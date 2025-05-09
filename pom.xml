@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- ==== 项目信息 ==== -->
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.3.0</version>           <!-- 2025-05 最新 GA -->
+    <relativePath/>                    <!-- 直接用中央仓库的 parent -->
+  </parent>
+
+  <groupId>twet.scheduling</groupId>
+  <artifactId>TWETScheduling</artifactId>
+  <version>0.0.1-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <!-- ==== 通用属性 ==== -->
+  <properties>
+    <java.version>21</java.version>                     <!-- 供 Boot 插件引用 -->
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release><!-- 供编译插件引用 -->
+  </properties>
+
+  <!-- ==== 依赖 ==== -->
+  <dependencies>
+    <!-- Spring 核心，含配置文件、日志桥接等 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- AOP（带 aspectjweaver 与 spring-aop）-->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-aop</artifactId>
+    </dependency>
+
+    <!-- 单元测试：JUnit 5 + AssertJ + Mockito 等，scope=test 已封装好 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <!-- ==== 构建配置 ==== -->
+  <build>
+    <!-- 保留旧目录结构（如果以后迁到 src/main/java，请删掉这两行） -->
+    <sourceDirectory>src</sourceDirectory>
+    <testSourceDirectory>test</testSourceDirectory>
+
+    <plugins>
+<!-- Java 编译插件：3.11.0+ 才支持 release 21 -->
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <release>${maven.compiler.release}</release>
+        </configuration>
+      </plugin>
+
+      <!-- Spring Boot 打包插件：生成可执行 JAR -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <!-- 版本由 parent 的管理节提供，无需显式声明 -->
+      </plugin>
+    </plugins>
+  </build>
+</project>

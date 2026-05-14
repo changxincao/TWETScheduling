@@ -7,6 +7,8 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: add: pointwise sum on overlapping domain
 - PASS: minimizePrefixInPlace: normal continuous/nonconvex case
 - PASS: minimizeSuffixInPlace: normal continuous/nonconvex case
+- PASS: minimizePrefixInPlace: boundary real-minimum regression
+- PASS: minimizeSuffixInPlace: boundary real-minimum regression
 - PASS: findMinimal: normal multi-segment case
 - PASS: findMinimal: vertical jump left-limit case
 - PASS: findMinimal: left/right position selection on continuous and discontinuous endpoints
@@ -21,4 +23,4 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: random sweep: add and mergeMinimum forward-frontier semantics on 500 continuous cases
 - PASS: random frontier sweep: mergeMinimum on 500 prefix-minimized cases
 
-Summary: passed=13, warnings=1, failed=3
+Summary: passed=15, warnings=1, failed=3

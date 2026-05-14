@@ -57,6 +57,8 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testAddAgainstPointwiseSum();
 		testPrefixMinAgainstOracle();
 		testSuffixMinAgainstOracle();
+		testPrefixBoundaryRealMinimumRegression();
+		testSuffixBoundaryRealMinimumRegression();
 		testFindMinimalNormalCases();
 		testFindMinimalVerticalJumpRisk();
 		testFindMinimalPositionSelectionCases();
@@ -158,6 +160,38 @@ public class PiecewiseLinearFunctionPropertyTest {
 		}
 		if (ok) {
 			pass("minimizeSuffixInPlace: normal continuous/nonconvex case");
+		}
+	}
+
+	private void testPrefixBoundaryRealMinimumRegression() {
+		// 2026-05-15: 回归测试。左边界的 runningMin 已经来自真实函数值时，不能因为 prevT==head.start 跳过常数最小值段。
+		PiecewiseLinearFunction f = function(0, 8,
+				seg(0, 4, 1, 5),
+				seg(4, 8, -2, 17));
+		PiecewiseLinearFunction actual = f.copy();
+		actual.minimizePrefixInPlace();
+		boolean ok = true;
+		for (double x : new double[] { 0, 2, 5.5, 6, 7.5 }) {
+			ok &= checkClose("minimizePrefixInPlace keeps real boundary minimum", prefixMinRef(f, x), evalRef(actual, x));
+		}
+		if (ok) {
+			pass("minimizePrefixInPlace: boundary real-minimum regression");
+		}
+	}
+
+	private void testSuffixBoundaryRealMinimumRegression() {
+		// 2026-05-15: 回归测试。右边界的 runningMin 已经来自真实函数值时，不能因为 lastT==tail.end 跳过常数最小值段。
+		PiecewiseLinearFunction f = function(3, 11,
+				seg(3, 7, 1, 1),
+				seg(7, 11, -1.5, 24));
+		PiecewiseLinearFunction actual = f.copy();
+		actual.minimizeSuffixInPlace();
+		boolean ok = true;
+		for (double x : new double[] { 3.5, 6.5, 8, 10, 11 }) {
+			ok &= checkClose("minimizeSuffixInPlace keeps real boundary minimum", suffixMinRef(f, x), evalRef(actual, x));
+		}
+		if (ok) {
+			pass("minimizeSuffixInPlace: boundary real-minimum regression");
 		}
 	}
 

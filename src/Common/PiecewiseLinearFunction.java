@@ -1162,7 +1162,7 @@ public class PiecewiseLinearFunction {
 //	private static long mergeMinimumDomainViolationCount = 0;
 	
 	public void mergeMinimum(PiecewiseLinearFunction g) {
-		Utility.debugCheckPWLFRightBoundPair("mergeMinimum.input", this, g);
+		Utility.debugCheckPWLFMergeContract("mergeMinimum.input", this, g);
 		// 函数g可以被舍弃，可随意修改，update不行
 		// 如果 L1 为空，直接变成 L2 的拷贝
 		if (this.head == null) {
@@ -1367,7 +1367,7 @@ public class PiecewiseLinearFunction {
 	 */
 	// merge1和merge2两个函数初步测试区别并不大，先这样
 	public void mergeMinimum2(PiecewiseLinearFunction g) {
-		Utility.debugCheckPWLFRightBoundPair("mergeMinimum2.input", this, g);
+		Utility.debugCheckPWLFMergeContract("mergeMinimum2.input", this, g);
 		// 1) 空函数处理
 		if (this.head == null) {
 			this.head = g.head;

@@ -78,12 +78,15 @@ public class Utility {
 		if (!Configure.debugPWLFDomainCheck || f == null || f.head == null || f.tail == null) {
 			return;
 		}
+		// 2026-05-14: tail.end 是当前 segment 链表真实覆盖到的右端点，domainEnd 是函数对象记录的元数据。
+		// setDomain/trimToDomain 这类操作可能把链表裁到 end<T，随后又把 domainEnd 恢复成原来的 T。
+		// 因此这里检查二者是否一致，用来定位哪一步破坏了 pricing 里要求的 [a,T] 右端统一约束。
 		if (!compareEq(f.tail.end, f.domainEnd)) {
 			String key = "PWLF_RightBound_Violation_" + operation;
 			debugMap.put(key, debugMap.getOrDefault(key, 0) + 1);
 			System.err.println("[PWLF domain check] " + operation + ": tail.end=" + f.tail.end
 					+ ", domainEnd=" + f.domainEnd + ", domainStart=" + f.domainStart
-					+ ", head.start=" + f.head.start);
+					+ ", head.start=" + f.head.start + ", object=" + System.identityHashCode(f));
 		}
 	}
 
@@ -101,7 +104,43 @@ public class Utility {
 			String key = "PWLF_RightBound_Mismatch_" + operation;
 			debugMap.put(key, debugMap.getOrDefault(key, 0) + 1);
 			System.err.println("[PWLF domain check] " + operation + ": left.tail.end=" + f.tail.end
-					+ ", right.tail.end=" + g.tail.end);
+					+ ", right.tail.end=" + g.tail.end + ", left=" + System.identityHashCode(f)
+					+ ", right=" + System.identityHashCode(g));
+		}
+	}
+
+	public static void debugCheckPWLFMergeContract(String operation, PiecewiseLinearFunction f,
+			PiecewiseLinearFunction g) {
+		if (!Configure.debugPWLFDomainCheck) {
+			return;
+		}
+		debugCheckPWLFRightBoundPair(operation, f, g);
+		if (f == null || g == null || f.head == null || g.head == null || f.tail == null || g.tail == null) {
+			return;
+		}
+
+		double overlapStart = Math.max(f.head.start, g.head.start);
+		double overlapEnd = Math.min(f.tail.end, g.tail.end);
+		boolean noPositiveOverlap = !compareLt(overlapStart, overlapEnd);
+		boolean differentRightBound = !compareEq(f.tail.end, g.tail.end);
+		boolean leftSinglePoint = compareEq(f.head.start, f.tail.end);
+		boolean rightSinglePoint = compareEq(g.head.start, g.tail.end);
+
+		// 2026-05-14: mergeMinimum 不是通用下包络，只按 forward label 的 [a,T] 契约使用。
+		// 这里额外检查“正长度交集、右端相同、非单点退化”，发现问题时只记录，不改变算法流程。
+		if (noPositiveOverlap || differentRightBound || leftSinglePoint || rightSinglePoint) {
+			String key = "PWLF_MergeContract_Violation_" + operation;
+			debugMap.put(key, debugMap.getOrDefault(key, 0) + 1);
+			System.err.println("[PWLF merge contract] " + operation
+					+ ": left=[" + f.head.start + "," + f.tail.end + "]"
+					+ ", right=[" + g.head.start + "," + g.tail.end + "]"
+					+ ", overlap=[" + overlapStart + "," + overlapEnd + "]"
+					+ ", noPositiveOverlap=" + noPositiveOverlap
+					+ ", differentRightBound=" + differentRightBound
+					+ ", leftSinglePoint=" + leftSinglePoint
+					+ ", rightSinglePoint=" + rightSinglePoint
+					+ ", leftObject=" + System.identityHashCode(f)
+					+ ", rightObject=" + System.identityHashCode(g));
 		}
 	}
 	

@@ -173,6 +173,8 @@ public class Solution {
 			int job = seq.get(i);
 			PiecewiseLinearFunction cur;
 			if (i == 0) {
+				// 2026-05-14: 序列首任务要先从虚拟起点 0 做 setup，再加工任务本身。
+				// 因此首任务最早完工时间是 s[0][job] + p[job]，早于该时间的惩罚函数定义域物理不可行。
 				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
 			} else {
 				cur = f.get(i - 1).shiftX(data.s[seq.get(i - 1)][job] + data.p[job]).add(data.penaltyFunction[job]);

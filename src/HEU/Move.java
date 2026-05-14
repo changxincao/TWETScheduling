@@ -69,6 +69,8 @@ public interface Move {
 			int job = sequence.get(i);
 			PiecewiseLinearFunction cur;
 			if (i == 0) {
+				// 2026-05-14: 首任务的完成时间不能早于“从虚拟起点 0 到该任务的 setup + 加工时间”。
+				// 这里裁掉 [0, s[0][job]+p[job])，避免后面回推 completion 时选到物理不可行的时间点。
 				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
 			} else {
 				cur = f.get(i - 1).shiftX(data.s[sequence.get(i - 1)][job] + data.p[job]);

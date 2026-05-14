@@ -79,3 +79,5 @@
 修正后重新运行 PWLF 测试：`merge-find-contract` 模式仍为 `passed=5, warnings=0, failed=0`；完整属性测试变为 `passed=13, warnings=1, failed=3`。其中 `minimizePrefixInPlace` 和 `minimizeSuffixInPlace` 的普通连续/非凸测试均已通过，之前 suffix 漏掉尾部常数最小值的问题被覆盖。剩余 3 个失败仍是既有的无效输入或严格语义问题：`dominates` 的定义域覆盖不严格，`mergeMinimum` 对完全不相交定义域不适用；这不属于本次 prefix/suffix 修正范围。
 
 2026-05-15 又补了两个显式回归测试：`minimizePrefixInPlace: boundary real-minimum regression` 构造左边界真实最小值需要向右延伸的情况；`minimizeSuffixInPlace: boundary real-minimum regression` 构造右边界真实最小值需要向左延伸的情况。这两个用例直接覆盖旧逻辑中 `prevT == head.start` 和 `lastT == tail.end` 误跳过真实最小值段的问题。重新运行后，`merge-find-contract` 仍为 `passed=5, warnings=0, failed=0`，完整属性测试为 `passed=15, warnings=1, failed=3`。新增的两个边界用例均通过，剩余失败仍是 `dominates` 定义域覆盖和 `mergeMinimum` 完全不相交输入。
+
+关于单点段，当前实现只能理解为“局部兜底”，不是通用零长度 segment 支持。`add()` 允许公共区间退化成一个点，主要是为了避免右端被全局时间上界裁到只剩 `[T,T]` 时直接得到空函数；`minimizePrefixInPlace()` 和 `minimizeSuffixInPlace()` 在没有生成任何 segment 时会补一条水平段，避免整函数因上界剪枝或单点退化变空；`trimToDomain()` 的右端裁剪也允许把最后一段裁成 `[T,T]`。但 `evaluate()` 只按 `[start,end)` 扫普通段，最后额外处理 `tail.end`，因此内部零长度段不是可靠的一般对象。`mergeMinimum` 也明确不接受 `[T,T]` 单点 label 作为普通输入，而要求 pricing 层直接尝试收尾到终点。因此后续设计仍应坚持：单点只允许作为全局右端 `T` 附近的退化兜底，不允许多个内部单点在函数链表里长期传播。

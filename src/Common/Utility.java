@@ -22,6 +22,12 @@ public class Utility {
 	//由于这个东西主要用于截断PiecewiseLinearFunction，不能直接在PWLF中使用data截断，在PWLF中传入一个data对象不合适
 	//所有比较的地方都替换为了使用这个上界，设置为当前最优解+1，可等价于big_M应该
 	//所有算例计算之处要重新初始化为big_M.
+	// 2026-05-14: curUpperBound 在启发式和精确定价中的语义不同。启发式阶段它可以设为当前
+	// 已知最好解成本，用来让 PiecewiseLinearFunction 在 prefix/suffix 取小和 move 评价时少维护
+	// 明显不可能改进当前解的区间，相当于一个更紧的动态 big-M。后续若先用启发式生成初始列/上界，
+	// 再进入 BPC/pricing 精确阶段，应先把启发式最优解和目标值单独保存到 BPC 的 incumbent/初始列池，
+	// 然后把 curUpperBound 重新设回 Utility.big_M。pricing 里的 reduced cost 会受 dual/cut 项影响，
+	// partial label 当前看起来较差，后续仍可能被 dual 拉低，因此不能直接用启发式上界截断函数段。
 	
 	public static  Random rng;//
 	static {
@@ -36,6 +42,8 @@ public class Utility {
 	
 	public static void updateCurUpperBound(double value) {
 		//并不是一个全局的上界，而是一个局部上界，当前VND初始解的值，在搜索过程中帮助减少分段数，不可使用全局上界
+		// 2026-05-14: 该更新只适合 HEU/局部搜索阶段。BPC pricing 阶段如果需要使用启发式解，
+		// 应通过 incumbent 或初始列传入，不应继续让 PWLF 用该值做动态截断。
 		
 		if(Utility.compareLt(value, curUpperBound)) {
 			Utility.curUpperBound=value;
@@ -48,6 +56,8 @@ public class Utility {
 	}
 	public static void resetCurUpperBound(double value) {
 		//并不是一个全局的上界，而是一个局部上界，当前VND初始解的值，在搜索过程中帮助减少分段数，不可使用全局上界
+		// 2026-05-14: 进入精确定价前建议调用 resetCurUpperBound(Utility.big_M)，避免启发式阶段
+		// 留下的动态上界影响 pricing 中的分段函数操作。
 		Utility.curUpperBound=value;//从结果看，segmentNum数量还是少了不少的
 		//怎么看上去对时间作用不大..
 		//能快一丢丢

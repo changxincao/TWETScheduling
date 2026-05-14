@@ -950,14 +950,20 @@ public class PiecewiseLinearFunction {
 			}
 		}
 
+		// 2026-05-14: partial dominance 里被支配区间用 big_M 标记，但 forward 函数
+		// 的右端定义域仍应保持到全局 T。这里不能像通用 normalize() 那样先裁掉右侧
+		// big_M 尾段，否则后续 prefix-min 没机会把右尾按前端最小值闭包补回来。
+		// 注意 replaceWithBigM 按半开区间 [cur,nxt) 替换，nxt 端点归右侧片段；
+		// 这里不为单个端点维护零长度段，和 pricing 中“单点 label 直接收尾”的约束一致。
+		// 全部被支配时，左侧 head big_M 会被 normalize() 清空，仍会返回 true。
 		normalize();
 		if(this.isEmpty()) return true;
 		return false;
 	}
 
 	/**
-	 * 1) 裁掉首尾 intercept==∞ 的“无穷”段（超出可行域的那两端） 2) 合并相邻 slope/intercept 完全相同的段 3) 再调用
-	 * minimizePrefixInPlace() 保证整体非增
+	 * 1) 裁掉头部 intercept==∞ 的“无穷”段 2) 合并相邻 slope/intercept 完全相同的段
+	 * 3) 再调用 minimizePrefixInPlace() 保证整体非增
 	 */
 	//TODO 2025.5.10将M替换为全局上界，但不知道normalize使用时是否有影响，可能把某些平行线等于upperBound的给删了，导致函数为空
 	//之后测试一下 ，normalize函数是否还有用？
@@ -972,24 +978,18 @@ public class PiecewiseLinearFunction {
 			return;
 		}
 
-		// 2) 删除尾部无穷段
-		Segment cur = head, lastFinite = null;
+		// 2026-05-14: 这里不再删除右侧 big_M 尾段。原来的 normalize() 会裁掉首尾 M 段，
+		// 这在启发式中可以缩短无效定义域，但不适合后续 BPC pricing 中统一保持 [a,T]
+		// 右端定义域的约束。特别是 updateDominatedIntervals 把被支配区间打成 big_M 后，
+		// 若尾部 M 被提前物理删除，后续 minimizePrefixInPlace() 就没机会用前缀最小值
+		// 把右尾闭包补回来。现在的语义是：左侧连续 M 仍然表示不可达起点并删除；
+		// 右侧 M 保留到 prefix-min 阶段处理，从而保持 forward 函数右端到 T。
+		Segment cur = head;
+		tail = null;
 		while (cur != null) {
-			if (cur.intercept < Utility.big_M) {
-				lastFinite = cur;
-			}
+			tail = cur;
 			cur = cur.next;
 		}
-		if (lastFinite == null) {
-			// 全部都是 ∞
-			head = tail = null;
-			return;
-		}
-		if (lastFinite.next != null) {
-			lastFinite.next = null;
-			
-		}
-		tail = lastFinite;
 		// 妙啊
 
 		// 3) 合并相邻完全相同的段
@@ -1109,9 +1109,41 @@ public class PiecewiseLinearFunction {
 	/**
 	 * 将 this（L1）与 g（L2）合并，在它们的定义域并集上取逐点最小值： 如果 L2 在某段 ≤ L1，则就地用 L2 的片段替换这部分 L1。
 	 */
-	//TODO 2025.5.15这个函数做的时候先假设两个函数不可能完全不存在重叠区间，正向的右侧区间肯定最大是一样的
-	//反向的左侧则是一样的
-	//是否可能用到一定bound? 先不管
+	// TODO 2025.5.15: 这个函数最初不是按“任意两个分段线性函数取下包络”的通用工具写的，
+	// 而是按标签函数合并场景写的。这里默认两个函数至少存在公共定义域，并且 forward 函数
+	// 的右端公共上界相同；反向函数若复用类似逻辑，则应有对称的左端公共边界。
+	//
+	// 2026-05-14: 重新梳理 mergeMinimum 的输入前提和边界风险。前面测试中看到的 5 类问题，
+	// 本质都来自“把该函数当作通用下包络合并器”使用，而当前 pricing/标签函数语义不应这样用。
+	//
+	// 1) g 完全在 this 左边。例如 this=[20,40]，g=[0,10]。此时 start=20,end=10，
+	//    公共区间不存在，但当前左前缀截取逻辑会一直推进 gh，直到 gh=null，随后访问
+	//    gh.start 构造 lastGSegBeforeDomain，可能触发 NPE。
+	// 2) g 完全在 this 右边。例如 this=[0,10]，g=[20,40]。此时扫描循环不会进入，
+	//    但 q!=null 的右尾拼接会执行 q.start=end，把 g 从 [20,40] 人为扩成 [10,40]，
+	//    进而让本来不存在的 [10,20] 参与后续 normalize/prefix-min。
+	// 3) 左端错位但有公共区间。例如 this=[20,T]，g=[10,T]。这是当前函数真正要支持的
+	//    正常情况：先截取 g 在 [10,20] 的左前缀，再在 [20,T] 上逐段取小，最后把前缀
+	//    接回 head。这里的风险主要是链表拼接错位，所以 prevGH 必须记录刚刚跳过的上一段。
+	// 4) 右端错位但有公共区间。例如 this=[0,50]，g=[0,80]。当前代码会在公共区间
+	//    处理完以后把 g 的右尾接进来。这个逻辑只有在 q.start<=end 时才合理；若 q.start>end，
+	//    就会和第 2 类一样凭空扩展定义域。
+	// 5) 只有一个单点交集。例如 this=[10,T]，g=[T,T]。数学上有交集，但公共部分没有
+	//    正长度区间，while(cur<end) 不会进入，所以不会真正比较 T 点处两者谁更小。若要
+	//    严格支持这种输入，就必须维护长度为 0 的单点段，后续 add/shift/dominance 都会
+	//    变复杂。因此当前策略是不让这种 label 进入 mergeMinimum：pricing 中若 label 的
+	//    函数定义域退化为 [T,T]，直接尝试连接终点生成完整列，不再参与普通 merge/dominance。
+	//
+	// 基于 2011 年 soft time window pricing 的标签函数语义，以及当前 TWET pricing 的预期设定，
+	// 进入这里的 forward 函数应都满足 [a,T] 形式：左端 a 可以不同，右端都取到全局最大时间 T。
+	// 即使某些区间在 dominance 后被删掉，也应通过 big_M 水平段或左/右端取小操作保持整体定义域
+	// 仍覆盖到 T，而不是让函数变成任意零散定义域。这样前 1、2、4 类问题在有效输入下不会发生，
+	// 第 3 类是正常输入，第 5 类由 pricing 层提前拦截。
+	//
+	// 后续如果要启用运行期检查，可打开下面的 mergeMinimumDomainViolationCount 字段和方法内
+	// 的调试块，用来验证每次进入的两个函数是否满足“有正长度交集、右端同为 T、没有单点退化”
+	// 这些约束。
+//	private static long mergeMinimumDomainViolationCount = 0;
 	
 	public void mergeMinimum(PiecewiseLinearFunction g) {
 		// 函数g可以被舍弃，可随意修改，update不行
@@ -1132,9 +1164,25 @@ public class PiecewiseLinearFunction {
 		// 1) 定位公共定义域 这里两个函数取小因该是要取并集的  不能取交集
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
-//		if (!Utility.compareLt(start, end)) {
-//			// 无交集无需合并
-//			return;
+//		// 2026-05-14: pricing 调试开关。mergeMinimum 的有效输入应满足：
+//		// 1. 两个函数存在正长度公共区间，即 max(a1,a2)<min(end1,end2)；
+//		// 2. forward 标签函数右端应同为全局最大时间 T，因此 this.tail.end 与 g.tail.end 应相等；
+//		// 3. 输入函数本身不应退化成 [T,T] 这种单点 label。单点 label 应在 pricing 层直接收尾到终点。
+//		// 这里暂时注释掉，不改变当前启发式行为；后续接入 BPC pricing 时可以打开，用于统计异常输入。
+//		boolean noPositiveOverlap = !Utility.compareLt(start, end);
+//		boolean differentRightBound = !Utility.compareEq(this.tail.end, g.tail.end);
+//		boolean thisSinglePoint = Utility.compareEq(this.head.start, this.tail.end);
+//		boolean gSinglePoint = Utility.compareEq(g.head.start, g.tail.end);
+//		if (noPositiveOverlap || differentRightBound || thisSinglePoint || gSinglePoint) {
+//			mergeMinimumDomainViolationCount++;
+//			System.out.println("[PWLF.mergeMinimum] domain violation #" + mergeMinimumDomainViolationCount
+//					+ ": this=[" + this.head.start + "," + this.tail.end + "]"
+//					+ ", g=[" + g.head.start + "," + g.tail.end + "]"
+//					+ ", overlap=[" + start + "," + end + "]"
+//					+ ", noPositiveOverlap=" + noPositiveOverlap
+//					+ ", differentRightBound=" + differentRightBound
+//					+ ", thisSinglePoint=" + thisSinglePoint
+//					+ ", gSinglePoint=" + gSinglePoint);
 //		}
 		//不对，无交集是可以合并的 取小操作 所以前边取了并集以后相当于扩充了定义域
 		//但函数定义域不存在的地方需特殊处理
@@ -1453,6 +1501,11 @@ public class PiecewiseLinearFunction {
 		// 因此这里先不区分 forward/backward，
 		// 直接扫描每段 start 和按当前段计算的 end 值，优先保证端点语义稳健。
 		// 若后续性能成为瓶颈，再按函数方向和凸性做加速。
+		// 2026-05-14: 当前 HEU 调用基本都是在三段/两段拼接评价的最后一步使用 findMinimal，
+		// 也就是函数已经构造完以后才取最小值。这里保留左右最优点缓存是安全的；但如果后续
+		// 改成“先 findMinimal，再对同一个对象原地 minimize/normalize/update，再次 findMinimal”，
+		// 必须在原地修改后调用 resetMinimum()，否则可能返回旧缓存。这个是使用约束，不是当前
+		// findMinimal 计算逻辑的错误。
 		double min = Utility.big_M;// 这里必须用 big_M，不能用 curUpperBound；部分合并逻辑比较的是成本差值。
 		double leftX = 0, rightX = 0;
 

@@ -41,3 +41,31 @@
 2026-05-14 对 `findMinimal` 的代码注释做了补充。当前 `normalize()` 实际是 forward normalize，内部固定调用 `minimizePrefixInPlace()`，因此只适合 forward 前沿函数；backward 函数当前不走 `normalize()`，而是在构造时直接调用 `minimizeSuffixInPlace()`。如果 backward 函数保持连续、单调不减，旧版 `findMinimal` 只看每段 `start` 通常也能得到正确最小成本。真正需要补充扫描每段 `end` 的原因，是未来如果 backward label 也参与合并取小、占优裁剪或集合包络，可能出现向上的 vertical gap，此时最小成本本身未必错，但 `fromRight` 要返回最右侧最优时间点，旧逻辑可能返回得过早。
 
 同日还修正了 `mergeMinimum` 中截取 `g` 左侧前缀时的 `prevGH` 更新顺序。`SegmentPool.obtain(gh.start, start, gh.slope, gh.intercept)` 会生成一段新的截取片段，并不是直接截短原 `gh`。因此 `prevGH` 必须记录“刚刚跳过的前一段”，再移动 `gh=gh.next`；原来先移动 `gh` 再赋值 `prevGH`，会把前驱记成下一段，存在拼链错位风险。修正后普通重叠用例仍通过，但随机前沿测试的失败数量没有减少，说明 `mergeMinimum` 的定义域错位问题不只是这个指针顺序导致，后续仍需要系统处理公共区间、单点交集和左右非重叠前后缀拼接。
+
+2026-05-14 又在 `mergeMinimum` 附近补充了更明确的输入契约说明。当前判断是，这个函数不应作为任意两个分段线性函数的通用下包络合并器使用，而应限制在 pricing/标签函数场景：输入函数的定义域应为 `[a,T]`，右端都取到全局最大时间 `T`。在这个设定下，完全左侧不相交、完全右侧不相交、右端错位这几类测试中暴露的问题不会出现在有效输入中；左端错位是正常情况，需要由当前左前缀拼接逻辑处理。唯一需要人为排除的是只在 `T` 一个点相交的单点 label，因为支持它会迫使函数结构维护零长度点段，后续 `add`、`shift`、`dominance` 都会变复杂。因此后续 pricing 中若 label 退化为 `[T,T]`，应直接尝试连接终点生成完整列，不再进入普通 `mergeMinimum` 或 dominance 流程。代码中同时预留了一个默认注释掉的调试块，后续接入 BPC pricing 时可以打开，用来统计是否存在无正长度交集、右端不一致或单点退化的异常输入。
+
+同日进一步给 `PiecewiseLinearFunctionPropertyTest` 增加了 `merge-find-contract` 测试模式，只检查 `findMinimal` 和满足 `[a,T]`、右端同为 `T`、存在正长度公共区间的 `mergeMinimum` 输入。该模式下，`findMinimal` 的普通多段、竖直跳变左极限、左右最优位置选择均通过；`mergeMinimum` 的确定性左端错位用例通过，500 个随机 `[a,T]` forward frontier 用例也通过。当前运行结果为 `passed=5, warnings=0, failed=0`。这说明在我们刚确认的 pricing 输入前提下，`findMinimal` 和 `mergeMinimum` 暂时没有暴露问题；原整套测试里仍存在的失败主要来自无效 merge 输入、`minimizeSuffixInPlace` 和 `dominates` 的其他语义风险，不应混同为这两个函数在当前契约下失败。
+
+继续检查其他函数后，当前最明确的真实问题仍然是 `minimizeSuffixInPlace`。测试用例中最后一段为递减段时，后缀最小化应在尾部形成一段常数最小值，但代码在 `lastT == tail.end` 时跳过了插入尾部常数段，后续又继续向左推进，导致尾部区间缺段，查询时得到 `Utility.curUpperBound`。这和 2025-05-10 为了类比 prefix 最小化加的保护条件有关，但 suffix 的尾部常数段不能这样跳过。由于启发式中的 backward 函数大量调用 `minimizeSuffixInPlace`，如果后续继续严格处理 backward 评价，这个函数应优先修。
+
+`dominates` 的主要风险是定义域覆盖语义不严格。当前如果支配函数的右端比被支配函数短，代码没有直接拒绝，而是比较 `this.tail.end` 和 `g.tail.end` 处的值，随后只扫描共同覆盖到的部分；一旦 `p` 提前耗尽，循环结束后仍可能返回 `true`。这在“右端水平段可自然延伸”的启发式语义下也许有一定解释空间，但若 BPC label dominance 要求在被支配函数完整定义域上都不差，这就是不安全的。另外注释中说支配要求至少一点严格更优，但函数内部没有真正记录 strict 标志；如果外层资源状态已经严格更优，这可能没问题，否则函数本身会把完全相等也当成支配。
+
+`updateDominatedIntervals` 目前只通过了很基础的“完全支配”和“中间段支配不报错”测试，不能认为已经可靠。它把被支配区间替换成 `big_M`，随后调用 `normalize()`；而 `normalize()` 会执行 forward prefix-min。这样在部分支配场景下，原本应该保留的 horizontal gap 可能被前缀最小值重新填成有限值，导致“删段”语义被破坏。2011 年论文里 dominance 后的函数可以有 horizontal gap，并不应该总被 prefix-min 抹平。因此如果后续 BPC pricing 真要做 partial dominance，这块不能直接照现在的实现用，需要重新定义 gap 是用 `big_M` 段表示，还是物理删除区间，并保证后续 `add/shift/merge` 都能识别这种表示。
+
+还有两个工程性风险需要记住。第一，`normalize()` 本质是 forward normalize，不是通用归一化；它会删除首尾 `big_M` 段、合并相邻同线段，并调用 `minimizePrefixInPlace()`。因此它不能直接用于 backward 函数，也不能用于需要保留 horizontal gap 的一般函数。第二，`PiecewiseLinearFunction` 有 `findMinimal` 缓存，但当前这不是 `findMinimal` 的正确性问题。`Move` 和 `Solution` 里的调用基本都是在三段/两段拼接评价的最后一步使用：先构造临时函数，再直接取最小值。这个用法下缓存没问题。只有未来如果在同一个对象上先 `findMinimal`，随后又原地 `minimize/normalize/update`，再调用 `findMinimal`，才需要在修改后显式 `resetMinimum()`。
+
+`shiftX`、`shiftY`、`add` 和 `minimizePrefixInPlace` 在当前测试覆盖的正常连续输入下没有暴露问题。需要注意的是，`add` 仍假设两个输入内部没有缺口，只是在公共定义域上逐段相加；如果未来 partial dominance 真的把函数表示成带物理 gap 的链表，`add` 不能直接复用。`setDomain/trimToDomain` 现在会允许裁出 `[T,T]` 单点，这和前面讨论一致：单点在启发式里可以暂时存在，但在 pricing 的 `mergeMinimum/dominance` 层应提前拦截。
+
+关于 `Utility.curUpperBound`，后续需要明确区分启发式阶段和 BPC pricing 阶段。启发式阶段它可以设为当前最好解成本，在 `PiecewiseLinearFunction` 的 prefix/suffix 取小和 move 评价里起到动态 big-M 的作用，减少明显不会改进当前解的函数段。pricing 阶段不建议继续使用这个启发式上界，因为 reduced cost 会减 dual 和 cut 项，partial label 当前函数值较大，后续仍可能被对偶项拉低。第一版 exact pricing 应简单地在进入 pricing 前调用 `Utility.resetCurUpperBound(Utility.big_M)`。启发式得到的最好解仍然要保存，但应作为 BPC 的 incumbent 或初始列池传入，而不是继续通过 `curUpperBound` 截断分段函数。
+
+`evaluate` 当前没有暴露实现问题。现有调用主要在 `Solution.merge3Segments` 和 `merge3SegmentsTest` 中，用于在 `findMinimal` 已经确定拼接时间点后回代计算函数值；另一个调用点在 `dominates` 的定义域右端比较里。启发式场景下，如果时间点不在定义域内返回 `Utility.curUpperBound`，可以理解为该拼接不可行或足够差。pricing 场景下，只要进入定价前把 `curUpperBound` 重置为 `Utility.big_M`，这个行为也基本等价于返回不可行大数。真正需要小心的是不要把 `evaluate` 的超定义域返回值和精确定价中的安全剪枝混在一起；合法时间点上的正常求值没有问题。
+
+随后补了 `updateDominatedIntervals` 的复杂测试，专门检查交点切分、多段被支配以及“被支配区间打成 `big_M` 后再做 forward prefix 闭包”的语义。测试没有通过，说明这里还不能简单认为已经没问题。失败主要暴露两类情况：第一，若被支配区间延伸到尾部，当前 `normalize()` 会先删除尾部 `big_M` 段，再做 `minimizePrefixInPlace()`，因此不会把尾部按前缀最小值补回；如果我们希望 `big_M` 和前端最小值在 forward 闭包下等价，这个实现顺序就不一致。第二，交点端点处存在开闭区间约定问题，例如 `g` 与 `this` 在某个交点相等，代码可能保留右侧段的起点值，而测试 oracle 会把该点按被支配处理。由此当前结论应调整为：`updateDominatedIntervals` 的基础链表替换能跑，但它在 BPC partial dominance 中到底应“保留 M 段”“裁掉 M 尾部”还是“打 M 后再闭包”，需要先定清楚语义，再决定是否修改代码和测试 oracle。
+
+2026-05-14 ? `updateDominatedIntervals` ? `normalize()` ?????????????? partial dominance?????????? `normalize()` ?????????? `big_M` ???????????? `big_M` ???????? `minimizePrefixInPlace()` ??? forward prefix ??????????????????????????????? `[a,T]` ?????????? dominated ???? `big_M` ?? normalize ???????
+
+同时明确了一个端点约定：`replaceWithBigM` 替换的是半开区间 `[cur,nxt)`，`nxt` 这个点归右侧片段，不为单个端点维护长度为 0 的特殊段。这和后续 pricing 的约束一致：如果 label 只剩下 `[T,T]` 这类单点，就直接尝试收尾生成列，不再进入普通 merge/dominance 流程。测试 oracle 也相应调整为同时检查断点左极限和右侧半开区间，而不是把交点等值处简单当成整点被支配。
+
+修正后，`updateDominatedIntervals` 的“完全支配”“中间段支配”“复杂 forward-closure 随机测试”均通过。完整测试当前仍有失败，但剩余失败不再来自 `updateDominatedIntervals`：主要还是已知的 `minimizeSuffixInPlace` 尾部缺段、`dominates` 定义域覆盖不严格，以及 `mergeMinimum` 在无效定义域输入下的问题。单独运行 `merge-find-contract` 模式仍为 `passed=5, warnings=0, failed=0`。
+
+2026-05-14 ? `updateDominatedIntervals` ? `normalize()` ?????????????? partial dominance?????????? `normalize()` ?????????? `big_M` ???????????? `big_M` ???????? `minimizePrefixInPlace()` ??? forward prefix ??????????????????????????????? `[a,T]` ?????????? dominated ???? `big_M` ?? normalize ???????

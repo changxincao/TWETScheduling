@@ -38,7 +38,11 @@ public class PiecewiseLinearFunctionPropertyTest {
 		Utility.resetCurUpperBound(Utility.big_M);
 
 		PiecewiseLinearFunctionPropertyTest test = new PiecewiseLinearFunctionPropertyTest();
-		test.runAll();
+		if (args.length > 0 && "merge-find-contract".equalsIgnoreCase(args[0])) {
+			test.runMergeFindContractSubset();
+		} else {
+			test.runAll();
+		}
 		test.writeReport();
 	}
 
@@ -60,9 +64,28 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testMergeMinimumOverlappingCases();
 		testMergeMinimumDisjointDomainRisk();
 		testUpdateDominatedIntervalsBasicCases();
+		testUpdateDominatedIntervalsComplexCases();
 		testUpperBoundSemanticDependency();
 		testRandomOperationSweep();
 		testRandomFrontierSweep();
+	}
+
+	/**
+	 * 2026-05-14: 专门检查当前 pricing 契约下的两个函数操作。
+	 * mergeMinimum 这里只测试 [a,T] 形式、右端同为 T、且存在正长度公共区间的 forward frontier；
+	 * 完全不相交和 [T,T] 单点 label 不属于这个函数的有效输入，应在 pricing 层提前处理。
+	 */
+	private void runMergeFindContractSubset() {
+		report.add("# PiecewiseLinearFunction merge/find contract test report");
+		report.add("");
+		report.add("Scope: findMinimal and mergeMinimum under [a,T] forward-frontier input contract.");
+		report.add("");
+
+		testFindMinimalNormalCases();
+		testFindMinimalVerticalJumpRisk();
+		testFindMinimalPositionSelectionCases();
+		testMergeMinimumSameRightBoundContractCases();
+		testRandomContractFrontierSweep();
 	}
 
 	private void testShiftXAgainstEvaluation() {
@@ -240,6 +263,34 @@ public class PiecewiseLinearFunctionPropertyTest {
 		}
 	}
 
+	private void testMergeMinimumSameRightBoundContractCases() {
+		boolean ok = true;
+		ok &= checkMergedMinimumContractCase("mergeMinimum contract: g has left prefix",
+				function(0, 100,
+						seg(20, 45, 1.2, -3.0),
+						seg(45, 100, -0.4, 69.0)),
+				function(0, 100,
+						seg(10, 30, -0.8, 35.0),
+						seg(30, 100, 0.1, 8.0)));
+		ok &= checkMergedMinimumContractCase("mergeMinimum contract: this has left prefix",
+				function(0, 100,
+						seg(10, 30, -0.6, 20.0),
+						seg(30, 100, 0.0, 2.0)),
+				function(0, 100,
+						seg(25, 60, -0.3, 18.0),
+						seg(60, 100, 0.2, -12.0)));
+		ok &= checkMergedMinimumContractCase("mergeMinimum contract: same left and right bounds",
+				function(0, 100,
+						seg(5, 40, 0.5, 1.0),
+						seg(40, 100, -0.2, 29.0)),
+				function(0, 100,
+						seg(5, 55, -0.1, 15.0),
+						seg(55, 100, 0.0, 9.5)));
+		if (ok) {
+			pass("mergeMinimum: [a,T] same-right-bound contract cases");
+		}
+	}
+
 	private void testMergeMinimumDisjointDomainRisk() {
 		PiecewiseLinearFunction f = function(0, 20, seg(5, 8, 0, 10));
 		PiecewiseLinearFunction left = function(0, 20, seg(0, 3, 0, 1));
@@ -287,6 +338,33 @@ public class PiecewiseLinearFunctionPropertyTest {
 		} catch (Throwable ex) {
 			fail("updateDominatedIntervals partial middle domination throws exception",
 					ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+	}
+
+	private void testUpdateDominatedIntervalsComplexCases() {
+		boolean ok = true;
+		ok &= checkUpdateDominatedForwardClosure("updateDominatedIntervals: crossing split case",
+				function(0, 100,
+						seg(0, 20, 0.0, 12.0),
+						seg(20, 55, -0.2, 16.0),
+						seg(55, 100, 0.0, 5.0)),
+				function(0, 100,
+						seg(10, 35, -0.5, 22.0),
+						seg(35, 75, 0.0, 4.0),
+						seg(75, 100, 0.1, -3.5)));
+		ok &= checkUpdateDominatedForwardClosure("updateDominatedIntervals: multiple dominated pieces",
+				function(0, 100,
+						seg(0, 25, 0.0, 20.0),
+						seg(25, 50, 0.0, 16.0),
+						seg(50, 75, 0.0, 12.0),
+						seg(75, 100, 0.0, 8.0)),
+				function(0, 100,
+						seg(15, 40, 0.0, 14.0),
+						seg(40, 60, 0.0, 18.0),
+						seg(60, 90, 0.0, 7.0)));
+		ok &= checkRandomUpdateDominatedForwardClosure();
+		if (ok) {
+			pass("updateDominatedIntervals: complex forward-closure cases");
 		}
 	}
 
@@ -377,12 +455,101 @@ public class PiecewiseLinearFunctionPropertyTest {
 		}
 	}
 
+	private void testRandomContractFrontierSweep() {
+		int localFailures = 0;
+		for (int i = 0; i < RANDOM_CASES; i++) {
+			PiecewiseLinearFunction f = randomContractFunction(100.0);
+			PiecewiseLinearFunction g = randomContractFunction(100.0);
+			f.minimizePrefixInPlace();
+			g.minimizePrefixInPlace();
+			Throwable ex = runWithTimeout(new Runnable() {
+				@Override
+				public void run() {
+					checkMergedMinimum(f, g);
+				}
+			}, 300);
+			if (ex != null) {
+				localFailures++;
+				if (localFailures <= 5) {
+					fail("random contract frontier mergeMinimum failure", "case=" + i + ", "
+							+ ex.getClass().getSimpleName() + ": " + ex.getMessage()
+							+ ", f=" + compact(f) + ", g=" + compact(g));
+				}
+				if (ex instanceof TestTimeoutException) {
+					break;
+				}
+			}
+		}
+		if (localFailures == 0) {
+			pass("random contract frontier sweep: mergeMinimum on " + RANDOM_CASES + " [a,T] cases");
+		} else {
+			warn("random contract frontier sweep found failures", "failureCount=" + localFailures + " / " + RANDOM_CASES);
+		}
+	}
+
 	private void checkMergedMinimum(PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
 		PiecewiseLinearFunction min = f.copy();
 		min.mergeMinimum(g.copy());
 		for (double x : sampleUnion(f, g)) {
 			requireClose(prefixMinOfLowerEnvelopeRef(f, g, x), evalRef(min, x));
 		}
+	}
+
+	private boolean checkMergedMinimumContractCase(String name, PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
+		try {
+			checkMergedMinimum(f, g);
+			return true;
+		} catch (Throwable ex) {
+			fail(name, ex.getClass().getSimpleName() + ": " + ex.getMessage()
+					+ ", f=" + compact(f) + ", g=" + compact(g));
+			return false;
+		}
+	}
+
+	private boolean checkUpdateDominatedForwardClosure(String name, PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
+		try {
+			PiecewiseLinearFunction actual = f.copy();
+			actual.updateDominatedIntervals(g.copy());
+			for (double x : sampleUnion(f, g)) {
+				double expected = prefixMinAfterDominanceRef(f, g, x);
+				requireClose(expected, evalRef(actual, x));
+			}
+			return true;
+		} catch (Throwable ex) {
+			fail(name, ex.getClass().getSimpleName() + ": " + ex.getMessage()
+					+ ", f=" + compact(f) + ", g=" + compact(g));
+			return false;
+		}
+	}
+
+	private boolean checkRandomUpdateDominatedForwardClosure() {
+		int localFailures = 0;
+		for (int i = 0; i < RANDOM_CASES; i++) {
+			PiecewiseLinearFunction f = randomContractFunction(100.0);
+			PiecewiseLinearFunction g = randomContractFunction(100.0);
+			f.minimizePrefixInPlace();
+			g.minimizePrefixInPlace();
+			try {
+				PiecewiseLinearFunction actual = f.copy();
+				actual.updateDominatedIntervals(g.copy());
+				for (double x : sampleUnion(f, g)) {
+					requireClose(prefixMinAfterDominanceRef(f, g, x), evalRef(actual, x));
+				}
+			} catch (Throwable ex) {
+				localFailures++;
+				if (localFailures <= 5) {
+					fail("random updateDominatedIntervals forward-closure failure", "case=" + i + ", "
+							+ ex.getClass().getSimpleName() + ": " + ex.getMessage()
+							+ ", f=" + compact(f) + ", g=" + compact(g));
+				}
+			}
+		}
+		if (localFailures > 0) {
+			warn("random updateDominatedIntervals forward-closure found failures",
+					"failureCount=" + localFailures + " / " + RANDOM_CASES);
+			return false;
+		}
+		return true;
 	}
 
 	private static Throwable runWithTimeout(Runnable task, long timeoutMillis) {
@@ -442,6 +609,26 @@ public class PiecewiseLinearFunctionPropertyTest {
 		return f;
 	}
 
+	private PiecewiseLinearFunction randomContractFunction(double rightBound) {
+		int n = 2 + RANDOM.nextInt(6);
+		PiecewiseLinearFunction f = new PiecewiseLinearFunction(0, rightBound);
+		double x = RANDOM.nextDouble() * 30.0;
+		double value = RANDOM.nextDouble() * 20.0 - 5.0;
+		for (int i = 0; i < n; i++) {
+			double next = (i == n - 1)
+					? rightBound
+					: x + (rightBound - x) * (0.15 + RANDOM.nextDouble() * 0.45);
+			if (!Utility.compareLt(x, next)) {
+				next = Math.min(rightBound, x + 1.0);
+			}
+			double slope = -4.0 + RANDOM.nextDouble() * 8.0;
+			f.addSegment(x, next, slope, value - slope * x);
+			value = slope * next + (value - slope * x);
+			x = next;
+		}
+		return f;
+	}
+
 	private static double[] seg(double start, double end, double slope, double intercept) {
 		return new double[] { start, end, slope, intercept };
 	}
@@ -496,6 +683,56 @@ public class PiecewiseLinearFunctionPropertyTest {
 			}
 		}
 		return min;
+	}
+
+	private static double prefixMinAfterDominanceRef(PiecewiseLinearFunction f, PiecewiseLinearFunction g, double x) {
+		double min = INF;
+		List<Double> samples = sampleUnion(f, g);
+		for (int i = 0; i < samples.size(); i++) {
+			double p = samples.get(i);
+			if (p <= x + TOL) {
+				// 2026-05-14: updateDominatedIntervals 不维护零长度单点段。
+				// 被支配区间按 [cur,nxt) 打成 big_M，nxt 端点归右侧片段。
+				// 因此在断点处判断是否被支配时，看断点右侧的开区间，而不是只看断点等值。
+				double probe = p;
+				if (i + 1 < samples.size() && p < samples.get(i + 1) - TOL) {
+					probe = (p + samples.get(i + 1)) * 0.5;
+				}
+				double fv = evalRef(f, p);
+				double dominanceFv = evalRef(f, probe);
+				double dominanceGv = evalRef(g, probe);
+				double valueAfterDominance = Utility.compareLe(dominanceGv, dominanceFv) ? INF : fv;
+				min = Math.min(min, valueAfterDominance);
+
+				// 同一个断点还要检查左极限。典型情况是 dominated 区间从 p 开始，
+				// p 右侧被打成 big_M，但 p 左侧原函数可能在靠近 p 时取得更小值；
+				// prefix-min 必须保留这个左侧极限，否则会误判 updateDominatedIntervals。
+				double leftValue = evalRefLeftLimit(f, p);
+				if (leftValue < INF * 0.5) {
+					double leftProbe = p;
+					if (i > 0 && samples.get(i - 1) < p - TOL) {
+						leftProbe = (samples.get(i - 1) + p) * 0.5;
+					}
+					double leftDominanceFv = evalRef(f, leftProbe);
+					double leftDominanceGv = evalRef(g, leftProbe);
+					double leftAfterDominance = Utility.compareLe(leftDominanceGv, leftDominanceFv) ? INF : leftValue;
+					min = Math.min(min, leftAfterDominance);
+				}
+			}
+		}
+		return min;
+	}
+
+	private static double evalRefLeftLimit(PiecewiseLinearFunction f, double x) {
+		if (f.head == null) {
+			return INF;
+		}
+		for (Segment s = f.head; s != null; s = s.next) {
+			if (x > s.start + TOL && x <= s.end + TOL) {
+				return s.slope * x + s.intercept;
+			}
+		}
+		return INF;
 	}
 
 	private static double[] minRef(PiecewiseLinearFunction f) {

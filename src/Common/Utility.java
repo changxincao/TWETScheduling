@@ -4,21 +4,60 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 import Basic.ArcFlowModel;
 import Basic.Data;
 import Common.Utility.TimerManager;
+import HEU.Solution;
 import ilog.concert.IloException;
 
 public class Utility {
-	public static boolean timeManage=true;//记录组件时间和次数，分析效率
 	public Data data;
+	public static HashMap<String, Integer> debugMap=new HashMap<String, Integer>();//记录各类元素执行次数
+	public static int debugNum=0;
 	public static double EPS=1e-6;
-	public static double big_M=1e9;
+	public static double big_M=1e8;
+	public static double curUpperBound=big_M;//记录当前算例下的最优成本，过程中动态更新,注意这里由于定义为了静态的，每次迭代算例需更新
+	//由于这个东西主要用于截断PiecewiseLinearFunction，不能直接在PWLF中使用data截断，在PWLF中传入一个data对象不合适
+	//所有比较的地方都替换为了使用这个上界，设置为当前最优解+1，可等价于big_M应该
+	//所有算例计算之处要重新初始化为big_M.
+	
+	public static  Random rng;//
+	static {
+		int seed = new Random(0).nextInt(10);
+//		System.out.println("seed:" + seed);
+		rng=new Random(seed);
+	}
 	public Utility(Data d)
 	{
-		data = d;
-
+		data = d;	
+	}
+	
+	public static void updateCurUpperBound(double value) {
+		//并不是一个全局的上界，而是一个局部上界，当前VND初始解的值，在搜索过程中帮助减少分段数，不可使用全局上界
+		
+		if(Utility.compareLt(value, curUpperBound)) {
+			Utility.curUpperBound=value;
+		}
+		//从结果看，segmentNum数量还是少了不少的
+		//怎么看上去对时间作用不大..
+		//暂时可能略有一丢丢改进，区别不大。可能在启发式过程中只能用当前局部上界作用不大
+		//这个到了精确似乎也不能用，因为按照上界剪枝是基于后续加入任务以后成本肯定是会增加的来算的，但精确里边考虑dual以后函数是存在负值的
+		//此时直接按照上界剪枝就会出问题
+	}
+	public static void resetCurUpperBound(double value) {
+		//并不是一个全局的上界，而是一个局部上界，当前VND初始解的值，在搜索过程中帮助减少分段数，不可使用全局上界
+		Utility.curUpperBound=value;//从结果看，segmentNum数量还是少了不少的
+		//怎么看上去对时间作用不大..
+		//能快一丢丢
+		//TODO 看把等于上界的segment的函数直接设置为空函数不知道会不会好点,输出一下判断,看起来并不存在这种情况哈哈哈哈
+	}
+	
+	public static void debugNumPlus() {
+		debugNum++;
+	
+//		System.out.print("debug:"+debugNum);
 	}
 	
 	/** helper record to store a task and its completion time */
@@ -114,6 +153,16 @@ public class Utility {
 	        return Math.abs(a1 - a2) <= EPS;
 	    }
 	    
+//	    public double getScheduleCost(ArrayList<Integer> schedule)
+//		{
+//			double cost = 0;
+//			for(int i = 1; i < schedule.size(); ++i)
+//			{
+//				cost += data.GetDistance(route.get(i - 1), route.get(i));
+//			}
+//			
+//			return cost;
+//		}
 	    
 	    
 
@@ -144,7 +193,7 @@ public static class TimerManager {
 
     /** 开始计时 */
     public static void start(String name) {
-    	if(!Utility.timeManage) return;
+    	if(!Configure.timeManage) return;
 //    	double s1=System.currentTimeMillis();
         TimerStat stat = timers.computeIfAbsent(name, k -> new TimerStat());
         if (stat.running) {
@@ -158,7 +207,7 @@ public static class TimerManager {
 
     /** 结束计时 */
     public  static void end(String name) {
-    	if(!Utility.timeManage) return;
+    	if(!Configure.timeManage) return;
 //    	double s1=System.currentTimeMillis();
         TimerStat stat = timers.get(name);
         if (stat == null || !stat.running) {

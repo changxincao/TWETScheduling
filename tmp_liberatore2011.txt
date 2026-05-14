@@ -1,0 +1,1516 @@
+4OR-Q J Oper Res (2011) 9:49–82
+DOI 10.1007/s10288-010-0136-6
+RESEARCH PAPER
+A column generation algorithm for the vehicle routing
+problem with soft time windows
+Federico Liberatore · Giovanni Righini ·
+Matteo Salani
+Received: 26 June 2009 / Revised: 17 June 2010 / Published online: 10 August 2010
+© Springer-V erlag 2010
+Abstract The V ehicle Routing Problem with Time Windows consists of comput-
+ing a minimum cost set of routes for a ﬂeet of vehicles of limited capacity visiting a
+given set of customers with known demand, with the additional constraint that each
+customer must be visited in a speciﬁed time window. We consider the case in which
+time window constraints are relaxed into “soft” constraints, that is penalty terms are
+added to the solution cost whenever a vehicle serves a customer outside of his time
+window. We present a branch-and-price algorithm which is the ﬁrst exact optimization
+algorithm for this problem.
+Keywords V ehicle routing problem · Soft time windows · Column generation ·
+Branch-and-price · Combinatorial optimization
+MSC classiﬁcation (2000) 90C27
+F. Liberatore · G. Righini ( B)
+Dipartimento di Tecnologie dell’Informazione, Università degli Studi di Milano,
+Via Bramante 65, 26013 Crema, Italy
+e-mail: giovanni.righini@unimi.it
+M. Salani
+TRANSP-OR, École Polytechnique Fédérale de Lausanne, Station 8, 1015 Lausanne, Switzerland
+Present Address:
+F. Liberatore
+Kent Business School, University of Kent, Canterbury, Kent CT2 7PE, UK
+e-mail: ﬂ51@kent.ac.uk
+Present Address:
+M. Salani
+IDSIA, Istituto Dalle Molle di Studi sull’Intelligenza Artiﬁciale,
+Galleria 2, 6928 Manno-Lugano, Switzerland
+e-mail: matteo.salani@idsia.ch
+123
+
+50 F. Liberatore et al.
+1 Introduction
+A common problem in distribution logistics is to decide routes and schedules of vehi-
+cles that must visit a given set of customers where goods must be picked up or delivered.
+The visit to each customer is often constrained to be scheduled inside a speciﬁed time
+window indicated by the customer; planning algorithms for optimally routing and
+scheduling the ﬂeet of vehicles must rigorously respect these restrictions. The result-
+ing problem is known as the vehicle routing problem with time windows (VRPTW):
+for a recent survey the reader is referred to Cordeau et al. (2001) and Kallehauge
+et al. (2005). In particular branch-and-price algorithms for the VRPTW have been
+developed by Desrochers et al. (1992), Desaulniers et al. (2008), Jepsen et al. (2008),
+Salani (2006) and Baldacci et al. (2009).
+In spite of the vast literature on the VRPTW, for practical purposes it may be
+questionable whether time windows should be actually modeled by constraints like
+those representing physical or logical restrictions, such as capacity constraints and
+precedence constraints. In many cases time windows represent preferences about the
+time at which visits should occur at customers’ locations, but violations to these pref-
+erences can be allowed, provided that they are small and not too frequent. For this
+purpose “soft time windows” can be deﬁned, such that if a customer is visited outside
+of his preferred time window, a penalty is incurred in terms of additional costs that are
+charged to the distributor/collector. In this way it is possible to compute feasible plans
+that are much more profitable for the logistic operator. A more realistic model is paid
+in terms of added difﬁculty in the solution process, because the optimization algorithm
+must take into account the additional cost terms coming from the penalties; as shown
+in the remainder of this paper this poses several computational problems that can
+be tackled by suitable extensions of mathematical optimization techniques recently
+developed for the VRP with additional constraints. To the best of our knowledge only
+heuristic algorithms have been published so far for the VRP with soft time windows
+(VRPSTW) since the early work by Sexton and Choi (1986), which concerned the
+pick-up and delivery version of the problem;Koskosidis et al.(1992) proposed an opti-
+mization-based heuristic which decomposes the original problem into an assignment
+subproblem and a number of routing subproblems; Balakrishnan (1993) presented
+several constructive heuristics; Taillard et al. (1997) and Chiang and Russell (2004)
+developed tabu search heuristics; Ibaraki et al. (2005) studied acceleration techniques
+for local search algorithms in the case of multiple soft time windows.
+In this paper we present a branch-and-price algorithm for the exact optimiza-
+tion of the VRPSTW. Since the VRPSTW turns out to be much more difﬁcult than
+the VRPTW from the computational viewpoint, our exact algorithm can be used as
+a heuristic providing an a posteriori approximation guarantee, when the size of the
+instances at hand prevent from ﬁnding a provable optimal solution within the available
+amount of computing time.
+The pricing sub-problem is a resource constrained elementary shortest path problem
+(RCESSP), which is NP -hard on graphs with negative cost cycles. We solve it by
+bi-directional dynamic programming with decremental state space relaxation, a tech-
+nique developed by Righini and Salani (2008b), with the additional difﬁculty that in
+the case of soft time windows the number of non-dominated dynamic programming
+123
+
+A column generation algorithm for the vehicle routing problem 51
+states is inﬁnite. A problem with this characteristic had been studied by Ioachim et al.
+(1998), who considered the shortest path problem with time windows and linear node
+costs.
+In Sect. 2 we present a mathematical formulation of the problem; in Sect. 3
+we illustrate the column generation algorithm; in Sect. 4 we present the exact and
+heuristic pricing algorithms; in Sect. 5 we describe branching techniques; in Sect. 6
+we present computational results.
+2 Problem formulation
+The VRPSTW is deﬁned as follows: a graph G(V, A) is given, where the vertex set
+V is made of a set N of N customers and two vertices, numbered 0 and N + 1 repre-
+senting the depot, where V vehicles are located. Non-negative weights tij and cij are
+associated with each arc (i, j) ∈ A; they represent respectively the traveling time and
+the transportation cost on each arc (i, j) ∈ A; traveling times are given by shortest
+path lengths and therefore they satisfy the triangle inequality.
+A positive integer demand qi is associated with each vertex i ∈ N and a capacity
+Q is associated with each vehicle. A non-negative integer service time θi and a time
+window [ai, bi], deﬁned by two non-negative integers, are also associated with each
+vertex i ∈ N ;i ft h es e r v i c ea tv e r t e xi starts inside its time window [ai, bi] no penalty
+is incurred; if a vehicle starts servicing the customer at vertex i before time ai or after
+time bi , then a linear penalty has to be paid, which is proportional to the anticipation
+or delay through non-negative coefﬁcients αi and βi respectively. Indicating with Ti
+the starting time of service at vertex i the penalty term πi(Ti) is deﬁned as follows:
+πi(Ti) =
+⎧
+⎨
+⎩
+αi(ai − Ti) Ti < ai
+0 ai ≤ Ti ≤ bi
+βi(Ti − bi) Ti > bi
+However the vehicles are allowed to wait at no cost at any time along their routes.
+Column generation algorithms for routing problems rely upon a set covering refor-
+mulation, as follows.
+minimize
+∑
+f ∈F
+w f z f
+subject to
+∑
+f ∈F
+xif z f ≥ 1 ∀i ∈ N (2.1)
+−
+∑
+f ∈F
+z f ≥− V (2.2)
+z f ∈{ 0, 1}∀ f ∈ F (2.3)
+where F is the set of feasible vehicle routes, w f is the cost of route f ∈ F, that is the
+sum of the costs of the arcs in the route plus the penalties due to the soft time windows
+123
+
+52 F. Liberatore et al.
+violations, and xif is a binary value which is equal to 1 if and only if route f ∈ F
+visits customer i ∈ N .
+At each node of the search tree in our branch-and-price algorithm we replace con-
+straint (2.2) with
+∑
+f ∈F
+z f ≥ VLB (2.4)
+−
+∑
+f ∈F
+z f ≥− VUB . (2.5)
+Initially VLB =
+⌈∑
+i∈N qi/Q
+⌉
+and VUB = V .
+The linear relaxation of this set covering reformulation (master problem) usually
+yields very tight lower bounds (see for instance Bramel and Simchi-Levi (2001) and
+the references therein). However since in general F contains an exponential number
+of columns, only a subset F′ is kept in a linear restricted master problem (RLMP) and
+further feasible routes are generated by the iterated solution of a pricing problem. The
+pricing problem consists in ﬁnding routes with negative reduced cost or proving that
+none exists. The reduced cost of route f ∈ F is:
+w f = w f −
+∑
+i∈N
+xif λi − λLB
+0 + λUB
+0
+where (λ, λLB
+0 ,λUB
+0 ) is the vector of non-negative dual variables corresponding to
+constraints (2.1), (2.4) and (2.5) in the optimal solution of the RLMP . In the remainder
+we use λ0 = λUB
+0 − λLB
+0 .
+The capacity constraints as well as the penalties are taken into account in the pricing
+subproblem: in particular the former ones restrict the set F of feasible routes, while
+the latter ones contribute to determine the cost of each route when the service starting
+time at each customer’s location is decided.
+3 Column generation
+In this section we illustrate a column generation algorithm to solve the linear restricted
+master problem to optimality at each node of a search tree. The RLMP is iteratively
+solved with the interior point method coded in the free solver GLPK 4.11.
+3.1 Upper bounding
+Primal bounds close to the optimal value are useful to prune the search tree in implicit
+enumeration algorithms. Any feasible solution for the VRPSTW yields a valid primal
+bound; unfortunately column generation iterations typically yield fractional solutions.
+However their structure gives information that can be exploited by a heuristic algo-
+rithm to produce good feasible solutions. In Fig. 1 we present the pseudo-code of such
+an algorithm.
+123
+
+A column generation algorithm for the vehicle routing problem 53
+Fig. 1 Pseudo-code of the heuristic
+The heuristic algorithm takes in input the set of customers N and the set of RLMP
+columns F′ with their reduced costs w f and their coefﬁcients xif and it produces
+a set of columns ˜F that constitute a feasible solution. Hereafter we indicate by F′
+i
+the set of columns in F′ that cover customer i, that is F′
+i ={ f ∈ F : xif = 1}.
+The algorithm computes a regret value associated with each customer. Let f i
+(1)
+∈ argmin f ∈F′
+i
+{w f } be a minimum reduced cost column covering customer i ∈ N
+and f i
+(2) ∈ argmin f ∈F′
+i \ f i
+(1)
+{w f } be the second best column covering customer i ∈ N .
+The regret value ri associated with customer i is given by
+ri = w f i
+(2)
+− w f i
+(1)
+.
+If the second best column does not exists, then ri is set to a very large value.
+Intuitively the regret value indicates how important it is to cover customer i with
+the best column covering it. This piece of information is used to sort the customers:
+at each iteration an uncovered customer i with maximum regret is considered, the
+column f
+i
+(1) is selected and all customers in that column are marked as covered. When
+all customers are covered, the heuristic terminates yielding a feasible solution to the
+VRPSTW. Since the regret values are computed according to the reduced costs, the
+heuristic generates feasible solutions whose structure resembles the optimal solution
+of the RLMP . Since the number of columns in the RLMP is much larger than the
+number of customers, the computational complexity of the heuristic is dominated by
+the computation of the regret values. Therefore the complexity is O(N|F
+′|).
+3.2 Lower bounding
+Column generation yields a valid lower bound to the optimal value of the master prob-
+lem only when it terminates, i.e. when no columns with negative reduced cost exist.
+However a valid lower bound can be computed at each column generation iteration
+as follows:
+123
+
+54 F. Liberatore et al.
+zRLMP − VUB w∗
+where zRLMP is the current value of the objective function of the RLMP , VUB is the
+maximum allowed number of vehicles and w∗ is the minimum reduced cost, that is
+the optimal value of the pricing sub-problem. Hence, in order to achieve better lower
+bounds one needs tight estimates for both V
+UB and w∗. The latter is dealt with in
+Sect. 4. Hereafter we show how a primal solution can be used to tighten the upper
+bound on the number of vehicles.
+3.2.1 Bounding the number of vehicles
+In the VRPTW, owing to the triangle inequality, any feasible solution certainly uses
+at least as many vehicles as the optimal solution. Unfortunately this is not true in
+the VRPSTW, because of the penalty terms due to the soft time windows: it may be
+optimal to use more vehicles than necessary, in order to pay less penalties. However
+it is possible to exploit the value z
+UB of a feasible solution to compute an upper limit
+to the number of vehicles needed to achieve the same cost.
+The cheapest route a vehicle can follow is a cycle(0, i, N + 1). Consider a list of all
+these simple cycles, sorted by non-decreasing costs. Consider the maximum value h,
+such that ∑h
+h=1 cost (h) ≤ zUB , where cost (h) indicates the cost of the cycle in
+position h in the sorted list. Each solution using more than h vehicles certainly has a
+cost greater than zUB ; hence an upper bound to the number of vehicles in an optimal
+solution is VUB = h.
+3.3 Column management
+Hereafter we describe how the RLMP is initialized and how the algorithm manages
+columns dynamically generated.
+3.3.1 Initialization of the RLMP
+At the root node, to ensure the existence of a feasible solution to the RLMP , we insert
+a dummy column, with a very high cost, representing a route that visits all customers.
+This dummy column is inserted just to ensure that the initial linear program is feasible;
+this is necessary to start pricing out new columns. After some iterations the dummy
+column leaves the optimal basis owing to its very high cost.
+For each customer i ∈ N we also insert a column representing a route which visits
+only that customer.
+At each node of the search tree the RLMP is initialized with the same set of col-
+umns of the last considered node, with the only possible exception of the columns that
+are not feasible due to previous branching decisions. Owing to the best-ﬁrst-search
+strategy we adopted, the last solved node is not necessarily the predecessor of the
+current node.
+123
+
+A column generation algorithm for the vehicle routing problem 55
+3.3.2 Column pool
+With each column we associate a data-structure representing the sequence in which
+the customers are visited, since this piece of information is not explicitly contained in
+the structure of the column. This data-structure is used to determine whether a column
+is feasible or not with respect to the branching decisions leading to the current node
+of the search tree.
+At each column generation iteration we insert into the RLMP all columns with neg-
+ative reduced cost that have been found by the pricing algorithms (multiple pricing).
+When the solution time of the RLMP exceeds a given threshold (set to 2 seconds in our
+tests), we remove from the RLMP all columns with reduced cost greater than a given
+threshold. In our tests we set the threshold to
+(
+5m i n
+(i, j)∈A{cij }
+)
+. This threshold has
+been set according to some preliminary experiments; however the algorithm is robust
+to this parameter because the columns are not erased but only stored in the pool and
+therefore they remain available for the next column generation iterations.
+The columns removed from the RLMP are inserted into a pool which is scanned
+at each column generation iteration in search for negative reduced cost columns. Also
+the columns which are detected as infeasible due to branching decisions are inserted
+into the pool. When a column has positive reduced cost for ten consecutive column
+generation iterations, it is deleted also from the pool.
+4 Pricing
+The pricing subproblem is a resource constrained shortest path problem with soft time
+windows. A vehicle must go from vertex 0 to vertex N + 1, visiting a subset of the
+other vertices; no cycles are allowed. Because there are non-negative costs c associ-
+ated with the arcs and non-negative prizesλassociated with the vertices, negative cost
+cycles can occur. Therefore the requisite that the path must be elementary does not
+come for free from cost minimization but it must be explicitly enforced. The resource
+constrained elementary shortest path problem (RCESPP) on graphs with negative cost
+cycles is strongly NP -hard (see Dror 1994).
+The capacity constraint is taken into account as a resource constraint: each vehicle
+leaving the depot has Q units of available resource and every time it visits a customer
+with demand q
+i it consumes qi units of resource. The objective is to minimize the cost,
+given by the sum of the costs of the arcs traversed plus the sum of the penalties for
+anticipation and delay, minus the sum of the prizes collected at the vertices visited.
+The main difﬁculty in dealing with soft time windows in column generation algo-
+rithms is that the possibility of trading time versus cost generates an inﬁnite number
+of possible solutions of the pricing problem that do not dominate one another. In algo-
+rithmic terms this means that the pricing algorithm, usually a dynamic programming
+algorithm, must take into account an inﬁnite number of Pareto-optimal states. In this
+paper we extend the ideas presented in previous papers on the RCESPP to the case with
+soft time windows, implying continuous resources. In particular we present extensions
+of the bi-directional search technique presented in Righini and Salani (2006), coupled
+with decremental state space relaxation presented in Righini and Salani (2008a,b),
+123
+
+56 F. Liberatore et al.
+Time window Ti
+i
+ai bi
+Fig. 2 A soft time window at a generic vertex i ∈ N : a linear penalty πi is incurred depending on the
+service starting time Ti
+when dynamic programming labels represent in a compact way an inﬁnite number of
+non-dominated states. A similar problem was discussed by Ioachim et al. (1998), who
+considered a single-vehicle routing problem with hard time windows and additional
+costs for each customer visited, linearly depending on the starting time of the visit.
+Since exact pricing is time consuming, we also developed heuristic pricing proce-
+dures illustrated in Sect. 4.3.
+4.1 Bi-directional dynamic programming
+The pricing sub-problem is solved to optimality by a bi-directional dynamic program-
+ming algorithm.
+4.1.1 States, labels and extension
+A state associated with vertex i ∈ N represents a path from the depot 0 to i. Different
+states associated with the same vertex correspond to different feasible paths reaching
+that vertex.
+When a vehicle reaches a vertex it can start the service immediately or it can wait
+and start the service at a later time in order to reduce costs in case of early arrival.
+Therefore from each feasible state an inﬁnite number of feasible states can be gener-
+ated. For this reason our dynamic programming algorithm must take into account an
+inﬁnite number of non-dominated states and this is done by grouping them into labels.
+Each label corresponds to an inﬁnite number of states associated with the same path.
+A label associated with vertex i ∈ N is a tuple L
+i = (S, i, r, C(Ti)), where S is a
+binary vector indicating the vertices visited along the path, i is the last reached vertex,
+r is the amount of capacity consumed up to i, C is the cost of the path, Ti is the time
+at which the service at vertex i begins. In each label the continuous function C(Ti)
+describes the trade-off between cost and time. This function is piecewise linear and
+convex, because it is the sum of piecewise linear and convex functions, like the one
+shown in Fig. 2, one for each of the vertices visited.
+123
+
+A column generation algorithm for the vehicle routing problem 57
+In bi-directional dynamic programming these states are called forward states and
+in the same way we deﬁne backward states, corresponding to paths from vertex i to
+the ﬁnal depot N + 1 represented by labels (S, i, r, C(Ti)), where Ti is the time at
+which the service at vertex i begins.
+To keep a perfect symmetry in the description of the algorithm, one could equiv-
+alently deﬁne Ti in backward states as the time at which the service terminates and
+consider backward time windows [ai + θi, bi + θi], specifying the range in which
+the service at vertex i should preferably terminate. In the exposition we preferred not
+to introduce backward time windows, in order not to make the notation unnecessar-
+ily complicated, and hence we refer to service starting time and to the original time
+windows both in forward and in backward labels.
+The dynamic programming algorithm iteratively extends all feasible forward and
+backward labels to generate new forward and backward labels respectively. The exten-
+sion of a forward label corresponds to appending an additional arc(i, j) t oap a t hf r o m
+0t o i, obtaining a path from 0 to j, while the extension of a backward label corre-
+sponds to appending an additional arc ( j, i) to a path from i to N + 1, obtaining a
+path from j to N + 1.
+To avoid negative cost cycles a dummy resource is associated with each vertex
+i ∈ N : there is only one unit available for each dummy resource and it is consumed
+when the corresponding vertex is visited. The dummy resources consumption vector
+S is initialized at 0 at the depot. Note that S does not keep any information about
+the order in which the vertices are visited. When a forward label (S, i, r, C(T
+i)) is
+extended to a vertex j, a new forward label (S′, j, r′, C′(Tj)) is generated and the
+update rule is:
+S′
+k =
+{ Sk + 1 k = j
+Sk k ̸= j
+A label (S, i, r, C(Ti)) corresponds to an elementary path only if Sk ≤ 1 ∀k ∈ N .
+The resource consumption r indicates the amount of capacity used. When a vehicle
+leaves the depot 0 all the resource is available, that is r = 0, and the extension rule is:
+r′ = r + q j.
+A label (S, i, r, C(Ti)) is feasible only if r ≤ Q.
+Finally the cost C(Ti) is initialized with the function C(T0) = 0 ∀T0 ≥ 0a tt h e
+depot 0. At each extension the cost depends on both traveling time and penalties and
+it is updated according to the formula
+C
+′(Tj) = C(Tj − (θi + tij )) − λi/2 + cij − λj/2 + πj(Tj),
+where λi =− λ0 if i = 0 and λj =− λ0 if j = N + 1. In this expression the cost
+function of the predecessor is evaluated at Ti = Tj − (θi + tij ), which is the latest
+time instant at which the service at vertex i should begin, to allow starting the service
+at vertex j at time Tj .
+123
+
+58 F. Liberatore et al.
+Fig. 3 Forward extension of a label of vertexi to vertex j.T h eC′(Tj ) function resulting from the extension
+is the sum of the C(Ti ) function of the extended label suitably shifted and the penalty function πj (Tj )
+Figure 3 shows an example of forward extension. In graphical terms, the cost func-
+tion C(Ti) is shifted to the right by the service time at vertex i, that is θi ,p l u st h e
+traveling time tij spent to reach vertex j, it is shifted up by the traveling cost cij
+minus the prizes λi/2 + λj/2 collected for visiting the vertices. Then it is summed
+to the penalty term πj , which depends on the arrival time Tj .I f C(Ti) is continuous
+and convex, then the resulting function C′(Tj) preserves both these properties. The
+number of segments in the piecewise linear function is increased by at most two at
+every extension.
+The extension rules for backward labels are symmetrical to those above. The cost
+function at the ﬁnal depot is initialized as C(TN+1) = 0 ∀TN+1 ≤ T max , where T max
+is deﬁned in the remainder.
+4.1.2 Dominance rules
+In general the effectiveness of any dynamic programming algorithm heavily depends
+on the number of states generated. Hence it is essential to fathom feasible states which
+cannot lead to optimal solutions.
+In our case this is done in two ways: by the deletion of parts of the linear functions
+in all labels and by suitable dominance rules.
+Consider a generic forward label, like the one represented in Fig. 4. Because all
+penalty functions have a positive penalty term for delays, the rightmost part of the
+function certainly has positive ﬁrst derivative. Since waiting at no cost is allowed,
+every time a state with cost C and time T is reachable, all states with the same
+cost C and time values greater than T are also reachable. Hence all states in the
+123
+
+A column generation algorithm for the vehicle routing problem 59
+Ti
+C(Ti) 
+Fig. 4 States on the ascending part of the piecewise linear function are dominated: the same value in time
+can be reached at a smaller cost
+ascending part of the function are dominated by the states of the same label with a
+smaller value of the cost and the same value of time. Therefore these dominated states
+can be replaced by states with the same cost of the dominating ones, as shown in
+Fig. 4. In graphical terms this means that the rightmost part of the piecewise linear
+function in each label is a horizontal unbounded segment, replacing all the segments
+with positive ﬁrst derivative, which result from the extension.
+The second way to eliminate dominated states is by dominance tests, that are per-
+formed each time labels are extended. Let (S′, i, r′, C′, T′
+i ) and (S′′, i, r′′, C′′, T′′
+i ) be
+two states belonging to two labels L′ and L′′ associated with vertexi; this is equivalent
+to say that the two states are two points on the piecewise linear functions of L′ and L′′.
+Then the former dominates the latter only if
+S′ ≤ S′′
+r′ ≤ r′′
+C′ ≤ C′′
+T′
+i ≤ T′′
+i
+and at least one of the inequalities is strict. When a dominance rule is applied to sin-
+gle states and the test succeeds, the effect is simply to delete one of the two states.
+In our case, where each label represents an inﬁnite number of states, the effect of the
+dominance test is to delete some parts of the piecewise linear functions, as shown in
+Fig. 5. The states surviving the dominance test are those of minimum cost for each
+feasible arrival time.
+This holds for both forward and backward states. As a consequence, the resulting
+piecewise linear functions may have gaps and are not convex in general, as the small
+example in Fig. 5 shows.
+When a new label is generated, it is compared to all the labels currently associ-
+ated with the same vertex and the dominance test is applied for each comparison. Let
+L
+′ = (S′, i, r′, C′(Ti)) and L′′ = (S′′, i, r′′, C′′(Ti)) be the two labels of vertex i that
+are compared. If S′ = S′′ and r′ = r′′ then the two labels are merged into one, so
+that at most one piecewise linear function is stored for each feasible combination of
+123
+
+60 F. Liberatore et al.
+Ti
+C(Ti) 
+Gap 
+Concavity 
+Fig. 5 As an effect of the dominance test, some parts of the piecewise linear functions are deleted.
+Only the states plotted in bold are non-dominated and survive the test
+S, i and r ; in this case the non-dominated states form a new piecewise linear function
+possibly with vertical gaps and concavities as the one formed by the points plotted in
+b o l di nF i g .5. In the other case, for instance (w.l.o.g.) if S
+′ ≤ S′′ and r′ ≤ r′′, then
+the dominated states in C′′(Ti) are deleted and hence the resulting piecewise linear
+function can have also horizontal gaps, as the black bolded function in Fig. 5.
+4.1.3 Profitable time windows
+The combined effect of soft time windows and dual prizes induces profitable time
+windows in the pricing problem. Consider a vertex i with dual prize λi ,s o f tt i m e
+window [ai, bi] and penalty coefﬁcients αi and βi . Any visit to the vertex occurring
+outside of the time window [ai − λi/αi, bi + λi/βi] is not profitable, because the
+penalty to be paid would be larger than the prize gained. Such a non-profitable visit
+can always be skipped from any path P, yielding another path P
+′ not worse than P,
+owing to the triangle inequality.
+From the computation of the profitable time windows, it is also possible to delete
+some arcs from the graph. Any arc (i, j) such that ai − λi/αi +θi + tij > bj +λj/βj
+can be deleted.
+We also use profitable time windows to detect unreachable vertices, as explained
+in the next paragraph. Owing to this observation we also deﬁne a maximum allowed
+arrival time T max = maxi∈N {bi +λi/βi + tiN +1}, which is the latest possible arrival
+time at the ﬁnal depot for an optimal path.
+4.1.4 Unreachable vertices
+Av e r t e xj is unreachable from a label L = (S, i, r, C(Ti)) when its demand q j cannot
+be fulﬁlled with the remaining capacity Q − r or when its profitable time window
+would be violated by any visit starting from label L, that is Ti + θi + tij > bj +
+λj/βj for all feasible values of Ti . For the purpose of the dominance test, unreachable
+123
+
+A column generation algorithm for the vehicle routing problem 61
+vertices can be counted as if they were already visited, exploiting an idea ofFeillet et al.
+(2004). Indicating with U′ and U′′ the characteristic vectors of the sets of unreachable
+vertices in two labels L′′ and L′′, the condition
+S′ ≤ S′′
+in the dominance test above is replaced by
+S′ + U′ ≤ S′′ + U′′,
+which is a weaker and therefore more effective sufﬁcient condition.
+4.1.5 Search policy
+Labels are extended according to the vertices they are associated with. The vertices are
+cyclically visited in increasing order of the starting time a
+i of their soft time windows;
+for each vertex the algorithm extends all its labels that have not yet been extended.
+At each vertex all the labels not yet extended are sorted according to a hierarchical
+criterion: ﬁrst they are sorted by increasing overall length of the path; in case of tie
+they are sorted by increasing amount of capacity consumed; in case of further tie, they
+are sorted by number of vertices visited.
+4.1.6 Joining forward and backward states
+In our bi-directional dynamic programming algorithm forward and backward paths
+must be joined to produce complete paths from vertex 0 to vertex N + 1. Let L
+f w =
+(S f w, i, r f w, C f w(Ti)) be a forward label and Lbw = (Sbw, j, rbw, Cbw(Tj)) be a
+backward label. The join operation between L f w and Lbw is subject to feasibility
+conditions on the resources. In particular the feasibility test on dummy resources S
+imposes that a same vertex can not be visited by both paths:
+S f w
+k + Sbw
+k ≤ 1 ∀k ∈ N.
+Moreover the consumption of capacity in the overall resulting path can not exceed the
+overall amount of available capacity, that is:
+r f w + rbw ≤ Q.
+If the join is feasible, then the cost of the resulting path can be obtained as the minimum
+of the function
+C(T) = C f w(T) − λi/2 + cij − λj/2 + Cbw(T + θi + tij ).
+This function may have several local minima, as shown in Fig. 6. However the detec-
+tion of the global minimum takes time linear in the number of discontinuity points of
+the two piecewise linear functions, since it requires merging two sorted lists.
+123
+
+62 F. Liberatore et al.
+T 
+C 
+0 
+Fig. 6 When a forward and a backward labels are joined, the two corresponding piecewise linear functions
+are summed up. The resulting piecewise linear function may have multiple local minima. All its points
+below 0 correspond to negative reduced cost routes
+In our pricing algorithm we insert into the RLMP all negative reduced cost columns
+corresponding to discontinuity points of the piecewise linear function resulting from
+the join operation.
+4.1.7 Resource-based bounding
+Since all forward and backward states generated by the bi-directional search algo-
+rithm are tentatively joined, it is crucial to reduce their number as much as possible.
+To this purpose we select a critical resource, whose consumption is monotone along
+the paths, and we do not extend states in which at least half of the available amount
+of that resource has already been consumed. We tried using r, T and |S| as critical
+resources. These choices are compared in the next section.
+4.2 Decremental state space relaxation
+Decremental state space relaxation (DSSR) was independently introduced by Righini
+and Salani (2008b) and by Boland et al. (2006) to reduce the number of states to be
+explored by dynamic programming. The basic idea is that the elementary path con-
+straints are not imposed on all the vertices of the graph but rather on a subset of critical
+vertices. If the optimal solution of the pricing problem is not elementary, one or more
+vertices visited more than once are inserted into the critical vertex set and the dynamic
+programming algorithm is executed again. In this way at each iteration a lower bound
+for the pricing problem is computed. Computational experiments reported in Righini
+and Salani (2008b) show that the number of vertices that must be deﬁned as critical in
+order to obtain a feasible solution is usually only a small fraction of N and therefore
+the pricing problem is solved to proven optimality in a fraction of the computing time
+required by dynamic programming when multiple visits are forbidden at all vertices.
+123
+
+A column generation algorithm for the vehicle routing problem 63
+In our algorithm we map each label(S, i, r, C(Ti)) onto a new label( ˆS, i, r, C(Ti)),
+where ˆS is the set of critical vertices, initially empty. This is done for both forward and
+backward labels. The dominance rule is then modiﬁed, replacing condition S′ ≤ S′′
+by ˆS′ ≤ ˆS′′. If unreachable vertices are also considered, they are recorded in a vector
+ˆU ⊆ N and the dominance rule is ˆS′ + ˆU′ ≤ ˆS′′ + ˆU′′.
+4.2.1 DSSR policies
+In Boland et al. (2006) several different policies to update the critical set were con-
+sidered. A computational comparison between them is also reported in Righini and
+Salani (2008a). In the algorithm for the VRPSTW, we used the policy called HMO
+according to the terminology ofBoland et al. (2006): it consists in adding to the critical
+vertex set one vertex at each iteration, selecting one at random among those visited
+the largest number of times.
+4.2.2 Initialization of the critical vertex set
+Also the initialization of the critical vertex set can be done in different ways. InRighini
+and Salani (2008a) several policies are compared. The aim is to identify a subset of
+vertices that have a high probability to belong to the ﬁnal critical vertex set. Let us
+deﬁne φij to be a measure of the “cycling attractiveness” of a vertex i with respect to
+av e r t e xj as the ratio of the prize λi over the duration of the cycle i- j-i:
+φij = λi/(θi + tij + θj + tji ).
+Now we deﬁne an ordering of the vertices based on the following four criteria:
+− Highest Cycling Attractiveness (HCA): order by max j∈N\{i}{φij }.
+− Total Cycling Attractiveness (TCA): order by ∑
+j∈N\{i} φij .
+− Weighted HCA (WHCA): order by max j∈N\{i}{φij (bi − ai)}.
+− Weighted TCA (WTCA): order by ∑
+j∈N\{i} φij (bi − ai).
+In general these criteria give different results and none of them is consistently reliable
+to identify the necessary vertices to be put in the critical vertex set. Let us deﬁne
+HCA m, TCA m, WHCA m and WTCA m to be the sets containing the ﬁrst m vertices
+according to each of the ordering criteria above. We use as an initial critical vertex set
+the one obtained from the intersection of these four sets. By a suitable choice of the
+value of m the initial critical vertex set can be set with the aim of reducing the num-
+ber of iterations (high m) or reducing the probability of inserting into it unnecessary
+vertices (low m). In our computational experiments we set m = 8.
+4.3 Heuristic pricing
+It is common practice to price out columns in a heuristic way, in order to speed up the
+column generation algorithm [see for instance Dell’Amico et al. (2006)]. Only when
+heuristic pricing algorithms fail it is necessary to resort to exact pricing techniques.
+123
+
+64 F. Liberatore et al.
+For this purpose we developed three heuristic pricing algorithms, with increasing com-
+plexity and accuracy: a greedy constructive algorithm, a local search algorithm and a
+heuristic dynamic programming algorithm.
+Hence the overall pricing procedure consists of the following steps: ﬁrst, the col-
+umn pool is searched and all columns in it are evaluated with the incumbent values
+of the dual variables; if no column with negative reduced cost is found, the heuristic
+pricing algorithms are used in sequence, until one of them ﬁnds out columns with
+negative reduced cost. If all of them fail, the exact pricing algorithm is executed and
+all non-dominated columns with negative reduced cost found in this way are inserted
+in the RLMP (multiple pricing).
+4.3.1 Greedy algorithm
+The greedy constructive heuristic computes tentative feasible solutions by visiting the
+vertices in a “nearest neighbor” fashion starting from the depot and coming back to it
+when no more vertices can be added to the route in a feasible way. The algorithm takes
+into account capacity constraints and time windows. For this last purpose it considers
+the soft time windows as if they were hard constraints. Starting from the last reached
+vertex i ∈ N the next vertex j ∈ N is chosen as the unvisited vertex which minimizes
+c
+ij − λj and such that it can be visited not later than bj and without exceeding the
+capacity.
+The greedy constructive heuristic always yields feasible solutions for the VRPTW
+and hence for the VRPSTW. If such a solution is better than the best incumbent solu-
+tion, all columns corresponding to its routes are inserted into the RLMP , including
+those with non-negative reduced cost. This is very useful in early iterations, when
+the RLMP contains only the columns produced by the initialization step. The effect
+is to stabilize the values of the dual variables and to reduce the optimal value of the
+RLMP by a significant amount. The more populated the RLMP is, the less effective
+the greedy heuristic becomes. For this reason this heuristic pricing algorithm is used
+only when the RLMP does not contain more than 1,000 columns.
+4.3.2 Local search
+We developed a “best improve” variable neighborhood descent algorithm, using two
+neighborhoods DELETE and INSERT. The former which is smaller is explored ﬁrst;
+if no improving solution is found, then the latter is explored.
+The DELETE neighborhood is made by all routes that are obtained from a current
+route f , by deleting one of the customers in it and rescheduling the service starting
+times in an optimal way, without changing the order in which the other customers are
+visited.
+The INSERT neighborhood is made by all solutions obtained from the current route
+f by inserting in the route one of the customers not already in it and rescheduling the
+service starting times optimally, keeping the order of the other customers unchanged.
+The exploration of this neighborhood takes O
+(
+N
+3)
+.
+To diversify the search, the local search algorithm is executed multiple times
+from different starting routes. The set of the starting solutions is given by the routes
+123
+
+A column generation algorithm for the vehicle routing problem 65
+associated with the basic variables of the RLMP . All routes with negative reduced cost
+found in any iteration of the local search algorithm are stored in a route set T . When
+a neighborhood is explored it may happen that the best neighbor found is already
+contained in T . In this case it is skipped, and the second best is considered, and so on.
+The local search terminates when it cannot ﬁnd a neighbor which is not already in T
+and such that its cost is better than the cost of the current route.
+Our computational tests with this heuristic have shown that it produces a very large
+number of columns with negative reduced cost in a very short time. Therefore the
+algorithm is halted when 10,000 columns have been generated.
+4.3.3 Heuristic dynamic programming algorithm
+The third heuristic pricing algorithm is obtained from the exact pricing algorithm by
+relaxing the dominance test. The requirement that the route must be elementary is
+still taken into account in the labels extension, but the set of already visited vertices
+is disregarded in the dominance test, which is:
+⎧
+⎨
+⎩
+r
+′ ≤ r′′
+C′ ≤ C′′
+T′
+i ≤ T′′
+i
+where (S′, i, r′, C′, T′
+i ) and (S′′, i, r′′, C′′, T′′
+i ) are two states belonging to two labels
+L′ and L′′ associated with vertex i ∈ N . Owing to the modiﬁed dominance test, the
+algorithm is not guaranteed to ﬁnd an optimal solution and it may even generate routes
+whose cost is not optimized. Therefore it is necessary to post-process the columns pro-
+vided by the algorithm in order to compute their minimum cost, without changing the
+order in which the customers are visited. All columns with negative reduced cost found
+in this way, after being post-processed, are inserted into the RLMP .
+5 Branch-and-price
+5.1 Search strategy
+The search tree is explored with a best-ﬁrst-search strategy, in which subproblems are
+evaluated according to the value of their associated lower bound.
+The main advantage is that the combination of best-ﬁrst-search with the primal
+heuristic described in Sect. 3.1 allows to produce good feasible solutions early in the
+search. In turn this allows the removal from the RLMP of all columns whose reduced
+cost is larger than the difference between the primal and the dual bounds.
+The main drawback is that it is not possible to solve a RLMP in a node of the search
+tree starting from the optimal basis of the predecessor node, because this would require
+to store explicitly all basic columns for each node. Furthermore nodes of the search tree
+solved consecutively have different ﬁxed variables because they come from different
+branching decisions.
+123
+
+66 F. Liberatore et al.
+5.2 Branching strategy
+We have used two different branching strategies, namely branching on number of
+vehicles and branching on arcs.
+The former technique works as follows: the sum Z = ∑
+f ∈F′ z f is computed;
+if this sum has a fractional value, two successor nodes are generated: in one of them
+we set V
+UB = ⌊Z⌋, while in the other we set VLB = ⌈Z⌉.
+When Z is integer, we perform branching on arcs, as follows. We compute the ﬂow
+on each arc (i, j):
+δij =
+∑
+f ∈F′:x f
+ij =1
+z f ∀i, j ∈ N.
+Then we detect the arc (i, j)∗ ∈ argmax(i, j)∈A
+{
+cij min
+{
+δij , 1 − δij
+}}
+such that ﬁx-
+ing it causes the maximum variation in the value of the solution. From each node,
+two successors are generated, such that in one of them arc (i, j)∗ is removed from the
+graph while in the other it is ﬁxed, i.e. all other arcs leaving vertex i or entering vertex
+j are removed.
+6 Experimental results
+The algorithm was coded in C, compiled with gcc and run on a Pentium IV PC with
+1.6 GHz CPU and 500 MB RAM, Linux operating System. The allotted computing
+time for each instance was limited to 1 h and the amount of available memory was
+limited to 500 MB, to avoid swap operations.
+6.1 Instances
+For our experiments we used instances derived from the well-known Solomon’s
+VRPTW benchmark ( Solomon 1983 ). These instances are divided into six groups
+and they have been designed to put in evidence different factors which can make
+VRPTW instances more or less difﬁcult: geographical dispersion of the customers,
+average number of customers to be served by each vehicle, fraction of customers with
+significantly tight time constraints, width and position of time windows. The custom-
+ers’ positions are generated at random in groups R1 and R2, they are clustered in
+groups C1 and C2 and they are hybrid in groups RC1 and RC2. In groups R1, C1
+and RC1 the vehicles have a capacity allowing to visit a few customers, about 5 to
+10 for each vehicle. In groups R2, C2 and RC2 the vehicles have a very large capac-
+ity and they may serve more than 30 customers each. In each group the customers
+are located in the same way: the instances are different only for the time windows.
+All the original Solomon’s instances have 100 customers; as proposed by Kohl et al.
+(1999) smaller instances with 25 and 50 customers are obtained by considering only
+the ﬁrst customers for each group. Costs and traveling times associated with the arcs
+are equal and they are computed by rounding down the Euclidean distance with one
+123
+
+A column generation algorithm for the vehicle routing problem 67
+decimal digit. In our experiments we considered the same penalty value, indicated by
+ψ , for anticipation and delay for all vertices: αi = βi = ψ ∀i ∈ N . In a ﬁrst set of
+experiments we set ψ to 100, following Taillard et al. (1997). So large penalties make
+soft time windows very unlike to be violated, acting as if they were hard constraints.
+We actually veriﬁed that this was the case in all our experimental results. In this way
+we could compare our algorithm with the known algorithms for the VRPTW. A second
+set of experiments has been done by setting ψ to 1.
+6.1.1 Large penalties
+In Tables 1–6 we report the results of the tests with the branch-and-price algorithm
+with large penalties. Tables 1, 2 and 3 report the detailed results for the instances
+with 25, 50 and 100 customers respectively. The ﬁrst two columns report the instance
+name and the vehicles capacity Q. Then we report the optimal value for the VRPTW
+(Z
+∗) for the instances for which it is known; in the other cases we report the best
+known value, taken from Danna and Le Pape (2005)o rf r o mDesaulniers et al. (2008).
+The next two columns report the best primal bound (ZUB ) and the best lower bound
+(ZLB ) when it was obtained within the time-out. Note that the time limit can play a
+role in the comparison between similar instances of different size: for example the
+lower bound obtained for instance C204_50 is less than that of instance C204_25,
+because in the former case the pricing algorithm with DSSR at the root node was not
+completed within the time-out and therefore the lower bound is weak (it corresponds
+to a solution using columns with cycles). The next columns report the gaps between
+the optimal solution of the VRPTW and the best upper bound (G
+∗
+UB = ZUB − Z∗
+Z∗ ),
+between the best lower bound and the optimal solution of the VRPTW (G∗
+LB ) and
+between the best lower and upper bounds (GUB
+LB = ZUB − ZLB
+ZLB ). Finally the rightmost
+columns report the overall computing time in seconds (a dash is reported if the time-out
+was exceeded), the number of nodes generated and the number of nodes solved in the
+search tree, the overall number of columns dynamically generated. We remark that the
+comparison with the optimal or best known solutions for the VRPTW is meaningful
+because the value of the large penalties (π = 100) was chosen to be large enough
+to produce the same optimal solutions as if the time windows were enforced as hard
+constraints.
+Tables 4–6 report aggregate results referred to the six groups of instances. From left
+to right the columns report: the name of the group, the percentage of instances solved
+at the root node, the percentage of solved instances, the average gap
+G∗
+LB between the
+optimal value and the lower bounds (the fraction between parentheses indicates the
+number of instances for which the gap could be computed), and the average gap GUB
+∗
+between the upper bound and the optimal value.
+From the examination of Tables 4–6 reporting aggregated results, it is possible to
+draw some conclusions about the performance of the branch-and-price algorithm.
+The number of instances solved to optimality within the time-out significantly
+decreases when the size of the instance increases.
+Instances in groups C are easier to solve, while RC instances are the most difﬁ-
+cult ones.
+123
+
+68 F. Liberatore et al.
+Table 1 Large penalties, 25 customers
+Instance QZ ∗ ZUB ZLB GUB
+∗ (%) G∗
+LB (%) GUB
+LB (%) Time (s) Nodes Visited Columns
+nodes
+c101_25 200 191.3 191.3 191.3 0 .00 0.00 0 .00 0 .17 1 1 125
+c102_25 200 190.3 190.3 190.3 0 .00 0.00 0 .00 1 .27 1 1 504
+c103_25 200 190.3 190.3 190.3 0 .00 0.00 0 .00 6 .32 1 1 389
+c104_25 200 186.9 186.9 186.9 0 .00 0.00 0 .00 65 .59 1 1 972
+c105_25 200 191.3 191.3 191.3 0 .00 0.00 0 .00 0 .24 1 1 239
+c106_25 200 191.3 191.3 191.3 0 .00 0.00 0 .00 0 .08 1 1 83
+c107_25 200 191.3 191.3 191.3 0 .00 0.00 0 .00 0 .47 1 1 1640
+c108_25 200 191.3 191.3 191.3 0 .00 0.00 0 .00 3 .73 1 1 1909
+c109_25 200 191.3 191.3 191.3 0 .00 0.00 0 .00 12 .95 1 1 643
+c201_25 700 214.7 214.7 214.7 0 .00 0.00 0 .00 0 .48 1 1 566
+c202_25 700 214.7 214.7 214.7 0 .00 0.00 0 .00 20 .56 1 1 5882
+c203_25 700 214.7 214.7 214.7 0 .00 0.00 0 .00 259 .76 1 1 9191
+c204_25 700 213.1 213.1 213.1 0 .00 0.00 0 .00 767 .97 1 1 12535
+c205_25 700 214.7 214.7 214.7 0 .00 0.00 0 .00 73 .4 1 1 2813
+c206_25 700 214.7 214.7 214.7 0 .00 0.00 0 .00 44 .39 1 1 989
+c207_25 700 214.5 214.5 214.5 0 .00 0.00 0 .00 190 .99 1 1 1382
+c208_25 700 214.5 214.5 214.5 0 .00 0.00 0 .00 403 .64 1 1 144
+r101_25 200 617.1 617.1 617.1 0 .00 0.00 0 .00 0 .05 1 1 73
+r102_25 200 547.1 547.1 547.1 0 .00 0.00 0 .00 4 .72 3 2 4938
+r103_25 200 454.6 454.6 454.6 0 .00 0.00 0 .00 0 .49 1 1 203
+r104_25 200 416.9 416.9 416.9 0 .00 0.00 0 .00 0 .94 1 1 714
+r105_25 200 530.5 530.5 530.5 0 .00 0.00 0 .00 0 .25 3 2 141
+r106_25 200 465.4 465.4 465.4 0 .00 0.00 0 .00 57 .28 5 2 10841
+r107_25 200 424.3 424.3 424.3 0 .00 0.00 0 .00 1 .89 1 1 573
+r108_25 200 397.3 397.3 396.9 0 .00 0.10 0 .10 − 3 2 7598
+r109_25 200 441.3 441.3 441.3 0 .00 0.00 0 .00 0 .5 1 1 344
+r110_25 200 444.1 439.8 439.8 − 0.97 0.97 0 .00 18 .19 15 5 393
+r111_25 200 428.8 428.8 428.8 0 .00 0.00 0 .00 7 .38 5 3 964
+r112_25 200 393 393 393 0 .00 0.00 0 .00 435 7 3 10927
+r201_25 1000 463.3 463.3 463.3 0 .00 0.00 0 .00 1 .97 3 2 1059
+r202_25 1000 410.5 410.5 410.5 0 .00 0.00 0 .00 3 .76 1 1 1010
+r203_25 1000 391.4 391.4 391.4 0 .00 0.00 0 .00 231 .7 1 1 9926
+r204_25 1000 355 356.5 354.58 0 .42 0.12 0 .54 − 23 11 13685
+r205_25 1000 393 393 393 0 .00 0.00 0 .00 34 .31 5 3 2477
+r206_25 1000 374.4 374.4 374.4 0 .00 0.00 0 .00 818 .75 7 3 5073
+r207_25 1000 361.6 361.6 361.6 0 .00 0.00 0 .00 2446 .12 9 3 5105
+r208_25 1000 328.2 328.2 328.2 0 .00 0.00 0 .00 1255 .78 1 1 4424
+r209_25 1000 370.7 370.7 370.7 0 .00 0.00 0 .00 307 .92 11 5 5609
+r210_25 1000 404.6 404.6 404.6 0 .00 0.00 0 .00 434 .12 3 2 3997
+r211_25 1000 350.9 384.8 341.33 9 .66 2.73 12 .74 − 3 2 1962
+123
+
+A column generation algorithm for the vehicle routing problem 69
+Table 1 continued
+Instance QZ ∗ ZUB ZLB GUB
+∗ (%) G∗
+LB (%) GUB
+LB (%) Time (s) Nodes Visited Columns
+nodes
+rc101_25 200 461.1 577.8 435.45 25 .31 5.56 32 .69 − 193 151 4131
+rc102_25 200 351.8 351.8 351.8 0 .00 0.00 0 .00 3 .47 3 2 398
+rc103_25 200 332.8 332.8 332.8 0 .00 0.00 0 .00 10 .49 1 1 246
+rc104_25 200 306.6 306.6 306.6 0 .00 0.00 0 .00 23 1 1 405
+rc105_25 200 411.3 411.3 411.3 0 .00 0.00 0 .00 2 .6 1 1 383
+rc106_25 200 345.5 345.5 345.5 0 .00 0.00 0 .00 4 .62 1 1 208
+rc107_25 200 298.3 298.3 298.3 0 .00 0.00 0 .00 5 .01 1 1 17
+rc108_25 200 294.5 294.5 294.5 0 .00 0.00 0 .00 46 .76 1 1 30
+rc201_25 1000 360.2 360.2 360.2 0 .00 0.00 0 .00 3 .52 1 1 2742
+rc202_25 1000 338 338 338 0 .00 0.00 0 .00 923 .99 1 1 699
+rc203_25 1000 326.9 326.9 320.1 0 .00 2.08 2 .12 − 1 1 4452
+rc204_25 1000 299.7 299.7 0 .00 − 1 1 1128
+rc205_25 1000 338 338 338 0 .00 0.00 0 .00 461 .32 1 1 1353
+rc206_25 1000 324 324 324 0 .00 0.00 0 .00 121 .46 1 1 3389
+rc207_25 1000 298.3 302.1 207 1 .27 30.61 45 .94 − 1 1 426
+rc208_25 1000 269.1 269.1 0 .00 − 1 1 1101
+When the capacity is larger, the instances are much more difﬁcult: the number of
+solved instances in Groups 2 is much smaller than in Groups 1. This is because large
+capacities allow longer paths to be computed in the pricing sub-problem. In addition
+the columns are more dense and this penalizes the interior point method, which works
+better on sparse matrices. The only exception is Group R2 with 100 customers, where
+the gaps are smaller than those for R1 with 100 customers. However this is because
+the only instance for which the optimal VRPTW value is known is the only instance
+that has been solved.
+As expected the Resource Constrained Elementary Shortest Path Problem with
+Soft Time Windows turns out to be much more difﬁcult than the same problem
+with hard time windows (see for instance Salani (2006); Desaulniers et al. (2008)
+and Righini and Salani (2008b)). For many instances the time-out is exceeded at
+the root node during the ﬁrst run of the pricing algorithm so that no valid lower
+bound is obtained within the time-out. This happens 2 times with the instances
+with 25 customers, 8 times with 50 customers and 18 times with 100 customers.
+These instances correspond to rows in Tables 1, 2 and 3, in which column Z
+LB
+is blank.
+The optimal solution of instance r110 with 25 customers and soft time windows
+(large penalties) is better than the optimal solution of the same instance with hard time
+windows (see Table 1): the optimal value with soft time windows is 439.8, while the
+optimal value with hard time windows is 444.1. For this reason the average gap G∗
+UB
+of group R1_25 (Table 4) is negative.
+The lower bounds obtained at the root node are tight for instances in groups R
+and C, but they are not for RC instances. Comparing the lower bounds at the root node
+123
+
+70 F. Liberatore et al.
+Table 2 Large penalties, 50 customers
+Instance QZ ∗ ZUB ZLB GUB
+∗ (%) G∗
+LB (%) GUB
+LB (%) Time (s) Nodes Visited Columns
+nodes
+c101_50 200 362.4 362 .4 362 .40 .00 0 .00 0 .00 0 .77 1 1 1204
+c102_50 200 361.4 361 .4 361 .40 .00 0 .00 0 .00 17 .15 1 1 5711
+c103_50 200 361.4 361 .4 361 .40 .00 0 .00 0 .00 79 .19 1 1 7475
+c104_50 200 358 358 358 0 .00 0 .00 0 .00 1302 .97 1 1 8218
+c105_50 200 362.4 362 .4 362 .40 .00 0 .00 0 .00 1 .18 1 1 1313
+c106_50 200 362.4 362 .4 362 .40 .00 0 .00 0 .00 1 .81 1 1 1260
+c107_50 200 362.4 362 .4 362 .40 .00 0 .00 0 .00 3 .56 1 1 2457
+c108_50 200 362.4 362 .4 362 .40 .00 0 .00 0 .00 19 .24 1 1 3018
+c109_50 200 362.4 362 .4 362 .40 .00 0 .00 0 .00 155 .28 1 1 6832
+c201_50 700 360.2 360 .2 360 .20 .00 0 .00 0 .00 35 .7 1 1 12527
+c202_50 700 360.2 360 .2 360 .20 .00 0 .00 0 .00 331 .13 1 1 62005
+c203_50 700 359.8 359 .8 359 .80 .00 0 .00 0 .00 562 .85 1 1 49109
+c204_50 700 350.1 359 .37 0 .23 2 .63 79 .94 411 .60 − 1 1 93033
+c205_50 700 359.8 359 .8 359 .80 .00 0 .00 0 .00 526 .19 1 1 48824
+c206_50 700 359.8 359 .8 359 .80 .00 0 .00 0 .00 391 .85 1 1 53714
+c207_50 700 359.6 360 .7 325 .46 0 .31 9 .49 10 .83 − 1 1 58250
+c208_50 700 350.5 350 .5 350 .50 .00 0 .00 0 .00 2057 .05 1 1 45868
+r101_50 200 1044 1044 1044 0 .00 0 .00 0 .00 1 .5 7 4 505
+r102_50 200 909 909 909 0 .00 0 .00 0 .00 1 .33 1 1 1169
+r103_50 200 772.9 772 .9 772 .90 .00 0 .00 0 .00 133 .78 13 5 12104
+r104_50 200 625.4 737 .2 619 .08 17 .88 1 .01 19 .08 − 3 2 21761
+r105_50 200 899.3 899 .3 899 .30 .00 0 .00 0 .00 19 .7 31 13 1782
+r106_50 200 793 793 793 0 .00 0 .00 0 .00 72 .13 11 5 13664
+r107_50 200 711.1 711 .1 711 .10 .00 0 .00 0 .00 303 .39 29 11 16364
+r108_50 200 617.7 775 .5 602 .21 25 .55 2 .51 28 .78 − 11 6 15785
+r109_50 200 786.8 786 .8 786 .80 .00 0 .00 0 .00 761 .84 327 125 3918
+r110_50 200 697 697 697 0 .00 0 .00 0 .00 687 .54 19 9 17025
+r111_50 200 707.2 707 .2 707 .20 .00 0 .00 0 .00 2643 .57 197 61 18025
+r112_50 200 630.2 900 .3 614 .85 42 .86 2 .44 46 .43 − 3 2 24570
+r201_50 1000 791.9 791 .9 791 .90 .00 0 .00 0 .00 97 .83 1 1 15163
+r202_50 1000 698.5 698 .5 698 .50 .00 0 .00 0 .00 552 .64 1 1 19123
+r203_50 1000 605.3 613 .2 598 .58 1 .31 1 .11 2 .44 − 3 2 47636
+r204_50 1000 506.4 513 .91 .48 − 1 1 78731
+r205_50 1000 690.1 842 .6 683 .47 22 .10 0 .96 23 .28 − 7 4 24596
+r206_50 1000 632.4 845 .1 518 .41 33 .63 18 .02 63 .02 − 1 1 46952
+r207_50 1000 584.6 ∗ 836.34 3 .06 − 1 1 55077
+r208_50 1000 684.1 ∗ 684.10 .00 − 1 1 111800
+r209_50 1000 600.6 600 .6 574 .89 0 .00 4 .28 4 .47 − 1 1 40253
+r210_50 1000 645.6 907 .3 490 .49 40 .54 24 .03 84 .98 − 1 1 34682
+r211_50 1000 535.5 712 .13 2 .98 − 1 1 55976
+123
+
+A column generation algorithm for the vehicle routing problem 71
+Table 2 continued
+Instance QZ ∗ ZUB ZLB GUB
+∗ (%) G∗
+LB (%) GUB
+LB (%) Time (s) Nodes Visited Columns
+nodes
+rc101_50 200 944 1101 .6 583 .77 16 .69 38 .16 88 .70 − 19 8 12195
+rc102_50 200 822.5 948 .9 721 .81 15 .37 12 .24 31 .46 − 3 2 16099
+rc103_50 200 710.9 826 .7 645 .28 16 .29 9 .23 28 .11 − 3 2 2783
+rc104_50 200 545.8 545 .8 545 .80 .00 0 .00 0 .00 655 .44 3 2 1006
+rc105_50 200 855.3 978 .6 804 .72 14 .42 5 .91 21 .61 − 269 134 19057
+rc106_50 200 723.2 743 664 .43 2 .74 8 .13 11 .83 − 3 2 5352
+rc107_50 200 642.7 698 .1 603 .58 8 .62 6 .09 15 .66 − 3 2 3183
+rc108_50 200 598.1 655 .5 541 .17 9 .60 9 .52 21 .13 − 3 2 2635
+rc201_50 1000 684.8 684 .8 684 .80 .00 0 .00 0 .00 57 1 1 6457
+rc202_50 1000 613.6 613 .6 612 .55 0 .00 0 .17 0 .17 − 1 1 19862
+rc203_50 1000 555.3 564 .51 .66 − 1 1 7460
+rc204_50 1000 444.2 462 .74 .16 − 1 1 15282
+rc205_50 1000 630.2 630 .2 618 .55 0 .00 1 .85 1 .88 − 1 1 4237
+rc206_50 1000 610 610 561 .21 0 .00 8 .00 8 .69 − 1 1 2868
+rc207_50 1000 558.6 573 .22 .61 − 1 1 13277
+rc208_50 1000 476.70 ∗ 498.94 .66 − 1 1 12736
+∗ Best known values from Righini and Salani (2006)
+with the ﬁnal lower bounds, it is possible to observe that branching is rather ineffective
+at tightening them. This suggests that a viable research direction to improve the overall
+performances could be the introduction of valid inequalities into the RLMP . A method
+of this kind has been successfully used for the VRPTW byJepsen et al. (2008), exploit-
+ing subset row inequalities to improve the lower bound in a branch-and-cut-and-price
+algorithm.
+6.2 Comparison between the simplex algorithm and the interior point method
+We solved the same instances with the simplex algorithm (CPLEX 8.0) and we obtained
+the results summarized in Table 7. From the comparison it is clear that the interior
+point method is far superior than the simplex method as far as the effectiveness of
+column generation is concerned. The reason is that the dual values provided by the
+interior point method require less stabilization effort and hence less iterations for the
+column generation algorithm (see last column in Table 7).
+6.3 Small penalties
+Concerning the instances with small penalties, we do not report here all the detailed
+results, which are available from the authors. We only report results for instances with
+25 customers in Table 8 while the aggregated results for all instance sizes are reported
+in Tables 9–11.
+123
+
+72 F. Liberatore et al.
+Table 3 Large penalties, 100 customers
+Instance QZ ∗ ZUB ZLB GUB
+∗ G∗
+LB GUB
+LB Time (s) Nodes Visited Columns
+(%) (%) (%) nodes
+c101_100 200 827 .3 827 .3 827 .30 .00 0 .00 0 .00 21 .64 1 1 6247
+c102_100 200 827 .3 827 .3 827 .30 .00 0 .00 0 .00 95 .18 1 1 13532
+c103_100 200 826 .3 826 .3 826 .30 .00 0 .00 0 .00 543 .03 1 1 21670
+c104_100 200 822 .9 822 .9 806 .22 0 .00 2 .03 2 .07 − 1 1 17554
+c105_100 200 827 .3 827 .3 827 .30 .00 0 .00 0 .00 38 .81 1 1 12093
+c106_100 200 827 .3 827 .3 827 .30 .00 0 .00 0 .00 97 .2 1 1 9504
+c107_100 200 827 .3 827 .3 827 .30 .00 0 .00 0 .00 49 .11 1 1 13941
+c108_100 200 827 .3 827 .3 827 .30 .00 0 .00 0 .00 337 .75 3 2 12723
+c109_100 200 827 .3 827 .3 827 .30 .00 0 .00 0 .00 2836 .43 1 1 19662
+c201_100 700 589 .1 589 .1 589 .10 .00 0 .00 0 .00 398 .4 1 1 62538
+c202_100 700 589 .1 589 .1 589 .10 .00 0 .00 0 .00 1063 .41 1 1 120925
+c203_100 700 588 .7 588 .7 511 .55 0 .00 13 .11 15 .08 − 1 1 204674
+c204_100 700 588 .1 807 37 .22 − 1 1 197038
+c205_100 700 586 .4 586 .4 583 .12 0 .00 0 .56 0 .56 − 1 1 73674
+c206_100 700 586 586 582 .23 0 .00 0 .64 0 .65 − 1 1 42355
+c207_100 700 585 .8 590 .8 485 .74 0 .85 17 .08 21 .63 − 1 1 55104
+c208_100 700 585 .8 589 .6 483 .53 0 .65 17 .46 21 .94 − 1 1 76416
+r101_100 200 1637 .7 1637 .7 1637 .70 .00 0 .00 0 .00 91 .7 97 44 3664
+r102_100 200 1466 .6 1466 .6 1466 .60 .00 0 .00 0 .00 394 .44 25 8 9712
+r103_100 200 1208 .7 1262 .9 1207 .75 4 .48 0 .08 4 .57 − 13 7 2377633
+r104_100 200 971 .5 1413 .2 956 .87 45 .47 1 .51 47 .69 − 3 2 21884
+r105_100 200 1355 .3 1355 .8 1354 .98 0 .04 0 .02 0 .06 − 589 249 9350
+r106_100 200 1234 .6 1546 .9 1230 .48 25 .30 0 .33 25 .72 − 73 37 14954
+r107_100 200 1064 .6 1451 .8 1053 .26 36 .37 1 .07 37 .84 − 5 3 12995
+r108_100 200 932 .1∗ 1340 912 .89 43 .76 2 .10 46 .79 − 1 1 15920
+r109_100 200 1146 .9 1347 .6 1138 .71 17 .50 0 .71 18 .34 − 19 10 8714
+r110_100 200 1068 1499 .7 1055 .57 40 .42 1 .16 42 .07 − 5 3 10082
+r111_100 200 1048 .7 1439 .5 1036 .23 37 .27 1 .19 38 .92 − 7 4 11144
+r112_100 200 948 .6∗ 1287.4 892 .28 35 .72 6 .31 44 .28 − 1 1 7307
+r201_100 1000 1143 .2 1323 .9 1141 .16 15 .81 0 .18 16 .01 − 7 4 63096
+r202_100 1000 1029 .6∗ 1347.63 0 .89 − 1 1 108222
+r203_100 1000 870 .8∗ 1275.54 6 .47 − 1 1 120916
+r204_100 1000 731 .3∗∗∗ 1062 45 .22 − 1 1 204505
+r205_100 1000 949 .8∗ 1336.74 0 .73 − 1 1 96975
+r206_100 1000 875 .9∗ 1314.25 0 .04 − 1 1 184010
+r207_100 1000 794 .0∗ 1129.84 2 .29 − 1 1 210362
+r208_100 1000 701 .2∗∗ 960.73 7 .01 − 1 1 304634
+r209_100 1000 854 .8∗ 1296.45 1 .66 − 1 1 151867
+r210_100 1000 900 .5∗ 1305 44 .92 − 1 1 165179
+r211_100 1000 746 .7∗∗∗ 1063 42 .36 − 1 1 201477
+123
+
+A column generation algorithm for the vehicle routing problem 73
+Table 3 continued
+Instance QZ ∗ ZUB ZLB GUB
+∗ G∗
+LB GUB
+LB Time (s) Nodes Visited Columns
+(%) (%) (%) nodes
+rc101_100 200 1619 .8 2090 .1 1600 .05 29 .03 1 .22 30 .63 − 1235 618 5969
+rc102_100 200 1457 .4 1799 .8 1414 .16 23 .49 2 .97 27 .27 − 103 52 10118
+rc103_100 200 1258 1617 .4 1225 .54 28 .57 2 .58 31 .97 − 3 2 22575
+rc104_100 200 1132 .3∗ 1447.2 1021 .38 27 .81 10 .86 41 .69 − 1 1 10580
+rc105_100 200 1513 .7 1663 .5 1478 .73 9 .90 2 .31 12 .50 − 159 80 23943
+rc106_100 200 1372 .7∗ 1674 1320 .22 1 .95 3 .98 26 .80 − 11 6 6737
+rc107_100 200 1207 .8 1580 .2 1180 .63 0 .83 2 .25 33 .85 − 1 1 11202
+rc108_100 200 1114 .2 1504 .3 980 .55 35 .01 12 .00 53 .41 − 1 1 8261
+rc201_100 1000 1261 .8 1347 .2 1255 .94 6 .77 0 .46 7 .27 − 3 2 45098
+rc202_100 1000 1092 .3 1302 .51 9 .24 − 1 1 86405
+rc203_100 1000 923 .7∗ 1119.12 1 .15 − 1 1 115710
+rc204_100 1000 783 .5∗∗ 982.72 5 .42 − 1 1 162246
+rc205_100 1000 1154 1257 .99 .00 − 1 1 59468
+rc206_100 1000 1051 .1∗ 1317.62 5 .35 − 1 1 108348
+rc207_100 1000 962 .9∗ 1360.24 1 .26 − 1 1 130351
+rc208_100 1000 776 .5∗∗∗ 896.61 5 .47 − 1 1 104155
+∗ Optimal values from Desaulniers et al. (2008)
+∗∗Best known values from Danna and Le Pape (2005)
+∗∗∗Best known values from Desaulniers et al. (2008)
+Table 4 Large penalties, 25
+customers, aggregated results Group Solved root (%) Solved (%) G∗
+LB (%) GUB
+∗ (%)
+C1_25 100 .00 100 .00 0.00 (9/9) 0 .00
+C2_25 100 .00 100 .00 0.00 (8/8) 0 .00
+R1_25 41 .67 91 .67 0.09 (12/12) − 0.08
+R2_25 27 .27 81 .82 0.26 (11/11) 0 .92
+RC1_25 75 .00 87 .50 0.70 (8/8) 3 .16
+RC2_25 50 .00 50 .00 7.71 (6/8) 0 .16
+Overall 82 .14 85 .71 1.03 0 .64
+Table 5 Large penalties, 50
+customers, aggregated results Group Solved root (%) Solved (%) G∗
+LB (%) GUB
+∗ (%)
+C1_50 100 .00 100 .00 0.00 (9/9) 0 .00
+C2_50 75 .00 75 .00 11.18 (8/8) 0 .37
+R1_50 8 .33 75 .00 0.50 (12/12) 7 .19
+R2_50 18 .18 18 .18 6.91 (7/11) 15 .92
+RC1_50 0 .00 12 .50 11.16 (8/8) 10 .47
+RC2_50 12 .50 12 .50 2.51 (4/8) 1 .64
+Overall 33 .93 50 .00 5.06 6 .45
+123
+
+74 F. Liberatore et al.
+Table 6 Large penalties, 100
+customers, aggregated results Group Solved root (%) Solved (%) G∗
+LB (%) GUB
+∗ (%)
+C1_100 88 .89 100 .00 0.23 (9/9) 0 .00
+C2_100 25 .00 25 .00 6.98 (7/8) 4 .84
+R1_100 0 .00 16 .67 1.21 (12/12) 25 .52
+R2_100 0 .00 0 .00 0.18 (1/11) 15 .81
+RC1_100 0 .00 0 .00 4.77 (8/8) 25 .82
+RC2_100 0 .00 0 .00 0.46 (1/8) 20 .46
+Overall 17 .86 23 .21 2.85 20 .13
+Table 7 Comparison between interior point and simplex method
+Method Solved root (%) Solved (%) Not solved (%) G∗
+LB (%) GUB
+∗ (%) Avg. # CG it.
+Simplex 3 .57 7 .14 92.86 46 .93 23 .32 251.72
+Interior point 17 .86 23 .21 76.79 6 .05 5 .19 103.50
+Also in this case the easiest instances are those in group C. Instances with larger
+capacity are still more difﬁcult, but differently from the case with large penalties, the
+most difﬁcult group is now R2. It can be seen that the problem becomes very difﬁcult
+when the number of customers increases: for many instance with N = 100 it was even
+difﬁcult to compute a valid lower bound at the root node.
+6.4 Comparison between small and large penalties
+Table 12 reports a comparison between the results obtained on the same instances
+when considering small and large penalties. For each group we report the number of
+instances that were solved to proven optimality and the percentage ratio between the
+optimal values and between the computing times with soft time windows with respect
+to hard time windows: the relative cost reduction obtained with soft time windows is
+measured by
+G1
+100 = 100 z∗100− z∗1
+z∗100 , while the relative increase in computing time is
+indicated by GTime = 100 Time 1− Time 100
+Time 100 .
+Several observations come from the examination of Table 12. When penalties are
+small, computing time is on average larger. However the branch-and-price algorithm
+was able to solve to proven optimality more instances with small penalties.
+The optimal value is obviously better when penalties are smaller. On these instances
+the average improvement is only 0,88%, but it reached a peak of 12,13% for instance
+rc_105_25.
+As expected, when the instances are clustered it is more difﬁcult to take advantage
+of the possibility of violating the time windows. Also, the improvement in the optimal
+value in Group 2 is smaller than in Group 1; this can be explained because when
+the capacity is larger there are less degrees of freedom in planning the routes com-
+pared to the scenario with more vehicles with smaller capacity. Aggregating customers
+123
+
+A column generation algorithm for the vehicle routing problem 75
+Table 8 Small penalties, 25 customers
+Instance QZ UB ZLB GUB
+LB (%) Time (s) Nodes Explored nodes Columns
+c101_25 200 191 .3 191 .30 .00 0 .17 1 1 142
+c102_25 200 190 .3 190 .30 .00 1 .38 1 1 510
+c103_25 200 190 .3 190 .30 .00 12 .54 1 1 391
+c104_25 200 186 .9 186 .90 .00 61 .28 1 1 1433
+c105_25 200 191 .3 191 .30 .00 0 .21 1 1 251
+c106_25 200 191 .3 191 .30 .00 0 .08 1 1 85
+c107_25 200 191 .3 191 .30 .00 1 .29 1 1 2323
+c108_25 200 191 .3 191 .30 .00 2 .9 1 1 2145
+c109_25 200 191 .3 191 .30 .00 14 .5 1 1 677
+c201_25 700 214 .7 214 .70 .00 0 .55 1 1 548
+c202_25 700 214 .7 214 .70 .00 19 .94 1 1 6508
+c203_25 700 214 .7 214 .70 .00 298 .99 1 1 9341
+c204_25 700 213 .1 213 .10 .00 391 .4 1 1 13273
+c205_25 700 214 .7 214 .70 .00 62 .15 1 1 2446
+c206_25 700 214 .7 214 .70 .00 40 .34 1 1 1009
+c207_25 700 214 .5 214 .50 .00 730 .16 1 1 1404
+c208_25 700 214 .5 214 .50 .00 411 .94 1 1 144
+r101_25 200 584 .7 584 .70 .00 0 .24 3 2 236
+r102_25 200 511 511 0 .00 3 .14 15 7 728
+r103_25 200 449 .7 449 .70 .00 1 .66 3 2 354
+r104_25 200 416 .8 416 .80 .00 11 .68 9 4 1358
+r105_25 200 521 .5 521 .50 .00 1 .04 3 2 418
+r106_25 200 459 .9 459 .90 .00 5 .82 3 2 1057
+r107_25 200 420 .3 420 .30 .00 4 .73 3 2 1001
+r108_25 200 395 .3 395 .30 .00 65 .29 5 3 2740
+r109_25 200 441 .3 441 .30 .00 1 .2 1 1 890
+r110_25 200 418 .8 418 .80 .00 1 .89 1 1 398
+r111_25 200 420 .7 420 .70 .00 3 .29 1 1 1909
+r112_25 200 393 393 0 .00 217 .27 15 8 2005
+r201_25 1000 463 .3 463 .30 .00 3 .38 3 2 1512
+r202_25 1000 408 .9 408 .90 .00 4 .81 1 1 1279
+r203_25 1000 391 .4 391 .40 .00 217 .43 1 1 11638
+r204_25 1000 355 354 .27 0 .21 − 23 11 35116
+r205_25 1000 393 393 0 .00 47 .61 5 3 3177
+r206_25 1000 374 .4 374 .40 .00 614 .27 9 4 5587
+r207_25 1000 361 .6 361 .60 .00 1696 .27 9 3 6010
+r208_25 1000 328 .2 328 .20 .00 1096 .43 1 1 2773
+r209_25 1000 484 .3 363 .67 33 .17 − 3 2 6962
+r210_25 1000 404 .6 404 .60 .00 643 .46 3 2 4972
+r211_25 1000 418 339 .24 23 .22 − 3 2 2042
+123
+
+76 F. Liberatore et al.
+Table 8 continued
+Instance QZ UB ZLB GUB
+LB (%) Time (s) Nodes Explored nodes Columns
+rc101_25 200 371 .7 371 .70 . 0 0 0 .74 1 1 470
+rc102_25 200 342 .1 342 .10 . 0 0 3 .24 1 1 546
+rc103_25 200 331 .4 331 .40 . 0 0 2 1 .48 1 1 506
+rc104_25 200 306 .6 306 .60 . 0 0 3 7 .64 1 1 650
+rc105_25 200 361 .4 361 .40 . 0 0 1 3 .54 1 1 673
+rc106_25 200 338 .7 338 .70 . 0 0 1 3 .29 1 1 324
+rc107_25 200 297 .3 297 .30 . 0 0 1 9 .25 1 1 16
+rc108_25 200 294 .5 294 .50 . 0 0 7 1 .07 1 1 31
+rc201_25 1000 360 .2 360 .20 . 0 0 7 .43 1 1 3504
+rc202_25 1000 338 338 0.00 735 .28 1 1 821
+rc203_25 1000 326 .9 326 .9 0.00 1265 .26 1 1 3858
+rc204_25 1000 299 .7 − 1 1 1194
+rc205_25 1000 338 338 0.00 85 .51 1 1 1056
+rc206_25 1000 324 324 0.00 280 .22 1 1 2684
+rc207_25 1000 298 .3 298 .3 0.00 2936 .44 1 1 501
+rc208_25 1000 269 .1 − 1 1 436
+Large penalties, 100 customers
+Table 9 Small penalties, 25
+customers, aggregated results Group Solved root (%) Solved (%) GUB
+LB
+C1_25 100 .00 100 .00 0.00% (9/9)
+C2_25 100 .00 100 .00 0.00% (8/8)
+R1_25 25 .00 100 .00 0.00% (12/12)
+R2_25 27 .27 72 .73 5.14% (11/11)
+RC1_25 100 .00 100 .00 0.00% (8/8)
+RC2_25 75 .00 75 .00 0.00% (6/8)
+Overall 66 .07 91 .07 1.05%
+Table 10 Small penalties, 50
+customers, aggregated results Group Solved root (%) Solved (%) GUB
+LB
+C1_50 88 .89 88 .89 0.00% (8/9)
+C2_50 75 .00 87 .50 0.00% (7/8)
+R1_50 8 .33 16 .67 0.52% (12/12)
+R2_50 9 .09 9 .09 5.34% (4/11)
+RC1_50 25 .00 25 .00 1.11% (8/8)
+RC2_50 37 .50 37 .50 0.00% (3/8)
+Overall 37 .50 41 .07 0.14%
+123
+
+A column generation algorithm for the vehicle routing problem 77
+Table 11 Small penalties, 100
+customers, aggregated results Group Solved root (%) Solved (%) GUB
+LB
+C1_100 77 .78 77 .78 0.00% (7/9)
+C2_100 0 .00 0 .00 – (0/8)
+R1_100 8 .33 8 .33 3.90% (9/12)
+R2_100 0 .00 0 .00 55.80% (1/11)
+RC1_100 0 .00 0 .00 11.91% (4/8)
+RC2_100 0 .00 0 .00 2.00% (1/8)
+Overall 14 .29 14 .29 1.17%
+Table 12 Comparison between
+the results obtained with small
+and large penalties, aggregated
+results
+Group Solved Solved G1
+100(%) GTime (%)
+penalty 1 penalty 100
+C1_25 9 9 0.00 28 .02
+C2_25 8 8 0.00 29 .69
+R1_25 12 11 2.13 186 .29
+R2_25 8 9 0.05 14 .00
+RC1_25 8 7 2.52 158 .06
+RC2_25 6 4 0.00 34 .98
+Overall 51 48 0.88 82 .92
+(clustered instances) or aggregating goods (large vehicles) make soft time windows
+less useful. Scenarios with aggregation of customers or goods are typical in long-haul
+transportation; in short-haul transportation soft time windows can be exploited much
+better to reduce costs.
+We have also made some computational test to observe in more detail the trade-off
+between the cost due to the penalties, representing the level of service perceived by
+the customers, and the routing cost, representing the objective function of the trans-
+portation company. In Figs. 7 and 8 we represent the results obtained with instance
+rc_105_25. In Fig. 7 we plot the routing cost and the total cost as a function of the
+penalty π, in the range [1,..., 8].I nF i g .8 we plot the difference between them, that
+is the overall penalty cost. Penalty costs tend to increase up to a threshold (in this
+example the threshold is reached for ψ = 8); when the penalty exceeds the threshold,
+time windows are no longer violated at optimality and the optimal solution coincides
+with that of the VRP with hard time windows.
+The number of vehicles in the optimal solution is also affected by the value of
+the penalties, as shown in Fig. 9. This proves that the use of soft time windows to
+model and solve vehicle routing problems may have a huge positive impact from the
+transportation company viewpoint.
+6.5 Comparison with tabu search
+Taillard et al. (1997) developed a tabu search heuristic for the VRPSTW. The neigh-
+borhood is explored by exchanging sequences of consecutive customers between pairs
+123
+
+78 F. Liberatore et al.
+Fig. 7 Trade-off between
+routing costs and total costs for
+different penalty values ψ
+(in abscissae)
+340,00
+350,00
+360,00
+370,00
+380,00
+390,00
+400,00
+410,00
+420,00
+02468 1 0 1 2
+Routing cost Total Cost
+Fig. 8 Overall penalty costs for
+different penalty values ψ
+(in abscissae)
+0,00
+10,00
+20,00
+30,00
+40,00
+50,00
+60,00
+02468 1 0 1 2
+Penalty cost
+Fig. 9 The optimal solution with small penalties uses 3 vehicles; the one with large penalties uses 4 vehicles
+of routes. Table 13 reports for each instance the optimal VRPTW value (Z∗), the best
+solution found by tabu search (ZT ), the primal bound found by the branch-and-price
+algorithm (UB), the gap between the VRPTW optimum and the tabu search solution
+(GT = ZT − Z∗
+Z∗ ) and the gap between the VRPTW and the branch-and-price upper
+bound (GUB
+∗ ). An asterisk in the last column indicates that the solution found by the
+branch-and-price algorithm is better than that found by the tabu search algorithm;
+a “+” indicates that the branch-and-price did not ﬁnd a better upper bound but it found
+a lower bound. The results refer to the case with large penalties.
+123
+
+A column generation algorithm for the vehicle routing problem 79
+Table 13 Large penalties—comparison with the Tabu Search.
+Instance Z∗ ZT ZUB GT GUB∗
+c101_100 827.3 828 .94 827 .30 .20 0 .00 *
+c102_100 827.3 828 .94 827 .30 .20 0 .00 *
+c103_100 826.3 828 .06 826 .30 .21 0 .00 *
+c104_100 822.9 824 .78 822 .90 .23 0 .00 *
+c105_100 827.3 828 .94 827 .30 .20 0 .00 *
+c106_100 827.3 828 .94 827 .30 .20 0 .00 *
+c107_100 827.3 828 .94 827 .30 .20 0 .00 *
+c108_100 827.3 828 .94 827 .30 .20 0 .00 *
+c109_100 827.3 828 .94 827 .30 .20 0 .00 *
+c201_100 589.1 591 .56 589 .10 .42 0 .00 *
+c202_100 589.1 591 .56 589 .10 .42 0 .00 *
+c203_100 588.7 591 .17 588 .70 .42 0 .00 *
+c204_100 588.1 590 .6 807 0 .43 37 .22
+c205_100 586.4 588 .88 586 .40 .42 0 .00 *
+c206_100 586 588 .49 586 0 .42 0 .00 *
+c207_100 585.8 588 .29 590 .80 .43 0 .85 +
+c208_100 585.8 588 .32 589 .60 .43 0 .65 +
+r101_100 1637.7 1650 .79 1637 .70 .80 0 .00 *
+r102_100 1466.6 1487 .6 1466 .61 .43 0 .00 *
+r103_100 1208.7 1294 .24 1262 .97 .08 4 .48 *
+r104_100 971.5 982 .72 1413 .21 .15 45 .47 +
+r105_100 1355.3 1377 .11 1355 .81 .61 0 .04 *
+r106_100 1234.6 1259 .71 1546 .92 .03 25 .30 +
+r107_100 1064.6 1126 .69 1451 .85 .83 36 .37 +
+r108_100 932.1 ∗ 968.59 1340 3 .91 43 .76 +
+r109_100 1146.9 1214 .54 1347 .65 .90 17 .50 +
+r110_100 1068 1080 .36 1499 .71 .16 40 .42 +
+r111_100 1048.7 1104 .83 1439 .55 .35 37 .27 +
+r112_100 948.6 ∗ 964.01 1287 .41 .62 35 .72 +
+r201_100 1143.2 1254 .8 1323 .99 .76 15 .81 +
+r202_100 1029.6 ∗ 1214.28 1347 .61 7 .94 30 .89
+r203_100 870.8 ∗ 951.59 1275 .59 .28 46 .47
+r204_100 731.3 ∗∗∗ 941.76 1062 28 .78 45 .22
+r205_100 949.8 ∗ 1038.72 1336 .79 .36 40 .73
+r206_100 875.9 ∗ 932.47 1314 .26 .46 50 .04
+r207_100 794 ∗ 837.2 1129 .85 .44 42 .29
+r208_100 701.2 ∗∗ 748.01 960 .76 .68 37 .01
+r209_100 854.8 ∗ 959.47 1296 .41 2 .24 51 .66
+r210_100 900.5 ∗ 980.9 1305 8 .93 44 .92
+r211_100 746.7 ∗∗∗ 923.8 1063 23 .72 42 .36
+123
+
+80 F. Liberatore et al.
+Table 13 continued
+Instance Z∗ ZT ZUB GT GUB∗
+rc101_100 1619.8 1696 .94 2090 .14 .76 29 .03 +
+rc102_100 1457.4 1554 .75 1799 .86 .68 23 .49 +
+rc103_100 1258 1264 .27 1617 .40 .50 28 .57 +
+rc104_100 1132.3 ∗ 1135.83 1447 .20 .31 27 .81 +
+rc105_100 1513.7 1643 .38 1663 .58 .57 9 .90 +
+rc106_100 1372.7 ∗ 1448.26 1674 5 .50 21 .95 +
+rc107_100 1207.8 1230 .54 1580 .21 .88 30 .83 +
+rc108_100 1114.2 1139 .82 1504 .32 .30 35 .01 +
+rc201_100 1261.8 1413 .79 1347 .21 2 .05 6 .77 *
+rc202_100 1092.3 1164 .25 1302 .56 .59 19 .24
+rc203_100 923.7 ∗ 1112.55 1119 .12 0 .44 21 .15
+rc204_100 783.5 ∗∗ 831.69 982 .76 .15 25 .42
+rc205_100 1154 1328 .21 1257 .91 5 .10 9 .00 *
+rc206_100 1051.1 ∗ 1158.81 1317 .61 0 .25 25 .35
+rc207_100 962.9 ∗ 1082.32 1360 .21 2 .40 41 .26
+rc208_100 776.5 ∗∗∗ 847.9 896 .69 .20 15 .47
+∗ Optimal values from Desaulniers et al. (2008);
+∗∗Best known values from Danna and Le Pape (2005)
+∗∗∗Best known values from Desaulniers et al. (2008)
+In 20 instances the branch-and-price algorithm could obtain better solutions than
+the tabu search algorithm.
+We also tried to solve the instances with large penalties and 100 customers initial-
+izing the branch-and-price algorithm with the heuristic solution provided by the tabu
+search. This yielded a significant improvement to the upper bound: for the instances
+which were not solved within the time-out the average gap between the upper bound
+and the optimal value of the VRPTW was reduced from 12.25 to 1.65%.
+7 Conclusions
+In this paper we have presented an exact optimization algorithm for the VRP with
+Soft Time Windows. The algorithm is a branch-and-price, based on a reformulation
+of the VRPSTW as a set covering problem with additional constraints. The pric-
+ing problem, the Resource Constrained Elementary Shortest Path Problem with Soft
+Time Windows, is solved via bi-directional and bounded dynamic programming with
+decremental state space relaxation. We have described how an inﬁnite number of
+non-dominated states are represented in a compact way by means of piecewise linear
+functions, whose description is stored in the labels extended by the dynamic program-
+ming algorithm; we have also presented the corresponding dominance rules and other
+algorithmic details. The branch-and-price algorithm also includes primal heuristics,
+branching strategies and three heuristic pricing techniques.
+123
+
+A column generation algorithm for the vehicle routing problem 81
+The experimental results on the Solomon’s data-set conﬁrm that the problem with
+soft time-windows is definitely more difﬁcult than its counterpart with hard time
+windows, due to the solution space which is enormously larger. The algorithm is able
+to solve only some of the instances with 100 customers, while a similar approach
+allows to solve almost all of them in the case of hard time windows ( Salani 2006 ).
+The relative difﬁculty of the VRPSTW instances has been evaluated by comparing the
+results obtained with different values of the penalties for early or late visits.
+The algorithmic techniques illustrated in this paper are meant to provide a basis for
+the development of decision support systems able to take into account the large variety
+of features and constraints arising in real routing problems in distribution logistics.
+Time windows have been so far considered as hard constraints in the related scientiﬁc
+literature, with a very few exceptions, all related to heuristics. The contribution offered
+by an exact mathematical optimization method for the VRPSTW is a step forward to
+bring mathematical programming models and algorithms more and more adherent to
+the needs of logistic managers and transportation companies.
+Acknowledgments This work was supported by MIUR—Ministero per l’Istruzione, l’Università e la
+Ricerca through the PRIN 2005 project “Routing and packing problems in the optimization of transpor-
+tation systems”. The authors are grateful to Maria Grazia Speranza and the organizers and participants
+of the International Workshop on Distribution Logistics 2006 (Brescia), where a preliminary version of
+this research was presented. They also acknowledge the support of ACSU—Associazione Cremasca Studi
+Universitari to the OptLab, where this research was done.
+References
+Balakrishnan N (1993) Simple heuristics for the vehicle routeing problem with soft time windows. J Oper
+Res Soc 44:279–287
+Baldacci R, Mingozzi A, Roberti R (2009) An exact method for the vehicle routing problem with time
+windows. In: 20 th International symposium of mathematical programming, Chicago
+Boland N, Dethridge J, Dumitrescu I (2006) Accelerated label setting algorithms for the elementary resource
+constrained shortest path problem. Oper Res Lett 34:58–68
+Bramel J, Simchi-Levi D (2001) The vehicle routing problem, volume 9 of SIAM monographs on discrete
+mathematics and applications, chapter set-covering-based algorithms for the capacitated VRP . SIAM:
+Society for Industrial and Applied Mathematics, Philadelphia
+Chiang WC, Russell RA (2004) A metaheuristic for the vehicle-routeing problem with soft time windows.
+J Oper Res Soc 55:1298–1310
+Cordeau JF, Desaulniers G, Desrosiers J, Solomon MM, Soumis F (2001) The vehicle routing problem,
+volume 9 of SIAM monographs on discrete mathematics and applications, chapter the VRP with time
+windows. SIAM: Society for Industrial and Applied Mathematics, Philadelphia
+Danna E, Le Pape C (2005) Column generation, chapter branch-and-price heuristics: a case study on the
+vehicle routing problem with time windows. Springer, New Y ork
+Dell’Amico M, Righini G, Salani M (2006) A branch-and-price approach to the vehicle routing problem
+with simultaneous distribution and collection. Transport Sci 40:235–247
+Desaulniers G, Lessard F, Hadjar A (2008) Tabu search, partial elementarity, and generalized k-path inequal-
+ities for the vehicle routing problem with time windows. Transport Sci 42:387–404
+Desrochers M, Desrosiers J, Solomon MM (1992) A new optimization algorithm for the vehicle routing
+problem with time windows. Oper Res 40:342–354
+Dror M (1994) Note on the complexity of the shortest path models for column generation in vrptw. Oper
+Res 42:977–978
+Feillet D, Dejax P, Gendreau M, Gueguen C (2004) An exact algorithm for the elementary shortest path
+problem with resource constraints: application to some vehicle routing problems. Networks 44:
+216–229
+123
+
+82 F. Liberatore et al.
+Ibaraki T, Imahori S, Kubo M, Masuda T, Uno T, Y agiura M (2005) Effective local search algorithms for
+routing and scheduling problems with general time-window constraints. Transport Sci 39:206–232
+Ioachim I, Gélinas S, Soumis F, Desrosiers J (1998) A dynamic programming algorithm for the shortest
+path problem with time windows and linear node costs. Networks 31:193–204
+Jepsen M, Petersen B, Spoorendonk S, Pisinger D (2008) Introducing subset-row inequalities in a branch-
+and-cut-and-price algorithm for the vehicle routing problem with time windows. Oper Res 56:497–511
+Kallehauge B, Larsen J, Madsen OBG, Solomon MM (2005) Column generation, chapter V ehicle routing
+problem with time windows. Springer, New Y ork
+Kohl N, Desrosiers J, Madsen OBG, Solomon MM, Soumis F (1999) 2-path cuts for the vehicle routing
+problem with time windows. Transport Sci 33:101–116
+Koskosidis Y A, Powell WB, Solomon MM (1992) An optimization based heuristic for vehicle routing and
+scheduling with soft time window constraints. Transport Sci 26:69–85
+Righini G, Salani M (2006) Symmetry helps: bounded bi-directional dynamic programming for the
+elementary shortest path problem with resource constraints. Discrete Optim 3:255–273
+Righini G, Salani M (2008a) Decremental state space relaxation strategies and initialization heuristics for
+solving the orienteering problem with time windows with dynamic programming. Comput Oper Res
+36:1191–1203
+Righini G, Salani M (2008b) New dynamic programming algorithms for the resource-constrained elemen-
+tary shortest path problem. Networks 51:155–170
+Salani M (2006) Branch-and-price algorithms for vehicle routing problems. PhD thesis, University of Milan
+Sexton T, Choi Y (1986) Pickup and delivery of partial loads with soft time windows. Am J Math Manag
+Sci 6:369–398
+Solomon MM (1983) V ehicle routing and scheduling with time windows constraints: models and algorithms.
+PhD thesis, University of Pennsylvania
+Taillard E, Badeau P, Gendreau M, Guertin F, Potvin JY (1997) A tabu search heuristic for the vehicle
+routing problem with soft time windows. Transport Sci 31:170–186
+123
+

@@ -1,8 +1,29 @@
 package HEU;
 //TODO 对那些序列反转，单任务的就不转了
-//TODO 统计PiecewiseLinearFunction中每个函数的调用时间，尝试优化
-//TODO 简单测试noImproved被触发次数应该很少很少，此外，里边存的元素似乎也不会很多,saveOperation也不会有很多个
-
+//TODO 统计PiecewiseLinearFunction中每个函数的调用时间，尝试优化 √
+//TODO 简单测试noImproved被触发次数应该很少很少，此外，里边存的元素似乎也不会很多,saveOperation也不会有很多个 √
+//TODO 全局上界（单个机器）bound的使用，下界的提前跳出（作用不一定大）、上界的使用包括函数的段删减和add时先判断是否成本超限 √ 作用不是很大
+//TODO 给定一个顺序后的最优完工时间是一个下界,此时有一个最小成本值 ?
+//TODO 全局上界应该好做？把现在的remainingValue从无穷换成全局上界好了，但这个值怎么传进来没想好 √ 作用一般
+//TODO 2025.5.10 看起来设置一个全局上界对函数切割可行域，有些能切割的挺多的，直接不可行了 但细节上还得处理，不知道作用大不大最终 √ 时间上界还是很有用的，但成本就一般了
+//TODO 现在只做了单个机器上的上界，整体的上界？?
+//对这种其实不好做，单个机器爆上界可设置为upperBound认为不可行，但多个机器都可行，加起来不可行如何存储？
+//思考在于，当给定一个上界，而当前解由于各机器都没有到达上界，但整体超过了，此时过程中如何处理？可能一个本来比当前解更差的解，由于已知上界的存在，反而比当前解更好了,想一下这种如何统一处理
+//TODO 2025.5.12 ALNS的过程和VND的过程都不是太能使用一个很好的upperbound去限制函数的定义域，会出一定的问题
+	//1、比如如果单纯做VND，此时上界给一个很好的上界A，但当前初始解是比较差的B，而当函数没有可行域或者超过当前上界时，成本会被评估为upperBound（或big_M），但这个是不合理的
+	//即，（正常情况下）有可能VND的过程中先由B搜到一个略好的解C（A<C<B）,此时可通过C进一步走向一个更好的解D<A。但如果使用upperBound限制以后，此时可能比较极端的情况，解B搜出来的所有邻域都比A更差
+	//那可能所有的邻域解都会被评估为A，此时不知道谁好谁坏了，从而无法选中能到更好解的那个。
+	//当前策略下可能某个cost[M]单独计算超过upperBound时，会直接取值为upperBound，而如果单个cost[M]没超过，但整体超过了，此时cost[M]保持原始值，但整体设置为upperBound
+	//此时就会导致邻域判断的时候，例如上界为1600，此时两个机器成本分别为1500,300, 而一个邻域解为1700（1600）,0, 此时从原始角度看，邻域解更好，但评估的时候会导致新解比原始解好200，这种评估就会出错了，从而可能两个解都是
+	//1600,其中之一原始成本是3000，另一个是2000，虽然都比upperBound更差，但此时还会认为有改进。整个的过程就会很乱。
+	//2、当结合ALNS的时候也会有问题，因为ALNS的扰动步骤本身就会接受差解，如果一个扰动比如删除后贪婪插入，此时所有插入后的成本都超过上界，那就会全部被标识为upperBound，此时其实ALNS的算子就全都变成随机算子了
+	//换句话说，上界这种设置和接受差解的原理是冲突的。
+	//3、一种可能是用上界做法是，先讨论VND本身，如果初始upperBound设置的比当前VND的初始解更大，那初始解本身各个函数的计算就不会有问题，在此基础上，基于初始解去搜索邻域，此时如果解有改进，是可以识别到的。
+	//当commit的时候更新上界，也就是说对某个解的邻域搜索的时候，使用的upperBound比该解的目标更大就好了，从而解更差的不会接受，解更好的可以保留。 这样的话,VND的结果肯定比当前用的上界好或等于。
+	//但当进入ALNS的时候，可能需要重算，不然也可能出现ALNS的所有解都比较差，此时超过了当前解之前使用的upperBound(因为当前解存储的函数是基于此算的），那就还会出问题。
+		// 2种做法，要么设上界就设置一个倍数，从而要求ALNS的结果如果超过这个上界就随机选一个结果（似乎也不太靠谱）
+		// 要么就是ALNS的时候取消上界，重算一下一维函数，从而ALNS的过程就正常了，进VND之前再整体刷一次。
+//2025.5.13 其实可以进一步考虑将所有段都超过上界的直接设置为null，这种如果多的话可能还是能节省不少的，毕竟如果是一条直线，还要不断加一个，变成直线重复无用操作
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -11,8 +32,8 @@ import java.util.List;
 import java.util.Set;
 
 import Basic.Data;
-import Common.PiecewiseLinearFunction;
 import Common.Utility;
+import Common.PiecewiseLinearFunction;
 
 //TODO local search感觉只能做同质的，异质的机器之间的partial scheduling拼起来的时候没办法快速处理.
 public interface Move {
@@ -36,8 +57,8 @@ public interface Move {
 			totalTime+=data.s[sequence.get(i-1)][sequence.get(i)]+data.p[sequence.get(i)];
 		}
 //		System.out.println(sequence+" "+totalTime);
-		if(totalTime>data.Cmax) {
-			return Utility.big_M;
+		if(totalTime>data.CmaxH) {
+			return Utility.curUpperBound;
 		}
 		
 		
@@ -48,9 +69,9 @@ public interface Move {
 			int job = sequence.get(i);
 			PiecewiseLinearFunction cur;
 			if (i == 0) {
-				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.Cmax);
+				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
 			} else {
-				cur = f.get(i - 1).shift(data.s[sequence.get(i - 1)][job] + data.p[job]);
+				cur = f.get(i - 1).shiftX(data.s[sequence.get(i - 1)][job] + data.p[job]);
 				cur =cur.add(data.penaltyFunction[job]);
 			}
 			cur.minimizePrefixInPlace();
@@ -69,7 +90,7 @@ public interface Move {
 				cur = data.penaltyFunction[job].copy();
 				
 			} else {
-				cur = b.get(i + 1).shift(-data.s[job][sequence.get(i + 1)] - data.p[sequence.get(i + 1)]).add(data.penaltyFunction[job]);
+				cur = b.get(i + 1).shiftX(-data.s[job][sequence.get(i + 1)] - data.p[sequence.get(i + 1)]).add(data.penaltyFunction[job]);
 			}
 			cur.minimizeSuffixInPlace();
 			b.set(i, cur);
@@ -98,27 +119,31 @@ public interface Move {
 		
 		
 //		System.out.println("反向最小:"+b.get(0).findMinimal(true, true)[0]+"前向/反向最小完成时间："+Arrays.toString(completionF)+" "+Arrays.toString(completionB));
-		
+		if(lastF.tail==null) {
+			return Utility.curUpperBound;
+		}
 		return  lastF.tail.end * lastF.tail.slope + lastF.tail.intercept;
 	}
 	public static void testSOutput(int[] para,int[] machines,Solution s,double testCost,double cost) {
+		Utility.debugNumPlus();
 		//单机器测试输出
 		String string="";
-//		string+="测试结果： 参数: ";
-//		for(int p:para) {
-//			string+= (p+" ");
-//		}
-//		string+= "(机器：原始成本)";
+		string+="测试结果： 参数: ";
+		for(int p:para) {
+			string+= (p+" ");
+		}
+		string+= "(机器：原始成本)";
 //		for(int m:machines) {
 //			string+= (m+" "+(s.cost[m])+" ");
 //		}
-//		
-//		string+="   最终成本:";
-//		string+= (testCost+" "+cost+" ");
-//		string+=(Utility.compareEq(cost,testCost))+" ";
+		string+=" "+s.curCost+" ";
+		
+		string+="   最终成本:";
+		string+= (testCost+" "+cost+" "+" "+Utility.curUpperBound);
+		string+=(Utility.compareEq(cost,testCost))+" ";
 //		if(Utility.compareEq(cost,testCost)==false) 
 //			System.out.println(cost+" "+testCost);
-//		System.out.print(string);
+		System.out.println(string);
 		
 	}
 	
@@ -141,7 +166,7 @@ class IOptOperator implements Move {
 	// crossIntra算子
 	/* 参数，可由外部调节 */
 	public static int LPATH = 10;// 路径移除长度, 移动点距离当前点距离长度限制
-	static int LINS = 3;
+	static int LINS = 6;
 	private static boolean allowReverseIOpt = true;
 	// 默认允许forward和backward的移动
 
@@ -215,6 +240,7 @@ class IOptOperator implements Move {
 							saveBestOperation(m, st, insertedP, len, rev, s.cost[m] + deltaCost);
 							bestCost = deltaCost;
 						}
+						if(len==0) break;
 					}
 				}
 			}
@@ -239,6 +265,7 @@ class IOptOperator implements Move {
 							saveBestOperation(m, st, insertedP, len, rev, s.cost[m] + deltaCost);
 							bestCost = deltaCost;
 						} 
+						if(len==0) break;
 					}
 					// normal,reverse插入
 
@@ -339,7 +366,7 @@ class IOptOperator implements Move {
  */
 //完成验证
 class TwoOptOperator implements Move {
-	public static int L2 = 40;// 限制搜索长度
+	public static int L2 = 30;// 限制搜索长度
 	public Solution s;
 	public Data data;
 	private int[] bestFrom;// 起始位置
@@ -588,7 +615,7 @@ class TwoOptStarOperator implements Move {
 									: new boolean[] { false }) {
 								double deltaCost = evalDelta(s, m1, m2, cut1, cut2, rev1, rev2);
 								
-//								ArrayList<ArrayList<Integer>> newSeqs=getNeqSeqs(seq1, cut1, seq2, cut2, rev1, rev2);
+								ArrayList<ArrayList<Integer>> newSeqs=getNeqSeqs(seq1, cut1, seq2, cut2, rev1, rev2);
 //								double testCost1=Move.testSequence(data, newSeqs.get(0), s);
 //								double testCost2=Move.testSequence(data, newSeqs.get(1), s);
 //								Move.testSOutput(new int[] {cut1,cut2,rev1?1:0,rev2?1:0}, new int[] {m1,m2}, s, testCost1+testCost2, deltaCost+s.cost[m1]+s.cost[m2]);
@@ -597,8 +624,9 @@ class TwoOptStarOperator implements Move {
 									savedOperations.add(new OptCost(m1, m2, cut1, cut2, rev1, rev2, deltaCost));
 									bestCost = deltaCost;
 								}
+								if(cut2==seq2.size()-1) break;
 							}
-
+							if(cut1==seq1.size()-1) break;
 						}
 					}
 
@@ -627,20 +655,20 @@ class TwoOptStarOperator implements Move {
 		newSeqs.add(s2);
 		return newSeqs;
 	}
-	
+	//TODO 不能值判断一次，一旦有setup time就不行了
 	public boolean mergeCmaxValidation(int m1, int m2,int cut1,int cut2,boolean rev1,boolean rev2) {
 		ArrayList<Integer> seq1=s.sequences.get(m1);
 		ArrayList<Integer> seq2=s.sequences.get(m2);
 		double mergedtimeM1=s.cumDurationNormal[m1][cut1-1]+data.s[seq1.get(cut1-1)][rev2?seq2.get(seq2.size()-1):seq2.get(cut2)]+data.p[rev2?seq2.get(seq2.size()-1):seq2.get(cut2)]
 				+(rev2?s.getReverseDuration(m2, cut2, seq2.size()-1):s.getNormalDuration(m2, cut2, seq2.size()-1));
 //		System.out.println(mergedtimeM1);
-		if(Utility.compareGt(mergedtimeM1, data.Cmax)) {
+		if(Utility.compareGt(mergedtimeM1, data.CmaxH)) {
 			return false;
 		}
 		double mergedtimeM2=s.cumDurationNormal[m2][cut2-1]+data.s[seq2.get(cut2-1)][rev1?seq1.get(seq1.size()-1):seq1.get(cut1)]+data.p[rev1?seq1.get(seq1.size()-1):seq1.get(cut1)]
 				+(rev1?s.getReverseDuration(m1, cut1, seq1.size()-1):s.getNormalDuration(m1, cut1, seq1.size()-1));
 //		System.out.println(mergedtimeM2);
-		if(Utility.compareGt(mergedtimeM2, data.Cmax)) {
+		if(Utility.compareGt(mergedtimeM2, data.CmaxH)) {
 			return false;
 		}
 		
@@ -714,7 +742,7 @@ class TwoOptStarOperator implements Move {
 	/* ------- Δ 两段：各线路独立计算 ------- */
 	private double evalDelta(Solution sol, int m1, int m2, int cut1, int cut2, boolean rev1, boolean rev2) {
 		
-		if(!mergeCmaxValidation(m1, m2, cut1, cut2, rev1, rev2)) return Utility.big_M;
+		if(!mergeCmaxValidation(m1, m2, cut1, cut2, rev1, rev2)) return Utility.curUpperBound;//这个返回big_M或者upperBound应该都可以
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
 		
@@ -753,7 +781,7 @@ class TwoOptStarOperator implements Move {
  */
 class PathInsertOperator implements Move {
 
-	private static int LSEG = 10; // 段长与插入距离限制
+	private static int LSEG = 20; // 段长与插入距离限制
 
 	static class OptCost implements Comparable<OptCost> {
 		int m1;// 机器
@@ -797,7 +825,7 @@ class PathInsertOperator implements Move {
 
 	/* -------- Δ：源线拼三段，目标线也拼三段 -------- */
 	private double evalDelta(Solution s, int m1, int m2, int stM1, int len, int stM2, boolean rev) {
-		if(!mergeCmaxValidation(m1, m2, stM1, len, stM2, rev)) return Utility.big_M;
+		if(!mergeCmaxValidation(m1, m2, stM1, len, stM2, rev)) return Utility.curUpperBound;//返回upperBound或者big_M应该都行
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
 		double costM1 = 0;
@@ -876,12 +904,14 @@ class PathInsertOperator implements Move {
 								double deltaCost = evalDelta(s, m1, m2, a, len, b, rev);
 //								double testCost1=Move.testSequence(data, getNeqSeqs(seq1, a, len, seq2, b, rev).get(0), s);
 //								double testCost2=Move.testSequence(data, getNeqSeqs(seq1, a, len, seq2, b, rev).get(1), s);
-//								Move.testSOutput(new int[] {0}, new int[] {0}, s, testCost2+testCost1,deltaCost+s.cost[m1]+s.cost[m2]);
+//								Move.testSOutput(new int[] {a,b,len,rev?1:0}, new int[] {m1,m2}, s, Utility.compareGe((testCost2+testCost1),Utility.upperBound)?Utility.upperBound:testCost2+testCost1,Utility.compareGe(deltaCost+s.cost[m1]+s.cost[m2], Utility.upperBound)?Utility.upperBound:deltaCost+s.cost[m1]+s.cost[m2]);
+//								Move.testSOutput(new int[] {a,b,len,rev?1:0}, new int[] {m1,m2}, s, testCost2+testCost1,Utility.compareGe(deltaCost+s.cost[m1]+s.cost[m2], Utility.upperBound)?Utility.upperBound:deltaCost+s.cost[m1]+s.cost[m2]);
 								
 								if (Utility.compareLt(deltaCost, bestCost)) {
 									savedOperations.add(new OptCost(m1, m2, a, len, b, rev, deltaCost));
 									bestCost = deltaCost;
 								}
+								if(len==1) break;
 							}
 
 						}
@@ -996,7 +1026,7 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 		mergedtimeM2+=shift1_2+durationS2+shift2_3+duration3;
 		
 //		System.out.println(mergedtimeM2);
-		if(Utility.compareGt(mergedtimeM2, data.Cmax)) {
+		if(Utility.compareGt(mergedtimeM2, data.CmaxH)) {
 			return false;
 		}
 		
@@ -1008,7 +1038,7 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 
 class CrossExchangeOperator implements Move {
 
-	private static int LSEG = 10; // 段长与插入距离限制
+	private static int LSEG = 20; // 段长与插入距离限制
 
 	static class OptCost implements Comparable<OptCost> {
 		int m1;// 机器
@@ -1069,14 +1099,14 @@ class CrossExchangeOperator implements Move {
 						for (int l1 = 0; l1 <= LSEG && a + l1 < seq1.size(); l1++) {
 							for (int l2 = 0; l2 <= LSEG && b + l2 < seq2.size(); l2++)
 								for (boolean rev1 : allowReverseCrossExchange ? new boolean[] { false, true }
-										: new boolean[] { false })
+										: new boolean[] { false }) {
 									for (boolean rev2 : allowReverseCrossExchange ? new boolean[] { false, true }
 											: new boolean[] { false }) {
 										double deltaCost = evalDelta(s, m1, m2, a, l1, b, l2, rev1, rev2);
 										
 //										double testCost1=Move.testSequence(data, getNeqSeqs(seq1, a, l1, seq2, b, l2, rev1, rev2).get(0), s);
 //										double testCost2=Move.testSequence(data, getNeqSeqs(seq1, a, l1, seq2, b, l2, rev1, rev2).get(1), s);
-//										Move.testSOutput(new int[] {a,l1,b,l2},new int[] {m1,m2} , s, testCost2+testCost1, deltaCost+s.cost[m1]+s.cost[m2]);
+//										Move.testSOutput(new int[] {a,l1,b,l2,rev1?1:0,rev2?1:0},new int[] {m1,m2} , s, Utility.compareGe((testCost2+testCost1),Utility.upperBound)?Utility.upperBound:testCost2+testCost1, Utility.compareGe(deltaCost+s.cost[m1]+s.cost[m2], Utility.upperBound)?Utility.upperBound:deltaCost+s.cost[m1]+s.cost[m2]);
 //										
 //										testCost1=Move.testSequence(data, getNeqSeqs(seq1, a, l1, seq2, b, l2, rev1, rev2).get(0), s);
 //										testCost2=Move.testSequence(data, getNeqSeqs(seq1, a, l1, seq2, b, l2, rev1, rev2).get(1), s);
@@ -1088,7 +1118,10 @@ class CrossExchangeOperator implements Move {
 											bestCost = deltaCost;
 
 										}
+										if(l2==0)break;
 									}
+									if(l1==0)break;
+								}
 
 						}
 					}
@@ -1167,7 +1200,7 @@ class CrossExchangeOperator implements Move {
 
 	private double evalDelta(Solution s, int m1, int m2, int stM1, int l1, int stM2, int l2, boolean rev1,
 			boolean rev2) {
-		if(!mergeCmaxValidation(m1, m2, stM1, l1, stM2, l2, rev1, rev2)) return Utility.big_M;
+		if(!mergeCmaxValidation(m1, m2, stM1, l1, stM2, l2, rev1, rev2)) return Utility.curUpperBound;//返回upperBound或者big_M应该都行
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
 		if (stM1 == 0 && stM2 == 0 && l1 == seqM1.size() - 1 && l2 == seqM2.size() - 1&&!rev1&&!rev2)
@@ -1259,7 +1292,7 @@ class CrossExchangeOperator implements Move {
 		double shift2_3M1=(stM1+len1)==seq1.size()-1?0:data.s[lastJobS2M1][seq1.get(stM1+len1+1)]+data.p[seq1.get(stM1+len1+1)];
 		double duration3M1=((stM1+len1)==seq1.size()-1?0:s.getNormalDuration(m1, stM1+len1+1, seq1.size()-1));
 		mergedtimeM1+=shift1_2M1+durationS2M1+shift2_3M1+duration3M1;
-		if(Utility.compareGt(mergedtimeM1, data.Cmax)) {
+		if(Utility.compareGt(mergedtimeM1, data.CmaxH)) {
 			return false;
 		}
 		
@@ -1273,7 +1306,7 @@ class CrossExchangeOperator implements Move {
 		mergedtimeM2+=shift1_2M2+durationS2M2+shift2_3M2+duration3M2;
 		
 //		System.out.println(mergedtimeM2);
-		if(Utility.compareGt(mergedtimeM2, data.Cmax)) {
+		if(Utility.compareGt(mergedtimeM2, data.CmaxH)) {
 			return false;
 		}
 		

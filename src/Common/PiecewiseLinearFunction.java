@@ -1,14 +1,15 @@
 // PiecewiseLinearFunction.java
 package Common;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Currency;
+import java.util.Deque;
 import java.util.List;
 
 import Common.Utility.TimerManager;
-
 
 //假设各段之间区间连续的
 public class PiecewiseLinearFunction {
@@ -27,27 +28,98 @@ public class PiecewiseLinearFunction {
 			next = null;
 			TimerManager.end("Segment初始化");
 		}
+
 		public double getValue(double t) {
-			
+
 //			if(Utility.compareLt(t, start)||Utility.compareLt(end,t)) {
 //				TimerManager.end("Segment取值");
 //				return Utility.big_M;
 //			}
-			//感觉似乎不判断也行，使用的时候都是基于当前段的边界算的
-			return slope*t+intercept;
+			// 感觉似乎不判断也行，使用的时候都是基于当前段的边界算的
+			return slope * t + intercept;
+		}
+	}
+
+	/**
+	 * 简单的链表节点复用池，用来缓存和重用 Segment 实例。
+	 * 防止过大的垃圾回收开销，次数是减少了，感觉上时间区别不大
+	 * 没有使用Pool的话把Utility里边的Pool关掉就好了，原始代码见save.PiecewiseLinearFunction
+	 * 其实就是用Segemnt.obtain()代替了new Segment，并增加了几个地方的release函数将没有用的一些临时函数释放掉
+	 */
+	
+	public int getSegmentNum() {
+		int num=0;
+		
+		Segment p=head;
+		if(p==null) return num;
+		while(p.next!=null) {
+			num++;
+			p=p.next;
+		}
+		if(num==1&&Utility.compareEq(p.intercept,Utility.curUpperBound)&&Utility.compareEq(p.slope,0)) {
+			Utility.debugMap.put("PWLF_Only1Seg_Equal_UB",Utility.debugMap.getOrDefault("PWLF_Only1Seg_Equal_UB", 0)+1);
+			
+		}
+		Utility.debugMap.put("segmentNum",Utility.debugMap.getOrDefault("segmentNum", 0)+num);
+
+		return num;
+	}
+	//做了测试，这玩意慢了很多很多，GPT说java对小尺寸对象回收很快，不需要。。
+	public static class SegmentPool {
+		private static final int MAX_SIZE=10000;
+		private static final Deque<Segment> pool = new ArrayDeque<>(MAX_SIZE);
+
+		
+		/**
+		 * 从池里拿一个 Segment，如果没有就 new 一个。
+		 */
+		public static Segment obtain(double start, double end, double slope, double intercept) {
+			Segment seg;
+			if (Configure.SegmentPool) {
+				if (!pool.isEmpty()) {
+					seg = pool.pop();
+					// 重置字段
+					seg.start = start;
+					seg.end = end;
+					seg.slope = slope;
+					seg.intercept = intercept;
+					seg.next = null;
+				} else {
+					seg = new Segment(start, end, slope, intercept);
+				}
+			} else {
+				seg = new Segment(start, end, slope, intercept);
+
+			}
+			return seg;
+		}
+
+		/**
+		 * 将一个（或一条链） Segment 放回池中，清空 next 引用以便重用。
+		 */
+		public static void release(Segment seg) {
+			if(!Configure.SegmentPool) return;
+			while (seg != null) {
+				Segment next = seg.next;
+				seg.next = null;
+				if(pool.size()<MAX_SIZE) {
+				pool.push(seg);
+				}
+				seg = next;
+			}
 		}
 	}
 
 	public Segment head, tail;
 	public double domainStart = 0; // 全局定义域起点
 	public double domainEnd = Double.POSITIVE_INFINITY; // 全局定义域终点
-	public double[] minValuePairsLeft;//存储函数全局最小cost以及对应的函数取值 [0]=cost [1]=t,t取所有取最小cost的t中最左边的
-	public double[] minValuePairsRight;//存储函数全局最小cost以及对应的函数取值 [0]=cost [1]=t,t取所有取最小cost的t中最右边的
-	//这俩copy的时候不复制，从而对那些操作中基于一个复制的函数做操作的，不需要处理
-	//比如shift\add
-	//对前向取小和后向取小，暂时不处理，感觉应该不会在这里冲突
-	//基本应该只会对同一个函数多次取它的最小值，变化以后取最小的应该没啥
-	
+	public double[] minValuePairsLeft;// 存储函数全局最小cost以及对应的函数取值 [0]=cost [1]=t,t取所有取最小cost的t中最左边的
+	public double[] minValuePairsRight;// 存储函数全局最小cost以及对应的函数取值 [0]=cost [1]=t,t取所有取最小cost的t中最右边的
+	// 这俩copy的时候不复制，从而对那些操作中基于一个复制的函数做操作的，不需要处理
+	// 比如shift\add
+	// 对前向取小和后向取小，暂时不处理，感觉应该不会在这里冲突
+	// 基本应该只会对同一个函数多次取它的最小值，变化以后取最小的应该没啥
+
 	public PiecewiseLinearFunction() {
 		head = tail = null;
 	}
@@ -61,7 +133,7 @@ public class PiecewiseLinearFunction {
 		} else {
 			throw new IllegalArgumentException("Invalid domain: start >= end");
 		}
-		//TODO 这个判断后期关了吧 
+		// TODO 这个判断后期关了吧
 		TimerManager.end("分段线性函数初始化");
 	}
 
@@ -70,11 +142,11 @@ public class PiecewiseLinearFunction {
 		if (this.head == null)
 			return res;
 		TimerManager.start("分段线性函数复制");
-		res.head = new Segment(head.start, head.end, head.slope, head.intercept);
+		res.head = SegmentPool.obtain(head.start, head.end, head.slope, head.intercept);
 		Segment q = res.head;
 		Segment p = head.next;
 		while (p != null) {
-			q.next = new Segment(p.start, p.end, p.slope, p.intercept);
+			q.next = SegmentPool.obtain(p.start, p.end, p.slope, p.intercept);
 			p = p.next;
 			q = q.next;
 		}
@@ -82,10 +154,11 @@ public class PiecewiseLinearFunction {
 		TimerManager.end("分段线性函数复制");
 		return res;
 	}
+	
 
 	// 设置定义域
 	public PiecewiseLinearFunction setDomain(double domainStart, double domainEnd) {
-		//不会改变当前函数，会复制一个产生新的，不需要copy()以后 
+		// 不会改变当前函数，会复制一个产生新的，不需要copy()以后
 		TimerManager.start("分段线性函数设置定义域");
 		PiecewiseLinearFunction res = this.copy();
 		if (Utility.compareLe(domainStart, domainEnd)) {
@@ -93,20 +166,22 @@ public class PiecewiseLinearFunction {
 			res.domainEnd = domainEnd;
 			res.trimToDomain();
 		} else {
-			throw new IllegalArgumentException("Invalid domain: start >= end");
+			//TODO 是否这么做
+			res.head=res.tail=null;//此时直接设置为空函数
+//			throw new IllegalArgumentException("Invalid domain: start >= end");
 		}
-		res.resetDomain(this.domainStart,this.domainEnd);
-		//TODO 是否需要
-		
+		res.resetDomain(this.domainStart, this.domainEnd);
+		// TODO 是否需要
+
 		TimerManager.end("分段线性函数设置定义域");
 		return res;
 	}
-	public void resetDomain(double domainStart,double domainEnd) {
-		this.domainStart=domainStart;
-		this.domainEnd=domainEnd;
+
+	public void resetDomain(double domainStart, double domainEnd) {
+		this.domainStart = domainStart;
+		this.domainEnd = domainEnd;
 	}
-	
-	
+
 	public boolean isEmpty() {
 		return head == null;
 	}
@@ -124,7 +199,7 @@ public class PiecewiseLinearFunction {
 //			}
 		// 不太可能
 
-		Segment seg = new Segment(start, end, slope, intercept);
+		Segment seg = SegmentPool.obtain(start, end, slope, intercept);
 		if (head == null)
 			head = tail = seg;
 		else {
@@ -147,8 +222,9 @@ public class PiecewiseLinearFunction {
 		}
 	}
 
-	public PiecewiseLinearFunction shift(double delta) {
-		TimerManager.start("分段线性函数shift");
+	public PiecewiseLinearFunction shiftX(double delta) {
+		//X 水平方向平移
+		TimerManager.start("分段线性函数shiftX");
 		PiecewiseLinearFunction res = copy();
 		Segment p = res.head;
 		while (p != null) {
@@ -158,19 +234,34 @@ public class PiecewiseLinearFunction {
 			p = p.next;
 		}
 		res.trimToDomain();
-		TimerManager.end("分段线性函数shift");
+		TimerManager.end("分段线性函数shiftX");
+		return res;
+	}
+	
+	public PiecewiseLinearFunction shiftY(double delta) {
+		//Y 竖直方向平移
+		TimerManager.start("分段线性函数shiftY");
+		PiecewiseLinearFunction res = copy();
+		Segment p = res.head;
+		while (p != null) {
+			p.intercept += delta;
+			p = p.next;
+		}
+		TimerManager.end("分段线性函数shiftY");
 		return res;
 	}
 
 	public double evaluate(double t) {
-		
+
 		if (head == null)
-			return Utility.big_M;
+			return Utility.curUpperBound;//不采用返回upperBound，这个值可能用于和别的一些较差解去比较，如果这个采用upperBound,那可能反而一个很差的解因为采用了upperBound的值反而被接受
+			//虽然整体可能不应该超过upperBound，但通过3Segment合并的时候，不能使用upperBound判断
+			//见Move的注释，暂时认为没啥区别，可以混用
 		if (!(Utility.compareLe(t, tail.end) && Utility.compareLe(head.start, t)))
-			return Utility.big_M;
+			return Utility.curUpperBound;
 		TimerManager.start("分段线性函数evaluate");
 		for (Segment cur = head; cur != null; cur = cur.next) {
-			
+
 			if (Utility.compareGe(t, cur.start) && Utility.compareLt(t, cur.end)) {
 				TimerManager.end("分段线性函数evaluate");
 				return cur.slope * t + cur.intercept;
@@ -180,27 +271,27 @@ public class PiecewiseLinearFunction {
 			TimerManager.end("分段线性函数evaluate");
 			return tail.slope * t + tail.intercept;
 		}
-		
+
 		throw new IllegalArgumentException("t out of domain: " + t);
-		
+
 	}
 
-	private double slopeAt(double t) {
-		if (head == null)
-			return Utility.big_M;
-		if (!(Utility.compareLe(t, tail.end) && Utility.compareLe(head.start, t)))
-			return Utility.big_M;
-
-		for (Segment cur = head; cur != null; cur = cur.next) {
-			if (Utility.compareGe(t, cur.start) && Utility.compareLt(t, cur.end)) {
-				return cur.slope;
-			}
-		}
-		if (Utility.compareEq(t, tail.end)) {
-			return tail.slope;
-		}
-		throw new IllegalArgumentException("t out of domain: " + t);
-	}
+//	private double slopeAt(double t) {
+//		if (head == null)
+//			return Utility.big_M;
+//		if (!(Utility.compareLe(t, tail.end) && Utility.compareLe(head.start, t)))
+//			return Utility.big_M;
+//
+//		for (Segment cur = head; cur != null; cur = cur.next) {
+//			if (Utility.compareGe(t, cur.start) && Utility.compareLt(t, cur.end)) {
+//				return cur.slope;
+//			}
+//		}
+//		if (Utility.compareEq(t, tail.end)) {
+//			return tail.slope;
+//		}
+//		throw new IllegalArgumentException("t out of domain: " + t);
+//	}
 
 	public PiecewiseLinearFunction add(PiecewiseLinearFunction g) {
 		PiecewiseLinearFunction res = new PiecewiseLinearFunction(domainStart, domainEnd);
@@ -208,7 +299,7 @@ public class PiecewiseLinearFunction {
 		// 空链表检查
 		if (this.head == null || g.head == null)
 			return res;
-		
+
 		// 计算共有定义域
 		double fStart = this.head.start;
 		double fEnd = this.tail.end;
@@ -221,7 +312,7 @@ public class PiecewiseLinearFunction {
 		if (Utility.compareLt(end, start))
 			return res;
 		TimerManager.start("分段线性函数相加");
-		
+
 		Segment p = this.head, q = g.head;
 		double cur = start; // 当前区间起点
 
@@ -254,6 +345,7 @@ public class PiecewiseLinearFunction {
 				q = q.next;
 		}
 		TimerManager.end("分段线性函数相加");
+		res.getSegmentNum();
 		return res;
 	}
 	// 未检查输入函数的定义域是否连续。
@@ -262,10 +354,10 @@ public class PiecewiseLinearFunction {
 		if (head == null)
 			return;
 		TimerManager.start("分段线性函数前缀最小化");
-		
-		double runningMin = Double.POSITIVE_INFINITY;
+
+		double runningMin = Utility.curUpperBound;//Double.POSITIVE_INFINITY;
 		double prevT = head.start;
-		Segment dummy = new Segment(0, 0, 0, 0), write = dummy;
+		Segment dummy = SegmentPool.obtain(0, 0, 0, 0), write = dummy;
 
 		for (Segment seg = head; seg != null; seg = seg.next) {
 			double s = seg.start, e = seg.end;
@@ -278,7 +370,7 @@ public class PiecewiseLinearFunction {
 					continue;// 不做处理
 				} else {
 					if (!Utility.compareEq(prevT, s)) {
-						write.next = new Segment(prevT, s, 0.0, runningMin);
+						write.next = SegmentPool.obtain(prevT, s, 0.0, runningMin);
 						write = write.next;
 						prevT = s;
 					}
@@ -297,10 +389,17 @@ public class PiecewiseLinearFunction {
 				if (Utility.compareGt(fgs, runningMin)) {
 					double tCross = (runningMin - b) / a;
 					if (Utility.compareLt(prevT, tCross)) {
-						write.next = new Segment(prevT, tCross, 0.0, runningMin);
+						if(!Utility.compareEq(prevT, head.start)&&(!Utility.compareEq(runningMin, Utility.curUpperBound))) {
+							//2025.5.10 新增一个内部的if，将所有的big_M替换成了upperbound，此时可能存在端内穿越有交点
+							//在此基础上，当要插入的是一条直线且该段的开始时间为head.start，此时不需要插入
+							//不过在我们的问题下，这里段内穿越应该最多就开始一次
+							//相当于会截断一部分
+							//这个if要是没有，就相当于对这个函数大于上界的那部分做了替换
+						write.next = SegmentPool.obtain(prevT, tCross, 0.0, runningMin);
 						write = write.next;
+						}
 					}
-					write.next = new Segment(tCross, seg.end, a, b);
+					write.next = SegmentPool.obtain(tCross, seg.end, a, b);
 					write = write.next;
 					runningMin = fge;
 					prevT = e;
@@ -308,10 +407,10 @@ public class PiecewiseLinearFunction {
 				} else {
 					// 递减且开头比runningMin更小
 					if (!Utility.compareEq(prevT, s)) {
-						write.next = new Segment(prevT, s, 0.0, runningMin);
+						write.next = SegmentPool.obtain(prevT, s, 0.0, runningMin);
 						write = write.next;
 					}
-					write.next = new Segment(seg.start, seg.end, seg.slope, seg.intercept);
+					write.next = SegmentPool.obtain(seg.start, seg.end, seg.slope, seg.intercept);
 					write = write.next;
 					runningMin = fge;
 					prevT = e;
@@ -322,24 +421,27 @@ public class PiecewiseLinearFunction {
 		}
 		double lastEnd = tail.end;
 		if (Utility.compareLt(prevT, lastEnd)) {
-
-			write.next = new Segment(prevT, lastEnd, 0.0, runningMin);
-			write = write.next;
 			
-		}
+			write.next = SegmentPool.obtain(prevT, lastEnd, 0.0, runningMin);
+			write = write.next;
 
+		}
+		//2025.5.10 如果整个函数都比upperBound更高的话，暂时处理为一条水平线，不直接砍掉
+		//TODO 小心normalize可能把这条线给删了，现在normalize是否有需要呢？
 		if (Utility.compareLe(prevT, lastEnd) && dummy.next == null) {
 			// 只包含一个点且该段首尾相同，是个单点
 			// 2025.4.23 这个地方是相对上边多加的，应该只会当一个段有一个单点的时候才会进入这里
 			// 或者这段if也可以不加入，直接Cmax在算好的基础上+1也行，但不知道会不会别的地方出问题，感觉应该不会，先这样
 			// 这段不能直接加在上边改成le，不然任何情况下都会在末尾产生一个单点
-			write.next = new Segment(prevT, lastEnd, 0.0, runningMin);
+			
+			write.next = SegmentPool.obtain(prevT, lastEnd, 0.0, runningMin);
 			write = write.next;
 		}
 
 		this.head = dummy.next;
 		this.tail = write;
 		TimerManager.end("分段线性函数前缀最小化");
+		getSegmentNum();
 	}
 
 	// 这个取min的操作应该是通用的了，不管函数的分段线性是什么样子，不连续、增减交替
@@ -352,7 +454,7 @@ public class PiecewiseLinearFunction {
 	 * 将本函数做 suffix‐minimize： 令 g(t)=min_{u≥t} f(u)，保证所得 g 在整体上是非递减的（即 f(t) ≤
 	 * runningMin）。 与前向版本对称地“倒着”扫一遍，然后重建链表。
 	 */
-	//这个使用列表辅助，相当于创建了新的分段线性函数,这个经过多次验证应该是对的
+	// 这个使用列表辅助，相当于创建了新的分段线性函数,这个经过多次验证应该是对的
 //	public void minimizeSuffixInPlace() {
 //		// 函数 反向取小
 //		if (head == null)
@@ -447,10 +549,10 @@ public class PiecewiseLinearFunction {
 //		tail = w;
 //		TimerManager.end("分段线性函数后缀最小化");
 //	}
-	
-	//尝试直接在当前链表修改,初步测试略微快一丢丢丢,10w次快了几毫秒
-	//正确性简单验证，还需要测试
-	//segment初始化变少了，因为会复用，不过在规模40上时间变化不大
+
+	// 尝试直接在当前链表修改,初步测试略微快一丢丢丢,10w次快了几毫秒
+	// 正确性简单验证，还需要测试
+	// segment初始化变少了，因为会复用，不过在规模40上时间变化不大
 	public void minimizeSuffixInPlace() {
 		// 函数 反向取小
 		if (head == null)
@@ -461,10 +563,10 @@ public class PiecewiseLinearFunction {
 		for (Segment s = head; s != null; s = s.next) {
 			segs.add(s);
 		}
-		int addTimes=0;//记录拼接段的次数
-		Segment nextSeg=null;
+		int addTimes = 0;// 记录拼接段的次数
+		Segment nextSeg = null;
 		// （2）倒序处理，每次产出新段，先累到 newSegs（逆序）。
-		double runningMin = Double.POSITIVE_INFINITY;
+		double runningMin = Utility.curUpperBound;//Double.POSITIVE_INFINITY;
 		double lastT = tail.end;
 		for (int i = segs.size() - 1; i >= 0; i--) {
 			Segment seg = segs.get(i);
@@ -480,9 +582,9 @@ public class PiecewiseLinearFunction {
 					continue;
 				} else {
 					if (!Utility.compareEq(lastT, e)) {
-						Segment curSeg =new Segment(e, lastT, 0, runningMin);
+						Segment curSeg = SegmentPool.obtain(e, lastT, 0, runningMin);
 						addTimes++;
-						nextSeg=insertSegment(curSeg, nextSeg, addTimes);
+						nextSeg = insertSegment(curSeg, nextSeg, addTimes);
 						lastT = e;
 					}
 					runningMin = fe;
@@ -498,14 +600,18 @@ public class PiecewiseLinearFunction {
 				if (Utility.compareGt(fe, runningMin)) {
 					double tCross = (runningMin - b) / a;
 					if (Utility.compareGt(lastT, tCross)) {
-						Segment curSeg=new Segment(tCross, lastT, 0.0, runningMin);
+						if(!Utility.compareEq(lastT, tail.end)&&(!Utility.compareEq(runningMin, Utility.curUpperBound))) {
+						//2025.5.10 新加if,思路同prefix最小化
+						Segment curSeg = SegmentPool.obtain(tCross, lastT, 0.0, runningMin);
 						addTimes++;
-						nextSeg=insertSegment(curSeg, nextSeg, addTimes);
+						nextSeg = insertSegment(curSeg, nextSeg, addTimes);
+						}
 					}
 //					Segment curSeg=new Segment(seg.start, tCross, a, b);
-					Segment curSeg=seg; seg.end=tCross;//直接复用
+					Segment curSeg = seg;
+					seg.end = tCross;// 直接复用
 					addTimes++;
-					nextSeg=insertSegment(curSeg, nextSeg, addTimes);
+					nextSeg = insertSegment(curSeg, nextSeg, addTimes);
 
 					runningMin = fs;
 					lastT = s;
@@ -515,42 +621,46 @@ public class PiecewiseLinearFunction {
 				else {
 					// 比起始段更高
 					if (!Utility.compareEq(lastT, e)) {
-						Segment curSeg=new Segment(e, lastT, 0, runningMin);
+						Segment curSeg = SegmentPool.obtain(e, lastT, 0, runningMin);
 						addTimes++;
-						nextSeg=insertSegment(curSeg, nextSeg, addTimes);
+						nextSeg = insertSegment(curSeg, nextSeg, addTimes);
 
 					}
-					Segment curSeg=seg;
+					Segment curSeg = seg;
 					addTimes++;
-					nextSeg=insertSegment(curSeg, nextSeg, addTimes);
+					nextSeg = insertSegment(curSeg, nextSeg, addTimes);
 					runningMin = fs;
 					lastT = s;
 				}
 
 			}
+			getSegmentNum();
 		}
 		double prevStart = head.start;
 		if (Utility.compareLt(prevStart, lastT)) {
-			Segment curSeg=new Segment(prevStart, lastT,0.0, runningMin);
+			Segment curSeg = SegmentPool.obtain(prevStart, lastT, 0.0, runningMin);
 			addTimes++;
-			nextSeg=insertSegment(curSeg, nextSeg, addTimes);
+			nextSeg = insertSegment(curSeg, nextSeg, addTimes);
 
 		}
+		//同prefixMinimize，若整个函数比上界还大，设置为水平线
 
-		if (Utility.compareGe(lastT, prevStart) && nextSeg==null) {
-			//suffix整个和prefix对称
-			Segment curSeg=new Segment(prevStart, lastT,0.0, runningMin);
+		if (Utility.compareGe(lastT, prevStart) && nextSeg == null) {
+			// suffix整个和prefix对称
+			Segment curSeg = SegmentPool.obtain(prevStart, lastT, 0.0, runningMin);
 			addTimes++;
-			nextSeg=insertSegment(curSeg, nextSeg, addTimes);
+			nextSeg = insertSegment(curSeg, nextSeg, addTimes);
 		}
-		
-		head=nextSeg;//此时curSeg和nextSeg相等
+
+		head = nextSeg;// 此时curSeg和nextSeg相等
 		TimerManager.end("分段线性函数后缀最小化");
 	}
-	public Segment insertSegment(Segment curSeg,Segment nextSeg,int addTimes) {
-		
-		curSeg.next=nextSeg;
-		if(addTimes==1) tail=curSeg;
+
+	public Segment insertSegment(Segment curSeg, Segment nextSeg, int addTimes) {
+
+		curSeg.next = nextSeg;
+		if (addTimes == 1)
+			tail = curSeg;
 		return curSeg;
 	}
 
@@ -577,7 +687,7 @@ public class PiecewiseLinearFunction {
 			return;
 			// 不需要修剪
 		}
-		
+
 		if (fromS) {
 			// 从头部修剪 [end <= domainStart)
 			while (head != null && Utility.compareLe(head.end, domainStart)) {
@@ -624,6 +734,7 @@ public class PiecewiseLinearFunction {
 			}
 		}
 		TimerManager.end("分段线性函数切割可行域");
+		getSegmentNum();
 	}
 
 	/**
@@ -642,11 +753,30 @@ public class PiecewiseLinearFunction {
 		if (Utility.compareGt(head.start, g.head.start)) {
 			return false;
 		}
+//		if (Utility.compareLt(tail.end, g.tail.end)) {
+//			return false;
+//		}
+		//TODO 这俩可以留一个,之后测试
 		if (Utility.compareLt(tail.end, g.tail.end)) {
-			return false;
+			double gValue=g.evaluate(g.tail.end);
+			double curValue=this.evaluate(tail.end);
+			
+			if(!Utility.compareLe(curValue, gValue)) {
+				//此时当前函数比g函数后续要更低，可不关注定义域,接着往后在cur.tail.end之前比较就行，否则返回
+				return false;
+			}
+			
 		}
 		// f定义域比g还小，肯定无法支配
-
+		//TODO 不一定 可以认为f.end-g.end这段f仍然有值，前段则不太好处理，但这样需要去算函数某个点的值，O(n)
+		//开头不好说了,如果使用upperbound砍的话，也不好对齐，因为精确里边存在负数，怎么做还得想想
+		//然后这个dominate有这么几种办法：
+		//1、最粗暴，原始做法，只看当前两者定义域内的比较
+		//2、只对平缓的那一段做延伸，这个定义域应该没影响，正向传播的反正end定义域影响不大
+		//3、对有斜率段做延伸（这个应该要小心，不能超过本身真实的定义域） 这个如果使用了bound砍掉函数的段的话可能要用，没砍的话应该不需要，就是本身的定义域
+		//此外，这两个如果要使用2、3的话，就要区分前向和后向了
+		
+		//TODO 反向的函数其实可以看成右侧定义域始终无穷大,想想反向咋占优,先不管反向,反向的要做就先认为定义域固定的（其实可看作0-无穷，反向移动只有右侧在动，而右侧可视为正无穷）
 		// 确定共同定义域
 		double gStart = g.head.start;
 		double gEnd = g.tail.end;
@@ -700,23 +830,29 @@ public class PiecewiseLinearFunction {
 	 * 对 L2（this）进行“被 L1（g）支配区间置∞”的就地更新： 在公共定义域上，凡 L1(t) <= L2(t) 的区间， 将 L2
 	 * 替换为前面段的最低值（保持非增性）。
 	 */
-	public void updateDominatedIntervals(PiecewiseLinearFunction g) {
+	public boolean updateDominatedIntervals(PiecewiseLinearFunction g) {
+		//TODO 2025.5.15感觉上dominate和这个可以合并，不然如果dominate为false的话，还得重新走一次这个流程?
+		//先留着，不一定使用这种部分支配的操作
+		//先修改这个函数，返回值为boolean,
+		//该函数被调用，应该是f函数属于的label L1其他属性占优label L2(g),此时需要调用g.updateDominatedIntervals(f)，使用f更新L2的g
+		//如果更新以后函数g空了，此时f完全占优g，返回true，此时标签L2可删除? 否则返回false, 函数g部分被干掉
+		//TODO 待测试
 		if (this.head == null) {
-			// 如果 L2 为空，直接拿过来 L1 的整条链
-			this.head = g.head;
-			this.tail = g.tail;
-			return;
+			// 如果 L2 为空，直接拿过来 L1 的整条链（nonono)
+//			this.head = g.head;
+//			this.tail = g.tail;//不是取小
+			return true;
 		}
 		if (g.head == null) {
 			// 如果 L1 为空，无事可做
-			return;
+			return false;
 		}
 		resetMinimum();
 		// 公共定义域
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
 		if (!Utility.compareLt(start, end))
-			return;
+			return false;
 
 		// 跳到 L2（this）上第一个与 start 重叠的分段，并累计起始前最小值
 		Segment p = this.head, prev = null;
@@ -780,9 +916,12 @@ public class PiecewiseLinearFunction {
 				}
 				// 无交点或交点不在内部 → 保留原段，并更新 lastMin
 
+				
+				//TODO 这里边拆前半段和后半段应该都是用于当前函数左侧定义域和右侧定义域超过了g函数，从而需要再拼一次
+				//感觉可以进一步简化，放在外边只做一次，while内部只处理共有部分
 				// 若需要拆前半段
 				if (!Utility.compareEq(p.start, cur)) {
-					Segment left = new Segment(p.start, cur, p.slope, p.intercept);
+					Segment left = SegmentPool.obtain(p.start, cur, p.slope, p.intercept);
 					left.next = p;
 					if (prev == null)
 						this.head = left;
@@ -790,13 +929,14 @@ public class PiecewiseLinearFunction {
 						prev.next = left;
 					p.start = cur;
 					prev = left;
+					continue;
 				} else {
 					prev = p;
 				}
-				// 拆前半段的 应该只可能出现在开头吧
+				// 拆前半段的 应该只可能出现在开头吧 应该是
 				// 若需要拆后半段
 				if (!Utility.compareEq(p.end, nxt)) {
-					Segment right = new Segment(nxt, p.end, p.slope, p.intercept);
+					Segment right = SegmentPool.obtain(nxt, p.end, p.slope, p.intercept);
 					right.next = p.next;
 					p.next = right;
 					p.end = nxt;
@@ -811,18 +951,22 @@ public class PiecewiseLinearFunction {
 		}
 
 		normalize();
-
+		if(this.isEmpty()) return true;
+		return false;
 	}
 
 	/**
 	 * 1) 裁掉首尾 intercept==∞ 的“无穷”段（超出可行域的那两端） 2) 合并相邻 slope/intercept 完全相同的段 3) 再调用
 	 * minimizePrefixInPlace() 保证整体非增
 	 */
+	//TODO 2025.5.10将M替换为全局上界，但不知道normalize使用时是否有影响，可能把某些平行线等于upperBound的给删了，导致函数为空
+	//之后测试一下 ，normalize函数是否还有用？
 	public void normalize() {
+		//这个的作用还在于将tail复位
 		// 1) 删除头部无穷段
 		while (head != null && head.intercept >= Utility.big_M) {
 			head = head.next;
-		}  
+		}
 		if (head == null) {
 			tail = null;
 			return;
@@ -843,8 +987,9 @@ public class PiecewiseLinearFunction {
 		}
 		if (lastFinite.next != null) {
 			lastFinite.next = null;
-			tail = lastFinite;
+			
 		}
+		tail = lastFinite;
 		// 妙啊
 
 		// 3) 合并相邻完全相同的段
@@ -870,7 +1015,7 @@ public class PiecewiseLinearFunction {
 	private void replaceSegment(Segment prev, Segment p, double cur, double nxt, double lastMin) {
 		// 拆前半段
 		if (!Utility.compareEq(p.start, cur)) {
-			Segment left = new Segment(p.start, cur, p.slope, p.intercept);
+			Segment left = SegmentPool.obtain(p.start, cur, p.slope, p.intercept);
 			left.next = p;
 			if (prev == null)
 				this.head = left;
@@ -880,14 +1025,14 @@ public class PiecewiseLinearFunction {
 			prev = left;
 		}
 		// 拆常数段
-		Segment mid = new Segment(cur, nxt, 0.0, lastMin);
+		Segment mid = SegmentPool.obtain(cur, nxt, 0.0, lastMin);
 		// 拆后半段或直接接续
 		if (Utility.compareEq(p.end, nxt)) {
 			mid.next = p.next;
 			if (mid.next == null)
 				tail = mid;
 		} else {
-			Segment right = new Segment(nxt, p.end, p.slope, p.intercept);
+			Segment right = SegmentPool.obtain(nxt, p.end, p.slope, p.intercept);
 			right.next = p.next;
 			mid.next = right;
 		}
@@ -904,7 +1049,7 @@ public class PiecewiseLinearFunction {
 	private Segment replaceWithBigM(Segment prev, Segment p, double cur, double nxt) {
 		// 和原 replaceSegment 类似，只是 intercept = Utility.big_M
 		if (!Utility.compareEq(p.start, cur)) {
-			Segment left = new Segment(p.start, cur, p.slope, p.intercept);
+			Segment left = SegmentPool.obtain(p.start, cur, p.slope, p.intercept);
 			left.next = p;
 			if (prev == null)
 				head = left;
@@ -913,11 +1058,11 @@ public class PiecewiseLinearFunction {
 			p.start = cur;
 			prev = left;
 		}
-		Segment mid = new Segment(cur, nxt, 0.0, Utility.big_M);
+		Segment mid = SegmentPool.obtain(cur, nxt, 0.0, Utility.big_M);
 		if (Utility.compareEq(p.end, nxt)) {
 			mid.next = p.next;
 		} else {
-			Segment right = new Segment(nxt, p.end, p.slope, p.intercept);
+			Segment right = SegmentPool.obtain(nxt, p.end, p.slope, p.intercept);
 			right.next = p.next;
 			mid.next = right;
 		}
@@ -935,7 +1080,7 @@ public class PiecewiseLinearFunction {
 			double newIntercept) {
 		// 和原 replaceSegment 类似，用 newSlope/newIntercept
 		if (!Utility.compareEq(p.start, cur)) {
-			Segment left = new Segment(p.start, cur, p.slope, p.intercept);
+			Segment left = SegmentPool.obtain(p.start, cur, p.slope, p.intercept);
 			left.next = p;
 			if (prev == null)
 				head = left;
@@ -944,11 +1089,11 @@ public class PiecewiseLinearFunction {
 			p.start = cur;
 			prev = left;
 		}
-		Segment mid = new Segment(cur, nxt, newSlope, newIntercept);
+		Segment mid = SegmentPool.obtain(cur, nxt, newSlope, newIntercept);
 		if (Utility.compareEq(p.end, nxt)) {
 			mid.next = p.next;
 		} else {
-			Segment right = new Segment(nxt, p.end, p.slope, p.intercept);
+			Segment right = SegmentPool.obtain(nxt, p.end, p.slope, p.intercept);
 			right.next = p.next;
 			mid.next = right;
 		}
@@ -962,8 +1107,12 @@ public class PiecewiseLinearFunction {
 	}
 
 	/**
-	 * 将 this（L1）与 g（L2）合并，在它们的公共定义域上取逐点最小值： 如果 L2 在某段 ≤ L1，则就地用 L2 的片段替换这部分 L1。
+	 * 将 this（L1）与 g（L2）合并，在它们的定义域并集上取逐点最小值： 如果 L2 在某段 ≤ L1，则就地用 L2 的片段替换这部分 L1。
 	 */
+	//TODO 2025.5.15这个函数做的时候先假设两个函数不可能完全不存在重叠区间，正向的右侧区间肯定最大是一样的
+	//反向的左侧则是一样的
+	//是否可能用到一定bound? 先不管
+	
 	public void mergeMinimum(PiecewiseLinearFunction g) {
 		// 函数g可以被舍弃，可随意修改，update不行
 		// 如果 L1 为空，直接变成 L2 的拷贝
@@ -978,16 +1127,43 @@ public class PiecewiseLinearFunction {
 		if (g.head == null) {
 			return;
 		}
-		
+
 		resetMinimum();
-		// 1) 定位公共定义域
+		// 1) 定位公共定义域 这里两个函数取小因该是要取并集的  不能取交集
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
-		if (!Utility.compareLt(start, end)) {
-			// 无交集无需合并
-			return;
+//		if (!Utility.compareLt(start, end)) {
+//			// 无交集无需合并
+//			return;
+//		}
+		//不对，无交集是可以合并的 取小操作 所以前边取了并集以后相当于扩充了定义域
+		//但函数定义域不存在的地方需特殊处理
+		
+		Segment gHeads=null ;//截取g函数前边可能多出来的一段
+		Segment lastGSegBeforeDomain=null;
+		Segment prevGH=null;
+		if(Utility.compareLt(g.head.start,start)) {
+			//截取g.head.start---start这部分的段
+			gHeads=g.head;
+			Segment gh=gHeads;
+			
+			while(Utility.compareLe(gh.end, start)) {
+				// 2026-05-14: prevGH 必须记录“刚刚跳过的前一段”，后面才能把
+				// 截出来的 [gh.start, start] 正确接到 g 的左侧前缀末尾。原来先
+				// gh=gh.next 再 prevGH=gh，会把 prevGH 记成下一段，导致拼链错位。
+				prevGH=gh;
+				gh=gh.next;
+			}
+			lastGSegBeforeDomain=SegmentPool.obtain(gh.start, start, gh.slope, gh.intercept);
+			//不管是否相等了gh.start=start
+			
+			//先记录下来，while以后再拼上去，不然直接拼head后边被改变了
+			
 		}
-
+		
+		
+		//现在下边while的处理是基于当前函数做的，所以只能处理当前函数定义域比g函数定义域更大的情况，当g定义域比f更大时，需要将多出来的部分截取下来并拼接导公共部分
+		//只需要处理g再左侧定义域超出的部分，其他的while处处理
 		// 2) 跳到第一个重叠的片段
 		Segment p = this.head, prev = null;
 		while (p != null && Utility.compareLt(p.end, start)) {
@@ -998,6 +1174,9 @@ public class PiecewiseLinearFunction {
 		while (q != null && Utility.compareLt(q.end, start)) {
 			q = q.next;
 		}
+		
+		
+		
 
 		double cur = start;
 		boolean cross = false;
@@ -1048,7 +1227,7 @@ public class PiecewiseLinearFunction {
 				// 6) 无交点也不替换 → 保留 this 的这一段 [cur,nxt)
 				// 按照 update 中的逻辑：先拆头，再拆尾，推进指针
 				if (!Utility.compareEq(p.start, cur)) {
-					Segment left = new Segment(p.start, cur, p.slope, p.intercept);
+					Segment left = SegmentPool.obtain(p.start, cur, p.slope, p.intercept);
 					left.next = p;
 					if (prev == null)
 						head = left;
@@ -1056,11 +1235,12 @@ public class PiecewiseLinearFunction {
 						prev.next = left;
 					p.start = cur;
 					prev = left;
+					continue;
 				} else {
 					prev = p;
 				}
 				if (!Utility.compareEq(p.end, nxt)) {
-					Segment right = new Segment(nxt, p.end, p.slope, p.intercept);
+					Segment right = SegmentPool.obtain(nxt, p.end, p.slope, p.intercept);
 					right.next = p.next;
 					p.next = right;
 					p.end = nxt;
@@ -1078,16 +1258,44 @@ public class PiecewiseLinearFunction {
 
 		if (q != null) {
 			// 函数g末尾还有一段，需要合并进来
-			q.start = end;// 此时相当于把函数g破坏了，但g也没用了
-			prev.next = q;
-			tail = g.tail;
-			// 直接接过来
+			if(Utility.compareEq(q.slope, prev.slope)&&Utility.compareEq(q.intercept, prev.intercept)) {
+				prev.end=q.end;
+				prev.next=q.next;
+				//tail的复位最后重新刷一次吧
+			}
+			else {
+				q.start = end;// 此时相当于把函数g破坏了，但g也没用了
+				prev.next = q;
+				tail = g.tail;
+				// 直接接过来
+			}
+			
 		}
-
+		if(lastGSegBeforeDomain!=null) {
+			//如果进入，肯定g函数前边有一段
+			if(prevGH!=null) prevGH.next=lastGSegBeforeDomain;
+			else gHeads=lastGSegBeforeDomain;
+			if((Utility.compareEq(lastGSegBeforeDomain.slope, head.slope))&&(Utility.compareEq(lastGSegBeforeDomain.intercept, head.intercept))) {
+				lastGSegBeforeDomain.next=head.next;
+				lastGSegBeforeDomain.end=head.end;
+			}else {
+				lastGSegBeforeDomain.next=head;
+			}
+			
+			head=gHeads;
+		}
+		
 		// 8) 末尾合并相邻同值同斜率片段、保持非增
+		//这个进入的时候还是有可能存在连续段的斜率和intercept是相同的，比如this函数最后一个和g相邻的部分，此时相当于前半部分取小，再和最后剩下的拼接，还是原来的东西
 		normalize();
 	}
 
+	
+	public void release() {
+		if(!Configure.SegmentPool) return;
+		SegmentPool.release(this.head);
+	}
+	
 	/**
 	 * 双指针扫描版本：对两个函数在全域上下做逐点最小合并， 同时保留各自非重叠区间，最后 normalize()。
 	 */
@@ -1101,7 +1309,7 @@ public class PiecewiseLinearFunction {
 		}
 		if (g.head == null)
 			return;
-		
+
 		resetMinimum();
 		// 2) 公共定义域
 		double commonS = Math.max(this.head.start, g.head.start);
@@ -1202,7 +1410,7 @@ public class PiecewiseLinearFunction {
 	private void replaceSegment(Segment prev, Segment p, double cur, double nxt, double newSlope, double newIntercept) {
 		// 拆出前半段
 		if (!Utility.compareEq(p.start, cur)) {
-			Segment left = new Segment(p.start, cur, p.slope, p.intercept);
+			Segment left = SegmentPool.obtain(p.start, cur, p.slope, p.intercept);
 			left.next = p;
 			if (prev == null)
 				head = left;
@@ -1212,12 +1420,12 @@ public class PiecewiseLinearFunction {
 			prev = left;
 		}
 		// 构造替换段
-		Segment mid = new Segment(cur, nxt, newSlope, newIntercept);
+		Segment mid = SegmentPool.obtain(cur, nxt, newSlope, newIntercept);
 		// 拆出后半段或直接接续
 		if (Utility.compareEq(p.end, nxt)) {
 			mid.next = p.next;
 		} else {
-			Segment right = new Segment(nxt, p.end, p.slope, p.intercept);
+			Segment right = SegmentPool.obtain(nxt, p.end, p.slope, p.intercept);
 			right.next = p.next;
 			mid.next = right;
 		}
@@ -1228,71 +1436,71 @@ public class PiecewiseLinearFunction {
 		if (mid.next == null)
 			tail = mid;
 	}
-	
-	public double[] findMinimal(boolean convex,boolean fromLeft) {
-		//对任意一个函数，遍历寻找全局最小值的成本以及对应的t值
-		//convex=false表示不一定是convex，可能是convex，不冲突
-		//fromLeft为true表示从左找第一个最小的 否则找最右侧的
-		//TODO 此处的实现只适用于连续的函数，只扫描了每个段的一个端点
-		//对于不连续的，还要进一步处理
-		double min=Utility.big_M;
-		double leftX=0,rightX=0;
 
-		
-		if(minValuePairsLeft!=null&&fromLeft) {
+	public double[] findMinimal(boolean convex, boolean fromLeft) {
+		// 对任意一个函数，遍历寻找全局最小值及对应的 t 值。
+		// convex=false 表示函数不一定凸；fromLeft=true 表示返回最左侧最小点，否则返回最右侧最小点。
+		// 2026-05-13: 原实现只扫描每段 start，再单独扫描 tail.end。对连续函数这样足够，
+		// 因为上一段 end 的左极限等于下一段 start 的值。并且当前 normalize() 是 forward
+		// normalize，内部会调用 minimizePrefixInPlace()，函数整体单调不增；在这种语义下，
+		// 旧逻辑通常也是有效的，最小值会出现在某段 start 或 tail.end。
+		// 2026-05-14: backward 函数当前不走 normalize()，而是直接 minimizeSuffixInPlace()。
+		// 如果 backward 函数由连续惩罚函数递推得到并保持连续、单调不减，旧逻辑一般也没问题；
+		// 即便存在向上的 vertical gap，只看最小值时左侧已有更小值，通常仍能找到正确成本。
+		// 但若后续对 backward label 也做合并取小、占优裁剪或其他集合包络操作，可能产生
+		// vertical gap：上一段 end 的左极限比下一段 start 更小。此时风险主要不在最小成本，
+		// 而在 fromRight 要找“最右侧最优时间点”，只看 start 可能返回得过早。
+		// 因此这里先不区分 forward/backward，
+		// 直接扫描每段 start 和按当前段计算的 end 值，优先保证端点语义稳健。
+		// 若后续性能成为瓶颈，再按函数方向和凸性做加速。
+		double min = Utility.big_M;// 这里必须用 big_M，不能用 curUpperBound；部分合并逻辑比较的是成本差值。
+		double leftX = 0, rightX = 0;
+
+		if (minValuePairsLeft != null && fromLeft) {
 			return minValuePairsLeft;
 		}
-		if(minValuePairsRight!=null&&!fromLeft) {
+		if (minValuePairsRight != null && !fromLeft) {
 			return minValuePairsRight;
 		}
-		
-		
-		if(head==null) {
-			return new double[] {min,leftX};
+
+		if (head == null) {
+			return new double[] {min, -1};
 		}
 		TimerManager.start("分段线性函数最小化");
-		for(Segment p=head;p!=null;p=p.next) {
-			double leftValue=p.getValue(p.start);
-			
-			if(Utility.compareLt(leftValue,min)) {
-				min=leftValue;
-				leftX=rightX=p.start;
-			}else {
-				if(Utility.compareEq(leftValue,min)) {
-					rightX=p.start;
-				}	
+		for (Segment p = head; p != null; p = p.next) {
+			double startValue = p.getValue(p.start);
+			if (Utility.compareLt(startValue, min)) {
+				min = startValue;
+				leftX = rightX = p.start;
+			} else if (Utility.compareEq(startValue, min)) {
+				rightX = p.start;
 			}
-			
-			if(Utility.compareGe(p.slope,0)&&convex) break;
-			//对凸函数,到最后一个斜率<=0的地方就好了
-			
+
+			double endValue = p.getValue(p.end);
+			if (Utility.compareLt(endValue, min)) {
+				min = endValue;
+				leftX = rightX = p.end;
+			} else if (Utility.compareEq(endValue, min)) {
+				rightX = p.end;
+			}
 		}
-		double rightValue=tail.getValue(tail.end);
-		
-		if(Utility.compareLt(rightValue,min)) {
-			min=rightValue;
-			leftX=rightX=tail.end;
-		}else {
-			if(Utility.compareEq(rightValue,min)) {
-				rightX=tail.end;
-			}	
-		}
-		this.minValuePairsLeft=new double[2];
-		this.minValuePairsRight=new double[2];
-		minValuePairsLeft[0]=min;minValuePairsLeft[1]=leftX;
-		minValuePairsRight[0]=min;minValuePairsRight[1]=rightX;
+		this.minValuePairsLeft = new double[2];
+		this.minValuePairsRight = new double[2];
+		minValuePairsLeft[0] = min;
+		minValuePairsLeft[1] = leftX;
+		minValuePairsRight[0] = min;
+		minValuePairsRight[1] = rightX;
 		TimerManager.end("分段线性函数最小化");
-		if(fromLeft) return minValuePairsLeft;
-		else return minValuePairsRight;
-	
-		
+		if (fromLeft)
+			return minValuePairsLeft;
+		else
+			return minValuePairsRight;
+
 	}
-	
-	
 
 	public void resetMinimum() {
-		minValuePairsLeft=null;
-		minValuePairsRight=null;
+		minValuePairsLeft = null;
+		minValuePairsRight = null;
 	}
 
 }

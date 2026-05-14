@@ -10,13 +10,16 @@ public class EngineVND {
 
 	public Data data;
 	public Solution s;
-	public int maxTimeLimit, maxIter;
+	
 
-	public EngineVND(Data data, Solution s, int maxTimeLimit, int maxIter) {
+	public EngineVND(Data data, Solution s) {
 		this.data = data;
 		this.s = s;
-		this.maxIter = maxIter;
-		this.maxTimeLimit = maxTimeLimit;
+		Utility.resetCurUpperBound(s.curCost);
+		for(int m=0;m<data.m;m++) {
+			s.updateInformationM(m);//重刷一次
+		}
+		
 	}
 
 	/** 生成所有 operator （依次执行 VND） */
@@ -45,7 +48,7 @@ public class EngineVND {
 		int iter = 0;
 		
 		boolean improved = true;
-		while (improved&&iter<maxIter) {
+		while (improved) {
 			
 			improved = false;
 			List<Move> ops = buildOps();
@@ -67,8 +70,18 @@ public class EngineVND {
 		}
 	
 	public boolean commit(Move move) {
+//		System.out.println("commit ");
 		TimerManager.start("commit");
 		boolean imp=move.commit();
+		if(imp&&Utility.compareLt(s.curCost,data.configure.bestSolution.curCost )) {
+//			System.out.println("commit 更新最优解");
+			data.configure.updateBestSolution(s);
+		
+		}
+		if(imp) {
+			//有改进，则更新当前局部上界
+			Utility.updateCurUpperBound(s.curCost);
+		}
 		TimerManager.end("commit");
 		return imp;
 	}

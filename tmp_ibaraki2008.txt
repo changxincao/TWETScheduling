@@ -1,0 +1,1370 @@
+Discrete Applied Mathematics 156 (2008) 2050 – 2069
+www.elsevier.com/locate/dam
+An iterated local search algorithm for the vehicle routing problem
+with convex time penalty functions
+Toshihide Ibarakia, Shinji Imahorib,∗, Koji Nonobec, Kensuke Sobued, Takeaki Unoe,
+Mutsunori Y agiuraf
+a Department of Informatics, School of Science and Technology, Kwansei Gakuin University, Sanda 669-1337, Japan
+bDepartment of Mathematical Informatics, Graduate School of Information Science and Technology, University of Tokyo, Tokyo 113-8656, Japan
+cDepartment of Engineering and Design, Faculty of Engineering and Design, Hosei University, Tokyo 102-8160, Japan
+dToyota Motor Corporation, Toyota 471-8571, Japan
+eNational Institute of Informatics, Tokyo 101-8430, Japan
+f Department of Computer Science and Mathematical Informatics, Graduate School of Information Science, Nagoya University, Nagoya 464-8603,
+Japan
+Received 23 June 2006; received in revised form 16 April 2007; accepted 23 April 2007
+Available online 22 May 2007
+Abstract
+We propose an iterated local search algorithm for the vehicle routing problem with time window constraints. We treat the time
+window constraint for each customer as a penalty function, and assume that it is convex and piecewise linear. Given an order of
+customers each vehicle to visit, dynamic programming (DP) is used to determine the optimal start time to serve the customers so that
+the total time penalty is minimized. This DP algorithm is then incorporated in the iterated local search algorithm to efﬁciently evaluate
+solutions in various neighborhoods. The amortized time complexity of evaluating a solution in the neighborhoods is a logarithmic
+order of the input size (i.e., the total number of linear pieces that deﬁne the penalty functions). Computational comparisons on
+benchmark instances with up to 1000 customers show that the proposed method is quite effective, especially for large instances.
+© 2007 Elsevier B.V . All rights reserved.
+Keywords: V ehicle routing problem with time windows; Metaheuristics; Dynamic programming
+1. Introduction
+The vehicle routing problem (VRP) is the problem of minimizing the total distance traveled by a number of vehicles,
+under various constraints, where each customer must be visited exactly once by a vehicle. This is one of the representative
+combinatorial optimization problems and is known to be NP-hard. Among variants of VRP , the VRP with capacity and
+time window constraints, called the vehicle routing problem with time windows (VRPTW), has been widely studied in
+the last decade. The capacity constraint signiﬁes that the total load on a route cannot exceed the capacity of the vehicle
+∗ Corresponding author.
+E-mail addresses: ibaraki@ksc.kwansei.ac.jp (T. Ibaraki), imahori@mist.i.u-tokyo.ac.jp (S. Imahori), nonobe@hosei.ac.jp (K. Nonobe),
+uno@nii.jp (T. Uno), yagiura@nagoya-u.jp (M. Y agiura).
+0166-218X/$ - see front matter © 2007 Elsevier B.V . All rights reserved.
+doi:10.1016/j.dam.2007.04.022
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2051
+serving the route. The time window constraint signiﬁes that each vehicle must start the service at each customer in
+the period speciﬁed by the customer. The VRPTW has a wide range of applications such as bank deliveries, postal
+deliveries, school bus routing and so on. For an extensive survey on heuristic and metaheuristic approaches for the
+VRPTW, see Refs. [5,6].
+If the capacity and time window constraints must be satisﬁed strictly, such problem is called the VRPHTW (H stands
+for hard). For this problem, even just ﬁnding a feasible solution with a given number of vehicles is known to be NP-
+complete, because it includes the (one-dimensional) bin packing problem [10] as a special case. Thus, it is inefﬁcient
+to search only within the feasible region of the VRPHTW, especially when the constraints are tight. Moreover, in many
+real-world situations, these constraints can be violated to some extent. Considering these, we treat these two types of
+constraints as soft (i.e., can be violated) in this paper. This problem is called the VRPSTW (S stands for soft), and
+the amount of violation of soft constraints is penalized by using penalty functions and added to the objective function.
+In this case, it is not trivial to determine the optimal start time of services at all customers so that the total penalty is
+minimized after ﬁxing the order of customers for each vehicle to visit.
+The time penalty function is the function that penalizes the amount of violation of time window constraints for
+customers. In most of the previous work for the VRPTW [23,28,29,31], only one time window is allowed for each
+customer and in this case the time penalty function is convex. In the literature [8,11,23,31], algorithms for particular
+convex time penalty functions were proposed in order to treat the time window constraint as a soft constraint. In [31],
+the time penalty for each customer is +∞ for earliness and linear for tardiness, and an O(1) time algorithm to compute
+approximately the optimal time penalty for a solution in neighborhoods was proposed. In [8,23], the time penalty is
+linear for both of earliness and tardiness, and O (n
+2
+k) time algorithms to compute the penalty of a given route of vehicle
+k were proposed, where nk is the number of customers assigned to vehicle k. If the time penalty function for each
+customer is the absolute deviation from a speciﬁed time, the problem to determine the optimal start time of services at
+all customers is called the isotonic median regression problem, which has been extensively studied. To our knowledge,
+the best time complexity for this problem (for a vehicle k)i sO (n
+k log nk) [1,11,17].
+The problem with multiple time windows [9,20] and other variants of VRPTW [16,30] have also been considered. In
+our previous paper [20], the time penalty function can be nonconvex and discontinuous as long as piecewise linear. Let
+/afii9829k be the total number of linear pieces of the time penalty functions for the depot and all customers assigned to vehicle
+k, and let /afii9829max be the maximum of /afii9829k among all vehicles. We proposed a dynamic programming (DP) algorithm that
+runs in O(nk /afii9829k) time when the problem of minimizing the time penalty of vehicle k is solved from scratch. This DP
+algorithm was incorporated into metaheuristic algorithms based on local search (LS). We also designed a sophisticated
+data structure with which the optimal time penalty of a solution in neighborhoods is computed in O (/afii9829
+max) amortized
+time. However, this computation time is still expensive when the number of customers becomes large, since /afii9829k usually
+depends linearly on the number of customers assigned to vehiclek. Moreover, it is observed in many practical situations
+that each customer has only one time window. In this paper, hence, the time penalty function is assumed to be convex
+and piecewise linear.
+One of the main contributions of this paper is to propose an efﬁcient algorithm to deal with convex time penalty
+functions. We use the DP technique in order to compute the optimal time penalty of a vehicle that serves customers in
+a speciﬁed order. The time complexity of our DP algorithm for convex time penalty functions is O (/afii9829
+k log /afii9829k) for each
+vehicle k, while the time to evaluate a solution in various neighborhoods is O (log /afii9829max) amortized time.
+The essential part of the VRP , i.e., assigning customers to vehicles and determining the visiting order of each vehicle,
+is determined by an LS algorithm. We use basic neighborhoods such as the cross exchange and 2-opt *, limiting the
+neighborhood sizes by using parameters. The LS based on these neighborhoods is then incorporated in the framework
+of metaheuristics. Among many possible metaheuristics based on the LS, we utilize the iterated local search (ILS)
+[21]. As it is not easy to specify appropriate weights of constraints a priori, we introduce a mechanism of adaptively
+controlling penalty weights into the ILS, which turns out to be very effective.
+To see the performance of our algorithm, we conduct computational experiments on representative benchmark
+instances of the VRPTW: (1) Solomon’s benchmark instances [29] and (2) Gehring and Homberger’s benchmark
+instances [12]. For Solomon’s instances, the solution quality of our algorithm is competitive with those of recent
+algorithms developed for the VRPTW. For Gehring and Homberger’s instances, our results are the best among the
+tested algorithms. This tendency becomes clearer for larger scale instances such as ones with 800 or 1000 cus-
+tomers. It should be pointed out that these benchmark instances are special cases of the instances that our algorithm
+can treat.
+
+2052 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+The remainder of this paper is organized as follows. In Section 2, we deﬁne the problem that we consider in this
+paper. In Section 3, we explain the problem to determine the optimal start time of services for a given route, and propose
+a DP algorithm. In Section 4, we propose LS and metaheuristic algorithms for ﬁnding a good set of routes. In Section
+5, we propose some ideas to accelerate the speed of our LS algorithm. In Section 6, we show our computational results
+on representative benchmark instances with up to 1000 customers. We give concluding remarks and discuss some
+extensions of our algorithm in Section 7.
+2. Problem
+In this section, we formulate the VRP with convex time penalty functions. Let G = (V, E) be a complete directed
+graph with a vertex set V ={ 0, 1,...,n } and an edge set E ={ (i, j)|i, j ∈ V,i ̸= j}, and M ={ 1, 2,...,m } be a set
+of vehicles. V ertex 0 is the depot and other vertices are customers. The following parameters are associated with each
+customer i ∈ V \{0}, the depot, each edge (i, j) ∈ E, and each vehicle k ∈ M:
+• an amount q
+i ( ⩾0) of the resource to be delivered from the depot to customer i,
+• a service time ui (⩾0) at customer i,
+• a time penalty function pi(t) ( ⩾0) of the start time t of the service for customer i,
+• a time penalty function pd
+0(t) ( ⩾0) of the departure time t from the depot,
+• a time penalty function pa
+0(t) ( ⩾0) of the arrival time t at the depot,
+• a distance dij ( ⩾0) for edge (i, j),
+• a travel time tij ( ⩾0) for edge (i, j),
+• a capacity Qk ( ⩾0) for vehicle k.
+Distances dij and travel times tij are asymmetric in general; i.e., dij ̸= dji and tij ̸= tji may hold. Each time penalty
+function pi(t), pd
+0(t) or pa
+0(t) is nonnegative, convex and piecewise linear. For convenience, we assume mintpi(t) = 0,
+mintpd
+0(t) = 0 and mintpa
+0(t) = 0 without loss of generality. It is also assumed that each function is represented by a
+linked list of linear pieces.
+We deﬁne a route by a sequence of the customers served by one vehicle. Let /afii9846k denote the route traveled by vehicle
+k, and /afii9846= (/afii98461, /afii98462,..., /afii9846m). We denote by /afii9846k(h) the hth customer in /afii9846k , and we deﬁne /afii9846k(0) = /afii9846k(nk + 1) = 0, where
+nk is the number of customers for vehicle k ∈ M (i.e., each vehicle k starts from the depot, visits nk customers, and
+comes back to the depot). We deﬁne 0–1 variables yik(/afii9846) ∈{ 0, 1} for i ∈ V \{0} and k ∈ M by
+yik(/afii9846) = 1 ⇐⇒∃ h ∈{ 1, 2,...,n k},i = /afii9846k(h).
+That is, yik(/afii9846) = 1 if and only if vehicle k visits customer i. Moreover, let si be the start time of service at customer
+i, sd
+k be the departure time of vehicle k from the depot and sa
+k be the arrival time of vehicle k at the depot, and
+let s = (s1,s 2,...,s n,s d
+1,s d
+2,...,s d
+m,s a
+1,s a
+2,...,s a
+m). Note that each vehicle is allowed to wait at customers before
+starting services. The total traveling cost dsum(/afii9846) of all vehicles, the total penalty psum(s) for time window constraints,
+and the total amount qsum(/afii9846) of capacity excess are expressed as
+dsum(/afii9846) =
+∑
+k∈M
+nk∑
+h=0
+d/afii9846k(h)/afii9846k(h+1),
+psum(s) =
+∑
+i∈V \{0}
+pi(si) +
+∑
+k∈M
+pd
+0(sd
+k ) +
+∑
+k∈M
+pa
+0(sa
+k),
+qsum(/afii9846) =
+∑
+k∈M
+max
+⎧
+⎨
+⎩
+∑
+i∈V \{0}
+qiyik(/afii9846) − Qk, 0
+⎫
+⎬
+⎭ .
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2053
+The VRP with convex time penalty functions is now formulated as follows:
+minimize cost(/afii9846, s) = dsum(/afii9846) + psum(s) + qsum(/afii9846) (1)
+subject to
+∑
+k∈M
+yik(/afii9846) = 1,i ∈ V \{0}, (2)
+sd
+k + t/afii9846k(0)/afii9846k(1) ⩽s/afii9846k(1),k ∈ M, (3)
+s/afii9846k(h) + u/afii9846k(h) + t/afii9846k(h)/afii9846k(h+1) ⩽s/afii9846k(h+1),k ∈ M, h = 1, 2,...,n k − 1, (4)
+s/afii9846k(nk) + u/afii9846k(nk) + t/afii9846k(nk)/afii9846k(nk+1) ⩽sa
+k,k ∈ M. (5)
+Constraint (2) means that every customer i ∈ V \{0} must be served exactly once by a vehicle. Constraints (3) and (4)
+require that the start time si of service for customer i must not be before the arrival time at customer i, and constraint
+(5) means that each vehicle k can return to the depot only after serving all the customers assigned to vehicle k.A sf o r
+the objective function (1), the time window and capacity constraints are treated as soft constraints, and their violations
+are evaluated as the penalties p
+sum(s) and qsum(/afii9846), respectively, in the objective function. Note that the weighted sum
+dsum(/afii9846) + /afii9839ppsum(s) + /afii9839qqsum(/afii9846) with constants /afii9839p ( ⩾0) and /afii9839q ( ⩾0) might seem more general; however, such a
+weighted sum can be represented in the above formulation by regarding /afii9839ppi(t), /afii9839ppd
+0(t), /afii9839ppa
+0(t), /afii9839qqi and /afii9839qQk
+(i ∈ V \{0}, k ∈ M) as the given input, and hence the weights are omitted for simplicity unless otherwise stated.
+Note that we call a solution that satisﬁes constraints (2)–(5) a feasible solution throughout the paper; i.e., a feasi-
+ble solution does not necessarily satisfy the time window and capacity constraints. If time window and/or capacity
+constraints are to be satisﬁed, the penalties p
+sum(s) and/or qsum(/afii9846) should be set sufﬁciently large.
+Remark. Although the number m of vehicles is sometimes treated as a decision variable in the literature, we consider
+it as a given constant in this paper for the following two reasons. (1) In many applications, the number of vehicles
+m is ﬁxed. (2) Algorithms become simpler if m is treated as a constant, since route elimination operators will not be
+necessary. For problems where m is a decision variable, we need to try various values of m to ﬁnd a small feasible m;
+however, in many practical situations, an appropriate range of m is known in advance.
+3. Optimal start time of services
+In this section, we consider the problem of determining the start time to serve the customers in a given route /afii9846
+k so
+that the total time penalty is minimized. This problem can be solved independently for each route. (How to determine
+a route /afii9846
+k will be discussed in Section 4.) We call this problem the optimal start time problem, which is described as
+follows:
+minimize pd
+0(sd
+k ) +
+nk∑
+i=1
+p/afii9846k(i)(s/afii9846k(i)) + pa
+0(sa
+k)
+subject to sd
+k + t/afii9846k(0)/afii9846k(1) ⩽s/afii9846k(1),
+s/afii9846k(h) + u/afii9846k(h) + t/afii9846k(h)/afii9846k(h+1) ⩽s/afii9846k(h+1),h = 1, 2,...,n k − 1,
+s/afii9846k(nk) + u/afii9846k(nk) + t/afii9846k(nk)/afii9846k(nk+1) ⩽sa
+k .
+Let /afii9829(p) be the number of pieces in a piecewise linear function p(t) , and let the total number of pieces in the penalty
+functions for all customers in a route /afii9846k (including the depot) be /afii9829k = ∑nk
+h=1 /afii9829(p/afii9846k(h)) + /afii9829(pd
+0) + /afii9829(pa
+0). We propose
+an O(/afii9829k log /afii9829k) time algorithm to solve this problem by DP . For this problem, there are several efﬁcient algorithms
+that have the same time complexity as the algorithm in this section [1,17]. However, our DP algorithm is simpler and
+utilized to design a more efﬁcient algorithm for evaluating solutions in various neighborhoods in Section 5.1.2.
+3.1. Dynamic programming
+For each h = 0, 1,...,n k + 1, we deﬁne function f k
+h (t) to be the minimum sum of the penalty values for customers
+/afii9846k(0), /afii9846k(1) ,..., /afii9846k(h) under the condition that all of them are served in this order and the service for /afii9846k(h) starts by
+
+2054 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+time t. We call this the forward minimum penalty function . For convenience, we also deﬁne values
+/afii9848k
+h = u/afii9846k(h) + t/afii9846k(h)/afii9846k(h+1)
+for customers h = 1, 2,...,n k ; i.e., /afii9848k
+h is the sum of the service time at the hth customer and the travel time from this
+to the next customer. Based on the idea of DP , f k
+h (t) can be computed by
+f k
+0 (t) = min
+t′ ⩽t
+pd
+0(t′),
+f k
+h (t) = min
+t′ ⩽t
+(f k
+h− 1(t′ − /afii9848k
+h− 1) + p/afii9846k(h)(t′)), h = 1, 2,...,n k ,
+f k
+nk+1(t) = min
+t′ ⩽t
+(f k
+nk (t′ − /afii9848k
+nk ) + pa
+0(t′)), (6)
+where /afii9848k
+0 = t/afii9846k(0)/afii9846k(1). The minimum time penalty value for the entire route /afii9846k (denoted by p∗
+sum(/afii9846k)) can be obtained
+by
+p∗
+sum(/afii9846k) = mint f k
+nk+1(t). (7)
+Moreover, the optimal start time s/afii9846k(h) of the service for each customer /afii9846k(1), /afii9846k(2) ,..., /afii9846k(nk), the departure time
+sd
+k from the depot and the arrival time sa
+k at the depot can be computed backward by
+sa
+k = arg mint f k
+nk+1(t),
+s/afii9846k(h) = arg min
+t ⩽s/afii9846k(h+1)− /afii9848k
+h
+f k
+h (t), h = nk,n k − 1,..., 1,
+sd
+k = arg min
+t ⩽s/afii9846k(1)− /afii9848k
+0
+f k
+0 (t), (8)
+where s/afii9846k(nk+1) = sa
+k .
+3.2. Algorithm and time complexity
+In this section, we consider the data structure and algorithm for computing forward minimum penalty functions f k
+h
+in the recurrence formula (6).
+We ﬁrst consider some characteristics of f k
+h . Since functions pi , pd
+0 and pa
+0 are convex and piecewise linear, each
+f k
+h is also convex and piecewise linear. Moreover, each f k
+h is nonincreasing by deﬁnition. The number of linear pieces
+for f k
+h is O(/afii9829k).
+In order to compute f k
+h in the recurrence formula (6), we need the following three operations:
+1. Computing f( t) := f( t− /afii9848) (called shift operation).
+2. Computing f( t) := f( t)+ g(t) (called add operation).
+3. Computing f( t) := mint′ ⩽tf( t′) (called minimize operation).
+Recall that functions f and g are convex and piecewise linear, and /afii9848is a constant. Note also that we represent function
+g by a linked list of linear pieces. To support the above operations efﬁciently, we use the following data structure to
+represent function f:
+• A balanced binary search tree with /afii9829(f ) leaves, whose height is denoted by htree and has a value c (called tree
+value). Each leaf v has an interval [tl
+v,t r
+v], and each node v (including internal nodes and leaves) of this tree has
+values av , bv and /afii9833v , where av and /afii9833v are used to compute the gradient and bv is used to compute the intercept,
+and how their values are controlled will be explained later in this section.
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2055
+• Each leaf of the tree represents a linear piece of function f, where the /afii9825th leaf in the inorder corresponds to the
+/afii9825th linear piece of f counted from left.
+We denote the root of the tree by v0, and the parent, the left child and the right child of a node v by H(v) , L(v) and
+R(v), respectively. We also denote the rightmost leaf in the descendants of an internal node v by ˜R(v), and we deﬁne
+˜R(v) = v for each leaf v. Each node v has pointers to H(v) , L(v), R(v) and ˜R(v), if they exist. We represent the set
+of nodes in the path from a node v to a node v′ as ℘(v,v ′), where v′ is a descendant of v. Consider a linear piece of
+function f that has a gradient a, an intercept b and an interval [tl,t r], which is assigned to leaf v. The interval of leaf v
+satisﬁes [tl
+v,t r
+v]=[ tl − c,t r − c], where c is the tree value. The values av′ and bv′ kept in nodes v′ ∈ ℘(v 0,v) satisfy
+the following equations:
+∑
+v′∈℘(v 0,v)
+av′ = a,
+∑
+v′∈℘(v 0,v)
+bv′ = b.
+The tree value c, intervals [tl
+v,t r
+v] of leaves v, and values av and bv of nodes v are appropriately updated during the
+execution of the algorithm as explained later.
+It is possible to shift a function f in O(1) time by updating the tree value c.F o rag i v e nt, we can ﬁnd the linear piece
+whose interval [tl,t r] satisﬁes tl ⩽t<t r in O(htree) time: we ﬁrst set v := v0. For the leaf node ˜R(L(v)),i f t<t r
+v + c
+holds, then we set v := L(v). Otherwise, we set v := R(v). We repeat this operation until v becomes a leaf node of
+the tree, and then output the linear piece corresponding to the leaf v.
+As for the value /afii9833v of each node v,w es e t
+/afii9833v =
+∑
+v′∈℘(v, ˜R(v))
+av′ .
+It is also possible to ﬁnd the rightmost linear piece whose gradient is less than a given constant /afii9825in O(htree) time: we
+ﬁrst set v := v0. The gradient of the linear piece corresponding to the leaf node ˜R(L(v)) can be computed by
+∑
+v′∈℘(v 0,v)
+av′ + /afii9833L(v) . (9)
+If it is larger than or equal to /afii9825,w es e t v := L(v). Otherwise, we set v := R(v). We repeat this operation until v
+becomes a leaf, and output the linear piece corresponding to the leaf v. The computation of (9) can be done in constant
+time for each v, because we can use the value of ∑
+v′∈℘(v 0,H(v)) av′ already computed for the parent.
+We now explain how to calculate and store the function f k
+h by using this data structure. First, we show the procedure
+for the ﬁrst equation of (6). We construct a balanced binary tree with leaves corresponding to the linear pieces of pd
+0
+whose gradients are less than 0. For each leaf v, we set an interval [tl
+v,t r
+v] and values av , bv for the corresponding
+linear piece. We add another leaf v to the rightmost position of this tree; av is 0, tr
+v is +∞ , and we set bv and tl
+v so that
+the resulting function becomes continuous. We set c = 0 for this tree, av = 0 and bv = 0 for all internal nodes v, and
+/afii9833v = a ˜R(v) for all nodes v. The time complexity of this computation is O (/afii9829(pd
+0)).
+We then explain the procedure for the second equation of (6). Since the procedure for the third equation is similar,
+we omit its explanation. For the shift operation f k
+h− 1(t′ − /afii9848), we update the tree value by c := c + /afii9848so that the intervals
+of the leaves are shifted. The add operation f k
+h− 1(t′ − /afii9848) + p/afii9846k(h)(t′) is realized as follows. Our basic strategy for this
+operation is adding each linear piece of g(t)(=p/afii9846k(h)(t′)) to function f( t) (=f k
+h− 1(t′ − /afii9848)) one by one. Consider a
+situation of adding a linear piece having gradient a, intercept b and interval [tl,t r] to the binary tree corresponding to
+the function f( t) with tree value c. We ﬁnd the leaf v/afii9825(resp., v/afii9826) satisfying tl
+v/afii9825⩽tl − c<t r
+v/afii9825(resp., tl
+v/afii9826<t r − c ⩽tr
+v/afii9826).
+If tl
+v/afii9825̸= tl − c holds, we divide leaf v/afii9825into two leaves which have intervals [tl
+v/afii9825,t l − c] and [tl − c,t r
+v/afii9825], and call the
+new leaf withinterval [tl − c,t r
+v/afii9825] as v/afii9825. We divide leaf v/afii9826into two leaves and deﬁne v/afii9826similarly (if necessary). In
+order to add the gradient a and intercept b to leaves whose intervals are [tl − c,t r
+v/afii9825], [tr
+v/afii9825,t ′′],..., [tl
+v/afii9826,t r − c],w ea d d
+a and b to the values av and bv of nodes v that satisfy one of the following three conditions:
+1. R(H(v)) = v, H(v) is not an ancestor of v/afii9826but that of v/afii9825, v is not an ancestor of v/afii9825,
+
+2056 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+2. L(H(v)) = v, H(v) is not an ancestor of v/afii9825but that of v/afii9826, v is not an ancestor of v/afii9826,
+3. v = v/afii9825or v = v/afii9826.
+It is easy to see that the number of nodes whose values are changed is O (htree) and we can change those values in
+O(htree) time. The resulting tree may not satisfy the conditions of a balanced tree; we apply a balancing procedure that
+runs in O(htree) time if necessary. Such an insertion is conducted for all linear pieces of g(t) . Thus, the time complexity
+of computing f( t)+ g(t) is O(/afii9829(g)htree) time.
+For the minimize operation mint′ ⩽t(f k
+h− 1(t′ − /afii9848) + p/afii9846k(h)(t′)), we ﬁnd the rightmost linear piece whose gradient is
+less than 0 in O (htree) time. Recall that function f k
+h− 1(t − /afii9848) + p/afii9846k(h)(t) is convex. We then remove the unnecessary
+portion of the tree (i.e., those with nonnegative gradient), and add a new leaf v to the rightmost position of this tree; av
+is 0, tr
+v is +∞ , and we set bv and tl
+v so that the resulting function becomes continuous. We apply a balancing procedure
+for this tree (if necessary). The computational complexity for these operations is O (htree).
+Now, we estimate the time complexity of our DP algorithm. We can compute f k
+nk+1 in O(/afii9829k log /afii9829k) time using the
+above procedures and operations, since htree = O(log /afii9829k) holds throughout the algorithm.
+For the computation of (8) and algorithms in Section 5, we must store f k
+h for all h = 0, 1,...,n k + 1. If we realize
+this naively, just by keeping the binary search trees of all functions independently, we need O (nk /afii9829k) time and space.
+To avoid this, we share common parts among the trees to save the computation time and memory. Consider the case
+of computing f
+k
+h . We ﬁrst generate a tree with only the root node v0 and set L(v0) = L(v′
+0), R(v0) = R(v′
+0) and
+˜R(v0) = ˜R(v′
+0), where v′
+0 is the root of f k
+h− 1. Then, whenever we need to update some information of a node in the
+process of computing f k
+h , we duplicate the node and apply the updates only on the copy, while sharing the other nodes
+with the tree of f k
+h− 1. As the number of new nodes is proportional to the number of updates, we can calculate and store
+functions f k
+h for all h = 0, 1,...,n k + 1i nO (/afii9829k log /afii9829k) time and space.
+After computing the functions f k
+h by (6), we can compute the minimum time penalty value for route /afii9846k in O(log /afii9829k)
+time by (7), and the optimal start time s/afii9846k(h) of services for all customers in this route in O (nk log /afii9829k) time by (8).
+4. LS for ﬁnding a good set of routes
+In this section, we describe an LS algorithm to ﬁnd a good set of routes. The following ingredients must be speciﬁed
+in designing the LS: search space, how to generate an initial solution, a function to evaluate solutions, neighborhoods
+and move strategy. The search space of our LS is the set of all visiting orders /afii9846=(/afii9846
+1, /afii98462,..., /afii9846m) satisfying condition
+(2). Note that a set of visiting orders /afii9846is called a “solution” in Sections 4 and 5, while a solution means (/afii9846, s) in other
+parts of this paper. We generate an initial solution (i.e., an initial set of visiting orders) randomly. The objective function
+is often used in the literature as the evaluation function; however, we do not use the objective function directly in this
+paper. The details of our evaluation function will be explained in Section 4.1. The neighborhood N(/afii9846) of a feasible
+solution /afii9846is a set of solutions obtainable from /afii9846by applying some speciﬁed operations. In Section 4.2, we explain
+the neighborhoods utilized in our LS. As the move strategy, we adopt (a slightly simpliﬁed version of) the aspiration
+plus strategy [14], which will be explained in Section 5.1. We describe a metaheuristic algorithm based on the LS in
+Section 4.3.
+4.1. Evaluation function
+Let p
+∗
+sum(/afii9846) be the minimum value of psum(s) among those s satisfying conditions (3)–(5) for a given set of routes /afii9846.
+Such an s can be computed by solving the optimal start time problem for each route with the DP algorithm of Section
+3. (A more efﬁcient method will be presented in Section 5.1.2.)
+Then the objective function (1) becomes
+cost(/afii9846) = dsum(/afii9846) + p∗
+sum(/afii9846) + qsum(/afii9846). (10)
+Using this objective function as an evaluation function of LS may not work well for problem instances with hard time
+window and/or capacity constraints. In such cases, a large amount of penalty should be imposed on the violation of the
+time window and/or capacity constraints to satisfy them strictly, but it prevents the search from visiting the infeasible
+region of VRPHTW. To avoid such phenomenon, we therefore adopt the following function eval(/afii9846) instead of cost(/afii9846)
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2057
+to evaluate solutions in LS:
+eval(/afii9846) = dsum(/afii9846) + /afii9837pp∗
+sum(/afii9846) + /afii9837qqsum(/afii9846), (11)
+where /afii9837p (resp., /afii9837q ) is a weight of p∗
+sum(/afii9846) (resp., qsum(/afii9846)). We change these weights whenever an LS stops at a locally
+optimal solution. As for the control mechanism of parameters /afii9837p and /afii9837q in our evaluation function eval, we control
+them as follows. If we ﬁnd a solution whose time penalty (resp., capacity penalty) is equal to 0 in LS, the time penalty
+weight /afii9837
+p (resp., the capacity penalty weight /afii9837q ) is decreased to 0 .9/afii9837p (resp., 0.9/afii9837q ) after completion of LS in order
+to emphasize the other part dsum(/afii9846) + qsum(/afii9846) (resp., dsum(/afii9846) + p∗
+sum(/afii9846)). Otherwise, /afii9837p (resp., /afii9837q ) is increased to
+min{1.1/afii9837p, 1} (resp., min{1.1/afii9837q, 1}) after completion of LS so that the inﬂuence of p∗
+sum(/afii9846) (resp., qsum(/afii9846)) is reduced.
+4.2. Neighborhoods
+The neighborhood is a very important factor that determines the effectiveness of LS. In our algorithm, we utilize
+some standard neighborhoods for the VRP such as the cross exchange and 2-opt * neighborhoods, limiting their sizes
+by using parameters.
+iopt neighborhood: The iopt neighborhood [4] is a variant of Or-opt neighborhood [27] used for the traveling
+salesman problem (TSP), which is a special case of the VRP in which the number of vehicles is one. We deﬁne a path
+as a subroute; i.e., a sequence of some consecutive customers served by one vehicle. An iopt operation removes a path
+of length at most Liopt
+path (a parameter) and inserts it into another position of the same route, where the position is limited
+within the length Liopt
+ins (a parameter) from the current position. For each insertion, we consider the following two cases:
+(1) visiting order preserved (called a normal insertion), and (2) visiting order reversed (called a reverse insertion). Note
+that the operation of just inverting the order of a path at its current position is also an iopt operation. Let N
+iopt(/afii9846,k) be
+the set of all solutions obtainable by applying an iopt operation to route /afii9846k of the current solution /afii9846=(/afii98461, /afii98462,..., /afii9846m),
+and let Niopt(/afii9846) = ⋃
+k∈MN iopt(/afii9846,k) . The size of the iopt neighborhood is O (nLiopt
+pathLiopt
+ins
+).
+2-opt neighborhood: The 2-opt neighborhood is one of the well-known neighborhoods for the TSP . A 2-opt operation
+removes a path whose length is at mostL2opt (a parameter), and inserts it into its current position with the reversed order.
+In other words, we remove two edges from a route, and reconstruct a route with two other edges. Let N 2opt(/afii9846,k) be the
+set of all solutions obtainable by applying a 2-opt operation to route /afii9846k , and let N2opt(/afii9846)= ⋃
+k∈MN 2opt(/afii9846,k) . The size
+of this neighborhood is O(nL2opt). Note that if Liopt
+path ⩾L2opt − 1, then N 2opt(/afii9846) ⊆ Niopt(/afii9846) holds. However, parameter
+Liopt
+path is usually set small in order to keep |N iopt(/afii9846)| small, and we use N 2opt(/afii9846) with a large L2opt independently from
+Niopt(/afii9846).
+2-opt* neighborhood: The 2-opt* neighborhood, which was proposed in [28], is a variant of the 2-opt neighborhood.
+A 2-opt* operation removes two edges from two different routes (one from each) to divide each route into two parts,
+and exchanges the second parts of the two routes. Let N 2opt∗
+(/afii9846,k,k ′) be the set of all solutions obtainable by applying
+a 2-opt* operation to two routes /afii9846k and /afii9846k′ of the current solution /afii9846, and let N 2opt∗
+(/afii9846) = ⋃
+k̸=k′ N 2opt∗
+(/afii9846,k,k ′). The
+size of the 2-opt * neighborhood is O(n2).
+Path insertion neighborhood: A path insertion operation removes a path of length at most Lpins (a parameter) from
+a route /afii9846k , and insert it into a different route /afii9846k′ . Let N pins(/afii9846,k,k ′) be the set of all solutions obtainable by applying a
+path insertion operation to two routes /afii9846k and /afii9846k′ , and let N pins(/afii9846)= ⋃
+k̸=k′ N pins(/afii9846,k,k ′). The size of the path insertion
+neighborhood is O (n2Lpins). If the length of the removed path is at most Lpins
+rev (a parameter), we also consider the
+reverse insertion, where Lpins
+rev ⩽Lpins.
+Cross exchange neighborhood: The cross exchange neighborhood was proposed in [31]. A cross exchange operation
+removes two paths from two different routes (one from each), whose length is at most Lcross (a parameter), and
+exchanges them. If the length of removed paths is at most Lcross
+rev (a parameter), we also consider the (both or either)
+reverse insertion. Let Ncross(/afii9846,k,k ′) be the set of all solutions obtainable by applying a cross exchange operation to
+two routes /afii9846k and /afii9846k′ , and let N cross(/afii9846) = ⋃
+k̸=k′ N cross(/afii9846,k,k ′). The size of this neighborhood is O (n2(Lcross)2).
+Combination of the neighborhoods : It is often effective to combine some neighborhoods in an LS algorithm. Our
+LS searches the above ﬁve types of neighborhoods in the order described as follows: iopt, 2-opt, 2-opt *, path insertion
+and cross exchange. Once we ﬁnd a better solution in a neighborhood, we return to the iopt neighborhood. When no
+
+2058 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+improvement is achieved in the ﬁve consecutive neighborhoods, this procedure outputs a locally optimal solution for
+the neighborhoods and terminates.
+4.3. Iterated local search
+If the LS is applied only once, many solutions of better quality may remain unvisited in the search space. To
+overcome this, we use the ILS [21], which is one of the basic frameworks of metaheuristics. In the ILS, the LS is
+executed iteratively and an initial solution of each LS is generated by slightly perturbing a good solution found so far.
+In our ILS, a random cross exchange operation, which randomly chooses two paths from two routes and exchanges
+them each other, is utilized to generate initial solutions. In order to generate a new initial solution, we chooser randomly
+from {1, 2, 3}, and apply random cross exchange operations r times consecutively to the incumbent solution (i.e., the
+best solution found by them).
+5. Efﬁcient implementation of LS
+In this section, we explain various useful ideas to search the neighborhoods efﬁciently. In Section 5.1, we propose
+ideas to speed up the evaluation of solutions in neighborhoods. In Section 5.2, we show two ideas to prune the
+neighborhood. In Section 5.3, we propose other ideas to accelerate the speed of our LS procedure.
+5.1. Evaluation of solutions in neighborhoods
+Let /afii9797d
+sum (resp., /afii9797psum and /afii9797qsum) be the difference in the traveling cost dsum(/afii9846) (resp., the time penalty p∗
+sum(/afii9846)
+and the capacity excess qsum(/afii9846)) between the current solution and a solution in its neighborhood. Then, we deﬁne
+/afii9797eval as
+/afii9797eval = /afii9797dsum + /afii9837p/afii9797psum + /afii9837q /afii9797qsum, (12)
+and move to a solution whose /afii9797eval is negative. In the subsequent subsections, we explain how to evaluate /afii9797dsum,
+/afii9797psum and /afii9797qsum effectively, based on the following two facts: (1) a neighborhood operation generates at most two
+different routes from the current solution and (2) each new route is generated by reconnecting a constant number of
+paths (more precisely, at most four paths) in the current solution.
+We now explain our basic strategy. At the beginning of a neighborhood search, we compute some values and
+functions that will be used during the neighborhood search (called preprocessing). We then evaluate each solution in
+the neighborhood quickly with those values and functions. Thus, our computation consists of the preprocessing part
+and the evaluation part. To avoid calling the preprocessing part too frequently, we adopt the aspiration plus strategy
+[14], which is explained as follows. We evaluate solutions in the neighborhood until we evaluate all the solutions in the
+neighborhood or we use (approximately) the same computation time that was spent for the previous preprocessing. If
+we can ﬁnd improved solutions during the search, we move to the best solution among them. Otherwise, we continue
+the search for the remaining neighbors, based on the ﬁrst admissible move strategy.
+5.1.1. Evaluation of /afii9797q
+sum and /afii9797dsum
+At the beginning of a neighborhood search, we compute
+/afii9828k
+0 = 0,
+/afii9828k
+h = /afii9828k
+h− 1 + q/afii9846k(h),h = 1, 2,...,n k ,
+/p10k
+0 = 0,
+/p10k
+h = /p10k
+h− 1 + d/afii9846k(h− 1)/afii9846k(h),h = 1, 2,...,n k + 1,
+ˆ/p10k
+nk+1 = 0,
+ˆ/p10k
+h = ˆ/p10k
+h+1 + d/afii9846k(h+1)/afii9846k(h),h = nk,n k − 1,..., 1, 0,
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2059
+for all k ∈ M, where /afii9828k
+h is the total amount of resource required by the ﬁrst h customers of route /afii9846k , /p10k
+h is the total
+distance from the depot to the hth customer of route /afii9846k , and ˆ/p10k
+h is the total distance when the vehicle visits customers
+in reverse direction from the (nk + 1)th customer to the hth customer of route /afii9846k . It is possible to compute all of them
+in O(n) time. We evaluate /afii9797qsum and /afii9797dsum for each solution in the neighborhood using these /afii9828k
+h, /p10k
+h and ˆ/p10k
+h.
+As for /afii9797qsum, we observe that /afii9797qsum is equal to 0 for all solutions in N iopt and N2opt , and thus we only consider
+solutions in N2opt∗
+, N pins and N cross. The sum ∑h′
+l=h q/afii9846k(l) of the amount of resources for the hth through the h′th
+customers can be computed in O (1) time by /afii9828k
+h′ − /afii9828k
+h− 1. Since there are only two different routes from the current
+solution and each new route is generated by reconnecting at most three paths, the time complexity to evaluate /afii9797qsum
+is O(1).
+As for /afii9797dsum, the total distance ∑h′− 1
+l=h d/afii9846k(l)/afii9846k(l+1) of the hth through the h′th customers (in the case of the normal
+insertion) can be computed in O (1) time by /p10k
+h′ − /p10k
+h. The total distance ∑h′− 1
+l=h d/afii9846k(l+1)/afii9846k(l) of the h′th through the
+hth customers (in the case of the reverse insertion) can be computed in O (1) time by ˆ/p10k
+h − ˆ/p10k
+h′ . Thus, /afii9797dsum is also
+computed in O(1) time for each solution in the neighborhoods.
+Since the size of each neighborhood |Niopt|, |N 2opt|, |N 2opt∗
+|, |N pins| or |N cross| is larger than O (n) (time for
+preprocessing), the amortized time complexity to evaluate /afii9797qsum and /afii9797dsum for a solution is O (1).
+5.1.2. Evaluation of /afii9797psum
+If /afii9797psum is computed according to (6) from scratch, it takes O(∑
+k∈M′ /afii9829k log /afii9829k) time, where M′ is the set of indices
+of the vehicles related to a neighborhood operation. (Note that |M′|⩽2 holds for any neighborhood considered in
+this paper.) Instead of this, we propose an O (∑
+k∈M′ log /afii9829k) = O(log /afii9829max) time algorithm that computes /afii9797psum for a
+solution /afii9846′ in the neighborhoods, where /afii9829max = maxk∈M /afii9829k . We only explain the algorithm for cases where the number
+of paths contained in a new route is two or three. However, this idea can be extended to a new route obtainable by
+reconnecting a constant number of paths (e.g., by reconnecting four paths).
+In addition to the forward minimum penalty function f
+k
+h (t) of (6), we deﬁne bk
+h(t) as the minimum sum of the time
+penalty values for customers /afii9846k(h), /afii9846k(h + 1) ,..., /afii9846k(nk), /afii9846k(nk + 1) under the condition that all of them are served
+in this order and the service for /afii9846k(h) starts at time t or later. We call this the backward minimum penalty function .I n
+a symmetric manner to the computation of f k
+h (t), bk
+h(t) can be computed by
+bk
+nk+1(t) = min
+t′ ⩾t
+pa
+0(t′),
+bk
+h(t) = min
+t′ ⩾t
+(p/afii9846k(h)(t′) + bk
+h+1(t′ + /afii9848k
+h)), h = nk,n k − 1,..., 1,
+bk
+0(t) = min
+t′ ⩾t
+(pd
+0(t′) + bk
+1(t′ + /afii9848k
+0)). (13)
+Each function bk
+h(t) is convex, piecewise linear and nondecreasing. For a vehiclek, we can calculate and store functions
+bk
+h for all h = 0, 1,...,n k + 1i nO (/afii9829k log /afii9829k) time.
+5.1.2.1. Reconnecting two paths. Let us consider the computation of the minimum time penalty on a new route
+/afii9846′
+k =⟨ 0, /afii9846k1 (h1)⟩.⟨/afii9846k2 (h2), 0⟩
+generated by reconnecting two paths ⟨0, /afii9846k1 (h1)⟩ and ⟨/afii9846k2 (h2), 0⟩, where ⟨/afii9846k(h), /afii9846k(h′)⟩ represents the path from
+/afii9846k(h) to /afii9846k(h′) in route /afii9846k . Using the forward and backward minimum penalty functions, p∗
+sum(/afii9846′
+k) can be computed
+by
+mint (f k1
+h1 (t) + bk2
+h2 (t +˜/afii9848(k1,k 2,h 1,h 2))), (14)
+where
+˜/afii9848(k, k′,h ,h′) = u/afii9846k(h) + t/afii9846k(h)/afii9846k′ (h′).
+If we compute min t(f (t) + b(t)) for two piecewise linear convex functions f and b naively, it takes O(/afii9829(f )+ /afii9829(b))
+time. However, using the fact that the new function f( t) + b(t) is also convex, we can compute the minimum value
+
+2060 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+and the corresponding time t (denoted by s∗)i nO (log /afii9829(f )+ log /afii9829(b)) time under the assumption that functions f
+and b are represented by the balanced search trees deﬁned in Section 3.2. (If the t that achieves the minimum value of
+f( t)+ b(t) is not unique, we deﬁne s∗ = min arg min t (f (t)+ b(t)) .) We note that our procedure is easily extended
+for computing mint
+∑r
+i=1gi(t) in O(∑r
+i=1 log /afii9829(gi)) time.
+We compute mint (f (t)+b(t)) for two convex functions f and b by a variant of binary search based on the following
+fact: suppose that we have a linear piece of f( t) that has gradient af and interval [lf ,r f ], and another linear piece of
+b(t) with gradient ab and interval [lb,r b].I f af +ab is less than 0, s∗⩾ min{rf ,r b} holds; otherwise, s∗⩽ max{lf ,l b}
+holds. For a node v in the balanced search tree representing a function f or b, let a(v) and [l(v), r(v)] be the gradient
+and interval of the linear piece that corresponds to the leaf ˜R(L(v)) (resp., v)i f v is an internal node (resp., a leaf). We
+ﬁrst set vf and vb to be the root nodes of the trees representing f and b, respectively. Using the above fact, we repeat one
+of the following operations until both of vf and vb become leaves: ifa(vf )+a(vb)< 0 holds, then we set vf := R(vf )
+(i.e., vf moves to its right child) if r(vf )<r( vb) holds, or set vb := R(vb) otherwise (i.e., r(vf ) ⩾r(vb)). On the
+other hand, if a(vf ) + a(vb)⩾0 holds, then we set vf := L(vf ) if l(vf )>l( vb),o rs e t vb := L(vb) otherwise (i.e.,
+l(vf ) ⩽l(vb)). The number of these operations is bounded by the sum of the heights of the trees representing f and b,
+since we replace vf or vb to its child node in each iteration. The heights of the trees are O (log /afii9829(f ))and O(log /afii9829(b)),
+respectively, and each iteration takes O(1) time. Hence, the total computation time to compute min t (f( t)+ b(t)) and
+s∗ is O(log /afii9829(f )+ log /afii9829(b)).
+5.1.2.2. Reconnecting three paths. Let us consider the computation of the minimum time penalty of a new route
+/afii9846′
+k =⟨ 0, /afii9846k1 (h1)⟩.⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩.⟨/afii9846k3 (h4), 0⟩ (15)
+generated by reconnecting three paths. For simplicity, we consider only the case where a new route is constructed
+with a normal insertion. For this computation, we use the forward and backward minimum penalty functions, /afii9848k
+h and
+˜/afii9848(k, k′,h ,h′). Moreover, for all candidates of the intermediate path (e.g., ⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩), we compute two types of
+new functions ˜f k
+h,h′ (t) and ˜bk
+h,h′ (t), and values /afii9851( k,h ,h′) whose deﬁnitions are given as follows. The function ˜f k
+h,h′ (t)
+(resp., ˜bk
+h,h′ (t)) is the minimum sum of the time penalty values for customers /afii9846k(h), /afii9846k(h + 1) ,..., /afii9846k(h′) if these
+customers are served in this order and the service for customer /afii9846k(h′) (resp., /afii9846k(h)) starts by (resp., starts on or after)
+time t. Based on the idea of DP , ˜f k
+h,h′ (t) and ˜bk
+h,h′ (t) can be computed by
+˜f k
+h,h(t) = min
+t′ ⩽t
+p/afii9846k(h)(t′), h = 1, 2,...,n k ,
+˜f k
+h,h′ (t) = min
+t′ ⩽t
+( ˜f k
+h,h′− 1(t′ − /afii9848k
+h′− 1) + p/afii9846k(h′)(t′)),
+h = 1, 2,...,n k − 1,h ′ = h + 1,h + 2,..., min{h + Lmax − 1,n k}, (16)
+˜bk
+h,h(t) = min
+t′ ⩾t
+p/afii9846k(h)(t′), h = 1, 2,...,n k ,
+˜bk
+h,h′ (t) = min
+t′ ⩾t
+(p/afii9846k(h)(t′) + ˜bk
+h+1,h′ (t′ + /afii9848k
+h)),
+h′ = 2, 3,...,n k,h = h′ − 1,h ′ − 2,..., max{h′ − Lmax + 1, 1}, (17)
+for all k ∈ M, where Lmax = max{Lcross,L pins}. Since pi(t), pd
+0(t) and pa
+0(t) are convex functions, ˜f k
+h,h′ (t) (resp.,
+˜bk
+h,h′ (t)) is also convex and is nonincreasing (resp., nondecreasing). We calculate and store these functions as well
+as f k
+h (t) and bk
+h(t). This computation is possible in O (Lmax/afii9829k log /afii9829k) time for each vehicle k. We deﬁne the value of
+/afii9851( k,h ,h′) to be the minimum time needed to serve customers /afii9846k(h), /afii9846k(h + 1) ,..., /afii9846k(h′) in this order; that is,
+/afii9851( k,h ,h′) =
+h′− 1∑
+h′′=h
+/afii9848k
+h′′ . (18)
+Note that we can also deﬁne ˜f k
+h,h′ (t), ˜bk
+h,h′ (t) and /afii9851( k,h ,h′) for the paths of reverse direction in a symmetric manner,
+and we use them to evaluate new routes constructed with reverse insertions.
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2061
+We now explain how to compute the minimum time penalty value of the new route /afii9846′
+k of (15). First, we consider the
+following two paths:
+⟨0, /afii9846k1 (h1)⟩.⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩
+and
+⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩.⟨/afii9846k3 (h4), 0⟩.
+For these two paths, we independently calculate the minimum time penalty values and the corresponding times s∗
+h2 and
+s∗
+h3 , which are, respectively, deﬁned as follows:
+s∗
+h2 = min arg mint (f k1
+h1 (t −˜/afii9848(k1,k 2,h 1,h 2)) + ˜bk2
+h2,h3 (t)),
+s∗
+h3 = max arg mint ( ˜f k2
+h2,h3 (t) + bk3
+h4 (t +˜/afii9848(k2,k 3,h 3,h 4))). (19)
+Now we compute the minimum time penalty of /afii9846′
+k .I f
+s∗
+h3 − s∗
+h2 ⩾/afii9851(k2,h 2,h 3) (20)
+holds, it is given by
+f k1
+h1 (s∗
+h2 −˜/afii9848(k1,k 2,h 1,h 2)) + ˜bk2
+h2,h3 (s∗
+h2 ) ˜f k2
+h2,h3 (s∗
+h3 ) + bk3
+h4 (s∗
+h3 +˜/afii9848(k2,k 3,h 3,h 4)) − mint
+˜f k2
+h2,h3 (t). (21)
+On the other hand, if
+s∗
+h3 − s∗
+h2 < /afii9851(k2,h 2,h 3) (22)
+holds, it can be computed by
+mint {f k1
+h1 (t −˜/afii9848(k1,k 2,h 1,h 2)) + ˜bk2
+h2,h3 (t) + ˜f k2
+h2,h3 (t + /afii9851(k2,h 2,h 3))
++ bk3
+h4 (t + /afii9851(k2,h 2,h 3) +˜/afii9848(k2,k 3,h 3,h 4))} min
+t′
+˜f k2
+h2,h3 (t′). (23)
+We now show the correctness of (21) and (23). The following lemma is crucial for this purpose, whose proof will be
+given later in this section.
+Lemma 5.1. Suppose th3 − th2 ⩾/afii9851(k2,h 2,h 3). Then ˜bk2
+h2,h3 (th2 )+ ˜f k2
+h2,h3 (th3 )− mint ˜f k2
+h2,h3 (t) gives the minimum total
+time penalty of all customers in the path ⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩, provided that /afii9846k2 (h2) is served after time th2 and /afii9846k2 (h3)
+is served by time th3 .
+From this lemma, it is clear that
+min
+th3 −th2 ⩾ /afii9851(k2,h2,h3)
+{f k1
+h1 (th2 −˜/afii9848(k1,k 2,h 1,h 2)) + ˜bk2
+h2,h3 (th2 )
++ ˜f k2
+h2,h3 (th3 ) + bk3
+h4 (th3 +˜/afii9848(k2,k 3,h 3,h 4))}− mint
+˜f k2
+h2,h3 (t) (24)
+gives the minimum total time penalty for all customers in the route
+/afii9846′
+k =⟨ 0, /afii9846k1 (h1)⟩.⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩.⟨/afii9846k3 (h4), 0⟩.
+As for the start time sh2 and sh3 of the service for customers /afii9846k2 (h2) and /afii9846k2 (h3),
+sh3 − sh2 ⩾/afii9851(k2,h 2,h 3) (25)
+is necessary and sufﬁcient for a feasible time schedule to exist. In the above procedure, we consider two cases in which
+s∗
+h2 and s∗
+h3 satisfy condition (25) or not. When s∗
+h2 and s∗
+h3 satisfy (25), we will have (20). As s∗
+h2 and s∗
+h3 deﬁned by
+
+2062 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+(19) minimize disjoint terms in (24) independently without considering condition (25), they give the minimum value
+to (24) in this case. On the other hand, when s∗
+h2 and s∗
+h3 do not satisfy (25), the optimal start time sopt
+h2 and sopt
+h3 of the
+service for customers /afii9846k2 (h2) and /afii9846k2 (h3) must satisfy sopt
+h3 − sopt
+h2 = /afii9851(k2,h 2,h 3). Then (23) clearly gives the minimum
+value in this case.
+We now give a proof to Lemma 5.1.
+Proof of Lemma 5.1. Let ˆsh2 , ˆsh2+1,..., ˆsh3 be a sequence of start times of the service for customers in ⟨/afii9846k2 (h2), /afii9846k2
+(h3)⟩ that achieves min t ˜f k2
+h2,h3 (t). Note that min t ˜f k2
+h2,h3 (t) = mint ˜bk2
+h2,h3 (t) = ∑h3
+h=h2 p/afii9846k2 (h)(ˆsh) holds by deﬁnition.
+For h2 ⩽h ⩽h′ ⩽h3, we call a sequence ( h, h+ 1,...,h ′) of indices a block if it is maximal among those that sat-
+isfy ˆsh′′ + /afii9848k2
+h′′ =ˆsh′′+1 for all h′′ = h, h+ 1,...,h ′ − 1. Let a+
+h (t) = lim/afii9830→+ 0{p/afii9846k2 (h)(t + /afii9830) − p/afii9846k2 (h)(t)}//afii9830and
+a−
+h (t) = lim/afii9830→+ 0{p/afii9846k2 (h)(t) − p/afii9846k2 (h)(t − /afii9830)}//afii9830. Then, for any block ( h, h + 1,...,h ′) and h′′ ∈[ h, h′], both
+a+
+h′′ (ˆsh′′ ) + a+
+h′′+1(ˆsh′′+1) +···+ a+
+h′ (ˆsh′ ) ⩾0 and a−
+h (ˆsh) + a−
+h+1(ˆsh+1) +···+ a−
+h′′ (ˆsh′′ ) ⩽0 hold, since otherwise
+ˆsh2 , ˆsh2+1,..., ˆsh3 cannot be optimal. Moreover, from convexity of time penalty functions, a+
+h (t) and a−
+h (t) are mono-
+tonically nondecreasing with t.F o rag i v e nth2 , let
+˜sh = max{ˆsh,t h2 + /afii9851(k2,h 2,h )}
+for h=h2,h 2+1,...,h 3. This time schedule ˜sh2 , ˜sh2+1,..., ˜sh3 achieves the minimum total time penalty˜bk2
+h2,h3 (th2 ) of
+customers in⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩ under the constraint that /afii9846k2 (h2) must be served after timeth2 for the following reasons.
+Consider the blocks deﬁned for this time schedule. From the above observation, for any block ( h, h+ 1,...,h ′) and
+h′′ ∈[ h, h′],w eh a v ea+
+h′′ (˜sh′′ )+a+
+h′′+1(˜sh′′+1)+···+ a+
+h′ (˜sh′ ) ⩾0, and also havea−
+h (˜sh)+a−
+h+1(˜sh+1)+···+ a−
+h′′ (˜sh′′ ) ⩽0
+or ˜sh′′ = th2 + /afii9851(k2,h 2,h ′′). These indicate that any sufﬁciently small change to this schedule that keeps its feasibility
+will not decrease the total time penalty. As the problem of minimizing the total time penalty is a convex programming
+problem (i.e., its objective function and feasible region are convex), this is sufﬁcient to conﬁrm its optimality. Similarly,
+we can obtain a time schedule ¯s
+h2 , ¯sh2+1,..., ¯sh3 that achieves the minimum total time penalty ˜f k2
+h2,h3 (th3 ) of customers
+in ⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩ under the constraint that /afii9846k2 (h3) must be served by time th3 by
+¯sh = min{ˆsh,t h3 − /afii9851(k2,h ,h3)}
+for h = h2,h 2 + 1,...,h 3. For the same reason, noting that th3 − th2 ⩾/afii9851(k2,h 2,h 3) implies th2 + /afii9851(k2,h 2,h )⩽th3 −
+/afii9851(k2,h ,h3), a time schedule
+ˇsh = median{ˆsh,t h2 + /afii9851(k2,h 2, h), th3 − /afii9851(k2,h ,h3)}
+for h=h2,h 2+1,...,h 3 is feasible and achieves the minimum total time penalty of customers in the path under the con-
+straint that /afii9846k2 (h2) must be served after timeth2 and /afii9846k2 (h3) must be served by timeth3 .I f th2 +/afii9851(k2,h 2,h )⩽ ˆsh ⩽th3 −
+/afii9851(k2,h ,h3) holds, ˆsh =˜sh =¯sh =ˇsh holds. If ˆsh ⩽th2 + /afii9851(k2,h 2,h )⩽th3 − /afii9851(k2,h ,h3) holds, ˆsh =¯sh and ˜sh =ˇsh
+hold. If th2 + /afii9851(k2,h 2,h )⩽th3 − /afii9851(k2,h ,h3) ⩽ ˆsh holds, ˆsh =˜sh and ¯sh =ˇsh hold. Thus, for all h=h2,h 2 + 1,...,h 3,
+p/afii9846k2 (h)(ˇsh) = p/afii9846k2 (h)(˜sh) + p/afii9846k2 (h)(¯sh) − p/afii9846k2 (h)(ˆsh) holds, which implies the lemma. □
+Finally, we estimate the time complexity of our procedure to compute /afii9797psum. Our procedure consists of two types of
+computation; computing ˜f k
+h,h′ (t), ˜bk
+h,h′ (t) and /afii9851( k,h ,h′) for preprocessing before starting a neighborhood search, and
+computing (19), (21) and (22) to evaluate each solution in our neighborhoods. As we described before, we can compute
+the former in O(L
+max/afii9829k log /afii9829k) time for each vehicle k. We can compute the latter in O(∑
+k∈M′ log /afii9829k) time, where M′
+is the set of indices of the vehicles related to new route /afii9846′
+k . Lmax/afii9829k is usually smaller than the size of neighborhoods,
+and under this assumption, the amortized computation time to compute /afii9797psum for a solution in neighborhoods becomes
+O(∑
+k∈M′ log /afii9829k) = O(log /afii9829max).
+5.2. Pruning the neighborhoods
+In this section, we propose two types of neighbor-lists, called distance-oriented and time-oriented neighbor-lists,
+which are used in our LS algorithm to prune the neighborhoods.
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2063
+The distance-oriented neighbor-list was successfully applied to the TSP [22]. At the beginning of our algorithm,
+for each customer i, we construct a list of Ldlist nearest customers from customer i, where Ldlist is a parameter. It
+is possible to construct these lists for all customers in O (n2Ldlist) time and to store these lists in O (nLdlist) space.
+Using this neighbor-list, our neighborhood search is limited to those operations that connect a customer i to one of
+the customers in its list. By using this idea, the size of neighborhood N2opt∗
+(resp., N pins,N cross) is reduced from
+O(n2) (resp., O(n2Lpins), O(n2(Lcross)2))t oO (nLdlist) (resp., O(nLdlistLpins), O(nLdlist(Lcross)2)). To reduce the size
+of neighborhoods further, we add another heuristic rule: we do not evaluate a solution if the distance of a new edge is
+/afii9853
+dlist times larger than the distance of the current edge, where /afii9853dlist is another parameter.
+Taking into account the time window constraints, we propose another technique to prune the neighborhoods on
+the basis of the start time of services at customers. In our LS algorithm, three types of neighborhood operations (i.e.,
+2-opt
+*, path insertion and cross exchange) are conducted on a pair of routes. After ﬁxing a pair of routes /afii9846k and /afii9846k′ ,
+we construct a list of customer pairs whose start times of service are close to each other in the following manner.
+For each customer /afii9846
+k(h) in route /afii9846k , we ﬁnd the customer /afii9846k′ (h′) whose start time s/afii9846k′ (h′) of service is the closest
+to s/afii9846k(h) among the customers assigned to route /afii9846k′ , and then, store customer pairs (/afii9846k(h), /afii9846k′ (h′ − Ltlist)), (/afii9846k(h),
+/afii9846k′ (h′ − Ltlist + 1) ) ,...,( /afii9846k(h), /afii9846k′ (h′ +Ltlist)), where Ltlist is a parameter. Since start times of service for customers
+in a route are nondecreasing, we can compute all such pairs in O (Ltlistnk + nk′ ) time for route /afii9846k . This procedure is
+conducted for the customers assigned to route/afii9846k′ similarly, and we merge those lists in order to eliminate double entries.
+We prune the neighborhood using the abovetime-oriented neighbor-list. For each pair of routes/afii9846k and /afii9846k′ , the number of
+solutions generated by 2-opt*, path insertion and cross exchange operations are reduced from O(nknk′ ),O (nknk′ Lpins),
+O(nknk′ (Lcross)2) to O(Ltlist(nk + nk′ )),O (Ltlist(nk + nk′ )Lpins),O (Ltlist(nk + nk′ )(Lcross)2). The time complexity
+of constructing the time-oriented neighbor-list for a pair of routes /afii9846k and /afii9846k′ is O(Ltlist(nk + nk′ )); this computation
+time does not affect the total computational time. The two types of neighborhoods resulting from distance-oriented and
+time-oriented neighbor-lists are then searched sequentially.
+5.3. Other speed up techniques
+In this section, we propose two other ideas, which do not change the worst case time complexity, but accelerate the
+speed in practical sense. As mentioned in Section 5.1, we can compute /afii9797q
+sum and /afii9797dsum in constant time, while it
+takes O(∑
+k∈M′ log /afii9829k) time to compute /afii9797psum.
+The ﬁrst idea is to reduce the number of linear pieces of functions f k
+h (t), bk
+h(t), ˜f k
+h,h′ (t) and ˜bk
+h,h′ (t). Since f k
+h (t)
+and ˜f k
+h,h′ (t) (resp., bk
+h(t) and ˜bk
+h,h′ (t)) are nonincreasing (resp., nondecreasing), f k
+h (t) and ˜f k
+h,h′ (t) (resp., bk
+h(t) and
+˜bk
+h,h′ (t)) usually have many pieces with extremely large value for small (resp., large) t. Without missing any improved
+solutions, we delete unnecessary linear pieces as follows. Let /afii98460 be the initial solution of our LS algorithm, and let
+UB := eval(/afii98460). We then delete those pieces whose minimum values are not less than UB //afii9837p. For a vehicle k, this
+deletion procedure of unnecessary pieces can be done in O (log /afii9829k) time. Whenever the current solution /afii9846is improved
+during the search, we update UB to eval( /afii9846)and call the deletion procedure.
+The second idea is to compute a lower bound of p∗
+sum(/afii9846′
+k) for each new route /afii9846′
+k in constant time so that we
+skip the evaluation of hopeless solutions. For each function f k
+h (t), bk
+h(t), ˜f k
+h,h′ (t) and ˜bk
+h,h′ (t), we compute and store
+mintf k
+h (t), mint bk
+h(t), mint ˜f k
+h,h′ (t) and mint ˜bk
+h,h′ (t) when we construct a binary search tree for each function. By using
+these values, we can obtain a lower bound of the minimum time penalty for each route. For example, a lower bound of the
+minimum time penalty for a new route /afii9846
+′
+k =⟨ 0, /afii9846k1 (h1)⟩.⟨/afii9846k2 (h2), 0⟩ generated by reconnecting two paths is calculated
+by mintf k1
+h1 (t)+mint bk2
+h2 (t), and a lower bound for another new route/afii9846′
+k =⟨0, /afii9846k1 (h1)⟩.⟨/afii9846k2 (h2), /afii9846k2 (h3)⟩.⟨/afii9846k3 (h4), 0⟩
+generated by reconnecting three paths is calculated by min tf k1
+h1 (t) + mint ˜f k2
+h2,h3 (t) + mint bk3
+h4 (t). Moreover, for a new
+route generated by reconnecting three paths, we can use another lower bound
+f k1
+h1 (s∗
+h2 −˜/afii9848(k1,k 2,h 1,h 2)) + ˜bk2
+h2,h3 (s∗
+h2 ) + mint bk3
+h4 (t)
+after computing s∗
+h2 for the ﬁrst equation of (19).
+
+2064 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+6. Computational experiments
+We conducted various computational experiments to evaluate the proposed algorithm. The algorithm was coded
+in C language and run on an IBM-compatible PC (Intel Pentium 4, 2.8 GHz, 1 GB memory). We used the following
+benchmark instances of the VRPHTW: (1) Solomon’s benchmark instances [29] and (2) Gehring and Homberger’s
+benchmark instances [12].
+6.1. Benchmark instances
+The benchmark instances by Solomon [29] are widely used in the literature. The number of customers in each
+instance is 100, and their locations are distributed in the square [0, 100]
+2 in the plane. The distances between customers
+are measured by Euclidean distance (in double precision), and the traveling times are proportional to the corresponding
+distances. Each customer i has one time window [w
+l
+i,w r
+i ], an amount of requirement q′
+i and a service time ui . The
+depot is located at the center of the square and it also has one time window [wl
+0,w r
+0]; that is, each vehicle departs from
+the depot at wl
+0 and must return to the depot by wr
+0. All vehicles have an identical capacity Q′. Both time window and
+capacity constraints must be satisﬁed strictly. The number of vehicles m is also a decision variable, and the objective is
+to ﬁnd a solution with the minimum (m, dsum(/afii9846)) in the lexicographical order. Solomon’s benchmark instances consist
+of six different sets of problem instances named C1, C2, R1, R2, RC1 and RC2, respectively. Customers are clustered
+in groups in type C and are uniformly distributed in type R, and type RC has these two characteristics. For instances
+of type 1, the time window is narrow at the depot, and hence only a small number of customers can be served by one
+vehicle. On the other hand, for instances of type 2, the time window at the depot is wide, and many customers can be
+served by one vehicle. Recently, 300 instances with a larger number of customers have been added by Gehring and
+Homberger [12], where these instances are divided into ﬁve groups by the number of customers; 200, 400, 600, 800
+and 1000, and each group has 60 instances (more precisely, 10 instances for each of six sets C1, C2, R1, R2, RC1 and
+RC2).
+6.2. Parameters
+In order to solve the above instances by our algorithm, we deﬁne the penalty functions as follows. For each customer
+i, one time window [w
+l
+i,w r
+i ] is given, and the service for customer i must be started in this period. Based on the given
+time window, we deﬁne the time penalty function pi(t) by the following equation:
+pi(t) =
+⎧
+⎨
+⎩
+100 000(−t + wl
+i), −∞ ⩽t<w l
+i,
+0,w l
+i ⩽t ⩽wr
+i ,
+100 000(t − wr
+i ), w r
+i <t ⩽ +∞ .
+The time penalty functions for the depot, pd
+0(t) and pa
+0(t), are deﬁned as follows:
+pd
+0(t) = max{100 000(−t + wl
+0), 0},
+pa
+0(t) = max{100 000(t − wr
+0), 0},
+where the depot has an identical time window [wl
+0,w r
+0] for all vehicles. As for the capacity constraint, we set qi :=
+100 000q′
+i and Qk := 100 000Q′ for the given input q′
+i and Q′.
+We then consider how to determine the number of vehicles for each instance; it is a given input for our formulation but
+a decision variable for the test instances used in our experiments. We ﬁrst set the number of vehicles to the previous best
+known values as of May 11, 2006, presented in the web site ( http://www.sintef.no/static/am/opti/
+projects/top/vrp/benchmarks.html). If we cannot ﬁnd a solution which satisﬁes the time window and
+capacity constraints, we increase the number of vehicles by one and conduct another experiment. Such experiments
+are repeated until we can ﬁnd a feasible solution for VRPHTW. On the other hand, if we can ﬁnd a feasible solution of
+VRPHTW with the best known m and the current m is larger than the trivial lower bound⌈∑
+i∈V \{0} qi/Q⌉, we decrease
+the number of vehicles by one and conduct another experiment. Such experiments are repeated until we cannot ﬁnd a
+feasible solution for VRPHTW.
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2065
+Table 1
+The results for 100-customer benchmark instances
+B BBB BVH GH02 HG99 HG05 IIKTUY ILS-1 ILS-2
+C1 10 10 10 10 10 10 10 10 10
+828.38* 828.48 828.38 * 828.63 828.38 * 828.38* 828.38* 828.38* 828.38*
+C 2 333 3 33 3 33
+589.86* 589.93 589.86 * 590.33 589.86 * 589.86* 589.86* 589.86* 589.86*
+R1 11.92 11.92 11.92 12 11.92 11.92 11.92 12 12.08
+1222.12 1221.1 1213.25 1217.57 1228.06 1212.73 * 1217.4 1217.99 1212.09
+R2 2.73 2.73 2.73 2.73 2.73 2.73 2.73 2.73 2.73
+975.12 975.43 966.37 961.29 969.95 955.03 * 959.11 967.97 960.95
+RC1 11.5 11.5 11.5 11.5 11.63 11.5 11.5 11.63 11.5
+1389.58 1389.89 1384.22 * 1395.13 1392.57 1386.44 1391.03 1384.67 1391.46
+RC2 3.25 3.25 3.25 3.25 3.25 3.25 3.25 3.25 3.25
+1128.38 1159.37 1141.24 1139.37 1144.43 1123.17 1122.79 * 1128.77 1127
+CNV 405 405 405 406 406 405 405 407 407
+CTD 57 710 57 952 57 567 57 641 57 876 57 309 * 57 444 57 545 57 437
+Computer P 200M P 400M S 10M P 400M P 200M Unknown P 1G P 2.8G P 2.8G
+CPU (min) 87 30 120 4 × 20.9 13.8 n/a 250 16.7 16.7
+Runs 1 3 5 5 10 n/a 1 1 1
+Estimated time 3.8 9.4 104.3 43.6 6 n/a 108.7 16.7 16.7
+Table 2
+The results for 200-customer benchmark instances
+BHD BVH GH99 GH02 LC LL MB ILS-1 ILS-2
+C1 18.9 18.9 18.9 18.9 18.9 19.1 18.8 * 18.9 18.9
+2749.83 2726.63 2782 2842.08 2743.66 2728.6 2717.21 2732.03 2734.42
+C 2 6 666666 6 6
+1842.65 1860.17 1846 1856.99 1836.1 1854.9 1833.57 1834.83 1833.37 *
+R1 18.2 18.2 18.2 18.2 18.2 18.3 18.2 18.2 18.2
+3718.3 3677.96 3705 3855.03 3676.95 3736.2 3618.68 * 3665.77 3655.24
+R2 4 4.1 4 4 4 4.1 4 4 4
+3014.28 3023.62 3055 3032.49 2986.01 3023 2942.92 * 2965.64 2958.56
+RC1 18 18 18 18.1 18 18.3 18 18 18
+3329.62 3279.99 3555 3674.91 3449.71 3385.8 3221.34 * 3287.61 3275.38
+RC2 4.4 4.5 4.3 4.4 4.3 4.9 4.4 4.3 4.3
+2585.89 2603.08 2675 2671.34 2613.75 2518.7 2519.79 2562.56 * 2576.12
+CNV 695 697 694 696 694 707 694 694 694
+CTD 172 406 171 715 176 180 179 328 173 061 172 472 168 573 * 170 484 170 331
+Computer A 700M S 10M P 200M P 400M P 933M P 545M P 2G P 2.8G P 2.8G
+CPU (min) 2.4 n/a 4 × 10 4 × 2.15 × 10 182.1 8 33.3 33.3
+Runs 3 n/a 1 3 1 3 1 1 1
+Estimated time 2.1 n/a 2.4 3.8 21.7 112.4 5.9 33 33
+As initial values of /afii9837p and /afii9837q , we conducted two types of experiments: (1) /afii9837p = 1/100 000 and /afii9837q = 1/100 000
+(called ILS-1) and (2) /afii9837p = 1 and /afii9837q = 1 (called ILS-2). The best solution found in our algorithm may not be a feasible
+solution of VRPHTW even if we can ﬁnd feasible solutions of VRPHTW in our search process. To overcome such a
+situation, we also store the best feasible solution of VRPHTW found in our algorithm. We set other parameter values
+as follows: L
+iopt
+path = 3, Liopt
+ins = 10, L2opt = 10, Lpins = 3, Lpins
+rev = 3, Lcross = 3, Lcross
+rev = 3, Ldlist = 20, /afii9853dlist = 1.5 and
+Ltlist = 1 for all experiments. The time limit of our metaheuristic algorithm for instances with 100, 200, 400, 600, 800
+and 1000 customers are 1000, 2000, 4000, 6000, 8000 and 10 000 seconds, respectively.
+
+2066 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+Table 3
+The results for 400-customer benchmark instances
+BHD BVH GH99 GH02 LC LL MB ILS-1 ILS-2
+C1 37.9 38 38 38 37.9 38.7 37.9 37.7 37.6 *
+7230.48 7220.96 7584 7855.82 7447.09 7181.4 7148.27 7282.15 7302.50
+C2 12 12 12 12 12 12.1 12 12 11.8 *
+3894.48 4154.4 3935 3940.19 3940.87 4017.1 3840.85 3851.96 3985.21
+R1 36.4 36.4 36.4 36.4 36.5 36.6 36.3 * 36.4 36.4
+8692.17 8713.37 8925 9478.22 8839.28 8912.4 8530.03 8746.94 8788.54
+R 2 8 888888 88
+6382.63 6959.75 6502 6650.28 6437.68 6610.6 6209.94 * 6269.9 6251.54
+RC1 36 36.1 36.1 36.1 36 36.5 36 36 36
+8305.55 8330.98 8763 9294.99 8652.01 8377.9 8066.44 * 8405.32 8471.85
+RC2 8.9 8.9 8.6 8.8 8.6 9.5 8.8 8.6 8.6
+5407.87 5631.7 5518 5629.43 5511.22 5466.2 5243.06 5337.5 5328.84 *
+CNV 1391 1393 1390 1392 1390 1414 1389 1387 1384 *
+CTD 399 132 410 112 412 270 428 489 408 281 405 656 390 386 398 938 401 285
+Computer A 700M S 10M P 200M P 400M P 933M P 545M P 2G P 2.8G P 2.8G
+CPU (min) 7.9 n/a 4 × 20 4 × 7.15 × 20 359.8 17 66.6 66.6
+Runs 3 n/a 1 3 1 3 1 1 1
+Estimated time 6.8 n/a 4.8 13 43.3 221.8 12.5 66.6 66.6
+Table 4
+The results for 600-customer benchmark instances
+BHD BVH GH99 GH02 LC LL MB ILS-1 ILS-2
+C1 57.8 57.8 57.9 57.7 57.9 58.2 57.8 57.5 57.5
+14 165.9 14 357.11 14 792 14 817.25 14 205.58 14 267.3 14 003.09 14 116.97 * 14 128.87
+C2 18 17.8 17.9 17.8 17.9 18.2 17.8 17.4 17.4
+7528.73 8259.04 7787 7889.96 7743.92 8202.6 7455.83 7945.56 * 7991.70
+R1 54.5 55 54.5 54.5 54.8 55.2 54.5 54.5 54.5
+19 081.18 19 308.62 20 854 21 864.47 19 869.82 19 744.8 18 358.68 * 19 844.39 19 963.56
+R2 11 11 11 11 11.2 11.1 11 11 11
+13 054.83 14 855.43 13 335 13 656.15 13 093.97 13 592.4 12 703.52 12 539.78 12 496.54 *
+RC1 55 55.1 55.1 55 55.2 55.5 55 55 55
+16 994.22 17 035.91 18411 19 114.02 17 678.13 17 320 16 418.63 * 17 278.81 17 395.51
+RC2 12.1 12.4 11.8 11.9 11.8 13 12.1 11.6 11.6
+11 212.36 11 987.89 11 522 11 670.29 11 034.71 11 204.9 10 677.46 10 791.7 10 743.03 *
+CNV 2084 2091 2082 2079 2088 2112 2082 2070 2070
+CTD 820 372 858 040 867 010 890 121 836 261 843 320 796 172 825 172
+* 827 192
+Computer A 700M S 10M P 200M P 400M P 933M P 545M P 2G P 2.8G P 2.8G
+CPU (min) 16.2 n/a 4 × 30 4 × 12.95 × 30 399.8 40 100 100
+Runs 3 n/a 1 3 1 3 1 1 1
+Estimated time 13.9 n/a 7.1 23.5 65 246.4 29.4 100 100.0
+6.3. Computational results
+We compare the solutions obtained by our algorithm with existing results. The results for the Solomon’s instances
+are shown in Table 1, and the results for Gehring and Homberger’s instances are shown in Tables 2–6 . Each row
+C1, C2, R1, R2, RC1 and RC2 denotes the problem set. The upper part of each cell represents the mean number of
+vehicles (called MNV) with respect to all instances in the set, and the lower part of each cell represents the mean total
+distance (called MTD). “CNV” stands for the cumulative number of vehicles, and “CTD” stands for the cumulative
+total distance, which are usually used in the literature to compare the results on these instances. “Computer” describes
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2067
+Table 5
+The results for 800-customer benchmark instances
+BHD BVH GH99 GH02 LC LL MB ILS-1 ILS-2
+C1 76.3 76.1 76.7 76.1 76.3 77.4 76.2 75.7 * 75.8
+25 170.88 25 391.67 26 528 26 936.68 25 668.82 25 337.02 25 132.27 25 487.55 25 337.93
+C2 24.2 24.4 24 23.7 24.1 24.4 23.7 23.4 * 23.5
+11 648.92 14 253.83 12 451 11 847.92 11 985.11 11 956.6 11 352.29 11 860.9 11 726.25
+R1 72.8 72.7 * 72.8 72.8 73.1 73 72.8 72.8 72.8
+32 748.06 33 337.91 34 586 34 653.88 33 552.4 33 806.34 31 918.47 33 275.72 33 413.41
+R2 15 15 15 15 15 15.1 15 15 15
+21 170.15 24 554.63 21 697 21 672.85 21 157.56 21 709.39 20 295.28 20 209.92 20 174.32 *
+RC1 73 73 72.4 72.3 72.3 73.2 73 72.4 72.4
+30 005.95 30 500.15 38 509 40 532.35 37 722.62 * 31 282.54 30 731.07 34 621.63 35 296.29
+RC2 16.3 16.6 16.1 16.1 15.8 17.1 15.8 15.7 * 15.8
+17 686.65 18 940.84 17 741 17 941.23 17 441.6 17 561.22 16 729.18 16 666.76 16 665.08
+CNV 2776 2778 2770 2760 2766 2802 2765 2750 * 2753
+CTD 1 384 306 1 469 790 1 515 120 1 535 849 1 475 281 1 416 531 1 361 586 1 421 225 1 426 133
+Computer A 700M S 10M P 200M P 400M P 933M P 545M P 2G P 2.8G P 2.8G
+CPU (min) 26.2 n/a 4 × 40 4 × 23.25 × 40 512.9 145 133.3 133.3
+Runs 3 n/a 1 3 1 3111
+Estimated time 22.5 n/a 9.5 42.3 86.6 316.1 106.5 133.3 133.3
+Table 6
+The results for 1000-customer benchmark instances
+BHD BVH GH99 GH02 LC LL MB ILS-1 ILS-2
+C1 95.8 95.1 96 95.4 95.3 96.3 95.1 94.5 * 94.6
+42 086.77 42 505.35 43 273 43 392.59 43 283.92 42 428.5 41 569.67 42 459.35 42 329.33
+C2 30.6 30.3 30.2 29.7 29.9 30.8 29.7 29.4 * 29.5
+17 035.88 18 546.13 17 570 17 574.72 17 443.5 17 294.9 16 639.54 16 986.46 16 679.76
+R1 92.1 92.8 91.9 91.9 92.2 92.7 92.1 91.9 91.9
+50 025.64 51 193.47 57 186 58 069.61 55 176.95 50 990.8 49 281.48 53 366.10 * 54 909.63
+R2 19 19 19 19 19.2 19 19 19 19
+31 458.23 36 736.97 31 930 31 873.62 30 919.77 31 990.9 29 860.32 29 546.19 * 29 589.71
+RC1 90 90.2 90 90.1 90 90.4 90 90 90
+46 736.92 48 634.15 50 668 50 950.14 49 711.36 48 892.4 45 396.41 * 48 275.2 48 768.87
+RC2 19 19.4 19 18.5 18.5 19.8 18.7 18.3 * 18.4
+25 994.12 29 079.78 27 012 27 175.98 26 001.11 26 042.3 25 063.51 24 904.08 24 667.92
+CNV 3465 3468 3461 3446 3451 3490 3446 3431 * 3434
+CTD 2 133 376 2 266 959 2 276 390 2 290 367 2 225 366 2 176 398 2 078 110 2 155 374 2 169 452
+Computer A 700M S 10M P 200M P 400M P 933M P 545M P 2G P 2.8G P 2.8G
+CPU (min) 39.6 n/a 4 × 50 4 × 30 5 × 50 606.3 600 166.7 166.7
+Runs 3 n/a 1 3 1 3 1 1 1
+Estimated time 34 n/a 11.9 54.9 108.3 373.5 440.8 166.7 166.7
+the spec of computers used in the experiments, where “P”, “S” and “A” mean Pentium, SUN Ultra and Advanced Micro
+Devices, respectively, and the number in this row means the clock frequency of the CPU (e.g., S 10M means SUN Ultra
+10 MHz and P 2.8G means Pentium 2.8 GHz). “CPU” and “Runs” describe the average CPU time in minutes and the
+number of independent runs for each instance, reported in each article. Using the spec data presented in the web page
+(http://www.specbench.org/), we estimate the total computation time used for one instance if each algorithm
+will be run on a PC with Pentium 2.8 GHz processor. “Estimated time” represents this estimated time in minutes. An
+asterisk “ ∗” in the row MNV (resp., CNV) means that it is the smallest without ties in the row, and thus the algorithm
+marked “ ∗” gives the best performance for the instance set. When there are ties for the number of vehicles, we give an
+asterisk on the corresponding distance value that is the smallest among those ties.
+
+2068 T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069
+In Table 1, columns “B” is the result of algorithm RVNS(2) proposed by Bräysy [4], “BBB” is the result by Berger
+et al. [3], “BVH” is the result by Bent and V an Hentenryck [2], “GH02” is the result of algorithm HM4C proposed by
+Gehring and Homberger [13], “HG99” is the result by Homberger and Gehring [18], “HG05” is the result by Homberger
+and Gehring [19], “IIKTUY” is the result of algorithm ILS(15000s) by Ibaraki et al. [20], “ILS-1” and “ILS-2” are the
+results of our algorithm with different initial values /afii9837p and /afii9837q . Computation time of “HG05” is not clearly stated in
+[19]. In this table, we can see that our algorithms (ILS-1 and ILS-2) perform slightly worse than the other algorithms.
+In Tables 2–6 , columns “BHD” is the result by Bräysy et al. [7], “BVH” is the result by Bent and V an Hentenryck
+[2], “GH99” is the result by Gehring and Homberger [12], “GH02” is the result by Gehring and Homberger [13], “LC”
+is the result by Le Bouthillier and Crainic [24], “LL” is the result by Li and Lim [25], “MB” is the result by Mester
+and Bräysy [26], “ILS-1” and “ILS-2” are the results of our algorithm. Computation time of “BVH” is not clearly
+stated in [2]. The solution quality of our algorithm for 200 customer instances is competitive with the best quality
+attained by Mester and Bräysy [26]; however, we use more computation time. The solution quality of our algorithm for
+larger instances is much better than the other algorithms in Tables 3–6 . For all of these instance sets, we succeeded in
+reducing the best-known CNV . These results indicate that our algorithm is highly efﬁcient to solve the VRP with hard
+time windows, in spite of its generality, especially for large scale instances. More details of our computational results
+and the best known solutions found by our algorithm on Gehring and Homberger’s instances are presented in our web
+page (http://www.al.cm.is.nagoya-u.ac.jp/∼ yagiura/papers/vrpctw_abst.html).
+7. Conclusions and discussions
+In this paper, we considered the VRP with convex time penalty functions and proposed a metaheuristic algorithm.
+We utilized the ILS to assign customers to vehicles and to determine the visiting order for each vehicle. To make our LS
+efﬁcient, we introduced some ideas to prune the neighborhoods. We also proposed an algorithm of DP to compute the
+optimal start time of services at customers in a given route. The time complexity of our DP algorithm is O (/afii9829
+k log /afii9829k)
+for each vehicle k, where /afii9829k is the total number of linear pieces in the penalty functions for all the customers in a
+route /afii9846k . We proposed another DP algorithm to evaluate solutions in our neighborhoods efﬁciently; the amortized time
+complexity of this algorithm is O (log /afii9829k) for each new route /afii9846k under appropriate assumptions.
+The objective function of our formulation is the sum of the total distance and penalties caused by violations of
+the time window and capacity constraints. In order to treat both of the VRPHTW and the VRPSTW effectively, we
+incorporated some ideas in our algorithm. To evaluate solutions in neighborhoods, we utilized an evaluation function,
+which is slightly different from the original objective function and equipped with an adaptive mechanism to control
+the penalty weights.
+We conducted computational experiments on representative benchmark instances of the VRP with capacity and time
+window constraints, and compared our algorithm with some existing algorithms for this problem. Our results for larger
+scale instances such as those with 400, 600, 800 or 1000 customers are the best among the recent results for these
+benchmark instances.
+For simplicity of the paper, we did not explain some ideas to treat more general problems, which we have implemented.
+We have assumed that all vehicles have the same time penalty functions p
+d
+0 and pa
+0 for departure from the depot and
+arrival at the depot. However, we can treat a situation where each vehicle has its own time penalty function for departure
+and arrival, without increasing the time complexity. In this case, however, we cannot use the 2-opt
+* operation in the form
+explained in Section 4.2, since the operation connects the ﬁrst part and the last part of two different routes. Therefore,
+we should treat a 2-opt
+* operation as a special case of the cross exchange operations. We have also assumed that each
+customer i has an amount qi of the resource to be delivered from the depot in this paper. We can treat some general
+problems as for the capacity constraint with slight modiﬁcations of our framework; e.g., the VRP with multi-resource
+and the VRP with backhauls [15].
+Acknowledgments
+We would like to thank Hideki Hashimoto for assisting in some computational experiments. This research was
+partially supported by Scientiﬁc Grant-in-Aid, by the Ministry of Education, Culture, Sports, Science and Technology
+of Japan.
+
+T. Ibaraki et al. / Discrete Applied Mathematics 156 (2008) 2050 – 2069 2069
+References
+[1] R.K. Ahuja, J.B. Orlin, A fast scaling algorithm for minimizing separable convex functions subject to chain constraints, Oper. Res. 49 (2001)
+784–789.
+[2] R. Bent, P . V an Hentenryck, A two-stage hybrid local search for the vehicle routing problem with time windows, Transportation Sci. 38 (2004)
+515–530.
+[3] J. Berger, M. Barkaoui, O. Bräysy, A route-directed hybrid genetic approach for the vehicle routing problem with time windows, INFOR 41
+(2003) 179–194.
+[4] O. Bräysy, A reactive variable neighborhood search for the vehicle routing problem with time windows, INFORMS J. Comput. 15 (2003)
+347–368.
+[5] O. Bräysy, M. Gendreau, V ehicle routing problem with time windows, Part I: route construction and local search algorithms, Transportation
+Sci. 39 (2005) 104–118.
+[6] O. Bräysy, M. Gendreau, V ehicle routing problem with time windows, Part II: metaheuristics, Transportation Sci. 39 (2005) 119–139.
+[7] O. Bräysy, G. Hasle, W. Dullaert, A multi-start local search algorithm for the vehicle routing problem with time windows, European J. Oper.
+Res. 159 (2004) 586–605.
+[8] J.S. Davis, J.J. Kanet, Single-machine scheduling with early and tardy completion costs, Naval Res. Logist. 40 (1993) 85–101.
+[9] C. De Jong, G. Kant, A. V an Vliet, On ﬁnding minimal route duration in the vehicle routing problem with multiple
+time windows, Manuscript, Department of Computer Science, Utrecht University, Holland, 1996 (available from the web page
+⟨http://www.cs.uu.nl/research/projects/alcom/wp4.3.html⟩).
+[10] M.R. Garey, D.S. Johnson, Computers and Intractability: A Guide to the Theory of NP-Completeness, Freeman, New Y ork, 1979.
+[11] M.R. Garey, R.E. Tarjan, G.T. Wilfong, One-processor scheduling with symmetric earliness and tardiness penalties, Math. Oper. Res. 13 (1988)
+330–348.
+[12] H. Gehring, J. Homberger, A parallel hybrid evolutionary metaheuristic for the vehicle routing problem with time windows, in: Proceedings of
+EUROGEN99.Jyväskylä, University of Jyväskylä, 1999, pp. 57–64.
+[13] H. Gehring, J. Homberger, Parallelization of a two-phase metaheuristic for routing problems with time windows, J. Heuristics 8 (2002)
+251–276.
+[14] F. Glover, M. Laguna, Tabu Search, Kluwer Academic Publishers, Dordrecht, 1997.
+[15] M. Goetschalckx, C. Jacobs-Blecha, The vehicle routing problem with backhauls, European J. Oper. Res. 42 (1989) 39–51.
+[16] H. Hashimoto, T. Ibaraki, S. Imahori, M. Y agiura, The vehicle routing problem with ﬂexible time windows and traveling times, Discrete Appl.
+Math. 154 (2006) 2271–2290.
+[17] D.S. Hochbaum, M. Queyranne, Minimizing a convex cost closure set, SIAM J. Discrete Math. 16 (2003) 192–207.
+[18] J. Homberger, H. Gehring, Two evolutionary metaheuristics for the vehicle routing problem with time windows, INFOR 37 (1999) 297–318.
+[19] J. Homberger, H. Gehring, A two-phase hybrid metaheuristic for the vehicle routing problem with time windows, European J. Oper. Res. 162
+(2005) 220–238.
+[20] T. Ibaraki, S. Imahori, M. Kubo, T. Masuda, T. Uno, M. Y agiura, Effective local search algorithms for routing and scheduling problems with
+general time window constraints, Transportation Sci. 39 (2005) 206–232.
+[21] D.S. Johnson, Local optimization and the traveling salesman problem, in: M.S. Paterson (Ed.), Automata, Languages and Programming, Lecture
+Notes in Computer Science, vol. 443, Springer, Berlin, 1990, pp. 446–461.
+[22] D.S. Johnson, L.A. McGeoch, The traveling salesman problem: a case study, in: E.H.L. Aarts, J.K. Lenstra (Eds.), Local Search in Combinatorial
+Optimization, Wiley, Chichester, 1997, pp. 215–310.
+[23] Y .A. Koskosidis, W.B. Powell, M.M. Solomon, An optimization-based heuristic for vehicle routing and scheduling with soft time window
+constraints, Transportation Sci. 26 (1992) 69–85.
+[24] A. Le Bouthillier, T.G. Crainic, A hybrid genetic algorithm for the vehicle routing problem with time windows, Working Paper, Centre for
+Research on Transportation University of Montreal, Canada, 2003.
+[25] H. Li, A. Lim, Large scale time-constrained vehicle routing problems: a general metaheuristic framework with extensive experimental results,
+Working paper, National University of Singapore.
+[26] D. Mester, O. Bräysy, Active guided evolution strategies for the large scale vehicle routing problem with time windows, Comput. Oper. Res.
+32 (2005) 1593–1614.
+[27] I. Or, Traveling salesman-type combinatorial problems and their relation to the logistics of regional blood banking, Ph.D. Thesis, Department
+of Industrial Engineering and Management Sciences, Northwestern University, Evanston, IL, 1976.
+[28] J.Y . Potvin, T. Kervahut, B.L. Garcia, J.M. Rousseau, The vehicle routing problem with time windows, Part 1: tabu search, INFORMS J.
+Comput. 8 (1996) 158–164.
+[29] M.M. Solomon, The vehicle routing and scheduling problems with time window constraints, Oper. Res. 35 (1987) 254–265.
+[30] M.M. Solomon, J. Desrosiers, Time window constrained routing and scheduling problems, Transportation Sci. 22 (1988) 1–13.
+[31] E. Taillard, P . Badeau, M. Gendreau, F. Guertin, J.Y . Potvin, A tabu search heuristic for the vehicle routing problem with soft time windows,
+Transportation Sci. 31 (1997) 170–186.
+

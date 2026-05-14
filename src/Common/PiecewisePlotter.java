@@ -1,9 +1,8 @@
 package Common;
-import Common.PiecewiseLinearFunction;
-import Common.PiecewiseLinearFunction.Segment;
-
 import javax.imageio.ImageIO;
 import javax.swing.*;
+
+
 import java.awt.*;
 import java.awt.geom.Line2D;
 import java.awt.image.BufferedImage;

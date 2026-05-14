@@ -1,6 +1,6 @@
 package Test;
+
 import Common.PiecewiseLinearFunction;
-import Common.PiecewiseLinearFunction.Segment;
 
 public class MergeBenchmark {
     // 老版 merge（链表+拆分，不复用）—— 请替换成你现有的 merge 方法名

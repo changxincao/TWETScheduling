@@ -1,5 +1,6 @@
 package Basic;
 
+import Common.Utility;
 import ilog.concert.*;
 import ilog.cplex.IloCplex;
 
@@ -54,7 +55,7 @@ public class ATIParallel {
 
     public ATIParallel(Data data) throws IloException {
         this.d = data;
-        this.H = (int) data.Cmax + 1;
+        this.H = (int) data.CmaxH + 1;
         this.cpx = new IloCplex();
         this.nodes = new HashMap<>();
         this.arcList = new ArrayList<>();
@@ -221,6 +222,65 @@ public class ATIParallel {
 
     public double getObj() throws IloException {
         return cpx.getObjValue();
+    }
+
+    /** @return 当前模型对应的数据实例。 */
+    public Data getData() {
+        return d;
+    }
+
+    /** @return 当前模型内部使用的 CPLEX 对象。 */
+    public IloCplex getCplex() {
+        return cpx;
+    }
+
+    /**
+     * 提取当前解对应的按机器划分的任务时间表。
+     * <p>
+     * 这里沿用 displayResults 里的重构思路，但改成返回结构化结果，供外部导出和验证使用。
+     */
+    public ArrayList<ArrayList<Utility.TaskInfo>> extractTaskSchedules() throws IloException {
+        ArrayList<Arc> activeArcs = new ArrayList<Arc>();
+        for (Arc arc : arcList) {
+            if (cpx.getValue(x[arc.index]) > 0.5) {
+                activeArcs.add(arc);
+            }
+        }
+
+        ArrayList<ArrayList<Utility.TaskInfo>> schedules = new ArrayList<ArrayList<Utility.TaskInfo>>();
+        ArrayList<Arc> startArcs = new ArrayList<Arc>();
+        for (Arc a : activeArcs) {
+            if (a.from.i == 0 && a.to.i != 0) {
+                startArcs.add(a);
+            }
+        }
+        startArcs.sort(Comparator.comparingInt((Arc a) -> a.from.t).thenComparingInt(a -> a.to.i));
+
+        for (Arc startArc : startArcs) {
+            ArrayList<Utility.TaskInfo> machine = new ArrayList<Utility.TaskInfo>();
+            Arc currentArc = startArc;
+            while (currentArc != null && currentArc.to.i != 0) {
+                int job = currentArc.to.i;
+                double completion = currentArc.to.t;
+                double start = completion - d.p[job];
+                double taskCost = d.w_e[job] * Math.max(d.d_e[job] - completion, 0.0)
+                        + d.w_t[job] * Math.max(completion - d.d_l[job], 0.0);
+                machine.add(new Utility.TaskInfo(job, start, completion, taskCost));
+
+                Node currentNode = currentArc.to;
+                currentArc = null;
+                for (Arc arc : activeArcs) {
+                    if (arc.from.equals(currentNode) && arc.to.i != arc.from.i) {
+                        currentArc = arc;
+                        break;
+                    }
+                }
+            }
+            if (!machine.isEmpty()) {
+                schedules.add(machine);
+            }
+        }
+        return schedules;
     }
 
     public void end() {

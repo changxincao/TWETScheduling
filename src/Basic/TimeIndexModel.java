@@ -1,6 +1,8 @@
 package Basic;
 
 import java.io.File;
+import java.util.ArrayList;
+import java.util.Comparator;
 
 import Basic.Data;
 import Common.Utility;
@@ -24,7 +26,7 @@ public class TimeIndexModel {
     public TimeIndexModel(Data data) throws IloException {
         this.d   = data;
         this.cpx = new IloCplex();
-        this.H=(int)data.Cmax;
+        this.H=(int)data.CmaxH;
         
         /* ---- create variables ---- */
         x = new IloNumVar[d.n + 1][H + 1];
@@ -90,6 +92,50 @@ public class TimeIndexModel {
     }
     public double getObj() throws IloException { return cpx.getObjValue(); }
     public int    getH()  { return H; }
+    public Data getData() { return d; }
+    public IloCplex getCplex() { return cpx; }
+    public IloNumVar[][] getX() { return x; }
+
+    /**
+     * 从 time-indexed 解中提取任务时间表。
+     * <p>
+     * 该模型本身不显式区分机器编号，因此这里按开始时间做一次贪心分配，
+     * 只用于结果输出和可行性核查，不改变原模型含义。
+     */
+    public ArrayList<ArrayList<Utility.TaskInfo>> extractTaskSchedules() throws IloException {
+        ArrayList<Utility.TaskInfo> tasks = new ArrayList<Utility.TaskInfo>();
+        for (int j = 1; j <= d.n; j++) {
+            for (int t = 0; t <= H - d.p[j]; t++) {
+                if (x[j][t] != null && cpx.getValue(x[j][t]) > 0.5 - Utility.EPS) {
+                    double start = t;
+                    double completion = t + d.p[j];
+                    double taskCost = d.w_e[j] * Math.max(d.d_e[j] - completion, 0.0)
+                            + d.w_t[j] * Math.max(completion - d.d_l[j], 0.0);
+                    tasks.add(new Utility.TaskInfo(j, start, completion, taskCost));
+                }
+            }
+        }
+        tasks.sort(Comparator.comparingDouble((Utility.TaskInfo t) -> t.start).thenComparingInt(t -> t.job));
+
+        ArrayList<ArrayList<Utility.TaskInfo>> schedules = new ArrayList<ArrayList<Utility.TaskInfo>>();
+        for (Utility.TaskInfo task : tasks) {
+            boolean assigned = false;
+            for (ArrayList<Utility.TaskInfo> machine : schedules) {
+                Utility.TaskInfo last = machine.get(machine.size() - 1);
+                if (last.completion <= task.start + Utility.EPS) {
+                    machine.add(task);
+                    assigned = true;
+                    break;
+                }
+            }
+            if (!assigned) {
+                ArrayList<Utility.TaskInfo> machine = new ArrayList<Utility.TaskInfo>();
+                machine.add(task);
+                schedules.add(machine);
+            }
+        }
+        return schedules;
+    }
     public void   end()   { cpx.end(); }
 
     /* quick demo */

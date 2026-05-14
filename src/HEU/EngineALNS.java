@@ -1,0 +1,412 @@
+package HEU;
+
+
+import java.util.*;
+
+import javax.swing.text.html.CSS;
+
+import Basic.Data;
+import Common.PiecewiseLinearFunction;
+import Common.Utility;
+
+/**
+ * ALNS (Adaptive Large Neighborhood Search) + VND 框架
+ */
+
+//扰动还是很关键的，测试中如果扰动不到位，小规模很容易局部最优
+public class EngineALNS {
+    private Data data;
+    private Solution current;
+    private EngineVND vnd;
+    private List<RemovalOperator> removals;
+    private List<InsertionOperator> insertions;
+
+    public static Random rng = new Random(0);
+    public static double defaultRemoveRatioU=0.2;//默认删除上界
+    public static double defaultRemoveRatioL=0.05;//默认删除上界
+    public static int maxNoImpIterN=40;//最多无改进次数
+    public static int maxremRatioChangeN=8;//最多扩大删除率次数
+    public static double maxRemRatio=0.6;//最大删除率
+    public static int ratioChangeNoImpIterN=15;//连续无改进次数，扩大解扰动
+    public static double increaseRate=1.5;//多次无改进，扩大扰动当前解的程度，增大率
+    public double curRemoveRatioL;
+    public double curRemoveRatioU;
+    
+    public EngineALNS(Data data, Solution init) {
+        data.configure.updateBestSolution(init);
+    	this.data = data;
+        this.current = init;
+        this.curRemoveRatioL=defaultRemoveRatioL;
+        this.curRemoveRatioU=defaultRemoveRatioU;
+        initOperators();
+       
+    }
+
+    /** 初始化所有 Removal/Insertion 算子 */
+    private void initOperators() {
+        removals = Arrays.asList(
+            new RandomRemoval(defaultRemoveRatioU),    // 随机移除 10% 节点
+            new WorstRemoval(defaultRemoveRatioU),     // 按惩罚贡献移除最坏的 10%
+            new ShawRemoval(defaultRemoveRatioU)         // 基于相似度移除 5 个节点
+        );
+        insertions = Arrays.asList(
+            new GreedyInsertion(),     // 贪心插入
+            new RegretKInsertion(2),    // 2-后悔值插入
+            new RandomizedInsertion(4)  // 前 5 最优位置中随机
+        );
+    }
+
+    /** 主搜索过程 */
+    public void search() {
+        int noImprove = 0;
+        int remRatioChangeN=0;//这个参数其实没啥用，不起控制作用,师兄那个是因为还有一个别的共同作用的
+        while (noImprove < maxNoImpIterN&&remRatioChangeN<maxremRatioChangeN) {
+        	Solution tmpSol=current.copy();
+        	//此处要对这个解重新 M 刷一次，保证ALNS可以对那些差解算出精确值
+        	Utility.resetCurUpperBound(Utility.big_M);
+       
+        	for(int m=0;m<data.m;m++) {
+        		tmpSol.curCost -= tmpSol.cost[m];
+        		tmpSol.calCost(m);
+        		tmpSol.curCost += tmpSol.cost[m];
+        	}
+//        	double test1=Move.testSequence(data,tmpSol.sequences.get(0),tmpSol);
+//        	double test2=Move.testSequence(data,tmpSol.sequences.get(1),tmpSol);
+//        	System.out.println("当前解成本："+tmpSol.curCost+" "+(test1+test2)+" "+Utility.curUpperBound);
+        	
+            // 1) 破坏
+            RemovalOperator rem = removals.get(rng.nextInt(removals.size()));
+            double ratio=EngineALNS.rng.nextDouble(curRemoveRatioL, curRemoveRatioU);
+            rem.setRemovedRatio(ratio);
+            List<Integer> removed = rem.remove(tmpSol);
+            
+            // 2) 修复
+            InsertionOperator ins = insertions.get(rng.nextInt(insertions.size()));
+            ins.insert(tmpSol, removed);
+//            System.out.println("完成ALNS步骤"+" "+rem.getClass().getName()+" "+ins.getClass().getName());
+//            System.out.println("删除："+removed);
+//            System.out.println(tmpSol.sequences);
+            // 3) 局部精炼
+           
+            vnd=new EngineVND(data, tmpSol);
+            vnd.search();
+//            System.out.println("完成VND步骤");
+//            System.out.println(tmpSol.sequences);
+            
+            
+            // 4) 更新全局最优
+            double tmpCost = tmpSol.curCost;
+            double bestCost= data.configure.bestSolution.curCost;
+            if (Utility.compareLt(tmpCost, bestCost)) {
+            	 data.configure.updateBestSolution(tmpSol);
+                noImprove = 0;
+                remRatioChangeN=0;
+                curRemoveRatioL=defaultRemoveRatioL;
+                curRemoveRatioU=defaultRemoveRatioU;
+               
+            } else {
+                noImprove++;
+                if(noImprove%ratioChangeNoImpIterN==0) {
+                	double rate=increaseRate;
+                	if(Utility.compareGe(curRemoveRatioU*(1+increaseRate),maxRemRatio)) {
+                		rate=maxRemRatio/curRemoveRatioU-1;
+                		if(!Utility.compareEq(rate, 0.0)) {
+                			//当到达最大阈值的时候删除率保持不变,直到结束或新解刷新
+                        	curRemoveRatioL*=(1+rate);
+                        	curRemoveRatioU*=(1+rate);
+                        	remRatioChangeN++;	
+                		}
+                		
+                	}
+                	
+                }
+            }
+            
+            if(Utility.compareLe(tmpCost, current.curCost)) {
+            	current=tmpSol;//不做复制
+            }
+        }
+        
+    }
+}
+
+// ===== 算子接口 =====
+interface RemovalOperator {
+    /** 从解中移除若干任务，返回被移除的任务ID列表 */
+    List<Integer> remove(Solution s);
+    void setRemovedRatio(double frac);
+   
+}
+
+interface InsertionOperator {
+    /** 将被移除任务重新插入解中 */
+    void insert(Solution s, List<Integer> removed);
+    
+    public static double evaluateInsertionCost(Solution s,int m, int pos,int job) {
+    	ArrayList<Integer> seq=s.sequences.get(m);
+    	PiecewiseLinearFunction f=(pos==-1?s.data.penaltyFunction[0]:s.fFunctions.get(m).get(pos));
+    	PiecewiseLinearFunction b=(pos==seq.size()-1?s.data.penaltyFunction[0]:s.bFunctions.get(m).get(pos+1));
+    	double shift1=s.data.s[pos==-1?0:seq.get(pos)][job]+s.data.p[job];
+    	double shift2=pos==seq.size()-1?0:s.data.s[job][seq.get(pos+1)]+s.data.p[seq.get(pos+1)];
+    	PiecewiseLinearFunction f1=f.shiftX(shift1).add(s.data.penaltyFunction[job]);
+    	return s.merge2Segments(f1, b, shift2)-s.cost[m];
+    }
+}
+
+// ===== Removal 算子实例 =====
+// 1. 随机移除
+class RandomRemoval implements RemovalOperator {
+    private double fraction;
+    public RandomRemoval(double fraction) { this.fraction = fraction; }
+    public List<Integer> remove(Solution s) {
+        Set<Integer> jobs = new HashSet<Integer>();
+        
+        int k = Math.max(1,(int)(s.data.n * fraction));
+        int[] removedNum=new int[s.data.m];
+        ArrayList<Integer> machinesId=new ArrayList<Integer>();
+        for(int m=0;m<s.data.m;m++) {
+        	if(s.sequences.get(m).size()>1) {
+        		machinesId.add(m);
+        	}
+        }
+        for(int i=0;i<k;i++) {
+        	int selectedM=machinesId.get(EngineALNS.rng.nextInt(machinesId.size()));
+        	int selectedJob=s.sequences.get(selectedM).get(EngineALNS.rng.nextInt(s.sequences.get(selectedM).size()));
+        	while(jobs.contains(selectedJob)) {
+        		selectedJob=s.sequences.get(selectedM).get(EngineALNS.rng.nextInt(s.sequences.get(selectedM).size()));
+        	}
+        	jobs.add(selectedJob);
+        	removedNum[selectedM]++;
+        	machinesId.removeIf(m->(removedNum[m]==s.sequences.get(m).size()-1));
+        	if(machinesId.size()==0) break;
+        }
+        
+        
+        List<Integer> toRemove =new ArrayList<Integer>(jobs);
+        s.removeJobs(toRemove);
+        return toRemove;
+    }
+	@Override
+	public void setRemovedRatio(double frac) {
+		this.fraction=frac;
+		
+	}
+}
+
+// 2. 最坏移除（按单任务惩罚最高）
+class WorstRemoval implements RemovalOperator {
+    private double fraction;
+    public WorstRemoval(double fraction) { this.fraction = fraction; }
+    public List<Integer> remove(Solution s) {
+        Map<Integer, Double> penalties = computeIndividualPenalties(s); // 用户自行实现
+        int k = Math.max(1,(int)(penalties.size() * fraction));
+        //这就相当于完全不做迭代了，只基于当前解删除,可能不准,先这样
+       List<Integer> removed=removeTopKByValue(s,penalties, k);
+       s.removeJobs(removed);
+       return removed;
+    }
+    
+    public Map<Integer, Double> computeIndividualPenalties(Solution s){
+    	//计算基于当前序列，删除某个任务导致的成本变化,删除减小最大的
+    	TreeMap<Integer, Double> JobDeltaCost=new TreeMap<Integer, Double>();
+    	for(int m=0;m<s.data.m;m++) {
+    		ArrayList<Integer> seq=s.sequences.get(m);
+    		double costM=s.cost[m];
+    		if(seq.size()==1) {
+    			JobDeltaCost.put(seq.get(0), costM);
+    			continue;
+    		}
+    		for(int i=0;i<seq.size();i++) {
+    			int jid=seq.get(i);
+    			PiecewiseLinearFunction f=(i==0?s.data.penaltyFunction[0]:s.fFunctions.get(m).get(i-1));
+    			PiecewiseLinearFunction b=(i==seq.size()-1?s.data.penaltyFunction[0]:s.bFunctions.get(m).get(i+1));
+    			double shift=(i==seq.size()-1?0:s.data.s[i==0?0:seq.get(i-1)][seq.get(i+1)]+s.data.p[seq.get(i+1)]);
+    			double cost=s.merge2Segments(f, b, shift);
+    			JobDeltaCost.put(jid, cost-costM);
+    		}
+    	}
+    	return JobDeltaCost;
+    	
+    }
+    public List<Integer> removeTopKByValue(Solution s,Map<Integer, Double> penalties,int k){
+    	List<Integer> list=new ArrayList<Integer>();
+    	for(int i=1;i<=s.data.n;i++) {
+    		list.add(i);
+    	}
+    	Collections.sort(list,(o1,o2)->(int)(penalties.get(o1)-penalties.get(o2)));
+    	list=list.subList(0, Math.min(k, list.size()));
+    	return list;
+    }
+    @Override
+	public void setRemovedRatio(double frac) {
+		this.fraction=frac;
+		
+	}
+}
+
+// 3. Shaw 相似性移除
+class ShawRemoval implements RemovalOperator {
+    private double fraction;
+    public ShawRemoval(double frac) { this.fraction = frac; }
+    public double taskDistance(int i, int j,Data data) {
+        double alpha = 1.0, alpha2 = 1.0, alpha3 = 1.0; // 可调权重
+        double alpha4=1.0;double alpha5=1.0;
+        
+        return alpha * Math.abs(data.p[i] - data.p[j])
+             + alpha2  * (data.s[i][j] + data.s[j][i])
+             + alpha3* Math.abs(data.d_e[i] - data.d_e[j])+alpha4*Math.abs(data.d_l[i] - data.d_l[j])
+             +alpha5*Math.abs(data.w_e[i] - data.w_e[j])+alpha5*Math.abs(data.w_t[i] - data.w_t[j]);
+        
+       
+    }
+    //TODO 可以预处理，先不管
+    public int findMostSimilar(Solution s,int seed, List<Integer> removed,int[] removedNumM,int[]jobMMap) {
+      double bestDist = Double.POSITIVE_INFINITY;
+      int bestJob = -1;
+      for (Integer job=1;job<=s.data.n;job++) {
+    	  int a1=s.sequences.get(jobMMap[job]).size();
+    	  int a2=removedNumM[jobMMap[job]]+1;
+    	  if(a1==a2) continue;
+          if (job == seed || removed.contains(job)) continue;
+          double dist = taskDistance(seed, job,s.data);
+          if (dist < bestDist) {
+              bestDist = dist;
+              bestJob = job;
+          }
+      }
+      //外层控制了删除数量，应该总是可以找到
+      return bestJob;
+  }
+    public List<Integer> remove(Solution s) {
+    	 List<Integer> all = new ArrayList<Integer>();
+         for(int i=1;i<=s.data.n;i++) {
+         	all.add(i);
+         }
+         int k = Math.max(1,(int)(all.size() * fraction));
+         
+         int[] jobMMap=new int[s.data.n+1];
+         k=Math.min(k,s.data.n-s.data.m);//保证每个机器剩余1个任务
+         for(int m=0;m<s.data.m;m++) {
+        	 for(int jid:s.sequences.get(m)) {
+        		 jobMMap[jid]=m;
+        	 }
+         }
+         
+        int[] removedNumM=new int[s.data.m];
+        int seed = all.get(EngineALNS.rng.nextInt(all.size()));
+        while(s.sequences.get(jobMMap[seed]).size()==1) {
+        	seed = all.get(EngineALNS.rng.nextInt(all.size()));
+        }
+        List<Integer> removed = new ArrayList<>();
+        removed.add(seed);
+        removedNumM[jobMMap[seed]]++;
+        while (removed.size() < k) {
+            int best = findMostSimilar(s, seed, removed,removedNumM,jobMMap); // 用户定义相似度
+            removed.add(best);
+            removedNumM[jobMMap[best]]++;
+        }
+        s.removeJobs(removed);
+        return removed;
+    }
+    @Override
+	public void setRemovedRatio(double frac) {
+		this.fraction=frac;
+		
+	}
+}
+
+// ===== Insertion 算子实例 =====
+// 1. 贪心插入
+class GreedyInsertion implements InsertionOperator {
+    public void insert(Solution s, List<Integer> removed) {
+        for (Integer job : removed) {
+            double bestDelta = Double.POSITIVE_INFINITY;
+            int bestM = -1, bestPos = -1;
+            for (int m = 0; m < s.data.m; m++) {
+                List<Integer> seq = s.sequences.get(m);
+                for (int pos = -1; pos < seq.size(); pos++) {
+                    double delta = InsertionOperator.evaluateInsertionCost(s,m, pos, job);
+                    if (delta < bestDelta) {
+                        bestDelta = delta;
+                        bestM = m;
+                        bestPos = pos;
+                    }
+                }
+            }
+            s.insertJob(bestM, bestPos, job);
+//            System.out.println("插入任务："+job+" "+bestM+" "+bestPos+" "+bestDelta);
+        }
+    }
+    
+   
+}
+
+// 2. 后悔值插入 (Regret-k)
+class RegretKInsertion implements InsertionOperator {
+    private int k;
+    public RegretKInsertion(int k) { this.k = k; }
+    public void insert(Solution s, List<Integer> removed) {
+    	removed=new ArrayList<Integer>(removed);
+        while (!removed.isEmpty()) {
+            int bestJob=-1;
+            double bestRegret=-1;
+            int bestM=0, bestPos=0;
+            for (Integer job : removed) {
+                // 记录前 k 小的成本
+                
+                List<double[]> locs = new ArrayList<>();
+                for (int m = 0; m < s.data.m; m++) {
+                    for (int pos=-1; pos<s.sequences.get(m).size(); pos++) {
+                        double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
+                      
+                        locs.add(new double[]{m,pos,d});
+                    }
+                }
+                // 取 k 最小
+                Collections.sort(locs,(o1,o2)->(int)(o1[2]-o2[2]));//先假设不太可能插入不可行
+                double best = locs.get(0)[2];
+                double regret = 0;
+                for (int i=1;i<Math.min(k,locs.size());i++) {
+                    regret += locs.get(i)[2] - best;
+                }
+                if (regret > bestRegret) {
+                    bestRegret = regret;
+                    bestJob = job;
+                    bestPos = (int)locs.get(0)[1];
+                    bestM=(int)locs.get(0)[0];
+                    
+                }
+               
+            }
+//            System.out.println(bestJob+" "+bestM+" "+bestPos);
+            // 对 bestJob 做贪心插入
+            s.insertJob(bestM, bestPos, bestJob);
+            removed.remove(Integer.valueOf(bestJob));
+        }
+    }
+    
+}
+
+// 3. 随机化插入
+class RandomizedInsertion implements InsertionOperator {
+    private int r;
+    public RandomizedInsertion(int r) { this.r = r; }
+    public void insert(Solution s, List<Integer> removed) {
+        for (Integer job: removed) {
+            List<InsertionOption> opts = new ArrayList<>();
+            for (int m=0;m<s.data.m;m++)
+                for (int pos=-1;pos<s.sequences.get(m).size();pos++) {
+                    double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
+                    opts.add(new InsertionOption(m,pos,d));
+                }
+            Collections.sort(opts, Comparator.comparingDouble(o->o.delta));
+            InsertionOption pick = opts.get(EngineALNS.rng.nextInt(Math.min(r,opts.size())));
+            s.insertJob(pick.machine,pick.position, job);
+        }
+    }
+}
+
+class InsertionOption { int machine, position; double delta;
+    InsertionOption(int m,int p,double d){machine=m;position=p;delta=d;}
+}
+

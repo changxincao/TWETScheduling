@@ -1,0 +1,647 @@
+package PWLFTesting;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Random;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+import Common.Configure;
+import Common.PiecewiseLinearFunction;
+import Common.PiecewiseLinearFunction.Segment;
+import Common.Utility;
+
+public class PiecewiseLinearFunctionPropertyTest {
+
+	private static final double INF = Utility.curUpperBound;
+	private static final double TOL = 1e-5;
+	private static final int RANDOM_CASES = 500;
+	private static final Random RANDOM = new Random(20260513L);
+
+	private final ArrayList<String> report = new ArrayList<String>();
+	private final ArrayList<String> failures = new ArrayList<String>();
+	private int passed;
+	private int warnings;
+	private int failed;
+
+	public static void main(String[] args) throws Exception {
+		Locale.setDefault(Locale.US);
+		Configure.SegmentPool = false;
+		Utility.resetCurUpperBound(Utility.big_M);
+
+		PiecewiseLinearFunctionPropertyTest test = new PiecewiseLinearFunctionPropertyTest();
+		test.runAll();
+		test.writeReport();
+	}
+
+	private void runAll() {
+		report.add("# PiecewiseLinearFunction property test report");
+		report.add("");
+		report.add("Scope: shiftX, add, prefix/suffix minimization, findMinimal, dominates, mergeMinimum, updateDominatedIntervals.");
+		report.add("Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-linear time-penalty functions.");
+		report.add("");
+
+		testShiftXAgainstEvaluation();
+		testAddAgainstPointwiseSum();
+		testPrefixMinAgainstOracle();
+		testSuffixMinAgainstOracle();
+		testFindMinimalNormalCases();
+		testFindMinimalVerticalJumpRisk();
+		testFindMinimalPositionSelectionCases();
+		testDominanceDomainCoverageRisk();
+		testMergeMinimumOverlappingCases();
+		testMergeMinimumDisjointDomainRisk();
+		testUpdateDominatedIntervalsBasicCases();
+		testUpperBoundSemanticDependency();
+		testRandomOperationSweep();
+		testRandomFrontierSweep();
+	}
+
+	private void testShiftXAgainstEvaluation() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 3, 2, 1),
+				seg(3, 8, -1, 10),
+				seg(8, 12, 0.5, -2));
+		double delta = 2.75;
+		PiecewiseLinearFunction shifted = f.shiftX(delta);
+		boolean ok = true;
+		for (double x : samplePoints(f)) {
+			double expected = evalRef(f, x);
+			double actual = evalRef(shifted, x + delta);
+			ok &= checkClose("shiftX keeps function values after horizontal shift", expected, actual);
+		}
+		if (ok) {
+			pass("shiftX: value preservation on shifted domain");
+		}
+	}
+
+	private void testAddAgainstPointwiseSum() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 5, 1.5, 2),
+				seg(5, 9, -0.5, 12));
+		PiecewiseLinearFunction g = function(0, 20,
+				seg(2, 6, -1, 9),
+				seg(6, 10, 2, -6));
+		PiecewiseLinearFunction sum = f.add(g);
+		boolean ok = true;
+		for (double x : sampleUnion(f, g)) {
+			double expected = evalRef(f, x) + evalRef(g, x);
+			double actual = evalRef(sum, x);
+			if (isFinite(expected)) {
+				ok &= checkClose("add equals pointwise sum on common domain", expected, actual);
+			}
+		}
+		if (ok) {
+			pass("add: pointwise sum on overlapping domain");
+		}
+	}
+
+	private void testPrefixMinAgainstOracle() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 3, 3, 1),
+				seg(3, 7, -2, 18),
+				seg(7, 11, 1, -2));
+		PiecewiseLinearFunction actual = f.copy();
+		actual.minimizePrefixInPlace();
+		boolean ok = true;
+		for (double x : samplePoints(f)) {
+			double expected = prefixMinRef(f, x);
+			ok &= checkClose("minimizePrefixInPlace equals prefix-min oracle", expected, evalRef(actual, x));
+		}
+		if (ok) {
+			pass("minimizePrefixInPlace: normal continuous/nonconvex case");
+		}
+	}
+
+	private void testSuffixMinAgainstOracle() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 3, -2, 12),
+				seg(3, 7, 1, 1),
+				seg(7, 11, -1.5, 24));
+		PiecewiseLinearFunction actual = f.copy();
+		actual.minimizeSuffixInPlace();
+		boolean ok = true;
+		for (double x : samplePoints(f)) {
+			double expected = suffixMinRef(f, x);
+			ok &= checkClose("minimizeSuffixInPlace equals suffix-min oracle", expected, evalRef(actual, x));
+		}
+		if (ok) {
+			pass("minimizeSuffixInPlace: normal continuous/nonconvex case");
+		}
+	}
+
+	private void testFindMinimalNormalCases() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 2, -3, 12),
+				seg(2, 5, 1, 4),
+				seg(5, 8, -0.25, 8));
+		double[] actual = f.findMinimal(false, true);
+		double[] expected = minRef(f);
+		if (checkClose("findMinimal normal min value", expected[0], actual[0])) {
+			pass("findMinimal: normal multi-segment case");
+		}
+	}
+
+	private void testFindMinimalVerticalJumpRisk() {
+		PiecewiseLinearFunction f = function(0, 10,
+				seg(0, 1, -10, 10),
+				seg(1, 2, 0, 5));
+		double[] actual = f.findMinimal(false, true);
+		double leftLimitMinimum = 0.0;
+		if (actual[0] > leftLimitMinimum + TOL) {
+			warn("findMinimal misses a left-limit minimum at a vertical jump",
+					"expectedLeftLimit=0.0, actual=" + actual[0]
+							+ ". This matters only if segment-end left limits are meaningful states.");
+		} else {
+			pass("findMinimal: vertical jump left-limit case");
+		}
+	}
+
+	private void testFindMinimalPositionSelectionCases() {
+		boolean ok = true;
+
+		PiecewiseLinearFunction flatBottom = function(0, 10,
+				seg(0, 2, -2, 9),
+				seg(2, 5, 0, 5),
+				seg(5, 7, 2, -5));
+		ok &= checkMinimalPair("findMinimal continuous flat bottom fromLeft", flatBottom.findMinimal(true, true), 5, 2);
+		ok &= checkMinimalPair("findMinimal continuous flat bottom fromRight", flatBottom.findMinimal(true, false), 5, 5);
+
+		PiecewiseLinearFunction verticalLeftLimit = function(0, 10,
+				seg(0, 1, -10, 10),
+				seg(1, 2, 0, 5));
+		ok &= checkMinimalPair("findMinimal vertical gap left-limit fromLeft", verticalLeftLimit.findMinimal(false, true), 0, 1);
+		ok &= checkMinimalPair("findMinimal vertical gap left-limit fromRight", verticalLeftLimit.findMinimal(false, false), 0, 1);
+
+		PiecewiseLinearFunction jumpIntoFlat = function(0, 10,
+				seg(0, 1, 0, 5),
+				seg(1, 2, 0, 0),
+				seg(2, 3, 0, 0));
+		ok &= checkMinimalPair("findMinimal downward jump into flat fromLeft", jumpIntoFlat.findMinimal(false, true), 0, 1);
+		ok &= checkMinimalPair("findMinimal downward jump into flat fromRight", jumpIntoFlat.findMinimal(false, false), 0, 3);
+
+		PiecewiseLinearFunction separatedMinima = function(0, 10,
+				seg(0, 1, 0, 0),
+				seg(1, 2, 0, 5),
+				seg(2, 3, 0, 0));
+		ok &= checkMinimalPair("findMinimal separated equal minima fromLeft", separatedMinima.findMinimal(false, true), 0, 0);
+		ok &= checkMinimalPair("findMinimal separated equal minima fromRight", separatedMinima.findMinimal(false, false), 0, 3);
+
+		PiecewiseLinearFunction cacheOrder = function(0, 10,
+				seg(0, 2, -1, 4),
+				seg(2, 4, 0, 2));
+		ok &= checkMinimalPair("findMinimal cache order fromRight first", cacheOrder.findMinimal(false, false), 2, 4);
+		ok &= checkMinimalPair("findMinimal cache order then fromLeft", cacheOrder.findMinimal(false, true), 2, 2);
+
+		if (ok) {
+			pass("findMinimal: left/right position selection on continuous and discontinuous endpoints");
+		}
+	}
+
+	private void testDominanceDomainCoverageRisk() {
+		PiecewiseLinearFunction shorter = function(0, 20,
+				seg(0, 5, 0, 1));
+		PiecewiseLinearFunction longer = function(0, 20,
+				seg(0, 10, 0, 5));
+		boolean actual = shorter.dominates(longer);
+		if (actual) {
+			fail("dominates returns true when dominator does not cover dominated function domain",
+					"shorter=[0,5], longer=[0,10]. If dominance is defined over the full dominated domain, this is unsafe.");
+		} else {
+			pass("dominates: rejects insufficient domain coverage");
+		}
+	}
+
+	private void testMergeMinimumOverlappingCases() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 4, 2, 0),
+				seg(4, 8, -1, 12));
+		PiecewiseLinearFunction g = function(0, 20,
+				seg(2, 6, -0.5, 8),
+				seg(6, 10, 0.25, 2));
+		PiecewiseLinearFunction actual = f.copy();
+		actual.mergeMinimum(g.copy());
+		boolean ok = true;
+		for (double x : sampleUnion(f, g)) {
+			double expected = prefixMinOfLowerEnvelopeRef(f, g, x);
+			ok &= checkClose("mergeMinimum equals prefix-min lower envelope on overlapping/extended domain",
+					expected, evalRef(actual, x));
+		}
+		if (ok) {
+			pass("mergeMinimum: overlapping domains under forward frontier semantics");
+		}
+	}
+
+	private void testMergeMinimumDisjointDomainRisk() {
+		PiecewiseLinearFunction f = function(0, 20, seg(5, 8, 0, 10));
+		PiecewiseLinearFunction left = function(0, 20, seg(0, 3, 0, 1));
+		PiecewiseLinearFunction right = function(0, 20, seg(10, 12, 0, 1));
+		checkMergeDisjoint("mergeMinimum disjoint-left domain", f, left);
+		checkMergeDisjoint("mergeMinimum disjoint-right domain", f, right);
+	}
+
+	private void checkMergeDisjoint(String name, PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
+		try {
+			PiecewiseLinearFunction actual = f.copy();
+			actual.mergeMinimum(g.copy());
+			boolean ok = true;
+			for (double x : sampleUnion(f, g)) {
+				double expected = prefixMinOfLowerEnvelopeRef(f, g, x);
+				ok &= checkClose(name + " equals prefix-min lower envelope", expected, evalRef(actual, x));
+			}
+			if (ok) {
+				pass(name);
+			}
+		} catch (Throwable ex) {
+			fail(name + " throws exception", ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+	}
+
+	private void testUpdateDominatedIntervalsBasicCases() {
+		PiecewiseLinearFunction f = function(0, 20, seg(0, 5, 0, 10));
+		PiecewiseLinearFunction g = function(0, 20, seg(0, 5, 0, 1));
+		boolean removed = f.updateDominatedIntervals(g);
+		if (!removed || !f.isEmpty()) {
+			fail("updateDominatedIntervals should remove fully dominated same-domain function",
+					"removed=" + removed + ", empty=" + f.isEmpty());
+		} else {
+			pass("updateDominatedIntervals: full domination");
+		}
+
+		PiecewiseLinearFunction partial = function(0, 20,
+				seg(0, 2, 0, 1),
+				seg(2, 4, 0, 10),
+				seg(4, 6, 0, 1));
+		PiecewiseLinearFunction dominator = function(0, 20, seg(2, 4, 0, 5));
+		try {
+			partial.updateDominatedIntervals(dominator);
+			pass("updateDominatedIntervals: partial middle domination no exception");
+		} catch (Throwable ex) {
+			fail("updateDominatedIntervals partial middle domination throws exception",
+					ex.getClass().getSimpleName() + ": " + ex.getMessage());
+		}
+	}
+
+	private void testUpperBoundSemanticDependency() {
+		double old = Utility.curUpperBound;
+		Utility.resetCurUpperBound(100.0);
+		try {
+			PiecewiseLinearFunction f = function(0, 10, seg(0, 4, 0, 200));
+			PiecewiseLinearFunction p = f.copy();
+			p.minimizePrefixInPlace();
+			double actual = evalRef(p, 2);
+			if (Math.abs(actual - 200.0) > TOL) {
+				warn("prefix/suffix minimization is not pure mathematical min when curUpperBound is below function values",
+						"curUpperBound=100, original=200, prefix result at t=2 is " + actual
+								+ ". This is intentional pruning behavior but unsafe for exact pricing with negative dual offsets.");
+			} else {
+				pass("curUpperBound dependency: prefix behaves as pure min");
+			}
+		} finally {
+			Utility.resetCurUpperBound(old);
+		}
+	}
+
+	private void testRandomOperationSweep() {
+		int localFailures = 0;
+		for (int i = 0; i < RANDOM_CASES; i++) {
+			PiecewiseLinearFunction f = randomContinuousFunction();
+			PiecewiseLinearFunction g = randomContinuousFunction();
+			try {
+				PiecewiseLinearFunction sum = f.add(g);
+				for (double x : sampleUnion(f, g)) {
+					double expected = evalRef(f, x) + evalRef(g, x);
+					if (isFinite(expected)) {
+						requireClose(expected, evalRef(sum, x));
+					}
+				}
+				PiecewiseLinearFunction min = f.copy();
+				min.mergeMinimum(g.copy());
+				for (double x : sampleUnion(f, g)) {
+					requireClose(prefixMinOfLowerEnvelopeRef(f, g, x), evalRef(min, x));
+				}
+			} catch (Throwable ex) {
+				localFailures++;
+				if (localFailures <= 5) {
+					fail("random sweep operation failure", "case=" + i + ", " + ex.getClass().getSimpleName()
+							+ ": " + ex.getMessage() + ", f=" + compact(f) + ", g=" + compact(g));
+				}
+			}
+		}
+		if (localFailures == 0) {
+			pass("random sweep: add and mergeMinimum forward-frontier semantics on " + RANDOM_CASES + " continuous cases");
+		} else {
+			warn("random sweep found failures", "failureCount=" + localFailures + " / " + RANDOM_CASES);
+		}
+	}
+
+	private void testRandomFrontierSweep() {
+		int localFailures = 0;
+		for (int i = 0; i < RANDOM_CASES; i++) {
+			PiecewiseLinearFunction f = randomContinuousFunction();
+			PiecewiseLinearFunction g = randomContinuousFunction();
+			f.minimizePrefixInPlace();
+			g.minimizePrefixInPlace();
+			Throwable ex = runWithTimeout(new Runnable() {
+				@Override
+				public void run() {
+					checkMergedMinimum(f, g);
+				}
+			}, 300);
+			if (ex != null) {
+				PiecewiseLinearFunction min = f.copy();
+				localFailures++;
+				if (localFailures <= 5) {
+					fail("random frontier sweep mergeMinimum failure", "case=" + i + ", " + ex.getClass().getSimpleName()
+							+ ": " + ex.getMessage() + ", f=" + compact(f) + ", g=" + compact(g)
+							+ ", currentMinCopy=" + compact(min));
+				}
+				if (ex instanceof TestTimeoutException) {
+					break;
+				}
+			}
+		}
+		if (localFailures == 0) {
+			pass("random frontier sweep: mergeMinimum on " + RANDOM_CASES + " prefix-minimized cases");
+		} else {
+			warn("random frontier sweep found failures", "failureCount=" + localFailures + " / " + RANDOM_CASES
+					+ ". This is closer to route-evaluation frontier usage than arbitrary raw functions.");
+		}
+	}
+
+	private void checkMergedMinimum(PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
+		PiecewiseLinearFunction min = f.copy();
+		min.mergeMinimum(g.copy());
+		for (double x : sampleUnion(f, g)) {
+			requireClose(prefixMinOfLowerEnvelopeRef(f, g, x), evalRef(min, x));
+		}
+	}
+
+	private static Throwable runWithTimeout(Runnable task, long timeoutMillis) {
+		CountDownLatch done = new CountDownLatch(1);
+		AtomicReference<Throwable> thrown = new AtomicReference<Throwable>();
+		Thread worker = new Thread(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					task.run();
+				} catch (Throwable ex) {
+					thrown.set(ex);
+				} finally {
+					done.countDown();
+				}
+			}
+		}, "pwlf-test-worker");
+		worker.setDaemon(true);
+		worker.start();
+		try {
+			if (!done.await(timeoutMillis, TimeUnit.MILLISECONDS)) {
+				return new TestTimeoutException("operation did not finish in " + timeoutMillis + " ms");
+			}
+		} catch (InterruptedException ex) {
+			Thread.currentThread().interrupt();
+			return ex;
+		}
+		return thrown.get();
+	}
+
+	private static class TestTimeoutException extends RuntimeException {
+		TestTimeoutException(String message) {
+			super(message);
+		}
+	}
+
+	private PiecewiseLinearFunction randomContinuousFunction() {
+		int n = 2 + RANDOM.nextInt(7);
+		PiecewiseLinearFunction f = new PiecewiseLinearFunction(0, 100);
+		double x = RANDOM.nextDouble() * 3.0;
+		double value = RANDOM.nextDouble() * 20.0 - 5.0;
+		for (int i = 0; i < n; i++) {
+			double width = 0.5 + RANDOM.nextDouble() * 4.0;
+			double slope = -4.0 + RANDOM.nextDouble() * 8.0;
+			f.addSegment(x, x + width, slope, value - slope * x);
+			value = slope * (x + width) + (value - slope * x);
+			x += width;
+		}
+		return f;
+	}
+
+	private static PiecewiseLinearFunction function(double domainStart, double domainEnd, double[]... segments) {
+		PiecewiseLinearFunction f = new PiecewiseLinearFunction(domainStart, domainEnd);
+		for (double[] s : segments) {
+			f.addSegment(s[0], s[1], s[2], s[3]);
+		}
+		return f;
+	}
+
+	private static double[] seg(double start, double end, double slope, double intercept) {
+		return new double[] { start, end, slope, intercept };
+	}
+
+	private static double evalRef(PiecewiseLinearFunction f, double x) {
+		if (f.head == null) {
+			return INF;
+		}
+		for (Segment s = f.head; s != null; s = s.next) {
+			if ((x >= s.start - TOL && x < s.end - TOL) || (s.next == null && Math.abs(x - s.end) <= TOL)) {
+				return s.slope * x + s.intercept;
+			}
+		}
+		return INF;
+	}
+
+	private static double prefixMinRef(PiecewiseLinearFunction f, double x) {
+		double min = INF;
+		for (double p : samplePoints(f)) {
+			if (p <= x + TOL) {
+				min = Math.min(min, evalRef(f, p));
+			}
+		}
+		for (Segment s = f.head; s != null; s = s.next) {
+			if (s.start <= x + TOL && x <= s.end + TOL) {
+				min = Math.min(min, evalRef(f, Math.min(x, s.end)));
+			}
+		}
+		return min;
+	}
+
+	private static double suffixMinRef(PiecewiseLinearFunction f, double x) {
+		double min = INF;
+		for (double p : samplePoints(f)) {
+			if (p + TOL >= x) {
+				min = Math.min(min, evalRef(f, p));
+			}
+		}
+		for (Segment s = f.head; s != null; s = s.next) {
+			if (s.start <= x + TOL && x <= s.end + TOL) {
+				min = Math.min(min, evalRef(f, Math.max(x, s.start)));
+			}
+		}
+		return min;
+	}
+
+	private static double prefixMinOfLowerEnvelopeRef(PiecewiseLinearFunction f, PiecewiseLinearFunction g, double x) {
+		double min = INF;
+		for (double p : sampleUnion(f, g)) {
+			if (p <= x + TOL) {
+				min = Math.min(min, Math.min(evalRef(f, p), evalRef(g, p)));
+			}
+		}
+		return min;
+	}
+
+	private static double[] minRef(PiecewiseLinearFunction f) {
+		double min = INF;
+		double arg = -1;
+		for (double p : samplePoints(f)) {
+			double v = evalRef(f, p);
+			if (v < min - TOL) {
+				min = v;
+				arg = p;
+			}
+		}
+		return new double[] { min, arg };
+	}
+
+	private static List<Double> samplePoints(PiecewiseLinearFunction f) {
+		ArrayList<Double> xs = new ArrayList<Double>();
+		for (Segment s = f.head; s != null; s = s.next) {
+			addUnique(xs, s.start);
+			addUnique(xs, (s.start + s.end) * 0.5);
+			addUnique(xs, s.end);
+		}
+		return xs;
+	}
+
+	private static List<Double> sampleUnion(PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
+		ArrayList<Double> xs = new ArrayList<Double>();
+		for (double x : samplePoints(f)) {
+			addUnique(xs, x);
+		}
+		for (double x : samplePoints(g)) {
+			addUnique(xs, x);
+		}
+		for (Segment a = f.head; a != null; a = a.next) {
+			for (Segment b = g.head; b != null; b = b.next) {
+				double start = Math.max(a.start, b.start);
+				double end = Math.min(a.end, b.end);
+				if (start <= end + TOL) {
+					addUnique(xs, start);
+					addUnique(xs, (start + end) * 0.5);
+					addUnique(xs, end);
+					double ds = a.slope - b.slope;
+					double di = b.intercept - a.intercept;
+					if (Math.abs(ds) > TOL) {
+						double cross = di / ds;
+						if (cross > start + TOL && cross < end - TOL) {
+							addUnique(xs, cross);
+						}
+					}
+				}
+			}
+		}
+		xs.sort(Double::compareTo);
+		return xs;
+	}
+
+	private static void addUnique(ArrayList<Double> xs, double x) {
+		for (double y : xs) {
+			if (Math.abs(x - y) <= TOL) {
+				return;
+			}
+		}
+		xs.add(Double.valueOf(x));
+	}
+
+	private static boolean isFinite(double v) {
+		return v < INF * 0.5;
+	}
+
+	private boolean checkClose(String name, double expected, double actual) {
+		try {
+			requireClose(expected, actual);
+			return true;
+		} catch (AssertionError ex) {
+			fail(name, "expected=" + expected + ", actual=" + actual);
+			return false;
+		}
+	}
+
+	private boolean checkMinimalPair(String name, double[] actual, double expectedValue, double expectedX) {
+		boolean ok = true;
+		ok &= checkClose(name + " value", expectedValue, actual[0]);
+		ok &= checkClose(name + " x", expectedX, actual[1]);
+		return ok;
+	}
+
+	private static void requireClose(double expected, double actual) {
+		if (Math.abs(expected - actual) > TOL) {
+			throw new AssertionError("expected=" + expected + ", actual=" + actual);
+		}
+	}
+
+	private void pass(String name) {
+		passed++;
+		report.add("- PASS: " + name);
+	}
+
+	private void warn(String name, String detail) {
+		warnings++;
+		report.add("- WARN: " + name + ". " + detail);
+		failures.add("WARN," + csv(name) + "," + csv(detail));
+	}
+
+	private void fail(String name, String detail) {
+		failed++;
+		report.add("- FAIL: " + name + ". " + detail);
+		failures.add("FAIL," + csv(name) + "," + csv(detail));
+	}
+
+	private static String csv(String s) {
+		return "\"" + s.replace("\"", "\"\"").replace("\n", " ") + "\"";
+	}
+
+	private static String compact(PiecewiseLinearFunction f) {
+		StringBuilder sb = new StringBuilder();
+		int count = 0;
+		for (Segment s = f.head; s != null && count < 6; s = s.next, count++) {
+			sb.append(String.format("[%.3f,%.3f,%.3f,%.3f]", s.start, s.end, s.slope, s.intercept));
+		}
+		return sb.toString();
+	}
+
+	private void writeReport() throws IOException {
+		Path outDir = Paths.get("pwlf_test_results");
+		Files.createDirectories(outDir);
+		Path reportPath = outDir.resolve("pwlf_property_test_report.md");
+		Path csvPath = outDir.resolve("pwlf_case_findings.csv");
+		report.add("");
+		report.add("Summary: passed=" + passed + ", warnings=" + warnings + ", failed=" + failed);
+		try (BufferedWriter writer = Files.newBufferedWriter(reportPath, StandardCharsets.UTF_8)) {
+			for (String line : report) {
+				writer.write(line);
+				writer.newLine();
+			}
+		}
+		try (BufferedWriter writer = Files.newBufferedWriter(csvPath, StandardCharsets.UTF_8)) {
+			writer.write("level,case,detail");
+			writer.newLine();
+			for (String line : failures) {
+				writer.write(line);
+				writer.newLine();
+			}
+		}
+		System.out.println("PWLF property tests completed.");
+		System.out.println("Report: " + reportPath.toAbsolutePath());
+		System.out.println("Findings: " + csvPath.toAbsolutePath());
+		System.out.println("Summary: passed=" + passed + ", warnings=" + warnings + ", failed=" + failed);
+	}
+}

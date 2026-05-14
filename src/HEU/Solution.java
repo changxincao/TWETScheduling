@@ -3,12 +3,17 @@ package HEU;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 
+import Basic.ATIParallel;
 import Basic.ArcFlowModel;
 import Basic.Data;
+import Basic.TimeIndexModel;
+import Common.Configure;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewisePlotter;
 import Common.Utility;
@@ -22,7 +27,7 @@ public class Solution {
 	// 暂时没做更新
 	ArrayList<ArrayList<PiecewiseLinearFunction>> fFunctions;// 每个机器上每个任务惩罚函数,正向传播
 	ArrayList<ArrayList<PiecewiseLinearFunction>> bFunctions;// 每个机器上每个任务惩罚函数,反向传播
-	double best_cost;
+	public double curCost;
 	double[] cost;// 每个机器上的成本
 	PiecewiseLinearFunction[][][] fFunctions_hg;// normal
 	PiecewiseLinearFunction[][][] bFunctions_hg;// normal
@@ -47,6 +52,39 @@ public class Solution {
 			bFunctions.add(new ArrayList<PiecewiseLinearFunction>());
 
 		}
+	}
+
+	public Solution copy() {
+		Solution solution = new Solution(this.data);
+		solution.sequences.clear();
+		solution.fFunctions.clear();
+		solution.bFunctions.clear();
+		for (int m = 0; m < data.m; m++) {
+			solution.sequences.add(new ArrayList<Integer>(this.sequences.get(m)));
+			solution.fFunctions.add(new ArrayList<PiecewiseLinearFunction>(this.fFunctions.get(m)));
+			solution.bFunctions.add(new ArrayList<PiecewiseLinearFunction>(this.bFunctions.get(m)));
+
+		}
+		solution.curCost = this.curCost;
+		solution.cost = Arrays.copyOf(this.cost, data.m);// 每个机器上的成本
+		solution.cumDurationNormal = new double[data.m][];
+		solution.cumDurationReverse = new double[data.m][];
+
+		for (int m = 0; m < data.m; m++) {
+			solution.cumDurationNormal[m] = Arrays.copyOf(cumDurationNormal[m], cumDurationNormal[m].length);
+			solution.cumDurationReverse[m] = Arrays.copyOf(cumDurationReverse[m], cumDurationReverse[m].length);
+
+		}
+		solution.fFunctions_hg = fFunctions_hg;// 可直接等于，数组直接重新new 不会清空
+		solution.bFunctions_hg = bFunctions_hg;// normal
+		solution.fFunctions_gh = fFunctions_gh;
+		solution.bFunctions_gh = bFunctions_gh;// reverse
+		solution.fFunctions_hgl_normal = fFunctions_hgl_normal;
+		solution.bFunctions_hgl_normal = bFunctions_hgl_normal;
+		solution.fFunctions_hgl_reverse = fFunctions_hgl_reverse;
+		solution.bFunctions_hgl_reverse = bFunctions_hgl_reverse;
+
+		return solution;
 	}
 
 	public void initialize_function() {
@@ -76,29 +114,57 @@ public class Solution {
 			cumDurationReverse[m] = new double[size];
 		}
 	}
-	
+
 	public void initialize_function(int m) {
-					int size = sequences.get(m).size();
-			fFunctions_hg[m] = new PiecewiseLinearFunction[size][size];// 应该不需要包含起始点
-			bFunctions_hg[m] = new PiecewiseLinearFunction[size][size];
-			fFunctions_gh[m] = new PiecewiseLinearFunction[size][size];// 应该不需要包含起始点
-			bFunctions_gh[m] = new PiecewiseLinearFunction[size][size];
-			fFunctions_hgl_normal[m] = new PiecewiseLinearFunction[size][size + 1][size];// 应该不需要包含起始点
-			bFunctions_hgl_normal[m] = new PiecewiseLinearFunction[size][size + 1][size];
-			fFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];// 应该不需要包含起始点
-			bFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];
-			// 最后一位[size]表示h2=-1的时候,即把某一段插入到最前边
-			cumDurationNormal[m] = new double[size];
-			cumDurationReverse[m] = new double[size];
-		
-	
+		int size = sequences.get(m).size();
+		fFunctions_hg[m] = new PiecewiseLinearFunction[size][size];// 应该不需要包含起始点
+		bFunctions_hg[m] = new PiecewiseLinearFunction[size][size];
+		fFunctions_gh[m] = new PiecewiseLinearFunction[size][size];// 应该不需要包含起始点
+		bFunctions_gh[m] = new PiecewiseLinearFunction[size][size];
+		fFunctions_hgl_normal[m] = new PiecewiseLinearFunction[size][size + 1][size];// 应该不需要包含起始点
+		bFunctions_hgl_normal[m] = new PiecewiseLinearFunction[size][size + 1][size];
+		fFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];// 应该不需要包含起始点
+		bFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];
+		// 最后一位[size]表示h2=-1的时候,即把某一段插入到最前边
+		cumDurationNormal[m] = new double[size];
+		cumDurationReverse[m] = new double[size];
+
 	}
 
 	public void setSequence(ArrayList<ArrayList<Integer>> sequences) {
 		this.sequences = sequences;
 	}
 
+	/**
+	 * 返回当前解中所有机器序列的深拷贝。
+	 * <p>
+	 * 这个接口是为了让新建的 TWETBPC 包能够读取启发式结果，
+	 * 但又不直接暴露内部可变数组引用。
+	 * <p>
+	 * 之所以返回 copy 而不是原对象，是为了避免：
+	 * 外部框架在拆初始列或做调试时，误改动当前启发式解本身。
+	 */
+	public ArrayList<ArrayList<Integer>> getSequencesCopy() {
+		ArrayList<ArrayList<Integer>> copy = new ArrayList<ArrayList<Integer>>(sequences.size());
+		for (List<Integer> seq : sequences) {
+			copy.add(new ArrayList<Integer>(seq));
+		}
+		return copy;
+	}
+
+	/**
+	 * 返回每台机器当前成本数组的副本。
+	 * <p>
+	 * 该接口同样是为 TWETBPC 新框架预留的只读桥接口。
+	 * 当前主要用于 seed/初始列相关的调试和信息提取，
+	 * 后续若需要根据机器成本筛选列，也会用到这个接口。
+	 */
+	public double[] getMachineCostsCopy() {
+		return cost == null ? new double[0] : Arrays.copyOf(cost, cost.length);
+	}
+
 	public void updateFFunctions1ForMachine(int m) {
+
 		// 1 1维
 		List<Integer> seq = sequences.get(m);
 		List<PiecewiseLinearFunction> f = new ArrayList<>();
@@ -107,9 +173,9 @@ public class Solution {
 			int job = seq.get(i);
 			PiecewiseLinearFunction cur;
 			if (i == 0) {
-				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.Cmax);
+				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
 			} else {
-				cur = f.get(i - 1).shift(data.s[seq.get(i - 1)][job] + data.p[job]).add(data.penaltyFunction[job]);
+				cur = f.get(i - 1).shiftX(data.s[seq.get(i - 1)][job] + data.p[job]).add(data.penaltyFunction[job]);
 			}
 			cur.minimizePrefixInPlace();
 			f.add(cur);
@@ -139,7 +205,7 @@ public class Solution {
 				cur = data.penaltyFunction[job].copy();
 
 			} else {
-				cur = b.get(i + 1).shift(-data.s[job][seq.get(i + 1)] - data.p[seq.get(i + 1)])
+				cur = b.get(i + 1).shiftX(-data.s[job][seq.get(i + 1)] - data.p[seq.get(i + 1)])
 						.add(data.penaltyFunction[job]);
 			}
 			cur.minimizeSuffixInPlace();
@@ -181,15 +247,15 @@ public class Solution {
 					// 2025.5.3 b函数应该不需要关注先最小化后截断可行域可能导致的问题，因为b函数是从后往前最小化的，从而即使从前截断一部分，并不影响。
 //					2025.5.4 还是不对，这个f函数在递推的时候，不应该函数最小化处理后再加一个函数。这是因为如果后续使用的时候需要限制定义域
 					// 此处初始未做限制认为从h1直接开始，从而递推过程中最小化也就相当于从一个很早的定义域开始最小化，例如如果某个函数是个增函数，那最小化以后是一条直线
-					//此时如果记录都按照直接从h1开始的函数最小化以后再存储，那后续限制定义域其实也会出错，比如实际使用的函数f_h1_h2定义域更小，该函数最小化以后为一条直线，取值100
-					//但此处由于没有使用实际计算时的顺序限制定义域，那可能最小化以后值为50，此时递推出来的后续函数都是错的，且无法通过限制定义域得到正确值（因为这种递增函数的最小化抹去了其他信息）
-					//尝试的做法是，这个二维函数记录不做最小化操作，直接记录函数本身，使用时再最小化和限制定义域
-					//而且感觉上其实所有函数不做min也行，定义变了，相当于恰好在此处完成，取min的含义为大于等于t完成
-					//2025.5.5 说明：5.4思考是错误的，此处函数必须存储的是minimize以后的结果，定义必须和原文一样才可以,已修改回去
-					//此外，当用于三段的拼接时，不需要处理定义域的问题，虽然不知道为什么，但不需要
-					
-					
-					//					bFunction_gh[h][g] = data.penaltyFunction[job].copy().setDomain(data.p[job] + data.min_s[job],
+					// 此时如果记录都按照直接从h1开始的函数最小化以后再存储，那后续限制定义域其实也会出错，比如实际使用的函数f_h1_h2定义域更小，该函数最小化以后为一条直线，取值100
+					// 但此处由于没有使用实际计算时的顺序限制定义域，那可能最小化以后值为50，此时递推出来的后续函数都是错的，且无法通过限制定义域得到正确值（因为这种递增函数的最小化抹去了其他信息）
+					// 尝试的做法是，这个二维函数记录不做最小化操作，直接记录函数本身，使用时再最小化和限制定义域
+					// 而且感觉上其实所有函数不做min也行，定义变了，相当于恰好在此处完成，取min的含义为大于等于t完成
+					// 2025.5.5 说明：5.4思考是错误的，此处函数必须存储的是minimize以后的结果，定义必须和原文一样才可以,已修改回去
+					// 此外，当用于三段的拼接时，不需要处理定义域的问题，虽然不知道为什么，但不需要
+
+					// bFunction_gh[h][g] = data.penaltyFunction[job].copy().setDomain(data.p[job] +
+					// data.min_s[job],
 //							data.Cmax);
 					// 2025.5.3 b函数不需要设置domain
 					bFunction_gh[h][g] = data.penaltyFunction[job].copy();
@@ -198,13 +264,12 @@ public class Solution {
 					continue;
 				}
 
-				
-				//b函数暂时认为没影响
-				fFunction_hg[h][g] = fFunction_hg[h][g - 1].shift(data.s[seq.get(g - 1)][job] + data.p[job])
+				// b函数暂时认为没影响
+				fFunction_hg[h][g] = fFunction_hg[h][g - 1].shiftX(data.s[seq.get(g - 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
-				fFunction_hg[h][g].minimizePrefixInPlace();	
-				
-				bFunction_gh[h][g] = bFunction_gh[h][g - 1].shift(-data.s[job][seq.get(g - 1)] - data.p[seq.get(g - 1)])
+				fFunction_hg[h][g].minimizePrefixInPlace();
+
+				bFunction_gh[h][g] = bFunction_gh[h][g - 1].shiftX(-data.s[job][seq.get(g - 1)] - data.p[seq.get(g - 1)])
 						.add(data.penaltyFunction[job]);
 				bFunction_gh[h][g].minimizeSuffixInPlace();
 			}
@@ -229,18 +294,18 @@ public class Solution {
 //					bFunction_hg[g][h] = data.penaltyFunction[job].copy().setDomain(data.p[job] + data.min_s[job],
 //							data.Cmax);
 					// 2025.5.3 b函数不需要设置domain
-					
+
 					bFunction_hg[g][h] = data.penaltyFunction[job].copy();
 					bFunction_hg[g][h].minimizeSuffixInPlace();
 					// 同理
 					continue;
 				}
-				
-				fFunction_gh[g][h] = fFunction_gh[g + 1][h].shift(data.s[seq.get(g + 1)][job] + data.p[job])
+
+				fFunction_gh[g][h] = fFunction_gh[g + 1][h].shiftX(data.s[seq.get(g + 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
 				fFunction_gh[g][h].minimizePrefixInPlace();
-				
-				bFunction_hg[g][h] = bFunction_hg[g + 1][h].shift(-data.s[job][seq.get(g + 1)] - data.p[seq.get(g + 1)])
+
+				bFunction_hg[g][h] = bFunction_hg[g + 1][h].shiftX(-data.s[job][seq.get(g + 1)] - data.p[seq.get(g + 1)])
 						.add(data.penaltyFunction[job]);
 				bFunction_hg[g][h].minimizeSuffixInPlace();
 
@@ -254,28 +319,27 @@ public class Solution {
 		// 此处则是基于前段序列
 
 	}
-	
-	public void updateFunctions2ForMachine(int m,double formerShift,int lastJob) {
+
+	public void updateFunctions2ForMachine(int m, double formerShift, int lastJob) {
 		// 更新h-g这一段的函数，注意，这里h应该不会取到虚拟0点，而g是机器上下标>=1的任意一个任务。
 		// 这种一段的backward函数当g是最后一个任务的时候，其实和1维的完全等价，此处不同于VRP那种
 		// 因为那种一维的是还要回到最终仓库的
 		// 不过做法上暂时感觉没啥区别
-		//2025.5.5
+		// 2025.5.5
 //		本来以为对merge三段时候函数的处理，即f_h1_h2，b_h1_h2的函数都需要根据前边拼接和后边拼接的段设置可行域
-		//这样的话其实预处理就没用了，因为每次拼接的都不同。
-		//但是一方面，b函数右侧其实总可以看成正无穷的可行域，那其实缩减不缩减都一样，那不需要缩减。
-		//对于f_h1_h2函数，本来以为需要根据左侧拼接的去设置最早的完成时间的定义域，但测试以后发现似乎并不需要，f_h_h函数直接从0开始都不影响，完全不需要考虑f_h_h的最早开始时间
-		//比如什么前边的任务是什么，最小的设置时间等等，这个不需要以后就直接对一个解预处理一次就好了，且不需要考虑定义域
-		//由于这个问题和2005那个VRP还略有区别，depot不存在成本，且回depot没有任何时间，因此对2-opt或某些算子，例如2-opt中从第一个任务选中某个长度做翻转
-		//此时其实拼接是2段拼接，本来对这种直接采用f_0_l表示序列depot-\sigma(0)-\sigma_(l)的晚于t完成的最小成本，但对这种明确是0开头的，定义域就很重要了
-		//所以之前的测试这里总是出错，围绕这里修改陷入了定义域的问题很久，又把f_h1_h2,b_h1_h2的函数定义修改为了不采用minimize的形式，使用时设置定义域，然而这种也不对的。
-		//因为这种必须是从最小的状态设置定义域以后一步一步推过来才对，先推过来在设置定义域不一定对。
-		//这就导致了在merge3段的时候函数定义错误，从而一直出错，且纠结在函数定义域的问题上，但事实上经过测试，3段拼接的时候f_h1_h2和b_h1_h2是不需要考虑定义域问题的。
-		//此外，这里的这种2-opt的2段拼接也可以直接使用3段拼接包含，把depot当作一个纯0的函数就好了，以及最后回到depot的shift为0.
-		
-		//从而这个函数不需要再使用了，这函数的存在本来就是为了给定一个前段序列，设置f_h1_h2的定义域的。b_h1_h2函数的定义域倒是不需要设置，右侧正无穷不需要处理，而左侧取决于拼接的f函数的定义域
-		//处理对应的f函数就好了
-		
+		// 这样的话其实预处理就没用了，因为每次拼接的都不同。
+		// 但是一方面，b函数右侧其实总可以看成正无穷的可行域，那其实缩减不缩减都一样，那不需要缩减。
+		// 对于f_h1_h2函数，本来以为需要根据左侧拼接的去设置最早的完成时间的定义域，但测试以后发现似乎并不需要，f_h_h函数直接从0开始都不影响，完全不需要考虑f_h_h的最早开始时间
+		// 比如什么前边的任务是什么，最小的设置时间等等，这个不需要以后就直接对一个解预处理一次就好了，且不需要考虑定义域
+		// 由于这个问题和2005那个VRP还略有区别，depot不存在成本，且回depot没有任何时间，因此对2-opt或某些算子，例如2-opt中从第一个任务选中某个长度做翻转
+		// 此时其实拼接是2段拼接，本来对这种直接采用f_0_l表示序列depot-\sigma(0)-\sigma_(l)的晚于t完成的最小成本，但对这种明确是0开头的，定义域就很重要了
+		// 所以之前的测试这里总是出错，围绕这里修改陷入了定义域的问题很久，又把f_h1_h2,b_h1_h2的函数定义修改为了不采用minimize的形式，使用时设置定义域，然而这种也不对的。
+		// 因为这种必须是从最小的状态设置定义域以后一步一步推过来才对，先推过来在设置定义域不一定对。
+		// 这就导致了在merge3段的时候函数定义错误，从而一直出错，且纠结在函数定义域的问题上，但事实上经过测试，3段拼接的时候f_h1_h2和b_h1_h2是不需要考虑定义域问题的。
+		// 此外，这里的这种2-opt的2段拼接也可以直接使用3段拼接包含，把depot当作一个纯0的函数就好了，以及最后回到depot的shift为0.
+
+		// 从而这个函数不需要再使用了，这函数的存在本来就是为了给定一个前段序列，设置f_h1_h2的定义域的。b_h1_h2函数的定义域倒是不需要设置，右侧正无穷不需要处理，而左侧取决于拼接的f函数的定义域
+		// 处理对应的f函数就好了
 
 		// H-G段 normal-forward处理 以及reverse的-backward处理
 		PiecewiseLinearFunction[][] fFunction_hg = fFunctions_hg[m];
@@ -292,11 +356,13 @@ public class Solution {
 					// 2024.5.3：f函数也不应该setdomain,对这种h1-h2的，没有确定的开头，从而这个函数在使用的时候的定义域是不确定的
 					// 取决于这个函数前一段拼接的序列内容，所以此处不应该设置定义域，而是再拼接的时候，根据确定的前序拼接段，再确定该函数h1-h2段，h2的最早的完工时间作为开始定义域
 					// 即此处将定义域设置完全,都是从0-Cmax
-					//TODO 删掉
-					if(formerShift+data.p[job] + data.s[lastJob][job]>data.Cmax) continue;
-					fFunction_hg[h][g] = data.penaltyFunction[job].setDomain(formerShift+data.p[job] + data.s[lastJob][job],data.Cmax);
+					// TODO 删掉
+					if (formerShift + data.p[job] + data.s[lastJob][job] > data.CmaxH)
+						continue;
+					fFunction_hg[h][g] = data.penaltyFunction[job]
+							.setDomain(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH);
 					fFunction_hg[h][g].minimizePrefixInPlace();
-	
+
 					bFunction_gh[h][g] = data.penaltyFunction[job].copy();
 					bFunction_gh[h][g].minimizeSuffixInPlace();
 					// 同理
@@ -305,13 +371,13 @@ public class Solution {
 
 				PiecewiseLinearFunction copy = fFunction_hg[h][g - 1];
 //				copy.minimizePrefixInPlace(); 
-				//b函数暂时认为没影响
-				fFunction_hg[h][g] = copy.shift(data.s[seq.get(g - 1)][job] + data.p[job])
+				// b函数暂时认为没影响
+				fFunction_hg[h][g] = copy.shiftX(data.s[seq.get(g - 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
 				fFunction_hg[h][g].minimizePrefixInPlace();
 				copy = bFunction_gh[h][g - 1];
 //				copy.minimizeSuffixInPlace();
-				bFunction_gh[h][g] = copy.shift(-data.s[job][seq.get(g - 1)] - data.p[seq.get(g - 1)])
+				bFunction_gh[h][g] = copy.shiftX(-data.s[job][seq.get(g - 1)] - data.p[seq.get(g - 1)])
 						.add(data.penaltyFunction[job]);
 				bFunction_gh[h][g].minimizeSuffixInPlace();
 			}
@@ -329,42 +395,43 @@ public class Solution {
 //					fFunction_gh[g][h] = data.penaltyFunction[job].copy().setDomain(data.p[job] + data.min_s[job],
 //							data.Cmax);
 					// 2025.5.3同上
-					//TODO 删掉
-					if(formerShift+data.p[job] + data.s[lastJob][job]>data.Cmax) continue;
-					
-					fFunction_gh[g][h] = data.penaltyFunction[job].setDomain(formerShift+data.p[job] + data.s[lastJob][job],data.Cmax);
+					// TODO 删掉
+					if (formerShift + data.p[job] + data.s[lastJob][job] > data.CmaxH)
+						continue;
+
+					fFunction_gh[g][h] = data.penaltyFunction[job]
+							.setDomain(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH);
 
 					// 早期:任务g的完工时间至少为他的执行时间+最小setup
 					fFunction_gh[g][h].minimizePrefixInPlace();
 //					bFunction_hg[g][h] = data.penaltyFunction[job].copy().setDomain(data.p[job] + data.min_s[job],
 //							data.Cmax);
 					// 2025.5.3 b函数不需要设置domain
-					bFunction_hg[g][h] = data.penaltyFunction[job].setDomain(formerShift+data.p[job] + data.s[lastJob][job],data.Cmax);
+					bFunction_hg[g][h] = data.penaltyFunction[job]
+							.setDomain(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH);
 					bFunction_hg[g][h].minimizeSuffixInPlace();
 					// 同理
 					continue;
 				}
 				PiecewiseLinearFunction copy = fFunction_gh[g + 1][h];
 //				copy.minimizePrefixInPlace(); //2025.5.4 同上
-				fFunction_gh[g][h] = copy.shift(data.s[seq.get(g + 1)][job] + data.p[job])
+				fFunction_gh[g][h] = copy.shiftX(data.s[seq.get(g + 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
 				fFunction_gh[g][h].minimizePrefixInPlace();
 				copy = bFunction_hg[g + 1][h];
 //				copy.minimizeSuffixInPlace();
-				bFunction_hg[g][h] = copy.shift(-data.s[job][seq.get(g + 1)] - data.p[seq.get(g + 1)])
+				bFunction_hg[g][h] = copy.shiftX(-data.s[job][seq.get(g + 1)] - data.p[seq.get(g + 1)])
 						.add(data.penaltyFunction[job]);
 				bFunction_hg[g][h].minimizeSuffixInPlace();
 
 			}
 		}
 
-	
-
 	}
 
-	
-	
 	public void updateFunctions3ForMachine(int m) {
+		releaseFunctions3(m);
+
 		// 2025.5.3 这堆函数应该不存在domain的问题,bFunction和前边一样,不需要设置定义域
 		// f函数则由于从0出发的,应该隐含了
 		int size = sequences.get(m).size();
@@ -382,14 +449,14 @@ public class Solution {
 					if (h2 == h1 + l + 1) {
 						fFunction_hgl_normal[h1][h2][l] = (h1 == 0 ? data.penaltyFunction[0]
 								: fFunctions.get(m).get(h1 - 1))
-								.shift(data.s[h1 == 0 ? 0 : seq.get(h1 - 1)][seq.get(h2)] + data.p[seq.get(h2)])
+								.shiftX(data.s[h1 == 0 ? 0 : seq.get(h1 - 1)][seq.get(h2)] + data.p[seq.get(h2)])
 								.add(data.penaltyFunction[seq.get(h2)]);
 						fFunction_hgl_normal[h1][h2][l].minimizePrefixInPlace();
 						fFunction_hgl_reverse[h1][h2][l] = fFunction_hgl_normal[h1][h2][l];
 
 					} else {
 						fFunction_hgl_normal[h1][h2][l] = fFunction_hgl_normal[h1][h2 - 1][l]
-								.shift(data.s[seq.get(h2 - 1)][seq.get(h2)] + data.p[seq.get(h2)])
+								.shiftX(data.s[seq.get(h2 - 1)][seq.get(h2)] + data.p[seq.get(h2)])
 								.add(data.penaltyFunction[seq.get(h2)]);
 						fFunction_hgl_normal[h1][h2][l].minimizePrefixInPlace();
 						fFunction_hgl_reverse[h1][h2][l] = fFunction_hgl_normal[h1][h2][l];
@@ -400,17 +467,18 @@ public class Solution {
 					if (l == 0) {
 						bFunction_hgl_normal[h1][h2][l] = ((h2 == size - 1 ? data.penaltyFunction[0]
 								: bFunctions.get(m).get(h2 + 1))
-										.shift((h2==size-1?0:-(data.s[seq.get(h1)][seq.get(h2 + 1)] + data.p[seq.get(h2 + 1)])))
-										.add(data.penaltyFunction[seq.get(h1)]));
+								.shiftX((h2 == size - 1 ? 0
+										: -(data.s[seq.get(h1)][seq.get(h2 + 1)] + data.p[seq.get(h2 + 1)])))
+								.add(data.penaltyFunction[seq.get(h1)]));
 						bFunction_hgl_reverse[h1][h2][l] = bFunction_hgl_normal[h1][h2][l];
 						bFunction_hgl_reverse[h1][h2][l].minimizeSuffixInPlace();
 					} else {
 						bFunction_hgl_reverse[h1][h2][l] = bFunction_hgl_reverse[h1][h2][l - 1]
-								.shift(-(data.s[seq.get(h1 + l)][seq.get(h1 + l-1)] + data.p[seq.get(h1 + l-1)]))
-								.add(data.penaltyFunction[seq.get(h1 + l )]);
+								.shiftX(-(data.s[seq.get(h1 + l)][seq.get(h1 + l - 1)] + data.p[seq.get(h1 + l - 1)]))
+								.add(data.penaltyFunction[seq.get(h1 + l)]);
 						bFunction_hgl_reverse[h1][h2][l].minimizeSuffixInPlace();
 						bFunction_hgl_normal[h1][h2][l] = bFunction_hgl_normal[h1 + 1][h2][l - 1]
-								.shift(-(data.s[seq.get(h1)][seq.get(h1 + 1)] + data.p[seq.get(h1 + 1)]))
+								.shiftX(-(data.s[seq.get(h1)][seq.get(h1 + 1)] + data.p[seq.get(h1 + 1)]))
 								.add(data.penaltyFunction[seq.get(h1)]);
 						bFunction_hgl_normal[h1][h2][l].minimizeSuffixInPlace();
 
@@ -432,7 +500,7 @@ public class Solution {
 					if (l == 0) {
 						fFunction_hgl_normal[h1][h2 == -1 ? size
 								: h2][l] = (h2 == -1 ? data.penaltyFunction[0] : fFunctions.get(m).get(h2))
-										.shift(data.s[h2 == -1 ? 0 : seq.get(h2)][seq.get(h1)] + data.p[seq.get(h1)])
+										.shiftX(data.s[h2 == -1 ? 0 : seq.get(h2)][seq.get(h1)] + data.p[seq.get(h1)])
 										.add(data.penaltyFunction[seq.get(h1)]);
 						fFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l] = fFunction_hgl_normal[h1][h2 == -1 ? size
 								: h2][l];
@@ -440,23 +508,17 @@ public class Solution {
 
 					} else {
 						fFunction_hgl_reverse[h1][h2 == -1 ? size
-								: h2][l] = (fFunction_hgl_reverse[h1 + 1][h2 == -1 ? size
-										: h2][l - 1])
-										.shift(data.s[seq.get(h1 + 1)][seq.get(h1)]
-												+ data.p[seq.get(h1)])
+								: h2][l] = (fFunction_hgl_reverse[h1 + 1][h2 == -1 ? size : h2][l - 1])
+										.shiftX(data.s[seq.get(h1 + 1)][seq.get(h1)] + data.p[seq.get(h1)])
 										.add(data.penaltyFunction[seq.get(h1)]);
 						// 此处计算h1,h2的时候，对应的h1+1,h2可能是不存在的，因为限制了h2离h1的长度
 						// 暂时此处不限制h2位置全部计算出来
-						fFunction_hgl_reverse[h1][h2 == -1 ? size
-								: h2][l].minimizePrefixInPlace();
+						fFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l].minimizePrefixInPlace();
 						fFunction_hgl_normal[h1][h2 == -1 ? size
-								: h2][l] = ( fFunction_hgl_normal[h1][h2 == -1 ? size
-										: h2][l - 1])
-										.shift(data.s[seq.get(h1 + l - 1)][seq.get(h1 + l)]
-												+ data.p[seq.get(h1 + l)])
+								: h2][l] = (fFunction_hgl_normal[h1][h2 == -1 ? size : h2][l - 1])
+										.shiftX(data.s[seq.get(h1 + l - 1)][seq.get(h1 + l)] + data.p[seq.get(h1 + l)])
 										.add(data.penaltyFunction[seq.get(h1 + l)]);
-						fFunction_hgl_normal[h1][h2 == -1 ? size
-								: h2][l].minimizePrefixInPlace();
+						fFunction_hgl_normal[h1][h2 == -1 ? size : h2][l].minimizePrefixInPlace();
 					}
 
 					// 第二段为 h2+1 - h1-1,h1+l+1 -0 reverse
@@ -467,7 +529,7 @@ public class Solution {
 					if (h2 == h1 - 2) {
 						bFunction_hgl_normal[h1][h2 == -1 ? size : h2][l] = (h1 + l == size - 1
 								? data.penaltyFunction[seq.get(h1 - 1)].copy()
-								: (bFunctions.get(m).get(h1 + l + 1).shift(
+								: (bFunctions.get(m).get(h1 + l + 1).shiftX(
 										-(data.s[seq.get(h1 - 1)][seq.get(h1 + l + 1)] + data.p[seq.get(h1 + l + 1)]))
 										.add(data.penaltyFunction[seq.get(h1 - 1)])));
 						bFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l] = bFunction_hgl_normal[h1][h2 == -1 ? size
@@ -476,7 +538,7 @@ public class Solution {
 
 					} else {
 						bFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l] = bFunction_hgl_reverse[h1][h2 + 1][l]
-								.shift(-(data.s[seq.get(h2 + 1)][seq.get(h2 + 2)] + data.p[seq.get(h2 + 2)]))
+								.shiftX(-(data.s[seq.get(h2 + 1)][seq.get(h2 + 2)] + data.p[seq.get(h2 + 2)]))
 								.add(data.penaltyFunction[seq.get(h2 + 1)]);
 						bFunction_hgl_normal[h1][h2 == -1 ? size : h2][l] = bFunction_hgl_reverse[h1][h2 == -1 ? size
 								: h2][l];
@@ -494,6 +556,8 @@ public class Solution {
 		double[] cumDurationMR = cumDurationReverse[m];
 		ArrayList<Integer> seq = this.sequences.get(m);
 		int size = seq.size();
+		if (size == 0)
+			return;
 		cumDurationMN[0] = data.s[0][seq.get(0)] + data.p[seq.get(0)];
 		cumDurationMR[0] = data.s[0][seq.get(seq.size() - 1)] + data.p[seq.get(seq.size() - 1)];
 		for (int i = 1; i < seq.size(); i++) {
@@ -518,52 +582,201 @@ public class Solution {
 		// 最后一位[size]表示h2=-1的时候,即把某一段插入到最前边
 		cumDurationNormal[m] = new double[size];
 		cumDurationReverse[m] = new double[size];
+		releaseFunctions1(m);
+		releaseFunctions2(m);
 		updateFFunctions1ForMachine(m);
 		updatebFunctions1ForMachine(m);
 		updateFunctions2ForMachine(m);
 //		updateFunctions3ForMachine(m);
 		updateCumDuration(m);
-		best_cost = best_cost - cost[m];
-		best_cost += costM;
+		curCost = curCost - cost[m];
+		curCost += costM;
 		cost[m] = costM;
 
 	}
 
 	public void updateInformationM(int m) {
 		// 这个暂时重新更新成本复杂度应该不会变大很多
-		best_cost -= cost[m];
+		//TODO 这种里边其实可以也按照3维那样，下次搜哪个更新哪个，而不需要一次性更新，应该会更快一些
+		//先不管了
+		curCost -= cost[m];
+		releaseFunctions1(m);
+		releaseFunctions2(m);
 		calCost(m);
-		best_cost += cost[m];
-		initialize_function(m);//数组重新设置长度
+		curCost += cost[m];
+
+		// TODO bound验证
+		double totalCost = 0;
+		for (int m1 = 0; m1 < data.m; m1++) {
+			totalCost += cost[m1];
+		}
+		if (Utility.compareGe(totalCost, Utility.curUpperBound)) {
+			this.curCost = Utility.curUpperBound;// 此时和各cost[m]割裂
+		} else {
+			curCost = totalCost;
+		}
+
+		initialize_function(m);// 数组重新设置长度
 		updateFunctions2ForMachine(m);
 //		updateFunctions3ForMachine(m);//不需要每次都更新，做Iopt的时候在更新
 		updateCumDuration(m);
 
 	}
 
+	public void releaseFunctions1(int m) {
+		if (!Configure.SegmentPool)
+			return;
+		if (fFunctions == null && bFunctions == null)
+			return;
+
+		if (fFunctions.get(m) == null)
+			return;
+		for (PiecewiseLinearFunction f : fFunctions.get(m)) {
+			f.release();
+		}
+
+		if (bFunctions.get(m) == null)
+			return;
+		for (PiecewiseLinearFunction b : bFunctions.get(m)) {
+			b.release();
+		}
+
+		fFunctions.get(m).clear();
+		bFunctions.get(m).clear();
+
+	}
+
+	public void releaseFunctions2(int m) {
+		if (!Configure.SegmentPool)
+			return;
+
+		if (fFunctions_hg[m] == null)
+			return;
+		for (int i = 0; i < fFunctions_hg[m].length; i++) {
+			for (PiecewiseLinearFunction f : fFunctions_hg[m][i]) {
+				if (f == null)
+					continue;
+				f.release();
+
+			}
+		}
+		if (fFunctions_gh[m] == null)
+			return;
+		for (int i = 0; i < fFunctions_gh[m].length; i++) {
+			for (PiecewiseLinearFunction f : fFunctions_gh[m][i]) {
+				if (f == null)
+					continue;
+				f.release();
+			}
+		}
+
+		if (bFunctions_hg[m] == null)
+			return;
+		for (int i = 0; i < bFunctions_hg[m].length; i++) {
+			for (PiecewiseLinearFunction b : bFunctions_hg[m][i]) {
+				if (b == null)
+					continue;
+				b.release();
+			}
+		}
+		if (bFunctions_gh[m] == null)
+			return;
+		for (int i = 0; i < bFunctions_gh[m].length; i++) {
+			for (PiecewiseLinearFunction b : bFunctions_gh[m][i]) {
+				if (b == null)
+					continue;
+				b.release();
+			}
+
+		}
+
+		ArrayList<PiecewiseLinearFunction[][][]> functions = new ArrayList<PiecewiseLinearFunction[][][]>();
+		functions.add(fFunctions_hg);
+		functions.add(fFunctions_gh);
+		functions.add(bFunctions_hg);
+		functions.add(bFunctions_gh);
+
+		for (PiecewiseLinearFunction[][][] function : functions) {
+
+			for (int i = 0; i < function[m].length; i++) {
+				for (int j = 0; j < function[m][i].length; j++) {
+					function[m][i][j] = null;
+				}
+			}
+		}
+
+	}
+
+	public void releaseFunctions3(int m) {
+		if (!Configure.SegmentPool)
+			return;
+		ArrayList<PiecewiseLinearFunction[][][][]> functions = new ArrayList<>();
+		functions.add(fFunctions_hgl_normal);
+		functions.add(fFunctions_hgl_reverse);
+		functions.add(bFunctions_hgl_reverse);
+		functions.add(bFunctions_hgl_normal);
+		for (PiecewiseLinearFunction[][][][] function : functions) {
+			for (int i = 0; i < function[m].length; i++) {
+				for (int j = 0; j < function[m][i].length; j++) {
+					for (PiecewiseLinearFunction f : function[m][i][j]) {
+						if (f == null)
+							continue;
+						f.release();
+					}
+					for (int k = 0; k < function[m][i][j].length; k++) {
+						function[m][i][j][k] = null;
+					}
+				}
+
+			}
+
+		}
+	}
+
 	public double merge3Segments(PiecewiseLinearFunction f1, PiecewiseLinearFunction f2, PiecewiseLinearFunction b2,
 			PiecewiseLinearFunction b3, double shift1, double shift2, double duration2) {
-			
+		if (f1.isEmpty() || f2.isEmpty() || b2.isEmpty() || b3.isEmpty())
+			return Utility.big_M;
+		Utility.debugMap.put("M3S Total:",Utility.debugMap.getOrDefault("M3S Total:",0)+1);
+		
+		double f1_LB = f1.tail.getValue(f1.tail.end);
+		double f2_LB = f2.tail.getValue(f2.tail.end);
+		double b3_LB = b3.head.getValue(b3.head.start);
+		if (Utility.compareGe(f1_LB + f2_LB + b3_LB, Utility.curUpperBound)) {
+			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
+			return f1_LB + f2_LB + b3_LB;
+		}
+
 		double bestCost = 0;
 		// 计算s_h2*
-		PiecewiseLinearFunction merge12 = f1.shift(shift1).add(b2);
+		PiecewiseLinearFunction merge12 = f1.shiftX(shift1).add(b2);
 		// 此处b2可行域应该不需要特殊处理，f1移动以后的可行域就是b2的
-		
+		if (merge12.isEmpty())
+			return Utility.curUpperBound;
 		double[] pairs12 = merge12.findMinimal(true, true);
 		double cost12 = pairs12[0];
-		if (cost12 == Utility.big_M) {
-			System.out.println("M错误？");// 假设不可能
-			merge12 = f1.shift(shift1).add(b2);
+		if (cost12+b3_LB >= Utility.curUpperBound) {
+			//这>=先不管，影响不大应该？
+//			Utility.debugNumPlus();
+//			System.out.println("M错误？");// 假设不可能
+			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
 			
-			}
+			return Utility.curUpperBound;// 应该就可以直接返回了，不需要往后做了
+		}
 		double s_h2 = pairs12[1];
 
 		// 计算s_h3*
-		PiecewiseLinearFunction merge23 = f2.add(b3.shift(-shift2));
+		PiecewiseLinearFunction merge23 = f2.add(b3.shiftX(-shift2));
+		if (merge23.isEmpty())
+			return Utility.curUpperBound;
 		double[] pairs23 = merge23.findMinimal(true, false);
 		double cost23 = pairs23[0];
-		if (cost23 == Utility.big_M) {
-			System.out.println("M错误？");// 假设不可能
+		if (cost23 >= Utility.curUpperBound) {
+//			Utility.debugNumPlus();
+//			System.out.println("M错误？");// 假设不可能
+			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
+			return Utility.curUpperBound;// 应该就可以直接返回了，不需要往后做了
+
 		}
 		double s_h3 = pairs23[1];
 		if (Utility.compareGe(s_h3 - s_h2, duration2)) {
@@ -573,89 +786,118 @@ public class Solution {
 		} else {
 //			System.out.println("情况2");
 			double SplitBestCost = f2.findMinimal(true, true)[0];
-			f2.resetDomain(0, data.Cmax);
-			PiecewiseLinearFunction newF = f1.shift(shift1).add(b2).add(f2.shift(-duration2))
-					.add(b3.shift(-shift2 - duration2));
-			
-			
+			f2.resetDomain(0, data.CmaxH);
+			PiecewiseLinearFunction newF = f1.shiftX(shift1).add(b2).add(f2.shiftX(-duration2))
+					.add(b3.shiftX(-shift2 - duration2));
+
 			double cost = newF.findMinimal(true, true)[0];
+			newF.release();
 			bestCost = cost - SplitBestCost;
 		}
+		merge12.release();
+		merge23.release();
+//		System.out.println("M3S:"+f1_LB+" "+f2_LB+" "+b3_LB+" "+bestCost);
 		return bestCost;
 
 	}
-	
-	
-	
-	
+
 	public double merge3SegmentsTest(PiecewiseLinearFunction f1, PiecewiseLinearFunction f2, PiecewiseLinearFunction b2,
-			PiecewiseLinearFunction b3, double shift1, double shift2, double duration2,List<Integer> seq1,List<Integer>seq2,List<Integer>seq3) {
-		//2025.5.5
-		//经过测试，f2,b2函数根本不需要考虑定义域的存在,即使考虑的话也只是为了在传递的时候缩减可行域
-		//为什么不需要考虑可行域还是没太搞懂，先做实现，注意，这个merge所依赖定理的成立，必须是函数要minimize的，即定义为时间t之后完成或t之前完成的最小成本
-		//而不是恰好在t完成，从而函数形式必须按照原文那样两个函数相加后再取小，不然的话结果会出错的
-		
+			PiecewiseLinearFunction b3, double shift1, double shift2, double duration2, List<Integer> seq1,
+			List<Integer> seq2, List<Integer> seq3) {
+		// 2025.5.5
+		// 经过测试，f2,b2函数根本不需要考虑定义域的存在,即使考虑的话也只是为了在传递的时候缩减可行域
+		// 为什么不需要考虑可行域还是没太搞懂，先做实现，注意，这个merge所依赖定理的成立，必须是函数要minimize的，即定义为时间t之后完成或t之前完成的最小成本
+		// 而不是恰好在t完成，从而函数形式必须按照原文那样两个函数相加后再取小，不然的话结果会出错的
+
 		double bestCost = 0;
 		// 计算s_h2*
-		PiecewiseLinearFunction merge12 = f1.shift(shift1).add(b2);
+		PiecewiseLinearFunction merge12 = f1.shiftX(shift1).add(b2);
 		// 此处b2可行域应该不需要特殊处理，f1移动以后的可行域就是b2的
-		ArrayList<Integer> newSeq1=new ArrayList<Integer>();
-		newSeq1.addAll(seq1);newSeq1.addAll(seq2);
-		double cost11=Move.testSequence(data,newSeq1, this);
+		ArrayList<Integer> newSeq1 = new ArrayList<Integer>();
+		newSeq1.addAll(seq1);
+		newSeq1.addAll(seq2);
+		double cost11 = Move.testSequence(data, newSeq1, this);
 		double[] pairs12 = merge12.findMinimal(true, true);
 		double cost12 = pairs12[0];
-		if (cost12 == Utility.big_M) {
+		if (cost12 >= Utility.curUpperBound) {
 			System.out.println("M错误？");// 假设不可能
 		}
 		double s_h2 = pairs12[1];
 
 		// 计算s_h3*
-		PiecewiseLinearFunction merge23 = f2.add(b3.shift(-shift2));
+		PiecewiseLinearFunction merge23 = f2.add(b3.shiftX(-shift2));
 		double[] pairs23 = merge23.findMinimal(true, false);
-		ArrayList<Integer> newSeq2=new ArrayList<Integer>();
-		newSeq2.addAll(seq2);newSeq2.addAll(seq3);
-		cost11=Move.testSequence(data,newSeq2, this);
+		ArrayList<Integer> newSeq2 = new ArrayList<Integer>();
+		newSeq2.addAll(seq2);
+		newSeq2.addAll(seq3);
+		cost11 = Move.testSequence(data, newSeq2, this);
 		double cost23 = pairs23[0];
-		if (cost23 == Utility.big_M) {
+		if (cost23 >= Utility.curUpperBound) {
 			System.out.println("M错误？");// 假设不可能
 		}
 		double s_h3 = pairs23[1];
 		if (Utility.compareGe(s_h3 - s_h2, duration2)) {
 			System.out.print("情况1");
 			bestCost = f1.evaluate(s_h2 - shift1) + b2.evaluate(s_h2) + f2.evaluate(s_h3) + b3.evaluate(s_h3 + shift2)
-					-f2.tail.getValue(f2.tail.end);
+					- f2.tail.getValue(f2.tail.end);
 		} else {
 			System.out.print("情况2");
-			PiecewiseLinearFunction ff1=f1.shift(shift1);
-			PiecewiseLinearFunction ff2=ff1.add(b2);
-			PiecewiseLinearFunction ff3=f2.shift(-duration2);
-			PiecewiseLinearFunction ff4=ff2.add(ff3);
-			PiecewiseLinearFunction ff5=b3.shift(-shift2 - duration2);
-			
-			PiecewiseLinearFunction newF =ff4.add(ff5);
-			
-			
-			ArrayList<Integer> newSeq3=new ArrayList<Integer>();
-			newSeq3.addAll(seq1);newSeq3.addAll(seq2);newSeq3.addAll(seq3);
-			cost11=Move.testSequence(data,newSeq3, this);
-			
+			PiecewiseLinearFunction ff1 = f1.shiftX(shift1);
+			PiecewiseLinearFunction ff2 = ff1.add(b2);
+			PiecewiseLinearFunction ff3 = f2.shiftX(-duration2);
+			PiecewiseLinearFunction ff4 = ff2.add(ff3);
+			PiecewiseLinearFunction ff5 = b3.shiftX(-shift2 - duration2);
+
+			PiecewiseLinearFunction newF = ff4.add(ff5);
+
+			ArrayList<Integer> newSeq3 = new ArrayList<Integer>();
+			newSeq3.addAll(seq1);
+			newSeq3.addAll(seq2);
+			newSeq3.addAll(seq3);
+			cost11 = Move.testSequence(data, newSeq3, this);
+
 			double[] values = newF.findMinimal(true, true);
-			double cost=values[0];
+			double cost = values[0];
 			double SplitBestCost = f2.findMinimal(true, true)[0];
-			
-			f2.resetDomain(0, data.Cmax);
-			
+
+			f2.resetDomain(0, data.CmaxH);
+
 			bestCost = cost - SplitBestCost;
 		}
 		return bestCost;
 
 	}
 
+	//merge2S和merge3S的bound使用感觉没啥用
+	//且要使用局部上界也得使用才行
 	public double merge2Segments(PiecewiseLinearFunction f1, PiecewiseLinearFunction b2, double shift) {
+		
+		if (f1.isEmpty() || b2.isEmpty())
+			return Utility.big_M;
+//		b2=b2.setDomain(f1.head.start+shift,b2.tail.end);//TODO 是否有用
+//		if(b2.isEmpty()) {
+//			Utility.debugMap.put("M2S Skip:",Utility.debugMap.getOrDefault("M2S Skip:",0)+1);
+//			return Utility.big_M;
+//		
+//		}
+		//TODO 通过对b2取更好的下界，直接砍掉的多了一点，但时间会慢点
+		//整体的影响不大感觉
+		Utility.debugMap.put("M2S Total:",Utility.debugMap.getOrDefault("M2S Total:",0)+1);
+		
+		double f1_LB = f1.tail.getValue(f1.tail.end);
+		double b2_LB = b2.head.getValue(b2.head.start);
+		if (Utility.compareGe(f1_LB + b2_LB, Utility.curUpperBound)) {
+//			System.out.println("下界跳出");
+			Utility.debugMap.put("M2S Skip:",Utility.debugMap.getOrDefault("M2S Skip:",0)+1);
+			return f1_LB+b2_LB;
+		}
 		double bestCost = 0;
-		PiecewiseLinearFunction newF = f1.add(b2.shift(-shift));
+		PiecewiseLinearFunction newF = f1.add(b2.shiftX(-shift));
+		if (newF.isEmpty())
+			return Utility.curUpperBound;
 		bestCost = newF.findMinimal(true, true)[0];
-
+		newF.release();
+//		System.out.println("M2S:"+f1_LB+" "+b2_LB+" "+bestCost);
 		return bestCost;
 
 	}
@@ -686,11 +928,11 @@ public class Solution {
 		// 构造每个位置上任务的惩罚成本函数
 		PiecewiseLinearFunction lastF = fFunctions.get(m).get(fFunctions.get(m).size() - 1);
 		cost[m] = lastF.tail.end * lastF.tail.slope + lastF.tail.intercept;
-		PiecewiseLinearFunction firstFb = bFunctions.get(m).get(0)
-				.setDomain(data.s[0][sequence.get(0)] + data.p[sequence.get(0)], data.Cmax);
+//		PiecewiseLinearFunction firstFb = bFunctions.get(m).get(0)
+//				.setDomain(data.s[0][sequence.get(0)] + data.p[sequence.get(0)], data.Cmax);
 //		或和0拼接
-		PiecewiseLinearFunction merged = data.penaltyFunction[0]
-				.add(bFunctions.get(m).get(0).shift(-data.s[0][sequence.get(0)] - data.p[sequence.get(0)]));
+//		PiecewiseLinearFunction merged = data.penaltyFunction[0]
+//				.add(bFunctions.get(m).get(0).shift(-data.s[0][sequence.get(0)] - data.p[sequence.get(0)]));
 		// 注意！反向的时候函数的含义为这一段排列到结束的最小成本，如果要算最优，还要和depot拼接,或者是把可行域处理一下，要从开头能到达
 		// 而fFunction是不需要的
 
@@ -720,20 +962,20 @@ public class Solution {
 //		System.out.println("使用反向函数方式2计算：" + method2 + " " + (method2 == cost[m]));
 
 		// PiecewisePlotter.plotAndSave(fFunction);
+
 		return cost[m];
 
 	}
 
 	public double calCost() {
-		double totalCost=0;
-		for(int m=0;m<data.m;m++) {
-			totalCost+=calCost(m);
+		double totalCost = 0;
+		for (int m = 0; m < data.m; m++) {
+			totalCost += calCost(m);
 		}
-		
+
 		return totalCost;
 	}
 
-	
 	public double getNormalDuration(int m, int a, int b) {
 		return this.cumDurationNormal[m][b] - this.cumDurationNormal[m][a];
 	}
@@ -745,52 +987,95 @@ public class Solution {
 		return this.cumDurationReverse[m][size - 1 - a] - this.cumDurationReverse[m][size - 1 - b];
 	}
 
-//
+	public void removeJobs(List<Integer> toRemove) {
+
+		for (int m = 0; m < data.m; m++) {
+			ArrayList<Integer> jobs = sequences.get(m);
+			boolean removed = jobs.removeAll(toRemove);
+//			 if(removed) updateInformationM(m);//TODO 应该不需要更新这么多信息，插入的时候应该是一个一个插入的?只需要更新1维度就好了
+			if (removed) {
+				// 同insert
+				curCost -= cost[m];
+				calCost(m);
+				curCost += cost[m];
+			}
+		}
+
+	}
+
+	public void insertJob(int m, int pos, int job) {
+		// 插入在pos之后
+		sequences.get(m).add(pos + 1, job);
+//		updateInformationM(m);// 不需要全部更新，只有一维的信息要使用，剩下的进入VND在使用
+		// 直接用下边的就好了，其实可以进一步优化，插入一个任务，f和b某些都不会变，不过感觉不会影响太大
+		curCost -= cost[m];
+		calCost(m);
+		curCost += cost[m];
+
+	}
+
+	public void setInitSolution() {
+		// 保证每个机器上的任务时间量不超过上界，所以不能太随机生成
+		// 暂时这么做，每次随机选择一个任务插入到某个时间不会爆的机器上
+		int numJob = data.n;
+		ArrayList<Integer> jobs = new ArrayList<Integer>();
+		for (int i = 1; i <= numJob; i++) {
+			jobs.add(i);
+		}
+		this.sequences.clear();
+		Collections.shuffle(jobs, Utility.rng);
+		for (int m = 0; m < data.m; m++) {
+			this.sequences.add(new ArrayList<Integer>());
+		}
+
+		double[] cumTimesM = new double[data.m];
+		int[] lastJobM = new int[data.m];
+		for (Integer jid : jobs) {
+			// 对当前任务，随机选择一个还能插入的机器插入
+			ArrayList<Integer> candMachines = new ArrayList<Integer>();
+			// 可选择的机器（时间未超上界）
+			for (int m = 0; m < data.m; m++) {
+				double newCumTimeM = cumTimesM[m] + data.s[lastJobM[m]][jid] + data.p[jid];
+				if (Utility.compareLe(newCumTimeM, data.CmaxH)) {
+					candMachines.add(m);
+				}
+			}
+			int selectedM = candMachines.get(Utility.rng.nextInt(candMachines.size()));
+			cumTimesM[selectedM] = cumTimesM[selectedM] + data.s[lastJobM[selectedM]][jid] + data.p[jid];
+			lastJobM[selectedM] = jid;
+			this.sequences.get(selectedM).add(jid);
+		}
+
+	}
+
+
+
 	public static void main(String[] args) throws IOException, IloException {
 
 		final String ROOT_DIR = "D:/软件/eclipse/workspace/TWETScheduling/data/100-2/"; // 根目录
 		TimerManager.globalStart();
 		for (File f : new File(ROOT_DIR).listFiles()) {
-
-			if (!f.getName().contains("wet100_001_2m.dat"))//wet040_039_2m.dat
+			Utility.curUpperBound=Utility.big_M;//重新初始化!
+			if (!f.getName().contains("wet100_023_2m.dat"))//wet040_039_2m.dat
 				continue;
 			Move.Recordreset();
 			System.out.println(f.getName());
 			Data data = new Data(f.getAbsolutePath(), true, true);
+//			data.Cmax*=5;//Cmax的限制还是能快不少的 
 //			data.m = 1;
-			ArrayList<ArrayList<Integer>> sequences = new ArrayList<>();
-			int seed = new Random(0).nextInt(10);
-			System.out.println("seed:" + seed);
-			Random r = new Random(seed);
-			int numJob=data.n;
-			int curJob=0;
-			for(int m=0;m<data.m;m++) {
-				ArrayList<Integer> sequence = new ArrayList<Integer>();
-				int numJobM=1+r.nextInt(numJob-1);
-				if(m==data.m-1) {
-					numJobM=numJob;
-				}
-				numJob-=numJobM;
-				for (int i = curJob+1; i <= curJob+numJobM; i++) {
-					sequence.add(i);
-				}
-				curJob+=numJobM;
-				sequences.add(sequence);
-				Collections.shuffle(sequence, r);
-				System.out.println("sequence:" + sequence);
-			}
-			
 			
 			for (int q = 0; q < 1; q++) {
 				Solution s = new Solution(data);
-				s.setSequence(sequences);
-
-				ArcFlowModel model = new ArcFlowModel(data);
+				s.setInitSolution();
+				
+//				ArcFlowModel model = new ArcFlowModel(data);
+//				ATIParallel model=new ATIParallel(data);
+//				TimeIndexModel model=new TimeIndexModel(data);
 				// sij大小对这个模型影响也挺大的，不过估计是因为变大M就变大了，松弛效果变差
-				model.setSequence(sequences);
+//				model.setSequence(s.sequences);
 //			model.cplex.exportModel("model.lp");
 				double s1 = System.currentTimeMillis();
-				model.solve();
+//				model.solve();
 				double e1 = System.currentTimeMillis();
 				double s2 = System.currentTimeMillis();
 //				double cost0 = s.calCost(0);
@@ -805,19 +1090,25 @@ public class Solution {
 				for(int m=0;m<data.m;m++) {
 					s.updateInformationM(m);
 				}
-				
-				System.out.println("初始解：" + s.best_cost);
-				EngineVND engine = new EngineVND(data, s, 100, 1000);
-//
+				data.configure.updateBestSolution(s);
+				System.out.println("初始解：" + s.curCost);
+//				EngineVND engine = new EngineVND(data, s);
+//				engine.search();
+				EngineALNS engine =new EngineALNS(data, s);
 				engine.search();
-				System.out.println("搜索后最优解：" + s.best_cost+" "+s.sequences);
+				s=data.configure.bestSolution;
+				for(int m=0;m<data.m;m++) {
+					System.out.println(s.fFunctions.get(m).get(s.sequences.get(m).size()-1).findMinimal(true, true)[1]);
+				}
+				System.out.println("搜索后最优解：" + s.curCost+" "+s.sequences);
 				System.out.println("验证:"+s.calCost());
 			}
 //			break;
 
 		}
 		TimerManager.report();
-		
+		System.out.println(Utility.debugNum);
+		System.out.println(Utility.debugMap);
 	}
 //	
 

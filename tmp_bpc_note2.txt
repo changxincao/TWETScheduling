@@ -1,0 +1,688 @@
+BPC LabelingඔᅝႪ
+Ї઎නམ
+Գ frontieraLuo set dominance࠹
+Ч໓ᆜ৘೘ো BPC pricing labelingԳ
+VRPѩඪૼ2011 ა 2014ඔ labelalabelׄࢫlabel
+ᅚष 2014֥pickup-and-deliveryaopen requestsaၳᇉ
+؟ބdepotඪૼ Luo et al.֥route-based reduced-cost function
+𝐺 (𝑟, 𝑞 )apair dominanceaset dominance ა dominance graphࡼ
+b
+࠺
+ളӮರ௹ğ2026 ୍ 4 ᄅ 17 ರ
+
+BPC labelingֻ࠺ 1 ်
+ଢ੣
+1ඔ྘ labelѓਈሑ෿ 3
+2Գ BPCඔ྘ label 3
+2.1 label൤ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+2.2๷ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+2.3 ๝၂ label໭ིሑ෿ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+3ඔᅝႪ 4
+3.1Чֆჭ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+3.2 ཌྷ๝ሧჷద଀ labelsѩ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+3.3 ҂๝֌ॖбద଀ labelsᅝႪ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+4Գ labelingӱ 6
+4.1ഈթ൉હ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+4.2 labelingቔႨ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+4.3 ֆཟ labelingປᆜੀӱ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+4.4ᇗྍঔᅚ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+4.5 චཟ labelingࢤ....................................... 8
+5 Luo et al.ඔ྘ label ა 𝐺 (𝑟, 𝑞 ) 8
+5.1 labelၬაঔᅚྐ༏ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+5.2 Ֆ extreme delivery pattern֞𝐺 (𝑟, 𝑞 ) . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+5.3ඔ೷Ԣ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+6 Luo֥pair dominanceaset dominance ა dominance graph 9
+6.1 pair dominance . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+6.2֥set dominanceğ෮Ⴕ eligible labels༯Ї઎ . . . . . . . . . . . . . . . . . . . . 10
+6.3 dominance graph෿Ї઎ . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+6.4 ྍ label࿃ౢ৘ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+6.5 Luo֥set dominanceၬა graph؛.................. 11
+7ކ12
+7.1ཌྷ๙ྟ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+7.2෿թԥ༯Ї઎ vs.ෘᅝႪ౵თ . . . . . . . . . . . . . . . . . . . . . 12
+7.3۱؟node໙ี . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+7.4නਫ਼ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+8෎Ҧ੻ 13
+8.1ࡎק............................................ 13
+8.2 Multiple pricing ა column pool . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+
+BPC labelingֻ࠺ 2 ်
+8.3 Bounded bidirectional labeling . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+8.4 DSSR adecremental search ა ng-route relaxation . . . . . . . . . . . . . . . . . . . . . . . 14
+8.5 Early join ა early stop . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+8.6 Valid inequalities ა cuts . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+8.7 Branchingؓlabeling႕ཙ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
+8.8 labeling෎ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+8.9ඔіൕა envelopeթ . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16
+9ၰ 17
+ႋ 18
+
+BPC labelingֻ࠺ 3 ်
+1ඔ྘ labelѓਈሑ෿
+༯đmaster problem୽эਈđpricing problemᇏ
+ڵreduced-cost ਙbԮ๤ ESPPRC labeling۱label ཿӮ
+(current vertex, discrete state, resource values, reduced cost),
+ఃᇏ reduced costඔ྘ labeling۱
+۱labelऎุሑ෿b
+ࡗ𝑡b๝၂่ partial pathༀष
+۱labelႿ 𝑡֥cost frontierbLuo et al. ᇏđ
+ಸਈҕඔ 𝑞b ๝၂่partial route ᄝ҂๝஥ෂਈ༯Ⴕ҂๝ቋཬ reduced costđ ෮
+۱labelႿ 𝑞ඔ 𝐺 (𝑟, 𝑞 )b
+ྏԎའ
+ඔ྘ labelᆃ
+ུऎุሑ෿ቓ dominanceඔіൕb
+ູ 𝐹𝑖 (𝑡)ׄפ𝑖 ၛൈख़ 𝑡ھpartial pathቋཬ
+reduced costbLuoູ 𝐺 (𝑟, 𝑞 )ؓxed partial route 𝑟ಸਈ
+ҕඔູ 𝑞ቋཬ reduced costb
+2Գ BPCඔ྘ label
+2.1 label൤
+ॉ੮၂่Ֆ depotׄפ𝑖֥partial path 𝑃𝑖Գ VRP֥forward labeling ᇏđ
+۱label ॖԎའཿູ
+𝐿𝑖 = (Ω𝑖, 𝜌𝑖, 𝐹𝑖, pred𝑖),
+ఃᇏ Ω𝑖 іൕ elementarity໙ሑ෿đ𝜌𝑖ః෰ሧჷđpred𝑖
+ྐ༏đ𝐹𝑖ඔb
+ඔ 𝐹𝑖 (𝑡)ၬ൞ğӚਇခ partial path 𝑃𝑖ׄפ𝑖đѩᄝ 𝑖 Ⴟൈख़ 𝑡ༀൈđՖ depot֞𝑖
+ቋཬ reduced costbႿ൞ label 𝐿𝑖սі၂ቂሑ෿ğ
+{
+(Ω𝑖, 𝜌𝑖, 𝑡, 𝐹𝑖 (𝑡)) : 𝑡 ∈ Dom(𝐹𝑖)
+}
+.
+ᆃ৚ Dom(𝐹𝑖)ھlabelԳđᄵ Dom(𝐹𝑖)ླ
+Գđᄵ Dom(𝐹𝑖) ๙ӈႮ route durationaprofitable time windowsః෰
+ཋᇅb
+Backward labelingభ
+࿃ᇶ
+ေႨ forwardཟඪૼb
+2.2๷
+భ labelׄפ𝑖޶(𝑖, 𝑗 )ׄפ֞𝑗ູ𝑠𝑖ູ𝜏𝑖 𝑗֥޶reduced cost
+ູ ¯𝑐𝑖 𝑗ׄפ𝑗ඔູ 𝑝 𝑗 (𝑡)b೏Ӛਇᄝ 𝑗 Ⴟൈख़ 𝑡ༀđᄵᄝ 𝑖ༀष൓
+
+BPC labelingֻ࠺ 4 ်
+ࡗ𝜉 сྶડቀ
+𝜉 + 𝑠𝑖 + 𝜏𝑖 𝑗 ≤ 𝑡.
+րđᆺေ 𝜉 ≤ 𝑡 − 𝑠𝑖 − 𝜏𝑖 𝑗֞ࢤ𝑗bၹՎྍ label ᄝ 𝑗ඔॖཿӮ
+𝐹𝑗 (𝑡) = ¯𝑐𝑖 𝑗 + 𝑝 𝑗 (𝑡) + min
+𝜉 ≤𝑡 −𝑠𝑖 − 𝜏𝑖 𝑗
+𝐹𝑖 (𝜉), 𝑡 ∈ Dom(𝐹𝑗). (1)
+ൔ (1)ඔ྘ label۱labelѓਈ costӮ
+ༀൈख़ 𝑡ሑ෿đᄜ౼ఃᇏӮЧቋཬᆀb೏ 𝑗ڛ
+Գ [𝑎 𝑗, 𝑏 𝑗]đᄵ
+Dom(𝐹𝑗) ⊆ [ 𝑎 𝑗, 𝑏 𝑗].
+۱𝑡ޅ𝜉đᄵ 𝐹𝑗 (𝑡)ၬb
+ၩၬ
+ൔ (1)ሑ෿ᄝ𝑖đପ
+ༀ 𝑗႕ཙ 𝐹𝑗 (𝑡)౼ᆴb
+2.3 ๝၂ label໭ིሑ෿
+ᄝ forward labeling ᇏđ೏๝၂ labelሑ෿ (𝑡1, 𝐹𝑖 (𝑡1)) ა (𝑡2, 𝐹𝑖 (𝑡2)) đડቀ
+𝑡1 ≤ 𝑡2, 𝐹 𝑖 (𝑡1) ≤ 𝐹𝑖 (𝑡2), (2)
+ሑ෿ᆦ஥bჰၹ൞Ӛਇॖၛᄝ 𝑡1҂ᄪႿ 𝑡1ൈख़bၹ
+ໃটঔᅚି৯b
+ඔ྘ labelԤğ
+๝၂ partial pathሑ෿b Backward labelཟ
+ሑ෿b
+3ඔᅝႪ
+3.1Чֆჭ
+۱labelׄפ𝑖ऎุሑ෿
+(Ω1, 𝜌1, 𝑡1, 𝐶1), (Ω2, 𝜌2, 𝑡2, 𝐶2).
+ሑ෿đѩ౏
+𝑡1 ≤ 𝑡2, 𝐶 1 ≤ 𝐶2, (3)
+ሑ෿b
+ѩ҂ေ౰ 𝑡1 = 𝑡2bᆺေ 𝑡1 ≤ 𝑡2၂
+ඔᅝႪ
+ࡗ–b
+
+BPC labelingֻ࠺ 5 ်
+3.2 ཌྷ๝ሧჷద଀ labelsѩ
+۱labels҂ॖղ
+bՎൈ҂ႋЌ਽ਆ่಺Ⴥ label۱
+labelඔ frontierb
+ඔູ 𝐹1 ა 𝐹2ᄯ
+min{ 𝐹1(𝑡), 𝐹2(𝑡)} ,
+ކࠢ
+S =
+{
+(𝑡, 𝐹 1(𝑡)) : 𝑡 ∈ Dom(𝐹1)
+}
+∪
+{
+(𝑡, 𝐹 2(𝑡)) : 𝑡 ∈ Dom(𝐹2)
+}
+,
+ᄜႨൔ (3)ϜഺჅሑ෿ᇗྍіൕູ၂่ frontierb
+֥ުfrontierᆦ஥ሑ෿đྙӮ horizontal
+gapඔᆴཟ༯๋đྙӮ vertical jump೘đོੱ҂ᄜֆ
+၂่൓ᇔ๪
+ඔb
+𝑡
+𝐹 (𝑡)
+𝐹1
+𝐹2
+ԩཟ༯๋
+ᆦ஥ frontier
+๭ 1: ཌྷ๝ద଀ labelsቋཬb
+3.3 ҂๝֌ॖбద଀ labelsᅝႪ
+۱labels఼đᄵ఼ label ॖၛ೷Ԣ೐ labelൈ
+ᆀopen-request ሑ
+Ⴕ০b
+ഡ 𝐿 𝑎 ᄝ৖೛ሧჷഈ఼Ⴟ 𝐿𝑏b೏ 𝐿𝑏ሑ෿ (𝑡, 𝐹 𝑏 (𝑡)) Ф 𝐿 𝑎ሑ෿ (𝜉, 𝐹 𝑎 (𝜉))ࠧ
+𝜉 ≤ 𝑡, 𝐹 𝑎 (𝜉) ≤ 𝐹 𝑏 (𝑡),
+ᄵ 𝐿𝑏 ᄝൈख़ 𝑡҂൞сಖᆜ่ 𝐹 𝑏ކࠢ
+D𝑎→𝑏 =
+{
+𝑡 ∈ Dom(𝐹 𝑏) : ∃𝜉 ≤ 𝑡, 𝐹 𝑎 (𝜉) ≤ 𝐹 𝑏 (𝑡)
+}
+. (4)
+೏ Dom(𝐹 𝑏) \ D 𝑎→𝑏 = ∅đᄵ 𝐿𝑏ᄵ 𝐿𝑏b
+࡯ܱ֥
+၂่ labelݦ֥
+҂৵࿃frontier֥؍
+টჷྐ༏b
+
+BPC labelingֻ࠺ 6 ်
+4Գ labelingӱ
+4.1ഈթ൉હ
+ׄפ𝑖đpricing۱labelކࠢL𝑖ֆ listႋο৖೛ሧჷద଀
+۱bucketğ๝၂ bucket֥labelsކ
+ѩĠ҂๝ bucketඔᅝႪb
+ၛ༯ྐ༏b
+འ ቔႨ
+ࠃlabelsׄפ𝑖֥labelsĠૄ่ labelࡗ
+frontierb
+ቆ ο Ω, 𝜌ః෰৖೛ሧჷద଀ቆᆮ labelsѩđॖбద଀ᅝႪb
+֥labelsࣸlabel֥frontierđႋᇗ
+ླေঔᅚb
+۱frontierڳ֞labelਫ਼
+b
+ॖ࿊ envelopeଖུ bucket఼ labelsҰb
+4.2 labelingቔႨ
+֞pricingԳ labelingbᆃུቆ
+൞ં໓ᇏlabel extensionadominanceބbidirectional searchሱ
+b
+
+BPC labelingֻ࠺ 7 ်
+ଽಸაቔႨ
+Labelඔ frontier҂ॖղྐ༏a
+۱labelႋ၂่ partial pathඔ frontier
+ھpartial pathሑ෿b
+Vertex label storeׄפ۱𝑖ࠃlabelކࠢL𝑖b ྍlabelղ 𝑖 ൈđ ᆺაL𝑖֥
+labelsb
+Signature bucket Ϝ L𝑖֥labelsᆦ஥
+frontierĠద଀҂๝֌ሧჷॖбൈđॖၛႨ఼ద଀ label ೷Ԣ೐ద଀ label֥
+ሑ෿b
+Extension engine۱labelऌൔ (1)ݦࡗ
+টჷb
+Dominance man-
+agerᄳ೘োҠቔğ๝၂ labelሑ෿Ġཌྷ๝ద଀ labelsሑ෿
+ѩĠሧჷॖб labelsඔᅝႪb
+Queue / bucket
+queue֥labelsࣸlabel ॖିФྍ labelਙᇏॖ
+b
+Join module ᄝචཟ labelingҰ forward label ა backward labelaಸਈ
+ෘປᆜ routeቋཬ reduced costb
+Column managerڵ֥֞reduced-cost routesູ master columnsĠ೏൐Ⴈ multiple
+pricingࠇcolumn poolਙॖྛྟb
+൞ vertex label storeބdominance managerԳ pricing঒
+ཁൔቔູ
+ඔ྘ label ᆞ൞Ϝᆃུሑ෿࿢෪ᄝ၂่ frontierݖdominance
+managerሑ෿b
+4.3 ֆཟ labelingປᆜੀӱ
+ֆཟ forward labelingb൮༵đᄝ depot ԩളӮԚ൓ labelđః frontier ๙ӈ൞ᄝᄍ
+ھlabelೆ depot֥labelb
+֥labelׄפ𝑖ׄפ࠿ު
+𝑗ऌൔ (1)ঔᅚФ
+ఙb೏ྍ labelྛ๝၂ label೷Ԣડቀൔ (2)ሑ෿b
+đ ྍlabelׄפ𝑗֥label၂҄đ ႨL 𝑗֥labels ೷Ԣྍ
+labelሑ෿b೏ྍ label҄đ೏ྍ labelࣸlabels ऎႵཌྷ
+ᆦ஥ frontier೘҄đ೏ྍ label ಯႵഺჅሑ෿đᄵ
+Ϝ෱Ҭೆ L 𝑗֥ࣸlabelsࣸlabelsđ္ॖିФᆜ่
+೷Ԣb
+֥labelڵreduced-cost֥
+ປᆜ labelభ pricing problemڵreduced-cost columnb
+
+BPC labelingֻ࠺ 8 ်
+4.4ᇗྍঔᅚ
+ࣸ۱labelྍ label֥labelb
+ൌགྷᇏॖູૄ่ labelః frontierᄹĠՖրঔ
+ሑ෿b
+ࣸlabelđၹ
+ູః frontier࠿ުlabelsሑ෿đᄵᇗྍঔᅚॖିള
+Ӯ಺Ⴥ labels੣b
+4.5 චཟ labelingࢤ
+ᄝචཟ labeling ᇏđforward labels Ֆ depot ཟభঔᅚđbackward labelsঔᅚb ਆҧlabels ๙ӈ
+۱critical resourceࢸ𝑇/2۱forward label ໊Ⴟ 𝑖۱backward
+label ໊Ⴟ 𝑗޶( 𝑖, 𝑗 )Ұ
+𝑡𝑖 + 𝑠𝑖 + 𝜏𝑖 𝑗 + 𝑡𝑏
+𝑗 ≤ 𝑇 ,
+ބelementarityಸb
+bforward frontier֥costđbackward fron-
+tier֥costbෘ
+ᇏ࿙ᅳቋཬ reduced cost่ਙb
+5 Luo et al.ඔ྘ label ა 𝐺 (𝑟, 𝑞 )
+5.1 labelၬაঔᅚྐ༏
+Luo et al.֥pricing টሱ split-delivery VRP with time windows and linear weight-related cost bః label ॖ
+ཿӮ
+𝐸𝑖 = (𝜏𝑖, 𝑁𝑖, 𝑉𝑖, 𝐺(𝑟, 𝑞 ), (𝐹𝑖, 𝑆𝐿 𝑖, 𝐼𝑖)) .
+ఃᇏ 𝜏𝑖ׄפ𝑖đ𝑁𝑖đ𝑉𝑖భ partial routeׄפ֥
+đ𝐺 (𝑟, 𝑞 ) ൞ route-based reduced-cost functionཛ (𝐹𝑖, 𝑆𝐿 𝑖, 𝐼𝑖)ᄯ 𝐺 (𝑟, 𝑞 )ğ𝐹𝑖קܥ
+ӮЧđ𝑆𝐿 𝑖ོੱđ𝐼𝑖ྐ༏b
+޶( 𝑖, 𝑗 ) ঔᅚൈđlabelྍğ
+𝜏𝑗 = max{ 𝑒 𝑗, 𝜏𝑖 + 𝑠𝑖 + 𝑡𝑖 𝑗 } ,
+𝑁 𝑗 = 𝑁𝑖 ∪ { 𝑗 } ,
+𝑉 𝑗 = 𝑉𝑖 \ { 𝑘 : 𝜏𝑗 + 𝑠 𝑗 + 𝑡 𝑗 𝑘 > 𝑙 𝑘 } \ { 𝑗 } ,
+𝐹𝑗 = 𝐹𝑖 + 𝑏𝑐 𝑖 𝑗 − 𝜇 𝑗 .
+ऌྍ routeކࠢ𝑆𝐿 𝑗ೆ 𝐼 𝑗bၹՎđLuo֥
+label ঔᅚಯಖ൞௴๙ labelingྍp đᆺ൞reduced cost൞࿢෪Ӯ
+𝐺 (𝑟, 𝑞 )b
+
+BPC labelingֻ࠺ 9 ်
+5.2 Ֆ extreme delivery pattern֞𝐺 (𝑟, 𝑞 )
+Luo et al.၂่ routeđpricingႋ extreme delivery pattern۱
+ေહ zero deliveryđေહ full delivery޼split deliveryקܥroute
+𝑟 = (𝑣(1), 𝑣(2), . . . , 𝑣(| 𝑟 |))
+đreduced cost ॖၛཿӮ
+𝑓𝑟 −
+| 𝑟 |∑
+ℎ=1
+𝛿𝑣 (ℎ) 𝑔𝑣 (ℎ) , (5)
+ఃᇏ 𝑓𝑟 ൞ა routeđ𝑔𝑣 (ℎ)޼𝑣(ℎ)֥reduced-cost ൬
+ၭb
+ሹ஥ෂਈ 𝑞ൔ (5)đႋႪ༵ཟ 𝑔𝑖ο 𝑔𝑖ཬஆ྽đ
+ඔ
+𝐺 (𝑟, 𝑞 ) = min
+{
+𝑓𝑟 −
+∑
+𝑖 ∈𝑟
+𝛿𝑖𝑔𝑖 :
+∑
+𝑖 ∈𝑟
+𝛿𝑖 = 𝑞, 0 ≤ 𝛿𝑖 ≤ 𝑑𝑖
+}
+. (6)
+భФแ
+֥−𝑔𝑖bປᆜ route֥pricing value ॖႮ
+𝐶 (𝑟, 𝑄) = min
+0≤𝑞 ≤𝑄
+𝐺 (𝑟, 𝑞 )
+b
+5.3ඔ೷Ԣ
+೏ 𝐺 (𝑟, 𝑞 )֥𝑞ཬ 𝑞ሑ෿ᆦ஥bLuo et al.ู
+đѩϜ 𝐺 (𝑟, 𝑞 )ק۳delivery capacity 𝑞ቋཬ reduced costԳᇏ
+೷Ԣ๝၂ label๝၂ labelb
+౵љᄝႿđLuoಯЌӻૄ่ partial route֥route-basedඔ 𝐺 (𝑟, 𝑞 )ࡗ
+Գ frontier ᄝ labelb
+6 Luo֥pair dominanceaset dominance ა dominance graph
+6.1 pair dominance
+Luo֥dominanceሑ෿ડቀ
+𝜏2
+𝑖 ≤ 𝜏1
+𝑖 , 𝑉 2
+𝑖 ⊇ 𝑉 1
+𝑖 , 𝑞 2 ≤ 𝑞1, 𝐺 2(𝑟 2, 𝑞2) ≤ 𝐺1(𝑟 1, 𝑞1),
+۱ؽֻlabel۱labelնa
+areduced costb
+đᆜ่ label֥ࡗpair dominance ॖၛཿӮğ೏
+𝜏2
+𝑖 ≤ 𝜏1
+𝑖 , 𝑉 2
+𝑖 ⊇ 𝑉 1
+𝑖 , 𝐺 2(𝑟 2, 𝑞) ≤ 𝐺1(𝑟 1, 𝑞), ∀𝑞 ∈ [ 0, 𝑄],
+ᄵ 𝐸 1
+𝑖 Ф 𝐸 2
+𝑖۱[0, 𝑄]ݦ
+ඔb
+
+BPC labelingֻ࠺ 10 ်
+6.2֥set dominanceğ෮Ⴕ eligible labels༯Ї઎
+set dominanceၬб pair dominanceభ label 𝐸 1
+𝑖֥labels
+ކࠢ
+E1
+𝑖 =
+{
+𝐸 𝑥
+𝑖 : 𝜏 𝑥
+𝑖 ≤ 𝜏1
+𝑖 , 𝑉 𝑥
+𝑖 ⊇ 𝑉 1
+𝑖 , 𝐸 𝑥
+𝑖 ≠ 𝐸 1
+𝑖
+}
+. (7)
+ᆃቆ labels༯Ї઎ູ
+𝐺1
+𝑚𝑖𝑛 (𝑞) = min
+𝐸 𝑥
+𝑖 ∈ E1
+𝑖
+𝐺 𝑥 (𝑟 𝑥, 𝑞). (8)
+೏
+𝐺1
+min(𝑞) ≤ 𝐺1(𝑟 1, 𝑞), ∀𝑞 ∈ [ 0, 𝑄],
+భ label Фᆃቆ labels ᆦ஥đॖၛᆜ่೷Ԣb
+၂đ𝐺1
+min(𝑞)ֻ
+൞෮Ⴕ eligible labelsοൔ (8)۱؟labelsڭ
+҂๝ 𝑞-భ labelb
+set dominanceၬ
+భ label֥labels༯Ї઎ᄝ
+۱[0, 𝑄]ॖၛ೷Ԣb
+6.3 dominance graph෿Ї઎
+ᄯൔ (8) ᇏ෮Ⴕ eligible labelsbLuoׄפ𝑖
+၂ᅦ dominance graph
+G𝑖 = (V𝑖, A𝑖).
+֥node ҂൞ VRP۱label۱graph node 𝑢ऎႵཌྷ๝ (𝜏, 𝑉)֥
+labelsູ 𝐿𝑢अ҆༯Ї઎
+𝐻𝑢 (𝑞) = min
+𝐸 𝑥 ∈ 𝐿𝑢
+𝐺 𝑥 (𝑟 𝑥, 𝑞).
+೏ node 𝑢 ᄝሧჷொ྽ഈ఼Ⴟ node 𝑣ࠧ
+𝜏(𝐿𝑢) ≤ 𝜏(𝐿𝑣), 𝑉 (𝐿𝑢) ⊇ 𝑉 (𝐿𝑣),
+֥node৫ш (𝑢, 𝑣)ၬ൞ğ𝑢֥labelϺᇹᆦ஥ 𝑣
+֥labelsb
+Ҭೆш (𝑢, 𝑣)ྍ node 𝑢 ൈđॖၛϜഈႳ nodeЇ઎ູ
+𝐴𝑣 (𝑞) = min
+{
+𝐻𝑤 (𝑞) : 𝑤 ൞𝑣֞𝑣ഈႳ node
+}
+, (9)
+ྍ label֥ݺ޹𝐴𝑣 (𝑞)҂൞ૄՑՖ labelsෘ෮
+Ⴕ eligible labelsಆअ༯Ї઎b
+൞đൔ (8)ಆ eligible set envelopeطdominance graphҰ๙ӈ၇
+ଖུ node༢๤ğ෱
+հ೷ label҂ॖбnodesభ labelᆃུྐ༏ഉ
+Ї઎ᇏđᄵॖିᄠൈഒ೷b
+
+BPC labelingֻ࠺ 11 ်
+6.4 ྍ label࿃ౢ৘
+ྍ label 𝐸 𝑥
+𝑖ׄפ𝑖൮༵ခ dominance graph֥
+nodesభ label۱nodeđ္҂൞сྶა෮Ⴕ nodes۬
+֥֞nodeડቀ
+𝐴𝑢 (𝑞) ≤ 𝐺 𝑥 (𝑟 𝑥, 𝑞), ∀𝑞 ∈ [ 0, 𝑄].
+೏Ӯ৫đᄵྍ label Ф೷Ԣb
+ၘႵऎႵཌྷ๝(𝜏, 𝑉)֥nodeྍlabelھnode
+֥label setྍअ҆༯Ї઎𝐻𝑢 (𝑞)ࡹnodeൡ໊ᇂb ྍ
+nodeđ൐๭ಯಖіղ (𝜏, 𝑉) ொ྽
+༢b
+࠿ުnodeԮѬЇ઎ 𝐴𝑢 (𝑞)֥ࣸlabels ॖିэӮФᆦ஥b
+Luo֥remove-label֥labelsb೏
+۱node֥labelsھnode ္ླေՖ graphb
+root
+𝜏 = 0, 𝑉 = { 1, 2, 3, 4}
+𝑢
+𝜏 = 2, 𝑉 = { 1, 2, 3}
+𝑣
+𝜏 = 3, 𝑉 = { 1, 3, 4}
+𝑤
+𝜏 = 5, 𝑉 = { 1, 3}
+𝑧
+𝜏 = 6, 𝑉 = { 3}
+๭ 2: dominance graphğnode ο (𝜏, 𝑉)۱nodeb
+6.5 Luo֥set dominanceၬა graph؛
+ౢԣb৘ંഈđLuo֥set dominance ൞Ⴈൔ (7) ᇏ෮Ⴕ eligible labels༯Ї
+భ labelᄯ
+min
+𝐸 𝑥
+𝑖 ∈ E1
+𝑖
+𝐺 𝑥 (𝑟 𝑥, 𝑞),
+֥labelsၬb
+ᇏđ໓ᅣીႵᄝૄՑྍ label۱E1
+𝑖൞Ⴈ
+dominance graph၂஻ node-level۱nodeཌྷ๝ (𝜏, 𝑉) labelsඔđ
+ᄜခொ྽шϜഈႳ node༯Ⴓ node༯Ї઎ၘ
+൐Ⴈb
+൞ğ
+•ၬඪૼਔ set dominance෮Ⴕ eligible labels༯Ї઎Ġ
+• dominance graphݖnode-level envelopeԮѬ envelopeॖ
+ҰĠ
+
+BPC labelingֻ࠺ 12 ်
+•ປᆜ eligible envelope޺۱؟
+҂ॖб nodeᇁഒ೷đ҂
+ᇁհ೷b
+۱؟nodeކ
+۱؟node֥envelopeࣇࣇ
+޹envelopeିᆜ่࿢ᇾ෱b
+7ކ
+7.1ཌྷ๙ྟ
+ބLuoඔ྘ label۱label іൕ၂ቂ৵࿃ሑ෿đ
+dominanceѓਈ costbၹՎđՖ৘ંіղି৯ुđLuo
+set dominance֥label֥frontierअ҆೷Ԣ
+b
+ඔ 𝐹ඔ೷Ԣ 𝐹֥
+భ label൞ඪđLuo֥set dominance ѩ҂൞Էᄯ
+Գ frontier׮
+ෘb
+7.2෿թԥ༯Ї઎ vs.ෘᅝႪ౵თ
+טfrontier۱labelಯಖॖၛЌ਽bᆃဢ
+൞frontier
+ϱЧྐ༏b
+Luoॖб(𝜏, 𝑉)֥labels֞dominance graph ᇏđ
+༯Ї઎bᆃဢđྍ label҂ླေૄ
+Ցᇗྍђ৥նਈ labelsoᆜ่ label֒
+җோb
+Գ frontier޹Luo dominance graph
+ᆦ஥ frontier ၂ቆ route-based༯Ї઎
+ᇶေႨႿᆜ่ label ೱԢ
+ܱlabelsФᆦ஥ൈ
+ࡗ
+node޹𝐻𝑢 (𝑞)ԮѬЇ
+઎ 𝐴𝑢 (𝑞)
+༯Ї઎đᆜุೱ
+Ԣॹ
+ࡎfrontierࢠ
+೐
+҂ॖб nodesᆦ஥ॖ
+ѽሚ
+
+BPC labelingֻ࠺ 13 ်
+7.3۱؟node໙ี
+֥set dominance ൐Ⴈ෮Ⴕ eligible labelsᄯ
+min
+𝐸 𝑥
+𝑖 ∈ E1
+𝑖
+𝐺 𝑥 (𝑟 𝑥, 𝑞),
+۱؟labelsభ labelФ೷Ԣb
+֌ dominance graphҰଖུ node҂ॖб nodesљᆺ
+భ label߶
+հ೷đᆺ൞ॖିഒ೷b
+೷Ԣනམა Luo۱node֥
+۱nodeb
+భ label۱؟node౦ঃb
+7.4නਫ਼
+Գ frontier۱labelඔॖၛФअ҆೷Ԣđഺ
+Ҫ൞ Luo-style envelope cacheொ྽ node၂஻
+labelsෘᆃུ labelsb
+ྍ labelܱnode҂ିᆜ่
+భlabelĠ೏
+ॖିջ gap֥frontierႋ nodeࠇbucketЇ઎b
+൞ğLuoඔ
+҂৵࿃frontierބenvelope۷
+၂ᇁྟb
+ࣥ
+Գ frontierೆචཟ labelingaDSSRϜ Luo-
+style node envelopeೆbఏԚᆺႨ envelopeᄜӇ൫Ⴈ envelope
+ቓअ҆೷Ԣb
+8෎Ҧ੻
+෎Ҧ੻đ҂ᅚष cost redistributionెb
+8.1ࡎק
+ڵreduced-cost columnsڵ֥؟ܔ
+Ⴈ exact labelingഒ expensive pricingЇও greedy
+insertionalocal searcharestricted graph pricingbLuo֥adaptive greedy heuristic
+Գ BPC༵ heuristicުexactb
+ቋႪ reduced-costࣉcolumn
+generationႨ exact pricingڵreduced-cost columnb
+
+BPC labelingֻ࠺ 14 ်
+8.2 Multiple pricing ა column pool
+Multiple pricing ᆷ၂Ց pricingڵreduced-cost columnsbᆃဢॖၛ
+ഒ masterބpricingՑඔbColumn pool֌ᄠൈ҂ᄝ RMPؓ֒
+đpoolڵreduced-costݖlabeling
+ളӮb
+൐ႨğpricingೆpoolҰpoolđ
+Ⴈ labelingb
+8.3 Bounded bidirectional labeling
+චཟ labelingҷӮ forward partial pathބbackward partial pathሧჷቔູcritical
+resourceູ 𝑇ᆺঔᅚડቀ
+𝜏𝑖 < 𝑇 /2
+֥forward labels֥ࡱbackward labels໙ሑ
+ಸb
+ഒֆҧ labelބ
+֥critical resourceؓLuo ໓ᅣđෙಖ cost ջ cumulativeđforward
+ა backward extensionၬ backward function ൌགྷචཟෆ෬b
+8.4 DSSRadecremental search ა ng-route relaxation
+DSSRࠇdecremental searchડቀelementarityग़
+ቋႪ reduced-cost pathೆ critical setđᄜᇗ
+b
+ng-route relaxationअ҆ਣთଽ఼ᇅ elementarityb෱бປಆ elementary pricing
+ഒ labels࠽BPCӈ༵Ⴈ relaxed pricing۷گ߫
+֥elementarity ჿඏb
+8.5 Early join ა early stop
+ᄝචཟ labeling෮Ⴕforwardބbackward labelsb ॖၛૄളӮ၂஻labels
+Ӈ൫ joinڵ֥؟ܔreduced-cost columnsđ
+భ heuristic pricing bExact pricingಯླေປᆜᆣૼđ֌ heuristic൐Ⴈ early stop
+Ⴕིb
+8.6 Valid inequalities ა cuts
+ᄝ branch-and-price-and-cut ᇏđvalid inequalities ॖၛᄹ఼ master֥lower boundೆ cuts୽э
+э pricing֥reduced costbൌགྷൈ๙ӈླေϜ cut duals֞label֥xed-costሧჷ
+ཛᇏb২ೂ k-path inequalitiesࣥxed costܱcuts ॖି
+э labelᄯb
+۱BPC/branch-and-price ໓ᅣᇏđcutѩ҂၂ဢbLiberatore et al.Գ VRPSTW
+໓ᅣᇶุ൞ branch-and-priceđ ѩીႵϜsubset-rowacapacity cut္ᆷԛ
+lower boundđvalid inequalitiesཟbBettinelli et al.Գ pickup-and-
+deliveryொ branch-and-priceඔ྘labelingamodified costsބbranchingĠ
+৚Ⴕ row/column pool׮cut generationbLuo et al. ᄵૼಒ൞ branch-and-price-
+
+BPC labelingֻ࠺ 15 ်
+and-cutđ൐Ⴈਔਆোა split delivery֥ܱvalid inequalitiesb
+֥cut/inequalityؓpricing/labeling႕ཙ
+Liberatore et al.ೆ cutsĠmaster ᇏ
+ჿඏđ branch-and-
+priceק
+b
+э route
+reduced costگ
+ᄖ cut dualsđၹՎ labelཌྷ
+b
+Bettinelli et al. ໃϜ๙Ⴈ cutting planesྏĠ
+ҐႨ modified costs೿ dominanceđ
+SCIP৘ row/column poolsܱ
+׮cut generationb
+ᇶေ႕ཙটሱ modified cost ა
+branching҂൞ cut dualsĠ೏
+Ⴈ arcđmodified cost֥trian-
+gle inequalityླ
+೐ dominanceb
+Luo et al. ൐Ⴈ k-path inequalitiesބstrong
+minimum number of vehicles (SMV)
+inequalitiesb
+k-path inequalitiesࠇࣥ
+֥޶xed-cost ཛĠSMV inequalities
+ٳfull delivery ა split/zero de-
+liveryđླေঔᅚ labelэ
+𝐺 (𝑟, 𝑞 )ᄯb
+࿊ subset-row inequalitiesacapacity cutsa
+ng-routeܱcutsak-path ো cutsa
+Ӛਇඔ/ܱcutsb
+೏ cutࣥxed costđ
+ೆĠ೏ cutༀଆൔa
+஥ෂਈđᄵॖିླေᄝ
+labelׄ؎֥
+b
+ၛ Luoਆো cuts ູ২bk-path inequalitiesࠢ𝑆ࠢھ
+޶ݖࣜ( 𝑖, 𝑗 ) ൈ fixed costೆཌྷႋ cut dualđၹՎ label ঔᅚ
+ྍ 𝐹𝑗֥xed-costॖbSMV inequalitiesڎfull deliveryasplit deliveryࠇzero
+deliveryڿxed costླေᄝ labelФ఼ᇅ full deliveryaഺჅಸ
+э 𝐺 (𝑟, 𝑞 )ၬთb
+ၹՎđcuts൞ pricing֥reduced costބlabel ঔ
+ඔ྘labeling֥cutsđ ቋ঒଴
+э label֥cutsb
+8.7 Branchingؓlabeling႕ཙ
+ؓࢤmasterᆸଖ၂่
+൐ pricingᇾնਈ forbidden routes֞pricing
+ࠇlabelওೂ༯b
+
+BPC labelingֻ࠺ 16 ်
+ؓم pricing႕ཙ
+భ LPଖ
+depot–vehicle typeӚਇඔቓഈ༯
+ᆦb
+ڿmaster ᇏӚਇඔჿඏđ
+pricingႋ dual ॖ
+ೆ reduced costb
+൐Ⴈ ࿊ᄴ fractional arc flow࣌
+Ġ఼ᇅ൐Ⴈ
+ބ޶
+b
+Ֆ pricing޶
+ཋ
+ᇅ routeႿ
+triangle inequality֥dominanceb
+ᆦđ
+ӈႨႿ split delivery ໙ีb
+ཌྷႋ reduced
+costĠpricing൞
+ડቀ
+ᆦཋᇅb
+шੀਈ/ሹੀਈ Luo֥total flow
+ᆦb
+֥ܱroute feasi-
+bilityࠇreduced costđॖିླေᄝ
+labelੀਈྐ༏b
+৵࿃шଆൔ Luo൐Ⴈਆ่৵࿃шp
+ᆦb
+ཋᇅ pricing޶
+ൌགྷĠ೏఼ᇅ/ଆ
+ൔđlabel޶
+b
+э label٠
+ಞ pricingඔ྘ labeling֥
+ࢠ
+೐ൈđᄜ൐Ⴈླေঔᅚ labelᆦb
+8.8 labeling෎
+֥dominance࠽labeling֥
+labelsࠇdominance bucket֥label֥label
+҂൞ૄՑಆਈೡ૭bఃՑđૄ่ labelіൕğsegmentࠇࡗ𝑞
+೘đ೏label೷Ԣđླေົ
+ࣸlabelঔᅚb
+ؓLuo-style set dominance۱dominance nodeअ҆༯Ї઎൪ູ၂ᇕ envelope cacheb
+ቔႨ҂൞ูս෮Ⴕ pairwise dominance൞ᄝྍ labelॹ෎ೱҰğ೏ node-
+level envelopeඔđ ᄵᆜ่labelߎ
+ܿsoft-time-window frontier࿃ԩ৘b
+8.9ඔіൕა envelopeթ
+ඔ྘ label֥segment listၬთaོ
+Գ frontierླေᆦӻ horizontal gapavertical jump๪ྙ෿b
+Envelope cacheඔ྘ labeling۱bucketࠇdominance graph node ᇏၘ
+؟ޓlabelsᆃུ labelsቋཬЇ઎bྍ label҂൞ᇯ่ label
+bLuo֥dominance graphൌགྷb
+
+BPC labelingֻ࠺ 17 ်
+9ၰ
+Գ VRP/PDP֥exact pricingඔ྘ labelğૄ
+۱label֥ࡗfrontierđঔᅚൈοൔ (1)֥labels ቓअ҆
+൞Ќᆣ frontierිᆞಒb
+ೆbounded bidirectional labelingaDSSRࠇdecremental searchaheuristic pricinga
+multiple pricingсေ cutsᄖ envelope graphb
+֒label࡫ࢹLuo֥dominance graphb༵Ϝ෱ቔູᆜ่ labelॹ෎ೱԢఖđႨ
+node-level envelopeđᄜӇ൫ϜenvelopeྙӮoೈ
+Գअ҆ frontier޹Luo-styleb
+ࢲ
+іղି৯ĠLuoਔ oϜ၂ቆlabels
+Գ
+frontierႵིҗோđႨ Luo-style envelopeෘb
+
+BPC labelingֻ࠺ 18 ်
+ႋ
+• Liberatore, Righini, and Salani (2011), A column generation algorithm for the vehicle routing problem with
+soft time windows.ႋѓሙ VRPSTWඔ྘ labelބfrontier dominanceb
+• Bettinelli, Ceselli, and Righini (2014), A branch-and-price algorithm for the multi-depot heterogeneous-
+fleet pickup and delivery problem with soft time windows .ඔ྘ labelaචཟ labelinga
+segment-listᅚष pickup-and-deliveryb
+• Luo, Qin, Zhu, and Lim (2017), Branch and Price and Cut for the Split-Delivery Vehicle Routing Problem
+with Time Windows and Linear Weight-Related Cost.ႋ 𝐺 (𝑟, 𝑞 )apair dominanceaset dominance
+ა dominance graphb
+

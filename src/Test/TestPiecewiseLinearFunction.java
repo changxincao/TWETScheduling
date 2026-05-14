@@ -1,9 +1,9 @@
 package Test;
 
-import Common.PiecewiseLinearFunction;
-import Common.PiecewiseLinearFunction.Segment;
 import Common.PiecewiseLinearFunctionArray;
 import Common.Utility;
+import Common.PiecewiseLinearFunction;
+import Common.PiecewiseLinearFunction.Segment;
 
 import java.util.Random;
 
@@ -130,7 +130,7 @@ public class TestPiecewiseLinearFunction {
     }
     // 渐进偏移，生成第二个函数
     static PiecewiseLinearFunction buildShiftedList(PiecewiseLinearFunction src, double delta) {
-        return src.shift(delta);
+        return src.shiftX(delta);
     }
 
     // 链表版 → 数组版

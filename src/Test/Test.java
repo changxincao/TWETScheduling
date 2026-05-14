@@ -35,6 +35,11 @@ import java.util.*;
 
 public class Test  {
     public static void main(String[] args) {
+    	int[] array=null;
+    	for(int i:array) {
+    		System.out.println(i);
+    	}
+    	
         // 原列表，初始 [1,2,3]
         List<Integer> seq = new ArrayList<>(Arrays.asList(1, 2, 3));
         List<Integer> other = new ArrayList<>(Arrays.asList(9, 8, 7));

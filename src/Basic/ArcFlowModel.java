@@ -106,7 +106,7 @@ public class ArcFlowModel {
 		cplex.addEq(C[0], 0, "C0");
 
 		/* (5) sequencing/time propagation with big-M */
-		double M = data.Cmax;
+		double M = data.CmaxH;
 		for (int i = 0; i < data.n + 1; i++) {
 			for (int j = 1; j < data.n + 1; j++) {
 				if (i == j)
@@ -150,12 +150,62 @@ public class ArcFlowModel {
 	/* ---------- solve & accessors ---------- */
 	public boolean solve() throws IloException {
 		cplex.setParam(IloCplex.DoubleParam.TiLim, 3600);
-		cplex.setOut(null);
+//		cplex.setOut(null);
 		return cplex.solve();
 	}
 
 	public double getObjective() throws IloException {
 		return cplex.getObjValue();
+	}
+
+	/** @return 当前模型对应的数据实例。 */
+	public Data getData() {
+		return data;
+	}
+
+	/** @return 当前模型内部使用的 CPLEX 对象。 */
+	public IloCplex getCplex() {
+		return cplex;
+	}
+
+	/**
+	 * 提取当前解对应的按机器划分的任务时间表。
+	 * <p>
+	 * 这个接口主要给结果输出/验证模块使用，避免外部重复写一遍从 x/C 变量重构序列的逻辑。
+	 */
+	public ArrayList<ArrayList<Utility.TaskInfo>> extractTaskSchedules() throws IloException {
+		ArrayList<ArrayList<Utility.TaskInfo>> schedules = new ArrayList<ArrayList<Utility.TaskInfo>>();
+		boolean[] visited = new boolean[data.n + 1];
+		for (int j = 1; j <= data.n; j++) {
+			if (x[0][j] == null || cplex.getValue(x[0][j]) <= 0.5 - Utility.EPS) {
+				continue;
+			}
+			ArrayList<Utility.TaskInfo> machine = new ArrayList<Utility.TaskInfo>();
+			int curr = j;
+			while (curr != -1 && curr != data.n + 1 && !visited[curr]) {
+				double completion = cplex.getValue(C[curr]);
+				double start = completion - data.p[curr];
+				double taskCost = data.w_e[curr] * Math.max(data.d_e[curr] - completion, 0.0)
+						+ data.w_t[curr] * Math.max(completion - data.d_l[curr], 0.0);
+				machine.add(new Utility.TaskInfo(curr, start, completion, taskCost));
+				visited[curr] = true;
+				int next = -1;
+				for (int k = 1; k <= data.n + 1; k++) {
+					if (curr == k || x[curr][k] == null) {
+						continue;
+					}
+					if (cplex.getValue(x[curr][k]) > 0.5 - Utility.EPS) {
+						next = k;
+						break;
+					}
+				}
+				curr = next;
+			}
+			if (!machine.isEmpty()) {
+				schedules.add(machine);
+			}
+		}
+		return schedules;
 	}
 
 	public void end() {

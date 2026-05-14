@@ -4,140 +4,379 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.Random;
+import java.util.Arrays;
 
+import Common.Configure;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
+import HEU.SchedulerForReleaseNoWait;
 
 public class Data {
-	public static int scale=1;
-    public int n;           // number of jobs
-    public int m;
-    public double[] p, d_e,d_l, w_e, w_t,r; // arrays length n
-    //r先不管，感觉可能某些地方会不兼容
-    public double[][] s;//sequence dependent set up
-    public double min_s[];//每个任务的最小setup
-    public PiecewiseLinearFunction[] penaltyFunction;
-    public double Cmax=1e6;//问题下的全局上界
-    public Data(String path,boolean setup,boolean due_date) throws IOException {
-    	BufferedReader reader=new BufferedReader(new FileReader(path));
-    	String line=reader.readLine();
-    	this.n = Integer.parseInt(line.split(" ")[0]);
-    	this.m = Integer.parseInt(line.split(" ")[1]);
-        this.p = new double[n+1]; 
-        this.d_e = new double[n+1]; 
-        this.d_l = new double[n+1]; 
-        this.w_e = new double[n+1];
-        this.w_t = new double[n+1];
-        this.s= new double[n+1][n+1];//如果存在释放时间，setup可以发生在释放时间之前
-        this.min_s=new double[n+1];
-        this.r= new double[n+1];
-        debug_set();
-        if(due_date) {
-        	 load_dd_data(setup, reader);
-        }else {
-        	load_dw_data(setup, reader);
-        }
-       
-        setCmax();
+	public Configure configure;
+	public static int scale = 1;
+	public int n; // number of jobs
+	public int m;
+	public double[] p, d_e, d_l, w_e, w_t, r; // arrays length n
+	// r先不管，感觉可能某些地方会不兼容
+	public double[][] s;// sequence dependent set up
+	public double min_s[];// 每个任务的最小setup
+	public PiecewiseLinearFunction[] penaltyFunction;
+	public double CmaxH = 1e6;// 问题下的全局上界，用于启发式，设置不能过紧，否则可能某些差解搜不到就跳不出去
+	public double CmaxE = 1e6;// 问题下的全局上界，用于精确，越紧越好
+	
+	public long[] mask;
+	public long full_mask;
+	public int m_BigNumber = 100000000;
+	public long[][] fl_reach;
+	public long[][] fh_reach;
+	public long[][] bl_reach;
+	public long[][] bh_reach;
+
+	public double[] earlyTime;
+	public double[] lateTime;// 标记每个任务的完成时间时间窗,后续label setting的时候可能动态迭代更新
+
+	public Data(String path, boolean setup, boolean due_date) throws IOException {
+		configure = new Configure();
+		BufferedReader reader = new BufferedReader(new FileReader(path));
+		String line = reader.readLine();
+		String[] headerTokens = splitTokens(line);
+		this.n = Integer.parseInt(headerTokens[0]);
+		this.m = Integer.parseInt(headerTokens[1]);
+		this.p = new double[n + 1];
+		this.d_e = new double[n + 1];
+		this.d_l = new double[n + 1];
+		this.w_e = new double[n + 1];
+		this.w_t = new double[n + 1];
+		this.s = new double[n + 1][n + 1];// 如果存在释放时间，setup可以发生在释放时间之前
+		this.min_s = new double[n + 1];
+		this.r = new double[n + 1];
+		debug_set();
+		if (due_date) {
+			load_dd_data(setup, reader);
+		} else {
+			load_dw_data(setup, reader);
+		}
+
+		setCmax();
+		setImprovedCmax();
+
 //        Cmax=7700;
-        setPenaltyFunctions();
-        for(int i=1;i<n+1;i++) {
-        	double minSi=Utility.big_M;
-        	for(int j=0;j<n+1;j++) {
-        		minSi=Math.min(minSi, s[j][i]);
-        	}
-        	min_s[i]=minSi;
-        }
-        
-    }
-    
-    public void setCmax() {
-    	/* ---- compute horizon (s_ij = 0) ---- */
-        double sumP = 0, maxP = 0, maxD = 0, maxR=0;
-        for (int j = 1; j <= n; j++) {
-            sumP += p[j];
-            double max_sj=0;
-            for(int i=0;i<n+1;i++) {
-            	max_sj=Math.max(max_sj, s[i][j]);
-            }
-            sumP+=max_sj;
-            maxP = Math.max(maxP, p[j]+max_sj);
-            maxR =Math.max(maxR, r[j]);
-            maxD = Math.max(maxD, d_e[j]-(p[j]+max_sj));//即每个任务在d_ej-pj-maxi(s_ij)这个时间以后执行，那么在任务前不可能存在等待时间，等待只会导致延迟？
-            //如果可能是小数的话，那就不能向下取整了？
-        }
-        Cmax =  (sumP / (double) m + (1.0-1.0/(double)m)*maxP) + maxD+1;
-        //不做取整，如果都是整数，向下取值，参考下文
+		setPenaltyFunctions();
+		for (int i = 1; i < n + 1; i++) {
+			double minSi = Utility.big_M;
+			for (int j = 0; j < n + 1; j++) {
+				minSi = Math.min(minSi, s[j][i]);
+			}
+			min_s[i] = minSi;
+		}
+
+	}
+
+	public void setTimeWindows() {
+		earlyTime = new double[this.n + 1];
+		lateTime = new double[this.n + 1];
+//    	earlyTime都为0 不做改变
+		Arrays.fill(lateTime, this.CmaxH);
+	}
+
+	// 这个原始VRP只需要做一次，但在我们问题上，每个子问题下任务的时间窗可能都会变，每次做一次
+
+	private void TightTW0() {
+		// Label Setting的时候应该就不用Cmax了，而是使用0任务的最晚时间窗
+		double tmax = CmaxH;
+		for (int ix = 1; ix <= this.n; ++ix) {
+			tmax = Math.max(tmax, lateTime[ix]);
+		}
+		if (Utility.compareLe(tmax, lateTime[0])) {
+			lateTime[0] = tmax;
+			System.out.println("TightTW0> Reduce the period from " + lateTime[0] + " to: " + tmax); // debug
+		}
+	}
+
+	private void TightTW1() {
+		int iter = 0;
+		for (int jid = 1; jid <= this.n; ++jid) {
+			double dbest = earlyTime[0] + getSetUp(0, jid) + getProcessT(jid);
+			if (Utility.compareGt(dbest, earlyTime[jid])) {
+//				System.out.println("TightTW1> Add the early time for " + cid +  ", from " + m_customer.get(cid).m_early_time + " to: " + dbest); //debug
+				earlyTime[jid] = dbest;
+				++iter;
+			}
+		}
+		// 不存在最后一个任务--->仓库，lateTime无法更新缩减
+		// 那可能某些极端场景下，最早开始比最晚还要大，此时该任务无法服务，可缩减本次labeling需处理任务数量
+
+		System.out.println("Reduced time windows: " + iter); // debug
+	}
+
+	public void BuildReach() {
+		// 同样应该也是每次labeling重算
+		// 这个就是最简单可能也很弱的一个计算了，因为允许违背的话，那可能更重要的还是基于已有的一些bound缩减？
+
+		int max_time = (int) lateTime[0] + 1;
+		fl_reach = new long[this.n + 1][max_time + 1];
+		fh_reach = new long[this.n + 1][max_time + 1];
+		bl_reach = new long[this.n + 1][max_time + 1];
+		bh_reach = new long[this.n + 1][max_time + 1];
+
+		fl_reach[0][0] = fh_reach[0][0] = full_mask;
+		bl_reach[0][0] = bh_reach[0][0] = full_mask;
+		// 暂时不考虑最后一个虚拟任务
+
+		// forward reach information
+		for (int jid = 1; jid <= this.n; ++jid) {
+			for (int t = (int) earlyTime[jid]; t <= lateTime[jid]; ++t) {
+				for (int i = 1; i <= this.n; ++i) {
+
+					if (i == jid) {
+						continue;
+					}
+					double it = t + getSetUp(jid, i) + getProcessT(i);
+					if (Utility.compareGt(it, lateTime[i])) {
+						continue;
+					}
+
+					if (i < 64) {
+						fl_reach[jid][t] |= mask[i];
+					} else {
+						fh_reach[jid][t] |= mask[i];
+					}
+				}
+			}
+		}
+		// 最多处理128个顾客
+		// 不设置最后一个虚拟点，总能到达
+
+		// backward reach information
+		for (int jid = 1; jid <= this.n; ++jid) {
+			int tstart = (int) (max_time - (lateTime[jid]));// 相当于取下界了，经过了1.5，但按照1去算
+			// 这种估计实际执行的时候可能还是需要判断,但对整数问题不需要，小数需要
+			double tend = max_time - (earlyTime[jid]);
+			// 相当于是反向来看，到当前任务执行结束，已经经过的时间
+			for (int t = tstart; t <= tend; ++t) {
+				for (int i = 0; i <= this.n; ++i) {
+					if (i == jid) {
+						continue;
+					}
+					double it = earlyTime[i] + getProcessT(jid) + getSetUp(i, jid) + t;
+					if (Utility.compareGt(it, max_time)) {
+						continue;
+					}
+
+					if (i < 64) {
+						bl_reach[jid][t] |= mask[i];
+					} else {
+						bh_reach[jid][t] |= mask[i];
+					}
+				}
+			}
+		}
+	}
+
+	public void setCmax() {
+		/* ---- compute horizon (s_ij = 0) ---- */
+		double sumP = 0, maxP = 0, maxD = 0, maxR = 0;
+		for (int j = 1; j <= n; j++) {
+			sumP += p[j];
+			double max_sj = 0;
+			for (int i = 0; i < n + 1; i++) {
+				max_sj = Math.max(max_sj, s[i][j]);
+			}
+			sumP += max_sj;
+			maxP = Math.max(maxP, p[j] + max_sj);
+			maxR = Math.max(maxR, r[j]);
+			maxD = Math.max(maxD, d_e[j] - (p[j] + max_sj));// 即每个任务在d_ej-pj-maxi(s_ij)这个时间以后执行，那么在任务前不可能存在等待时间，等待只会导致延迟？
+			// 如果可能是小数的话，那就不能向下取整了？
+		}
+		CmaxH = (sumP / (double) m + (1.0 - 1.0 / (double) m) * maxP) + maxD + 1;
+		CmaxE=CmaxH;
+		// 不做取整，如果都是整数，向下取值，参考下文
 //        Kramer, A., Dell’Amico, M., Feillet, D., & Iori, M. (2020). Scheduling jobs with release dates on identical parallel machines by minimizing the total weighted completion time. Computers and Operations Research, 123, 105018. https://doi.org/10.1016/j.cor.2020.105018
-    }
-    
-    //每个任务在时间max{(d_i-si-pi),r_i}之后不会有等待时间，其中s_i为所有i设置时间的最大
-    //在此基础上取前m-1个任务的平均执行时间+最大任务的执行时间，，这是无等待情况下，因此基于所有任务的最大最早开始时间执行
-    //还可以看作是一个带有不同释放时间的东西，后续启发式求解
-    
-    public void setPenaltyFunctions() {
-    	penaltyFunction=new PiecewiseLinearFunction[n+1];
-    	penaltyFunction[0]=new PiecewiseLinearFunction(0, Cmax);
-    	penaltyFunction[0].addSegment(0,Cmax,0,0);
-    	for(int jid=1;jid<n+1;jid++) {
-    		penaltyFunction[jid]=new PiecewiseLinearFunction(0,Cmax);
-    		if((!Utility.compareEq(0, d_e[jid]))&&(!Utility.compareEq(w_e[jid], 0))) {
-    			penaltyFunction[jid].addSegment(0, d_e[jid], -w_e[jid], w_e[jid]*d_e[jid]);
-    		}
-    		if(!Utility.compareEq(d_e[jid],d_l[jid] )) {
-    			penaltyFunction[jid].addSegment(d_e[jid],d_l[jid] , 0,0);
-    		}
-    		penaltyFunction[jid].addSegment(d_l[jid], Cmax, w_t[jid], -w_t[jid]*d_l[jid]);
-        	
-    	}
-    	//TODO 待测试setDomian()
-    	//每个点上最多三段，可能最少就一段,如果不存在窗口且de=0或者不存在早到惩罚成本，此时就只有迟到成本了
-    }
-    
-    public void load_dw_data(boolean setup,BufferedReader reader) throws IOException {
-    	//dw->single due window
-    	//TODO
-    }
+	}
+	// 每个任务在时间max{(d_i-si-pi),r_i}之后不会有等待时间，其中s_i为所有i设置时间的最大
+	// 在此基础上取前m-1个任务的平均执行时间+最大任务的执行时间，，这是无等待情况下，因此基于所有任务的最大最早开始时间执行
+	// 还可以看作是一个带有不同释放时间的东西，后续启发式求解
+	
 
-    public void load_dd_data(boolean setup,BufferedReader reader) throws IOException {
-    	//dd->single due date
-    	//后续有sij数据再写
-    	
-    	for(int jid=1;jid<=n;jid++) {
-    		String line=reader.readLine();
-    		this.p[jid]=Integer.parseInt(line.split(" ")[0])*scale;
-    		this.d_e[jid]=Integer.parseInt(line.split(" ")[1])*scale;
-    		this.d_l[jid]=Integer.parseInt(line.split(" ")[1])*scale;
-    		this.w_e[jid]=Integer.parseInt(line.split(" ")[2]);
-    		this.w_t[jid]=Integer.parseInt(line.split(" ")[3]);
-    	}
-    	if(setup) {
-//    		...
-    		for(int i=0;i<n+1;i++) {
-    			for(int j=1;j<n+1;j++) {
-    				if(i==j) continue;
-    				s[i][j]=0;//new Random(0).nextDouble(30)*scale;
-    			}
-    		}
-    	}
-    }
-    public double cost(int j, int C) {
-        /*  1. 计算提前量 E_j = max{d_j - C, 0} */
-        double earliness = Math.max(d_e[j] - C, 0);
+	public void setImprovedCmax() {
+		//不采用简单的基于每个任务的d_l,计算可能无等待的最大累计时间
+		//将该问题作为一个决策问题，启发式获得上界，同样考虑无等待，认为每个任务的释放时间为
+		//即每个任务在时间d_l[j]-p[j]释放，且其setup可发生在release之前,此时任务开始执行必然在释放时间之后，且任务不可能等待取寻求更好的成本
+		SchedulerForReleaseNoWait scheduler=new SchedulerForReleaseNoWait(this);
+		double improvedCmax=scheduler.solve(CmaxH, 2, 10);
+		if(improvedCmax<CmaxH) {
+			System.out.println("Cmax被进一步改进："+CmaxH+" "+improvedCmax);
+			CmaxE=improvedCmax;
+			CmaxH=CmaxE*1.1;
+//			Cmax*=5;
+			//暂时感觉是正确的..虽然结果和不设置此处不太一样，有高有低
+			//相对于前边那种计算方法还是小了不少的
+			//虽然结果似乎有时候会变差，但变得更快，但这个变差感觉是启发式的问题
+			//这个的大小会严重影响求解速度
+			//确实会有一些影响, 暂时设置一个1.4倍吧 但这个Cmax对精确应该是可用的，对启发式需要给一定的冗余才能搜到更好的解 
+			//也不一定，有时候小点又快又好,感觉主要还是略大一点，保证存在ALNS更新可行解的同时，加深ls次数可能稳定一些
+		}
+	}
 
-        /*  2. 计算逾期量 T_j = max{C - d_j, 0} */
-        double tardiness = Math.max(C - d_l[j], 0);
+	//TODO 2025.5.16 这俩玩意的一个问题在于，设置上界以后虽然速度会快很多，但不知道这个东西限制的太死会不会导致某些解直接无法被搜索到，从而导致陷入局部最优
+	//可能说限制的太死，扰动范围可能就很小.
+	//或者就是扰动的时候允许一个更大的Cmax，VND则保持原样。在ALNS处允许函数范围扩大一定倍数
+	//不能这么做，这么做要修改像下边的这些东西，而且如果ALNS基于这个算了一个Cmax超出的解，那进入VND也是一个上界不可行的解相当于
+	//两种办法：
+		//1、要么就是将这种解超出Cmax的解当作不可行解，但仍然接受做一定惩罚
+		//2、要么就是仍然只允许可行解，但将Cmax设置大一些,但这个是否永远不会报错就不一定，只能设置足够大 
+		//还得尝试一下 先用第2种吧，第一种还得修改评估逻辑,稍微大一点应该都有可行的解，主要看一下对不同的Cmax结果变化大不大，是不是Cmax越大可行解越好越稳定
+		//因为Cmax变大会显著影响时间
+	
+	//	public void enlargeCmax() {
+//		this.Cmax*=1.3;
+//		for(PiecewiseLinearFunction f:this.penaltyFunction) {
+//			f.tail.end*=1.3;
+//			f.domainEnd*=1.3;
+//		}
+		
+//	}
+	
+//	public void resetCmax() {
+//		this.Cmax/=1.3;
+//		for(PiecewiseLinearFunction f:this.penaltyFunction) {
+//			f.tail.end/=1.3;
+//			f.domainEnd*=1.3;
+//		}
+//	}
+	
+	
+	
 
-        /*  3. 加权求和返回 */
-        return w_e[j] * earliness + w_t[j] * tardiness;
-    }
-   
-    
-    public void debug_set() {
-//    	n=40;
-    	m=2;
-    	scale=3;
-    }
-    
+	public void setPenaltyFunctions() {
+		penaltyFunction = new PiecewiseLinearFunction[n + 1];
+		penaltyFunction[0] = new PiecewiseLinearFunction(0, CmaxH);
+		penaltyFunction[0].addSegment(0, CmaxH, 0, 0);
+		for (int jid = 1; jid < n + 1; jid++) {
+			penaltyFunction[jid] = new PiecewiseLinearFunction(0, CmaxH);
+			if ((!Utility.compareEq(0, d_e[jid])) && (!Utility.compareEq(w_e[jid], 0))) {
+				penaltyFunction[jid].addSegment(0, d_e[jid], -w_e[jid], w_e[jid] * d_e[jid]);
+			}
+			if (!Utility.compareEq(d_e[jid], d_l[jid])) {
+				penaltyFunction[jid].addSegment(d_e[jid], d_l[jid], 0, 0);
+			}
+			penaltyFunction[jid].addSegment(d_l[jid], CmaxH, w_t[jid], -w_t[jid] * d_l[jid]);
+
+		}
+		// TODO 待测试setDomian()
+		// 每个点上最多三段，可能最少就一段,如果不存在窗口且de=0或者不存在早到惩罚成本，此时就只有迟到成本了
+	}
+
+	public void load_dw_data(boolean setup, BufferedReader reader) throws IOException {
+		// dw->single due window
+		// TODO
+	}
+
+	public void load_dd_data(boolean setup, BufferedReader reader) throws IOException {
+		// dd->single due date
+
+		for (int jid = 1; jid <= n; jid++) {
+			String line = reader.readLine();
+			String[] tokens = splitTokens(line);
+			this.p[jid] = Integer.parseInt(tokens[0]) * scale;
+			this.d_e[jid] = Integer.parseInt(tokens[1]) * scale;
+			this.d_l[jid] = Integer.parseInt(tokens[1]) * scale;
+			this.w_e[jid] = Integer.parseInt(tokens[2]);
+			this.w_t[jid] = Integer.parseInt(tokens[3]);
+		}
+		if (setup) {
+			loadSetupMatrix(reader);
+		}
+	}
+
+	/**
+	 * 2026-04-17: 多机生成数据会在任务区后追加一个 SETUP 块，按 (n+1)*(n+1) 直接读入。
+	 * 如果实例里没有这部分，就继续保持默认的零 setup，兼容旧格式。
+	 */
+	private void loadSetupMatrix(BufferedReader reader) throws IOException {
+		String line = nextNonEmptyLine(reader);
+		if (line == null) {
+			return;
+		}
+		if ("SETUP".equalsIgnoreCase(line.trim())) {
+			for (int i = 0; i <= n; i++) {
+				fillSetupRow(i, splitTokens(reader.readLine()));
+			}
+			return;
+		}
+		String[] firstRow = splitTokens(line);
+		if (firstRow.length != n + 1) {
+			throw new IOException("Invalid setup block in instance file");
+		}
+		fillSetupRow(0, firstRow);
+		for (int i = 1; i <= n; i++) {
+			fillSetupRow(i, splitTokens(reader.readLine()));
+		}
+	}
+
+	private void fillSetupRow(int row, String[] tokens) {
+		for (int j = 0; j <= n; j++) {
+			s[row][j] = Double.parseDouble(tokens[j]);
+		}
+	}
+
+	private String nextNonEmptyLine(BufferedReader reader) throws IOException {
+		String line;
+		while ((line = reader.readLine()) != null) {
+			if (!line.trim().isEmpty()) {
+				return line;
+			}
+		}
+		return null;
+	}
+
+	private String[] splitTokens(String line) {
+		return line.trim().split("\\s+");
+	}
+
+	public void debug_set() {
+		n = 60;
+		m = 3;
+		scale = 3;
+	}
+
+	public double cost(int j, int C) {
+		/* 1. 计算提前量 E_j = max{d_j - C, 0} */
+		double earliness = Math.max(d_e[j] - C, 0);
+
+		/* 2. 计算逾期量 T_j = max{C - d_j, 0} */
+		double tardiness = Math.max(C - d_l[j], 0);
+
+		/* 3. 加权求和返回 */
+		return w_e[j] * earliness + w_t[j] * tardiness;
+	}
+
+	public double getSetUp(int i, int j) {
+		return this.s[i][j];
+	}
+
+	public double getProcessT(int i) {
+		return this.p[i];
+	}
+
+	private void buildMask() {
+		// 只包含0-n,没考虑最后回到0
+		mask = new long[this.n + 1];
+		long x = 1;
+		for (int i = 0; i <= n; ++i) {
+			mask[i] = x;
+			if (i == 63) {
+				x = 1;
+			} else {
+				x <<= 1;
+			}
+		}
+
+		full_mask = ((1L << 63) - 1);
+		if (this.n > 62)// 0不算一个任务,但占一个位置
+		{
+			full_mask |= mask[63];
+		}
+	}
+
 }

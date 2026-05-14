@@ -2,8 +2,8 @@ package Test;
 
 import java.util.List;
 
-import Common.PiecewiseLinearFunction;
 import Common.PiecewisePlotter;
+import Common.PiecewiseLinearFunction;
 
 public class TestPWF {
     public static void main(String[] args) {

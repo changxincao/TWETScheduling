@@ -1,0 +1,3448 @@
+This article was downloaded by: [128.122.253.228] On: 08 October 2014, At: 06:28
+Publisher: Institute for Operations Research and the Management Sciences (INFORMS)
+INFORMS is located in Maryland, USA
+Transportation Science
+Publication details, including instructions for authors and subscription information:
+http://pubsonline.informs.org
+Effective Local Search Algorithms for Routing and
+Scheduling Problems with General Time-Window
+Constraints
+T . Ibaraki, S. Imahori, M. Kubo, T . Masuda, T . Uno, M. Yagiura,
+To cite this article:
+T . Ibaraki, S. Imahori, M. Kubo, T . Masuda, T . Uno, M. Yagiura,  (2005) Effective Local Search Algorithms for Routing
+and Scheduling Problems with General Time-Window Constraints. Transportation Science 39(2):206-232. http://
+dx.doi.org/10.1287/trsc.1030.0085
+Full terms and conditions of use: http://pubsonline.informs.org/page/terms-and-conditions
+This article may be used only for the purposes of research, teaching, and/or private study. Commercial use
+or systematic downloading (by robots or other automatic processes) is prohibited without explicit Publisher
+approval, unless otherwise noted. For more information, contact permissions@informs.org.
+The Publisher does not warrant or guarantee the article’s accuracy, completeness, merchantability, fitness
+for a particular purpose, or non-infringement. Descriptions of, or references to, products or publications, or
+inclusion of an advertisement in this article, neither constitutes nor implies a guarantee, endorsement, or
+support of claims made of that product, publication, or service.
+© 2005 INFORMS
+Please scroll down for article—it is on subsequent pages
+INFORMS is the largest professional society in the world for professionals in the fields of operations research, management
+science, and analytics.
+For more information on INFORMS, its publications, membership, or meetings visit http://www.informs.org
+
+
+TRANSPORTATION SCIENCE
+Vol. 39, No. 2, May 2005, pp. 206–232
+issn0041-1655/barSCeissn1526-5447/barSC05/barSC3902/barSC0206
+informs ®
+doi10.1287/trsc.1030.0085
+©2005 INFORMS
+Effective Local Search Algorithms for Routing
+and Scheduling Problems with General
+Time-Window Constraints
+T. Ibaraki
+Department of Informatics, School of Science and Technology, Kwansei Gakuen University, 2-1 Gakuen,
+Sanda 669-1337, Japan, ibaraki@ksc.kwansei.ac.jp
+S. Imahori
+Department of Mathematical Informatics, Graduate School of Information Science and Technology, University of Tokyo,
+7-3-1 Hongo, Bunkyo-ku, Tokyo 113-8656, Japan, imahori@simplex.t.u-tokyo.ac.jp
+M. Kubo
+Department of Logistics and Information Engineering, Faculty of Marine Technology, Tokyo University of Marine Science and
+Technology, 2-1-6 Etchujima, Kouto-ku, Tokyo 135-8533, Japan, kubo@e.kaiyodai.ac.jp
+T. Masuda
+Communication & High Technology, Accenture, Nihon Seimei Akasaka Daini Bldg., 7-1-16 Akasaka Minato-ku,
+Tokyo 107-8672, Japan, tomoyasu.masuda@accenture.com
+T. Uno
+National Institute of Informatics, 2-1-2 Hitotsubashi, Chiyoda-ku, Tokyo 101-8430, Japan, uno@nii.jp
+M. Yagiura
+Department of Applied Mathematics and Physics, Graduate School of Informatics, Kyoto University,
+Kyoto 606-8501, Japan, yagiura@i.kyoto-u.ac.jp
+W
+e propose local search algorithms for the vehicle routing problem with soft time-window constraints.
+The time-window constraint for each customer is treated as a penalty function, which is very general
+in the sense that it can be nonconvex and discontinuous as long as it is piecewise linear. In our algorithm,
+we use local search to assign customers to vehicles and to ﬁnd orders of customers for vehicles to visit. Our
+algorithmemploysanadvancedneighborhood,calledthecyclic-exchangeneighborhood,inadditiontostandard
+neighborhoods for the vehicle routing problem. After ﬁxing the order of customers for a vehicle to visit, we
+must determine the optimal start times of processing at customers so that the total penalty is minimized. We
+showthatthisproblemcanbeefﬁcientlysolvedbyusingdynamicprogramming,whichisthenincorporatedin
+ouralgorithm.Wereportcomputationalresultsforvariousbenchmarkinstancesofthevehicleroutingproblem.
+The generality of time-window constraints allows us to handle a wide variety of scheduling problems. As an
+example,wementioninthispaperanapplicationtoaproductionschedulingproblemwithinventorycost,and
+report computational results for real-world instances.
+Key words: vehicle routing; adaptive multistart local search; dynamic programming; time-window constraints;
+metaheuristics; very large scale neighborhood
+History: Received: August 2002; revision received: March 2003; accepted: March 2003.
+Introduction
+Thevehicle routing problem(VRP) is the problem of
+minimizing the total distance traveled by a number
+of vehicles, under various constraints, where each
+customer must be visited exactly once by a vehicle
+(Desrochersetal.1988,1995;SolomonandDesrosiers
+1988). This is one of the representative combinato-
+rial optimization problems and is known to be NP-
+hard. Among variants of VRP, the VRP with capac-
+ity and time-window constraints, called thevehicle
+routing problem with time windows(VRPTW), has been
+widely studied in the last decade (Koskosidis et al.
+1992; Potvin et al. 1996; Savelsbergh 1992; Taillard
+et al. 1997). The capacity constraint signiﬁes that the
+totalloadonaroutecannotexceedthecapacityofthe
+vehicleservingtheroute.Thetime-windowconstraint
+signiﬁes that each vehicle must start the service at
+each customer in the period speciﬁed by the cus-
+tomer. The VRPTW has a wide range of applica-
+tionssuchasbankdeliveries,postaldeliveries,school
+bus routing, and so on, and it has been a sub-
+ject of intensive research focused mainly on heuris-
+206
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 207
+tic and metaheuristic approaches (Bräysy and Gen-
+dreau 2005a, b). Among recent approaches are a
+two-stage hybrid local search by Bent and Van Hen-
+tenryck (2001), a hybrid genetic algorithm by Berger
+et al. (2003), a reactive variable neighborhood search
+by Bräysy (2003), a two-phase hybrid metaheuristic
+algorithm by Homberger and Gehring (2004), a vari-
+ableneighborhooddecentwithconstraint-basedoper-
+ators by Rousseau et al. (2002), and so on. See an
+extensive survey by Bräysy and Gendreau (2005a, b)
+for heuristic and metaheuristic approaches. To the
+best of our knowledge, only a convex time-window
+constraintisallowedforeachcustomerinmostofthe
+previousworkofVRPTW(Potvinetal.1996;Solomon
+1987;Taillardetal.1997).Thecasewithmultipletime
+windows (De Jong et al. 1996) and other variants of
+VRPTW (Solomon and Desrosiers 1988) are also con-
+sidered to be important.
+A constraint is calledhardif it must be satisﬁed
+andsoftif it can be violated. The amount of viola-
+tionofsoftconstraintsisusuallypenalizedandadded
+to the objective function. The VRP with hard (respec-
+tively, soft) time-window constraints is abbreviated
+as VRPHTW (respectively, VRPSTW). For VRPHTW,
+even just ﬁnding a feasible schedule with a given
+number of vehicles is known to be NP-complete,
+because it includes the one-dimensional bin pack-
+ing problem as a special case (Garey and Johnson
+1979). Therefore, searching within the feasible region
+of VRPHTW may be inefﬁcient, especially when the
+constraints are tight. Moreover, in many real-world
+situations constraints of time window and capacity
+can be violated to some extent. Considering these sit-
+uations, we treat these two constraints as soft in this
+paper.
+The main contribution of this paper is to pro-
+pose an efﬁcient algorithm to deal with general time-
+window constraints, which is then incorporated in
+metaheuristic algorithms to develop general problem
+solvers. The time-window constraints we consider in
+this paper are general in the sense that one or more
+time slots can be assigned to each customer. That is,
+thecorrespondingpenaltyfunctioncanbenonconvex
+and discontinuous as long as it is piecewise linear.
+We call the resulting problem thevehicle routing prob-
+lem with general time windows(VRPGTW).Inthiscase,
+after ﬁxing the order of customers for a vehicle to
+visit, we must determine the optimal start times of
+servicesatallcustomerssothatthetotaltimepenalty
+of the vehicle is minimized. We show that this prob-
+lem can be efﬁciently solved by using dynamic pro-
+gramming (DP).
+Letn
+k bethenumberofcustomersassignedtovehi-
+clek, andbSLdeltak be the total number of linear pieces of
+the penalty functions for those customers. The infor-
+mationofeachlinearpieceisusuallyexplicitlygiven,
+and in this case,bSLdelta
+k is considered as the input size
+of the penalty functions of the customers. Moreover,
+bSLdelta
+k=Oblparenorinkbrparenoriholds in many cases, since the number of
+linearpiecesofthepenaltyfunctionforeachcustomer
+is usuallyOblparenori1brparenori. For example, if the penalty for a cus-
+tomeristheweightedsumofearlinessandtardiness,
+then the number of linear pieces of the penalty func-
+tion is at most three. The time complexity of our DP
+isOblparenorin
+kbSLdeltakbrparenoriif the problem for vehiclekis solved from
+scratch. We also show that the optimal time penalty
+of each solution in the neighborhood of the current
+solution can be evaluated inOblparenori∑
+k∈M ′ bSLdeltakbrparenoritime from
+the information of the current solution, whereM ′ is
+the set of indices of vehicles which the neighborhood
+operation involves.
+Specialcasesofconvexpenaltyfunctionswerecon-
+sidered in the literature of VRPSTW and scheduling
+problems, e.g., Davis and Kanet (1993), Garey et al.
+(1988), Koskosidis et al. (1992), Taillard et al. (1997),
+Tamaki et al. (1999a, b). In Taillard et al. (1997), the
+time penalty for each customer is+/infinity2for earliness
+and linear for tardiness, and anOblparenori1brparenoritime algorithm
+toapproximatelycomputetheoptimaltimepenaltyof
+a solution in the neighborhood is proposed. In Davis
+and Kanet (1993), Koskosidis et al. (1992), Tamaki
+et al. (1999a, b) the time penalty is linear for both
+earliness and tardiness, and anOblparenorin
+2
+kbrparenoritime algorithm
+for a given route of vehiclek is proposed in Davis
+andKanet(1993)andKoskosidisetal.(1992),Tamaki
+et al. (1999a, b). If the penalty function for each cus-
+tomer is the absolute deviation from a speciﬁed time,
+this problem becomes theisotonic median regression
+problem, which has been extensively studied. To our
+knowledge,thebesttimecomplexityforthisproblem
+(foravehiclek)isOblparenorin
+klognkbrparenori(AhujaandOrlin2001;
+Garey et al. 1988; Hochbaum and Queyranne 2003).
+Very fast algorithms for general convex functions are
+also known (Ahuja and Orlin 2001; Hochbaum and
+Queyranne 2003).
+The essential part of VRPGTW, i.e., assigning
+customers to vehicles and determining the visit-
+ing order of each vehicle, is solved by local search
+(LS) algorithms. In the literature, three types of
+neighborhoods—called the cross-exchange, 2-opt
+∗,
+and Or-opt neighborhoods—have been widely used
+(Or1976;Potvinetal.1996;ReiterandSherman1965;
+Taillard et al. 1997). We refer to these neighborhoods
+asstandard neighborhoods. In our LS, in addition to
+these standard neighborhoods, we use an advanced
+neighborhood called the cyclic-exchange neighbor-
+hood(Ahujaetal.2000,2002).Thisisdeﬁnedtobethe
+set of solutions obtainable by cyclically exchanging
+two or more paths of length at mostL
+cyclic(a param-
+eter), which stems from the cyclic transfer algorithm
+of Thompson and Psaraftis (1993) and the ejection
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+208 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+chainsofGlover(1996).Becausethesizeofthisneigh-
+borhood grows exponentially with the input size, we
+search an improving solution by using theimprove-
+ment graph, whose concept is proposed, e.g., in Ahuja
+et al. (2000, 2002), and is applicable to a wide range
+ofproblems.Wealsoproposetime-orientedneighbor-
+lists to make the search in the cross-exchange and 2-
+opt
+∗neighborhoods more efﬁcient.
+Among many possible metaheuristics based on LS,
+weusethemultistartlocalsearch(MLS)(Lin1965;Lin
+and Kernighan 1973; Reiter and Sherman 1965), the
+iteratedlocalsearch(ILS)(Johnson1990;Martinetal.
+1991; 1992) and the adaptive multistart local search
+(AMLS) (Boese et al. 1994; Taillard et al. 1997). MLS
+repeatedly applies LS to a number of initial solutions
+that are generated randomly or by greedy methods,
+and the best solution obtained in the entire search
+is output. ILS is a variant of MLS, in which the ini-
+tialsolutionsforLSaregeneratedbyperturbinggood
+solutions obtained in the previous search. AMLS is
+also a variant of MLS, which keeps a setP of good
+solutionsfoundintheprevioussearch,andgenerates
+initial solutions by combining the parts of the solu-
+tions inP.
+We conduct computational experiments on three
+different types of instances: Solomon’s VRPHTW
+benchmark instances (Solomon 1987), artiﬁcially gen-
+erated instances of the parallel machine-scheduling
+problem (PMP) with various types of time windows,
+and real-world instances of a production schedul-
+ing problem with inventory cost. The computational
+resultsexhibitagoodprospectofILSandAMLS.For
+Solomon’s benchmark instances, the solution quality
+of our algorithms is competitive with those of recent
+algorithmsdevelopedforVRPHTW,thoughouralgo-
+rithms require slightly more computational time. It
+should be pointed out that Solomon’s instances have
+only convex penalty functions, while our algorithms
+can handle more general penalty functions. For the
+PMP,wegenerateinstanceswithvarioustypesoftime
+penalty functions (including nonconvex ones), whose
+optimal solutions are known. Our algorithms ﬁnd
+optimalornear-optimalsolutionswithhighprobabil-
+ity. It is also observed that the cyclic-exchange neigh-
+borhood is quite effective in dealing with nonconvex
+time penalty functions. For the production schedul-
+ing problem with inventory cost, we use real-world
+data provided by a company, and observe that the
+proposed algorithms ﬁnd better schedules than those
+currently used in the company.
+1. Problem
+In this section, we formulate the VRPGTW. LetG =
+blparenoriV bcommaori Ebrparenoribe a complete directed graph with a vertex set
+V =blbraceori0bcommaori1bcommaoribperiodoribperiodoribperiodoribcommaorin brbraceoriand an edge setE=blbraceoriblparenoriibcommaori jbrparenori/barSCibcommaori j∈Vbcommaori
+i̸=jbrbraceori, andM =blbraceori1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorim brbraceoribe a set of vehicles. Ver-
+tex 0 is the depot and other vertices are customers.
+The following parameters are associated with each
+customeri∈V, each vehiclek∈M , and each edge
+blparenoriibcommaori jbrparenori∈E:
+• a quantityq
+i blparenori≥0brparenoriof goods to be delivered,
+• a penalty functionpiblparenoritbrparenori blparenori≥0brparenoriof the start timet
+of the service,
+• a service timeui blparenori≥0brparenori,
+• a capacityQ k blparenori≥0brparenori,
+• a distancedij blparenori≥0brparenori, and
+• a travel timetij blparenori≥0brparenori.
+We assumeq0 =0 andu0 =0 for the depot 0. Each
+vehicle can start from the depot after time 0. Each
+penaltyfunctionp
+iblparenoritbrparenoriisnonnegative,piecewiselinear,
+and satisﬁespiblparenoritbrparenori≤limbSLvarepsilon→0minblbraceoripiblparenorit+bSLvarepsilonbrparenoribcommaori piblparenorit−bSLvarepsilonbrparenoribrbraceoriat
+every discontinuous pointt(see Figure 1, for exam-
+ple). This assumption is necessary to ensure the exis-
+tence of an optimal solution. Note thatp
+iblparenoritbrparenorican be
+nonconvex and discontinuous as long as it satisﬁes
+theaboveconditions.Distancesd
+ijandtraveltimestij
+are, in general, asymmetric; i.e.,dij̸=dji andtij̸=tji
+might hold.
+LetbSLsigmak denotetheroutetraveledbyvehiclek,where
+bSLsigmakblparenorihbrparenoridenotes thehth customer inbSLsigmak, and let
+/UPsigma=blparenoribSLsigma1bcommaoribSLsigma2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmam brparenoribperiodori
+Note that each customeri is included in exactly
+onebSLsigmak, and is visited by the vehicle exactly once.
+We denote bynk the number of customers inbSLsigmak
+fork∈M . For convenience, we deﬁnebSLsigmakblparenori0brparenori=0
+andbSLsigmakblparenorink+1brparenori=0 for allk (i.e., each vehiclek∈M
+leaves the depot and returns to the depot). We also
+useasetofdirectededgesblbraceoriblparenoribSLsigma
+kblparenorihbrparenoribcommaori bSLsigmakblparenorih+1brparenoribrparenori∈E/barSCh=
+0bcommaori1bcommaoribperiodoribperiodoribperiodoribcommaorinkbcommaorik∈Mbrbraceorito represent a set of routes/UPsigma.
+Moreover,letsi bethestarttimeoftheserviceatcus-
+tomeriandsa
+k be the arrival time of vehiclek at the
+depot, and let
+s=blparenoris1bcommaoris2bcommaoribperiodoribperiodoribperiodoribcommaorisn bcommaorisa
+1bcommaorisa
+2bcommaoribperiodoribperiodoribperiodoribcommaorisa
+m brparenoribperiodori
+Notethateachvehicleisallowedtowaitatcustomers
+before starting services.
+t
+penalty pi(t)
+Figure 1 An Example of a Penalty Functionpi/lparenorit/rparenori
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 209
+For convenience, we deﬁne 0-1 variablesyikblparenori/UPsigmabrparenori∈
+blbraceori0bcommaori1brbraceorifori∈V andk∈M by
+yikblparenori/UPsigmabrparenori=1⇐⇒
+i=bSLsigmakblparenorihbrparenoriholds for exactly oneh∈blbraceori1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorinkbrbraceoribperiodori
+That is,yikblparenori/UPsigmabrparenori=1 if and only if vehiclek visits cus-
+tomeri. Then the total distancedsumblparenori/UPsigmabrparenoritraveled by
+all vehicles, the total penaltypsumblparenorisbrparenorifor start times
+of services, and the total amountqsumblparenori/UPsigmabrparenoriof capacity
+excess are expressed as
+dsumblparenori/UPsigmabrparenori=
+∑
+k∈M
+nk∑
+h=0
+dbSLsigmakblparenorihbrparenoribcommaoribSLsigmakblparenorih+1brparenori
+psumblparenorisbrparenori=
+∑
+i∈V\blbraceori0brbraceori
+piblparenorisibrparenori+
+∑
+k∈M
+p0blparenorisa
+k brparenori
+qsumblparenori/UPsigmabrparenori=
+∑
+k∈M
+max
+{∑
+i∈V
+qiyikblparenori/UPsigmabrparenori−Q kbcommaori0
+}
+bperiodori
+The VRPGTW is now formulated as follows:
+minimizecostblparenori/UPsigmabcommaorisbrparenori=dsumblparenori/UPsigmabrparenori+psumblparenorisbrparenori
++qsumblparenori/UPsigmabrparenori (1)
+subject to
+∑
+k∈M
+yikblparenori/UPsigmabrparenori=1bcommaorii∈V\blbraceori0brbraceori (2)
+t0bcommaoribSLsigmakblparenori1brparenori≤sbSLsigmakblparenori1brparenoribcommaorik∈M (3)
+sbSLsigmakblparenorihbrparenori+ubSLsigmakblparenorihbrparenori+tbSLsigmakblparenorihbrparenoribcommaoribSLsigmakblparenorih+1brparenori≤sbSLsigmakblparenorih+1brparenoribcommaori
+h=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink−1bcommaorik∈M (4)
+sbSLsigmakblparenorinkbrparenori+ubSLsigmakblparenorinkbrparenori+tbSLsigmakblparenorinkbrparenoribcommaori0≤sa
+k bcommaorik∈Mbperiodori(5)
+Constraint (2) means that every customeri∈V\blbraceori0brbraceori
+mustbeservedonlyoncebyexactlyonevehicle.Con-
+straints (3), (4), and (5) require that the start times
+i
+of the service at customerimust be after the arrival
+time at customeri. The time-window and capacity
+constraints are treated as soft, and their violation is
+evaluated as the penaltiesp
+sumblparenorisbrparenoriandqsumblparenori/UPsigmabrparenoriin the
+objective function.
+As for the objective function (1), the weighted sum
+dsumblparenori/UPsigmabrparenori+bSLalphapsumblparenorisbrparenori+bSLbetaqsumblparenori/UPsigmabrparenoriwith constantsbSLalpha(≥0)
+andbSLbeta(≥0) might seem more natural; however, such
+weights can be treated in the above formulation by
+regardingbSLalphap
+iblparenoritbrparenori,bSLbetaqi, andbSLbetaQk (i∈V,k∈M )a st h e
+given data, and hence the weights are omitted for
+simplicity.
+Wecanalsoconsiderapenaltyfunction˜p
+kblparenoritbrparenoriofthe
+departure timetof vehiclekfrom the depot, though
+in the above formulation we assume that all vehicles
+have the same departure time 0. For this, we intro-
+ducem dummy customersi=n+1bcommaorin+2bcommaoribperiodoribperiodoribperiodoribcommaorin+m
+with penalty functionsp
+iblparenoritbrparenori=˜pi−n blparenoritbrparenorito represent the
+penalty of the departure time of vehiclek from the
+depot.Finally,thedistancesdijandthetraveltimestij
+aredeﬁnedsothateachvehiclekmustvisitcustomer
+n+kﬁrst (i.e., a very large cost is incurred if vehicle
+kvisits other customers ﬁrst).
+The time-window constraint of customeriis often
+regarded as hard and deﬁned by an intervalblbracketoriwr
+ibcommaoriwd
+i brbracketori
+(instead of a penalty functionpiblparenoritbrparenori), within which the
+service ofimust be started. Such an instance can be
+treatedasaspecialcaseofourformulationbysetting
+penalty functions as either
+p
+iblparenoritbrparenori=bSLalpha·maxblbraceoriwr
+i−tbcommaori0bcommaorit−wd
+i brbraceori(6)
+or
+piblparenoritbrparenori=
+
+
+
+0bcommaorit∈blbracketoriwr
+ibcommaoriwd
+i brbracketoribcommaori
+bSLalphabcommaoriotherwisebcommaori
+(7)
+wherebSLalphais a large positive value.
+To avoid confusion, we note throughout the paper
+(unless otherwise stated) that a feasible solution
+denotesasolutionthatsatisﬁesconstraints(2)–(5);i.e.,
+a feasible solution (of our formulation) does not nec-
+essarily satisfy the time-window and capacity con-
+straints. Cases with hard time-window or capacity
+constraints, or both, can be treated by setting the
+penaltiesp
+sumblparenorisbrparenoriandqsumblparenori/UPsigmabrparenorisufﬁciently large. See
+§3.2 for more discussion about this matter.
+Remark. The number of vehiclesm is a given con-
+stant in this paper, although it is sometimes treated
+as a decision variable in the literature. We adopt this
+assumption for the following two reasons. First, in
+many applications, the number of vehiclesm (or the
+numberofmachinesinschedulingproblems)isﬁxed.
+Second, algorithms become simpler ifm is treated as
+aconstantbecauserouteeliminationoperatorsarenot
+necessary. For problems wherem is a decision vari-
+able, we need to try various values ofm to ﬁnd a
+small feasiblem; however, in many practical situa-
+tions,anappropriaterangeofm isknowninadvance.
+2. OptimalStartTimeofServices
+In this section, we consider the problem of determin-
+ing the time to start services of customers in a given
+routebSLsigma
+k so that the total time penalty is minimized.
+How to determinebSLsigmak will be discussed in §3. LetbSLdeltablparenoriibrparenori
+be the number of pieces in the piecewise linear func-
+tionpiblparenoritbrparenori, and let the total number of pieces in the
+penalty functions for all the customers inbSLsigmak (includ-
+ing the depot) bebSLdeltak =∑nk
+h=0 bSLdeltablparenoribSLsigmakblparenorihbrparenoribrparenori. Furthermore, let
+bSLdelta=∑
+k∈M bSLdeltak =∑
+i∈V\blbraceori0brbraceoribSLdeltablparenoriibrparenori+mbSLdeltablparenori0brparenoribe the total number
+of pieces in the penalty functions of all customers
+(including the depot), wherebSLdelta
+blparenori0brparenoriis multiplied bym.
+WeproposeanOblparenorinkbSLdeltakbrparenoritimealgorithmbasedonthe
+DP to solve this problem. (Hochbaum 2002b points
+out that this time complexity can also be achieved by
+using a more general algorithm in Hochbaum 1997,
+2002a; Hochbaum and Naor 1994; however, our DP
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+210 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+algorithm is simpler and is used to achieve a more
+efﬁcient algorithm in §4.1.2.) If the penalty functions
+are convex, this problem can be formulated as a con-
+vex programming problem, which is efﬁciently solv-
+ablebyusingexistingmethods(Bertsekas1995;Chvá-
+tal 1983); even without using efﬁcient algorithms for
+this problem (Ahuja and Orlin 2001; Hochbaum and
+Queyranne2003).Here,itisemphasizedthatthepro-
+posedDPalgorithmisapplicableevenifp
+iblparenoritbrparenoriarenon-
+convex and discontinuous.
+2.1. TheDPAlgorithm
+Wedeﬁnefk
+h blparenoritbrparenoritobetheminimumsumofthepenalty
+valuesforcustomersbSLsigmakblparenori0brparenoribcommaori bSLsigmakblparenori1brparenori bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmakblparenorihbrparenoriunderthe
+condition that all of them are served before timet.
+Throughoutthispaper,wecallthisaforward minimum
+penalty function. For convenience, we also deﬁne
+pk
+hblparenoritbrparenori=pbSLsigmakblparenorihbrparenoriblparenoritbrparenoribcommaori
+bSLtauk
+h =ubSLsigmakblparenorihbrparenori+tbSLsigmakblparenorihbrparenoribcommaoribSLsigmakblparenorih+1brparenoribcommaori
+wherepk
+hblparenoritbrparenoriis the penalty function for thehth cus-
+tomer of vehiclek, andbSLtauk
+h is the sum of the service
+timeatthehthcustomerandthetraveltimefromthe
+hthcustomertothe(h+1)stcustomer.Thenfk
+h blparenoritbrparenorican
+be computed by
+fk
+0 blparenoritbrparenori=
+{
++/infinity2bcommaorit∈blparenori−/infinity2bcommaori0brparenori
+0bcommaorit∈blbracketori0bcommaori+/infinity2brparenori (8)
+fk
+h blparenoritbrparenori=min
+t′≤t
+blparenorifk
+h−1blparenorit′−bSLtauk
+h−1brparenori+pk
+hblparenorit′brparenoribrparenoribcommaori
+1≤h≤nk+1bcommaori−/infinity2<t< +/infinity2bperiodori
+ThentheminimumpenaltyvaluefortheroutebSLsigmak can
+be obtained by
+min
+t
+fk
+nk+1blparenoritbrparenoribperiodori(9)
+The optimal start timesbSLsigmakblparenorihbrparenoriof the service for each
+h=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink and the timesa
+k of vehiclek to return
+to the depot can be computed by
+sa
+k =minargmin
+t
+fk
+nk+1blparenoritbrparenori
+sbSLsigmakblparenorihbrparenori=min argmin
+t≤sbSLsigmakblparenorih+1brparenori−bSLtauk
+h
+fk
+h blparenoritbrparenoribcommaori1≤h≤nkbcommaori(10)
+wheres0 =sa
+k is assumed for convenience. The ﬁrst
+minintheright-handsideof(10)signiﬁestheleftmost
+tif minf
+k
+nk+1blparenoritbrparenori(or minfk
+h blparenoritbrparenori) is achieved by multi-
+plet.
+An example of the computation of recursion (8) is
+shown in Figure 2. This ﬁgure represents the compu-
+tation off
+k
+h blparenoritbrparenorifromfk
+h−1blparenoritbrparenoriandpk
+hblparenoritbrparenori, wherebSLtauk
+h−1=2,
+andfk
+h−1blparenoritbrparenoriandpk
+hblparenoritbrparenoriare respectively deﬁned by
+fk
+h−1blparenoritbrparenori=
+
+
+
+
+
+
+−t+3bcommaorit <1
+2bcommaori1≤t< 4
+−t+6bcommaori4≤t< 5
+1bcommaori5<t
+08 76542311 0 9
+1
+2
+3
+4
+5
+6
+7
+8
+time t
+f k
+h −1( t− τh −1)+ pk
+h ( t)
+y
+pk
+h ( t)
+f k
+h ( t)
+f k
+h −1( t− τh −1)
+f k
+h −1( t)
+Figure 2 AnExampleoftheComputationoffk
+h /lparenorit/rparenorifromfk
+h−1 /lparenorit/rparenoriandpk
+h /lparenorit/rparenori
+and
+pk
+hblparenoritbrparenori=
+
+
+
+
+
+
+−0bperiodori5t+3bcommaorit <4
+t−3bcommaori4≤t< 8
+−4t+37bcommaori8≤t< 9
+t−8bcommaori9<t bperiodori
+2.2. ImplementationandTimeComplexity
+oftheAlgorithm
+Let us consider the data structure for computing
+recursion (8). Because penalty functionp
+k
+hblparenoritbrparenoriis piece-
+wise linear,fk
+h blparenoritbrparenoriis also piecewise linear. Therefore
+we can keep the functions that appear in (8) in
+linkedlists,whosecomponentsstoretheintervalsand
+the associated linear functions (i.e., linear pieces) of
+thepiecewiselinearfunctions.Incomputingf
+k
+h blparenoritbrparenori,the
+intervalsoffk
+h−1blparenoritbrparenoriareﬁrstshiftedbybSLtauk
+h−1totheright
+to obtainfk
+h−1blparenorit−bSLtauk
+h−1brparenori. Then,fk
+h−1blparenorit−bSLtauk
+h−1brparenori+pk
+hblparenoritbrparenoriis
+computed by merging the intervals offk
+h−1blparenorit−bSLtauk
+h−1brparenori
+andpk
+hblparenoritbrparenoriwhileaddingthelinearfunctionsofthecor-
+respondingpieces,andbystoringfk
+h−1blparenorit−bSLtauk
+h−1brparenori+pk
+hblparenoritbrparenori
+inanewlinkedlist.Finally,fk
+h blparenoritbrparenoriisobtainedbytaking
+the minimum offk
+h−1blparenorit′ −bSLtauk
+h−1brparenori+pk
+hblparenorit′brparenoriover allt′ ≤t,
+which can be achieved by scanning the new list from
+the left. Figure 3 shows the linked lists for the ﬁve
+functions in Figure 2.
+The computation off
+k
+h−1blparenorit−bSLtauh−1brparenori+pk
+hblparenoritbrparenoriandfk
+h blparenoritbrparenori
+fromfk
+h−1blparenoritbrparenoriandpk
+hblparenoritbrparenorican be achieved inOblparenoribSLdeltakbrparenoritime,
+since the total number of pieces infk
+h−1blparenoritbrparenoriandpk
+hblparenoritbrparenoriis
+OblparenoribSLdeltakbrparenori. The computation of total time penalty (9) and
+optimalstarttime(10)foreachhcanalsobeachieved
+inOblparenoribSLdeltakbrparenoritime, since both computations only require
+to scan the list offk
+h blparenoritbrparenori. Therefore, determining the
+minimumtimepenaltyforagivenrouteandtheopti-
+malstarttimesofservicesforallthecustomersinthe
+routecanbedoneinOblparenorin
+kbSLdeltakbrparenoritime.(Forevaluatingthe
+optimal time penalty of a solution in the neighbor-
+hood, a more efﬁcient algorithm will be explained in
+§4.1.2.)
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 211
+init [−∞,1] y = −t + 3 [1,4] y = 2 [4,5] y = −t + 6 [5, ∞ ] y =1
+init [−∞,3] y = −t + 5 [3,6] y = 2 [6,7] y = −t + 8 [7, ∞ ] y =1
+init [−∞,4] y = −0.5t + 3 [4,8] y = t − 3 [8,9] y = −4t + 37 [9, ∞ ]y = t − 8
+init [−∞,3] y = −1.5t + 8 [3,4] y = −0.5t + 5 [4,6] y = t − 1
+[6,7] y = 5 [7,8] y = t − 2 [8,9] y = −4t + 38 [9, ∞ ]y = t − 7
+init [−∞,3] y = −1.5t + 8 [3,4] y = −0.5t + 5 [4,8.75] y =3
+[8.75,9]y = −4t + 38 [9, ∞ ] y =2
+f k
+h −1 ( t)
+f k
+h −1 ( t− τh −1 )
+pk
+h ( t)
+f k
+h −1 ( t− τh −1 )
+f k
+h ( t)
++pk
+h ( t)
+Figure 3 The Linked Lists Representing the Four Functions in Figure 2
+3. LocalSearch
+In this section, we describe the framework of our LS.
+The search space of LS is the set of all visiting orders
+/UPsigma=blparenoribSLsigma
+1bcommaoribSLsigma2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmam brparenorisatisfying condition (2). Then, a
+solution/UPsigmais evaluated by
+costblparenori/UPsigmabrparenori=dsumblparenori/UPsigmabrparenori+p∗
+sumblparenori/UPsigmabrparenori+qsumblparenori/UPsigmabrparenoribcommaori(11)
+wherep∗
+sumblparenori/UPsigmabrparenoriistheminimumvalueofpsumblparenorisbrparenoriamong
+thosessatisfying conditions (3)–(5) for the given/UPsigma.
+Such ansis computed by the DP of §2 (a more efﬁ-
+cient method will be explained in §4.1.2). For con-
+venience, letd
+sumblparenoribSLsigmakbrparenoribe the total distance of route
+bSLsigmak,p∗
+sumblparenoribSLsigmakbrparenoribe the optimal time penalty of routebSLsigmak,
+andqsumblparenoribSLsigmakbrparenoribe the total amount of capacity excess
+ofroutebSLsigmak,anddeﬁnecostblparenoribSLsigmakbrparenori=dsumblparenoribSLsigmakbrparenori+p∗
+sumblparenoribSLsigmakbrparenori+
+qsumblparenoribSLsigmakbrparenori. Thencostblparenori/UPsigmabrparenori=∑
+k∈M costblparenoribSLsigmakbrparenoriholds.
+TheneighborhoodNblparenori/UPsigmabrparenoriofafeasiblesolution/UPsigmaisa
+set of solutions obtainable from/UPsigmaby applying some
+speciﬁed operations (to be described later). The LS
+starts from an initial solution/UPsigmaand repeats replac-
+ing/UPsigmawithabettersolution/UPsigma
+′ (i.e.,costblparenori/UPsigma′brparenori<costblparenori/UPsigmabrparenori)
+in its neighborhoodNblparenori/UPsigmabrparenoriuntil no better solution is
+found inNblparenori/UPsigmabrparenori. We will use more than one neighbor-
+hood in our LS.
+In the subsequent sections, we will explain the
+details of LS. In §3.1, we explain the neighborhoods
+used in our algorithm. In §3.2, we explain how we
+deﬁne the incumbent solution. In §3.3, we describe
+the search order in the neighborhoods, and summa-
+rize the framework of LS.
+3.1. Neighborhoods
+Inouralgorithm,weusethestandardneighborhoods
+(i.e., the cross-exchange, 2-opt
+∗, and Or-opt neigh-
+borhoods) with slight modiﬁcations. We also use the
+cyclic-exchange neighborhood, whose basic idea was
+proposedinAhujaetal.(2002)andAhujaetal.(2000).
+3.1.1. Standard Neighborhoods.The cross-ex-
+change neighborhood was proposed in Taillard et al.
+(1997).Across-exchangeoperationremovestwopaths
+from two different routes (one from each), whose
+length (i.e., the number of customers in the path) is
+at mostL
+cross(a parameter), and exchanges them. Let
+Ncrossblparenori/UPsigmabcommaorik bcommaorik′brparenoribethesetofallsolutionsobtainableby
+cross-exchange operations on two routesbSLsigmak andbSLsigmak′
+in the current solution/UPsigma=blparenoribSLsigma1bcommaoribSLsigma2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmam brparenori, and let
+Ncrossblparenori/UPsigmabrparenori=⋃
+k<k ′ N crossblparenori/UPsigmabcommaorik bcommaorik′brparenori. The size of the cross-
+exchangeneighborhoodisOblparenorin2blparenoriLcrossbrparenori2brparenori.
+Figure 4 illustrates a cross-exchange operation.
+In this ﬁgure, squares represent the depot (which
+is duplicated at each end) and circles represent
+customers in the route. A thin line represents a
+route edge and a thick line represents a path
+(i.e., more than two customers may be included).
+First, two edgesblparenoribSLsigma
+kblparenorihk
+1−1brparenoribcommaori bSLsigmakblparenorihk
+1brparenoribrparenoriandblparenoribSLsigmakblparenorihk
+2−1brparenoribcommaori
+bSLsigmakblparenorihk
+2brparenoribrparenoriare removed from routebSLsigmak and two edges
+blparenoribSLsigmak′ blparenorihk′
+1−1brparenoribcommaori bSLsigmak′ blparenorihk′
+1brparenoribrparenoriandblparenoribSLsigmak′ blparenorihk′
+2−1brparenoribcommaori bSLsigmak′ blparenorihk′
+2 brparenoribrparenoriarealso
+removed from routebSLsigmak′. Then, four new edges
+blparenoribSLsigmakblparenorihk
+1−1brparenori,bSLsigmak′ blparenorihk′
+1brparenoribrparenori,blparenoribSLsigmak′ blparenorihk′
+2−1brparenoribcommaori bSLsigmakblparenorihk
+2brparenoribrparenori,blparenoribSLsigmak′ blparenorihk′
+1−1brparenoribcommaori
+bSLsigmakblparenorihk
+1brparenoribrparenori, andblparenoribSLsigmakblparenorihk
+2−1brparenoribcommaori bSLsigmak′ blparenorihk′
+2 brparenoribrparenoriare added to ex-
+change two pathsbSLsigmakblparenorihk
+1brparenori→bSLsigmakblparenorihk
+2−1brparenoriandbSLsigmak′ blparenorihk′
+1brparenori→
+bSLsigmak′ blparenorihk′
+2−1brparenori.
+The 2-opt∗neighborhood was proposed in Potvin
+et al. (1996), which is a variant of the 2-opt neigh-
+borhood (Lin 1965) for the traveling salesman prob-
+lem (TSP, a special case of VRP in which the number
+of vehicles is one). A 2-opt
+∗operation removes two
+edges from two different routes (one from each) to
+divide each route into two parts and exchanges the
+second parts of the two routes (see Figure 5). Let
+N
+2opt∗
+blparenori/UPsigmabcommaorik bcommaorik′brparenoribethesetofallsolutionsobtainableby
+2-opt∗operationsontworoutesbSLsigmak andbSLsigmak′ ofthecur-
+rent solution/UPsigma=blparenoribSLsigma1bcommaoribSLsigma2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmam brparenori, and letN 2opt∗
+blparenori/UPsigmabrparenori=⋃
+k<k ′ N 2opt∗
+blparenori/UPsigmabcommaorik bcommaorik′brparenori. The size of the 2-opt∗neighbor-
+hood isOblparenorin2brparenori.
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+212 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+σk ( hk
+1 − 1)
+σk ( hk
+1 )
+σk ( hk
+2 )
+σk ( hk
+2 − 1)
+σk ′ ( hk ′
+1 − 1)
+σk ′ ( hk ′
+1 )
+σk ′ ( hk ′
+2 )
+σk ′ ( hk ′
+2 − 1)
+σk σk ′σk σk ′
+σk ( hk
+1 − 1)
+σk ( hk
+1 )
+σk ( hk
+2 )
+σk ( hk
+2 − 1)
+σk ′ ( hk ′
+1 − 1)
+σk ′ ( hk ′
+1 )
+σk ′ ( hk ′
+2 )
+σk ′ ( hk ′
+2 − 1)
+Figure 4A Cross-Exchange Operation
+Note thatN2opt∗
+blparenori/UPsigmabrparenori⊆N crossblparenori/UPsigmabrparenoriholds ifLcross=n,
+since the cross-exchange operation generates solu-
+tions inN
+2opt∗
+blparenori/UPsigmabrparenoriwhen the last customers of the two
+paths to be exchanged (bSLsigmakblparenorihk
+2−1brparenoriandbSLsigmak′ blparenorihk′
+2 −1brparenoriin
+Figure 4) are the last customers of the routes. How-
+ever, parameterL
+crossis usually set small to keep
+/barSCNcrossblparenori/UPsigmabrparenori/barSCsmall and there are many solutions in
+N 2opt∗
+blparenori/UPsigmabrparenori\N crossblparenori/UPsigmabrparenori. Hence searching inN 2opt∗
+blparenori/UPsigmabrparenorisep-
+arately fromNcrossblparenori/UPsigmabrparenoriis meaningful.
+The cross-exchange and 2-opt∗operations always
+changetheassignmentofcustomerstotheroutes.We
+thereforeusetheintrarouteneighborhoodtoimprove
+asolutionwithinaroute,whichisavariantofOr-opt
+neighborhood used in TSP (Or 1976; Reiter and Sher-
+man1965).Anintrarouteoperationremovesapathof
+length at mostL
+intra
+path(a parameter) and inserts it into
+another position of the same route, where the posi-
+tionislimitedwithindistanceL
+intra
+ins(aparameter)from
+the original position. This is illustrated in Figure 6.
+If the removed path isbSLsigma
+kblparenorih1brparenori→bSLsigmakblparenorih1+l−1brparenori(1≤
+l≤Lintra
+path), it is inserted either betweenbSLsigmakblparenorih1−l′−1brparenori
+andbSLsigmakblparenorih1−l′brparenori, or betweenbSLsigmakblparenorih1+l+l′−1brparenoriand
+bSLsigmakblparenorih1+l+l′brparenori, for 1≤l′ ≤Lintra
+ins. If the removed path is
+inserted betweenbSLsigmakblparenorih1+l+l′−1brparenoriandbSLsigmakblparenorih1+l+l′brparenori
+(respectively, betweenbSLsigmakblparenorih1−l′ −1brparenoriandbSLsigmakblparenorih1−l′brparenori),
+it is called a forward (respectively, backward) inser-
+tion.InFigure6,weshowaforwardinsertion,where
+it is denotedh
+2=h1+l+l′ −1 for simplicity. For
+each insertion, we consider two cases: with its vis-
+iting order preserved (denoted a normal insertion),
+σk ( hk
+1 − 1)
+σk ( hk
+1 )
+σk ′ ( hk ′
+1 − 1)
+σk ′ ( hk ′
+1 )
+σk σk ′σk σk ′
+σk ( hk
+1 − 1)
+σk ( hk
+1 )
+σk ′ ( hk ′
+1 − 1)
+σk ′ ( hk ′
+1 )
+Figure 5 A 2-Opt∗Operation
+andwithitsvisitingorderreversed(denotedareverse
+insertion). Note that, even if we only considerl′ ≥
+1, the operation of just inverting the order of the
+removed path with its position unchanged is an
+intrarouteoperationusingaforwardreverseinsertion
+withl
+′ =1(i.e.,thecasewithh2=h1+linFigure6(b)),
+where the pathbSLsigmakblparenorih1brparenori→bSLsigmakblparenorih1+lbrparenoriis regarded as the
+removed path.
+LetN intrablparenori/UPsigmabcommaorik brparenoribethesetofallsolutionsobtainable
+by intraroute operations on routebSLsigmak of the current
+solution/UPsigma=blparenoribSLsigma1bcommaoribSLsigma2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmam brparenori, and letN intrablparenori/UPsigmabrparenori=⋃
+k∈M N intrablparenori/UPsigmabcommaorik brparenori. The size of the intraroute neighbor-
+hood isOblparenorin Lintra
+pathLintra
+insbrparenori.
+3.1.2. The Cyclic-Exchange Neighborhood.In
+this section, we deﬁne the cyclic-exchange neighbor-
+hood. LetbSLpsi
+ildenote the path in a solution/UPsigma, whose
+initial customer isiand whose length isl. That is,
+bSLpsiildenotes the sequence oflconsecutive customers
+i=bSLsigmakblparenorihbrparenoribcommaori bSLsigmakblparenorih+1brparenori bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmakblparenorih+l−1brparenori. Letkblbracketoriibrbracketoridenote
+the vehicle that visits customeri. For a sequence of
+pathsbSLpsii1l1bcommaoribSLpsii2l2bcommaoribperiodoribperiodoribperiodoribcommaoribSLpsiirlr satisfyingkblbracketoriijbrbracketori̸=kblbracketoriij′ brbracketorifor all
+j̸=j′, the cyclic-exchange operation is deﬁned as fol-
+lows:Foreachj=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorir,bSLpsiij−1bcommaorilj−1 isremovedfrom
+routebSLsigmakblbracketoriij−1brbracketoriand inserted into routebSLsigmakblbracketoriijbrbracketoribetween the
+two customers to whichbSLpsiijlj was connected (i0 =ir
+andl0 =lr are assumed for convenience). Note that
+there are two directions in inserting a path: with
+its visiting order unchanged (denoted normal inser-
+tion) and with its visiting order reversed (denoted
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 213
+σk
+σk ( h1 − 1)
+σk ( h1 )
+σk ( h1 + l)
+σk ( h1 + l− 1)
+σk ( h2 )
+σk ( h2 +1 )
+σk ( h1 )
+σk ( h1 + l− 1)
+σk
+(a) normal insertion
+σk
+(b) reverse insertion
+σk ( h2 )
+σk ( h2 +1 )
+σk ( h1 − 1)
+σk ( h1 + l)
+σk ( h1 )
+σk ( h1 + l− 1)
+σk ( h2 )
+σk ( h2 +1 )
+σk ( h1 − 1)
+σk ( h1 + l)
+Figure 6 An Intraroute Operation: (a) Normal and (b) Reverse Insertions
+reverse insertion). As a result, there are 2r possible
+cyclic exchange operations on a sequence of paths
+bSLpsi
+i1l1bcommaoribSLpsii2l2bcommaoribperiodoribperiodoribperiodoribcommaoribSLpsiirlr. Figure 7 represents an example of
+such cyclic-exchange operations. In this ﬁgure, route
+bSLsigma
+kblbracketorii1brbracketoriis duplicated at the right end for simplicity.
+As a special case of the cyclic exchange, we also
+consider the acyclic-exchange operation. LetbSLpsii0 blparenorii=
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorin brparenoriandbSLpsik
+00 blparenorik=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorim brparenoridenote empty
+paths (i.e., paths of length 0 starting from customer
+iand the depot, respectively) in a solution/UPsigma.A n
+emptypathmeansthatnocustomerisremovedfrom
+the route. LetbSLpsi
+i′ l′ be the path to be inserted into
+the route from whichbSLpsii0 orbSLpsik
+00 is removed. Then
+bSLpsii0 signiﬁes thatbSLpsii′ l′ is inserted between customer
+iand its predecessor, whilebSLpsik
+00 signiﬁes thatbSLpsii′ l′ is
+insertedbetweencustomerbSLsigmakblparenorinkbrparenoriandthedepot.Then
+the cyclic-exchange operation on a sequence of paths
+bSLpsi
+i1l1bcommaoribSLpsii2l2bcommaoribperiodoribperiodoribperiodoribcommaoribSLpsiirlr iscalledtheacyclic-exchangeoper-
+σk [i1 ] σk [i2 ] σk [i3 ] σk [i1 ]
+l1 ψ i1 l1 ψ i2 l2 l3 ψ i3 l3 ψ i1 l1
+i1
+i2 i3
+i1
+Figure 7 A Cyclic-Exchange Operation on Three Routes
+Note. The ﬁrst and last routes represent the same route.
+ation, if an empty path is removed from routekblbracketoriirbrbracketori.
+Figure 8 shows an acyclic-exchange operation.
+The cyclic-exchange neighborhoodN cyclicblparenori/UPsigmabrparenoriis
+deﬁned to be the set of solutions obtainable by
+applying cyclic-exchange operations (including
+acyclic-exchange operations) on every possible com-
+bination of pathsbSLpsi
+il satisfying the following three
+conditions:
+(1) all paths belong to different vehicles,
+(2) the length of each path is at mostL
+cyclic(a pa-
+rameter), and
+(3) the number of participating paths is at most
+bSLnucyclic(a parameter).
+IfLcyclic≥LcrossandbSLnucyclic≥2, thenN crossblparenori/UPsigmabrparenori⊆
+N cyclicblparenori/UPsigmabrparenoriholds.
+The size ofN cyclicblparenori/UPsigmabrparenoriis usually very large and
+grows exponentially withbSLnucyclic. Therefore, enumer-
+ating all solutions inN cyclicblparenori/UPsigmabrparenoriis computationally
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+214 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+(a) An acyclic exchange onψ i1 l1 ,ψ i2 l2 and ψ i3 0 (b) An acyclic exchange onψ i1 l1 ,ψ i2 l2 and ψ k
+00
+σk [i1 ] σk [i2 ] σk [i3 ]
+ψ i1 l1 ψ i2 l2
+ψ i3 0
+σk [i1 ] σk [i2 ] σk
+ψ i1 l1 ψ i2 l2
+ψ k
+00
+i1 i2
+i3
+i1 i2
+Figure 8 An Acyclic-Exchange Operation on Three Routes
+infeasible. However, the concept of the improvement
+graph(Ahujaetal.2002;Ahujaetal.2000)canbeuti-
+lized to implicitly search the neighborhood. We will
+describe the improvement graph and how we search
+an improved solution in §4.2.
+3.2. TheIncumbentSolution
+Theincumbent solutionin our algorithm is deﬁned as
+follows: In our formulation of VRPGTW, the capacity
+andtime-windowconstraintsaretreatedassoft.That
+is, they are not included in the constraints (2)–(5) of
+VRPGTW. Therefore, a locally optimal solution out-
+put by LS may not satisfy the two constraints (i.e.,
+it may not be feasible to VRPHTW even though it
+is always feasible to VRPGTW). This situation may
+happen, on the one hand, even if we setbSLalphain (6)
+or (7) very large, or multiply the values ofq
+i and
+Q k by a very large number, to makep∗
+sumblparenori/UPsigmabrparenoriand
+qsumblparenori/UPsigmabrparenorirelatively large. On the other hand, the solu-
+tions found during the search of LS often satisfy the
+two constraints even ifp
+∗
+sumblparenori/UPsigmabrparenoriandqsumblparenori/UPsigmabrparenoriare not
+set very large. Some applications prefer such solu-
+tions that satisfy the two constraints (i.e., VRPHTW).
+Thus, in addition to the original functioncostblparenori/UPsigmabrparenoriof
+(11),weallowthealgorithmtohaveanothercriterion,
+bestevalblparenori/UPsigmabrparenori, and to keep as the incumbent the feasible
+solutiontoVRPGTW(i.e.,constraints(2)–(5)aresatis-
+ﬁed), which has the smallestbestevalblparenori/UPsigmabrparenoriamong those
+foundduringthesearchbythen.Forexample,besteval
+may becostblparenori/UPsigmabrparenorior
+bestevalblparenori/UPsigmabrparenori=
+{
+d
+sumblparenori/UPsigmabrparenoribcommaoriifp∗
+sumblparenori/UPsigmabrparenori+qsumblparenori/UPsigmabrparenori=0
+costblparenori/UPsigmabrparenori+bSLbetabcommaoriotherwise,
+wherebSLbetais an appropriate constant that satisﬁesbSLbeta>
+dsumblparenori/UPsigmabrparenorifor all/UPsigma. Here we emphasize thatbesteval
+does not affect the search process of our algorithm,
+i.e., the search is conducted entirely on the basis of
+cost.
+3.3. TheWholeFrameworkoftheLocalSearch
+The LS in our algorithm searches the neighborhoods
+in the order described as follows. We ﬁrst search the
+three neighborhoods,
+(1) the intraroute neighborhood,
+(2) the 2-opt
+∗neighborhood, and
+(3) the cross-exchange neighborhood,
+inthisorder.Thesearchofeachneighborhoodisexe-
+cuteduntilnoimprovementisfoundintheneighbor-
+hood. Then, after the cross-exchange neighborhood,
+the LS returns to the intraroute neighborhood. This
+procedurecontinuesuntilnoimprovementisfoundin
+threeconsecutiveneighborhoods.Thecyclic-exchange
+neighborhood is searched after this procedure. If an
+improved solution is found in the cyclic-exchange
+neighborhood, the procedure immediately returns
+to the intraroute neighborhood; otherwise the local
+searchoutputsthelocallyoptimalsolutionandstops.
+Our local search, LS(/UPsigma
+0), which starts from an ini-
+tial solution/UPsigma0, is summarized as follows: (Note that
+we also keep the solution that minimizesbestevalblparenori/UPsigmabrparenori
+of §3.2 among those solutions generated during the
+search process, though it is not explicitly described
+due to space limitations.)
+Algorithm LS(/UPsigma
+0).
+Step1bperiodoriLet/UPsigmabcolonori=/UPsigma0.
+Step2. Execute the following neighborhood search
+cyclically until no improvement is achieved in three
+consecutive neighborhoods.
+2a. (intraroute neighborhood). If there is a feasi-
+ble solution/UPsigma
+′ ∈N intrablparenori/UPsigmabrparenorisuch thatcostblparenori/UPsigma′brparenori<costblparenori/UPsigmabrparenori,
+let/UPsigmabcolonori=/UPsigma′, and return to Step 2a. Otherwise go to
+Step 2b.
+2b. (2-opt∗neighborhood). If there is a feasible
+solution/UPsigma′ ∈N 2opt∗
+blparenori/UPsigmabrparenorisuch thatcostblparenori/UPsigma′brparenori<costblparenori/UPsigmabrparenori,
+let/UPsigmabcolonori=/UPsigma′, and return to Step 2b. Otherwise go to
+Step 2c.
+2c. (cross-exchange neighborhood). If there is a
+feasible solution/UPsigma′ ∈N crossblparenori/UPsigmabrparenorisuch thatcostblparenori/UPsigma′brparenori<
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 215
+costblparenori/UPsigmabrparenori, let/UPsigmabcolonori=/UPsigma′, and return to Step 2c. Otherwise
+return to Step 2a.
+Step3bperiodori(cyclic-exchange neighborhood). If there is
+a feasible solution/UPsigma′ ∈N cyclicblparenori/UPsigmabrparenorisuch thatcostblparenori/UPsigma′brparenori<
+costblparenori/UPsigmabrparenori, let/UPsigmabcolonori=/UPsigma′ and return to Step 2. Otherwise
+output the current solution/UPsigmaand halt.
+4. EfﬁcientImplementationofLS
+In this section, we explain various ideas useful to
+search the neighborhood efﬁciently. In §4.1, we pro-
+poseideastospeeduptheevaluationoftheobjective
+values of solutions in the standard neighborhoods.
+In §4.2, we explain the improvement graph and an
+algorithm to search in the cyclic-exchange neighbor-
+hood.In§4.3,weproposetime-orientedneighborlists
+to prune the search in the cross-exchange and 2-opt
+∗
+neighborhoods.Finally,in§4.4,weproposetwomore
+ideas to speed up the LS procedure.
+4.1. EvaluationofSolutionsintheStandard
+Neighborhoods
+LetbUPXeltad
+sum, bUPXeltapsum, andbUPXeltaqsumbe the differences in
+the distancedsumblparenori/UPsigmabrparenori, the time penaltyp∗
+sumblparenori/UPsigmabrparenori, and
+the amountqsumblparenori/UPsigmabrparenoriof capacity excess, respectively,
+between the current solution and a solution in the
+neighborhood. Then let
+bUPXeltacost=bUPXeltad
+sum+bUPXeltapsum+bUPXeltaqsumbcommaori
+which is negative if the new solution is better than
+the current solution. For a neighborhoodN , letone-
+round time forN bethetimeeithertoﬁndanimproved
+solution inN and update the data stored to evaluate
+solutions, or to conclude that there is no improved
+solution inN . We also deﬁneone-round time forN
+with respect tod
+sumtobethetimerequiredtoevaluate
+bUPXeltadsumduring the whole one-round time. One-round
+time forN with respect topsumand that with respect
+toqsumare similarly deﬁned. In the subsequent sec-
+tions, we explain separately how we evaluatebUPXeltadsum,
+bUPXeltapsum,andbUPXeltaqsumduringthesearchofcross-exchange,
+2-opt∗and intraroute neighborhoods.
+4.1.1. EvaluationofbUPXeltadsum.WecancomputebUPXeltadsum
+by the difference between the sum of distances of the
+inserted edges and that of the removed edges. For
+a solution in the cross-exchange or 2-opt
+∗neighbor-
+hood,bUPXeltadsumcan be computed inOblparenori1brparenoritime, since the
+number of removed edges and inserted edges is con-
+stant.Therefore,one-roundtimesforN
+crossandN 2opt∗
+with respect todsumareOblparenori/barSCN cross/barSCbrparenoriandOblparenori/barSCN 2opt∗
+/barSCbrparenori,
+respectively.
+For the intraroute neighborhood, the evaluation of
+bUPXeltadsumrequiresOblparenoriLintra
+pathbrparenoritime if we evaluate a solution
+inNintrablparenori/UPsigmabrparenorifrom scratch, since we need to compute
+the sum of the distances of all edges in the removed
+path when it is inserted reversely. However, we shall
+explain below that this computational time can be
+reduced toOblparenori1brparenoriand, consequently, one-round time
+forN
+intrawith respect todsumcan be reduced from
+Oblparenori/barSCN intra/barSC·Lintra
+pathbrparenoritoOblparenori/barSCN intra/barSCbrparenori,ifweevaluatethesolu-
+tions inNintrain a speciﬁed order and use the infor-
+mation from the previous search.
+As explained in §3.1.1, intraroute operation is cat-
+egorized into the following four groups by the types
+of insertion: (1) normal forward insertion, (2) reverse
+forwardinsertion,(3)normalbackwardinsertion,and
+(4) reverse backward insertion. BecausebUPXeltad
+sumis eas-
+ily computed inOblparenori1brparenoritime for normal insertions, and
+operations (2) and (4) are similar, we will only treat
+the case of (2). See Figure 6(b) for a help to under-
+stand the following discussion.
+The computation of reverse forward insertions on
+routebSLsigma
+k is done as shown in Figure 9. The three
+nested loops in Figure 9 generate all possible reverse
+forward insertions. The new routesbSLsigma
+new
+k tested in
+this loop are/langleSCthe depot→bSLsigmakblparenorih1−1brparenoribcommaori bSLsigmakblparenorih1+lbrparenori→
+bSLsigmakblparenorih2brparenoribcommaori bSLsigmakblparenorih1+l−1brparenori→bSLsigmakblparenorih1brparenoribcommaori bSLsigmakblparenorih2+1brparenori→the depot/rangleSC.
+ToevaluatebUPXeltadsuminOblparenori1brparenoritimeforeachbSLsigmanew
+k ,westore
+two valuesdist−anddist+in the nested loops. For
+simplicity, letdk
+hh′ denote the distance from thehth
+customertotheh′thcustomerinroutebSLsigmak.Ifl=1,we
+initializedist−anddist+bydist−bcolonori=0 anddist+bcolonori=0;
+otherwise (i.e.,l> 1) we update them by
+dist−bcolonori=dist−+dk
+h1+l−2bcommaorih1+l−1bcommaori
+dist+bcolonori=dist++dk
+h1+l−1bcommaorih1+l−2bperiodori
+Theaboveinitializationandupdateofdist−anddist+
+canbeexecutedinOblparenori1brparenoritime.Then,bUPXeltadsumofbSLsigmanew
+k can
+be computed inOblparenori1brparenoritime by
+bUPXeltadsum=blparenoridist++dk
+h1−1bcommaorih1+l+dk
+h2bcommaorih1+l−1+dk
+h1bcommaorih2+1brparenori
+−blparenoridist−+dk
+h1−1bcommaorih1
++dk
+h1+l−1bcommaorih1+l+dk
+h2bcommaorih2+1brparenoribperiodori
+Space complexity for this computation isOblparenori1brparenori.
+for h1 =1 ,2,...,nk − 1 do
+for h2 = h1 +1 ,h1 +2 ,...,min{h1 + L intra
+ins ,nk } do
+for l=1 ,2,...,min{L intra
+path ,h2 − h1} do
+evaluate ∆cost of the new solutionσ new
+k obtained
+by removing a pathσk( h1) → σk( h1 + l− 1) and
+reinserting it betweenσk( h2) and σk( h2 + 1) with
+its visiting order reversed
+end for
+end for
+end for.
+Figure 9 Search Order in the Intraroute Neighborhood with Respect to
+the Reverse Forward Insertion
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+216 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+4.1.2. Evaluation ofbUPXeltapsum.IfbUPXeltapsumis computed
+by obtainingp∗
+sumof the new routes by (8) from
+scratch, it takesOblparenori∑
+k∈M ′ nkbSLdeltakbrparenoritime, whereM ′ is the
+set of indices of the routes related to the neighbor-
+hoodoperation(/barSCM
+′/barSC≤2holdsforstandardneighbor-
+hoods). Instead of this, we propose anOblparenori∑
+k∈M ′ bSLdeltakbrparenori=
+OblparenoribSLdeltabrparenoritime algorithm that computesbUPXeltapsum. We also
+propose a simple idea to further reduce the compu-
+tational time, though the worst-case time complexity
+does not change.
+Let us consider the computation of the minimum
+time penalty on a routebSLsigma
+k. Deﬁnebk
+h blparenoritbrparenorito be the
+minimum sum of the penalty values for customers
+bSLsigma
+kblparenorihbrparenoribcommaori bSLsigmakblparenorih+1brparenori bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmakblparenorinkbrparenoribcommaori bSLsigmakblparenorink +1brparenori, provided that
+all of them are served after timet. We call this the
+backward minimum penalty function. Then,bk
+h blparenoritbrparenorican be
+computed as follows in a symmetric manner to the
+computation off
+k
+h blparenoritbrparenori,
+bk
+nk+1blparenoritbrparenori=min
+t′≥t
+p0blparenorit′brparenori
+bk
+h blparenoritbrparenori=min
+t′≥t
+blparenoribk
+h+1blparenorit′+bSLtauk
+h brparenori+pk
+hblparenorit′brparenoribrparenoribcommaori1≤h≤nkbperiodori
+(12)
+Then,
+p∗
+sumblparenoribSLsigmakbrparenori=min
+t
+blparenorifk
+h blparenoritbrparenori+bk
+h+1blparenorit+bSLtauk
+h brparenoribrparenori(13)
+holdsforanyhblparenori1≤h≤nkbrparenori.Thatis,iffk
+h blparenoritbrparenoriandbk
+h+1blparenoritbrparenori
+areknownforsomeh,theminimumpenaltyp∗
+sumblparenoribSLsigmakbrparenori
+can be computed by (13). This is possible inOblparenoribSLdeltakbrparenori
+time, becausefk
+h blparenoritbrparenoriandbk
+h+1blparenoritbrparenoriconsist ofOblparenoribSLdeltakbrparenorilinear
+pieces as explained in §2.2 (for the case offk
+h blparenoritbrparenori).
+To use this idea, we keepfk
+h blparenoritbrparenoriandbk
+h blparenoritbrparenoriin mem-
+ory for allh=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink andk∈M . In the case of
+neighborhoodN2opt∗
+, the computation of (13) can be
+directly carried out by using the forward and back-
+ward minimum penalty functions stored in memory.
+In the case ofN
+crossandN intra, however, the solutions
+must be treated in a speciﬁed order. We will describe
+thealgorithmonlyforN
+intra,sincethecaseofN crossis
+simpler.
+As in §4.1.1, we only consider the reverse forward
+insertions on a routebSLsigmak, because other cases are sim-
+ilar. Recall that solutions are searched in the order as
+used in Figure 9. Letf
+h1bcommaorih2bcommaorilblparenoritbrparenoribe the forward mini-
+mum penalty function for the subroute/langleSCthe depot→
+bSLsigmakblparenorih1−1brparenoribcommaori bSLsigmakblparenorih1+lbrparenori→bSLsigmakblparenorih2brparenori/rangleSC, andbh1bcommaorih2bcommaorilblparenoritbrparenoribe the
+backwardminimumpenaltyfunctionforthesubroute
+/langleSCbSLsigma
+kblparenorih1+l−1brparenori→bSLsigmakblparenorih1brparenoribcommaori bSLsigmakblparenorih2+1brparenori→the depot/rangleSC(see
+Figure 6(b)). Then we evaluate the total time penalty
+of the new routebSLsigma
+new
+k =/langleSCthe depot→bSLsigmakblparenorih1−1brparenoribcommaori
+bSLsigmakblparenorih1+lbrparenori→bSLsigmakblparenorih2brparenoribcommaori bSLsigmakblparenorih1+l−1brparenori→bSLsigmakblparenorih1brparenoribcommaori bSLsigmakblparenorih2+1brparenori
+→the depot/rangleSCby
+min
+t
+blparenorifh1bcommaorih2bcommaorilblparenoritbrparenori+bh1bcommaorih2bcommaorilblparenorit+ubSLsigmakblparenorih2brparenori+tbSLsigmakblparenorih2brparenoribcommaoribSLsigmakblparenorih1+l−1brparenoribrparenoribrparenoribperiodori
+Asstatedabove,thiscomputationispossibleinOblparenoribSLdeltakbrparenori
+time, iffh1bcommaorih2bcommaorilblparenoritbrparenoriandbh1bcommaorih2bcommaorilblparenoritbrparenoriare known.
+Now we describe how we compute functions
+fh1bcommaorih2bcommaorilblparenoritbrparenoriandbh1bcommaorih2bcommaorilblparenoritbrparenori.Functionfh1bcommaorih2bcommaorilblparenoritbrparenoriiscomputed
+by (8) fromfk
+h1−1blparenoritbrparenoriifh2=h1+l, and fromfh1bcommaorih2−1bcommaorilblparenoritbrparenori
+ifh2 >h 1+l. Functionbh1bcommaorih2bcommaorilblparenoritbrparenoriis computed by (12)
+frombk
+h2+1blparenoritbrparenoriifl=1, and frombh1bcommaorih2bcommaoril−1blparenoritbrparenoriifl> 1.
+These functionsfk
+h1−1blparenoritbrparenoriandbk
+h2+1blparenoritbrparenoriare stored in
+memory, as already mentioned. Because we generate
+solutions inN
+intrain the order of Figure 9, functions
+fh1bcommaorih2−1bcommaorilblparenoritbrparenoriandbh1bcommaorih2bcommaoril−1blparenoritbrparenoriare already available when
+theyareneededforcomputingfh1bcommaorih2bcommaorilblparenoritbrparenoriandbh1bcommaorih2bcommaorilblparenoritbrparenori,
+respectively. From these arguments, we can conclude
+thatf
+h1bcommaorih2bcommaorilblparenoritbrparenoriandbh1bcommaorih2bcommaorilblparenoritbrparenoriarecomputedinOblparenoribSLdeltakbrparenoritime
+(i.e., the time to execute (8) and (12)).
+Finally, we consider the space complexity of the
+above computation. We needOblparenorinkbSLdeltakbrparenorispace to store
+functionsfk
+h blparenoritbrparenoriandbk
+h blparenoritbrparenoriforallcustomersinroutebSLsigmak.
+Tocomputebh1bcommaorih2bcommaorilblparenoritbrparenori,weonlyneedtokeepbh1bcommaorih2bcommaoril−1blparenoritbrparenori
+in memory, which requiresOblparenoribSLdeltakbrparenorispace. To compute
+fh1bcommaorih2bcommaorilblparenoritbrparenori, we need to keepfh1bcommaorih2−1bcommaorilblparenoritbrparenoriforl=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori
+minblbraceoriLintra
+pathbcommaorinkbrbraceori, which requiresOblparenoriminblbraceoriLintra
+pathbcommaorinkbrbraceori·bSLdeltakbrparenori
+space. Therefore, the memory space required to
+store the necessary functions during the search of
+N
+intrablparenori/UPsigmabcommaorik brparenoriisOblparenorinkbSLdeltakbrparenori.
+In conclusion,bUPXeltapsumof a solution inN cross,N2opt∗
+,
+orNintracan be evaluated inOblparenori∑
+k∈M ′ bSLdeltakbrparenori=OblparenoribSLdeltabrparenori
+time provided that functionsfk
+h blparenoritbrparenoriandbk
+h blparenoritbrparenoriforh=
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink andk∈M are available, whereM ′ ⊆
+M (/barSCM ′/barSC≤2) is the set of indices of the relevant
+routes. The space complexity required for this com-
+putation isOblparenori∑
+k∈M nkbSLdeltakbrparenori=OblparenorinbSLdeltabrparenori. At the beginning
+of LS, we need to compute functionsfk
+h blparenoritbrparenoriandbk
+h blparenoritbrparenori
+for allh =1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink andk∈M , which is pos-
+sible inOblparenori∑
+k∈M nkbSLdeltakbrparenori=OblparenorinbSLdeltabrparenoritime. We also need
+to recompute functionsfk
+h blparenoritbrparenoriandbk
+h blparenoritbrparenorifor allh=
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink andk∈M ′,wheneverthecurrentsolution
+is updated (i.e., the current round is over). This com-
+putationtakesOblparenori∑
+k∈M ′ nkbSLdeltakbrparenori=OblparenorinbSLdeltabrparenoritime.As/barSCN cross/barSC,
+/barSCN2opt∗
+/barSC, and/barSCN intra/barSCare larger thann, the one-round
+times forN cross,N 2opt∗
+, andN intrawith respect topsum
+areOblparenori/barSCN cross/barSCbSLdeltabrparenori,Oblparenori/barSCN 2opt∗
+/barSCbSLdeltabrparenori, andOblparenori/barSCN intra/barSCbSLdeltabrparenori, respec-
+tively, and the space complexity isOblparenorinbSLdeltabrparenorifor such
+neighborhoods.
+We can further reduce the number of pieces in
+forward and backward minimum penalty functions.
+Becausef
+k
+h blparenoritbrparenori(respectively,bk
+h blparenoritbrparenori) is nonincreasing
+(respectively, nondecreasing), there are usually many
+pieces with considerably large value inf
+k
+h blparenoritbrparenori(respec-
+tively, inbk
+h blparenoritbrparenori) for small (respectively, large)t. Such
+pieces will not be used in evaluating improved solu-
+tions. Therefore, we set a value INF and delete those
+pieces whose values over their intervals are not less
+than INF. We then add one piece whose interval is
+the union of the deleted intervals and function value
+is always INF. Even after this modiﬁcation, we can
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 217
+compute the exact optimal time penaltyp∗
+sumblparenoribSLsigmakbrparenoriif
+p∗
+sumblparenoribSLsigmakbrparenori<INF holds; otherwise we can conclude that
+p∗
+sumblparenoribSLsigmakbrparenori≥INF holds. In our algorithm, INF is set
+to a sufﬁciently large value at the beginning of the
+local search. Then, whenever the current solution is
+improvedduringsearch,wesetINFbcolonori=costblparenori/UPsigmabrparenoriforthe
+current solution/UPsigma, which ensures that the algorithm
+never misses improved solutions. Though the worst-
+case time complexity is not improved by this mod-
+iﬁcation, actual computation usually becomes much
+faster.
+4.1.3. Evaluation ofbUPXeltaq
+sum.Let us consider the
+total amount of goods∑nk
+h=1qbSLsigmakblparenorihbrparenorito be delivered in a
+routebSLsigmak. We deﬁne
+bSLgammak
+0 =0
+bSLgammak
+h =
+h∑
+l=1
+qbSLsigmakblparenorilbrparenori=bSLgammak
+h−1+qbSLsigmakblparenorihbrparenoribcommaorih=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink
+for allk∈M , and store these values in memory dur-
+ingthesearch.Then,thesum∑h′
+l=h qbSLsigmakblparenorilbrparenorioftheamount
+of goods for thehth through theh′th customers can
+be computed inOblparenori1brparenoritime bybSLgammak
+h′ −bSLgammak
+h−1. HencebUPXeltaqsum
+is computed inOblparenori1brparenoritime for a solution inN crossor
+N2opt∗
+(bUPXeltaqsumis always 0 for solutions inN intra).
+At the beginning of LS, we need to initialize allbSLgammak
+h,
+which is possible inOblparenori∑
+k∈M nkbrparenori=Oblparenorinbrparenoritime. When-
+ever the current solution is updated, we also need to
+recomputebSLgamma
+k
+h forallh=0bcommaori1bcommaoribperiodoribperiodoribperiodoribcommaorink andk∈M ′,where
+M ′ ⊆M (/barSCM ′/barSC≤2) is the set of indices of relevant
+routes. The time required for this isOblparenori∑
+k∈M ′ nkbrparenori=
+Oblparenorinbrparenori. Because sizes/barSCNcross/barSC,/barSCN2opt∗
+/barSC, and/barSCNintra/barSCare
+larger thann, one-round times forNcross,N2opt∗
+, and
+Nintrawith respect toqsumareOblparenori/barSCN cross/barSCbrparenori,Oblparenori/barSCN 2opt∗
+/barSCbrparenori,
+andOblparenori/barSCNintra/barSCbrparenori, respectively. The space complexity of
+the above computation isOblparenorinbrparenori.
+4.2. SearchintheCyclic-ExchangeNeighborhood
+In this section, we introduce the improvement graph
+(Ahuja et al. 2000, 2002), which is used to ﬁnd
+an improved solution inN
+cyclic. Then we propose a
+heuristic on how to search the improvement graph.
+4.2.1. Improvement Graph.For simplicity, we
+ﬁrst describe the improvement graph in which
+acyclic-exchange operations are not considered, and
+then describe how acyclic-exchange operations are
+treated. The improvement graphGblparenori/UPsigmabrparenori=blparenoriV blparenori/UPsigmabrparenoribcommaori Eblparenori/UPsigmabrparenoribrparenori
+isdeﬁnedforafeasiblesolution/UPsigma.ThesetVblparenori/UPsigmabrparenoricon-
+sists of nodesv
+il blparenorii=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorin bcommaori l=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoriLcyclicbrparenori,
+where a nodevil∈Vblparenori/UPsigmabrparenorirepresents pathbSLpsiil (i.e.,
+the path of lengthl fromi in/UPsigma). A directed arc
+en
+ili′ l′ (respectively,er
+ili′ l′)∈Eblparenori/UPsigmabrparenorifrom nodevil tovi′ l′
+indicates that pathsbSLpsiil andbSLpsii′ l′ are removed from
+routesbSLsigmakblbracketoriibrbracketoriandbSLsigmakblbracketorii′ brbracketori,respectively,andbSLpsiilisinsertedin
+placeofbSLpsii′ l′ inbSLsigmakblbracketorii′ brbracketoriwithitsvisitingorderunchanged
+(respectively, reversed). Herekblbracketoriibrbracketoridenotes the vehicle
+that visits customeri. That is,en
+ili′ l′ ander
+ili′ l′ represent
+normal and reverse insertions, respectively. Two arcs
+e
+n
+ili′ l′ ander
+ili′ l′ are inEblparenori/UPsigmabrparenoriif and only ifkblbracketoriibrbracketori̸=kblbracketorii′brbracketori
+holds. Lethi be the index satisfyingbSLsigmakblbracketoriibrbracketoriblparenorihibrparenori=ifor
+customeri, and deﬁne the following routes:
+bSLsigman
+ili′ l′ =
+⟨
+the depot→bSLsigmakblbracketorii′ brbracketoriblparenorihi′ −1brparenoribcommaori
+bSLsigmakblbracketoriibrbracketoriblparenorihibrparenori→bSLsigmakblbracketoriibrbracketoriblparenorihi+l−1brparenoribcommaori
+bSLsigmakblbracketorii′ brbracketoriblparenorihi′ +l′brparenori→the depot
+⟩
+bcommaori
+bSLsigmar
+ili′ l′ =
+⟨
+the depot→bSLsigmakblbracketorii′ brbracketoriblparenorihi′ −1brparenoribcommaori
+bSLsigmakblbracketoriibrbracketoriblparenorihi+l−1brparenori→bSLsigmakblbracketoriibrbracketoriblparenorihibrparenoribcommaori
+bSLsigmakblbracketorii′ brbracketoriblparenorihi′ +l′brparenori→the depot
+⟩
+bperiodori
+Then, the costs of arcsen
+ili′ l′ ander
+ili′ l′ are deﬁned as
+costblparenoribSLsigman
+ili′ l′ brparenori−costblparenoribSLsigmakblbracketorii′ brbracketoribrparenoriandcostblparenoribSLsigmar
+ili′ l′ brparenori−costblparenoribSLsigmakblbracketorii′ brbracketoribrparenori(i.e.,
+the cost increases on routebSLsigmakblbracketorii′ brbracketoriby the insertions),
+respectively.
+We call a directed cycleC in the improvement
+graphGblparenori/UPsigmabrparenorisubset-disjointifkblbracketoriibrbracketori̸=kblbracketorii′brbracketoriholds for any
+pair of nodesvilandvi′ l′ inC (i.e., all the participat-
+ing paths belong to different routes). We then call a
+subset-disjointcycleavalid cycleifthesumoftheirarc
+costsisnegative.Asiseasilyunderstood,thereisone-
+to-one correspondence between solutions of cyclic-
+exchange operations inN
+cyclicblparenori/UPsigmabrparenoriand subset-disjoint
+cycles inGblparenori/UPsigmabrparenori, and the cost of a cycle represents the
+cost increase of the corresponding solution from that
+ofthecurrentsolution/UPsigma.Henceanimprovedsolution
+inN
+cyclicblparenori/UPsigmabrparenorican be found by a valid cycle inGblparenori/UPsigmabrparenori.
+We need only one ofen
+ili′ l′ ander
+ili′ l′ with lower cost
+toﬁndavalidcycle.Therefore,insteadofhavingtwo
+arcse
+n
+ili′ l′ ander
+ili′ l′,onlyonearceili′ l′ =blparenorivilbcommaorivi′ l′ brparenori,whose
+cost is
+cili′ l′ =min
+{
+costblparenoribSLsigman
+ili′ l′ brparenori−costblparenoribSLsigmakblbracketorii′ brbracketoribrparenoribcommaori
+costblparenoribSLsigmar
+ili′ l′ brparenori−costblparenoribSLsigmakblbracketorii′ brbracketoribrparenori
+}
+bcommaori
+is included inEblparenori/UPsigmabrparenorifor each ordered pair ofviland
+vi′ l′.
+Wenowdescribehowtodealwithacyclic-exchange
+operations in the improvement graph. We create
+nodesv
+i0 fori=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorinandvk
+00 fork=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorim,
+wherevi0 andvk
+00 correspond to empty pathsbSLpsii0
+andbSLpsik
+00, respectively. We also create a nodeˆv. These
+nodes are connected by arcsblparenorivi0bcommaoriˆvbrparenori,blparenorivk
+00bcommaoriˆvbrparenori,blparenoriˆvbcommaori vi′ l′ brparenori,
+blparenorivi′ l′ bcommaorivi0brparenori, andblparenorivi′ l′ bcommaorivk
+00brparenoriforibcommaori i′ =1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorin, l′ =
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoriLcyclic,andk=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorim.Letusdeﬁnethree
+routesbSLsigmai′ l′,bSLsigman
+i′ l′ i0, andbSLsigmar
+i′ l′ i0 by
+bSLsigmai′ l′ =
+⟨
+the depot→bSLsigmakblbracketorii′ brbracketoriblparenorihi′ −1brparenoribcommaori
+bSLsigmakblbracketorii′ brbracketoriblparenorihi′ +l′brparenori→the depot
+⟩
+bcommaori
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+218 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+bSLsigman
+i′ l′ i0 =
+⟨
+the depot→bSLsigmakblbracketoriibrbracketoriblparenorihi−1brparenoribcommaori
+bSLsigmakblbracketorii′ brbracketoriblparenorihi′ brparenori→bSLsigmakblbracketorii′ brbracketoriblparenorihi′ +l′−1brparenoribcommaori
+bSLsigmakblbracketoriibrbracketoriblparenorihibrparenori→the depot
+⟩
+bcommaori
+bSLsigmar
+i′ l′ i0 =
+⟨
+the depot→bSLsigmakblbracketoriibrbracketoriblparenorihi−1brparenoribcommaori
+bSLsigmakblbracketorii′ brbracketoriblparenorihi′ +l′−1brparenori→bSLsigmakblbracketorii′ brbracketoriblparenorihi′ brparenoribcommaori
+bSLsigmakblbracketoriibrbracketoriblparenorihibrparenori→the depot
+⟩
+bperiodori
+Thenthecostofarcblparenorivi0bcommaoriˆvbrparenoriisdeﬁnedas0,thatofarc
+blparenoriˆvbcommaori vi′ l′ brparenoriisdeﬁnedascostblparenoribSLsigmai′ l′ brparenori−costblparenoribSLsigmakblbracketorii′ brbracketoribrparenori,andthatof
+arcblparenorivi′ l′ bcommaorivi0brparenoriis deﬁned as
+min
+{
+costblparenoribSLsigman
+i′ l′ i0brparenori−costblparenoribSLsigmakblbracketoriibrbracketoribrparenoribcommaoricostblparenoribSLsigmar
+i′ l′ i0brparenori−costblparenoribSLsigmakblbracketoriibrbracketoribrparenori
+}
+bperiodori
+The costs of the arcsblparenorivk
+00bcommaoriˆvbrparenoriandblparenorivi′ l′ bcommaorivk
+00brparenoriare simi-
+larlydeﬁned.NowacycleC inthemodiﬁedimprove-
+ment graph represents acyclic-exchange operations if
+and only ifC containsˆv. Thus the graph contains
+a valid cycle if and only if an improved solution
+(eithercyclic-oracyclic-exchangeoperations)existsin
+N
+cyclicblparenori/UPsigmabrparenori.
+Let us now consider the size of the improvement
+graph and time complexity to construct it. Because
+there areOblparenoriL
+cyclicnbrparenoripaths to be considered for the
+cyclic-exchange operation,/barSCVblparenori/UPsigmabrparenori/barSC=OblparenoriLcyclicnbrparenoriand
+/barSCEblparenori/UPsigmabrparenori/barSC=OblparenoriblparenoriLcyclicnbrparenori2brparenorihold. From the discussion in
+§4.1, it is not difﬁcult to see that the cost of an arc in
+Eblparenori/UPsigmabrparenorican be computed inOblparenoribSLdelta
+kblbracketoriibrbracketori+bSLdeltakblbracketorii′ brbracketoribrparenori=OblparenoribSLdeltabrparenoritime,
+provided thatfk
+h blparenoritbrparenori,bk
+h blparenoritbrparenori, andbSLgammak
+h are known forh=
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorink andk∈M ,andtheorderofcomputingthe
+arc costs is carefully designed. Because allfk
+h blparenoritbrparenoriand
+bk
+h blparenoritbrparenori(respectively,bSLgammak
+h)arecomputedinOblparenorinbSLdeltabrparenori(respec-
+tively,Oblparenorinbrparenori) time, the construction ofGblparenori/UPsigmabrparenoriis pos-
+sible inOblparenoriblparenoriLcyclicnbrparenori2bSLdeltabrparenoritime. The space complexity to
+computearccostsisOblparenorinbSLdeltabrparenori(neededtostorefunctions
+fk
+h blparenoritbrparenoriandbk
+h blparenoritbrparenori), and the space to store graphGblparenori/UPsigmabrparenoriis
+OblparenoriblparenoriLcyclicnbrparenori2brparenori.
+4.2.2. A Heuristic Algorithm to Find a Valid
+Cycle.Becausetheproblemofﬁndingavalidcyclein
+ageneralimprovementgraphofthistypeisknownto
+beNP-hard(ThompsonandOrlin1989),wedevelopa
+heuristicalgorithm,whichisnotguaranteedtoﬁnda
+validcycleevenifitexists.Ouralgorithmisbasedon
+the labeling algorithm for the shortest path problem.
+We ﬁrst brieﬂy summarize the labeling algorithm
+inGblparenori/UPsigmabrparenori. Letc
+uv denote the cost of an arcblparenoriubcommaori vbrparenori∈
+Eblparenori/UPsigmabrparenori. The cost of a path inGblparenori/UPsigmabrparenoriis the sum ofcuv
+of arcsblparenoriubcommaori vbrparenoriin the path, and the length of a path
+is the number of vertices in the path. The shortest
+path problem asks to ﬁnd a path of minimum cost
+from a speciﬁed nodev
+s∈Vblparenori/UPsigmabrparenorito every other node
+inVblparenori/UPsigmabrparenori.Thealgorithmcomputeslabelslabelblparenorivbcommaori lbrparenorifor
+allv∈Vblparenori/UPsigmabrparenori,f r o ml=1t o/barSCVblparenori/UPsigmabrparenori/barSC, wherelabelblparenorivbcommaori lbrparenori
+stores the minimum cost among all directed paths
+fromv
+s tov of length at mostl.I flabelblparenorivbcommaori lbrparenori=/infinity2,n o
+directedpathoflengthatmostlfromvs tovisfound
+yet. We call the phase of computinglabelblparenorivbcommaori lbrparenorifor all
+v∈Vblparenori/UPsigmabrparenorithelth phase. The algorithm also maintains
+prevblparenorivbrparenoriforallv∈Vblparenori/UPsigmabrparenori,whichrepresentstheprevious
+node ofv in the directed path tov of costlabelblparenorivbcommaori lbrparenori.
+The algorithm starts by settinglabelblparenorivsbcommaori1brparenoribcolonori=0 and
+labelblparenorivbcommaori1brparenoribcolonori=/infinity2for allv∈Vblparenori/UPsigmabrparenori\blbraceorivsbrbraceori. At the begin-
+ning of thelth phase withl≥2, labels are set
+labelblparenorivbcommaori lbrparenori bcolonori=labelblparenorivbcommaori l−1brparenorifor allv∈Vblparenori/UPsigmabrparenori. Then, for
+every arcblparenoriubcommaori vbrparenori,i flabelblparenoriubcommaori l−1brparenori+cuv < labelblparenorivbcommaori lbrparenori
+holds,labelblparenorivbcommaori lbrparenoriisupdatedtolabelblparenoriubcommaori l−1brparenori+cuv and
+prevblparenorivbrparenoriis updated tou. This step is called thelabel
+update step. Thelth phase ends if all arcs are checked.
+The algorithm stops whenlabelblparenorivbcommaori l−1brparenori=labelblparenorivbcommaori lbrparenori
+holds for allv∈Vblparenori/UPsigmabrparenoriat the end of thelth phase, or
+it reaches the end of the/barSCVblparenori/UPsigmabrparenori/barSCth phase.
+The algorithm is usually implemented on a node
+set/hattV, called the active nodes, which is set toblbraceorivsbrbraceori
+in the second phase, and is the set of thosev sat-
+isfyinglabelblparenorivbcommaori l−1brparenori<l a b e l blparenori v bcommaoril−2brparenoriin thelth phase
+withl≥3. LetEv be the set of arcs whose tail ver-
+tex isv. In thelth phase (l≥2), only the arcs in/hattE=⋃
+v∈/hattV Ev arescannedforthelabelupdatestepbecause
+labelblparenoriubcommaori l−1brparenori+cuv ≥labelblparenorivbcommaori lbrparenoriholdsforallarcsblparenoriubcommaori vbrparenori
+not in/hattE.
+We make some modiﬁcations on the labeling algo-
+rithm above. The set of active nodes is further
+reducedasfollows.Weonlyconsiderthosearcsblparenoriubcommaori vbrparenori
+withlabelblparenoriubcommaori l−1brparenori<0 for the label update steps in
+thelth phase. That is, we delete those nodesu with
+labelblparenoriubcommaori l−1brparenori≥0f r o m/hattV. Then the set of the reduced
+active nodes is denoted/tildeeV.
+Werepeatthealgorithmbyregardingeverynodeas
+thesource.Recallthatweonlyconsidervalidcyclesof
+length at mostbSLnu
+cyclic(§3.1.2). This parameter is moti-
+vated by the fact that longer cycles are less likely to
+be subset-disjoint. As a cycle of length more thanm
+will not be subset-disjoint, we assume thatbSLnu
+cyclic≤m
+holds. Our algorithm ﬁnishes the search with the
+current source node and exits to a further search
+with another source node, if either of the following
+two conditions holds: ﬁrst, the algorithm reaches the
+blparenoribSLnu
+cyclic+1brparenorist phase, or second, the set of active nodes
+/tildeeV becomes empty. Finally, the entire algorithm halts
+either when a valid cycle is identiﬁed, or when the
+search is completed with all source nodes inVblparenori/UPsigmabrparenori.
+Furthermodiﬁcationisthatthelabelupdatestepis
+executed only if the resulting path is subset-disjoint.
+To check whether a path considered in each label
+update step is subset-disjoint or not inOblparenori1brparenoritime, we
+maintainsetblparenorivbcommaori kbrparenorifor allv∈Vblparenori/UPsigmabrparenoriandk∈M . Let
+Pblbracketori v brbracketoridenotethepathfromv
+s tov obtainedbytracing
+prevblparenorivbrparenorifromnodevbacktovs,andletkv betheindex
+oftheroutethatcontainsthepath(ofcustomers)cor-
+responding to nodev∈Vblparenori/UPsigmabrparenori. The value ofsetblparenorivbcommaori kbrparenori
+is 1, ifPblbracketori v brbracketoricontains a vertexu satisfyingk
+u =k, and
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 219
+0 otherwise. Then the label update step for an arc
+blparenoriubcommaori vbrparenori∈/tildeeE is executed only ifsetblparenoriubcommaori kvbrparenori=0 holds (i.e.,
+thenewpathPblbracketori v brbracketoriisassuredtobesubset-disjointafter
+the label update step). At the beginning of thelth
+phasewithl≥3,setblparenorivbcommaori kbrparenoriareupdatedforthosev∈/tildeeV
+by ﬁrst resettingsetblparenorivbcommaori kbrparenori bcolonori=0 for allk and then set-
+tingsetblparenorivbcommaori ku brparenoribcolonori=1 for allu inPblbracketori v brbracketori.
+The ﬁnal modiﬁcation is that the algorithm checks
+iflabelblparenorivbcommaori lbrparenori+cvvs < 0holdsforsomev∈/tildeeV,attheend
+of thelth phase. If such av is found, the resulting
+cycleblparenoriP blbracketorivbrbracketoribcommaori vsbrparenoriis a valid cycle.
+The modiﬁcation of active nodes from/hattV to/tildeeV
+is motivated by the following simple well-known
+lemma (see, e.g., Lin and Kernighan 1973).
+Lemma 4.1. If∑
+l
+i=1ci < 0 holds, then there exists aj
+such that ∑k
+i=j ci < 0 holds for allk=jbcommaorij+1bcommaoribperiodoribperiodoribperiodoribcommaoril, and∑k
+i=1ci+∑l
+i=j ci < 0 holds for allk=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorij−1.
+Proof.Letk∗be the largest index among those
+k that maximizes∑k
+i=1ci. Then∑k
+i=1ci+∑l
+i=k∗+1ci≤∑k∗
+i=1ci +∑l
+i=k∗+1ci < 0 holds if 1≤k ≤k∗, and∑k
+i=k∗+1ci=∑k
+i=1ci−∑k∗
+i=1ci < 0 holds ifk∗+1≤k≤l.
+Hencej=k∗+1 satisﬁes the conditions in the
+lemma.□
+This lemma indicates that, in a valid cycleC, there
+exists a vertexv∈C such that the costs of all the
+directed paths inC starting fromv are negative.
+Thus,althoughonlymaintaininglabelswithnegative
+cost might miss some valid cycles in the search with
+the current source node, the algorithm will eventu-
+ally ﬁnd such valid cycles starting from other source
+nodes.
+The algorithm, called FVC, to ﬁnd a valid cycle in
+a given directed graphGblparenori/UPsigmabrparenoriis summarized as fol-
+lows:(Inthealgorithm,/hattV isthesetsofverticeswhose
+labels have been improved in the label-update step
+of the current phase,/tildeeV is the subset of/hattV whose
+labels are negative, and/tildeeE is⋃
+v∈/tildeeV Ev.)
+Algorithm FVC( Gblparenori/UPsigmabrparenori=blparenoriV blparenori/UPsigmabrparenoribcommaori Eblparenori/UPsigmabrparenoribrparenori).
+Step1bperiodoriLetUbcolonori=Vblparenori/UPsigmabrparenori.
+Step2bperiodoriChoose a nodevs∈U and letUbcolonori=U\blbraceorivsbrbraceori,
+labelblparenoriubcommaori1brparenoribcolonori=/infinity2for allu∈Vblparenori/UPsigmabrparenori\blbraceorivsbrbraceori,labelblparenorivsbcommaori1brparenoribcolonori=0,
+/tildeeVbcolonori=blbraceorivsbrbraceori,/hattVbcolonori=/varnothing,/tildeeEbcolonori=Evs, setblparenorivbcommaori kbrparenori bcolonori=0 for allv∈
+Vblparenori/UPsigmabrparenori\blbraceorivsbrbraceoriandk∈M ,setblparenorivsbcommaorikvsbrparenoribcolonori=1 andlbcolonori=2.
+Step3bperiodoriIfl>bSLnucyclic, go to Step 8. Otherwise, let
+labelblparenorivbcommaori lbrparenori bcolonori=labelblparenorivbcommaori l−1brparenorifor allv∈Vblparenori/UPsigmabrparenori.
+Step4bperiodoriChoose an arceuv =blparenoriubcommaori vbrparenori∈/tildeeE and let/tildeeEbcolonori=
+/tildeeE\blbraceorieuv brbraceori.Ifbothsetblparenoriubcommaori kvbrparenori=0andlabelblparenoriubcommaori l−1brparenori+cuv <
+labelblparenorivbcommaori lbrparenorihold, letlabelblparenorivbcommaori lbrparenori bcolonori=labelblparenoriubcommaori l−1brparenori+cuv,
+prevblparenorivbrparenori bcolonori=u and/hattVbcolonori=/hattV ∪blbraceorivbrbraceori.
+Step5bperiodoriIf/tildeeE̸=/varnothing, return to Step 4.
+Step6bperiodoriLetsetblparenorivbcommaori kbrparenori bcolonori=0 for allv∈/tildeeV andk∈M .
+Then let/tildeeVbcolonori=/varnothing.
+Step7bperiodoriChoose a nodev∈/hattV and let/hattVbcolonori=/hattV\blbraceorivbrbraceori.I f
+labelblparenorivbcommaori lbrparenori≥0 holds, proceed to Step 8. Iflabelblparenorivbcommaori lbrparenori+
+cvvs < 0 holds, output the corresponding valid cycle
+and halt. Otherwise, let/tildeeVbcolonori=/tildeeV ∪blbraceorivbrbraceori,/tildeeEbcolonori=/tildeeE∪Ev, and
+setblparenorivbcommaori ku brparenoribcolonori=1 for allu inPblbracketori v brbracketori.
+Step8bperiodoriIf/hattV ̸=/varnothing, return to Step 7. Otherwise, if
+/tildeeV ̸=/varnothing, letlbcolonori=l+1 and return to Step 3.
+Step9bperiodoriIfU =/varnothing, halt. Otherwise, return to Step 2.
+Let us consider the time complexity of Algorithm
+FVC. The number of repetitions of the loop from
+Step2throughStep9isOblparenori/barSCVblparenori/UPsigmabrparenori/barSCbrparenori.Theinitializationin
+Step2requiresOblparenori/barSCVblparenori/UPsigmabrparenori/barSCmbrparenoritimeforlettingsetblparenorivbcommaori kbrparenori bcolonori=
+0 for allu∈Vblparenori/UPsigmabrparenoriandk∈M . The loop of Steps 3
+to 8 is repeatedOblparenoribSLnu
+cyclicbrparenoritimes. In Step 3, it takes
+Oblparenori/barSCVblparenori/UPsigmabrparenori/barSCbrparenoritime to initialize labelslabelblparenorivbcommaori lbrparenorifor all
+v∈Vblparenori/UPsigmabrparenori. Steps 4 and 5 are repeatedOblparenori/barSC/tildeeE/barSCbrparenoritimes,
+and takeOblparenori1brparenoritime for each execution. Then, Step 6
+requiresOblparenori/barSC/tildeeV/barSClbrparenoritime, since resettingsetblparenorivbcommaori kbrparenori bcolonori=0
+for allk∈M can be done by tracing the vertices
+in the pathPblbracketori v brbracketorifor allv∈/tildeeV. For the same rea-
+son, Step 7 is carried out inOblparenorilbrparenoritime to update
+setblparenorivbcommaori kbrparenori. Step 8 is executed inOblparenori1brparenoritime. The
+loop of Steps 7 and 8 is repeatedOblparenori/barSC/hattV/barSCbrparenoritimes.
+Consequently the total time required for FVC is
+Oblparenori/barSCVblparenori/UPsigmabrparenori/barSC
+2m +bSLnucyclic/barSCVblparenori/UPsigmabrparenori/barSC/barSCEblparenori/UPsigmabrparenori/barSC+blparenoribSLnucyclicbrparenori2/barSCVblparenori/UPsigmabrparenori/barSC2brparenori=
+OblparenoribSLnucyclicblparenoriLcyclicnbrparenori3brparenori, sincem ≤n,/barSCEblparenori/UPsigmabrparenori/barSC=OblparenoriblparenoriLcyclicnbrparenori2brparenori
+and/barSCVblparenori/UPsigmabrparenori/barSC=OblparenoriLcyclicnbrparenorihold. This complexity seems
+ratherlarge;however,itsactualcomputationaltimeis
+usuallymuchsmaller,sincethesizesofsets/tildeeE,/tildeeV,and
+/hattV tend to decrease rapidly aslincreases.
+4.3. Time-OrientedNeighbor-Lists
+In this section, we propose the time-oriented
+neighbor-lists to prune the neighborhood search
+heuristically.Asimilartechnique,calledtheneighbor-
+lists, was successfully applied to TSP (Johnson and
+McGeoch 1997) and VRP (e.g., Park et al. 2000), in
+which the neighbor-list of customeriis determined
+on the basis of the distance fromi. However, this is
+notappropriateforVRPGTWbecauseweshouldalso
+take into account the start time of service ati.
+Recallthatallvehiclescanleavethedepotaftertime
+0. Here we also assume that it is desirable to return
+to the depot before timew
+d
+0. We partition the period
+of lengthwd
+0 intobSLnunlist(a parameter) intervals, and
+letbSLrho=wd
+0 /bSLnunlist. For each customeri, we construct
+bSLnunlisttime-oriented neighbor-lists, nlistbSLphi
+i =blparenorinlistbSLphi
+i blbracketori1brbracketoribcommaori
+nlistbSLphi
+i blbracketori2brbracketori bcommaoribperiodoribperiodoribperiodoribcommaorinlistbSLphi
+i blbracketorinbrbracketoribrparenori, forbSLphi=1, 2bcommaoribperiodoribperiodoribperiodoribcommaoribSLnunlist, where
+customernlistbSLphi
+i blbracketorilbrbracketoriwithasmallerlismoredesirableto
+be served immediately afteri, provided thatbSLphiis the
+largest index satisfyingblparenoribSLphi−1brparenoribSLrho≤si. The desirability
+of customerjbeing scheduled immediately afteriis
+determinedintheincreasingorderof
+keybSLphi
+i blbracketorijbrbracketori=
+
+
+
+
+
+
+d
+ij+ min
+0≤t≤bSLmunlistW
+pjblparenoriblparenoribSLphi−1brparenoribSLrho+tbrparenoribcommaori
+ifui+tij≤bSLmunlistW
++/infinity2bcommaoriotherwise,
+(14)
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+220 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+i
+nlist1
+i
+nlist2
+i
+nlistν nlist−1
+i
+nlistν nlist
+i
+•
+•
+•
+•
+•
+•
+1l: 23 456
+customer indices:
+0≤ s
+i <ρ
+ρ ≤ si < 2ρ
+( νnlist − 2)ρ ≤ si < ( νnlist − 1)ρ
+( νnlist − 1)ρ ≤ si
+time interval
+•••• ••
+Figure 10 An Illustration of the Time-Oriented Neighbor-Lists
+whereW =mw d
+0 /n andbSLmunlistis a parameter. In other
+words,nlistbSLphi
+i blbracketorilbrbracketoriisthecustomerjwiththelthsmallest
+value of keybSLphi
+i blbracketorijbrbracketori. The structure of the time-oriented
+neighbor-lists is illustrated in Figure 10.
+Themeaningof(14)isexplainedasfollows.Iftime
+ui+tijis large, servingjimmediately afteriis not
+desirable,sinceitwilldelaytheserviceofsubsequent
+customers.ThereforewesetkeybSLphi
+i blbracketorijbrbracketorito+/infinity2ifui+tij>
+bSLmunlistW , whereW is a rough estimate of the average
+time spent for one customer (i.e.,sbSLsigmakblparenorih+1brparenori−sbSLsigmakblparenorihbrparenori), and
+bSLmunlistissettothreeinourexperiment.Forthosejwith
+ui+tij≤bSLmunlistW , the ﬁrst term in (14) is the distance
+fromcustomeritocustomerj,whilethesecondterm
+representstheminimumtimepenaltyofcustomerjif
+itisservedinthetimeintervalofblbracketoriblparenoribSLphi−1brparenoribSLrhobcommaori blparenoribSLphi−1brparenoribSLrho+
+bSLmunlistWbrbracketori.
+Before proceeding further, we comment on param-
+eterbSLnunlist. It might be natural to setbSLnunlistproportional
+ton/m based on the same consideration asW ; how-
+ever, large memory space is necessary ifbSLnunlistis set
+large.WethereforesetbSLnunlistsmalltokeepthememory
+requirement reasonable.
+Let us now consider the time complexity of con-
+structing the time-oriented neighbor-lists. The com-
+putation of keybSLphi
+i blbracketorijbrbracketorirequiresOblparenoribSLdeltablparenorijbrparenoribrparenori, wherebSLdeltablparenorijbrparenoriwas
+deﬁned in §2. Therefore the computation of keybSLphi
+i blbracketorijbrbracketori
+forallj=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorin bcommaori j̸=irequires∑n
+j=1OblparenoribSLdeltablparenorijbrparenoribrparenori=OblparenoribSLdeltabrparenori
+time.ItfollowsthattheconstructionofnlistbSLphi
+i foreach
+ofi=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorinandbSLphi=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoribSLnunlistrequiresOblparenoribSLdelta+
+nlognbrparenoritime; henceOblparenorinbSLnunlistblparenoribSLdelta+nlognbrparenoribrparenoriin total.
+We now describe how we use the time-oriented
+neighbor-lists for the search inN 2opt∗
+andNcross.
+We ﬁrst explain the case ofN2opt∗
+. For a customer
+i=bSLsigmakblparenorihk
+1−1brparenori(see Figure 5), the customers selected
+forbSLsigmak′ blparenorihk′
+1brparenoriare nlistbSLphi
+i blbracketorilbrbracketori, l=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoriLnlist
+2opt∗(Lnlist
+2opt∗is
+a parameter), wherebSLphiis ﬁxed tobSLphi=/lfloorSCsi/bSLrho/rfloorSC+1.
+Similarly, in the case ofNcross, for a customeri=
+bSLsigmakblparenorihk
+1−1brparenori(seeFigure4),customersselectedforbSLsigmak′ blparenorihk′
+1brparenori
+are nlistbSLphi
+i blbracketorilbrbracketori,l=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoriLnlist
+cross(Lnlist
+crossis a parameter),
+wherebSLphiis ﬁxed tobSLphi=/lfloorSCsi/bSLrho/rfloorSC+1. Then, all possible
+valuesforhk
+2andhk′
+2 (i.e.,hk
+2=hk
+1bcommaorihk
+1
++1bcommaoribperiodoribperiodoribperiodoribcommaorihk
+1+Lcross,
+hk′
+2 =hk′
+1bcommaorihk′
+1+1bcommaoribperiodoribperiodoribperiodoribcommaorihk′
+1+Lcross)areconsideredforeach
+pair ofhk
+1 andhk′
+1. We do not use the time-oriented
+neighbor-lists in the search ofN intra, since it seems
+impossibletokeepthetimecomplexityofcomputing
+theminimumtimepenaltytoOblparenoribSLdeltabrparenoriifthismodiﬁcation
+is added.
+By using the time-oriented neighbor-lists, the
+neighborhood size ofN
+crossis reduced from
+OblparenoriblparenoriLcrossbrparenori2n2brparenoritoOblparenoriblparenoriLcrossbrparenori2nLnlist
+crossbrparenori, and that ofN 2opt∗
+is reduced fromOblparenorin2brparenoritoOblparenorinLnlist
+2opt∗brparenori. We setLnlist
+2opt∗bcolonori=
+minblbraceorinbcommaori blparenoriLcrossbrparenori2Lnlist
+crossbrbraceoriin our algorithm so that the
+size ofN2opt∗
+becomesOblparenoriminblbraceorin2bcommaoriblparenori Lcrossbrparenori2nLnlist
+crossbrbraceoribrparenori.
+This parameter setting does not affect the overall
+neighborhood size, since the size ofN
+crossis already
+OblparenoriblparenoriLcrossbrparenori2nLnlist
+crossbrparenori.
+4.4. OtherSpeedupTechniques
+We explain two other techniques to speed up the
+local search. First, we maintain tablesIcrossblparenorikbcommaori k′brparenori,
+I2opt∗
+blparenorikbcommaori k′brparenori, andIintrablparenorikbrparenoriforkbcommaori k′ ∈M so that we do
+not search the regions where no improvement is
+expected. We setI
+crossblparenorikbcommaori k′brparenoribcolonori=0 whenever the algo-
+rithm ﬁnds no improvement inN crossblparenori/UPsigmabcommaorik bcommaorik′brparenori, and
+setIcrossblparenorikbcommaori k′brparenoribcolonori=1 whenever an improvement occurs
+by any neighborhood operation on eitherbSLsigmak orbSLsigmak′.
+TablesI2opt∗
+blparenorikbcommaori k′brparenoriandIintrablparenorikbrparenoriare deﬁned similarly.
+Then, we searchN crossblparenori/UPsigmabcommaorik bcommaorik′brparenorionly ifIcrossblparenorikbcommaori k′brparenori=
+1 holds. Similarly, we searchN2opt∗
+blparenori/UPsigmabcommaorik bcommaorik′brparenori(respec-
+tively,N intrablparenori/UPsigmabcommaorik brparenori)onlyifI2opt∗
+blparenorikbcommaori k′brparenori=1(respectively,
+Iintrablparenorikbrparenori=1) holds.
+The second idea is to improve the search in the
+cyclic-exchange neighborhood. The construction of
+the improvement graph is the most expensive part.
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 221
+(Thoughtheworst-casetimecomplexityofAlgorithm
+FVC of §4.2.2 seems to become more expensive if
+bSLdelta=oblparenoribSLnu
+cyclicLcrossnbrparenorihold, its actual computational time
+is usually much smaller than that of the construc-
+tion of the improvement graph.) To alleviate this, we
+do not construct the whole improvement graph from
+scratch. This is motivated by the fact that there may
+be some routes not modiﬁed during the search after
+the previous construction. In such a case, the costs of
+arcs between such routes do not change. For this, we
+maintainatableI
+cyclicblparenorikbrparenorifork∈M .Thealgorithmsets
+Icyclicblparenorikbrparenori bcolonori=0 for allk∈M whenever the improvement
+graph is constructed. Then, if routek is involved in
+the update of solutions (by any neighborhood oper-
+ation), the algorithm setsI
+cyclicblparenorikbrparenori bcolonori=1. In the recon-
+struction, the cost of an arcblparenoriubcommaori vbrparenoriis updated if and
+only ifIcyclicblparenoriku brparenori=1o rIcyclicblparenorikvbrparenori=1 holds.
+Finally, we ﬁnd more than one valid cycle in
+the improvement graph by applying Algorithm FVC
+repeatedly.Thisismotivatedbythefactthatthecosts
+on many arcs remain unchanged even after a cyclic-
+exchange operation is applied. It is executed as fol-
+lows: If a solution is improved by a cyclic-exchange
+operation, we remove from the improvement graph
+those arcs whose head or tail node is in those routes
+involved in the update of the solution. Then, Algo-
+rithm FVC is again applied to the reduced improve-
+ment graph. This procedure is repeated until either
+FVC is unable to ﬁnd a valid cycle or the number of
+the routes not involved in these updates of solutions
+becomeslessthantwo.Feasiblecyclic-exchangeoper-
+ations always correspond to the valid cycles found
+during the above repeated calls to FVC, sincek
+u ̸=kv
+holds for any two verticesu andv in these valid
+cycles.
+5. MetaheuristicAlgorithms
+In this section, we describe three metaheuristic algo-
+rithms: the MLS (Lin 1965; Lin and Kernighan 1973;
+Reiter and Sherman 1965), the ILS (Johnson 1990;
+Martin et al. 1991; 1992), and the AMLS (Boese et al.
+1994; Taillard et al. 1997). All of these algorithms are
+based on the LS described so far. We describe how to
+generate initial solutions within their frameworks.
+5.1. TheMLSandILS
+In the MLS, LS is repeatedly applied from a number
+ofinitialsolutionsandthebestsolutionfoundduring
+theentiresearchisoutput.AlgorithmMLSissumma-
+rized as follows:
+Algorithm MLS.
+Step1bperiodoriGenerate an initial solution/UPsigma
+0 and let
+/UPsigmabestbcolonori=/UPsigma0.
+Step2bperiodoriImprove/UPsigma0 by LS; i.e.,/UPsigmabcolonori=LSblparenori/UPsigma0brparenori.
+Step3bperiodoriIf a solution/UPsigma′ satisfyingbestevalblparenori/UPsigma′brparenori<
+bestevalblparenori/UPsigmabestbrparenoriis found during the LS in Step 2, let
+/UPsigmabestbcolonori=/UPsigma′.
+Step4bperiodoriIf some stopping criterion is satisﬁed, out-
+put/UPsigmabestand halt; otherwise generate a solution/UPsigma0
+and return to Step 2.
+In the computational experiment in §6, the initial
+solutions of MLS are generated randomly.
+The ILS is a variant of MLS, in which initial solu-
+tions are generated by slightly perturbing a solution
+/UPsigma
+seed, which is a good (not necessarily the best) solu-
+tion found during the search. The algorithm of ILS is
+summarized as follows:
+Algorithm ILS.
+Step1bperiodoriGenerate an initial solution/UPsigma
+0, and let
+/UPsigmaseedbcolonori=/UPsigma0 and/UPsigmabestbcolonori=/UPsigma0.
+Step2bperiodoriImprove/UPsigma0 by LS; i.e., let/UPsigmabcolonori=LSblparenori/UPsigma0brparenori.
+Step3bperiodoriIf a solution/UPsigma′ satisfyingbestevalblparenori/UPsigma′brparenori<
+bestevalblparenori/UPsigmabestbrparenoriis found during the LS in Step 2, let
+/UPsigmabestbcolonori=/UPsigma′.
+Step4bperiodoriIfcostblparenori/UPsigmabrparenori≤costblparenori/UPsigmaseedbrparenori, let/UPsigmaseedbcolonori=/UPsigma.
+Step5bperiodoriIf some stopping criterion is satisﬁed, out-
+put/UPsigmabestand halt; otherwise generate a solution/UPsigma0
+by slightly perturbing/UPsigmaseedand return to Step 2.
+In our ILS, the random cross-exchange operation
+is used to perturb/UPsigmaseed, which randomly chooses
+two paths from two routes with no restriction on the
+length of the paths and exchanges them. The algo-
+rithm executes the random cross-exchange operation
+bSLnu
+ils
+ptb(a parameter) times on/UPsigmaseedto generate a new
+initial solution/UPsigma0 in Step 5.
+5.2. TheAMLS
+AMLS maintains a set of solutionsP =blbraceori/UPsigma1bcommaori/UPsigma2bcommaori
+bperiodoribperiodoribperiodoribcommaori/UPsigma/barSCP/barSCbrbraceoriduring the search, where/barSCP/barSC≤bSLnuamls
+popholds
+(bSLnuamls
+popis a parameter). Solutions inP are selected
+fromthelocallyoptimalsolutionsfoundintheprevi-
+ous search, and are used to generate the initial solu-
+tion for the next local search. We ﬁrst describe how
+we generate the initial solution for the next LS, then
+describehowweinitializeP andupdateitduringthe
+search, and ﬁnally summarize the outline of Algo-
+rithm AMLS.
+Let the currentP consist of/UPsigma
+bSLlambda=blparenoribSLsigmabSLlambda
+1bcommaoribSLsigmabSLlambda
+2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmabSLlambda
+m brparenori,
+bSLlambda=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori/barSCP/barSC, andRblbracketoriP brbracketoribe the set of/barSCP/barSCm routes
+blbraceoribSLsigma1
+1bcommaoribSLsigma1
+2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma1
+m bcommaoribSLsigma2
+1bcommaoribSLsigma2
+2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma2
+m bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma/barSCP/barSC
+1 bcommaoribSLsigma/barSCP/barSC
+2 bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma/barSCP/barSC
+m brbraceori.
+The initial solution/UPsigma0 =blparenoribSLsigma0
+1bcommaoribSLsigma0
+2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma0
+m brparenoriis con-
+structed by selecting routesbSLsigmafromRblbracketoriP brbracketorione by one.
+Let/UPsigma0 be the current solution being constructed,
+where some routes in/UPsigma0 may be empty, and letbSLsigma
+be a route inRblbracketoriP brbracketori. VbSLsigmaandV/UPsigma0 denote the sets of
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+222 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+customers in routebSLsigmaand solution/UPsigma0, respectively.
+Then let
+cgenblparenoribSLsigmabcommaori/UPsigma0brparenori=
+
+
+
+costblparenoribSLsigmabrparenori
+/barSCVbSLsigma\V/UPsigma0/barSCbcommaoriif/barSCVbSLsigma\V/UPsigma0/barSC̸=0
+/infinity2bcommaoriotherwisebperiodori
+CostcgenblparenoribSLsigmabcommaori/UPsigma0brparenorimeasurestheattractivenessofroutebSLsigma
+with respect to the current solution/UPsigma0 under consid-
+eration. If/barSCVbSLsigma\V/UPsigma0/barSC=0 holds, all customers inbSLsigmahave
+already been assigned to/UPsigma0 and hence it is useless
+to insertbSLsigmainto/UPsigma0, and hencecgenis set to/infinity2. Other-
+wise,cgenblparenoribSLsigmabcommaori/UPsigma0brparenoriindicates the average cost to visit a
+customer not in/UPsigma0.
+All the routes in/UPsigma0 are initially set to be empty,
+and then the route selection step is executedm
+times. In thekth route selection step, the routebSLsigma∗
+with the minimumcgenblparenoribSLsigmabcommaori/UPsigma0brparenoriis selected fromRblbracketoriP brbracketori
+and we setbSLsigma0
+k bcolonori=bSLsigma∗. Here we restrict/UPsigma0 to con-
+tain at most/lceilSCm/bSLnuamls
+pop/rceilSCroutes from one/UPsigmabSLlambdainP to
+keep its diversity. This is achieved simply by set-
+tingc
+genblparenoribSLsigmabcommaori/UPsigma0brparenoribcolonori=/infinity2for allbSLsigma∈/UPsigmabSLlambdawhen/UPsigma0 contains
+/lceilSCm/bSLnuamls
+pop/rceilSCroutes from/UPsigmabSLlambda. Afterm route selection
+steps, some customers may be assigned to more than
+one route in/UPsigma
+0. We call them duplicate customers,
+and apply the following customer deletion steps.
+Letibe a duplicate customer, which is assigned to
+Z routesbSLsigma
+0
+k1
+bcommaoribSLsigma0
+k2
+bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma0
+kZ
+. We deﬁneˆbSLsigmakz to be the
+route obtained by deleting customerifrombSLsigma0
+kz
+. Then
+we setbSLsigma0
+kz
+bcolonori=ˆbSLsigma0
+kz
+forz=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoriZexcept forz=
+argminzblbraceoricostblparenoriˆbSLsigma0
+kz
+brparenori−costblparenoribSLsigma0
+kz
+brparenoribrbraceoribperiodoriThis customer deletion
+stepisappliedtoallduplicatecustomersinarandom
+order. After this procedure, no customer is duplicate,
+but some customers may remain unassigned. For all
+of the unassigned customers, the following customer
+insertion steps are applied. Letibe such a customer,
+andjbe the customer nlist
+bSLphi
+i blbracketorilbrbracketorithat has the smallestl
+among those already assigned to/UPsigma0, wherebSLphiis ran-
+domly chosen fromblbraceori1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoribSLnunlistbrbraceori. Then, customeri
+is inserted betweenjand its preceding customer in
+the current route. The entire procedure of generating
+aninitialsolutionfromP,calledGENINITblparenoriP brparenori,issum-
+marized as follows.
+Procedure GENINIT( P ).
+Step1bperiodori(initialization) Let all routes in/UPsigma
+0 be empty
+and letkbcolonori=1.
+Step2bperiodori(routes selection) Let
+bSLsigma∗bcolonori=argminbSLsigma∈RblbracketoriP brbracketoricgenblparenoribSLsigmabcommaori/UPsigma0brparenori.
+Then letbSLsigma0
+k bcolonori=bSLsigma∗andkbcolonori=k+1. Ifk≤m, return to
+Step 2.
+Step3bperiodori(customer deletion) Execute the customer
+deletion step on duplicate customers until there is no
+such customer.
+Step4bperiodori(customer insertion) Execute the customer
+insertion step on unassigned customers until there is
+no such customer.
+Step5bperiodoriOutput/UPsigma
+0 =blparenoribSLsigma0
+1bcommaoribSLsigma0
+2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma0
+m brparenorias the initial
+solution and halt.
+Initially,P is set empty. If/barSCP/barSC<bSLnuamls
+popholds, an
+initial solution for LS is generated randomly. Then,
+for the locally optimal solution/UPsigma
+loptobtained by the
+LS, we letPbcolonori=P ∪blbraceori/UPsigmaloptbrbraceoriifcostblparenori/UPsigmaloptbrparenoridiffers from
+the costs of all solutions inP (P remains unchanged
+otherwise). If/barSCP/barSC=bSLnuamls
+popholds, an initial solution
+for LS is generated by calling GENINITblparenoriP brparenori. Then for
+the locally optimal solution/UPsigmaloptobtained by the LS,
+P is updated as follows. Let/UPsigmaworstbe the solution
+with the worst cost inP.I fcostblparenori/UPsigmaloptbrparenori>costblparenori/UPsigmaworstbrparenori
+holds,P remainsunchanged.Otherwise,solution/UPsigmalopt
+is added toP and some solutions are deleted fromP
+by the following rules. For this, we deﬁne
+RcloseblparenoribSLsigmabcommaori bSLsigma′brparenori=/barSCVbSLsigma∩VbSLsigma′/barSC
+/barSCVbSLsigma∪VbSLsigma′/barSC
+for a pair of routesbSLsigmaandbSLsigma′, which measures the
+closeness of the assigned customers between the two
+routes.RcloseblparenoribSLsigmabcommaori bSLsigma
+′brparenori=1 holds if and only if the
+assigned customers ofbSLsigmaandbSLsigma′ are exactly the same.
+For a pair of solutions/UPsigma=blparenoribSLsigma1bcommaoribSLsigma2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmam brparenoriand/UPsigma′ =
+blparenoribSLsigma′
+1bcommaoribSLsigma′
+2bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigma′
+m brparenori, let
+Scloseblparenori/UPsigmabcommaori/UPsigma′brparenori=1
+m
+m∑
+k=1
+max
+k′
+blbraceoriRcloseblparenoribSLsigmakbcommaoribSLsigmak′ brparenoribrbraceoribcommaori
+which measures the closeness of the assigned cus-
+tomers between the two solutions.Scloseblparenori/UPsigmabcommaori/UPsigma′brparenori=1
+holdsifandonlyiftheassignedcustomersareexactly
+the same. Let¯m (respectively,¯s) be the mean (respec-
+tively, standard deviation) ofScloseblparenori/UPsigmabcommaori/UPsigma
+′brparenoribetween
+allpairsblparenori/UPsigmabcommaori/UPsigma′brparenoriofsolutionsinP,andletbSLxiblparenoriPbrparenori=¯m+2¯s
+and
+S=
+{
+/UPsigma∈P /barSCScloseblparenori/UPsigmaloptbcommaori/UPsigmabrparenori≥bSLxiblparenoriPbrparenori
+}
+bperiodori
+S is the set of solutions inP whose assigned cus-
+tomers are similar to that of/UPsigmalopt.I fS=/varnothingholds,
+we letPbcolonori=P∪blbraceori/UPsigmaloptbrbraceori\blbraceori/UPsigmaworstbrbraceori. Otherwise (i.e.,S̸=/varnothing),
+we letS′ bcolonori=blbraceori/UPsigma∈S/barSCcostblparenori/UPsigmabrparenori≥costblparenori/UPsigmaloptbrparenoribrbraceoriand then let
+Pbcolonori=P∪blbraceori/UPsigmaloptbrbraceori\S′ ifS′ ̸=/varnothing(P remains unchanged if
+S′ =/varnothing). The above rules of updating setP for the
+obtained locally optimal solution/UPsigmaloptis summarized
+as follows:
+Procedure UPDATE( Pbcommaori/UPsigmalopt).
+Step1bperiodoriIf/barSCP/barSC<bSLnuamls
+popandcostblparenori/UPsigmaloptbrparenoridiffersfromthe
+costs of all solutions inP, letPbcolonori=P∪blbraceori/UPsigmaloptbrbraceoriand halt.
+Step2bperiodori(/barSCP/barSC=bSLnuamls
+popholds.) For the worst solution
+/UPsigmaworstinP, halt ifcostblparenori/UPsigmaloptbrparenori>costblparenori/UPsigmaworstbrparenoriholds.
+Step3bperiodoriLetSbcolonori=blbraceori/UPsigma∈P /barSCScloseblparenori/UPsigmaloptbcommaori/UPsigmabrparenori≥bSLxiblparenoriPbrparenoribrbraceori.I f
+S=/varnothing,letPbcolonori=P∪blbraceori/UPsigmaloptbrbraceori\blbraceori/UPsigmaworstbrbraceori.Otherwise,compute
+S′ bcolonori=blbraceori/UPsigma∈S /barSCcostblparenori/UPsigmabrparenori≥costblparenori/UPsigmaloptbrparenoribrbraceori, and letPbcolonori=P∪
+blbraceori/UPsigmaloptbrbraceori\S′ ifS′ ̸=/varnothing.
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 223
+Then, Algorithm AMLS is summarized as follows:
+Algorithm AMLS.
+Step1bperiodoriLetbest bcolonori=/infinity2andPbcolonori=/varnothing.
+Step2bperiodoriIf/barSCP/barSC<bSLnuamls
+pop,generateaninitialsolution/UPsigma0
+randomly. Otherwise, let/UPsigma0 bcolonori=GENINIT blparenoriP brparenori.
+Step3bperiodoriImprove/UPsigma0 by LS; i.e., let/UPsigmaloptbcolonori=LSblparenori/UPsigma0brparenori.
+Step4bperiodoriIf a solution/UPsigma′ satisfyingbestevalblparenori/UPsigma′brparenori<b e s t
+is found during the execution of LS, letbest bcolonori=
+bestevalblparenori/UPsigma′brparenoriand/UPsigmabestbcolonori=/UPsigma′.
+Step5bperiodoriUpdate setP by calling UPDATEblparenoriP bcommaori/UPsigmaloptbrparenori.
+Step6bperiodoriIf some stopping criterion is satisﬁed, out-
+put/UPsigmabestand halt; otherwise return to Step 2.
+6. ComputationalResults
+We conducted various computational experiments to
+evaluate the proposed algorithms. The algorithms
+werecodedinClanguageandrunonahandmadePC
+(IntelPentiumIII1GHz,1GBmemory).Theprogram
+parametersweresetasshowninTable1unlessother-
+wisestated.Thecomputationaltimewasmeasuredby
+usingthesubroutineavailableatTsuchimura’swebsite
+(http://www.nn.iij4u.or.jp/~tutimura/c/cpu_time.c).
+6.1. TheVehicleRoutingProblemwithHard
+TimeWindows
+6.1.1. Solomon’sBenchmarkInstances.Thebench-
+mark instances by Solomon (1987) are widely used
+in the literature. The number of customers in each
+instance is 100, and their locations are distributed
+in the squareblbracketori0bcommaori100brbracketori
+2 of the plane. The distances
+between customers are measured by Euclidean dis-
+tance (in double precision), and the traveling times
+areproportionaltothecorrespondingdistances.Each
+customeri(including the depot) has one time win-
+dowblbracketoriw
+r
+ibcommaoriwd
+i brbracketori,anamountofrequirementqi,andaser-
+vice timeui. All vehiclesk have a ﬁxed capacityQ.
+Both time-window and capacity constraints are con-
+sideredhard.Fortheseinstances,thenumberofvehi-
+clesm is also a decision variable, and the objective
+is to ﬁnd a solution with the minimumblparenorimbcommaori d
+sumblparenori/UPsigmabrparenoribrparenori
+in the lexicographical order. (For two vectorsbSLalpha=
+blparenoribSLalpha1bcommaoribSLalpha2bcommaoribperiodoribperiodoribperiodoribcommaoribSLalphalbrparenoriandbSLbeta=blparenoribSLbeta1bcommaoribSLbeta2bcommaoribperiodoribperiodoribperiodoribcommaoribSLbetalbrparenori, bSLalphais smaller
+thanbSLbetainthelexicographicalorderifandonlyifthere
+Table 1 The Default Parameter Values of Our Algorithms
+N cross: Lcross=3
+N intra: Lintra
+path=3,Lintra
+ins=30
+N cyclic: Lcyclic=3,/SLnucyclic=5
+Neighbor-lists:/SLnunlist=20,/SLmunlist=3,Lnlist
+cross=20
+(Lnlist
+2opt∗=min/lbraceori/lparenoriLcross/rparenori2Lnlist
+cross/commaorin /rbraceori=100)
+ILS: /SLnuILS
+ptb=1
+AMLS: /SLnuAMLS
+pop =10
+is an indexi∈blbracketori1bcommaoril brbracketorithat satisﬁesbSLalphaj=bSLbetaj for allj<i
+andbSLalphai <bSLbetai.)Thesebenchmarkinstancesconsistofsix
+differentsetsofprobleminstancescalledR1,R2,RC1,
+RC2,C1,andC2,respectively.Locationsofcustomers
+are uniformly distributed in type Rand are clustered
+in groups in type C, and the two types are mixed
+in type RC. Furthermore, for instances of type 1, the
+time window is narrow at the depot, and hence only
+a small number of customers can be served by one
+vehicle. Conversely, for instances of type 2, the time
+window is wide, and hence many customers can be
+served by one vehicle.
+6.1.2. ComputationalResults.BecauseSolomon’s
+benchmark instances are constructed for VRPHTW,
+we use the lexicographical order of the vector
+blparenoriq
+sumblparenori/UPsigmabrparenoribcommaori p∗
+sumblparenori/UPsigmabrparenoribcommaori dsumblparenori/UPsigmabrparenoribrparenoriasbestevalblparenori/UPsigmabrparenoriin §3.2. As
+the penalty functionpiblparenoritbrparenorifor customeri, we use for-
+mula (6). How we set the number of vehiclesm and
+parameterbSLalphain (6) is described in the appendix.
+We ﬁrst tested Algorithm MLS without incorporat-
+ingNcyclictoseetheeffectivenessofthetime-oriented
+neighbor-lists.Recallthatthetime-orientedneighbor-
+listsareusedonlyforN
+2opt∗
+andN cross.Neighborhood
+Nintrais also used in this experiment, since the solu-
+tion quality is poor withoutN intra, and its computa-
+tional time is small compared with that ofN cross.W e
+tested two valuesLnlist
+cross=30bcommaori100 (Lnlist
+cross=100 means
+that the whole neighborhoodN cross∪N 2opt∗
+is used).
+The value ofLnlist
+2opt∗is set to minblbraceoriblparenoriLcrossbrparenori2Lnlist
+crossbcommaorin brbraceorias
+discussed in §4.3. Algorithm LS was repeated from
+randomlygeneratedinitialsolutions50timesforeach
+value ofL
+nlist
+cross, and the average values of the cost and
+the computational time were compared. Though the
+results are omitted due to space limitation, it was
+observed that, ifL
+nlist
+crossis set to 30, the average com-
+putational time is reduced to 20%–30% of those with
+L
+nlist
+cross=100,whilemaintainingalmostequivalentsolu-
+tionquality.Actually,LSwithLnlist
+cross=30obtainedbet-
+ter average cost for some instances.
+We then tested the effectiveness of the cyclic-
+exchange neighborhood. For this, we compared the
+qualities of solutions obtained by ILS with and with-
+outN
+cyclic.Bothalgorithmswererun1,800secondsfor
+eachinstance,andthesolutionqualitiesandthenum-
+ber of calls to LS were compared. Though the results
+are also omitted due to space limitation, not much
+difference in solution quality was observed. It is con-
+ceivablethatonereasonforthisisthatthenumberof
+calls to LS in ILS withoutN
+cyclicis much larger than
+that of ILS withN cyclic(i.e., many LS can compen-
+sate the power of the cyclic-exchange neighborhood).
+However, this does not immediately mean that the
+cyclic exchange neighborhood is useless, as will be
+observed in §6.2.
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+224 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+Table 2 Comparison of the Solution Quality on Solomon’s Instances
+Problem ILS ILS AMLS AMLS H&G G&H BBB Br † BVH H&G
+class 2,000s 15,000s 2,000s 15,000s (1999)(2002)(2003)(2003)(2001)(2004)
+C1 MNV 10 /periodori00 10 /periodori00 10 /periodori00 10 /periodori00 10 /periodori00 10 /periodori00 10 /periodori00 10 /periodori00 10 /periodori00 10 /periodori00
+MTD 828 /periodori38 828 /periodori38 828 /periodori38 828 /periodori38 828 /periodori38 828 /periodori63 828 /periodori48 828 /periodori38 828 /periodori38 828 /periodori38
+C2 MNV 3 /periodori00 3 /periodori00 3 /periodori00 3 /periodori00 3 /periodori00 3 /periodori00 3 /periodori00 3 /periodori00 3 /periodori00 3 /periodori00
+MTD 589 /periodori86 589 /periodori86 589 /periodori86 589 /periodori86 589 /periodori86 590 /periodori33 589 /periodori93 589 /periodori86 589 /periodori86 589 /periodori86
+R1 MNV 12 /periodori00 11 /periodori92 11 /periodori92 11 /periodori92 11 /periodori92 12 /periodori00 11 /periodori92 11 /periodori92 11 /periodori92 11 /periodori92
+MTD 1 /commaori215 /periodori83 1 /commaori214/periodori26 1 /commaori220/periodori02 1 /commaori217/periodori40 1 /commaori228/periodori06 1 /commaori217/periodori57 1 /commaori221/periodori10 1 /commaori222/periodori12 1 /commaori213/periodori25 1 /commaori212/periodori73
+R2 MNV 2 /periodori73 2 /periodori73 2 /periodori73 2 /periodori73 2 /periodori73 2 /periodori73 2 /periodori73 2 /periodori73 2 /periodori73 2 /periodori73
+MTD 978 /periodori84 967 /periodori03 961 /periodori64 959 /periodori11 969 /periodori95 961 /periodori29 975 /periodori43 975 /periodori12 966 /periodori37 955 /periodori03
+RC1 MNV 11 /periodori50 11 /periodori50 11 /periodori63 11 /periodori50 11 /periodori63 11 /periodori50 11 /periodori50 11 /periodori50 11 /periodori50 11 /periodori50
+MTD 1 /commaori385 /periodori89 1 /commaori385 /periodori42 1 /commaori378 /periodori72 1 /commaori391 /periodori03 1 /commaori392/periodori57 1 /commaori395 /periodori13 1 /commaori389 /periodori89 1 /commaori389 /periodori58 1 /commaori384/periodori22 1 /commaori386/periodori44
+RC2 MNV 3 /periodori25 3 /periodori25 3 /periodori25 3 /periodori25 3 /periodori25 3 /periodori25 3 /periodori25 3 /periodori25 3 /periodori25 3 /periodori25
+MTD 1 /commaori147/periodori38 1 /commaori131/periodori24 1 /commaori132/periodori17 1 /commaori122/periodori79 1 /commaori144/periodori43 1 /commaori139 /periodori37 1 /commaori159 /periodori37 1 /commaori128/periodori38 1 /commaori141/periodori24 1 /commaori123/periodori17
+All CNV 406 405 406 405 406 406 405 405 405 405
+CTD 57 /commaori798 57 /commaori516 57 /commaori480 57 /commaori444 57 /commaori876 57 /commaori641 57 /commaori952 57 /commaori710 57 /commaori567 57 /commaori309
+Notes. † Better results with CNV 405 and CTD 57,273 were reported without specifying the CPU time in Bent and Van Hentenryck (2001). The results in column
+BVH (2001)were taken from Tables 4 and 5 of Bent and Van Hentenryck (2001) , which are the best of ﬁve runs where each run takes 7,200 CPU seconds on
+a Sun Ultra 10 440 MHz.
+We ﬁnally compare the best solutions obtained by
+Algorithms ILS and AMLS with other existing meth-
+ods.(TheresultsofMLSaremuchworsethanthoseof
+ILSandAMLS,andareomitted.)BothILSandAMLS
+were run up to 15,000 seconds for each instance. The
+results are shown in Table 2. MNV represents the
+mean number of vehicles, MTD represents the mean
+total distance, CNV represents the cumulative num-
+ber of vehicles, and CTD represents the cumulative
+total distance, which are usually used in the litera-
+ture to compare the results on Solomon’s instances.
+Column ILS 2000s is the result of ILS, where the
+time limit for each instance is 2,000 seconds. The
+meaning of columns ILS 15000s, AMLS 2000s, and
+AMLS 15000s are similar. Column H&G (1999) is the
+resultbyHombergerandGehring(1999),G&H(2002)
+is the result by Algorithm HM4C in Gehring and
+Homberger (2002), BBB (2003) is the result by Berger
+et al. (2003), Br (2003) is the result by Algorithm
+RVNS(2)inBräysy(2003),BVH(2001)istheresultby
+Bent and Van Hentenryck (2001), and H&G (2004) is
+the result by Homberger and Gehring (2004).
+According to a recent survey by Bräysy and Gen-
+dreau (2005b), not many algorithms achieved CNV
+406orless,andonlythosealgorithmscitedinTable2
+achieved CNV 405. The average computational time
+of Algorithms H&G (1999), G&H (2002), BBB (2003),
+Br (2003), and BVH (2001) for each instance are
+roughlyestimatedas800,6,000,1,300,500,and14,000
+seconds, respectively, if they were run on our com-
+puter (see the appendix for the comparison of differ-
+entcomputers).ComputationaltimeofH&G(2004)is
+not clearly stated in Homberger and Gehring (2004).
+The solution qualities of ILS and AMLS with the
+timelimitof2,000secondsarecompetitivewithH&G
+(1999) and G&H (2002), but slightly worse than BBB
+(2003), Br (2003), BVH (2001), and H&G (2004). If
+muchlongercomputationaltime—15,000seconds—is
+allowed, both ILS and AMLS exhibit better quality
+thanBBB(2003),Br(2003),andBVH(2001).Notethat
+the computational time of our algorithms is roughly
+equivalent to algorithm BVH (2001).
+These results are signiﬁcant, since our algorithms
+are very general and not tailored to VRPHTW. More
+details of the computational results on Solomon’s
+instances are presented in the appendix.
+6.2. ParallelMachineSchedulingProblem
+6.2.1. The Problem Deﬁnition.For the PMP, we
+aregivennjobsblbraceori1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorin brbraceoriandm identicalmachines
+blbraceori1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorim brbraceori. A machine can process only one job at
+a time, and processing of a job cannot be stopped,
+once it begins, until it is completed (i.e., no preemp-
+tion allowed). Each jobihas:
+• a processing timeu
+i blparenori≥0brparenori, and
+• a penalty functionpiblparenorisibrparenoriblparenori≥0brparenoriof the start timesi
+of jobi.
+Wearealsogivenapenaltyfunctionp0blparenoritbrparenoriofthecom-
+pletion timetof all jobs in each machine. The objec-
+tive is to ﬁnd an assignment of jobs to machines,
+start timess
+i of jobsiblparenori i=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorin brparenori, and comple-
+tion timessa
+k of machineskblparenori k=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaorim brparenoriso that
+the following total penalty is minimized:
+n∑
+i=1
+piblparenorisibrparenori+
+m∑
+k=1
+p0blparenorisa
+k brparenoribperiodori
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 225
+(a) LINEAR (b) NCONV1
+(c-f) f-type of NCONV2 (c-b) b-type of NCONV2
+ii
+ii
+i− 3 i+3
+i− 7 i+7
+0
+00
+0
+1
+3.53 .5
+pi( t)pi( t)
+pb
+i ( t)pf
+i( t)
+tt
+tt
+Figure 11 Penalty Functionspi/lparenorit/rparenori
+Note. (a)LINEAR, (b)NCONV1, (c-f)f-type of NCONV2, and (c-b)b-type of NCONV2.
+As can be easily understood, this is a special case
+ofVRPGTWinwhichthedistanceandtravelingtime
+between customers and the quantity of goods to be
+delivered to customers are always 0. We considered
+this problem in order to observe the performance of
+our algorithm in dealing with general time penalty
+functions by generating instances whose optimal val-
+ues are known.
+6.2.2. GenerationofInstances.Wegeneratethree
+instances of PMP, which we call LINEAR, NCONV1,
+andNCONV2.Foreachinstance,100jobswithu
+i=10
+blparenorii=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori100brparenoriare scheduled to 10 machines, and
+p0blparenoritbrparenoriis deﬁned as
+p0blparenoritbrparenori=maxblbraceori−tbcommaori0bcommaorit−110brbraceoribperiodori
+We deﬁnepiblparenoritbrparenorifori=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori100 so thatpiblparenoriibrparenori=0
+holds for alliin all instances (the concrete deﬁnition
+ofpiblparenoritbrparenoridepends on the instance, and will be given
+later in this section). We deﬁne the sets of jobsIk =
+blbraceorii/barSCi≡k−1blparenorimod10brparenoribrbraceori,k=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori10.Then,anopti-
+mal schedule of cost 0 can be obtained by the follow-
+ing rules:
+• All jobsi∈I
+k are assigned to machinek fork=
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori10.
+• Start timesi of jobiis set toi.
+• Completiontimesa
+k isthecompletiontimeofthe
+last job processed on machinek.
+The three instances differ only in their penalty
+functionsp
+iblparenoritbrparenori, which are deﬁned as follows (see
+Figure 11):
+LINEAR.Penalty functions ofi=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori100 are
+deﬁned by
+piblparenoritbrparenori=maxblbraceorii−tbcommaorit−ibrbraceoribperiodori
+NCONV1. Penalty functions ofi=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori100 are
+deﬁned by
+piblparenoritbrparenori=
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+i−2−tbcommaori t < i−3bcommaori
+t−i+4bcommaorii−3≤t<i −2bcommaori
+i−tbcommaori−2≤t<i bcommaori
+t−ibcommaori i≤t<i +2bcommaori
+i+4−tbcommaori i+2≤t<i +3bcommaori
+t−i−2bcommaorii+3≤tbperiodori
+NCONV2. There are two types—f-type and b-
+type—of penalty functions for NCONV2. We denote
+penaltyfunctionsoff-typeandb-typeforjobiasp
+f
+iblparenoritbrparenori
+andpb
+i blparenoritbrparenori,respectively.Thesefunctionsaredeﬁnedby
+pf
+iblparenoritbrparenori=
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+i−7−tbcommaori t < i−7bcommaori
+t−i+7bcommaorii−7≤t<i −3bperiodori5bcommaori
+i−tbcommaori i−3bperiodori5≤t<i bcommaori
+t−ibcommaori i≤tbcommaori
+and
+p
+b
+i blparenoritbrparenori=
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+i−tbcommaori t < ibcommaori
+t−ibcommaori i≤t<i +3bperiodori5bcommaori
+i+7−tbcommaori i+3bperiodori5≤t<i +7bcommaori
+t−i−7bcommaorii+7≤tbperiodori
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+226 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+Table 3 The Best Costs, Average Costs, and the Number of Calls to Algorithm LS by Six Algorithms Applied
+to the Parallel Machine Scheduling Problem
+Instance MLS MLS − ILS ILS − AMLS AMLS −
+LINEAR best cost 0 4 0 0 0 2
+avg. cost 0 /periodori06 /periodori70 /periodori00 /periodori70 /periodori02 /periodori0
+#LS 101 /periodori71 /commaori048/periodori0 113 /periodori7 985 /periodori7 120 /periodori0 936 /periodori3
+NCONV1 best cost 0 13 0 0 0 8
+avg. cost 0 /periodori01 5 /periodori30 /periodori01 /periodori00 /periodori09 /periodori3
+#LS 65 /periodori7 635 /periodori09 4 /periodori3 588 /periodori37 0 /periodori3 395 /periodori3
+NCONV2 best cost 4 23 0 12 3 21
+avg. cost 5 /periodori32 5 /periodori00 /periodori01 7 /periodori74 /periodori02 1 /periodori3
+#LS 55 /periodori3 720 /periodori79 4 /periodori0 677 /periodori75 8 /periodori0 403 /periodori0
+Then,wesetpiblparenoritbrparenori=pb
+i blparenoritbrparenorifor1≤i≤10,piblparenoritbrparenori=pf
+iblparenoritbrparenorifor
+91≤i≤100,andwerandomlychoosepf
+iblparenoritbrparenoriorpb
+i blparenoritbrparenorias
+piblparenoritbrparenorifor 11≤i≤90.
+6.2.3. Computational Results.Let MLS−, ILS−
+and AMLS−be Algorithms MLS, ILS, and AMLS,
+respectively, in whichN cyclicis not incorporated. We
+tested six algorithms, MLS, MLS−, ILS, ILS−, AMLS,
+and AMLS−. Each algorithm was run three times for
+each instance, where each run was terminated after
+1,800 seconds. Table 3 shows the best costs, aver-
+age costs, and the average number of calls to algo-
+rithmLS.ItcanbeobservedfromthetablethatMLS,
+ILS, and AMLS are much more powerful than MLS
+−,
+ILS−, and AMLS−, indicating the effectiveness of the
+cyclic-exchangeneighborhood.Itcanalsobeobserved
+that ILS produces slightly better solutions than MLS
+and AMLS. In summary, incorporating the cyclic-
+exchange neighborhood is useful for these instances.
+6.3. AProductionSchedulingProblemwith
+InventoryCost
+6.3.1. The Problem Deﬁnition.We consider the
+production of˜n items in a given periodblbracketori0bcommaoriXbrbracketorionm
+identical machines. Each itemi=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori˜n has
+• a demandZ
+i,
+• an inventory cost coefﬁcientci
+i,
+• a production rateR i,
+and each ordered pair ofblparenoriibcommaori jbrparenoriforibcommaori j∈blbraceori1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori˜nbrbraceori
+has
+• a setup costcs
+ij,
+• a setup timets
+ij,
+whereZ i is the amount of itemito produce during
+blbracketori0bcommaoriXbrbracketori,ci
+i is the cost incurred for a unit of the accu-
+mulated inventory of itemi,R i is the time required
+to produce one unit of itemi,cs
+ijis the cost incurred
+whenever the production on a machine is changed
+from itemi to itemj (c
+s
+ii=0), andts
+ij is the time
+required for the setup operation (ts
+ii=0). We assume
+that the amountZ i/X of itemiis consumed per unit
+time. The production of an item can be divided into
+lots of possibly different sizes. LetbSLzeta
+i be the number
+of lots of itemi, ir blparenorir=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoribSLzetaibrparenoribe therth lot
+of itemi, bSLthetair be the amount of production of lotir
+(i.e., the lot size), andsir be the start time of lotir.
+Then∑bSLzetai
+r=1bSLthetair =Z i must hold. Moreover, letbSLsigmak =
+blparenoribSLsigmakblparenori1brparenoribcommaori bSLsigmakblparenori2brparenori bcommaoribperiodoribperiodoribperiodoribcommaoribSLsigmakblparenorinkbrparenoribrparenoridenote the production order
+on machinek, wherebSLsigmakblparenorihbrparenoridenote thehth lot inbSLsigmak.
+Then,aschedule/UPpi=blparenori/UPzetabcommaori/UPthetabcommaori/UPsigmabcommaorisbrparenoriisdeterminedby
+• the number of lotsbSLzetai of each itemi=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori˜n,
+• the sizebSLthetair of each lotir, r=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoribSLzetaibcommaorii=
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori˜n,
+• a production orderbSLsigmak on machinesk =1,
+2bcommaoribperiodoribperiodoribperiodoribcommaorim,
+• start timesir of production of each lotir, r=
+1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaoribSLzetaibcommaorii=1bcommaori2bcommaoribperiodoribperiodoribperiodoribcommaori˜n.
+Determining the start timessir is not trivial, since the
+machines can have idle time between adjacent lots.
+Leta
+/UPpi
+i blparenorixbrparenoridenote the accumulated amount of itemi
+produced before timexblparenori0≤x≤Xbrparenori, which is deter-
+mined by the schedule/UPpi. Then deﬁne
+b/UPpi
+i =max
+{
+max
+0≤x≤X
+blbraceoriblparenoriZi/Xbrparenorix−a/UPpi
+i blparenorixbrparenoribrbraceoribcommaori0
+}
+bcommaori
+which is the amount of itemirequired to be stored
+at time 0 so that the shortage of itemiwill not occur
+during the entire scheduling period. Thena/UPpi
+i blparenoriXbrparenori=
+Z i−b/UPpi
+i must hold. Ifb/UPpi
+i is stored at time 0, then the
+accumulated inventoryI/UPpi
+i of itemiover the whole
+periodblbracketori0bcommaoriXbrbracketoriis given by
+I/UPpi
+i =
+∫ X
+0
+blparenoria/UPpi
+i blparenorixbrparenori+b/UPpi
+i −blparenoriZi/Xbrparenorixbrparenori dxbperiodori
+Our objective function to be minimized is the sum of
+the total setup costs and the total inventory cost:
+m∑
+k=1
+nk−1∑
+h=1
+cs
+bSLsigmakblparenorihbrparenoribcommaoribSLsigmakblparenorih+1brparenori+
+˜n∑
+i=1
+ci
+i·I/UPpi
+i bperiodori
+6.3.2. Formulation to VRPGTW.The production
+scheduling problem with inventory cost can be for-
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 227
+Table 4Comparison of Schedules Obtained by ILS and Those Used in
+the Company
+ILSCost (yen)of the Reduction
+Data n real schedule Cost (yen)CUP secs. ratio (%)
+1,999.11 66 1,443,758 1,094,932 794 24.2
+1,999.12 67 1,400,603 919,898 523 34.3
+2,000.01 57 1,258,431 913,148 316 27.4
+2,000.02 60 1,106,430 758,573 348 31.4
+2,000.03 59 1,177,601 858,588 334 27.1
+2,000.04 66 1,119,503 698,220 458 37.6
+mulated to VRPGTW as follows: The formulation
+includessomeapproximationonlotsizingandinven-
+tory cost. First, we regard the number of lotsbSLzeta
+i as a
+parameter, and divide the demandZ i intobSLzetai lots of
+thesameamountZ i/bSLzetai.(IfbSLzetaiaresetlarger,theapprox-
+imation is more precise because consecutive produc-
+tion of lots of the same item can be regarded as one
+lot.)IntheVRPGTWformulation,eachcustomerrep-
+resentstheproductionofalot,andeachvehiclerepre-
+sentsamachine.Then,visitingcustomeri
+r byvehicle
+k signiﬁes that therth lot of itemiis produced on
+machinek. The service timeuir of customerir then
+becomesR iZ i/bSLzetai. We let the distancedirjr′ from cus-
+tomerir to customerjr′ bedirjr′ =cs
+ij, and the travel
+timetirjr′ from customerir to customerjr′ betirjr′ =ts
+ij.
+Finally, we set the time penalty functionpir blparenoritbrparenorito rep-
+resenttheinventorycostofitemiasfollows:Because
+we divide demandZ i intobSLzetai lots, the desirable start
+time of lotir is
+s∗
+ir
+=blparenorir−1brparenoriX/bSLzetaibperiodori
+If the production of lotir begins earlier thans∗
+ir
+by
+oneunittime,theaccumulatedinventoryI/UPpi
+i increases
+byZ i/bSLzetai.Conversely,iftheproductionoflotir begins
+laterthans∗
+ir
+byoneunittime,b/UPpi
+i shouldbeincreased
+to avoid shortage, and we consider that the accumu-
+lated inventoryI
+/UPpi
+i increases byZ i. Based on these
+Table 5 TheNumberofVehiclesm andParameter/SLalphaforSolomon’sBenchmarkInstances
+Instancem/SLalpha Instancem/SLalpha Instancem/SLalpha Instancem/SLalpha
+R101 19 50 R201 4 10 RC101 14 100 RC201 4 10
+R102 17 50 R202 3 10 RC102 12 100 RC202 3 10
+R103 13 100 R203 3 1 RC103 11 10 RC203 3 1
+R104 10 10 R204 2 10 RC104 10 10 RC204 3 1
+R104 9 10 R205 3 1 RC105 14 100 RC205 4 10
+R105 14 10 R206 3 1 RC105 13 5 /commaori000 RC206 3 1
+R106 12 10 R207 2 5 RC106 11 100 RC207 3 1
+R107 10 10 R208 2 1 RC107 11 10 RC208 3 1
+R108 9 10 R209 3 1 RC108 10 10
+R109 11 50 R210 3 5
+R110 10 50 R211 2 10
+R111 10 10
+R112 9 50
+observations, we set the time penalty functionpir blparenoritbrparenori
+as
+pir blparenoritbrparenori=max
+{
+bSLalphar
+ir
+blparenoris∗
+ir
+−xbrparenoribcommaori bSLalphad
+ir
+blparenorix−s∗
+ir
+brparenori
+}
+bcommaori
+wherebSLalphar
+ir
+=ci
+iZ i/bSLzetai andbSLalphad
+ir
+=ci
+iZ i. (The above penalty
+becomes larger than the actual inventory cost if more
+than one lot of one item is late, since the amounts
+of inventory to be added tob
+/UPpi
+i are summed up in
+our penalty function, whereas only the maximum of
+such amounts for each item contributes to the real
+inventory cost.)
+6.3.3. ComputationalResults.We conducted com-
+putationalexperimentsonrealdatafromKokuyoCo.,
+Ltd. In that company, the scheduling periodX is one
+month,andoneunitofoperatingtimeiseighthours.
+It is requested by the company that the minimum
+production amount of itemiat a time should be the
+amount to be produced in eight hours. For this, we
+set parameterbSLzeta
+i so thatZ i/bSLzetai becomes equal to that
+amount. The number of machinesm is three, and
+the total number of lotsn=∑˜n
+i=1bSLzetai is summarized in
+Table 4.
+For this problem, we only tested ILS, since the
+objective of this experiment is to see the wide
+applicability of our problem formulation. For each
+instance, ILS was run until the number of calls to LS
+reaches 300. Table 4 shows the costs in yen of the
+schedulesobtainedbyILSandthoseofrealschedules
+currently used by the company. (Note that the costs
+of our algorithm are recomputed after the schedules
+areobtained;i.e.,theyarenottheapproximatevalues
+used in the algorithm.) The computational times of
+ILS in seconds and the reduction ratio of the costs in
+percent are also shown. Signiﬁcant reduction in cost
+can be observed from the table.
+7. Conclusion
+We considered the VRPGTW and proposed LS
+algorithms. Problem VRPGTW is quite general in
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+228 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+Table 6 Detailed Results by ILS for Solomon’s Instances
+Time limit=2/commaori000 secs Time limit =15 /commaori000 secs To ﬁnd feasible
+#LS in Time to #LS in Time to #LS to Time to
+m Distance total best (s)Distance total best (s) feas. feas. (s)
+R101 19 1 /commaori650 /periodori80 760 190 /periodori94 1 /commaori650 /periodori80 5,632 190 /periodori94 21 43 /periodori01
+R102 17 1 /commaori487/periodori88 598 440 /periodori49 1 /commaori486/periodori96 4,073 14 /commaori246/periodori96 2 5 /periodori06
+R103 13 1 /commaori297/periodori99 775 1 /commaori072/periodori59 1 /commaori293/periodori05 5,338 6 /commaori343/periodori37 96 171 /periodori39
+R104 10 982 /periodori02 899 1 /commaori247/periodori93 982 /periodori02 6,512 1 /commaori247/periodori93 2 5 /periodori78
+R104 9 — — — 1 /commaori013/periodori13 5,313 2 /commaori032/periodori78 718 2 /commaori012/periodori69
+R105 14 ∗1/commaori377 /periodori11 786 486 /periodori91 ∗1/commaori377 /periodori11 5,319 486 /periodori91 6 13 /periodori82
+R106 12 1 /commaori261/periodori94 704 736 /periodori88 1 /commaori257 /periodori96 5,107 9 /commaori416/periodori67 6 13 /periodori96
+R107 10 1 /commaori125 /periodori40 712 855 /periodori11 1 /commaori120/periodori25 5,079 4 /commaori869/periodori27 92 217 /periodori28
+R108 9 980 /periodori32 763 994 /periodori55 962 /periodori34 5,761 4 /commaori013/periodori62 49 102 /periodori82
+R109 11 1 /commaori197 /periodori64 761 557 /periodori19 ∗1/commaori194/periodori73 5,423 4 /commaori700/periodori72 92 210 /periodori70
+R110 10 1 /commaori119 /periodori00 763 884 /periodori47 1 /commaori119 /periodori00 5,499 884 /periodori47 60 126 /periodori45
+R111 10 1 /commaori106/periodori30 714 190 /periodori10 1 /commaori101/periodori91 5,119 12 /commaori034/periodori23 25 60 /periodori61
+R112 9 1003 /periodori55 930 1 /commaori984/periodori91 993 /periodori82 6,634 14 /commaori486/periodori12 817 1 /commaori776/periodori35
+R201 4 1 /commaori262/periodori64 555 1 /commaori893 /periodori11 1 /commaori253 /periodori23 3,805 3 /commaori306/periodori99 1 3 /periodori22
+R202 3 1 /commaori201/periodori24 338 1 /commaori671/periodori67 1 /commaori200/periodori40 2,213 4 /commaori555 /periodori79 5 27 /periodori13
+R203 3 953 /periodori98 313 1 /commaori017/periodori88 952 /periodori29 2,208 11 /commaori018/periodori32 1 7 /periodori38
+R204 2 853 /periodori86 253 200 /periodori95 853 /periodori86 1,786 200 /periodori95 24 164 /periodori66
+R205 3 1 /commaori026/periodori25 308 1 /commaori026/periodori25 1 /commaori009 /periodori10 2,190 10 /commaori856 /periodori82 1 6 /periodori10
+R206 3 913 /periodori18 394 1 /commaori355 /periodori17 912 /periodori01 2,473 9 /commaori251 /periodori25 1 7 /periodori30
+R207 2 977 /periodori54 240 1 /commaori616/periodori77 898 /periodori64 1,672 12 /commaori453/periodori91 82 623 /periodori46
+R208 2 736 /periodori43 278 1 /commaori942/periodori15 734 /periodori67 1,787 4 /commaori639/periodori49 1 8 /periodori80
+R209 3 919 /periodori58 331 944 /periodori87 919 /periodori58 2,202 944 /periodori87 3 14 /periodori05
+R210 3 967 /periodori94 359 526 /periodori71 962 /periodori45 2,508 8 /commaori211/periodori05 1 5 /periodori49
+R211 2 954 /periodori65 248 1 /commaori093 /periodori23 941 /periodori10 1,678 9 /commaori217/periodori80 45 314 /periodori73
+RC101 14 1 /commaori696/periodori95 903 348 /periodori62 1 /commaori696/periodori95 6,608 348 /periodori62 110 215 /periodori14
+RC102 12 1 /commaori554 /periodori84 873 682 /periodori01 1 /commaori554 /periodori84 6,150 682 /periodori01 327 672 /periodori98
+RC103 11 1 /commaori265/periodori80 968 471 /periodori14 1 /commaori263/periodori54 7,031 5 /commaori248/periodori24 2 4 /periodori25
+RC104 10 1 /commaori137/periodori03 978 1 /commaori816/periodori49 1 /commaori136/periodori88 6,800 14 /commaori816/periodori71 13 30 /periodori49
+RC105 14 1 /commaori543/periodori38 869 1 /commaori452/periodori53 1 /commaori540/periodori18 6,165 3 /commaori312/periodori70 6 14 /periodori00
+RC105 13 1 /commaori633/periodori72 812 1 /commaori550 /periodori40 1 /commaori633/periodori72 5,726 1 /commaori550 /periodori40 109 219 /periodori51
+RC106 11 ∗1/commaori424/periodori73 1 /commaori124 573 /periodori76 ∗1/commaori424/periodori73 8,039 573 /periodori76 130 193 /periodori17
+RC107 11 1 /commaori232/periodori26 1 /commaori093 181 /periodori31 1 /commaori232/periodori26 7,956 181 /periodori31 4 6 /periodori20
+RC108 10 1 /commaori141/periodori76 1 /commaori096 700 /periodori90 1 /commaori140/periodori40 7,984 7 /commaori149/periodori54 28 44 /periodori35
+RC201 4 1 /commaori423/periodori60 602 589 /periodori51 1 /commaori413/periodori52 4,011 9 /commaori425/periodori99 1 2 /periodori91
+RC202 3 1 /commaori459 /periodori40 344 1 /commaori596 /periodori03 1 /commaori388 /periodori86 2,519 8 /commaori374/periodori82 42 197 /periodori19
+RC203 3 1 /commaori096/periodori15 410 1 /commaori842/periodori24 1 /commaori077 /periodori93 2,642 10 /commaori083/periodori76 4 16 /periodori18
+RC204 3 799 /periodori16 458 355 /periodori70 799 /periodori16 3,169 355 /periodori70 1 6 /periodori32
+RC205 4 1 /commaori314/periodori40 645 1 /commaori337/periodori54 1 /commaori307/periodori15 4,443 10 /commaori381/periodori77 1 2 /periodori88
+RC206 3 1 /commaori167/periodori28 378 306 /periodori16 1 /commaori165 /periodori04 2,553 6 /commaori164/periodori89 2 10 /periodori84
+RC207 3 1 /commaori075 /periodori92 353 1 /commaori118/periodori53 1 /commaori064/periodori05 2,399 2 /commaori902/periodori25 2 14 /periodori86
+RC208 3 843 /periodori15 424 1 /commaori936/periodori64 834 /periodori23 2,859 5 /commaori116/periodori93 1 4 /periodori58
+∗A tie with the best known solution.
+thattime-windowconstraintsarerepresentedbygen-
+eral penalty functions (e.g., more than one time win-
+dow for each customer can be treated). We proposed
+a DP algorithm to efﬁciently compute the optimal
+start times of services for customers in a given route.
+Wealsoincorporatedanadvancedneighborhood,the
+cyclic-exchange neighborhood, and the time-oriented
+neighborliststomaketheLSmoreeffective.Asforthe
+metaheuristic frameworks of LS, we tested the MLS,
+the ILS and the AMLS. The computational results
+on Solomon’s benchmark instances indicated that the
+proposed algorithms are quite effective. A PMP and
+aproductionschedulingproblemwithinventorycost
+were also solved to show a wide applicability of the
+proposed formulation of VRPGTW.
+Acknowledgments
+The authors are grateful to Akira Tanaka, Kokuyo Co.,
+Ltd., for providing the problem instances in §6.3. They
+are also grateful to Olli Bräysy (SINTEF Applied Mathe-
+matics), Dorit S. Hochbaum (University of California), Jörg
+Homberger (University of Cooperative Education), and the
+anonymous referees for valuable comments. This research
+was partially supported by Scientiﬁc Grant-in-Aid by the
+MinistryofEducation,Culture,Sports,ScienceandTechnol-
+ogyofJapan,andbytheTelecommunicationsAdvancement
+Foundation of Japan.
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 229
+Table 7 Detailed Results by AMLS for Solomon’s Instances
+Time limit=2/commaori000 secs Time limit =15 /commaori000 secs To ﬁnd feasible
+#LS in Time to #LS in Time to #LS to Time to
+m Distance total best (s)Distance total best (s)feas. feas.(s)
+R101 19 1 /commaori651 /periodori97 909 222 /periodori56 1 /commaori650 /periodori80 7 /commaori217 2 /commaori999 /periodori98 2 7 /periodori00
+R102 17 1 /commaori487/periodori97 771 180 /periodori45 1 /commaori487/periodori97 7 /commaori098 180 /periodori45 5 20 /periodori88
+R103 13 1 /commaori293/periodori05 952 1 /commaori718 /periodori30 1 /commaori293/periodori05 8 /commaori205 1 /commaori718 /periodori30 61 137 /periodori66
+R104 10 981 /periodori23 1 /commaori268 1 /commaori927/periodori28 981 /periodori23 9 /commaori922 1 /commaori927/periodori28 2 6 /periodori32
+R104 9 1 /commaori013/periodori13 920 1 /commaori986/periodori56 1 /commaori013/periodori13 7 /commaori718 1 /commaori986/periodori56 912 1 /commaori986/periodori56
+R105 14 ∗1/commaori377 /periodori11 884 466 /periodori13 ∗1/commaori377 /periodori11 7 /commaori213 466 /periodori13 5 16 /periodori58
+R106 12 1 /commaori258 /periodori48 852 1 /commaori683/periodori83 1 /commaori257 /periodori96 7 /commaori034 2 /commaori915 /periodori93 13 39 /periodori10
+R107 10 1 /commaori120/periodori98 1 /commaori093 1 /commaori165 /periodori17 1 /commaori118/periodori04 9 /commaori293 5 /commaori962/periodori73 46 145 /periodori89
+R108 9 977 /periodori28 922 1 /commaori495 /periodori42 963 /periodori99 8 /commaori699 2 /commaori550 /periodori13 14 39 /periodori44
+R109 11 1 /commaori197 /periodori42 1 /commaori215 1 /commaori690/periodori89 1 /commaori197 /periodori42 10 /commaori338 1 /commaori690/periodori89 29 91 /periodori40
+R110 10 1 /commaori142/periodori85 1 /commaori260 1 /commaori650 /periodori77 1 /commaori137/periodori10 10 /commaori579 2 /commaori460/periodori66 89 210 /periodori39
+R111 10 1 /commaori104/periodori54 803 1 /commaori913 /periodori35 1 /commaori096/periodori73 7 /commaori747 4 /commaori275 /periodori11 29 79 /periodori20
+R112 9 1 /commaori015 /periodori50 1 /commaori118 1 /commaori768/periodori87 1 /commaori015 /periodori50 9 /commaori168 1 /commaori768/periodori87 434 903 /periodori86
+R201 4 1 /commaori256/periodori11 1 /commaori063 1 /commaori900 /periodori43 1 /commaori253 /periodori23 8 /commaori508 2 /commaori359 /periodori64 1 3 /periodori21
+R202 3 1 /commaori201/periodori69 1 /commaori044 398 /periodori19 1 /commaori200/periodori18 8 /commaori326 4 /commaori573 /periodori36 6 31 /periodori77
+R203 3 946 /periodori20 599 1 /commaori407/periodori59 942 /periodori86 5 /commaori060 13 /commaori230/periodori44 1 7 /periodori09
+R204 2 848 /periodori59 678 1 /commaori808 /periodori52 844 /periodori20 5 /commaori740 9 /commaori664/periodori77 41 259 /periodori32
+R205 3 1 /commaori012/periodori32 519 1 /commaori175 /periodori57 1 /commaori004/periodori04 4 /commaori115 4 /commaori749/periodori60 1 5 /periodori95
+R206 3 914 /periodori28 599 1 /commaori533 /periodori23 913 /periodori26 4 /commaori877 13 /commaori551 /periodori43 1 7 /periodori03
+R207 2 909 /periodori80 909 1 /commaori574 /periodori27 908 /periodori77 7 /commaori894 2 /commaori601/periodori94 54 333 /periodori98
+R208 2 728 /periodori03 601 1 /commaori898 /periodori09 726 /periodori82 5 /commaori476 2 /commaori334/periodori02 1 8 /periodori37
+R209 3 916 /periodori99 536 1 /commaori543/periodori06 913 /periodori32 4 /commaori591 2 /commaori309 /periodori21 2 13 /periodori11
+R210 3 939 /periodori91 719 1 /commaori184/periodori84 939 /periodori37 5 /commaori127 7 /commaori045/periodori56 1 5 /periodori30
+R211 2 904 /periodori14 785 1 /commaori670/periodori15 904 /periodori14 4 /commaori537 1 /commaori670/periodori15 53 277 /periodori88
+RC101 14 1 /commaori696/periodori95 1 /commaori293 228 /periodori75 1 /commaori696/periodori95 10 /commaori052 228 /periodori75 45 98 /periodori62
+RC102 12 1 /commaori554 /periodori84 1 /commaori154 1 /commaori350 /periodori84 ∗1/commaori554 /periodori75 10 /commaori365 4 /commaori089 /periodori89 118 285 /periodori01
+RC103 11 1 /commaori263/periodori54 1 /commaori634 1 /commaori973 /periodori22 ∗1/commaori261/periodori67 12 /commaori480 8 /commaori887 /periodori18 2 5 /periodori98
+RC104 10 1 /commaori138/periodori95 1 /commaori533 566 /periodori86 ∗1/commaori135 /periodori48 12 /commaori248 9 /commaori584 /periodori67 5 16 /periodori44
+RC105 14 1 /commaori542/periodori29 911 1 /commaori342/periodori22 1 /commaori540/periodori18 11 /commaori671 3 /commaori133/periodori75 49 121 /periodori21
+RC105 13 — — — 1 /commaori681/periodori56 7 /commaori207 5 /commaori220/periodori97 2 /commaori453 5 /commaori220/periodori97
+RC106 11 1 /commaori453/periodori59 1 /commaori425 1 /commaori831/periodori30 ∗1/commaori424/periodori73 10 /commaori440 13 /commaori621/periodori57 514 733 /periodori54
+RC107 11 1 /commaori232/periodori26 1 /commaori735 821 /periodori58 1 /commaori232/periodori26 13 /commaori306 821 /periodori58 8 18 /periodori08
+RC108 10 1 /commaori147/periodori35 1 /commaori681 1 /commaori789 /periodori81 1 /commaori140/periodori83 12 /commaori928 4 /commaori134/periodori77 11 20 /periodori06
+RC201 4 1 /commaori413/periodori52 1 /commaori061 734 /periodori08 1 /commaori406/periodori94 8 /commaori366 6 /commaori877 /periodori76 1 2 /periodori95
+RC202 3 1 /commaori378 /periodori42 899 1 /commaori826/periodori62 1 /commaori376/periodori03 7 /commaori932 3 /commaori001/periodori17 23 100 /periodori63
+RC203 3 1 /commaori088 /periodori06 580 410 /periodori42 1 /commaori063/periodori68 4 /commaori805 2 /commaori262/periodori31 12 70 /periodori40
+RC204 3 800 /periodori83 849 662 /periodori97 799 /periodori16 7 /commaori522 8 /commaori742/periodori92 1 6 /periodori31
+RC205 4 1 /commaori302/periodori60 1 /commaori066 375 /periodori94 1 /commaori297/periodori65 9 /commaori141 4 /commaori668/periodori77 1 2 /periodori87
+RC206 3 1 /commaori152 /periodori03 642 1 /commaori798 /periodori40 ∗1/commaori146/periodori32 5 /commaori459 3 /commaori986/periodori83 6 36 /periodori49
+RC207 3 1 /commaori093 /periodori74 540 1 /commaori528 /periodori29 1 /commaori064/periodori40 4 /commaori917 4 /commaori274/periodori48 2 13 /periodori74
+RC208 3 ∗∗828/periodori14 749 1 /commaori522/periodori56 ∗∗828/periodori14 7 /commaori232 1 /commaori522/periodori56 1 4 /periodori58
+∗A tie with the best known solution;∗∗a better solution than the best known solution.
+Appendix. DetailedResultsforSolomon’s
+Instances
+The details of the results on Solomon’s instances are
+explained. We will omit the computational results for
+type C, since these instances are easy and our algorithms
+always output the best known values (see, e.g., the column
+Our best solutioninTablesIIandIIIofTaillardetal.1997,or
+Table 8 below) in short time under wide ranges of parame-
+ter settings.
+Thenumberofvehiclesm andparameterbSLalphain(6)usedin
+our experiments are listed in Table 5. (As for the instance
+name, the last two digits represent the instance index
+and the rest indicates the type. For example, 12 instances
+R101–R112 belong to type R1.) According to Bräysy (2003),
+these values ofm are taken from the best published solu-
+tionsexceptforR101,forwhichThangiahetal.(1994)report
+a solution with one vehicle less. Because ILS (respectively,
+AMLS)failedtoﬁndafeasiblesolutionwiththebestknown
+m within 2,000 seconds for R104 (respectively, RC105), we
+alsoranouralgorithmswithonevehiclemoreforthesetwo
+instances R104 and RC105. ParameterbSLalphawas chosen after
+testing 10, 50, and 100 for type 1 instances, and 1, 5, and
+10 for type 2 instances, respectively, in preliminary experi-
+ments except for RC105 withm =13. For RC105 withm =
+13,AMLSfailedtoﬁndafeasiblesolutionwithbSLalpha≤100,and
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+230 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+Table 8 The Best Known Values for Solomon’s Instances According to http://www.sintef.no/
+static/am/opti/projects/top/vrp/bknown.html
+Instance m Distance Instance m Distance
+R101 19 1 /commaori645/periodori79 R201 4 1 /commaori252/periodori37
+R102 17 1 /commaori486/periodori12 R202 3 1 /commaori191 /periodori70
+R103 13 1 /commaori292/periodori68 R203 3 939 /periodori54
+R104 9 1 /commaori007/periodori24 R204 2 825 /periodori52
+R105 14 1 /commaori377 /periodori11 R205 3 994 /periodori42
+R106 12 1 /commaori251 /periodori98 R206 3 906 /periodori14
+R107 10 1 /commaori104/periodori66 R207 2 893 /periodori33
+R108 9 960 /periodori88 R208 2 726 /periodori75
+R109 11 1 /commaori194/periodori73 R209 3 909 /periodori16
+R110 10 1 /commaori118/periodori59 R210 3 939 /periodori34
+R111 10 1 /commaori096/periodori72 R211 2 892 /periodori71
+R112 9 982 /periodori14
+C101 10 828 /periodori94 C201 3 591 /periodori56
+C102 10 828 /periodori94 C202 3 591 /periodori56
+C103 10 828 /periodori06 C203 3 591 /periodori17
+C104 10 824 /periodori78 C204 3 590 /periodori60
+C105 10 828 /periodori94 C205 3 588 /periodori88
+C106 10 828 /periodori94 C206 3 588 /periodori49
+C107 10 828 /periodori94 C207 3 588 /periodori29
+C108 10 828 /periodori94 C208 3 588 /periodori32
+C109 10 828 /periodori94
+RC101 14 1 /commaori696/periodori94 RC201 4 1 /commaori406/periodori91
+RC102 12 1 /commaori554 /periodori75 RC202 3 1 /commaori367/periodori09
+RC103 11 1 /commaori261/periodori67 RC203 3 1 /commaori049/periodori62
+RC104 10 1 /commaori135 /periodori48 RC204 3 798 /periodori41
+RC105 13 1 /commaori629/periodori44 RC205 4 1 /commaori297/periodori19
+RC106 11 1 /commaori424/periodori73 RC206 3 1 /commaori146/periodori32
+RC107 11 1 /commaori230/periodori48 RC207 3 1 /commaori061/periodori14
+RC108 10 1 /commaori139 /periodori82 RC208 † 3 828 /periodori14
+Notes. CNV: 405; CTD: 57192. The data were taken on March 6, 2003.
+† We found the best solution of RC208.
+we decided to usebSLalpha=5bcommaori000 after testingbSLalpha=500bcommaori1,000,
+and 5,000.
+ThebestsolutionsobtainedbyILSandAMLSareshown
+inTables6and7,respectively.Theﬁguresincolumnsdistance
+denotethedistancesdsumblparenori/UPsigmabrparenoriofthebestsolutions/UPsigmaobtained
+by the algorithms within the time limit shown in the ﬁrst
+row. The total number of calls to Algorithm LS within the
+timelimitisshownincolumns#LS in total.Columnstime to
+best (s)show the CPU seconds when the best solutions are
+found.FeasiblesolutionstoVRPHTW(i.e.,p
+∗
+sumblparenori/UPsigmabrparenori=0and
+qsumblparenori/UPsigmabrparenori=0)wereobtainedforallinstancesexceptforthose
+with “—” marks. The last two columns labeledto ﬁnd fea-
+sibleare the number of calls to Algorithm LS (column#LS
+to feas.) and CPU seconds (columntime to feas.(s)) when the
+Table 9 Benchmark Results of Various CPUs
+CPU SPECint2000 SPECint95 LINPACK Mﬂops Mips
+Pentium III 1 GHz 408–442
+Pentium III 933 MHz 192–234
+Pentium III 800 MHz 344 38.0
+Sun Ultra 10 440 MHz 18.1 (73)
+Pentium 400 MHz (54)239 940
+Pentium 200 MHz 5.00–5.47 (24)107 349
+Sun Sparc 10 10
+ﬁrstfeasiblesolutionisfound.Wecompareourresultswith
+the best known values reported in http://www.sintef.no/
+static/am/opti/projects/top/vrp/bknown.html (the data
+were taken on March 6, 2003), which are summarized in
+Table8.Asingleasteriskindicatesatiewiththebestknown
+solution, and a double asterisk indicates that a better solu-
+tionwasfound.ILSobtainedthreetiesolutions,whileAMLS
+obtainedonebettersolutionandsixtiesolutions,among39
+instancesinthetable.
+Finally,weestimatethecomputationaltimeofAlgorithms
+H&G (1999), G&H (2002), BBB (2003), Br (2003), and BVH
+(2001). The benchmark results of SPECint2000, SPECint95
+from the SPEC website (http://www.specbench.org/) and
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+Transportation Science 39(2), pp. 206–232, ©2005 INFORMS 231
+Table 10 Estimated Running time of Various Algorithms
+Estimated Avg. CPU seconds Number Number Estimated time
+Algorithm CPU speed for type sR&R C o f runs of CPUs on our CPU (s)
+ILS and AMLS Pentium III 1 GHz 1 2,000 or 15,000 1 1 2,000 or 15,000
+G&H (2002)Pentium 400 MHz 0 /periodori24 1,088–1,420 5 4 5,222–6,816
+H&G (1999)Pentium 200 MHz 0 /periodori1 660–990 10 1 660–990
+BBB (2003)Pentium 400 MHz 0 /periodori24 1,800 3 1 1,300
+Br (2003)Pentium 200 MHz 0 /periodori1 3,245–7,203 1 1 325–720
+BVH (2001)Sun Ultra 10 440 MHz 0 /periodori4 7,200 5 1 14,000
+Dongarra’s LINPACK results (Dongarra 2002) of related
+CPUs are summarized in Table 9. (Because we could not
+ﬁnd LINPACK results for Pentium 400 MHz, Pentium
+200MHz,andSunUltra10440MHzinDongarra2002,the
+corresponding results (i.e., those data in parentheses) were
+taken from Bräysy and Gendreau 2004b.) We also include
+Mﬂops and Mips reported in Gehring and Homberger
+(2002). Because the results of SPECint95 and LINPACK for
+our CPU (Pentium III 1 GHz) are not available, the results
+of similar CPUs—Pentium III 933 MHz and 800 MHz—are
+shown.
+Based on these data, we give in Table 10 rough esti-
+matesonthecomputationaltimespentbyAlgorithmsH&G
+(1999), G&H (2002), BBB (2003), Br (2003), and BVH (2001)
+for types Rand R C instances. (The average computational
+time of Br 2003 reported in Bräysy 2003 on types Rand R C
+instancesrangesfrom129.8to288.1minutes,whicharethe
+estimated values on Sun Sparc 10 using Dongarra’s factors.
+The computational time of Br 2003 on Pentium 200 MHz
+in the table is therefore estimated from these data.) If the
+results are the best of multiple runs, we multiply the num-
+ber of runs. Algorithm G&H (2002) is designed for dis-
+tributed computation, where ﬁve computers (one for mas-
+ter and four for slaves) were used to obtain the results in
+Table2.Inthiscase,wemultiplyfour,thenumberofslaves,
+to estimate the time in sequential computation, though this
+might be an overestimate.
+References
+Ahuja, R. K., J. B. Orlin. 2001. A fast scaling algorithm for mini-
+mizingseparableconvexfunctionssubjecttochainconstraints.
+Oper. Res.49784–789.
+Ahuja, R. K., J. B. Orlin, D. Sharma. 2000. Very large-scale neigh-
+borhood search.Internat. Trans. Oper. Res.7301–317.
+Ahuja, R. K., O. Ergun, J. B. Orlin, A. P. Punnen. 2002. A survey of
+verylarge-scaleneighborhoodsearchtechniques.Discrete Appl.
+Math.12375–102.
+Bent, R., P. Van Hentenryck. 2001. A two-stage hybrid local search
+for the vehicle routing problem with time windows. Techni-
+cal Report CS-01-06, Department of Computer Science, Brown
+University, Providence, RI.
+Berger, J., M. Barkaoui, O. Bräysy. 2003. A route-directed hybrid
+genetic approach for the vehicle routing problem with time
+windows.INFOR 41(2) 179–194.
+Bertsekas, D. P. 1995.Nonlinear Programming. Athena Scientiﬁc,
+Belmont, MA.
+Boese, K. D., A. B. Kahng, S. Muddu. 1994. A new adaptive multi-
+start technique for combinatorial global optimizations.Oper.
+Res. Lett.16101–113.
+Bräysy, O. 2003. A reactive variable neighborhood search for
+the vehicle-routing problem with time windows.INFORMS
+J. Comput15 347–368.
+Bräysy,O.,M.Gendreau.2005a.Vehicleroutingproblemwithtime
+windows, Part I: Route construction and local search algo-
+rithms.Transportation Sci.39(1) 104–118.
+Bräysy, O., M. Gendreau. 2005b. Vehicle routing problem with
+time windows, Part II: Metaheuristics.Transportation Sci.39(1)
+119–139.
+Chvátal, V. 1983.Linear Programming. Freeman, New York.
+Davis, J. S., J. J. Kanet. 1993. Single-machine scheduling with early
+and tardy completion costs.Naval Res. Logist.4085–101.
+De Jong, C., G. Kant, A. Van Vliet. 1996. On ﬁnding minimal
+route duration in the vehicle routing problem with multiple
+time windows. Manuscript, Department of Computer Science,
+Utrecht University, The Netherlands (http://www.cs.uu.nl/
+research/projects/alcom/wp4.3.html).
+Desrochers,M.,J.K.Lenstra,M.W.P.Savelsbergh,F.Soumis.1988.
+Vehicleroutingwithtimewindows:Optimizationandapproxi-
+mation.B.L.Golden,A.A.Assad,eds.Vehicle Routing: Methods
+and Studies. North-Holland, Amsterdam, The Netherlands.
+Desrosiers, J., Y. Dumas, M. M. Solomon, F. Soumis. 1995. Time
+constrained routing and scheduling. M. O. Ball, T. L. Mag-
+nanti, C. L. Monma, G. L. Nemhauser, eds.Handbooks in Oper-
+ations Research and Management Science,Vol.8.Network Routing.
+North-Holland, Amsterdam, The Netherlands, 35–139.
+Dongarra, J. J. 2002. Performance of various computers using
+standard linear equations software. Technical Report CS-
+89-85, Computer Science Department, University of Ten-
+nessee, Knoxville, TN (http://www.netlib.org/benchmark/
+performance.ps).
+Garey, M. R., D. S. Johnson. 1979.Computers and Intractability: A
+Guide to the Theory of NP-Completeness. Freeman, New York.
+Garey, M. R., R. E. Tarjan, G. T. Wilfong. 1988. One-processor
+scheduling with symmetric earliness and tardiness penalties.
+Math. Oper. Res.13330–348.
+Gehring, H., J. Homberger. 2002. Parallelization of a two-phase
+metaheuristic for routing problems with time windows.
+J. Heuristics8251–276.
+Glover,F.1996.Ejectionchains,referencestructuresandalternating
+path methods for traveling salesman problems.Discrete Appl.
+Math.65 223–253.
+Hochbaum,D.S.1997.Approximatingcoveringandpackingprob-
+lems: Set cover, vertex cover, independent set, and related
+problems. D. S. Hochbaum, ed.Approximation Algorithms for
+NP-Hard Problems. PWS Pub. Co., Boston, MA, 94–143.
+Hochbaum, D. S. 2002a. Solving integer programs over monotone
+inequalitiesinthreevariables:Aframeworkforhalfintegrality
+and good approximations.Eur. J. Oper. Res.140291–321.
+Hochbaum, D. S. 2002b. Private communication.
+Hochbaum, D. S., J. Naor. 1994. Simple and fast algorithms for lin-
+ear and integer programs with two variables per inequality.
+SIAM J. Comput.231179–1192.
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+
+Ibarakietal.:Effective Local Search Algorithms for Routing and Scheduling Problems
+232 Transportation Science 39(2), pp. 206–232, ©2005 INFORMS
+Hochbaum, D. S., M. Queyranne. 2003. Minimizing a convex cost
+closure set.SIAM J. Discrete Math.16192–207.
+Homberger, J., H. Gehring. 1999. Two evolutionary metaheuristics
+forthevehicleroutingproblemwithtimewindows.INFOR 37
+297–318.
+Homberger, J., H. Gehring. 2004. A two-phase hybrid metaheuris-
+tic for the vehicle routing problem with time windows.Eur.
+J. Oper. Res.Forthcoming.
+Johnson, D. S. 1990. Local optimization and the traveling salesman
+problem. M. S. Paterson, ed.Automata, Languages and Program-
+ming, Vol. 443.Lecture Notes Comp. Sci.Springer-Verlag, Berlin,
+Germany, 446–461.
+Johnson, D. S., L. A. McGeoch. 1997. The traveling salesman prob-
+lem:Acasestudy.E.H.L.Aarts,J.K.Lenstra,eds.Local Search
+in Combinatorial Optimization. John Wiley & Sons, Chichester,
+UK, 215–310.
+Koskosidis, Y. A., W. B. Powell, M. M. Solomon. 1992. An
+optimization-based heuristic for vehicle routing and schedul-
+ing with soft time window constraints.Transportation Sci.26
+69–85.
+Lin,S.1965.Computersolutionsofthetravelingsalesmanproblem.
+Bell System Tech. J.442245–2269.
+Lin, S., B. W. Kernighan. 1973. An effective heuristic algorithm for
+the traveling salesman problem.Oper. Res.21498–516.
+Martin,O.,S.W.Otto,E.W.Felten.1991.Large-stepMarkovchains
+forthetravelingsalesmanproblem.Complex Systems5 299–326.
+Martin,O.,S.W.Otto,E.W.Felten.1992.Large-stepMarkovchains
+fortheTSPincorporatinglocalsearchheuristic.Oper. Res. Lett.
+11219–224.
+Or, I. 1976. Traveling salesman-type combinatorial problems and
+their relation to the logistics of regional blood banking.
+Unpublished doctoral dissertation, Department of Industrial
+Engineering and Management Science, Northwestern Univer-
+sity, Evanston, IL.
+Park, N., H. Okano, H. Imai. 2000. A path-exchange-type local
+search algorithm for vehicle routing and its efﬁcient search
+strategy.J. Oper. Res. Soc. Japan43197–208.
+Potvin, J. Y., T. Kervahut, B. L. Garcia, J. M. Rousseau. 1996. The
+vehicle routing problem with time windows, Part 1: Tabu
+search.INFORMS J. Comput.8158–164.
+Reiter,S.,G.Sherman.1965.Discreteoptimizing.J. Soc. Indust. Appl.
+Math.13864–889.
+Rousseau, L.-M., M. Gendreau, G. Pesant. 2002. Using constraint-
+basedoperatorstosolvethevehicleroutingproblemwithtime
+windows.J. Heuristics843–58.
+Savelsbergh, M. W. P. 1992. The vehicle routing problem with
+time windows: Minimizing route duration.ORSA J. Comput.4
+146–154.
+Solomon,M.M.1987.Thevehicleroutingandschedulingproblems
+with time window constraints.Oper. Res.35 254–265.
+Solomon,M.M.,J.Desrosiers.1988.Timewindowconstrainedrout-
+ing and scheduling problems.Transportation Sci.221–13.
+Taillard, E., P. Badeau, M. Gendreau, F. Guertin, J. Y. Potvin. 1997.
+A tabu search heuristic for the vehicle routing problem with
+soft time windows.Transportation Sci.31170–186.
+Tamaki,H.,T.Komori,S.Abe.1999a.Aheuristicapproachtoparal-
+lel machine scheduling with earliness and tardiness penalties.
+Proc. 7th IEEE Internat. Conf. Emerging Tech. Factory Automation
+(ETFA’99), Barcelona, Catalonia, Spain, 1367–1370.
+Tamaki, H., T. Sugimoto, M. Araki. 1999b. Parallel machine
+scheduling problem with a non-regular objective function—
+Minimizing the sum of earliness and tardiness penalties (in
+Japanese).Trans. Soc. Instrument Control Engineers35 1176–1182.
+Thangiah, S. R., I. H. Osman, T. Sun. 1994. Hybrid genetic algo-
+rithm, simulated annealing and tabu search methods for vehi-
+cle routing problems with time windows. Working Paper
+UKC/IMS/OR94/4, Institute of Mathematics and Statistics,
+University of Kent, Canterbury, UK.
+Thompson, P. M., J. B. Orlin. 1989. The theory of cyclic transfers.
+Working Paper OR200-89, Operations Research Center, MIT,
+Cambridge, MA.
+Thompson, P. M., H. N. Psaraftis. 1993. Cyclic transfer algorithms
+for multivehicle routing and scheduling problems.Oper. Res.
+41935–946.
+Downloaded from informs.org by [128.122.253.228] on 08 October 2014, at 06:28 . For personal use only, all rights reserved. 
+
+

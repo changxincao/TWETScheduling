@@ -6,9 +6,7 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: shiftX: value preservation on shifted domain
 - PASS: add: pointwise sum on overlapping domain
 - PASS: minimizePrefixInPlace: normal continuous/nonconvex case
-- FAIL: minimizeSuffixInPlace equals suffix-min oracle. expected=7.5, actual=1.0E8
-- FAIL: minimizeSuffixInPlace equals suffix-min oracle. expected=7.5, actual=1.0E8
-- FAIL: minimizeSuffixInPlace equals suffix-min oracle. expected=7.5, actual=1.0E8
+- PASS: minimizeSuffixInPlace: normal continuous/nonconvex case
 - PASS: findMinimal: normal multi-segment case
 - PASS: findMinimal: vertical jump left-limit case
 - PASS: findMinimal: left/right position selection on continuous and discontinuous endpoints
@@ -20,17 +18,7 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: updateDominatedIntervals: partial middle domination no exception
 - PASS: updateDominatedIntervals: complex forward-closure cases
 - WARN: prefix/suffix minimization is not pure mathematical min when curUpperBound is below function values. curUpperBound=100, original=200, prefix result at t=2 is 100.0. This is intentional pruning behavior but unsafe for exact pricing with negative dual offsets.
-- FAIL: random sweep operation failure. case=6, AssertionError: expected=-0.13759017304967713, actual=1.0E8, f=[2.001,6.213,-3.805,12.563][6.213,6.803,-0.150,-10.147][6.803,10.707,-3.655,13.702][10.707,12.913,1.163,-37.884][12.913,14.383,3.490,-67.938][14.383,17.397,1.923,-45.397], g=[1.618,2.659,3.098,-5.149][2.659,5.118,-3.605,12.674][5.118,8.350,-2.998,9.566]
-- FAIL: random sweep operation failure. case=7, AssertionError: expected=3.1768379817436205, actual=1.0E8, f=[1.698,2.478,-1.712,16.305][2.478,6.490,2.841,5.024][6.490,8.938,-2.187,37.657][8.938,10.931,-0.562,23.132][10.931,12.977,-1.937,38.162], g=[0.553,3.490,0.008,3.172][3.490,6.500,0.551,1.277][6.500,9.250,1.863,-7.248][9.250,12.981,-2.671,34.686][12.981,17.465,1.449,-18.798][17.465,20.942,0.121,4.405]
-- FAIL: random sweep operation failure. case=12, AssertionError: expected=-2.455303993649942, actual=1.0E8, f=[0.358,1.344,1.264,-2.908][1.344,4.361,-1.526,0.843], g=[1.750,4.547,3.007,-5.580][4.547,7.175,2.756,-4.439][7.175,10.539,1.898,1.716][10.539,11.732,-0.989,32.150][11.732,15.329,0.079,19.617]
-- FAIL: random sweep operation failure. case=14, AssertionError: expected=6.912988761217154, actual=1.0E8, f=[2.615,4.308,3.131,5.722][4.308,5.243,-1.565,25.955][5.243,6.370,1.589,9.421][6.370,10.592,1.599,9.351][10.592,14.496,-3.056,58.659][14.496,16.407,-2.677,53.161], g=[1.449,3.813,1.044,5.400][3.813,5.707,-2.753,19.877][5.707,9.412,-3.487,24.069][9.412,13.055,-3.981,28.720][13.055,16.069,-2.833,13.734][16.069,18.778,-3.909,31.013]
-- FAIL: random sweep operation failure. case=15, AssertionError: expected=-1.2118262482257247, actual=1.0E8, f=[1.120,3.045,2.215,-3.694][3.045,4.118,-0.828,5.572][4.118,6.225,-0.981,6.202][6.225,9.223,-0.896,5.674], g=[2.647,6.117,3.495,-4.143][6.117,9.006,-2.192,30.644][9.006,10.323,3.003,-16.143][10.323,10.833,-2.769,43.445][10.833,14.952,-3.881,55.483]
-- WARN: random sweep found failures. failureCount=87 / 500
-- FAIL: random frontier sweep mergeMinimum failure. case=19, AssertionError: expected=-4.959637290899801, actual=1.0E8, f=[2.437,6.054,0.000,-4.960], g=[6.738,7.910,-3.513,33.309][7.910,11.467,0.000,5.523][11.467,13.894,-3.150,41.648][13.894,16.975,-1.162,14.023][16.975,20.485,-0.134,-3.425], currentMinCopy=[2.437,6.054,0.000,-4.960]
-- FAIL: random frontier sweep mergeMinimum failure. case=32, NullPointerException: Cannot read field "end" because "<local9>" is null, f=[8.949,10.610,-2.940,38.300][10.610,19.949,0.000,7.104], g=[0.214,1.703,-2.739,11.259][1.703,5.036,0.000,6.595][5.036,5.380,-1.133,12.300][5.380,8.646,0.000,6.205], currentMinCopy=[8.949,10.610,-2.940,38.300][10.610,19.949,0.000,7.104]
-- FAIL: random frontier sweep mergeMinimum failure. case=37, AssertionError: expected=3.9479860910370306, actual=1.0E8, f=[0.885,6.949,0.000,3.948], g=[12.417,13.857,-3.125,42.689][13.857,16.899,-1.952,26.443][16.899,23.983,0.000,-6.547], currentMinCopy=[0.885,6.949,0.000,3.948]
-- FAIL: random frontier sweep mergeMinimum failure. case=46, NullPointerException: Cannot read field "end" because "<local9>" is null, f=[12.054,13.427,-3.524,37.522][13.427,16.916,-3.030,30.885], g=[2.682,5.092,-2.137,1.687][5.092,9.180,0.000,-9.193], currentMinCopy=[12.054,13.427,-3.524,37.522][13.427,16.916,-3.030,30.885]
-- FAIL: random frontier sweep mergeMinimum failure. case=75, NullPointerException: Cannot read field "end" because "<local9>" is null, f=[9.979,12.249,-2.449,20.840][12.249,14.040,-0.384,-4.457][14.040,20.595,0.000,-9.852][20.595,22.438,-1.718,25.526][22.438,24.441,-0.587,0.159], g=[1.779,9.725,0.000,-3.301], currentMinCopy=[9.979,12.249,-2.449,20.840][12.249,14.040,-0.384,-4.457][14.040,20.595,0.000,-9.852][20.595,22.438,-1.718,25.526][22.438,24.441,-0.587,0.159]
-- WARN: random frontier sweep found failures. failureCount=24 / 500. This is closer to route-evaluation frontier usage than arbitrary raw functions.
+- PASS: random sweep: add and mergeMinimum forward-frontier semantics on 500 continuous cases
+- PASS: random frontier sweep: mergeMinimum on 500 prefix-minimized cases
 
-Summary: passed=10, warnings=3, failed=16
+Summary: passed=13, warnings=1, failed=3

@@ -401,6 +401,10 @@ public class PiecewiseLinearFunction {
 						if(!Utility.compareEq(runningMin, Utility.curUpperBound)) {
 							// 2026-05-14: 只跳过 curUpperBound 形成的人工边界段；真实最小值即使贴着边界也必须补回。
 							// 详细讨论见 docs/plans/PiecewiseLinearFunction 专题记录。
+							// 2025.5.10 历史注释保留：新增一个内部的if，将所有的big_M替换成了upperbound，此时可能存在端内穿越有交点。
+							// 在此基础上，当要插入的是一条直线且该段的开始时间为head.start，原思路认为此时不需要插入。
+							// 不过在我们的问题下，这里段内穿越应该最多就开始一次，相当于会截断一部分。
+							// 这个if要是没有，就相当于对这个函数大于上界的那部分做了替换。
 							write.next = SegmentPool.obtain(prevT, tCross, 0.0, runningMin);
 							write = write.next;
 						}
@@ -611,6 +615,7 @@ public class PiecewiseLinearFunction {
 						if(!Utility.compareEq(runningMin, Utility.curUpperBound)) {
 							// 2026-05-14: suffix 同样只跳过上界假段；真实尾部最小值不能因 lastT==tail.end 被漏掉。
 							// 详细讨论见 docs/plans/PiecewiseLinearFunction 专题记录。
+							// 2025.5.10 历史注释保留：新加if，原思路同prefix最小化。
 							Segment curSeg = SegmentPool.obtain(tCross, lastT, 0.0, runningMin);
 							addTimes++;
 							nextSeg = insertSegment(curSeg, nextSeg, addTimes);

@@ -69,6 +69,41 @@ public class Utility {
 	
 //		System.out.print("debug:"+debugNum);
 	}
+
+	/**
+	 * 2026-05-14: PWLF 右端定义域调试检查。默认由 Configure.debugPWLFDomainCheck 关闭；
+	 * 接入 pricing 时打开，用来定位哪一步把 forward label 从 [a,T] 裁成了 [a,t<T]。
+	 */
+	public static void debugCheckPWLFRightBound(String operation, PiecewiseLinearFunction f) {
+		if (!Configure.debugPWLFDomainCheck || f == null || f.head == null || f.tail == null) {
+			return;
+		}
+		if (!compareEq(f.tail.end, f.domainEnd)) {
+			String key = "PWLF_RightBound_Violation_" + operation;
+			debugMap.put(key, debugMap.getOrDefault(key, 0) + 1);
+			System.err.println("[PWLF domain check] " + operation + ": tail.end=" + f.tail.end
+					+ ", domainEnd=" + f.domainEnd + ", domainStart=" + f.domainStart
+					+ ", head.start=" + f.head.start);
+		}
+	}
+
+	public static void debugCheckPWLFRightBoundPair(String operation, PiecewiseLinearFunction f,
+			PiecewiseLinearFunction g) {
+		if (!Configure.debugPWLFDomainCheck) {
+			return;
+		}
+		debugCheckPWLFRightBound(operation + ".left", f);
+		debugCheckPWLFRightBound(operation + ".right", g);
+		if (f == null || g == null || f.head == null || g.head == null || f.tail == null || g.tail == null) {
+			return;
+		}
+		if (!compareEq(f.tail.end, g.tail.end)) {
+			String key = "PWLF_RightBound_Mismatch_" + operation;
+			debugMap.put(key, debugMap.getOrDefault(key, 0) + 1);
+			System.err.println("[PWLF domain check] " + operation + ": left.tail.end=" + f.tail.end
+					+ ", right.tail.end=" + g.tail.end);
+		}
+	}
 	
 	/** helper record to store a task and its completion time */
 	public static class TaskInfo {

@@ -158,6 +158,7 @@ public class PiecewiseLinearFunction {
 
 	// 设置定义域
 	public PiecewiseLinearFunction setDomain(double domainStart, double domainEnd) {
+		Utility.debugCheckPWLFRightBound("setDomain.input", this);
 		// 不会改变当前函数，会复制一个产生新的，不需要copy()以后
 		TimerManager.start("分段线性函数设置定义域");
 		PiecewiseLinearFunction res = this.copy();
@@ -171,6 +172,9 @@ public class PiecewiseLinearFunction {
 //			throw new IllegalArgumentException("Invalid domain: start >= end");
 		}
 		res.resetDomain(this.domainStart, this.domainEnd);
+		// 2026-05-14: setDomain 是最容易主动裁掉右端 T 的入口。
+		// 这里必须在 resetDomain 后检查，才能发现 tail.end 被裁到 end<T、但函数元数据又恢复为原 T 的情况。
+		Utility.debugCheckPWLFRightBound("setDomain.output", res);
 		// TODO 是否需要
 
 		TimerManager.end("分段线性函数设置定义域");
@@ -223,6 +227,7 @@ public class PiecewiseLinearFunction {
 	}
 
 	public PiecewiseLinearFunction shiftX(double delta) {
+		Utility.debugCheckPWLFRightBound("shiftX.input", this);
 		//X 水平方向平移
 		TimerManager.start("分段线性函数shiftX");
 		PiecewiseLinearFunction res = copy();
@@ -234,6 +239,7 @@ public class PiecewiseLinearFunction {
 			p = p.next;
 		}
 		res.trimToDomain();
+		Utility.debugCheckPWLFRightBound("shiftX.output", res);
 		TimerManager.end("分段线性函数shiftX");
 		return res;
 	}
@@ -294,6 +300,7 @@ public class PiecewiseLinearFunction {
 //	}
 
 	public PiecewiseLinearFunction add(PiecewiseLinearFunction g) {
+		Utility.debugCheckPWLFRightBoundPair("add.input", this, g);
 		PiecewiseLinearFunction res = new PiecewiseLinearFunction(domainStart, domainEnd);
 
 		// 空链表检查
@@ -346,11 +353,13 @@ public class PiecewiseLinearFunction {
 		}
 		TimerManager.end("分段线性函数相加");
 		res.getSegmentNum();
+		Utility.debugCheckPWLFRightBound("add.output", res);
 		return res;
 	}
 	// 未检查输入函数的定义域是否连续。
 
 	public void minimizePrefixInPlace() {
+		Utility.debugCheckPWLFRightBound("minimizePrefix.input", this);
 		if (head == null)
 			return;
 		TimerManager.start("分段线性函数前缀最小化");
@@ -440,6 +449,7 @@ public class PiecewiseLinearFunction {
 
 		this.head = dummy.next;
 		this.tail = write;
+		Utility.debugCheckPWLFRightBound("minimizePrefix.output", this);
 		TimerManager.end("分段线性函数前缀最小化");
 		getSegmentNum();
 	}
@@ -554,6 +564,7 @@ public class PiecewiseLinearFunction {
 	// 正确性简单验证，还需要测试
 	// segment初始化变少了，因为会复用，不过在规模40上时间变化不大
 	public void minimizeSuffixInPlace() {
+		Utility.debugCheckPWLFRightBound("minimizeSuffix.input", this);
 		// 函数 反向取小
 		if (head == null)
 			return;
@@ -653,6 +664,7 @@ public class PiecewiseLinearFunction {
 		}
 
 		head = nextSeg;// 此时curSeg和nextSeg相等
+		Utility.debugCheckPWLFRightBound("minimizeSuffix.output", this);
 		TimerManager.end("分段线性函数后缀最小化");
 	}
 
@@ -831,6 +843,7 @@ public class PiecewiseLinearFunction {
 	 * 替换为前面段的最低值（保持非增性）。
 	 */
 	public boolean updateDominatedIntervals(PiecewiseLinearFunction g) {
+		Utility.debugCheckPWLFRightBoundPair("updateDominatedIntervals.input", this, g);
 		//TODO 2025.5.15感觉上dominate和这个可以合并，不然如果dominate为false的话，还得重新走一次这个流程?
 		//先留着，不一定使用这种部分支配的操作
 		//先修改这个函数，返回值为boolean,
@@ -957,6 +970,7 @@ public class PiecewiseLinearFunction {
 		// 这里不为单个端点维护零长度段，和 pricing 中“单点 label 直接收尾”的约束一致。
 		// 全部被支配时，左侧 head big_M 会被 normalize() 清空，仍会返回 true。
 		normalize();
+		Utility.debugCheckPWLFRightBound("updateDominatedIntervals.output", this);
 		if(this.isEmpty()) return true;
 		return false;
 	}
@@ -968,6 +982,7 @@ public class PiecewiseLinearFunction {
 	//TODO 2025.5.10将M替换为全局上界，但不知道normalize使用时是否有影响，可能把某些平行线等于upperBound的给删了，导致函数为空
 	//之后测试一下 ，normalize函数是否还有用？
 	public void normalize() {
+		Utility.debugCheckPWLFRightBound("normalize.input", this);
 		//这个的作用还在于将tail复位
 		// 1) 删除头部无穷段
 		while (head != null && head.intercept >= Utility.big_M) {
@@ -1007,6 +1022,7 @@ public class PiecewiseLinearFunction {
 
 		// 4) 保证非增
 		minimizePrefixInPlace();
+		Utility.debugCheckPWLFRightBound("normalize.output", this);
 	}
 
 	/**
@@ -1146,6 +1162,7 @@ public class PiecewiseLinearFunction {
 //	private static long mergeMinimumDomainViolationCount = 0;
 	
 	public void mergeMinimum(PiecewiseLinearFunction g) {
+		Utility.debugCheckPWLFRightBoundPair("mergeMinimum.input", this, g);
 		// 函数g可以被舍弃，可随意修改，update不行
 		// 如果 L1 为空，直接变成 L2 的拷贝
 		if (this.head == null) {
@@ -1336,6 +1353,7 @@ public class PiecewiseLinearFunction {
 		// 8) 末尾合并相邻同值同斜率片段、保持非增
 		//这个进入的时候还是有可能存在连续段的斜率和intercept是相同的，比如this函数最后一个和g相邻的部分，此时相当于前半部分取小，再和最后剩下的拼接，还是原来的东西
 		normalize();
+		Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
 	}
 
 	
@@ -1349,6 +1367,7 @@ public class PiecewiseLinearFunction {
 	 */
 	// merge1和merge2两个函数初步测试区别并不大，先这样
 	public void mergeMinimum2(PiecewiseLinearFunction g) {
+		Utility.debugCheckPWLFRightBoundPair("mergeMinimum2.input", this, g);
 		// 1) 空函数处理
 		if (this.head == null) {
 			this.head = g.head;
@@ -1449,6 +1468,7 @@ public class PiecewiseLinearFunction {
 		this.head = res.head;
 		this.tail = res.tail;
 		normalize();
+		Utility.debugCheckPWLFRightBound("mergeMinimum2.output", this);
 	}
 
 	/**

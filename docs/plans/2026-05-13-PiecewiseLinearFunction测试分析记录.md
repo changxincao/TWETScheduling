@@ -63,3 +63,7 @@
 2026-05-14：给 `PiecewiseLinearFunctionPropertyTest` 增加了 `merge-find-contract` 测试模式，只检查 `findMinimal` 和满足 `[a,T]`、右端同为 `T`、存在正长度公共区间的 `mergeMinimum` 输入。该模式下当前结果为 `passed=5, warnings=0, failed=0`。完整测试仍为 `passed=10, warnings=3, failed=16`，剩余失败属于既有风险，不是本次调试检查接入引入的新变化。
 
 2026-05-14：把 `mergeMinimum/mergeMinimum2` 接入 `Utility.debugCheckPWLFMergeContract(...)`，并在 `Utility.debugCheckPWLFRightBound(...)` 附近补充中文注释，说明 `tail.end` 与 `domainEnd` 的区别。该检查默认关闭，仅用于后续接入 pricing 时定位是否有操作破坏 `[a,T]` 约束。
+
+2026-05-14：进一步分析了 `minimizeSuffixInPlace()` 和 backward 函数定义域。当前 backward 函数构造时基本不提前设置较窄 domain：一维 backward 的末任务直接使用 `data.penaltyFunction[job].copy()`，递推时执行 `shiftX(-s[job][next]-p[next]) + add(data.penaltyFunction[job])`，随后调用 `minimizeSuffixInPlace()`；二维、三维 backward 辅助函数也是同一思路。`Move.getCost()` 中的 `setDomain(...)` 主要是在已经有一个具体前驱完成时间后，回推具体 completion 时裁左端，不是 backward 函数构造阶段的定义域约束。因此当前 backward 定义域问题不在“提前裁窄”，而在 `minimizeSuffixInPlace()` 是否正确把后缀最小值物化出来。
+
+`minimizeSuffixInPlace()` 的语义应是把函数 `f(t)` 转成 `g(t)=min_{u>=t} f(u)`。当前实现从右向左扫描，用 `runningMin` 记录右侧已知最小值，用 `lastT` 记录右侧尚未接回新链表的边界。问题出在递增段发生穿越时，代码用 `if (!Utility.compareEq(lastT, tail.end) && !Utility.compareEq(runningMin, Utility.curUpperBound))` 控制是否补一段 `[tCross,lastT]` 的常数最小值。这个判断是从 prefix 最小化思路搬过来的，但对 suffix 不是严格对称的：当右侧最小值第一次来自尾部区间，`lastT` 仍然等于原 `tail.end`，该判断会跳过本来应该保留的尾部常数段，导致新函数链表缺少右侧一段，后续 `evaluate` 或 `findMinimal` 在这段上只能得到 `Utility.curUpperBound`。因此，`minimizeSuffixInPlace()` 仍是 backward 函数优先修复项；修复时应重点保证尾部最小值段被显式加入，而不是简单套用 prefix 的首端判断。

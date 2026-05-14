@@ -38,6 +38,10 @@
 
 这里要区分 `tail.end` 和 `domainEnd`。`tail.end` 是当前 segment 链表真实覆盖到的最右端，`domainEnd` 是函数对象保存的元数据。正常情况下二者应该一致；但 `setDomain/trimToDomain` 可能把链表裁到 `end<T`，随后又把 `domainEnd` 恢复成原来的 `T`。因此检查 `tail.end == domainEnd` 不是重复检查，而是在定位“实际函数已经被裁短、但元数据还像是完整 `[a,T]`”的情况。
 
+更准确地说，在后续 forward pricing 约定的输入流里，如果每个输入函数都满足 `tail.end == domainEnd == T`，并且函数操作不主动调用 `setDomain(..., end<T)`，那么 `add`、`mergeMinimum/mergeMinimum2`、`normalize` 和正向 `shiftX` 都不应主动破坏这个关系。`add` 的结果右端取两个输入实际右端的公共部分，两个输入都是 `T` 时结果仍到 `T`；`mergeMinimum` 在有效输入契约下也是两个函数右端同为 `T`；`normalize` 已经改成不删除右侧 `big_M` 尾段；正向 `shiftX` 平移后超出 `T` 的部分会被裁回 `T`。
+
+真正会主动制造 `tail.end != domainEnd` 的，是 `setDomain(start,end)` 且 `end < 原 domainEnd` 的情况。这个函数会先按较小的 `end` 裁短真实 segment 链表，然后又调用 `resetDomain(this.domainStart,this.domainEnd)` 把元数据恢复成原来的右端。也就是说，`setDomain` 当前不是“永久缩小函数对象账面定义域”，而是“生成一个实际链表被裁过、但元数据仍保留原定义域”的副本。后续 BPC pricing 若要保持 `[a,T]` 结构，应避免在 label 主流程中使用 `setDomain(..., end<T)`。
+
 当前 `Configure.debugPWLFDomainCheck` 是分段函数右端定义域检查的统一开关，默认关闭，不改变现有求解流程。打开后，`setDomain`、`shiftX`、`add`、`minimizePrefixInPlace`、`minimizeSuffixInPlace`、`updateDominatedIntervals`、`normalize`、`mergeMinimum` 和 `mergeMinimum2` 的关键入口或出口会检查函数实际右端是否仍等于 `domainEnd`。
 
 对 `mergeMinimum/mergeMinimum2`，现在额外接入了 `Utility.debugCheckPWLFMergeContract(...)`。它检查的是后续 pricing 必须遵守的输入契约：两个函数是否有正长度交集、右端是否一致、左函数是否退化成单点、右函数是否退化成单点。发现异常时会在 `Utility.debugMap` 中记录计数，并向 `System.err` 输出操作名、左右区间、公共区间、异常布尔值和两个函数对象 id。这个输出可以先定位是哪类操作、哪一对函数破坏了 `[a,T]` 结构；如果后续要定位到具体 label、节点或列，需要在 BPC 层继续传入业务 id。

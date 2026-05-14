@@ -26,7 +26,9 @@
 
 `mergeMinimum` 在 `[a,T]`、右端同为 `T`、存在正长度公共区间的输入契约下通过了专项测试。当前 `merge-find-contract` 模式结果为 `passed=5, warnings=0, failed=0`。原完整测试中仍存在的失败，主要来自无效 merge 输入、`minimizeSuffixInPlace` 和 `dominates` 的语义风险，不应混同为 `mergeMinimum` 在当前契约下失败。
 
-`updateDominatedIntervals` 当前倾向于不物理删除被占优区间，而是把区间替换为 `big_M` 水平段。这样链表仍然连续，`add` 仍可在“输入内部无物理 gap”的假设下使用。后续如果 BPC pricing 真的采用 partial dominance，需要重新确认这里的语义：被打成 `big_M` 的区间是要严格保留为 horizontal gap，还是允许被 forward prefix-min 重新闭包。第一版 exact pricing 更稳的做法是先做全段 dominance，把 partial dominance 保留为第二阶段优化。
+`updateDominatedIntervals` 当前倾向于不物理删除被占优区间，而是把区间替换为 `big_M` 水平段。这样链表仍然连续，`add` 仍可在“输入内部无物理 gap”的假设下使用。经过后续讨论，这个方向对 forward frontier 语义是可以解释通的：forward 函数表示“不晚于 t 完成时的最小成本”，所以某段被打成 `big_M` 后，如果更早时间已经有有效值，`normalize()/minimizePrefixInPlace()` 把更早的有限值延伸到该段，并不一定是错误，而是符合“不晚于 t”的闭包语义。
+
+因此 `updateDominatedIntervals` 暂时不应再作为 partial dominance 的主要风险反复分析。真正的前提是，pricing 阶段不能继续使用启发式 `curUpperBound` 作为截断上界，而应先把 `Utility.curUpperBound` 重置为 `Utility.big_M`。否则 reduced cost 后续可能被 dual 项拉低，提前用启发式上界把某段压平或截断，就可能破坏精确定价。也就是说，partial dominance 的主要风险更应该放在“哪些 label 有资格支配、定义域和资源状态是否满足支配关系”上，而不是 `updateDominatedIntervals` 当前这种“打 big_M + forward normalize”的函数操作本身。
 
 `add` 在当前假设下没有暴露主要问题。它要求两个输入在公共定义域上按连续 segment 扫描相加；如果未来把 dominance 改成物理删除区间，让函数内部出现断裂，那么 `add` 不能直接复用。当前我们选择用 `big_M` 段保留连续链表，就是为了先避免这个问题。
 

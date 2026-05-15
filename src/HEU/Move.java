@@ -1030,20 +1030,25 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 	public boolean mergeCmaxValidation(int m1, int m2,int stM1,int len,int stM2,boolean rev1) {
 		ArrayList<Integer> seq1=s.sequences.get(m1);
 		ArrayList<Integer> seq2=s.sequences.get(m2);
-//		double mergedtimeM1=(stM1==0?0:s.cumDurationNormal[m1][stM1-1]);
-//		if(stM1+len!=seq1.size()-1) {
-//			mergedtimeM1+=data.s[stM1==0?0:seq1.get(stM1-1)][seq1.get(stM1+len+1)]+data.p[seq1.get(stM1+len+1)]
-//					+s.getNormalDuration(m1, stM1+len+1, seq1.size()-1);
-//		}
-//
-////		System.out.println(mergedtimeM1);
-//		if(Utility.compareGt(mergedtimeM1, data.Cmax)) {
-//			return false;
-//		}
-		
-		//m1机器不需要验证，只会变得更小
-		
-		
+		// 2026-05-15:
+		// 这里不能再依赖“M1 删除一段后只会变小”的旧假设。
+		// 当 setup=0 或 setup 严格满足三角不等式时，这个判断通常成立；
+		// 但当前随机生成的 sequence-dependent setup 不保证三角不等式，
+		// 删除片段后新连的 pre -> post setup 可能比原路径更大。
+		// 因此用 cumDurationNormal 和区间 duration 做 O(1) 预验证，
+		// 使 Cmax validation 与后续 evalDelta() 中的真实拼接评价保持一致。
+		int endM1 = stM1 + len;
+		double mergedtimeM1 = stM1 == 0 ? 0 : s.cumDurationNormal[m1][stM1 - 1];
+		if (endM1 != seq1.size() - 1) {
+			int preJob = stM1 == 0 ? 0 : seq1.get(stM1 - 1);
+			int postJob = seq1.get(endM1 + 1);
+			mergedtimeM1 += data.s[preJob][postJob] + data.p[postJob]
+					+ s.getNormalDuration(m1, endM1 + 1, seq1.size() - 1);
+		}
+		if (Utility.compareGt(mergedtimeM1, data.CmaxH)) {
+			return false;
+		}
+
 		double mergedtimeM2=(stM2==-1?0:s.cumDurationNormal[m2][stM2]);
 		int fitstJobS2=rev1?seq1.get(stM1+len):seq1.get(stM1);
 		int lastJobS2 =rev1?seq1.get(stM1):seq1.get(stM1+len);

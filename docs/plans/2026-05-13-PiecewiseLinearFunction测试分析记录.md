@@ -157,3 +157,9 @@
 2026-05-15 进一步重新分析后，对上面这段判断做了修正。`suffix-min` 并没有把交点左侧整段算错，左侧段的左极限/右端极限其实仍然存在；真正不一致的是内部断点本身的 `evaluate` 归属。当前 segment 按 `[start,end)` 处理，断点会归到右侧段，因此如果左侧 end 极限更小，裸 `evaluate(t)` 会取到右侧较大值。更合理的语义是：内部断点处的函数值取左右两侧极限的较小值。这不需要把内部单点作为 segment 传播，只是在最终评价或测试取值时承认这个断点的最佳值。
 
 按这个语义修改了 `PiecewiseLinearFunction.evaluate()`：当 `t` 正好落在相邻两段的公共端点时，返回 `min(左段 end 值, 右段 start 值)`。测试里的 `evalRef` 同步改成同一规则，并增加了 `evaluate: internal breakpoint takes min of adjacent limits` 回归用例。重新运行后，`updateDominatedIntervals(Direction)` 的 500 组 forward/backward 随机测试全部通过；完整 PWLF 测试为 `passed=22, warnings=1, failed=2`，剩余两个失败仍是 `mergeMinimum` 完全不相交定义域这个已知无效输入。由此当前结论应改为：backward partial dominance 在“内部断点评价取左右极限最小”的语义下可以通过现有随机测试，但后续若某个内部单点还要继续作为结构参与更多函数运算，仍需要额外设计。
+
+### 当前暂存结论
+
+截至 2026-05-15，分段线性函数这一层可以先收口。forward 的基本链路是 `shiftX + add + minimizePrefixInPlace`，backward 的基本链路是 `shiftX + add + minimizeSuffixInPlace`，两者都已经通过当前测试。`normalize(Direction)` 已经区分 forward/backward；`mergeMinimum(Direction)` 在有效输入契约下通过随机测试；`updateDominatedIntervals(Direction)` 在当前“内部断点评价取左右极限最小”的语义下也通过 forward/backward 随机测试。`evaluate()` 已经处理内部断点，`findMinimal()` 已经不再只依赖单侧端点，`setDomain(start,end,true)` 可以用 `big_M` 表达窗口外不可行并保留右端定义域。
+
+需要保留的边界也已经明确。`mergeMinimum` 仍不支持完全不相交定义域，这属于契约外输入，后续 labeling 层要避免把这种输入送进来，或者后续单独修这个通用合并场景。内部单点不作为 segment 长期传播，只在最终评价语义上通过断点左右极限取小处理。`mergeMinimum2()` 只是实验/benchmark，不作为正式入口。`Utility.curUpperBound` 在启发式里可以作为上界剪枝语义使用，但进入 pricing 前必须设为 `Utility.big_M`，避免 reduced cost 后续被 dual 项拉低时提前被截断。后续真正写 labeling 时，label 数据结构、扩展规则、dominance、拼接和 reduced cost 另行设计；不要再把这些尚未实现的 label 层问题混到分段函数层。

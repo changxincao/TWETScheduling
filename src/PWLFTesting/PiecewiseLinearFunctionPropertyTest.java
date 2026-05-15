@@ -56,6 +56,8 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testShiftXAgainstEvaluation();
 		testAddAgainstPointwiseSum();
 		testSetDomainFillOutsideWithBigM();
+		testSetDomainFillOutsideWithBigMEndpointAndClosure();
+		testSetDomainFillOutsideWithBigMAddContract();
 		testPrefixMinAgainstOracle();
 		testSuffixMinAgainstOracle();
 		testPrefixBoundaryRealMinimumRegression();
@@ -149,6 +151,55 @@ public class PiecewiseLinearFunctionPropertyTest {
 		ok &= checkClose("setDomain bigM keeps metadata right bound", 10, restricted.domainEnd);
 		if (ok) {
 			pass("setDomain(fillOutsideWithBigM): keeps right bound and fills outside window");
+		}
+	}
+
+	private void testSetDomainFillOutsideWithBigMEndpointAndClosure() {
+		PiecewiseLinearFunction f = function(0, 10,
+				seg(0, 4, 2, 1),
+				seg(4, 10, -1, 20));
+		PiecewiseLinearFunction restricted = f.setDomain(2, 7, true);
+		boolean ok = true;
+		// 2026-05-15: 窗口端点是后续 pricing 最容易误用的地方。
+		// setDomain(..., true) 会在窗口外接 big_M 段，但 evaluate() 应按内部断点两侧极限取较小值，
+		// 因此窗口左右端点本身仍能取到窗口内原函数值。
+		ok &= checkClose("setDomain bigM keeps left endpoint value", evalRef(f, 2), restricted.evaluate(2));
+		ok &= checkClose("setDomain bigM keeps right endpoint value", evalRef(f, 7), restricted.evaluate(7));
+
+		PiecewiseLinearFunction forward = restricted.copy();
+		forward.minimizePrefixInPlace();
+		ok &= checkClose("setDomain bigM forward closure keeps left infeasible", Utility.big_M, evalRef(forward, 1));
+		ok &= checkClose("setDomain bigM forward closure extends best feasible value to the right", 5.0,
+				evalRef(forward, 8));
+
+		PiecewiseLinearFunction backward = restricted.copy();
+		backward.minimizeSuffixInPlace();
+		ok &= checkClose("setDomain bigM backward closure extends best feasible value to the left", 5.0,
+				evalRef(backward, 1));
+		ok &= checkClose("setDomain bigM backward closure keeps right infeasible", Utility.big_M,
+				evalRef(backward, 8));
+		if (ok) {
+			pass("setDomain(fillOutsideWithBigM): endpoint and forward/backward closure semantics");
+		}
+	}
+
+	private void testSetDomainFillOutsideWithBigMAddContract() {
+		PiecewiseLinearFunction job = function(0, 10,
+				seg(0, 4, 2, 1),
+				seg(4, 10, -1, 20)).setDomain(2, 7, true);
+		PiecewiseLinearFunction label = function(0, 10,
+				seg(0, 10, 0, 3));
+		PiecewiseLinearFunction sum = label.add(job);
+		boolean ok = true;
+		// 2026-05-15: 这个测试对应后续 BPC pricing 的核心契约。
+		// job 窗口外不能物理裁掉，否则 add() 只取公共定义域会把 label 的右端 T 一起裁短。
+		ok &= checkClose("setDomain bigM add keeps right bound", 10, sum.tail.end);
+		ok &= checkClose("setDomain bigM add keeps metadata right bound", 10, sum.domainEnd);
+		ok &= checkClose("setDomain bigM add keeps left outside infeasible", Utility.big_M + 3, evalRef(sum, 1));
+		ok &= checkClose("setDomain bigM add keeps inner value", evalRef(job, 3) + 3, evalRef(sum, 3));
+		ok &= checkClose("setDomain bigM add keeps right outside infeasible", Utility.big_M + 3, evalRef(sum, 8));
+		if (ok) {
+			pass("setDomain(fillOutsideWithBigM): add keeps [a,T] contract");
 		}
 	}
 

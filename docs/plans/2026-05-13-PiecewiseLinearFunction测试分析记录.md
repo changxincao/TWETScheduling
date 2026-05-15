@@ -160,6 +160,8 @@
 
 ### 当前暂存结论
 
+2026-05-15 进一步补了 `setDomain(start,end,true)` 的窗口语义回归测试。这次重点不是重新改底层实现，而是把后续硬时间窗/pricing 最容易踩坑的几个点测死：第一，窗口左右端点本身要能取到窗口内原函数值，不能因为右侧接了 `big_M` 段就在 `evaluate(end)` 时直接落到不可行段；第二，forward 场景下对窗口函数做 `minimizePrefixInPlace()` 后，窗口右侧应被窗口内最优可行 completion 闭包，而窗口左侧仍保持不可行；第三，backward 场景下对同一窗口函数做 `minimizeSuffixInPlace()` 后，窗口左侧应被窗口内最优可行 completion 闭包，而窗口右侧仍保持不可行；第四，窗口化 job 函数和一个 `[a,T]` label 函数相加以后，结果右端仍必须到 `T`，不能被物理裁短。新增测试后，完整 PWLF 测试结果为 `passed=24, warnings=1, failed=2`，`merge-find-contract` 子集仍为 `passed=5, warnings=0, failed=0`。剩余两个失败仍是 `mergeMinimum` 完全不相交定义域的契约外输入，不是窗口定义域问题。
+
 截至 2026-05-15，分段线性函数这一层可以先收口。forward 的基本链路是 `shiftX + add + minimizePrefixInPlace`，backward 的基本链路是 `shiftX + add + minimizeSuffixInPlace`，两者都已经通过当前测试。`normalize(Direction)` 已经区分 forward/backward；`mergeMinimum(Direction)` 在有效输入契约下通过随机测试；`updateDominatedIntervals(Direction)` 在当前“内部断点评价取左右极限最小”的语义下也通过 forward/backward 随机测试。`evaluate()` 已经处理内部断点，`findMinimal()` 已经不再只依赖单侧端点，`setDomain(start,end,true)` 可以用 `big_M` 表达窗口外不可行并保留右端定义域。
 
 需要保留的边界也已经明确。`mergeMinimum` 仍不支持完全不相交定义域，这属于契约外输入，后续 labeling 层要避免把这种输入送进来，或者后续单独修这个通用合并场景。内部单点不作为 segment 长期传播，只在最终评价语义上通过断点左右极限取小处理。`mergeMinimum2()` 只是实验/benchmark，不作为正式入口。`Utility.curUpperBound` 在启发式里可以作为上界剪枝语义使用，但进入 pricing 前必须设为 `Utility.big_M`，避免 reduced cost 后续被 dual 项拉低时提前被截断。后续真正写 labeling 时，label 数据结构、扩展规则、dominance、拼接和 reduced cost 另行设计；不要再把这些尚未实现的 label 层问题混到分段函数层。

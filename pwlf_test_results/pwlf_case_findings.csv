@@ -1,4 +1,1 @@
 level,case,detail
-FAIL,"mergeMinimum disjoint-left domain throws exception","NullPointerException: Cannot read field ""end"" because ""<local10>"" is null"
-FAIL,"mergeMinimum disjoint-right domain equals prefix-min lower envelope","expected=10.0, actual=1.0"
-WARN,"prefix/suffix minimization is not pure mathematical min when curUpperBound is below function values","curUpperBound=100, original=200, prefix result at t=2 is 100.0. This is intentional pruning behavior but unsafe for exact pricing with negative dual offsets."

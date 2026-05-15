@@ -133,3 +133,5 @@
 进一步讨论 backward pricing 时，当前倾向是 label 自身的函数左端不要提前裁剪，保持从 0 开始；这和 forward 中右端保持到 `T` 是对称的“锚点”思想。原因和启发式一致：backward 函数往前扩展时会做负向 `shiftX`，如果 label 函数提前带着某个“后段第一个任务最早完成时间”的左端限制，这个限制会被平移成“前段最后一个任务完成时间”的限制，从而误剪可行域。因此，backward label 函数本身不应通过物理 `setDomain` 裁左端。
 
 这里又进一步明确了一点：forward 和 backward 在 job 成本函数上的处理其实差别不大。profitable completion window 或任务自身窗口可以直接作用在“本次加入的 job 成本函数”上，也就是 job 函数可以物理裁成窗口内定义域；真正不能随便裁的是累计 label 函数。forward 的累计 label 要保持右端到 `T`，backward 的累计 label 要保持左端到 0。换句话说，窗口限制放在 job 函数上，label 端点契约放在 label 函数上；不要把 job 的窗口限制提前写进 label 的固定端点里。
+
+进一步逐个检查 `PiecewiseLinearFunction` 的操作函数后，当前不能直接用于 backward 的主要是高层集合操作，而不是底层函数运算。底层的 `copy`、`setDomain`、`shiftX/shiftY`、`add`、`evaluate`、`findMinimal` 只要调用层维护好定义域契约，本身不区分 forward/backward；`minimizePrefixInPlace()` 只做 forward 前缀闭包，`minimizeSuffixInPlace()` 只做 backward 后缀闭包。真正不适用于 backward 的是 `normalize()`，以及依赖它收尾的 `updateDominatedIntervals()`、`mergeMinimum()`、`mergeMinimum2()`。这些函数当前都会把结果按 forward 方式处理：删左侧 `big_M`、保留右侧 `big_M`，再做 prefix-min。因此如果后续要写 backward 的 merge 或 partial dominance，需要单独做 backward 版本，不能直接复用现有这三个集合操作。

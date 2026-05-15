@@ -109,3 +109,9 @@
 4. `curUpperBound` 在启发式和 pricing 里的意义不同。pricing 前要把它重置为 `Utility.big_M`，否则 prefix/suffix 取小可能把 reduced cost 后续仍有机会变好的区间提前压平或截断。
 
 5. `[T,T]` 单点 label 只能作为右端退化兜底。pricing 中一旦扩展得到只剩全局右端的 label，应直接尝试接终点或丢弃，不要继续参与 merge、dominance、partial dominance 或普通 add 链条。
+
+在当前约定下，如果所有进入主流程的函数都满足 `[a,T]` 右端统一，内部不可行区间用 `big_M` 连续段表示，不物理断链，也不存在内部单点段，那么大部分函数操作可以继续复用。`copy/shiftY` 只是复制或竖直平移，不改变定义域；正向 `shiftX` 会把右端裁回 `T`，只要输入右端为 `T`，输出仍可维持右端统一；`add` 在两个输入右端同为 `T` 时结果也会到 `T`；`minimizePrefixInPlace/minimizeSuffixInPlace` 当前边界补段修正后，对连续链表上的普通分段函数更稳；`updateDominatedIntervals` 用 `big_M` 段保留连续性后，可以与 forward prefix 语义兼容；`normalize` 当前不再主动删除右侧 `big_M` 尾段，因此不会因为被支配区间而物理裁短右端。
+
+但这不等于所有函数都已经可以作为 BPC 的严格工具无条件使用。`dominates` 目前仍不是严格 label dominance，尤其没有完整处理定义域覆盖、严格改进和资源状态等条件；`mergeMinimum/mergeMinimum2` 只应在有正长度公共区间、右端同为 `T`、非 `[T,T]` 单点的输入契约下使用，不能当通用下包络合并器；`evaluate` 在内部断点按右侧段取值，不能直接拿来判断窗口右端闭区间值。更准确的结论是：在 `[a,T] + big_M 连续 gap + 无内部单点` 的函数结构假设下，底层分段函数的构造、相加、平移、前缀/后缀取小、有效输入 merge 基本可用；严格 label dominance 和端点语义仍要在 BPC 层单独约束。
+
+补充检查了 `evaluate()` 的实际调用位置。当前启发式的普通成本计算 `calCost(m)` 并不通过 `evaluate()` 找最优值，而是先构造 forward 函数，再取最后一段右端值；`Move.getCost()` 回推出具体 completion 时也主要用 `findMinimal()`。`evaluate()` 在线上主要出现在两类地方：一是 `merge3Segments/merge3SegmentsTest` 里，在 `findMinimal()` 已经确定若干拼接时间点以后，用这些时间点回代计算三段拼接成本；二是 `dominates()` 里对右端覆盖的一个辅助比较。测试类和列评价器里的 `evaluate` 是另一个对象/测试语义，不属于 PWLF 主流程。因此，它不是普通 label 扩展中的核心操作，也不是最终整机成本的主要入口；但三段拼接的回代时间点如果刚好落在内部断点，仍会受 `[start,end)` 端点归属影响。

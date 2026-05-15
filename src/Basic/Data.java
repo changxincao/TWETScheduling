@@ -21,6 +21,9 @@ public class Data {
 	public double[][] s;// sequence dependent set up
 	public double[][] setupCost;// sequence dependent setup cost，和 s[i][j] 使用同一条弧 i->j
 	public double min_s[];// 每个任务的最小setup
+	public double[] outsourcingCost;// 每个任务的 baseline outsourcing cost；默认 big_M 表示暂不收缩预处理粗硬窗
+	public double[] maxSetupCostAdvantage;// 预处理粗硬窗使用的 max_i B_ij 上界
+	public double[] hardWindowStart, hardWindowEnd;// 每个任务预处理后的粗 completion 硬窗
 	public PiecewiseLinearFunction[] penaltyFunction;
 	public double CmaxH = 1e6;// 问题下的全局上界，用于启发式，设置不能过紧，否则可能某些差解搜不到就跳不出去
 	public double CmaxE = 1e6;// 问题下的全局上界，用于精确，越紧越好
@@ -52,6 +55,12 @@ public class Data {
 		this.setupCost = new double[n + 1][n + 1];// 旧数据没有 SETUP_COST 块时默认全 0，保持兼容
 		this.min_s = new double[n + 1];
 		this.r = new double[n + 1];
+		this.outsourcingCost = new double[n + 1];
+		this.maxSetupCostAdvantage = new double[n + 1];
+		this.hardWindowStart = new double[n + 1];
+		this.hardWindowEnd = new double[n + 1];
+		Arrays.fill(this.outsourcingCost, Utility.big_M);
+		this.outsourcingCost[0] = 0;
 		debug_set();
 		if (due_date) {
 			load_dd_data(setup, reader);
@@ -63,6 +72,7 @@ public class Data {
 		setImprovedCmax();
 
 //        Cmax=7700;
+		setPreprocessedHardWindows();
 		setPenaltyFunctions();
 		for (int i = 1; i < n + 1; i++) {
 			double minSi = Utility.big_M;
@@ -263,10 +273,63 @@ public class Data {
 				penaltyFunction[jid].addSegment(d_e[jid], d_l[jid], 0, 0);
 			}
 			penaltyFunction[jid].addSegment(d_l[jid], CmaxH, w_t[jid], -w_t[jid] * d_l[jid]);
+			// 2026-05-15: 预处理粗硬窗直接作用到原始 job 成本函数，但窗外只写成 big_M，不物理删除定义域。
+			// 这样启发式和后续 BPC pricing 仍能保持函数右端到 CmaxH/T 的结构；更窄的 H_ij 留给 pricing 扩展时动态处理。
+			penaltyFunction[jid] = penaltyFunction[jid].setDomain(hardWindowStart[jid], hardWindowEnd[jid], true);
 
 		}
 		// TODO 待测试setDomian()
 		// 每个点上最多三段，可能最少就一段,如果不存在窗口且de=0或者不存在早到惩罚成本，此时就只有迟到成本了
+	}
+
+	/**
+	 * 2026-05-15: 基于外包 baseline cost 和 setup-cost advantage 预处理 job 级粗硬窗。
+	 * 这里只做不含 dual、不含给定前驱 i 的保守版本：对每个 job j 取 max_i B_ij，
+	 * 再用 b_j 给出不会误删的 completion 窗口。真正依赖 dual 和具体前驱的 H_ij，
+	 * 后续仍应在 pricing 扩展 i -> j 时重新计算。
+	 */
+	public void setPreprocessedHardWindows() {
+		if (hardWindowStart == null || hardWindowStart.length != n + 1) {
+			hardWindowStart = new double[n + 1];
+			hardWindowEnd = new double[n + 1];
+		}
+		if (maxSetupCostAdvantage == null || maxSetupCostAdvantage.length != n + 1) {
+			maxSetupCostAdvantage = new double[n + 1];
+		}
+		hardWindowStart[0] = 0;
+		hardWindowEnd[0] = CmaxH;
+		for (int j = 1; j <= n; j++) {
+			maxSetupCostAdvantage[j] = computeMaxSetupCostAdvantage(j);
+			double baselineOutsourcingCost = outsourcingCost == null ? Utility.big_M : outsourcingCost[j];
+			double gamma = maxSetupCostAdvantage[j] + Math.max(0, baselineOutsourcingCost);
+			double left = Utility.compareGt(w_e[j], 0) ? d_e[j] - gamma / w_e[j] : 0;
+			double right = Utility.compareGt(w_t[j], 0) ? d_l[j] + gamma / w_t[j] : CmaxH;
+			hardWindowStart[j] = Math.max(0, left);
+			hardWindowEnd[j] = Math.min(CmaxH, right);
+		}
+	}
+
+	/**
+	 * 论文中 B_ij 表示删除 j 后可能得到的 setup-cost advantage。
+	 * 预处理阶段没有给定前驱 i，因此这里对所有 i 取最大值，得到 job 级保守上界。
+	 */
+	private double computeMaxSetupCostAdvantage(int job) {
+		double maxAdvantage = 0;
+		for (int i = 0; i <= n; i++) {
+			if (i == job) {
+				continue;
+			}
+			for (int k = 1; k <= n; k++) {
+				if (k == i || k == job) {
+					continue;
+				}
+				double advantage = setupCost[i][k] - setupCost[i][job] - setupCost[job][k];
+				if (Utility.compareGt(advantage, maxAdvantage)) {
+					maxAdvantage = advantage;
+				}
+			}
+		}
+		return maxAdvantage;
 	}
 
 	public void load_dw_data(boolean setup, BufferedReader reader) throws IOException {

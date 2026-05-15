@@ -1290,7 +1290,9 @@ class CrossExchangeOperator implements Move {
 //		} else {
 			//不使用2段拼接 2025.5.6
 			// 此处M2上被拆的在中间
-			shift1 = data.s[seqM2.get(stM2==0?0:stM2 - 1)][rev1?seqM1.get(stM1+l1):seqM1.get(stM1)] + data.p[rev1?seqM1.get(stM1+l1):seqM1.get(stM1)];
+			// 2026-05-15: 当 M2 被替换片段从首位开始时，M2 前缀为空，插入片段的前驱应为虚拟起点 0。
+			// 旧写法在 stM2==0 时取 seqM2.get(0)，setup 非零时会把原首任务误当作前驱。
+			shift1 = data.s[stM2==0?0:seqM2.get(stM2 - 1)][rev1?seqM1.get(stM1+l1):seqM1.get(stM1)] + data.p[rev1?seqM1.get(stM1+l1):seqM1.get(stM1)];
 			shift2 = stM2 + l2 ==seqM2.size()-1?0:(data.s[rev1?seqM1.get(stM1):seqM1.get(stM1+l1)][seqM2.get(stM2 + l2 + 1)] + data.p[seqM2.get(stM2 + l2 + 1)]);
 			double durationSplitM1 =rev1?s.getReverseDuration(m1, stM1, stM1+l1):s.getNormalDuration(m1, stM1, stM1+l1);
 			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b3M2, shift1, shift2, durationSplitM1);

@@ -115,3 +115,5 @@
 但这不等于所有函数都已经可以作为 BPC 的严格工具无条件使用。`dominates` 目前仍不是严格 label dominance，尤其没有完整处理定义域覆盖、严格改进和资源状态等条件；`mergeMinimum/mergeMinimum2` 只应在有正长度公共区间、右端同为 `T`、非 `[T,T]` 单点的输入契约下使用，不能当通用下包络合并器；`evaluate` 在内部断点按右侧段取值，不能直接拿来判断窗口右端闭区间值。更准确的结论是：在 `[a,T] + big_M 连续 gap + 无内部单点` 的函数结构假设下，底层分段函数的构造、相加、平移、前缀/后缀取小、有效输入 merge 基本可用；严格 label dominance 和端点语义仍要在 BPC 层单独约束。
 
 补充检查了 `evaluate()` 的实际调用位置。当前启发式的普通成本计算 `calCost(m)` 并不通过 `evaluate()` 找最优值，而是先构造 forward 函数，再取最后一段右端值；`Move.getCost()` 回推出具体 completion 时也主要用 `findMinimal()`。`evaluate()` 在线上主要出现在两类地方：一是 `merge3Segments/merge3SegmentsTest` 里，在 `findMinimal()` 已经确定若干拼接时间点以后，用这些时间点回代计算三段拼接成本；二是 `dominates()` 里对右端覆盖的一个辅助比较。测试类和列评价器里的 `evaluate` 是另一个对象/测试语义，不属于 PWLF 主流程。因此，它不是普通 label 扩展中的核心操作，也不是最终整机成本的主要入口；但三段拼接的回代时间点如果刚好落在内部断点，仍会受 `[start,end)` 端点归属影响。
+
+`mergeMinimum2()` 当前没有被正式求解流程调用，只在 `src/Test/MergeBenchmark.java` 里用于测试/性能比较。这个版本的问题不在于现在会影响启发式，而在于它不适合作为后续 BPC pricing 的主合并函数：它会直接修改输入链表节点的 `p.start/q.start`，并把原 segment 节点直接接入 `res`，副作用比 `mergeMinimum()` 更难控制；公共区间扫描也没有显式在 `commonE` 处停止，依赖后续 `hi=commonE` 和指针推进，遇到无效输入或边界退化时更容易产生零长度段或重复推进问题。因此后续如果需要下包络合并，优先沿用已经写了输入契约和调试检查的 `mergeMinimum()`，`mergeMinimum2()` 暂时只保留为实验/对照实现。

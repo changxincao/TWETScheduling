@@ -153,3 +153,7 @@
 进一步检查失败样例后，问题可以更准确地说成“内部交点单点被删”。例如某个 backward 样例中，`f` 在左侧低于 `g`，随后两者在 `t≈8.876` 相交，之后一大段都是 `g<=f`。`updateDominatedIntervals` 按半开区间把 `[8.876, ... )` 替换成 `big_M`，这对不维护零长度点的 forward 处理比较自然；但 backward 后续做的是 suffix-min，`t=8.876` 这个交点可能正好是右侧可选时间里 `f` 的最小值。如果这个点被当成 dominated 区间的一部分删掉，suffix-min 只能退而使用更右侧未被支配的较大值，于是测试出现 expected 为交点值、actual 为右侧残余值的情况。
 
 因此，这几个失败不是 `normalizeBackward()` 删除右侧 `big_M` 尾段导致的，也不是 `mergeMinimum(Direction.BACKWARD)` 的下包络逻辑导致的；它们来自 partial dominance 与“内部单点不建模”之间的冲突。若要把 backward partial dominance 做成精确操作，就必须处理交点边界归属：要么在这类交点处允许保留零长度点段，要么把被支配区间的开闭方向按 backward suffix-min 重新设计，确保不会删掉 suffix 仍可能需要的边界值。若继续坚持“不维护内部单点”，则 backward partial dominance 只能作为可能过剪的启发式过滤，不能作为 BPC 精确定价里的安全 dominance。
+
+2026-05-15 进一步重新分析后，对上面这段判断做了修正。`suffix-min` 并没有把交点左侧整段算错，左侧段的左极限/右端极限其实仍然存在；真正不一致的是内部断点本身的 `evaluate` 归属。当前 segment 按 `[start,end)` 处理，断点会归到右侧段，因此如果左侧 end 极限更小，裸 `evaluate(t)` 会取到右侧较大值。更合理的语义是：内部断点处的函数值取左右两侧极限的较小值。这不需要把内部单点作为 segment 传播，只是在最终评价或测试取值时承认这个断点的最佳值。
+
+按这个语义修改了 `PiecewiseLinearFunction.evaluate()`：当 `t` 正好落在相邻两段的公共端点时，返回 `min(左段 end 值, 右段 start 值)`。测试里的 `evalRef` 同步改成同一规则，并增加了 `evaluate: internal breakpoint takes min of adjacent limits` 回归用例。重新运行后，`updateDominatedIntervals(Direction)` 的 500 组 forward/backward 随机测试全部通过；完整 PWLF 测试为 `passed=22, warnings=1, failed=2`，剩余两个失败仍是 `mergeMinimum` 完全不相交定义域这个已知无效输入。由此当前结论应改为：backward partial dominance 在“内部断点评价取左右极限最小”的语义下可以通过现有随机测试，但后续若某个内部单点还要继续作为结构参与更多函数运算，仍需要额外设计。

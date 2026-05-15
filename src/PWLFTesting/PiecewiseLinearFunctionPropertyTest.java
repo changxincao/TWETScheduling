@@ -60,6 +60,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testSuffixMinAgainstOracle();
 		testPrefixBoundaryRealMinimumRegression();
 		testSuffixBoundaryRealMinimumRegression();
+		testEvaluateInternalBreakpointMinimum();
 		testDirectionalNormalizeRegression();
 		testRandomDirectionalNormalizeSweep();
 		testFindMinimalNormalCases();
@@ -243,6 +244,16 @@ public class PiecewiseLinearFunctionPropertyTest {
 
 		if (forwardOk && backwardOk) {
 			pass("normalize(Direction): forward keeps T, backward keeps 0");
+		}
+	}
+
+	private void testEvaluateInternalBreakpointMinimum() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 10, 3, 0),
+				seg(10, 20, 0, 70));
+		double actual = f.evaluate(10);
+		if (checkClose("evaluate internal breakpoint uses better side", 30, actual)) {
+			pass("evaluate: internal breakpoint takes min of adjacent limits");
 		}
 	}
 
@@ -911,10 +922,17 @@ public class PiecewiseLinearFunctionPropertyTest {
 		if (f.head == null) {
 			return INF;
 		}
+		Segment prev = null;
 		for (Segment s = f.head; s != null; s = s.next) {
+			if (prev != null && Math.abs(prev.end - s.start) <= TOL && Math.abs(x - s.start) <= TOL) {
+				double leftValue = prev.slope * x + prev.intercept;
+				double rightValue = s.slope * x + s.intercept;
+				return Math.min(leftValue, rightValue);
+			}
 			if ((x >= s.start - TOL && x < s.end - TOL) || (s.next == null && Math.abs(x - s.end) <= TOL)) {
 				return s.slope * x + s.intercept;
 			}
+			prev = s;
 		}
 		return INF;
 	}

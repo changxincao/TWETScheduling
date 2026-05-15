@@ -329,12 +329,23 @@ public class PiecewiseLinearFunction {
 		if (!(Utility.compareLe(t, tail.end) && Utility.compareLe(head.start, t)))
 			return Utility.curUpperBound;
 		TimerManager.start("分段线性函数evaluate");
+		Segment prev = null;
 		for (Segment cur = head; cur != null; cur = cur.next) {
+			if (prev != null && Utility.compareEq(prev.end, cur.start) && Utility.compareEq(t, cur.start)) {
+				// 2026-05-15: 内部断点处按左右极限的较小值解释函数值。
+				// partial dominance 可能在断点两侧产生 vertical gap；不维护内部零长度点时，
+				// 最终评价仍应允许取到左右两侧中更优的那个端点值。
+				double leftValue = prev.slope * t + prev.intercept;
+				double rightValue = cur.slope * t + cur.intercept;
+				TimerManager.end("分段线性函数evaluate");
+				return Math.min(leftValue, rightValue);
+			}
 
 			if (Utility.compareGe(t, cur.start) && Utility.compareLt(t, cur.end)) {
 				TimerManager.end("分段线性函数evaluate");
 				return cur.slope * t + cur.intercept;
 			}
+			prev = cur;
 		}
 		if (Utility.compareEq(t, tail.end)) {
 			TimerManager.end("分段线性函数evaluate");

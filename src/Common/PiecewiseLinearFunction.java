@@ -181,6 +181,60 @@ public class PiecewiseLinearFunction {
 		return res;
 	}
 
+	/**
+	 * 2026-05-15: 带窗口外 big_M 填充的定义域限制。
+	 * false 时保持旧版 setDomain 语义：物理裁掉窗口外 segment，主要给启发式回推 completion 使用。
+	 * true 时不裁掉右端定义域，而是把窗口外区间写成 big_M 段，保持 tail.end 到原来的 T；
+	 * 这个语义用于 BPC pricing 中的 profitable completion window，避免后续 add/merge 破坏 [a,T] 契约。
+	 */
+	public PiecewiseLinearFunction setDomain(double domainStart, double domainEnd, boolean fillOutsideWithBigM) {
+		if (!fillOutsideWithBigM) {
+			return setDomain(domainStart, domainEnd);
+		}
+		Utility.debugCheckPWLFRightBound("setDomainBigM.input", this);
+		TimerManager.start("分段线性函数设置定义域");
+		PiecewiseLinearFunction res = new PiecewiseLinearFunction(this.domainStart, this.domainEnd);
+		if (this.head == null) {
+			TimerManager.end("分段线性函数设置定义域");
+			return res;
+		}
+
+		double actualStart = this.head.start;
+		double actualEnd = this.tail.end;
+		double keepStart = Math.max(actualStart, domainStart);
+		double keepEnd = Math.min(actualEnd, domainEnd);
+
+		if (!Utility.compareLt(keepStart, keepEnd)) {
+			// 窗口与当前函数没有正长度交集时，整段都视作不可行，但仍保留右端到 T。
+			res.addSegment(actualStart, actualEnd, 0, Utility.big_M);
+			Utility.debugCheckPWLFRightBound("setDomainBigM.output", res);
+			TimerManager.end("分段线性函数设置定义域");
+			return res;
+		}
+
+		if (Utility.compareLt(actualStart, keepStart)) {
+			res.addSegment(actualStart, keepStart, 0, Utility.big_M);
+		}
+
+		for (Segment seg = this.head; seg != null; seg = seg.next) {
+			double start = Math.max(seg.start, keepStart);
+			double end = Math.min(seg.end, keepEnd);
+			if (Utility.compareLt(start, end)) {
+				res.addSegment(start, end, seg.slope, seg.intercept);
+			}
+		}
+
+		if (Utility.compareLt(keepEnd, actualEnd)) {
+			// 当前 Segment 采用左闭右开、tail.end 特判的约定。
+			// 窗口右端点若需要严格闭区间语义，应由后续 prefix-min 或 label 层单点逻辑处理。
+			res.addSegment(keepEnd, actualEnd, 0, Utility.big_M);
+		}
+
+		Utility.debugCheckPWLFRightBound("setDomainBigM.output", res);
+		TimerManager.end("分段线性函数设置定义域");
+		return res;
+	}
+
 	public void resetDomain(double domainStart, double domainEnd) {
 		this.domainStart = domainStart;
 		this.domainEnd = domainEnd;

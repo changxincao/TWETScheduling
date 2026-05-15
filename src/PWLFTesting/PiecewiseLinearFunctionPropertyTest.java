@@ -55,6 +55,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 
 		testShiftXAgainstEvaluation();
 		testAddAgainstPointwiseSum();
+		testSetDomainFillOutsideWithBigM();
 		testPrefixMinAgainstOracle();
 		testSuffixMinAgainstOracle();
 		testPrefixBoundaryRealMinimumRegression();
@@ -126,6 +127,23 @@ public class PiecewiseLinearFunctionPropertyTest {
 		}
 		if (ok) {
 			pass("add: pointwise sum on overlapping domain");
+		}
+	}
+
+	private void testSetDomainFillOutsideWithBigM() {
+		PiecewiseLinearFunction f = function(0, 10,
+				seg(0, 4, 2, 1),
+				seg(4, 10, -1, 20));
+		PiecewiseLinearFunction restricted = f.setDomain(2, 7, true);
+		boolean ok = true;
+		ok &= checkClose("setDomain bigM keeps left outside infeasible", Utility.big_M, evalRef(restricted, 1));
+		ok &= checkClose("setDomain bigM keeps inner left value", evalRef(f, 3), evalRef(restricted, 3));
+		ok &= checkClose("setDomain bigM keeps inner right value", evalRef(f, 6), evalRef(restricted, 6));
+		ok &= checkClose("setDomain bigM keeps right outside infeasible", Utility.big_M, evalRef(restricted, 8));
+		ok &= checkClose("setDomain bigM keeps tail right bound", 10, restricted.tail.end);
+		ok &= checkClose("setDomain bigM keeps metadata right bound", 10, restricted.domainEnd);
+		if (ok) {
+			pass("setDomain(fillOutsideWithBigM): keeps right bound and fills outside window");
 		}
 	}
 

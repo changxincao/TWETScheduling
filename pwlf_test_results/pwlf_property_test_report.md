@@ -5,6 +5,7 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 
 - PASS: shiftX: value preservation on shifted domain
 - PASS: add: pointwise sum on overlapping domain
+- PASS: setDomain(fillOutsideWithBigM): keeps right bound and fills outside window
 - PASS: minimizePrefixInPlace: normal continuous/nonconvex case
 - PASS: minimizeSuffixInPlace: normal continuous/nonconvex case
 - PASS: minimizePrefixInPlace: boundary real-minimum regression
@@ -23,4 +24,4 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: random sweep: add and mergeMinimum forward-frontier semantics on 500 continuous cases
 - PASS: random frontier sweep: mergeMinimum on 500 prefix-minimized cases
 
-Summary: passed=15, warnings=1, failed=3
+Summary: passed=16, warnings=1, failed=3

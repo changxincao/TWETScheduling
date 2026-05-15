@@ -602,7 +602,6 @@ class TwoOptStarOperator implements Move {
 
 	@Override
 	public void searchBest() {
-		double bestCost = 0;
 		for (int m1 = 0; m1 < data.m; m1++) {
 			for (int m2 = m1 + 1; m2 < data.m; m2++) {
 				if (noImprovedSeqPair.contains(Set.of(s.sequences.get(m1), s.sequences.get(m2))))
@@ -622,9 +621,14 @@ class TwoOptStarOperator implements Move {
 //								double testCost2=Move.testSequence(data, newSeqs.get(1), s);
 //								Move.testSOutput(new int[] {cut1,cut2,rev1?1:0,rev2?1:0}, new int[] {m1,m2}, s, testCost1+testCost2, deltaCost+s.cost[m1]+s.cost[m2]);
 								
-								if (Utility.compareLt(deltaCost, bestCost)) {
+								// 2026-05-15:
+								// 跨机器算子后续会对 savedOperations 排序，并贪婪提交互不重叠机器上的改进 move。
+								// 因此这里不能只保存“刷新全局最优”的候选，否则某个机器对即使存在改进，
+								// 只要它没有刷新全局 best，就不会进入 savedOperations；commit 末尾又会据此把该机器对
+								// 写入 noImprovedSeqPair，导致后续相同序列被错误跳过。
+								// 这里保存所有改进候选，使 noImprovedSeqPair 的含义保持为“该机器对确实没有任何改进候选”。
+								if (Utility.compareLt(deltaCost, 0)) {
 									savedOperations.add(new OptCost(m1, m2, cut1, cut2, rev1, rev2, deltaCost));
-									bestCost = deltaCost;
 								}
 								if(cut2==seq2.size()-1) break;
 							}
@@ -884,7 +888,6 @@ class PathInsertOperator implements Move {
 	@Override
 	public void searchBest() {
 
-		double bestCost = 0;
 		for (int m1 = 0; m1 < data.m; m1++) {
 			for (int m2 = 0; m2 < data.m; m2++) {
 				if (m1 == m2)
@@ -909,9 +912,12 @@ class PathInsertOperator implements Move {
 //								Move.testSOutput(new int[] {a,b,len,rev?1:0}, new int[] {m1,m2}, s, Utility.compareGe((testCost2+testCost1),Utility.upperBound)?Utility.upperBound:testCost2+testCost1,Utility.compareGe(deltaCost+s.cost[m1]+s.cost[m2], Utility.upperBound)?Utility.upperBound:deltaCost+s.cost[m1]+s.cost[m2]);
 //								Move.testSOutput(new int[] {a,b,len,rev?1:0}, new int[] {m1,m2}, s, testCost2+testCost1,Utility.compareGe(deltaCost+s.cost[m1]+s.cost[m2], Utility.upperBound)?Utility.upperBound:deltaCost+s.cost[m1]+s.cost[m2]);
 								
-								if (Utility.compareLt(deltaCost, bestCost)) {
+								// 2026-05-15:
+								// savedOperations 是后续排序并贪婪提交的候选池，不应只记录刷新全局 best 的候选。
+								// 如果某个有向机器对存在改进但未刷新全局 best，它也必须进入候选池；
+								// 否则 commit 末尾会把这个有向机器对误写入 noImprovedSeqPair，后续直接跳过。
+								if (Utility.compareLt(deltaCost, 0)) {
 									savedOperations.add(new OptCost(m1, m2, a, len, b, rev, deltaCost));
-									bestCost = deltaCost;
 								}
 								if(len==1) break;
 							}
@@ -1089,7 +1095,6 @@ class CrossExchangeOperator implements Move {
 	@Override
 	public void searchBest() {
 
-		double bestCost = 0;
 		for (int m1 = 0; m1 < data.m; m1++) {
 			for (int m2 = m1 + 1; m2 < data.m; m2++) {
 				if (noImprovedSeqPair.contains(Set.of(s.sequences.get(m1), s.sequences.get(m2))))
@@ -1114,10 +1119,13 @@ class CrossExchangeOperator implements Move {
 //										testCost2=Move.testSequence(data, getNeqSeqs(seq1, a, l1, seq2, b, l2, rev1, rev2).get(1), s);
 										
 									
-										if (Utility.compareLt(deltaCost, bestCost)) {
+										// 2026-05-15:
+										// 当前 commit 逻辑会对 savedOperations 排序，然后选择互不冲突的机器对提交。
+										// 所以这里保存所有改进 cross-exchange 候选，而不是只保存刷新全局最优的候选；
+										// 这样 noImprovedSeqPair 才能准确表示“该机器对没有任何改进候选”。
+										if (Utility.compareLt(deltaCost, 0)) {
 											savedOperations
 													.add(new OptCost(m1, m2, a, b, l1, l2, rev1, rev2, deltaCost));
-											bestCost = deltaCost;
 
 										}
 										if(l2==0)break;

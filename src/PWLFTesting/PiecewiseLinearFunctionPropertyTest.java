@@ -60,6 +60,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testSuffixMinAgainstOracle();
 		testPrefixBoundaryRealMinimumRegression();
 		testSuffixBoundaryRealMinimumRegression();
+		testDirectionalNormalizeRegression();
 		testFindMinimalNormalCases();
 		testFindMinimalVerticalJumpRisk();
 		testFindMinimalPositionSelectionCases();
@@ -213,6 +214,35 @@ public class PiecewiseLinearFunctionPropertyTest {
 		}
 	}
 
+	private void testDirectionalNormalizeRegression() {
+		PiecewiseLinearFunction forward = function(0, 10,
+				seg(0, 2, 0, INF),
+				seg(2, 5, -1, 8),
+				seg(5, 10, 0, INF));
+		forward.normalize(PiecewiseLinearFunction.Direction.FORWARD);
+
+		boolean forwardOk = true;
+		forwardOk &= checkClose("normalize(FORWARD) drops unreachable left side", 2, forward.head.start);
+		forwardOk &= checkClose("normalize(FORWARD) keeps right endpoint T", 10, forward.tail.end);
+		forwardOk &= checkClose("normalize(FORWARD) closes trailing bigM by prefix minimum", 3, evalRef(forward, 7));
+
+		PiecewiseLinearFunction backward = function(0, 10,
+				seg(0, 3, 0, INF),
+				seg(3, 8, 1, 1),
+				seg(8, 10, 0, INF));
+		backward.normalize(PiecewiseLinearFunction.Direction.BACKWARD);
+
+		boolean backwardOk = true;
+		backwardOk &= checkClose("normalize(BACKWARD) keeps left endpoint 0", 0, backward.head.start);
+		backwardOk &= checkClose("normalize(BACKWARD) drops unreachable right tail", 8, backward.tail.end);
+		backwardOk &= checkClose("normalize(BACKWARD) closes leading bigM by suffix minimum", 4, evalRef(backward, 1));
+		backwardOk &= checkClose("normalize(BACKWARD) keeps suffix-min value inside real domain", 8, evalRef(backward, 7));
+
+		if (forwardOk && backwardOk) {
+			pass("normalize(Direction): forward keeps T, backward keeps 0");
+		}
+	}
+
 	private void testFindMinimalNormalCases() {
 		PiecewiseLinearFunction f = function(0, 20,
 				seg(0, 2, -3, 12),
@@ -303,7 +333,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 				seg(2, 6, -0.5, 8),
 				seg(6, 10, 0.25, 2));
 		PiecewiseLinearFunction actual = f.copy();
-		actual.mergeMinimum(g.copy());
+		actual.mergeMinimum(g.copy(), PiecewiseLinearFunction.Direction.FORWARD);
 		boolean ok = true;
 		for (double x : sampleUnion(f, g)) {
 			double expected = prefixMinOfLowerEnvelopeRef(f, g, x);
@@ -354,7 +384,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 	private void checkMergeDisjoint(String name, PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
 		try {
 			PiecewiseLinearFunction actual = f.copy();
-			actual.mergeMinimum(g.copy());
+			actual.mergeMinimum(g.copy(), PiecewiseLinearFunction.Direction.FORWARD);
 			boolean ok = true;
 			for (double x : sampleUnion(f, g)) {
 				double expected = prefixMinOfLowerEnvelopeRef(f, g, x);
@@ -371,7 +401,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 	private void testUpdateDominatedIntervalsBasicCases() {
 		PiecewiseLinearFunction f = function(0, 20, seg(0, 5, 0, 10));
 		PiecewiseLinearFunction g = function(0, 20, seg(0, 5, 0, 1));
-		boolean removed = f.updateDominatedIntervals(g);
+		boolean removed = f.updateDominatedIntervals(g, PiecewiseLinearFunction.Direction.FORWARD);
 		if (!removed || !f.isEmpty()) {
 			fail("updateDominatedIntervals should remove fully dominated same-domain function",
 					"removed=" + removed + ", empty=" + f.isEmpty());
@@ -385,7 +415,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 				seg(4, 6, 0, 1));
 		PiecewiseLinearFunction dominator = function(0, 20, seg(2, 4, 0, 5));
 		try {
-			partial.updateDominatedIntervals(dominator);
+			partial.updateDominatedIntervals(dominator, PiecewiseLinearFunction.Direction.FORWARD);
 			pass("updateDominatedIntervals: partial middle domination no exception");
 		} catch (Throwable ex) {
 			fail("updateDominatedIntervals partial middle domination throws exception",
@@ -454,7 +484,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 					}
 				}
 				PiecewiseLinearFunction min = f.copy();
-				min.mergeMinimum(g.copy());
+				min.mergeMinimum(g.copy(), PiecewiseLinearFunction.Direction.FORWARD);
 				for (double x : sampleUnion(f, g)) {
 					requireClose(prefixMinOfLowerEnvelopeRef(f, g, x), evalRef(min, x));
 				}
@@ -541,7 +571,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 
 	private void checkMergedMinimum(PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
 		PiecewiseLinearFunction min = f.copy();
-		min.mergeMinimum(g.copy());
+		min.mergeMinimum(g.copy(), PiecewiseLinearFunction.Direction.FORWARD);
 		for (double x : sampleUnion(f, g)) {
 			requireClose(prefixMinOfLowerEnvelopeRef(f, g, x), evalRef(min, x));
 		}
@@ -561,7 +591,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 	private boolean checkUpdateDominatedForwardClosure(String name, PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
 		try {
 			PiecewiseLinearFunction actual = f.copy();
-			actual.updateDominatedIntervals(g.copy());
+			actual.updateDominatedIntervals(g.copy(), PiecewiseLinearFunction.Direction.FORWARD);
 			for (double x : sampleUnion(f, g)) {
 				double expected = prefixMinAfterDominanceRef(f, g, x);
 				requireClose(expected, evalRef(actual, x));
@@ -583,7 +613,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 			g.minimizePrefixInPlace();
 			try {
 				PiecewiseLinearFunction actual = f.copy();
-				actual.updateDominatedIntervals(g.copy());
+				actual.updateDominatedIntervals(g.copy(), PiecewiseLinearFunction.Direction.FORWARD);
 				for (double x : sampleUnion(f, g)) {
 					requireClose(prefixMinAfterDominanceRef(f, g, x), evalRef(actual, x));
 				}

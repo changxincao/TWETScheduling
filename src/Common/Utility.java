@@ -109,6 +109,23 @@ public class Utility {
 		}
 	}
 
+	/**
+	 * 2026-05-15: PWLF backward 方向的左端定义域调试检查。
+	 * forward pricing 关注真实右端是否仍到 T；backward pricing 对称地关注真实左端是否仍从 0/domainStart 开始。
+	 */
+	public static void debugCheckPWLFLeftBound(String operation, PiecewiseLinearFunction f) {
+		if (!Configure.debugPWLFDomainCheck || f == null || f.head == null || f.tail == null) {
+			return;
+		}
+		if (!compareEq(f.head.start, f.domainStart)) {
+			String key = "PWLF_LeftBound_Violation_" + operation;
+			debugMap.put(key, debugMap.getOrDefault(key, 0) + 1);
+			System.err.println("[PWLF left-domain check] " + operation + ": head.start=" + f.head.start
+					+ ", domainStart=" + f.domainStart + ", tail.end=" + f.tail.end
+					+ ", domainEnd=" + f.domainEnd + ", object=" + System.identityHashCode(f));
+		}
+	}
+
 	public static void debugCheckPWLFMergeContract(String operation, PiecewiseLinearFunction f,
 			PiecewiseLinearFunction g) {
 		if (!Configure.debugPWLFDomainCheck) {

@@ -5,7 +5,7 @@ import Common.PiecewiseLinearFunction;
 public class MergeBenchmark {
     // 老版 merge（链表+拆分，不复用）—— 请替换成你现有的 merge 方法名
     public static void oldMerge(PiecewiseLinearFunction f, PiecewiseLinearFunction g) {
-        f.mergeMinimum(g);
+        f.mergeMinimum(g, PiecewiseLinearFunction.Direction.FORWARD);
     }
     // 新版 merge（双指针+复用）
     public static void newMerge(PiecewiseLinearFunction f, PiecewiseLinearFunction g) {

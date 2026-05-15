@@ -34,7 +34,7 @@ public class TestPWF {
         PiecewiseLinearFunction L2 = new PiecewiseLinearFunction();
         L2.addSegment(0, 10, 0, 10); // L2(t) = 10, t in [0,10)
 
-        L2.updateDominatedIntervals(L1);
+        L2.updateDominatedIntervals(L1, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("测试 1 - 完全支配:");
         System.out.println("预期: [0.000,10.000): 0.000·t+5.000");
         System.out.println("实际: " + L2.toString());
@@ -50,7 +50,7 @@ public class TestPWF {
         PiecewiseLinearFunction L2 = new PiecewiseLinearFunction();
         L2.addSegment(0, 10, 0, 10); // L2(t) = 10, t in [0,10)
 
-        L2.updateDominatedIntervals(L1);
+        L2.updateDominatedIntervals(L1, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("测试 2 - 部分支配:");
         System.out.println("预期: [0.000,5.000): 0.000·t+5.000, [5.000,10.000): 0.000·t+10.000");
         System.out.println("实际: " + L2.toString());
@@ -65,7 +65,7 @@ public class TestPWF {
         PiecewiseLinearFunction L2 = new PiecewiseLinearFunction();
         L2.addSegment(0, 10, 0, 5); // L2(t) = 5, t in [0,10)
 
-        L2.updateDominatedIntervals(L1);
+        L2.updateDominatedIntervals(L1, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("测试 3 - 存在交点:");
         System.out.println("预期: [0.000,5.000): 0.000·t+∞, [5.000,10.000): 0.000·t+5.000");
         System.out.println("实际: " + L2.toString());
@@ -80,7 +80,7 @@ public class TestPWF {
         PiecewiseLinearFunction L2 = new PiecewiseLinearFunction();
         L2.addSegment(5, 10, 0, 10); // L2(t) = 10, t in [5,10)
 
-        L2.updateDominatedIntervals(L1);
+        L2.updateDominatedIntervals(L1, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("测试 4 - 无公共定义域:");
         System.out.println("预期: [5.000,10.000): 0.000·t+10.000");
         System.out.println("实际: " + L2.toString());
@@ -93,7 +93,7 @@ public class TestPWF {
         PiecewiseLinearFunction L2 = new PiecewiseLinearFunction();
         L2.addSegment(0, 10, 0, 10); // L2(t) = 10, t in [0,10)
 
-        L2.updateDominatedIntervals(L1);
+        L2.updateDominatedIntervals(L1, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("测试 5 - 空函数 (L1 为空):");
         System.out.println("预期: [0.000,10.000): 0.000·t+10.000");
         System.out.println("实际: " + L2.toString());
@@ -101,7 +101,7 @@ public class TestPWF {
 
         L1.addSegment(0, 10, 0, 5); // L1(t) = 5, t in [0,10)
         L2 = new PiecewiseLinearFunction(); // L2 为空
-        L2.updateDominatedIntervals(L1);
+        L2.updateDominatedIntervals(L1, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("测试 5 - 空函数 (L2 为空):");
         System.out.println("预期: [0.000,10.000): 0.000·t+5.000");
         System.out.println("实际: " + L2.toString());
@@ -116,7 +116,7 @@ public class TestPWF {
         PiecewiseLinearFunction L2 = new PiecewiseLinearFunction();
         L2.addSegment(0, 10, 0, 10); // L2(t) = 10, t in [0,10)
 
-        L2.updateDominatedIntervals(L1);
+        L2.updateDominatedIntervals(L1, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("测试 6 - 单段函数:");
         System.out.println("预期: [0.000,10.000): 0.000·t+5.000");
         System.out.println("实际: " + L2.toString());
@@ -134,7 +134,7 @@ public class TestPWF {
         L2.addSegment(0, 5, 0, 10);  // L2(t) = 10, t in [0,5)
         L2.addSegment(5, 10, 0, 15); // L2(t) = 15, t in [5,10)
 
-        L2.mergeMinimum(L1);
+        L2.mergeMinimum(L1, PiecewiseLinearFunction.Direction.FORWARD);
           System.out.println("测试 7 - 多段函数:");
         System.out.println("预期: [0.000,3.000): 0.000·t+5.000, [3.000,5.000): 0.000·t+10.000, [5.000,10.000): 0.000·t+15.000");
         System.out.println("实际: " + L2.toString());

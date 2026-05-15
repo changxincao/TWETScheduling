@@ -137,3 +137,11 @@
 进一步逐个检查 `PiecewiseLinearFunction` 的操作函数后，当前不能直接用于 backward 的主要是高层集合操作，而不是底层函数运算。底层的 `copy`、`setDomain`、`shiftX/shiftY`、`add`、`evaluate`、`findMinimal` 只要调用层维护好定义域契约，本身不区分 forward/backward；`minimizePrefixInPlace()` 只做 forward 前缀闭包，`minimizeSuffixInPlace()` 只做 backward 后缀闭包。真正不适用于 backward 的是 `normalize()`，以及依赖它收尾的 `updateDominatedIntervals()`、`mergeMinimum()`、`mergeMinimum2()`。这些函数当前都会把结果按 forward 方式处理：删左侧 `big_M`、保留右侧 `big_M`，再做 prefix-min。因此如果后续要写 backward 的 merge 或 partial dominance，需要单独做 backward 版本，不能直接复用现有这三个集合操作。
 
 后续如果真正改方向化接口，`mergeMinimum2()` 暂时不参与改造，甚至可以先注释/标记为实验实现，不作为 BPC pricing 的正式入口。它本身不是当前主流程依赖的函数，且会复用和改动输入 segment，方向化后更容易误用。正式保留的应是 `normalize(direction)`、`mergeMinimum(g,direction)` 和 `updateDominatedIntervals(g,direction)` 这几个入口。旧的无方向接口也不建议继续作为主接口保留；如果为了临时兼容测试保留，也必须明确标注默认 `FORWARD`，但后续 pricing 代码应强制显式传方向，避免写代码时忘记当前函数是在 forward 还是 backward 语义下运行。
+
+2026-05-15 已开始把这个方向化接口落到代码里。新增 `PiecewiseLinearFunction.Direction`，目前只有 `FORWARD` 和 `BACKWARD` 两个取值。`normalize(Direction.FORWARD)` 保留原来的 forward 逻辑：删除左侧连续 `big_M` 段，保留右侧 `big_M` 尾段，然后调用 `minimizePrefixInPlace()`，从而维持 `[a,T]` 语义。`normalize(Direction.BACKWARD)` 则做对称处理：保留左侧 `big_M` 段，删除右侧连续 `big_M` 尾段，然后调用 `minimizeSuffixInPlace()`，从而维持 `[0,b]` 语义。这里的核心不是简单反转代码，而是明确两个方向的固定端点不同：forward 固定右端 `T`，backward 固定左端 0。
+
+同步修改了 `mergeMinimum(g,direction)` 和 `updateDominatedIntervals(g,direction)`。这两个函数本身的区间扫描、替换和下包络逻辑仍沿用原实现，变化只在输入调试检查和最后的闭包方向：forward 继续检查右端定义域并做 prefix 闭包，backward 检查左端定义域并做 suffix 闭包。这样后续如果 backward pricing 需要做 label merge 或 partial dominance，可以先复用同一套扫描逻辑，但必须显式传入方向，避免误用 forward 的 `normalize()`。
+
+`mergeMinimum2()` 没有参与正式方向化改造，代码中已标记为实验实现。它目前仍默认按 forward 语义 normalize，只用于 `MergeBenchmark` 这类测试/对照，不作为后续 BPC pricing 的正式入口。后续如果确实需要另一套下包络实现，应该重新按方向、输入契约和 segment 副作用整理，而不是直接扩展这个实验函数。
+
+测试上新增了 `normalize(Direction)` 的显式回归用例：forward 用例检查左侧不可达区间被删除、右端仍保留到 `T`、右侧 `big_M` 能被 prefix-min 闭包；backward 用例检查左端 0 被保留、右侧不可达尾段被删除、左侧 `big_M` 能被 suffix-min 闭包。重新编译相关类后，完整 PWLF 测试结果为 `passed=18, warnings=1, failed=2`；`merge-find-contract` 模式仍为 `passed=5, warnings=0, failed=0`。剩余两个失败仍是 `mergeMinimum` 完全不相交定义域的契约外输入，不是本次 backward 方向化引入的问题。

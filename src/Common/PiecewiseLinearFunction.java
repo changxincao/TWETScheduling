@@ -13,6 +13,15 @@ import Common.Utility.TimerManager;
 
 //假设各段之间区间连续的
 public class PiecewiseLinearFunction {
+	/**
+	 * 分段函数集合操作的闭包方向。
+	 * FORWARD 表示按前缀最小值维护 [a,T] 语义；BACKWARD 表示按后缀最小值维护 [0,b] 语义。
+	 */
+	public enum Direction {
+		FORWARD,
+		BACKWARD
+	}
+
 	public static class Segment {
 		public double start, end; // local coordinates
 		public double slope;
@@ -898,8 +907,13 @@ public class PiecewiseLinearFunction {
 	 * 对 L2（this）进行“被 L1（g）支配区间置∞”的就地更新： 在公共定义域上，凡 L1(t) <= L2(t) 的区间， 将 L2
 	 * 替换为前面段的最低值（保持非增性）。
 	 */
-	public boolean updateDominatedIntervals(PiecewiseLinearFunction g) {
-		Utility.debugCheckPWLFRightBoundPair("updateDominatedIntervals.input", this, g);
+	public boolean updateDominatedIntervals(PiecewiseLinearFunction g, Direction direction) {
+		if (direction == Direction.BACKWARD) {
+			Utility.debugCheckPWLFLeftBound("updateDominatedIntervals.input.left", this);
+			Utility.debugCheckPWLFLeftBound("updateDominatedIntervals.input.right", g);
+		} else {
+			Utility.debugCheckPWLFRightBoundPair("updateDominatedIntervals.input", this, g);
+		}
 		//TODO 2025.5.15感觉上dominate和这个可以合并，不然如果dominate为false的话，还得重新走一次这个流程?
 		//先留着，不一定使用这种部分支配的操作
 		//先修改这个函数，返回值为boolean,
@@ -1025,8 +1039,12 @@ public class PiecewiseLinearFunction {
 		// 注意 replaceWithBigM 按半开区间 [cur,nxt) 替换，nxt 端点归右侧片段；
 		// 这里不为单个端点维护零长度段，和 pricing 中“单点 label 直接收尾”的约束一致。
 		// 全部被支配时，左侧 head big_M 会被 normalize() 清空，仍会返回 true。
-		normalize();
-		Utility.debugCheckPWLFRightBound("updateDominatedIntervals.output", this);
+		normalize(direction);
+		if (direction == Direction.BACKWARD) {
+			Utility.debugCheckPWLFLeftBound("updateDominatedIntervals.output", this);
+		} else {
+			Utility.debugCheckPWLFRightBound("updateDominatedIntervals.output", this);
+		}
 		if(this.isEmpty()) return true;
 		return false;
 	}
@@ -1037,8 +1055,16 @@ public class PiecewiseLinearFunction {
 	 */
 	//TODO 2025.5.10将M替换为全局上界，但不知道normalize使用时是否有影响，可能把某些平行线等于upperBound的给删了，导致函数为空
 	//之后测试一下 ，normalize函数是否还有用？
-	public void normalize() {
-		Utility.debugCheckPWLFRightBound("normalize.input", this);
+	public void normalize(Direction direction) {
+		if (direction == Direction.BACKWARD) {
+			normalizeBackward();
+		} else {
+			normalizeForward();
+		}
+	}
+
+	private void normalizeForward() {
+		Utility.debugCheckPWLFRightBound("normalize.forward.input", this);
 		//这个的作用还在于将tail复位
 		// 1) 删除头部无穷段
 		while (head != null && Utility.compareGe(head.intercept, Utility.big_M)) {
@@ -1078,7 +1104,49 @@ public class PiecewiseLinearFunction {
 
 		// 4) 保证非增
 		minimizePrefixInPlace();
-		Utility.debugCheckPWLFRightBound("normalize.output", this);
+		Utility.debugCheckPWLFRightBound("normalize.forward.output", this);
+	}
+
+	private void normalizeBackward() {
+		Utility.debugCheckPWLFLeftBound("normalize.backward.input", this);
+		if (head == null) {
+			tail = null;
+			return;
+		}
+
+		// 2026-05-15: backward 方向与 forward normalize 对称。
+		// backward label 的固定端点是左端 0/domainStart，因此左侧 big_M 不能物理删除；
+		// 右侧连续 big_M 尾段表示后续无法接上的过晚完成时间，可以在 suffix-min 前裁掉。
+		Segment cur = head;
+		Segment lastNonBigM = null;
+		while (cur != null) {
+			if (!Utility.compareGe(cur.intercept, Utility.big_M)) {
+				lastNonBigM = cur;
+			}
+			cur = cur.next;
+		}
+		if (lastNonBigM == null) {
+			head = tail = null;
+			return;
+		}
+		lastNonBigM.next = null;
+		tail = lastNonBigM;
+
+		cur = head;
+		while (cur.next != null) {
+			if (Utility.compareEq(cur.slope, cur.next.slope) && Utility.compareEq(cur.intercept, cur.next.intercept)) {
+				cur.end = cur.next.end;
+				cur.next = cur.next.next;
+				if (cur.next == null) {
+					tail = cur;
+				}
+			} else {
+				cur = cur.next;
+			}
+		}
+
+		minimizeSuffixInPlace();
+		Utility.debugCheckPWLFLeftBound("normalize.backward.output", this);
 	}
 
 	/**
@@ -1217,8 +1285,13 @@ public class PiecewiseLinearFunction {
 	// 这些约束。
 //	private static long mergeMinimumDomainViolationCount = 0;
 	
-	public void mergeMinimum(PiecewiseLinearFunction g) {
-		Utility.debugCheckPWLFMergeContract("mergeMinimum.input", this, g);
+	public void mergeMinimum(PiecewiseLinearFunction g, Direction direction) {
+		if (direction == Direction.FORWARD) {
+			Utility.debugCheckPWLFMergeContract("mergeMinimum.input", this, g);
+		} else {
+			Utility.debugCheckPWLFLeftBound("mergeMinimum.input.left", this);
+			Utility.debugCheckPWLFLeftBound("mergeMinimum.input.right", g);
+		}
 		// 函数g可以被舍弃，可随意修改，update不行
 		// 如果 L1 为空，直接变成 L2 的拷贝
 		if (this.head == null) {
@@ -1408,8 +1481,12 @@ public class PiecewiseLinearFunction {
 		
 		// 8) 末尾合并相邻同值同斜率片段、保持非增
 		//这个进入的时候还是有可能存在连续段的斜率和intercept是相同的，比如this函数最后一个和g相邻的部分，此时相当于前半部分取小，再和最后剩下的拼接，还是原来的东西
-		normalize();
-		Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
+		normalize(direction);
+		if (direction == Direction.BACKWARD) {
+			Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
+		} else {
+			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
+		}
 	}
 
 	
@@ -1419,9 +1496,12 @@ public class PiecewiseLinearFunction {
 	}
 	
 	/**
-	 * 双指针扫描版本：对两个函数在全域上下做逐点最小合并， 同时保留各自非重叠区间，最后 normalize()。
+	 * 实验版双指针扫描下包络。
+	 * <p>
+	 * 2026-05-15: 该函数不作为 BPC pricing 的正式入口，不参与 forward/backward 方向化改造。
+	 * 后续正式合并统一使用 {@link #mergeMinimum(PiecewiseLinearFunction, Direction)}。
 	 */
-	// merge1和merge2两个函数初步测试区别并不大，先这样
+	@Deprecated
 	public void mergeMinimum2(PiecewiseLinearFunction g) {
 		Utility.debugCheckPWLFMergeContract("mergeMinimum2.input", this, g);
 		// 1) 空函数处理
@@ -1523,7 +1603,7 @@ public class PiecewiseLinearFunction {
 		// 6) 赋值回 this 并归一化
 		this.head = res.head;
 		this.tail = res.tail;
-		normalize();
+		normalize(Direction.FORWARD);
 		Utility.debugCheckPWLFRightBound("mergeMinimum2.output", this);
 	}
 

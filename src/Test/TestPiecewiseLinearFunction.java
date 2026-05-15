@@ -67,7 +67,7 @@ public class TestPiecewiseLinearFunction {
         for (int i = 0; i < fList.length; i++) {
             PiecewiseLinearFunction L = fList[i];
             PiecewiseLinearFunction R = buildShiftedList(L, 0.5); // 简单偏移测试
-            PiecewiseLinearFunction mergedL = L.copy(); mergedL.mergeMinimum(R);
+            PiecewiseLinearFunction mergedL = L.copy(); mergedL.mergeMinimum(R, PiecewiseLinearFunction.Direction.FORWARD);
             PiecewiseLinearFunctionArray A = aList[i];
             PiecewiseLinearFunctionArray B = toArrayVersion(R);
             PiecewiseLinearFunctionArray mergedA = A.copy(); mergedA.mergeMinimum(B);
@@ -152,7 +152,7 @@ public class TestPiecewiseLinearFunction {
         for (int k = 0; k < ITERS; k++) {
             PiecewiseLinearFunction tmp = L.copy();
             long t0 = System.nanoTime();
-            tmp.mergeMinimum(R1);
+            tmp.mergeMinimum(R1, PiecewiseLinearFunction.Direction.FORWARD);
             long t1 = System.nanoTime();
             tList+=(t1-t0);
         }
@@ -181,7 +181,7 @@ public class TestPiecewiseLinearFunction {
         long t0 = System.nanoTime();
         for (int k = 0; k < ITERS; k++) {
             PiecewiseLinearFunction tmp = L.copy();
-            tmp.updateDominatedIntervals(R1);
+            tmp.updateDominatedIntervals(R1, PiecewiseLinearFunction.Direction.FORWARD);
         }
         long tList = System.nanoTime() - t0;
 

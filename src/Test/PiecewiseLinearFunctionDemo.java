@@ -27,7 +27,7 @@ public class PiecewiseLinearFunctionDemo {
         f3.addSegment(0, 10, 1, 0); // f3(t) = t
         PiecewiseLinearFunction g3 = new PiecewiseLinearFunction();
         g3.addSegment(0, 10, 1, 1); // g3(t) = t + 1
-        boolean emptied3 = g3.updateDominatedIntervals(f3);
+        boolean emptied3 = g3.updateDominatedIntervals(f3, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("--- updateDominatedIntervals: 完全支配 ---");
         System.out.println("g3 emptied: " + emptied3 + ", isEmpty: " + g3.isEmpty());
 
@@ -38,7 +38,7 @@ public class PiecewiseLinearFunctionDemo {
         g4.addSegment(0, 5, 0, 5);  // g4=5 constant on [0,5)
         f4.addSegment(5, 10, 1, 0); // f4(t)=t on [5,10)
         g4.addSegment(5, 10, 2, 0); // g4(t)=2t on [5,10)
-        boolean emptied4 = g4.updateDominatedIntervals(f4);
+        boolean emptied4 = g4.updateDominatedIntervals(f4, PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("--- updateDominatedIntervals: 部分支配 ---");
         System.out.println("g4 emptied: " + emptied4 + ", g4 after update:");
         System.out.println(g4);
@@ -50,8 +50,8 @@ public class PiecewiseLinearFunctionDemo {
         g5.addSegment(5, 8, -1, 10); // g5: [5,8)
         PiecewiseLinearFunction f5c=f5.copy();
         PiecewiseLinearFunction g5c=g5.copy();
-        f5c.mergeMinimum(g5.copy());
-        g5c.mergeMinimum(f5.copy());
+        f5c.mergeMinimum(g5.copy(), PiecewiseLinearFunction.Direction.FORWARD);
+        g5c.mergeMinimum(f5.copy(), PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("--- mergeMinimum: 完全不重叠域 ---");
         System.out.println(f5);
 
@@ -64,8 +64,8 @@ public class PiecewiseLinearFunctionDemo {
         
         PiecewiseLinearFunction f6c=f6.copy();
         PiecewiseLinearFunction g6c=g6.copy();
-        f6c.mergeMinimum(g6.copy());
-        g6c.mergeMinimum(f6.copy());
+        f6c.mergeMinimum(g6.copy(), PiecewiseLinearFunction.Direction.FORWARD);
+        g6c.mergeMinimum(f6.copy(), PiecewiseLinearFunction.Direction.FORWARD);
         System.out.println("--- mergeMinimum: 部分重叠、多段 ---");
         System.out.println(f6);
     }

@@ -3,6 +3,7 @@ package TWETBPC.BP;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.TWETMasterSolution;
+import Common.Utility;
 
 /**
  * 机器数分支器。
@@ -43,7 +44,7 @@ public class MachineCountBrancher implements Brancher {
 		}
 		double machineUsage = solution.getMachineUsage();
 		double rounded = Math.rint(machineUsage);
-		if (Math.abs(machineUsage - rounded) <= tolerance) {
+		if (Utility.compareLe(Math.abs(machineUsage - rounded), tolerance)) {
 			return BranchResult.none("Machine usage already integral");
 		}
 

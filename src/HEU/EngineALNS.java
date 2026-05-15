@@ -233,7 +233,13 @@ class WorstRemoval implements RemovalOperator {
     	for(int i=1;i<=s.data.n;i++) {
     		list.add(i);
     	}
-    	Collections.sort(list,(o1,o2)->(int)(penalties.get(o1)-penalties.get(o2)));
+    	Collections.sort(list,(o1,o2)->{
+    		double v1 = penalties.get(o1);
+    		double v2 = penalties.get(o2);
+    		if (Utility.compareLt(v1, v2)) return -1;
+    		if (Utility.compareGt(v1, v2)) return 1;
+    		return Integer.compare(o1, o2);
+    	});
     	list=list.subList(0, Math.min(k, list.size()));
     	return list;
     }
@@ -269,7 +275,7 @@ class ShawRemoval implements RemovalOperator {
     	  if(a1==a2) continue;
           if (job == seed || removed.contains(job)) continue;
           double dist = taskDistance(seed, job,s.data);
-          if (dist < bestDist) {
+          if (Utility.compareLt(dist, bestDist)) {
               bestDist = dist;
               bestJob = job;
           }
@@ -326,7 +332,7 @@ class GreedyInsertion implements InsertionOperator {
                 List<Integer> seq = s.sequences.get(m);
                 for (int pos = -1; pos < seq.size(); pos++) {
                     double delta = InsertionOperator.evaluateInsertionCost(s,m, pos, job);
-                    if (delta < bestDelta) {
+                    if (Utility.compareLt(delta, bestDelta)) {
                         bestDelta = delta;
                         bestM = m;
                         bestPos = pos;
@@ -363,13 +369,18 @@ class RegretKInsertion implements InsertionOperator {
                     }
                 }
                 // 取 k 最小
-                Collections.sort(locs,(o1,o2)->(int)(o1[2]-o2[2]));//先假设不太可能插入不可行
+                Collections.sort(locs,(o1,o2)->{
+                	if (Utility.compareLt(o1[2], o2[2])) return -1;
+                	if (Utility.compareGt(o1[2], o2[2])) return 1;
+                	if ((int)o1[0] != (int)o2[0]) return Integer.compare((int)o1[0], (int)o2[0]);
+                	return Integer.compare((int)o1[1], (int)o2[1]);
+                });//先假设不太可能插入不可行
                 double best = locs.get(0)[2];
                 double regret = 0;
                 for (int i=1;i<Math.min(k,locs.size());i++) {
                     regret += locs.get(i)[2] - best;
                 }
-                if (regret > bestRegret) {
+                if (Utility.compareGt(regret, bestRegret)) {
                     bestRegret = regret;
                     bestJob = job;
                     bestPos = (int)locs.get(0)[1];

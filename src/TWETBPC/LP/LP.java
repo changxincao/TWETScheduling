@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 
 import Basic.Data;
+import Common.Utility;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
@@ -148,7 +149,7 @@ public class LP {
 		boolean[] covered = new boolean[data.n + 1];
 		int usedColumns = 0;
 		for (Map.Entry<Integer, Double> entry : chosen.entrySet()) {
-			if (Math.abs(entry.getValue().doubleValue() - 1.0) > 1e-9) {
+			if (Utility.compareGt(Math.abs(entry.getValue().doubleValue() - 1.0), 1e-9)) {
 				return false;
 			}
 			usedColumns++;

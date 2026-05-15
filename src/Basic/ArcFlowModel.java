@@ -177,7 +177,7 @@ public class ArcFlowModel {
 		ArrayList<ArrayList<Utility.TaskInfo>> schedules = new ArrayList<ArrayList<Utility.TaskInfo>>();
 		boolean[] visited = new boolean[data.n + 1];
 		for (int j = 1; j <= data.n; j++) {
-			if (x[0][j] == null || cplex.getValue(x[0][j]) <= 0.5 - Utility.EPS) {
+			if (x[0][j] == null || !Utility.compareGe(cplex.getValue(x[0][j]), 0.5)) {
 				continue;
 			}
 			ArrayList<Utility.TaskInfo> machine = new ArrayList<Utility.TaskInfo>();
@@ -194,7 +194,7 @@ public class ArcFlowModel {
 					if (curr == k || x[curr][k] == null) {
 						continue;
 					}
-					if (cplex.getValue(x[curr][k]) > 0.5 - Utility.EPS) {
+					if (Utility.compareGe(cplex.getValue(x[curr][k]), 0.5)) {
 						next = k;
 						break;
 					}

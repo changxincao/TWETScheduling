@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.PriorityQueue;
 
 import Basic.Data;
+import Common.Utility;
 import Output.BPCTraceSink;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETSolveResult;
@@ -71,7 +72,7 @@ public class Tree {
 			}
 
 			boolean incumbentUpdated = false;
-			if (solution.isInteger() && solution.getObjectiveValue() < incumbentCost) {
+			if (solution.isInteger() && Utility.compareLt(solution.getObjectiveValue(), incumbentCost)) {
 				incumbentCost = solution.getObjectiveValue();
 				incumbentColumnIds = new ArrayList<Integer>(solution.getActiveColumnIds());
 				incumbentUpdated = true;
@@ -86,7 +87,7 @@ public class Tree {
 				continue;
 			}
 			if (Double.isFinite(incumbentCost) && solution.getStatus() != TWETMasterStatus.NOT_SOLVED
-					&& solution.getObjectiveValue() >= incumbentCost - config.branchingTolerance) {
+					&& Utility.compareGe(solution.getObjectiveValue(), incumbentCost - config.branchingTolerance)) {
 				traceSink.onNodeClosed(node, "pruned_by_incumbent", queue.size());
 				continue;
 			}

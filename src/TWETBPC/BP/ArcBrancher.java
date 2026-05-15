@@ -3,6 +3,7 @@ package TWETBPC.BP;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.TWETMasterSolution;
+import Common.Utility;
 
 /**
  * 弧分支器。
@@ -56,11 +57,11 @@ public class ArcBrancher implements Brancher {
 				}
 				double value = solution.getArcValue(lp.getPool(), from, to, sink);
 				double frac = Math.abs(value - Math.rint(value));
-				if (frac <= tolerance) {
+				if (Utility.compareLe(frac, tolerance)) {
 					continue;
 				}
 				double score = Math.abs(value - 0.5);
-				if (score < bestFrac) {
+				if (Utility.compareLt(score, bestFrac)) {
 					bestFrac = score;
 					bestFrom = from;
 					bestTo = to;

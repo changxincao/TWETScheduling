@@ -78,7 +78,7 @@ public class TimeIndexModel {
                 int earliness = Math.max(dueE - C, 0);
                 int tardiness = Math.max(C - dueL, 0);
                 double cost = wE * earliness + wT * tardiness;
-                if (cost != 0)                       // skip zero‑cost arcs
+                if (!Utility.compareEq(cost, 0.0))                       // skip zero‑cost arcs
                     obj.addTerm(cost, x[j][t]);
             }
         }
@@ -106,7 +106,7 @@ public class TimeIndexModel {
         ArrayList<Utility.TaskInfo> tasks = new ArrayList<Utility.TaskInfo>();
         for (int j = 1; j <= d.n; j++) {
             for (int t = 0; t <= H - d.p[j]; t++) {
-                if (x[j][t] != null && cpx.getValue(x[j][t]) > 0.5 - Utility.EPS) {
+                if (x[j][t] != null && Utility.compareGe(cpx.getValue(x[j][t]), 0.5)) {
                     double start = t;
                     double completion = t + d.p[j];
                     double taskCost = d.w_e[j] * Math.max(d.d_e[j] - completion, 0.0)
@@ -122,7 +122,7 @@ public class TimeIndexModel {
             boolean assigned = false;
             for (ArrayList<Utility.TaskInfo> machine : schedules) {
                 Utility.TaskInfo last = machine.get(machine.size() - 1);
-                if (last.completion <= task.start + Utility.EPS) {
+                if (Utility.compareLe(last.completion, task.start)) {
                     machine.add(task);
                     assigned = true;
                     break;

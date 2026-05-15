@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import Common.Utility;
 import TWETBPC.LP.Pool;
 
 /**
@@ -119,7 +120,7 @@ public final class TWETMasterSolution {
 	 * 这是 {@link #getArcValue(Pool, int, int, int)} 的布尔包装。
 	 */
 	public boolean usesArc(Pool pool, int from, int to, int sinkId) {
-		return getArcValue(pool, from, to, sinkId) > 0.0;
+		return Utility.compareGt(getArcValue(pool, from, to, sinkId), 0.0);
 	}
 
 }

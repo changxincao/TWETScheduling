@@ -204,7 +204,7 @@ public class Data {
 		//即每个任务在时间d_l[j]-p[j]释放，且其setup可发生在release之前,此时任务开始执行必然在释放时间之后，且任务不可能等待取寻求更好的成本
 		SchedulerForReleaseNoWait scheduler=new SchedulerForReleaseNoWait(this);
 		double improvedCmax=scheduler.solve(CmaxH, 2, 10);
-		if(improvedCmax<CmaxH) {
+		if(Utility.compareLt(improvedCmax, CmaxH)) {
 			System.out.println("Cmax被进一步改进："+CmaxH+" "+improvedCmax);
 			CmaxE=improvedCmax;
 			CmaxH=CmaxE*1.1;

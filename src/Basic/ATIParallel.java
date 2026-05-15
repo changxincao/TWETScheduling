@@ -242,7 +242,7 @@ public class ATIParallel {
     public ArrayList<ArrayList<Utility.TaskInfo>> extractTaskSchedules() throws IloException {
         ArrayList<Arc> activeArcs = new ArrayList<Arc>();
         for (Arc arc : arcList) {
-            if (cpx.getValue(x[arc.index]) > 0.5) {
+            if (Utility.compareGe(cpx.getValue(x[arc.index]), 0.5)) {
                 activeArcs.add(arc);
             }
         }
@@ -295,7 +295,7 @@ public class ATIParallel {
 
         List<Arc> activeArcs = new ArrayList<>();
         for (Arc arc : arcList) {
-            if (cpx.getValue(x[arc.index]) > 0.5) {
+            if (Utility.compareGe(cpx.getValue(x[arc.index]), 0.5)) {
                 activeArcs.add(arc);
             }
         }

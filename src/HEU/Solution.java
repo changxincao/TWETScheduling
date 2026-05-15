@@ -359,7 +359,7 @@ public class Solution {
 					// 取决于这个函数前一段拼接的序列内容，所以此处不应该设置定义域，而是再拼接的时候，根据确定的前序拼接段，再确定该函数h1-h2段，h2的最早的完工时间作为开始定义域
 					// 即此处将定义域设置完全,都是从0-Cmax
 					// TODO 删掉
-					if (formerShift + data.p[job] + data.s[lastJob][job] > data.CmaxH)
+					if (Utility.compareGt(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH))
 						continue;
 					fFunction_hg[h][g] = data.penaltyFunction[job]
 							.setDomain(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH);
@@ -398,7 +398,7 @@ public class Solution {
 //							data.Cmax);
 					// 2025.5.3同上
 					// TODO 删掉
-					if (formerShift + data.p[job] + data.s[lastJob][job] > data.CmaxH)
+					if (Utility.compareGt(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH))
 						continue;
 
 					fFunction_gh[g][h] = data.penaltyFunction[job]
@@ -757,7 +757,7 @@ public class Solution {
 			return Utility.curUpperBound;
 		double[] pairs12 = merge12.findMinimal(true, true);
 		double cost12 = pairs12[0];
-		if (cost12+b3_LB >= Utility.curUpperBound) {
+		if (Utility.compareGe(cost12 + b3_LB, Utility.curUpperBound)) {
 			//这>=先不管，影响不大应该？
 //			Utility.debugNumPlus();
 //			System.out.println("M错误？");// 假设不可能
@@ -773,7 +773,7 @@ public class Solution {
 			return Utility.curUpperBound;
 		double[] pairs23 = merge23.findMinimal(true, false);
 		double cost23 = pairs23[0];
-		if (cost23 >= Utility.curUpperBound) {
+		if (Utility.compareGe(cost23, Utility.curUpperBound)) {
 //			Utility.debugNumPlus();
 //			System.out.println("M错误？");// 假设不可能
 			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
@@ -821,7 +821,7 @@ public class Solution {
 		double cost11 = Move.testSequence(data, newSeq1, this);
 		double[] pairs12 = merge12.findMinimal(true, true);
 		double cost12 = pairs12[0];
-		if (cost12 >= Utility.curUpperBound) {
+		if (Utility.compareGe(cost12, Utility.curUpperBound)) {
 			System.out.println("M错误？");// 假设不可能
 		}
 		double s_h2 = pairs12[1];
@@ -834,7 +834,7 @@ public class Solution {
 		newSeq2.addAll(seq3);
 		cost11 = Move.testSequence(data, newSeq2, this);
 		double cost23 = pairs23[0];
-		if (cost23 >= Utility.curUpperBound) {
+		if (Utility.compareGe(cost23, Utility.curUpperBound)) {
 			System.out.println("M错误？");// 假设不可能
 		}
 		double s_h3 = pairs23[1];

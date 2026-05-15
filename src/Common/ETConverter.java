@@ -145,13 +145,13 @@ public final class ETConverter {
 
     private static int sampleRoundedTruncatedNormal(Random random, double mean, double stdDev, double lowerBound,
             double upperBound) {
-        if (stdDev <= 0.0) {
+        if (Utility.compareLe(stdDev, 0.0)) {
             return (int) Math.rint(mean);
         }
         double value;
         do {
             value = mean + random.nextGaussian() * stdDev;
-        } while (value < lowerBound || value > upperBound);
+        } while (Utility.compareLt(value, lowerBound) || Utility.compareGt(value, upperBound));
         return (int) Math.rint(value);
     }
 

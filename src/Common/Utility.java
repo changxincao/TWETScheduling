@@ -170,7 +170,7 @@ public class Utility {
 	
 		    // 1. loop over arcs leaving dummy source (0,j)
 		    for (int j = 1; j <= data.n; j++) {
-		        if (model.x[0][j] != null && model.cplex.getValue(model.x[0][j]) > 0.5 - EPS) {
+		        if (model.x[0][j] != null && compareGe(model.cplex.getValue(model.x[0][j]), 0.5)) {
 	
 		            List<TaskInfo> seq = new ArrayList<>();
 		            int curr = j;
@@ -183,7 +183,7 @@ public class Utility {
 		                // find successor of curr
 		                int next = -1;
 		                for (int k = 1; k <= data.n; k++) {
-		                    if (curr != k && model.x[curr][k] != null && model.cplex.getValue(model.x[curr][k]) > 0.5 - EPS) {
+		                    if (curr != k && model.x[curr][k] != null && compareGe(model.cplex.getValue(model.x[curr][k]), 0.5)) {
 		                        next = k;
 		                        break;
 		                    }

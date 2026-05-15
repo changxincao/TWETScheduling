@@ -37,18 +37,18 @@ public final class ModelSolutionValidator {
 				seen[task.getJob()] = true;
 
 				double expectedProcessing = data.p[task.getJob()];
-				if (Math.abs((task.getCompletion() - task.getStart()) - expectedProcessing) > 1e-6) {
+				if (Utility.compareGt(Math.abs((task.getCompletion() - task.getStart()) - expectedProcessing), 1e-6)) {
 					issues.add("任务加工时长不匹配: job=" + task.getJob());
 				}
 
 				if (prev != null) {
 					double requiredStart = prev.getCompletion() + data.s[prevJob][task.getJob()];
-					if (task.getStart() + 1e-6 < requiredStart) {
+					if (Utility.compareLt(task.getStart(), requiredStart)) {
 						issues.add("机器内时序或 setup 约束被破坏: prev=" + prevJob + ", next=" + task.getJob());
 					}
 				} else {
 					double requiredStart = data.s[0][task.getJob()];
-					if (task.getStart() + 1e-6 < requiredStart) {
+					if (Utility.compareLt(task.getStart(), requiredStart)) {
 						issues.add("首任务开始时间小于源点 setup: job=" + task.getJob());
 					}
 				}
@@ -69,8 +69,8 @@ public final class ModelSolutionValidator {
 
 		boolean objectiveConsistent;
 		if (Double.isFinite(reportedObjective)) {
-			objectiveConsistent = Math.abs(recomputedObjective - reportedObjective) <= Math.max(1e-6,
-					1e-6 * Math.max(1.0, Math.abs(reportedObjective)));
+			objectiveConsistent = Utility.compareLe(Math.abs(recomputedObjective - reportedObjective), Math.max(1e-6,
+					1e-6 * Math.max(1.0, Math.abs(reportedObjective))));
 			if (!objectiveConsistent) {
 				issues.add("目标值不一致: reported=" + reportedObjective + ", recomputed=" + recomputedObjective);
 			}

@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import Basic.Data;
+import Common.Utility;
 
 // 任务类，用于存储任务的属性
 class Job {
@@ -216,20 +217,20 @@ public class SchedulerForReleaseNoWait {
 					double currentCompletionTime = earliestPossibleStartTime + currentJob.p;
 
 					// 寻找最小完成时间
-					if (currentCompletionTime < minCompletionTime) {
+					if (Utility.compareLt(currentCompletionTime, minCompletionTime)) {
 						minCompletionTime = currentCompletionTime;
 						bestJobId = jobId;
 						bestMachineIdx = mIdx;
 						bestStartTimeForSelected = earliestPossibleStartTime;
-					} else if (currentCompletionTime == minCompletionTime) { // 如果完成时间相同，进行决胜
+					} else if (Utility.compareEq(currentCompletionTime, minCompletionTime)) { // 如果完成时间相同，进行决胜
 						// 优先选择开始时间更早的
-						if (earliestPossibleStartTime < bestStartTimeForSelected) {
+						if (Utility.compareLt(earliestPossibleStartTime, bestStartTimeForSelected)) {
 							bestJobId = jobId;
 							bestMachineIdx = mIdx;
 							bestStartTimeForSelected = earliestPossibleStartTime;
 						}
 						// 如果开始时间也相同，优先选择机器索引更小的 (任意固定规则)
-						else if (earliestPossibleStartTime == bestStartTimeForSelected && mIdx < bestMachineIdx) {
+						else if (Utility.compareEq(earliestPossibleStartTime, bestStartTimeForSelected) && mIdx < bestMachineIdx) {
 							bestJobId = jobId;
 							bestMachineIdx = mIdx;
 							// bestStartTimeForSelected 不变
@@ -312,7 +313,7 @@ public class SchedulerForReleaseNoWait {
 						double candidateMakespan = calculateOverallMakespan(candidateSchedule);
 
 						// 如果找到了一个更好的解 (首次改进策略)
-						if (candidateMakespan < bestMakespanFound) { // 与全局最优比较
+						if (Utility.compareLt(candidateMakespan, bestMakespanFound)) { // 与全局最优比较
 							bestMakespanFound = candidateMakespan;
 							bestScheduleFound = deepCopySchedule(candidateSchedule);
 
@@ -365,7 +366,7 @@ public class SchedulerForReleaseNoWait {
 
 							double candidateMakespan = calculateOverallMakespan(candidateSchedule);
 
-							if (candidateMakespan < bestMakespanFound) { // 与全局最优比较
+							if (Utility.compareLt(candidateMakespan, bestMakespanFound)) { // 与全局最优比较
 								bestMakespanFound = candidateMakespan;
 								bestScheduleFound = deepCopySchedule(candidateSchedule);
 

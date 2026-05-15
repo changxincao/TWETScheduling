@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import Basic.Data;
+import Common.Utility;
 
 /**
  * 分支树节点状态。
@@ -146,10 +147,10 @@ public class Node implements Comparable<Node> {
 	 * 这样 PriorityQueue 弹出的就是“当前估计最值得优先处理”的节点。
 	 */
 	public int compareTo(Node other) {
-		if (pseudoCost < other.pseudoCost) {
+		if (Utility.compareLt(pseudoCost, other.pseudoCost)) {
 			return -1;
 		}
-		if (pseudoCost > other.pseudoCost) {
+		if (Utility.compareGt(pseudoCost, other.pseudoCost)) {
 			return 1;
 		}
 		return Integer.compare(id, other.id);

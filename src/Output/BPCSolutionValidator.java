@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import Basic.Data;
+import Common.Utility;
 import TWETBPC.TWETSolveResult;
 import TWETBPC.LP.Pool;
 import TWETBPC.Model.TWETColumn;
@@ -48,8 +49,8 @@ public final class BPCSolutionValidator {
 
 		double incumbentCost = result.getIncumbentCost();
 		boolean objectiveConsistent = Double.isFinite(incumbentCost)
-				&& Math.abs(incumbentCost - recomputedObjective) <= Math.max(1e-6,
-						1e-6 * Math.max(1.0, Math.abs(incumbentCost)));
+				&& Utility.compareLe(Math.abs(incumbentCost - recomputedObjective), Math.max(1e-6,
+						1e-6 * Math.max(1.0, Math.abs(incumbentCost))));
 		if (!objectiveConsistent) {
 			issues.add("incumbent 目标值与列成本和不一致: incumbent=" + incumbentCost + ", recomputed="
 					+ recomputedObjective);

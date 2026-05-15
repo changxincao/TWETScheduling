@@ -57,7 +57,7 @@ public interface Move {
 			totalTime+=data.s[sequence.get(i-1)][sequence.get(i)]+data.p[sequence.get(i)];
 		}
 //		System.out.println(sequence+" "+totalTime);
-		if(totalTime>data.CmaxH) {
+		if(Utility.compareGt(totalTime, data.CmaxH)) {
 			return Utility.curUpperBound;
 		}
 		

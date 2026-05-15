@@ -2,6 +2,7 @@ package Output;
 
 import java.util.Locale;
 
+import Common.Utility;
 import TWETBPC.TWETSolveResult;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.TWETMasterSolution;
@@ -99,7 +100,7 @@ public final class BPCOutputFormatters {
 	}
 
 	public static double gapPercent(double bestBound, double incumbentCost) {
-		if (!Double.isFinite(bestBound) || !Double.isFinite(incumbentCost) || incumbentCost <= 0.0) {
+		if (!Double.isFinite(bestBound) || !Double.isFinite(incumbentCost) || Utility.compareLe(incumbentCost, 0.0)) {
 			return Double.NaN;
 		}
 		return Math.max(0.0, (1.0 - bestBound / incumbentCost) * 100.0);

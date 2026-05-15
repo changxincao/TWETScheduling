@@ -92,4 +92,20 @@
 
 最终按讨论采用了重载形式 `setDomain(start,end,fillOutsideWithBigM)`。`fillOutsideWithBigM=false` 时直接复用旧的物理裁剪逻辑；`true` 时新建函数，保留原函数实际覆盖区间的右端，把窗口左侧和右侧写成 `Utility.big_M` 水平段，窗口内部保留原 segment。这个方法主要给 BPC pricing 的 profitable window 使用。需要注意的是，当前 segment 仍按左闭右开处理，窗口右端点后接 `big_M` 段时，裸 `evaluate(end)` 会落到右侧 big_M；pricing 中该函数应随后做 prefix-min，让窗口内可行 completion 的最优值向右闭包。若后续出现只剩端点的窗口，仍建议在 label 层直接处理，不让它进入普通扩展链条。
 
+这里说的 `evaluate(end)` 风险不是指 `evaluate()` 普遍错误，而是当前链表段的端点归属约定：普通段按 `[start,end)` 扫描，只有整条函数最后的 `tail.end` 会被特判为有效。因此如果把 profitable window 右端 `end` 后面接一段 `[end,T]` 的 `big_M`，裸调用 `evaluate(end)` 会命中右侧 `big_M` 段，而不是左侧窗口内原函数值。对 pricing 扩展来说，这通常不是主问题，因为随后要做 `minimizePrefixInPlace()`，而 prefix-min 内部会用左侧 segment 的 `seg.end` 参与计算，把窗口内直到 `end` 的可行最优值向右延伸。但如果未来有代码直接拿这个未 prefix-min 的窗口限制函数在内部断点 `end` 上求值，就需要注意这个端点语义。
+
 验证上，新增了 `setDomain(fillOutsideWithBigM)` 的专项测试，检查窗口外值为 `big_M`、窗口内保留原函数值、`tail.end` 和 `domainEnd` 仍保持到原右端。重新编译 `PiecewiseLinearFunction.java` 和 `PiecewiseLinearFunctionPropertyTest.java` 后，`merge-find-contract` 结果为 `passed=5, warnings=0, failed=0`，完整测试为 `passed=16, warnings=1, failed=3`。剩余失败仍是之前的 `dominates` 定义域覆盖和 `mergeMinimum` 无效输入问题。
+
+### 后续实现注意事项
+
+这里把几个容易写错的点集中标记一下，后面写 BPC pricing 时优先按这些约束实现。
+
+1. `setDomain(start,end)` 和 `setDomain(start,end,true)` 不是同一个语义。前者是物理裁剪 segment 链表，主要服务启发式 completion 回推；后者是把窗口外写成 `big_M`，用于 pricing 的 profitable window。不要在 pricing 主流程里误用两参数版本去裁短右端。
+
+2. `add()` 不会自动补右端，也不应该让它自动补。它只在两个输入函数的实际公共定义域上相加；如果某个输入已经被物理裁短到 `end<T`，输出也会短到 `end`。因此 pricing 主流程要自己保证输入函数仍满足右端到 `T`。
+
+3. `setDomain(..., true)` 后的窗口右端点存在内部断点归属问题。当前 segment 是 `[start,end)`，只有整条函数的 `tail.end` 特判；所以裸 `evaluate(hbar)` 可能返回右侧 `big_M`。正常 pricing 扩展应立刻做 prefix-min，把窗口内可行 completion 的最优值向右闭包；不要在未 prefix-min 的中间函数上直接用 `evaluate(hbar)` 做严格判断。
+
+4. `curUpperBound` 在启发式和 pricing 里的意义不同。pricing 前要把它重置为 `Utility.big_M`，否则 prefix/suffix 取小可能把 reduced cost 后续仍有机会变好的区间提前压平或截断。
+
+5. `[T,T]` 单点 label 只能作为右端退化兜底。pricing 中一旦扩展得到只剩全局右端的 label，应直接尝试接终点或丢弃，不要继续参与 merge、dominance、partial dominance 或普通 add 链条。

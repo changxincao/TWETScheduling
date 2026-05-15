@@ -783,6 +783,8 @@ class TwoOptStarOperator implements Move {
 		double shift2 = data.s[seqM2.get(cut2 - 1)][rev1?seqM1.get(seqM1.size()-1):seqM1.get(cut1)] + data.p[rev1?seqM1.get(seqM1.size()-1):seqM1.get(cut1)];
 		double cost2 = s.merge2Segments(f1M2, b2M1, shift2);
 
+		// 2026-05-15: 返回的是变化成本 delta = 新两机成本 - 原两机成本，不是新解总成本；
+		// 因此 searchBest 中用 deltaCost < 0 判断是否为改进候选是正确的。
 		return cost1 + cost2 - originCost;
 
 	}
@@ -888,6 +890,8 @@ class PathInsertOperator implements Move {
 			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b2M2, shift1, shift2, durationSplit);
 //		}
 
+		// 2026-05-15: 返回的是变化成本 delta = 新两机成本 - 原两机成本，不是总成本。
+		// 所以 searchBest 中保存所有 deltaCost < 0 的候选，语义就是保存所有改进候选。
 		return costM1 + costM2 - originCost;
 
 	}
@@ -926,7 +930,10 @@ class PathInsertOperator implements Move {
 								if (Utility.compareLt(deltaCost, 0)) {
 									savedOperations.add(new OptCost(m1, m2, a, len, b, rev, deltaCost));
 								}
-								if(len==1) break;
+								// 2026-05-15:
+								// len 表示片段长度减 1。len=0 时只有一个任务，reverse 与 normal 等价，
+								// 因此可以跳过第二个方向；len>=1 时片段至少有两个任务，反向插入是不同候选，不能跳过。
+								if(len==0) break;
 							}
 
 						}
@@ -1289,6 +1296,8 @@ class CrossExchangeOperator implements Move {
 			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b3M2, shift1, shift2, durationSplitM1);
 //		}
 
+		// 2026-05-15: 返回变化成本 delta = 新两机成本 - 原两机成本。
+		// 该值小于 0 才表示 cross-exchange 候选能改善当前解。
 		return costM1 + costM2 - originalCost;
 	}
 	public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,int len1,ArrayList<Integer> s2,int from2,int len2, boolean rev1,boolean rev2){

@@ -135,3 +135,5 @@
 这里又进一步明确了一点：forward 和 backward 在 job 成本函数上的处理其实差别不大。profitable completion window 或任务自身窗口可以直接作用在“本次加入的 job 成本函数”上，也就是 job 函数可以物理裁成窗口内定义域；真正不能随便裁的是累计 label 函数。forward 的累计 label 要保持右端到 `T`，backward 的累计 label 要保持左端到 0。换句话说，窗口限制放在 job 函数上，label 端点契约放在 label 函数上；不要把 job 的窗口限制提前写进 label 的固定端点里。
 
 进一步逐个检查 `PiecewiseLinearFunction` 的操作函数后，当前不能直接用于 backward 的主要是高层集合操作，而不是底层函数运算。底层的 `copy`、`setDomain`、`shiftX/shiftY`、`add`、`evaluate`、`findMinimal` 只要调用层维护好定义域契约，本身不区分 forward/backward；`minimizePrefixInPlace()` 只做 forward 前缀闭包，`minimizeSuffixInPlace()` 只做 backward 后缀闭包。真正不适用于 backward 的是 `normalize()`，以及依赖它收尾的 `updateDominatedIntervals()`、`mergeMinimum()`、`mergeMinimum2()`。这些函数当前都会把结果按 forward 方式处理：删左侧 `big_M`、保留右侧 `big_M`，再做 prefix-min。因此如果后续要写 backward 的 merge 或 partial dominance，需要单独做 backward 版本，不能直接复用现有这三个集合操作。
+
+后续如果真正改方向化接口，`mergeMinimum2()` 暂时不参与改造，甚至可以先注释/标记为实验实现，不作为 BPC pricing 的正式入口。它本身不是当前主流程依赖的函数，且会复用和改动输入 segment，方向化后更容易误用。正式保留的应是 `normalize(direction)`、`mergeMinimum(g,direction)` 和 `updateDominatedIntervals(g,direction)` 这几个入口。旧的无方向接口也不建议继续作为主接口保留；如果为了临时兼容测试保留，也必须明确标注默认 `FORWARD`，但后续 pricing 代码应强制显式传方向，避免写代码时忘记当前函数是在 forward 还是 backward 语义下运行。

@@ -127,3 +127,5 @@
 2026-05-15 已把 `dominates()` 收紧为明确的完整函数占优判断。现在它要求 `this.head.start <= g.head.start` 且 `this.tail.end >= g.tail.end`，右端不覆盖时直接返回 `false`，不再用两个右端点近似推断缺失区间；双指针扫描只处理正长度区间，并在循环结束后检查 `cur` 是否已经扫到 `gEnd`，防止链表被意外裁断或指针推进异常时误返回 `true`。该函数仍不做 partial dominance，也不检查 label 状态或严格改进，只能作为函数层面的完整占优子程序。
 
 验证后，完整 PWLF 测试由 `passed=16, warnings=1, failed=3` 变为 `passed=17, warnings=1, failed=2`。被修掉的是“右端不覆盖仍错误支配”的已知问题；剩余两个失败仍是 `mergeMinimum` 在完全不相交定义域下的无效输入问题，属于前面已经明确不支持的契约外场景。
+
+2026-05-15 又补充确认了各函数的方向语义。`copy`、`setDomain`、`shiftX/shiftY`、`add`、`evaluate`、`findMinimal` 本身基本是方向无关的，关键仍是输入函数的定义域和端点契约要满足要求；`minimizePrefixInPlace()` 明确是 forward 闭包，得到从左到右的前缀最小值函数；`minimizeSuffixInPlace()` 是 backward 闭包，得到从右到左的后缀最小值函数。真正只适配 forward 的是 `normalize()`：它删除左侧 `big_M`、保留右侧 `big_M` 尾段，并调用 `minimizePrefixInPlace()`，所以所有内部调用 `normalize()` 的操作，包括 `updateDominatedIntervals()`、`mergeMinimum()` 和 `mergeMinimum2()`，当前也都只能按 forward label 语义使用。若后续要对 backward label 做合并或 partial dominance，不能直接复用这些函数，需要单独写 backward 版本，至少要把最后的闭包改成 suffix-min，并重新讨论左侧/右侧 `big_M` 段的保留规则。

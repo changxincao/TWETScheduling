@@ -229,9 +229,13 @@ class WorstRemoval implements RemovalOperator {
     	
     }
     public List<Integer> removeTopKByValue(Solution s,Map<Integer, Double> penalties,int k){
-    	List<Integer> list=new ArrayList<Integer>();
-    	for(int i=1;i<=s.data.n;i++) {
-    		list.add(i);
+    	List<Integer> list=new ArrayList<Integer>(penalties.keySet());
+    	int[] jobMachine = new int[s.data.n + 1];
+    	Arrays.fill(jobMachine, -1);
+    	for (int m = 0; m < s.data.m; m++) {
+    		for (int job : s.sequences.get(m)) {
+    			jobMachine[job] = m;
+    		}
     	}
     	Collections.sort(list,(o1,o2)->{
     		double v1 = penalties.get(o1);
@@ -240,8 +244,29 @@ class WorstRemoval implements RemovalOperator {
     		if (Utility.compareGt(v1, v2)) return 1;
     		return Integer.compare(o1, o2);
     	});
-    	list=list.subList(0, Math.min(k, list.size()));
-    	return list;
+    	// 2026-05-15:
+    	// WorstRemoval 原来直接取前 k 个任务，极端情况下可能把某台机器删空。
+    	// 当前局部搜索和 pair cache 默认机器序列非空，因此这里和 Random/Shaw removal 一样，
+    	// 显式保证每台机器至少保留一个任务。
+    	int[] removedNum = new int[s.data.m];
+    	List<Integer> removed = new ArrayList<Integer>();
+    	int maxRemovable = Math.max(0, s.data.n - s.data.m);
+    	int target = Math.min(k, maxRemovable);
+    	for (int job : list) {
+    		int m = jobMachine[job];
+    		if (m < 0) {
+    			continue;
+    		}
+    		if (s.sequences.get(m).size() - removedNum[m] <= 1) {
+    			continue;
+    		}
+    		removed.add(job);
+    		removedNum[m]++;
+    		if (removed.size() >= target) {
+    			break;
+    		}
+    	}
+    	return removed;
     }
     @Override
 	public void setRemovedRatio(double frac) {

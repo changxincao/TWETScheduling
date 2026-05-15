@@ -144,6 +144,15 @@ public class ArcFlowModel {
 			obj.addTerm(data.w_e[j], E[j]); // α_j * E_j
 			obj.addTerm(data.w_t[j], T[j]); // β_j * T_j
 		}
+		// 2026-05-15: setup cost 是被选中弧 i->j 的固定目标成本，
+		// 不影响时间传播，只通过 x_ij 加入目标函数。
+		for (int i = 0; i < data.n + 1; i++) {
+			for (int j = 1; j < data.n + 1; j++) {
+				if (i != j && x[i][j] != null) {
+					obj.addTerm(data.getSetupCost(i, j), x[i][j]);
+				}
+			}
+		}
 		cplex.addMinimize(obj, "TotalPenalty");
 	}
 
@@ -182,11 +191,13 @@ public class ArcFlowModel {
 			}
 			ArrayList<Utility.TaskInfo> machine = new ArrayList<Utility.TaskInfo>();
 			int curr = j;
+			int prevJob = 0;
 			while (curr != -1 && curr != data.n + 1 && !visited[curr]) {
 				double completion = cplex.getValue(C[curr]);
 				double start = completion - data.p[curr];
 				double taskCost = data.w_e[curr] * Math.max(data.d_e[curr] - completion, 0.0)
-						+ data.w_t[curr] * Math.max(completion - data.d_l[curr], 0.0);
+						+ data.w_t[curr] * Math.max(completion - data.d_l[curr], 0.0)
+						+ data.getSetupCost(prevJob, curr);
 				machine.add(new Utility.TaskInfo(curr, start, completion, taskCost));
 				visited[curr] = true;
 				int next = -1;
@@ -199,6 +210,7 @@ public class ArcFlowModel {
 						break;
 					}
 				}
+				prevJob = curr;
 				curr = next;
 			}
 			if (!machine.isEmpty()) {

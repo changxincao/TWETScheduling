@@ -106,7 +106,7 @@ public class ATIParallel {
                     int t_j = t_i + delta[i][j];
                     if (t_j <= H) {
                         Node to = nodes.get(j + "_" + t_j);
-                        Arc arc = new Arc(from, to, d.cost(j, t_j), arcIndex++);
+                        Arc arc = new Arc(from, to, d.cost(j, t_j) + d.getSetupCost(i, j), arcIndex++);
                         arcList.add(arc);
                     }
                 }
@@ -119,7 +119,7 @@ public class ATIParallel {
                 int t_j = t + delta[0][j];
                 Node from = nodes.get("0_" + t);
                 Node to = nodes.get(j + "_" + t_j);
-                Arc arc = new Arc(from, to, d.cost(j, t_j), arcIndex++);
+                Arc arc = new Arc(from, to, d.cost(j, t_j) + d.getSetupCost(0, j), arcIndex++);
                 arcList.add(arc);
             }
         }
@@ -264,7 +264,8 @@ public class ATIParallel {
                 double completion = currentArc.to.t;
                 double start = completion - d.p[job];
                 double taskCost = d.w_e[job] * Math.max(d.d_e[job] - completion, 0.0)
-                        + d.w_t[job] * Math.max(completion - d.d_l[job], 0.0);
+                        + d.w_t[job] * Math.max(completion - d.d_l[job], 0.0)
+                        + d.getSetupCost(currentArc.from.i, job);
                 machine.add(new Utility.TaskInfo(job, start, completion, taskCost));
 
                 Node currentNode = currentArc.to;
@@ -341,6 +342,7 @@ public class ATIParallel {
         int[] C = new int[d.n + 1];
         int[] E = new int[d.n + 1];
         int[] T = new int[d.n + 1];
+        double selectedSetupCost = 0.0;
 
         System.out.println("\n=== Scheduling Results ===");
         for (int m = 0; m < machineSchedules.size(); m++) {
@@ -357,6 +359,7 @@ public class ATIParallel {
                     C[job] = completionTime;
                     E[job] = (int)(Math.max(0, d.d_e[job] - completionTime));
                     T[job] = (int)(Math.max(0, completionTime - d.d_l[job]));
+                    selectedSetupCost += d.getSetupCost(a.from.i, job);
                 } else if (a.from.i != 0 && a.to.i != 0 && a.from.i != a.to.i) {
                     int job = a.to.i;
                     int completionTime = a.to.t;
@@ -366,6 +369,7 @@ public class ATIParallel {
                     C[job] = completionTime;
                     E[job] = (int)(Math.max(0, d.d_e[job] - completionTime));
                     T[job] = (int)(Math.max(0, completionTime - d.d_l[job]));
+                    selectedSetupCost += d.getSetupCost(a.from.i, job);
                 }
             }
         }
@@ -378,7 +382,7 @@ public class ATIParallel {
             }
         }
 
-        int totalCost = 0;
+        double totalCost = selectedSetupCost;
         for (int j = 1; j <= d.n; j++) {
             if (C[j] != 0) {
                 totalCost += d.w_e[j] * E[j] + d.w_t[j] * T[j];

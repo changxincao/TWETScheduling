@@ -311,13 +311,25 @@ public class PiecewiseLinearFunction {
 		//Y 竖直方向平移
 		TimerManager.start("分段线性函数shiftY");
 		PiecewiseLinearFunction res = copy();
-		Segment p = res.head;
+		res.shiftYInPlace(delta);
+		TimerManager.end("分段线性函数shiftY");
+		return res;
+	}
+
+	public PiecewiseLinearFunction shiftYInPlace(double delta) {
+		// 2026-05-15: setup cost 是弧上的固定目标成本，只需要把整条函数纵向平移。
+		// 这里提供原地版本，避免在大量递推中为了常数项额外复制函数。
+		if (Utility.compareEq(delta, 0.0)) {
+			return this;
+		}
+		Segment p = head;
 		while (p != null) {
 			p.intercept += delta;
 			p = p.next;
 		}
-		TimerManager.end("分段线性函数shiftY");
-		return res;
+		minValuePairsLeft = null;
+		minValuePairsRight = null;
+		return this;
 	}
 
 	public double evaluate(double t) {

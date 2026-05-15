@@ -19,6 +19,7 @@ public class Data {
 	public double[] p, d_e, d_l, w_e, w_t, r; // arrays length n
 	// r先不管，感觉可能某些地方会不兼容
 	public double[][] s;// sequence dependent set up
+	public double[][] setupCost;// sequence dependent setup cost，和 s[i][j] 使用同一条弧 i->j
 	public double min_s[];// 每个任务的最小setup
 	public PiecewiseLinearFunction[] penaltyFunction;
 	public double CmaxH = 1e6;// 问题下的全局上界，用于启发式，设置不能过紧，否则可能某些差解搜不到就跳不出去
@@ -48,6 +49,7 @@ public class Data {
 		this.w_e = new double[n + 1];
 		this.w_t = new double[n + 1];
 		this.s = new double[n + 1][n + 1];// 如果存在释放时间，setup可以发生在释放时间之前
+		this.setupCost = new double[n + 1][n + 1];// 旧数据没有 SETUP_COST 块时默认全 0，保持兼容
 		this.min_s = new double[n + 1];
 		this.r = new double[n + 1];
 		debug_set();
@@ -285,15 +287,17 @@ public class Data {
 			this.w_t[jid] = Integer.parseInt(tokens[3]);
 		}
 		if (setup) {
-			loadSetupMatrix(reader);
+			loadSetupMatrices(reader);
 		}
 	}
 
 	/**
 	 * 2026-04-17: 多机生成数据会在任务区后追加一个 SETUP 块，按 (n+1)*(n+1) 直接读入。
 	 * 如果实例里没有这部分，就继续保持默认的零 setup，兼容旧格式。
+	 * 2026-05-15: 允许在 SETUP 后继续追加 SETUP_COST 块。
+	 * setup time 影响时间递推，setup cost 只影响目标值；两者共享同一条弧 i->j。
 	 */
-	private void loadSetupMatrix(BufferedReader reader) throws IOException {
+	private void loadSetupMatrices(BufferedReader reader) throws IOException {
 		String line = nextNonEmptyLine(reader);
 		if (line == null) {
 			return;
@@ -302,21 +306,38 @@ public class Data {
 			for (int i = 0; i <= n; i++) {
 				fillSetupRow(i, splitTokens(reader.readLine()));
 			}
+			line = nextNonEmptyLine(reader);
+		} else {
+			String[] firstRow = splitTokens(line);
+			if (firstRow.length != n + 1) {
+				throw new IOException("Invalid setup block in instance file");
+			}
+			fillSetupRow(0, firstRow);
+			for (int i = 1; i <= n; i++) {
+				fillSetupRow(i, splitTokens(reader.readLine()));
+			}
+			line = nextNonEmptyLine(reader);
+		}
+		if (line == null) {
 			return;
 		}
-		String[] firstRow = splitTokens(line);
-		if (firstRow.length != n + 1) {
-			throw new IOException("Invalid setup block in instance file");
+		if (!"SETUP_COST".equalsIgnoreCase(line.trim())) {
+			throw new IOException("Unknown optional block after SETUP: " + line);
 		}
-		fillSetupRow(0, firstRow);
-		for (int i = 1; i <= n; i++) {
-			fillSetupRow(i, splitTokens(reader.readLine()));
+		for (int i = 0; i <= n; i++) {
+			fillSetupCostRow(i, splitTokens(reader.readLine()));
 		}
 	}
 
 	private void fillSetupRow(int row, String[] tokens) {
 		for (int j = 0; j <= n; j++) {
 			s[row][j] = Double.parseDouble(tokens[j]);
+		}
+	}
+
+	private void fillSetupCostRow(int row, String[] tokens) {
+		for (int j = 0; j <= n; j++) {
+			setupCost[row][j] = Double.parseDouble(tokens[j]);
 		}
 	}
 
@@ -353,6 +374,10 @@ public class Data {
 
 	public double getSetUp(int i, int j) {
 		return this.s[i][j];
+	}
+
+	public double getSetupCost(int i, int j) {
+		return this.setupCost[i][j];
 	}
 
 	public double getProcessT(int i) {

@@ -72,9 +72,11 @@ public interface Move {
 				// 2026-05-14: 首任务的完成时间不能早于“从虚拟起点 0 到该任务的 setup + 加工时间”。
 				// 这里裁掉 [0, s[0][job]+p[job])，避免后面回推 completion 时选到物理不可行的时间点。
 				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+				cur.shiftYInPlace(data.getSetupCost(0, job));
 			} else {
 				cur = f.get(i - 1).shiftX(data.s[sequence.get(i - 1)][job] + data.p[job]);
 				cur =cur.add(data.penaltyFunction[job]);
+				cur.shiftYInPlace(data.getSetupCost(sequence.get(i - 1), job));
 			}
 			cur.minimizePrefixInPlace();
 			f.add(cur);
@@ -93,6 +95,7 @@ public interface Move {
 				
 			} else {
 				cur = b.get(i + 1).shiftX(-data.s[job][sequence.get(i + 1)] - data.p[sequence.get(i + 1)]).add(data.penaltyFunction[job]);
+				cur.shiftYInPlace(data.getSetupCost(job, sequence.get(i + 1)));
 			}
 			cur.minimizeSuffixInPlace();
 			b.set(i, cur);
@@ -313,10 +316,20 @@ class IOptOperator implements Move {
 			System.out.println(" "+from+" "+to+" "+len);
 		}
 		double shift=0;
-		if(to<from) shift=(rev?data.s[seq.get(from)][seq.get(to+1)]:data.s[seq.get(from+len)][seq.get(to+1)])+data.p[seq.get(to+1)];
-		else shift=(rev?data.s[seq.get(to)][seq.get(from+len)]:data.s[seq.get(to)][seq.get(from)])+data.p[rev?seq.get(from+len):seq.get(from)];
+		int bridgeFrom;
+		int bridgeTo;
+		if(to<from) {
+			bridgeFrom = rev ? seq.get(from) : seq.get(from + len);
+			bridgeTo = seq.get(to + 1);
+			shift = data.s[bridgeFrom][bridgeTo] + data.p[bridgeTo];
+		}
+		else {
+			bridgeFrom = seq.get(to);
+			bridgeTo = rev ? seq.get(from + len) : seq.get(from);
+			shift = data.s[bridgeFrom][bridgeTo] + data.p[bridgeTo];
+		}
 		
-		return s.merge2Segments(f1, b2, shift)-s.cost[mid];
+		return s.merge2Segments(f1, b2, shift, data.getSetupCost(bridgeFrom, bridgeTo))-s.cost[mid];
 	}
 
 	@Override
@@ -544,7 +557,9 @@ class TwoOptOperator implements Move {
 //		}
 		
 		//不再使用此处注释的分3段拼接和2段拼接（边界翻转，但上述代码也采用了3段拼接的做法）
-		double mergedCost = s.merge3Segments(f1, f2, b2, b3, shift1, shift2, duration2);
+		double bridgeCost1 = data.getSetupCost(aid == 0 ? 0 : seq.get(aid - 1), seq.get(bid));
+		double bridgeCost2 = bid == size - 1 ? 0.0 : data.getSetupCost(seq.get(aid), seq.get(bid + 1));
+		double mergedCost = s.merge3Segments(f1, f2, b2, b3, shift1, shift2, duration2, bridgeCost1, bridgeCost2);
 		return mergedCost-s.cost[mid];
 		
 	}
@@ -769,8 +784,10 @@ class TwoOptStarOperator implements Move {
 			b2M2 = s.bFunctions_gh[m2][cut2][seqM2.size() - 1];// 机器m2的第2段反向的backward函数
 
 		// 拼接
-		double shift1 = data.s[seqM1.get(cut1 - 1)][rev2?seqM2.get(seqM2.size() - 1):seqM2.get(cut2)] + data.p[rev2?seqM2.get(seqM2.size() - 1):seqM2.get(cut2)];
-		double cost1 = s.merge2Segments(f1M1, b2M2, shift1);
+		int bridgeFrom1 = seqM1.get(cut1 - 1);
+		int bridgeTo1 = rev2 ? seqM2.get(seqM2.size() - 1) : seqM2.get(cut2);
+		double shift1 = data.s[bridgeFrom1][bridgeTo1] + data.p[bridgeTo1];
+		double cost1 = s.merge2Segments(f1M1, b2M2, shift1, data.getSetupCost(bridgeFrom1, bridgeTo1));
 
 		// 对机器m2执行拼接计算
 		PiecewiseLinearFunction f1M2 = s.fFunctions.get(m2).get(cut2 - 1);// 机器m2的第一段
@@ -780,8 +797,10 @@ class TwoOptStarOperator implements Move {
 		else
 			b2M1 = s.bFunctions_gh[m1][cut1][seqM1.size() - 1];// 机器m1的第2段反向的backward函数
 
-		double shift2 = data.s[seqM2.get(cut2 - 1)][rev1?seqM1.get(seqM1.size()-1):seqM1.get(cut1)] + data.p[rev1?seqM1.get(seqM1.size()-1):seqM1.get(cut1)];
-		double cost2 = s.merge2Segments(f1M2, b2M1, shift2);
+		int bridgeFrom2 = seqM2.get(cut2 - 1);
+		int bridgeTo2 = rev1 ? seqM1.get(seqM1.size() - 1) : seqM1.get(cut1);
+		double shift2 = data.s[bridgeFrom2][bridgeTo2] + data.p[bridgeTo2];
+		double cost2 = s.merge2Segments(f1M2, b2M1, shift2, data.getSetupCost(bridgeFrom2, bridgeTo2));
 
 		// 2026-05-15: 返回的是变化成本 delta = 新两机成本 - 原两机成本，不是新解总成本；
 		// 因此 searchBest 中用 deltaCost < 0 判断是否为改进候选是正确的。
@@ -852,8 +871,11 @@ class PathInsertOperator implements Move {
 		PiecewiseLinearFunction b2M1 = null;
 		if (stM1 + len != sizeM1 - 1) {
 			b2M1 = s.bFunctions.get(m1).get(stM1 + len + 1);
+			int bridgeFromM1 = stM1 == 0 ? 0 : seqM1.get(stM1 - 1);
+			int bridgeToM1 = seqM1.get(stM1 + len + 1);
 			costM1 = s.merge2Segments(f1M1, b2M1,
-					data.s[stM1==0?0:seqM1.get(stM1 - 1)][seqM1.get(stM1 + len + 1)] + data.p[seqM1.get(stM1 + len + 1)]);
+					data.s[bridgeFromM1][bridgeToM1] + data.p[bridgeToM1],
+					data.getSetupCost(bridgeFromM1, bridgeToM1));
 		} else {
 			costM1 = f1M1.tail.getValue(f1M1.tail.end);
 			// 否则此时机器m1只剩下第一段,不需要拼接
@@ -884,10 +906,16 @@ class PathInsertOperator implements Move {
 		//不在采用拼两段的做法,直接拼三段
 		
 			// 拼三段
-			double shift1 = data.s[stM2==-1?0:seqM2.get(stM2)][rev?seqM1.get(stM1+len):seqM1.get(stM1)] + data.p[rev?seqM1.get(stM1+len):seqM1.get(stM1)];
-			double shift2 = stM2==seqM2.size()-1?0:(data.s[rev?seqM1.get(stM1):seqM1.get(stM1+len)][seqM2.get(stM2 + 1)] + data.p[seqM2.get(stM2 + 1)]);
+			int bridgeFrom1 = stM2 == -1 ? 0 : seqM2.get(stM2);
+			int bridgeTo1 = rev ? seqM1.get(stM1 + len) : seqM1.get(stM1);
+			double shift1 = data.s[bridgeFrom1][bridgeTo1] + data.p[bridgeTo1];
+			int bridgeFrom2 = rev ? seqM1.get(stM1) : seqM1.get(stM1 + len);
+			int bridgeTo2 = stM2 == seqM2.size() - 1 ? 0 : seqM2.get(stM2 + 1);
+			double shift2 = stM2==seqM2.size()-1?0:(data.s[bridgeFrom2][bridgeTo2] + data.p[bridgeTo2]);
 			double durationSplit =rev?s.getReverseDuration(m1, stM1, stM1+len):s.getNormalDuration(m1, stM1, stM1+len);
-			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b2M2, shift1, shift2, durationSplit);
+			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b2M2, shift1, shift2, durationSplit,
+					data.getSetupCost(bridgeFrom1, bridgeTo1),
+					stM2 == seqM2.size() - 1 ? 0.0 : data.getSetupCost(bridgeFrom2, bridgeTo2));
 //		}
 
 		// 2026-05-15: 返回的是变化成本 delta = 新两机成本 - 原两机成本，不是总成本。
@@ -1277,10 +1305,16 @@ class CrossExchangeOperator implements Move {
 //		} else {
 		//不再使用2段拼接 2025.5.6
 			// 此处M1上被拆的在中间
-			double shift1 = data.s[stM1==0?0:seqM1.get(stM1 - 1)][rev2?seqM2.get(stM2+l2):seqM2.get(stM2)] + data.p[rev2?seqM2.get(stM2+l2):seqM2.get(stM2)];
-			double shift2 = stM1 + l1==seqM1.size()-1?0:(data.s[rev2?seqM2.get(stM2):seqM2.get(stM2+l2)][seqM1.get(stM1 + l1 + 1)] + data.p[seqM1.get(stM1 + l1 + 1)]);
+			int bridgeFromM1A = stM1 == 0 ? 0 : seqM1.get(stM1 - 1);
+			int bridgeToM1A = rev2 ? seqM2.get(stM2 + l2) : seqM2.get(stM2);
+			double shift1 = data.s[bridgeFromM1A][bridgeToM1A] + data.p[bridgeToM1A];
+			int bridgeFromM1B = rev2 ? seqM2.get(stM2) : seqM2.get(stM2 + l2);
+			int bridgeToM1B = stM1 + l1 == seqM1.size() - 1 ? 0 : seqM1.get(stM1 + l1 + 1);
+			double shift2 = stM1 + l1==seqM1.size()-1?0:(data.s[bridgeFromM1B][bridgeToM1B] + data.p[bridgeToM1B]);
 			double durationSplitM2 = rev2?s.getReverseDuration(m2, stM2, stM2+l2):s.getNormalDuration(m2, stM2, stM2+l2);
-			costM1 = s.merge3Segments(f1M1, fSplitM2, bSplitM2, b3M1, shift1, shift2, durationSplitM2);
+			costM1 = s.merge3Segments(f1M1, fSplitM2, bSplitM2, b3M1, shift1, shift2, durationSplitM2,
+					data.getSetupCost(bridgeFromM1A, bridgeToM1A),
+					stM1 + l1 == seqM1.size() - 1 ? 0.0 : data.getSetupCost(bridgeFromM1B, bridgeToM1B));
 //		}
 
 		// 机器m2拼接
@@ -1297,10 +1331,16 @@ class CrossExchangeOperator implements Move {
 			// 此处M2上被拆的在中间
 			// 2026-05-15: 当 M2 被替换片段从首位开始时，M2 前缀为空，插入片段的前驱应为虚拟起点 0。
 			// 旧写法在 stM2==0 时取 seqM2.get(0)，setup 非零时会把原首任务误当作前驱。
-			shift1 = data.s[stM2==0?0:seqM2.get(stM2 - 1)][rev1?seqM1.get(stM1+l1):seqM1.get(stM1)] + data.p[rev1?seqM1.get(stM1+l1):seqM1.get(stM1)];
-			shift2 = stM2 + l2 ==seqM2.size()-1?0:(data.s[rev1?seqM1.get(stM1):seqM1.get(stM1+l1)][seqM2.get(stM2 + l2 + 1)] + data.p[seqM2.get(stM2 + l2 + 1)]);
+			int bridgeFromM2A = stM2 == 0 ? 0 : seqM2.get(stM2 - 1);
+			int bridgeToM2A = rev1 ? seqM1.get(stM1 + l1) : seqM1.get(stM1);
+			shift1 = data.s[bridgeFromM2A][bridgeToM2A] + data.p[bridgeToM2A];
+			int bridgeFromM2B = rev1 ? seqM1.get(stM1) : seqM1.get(stM1 + l1);
+			int bridgeToM2B = stM2 + l2 == seqM2.size() - 1 ? 0 : seqM2.get(stM2 + l2 + 1);
+			shift2 = stM2 + l2 ==seqM2.size()-1?0:(data.s[bridgeFromM2B][bridgeToM2B] + data.p[bridgeToM2B]);
 			double durationSplitM1 =rev1?s.getReverseDuration(m1, stM1, stM1+l1):s.getNormalDuration(m1, stM1, stM1+l1);
-			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b3M2, shift1, shift2, durationSplitM1);
+			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b3M2, shift1, shift2, durationSplitM1,
+					data.getSetupCost(bridgeFromM2A, bridgeToM2A),
+					stM2 + l2 == seqM2.size() - 1 ? 0.0 : data.getSetupCost(bridgeFromM2B, bridgeToM2B));
 //		}
 
 		// 2026-05-15: 返回变化成本 delta = 新两机成本 - 原两机成本。

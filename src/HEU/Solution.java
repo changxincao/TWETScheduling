@@ -163,6 +163,13 @@ public class Solution {
 		return cost == null ? new double[0] : Arrays.copyOf(cost, cost.length);
 	}
 
+	private PiecewiseLinearFunction addSetupCost(PiecewiseLinearFunction function, int fromJob, int toJob) {
+		// 2026-05-15: setup time 和 setup cost 都属于同一条弧 i->j。
+		// setup time 已经体现在 shiftX(s_ij+p_j) 中；setup cost 不改时间轴，
+		// 只把当前累计函数整体纵向平移 kappa_ij。
+		return function.shiftYInPlace(data.getSetupCost(fromJob, toJob));
+	}
+
 	public void updateFFunctions1ForMachine(int m) {
 
 		// 1 1维
@@ -176,8 +183,10 @@ public class Solution {
 				// 2026-05-14: 序列首任务要先从虚拟起点 0 做 setup，再加工任务本身。
 				// 因此首任务最早完工时间是 s[0][job] + p[job]，早于该时间的惩罚函数定义域物理不可行。
 				cur = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+				addSetupCost(cur, 0, job);
 			} else {
 				cur = f.get(i - 1).shiftX(data.s[seq.get(i - 1)][job] + data.p[job]).add(data.penaltyFunction[job]);
+				addSetupCost(cur, seq.get(i - 1), job);
 			}
 			cur.minimizePrefixInPlace();
 			f.add(cur);
@@ -209,6 +218,7 @@ public class Solution {
 			} else {
 				cur = b.get(i + 1).shiftX(-data.s[job][seq.get(i + 1)] - data.p[seq.get(i + 1)])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(cur, job, seq.get(i + 1));
 			}
 			cur.minimizeSuffixInPlace();
 			b.set(i, cur);
@@ -269,10 +279,12 @@ public class Solution {
 				// b函数暂时认为没影响
 				fFunction_hg[h][g] = fFunction_hg[h][g - 1].shiftX(data.s[seq.get(g - 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(fFunction_hg[h][g], seq.get(g - 1), job);
 				fFunction_hg[h][g].minimizePrefixInPlace();
 
 				bFunction_gh[h][g] = bFunction_gh[h][g - 1].shiftX(-data.s[job][seq.get(g - 1)] - data.p[seq.get(g - 1)])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(bFunction_gh[h][g], job, seq.get(g - 1));
 				bFunction_gh[h][g].minimizeSuffixInPlace();
 			}
 		}
@@ -305,10 +317,12 @@ public class Solution {
 
 				fFunction_gh[g][h] = fFunction_gh[g + 1][h].shiftX(data.s[seq.get(g + 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(fFunction_gh[g][h], seq.get(g + 1), job);
 				fFunction_gh[g][h].minimizePrefixInPlace();
 
 				bFunction_hg[g][h] = bFunction_hg[g + 1][h].shiftX(-data.s[job][seq.get(g + 1)] - data.p[seq.get(g + 1)])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(bFunction_hg[g][h], job, seq.get(g + 1));
 				bFunction_hg[g][h].minimizeSuffixInPlace();
 
 			}
@@ -363,6 +377,7 @@ public class Solution {
 						continue;
 					fFunction_hg[h][g] = data.penaltyFunction[job]
 							.setDomain(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH);
+					addSetupCost(fFunction_hg[h][g], lastJob, job);
 					fFunction_hg[h][g].minimizePrefixInPlace();
 
 					bFunction_gh[h][g] = data.penaltyFunction[job].copy();
@@ -376,11 +391,13 @@ public class Solution {
 				// b函数暂时认为没影响
 				fFunction_hg[h][g] = copy.shiftX(data.s[seq.get(g - 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(fFunction_hg[h][g], seq.get(g - 1), job);
 				fFunction_hg[h][g].minimizePrefixInPlace();
 				copy = bFunction_gh[h][g - 1];
 //				copy.minimizeSuffixInPlace();
 				bFunction_gh[h][g] = copy.shiftX(-data.s[job][seq.get(g - 1)] - data.p[seq.get(g - 1)])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(bFunction_gh[h][g], job, seq.get(g - 1));
 				bFunction_gh[h][g].minimizeSuffixInPlace();
 			}
 		}
@@ -403,6 +420,7 @@ public class Solution {
 
 					fFunction_gh[g][h] = data.penaltyFunction[job]
 							.setDomain(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH);
+					addSetupCost(fFunction_gh[g][h], lastJob, job);
 
 					// 早期:任务g的完工时间至少为他的执行时间+最小setup
 					fFunction_gh[g][h].minimizePrefixInPlace();
@@ -411,6 +429,7 @@ public class Solution {
 					// 2025.5.3 b函数不需要设置domain
 					bFunction_hg[g][h] = data.penaltyFunction[job]
 							.setDomain(formerShift + data.p[job] + data.s[lastJob][job], data.CmaxH);
+					addSetupCost(bFunction_hg[g][h], lastJob, job);
 					bFunction_hg[g][h].minimizeSuffixInPlace();
 					// 同理
 					continue;
@@ -419,11 +438,13 @@ public class Solution {
 //				copy.minimizePrefixInPlace(); //2025.5.4 同上
 				fFunction_gh[g][h] = copy.shiftX(data.s[seq.get(g + 1)][job] + data.p[job])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(fFunction_gh[g][h], seq.get(g + 1), job);
 				fFunction_gh[g][h].minimizePrefixInPlace();
 				copy = bFunction_hg[g + 1][h];
 //				copy.minimizeSuffixInPlace();
 				bFunction_hg[g][h] = copy.shiftX(-data.s[job][seq.get(g + 1)] - data.p[seq.get(g + 1)])
 						.add(data.penaltyFunction[job]);
+				addSetupCost(bFunction_hg[g][h], job, seq.get(g + 1));
 				bFunction_hg[g][h].minimizeSuffixInPlace();
 
 			}
@@ -453,6 +474,7 @@ public class Solution {
 								: fFunctions.get(m).get(h1 - 1))
 								.shiftX(data.s[h1 == 0 ? 0 : seq.get(h1 - 1)][seq.get(h2)] + data.p[seq.get(h2)])
 								.add(data.penaltyFunction[seq.get(h2)]);
+						addSetupCost(fFunction_hgl_normal[h1][h2][l], h1 == 0 ? 0 : seq.get(h1 - 1), seq.get(h2));
 						fFunction_hgl_normal[h1][h2][l].minimizePrefixInPlace();
 						fFunction_hgl_reverse[h1][h2][l] = fFunction_hgl_normal[h1][h2][l];
 
@@ -460,6 +482,7 @@ public class Solution {
 						fFunction_hgl_normal[h1][h2][l] = fFunction_hgl_normal[h1][h2 - 1][l]
 								.shiftX(data.s[seq.get(h2 - 1)][seq.get(h2)] + data.p[seq.get(h2)])
 								.add(data.penaltyFunction[seq.get(h2)]);
+						addSetupCost(fFunction_hgl_normal[h1][h2][l], seq.get(h2 - 1), seq.get(h2));
 						fFunction_hgl_normal[h1][h2][l].minimizePrefixInPlace();
 						fFunction_hgl_reverse[h1][h2][l] = fFunction_hgl_normal[h1][h2][l];
 					}
@@ -472,16 +495,21 @@ public class Solution {
 								.shiftX((h2 == size - 1 ? 0
 										: -(data.s[seq.get(h1)][seq.get(h2 + 1)] + data.p[seq.get(h2 + 1)])))
 								.add(data.penaltyFunction[seq.get(h1)]));
+						if (h2 != size - 1) {
+							addSetupCost(bFunction_hgl_normal[h1][h2][l], seq.get(h1), seq.get(h2 + 1));
+						}
 						bFunction_hgl_reverse[h1][h2][l] = bFunction_hgl_normal[h1][h2][l];
 						bFunction_hgl_reverse[h1][h2][l].minimizeSuffixInPlace();
 					} else {
 						bFunction_hgl_reverse[h1][h2][l] = bFunction_hgl_reverse[h1][h2][l - 1]
 								.shiftX(-(data.s[seq.get(h1 + l)][seq.get(h1 + l - 1)] + data.p[seq.get(h1 + l - 1)]))
 								.add(data.penaltyFunction[seq.get(h1 + l)]);
+						addSetupCost(bFunction_hgl_reverse[h1][h2][l], seq.get(h1 + l), seq.get(h1 + l - 1));
 						bFunction_hgl_reverse[h1][h2][l].minimizeSuffixInPlace();
 						bFunction_hgl_normal[h1][h2][l] = bFunction_hgl_normal[h1 + 1][h2][l - 1]
 								.shiftX(-(data.s[seq.get(h1)][seq.get(h1 + 1)] + data.p[seq.get(h1 + 1)]))
 								.add(data.penaltyFunction[seq.get(h1)]);
+						addSetupCost(bFunction_hgl_normal[h1][h2][l], seq.get(h1), seq.get(h1 + 1));
 						bFunction_hgl_normal[h1][h2][l].minimizeSuffixInPlace();
 
 					}
@@ -504,6 +532,8 @@ public class Solution {
 								: h2][l] = (h2 == -1 ? data.penaltyFunction[0] : fFunctions.get(m).get(h2))
 										.shiftX(data.s[h2 == -1 ? 0 : seq.get(h2)][seq.get(h1)] + data.p[seq.get(h1)])
 										.add(data.penaltyFunction[seq.get(h1)]);
+						addSetupCost(fFunction_hgl_normal[h1][h2 == -1 ? size : h2][l], h2 == -1 ? 0 : seq.get(h2),
+								seq.get(h1));
 						fFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l] = fFunction_hgl_normal[h1][h2 == -1 ? size
 								: h2][l];
 						fFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l].minimizePrefixInPlace();
@@ -513,6 +543,8 @@ public class Solution {
 								: h2][l] = (fFunction_hgl_reverse[h1 + 1][h2 == -1 ? size : h2][l - 1])
 										.shiftX(data.s[seq.get(h1 + 1)][seq.get(h1)] + data.p[seq.get(h1)])
 										.add(data.penaltyFunction[seq.get(h1)]);
+						addSetupCost(fFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l], seq.get(h1 + 1),
+								seq.get(h1));
 						// 此处计算h1,h2的时候，对应的h1+1,h2可能是不存在的，因为限制了h2离h1的长度
 						// 暂时此处不限制h2位置全部计算出来
 						fFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l].minimizePrefixInPlace();
@@ -520,6 +552,8 @@ public class Solution {
 								: h2][l] = (fFunction_hgl_normal[h1][h2 == -1 ? size : h2][l - 1])
 										.shiftX(data.s[seq.get(h1 + l - 1)][seq.get(h1 + l)] + data.p[seq.get(h1 + l)])
 										.add(data.penaltyFunction[seq.get(h1 + l)]);
+						addSetupCost(fFunction_hgl_normal[h1][h2 == -1 ? size : h2][l], seq.get(h1 + l - 1),
+								seq.get(h1 + l));
 						fFunction_hgl_normal[h1][h2 == -1 ? size : h2][l].minimizePrefixInPlace();
 					}
 
@@ -534,6 +568,10 @@ public class Solution {
 								: (bFunctions.get(m).get(h1 + l + 1).shiftX(
 										-(data.s[seq.get(h1 - 1)][seq.get(h1 + l + 1)] + data.p[seq.get(h1 + l + 1)]))
 										.add(data.penaltyFunction[seq.get(h1 - 1)])));
+						if (h1 + l != size - 1) {
+							addSetupCost(bFunction_hgl_normal[h1][h2 == -1 ? size : h2][l], seq.get(h1 - 1),
+									seq.get(h1 + l + 1));
+						}
 						bFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l] = bFunction_hgl_normal[h1][h2 == -1 ? size
 								: h2][l];
 						bFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l].minimizeSuffixInPlace();
@@ -542,6 +580,8 @@ public class Solution {
 						bFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l] = bFunction_hgl_reverse[h1][h2 + 1][l]
 								.shiftX(-(data.s[seq.get(h2 + 1)][seq.get(h2 + 2)] + data.p[seq.get(h2 + 2)]))
 								.add(data.penaltyFunction[seq.get(h2 + 1)]);
+						addSetupCost(bFunction_hgl_reverse[h1][h2 == -1 ? size : h2][l], seq.get(h2 + 1),
+								seq.get(h2 + 2));
 						bFunction_hgl_normal[h1][h2 == -1 ? size : h2][l] = bFunction_hgl_reverse[h1][h2 == -1 ? size
 								: h2][l];
 						bFunction_hgl_normal[h1][h2 == -1 ? size : h2][l].minimizeSuffixInPlace();
@@ -737,16 +777,25 @@ public class Solution {
 
 	public double merge3Segments(PiecewiseLinearFunction f1, PiecewiseLinearFunction f2, PiecewiseLinearFunction b2,
 			PiecewiseLinearFunction b3, double shift1, double shift2, double duration2) {
+		return merge3Segments(f1, f2, b2, b3, shift1, shift2, duration2, 0.0, 0.0);
+	}
+
+	public double merge3Segments(PiecewiseLinearFunction f1, PiecewiseLinearFunction f2, PiecewiseLinearFunction b2,
+			PiecewiseLinearFunction b3, double shift1, double shift2, double duration2, double bridgeCost1,
+			double bridgeCost2) {
+		// 2026-05-15: f1/f2/b2/b3 只包含各自段内部的 setup cost。
+		// 三段拼接新产生的两条桥接弧不属于任何原段，因此由 bridgeCost1/bridgeCost2 显式补入。
 		if (f1.isEmpty() || f2.isEmpty() || b2.isEmpty() || b3.isEmpty())
 			return Utility.big_M;
 		Utility.debugMap.put("M3S Total:",Utility.debugMap.getOrDefault("M3S Total:",0)+1);
+		double bridgeCost = bridgeCost1 + bridgeCost2;
 		
 		double f1_LB = f1.tail.getValue(f1.tail.end);
 		double f2_LB = f2.tail.getValue(f2.tail.end);
 		double b3_LB = b3.head.getValue(b3.head.start);
-		if (Utility.compareGe(f1_LB + f2_LB + b3_LB, Utility.curUpperBound)) {
+		if (Utility.compareGe(f1_LB + f2_LB + b3_LB + bridgeCost, Utility.curUpperBound)) {
 			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
-			return f1_LB + f2_LB + b3_LB;
+			return f1_LB + f2_LB + b3_LB + bridgeCost;
 		}
 
 		double bestCost = 0;
@@ -757,7 +806,7 @@ public class Solution {
 			return Utility.curUpperBound;
 		double[] pairs12 = merge12.findMinimal(true, true);
 		double cost12 = pairs12[0];
-		if (Utility.compareGe(cost12 + b3_LB, Utility.curUpperBound)) {
+		if (Utility.compareGe(cost12 + b3_LB + bridgeCost, Utility.curUpperBound)) {
 			//这>=先不管，影响不大应该？
 //			Utility.debugNumPlus();
 //			System.out.println("M错误？");// 假设不可能
@@ -773,7 +822,7 @@ public class Solution {
 			return Utility.curUpperBound;
 		double[] pairs23 = merge23.findMinimal(true, false);
 		double cost23 = pairs23[0];
-		if (Utility.compareGe(cost23, Utility.curUpperBound)) {
+		if (Utility.compareGe(cost23 + bridgeCost, Utility.curUpperBound)) {
 //			Utility.debugNumPlus();
 //			System.out.println("M错误？");// 假设不可能
 			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
@@ -799,7 +848,7 @@ public class Solution {
 		merge12.release();
 		merge23.release();
 //		System.out.println("M3S:"+f1_LB+" "+f2_LB+" "+b3_LB+" "+bestCost);
-		return bestCost;
+		return bestCost + bridgeCost;
 
 	}
 
@@ -873,6 +922,12 @@ public class Solution {
 	//merge2S和merge3S的bound使用感觉没啥用
 	//且要使用局部上界也得使用才行
 	public double merge2Segments(PiecewiseLinearFunction f1, PiecewiseLinearFunction b2, double shift) {
+		return merge2Segments(f1, b2, shift, 0.0);
+	}
+
+	public double merge2Segments(PiecewiseLinearFunction f1, PiecewiseLinearFunction b2, double shift,
+			double bridgeCost) {
+		// 2026-05-15: 两段内部成本已在各自函数里累计；这里额外补两段之间新桥接弧的 setup cost。
 		
 		if (f1.isEmpty() || b2.isEmpty())
 			return Utility.big_M;
@@ -888,16 +943,16 @@ public class Solution {
 		
 		double f1_LB = f1.tail.getValue(f1.tail.end);
 		double b2_LB = b2.head.getValue(b2.head.start);
-		if (Utility.compareGe(f1_LB + b2_LB, Utility.curUpperBound)) {
+		if (Utility.compareGe(f1_LB + b2_LB + bridgeCost, Utility.curUpperBound)) {
 //			System.out.println("下界跳出");
 			Utility.debugMap.put("M2S Skip:",Utility.debugMap.getOrDefault("M2S Skip:",0)+1);
-			return f1_LB+b2_LB;
+			return f1_LB + b2_LB + bridgeCost;
 		}
 		double bestCost = 0;
 		PiecewiseLinearFunction newF = f1.add(b2.shiftX(-shift));
 		if (newF.isEmpty())
 			return Utility.curUpperBound;
-		bestCost = newF.findMinimal(true, true)[0];
+		bestCost = newF.findMinimal(true, true)[0] + bridgeCost;
 		newF.release();
 //		System.out.println("M2S:"+f1_LB+" "+b2_LB+" "+bestCost);
 		return bestCost;

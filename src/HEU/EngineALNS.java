@@ -146,10 +146,16 @@ interface InsertionOperator {
     	ArrayList<Integer> seq=s.sequences.get(m);
     	PiecewiseLinearFunction f=(pos==-1?s.data.penaltyFunction[0]:s.fFunctions.get(m).get(pos));
     	PiecewiseLinearFunction b=(pos==seq.size()-1?s.data.penaltyFunction[0]:s.bFunctions.get(m).get(pos+1));
-    	double shift1=s.data.s[pos==-1?0:seq.get(pos)][job]+s.data.p[job];
-    	double shift2=pos==seq.size()-1?0:s.data.s[job][seq.get(pos+1)]+s.data.p[seq.get(pos+1)];
+        int bridgeFrom1 = pos == -1 ? 0 : seq.get(pos);
+        double shift1=s.data.s[bridgeFrom1][job]+s.data.p[job];
+        int bridgeTo2 = pos == seq.size() - 1 ? 0 : seq.get(pos + 1);
+        double shift2=pos==seq.size()-1?0:s.data.s[job][bridgeTo2]+s.data.p[bridgeTo2];
     	PiecewiseLinearFunction f1=f.shiftX(shift1).add(s.data.penaltyFunction[job]);
-    	return s.merge2Segments(f1, b, shift2)-s.cost[m];
+        // 2026-05-15: 插入任务时两条新弧都要同步计入 setup cost。
+        // 第一条弧属于插入后的前段函数，第二条桥接弧交给 merge2Segments 处理。
+        f1.shiftYInPlace(s.data.getSetupCost(bridgeFrom1, job));
+        return s.merge2Segments(f1, b, shift2,
+                pos == seq.size() - 1 ? 0.0 : s.data.getSetupCost(job, bridgeTo2))-s.cost[m];
     }
 }
 
@@ -220,8 +226,11 @@ class WorstRemoval implements RemovalOperator {
     			int jid=seq.get(i);
     			PiecewiseLinearFunction f=(i==0?s.data.penaltyFunction[0]:s.fFunctions.get(m).get(i-1));
     			PiecewiseLinearFunction b=(i==seq.size()-1?s.data.penaltyFunction[0]:s.bFunctions.get(m).get(i+1));
-    			double shift=(i==seq.size()-1?0:s.data.s[i==0?0:seq.get(i-1)][seq.get(i+1)]+s.data.p[seq.get(i+1)]);
-    			double cost=s.merge2Segments(f, b, shift);
+                int bridgeFrom = i == 0 ? 0 : seq.get(i - 1);
+                int bridgeTo = i == seq.size() - 1 ? 0 : seq.get(i + 1);
+                double shift=(i==seq.size()-1?0:s.data.s[bridgeFrom][bridgeTo]+s.data.p[bridgeTo]);
+                double cost=s.merge2Segments(f, b, shift,
+                        i == seq.size() - 1 ? 0.0 : s.data.getSetupCost(bridgeFrom, bridgeTo));
     			JobDeltaCost.put(jid, cost-costM);
     		}
     	}

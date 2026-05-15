@@ -54,7 +54,8 @@ public final class ModelSolutionValidator {
 				}
 
 				double taskCost = data.w_e[task.getJob()] * Math.max(data.d_e[task.getJob()] - task.getCompletion(), 0.0)
-						+ data.w_t[task.getJob()] * Math.max(task.getCompletion() - data.d_l[task.getJob()], 0.0);
+						+ data.w_t[task.getJob()] * Math.max(task.getCompletion() - data.d_l[task.getJob()], 0.0)
+						+ data.getSetupCost(prevJob, task.getJob());
 				recomputedObjective += taskCost;
 				prev = task;
 				prevJob = task.getJob();

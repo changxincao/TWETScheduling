@@ -61,6 +61,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testPrefixBoundaryRealMinimumRegression();
 		testSuffixBoundaryRealMinimumRegression();
 		testDirectionalNormalizeRegression();
+		testRandomDirectionalNormalizeSweep();
 		testFindMinimalNormalCases();
 		testFindMinimalVerticalJumpRisk();
 		testFindMinimalPositionSelectionCases();
@@ -69,6 +70,8 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testMergeMinimumDisjointDomainRisk();
 		testUpdateDominatedIntervalsBasicCases();
 		testUpdateDominatedIntervalsComplexCases();
+		testRandomDirectionalMergeSweep();
+		testRandomDirectionalUpdateDominatedSweep();
 		testUpperBoundSemanticDependency();
 		testRandomOperationSweep();
 		testRandomFrontierSweep();
@@ -240,6 +243,46 @@ public class PiecewiseLinearFunctionPropertyTest {
 
 		if (forwardOk && backwardOk) {
 			pass("normalize(Direction): forward keeps T, backward keeps 0");
+		}
+	}
+
+	private void testRandomDirectionalNormalizeSweep() {
+		int localFailures = 0;
+		for (int i = 0; i < RANDOM_CASES; i++) {
+			PiecewiseLinearFunction forward = randomForwardNormalizeInput(100.0);
+			PiecewiseLinearFunction forwardOriginal = forward.copy();
+			PiecewiseLinearFunction backward = randomBackwardNormalizeInput(100.0);
+			PiecewiseLinearFunction backwardOriginal = backward.copy();
+			try {
+				forward.normalize(PiecewiseLinearFunction.Direction.FORWARD);
+				if (forward.head == null || !Utility.compareEq(forward.tail.end, 100.0)) {
+					throw new AssertionError("forward normalize should keep right endpoint T");
+				}
+				for (double x : samplePoints(forward)) {
+					requireClose(prefixMinRef(forwardOriginal, x), evalRef(forward, x));
+				}
+
+				backward.normalize(PiecewiseLinearFunction.Direction.BACKWARD);
+				if (backward.head == null || !Utility.compareEq(backward.head.start, 0.0)) {
+					throw new AssertionError("backward normalize should keep left endpoint 0");
+				}
+				for (double x : samplePoints(backward)) {
+					requireClose(suffixMinRef(backwardOriginal, x), evalRef(backward, x));
+				}
+			} catch (Throwable ex) {
+				localFailures++;
+				if (localFailures <= 5) {
+					fail("random directional normalize failure", "case=" + i + ", "
+							+ ex.getClass().getSimpleName() + ": " + ex.getMessage()
+							+ ", forward=" + compact(forwardOriginal)
+							+ ", backward=" + compact(backwardOriginal));
+				}
+			}
+		}
+		if (localFailures == 0) {
+			pass("normalize(Direction): random forward/backward sweep on " + RANDOM_CASES + " cases");
+		} else {
+			warn("normalize(Direction) random sweep found failures", "failureCount=" + localFailures + " / " + RANDOM_CASES);
 		}
 	}
 
@@ -634,6 +677,89 @@ public class PiecewiseLinearFunctionPropertyTest {
 		return true;
 	}
 
+	private void testRandomDirectionalMergeSweep() {
+		int localFailures = 0;
+		for (int i = 0; i < RANDOM_CASES; i++) {
+			PiecewiseLinearFunction forwardF = randomContractFunction(100.0);
+			PiecewiseLinearFunction forwardG = randomContractFunction(100.0);
+			forwardF.minimizePrefixInPlace();
+			forwardG.minimizePrefixInPlace();
+
+			PiecewiseLinearFunction backwardF = randomBackwardContractFunction(100.0);
+			PiecewiseLinearFunction backwardG = randomBackwardContractFunction(100.0);
+			backwardF.minimizeSuffixInPlace();
+			backwardG.minimizeSuffixInPlace();
+			try {
+				PiecewiseLinearFunction forwardActual = forwardF.copy();
+				forwardActual.mergeMinimum(forwardG.copy(), PiecewiseLinearFunction.Direction.FORWARD);
+				for (double x : sampleUnion(forwardF, forwardG)) {
+					requireClose(prefixMinOfLowerEnvelopeRef(forwardF, forwardG, x), evalRef(forwardActual, x));
+				}
+
+				PiecewiseLinearFunction backwardActual = backwardF.copy();
+				backwardActual.mergeMinimum(backwardG.copy(), PiecewiseLinearFunction.Direction.BACKWARD);
+				for (double x : sampleUnion(backwardF, backwardG)) {
+					requireClose(suffixMinOfLowerEnvelopeRef(backwardF, backwardG, x), evalRef(backwardActual, x));
+				}
+			} catch (Throwable ex) {
+				localFailures++;
+				if (localFailures <= 5) {
+					fail("random directional mergeMinimum failure", "case=" + i + ", "
+							+ ex.getClass().getSimpleName() + ": " + ex.getMessage()
+							+ ", forwardF=" + compact(forwardF) + ", forwardG=" + compact(forwardG)
+							+ ", backwardF=" + compact(backwardF) + ", backwardG=" + compact(backwardG));
+				}
+			}
+		}
+		if (localFailures == 0) {
+			pass("mergeMinimum(Direction): random forward/backward sweep on " + RANDOM_CASES + " cases");
+		} else {
+			warn("mergeMinimum(Direction) random sweep found failures", "failureCount=" + localFailures + " / " + RANDOM_CASES);
+		}
+	}
+
+	private void testRandomDirectionalUpdateDominatedSweep() {
+		int localFailures = 0;
+		for (int i = 0; i < RANDOM_CASES; i++) {
+			PiecewiseLinearFunction forwardF = randomContractFunction(100.0);
+			PiecewiseLinearFunction forwardG = randomContractFunction(100.0);
+			forwardF.minimizePrefixInPlace();
+			forwardG.minimizePrefixInPlace();
+
+			PiecewiseLinearFunction backwardF = randomBackwardContractFunction(100.0);
+			PiecewiseLinearFunction backwardG = randomBackwardContractFunction(100.0);
+			backwardF.minimizeSuffixInPlace();
+			backwardG.minimizeSuffixInPlace();
+			try {
+				PiecewiseLinearFunction forwardActual = forwardF.copy();
+				forwardActual.updateDominatedIntervals(forwardG.copy(), PiecewiseLinearFunction.Direction.FORWARD);
+				for (double x : sampleUnion(forwardF, forwardG)) {
+					requireClose(prefixMinAfterDominanceRef(forwardF, forwardG, x), evalRef(forwardActual, x));
+				}
+
+				PiecewiseLinearFunction backwardActual = backwardF.copy();
+				backwardActual.updateDominatedIntervals(backwardG.copy(), PiecewiseLinearFunction.Direction.BACKWARD);
+				for (double x : sampleUnion(backwardF, backwardG)) {
+					requireClose(suffixMinAfterDominanceRef(backwardF, backwardG, x), evalRef(backwardActual, x));
+				}
+			} catch (Throwable ex) {
+				localFailures++;
+				if (localFailures <= 5) {
+					fail("random directional updateDominatedIntervals failure", "case=" + i + ", "
+							+ ex.getClass().getSimpleName() + ": " + ex.getMessage()
+							+ ", forwardF=" + compact(forwardF) + ", forwardG=" + compact(forwardG)
+							+ ", backwardF=" + compact(backwardF) + ", backwardG=" + compact(backwardG));
+				}
+			}
+		}
+		if (localFailures == 0) {
+			pass("updateDominatedIntervals(Direction): random forward/backward sweep on " + RANDOM_CASES + " cases");
+		} else {
+			warn("updateDominatedIntervals(Direction) random sweep found failures",
+					"failureCount=" + localFailures + " / " + RANDOM_CASES);
+		}
+	}
+
 	private static Throwable runWithTimeout(Runnable task, long timeoutMillis) {
 		CountDownLatch done = new CountDownLatch(1);
 		AtomicReference<Throwable> thrown = new AtomicReference<Throwable>();
@@ -711,6 +837,72 @@ public class PiecewiseLinearFunctionPropertyTest {
 		return f;
 	}
 
+	private PiecewiseLinearFunction randomBackwardContractFunction(double rightBound) {
+		int n = 2 + RANDOM.nextInt(6);
+		PiecewiseLinearFunction f = new PiecewiseLinearFunction(0, rightBound);
+		double x = 0.0;
+		double value = RANDOM.nextDouble() * 20.0 - 5.0;
+		for (int i = 0; i < n; i++) {
+			double next = (i == n - 1)
+					? rightBound
+					: x + (rightBound - x) * (0.15 + RANDOM.nextDouble() * 0.45);
+			if (!Utility.compareLt(x, next)) {
+				next = Math.min(rightBound, x + 1.0);
+			}
+			double slope = -4.0 + RANDOM.nextDouble() * 8.0;
+			f.addSegment(x, next, slope, value - slope * x);
+			value = slope * next + (value - slope * x);
+			x = next;
+		}
+		return f;
+	}
+
+	private PiecewiseLinearFunction randomForwardNormalizeInput(double rightBound) {
+		PiecewiseLinearFunction core = randomContractFunction(rightBound);
+		PiecewiseLinearFunction f = new PiecewiseLinearFunction(0, rightBound);
+		f.addSegment(0.0, core.head.start, 0.0, INF);
+		for (Segment s = core.head; s != null; s = s.next) {
+			f.addSegment(s.start, s.end, s.slope, s.intercept);
+		}
+		if (RANDOM.nextBoolean()) {
+			double cut = core.tail.end - 5.0 - RANDOM.nextDouble() * 10.0;
+			if (Utility.compareLt(core.head.start, cut) && Utility.compareLt(cut, rightBound)) {
+				f = f.setDomain(core.head.start, cut, true);
+			}
+		}
+		return f;
+	}
+
+	private PiecewiseLinearFunction randomBackwardNormalizeInput(double rightBound) {
+		PiecewiseLinearFunction core = randomBackwardContractFunction(rightBound);
+		double tailStart = rightBound - 5.0 - RANDOM.nextDouble() * 10.0;
+		if (Utility.compareLe(tailStart, 0.0)) {
+			tailStart = rightBound * 0.75;
+		}
+		PiecewiseLinearFunction f = new PiecewiseLinearFunction(0, rightBound);
+		double firstEnd = Math.min(tailStart, rightBound * 0.2 + RANDOM.nextDouble() * rightBound * 0.2);
+		if (Utility.compareLt(0.0, firstEnd)) {
+			f.addSegment(0.0, firstEnd, 0.0, INF);
+		}
+		for (Segment s = core.head; s != null; s = s.next) {
+			double start = Math.max(s.start, firstEnd);
+			double end = Math.min(s.end, tailStart);
+			if (Utility.compareLt(start, end)) {
+				f.addSegment(start, end, s.slope, s.intercept);
+			}
+		}
+		if (f.head == null || Utility.compareLt(f.tail.end, tailStart)) {
+			double start = f.head == null ? firstEnd : f.tail.end;
+			if (Utility.compareLt(start, tailStart)) {
+				f.addSegment(start, tailStart, 0.0, RANDOM.nextDouble() * 20.0);
+			}
+		}
+		if (Utility.compareLt(tailStart, rightBound)) {
+			f.addSegment(tailStart, rightBound, 0.0, INF);
+		}
+		return f;
+	}
+
 	private static double[] seg(double start, double end, double slope, double intercept) {
 		return new double[] { start, end, slope, intercept };
 	}
@@ -729,14 +921,14 @@ public class PiecewiseLinearFunctionPropertyTest {
 
 	private static double prefixMinRef(PiecewiseLinearFunction f, double x) {
 		double min = INF;
-		for (double p : samplePoints(f)) {
-			if (p <= x + TOL) {
-				min = Math.min(min, evalRef(f, p));
-			}
-		}
 		for (Segment s = f.head; s != null; s = s.next) {
-			if (s.start <= x + TOL && x <= s.end + TOL) {
-				min = Math.min(min, evalRef(f, Math.min(x, s.end)));
+			if (s.start > x + TOL) {
+				break;
+			}
+			double right = Math.min(x, s.end);
+			if (s.start <= right + TOL) {
+				min = Math.min(min, s.slope * s.start + s.intercept);
+				min = Math.min(min, s.slope * right + s.intercept);
 			}
 		}
 		return min;
@@ -744,14 +936,14 @@ public class PiecewiseLinearFunctionPropertyTest {
 
 	private static double suffixMinRef(PiecewiseLinearFunction f, double x) {
 		double min = INF;
-		for (double p : samplePoints(f)) {
-			if (p + TOL >= x) {
-				min = Math.min(min, evalRef(f, p));
-			}
-		}
 		for (Segment s = f.head; s != null; s = s.next) {
-			if (s.start <= x + TOL && x <= s.end + TOL) {
-				min = Math.min(min, evalRef(f, Math.max(x, s.start)));
+			if (s.end + TOL < x) {
+				continue;
+			}
+			double left = Math.max(x, s.start);
+			if (left <= s.end + TOL) {
+				min = Math.min(min, s.slope * left + s.intercept);
+				min = Math.min(min, s.slope * s.end + s.intercept);
 			}
 		}
 		return min;
@@ -761,6 +953,16 @@ public class PiecewiseLinearFunctionPropertyTest {
 		double min = INF;
 		for (double p : sampleUnion(f, g)) {
 			if (p <= x + TOL) {
+				min = Math.min(min, Math.min(evalRef(f, p), evalRef(g, p)));
+			}
+		}
+		return min;
+	}
+
+	private static double suffixMinOfLowerEnvelopeRef(PiecewiseLinearFunction f, PiecewiseLinearFunction g, double x) {
+		double min = INF;
+		for (double p : sampleUnion(f, g)) {
+			if (p + TOL >= x) {
 				min = Math.min(min, Math.min(evalRef(f, p), evalRef(g, p)));
 			}
 		}
@@ -805,12 +1007,56 @@ public class PiecewiseLinearFunctionPropertyTest {
 		return min;
 	}
 
+	private static double suffixMinAfterDominanceRef(PiecewiseLinearFunction f, PiecewiseLinearFunction g, double x) {
+		double min = INF;
+		List<Double> samples = sampleUnion(f, g);
+		for (int i = samples.size() - 1; i >= 0; i--) {
+			double p = samples.get(i);
+			if (p + TOL >= x) {
+				double probe = p;
+				if (i > 0 && samples.get(i - 1) < p - TOL) {
+					probe = (samples.get(i - 1) + p) * 0.5;
+				}
+				double fv = evalRef(f, p);
+				double dominanceFv = evalRef(f, probe);
+				double dominanceGv = evalRef(g, probe);
+				double valueAfterDominance = Utility.compareLe(dominanceGv, dominanceFv) ? INF : fv;
+				min = Math.min(min, valueAfterDominance);
+
+				double rightValue = evalRefRightLimit(f, p);
+				if (rightValue < INF * 0.5) {
+					double rightProbe = p;
+					if (i + 1 < samples.size() && p < samples.get(i + 1) - TOL) {
+						rightProbe = (samples.get(i + 1) + p) * 0.5;
+					}
+					double rightDominanceFv = evalRef(f, rightProbe);
+					double rightDominanceGv = evalRef(g, rightProbe);
+					double rightAfterDominance = Utility.compareLe(rightDominanceGv, rightDominanceFv) ? INF : rightValue;
+					min = Math.min(min, rightAfterDominance);
+				}
+			}
+		}
+		return min;
+	}
+
 	private static double evalRefLeftLimit(PiecewiseLinearFunction f, double x) {
 		if (f.head == null) {
 			return INF;
 		}
 		for (Segment s = f.head; s != null; s = s.next) {
 			if (x > s.start + TOL && x <= s.end + TOL) {
+				return s.slope * x + s.intercept;
+			}
+		}
+		return INF;
+	}
+
+	private static double evalRefRightLimit(PiecewiseLinearFunction f, double x) {
+		if (f.head == null) {
+			return INF;
+		}
+		for (Segment s = f.head; s != null; s = s.next) {
+			if (x >= s.start - TOL && x < s.end - TOL) {
 				return s.slope * x + s.intercept;
 			}
 		}

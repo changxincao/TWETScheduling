@@ -693,6 +693,21 @@ class TwoOptStarOperator implements Move {
 		boolean[][] improvedPair = new boolean[data.m][data.m];
 
 		for (OptCost operation : savedOperations) {
+			improvedPair[operation.m1][operation.m2] = true;
+		}
+		// 2026-05-15:
+		// noImprovedSeqPair 记录的是“本轮搜索时看到的旧序列 pair 没有改进”。
+		// 因此必须在真正修改机器序列之前写入缓存；否则批量 commit 改完某台机器后，
+		// 可能把由新序列组成、但本轮并未搜索过的 pair 错误写成 no-improved。
+		for (int m1 = 0; m1 < data.m; m1++) {
+			for (int m2 = m1 + 1; m2 < data.m; m2++) {
+				if (!improvedPair[m1][m2]) {
+					noImprovedSeqPair.add(Set.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
+				}
+			}
+		}
+
+		for (OptCost operation : savedOperations) {
 			boolean allCover = true;
 			for (boolean machineCovered : coverdMachines) {
 				if (!machineCovered) {
@@ -705,7 +720,6 @@ class TwoOptStarOperator implements Move {
 			int m1 = operation.m1;
 			int m2 = operation.m2;
 
-			improvedPair[m1][m2] = true;
 			if (allCover) {
 				continue;
 			}
@@ -733,13 +747,6 @@ class TwoOptStarOperator implements Move {
 			s2.addAll(tail1);
 			s.updateInformationM(m1);
 			s.updateInformationM(m2);
-		}
-		for (int m1 = 0; m1 < data.m; m1++) {
-			for (int m2 = m1 + 1; m2 < data.m; m2++) {
-				if (!improvedPair[m1][m2]) {
-					noImprovedSeqPair.add(Set.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
-				}
-			}
 		}
 
 		return imp;
@@ -959,6 +966,22 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 		boolean[][] improvedPair = new boolean[data.m][data.m];
 
 		for (OptCost operation : savedOperations) {
+			improvedPair[operation.m1][operation.m2] = true;
+		}
+		// 2026-05-15:
+		// Path insertion 的 pair 是有向的，缓存也保持有向。
+		// 缓存必须写在序列修改之前，保证记录的是刚刚完整搜索过的旧序列 pair。
+		for (int m1 = 0; m1 < data.m; m1++) {
+			for (int m2 = 0; m2 < data.m; m2++) {
+				if (m1 == m2)
+					continue;
+				if (!improvedPair[m1][m2]) {
+					noImprovedSeqPair.add(List.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
+				}
+			}
+		}
+
+		for (OptCost operation : savedOperations) {
 			boolean allCover = true;
 			for (boolean machineCovered : coverdMachines) {
 				if (!machineCovered) {
@@ -971,7 +994,6 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 			int m1 = operation.m1;
 			int m2 = operation.m2;
 
-			improvedPair[m1][m2] = true;
 			if (allCover) {
 				continue;
 			}
@@ -991,15 +1013,6 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 			s.sequences.get(m2).addAll(to2 + 1, slice);
 			s.updateInformationM(m1);
 			s.updateInformationM(m2);
-		}
-		for (int m1 = 0; m1 < data.m; m1++) {
-			for (int m2 = 0; m2 < data.m; m2++) {
-				if (m1 == m2)
-					continue;
-				if (!improvedPair[m1][m2]) {
-					noImprovedSeqPair.add(List.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
-				}
-			}
 		}
 
 		return imp;
@@ -1153,6 +1166,20 @@ class CrossExchangeOperator implements Move {
 		boolean[][] improvedPair = new boolean[data.m][data.m];
 
 		for (OptCost operation : savedOperations) {
+			improvedPair[operation.m1][operation.m2] = true;
+		}
+		// 2026-05-15:
+		// Cross exchange 的 pair 是无向的。先用修改前序列写 no-improved 缓存，
+		// 再执行批量 commit，避免把本轮 commit 后生成的新 pair 错记为已搜索无改进。
+		for (int m1 = 0; m1 < data.m; m1++) {
+			for (int m2 = m1 + 1; m2 < data.m; m2++) {
+				if (!improvedPair[m1][m2]) {
+					noImprovedSeqPair.add(Set.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
+				}
+			}
+		}
+
+		for (OptCost operation : savedOperations) {
 			boolean allCover = true;
 			for (boolean machineCovered : coverdMachines) {
 				if (!machineCovered) {
@@ -1165,7 +1192,6 @@ class CrossExchangeOperator implements Move {
 			int m1 = operation.m1;
 			int m2 = operation.m2;
 
-			improvedPair[m1][m2] = true;
 			if (allCover) {
 				continue;
 			}
@@ -1195,13 +1221,6 @@ class CrossExchangeOperator implements Move {
 			s2.addAll(from2, slice1);
 			s.updateInformationM(m1);
 			s.updateInformationM(m2);
-		}
-		for (int m1 = 0; m1 < data.m; m1++) {
-			for (int m2 = m1 + 1; m2 < data.m; m2++) {
-				if (!improvedPair[m1][m2]) {
-					noImprovedSeqPair.add(Set.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
-				}
-			}
 		}
 
 		return imp;

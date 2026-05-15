@@ -119,3 +119,7 @@
 `mergeMinimum2()` 当前没有被正式求解流程调用，只在 `src/Test/MergeBenchmark.java` 里用于测试/性能比较。这个版本的问题不在于现在会影响启发式，而在于它不适合作为后续 BPC pricing 的主合并函数：它会直接修改输入链表节点的 `p.start/q.start`，并把原 segment 节点直接接入 `res`，副作用比 `mergeMinimum()` 更难控制；公共区间扫描也没有显式在 `commonE` 处停止，依赖后续 `hi=commonE` 和指针推进，遇到无效输入或边界退化时更容易产生零长度段或重复推进问题。因此后续如果需要下包络合并，优先沿用已经写了输入契约和调试检查的 `mergeMinimum()`，`mergeMinimum2()` 暂时只保留为实验/对照实现。
 
 继续检查后，当前 `dominates()` 也没有被正式求解流程调用，只在测试/demo 中出现。因此它现在不是启发式运行风险，但它是后续 BPC label dominance 里最后一个不能直接复用的核心函数。原因是当前 `dominates()` 只做函数值层面的粗比较，并且对右端覆盖、严格支配、前后向语义和 label 资源状态都没有完整定义；BPC 中真正的 dominance 必须放在 label 层重新封装，先判断终端节点、可扩展任务集合、分支状态、cut 相关资源等结构条件，再调用一个严格的函数支配比较。也就是说，分段函数底层操作基本可用后，剩下的主要工作不是继续修 `add/shift/minimize`，而是设计 BPC 的 label dominance 规则。
+
+如果暂时只讨论函数层面的“是否完整占优”，不要求至少一点严格更优，也不考虑 label 资源状态，那么 `dominates()` 的剩余问题主要是定义域语义。它不是 partial dominance：返回值只有 true/false，逻辑也是尝试检查 `this` 是否在 `g` 的整个定义域上不大于 `g`，不会返回被占优区间，也不会修改函数。真正做 partial dominance 的是 `updateDominatedIntervals(g)`，它会在公共定义域上把被 `g` 支配的区间写成 `big_M`。因此，`dominates()` 必须理解为“完整函数占优判断”，不支持部分占优。
+
+在当前 `[a,T]` 统一右端契约下，`dominates()` 的右端覆盖问题会被弱化，因为两个函数通常都到 `T`；左端则通过 `this.head.start <= g.head.start` 保证 `this` 从不晚于 `g` 的起点开始有定义。若这个契约被破坏，当前代码里 `this.tail.end < g.tail.end` 的分支不是严格处理，只用 `this.tail.end` 和 `g.tail.end` 两个点做辅助判断，不能证明中间缺失区间都被占优。另一个问题是它在比较过程中按端点判断线性段，只适合连续链表和普通线性段；内部 `big_M` gap 可以作为高成本段参与比较，但内部断点仍沿用右侧段/端点约定，不能表达闭区间端点的特殊支配。综合看，在 `[a,T] + 连续 big_M gap` 契约下它可以作为粗的完整函数占优参考，但不能替代 `updateDominatedIntervals()` 的 partial dominance，也不能在契约外使用。

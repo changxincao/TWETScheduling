@@ -123,3 +123,7 @@
 如果暂时只讨论函数层面的“是否完整占优”，不要求至少一点严格更优，也不考虑 label 资源状态，那么 `dominates()` 的剩余问题主要是定义域语义。它不是 partial dominance：返回值只有 true/false，逻辑也是尝试检查 `this` 是否在 `g` 的整个定义域上不大于 `g`，不会返回被占优区间，也不会修改函数。真正做 partial dominance 的是 `updateDominatedIntervals(g)`，它会在公共定义域上把被 `g` 支配的区间写成 `big_M`。因此，`dominates()` 必须理解为“完整函数占优判断”，不支持部分占优。
 
 在当前 `[a,T]` 统一右端契约下，`dominates()` 的右端覆盖问题会被弱化，因为两个函数通常都到 `T`；左端则通过 `this.head.start <= g.head.start` 保证 `this` 从不晚于 `g` 的起点开始有定义。若这个契约被破坏，当前代码里 `this.tail.end < g.tail.end` 的分支不是严格处理，只用 `this.tail.end` 和 `g.tail.end` 两个点做辅助判断，不能证明中间缺失区间都被占优。另一个问题是它在比较过程中按端点判断线性段，只适合连续链表和普通线性段；内部 `big_M` gap 可以作为高成本段参与比较，但内部断点仍沿用右侧段/端点约定，不能表达闭区间端点的特殊支配。综合看，在 `[a,T] + 连续 big_M gap` 契约下它可以作为粗的完整函数占优参考，但不能替代 `updateDominatedIntervals()` 的 partial dominance，也不能在契约外使用。
+
+2026-05-15 已把 `dominates()` 收紧为明确的完整函数占优判断。现在它要求 `this.head.start <= g.head.start` 且 `this.tail.end >= g.tail.end`，右端不覆盖时直接返回 `false`，不再用两个右端点近似推断缺失区间；双指针扫描只处理正长度区间，并在循环结束后检查 `cur` 是否已经扫到 `gEnd`，防止链表被意外裁断或指针推进异常时误返回 `true`。该函数仍不做 partial dominance，也不检查 label 状态或严格改进，只能作为函数层面的完整占优子程序。
+
+验证后，完整 PWLF 测试由 `passed=16, warnings=1, failed=3` 变为 `passed=17, warnings=1, failed=2`。被修掉的是“右端不覆盖仍错误支配”的已知问题；剩余两个失败仍是 `mergeMinimum` 在完全不相交定义域下的无效输入问题，属于前面已经明确不支持的契约外场景。

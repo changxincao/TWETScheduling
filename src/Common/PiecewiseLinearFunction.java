@@ -807,11 +807,14 @@ public class PiecewiseLinearFunction {
 	}
 
 	/**
-	 * 检查此函数（L1）是否在 g（L2）的定义域上支配 g。 如果在 L2 的定义域上，L1(t) <= L2(t)，且至少在某一点严格小于，则 L1 支配
-	 * L2。
+	 * 检查此函数是否完整占优 g。
+	 * <p>
+	 * 这里仅判断函数层面的完整占优：在 g 的整个定义域上，this(t) <= g(t)。
+	 * 不处理 partial dominance，也不要求至少一点严格更优；BPC label 层若需要严格支配或 tie-breaking，
+	 * 应在外层结合标签状态单独判断。
 	 *
 	 * @param g 要比较的函数（L2）。
-	 * @return 如果此函数支配 g，则返回 true，否则返回 false。
+	 * @return 如果此函数在 g 的完整定义域上不大于 g，则返回 true，否则返回 false。
 	 */
 	public boolean dominates(PiecewiseLinearFunction g) {
 		if (this.head == null)
@@ -822,19 +825,11 @@ public class PiecewiseLinearFunction {
 		if (Utility.compareGt(head.start, g.head.start)) {
 			return false;
 		}
-//		if (Utility.compareLt(tail.end, g.tail.end)) {
-//			return false;
-//		}
-		//TODO 这俩可以留一个,之后测试
 		if (Utility.compareLt(tail.end, g.tail.end)) {
-			double gValue=g.evaluate(g.tail.end);
-			double curValue=this.evaluate(tail.end);
-			
-			if(!Utility.compareLe(curValue, gValue)) {
-				//此时当前函数比g函数后续要更低，可不关注定义域,接着往后在cur.tail.end之前比较就行，否则返回
-				return false;
-			}
-			
+			// 2026-05-15: 完整占优必须覆盖 g 的整个定义域。
+			// 原先这里尝试用右端两个点近似判断 tail.end 之后的区间，但这不能证明整段都被占优；
+			// 后续 pricing 统一要求 [a,T] 右端一致，因此契约外的右端短缺直接判为不占优。
+			return false;
 		}
 		// f定义域比g还小，肯定无法支配
 		//TODO 不一定 可以认为f.end-g.end这段f仍然有值，前段则不太好处理，但这样需要去算函数某个点的值，O(n)
@@ -863,7 +858,7 @@ public class PiecewiseLinearFunction {
 		}
 
 		double cur = gStart;
-		while (p != null && q != null && Utility.compareLe(cur, gEnd)) {
+		while (p != null && q != null && Utility.compareLt(cur, gEnd)) {
 			double pEnd = p.end;
 			double qEnd = q.end;
 			double nxt = Math.min(Math.min(pEnd, qEnd), gEnd);
@@ -891,7 +886,11 @@ public class PiecewiseLinearFunction {
 			}
 		}
 
-		// 支配要求在某点存在严格不等式
+		// 2026-05-15: 正常 [a,T] 连续链表输入下，右端覆盖检查已经保证能扫到 gEnd。
+		// 这里再做一次兜底，避免链表被意外物理裁断或指针推进异常时没有扫完整个 g 定义域却返回 true。
+		if (Utility.compareLt(cur, gEnd)) {
+			return false;
+		}
 		return true;
 	}
 

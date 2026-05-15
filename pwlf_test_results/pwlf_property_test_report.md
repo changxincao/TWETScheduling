@@ -13,7 +13,7 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: findMinimal: normal multi-segment case
 - PASS: findMinimal: vertical jump left-limit case
 - PASS: findMinimal: left/right position selection on continuous and discontinuous endpoints
-- FAIL: dominates returns true when dominator does not cover dominated function domain. shorter=[0,5], longer=[0,10]. If dominance is defined over the full dominated domain, this is unsafe.
+- PASS: dominates: rejects insufficient domain coverage
 - PASS: mergeMinimum: overlapping domains under forward frontier semantics
 - FAIL: mergeMinimum disjoint-left domain throws exception. NullPointerException: Cannot read field "end" because "<local9>" is null
 - FAIL: mergeMinimum disjoint-right domain equals prefix-min lower envelope. expected=10.0, actual=1.0
@@ -24,4 +24,4 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: random sweep: add and mergeMinimum forward-frontier semantics on 500 continuous cases
 - PASS: random frontier sweep: mergeMinimum on 500 prefix-minimized cases
 
-Summary: passed=16, warnings=1, failed=3
+Summary: passed=17, warnings=1, failed=2

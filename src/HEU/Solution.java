@@ -189,39 +189,89 @@ public class Solution {
 		if (!canOutsource(job)) {
 			return Utility.big_M;
 		}
-		double newBaseline = outsourcingBaselineTotal + getOutsourcingBaseline(job);
-		return data.evaluateOutsourcingCost(newBaseline) - outsourcingCostTotal;
+		ArrayList<Integer> addJobs = new ArrayList<Integer>();
+		addJobs.add(job);
+		return evaluateOutsourcingDelta(null, addJobs);
 	}
 
 	public double evaluateOutsourcingRemoveDelta(int job) {
 		if (!outsourcedJobs.contains(job)) {
 			return Utility.big_M;
 		}
-		double newBaseline = outsourcingBaselineTotal - getOutsourcingBaseline(job);
+		ArrayList<Integer> removeJobs = new ArrayList<Integer>();
+		removeJobs.add(job);
+		return evaluateOutsourcingDelta(removeJobs, null);
+	}
+
+	public double getOutsourcingBaseline(List<Integer> jobs) {
+		double total = 0;
+		if (jobs == null) {
+			return total;
+		}
+		for (int job : jobs) {
+			double baseline = getOutsourcingBaseline(job);
+			if (Utility.isBigMValue(baseline)) {
+				return Utility.big_M;
+			}
+			total += baseline;
+		}
+		return total;
+	}
+
+	public double evaluateOutsourcingDelta(List<Integer> removeJobs, List<Integer> addJobs) {
+		double removeBaseline = getOutsourcingBaseline(removeJobs);
+		double addBaseline = getOutsourcingBaseline(addJobs);
+		if (Utility.isBigMValue(removeBaseline) || Utility.isBigMValue(addBaseline)) {
+			return Utility.big_M;
+		}
+		double newBaseline = outsourcingBaselineTotal - removeBaseline + addBaseline;
+		if (Utility.compareLt(newBaseline, 0)) {
+			return Utility.big_M;
+		}
 		return data.evaluateOutsourcingCost(newBaseline) - outsourcingCostTotal;
 	}
 
 	public void addOutsourcedJob(int job) {
+		ArrayList<Integer> jobs = new ArrayList<Integer>();
+		jobs.add(job);
+		addOutsourcedJobs(jobs);
+	}
+
+	public void addOutsourcedJobs(List<Integer> jobs) {
 		// 2026-05-16: b_j 只是 baseline，真正成本按 G(B(O)) 统一评价。
 		// 因此增删任务时必须用函数差分更新，而不是简单加减 b_j。
-		outsourcedJobs.add(job);
-		double oldCost = outsourcingCostTotal;
-		outsourcingBaselineTotal += getOutsourcingBaseline(job);
-		outsourcingCostTotal = data.evaluateOutsourcingCost(outsourcingBaselineTotal);
-		double delta = outsourcingCostTotal - oldCost;
-		curCost += delta;
+		outsourcedJobs.addAll(jobs);
+		recomputeOutsourcingCostAndCurCost();
 	}
 
 	public boolean removeOutsourcedJob(int job) {
-		boolean removed = outsourcedJobs.remove(Integer.valueOf(job));
+		ArrayList<Integer> jobs = new ArrayList<Integer>();
+		jobs.add(job);
+		return removeOutsourcedJobs(jobs);
+	}
+
+	public boolean removeOutsourcedJobs(List<Integer> jobs) {
+		boolean removed = false;
+		for (int job : jobs) {
+			removed = outsourcedJobs.remove(Integer.valueOf(job)) || removed;
+		}
 		if (removed) {
-			double oldCost = outsourcingCostTotal;
-			outsourcingBaselineTotal -= getOutsourcingBaseline(job);
-			outsourcingCostTotal = data.evaluateOutsourcingCost(outsourcingBaselineTotal);
-			double delta = outsourcingCostTotal - oldCost;
-			curCost += delta;
+			recomputeOutsourcingCostAndCurCost();
 		}
 		return removed;
+	}
+
+	public void replaceOutsourcedSegment(int from, int len, List<Integer> replacement) {
+		outsourcedJobs.subList(from, from + len).clear();
+		outsourcedJobs.addAll(from, replacement);
+		recomputeOutsourcingCostAndCurCost();
+	}
+
+	private void recomputeOutsourcingCostAndCurCost() {
+		double oldCost = outsourcingCostTotal;
+		outsourcingBaselineTotal = getOutsourcingBaseline(outsourcedJobs);
+		outsourcingCostTotal = data.evaluateOutsourcingCost(outsourcingBaselineTotal);
+		curCost += outsourcingCostTotal - oldCost;
 	}
 
 	private PiecewiseLinearFunction addSetupCost(PiecewiseLinearFunction function, int fromJob, int toJob) {

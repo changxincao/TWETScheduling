@@ -35,7 +35,8 @@ public class EngineVND {
 		ops.add(new TwoOptStarOperator(s));
 		ops.add(new PathInsertOperator(s));
 		ops.add(new CrossExchangeOperator(s));
-		ops.add(new OutsourcingRelocateOperator(s));
+		ops.add(new OutsourcingPathInsertOperator(s));
+		ops.add(new OutsourcingCrossExchangeOperator(s));
 		
 		Collections.shuffle(ops,new Random(1));
 		return ops;

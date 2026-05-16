@@ -1098,28 +1098,35 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 }
 
 /**
- * 2026-05-16: 外包与真实机器之间的单任务 relocate。
- * <p>
- * 该算子借用 path-insert 的思想，但外包侧不是普通机器序列：
- * 外包 list 的顺序只用于存储和生成候选，不参与 setup/time 函数递推。
- * 因此这里先只做语义最清楚的两个方向：
- * 1) 真实机器上的一个任务转入外包；
- * 2) 外包任务插入某台真实机器的某个位置。
+ * 2026-05-16: 外包版 path-insert。
+ * 外包 list 只表示当前外包集合的存储顺序，不表示加工顺序；外包成本由 G(B(O)) 决定。
+ * 因此外包相关 move 不直接复用机器-机器的拼接缓存，而是重算受影响真实机器的序列成本。
+ * 当前只提交一个最优外包 move，避免多个候选共用旧 B(O) 时增量成本失真。
  */
-class OutsourcingRelocateOperator implements Move {
+class OutsourcingPathInsertOperator implements Move {
+	private static int LSEG = 20;
 
 	static class OptCost implements Comparable<OptCost> {
-		boolean toOutsource;
+		boolean machineToOutsource;
 		int machine;
-		int position;
-		int job;
+		int machineFrom;
+		int outsourceFrom;
+		int len;
+		int insertPos;
+		boolean reverse;
+		ArrayList<Integer> segment;
 		double deltaCost;
 
-		OptCost(boolean toOutsource, int machine, int position, int job, double deltaCost) {
-			this.toOutsource = toOutsource;
+		OptCost(boolean machineToOutsource, int machine, int machineFrom, int outsourceFrom, int len, int insertPos,
+				boolean reverse, List<Integer> segment, double deltaCost) {
+			this.machineToOutsource = machineToOutsource;
 			this.machine = machine;
-			this.position = position;
-			this.job = job;
+			this.machineFrom = machineFrom;
+			this.outsourceFrom = outsourceFrom;
+			this.len = len;
+			this.insertPos = insertPos;
+			this.reverse = reverse;
+			this.segment = new ArrayList<Integer>(segment);
 			this.deltaCost = deltaCost;
 		}
 
@@ -1133,54 +1140,62 @@ class OutsourcingRelocateOperator implements Move {
 	public Data data;
 	private ArrayList<OptCost> savedOperations = new ArrayList<OptCost>();
 
-	public OutsourcingRelocateOperator(Solution s) {
+	public OutsourcingPathInsertOperator(Solution s) {
 		this.s = s;
 		this.data = s.data;
-	}
-
-	private double evaluateRemoveFromMachine(int m, int pos) {
-		ArrayList<Integer> seq = s.sequences.get(m);
-		if (seq.size() <= 1) {
-			return Utility.big_M;
-		}
-		PiecewiseLinearFunction f = pos == 0 ? data.penaltyFunction[0] : s.fFunctions.get(m).get(pos - 1);
-		PiecewiseLinearFunction b = pos == seq.size() - 1 ? data.penaltyFunction[0] : s.bFunctions.get(m).get(pos + 1);
-		int bridgeFrom = pos == 0 ? 0 : seq.get(pos - 1);
-		int bridgeTo = pos == seq.size() - 1 ? 0 : seq.get(pos + 1);
-		double shift = pos == seq.size() - 1 ? 0 : data.s[bridgeFrom][bridgeTo] + data.p[bridgeTo];
-		double newCost = s.merge2Segments(f, b, shift,
-				pos == seq.size() - 1 ? 0.0 : data.getSetupCost(bridgeFrom, bridgeTo));
-		return newCost - s.cost[m];
 	}
 
 	@Override
 	public void searchBest() {
 		savedOperations.clear();
+		searchMachineToOutsource();
+		searchOutsourceToMachine();
+	}
 
-		// 机器 -> 外包：删除真实机器上的一个任务，增加该任务外包成本。
+	private void searchMachineToOutsource() {
 		for (int m = 0; m < data.m; m++) {
 			ArrayList<Integer> seq = s.sequences.get(m);
-			for (int pos = 0; pos < seq.size(); pos++) {
-				int job = seq.get(pos);
-				if (!s.canOutsource(job)) {
-					continue;
-				}
-				double delta = evaluateRemoveFromMachine(m, pos) + s.evaluateOutsourcingAddDelta(job);
-				if (Utility.compareLt(delta, 0)) {
-					savedOperations.add(new OptCost(true, m, pos, job, delta));
+			for (int from = 0; from < seq.size(); from++) {
+				int maxLen = Math.min(LSEG, seq.size() - from);
+				for (int len = 1; len <= maxLen; len++) {
+					if (seq.size() - len <= 0) {
+						continue;
+					}
+					ArrayList<Integer> segment = new ArrayList<Integer>(seq.subList(from, from + len));
+					if (!canOutsourceAll(segment)) {
+						continue;
+					}
+					ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
+					newSeq.subList(from, from + len).clear();
+					double newMachineCost = Move.testSequence(data, newSeq, s);
+					double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(null, segment);
+					if (Utility.compareLt(delta, 0)) {
+						savedOperations.add(new OptCost(true, m, from, -1, len, -1, false, segment, delta));
+					}
 				}
 			}
 		}
+	}
 
-		// 外包 -> 机器：把外包任务插回真实机器的某个位置。
-		for (int job : s.outsourcedJobs) {
-			for (int m = 0; m < data.m; m++) {
-				ArrayList<Integer> seq = s.sequences.get(m);
-				for (int pos = -1; pos < seq.size(); pos++) {
-					double delta = InsertionOperator.evaluateInsertionCost(s, m, pos, job)
-							+ s.evaluateOutsourcingRemoveDelta(job);
-					if (Utility.compareLt(delta, 0)) {
-						savedOperations.add(new OptCost(false, m, pos, job, delta));
+	private void searchOutsourceToMachine() {
+		ArrayList<Integer> out = s.outsourcedJobs;
+		for (int from = 0; from < out.size(); from++) {
+			int maxLen = Math.min(LSEG, out.size() - from);
+			for (int len = 1; len <= maxLen; len++) {
+				ArrayList<Integer> segment = new ArrayList<Integer>(out.subList(from, from + len));
+				for (boolean reverse : len == 1 ? new boolean[] { false } : new boolean[] { false, true }) {
+					ArrayList<Integer> insertSegment = oriented(segment, reverse);
+					for (int m = 0; m < data.m; m++) {
+						ArrayList<Integer> seq = s.sequences.get(m);
+						for (int pos = -1; pos < seq.size(); pos++) {
+							ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
+							newSeq.addAll(pos + 1, insertSegment);
+							double newMachineCost = Move.testSequence(data, newSeq, s);
+							double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(segment, null);
+							if (Utility.compareLt(delta, 0)) {
+								savedOperations.add(new OptCost(false, m, -1, from, len, pos, reverse, segment, delta));
+							}
+						}
 					}
 				}
 			}
@@ -1194,31 +1209,196 @@ class OutsourcingRelocateOperator implements Move {
 		}
 		Collections.sort(savedOperations);
 		for (OptCost op : savedOperations) {
-			// 2026-05-16: 外包成本是凹函数 G(B)，多个外包增删不能直接使用旧 baseline 下的
-			// delta 批量提交。第一版只提交当前最优的一个 relocate，保证增量语义准确。
-			if (op.toOutsource) {
+			if (op.machineToOutsource) {
 				ArrayList<Integer> seq = s.sequences.get(op.machine);
-				int pos = seq.indexOf(op.job);
-				if (pos < 0 || seq.size() <= 1) {
+				if (!segmentMatches(seq, op.machineFrom, op.segment) || seq.size() - op.len <= 0) {
 					continue;
 				}
-				curRemoveFromMachine(op.machine, pos);
-				s.addOutsourcedJob(op.job);
-			} else {
-				if (!s.outsourcedJobs.contains(op.job)) {
-					continue;
-				}
-				s.removeOutsourcedJob(op.job);
-				s.insertJob(op.machine, op.position, op.job);
+				removeMachineSegment(op.machine, op.machineFrom, op.len);
+				s.addOutsourcedJobs(op.segment);
+				return true;
 			}
+			if (!segmentMatches(s.outsourcedJobs, op.outsourceFrom, op.segment)) {
+				continue;
+			}
+			insertMachineSegment(op.machine, op.insertPos, oriented(op.segment, op.reverse));
+			s.replaceOutsourcedSegment(op.outsourceFrom, op.len, Collections.emptyList());
 			return true;
 		}
 		return false;
 	}
 
-	private void curRemoveFromMachine(int m, int pos) {
+	private boolean canOutsourceAll(List<Integer> jobs) {
+		for (int job : jobs) {
+			if (!s.canOutsource(job)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private ArrayList<Integer> oriented(List<Integer> segment, boolean reverse) {
+		ArrayList<Integer> res = new ArrayList<Integer>(segment);
+		if (reverse) {
+			Collections.reverse(res);
+		}
+		return res;
+	}
+
+	private boolean segmentMatches(List<Integer> list, int from, List<Integer> segment) {
+		return from >= 0 && from + segment.size() <= list.size()
+				&& list.subList(from, from + segment.size()).equals(segment);
+	}
+
+	private void removeMachineSegment(int m, int from, int len) {
 		s.curCost -= s.cost[m];
-		s.sequences.get(m).remove(pos);
+		s.sequences.get(m).subList(from, from + len).clear();
+		s.calCost(m);
+		s.curCost += s.cost[m];
+	}
+
+	private void insertMachineSegment(int m, int pos, List<Integer> segment) {
+		s.curCost -= s.cost[m];
+		s.sequences.get(m).addAll(pos + 1, segment);
+		s.calCost(m);
+		s.curCost += s.cost[m];
+	}
+}
+
+/**
+ * 2026-05-16: 外包版 cross-exchange。
+ * 真实机器取一段任务，外包 list 取一段任务，两段互换。外包段插入真实机器时尝试原顺序和反序；
+ * 被换入外包的真实机器段只改变外包集合，不承担 setup/time 递推。
+ */
+class OutsourcingCrossExchangeOperator implements Move {
+	private static int LSEG = 20;
+
+	static class OptCost implements Comparable<OptCost> {
+		int machine;
+		int machineFrom;
+		int machineLen;
+		int outsourceFrom;
+		int outsourceLen;
+		boolean reverseOutSegment;
+		ArrayList<Integer> machineSegment;
+		ArrayList<Integer> outsourceSegment;
+		double deltaCost;
+
+		OptCost(int machine, int machineFrom, int machineLen, int outsourceFrom, int outsourceLen,
+				boolean reverseOutSegment, List<Integer> machineSegment, List<Integer> outsourceSegment,
+				double deltaCost) {
+			this.machine = machine;
+			this.machineFrom = machineFrom;
+			this.machineLen = machineLen;
+			this.outsourceFrom = outsourceFrom;
+			this.outsourceLen = outsourceLen;
+			this.reverseOutSegment = reverseOutSegment;
+			this.machineSegment = new ArrayList<Integer>(machineSegment);
+			this.outsourceSegment = new ArrayList<Integer>(outsourceSegment);
+			this.deltaCost = deltaCost;
+		}
+
+		@Override
+		public int compareTo(OptCost o) {
+			return Double.compare(this.deltaCost, o.deltaCost);
+		}
+	}
+
+	public Solution s;
+	public Data data;
+	private ArrayList<OptCost> savedOperations = new ArrayList<OptCost>();
+
+	public OutsourcingCrossExchangeOperator(Solution s) {
+		this.s = s;
+		this.data = s.data;
+	}
+
+	@Override
+	public void searchBest() {
+		savedOperations.clear();
+		ArrayList<Integer> out = s.outsourcedJobs;
+		if (out.isEmpty()) {
+			return;
+		}
+		for (int m = 0; m < data.m; m++) {
+			ArrayList<Integer> seq = s.sequences.get(m);
+			for (int mf = 0; mf < seq.size(); mf++) {
+				int maxMLen = Math.min(LSEG, seq.size() - mf);
+				for (int mLen = 1; mLen <= maxMLen; mLen++) {
+					ArrayList<Integer> machineSegment = new ArrayList<Integer>(seq.subList(mf, mf + mLen));
+					if (!canOutsourceAll(machineSegment)) {
+						continue;
+					}
+					for (int of = 0; of < out.size(); of++) {
+						int maxOLen = Math.min(LSEG, out.size() - of);
+						for (int oLen = 1; oLen <= maxOLen; oLen++) {
+							ArrayList<Integer> outsourceSegment = new ArrayList<Integer>(out.subList(of, of + oLen));
+							for (boolean reverse : oLen == 1 ? new boolean[] { false }
+									: new boolean[] { false, true }) {
+								ArrayList<Integer> insertSegment = oriented(outsourceSegment, reverse);
+								ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
+								newSeq.subList(mf, mf + mLen).clear();
+								newSeq.addAll(mf, insertSegment);
+								double newMachineCost = Move.testSequence(data, newSeq, s);
+								double delta = newMachineCost - s.cost[m]
+										+ s.evaluateOutsourcingDelta(outsourceSegment, machineSegment);
+								if (Utility.compareLt(delta, 0)) {
+									savedOperations.add(new OptCost(m, mf, mLen, of, oLen, reverse, machineSegment,
+											outsourceSegment, delta));
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	@Override
+	public boolean commit() {
+		if (savedOperations.isEmpty()) {
+			return false;
+		}
+		Collections.sort(savedOperations);
+		for (OptCost op : savedOperations) {
+			if (!segmentMatches(s.sequences.get(op.machine), op.machineFrom, op.machineSegment)
+					|| !segmentMatches(s.outsourcedJobs, op.outsourceFrom, op.outsourceSegment)) {
+				continue;
+			}
+			replaceMachineSegment(op.machine, op.machineFrom, op.machineLen,
+					oriented(op.outsourceSegment, op.reverseOutSegment));
+			s.replaceOutsourcedSegment(op.outsourceFrom, op.outsourceLen, op.machineSegment);
+			return true;
+		}
+		return false;
+	}
+
+	private boolean canOutsourceAll(List<Integer> jobs) {
+		for (int job : jobs) {
+			if (!s.canOutsource(job)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private ArrayList<Integer> oriented(List<Integer> segment, boolean reverse) {
+		ArrayList<Integer> res = new ArrayList<Integer>(segment);
+		if (reverse) {
+			Collections.reverse(res);
+		}
+		return res;
+	}
+
+	private boolean segmentMatches(List<Integer> list, int from, List<Integer> segment) {
+		return from >= 0 && from + segment.size() <= list.size()
+				&& list.subList(from, from + segment.size()).equals(segment);
+	}
+
+	private void replaceMachineSegment(int m, int from, int len, List<Integer> replacement) {
+		s.curCost -= s.cost[m];
+		s.sequences.get(m).subList(from, from + len).clear();
+		s.sequences.get(m).addAll(from, replacement);
 		s.calCost(m);
 		s.curCost += s.cost[m];
 	}

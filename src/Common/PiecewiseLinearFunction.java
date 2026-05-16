@@ -13,6 +13,9 @@ import Common.Utility.TimerManager;
 
 //假设各段之间区间连续的
 public class PiecewiseLinearFunction {
+	// 2026-05-16: 只用于人为粗硬窗退化为单点时的轻微放宽。
+	// 粗硬窗本身是预处理剪枝，不是真实物理可行域；把 [d,d] 放宽到 d±0.1 只会少剪一点，
+	// 不会因为这个扰动删掉最优解，同时能避免长度为 0 的点段进入 add/merge/normalize。
 	private static final double WINDOW_EPSILON = 0.1;
 
 	/**

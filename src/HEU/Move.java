@@ -1098,10 +1098,211 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 }
 
 /**
+ * 2026-05-16: 外包 move 的快速评价工具。
+ * 外包任务仍作为集合计算 G(B(O))，但外包 list 中的连续片段插回真实机器时，
+ * 可以像普通机器片段一样构造 forward/backward 分段函数和片段 duration。
+ * 这样外包 move 的机器侧成本可以复用 merge2Segments/merge3Segments，
+ * 避免在候选枚举内层用 testSequence(newSeq) 重算整条机器序列。
+ */
+class OutsourcingMoveEvaluator {
+	static class SegmentProfile {
+		final ArrayList<Integer> jobs;
+		final PiecewiseLinearFunction forward;
+		final PiecewiseLinearFunction backward;
+		final double durationAfterFirst;
+
+		SegmentProfile(List<Integer> jobs, PiecewiseLinearFunction forward, PiecewiseLinearFunction backward,
+				double durationAfterFirst) {
+			this.jobs = new ArrayList<Integer>(jobs);
+			this.forward = forward;
+			this.backward = backward;
+			this.durationAfterFirst = durationAfterFirst;
+		}
+
+		int firstJob() {
+			return jobs.get(0);
+		}
+
+		int lastJob() {
+			return jobs.get(jobs.size() - 1);
+		}
+	}
+
+	static class OutsourcedSegmentCache {
+		private final Solution s;
+		private final int maxLen;
+		private final ArrayList<Integer> jobs;
+		private final SegmentProfile[][] normalProfiles;
+		private final SegmentProfile[][] reverseProfiles;
+
+		OutsourcedSegmentCache(Solution s, int maxLen) {
+			this.s = s;
+			this.maxLen = maxLen;
+			this.jobs = s.outsourcedJobs;
+			int size = jobs.size();
+			this.normalProfiles = new SegmentProfile[size][size];
+			this.reverseProfiles = new SegmentProfile[size][size];
+			build();
+		}
+
+		private void build() {
+			for (int from = 0; from < jobs.size(); from++) {
+				int maxTo = Math.min(jobs.size(), from + maxLen);
+				for (int to = from; to < maxTo; to++) {
+					List<Integer> normal = new ArrayList<Integer>(jobs.subList(from, to + 1));
+					normalProfiles[from][to] = buildProfile(s, normal);
+					if (to == from) {
+						reverseProfiles[from][to] = normalProfiles[from][to];
+					} else {
+						ArrayList<Integer> reversed = new ArrayList<Integer>(normal);
+						Collections.reverse(reversed);
+						reverseProfiles[from][to] = buildProfile(s, reversed);
+					}
+				}
+			}
+		}
+
+		SegmentProfile get(int from, int len, boolean reverse) {
+			int to = from + len - 1;
+			return reverse ? reverseProfiles[from][to] : normalProfiles[from][to];
+		}
+	}
+
+	static SegmentProfile buildProfile(Solution s, List<Integer> jobs) {
+		Data data = s.data;
+		PiecewiseLinearFunction forward = null;
+		for (int i = 0; i < jobs.size(); i++) {
+			int job = jobs.get(i);
+			if (i == 0) {
+				forward = data.penaltyFunction[job].copy();
+			} else {
+				int prev = jobs.get(i - 1);
+				forward = forward.shiftX(data.s[prev][job] + data.p[job]).add(data.penaltyFunction[job]);
+				forward.shiftYInPlace(data.getSetupCost(prev, job));
+			}
+			forward.minimizePrefixInPlace();
+		}
+
+		PiecewiseLinearFunction backward = null;
+		for (int i = jobs.size() - 1; i >= 0; i--) {
+			int job = jobs.get(i);
+			if (i == jobs.size() - 1) {
+				backward = data.penaltyFunction[job].copy();
+			} else {
+				int next = jobs.get(i + 1);
+				backward = backward.shiftX(-data.s[job][next] - data.p[next]).add(data.penaltyFunction[job]);
+				backward.shiftYInPlace(data.getSetupCost(job, next));
+			}
+			backward.minimizeSuffixInPlace();
+		}
+
+		double duration = 0;
+		for (int i = 1; i < jobs.size(); i++) {
+			int prev = jobs.get(i - 1);
+			int job = jobs.get(i);
+			duration += data.s[prev][job] + data.p[job];
+		}
+		return new SegmentProfile(jobs, forward, backward, duration);
+	}
+
+	static boolean isRemoveCmaxFeasible(Solution s, int m, int from, int len) {
+		ArrayList<Integer> seq = s.sequences.get(m);
+		int end = from + len - 1;
+		if (seq.size() - len == 0) {
+			return true;
+		}
+		double total = from == 0 ? 0 : s.cumDurationNormal[m][from - 1];
+		if (end != seq.size() - 1) {
+			int bridgeFrom = from == 0 ? 0 : seq.get(from - 1);
+			int bridgeTo = seq.get(end + 1);
+			total += s.data.s[bridgeFrom][bridgeTo] + s.data.p[bridgeTo]
+					+ s.getNormalDuration(m, end + 1, seq.size() - 1);
+		}
+		return !Utility.compareGt(total, s.data.CmaxH);
+	}
+
+	static double evaluateRemoveMachineCost(Solution s, int m, int from, int len) {
+		ArrayList<Integer> seq = s.sequences.get(m);
+		int end = from + len - 1;
+		if (seq.size() - len == 0) {
+			return 0;
+		}
+		PiecewiseLinearFunction f1 = from == 0 ? s.data.penaltyFunction[0] : s.fFunctions.get(m).get(from - 1);
+		if (end == seq.size() - 1) {
+			return f1.tail.getValue(f1.tail.end);
+		}
+		PiecewiseLinearFunction b2 = s.bFunctions.get(m).get(end + 1);
+		int bridgeFrom = from == 0 ? 0 : seq.get(from - 1);
+		int bridgeTo = seq.get(end + 1);
+		return s.merge2Segments(f1, b2, s.data.s[bridgeFrom][bridgeTo] + s.data.p[bridgeTo],
+				s.data.getSetupCost(bridgeFrom, bridgeTo));
+	}
+
+	static boolean isInsertCmaxFeasible(Solution s, int m, int pos, SegmentProfile profile) {
+		ArrayList<Integer> seq = s.sequences.get(m);
+		double total = pos == -1 ? 0 : s.cumDurationNormal[m][pos];
+		int bridgeFrom1 = pos == -1 ? 0 : seq.get(pos);
+		total += s.data.s[bridgeFrom1][profile.firstJob()] + s.data.p[profile.firstJob()]
+				+ profile.durationAfterFirst;
+		if (pos != seq.size() - 1) {
+			int bridgeTo2 = seq.get(pos + 1);
+			total += s.data.s[profile.lastJob()][bridgeTo2] + s.data.p[bridgeTo2]
+					+ s.getNormalDuration(m, pos + 1, seq.size() - 1);
+		}
+		return !Utility.compareGt(total, s.data.CmaxH);
+	}
+
+	static double evaluateInsertMachineCost(Solution s, int m, int pos, SegmentProfile profile) {
+		ArrayList<Integer> seq = s.sequences.get(m);
+		PiecewiseLinearFunction f1 = pos == -1 ? s.data.penaltyFunction[0] : s.fFunctions.get(m).get(pos);
+		PiecewiseLinearFunction b3 = pos == seq.size() - 1 ? s.data.penaltyFunction[0] : s.bFunctions.get(m).get(pos + 1);
+		int bridgeFrom1 = pos == -1 ? 0 : seq.get(pos);
+		double shift1 = s.data.s[bridgeFrom1][profile.firstJob()] + s.data.p[profile.firstJob()];
+		int bridgeTo2 = pos == seq.size() - 1 ? 0 : seq.get(pos + 1);
+		double shift2 = pos == seq.size() - 1 ? 0
+				: s.data.s[profile.lastJob()][bridgeTo2] + s.data.p[bridgeTo2];
+		return s.merge3Segments(f1, profile.forward, profile.backward, b3, shift1, shift2,
+				profile.durationAfterFirst, s.data.getSetupCost(bridgeFrom1, profile.firstJob()),
+				pos == seq.size() - 1 ? 0.0 : s.data.getSetupCost(profile.lastJob(), bridgeTo2));
+	}
+
+	static boolean isReplaceCmaxFeasible(Solution s, int m, int from, int len, SegmentProfile profile) {
+		ArrayList<Integer> seq = s.sequences.get(m);
+		int end = from + len - 1;
+		double total = from == 0 ? 0 : s.cumDurationNormal[m][from - 1];
+		int bridgeFrom1 = from == 0 ? 0 : seq.get(from - 1);
+		total += s.data.s[bridgeFrom1][profile.firstJob()] + s.data.p[profile.firstJob()]
+				+ profile.durationAfterFirst;
+		if (end != seq.size() - 1) {
+			int bridgeTo2 = seq.get(end + 1);
+			total += s.data.s[profile.lastJob()][bridgeTo2] + s.data.p[bridgeTo2]
+					+ s.getNormalDuration(m, end + 1, seq.size() - 1);
+		}
+		return !Utility.compareGt(total, s.data.CmaxH);
+	}
+
+	static double evaluateReplaceMachineCost(Solution s, int m, int from, int len, SegmentProfile profile) {
+		ArrayList<Integer> seq = s.sequences.get(m);
+		int end = from + len - 1;
+		PiecewiseLinearFunction f1 = from == 0 ? s.data.penaltyFunction[0] : s.fFunctions.get(m).get(from - 1);
+		PiecewiseLinearFunction b3 = end == seq.size() - 1 ? s.data.penaltyFunction[0] : s.bFunctions.get(m).get(end + 1);
+		int bridgeFrom1 = from == 0 ? 0 : seq.get(from - 1);
+		double shift1 = s.data.s[bridgeFrom1][profile.firstJob()] + s.data.p[profile.firstJob()];
+		int bridgeTo2 = end == seq.size() - 1 ? 0 : seq.get(end + 1);
+		double shift2 = end == seq.size() - 1 ? 0
+				: s.data.s[profile.lastJob()][bridgeTo2] + s.data.p[bridgeTo2];
+		return s.merge3Segments(f1, profile.forward, profile.backward, b3, shift1, shift2,
+				profile.durationAfterFirst, s.data.getSetupCost(bridgeFrom1, profile.firstJob()),
+				end == seq.size() - 1 ? 0.0 : s.data.getSetupCost(profile.lastJob(), bridgeTo2));
+	}
+}
+
+/**
  * 2026-05-16: 外包版 path-insert。
  * 外包 list 只表示当前外包集合的存储顺序，不表示加工顺序；外包成本由 G(B(O)) 决定。
- * 因此外包相关 move 不直接复用机器-机器的拼接缓存，而是重算受影响真实机器的序列成本。
- * 当前只提交一个最优外包 move，避免多个候选共用旧 B(O) 时增量成本失真。
+ * 外包片段插回真实机器时，会按外包 list 的当前顺序或反序构造片段函数，
+ * 然后复用普通机器 move 的 merge2/merge3 快速评价。当前只提交一个最优外包 move，
+ * 避免多个候选共用旧 B(O) 时增量成本失真。
  */
 class OutsourcingPathInsertOperator implements Move {
 	private static int LSEG = 20;
@@ -1149,7 +1350,7 @@ class OutsourcingPathInsertOperator implements Move {
 	public void searchBest() {
 		savedOperations.clear();
 		searchMachineToOutsource();
-		searchOutsourceToMachine();
+		searchOutsourceToMachine(new OutsourcingMoveEvaluator.OutsourcedSegmentCache(s, LSEG));
 	}
 
 	private void searchMachineToOutsource() {
@@ -1165,12 +1366,10 @@ class OutsourcingPathInsertOperator implements Move {
 					if (!canOutsourceAll(segment)) {
 						continue;
 					}
-					ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
-					newSeq.subList(from, from + len).clear();
-					if (!isCmaxFeasible(newSeq)) {
+					if (!OutsourcingMoveEvaluator.isRemoveCmaxFeasible(s, m, from, len)) {
 						continue;
 					}
-					double newMachineCost = Move.testSequence(data, newSeq, s);
+					double newMachineCost = OutsourcingMoveEvaluator.evaluateRemoveMachineCost(s, m, from, len);
 					double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(null, segment);
 					if (Utility.compareLt(delta, 0)) {
 						savedOperations.add(new OptCost(true, m, from, -1, len, -1, false, segment, delta));
@@ -1180,23 +1379,21 @@ class OutsourcingPathInsertOperator implements Move {
 		}
 	}
 
-	private void searchOutsourceToMachine() {
+	private void searchOutsourceToMachine(OutsourcingMoveEvaluator.OutsourcedSegmentCache cache) {
 		ArrayList<Integer> out = s.outsourcedJobs;
 		for (int from = 0; from < out.size(); from++) {
 			int maxLen = Math.min(LSEG, out.size() - from);
 			for (int len = 1; len <= maxLen; len++) {
 				ArrayList<Integer> segment = new ArrayList<Integer>(out.subList(from, from + len));
 				for (boolean reverse : len == 1 ? new boolean[] { false } : new boolean[] { false, true }) {
-					ArrayList<Integer> insertSegment = oriented(segment, reverse);
+					OutsourcingMoveEvaluator.SegmentProfile profile = cache.get(from, len, reverse);
 					for (int m = 0; m < data.m; m++) {
 						ArrayList<Integer> seq = s.sequences.get(m);
 						for (int pos = -1; pos < seq.size(); pos++) {
-							ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
-							newSeq.addAll(pos + 1, insertSegment);
-							if (!isCmaxFeasible(newSeq)) {
+							if (!OutsourcingMoveEvaluator.isInsertCmaxFeasible(s, m, pos, profile)) {
 								continue;
 							}
-							double newMachineCost = Move.testSequence(data, newSeq, s);
+							double newMachineCost = OutsourcingMoveEvaluator.evaluateInsertMachineCost(s, m, pos, profile);
 							double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(segment, null);
 							if (Utility.compareLt(delta, 0)) {
 								savedOperations.add(new OptCost(false, m, -1, from, len, pos, reverse, segment, delta));
@@ -1241,17 +1438,6 @@ class OutsourcingPathInsertOperator implements Move {
 			}
 		}
 		return true;
-	}
-
-	private boolean isCmaxFeasible(List<Integer> sequence) {
-		if (sequence.isEmpty()) {
-			return true;
-		}
-		double totalTime = data.s[0][sequence.get(0)] + data.p[sequence.get(0)];
-		for (int i = 1; i < sequence.size(); i++) {
-			totalTime += data.s[sequence.get(i - 1)][sequence.get(i)] + data.p[sequence.get(i)];
-		}
-		return !Utility.compareGt(totalTime, data.CmaxH);
 	}
 
 	private ArrayList<Integer> oriented(List<Integer> segment, boolean reverse) {
@@ -1337,6 +1523,8 @@ class OutsourcingCrossExchangeOperator implements Move {
 		if (out.isEmpty()) {
 			return;
 		}
+		OutsourcingMoveEvaluator.OutsourcedSegmentCache cache = new OutsourcingMoveEvaluator.OutsourcedSegmentCache(s,
+				LSEG);
 		for (int m = 0; m < data.m; m++) {
 			ArrayList<Integer> seq = s.sequences.get(m);
 			for (int mf = 0; mf < seq.size(); mf++) {
@@ -1352,14 +1540,12 @@ class OutsourcingCrossExchangeOperator implements Move {
 							ArrayList<Integer> outsourceSegment = new ArrayList<Integer>(out.subList(of, of + oLen));
 							for (boolean reverse : oLen == 1 ? new boolean[] { false }
 									: new boolean[] { false, true }) {
-								ArrayList<Integer> insertSegment = oriented(outsourceSegment, reverse);
-								ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
-								newSeq.subList(mf, mf + mLen).clear();
-								newSeq.addAll(mf, insertSegment);
-								if (!isCmaxFeasible(newSeq)) {
+								OutsourcingMoveEvaluator.SegmentProfile profile = cache.get(of, oLen, reverse);
+								if (!OutsourcingMoveEvaluator.isReplaceCmaxFeasible(s, m, mf, mLen, profile)) {
 									continue;
 								}
-								double newMachineCost = Move.testSequence(data, newSeq, s);
+								double newMachineCost = OutsourcingMoveEvaluator.evaluateReplaceMachineCost(s, m, mf,
+										mLen, profile);
 								double delta = newMachineCost - s.cost[m]
 										+ s.evaluateOutsourcingDelta(outsourceSegment, machineSegment);
 								if (Utility.compareLt(delta, 0)) {
@@ -1400,17 +1586,6 @@ class OutsourcingCrossExchangeOperator implements Move {
 			}
 		}
 		return true;
-	}
-
-	private boolean isCmaxFeasible(List<Integer> sequence) {
-		if (sequence.isEmpty()) {
-			return true;
-		}
-		double totalTime = data.s[0][sequence.get(0)] + data.p[sequence.get(0)];
-		for (int i = 1; i < sequence.size(); i++) {
-			totalTime += data.s[sequence.get(i - 1)][sequence.get(i)] + data.p[sequence.get(i)];
-		}
-		return !Utility.compareGt(totalTime, data.CmaxH);
 	}
 
 	private ArrayList<Integer> oriented(List<Integer> segment, boolean reverse) {

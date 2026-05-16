@@ -19,11 +19,14 @@ public class Data {
 	public double[] p, d_e, d_l, w_e, w_t, r; // arrays length n
 	// r先不管，感觉可能某些地方会不兼容
 	public double[][] s;// sequence dependent set up
+	public double[][] setupCostAdvantage;// B_ij：删除 j 后可能获得的 setup-cost advantage，供粗窗和后续 pricing 复用
 	public double[][] setupCost;// sequence dependent setup cost，和 s[i][j] 使用同一条弧 i->j
 	public double min_s[];// 每个任务的最小setup
 	public double[] outsourcingCost;// 每个任务的 baseline outsourcing cost；默认 big_M 表示暂不收缩预处理粗硬窗
 	public double[] maxSetupCostAdvantage;// 预处理粗硬窗使用的 max_i B_ij 上界
 	public double[] hardWindowStart, hardWindowEnd;// 每个任务预处理后的粗 completion 硬窗
+	public boolean[] degenerateHardWindow;// 预处理粗窗是否退化为内部单点
+	public boolean[] outsourceOnlyByPreprocess;// 外包成本为 0 且粗窗退化时，后续可直接按外包候选处理
 	public PiecewiseLinearFunction[] penaltyFunction;
 	public double CmaxH = 1e6;// 问题下的全局上界，用于启发式，设置不能过紧，否则可能某些差解搜不到就跳不出去
 	public double CmaxE = 1e6;// 问题下的全局上界，用于精确，越紧越好
@@ -53,12 +56,15 @@ public class Data {
 		this.w_t = new double[n + 1];
 		this.s = new double[n + 1][n + 1];// 如果存在释放时间，setup可以发生在释放时间之前
 		this.setupCost = new double[n + 1][n + 1];// 旧数据没有 SETUP_COST 块时默认全 0，保持兼容
+		this.setupCostAdvantage = new double[n + 1][n + 1];
 		this.min_s = new double[n + 1];
 		this.r = new double[n + 1];
 		this.outsourcingCost = new double[n + 1];
 		this.maxSetupCostAdvantage = new double[n + 1];
 		this.hardWindowStart = new double[n + 1];
 		this.hardWindowEnd = new double[n + 1];
+		this.degenerateHardWindow = new boolean[n + 1];
+		this.outsourceOnlyByPreprocess = new boolean[n + 1];
 		Arrays.fill(this.outsourcingCost, Utility.big_M);
 		this.outsourcingCost[0] = 0;
 		debug_set();
@@ -296,19 +302,28 @@ public class Data {
 		if (maxSetupCostAdvantage == null || maxSetupCostAdvantage.length != n + 1) {
 			maxSetupCostAdvantage = new double[n + 1];
 		}
+		if (degenerateHardWindow == null || degenerateHardWindow.length != n + 1) {
+			degenerateHardWindow = new boolean[n + 1];
+			outsourceOnlyByPreprocess = new boolean[n + 1];
+		}
+		precomputeSetupCostAdvantages();
 		hardWindowStart[0] = 0;
 		hardWindowEnd[0] = CmaxH;
 		for (int j = 1; j <= n; j++) {
-			maxSetupCostAdvantage[j] = computeMaxSetupCostAdvantage(j);
 			double baselineOutsourcingCost = outsourcingCost == null ? Utility.big_M : outsourcingCost[j];
 			double gamma = maxSetupCostAdvantage[j] + Math.max(0, baselineOutsourcingCost);
 			double left = Utility.compareGt(w_e[j], 0) ? d_e[j] - gamma / w_e[j] : 0;
 			double right = Utility.compareGt(w_t[j], 0) ? d_l[j] + gamma / w_t[j] : CmaxH;
 			left = Math.max(0, left);
 			right = Math.min(CmaxH, right);
-			// 2026-05-16: 预处理层不制造零长度硬窗。
-			// 当前分段函数结构不适合让内部单点继续参与 add/merge；若粗窗退化为单点，保守放回全域。
+			degenerateHardWindow[j] = false;
+			outsourceOnlyByPreprocess[j] = false;
+			// 2026-05-16: 预处理层不把零长度硬窗写进 penaltyFunction。
+			// 这种单点通常意味着只有在 d 点内部加工才不劣于外包；若 b_j=0，则后续外包模块可直接跳过内部加工。
+			// 当前启发式还没有外包集合，先只记录标记并保守放回全域，避免内部单点破坏 add/merge。
 			if (!Utility.compareLt(left, right)) {
+				degenerateHardWindow[j] = true;
+				outsourceOnlyByPreprocess[j] = Utility.compareEq(baselineOutsourcingCost, 0);
 				left = 0;
 				right = CmaxH;
 			}
@@ -318,26 +333,39 @@ public class Data {
 	}
 
 	/**
-	 * 论文中 B_ij 表示删除 j 后可能得到的 setup-cost advantage。
-	 * 预处理阶段没有给定前驱 i，因此这里对所有 i 取最大值，得到 job 级保守上界。
+	 * 2026-05-16: 预处理论文中的 B_ij。
+	 * B_ij = max_k [kappa_ik - kappa_ij - kappa_jk]^+，
+	 * 表示从 i 后面删除 j、改接到 k 时最多能节省多少 setup cost。
+	 * 这里先按当前任务点 1..n 扫 k；论文里的终点 n+1 若 setup cost 为 0，只会贡献非正项，不影响 max(.,0)。
+	 * 后续 pricing 扩展 i -> j 时可以直接使用 setupCostAdvantage[i][j]，不用每次扩展再扫 k。
 	 */
-	private double computeMaxSetupCostAdvantage(int job) {
-		double maxAdvantage = 0;
+	public void precomputeSetupCostAdvantages() {
+		if (setupCostAdvantage == null || setupCostAdvantage.length != n + 1) {
+			setupCostAdvantage = new double[n + 1][n + 1];
+		}
+		Arrays.fill(maxSetupCostAdvantage, 0);
 		for (int i = 0; i <= n; i++) {
-			if (i == job) {
-				continue;
-			}
-			for (int k = 1; k <= n; k++) {
-				if (k == i || k == job) {
+			Arrays.fill(setupCostAdvantage[i], 0);
+			for (int j = 1; j <= n; j++) {
+				if (i == j) {
 					continue;
 				}
-				double advantage = setupCost[i][k] - setupCost[i][job] - setupCost[job][k];
-				if (Utility.compareGt(advantage, maxAdvantage)) {
-					maxAdvantage = advantage;
+				double best = 0;
+				for (int k = 1; k <= n; k++) {
+					if (k == i || k == j) {
+						continue;
+					}
+					double advantage = setupCost[i][k] - setupCost[i][j] - setupCost[j][k];
+					if (Utility.compareGt(advantage, best)) {
+						best = advantage;
+					}
+				}
+				setupCostAdvantage[i][j] = best;
+				if (Utility.compareGt(best, maxSetupCostAdvantage[j])) {
+					maxSetupCostAdvantage[j] = best;
 				}
 			}
 		}
-		return maxAdvantage;
 	}
 
 	public void load_dw_data(boolean setup, BufferedReader reader) throws IOException {
@@ -467,6 +495,10 @@ public class Data {
 
 	public double getSetupCost(int i, int j) {
 		return this.setupCost[i][j];
+	}
+
+	public double getSetupCostAdvantage(int i, int j) {
+		return this.setupCostAdvantage[i][j];
 	}
 
 	public double getProcessT(int i) {

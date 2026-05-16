@@ -304,8 +304,16 @@ public class Data {
 			double gamma = maxSetupCostAdvantage[j] + Math.max(0, baselineOutsourcingCost);
 			double left = Utility.compareGt(w_e[j], 0) ? d_e[j] - gamma / w_e[j] : 0;
 			double right = Utility.compareGt(w_t[j], 0) ? d_l[j] + gamma / w_t[j] : CmaxH;
-			hardWindowStart[j] = Math.max(0, left);
-			hardWindowEnd[j] = Math.min(CmaxH, right);
+			left = Math.max(0, left);
+			right = Math.min(CmaxH, right);
+			// 2026-05-16: 预处理层不制造零长度硬窗。
+			// 当前分段函数结构不适合让内部单点继续参与 add/merge；若粗窗退化为单点，保守放回全域。
+			if (!Utility.compareLt(left, right)) {
+				left = 0;
+				right = CmaxH;
+			}
+			hardWindowStart[j] = left;
+			hardWindowEnd[j] = right;
 		}
 	}
 
@@ -381,14 +389,18 @@ public class Data {
 			}
 			line = nextNonEmptyLine(reader);
 		}
-		if (line == null) {
-			return;
-		}
-		if (!"SETUP_COST".equalsIgnoreCase(line.trim())) {
-			throw new IOException("Unknown optional block after SETUP: " + line);
-		}
-		for (int i = 0; i <= n; i++) {
-			fillSetupCostRow(i, splitTokens(reader.readLine()));
+		while (line != null) {
+			String blockName = line.trim();
+			if ("SETUP_COST".equalsIgnoreCase(blockName)) {
+				for (int i = 0; i <= n; i++) {
+					fillSetupCostRow(i, splitTokens(reader.readLine()));
+				}
+			} else if ("OUTSOURCING_COST".equalsIgnoreCase(blockName)) {
+				fillOutsourcingCost(splitTokens(reader.readLine()));
+			} else {
+				throw new IOException("Unknown optional block after SETUP: " + line);
+			}
+			line = nextNonEmptyLine(reader);
 		}
 	}
 
@@ -401,6 +413,20 @@ public class Data {
 	private void fillSetupCostRow(int row, String[] tokens) {
 		for (int j = 0; j <= n; j++) {
 			setupCost[row][j] = Double.parseDouble(tokens[j]);
+		}
+	}
+
+	private void fillOutsourcingCost(String[] tokens) throws IOException {
+		if (tokens.length == n) {
+			for (int j = 1; j <= n; j++) {
+				outsourcingCost[j] = Double.parseDouble(tokens[j - 1]);
+			}
+		} else if (tokens.length == n + 1) {
+			for (int j = 0; j <= n; j++) {
+				outsourcingCost[j] = Double.parseDouble(tokens[j]);
+			}
+		} else {
+			throw new IOException("Invalid OUTSOURCING_COST vector length: " + tokens.length);
 		}
 	}
 

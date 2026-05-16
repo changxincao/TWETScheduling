@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import Basic.Data;
@@ -158,6 +159,9 @@ public interface Move {
 		TwoOptStarOperator.noImprovedSeqPair.clear();
 		PathInsertOperator.noImprovedSeqPair.clear();
 		CrossExchangeOperator.noImprovedSeqPair.clear();
+		OutsourcingPathInsertOperator.noImprovedMachineToOutsource.clear();
+		OutsourcingPathInsertOperator.noImprovedOutsourceToMachine.clear();
+		OutsourcingCrossExchangeOperator.noImprovedSeqAndOutsource.clear();
 		
 	}
 }
@@ -1305,6 +1309,38 @@ class OutsourcingMoveEvaluator {
 }
 
 /**
+ * 2026-05-16: 外包相关算子的 no-improved 状态。
+ * 外包成本只依赖外包集合的 baseline，但当前外包候选按 outsourcedJobs 的连续片段生成，
+ * 因此 key 必须保存外包 list 的当前顺序，而不能只保存集合。
+ */
+class OutsourcingStateKey {
+	private final ArrayList<Integer> machineSeq;
+	private final ArrayList<Integer> outsourcedList;
+
+	OutsourcingStateKey(List<Integer> machineSeq, List<Integer> outsourcedList) {
+		this.machineSeq = new ArrayList<Integer>(machineSeq);
+		this.outsourcedList = new ArrayList<Integer>(outsourcedList);
+	}
+
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj) {
+			return true;
+		}
+		if (!(obj instanceof OutsourcingStateKey)) {
+			return false;
+		}
+		OutsourcingStateKey other = (OutsourcingStateKey) obj;
+		return machineSeq.equals(other.machineSeq) && outsourcedList.equals(other.outsourcedList);
+	}
+
+	@Override
+	public int hashCode() {
+		return Objects.hash(machineSeq, outsourcedList);
+	}
+}
+
+/**
  * 2026-05-16: 外包版 path-insert。
  * 外包 list 只表示当前外包集合的存储顺序，不表示加工顺序；外包成本由 G(B(O)) 决定。
  * 外包片段插回真实机器时，会按外包 list 的当前顺序或反序构造片段函数，
@@ -1347,6 +1383,8 @@ class OutsourcingPathInsertOperator implements Move {
 	public Solution s;
 	public Data data;
 	private ArrayList<OptCost> savedOperations = new ArrayList<OptCost>();
+	static HashSet<OutsourcingStateKey> noImprovedMachineToOutsource = new HashSet<OutsourcingStateKey>();
+	static HashSet<OutsourcingStateKey> noImprovedOutsourceToMachine = new HashSet<OutsourcingStateKey>();
 
 	public OutsourcingPathInsertOperator(Solution s) {
 		this.s = s;
@@ -1363,6 +1401,11 @@ class OutsourcingPathInsertOperator implements Move {
 	private void searchMachineToOutsource() {
 		for (int m = 0; m < data.m; m++) {
 			ArrayList<Integer> seq = s.sequences.get(m);
+			OutsourcingStateKey key = new OutsourcingStateKey(seq, s.outsourcedJobs);
+			if (noImprovedMachineToOutsource.contains(key)) {
+				continue;
+			}
+			boolean improved = false;
 			for (int from = 0; from < seq.size(); from++) {
 				int maxLen = Math.min(LSEG, seq.size() - from);
 				for (int len = 1; len <= maxLen; len++) {
@@ -1377,22 +1420,34 @@ class OutsourcingPathInsertOperator implements Move {
 					double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(null, segment);
 					if (Utility.compareLt(delta, 0)) {
 						savedOperations.add(new OptCost(true, m, from, -1, len, -1, false, segment, delta));
+						improved = true;
 					}
 				}
+			}
+			if (!improved) {
+				noImprovedMachineToOutsource.add(key);
 			}
 		}
 	}
 
 	private void searchOutsourceToMachine(OutsourcingMoveEvaluator.OutsourcedSegmentCache cache) {
 		ArrayList<Integer> out = s.outsourcedJobs;
-		for (int from = 0; from < out.size(); from++) {
-			int maxLen = Math.min(LSEG, out.size() - from);
-			for (int len = 1; len <= maxLen; len++) {
-				ArrayList<Integer> segment = new ArrayList<Integer>(out.subList(from, from + len));
-				for (boolean reverse : len == 1 ? new boolean[] { false } : new boolean[] { false, true }) {
-					OutsourcingMoveEvaluator.SegmentProfile profile = cache.get(from, len, reverse);
-					for (int m = 0; m < data.m; m++) {
-						ArrayList<Integer> seq = s.sequences.get(m);
+		if (out.isEmpty()) {
+			return;
+		}
+		for (int m = 0; m < data.m; m++) {
+			ArrayList<Integer> seq = s.sequences.get(m);
+			OutsourcingStateKey key = new OutsourcingStateKey(seq, out);
+			if (noImprovedOutsourceToMachine.contains(key)) {
+				continue;
+			}
+			boolean improved = false;
+			for (int from = 0; from < out.size(); from++) {
+				int maxLen = Math.min(LSEG, out.size() - from);
+				for (int len = 1; len <= maxLen; len++) {
+					ArrayList<Integer> segment = new ArrayList<Integer>(out.subList(from, from + len));
+					for (boolean reverse : len == 1 ? new boolean[] { false } : new boolean[] { false, true }) {
+						OutsourcingMoveEvaluator.SegmentProfile profile = cache.get(from, len, reverse);
 						for (int pos = -1; pos < seq.size(); pos++) {
 							if (!OutsourcingMoveEvaluator.isInsertCmaxFeasible(s, m, pos, profile)) {
 								continue;
@@ -1401,10 +1456,14 @@ class OutsourcingPathInsertOperator implements Move {
 							double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(segment, null);
 							if (Utility.compareLt(delta, 0)) {
 								savedOperations.add(new OptCost(false, m, -1, from, len, pos, reverse, segment, delta));
+								improved = true;
 							}
 						}
 					}
 				}
+			}
+			if (!improved) {
+				noImprovedOutsourceToMachine.add(key);
 			}
 		}
 	}
@@ -1514,6 +1573,7 @@ class OutsourcingCrossExchangeOperator implements Move {
 	public Solution s;
 	public Data data;
 	private ArrayList<OptCost> savedOperations = new ArrayList<OptCost>();
+	static HashSet<OutsourcingStateKey> noImprovedSeqAndOutsource = new HashSet<OutsourcingStateKey>();
 
 	public OutsourcingCrossExchangeOperator(Solution s) {
 		this.s = s;
@@ -1531,6 +1591,14 @@ class OutsourcingCrossExchangeOperator implements Move {
 				LSEG);
 		for (int m = 0; m < data.m; m++) {
 			ArrayList<Integer> seq = s.sequences.get(m);
+			if (seq.isEmpty()) {
+				continue;
+			}
+			OutsourcingStateKey key = new OutsourcingStateKey(seq, out);
+			if (noImprovedSeqAndOutsource.contains(key)) {
+				continue;
+			}
+			boolean improved = false;
 			for (int mf = 0; mf < seq.size(); mf++) {
 				int maxMLen = Math.min(LSEG, seq.size() - mf);
 				for (int mLen = 1; mLen <= maxMLen; mLen++) {
@@ -1555,11 +1623,15 @@ class OutsourcingCrossExchangeOperator implements Move {
 								if (Utility.compareLt(delta, 0)) {
 									savedOperations.add(new OptCost(m, mf, mLen, of, oLen, reverse, machineSegment,
 											outsourceSegment, delta));
+									improved = true;
 								}
 							}
 						}
 					}
 				}
+			}
+			if (!improved) {
+				noImprovedSeqAndOutsource.add(key);
 			}
 		}
 	}

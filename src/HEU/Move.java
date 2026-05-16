@@ -1312,6 +1312,8 @@ class OutsourcingMoveEvaluator {
  * 2026-05-16: 外包相关算子的 no-improved 状态。
  * 外包成本只依赖外包集合的 baseline，但当前外包候选按 outsourcedJobs 的连续片段生成，
  * 因此 key 必须保存外包 list 的当前顺序，而不能只保存集合。
+ * 这里没有直接在各算子里手写 List.of(List.copyOf(seq), List.copyOf(out))，
+ * 是为了把“有序 key + 防止原 list 后续变动”的约束集中封装，避免漏 copy 导致 HashSet 缓存失效。
  */
 class OutsourcingStateKey {
 	private final ArrayList<Integer> machineSeq;

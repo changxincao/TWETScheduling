@@ -1097,6 +1097,138 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 
 }
 
+/**
+ * 2026-05-16: 外包与真实机器之间的单任务 relocate。
+ * <p>
+ * 该算子借用 path-insert 的思想，但外包侧不是普通机器序列：
+ * 外包 list 的顺序只用于存储和生成候选，不参与 setup/time 函数递推。
+ * 因此这里先只做语义最清楚的两个方向：
+ * 1) 真实机器上的一个任务转入外包；
+ * 2) 外包任务插入某台真实机器的某个位置。
+ */
+class OutsourcingRelocateOperator implements Move {
+
+	static class OptCost implements Comparable<OptCost> {
+		boolean toOutsource;
+		int machine;
+		int position;
+		int job;
+		double deltaCost;
+
+		OptCost(boolean toOutsource, int machine, int position, int job, double deltaCost) {
+			this.toOutsource = toOutsource;
+			this.machine = machine;
+			this.position = position;
+			this.job = job;
+			this.deltaCost = deltaCost;
+		}
+
+		@Override
+		public int compareTo(OptCost o) {
+			return Double.compare(this.deltaCost, o.deltaCost);
+		}
+	}
+
+	public Solution s;
+	public Data data;
+	private ArrayList<OptCost> savedOperations = new ArrayList<OptCost>();
+
+	public OutsourcingRelocateOperator(Solution s) {
+		this.s = s;
+		this.data = s.data;
+	}
+
+	private double evaluateRemoveFromMachine(int m, int pos) {
+		ArrayList<Integer> seq = s.sequences.get(m);
+		if (seq.size() <= 1) {
+			return Utility.big_M;
+		}
+		PiecewiseLinearFunction f = pos == 0 ? data.penaltyFunction[0] : s.fFunctions.get(m).get(pos - 1);
+		PiecewiseLinearFunction b = pos == seq.size() - 1 ? data.penaltyFunction[0] : s.bFunctions.get(m).get(pos + 1);
+		int bridgeFrom = pos == 0 ? 0 : seq.get(pos - 1);
+		int bridgeTo = pos == seq.size() - 1 ? 0 : seq.get(pos + 1);
+		double shift = pos == seq.size() - 1 ? 0 : data.s[bridgeFrom][bridgeTo] + data.p[bridgeTo];
+		double newCost = s.merge2Segments(f, b, shift,
+				pos == seq.size() - 1 ? 0.0 : data.getSetupCost(bridgeFrom, bridgeTo));
+		return newCost - s.cost[m];
+	}
+
+	@Override
+	public void searchBest() {
+		savedOperations.clear();
+
+		// 机器 -> 外包：删除真实机器上的一个任务，增加该任务外包成本。
+		for (int m = 0; m < data.m; m++) {
+			ArrayList<Integer> seq = s.sequences.get(m);
+			for (int pos = 0; pos < seq.size(); pos++) {
+				int job = seq.get(pos);
+				if (!s.canOutsource(job)) {
+					continue;
+				}
+				double delta = evaluateRemoveFromMachine(m, pos) + s.getOutsourcingCost(job);
+				if (Utility.compareLt(delta, 0)) {
+					savedOperations.add(new OptCost(true, m, pos, job, delta));
+				}
+			}
+		}
+
+		// 外包 -> 机器：把外包任务插回真实机器的某个位置。
+		for (int job : s.outsourcedJobs) {
+			for (int m = 0; m < data.m; m++) {
+				ArrayList<Integer> seq = s.sequences.get(m);
+				for (int pos = -1; pos < seq.size(); pos++) {
+					double delta = InsertionOperator.evaluateInsertionCost(s, m, pos, job) - s.getOutsourcingCost(job);
+					if (Utility.compareLt(delta, 0)) {
+						savedOperations.add(new OptCost(false, m, pos, job, delta));
+					}
+				}
+			}
+		}
+	}
+
+	@Override
+	public boolean commit() {
+		if (savedOperations.isEmpty()) {
+			return false;
+		}
+		Collections.sort(savedOperations);
+		boolean[] coveredMachines = new boolean[data.m];
+		HashSet<Integer> usedJobs = new HashSet<Integer>();
+		boolean improved = false;
+		for (OptCost op : savedOperations) {
+			if (usedJobs.contains(op.job) || coveredMachines[op.machine]) {
+				continue;
+			}
+			if (op.toOutsource) {
+				ArrayList<Integer> seq = s.sequences.get(op.machine);
+				int pos = seq.indexOf(op.job);
+				if (pos < 0 || seq.size() <= 1) {
+					continue;
+				}
+				curRemoveFromMachine(op.machine, pos);
+				s.addOutsourcedJob(op.job);
+			} else {
+				if (!s.outsourcedJobs.contains(op.job)) {
+					continue;
+				}
+				s.removeOutsourcedJob(op.job);
+				s.insertJob(op.machine, op.position, op.job);
+			}
+			coveredMachines[op.machine] = true;
+			usedJobs.add(op.job);
+			improved = true;
+		}
+		return improved;
+	}
+
+	private void curRemoveFromMachine(int m, int pos) {
+		s.curCost -= s.cost[m];
+		s.sequences.get(m).remove(pos);
+		s.calCost(m);
+		s.curCost += s.cost[m];
+	}
+}
+
 class CrossExchangeOperator implements Move {
 
 	private static int LSEG = 20; // 段长与插入距离限制

@@ -157,6 +157,12 @@ interface InsertionOperator {
         return s.merge2Segments(f1, b, shift2,
                 pos == seq.size() - 1 ? 0.0 : s.data.getSetupCost(job, bridgeTo2))-s.cost[m];
     }
+
+    public static double evaluateOutsourcingCost(Solution s, int job) {
+    	// 2026-05-16: ALNS repair 把外包当作额外插入候选；
+    	// removed 集合里的任务放入外包时，增量就是该任务的外包固定成本。
+    	return s.getOutsourcingCost(job);
+    }
 }
 
 // ===== Removal 算子实例 =====
@@ -362,6 +368,7 @@ class GreedyInsertion implements InsertionOperator {
         for (Integer job : removed) {
             double bestDelta = Double.POSITIVE_INFINITY;
             int bestM = -1, bestPos = -1;
+            boolean bestOutsource = false;
             for (int m = 0; m < s.data.m; m++) {
                 List<Integer> seq = s.sequences.get(m);
                 for (int pos = -1; pos < seq.size(); pos++) {
@@ -373,7 +380,15 @@ class GreedyInsertion implements InsertionOperator {
                     }
                 }
             }
-            s.insertJob(bestM, bestPos, job);
+            double outsourceDelta = InsertionOperator.evaluateOutsourcingCost(s, job);
+            if (Utility.compareLt(outsourceDelta, bestDelta)) {
+            	bestOutsource = true;
+            }
+            if (bestOutsource) {
+            	s.addOutsourcedJob(job);
+            } else {
+            	s.insertJob(bestM, bestPos, job);
+            }
 //            System.out.println("插入任务："+job+" "+bestM+" "+bestPos+" "+bestDelta);
         }
     }
@@ -398,9 +413,13 @@ class RegretKInsertion implements InsertionOperator {
                 for (int m = 0; m < s.data.m; m++) {
                     for (int pos=-1; pos<s.sequences.get(m).size(); pos++) {
                         double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
-                      
+                       
                         locs.add(new double[]{m,pos,d});
                     }
+                }
+                double outsourceDelta = InsertionOperator.evaluateOutsourcingCost(s, job);
+                if (!Utility.isBigMValue(outsourceDelta)) {
+                	locs.add(new double[]{-1,-1,outsourceDelta});
                 }
                 // 取 k 最小
                 Collections.sort(locs,(o1,o2)->{
@@ -425,7 +444,11 @@ class RegretKInsertion implements InsertionOperator {
             }
 //            System.out.println(bestJob+" "+bestM+" "+bestPos);
             // 对 bestJob 做贪心插入
-            s.insertJob(bestM, bestPos, bestJob);
+            if (bestM == -1) {
+            	s.addOutsourcedJob(bestJob);
+            } else {
+            	s.insertJob(bestM, bestPos, bestJob);
+            }
             removed.remove(Integer.valueOf(bestJob));
         }
     }
@@ -444,9 +467,17 @@ class RandomizedInsertion implements InsertionOperator {
                     double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
                     opts.add(new InsertionOption(m,pos,d));
                 }
+            double outsourceDelta = InsertionOperator.evaluateOutsourcingCost(s, job);
+            if (!Utility.isBigMValue(outsourceDelta)) {
+            	opts.add(new InsertionOption(-1, -1, outsourceDelta));
+            }
             Collections.sort(opts, Comparator.comparingDouble(o->o.delta));
             InsertionOption pick = opts.get(EngineALNS.rng.nextInt(Math.min(r,opts.size())));
-            s.insertJob(pick.machine,pick.position, job);
+            if (pick.machine == -1) {
+            	s.addOutsourcedJob(job);
+            } else {
+            	s.insertJob(pick.machine,pick.position, job);
+            }
         }
     }
 }

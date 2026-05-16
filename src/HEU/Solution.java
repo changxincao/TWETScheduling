@@ -23,12 +23,14 @@ import ilog.concert.IloException;
 public class Solution {
 	Data data;
 	ArrayList<ArrayList<Integer>> sequences;// 每个机器上的任务序列
+	ArrayList<Integer> outsourcedJobs;// 2026-05-16: 外包任务集合。顺序只用于存储和候选生成，不表示外包加工顺序。
 	ArrayList<ArrayList<Double>> completions;// 最优解下，每个机器上的任务完工时间
 	// 暂时没做更新
 	ArrayList<ArrayList<PiecewiseLinearFunction>> fFunctions;// 每个机器上每个任务惩罚函数,正向传播
 	ArrayList<ArrayList<PiecewiseLinearFunction>> bFunctions;// 每个机器上每个任务惩罚函数,反向传播
 	public double curCost;
 	double[] cost;// 每个机器上的成本
+	double outsourcingCostTotal;// 2026-05-16: 外包任务的固定成本之和，curCost=机器成本之和+该值。
 	PiecewiseLinearFunction[][][] fFunctions_hg;// normal
 	PiecewiseLinearFunction[][][] bFunctions_hg;// normal
 	PiecewiseLinearFunction[][][] fFunctions_gh;// reverse
@@ -44,6 +46,7 @@ public class Solution {
 		this.data = data;
 		cost = new double[data.m];
 		this.sequences = new ArrayList<ArrayList<Integer>>();
+		this.outsourcedJobs = new ArrayList<Integer>();
 		this.fFunctions = new ArrayList<ArrayList<PiecewiseLinearFunction>>();
 		this.bFunctions = new ArrayList<ArrayList<PiecewiseLinearFunction>>();
 		for (int m = 0; m < data.m; m++) {
@@ -57,6 +60,7 @@ public class Solution {
 	public Solution copy() {
 		Solution solution = new Solution(this.data);
 		solution.sequences.clear();
+		solution.outsourcedJobs = new ArrayList<Integer>(this.outsourcedJobs);
 		solution.fFunctions.clear();
 		solution.bFunctions.clear();
 		for (int m = 0; m < data.m; m++) {
@@ -67,6 +71,7 @@ public class Solution {
 		}
 		solution.curCost = this.curCost;
 		solution.cost = Arrays.copyOf(this.cost, data.m);// 每个机器上的成本
+		solution.outsourcingCostTotal = this.outsourcingCostTotal;
 		solution.cumDurationNormal = new double[data.m][];
 		solution.cumDurationReverse = new double[data.m][];
 
@@ -133,6 +138,8 @@ public class Solution {
 
 	public void setSequence(ArrayList<ArrayList<Integer>> sequences) {
 		this.sequences = sequences;
+		this.outsourcedJobs.clear();
+		this.outsourcingCostTotal = 0;
 	}
 
 	/**
@@ -161,6 +168,36 @@ public class Solution {
 	 */
 	public double[] getMachineCostsCopy() {
 		return cost == null ? new double[0] : Arrays.copyOf(cost, cost.length);
+	}
+
+	public ArrayList<Integer> getOutsourcedJobsCopy() {
+		return new ArrayList<Integer>(outsourcedJobs);
+	}
+
+	public boolean canOutsource(int job) {
+		return job > 0 && job < data.outsourcingCost.length && !Utility.isBigMValue(data.outsourcingCost[job]);
+	}
+
+	public double getOutsourcingCost(int job) {
+		return canOutsource(job) ? data.outsourcingCost[job] : Utility.big_M;
+	}
+
+	public void addOutsourcedJob(int job) {
+		// 2026-05-16: 外包没有序列相关成本，只维护集合和固定外包成本。
+		outsourcedJobs.add(job);
+		double delta = getOutsourcingCost(job);
+		outsourcingCostTotal += delta;
+		curCost += delta;
+	}
+
+	public boolean removeOutsourcedJob(int job) {
+		boolean removed = outsourcedJobs.remove(Integer.valueOf(job));
+		if (removed) {
+			double delta = getOutsourcingCost(job);
+			outsourcingCostTotal -= delta;
+			curCost -= delta;
+		}
+		return removed;
 	}
 
 	private PiecewiseLinearFunction addSetupCost(PiecewiseLinearFunction function, int fromJob, int toJob) {
@@ -652,6 +689,7 @@ public class Solution {
 		for (int m1 = 0; m1 < data.m; m1++) {
 			totalCost += cost[m1];
 		}
+		totalCost += outsourcingCostTotal;
 		if (Utility.compareGe(totalCost, Utility.curUpperBound)) {
 			this.curCost = Utility.curUpperBound;// 此时和各cost[m]割裂
 		} else {
@@ -1029,6 +1067,7 @@ public class Solution {
 		for (int m = 0; m < data.m; m++) {
 			totalCost += calCost(m);
 		}
+		totalCost += outsourcingCostTotal;
 
 		return totalCost;
 	}
@@ -1057,6 +1096,9 @@ public class Solution {
 				curCost += cost[m];
 			}
 		}
+		for (Integer job : toRemove) {
+			removeOutsourcedJob(job);
+		}
 
 	}
 
@@ -1080,6 +1122,10 @@ public class Solution {
 			jobs.add(i);
 		}
 		this.sequences.clear();
+		this.outsourcedJobs.clear();
+		this.outsourcingCostTotal = 0;
+		this.curCost = 0;
+		Arrays.fill(this.cost, 0);
 		Collections.shuffle(jobs, Utility.rng);
 		for (int m = 0; m < data.m; m++) {
 			this.sequences.add(new ArrayList<Integer>());
@@ -1096,6 +1142,15 @@ public class Solution {
 				if (Utility.compareLe(newCumTimeM, data.CmaxH)) {
 					candMachines.add(m);
 				}
+			}
+			if (candMachines.isEmpty()) {
+				if (canOutsource(jid)) {
+					// 2026-05-16: 初始构造仍优先真实机器；只有没有可行机器时才用外包兜底。
+					// 若外包成本为 big_M，说明该任务当前不允许外包，应显式暴露初始化不可行。
+					addOutsourcedJob(jid);
+					continue;
+				}
+				throw new IllegalStateException("No feasible machine and outsourcing is disabled for job " + jid);
 			}
 			int selectedM = candMachines.get(Utility.rng.nextInt(candMachines.size()));
 			cumTimesM[selectedM] = cumTimesM[selectedM] + data.s[lastJobM[selectedM]][jid] + data.p[jid];

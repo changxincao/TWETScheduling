@@ -25,8 +25,6 @@ public class Data {
 	public double[] outsourcingCost;// 每个任务的 baseline outsourcing cost；默认 big_M 表示暂不收缩预处理粗硬窗
 	public double[] maxSetupCostAdvantage;// 预处理粗硬窗使用的 max_i B_ij 上界
 	public double[] hardWindowStart, hardWindowEnd;// 每个任务预处理后的粗 completion 硬窗
-	public boolean[] degenerateHardWindow;// 预处理粗窗是否退化为内部单点
-	public boolean[] outsourceOnlyByPreprocess;// 外包成本为 0 且粗窗退化时，后续可直接按外包候选处理
 	public PiecewiseLinearFunction[] penaltyFunction;
 	public double CmaxH = 1e6;// 问题下的全局上界，用于启发式，设置不能过紧，否则可能某些差解搜不到就跳不出去
 	public double CmaxE = 1e6;// 问题下的全局上界，用于精确，越紧越好
@@ -63,8 +61,6 @@ public class Data {
 		this.maxSetupCostAdvantage = new double[n + 1];
 		this.hardWindowStart = new double[n + 1];
 		this.hardWindowEnd = new double[n + 1];
-		this.degenerateHardWindow = new boolean[n + 1];
-		this.outsourceOnlyByPreprocess = new boolean[n + 1];
 		Arrays.fill(this.outsourcingCost, Utility.big_M);
 		this.outsourcingCost[0] = 0;
 		debug_set();
@@ -302,10 +298,6 @@ public class Data {
 		if (maxSetupCostAdvantage == null || maxSetupCostAdvantage.length != n + 1) {
 			maxSetupCostAdvantage = new double[n + 1];
 		}
-		if (degenerateHardWindow == null || degenerateHardWindow.length != n + 1) {
-			degenerateHardWindow = new boolean[n + 1];
-			outsourceOnlyByPreprocess = new boolean[n + 1];
-		}
 		precomputeSetupCostAdvantages();
 		hardWindowStart[0] = 0;
 		hardWindowEnd[0] = CmaxH;
@@ -316,17 +308,6 @@ public class Data {
 			double right = Utility.compareGt(w_t[j], 0) ? d_l[j] + gamma / w_t[j] : CmaxH;
 			left = Math.max(0, left);
 			right = Math.min(CmaxH, right);
-			degenerateHardWindow[j] = false;
-			outsourceOnlyByPreprocess[j] = false;
-			// 2026-05-16: 预处理层不把零长度硬窗写进 penaltyFunction。
-			// 这种单点通常意味着只有在 d 点内部加工才不劣于外包；若 b_j=0，则后续外包模块可直接跳过内部加工。
-			// 当前启发式还没有外包集合，先只记录标记并保守放回全域，避免内部单点破坏 add/merge。
-			if (!Utility.compareLt(left, right)) {
-				degenerateHardWindow[j] = true;
-				outsourceOnlyByPreprocess[j] = Utility.compareEq(baselineOutsourcingCost, 0);
-				left = 0;
-				right = CmaxH;
-			}
 			hardWindowStart[j] = left;
 			hardWindowEnd[j] = right;
 		}

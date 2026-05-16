@@ -13,6 +13,8 @@ import Common.Utility.TimerManager;
 
 //假设各段之间区间连续的
 public class PiecewiseLinearFunction {
+	private static final double WINDOW_EPSILON = 0.1;
+
 	/**
 	 * 分段函数集合操作的闭包方向。
 	 * FORWARD 表示按前缀最小值维护 [a,T] 语义；BACKWARD 表示按后缀最小值维护 [0,b] 语义。
@@ -212,6 +214,14 @@ public class PiecewiseLinearFunction {
 		double actualEnd = this.tail.end;
 		double keepStart = Math.max(actualStart, domainStart);
 		double keepEnd = Math.min(actualEnd, domainEnd);
+		if (!Utility.compareLt(keepStart, keepEnd)) {
+			// 2026-05-16: 三参数 setDomain 用于硬窗/定价窗，窗外填 big_M，不物理删除定义域。
+			// 若窗口退化成单点，不把内部单点作为特殊段传播，而是扩成一个很小区间。
+			// 当前算例时间基本为整数，0.1 的扰动只用于统一函数结构；普通两参数 setDomain 不做这个处理。
+			double center = 0.5 * (keepStart + keepEnd);
+			keepStart = Math.max(actualStart, center - WINDOW_EPSILON);
+			keepEnd = Math.min(actualEnd, center + WINDOW_EPSILON);
+		}
 
 		if (!Utility.compareLt(keepStart, keepEnd)) {
 			// 窗口与当前函数没有正长度交集时，整段都视作不可行，但仍保留右端到 T。

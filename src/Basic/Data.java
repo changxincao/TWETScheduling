@@ -23,6 +23,7 @@ public class Data {
 	public double[][] setupCost;// sequence dependent setup cost，和 s[i][j] 使用同一条弧 i->j
 	public double min_s[];// 每个任务的最小setup
 	public double[] outsourcingCost;// 每个任务的 baseline outsourcing cost；默认 big_M 表示暂不收缩预处理粗硬窗
+	public PiecewiseLinearFunction outsourcingCostFunction;// 2026-05-16: 总外包成本函数 G(B(O))，输入为 baseline 总量
 	public double[] maxSetupCostAdvantage;// 预处理粗硬窗使用的 max_i B_ij 上界
 	public double[] hardWindowStart, hardWindowEnd;// 每个任务预处理后的粗 completion 硬窗
 	public PiecewiseLinearFunction[] penaltyFunction;
@@ -72,6 +73,7 @@ public class Data {
 
 		setCmax();
 		setImprovedCmax();
+		ensureOutsourcingCostFunction();
 
 //        Cmax=7700;
 		setPreprocessedHardWindows();
@@ -303,7 +305,9 @@ public class Data {
 		hardWindowEnd[0] = CmaxH;
 		for (int j = 1; j <= n; j++) {
 			double baselineOutsourcingCost = outsourcingCost == null ? Utility.big_M : outsourcingCost[j];
-			double gamma = maxSetupCostAdvantage[j] + Math.max(0, baselineOutsourcingCost);
+			// 2026-05-16: b_j 只是外包 baseline，真正外包成本是 G(B)。
+			// 粗硬窗只需要一个安全上界；单任务外包成本用 G(b_j)-G(0)=G(b_j)。
+			double gamma = maxSetupCostAdvantage[j] + Math.max(0, evaluateOutsourcingCost(baselineOutsourcingCost));
 			double left = Utility.compareGt(w_e[j], 0) ? d_e[j] - gamma / w_e[j] : 0;
 			double right = Utility.compareGt(w_t[j], 0) ? d_l[j] + gamma / w_t[j] : CmaxH;
 			left = Math.max(0, left);
@@ -406,6 +410,8 @@ public class Data {
 				}
 			} else if ("OUTSOURCING_COST".equalsIgnoreCase(blockName)) {
 				fillOutsourcingCost(splitTokens(reader.readLine()));
+			} else if ("OUTSOURCING_TARIFF".equalsIgnoreCase(blockName)) {
+				fillOutsourcingTariff(reader);
 			} else {
 				throw new IOException("Unknown optional block after SETUP: " + line);
 			}
@@ -437,6 +443,57 @@ public class Data {
 		} else {
 			throw new IOException("Invalid OUTSOURCING_COST vector length: " + tokens.length);
 		}
+	}
+
+	private void fillOutsourcingTariff(BufferedReader reader) throws IOException {
+		int segmentCount = Integer.parseInt(nextNonEmptyLine(reader).trim());
+		outsourcingCostFunction = new PiecewiseLinearFunction(0, Utility.big_M);
+		for (int i = 0; i < segmentCount; i++) {
+			String[] tokens = splitTokens(reader.readLine());
+			if (tokens.length != 4) {
+				throw new IOException("Invalid OUTSOURCING_TARIFF row, expected: start end slope intercept");
+			}
+			double start = Double.parseDouble(tokens[0]);
+			double end = Double.parseDouble(tokens[1]);
+			double slope = Double.parseDouble(tokens[2]);
+			double intercept = Double.parseDouble(tokens[3]);
+			outsourcingCostFunction.addSegment(start, end, slope, intercept);
+		}
+	}
+
+	private void ensureOutsourcingCostFunction() {
+		if (outsourcingCostFunction != null) {
+			return;
+		}
+		double maxBaseline = Math.max(1.0, getMaxOutsourcingBaseline());
+		outsourcingCostFunction = new PiecewiseLinearFunction(0, maxBaseline);
+		// 2026-05-16: 没有给定折扣函数时使用 G(q)=q，兼容旧数据和旧逻辑。
+		outsourcingCostFunction.addSegment(0, maxBaseline, 1, 0);
+	}
+
+	public double getMaxOutsourcingBaseline() {
+		double total = 0;
+		if (outsourcingCost == null) {
+			return total;
+		}
+		for (int j = 1; j <= n; j++) {
+			if (!Utility.isBigMValue(outsourcingCost[j])) {
+				total += Math.max(0, outsourcingCost[j]);
+			}
+		}
+		return total;
+	}
+
+	public double evaluateOutsourcingCost(double baselineTotal) {
+		if (Utility.isBigMValue(baselineTotal)) {
+			return Utility.big_M;
+		}
+		ensureOutsourcingCostFunction();
+		double q = Math.max(0, baselineTotal);
+		if (Utility.compareGt(q, outsourcingCostFunction.tail.end)) {
+			return Utility.big_M;
+		}
+		return outsourcingCostFunction.evaluate(q);
 	}
 
 	private String nextNonEmptyLine(BufferedReader reader) throws IOException {

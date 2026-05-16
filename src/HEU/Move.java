@@ -1165,7 +1165,7 @@ class OutsourcingRelocateOperator implements Move {
 				if (!s.canOutsource(job)) {
 					continue;
 				}
-				double delta = evaluateRemoveFromMachine(m, pos) + s.getOutsourcingCost(job);
+				double delta = evaluateRemoveFromMachine(m, pos) + s.evaluateOutsourcingAddDelta(job);
 				if (Utility.compareLt(delta, 0)) {
 					savedOperations.add(new OptCost(true, m, pos, job, delta));
 				}
@@ -1177,7 +1177,8 @@ class OutsourcingRelocateOperator implements Move {
 			for (int m = 0; m < data.m; m++) {
 				ArrayList<Integer> seq = s.sequences.get(m);
 				for (int pos = -1; pos < seq.size(); pos++) {
-					double delta = InsertionOperator.evaluateInsertionCost(s, m, pos, job) - s.getOutsourcingCost(job);
+					double delta = InsertionOperator.evaluateInsertionCost(s, m, pos, job)
+							+ s.evaluateOutsourcingRemoveDelta(job);
 					if (Utility.compareLt(delta, 0)) {
 						savedOperations.add(new OptCost(false, m, pos, job, delta));
 					}
@@ -1192,13 +1193,9 @@ class OutsourcingRelocateOperator implements Move {
 			return false;
 		}
 		Collections.sort(savedOperations);
-		boolean[] coveredMachines = new boolean[data.m];
-		HashSet<Integer> usedJobs = new HashSet<Integer>();
-		boolean improved = false;
 		for (OptCost op : savedOperations) {
-			if (usedJobs.contains(op.job) || coveredMachines[op.machine]) {
-				continue;
-			}
+			// 2026-05-16: 外包成本是凹函数 G(B)，多个外包增删不能直接使用旧 baseline 下的
+			// delta 批量提交。第一版只提交当前最优的一个 relocate，保证增量语义准确。
 			if (op.toOutsource) {
 				ArrayList<Integer> seq = s.sequences.get(op.machine);
 				int pos = seq.indexOf(op.job);
@@ -1214,11 +1211,9 @@ class OutsourcingRelocateOperator implements Move {
 				s.removeOutsourcedJob(op.job);
 				s.insertJob(op.machine, op.position, op.job);
 			}
-			coveredMachines[op.machine] = true;
-			usedJobs.add(op.job);
-			improved = true;
+			return true;
 		}
-		return improved;
+		return false;
 	}
 
 	private void curRemoveFromMachine(int m, int pos) {

@@ -159,9 +159,9 @@ interface InsertionOperator {
     }
 
     public static double evaluateOutsourcingCost(Solution s, int job) {
-    	// 2026-05-16: ALNS repair 把外包当作额外插入候选；
-    	// removed 集合里的任务放入外包时，增量就是该任务的外包固定成本。
-    	return s.getOutsourcingCost(job);
+    	// 2026-05-16: ALNS repair 把外包当作额外插入候选。
+    	// 外包成本为 G(B(O))，这里返回把 job 加入当前外包集合的函数差分。
+    	return s.evaluateOutsourcingAddDelta(job);
     }
 }
 

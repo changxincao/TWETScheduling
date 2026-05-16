@@ -30,7 +30,8 @@ public class Solution {
 	ArrayList<ArrayList<PiecewiseLinearFunction>> bFunctions;// 每个机器上每个任务惩罚函数,反向传播
 	public double curCost;
 	double[] cost;// 每个机器上的成本
-	double outsourcingCostTotal;// 2026-05-16: 外包任务的固定成本之和，curCost=机器成本之和+该值。
+	double outsourcingBaselineTotal;// 2026-05-16: 外包任务 baseline 之和 B(O)，真正成本为 G(B(O))。
+	double outsourcingCostTotal;// 外包集合的总成本 G(B(O))，curCost=机器成本之和+该值。
 	PiecewiseLinearFunction[][][] fFunctions_hg;// normal
 	PiecewiseLinearFunction[][][] bFunctions_hg;// normal
 	PiecewiseLinearFunction[][][] fFunctions_gh;// reverse
@@ -71,6 +72,7 @@ public class Solution {
 		}
 		solution.curCost = this.curCost;
 		solution.cost = Arrays.copyOf(this.cost, data.m);// 每个机器上的成本
+		solution.outsourcingBaselineTotal = this.outsourcingBaselineTotal;
 		solution.outsourcingCostTotal = this.outsourcingCostTotal;
 		solution.cumDurationNormal = new double[data.m][];
 		solution.cumDurationReverse = new double[data.m][];
@@ -139,6 +141,7 @@ public class Solution {
 	public void setSequence(ArrayList<ArrayList<Integer>> sequences) {
 		this.sequences = sequences;
 		this.outsourcedJobs.clear();
+		this.outsourcingBaselineTotal = 0;
 		this.outsourcingCostTotal = 0;
 	}
 
@@ -178,24 +181,45 @@ public class Solution {
 		return job > 0 && job < data.outsourcingCost.length && !Utility.isBigMValue(data.outsourcingCost[job]);
 	}
 
-	public double getOutsourcingCost(int job) {
+	public double getOutsourcingBaseline(int job) {
 		return canOutsource(job) ? data.outsourcingCost[job] : Utility.big_M;
 	}
 
+	public double evaluateOutsourcingAddDelta(int job) {
+		if (!canOutsource(job)) {
+			return Utility.big_M;
+		}
+		double newBaseline = outsourcingBaselineTotal + getOutsourcingBaseline(job);
+		return data.evaluateOutsourcingCost(newBaseline) - outsourcingCostTotal;
+	}
+
+	public double evaluateOutsourcingRemoveDelta(int job) {
+		if (!outsourcedJobs.contains(job)) {
+			return Utility.big_M;
+		}
+		double newBaseline = outsourcingBaselineTotal - getOutsourcingBaseline(job);
+		return data.evaluateOutsourcingCost(newBaseline) - outsourcingCostTotal;
+	}
+
 	public void addOutsourcedJob(int job) {
-		// 2026-05-16: 外包没有序列相关成本，只维护集合和固定外包成本。
+		// 2026-05-16: b_j 只是 baseline，真正成本按 G(B(O)) 统一评价。
+		// 因此增删任务时必须用函数差分更新，而不是简单加减 b_j。
 		outsourcedJobs.add(job);
-		double delta = getOutsourcingCost(job);
-		outsourcingCostTotal += delta;
+		double oldCost = outsourcingCostTotal;
+		outsourcingBaselineTotal += getOutsourcingBaseline(job);
+		outsourcingCostTotal = data.evaluateOutsourcingCost(outsourcingBaselineTotal);
+		double delta = outsourcingCostTotal - oldCost;
 		curCost += delta;
 	}
 
 	public boolean removeOutsourcedJob(int job) {
 		boolean removed = outsourcedJobs.remove(Integer.valueOf(job));
 		if (removed) {
-			double delta = getOutsourcingCost(job);
-			outsourcingCostTotal -= delta;
-			curCost -= delta;
+			double oldCost = outsourcingCostTotal;
+			outsourcingBaselineTotal -= getOutsourcingBaseline(job);
+			outsourcingCostTotal = data.evaluateOutsourcingCost(outsourcingBaselineTotal);
+			double delta = outsourcingCostTotal - oldCost;
+			curCost += delta;
 		}
 		return removed;
 	}
@@ -1123,6 +1147,7 @@ public class Solution {
 		}
 		this.sequences.clear();
 		this.outsourcedJobs.clear();
+		this.outsourcingBaselineTotal = 0;
 		this.outsourcingCostTotal = 0;
 		this.curCost = 0;
 		Arrays.fill(this.cost, 0);

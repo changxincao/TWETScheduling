@@ -619,10 +619,14 @@ class TwoOptStarOperator implements Move {
 	public void searchBest() {
 		for (int m1 = 0; m1 < data.m; m1++) {
 			for (int m2 = m1 + 1; m2 < data.m; m2++) {
-				if (noImprovedSeqPair.contains(Set.of(s.sequences.get(m1), s.sequences.get(m2))))
-					continue;
 				ArrayList<Integer> seq1 = s.sequences.get(m1);
 				ArrayList<Integer> seq2 = s.sequences.get(m2);
+				// 2026-05-16: 允许机器为空以后，2-opt* 只有在两台机器都至少有两个任务时才有合法切尾候选。
+				// 这种“算子本身无法作用”的 pair 不写入 noImproved 缓存，避免空序列触发 Set.of 重复元素问题。
+				if (seq1.size() < 2 || seq2.size() < 2)
+					continue;
+				if (noImprovedSeqPair.contains(Set.of(seq1, seq2)))
+					continue;
 				for (int cut1 = 1; cut1 < seq1.size(); cut1++) {
 					for (int cut2 = 1; cut2 < seq2.size(); cut2++) {
 						for (boolean rev1 : allowReverseTwoOptStar ? new boolean[] { false, true }
@@ -716,6 +720,9 @@ class TwoOptStarOperator implements Move {
 		// 可能把由新序列组成、但本轮并未搜索过的 pair 错误写成 no-improved。
 		for (int m1 = 0; m1 < data.m; m1++) {
 			for (int m2 = m1 + 1; m2 < data.m; m2++) {
+				if (s.sequences.get(m1).size() < 2 || s.sequences.get(m2).size() < 2) {
+					continue;
+				}
 				if (!improvedPair[m1][m2]) {
 					noImprovedSeqPair.add(Set.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
 				}
@@ -1359,9 +1366,6 @@ class OutsourcingPathInsertOperator implements Move {
 			for (int from = 0; from < seq.size(); from++) {
 				int maxLen = Math.min(LSEG, seq.size() - from);
 				for (int len = 1; len <= maxLen; len++) {
-					if (seq.size() - len <= 0) {
-						continue;
-					}
 					ArrayList<Integer> segment = new ArrayList<Integer>(seq.subList(from, from + len));
 					if (!canOutsourceAll(segment)) {
 						continue;
@@ -1414,7 +1418,7 @@ class OutsourcingPathInsertOperator implements Move {
 		for (OptCost op : savedOperations) {
 			if (op.machineToOutsource) {
 				ArrayList<Integer> seq = s.sequences.get(op.machine);
-				if (!segmentMatches(seq, op.machineFrom, op.segment) || seq.size() - op.len <= 0) {
+				if (!segmentMatches(seq, op.machineFrom, op.segment)) {
 					continue;
 				}
 				removeMachineSegment(op.machine, op.machineFrom, op.len);
@@ -1663,10 +1667,14 @@ class CrossExchangeOperator implements Move {
 
 		for (int m1 = 0; m1 < data.m; m1++) {
 			for (int m2 = m1 + 1; m2 < data.m; m2++) {
-				if (noImprovedSeqPair.contains(Set.of(s.sequences.get(m1), s.sequences.get(m2))))
-					continue;
 				ArrayList<Integer> seq1 = s.sequences.get(m1);
 				ArrayList<Integer> seq2 = s.sequences.get(m2);
+				// 2026-05-16: cross-exchange 需要两边都能取出片段；空机器 pair 直接跳过，
+				// 不把“算子不可作用”误记为“已经搜索但无改进”。
+				if (seq1.isEmpty() || seq2.isEmpty())
+					continue;
+				if (noImprovedSeqPair.contains(Set.of(seq1, seq2)))
+					continue;
 				for (int a = 0; a < seq1.size(); a++) {
 					for (int b = 0; b < seq2.size(); b++) {
 						for (int l1 = 0; l1 <= LSEG && a + l1 < seq1.size(); l1++) {
@@ -1726,6 +1734,9 @@ class CrossExchangeOperator implements Move {
 		// 再执行批量 commit，避免把本轮 commit 后生成的新 pair 错记为已搜索无改进。
 		for (int m1 = 0; m1 < data.m; m1++) {
 			for (int m2 = m1 + 1; m2 < data.m; m2++) {
+				if (s.sequences.get(m1).isEmpty() || s.sequences.get(m2).isEmpty()) {
+					continue;
+				}
 				if (!improvedPair[m1][m2]) {
 					noImprovedSeqPair.add(Set.of(List.copyOf(s.sequences.get(m1)), List.copyOf(s.sequences.get(m2))));
 				}

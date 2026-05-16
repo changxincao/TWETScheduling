@@ -36,6 +36,7 @@ public class OutsourcingMoveConsistencyTest {
 		checkOutsourceToMachine(s);
 		checkCrossExchangeWithOutsourcing(s);
 		checkOutsourcingDelta(s);
+		checkMachineCanBecomeEmptyByOutsourcing();
 		System.out.println("OutsourcingMoveConsistencyTest passed, checked=" + checked);
 	}
 
@@ -195,6 +196,38 @@ public class OutsourcingMoveConsistencyTest {
 				+ s.getOutsourcingBaseline(add);
 		double expected = s.data.evaluateOutsourcingCost(expectedBaseline) - oldCost;
 		assertClose(expected, s.evaluateOutsourcingDelta(remove, add), "outsourcing G(B) delta mismatch");
+		checked++;
+	}
+
+	private void checkMachineCanBecomeEmptyByOutsourcing() throws IOException {
+		Data data = buildData();
+		Arrays.fill(data.outsourcingCost, 0.0);
+		data.outsourcingCostFunction = new PiecewiseLinearFunction(0, data.n);
+		data.outsourcingCostFunction.addSegment(0, data.n, 0.0, 0.0);
+
+		Solution s = new Solution(data);
+		s.sequences.get(0).add(1);
+		s.initialize_function();
+		for (int m = 0; m < data.m; m++) {
+			s.updateInformationM(m);
+		}
+
+		double oldCost = s.curCost;
+		OutsourcingPathInsertOperator op = new OutsourcingPathInsertOperator(s);
+		op.searchBest();
+		boolean committed = op.commit();
+		if (!committed) {
+			throw new AssertionError("machine->outsourcing should allow deleting the last internal job");
+		}
+		if (!s.sequences.get(0).isEmpty()) {
+			throw new AssertionError("machine 0 should become empty after outsourcing its only job");
+		}
+		if (!s.outsourcedJobs.contains(1)) {
+			throw new AssertionError("job 1 should be moved to outsourcing");
+		}
+		if (!Utility.compareLt(s.curCost, oldCost) && Math.abs(s.curCost - oldCost) > TOL) {
+			throw new AssertionError("zero-cost outsourcing should not increase solution cost");
+		}
 		checked++;
 	}
 

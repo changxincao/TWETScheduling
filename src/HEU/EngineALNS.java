@@ -181,7 +181,8 @@ class RandomRemoval implements RemovalOperator {
 		for (int i = 0; i < k; i++) {
 			ArrayList<int[]> candidates = new ArrayList<int[]>();
 			for (int m = 0; m < s.data.m; m++) {
-				if (s.sequences.get(m).size() - removedNum[m] <= 1) {
+				// 2026-05-16: 外包模型允许真实机器空闲，这里只跳过已经没有剩余候选任务的机器。
+				if (s.sequences.get(m).size() - removedNum[m] <= 0) {
 					continue;
 				}
 				for (int job : s.sequences.get(m)) {
@@ -281,15 +282,12 @@ class WorstRemoval implements RemovalOperator {
 			if (Utility.compareGt(v1, v2)) return 1;
 			return Integer.compare(o1, o2);
 		});
-		// 2026-05-15:
-		// WorstRemoval 原来直接取前 k 个任务，极端情况下可能把某台机器删空。
-		// 当前局部搜索和 pair cache 默认机器序列非空，因此这里和 Random/Shaw removal 一样，
-		// 显式保证每台机器至少保留一个任务。
+		// 2026-05-16: 外包模型允许真实机器空闲，WorstRemoval 不再强制每台机器保留一个任务。
 		int[] removedNum = new int[s.data.m];
 		List<Integer> removed = new ArrayList<Integer>();
 		int maxRemovable = s.outsourcedJobs.size();
 		for (int m = 0; m < s.data.m; m++) {
-			maxRemovable += Math.max(0, s.sequences.get(m).size() - 1);
+			maxRemovable += s.sequences.get(m).size();
 		}
 		int target = Math.min(k, maxRemovable);
 		for (int job : list) {
@@ -304,7 +302,7 @@ class WorstRemoval implements RemovalOperator {
 			if (m < 0) {
 				continue;
 			}
-			if (s.sequences.get(m).size() - removedNum[m] <= 1) {
+			if (s.sequences.get(m).size() - removedNum[m] <= 0) {
 				continue;
 			}
 			removed.add(job);
@@ -350,7 +348,7 @@ class ShawRemoval implements RemovalOperator {
 			if(machine >= 0) {
 				int a1=s.sequences.get(machine).size();
 				int a2=removedNumM[machine]+1;
-				if(a1==a2) continue;
+				if(a2>a1) continue;
 			}
 			if (job == seed || removed.contains(job)) continue;
 			double dist = taskDistance(seed, job,s.data);
@@ -372,9 +370,9 @@ class ShawRemoval implements RemovalOperator {
 		Arrays.fill(jobMMap, -1);
 		int maxRemovable = s.outsourcedJobs.size();
 		for (int m = 0; m < s.data.m; m++) {
-			maxRemovable += Math.max(0, s.sequences.get(m).size() - 1);
+			maxRemovable += s.sequences.get(m).size();
 		}
-		k=Math.min(k,maxRemovable);//真实机器至少剩余1个任务，外包任务可直接作为删除候选
+		k=Math.min(k,maxRemovable);// 2026-05-16: 真实机器允许删空，删除上限就是当前内部任务+外包任务总数。
 		for(int m=0;m<s.data.m;m++) {
 			for(int jid:s.sequences.get(m)) {
 				jobMMap[jid]=m;
@@ -389,7 +387,7 @@ class ShawRemoval implements RemovalOperator {
 			return new ArrayList<Integer>();
 		}
 		int seed = all.get(EngineALNS.rng.nextInt(all.size()));
-		while(jobMMap[seed] == -1 || (jobMMap[seed] >= 0 && s.sequences.get(jobMMap[seed]).size()==1)) {
+		while(jobMMap[seed] == -1) {
 			seed = all.get(EngineALNS.rng.nextInt(all.size()));
 		}
 		List<Integer> removed = new ArrayList<>();

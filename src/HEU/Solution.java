@@ -43,6 +43,9 @@ public class Solution {
 	double[][] cumDurationNormal;// 记录每个机器上，0-id之间累计的duration
 	double[][] cumDurationReverse;// 记录每个机器上，id-0之间累计的duration，可能设置时间不对称
 
+	TimeWindowSummary[][][] timeWindowSummary_hg;// 2026-05-17: 子序列 h..g 正向硬窗摘要，用于 move 前安全剪枝
+	TimeWindowSummary[][][] timeWindowSummary_gh;// 2026-05-17: 子序列 h..g 反向硬窗摘要，用于 reverse 片段剪枝
+
 	public Solution(Data data) {
 		this.data = data;
 		cost = new double[data.m];
@@ -90,6 +93,8 @@ public class Solution {
 		solution.bFunctions_hgl_normal = bFunctions_hgl_normal;
 		solution.fFunctions_hgl_reverse = fFunctions_hgl_reverse;
 		solution.bFunctions_hgl_reverse = bFunctions_hgl_reverse;
+		solution.timeWindowSummary_hg = timeWindowSummary_hg;
+		solution.timeWindowSummary_gh = timeWindowSummary_gh;
 
 		return solution;
 	}
@@ -103,6 +108,8 @@ public class Solution {
 		bFunctions_hgl_normal = new PiecewiseLinearFunction[data.m][][][];
 		fFunctions_hgl_reverse = new PiecewiseLinearFunction[data.m][][][];
 		bFunctions_hgl_reverse = new PiecewiseLinearFunction[data.m][][][];
+		timeWindowSummary_hg = new TimeWindowSummary[data.m][][];
+		timeWindowSummary_gh = new TimeWindowSummary[data.m][][];
 		cumDurationNormal = new double[data.m][];
 		cumDurationReverse = new double[data.m][];
 		for (int m = 0; m < data.m; m++) {
@@ -116,6 +123,8 @@ public class Solution {
 			bFunctions_hgl_normal[m] = new PiecewiseLinearFunction[size][size + 1][size];
 			fFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];// 应该不需要包含起始点
 			bFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];
+			timeWindowSummary_hg[m] = new TimeWindowSummary[size][size];
+			timeWindowSummary_gh[m] = new TimeWindowSummary[size][size];
 			// 最后一位[size]表示h2=-1的时候,即把某一段插入到最前边
 			cumDurationNormal[m] = new double[size];
 			cumDurationReverse[m] = new double[size];
@@ -132,6 +141,8 @@ public class Solution {
 		bFunctions_hgl_normal[m] = new PiecewiseLinearFunction[size][size + 1][size];
 		fFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];// 应该不需要包含起始点
 		bFunctions_hgl_reverse[m] = new PiecewiseLinearFunction[size][size + 1][size];
+		timeWindowSummary_hg[m] = new TimeWindowSummary[size][size];
+		timeWindowSummary_gh[m] = new TimeWindowSummary[size][size];
 		// 最后一位[size]表示h2=-1的时候,即把某一段插入到最前边
 		cumDurationNormal[m] = new double[size];
 		cumDurationReverse[m] = new double[size];
@@ -742,6 +753,7 @@ public class Solution {
 		updateFunctions2ForMachine(m);
 //		updateFunctions3ForMachine(m);
 		updateCumDuration(m);
+		updateTimeWindowSummariesForMachine(m);
 		curCost = curCost - cost[m];
 		curCost += costM;
 		cost[m] = costM;
@@ -774,6 +786,7 @@ public class Solution {
 		updateFunctions2ForMachine(m);
 //		updateFunctions3ForMachine(m);//不需要每次都更新，做Iopt的时候在更新
 		updateCumDuration(m);
+		updateTimeWindowSummariesForMachine(m);
 
 	}
 
@@ -1155,6 +1168,38 @@ public class Solution {
 		int size = this.cumDurationReverse[m].length;
 
 		return this.cumDurationReverse[m][size - 1 - a] - this.cumDurationReverse[m][size - 1 - b];
+	}
+
+	void updateTimeWindowSummariesForMachine(int m) {
+		ArrayList<Integer> seq = sequences.get(m);
+		int size = seq.size();
+		if (size == 0) {
+			return;
+		}
+		for (int from = 0; from < size; from++) {
+			for (int to = from; to < size; to++) {
+				ArrayList<Integer> normal = new ArrayList<Integer>(seq.subList(from, to + 1));
+				timeWindowSummary_hg[m][from][to] = TimeWindowSummary.of(data, normal);
+				if (from == to) {
+					timeWindowSummary_gh[m][from][to] = timeWindowSummary_hg[m][from][to];
+				} else {
+					ArrayList<Integer> reversed = new ArrayList<Integer>(normal);
+					Collections.reverse(reversed);
+					timeWindowSummary_gh[m][from][to] = TimeWindowSummary.of(data, reversed);
+				}
+			}
+		}
+	}
+
+	TimeWindowSummary getTimeWindowSummary(int m, int from, int to, boolean reverse) {
+		if (from > to) {
+			return TimeWindowSummary.EMPTY;
+		}
+		return reverse ? timeWindowSummary_gh[m][from][to] : timeWindowSummary_hg[m][from][to];
+	}
+
+	boolean maySequenceSatisfyHardWindows(TimeWindowSummary... parts) {
+		return TimeWindowSummary.mayFormSequence(data, parts);
 	}
 
 	public void removeJobs(List<Integer> toRemove) {

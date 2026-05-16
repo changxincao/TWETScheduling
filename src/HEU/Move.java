@@ -314,6 +314,24 @@ class IOptOperator implements Move {
 
 	public double evalDelta(Solution s, int mid, int from, int len, int to, boolean rev) {
 		ArrayList<Integer> seq=s.sequences.get(mid);
+		TimeWindowSummary moved = s.getTimeWindowSummary(mid, from, from + len, rev);
+		boolean hardWindowFeasible;
+		if (to < from) {
+			hardWindowFeasible = s.maySequenceSatisfyHardWindows(
+					s.getTimeWindowSummary(mid, 0, to, false),
+					moved,
+					s.getTimeWindowSummary(mid, to + 1, from - 1, false),
+					s.getTimeWindowSummary(mid, from + len + 1, seq.size() - 1, false));
+		} else {
+			hardWindowFeasible = s.maySequenceSatisfyHardWindows(
+					s.getTimeWindowSummary(mid, 0, from - 1, false),
+					s.getTimeWindowSummary(mid, from + len + 1, to, false),
+					moved,
+					s.getTimeWindowSummary(mid, to + 1, seq.size() - 1, false));
+		}
+		if (!hardWindowFeasible) {
+			return Utility.curUpperBound;
+		}
 		PiecewiseLinearFunction f1=rev?s.fFunctions_hgl_reverse[mid][from][to==-1?seq.size():to][len]:s.fFunctions_hgl_normal[mid][from][to==-1?seq.size():to][len];
 		PiecewiseLinearFunction b2=rev?s.bFunctions_hgl_reverse[mid][from][to==-1?seq.size():to][len]:s.bFunctions_hgl_normal[mid][from][to==-1?seq.size():to][len];
 		if(b2==null) {
@@ -500,6 +518,12 @@ class TwoOptOperator implements Move {
 		ArrayList<Integer> seq = s.sequences.get(mid);
 
 		// 第一段forward函数 0-aid-1
+		if (!s.maySequenceSatisfyHardWindows(
+				s.getTimeWindowSummary(mid, 0, aid - 1, false),
+				s.getTimeWindowSummary(mid, aid, bid, true),
+				s.getTimeWindowSummary(mid, bid + 1, size - 1, false))) {
+			return Utility.curUpperBound;
+		}
 		PiecewiseLinearFunction f1 = aid==0?data.penaltyFunction[0]:s.fFunctions.get(mid).get(aid - 1);
 
 		// 第2段forward函数 aid-bid 的反向
@@ -784,7 +808,16 @@ class TwoOptStarOperator implements Move {
 		if(!mergeCmaxValidation(m1, m2, cut1, cut2, rev1, rev2)) return Utility.curUpperBound;//这个返回big_M或者upperBound应该都可以
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
-		
+		// 2026-05-17: Vidal 式硬窗预判只做安全剪枝；通过后仍用分段函数 merge 计算真实成本。
+		if (!s.maySequenceSatisfyHardWindows(
+				s.getTimeWindowSummary(m1, 0, cut1 - 1, false),
+				s.getTimeWindowSummary(m2, cut2, seqM2.size() - 1, rev2))
+				|| !s.maySequenceSatisfyHardWindows(
+						s.getTimeWindowSummary(m2, 0, cut2 - 1, false),
+						s.getTimeWindowSummary(m1, cut1, seqM1.size() - 1, rev1))) {
+			return Utility.curUpperBound;
+		}
+
 		double originCost = s.cost[m1] + s.cost[m2];
 		// 对机器m1执行拼接计算
 		PiecewiseLinearFunction f1M1 = s.fFunctions.get(m1).get(cut1 - 1);// 机器m1的第一段
@@ -877,6 +910,16 @@ class PathInsertOperator implements Move {
 		double costM2 = 0;
 		double originCost = s.cost[m1] + s.cost[m2];
 		int sizeM1 = seqM1.size();
+		TimeWindowSummary splitSummary = s.getTimeWindowSummary(m1, stM1, stM1 + len, rev);
+		if (!s.maySequenceSatisfyHardWindows(
+				s.getTimeWindowSummary(m1, 0, stM1 - 1, false),
+				s.getTimeWindowSummary(m1, stM1 + len + 1, sizeM1 - 1, false))
+				|| !s.maySequenceSatisfyHardWindows(
+						s.getTimeWindowSummary(m2, 0, stM2, false),
+						splitSummary,
+						s.getTimeWindowSummary(m2, stM2 + 1, seqM2.size() - 1, false))) {
+			return Utility.curUpperBound;
+		}
 		// 对机器M1,执行两段拼接 0-st-1, st+len+1-size-1
 		PiecewiseLinearFunction f1M1 = stM1>=1?s.fFunctions.get(m1).get(stM1 - 1):data.penaltyFunction[0];
 		PiecewiseLinearFunction b2M1 = null;
@@ -1121,13 +1164,15 @@ class OutsourcingMoveEvaluator {
 		final PiecewiseLinearFunction forward;
 		final PiecewiseLinearFunction backward;
 		final double durationAfterFirst;
+		final TimeWindowSummary timeWindowSummary;
 
 		SegmentProfile(List<Integer> jobs, PiecewiseLinearFunction forward, PiecewiseLinearFunction backward,
-				double durationAfterFirst) {
+				double durationAfterFirst, TimeWindowSummary timeWindowSummary) {
 			this.jobs = new ArrayList<Integer>(jobs);
 			this.forward = forward;
 			this.backward = backward;
 			this.durationAfterFirst = durationAfterFirst;
+			this.timeWindowSummary = timeWindowSummary;
 		}
 
 		int firstJob() {
@@ -1213,7 +1258,7 @@ class OutsourcingMoveEvaluator {
 			int job = jobs.get(i);
 			duration += data.s[prev][job] + data.p[job];
 		}
-		return new SegmentProfile(jobs, forward, backward, duration);
+		return new SegmentProfile(jobs, forward, backward, duration, TimeWindowSummary.of(data, jobs));
 	}
 
 	static boolean isRemoveCmaxFeasible(Solution s, int m, int from, int len) {
@@ -1229,7 +1274,12 @@ class OutsourcingMoveEvaluator {
 			total += s.data.s[bridgeFrom][bridgeTo] + s.data.p[bridgeTo]
 					+ s.getNormalDuration(m, end + 1, seq.size() - 1);
 		}
-		return !Utility.compareGt(total, s.data.CmaxH);
+		if (Utility.compareGt(total, s.data.CmaxH)) {
+			return false;
+		}
+		return s.maySequenceSatisfyHardWindows(
+				s.getTimeWindowSummary(m, 0, from - 1, false),
+				s.getTimeWindowSummary(m, end + 1, seq.size() - 1, false));
 	}
 
 	static double evaluateRemoveMachineCost(Solution s, int m, int from, int len) {
@@ -1260,7 +1310,13 @@ class OutsourcingMoveEvaluator {
 			total += s.data.s[profile.lastJob()][bridgeTo2] + s.data.p[bridgeTo2]
 					+ s.getNormalDuration(m, pos + 1, seq.size() - 1);
 		}
-		return !Utility.compareGt(total, s.data.CmaxH);
+		if (Utility.compareGt(total, s.data.CmaxH)) {
+			return false;
+		}
+		return s.maySequenceSatisfyHardWindows(
+				s.getTimeWindowSummary(m, 0, pos, false),
+				profile.timeWindowSummary,
+				s.getTimeWindowSummary(m, pos + 1, seq.size() - 1, false));
 	}
 
 	static double evaluateInsertMachineCost(Solution s, int m, int pos, SegmentProfile profile) {
@@ -1289,7 +1345,13 @@ class OutsourcingMoveEvaluator {
 			total += s.data.s[profile.lastJob()][bridgeTo2] + s.data.p[bridgeTo2]
 					+ s.getNormalDuration(m, end + 1, seq.size() - 1);
 		}
-		return !Utility.compareGt(total, s.data.CmaxH);
+		if (Utility.compareGt(total, s.data.CmaxH)) {
+			return false;
+		}
+		return s.maySequenceSatisfyHardWindows(
+				s.getTimeWindowSummary(m, 0, from - 1, false),
+				profile.timeWindowSummary,
+				s.getTimeWindowSummary(m, end + 1, seq.size() - 1, false));
 	}
 
 	static double evaluateReplaceMachineCost(Solution s, int m, int from, int len, SegmentProfile profile) {
@@ -1870,6 +1932,18 @@ class CrossExchangeOperator implements Move {
 		if(!mergeCmaxValidation(m1, m2, stM1, l1, stM2, l2, rev1, rev2)) return Utility.curUpperBound;//返回upperBound或者big_M应该都行
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
+		TimeWindowSummary splitM1 = s.getTimeWindowSummary(m1, stM1, stM1 + l1, rev1);
+		TimeWindowSummary splitM2 = s.getTimeWindowSummary(m2, stM2, stM2 + l2, rev2);
+		if (!s.maySequenceSatisfyHardWindows(
+				s.getTimeWindowSummary(m1, 0, stM1 - 1, false),
+				splitM2,
+				s.getTimeWindowSummary(m1, stM1 + l1 + 1, seqM1.size() - 1, false))
+				|| !s.maySequenceSatisfyHardWindows(
+						s.getTimeWindowSummary(m2, 0, stM2 - 1, false),
+						splitM1,
+						s.getTimeWindowSummary(m2, stM2 + l2 + 1, seqM2.size() - 1, false))) {
+			return Utility.curUpperBound;
+		}
 		if (stM1 == 0 && stM2 == 0 && l1 == seqM1.size() - 1 && l2 == seqM2.size() - 1&&!rev1&&!rev2)
 			return 0;// 此时两个机器序列完全互换，不再往后
 		double originalCost = s.cost[m1] + s.cost[m2];

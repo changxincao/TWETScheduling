@@ -38,6 +38,7 @@ public class OutsourcingMoveConsistencyTest {
 		checkOutsourcingDelta(s);
 		checkMachineCanBecomeEmptyByOutsourcing();
 		checkInitSolutionRespectsHardWindows();
+		checkHardWindowSummaryRejectsImpossibleConcat();
 		System.out.println("OutsourcingMoveConsistencyTest passed, checked=" + checked);
 	}
 
@@ -257,13 +258,39 @@ public class OutsourcingMoveConsistencyTest {
 		checked++;
 	}
 
+	private void checkHardWindowSummaryRejectsImpossibleConcat() throws IOException {
+		Data data = buildData();
+		for (int j = 1; j <= data.n; j++) {
+			data.hardWindowStart[j] = 0;
+			data.hardWindowEnd[j] = data.CmaxH;
+		}
+		double earliestJob2AfterJob1 = data.s[0][1] + data.p[1] + data.s[1][2] + data.p[2];
+		data.hardWindowEnd[2] = Math.max(0, earliestJob2AfterJob1 - 1.0);
+		data.setPenaltyFunctions();
+
+		TimeWindowSummary job1 = TimeWindowSummary.of(data, List.of(1));
+		TimeWindowSummary job2 = TimeWindowSummary.of(data, List.of(2));
+		TimeWindowSummary job12 = TimeWindowSummary.of(data, List.of(1, 2));
+		if (TimeWindowSummary.mayFormSequence(data, job12)
+				|| TimeWindowSummary.mayFormSequence(data, job1, job2)) {
+			throw new AssertionError("hard-window summary should reject impossible concatenation");
+		}
+		checked++;
+	}
+
 	private boolean isCmaxFeasible(Data data, ArrayList<Integer> sequence) {
 		if (sequence.isEmpty()) {
 			return true;
 		}
-		double total = data.s[0][sequence.get(0)] + data.p[sequence.get(0)];
-		for (int i = 1; i < sequence.size(); i++) {
-			total += data.s[sequence.get(i - 1)][sequence.get(i)] + data.p[sequence.get(i)];
+		double total = 0;
+		int lastJob = 0;
+		for (int job : sequence) {
+			total += data.s[lastJob][job] + data.p[job];
+			total = Math.max(total, data.hardWindowStart[job]);
+			if (Utility.compareGt(total, data.hardWindowEnd[job])) {
+				return false;
+			}
+			lastJob = job;
 		}
 		return !Utility.compareGt(total, data.CmaxH);
 	}

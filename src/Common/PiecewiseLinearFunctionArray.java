@@ -413,7 +413,7 @@ public class PiecewiseLinearFunctionArray {
 
  		    // 1) 找到第一个非 ∞ 段
  		    int startIdx = 0;
- 		    while (startIdx < n && segs.get(startIdx).intercept >= Utility.big_M) {
+ 		    while (startIdx < n && Utility.isBigMValue(segs.get(startIdx).intercept)) {
  		        startIdx++;
  		    }
  		    if (startIdx == n) {
@@ -424,7 +424,7 @@ public class PiecewiseLinearFunctionArray {
 
  		    // 2) 找到最后一个非 ∞ 段
  		    int endIdx = n - 1;
- 		    while (endIdx >= startIdx && segs.get(endIdx).intercept >= Utility.big_M) {
+ 		    while (endIdx >= startIdx && Utility.isBigMValue(segs.get(endIdx).intercept)) {
  		        endIdx--;
  		    }
 

@@ -1103,7 +1103,7 @@ public class PiecewiseLinearFunction {
 		Utility.debugCheckPWLFRightBound("normalize.forward.input", this);
 		//这个的作用还在于将tail复位
 		// 1) 删除头部无穷段
-		while (head != null && Utility.compareGe(head.intercept, Utility.big_M)) {
+		while (head != null && Utility.isBigMValue(head.intercept)) {
 			head = head.next;
 		}
 		if (head == null) {
@@ -1156,7 +1156,7 @@ public class PiecewiseLinearFunction {
 		Segment cur = head;
 		Segment lastNonBigM = null;
 		while (cur != null) {
-			if (!Utility.compareGe(cur.intercept, Utility.big_M)) {
+			if (!Utility.isBigMValue(cur.intercept)) {
 				lastNonBigM = cur;
 			}
 			cur = cur.next;

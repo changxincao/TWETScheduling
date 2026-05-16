@@ -18,6 +18,7 @@ public class Utility {
 	public static int debugNum=0;
 	public static double EPS=1e-6;
 	public static double big_M=1e8;
+	private static final double BIG_M_STATE_RATIO = 0.5;
 	public static double curUpperBound=big_M;//记录当前算例下的最优成本，过程中动态更新,注意这里由于定义为了静态的，每次迭代算例需更新
 	//由于这个东西主要用于截断PiecewiseLinearFunction，不能直接在PWLF中使用data截断，在PWLF中传入一个data对象不合适
 	//所有比较的地方都替换为了使用这个上界，设置为当前最优解+1，可等价于big_M应该
@@ -62,6 +63,14 @@ public class Utility {
 		//怎么看上去对时间作用不大..
 		//能快一丢丢
 		//TODO 看把等于上界的segment的函数直接设置为空函数不知道会不会好点,输出一下判断,看起来并不存在这种情况哈哈哈哈
+	}
+
+	public static boolean isBigMValue(double value) {
+		// 2026-05-16: 判断“不可行/M 状态”时不要只和 big_M 精确边界比较。
+		// 分段函数经过固定成本平移、相加或取小后，M 段可能变成 M+a 或 M-a。
+		// big_M 足够大，使用 M/2 作为阈值可以把这些数值扰动统一视作不可行状态；
+		// 这里仅用于结构清理/剪枝判断，不应用来替代普通目标值比较。
+		return compareGe(value, big_M * BIG_M_STATE_RATIO);
 	}
 	
 	public static void debugNumPlus() {

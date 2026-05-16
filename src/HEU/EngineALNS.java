@@ -168,43 +168,47 @@ interface InsertionOperator {
 // ===== Removal 算子实例 =====
 // 1. 随机移除
 class RandomRemoval implements RemovalOperator {
-    private double fraction;
-    public RandomRemoval(double fraction) { this.fraction = fraction; }
-    public List<Integer> remove(Solution s) {
-        Set<Integer> jobs = new HashSet<Integer>();
+	private double fraction;
 
-        int k = Math.max(1,(int)(s.data.n * fraction));
-        int[] removedNum=new int[s.data.m];
-        for(int i=0;i<k;i++) {
-	ArrayList<int[]> candidates = new ArrayList<int[]>();
-	for(int m=0;m<s.data.m;m++) {
-		if(s.sequences.get(m).size() - removedNum[m] <= 1) {
-			continue;
-		}
-		for(int job:s.sequences.get(m)) {
-			if(!jobs.contains(job)) {
-				candidates.add(new int[] {m, job});
+	public RandomRemoval(double fraction) {
+		this.fraction = fraction;
+	}
+
+	public List<Integer> remove(Solution s) {
+		Set<Integer> jobs = new HashSet<Integer>();
+		int k = Math.max(1, (int) (s.data.n * fraction));
+		int[] removedNum = new int[s.data.m];
+		for (int i = 0; i < k; i++) {
+			ArrayList<int[]> candidates = new ArrayList<int[]>();
+			for (int m = 0; m < s.data.m; m++) {
+				if (s.sequences.get(m).size() - removedNum[m] <= 1) {
+					continue;
+				}
+				for (int job : s.sequences.get(m)) {
+					if (!jobs.contains(job)) {
+						candidates.add(new int[] { m, job });
+					}
+				}
+			}
+			for (int job : s.outsourcedJobs) {
+				if (!jobs.contains(job)) {
+					candidates.add(new int[] { -1, job });
+				}
+			}
+			if (candidates.size() == 0) {
+				break;
+			}
+			int[] selected = candidates.get(EngineALNS.rng.nextInt(candidates.size()));
+			jobs.add(selected[1]);
+			if (selected[0] >= 0) {
+				removedNum[selected[0]]++;
 			}
 		}
+		List<Integer> toRemove = new ArrayList<Integer>(jobs);
+		s.removeJobs(toRemove);
+		return toRemove;
 	}
-	for(int job:s.outsourcedJobs) {
-		if(!jobs.contains(job)) {
-			candidates.add(new int[] {-1, job});
-		}
-	}
-	if(candidates.size()==0) break;
-	int[] selected = candidates.get(EngineALNS.rng.nextInt(candidates.size()));
-	jobs.add(selected[1]);
-	if(selected[0] >= 0) {
-		removedNum[selected[0]]++;
-			}
-        }
 
-
-        List<Integer> toRemove =new ArrayList<Integer>(jobs);
-        s.removeJobs(toRemove);
-        return toRemove;
-    }
 	@Override
 	public void setRemovedRatio(double frac) {
 		this.fraction=frac;
@@ -214,99 +218,105 @@ class RandomRemoval implements RemovalOperator {
 
 // 2. 最坏移除（按单任务惩罚最高）
 class WorstRemoval implements RemovalOperator {
-    private double fraction;
-    public WorstRemoval(double fraction) { this.fraction = fraction; }
-    public List<Integer> remove(Solution s) {
-        Map<Integer, Double> penalties = computeIndividualPenalties(s); // 用户自行实现
-        int k = Math.max(1,(int)(penalties.size() * fraction));
-        //这就相当于完全不做迭代了，只基于当前解删除,可能不准,先这样
-       List<Integer> removed=removeTopKByValue(s,penalties, k);
-       s.removeJobs(removed);
-       return removed;
-    }
+	private double fraction;
 
-    public Map<Integer, Double> computeIndividualPenalties(Solution s){
-	//计算基于当前序列，删除某个任务导致的成本变化,删除减小最大的
-	TreeMap<Integer, Double> JobDeltaCost=new TreeMap<Integer, Double>();
-	for(int m=0;m<s.data.m;m++) {
-		ArrayList<Integer> seq=s.sequences.get(m);
-		double costM=s.cost[m];
-		if(seq.size()==1) {
-			JobDeltaCost.put(seq.get(0), costM);
-			continue;
-		}
-		for(int i=0;i<seq.size();i++) {
-			int jid=seq.get(i);
-			PiecewiseLinearFunction f=(i==0?s.data.penaltyFunction[0]:s.fFunctions.get(m).get(i-1));
-			PiecewiseLinearFunction b=(i==seq.size()-1?s.data.penaltyFunction[0]:s.bFunctions.get(m).get(i+1));
-                int bridgeFrom = i == 0 ? 0 : seq.get(i - 1);
-                int bridgeTo = i == seq.size() - 1 ? 0 : seq.get(i + 1);
-                double shift=(i==seq.size()-1?0:s.data.s[bridgeFrom][bridgeTo]+s.data.p[bridgeTo]);
-                double cost=s.merge2Segments(f, b, shift,
-                        i == seq.size() - 1 ? 0.0 : s.data.getSetupCost(bridgeFrom, bridgeTo));
-			JobDeltaCost.put(jid, cost-costM);
-		}
+	public WorstRemoval(double fraction) {
+		this.fraction = fraction;
 	}
-	for(int jid:s.outsourcedJobs) {
-		JobDeltaCost.put(jid, s.evaluateOutsourcingRemoveDelta(jid));
-	}
-	return JobDeltaCost;
 
-    }
-    public List<Integer> removeTopKByValue(Solution s,Map<Integer, Double> penalties,int k){
-	List<Integer> list=new ArrayList<Integer>(penalties.keySet());
-	int[] jobMachine = new int[s.data.n + 1];
-	Arrays.fill(jobMachine, -1);
-	for (int m = 0; m < s.data.m; m++) {
-		for (int job : s.sequences.get(m)) {
-			jobMachine[job] = m;
+	public List<Integer> remove(Solution s) {
+		Map<Integer, Double> penalties = computeIndividualPenalties(s); // 用户自行实现
+		int k = Math.max(1, (int) (penalties.size() * fraction));
+		// 这就相当于完全不做迭代了，只基于当前解删除,可能不准,先这样
+		List<Integer> removed = removeTopKByValue(s, penalties, k);
+		s.removeJobs(removed);
+		return removed;
+	}
+
+	public Map<Integer, Double> computeIndividualPenalties(Solution s) {
+		// 计算基于当前序列，删除某个任务导致的成本变化,删除减小最大的
+		TreeMap<Integer, Double> JobDeltaCost = new TreeMap<Integer, Double>();
+		for (int m = 0; m < s.data.m; m++) {
+			ArrayList<Integer> seq = s.sequences.get(m);
+			double costM = s.cost[m];
+			if (seq.size() == 1) {
+				JobDeltaCost.put(seq.get(0), costM);
+				continue;
+			}
+			for (int i = 0; i < seq.size(); i++) {
+				int jid = seq.get(i);
+				PiecewiseLinearFunction f = (i == 0 ? s.data.penaltyFunction[0] : s.fFunctions.get(m).get(i - 1));
+				PiecewiseLinearFunction b = (i == seq.size() - 1 ? s.data.penaltyFunction[0]
+						: s.bFunctions.get(m).get(i + 1));
+				int bridgeFrom = i == 0 ? 0 : seq.get(i - 1);
+				int bridgeTo = i == seq.size() - 1 ? 0 : seq.get(i + 1);
+				double shift = (i == seq.size() - 1 ? 0 : s.data.s[bridgeFrom][bridgeTo] + s.data.p[bridgeTo]);
+				double cost = s.merge2Segments(f, b, shift,
+						i == seq.size() - 1 ? 0.0 : s.data.getSetupCost(bridgeFrom, bridgeTo));
+				JobDeltaCost.put(jid, cost - costM);
+			}
 		}
+		for (int jid : s.outsourcedJobs) {
+			JobDeltaCost.put(jid, s.evaluateOutsourcingRemoveDelta(jid));
+		}
+		return JobDeltaCost;
 	}
-	for (int job : s.outsourcedJobs) {
-		jobMachine[job] = -2;
-	}
-	Collections.sort(list,(o1,o2)->{
-		double v1 = penalties.get(o1);
-		double v2 = penalties.get(o2);
-		if (Utility.compareLt(v1, v2)) return -1;
-		if (Utility.compareGt(v1, v2)) return 1;
-		return Integer.compare(o1, o2);
-	});
-	// 2026-05-15:
-	// WorstRemoval 原来直接取前 k 个任务，极端情况下可能把某台机器删空。
-	// 当前局部搜索和 pair cache 默认机器序列非空，因此这里和 Random/Shaw removal 一样，
-	// 显式保证每台机器至少保留一个任务。
-	int[] removedNum = new int[s.data.m];
-	List<Integer> removed = new ArrayList<Integer>();
-	int maxRemovable = s.outsourcedJobs.size();
-	for (int m = 0; m < s.data.m; m++) {
-		maxRemovable += Math.max(0, s.sequences.get(m).size() - 1);
-	}
-	int target = Math.min(k, maxRemovable);
-	for (int job : list) {
-		int m = jobMachine[job];
-		if (m == -2) {
+
+	public List<Integer> removeTopKByValue(Solution s, Map<Integer, Double> penalties, int k) {
+		List<Integer> list = new ArrayList<Integer>(penalties.keySet());
+		int[] jobMachine = new int[s.data.n + 1];
+		Arrays.fill(jobMachine, -1);
+		for (int m = 0; m < s.data.m; m++) {
+			for (int job : s.sequences.get(m)) {
+				jobMachine[job] = m;
+			}
+		}
+		for (int job : s.outsourcedJobs) {
+			jobMachine[job] = -2;
+		}
+		Collections.sort(list, (o1, o2) -> {
+			double v1 = penalties.get(o1);
+			double v2 = penalties.get(o2);
+			if (Utility.compareLt(v1, v2)) return -1;
+			if (Utility.compareGt(v1, v2)) return 1;
+			return Integer.compare(o1, o2);
+		});
+		// 2026-05-15:
+		// WorstRemoval 原来直接取前 k 个任务，极端情况下可能把某台机器删空。
+		// 当前局部搜索和 pair cache 默认机器序列非空，因此这里和 Random/Shaw removal 一样，
+		// 显式保证每台机器至少保留一个任务。
+		int[] removedNum = new int[s.data.m];
+		List<Integer> removed = new ArrayList<Integer>();
+		int maxRemovable = s.outsourcedJobs.size();
+		for (int m = 0; m < s.data.m; m++) {
+			maxRemovable += Math.max(0, s.sequences.get(m).size() - 1);
+		}
+		int target = Math.min(k, maxRemovable);
+		for (int job : list) {
+			int m = jobMachine[job];
+			if (m == -2) {
+				removed.add(job);
+				if (removed.size() >= target) {
+					break;
+				}
+				continue;
+			}
+			if (m < 0) {
+				continue;
+			}
+			if (s.sequences.get(m).size() - removedNum[m] <= 1) {
+				continue;
+			}
 			removed.add(job);
+			removedNum[m]++;
 			if (removed.size() >= target) {
 				break;
 			}
-			continue;
 		}
-		if (m < 0) {
-			continue;
-		}
-		if (s.sequences.get(m).size() - removedNum[m] <= 1) {
-			continue;
-		}
-		removed.add(job);
-		removedNum[m]++;
-		if (removed.size() >= target) {
-			break;
-		}
+		return removed;
 	}
-	return removed;
-    }
-    @Override
+
+	@Override
 	public void setRemovedRatio(double frac) {
 		this.fraction=frac;
 
@@ -315,91 +325,93 @@ class WorstRemoval implements RemovalOperator {
 
 // 3. Shaw 相似性移除
 class ShawRemoval implements RemovalOperator {
-    private double fraction;
-    public ShawRemoval(double frac) { this.fraction = frac; }
-    public double taskDistance(int i, int j,Data data) {
-        double alpha = 1.0, alpha2 = 1.0, alpha3 = 1.0; // 可调权重
-        double alpha4=1.0;double alpha5=1.0;
+	private double fraction;
 
-        return alpha * Math.abs(data.p[i] - data.p[j])
-             + alpha2  * (data.s[i][j] + data.s[j][i])
-             + alpha3* Math.abs(data.d_e[i] - data.d_e[j])+alpha4*Math.abs(data.d_l[i] - data.d_l[j])
-             +alpha5*Math.abs(data.w_e[i] - data.w_e[j])+alpha5*Math.abs(data.w_t[i] - data.w_t[j]);
+	public ShawRemoval(double frac) {
+		this.fraction = frac;
+	}
 
+	public double taskDistance(int i, int j,Data data) {
+		double alpha = 1.0, alpha2 = 1.0, alpha3 = 1.0; // 可调权重
+		double alpha4=1.0;double alpha5=1.0;
+		return alpha * Math.abs(data.p[i] - data.p[j])
+				+ alpha2  * (data.s[i][j] + data.s[j][i])
+				+ alpha3* Math.abs(data.d_e[i] - data.d_e[j])+alpha4*Math.abs(data.d_l[i] - data.d_l[j])
+				+ alpha5*Math.abs(data.w_e[i] - data.w_e[j])+alpha5*Math.abs(data.w_t[i] - data.w_t[j]);
+	}
 
-    }
-    //TODO 可以预处理，先不管
-    public int findMostSimilar(Solution s,int seed, List<Integer> removed,int[] removedNumM,int[]jobMMap) {
-      double bestDist = Double.POSITIVE_INFINITY;
-      int bestJob = -1;
-      for (Integer job=1;job<=s.data.n;job++) {
-	  int machine = jobMMap[job];
-	  if(machine == -1) continue;
-	  if(machine >= 0) {
-		  int a1=s.sequences.get(machine).size();
-		  int a2=removedNumM[machine]+1;
-		  if(a1==a2) continue;
-	  }
-          if (job == seed || removed.contains(job)) continue;
-          double dist = taskDistance(seed, job,s.data);
-          if (Utility.compareLt(dist, bestDist)) {
-              bestDist = dist;
-              bestJob = job;
-          }
-      }
-      //外层控制了删除数量，应该总是可以找到
-      return bestJob;
-  }
-    public List<Integer> remove(Solution s) {
-	 List<Integer> all = new ArrayList<Integer>();
-         for(int i=1;i<=s.data.n;i++) {
-	all.add(i);
-         }
-         int k = Math.max(1,(int)(all.size() * fraction));
+	//TODO 可以预处理，先不管
+	public int findMostSimilar(Solution s,int seed, List<Integer> removed,int[] removedNumM,int[]jobMMap) {
+		double bestDist = Double.POSITIVE_INFINITY;
+		int bestJob = -1;
+		for (Integer job=1;job<=s.data.n;job++) {
+			int machine = jobMMap[job];
+			if(machine == -1) continue;
+			if(machine >= 0) {
+				int a1=s.sequences.get(machine).size();
+				int a2=removedNumM[machine]+1;
+				if(a1==a2) continue;
+			}
+			if (job == seed || removed.contains(job)) continue;
+			double dist = taskDistance(seed, job,s.data);
+			if (Utility.compareLt(dist, bestDist)) {
+				bestDist = dist;
+				bestJob = job;
+			}
+		}
+		return bestJob;
+	}
 
-         int[] jobMMap=new int[s.data.n+1];
-         Arrays.fill(jobMMap, -1);
-         int maxRemovable = s.outsourcedJobs.size();
-         for (int m = 0; m < s.data.m; m++) {
-	 maxRemovable += Math.max(0, s.sequences.get(m).size() - 1);
-         }
-         k=Math.min(k,maxRemovable);//真实机器至少剩余1个任务，外包任务可直接作为删除候选
-         for(int m=0;m<s.data.m;m++) {
-	 for(int jid:s.sequences.get(m)) {
-		 jobMMap[jid]=m;
-	 }
-         }
-         for (int jid : s.outsourcedJobs) {
-	 jobMMap[jid] = -2;
-         }
+	public List<Integer> remove(Solution s) {
+		List<Integer> all = new ArrayList<Integer>();
+		for(int i=1;i<=s.data.n;i++) {
+			all.add(i);
+		}
+		int k = Math.max(1,(int)(all.size() * fraction));
+		int[] jobMMap=new int[s.data.n+1];
+		Arrays.fill(jobMMap, -1);
+		int maxRemovable = s.outsourcedJobs.size();
+		for (int m = 0; m < s.data.m; m++) {
+			maxRemovable += Math.max(0, s.sequences.get(m).size() - 1);
+		}
+		k=Math.min(k,maxRemovable);//真实机器至少剩余1个任务，外包任务可直接作为删除候选
+		for(int m=0;m<s.data.m;m++) {
+			for(int jid:s.sequences.get(m)) {
+				jobMMap[jid]=m;
+			}
+		}
+		for (int jid : s.outsourcedJobs) {
+			jobMMap[jid] = -2;
+		}
 
-        int[] removedNumM=new int[s.data.m];
-        if (k <= 0) {
-	return new ArrayList<Integer>();
-        }
-        int seed = all.get(EngineALNS.rng.nextInt(all.size()));
-        while(jobMMap[seed] == -1 || (jobMMap[seed] >= 0 && s.sequences.get(jobMMap[seed]).size()==1)) {
-	seed = all.get(EngineALNS.rng.nextInt(all.size()));
-        }
-        List<Integer> removed = new ArrayList<>();
-        removed.add(seed);
-        if (jobMMap[seed] >= 0) {
-	removedNumM[jobMMap[seed]]++;
-        }
-        while (removed.size() < k) {
-            int best = findMostSimilar(s, seed, removed,removedNumM,jobMMap); // 用户定义相似度
-            if (best < 0) {
-	break;
-            }
-            removed.add(best);
-            if (jobMMap[best] >= 0) {
-	removedNumM[jobMMap[best]]++;
-            }
-        }
-        s.removeJobs(removed);
-        return removed;
-    }
-    @Override
+		int[] removedNumM=new int[s.data.m];
+		if (k <= 0) {
+			return new ArrayList<Integer>();
+		}
+		int seed = all.get(EngineALNS.rng.nextInt(all.size()));
+		while(jobMMap[seed] == -1 || (jobMMap[seed] >= 0 && s.sequences.get(jobMMap[seed]).size()==1)) {
+			seed = all.get(EngineALNS.rng.nextInt(all.size()));
+		}
+		List<Integer> removed = new ArrayList<>();
+		removed.add(seed);
+		if (jobMMap[seed] >= 0) {
+			removedNumM[jobMMap[seed]]++;
+		}
+		while (removed.size() < k) {
+			int best = findMostSimilar(s, seed, removed,removedNumM,jobMMap); // 用户定义相似度
+			if (best < 0) {
+				break;
+			}
+			removed.add(best);
+			if (jobMMap[best] >= 0) {
+				removedNumM[jobMMap[best]]++;
+			}
+		}
+		s.removeJobs(removed);
+		return removed;
+	}
+
+	@Override
 	public void setRemovedRatio(double frac) {
 		this.fraction=frac;
 

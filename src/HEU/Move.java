@@ -1167,6 +1167,9 @@ class OutsourcingPathInsertOperator implements Move {
 					}
 					ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
 					newSeq.subList(from, from + len).clear();
+					if (!isCmaxFeasible(newSeq)) {
+						continue;
+					}
 					double newMachineCost = Move.testSequence(data, newSeq, s);
 					double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(null, segment);
 					if (Utility.compareLt(delta, 0)) {
@@ -1190,6 +1193,9 @@ class OutsourcingPathInsertOperator implements Move {
 						for (int pos = -1; pos < seq.size(); pos++) {
 							ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
 							newSeq.addAll(pos + 1, insertSegment);
+							if (!isCmaxFeasible(newSeq)) {
+								continue;
+							}
 							double newMachineCost = Move.testSequence(data, newSeq, s);
 							double delta = newMachineCost - s.cost[m] + s.evaluateOutsourcingDelta(segment, null);
 							if (Utility.compareLt(delta, 0)) {
@@ -1235,6 +1241,17 @@ class OutsourcingPathInsertOperator implements Move {
 			}
 		}
 		return true;
+	}
+
+	private boolean isCmaxFeasible(List<Integer> sequence) {
+		if (sequence.isEmpty()) {
+			return true;
+		}
+		double totalTime = data.s[0][sequence.get(0)] + data.p[sequence.get(0)];
+		for (int i = 1; i < sequence.size(); i++) {
+			totalTime += data.s[sequence.get(i - 1)][sequence.get(i)] + data.p[sequence.get(i)];
+		}
+		return !Utility.compareGt(totalTime, data.CmaxH);
 	}
 
 	private ArrayList<Integer> oriented(List<Integer> segment, boolean reverse) {
@@ -1339,6 +1356,9 @@ class OutsourcingCrossExchangeOperator implements Move {
 								ArrayList<Integer> newSeq = new ArrayList<Integer>(seq);
 								newSeq.subList(mf, mf + mLen).clear();
 								newSeq.addAll(mf, insertSegment);
+								if (!isCmaxFeasible(newSeq)) {
+									continue;
+								}
 								double newMachineCost = Move.testSequence(data, newSeq, s);
 								double delta = newMachineCost - s.cost[m]
 										+ s.evaluateOutsourcingDelta(outsourceSegment, machineSegment);
@@ -1380,6 +1400,17 @@ class OutsourcingCrossExchangeOperator implements Move {
 			}
 		}
 		return true;
+	}
+
+	private boolean isCmaxFeasible(List<Integer> sequence) {
+		if (sequence.isEmpty()) {
+			return true;
+		}
+		double totalTime = data.s[0][sequence.get(0)] + data.p[sequence.get(0)];
+		for (int i = 1; i < sequence.size(); i++) {
+			totalTime += data.s[sequence.get(i - 1)][sequence.get(i)] + data.p[sequence.get(i)];
+		}
+		return !Utility.compareGt(totalTime, data.CmaxH);
 	}
 
 	private ArrayList<Integer> oriented(List<Integer> segment, boolean reverse) {

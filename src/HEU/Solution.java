@@ -1211,11 +1211,17 @@ public class Solution {
 		for (Integer jid : jobs) {
 			// 对当前任务，随机选择一个还能插入的机器插入
 			ArrayList<Integer> candMachines = new ArrayList<Integer>();
-			// 可选择的机器（时间未超上界）
+			ArrayList<Double> candCompletions = new ArrayList<Double>();
+			// 可选择的机器（时间未超上界，且满足预处理粗硬窗）
 			for (int m = 0; m < data.m; m++) {
-				double newCumTimeM = cumTimesM[m] + data.s[lastJobM[m]][jid] + data.p[jid];
-				if (Utility.compareLe(newCumTimeM, data.CmaxH)) {
+				double earliestCompletion = cumTimesM[m] + data.s[lastJobM[m]][jid] + data.p[jid];
+				// 2026-05-16: 初始构造阶段不建分段函数，因此用粗硬窗做轻量 earliest-time 递推。
+				// 若最早完工早于硬窗左端，可以在加工该任务前等待；最终记录调整后的完工时间。
+				double adjustedCompletion = Math.max(earliestCompletion, data.hardWindowStart[jid]);
+				if (Utility.compareLe(adjustedCompletion, data.hardWindowEnd[jid])
+						&& Utility.compareLe(adjustedCompletion, data.CmaxH)) {
 					candMachines.add(m);
+					candCompletions.add(adjustedCompletion);
 				}
 			}
 			if (candMachines.isEmpty()) {
@@ -1227,8 +1233,9 @@ public class Solution {
 				}
 				throw new IllegalStateException("No feasible machine and outsourcing is disabled for job " + jid);
 			}
-			int selectedM = candMachines.get(Utility.rng.nextInt(candMachines.size()));
-			cumTimesM[selectedM] = cumTimesM[selectedM] + data.s[lastJobM[selectedM]][jid] + data.p[jid];
+			int selectedIndex = Utility.rng.nextInt(candMachines.size());
+			int selectedM = candMachines.get(selectedIndex);
+			cumTimesM[selectedM] = candCompletions.get(selectedIndex);
 			lastJobM[selectedM] = jid;
 			this.sequences.get(selectedM).add(jid);
 		}

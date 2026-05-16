@@ -37,6 +37,7 @@ public class OutsourcingMoveConsistencyTest {
 		checkCrossExchangeWithOutsourcing(s);
 		checkOutsourcingDelta(s);
 		checkMachineCanBecomeEmptyByOutsourcing();
+		checkInitSolutionRespectsHardWindows();
 		System.out.println("OutsourcingMoveConsistencyTest passed, checked=" + checked);
 	}
 
@@ -227,6 +228,31 @@ public class OutsourcingMoveConsistencyTest {
 		}
 		if (!Utility.compareLt(s.curCost, oldCost) && Math.abs(s.curCost - oldCost) > TOL) {
 			throw new AssertionError("zero-cost outsourcing should not increase solution cost");
+		}
+		checked++;
+	}
+
+	private void checkInitSolutionRespectsHardWindows() throws IOException {
+		Data data = buildData();
+		for (int j = 1; j <= data.n; j++) {
+			data.hardWindowStart[j] = 500.0 + j;
+			data.hardWindowEnd[j] = data.CmaxH;
+		}
+		Solution s = new Solution(data);
+		s.setInitSolution();
+		for (int m = 0; m < data.m; m++) {
+			double completion = 0;
+			int lastJob = 0;
+			for (int job : s.sequences.get(m)) {
+				double earliestCompletion = completion + data.s[lastJob][job] + data.p[job];
+				completion = Math.max(earliestCompletion, data.hardWindowStart[job]);
+				if (Utility.compareLt(completion, data.hardWindowStart[job])
+						|| Utility.compareGt(completion, data.hardWindowEnd[job])
+						|| Utility.compareGt(completion, data.CmaxH)) {
+					throw new AssertionError("initial sequence violates hard window for job " + job);
+				}
+				lastJob = job;
+			}
 		}
 		checked++;
 	}

@@ -31,15 +31,21 @@ public class GC {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
+	private final boolean usePaperDominanceGraph;
 	private PriorityQueue<Label> UL;
-	private ArrayList<DominanceGraph> TL;
+	private ArrayList<DominanceStore> TL;
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 
 	public GC(Data data, TWETBPCConfig config) {
+		this(data, config, false);
+	}
+
+	public GC(Data data, TWETBPCConfig config, boolean usePaperDominanceGraph) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
+		this.usePaperDominanceGraph = usePaperDominanceGraph;
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -70,9 +76,9 @@ public class GC {
 
 	private void initialize(LP lp) {
 		UL = new PriorityQueue<Label>();
-		TL = new ArrayList<DominanceGraph>(data.n + 1);
+		TL = new ArrayList<DominanceStore>(data.n + 1);
 		for (int i = 0; i <= data.n; i++) {
-			TL.add(new DominanceGraph());
+			TL.add(usePaperDominanceGraph ? new PaperDominanceGraph() : new DominanceGraph());
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();

@@ -42,7 +42,7 @@ pricing 中也补了直接时间可行性过滤。之前的逻辑是先尝试 `s
 
 `reachableSet` 现在只做一跳可达性过滤。具体来说，`buildReachableSet` 只检查候选任务是否未访问、当前弧是否未被禁止、以及从当前 frontier 最早完成时间直接扩展到该任务是否不超过局部 `H_ij` 和 `CmaxH`。它没有做多步可达性、time-index reachability，也没有接入 Vidal 式子序列摘要。这个设计不会漏掉可行列，因为它只是提前排除直接扩展已经明显不可能的任务；但会保留很多后续几步才发现不可行的候选，因此主要影响效率，不是当前正确性风险。
 
-列生成停止条件目前还不够“证明友好”。`GC.solve()` 单轮最多返回 `maxExactPricingColumns` 条负 reduced-cost 列；`PC.solve()` 单节点最多执行 `maxPricingRounds` 轮 pricing。如果某一轮达到列数上限，或者总轮数耗尽时实际上仍存在负 reduced-cost 列，当前 `PricingResult` 只会告诉上层“本轮返回了若干列/没有列”，不会显式标记“因为上限停止”。这在工程上能跑，但严格 B&P 证明需要知道列生成是否真正定价完毕。后续应给 `PricingResult` 增加 stoppedByColumnLimit、stoppedByRoundLimit 或类似状态，并在节点 bound/关闭逻辑和输出里明确标记。
+列生成停止条件在第一版中曾经不够“证明友好”。当时 `GC.solve()` 单轮最多返回 `maxExactPricingColumns` 条负 reduced-cost 列，`PC.solve()` 单节点最多执行 `maxPricingRounds` 轮 pricing；如果轮数耗尽时实际上仍存在负 reduced-cost 列，就会影响节点下界的严格性。后续已经按旧 VRP 代码思路删掉固定轮数上限，`PC` 改为迭代到没有新 active column 为止；单轮加列数上限仍保留在 pricing 侧，用于控制每次返回列的数量。
 
 当前 pricing 输出统计也偏粗。`PC` 只记录 pricing 是否 improved、加了多少列、pool size 和文字 message；`GC` 内部没有暴露生成 label 数、扩展尝试数、时间可行性剪枝数、dominance 删除数、重复列过滤数、返回列数和耗时。后续要分析 BPC 性能时，这些统计很关键，尤其是 dominance graph 和 reachableSet 优化之前，需要知道瓶颈到底在 label 扩展、分段函数操作、dominance merge 还是 RMP 重解。
 
@@ -60,7 +60,7 @@ pricing 中也补了直接时间可行性过滤。之前的逻辑是先尝试 `s
 
 `reachableSet` 这一点目前不需要扩大。论文里更新 reachable set 本身就是一跳过滤：从当前末端 job 出发，检查某个候选 job 是否未访问、弧是否允许、直接接上以后是否还可能落在对应的 `H_ij` 内。当前 `buildReachableSet()` 做的也是这一类一跳判断。多步可达性、time-index reachability 或 Vidal 式摘要都只是后续加速，不是这里必须补的正确性条件。
 
-列生成停止条件也要修正。旧 VRP 代码里的 `addin_size` 对应的是“单轮最多加入多少列”，这和当前 `maxExactPricingColumns` 类似；但旧 `PC` 没有 `maxPricingRounds` 这种节点内固定轮数上限。它的流程是 heuristic pricing 和 exact pricing 反复跑，直到 exact pricing 的 `Extend(lp)` 返回 false，也就是没有下一批负 reduced-cost 列。当前 `PC.solve()` 里 `for (round < maxPricingRounds)` 是工程安全阈值，不是严格 B&P 的停止条件。如果这个上限耗尽但 pricing 其实还能找到负 reduced-cost 列，就会影响节点下界的严格性。后续应把节点 pricing 改成“直到无列”为止；如果保留上限，只能作为调试/保护参数，并且必须在结果里标记“因轮数上限停止”，不能把该节点当作严格定价完成。
+列生成停止条件已按这个判断修正。旧 VRP 代码里的 `addin_size` 对应的是“单轮最多加入多少列”，这和当前 `maxExactPricingColumns` 类似；但旧 `PC` 没有 `maxPricingRounds` 这种节点内固定轮数上限。当前实现已经删除固定轮数上限，节点内流程改为 heuristic pricing 和 exact pricing 反复跑，直到本轮没有新的 active column 被加入。这里仍要保留一个工程细节：如果 pricing 找到的是重复列，`Pool` 会返回已有列 id，`PC` 不把它计入新 active column，避免无意义空转。
 
 分支后 restricted master infeasible 的处理也要参考旧 VRP 代码。旧 `BranchD.UpdateRouteSet()` 在子节点没有可行列时，不是直接关闭节点，而是先用 slack 暂时保持分支约束可处理，然后调用启发式和精确定价的 `FindFeasible` 生成满足该分支状态的 route，再从这些 route 中筛选一批 reduced cost 较好的列作为子节点初始列。当前 TWET 版本只把 required arc 写成 RMP 等式，如果当前 restricted pool 里没有包含该 required arc 的列，RMP 可能还没来得及 pricing 就直接 infeasible。因此后续需要做一个子节点可行列兜底：可以先做定向 pricing/构造列，强制满足 required arcs；或者临时人工列/slack 保持 RMP 可解，再用 pricing 替换。直接把这种节点判 infeasible 不符合旧代码思路，也可能错误剪掉可行分支。
 
@@ -69,3 +69,15 @@ pricing 中也补了直接时间可行性过滤。之前的逻辑是先尝试 `s
 但 `z_j` 整数不代表 tariff 的分段变量也会整数。当前 RMP 里的 `outsourceSegmentActive` 和 `outsourceSegmentBaseline` 是连续变量，它们表达的是 `G(sum b_j z_j)` 的 LP relaxation。即使 `q=sum b_j z_j` 已经固定为整数 baseline，总量仍然可能被分数地分配到多个 tariff segment 上；如果 `G` 是凹分段函数，这个松弛可能给出比真实单段选择更低的外包成本。因此 tariff segment 是否整数，不能靠 `z_j` 整数自动保证。后续如果要求严格整数外包成本，需要加 segment 选择分支、SOS/特殊有序结构，或者其他强化建模。
 
 关于动态 `H_ij`，当前实现和论文公式在结构上是一致的：`gamma = B_ij + min(π_j,b_j)`，再用 earliness/tardiness 斜率把它转成 `[h_ij,\bar h_ij]`，扩展时用 `shiftX(s_ij+p_j)`、任务惩罚函数窗口外补 `big_M`、再加 setup cost、job dual 和 arc dual。只要 dual 符号、`B_ij`、任务惩罚函数和外包 baseline 的定义没有错，这个部分不应因为实现方式本身丢失最优列。后续需要对拍的是公式输入值是否一致，而不是把 `H_ij` 逻辑本身当作优先怀疑对象。
+
+## 2026-05-17：本轮 BPC 框架修正落地
+
+本轮按前面的修正判断先做四件事。第一，保留原来的 `DominanceGraph` 作为全量扫描版，同时新增 `PaperDominanceGraph` 和 `PaperDominanceExactPricingEngine`。新图结构按论文伪代码维护 reachable set 的包含关系，显式保存 roots、predecessors、successors，以及每个 node 上的 `f_u/h_u/g_u` 三类 envelope；但为了适配 TWET 列需要恢复具体任务顺序的事实，每个 node 仍保存真实 label 集合，聚合 envelope 只用于占优判断，不替代真实路径。这样后续可以直接比较“旧全扫版”和“论文图传播版”的效率差异。
+
+第二，删除节点内固定 pricing 轮数上限。`PC.solve()` 现在不再使用 `maxPricingRounds`，而是反复调用 pricing，直到本轮没有新的 active column 被加入为止；单次 exact pricing 返回列数仍由 `maxExactPricingColumns` 控制，默认值改为旧 VRP 代码 `Configure.addin_size` 对应的 150。这里要注意一个细节：如果 pricing 返回的是 pool 里已经存在的重复列，`PC` 不再把它当成新列，否则可能出现“有 improved 但没有新 active column”的空转。
+
+第三，补了 SP2 tariff segment 分支。`TWETMasterSolution` 现在会保存 master 中 `outsourceSegmentActive` 的 LP 值；`TariffSegmentBrancher` 会寻找最接近 0.5 的分数 segment 变量，生成 `z_s <= 0` 和 `z_s >= 1` 两个子节点。对应的分支状态保存在 `Node` 中，`LP` 重建变量时通过调整 `outsourceSegmentActive[s]` 的上下界实现约束。该分支只作用在 master 变量上，不改变 private-route pricing 结构，只通过新的 dual 间接影响后续定价。
+
+第四，分支子节点加入了初始列兜底。`Tree` 在把子节点放进队列前，会先从全局 pool 中筛选所有兼容 forbidden arc 的列作为 seed；如果子节点存在 required arc 且当前 seed 中没有任何列覆盖它，就尝试根据 required arc 链构造一条简单 fallback column，并用 `TWETColumnEvaluator` 评估后加入 pool。这不是旧 VRP `UpdateRouteSet()/FindFeasible` 的完整复刻，因为它还没有调用定向 pricing 去系统生成满足分支状态的列；但它已经避免了一类最直接的问题，即 required arc 子节点因为 restricted pool 暂时没有覆盖该弧的列而立刻 RMP infeasible。
+
+当前仍需保留的边界有三点。第一，`PaperDominanceGraph` 只是按论文结构重写了 graph propagation，仍然只做完整占优，不做 partial dominance。第二，required-arc fallback column 只是工程兜底，不是严格的分支节点可行列生成器，后续如果遇到复杂 required arc 组合，仍应补定向 pricing 或人工列/slack。第三，tariff segment 分支已经接入，但外包任务变量 `y_j` 本身暂时没有单独分支；当前优先级是先处理 tariff segment 分数性，然后机器数分支，再 arc 分支。若后续观察到 `y_j` 分数但无可分支 arc，需要再补外包变量分支。

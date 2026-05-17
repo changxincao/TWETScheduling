@@ -156,9 +156,10 @@ public class LP {
 			readDuals();
 			LinkedHashMap<Integer, Double> columnValues = readColumnValues();
 			double[] outsourcingValues = readOutsourcingValues();
+			double[] segmentValues = readOutsourceSegmentValues();
 			boolean integer = isIntegerSolution(columnValues, outsourcingValues);
 			lastSolution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues, outsourcingValues,
-					cplex.getObjValue(), integer, "Restricted master LP solved");
+					segmentValues, cplex.getObjValue(), integer, "Restricted master LP solved");
 			return lastSolution;
 		} catch (IloException ex) {
 			clearDuals();
@@ -201,7 +202,9 @@ public class LP {
 		outsourceSegmentBaseline = new IloNumVar[outsourcingTariffSegments.size()];
 		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
 			TariffSegment seg = outsourcingTariffSegments.get(l);
-			outsourceSegmentActive[l] = cplex.numVar(0.0, 1.0, "outSegActive_" + l);
+			double lb = node.getTariffSegmentState(l) == Node.SEGMENT_REQUIRED ? 1.0 : 0.0;
+			double ub = node.getTariffSegmentState(l) == Node.SEGMENT_FORBIDDEN ? 0.0 : 1.0;
+			outsourceSegmentActive[l] = cplex.numVar(lb, ub, "outSegActive_" + l);
 			outsourceSegmentBaseline[l] = cplex.numVar(0.0, seg.end, "outSegBaseline_" + l);
 		}
 	}
@@ -330,6 +333,14 @@ public class LP {
 		return values;
 	}
 
+	private double[] readOutsourceSegmentValues() throws IloException {
+		double[] values = new double[outsourceSegmentActive.length];
+		for (int segment = 0; segment < outsourceSegmentActive.length; segment++) {
+			values[segment] = cplex.getValue(outsourceSegmentActive[segment]);
+		}
+		return values;
+	}
+
 	private boolean isIntegerSolution(Map<Integer, Double> columnValues, double[] outsourcingValues) throws IloException {
 		for (double value : columnValues.values()) {
 			if (!isIntegral01(value)) {
@@ -364,22 +375,7 @@ public class LP {
 	}
 
 	private boolean isColumnCompatible(TWETColumn column) {
-		int sink = node == null ? data.n + 1 : node.sinkId();
-		List<Integer> seq = column.getSequence();
-		if (!seq.isEmpty() && node != null) {
-			if (node.getArcState(0, seq.get(0)) == Node.ARC_FORBIDDEN) {
-				return false;
-			}
-			for (int i = 1; i < seq.size(); i++) {
-				if (node.getArcState(seq.get(i - 1), seq.get(i)) == Node.ARC_FORBIDDEN) {
-					return false;
-				}
-			}
-			if (node.getArcState(seq.get(seq.size() - 1), sink) == Node.ARC_FORBIDDEN) {
-				return false;
-			}
-		}
-		return true;
+		return node == null || node.isColumnCompatible(column);
 	}
 
 	private void clearDuals() {

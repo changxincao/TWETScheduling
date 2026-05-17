@@ -16,6 +16,7 @@ import TWETBPC.CUT.SubsetRowCutGenerator;
 import TWETBPC.GC.ExactPricingEngine;
 import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.InitialColumnBuilder;
+import TWETBPC.GC.PaperDominanceExactPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.IO.HeuristicSeedProvider;
 import TWETBPC.LP.CutPool;
@@ -53,13 +54,19 @@ public class TWETBPCContext {
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		pricingEngines.add(new HeuristicPricingEngine());
-		pricingEngines.add(new ExactPricingEngine(data, config));
+		if (config.usePaperDominancePricing) {
+			pricingEngines.add(new PaperDominanceExactPricingEngine(data, config));
+		} else {
+			pricingEngines.add(new ExactPricingEngine(data, config));
+		}
 
 		this.cutGenerators = new ArrayList<CutGenerator>();
 		cutGenerators.add(new NoOpCutGenerator());
 		cutGenerators.add(new SubsetRowCutGenerator());
 
 		this.branchers = new ArrayList<Brancher>();
+		branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));
+		branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
 		branchers.add(new ArcBrancher(config.branchingTolerance));
 
 		this.traceSummary = new BPCTraceSummary();

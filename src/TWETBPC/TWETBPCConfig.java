@@ -1,7 +1,7 @@
 package TWETBPC;
 
 /**
- * TWET-BPC 骨架的可调参数集合。
+ * TWET-BPC 框架的可调参数集合。
  */
 public class TWETBPCConfig {
 
@@ -30,10 +30,10 @@ public class TWETBPCConfig {
 	public int maxInitialColumns = 2000;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;
-	/** 单个节点内最多进行多少轮 pricing。 */
-	public int maxPricingRounds = 32;
-	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列，避免一轮加列过多。 */
-	public int maxExactPricingColumns = 100;
+	/** 是否使用按论文 dominance graph 伪代码实现的精确定价器；关闭后可回退旧的全量扫描版做效率对比。 */
+	public boolean usePaperDominancePricing = true;
+	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP 代码 Configure.addin_size 的默认值。 */
+	public int maxExactPricingColumns = 150;
 	/** 单个节点内最多进行多少轮 cut separation。 */
 	public int maxCutRounds = 8;
 	/** 判断是否整数时使用的容差。 */

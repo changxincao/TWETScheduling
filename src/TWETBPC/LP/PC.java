@@ -37,26 +37,31 @@ public class PC {
 			return solution;
 		}
 
-		for (int round = 0; round < config.maxPricingRounds; round++) {
+		while (true) {
 			ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
-			boolean improved = false;
+			ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
 			for (PricingEngine engine : pricingEngines) {
 				PricingResult result = engine.price(lp);
 				int addedColumns = 0;
 				if (result.isImproved()) {
-					improved = true;
 					for (int i = 0; i < result.getColumns().size(); i++) {
 						TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
 						int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
 								column.isSeedColumn());
-						newColumnIds.add(Integer.valueOf(id));
+						Integer value = Integer.valueOf(id);
+						if (!activeColumnIds.contains(value)) {
+							activeColumnIds.add(value);
+							newColumnIds.add(value);
+							addedColumns++;
+						}
 					}
-					addedColumns = result.getColumns().size();
 				}
 				traceSink.onPricingCall(lp.getNode(), engine.getName(), result.isImproved(), addedColumns,
 						result.getMessage(), lp.getPool().size());
 			}
-			if (!improved) {
+			// 2026-05-17: 参考旧 VRP PC，节点内 pricing 不再设固定轮数；
+			// 单轮加列数由 pricing 侧控制，PC 一直迭代到没有新的 active 列。
+			if (newColumnIds.isEmpty()) {
 				break;
 			}
 			lp.addColumns(newColumnIds);

@@ -14,7 +14,7 @@ import TWETBPC.Util.PackedBitSet;
  * graph 中 eligible nodes 的下包络若能在整个定义域上压住新 label，
  * 则删除新 label；否则保留整条 label，不切函数片段。
  */
-final class DominanceGraph {
+final class DominanceGraph implements DominanceStore {
 
 	private final ArrayList<DominanceNode> nodes = new ArrayList<DominanceNode>();
 
@@ -23,7 +23,7 @@ final class DominanceGraph {
 	 *
 	 * @return true 表示该 label 被已有 graph 完整占优并丢弃；false 表示已插入 graph
 	 */
-	boolean insertOrDominate(Label label) {
+	public boolean insertOrDominate(Label label) {
 		PiecewiseLinearFunction eligibleEnvelope = buildEligibleEnvelope(label.reachableSet, null);
 		if (eligibleEnvelope != null && eligibleEnvelope.dominates(label.frontier)) {
 			label.isDominated = true;

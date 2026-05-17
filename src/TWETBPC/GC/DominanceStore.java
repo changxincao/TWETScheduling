@@ -1,0 +1,18 @@
+package TWETBPC.GC;
+
+/**
+ * 单个 terminal job 下 label 占优结构的统一接口。
+ * <p>
+ * 2026-05-17: 这里把旧的全量扫描 dominance graph 和按论文伪代码实现的 graph
+ * 隔离开，便于后续在同一套 pricing 主流程下比较两种占优结构的效率。
+ */
+interface DominanceStore {
+
+	/**
+	 * 尝试插入一个 label。
+	 *
+	 * @return true 表示该 label 已被当前结构完整占优并丢弃；false 表示它被保留。
+	 */
+	boolean insertOrDominate(Label label);
+
+}

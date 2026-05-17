@@ -14,6 +14,9 @@ import TWETBPC.BP.BranchResult;
 import TWETBPC.BP.Brancher;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
+import TWETBPC.IO.TWETColumnEvaluator;
+import TWETBPC.Model.ColumnSource;
+import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 
@@ -27,6 +30,7 @@ public class Tree {
 	private final Pool pool;
 	private final CutPool cutPool;
 	private final InitialColumnBuilder initialColumnBuilder;
+	private final TWETColumnEvaluator columnEvaluator;
 	private final PC pc;
 	private final List<Brancher> branchers;
 	private final BPCTraceSink traceSink;
@@ -38,6 +42,7 @@ public class Tree {
 		this.pool = pool;
 		this.cutPool = cutPool;
 		this.initialColumnBuilder = initialColumnBuilder;
+		this.columnEvaluator = new TWETColumnEvaluator(data);
 		this.pc = pc;
 		this.branchers = branchers;
 		this.traceSink = traceSink;
@@ -106,12 +111,8 @@ public class Tree {
 					traceSink.onBranchRejected(node, brancher.getName(), result.getMessage());
 					continue;
 				}
-				if (result.getLeftNode() != null) {
-					queue.add(result.getLeftNode());
-				}
-				if (result.getRightNode() != null) {
-					queue.add(result.getRightNode());
-				}
+				enqueueChild(queue, result.getLeftNode());
+				enqueueChild(queue, result.getRightNode());
 				traceSink.onBranch(node, brancher.getName(), result, queue.size());
 				branched = true;
 				break;
@@ -125,6 +126,121 @@ public class Tree {
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, pool.size(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and forward exact pricing; advanced cuts/pricing remain pending");
+	}
+
+	private void enqueueChild(PriorityQueue<Node> queue, Node child) {
+		if (child == null) {
+			return;
+		}
+		prepareChildSeedColumns(child);
+		queue.add(child);
+	}
+
+	private void prepareChildSeedColumns(Node child) {
+		ArrayList<Integer> seed = new ArrayList<Integer>();
+		for (TWETColumn column : pool.getColumns()) {
+			if (child.isColumnCompatible(column)) {
+				seed.add(Integer.valueOf(column.getId()));
+			}
+		}
+		for (int[] arc : child.getRequiredArcs()) {
+			if (!hasColumnCoveringArc(seed, child, arc[0], arc[1])) {
+				addRequiredArcFallbackColumn(seed, child, arc[0], arc[1]);
+			}
+		}
+		child.seedColumnIds = seed;
+	}
+
+	private boolean hasColumnCoveringArc(ArrayList<Integer> seed, Node child, int from, int to) {
+		for (int columnId : seed) {
+			if (child.columnCoversRequiredArc(pool.getColumn(columnId), from, to)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void addRequiredArcFallbackColumn(ArrayList<Integer> seed, Node child, int requiredFrom, int requiredTo) {
+		ArrayList<Integer> sequence = buildRequiredArcChain(child, requiredFrom, requiredTo);
+		if (sequence.isEmpty() || !isSequenceCompatible(child, sequence)) {
+			return;
+		}
+		double cost = columnEvaluator.evaluate(sequence);
+		if (Utility.isBigMValue(cost)) {
+			return;
+		}
+		int id = pool.addColumn(sequence, cost, ColumnSource.MANUAL, false);
+		Integer value = Integer.valueOf(id);
+		if (!seed.contains(value)) {
+			seed.add(value);
+		}
+	}
+
+	private ArrayList<Integer> buildRequiredArcChain(Node child, int requiredFrom, int requiredTo) {
+		int sink = child.sinkId();
+		int[] succ = new int[sink + 1];
+		int[] pred = new int[sink + 1];
+		for (int i = 0; i < succ.length; i++) {
+			succ[i] = -1;
+			pred[i] = -1;
+		}
+		for (int[] arc : child.getRequiredArcs()) {
+			int from = arc[0];
+			int to = arc[1];
+			if (from >= succ.length || to >= pred.length) {
+				continue;
+			}
+			if (succ[from] != -1 && succ[from] != to) {
+				return new ArrayList<Integer>();
+			}
+			if (to != sink && pred[to] != -1 && pred[to] != from) {
+				return new ArrayList<Integer>();
+			}
+			succ[from] = to;
+			if (to != sink) {
+				pred[to] = from;
+			}
+		}
+
+		int start = requiredFrom;
+		while (start != 0 && pred[start] != -1) {
+			start = pred[start];
+		}
+		ArrayList<Integer> sequence = new ArrayList<Integer>();
+		boolean[] seen = new boolean[sink + 1];
+		int cursor = start;
+		if (cursor != 0 && cursor != sink) {
+			sequence.add(Integer.valueOf(cursor));
+			seen[cursor] = true;
+		}
+		while (cursor >= 0 && cursor < succ.length && succ[cursor] != -1) {
+			int next = succ[cursor];
+			if (next == sink) {
+				break;
+			}
+			if (seen[next]) {
+				return new ArrayList<Integer>();
+			}
+			sequence.add(Integer.valueOf(next));
+			seen[next] = true;
+			cursor = next;
+		}
+		return sequence;
+	}
+
+	private boolean isSequenceCompatible(Node child, ArrayList<Integer> sequence) {
+		if (sequence.isEmpty()) {
+			return false;
+		}
+		if (child.getArcState(0, sequence.get(0).intValue()) == Node.ARC_FORBIDDEN) {
+			return false;
+		}
+		for (int i = 1; i < sequence.size(); i++) {
+			if (child.getArcState(sequence.get(i - 1).intValue(), sequence.get(i).intValue()) == Node.ARC_FORBIDDEN) {
+				return false;
+			}
+		}
+		return child.getArcState(sequence.get(sequence.size() - 1).intValue(), child.sinkId()) != Node.ARC_FORBIDDEN;
 	}
 
 	private double incumbentCostFromInitial(InitialColumnBundle initial) {

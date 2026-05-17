@@ -189,7 +189,10 @@ public class ATIParallel {
     private void buildVariables() throws IloException {
         x = new IloNumVar[arcList.size()];
         for (int idx = 0; idx < arcList.size(); idx++) {
-            x[idx] = cpx.numVar(0, d.m,IloNumVarType.Float, "x_" + idx);
+            // 2026-05-17: 时间扩展网络里的弧流必须是整数，不能用连续变量。
+            // 连续变量会允许一个任务的 1 单位流量拆到多条入弧上，得到 LP 松弛下界；
+            // A4 等等待弧可能承载多台机器，所以这里用 [0,m] 整数变量，而不是 boolVar。
+            x[idx] = cpx.intVar(0, d.m, "x_" + idx);
         }
         y = new IloNumVar[d.n + 1];
         for (int j = 1; j <= d.n; j++) {

@@ -104,7 +104,7 @@ public class SmallExactHeuristicBatchTest {
 		}
 	}
 
-	private Data buildRandomCase(int caseId, int n, int machines) throws IOException {
+	static Data buildRandomCase(int caseId, int n, int machines) throws IOException {
 		Random random = new Random(20260517L + caseId * 97L);
 		Data data = loadBaseDataQuietly();
 		data.n = n;
@@ -151,7 +151,7 @@ public class SmallExactHeuristicBatchTest {
 		return data;
 	}
 
-	private Data loadBaseDataQuietly() throws IOException {
+	private static Data loadBaseDataQuietly() throws IOException {
 		PrintStream oldOut = System.out;
 		try {
 			// Data 构造函数会运行一次旧的 Cmax 改进启发式并打印信息。
@@ -163,7 +163,7 @@ public class SmallExactHeuristicBatchTest {
 		}
 	}
 
-	private double computeSafeHorizon(Data data) {
+	private static double computeSafeHorizon(Data data) {
 		double sumP = 0.0;
 		double maxSetup = 0.0;
 		double maxDue = 0.0;

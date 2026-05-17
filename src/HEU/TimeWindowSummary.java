@@ -16,6 +16,8 @@ final class TimeWindowSummary {
 	static final TimeWindowSummary EMPTY = new TimeWindowSummary(true, true, 0, 0, 0, 0);
 
 	final boolean empty;
+	// 2026-05-17: 正向原机器片段通常继承可行解而为 true；保留该标记主要是保护 reverse 片段和外包片段。
+	// 后续若要优化预处理，可先算该摘要，若 feasible=false 则跳过对应片段的分段函数构造或写成全 M 函数。
 	final boolean feasible;
 	final int firstJob;
 	final int lastJob;

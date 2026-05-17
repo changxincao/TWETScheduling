@@ -351,6 +351,11 @@ public class Data {
 		}
 	}
 
+	/**
+	 * 2026-05-16: 预处理 B_ij。
+	 * B_ij = max_k [kappa_ik - kappa_ij - kappa_jk]^+，表示从 i 后面删除 j、
+	 * 改接到 k 时最多能节省多少 setup cost。pricing 扩展 i->j 时直接使用该值。
+	 */
 	public void precomputeSetupCostAdvantages() {
 		if (setupCostAdvantage == null || setupCostAdvantage.length != n + 1) {
 			setupCostAdvantage = new double[n + 1][n + 1];

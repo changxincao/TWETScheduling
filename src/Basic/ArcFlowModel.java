@@ -1,6 +1,7 @@
 package Basic;
 
 import Basic.Data;
+import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import ilog.concert.*;
 import ilog.cplex.IloCplex;
@@ -32,6 +33,21 @@ public class ArcFlowModel {
 	public IloNumVar[] C; // start/completion time of job j
 	public IloNumVar[] E; // earliness
 	public IloNumVar[] T; // tardiness
+	public IloNumVar[] y; // 2026-05-17: y[j]=1 表示任务 j 外包，不进入内部机器路径
+	public IloNumVar[] outsourceSegmentActive; // 外包总成本 G(B) 的分段选择变量
+	public IloNumVar[] outsourceSegmentBaseline; // 每个分段承接的 baseline 外包成本 q_l
+	private ArrayList<TariffSegment> outsourcingTariffSegments;
+
+	private static final class TariffSegment {
+		double start, end, slope, intercept;
+
+		TariffSegment(double start, double end, double slope, double intercept) {
+			this.start = start;
+			this.end = end;
+			this.slope = slope;
+			this.intercept = intercept;
+		}
+	}
 
 	/* ---------- constructor ---------- */
 	public ArcFlowModel(Data data) throws IloException {
@@ -62,6 +78,20 @@ public class ArcFlowModel {
 		C = cplex.numVarArray(data.n + 1, 0, Double.MAX_VALUE, IloNumVarType.Float); // C[0] will be fixed to 0
 		E = cplex.numVarArray(data.n + 1, 0, Double.MAX_VALUE, IloNumVarType.Float);
 		T = cplex.numVarArray(data.n + 1, 0, Double.MAX_VALUE, IloNumVarType.Float);
+		y = new IloNumVar[data.n + 1];
+		for (int j = 1; j <= data.n; j++) {
+			y[j] = cplex.boolVar("outsource_" + j);
+			cplex.add(y[j]);
+		}
+		outsourcingTariffSegments = collectOutsourcingTariffSegments();
+		outsourceSegmentActive = new IloNumVar[outsourcingTariffSegments.size()];
+		outsourceSegmentBaseline = new IloNumVar[outsourcingTariffSegments.size()];
+		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
+			outsourceSegmentActive[l] = cplex.boolVar("outsourceTariff_" + l);
+			outsourceSegmentBaseline[l] = cplex.numVar(0, Double.MAX_VALUE, "outsourceBaseline_" + l);
+			cplex.add(outsourceSegmentActive[l]);
+			cplex.add(outsourceSegmentBaseline[l]);
+		}
 		// 变量是整数的时候这几个设置为整数更快一点,区别不大
 		for (int i = 0; i < data.n + 1; i++) {
 			C[i].setName("C_" + i);
@@ -83,7 +113,7 @@ public class ArcFlowModel {
 				if (i != j)
 					incoming.add(x[i][j]);
 			}
-			cplex.addEq(cplex.sum(incoming.toArray(IloNumVar[]::new)), 1, "inFlow_" + j);
+			cplex.addEq(cplex.sum(cplex.sum(incoming.toArray(IloNumVar[]::new)), y[j]), 1, "cover_" + j);
 		}
 
 		/* (2) each job has exactly one successor (outgoing‑flow) */
@@ -93,8 +123,9 @@ public class ArcFlowModel {
 				if (i != j)
 					outgoing.add(x[i][j]);
 			}
-			cplex.addEq(cplex.sum(outgoing.toArray(IloNumVar[]::new)), 1, "outFlow_" + i);
+			cplex.addEq(cplex.sum(cplex.sum(outgoing.toArray(IloNumVar[]::new)), y[i]), 1, "outFlow_" + i);
 		}
+		addOutsourcingTariffConstraints();
 
 		/* (3) at most m jobs are launched from the dummy source */
 		List<IloNumVar> firstArcs = new ArrayList<>();
@@ -153,7 +184,49 @@ public class ArcFlowModel {
 				}
 			}
 		}
+		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
+			TariffSegment seg = outsourcingTariffSegments.get(l);
+			obj.addTerm(seg.slope, outsourceSegmentBaseline[l]);
+			obj.addTerm(seg.intercept, outsourceSegmentActive[l]);
+		}
 		cplex.addMinimize(obj, "TotalPenalty");
+	}
+
+	private ArrayList<TariffSegment> collectOutsourcingTariffSegments() {
+		data.evaluateOutsourcingCost(0);
+		ArrayList<TariffSegment> segments = new ArrayList<TariffSegment>();
+		PiecewiseLinearFunction.Segment seg = data.outsourcingCostFunction.head;
+		while (seg != null) {
+			segments.add(new TariffSegment(seg.start, seg.end, seg.slope, seg.intercept));
+			seg = seg.next;
+		}
+		return segments;
+	}
+
+	private void addOutsourcingTariffConstraints() throws IloException {
+		// 2026-05-17: 模仿 SP2 的外包变量建模。y_j 表示任务是否外包，
+		// q=sum b_j y_j，再通过一组选段变量表达总外包成本 G(q)。
+		IloLinearNumExpr baselineFromJobs = cplex.linearNumExpr();
+		for (int j = 1; j <= data.n; j++) {
+			if (Utility.isBigMValue(data.outsourcingCost[j])) {
+				cplex.addEq(y[j], 0, "outsourceDisabled_" + j);
+			} else {
+				baselineFromJobs.addTerm(data.outsourcingCost[j], y[j]);
+			}
+		}
+		IloLinearNumExpr baselineFromSegments = cplex.linearNumExpr();
+		IloLinearNumExpr active = cplex.linearNumExpr();
+		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
+			TariffSegment seg = outsourcingTariffSegments.get(l);
+			baselineFromSegments.addTerm(1.0, outsourceSegmentBaseline[l]);
+			active.addTerm(1.0, outsourceSegmentActive[l]);
+			cplex.addGe(outsourceSegmentBaseline[l], cplex.prod(seg.start, outsourceSegmentActive[l]),
+					"outsourceSegLB_" + l);
+			cplex.addLe(outsourceSegmentBaseline[l], cplex.prod(seg.end, outsourceSegmentActive[l]),
+					"outsourceSegUB_" + l);
+		}
+		cplex.addEq(baselineFromJobs, baselineFromSegments, "outsourceBaselineBalance");
+		cplex.addEq(active, 1, "outsourceOneTariffSegment");
 	}
 
 	/* ---------- solve & accessors ---------- */
@@ -175,6 +248,17 @@ public class ArcFlowModel {
 	/** @return 当前模型内部使用的 CPLEX 对象。 */
 	public IloCplex getCplex() {
 		return cplex;
+	}
+
+	/** @return 当前解中被外包的任务编号。 */
+	public ArrayList<Integer> extractOutsourcedJobs() throws IloException {
+		ArrayList<Integer> outsourced = new ArrayList<Integer>();
+		for (int j = 1; j <= data.n; j++) {
+			if (y[j] != null && Utility.compareGe(cplex.getValue(y[j]), 0.5)) {
+				outsourced.add(j);
+			}
+		}
+		return outsourced;
 	}
 
 	/**

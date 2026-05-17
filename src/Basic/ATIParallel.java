@@ -1,5 +1,6 @@
 package Basic;
 
+import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import ilog.concert.*;
 import ilog.cplex.IloCplex;
@@ -40,6 +41,16 @@ public class ATIParallel {
         }
     }
 
+    private static final class TariffSegment {
+        double start, end, slope, intercept;
+        TariffSegment(double start, double end, double slope, double intercept) {
+            this.start = start;
+            this.end = end;
+            this.slope = slope;
+            this.intercept = intercept;
+        }
+    }
+
     private Data d;
     private int H;
     private IloCplex cpx;
@@ -52,6 +63,10 @@ public class ATIParallel {
     private Map<Node, List<Arc>> incomingArcsByNode; // Cache incoming arcs for flow
     private Map<Node, List<Arc>> outgoingArcsByNode; // Cache outgoing arcs for flow
     private List<Arc> a2Arcs; // Cache A^2 arcs for capacity constraint
+    private IloNumVar[] y; // 2026-05-17: y[j]=1 表示任务 j 外包，不进入时间扩展网络
+    private IloNumVar[] outsourceSegmentActive;
+    private IloNumVar[] outsourceSegmentBaseline;
+    private ArrayList<TariffSegment> outsourcingTariffSegments;
 
     public ATIParallel(Data data) throws IloException {
         this.d = data;
@@ -176,6 +191,17 @@ public class ATIParallel {
         for (int idx = 0; idx < arcList.size(); idx++) {
             x[idx] = cpx.numVar(0, d.m,IloNumVarType.Float, "x_" + idx);
         }
+        y = new IloNumVar[d.n + 1];
+        for (int j = 1; j <= d.n; j++) {
+            y[j] = cpx.boolVar("outsource_" + j);
+        }
+        outsourcingTariffSegments = collectOutsourcingTariffSegments();
+        outsourceSegmentActive = new IloNumVar[outsourcingTariffSegments.size()];
+        outsourceSegmentBaseline = new IloNumVar[outsourcingTariffSegments.size()];
+        for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
+            outsourceSegmentActive[l] = cpx.boolVar("outsourceTariff_" + l);
+            outsourceSegmentBaseline[l] = cpx.numVar(0, Double.MAX_VALUE, "outsourceBaseline_" + l);
+        }
     }
 
     private void addConstraintsAndObjective() throws IloException {
@@ -184,16 +210,23 @@ public class ATIParallel {
         for (Arc arc : arcList) {
             obj.addTerm(arc.cost, x[arc.index]);
         }
+        for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
+            TariffSegment seg = outsourcingTariffSegments.get(l);
+            obj.addTerm(seg.slope, outsourceSegmentBaseline[l]);
+            obj.addTerm(seg.intercept, outsourceSegmentActive[l]);
+        }
         cpx.addMinimize(obj);
 
-        // Constraint (2): Each job processed exactly once
+        // Constraint (2): Each job is either processed internally exactly once or outsourced.
         for (int j = 1; j <= d.n; j++) {
             IloLinearNumExpr expr = cpx.linearNumExpr();
             for (Arc arc : incomingArcsByJob.get(j)) {
                 expr.addTerm(1, x[arc.index]);
             }
+            expr.addTerm(1, y[j]);
             cpx.addEq(expr, 1, "job_" + j);
         }
+        addOutsourcingTariffConstraints();
 
         // Constraint (3): Machine capacity
         IloLinearNumExpr capExpr = cpx.linearNumExpr();
@@ -216,6 +249,43 @@ public class ATIParallel {
         }
     }
 
+    private ArrayList<TariffSegment> collectOutsourcingTariffSegments() {
+        d.evaluateOutsourcingCost(0);
+        ArrayList<TariffSegment> segments = new ArrayList<TariffSegment>();
+        PiecewiseLinearFunction.Segment seg = d.outsourcingCostFunction.head;
+        while (seg != null) {
+            segments.add(new TariffSegment(seg.start, seg.end, seg.slope, seg.intercept));
+            seg = seg.next;
+        }
+        return segments;
+    }
+
+    private void addOutsourcingTariffConstraints() throws IloException {
+        // 2026-05-17: 和 SP2 一样，外包由 y_j 覆盖任务，G(sum b_j y_j)
+        // 通过一组选段变量线性化；任务若没有有效 b_j，则固定为不能外包。
+        IloLinearNumExpr baselineFromJobs = cpx.linearNumExpr();
+        for (int j = 1; j <= d.n; j++) {
+            if (Utility.isBigMValue(d.outsourcingCost[j])) {
+                cpx.addEq(y[j], 0, "outsourceDisabled_" + j);
+            } else {
+                baselineFromJobs.addTerm(d.outsourcingCost[j], y[j]);
+            }
+        }
+        IloLinearNumExpr baselineFromSegments = cpx.linearNumExpr();
+        IloLinearNumExpr active = cpx.linearNumExpr();
+        for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
+            TariffSegment seg = outsourcingTariffSegments.get(l);
+            baselineFromSegments.addTerm(1.0, outsourceSegmentBaseline[l]);
+            active.addTerm(1.0, outsourceSegmentActive[l]);
+            cpx.addGe(outsourceSegmentBaseline[l], cpx.prod(seg.start, outsourceSegmentActive[l]),
+                    "outsourceSegLB_" + l);
+            cpx.addLe(outsourceSegmentBaseline[l], cpx.prod(seg.end, outsourceSegmentActive[l]),
+                    "outsourceSegUB_" + l);
+        }
+        cpx.addEq(baselineFromJobs, baselineFromSegments, "outsourceBaselineBalance");
+        cpx.addEq(active, 1, "outsourceOneTariffSegment");
+    }
+
     public boolean solve() throws IloException {
         return cpx.solve();
     }
@@ -232,6 +302,17 @@ public class ATIParallel {
     /** @return 当前模型内部使用的 CPLEX 对象。 */
     public IloCplex getCplex() {
         return cpx;
+    }
+
+    /** @return 当前解中被外包的任务编号。 */
+    public ArrayList<Integer> extractOutsourcedJobs() throws IloException {
+        ArrayList<Integer> outsourced = new ArrayList<Integer>();
+        for (int j = 1; j <= d.n; j++) {
+            if (y[j] != null && Utility.compareGe(cpx.getValue(y[j]), 0.5)) {
+                outsourced.add(j);
+            }
+        }
+        return outsourced;
     }
 
     /**

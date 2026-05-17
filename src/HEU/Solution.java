@@ -1176,17 +1176,44 @@ public class Solution {
 		if (size == 0) {
 			return;
 		}
-		for (int from = 0; from < size; from++) {
-			for (int to = from; to < size; to++) {
-				ArrayList<Integer> normal = new ArrayList<Integer>(seq.subList(from, to + 1));
-				timeWindowSummary_hg[m][from][to] = TimeWindowSummary.of(data, normal);
-				if (from == to) {
-					timeWindowSummary_gh[m][from][to] = timeWindowSummary_hg[m][from][to];
-				} else {
-					ArrayList<Integer> reversed = new ArrayList<Integer>(normal);
-					Collections.reverse(reversed);
-					timeWindowSummary_gh[m][from][to] = TimeWindowSummary.of(data, reversed);
+		// 2026-05-17: 硬窗摘要只用于 move 前安全剪枝，这里按二维递推构造，
+		// 避免每个 [from,to] 都复制 subList 再重新扫描，构建复杂度从区间反复扫描降为 O(n^2)。
+		for (int to = 0; to < size; to++) {
+			int last = seq.get(to);
+			double latest = data.hardWindowEnd[last];
+			double durationAfterFirst = 0;
+			boolean feasible = !Utility.compareGt(data.hardWindowStart[last], latest);
+			for (int from = to; from >= 0; from--) {
+				int first = seq.get(from);
+				if (from < to) {
+					int next = seq.get(from + 1);
+					durationAfterFirst += data.s[first][next] + data.p[next];
+					latest = Math.min(data.hardWindowEnd[first], latest - data.s[first][next] - data.p[next]);
+					if (Utility.compareLt(latest, data.hardWindowStart[first])) {
+						feasible = false;
+					}
 				}
+				timeWindowSummary_hg[m][from][to] = TimeWindowSummary.fromComputed(feasible, first, last,
+						durationAfterFirst, latest);
+			}
+		}
+		for (int from = 0; from < size; from++) {
+			int last = seq.get(from);
+			double latest = data.hardWindowEnd[last];
+			double durationAfterFirst = 0;
+			boolean feasible = !Utility.compareGt(data.hardWindowStart[last], latest);
+			for (int to = from; to < size; to++) {
+				int first = seq.get(to);
+				if (to > from) {
+					int next = seq.get(to - 1);
+					durationAfterFirst += data.s[first][next] + data.p[next];
+					latest = Math.min(data.hardWindowEnd[first], latest - data.s[first][next] - data.p[next]);
+					if (Utility.compareLt(latest, data.hardWindowStart[first])) {
+						feasible = false;
+					}
+				}
+				timeWindowSummary_gh[m][from][to] = TimeWindowSummary.fromComputed(feasible, first, last,
+						durationAfterFirst, latest);
 			}
 		}
 	}

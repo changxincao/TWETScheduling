@@ -32,6 +32,11 @@ final class TimeWindowSummary {
 		this.latestFirstCompletion = latestFirstCompletion;
 	}
 
+	static TimeWindowSummary fromComputed(boolean feasible, int firstJob, int lastJob, double durationAfterFirst,
+			double latestFirstCompletion) {
+		return new TimeWindowSummary(false, feasible, firstJob, lastJob, durationAfterFirst, latestFirstCompletion);
+	}
+
 	static TimeWindowSummary of(Data data, List<Integer> jobs) {
 		if (jobs == null || jobs.isEmpty()) {
 			return EMPTY;

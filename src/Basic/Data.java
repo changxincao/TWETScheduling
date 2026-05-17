@@ -382,6 +382,8 @@ public class Data {
 	 * setup time 影响时间递推，setup cost 只影响目标值；两者共享同一条弧 i->j。
 	 */
 	private void loadSetupMatrices(BufferedReader reader) throws IOException {
+		// 2026-05-17: 当前 OUTSOURCING_COST/OUTSOURCING_TARIFF 也作为 SETUP 后的 optional block 读取。
+		// 因此带外包的正式数据需要走 setup=true；若以后要在无 setup 数据里单独启用外包，应把 optional block 解析拆到更外层。
 		String line = nextNonEmptyLine(reader);
 		if (line == null) {
 			return;
@@ -448,6 +450,9 @@ public class Data {
 	private void fillOutsourcingTariff(BufferedReader reader) throws IOException {
 		int segmentCount = Integer.parseInt(nextNonEmptyLine(reader).trim());
 		outsourcingCostFunction = new PiecewiseLinearFunction(0, Utility.big_M);
+		// 2026-05-17: 这里读取的是总外包成本函数 G(B) 的分段。
+		// 数据生成时要保证分段覆盖 B=0 和所有可能的 sum b_j；通常还应让 G(0)=0，
+		// 否则“没有任务外包”也会因为选段截距产生固定外包费用。
 		for (int i = 0; i < segmentCount; i++) {
 			String[] tokens = splitTokens(reader.readLine());
 			if (tokens.length != 4) {

@@ -40,15 +40,23 @@ public class SmallExactHeuristicBatchTest {
 
 		int matched = 0;
 		double maxGap = 0.0;
+		long totalExactMillis = 0L;
+		long totalHeuristicMillis = 0L;
 		long start = System.currentTimeMillis();
 		try (BufferedWriter writer = Files.newBufferedWriter(csv)) {
-			writer.write("case_id,n,m,exact,heuristic,gap,exact_outsourced,best_seed,status\n");
+			writer.write("case_id,n,m,exact,heuristic,gap,exact_ms,heuristic_ms,exact_outsourced,best_seed,status\n");
 			for (int caseId = 0; caseId < CASES; caseId++) {
 				int n = 6 + caseId % 3;
 				Data data = buildRandomCase(caseId, n, 2);
 
+				long exactStart = System.currentTimeMillis();
 				ExactResult exact = solveExact(data);
+				long exactMillis = System.currentTimeMillis() - exactStart;
+				long heuristicStart = System.currentTimeMillis();
 				HeuristicResult heuristic = solveHeuristic(data, caseId);
+				long heuristicMillis = System.currentTimeMillis() - heuristicStart;
+				totalExactMillis += exactMillis;
+				totalHeuristicMillis += heuristicMillis;
 				double gap = heuristic.objective - exact.objective;
 				maxGap = Math.max(maxGap, Math.max(0.0, gap));
 				boolean ok = Math.abs(gap) <= TOL;
@@ -57,17 +65,20 @@ public class SmallExactHeuristicBatchTest {
 				}
 
 				writer.write(caseId + "," + data.n + "," + data.m + "," + exact.objective + ","
-						+ heuristic.objective + "," + gap + "," + exact.outsourcedJobs + ","
+						+ heuristic.objective + "," + gap + "," + exactMillis + "," + heuristicMillis + ","
+						+ exact.outsourcedJobs + ","
 						+ heuristic.bestSeed + "," + (ok ? "OK" : "GAP") + "\n");
-				System.out.printf("case=%02d n=%d exact=%.6f heuristic=%.6f gap=%.6g outsourced=%d %s%n",
-						caseId, data.n, exact.objective, heuristic.objective, gap, exact.outsourcedJobs,
+				System.out.printf("case=%02d n=%d exact=%.6f heuristic=%.6f gap=%.6g exactMs=%d heuristicMs=%d outsourced=%d %s%n",
+						caseId, data.n, exact.objective, heuristic.objective, gap, exactMillis, heuristicMillis,
+						exact.outsourcedJobs,
 						ok ? "OK" : "GAP");
 			}
 		}
 
 		double seconds = (System.currentTimeMillis() - start) / 1000.0;
-		System.out.printf("SmallExactHeuristicBatchTest finished: matched=%d/%d, maxGap=%.6g, time=%.2fs, csv=%s%n",
-				matched, CASES, maxGap, seconds, csv);
+		System.out.printf("SmallExactHeuristicBatchTest finished: matched=%d/%d, maxGap=%.6g, avgExactMs=%.2f, avgHeuristicMs=%.2f, time=%.2fs, csv=%s%n",
+				matched, CASES, maxGap, totalExactMillis / (double) CASES, totalHeuristicMillis / (double) CASES,
+				seconds, csv);
 		if (matched != CASES) {
 			throw new AssertionError("Heuristic did not match exact result in all small cases. See " + csv);
 		}

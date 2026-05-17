@@ -48,7 +48,7 @@ public class SmallExactHeuristicBatchTest {
 		long totalHeuristicMillis = 0L;
 		long start = System.currentTimeMillis();
 		try (BufferedWriter writer = Files.newBufferedWriter(csv)) {
-			writer.write("case_id,n,m,arcflow,parallel,heuristic,parallel_gap,heuristic_gap,arcflow_ms,parallel_ms,heuristic_ms,arcflow_outsourced,parallel_outsourced,best_seed,status\n");
+			writer.write("case_id,n,m,arcflow,parallel,heuristic,parallel_gap,heuristic_gap,arcflow_ms,parallel_ms,heuristic_ms,arcflow_outsourced,parallel_outsourced,best_seed,seed_best_count,seed_worst,seed_range,all_seeds_same,status\n");
 			for (int caseId = 0; caseId < CASES; caseId++) {
 				int n = 6 + caseId % 3;
 				Data data = buildRandomCase(caseId, n, 2);
@@ -83,10 +83,12 @@ public class SmallExactHeuristicBatchTest {
 						+ parallel.objective + "," + heuristic.objective + "," + parallelGap + ","
 						+ heuristicGap + "," + exactMillis + "," + parallelMillis + "," + heuristicMillis + ","
 						+ exact.outsourcedJobs + "," + parallel.outsourcedJobs + ","
-						+ heuristic.bestSeed + "," + (ok ? "OK" : "GAP") + "\n");
-				System.out.printf("case=%02d n=%d arc=%.6f parallel=%.6f heu=%.6f pGap=%.6g hGap=%.6g arcMs=%d parallelMs=%d heuMs=%d outsourced=%d/%d %s%n",
+						+ heuristic.bestSeed + "," + heuristic.bestCount + "," + heuristic.worstObjective + ","
+						+ heuristic.seedRange + "," + heuristic.allSeedsSame + "," + (ok ? "OK" : "GAP") + "\n");
+				System.out.printf("case=%02d n=%d arc=%.6f parallel=%.6f heu=%.6f pGap=%.6g hGap=%.6g seedRange=%.6g bestSeeds=%d/%d arcMs=%d parallelMs=%d heuMs=%d outsourced=%d/%d %s%n",
 						caseId, data.n, exact.objective, parallel.objective, heuristic.objective,
-						parallelGap, heuristicGap, exactMillis, parallelMillis, heuristicMillis,
+						parallelGap, heuristicGap, heuristic.seedRange, heuristic.bestCount, RESTARTS,
+						exactMillis, parallelMillis, heuristicMillis,
 						exact.outsourcedJobs, parallel.outsourcedJobs,
 						ok ? "OK" : "GAP");
 			}
@@ -219,7 +221,9 @@ public class SmallExactHeuristicBatchTest {
 			EngineALNS.ratioChangeNoImpIterN = 8;
 
 			double best = Utility.big_M;
+			double worst = -Utility.big_M;
 			long bestSeed = -1;
+			int bestCount = 0;
 			for (int restart = 0; restart < RESTARTS; restart++) {
 				long seed = 202605170000L + caseId * 1000L + restart;
 				Utility.resetCurUpperBound(Utility.big_M);
@@ -242,9 +246,13 @@ public class SmallExactHeuristicBatchTest {
 				if (Utility.compareLt(value, best)) {
 					best = value;
 					bestSeed = seed;
+					bestCount = 1;
+				} else if (Math.abs(value - best) <= TOL) {
+					bestCount++;
 				}
+				worst = Math.max(worst, value);
 			}
-			return new HeuristicResult(best, bestSeed);
+			return new HeuristicResult(best, worst, worst - best, bestSeed, bestCount);
 		} finally {
 			EngineALNS.maxNoImpIterN = oldMaxNoImp;
 			EngineALNS.maxremRatioChangeN = oldMaxRatioChange;
@@ -264,11 +272,19 @@ public class SmallExactHeuristicBatchTest {
 
 	private static final class HeuristicResult {
 		final double objective;
+		final double worstObjective;
+		final double seedRange;
 		final long bestSeed;
+		final int bestCount;
+		final boolean allSeedsSame;
 
-		HeuristicResult(double objective, long bestSeed) {
+		HeuristicResult(double objective, double worstObjective, double seedRange, long bestSeed, int bestCount) {
 			this.objective = objective;
+			this.worstObjective = worstObjective;
+			this.seedRange = seedRange;
 			this.bestSeed = bestSeed;
+			this.bestCount = bestCount;
+			this.allSeedsSame = seedRange <= TOL;
 		}
 	}
 }

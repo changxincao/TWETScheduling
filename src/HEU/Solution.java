@@ -250,7 +250,7 @@ public class Solution {
 
 	public void addOutsourcedJobs(List<Integer> jobs) {
 		// 2026-05-16: b_j 只是 baseline，真正成本按 G(B(O)) 统一评价。
-		// 因此增删任务时必须用函数差分更新，而不是简单加减 b_j。
+		// 因此增删任务时必须重算 G(B)，而不是简单加减 b_j。
 		outsourcedJobs.addAll(jobs);
 		recomputeOutsourcingCostAndCurCost();
 	}
@@ -279,10 +279,20 @@ public class Solution {
 	}
 
 	private void recomputeOutsourcingCostAndCurCost() {
-		double oldCost = outsourcingCostTotal;
 		outsourcingBaselineTotal = getOutsourcingBaseline(outsourcedJobs);
 		outsourcingCostTotal = data.evaluateOutsourcingCost(outsourcingBaselineTotal);
-		curCost += outsourcingCostTotal - oldCost;
+		// 2026-05-17: 外包 move 的提交通常是“先改真实机器，再改外包集合”。
+		// 如果只在旧 curCost 上做 G(B) 差分，就会依赖前一步的中间状态是否绝对准确。
+		// 这里直接从所有机器 cost[m] 和最新 G(B) 重新汇总，避免分步提交时的中间状态误差继续传播。
+		refreshCurCostFromComponents();
+	}
+
+	private void refreshCurCostFromComponents() {
+		double totalCost = outsourcingCostTotal;
+		for (int m = 0; m < data.m; m++) {
+			totalCost += cost[m];
+		}
+		curCost = totalCost;
 	}
 
 	private PiecewiseLinearFunction addSetupCost(PiecewiseLinearFunction function, int fromJob, int toJob) {
@@ -770,17 +780,11 @@ public class Solution {
 		calCost(m);
 		curCost += cost[m];
 
-		// TODO bound验证
-		double totalCost = 0;
-		for (int m1 = 0; m1 < data.m; m1++) {
-			totalCost += cost[m1];
-		}
-		totalCost += outsourcingCostTotal;
 		// 2026-05-17: curCost 必须始终保存真实目标值，不能用 curUpperBound 截断。
 		// 旧逻辑把劣解成本压成当前上界，和 cost[m]/outsourcingCostTotal 的分项值割裂；
 		// 外包 move 后续按 G(B) 的差分更新 curCost 时，会从被截断的 curCost 中减去真实旧外包成本，
 		// 极端情况下把解成本更新成巨大负数。剪枝仍由 Utility.curUpperBound 控制，但解对象自身不再截断。
-		curCost = totalCost;
+		refreshCurCostFromComponents();
 
 		initialize_function(m);// 数组重新设置长度
 		updateFunctions2ForMachine(m);

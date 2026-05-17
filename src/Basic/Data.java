@@ -77,6 +77,7 @@ public class Data {
 
 //        Cmax=7700;
 		setPreprocessedHardWindows();
+		tightenCmaxByPreprocessedHardWindows();
 		setPenaltyFunctions();
 		for (int i = 1; i < n + 1; i++) {
 			double minSi = Utility.big_M;
@@ -324,6 +325,32 @@ public class Data {
 	 * 这里先按当前任务点 1..n 扫 k；论文里的终点 n+1 若 setup cost 为 0，只会贡献非正项，不影响 max(.,0)。
 	 * 后续 pricing 扩展 i -> j 时可以直接使用 setupCostAdvantage[i][j]，不用每次扩展再扫 k。
 	 */
+	/**
+	 * 2026-05-17: 用预处理粗硬窗反向收紧全局时间 horizon。
+	 * <p>
+	 * setPreprocessedHardWindows() 之后，每个 job 的 completion 已经被限制在
+	 * [hardWindowStart[j], hardWindowEnd[j]] 内；窗口外会在 penaltyFunction 中写成 big_M，
+	 * 不再是有意义的内部加工完成时间。因此若所有 job 的 hardWindowEnd 最大值已经小于当前 CmaxH，
+	 * 可以先把 CmaxH 收到这个最大右端，再构造分段函数，减少启发式和 BPC pricing 维护的无效尾段。
+	 * <p>
+	 * 这里不使用 pricing dual。dual 相关的 H_ij 仍只在 pricing 扩展 i->j 时动态计算，避免同一轮
+	 * RMP 下不同列使用不同全局 horizon。
+	 */
+	private void tightenCmaxByPreprocessedHardWindows() {
+		double tightened = 0.0;
+		for (int j = 1; j <= n; j++) {
+			if (!Double.isFinite(hardWindowEnd[j])) {
+				return;
+			}
+			tightened = Math.max(tightened, hardWindowEnd[j]);
+		}
+		if (Utility.compareGt(tightened, 0.0) && Utility.compareLt(tightened, CmaxH)) {
+			CmaxH = tightened;
+			CmaxE = Math.min(CmaxE, CmaxH);
+			hardWindowEnd[0] = CmaxH;
+		}
+	}
+
 	public void precomputeSetupCostAdvantages() {
 		if (setupCostAdvantage == null || setupCostAdvantage.length != n + 1) {
 			setupCostAdvantage = new double[n + 1][n + 1];

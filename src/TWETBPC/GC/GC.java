@@ -83,7 +83,7 @@ public class GC {
 		// 每条内部机器列在 RMP 的机器数约束中系数为 1，因此初始化时扣除该约束 dual。
 		frontier.shiftYInPlace(-lp.getMachineDual());
 		frontier.normalize(Direction.FORWARD);
-		Label source = new Label(0, null, visited, buildReachableSet(0, visited, lp.getNode()), frontier);
+		Label source = new Label(0, null, visited, buildReachableSet(0, visited, lp.getNode(), frontier, lp), frontier);
 		TL.get(0).insertOrDominate(source);
 		UL.add(source);
 	}
@@ -96,6 +96,9 @@ public class GC {
 	}
 
 	private Label extend(Label label, int nextJob, LP lp) {
+		if (!isDirectExtensionTimeFeasible(label.frontier, label.jid, nextJob, lp)) {
+			return null;
+		}
 		double delay = data.getSetUp(label.jid, nextJob) + data.getProcessT(nextJob);
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
 		if (shifted.head == null) {
@@ -124,7 +127,28 @@ public class GC {
 
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
-		return new Label(nextJob, label, visited, buildReachableSet(nextJob, visited, lp.getNode()), nextFrontier);
+		return new Label(nextJob, label, visited, buildReachableSet(nextJob, visited, lp.getNode(), nextFrontier, lp),
+				nextFrontier);
+	}
+
+	/**
+	 * 2026-05-17: pricing 的轻量级时间可行性过滤。
+	 * <p>
+	 * 当前 label 的 frontier 左端表示当前末端 job 最早可能完成到的时间上界。若再接 nextJob 后的
+	 * 最早完成时间已经超过动态 H_ij 的右端，则这条扩展不可能产生有效函数，没必要再做
+	 * shift/add/normalize 这些较重的分段函数操作。
+	 */
+	private boolean isDirectExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob, LP lp) {
+		if (frontier == null || frontier.head == null) {
+			return false;
+		}
+		double hStart = hWindowStart(prevJob, nextJob, lp);
+		double hEnd = hWindowEnd(prevJob, nextJob, lp);
+		if (Utility.compareGt(hStart, hEnd)) {
+			return false;
+		}
+		double earliestCompletion = frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
+		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, data.CmaxH);
 	}
 
 	private double hWindowStart(int prevJob, int job, LP lp) {
@@ -148,10 +172,12 @@ public class GC {
 		return data.getSetupCostAdvantage(prevJob, job) + Math.min(lp.getJobDual(job), baseline);
 	}
 
-	private PackedBitSet buildReachableSet(int fromJob, PackedBitSet visited, Node node) {
+	private PackedBitSet buildReachableSet(int fromJob, PackedBitSet visited, Node node, PiecewiseLinearFunction frontier,
+			LP lp) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && node.getArcState(fromJob, job) != Node.ARC_FORBIDDEN) {
+			if (!visited.contains(job) && node.getArcState(fromJob, job) != Node.ARC_FORBIDDEN
+					&& isDirectExtensionTimeFeasible(frontier, fromJob, job, lp)) {
 				reachable.add(job);
 			}
 		}

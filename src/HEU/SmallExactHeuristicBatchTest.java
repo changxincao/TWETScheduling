@@ -10,6 +10,7 @@ import java.util.Arrays;
 import java.util.Random;
 
 import Basic.ArcFlowModel;
+import Basic.ATIParallel;
 import Basic.Data;
 import Common.Configure;
 import Common.PiecewiseLinearFunction;
@@ -39,12 +40,15 @@ public class SmallExactHeuristicBatchTest {
 		Path csv = outputDir.resolve("2026-05-17-small-exact-heuristic.csv");
 
 		int matched = 0;
+		int parallelMatched = 0;
 		double maxGap = 0.0;
+		double maxParallelGap = 0.0;
 		long totalExactMillis = 0L;
+		long totalParallelMillis = 0L;
 		long totalHeuristicMillis = 0L;
 		long start = System.currentTimeMillis();
 		try (BufferedWriter writer = Files.newBufferedWriter(csv)) {
-			writer.write("case_id,n,m,exact,heuristic,gap,exact_ms,heuristic_ms,exact_outsourced,best_seed,status\n");
+			writer.write("case_id,n,m,arcflow,parallel,heuristic,parallel_gap,heuristic_gap,arcflow_ms,parallel_ms,heuristic_ms,arcflow_outsourced,parallel_outsourced,best_seed,status\n");
 			for (int caseId = 0; caseId < CASES; caseId++) {
 				int n = 6 + caseId % 3;
 				Data data = buildRandomCase(caseId, n, 2);
@@ -52,35 +56,49 @@ public class SmallExactHeuristicBatchTest {
 				long exactStart = System.currentTimeMillis();
 				ExactResult exact = solveExact(data);
 				long exactMillis = System.currentTimeMillis() - exactStart;
+				long parallelStart = System.currentTimeMillis();
+				ExactResult parallel = solveParallel(data);
+				long parallelMillis = System.currentTimeMillis() - parallelStart;
 				long heuristicStart = System.currentTimeMillis();
 				HeuristicResult heuristic = solveHeuristic(data, caseId);
 				long heuristicMillis = System.currentTimeMillis() - heuristicStart;
 				totalExactMillis += exactMillis;
+				totalParallelMillis += parallelMillis;
 				totalHeuristicMillis += heuristicMillis;
-				double gap = heuristic.objective - exact.objective;
-				maxGap = Math.max(maxGap, Math.max(0.0, gap));
-				boolean ok = Math.abs(gap) <= TOL;
+				double parallelGap = parallel.objective - exact.objective;
+				double heuristicGap = heuristic.objective - exact.objective;
+				maxParallelGap = Math.max(maxParallelGap, Math.abs(parallelGap));
+				maxGap = Math.max(maxGap, Math.max(0.0, heuristicGap));
+				boolean parallelOk = Math.abs(parallelGap) <= TOL;
+				boolean heuristicOk = Math.abs(heuristicGap) <= TOL;
+				boolean ok = parallelOk && heuristicOk;
+				if (parallelOk) {
+					parallelMatched++;
+				}
 				if (ok) {
 					matched++;
 				}
 
 				writer.write(caseId + "," + data.n + "," + data.m + "," + exact.objective + ","
-						+ heuristic.objective + "," + gap + "," + exactMillis + "," + heuristicMillis + ","
-						+ exact.outsourcedJobs + ","
+						+ parallel.objective + "," + heuristic.objective + "," + parallelGap + ","
+						+ heuristicGap + "," + exactMillis + "," + parallelMillis + "," + heuristicMillis + ","
+						+ exact.outsourcedJobs + "," + parallel.outsourcedJobs + ","
 						+ heuristic.bestSeed + "," + (ok ? "OK" : "GAP") + "\n");
-				System.out.printf("case=%02d n=%d exact=%.6f heuristic=%.6f gap=%.6g exactMs=%d heuristicMs=%d outsourced=%d %s%n",
-						caseId, data.n, exact.objective, heuristic.objective, gap, exactMillis, heuristicMillis,
-						exact.outsourcedJobs,
+				System.out.printf("case=%02d n=%d arc=%.6f parallel=%.6f heu=%.6f pGap=%.6g hGap=%.6g arcMs=%d parallelMs=%d heuMs=%d outsourced=%d/%d %s%n",
+						caseId, data.n, exact.objective, parallel.objective, heuristic.objective,
+						parallelGap, heuristicGap, exactMillis, parallelMillis, heuristicMillis,
+						exact.outsourcedJobs, parallel.outsourcedJobs,
 						ok ? "OK" : "GAP");
 			}
 		}
 
 		double seconds = (System.currentTimeMillis() - start) / 1000.0;
-		System.out.printf("SmallExactHeuristicBatchTest finished: matched=%d/%d, maxGap=%.6g, avgExactMs=%.2f, avgHeuristicMs=%.2f, time=%.2fs, csv=%s%n",
-				matched, CASES, maxGap, totalExactMillis / (double) CASES, totalHeuristicMillis / (double) CASES,
+		System.out.printf("SmallExactHeuristicBatchTest finished: matched=%d/%d, parallelMatched=%d/%d, maxHeuristicGap=%.6g, maxParallelGap=%.6g, avgArcFlowMs=%.2f, avgParallelMs=%.2f, avgHeuristicMs=%.2f, time=%.2fs, csv=%s%n",
+				matched, CASES, parallelMatched, CASES, maxGap, maxParallelGap,
+				totalExactMillis / (double) CASES, totalParallelMillis / (double) CASES, totalHeuristicMillis / (double) CASES,
 				seconds, csv);
 		if (matched != CASES) {
-			throw new AssertionError("Heuristic did not match exact result in all small cases. See " + csv);
+			throw new AssertionError("Parallel model or heuristic did not match ArcFlow result in all small cases. See " + csv);
 		}
 	}
 
@@ -169,6 +187,23 @@ public class SmallExactHeuristicBatchTest {
 			throw new AssertionError("ArcFlowModel did not solve case n=" + data.n);
 		}
 		double objective = model.getObjective();
+		int outsourced = model.extractOutsourcedJobs().size();
+		model.end();
+		return new ExactResult(objective, outsourced);
+	}
+
+	private ExactResult solveParallel(Data data) throws Exception {
+		Utility.resetCurUpperBound(Utility.big_M);
+		ATIParallel model = new ATIParallel(data);
+		model.getCplex().setOut(null);
+		model.getCplex().setWarning(null);
+		model.getCplex().setParam(IloCplex.DoubleParam.TiLim, 60);
+		boolean solved = model.solve();
+		if (!solved) {
+			model.end();
+			throw new AssertionError("ATIParallel did not solve case n=" + data.n);
+		}
+		double objective = model.getObj();
 		int outsourced = model.extractOutsourcedJobs().size();
 		model.end();
 		return new ExactResult(objective, outsourced);

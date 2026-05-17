@@ -65,11 +65,9 @@ public class EngineALNS {
 	//此处要对这个解重新 M 刷一次，保证ALNS可以对那些差解算出精确值
 	Utility.resetCurUpperBound(Utility.big_M);
 
-	for(int m=0;m<data.m;m++) {
-		tmpSol.curCost -= tmpSol.cost[m];
-		tmpSol.calCost(m);
-		tmpSol.curCost += tmpSol.cost[m];
-	}
+	// 2026-05-17: ALNS 会接受扰动后的较差解，进入该阶段前必须恢复真实目标值。
+	// 不能沿用 VND 阶段可能使用过的局部上界截断值，否则后续外包差分更新会破坏 curCost。
+	tmpSol.curCost = tmpSol.calCost();
 //        	double test1=Move.testSequence(data,tmpSol.sequences.get(0),tmpSol);
 //        	double test2=Move.testSequence(data,tmpSol.sequences.get(1),tmpSol);
 //        	System.out.println("当前解成本："+tmpSol.curCost+" "+(test1+test2)+" "+Utility.curUpperBound);
@@ -154,8 +152,12 @@ interface InsertionOperator {
         // 2026-05-15: 插入任务时两条新弧都要同步计入 setup cost。
         // 第一条弧属于插入后的前段函数，第二条桥接弧交给 merge2Segments 处理。
         f1.shiftYInPlace(s.data.getSetupCost(bridgeFrom1, job));
-        return s.merge2Segments(f1, b, shift2,
-                pos == seq.size() - 1 ? 0.0 : s.data.getSetupCost(job, bridgeTo2))-s.cost[m];
+        double mergedCost = s.merge2Segments(f1, b, shift2,
+                pos == seq.size() - 1 ? 0.0 : s.data.getSetupCost(job, bridgeTo2));
+        if (Move.isInvalidMoveCost(mergedCost)) {
+	return Utility.big_M;
+        }
+        return mergedCost-s.cost[m];
     }
 
     public static double evaluateOutsourcingCost(Solution s, int job) {
@@ -468,8 +470,9 @@ class RegretKInsertion implements InsertionOperator {
                 for (int m = 0; m < s.data.m; m++) {
                     for (int pos=-1; pos<s.sequences.get(m).size(); pos++) {
                         double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
-
-                        locs.add(new double[]{m,pos,d});
+                        if (!Utility.isBigMValue(d)) {
+                            locs.add(new double[]{m,pos,d});
+                        }
                     }
                 }
                 double outsourceDelta = InsertionOperator.evaluateOutsourcingCost(s, job);
@@ -520,7 +523,9 @@ class RandomizedInsertion implements InsertionOperator {
             for (int m=0;m<s.data.m;m++)
                 for (int pos=-1;pos<s.sequences.get(m).size();pos++) {
                     double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
-                    opts.add(new InsertionOption(m,pos,d));
+                    if (!Utility.isBigMValue(d)) {
+                        opts.add(new InsertionOption(m,pos,d));
+                    }
                 }
             double outsourceDelta = InsertionOperator.evaluateOutsourcingCost(s, job);
             if (!Utility.isBigMValue(outsourceDelta)) {

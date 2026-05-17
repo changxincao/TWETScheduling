@@ -776,11 +776,11 @@ public class Solution {
 			totalCost += cost[m1];
 		}
 		totalCost += outsourcingCostTotal;
-		if (Utility.compareGe(totalCost, Utility.curUpperBound)) {
-			this.curCost = Utility.curUpperBound;// 此时和各cost[m]割裂
-		} else {
-			curCost = totalCost;
-		}
+		// 2026-05-17: curCost 必须始终保存真实目标值，不能用 curUpperBound 截断。
+		// 旧逻辑把劣解成本压成当前上界，和 cost[m]/outsourcingCostTotal 的分项值割裂；
+		// 外包 move 后续按 G(B) 的差分更新 curCost 时，会从被截断的 curCost 中减去真实旧外包成本，
+		// 极端情况下把解成本更新成巨大负数。剪枝仍由 Utility.curUpperBound 控制，但解对象自身不再截断。
+		curCost = totalCost;
 
 		initialize_function(m);// 数组重新设置长度
 		updateFunctions2ForMachine(m);
@@ -1160,12 +1160,29 @@ public class Solution {
 	}
 
 	public double getNormalDuration(int m, int a, int b) {
+		// 2026-05-17: move 拼接时 [a,b] 可能表示不存在的中间段或后缀。
+		// 空片段的持续时间应为 0，统一在这里兜底，避免各算子重复做边界判断。
+		if (a > b) {
+			return 0;
+		}
+		if (a < 0 || b < 0 || a >= this.cumDurationNormal[m].length || b >= this.cumDurationNormal[m].length) {
+			throw new IllegalArgumentException("Invalid normal duration range: m=" + m + ", a=" + a + ", b=" + b
+					+ ", size=" + this.cumDurationNormal[m].length + ", seq=" + sequences.get(m));
+		}
 		return this.cumDurationNormal[m][b] - this.cumDurationNormal[m][a];
 	}
 
 	public double getReverseDuration(int m, int a, int b) {
 		// [a,b]之间元素倒置,b的完工 --- a的完工时间
+		// 2026-05-17: 反向片段同样可能为空，语义上 duration 为 0。
+		if (a > b) {
+			return 0;
+		}
 		int size = this.cumDurationReverse[m].length;
+		if (a < 0 || b < 0 || a >= size || b >= size) {
+			throw new IllegalArgumentException("Invalid reverse duration range: m=" + m + ", a=" + a + ", b=" + b
+					+ ", size=" + size + ", seq=" + sequences.get(m));
+		}
 
 		return this.cumDurationReverse[m][size - 1 - a] - this.cumDurationReverse[m][size - 1 - b];
 	}

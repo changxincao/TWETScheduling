@@ -44,6 +44,12 @@ public interface Move {
 	public boolean commit();
 	// 对当前算子下的最好的操作，更新解,若为true，则产生了更新，否则无更新
 	
+	static boolean isInvalidMoveCost(double cost) {
+		// 2026-05-17: move 的 evalDelta 返回变化成本。merge 在不可行或被上界剪掉时
+		// 会返回 curUpperBound/big_M，这类伪成本不能再减 originCost，否则可能被误判为改进。
+		return Utility.isBigMValue(cost) || Utility.compareGe(cost, Utility.curUpperBound);
+	}
+
 	public static double testSequence(Data data,ArrayList<Integer> sequence,Solution s) {
 		double[] completionF=new double[sequence.size()];
 		double[] completionB=new double[sequence.size()];
@@ -330,7 +336,7 @@ class IOptOperator implements Move {
 					s.getTimeWindowSummary(mid, to + 1, seq.size() - 1, false));
 		}
 		if (!hardWindowFeasible) {
-			return Utility.curUpperBound;
+			return Utility.big_M;
 		}
 		PiecewiseLinearFunction f1=rev?s.fFunctions_hgl_reverse[mid][from][to==-1?seq.size():to][len]:s.fFunctions_hgl_normal[mid][from][to==-1?seq.size():to][len];
 		PiecewiseLinearFunction b2=rev?s.bFunctions_hgl_reverse[mid][from][to==-1?seq.size():to][len]:s.bFunctions_hgl_normal[mid][from][to==-1?seq.size():to][len];
@@ -351,7 +357,11 @@ class IOptOperator implements Move {
 			shift = data.s[bridgeFrom][bridgeTo] + data.p[bridgeTo];
 		}
 		
-		return s.merge2Segments(f1, b2, shift, data.getSetupCost(bridgeFrom, bridgeTo))-s.cost[mid];
+		double mergedCost = s.merge2Segments(f1, b2, shift, data.getSetupCost(bridgeFrom, bridgeTo));
+		if (Move.isInvalidMoveCost(mergedCost)) {
+			return Utility.big_M;
+		}
+		return mergedCost-s.cost[mid];
 	}
 
 	@Override
@@ -522,7 +532,7 @@ class TwoOptOperator implements Move {
 				s.getTimeWindowSummary(mid, 0, aid - 1, false),
 				s.getTimeWindowSummary(mid, aid, bid, true),
 				s.getTimeWindowSummary(mid, bid + 1, size - 1, false))) {
-			return Utility.curUpperBound;
+			return Utility.big_M;
 		}
 		PiecewiseLinearFunction f1 = aid==0?data.penaltyFunction[0]:s.fFunctions.get(mid).get(aid - 1);
 
@@ -588,6 +598,9 @@ class TwoOptOperator implements Move {
 		double bridgeCost1 = data.getSetupCost(aid == 0 ? 0 : seq.get(aid - 1), seq.get(bid));
 		double bridgeCost2 = bid == size - 1 ? 0.0 : data.getSetupCost(seq.get(aid), seq.get(bid + 1));
 		double mergedCost = s.merge3Segments(f1, f2, b2, b3, shift1, shift2, duration2, bridgeCost1, bridgeCost2);
+		if (Move.isInvalidMoveCost(mergedCost)) {
+			return Utility.big_M;
+		}
 		return mergedCost-s.cost[mid];
 		
 	}
@@ -805,7 +818,7 @@ class TwoOptStarOperator implements Move {
 	/* ------- Δ 两段：各线路独立计算 ------- */
 	private double evalDelta(Solution sol, int m1, int m2, int cut1, int cut2, boolean rev1, boolean rev2) {
 		
-		if(!mergeCmaxValidation(m1, m2, cut1, cut2, rev1, rev2)) return Utility.curUpperBound;//这个返回big_M或者upperBound应该都可以
+		if(!mergeCmaxValidation(m1, m2, cut1, cut2, rev1, rev2)) return Utility.big_M;
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
 		// 2026-05-17: Vidal 式硬窗预判只做安全剪枝；通过后仍用分段函数 merge 计算真实成本。
@@ -815,7 +828,7 @@ class TwoOptStarOperator implements Move {
 				|| !s.maySequenceSatisfyHardWindows(
 						s.getTimeWindowSummary(m2, 0, cut2 - 1, false),
 						s.getTimeWindowSummary(m1, cut1, seqM1.size() - 1, rev1))) {
-			return Utility.curUpperBound;
+			return Utility.big_M;
 		}
 
 		double originCost = s.cost[m1] + s.cost[m2];
@@ -845,6 +858,9 @@ class TwoOptStarOperator implements Move {
 		int bridgeTo2 = rev1 ? seqM1.get(seqM1.size() - 1) : seqM1.get(cut1);
 		double shift2 = data.s[bridgeFrom2][bridgeTo2] + data.p[bridgeTo2];
 		double cost2 = s.merge2Segments(f1M2, b2M1, shift2, data.getSetupCost(bridgeFrom2, bridgeTo2));
+		if (Move.isInvalidMoveCost(cost1) || Move.isInvalidMoveCost(cost2)) {
+			return Utility.big_M;
+		}
 
 		// 2026-05-15: 返回的是变化成本 delta = 新两机成本 - 原两机成本，不是新解总成本；
 		// 因此 searchBest 中用 deltaCost < 0 判断是否为改进候选是正确的。
@@ -903,7 +919,7 @@ class PathInsertOperator implements Move {
 
 	/* -------- Δ：源线拼三段，目标线也拼三段 -------- */
 	private double evalDelta(Solution s, int m1, int m2, int stM1, int len, int stM2, boolean rev) {
-		if(!mergeCmaxValidation(m1, m2, stM1, len, stM2, rev)) return Utility.curUpperBound;//返回upperBound或者big_M应该都行
+		if(!mergeCmaxValidation(m1, m2, stM1, len, stM2, rev)) return Utility.big_M;
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
 		double costM1 = 0;
@@ -918,7 +934,7 @@ class PathInsertOperator implements Move {
 						s.getTimeWindowSummary(m2, 0, stM2, false),
 						splitSummary,
 						s.getTimeWindowSummary(m2, stM2 + 1, seqM2.size() - 1, false))) {
-			return Utility.curUpperBound;
+			return Utility.big_M;
 		}
 		// 对机器M1,执行两段拼接 0-st-1, st+len+1-size-1
 		PiecewiseLinearFunction f1M1 = stM1>=1?s.fFunctions.get(m1).get(stM1 - 1):data.penaltyFunction[0];
@@ -933,6 +949,9 @@ class PathInsertOperator implements Move {
 		} else {
 			costM1 = f1M1.tail.getValue(f1M1.tail.end);
 			// 否则此时机器m1只剩下第一段,不需要拼接
+		}
+		if (Move.isInvalidMoveCost(costM1)) {
+			return Utility.big_M;
 		}
 
 		// 对机器M2，执行2段或三段拼接
@@ -970,6 +989,9 @@ class PathInsertOperator implements Move {
 			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b2M2, shift1, shift2, durationSplit,
 					data.getSetupCost(bridgeFrom1, bridgeTo1),
 					stM2 == seqM2.size() - 1 ? 0.0 : data.getSetupCost(bridgeFrom2, bridgeTo2));
+			if (Move.isInvalidMoveCost(costM2)) {
+				return Utility.big_M;
+			}
 //		}
 
 		// 2026-05-15: 返回的是变化成本 delta = 新两机成本 - 原两机成本，不是总成本。
@@ -1581,17 +1603,16 @@ class OutsourcingPathInsertOperator implements Move {
 	}
 
 	private void removeMachineSegment(int m, int from, int len) {
-		s.curCost -= s.cost[m];
 		s.sequences.get(m).subList(from, from + len).clear();
-		s.calCost(m);
-		s.curCost += s.cost[m];
+		// 2026-05-17: 外包 move 会改变真实机器序列长度，不能只重算 cost。
+		// 后续普通 VND 还会使用该机器的二维函数、duration 和硬窗摘要，必须同步重建缓存。
+		s.updateInformationM(m);
 	}
 
 	private void insertMachineSegment(int m, int pos, List<Integer> segment) {
-		s.curCost -= s.cost[m];
 		s.sequences.get(m).addAll(pos + 1, segment);
-		s.calCost(m);
-		s.curCost += s.cost[m];
+		// 2026-05-17: 同 removeMachineSegment，插入外包片段后必须同步刷新机器缓存。
+		s.updateInformationM(m);
 	}
 }
 
@@ -1742,11 +1763,10 @@ class OutsourcingCrossExchangeOperator implements Move {
 	}
 
 	private void replaceMachineSegment(int m, int from, int len, List<Integer> replacement) {
-		s.curCost -= s.cost[m];
 		s.sequences.get(m).subList(from, from + len).clear();
 		s.sequences.get(m).addAll(from, replacement);
-		s.calCost(m);
-		s.curCost += s.cost[m];
+		// 2026-05-17: 替换片段可能改变机器长度和所有子序列缓存，不能只重算 cost。
+		s.updateInformationM(m);
 	}
 }
 
@@ -1929,7 +1949,7 @@ class CrossExchangeOperator implements Move {
 
 	private double evalDelta(Solution s, int m1, int m2, int stM1, int l1, int stM2, int l2, boolean rev1,
 			boolean rev2) {
-		if(!mergeCmaxValidation(m1, m2, stM1, l1, stM2, l2, rev1, rev2)) return Utility.curUpperBound;//返回upperBound或者big_M应该都行
+		if(!mergeCmaxValidation(m1, m2, stM1, l1, stM2, l2, rev1, rev2)) return Utility.big_M;
 		ArrayList<Integer> seqM1 = s.sequences.get(m1);
 		ArrayList<Integer> seqM2 = s.sequences.get(m2);
 		TimeWindowSummary splitM1 = s.getTimeWindowSummary(m1, stM1, stM1 + l1, rev1);
@@ -1942,7 +1962,7 @@ class CrossExchangeOperator implements Move {
 						s.getTimeWindowSummary(m2, 0, stM2 - 1, false),
 						splitM1,
 						s.getTimeWindowSummary(m2, stM2 + l2 + 1, seqM2.size() - 1, false))) {
-			return Utility.curUpperBound;
+			return Utility.big_M;
 		}
 		if (stM1 == 0 && stM2 == 0 && l1 == seqM1.size() - 1 && l2 == seqM2.size() - 1&&!rev1&&!rev2)
 			return 0;// 此时两个机器序列完全互换，不再往后
@@ -1987,6 +2007,9 @@ class CrossExchangeOperator implements Move {
 			costM1 = s.merge3Segments(f1M1, fSplitM2, bSplitM2, b3M1, shift1, shift2, durationSplitM2,
 					data.getSetupCost(bridgeFromM1A, bridgeToM1A),
 					stM1 + l1 == seqM1.size() - 1 ? 0.0 : data.getSetupCost(bridgeFromM1B, bridgeToM1B));
+			if (Move.isInvalidMoveCost(costM1)) {
+				return Utility.big_M;
+			}
 //		}
 
 		// 机器m2拼接
@@ -2013,6 +2036,9 @@ class CrossExchangeOperator implements Move {
 			costM2 = s.merge3Segments(f1M2, fSplitM1, bSplitM1, b3M2, shift1, shift2, durationSplitM1,
 					data.getSetupCost(bridgeFromM2A, bridgeToM2A),
 					stM2 + l2 == seqM2.size() - 1 ? 0.0 : data.getSetupCost(bridgeFromM2B, bridgeToM2B));
+			if (Move.isInvalidMoveCost(costM2)) {
+				return Utility.big_M;
+			}
 //		}
 
 		// 2026-05-15: 返回变化成本 delta = 新两机成本 - 原两机成本。

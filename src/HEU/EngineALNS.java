@@ -154,6 +154,8 @@ interface InsertionOperator {
         f1.shiftYInPlace(s.data.getSetupCost(bridgeFrom1, job));
         double mergedCost = s.merge2Segments(f1, b, shift2,
                 pos == seq.size() - 1 ? 0.0 : s.data.getSetupCost(job, bridgeTo2));
+        // 2026-05-17: merge 返回 curUpperBound/big_M 时表示该插入位置被剪枝或不可行，
+        // 不能再作为真实机器成本参与 delta。repair 阶段当前只保留可行候选。
         if (Move.isInvalidMoveCost(mergedCost)) {
 	return Utility.big_M;
         }
@@ -470,6 +472,8 @@ class RegretKInsertion implements InsertionOperator {
                 for (int m = 0; m < s.data.m; m++) {
                     for (int pos=-1; pos<s.sequences.get(m).size(); pos++) {
                         double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
+                        // 2026-05-17: regret repair 的候选池不放 big_M 插入位。
+                        // 否则后悔值排序会被不可行位置污染，甚至把不可行位置作为最优插入。
                         if (!Utility.isBigMValue(d)) {
                             locs.add(new double[]{m,pos,d});
                         }
@@ -523,6 +527,7 @@ class RandomizedInsertion implements InsertionOperator {
             for (int m=0;m<s.data.m;m++)
                 for (int pos=-1;pos<s.sequences.get(m).size();pos++) {
                     double d = InsertionOperator.evaluateInsertionCost(s,m,pos,job);
+                    // 2026-05-17: randomized repair 只在可行候选里随机，避免抽到硬窗/Cmax/merge 剪掉的位置。
                     if (!Utility.isBigMValue(d)) {
                         opts.add(new InsertionOption(m,pos,d));
                     }

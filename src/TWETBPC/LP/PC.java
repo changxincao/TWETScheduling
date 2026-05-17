@@ -33,7 +33,7 @@ public class PC {
 		// TODO 2026-04-10: 真正接入 RMP 之后，这里还要补每轮 pricing/cut 前后的 dual、
 		// reduced cost、违反度等统计；当前骨架阶段只能输出“是否找到改进”和“新增数量”。
 		TWETMasterSolution solution = lp.solveRelaxation();
-		if (solution.isInteger()) {
+		if (solution.getStatus() == TWETBPC.Model.TWETMasterStatus.INFEASIBLE) {
 			return solution;
 		}
 
@@ -61,9 +61,6 @@ public class PC {
 			}
 			lp.addColumns(newColumnIds);
 			solution = lp.solveRelaxation();
-			if (solution.isInteger()) {
-				return solution;
-			}
 		}
 
 		for (int round = 0; round < config.maxCutRounds; round++) {
@@ -87,9 +84,6 @@ public class PC {
 			}
 			lp.addCuts(newCutIds);
 			solution = lp.solveRelaxation();
-			if (solution.isInteger()) {
-				return solution;
-			}
 		}
 
 		return solution;

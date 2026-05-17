@@ -28,6 +28,7 @@ public final class BPCResultWriter {
 		Path log = dir.resolve(stem + ".log");
 		Path nodes = dir.resolve(stem + ".nodes.csv");
 		Path columns = dir.resolve(stem + ".columns.csv");
+		Path outsourcing = dir.resolve(stem + ".outsourcing.csv");
 		Path cuts = dir.resolve(stem + ".cuts.csv");
 
 		try (BufferedWriter writer = Files.newBufferedWriter(summary)) {
@@ -126,6 +127,19 @@ public final class BPCResultWriter {
 				writer.write(String.format(Locale.US, "%d,%.6f,%d,%s,%s,\"%s\"\n", column.getId(), column.getCost(),
 						column.size(), column.getSource(), Boolean.toString(column.isSeedColumn()),
 						column.getSequence().toString()));
+			}
+		}
+
+		try (BufferedWriter writer = Files.newBufferedWriter(outsourcing)) {
+			// 2026-05-17: y_j 是 RMP 的正式解变量，单独导出，避免结果只看内部机器列。
+			writer.write("jobId,value,baselineCost\n");
+			double[] values = result.getIncumbentOutsourcingValues();
+			for (int job = 1; job <= context.data.n; job++) {
+				double value = job < values.length ? values[job] : 0.0;
+				if (value > 1e-8) {
+					writer.write(String.format(Locale.US, "%d,%.6f,%.6f\n", job, value,
+							context.data.outsourcingCost[job]));
+				}
 			}
 		}
 

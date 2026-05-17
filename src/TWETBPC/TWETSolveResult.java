@@ -26,6 +26,8 @@ public final class TWETSolveResult {
 	private final int generatedColumns;
 	/** 结果中对应的列 id 集合。 */
 	private final ArrayList<Integer> incumbentColumnIds;
+	/** 2026-05-17: incumbent 中的外包变量取值，下标为 job id。*/
+	private final double[] incumbentOutsourcingValues;
 	/** 供调试/说明使用的文字信息。 */
 	private final String message;
 
@@ -34,12 +36,24 @@ public final class TWETSolveResult {
 	 */
 	public TWETSolveResult(TWETSolveStatus status, double incumbentCost, double bestBound, int processedNodes,
 			int generatedColumns, List<Integer> incumbentColumnIds, String message) {
+		this(status, incumbentCost, bestBound, processedNodes, generatedColumns, incumbentColumnIds, null, message);
+	}
+
+	/**
+	 * 2026-05-17: RMP 已经包含 y_j 外包变量，结果对象必须同时保存外包取值。
+	 * 否则含外包任务的整数解在后续校验、输出时会被误判为任务未覆盖。
+	 */
+	public TWETSolveResult(TWETSolveStatus status, double incumbentCost, double bestBound, int processedNodes,
+			int generatedColumns, List<Integer> incumbentColumnIds, double[] incumbentOutsourcingValues,
+			String message) {
 		this.status = status;
 		this.incumbentCost = incumbentCost;
 		this.bestBound = bestBound;
 		this.processedNodes = processedNodes;
 		this.generatedColumns = generatedColumns;
 		this.incumbentColumnIds = new ArrayList<Integer>(incumbentColumnIds);
+		this.incumbentOutsourcingValues = incumbentOutsourcingValues == null ? new double[0]
+				: incumbentOutsourcingValues.clone();
 		this.message = message;
 	}
 
@@ -75,6 +89,11 @@ public final class TWETSolveResult {
 	 */
 	public List<Integer> getIncumbentColumnIds() {
 		return Collections.unmodifiableList(incumbentColumnIds);
+	}
+
+	/** @return incumbent 中外包变量取值的副本 */
+	public double[] getIncumbentOutsourcingValues() {
+		return incumbentOutsourcingValues.clone();
 	}
 
 	/** @return 求解器返回的补充说明 */

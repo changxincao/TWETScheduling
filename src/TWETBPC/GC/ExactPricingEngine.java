@@ -1,27 +1,39 @@
 package TWETBPC.GC;
 
+import java.util.ArrayList;
+
+import Basic.Data;
+import TWETBPC.TWETBPCConfig;
 import TWETBPC.LP.LP;
+import TWETBPC.Model.TWETColumn;
 
 /**
- * 精确定价器占位实现。
+ * 精确定价器。
  * <p>
- * 它在职责上对应旧参考代码中的 GCNGBB 等精确定价器，
- * 后续会在这里放入 TWET 的标签扩展 / DP / 其它精确定价方法。
+ * 第一版使用单向 forward labeling，并通过 dominance graph 做完整 set dominance。
+ * 暂不接 SRI cut、partial dominance、ng-route、DSSR 或双向拼接。
  */
 public class ExactPricingEngine implements PricingEngine {
 
-	@Override
-	/**
-	 * 执行一次精确定价。
-	 * <p>
-	 * 当前仅保留占位接口。
-	 */
-	public PricingResult price(LP lp) {
-		return PricingResult.noImprovement("Exact pricing placeholder");
+	private final Data data;
+	private final TWETBPCConfig config;
+
+	public ExactPricingEngine(Data data, TWETBPCConfig config) {
+		this.data = data;
+		this.config = config;
 	}
 
 	@Override
-	/** @return 定价器名称 */
+	public PricingResult price(LP lp) {
+		GC gc = new GC(data, config);
+		ArrayList<TWETColumn> columns = gc.solve(lp);
+		if (columns.isEmpty()) {
+			return PricingResult.noImprovement("No negative reduced-cost column");
+		}
+		return new PricingResult(columns, true, "Exact forward labeling generated " + columns.size() + " columns");
+	}
+
+	@Override
 	public String getName() {
 		return "ExactPricing";
 	}

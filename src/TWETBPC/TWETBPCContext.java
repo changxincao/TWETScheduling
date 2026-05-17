@@ -10,7 +10,6 @@ import Output.BPCTraceSink;
 import Output.BPCTraceSummary;
 import TWETBPC.BP.ArcBrancher;
 import TWETBPC.BP.Brancher;
-import TWETBPC.BP.MachineCountBrancher;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.CUT.NoOpCutGenerator;
 import TWETBPC.CUT.SubsetRowCutGenerator;
@@ -54,14 +53,13 @@ public class TWETBPCContext {
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		pricingEngines.add(new HeuristicPricingEngine());
-		pricingEngines.add(new ExactPricingEngine());
+		pricingEngines.add(new ExactPricingEngine(data, config));
 
 		this.cutGenerators = new ArrayList<CutGenerator>();
 		cutGenerators.add(new NoOpCutGenerator());
 		cutGenerators.add(new SubsetRowCutGenerator());
 
 		this.branchers = new ArrayList<Brancher>();
-		branchers.add(new MachineCountBrancher(config.branchingTolerance));
 		branchers.add(new ArcBrancher(config.branchingTolerance));
 
 		this.traceSummary = new BPCTraceSummary();

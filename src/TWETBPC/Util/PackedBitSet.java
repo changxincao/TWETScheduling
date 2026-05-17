@@ -80,6 +80,29 @@ public final class PackedBitSet {
 		return false;
 	}
 
+	/**
+	 * 判断当前集合是否包含在另一个集合中。
+	 * <p>
+	 * BPC pricing 的 dominance graph 需要频繁判断“一个 label 的未来可扩展集合
+	 * 是否不强于另一个 label”。这里直接在 bit 层做子集判断，避免在外层展开成 List。
+	 */
+	public boolean isSubsetOf(PackedBitSet other) {
+		int len = Math.max(words.length, other.words.length);
+		for (int i = 0; i < len; i++) {
+			long a = i < words.length ? words[i] : 0L;
+			long b = i < other.words.length ? other.words[i] : 0L;
+			if ((a & ~b) != 0L) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** @return 当前集合是否是 {@code other} 的超集 */
+	public boolean isSupersetOf(PackedBitSet other) {
+		return other.isSubsetOf(this);
+	}
+
 	/** @return 当前位集的深拷贝 */
 	public PackedBitSet copy() {
 		return new PackedBitSet(Arrays.copyOf(words, words.length));

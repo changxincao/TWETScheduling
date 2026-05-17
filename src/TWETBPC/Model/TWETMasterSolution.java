@@ -30,6 +30,8 @@ public final class TWETMasterSolution {
 	private final TWETMasterStatus status;
 	/** 列变量值；key 是列 id，value 是该列在解中的取值。 */
 	private final LinkedHashMap<Integer, Double> columnValues;
+	/** 外包变量值；下标为 job id。 */
+	private final double[] outsourcingValues;
 	/** 当前解的目标值。 */
 	private final double objectiveValue;
 	/** 当前解是否为整数解。 */
@@ -42,8 +44,17 @@ public final class TWETMasterSolution {
 	 */
 	public TWETMasterSolution(TWETMasterStatus status, Map<Integer, Double> columnValues, double objectiveValue,
 			boolean integer, String message) {
+		this(status, columnValues, null, objectiveValue, integer, message);
+	}
+
+	/**
+	 * 构造一个包含外包变量值的主问题结果对象。
+	 */
+	public TWETMasterSolution(TWETMasterStatus status, Map<Integer, Double> columnValues, double[] outsourcingValues,
+			double objectiveValue, boolean integer, String message) {
 		this.status = status;
 		this.columnValues = new LinkedHashMap<Integer, Double>(columnValues);
+		this.outsourcingValues = outsourcingValues == null ? new double[0] : outsourcingValues.clone();
 		this.objectiveValue = objectiveValue;
 		this.integer = integer;
 		this.message = message;
@@ -57,6 +68,11 @@ public final class TWETMasterSolution {
 	/** @return 列值的只读映射 */
 	public Map<Integer, Double> getColumnValues() {
 		return Collections.unmodifiableMap(columnValues);
+	}
+
+	/** @return 外包变量值的副本；若当前主问题没有外包变量，则返回空数组 */
+	public double[] getOutsourcingValues() {
+		return outsourcingValues.clone();
 	}
 
 	/**

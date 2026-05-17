@@ -56,6 +56,7 @@ public class Tree {
 				: data.configure.bestSolution.curCost;
 		double bestBound = Double.POSITIVE_INFINITY;
 		ArrayList<Integer> incumbentColumnIds = new ArrayList<Integer>(initial.getIncumbentColumnIds());
+		double[] incumbentOutsourcingValues = initialOutsourcingValues(initial);
 		int processedNodes = 0;
 
 		while (!queue.isEmpty() && processedNodes < config.maxNodes) {
@@ -67,7 +68,12 @@ public class Tree {
 			lp.construct(node, node.seedColumnIds);
 			TWETMasterSolution solution = pc.solve(lp);
 
-			if (solution.getStatus() != TWETMasterStatus.NOT_SOLVED) {
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				traceSink.onNodeClosed(node, "infeasible_master", queue.size());
+				continue;
+			}
+
+			if (solution.getStatus() == TWETMasterStatus.LP_RELAXATION) {
 				bestBound = Math.min(bestBound, solution.getObjectiveValue());
 			}
 
@@ -75,6 +81,7 @@ public class Tree {
 			if (solution.isInteger() && Utility.compareLt(solution.getObjectiveValue(), incumbentCost)) {
 				incumbentCost = solution.getObjectiveValue();
 				incumbentColumnIds = new ArrayList<Integer>(solution.getActiveColumnIds());
+				incumbentOutsourcingValues = solution.getOutsourcingValues();
 				incumbentUpdated = true;
 				traceSink.onIncumbentUpdated(node, solution, incumbentCost);
 			}
@@ -116,7 +123,8 @@ public class Tree {
 
 		TWETSolveStatus status = processedNodes <= 1 ? TWETSolveStatus.ROOT_PROCESSED : TWETSolveStatus.FINISHED;
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, pool.size(), incumbentColumnIds,
-				"TWET BPC scaffold built; exact master/pricing/cuts remain to be completed");
+				incumbentOutsourcingValues,
+				"TWET BPC solved with LP RMP and forward exact pricing; advanced cuts/pricing remain pending");
 	}
 
 	private double incumbentCostFromInitial(InitialColumnBundle initial) {
@@ -128,6 +136,19 @@ public class Tree {
 			cost += pool.getColumn(columnId).getCost();
 		}
 		return cost;
+	}
+
+	private double[] initialOutsourcingValues(InitialColumnBundle initial) {
+		double[] values = new double[data.n + 1];
+		if (initial.getSeedSolution() == null) {
+			return values;
+		}
+		for (int job : initial.getSeedSolution().getOutsourcedJobsCopy()) {
+			if (job >= 1 && job <= data.n) {
+				values[job] = 1.0;
+			}
+		}
+		return values;
 	}
 
 }

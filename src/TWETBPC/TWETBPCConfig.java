@@ -32,6 +32,8 @@ public class TWETBPCConfig {
 	public int maxNodes = 1000;
 	/** 单个节点内最多进行多少轮 pricing。 */
 	public int maxPricingRounds = 32;
+	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列，避免一轮加列过多。 */
+	public int maxExactPricingColumns = 100;
 	/** 单个节点内最多进行多少轮 cut separation。 */
 	public int maxCutRounds = 8;
 	/** 判断是否整数时使用的容差。 */

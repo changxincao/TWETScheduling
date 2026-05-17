@@ -12,6 +12,10 @@ import ilog.cplex.IloCplex;
 /**
  * Time‑indexed formulation WITHOUT an explicit machine index.
  * Capacity is enforced by:  for every time τ,  Σ overlaps ≤ m
+ *
+ * 2026-05-17: 这个模型只保留为不含 sequence-dependent setup time / setup cost /
+ * outsourcing 的基准 time-indexed 形式。若要严格加入 setup time，需要显式刻画同一机器上的前后继，
+ * 或引入机器维度和序列状态，模型会明显复杂化；当前外包和 setup 相关实验不再沿这个模型扩展。
  */
 public class TimeIndexModel {
 

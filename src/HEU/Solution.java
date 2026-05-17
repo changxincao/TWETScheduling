@@ -781,9 +781,9 @@ public class Solution {
 		curCost += cost[m];
 
 		// 2026-05-17: curCost 必须始终保存真实目标值，不能用 curUpperBound 截断。
-		// 旧逻辑把劣解成本压成当前上界，和 cost[m]/outsourcingCostTotal 的分项值割裂；
-		// 外包 move 后续按 G(B) 的差分更新 curCost 时，会从被截断的 curCost 中减去真实旧外包成本，
-		// 极端情况下把解成本更新成巨大负数。剪枝仍由 Utility.curUpperBound 控制，但解对象自身不再截断。
+		// curUpperBound 只是分段函数和 move 评估中的剪枝阈值，不是当前解的成本。
+		// 如果把劣解成本压成当前上界，后续 bestSolution 比较、ALNS 接受判断、输出校验以及任何增量更新
+		// 都会基于一个假目标值。外包侧现在会重新汇总总成本，但这里仍必须保持解对象自身语义干净。
 		refreshCurCostFromComponents();
 
 		initialize_function(m);// 数组重新设置长度

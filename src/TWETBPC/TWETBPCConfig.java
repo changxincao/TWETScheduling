@@ -48,7 +48,8 @@ public class TWETBPCConfig {
 	public int maxExactPricingColumns = 150;
 	/**
 	 * 2026-05-18: 对应旧 VRP Configure.m_branch_col_number。这里默认调大，只作为防死循环保护，
-	 * 不作为不可行证明；正常 repair 应由 slack=0 或无新列退出。
+	 * 不作为不可行证明；正常 repair 应由 slack=0 或无新列退出。原来的 500 过小，
+	 * 可能让可修复子节点过早触发工程上限，因此先放宽到 100000。
 	 */
 	public int maxBranchRepairColumns = 100000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_initial_col_number，子节点初始 RMP 最多继承多少条低 reduced-cost 列。 */

@@ -32,7 +32,7 @@ public class PC {
 
 	public TWETMasterSolution solve(LP lp) {
 		// TODO 2026-04-10: 真正接入 RMP 之后，这里还要补每轮 pricing/cut 前后的 dual、
-		// reduced cost、违反度等统计；当前骨架阶段只能输出“是否找到改进”和“新增数量”。
+		// reduced cost、违反度等统计；当前骨架阶段只输出“是否找到改进”和“新增数量”。
 		TWETMasterSolution solution = lp.solveRelaxation();
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 			solution = repairInfeasibleMaster(lp);
@@ -79,9 +79,8 @@ public class PC {
 	}
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
-		// 2026-05-18: 对齐旧 VRP UpdateRouteSet/FindFeasible。
-		// 正常 RMP 不可行时，先建立带人工 slack 的同一节点 LP；slack 产生的 dual 会引导
-		// 启发式和精确定价器生成满足覆盖/required-arc 的列。修复成功后关闭 slack，回到正常 RMP。
+		// 2026-05-18: 正常 RMP 不可行时，先建立带人工 slack 的同一节点 LP；
+		// slack 产生的 dual 用于引导启发式和精确定价器补列，补到 slack=0 后再回到正常 RMP。
 		lp.setFeasibilityRepairMode(true);
 		TWETMasterSolution solution = lp.solveRelaxation();
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -92,7 +91,7 @@ public class PC {
 		int generatedForRepair = 0;
 		while (!lp.isNoSlack() && generatedForRepair < config.maxBranchRepairColumns) {
 			boolean addedInThisPass = false;
-			for (int engineIndex = 0; engineIndex < pricingEngines.size() && !lp.isNoSlack()
+			for (int engineIndex = 0; engineIndex < pricingEngines.size()
 					&& generatedForRepair < config.maxBranchRepairColumns; engineIndex++) {
 				ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
 				ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, pricingEngines.get(engineIndex), true,
@@ -110,8 +109,8 @@ public class PC {
 					continue;
 				}
 				addedInThisPass = true;
-				// 2026-05-18: repair 对齐旧 VRP 的 FindFeasible 信息流：
-				// 前一个定价器补列并重解 LP 后，后续定价器基于新的 dual 再搜索。
+				// 2026-05-18: 对齐旧 VRP FindFeasible 的信息流。某个定价器补列后立即重解 LP；
+				// 即使 slack 已归零，也允许后续定价器基于新 dual 再跑一次，外层 while 再负责退出 repair。
 				resetFollowingPricingEngines(engineIndex + 1);
 				solution = lp.resolveCurrentModel();
 				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -132,9 +131,8 @@ public class PC {
 							+ " columns");
 		}
 
-		// 2026-05-18: 旧 VRP UpdateRouteSet 在 FindFeasible 成功后，会按当前子节点 LP 的
-		// reduced cost 重选 route set。这里保持同一逻辑：repair 期间生成的列不全部继续携带，
-		// 只保留 reduced cost 足够低的一批列，再关闭 slack 重解正常 RMP。
+		// 2026-05-18: 旧 VRP UpdateRouteSet 在 FindFeasible 成功后会按当前子节点 LP 的
+		// reduced cost 重筛 route set。这里保持同一语义，避免 repair 期间生成的列全部继续携带。
 		lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 				config.branchSeedReducedCostAllowance);
 		lp.setFeasibilityRepairMode(false);

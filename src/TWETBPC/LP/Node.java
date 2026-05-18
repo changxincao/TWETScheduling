@@ -24,6 +24,16 @@ public class Node implements Comparable<Node> {
 	public static final byte SEGMENT_FORBIDDEN = -1;
 	public static final byte SEGMENT_REQUIRED = 1;
 
+	// 2026-05-18: repairType 只记录“当前 child 新增的分支行”，用于 LP repair mode
+	// 给这条行挂人工 slack。coverage 等普通主问题约束不通过这里标记。
+	public static final byte REPAIR_NONE = 0;
+	public static final byte REPAIR_MACHINE_UPPER = 1;
+	public static final byte REPAIR_MACHINE_LOWER = 2;
+	public static final byte REPAIR_ARC_FORBIDDEN = 3;
+	public static final byte REPAIR_ARC_REQUIRED = 4;
+	public static final byte REPAIR_TARIFF_FORBIDDEN = 5;
+	public static final byte REPAIR_TARIFF_REQUIRED = 6;
+
 	private final Data data;
 	public int id;
 	public int depth;
@@ -35,6 +45,11 @@ public class Node implements Comparable<Node> {
 	public ArrayList<Integer> activeCutIds;
 	private byte[][] arcState;
 	private byte[] tariffSegmentState;
+	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
+	private byte repairType;
+	private int repairFrom;
+	private int repairTo;
+	private int repairSegment;
 
 	public Node(Data data, List<Integer> seedColumnIds, List<Integer> incumbentColumnIds, double pseudoCost) {
 		this.data = data;
@@ -48,6 +63,10 @@ public class Node implements Comparable<Node> {
 		this.activeCutIds = new ArrayList<Integer>();
 		this.arcState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
+		this.repairType = REPAIR_NONE;
+		this.repairFrom = -1;
+		this.repairTo = -1;
+		this.repairSegment = -1;
 	}
 
 	public Node copy() {
@@ -62,6 +81,10 @@ public class Node implements Comparable<Node> {
 			copy.arcState[i] = arcState[i].clone();
 		}
 		copy.tariffSegmentState = tariffSegmentState.clone();
+		copy.repairType = repairType;
+		copy.repairFrom = repairFrom;
+		copy.repairTo = repairTo;
+		copy.repairSegment = repairSegment;
 		return copy;
 	}
 
@@ -79,6 +102,45 @@ public class Node implements Comparable<Node> {
 
 	public void requireArc(int from, int to) {
 		arcState[from][to] = ARC_REQUIRED;
+	}
+
+	public void markMachineUpperRepair() {
+		repairType = REPAIR_MACHINE_UPPER;
+		repairFrom = repairTo = repairSegment = -1;
+	}
+
+	public void markMachineLowerRepair() {
+		repairType = REPAIR_MACHINE_LOWER;
+		repairFrom = repairTo = repairSegment = -1;
+	}
+
+	public void markArcRepair(int from, int to, boolean required) {
+		repairType = required ? REPAIR_ARC_REQUIRED : REPAIR_ARC_FORBIDDEN;
+		repairFrom = from;
+		repairTo = to;
+		repairSegment = -1;
+	}
+
+	public void markTariffRepair(int segment, boolean required) {
+		repairType = required ? REPAIR_TARIFF_REQUIRED : REPAIR_TARIFF_FORBIDDEN;
+		repairFrom = repairTo = -1;
+		repairSegment = segment;
+	}
+
+	public byte getRepairType() {
+		return repairType;
+	}
+
+	public int getRepairFrom() {
+		return repairFrom;
+	}
+
+	public int getRepairTo() {
+		return repairTo;
+	}
+
+	public int getRepairSegment() {
+		return repairSegment;
 	}
 
 	public byte getTariffSegmentState(int segment) {

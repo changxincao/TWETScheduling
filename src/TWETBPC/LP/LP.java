@@ -14,8 +14,8 @@ import Common.Utility;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
-import ilog.concert.IloException;
 import ilog.concert.IloColumn;
+import ilog.concert.IloException;
 import ilog.concert.IloLinearNumExpr;
 import ilog.concert.IloNumVar;
 import ilog.concert.IloObjective;
@@ -23,12 +23,11 @@ import ilog.concert.IloRange;
 import ilog.cplex.IloCplex;
 
 /**
- * 当前节点上的受限主问题包装器。
- * <p>
- * 2026-05-17: 这里已经不再是 placeholder。当前实现采用
- * {@code parallel_machine_scheduling_with_due_window.pdf} 中 SP2 的思路：
- * 内部机器调度方案由列变量表示，外包由显式 {@code y_j} 变量和总外包成本函数
- * {@code G(sum b_j y_j)} 表示。RMP 先解 LP 松弛并向 pricing 暴露 dual。
+ * 当前节点上的受限主问题。
+ *
+ * 2026-05-18: 这里按照 SP2 思路同时建内部列变量、外包 y_j 变量和 outsourcing tariff
+ * segment 变量。分支 repair 参考旧 VRP 的 UpdateRouteSet/FindFeasible：先把当前分支行加入 LP，
+ * 如果不可行，只对当前新增分支行加人工 slack，用 slack dual 引导定价补列。
  */
 public class LP {
 
@@ -49,11 +48,12 @@ public class LP {
 	private IloNumVar[] outsourceVars;
 	private IloNumVar[] outsourceSegmentActive;
 	private IloNumVar[] outsourceSegmentBaseline;
-	private IloNumVar[] coverSlackVars;
-	private HashMap<Long, IloNumVar> requiredArcSlackVars;
+	private ArrayList<IloNumVar> repairSlackVars;
 	private IloRange[] coverRanges;
 	private IloRange machineRange;
-	private HashMap<Long, IloRange> requiredArcRanges;
+	private HashMap<Long, IloRange> arcBranchRanges;
+	private IloRange[] tariffActiveBounds;
+	private IloRange[] tariffBranchRanges;
 	private ArrayList<TariffSegment> outsourcingTariffSegments;
 	private boolean feasibilityRepairMode;
 
@@ -74,7 +74,9 @@ public class LP {
 
 	public void construct(Node node, List<Integer> columnIds) {
 		this.node = node;
-		this.restrictedColumnIds = filterFeasibleColumns(columnIds);
+		// 2026-05-18: 子节点首次 LP 先使用父节点传下来的列集，不按新分支状态提前筛列。
+		// 这样可先判断“父节点列集 + 新分支行”是否可行；若可行或 repair 成功，再统一筛成正式列集。
+		this.restrictedColumnIds = new ArrayList<Integer>(columnIds);
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
 		this.lastSolution = null;
 		clearDuals();
@@ -108,11 +110,6 @@ public class LP {
 		return lastSolution;
 	}
 
-	/**
-	 * 2026-05-18: 分支子节点缺列时，临时打开人工 slack RMP。
-	 * 这个开关只用于模仿旧 VRP 的 UpdateRouteSet/FindFeasible：先让子节点 LP 可解并产生 dual，
-	 * 再用 pricing 找列把 slack 压回 0。正常节点求解必须关闭该模式。
-	 */
 	public void setFeasibilityRepairMode(boolean enabled) {
 		this.feasibilityRepairMode = enabled;
 		this.lastSolution = null;
@@ -127,15 +124,8 @@ public class LP {
 			return true;
 		}
 		try {
-			if (coverSlackVars != null) {
-				for (int job = 1; job < coverSlackVars.length; job++) {
-					if (coverSlackVars[job] != null && Utility.compareGt(cplex.getValue(coverSlackVars[job]), VALUE_TOLERANCE)) {
-						return false;
-					}
-				}
-			}
-			if (requiredArcSlackVars != null) {
-				for (IloNumVar slack : requiredArcSlackVars.values()) {
+			if (repairSlackVars != null) {
+				for (IloNumVar slack : repairSlackVars) {
 					if (slack != null && Utility.compareGt(cplex.getValue(slack), VALUE_TOLERANCE)) {
 						return false;
 					}
@@ -147,17 +137,17 @@ public class LP {
 		return true;
 	}
 
-	/** @return job 覆盖约束的 dual，供 pricing 计算 reduced cost */
+	/** @return job 覆盖约束的 dual，供 pricing 计算 reduced cost。 */
 	public double getJobDual(int job) {
 		return jobDual[job];
 	}
 
-	/** @return 机器数约束的 dual；每条内部列的系数为 1 */
+	/** @return 机器数量约束 dual；每条内部列的系数为 1。 */
 	public double getMachineDual() {
 		return machineDual;
 	}
 
-	/** @return arc 分支约束的 dual；没有对应约束时为 0 */
+	/** @return arc 分支约束 dual；没有对应约束时为 0。 */
 	public double getArcDual(int from, int to) {
 		if (from < 0 || from >= arcDual.length || to < 0 || to >= arcDual[from].length) {
 			return 0.0;
@@ -254,16 +244,15 @@ public class LP {
 		cplex = new IloCplex();
 		objective = null;
 		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
-		coverSlackVars = null;
-		requiredArcSlackVars = new HashMap<Long, IloNumVar>();
-		requiredArcRanges = new HashMap<Long, IloRange>();
+		repairSlackVars = new ArrayList<IloNumVar>();
+		arcBranchRanges = new HashMap<Long, IloRange>();
 		outsourcingTariffSegments = collectOutsourcingTariffSegments();
 
 		buildVariables();
 		buildObjective();
 		buildCoverageConstraints();
 		buildMachineConstraint();
-		buildRequiredArcConstraints();
+		buildArcBranchConstraints();
 		buildOutsourcingTariffConstraints();
 		if (feasibilityRepairMode) {
 			addFeasibilitySlacks();
@@ -288,9 +277,9 @@ public class LP {
 		outsourceSegmentBaseline = new IloNumVar[outsourcingTariffSegments.size()];
 		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
 			TariffSegment seg = outsourcingTariffSegments.get(l);
-			double lb = node.getTariffSegmentState(l) == Node.SEGMENT_REQUIRED ? 1.0 : 0.0;
-			double ub = node.getTariffSegmentState(l) == Node.SEGMENT_FORBIDDEN ? 0.0 : 1.0;
-			outsourceSegmentActive[l] = cplex.numVar(lb, ub, "outSegActive_" + l);
+			// 2026-05-18: z_s 的 [0,1] 写成显式约束行，而不是只依赖变量上界。
+			// 这样 z_s<=0 / z_s>=1 分支以及对应 repair slack 都有明确的 LP 行可以挂接。
+			outsourceSegmentActive[l] = cplex.numVar(0.0, Double.MAX_VALUE, "outSegActive_" + l);
 			outsourceSegmentBaseline[l] = cplex.numVar(0.0, seg.end, "outSegBaseline_" + l);
 		}
 	}
@@ -329,17 +318,16 @@ public class LP {
 		for (IloNumVar var : lambdaVars) {
 			expr.addTerm(1.0, var);
 		}
-		// 2026-05-18: 机器数按区间建模。根节点通常是 [0, m]，允许任务全部外包；
-		// MachineCountBrancher 会逐步收紧 min/max。若后续问题要求“必须使用全部机器”，
-		// 这里才能改成等式；当前带外包模型下不应强制等于 m。
+		// 2026-05-18: 带外包模型下允许真实机器为空，机器数按节点区间建模。
 		machineRange = cplex.addRange(node.minMachineCount, expr, node.maxMachineCount, "machineCount");
 	}
 
-	private void buildRequiredArcConstraints() throws IloException {
+	private void buildArcBranchConstraints() throws IloException {
 		int sink = node.sinkId();
 		for (int from = 0; from <= sink; from++) {
 			for (int to = 1; to <= sink; to++) {
-				if (from == to || node.getArcState(from, to) != Node.ARC_REQUIRED) {
+				byte state = node.getArcState(from, to);
+				if (from == to || state == Node.ARC_FREE) {
 					continue;
 				}
 				IloLinearNumExpr expr = cplex.linearNumExpr();
@@ -349,15 +337,14 @@ public class LP {
 						expr.addTerm(1.0, lambdaVars[idx]);
 					}
 				}
-				IloRange range = cplex.addEq(expr, 1.0, "requiredArc_" + from + "_" + to);
-				requiredArcRanges.put(arcKey(from, to), range);
+				IloRange range = state == Node.ARC_REQUIRED ? cplex.addEq(expr, 1.0, "requiredArc_" + from + "_" + to)
+						: cplex.addEq(expr, 0.0, "forbiddenArc_" + from + "_" + to);
+				arcBranchRanges.put(arcKey(from, to), range);
 			}
 		}
 	}
 
 	private void buildOutsourcingTariffConstraints() throws IloException {
-		// SP2 的外包部分：y_j 决定 baseline 总量 q=sum b_j y_j，
-		// 分段变量给出 G(q) 的 LP 松弛表达。整数化/更强刻画后续在 B&B 层继续加强。
 		IloLinearNumExpr baselineFromJobs = cplex.linearNumExpr();
 		for (int job = 1; job <= data.n; job++) {
 			if (!Utility.isBigMValue(data.outsourcingCost[job])) {
@@ -366,10 +353,28 @@ public class LP {
 		}
 		IloLinearNumExpr baselineFromSegments = cplex.linearNumExpr();
 		IloLinearNumExpr active = cplex.linearNumExpr();
+		tariffActiveBounds = new IloRange[outsourcingTariffSegments.size()];
+		tariffBranchRanges = new IloRange[outsourcingTariffSegments.size()];
 		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
 			TariffSegment seg = outsourcingTariffSegments.get(l);
 			baselineFromSegments.addTerm(1.0, outsourceSegmentBaseline[l]);
 			active.addTerm(1.0, outsourceSegmentActive[l]);
+
+			IloLinearNumExpr zBoundExpr = cplex.linearNumExpr();
+			zBoundExpr.addTerm(1.0, outsourceSegmentActive[l]);
+			tariffActiveBounds[l] = cplex.addRange(0.0, zBoundExpr, 1.0, "outSegActiveBound_" + l);
+
+			byte state = node.getTariffSegmentState(l);
+			if (state == Node.SEGMENT_FORBIDDEN) {
+				IloLinearNumExpr branchExpr = cplex.linearNumExpr();
+				branchExpr.addTerm(1.0, outsourceSegmentActive[l]);
+				tariffBranchRanges[l] = cplex.addLe(branchExpr, 0.0, "outSegForbidden_" + l);
+			} else if (state == Node.SEGMENT_REQUIRED) {
+				IloLinearNumExpr branchExpr = cplex.linearNumExpr();
+				branchExpr.addTerm(1.0, outsourceSegmentActive[l]);
+				tariffBranchRanges[l] = cplex.addGe(branchExpr, 1.0, "outSegRequired_" + l);
+			}
+
 			cplex.addGe(outsourceSegmentBaseline[l], cplex.prod(seg.start, outsourceSegmentActive[l]),
 					"outSegLB_" + l);
 			cplex.addLe(outsourceSegmentBaseline[l], cplex.prod(seg.end, outsourceSegmentActive[l]),
@@ -380,35 +385,37 @@ public class LP {
 	}
 
 	/**
-	 * 2026-05-18: 子节点修复模式下加入人工 slack。
-	 * <p>
-	 * 旧 VRP 在 UpdateRouteSet 里发现子节点 RMP 暂时不可行时，会先 AddSlack，
-	 * 然后调用启发式/精确定价器 FindFeasible，用 slack dual 引导生成满足分支状态的列。
-	 * 这里保持同一语义：slack 只用于 repair LP，正常 RMP 不带这些变量。
+	 * 2026-05-18: 子节点 repair LP 只给“当前新分支行”加人工 slack。
+	 * coverage 如果不可行，应由 pricing/外包列修复；repair slack 只用于产生当前分支行的引导 dual。
 	 */
 	private void addFeasibilitySlacks() throws IloException {
-		// 2026-05-18: 即使模型有外包变量，子节点 RMP 也不一定天然可行。
-		// 典型原因包括：某些任务不能外包(y_j 上界为 0)且当前列集没有覆盖它；
-		// required arc 必须由内部列满足，外包变量不能替代；tariff segment 分支可能限制外包基准量；
-		// machine-count 分支也可能要求至少使用若干内部列。这里的 slack 只用于临时拿 dual，
-		// 之后必须由 FindFeasible/pricing 生成真实列并把 slack 压回 0。
 		double penalty = Utility.big_M;
-		coverSlackVars = new IloNumVar[data.n + 1];
-		for (int job = 1; job <= data.n; job++) {
-			IloColumn col = cplex.column(objective, penalty);
-			col = col.and(cplex.column(coverRanges[job], 1.0));
-			coverSlackVars[job] = cplex.numVar(col, 0.0, 1.0, "coverSlack_" + job);
+		byte type = node.getRepairType();
+		if (type == Node.REPAIR_MACHINE_UPPER) {
+			addRepairSlack(machineRange, -1.0, "machineUpperSlack", penalty);
+		} else if (type == Node.REPAIR_MACHINE_LOWER) {
+			addRepairSlack(machineRange, 1.0, "machineLowerSlack", penalty);
+		} else if (type == Node.REPAIR_ARC_FORBIDDEN || type == Node.REPAIR_ARC_REQUIRED) {
+			IloRange range = arcBranchRanges.get(Long.valueOf(arcKey(node.getRepairFrom(), node.getRepairTo())));
+			if (range != null) {
+				double coeff = type == Node.REPAIR_ARC_REQUIRED ? 1.0 : -1.0;
+				addRepairSlack(range, coeff,
+						"arcBranchSlack_" + node.getRepairFrom() + "_" + node.getRepairTo(), penalty);
+			}
+		} else if (type == Node.REPAIR_TARIFF_FORBIDDEN || type == Node.REPAIR_TARIFF_REQUIRED) {
+			int segment = node.getRepairSegment();
+			if (tariffBranchRanges != null && segment >= 0 && segment < tariffBranchRanges.length
+					&& tariffBranchRanges[segment] != null) {
+				double coeff = type == Node.REPAIR_TARIFF_REQUIRED ? 1.0 : -1.0;
+				addRepairSlack(tariffBranchRanges[segment], coeff, "tariffBranchSlack_" + segment, penalty);
+			}
 		}
+	}
 
-		for (Map.Entry<Long, IloRange> entry : requiredArcRanges.entrySet()) {
-			long key = entry.getKey().longValue();
-			int from = decodeFrom(key);
-			int to = decodeTo(key);
-			IloColumn col = cplex.column(objective, penalty);
-			col = col.and(cplex.column(entry.getValue(), 1.0));
-			requiredArcSlackVars.put(Long.valueOf(key),
-					cplex.numVar(col, 0.0, 1.0, "requiredArcSlack_" + from + "_" + to));
-		}
+	private void addRepairSlack(IloRange range, double coeff, String name, double penalty) throws IloException {
+		IloColumn col = cplex.column(objective, penalty);
+		col = col.and(cplex.column(range, coeff));
+		repairSlackVars.add(cplex.numVar(col, 0.0, Double.MAX_VALUE, name));
 	}
 
 	private void addColumnToCurrentModel(int columnId) throws IloException {
@@ -420,7 +427,7 @@ public class LP {
 				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
 			}
 		}
-		for (Map.Entry<Long, IloRange> entry : requiredArcRanges.entrySet()) {
+		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
 			if (column.visitsArc(from, to, node.sinkId())) {
@@ -455,10 +462,7 @@ public class LP {
 	}
 
 	/**
-	 * 2026-05-18: 对齐旧 VRP UpdateRouteSet 的 route-set 更新逻辑。
-	 * slack repair 成功后，不直接把所有 repair 过程中见过的列都传下去，而是按当前子节点 LP
-	 * 的 reduced cost 重新筛一批列，避免子节点列集越来越胖。这里必须在关闭 repair mode
-	 * 并重建正常 RMP 前调用，因为 reduced cost 来自当前 CPLEX 模型。
+	 * repair 成功后，按当前 LP 的 reduced cost 筛出正式子节点列集。
 	 */
 	public void resetRestrictedColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance) {
 		if (cplex == null || lambdaByColumnId == null) {
@@ -515,7 +519,7 @@ public class LP {
 			jobDual[job] = cplex.getDual(coverRanges[job]);
 		}
 		machineDual = cplex.getDual(machineRange);
-		for (Map.Entry<Long, IloRange> entry : requiredArcRanges.entrySet()) {
+		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
 			arcDual[from][to] = cplex.getDual(entry.getValue());
@@ -570,16 +574,6 @@ public class LP {
 
 	private boolean isIntegral01(double value) {
 		return Utility.compareLe(Math.abs(value - Math.rint(value)), VALUE_TOLERANCE);
-	}
-
-	private ArrayList<Integer> filterFeasibleColumns(List<Integer> columnIds) {
-		ArrayList<Integer> feasible = new ArrayList<Integer>(columnIds.size());
-		for (int id : columnIds) {
-			if (isColumnCompatible(pool.getColumn(id))) {
-				feasible.add(Integer.valueOf(id));
-			}
-		}
-		return feasible;
 	}
 
 	private boolean isColumnCompatible(TWETColumn column) {

@@ -55,6 +55,8 @@ public class MachineCountBrancher implements Brancher {
 		left.pseudoCost = right.pseudoCost = solution.getObjectiveValue();
 		left.maxMachineCount = (int) Math.floor(machineUsage);
 		right.minMachineCount = (int) Math.ceil(machineUsage);
+		left.markMachineUpperRepair();
+		right.markMachineLowerRepair();
 		return new BranchResult(true, left, right, "Branched on machine usage");
 	}
 

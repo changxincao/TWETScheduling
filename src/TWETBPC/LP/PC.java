@@ -39,6 +39,18 @@ public class PC {
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return solution;
 			}
+		} else if (lp.getNode() != null && lp.getNode().depth > 0) {
+			// 2026-05-18: 对齐旧 VRP UpdateRouteSet。child 第一次 LP 可行时，也先按当前 LP 的
+			// reduced cost 和分支兼容性筛出正式列集，再进入后续 pricing；repair 成功路径也会做同样筛选。
+			lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
+					config.branchSeedReducedCostAllowance);
+			solution = lp.solveRelaxation();
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				solution = repairInfeasibleMaster(lp);
+				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					return solution;
+				}
+			}
 		}
 
 		while (true) {

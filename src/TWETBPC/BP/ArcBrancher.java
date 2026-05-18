@@ -80,6 +80,7 @@ public class ArcBrancher implements Brancher {
 		left.depth = right.depth = base.depth + 1;
 		left.pseudoCost = right.pseudoCost = solution.getObjectiveValue();
 		left.forbidArc(bestFrom, bestTo);
+		left.markArcRepair(bestFrom, bestTo, false);
 		// 2026-05-17: 强制弧分支参考旧 VRP BranchD。
 		// 要求 i->j 出现时，若 i 是真实 job，则它不能再接别的后继；
 		// 若 j 是真实 job，则它不能再有别的前驱。depot/sink 端点不做这种排他处理，
@@ -99,6 +100,7 @@ public class ArcBrancher implements Brancher {
 			}
 		}
 		right.requireArc(bestFrom, bestTo);
+		right.markArcRepair(bestFrom, bestTo, true);
 		return new BranchResult(true, left, right, "Branched on arc (" + bestFrom + "," + bestTo + ")");
 	}
 

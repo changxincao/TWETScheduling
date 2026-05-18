@@ -51,7 +51,9 @@ public class TariffSegmentBrancher implements Brancher {
 		left.depth = right.depth = base.depth + 1;
 		left.pseudoCost = right.pseudoCost = solution.getObjectiveValue();
 		left.forbidTariffSegment(bestSegment);
+		left.markTariffRepair(bestSegment, false);
 		right.requireTariffSegment(bestSegment);
+		right.markTariffRepair(bestSegment, true);
 		return new BranchResult(true, left, right,
 				"Branched on outsourcing tariff segment z_" + bestSegment + "=" + values[bestSegment]);
 	}

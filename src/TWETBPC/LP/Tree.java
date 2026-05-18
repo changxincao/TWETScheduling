@@ -1,8 +1,6 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
@@ -16,7 +14,6 @@ import TWETBPC.BP.BranchResult;
 import TWETBPC.BP.Brancher;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
-import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 
@@ -130,8 +127,7 @@ public class Tree {
 		if (processedNodes == 0) {
 			return TWETSolveStatus.INITIALIZED;
 		}
-		// 2026-05-18: 旧实现只按 processedNodes 判断 FINISHED/ROOT_PROCESSED，
-		// 在达到 maxNodes 且队列仍有未处理节点时会误报完成。这里显式区分节点上限停止。
+		// 2026-05-18: 显式区分达到 maxNodes 后队列仍非空的情况，避免把节点上限停止误报为完成。
 		if (!queueEmpty && processedNodes >= config.maxNodes) {
 			return TWETSolveStatus.NODE_LIMIT;
 		}
@@ -150,41 +146,14 @@ public class Tree {
 	}
 
 	private void prepareChildSeedColumns(Node child, LP parentLp) {
-		ArrayList<SeedCandidate> candidates = new ArrayList<SeedCandidate>();
-		if (parentLp != null) {
-			for (int columnId : parentLp.getRestrictedColumnIds()) {
-				TWETColumn column = pool.getColumn(columnId);
-				if (!child.isColumnCompatible(column)) {
-					continue;
-				}
-				candidates.add(new SeedCandidate(columnId, parentLp.getColumnReducedCost(columnId)));
-			}
-		}
-		Collections.sort(candidates, new Comparator<SeedCandidate>() {
-			@Override
-			public int compare(SeedCandidate a, SeedCandidate b) {
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return 1;
-				}
-				return Integer.compare(a.columnId, b.columnId);
-			}
-		});
-
 		ArrayList<Integer> seed = new ArrayList<Integer>();
-		for (SeedCandidate candidate : candidates) {
-			if (seed.size() >= config.branchSeedColumnLimit) {
-				break;
-			}
-			if (Utility.compareGt(candidate.reducedCost, config.branchSeedReducedCostAllowance)) {
-				continue;
-			}
-			seed.add(Integer.valueOf(candidate.columnId));
+		if (parentLp != null) {
+			seed.addAll(parentLp.getRestrictedColumnIds());
 		}
-		// 2026-05-18: 这里对齐旧 VRP UpdateRouteSet 的“子节点先继承父节点低 reduced-cost 列”。
-		// 如果这些列不足以让 RMP 可行，不再在 Tree 里暴力拼 fallback 序列，而是交给 PC 的 slack RMP + FindFeasible 修复。
+		// 2026-05-18: 对齐旧 VRP UpdateRouteSet 的时机。child 入队时先继承父节点当前列集，
+		// 不提前按新分支状态或 reduced cost 过滤；等 child 出队后，RMP 带新分支行先求一次 LP。
+		// 若可行或通过 slack repair 修复成功，再在 LP.resetRestrictedColumnsByCurrentReducedCost()
+		// 里筛成正式子节点列集。这样保留“出队时处理”的实现方式，但逻辑上等价于旧代码。
 		child.seedColumnIds = seed;
 	}
 
@@ -210,16 +179,6 @@ public class Tree {
 			}
 		}
 		return values;
-	}
-
-	private static final class SeedCandidate {
-		final int columnId;
-		final double reducedCost;
-
-		SeedCandidate(int columnId, double reducedCost) {
-			this.columnId = columnId;
-			this.reducedCost = reducedCost;
-		}
 	}
 
 }

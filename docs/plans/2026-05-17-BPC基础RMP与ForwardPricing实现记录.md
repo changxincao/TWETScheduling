@@ -475,3 +475,11 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 这个修改的目的不是改变旧 VRP 的 reduced-cost 筛列思想，而是补上一个显式安全约束：child 首次 LP 可行或 repair 成功时，当前正值列构成当前 LP 解的一部分；理论上这些基列 reduced cost 通常为 0，但如果存在大量 reduced cost 为 0 的退化列，单纯排序截断仍可能把某些正值列挤掉。现在先保留正值列，就能保证“当前已经找到的可行组合”不会被筛列上限截断。`branchSeedColumnLimit` 仍然控制补充的非正值低 reduced-cost 列数量；如果正值列本身超过该上限，则以上限为软约束，优先保证可行性。
 
 验证：针对 `Basic/Common/HEU/Output/TWETBPC` 子集运行 `javac -encoding UTF-8 -cp D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar;target\classes -d target\twetbpc-compile ...` 通过，仅有历史 deprecated API 提示。
+
+## 2026-05-19：`bestBound` 的语义和线性外包函数的影响
+
+本次澄清 `Tree.solve()` 里 `bestBound = Math.min(bestBound, solution.getObjectiveValue())` 的问题。这里不是说某个节点的 LP relaxation 不能作为下界；对最小化问题，每个节点完整列生成后的 LP 值当然是该节点子树的下界。问题在于当前代码取的是“已经处理过节点 LP 值的最小值”，这个值通常在 root 节点就达到最小，后续子节点 LP bound 往往只会更高，因此 `bestBound` 很可能长期停留在 root LP bound，无法反映分支树收敛过程中全局下界被逐步抬高。
+
+严格的 B&B 下界应该更接近“当前仍未关闭的 open nodes 的最小下界”。如果队列为空并且所有节点都被关闭，则最终下界应当等于 incumbent；如果达到 node limit 或 time limit，则应报告 open queue 中最小节点下界作为当前全局 LB。当前字段作为“见过的最弱有效下界”通常仍是合法下界，但太松，不能作为最终证明质量的严谨指标。
+
+如果用户问的是目标函数本身是否线性，例如外包函数 `G(B)=B`，这和 `bestBound` 的树搜索语义是两件事。`bestBound` 的报告问题不会因为目标是线性就消失；即使 RMP 目标完全线性，root LP bound 也可能一直被当前 `min` 逻辑保留下来。另一方面，如果讨论的是外包 tariff segment 变量，`G(B)=B` 这种全局线性函数确实不需要复杂的 segment 选择分支：可以只保留一个覆盖全域的线性段，或者直接用线性成本项建模。若人为把同一条直线切成多个 segment，LP relaxation 中 `z_s` 可能分数，但目标值不会因此变错；这时继续对 `z_s` 分支只是冗余工作，不是必要的精确性条件。

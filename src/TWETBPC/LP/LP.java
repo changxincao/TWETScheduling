@@ -329,6 +329,9 @@ public class LP {
 		for (IloNumVar var : lambdaVars) {
 			expr.addTerm(1.0, var);
 		}
+		// 2026-05-18: 机器数按区间建模。根节点通常是 [0, m]，允许任务全部外包；
+		// MachineCountBrancher 会逐步收紧 min/max。若后续问题要求“必须使用全部机器”，
+		// 这里才能改成等式；当前带外包模型下不应强制等于 m。
 		machineRange = cplex.addRange(node.minMachineCount, expr, node.maxMachineCount, "machineCount");
 	}
 
@@ -384,6 +387,11 @@ public class LP {
 	 * 这里保持同一语义：slack 只用于 repair LP，正常 RMP 不带这些变量。
 	 */
 	private void addFeasibilitySlacks() throws IloException {
+		// 2026-05-18: 即使模型有外包变量，子节点 RMP 也不一定天然可行。
+		// 典型原因包括：某些任务不能外包(y_j 上界为 0)且当前列集没有覆盖它；
+		// required arc 必须由内部列满足，外包变量不能替代；tariff segment 分支可能限制外包基准量；
+		// machine-count 分支也可能要求至少使用若干内部列。这里的 slack 只用于临时拿 dual，
+		// 之后必须由 FindFeasible/pricing 生成真实列并把 slack 压回 0。
 		double penalty = Utility.big_M;
 		coverSlackVars = new IloNumVar[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {

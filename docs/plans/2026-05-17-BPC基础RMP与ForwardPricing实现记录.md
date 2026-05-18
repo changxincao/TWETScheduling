@@ -175,3 +175,15 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 第四，旧 VRP 的 child route set 是 `UpdateRouteSet()` 的直接返回值，分支时立即赋给 left/right node；当前 TWET 是 child 入队前先继承父节点低 reduced-cost 列，真正不可行时在该 child 被弹出求解时才执行 slack repair 和 reduced-cost 重筛。也就是说，旧流程是在“生成 child 时”完成 route set 修复，TWET 当前是在“求解 child 时”完成修复。逻辑上等价地服务于 child RMP，但触发时机不同。若要更像旧版，可以把 repair 提前到 `enqueueChild` 阶段；但那会让分支阶段直接调用 LP/PC，代码耦合更重，且当前延迟修复不会改变子节点求解逻辑。
 
 因此，如果不考虑评估细节，当前还不一致的核心是：`FindFeasible` 的 repair loop 放在 `PC` 而不是 GC 内部；启发式新增列后没有 exact pricing reset 语义；slack 约束范围比旧 VRP 更泛；child route set 修复发生在 child 求解时而不是 child 创建时。其他如增量加列、repair 后按 reduced cost 重筛列集、列数阈值和 add-in 阈值，已经基本按旧 VRP 思路对齐。
+
+## 2026-05-18：关于 slack、机器数区间和 child 修复时机的补充说明
+
+关于 `FindFeasible` 循环放在哪里，本质上主要是职责划分差异。旧 VRP 把 `solve LP -> IsNoSlack -> GetDual/GetValue -> Extend` 包在每个 GC 的 `FindFeasible()` 里；当前 TWET 把这层循环放在 `PC.repairInfeasibleMaster()`，pricing engine 只负责单轮补列。从算法调用顺序看，两者都是“解带 slack 的 RMP，读 dual，调用启发式/精确定价补列，再解 RMP，直到 slack 为 0 或列数上限”。因此这是封装位置不同，不是求解逻辑本质不同。当前放在 `PC` 更适合 TWET，因为多个 pricing engine 可以共享一套 repair 停止条件，避免每个 engine 复制 LP 求解和 slack 检查逻辑。
+
+旧 VRP 中 `gc.Reset()` 的目的，是在启发式定价器产生新列以后，清理后续精确定价器可能保留的内部状态。新增列会改变 RMP，重新求解后 dual 会变化；如果 exact pricing 内部保存了上一轮的标签、bound、ng memory、DSSR 状态或其他缓存，就可能不再适合继续使用，所以旧代码在 `hgc.FindFeasible()` 产生新列后调用 `gc.Reset()`。当前 TWET exact pricing 每次调用基本重新读取 LP dual 并重新做 labeling，暂时没有这类跨调用状态，所以不需要 reset。后续如果加入 DSSR、ng-memory、双向 bound 或 label pool 复用，就应该给 `PricingEngine` 加默认空实现的 `reset()`，并在 repair mode 下前一个 engine 加列后调用后续 engine 的 reset。
+
+关于 slack，即使有外包变量，RMP 也不保证总可行。如果每个任务都能外包、tariff segment 没有限制、机器数下界为 0、且没有 required arc，那么没有内部列时确实可以通过 `y_j=1` 让 coverage 可行。但当前模型存在几类例外：某些任务可以被设为不能外包，即 `outsourcingCost[j]` 为 `big_M` 时 `y_j` 上界为 0；required arc 必须由内部列覆盖，外包不能替代；tariff segment 分支可能禁止某些外包基准量；machine-count 分支可能要求至少使用若干内部列。因此 slack 的作用不是把不可行解当成可行解，而是让“暂时缺列”的 RMP 先可解并产生 dual，随后必须通过 `FindFeasible/pricing` 生成真实列，把 slack 压回 0。
+
+当前机器数约束是区间形式 `minMachineCount <= sum lambda <= maxMachineCount`。根节点默认 `minMachineCount=0, maxMachineCount=m`，这意味着允许全部外包；`MachineCountBrancher` 会在分支中收紧上下界。这个建模不应该默认改成等式 `sum lambda = m`，因为在带外包或允许机器空闲的设定下，最优解不一定使用全部机器。只有当后续明确要求“所有机器必须使用”时，才应该改成等式。
+
+关于 child 修复时机，旧 VRP 是创建 child 时直接运行 `UpdateRouteSet()`，修好 child 的 route set 后再入队。当前 TWET 是 child 入队时先继承父节点低 reduced-cost 列，真正弹出求解 child 时再根据需要做 slack repair。两者对最终 child RMP 的作用接近，但时机不同。当前延迟修复的好处是：如果 child 后续不需要处理或被 bound 剪掉，就不用提前跑 LP/pricing；`Tree` 也不需要直接调用 LP/PC，所有 RMP 不可行修复集中在 `PC`。因此当前时机更适合这个项目，暂时不建议为了形式一致而把 repair 挪回 `enqueueChild()`。

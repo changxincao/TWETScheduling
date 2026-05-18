@@ -416,3 +416,38 @@ repair slack 的语义也随之收紧。之前 TWET 版本会给 coverage 行和
 进一步确认后，分支约束在正式 child 列集中的保留策略可以区分处理。`forbidden arc` 是列级禁用约束：如果 child 已经完成筛列，所有含该弧的旧列都被删掉，并且 pricing 图也不再生成该弧，那么 RMP 中的 `sum x_ij = 0` 行在后续正式 LP 中确实可以视为冗余。它在首次 child LP 和 repair 阶段仍然需要存在，用来压掉父节点继承来的旧列并产生 repair/dual 语义；但在正式筛列成功以后，可以作为性能优化考虑删除或不再建立。
 
 这个结论不适用于 `required arc`、机器数和 tariff segment。`required arc` 是解级聚合约束，含义是最终选中列集合中必须有一条列使用该弧，而不是每条列都必须使用该弧；机器数约束约束的是被选内部列数量之和；tariff segment 约束的是 master 中的外包分段变量 `z_s`。这三类约束都不能被“列已经兼容当前分支状态”替代，后续正式 RMP 中仍应保留对应行，并让其 dual 进入 reduced cost 或 master 求解逻辑。
+## 2026-05-19：TWET-BPC 与旧 VRP 框架流程整体复核
+
+本次重新按旧 VRP 的 `Tree / PC / BranchD.UpdateRouteSet / GCTabu / GCNGBB` 主流程，对当前 `TWETBPC` 下的 branch-and-price 代码做了一轮整体复核。当前结论是：如果只看 no-cut 的 branch-and-price 主流程，现在的框架已经基本对齐旧 VRP 的核心逻辑；如果按完整 BPC 理解，则 cut 接入仍只是占位，不能认为已经是完整 branch-price-and-cut。
+
+1. 主流程已经基本对齐的部分
+
+当前 `Tree.solve()` 的节点流程是：先由启发式 seed 构造初始列和 incumbent，再从优先队列弹出节点，构造该节点 restricted master，调用 `PC.solve()` 完成列生成，得到 LP relaxation 后检查整数性、更新 incumbent、按 bound 剪枝，最后按 tariff segment、machine count、arc 的顺序分支。这个结构和旧 VRP 的 `Tree.Solve()` 对应，只是当前把 child 的列修复推迟到 child 真正出队时做，而旧 VRP 是在父节点分支时立刻调用 `UpdateRouteSet()`。这属于时机和封装差异，不改变逻辑含义，而且当前延迟修复通常更省，因为不会提前为最终未被展开的 child 做昂贵的 repair。
+
+child 列集合的处理现在也已经按旧 VRP 的语义修正。`Tree.prepareChildSeedColumns()` 先把父节点当前 restricted columns 原样传给 child，不提前按新分支状态或 reduced cost 筛列；child 出队后，`LP.construct()` 用“父节点列集合 + 当前 child 分支行”先求一次 LP。如果可行，再调用 `resetRestrictedColumnsByCurrentReducedCost()` 筛成正式 child 列集；如果不可行，则进入 `repairInfeasibleMaster()`，只对当前新增分支行加 artificial slack，再用 heuristic pricing 和 exact pricing 补列。这和旧 VRP `UpdateRouteSet()` 的“先带 child 分支行求父节点当前 LP，必要时 AddSlack + FindFeasible，成功后再筛 route set”在流程意图上是一致的。
+
+pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngine`，再跑 `PaperDominanceExactPricingEngine` 或普通 `ExactPricingEngine`。repair 模式下，启发式 engine 会反复补列直到耗尽或 slack 归零，然后 exact engine 兜底；这和旧 VRP “优先用 GCTabu.FindFeasible，Tabu 耗尽后用 GCNGBB.FindFeasible”的思路一致。普通列生成里，当前 PC 会把 heuristic 和 exact 在同一轮 dual 下生成的列合并后统一加入，再重新求解；旧 VRP 的启发式内部可能先加列并更新 LP 后再进 exact。这是封装和效率差异，不影响正确性，因为下一轮 pricing 会基于新 dual 继续找列。
+
+分支约束和 pricing dual 的方向也基本正确。machine count 约束的 dual 在 pricing 初始 label 中扣除；arc branch 约束的 dual 通过 `getArcDual(from,to)` 在扩展弧时扣除。required arc、machine count 和 tariff segment 都是解层面的聚合约束，必须保留在 RMP 中；forbidden arc 在正式筛列成功后理论上可能变成冗余行，但当前保留它主要是为了统一流程和处理父节点继承列，不是逻辑错误。
+
+2. 当前仍然存在的主要问题
+
+第一个问题是 cut 部分还不是完整 BPC。`SubsetRowCutGenerator` 当前明确是 placeholder，返回空 cut；`TWETCut` 和 `CutPool` 也只是元数据容器，`LP.addCuts()` 只是把 cut id 放进 activeCutIds，并没有在 `LP.buildModel()` 里真正添加 cut 行，也没有把 cut 系数写入已有列和新列。进一步说，`PC.solve()` 现在即使某天真的 separated 出 cuts，也只是 `addCuts()` 后重新求一次 LP，没有像旧 VRP 的 `PC.Solve()` 那样回到 price-and-cut 外层循环继续 pricing。因此当前 no-cut branch-and-price 可以评价为基本成形，但完整 BPC 还没有真正接上 cut。
+
+第二个问题是 child 正式筛列后的可行性保护仍偏工程化。`resetRestrictedColumnsByCurrentReducedCost()` 只按 reduced cost 阈值和列数上限选择低 reduced-cost 列，没有显式强制保留当前 LP 中所有正值列或当前可行基相关列。旧 VRP 也依赖较宽的 `m_addin_red_cost` 和 `m_initial_col_number` 降低风险，但它同样不是严格证明。当前 TWET 版本在筛列后会重新求 LP；如果筛列极端情况下删掉了维持 coverage 或其他约束所需的列，而 repair slack 又只挂在当前新增分支行上，那么该 child 可能被误判为 infeasible。建议后续优化为：筛列时先无条件保留当前 LP 正值列，再按 reduced cost 补足候选列。这样更接近“保留当前可行解，再压缩列池”的安全语义。
+
+第三个问题是求解结果里的 `bestBound` 报告还不严格。当前 `Tree.solve()` 用已处理节点 LP 值的最小值更新 `bestBound`，这更像“见过的最好下界”，不是严格的全局 open-node lower bound。旧 VRP 最后会结合队列中的 `sudo_cost` 做 lower bound 汇总。当前剪枝本身主要依赖当前节点 LP 值和 incumbent，不会因为这个字段直接错剪，但最终输出的 bound/status 可能偏乐观或不够严谨。后续如果要把 BPC 结果作为精确证明，需要把 open queue 的节点 bound、已处理节点 bound 和 node limit 状态分开记录。
+
+第四个问题是当前 RMP 默认假设存在 outsourcing tariff function。`LP.buildOutsourcingTariffConstraints()` 总会添加 `sum z_s = 1`。如果某个数据没有外包分段函数，`outsourcingTariffSegments` 为空时会形成空表达式等于 1 的不可行模型。现在带外包的数据路径下通常有 tariff block，所以不一定触发；但如果要兼容无外包版本，需要加 dummy segment `G(0)=0` 或在无 tariff 时跳过整组外包分段约束。
+
+3. 与旧 VRP 不一致但目前可接受的地方
+
+当前分支顺序是 tariff segment、machine count、arc。旧 VRP 没有 tariff segment 分支；对于当前 SP2 外包分段建模，先分 `z_s` 是合理的，因为即使内部列变量和 arc 都整数，LP relaxation 中 `z_s` 仍可能是多个 tariff segment 的凸组合。machine count 再到 arc 的顺序和旧 VRP 的车辆数优先、再路由结构分支是一致的。
+
+当前 `PaperDominanceGraph` 的设计和论文伪代码不是逐字相同，但主逻辑是对齐的：每个 reachable-set node 维护真实 label 集合和 envelope，而不是只保留一个无法恢复路径的聚合 label；插入时先用 superset node 的 `g` envelope 判断 set dominance，不能占优则插入 label，并沿 successor 传播、删除被 predecessor envelope 占优的 label。这个处理比“node 里只有一个聚合 label”更适合 TWET，因为最终列需要恢复具体序列，而序列影响 setup time/cost 和真实列成本。当前没有发现框架级错误；后续若要提高效率，可以继续缓存 ancestor/descendant 或优化 terminal node 查找，但这属于性能问题。
+
+当前 exact pricing 的 `maxExactPricingColumns` 只是单轮返回列数量上限，不等价于“证明已经没有负 reduced-cost 列”。但 PC 会在加列、重解 LP 后继续 pricing，直到所有 engine 都没有返回新 active 列。因此只要 exact pricing 在某一轮没有被 active/duplicate 逻辑误空，单轮上限本身不是 correctness 风险。现在已经避免 active column 和本轮 duplicate 消耗返回上限，这一点和旧 VRP “计入 add-in 前查 pool”方向一致。
+
+4. 当前建议的后续检查顺序
+
+短期如果继续完善 no-cut branch-and-price，优先处理 `resetRestrictedColumnsByCurrentReducedCost()` 的正值列保护和 bound/status 报告，这两个不涉及大重构，能直接提高稳健性和结果可信度。cut 相关暂时可以继续保持 placeholder，但需要在文档和输出中明确“当前是 no-cut B&P，不是完整 BPC”。如果后续真的接 SRI/cut，再必须同时完成三件事：RMP cut 行建模、列的 cut 系数接入、加 cut 后回到 pricing 循环。

@@ -493,3 +493,10 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 同时补充外包线性函数的判断：如果 `G(B)` 是全局线性函数，例如 `G(B)=B`，只要数据中至少保留一个 tariff segment 覆盖可能的 baseline，就不会因为 segment 建模影响目标值。此时 tariff segment 分支可以视为冗余优化点，而不是精确性必需项。
 
 验证：针对 `Basic/Common/HEU/Output/TWETBPC` 子集运行 `javac -encoding UTF-8 -cp D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar;target\classes -d target\twetbpc-compile ...` 通过，仅有历史 deprecated API 提示。
+## 2026-05-19：关于 lower_bound 取 min 和 incumbent 截断的补充
+
+本次进一步澄清旧 VRP 里 `lower_bound = min(current lower_bound, queue.peek().sudo_cost)` 的含义。这里的 `min` 不是严格意义上“open nodes 全局下界的最佳更新方式”，而是旧代码的保守汇总写法。旧 VRP 在处理非整数节点时会把 `lower_bound` 临时设成当前节点 LP 值，最后如果队列非空，再用 open queue 中最小的 `sudo_cost` 修正；因为历史记录里可能还保留 root 或更早节点的较低 bound，所以继续取 `min` 会让报告值偏保守，甚至长期停在 root LP bound。这个值通常仍是合法下界，但不一定是最紧的当前 open-node 下界。
+
+当前 TWET-BPC 没有在最终返回时继续照抄这个 `min`。现在求解结束时如果队列为空，说明所有节点已经关闭，最终 `bestBound` 直接取 incumbent；如果队列非空，说明因为节点上限等原因还有 open node，则最终 `bestBound` 取 `queue.peek().pseudoCost`，也就是当前 open queue 里最小的伪下界。运行中展示用的 bound 可以取当前节点 LP bound 和 open queue 最小伪下界的较小值，只作为状态输出，不改变剪枝逻辑。
+
+同时澄清 `bound` 超过 incumbent 时截到 incumbent 的语义。对最小化问题，任何有效 lower bound 都不应该大于当前 upper bound/incumbent；如果报告层出现 `LB > incumbent`，通常是因为伪下界、数值误差或状态汇总方式导致的输出异常。把报告值截到 incumbent 只是为了保持输出区间合法，不表示算法可以因此直接宣告最优。真正可以宣告最优的条件仍然是 open queue 为空，或者所有 open node 的有效下界都已经不小于 incumbent 并被正常剪掉。

@@ -91,19 +91,36 @@ public class PC {
 
 		int generatedForRepair = 0;
 		while (!lp.isNoSlack() && generatedForRepair < config.maxBranchRepairColumns) {
-			ArrayList<Integer> newColumnIds = generateColumns(lp, true);
-			if (newColumnIds.isEmpty()) {
+			boolean addedInThisPass = false;
+			for (int engineIndex = 0; engineIndex < pricingEngines.size() && !lp.isNoSlack()
+					&& generatedForRepair < config.maxBranchRepairColumns; engineIndex++) {
+				ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
+				ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, pricingEngines.get(engineIndex), true,
+						activeColumnIds);
+				if (newColumnIds.isEmpty()) {
+					continue;
+				}
+				if (generatedForRepair + newColumnIds.size() > config.maxBranchRepairColumns) {
+					newColumnIds = new ArrayList<Integer>(
+							newColumnIds.subList(0, config.maxBranchRepairColumns - generatedForRepair));
+				}
+				int addedColumns = lp.addColumns(newColumnIds);
+				generatedForRepair += addedColumns;
+				if (addedColumns == 0) {
+					continue;
+				}
+				addedInThisPass = true;
+				// 2026-05-18: repair 对齐旧 VRP 的 FindFeasible 信息流：
+				// 前一个定价器补列并重解 LP 后，后续定价器基于新的 dual 再搜索。
+				resetFollowingPricingEngines(engineIndex + 1);
+				solution = lp.resolveCurrentModel();
+				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					lp.setFeasibilityRepairMode(false);
+					return solution;
+				}
+			}
+			if (!addedInThisPass) {
 				break;
-			}
-			if (generatedForRepair + newColumnIds.size() > config.maxBranchRepairColumns) {
-				newColumnIds = new ArrayList<Integer>(
-						newColumnIds.subList(0, config.maxBranchRepairColumns - generatedForRepair));
-			}
-			generatedForRepair += lp.addColumns(newColumnIds);
-			solution = lp.resolveCurrentModel();
-			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-				lp.setFeasibilityRepairMode(false);
-				return solution;
 			}
 		}
 
@@ -128,26 +145,39 @@ public class PC {
 		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
 		ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
 		for (PricingEngine engine : pricingEngines) {
-			PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
-			int addedColumns = 0;
-			if (result.isImproved()) {
-				for (int i = 0; i < result.getColumns().size(); i++) {
-					TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
-					int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
-							column.isSeedColumn());
-					Integer value = Integer.valueOf(id);
-					if (!activeColumnIds.contains(value)) {
-						activeColumnIds.add(value);
-						newColumnIds.add(value);
-						addedColumns++;
-					}
-				}
-			}
-			String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
-			traceSink.onPricingCall(lp.getNode(), name, result.isImproved(), addedColumns, result.getMessage(),
-					lp.getPool().size());
+			newColumnIds.addAll(generateColumnsFromEngine(lp, engine, repairMode, activeColumnIds));
 		}
 		return newColumnIds;
+	}
+
+	private ArrayList<Integer> generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
+			ArrayList<Integer> activeColumnIds) {
+		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
+		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
+		int addedColumns = 0;
+		if (result.isImproved()) {
+			for (int i = 0; i < result.getColumns().size(); i++) {
+				TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
+				int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
+						column.isSeedColumn());
+				Integer value = Integer.valueOf(id);
+				if (!activeColumnIds.contains(value)) {
+					activeColumnIds.add(value);
+					newColumnIds.add(value);
+					addedColumns++;
+				}
+			}
+		}
+		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
+		traceSink.onPricingCall(lp.getNode(), name, result.isImproved(), addedColumns, result.getMessage(),
+				lp.getPool().size());
+		return newColumnIds;
+	}
+
+	private void resetFollowingPricingEngines(int startIndex) {
+		for (int i = startIndex; i < pricingEngines.size(); i++) {
+			pricingEngines.get(i).reset();
+		}
 	}
 
 }

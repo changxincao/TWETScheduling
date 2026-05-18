@@ -22,7 +22,7 @@ public class TWETBPCConfig {
 	public boolean runALNSForSeed = true;
 	/** 是否为每个 job 额外生成 singleton 列。 */
 	public boolean generateSingletonColumns = true;
-	/** 是否从启发式完整序列中切出短子序列，作为额外初始列。 */
+	/** 是否从启发式完整序列中切出短子序列列，作为额外初始列。 */
 	public boolean generateSubsequenceColumns = true;
 	/** 从一条启发式序列切子列时，允许的最大长度。 */
 	public int maxSeedSubsequenceLength = 4;
@@ -34,23 +34,26 @@ public class TWETBPCConfig {
 	public boolean usePaperDominancePricing = true;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
-	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最终最多返回给 RMP 的优质负 reduced-cost 列数。 */
+	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */
 	public int heuristicPricingSeedColumns = 30;
-	/** 2026-05-18: 对应旧 VRP Configure.m_gen_size，本地负 reduced-cost 候选池生成上限，达到后停止 tabu 生成。 */
+	/** 2026-05-18: 对应旧 VRP Configure.m_gen_size，本地负 reduced-cost 候选池生成上限。 */
 	public int heuristicPricingPoolSize = 1000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_iteration_number，每条 seed 的 tabu 搜索轮数。 */
 	public int heuristicPricingTabuIterations = 50;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_tenure，tabu 禁忌长度。 */
 	public int heuristicPricingTabuTenure = 30;
-	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP 代码 Configure.addin_size 的默认值。 */
+	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP Configure.addin_size 的默认值。 */
 	public int maxExactPricingColumns = 150;
-	/** 2026-05-18: 对应旧 VRP Configure.m_branch_col_number，分支子节点为消除 slack 最多额外生成多少列。 */
-	public int maxBranchRepairColumns = 500;
+	/**
+	 * 2026-05-18: 对应旧 VRP Configure.m_branch_col_number。这里默认调大，只作为防死循环保护，
+	 * 不作为不可行证明；正常 repair 应由 slack=0 或无新列退出。
+	 */
+	public int maxBranchRepairColumns = 100000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_initial_col_number，子节点初始 RMP 最多继承多少条低 reduced-cost 列。 */
 	public int branchSeedColumnLimit = 1000;
-	/** 2026-05-18: 对应旧 VRP Configure.m_addin_red_cost，父节点 reduced cost 低于该阈值的列才优先传给子节点。 */
+	/** 2026-05-18: 对应旧 VRP Configure.m_addin_red_cost，父节点 reduced cost 低于该阈值的列优先传给子节点。 */
 	public double branchSeedReducedCostAllowance = 5000.0;
 	/** 单个节点内最多进行多少轮 cut separation。 */
 	public int maxCutRounds = 8;

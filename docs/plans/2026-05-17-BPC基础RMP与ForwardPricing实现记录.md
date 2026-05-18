@@ -213,3 +213,17 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 旧 VRP 里的 `Reset()` 有两类调用场景。正常列生成中，`GCNGBB.Solve(lp)` 一开始会无条件调用 `Reset()`，这是一次完整 exact pricing 求解的初始化。分支可行列修复中，`BranchA/B/C/D.UpdateRouteSet()` 创建一个 `GCTabu hgc` 和一个 `GCNGBB gc`，在 while 循环里先调用 `hgc.FindFeasible()`，如果 `old_col_number != col_number`，说明启发式新加了列，此时才调用 `gc.Reset()`，随后再调用 `gc.FindFeasible()`。`GCNGBB.FindFeasible()` 自己不 reset，因此同一个 `GCNGBB` 对象在分支修复循环中会保留动态 ng-set；所谓“跨调用”就是这些 `m_low_ng_set/m_high_ng_set` 会跨多次 `gc.FindFeasible()` 调用保留，除非正常 `Solve()` 开头或启发式新增列后显式 reset。
 
 coverage 是否可能不可行，取决于外包变量是否能覆盖所有任务，以及 child 从父节点继承的列是否仍能覆盖所有不能外包的任务。child 只从父节点 restricted columns 中筛选低 reduced-cost 且兼容分支状态的列，筛选以后完全可能丢掉某些高 reduced-cost 但覆盖关键 job 的列；如果该 job 又不能外包，则 coverage 行会暂时不可行。即使父节点可行，child 的 forbidden/required arc 状态也可能让原来覆盖某个 job 的列不再兼容。因此 coverage slack 不是只为外包变量本身准备，而是为“当前 child restricted column set 暂时缺覆盖列”的情况准备。
+
+## 2026-05-18：solve、FindFeasible、Reset 和 coverage slack 的细化记录
+
+本轮继续把旧 VRP 代码和当前 TWET-BPC 代码逐项对齐，重点澄清 `solve/price` 和 `findFeasible` 的区别。正常 `solve` 或 `price` 的前提是当前 RMP 已经可行，此时 LP 能给出正常 dual，pricing 的目标是找负 reduced cost 列来改进当前节点的 LP 下界。`findFeasible` 的场景不一样：它用于分支子节点 restricted column set 暂时不够时，RMP 可能不可行。旧 VRP 的做法是先 `AddSlack`，让带人工 slack 的 LP 能解出 dual，再用启发式和精确定价在这个 dual 下补列，直到 `IsNoSlack()` 成立。也就是说，`findFeasible` 的第一目标不是证明没有负 reduced cost，而是先把子节点的列集修到可行。
+
+旧 VRP 中启发式 `GCTabu.FindFeasible()` 本身已经会循环执行 `solve LP -> IsNoSlack -> GetDual/GetValue -> Extend`。如果启发式已经把 slack 压到 0，它会返回 `-1` 表示成功。不过旧 `BranchD.UpdateRouteSet()` 的外层 while 写法是先调用启发式，再根据是否新增列决定是否 `gc.Reset()`，然后仍然调用一次 `GCNGBB.FindFeasible()`；下一轮循环开头看到 `col_number == -1` 才退出。因此“启发式找到可行列以后为什么还调用精确的”不是因为算法上必须这么做，而是旧代码的控制流如此写。更准确地说，旧代码把启发式当作快速修复层，把 `GCNGBB` 当作进一步兜底层；如果启发式已经成功，精确层通常很快会发现 slack 已经为 0 并返回成功。
+
+关于 `Reset()`，这次重新看了旧 `GCNGBB` 源码，确认它清理的只有 `m_low_ng_set` 和 `m_high_ng_set` 两个动态 ng-set。它不是 DSSR 的完整重启，也不是清理 dominance graph，更不是清理 LP 或 route pool。旧代码只有在 `hgc.FindFeasible()` 新增列以后才调用 `gc.Reset()`，原因是启发式补列会改变 RMP 和后续 dual，旧作者选择让后续 exact pricing 的动态 ng-memory 从较松状态重新开始。如果启发式没有新增列，就不 reset；如果 exact `FindFeasible()` 自己连续调用多次，它会保留这些 ng-set 状态继续推进。当前 TWET 的基础 exact pricing 每次调用都会重新读 dual 并重新做 forward labeling，没有跨调用的动态 ng-set，所以现在暂时没有需要 reset 的对象。后续若加入 DSSR、ng-route 动态记忆、双向 bound 缓存或跨轮 label pool，再补 `PricingEngine.reset()` 才有意义。
+
+本轮还澄清了 child 继承列以后为什么仍可能出现 coverage 不可行。child 并不是完整继承父节点所有列，而是从父节点 restricted columns 中按 reduced cost 和分支兼容性筛一批列。这样做和旧 VRP 的 `UpdateRouteSet()` 后半段一致，目的是限制子节点列集规模。但筛选以后，某些覆盖关键 job 的高 reduced-cost 列可能被丢掉；如果该 job 又不能外包，coverage 约束就会暂时不可行。即使 job 可以外包，required arc 也不能靠外包变量满足，因为 required arc 要求的是内部加工列中出现某条弧。因此当前 TWET repair mode 同时给 coverage 行和 required-arc 行加人工 slack，是为了覆盖“暂时缺列”的 RMP，而不是为了放松最终模型。repair 成功后必须关闭 slack，并重解正常 RMP。
+
+这里要区分两类 slack。旧 VRP 的 `AddSlack` 是加在分支约束行上的人工变量，目标系数为 `BigNumber`，只用于让当前 route set 暂时不满足分支约束时仍能求 LP 和 dual。当前 TWET 的 `requiredArcSlack` 与旧逻辑最接近，对应 `sum(columns using arc)=1` 这一类分支约束。`coverSlack` 是当前问题新增的工程兜底：如果某个 job 的 `y_j` 上界为 0，或者 child 筛列后暂时没有内部列覆盖它，coverage 行就需要人工 slack 来产生 dual。若某个 job 可以正常外包，`y_j=1` 已经能满足 coverage，这个 slack 自然不会为正。
+
+当前实现把旧 VRP 中放在各个 GC 内部的 `FindFeasible` 循环统一放到了 `PC.repairInfeasibleMaster()`：先解带 slack 的 RMP，调用 pricing engines 的 `findFeasible(lp)`，增量加列后 `resolveCurrentModel()`，循环直到 slack 为 0 或达到列数上限。这个是封装位置差异，不是调用逻辑差异。这样做的好处是多个 pricing engine 共用一套 repair 停止条件和增量加列逻辑，避免每个 GC 都复制 LP 求解、slack 检查和列接入代码。当前 `PricingEngine.findFeasible(lp)` 默认复用 `price(lp)`，后续如果 required-arc 节点需要更强定向搜索，可以在具体 engine 里覆盖。

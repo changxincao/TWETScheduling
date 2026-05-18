@@ -467,3 +467,11 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 第二个调用点在 `repairInfeasibleMaster()` 末尾：如果 child 第一次 LP 不可行，则先进入带 artificial slack 的 repair LP，通过 `engine.findFeasible(lp)` 反复补列；只有当 `lp.isNoSlack()` 为真，即 slack 被真实列压回 0 后，才调用该函数筛列，然后关闭 repair mode，回到正常 RMP 求解。这对应旧 VRP `FindFeasible()` 成功以后再筛 route set 的路径。
 
 因此它不是每轮普通 pricing 后都会调用，也不是 root 节点默认调用。它只服务于 child 的初始列集压缩：要么 child 首次 LP 已经可行后筛一次，要么 findFeasible/repair 成功后筛一次。
+
+## 2026-05-19：child 筛列增加正值列优先保留规则
+
+根据前面的边界分析，本次把 `LP.resetRestrictedColumnsByCurrentReducedCost()` 的筛列规则改成两阶段。第一阶段先检查当前 LP 中列变量值为正的列，并在分支兼容的前提下无条件放入 child 的正式 restricted column set；第二阶段才按 reduced cost 从小到大补充其他候选列，直到达到 `branchSeedColumnLimit`。
+
+这个修改的目的不是改变旧 VRP 的 reduced-cost 筛列思想，而是补上一个显式安全约束：child 首次 LP 可行或 repair 成功时，当前正值列构成当前 LP 解的一部分；理论上这些基列 reduced cost 通常为 0，但如果存在大量 reduced cost 为 0 的退化列，单纯排序截断仍可能把某些正值列挤掉。现在先保留正值列，就能保证“当前已经找到的可行组合”不会被筛列上限截断。`branchSeedColumnLimit` 仍然控制补充的非正值低 reduced-cost 列数量；如果正值列本身超过该上限，则以上限为软约束，优先保证可行性。
+
+验证：针对 `Basic/Common/HEU/Output/TWETBPC` 子集运行 `javac -encoding UTF-8 -cp D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar;target\classes -d target\twetbpc-compile ...` 通过，仅有历史 deprecated API 提示。

@@ -468,6 +468,7 @@ public class LP {
 		if (cplex == null || lambdaByColumnId == null) {
 			return;
 		}
+		ArrayList<Integer> selected = new ArrayList<Integer>();
 		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
 		for (int columnId : restrictedColumnIds) {
 			TWETColumn column = pool.getColumn(columnId);
@@ -475,6 +476,13 @@ public class LP {
 				continue;
 			}
 			double reducedCost = getColumnReducedCost(columnId);
+			if (isPositiveCurrentColumn(columnId)) {
+				// 2026-05-19: child LP 已经可行时，正值列构成当前可行解的一部分。
+				// 理论上这些基列的 reduced cost 通常为 0；这里先无条件保留它们，
+				// 再用低 reduced-cost 列补足，避免大量 0 reduced-cost 退化列按 id 截断时误删当前可行基。
+				selected.add(Integer.valueOf(columnId));
+				continue;
+			}
 			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
 				candidates.add(new ColumnReducedCost(columnId, reducedCost));
 			}
@@ -492,13 +500,24 @@ public class LP {
 			}
 		});
 
-		ArrayList<Integer> selected = new ArrayList<Integer>();
-		for (int i = 0; i < candidates.size() && i < maxColumns; i++) {
+		for (int i = 0; i < candidates.size() && selected.size() < maxColumns; i++) {
 			selected.add(Integer.valueOf(candidates.get(i).columnId));
 		}
 		if (!selected.isEmpty()) {
 			restrictedColumnIds = selected;
 			lastSolution = null;
+		}
+	}
+
+	private boolean isPositiveCurrentColumn(int columnId) {
+		IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
+		if (var == null) {
+			return false;
+		}
+		try {
+			return Utility.compareGt(cplex.getValue(var), VALUE_TOLERANCE);
+		} catch (IloException ex) {
+			return false;
 		}
 	}
 

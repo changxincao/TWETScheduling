@@ -7,9 +7,10 @@ import java.util.HashSet;
 import java.util.List;
 
 import Basic.Data;
+import Common.PiecewiseLinearFunction;
 import Common.Utility;
+import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
-import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -19,11 +20,12 @@ import TWETBPC.Util.SequenceSignature;
 /**
  * 启发式定价器。
  * <p>
- * 2026-05-18: 旧 VRP 代码里的 GCTabu 会先从当前 RMP 中挑低 reduced cost route，
- * 再通过 remove/add/exchange 邻域快速捞一批负 reduced-cost route。这里先移植这个“工作流”
- * 而不是直接硬搬 VRP 的 O(1) 时间窗数组：TWET 的列成本来自分段线性函数、setup time/cost 和硬窗预处理，
- * 因此第一版对候选序列统一调用 {@link TWETColumnEvaluator} 重算真实成本。它只是 exact pricing 前的加速层；
- * 找不到列时仍由 exact forward labeling 兜底，所以不会影响精确性。
+ * 2026-05-18: 这一版按旧 VRP `GCTabu` 的框架改写：从当前 RMP 中选择低 reduced-cost seed
+ * column，围绕每条 seed 做 remove/add/exchange tabu 搜索，生成本地负 reduced-cost column
+ * pool，最后排序取少量列加入 RMP。和旧 VRP 不同的是，TWET 列成本不是简单弧成本之和，所以每条
+ * seed 会先建立 forward/backward 分段函数 profile；候选 move 用
+ * `merge2Segments/merge3Segments` 快速拼接评价，而不是每个候选都完整重建一条序列。exact pricing
+ * 仍在该启发式之后执行，因此这里是加速层，不承担最优性证明。
  */
 public class HeuristicPricingEngine implements PricingEngine {
 
@@ -31,12 +33,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
-	private final TWETColumnEvaluator evaluator;
 
 	public HeuristicPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	@Override
@@ -50,6 +50,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("No active seed column for heuristic pricing");
 		}
 
+		Utility.resetCurUpperBound(Utility.big_M);
 		HashSet<SequenceSignature> activeSignatures = activeSignatures(lp);
 		HashSet<SequenceSignature> generatedSignatures = new HashSet<SequenceSignature>();
 		ArrayList<ScoredSequence> negativeCandidates = new ArrayList<ScoredSequence>();
@@ -59,12 +60,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (scanCount[0] >= config.maxHeuristicPricingCandidateScans) {
 				break;
 			}
-			searchSeedNeighborhood(seed.getSequence(), lp, activeSignatures, generatedSignatures, negativeCandidates,
-					scanCount);
+			tabuSearch(seed.getSequence(), lp, activeSignatures, generatedSignatures, negativeCandidates, scanCount);
 		}
 
 		if (negativeCandidates.isEmpty()) {
-			return PricingResult.noImprovement("Heuristic pricing found no negative reduced-cost column; scanned "
+			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column; scanned "
 					+ scanCount[0] + " candidates");
 		}
 
@@ -89,7 +89,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 					false));
 		}
 		return new PricingResult(columns, true,
-				"Heuristic pricing generated " + columns.size() + " columns; scanned " + scanCount[0] + " candidates");
+				"Tabu heuristic pricing generated " + columns.size() + " columns; scanned " + scanCount[0]
+						+ " candidates");
 	}
 
 	@Override
@@ -123,93 +124,89 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return new ArrayList<TWETColumn>(seeds.subList(0, limit));
 	}
 
-	private HashSet<SequenceSignature> activeSignatures(LP lp) {
-		HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
-		for (int columnId : lp.getRestrictedColumnIds()) {
-			signatures.add(lp.getPool().getColumn(columnId).getSignature());
-		}
-		return signatures;
-	}
-
-	private void searchSeedNeighborhood(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,
+	private void tabuSearch(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,
 			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates,
 			int[] scanCount) {
-		ArrayList<Integer> base = new ArrayList<Integer>(seed);
-		boolean[] used = usedJobs(base);
+		TabuRouteState state = new TabuRouteState(seed);
+		if (!state.isValid()) {
+			return;
+		}
+		tryAddNegative(state.sequence, state.cost, lp, activeSignatures, generatedSignatures, negativeCandidates);
+		double bestReducedCost = state.reducedCost(lp);
 
-		// remove: 删除一个任务，类似旧 GCTabu 的 remove 邻域。
-		if (base.size() > 1) {
-			for (int removePos = 0; removePos < base.size(); removePos++) {
-				ArrayList<Integer> candidate = new ArrayList<Integer>(base);
-				candidate.remove(removePos);
-				tryCandidate(candidate, lp, activeSignatures, generatedSignatures, negativeCandidates, scanCount);
-				if (shouldStop(scanCount)) {
-					return;
+		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
+		for (int iter = 0; iter < iterations && scanCount[0] < config.maxHeuristicPricingCandidateScans; iter++) {
+			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost, scanCount);
+			if (bestMove == null) {
+				break;
+			}
+			state.apply(bestMove, iter + config.heuristicPricingTabuTenure);
+			if (Utility.compareLt(state.currentReducedCost, bestReducedCost)) {
+				bestReducedCost = state.currentReducedCost;
+			}
+			tryAddNegative(state.sequence, state.cost, lp, activeSignatures, generatedSignatures, negativeCandidates);
+		}
+	}
+
+	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost, int[] scanCount) {
+		TabuMove bestMove = null;
+		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
+		Node node = lp.getNode();
+
+		if (state.sequence.size() > 1) {
+			for (int pos = 0; pos < state.sequence.size(); pos++) {
+				TabuMove move = state.evaluateRemove(pos, lp);
+				if (isAcceptedCandidate(move, node, iter, bestReducedCost, scanCount)
+						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
+					bestMove = move;
+					bestMoveReducedCost = move.reducedCost;
 				}
 			}
 		}
 
-		// relocate: 同一批任务换顺序。TWET 有 setup time/cost，顺序变化本身可能产生负 reduced cost。
-		for (int from = 0; from < base.size(); from++) {
-			ArrayList<Integer> without = new ArrayList<Integer>(base);
-			int job = without.remove(from).intValue();
-			for (int to = 0; to <= without.size(); to++) {
-				if (to == from) {
-					continue;
-				}
-				ArrayList<Integer> candidate = new ArrayList<Integer>(without);
-				candidate.add(to, Integer.valueOf(job));
-				tryCandidate(candidate, lp, activeSignatures, generatedSignatures, negativeCandidates, scanCount);
-				if (shouldStop(scanCount)) {
-					return;
-				}
-			}
-		}
-
-		// add / exchange: 从未访问任务中尝试插入或替换。这里不做完整 tabu tenure，先保留最稳的邻域捞列功能。
 		for (int job = 1; job <= data.n; job++) {
-			if (used[job]) {
+			if (state.used[job]) {
 				continue;
 			}
-			for (int pos = 0; pos <= base.size(); pos++) {
-				ArrayList<Integer> candidate = new ArrayList<Integer>(base);
-				candidate.add(pos, Integer.valueOf(job));
-				tryCandidate(candidate, lp, activeSignatures, generatedSignatures, negativeCandidates, scanCount);
-				if (shouldStop(scanCount)) {
-					return;
+			for (int pos = 0; pos <= state.sequence.size(); pos++) {
+				TabuMove move = state.evaluateAdd(job, pos, lp);
+				if (isAcceptedCandidate(move, node, iter, bestReducedCost, scanCount)
+						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
+					bestMove = move;
+					bestMoveReducedCost = move.reducedCost;
 				}
 			}
-			for (int pos = 0; pos < base.size(); pos++) {
-				ArrayList<Integer> candidate = new ArrayList<Integer>(base);
-				candidate.set(pos, Integer.valueOf(job));
-				tryCandidate(candidate, lp, activeSignatures, generatedSignatures, negativeCandidates, scanCount);
-				if (shouldStop(scanCount)) {
-					return;
+			for (int pos = 0; pos < state.sequence.size(); pos++) {
+				TabuMove move = state.evaluateExchange(job, pos, lp);
+				if (isAcceptedCandidate(move, node, iter, bestReducedCost, scanCount)
+						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
+					bestMove = move;
+					bestMoveReducedCost = move.reducedCost;
 				}
 			}
 		}
+		return bestMove;
 	}
 
-	private boolean shouldStop(int[] scanCount) {
-		// 旧 GCTabu 是先形成本地负 reduced-cost route pool，再排序选最好的 addin_size 条；
-		// 因此这里不能“找到足够条数就停”，否则早期较弱候选会挤掉后面更好的候选。
-		return scanCount[0] >= config.maxHeuristicPricingCandidateScans;
-	}
-
-	private void tryCandidate(ArrayList<Integer> sequence, LP lp, HashSet<SequenceSignature> activeSignatures,
-			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates,
-			int[] scanCount) {
-		if (scanCount[0] >= config.maxHeuristicPricingCandidateScans || sequence.isEmpty()
-				|| hasDuplicateJobs(sequence) || !isSequenceCompatible(lp.getNode(), sequence)) {
-			return;
+	private boolean isAcceptedCandidate(TabuMove move, Node node, int iter, double bestReducedCost, int[] scanCount) {
+		if (scanCount[0] >= config.maxHeuristicPricingCandidateScans || move == null || !move.valid) {
+			return false;
 		}
 		scanCount[0]++;
-		SequenceSignature signature = new SequenceSignature(sequence);
-		if (activeSignatures.contains(signature) || !generatedSignatures.add(signature)) {
+		if (!isSequenceCompatible(node, move.sequence)) {
+			return false;
+		}
+		// 旧 GCTabu 的 aspiration：如果候选优于历史最好 reduced cost，即使 tabu 也允许。
+		return !move.isTabu(iter) || Utility.compareLt(move.reducedCost, bestReducedCost);
+	}
+
+	private void tryAddNegative(List<Integer> sequence, double cost, LP lp, HashSet<SequenceSignature> activeSignatures,
+			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates) {
+		if (sequence.isEmpty() || Utility.isBigMValue(cost) || hasDuplicateJobs(sequence)) {
 			return;
 		}
-		double cost = evaluator.evaluate(sequence);
-		if (Utility.isBigMValue(cost)) {
+		SequenceSignature signature = new SequenceSignature(sequence);
+		if (activeSignatures.contains(signature) || !generatedSignatures.add(signature)) {
 			return;
 		}
 		double reducedCost = reducedCost(sequence, cost, lp);
@@ -218,7 +215,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 	}
 
-	private boolean isSequenceCompatible(Node node, ArrayList<Integer> sequence) {
+	private HashSet<SequenceSignature> activeSignatures(LP lp) {
+		HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
+		for (int columnId : lp.getRestrictedColumnIds()) {
+			signatures.add(lp.getPool().getColumn(columnId).getSignature());
+		}
+		return signatures;
+	}
+
+	private boolean isSequenceCompatible(Node node, List<Integer> sequence) {
 		if (sequence.isEmpty()) {
 			return false;
 		}
@@ -231,16 +236,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 		}
 		return node.getArcState(sequence.get(sequence.size() - 1).intValue(), node.sinkId()) != Node.ARC_FORBIDDEN;
-	}
-
-	private boolean[] usedJobs(List<Integer> sequence) {
-		boolean[] used = new boolean[data.n + 1];
-		for (int job : sequence) {
-			if (job >= 1 && job <= data.n) {
-				used[job] = true;
-			}
-		}
-		return used;
 	}
 
 	private boolean hasDuplicateJobs(List<Integer> sequence) {
@@ -269,6 +264,232 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return reducedCost;
 	}
 
+	private final class TabuRouteState {
+		private final Solution mergeHelper = new Solution(data);
+		private ArrayList<Integer> sequence;
+		private boolean[] used;
+		private int[] tabuTenure;
+		private PiecewiseLinearFunction[] forward;
+		private PiecewiseLinearFunction[] backward;
+		private double cost;
+		private double currentReducedCost;
+
+		TabuRouteState(List<Integer> seed) {
+			this.sequence = new ArrayList<Integer>(seed);
+			this.used = new boolean[data.n + 1];
+			this.tabuTenure = new int[data.n + 1];
+			rebuild();
+		}
+
+		boolean isValid() {
+			return !sequence.isEmpty() && !Utility.isBigMValue(cost);
+		}
+
+		double reducedCost(LP lp) {
+			currentReducedCost = HeuristicPricingEngine.this.reducedCost(sequence, cost, lp);
+			return currentReducedCost;
+		}
+
+		TabuMove evaluateRemove(int pos, LP lp) {
+			if (sequence.size() <= 1) {
+				return TabuMove.invalid();
+			}
+			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
+			int removedJob = candidate.remove(pos).intValue();
+			double candidateCost = removeCost(pos);
+			return buildMove(candidate, candidateCost, lp, MoveType.REMOVE, removedJob, -1);
+		}
+
+		TabuMove evaluateAdd(int job, int pos, LP lp) {
+			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
+			candidate.add(pos, Integer.valueOf(job));
+			double candidateCost = insertOrReplaceCost(pos, job, false);
+			return buildMove(candidate, candidateCost, lp, MoveType.ADD, job, -1);
+		}
+
+		TabuMove evaluateExchange(int job, int pos, LP lp) {
+			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
+			int removedJob = candidate.set(pos, Integer.valueOf(job)).intValue();
+			double candidateCost = insertOrReplaceCost(pos, job, true);
+			return buildMove(candidate, candidateCost, lp, MoveType.EXCHANGE, job, removedJob);
+		}
+
+		void apply(TabuMove move, int tenureUntil) {
+			this.sequence = new ArrayList<Integer>(move.sequence);
+			if (move.primaryJob >= 1 && move.primaryJob < tabuTenure.length) {
+				tabuTenure[move.primaryJob] = tenureUntil;
+			}
+			if (move.secondaryJob >= 1 && move.secondaryJob < tabuTenure.length) {
+				tabuTenure[move.secondaryJob] = tenureUntil;
+			}
+			rebuild();
+			this.currentReducedCost = move.reducedCost;
+		}
+
+		private TabuMove buildMove(ArrayList<Integer> candidate, double candidateCost, LP lp, MoveType type, int primaryJob,
+				int secondaryJob) {
+			if (candidate.isEmpty() || Utility.isBigMValue(candidateCost) || hasDuplicateJobs(candidate)) {
+				return TabuMove.invalid();
+			}
+			double rc = HeuristicPricingEngine.this.reducedCost(candidate, candidateCost, lp);
+			return new TabuMove(candidate, candidateCost, rc, type, primaryJob, secondaryJob, tabuTenure);
+		}
+
+		private double removeCost(int pos) {
+			if (sequence.size() == 1) {
+				return 0.0;
+			}
+			int end = pos;
+			PiecewiseLinearFunction f1 = pos == 0 ? data.penaltyFunction[0] : forward[pos - 1];
+			if (end == sequence.size() - 1) {
+				return f1.tail.getValue(f1.tail.end);
+			}
+			PiecewiseLinearFunction b2 = backward[end + 1];
+			int bridgeFrom = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
+			int bridgeTo = sequence.get(end + 1).intValue();
+			return mergeHelper.merge2Segments(f1, b2, data.s[bridgeFrom][bridgeTo] + data.p[bridgeTo],
+					data.getSetupCost(bridgeFrom, bridgeTo));
+		}
+
+		private double insertOrReplaceCost(int pos, int job, boolean replace) {
+			int prefixEnd = pos - 1;
+			int suffixStart = replace ? pos + 1 : pos;
+			PiecewiseLinearFunction f1 = prefixEnd < 0 ? data.penaltyFunction[0] : forward[prefixEnd];
+			PiecewiseLinearFunction b3 = suffixStart >= sequence.size() ? data.penaltyFunction[0] : backward[suffixStart];
+			SegmentProfile single = singletonProfile(job);
+			int bridgeFrom1 = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
+			double shift1 = data.s[bridgeFrom1][job] + data.p[job];
+			int bridgeTo2 = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
+			double shift2 = suffixStart >= sequence.size() ? 0.0 : data.s[job][bridgeTo2] + data.p[bridgeTo2];
+			return mergeHelper.merge3Segments(f1, single.forward, single.backward, b3, shift1, shift2, 0.0,
+					data.getSetupCost(bridgeFrom1, job),
+					suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo2));
+		}
+
+		private void rebuild() {
+			this.used = new boolean[data.n + 1];
+			for (int job : sequence) {
+				if (job >= 1 && job <= data.n) {
+					used[job] = true;
+				}
+			}
+			this.forward = buildForwardProfile(sequence, true);
+			this.backward = buildBackwardProfile(sequence);
+			this.cost = sequence.isEmpty() || forward.length == 0 || forward[forward.length - 1].isEmpty() ? Utility.big_M
+					: forward[forward.length - 1].tail.getValue(forward[forward.length - 1].tail.end);
+		}
+	}
+
+	private PiecewiseLinearFunction[] buildForwardProfile(List<Integer> jobs, boolean includeDepotStart) {
+		PiecewiseLinearFunction[] result = new PiecewiseLinearFunction[jobs.size()];
+		for (int i = 0; i < jobs.size(); i++) {
+			int job = jobs.get(i).intValue();
+			PiecewiseLinearFunction cur;
+			if (i == 0) {
+				cur = data.penaltyFunction[job].copy();
+				if (includeDepotStart) {
+					cur = cur.setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+					cur.shiftYInPlace(data.getSetupCost(0, job));
+				}
+			} else {
+				int prev = jobs.get(i - 1).intValue();
+				cur = result[i - 1].shiftX(data.s[prev][job] + data.p[job]).add(data.penaltyFunction[job]);
+				cur.shiftYInPlace(data.getSetupCost(prev, job));
+			}
+			cur.minimizePrefixInPlace();
+			result[i] = cur;
+		}
+		return result;
+	}
+
+	private PiecewiseLinearFunction[] buildBackwardProfile(List<Integer> jobs) {
+		PiecewiseLinearFunction[] result = new PiecewiseLinearFunction[jobs.size()];
+		for (int i = jobs.size() - 1; i >= 0; i--) {
+			int job = jobs.get(i).intValue();
+			PiecewiseLinearFunction cur;
+			if (i == jobs.size() - 1) {
+				cur = data.penaltyFunction[job].copy();
+			} else {
+				int next = jobs.get(i + 1).intValue();
+				cur = result[i + 1].shiftX(-data.s[job][next] - data.p[next]).add(data.penaltyFunction[job]);
+				cur.shiftYInPlace(data.getSetupCost(job, next));
+			}
+			cur.minimizeSuffixInPlace();
+			result[i] = cur;
+		}
+		return result;
+	}
+
+	private SegmentProfile singletonProfile(int job) {
+		PiecewiseLinearFunction forward = data.penaltyFunction[job].copy();
+		forward.minimizePrefixInPlace();
+		PiecewiseLinearFunction backward = data.penaltyFunction[job].copy();
+		backward.minimizeSuffixInPlace();
+		return new SegmentProfile(forward, backward);
+	}
+
+	private static final class SegmentProfile {
+		final PiecewiseLinearFunction forward;
+		final PiecewiseLinearFunction backward;
+
+		private SegmentProfile(PiecewiseLinearFunction forward, PiecewiseLinearFunction backward) {
+			this.forward = forward;
+			this.backward = backward;
+		}
+	}
+
+	private enum MoveType {
+		REMOVE, ADD, EXCHANGE
+	}
+
+	private static final class TabuMove {
+		final boolean valid;
+		final ArrayList<Integer> sequence;
+		final double cost;
+		final double reducedCost;
+		final MoveType type;
+		final int primaryJob;
+		final int secondaryJob;
+		final int primaryTenure;
+		final int secondaryTenure;
+
+		TabuMove(ArrayList<Integer> sequence, double cost, double reducedCost, MoveType type, int primaryJob,
+				int secondaryJob, int[] tabuTenure) {
+			this.valid = true;
+			this.sequence = sequence;
+			this.cost = cost;
+			this.reducedCost = reducedCost;
+			this.type = type;
+			this.primaryJob = primaryJob;
+			this.secondaryJob = secondaryJob;
+			this.primaryTenure = primaryJob >= 0 && primaryJob < tabuTenure.length ? tabuTenure[primaryJob] : 0;
+			this.secondaryTenure = secondaryJob >= 0 && secondaryJob < tabuTenure.length ? tabuTenure[secondaryJob] : 0;
+		}
+
+		private TabuMove() {
+			this.valid = false;
+			this.sequence = new ArrayList<Integer>();
+			this.cost = Utility.big_M;
+			this.reducedCost = Utility.big_M;
+			this.type = MoveType.ADD;
+			this.primaryJob = -1;
+			this.secondaryJob = -1;
+			this.primaryTenure = 0;
+			this.secondaryTenure = 0;
+		}
+
+		static TabuMove invalid() {
+			return new TabuMove();
+		}
+
+		boolean isTabu(int iter) {
+			if (type == MoveType.EXCHANGE) {
+				return iter < primaryTenure || iter < secondaryTenure;
+			}
+			return iter < primaryTenure;
+		}
+	}
+
 	private static final class ScoredSequence {
 		final ArrayList<Integer> sequence;
 		final double cost;
@@ -280,5 +501,4 @@ public class HeuristicPricingEngine implements PricingEngine {
 			this.reducedCost = reducedCost;
 		}
 	}
-
 }

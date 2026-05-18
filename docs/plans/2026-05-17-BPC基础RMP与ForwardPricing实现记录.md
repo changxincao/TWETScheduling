@@ -20,6 +20,16 @@ pricing 先实现了最基础的单向 forward labeling，不含 SRI cut、ng-ro
 
 需要明确的是，这还不是完整 BPC。当前没有 SRI cut，没有 cut-aware pricing，没有 partial dominance，没有 bidirectional labeling，也没有 ng-route/DSSR 之类的松弛强化。分支方面也只有 arc branching；如果要求严格求完整 B&P 树，后续还需要补人工列/分支节点可行性兜底、外包变量分支、tariff 分段整数性处理，以及更完整的输出统计。
 
+## 2026-05-18：启发式定价改为旧 VRP GCTabu 框架
+
+本轮按用户要求把启发式定价进一步向旧 VRP 的 `GCTabu` 框架靠齐。旧代码的核心流程不是替代 exact pricing，而是在 exact pricing 前从当前 RMP 里挑一批低 reduced cost route 作为 seed，然后围绕 seed 做 remove/add/exchange tabu 搜索，形成一个本地负 reduced-cost route pool，排序后只加入少量优质列。当前 TWET 版本沿用这个框架：先收集当前 restricted columns，按 reduced cost 排序取 `heuristicPricingSeedColumns=30` 条种子；每条种子运行 `heuristicPricingTabuIterations=50` 轮 tabu，tenure 取旧 VRP 默认值 30；邻域包括删除一个任务、插入一个未访问任务、用未访问任务替换当前任务。所有候选进入本地池后，最后按 reduced cost 排序，最多返回 `maxHeuristicPricingColumns=30` 条。
+
+和旧 VRP 不能完全照搬的地方在于 move 评价。旧 VRP 的 route cost 基本是弧成本、容量和硬时间窗状态的增量更新；TWET 的列成本来自分段线性时间惩罚、setup time、setup cost 和硬时间窗预处理，不能直接用旧的局部弧成本公式。因此这次没有再用全序列 `TWETColumnEvaluator` 重算每个候选，而是给每条 seed 建立 forward/backward 分段函数 profile。删除任务时用两段拼接 `merge2Segments` 评价；插入或替换任务时把新任务看作单点 segment，用三段拼接 `merge3Segments` 评价；setup cost 在桥接弧上显式补入。这就保留了旧 `GCTabu` 的搜索结构，同时把候选成本评价换成当前 TWET 启发式中已经验证过的分段函数拼接逻辑。
+
+这里仍然只是启发式加速层，不承担最优性证明。候选列会先检查当前分支节点的 forbidden arc 状态，并跳过当前 RMP 已 active 的重复序列；如果找到负 reduced-cost 列就返回给 `PC`，后面 exact forward pricing 仍会继续兜底。因此它找不到列不会影响严格性，最多影响速度。当前实现还没有把旧 VRP 里更完整的 slack RMP + `FindFeasible` 定向 pricing 复制进来；required-arc 子节点现在仍主要依赖 pool 筛列和 fallback column，复杂分支状态下还需要后续继续增强。
+
+验证方面，本轮做了 focused compile，范围为 `src/Common`、`src/Basic`、`src/HEU`、`src/Output` 和 `src/TWETBPC`，编译通过，仅有旧 API deprecation 提示。随后运行 `TWETBPC.GC.PaperDominanceGraphConsistencyTest`，结果为 `cases=200, insertions=16000` 通过；运行 `PWLFTesting.PiecewiseLinearFunctionPropertyTest`，程序正常结束，保留既有的 PWLF 警告/失败计数，没有出现本轮新增编译或运行错误。另用临时 smoke 程序构造 7 任务、2 机器小算例跑 `TWETBPCSolver`，结果为 `ROOT_PROCESSED, incumbent=23.66, bound=23.660000000000004, columns=21`，说明启发式定价接入后 BPC 主链路仍能跑通。
+
 ## 后续计划
 
 下一步最自然的是继续完善 pricing 的质量，而不是马上堆 cut。可以先做三件事：第一，补 pricing 过程的详细统计输出，包括 label 数、dominance 删除数、返回列数和耗时；第二，给 required-arc 分支节点补人工列或更稳的节点可行性处理，避免 restricted master 在分支后因为暂时没有列而提前 infeasible；第三，再考虑把 dominance graph 从当前的完整占优推进到 partial dominance 或更高效的 graph propagation。

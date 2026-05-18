@@ -46,6 +46,12 @@ public class TWETBPCConfig {
 	public int heuristicPricingTabuTenure = 30;
 	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP 代码 Configure.addin_size 的默认值。 */
 	public int maxExactPricingColumns = 150;
+	/** 2026-05-18: 对应旧 VRP Configure.m_branch_col_number，分支子节点为消除 slack 最多额外生成多少列。 */
+	public int maxBranchRepairColumns = 500;
+	/** 2026-05-18: 对应旧 VRP Configure.m_initial_col_number，子节点初始 RMP 最多继承多少条低 reduced-cost 列。 */
+	public int branchSeedColumnLimit = 1000;
+	/** 2026-05-18: 对应旧 VRP Configure.m_addin_red_cost，父节点 reduced cost 低于该阈值的列才优先传给子节点。 */
+	public double branchSeedReducedCostAllowance = 5000.0;
 	/** 单个节点内最多进行多少轮 cut separation。 */
 	public int maxCutRounds = 8;
 	/** 判断是否整数时使用的容差。 */

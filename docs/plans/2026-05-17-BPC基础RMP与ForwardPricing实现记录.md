@@ -139,3 +139,15 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 前面临时加入过 `maxHeuristicPricingCandidateScans=5000`，用于防止 TWET 候选评估开销过大。但旧 VRP 的 `GCTabu` 并不是按候选扫描次数截断，而是用几组更明确的参数控制：`m_tabu_cg_size=30` 控制 seed 数，`m_tabu_cg_iteration_number=50` 控制每条 seed 的 tabu 轮数，`m_tabu_cg_tenure=30` 控制 tabu 长度，`m_gen_size=1000` 控制本地负 reduced-cost route pool 的最大规模，`addin_size=150` 控制最终加入 RMP 的列数。因此当前 TWET 版已经取消 candidate scan 上限，改为同样的参数语义。
 
 修改后的配置对应关系为：`heuristicPricingSeedColumns=30` 对应旧 `m_tabu_cg_size`；`heuristicPricingTabuIterations=50` 对应旧 `m_tabu_cg_iteration_number`；`heuristicPricingTabuTenure=30` 对应旧 `m_tabu_cg_tenure`；`heuristicPricingPoolSize=1000` 对应旧 `m_gen_size`；`maxHeuristicPricingColumns=150` 对应旧 `addin_size`。这样控制逻辑更接近旧代码：每条 seed 完整扫描每轮 remove/add/exchange 邻域，选择当前最好 move；只要本地负 reduced-cost 候选池没满，就继续按 tabu 轮数推进；最后对候选池排序并返回前 150 条。这个改动不会改变 exact pricing 的兜底地位，只是让启发式生成列层和旧 VRP 的行为更一致。
+
+## 2026-05-18：分支子节点改为 slack RMP + FindFeasible 修复
+
+前一版 `Tree.prepareChildSeedColumns()` 的做法还是偏工程兜底：子节点入队前先从全局 pool 筛所有兼容列，然后对缺覆盖 job 或缺 required arc 的情况临时拼一些 fallback 序列。这和旧 VRP 的 `BranchD.UpdateRouteSet()` 不是同一套逻辑，效率也差，因为它在树层暴力枚举 pool 插入位置，而且无法利用 RMP dual 指导列生成。本轮把这块改成更接近旧代码的结构。
+
+现在子节点入队时只做一件事：从父节点当前 RMP 的 restricted columns 中，按父节点 reduced cost 排序，挑选低于 `branchSeedReducedCostAllowance=5000` 的列，并最多保留 `branchSeedColumnLimit=1000` 条作为 child seed。这两个参数分别对应旧 VRP 的 `m_addin_red_cost` 和 `m_initial_col_number`。也就是说，子节点初始列集不再是“全局 pool 里所有兼容列”，而是像旧 `UpdateRouteSet()` 后半段那样继承父节点低 reduced-cost 的优质列。
+
+如果这些 seed 仍然导致子节点 RMP 暂时不可行，修复逻辑现在放到 `PC` 内部。`PC.solve()` 会先解正常 RMP；如果不可行，就打开 `LP` 的 feasibility repair mode，建立带人工 slack 的同一节点 RMP。slack 加在 job 覆盖约束和 required-arc 约束上，目标系数为 `big_M`，只用于让暂时缺列的子节点先可解并产生 dual。随后 `PC` 调用现有启发式 pricing 和 exact pricing，日志名加 `[FindFeasible]`，不断把新列增量加入当前 CPLEX 模型并重新求解，直到 slack 归零，或者生成列数达到 `maxBranchRepairColumns=500`，该参数对应旧 VRP 的 `m_branch_col_number`。slack 归零后会关闭 repair mode，重建正常 RMP 继续标准列生成。
+
+这次也把 `LP.addColumns()` 改成支持当前模型上的增量加列。只要 CPLEX 模型已经存在，新列会通过 `IloColumn` 同时接入 objective、machine constraint、coverage constraints 和 required-arc constraints，然后直接 `resolveCurrentModel()`，不再每轮都 `cplex.end()` 再重建模型。只有切换 repair mode、加入 cut 或显式重新 solve 时才重建模型。这个点是效率上的关键：如果沿用旧 VRP 的 FindFeasible 流程但每次都重建 LP，反而会比旧代码慢。
+
+需要说明的是，这仍然不是完全复制旧 VRP 的所有细节。旧代码里的 `GCTabu.FindFeasible()` 和 `GCNGBB.FindFeasible()` 是专门的可行列修复入口；当前 TWET 版先复用已有 pricing engines，在 slack dual 下生成负 reduced-cost 列。结构上已经变成“slack RMP + 启发式/精确定价修复”，但还没有为 required arc 写专门定向的 pricing 状态，也没有输出 slack 剩余量和 repair 迭代统计。后续如果遇到复杂 required-arc 分支节点，可以继续把 `PricingEngine` 拆出专门的 `findFeasible` 接口。

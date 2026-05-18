@@ -13,8 +13,10 @@ import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 import ilog.concert.IloException;
+import ilog.concert.IloColumn;
 import ilog.concert.IloLinearNumExpr;
 import ilog.concert.IloNumVar;
+import ilog.concert.IloObjective;
 import ilog.concert.IloRange;
 import ilog.cplex.IloCplex;
 
@@ -39,14 +41,19 @@ public class LP {
 	private TWETMasterSolution lastSolution;
 
 	private IloCplex cplex;
+	private IloObjective objective;
 	private IloNumVar[] lambdaVars;
+	private HashMap<Integer, IloNumVar> lambdaByColumnId;
 	private IloNumVar[] outsourceVars;
 	private IloNumVar[] outsourceSegmentActive;
 	private IloNumVar[] outsourceSegmentBaseline;
+	private IloNumVar[] coverSlackVars;
+	private HashMap<Long, IloNumVar> requiredArcSlackVars;
 	private IloRange[] coverRanges;
 	private IloRange machineRange;
 	private HashMap<Long, IloRange> requiredArcRanges;
 	private ArrayList<TariffSegment> outsourcingTariffSegments;
+	private boolean feasibilityRepairMode;
 
 	private double[] jobDual;
 	private double machineDual;
@@ -60,6 +67,7 @@ public class LP {
 		this.activeCutIds = new ArrayList<Integer>();
 		this.jobDual = new double[data.n + 1];
 		this.arcDual = new double[data.n + 2][data.n + 2];
+		this.feasibilityRepairMode = false;
 	}
 
 	public void construct(Node node, List<Integer> columnIds) {
@@ -98,6 +106,45 @@ public class LP {
 		return lastSolution;
 	}
 
+	/**
+	 * 2026-05-18: 分支子节点缺列时，临时打开人工 slack RMP。
+	 * 这个开关只用于模仿旧 VRP 的 UpdateRouteSet/FindFeasible：先让子节点 LP 可解并产生 dual，
+	 * 再用 pricing 找列把 slack 压回 0。正常节点求解必须关闭该模式。
+	 */
+	public void setFeasibilityRepairMode(boolean enabled) {
+		this.feasibilityRepairMode = enabled;
+		this.lastSolution = null;
+	}
+
+	public boolean isFeasibilityRepairMode() {
+		return feasibilityRepairMode;
+	}
+
+	public boolean isNoSlack() {
+		if (cplex == null) {
+			return true;
+		}
+		try {
+			if (coverSlackVars != null) {
+				for (int job = 1; job < coverSlackVars.length; job++) {
+					if (coverSlackVars[job] != null && Utility.compareGt(cplex.getValue(coverSlackVars[job]), VALUE_TOLERANCE)) {
+						return false;
+					}
+				}
+			}
+			if (requiredArcSlackVars != null) {
+				for (IloNumVar slack : requiredArcSlackVars.values()) {
+					if (slack != null && Utility.compareGt(cplex.getValue(slack), VALUE_TOLERANCE)) {
+						return false;
+					}
+				}
+			}
+		} catch (IloException ex) {
+			return false;
+		}
+		return true;
+	}
+
 	/** @return job 覆盖约束的 dual，供 pricing 计算 reduced cost */
 	public double getJobDual(int job) {
 		return jobDual[job];
@@ -116,13 +163,23 @@ public class LP {
 		return arcDual[from][to];
 	}
 
-	public void addColumns(List<Integer> columnIds) {
+	public int addColumns(List<Integer> columnIds) {
+		int added = 0;
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
 			if (!restrictedColumnIds.contains(value) && isColumnCompatible(pool.getColumn(id))) {
 				restrictedColumnIds.add(value);
+				added++;
+				if (cplex != null && objective != null) {
+					try {
+						addColumnToCurrentModel(id);
+					} catch (IloException ex) {
+						throw new IllegalStateException("Failed to add column " + id + " to current RMP", ex);
+					}
+				}
 			}
 		}
+		return added;
 	}
 
 	public void addCuts(List<Integer> cutIds) {
@@ -144,23 +201,7 @@ public class LP {
 		try {
 			buildModel();
 			cplex.setOut(null);
-			boolean solved = cplex.solve();
-			if (!solved) {
-				clearDuals();
-				lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
-						new LinkedHashMap<Integer, Double>(), 0.0, false,
-						"Restricted master infeasible or not solved: " + cplex.getStatus());
-				return lastSolution;
-			}
-
-			readDuals();
-			LinkedHashMap<Integer, Double> columnValues = readColumnValues();
-			double[] outsourcingValues = readOutsourcingValues();
-			double[] segmentValues = readOutsourceSegmentValues();
-			boolean integer = isIntegerSolution(columnValues, outsourcingValues);
-			lastSolution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues, outsourcingValues,
-					segmentValues, cplex.getObjValue(), integer, "Restricted master LP solved");
-			return lastSolution;
+			return solveCurrentModel("Restricted master LP solved");
 		} catch (IloException ex) {
 			clearDuals();
 			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
@@ -169,11 +210,50 @@ public class LP {
 		}
 	}
 
+	public TWETMasterSolution resolveCurrentModel() {
+		if (cplex == null) {
+			return solveRelaxation();
+		}
+		try {
+			return solveCurrentModel("Restricted master LP resolved");
+		} catch (IloException ex) {
+			clearDuals();
+			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
+					false, "Restricted master resolve error: " + ex.getMessage());
+			return lastSolution;
+		}
+	}
+
+	private TWETMasterSolution solveCurrentModel(String successMessage) throws IloException {
+		boolean solved = cplex.solve();
+		if (!solved) {
+			clearDuals();
+			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
+					false, "Restricted master infeasible or not solved: " + cplex.getStatus());
+			return lastSolution;
+		}
+
+		readDuals();
+		LinkedHashMap<Integer, Double> columnValues = readColumnValues();
+		double[] outsourcingValues = readOutsourcingValues();
+		double[] segmentValues = readOutsourceSegmentValues();
+		boolean integer = isIntegerSolution(columnValues, outsourcingValues);
+		String message = feasibilityRepairMode && !isNoSlack() ? successMessage + " with positive artificial slack"
+				: successMessage;
+		lastSolution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues, outsourcingValues,
+				segmentValues, cplex.getObjValue(), integer, message);
+		return lastSolution;
+	}
+
 	private void buildModel() throws IloException {
 		if (cplex != null) {
 			cplex.end();
 		}
 		cplex = new IloCplex();
+		objective = null;
+		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
+		coverSlackVars = null;
+		requiredArcSlackVars = new HashMap<Long, IloNumVar>();
 		requiredArcRanges = new HashMap<Long, IloRange>();
 		outsourcingTariffSegments = collectOutsourcingTariffSegments();
 
@@ -183,6 +263,9 @@ public class LP {
 		buildMachineConstraint();
 		buildRequiredArcConstraints();
 		buildOutsourcingTariffConstraints();
+		if (feasibilityRepairMode) {
+			addFeasibilitySlacks();
+		}
 	}
 
 	private void buildVariables() throws IloException {
@@ -190,6 +273,7 @@ public class LP {
 		for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
 			int columnId = restrictedColumnIds.get(idx).intValue();
 			lambdaVars[idx] = cplex.numVar(0.0, Double.MAX_VALUE, "lambda_" + columnId);
+			lambdaByColumnId.put(Integer.valueOf(columnId), lambdaVars[idx]);
 		}
 
 		outsourceVars = new IloNumVar[data.n + 1];
@@ -220,7 +304,7 @@ public class LP {
 			obj.addTerm(seg.slope, outsourceSegmentBaseline[l]);
 			obj.addTerm(seg.intercept, outsourceSegmentActive[l]);
 		}
-		cplex.addMinimize(obj);
+		objective = cplex.addMinimize(obj);
 	}
 
 	private void buildCoverageConstraints() throws IloException {
@@ -288,6 +372,76 @@ public class LP {
 		}
 		cplex.addEq(baselineFromJobs, baselineFromSegments, "outsourceBaseline");
 		cplex.addEq(active, 1.0, "outsourceOneSegment");
+	}
+
+	/**
+	 * 2026-05-18: 子节点修复模式下加入人工 slack。
+	 * <p>
+	 * 旧 VRP 在 UpdateRouteSet 里发现子节点 RMP 暂时不可行时，会先 AddSlack，
+	 * 然后调用启发式/精确定价器 FindFeasible，用 slack dual 引导生成满足分支状态的列。
+	 * 这里保持同一语义：slack 只用于 repair LP，正常 RMP 不带这些变量。
+	 */
+	private void addFeasibilitySlacks() throws IloException {
+		double penalty = Utility.big_M;
+		coverSlackVars = new IloNumVar[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			IloColumn col = cplex.column(objective, penalty);
+			col = col.and(cplex.column(coverRanges[job], 1.0));
+			coverSlackVars[job] = cplex.numVar(col, 0.0, 1.0, "coverSlack_" + job);
+		}
+
+		for (Map.Entry<Long, IloRange> entry : requiredArcRanges.entrySet()) {
+			long key = entry.getKey().longValue();
+			int from = decodeFrom(key);
+			int to = decodeTo(key);
+			IloColumn col = cplex.column(objective, penalty);
+			col = col.and(cplex.column(entry.getValue(), 1.0));
+			requiredArcSlackVars.put(Long.valueOf(key),
+					cplex.numVar(col, 0.0, 1.0, "requiredArcSlack_" + from + "_" + to));
+		}
+	}
+
+	private void addColumnToCurrentModel(int columnId) throws IloException {
+		TWETColumn column = pool.getColumn(columnId);
+		IloColumn cplexColumn = cplex.column(objective, column.getCost());
+		cplexColumn = cplexColumn.and(cplex.column(machineRange, 1.0));
+		for (int job = 1; job <= data.n; job++) {
+			if (column.containsJob(job)) {
+				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
+			}
+		}
+		for (Map.Entry<Long, IloRange> entry : requiredArcRanges.entrySet()) {
+			int from = decodeFrom(entry.getKey().longValue());
+			int to = decodeTo(entry.getKey().longValue());
+			if (column.visitsArc(from, to, node.sinkId())) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			}
+		}
+		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "lambda_" + columnId);
+		lambdaByColumnId.put(Integer.valueOf(columnId), var);
+		lambdaVars = append(lambdaVars, var);
+	}
+
+	private IloNumVar[] append(IloNumVar[] vars, IloNumVar var) {
+		IloNumVar[] expanded = new IloNumVar[vars.length + 1];
+		System.arraycopy(vars, 0, expanded, 0, vars.length);
+		expanded[vars.length] = var;
+		return expanded;
+	}
+
+	public double getColumnReducedCost(int columnId) {
+		if (cplex == null || lambdaByColumnId == null) {
+			return Double.POSITIVE_INFINITY;
+		}
+		IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
+		if (var == null) {
+			return Double.POSITIVE_INFINITY;
+		}
+		try {
+			return cplex.getReducedCost(var);
+		} catch (IloException ex) {
+			return Double.POSITIVE_INFINITY;
+		}
 	}
 
 	private ArrayList<TariffSegment> collectOutsourcingTariffSegments() {

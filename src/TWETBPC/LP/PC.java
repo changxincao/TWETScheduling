@@ -9,6 +9,7 @@ import TWETBPC.CUT.CutGenerationResult;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingResult;
+import TWETBPC.Model.TWETMasterStatus;
 import TWETBPC.Model.TWETMasterSolution;
 
 /**
@@ -33,39 +34,22 @@ public class PC {
 		// TODO 2026-04-10: 真正接入 RMP 之后，这里还要补每轮 pricing/cut 前后的 dual、
 		// reduced cost、违反度等统计；当前骨架阶段只能输出“是否找到改进”和“新增数量”。
 		TWETMasterSolution solution = lp.solveRelaxation();
-		if (solution.getStatus() == TWETBPC.Model.TWETMasterStatus.INFEASIBLE) {
-			return solution;
+		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			solution = repairInfeasibleMaster(lp);
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				return solution;
+			}
 		}
 
 		while (true) {
-			ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
-			ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
-			for (PricingEngine engine : pricingEngines) {
-				PricingResult result = engine.price(lp);
-				int addedColumns = 0;
-				if (result.isImproved()) {
-					for (int i = 0; i < result.getColumns().size(); i++) {
-						TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
-						int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
-								column.isSeedColumn());
-						Integer value = Integer.valueOf(id);
-						if (!activeColumnIds.contains(value)) {
-							activeColumnIds.add(value);
-							newColumnIds.add(value);
-							addedColumns++;
-						}
-					}
-				}
-				traceSink.onPricingCall(lp.getNode(), engine.getName(), result.isImproved(), addedColumns,
-						result.getMessage(), lp.getPool().size());
-			}
+			ArrayList<Integer> newColumnIds = generateColumns(lp, false);
 			// 2026-05-17: 参考旧 VRP PC，节点内 pricing 不再设固定轮数；
 			// 单轮加列数由 pricing 侧控制，PC 一直迭代到没有新的 active 列。
 			if (newColumnIds.isEmpty()) {
 				break;
 			}
 			lp.addColumns(newColumnIds);
-			solution = lp.solveRelaxation();
+			solution = lp.resolveCurrentModel();
 		}
 
 		for (int round = 0; round < config.maxCutRounds; round++) {
@@ -92,6 +76,73 @@ public class PC {
 		}
 
 		return solution;
+	}
+
+	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
+		// 2026-05-18: 对齐旧 VRP UpdateRouteSet/FindFeasible。
+		// 正常 RMP 不可行时，先建立带人工 slack 的同一节点 LP；slack 产生的 dual 会引导
+		// 启发式和精确定价器生成满足覆盖/required-arc 的列。修复成功后关闭 slack，回到正常 RMP。
+		lp.setFeasibilityRepairMode(true);
+		TWETMasterSolution solution = lp.solveRelaxation();
+		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			lp.setFeasibilityRepairMode(false);
+			return solution;
+		}
+
+		int generatedForRepair = 0;
+		while (!lp.isNoSlack() && generatedForRepair < config.maxBranchRepairColumns) {
+			ArrayList<Integer> newColumnIds = generateColumns(lp, true);
+			if (newColumnIds.isEmpty()) {
+				break;
+			}
+			if (generatedForRepair + newColumnIds.size() > config.maxBranchRepairColumns) {
+				newColumnIds = new ArrayList<Integer>(
+						newColumnIds.subList(0, config.maxBranchRepairColumns - generatedForRepair));
+			}
+			generatedForRepair += lp.addColumns(newColumnIds);
+			solution = lp.resolveCurrentModel();
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				lp.setFeasibilityRepairMode(false);
+				return solution;
+			}
+		}
+
+		if (!lp.isNoSlack()) {
+			lp.setFeasibilityRepairMode(false);
+			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
+					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
+					"Repair RMP still has positive artificial slack after generating " + generatedForRepair
+							+ " columns");
+		}
+
+		lp.setFeasibilityRepairMode(false);
+		return lp.solveRelaxation();
+	}
+
+	private ArrayList<Integer> generateColumns(LP lp, boolean repairMode) {
+		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
+		ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
+		for (PricingEngine engine : pricingEngines) {
+			PricingResult result = engine.price(lp);
+			int addedColumns = 0;
+			if (result.isImproved()) {
+				for (int i = 0; i < result.getColumns().size(); i++) {
+					TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
+					int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
+							column.isSeedColumn());
+					Integer value = Integer.valueOf(id);
+					if (!activeColumnIds.contains(value)) {
+						activeColumnIds.add(value);
+						newColumnIds.add(value);
+						addedColumns++;
+					}
+				}
+			}
+			String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
+			traceSink.onPricingCall(lp.getNode(), name, result.isImproved(), addedColumns, result.getMessage(),
+					lp.getPool().size());
+		}
+		return newColumnIds;
 	}
 
 }

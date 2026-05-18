@@ -161,3 +161,17 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 另一个差异是 `FindFeasible` 入口。之前 repair mode 只是日志上把普通 pricing 标成 `[FindFeasible]`，逻辑上仍调用 `price(lp)`。本轮在 `PricingEngine` 中增加了默认 `findFeasible(lp)` 入口，默认实现仍复用 `price(lp)`，但 `PC` 在 repair mode 下会显式调用该入口。这一步本身不改变当前定价结果，但把流程语义和旧 VRP 对齐了：后续如果 required-arc 分支节点需要更强的定向修复，可以直接在具体 pricing engine 中覆盖 `findFeasible()`，而不影响正常 pricing。
 
 因此当前逻辑和旧 VRP 的主差异进一步缩小为两点：第一，TWET 的 slack 仍同时覆盖 job 覆盖约束和 required-arc 约束，比旧 VRP 的 branch slack 更泛，这是由外包和任务覆盖结构导致的；第二，当前具体 pricing engine 的 `findFeasible()` 还没有写专门的 required-arc 定向状态，只是有了入口和 slack dual 驱动。后续若继续追求完全同款，应优先做后者，而不是再回到树层 fallback。
+
+## 2026-05-18：当前 BPC 框架与旧 VRP 流程的剩余差异
+
+这次只比较框架流程，不讨论 TWET 与 VRP 在成本评估、时间窗函数、setup time/cost 上的差异。当前实现的主线已经和旧 VRP 接近：子节点先继承低 reduced-cost 列，RMP 不可行时打开 slack RMP，通过启发式和精确定价器在 slack dual 下补列，slack 归零后按当前 LP reduced cost 重筛 restricted columns，再关闭 slack 回到正常 RMP。这个流程已经对应旧 `UpdateRouteSet -> AddSlack -> GCTabu/GCNGBB.FindFeasible -> reduced-cost route set selection` 的主结构。
+
+剩余差异主要有四个。第一，旧 VRP 的 `FindFeasible()` 自己内部反复 `solve LP -> IsNoSlack -> GetDual/GetValue -> Extend`，也就是说求解、检查 slack 和扩展列都包在具体 GC 里；当前 TWET 是 `PC` 外层统一控制这个循环，pricing engine 只负责一次 `findFeasible(lp)` 返回列。两者逻辑目标一致，但职责边界不同。如果只看算法流程，TWET 版少了“每个 GC 自己持有完整 repair loop”的写法。
+
+第二，旧 VRP 在一次 repair 迭代里先跑启发式 `GCTabu.FindFeasible`，如果启发式产生新列，会 `gc.Reset()` 重置精确定价状态，再跑 `GCNGBB.FindFeasible`。当前 TWET 是按 `pricingEngines` 顺序逐个调用，暂时没有“启发式新增列后显式 reset exact pricing 状态”的动作。当前 exact pricing 如果本身无状态，这个差异影响不大；但如果后续 exact pricing 引入缓存、DSSR/ng-memory 之类状态，就应该补这个 reset 语义。
+
+第三，旧 VRP 的 slack 是围绕当前分支约束加的 branch slack；当前 TWET 的 slack 加在 job 覆盖和 required-arc 约束上。这不是评估细节，而是 RMP 结构差异带来的框架差异。TWET 有外包变量和任务覆盖约束，子节点缺列可能表现为覆盖缺口或 required-arc 缺口，所以 slack 范围更泛。这个差异是当前问题结构导致的，不能简单照搬成只给某一条分支约束加 slack。
+
+第四，旧 VRP 的 child route set 是 `UpdateRouteSet()` 的直接返回值，分支时立即赋给 left/right node；当前 TWET 是 child 入队前先继承父节点低 reduced-cost 列，真正不可行时在该 child 被弹出求解时才执行 slack repair 和 reduced-cost 重筛。也就是说，旧流程是在“生成 child 时”完成 route set 修复，TWET 当前是在“求解 child 时”完成修复。逻辑上等价地服务于 child RMP，但触发时机不同。若要更像旧版，可以把 repair 提前到 `enqueueChild` 阶段；但那会让分支阶段直接调用 LP/PC，代码耦合更重，且当前延迟修复不会改变子节点求解逻辑。
+
+因此，如果不考虑评估细节，当前还不一致的核心是：`FindFeasible` 的 repair loop 放在 `PC` 而不是 GC 内部；启发式新增列后没有 exact pricing reset 语义；slack 约束范围比旧 VRP 更泛；child route set 修复发生在 child 求解时而不是 child 创建时。其他如增量加列、repair 后按 reduced cost 重筛列集、列数阈值和 add-in 阈值，已经基本按旧 VRP 思路对齐。

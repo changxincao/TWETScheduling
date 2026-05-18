@@ -187,3 +187,7 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 当前机器数约束是区间形式 `minMachineCount <= sum lambda <= maxMachineCount`。根节点默认 `minMachineCount=0, maxMachineCount=m`，这意味着允许全部外包；`MachineCountBrancher` 会在分支中收紧上下界。这个建模不应该默认改成等式 `sum lambda = m`，因为在带外包或允许机器空闲的设定下，最优解不一定使用全部机器。只有当后续明确要求“所有机器必须使用”时，才应该改成等式。
 
 关于 child 修复时机，旧 VRP 是创建 child 时直接运行 `UpdateRouteSet()`，修好 child 的 route set 后再入队。当前 TWET 是 child 入队时先继承父节点低 reduced-cost 列，真正弹出求解 child 时再根据需要做 slack repair。两者对最终 child RMP 的作用接近，但时机不同。当前延迟修复的好处是：如果 child 后续不需要处理或被 bound 剪掉，就不用提前跑 LP/pricing；`Tree` 也不需要直接调用 LP/PC，所有 RMP 不可行修复集中在 `PC`。因此当前时机更适合这个项目，暂时不建议为了形式一致而把 repair 挪回 `enqueueChild()`。
+
+## 2026-05-18：FindFeasible 封装差异的结论补充
+
+关于 `FindFeasible` 循环位置，当前结论是：这主要是封装差异，不是算法调用逻辑差异。旧 VRP 把 `solve LP -> check slack -> read dual -> pricing extend -> add columns` 包在各个 GC 的 `FindFeasible()` 内部；当前 TWET 把这层循环统一放在 `PC.repairInfeasibleMaster()`，pricing engine 的 `findFeasible(lp)` 只执行单轮补列。从调用顺序和信息流看，二者都是“带 slack 的 RMP 产生 dual，定价器根据 dual 补列，增量加列后重解，直到 slack 为 0 或达到列数上限”。因此这里不需要为了形式一致把循环强行搬进 GC 类，后续只要保证具体 `findFeasible()` 能在 required-arc 等场景下生成有效列即可。

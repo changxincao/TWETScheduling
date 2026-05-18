@@ -197,3 +197,13 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 重新查看旧 VRP 源码后，`BranchD.UpdateRouteSet()` 中的 `gc.Reset()` 不是在清理启发式和精确定价共享的函数信息，也不是 dominance graph。该处 `gc` 是 `GCNGBB`，其 `Reset()` 只执行 `Arrays.fill(m_low_ng_set, 0)` 和 `Arrays.fill(m_high_ng_set, 0)`。这两个数组是 `GCNGBB` 在 exact pricing 中维护的动态 ng-set，用于在发现重复访问/环以后扩展某些 customer 的 ng-memory，从而加强后续 label 扩展中的访问限制。`Extend(lp,n)` 每次会重新初始化标签队列、候选列池和 bound 数组，但不会自动清空这两个动态 ng-set；因此它们会跨多次 exact pricing 调用保留。
 
 旧代码在启发式 `hgc.FindFeasible()` 产生新列后调用 `gc.Reset()`，含义是：RMP 增加了列并重新求解后，dual 和后续 pricing 搜索环境发生了变化，于是把 exact pricing 里此前逐步加严的动态 ng-memory 清掉，让精确定价从较松的 ng-set 状态重新开始。当前 TWET 基础版 exact pricing 没有这种跨调用维护的动态 ng-set，因此暂时不需要 reset；如果后续实现 DSSR、ng-route 动态记忆或跨轮 label/bound 缓存，再补 `reset()` 才有必要。
+
+## 2026-05-18：关于 reset、slack 和修复时机的问答记录
+
+本轮进一步澄清了旧 VRP `UpdateRouteSet/FindFeasible` 中几个容易混淆的点。第一，`gc.Reset()` 并不是清理启发式和精确定价共享的函数信息，也不是 dominance graph。旧代码中被 reset 的 `gc` 是 `GCNGBB`，`Reset()` 只清空 `m_low_ng_set` 和 `m_high_ng_set`，也就是 exact pricing 中动态维护的 ng-set。只有当前面的启发式 `hgc.FindFeasible()` 产生了新列时，旧代码才调用 `gc.Reset()`；如果启发式没有新增列，就不 reset。当前 TWET 基础 exact pricing 没有跨调用动态 ng-set，因此暂时不需要 reset。
+
+第二，机器数量分支当前确实存在，机器数约束写成 `minMachineCount <= sum(lambda) <= maxMachineCount`。如果后续确认该问题的最优解必然使用全部机器，可以从 brancher 列表里关掉 `MachineCountBrancher`，甚至进一步把机器数上下界固定；但当前为了兼容外包和空机器，先保留区间建模。
+
+第三，旧 VRP 的 slack 是加在某条分支约束上的人工变量。它只出现在那一行约束里，目标系数为 `BigNumber`，用于让“当前 route set 暂时不满足分支约束”的 LP 先可解。当前 TWET 的 required-arc slack 与旧 VRP 的 branch slack 语义最接近：required arc 约束要求 `sum(使用该弧的内部列)=1`，如果当前列集没有这类列，就临时加 `requiredArcSlack` 让该行可解，并用 slack dual 引导 pricing 生成真实列。当前 TWET 还额外对 job coverage 行加了 `coverSlack`，这是因为有些任务不能外包，或者外包/segment/机器数状态使得当前 restricted RMP 没有真实方式覆盖某个 job。这里不是给“外包变量”本身加 slack，而是给覆盖约束加 slack；如果某个 job 能正常通过 `y_j=1` 外包覆盖，这个 slack 自然不会为正。
+
+第四，修复列逻辑与旧 VRP 的核心一致，差别是时机。旧 VRP 是创建 child 时立即运行 `UpdateRouteSet()`，必要时 slack + FindFeasible，修好 route set 后入队。当前 TWET 是 child 先入队，等实际弹出求解时由 `PC` 做 slack + FindFeasible。两者的修复机制都是“slack RMP 产生 dual -> pricing 找列 -> 加列重解 -> slack 归零后筛列”，但当前延迟修复能避免提前处理可能不会被访问的 child，也能让 `Tree` 不直接耦合 LP/pricing。

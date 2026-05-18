@@ -122,10 +122,25 @@ public class Tree {
 			}
 		}
 
-		TWETSolveStatus status = processedNodes <= 1 ? TWETSolveStatus.ROOT_PROCESSED : TWETSolveStatus.FINISHED;
+		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty());
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, pool.size(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and forward exact pricing; advanced cuts/pricing remain pending");
+	}
+
+	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty) {
+		if (processedNodes == 0) {
+			return TWETSolveStatus.INITIALIZED;
+		}
+		// 2026-05-18: 旧实现只按 processedNodes 判断 FINISHED/ROOT_PROCESSED，
+		// 在达到 maxNodes 且队列仍有未处理节点时会误报完成。这里显式区分节点上限停止。
+		if (!queueEmpty && processedNodes >= config.maxNodes) {
+			return TWETSolveStatus.NODE_LIMIT;
+		}
+		if (processedNodes == 1) {
+			return TWETSolveStatus.ROOT_PROCESSED;
+		}
+		return TWETSolveStatus.FINISHED;
 	}
 
 	private void enqueueChild(PriorityQueue<Node> queue, Node child) {
@@ -161,8 +176,8 @@ public class Tree {
 	}
 
 	private void addRequiredArcFallbackColumn(ArrayList<Integer> seed, Node child, int requiredFrom, int requiredTo) {
-		ArrayList<Integer> sequence = buildRequiredArcChain(child, requiredFrom, requiredTo);
-		if (sequence.isEmpty() || !isSequenceCompatible(child, sequence)) {
+		ArrayList<Integer> sequence = findRequiredArcFallbackSequence(child, requiredFrom, requiredTo);
+		if (sequence == null || sequence.isEmpty()) {
 			return;
 		}
 		double cost = columnEvaluator.evaluate(sequence);
@@ -174,6 +189,91 @@ public class Tree {
 		if (!seed.contains(value)) {
 			seed.add(value);
 		}
+	}
+
+	private ArrayList<Integer> findRequiredArcFallbackSequence(Node child, int requiredFrom, int requiredTo) {
+		ArrayList<Integer> requiredChain = buildRequiredArcChain(child, requiredFrom, requiredTo);
+		if (requiredChain.isEmpty()) {
+			return null;
+		}
+
+		// 2026-05-18: required-arc 子节点不能只依赖 restricted pool 里已有列。
+		// 旧 VRP 的 UpdateRouteSet 会在子节点缺可行列时主动找满足分支状态的 route。
+		// 这里先做一个轻量兜底：把 required arc 链插入已有列的不同位置，挑一条兼容且成本最小的列。
+		// 这不是完整定向 pricing，但比只尝试裸 required-chain 更不容易误关可行子节点。
+		ArrayList<Integer> bestSequence = null;
+		double bestCost = Double.POSITIVE_INFINITY;
+		double cost = evaluateFallbackCandidate(child, requiredChain, requiredFrom, requiredTo);
+		if (Utility.compareLt(cost, bestCost)) {
+			bestCost = cost;
+			bestSequence = requiredChain;
+		}
+
+		for (TWETColumn baseColumn : pool.getColumns()) {
+			List<Integer> base = baseColumn.getSequence();
+			if (hasJobOverlap(base, requiredChain)) {
+				continue;
+			}
+			for (int pos = 0; pos <= base.size(); pos++) {
+				ArrayList<Integer> candidate = new ArrayList<Integer>(base.size() + requiredChain.size());
+				candidate.addAll(base.subList(0, pos));
+				candidate.addAll(requiredChain);
+				candidate.addAll(base.subList(pos, base.size()));
+				cost = evaluateFallbackCandidate(child, candidate, requiredFrom, requiredTo);
+				if (Utility.compareLt(cost, bestCost)) {
+					bestCost = cost;
+					bestSequence = candidate;
+				}
+			}
+		}
+		return bestSequence;
+	}
+
+	private double evaluateFallbackCandidate(Node child, ArrayList<Integer> sequence, int requiredFrom, int requiredTo) {
+		if (sequence.isEmpty() || hasDuplicateJobs(sequence) || !isSequenceCompatible(child, sequence)
+				|| !sequenceCoversArc(sequence, requiredFrom, requiredTo, child.sinkId())) {
+			return Utility.big_M;
+		}
+		double cost = columnEvaluator.evaluate(sequence);
+		return Utility.isBigMValue(cost) ? Utility.big_M : cost;
+	}
+
+	private boolean hasJobOverlap(List<Integer> base, ArrayList<Integer> chain) {
+		for (int job : chain) {
+			if (base.contains(Integer.valueOf(job))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private boolean hasDuplicateJobs(ArrayList<Integer> sequence) {
+		boolean[] seen = new boolean[data.n + 1];
+		for (int job : sequence) {
+			if (job < 1 || job > data.n || seen[job]) {
+				return true;
+			}
+			seen[job] = true;
+		}
+		return false;
+	}
+
+	private boolean sequenceCoversArc(List<Integer> sequence, int from, int to, int sink) {
+		if (sequence.isEmpty()) {
+			return false;
+		}
+		if (from == 0) {
+			return sequence.get(0).intValue() == to;
+		}
+		if (to == sink) {
+			return sequence.get(sequence.size() - 1).intValue() == from;
+		}
+		for (int i = 1; i < sequence.size(); i++) {
+			if (sequence.get(i - 1).intValue() == from && sequence.get(i).intValue() == to) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private ArrayList<Integer> buildRequiredArcChain(Node child, int requiredFrom, int requiredTo) {

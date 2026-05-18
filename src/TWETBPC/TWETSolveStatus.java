@@ -14,6 +14,8 @@ public enum TWETSolveStatus {
 	ROOT_PROCESSED,
 	/** 树搜索框架结束。 */
 	FINISHED,
+	/** 2026-05-18: 达到节点数上限，队列中仍可能有未处理节点。 */
+	NODE_LIMIT,
 	/** 流程异常结束。 */
 	FAILED
 }

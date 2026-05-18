@@ -81,3 +81,25 @@ pricing 中也补了直接时间可行性过滤。之前的逻辑是先尝试 `s
 第四，分支子节点加入了初始列兜底。`Tree` 在把子节点放进队列前，会先从全局 pool 中筛选所有兼容 forbidden arc 的列作为 seed；如果子节点存在 required arc 且当前 seed 中没有任何列覆盖它，就尝试根据 required arc 链构造一条简单 fallback column，并用 `TWETColumnEvaluator` 评估后加入 pool。这不是旧 VRP `UpdateRouteSet()/FindFeasible` 的完整复刻，因为它还没有调用定向 pricing 去系统生成满足分支状态的列；但它已经避免了一类最直接的问题，即 required arc 子节点因为 restricted pool 暂时没有覆盖该弧的列而立刻 RMP infeasible。
 
 当前仍需保留的边界有三点。第一，`PaperDominanceGraph` 只是按论文结构重写了 graph propagation，仍然只做完整占优，不做 partial dominance。第二，required-arc fallback column 只是工程兜底，不是严格的分支节点可行列生成器，后续如果遇到复杂 required arc 组合，仍应补定向 pricing 或人工列/slack。第三，tariff segment 分支已经接入，但外包任务变量 `y_j` 本身暂时没有单独分支；当前优先级是先处理 tariff segment 分数性，然后机器数分支，再 arc 分支。若后续观察到 `y_j` 分数但无可分支 arc，需要再补外包变量分支。
+## 2026-05-17：当前 BPC 实现复核结论
+
+本次对照旧 VRP 代码中的 `PC/GC/BranchD` 主流程，以及 `parallel_machine_scheduling_with_due_window.pdf` 里的 SP2、forward labeling 和 dominance graph 思路，对当前 `TWETBPC` 实现做了一轮结构复核。总体判断是：当前版本作为“不带 cut、单向 forward exact pricing、带外包 tariff 分支雏形”的第一版 B&P 骨架是能跑通的，RMP 的覆盖约束、机器数约束、外包 `G(B)` 的 LP relaxation、列池、定价返回列、tariff segment 分支、arc branching 的基本接口都已经接上。但它还不能称为完整严格的 BPC，主要风险集中在 pricing 停止条件、cut 接入、分支子节点可行列兜底和 dominance graph 的等价验证上。
+
+最需要优先处理的是 pricing 的“返回列上限”和全局列池去重之间的关系。当前 `GC` 单轮最多返回 `maxExactPricingColumns=150` 条负 reduced-cost 列，但去重只在本轮内部做；如果这些列已经存在于全局 pool 或已经 active，`PC` 会发现没有新的 active column，然后停止列生成。旧 VRP 代码是在把 route 计入本轮 add-in 数量之前就检查 `pool.Route2ID(route)==-1`，也就是说重复列不会消耗本轮加列上限。当前实现如果遇到大量重复负 reduced-cost 列，有可能在还存在未发现新列时提前停下。这不是 smoke test 一定会触发的问题，但从严格列生成逻辑上看需要修：要么让 pricing 能查询全局 pool 并在计数前跳过已知列，要么在 `PricingResult` 里显式返回“是否达到列数上限、是否完整搜索结束”的状态，让 `PC` 不把“没有新增 active column”简单等同于“没有负 reduced-cost 列”。
+
+cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在只把 cut id 加进 `activeCutIds`，`buildModel()` 没有真正把 cut pool 里的 cut 写成 CPLEX 约束；`PC` 在 cut loop 里即使将来加了 cut，也只是 re-solve LP，没有像旧 VRP `PC` 那样在 cut 加入后回到 pricing。严格的 branch-price-and-cut 必须在“加 cut 后重新 pricing”，否则 cut 的 dual 不会进入 pricing，RMP 也不完整。当前 cut generator 基本是 no-op，所以现阶段的无 cut B&P 运行不受影响，但这块在接 SRI 或其他 cut 前必须补齐。
+
+分支子节点的可行列兜底也还不够强。当前 `Tree` 在生成 child 时会从全局 pool 里筛选兼容列，并尝试为缺失的 required arc 构造一条简单 fallback column；这比完全不兜底好，但还没有达到旧 VRP `BranchD.UpdateRouteSet()` 的强度。旧代码会通过 slack/启发式/精确定价去为分支节点找可行 route，避免 restricted master 因暂时没有满足 required arc 的列而直接 infeasible。TWET 这里 required arc 可能需要前后插入其他任务才能形成可行序列，简单 required-chain fallback 不一定够。因此后续应补定向 pricing 或人工列/slack 机制，避免误关可行分支节点。
+
+`PaperDominanceGraph` 的方向是合理的：它保留真实 label 集合用于恢复具体列，同时维护 `f_u/h_u/g_u` 这类 envelope 用于集合占优判断，这比把多条真实路径物理合并成一条 label 更适合 TWET，因为 setup time、setup cost 和最终列的 arc pattern 依赖顺序。但这部分逻辑复杂，当前还缺少和旧全扫描 `DominanceGraph` 的等价对拍。后续至少应该在小算例上同时跑 full-scan dominance 与 paper graph dominance，比较生成负列、根节点 bound 和最终列池，确认 graph propagation 没有过度删除 label。
+
+其他边界问题相对次一级。`Tree.solve()` 目前的 status 对 node limit 和 open queue 不够精确，`processedNodes > 1` 基本就返回 `FINISHED`，不适合正式汇报；`incumbentCostFromInitial()` 在没有 `bestSolution` 时只汇总内部列，可能忽略外包初始值，虽然正常 seed 流程通常能提供 bestSolution，但这个兜底不够严谨。focused 编译已经通过，命令范围为 `src/Common, src/Basic, src/HEU, src/Output, src/TWETBPC`，只出现旧 API deprecation 提示。本次没有修改源代码，只记录审查结论。
+## 2026-05-18：pricing 上限、required-arc 兜底和状态汇报修正
+
+本轮先处理无 cut B&P 里能直接改好的三件事，cut 接入暂时不动。第一，`GC` 的列返回上限现在不再被当前 RMP 已经 active 的重复列消耗。做法是在 pricing 初始化时收集 `lp.getRestrictedColumnIds()` 对应的序列签名，`tryGenerateColumn()` 恢复出候选序列后先判断它是否已经 active；如果已经 active，就直接跳过，不计入 `generatedColumns.size()`。如果某条列在全局 pool 中存在但还没有 active，仍允许返回给 `PC`，由 `PC` 激活已有列。这和旧 VRP 代码“先查 pool，再计入 addin_size”的思路一致。这个改动主要是效率和停止条件稳健性优化；正常情况下它只是减少重复返回列，严格场景下可以避免“返回列上限被重复列耗尽”后误以为没有新列。
+
+第二，required-arc 子节点的 fallback column 做了增强。原来只根据 required arc 的连通链构造一条裸序列，如果这条裸序列不可行，就没有进一步兜底。现在会先构造 required arc 所在的强制链，然后尝试把这条链插入全局 pool 中已有列的不同位置，只要不重复 job、满足当前节点 forbidden arc 状态、确实覆盖该 required arc，并且 `TWETColumnEvaluator` 评估不是 `big_M`，就可以作为子节点 seed column。这个做法仍然不是旧 VRP `UpdateRouteSet()/FindFeasible` 的完整复刻，因为它没有做定向 pricing，也没有人工 slack；但它已经比裸链更接近“先尽量为 required-arc 分支节点补一条可行列”的思路，能减少 restricted master 因暂时缺列而误 infeasible 的概率。
+
+第三，树搜索最终状态不再只靠 `processedNodes` 粗判。新增 `TWETSolveStatus.NODE_LIMIT`，当达到 `config.maxNodes` 且队列中仍有未处理节点时返回该状态；如果只处理了根节点且队列已空，仍返回 `ROOT_PROCESSED`；处理多个节点并正常清空队列时返回 `FINISHED`。这只是结果汇报语义修正，不改变搜索过程。
+
+关于 `PaperDominanceGraph`，本轮没有进一步改。当前判断是：结构方向是对的，它保留真实 label 集合，同时维护 node envelope 用于集合占优，符合 TWET 需要恢复具体序列的要求；但还没有通过和全扫描 `DominanceGraph` 的系统对拍来证明完全无误。因此它现在是“可继续使用并重点测试”的实现，不是已经严格验证完的实现。后续应补一个小算例对拍：同一实例分别用全扫描 dominance 和 paper graph dominance，比较根节点 bound、生成列集合和最终 RMP 结果。

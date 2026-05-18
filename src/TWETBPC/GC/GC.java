@@ -36,6 +36,7 @@ public class GC {
 	private ArrayList<DominanceStore> TL;
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
+	private HashSet<SequenceSignature> activeColumnSignatures;
 
 	public GC(Data data, TWETBPCConfig config) {
 		this(data, config, false);
@@ -82,6 +83,10 @@ public class GC {
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
+		activeColumnSignatures = new HashSet<SequenceSignature>();
+		for (int columnId : lp.getRestrictedColumnIds()) {
+			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
+		}
 
 		PackedBitSet visited = new PackedBitSet(data.n + 2);
 		visited.add(0);
@@ -206,6 +211,12 @@ public class GC {
 
 		ArrayList<Integer> sequence = recoverSequence(label);
 		SequenceSignature signature = new SequenceSignature(sequence);
+		// 2026-05-18: 旧 VRP GC 在计入 addin_size 前会先查全局 route pool。
+		// 这里对应地先跳过当前 RMP 已经 active 的同序列列，避免重复列消耗本轮返回列上限。
+		// 如果该序列只存在于全局 pool、但尚未 active，则仍返回给 PC，由 PC 负责激活已有列。
+		if (activeColumnSignatures.contains(signature)) {
+			return;
+		}
 		if (!generatedSignatures.add(signature)) {
 			return;
 		}

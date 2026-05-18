@@ -451,3 +451,11 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 4. 当前建议的后续检查顺序
 
 短期如果继续完善 no-cut branch-and-price，优先处理 `resetRestrictedColumnsByCurrentReducedCost()` 的正值列保护和 bound/status 报告，这两个不涉及大重构，能直接提高稳健性和结果可信度。cut 相关暂时可以继续保持 placeholder，但需要在文档和输出中明确“当前是 no-cut B&P，不是完整 BPC”。如果后续真的接 SRI/cut，再必须同时完成三件事：RMP cut 行建模、列的 cut 系数接入、加 cut 后回到 pricing 循环。
+
+## 2026-05-19：关于 child 筛列是否会丢掉基解列的补充
+
+针对 `resetRestrictedColumnsByCurrentReducedCost()` 是否会把维持可行性的基解列筛掉，本次补充澄清如下。正常情况下，用户的判断是对的：如果 child 第一次 LP 已经可行，那么当前正值基列的 reduced cost 通常为 0；当前 `branchSeedReducedCostAllowance=5000.0` 很宽，所以这些列会进入候选集合。只要 `branchSeedColumnLimit` 足够大，当前基解对应的列大概率会保留下来，从而筛列后的 restricted RMP 仍然可行。
+
+前面说的“可能筛掉可行性列”不是指常规情况下必然会发生，而是指这个筛列步骤在代码上没有显式保证“所有当前正值列必须保留”。当前实现会先收集所有 reduced cost 小于阈值的列，然后按 reduced cost 排序，再取前 `maxColumns` 条。如果存在大量 reduced cost 为 0 或非常接近 0 的退化列，且候选数超过 `branchSeedColumnLimit`，排序的 tie-break 只按 column id 处理，那么某些当前正值列理论上可能排在截断位置之后。这个风险在当前参数下很低，但它是工程假设，不是数学保证。
+
+因此更稳的后续修改不是改变 reduced-cost 筛列思想，而是在筛列前先把当前 LP 中 value > tolerance 的列无条件放入 selected，再用低 reduced-cost 列补足到上限。这样可以保留旧 VRP “用 reduced cost 压缩 child route set”的流程，同时把“当前可行基被筛掉”的边界风险消掉。

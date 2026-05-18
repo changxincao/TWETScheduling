@@ -398,3 +398,15 @@ repair slack 的语义也随之收紧。之前 TWET 版本会给 coverage 行和
 为了支持 tariff segment 分支 repair，`z_s` 的 `[0,1]` 也从变量上下界改成了显式约束行 `0 <= z_s <= 1`，分支时再额外加入 `z_s <= 0` 或 `z_s >= 1`。这样 branch row 本身可以挂 slack，也便于后续读取或分析该分支约束。arc 分支也不再只建立 required arc 行，而是 required 和 forbidden 都在 RMP 中建立聚合分支行；即使 pricing 侧已经通过子图状态避免生成 forbidden arc，这些 RMP 行仍然需要保留，因为父节点继承来的旧列需要由该行压掉，并且该行 dual 必须进入 route pricing 的 reduced cost。
 
 当前仍有一个需要后续测试关注的边界：child 第一次 LP 可行后，按 reduced cost 重新筛正式列集可能在极端情况下删掉某些维持 coverage 的高 reduced-cost 列。旧 VRP 本身也依赖较宽的 reduced-cost allowance 和保留列数降低这个风险；当前 TWET 版本保持同样思路。如果筛列后 LP 再次不可行，会进入 repair，但由于 coverage slack 已删除，说明筛列策略可能需要进一步加“保留当前正值列/覆盖关键任务列”的保护。
+
+## 2026-05-18：为什么正式 child pricing 阶段仍保留分支行
+
+本轮集中讨论“如果 child 已经完成首次可行性检查，后续 restricted columns 和 pricing 新列都满足分支约束，RMP 中的分支约束行是否还需要保留”。结论是：不能统一删除。这里要区分列级兼容和解级聚合约束。
+
+对于 forbidden arc，若 child 已经筛掉所有含禁用弧的旧列，并且 pricing 图也禁止继续生成该弧，则 `sum x_ij = 0` 在正式 child LP 中通常是冗余的。保留它主要是为了流程统一和首次 LP/repair 语义清楚；后续如果确认该行没有任何非零系数，删除也可以作为性能优化，但不是当前优先项。
+
+对于 required arc，不能理解成“每条生成列都必须包含这条弧”。列生成中的一条列是一台机器上的一个内部加工序列，master 会选择多条列共同覆盖任务。右分支要求的是聚合变量 `sum_r a_ij^r lambda_r = 1`，即最终解中恰好有一条被选列使用该弧；它不是要求所有列都使用该弧。当前代码中的 `Node.isColumnCompatible()` 也只过滤 forbidden arc，并不会要求每条列都包含 required arc。即使右分支会把 `i` 的其他后继、`j` 的其他前驱禁掉，仍然可能存在很多不含 `i,j` 的合法列；在带外包的模型里，任务 `i,j` 还可能被外包变量覆盖。因此 required arc 行必须保留，否则 child 可以不选择任何含该弧的内部列，从而违背该分支。
+
+机器数分支和 tariff segment 分支也都是解级约束。每条内部列在机器数行中的系数都是 1，但单条列没有“是否满足机器数上下界”的概念，只有所有被选列的总数才满足。tariff 的 `z_s` 更不是 route pricing 生成的列，它是 master 中的外包分段变量；`z_s <= 0` 或 `z_s >= 1` 必须作为 master 约束保留。
+
+所以更准确的判断是：pricing 侧的图/状态限制只能保证“新生成列不违反列级 forbidden 状态”，不能替代 RMP 中的聚合分支行。RMP 分支行还负责约束父节点继承来的旧列、表达解级分支语义，并提供当前节点 reduced cost 所需的 dual。若删除 required arc、机器数或 tariff 分支行，当前节点的 LP 松弛就不再是该 branch node 的松弛，pricing 的 reduced cost 也不再对应真实 RMP。

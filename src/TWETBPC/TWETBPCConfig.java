@@ -34,15 +34,15 @@ public class TWETBPCConfig {
 	public boolean usePaperDominancePricing = true;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
-	/** 启发式定价最多返回多少条列；参考旧 VRP GCTabu 最终只加入少量优质列的做法。 */
-	public int maxHeuristicPricingColumns = 30;
-	/** 启发式定价从当前 RMP 中挑多少条低 reduced cost 列作为邻域搜索种子。 */
+	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最终最多返回给 RMP 的优质负 reduced-cost 列数。 */
+	public int maxHeuristicPricingColumns = 150;
+	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */
 	public int heuristicPricingSeedColumns = 30;
-	/** 启发式定价单次调用最多评估多少个候选，避免邻域搜索开销失控。 */
-	public int maxHeuristicPricingCandidateScans = 5000;
-	/** 2026-05-18: Tabu 定价每条 seed 的搜索轮数，取旧 VRP Configure.m_tabu_cg_iteration_number 默认值。 */
+	/** 2026-05-18: 对应旧 VRP Configure.m_gen_size，本地负 reduced-cost 候选池生成上限，达到后停止 tabu 生成。 */
+	public int heuristicPricingPoolSize = 1000;
+	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_iteration_number，每条 seed 的 tabu 搜索轮数。 */
 	public int heuristicPricingTabuIterations = 50;
-	/** 2026-05-18: Tabu 定价禁忌长度，取旧 VRP Configure.m_tabu_cg_tenure 默认值。 */
+	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_tenure，tabu 禁忌长度。 */
 	public int heuristicPricingTabuTenure = 30;
 	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP 代码 Configure.addin_size 的默认值。 */
 	public int maxExactPricingColumns = 150;

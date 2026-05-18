@@ -22,7 +22,7 @@ pricing 先实现了最基础的单向 forward labeling，不含 SRI cut、ng-ro
 
 ## 2026-05-18：启发式定价改为旧 VRP GCTabu 框架
 
-本轮按用户要求把启发式定价进一步向旧 VRP 的 `GCTabu` 框架靠齐。旧代码的核心流程不是替代 exact pricing，而是在 exact pricing 前从当前 RMP 里挑一批低 reduced cost route 作为 seed，然后围绕 seed 做 remove/add/exchange tabu 搜索，形成一个本地负 reduced-cost route pool，排序后只加入少量优质列。当前 TWET 版本沿用这个框架：先收集当前 restricted columns，按 reduced cost 排序取 `heuristicPricingSeedColumns=30` 条种子；每条种子运行 `heuristicPricingTabuIterations=50` 轮 tabu，tenure 取旧 VRP 默认值 30；邻域包括删除一个任务、插入一个未访问任务、用未访问任务替换当前任务。所有候选进入本地池后，最后按 reduced cost 排序，最多返回 `maxHeuristicPricingColumns=30` 条。
+本轮按用户要求把启发式定价进一步向旧 VRP 的 `GCTabu` 框架靠齐。旧代码的核心流程不是替代 exact pricing，而是在 exact pricing 前从当前 RMP 里挑一批低 reduced cost route 作为 seed，然后围绕 seed 做 remove/add/exchange tabu 搜索，形成一个本地负 reduced-cost route pool，排序后只加入少量优质列。当前 TWET 版本沿用这个框架：先收集当前 restricted columns，按 reduced cost 排序取 `heuristicPricingSeedColumns=30` 条种子，对应旧 `m_tabu_cg_size`；每条种子运行 `heuristicPricingTabuIterations=50` 轮 tabu，对应旧 `m_tabu_cg_iteration_number`；tenure 为 `heuristicPricingTabuTenure=30`，对应旧 `m_tabu_cg_tenure`；本地负 reduced-cost 候选池上限为 `heuristicPricingPoolSize=1000`，对应旧 `m_gen_size`；最后排序返回 `maxHeuristicPricingColumns=150` 条，对应旧 `addin_size`。邻域包括删除一个任务、插入一个未访问任务、用未访问任务替换当前任务。
 
 和旧 VRP 不能完全照搬的地方在于 move 评价。旧 VRP 的 route cost 基本是弧成本、容量和硬时间窗状态的增量更新；TWET 的列成本来自分段线性时间惩罚、setup time、setup cost 和硬时间窗预处理，不能直接用旧的局部弧成本公式。因此这次没有再用全序列 `TWETColumnEvaluator` 重算每个候选，而是给每条 seed 建立 forward/backward 分段函数 profile。删除任务时用两段拼接 `merge2Segments` 评价；插入或替换任务时把新任务看作单点 segment，用三段拼接 `merge3Segments` 评价；setup cost 在桥接弧上显式补入。这就保留了旧 `GCTabu` 的搜索结构，同时把候选成本评价换成当前 TWET 启发式中已经验证过的分段函数拼接逻辑。
 
@@ -118,10 +118,24 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 
 本轮继续对照旧 VRP 代码里的 `GCTabu`、`BranchD.UpdateRouteSet()` 和当前 TWET 的 forward pricing 做了补充。旧 `GCTabu` 的核心流程不是替代精确定价，而是在 exact pricing 前先从当前 RMP 里挑一批低 reduced cost route，围绕这些 route 做 remove/add/exchange 邻域搜索，形成一个负 reduced-cost route pool，排序后只加入少量优质列。当前 TWET 版先移植这个流程，而不是直接搬旧代码里的硬时间窗 O(1) 增量数组。原因是 TWET 列成本依赖分段线性时间惩罚、setup time、setup cost 和硬时间窗预处理，直接复用 VRP 的增量公式不安全；第一版启发式定价对每个候选序列统一调用 `TWETColumnEvaluator` 重算真实列成本，再用当前 RMP dual 计算 reduced cost。这样慢一些，但语义稳，而且后面仍然有 exact forward labeling 兜底，不影响精确性。
 
-实现上，`HeuristicPricingEngine` 已经从占位实现改成真实的启发式定价器。它先按 reduced cost 对当前 restricted columns 排序，取 `heuristicPricingSeedColumns=30` 条作为种子；然后围绕每条种子尝试 remove、relocate、add 和 exchange 四类邻域，最多扫描 `maxHeuristicPricingCandidateScans=5000` 个候选；所有负 reduced-cost 候选先进入本地池，最后排序取 `maxHeuristicPricingColumns=30` 条返回。这里刻意没有“找到 30 条就停”，因为旧 GCTabu 是先形成候选池再挑最好的 add-in 列，提前停会让早期较弱列挤掉后面更好的列。该启发式只跳过当前 RMP 已经 active 的重复列；如果某条序列在全局 pool 中已有但当前节点尚未 active，仍允许返回给 `PC` 激活。
+实现上，`HeuristicPricingEngine` 已经从占位实现改成真实的启发式定价器。它先按 reduced cost 对当前 restricted columns 排序，取 `heuristicPricingSeedColumns=30` 条作为种子；然后围绕每条种子尝试 remove、add 和 exchange 三类邻域，每条种子运行 `heuristicPricingTabuIterations=50` 轮。当前已经取消额外的 candidate scan 上限，不再用扫描次数控制搜索，而是按旧 GCTabu 方式用本地负 reduced-cost 候选池 `heuristicPricingPoolSize=1000` 控制生成规模，最后排序取 `maxHeuristicPricingColumns=150` 条返回。这里刻意没有“找到 150 条就停”，因为旧 GCTabu 是先形成候选池再挑最好的 add-in 列，提前停会让早期较弱列挤掉后面更好的列。该启发式只跳过当前 RMP 已经 active 的重复列；如果某条序列在全局 pool 中已有但当前节点尚未 active，仍允许返回给 `PC` 激活。
 
 分支子节点补列也做了一层加强。之前只对 required arc 做 fallback：如果当前 seed 中没有覆盖某条 required arc 的列，就构造 required-chain，并尝试把这条链插入已有列的不同位置。现在又补了“不能外包任务缺覆盖”的兜底：如果某个 job 的外包成本是 `big_M`，即 RMP 中对应 `y_j` 上界为 0，而当前 seed 中又没有任何兼容列覆盖它，就先尝试 singleton，再尝试把该 job 插入已有 pool 列的不同位置，选择一个兼容且成本有限的 fallback column。这个仍然不是旧 VRP `FindFeasible` 的完整 slack + 定向 pricing 版本，但能减少一类 restricted master 因暂时缺列而提前 infeasible 的情况。
 
 `PaperDominanceGraph` 这次没有改主逻辑，但补了一个轻量一致性测试 `PaperDominanceGraphConsistencyTest`。测试做法是构造随机 reachable set 和 `[0,T]` forward frontier，把同一批 label 同步插入朴素全扫描 `DominanceGraph` 和论文式 `PaperDominanceGraph`，检查“新 label 是否被占优丢弃”的返回结果是否一致。当前测试规模为 200 组、每组 80 个 label，共 16000 次插入，测试通过。这个测试不能替代真实算例级的 bound/列池对拍，也不覆盖 partial dominance，但至少能防止 graph propagation 方向、terminal superset 查找或 predecessor/successor 维护出现明显语义错误。
 
 本轮验证包括一次 focused compile，范围仍为 `src/Common`、`src/Basic`、`src/HEU`、`src/Output` 和 `src/TWETBPC`，编译通过，仅有旧 API deprecation 提示；随后运行 `TWETBPC.GC.PaperDominanceGraphConsistencyTest`，结果通过。剩余风险主要有两点：第一，启发式定价目前是全序列重算成本，不是旧 GCTabu 那种完全增量式 tabu，后续如果要追求速度，需要把 HEU 里已有的快速分段函数拼接和 reduced-cost 常数项结合起来做专门的增量评估；第二，分支子节点仍没有完整 slack RMP + FindFeasible 定向 pricing，复杂 required arc 组合下仍可能需要进一步补强。
+
+## 2026-05-18：旧版 GCTabu 中 cut 项的增量处理方式
+
+旧 VRP 的 `GCTabu` 在启发式列生成里已经考虑了 active subset-row cut。它不是每次 move 后重新扫描整条 route 来计算 cut 系数，而是在当前 route 状态中维护 `sr_count[sr]`：表示第 `sr` 个 active SR cut 在当前 route 中命中了多少个客户。初始化 seed route 时，逐个客户更新 `sr_count`，当某个 cut 的命中数从 1 变成 2 时，就在 reduced cost 中扣掉该 cut 的对偶 `sr_mu`。这对应 SR cut 在 route 上的系数从 0 变成 1。
+
+后续 tabu move 也按这个计数做增量修正。`remove` 一个客户时，如果该客户属于某个 SR cut 且原来 `sr_count==2`，删掉后该 cut 不再被 route 触发，所以 reduced cost 要把这部分对偶加回去；`add` 一个客户时，如果该客户属于某个 SR cut 且原来 `sr_count==1`，加入后命中数达到 2，所以 reduced cost 要扣掉 `sr_mu`；`exchange` 则同时看换出客户和换入客户是否让某个 cut 的命中数跨过 2 这个阈值，分别加回或扣掉对应对偶。真正提交 move 后，再同步更新 `sr_count`，下一轮继续使用。
+
+这个处理后续可以直接作为 TWET 启发式定价接 cut 的参考。具体做法是给 `TabuRouteState` 增加 active cut 的命中计数，例如 `srCount[]`，并提前维护 `srCustomer[sr][job]` 或等价的 cut-membership 查询。`evaluateRemove`、`evaluateAdd`、`evaluateExchange` 在现有分段函数快速评估出的真实列成本基础上，再按 `srCount` 做 reduced-cost 增量修正。这样每个候选 move 只需要额外扫描 active SR cut 数量，而不需要重算整条列。exact pricing 如果后续接 SRI，也要像旧版 `LabelEX.sr_count` 一样把 cut 计数状态带进 label，否则 dominance 和 reduced cost 都无法正确反映 cut dual。当前无 cut 版本不需要马上改代码，但这个方案应作为后续接 cut 的默认路径。
+
+## 2026-05-18：启发式定价参数对齐旧 VRP GCTabu
+
+前面临时加入过 `maxHeuristicPricingCandidateScans=5000`，用于防止 TWET 候选评估开销过大。但旧 VRP 的 `GCTabu` 并不是按候选扫描次数截断，而是用几组更明确的参数控制：`m_tabu_cg_size=30` 控制 seed 数，`m_tabu_cg_iteration_number=50` 控制每条 seed 的 tabu 轮数，`m_tabu_cg_tenure=30` 控制 tabu 长度，`m_gen_size=1000` 控制本地负 reduced-cost route pool 的最大规模，`addin_size=150` 控制最终加入 RMP 的列数。因此当前 TWET 版已经取消 candidate scan 上限，改为同样的参数语义。
+
+修改后的配置对应关系为：`heuristicPricingSeedColumns=30` 对应旧 `m_tabu_cg_size`；`heuristicPricingTabuIterations=50` 对应旧 `m_tabu_cg_iteration_number`；`heuristicPricingTabuTenure=30` 对应旧 `m_tabu_cg_tenure`；`heuristicPricingPoolSize=1000` 对应旧 `m_gen_size`；`maxHeuristicPricingColumns=150` 对应旧 `addin_size`。这样控制逻辑更接近旧代码：每条 seed 完整扫描每轮 remove/add/exchange 邻域，选择当前最好 move；只要本地负 reduced-cost 候选池没满，就继续按 tabu 轮数推进；最后对候选池排序并返回前 150 条。这个改动不会改变 exact pricing 的兜底地位，只是让启发式生成列层和旧 VRP 的行为更一致。

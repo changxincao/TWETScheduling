@@ -54,18 +54,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 		HashSet<SequenceSignature> activeSignatures = activeSignatures(lp);
 		HashSet<SequenceSignature> generatedSignatures = new HashSet<SequenceSignature>();
 		ArrayList<ScoredSequence> negativeCandidates = new ArrayList<ScoredSequence>();
-		int[] scanCount = new int[] { 0 };
 
 		for (TWETColumn seed : seeds) {
-			if (scanCount[0] >= config.maxHeuristicPricingCandidateScans) {
+			if (isHeuristicPoolFull(negativeCandidates)) {
 				break;
 			}
-			tabuSearch(seed.getSequence(), lp, activeSignatures, generatedSignatures, negativeCandidates, scanCount);
+			tabuSearch(seed.getSequence(), lp, activeSignatures, generatedSignatures, negativeCandidates);
 		}
 
 		if (negativeCandidates.isEmpty()) {
-			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column; scanned "
-					+ scanCount[0] + " candidates");
+			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column");
 		}
 
 		Collections.sort(negativeCandidates, new Comparator<ScoredSequence>() {
@@ -89,8 +87,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 					false));
 		}
 		return new PricingResult(columns, true,
-				"Tabu heuristic pricing generated " + columns.size() + " columns; scanned " + scanCount[0]
-						+ " candidates");
+				"Tabu heuristic pricing generated " + columns.size() + " columns from local pool "
+						+ negativeCandidates.size());
 	}
 
 	@Override
@@ -125,8 +123,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private void tabuSearch(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,
-			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates,
-			int[] scanCount) {
+			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates) {
 		TabuRouteState state = new TabuRouteState(seed);
 		if (!state.isValid()) {
 			return;
@@ -135,8 +132,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		double bestReducedCost = state.reducedCost(lp);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
-		for (int iter = 0; iter < iterations && scanCount[0] < config.maxHeuristicPricingCandidateScans; iter++) {
-			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost, scanCount);
+		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates); iter++) {
+			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost);
 			if (bestMove == null) {
 				break;
 			}
@@ -148,7 +145,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 	}
 
-	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost, int[] scanCount) {
+	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost) {
 		TabuMove bestMove = null;
 		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
 		Node node = lp.getNode();
@@ -156,7 +153,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (state.sequence.size() > 1) {
 			for (int pos = 0; pos < state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateRemove(pos, lp);
-				if (isAcceptedCandidate(move, node, iter, bestReducedCost, scanCount)
+				if (isAcceptedCandidate(move, node, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
@@ -170,7 +167,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			for (int pos = 0; pos <= state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateAdd(job, pos, lp);
-				if (isAcceptedCandidate(move, node, iter, bestReducedCost, scanCount)
+				if (isAcceptedCandidate(move, node, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
@@ -178,7 +175,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			for (int pos = 0; pos < state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateExchange(job, pos, lp);
-				if (isAcceptedCandidate(move, node, iter, bestReducedCost, scanCount)
+				if (isAcceptedCandidate(move, node, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
@@ -188,11 +185,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return bestMove;
 	}
 
-	private boolean isAcceptedCandidate(TabuMove move, Node node, int iter, double bestReducedCost, int[] scanCount) {
-		if (scanCount[0] >= config.maxHeuristicPricingCandidateScans || move == null || !move.valid) {
+	private boolean isAcceptedCandidate(TabuMove move, Node node, int iter, double bestReducedCost) {
+		if (move == null || !move.valid) {
 			return false;
 		}
-		scanCount[0]++;
 		if (!isSequenceCompatible(node, move.sequence)) {
 			return false;
 		}
@@ -202,6 +198,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private void tryAddNegative(List<Integer> sequence, double cost, LP lp, HashSet<SequenceSignature> activeSignatures,
 			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates) {
+		if (isHeuristicPoolFull(negativeCandidates)) {
+			return;
+		}
 		if (sequence.isEmpty() || Utility.isBigMValue(cost) || hasDuplicateJobs(sequence)) {
 			return;
 		}
@@ -213,6 +212,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			negativeCandidates.add(new ScoredSequence(sequence, cost, reducedCost));
 		}
+	}
+
+	private boolean isHeuristicPoolFull(ArrayList<ScoredSequence> negativeCandidates) {
+		return negativeCandidates.size() >= config.heuristicPricingPoolSize;
 	}
 
 	private HashSet<SequenceSignature> activeSignatures(LP lp) {

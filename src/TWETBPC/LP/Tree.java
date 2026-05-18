@@ -74,7 +74,7 @@ public class Tree {
 			}
 
 			if (solution.getStatus() == TWETMasterStatus.LP_RELAXATION) {
-				bestBound = Math.min(bestBound, solution.getObjectiveValue());
+				bestBound = updateReportedBound(queue, solution.getObjectiveValue(), incumbentCost);
 			}
 
 			boolean incumbentUpdated = false;
@@ -117,10 +117,40 @@ public class Tree {
 			}
 		}
 
+		bestBound = finalBound(queue, incumbentCost, bestBound);
 		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty());
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, pool.size(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and forward exact pricing; advanced cuts/pricing remain pending");
+	}
+
+	private double updateReportedBound(PriorityQueue<Node> queue, double currentNodeBound, double incumbentCost) {
+		// 2026-05-19: 参考旧 VRP 的 sudo_cost 语义，报告当前节点 bound 与 open queue 中最小伪下界的较小值。
+		// 旧实现最后用 queue.peek().sudo_cost 修正 lower bound；这里在求解过程中也用同一语义更新输出。
+		double bound = currentNodeBound;
+		if (!queue.isEmpty()) {
+			bound = Math.min(bound, queue.peek().pseudoCost);
+		}
+		if (Double.isFinite(incumbentCost) && Utility.compareGt(bound, incumbentCost)) {
+			return incumbentCost;
+		}
+		return bound;
+	}
+
+	private double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound) {
+		// 2026-05-19: 如果队列为空，所有节点已经关闭，最终 LB 应等于 incumbent；
+		// 如果达到节点上限仍有 open node，则用 open queue 中最小伪下界作为当前全局 LB。
+		if (queue.isEmpty()) {
+			return incumbentCost;
+		}
+		double bound = queue.peek().pseudoCost;
+		if (Double.isFinite(incumbentCost) && Utility.compareGt(bound, incumbentCost)) {
+			return incumbentCost;
+		}
+		if (Double.isFinite(bound)) {
+			return bound;
+		}
+		return lastReportedBound;
 	}
 
 	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty) {

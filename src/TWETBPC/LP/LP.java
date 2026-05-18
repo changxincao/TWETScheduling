@@ -1,6 +1,8 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -444,6 +446,50 @@ public class LP {
 		}
 	}
 
+	/**
+	 * 2026-05-18: 对齐旧 VRP UpdateRouteSet 的 route-set 更新逻辑。
+	 * slack repair 成功后，不直接把所有 repair 过程中见过的列都传下去，而是按当前子节点 LP
+	 * 的 reduced cost 重新筛一批列，避免子节点列集越来越胖。这里必须在关闭 repair mode
+	 * 并重建正常 RMP 前调用，因为 reduced cost 来自当前 CPLEX 模型。
+	 */
+	public void resetRestrictedColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance) {
+		if (cplex == null || lambdaByColumnId == null) {
+			return;
+		}
+		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
+		for (int columnId : restrictedColumnIds) {
+			TWETColumn column = pool.getColumn(columnId);
+			if (!isColumnCompatible(column)) {
+				continue;
+			}
+			double reducedCost = getColumnReducedCost(columnId);
+			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
+				candidates.add(new ColumnReducedCost(columnId, reducedCost));
+			}
+		}
+		Collections.sort(candidates, new Comparator<ColumnReducedCost>() {
+			@Override
+			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
+				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
+					return -1;
+				}
+				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
+					return 1;
+				}
+				return Integer.compare(a.columnId, b.columnId);
+			}
+		});
+
+		ArrayList<Integer> selected = new ArrayList<Integer>();
+		for (int i = 0; i < candidates.size() && i < maxColumns; i++) {
+			selected.add(Integer.valueOf(candidates.get(i).columnId));
+		}
+		if (!selected.isEmpty()) {
+			restrictedColumnIds = selected;
+			lastSolution = null;
+		}
+	}
+
 	private ArrayList<TariffSegment> collectOutsourcingTariffSegments() {
 		data.evaluateOutsourcingCost(0.0);
 		ArrayList<TariffSegment> segments = new ArrayList<TariffSegment>();
@@ -567,6 +613,16 @@ public class LP {
 			this.end = end;
 			this.slope = slope;
 			this.intercept = intercept;
+		}
+	}
+
+	private static final class ColumnReducedCost {
+		final int columnId;
+		final double reducedCost;
+
+		ColumnReducedCost(int columnId, double reducedCost) {
+			this.columnId = columnId;
+			this.reducedCost = reducedCost;
 		}
 	}
 

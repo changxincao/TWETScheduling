@@ -151,3 +151,13 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 这次也把 `LP.addColumns()` 改成支持当前模型上的增量加列。只要 CPLEX 模型已经存在，新列会通过 `IloColumn` 同时接入 objective、machine constraint、coverage constraints 和 required-arc constraints，然后直接 `resolveCurrentModel()`，不再每轮都 `cplex.end()` 再重建模型。只有切换 repair mode、加入 cut 或显式重新 solve 时才重建模型。这个点是效率上的关键：如果沿用旧 VRP 的 FindFeasible 流程但每次都重建 LP，反而会比旧代码慢。
 
 需要说明的是，这仍然不是完全复制旧 VRP 的所有细节。旧代码里的 `GCTabu.FindFeasible()` 和 `GCNGBB.FindFeasible()` 是专门的可行列修复入口；当前 TWET 版先复用已有 pricing engines，在 slack dual 下生成负 reduced-cost 列。结构上已经变成“slack RMP + 启发式/精确定价修复”，但还没有为 required arc 写专门定向的 pricing 状态，也没有输出 slack 剩余量和 repair 迭代统计。后续如果遇到复杂 required-arc 分支节点，可以继续把 `PricingEngine` 拆出专门的 `findFeasible` 接口。
+
+## 2026-05-18：继续贴近旧 VRP 的 UpdateRouteSet 流程
+
+前一版已经把暴力 fallback 改成了 slack RMP + pricing 修复，但还有一个关键差异：旧 VRP 的 `UpdateRouteSet()` 在 `FindFeasible()` 成功以后，会从当前子节点 LP 的 `route_index` 中按 reduced cost 重新筛选 route set，只保留 `rc < m_addin_red_cost` 且数量不超过 `m_initial_col_number` 的列。也就是说，旧代码不是“修复过程中见过多少列就全部带下去”，而是修复成功后根据当前子节点 LP 的 reduced cost 重新压缩列集。
+
+本轮补上了这个步骤。`LP` 新增 `resetRestrictedColumnsByCurrentReducedCost(maxColumns, reducedCostAllowance)`，在 repair slack 已经归零、但还没关闭 repair mode 之前调用。此时 reduced cost 来自当前带 slack 的子节点 LP，和旧 VRP 在 slack 修复成功后读取 `lp.cplex.getReducedCost(...)` 的时机一致。筛选后再关闭 repair mode，重建正常 RMP 并继续后续列生成。这样 child 的 restricted columns 不会因为 repair 过程持续膨胀，也更接近旧 VRP 的 route-set 更新语义。
+
+另一个差异是 `FindFeasible` 入口。之前 repair mode 只是日志上把普通 pricing 标成 `[FindFeasible]`，逻辑上仍调用 `price(lp)`。本轮在 `PricingEngine` 中增加了默认 `findFeasible(lp)` 入口，默认实现仍复用 `price(lp)`，但 `PC` 在 repair mode 下会显式调用该入口。这一步本身不改变当前定价结果，但把流程语义和旧 VRP 对齐了：后续如果 required-arc 分支节点需要更强的定向修复，可以直接在具体 pricing engine 中覆盖 `findFeasible()`，而不影响正常 pricing。
+
+因此当前逻辑和旧 VRP 的主差异进一步缩小为两点：第一，TWET 的 slack 仍同时覆盖 job 覆盖约束和 required-arc 约束，比旧 VRP 的 branch slack 更泛，这是由外包和任务覆盖结构导致的；第二，当前具体 pricing engine 的 `findFeasible()` 还没有写专门的 required-arc 定向状态，只是有了入口和 slack dual 驱动。后续若继续追求完全同款，应优先做后者，而不是再回到树层 fallback。

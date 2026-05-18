@@ -115,6 +115,11 @@ public class PC {
 							+ " columns");
 		}
 
+		// 2026-05-18: 旧 VRP UpdateRouteSet 在 FindFeasible 成功后，会按当前子节点 LP 的
+		// reduced cost 重选 route set。这里保持同一逻辑：repair 期间生成的列不全部继续携带，
+		// 只保留 reduced cost 足够低的一批列，再关闭 slack 重解正常 RMP。
+		lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
+				config.branchSeedReducedCostAllowance);
 		lp.setFeasibilityRepairMode(false);
 		return lp.solveRelaxation();
 	}
@@ -123,7 +128,7 @@ public class PC {
 		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
 		ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
 		for (PricingEngine engine : pricingEngines) {
-			PricingResult result = engine.price(lp);
+			PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
 			int addedColumns = 0;
 			if (result.isImproved()) {
 				for (int i = 0; i < result.getColumns().size(); i++) {

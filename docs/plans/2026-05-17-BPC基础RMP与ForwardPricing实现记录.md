@@ -191,3 +191,9 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 ## 2026-05-18：FindFeasible 封装差异的结论补充
 
 关于 `FindFeasible` 循环位置，当前结论是：这主要是封装差异，不是算法调用逻辑差异。旧 VRP 把 `solve LP -> check slack -> read dual -> pricing extend -> add columns` 包在各个 GC 的 `FindFeasible()` 内部；当前 TWET 把这层循环统一放在 `PC.repairInfeasibleMaster()`，pricing engine 的 `findFeasible(lp)` 只执行单轮补列。从调用顺序和信息流看，二者都是“带 slack 的 RMP 产生 dual，定价器根据 dual 补列，增量加列后重解，直到 slack 为 0 或达到列数上限”。因此这里不需要为了形式一致把循环强行搬进 GC 类，后续只要保证具体 `findFeasible()` 能在 required-arc 等场景下生成有效列即可。
+
+## 2026-05-18：旧 VRP 中 gc.Reset() 的真实含义
+
+重新查看旧 VRP 源码后，`BranchD.UpdateRouteSet()` 中的 `gc.Reset()` 不是在清理启发式和精确定价共享的函数信息，也不是 dominance graph。该处 `gc` 是 `GCNGBB`，其 `Reset()` 只执行 `Arrays.fill(m_low_ng_set, 0)` 和 `Arrays.fill(m_high_ng_set, 0)`。这两个数组是 `GCNGBB` 在 exact pricing 中维护的动态 ng-set，用于在发现重复访问/环以后扩展某些 customer 的 ng-memory，从而加强后续 label 扩展中的访问限制。`Extend(lp,n)` 每次会重新初始化标签队列、候选列池和 bound 数组，但不会自动清空这两个动态 ng-set；因此它们会跨多次 exact pricing 调用保留。
+
+旧代码在启发式 `hgc.FindFeasible()` 产生新列后调用 `gc.Reset()`，含义是：RMP 增加了列并重新求解后，dual 和后续 pricing 搜索环境发生了变化，于是把 exact pricing 里此前逐步加严的动态 ng-memory 清掉，让精确定价从较松的 ng-set 状态重新开始。当前 TWET 基础版 exact pricing 没有这种跨调用维护的动态 ng-set，因此暂时不需要 reset；如果后续实现 DSSR、ng-route 动态记忆或跨轮 label/bound 缓存，再补 `reset()` 才有必要。

@@ -96,6 +96,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return "HeuristicPricing";
 	}
 
+	@Override
+	public boolean repeatFindFeasibleUntilExhausted() {
+		return true;
+	}
+
 	private ArrayList<TWETColumn> collectSeedColumns(final LP lp) {
 		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>();
 		for (int columnId : lp.getRestrictedColumnIds()) {

@@ -93,29 +93,37 @@ public class PC {
 			boolean addedInThisPass = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size()
 					&& generatedForRepair < config.maxBranchRepairColumns; engineIndex++) {
-				ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
-				ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, pricingEngines.get(engineIndex), true,
-						activeColumnIds);
-				if (newColumnIds.isEmpty()) {
-					continue;
+				PricingEngine engine = pricingEngines.get(engineIndex);
+				boolean addedByThisEngine = false;
+				boolean keepCurrentEngine = true;
+				while (keepCurrentEngine && generatedForRepair < config.maxBranchRepairColumns) {
+					ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
+					ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, engine, true, activeColumnIds);
+					if (newColumnIds.isEmpty()) {
+						break;
+					}
+					if (generatedForRepair + newColumnIds.size() > config.maxBranchRepairColumns) {
+						newColumnIds = new ArrayList<Integer>(
+								newColumnIds.subList(0, config.maxBranchRepairColumns - generatedForRepair));
+					}
+					int addedColumns = lp.addColumns(newColumnIds);
+					generatedForRepair += addedColumns;
+					if (addedColumns == 0) {
+						break;
+					}
+					addedInThisPass = true;
+					addedByThisEngine = true;
+					solution = lp.resolveCurrentModel();
+					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+						lp.setFeasibilityRepairMode(false);
+						return solution;
+					}
+					// 2026-05-18: 旧 GCTabu.FindFeasible 会在启发式仍能补列且 slack 未归零时继续用启发式；
+					// exact 定价不反复占用这一层，执行一次后把控制权交回外层 repair pass。
+					keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted() && !lp.isNoSlack();
 				}
-				if (generatedForRepair + newColumnIds.size() > config.maxBranchRepairColumns) {
-					newColumnIds = new ArrayList<Integer>(
-							newColumnIds.subList(0, config.maxBranchRepairColumns - generatedForRepair));
-				}
-				int addedColumns = lp.addColumns(newColumnIds);
-				generatedForRepair += addedColumns;
-				if (addedColumns == 0) {
-					continue;
-				}
-				addedInThisPass = true;
-				// 2026-05-18: 对齐旧 VRP FindFeasible 的信息流。某个定价器补列后立即重解 LP；
-				// 即使 slack 已归零，也允许后续定价器基于新 dual 再跑一次，外层 while 再负责退出 repair。
-				resetFollowingPricingEngines(engineIndex + 1);
-				solution = lp.resolveCurrentModel();
-				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-					lp.setFeasibilityRepairMode(false);
-					return solution;
+				if (addedByThisEngine) {
+					resetFollowingPricingEngines(engineIndex + 1);
 				}
 			}
 			if (!addedInThisPass) {

@@ -35,6 +35,10 @@ public interface PricingEngine {
 	}
 
 	/** @return 定价器名称，主要用于日志和调试。 */
+	default boolean repeatFindFeasibleUntilExhausted() {
+		return false;
+	}
+
 	String getName();
 
 }

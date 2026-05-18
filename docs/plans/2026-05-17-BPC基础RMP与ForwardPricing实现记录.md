@@ -410,3 +410,9 @@ repair slack 的语义也随之收紧。之前 TWET 版本会给 coverage 行和
 机器数分支和 tariff segment 分支也都是解级约束。每条内部列在机器数行中的系数都是 1，但单条列没有“是否满足机器数上下界”的概念，只有所有被选列的总数才满足。tariff 的 `z_s` 更不是 route pricing 生成的列，它是 master 中的外包分段变量；`z_s <= 0` 或 `z_s >= 1` 必须作为 master 约束保留。
 
 所以更准确的判断是：pricing 侧的图/状态限制只能保证“新生成列不违反列级 forbidden 状态”，不能替代 RMP 中的聚合分支行。RMP 分支行还负责约束父节点继承来的旧列、表达解级分支语义，并提供当前节点 reduced cost 所需的 dual。若删除 required arc、机器数或 tariff 分支行，当前节点的 LP 松弛就不再是该 branch node 的松弛，pricing 的 reduced cost 也不再对应真实 RMP。
+
+## 2026-05-19：forbidden arc 行的后续冗余判断
+
+进一步确认后，分支约束在正式 child 列集中的保留策略可以区分处理。`forbidden arc` 是列级禁用约束：如果 child 已经完成筛列，所有含该弧的旧列都被删掉，并且 pricing 图也不再生成该弧，那么 RMP 中的 `sum x_ij = 0` 行在后续正式 LP 中确实可以视为冗余。它在首次 child LP 和 repair 阶段仍然需要存在，用来压掉父节点继承来的旧列并产生 repair/dual 语义；但在正式筛列成功以后，可以作为性能优化考虑删除或不再建立。
+
+这个结论不适用于 `required arc`、机器数和 tariff segment。`required arc` 是解级聚合约束，含义是最终选中列集合中必须有一条列使用该弧，而不是每条列都必须使用该弧；机器数约束约束的是被选内部列数量之和；tariff segment 约束的是 master 中的外包分段变量 `z_s`。这三类约束都不能被“列已经兼容当前分支状态”替代，后续正式 RMP 中仍应保留对应行，并让其 dual 进入 reduced cost 或 master 求解逻辑。

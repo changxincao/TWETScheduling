@@ -459,3 +459,11 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 前面说的“可能筛掉可行性列”不是指常规情况下必然会发生，而是指这个筛列步骤在代码上没有显式保证“所有当前正值列必须保留”。当前实现会先收集所有 reduced cost 小于阈值的列，然后按 reduced cost 排序，再取前 `maxColumns` 条。如果存在大量 reduced cost 为 0 或非常接近 0 的退化列，且候选数超过 `branchSeedColumnLimit`，排序的 tie-break 只按 column id 处理，那么某些当前正值列理论上可能排在截断位置之后。这个风险在当前参数下很低，但它是工程假设，不是数学保证。
 
 因此更稳的后续修改不是改变 reduced-cost 筛列思想，而是在筛列前先把当前 LP 中 value > tolerance 的列无条件放入 selected，再用低 reduced-cost 列补足到上限。这样可以保留旧 VRP “用 reduced cost 压缩 child route set”的流程，同时把“当前可行基被筛掉”的边界风险消掉。
+
+## 2026-05-19：`resetRestrictedColumnsByCurrentReducedCost()` 的调用时机
+
+本次确认 `resetRestrictedColumnsByCurrentReducedCost()` 只有两个调用点，语义都是“child 已经有一个可行 LP 后，把当前列池筛成正式 child restricted column set”。第一个调用点在 `PC.solve()` 中：child 节点第一次 `lp.solveRelaxation()` 已经可行时，直接按当前 LP 的 reduced cost 和分支兼容性筛列，然后重新建 LP 求解。这对应旧 VRP `UpdateRouteSet()` 中“首次 child LP 可行后筛 route set”的路径。
+
+第二个调用点在 `repairInfeasibleMaster()` 末尾：如果 child 第一次 LP 不可行，则先进入带 artificial slack 的 repair LP，通过 `engine.findFeasible(lp)` 反复补列；只有当 `lp.isNoSlack()` 为真，即 slack 被真实列压回 0 后，才调用该函数筛列，然后关闭 repair mode，回到正常 RMP 求解。这对应旧 VRP `FindFeasible()` 成功以后再筛 route set 的路径。
+
+因此它不是每轮普通 pricing 后都会调用，也不是 root 节点默认调用。它只服务于 child 的初始列集压缩：要么 child 首次 LP 已经可行后筛一次，要么 findFeasible/repair 成功后筛一次。

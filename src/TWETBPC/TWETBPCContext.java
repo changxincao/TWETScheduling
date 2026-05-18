@@ -53,7 +53,7 @@ public class TWETBPCContext {
 		this.initialColumnBuilder = new InitialColumnBuilder(data, config, pool, seedProvider);
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
-		pricingEngines.add(new HeuristicPricingEngine());
+		pricingEngines.add(new HeuristicPricingEngine(data, config));
 		if (config.usePaperDominancePricing) {
 			pricingEngines.add(new PaperDominanceExactPricingEngine(data, config));
 		} else {

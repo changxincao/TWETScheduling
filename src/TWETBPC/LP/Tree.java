@@ -158,12 +158,81 @@ public class Tree {
 				seed.add(Integer.valueOf(column.getId()));
 			}
 		}
+		addMissingCoverageFallbackColumns(seed, child);
 		for (int[] arc : child.getRequiredArcs()) {
 			if (!hasColumnCoveringArc(seed, child, arc[0], arc[1])) {
 				addRequiredArcFallbackColumn(seed, child, arc[0], arc[1]);
 			}
 		}
 		child.seedColumnIds = seed;
+	}
+
+	private void addMissingCoverageFallbackColumns(ArrayList<Integer> seed, Node child) {
+		for (int job = 1; job <= data.n; job++) {
+			if (!Utility.isBigMValue(data.outsourcingCost[job]) || hasColumnCoveringJob(seed, job)) {
+				continue;
+			}
+			addJobFallbackColumn(seed, child, job);
+		}
+	}
+
+	private boolean hasColumnCoveringJob(ArrayList<Integer> seed, int job) {
+		for (int columnId : seed) {
+			if (pool.getColumn(columnId).containsJob(job)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void addJobFallbackColumn(ArrayList<Integer> seed, Node child, int requiredJob) {
+		ArrayList<Integer> sequence = findJobFallbackSequence(child, requiredJob);
+		if (sequence == null || sequence.isEmpty()) {
+			return;
+		}
+		double cost = columnEvaluator.evaluate(sequence);
+		if (Utility.isBigMValue(cost)) {
+			return;
+		}
+		int id = pool.addColumn(sequence, cost, ColumnSource.MANUAL, false);
+		Integer value = Integer.valueOf(id);
+		if (!seed.contains(value)) {
+			seed.add(value);
+		}
+	}
+
+	private ArrayList<Integer> findJobFallbackSequence(Node child, int requiredJob) {
+		ArrayList<Integer> bestSequence = null;
+		double bestCost = Double.POSITIVE_INFINITY;
+		ArrayList<Integer> singleton = new ArrayList<Integer>();
+		singleton.add(Integer.valueOf(requiredJob));
+		double cost = evaluateFallbackCandidate(child, singleton, -1, -1);
+		if (Utility.compareLt(cost, bestCost)) {
+			bestCost = cost;
+			bestSequence = singleton;
+		}
+
+		// 2026-05-18: 这里对应旧 VRP UpdateRouteSet/FindFeasible 的“子节点缺列时主动找可行列”。
+		// 当前还没有引入 slack RMP + 定向 pricing，因此先用轻量兜底：把缺覆盖的 job 插入已有兼容列的不同位置。
+		// 这只在该 job 不能外包且 seed 中没有任何可兼容覆盖列时触发，不改变正常节点的列池结构。
+		for (TWETColumn baseColumn : pool.getColumns()) {
+			List<Integer> base = baseColumn.getSequence();
+			if (base.contains(Integer.valueOf(requiredJob))) {
+				continue;
+			}
+			for (int pos = 0; pos <= base.size(); pos++) {
+				ArrayList<Integer> candidate = new ArrayList<Integer>(base.size() + 1);
+				candidate.addAll(base.subList(0, pos));
+				candidate.add(Integer.valueOf(requiredJob));
+				candidate.addAll(base.subList(pos, base.size()));
+				cost = evaluateFallbackCandidate(child, candidate, -1, -1);
+				if (Utility.compareLt(cost, bestCost)) {
+					bestCost = cost;
+					bestSequence = candidate;
+				}
+			}
+		}
+		return bestSequence;
 	}
 
 	private boolean hasColumnCoveringArc(ArrayList<Integer> seed, Node child, int from, int to) {
@@ -231,7 +300,8 @@ public class Tree {
 
 	private double evaluateFallbackCandidate(Node child, ArrayList<Integer> sequence, int requiredFrom, int requiredTo) {
 		if (sequence.isEmpty() || hasDuplicateJobs(sequence) || !isSequenceCompatible(child, sequence)
-				|| !sequenceCoversArc(sequence, requiredFrom, requiredTo, child.sinkId())) {
+				|| (requiredFrom >= 0 && requiredTo >= 0
+						&& !sequenceCoversArc(sequence, requiredFrom, requiredTo, child.sinkId()))) {
 			return Utility.big_M;
 		}
 		double cost = columnEvaluator.evaluate(sequence);

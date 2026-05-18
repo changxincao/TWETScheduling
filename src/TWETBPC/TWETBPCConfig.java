@@ -32,7 +32,15 @@ public class TWETBPCConfig {
 	public int maxNodes = 1000;
 	/** 是否使用按论文 dominance graph 伪代码实现的精确定价器；关闭后可回退旧的全量扫描版做效率对比。 */
 	public boolean usePaperDominancePricing = true;
-	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP 代码 Configure.addin_size 的默认值。 */
+	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。*/
+	public boolean enableHeuristicPricing = true;
+	/** 启发式定价最多返回多少条列；参考旧 VRP GCTabu 最终只加入少量优质列的做法。*/
+	public int maxHeuristicPricingColumns = 30;
+	/** 启发式定价从当前 RMP 中挑多少条低 reduced cost 列作为邻域搜索种子。*/
+	public int heuristicPricingSeedColumns = 30;
+	/** 启发式定价单次调用最多评估多少个候选，避免完整序列重算成本时开销失控。*/
+	public int maxHeuristicPricingCandidateScans = 5000;
+	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP 代码 Configure.addin_size 的默认值。*/
 	public int maxExactPricingColumns = 150;
 	/** 单个节点内最多进行多少轮 cut separation。 */
 	public int maxCutRounds = 8;

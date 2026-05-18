@@ -207,3 +207,9 @@ cut 相关目前还是框架占位，不是可用的 BPC。`LP.addCuts()` 现在
 第三，旧 VRP 的 slack 是加在某条分支约束上的人工变量。它只出现在那一行约束里，目标系数为 `BigNumber`，用于让“当前 route set 暂时不满足分支约束”的 LP 先可解。当前 TWET 的 required-arc slack 与旧 VRP 的 branch slack 语义最接近：required arc 约束要求 `sum(使用该弧的内部列)=1`，如果当前列集没有这类列，就临时加 `requiredArcSlack` 让该行可解，并用 slack dual 引导 pricing 生成真实列。当前 TWET 还额外对 job coverage 行加了 `coverSlack`，这是因为有些任务不能外包，或者外包/segment/机器数状态使得当前 restricted RMP 没有真实方式覆盖某个 job。这里不是给“外包变量”本身加 slack，而是给覆盖约束加 slack；如果某个 job 能正常通过 `y_j=1` 外包覆盖，这个 slack 自然不会为正。
 
 第四，修复列逻辑与旧 VRP 的核心一致，差别是时机。旧 VRP 是创建 child 时立即运行 `UpdateRouteSet()`，必要时 slack + FindFeasible，修好 route set 后入队。当前 TWET 是 child 先入队，等实际弹出求解时由 `PC` 做 slack + FindFeasible。两者的修复机制都是“slack RMP 产生 dual -> pricing 找列 -> 加列重解 -> slack 归零后筛列”，但当前延迟修复能避免提前处理可能不会被访问的 child，也能让 `Tree` 不直接耦合 LP/pricing。
+
+## 2026-05-18：Reset 调用点和 coverage slack 的进一步澄清
+
+旧 VRP 里的 `Reset()` 有两类调用场景。正常列生成中，`GCNGBB.Solve(lp)` 一开始会无条件调用 `Reset()`，这是一次完整 exact pricing 求解的初始化。分支可行列修复中，`BranchA/B/C/D.UpdateRouteSet()` 创建一个 `GCTabu hgc` 和一个 `GCNGBB gc`，在 while 循环里先调用 `hgc.FindFeasible()`，如果 `old_col_number != col_number`，说明启发式新加了列，此时才调用 `gc.Reset()`，随后再调用 `gc.FindFeasible()`。`GCNGBB.FindFeasible()` 自己不 reset，因此同一个 `GCNGBB` 对象在分支修复循环中会保留动态 ng-set；所谓“跨调用”就是这些 `m_low_ng_set/m_high_ng_set` 会跨多次 `gc.FindFeasible()` 调用保留，除非正常 `Solve()` 开头或启发式新增列后显式 reset。
+
+coverage 是否可能不可行，取决于外包变量是否能覆盖所有任务，以及 child 从父节点继承的列是否仍能覆盖所有不能外包的任务。child 只从父节点 restricted columns 中筛选低 reduced-cost 且兼容分支状态的列，筛选以后完全可能丢掉某些高 reduced-cost 但覆盖关键 job 的列；如果该 job 又不能外包，则 coverage 行会暂时不可行。即使父节点可行，child 的 forbidden/required arc 状态也可能让原来覆盖某个 job 的列不再兼容。因此 coverage slack 不是只为外包变量本身准备，而是为“当前 child restricted column set 暂时缺覆盖列”的情况准备。

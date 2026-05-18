@@ -500,3 +500,7 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 当前 TWET-BPC 没有在最终返回时继续照抄这个 `min`。现在求解结束时如果队列为空，说明所有节点已经关闭，最终 `bestBound` 直接取 incumbent；如果队列非空，说明因为节点上限等原因还有 open node，则最终 `bestBound` 取 `queue.peek().pseudoCost`，也就是当前 open queue 里最小的伪下界。运行中展示用的 bound 可以取当前节点 LP bound 和 open queue 最小伪下界的较小值，只作为状态输出，不改变剪枝逻辑。
 
 同时澄清 `bound` 超过 incumbent 时截到 incumbent 的语义。对最小化问题，任何有效 lower bound 都不应该大于当前 upper bound/incumbent；如果报告层出现 `LB > incumbent`，通常是因为伪下界、数值误差或状态汇总方式导致的输出异常。把报告值截到 incumbent 只是为了保持输出区间合法，不表示算法可以因此直接宣告最优。真正可以宣告最优的条件仍然是 open queue 为空，或者所有 open node 的有效下界都已经不小于 incumbent 并被正常剪掉。
+
+旧 VRP 真正用于证明和剪枝的不是末尾这个 `min`，而是搜索过程中的两处 bound 剪枝。第一处是在节点刚从队列弹出时检查 `node.sudo_cost > best_cost + tolerance`，如果成立直接跳过该节点，不再建 LP；第二处是在该节点 LP/列生成完成后，如果 `lp.solution_cost + tolerance > best_cost`，则该节点子树被 bound 剪掉。`sudo_cost` 是节点入队时继承的父节点 LP bound，通常比较弱，但它仍然是该子树的有效下界；`lp.solution_cost` 是当前节点真正求解后的更强下界。
+
+当前 TWET-BPC 已经有第二类剪枝，即节点 LP 求解后用 `solution.getObjectiveValue()` 和 incumbent 比较并关闭节点；但还没有完全接上旧 VRP 第一类“弹出节点前按 `pseudoCost` 预剪枝”。因此当前正确性不依赖这个预剪枝，最多会多求一些本可以提前跳过的节点。如果 `PriorityQueue` 以 `pseudoCost` 从小到大排序，那么当 `queue.peek().pseudoCost >= incumbent` 时，理论上所有剩余 open nodes 的伪下界都不小于 incumbent，可以直接终止或清空队列；旧 VRP 只是逐个弹出并跳过，没有利用这一点做批量清空。后续如果要进一步优化，可以在 TWET `Tree.solve()` 弹出节点前或弹出后建 LP 前加这层判断。

@@ -562,3 +562,19 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 repair 模式暂时保持原有实现。它已经是启发式可反复补列、exact 兜底的结构，和旧 VRP `FindFeasible` 的主语义较接近；本次不额外调整。
 
 验证：针对 `Basic/Common/HEU/Output/TWETBPC` 子集运行 `javac -encoding UTF-8 -cp D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar;target\classes -d target\twetbpc-compile ...` 通过，仅有历史 deprecated API 提示。随后运行 `HEU.SmallBPCBatchTest`，8 个随机小算例均与 `ArcFlowModel` 目标值一致，tariff 分支诊断例也得到 `BPC=ArcFlow=10.0`、`nodes=3`、`branches=1`、验证可行。
+
+## 2026-05-19：只看流程框架时当前仍和旧 VRP 不同的地方
+
+本次只按“流程和框架”复核，不讨论 TWET 分段函数、setup、外包成本、label 评估这些问题特化细节。普通 pricing 循环已经改成启发式优先、加列即重解并回到第一个 engine，因此不再作为差异项。
+
+当前剩余的第一类差异是 cut 外层循环。旧 VRP 是完整 price-and-cut 框架：pricing 收敛后分离 cut，若加了 cut，则回到 pricing，因为 cut dual 会改变列 reduced cost。当前 `CutGenerator/CutPool/TWETCut` 仍是占位，`SubsetRowCutGenerator` 不产生真实 cut，`LP` 中也没有真实 cut 行和列系数。因此当前应表述为 no-cut branch-and-price 框架，而不是完整 BPC。后续接 cut 时，必须补“加 cut 后重新 pricing”的外层循环。
+
+第二类差异是 DSSR/ng-route 状态。旧 VRP 的 `GCNGBB` 有动态 ng-set / DSSR 状态，`Reset()` 的意义是当启发式新加列、LP dual 改变后，精确定价的动态状态需要清理或重新开始。当前 exact pricing 没有 DSSR/ng-set，只是基础 forward labeling 加 dominance graph，因此 `reset()` 还是接口占位。这不是当前流程错误，而是旧版完整 exact pricing 能力尚未实现。
+
+第三类差异是 child repair 的时机。旧 VRP 在分支生成 child 时立即执行 `UpdateRouteSet()`，当前 TWET-BPC 是 child 真正出队时才做首次 LP、repair 和正式列筛选。这个时机不同，但逻辑等价，而且当前更省，因为不会提前修复后来可能被 bound 剪掉的 child。只要 child 出队时仍先用父节点列集加当前分支行求 LP，不可行时只对当前分支行加 slack 修复，再筛正式列集，这个框架语义就是对齐的。
+
+第四类差异是分支族。旧 VRP 没有 outsourcing tariff segment 分支，当前因为 SP2 外包分段变量 `z_s` 可能分数，所以多了 `TariffSegmentBrancher`，且当前顺序是 tariff segment、machine count、arc。这是当前模型需要的扩展，不是框架错误。若以后做不带外包或线性外包成本的版本，可以把 tariff 分支关闭或让它自然不触发。
+
+第五类差异是输出和状态统计的实现方式。当前 `Tree` 在 `pseudoCost >= incumbent` 时直接清空队列结束，旧 VRP 是逐个弹出后跳过；由于队列都按伪下界升序，这两个逻辑等价，但不是逐行同款。当前 `bestBound/finalStatus/trace` 也是按 TWET 输出对象重新封装，不是旧 VRP 的控制台变量原样搬运。
+
+因此当前严格说法是：no-cut B&P 主控流程已经和旧 VRP 基本一致；普通 pricing 循环、pseudoCost 预剪枝、child repair 语义这些之前差异较大的地方已经补齐。仍不同的部分主要是尚未实现 cut 循环、DSSR/ng-route 状态和旧版完整 pricing 栈，以及 SP2 外包分段带来的额外分支族。

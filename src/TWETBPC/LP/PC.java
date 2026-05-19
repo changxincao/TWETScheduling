@@ -31,7 +31,7 @@ public class PC {
 	}
 
 	public TWETMasterSolution solve(LP lp) {
-		// TODO 2026-04-10: 真正接入 RMP 之后，这里还要补每轮 pricing/cut 前后的 dual、
+		// TODO 2026-04-10: 真正接入 RMP 之后，还要补每轮 pricing/cut 前后的 dual、
 		// reduced cost、违反度等统计；当前骨架阶段只输出“是否找到改进”和“新增数量”。
 		TWETMasterSolution solution = lp.solveRelaxation();
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -40,7 +40,7 @@ public class PC {
 				return solution;
 			}
 		} else if (lp.getNode() != null && lp.getNode().depth > 0) {
-			// 2026-05-18: 对齐旧 VRP UpdateRouteSet。child 第一次 LP 可行时，也先按当前 LP 的
+			// 2026-05-18: 对齐旧 VRP UpdateRouteSet。Child 第一次 LP 可行时，也先按当前 LP 的
 			// reduced cost 和分支兼容性筛出正式列集，再进入后续 pricing；repair 成功路径也会做同样筛选。
 			lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 					config.branchSeedReducedCostAllowance);
@@ -53,16 +53,7 @@ public class PC {
 			}
 		}
 
-		while (true) {
-			ArrayList<Integer> newColumnIds = generateColumns(lp, false);
-			// 2026-05-17: 参考旧 VRP PC，节点内 pricing 不再设固定轮数；
-			// 单轮加列数由 pricing 侧控制，PC 一直迭代到没有新的 active 列。
-			if (newColumnIds.isEmpty()) {
-				break;
-			}
-			lp.addColumns(newColumnIds);
-			solution = lp.resolveCurrentModel();
-		}
+		solution = solvePricingLoop(lp, solution);
 
 		for (int round = 0; round < config.maxCutRounds; round++) {
 			ArrayList<Integer> newCutIds = new ArrayList<Integer>();
@@ -87,6 +78,37 @@ public class PC {
 			solution = lp.solveRelaxation();
 		}
 
+		return solution;
+	}
+
+	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
+		TWETMasterSolution solution = currentSolution;
+		while (true) {
+			boolean addedColumn = false;
+			for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
+				PricingEngine engine = pricingEngines.get(engineIndex);
+				ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
+				ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, engine, false, activeColumnIds);
+				if (newColumnIds.isEmpty()) {
+					continue;
+				}
+
+				int addedColumns = lp.addColumns(newColumnIds);
+				if (addedColumns == 0) {
+					continue;
+				}
+
+				// 2026-05-19: 对齐旧 VRP PC 的普通 pricing 节奏。一个定价器加列后立即重解 LP，
+				// 并从第一个定价器重新开始；这样只要启发式还能补列，就不会提前调用更重的精确定价。
+				resetFollowingPricingEngines(engineIndex + 1);
+				solution = lp.resolveCurrentModel();
+				addedColumn = true;
+				break;
+			}
+			if (!addedColumn) {
+				break;
+			}
+		}
 		return solution;
 	}
 
@@ -157,15 +179,6 @@ public class PC {
 				config.branchSeedReducedCostAllowance);
 		lp.setFeasibilityRepairMode(false);
 		return lp.solveRelaxation();
-	}
-
-	private ArrayList<Integer> generateColumns(LP lp, boolean repairMode) {
-		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
-		ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
-		for (PricingEngine engine : pricingEngines) {
-			newColumnIds.addAll(generateColumnsFromEngine(lp, engine, repairMode, activeColumnIds));
-		}
-		return newColumnIds;
 	}
 
 	private ArrayList<Integer> generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,

@@ -552,3 +552,13 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 第八，`bestBound` 和节点状态输出已经比前面更接近旧 VRP，但仍要区分“证明用状态”和“输出摘要”。当前已经修正为队列空时 `LB=incumbent`，队列未空时用 `queue.peek().pseudoCost` 作为 open-node 伪下界；同时补了 pseudoCost 预剪枝。这和旧 VRP `sudo_cost` 的安全下界语义一致。区别是当前在 pseudoCost 已经不可能改进时直接清空队列，而旧版逐个跳过；这是实现方式差异，不是逻辑缺失。
 
 当前结论为：如果只讨论 no-cut branch-and-price 主流程，当前 TWET-BPC 已经基本和旧 VRP 的框架一致，并且最近补上了之前确实缺失的 `sudo_cost/pseudoCost` 预剪枝。还不能说“完整 BPC 和旧 VRP 完全一样”，因为 cut 循环、DSSR/ng-set 状态、完整 pricing 栈和部分旧版效率细节还没有实现。后续如果继续追求和旧 VRP 完整版一致，优先顺序应是：先接真实 cut 后的 price-and-cut 外层循环，再做 NG/DSSR exact pricing reset 语义，最后补 cut reduced-cost 项和更强列生成统计。
+
+## 2026-05-19：普通 pricing 循环改为旧 VRP 的启发式优先节奏
+
+本次只处理普通 pricing 循环和旧 VRP 不完全一致的问题，不动 cut 和 DSSR/ng-set。修改前，`PC.solve()` 在每一轮调用 `generateColumns()`，会在同一轮 dual 下依次调用所有 pricing engine，把启发式和 exact 找到的列合并后统一加入 RMP，再重解 LP。这样做通常不影响正确性，但和旧 VRP 的 `PC` 节奏不同：旧版更偏向先反复使用 `GCTabu`，只要启发式仍能找到列，就先加列、重解 LP，并继续从启发式开始；只有启发式耗尽后才进入更重的 `GCNGBB`。
+
+现在 `PC.solve()` 已改成同样的控制方式：普通 pricing 循环中按 `pricingEngines` 顺序逐个调用 engine；某个 engine 找到并成功加入新列后，立即重解当前 RMP，并从第一个 engine 重新开始。由于当前 engine 顺序为 `HeuristicPricingEngine -> PaperDominanceExactPricingEngine/ExactPricingEngine`，这意味着只要启发式还能持续补列，就不会提前调用 exact pricing。若启发式没有新列，才进入 exact；若 exact 加列，也会重解 LP 并回到启发式。这个修改主要改善效率语义和旧 VRP 框架一致性，不改变 RMP、分支、repair slack、cut placeholder 或 exact pricing 内部逻辑。
+
+repair 模式暂时保持原有实现。它已经是启发式可反复补列、exact 兜底的结构，和旧 VRP `FindFeasible` 的主语义较接近；本次不额外调整。
+
+验证：针对 `Basic/Common/HEU/Output/TWETBPC` 子集运行 `javac -encoding UTF-8 -cp D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar;target\classes -d target\twetbpc-compile ...` 通过，仅有历史 deprecated API 提示。随后运行 `HEU.SmallBPCBatchTest`，8 个随机小算例均与 `ArcFlowModel` 目标值一致，tariff 分支诊断例也得到 `BPC=ArcFlow=10.0`、`nodes=3`、`branches=1`、验证可行。

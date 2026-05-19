@@ -1,0 +1,2 @@
+case_id,type,n,m,objective,bound,gap_percent,status,nodes,branches,pricing_rounds,generated_columns,pool_size,valid,bpc_ms,branch_success
+3,concave_tariff,40,5,115.2,115.2,0.0,FINISHED,14,9,78,1915,1915,true,10450,{TariffSegmentBrancher=1, ArcBrancher=8}

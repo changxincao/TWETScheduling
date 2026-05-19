@@ -64,6 +64,16 @@ public class Tree {
 			node.id = ++processedNodes;
 			traceSink.onNodePicked(node, queue.size(), pool.size(), cutPool.size());
 
+			// 2026-05-19: 对齐旧 VRP 的 sudo_cost 预剪枝。root 的 pseudoCost 是占位大数，不能用来剪；
+			// 非根节点若 pseudoCost 已不小于 incumbent，由于队列按 pseudoCost 升序，当前节点和剩余节点
+			// 都不可能改进，继续构建 RMP / pricing 只会浪费时间，极端情况下还会触发标签/函数包络内存膨胀。
+			if (node.depth > 0 && Double.isFinite(incumbentCost)
+					&& Utility.compareGe(node.pseudoCost, incumbentCost - config.branchingTolerance)) {
+				traceSink.onNodeClosed(node, "pruned_by_pseudo_cost", 0);
+				queue.clear();
+				break;
+			}
+
 			LP lp = new LP(data, pool, cutPool);
 			lp.construct(node, node.seedColumnIds);
 			TWETMasterSolution solution = pc.solve(lp);

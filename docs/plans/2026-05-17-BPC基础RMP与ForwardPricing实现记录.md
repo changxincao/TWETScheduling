@@ -519,3 +519,15 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 为了检查真实分支路径，又构造了一个两段凹折扣 tariff 的诊断算例。该算例使 LP relaxation 可以分数使用第二段 tariff，因此会触发 `TariffSegmentBrancher`。测试结果为 ArcFlow=10.0、BPC=10.0、best bound=10.0，处理 3 个节点、触发 1 次分支、pricing 6 轮、validator 可行，结果写入 `test-results/bpc/2026-05-19-small-bpc-branch.csv`。这说明当前 no-cut branch-and-price 的根节点求解、tariff 分支、child 入队/出队、RMP 重建、pricing 修复和最终 incumbent/bound 汇总在该小例子上能够闭合。
 
 当前结论是：不考虑 cut 的情况下，主框架与旧 VRP 的 branch-price 主流程已经基本一致；差异主要是问题特有的分段函数定价、外包 tariff 分支和当前延迟到 child 出队时修复列集合。该差异前面已经确认不改变主流程语义。仍需注意的是，本次诊断只触发了 tariff 分支，尚未专门构造 fractional arc 分支算例；后续如果要验证 arc branching，可继续构造禁用外包或线性外包成本下的分数 arc 根节点例子。
+
+## 2026-05-19：40 任务中等规模 BPC 诊断
+
+本次新增 `HEU.MediumBPCBatchTest`，用于不再依赖 ArcFlow 对拍、而是直接观察 40 任务 BPC 自身的节点、分支、pricing、上下界和最终解验证。测试入口默认只跑一个 case；如果要跑多个 40 任务算例，建议从脚本层面按 case id 启动多个独立 JVM，而不是在同一个 JVM 中连续跑很多 case。原因是 40 任务 pricing 会产生较多临时 label、分段函数和 dominance envelope；连续在同一 JVM 中跑多个 case 时，case 0 后接 case 1 曾出现内存压力，而分开启动 JVM 后三个测试 case 都能正常闭合。
+
+测试结果如下。case 0 是线性外包成本，根节点直接闭合，目标值和下界均为 `90.10`，状态为 `ROOT_PROCESSED`，未触发分支，耗时约 `3.3s`。case 1 也是线性外包成本，但触发了真实 arc 分支，最终目标值和下界均为 `73.34`，处理节点数 `12`，分支调用 `7` 次，pricing `80` 轮，生成列 `2785` 条，耗时约 `16.7s`。case 3 使用两段凹折扣 tariff，触发了 `1` 次 tariff segment 分支和 `8` 次 arc 分支，最终目标值和下界均为 `115.20`，处理节点数 `14`，pricing `78` 轮，生成列 `1915` 条，耗时约 `10.45s`。三个 case 的 `BPCSolutionValidator` 均返回可行，gap 均为 0。
+
+本次测试还暴露了一个和旧 VRP `sudo_cost` 预剪枝对应的缺口。case 1 在修复前曾运行到某个非根节点时，已经有 incumbent `73.34`，而队列弹出的节点 `pseudoCost=73.462895` 已经不可能改进 incumbent。旧 VRP 在这种情况下会用 `sudo_cost` 直接跳过该节点，不再建 RMP 和 pricing；当前 TWET-BPC 当时缺少这层预剪枝，仍继续构建 LP 并进入 pricing，最终在 `PaperDominanceGraph.mergeGEnvelopes` 附近触发内存膨胀。现在 `Tree.solve()` 在非根节点建模前增加 `pseudoCost >= incumbent` 的预剪枝。由于优先队列按 `pseudoCost` 升序，当前节点已经不可能改进时，剩余节点也不会更好，因此可以直接关闭队列并结束搜索。这个修改不改变正确性，只是补上旧 VRP 已有的提前关闭逻辑，并避免明显无意义的 pricing。
+
+同时，`BPCTraceSummary.onNodePicked()` 也补了一个计数修正：被 pseudoCost 预剪枝的节点不会进入 `onMasterSolved()`，但它已经从队列中弹出并被处理，因此应当计入 processed nodes。否则 trace 中的节点数会比求解结果对象少一类预剪枝节点。
+
+本轮有效输出文件为 `test-results/bpc/2026-05-19-medium-bpc-40-case0.csv`、`test-results/bpc/2026-05-19-medium-bpc-40-case1.csv` 和 `test-results/bpc/2026-05-19-medium-bpc-40-case3.csv`。此外，调试慢例时可以通过 `-Dtwet.bpc.verbose=true` 打开 BPC 过程输出；如果需要按“等待 10 分钟后停止”的方式人工观察，verbose 日志中能直接看到最后一次 incumbent、bound、节点和分支状态。

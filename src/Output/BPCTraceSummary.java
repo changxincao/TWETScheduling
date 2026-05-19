@@ -70,6 +70,8 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	@Override
 	public void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
+		// 2026-05-19: pseudoCost 预剪枝节点不会进入 onMasterSolved，也应计入已弹出处理的节点数。
+		processedNodes = Math.max(processedNodes, node.id);
 		queuePeak = Math.max(queuePeak, queueSize);
 		maxPoolSize = Math.max(maxPoolSize, poolSize);
 		maxCutPoolSize = Math.max(maxCutPoolSize, cutPoolSize);

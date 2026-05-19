@@ -1,0 +1,2 @@
+case_id,type,n,m,objective,bound,gap_percent,status,nodes,branches,pricing_rounds,generated_columns,pool_size,valid,bpc_ms,branch_success
+0,linear,40,5,90.1,90.1,0.0,ROOT_PROCESSED,1,0,22,2080,2080,true,3323,{}

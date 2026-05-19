@@ -1,0 +1,2 @@
+case_id,type,n,m,objective,bound,gap_percent,status,nodes,branches,pricing_rounds,generated_columns,pool_size,valid,bpc_ms,branch_success
+1,linear,40,5,73.33999999999997,73.33999999999997,0.0,FINISHED,12,7,80,2785,2785,true,16704,{ArcBrancher=7}

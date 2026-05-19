@@ -531,3 +531,24 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 同时，`BPCTraceSummary.onNodePicked()` 也补了一个计数修正：被 pseudoCost 预剪枝的节点不会进入 `onMasterSolved()`，但它已经从队列中弹出并被处理，因此应当计入 processed nodes。否则 trace 中的节点数会比求解结果对象少一类预剪枝节点。
 
 本轮有效输出文件为 `test-results/bpc/2026-05-19-medium-bpc-40-case0.csv`、`test-results/bpc/2026-05-19-medium-bpc-40-case1.csv` 和 `test-results/bpc/2026-05-19-medium-bpc-40-case3.csv`。此外，调试慢例时可以通过 `-Dtwet.bpc.verbose=true` 打开 BPC 过程输出；如果需要按“等待 10 分钟后停止”的方式人工观察，verbose 日志中能直接看到最后一次 incumbent、bound、节点和分支状态。
+## 2026-05-19：再次复核 TWET-BPC 与旧 VRP 流程是否完全一致
+
+这次重新按旧 VRP 的 `Tree / PC / Branch*.UpdateRouteSet / GCTabu / GCNGBB` 和当前 `TWETBPC` 的 `Tree / PC / LP / Node / PricingEngine` 做了一轮对照。需要修正前面的表述：当前只能说 no-cut branch-and-price 的主流程骨架已经基本对齐旧 VRP，而不是旧 VRP 的所有实现细节、剪枝时机、cut 循环和 DSSR 状态语义都已经一比一复刻。前面说“流程逻辑一样”，更准确的含义是：节点出队、建 restricted master、列生成、整数性检查、分支、child 列修复这些主干顺序已经一致；但还有若干地方属于“问题特化或暂未实现完整旧版能力”。
+
+第一，`sudo_cost/pseudoCost` 出队前预剪枝已经补上。旧 VRP 在 `Tree` 中弹出节点后、建 LP 前会检查 `node.sudo_cost > best_cost + tolerance`，满足时直接跳过该节点。当前 TWET-BPC 之前确实缺这一层，所以 40 任务 case 中出现过已经有 incumbent 后，`pseudoCost` 明显不可能改进的节点仍继续建模和 pricing，造成无意义计算和内存压力。现在 `Tree.solve()` 已经在非根节点建模前加了 `pseudoCost >= incumbent` 的预剪枝。当前实现因为优先队列按 `pseudoCost` 升序，所以一旦队头都不可能改进，直接清空队列结束；旧 VRP 是逐个 `poll` 后 `continue`。这两者在逻辑上等价，当前写法更直接，但不是旧代码逐行同款。
+
+第二，普通 pricing 主循环和旧 VRP 仍有轻微接口差异。旧 VRP 的 `PC` 是启发式 `GCTabu` 和精确 `GCNGBB` 交替推进，启发式找到列后会更新 LP，再进入后续精确定价；当前 TWET-BPC 的 `generateColumns()` 在一轮中先调用启发式和精确 engine，合并新列后统一加入并重解 LP。这个差异通常不影响正确性，因为下一轮会基于新 dual 继续 pricing；但从旧 VRP 的效率语义看，旧版更偏向“只要启发式能持续找到列，就尽量先用启发式”，当前封装可能让精确 engine 在某些轮次更早参与，效率上不完全相同。repair 模式中当前已经更接近旧版：启发式 engine 可以反复找列直到耗尽或 slack 归零，再由 exact engine 兜底。
+
+第三，`UpdateRouteSet / FindFeasible` 的主语义已经对齐，但不是旧版完全同一时机。旧 VRP 在父节点分支时立即给 child 做 `UpdateRouteSet()`，即先用父节点当前列加 child 分支行求一次 LP，不可行才加当前分支行 slack 并调用 `FindFeasible()`；成功后再筛 child 的 route set。当前 TWET-BPC 把这个动作推迟到 child 真正出队后执行。这个时机差异不改变逻辑含义，反而避免为最终不会展开的 child 提前做修复。当前也已经按旧版语义收紧为只对当前新分支行加 repair slack，不再默认给 coverage 行加 slack。
+
+第四，DSSR/ng-set 的 reset 语义当前还没有旧版对应物。旧 VRP 的 `GCNGBB.Reset()` 主要服务于 ng-route/DSSR 状态：如果启发式新加了列，精确定价中上一轮逐步扩充出来的 ng-set 状态可能不再适合作为下一次精确定价的延续，因此需要 reset。当前 TWET-BPC 的 exact pricing 是基础 forward labeling + dominance graph，没有 DSSR/ng-set 状态，所以当前 `reset()` 基本只是接口占位。也就是说，这里不是漏掉一个必须重置的缓存，而是当前 exact pricing 还没有实现旧 VRP 那套 DSSR 状态机制；后续如果加入 ng-route/DSSR，再需要恢复旧版 reset 语义。
+
+第五，cut 部分不是完整 BPC。旧 VRP 的 `PC.Solve()` 是 price-and-cut 外层循环，分离出 cut 后会重新回到 pricing，因为新 cut 的 dual 会改变 reduced cost。当前 TWET-BPC 的 cut 类和 cut pool 仍是占位，`SubsetRowCutGenerator` 不产生真实 cut，`LP.buildModel()` 也没有真实 cut 行和列系数。即使后续接入真实 cut，当前 `PC` 也需要改成“加 cut 后重新 pricing”的外层循环。因此当前更准确的定位是 no-cut branch-and-price 框架，而不是完整 branch-price-and-cut。
+
+第六，分支类型和顺序有问题特化差异。旧 VRP 没有 outsourcing tariff segment 分支；当前 SP2 外包分段模型必须处理 `z_s` 的分数解，因此当前顺序是 tariff segment、machine count、arc。这个和旧 VRP 不同，但属于当前问题新增结构。对于 arc 分支，当前 forbidden arc 行在正式 child 列集合筛完后理论上可能冗余，因为所有含该弧的旧列已被删掉、pricing 也不会再生成该弧；required arc、machine count 和 tariff segment 都是解层面的聚合约束，不能删。这个判断已经写入前面的专题记录。
+
+第七，当前 exact pricing 仍是最基础 forward labeling，不等于旧 VRP 的完整 pricing 栈。旧 VRP 有多种 GC 实现、ng-route/DSSR、启发式 tabu 列生成、cut reduced-cost 快速项等。当前 TWET-BPC 已经有启发式 pricing、paper-style dominance graph 和基础 exact pricing，但还没有 NG/DSSR、双向 labeling、SRI/cut reduced-cost 项。这个不是主流程 bug，而是能力范围差异。
+
+第八，`bestBound` 和节点状态输出已经比前面更接近旧 VRP，但仍要区分“证明用状态”和“输出摘要”。当前已经修正为队列空时 `LB=incumbent`，队列未空时用 `queue.peek().pseudoCost` 作为 open-node 伪下界；同时补了 pseudoCost 预剪枝。这和旧 VRP `sudo_cost` 的安全下界语义一致。区别是当前在 pseudoCost 已经不可能改进时直接清空队列，而旧版逐个跳过；这是实现方式差异，不是逻辑缺失。
+
+当前结论为：如果只讨论 no-cut branch-and-price 主流程，当前 TWET-BPC 已经基本和旧 VRP 的框架一致，并且最近补上了之前确实缺失的 `sudo_cost/pseudoCost` 预剪枝。还不能说“完整 BPC 和旧 VRP 完全一样”，因为 cut 循环、DSSR/ng-set 状态、完整 pricing 栈和部分旧版效率细节还没有实现。后续如果继续追求和旧 VRP 完整版一致，优先顺序应是：先接真实 cut 后的 price-and-cut 外层循环，再做 NG/DSSR exact pricing reset 语义，最后补 cut reduced-cost 项和更强列生成统计。

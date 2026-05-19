@@ -510,3 +510,12 @@ pricing 层也基本符合旧 VRP 的分层：当前先跑 `HeuristicPricingEngi
 关于 `sudo_cost` 剪枝，旧代码的 `PriorityQueue<Node>` 通过 `Node.compareTo()` 按 `sudo_cost` 升序排列。因此一旦弹出的最小 `sudo_cost` 都已经大于 incumbent，后面所有节点的 `sudo_cost` 都不会更小，理论上可以直接结束搜索。旧代码写成逐个 `poll` 后 `continue`，不会再建 LP，但会继续把队列弹空；这是实现上不够直接，但不会多求 LP。当前 TWET-BPC 目前只有节点 LP 求解后的 incumbent 剪枝，尚未做建 LP 前的 `pseudoCost` 预剪枝，所以在这个边界下确实可能多求解本可跳过的节点。后续可以直接在 `Tree.solve()` 的 while 循环开头加：如果 `queue.peek().pseudoCost >= incumbent`，则清空队列或 break。
 
 再进一步修正对旧 VRP 最终下界的判断：旧代码在未求完且队列非空时执行 `lower_bound = min(lower_bound, queue.peek().sudo_cost)`，这个不是明显 bug。循环中的 `lower_bound` 会被当前处理节点的 `lp.solution_cost` 覆盖，而当前节点 LP bound 可能大于队列中尚未处理节点的最小 `sudo_cost`；如果不取 `min`，报告的下界可能超过 open tree 中已知的最小合法下界。这里取 `min` 的作用正是把报告值压回安全下界。它可能仍然偏弱，因为 `sudo_cost` 只是父节点 bound 继承下来的伪下界，但作为未完成搜索时的安全 LB 是合理的。因此当前问题不是“旧 VRP 下界计算错误”，而是它的未完成 gap 可能不够紧。
+## 2026-05-19：BPC 小算例整树求解对拍
+
+本次新增 `HEU.SmallBPCBatchTest`，用于把当前 TWET-BPC 和 `ArcFlowModel` 在小规模随机算例上直接对拍。测试不依赖启发式 seed 的额外 ALNS，关闭 BPC 文件输出和 console 输出，只保留 RMP、pricing、branch tree 和 solution validator 的主流程。测试结果写入 `test-results/bpc/2026-05-19-small-bpc.csv`。
+
+随机部分共 8 个算例，规模为 5、6、7 个任务和 2 台机器，均带 setup time、setup cost、外包成本和线性 tariff。8 个算例中 BPC 目标值、best bound 与 ArcFlow 精确值全部一致，gap 均为 0，`BPCSolutionValidator` 均返回可行。所有随机算例都在根节点闭合，状态为 `ROOT_PROCESSED`，这是当前 `Tree.finalStatus()` 的语义：只处理根节点时即返回该状态；如果此时 bound 与 incumbent 相等且队列已闭合，应视为根节点证明完成，而不是未完成。
+
+为了检查真实分支路径，又构造了一个两段凹折扣 tariff 的诊断算例。该算例使 LP relaxation 可以分数使用第二段 tariff，因此会触发 `TariffSegmentBrancher`。测试结果为 ArcFlow=10.0、BPC=10.0、best bound=10.0，处理 3 个节点、触发 1 次分支、pricing 6 轮、validator 可行，结果写入 `test-results/bpc/2026-05-19-small-bpc-branch.csv`。这说明当前 no-cut branch-and-price 的根节点求解、tariff 分支、child 入队/出队、RMP 重建、pricing 修复和最终 incumbent/bound 汇总在该小例子上能够闭合。
+
+当前结论是：不考虑 cut 的情况下，主框架与旧 VRP 的 branch-price 主流程已经基本一致；差异主要是问题特有的分段函数定价、外包 tariff 分支和当前延迟到 child 出队时修复列集合。该差异前面已经确认不改变主流程语义。仍需注意的是，本次诊断只触发了 tariff 分支，尚未专门构造 fractional arc 分支算例；后续如果要验证 arc branching，可继续构造禁用外包或线性外包成本下的分数 arc 根节点例子。

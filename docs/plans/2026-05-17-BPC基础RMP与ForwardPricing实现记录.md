@@ -635,3 +635,9 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 关于“时间藏在定义域里”的说法，更准确的表述是：TWET pricing 的 label 时间状态不是一个离散整数时刻或单一 earliest-time 标量，而是一整个分段线性 frontier 函数的有效定义域和函数形状。每轮 pricing 的动态 `H_ij` 窗口确实固定，可以预处理，这也是当前已经做的 job/pair 级缓存；但旧 VRP `BuildReach` 那种 `customer + time index -> reachable bitset` 还需要一个离散时间索引。若要在 TWET 中做类似结构，就必须先决定用哪个时间代表一个 label 状态，例如只用 `frontier.head.start` 做一跳过滤，或者离散化所有可能完成时间。前者当前已经在 `buildReachableSet()` 和 `isDirectExtensionTimeFeasible()` 中做了；后者会引入较大的内存和离散化误差/复杂度，暂时不作为基础 forward pricing 的必要部分。
 
 `BuildInRank` 的作用是排序，不是剪枝。旧 VRP 会给每个节点的可能入边或前驱建立一个 rank，通常按距离、时间或某种便宜估计排序。label-setting 或 dominance propagation 需要扫入边/前驱时，可以优先看更可能产生好 label 的前驱，或者用 rank 辅助快速定位候选范围。它不会改变哪些弧可行，也不会影响 reduced cost 公式；收益主要是减少无效扫描和改善搜索顺序。当前 TWET forward pricing 仍是按任务编号扫描候选任务，后续如果 label 数增多，可以考虑给候选 `prevJob -> job` 按静态弧代价、setup time、粗硬窗紧张度或历史 reduced-cost 表现建 rank。
+
+进一步复核旧 VRP 代码后需要补一句：旧 `BuildInRank()` 的具体实现是对每个目标 customer `cid`，把所有前驱 `i` 按 `GetDistance(i,cid)` 排序，然后写入 `m_in_rank[cid][i] = rank`。但在当前参考 `src` 的 Java 文件里没有检索到 `m_in_rank` 的真实使用点，说明它至少在这份代码中更像预留/历史加速结构，而不是主 pricing 流程实际依赖的剪枝条件。因此当前 TWET-BPC 暂时不接它不会影响流程正确性。
+
+关于用 `BuildReach` 思路进一步替代 `isDirectExtensionTimeFeasible()`，可以做，但要区分两种层次。现在已经预处理了每轮 pricing 的动态窗口 `H_ij` 和 job penalty 函数；这相当于把“窗口本身”缓存了。若还想像旧 VRP 一样把“从某个末端任务、某个当前时间还能到哪些任务”也缓存，就需要再引入一个以当前完成时间为索引的 reach 表，例如 `reach[fromJob][t]`，其中包含所有满足 `t + s[from][j] + p[j] <= HEnd[from][j]` 的 `j`。这样 label 扩展时可以用 `frontier.head.start` 映射到 `t`，直接拿 bitset，再扣掉 visited set 和分支禁弧。
+
+这个方向能减少每次 `buildReachableSet()` 里对所有 job 的循环判断，但它不是无代价的。第一，当前时间可能是 double，不一定天然对应整数下标；如果输入时间全是整数，可以用 `ceil(frontier.head.start)` 做安全索引，否则要处理离散化边界。第二，表规模是 `(n+1) * CmaxH` 级别的 bitset，若 `CmaxH` 很大，内存会明显增加。第三，分支禁弧是 node-local 的，若 reach 表只按本轮 dual 预处理，就还需要在运行时额外扣掉当前 node 的 forbidden arcs；若把 node 分支也编入 reach 表，则每个 B&B 节点都要重建一份。因此它是合理的后续性能优化，但当前 pair/job 级动态硬窗缓存已经先解决了重复计算 `H_ij` 和重复 `setDomain` 的主要开销。

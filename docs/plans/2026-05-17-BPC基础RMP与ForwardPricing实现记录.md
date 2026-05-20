@@ -675,3 +675,13 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 本次验证命令主要包括：`HEU.SmallBPCBatchTest` 小规模 BPC/ArcFlow 对拍，8 个随机算例和 tariff 分支诊断例均通过；`TWETBPC.GC.PaperDominanceGraphConsistencyTest` 通过；临时启发式列成本检查程序通过；临时精确定价列成本检查程序通过。测试均使用 CPLEX native path `D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win64`。
 
 剩余能明显提高效率的方向有几类。第一，exact pricing 目前对每条最终生成列调用 `TWETColumnEvaluator` 重算真实成本，这是稳健但偏慢的做法；后续可以让 label 同时携带真实成本函数或用 reduced cost 加 dual 反推，但必须继续做列成本对拍。第二，`PaperDominanceGraph` 当前虽然流程正确，但 eligible node 查找、envelope merge 和 label 删除仍有较多线性扫描，后续可以加 ancestor/descendant 缓存或 bitset 索引。第三，启发式定价每次 tabu 接受 move 后会重建 profile，后续可以做局部增量更新，但这比当前实现更复杂，必须谨慎。第四，`buildReachableSet()` 仍是逐 job 扫描；旧 VRP 的 reach bitset 并不会天然消除扫描，只有配合 set-bit 迭代、visited/forbidden bitset 相减才可能有大收益，所以当前暂不实现，后续先 profiling 再决定。第五，当前还缺少系统化 pricing 统计，包括 label 数、扩展数、动态硬窗剪枝数、dominance 删除数、启发式/精确定价耗时和生成列数量，这个是后续优化前最该补的观测层。
+
+## 2026-05-20：PiecewiseLinearFunction 对反向 labeling 的支持状态
+
+本次检查 `PiecewiseLinearFunction` 中和反向 labeling 相关的接口。当前分段函数层已经有方向化设计：`Direction.FORWARD` 表示前向函数按前缀最小值维护 `[a,T]` 语义，`Direction.BACKWARD` 表示反向函数按后缀最小值维护 `[0,b]` 语义。核心接口包括 `normalize(Direction)`、`normalizeBackward()`、`minimizeSuffixInPlace()`、`mergeMinimum(g, Direction)` 和 `updateDominatedIntervals(g, Direction)`。其中 forward normalize 保留右侧到全局 T 的定义域，不提前删除右侧 big_M；backward normalize 与之对称，保留左侧 0/domainStart，允许删除右侧连续 big_M 尾段，然后调用 suffix-min 闭包。
+
+因此从基础函数操作看，当前代码已经为反向函数准备了必要语义，尤其是后向闭包、后向 normalize、后向 merge/min-dominate 的方向参数都存在。测试侧 `PiecewiseLinearFunctionPropertyTest` 也覆盖了 `normalize(BACKWARD)`、`minimizeSuffixInPlace()`、backward merge/updateDominatedIntervals 的随机对拍。
+
+但当前 BPC exact pricing 仍然是单向 forward labeling。`GC` 初始化 source label 和扩展 label 时都调用 `normalize(Direction.FORWARD)`，`DominanceGraph`、`PaperDominanceGraph` 和 `DominanceNode` 的 envelope merge 也都使用 `Direction.FORWARD`。也就是说，现有 exact pricing 没有真正构造 backward label、没有 backward dominance graph，也没有 forward/backward 双向拼接定价。当前 backward 相关函数主要被 HEU 局部搜索和 `HeuristicPricingEngine` 的 tabu pricing profile 使用：`buildBackwardProfile()` 从序列右端向左递推，使用负向 `shiftX(-s_ij-p_j)`、`add(jobPenalty)` 和 `minimizeSuffixInPlace()`，用于快速评价 remove/add/exchange 这类片段拼接。
+
+所以当前准确结论是：PWLF 层已经具备反向 label 所需的基础操作，但 BPC exact pricing 尚未实现反向 labeling；后续如果要做 bidirectional pricing，需要新增 backward Label/queue/dominance store，定义反向扩展的 reduced-cost dual 处理和 source/sink 边处理，并在拼接时明确 forward `[a,T]` 与 backward `[0,b]` 的公共时间语义。现有 `mergeMinimum(..., BACKWARD)` 和 `normalize(BACKWARD)` 可以复用，但不能直接说明双向 exact pricing 已经完成。

@@ -646,4 +646,10 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 
 如果把这个思想搬到当前 TWET pricing，效率是否会提高取决于实例规模和 `CmaxH`。当前 `buildReachableSet()` 每生成一个 label 都会扫一遍所有 job，并做一次 `earliest + setup + p <= HEnd` 的判断，复杂度大约是 `label 数 * n`。若建 `reach[from][t]`，每个 label 可以直接拿 bitset，理论上能减少扫描和比较，尤其是 label 很多、`n` 较大时会有收益。但预处理要付出 `n * CmaxH * n/wordSize` 左右的时间和 `n * CmaxH` 个 bitset 的内存；如果 `CmaxH` 很大或时间不是整数，收益可能被内存和离散化成本抵消。因此当前判断是：可以作为后续性能强化，但最好先统计 40/60/更大算例中 label 数、`CmaxH` 大小和 `buildReachableSet()` 耗时占比，再决定是否实现。
 
+进一步分析后，这个 reach 优化必须和位集操作一起做才有意义。理想流程不是“拿到 reach 后仍然 `for job=1..n` 逐个判断”，而是 `candidate = reach[from][timeIndex]`，再做 `candidate &= ~visited`，再扣掉当前 node 的显式 forbidden arcs，最后只迭代 candidate 中为 1 的 job。如果仍然全任务扫描，只是把一个时间不等式换成一次 bitset contains，收益会很小。当前 `PackedBitSet` 只支持 `add/contains/intersects/subset/copy`，还没有 `andNot`、原地交集和 set-bit 迭代接口；因此真正要接 `BuildReach` 式优化，需要先补这些底层集合操作，否则 reach 表本身不一定能带来明显加速。
+
+对于小数时间，使用 `floor(frontier.head.start)` 作为索引会得到一个可达集合的超集：例如真实时间是 10.9，按 10 预处理出的 reach 可能包含一些 10 可达但 10.9 已经不可达的 job。因此这时仍需要在候选集合内做一次精确的 `earliest + setup + p <= HEnd` 检查。用 `ceil` 则相反，会变成偏紧的子集，可能错误删掉真实可行扩展，所以不安全。也就是说，如果时间不是严格整数，reach 表最多先做粗过滤，最后的 `isDirectExtensionTimeFeasible()` 仍然不能完全删掉。
+
+分支禁弧也不能完全省掉。静态预处理禁弧确实可以在构造 reach 表时先过滤进去，因为它是全局不变的；但显式 arc branching 产生的 forbidden arcs 是 node-local 的，同一轮 pricing 在不同 B&B 节点下不一样。若不想每个节点重建 reach 表，就必须在使用 reach 表后再扣掉当前 node 的 forbidden arcs。因此 reach 表只能替代一部分时间可达性判断，不能替代分支兼容性检查。
+
 `BuildInRank()` 当前明确不做。参考旧 VRP 代码中虽然构造了 `m_in_rank`，但没有检索到真实调用点；它只是按入边距离给前驱排序，不参与可行性、reduced cost 或 dominance 正确性。后续如果需要排序加速，可以重新设计一个适合 TWET 的 rank，而不是机械搬这个未使用结构。

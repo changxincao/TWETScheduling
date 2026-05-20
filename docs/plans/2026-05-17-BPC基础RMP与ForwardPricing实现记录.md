@@ -688,12 +688,12 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 
 ## 2026-05-20：新增 no-cut 双向 labeling pricing
 
-本次按旧 VRP 双向 GC 的框架新增了一个独立的双向 pricing 层，不替换原来的 forward exact GC。新的入口类是 `BidirectionalPricingEngine`，核心实现是 `GCBidirectional`。在 `TWETBPCContext` 中，当前 pricing engine 顺序为：`HeuristicPricingEngine -> BidirectionalPricingEngine -> PaperDominanceExactPricingEngine/ExactPricingEngine`。因此它的作用是插在启发式之后、原 forward exact 之前做一轮双向搜索；如果双向版没有找到负 reduced-cost 列，后续原 forward exact 仍然继续执行，基础 no-cut 定价证明不依赖这第一版双向实现。
+本次按旧 VRP 双向 GC 的框架新增了一个独立的双向 pricing 层。新的入口类是 `BidirectionalPricingEngine`，核心实现是 `GCBidirectional`。在 `TWETBPCContext` 中，当前 exact pricing 层改为二选一：如果 `enableBidirectionalPricing=true`，启发式定价之后只接双向定价；如果该开关为 `false`，才按 `usePaperDominancePricing` 选择原来的单向 forward exact / paper-dominance exact。也就是说，双向和单向不再串成顺序兜底，而是作为两种 exact pricing 实现互斥切换。
 
 `GCBidirectional` 的流程对应旧 VRP 中的 `FWExtend / BWExtend / Join`。forward label 从虚拟起点 0 开始向后扩展，backward label 从虚拟终点 sink 开始向前扩展；两侧 label 都保存当前真实 job 序列、visited bitset 和最小 processing+setup duration。forward 侧扩展 `last -> job`，backward 侧扩展 `job -> first`，扩展时统一检查当前节点的 `Node.isArcForbidden()`，因此静态预处理禁弧和显式 arc 分支禁弧都会生效。两侧都采用半程 duration 截断，对应旧 VRP 中 `m_time < max_time/2` 的双向资源截断思想，用于控制标签规模。
 
 拼接部分采用旧 VRP 的同中间点 join 思路：forward label 和 backward label 必须在同一个 job 上相遇，且除该公共 job 外不能有重复访问任务。拼接后得到完整序列 `forwardPrefix + backwardSuffixWithoutCommonJob`，再统一调用 `TWETColumnEvaluator.evaluate(sequence)` 重新计算真实列成本，并按当前 LP dual 扣除机器数 dual、job dual 和 arc dual 得到 reduced cost。这样做比直接把 forward/backward 分段函数拼成 reduced-cost 函数更稳健，因为当前 TWET 的动态 `H_ij` 可能依赖前驱，反向函数定义域和 endpoint gap 也更容易写错。第一版双向实现先保证生成列口径和现有列评价器一致，后续再考虑把分段函数拼接评价进一步下沉到 label 里。
 
-为了不把第一版双向实现变成新的正确性风险，`TWETBPCConfig` 新增 `enableBidirectionalPricing` 和 `maxBidirectionalPartialLabels`。前者控制是否启用双向层；后者是工程保护，用于避免 no-cut、无 DSSR/ng-route 的双向标签在无负列节点上爆炸。这个上限不作为“无负列证明”，因为如果双向层没生成列，后面的 forward exact 仍会执行。若双向层生成了列，PC 会像其他 pricing engine 一样加列重解，然后从启发式 engine 重新开始。
+`TWETBPCConfig` 只保留 `enableBidirectionalPricing` 作为双向/单向 exact pricing 的选择开关，不再设置额外的双向 label 数工程保护。双向实现仍会遵守现有 `maxExactPricingColumns`，即单轮最多返回多少条负 reduced-cost 列；但不会因为局部 label 数超过某个新增上限而提前停止。若双向层生成了列，PC 会像其他 pricing engine 一样加列重解，然后从启发式 engine 重新开始。
 
 验证上，本次先针对新增类和接入点运行 `javac -encoding UTF-8` 编译通过；随后运行 `TWETBPC.GC.PaperDominanceGraphConsistencyTest`，200 组、16000 次随机插入通过；再运行 `HEU.SmallBPCBatchTest`，8 个随机小例均与 ArcFlow 目标值一致，额外 tariff 分支诊断例也通过。测试输出 CSV 是运行副产物，已恢复到仓库原状态，未纳入本次提交。

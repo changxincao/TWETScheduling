@@ -35,18 +35,11 @@ public class TWETBPCConfig {
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**
-	 * 2026-05-20: 是否在单向 exact forward pricing 前先运行一轮双向 no-cut labeling。
-	 * 该实现参考旧 VRP 的 FW/BW/Join 流程新建，不替换原 forward exact；双向版没有返回列时，
-	 * 仍会继续调用后面的 forward exact pricing 作为严格兜底。
+	 * 2026-05-20: exact pricing 层是否使用双向 no-cut labeling。
+	 * 为 true 时，启发式定价之后只接双向定价；为 false 时，才按 usePaperDominancePricing
+	 * 选择原来的单向 forward exact 定价。这里是二选一开关，不把双向和单向串起来顺序兜底。
 	 */
 	public boolean enableBidirectionalPricing = true;
-	/**
-	 * 2026-05-20: 双向 labeling 的局部 label 数工程保护。
-	 * 旧 VRP 依赖资源半程截断、ng/DSSR 和 dominance 控制规模；当前第一版 no-cut 双向实现
-	 * 先保守限制局部 label 数，防止在无负列节点上爆炸。该限制不作为无负列证明，因为后面还有
-	 * 原 forward exact pricing 兜底。
-	 */
-	public int maxBidirectionalPartialLabels = 50000;
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

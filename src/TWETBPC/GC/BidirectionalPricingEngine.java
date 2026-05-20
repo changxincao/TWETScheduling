@@ -10,9 +10,9 @@ import TWETBPC.Model.TWETColumn;
 /**
  * 双向 no-cut labeling 定价器入口。
  * <p>
- * 2026-05-20: 该类只新增双向版本，不替换原来的 forward exact pricing。
- * 当前上下文中它会放在启发式定价之后、forward exact 之前；如果双向版没有找到负 reduced-cost
- * 列，后续 forward exact 仍会继续执行，保证基础 no-cut 定价证明不依赖这第一版双向实现。
+ * 2026-05-20: 该类是 exact pricing 层的双向实现。当前通过
+ * {@code TWETBPCConfig.enableBidirectionalPricing} 和原单向 forward exact 二选一，
+ * 不再把双向和单向串成顺序兜底。
  */
 public class BidirectionalPricingEngine implements PricingEngine {
 

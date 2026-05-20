@@ -55,10 +55,11 @@ public class TWETBPCContext {
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		pricingEngines.add(new HeuristicPricingEngine(data, config));
-		// 2026-05-20: 新增双向 no-cut labeling，位置对应旧 VRP 中“启发式后、精确前”的加速层。
-		// 不替换原 forward exact；双向版没有找到列时，后续 exact forward 继续兜底。
-		pricingEngines.add(new BidirectionalPricingEngine(data, config));
-		if (config.usePaperDominancePricing) {
+		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
+		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
+		if (config.enableBidirectionalPricing) {
+			pricingEngines.add(new BidirectionalPricingEngine(data, config));
+		} else if (config.usePaperDominancePricing) {
 			pricingEngines.add(new PaperDominanceExactPricingEngine(data, config));
 		} else {
 			pricingEngines.add(new ExactPricingEngine(data, config));

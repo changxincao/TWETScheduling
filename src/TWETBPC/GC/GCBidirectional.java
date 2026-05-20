@@ -41,8 +41,6 @@ public class GCBidirectional {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
-	private int createdLabels;
-	private boolean stoppedByLabelLimit;
 	private String lastMessage = "Bidirectional pricing not executed";
 
 	public GCBidirectional(Data data, TWETBPCConfig config) {
@@ -65,9 +63,6 @@ public class GCBidirectional {
 			}
 		}
 		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns";
-		if (stoppedByLabelLimit) {
-			lastMessage += " before label-limit fallback";
-		}
 		return generatedColumns;
 	}
 
@@ -90,9 +85,6 @@ public class GCBidirectional {
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
-		createdLabels = 0;
-		stoppedByLabelLimit = false;
-
 		PackedBitSet forwardVisited = new PackedBitSet(data.n + 2);
 		forwardVisited.add(0);
 		FWUL.add(BiLabel.source(forwardVisited));
@@ -103,7 +95,7 @@ public class GCBidirectional {
 	}
 
 	private boolean canContinue() {
-		return generatedColumns.size() < config.maxExactPricingColumns && !stoppedByLabelLimit;
+		return generatedColumns.size() < config.maxExactPricingColumns;
 	}
 
 	private void forwardExtend(LP lp) {
@@ -175,9 +167,6 @@ public class GCBidirectional {
 	}
 
 	private void addForwardLabel(BiLabel label, LP lp) {
-		if (!registerLabel()) {
-			return;
-		}
 		FWTL.get(label.jid).add(label);
 		FWUL.add(label);
 		tryGenerateColumn(label.sequence, lp);
@@ -185,22 +174,10 @@ public class GCBidirectional {
 	}
 
 	private void addBackwardLabel(BiLabel label, LP lp) {
-		if (!registerLabel()) {
-			return;
-		}
 		BWTL.get(label.jid).add(label);
 		BWUL.add(label);
 		tryGenerateColumn(label.sequence, lp);
 		joinBackward(label, lp);
-	}
-
-	private boolean registerLabel() {
-		createdLabels++;
-		if (createdLabels > config.maxBidirectionalPartialLabels) {
-			stoppedByLabelLimit = true;
-			return false;
-		}
-		return true;
 	}
 
 	/**

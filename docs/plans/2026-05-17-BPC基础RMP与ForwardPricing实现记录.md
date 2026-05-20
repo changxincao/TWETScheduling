@@ -578,3 +578,12 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 第五类差异是输出和状态统计的实现方式。当前 `Tree` 在 `pseudoCost >= incumbent` 时直接清空队列结束，旧 VRP 是逐个弹出后跳过；由于队列都按伪下界升序，这两个逻辑等价，但不是逐行同款。当前 `bestBound/finalStatus/trace` 也是按 TWET 输出对象重新封装，不是旧 VRP 的控制台变量原样搬运。
 
 因此当前严格说法是：no-cut B&P 主控流程已经和旧 VRP 基本一致；普通 pricing 循环、pseudoCost 预剪枝、child repair 语义这些之前差异较大的地方已经补齐。仍不同的部分主要是尚未实现 cut 循环、DSSR/ng-route 状态和旧版完整 pricing 栈，以及 SP2 外包分段带来的额外分支族。
+
+## 2026-05-20：基于粗硬时间窗的静态不可行 arc 预处理
+本次补上一个与旧 VRP `feasible_arc` 思路对应的静态预处理层。当前数据已经先用外包基准成本和 setup-cost advantage 得到每个任务的粗硬完成窗口 `[hardWindowStart[j], hardWindowEnd[j]]`，并进一步收紧 `CmaxH`。在这个基础上，可以安全删除一部分相邻弧：如果任务 `i` 即使取最早允许完成时间 `hardWindowStart[i]`，后接任务 `j` 后得到的最早完成时间 `hardWindowStart[i] + s[i][j] + p[j]` 仍然超过 `hardWindowEnd[j]`，那么 `i -> j` 在任何满足粗硬窗的列中都不可能出现。`0 -> j` 同理使用 `s[0][j] + p[j]` 判断。
+
+实现上在 `Data` 中新增 `preprocessedArcForbidden`，并在构造流程和 `setPenaltyFunctions()` 前调用 `preprocessInfeasibleArcsByHardWindows()`。这里同时标记自环、回到 source、sink 出边、source 到 sink 等结构性非法弧。这个矩阵是全局过滤条件，不写入 `Node.arcState`，原因是它不是分支约束；如果把这些弧伪装成 `ARC_FORBIDDEN`，`LP.buildArcBranchConstraints()` 会为所有预处理弧额外建 forbidden-arc 行，导致 RMP 膨胀。
+
+接入点上，`Node` 新增 `isArcForbidden(from,to)`，统一判断“显式 forbidden 分支”与“预处理不可行弧”。exact pricing 的 label 扩展、reachable set 构建、回 sink 检查，tabu heuristic pricing 的候选序列兼容性检查，以及 `ArcBrancher` 的分支候选扫描，都改用这个判断。RMP 建模仍使用 `getArcState()`，只对显式分支状态建约束行。这样后续 pricing 和 branch 都不会再考虑这些静态不可行边，但不会改变主问题的约束结构。
+
+当前预处理只做一跳安全删除，不做多步 reachability、Vidal 式子序列摘要或动态 dual 相关 `H_ij` 收缩；这些仍属于后续性能强化。验证上，本次用 CPLEX classpath 编译 `HEU.SmallBPCBatchTest` 通过，并运行该测试：8 个随机小算例均与 ArcFlow 结果一致，额外 tariff 分支诊断例也通过。

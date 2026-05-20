@@ -96,6 +96,16 @@ public class Node implements Comparable<Node> {
 		return arcState[from][to];
 	}
 
+	/**
+	 * 2026-05-20: 判断一条弧是否不能用于生成列。
+	 * <p>
+	 * 显式分支状态仍保存在 arcState 中；Data 里的预处理不可行弧只作为全局过滤条件，不写入
+	 * arcState，避免 RMP 把这些静态过滤弧误建成分支约束行。
+	 */
+	public boolean isArcForbidden(int from, int to) {
+		return data.isPreprocessedArcForbidden(from, to) || getArcState(from, to) == ARC_FORBIDDEN;
+	}
+
 	public void forbidArc(int from, int to) {
 		arcState[from][to] = ARC_FORBIDDEN;
 	}
@@ -198,15 +208,15 @@ public class Node implements Comparable<Node> {
 		if (seq.isEmpty()) {
 			return true;
 		}
-		if (getArcState(0, seq.get(0).intValue()) == ARC_FORBIDDEN) {
+		if (isArcForbidden(0, seq.get(0).intValue())) {
 			return false;
 		}
 		for (int i = 1; i < seq.size(); i++) {
-			if (getArcState(seq.get(i - 1).intValue(), seq.get(i).intValue()) == ARC_FORBIDDEN) {
+			if (isArcForbidden(seq.get(i - 1).intValue(), seq.get(i).intValue())) {
 				return false;
 			}
 		}
-		return getArcState(seq.get(seq.size() - 1).intValue(), sinkId()) != ARC_FORBIDDEN;
+		return !isArcForbidden(seq.get(seq.size() - 1).intValue(), sinkId());
 	}
 
 	public boolean columnCoversRequiredArc(TWETColumn column, int from, int to) {

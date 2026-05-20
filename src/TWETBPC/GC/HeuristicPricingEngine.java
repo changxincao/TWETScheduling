@@ -235,15 +235,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (sequence.isEmpty()) {
 			return false;
 		}
-		if (node.getArcState(0, sequence.get(0).intValue()) == Node.ARC_FORBIDDEN) {
+		if (node.isArcForbidden(0, sequence.get(0).intValue())) {
 			return false;
 		}
 		for (int i = 1; i < sequence.size(); i++) {
-			if (node.getArcState(sequence.get(i - 1).intValue(), sequence.get(i).intValue()) == Node.ARC_FORBIDDEN) {
+			if (node.isArcForbidden(sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
 				return false;
 			}
 		}
-		return node.getArcState(sequence.get(sequence.size() - 1).intValue(), node.sinkId()) != Node.ARC_FORBIDDEN;
+		return !node.isArcForbidden(sequence.get(sequence.size() - 1).intValue(), node.sinkId());
 	}
 
 	private boolean hasDuplicateJobs(List<Integer> sequence) {

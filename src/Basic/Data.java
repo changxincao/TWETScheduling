@@ -26,6 +26,7 @@ public class Data {
 	public PiecewiseLinearFunction outsourcingCostFunction;// 2026-05-16: 总外包成本函数 G(B(O))，输入为 baseline 总量
 	public double[] maxSetupCostAdvantage;// 预处理粗硬窗使用的 max_i B_ij 上界
 	public double[] hardWindowStart, hardWindowEnd;// 每个任务预处理后的粗 completion 硬窗
+	public boolean[][] preprocessedArcForbidden;// 2026-05-20: 基于粗硬时间窗预处理出的全局不可行弧，供 BPC pricing/branch 跳过
 	public PiecewiseLinearFunction[] penaltyFunction;
 	public double CmaxH = 1e6;// 问题下的全局上界，用于启发式，设置不能过紧，否则可能某些差解搜不到就跳不出去
 	public double CmaxE = 1e6;// 问题下的全局上界，用于精确，越紧越好
@@ -78,6 +79,7 @@ public class Data {
 //        Cmax=7700;
 		setPreprocessedHardWindows();
 		tightenCmaxByPreprocessedHardWindows();
+		preprocessInfeasibleArcsByHardWindows();
 		setPenaltyFunctions();
 		for (int i = 1; i < n + 1; i++) {
 			double minSi = Utility.big_M;
@@ -266,6 +268,7 @@ public class Data {
 	
 
 	public void setPenaltyFunctions() {
+		preprocessInfeasibleArcsByHardWindows();
 		penaltyFunction = new PiecewiseLinearFunction[n + 1];
 		penaltyFunction[0] = new PiecewiseLinearFunction(0, CmaxH);
 		penaltyFunction[0].addSegment(0, CmaxH, 0, 0);
@@ -349,6 +352,82 @@ public class Data {
 			CmaxE = Math.min(CmaxE, CmaxH);
 			hardWindowEnd[0] = CmaxH;
 		}
+	}
+
+	/**
+	 * 2026-05-20: 参考旧 VRP 的 feasible_arc 预处理，利用当前 job 粗硬时间窗提前删除不可能出现的相邻弧。
+	 * <p>
+	 * 这里只做静态安全判断：若 job i 最早允许完成时间 hardWindowStart[i] 后接 j，
+	 * 即使取 i 的最早完成，也已经使 j 的最早完成时间超过 hardWindowEnd[j]，则弧 i->j
+	 * 在任何可行列中都不可能出现。source->j 同理使用 s_0j+p_j；sink 不代表真实加工点，
+	 * 只禁止 sink 出边、自环、回到 source 等结构性非法弧。
+	 * <p>
+	 * 注意这里不把这些弧写入 Node.arcState。它们不是分支约束，只是 pricing/branch 生成候选时的
+	 * 全局过滤条件；否则 RMP 会为每条预处理不可行弧额外建 forbidden-arc 行，反而膨胀模型。
+	 */
+	public void preprocessInfeasibleArcsByHardWindows() {
+		int sink = n + 1;
+		preprocessedArcForbidden = new boolean[n + 2][n + 2];
+		preprocessedArcForbidden[0][sink] = true;
+		for (int i = 0; i <= sink; i++) {
+			preprocessedArcForbidden[i][0] = true;
+			preprocessedArcForbidden[i][i] = true;
+		}
+		for (int to = 0; to <= sink; to++) {
+			preprocessedArcForbidden[sink][to] = true;
+		}
+		for (int j = 1; j <= n; j++) {
+			if (Utility.compareGt(hardWindowStart[j], hardWindowEnd[j])) {
+				for (int from = 0; from <= sink; from++) {
+					preprocessedArcForbidden[from][j] = true;
+				}
+				continue;
+			}
+			double earliestFromDepot = s[0][j] + p[j];
+			if (Utility.compareGt(earliestFromDepot, hardWindowEnd[j]) || Utility.compareGt(earliestFromDepot, CmaxH)) {
+				preprocessedArcForbidden[0][j] = true;
+			}
+		}
+		for (int i = 1; i <= n; i++) {
+			if (Utility.compareGt(hardWindowStart[i], hardWindowEnd[i])) {
+				for (int to = 1; to <= sink; to++) {
+					preprocessedArcForbidden[i][to] = true;
+				}
+				continue;
+			}
+			for (int j = 1; j <= n; j++) {
+				if (i == j) {
+					continue;
+				}
+				double earliestCompletionJ = hardWindowStart[i] + s[i][j] + p[j];
+				if (Utility.compareGt(earliestCompletionJ, hardWindowEnd[j])
+						|| Utility.compareGt(earliestCompletionJ, CmaxH)) {
+					preprocessedArcForbidden[i][j] = true;
+				}
+			}
+		}
+	}
+
+	public boolean isPreprocessedArcForbidden(int from, int to) {
+		if (from < 0 || to < 0 || from >= n + 2 || to >= n + 2) {
+			return true;
+		}
+		return preprocessedArcForbidden != null && preprocessedArcForbidden[from][to];
+	}
+
+	public int countPreprocessedForbiddenArcs() {
+		if (preprocessedArcForbidden == null) {
+			return 0;
+		}
+		int count = 0;
+		for (int i = 0; i < preprocessedArcForbidden.length; i++) {
+			for (int j = 0; j < preprocessedArcForbidden[i].length; j++) {
+				if (preprocessedArcForbidden[i][j]) {
+					count++;
+				}
+			}
+		}
+		return count;
 	}
 
 	/**

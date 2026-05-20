@@ -103,7 +103,7 @@ public class GC {
 		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 			return false;
 		}
-		return node.getArcState(label.jid, nextJob) != Node.ARC_FORBIDDEN;
+		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
 	private Label extend(Label label, int nextJob, LP lp) {
@@ -187,7 +187,7 @@ public class GC {
 			LP lp) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && node.getArcState(fromJob, job) != Node.ARC_FORBIDDEN
+			if (!visited.contains(job) && !node.isArcForbidden(fromJob, job)
 					&& isDirectExtensionTimeFeasible(frontier, fromJob, job, lp)) {
 				reachable.add(job);
 			}
@@ -201,7 +201,7 @@ public class GC {
 		}
 		Node node = lp.getNode();
 		int sink = node.sinkId();
-		if (node.getArcState(label.jid, sink) == Node.ARC_FORBIDDEN) {
+		if (node.isArcForbidden(label.jid, sink)) {
 			return;
 		}
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);

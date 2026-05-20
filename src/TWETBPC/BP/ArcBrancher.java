@@ -52,7 +52,7 @@ public class ArcBrancher implements Brancher {
 
 		for (int from = 0; from <= sink; from++) {
 			for (int to = 1; to <= sink; to++) {
-				if (from == to || base.getArcState(from, to) != Node.ARC_FREE) {
+				if (from == to || base.getArcState(from, to) != Node.ARC_FREE || base.isArcForbidden(from, to)) {
 					continue;
 				}
 				double value = solution.getArcValue(lp.getPool(), from, to, sink);

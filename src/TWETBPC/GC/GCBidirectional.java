@@ -100,6 +100,9 @@ public class GCBidirectional {
 
 	private void forwardExtend(LP lp) {
 		BiLabel label = FWUL.poll();
+		if (label.isDominated) {
+			return;
+		}
 		Node node = lp.getNode();
 		if (!label.sequence.isEmpty()) {
 			tryGenerateColumn(label.sequence, lp);
@@ -118,12 +121,16 @@ public class GCBidirectional {
 				continue;
 			}
 			BiLabel child = label.append(job, nextDuration);
+			child.dominanceReducedCost = dominanceReducedCost(child.sequence, lp);
 			addForwardLabel(child, lp);
 		}
 	}
 
 	private void backwardExtend(LP lp) {
 		BiLabel label = BWUL.poll();
+		if (label.isDominated) {
+			return;
+		}
 		Node node = lp.getNode();
 		if (!label.sequence.isEmpty()) {
 			tryGenerateColumn(label.sequence, lp);
@@ -144,6 +151,7 @@ public class GCBidirectional {
 				continue;
 			}
 			BiLabel child = label.prepend(job, nextInternalDuration, nextSourceDuration);
+			child.dominanceReducedCost = dominanceReducedCost(child.sequence, lp);
 			addBackwardLabel(child, lp);
 		}
 	}
@@ -167,17 +175,56 @@ public class GCBidirectional {
 	}
 
 	private void addForwardLabel(BiLabel label, LP lp) {
-		FWTL.get(label.jid).add(label);
+		if (isDominatedAndInsert(label, FWTL.get(label.jid))) {
+			return;
+		}
 		FWUL.add(label);
 		tryGenerateColumn(label.sequence, lp);
 		joinForward(label, lp);
 	}
 
 	private void addBackwardLabel(BiLabel label, LP lp) {
-		BWTL.get(label.jid).add(label);
+		if (isDominatedAndInsert(label, BWTL.get(label.jid))) {
+			return;
+		}
 		BWUL.add(label);
 		tryGenerateColumn(label.sequence, lp);
 		joinBackward(label, lp);
+	}
+
+	/**
+	 * 2026-05-20: 双向 pricing 的第一层旧 VRP 风格占优。
+	 * <p>
+	 * 旧 VRP 的 FW/BW label 入表前会比较 reduced cost、time/load 和 memory 集合，删除被支配 label。
+	 * 当前 TWET 双向第一版尚未把分段 reduced-cost 函数下沉到 label 层，因此这里先做一个保守的标量占优：
+	 * 同一端点上，若已有 label 的已访问集合不大于新 label，且 duration 与当前 partial reduced-cost bound
+	 * 都不差，则新 label 不需要继续扩展；反过来，新 label 也会删除表中被它支配的旧 label。
+	 * 后续若实现函数型 forward/backward dominance，应替换这里的标量 bound。
+	 */
+	private boolean isDominatedAndInsert(BiLabel label, ArrayList<BiLabel> table) {
+		for (int i = 0; i < table.size(); i++) {
+			BiLabel existing = table.get(i);
+			if (dominates(existing, label)) {
+				label.isDominated = true;
+				return true;
+			}
+			if (dominates(label, existing)) {
+				existing.isDominated = true;
+				table.remove(i);
+				i--;
+			}
+		}
+		table.add(label);
+		return false;
+	}
+
+	private boolean dominates(BiLabel a, BiLabel b) {
+		if (!a.visited.isSubsetOf(b.visited)) {
+			return false;
+		}
+		return !Utility.compareGt(a.sourceDuration, b.sourceDuration)
+				&& !Utility.compareGt(a.internalDuration, b.internalDuration)
+				&& !Utility.compareGt(a.dominanceReducedCost, b.dominanceReducedCost);
 	}
 
 	/**
@@ -188,6 +235,9 @@ public class GCBidirectional {
 			return;
 		}
 		for (BiLabel backward : BWTL.get(forward.jid)) {
+			if (backward.isDominated) {
+				continue;
+			}
 			tryJoin(forward, backward, lp);
 			if (generatedColumns.size() >= config.maxExactPricingColumns) {
 				return;
@@ -203,6 +253,9 @@ public class GCBidirectional {
 			return;
 		}
 		for (BiLabel forward : FWTL.get(backward.jid)) {
+			if (forward.isDominated) {
+				continue;
+			}
 			tryJoin(forward, backward, lp);
 			if (generatedColumns.size() >= config.maxExactPricingColumns) {
 				return;
@@ -276,12 +329,32 @@ public class GCBidirectional {
 		return reducedCost;
 	}
 
+	private double dominanceReducedCost(ArrayList<Integer> sequence, LP lp) {
+		if (sequence.isEmpty()) {
+			return 0.0;
+		}
+		double cost = evaluator.evaluate(sequence);
+		if (Utility.isBigMValue(cost)) {
+			return Utility.big_M;
+		}
+		double reducedCost = cost - lp.getMachineDual();
+		int prev = 0;
+		for (int job : sequence) {
+			reducedCost -= lp.getJobDual(job);
+			reducedCost -= lp.getArcDual(prev, job);
+			prev = job;
+		}
+		return reducedCost;
+	}
+
 	private static final class BiLabel implements Comparable<BiLabel> {
 		final int jid;
 		final PackedBitSet visited;
 		final ArrayList<Integer> sequence;
 		final double sourceDuration;
 		final double internalDuration;
+		double dominanceReducedCost;
+		boolean isDominated;
 
 		private BiLabel(int jid, PackedBitSet visited, ArrayList<Integer> sequence, double sourceDuration,
 				double internalDuration) {
@@ -290,6 +363,8 @@ public class GCBidirectional {
 			this.sequence = sequence;
 			this.sourceDuration = sourceDuration;
 			this.internalDuration = internalDuration;
+			this.dominanceReducedCost = 0.0;
+			this.isDominated = false;
 		}
 
 		static BiLabel source(PackedBitSet visited) {

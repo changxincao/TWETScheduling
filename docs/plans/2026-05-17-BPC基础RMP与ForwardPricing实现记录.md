@@ -711,3 +711,13 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 本次测试使用 3 个随机小算例，任务数分别为 5、6、7，并把 `maxExactPricingColumns` 临时调到 100000，尽量避免单轮返回列上限先截断最优负 reduced-cost 列。结果共比较 7 个 pricing 轮次，单向和双向的最小 reduced cost 全部一致。具体结果写入 `test-results/bpc/2026-05-20-pricing-comparison.csv`。控制台汇总为：`matchedRounds=7/7`，单向平均耗时约 `2.43 ms/round`，双向平均耗时约 `62.29 ms/round`。
 
 这个结果说明，在当前小规模测试范围内，双向 pricing 虽然返回的候选列更多、耗时明显更高，但没有漏掉单向 forward exact 能找到的最优负 reduced-cost 列。耗时更高的主要原因仍是当前双向版本没有 forward/backward dominance，也没有把 reduced-cost 分段函数递推下沉到 label 层，而是在完整序列生成后统一调用 `TWETColumnEvaluator` 重算成本。因此它现在更适合作为正确性对拍版本，而不是效率更强的替代版本。后续如果要让双向真正带来效率收益，应优先补 forward/backward label dominance 和更强的 join 前 reduced-cost 剪枝。
+
+## 2026-05-20：双向 pricing 补充旧 VRP 风格 label 占优
+
+根据后续复核，前一版 `GCBidirectional` 的核心缺口不是外层 `FWExtend/BWExtend/Join` 框架，而是没有像旧 VRP 双向 GC 那样在 `FWTL/BWTL` 入表阶段做 label dominance。旧 VRP 的流程中，label 出队时会跳过已经被标记 dominated 的对象，扩展生成的新 label 入 TL 前会和同一终端点表内 label 比较，若被已有 label 支配则直接丢弃；若新 label 支配旧 label，则把旧 label 标记为 dominated 并从表中移除。这样 UL 中即使残留旧对象，后续出队时也会被跳过，join 阶段也不会再用已经失效的 TL label。
+
+本次在 `GCBidirectional` 中补上了这层生命周期：`forwardExtend()` 和 `backwardExtend()` 出队后先检查 `isDominated`；`addForwardLabel()` 和 `addBackwardLabel()` 不再直接插入 TL，而是调用 `isDominatedAndInsert()`；`joinForward()` 和 `joinBackward()` 只枚举未被 dominated 的反向/正向 label。这个流程和旧 VRP 的表结构语义一致：TL 是每个终端 job 上已经保留的有效 label 集合，UL 是待扩展队列，被后续占优删除的对象不从优先队列中物理删除，而是在出队时跳过。
+
+当前占优条件仍是第一层保守标量版，不是最终的函数级 TWET dominance。具体规则为：两个 label 必须在同一个终端 job 的 TL 表中比较；若 label A 的 visited 集合包含于 label B，且 A 的 source duration、internal duration、当前 partial reduced-cost bound 都不劣于 B，则认为 A 支配 B。这里的 partial reduced-cost bound 通过当前真实部分序列调用 `TWETColumnEvaluator` 得到成本，再扣除机器数 dual、job dual 和已有 arc dual。这个做法能明显减少双向 label 数和 join 候选，但它还没有把 forward/backward 分段 reduced-cost frontier 下沉到 label 层，因此不能等同于 `GC` 中基于 `PiecewiseLinearFunction` envelope 的完整 set dominance。后续如果继续优化双向 pricing，下一步应把 forward label 的 reduced-cost frontier、backward label 的后向 frontier 以及方向化 dominance store 加进来，而不是长期依赖这个标量近似。
+
+验证上，本次重新运行 `HEU.PricingAlgorithmComparisonTest`。3 个随机小算例、7 个 pricing 轮次中，单向 paper-dominance exact 和双向 exact 的最小 reduced cost 仍全部一致；加入占优后，双向平均耗时从上一版约 `62.29 ms/round` 降到约 `7.14 ms/round`，但仍慢于单向的约 `1.71 ms/round`。随后运行 `HEU.SmallBPCBatchTest`，8 个随机小算例与 ArcFlow 目标值全部一致，tariff 分支诊断例也通过；补跑 `PaperDominanceGraphConsistencyTest`，200 组、16000 次插入对拍通过。当前结论为：双向 pricing 的旧 VRP 风格 TL/UL 占优生命周期已经补齐，正确性在现有对拍范围内未发现问题；但函数级双向 dominance 和 label 层 reduced-cost 递推仍是后续效率强化点。

@@ -13,6 +13,7 @@ import TWETBPC.BP.Brancher;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.CUT.NoOpCutGenerator;
 import TWETBPC.CUT.SubsetRowCutGenerator;
+import TWETBPC.GC.BidirectionalPricingEngine;
 import TWETBPC.GC.ExactPricingEngine;
 import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.InitialColumnBuilder;
@@ -54,6 +55,9 @@ public class TWETBPCContext {
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		pricingEngines.add(new HeuristicPricingEngine(data, config));
+		// 2026-05-20: 新增双向 no-cut labeling，位置对应旧 VRP 中“启发式后、精确前”的加速层。
+		// 不替换原 forward exact；双向版没有找到列时，后续 exact forward 继续兜底。
+		pricingEngines.add(new BidirectionalPricingEngine(data, config));
 		if (config.usePaperDominancePricing) {
 			pricingEngines.add(new PaperDominanceExactPricingEngine(data, config));
 		} else {

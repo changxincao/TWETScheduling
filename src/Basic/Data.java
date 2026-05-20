@@ -20,6 +20,7 @@ public class Data {
 	// r先不管，感觉可能某些地方会不兼容
 	public double[][] s;// sequence dependent set up
 	public double[][] setupCostAdvantage;// B_ij：删除 j 后可能获得的 setup-cost advantage，供粗窗和后续 pricing 复用
+	public boolean setupCostTriangleInequalitySatisfied;// 2026-05-20: 若所有 B_ij 都为 0，则 pricing 动态硬窗可退化为 job 级缓存
 	public double[][] setupCost;// sequence dependent setup cost，和 s[i][j] 使用同一条弧 i->j
 	public double min_s[];// 每个任务的最小setup
 	public double[] outsourcingCost;// 每个任务的 baseline outsourcing cost；默认 big_M 表示暂不收缩预处理粗硬窗
@@ -439,6 +440,7 @@ public class Data {
 		if (setupCostAdvantage == null || setupCostAdvantage.length != n + 1) {
 			setupCostAdvantage = new double[n + 1][n + 1];
 		}
+		setupCostTriangleInequalitySatisfied = true;
 		Arrays.fill(maxSetupCostAdvantage, 0);
 		for (int i = 0; i <= n; i++) {
 			Arrays.fill(setupCostAdvantage[i], 0);
@@ -459,6 +461,9 @@ public class Data {
 				setupCostAdvantage[i][j] = best;
 				if (Utility.compareGt(best, maxSetupCostAdvantage[j])) {
 					maxSetupCostAdvantage[j] = best;
+				}
+				if (Utility.compareGt(best, 0.0)) {
+					setupCostTriangleInequalitySatisfied = false;
 				}
 			}
 		}

@@ -603,3 +603,25 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 每轮 RMP 求解后的 dual 确实已经在 pricing 中用于更新“局部硬时间窗”。当前 `GC` 在扩展 `prevJob -> job` 时使用 `hWindowGamma(prevJob, job, lp)`，其中包含 setup-cost advantage、job dual 和外包 baseline，得到动态的 `hWindowStart/hWindowEnd`。随后先用 `isDirectExtensionTimeFeasible()` 做轻量过滤，再对 job penalty 调用 `setDomain(hStart,hEnd,true)`，把窗口外设为 `big_M` 并继续做分段函数运算。因此这部分不是没用，而是已经在每次 pricing 扩展时即时使用。
 
 这类 dual 相关窗口不适合再写成全局禁弧矩阵。原因是它只对“当前 RMP dual 下寻找负 reduced-cost 列”有效，下一轮 LP 重新求解后 dual 会变；并且它通常依赖当前 label frontier 的左端时间，不只是一个固定的 `i -> j` 结构属性。即使某条弧在当前 dual 下不会产生负 reduced-cost 扩展，也不代表这条弧在原问题中不可行，更不代表后续分支不该考虑它。因此分支候选只能跳过静态预处理禁弧和显式 forbidden 分支，不能跳过动态 hard-window 过滤出来的局部禁弧。动态窗口继续留在 pricing 内部做扩展剪枝即可；若后续要加速，可以在单次 pricing 调用内部缓存一份“当前 dual 下的 pair 级快速判断”，但它只能作为本轮 pricing 的局部缓存，不能进入 `Node.arcState`，也不能影响 brancher。
+## 2026-05-20：pricing 中动态硬时间窗的预计算
+
+这次讨论集中在旧 VRP 代码里的 `BuildReach`、`BuildInRank` 和当前 TWET-BPC pricing 里动态硬时间窗的关系。旧 VRP 的 `BuildReach` 本质上是一个按资源状态预先建好的 reachability 索引：给定当前客户、时间或容量状态，可以用 bitset 快速得到仍可能到达的下一批客户，避免 label 扩展时每次都全量扫描并重复做时间窗/容量判断。它不是新的约束，而是把一部分“一定不可达”的判断提前压缩成查询表。当前 TWET 问题没有容量资源，而且时间状态由分段线性函数的定义域承载，不适合直接照搬成旧 VRP 那种离散时间/容量 bitset；但是其中“本轮 pricing 内可复用的可达性判断应缓存”的思想是可以用的。
+
+旧 VRP 的 `BuildInRank` 是另一个加速结构，主要给 label-setting 中的入边或候选前驱排序。直观上，它把“哪些 predecessor 更有可能更早、更短或更有用”预先排好，后续 dominance 或扩展时不必每次重新排序。它同样不改变可行域，也不影响最优性，只影响搜索顺序和效率。当前基础 forward pricing 还没有引入这种入边排序；如果后续做双向 labeling、NG/DSSR 或更强 dominance graph，可以再考虑把类似 rank 结构接进来。
+
+当前 `GC.isDirectExtensionTimeFeasible()` 的作用是轻量过滤。它在真正执行 `shift/add/normalize` 前，先用当前 label frontier 的最左端时间、`setupTime(prevJob,nextJob)` 和 `processingTime(nextJob)` 算出最早可能完成时间。如果这个最早完成时间已经超过本轮 dual 下的 `H_ij` 右端，或者超过 `CmaxH`，那么这条扩展不可能产生有效负 reduced-cost label，直接跳过。这个判断只是一层便宜的前置过滤，不能替代后面的分段函数运算，因为分段函数还要处理完整成本形状、窗口外 big_M、dual、setup cost 和 normalize。
+
+原实现是在每次 label 扩展时重复计算 `hWindowStart/hWindowEnd`，并对 `data.penaltyFunction[j]` 的副本调用 `setDomain(hStart,hEnd,true)`。这在逻辑上是对的，但会重复做同一轮 pricing 中不变的事情。现在改成在 `GC.initialize(lp)` 中一次性预计算 `dynamicHStart[prevJob][job]`、`dynamicHEnd[prevJob][job]` 和 `dynamicJobPenalty[prevJob][job]`。由于一轮 pricing 内 RMP dual 固定，`H_ij` 也固定；即使 `setupCostAdvantage B_ij` 非零，窗口也只依赖 `(prevJob, job)`，所以按弧缓存仍然正确。若 setup cost 满足对应三角关系使 `B_ij=0`，这个缓存自然退化为“每个 job 一份窗口”的情形。
+
+这里没有把动态硬时间窗写成全局禁弧矩阵。原因是这类窗口依赖当前 LP dual，只对本轮 pricing 的 reduced-cost 搜索有效；下一轮 RMP 重解后 dual 会变，窗口也要重新算。它也不应该影响 arc branching 候选，因为某条弧在当前 dual 下不值得扩展，并不等价于它在原问题中结构性不可行。静态粗硬窗预处理仍然放在 `Data.preprocessedArcForbidden` 中；动态 dual 硬窗只保留在 `GC` 的本轮缓存里。
+
+本次修改后的流程为：每轮 pricing 初始化时先构造动态窗口缓存；扩展 `prevJob -> job` 时先查 `dynamicJobPenalty` 是否存在，再用 `dynamicHEnd` 做 `isDirectExtensionTimeFeasible()` 轻量过滤；通过后直接复用缓存好的 job penalty 函数，继续执行 `shift/add/normalize`。这样减少了重复计算和重复构造函数副本，同时不改变 pricing 的可行域语义。
+## 2026-05-20：动态硬时间窗缓存的 job 级与 pair 级切换
+
+在前一版实现中，`GC` 已经把每轮 pricing 的动态硬时间窗从“每次扩展时重复计算”改为“本轮 pricing 初始化时预计算”。本次进一步把缓存分成两种模式。`Data.precomputeSetupCostAdvantages()` 在计算 `B_ij` 时同步记录 `setupCostTriangleInequalitySatisfied`：只要存在某个 `B_ij > 0`，就说明 setup cost 在当前公式意义下不满足三角关系，动态窗口仍然依赖 `prevJob -> job`，必须使用二维 pair 级缓存；只有所有 `B_ij` 都为 0 时，`H_ij` 才不再依赖前驱，可以退化成 job 级一维缓存。
+
+这不是把正确性建立在“数据应该满足三角不等式”的假设上，而是由实际预处理结果决定缓存形式。pair 级模式下，`dynamicJobPenaltyByPair[prevJob][job]` 保存每条弧对应的动态 job 函数副本；job 级模式下，`dynamicJobPenaltyByJob[job]` 只保存每个任务一份函数副本。扩展时统一通过 `getDynamicJobPenalty(prevJob, job)` 和 `getDynamicHEnd(prevJob, job)` 读取，因此后续 label 扩展逻辑不需要关心当前是哪种缓存。
+
+这个优化的收益主要在满足三角关系或 `setupCost` 全 0 的数据上。此时每轮 pricing 不再为每个 `prevJob -> job` 重复构造同一个 `setDomain(hStart,hEnd,true)` 结果，而是每个 job 只构造一次。若数据不满足三角关系，则仍然走二维缓存，行为与前一版 pair 级实现一致，保证 `B_ij` 非零时不会错误地把前驱相关窗口合并掉。
+
+验证上，针对 `Basic/Common/HEU/Output/TWETBPC` 子集运行 `javac -encoding UTF-8` 编译通过；随后运行 `HEU.SmallBPCBatchTest`，8 个随机小算例均与 `ArcFlowModel` 目标值一致，额外 tariff 分支诊断例也通过。

@@ -597,3 +597,9 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 分支里也使用同一个判断，但语义不同。`ArcBrancher` 在扫描 fractional arc 时会跳过已经被预处理禁掉的弧，因为这种弧不可能出现在任何合法列里，对它分支没有意义。如果它仍在 LP 解里出现，说明前面的列兼容性已经出错，而不是应该继续分支。相反，`LP.buildArcBranchConstraints()` 仍然只看 `Node.getArcState()`，也就是只为显式分支状态建 required/forbidden 约束行；预处理弧不会被建成 forbidden-arc 约束，否则 RMP 会因为大量静态禁弧膨胀。
 
 因此，“删掉相应的列”只发生在两个防御性入口：`LP.addColumns()` 和 `LP.construct()`。正常情况下，pricing 已经不会生成含静态禁弧的列，所以 `addColumns()` 只是二次保险。`LP.construct()` 的过滤则是为了处理 root seed、父节点继承 restricted columns 或调试入口中可能残留的历史列。如果这些列包含粗硬时间窗已经证明不可行的弧，继续放入 RMP 会让主问题使用本不该存在的列。这里过滤的是静态预处理禁弧，不过滤当前 child 的分支状态；这样不会破坏旧 VRP 那种“child 首次 LP 先继承父节点列集并带新分支行求可行性”的流程。
+
+关于旧 VRP 预处理是否已经全部搬过来，当前结论是没有，也不应该无差别全搬。旧 VRP `Data` 中主要有几类预处理：`TightTW0/TightTW1` 收紧 depot/customer 时间窗，`TightCapacity` 收紧车辆容量，`BuildReach` 预先构造按时间和容量索引的 forward/backward reach bitset，`BuildInRank` 为 label-setting 的入边排序提供加速。当前 TWET-BPC 已经接入的是与时间窗直接对应的部分：先用外包 baseline 和 setup-cost advantage 得到每个任务的粗 completion 硬窗，再收紧 `CmaxH`，然后基于这个粗窗删除静态不可能的相邻 arc。容量预处理在当前同质并行机模型里没有对应资源；旧 VRP 的 forward/backward time-index reach bitset 和入边 rank 属于更深一层的 label-setting 加速结构，目前基础 forward pricing 尚未实现；NG/DSSR、双向拼接和 cut reduced-cost 也属于后续强化，不是这次静态禁弧预处理的范围。
+
+每轮 RMP 求解后的 dual 确实已经在 pricing 中用于更新“局部硬时间窗”。当前 `GC` 在扩展 `prevJob -> job` 时使用 `hWindowGamma(prevJob, job, lp)`，其中包含 setup-cost advantage、job dual 和外包 baseline，得到动态的 `hWindowStart/hWindowEnd`。随后先用 `isDirectExtensionTimeFeasible()` 做轻量过滤，再对 job penalty 调用 `setDomain(hStart,hEnd,true)`，把窗口外设为 `big_M` 并继续做分段函数运算。因此这部分不是没用，而是已经在每次 pricing 扩展时即时使用。
+
+这类 dual 相关窗口不适合再写成全局禁弧矩阵。原因是它只对“当前 RMP dual 下寻找负 reduced-cost 列”有效，下一轮 LP 重新求解后 dual 会变；并且它通常依赖当前 label frontier 的左端时间，不只是一个固定的 `i -> j` 结构属性。即使某条弧在当前 dual 下不会产生负 reduced-cost 扩展，也不代表这条弧在原问题中不可行，更不代表后续分支不该考虑它。因此分支候选只能跳过静态预处理禁弧和显式 forbidden 分支，不能跳过动态 hard-window 过滤出来的局部禁弧。动态窗口继续留在 pricing 内部做扩展剪枝即可；若后续要加速，可以在单次 pricing 调用内部缓存一份“当前 dual 下的 pair 级快速判断”，但它只能作为本轮 pricing 的局部缓存，不能进入 `Node.arcState`，也不能影响 brancher。

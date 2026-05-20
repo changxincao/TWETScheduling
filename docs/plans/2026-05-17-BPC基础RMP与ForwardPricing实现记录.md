@@ -697,3 +697,17 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 `TWETBPCConfig` 只保留 `enableBidirectionalPricing` 作为双向/单向 exact pricing 的选择开关，不再设置额外的双向 label 数工程保护。双向实现仍会遵守现有 `maxExactPricingColumns`，即单轮最多返回多少条负 reduced-cost 列；但不会因为局部 label 数超过某个新增上限而提前停止。若双向层生成了列，PC 会像其他 pricing engine 一样加列重解，然后从启发式 engine 重新开始。
 
 验证上，本次先针对新增类和接入点运行 `javac -encoding UTF-8` 编译通过；随后运行 `TWETBPC.GC.PaperDominanceGraphConsistencyTest`，200 组、16000 次随机插入通过；再运行 `HEU.SmallBPCBatchTest`，8 个随机小例均与 ArcFlow 目标值一致，额外 tariff 分支诊断例也通过。测试输出 CSV 是运行副产物，已恢复到仓库原状态，未纳入本次提交。
+
+## 2026-05-20：双向 pricing 与旧 VRP 双向 GC 的流程一致性复核
+
+本次重新对照旧 VRP 中 `GCNG/GCBDT` 的双向 labeling 代码，结论是：当前 `GCBidirectional` 在外层骨架上已经接近旧流程，但还不是严格同款实现。已经一致的部分包括：都有 forward 初始化和 backward 初始化；都有 `FWUL/BWUL` 待扩展队列以及按终端 customer/job 存储的 `FWTL/BWTL`；forward 从起点向后扩展，backward 从终点向前扩展；扩展时都检查已访问点、当前节点禁弧和基本时间资源；两侧都用半程资源截断控制搜索规模；join 时也采用“forward label 与 backward label 在同一个中间点相遇，再拼成完整路径/序列”的思路。
+
+当前主要差异有四个。第一，旧 VRP 的 label 本身带 reduced cost、time、load、visit/reach/memory 等资源，并在扩展时增量更新；当前 `GCBidirectional` 的 label 只保存真实序列、visited bitset 和 processing+setup duration，完整序列生成后才调用 `TWETColumnEvaluator` 重新评价列成本并计算 reduced cost。这保证了列成本口径稳定，但效率和旧代码不同。第二，旧 VRP 在 forward/backward 两侧都有 label dominance，入表前会删掉被占优 label；当前双向版暂时没有 dominance，只靠 visited、禁弧和半程截断控制规模。第三，旧 VRP 的 reduced-cost 计算在 label 扩展和 join 时已经参与筛选，当前只在完整序列阶段筛选，因此会多生成和多评价候选。第四，旧 `GCNG` 还包含 ng-memory/DSSR 的 duplicate cycle 更新；当前按用户要求暂不考虑 ng-route、DSSR 和 SRI cut，所以这部分差异是刻意保留的。
+
+因此，当前双向版可以看作“旧 VRP 双向框架的第一版 TWET 适配”，用于和单向 pricing 做对拍测试是可以的；但如果要求“流程完全一致”，后续至少还应补两件事：一是给 forward/backward label 增加安全的 dominance 结构，二是把 TWET 的分段函数 reduced-cost 递推下沉到 label 层，而不是只在完整序列阶段调用 evaluator。下一步做两个 pricing 对拍时，应重点比较同一轮 RMP dual 下两者找到的最小 reduced cost、返回列数量和耗时；如果出现双向最小 reduced cost 明显弱于单向，就优先检查半程截断和同点 join 是否漏掉了某些序列。
+## 2026-05-20：单向与双向 exact pricing 逐轮对拍
+本次新增 `HEU.PricingAlgorithmComparisonTest`，用于在同一个 RMP dual 下同时调用单向 `PaperDominanceExactPricingEngine` 和双向 `BidirectionalPricingEngine`。这个诊断类不接入正式 `PC` 流程，也不改变 `enableBidirectionalPricing` 的生产语义；它只是在每轮 LP 解出 dual 后，分别调用两个 exact pricing，计算各自返回列中的最小 reduced cost、对应序列、返回列数和耗时，然后把两边新列的并集加入当前 RMP，重解后进入下一轮。这样可以避免“两套算法各自推进后 dual 不同”导致的比较不公平。
+
+本次测试使用 3 个随机小算例，任务数分别为 5、6、7，并把 `maxExactPricingColumns` 临时调到 100000，尽量避免单轮返回列上限先截断最优负 reduced-cost 列。结果共比较 7 个 pricing 轮次，单向和双向的最小 reduced cost 全部一致。具体结果写入 `test-results/bpc/2026-05-20-pricing-comparison.csv`。控制台汇总为：`matchedRounds=7/7`，单向平均耗时约 `2.43 ms/round`，双向平均耗时约 `62.29 ms/round`。
+
+这个结果说明，在当前小规模测试范围内，双向 pricing 虽然返回的候选列更多、耗时明显更高，但没有漏掉单向 forward exact 能找到的最优负 reduced-cost 列。耗时更高的主要原因仍是当前双向版本没有 forward/backward dominance，也没有把 reduced-cost 分段函数递推下沉到 label 层，而是在完整序列生成后统一调用 `TWETColumnEvaluator` 重算成本。因此它现在更适合作为正确性对拍版本，而不是效率更强的替代版本。后续如果要让双向真正带来效率收益，应优先补 forward/backward label dominance 和更强的 join 前 reduced-cost 剪枝。

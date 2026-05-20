@@ -625,3 +625,13 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 这个优化的收益主要在满足三角关系或 `setupCost` 全 0 的数据上。此时每轮 pricing 不再为每个 `prevJob -> job` 重复构造同一个 `setDomain(hStart,hEnd,true)` 结果，而是每个 job 只构造一次。若数据不满足三角关系，则仍然走二维缓存，行为与前一版 pair 级实现一致，保证 `B_ij` 非零时不会错误地把前驱相关窗口合并掉。
 
 验证上，针对 `Basic/Common/HEU/Output/TWETBPC` 子集运行 `javac -encoding UTF-8` 编译通过；随后运行 `HEU.SmallBPCBatchTest`，8 个随机小算例均与 `ArcFlowModel` 目标值一致，额外 tariff 分支诊断例也通过。
+
+## 2026-05-20：关于 BuildReach、BuildInRank 和动态硬窗缓存的进一步澄清
+
+这里需要澄清一个容易混淆的点：`setupCostTriangleInequalitySatisfied` 不是每次 pricing 都重新扫描所有 `B_ij` 得到的，而是在 `Data.precomputeSetupCostAdvantages()` 阶段随 `B_ij` 一次性预处理出来的实例级标记。pricing 阶段只读这个标记。若该标记为 `true`，说明所有 `B_ij=0`，动态硬窗只和任务 `j` 的 dual、外包 baseline、惩罚函数参数有关，因此每轮 pricing 只需要给每个任务构造一份 job 级动态窗口和 job penalty 函数。若该标记为 `false`，说明至少有一个 `B_ij>0`，动态硬窗仍依赖前驱 `i`，此时必须按 `prevJob -> job` 构造 pair 级表。也就是说，判断三角关系是输入数据预处理的一部分，不是 pricing 内部的重复开销。
+
+`isDirectExtensionTimeFeasible()` 的用途也要限定清楚。它不是完整可行性判定，而是扩展前的便宜过滤。当前 label 的 `frontier.head.start` 可以看作这条部分序列最早还能落到的完成时间左端；如果再接 `nextJob` 后，`frontier.head.start + s(prev,next) + p(next)` 已经超过本轮动态硬窗右端 `H_ij^R` 或 `CmaxH`，那么后面做 `shiftX`、`setDomain`、`add`、`normalize` 一定也只会得到空函数或 `big_M` 状态，提前跳过可以省掉分段函数操作。它保守地只删“最早都来不及”的扩展，不会替代分段函数求值，也不会剪掉仍可能可行的扩展。
+
+关于“时间藏在定义域里”的说法，更准确的表述是：TWET pricing 的 label 时间状态不是一个离散整数时刻或单一 earliest-time 标量，而是一整个分段线性 frontier 函数的有效定义域和函数形状。每轮 pricing 的动态 `H_ij` 窗口确实固定，可以预处理，这也是当前已经做的 job/pair 级缓存；但旧 VRP `BuildReach` 那种 `customer + time index -> reachable bitset` 还需要一个离散时间索引。若要在 TWET 中做类似结构，就必须先决定用哪个时间代表一个 label 状态，例如只用 `frontier.head.start` 做一跳过滤，或者离散化所有可能完成时间。前者当前已经在 `buildReachableSet()` 和 `isDirectExtensionTimeFeasible()` 中做了；后者会引入较大的内存和离散化误差/复杂度，暂时不作为基础 forward pricing 的必要部分。
+
+`BuildInRank` 的作用是排序，不是剪枝。旧 VRP 会给每个节点的可能入边或前驱建立一个 rank，通常按距离、时间或某种便宜估计排序。label-setting 或 dominance propagation 需要扫入边/前驱时，可以优先看更可能产生好 label 的前驱，或者用 rank 辅助快速定位候选范围。它不会改变哪些弧可行，也不会影响 reduced cost 公式；收益主要是减少无效扫描和改善搜索顺序。当前 TWET forward pricing 仍是按任务编号扫描候选任务，后续如果 label 数增多，可以考虑给候选 `prevJob -> job` 按静态弧代价、setup time、粗硬窗紧张度或历史 reduced-cost 表现建 rank。

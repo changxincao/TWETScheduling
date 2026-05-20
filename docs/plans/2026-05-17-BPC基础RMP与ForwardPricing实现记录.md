@@ -591,3 +591,9 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 复核时进一步确认，静态预处理禁弧不能只在新增列时过滤。`LP.addColumns()` 已经会调用 `Node.isColumnCompatible()`，因此 pricing 新生成的列不会带入静态禁弧；但 `LP.construct()` 会直接接收 root seed 或 child 从父节点继承的 restricted columns。如果历史列池、seed 列或后续调试入口里残留了包含静态禁弧的列，第一次 LP 仍可能把这些已经证明不可行的列放回 RMP。为避免这个接口漏洞，本次在 `Node` 中补充 `isColumnPreprocessingCompatible()`，只检查 `Data.preprocessedArcForbidden`，不检查当前分支状态；`LP.construct()` 只用这个静态检查过滤输入列。这样既能保证全局不可行列不进入 RMP，又不破坏旧 VRP 对齐过的 child 首次 LP 语义，即 child 仍然先继承父节点列集并带新分支行求可行性，而不是提前按分支状态筛列。
 
 临时统计程序对 6、7、8、20、40 个任务的随机算例做了删边统计。结构性禁弧包括自环、回 source、sink 出边、source 到 sink 等固定非法弧；真正由粗硬时间窗删掉的是 job-job 弧。在测试样本中，6 任务例删掉 11/30 条 job-job 弧，7 任务例删掉 11/42 条，8 任务例删掉 20/56 条，20 任务例删掉 112/380 条，两个 40 任务例分别删掉 301/1560 和 423/1560 条。source-job 和 job-sink 在这些样本中没有被粗窗删掉，这符合当前规则：起点到第一个任务通常可通过等待进入窗口，回 sink 也没有单独硬窗。因此这个预处理在当前随机数据上确实能删掉相当一部分内部相邻边，主要收益会体现在 pricing 扩展、reachable set 构建、启发式 pricing 候选序列兼容性检查和 arc branching 候选扫描上。
+
+进一步澄清这个预处理在 BPC 中的使用方式。`Data.preprocessedArcForbidden` 不是分支状态，也不是一个要写进 RMP 的约束集合，而是全局图过滤器。`Node.isArcForbidden(from,to)` 把两类禁弧合并起来判断：一类是 `Data` 预处理得到的静态不可行弧，另一类是当前节点显式 forbidden arc 分支。pricing 扩展 label 时先查这个函数，因此如果 `i -> j` 已经被预处理判定不可能，label 根本不会扩展到 `j`；reachable set 构建也不会把 `j` 放进去；label 回 sink 生成列时也会检查末端弧。启发式 pricing 同样在候选序列兼容性检查里调用这个判断，所以含静态禁弧的候选序列会被直接跳过。
+
+分支里也使用同一个判断，但语义不同。`ArcBrancher` 在扫描 fractional arc 时会跳过已经被预处理禁掉的弧，因为这种弧不可能出现在任何合法列里，对它分支没有意义。如果它仍在 LP 解里出现，说明前面的列兼容性已经出错，而不是应该继续分支。相反，`LP.buildArcBranchConstraints()` 仍然只看 `Node.getArcState()`，也就是只为显式分支状态建 required/forbidden 约束行；预处理弧不会被建成 forbidden-arc 约束，否则 RMP 会因为大量静态禁弧膨胀。
+
+因此，“删掉相应的列”只发生在两个防御性入口：`LP.addColumns()` 和 `LP.construct()`。正常情况下，pricing 已经不会生成含静态禁弧的列，所以 `addColumns()` 只是二次保险。`LP.construct()` 的过滤则是为了处理 root seed、父节点继承 restricted columns 或调试入口中可能残留的历史列。如果这些列包含粗硬时间窗已经证明不可行的弧，继续放入 RMP 会让主问题使用本不该存在的列。这里过滤的是静态预处理禁弧，不过滤当前 child 的分支状态；这样不会破坏旧 VRP 那种“child 首次 LP 先继承父节点列集并带新分支行求可行性”的流程。

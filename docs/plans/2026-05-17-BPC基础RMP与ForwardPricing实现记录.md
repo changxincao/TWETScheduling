@@ -641,3 +641,9 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 关于用 `BuildReach` 思路进一步替代 `isDirectExtensionTimeFeasible()`，可以做，但要区分两种层次。现在已经预处理了每轮 pricing 的动态窗口 `H_ij` 和 job penalty 函数；这相当于把“窗口本身”缓存了。若还想像旧 VRP 一样把“从某个末端任务、某个当前时间还能到哪些任务”也缓存，就需要再引入一个以当前完成时间为索引的 reach 表，例如 `reach[fromJob][t]`，其中包含所有满足 `t + s[from][j] + p[j] <= HEnd[from][j]` 的 `j`。这样 label 扩展时可以用 `frontier.head.start` 映射到 `t`，直接拿 bitset，再扣掉 visited set 和分支禁弧。
 
 这个方向能减少每次 `buildReachableSet()` 里对所有 job 的循环判断，但它不是无代价的。第一，当前时间可能是 double，不一定天然对应整数下标；如果输入时间全是整数，可以用 `ceil(frontier.head.start)` 做安全索引，否则要处理离散化边界。第二，表规模是 `(n+1) * CmaxH` 级别的 bitset，若 `CmaxH` 很大，内存会明显增加。第三，分支禁弧是 node-local 的，若 reach 表只按本轮 dual 预处理，就还需要在运行时额外扣掉当前 node 的 forbidden arcs；若把 node 分支也编入 reach 表，则每个 B&B 节点都要重建一份。因此它是合理的后续性能优化，但当前 pair/job 级动态硬窗缓存已经先解决了重复计算 `H_ij` 和重复 `setDomain` 的主要开销。
+
+旧 VRP 的 `BuildReach()` 不是只给每个 customer 存一个最早到达时间，而是枚举每个 customer 自己时间窗内的所有整数时间 `t`。forward 部分大致是：对当前 customer `cid`，从 `early_time[cid]` 到 `late_time[cid]` 逐个枚举 `t`，再扫所有候选下一个 customer `i`，判断 `t + service(cid) + distance(cid,i) <= late_time[i]`，满足则把 `i` 写入 `m_fl_reach[cid][t] / m_fh_reach[cid][t]` 这个 bitset。也就是说，它预处理的是“当前在 cid 且当前时间为 t 时还能去哪些点”，不是“cid 有哪些固定可达点”。backward reach 同理，只是把时间从反向剩余/偏移的角度编码。
+
+如果把这个思想搬到当前 TWET pricing，效率是否会提高取决于实例规模和 `CmaxH`。当前 `buildReachableSet()` 每生成一个 label 都会扫一遍所有 job，并做一次 `earliest + setup + p <= HEnd` 的判断，复杂度大约是 `label 数 * n`。若建 `reach[from][t]`，每个 label 可以直接拿 bitset，理论上能减少扫描和比较，尤其是 label 很多、`n` 较大时会有收益。但预处理要付出 `n * CmaxH * n/wordSize` 左右的时间和 `n * CmaxH` 个 bitset 的内存；如果 `CmaxH` 很大或时间不是整数，收益可能被内存和离散化成本抵消。因此当前判断是：可以作为后续性能强化，但最好先统计 40/60/更大算例中 label 数、`CmaxH` 大小和 `buildReachableSet()` 耗时占比，再决定是否实现。
+
+`BuildInRank()` 当前明确不做。参考旧 VRP 代码中虽然构造了 `m_in_rank`，但没有检索到真实调用点；它只是按入边距离给前驱排序，不参与可行性、reduced cost 或 dominance 正确性。后续如果需要排序加速，可以重新设计一个适合 TWET 的 rank，而不是机械搬这个未使用结构。

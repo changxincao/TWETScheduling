@@ -2,6 +2,7 @@ package TWETBPC.Util;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.IntConsumer;
 
 /**
  * 基于 long 数组的轻量位集封装。
@@ -58,11 +59,45 @@ public final class PackedBitSet {
 	}
 
 	/**
+	 * 把某个 bit 清零。
+	 * <p>
+	 * 2026-05-20: 后续 pricing 若预处理 reach bitset，需要频繁从候选集合里删掉已访问点或被禁弧点，
+	 * 这里提供底层 O(1) 删除，避免外层退回 List 扫描。
+	 */
+	public void remove(int bit) {
+		int word = bit >>> 6;
+		words[word] &= ~(1L << (bit & 63));
+	}
+
+	/**
 	 * 判断某个 bit 是否存在。
 	 */
 	public boolean contains(int bit) {
 		int word = bit >>> 6;
 		return (words[word] & (1L << (bit & 63))) != 0L;
+	}
+
+	/**
+	 * @return 当前集合是否为空。
+	 */
+	public boolean isEmpty() {
+		for (long word : words) {
+			if (word != 0L) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * @return 当前集合里 1 bit 的数量。
+	 */
+	public int cardinality() {
+		int count = 0;
+		for (long word : words) {
+			count += Long.bitCount(word);
+		}
+		return count;
 	}
 
 	/**
@@ -78,6 +113,113 @@ public final class PackedBitSet {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * 原地取交集。
+	 * <p>
+	 * 主要用于后续把“时间可达集合”和“未访问集合”相交，得到当前 label 真正候选扩展点。
+	 */
+	public void andInPlace(PackedBitSet other) {
+		int len = Math.min(words.length, other.words.length);
+		for (int i = 0; i < len; i++) {
+			words[i] &= other.words[i];
+		}
+		for (int i = len; i < words.length; i++) {
+			words[i] = 0L;
+		}
+	}
+
+	/**
+	 * @return 当前集合与 {@code other} 的交集副本。
+	 */
+	public PackedBitSet and(PackedBitSet other) {
+		PackedBitSet res = copy();
+		res.andInPlace(other);
+		return res;
+	}
+
+	/**
+	 * 原地取并集。
+	 * <p>
+	 * 本类是固定 universe 的轻量 bitset；如果两个集合 word 数不同，只在当前集合已有 word 范围内合并。
+	 */
+	public void orInPlace(PackedBitSet other) {
+		int len = Math.min(words.length, other.words.length);
+		for (int i = 0; i < len; i++) {
+			words[i] |= other.words[i];
+		}
+	}
+
+	/**
+	 * @return 当前集合与 {@code other} 的并集副本。
+	 */
+	public PackedBitSet or(PackedBitSet other) {
+		PackedBitSet res = copy();
+		res.orInPlace(other);
+		return res;
+	}
+
+	/**
+	 * 原地删除 {@code other} 中出现的 bit。
+	 * <p>
+	 * 后续 reach 预处理可用它一次性去掉 visited set 或 forbidden-successor set。
+	 */
+	public void andNotInPlace(PackedBitSet other) {
+		int len = Math.min(words.length, other.words.length);
+		for (int i = 0; i < len; i++) {
+			words[i] &= ~other.words[i];
+		}
+	}
+
+	/**
+	 * @return 当前集合减去 {@code other} 后的副本。
+	 */
+	public PackedBitSet andNot(PackedBitSet other) {
+		PackedBitSet res = copy();
+		res.andNotInPlace(other);
+		return res;
+	}
+
+	/**
+	 * 从指定位置开始寻找下一个置 1 的 bit。
+	 *
+	 * @return 找到的 bit 编号；如果不存在，返回 -1。
+	 */
+	public int nextSetBit(int fromInclusive) {
+		int bit = Math.max(0, fromInclusive);
+		int wordIndex = bit >>> 6;
+		if (wordIndex >= words.length) {
+			return -1;
+		}
+		long word = words[wordIndex] & (-1L << (bit & 63));
+		while (true) {
+			if (word != 0L) {
+				return (wordIndex << 6) + Long.numberOfTrailingZeros(word);
+			}
+			wordIndex++;
+			if (wordIndex >= words.length) {
+				return -1;
+			}
+			word = words[wordIndex];
+		}
+	}
+
+	/**
+	 * 按从小到大的 bit 编号遍历集合元素。
+	 * <p>
+	 * 2026-05-20: 这是给后续高效 pricing 扩展准备的接口。旧 VRP 代码大量依赖 bit-mask 枚举候选点，
+	 * 这里集中封装后，GC 层可以只关心“遍历候选 job”，不再暴露 long word 细节。
+	 */
+	public void forEachSetBit(IntConsumer consumer) {
+		for (int wordIndex = 0; wordIndex < words.length; wordIndex++) {
+			long word = words[wordIndex];
+			while (word != 0L) {
+				int offset = Long.numberOfTrailingZeros(word);
+				consumer.accept((wordIndex << 6) + offset);
+				word &= word - 1;
+			}
+		}
 	}
 
 	/**

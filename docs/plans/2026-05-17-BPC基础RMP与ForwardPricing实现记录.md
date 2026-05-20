@@ -653,3 +653,7 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 分支禁弧也不能完全省掉。静态预处理禁弧确实可以在构造 reach 表时先过滤进去，因为它是全局不变的；但显式 arc branching 产生的 forbidden arcs 是 node-local 的，同一轮 pricing 在不同 B&B 节点下不一样。若不想每个节点重建 reach 表，就必须在使用 reach 表后再扣掉当前 node 的 forbidden arcs。因此 reach 表只能替代一部分时间可达性判断，不能替代分支兼容性检查。
 
 `BuildInRank()` 当前明确不做。参考旧 VRP 代码中虽然构造了 `m_in_rank`，但没有检索到真实调用点；它只是按入边距离给前驱排序，不参与可行性、reduced cost 或 dominance 正确性。后续如果需要排序加速，可以重新设计一个适合 TWET 的 rank，而不是机械搬这个未使用结构。
+
+本次进一步确认旧 VRP 对 forbidden arc 的处理方式。旧代码里的 `BuildReach()` 是数据层/资源层的全局 reach 预处理，不会把每个分支节点上的 forbidden arc 直接揉进 reach 表。真正扩展 label 或做 tabu move 时，仍然会检查当前节点的 `feasible_arc[i][j] == -1`，命中则跳过该弧。也就是说，旧 VRP 的结构是“全局 reach 表先给出资源上可能到达的候选，再用 node-local feasible_arc 过滤分支禁弧”，不是每次分支后重建一套 reach 表。
+
+当前 TWET-BPC 的语义与此保持一致：静态预处理禁弧可以进入全局过滤，因为它不随节点变化；显式 forbidden arc 分支必须保留为 `Node.isArcForbidden(from,to)` 这种运行时检查，因为它是 node-local 的。当前 `Label.visitedSet` 已经使用 `PackedBitSet` 存储，不是普通 `HashSet`。为了给后续 `reach[from][time]` 方案留接口，本次先补齐 `PackedBitSet` 的原地交集、并集、差集、空集/基数判断和 set-bit 迭代。后续如果实现 reach 表，理想流程应是：取出 `candidate = reach[from][timeIndex].copy()`，再 `candidate.andNotInPlace(visited)`，再扣掉当前节点 forbidden 后继集合，最后只遍历 candidate 中置 1 的 job。这样才真正减少全任务扫描；如果仍然 `for job=1..n` 逐个 `contains`，reach 表收益会很有限。

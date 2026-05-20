@@ -219,6 +219,28 @@ public class Node implements Comparable<Node> {
 		return !isArcForbidden(seq.get(seq.size() - 1).intValue(), sinkId());
 	}
 
+	/**
+	 * 2026-05-20: 只检查 Data 预处理得到的全局不可行弧，不检查当前分支状态。
+	 * <p>
+	 * child 第一次 LP 仍要继承父节点列集并带新分支行求一次可行性，这一点不能被提前分支过滤破坏；
+	 * 但粗硬时间窗已经证明不可行的静态弧不属于任何节点，历史列池里如果残留这类列，应在建模入口直接排除。
+	 */
+	public boolean isColumnPreprocessingCompatible(TWETColumn column) {
+		List<Integer> seq = column.getSequence();
+		if (seq.isEmpty()) {
+			return true;
+		}
+		if (data.isPreprocessedArcForbidden(0, seq.get(0).intValue())) {
+			return false;
+		}
+		for (int i = 1; i < seq.size(); i++) {
+			if (data.isPreprocessedArcForbidden(seq.get(i - 1).intValue(), seq.get(i).intValue())) {
+				return false;
+			}
+		}
+		return !data.isPreprocessedArcForbidden(seq.get(seq.size() - 1).intValue(), sinkId());
+	}
+
 	public boolean columnCoversRequiredArc(TWETColumn column, int from, int to) {
 		return column.visitsArc(from, to, sinkId());
 	}

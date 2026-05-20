@@ -587,3 +587,7 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 接入点上，`Node` 新增 `isArcForbidden(from,to)`，统一判断“显式 forbidden 分支”与“预处理不可行弧”。exact pricing 的 label 扩展、reachable set 构建、回 sink 检查，tabu heuristic pricing 的候选序列兼容性检查，以及 `ArcBrancher` 的分支候选扫描，都改用这个判断。RMP 建模仍使用 `getArcState()`，只对显式分支状态建约束行。这样后续 pricing 和 branch 都不会再考虑这些静态不可行边，但不会改变主问题的约束结构。
 
 当前预处理只做一跳安全删除，不做多步 reachability、Vidal 式子序列摘要或动态 dual 相关 `H_ij` 收缩；这些仍属于后续性能强化。验证上，本次用 CPLEX classpath 编译 `HEU.SmallBPCBatchTest` 通过，并运行该测试：8 个随机小算例均与 ArcFlow 结果一致，额外 tariff 分支诊断例也通过。
+
+复核时进一步确认，静态预处理禁弧不能只在新增列时过滤。`LP.addColumns()` 已经会调用 `Node.isColumnCompatible()`，因此 pricing 新生成的列不会带入静态禁弧；但 `LP.construct()` 会直接接收 root seed 或 child 从父节点继承的 restricted columns。如果历史列池、seed 列或后续调试入口里残留了包含静态禁弧的列，第一次 LP 仍可能把这些已经证明不可行的列放回 RMP。为避免这个接口漏洞，本次在 `Node` 中补充 `isColumnPreprocessingCompatible()`，只检查 `Data.preprocessedArcForbidden`，不检查当前分支状态；`LP.construct()` 只用这个静态检查过滤输入列。这样既能保证全局不可行列不进入 RMP，又不破坏旧 VRP 对齐过的 child 首次 LP 语义，即 child 仍然先继承父节点列集并带新分支行求可行性，而不是提前按分支状态筛列。
+
+临时统计程序对 6、7、8、20、40 个任务的随机算例做了删边统计。结构性禁弧包括自环、回 source、sink 出边、source 到 sink 等固定非法弧；真正由粗硬时间窗删掉的是 job-job 弧。在测试样本中，6 任务例删掉 11/30 条 job-job 弧，7 任务例删掉 11/42 条，8 任务例删掉 20/56 条，20 任务例删掉 112/380 条，两个 40 任务例分别删掉 301/1560 和 423/1560 条。source-job 和 job-sink 在这些样本中没有被粗窗删掉，这符合当前规则：起点到第一个任务通常可通过等待进入窗口，回 sink 也没有单独硬窗。因此这个预处理在当前随机数据上确实能删掉相当一部分内部相邻边，主要收益会体现在 pricing 扩展、reachable set 构建、启发式 pricing 候选序列兼容性检查和 arc branching 候选扫描上。

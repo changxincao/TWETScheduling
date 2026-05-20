@@ -76,7 +76,15 @@ public class LP {
 		this.node = node;
 		// 2026-05-18: 子节点首次 LP 先使用父节点传下来的列集，不按新分支状态提前筛列。
 		// 这样可先判断“父节点列集 + 新分支行”是否可行；若可行或 repair 成功，再统一筛成正式列集。
-		this.restrictedColumnIds = new ArrayList<Integer>(columnIds);
+		this.restrictedColumnIds = new ArrayList<Integer>();
+		for (int columnId : columnIds) {
+			// 2026-05-20: child 首次 LP 不按当前分支状态提前筛列，但静态预处理禁弧是全局不可行，
+			// 如果历史列池里残留这类列，继续建模会把已证明不可行的列重新放回 RMP。
+			TWETColumn column = pool.getColumn(columnId);
+			if (node == null || node.isColumnPreprocessingCompatible(column)) {
+				this.restrictedColumnIds.add(Integer.valueOf(columnId));
+			}
+		}
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
 		this.lastSolution = null;
 		clearDuals();

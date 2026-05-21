@@ -790,3 +790,11 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 日志写入 `test-results/bpc/2026-05-21-tanaka-no-outsourcing-zero-setup-bpc-run.log`。10 分钟限时内仍未完成根节点求解。清零 setup 后流程正常进入 root node，初始列仍为 190 条，初始 incumbent 从有 setup time 时的 144453 降到 98071；随后启发式 pricing 多轮补列，列池增长到 9357，最后启发式 pricing 报告找不到新的负 reduced-cost 列。之后进入 exact pricing，但 exact pricing 在 10 分钟内仍未返回，因此没有得到 root LP bound，也没有进入分支。
 
 与非零 setup time 的同一实例对比，清零 setup 并没有让 BPC 明显变快。有 setup time 时启发式 pricing 把列池扩到 8885 后进入 exact pricing 并超时；清零 setup 后列池反而扩到 9357，说明 setup time 不是当前 50 任务 no-outsourcing 卡住的主因。更合理的解释是：无外包条件下所有任务都必须由真实机器列覆盖，RMP dual 会让大量序列 reduced cost 接近 0；启发式负责找负列还能工作，但 exact pricing 要证明没有剩余负列，仍然会遇到标签爆炸。当前瓶颈仍是 exact pricing 的证明能力，而不是 setup time 本身。
+
+## 2026-05-21：Tanaka no-outsourcing 启发式 pricing 迭代与初始列来源
+
+进一步复核日志后确认，前面提到的列池规模不是单轮生成，而是 root 节点内多轮 LP-启发式定价循环累计得到的。zero-setup 运行中 `HeuristicPricing` 被调用 57 次，其中 56 次成功加列，总新增 9167 条，列池从初始 190 增长到 9357；非零 setup 运行中调用 52 次，其中 51 次成功加列，总新增 8695 条，列池增长到 8885。每次启发式定价加列后，`PC.solvePricingLoop()` 会立即把列加入 RMP、重解 LP，然后重新从第一个 pricing engine 开始；因此它符合旧 VRP 风格“启发式能找列就持续用启发式，找不到后才进入 exact pricing”的流程。
+
+启发式找列本身不是单个 O(1) 操作。当前 `HeuristicPricingEngine` 每轮先从 restricted columns 中按 reduced cost 选最多 `heuristicPricingSeedColumns=30` 条 seed；对每条 seed 做 tabu 搜索，最多 `heuristicPricingTabuIterations=50` 轮，每轮枚举 remove/add/exchange 邻域。候选 move 的机器序列成本评价使用 forward/backward 分段函数 profile 和 `merge2Segments/merge3Segments` 做快速拼接，不是每个候选都完整重建整条序列；但每次接受一个 move 后会重建当前 seed route 的 profile。因此单个候选评估基本是拼接级快速评估，整轮启发式仍然可能慢，原因是 seed 数、tabu 轮数和 add/exchange 候选规模会形成大量候选扫描。
+
+初始列来源也已确认：`Tree.solve()` 通过 `InitialColumnBuilder.build()` 构造 root 初始列。它先由 `HeuristicSeedProvider` 生成一个 seed solution；在当前 `TanakaNoOutsourcingBPCTest` 中默认 `config.runALNSForSeed=false`，只有显式传 `-Dtwet.bpc.seedALNS=true` 时才会在初始构造解之后跑 ALNS。初始列只来自最终 seed solution：每台机器的完整序列作为 incumbent/full seed 列，再切一些短子序列列和 singleton 列；ALNS 搜索过程中曾经出现过的中间好解不会自动进入初始列池，除非它最终更新成 `data.configure.bestSolution` 并作为最终 seed 返回。

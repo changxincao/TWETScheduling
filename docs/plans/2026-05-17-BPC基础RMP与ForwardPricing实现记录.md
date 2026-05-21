@@ -725,3 +725,18 @@ repair 模式暂时保持原有实现。它已经是启发式可反复补列、e
 补充说明“函数级双向 dominance”的含义：单向 `GC` 里的 `Label` 保存的是一条 `PiecewiseLinearFunction frontier`，它表示当前 partial sequence 在不同完成时间上的 reduced-cost 函数；`DominanceGraph` 不是只比较一个数，而是把多个 label 的 frontier 做下包络，然后判断这个 envelope 是否在整个定义域上压住新 label 的 frontier。因此这里的占优是“函数对函数”的占优，也就是对所有相关完成时间都不差。当前双向 `GCBidirectional` 的 `BiLabel` 还没有保存 forward/backward 的分段函数 frontier，只保存真实序列、visited 集合、duration，以及一个用当前部分序列重算出来的 `dominanceReducedCost` 标量。所以现在的双向占优只是旧 VRP 式 TL/UL 生命周期加一个标量剪枝，不是最终的函数级 TWET dominance。
 
 如果后续做最终版本，forward `BiLabel` 应携带类似单向 `Label.frontier` 的前向 reduced-cost 函数，扩展 `last -> job` 时通过 `shiftX/add/shiftY/normalize(FORWARD)` 增量更新；backward `BiLabel` 应携带反向 reduced-cost 函数，扩展 `job -> first` 时用反向 shift/add 和 `normalize(BACKWARD)` 或 suffix-min 语义更新。两侧入 `FWTL/BWTL` 时，不再用一个 `dominanceReducedCost` 标量比较，而是按方向使用函数 envelope 做 set dominance。这样才能和单向 paper-dominance 的语义一致，并把更多剪枝提前到 label 层和 join 前。
+## 2026-05-21：旧 VRP GCTabu 启发式找列流程复核
+
+这里讨论的是旧 VRP BPC 代码里 `BPC.GC.GCTabu` 的启发式列生成，不是 `BPC.CUT.Tabu` 里的 cut 分离 tabu。`GCTabu` 的定位是 pricing 的快速层：先用当前 RMP 的对偶信息，从已有 route 中选一些低 reduced cost 的种子列，在这些种子列附近做 tabu 局部搜索，尽量快速找到负 reduced cost route；如果启发式找不到，后面再交给精确定价兜底。
+
+在普通列生成流程中，入口在 `PC.Solve()`。每一轮先调用 `GCTabu.Solve(lp)`，它内部会重复执行“解 LP、取 dual、选种子、tabu 扰动、加负 reduced cost 列”的循环；只要启发式还能加列，就继续用启发式推进。启发式停止后，再调用精确定价 `GCNGBB.Extend(lp)`。如果精确定价又加了列，外层循环重新回到启发式层。也就是说旧代码的策略是：能用快的 tabu 找列就优先持续用 tabu，tabu 找不到以后才用慢的 exact pricing。
+
+`GCTabu.Extend(lp,node)` 先从当前 active route 里按 CPLEX reduced cost 选种子，数量由旧参数 `m_tabu_cg_size` 控制。对每条种子 route，`Initialize()` 会恢复当前任务序列、访问状态、载重、subset-row cut 命中计数 `sr_count`，并按当前 dual 计算该 route 的 reduced cost。随后 `UpdateSegInfo()` 为这条 route 预处理所有连续子段的 `seg_early_start / seg_late_start / seg_duration`，这些数组用于后续 remove/add/exchange move 的 O(1) 或近 O(1) 时间窗可行性判断。
+
+tabu 搜索本体在 `Tabu(lp)`。每一轮枚举三类邻域：删除当前 route 中的一个客户、向 route 某个位置插入一个未使用客户、用未使用客户替换 route 中的一个客户。每个 move 先调用 `IsFeasible()` 检查容量、弧可行性和时间窗拼接可行性；通过后再用增量公式更新 reduced cost。增量项包括距离成本、客户 dual、arc branching dual，以及 active subset-row cut 的 `sr_mu`。如果某个 move 被 tabu 禁止，但能打破当前 best reduced cost，也可以通过 aspiration 接受。执行最优 move 后更新 route、used 集合、载重、`sr_count`、tabu tenure 和子段预处理数组。
+
+当搜索过程中当前 route 的 reduced cost 变成负数，且全局 route pool 里没有重复 route 时，就先放入 `GCTabu` 自己的本地候选池。候选池达到旧参数 `m_gen_size` 后停止当前搜索。所有种子搜索结束后，本地池按 reduced cost 排序，最多向 LP 加入 `addin_size` 条最好的新列。旧代码这里有两层控制：`m_gen_size` 控制本地候选池规模，`addin_size` 控制本轮真正加入 RMP 的列数。
+
+在分支节点可行性修复中，`GCTabu.FindFeasible(lp,node,col_number)` 被 `Branch*.UpdateRouteSet()` 调用。旧流程是先尝试直接解当前 child LP；如果 slack 已经为 0，则说明当前列集可行。否则先用 `GCTabu.FindFeasible()` 找可行修复列；如果启发式加了列，会 reset 精确定价的部分状态，再调用 `GCNGBB.FindFeasible()` 兜底。只要两者还能加列，就继续循环；如果两者都加不出列，或者达到分支修复列数上限，才认为修复失败。这个逻辑和普通 pricing 一样体现了“启发式优先，精确兜底”的结构。
+
+因此旧 VRP 的 tabu 找列框架可以概括为：从当前 RMP 低 reduced cost route 取种子，围绕种子做带 tabu tenure 和 aspiration 的 remove/add/exchange 局部搜索，用预处理子段数组快速判断时间窗可行性，用 dual 增量快速评估 reduced cost，把找到的负 reduced cost route 放入本地池，再按 reduced cost 选最好的若干列加入 RMP。它不是单独求一个完整启发式解，而是服务于列生成的“负 reduced cost 列发现器”。

@@ -33,10 +33,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private final SegmentProfile[] singletonProfileCache;
 
 	public HeuristicPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
+		this.singletonProfileCache = buildSingletonProfileCache();
 	}
 
 	@Override
@@ -102,29 +104,32 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private ArrayList<TWETColumn> collectSeedColumns(final LP lp) {
-		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>();
+		ArrayList<ScoredSeed> scoredSeeds = new ArrayList<ScoredSeed>();
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
 			if (!column.getSequence().isEmpty()) {
-				seeds.add(column);
+				// 2026-05-21: seed 排序前先缓存 reduced cost，避免 comparator 反复扫描同一条列。
+				scoredSeeds.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp)));
 			}
 		}
-		Collections.sort(seeds, new Comparator<TWETColumn>() {
+		Collections.sort(scoredSeeds, new Comparator<ScoredSeed>() {
 			@Override
-			public int compare(TWETColumn a, TWETColumn b) {
-				double rcA = reducedCost(a.getSequence(), a.getCost(), lp);
-				double rcB = reducedCost(b.getSequence(), b.getCost(), lp);
-				if (Utility.compareLt(rcA, rcB)) {
+			public int compare(ScoredSeed a, ScoredSeed b) {
+				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
 					return -1;
 				}
-				if (Utility.compareGt(rcA, rcB)) {
+				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
 					return 1;
 				}
-				return Integer.compare(a.size(), b.size());
+				return Integer.compare(a.column.size(), b.column.size());
 			}
 		});
-		int limit = Math.min(config.heuristicPricingSeedColumns, seeds.size());
-		return new ArrayList<TWETColumn>(seeds.subList(0, limit));
+		int limit = Math.min(config.heuristicPricingSeedColumns, scoredSeeds.size());
+		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(limit);
+		for (int i = 0; i < limit; i++) {
+			seeds.add(scoredSeeds.get(i).column);
+		}
+		return seeds;
 	}
 
 	private void tabuSearch(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,
@@ -469,12 +474,27 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return result;
 	}
 
-	private SegmentProfile singletonProfile(int job) {
+	private SegmentProfile[] buildSingletonProfileCache() {
+		SegmentProfile[] cache = new SegmentProfile[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			cache[job] = buildSingletonProfile(job);
+		}
+		return cache;
+	}
+
+	private SegmentProfile buildSingletonProfile(int job) {
 		PiecewiseLinearFunction forward = data.penaltyFunction[job].copy();
 		forward.minimizePrefixInPlace();
 		PiecewiseLinearFunction backward = data.penaltyFunction[job].copy();
 		backward.minimizeSuffixInPlace();
 		return new SegmentProfile(forward, backward);
+	}
+
+	private SegmentProfile singletonProfile(int job) {
+		SegmentProfile cached = singletonProfileCache[job];
+		// 2026-05-21: 单 job 的 normalize 结果只和 job 自身有关，先缓存模板。
+		// merge 过程可能修改传入函数，因此这里仍返回副本，避免共享缓存被污染。
+		return new SegmentProfile(cached.forward.copy(), cached.backward.copy());
 	}
 
 	private static final class SegmentProfile {
@@ -489,6 +509,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private enum MoveType {
 		REMOVE, ADD, EXCHANGE
+	}
+
+	private static final class ScoredSeed {
+		final TWETColumn column;
+		final double reducedCost;
+
+		ScoredSeed(TWETColumn column, double reducedCost) {
+			this.column = column;
+			this.reducedCost = reducedCost;
+		}
 	}
 
 	private static final class TabuMove {

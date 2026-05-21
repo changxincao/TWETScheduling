@@ -842,3 +842,10 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 为了保持分支兼容性，当前 seed 进入 tabu 前仍完整检查一次 forbidden arc；之后每个局部 move 只检查被新接上的局部弧。这个逻辑成立的前提是当前 seed 已经满足当前节点的 forbidden arc 约束，局部 move 只会改变少数弧，因此检查新弧即可。
 
 验证上，`HeuristicPricingEngine.java` 单独编译通过；`HEU.SmallBPCBatchTest` 8 个随机小算例继续与 ArcFlow 目标值一致，tariff 分支诊断例也通过。
+## 2026-05-21：启发式 pricing 的 singleton profile 与 seed reduced cost 缓存
+
+本轮继续处理 `HeuristicPricingEngine` 中和旧 VRP `GCTabu` 对比后暴露出来的重复计算点。第一处是 add/exchange 候选里反复构造单任务 profile。单个 job 的前向 prefix-min 和反向 suffix-min 结果只依赖 job 自身，与当前 seed route、dual 或 tabu 状态无关，因此可以在 pricing engine 构造时预先缓存模板。实际 merge 时仍然返回 `PiecewiseLinearFunction` 副本，因为 `merge2Segments/merge3Segments` 过程可能修改传入函数对象，直接共享缓存会污染后续候选。
+
+第二处是 seed 排序。此前 `collectSeedColumns()` 在 comparator 中调用 `reducedCost(...)`，排序过程会对同一条 seed 列重复扫描 job dual 和 arc dual。现在改为先为每条非空 restricted column 计算一次 reduced cost，保存为 `ScoredSeed` 后再排序。这个改动不改变 seed 选择规则，只减少排序阶段的重复遍历，和旧 VRP 先得到 route reduced cost 再按值选 seed 的思路一致。
+
+验证上，`HeuristicPricingEngine.java` 单独编译通过；`HEU.SmallBPCBatchTest` 继续通过 8 个随机小算例对拍和 tariff 分支诊断。当前剩余的主要性能差异仍然是 TWET 候选真实成本必须通过分段函数 profile 拼接得到，且接受 move 后需要重建当前 route profile，这部分属于问题结构差异，不是简单缓存能完全消除。

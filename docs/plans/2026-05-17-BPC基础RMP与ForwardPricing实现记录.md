@@ -752,6 +752,8 @@ tabu 搜索本体在 `Tabu(lp)`。每一轮枚举三类邻域：删除当前 rou
 
 本次按“外包成本设为无穷大，只允许真实机器调度”的设定，尝试求解 Tanaka 扩展多机器算例 `data/50-2/wet050_001_2m.dat`。由于当前 `Data` 构造函数里仍有 `debug_set()` 会把规模改成 60/3，直接读取 50 任务 setup 文件会在读到 `SETUP` 行时报错。因此新增了一个只用于诊断的 runner `HEU.TanakaNoOutsourcingBPCTest`，手工读取该文件的 50/2 数据、setup time 矩阵，并把所有 `outsourcingCost[j]` 设为 `Utility.big_M`。这个 runner 不修改生产 `Data.java`，也不复用 base `Data` 构造时留下的旧 best solution。
 
+该实例确实包含非零 setup time。文件中 50 条任务数据之后有 `SETUP` 块，矩阵中大量元素非零，例如 depot 到任务的首行包含 `31, 8, 21, 51, ...`。当前诊断 runner 会把该 `SETUP` 块读入 `data.s`，因此 BPC pricing、列评估和启发式 seed 都是在有 setup time 的条件下运行。这里没有额外 `SETUP_COST` 块，所以 `setupCost` 仍为 0；本次诊断只检验 setup time + no outsourcing。
+
 测试命令使用 CPLEX native 路径：
 
 ```powershell
@@ -768,3 +770,5 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 10 分钟限时内没有完成根节点求解。日志显示当前流程已进入 root node，初始列 190 条，初始 incumbent 为 144453。随后启发式 pricing 多轮生成负 reduced-cost 列，列池从 190 增长到 8885，最后启发式 pricing 报告不再找到负 reduced-cost 列。之后进入 exact pricing，但在 10 分钟限时内 exact pricing 没有返回，因此没有形成 root LP 的最终 bound，也没有进入分支。当前能确认的是：无外包 50 任务实例已经能启动并完成启发式 pricing 阶段，但现有 exact pricing 在该规模上仍然是瓶颈，至少这个算例 10 分钟内没有求解完成。
 
 这个结果说明当前 BPC 框架在小规模对拍上可用，但面对 50 任务、无外包、真实机器调度版本时，根节点 exact pricing 还不够强。后续优先方向不是再调树搜索，而是优化 exact pricing：包括真正高效的双向函数 label dominance、NG/DSSR、pricing 统计、以及对启发式 pricing 生成列数量和 exact pricing 启动条件做更细的性能分析。
+
+随后复查 `seedALNS=true` 的情况，前面“ALNS 可能不出结果”的判断需要修正。短限时 60 秒复现实验显示，ALNS seed 实际上可以完成，并且把初始 incumbent 从不跑 ALNS 时的 144453 降到 47396；日志随后进入 root node，并开始启发式 pricing。因此之前看起来“ALNS 没结果”，主要是因为测试 runner 默认关闭控制台输出，且只有最终完成时才写汇总；如果后续 exact pricing 没返回，就看不到中间状态。实际瓶颈仍然在 root pricing，特别是启发式 pricing 之后的 exact pricing，而不是 ALNS seed 本身。

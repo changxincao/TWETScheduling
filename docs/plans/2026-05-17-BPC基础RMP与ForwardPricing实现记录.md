@@ -740,3 +740,5 @@ tabu 搜索本体在 `Tabu(lp)`。每一轮枚举三类邻域：删除当前 rou
 在分支节点可行性修复中，`GCTabu.FindFeasible(lp,node,col_number)` 被 `Branch*.UpdateRouteSet()` 调用。旧流程是先尝试直接解当前 child LP；如果 slack 已经为 0，则说明当前列集可行。否则先用 `GCTabu.FindFeasible()` 找可行修复列；如果启发式加了列，会 reset 精确定价的部分状态，再调用 `GCNGBB.FindFeasible()` 兜底。只要两者还能加列，就继续循环；如果两者都加不出列，或者达到分支修复列数上限，才认为修复失败。这个逻辑和普通 pricing 一样体现了“启发式优先，精确兜底”的结构。
 
 因此旧 VRP 的 tabu 找列框架可以概括为：从当前 RMP 低 reduced cost route 取种子，围绕种子做带 tabu tenure 和 aspiration 的 remove/add/exchange 局部搜索，用预处理子段数组快速判断时间窗可行性，用 dual 增量快速评估 reduced cost，把找到的负 reduced cost route 放入本地池，再按 reduced cost 选最好的若干列加入 RMP。它不是单独求一个完整启发式解，而是服务于列生成的“负 reduced cost 列发现器”。
+
+补充说明 tabu 的思想本身。旧 VRP 这里不是单纯做最速下降局部搜索，而是允许当前 route 接受某个邻域里的最好 move，即使这个 move 不一定让 reduced cost 立刻变好。为了避免刚移动过的客户马上被反向移动撤销，代码给相关客户设置 `tabu_tenure`，在若干轮内禁止它参与相反或重复性质的 move。这样搜索可以跳出局部最优，在一个种子 route 附近探索更大的邻域。禁忌不是绝对的：如果某个 tabu move 能得到比历史最好 `best_cost` 更低的 reduced cost，就通过 aspiration 规则放行。也就是说，tabu 的核心是“短期记忆防止来回震荡 + aspiration 允许明显更优解破禁 + 接受非改进 move 扩大搜索范围”。

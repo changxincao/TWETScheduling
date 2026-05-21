@@ -27,10 +27,11 @@ public class TanakaNoOutsourcingBPCTest {
 	public static void main(String[] args) throws Exception {
 		String instance = args.length > 0 ? args[0] : "data/50-2/wet050_001_2m.dat";
 		boolean bidirectional = Boolean.getBoolean("twet.bpc.bidirectional");
+		boolean zeroSetup = Boolean.getBoolean("twet.bpc.zeroSetup");
 		int maxNodes = Integer.getInteger("twet.bpc.maxNodes", 20000);
 
 		Utility.resetCurUpperBound(Utility.big_M);
-		Data data = loadTanakaMultiMachine(instance);
+		Data data = loadTanakaMultiMachine(instance, zeroSetup);
 		int disabledOutsourcing = 0;
 		for (int j = 1; j <= data.n; j++) {
 			if (Utility.isBigMValue(data.outsourcingCost[j])) {
@@ -39,7 +40,8 @@ public class TanakaNoOutsourcingBPCTest {
 		}
 
 		TWETBPCConfig config = new TWETBPCConfig();
-		config.instanceName = Path.of(instance).getFileName().toString().replace(".dat", "") + "-no-outsourcing";
+		config.instanceName = Path.of(instance).getFileName().toString().replace(".dat", "") + "-no-outsourcing"
+				+ (zeroSetup ? "-zero-setup" : "");
 		config.enableBPCConsoleOutput = Boolean.getBoolean("twet.bpc.verbose");
 		config.writeBPCResultFiles = false;
 		// 2026-05-21: 这里用手工 loader 绕开 Data.debug_set()，不能复用 base Data 构造时留下的旧 bestSolution。
@@ -64,12 +66,12 @@ public class TanakaNoOutsourcingBPCTest {
 		Files.createDirectories(outputDir);
 		Path csv = outputDir.resolve("2026-05-21-tanaka-no-outsourcing-bpc.csv");
 		String line = String.join(",",
-				"instance", "n", "m", "outsourcing_disabled", "bidirectional", "status", "incumbent", "bound",
+				"instance", "n", "m", "outsourcing_disabled", "zero_setup", "bidirectional", "status", "incumbent", "bound",
 				"gap_percent", "nodes", "branches", "pricing_rounds", "generated_columns", "pool_size", "valid",
 				"millis");
 		String values = String.join(",",
 				instance, String.valueOf(data.n), String.valueOf(data.m), String.valueOf(disabledOutsourcing),
-				String.valueOf(bidirectional), String.valueOf(result.getStatus()), String.valueOf(result.getIncumbentCost()),
+				String.valueOf(zeroSetup), String.valueOf(bidirectional), String.valueOf(result.getStatus()), String.valueOf(result.getIncumbentCost()),
 				String.valueOf(result.getBestBound()), String.valueOf(gapPercent(result.getBestBound(), result.getIncumbentCost())),
 				String.valueOf(result.getProcessedNodes()),
 				String.valueOf(solver.getContext().traceSummary.getBranchCalls()),
@@ -79,8 +81,8 @@ public class TanakaNoOutsourcingBPCTest {
 		Files.writeString(csv, line + System.lineSeparator() + values + System.lineSeparator());
 
 		System.out.printf(
-				"tanakaNoOutsource instance=%s n=%d m=%d disabledOutsourcing=%d bidirectional=%s status=%s incumbent=%.6f bound=%.6f gap%%=%.4f nodes=%d branches=%d pricing=%d cols=%d pool=%d valid=%s ms=%d csv=%s%n",
-				instance, data.n, data.m, disabledOutsourcing, bidirectional, result.getStatus(),
+				"tanakaNoOutsource instance=%s n=%d m=%d disabledOutsourcing=%d zeroSetup=%s bidirectional=%s status=%s incumbent=%.6f bound=%.6f gap%%=%.4f nodes=%d branches=%d pricing=%d cols=%d pool=%d valid=%s ms=%d csv=%s%n",
+				instance, data.n, data.m, disabledOutsourcing, zeroSetup, bidirectional, result.getStatus(),
 				result.getIncumbentCost(), result.getBestBound(), gapPercent(result.getBestBound(), result.getIncumbentCost()),
 				result.getProcessedNodes(), solver.getContext().traceSummary.getBranchCalls(),
 				solver.getContext().traceSummary.getPricingRounds(), result.getGeneratedColumns(),
@@ -94,7 +96,7 @@ public class TanakaNoOutsourcingBPCTest {
 		return Math.max(0.0, (incumbent - bound) / Math.abs(incumbent) * 100.0);
 	}
 
-	private static Data loadTanakaMultiMachine(String instance) throws IOException {
+	private static Data loadTanakaMultiMachine(String instance, boolean zeroSetup) throws IOException {
 		Data data = loadBaseDataQuietly();
 		try (BufferedReader reader = Files.newBufferedReader(Path.of(instance))) {
 			String[] header = split(reader.readLine());
@@ -125,6 +127,13 @@ public class TanakaNoOutsourcingBPCTest {
 						data.s[i][j] = Double.parseDouble(row[j]);
 					}
 				}
+			}
+		}
+		if (zeroSetup) {
+			// 2026-05-21: 诊断开关，只用于比较 setup time 对 BPC pricing 难度的影响。
+			// 清零后仍使用同一批 Tanaka job 数据、同一 no-outsourcing 设置，不改生产数据读取逻辑。
+			for (int i = 0; i <= data.n; i++) {
+				Arrays.fill(data.s[i], 0, data.n + 1, 0);
 			}
 		}
 		data.CmaxH = computeSafeHorizon(data);

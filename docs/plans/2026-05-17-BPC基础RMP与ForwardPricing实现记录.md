@@ -778,3 +778,15 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 这个子问题本身确实会很难。50 个任务、2 台机器、无外包时，pricing 要在一台机器上找任意任务子序列列，判断其 reduced cost 是否为负。本质上接近带序列相关 setup time 和分段时间惩罚函数的 elementary shortest path / scheduling pricing；没有外包时，所有任务都必须靠机器列覆盖，RMP dual 会让大量组合的 reduced cost 接近 0，启发式已经找到很多负列后，exact pricing 需要证明剩下所有组合都不负，难度明显高于“找到一条好列”。当前 exact pricing 虽然有 dominance graph，但仍是单向 forward、完整集合占优，不使用 NG/DSSR，不使用函数级双向拼接 dominance，也没有 SRI/cut reduced-cost 的增量结构；函数 label 的形状还会削弱简单标量占优。由此在 50 规模上根节点 exact pricing 爆标签是合理现象。
 
 所以当前瓶颈判断为：启发式 pricing 负责“找列”已经能工作，但 exact pricing 负责“证明没有列”还不够强。后续如果要让 50 规模 no-outsourcing 跑动，优先级应是补强 exact pricing：真正可用的双向函数 label 与 join、NG/DSSR 放松加动态收缩、pricing 内部标签数/占优数/剪枝数/耗时统计，以及必要时先用较强启发式给出更好的 incumbent 和更紧剪枝。单纯增加树节点上限或调整分支策略对这个 root bottleneck 没直接帮助。
+
+## 2026-05-21：Tanaka no-outsourcing 清零 setup time 对比
+
+为判断前一轮 50 任务 no-outsourcing BPC 卡住是否主要由 setup time 引起，本次在诊断 runner `HEU.TanakaNoOutsourcingBPCTest` 中增加 `-Dtwet.bpc.zeroSetup=true` 开关。该开关只在 runner 手工读完 `SETUP` 块后把 `data.s` 清零，不修改原始数据文件，也不改生产 `Data.java` 读取流程；其目的只是做同一 Tanaka 任务数据、同一 no-outsourcing 设置下的 setup time 影响对比。
+
+测试命令在原 no-outsourcing 命令基础上增加：
+```powershell
+-Dtwet.bpc.zeroSetup=true
+```
+日志写入 `test-results/bpc/2026-05-21-tanaka-no-outsourcing-zero-setup-bpc-run.log`。10 分钟限时内仍未完成根节点求解。清零 setup 后流程正常进入 root node，初始列仍为 190 条，初始 incumbent 从有 setup time 时的 144453 降到 98071；随后启发式 pricing 多轮补列，列池增长到 9357，最后启发式 pricing 报告找不到新的负 reduced-cost 列。之后进入 exact pricing，但 exact pricing 在 10 分钟内仍未返回，因此没有得到 root LP bound，也没有进入分支。
+
+与非零 setup time 的同一实例对比，清零 setup 并没有让 BPC 明显变快。有 setup time 时启发式 pricing 把列池扩到 8885 后进入 exact pricing 并超时；清零 setup 后列池反而扩到 9357，说明 setup time 不是当前 50 任务 no-outsourcing 卡住的主因。更合理的解释是：无外包条件下所有任务都必须由真实机器列覆盖，RMP dual 会让大量序列 reduced cost 接近 0；启发式负责找负列还能工作，但 exact pricing 要证明没有剩余负列，仍然会遇到标签爆炸。当前瓶颈仍是 exact pricing 的证明能力，而不是 setup time 本身。

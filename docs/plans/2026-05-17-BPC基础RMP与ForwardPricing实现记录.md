@@ -772,3 +772,9 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 这个结果说明当前 BPC 框架在小规模对拍上可用，但面对 50 任务、无外包、真实机器调度版本时，根节点 exact pricing 还不够强。后续优先方向不是再调树搜索，而是优化 exact pricing：包括真正高效的双向函数 label dominance、NG/DSSR、pricing 统计、以及对启发式 pricing 生成列数量和 exact pricing 启动条件做更细的性能分析。
 
 随后复查 `seedALNS=true` 的情况，前面“ALNS 可能不出结果”的判断需要修正。短限时 60 秒复现实验显示，ALNS seed 实际上可以完成，并且把初始 incumbent 从不跑 ALNS 时的 144453 降到 47396；日志随后进入 root node，并开始启发式 pricing。因此之前看起来“ALNS 没结果”，主要是因为测试 runner 默认关闭控制台输出，且只有最终完成时才写汇总；如果后续 exact pricing 没返回，就看不到中间状态。实际瓶颈仍然在 root pricing，特别是启发式 pricing 之后的 exact pricing，而不是 ALNS seed 本身。
+
+进一步分析 root pricing 卡住的原因：它不是 LP 求解困难，也不是 ALNS seed 困难，而是 exact pricing 在证明“没有新的负 reduced-cost 列”时要做接近穷尽的 forward labeling。当前 `PC.solvePricingLoop()` 的流程是旧 VRP 风格：只要启发式 pricing 还能补列，就反复启发式补列并重解 LP；当启发式报告没有负 reduced-cost 列后，才调用 exact pricing 兜底。日志中启发式 pricing 已经把列池扩到 8885，最后返回 “found no negative reduced-cost column”，因此后续卡住的位置就是 exact forward labeling 的兜底证明。
+
+这个子问题本身确实会很难。50 个任务、2 台机器、无外包时，pricing 要在一台机器上找任意任务子序列列，判断其 reduced cost 是否为负。本质上接近带序列相关 setup time 和分段时间惩罚函数的 elementary shortest path / scheduling pricing；没有外包时，所有任务都必须靠机器列覆盖，RMP dual 会让大量组合的 reduced cost 接近 0，启发式已经找到很多负列后，exact pricing 需要证明剩下所有组合都不负，难度明显高于“找到一条好列”。当前 exact pricing 虽然有 dominance graph，但仍是单向 forward、完整集合占优，不使用 NG/DSSR，不使用函数级双向拼接 dominance，也没有 SRI/cut reduced-cost 的增量结构；函数 label 的形状还会削弱简单标量占优。由此在 50 规模上根节点 exact pricing 爆标签是合理现象。
+
+所以当前瓶颈判断为：启发式 pricing 负责“找列”已经能工作，但 exact pricing 负责“证明没有列”还不够强。后续如果要让 50 规模 no-outsourcing 跑动，优先级应是补强 exact pricing：真正可用的双向函数 label 与 join、NG/DSSR 放松加动态收缩、pricing 内部标签数/占优数/剪枝数/耗时统计，以及必要时先用较强启发式给出更好的 incumbent 和更紧剪枝。单纯增加树节点上限或调整分支策略对这个 root bottleneck 没直接帮助。

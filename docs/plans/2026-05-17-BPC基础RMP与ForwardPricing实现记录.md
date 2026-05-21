@@ -867,3 +867,11 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 第二，接受 tabu move 后当前会调用 `rebuild()`，从头重建整条 route 的 forward/backward profile。这一点确实还有理论优化空间：remove/add/exchange 只改变某个位置附近，forward 在该位置之后受影响，backward 在该位置之前受影响，因此可以只重建受影响前缀或后缀，甚至在同时维护局部 dirty 区间的情况下减少一半以上的重建量。但这会让状态维护明显复杂化，尤其是 add/remove 会改变数组下标，exchange 虽然长度不变但两侧 profile 仍分别受影响。旧 VRP `GCTabu` 接受 move 后也会调用 `UpdateSegInfo()` 重建整条 route 的段摘要，因此当前“接受 move 后重建 profile”的框架并不比旧 VRP 更落后，只是 TWET 的 profile 构造更重。
 
 当前建议是：短期不再动 tabu 框架。若后续 profiling 显示启发式 pricing 仍是瓶颈，优先做 merge 的专用 shifted-sum-min 扫描器，因为它能同时服务启发式、局部搜索和后续 pricing；profile 局部重建排第二，除非确认 route 很长且接受 move 次数很多，否则它会显著增加代码复杂度。
+
+## 2026-05-21：ALNS 历史 best 解作为 root 初始列的可行性
+
+后续可以考虑把 ALNS/VND 过程中出现过的历史全局 best 解也转成 root 初始列。当前框架很适合接这个功能，因为 `EngineALNS` 和 `EngineVND` 更新全局最优时都会调用 `data.configure.updateBestSolution(solution)`，这个方法天然是记录历史 best 解的统一入口。只要在 `Configure` 里额外维护一个 `bestSolutionHistory`，每次更新 best solution 时复制一份加入历史池，就能捕获初始解、ALNS 每次刷新后的 best 解，以及 VND commit 中刷新出来的 best 解。
+
+初始列构造侧也比较简单。现在 `InitialColumnBuilder.build()` 只调用 `seedProvider.getOrBuildSeed()`，然后把最终 seed solution 中每台机器的完整序列加入列池。若启用历史 best 解池，可以保持最终 seed 仍作为 incumbent，仅把历史 best 解中的机器序列额外加入 `initialColumnIds`。列池 `Pool.addColumn()` 已经用 `SequenceSignature` 做序列级判重，`InitialColumnBuilder` 也用 `LinkedHashSet` 去重，因此“历史解中重复出现的同一机器序列”不会重复进入 root RMP。外包任务不需要额外转成列，因为 RMP 已经有外包变量；历史解只贡献其中真实机器上的完整序列列。
+
+这个功能对可行性没有风险：最终 seed 的完整机器列仍然作为 incumbent column set 返回，历史 best 只是增加 root 初始列。它和前面删除短子序列、singleton 的逻辑不冲突，因为这里加入的是 ALNS 实际到达过的完整机器序列，而不是人为切出来的组合片段。建议加一个配置开关，例如 `useBestSolutionHistoryForInitialColumns`，默认可以先打开或先用于诊断；如果后续发现 root LP 初始列过多影响速度，再限制历史池大小或只保留最近/最优若干个历史 best 解。

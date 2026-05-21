@@ -814,3 +814,13 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 当前 TWET 的 `InitialColumnBuilder` 与旧 VRP root 逻辑不完全相同：它除了加入最终 seed solution 中每台机器的完整序列，还额外切长度不超过 `maxSeedSubsequenceLength=4` 的连续短子序列，并补 singleton。`maxInitialColumns=2000` 也是当前 TWET 版本新增的 root 初始列上限，不是旧 VRP root 的同名参数。这样做的初衷是让 root RMP 一开始有更多组合弹性，但从严格模仿旧 VRP root 的角度看，这确实是额外策略，不是必须项；如果要做旧 VRP 风格对照，可以关闭 `generateSubsequenceColumns` 和 `generateSingletonColumns`，只保留最终 seed 的完整机器序列作为 root 初始列。
 
 以 Tanaka 50/2 no-outsourcing 诊断为例，当前 root 初始列为 190 条；如果按旧 VRP root 风格只放最终 seed 中每台机器的完整序列，则只有 2 条机器列。当前 190 条相当于比纯完整 seed 列多了 188 条，主要来自短连续子序列和 singleton。它们不影响可行性，因为完整 seed 列本身已经给了一个可行整数解；它们只影响 root LP 起步松弛和后续 dual/pricing 轨迹。
+
+## 2026-05-21：root 初始列回退到旧 VRP 风格
+
+根据进一步讨论，当前 TWET-BPC 的 root 初始列默认回退到旧 VRP 风格：只使用最终 seed solution 中每台机器的完整序列作为 root 初始列。旧 VRP 的 root 入口是 `Tree.Solve()` 调用 `GenRoute.ConstructSolution()`，随后 `new Node(data, gr.solution)`，因此 root 初始列就是启发式解中的 routes；它不会额外切短子 route，也不会补 singleton。`m_initial_col_number=1000` 是 child `UpdateRouteSet()` 的筛列上限，不是 root 初始列参数。
+
+本次将 `TWETBPCConfig.generateSubsequenceColumns` 和 `generateSingletonColumns` 默认改为 `false`，保留开关仅用于后续诊断对比。`InitialColumnBuilder` 中补充注释，说明短子序列和 singleton 不是旧 VRP root 初始列逻辑。这样 Tanaka 50/2 no-outsourcing 诊断的 root 初始列从原来的 190 条降为 2 条，即最终 seed 解中的两台机器完整序列；短跑日志确认 `Initial columns=2, incumbent columns=2`。
+
+同时明确启发式 pricing move 的当前实现边界：候选机器成本使用 forward/backward profile 和 `merge2Segments/merge3Segments` 快速拼接，但 `evaluateRemove/evaluateAdd/evaluateExchange` 仍会为每个候选构造新的 `ArrayList`，并在 reduced-cost 计算中遍历候选序列扣 job dual 和 arc dual。因此当前不是“每个 move 完全不构造新序列、严格 O(1)”的实现；若要进一步加速，需要单独把候选序列构造延迟到最终 best move，或者维护 dual 前缀/弧增量缓存。
+
+验证上，`javac` 编译 `TWETBPCConfig`、`InitialColumnBuilder` 和 `SmallBPCBatchTest` 通过；`HEU.SmallBPCBatchTest` 8 个随机小例与 ArcFlow 全部一致，tariff 分支诊断例也通过。Tanaka 短跑只用于确认 root 初始列数量，未作为完整求解测试。

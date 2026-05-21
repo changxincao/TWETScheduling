@@ -78,6 +78,8 @@ public class InitialColumnBuilder {
 			initialColumnIds.add(Integer.valueOf(id));
 			incumbentColumnIds.add(Integer.valueOf(id));
 
+			// 2026-05-21: 旧 VRP 的 root 初始列只来自 GenRoute 的完整 route set。
+			// 短子序列只是此前为 TWET 启动阶段额外加的补列策略，默认关闭，仅保留为诊断开关。
 			if (!config.generateSubsequenceColumns) {
 				continue;
 			}
@@ -93,6 +95,7 @@ public class InitialColumnBuilder {
 			}
 		}
 
+		// 2026-05-21: singleton 不是旧 VRP root 初始列逻辑，默认关闭。
 		if (config.generateSingletonColumns) {
 			for (int job = 1; job <= data.n && initialColumnIds.size() < config.maxInitialColumns; job++) {
 				// singleton 列通常是主问题起步时最稳妥的保底列。

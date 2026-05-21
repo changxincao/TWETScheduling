@@ -798,3 +798,11 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 启发式找列本身不是单个 O(1) 操作。当前 `HeuristicPricingEngine` 每轮先从 restricted columns 中按 reduced cost 选最多 `heuristicPricingSeedColumns=30` 条 seed；对每条 seed 做 tabu 搜索，最多 `heuristicPricingTabuIterations=50` 轮，每轮枚举 remove/add/exchange 邻域。候选 move 的机器序列成本评价使用 forward/backward 分段函数 profile 和 `merge2Segments/merge3Segments` 做快速拼接，不是每个候选都完整重建整条序列；但每次接受一个 move 后会重建当前 seed route 的 profile。因此单个候选评估基本是拼接级快速评估，整轮启发式仍然可能慢，原因是 seed 数、tabu 轮数和 add/exchange 候选规模会形成大量候选扫描。
 
 初始列来源也已确认：`Tree.solve()` 通过 `InitialColumnBuilder.build()` 构造 root 初始列。它先由 `HeuristicSeedProvider` 生成一个 seed solution；在当前 `TanakaNoOutsourcingBPCTest` 中默认 `config.runALNSForSeed=false`，只有显式传 `-Dtwet.bpc.seedALNS=true` 时才会在初始构造解之后跑 ALNS。初始列只来自最终 seed solution：每台机器的完整序列作为 incumbent/full seed 列，再切一些短子序列列和 singleton 列；ALNS 搜索过程中曾经出现过的中间好解不会自动进入初始列池，除非它最终更新成 `data.configure.bestSolution` 并作为最终 seed 返回。
+
+## 2026-05-21：启发式 pricing 候选复杂度与初始列生成口径补充
+
+这里的 `O(k)` 指当前 tabu pricing 中一条候选序列长度为 `k` 时，一些非函数拼接部分仍会随序列长度线性增长。候选 move 的机器成本没有完整重算整条序列，而是用 seed route 的 forward/backward profile 和 `merge2Segments/merge3Segments` 拼接；但为了生成候选对象，代码仍会复制一份 `ArrayList`，并在计算 reduced cost 时遍历候选序列扣 job dual 与相邻 arc dual。每次 tabu 接受一个 move 后，还会为新的当前 route 重建 forward/backward profile。由此当前实现是“成本函数评价局部拼接化”，不是“整个候选评价严格 O(1)”。后续若要优化，应优先减少候选序列复制、缓存 job dual 和与 arc dual、以及对已接受 move 的 profile 做局部更新。
+
+初始列中的“短子序列”和 singleton 也进一步澄清。`InitialColumnBuilder` 先把最终 seed solution 中每台机器的完整任务序列加入列池，作为 incumbent 对应列；随后若 `generateSubsequenceColumns=true`，会从这些完整机器序列里切连续短片段，长度最多 `maxSeedSubsequenceLength=4`，作为额外初始列；最后若 `generateSingletonColumns=true`，会给每个 job 补一条单任务列。Tanaka 50/2 诊断中 root 初始列数为 190，来源就是最终 seed 的两条完整机器列、这些机器序列中的短连续子序列，以及 50 条 singleton 的去重结果。ALNS 过程中的中间解不进入初始列池，只有最终 best seed 会被拆成这些列。
+
+旧 VRP 的根节点初始列入口是 `HEU.GenRoute`，它先构造一个启发式可行解/route set，作为 root LP 的起始列集；后续分支节点的列继承与筛选由 `UpdateRouteSet()` 处理，参数 `m_initial_col_number=1000` 控制子节点最多保留多少条低 reduced-cost 列。当前 TWET 的 `InitialColumnBuilder` 是按这个思想做的适配，但因为 TWET 单机列比 VRP route 更依赖序列成本函数，所以额外加入短连续子序列和 singleton 作为启动稳定性补充；这不是旧 VRP 完全同款的 root 生成细节，而是当前问题上的保守初始化。

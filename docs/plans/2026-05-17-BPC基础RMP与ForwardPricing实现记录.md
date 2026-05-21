@@ -833,3 +833,12 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 启发式 pricing 的 tabu move 流程也重新核对如下。给定一条 seed 列后，`TabuRouteState` 会先为当前序列构造 forward/backward profile。每一轮 tabu 搜索枚举 remove/add/exchange 三类 move。单个候选 move 的机器成本不是整条序列重算，而是通过 `removeCost()` 或 `insertOrReplaceCost()` 调用 `merge2Segments/merge3Segments` 进行 profile 拼接评估；但当前实现仍会为候选构造一个新的 `ArrayList`，并在 `reducedCost()` 中遍历该候选序列扣除 job dual 和相邻 arc dual。因此当前是“机器成本函数拼接评估较快”，不是“整个 move 评估严格 O(1) 且完全不构造候选序列”。接受一个 move 后，代码会把该候选作为新的当前序列，并重建 forward/backward profile。
 
 验证上，本次编译 `TWETBPCConfig`、`InitialColumnBuilder`、`ColumnSource` 及相关测试入口通过；`HEU.SmallBPCBatchTest` 8 个随机小算例继续与 ArcFlow 目标值一致，tariff 分支诊断例也通过。
+## 2026-05-21：启发式 pricing move 改为局部增量 reduced cost
+
+对照旧 VRP 的 `BPC.GC.GCTabu` 后，确认旧实现只在 seed route 初始化时完整遍历一次 route 得到 `reduce_cost`，后续 remove/add/exchange 候选都用局部边变化、customer dual、arc dual 和 cut dual 做增量更新，不会为每个候选构造新 route 后再从头扫描。当前 TWET 版本此前虽然已经用 forward/backward profile 和 `merge2Segments/merge3Segments` 快速评估机器真实成本，但 reduced cost 仍然为每个候选复制 `ArrayList` 并遍历扣 job dual 与 arc dual，这一点和旧 VRP 不一致。
+
+本次修改将 `HeuristicPricingEngine.TabuRouteState` 的候选评估改成旧 VRP 风格。每个候选 move 只保存类型、位置、涉及任务、候选真实成本和候选 reduced cost；remove/add/exchange 的 reduced cost 由当前 `currentReducedCost` 加上 `candidateCost - cost`，再局部替换受影响 job dual 和两三条 arc dual 得到。候选阶段不再构造完整候选序列，也不再调用全序列 `reducedCost(...)`。只有 seed 初始化、接受 move 后加入负列池、以及最终把列交给 RMP 时，才需要使用完整序列。
+
+为了保持分支兼容性，当前 seed 进入 tabu 前仍完整检查一次 forbidden arc；之后每个局部 move 只检查被新接上的局部弧。这个逻辑成立的前提是当前 seed 已经满足当前节点的 forbidden arc 约束，局部 move 只会改变少数弧，因此检查新弧即可。
+
+验证上，`HeuristicPricingEngine.java` 单独编译通过；`HEU.SmallBPCBatchTest` 8 个随机小算例继续与 ArcFlow 目标值一致，tariff 分支诊断例也通过。

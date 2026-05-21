@@ -130,11 +130,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private void tabuSearch(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,
 			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates) {
 		TabuRouteState state = new TabuRouteState(seed);
-		if (!state.isValid()) {
+		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence)) {
 			return;
 		}
-		tryAddNegative(state.sequence, state.cost, lp, activeSignatures, generatedSignatures, negativeCandidates);
 		double bestReducedCost = state.reducedCost(lp);
+		tryAddNegative(state.sequence, state.cost, bestReducedCost, activeSignatures, generatedSignatures,
+				negativeCandidates);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
 		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates); iter++) {
@@ -146,19 +147,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (Utility.compareLt(state.currentReducedCost, bestReducedCost)) {
 				bestReducedCost = state.currentReducedCost;
 			}
-			tryAddNegative(state.sequence, state.cost, lp, activeSignatures, generatedSignatures, negativeCandidates);
+			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, activeSignatures, generatedSignatures,
+					negativeCandidates);
 		}
 	}
 
 	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost) {
 		TabuMove bestMove = null;
 		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
-		Node node = lp.getNode();
 
 		if (state.sequence.size() > 1) {
 			for (int pos = 0; pos < state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateRemove(pos, lp);
-				if (isAcceptedCandidate(move, node, iter, bestReducedCost)
+				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
@@ -172,7 +173,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			for (int pos = 0; pos <= state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateAdd(job, pos, lp);
-				if (isAcceptedCandidate(move, node, iter, bestReducedCost)
+				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
@@ -180,7 +181,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			for (int pos = 0; pos < state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateExchange(job, pos, lp);
-				if (isAcceptedCandidate(move, node, iter, bestReducedCost)
+				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
@@ -190,19 +191,17 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return bestMove;
 	}
 
-	private boolean isAcceptedCandidate(TabuMove move, Node node, int iter, double bestReducedCost) {
+	private boolean isAcceptedCandidate(TabuMove move, int iter, double bestReducedCost) {
 		if (move == null || !move.valid) {
-			return false;
-		}
-		if (!isSequenceCompatible(node, move.sequence)) {
 			return false;
 		}
 		// 旧 GCTabu 的 aspiration：如果候选优于历史最好 reduced cost，即使 tabu 也允许。
 		return !move.isTabu(iter) || Utility.compareLt(move.reducedCost, bestReducedCost);
 	}
 
-	private void tryAddNegative(List<Integer> sequence, double cost, LP lp, HashSet<SequenceSignature> activeSignatures,
-			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates) {
+	private void tryAddNegative(List<Integer> sequence, double cost, double reducedCost,
+			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
+			ArrayList<ScoredSequence> negativeCandidates) {
 		if (isHeuristicPoolFull(negativeCandidates)) {
 			return;
 		}
@@ -213,7 +212,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (activeSignatures.contains(signature) || !generatedSignatures.add(signature)) {
 			return;
 		}
-		double reducedCost = reducedCost(sequence, cost, lp);
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			negativeCandidates.add(new ScoredSequence(sequence, cost, reducedCost));
 		}
@@ -302,28 +300,42 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (sequence.size() <= 1) {
 				return TabuMove.invalid();
 			}
-			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
-			int removedJob = candidate.remove(pos).intValue();
 			double candidateCost = removeCost(pos);
-			return buildMove(candidate, candidateCost, lp, MoveType.REMOVE, removedJob, -1);
+			int removedJob = sequence.get(pos).intValue();
+			if (Utility.isBigMValue(candidateCost) || !isRemoveCompatible(pos, lp.getNode())) {
+				return TabuMove.invalid();
+			}
+			double rc = reducedCostAfterRemove(pos, removedJob, candidateCost, lp);
+			return new TabuMove(candidateCost, rc, MoveType.REMOVE, pos, removedJob, -1, tabuTenure);
 		}
 
 		TabuMove evaluateAdd(int job, int pos, LP lp) {
-			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
-			candidate.add(pos, Integer.valueOf(job));
 			double candidateCost = insertOrReplaceCost(pos, job, false);
-			return buildMove(candidate, candidateCost, lp, MoveType.ADD, job, -1);
+			if (Utility.isBigMValue(candidateCost) || !isInsertCompatible(pos, job, false, lp.getNode())) {
+				return TabuMove.invalid();
+			}
+			double rc = reducedCostAfterAdd(pos, job, candidateCost, lp);
+			return new TabuMove(candidateCost, rc, MoveType.ADD, pos, job, -1, tabuTenure);
 		}
 
 		TabuMove evaluateExchange(int job, int pos, LP lp) {
-			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
-			int removedJob = candidate.set(pos, Integer.valueOf(job)).intValue();
 			double candidateCost = insertOrReplaceCost(pos, job, true);
-			return buildMove(candidate, candidateCost, lp, MoveType.EXCHANGE, job, removedJob);
+			int removedJob = sequence.get(pos).intValue();
+			if (Utility.isBigMValue(candidateCost) || !isInsertCompatible(pos, job, true, lp.getNode())) {
+				return TabuMove.invalid();
+			}
+			double rc = reducedCostAfterExchange(pos, job, removedJob, candidateCost, lp);
+			return new TabuMove(candidateCost, rc, MoveType.EXCHANGE, pos, job, removedJob, tabuTenure);
 		}
 
 		void apply(TabuMove move, int tenureUntil) {
-			this.sequence = new ArrayList<Integer>(move.sequence);
+			if (move.type == MoveType.REMOVE) {
+				this.sequence.remove(move.position);
+			} else if (move.type == MoveType.ADD) {
+				this.sequence.add(move.position, Integer.valueOf(move.primaryJob));
+			} else {
+				this.sequence.set(move.position, Integer.valueOf(move.primaryJob));
+			}
 			if (move.primaryJob >= 1 && move.primaryJob < tabuTenure.length) {
 				tabuTenure[move.primaryJob] = tenureUntil;
 			}
@@ -332,15 +344,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			rebuild();
 			this.currentReducedCost = move.reducedCost;
-		}
-
-		private TabuMove buildMove(ArrayList<Integer> candidate, double candidateCost, LP lp, MoveType type, int primaryJob,
-				int secondaryJob) {
-			if (candidate.isEmpty() || Utility.isBigMValue(candidateCost) || hasDuplicateJobs(candidate)) {
-				return TabuMove.invalid();
-			}
-			double rc = HeuristicPricingEngine.this.reducedCost(candidate, candidateCost, lp);
-			return new TabuMove(candidate, candidateCost, rc, type, primaryJob, secondaryJob, tabuTenure);
 		}
 
 		private double removeCost(int pos) {
@@ -372,6 +375,44 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return mergeHelper.merge3Segments(f1, single.forward, single.backward, b3, shift1, shift2, 0.0,
 					data.getSetupCost(bridgeFrom1, job),
 					suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo2));
+		}
+
+		private double reducedCostAfterRemove(int pos, int removedJob, double candidateCost, LP lp) {
+			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
+			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
+			// 2026-05-21: 对齐旧 VRP GCTabu，候选 move 的 reduced cost 只做局部增量更新。
+			// 机器真实成本变化由分段函数拼接给出；dual 部分只需要替换受影响的 job 和两三条弧。
+			return currentReducedCost + candidateCost - cost + lp.getJobDual(removedJob)
+					+ lp.getArcDual(prev, removedJob) + lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next);
+		}
+
+		private double reducedCostAfterAdd(int pos, int job, double candidateCost, LP lp) {
+			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
+			int next = pos == sequence.size() ? lp.getNode().sinkId() : sequence.get(pos).intValue();
+			return currentReducedCost + candidateCost - cost - lp.getJobDual(job) - lp.getArcDual(prev, job)
+					- lp.getArcDual(job, next) + lp.getArcDual(prev, next);
+		}
+
+		private double reducedCostAfterExchange(int pos, int job, int removedJob, double candidateCost, LP lp) {
+			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
+			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
+			return currentReducedCost + candidateCost - cost + lp.getJobDual(removedJob) - lp.getJobDual(job)
+					+ lp.getArcDual(prev, removedJob) + lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job)
+					- lp.getArcDual(job, next);
+		}
+
+		private boolean isRemoveCompatible(int pos, Node node) {
+			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
+			int next = pos == sequence.size() - 1 ? node.sinkId() : sequence.get(pos + 1).intValue();
+			return !node.isArcForbidden(prev, next);
+		}
+
+		private boolean isInsertCompatible(int pos, int job, boolean replace, Node node) {
+			int prefixEnd = pos - 1;
+			int suffixStart = replace ? pos + 1 : pos;
+			int prev = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
+			int next = suffixStart >= sequence.size() ? node.sinkId() : sequence.get(suffixStart).intValue();
+			return !node.isArcForbidden(prev, job) && !node.isArcForbidden(job, next);
 		}
 
 		private void rebuild() {
@@ -452,22 +493,22 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private static final class TabuMove {
 		final boolean valid;
-		final ArrayList<Integer> sequence;
 		final double cost;
 		final double reducedCost;
 		final MoveType type;
+		final int position;
 		final int primaryJob;
 		final int secondaryJob;
 		final int primaryTenure;
 		final int secondaryTenure;
 
-		TabuMove(ArrayList<Integer> sequence, double cost, double reducedCost, MoveType type, int primaryJob,
+		TabuMove(double cost, double reducedCost, MoveType type, int position, int primaryJob,
 				int secondaryJob, int[] tabuTenure) {
 			this.valid = true;
-			this.sequence = sequence;
 			this.cost = cost;
 			this.reducedCost = reducedCost;
 			this.type = type;
+			this.position = position;
 			this.primaryJob = primaryJob;
 			this.secondaryJob = secondaryJob;
 			this.primaryTenure = primaryJob >= 0 && primaryJob < tabuTenure.length ? tabuTenure[primaryJob] : 0;
@@ -476,10 +517,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		private TabuMove() {
 			this.valid = false;
-			this.sequence = new ArrayList<Integer>();
 			this.cost = Utility.big_M;
 			this.reducedCost = Utility.big_M;
 			this.type = MoveType.ADD;
+			this.position = -1;
 			this.primaryJob = -1;
 			this.secondaryJob = -1;
 			this.primaryTenure = 0;

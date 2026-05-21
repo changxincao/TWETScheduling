@@ -24,6 +24,7 @@ public class InitialColumnBuilder {
 
 	/** 当前实例数据。 */
 	private final Data data;
+	private final TWETBPCConfig config;
 	/** 全局列池。 */
 	private final Pool pool;
 	/** 启发式 seed 提供器。 */
@@ -36,6 +37,7 @@ public class InitialColumnBuilder {
 	 */
 	public InitialColumnBuilder(Data data, TWETBPCConfig config, Pool pool, HeuristicSeedProvider seedProvider) {
 		this.data = data;
+		this.config = config;
 		this.pool = pool;
 		this.seedProvider = seedProvider;
 		this.evaluator = new TWETColumnEvaluator(data);
@@ -52,19 +54,34 @@ public class InitialColumnBuilder {
 		LinkedHashSet<Integer> initialColumnIds = new LinkedHashSet<Integer>();
 		LinkedHashSet<Integer> incumbentColumnIds = new LinkedHashSet<Integer>();
 
-		ArrayList<ArrayList<Integer>> machineSequences = SolutionBridge.extractSequences(seed);
+		addMachineColumns(seed, initialColumnIds, incumbentColumnIds);
+		if (config.useBestSolutionHistoryForInitialColumns && data.configure != null) {
+			for (Solution historicalBest : data.configure.getBestSolutionHistoryCopies()) {
+				addMachineColumns(historicalBest, initialColumnIds, null);
+			}
+		}
+
+		return new InitialColumnBundle(seed, new ArrayList<Integer>(initialColumnIds),
+				new ArrayList<Integer>(incumbentColumnIds), SolutionBridge.extractOutsourcedJobs(seed),
+				SolutionBridge.extractOutsourcingBaseline(seed), SolutionBridge.extractOutsourcingCost(seed));
+	}
+
+	private void addMachineColumns(Solution solution, LinkedHashSet<Integer> initialColumnIds,
+			LinkedHashSet<Integer> incumbentColumnIds) {
+		if (solution == null) {
+			return;
+		}
+		ArrayList<ArrayList<Integer>> machineSequences = SolutionBridge.extractSequences(solution);
 		for (List<Integer> seq : machineSequences) {
 			if (seq.isEmpty()) {
 				continue;
 			}
-
 			int id = pool.addColumn(seq, evaluator.evaluate(seq), ColumnSource.HEURISTIC_FULL, true);
 			initialColumnIds.add(Integer.valueOf(id));
-			incumbentColumnIds.add(Integer.valueOf(id));
+			if (incumbentColumnIds != null) {
+				incumbentColumnIds.add(Integer.valueOf(id));
+			}
 		}
-
-		return new InitialColumnBundle(seed, new ArrayList<Integer>(initialColumnIds),
-				new ArrayList<Integer>(incumbentColumnIds));
 	}
 
 }

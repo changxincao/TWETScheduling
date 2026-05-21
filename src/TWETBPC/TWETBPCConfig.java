@@ -20,6 +20,8 @@ public class TWETBPCConfig {
 	public boolean reuseConfiguredBestSolution = true;
 	/** 如果没有现成最好解，是否额外跑一遍 ALNS 生成更好的 seed。 */
 	public boolean runALNSForSeed = true;
+	/** 2026-05-21: 是否把 ALNS/VND 历史 best 解中的完整机器序列也作为 root 初始列。 */
+	public boolean useBestSolutionHistoryForInitialColumns = true;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;
 	/** 是否使用按论文 dominance graph 伪代码实现的精确定价器；关闭后可回退旧的全量扫描版做效率对比。 */

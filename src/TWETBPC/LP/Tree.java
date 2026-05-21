@@ -201,7 +201,7 @@ public class Tree {
 		if (data.configure.bestSolution != null) {
 			return data.configure.bestSolution.curCost;
 		}
-		double cost = 0.0;
+		double cost = initial.getIncumbentOutsourcingCost();
 		for (int columnId : initial.getIncumbentColumnIds()) {
 			cost += pool.getColumn(columnId).getCost();
 		}
@@ -210,10 +210,7 @@ public class Tree {
 
 	private double[] initialOutsourcingValues(InitialColumnBundle initial) {
 		double[] values = new double[data.n + 1];
-		if (initial.getSeedSolution() == null) {
-			return values;
-		}
-		for (int job : initial.getSeedSolution().getOutsourcedJobsCopy()) {
+		for (int job : initial.getIncumbentOutsourcedJobs()) {
 			if (job >= 1 && job <= data.n) {
 				values[job] = 1.0;
 			}

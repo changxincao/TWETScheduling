@@ -132,13 +132,17 @@ public final class BPCResultWriter {
 
 		try (BufferedWriter writer = Files.newBufferedWriter(outsourcing)) {
 			// 2026-05-17: y_j 是 RMP 的正式解变量，单独导出，避免结果只看内部机器列。
-			writer.write("jobId,value,baselineCost\n");
+			double outsourcingBaseline = outsourcingBaseline(context, result);
+			double outsourcingCost = context.data.evaluateOutsourcingCost(outsourcingBaseline);
+			writer.write("recordType,jobId,value,baselineCost,weightedBaselineContribution,outsourcingCostTotal\n");
+			writer.write(String.format(Locale.US, "TOTAL,,,%.6f,%.6f,%.6f\n", outsourcingBaseline,
+					outsourcingBaseline, outsourcingCost));
 			double[] values = result.getIncumbentOutsourcingValues();
 			for (int job = 1; job <= context.data.n; job++) {
 				double value = job < values.length ? values[job] : 0.0;
 				if (value > 1e-8) {
-					writer.write(String.format(Locale.US, "%d,%.6f,%.6f\n", job, value,
-							context.data.outsourcingCost[job]));
+					writer.write(String.format(Locale.US, "JOB,%d,%.6f,%.6f,%.6f,\n", job, value,
+							context.data.outsourcingCost[job], value * context.data.outsourcingCost[job]));
 				}
 			}
 		}
@@ -166,6 +170,18 @@ public final class BPCResultWriter {
 			writer.write("- " + entry.getKey() + ": " + entry.getValue() + "\n");
 		}
 		writer.write("\n");
+	}
+
+	private static double outsourcingBaseline(TWETBPCContext context, TWETSolveResult result) {
+		double baseline = 0.0;
+		double[] values = result.getIncumbentOutsourcingValues();
+		for (int job = 1; job <= context.data.n && job < values.length; job++) {
+			double value = values[job];
+			if (value > 1e-8) {
+				baseline += value * context.data.outsourcingCost[job];
+			}
+		}
+		return baseline;
 	}
 
 }

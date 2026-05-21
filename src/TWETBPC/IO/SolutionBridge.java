@@ -42,4 +42,16 @@ public final class SolutionBridge {
 		return solution.getMachineCostsCopy();
 	}
 
+	public static ArrayList<Integer> extractOutsourcedJobs(Solution solution) {
+		return solution.getOutsourcedJobsCopy();
+	}
+
+	public static double extractOutsourcingBaseline(Solution solution) {
+		return solution.getOutsourcingBaselineTotal();
+	}
+
+	public static double extractOutsourcingCost(Solution solution) {
+		return solution.getOutsourcingCostTotal();
+	}
+
 }

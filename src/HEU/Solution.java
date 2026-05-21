@@ -188,6 +188,14 @@ public class Solution {
 		return new ArrayList<Integer>(outsourcedJobs);
 	}
 
+	public double getOutsourcingBaselineTotal() {
+		return outsourcingBaselineTotal;
+	}
+
+	public double getOutsourcingCostTotal() {
+		return outsourcingCostTotal;
+	}
+
 	public boolean canOutsource(int job) {
 		return job > 0 && job < data.outsourcingCost.length && !Utility.isBigMValue(data.outsourcingCost[job]);
 	}

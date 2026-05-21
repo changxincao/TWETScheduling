@@ -806,3 +806,11 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 初始列中的“短子序列”和 singleton 也进一步澄清。`InitialColumnBuilder` 先把最终 seed solution 中每台机器的完整任务序列加入列池，作为 incumbent 对应列；随后若 `generateSubsequenceColumns=true`，会从这些完整机器序列里切连续短片段，长度最多 `maxSeedSubsequenceLength=4`，作为额外初始列；最后若 `generateSingletonColumns=true`，会给每个 job 补一条单任务列。Tanaka 50/2 诊断中 root 初始列数为 190，来源就是最终 seed 的两条完整机器列、这些机器序列中的短连续子序列，以及 50 条 singleton 的去重结果。ALNS 过程中的中间解不进入初始列池，只有最终 best seed 会被拆成这些列。
 
 旧 VRP 的根节点初始列入口是 `HEU.GenRoute`，它先构造一个启发式可行解/route set，作为 root LP 的起始列集；后续分支节点的列继承与筛选由 `UpdateRouteSet()` 处理，参数 `m_initial_col_number=1000` 控制子节点最多保留多少条低 reduced-cost 列。当前 TWET 的 `InitialColumnBuilder` 是按这个思想做的适配，但因为 TWET 单机列比 VRP route 更依赖序列成本函数，所以额外加入短连续子序列和 singleton 作为启动稳定性补充；这不是旧 VRP 完全同款的 root 生成细节，而是当前问题上的保守初始化。
+
+## 2026-05-21：更正 root 初始列与旧 VRP 的对应关系
+
+进一步核对旧 VRP 代码后，需要更正前面关于 root 初始列的表述。旧 VRP 的 root 初始列来自 `Tree.Solve()` 中调用 `HEU.GenRoute.ConstructSolution()` 得到的启发式 route set，然后用 `new Node(data, gr.solution)` 直接作为 root node 的 `route_set`。也就是说，root 初始列基本就是启发式解里的 route，不会额外从这些 route 中切短子 route，也不会补 singleton route。参数 `m_initial_col_number=1000` 不是 root 初始列参数，而是各类 `Branch*.UpdateRouteSet()` 在生成 child route set 时，从已有 pool 中按 reduced cost 筛列的上限。
+
+当前 TWET 的 `InitialColumnBuilder` 与旧 VRP root 逻辑不完全相同：它除了加入最终 seed solution 中每台机器的完整序列，还额外切长度不超过 `maxSeedSubsequenceLength=4` 的连续短子序列，并补 singleton。`maxInitialColumns=2000` 也是当前 TWET 版本新增的 root 初始列上限，不是旧 VRP root 的同名参数。这样做的初衷是让 root RMP 一开始有更多组合弹性，但从严格模仿旧 VRP root 的角度看，这确实是额外策略，不是必须项；如果要做旧 VRP 风格对照，可以关闭 `generateSubsequenceColumns` 和 `generateSingletonColumns`，只保留最终 seed 的完整机器序列作为 root 初始列。
+
+以 Tanaka 50/2 no-outsourcing 诊断为例，当前 root 初始列为 190 条；如果按旧 VRP root 风格只放最终 seed 中每台机器的完整序列，则只有 2 条机器列。当前 190 条相当于比纯完整 seed 列多了 188 条，主要来自短连续子序列和 singleton。它们不影响可行性，因为完整 seed 列本身已经给了一个可行整数解；它们只影响 root LP 起步松弛和后续 dual/pricing 轨迹。

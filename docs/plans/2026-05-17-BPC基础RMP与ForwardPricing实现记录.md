@@ -748,3 +748,23 @@ tabu 搜索本体在 `Tabu(lp)`。每一轮枚举三类邻域：删除当前 rou
 旧 VRP 默认参数是 `m_tabu_cg_tenure=30`、`m_tabu_cg_iteration_number=50`。因此某个客户在第 `iter` 轮被操作后，会被设置为 `tabu_tenure[customer] = iter + 30`，后续只有当当前轮数 `iter >= tabu_tenure[customer]` 时才自然解禁；若候选 move 的 reduced cost 优于历史最好 `best_cost`，则可以提前通过 aspiration。单条 seed 的 `Tabu()` 搜索停止条件主要有三类：达到 50 轮迭代上限；某一轮没有任何可接受 move，即 `best_place == -1`；本地负 reduced-cost 候选池达到 `m_gen_size=1000`。当前 TWET 版参数也按旧 VRP 对齐为 `heuristicPricingTabuTenure=30`、`heuristicPricingTabuIterations=50`、`heuristicPricingPoolSize=1000`，并额外在最终返回 RMP 时最多取 `maxHeuristicPricingColumns=150` 条优质列。
 
 再按执行粒度澄清一次：tabu 搜索是对每条 seed route 单独执行的，不是全局共用一个 `tabu_tenure`。每处理一条 seed，都会用这条 seed 初始化当前 route、used 集合、reduced cost 和 `tabu_tenure`；这条 seed 的搜索结束后，再换下一条 seed 重新初始化。不同 seed 之间共享的是本地负 reduced-cost 候选池，用于最后统一排序加列；不共享某个客户是否 tabu 的状态。单条 seed 的每一轮都会完整扫描 remove、add、exchange 三类邻域，过滤不可行 move，再用 tabu tenure 和 aspiration 判断是否可接受，最后选择 reduced cost 最小的那个可接受 move 更新当前 route。它不是遇到第一个非 tabu move 就更新，而是“全邻域扫描后取当前最好”。如果一整轮没有任何可接受 move，才停止当前 seed，转到下一条 seed。
+## 2026-05-21：Tanaka 50 任务无外包 BPC 诊断
+
+本次按“外包成本设为无穷大，只允许真实机器调度”的设定，尝试求解 Tanaka 扩展多机器算例 `data/50-2/wet050_001_2m.dat`。由于当前 `Data` 构造函数里仍有 `debug_set()` 会把规模改成 60/3，直接读取 50 任务 setup 文件会在读到 `SETUP` 行时报错。因此新增了一个只用于诊断的 runner `HEU.TanakaNoOutsourcingBPCTest`，手工读取该文件的 50/2 数据、setup time 矩阵，并把所有 `outsourcingCost[j]` 设为 `Utility.big_M`。这个 runner 不修改生产 `Data.java`，也不复用 base `Data` 构造时留下的旧 best solution。
+
+测试命令使用 CPLEX native 路径：
+
+```powershell
+java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win64 `
+  -cp target/classes;D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar `
+  -Dtwet.bpc.verbose=true `
+  -Dtwet.bpc.bidirectional=false `
+  -Dtwet.bpc.maxNodes=20000 `
+  HEU.TanakaNoOutsourcingBPCTest data/50-2/wet050_001_2m.dat
+```
+
+第一次运行失败不是算法问题，而是 `java.library.path` 没有指到 `cplex2211.dll` 所在目录。补上 `D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win64` 后可以正常启动 CPLEX。
+
+10 分钟限时内没有完成根节点求解。日志显示当前流程已进入 root node，初始列 190 条，初始 incumbent 为 144453。随后启发式 pricing 多轮生成负 reduced-cost 列，列池从 190 增长到 8885，最后启发式 pricing 报告不再找到负 reduced-cost 列。之后进入 exact pricing，但在 10 分钟限时内 exact pricing 没有返回，因此没有形成 root LP 的最终 bound，也没有进入分支。当前能确认的是：无外包 50 任务实例已经能启动并完成启发式 pricing 阶段，但现有 exact pricing 在该规模上仍然是瓶颈，至少这个算例 10 分钟内没有求解完成。
+
+这个结果说明当前 BPC 框架在小规模对拍上可用，但面对 50 任务、无外包、真实机器调度版本时，根节点 exact pricing 还不够强。后续优先方向不是再调树搜索，而是优化 exact pricing：包括真正高效的双向函数 label dominance、NG/DSSR、pricing 统计、以及对启发式 pricing 生成列数量和 exact pricing 启动条件做更细的性能分析。

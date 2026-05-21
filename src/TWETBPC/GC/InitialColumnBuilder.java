@@ -16,23 +16,14 @@ import TWETBPC.Model.ColumnSource;
 /**
  * 初始列构造器。
  * <p>
- * 对照旧 VRP-BPC 参考代码，可以把它看作“GenRoute / 初始路集生成”的 TWET 版本入口。
- * 只不过这里的对象不再是 route，而是单机序列列。
- * <p>
- * 当前策略是：
- * <ul>
- * <li>先拿到一个启发式 seed；</li>
- * <li>把 seed 中每台机器的完整序列作为初始列；</li>
- * <li>可选地再切出若干短子序列列；</li>
- * <li>可选地补 singleton 列，增强主问题起步阶段的可行性。</li>
- * </ul>
+ * 对照旧 VRP-BPC 参考代码，这里只把启发式最终 seed solution 中每台机器的完整序列
+ * 加入 root 初始列池。2026-05-21: 此前额外切短子序列和补 singleton 的逻辑不是旧 VRP
+ * root 初始列流程，已经删除，避免 root 阶段引入额外组合列导致流程和参考代码不一致。
  */
 public class InitialColumnBuilder {
 
 	/** 当前实例数据。 */
 	private final Data data;
-	/** 初始列构造相关参数。 */
-	private final TWETBPCConfig config;
 	/** 全局列池。 */
 	private final Pool pool;
 	/** 启发式 seed 提供器。 */
@@ -41,11 +32,10 @@ public class InitialColumnBuilder {
 	private final TWETColumnEvaluator evaluator;
 
 	/**
-	 * 构造一个初始列构造器。
+	 * 构造一个初始列构造器。config 保留在构造签名里，是为了不扩大调用侧改动范围。
 	 */
 	public InitialColumnBuilder(Data data, TWETBPCConfig config, Pool pool, HeuristicSeedProvider seedProvider) {
 		this.data = data;
-		this.config = config;
 		this.pool = pool;
 		this.seedProvider = seedProvider;
 		this.evaluator = new TWETColumnEvaluator(data);
@@ -54,13 +44,8 @@ public class InitialColumnBuilder {
 	/**
 	 * 构造初始列 bundle。
 	 * <p>
-	 * 返回结果里既包含 seed solution，也包含：
-	 * <ul>
-	 * <li>所有初始列 id；</li>
-	 * <li>当前 incumbent 对应的完整列 id。</li>
-	 * </ul>
-	 * 其中使用 {@link LinkedHashSet} 的原因是：
-	 * 既要去重，又希望尽量保留列加入的先后顺序。
+	 * 返回结果里既包含 seed solution，也包含所有初始列 id 和 incumbent 对应的完整列 id。
+	 * 使用 {@link LinkedHashSet} 是为了去重，同时保留列加入顺序。
 	 */
 	public InitialColumnBundle build() {
 		Solution seed = seedProvider.getOrBuildSeed();
@@ -73,37 +58,9 @@ public class InitialColumnBuilder {
 				continue;
 			}
 
-			// 每台机器上的完整序列，视作一条高质量 seed 列。
 			int id = pool.addColumn(seq, evaluator.evaluate(seq), ColumnSource.HEURISTIC_FULL, true);
 			initialColumnIds.add(Integer.valueOf(id));
 			incumbentColumnIds.add(Integer.valueOf(id));
-
-			// 2026-05-21: 旧 VRP 的 root 初始列只来自 GenRoute 的完整 route set。
-			// 短子序列只是此前为 TWET 启动阶段额外加的补列策略，默认关闭，仅保留为诊断开关。
-			if (!config.generateSubsequenceColumns) {
-				continue;
-			}
-			int maxLen = Math.min(config.maxSeedSubsequenceLength, seq.size());
-			for (int len = 1; len <= maxLen && initialColumnIds.size() < config.maxInitialColumns; len++) {
-				for (int start = 0; start + len <= seq.size() && initialColumnIds.size() < config.maxInitialColumns; start++) {
-					// 从完整 seed 列里切出较短子列，为后续 RMP 提供更灵活的覆盖组合。
-					ArrayList<Integer> subSeq = new ArrayList<Integer>(seq.subList(start, start + len));
-					ColumnSource source = len == 1 ? ColumnSource.SINGLETON : ColumnSource.HEURISTIC_SUBSEQUENCE;
-					int subId = pool.addColumn(subSeq, evaluator.evaluate(subSeq), source, true);
-					initialColumnIds.add(Integer.valueOf(subId));
-				}
-			}
-		}
-
-		// 2026-05-21: singleton 不是旧 VRP root 初始列逻辑，默认关闭。
-		if (config.generateSingletonColumns) {
-			for (int job = 1; job <= data.n && initialColumnIds.size() < config.maxInitialColumns; job++) {
-				// singleton 列通常是主问题起步时最稳妥的保底列。
-				ArrayList<Integer> singleton = new ArrayList<Integer>(1);
-				singleton.add(Integer.valueOf(job));
-				int id = pool.addColumn(singleton, evaluator.evaluate(singleton), ColumnSource.SINGLETON, true);
-				initialColumnIds.add(Integer.valueOf(id));
-			}
 		}
 
 		return new InitialColumnBundle(seed, new ArrayList<Integer>(initialColumnIds),

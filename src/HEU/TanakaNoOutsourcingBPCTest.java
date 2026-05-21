@@ -50,7 +50,6 @@ public class TanakaNoOutsourcingBPCTest {
 		config.reuseConfiguredBestSolution = false;
 		config.runALNSForSeed = Boolean.getBoolean("twet.bpc.seedALNS");
 		config.maxNodes = maxNodes;
-		config.maxInitialColumns = 5000;
 		config.maxHeuristicPricingColumns = 200;
 		config.maxExactPricingColumns = 200;
 		config.branchSeedColumnLimit = 5000;

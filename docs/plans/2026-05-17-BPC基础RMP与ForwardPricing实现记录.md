@@ -824,3 +824,12 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 同时明确启发式 pricing move 的当前实现边界：候选机器成本使用 forward/backward profile 和 `merge2Segments/merge3Segments` 快速拼接，但 `evaluateRemove/evaluateAdd/evaluateExchange` 仍会为每个候选构造新的 `ArrayList`，并在 reduced-cost 计算中遍历候选序列扣 job dual 和 arc dual。因此当前不是“每个 move 完全不构造新序列、严格 O(1)”的实现；若要进一步加速，需要单独把候选序列构造延迟到最终 best move，或者维护 dual 前缀/弧增量缓存。
 
 验证上，`javac` 编译 `TWETBPCConfig`、`InitialColumnBuilder` 和 `SmallBPCBatchTest` 通过；`HEU.SmallBPCBatchTest` 8 个随机小例与 ArcFlow 全部一致，tariff 分支诊断例也通过。Tanaka 短跑只用于确认 root 初始列数量，未作为完整求解测试。
+## 2026-05-21：删除 root 阶段额外短子序列和 singleton 初始列
+
+前面已经确认旧 VRP 的 root 初始列来自 `GenRoute.ConstructSolution()` 得到的完整 route set，不会再从这些 route 里切短子序列，也不会额外补 singleton。为了让当前 TWET-BPC 的 root 初始化流程和旧 VRP 保持一致，本次直接删除了 `generateSubsequenceColumns`、`generateSingletonColumns`、`maxSeedSubsequenceLength` 和 `maxInitialColumns` 这些参数，以及 `InitialColumnBuilder` 中对应的短子序列和 singleton 生成代码。`ColumnSource` 中的 `HEURISTIC_SUBSEQUENCE` 和 `SINGLETON` 也同步删除。
+
+现在 root 初始列只有最终 seed solution 中每台真实机器的完整任务序列。这样做的含义是：root LP 的起点完全依赖启发式最终解给出的完整机器列，后续组合空间交给 pricing 逐轮补列，而不是在 root 初始化阶段人为塞入短子列。这个处理和旧 VRP 框架更一致，也避免额外初始化策略影响后续效率判断。
+
+启发式 pricing 的 tabu move 流程也重新核对如下。给定一条 seed 列后，`TabuRouteState` 会先为当前序列构造 forward/backward profile。每一轮 tabu 搜索枚举 remove/add/exchange 三类 move。单个候选 move 的机器成本不是整条序列重算，而是通过 `removeCost()` 或 `insertOrReplaceCost()` 调用 `merge2Segments/merge3Segments` 进行 profile 拼接评估；但当前实现仍会为候选构造一个新的 `ArrayList`，并在 `reducedCost()` 中遍历该候选序列扣除 job dual 和相邻 arc dual。因此当前是“机器成本函数拼接评估较快”，不是“整个 move 评估严格 O(1) 且完全不构造候选序列”。接受一个 move 后，代码会把该候选作为新的当前序列，并重建 forward/backward profile。
+
+验证上，本次编译 `TWETBPCConfig`、`InitialColumnBuilder`、`ColumnSource` 及相关测试入口通过；`HEU.SmallBPCBatchTest` 8 个随机小算例继续与 ArcFlow 目标值一致，tariff 分支诊断例也通过。

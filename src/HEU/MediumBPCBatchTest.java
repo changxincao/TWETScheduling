@@ -125,7 +125,6 @@ public class MediumBPCBatchTest {
 		config.writeBPCResultFiles = false;
 		config.runALNSForSeed = false;
 		config.maxNodes = 5000;
-		config.maxInitialColumns = 3000;
 		config.maxExactPricingColumns = 200;
 		config.maxHeuristicPricingColumns = 200;
 		config.branchSeedColumnLimit = 3000;

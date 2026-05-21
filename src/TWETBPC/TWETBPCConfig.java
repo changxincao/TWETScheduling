@@ -20,16 +20,6 @@ public class TWETBPCConfig {
 	public boolean reuseConfiguredBestSolution = true;
 	/** 如果没有现成最好解，是否额外跑一遍 ALNS 生成更好的 seed。 */
 	public boolean runALNSForSeed = true;
-	/** 是否为每个 job 额外生成 singleton 列。 */
-	/** 2026-05-21: 默认对齐旧 VRP root 逻辑，只用最终启发式解的完整机器序列作为初始列。 */
-	public boolean generateSingletonColumns = false;
-	/** 是否从启发式完整序列中切出短子序列列，作为额外初始列。 */
-	/** 2026-05-21: 短子序列不是旧 VRP root 初始列逻辑，默认关闭；仅保留为后续诊断开关。 */
-	public boolean generateSubsequenceColumns = false;
-	/** 从一条启发式序列切子列时，允许的最大长度。 */
-	public int maxSeedSubsequenceLength = 4;
-	/** 初始列总数上限，避免一开始把列池扩得过大。 */
-	public int maxInitialColumns = 2000;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;
 	/** 是否使用按论文 dominance graph 伪代码实现的精确定价器；关闭后可回退旧的全量扫描版做效率对比。 */

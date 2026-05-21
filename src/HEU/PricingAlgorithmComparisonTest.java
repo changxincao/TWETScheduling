@@ -158,7 +158,6 @@ public class PricingAlgorithmComparisonTest {
 		config.enableBidirectionalPricing = true;
 		// 诊断小算例上尽量不让 addin_size 先截断结果，方便比较两种 exact pricing 的最优 reduced cost。
 		config.maxExactPricingColumns = 100000;
-		config.maxInitialColumns = 2000;
 		config.branchSeedColumnLimit = 2000;
 		return config;
 	}

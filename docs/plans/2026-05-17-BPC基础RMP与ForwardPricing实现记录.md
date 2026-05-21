@@ -842,6 +842,15 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 为了保持分支兼容性，当前 seed 进入 tabu 前仍完整检查一次 forbidden arc；之后每个局部 move 只检查被新接上的局部弧。这个逻辑成立的前提是当前 seed 已经满足当前节点的 forbidden arc 约束，局部 move 只会改变少数弧，因此检查新弧即可。
 
 验证上，`HeuristicPricingEngine.java` 单独编译通过；`HEU.SmallBPCBatchTest` 8 个随机小算例继续与 ArcFlow 目标值一致，tariff 分支诊断例也通过。
+
+## 2026-05-21：旧 VRP 不带 ng-route 的双向 labeling 如何 join
+本次复核旧 VRP `BPC.GC` 下不带 ng-route 的双向版本，主要看 `GCBDT.java` 和 `GCDSS.java`。结论是：旧代码的 bounded bidirectional label setting 是在同一个中间客户点 `cid` 上 join，不是按一条连接弧 `(i,j)` join。
+
+具体证据在 `GCDSS.Join()` 中最清楚：外层遍历 `cid`，然后取 `BWTL.get(cid)` 中的 backward label，再遍历 `FWTL.get(cid)` 中的 forward label。也就是说，两边 label 的 terminal 都是同一个 `cid`。拼接 reduced cost 时用 `lbf.m_reduced_cost + label.m_reduced_cost + lp.mu[cid]`，这里加回 `mu[cid]` 是因为中间点 `cid` 同时出现在前向和后向 label 的 reduced cost 中，被扣了两次，需要补回一次。路线恢复时 `JoinRoute(lbf, label)` 先沿 forward label 恢复到 `cid`，随后从 `blb.father` 开始接 backward 路径，刻意跳过 backward label 自己的 `cid`，避免中间点重复出现。
+
+`GCBDT` 的逻辑也是同一类点 join。它在 backward 扩展过程中，如果当前 backward label 的 `cid` 不是 sink，就临时 `ResetVisit(label, cid)`，然后只和 `FWTL.get(cid)` 的 forward labels 配对。通过容量、时间和访问集合检查后，同样用 `JoinRoute(lbf, label)` 拼接，其中 backward 部分从 `blb.father` 开始。因此它也不是枚举前向末端 `i` 和后向起点 `j`，再用弧 `(i,j)` 连接。
+
+这对当前 TWET 双向 pricing 的含义是：如果要“按旧 VRP 框架”复刻不带 ng-route 的 bounded bidirectional join，最直接对应的是同一任务点 join。若改成 `(i,j)` 弧 join，会更像另一类 front-to-back 拼接策略，可能覆盖更多连接方式，但已经不是旧 VRP 这两个基础双向类的原始流程。后续如果要做函数级双向 label，除非明确决定升级为弧 join，否则应先按点 join 对齐旧代码，再考虑是否为了 TWET 的 setup/函数结构增加弧 join 版本做对比。
 ## 2026-05-21：启发式 pricing 的 singleton profile 与 seed reduced cost 缓存
 
 本轮继续处理 `HeuristicPricingEngine` 中和旧 VRP `GCTabu` 对比后暴露出来的重复计算点。第一处是 add/exchange 候选里反复构造单任务 profile。单个 job 的前向 prefix-min 和反向 suffix-min 结果只依赖 job 自身，与当前 seed route、dual 或 tabu 状态无关，因此可以在 pricing engine 构造时预先缓存模板。实际 merge 时仍然返回 `PiecewiseLinearFunction` 副本，因为 `merge2Segments/merge3Segments` 过程可能修改传入函数对象，直接共享缓存会污染后续候选。

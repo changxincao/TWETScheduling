@@ -849,3 +849,13 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 第二处是 seed 排序。此前 `collectSeedColumns()` 在 comparator 中调用 `reducedCost(...)`，排序过程会对同一条 seed 列重复扫描 job dual 和 arc dual。现在改为先为每条非空 restricted column 计算一次 reduced cost，保存为 `ScoredSeed` 后再排序。这个改动不改变 seed 选择规则，只减少排序阶段的重复遍历，和旧 VRP 先得到 route reduced cost 再按值选 seed 的思路一致。
 
 验证上，`HeuristicPricingEngine.java` 单独编译通过；`HEU.SmallBPCBatchTest` 继续通过 8 个随机小算例对拍和 tariff 分支诊断。当前剩余的主要性能差异仍然是 TWET 候选真实成本必须通过分段函数 profile 拼接得到，且接受 move 后需要重建当前 route profile，这部分属于问题结构差异，不是简单缓存能完全消除。
+
+## 2026-05-21：启发式 pricing 与旧 VRP GCTabu 流程效率复核
+
+本次只比较启发式找列框架和计算流程，不把 TWET 分段函数评估本身视为不一致。复核旧 VRP `BPC.GC.GCTabu` 后，当前 `HeuristicPricingEngine` 的主流程已经基本对齐：先从当前 restricted columns 中选低 reduced-cost seed；对每条 seed 初始化当前 route 状态；每轮枚举 remove/add/exchange 三类邻域；候选 reduced cost 使用当前 reduced cost 加局部 job dual、arc dual 和真实成本变化做增量更新；tabu tenure 与 aspiration 规则一致；接受 move 后才修改当前 route 并重建可行性/成本摘要；发现负 reduced-cost route 后先放入本地 pool，最后排序并按 `addin_size` 风格的上限返回列。
+
+参数语义也基本对齐。`heuristicPricingSeedColumns=30` 对应旧 `m_tabu_cg_size`，`heuristicPricingPoolSize=1000` 对应旧 `m_gen_size`，`maxHeuristicPricingColumns=150` 对应旧 `addin_size`，`heuristicPricingTabuIterations=50` 和 `heuristicPricingTabuTenure=30` 分别对应旧 tabu 迭代次数和 tenure。当前实现没有保留前面额外 root 短子序列、singleton 初始列之类的额外策略，root 初始列已经回到旧 VRP 风格。
+
+剩余差异主要有三类。第一，旧 VRP seed 排序直接调用 CPLEX `getReducedCost(var)`，当前 TWET 仍用 `cost - dual` 手工计算 seed reduced cost；这是实现接口差异，已经缓存为每条 seed 只算一次，不再在 comparator 中重复扫描。第二，旧 VRP 的 route cost 是弧成本标量增量，TWET 的真实成本必须通过 forward/backward 分段函数 profile 拼接；这属于问题结构差异。第三，旧 VRP 带 SRI cut 时在 move 增量里维护 `sr_count`，当前 no-cut 版本暂不处理 cut dual；后续加 SRI 时应按旧代码把 cut 贡献也纳入局部增量，而不是回退到全序列扫描。
+
+因此当前可以认为启发式 pricing 的流程和非问题特有的计算效率已经与旧 VRP 基本一致。后续如果还要进一步提速，优先方向不是再改 tabu 框架，而是减少 TWET profile 重建、优化分段函数 merge、或者在加入 SRI cut 后继续保持局部增量更新。

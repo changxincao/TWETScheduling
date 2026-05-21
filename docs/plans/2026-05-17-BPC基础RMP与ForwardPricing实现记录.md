@@ -859,3 +859,11 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 剩余差异主要有三类。第一，旧 VRP seed 排序直接调用 CPLEX `getReducedCost(var)`，当前 TWET 仍用 `cost - dual` 手工计算 seed reduced cost；这是实现接口差异，已经缓存为每条 seed 只算一次，不再在 comparator 中重复扫描。第二，旧 VRP 的 route cost 是弧成本标量增量，TWET 的真实成本必须通过 forward/backward 分段函数 profile 拼接；这属于问题结构差异。第三，旧 VRP 带 SRI cut 时在 move 增量里维护 `sr_count`，当前 no-cut 版本暂不处理 cut dual；后续加 SRI 时应按旧代码把 cut 贡献也纳入局部增量，而不是回退到全序列扫描。
 
 因此当前可以认为启发式 pricing 的流程和非问题特有的计算效率已经与旧 VRP 基本一致。后续如果还要进一步提速，优先方向不是再改 tabu 框架，而是减少 TWET profile 重建、优化分段函数 merge、或者在加入 SRI cut 后继续保持局部增量更新。
+
+## 2026-05-21：merge 与 profile 重建的剩余优化空间
+
+针对启发式 pricing 中剩下的两个 TWET 特有成本点，当前判断如下。第一，`merge2Segments/merge3Segments` 仍有优化空间，但主要是常数和对象分配层面的优化。现在 `merge2Segments` 会构造 `b2.shiftX(-shift)` 再和 `f1.add(...)` 生成临时函数，然后 `findMinimal()`；`merge3Segments` 也会构造 `merge12`、`merge23`，在第二种情形下还会连续构造多个 `shiftX/add` 临时函数。理论上可以写专门的 shifted-sum-min 扫描器，直接用双指针或多指针在原函数段上计算 `min f(t+a)+g(t+b)`，避免临时分段函数对象。这会减少 copy、add、release 和 SegmentPool 压力，但要重新处理定义域交集、big_M 段、端点极限和 gap 语义，风险比普通缓存高，必须用现有 merge 作为 oracle 做大量随机对拍。
+
+第二，接受 tabu move 后当前会调用 `rebuild()`，从头重建整条 route 的 forward/backward profile。这一点确实还有理论优化空间：remove/add/exchange 只改变某个位置附近，forward 在该位置之后受影响，backward 在该位置之前受影响，因此可以只重建受影响前缀或后缀，甚至在同时维护局部 dirty 区间的情况下减少一半以上的重建量。但这会让状态维护明显复杂化，尤其是 add/remove 会改变数组下标，exchange 虽然长度不变但两侧 profile 仍分别受影响。旧 VRP `GCTabu` 接受 move 后也会调用 `UpdateSegInfo()` 重建整条 route 的段摘要，因此当前“接受 move 后重建 profile”的框架并不比旧 VRP 更落后，只是 TWET 的 profile 构造更重。
+
+当前建议是：短期不再动 tabu 框架。若后续 profiling 显示启发式 pricing 仍是瓶颈，优先做 merge 的专用 shifted-sum-min 扫描器，因为它能同时服务启发式、局部搜索和后续 pricing；profile 局部重建排第二，除非确认 route 很长且接受 move 次数很多，否则它会显著增加代码复杂度。

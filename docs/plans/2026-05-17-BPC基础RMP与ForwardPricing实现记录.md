@@ -742,3 +742,5 @@ tabu 搜索本体在 `Tabu(lp)`。每一轮枚举三类邻域：删除当前 rou
 因此旧 VRP 的 tabu 找列框架可以概括为：从当前 RMP 低 reduced cost route 取种子，围绕种子做带 tabu tenure 和 aspiration 的 remove/add/exchange 局部搜索，用预处理子段数组快速判断时间窗可行性，用 dual 增量快速评估 reduced cost，把找到的负 reduced cost route 放入本地池，再按 reduced cost 选最好的若干列加入 RMP。它不是单独求一个完整启发式解，而是服务于列生成的“负 reduced cost 列发现器”。
 
 补充说明 tabu 的思想本身。旧 VRP 这里不是单纯做最速下降局部搜索，而是允许当前 route 接受某个邻域里的最好 move，即使这个 move 不一定让 reduced cost 立刻变好。为了避免刚移动过的客户马上被反向移动撤销，代码给相关客户设置 `tabu_tenure`，在若干轮内禁止它参与相反或重复性质的 move。这样搜索可以跳出局部最优，在一个种子 route 附近探索更大的邻域。禁忌不是绝对的：如果某个 tabu move 能得到比历史最好 `best_cost` 更低的 reduced cost，就通过 aspiration 规则放行。也就是说，tabu 的核心是“短期记忆防止来回震荡 + aspiration 允许明显更优解破禁 + 接受非改进 move 扩大搜索范围”。
+
+更具体地说，tabu tenure 的作用不是直接判断一条 route 是否可行，也不是判断这条列是否能加入 RMP，而是控制局部搜索过程中的“下一步能不能动某个客户”。例如当前 route 是 `0-a-b-c-0`，某一轮选择 remove `b`，route 变成 `0-a-c-0`，同时把 `b` 标记为 tabu 若干轮。后面几轮即使“把 `b` 插回 `a` 和 `c` 中间”看起来是当前邻域里不错的 move，也会因为 `b` 还在 tabu 期内被禁止，从而避免刚删掉又立刻插回去。反过来，如果这个插回动作能产生全局以来最好的 reduced cost，就可以通过 aspiration 破禁。旧 VRP 的 `GCTabu` 就是用这种机制在 seed route 周围持续扰动，边走边收集所有遇到的负 reduced-cost route，而不是只保留最后停下来的 route。

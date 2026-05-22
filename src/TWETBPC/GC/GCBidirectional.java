@@ -426,7 +426,10 @@ public class GCBidirectional {
 		if (joinCost.head == null) {
 			return;
 		}
-		joinCost.shiftYInPlace(data.getSetupCost(forward.jid, backward.jid));
+		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
+		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
+		joinCost.shiftYInPlace(data.getSetupCost(forward.jid, backward.jid)
+				- lp.getArcDual(forward.jid, backward.jid));
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
 			return;

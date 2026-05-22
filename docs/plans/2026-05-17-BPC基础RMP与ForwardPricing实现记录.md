@@ -993,3 +993,13 @@ forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 
 这个改动并没有去掉任何真正的可行 join，因为 `reachableSet` 本来就是当前 label 在禁弧和时间可行性过滤后的候选端点集合；这里只是把原来“先扫全集，再在里面跳过不可能端点”的写法，改成了“直接只扫当前可达端点”。因此它属于常数级优化，不改变最终生成列的语义。
 
 回归验证继续通过。重新编译 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；`HEU.SmallBPCBatchTest` 也继续保持 8/8 个小例和 tariff 分支诊断例全部通过。这一步的意义主要是继续压缩双向 join 的无效候选扫描，而不是改变算法能力边界。
+
+## 2026-05-22：修正 crossing arc join 漏扣 `arcDual(i,r)` 的 fixed reduced-cost 项
+
+在继续看 `tryJoin()` 的时候，发现这里虽然已经把 forward frontier、backward projection 和 crossing arc 的 `setupCost(i,r)` 加了进去，但还漏掉了连接弧 `(i,r)` 在 RMP 中对应的聚合 arc dual。forward 扩展时固定项一直是 `setupCost(i,j) - jobDual(j) - arcDual(i,j)`；backward 扩展时固定项也是 `-jobDual(i) - arcDual(i,successor)`。因此到了 join 这一步，crossing arc 本身的固定 reduced-cost 项也必须是 `setupCost(i,r) - arcDual(i,r)`，而不能只加 setup cost。
+
+如果这里少扣这一次 `arcDual(i,r)`，函数级 join 下界就会系统性偏高。它未必会直接生成错误列，因为最终真正加列前还会走一次 `TWETColumnEvaluator + reducedCost(sequence, cost, lp)` 做完整复核；但它有可能把某些本来应该被识别为负 reduced-cost 的 join 候选提前挡掉，特别是在 `arcDual(i,r)` 为正时，会出现“真实列是负的，但 join 下界被抬到非负”的漏列风险。因此这一步不是单纯的常数优化，而是一个 join reduced-cost 口径修正。
+
+实现上只改了一行固定项：`joinCost.shiftYInPlace(...)` 现在从原来的只加 `setupCost(i,r)`，改成加 `setupCost(i,r) - lp.getArcDual(i,r)`，并在代码旁边补了中文注释说明原因。其它 join、dominance、`T^mid` 和 evaluator 复核流程都不变。
+
+回归验证没有被破坏。重新编译 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；`HEU.SmallBPCBatchTest` 仍保持 8/8 个小例和 tariff 分支诊断例全部通过。说明这次修正至少没有引入行为偏差，同时把 join 下界和完整 reduced-cost 定义重新对齐了。

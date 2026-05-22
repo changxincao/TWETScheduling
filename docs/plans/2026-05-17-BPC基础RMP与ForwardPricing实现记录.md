@@ -1003,3 +1003,17 @@ forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 
 实现上只改了一行固定项：`joinCost.shiftYInPlace(...)` 现在从原来的只加 `setupCost(i,r)`，改成加 `setupCost(i,r) - lp.getArcDual(i,r)`，并在代码旁边补了中文注释说明原因。其它 join、dominance、`T^mid` 和 evaluator 复核流程都不变。
 
 回归验证没有被破坏。重新编译 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；`HEU.SmallBPCBatchTest` 仍保持 8/8 个小例和 tariff 分支诊断例全部通过。说明这次修正至少没有引入行为偏差，同时把 join 下界和完整 reduced-cost 定义重新对齐了。
+
+## 2026-05-22：给双向 join 加一层标量乐观下界预剪枝
+
+在前面的两轮优化之后，`tryJoin()` 的热点已经比较集中：先裁 forward frontier，再构造 backward projection，再做 `add + findMinimal`。这一套是必要的精确函数判断，但并不是每个 forward/backward label 对都值得走到这一步，因为很多 pair 在更粗的层面就不可能给出负 reduced cost。
+
+这次补了一层非常便宜的 join 前置下界。`ForwardLabel` 和 `BackwardLabel` 本身都已经缓存了各自 frontier 在当前定义域上的最小值 `minReducedCost`。而对任意一个 crossing arc `(i,r)` 来说，真正 join 函数的最小值一定不小于
+\[
+    \min f_i + \min f_r^b + \kappa_{ir} - \alpha_{ir},
+\]
+也就是 forward frontier 最小值、backward frontier 最小值，再加上 crossing arc 的固定 reduced-cost 项 `setupCost(i,r) - arcDual(i,r)`。原因很直接：后面的 `cropToInterval()` 只会缩小定义域，`buildJoinBackwardProjection()` 只会把 backward frontier 取到 `T^mid` 或更靠右的位置，这两步都不可能把函数最小值压得比原 frontier 的全局最小值更低。因此这确实是一个安全的乐观下界。
+
+实现上，`tryJoin()` 现在在做任何函数裁剪和投影之前，先计算一次 `optimisticJoinLB`。如果这个下界都已经不可能为负，就直接返回，不再进入后面的 `crop + projection + add + findMinimal`。这样做不会改变生成列语义，只是把一批显然不可能成列的 pair 提前挡在了最便宜的标量检查层。
+
+回归验证继续通过。重新编译 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；该组小例上的双向平均时间约为 `1.67 ms/round`。`HEU.SmallBPCBatchTest` 继续保持 8/8 个小例和 tariff 分支诊断例全部通过。说明这层 join 前置下界剪枝在当前实现里是安全的，而且能继续减少一部分无效的函数级 join 计算。

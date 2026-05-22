@@ -406,6 +406,16 @@ public class GCBidirectional {
 			return;
 		}
 
+		double joinFixedReducedCost = data.getSetupCost(forward.jid, backward.jid)
+				- lp.getArcDual(forward.jid, backward.jid);
+		// 2026-05-22: 先用 forward/backward frontier 的全局最小值做一次乐观下界。
+		// cropToInterval 和 backward projection 只会进一步收紧定义域或把取值抬高，
+		// 因此若这个标量下界都不能为负，就没必要再构造 join 函数。
+		double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
+		if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
+			return;
+		}
+
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
 		double joinUpper = Math.min(tMid, backward.frontier.tail.end - delta);
 		double joinLower = forward.frontier.head.start;
@@ -428,8 +438,7 @@ public class GCBidirectional {
 		}
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
 		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
-		joinCost.shiftYInPlace(data.getSetupCost(forward.jid, backward.jid)
-				- lp.getArcDual(forward.jid, backward.jid));
+		joinCost.shiftYInPlace(joinFixedReducedCost);
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
 			return;

@@ -360,10 +360,8 @@ public class GCBidirectional {
 			return;
 		}
 		Node node = lp.getNode();
-		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
-			if (forward.jid == firstJob || node.isArcForbidden(forward.jid, firstJob)) {
-				continue;
-			}
+		for (int firstJob = forward.reachableSet.nextSetBit(1); firstJob >= 0 && canContinue();
+				firstJob = forward.reachableSet.nextSetBit(firstJob + 1)) {
 			ArrayList<BackwardLabel> table = BWTL.get(firstJob);
 			for (int i = 0; i < table.size() && canContinue(); i++) {
 				BackwardLabel backward = table.get(i);
@@ -379,10 +377,17 @@ public class GCBidirectional {
 			return;
 		}
 		Node node = lp.getNode();
-		for (int lastJob = 0; lastJob <= data.n && canContinue(); lastJob++) {
-			if (lastJob == backward.jid || node.isArcForbidden(lastJob, backward.jid)) {
-				continue;
+		if (!node.isArcForbidden(0, backward.jid)) {
+			ArrayList<ForwardLabel> sourceTable = FWTL.get(0);
+			for (int i = 0; i < sourceTable.size() && canContinue(); i++) {
+				ForwardLabel forward = sourceTable.get(i);
+				if (!forward.isDominated) {
+					tryJoin(forward, backward, lp);
+				}
 			}
+		}
+		for (int lastJob = backward.reachableSet.nextSetBit(1); lastJob >= 0 && canContinue();
+				lastJob = backward.reachableSet.nextSetBit(lastJob + 1)) {
 			ArrayList<ForwardLabel> table = FWTL.get(lastJob);
 			for (int i = 0; i < table.size() && canContinue(); i++) {
 				ForwardLabel forward = table.get(i);

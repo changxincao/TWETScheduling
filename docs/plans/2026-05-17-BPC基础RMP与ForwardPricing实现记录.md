@@ -984,3 +984,12 @@ forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 
 这样 `GCBidirectional.backwardHWindowGamma()` 里就不再自己扫 `h`，而是直接调用 `data.getBackwardSetupCostAdvantage(i,j)`。这一改动不影响任何 reduced-cost 语义，只是把每轮 pricing 的重复三重循环搬到了数据初始化阶段。
 
 回归验证继续保持通过。重新编译 `Data.java` 和 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍是 12/12 轮单向/双向最优 reduced cost 完全一致，而且这组小例上的双向平均时间从前一轮的约 `6.58 ms/round` 下降到约 `1.58 ms/round`；`HEU.SmallBPCBatchTest` 也继续保持 8/8 小例和 tariff 分支诊断例全部通过。这里的数值不应过度解读成严格 benchmark，但至少说明这次把 backward `B^b_{ij}` 下沉到 `Data` 后，没有引入行为变化，而且对当前小例的双向 pricing 常数开销是有帮助的。
+## 2026-05-22：用 reachableSet 剪掉双向 join 的无效端点扫描
+
+在前面的 crossing-arc 双向版本里，`joinFromForward()` 和 `joinFromBackward()` 功能上已经是对的，但外层仍然会把 `1..n` 或 `0..n` 的端点全部扫一遍，再去看相应的 `FWTL/BWTL` 表。这样做在小例上影响不大，但当某个 forward 或 backward label 的 `reachableSet` 已经因时间窗、`T^mid` 和禁弧收缩得很小时，这部分全量扫描就是纯常数开销。
+
+这次只做一个低风险剪枝，不动 join 语义，也不动 dominance。`joinFromForward()` 现在直接遍历 `forward.reachableSet` 中当前仍可能作为 crossing arc 右端点的任务，不再把 `1..n` 全部扫一遍；`joinFromBackward()` 也改成先单独处理 source `0`，再遍历 `backward.reachableSet` 中当前可作为 crossing arc 左端点的任务。这样 join 前的端点枚举就和扩展阶段维护的可达集合保持了一致，不再做无意义的全集扫描。
+
+这个改动并没有去掉任何真正的可行 join，因为 `reachableSet` 本来就是当前 label 在禁弧和时间可行性过滤后的候选端点集合；这里只是把原来“先扫全集，再在里面跳过不可能端点”的写法，改成了“直接只扫当前可达端点”。因此它属于常数级优化，不改变最终生成列的语义。
+
+回归验证继续通过。重新编译 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；`HEU.SmallBPCBatchTest` 也继续保持 8/8 个小例和 tariff 分支诊断例全部通过。这一步的意义主要是继续压缩双向 join 的无效候选扫描，而不是改变算法能力边界。

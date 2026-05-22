@@ -1,5 +1,17 @@
 # BPC 基础 RMP 与单向 Forward Pricing 实现记录
 
+## 2026-05-22：旧 VRP 中 GCNGB 与 GCNGBB 的 bound / DSS 流程区别
+
+旧 VRP 代码里 `GCNGB` 和 `GCNGBB` 都带有 `ng-route` 思想，但它们不是同一个层次的双向算法。`GCNGB.java` 文件头写的是 `ng-route with complete bound`，并特别注明这种 complete bound 不能直接和 bounded bidirectional search 组合，因为在 bounded 双向搜索里这个 bound 不再是完整的。这里的关键不是“ng-route 不能和双向 labeling 共存”，而是“`GCNGB` 那套单向扩展阶段使用的 complete-bound 剪枝公式不能直接搬到半程双向 join 里”。
+
+`GCNGB` 的流程更准确地说是“交替方向的完整扩展 + 对侧 complete bound 剪枝”。它维护 forward 和 backward 两套 label 队列，也会交替执行 `FWExtend()` 和 `BWExtend()`，但每次真正扩展时仍是一个方向从源到汇或从汇到源完整延伸；当 label 到达终点时可以直接生成 route。它没有像 bounded bidirectional 那样在中间点执行 `Join()`。它的 bound 表来自上一轮对侧已经生成的完整 label 集，例如 forward 扩展时用 `m_bw_bound[cid][remainingTime]` 估计从当前点继续到终点的最优剩余 reduced cost；如果当前 label 的 reduced cost 加这个对侧完整 bound 已经不可能为负，就剪掉。若发现 ng-relaxation 下的重复路径，则记录 duplicate cycle，再通过 `UpdateNGSet()` 扩大 ng-set，下一轮重新搜索。这套逻辑依赖一个前提：对侧 bound 表代表“从当前点到终点的完整补全能力”。
+
+`GCNGBB` 才是旧代码里真正的 bounded bidirectional 版本。它同样使用 ng-route，并且用 DSSR/decremental state space 处理 ng 放松下产生的重复客户。流程是先构造多类 bound 表，包括 forward/backward time bound、forward/backward capacity bound 以及带 SRI 修正的 bound 变体；然后在每一轮 DSS 循环里执行 `FWExtend()`、`UpdateFWBound()`、`BWExtend()`、`UpdateBWBound()`，最后通过 `Join()` 在同一个中间客户点 `cid` 上拼接 forward label 和 backward label。join 时会检查访问集合冲突、容量、时间和 reduced cost；如果拼出来的是负 reduced-cost 但包含 ng 放松造成的重复客户，就不直接作为合法列接受，而是记录最优重复环并更新 ng-set，进入下一轮 DSS 收缩；如果拼出来的是合法 elementary/ng-feasible 路径，才放入本轮候选列池。
+
+因此，`GCNGBB` 不是把 `GCNGB` 的 `m_fw_bound / m_bw_bound` 公式原样塞进双向 join。它重新组织了 bound 的来源、使用位置和 DSS 检查逻辑。bounded 双向 label 本来就只扩展到一部分资源范围，单侧 label 集并不表示“从某点到终点的完整补全”。如果照搬 `GCNGB` 的 complete-bound 剪枝，就可能把本来可以通过中间 join 得到的负 reduced-cost 路径提前剪掉；反过来，也可能把 ng 放松下的重复路径当成安全补全来估计，破坏 DSS 的判断。因此旧代码才把 `GCNGB` 和 `GCNGBB` 分成两个实现。
+
+对当前 TWET-BPC 的含义是：如果后续做 NG + DSSR + 双向函数 label，应该参考 `GCNGBB` 的整体结构，而不是只把 `GCNGB` 的 bound 公式搬过来。TWET 的 label 还带有分段线性函数，剩余成本 bound 不能只按一个标量 reduced cost 粗暴剪枝；至少要证明它是对所有可行完成时间都安全的函数级下界，或者先只保留双向 join 和 DSSR，不加 complete-bound 剪枝。否则在半程 label 上套用完整路径 bound，会有错误剪枝风险。
+
 ## 当前实现
 
 本次先把能够真正运行的第一版 BPC 主链路搭起来，目标不是一次性完成完整 branch-price-and-cut，而是先形成“RMP 能解、pricing 能生成负 reduced cost 列、列能回到 RMP、结果能输出和校验”的闭环。当前实现参考 `parallel_machine_scheduling_with_due_window.pdf` 中 set-partitioning/SP2 的建模思路，以及前面讨论过的“每个 dominance graph node 保留真实 label 集合，同时维护一个聚合 envelope 用于集合占优”的方案；旧 VRP BPC 代码里的 `GC`、`UL/TL`、按末端节点组织 label、arc branching 这些结构也尽量沿用了相近的命名和流程。

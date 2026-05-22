@@ -851,6 +851,10 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 `GCBDT` 的逻辑也是同一类点 join。它在 backward 扩展过程中，如果当前 backward label 的 `cid` 不是 sink，就临时 `ResetVisit(label, cid)`，然后只和 `FWTL.get(cid)` 的 forward labels 配对。通过容量、时间和访问集合检查后，同样用 `JoinRoute(lbf, label)` 拼接，其中 backward 部分从 `blb.father` 开始。因此它也不是枚举前向末端 `i` 和后向起点 `j`，再用弧 `(i,j)` 连接。
 
 这对当前 TWET 双向 pricing 的含义是：如果要“按旧 VRP 框架”复刻不带 ng-route 的 bounded bidirectional join，最直接对应的是同一任务点 join。若改成 `(i,j)` 弧 join，会更像另一类 front-to-back 拼接策略，可能覆盖更多连接方式，但已经不是旧 VRP 这两个基础双向类的原始流程。后续如果要做函数级双向 label，除非明确决定升级为弧 join，否则应先按点 join 对齐旧代码，再考虑是否为了 TWET 的 setup/函数结构增加弧 join 版本做对比。
+
+旧 VRP 里还有一条容易误读的注释：`GCNGB.java` 文件头写的是 `ng-route with complete bound`，并注明 `cannot be combined with bounded bidirectional search, because the bound is not complete`。这里不能简单理解成“ng-route 和双向 labeling 冲突”。因为同一目录下 `GCNG.java` 明确就是 `ng-route, using bounded bidirectional label setting`，`GCNGBB.java` 也写了 `ng-route, using decremental state space ... using bounded bidirectional label setting ... using the complete bound to cut off some labels`。因此更准确的理解是：旧作者认为 `GCNGB` 那种单向/完整 bound 的剪枝方式不能直接搬到 bounded bidirectional search 里使用，因为在 bounded 双向只扩到一半资源时，那个 bound 不是完整路径意义上的安全 bound；后续 `GCNGBB` 则通过 DSS、2d/2-cycle-free bound 和额外 bound checks 重新组织了组合方式。
+
+对当前 TWET 的启示是：不要把这条注释当成“不能做 NG + 双向”。可以做 NG + 双向，但如果要加入类似 complete bound 的剪枝，必须重新证明它在 bounded forward/backward label 和 join 结构下仍然是安全下界/上界，不能直接把单向 bound 公式照搬到半程 label 上剪。
 ## 2026-05-21：启发式 pricing 的 singleton profile 与 seed reduced cost 缓存
 
 本轮继续处理 `HeuristicPricingEngine` 中和旧 VRP `GCTabu` 对比后暴露出来的重复计算点。第一处是 add/exchange 候选里反复构造单任务 profile。单个 job 的前向 prefix-min 和反向 suffix-min 结果只依赖 job 自身，与当前 seed route、dual 或 tabu 状态无关，因此可以在 pricing engine 构造时预先缓存模板。实际 merge 时仍然返回 `PiecewiseLinearFunction` 副本，因为 `merge2Segments/merge3Segments` 过程可能修改传入函数对象，直接共享缓存会污染后续候选。

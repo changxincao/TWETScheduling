@@ -124,6 +124,9 @@ public class GCBidirectional {
 		PackedBitSet sinkVisited = new PackedBitSet(data.n + 2);
 		sinkVisited.add(lp.getNode().sinkId());
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
+		// 2026-05-23: backward 虚拟终点本身也要带 [Tmid,CmaxH] 元数据。
+		// 这样后续若发生 shiftX，trimToDomain 的边界和物理半域一致。
+		sinkFrontier.resetDomain(tMid, data.CmaxH);
 		sinkFrontier.addSegment(tMid, data.CmaxH, 0.0, 0.0);
 		BackwardLabel sink = BackwardLabel.sink(lp.getNode().sinkId(), sinkVisited, sinkFrontier,
 				buildBackwardReachableSet(lp.getNode().sinkId(), sinkVisited, lp.getNode(), sinkFrontier));

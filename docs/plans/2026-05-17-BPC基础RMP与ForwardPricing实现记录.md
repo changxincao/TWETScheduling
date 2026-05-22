@@ -1132,3 +1132,11 @@ join 侧也同步补了单点投影处理。`buildJoinBackwardProjection()` 在 
 基于这个判断，本次把 `GCBidirectional.cropToInterval()` 调整为在裁剪物理 segment 的同时同步 `domainStart/domainEnd`。这样由 `cropToInterval()` 构造出的 forward 半域函数、backward 半域函数、动态 half-domain job penalty 和 join 临时裁剪函数，在后续 `shiftX()` 中都会按自身半域元数据自然 `trimToDomain()`。这不改变双向 pricing 的数学流程，只是把半域边界从“物理 segment 兜底”提升为“元数据和物理 segment 一致”的明确契约，也减少后续理解上的歧义。
 
 需要注意的是，三参数 `setDomain(start,end,true)` 的作用仍然是把动态硬时间窗外写成 `big_M`，不是直接表达双向半域；双向半域由 `cropToInterval()` 再裁出。`shiftX()` 会裁，但只裁到函数对象自己记录的 domain，所以凡是人为裁半域的辅助函数，都必须同步元数据。
+
+## 2026-05-23：双向初始半域与自然裁剪保证
+
+继续确认双向半域是否可以像单向里的 `CmaxH` 一样作为方向边界使用。当前 forward 侧已经满足这个契约：source label 由 `cropToInterval(data.penaltyFunction[0], 0, T^mid)` 构造，动态 job penalty 也由 `buildForwardHalfPenalty()` 裁成 `[0,T^mid]`，并且 `cropToInterval()` 已同步 `domainStart/domainEnd`。因此 forward 扩展中 `label.frontier.shiftX(delay)` 会先按 `[0,T^mid]` 自动 `trimToDomain()`；之后 `add(jobPenalty)` 的公共定义域仍然不超过 `[0,T^mid]`，不需要再额外做一次半域裁剪。
+
+反向侧逻辑同理，但本次发现虚拟 sink 初始函数虽然物理 segment 是 `[T^mid,CmaxH]`，此前没有同步 domain 元数据。现在已经在构造 `sinkFrontier` 时显式 `resetDomain(T^mid,CmaxH)`。这样 backward 初始 label、backward dynamic job penalty 以及后续扩展得到的函数都会以 `[T^mid,CmaxH]` 作为自身 domain；`shiftX(-delay)` 会自然按反向半域裁剪，`add(jobPenalty)` 也只在该半域公共定义域上操作。
+
+因此当前可以把 `T^mid` 理解成双向 pricing 中的半域版 `CmaxH`：forward 右端边界是 `T^mid`，backward 左端边界是 `T^mid`。这依赖两个条件同时成立：一是初始 label 的元数据和物理 segment 都在半域内；二是每个新增 job penalty 也先裁成同方向半域。只要这两个条件保持，扩展过程中不需要额外的 post-crop 来兜底。

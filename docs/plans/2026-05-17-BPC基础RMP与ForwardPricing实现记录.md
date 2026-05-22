@@ -922,3 +922,17 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 初始列构造侧也比较简单。现在 `InitialColumnBuilder.build()` 只调用 `seedProvider.getOrBuildSeed()`，然后把最终 seed solution 中每台机器的完整序列加入列池。若启用历史 best 解池，可以保持最终 seed 仍作为 incumbent，仅把历史 best 解中的机器序列额外加入 `initialColumnIds`。列池 `Pool.addColumn()` 已经用 `SequenceSignature` 做序列级判重，`InitialColumnBuilder` 也用 `LinkedHashSet` 去重，因此“历史解中重复出现的同一机器序列”不会重复进入 root RMP。外包任务不需要额外转成列，因为 RMP 已经有外包变量；历史解只贡献其中真实机器上的完整序列列。
 
 这个功能对可行性没有风险：最终 seed 的完整机器列仍然作为 incumbent column set 返回，历史 best 只是增加 root 初始列。它和前面删除短子序列、singleton 的逻辑不冲突，因为这里加入的是 ALNS 实际到达过的完整机器序列，而不是人为切出来的组合片段。建议加一个配置开关，例如 `useBestSolutionHistoryForInitialColumns`，默认可以先打开或先用于诊断；如果后续发现 root LP 初始列过多影响速度，再限制历史池大小或只保留最近/最优若干个历史 best 解。
+
+## 2026-05-22：v42 tex 双向 labeling 与当前 GCBidirectional 的差异判断
+
+本次开始准备优化 exact pricing，目标是先实现 elementary 的双向 labeling。对照 `C:\Users\Changxin\Downloads\twet_outsourcing_models_revised_v42.tex` 中 “Bidirectional internal scheduling pricing” 小节后，当前主要结论是：现有 `src/TWETBPC/GC/GCBidirectional.java` 不能直接作为该算法的小修补版本，它和 v42 tex 的双向算法在 join 结构、label 状态和 dominance 语义上都有结构性差异。
+
+当前 `GCBidirectional` 更像旧 VRP 中不带 ng-route 的点 join 框架：forward label 和 backward label 按同一个中间 job 存在 `FWTL.get(cid)` 与 `BWTL.get(cid)` 中，`tryJoin()` 也要求 `forward.jid == backward.jid`，拼接时跳过 backward 序列的第一个 job 以避免中间点重复。这个流程和前面复核过的旧 VRP `GCBDT/GCDSS` 的同点 join 是一致的。
+
+但 v42 tex 里的 TWET 双向算法不是同点 join，而是通过一条跨越中点的连接弧 `(i,r)` join。forward label 表示到 job `i` 的 prefix，backward label 表示从 job `r` 开始的 suffix，两侧访问集合必须互不相交，并且要满足 `ell_L + s_ir + p_r <= rho_L^b`。最终 reduced cost 由 `min { f_L(t) + kappa_ir + f_b(u) } - lambda` 或等价的单时间变量形式计算，其中允许在 crossing arc 上等待。也就是说，真正的拼接点通常是两段之间的弧，而不是某个共同 job。若继续使用当前同点 join，会漏掉中点落在两个相邻 job 之间的序列，例如 prefix 结束于 `i`、suffix 从 `r` 开始、且 `i != r` 的情况；这不是单纯效率弱，而是可能影响 exact pricing 的完备性。
+
+另一个差异是 label 成本状态。当前 `GCBidirectional` 为了避免反向函数定义域和 endpoint discontinuity 复杂性，join 后统一调用 `TWETColumnEvaluator` 对完整序列重算成本，并用 `dominanceReducedCost`、`sourceDuration`、`internalDuration` 做标量占优。v42 tex 要求 forward/backward label 都携带完成时间函数：forward 是 prefix 的 reduced-cost frontier，backward 是 “第一个 job 完成不早于 t” 时 suffix 的 reduced-cost 函数；dominance 也应比较函数和可扩展集合。当前这种标量 dominance 只能作为保守搜索控制，不能等价于论文中的函数级 dominance graph。
+
+因此后续实现应分两步做。第一步先把双向 exact pricing 的结构改成 v42 tex 的 elementary 版本：forward/backward 都保留显式 visited set，dominance graph 仍按集合 key 做完整占优，不做 partial dominance，也不接 ng-route/SRI；join 改成枚举 crossing arc `(i,r)`，并处理 source label 与 backward label 的 `(0,r)` join，保证覆盖右半侧开始的完整列。第二步再处理函数域细节：如果暂时不动半域定义域，可以先保留全域函数并只在 join 处按 tex 的常数延拓语义取值；如果要严格按论文实现，则 forward label 存 `[ell,Tmid]`，backward label 存 `[Tmid,rho]`，extension/dominance 在半域上做，join 时使用常数延拓计算 crossing arc 的最小 reduced cost。
+
+当前判断为：存在问题，不能直接在现有同点 join + 完整序列 evaluator 的框架上宣称已经实现 v42 tex 的 elementary 双向 labeling。下一步代码实现应以“新建或重写一个函数 label 型双向 exact pricing engine”为目标，而不是给现有标量 `GCBidirectional` 加局部判断。

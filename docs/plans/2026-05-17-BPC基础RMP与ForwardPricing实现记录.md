@@ -14,6 +14,8 @@
 
 需要特别避免一个误解：`GCNGBB` 并不是“不使用 complete bound”。源码头部仍然写着 `using the complete bound to cut off some labels`，并且实际维护了 `m_ft_bound/m_bt_bound/m_fc_bound/m_bc_bound` 以及带 SRI 修正的 bound 表。准确说法是：`GCNGBB` 使用了 complete-bound 思想，但它不是直接复用 `GCNGB` 的 `m_fw_bound/m_bw_bound + CheckBoundFW/BW` 公式，而是为了 bounded bidirectional search 重新构造了 forward/backward、time/capacity、SRI/no-SRI 多套 bound，并把它们放在半程 label 扩展、bound 更新和 join/DSS 检查这一整套流程中使用。
 
+两者 bound 的核心区别可以概括为五点。第一，来源不同：`GCNGB` 的 `m_fw_bound/m_bw_bound` 主要来自上一轮另一方向已经生成的终止 label 集，表示从某个客户点继续补到终点或起点的经验最优补全；`GCNGBB` 则先用 `BoundFTExtend/BoundBTExtend/BoundFCExtend/BoundBCExtend` 构造时间和容量维度的动态规划式 bound，再用已经生成的 bounded labels 通过 `UpdateFWBound/UpdateBWBound` 进行修正。第二，含义不同：`GCNGB` 的 bound 更接近“单向完整补全 bound”，扩展当前 label 时把对侧 bound 当作到终点的完整剩余成本；`GCNGBB` 的 bound 是服务于半程 label 与中间 join 的安全估计，不单独承担恢复完整 route 的职责。第三，维度不同：`GCNGB` 主要按客户和剩余时间建表；`GCNGBB` 同时维护时间 bound、容量 bound、SRI 修正版 bound，以及二环避免用的 second-best 信息。第四，使用位置不同：`GCNGB` 在单方向扩展时直接通过 `CheckBoundFW/BW` 剪 label；`GCNGBB` 在 bounded 前后向扩展、bound 更新和 join 前后共同使用这些 bound，并且 join 后还要进入 DSSR 重复客户检查。第五，安全性前提不同：`GCNGB` 安全依赖“对侧表能代表完整补全”；`GCNGBB` 安全依赖“半程 label、bound 表、join、DSSR 更新”这一整套流程共同成立。因此不能把 `GCNGB` 的公式孤立移植到 `GCNGBB` 或当前 TWET 的双向函数 label 中。
+
 ## 当前实现
 
 本次先把能够真正运行的第一版 BPC 主链路搭起来，目标不是一次性完成完整 branch-price-and-cut，而是先形成“RMP 能解、pricing 能生成负 reduced cost 列、列能回到 RMP、结果能输出和校验”的闭环。当前实现参考 `parallel_machine_scheduling_with_due_window.pdf` 中 set-partitioning/SP2 的建模思路，以及前面讨论过的“每个 dominance graph node 保留真实 label 集合，同时维护一个聚合 envelope 用于集合占优”的方案；旧 VRP BPC 代码里的 `GC`、`UL/TL`、按末端节点组织 label、arc branching 这些结构也尽量沿用了相近的命名和流程。

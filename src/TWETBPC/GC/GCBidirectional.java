@@ -734,23 +734,8 @@ public class GCBidirectional {
 		if (successor == data.n + 1 || useJobLevelDynamicWindowCache) {
 			return Math.min(lp.getJobDual(job), baseline);
 		}
-		double bBackward = computeBackwardSetupCostAdvantage(job, successor);
+		double bBackward = data.getBackwardSetupCostAdvantage(job, successor);
 		return bBackward + Math.min(lp.getJobDual(job), baseline);
-	}
-
-	private double computeBackwardSetupCostAdvantage(int job, int successor) {
-		double best = 0.0;
-		for (int predecessor = 0; predecessor <= data.n; predecessor++) {
-			if (predecessor == job || predecessor == successor) {
-				continue;
-			}
-			double saving = data.getSetupCost(predecessor, successor) - data.getSetupCost(predecessor, job)
-					- data.getSetupCost(job, successor);
-			if (Utility.compareGt(saving, best)) {
-				best = saving;
-			}
-		}
-		return Math.max(0.0, best);
 	}
 
 	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {

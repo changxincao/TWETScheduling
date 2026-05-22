@@ -12,6 +12,7 @@ import Common.Utility;
 import HEU.SchedulerForReleaseNoWait;
 
 public class Data {
+	public double[][] backwardSetupCostAdvantage;// 2026-05-22: B^b_ij 缓存到 Data，避免双向 pricing 每轮重新扫前驱 h
 	public Configure configure;
 	public static int scale = 1;
 	public int n; // number of jobs
@@ -58,6 +59,7 @@ public class Data {
 		this.s = new double[n + 1][n + 1];// 如果存在释放时间，setup可以发生在释放时间之前
 		this.setupCost = new double[n + 1][n + 1];// 旧数据没有 SETUP_COST 块时默认全 0，保持兼容
 		this.setupCostAdvantage = new double[n + 1][n + 1];
+		this.backwardSetupCostAdvantage = new double[n + 1][n + 1];
 		this.min_s = new double[n + 1];
 		this.r = new double[n + 1];
 		this.outsourcingCost = new double[n + 1];
@@ -440,10 +442,14 @@ public class Data {
 		if (setupCostAdvantage == null || setupCostAdvantage.length != n + 1) {
 			setupCostAdvantage = new double[n + 1][n + 1];
 		}
+		if (backwardSetupCostAdvantage == null || backwardSetupCostAdvantage.length != n + 1) {
+			backwardSetupCostAdvantage = new double[n + 1][n + 1];
+		}
 		setupCostTriangleInequalitySatisfied = true;
 		Arrays.fill(maxSetupCostAdvantage, 0);
 		for (int i = 0; i <= n; i++) {
 			Arrays.fill(setupCostAdvantage[i], 0);
+			Arrays.fill(backwardSetupCostAdvantage[i], 0);
 			for (int j = 1; j <= n; j++) {
 				if (i == j) {
 					continue;
@@ -465,6 +471,24 @@ public class Data {
 				if (Utility.compareGt(best, 0.0)) {
 					setupCostTriangleInequalitySatisfied = false;
 				}
+			}
+		}
+		for (int i = 1; i <= n; i++) {
+			for (int j = 1; j <= n; j++) {
+				if (i == j) {
+					continue;
+				}
+				double best = 0;
+				for (int h = 0; h <= n; h++) {
+					if (h == i || h == j) {
+						continue;
+					}
+					double advantage = setupCost[h][j] - setupCost[h][i] - setupCost[i][j];
+					if (Utility.compareGt(advantage, best)) {
+						best = advantage;
+					}
+				}
+				backwardSetupCostAdvantage[i][j] = Math.max(0.0, best);
 			}
 		}
 	}
@@ -658,6 +682,10 @@ public class Data {
 
 	public double getSetupCostAdvantage(int i, int j) {
 		return this.setupCostAdvantage[i][j];
+	}
+
+	public double getBackwardSetupCostAdvantage(int i, int j) {
+		return this.backwardSetupCostAdvantage[i][j];
 	}
 
 	public double getProcessT(int i) {

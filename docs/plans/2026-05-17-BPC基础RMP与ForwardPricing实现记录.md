@@ -972,3 +972,15 @@ forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 
 这一轮改动后重新做了两类回归。第一，`HEU.PricingAlgorithmComparisonTest` 仍然保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；第二，`HEU.SmallBPCBatchTest` 仍然保持 8/8 个小例和 1 个 tariff 分支诊断例全部通过，BPC 与 ArcFlow 目标值一致。说明这次 backward 动态窗口增强没有破坏当前双向 pricing 的正确性基线。
 
 到这一步，双向 exact pricing 中“只有 forward 用本轮动态硬时间窗、backward 仍用静态粗窗”的不对称已经去掉。当前剩余的主要强化点就不再是这个窗口层面，而是更强的函数级 dominance 结构、NG/DSSR 和 cut。
+
+## 2026-05-22：把 backward setup-cost advantage 下沉到 Data 预处理
+
+补完 backward 动态硬时间窗后，`GCBidirectional` 里还有一个明显但纯工程性的低效点：`B_{ij}^b` 仍然是在 pricing 初始化时按 pair 临时扫前驱 `h` 计算出来的。这样即使同一个实例多轮重解 RMP、重复做 pricing，backward 的 setup-cost advantage 也会被一轮一轮重复计算。
+
+这次把这部分也和 forward 一样下沉到了 `Data`。现在 `Data.precomputeSetupCostAdvantages()` 在原有 `setupCostAdvantage[i][j]` 之外，同时预处理 `backwardSetupCostAdvantage[i][j]`，其含义正是论文里的
+\[
+    B_{ij}^b=\max_h[\kappa_{hj}-\kappa_{hi}-\kappa_{ij}]_+.
+\]
+这样 `GCBidirectional.backwardHWindowGamma()` 里就不再自己扫 `h`，而是直接调用 `data.getBackwardSetupCostAdvantage(i,j)`。这一改动不影响任何 reduced-cost 语义，只是把每轮 pricing 的重复三重循环搬到了数据初始化阶段。
+
+回归验证继续保持通过。重新编译 `Data.java` 和 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍是 12/12 轮单向/双向最优 reduced cost 完全一致，而且这组小例上的双向平均时间从前一轮的约 `6.58 ms/round` 下降到约 `1.58 ms/round`；`HEU.SmallBPCBatchTest` 也继续保持 8/8 小例和 tariff 分支诊断例全部通过。这里的数值不应过度解读成严格 benchmark，但至少说明这次把 backward `B^b_{ij}` 下沉到 `Data` 后，没有引入行为变化，而且对当前小例的双向 pricing 常数开销是有帮助的。

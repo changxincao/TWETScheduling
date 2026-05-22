@@ -113,9 +113,11 @@ public class GCBidirectional {
 
 		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
 		sourceVisited.add(0);
-		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
+		PiecewiseLinearFunction sourceFrontier = data.penaltyFunction[0].copy();
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
+		sourceFrontier = padToIntervalWithBigM(sourceFrontier, 0.0, tMid);
 		sourceFrontier.normalize(Direction.FORWARD);
+		sourceFrontier = padToIntervalWithBigM(sourceFrontier, 0.0, tMid);
 		ForwardLabel source = new ForwardLabel(0, null, sourceVisited,
 				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
 		FWTL.get(0).add(source);
@@ -220,17 +222,15 @@ public class GCBidirectional {
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
 				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
+		// 2026-05-22: forward frontier 固定保留 [0,Tmid] 半域；窗口外和移位后暂不可达部分写成 big_M，
+		// normalize 之后再把左侧缺失的 big_M 头段补回，避免 join/reach 再因为物理缩域丢掉半域语义。
+		nextFrontier = padToIntervalWithBigM(nextFrontier, 0.0, tMid);
 		nextFrontier.normalize(Direction.FORWARD);
 		if (nextFrontier.head == null) {
 			return null;
 		}
-
-		double ell = nextFrontier.head.start;
-		if (Utility.compareGt(ell, tMid)) {
-			return null;
-		}
-		nextFrontier = cropToInterval(nextFrontier, ell, tMid);
-		if (nextFrontier.head == null) {
+		nextFrontier = padToIntervalWithBigM(nextFrontier, 0.0, tMid);
+		if (!hasFiniteSegment(nextFrontier)) {
 			return null;
 		}
 
@@ -243,21 +243,25 @@ public class GCBidirectional {
 	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
 		Node node = lp.getNode();
 		PiecewiseLinearFunction nextFrontier;
-		double rho;
+		double successorHStart = getDynamicBackwardHStart(prevJob, label.isSinkRoot ? node.sinkId() : label.jid);
+		double rhoPrime;
 		if (label.isSinkRoot) {
+			rhoPrime = getDynamicBackwardHEnd(prevJob, node.sinkId());
+			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
+				return null;
+			}
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, node.sinkId());
 			if (jobPenalty == null) {
 				return null;
 			}
 			nextFrontier = jobPenalty.copy();
 			nextFrontier.shiftYInPlace(-lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId()));
-			nextFrontier.normalize(Direction.BACKWARD);
-			if (nextFrontier.head == null) {
-				return null;
-			}
-			rho = getDynamicBackwardHEnd(prevJob, node.sinkId());
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
+			rhoPrime = Math.min(label.feasibleEnd - delay, getDynamicBackwardHEnd(prevJob, label.jid));
+			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
+				return null;
+			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
 			if (shifted.head == null) {
 				return null;
@@ -273,18 +277,16 @@ public class GCBidirectional {
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
 					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
-			nextFrontier.normalize(Direction.BACKWARD);
-			if (nextFrontier.head == null) {
-				return null;
-			}
-			rho = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
 		}
-		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, label.isSinkRoot ? node.sinkId() : label.jid));
-		if (Utility.compareLt(rho, lower)) {
+		// 2026-05-22: backward 端先补满 [Tmid,T] 再做 suffix-normalize。
+		// 这样 [Tmid, 真正最早可行点) 会被 suffix-min 压成常数，而不是像旧实现那样被 crop 掉。
+		nextFrontier = padToIntervalWithBigM(nextFrontier, tMid, data.CmaxH);
+		nextFrontier.normalize(Direction.BACKWARD);
+		if (nextFrontier.head == null) {
 			return null;
 		}
-		nextFrontier = cropToInterval(nextFrontier, lower, rho);
-		if (nextFrontier.head == null) {
+		nextFrontier = padToIntervalWithBigM(nextFrontier, tMid, data.CmaxH);
+		if (!hasFiniteSegment(nextFrontier)) {
 			return null;
 		}
 
@@ -417,8 +419,8 @@ public class GCBidirectional {
 		}
 
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
-		double joinUpper = Math.min(tMid, backward.frontier.tail.end - delta);
-		double joinLower = forward.frontier.head.start;
+		double joinUpper = Math.min(tMid, backward.feasibleEnd - delta);
+		double joinLower = forward.feasibleStart;
 		if (Utility.compareGt(joinLower, joinUpper)) {
 			return;
 		}
@@ -533,7 +535,11 @@ public class GCBidirectional {
 			return false;
 		}
 		double hEnd = getDynamicForwardHEnd(prevJob, nextJob);
-		double earliestCompletion = frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
+		double feasibleStart = firstFiniteStart(frontier);
+		if (!Double.isFinite(feasibleStart)) {
+			return false;
+		}
+		double earliestCompletion = feasibleStart + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
 		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, tMid);
 	}
 
@@ -548,7 +554,7 @@ public class GCBidirectional {
 			rhoPrime = getDynamicBackwardHEnd(prevJob, successor);
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
-			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
+			rhoPrime = Math.min(label.feasibleEnd - delay, getDynamicBackwardHEnd(prevJob, successor));
 		}
 		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, successor));
 		return !Utility.compareLt(rhoPrime, lower);
@@ -797,6 +803,57 @@ public class GCBidirectional {
 		return cropped;
 	}
 
+	private PiecewiseLinearFunction padToIntervalWithBigM(PiecewiseLinearFunction function, double intervalStart,
+			double intervalEnd) {
+		PiecewiseLinearFunction padded = new PiecewiseLinearFunction(intervalStart, intervalEnd);
+		if (Utility.compareGt(intervalStart, intervalEnd)) {
+			return padded;
+		}
+		PiecewiseLinearFunction clipped = cropToInterval(function, intervalStart, intervalEnd);
+		if (clipped.head == null) {
+			padded.addSegment(intervalStart, intervalEnd, 0.0, Utility.big_M);
+			return padded;
+		}
+		if (Utility.compareLt(intervalStart, clipped.head.start)) {
+			padded.addSegment(intervalStart, clipped.head.start, 0.0, Utility.big_M);
+		}
+		appendSegments(padded, clipped);
+		if (Utility.compareLt(clipped.tail.end, intervalEnd)) {
+			padded.addSegment(clipped.tail.end, intervalEnd, 0.0, Utility.big_M);
+		}
+		mergeAdjacentEqualSegments(padded);
+		return padded;
+	}
+
+	private static boolean hasFiniteSegment(PiecewiseLinearFunction function) {
+		return Double.isFinite(firstFiniteStart(function));
+	}
+
+	private static double firstFiniteStart(PiecewiseLinearFunction function) {
+		if (function == null) {
+			return Double.POSITIVE_INFINITY;
+		}
+		for (Segment seg = function.head; seg != null; seg = seg.next) {
+			if (!Utility.isBigMValue(seg.intercept)) {
+				return seg.start;
+			}
+		}
+		return Double.POSITIVE_INFINITY;
+	}
+
+	private static double lastFiniteEnd(PiecewiseLinearFunction function) {
+		if (function == null) {
+			return Double.NEGATIVE_INFINITY;
+		}
+		double end = Double.NEGATIVE_INFINITY;
+		for (Segment seg = function.head; seg != null; seg = seg.next) {
+			if (!Utility.isBigMValue(seg.intercept)) {
+				end = seg.end;
+			}
+		}
+		return end;
+	}
+
 	private void appendSegments(PiecewiseLinearFunction target, PiecewiseLinearFunction source) {
 		if (target == null || source == null || source.head == null) {
 			return;
@@ -828,6 +885,8 @@ public class GCBidirectional {
 		final PackedBitSet visitedSet;
 		final PackedBitSet reachableSet;
 		final PiecewiseLinearFunction frontier;
+		final double feasibleStart;
+		final double feasibleEnd;
 		double minReducedCost;
 		boolean isDominated;
 
@@ -836,6 +895,8 @@ public class GCBidirectional {
 			this.visitedSet = visitedSet;
 			this.reachableSet = reachableSet;
 			this.frontier = frontier;
+			this.feasibleStart = firstFiniteStart(frontier);
+			this.feasibleEnd = lastFiniteEnd(frontier);
 			this.minReducedCost = frontier == null || frontier.head == null ? Utility.big_M
 					: frontier.findMinimal(false, true)[0];
 			this.isDominated = false;

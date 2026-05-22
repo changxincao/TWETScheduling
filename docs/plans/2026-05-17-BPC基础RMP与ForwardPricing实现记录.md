@@ -1017,3 +1017,13 @@ forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 
 实现上，`tryJoin()` 现在在做任何函数裁剪和投影之前，先计算一次 `optimisticJoinLB`。如果这个下界都已经不可能为负，就直接返回，不再进入后面的 `crop + projection + add + findMinimal`。这样做不会改变生成列语义，只是把一批显然不可能成列的 pair 提前挡在了最便宜的标量检查层。
 
 回归验证继续通过。重新编译 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；该组小例上的双向平均时间约为 `1.67 ms/round`。`HEU.SmallBPCBatchTest` 继续保持 8/8 个小例和 tariff 分支诊断例全部通过。说明这层 join 前置下界剪枝在当前实现里是安全的，而且能继续减少一部分无效的函数级 join 计算。
+
+## 2026-05-22：修正双向 frontier 的半域保存方式
+
+这轮重新检查 `GCBidirectional` 后，确认上一版双向 exact pricing 在 backward 半域上还有一个不够严谨的点。旧实现会在 `extendBackward()` 里直接把 frontier 物理裁成 `[lower, rho]`，但 `buildJoinBackwardProjection()` 又默认可以在 `T^mid` 取 `backward.evaluate(T^mid)`。当 `lower > T^mid` 时，这两个假设是冲突的：一方面 `[T^mid, lower)` 这段已经被裁掉，另一方面 join 又想把 `T^mid` 当成 backward 常数延拓的锚点。这样虽然在很多小例上未必立刻出错，但语义上不稳，也和前面单向 pricing / 启发式里“定义域外写成 big_M，不轻易物理删域”的处理风格不一致。
+
+这次改法是统一把双向 label 的 frontier 改成“固定半域 + 显式 big_M 补边”。forward 端始终保存 `[0, T^mid]`，backward 端始终保存 `[T^mid, CmaxH]`。扩展时，先继续使用本轮动态硬时间窗裁好的 job penalty 函数；完成 `shift/add/固定 reduced-cost 项` 之后，不再直接用 `cropToInterval()` 缩到真实可行子区间，而是先把整个半域补满：半域内当前没有定义的部分全部写成 `big_M` 段。随后再做 `normalize(Direction.FORWARD/BACKWARD)`。这样 forward 端仍保留左侧不可行的 `big_M` 头段，backward 端则会在 suffix-normalize 时把 `[T^mid, 真正最早可行点)` 自然压成常数，而不是被物理裁掉。normalize 完成后，再把半域边界上缺失的 `big_M` 段补回去，确保存进 label 的 frontier 始终覆盖整段半域。
+
+半域补边后，`head.start/tail.end` 就不再等于真实的有限可行边界，因此这轮也同步把几个依赖边界的位置改成了“显式扫描有限段”。现在 `FunctionLabel` 新增缓存 `feasibleStart` 和 `feasibleEnd`，分别表示首个非 `big_M` 段的起点和最后一个非 `big_M` 段的终点。前向直接扩展过滤改用 `feasibleStart` 计算最早完成时间，反向直接扩展过滤改用 `feasibleEnd` 计算 `rho'`，join 的有效区间也改成 `forward.feasibleStart` 到 `backward.feasibleEnd - delta`。这样 reach、直接扩展和 join 都不会再被半域补边后的假 `head/tail` 误导。
+
+这次修改的核心目标不是再加一种新剪枝，而是把双向 frontier 的保存语义收紧到更稳的版本：半域始终存在，窗口外用 `big_M` 表达，不再把 join 需要用到的边界段物理删掉。回归上重新跑了 `HEU.PricingAlgorithmComparisonTest` 和 `HEU.SmallBPCBatchTest`。结果仍然是单向 exact 与双向 exact 12/12 轮最优 reduced cost 一致，小规模整树 8/8 对拍通过，tariff 分支诊断例也继续通过。说明这一轮修正没有破坏当前 exact pricing 的基线正确性，同时把半域定义和 join 语义补得更严谨了。

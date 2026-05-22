@@ -1124,3 +1124,11 @@ join 阶段按论文语义做临时函数延拓。forward label 原始只保存 
 join 侧也同步补了单点投影处理。`buildJoinBackwardProjection()` 在 `xStart == xEnd` 时不再直接返回空函数，而是根据 `x` 是否落在 `T^mid - Delta` 左侧，分别取 backward 的 `f_b(T^mid)` 常数，或取平移后的 backward 函数在该点的值。这样 forward 或 backward 在半域边界退化成单点时，仍可在 join 阶段被正确评价；该处理只服务 join，不把单点 label 继续放进普通扩展队列。
 
 验证上重新编译 `GCBidirectional.java`、`PricingAlgorithmComparisonTest.java` 和 `SmallBPCBatchTest.java`，使用 CPLEX jar 后编译通过。随后运行 `HEU.PricingAlgorithmComparisonTest`，结果为 12/12 轮单向 exact 与双向 exact 最优 reduced cost 一致，平均时间约为 forward `1.00 ms/round`、bidirectional `0.83 ms/round`；运行 `HEU.SmallBPCBatchTest`，8 个随机小例与 ArcFlow 对拍全部一致，tariff 分支诊断例也通过。当前结论是，这次修改没有改变主流程，只是把 `T^mid` 边界单点和 backward 虚拟终点扩展语义补严。
+
+## 2026-05-23：双向半域裁剪与 `shiftX(trimToDomain)` 的关系
+
+继续复核双向 pricing 半域实现时，确认 `PiecewiseLinearFunction.shiftX()` 本身确实会在水平平移后调用 `trimToDomain()`。因此问题不在于 `shiftX` 不裁剪，而在于它裁剪时只读取当前函数对象的 `domainStart/domainEnd` 元数据；如果半域只是通过物理 segment 被裁到 `[0,T^mid]` 或 `[T^mid,CmaxH]`，但函数元数据仍保持默认或全域，那么 `shiftX()` 并不知道应该按 `T^mid` 裁剪，只能等后续 `add()` 通过公共物理定义域再兜底收窄。
+
+基于这个判断，本次把 `GCBidirectional.cropToInterval()` 调整为在裁剪物理 segment 的同时同步 `domainStart/domainEnd`。这样由 `cropToInterval()` 构造出的 forward 半域函数、backward 半域函数、动态 half-domain job penalty 和 join 临时裁剪函数，在后续 `shiftX()` 中都会按自身半域元数据自然 `trimToDomain()`。这不改变双向 pricing 的数学流程，只是把半域边界从“物理 segment 兜底”提升为“元数据和物理 segment 一致”的明确契约，也减少后续理解上的歧义。
+
+需要注意的是，三参数 `setDomain(start,end,true)` 的作用仍然是把动态硬时间窗外写成 `big_M`，不是直接表达双向半域；双向半域由 `cropToInterval()` 再裁出。`shiftX()` 会裁，但只裁到函数对象自己记录的 domain，所以凡是人为裁半域的辅助函数，都必须同步元数据。

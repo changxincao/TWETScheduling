@@ -792,6 +792,10 @@ public class GCBidirectional {
 
 	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {
 		PiecewiseLinearFunction cropped = new PiecewiseLinearFunction();
+		// 2026-05-23: crop 不只裁物理 segment，也要同步函数元数据。
+		// shiftX() 的 trimToDomain 只看 domainStart/domainEnd；如果这里不重设，
+		// 后续半域 label 会只能靠 add 的公共物理定义域兜底，不能自然按 Tmid 裁剪。
+		cropped.resetDomain(start, end);
 		if (function == null || function.head == null || Utility.compareGt(start, end)) {
 			return cropped;
 		}

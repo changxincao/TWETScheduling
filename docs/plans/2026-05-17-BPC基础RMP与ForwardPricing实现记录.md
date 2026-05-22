@@ -16,6 +16,14 @@
 
 两者 bound 的核心区别可以概括为五点。第一，来源不同：`GCNGB` 的 `m_fw_bound/m_bw_bound` 主要来自上一轮另一方向已经生成的终止 label 集，表示从某个客户点继续补到终点或起点的经验最优补全；`GCNGBB` 则先用 `BoundFTExtend/BoundBTExtend/BoundFCExtend/BoundBCExtend` 构造时间和容量维度的动态规划式 bound，再用已经生成的 bounded labels 通过 `UpdateFWBound/UpdateBWBound` 进行修正。第二，含义不同：`GCNGB` 的 bound 更接近“单向完整补全 bound”，扩展当前 label 时把对侧 bound 当作到终点的完整剩余成本；`GCNGBB` 的 bound 是服务于半程 label 与中间 join 的安全估计，不单独承担恢复完整 route 的职责。第三，维度不同：`GCNGB` 主要按客户和剩余时间建表；`GCNGBB` 同时维护时间 bound、容量 bound、SRI 修正版 bound，以及二环避免用的 second-best 信息。第四，使用位置不同：`GCNGB` 在单方向扩展时直接通过 `CheckBoundFW/BW` 剪 label；`GCNGBB` 在 bounded 前后向扩展、bound 更新和 join 前后共同使用这些 bound，并且 join 后还要进入 DSSR 重复客户检查。第五，安全性前提不同：`GCNGB` 安全依赖“对侧表能代表完整补全”；`GCNGBB` 安全依赖“半程 label、bound 表、join、DSSR 更新”这一整套流程共同成立。因此不能把 `GCNGB` 的公式孤立移植到 `GCNGBB` 或当前 TWET 的双向函数 label 中。
 
+`GCNGBB` 的 bound 计算可以理解成两层。第一层是预计算的资源维动态规划 bound：`BoundFTExtend` 从 depot 按时间向前推，得到到达客户 `i` 且消耗时间 `t` 的较好 reduced cost；`BoundBTExtend` 从 sink/depot 反向按时间推；`BoundFCExtend` 和 `BoundBCExtend` 则把时间维换成容量维。每次转移大体是“当前 bound + 距离成本 - arc dual - customer dual”，再检查时间窗、可行弧和资源容量。随后做单调化处理，使更宽松资源下的 bound 不比更紧资源差。第二层是用实际 bounded label 修正 bound：`UpdateFWBound` 和 `UpdateBWBound` 扫描已经生成的 forward/backward labels，把这些真实 label 的 reduced cost 写入对应客户和资源位置，再和预计算 bound 取一个保守组合。这样既有快速 DP bound，也有当前搜索实际生成 label 带来的更紧信息。
+
+SRI 相关的 bound 是为了处理 subset-row cut 的 reduced cost。代码里同时维护 no-SRI 和 SRI 版本，例如 `m_bt_bound` 与 `m_btsr_bound`。扩展 forward label 时先用 `lbcost + m_bt_bound + mu[i]` 做普通 bound 检查，再用 `lbcost_nosr + m_btsr_bound + mu[i]` 做带 SRI 修正的检查；backward 和容量维也是同样结构。这样做的原因是 SRI cut 的贡献不是简单的单条弧或单个客户 dual，路径中某个集合被访问到第二个客户时才触发，因此代码需要维护 `sr_count` 和对应的 SRI bound 版本，避免 bound 检查漏掉 cut dual 的影响。
+
+`m_sec_bound` 和 `m_bd_fid` 是为了构造 2-cycle-free bound，不是 DSSR 的 ng-set 本身。以 `BoundFTExtend` 为例，若当前状态是从 `cid` 转移到 `i`，代码会检查 `i != m_bd_fid[cid][t]`。如果最优 bound 到达 `cid` 的上一跳本来就是 `i`，那么继续走 `cid -> i` 就会形成 `i -> cid -> i` 的二环。为了避免 bound 被这种不允许或不希望使用的二环压得过低，代码在这种情况下不用最优 bound，而改用 `m_sec_bound[cid][t]`，也就是“上一跳不是 i 的第二好 bound”。这只是 bound 表内部的局部二环处理。
+
+ng-set / DSSR 处理的是更一般的重复客户问题。label 扩展时根据 ng-set 保留有限记忆，允许某些非记忆客户在 ng-route 放松下被重复访问；join 后如果发现生成的负 reduced-cost route 中有重复客户，就把这个 route 记录为 `m_best_cycle`，然后 `UpdateNGSet()` 找出重复客户之间的环，把环内相关客户加入彼此的 ng-set。下一轮搜索时这些重复会被记忆约束禁止。也就是说，2-cycle-free bound 是为了让 bound 表不要被最简单的二环污染；ng/DSSR 是为了逐步收紧整个 labeling 的非 elementary 放松。
+
 ## 当前实现
 
 本次先把能够真正运行的第一版 BPC 主链路搭起来，目标不是一次性完成完整 branch-price-and-cut，而是先形成“RMP 能解、pricing 能生成负 reduced cost 列、列能回到 RMP、结果能输出和校验”的闭环。当前实现参考 `parallel_machine_scheduling_with_due_window.pdf` 中 set-partitioning/SP2 的建模思路，以及前面讨论过的“每个 dominance graph node 保留真实 label 集合，同时维护一个聚合 envelope 用于集合占优”的方案；旧 VRP BPC 代码里的 `GC`、`UL/TL`、按末端节点组织 label、arc branching 这些结构也尽量沿用了相近的命名和流程。

@@ -14,6 +14,8 @@
 
 这里的裁剪不是为了替代硬时间窗，也不是因为 `add()` 没有改变定义域；它只是为了让 forward/backward 分别只保存自己负责的一半时间轴。硬时间窗仍然由新增 job penalty 的 `setDomain(hStart,hEnd,true)` 表达，`add()` 之后的公共域变化只反映函数相加的数学定义域，不等于双向半域截断。
 
+进一步澄清：这一步不能类比单向里“自然被 Cmax 卡住”。单向 forward 的 job penalty 定义域本身就是 `[0,CmaxH]`，所以前缀函数 shift 到 `[delay,CmaxH+delay]` 后，再和 job penalty 相加，公共定义域会自然回到不超过 `CmaxH`。但双向 forward 的人为半域右端是 `T^mid`，而 job penalty 仍是全局 `[0,CmaxH]` 上的函数，不是 `[0,T^mid]` 上的函数；因此相加后只能自然卡到 `CmaxH`，不能自然卡到 `T^mid`。如果不额外裁剪，forward label 会越过半域进入右半轴，破坏 bounded bidirectional 的保存域约定，也会让后续 join 的半域公式不再干净。
+
 关于 `job -> sink` 这条虚拟终点弧，当前代码不能简单认为它没用。列的真实序列虽然只存 job 集合和顺序，但在 master 的 arc branching 语义里，`i -> sink` 表示 job `i` 是某条内部机器列的最后一个任务。`TWETColumn.visitsArc()` 明确把最后一个 job 到 `sinkId` 视为该列访问的弧；`ArcBrancher` 也会扫描包含 `sink` 的 arc 值。因此如果某个节点分支到了 `i -> sink`，RMP 会有对应 arc 分支约束，其 dual 就需要在 pricing reduced cost 里扣掉。没有这类分支时，`lp.getArcDual(i,sink)` 返回 0，所以这项不会影响根节点和普通节点。
 
 ## 2026-05-22：旧 VRP 中 GCNGB 与 GCNGBB 的 bound / DSS 流程区别

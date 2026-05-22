@@ -225,15 +225,6 @@ public class GCBidirectional {
 			return null;
 		}
 
-		double ell = nextFrontier.head.start;
-		if (Utility.compareGt(ell, tMid)) {
-			return null;
-		}
-		nextFrontier = cropToInterval(nextFrontier, ell, tMid);
-		if (nextFrontier.head == null) {
-			return null;
-		}
-
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
 		PackedBitSet reachable = buildForwardReachableSet(nextJob, visited, lp.getNode(), nextFrontier);
@@ -280,9 +271,6 @@ public class GCBidirectional {
 					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
-		// 2026-05-22: backward 只保留 [Tmid,rho] 半域，不补右侧。
-		// 若 [Tmid,lower) 因当前 job 窗口暂为 big_M，suffix-normalize 会把它压成 lower 处的常数值。
-		nextFrontier = cropToInterval(nextFrontier, tMid, rhoPrime);
 		nextFrontier.normalize(Direction.BACKWARD);
 		if (nextFrontier.head == null) {
 			return null;
@@ -619,7 +607,7 @@ public class GCBidirectional {
 			double hEnd = hWindowEnd(0, job, lp);
 			dynamicJobHEnd[job] = hEnd;
 			if (!Utility.compareGt(hStart, hEnd)) {
-				dynamicJobPenaltyByJob[job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+				dynamicJobPenaltyByJob[job] = buildForwardHalfPenalty(job, hStart, hEnd);
 			}
 		}
 	}
@@ -636,7 +624,7 @@ public class GCBidirectional {
 				double hEnd = hWindowEnd(prevJob, job, lp);
 				dynamicPairHEnd[prevJob][job] = hEnd;
 				if (!Utility.compareGt(hStart, hEnd)) {
-					dynamicJobPenaltyByPair[prevJob][job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+					dynamicJobPenaltyByPair[prevJob][job] = buildForwardHalfPenalty(job, hStart, hEnd);
 				}
 			}
 		}
@@ -652,7 +640,7 @@ public class GCBidirectional {
 			dynamicBackwardHStartToSinkByJob[job] = hStart;
 			dynamicBackwardHEndToSinkByJob[job] = hEnd;
 			if (!Utility.compareGt(hStart, hEnd)) {
-				dynamicBackwardPenaltyToSinkByJob[job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+				dynamicBackwardPenaltyToSinkByJob[job] = buildBackwardHalfPenalty(job, hStart, hEnd);
 			}
 		}
 		if (useJobLevelDynamicWindowCache) {
@@ -674,11 +662,22 @@ public class GCBidirectional {
 				dynamicBackwardHStartByPair[job][successor] = hStart;
 				dynamicBackwardHEndByPair[job][successor] = hEnd;
 				if (!Utility.compareGt(hStart, hEnd)) {
-					dynamicBackwardPenaltyByPair[job][successor] = data.penaltyFunction[job].setDomain(hStart, hEnd,
-							true);
+					dynamicBackwardPenaltyByPair[job][successor] = buildBackwardHalfPenalty(job, hStart, hEnd);
 				}
 			}
 		}
+	}
+
+	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
+		// 2026-05-23: 半域边界直接写入动态 job penalty。
+		// forward 的新增 job 函数只在 [0,Tmid] 上参与 add，公共定义域会自然把右端卡在 Tmid。
+		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, tMid);
+	}
+
+	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
+		// 2026-05-23: backward 对称使用 [Tmid,CmaxH] 上的新增 job 函数。
+		// 若窗口左侧为 big_M，后续 normalize(BACKWARD) 会通过 suffix-min 表达“可以等到窗口内完成”。
+		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, data.CmaxH);
 	}
 
 	private PiecewiseLinearFunction getDynamicForwardJobPenalty(int prevJob, int job) {

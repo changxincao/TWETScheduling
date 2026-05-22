@@ -18,6 +18,12 @@
 
 关于 `job -> sink` 这条虚拟终点弧，当前代码不能简单认为它没用。列的真实序列虽然只存 job 集合和顺序，但在 master 的 arc branching 语义里，`i -> sink` 表示 job `i` 是某条内部机器列的最后一个任务。`TWETColumn.visitsArc()` 明确把最后一个 job 到 `sinkId` 视为该列访问的弧；`ArcBrancher` 也会扫描包含 `sink` 的 arc 值。因此如果某个节点分支到了 `i -> sink`，RMP 会有对应 arc 分支约束，其 dual 就需要在 pricing reduced cost 里扣掉。没有这类分支时，`lp.getArcDual(i,sink)` 返回 0，所以这项不会影响根节点和普通节点。
 
+进一步优化后，当前代码已经不再依赖“扩展后再裁一次半域”的写法。做法是把半域边界提前写进每轮动态 job penalty：forward 使用 `buildForwardHalfPenalty()`，先对 job penalty 做动态硬窗 `setDomain(hStart,hEnd,true)`，再物理裁到 `[0,T^mid]`；backward 使用 `buildBackwardHalfPenalty()`，同样先写动态硬窗，再裁到 `[T^mid,CmaxH]`。这样扩展时 `add()` 的公共定义域会自然满足半域约束：forward 不会越过 `T^mid`，backward 不会落到 `T^mid` 左侧。
+
+这和单向“自然被 Cmax 卡住”的思路是一致的，只是双向把 Cmax 换成了方向相关的半域 job penalty。需要注意的是，动态硬窗仍保留为 `big_M` 窗外语义，而不是物理裁成 `[hStart,hEnd]`；因此 forward 仍可由 prefix-min 表达右侧等待闭包，backward 仍可由 suffix-min 表达左侧等待闭包。本次修改后，forward/backward 扩展中的额外 `cropToInterval(..., T^mid)` 被删除，半域限制由预计算好的方向化 penalty 负责。
+
+验证上重新编译 `GCBidirectional.java`、`PricingAlgorithmComparisonTest.java` 和 `SmallBPCBatchTest.java`。`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 最优 reduced cost 一致，平均时间约为 forward `2.58 ms/round`、bidirectional `2.50 ms/round`；`HEU.SmallBPCBatchTest` 仍保持 8/8 小例与 ArcFlow 对拍一致，tariff 分支诊断例通过。说明把半域边界提前写入 job penalty 后，行为与原实现一致，同时扩展阶段更接近用户要求的“像单向一样由 add 的公共定义域自然卡边界”。
+
 ## 2026-05-22：旧 VRP 中 GCNGB 与 GCNGBB 的 bound / DSS 流程区别
 
 旧 VRP 代码里 `GCNGB` 和 `GCNGBB` 都带有 `ng-route` 思想，但它们不是同一个层次的双向算法。`GCNGB.java` 文件头写的是 `ng-route with complete bound`，并特别注明这种 complete bound 不能直接和 bounded bidirectional search 组合，因为在 bounded 双向搜索里这个 bound 不再是完整的。这里的关键不是“ng-route 不能和双向 labeling 共存”，而是“`GCNGB` 那套单向扩展阶段使用的 complete-bound 剪枝公式不能直接搬到半程双向 join 里”。

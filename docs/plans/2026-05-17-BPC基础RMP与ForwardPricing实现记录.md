@@ -1156,3 +1156,11 @@ join 阶段采用 crossing arc `(i,r)`，不是旧 VRP 的同点 join。`joinFro
 可以精简或提高效率的点主要有四类。第一，`FunctionLabel` 构造时立即调用 `frontier.findMinimal()` 计算 `minReducedCost`，这个值用于 PQ 排序、big_M 过滤和 join 乐观下界，因此当前不是纯多余；但它确实会让每个中间 label 都做一次函数最小值计算。若后续 profiling 显示这里是瓶颈，可以改成 lazy min 或用更便宜的排序 key，但要重新确认队列顺序和剪枝安全性。第二，`buildForwardReachableSet/buildBackwardReachableSet` 每生成一个 label 都扫描 `1..n`，复杂度是每 label `O(n)`；这比预处理 reach bitset 更简单稳健，但在大规模 pricing 中可能是瓶颈。之前讨论过旧 VRP reach 预处理，但由于 TWET 动态硬窗依赖 dual 和 pair/job 窗口，直接搬过来收益不一定大。第三，`tryJoin()` 构造 backward projection 时仍会创建临时函数并调用 `shiftX/crop/add/findMinimal`；这是当前最重的函数级 join 成本，已经有标量下界剪枝，但后续可以写专门的 shifted-sum-min 扫描器减少临时函数对象。第四，最终加列前 `tryGenerateColumn()` 会恢复完整 sequence、重新 evaluator 计算真实成本并再扫一遍 reduced cost；这一步保证安全，短期不建议删，除非以后能证明双向函数 join 的 reduced cost 和 evaluator 完全一致并有充分对拍。
 
 本次没有发现必须立刻重构的地方。优先级建议为：短期保持当前流程，继续用小规模对拍和中规模 profiling 验证；若要优化，先统计 pricing 中 label 数、dominance 删除数、reachable 扫描次数、join 尝试次数、join 下界剪枝次数、函数级 join 耗时，再决定是优化 `findMinimal`、reachable 构造还是 join 临时函数。没有统计前不建议继续大改流程。
+
+## 2026-05-23：双向 labeling 内部流程复核与 join 投影修正
+
+本次按扩展、占优、dominance graph、join、函数半域和截断逐项复核 `GCBidirectional`。当前 forward 扩展已经基本符合单向递推的半域版本：source 和动态 job penalty 都被裁到 `[0,T^mid]`，且 `cropToInterval()` 会同步函数 `domainStart/domainEnd`，因此 `shiftX(delay)` 后会自然按 `T^mid` 裁剪，不需要额外 post-crop。backward 侧也已经通过 sink 初始函数和动态 job penalty 的 `[T^mid,CmaxH]` 元数据实现对称半域，sink root 第一次扩展不加 setup/processing 平移也是正确的。
+
+发现的主要问题在 join 投影：`buildJoinBackwardProjection()` 原来直接调用 `backward.shiftX(-delta)`，但 `shiftX()` 会按 backward 原始半域 `[T^mid,CmaxH]` 做 `trimToDomain()`。join 投影实际需要的是 `f_b(x+delta)`，其 shifted 后的定义域应为 `[T^mid-delta,CmaxH-delta]`；如果继续按原 `[T^mid,CmaxH]` 裁剪，就可能误删 `x<T^mid` 但满足 `x+delta>=T^mid` 的合法投影段。已改成专门的 `shiftBackwardForJoinProjection()`：先复制 backward 函数，把元数据同步左移，再手动平移 segment。这个修改只影响 join 的临时投影，不写回 label。
+
+当前双向实现仍有两类效率差异。第一，双向版本的 `insertForward/insertBackward` 仍是同一末端 table 内的线性扫描完整占优，没有接入 `PaperDominanceGraph`；这不破坏正确性，但和论文式 dominance graph 的高效流程还不一致。第二，扩展阶段存在一些保守的重复判断，例如 reachableSet 已经做过 direct time feasibility 过滤，`extendForward/extendBackward` 里仍会再检查一次；这属于安全冗余，不是错误。后续如果优化，应优先考虑给双向 label table 接入方向兼容的 dominance graph，而不是先删安全检查。

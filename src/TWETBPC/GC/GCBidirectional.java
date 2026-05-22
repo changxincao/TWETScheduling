@@ -453,12 +453,13 @@ public class GCBidirectional {
 			return null;
 		}
 		PiecewiseLinearFunction projection = new PiecewiseLinearFunction();
+		projection.resetDomain(xStart, xEnd);
 		double split = tMid - delta;
 		if (Utility.compareEq(xStart, xEnd)) {
 			if (!Utility.compareGt(xStart, split)) {
 				addConstantSegmentOrPoint(projection, xStart, xEnd, backward.evaluate(tMid));
 			} else {
-				PiecewiseLinearFunction shifted = backward.shiftX(-delta);
+				PiecewiseLinearFunction shifted = shiftBackwardForJoinProjection(backward, delta);
 				appendSegments(projection, cropToInterval(shifted, xStart, xEnd));
 			}
 			mergeAdjacentEqualSegments(projection);
@@ -471,12 +472,28 @@ public class GCBidirectional {
 
 		double shiftedStart = Math.max(xStart, split);
 		if (!Utility.compareGt(shiftedStart, xEnd)) {
-			PiecewiseLinearFunction shifted = backward.shiftX(-delta);
+			PiecewiseLinearFunction shifted = shiftBackwardForJoinProjection(backward, delta);
 			PiecewiseLinearFunction shiftedPart = cropToInterval(shifted, shiftedStart, xEnd);
 			appendSegments(projection, shiftedPart);
 		}
 		mergeAdjacentEqualSegments(projection);
 		return projection;
+	}
+
+	/**
+	 * 2026-05-23: join 投影需要的是 f_b(x + delta)，定义域也应随之左移。
+	 * 不能直接调用 backward.shiftX(-delta)，因为 shiftX 会按 backward 原来的
+	 * [Tmid,CmaxH] 元数据 trim，误删 x<Tmid 但满足 x+delta>=Tmid 的合法投影段。
+	 */
+	private PiecewiseLinearFunction shiftBackwardForJoinProjection(PiecewiseLinearFunction backward, double delta) {
+		PiecewiseLinearFunction shifted = backward.copy();
+		shifted.resetDomain(backward.domainStart - delta, backward.domainEnd - delta);
+		for (Segment seg = shifted.head; seg != null; seg = seg.next) {
+			seg.start -= delta;
+			seg.end -= delta;
+			seg.intercept += seg.slope * delta;
+		}
+		return shifted;
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp) {

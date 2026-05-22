@@ -1,5 +1,15 @@
 # BPC 基础 RMP 与单向 Forward Pricing 实现记录
 
+## 2026-05-23：复核双向 pricing 流程与旧 VRP 双向框架的一致性
+
+本次重新对照当前 `GCBidirectional` 和旧 VRP 的 `GCBDT/GCNGBB` 后，确认当前双向 pricing 的外层流程已经按前面讨论的口径执行。当前实现先在 `initialize()` 中建立 forward/backward 两侧的未处理队列 `FWUL/BWUL` 和按端点分组的已处理表 `FWTL/BWTL`，forward 从虚拟起点 label 出发，backward 从虚拟终点 label 出发；随后 `solve()` 中交替处理两侧队列，出队时如果 label 已被后续 label 支配则直接跳过，否则先尝试生成列或 join，再做同方向扩展。扩展出的新 label 先进入同端点表做 dominance 检查，若被现有 label 支配则标记并丢弃；若能支配已有 label，则把旧 label 标记为 dominated 并从表中移除；未被支配的新 label 才进入未处理队列。
+
+这个生命周期和旧 VRP 的双向框架是一致的。旧 `GCBDT/GCNGBB` 的核心也是两侧队列、两侧 table、同端点 dominance、被支配 label 出队跳过、两侧扩展和最后 join。当前 TWET 版本和旧 VRP 的不同主要是问题语义差异，而不是框架差异：旧 VRP 的 join 是同一个中间客户点拼接，TWET 这里按论文使用 crossing arc `(i,r)` 拼接；旧 VRP 的 label 成本是标量时间/容量资源，TWET 的 label frontier 是分段 reduced-cost 函数；旧 VRP 的可达性来自硬时间窗/容量 bitset，TWET 还要叠加动态硬时间窗、半域 `[ell,T^mid]` / `[T^mid,rho]` 和函数 dominance。这些差异不改变外层流程。
+
+按用户强调的两个细节复核，当前代码也已经对齐。第一，forward label 的右侧边界裁到 `T^mid`，backward label 的左侧边界从 `T^mid` 开始，扩展阶段不额外给半域外补 `big_M`；新增 job 的硬窗只体现在 job penalty 的 `setDomain(hStart,hEnd,true)`。第二，backward 从虚拟终点首次扩展到真实 job 时没有 setup/processing 平移，因为当前时间变量就是这个 job 自己的完成时间；普通 backward 扩展才会按 successor 的 processing/setup 反向平移。第三，`cropToInterval()` 和 join projection 已经允许 `T^mid` 单点常数段，避免半域刚好退化到边界点时被误删。
+
+因此当前结论是：如果不把 “join 是同点还是 crossing arc” 视为流程差异，当前 TWET 双向 pricing 的主框架已经和旧 VRP 的双向 labeling 框架一致；当前仍未纳入的是旧 `GCNGBB` 的 NG/DSSR、complete/2-cycle bound、SRI cut 等强化机制，这些属于后续增强，不影响当前 elementary no-cut 双向框架判断。
+
 ## 2026-05-22：旧 VRP 中 GCNGB 与 GCNGBB 的 bound / DSS 流程区别
 
 旧 VRP 代码里 `GCNGB` 和 `GCNGBB` 都带有 `ng-route` 思想，但它们不是同一个层次的双向算法。`GCNGB.java` 文件头写的是 `ng-route with complete bound`，并特别注明这种 complete bound 不能直接和 bounded bidirectional search 组合，因为在 bounded 双向搜索里这个 bound 不再是完整的。这里的关键不是“ng-route 不能和双向 labeling 共存”，而是“`GCNGB` 那套单向扩展阶段使用的 complete-bound 剪枝公式不能直接搬到半程双向 join 里”。

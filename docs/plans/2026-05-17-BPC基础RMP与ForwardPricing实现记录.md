@@ -952,3 +952,23 @@ forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 
 这次的验证分成两层。第一层是 pricing 对拍。重新编译 `GCBidirectional.java` 后，运行 `HEU.PricingAlgorithmComparisonTest`，3 个随机小例共 12 个 pricing 轮次中，单向 exact pricing 和新的双向 exact pricing 的最优 reduced cost 全部一致，结果写入 `test-results/bpc/2026-05-20-pricing-comparison.csv`。第二层是整棵小树回归。运行 `HEU.SmallBPCBatchTest` 后，8 个小规模实例全部完成，BPC 结果与 ArcFlow 对拍一致，同时 tariff 分支诊断例也通过，结果分别写入 `test-results/bpc/2026-05-19-small-bpc.csv` 和 `test-results/bpc/2026-05-19-small-bpc-branch.csv`。这说明当前版本至少在“小规模完整树 + 单轮 pricing 对拍”两个层面没有暴露错误。
 
 当前仍然保留两个明确限制。第一，backward 侧还没有做完全对称的 pair 级动态硬时间窗收缩，因此它的剪枝强度低于前向侧，也低于论文里更完整的实现。第二，当前双向 exact pricing 仍然是 elementary、no-cut、no-partial-dominance 的基础版，后续如果要继续追求 50 任务以上实例的 exact pricing 效率，优先顺序仍然应该是：补 backward 动态窗口、把函数级 dominance 从 pairwise list 提升到更强结构、再考虑 NG/DSSR 和 cut。
+
+## 2026-05-22：补齐 backward 侧的本轮动态硬时间窗
+
+在上一版双向 exact pricing 里，forward 侧已经和单向 `GC` 一样，按当前 LP dual 预计算了本轮动态 `H_{ij}`，并在扩展前做 O(1) 时间窗过滤；但 backward 侧仍然只用 `data.penaltyFunction[j]` 里预先写好的静态粗硬时间窗。这虽然不破坏正确性，但会让 backward label 保留过多无效时间段，也会让 `reachableSet` 和 `tryJoin()` 前面的初筛偏弱。
+
+这次只补这一块，不动 join、不动 dominance、不动外层流程。具体做法是把 backward 侧也改成和论文一致的 pair 级动态窗口。对于 backward 扩展中“把 job `i` 接到当前后缀最前端，后继为 `r`”这个局部结构，按 tex 中的定义使用
+\[
+    B_{ir}^b=\max_h[\kappa_{hr}-\kappa_{hi}-\kappa_{ir}]_+,
+\]
+再构造
+\[
+    \Gamma_{ir}^b=B_{ir}^b+\min\{\pi_i,b_i\},
+\]
+从而得到本轮 backward profitable completion window \(H_{ir}^b=[\underline h_{ir}^b,\bar h_{ir}^b]\)。如果当前数据满足 setup cost 三角不等式，则这些 backward setup-cost advantage 都退化为 0，此时仍然走 job 级缓存；否则就和 forward 一样，走 pair 级缓存。对于 `sink` 作为后继的根 backward label，按照 tex 的含义有 `B_{i,n+1}^b=0`，因此这里只保留 `min(jobDual, baseline outsourcing cost)` 这一部分。
+
+实现上新增了三组 backward 缓存：一组是接虚拟终点 `sink` 时的 job 级窗口和裁剪后 penalty 函数，一组是一般 `successor` 场景下的 pair 级窗口上界/下界，一组是对应的 pair 级裁剪后 penalty 函数。`isDirectBackwardExtensionTimeFeasible()` 现在不再看静态 `hardWindowStart/hardWindowEnd`，而是直接用本轮缓存的 `H_{ir}^b` 做 O(1) 交集判断；`extendBackward()` 在 `shiftX(-delay)` 之后，也不再把 `data.penaltyFunction[i]` 直接加上去，而是改成加本轮已经裁好的 backward dynamic penalty。这样 backward frontier 的定义域、`rho` 更新和 `reachableSet` 计算就都和论文里的 `H_{ir}^b` 一致了。
+
+这一轮改动后重新做了两类回归。第一，`HEU.PricingAlgorithmComparisonTest` 仍然保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；第二，`HEU.SmallBPCBatchTest` 仍然保持 8/8 个小例和 1 个 tariff 分支诊断例全部通过，BPC 与 ArcFlow 目标值一致。说明这次 backward 动态窗口增强没有破坏当前双向 pricing 的正确性基线。
+
+到这一步，双向 exact pricing 中“只有 forward 用本轮动态硬时间窗、backward 仍用静态粗窗”的不对称已经去掉。当前剩余的主要强化点就不再是这个窗口层面，而是更强的函数级 dominance 结构、NG/DSSR 和 cut。

@@ -59,6 +59,12 @@ public class GCBidirectional {
 	private PiecewiseLinearFunction[][] dynamicJobPenaltyByPair;
 	private double[] dynamicJobHEnd;
 	private double[][] dynamicPairHEnd;
+	private PiecewiseLinearFunction[] dynamicBackwardPenaltyToSinkByJob;
+	private PiecewiseLinearFunction[][] dynamicBackwardPenaltyByPair;
+	private double[] dynamicBackwardHStartToSinkByJob;
+	private double[] dynamicBackwardHEndToSinkByJob;
+	private double[][] dynamicBackwardHStartByPair;
+	private double[][] dynamicBackwardHEndByPair;
 
 	private String lastMessage = "Bidirectional pricing not executed";
 
@@ -239,20 +245,28 @@ public class GCBidirectional {
 		PiecewiseLinearFunction nextFrontier;
 		double rho;
 		if (label.isSinkRoot) {
-			nextFrontier = data.penaltyFunction[prevJob].copy();
+			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, node.sinkId());
+			if (jobPenalty == null) {
+				return null;
+			}
+			nextFrontier = jobPenalty.copy();
 			nextFrontier.shiftYInPlace(-lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId()));
 			nextFrontier.normalize(Direction.BACKWARD);
 			if (nextFrontier.head == null) {
 				return null;
 			}
-			rho = nextFrontier.tail.end;
+			rho = getDynamicBackwardHEnd(prevJob, node.sinkId());
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
 			if (shifted.head == null) {
 				return null;
 			}
-			nextFrontier = shifted.add(data.penaltyFunction[prevJob]);
+			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, label.jid);
+			if (jobPenalty == null) {
+				return null;
+			}
+			nextFrontier = shifted.add(jobPenalty);
 			if (nextFrontier.head == null) {
 				return null;
 			}
@@ -263,12 +277,13 @@ public class GCBidirectional {
 			if (nextFrontier.head == null) {
 				return null;
 			}
-			rho = Math.min(label.frontier.tail.end - delay, nextFrontier.tail.end);
+			rho = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
 		}
-		if (Utility.compareLt(rho, tMid)) {
+		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, label.isSinkRoot ? node.sinkId() : label.jid));
+		if (Utility.compareLt(rho, lower)) {
 			return null;
 		}
-		nextFrontier = cropToInterval(nextFrontier, tMid, rho);
+		nextFrontier = cropToInterval(nextFrontier, lower, rho);
 		if (nextFrontier.head == null) {
 			return null;
 		}
@@ -506,19 +521,19 @@ public class GCBidirectional {
 	}
 
 	/**
-	 * 2026-05-22: backward 侧这里先只做 O(1) 的存在性交集检查。
-	 * 只要 [Tmid, rho'] 和 job 的静态粗硬窗还有交集，就允许进入真正的函数扩展。
-	 * 更强的 pair 级 H^b_{ir} 可以以后再补。
+	 * 2026-05-22: backward 侧和论文一致，先用本轮预计算的 H^b_{ir} 做 O(1) 交集过滤；
+	 * 真正的 reduced-cost 函数仍在 extendBackward 里通过 shift/add/normalize 递推。
 	 */
 	private boolean isDirectBackwardExtensionTimeFeasible(BackwardLabel label, int prevJob) {
+		int successor = label.isSinkRoot ? data.n + 1 : label.jid;
 		double rhoPrime;
 		if (label.isSinkRoot) {
-			rhoPrime = data.hardWindowEnd[prevJob];
+			rhoPrime = getDynamicBackwardHEnd(prevJob, successor);
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
-			rhoPrime = Math.min(label.frontier.tail.end - delay, data.hardWindowEnd[prevJob]);
+			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
 		}
-		double lower = Math.max(tMid, data.hardWindowStart[prevJob]);
+		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, successor));
 		return !Utility.compareLt(rhoPrime, lower);
 	}
 
@@ -555,11 +570,18 @@ public class GCBidirectional {
 		dynamicJobPenaltyByPair = null;
 		dynamicJobHEnd = null;
 		dynamicPairHEnd = null;
+		dynamicBackwardPenaltyToSinkByJob = null;
+		dynamicBackwardPenaltyByPair = null;
+		dynamicBackwardHStartToSinkByJob = null;
+		dynamicBackwardHEndToSinkByJob = null;
+		dynamicBackwardHStartByPair = null;
+		dynamicBackwardHEndByPair = null;
 		if (useJobLevelDynamicWindowCache) {
 			precomputeJobLevelDynamicPricingWindows(lp);
 		} else {
 			precomputePairLevelDynamicPricingWindows(lp);
 		}
+		precomputeBackwardDynamicPricingWindows(lp);
 	}
 
 	private void precomputeJobLevelDynamicPricingWindows(LP lp) {
@@ -593,6 +615,45 @@ public class GCBidirectional {
 		}
 	}
 
+	private void precomputeBackwardDynamicPricingWindows(LP lp) {
+		dynamicBackwardPenaltyToSinkByJob = new PiecewiseLinearFunction[data.n + 1];
+		dynamicBackwardHStartToSinkByJob = new double[data.n + 1];
+		dynamicBackwardHEndToSinkByJob = new double[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = backwardHWindowStart(job, data.n + 1, lp);
+			double hEnd = backwardHWindowEnd(job, data.n + 1, lp);
+			dynamicBackwardHStartToSinkByJob[job] = hStart;
+			dynamicBackwardHEndToSinkByJob[job] = hEnd;
+			if (!Utility.compareGt(hStart, hEnd)) {
+				dynamicBackwardPenaltyToSinkByJob[job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+			}
+		}
+		if (useJobLevelDynamicWindowCache) {
+			dynamicBackwardPenaltyByPair = null;
+			dynamicBackwardHStartByPair = null;
+			dynamicBackwardHEndByPair = null;
+			return;
+		}
+		dynamicBackwardPenaltyByPair = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
+		dynamicBackwardHStartByPair = new double[data.n + 1][data.n + 1];
+		dynamicBackwardHEndByPair = new double[data.n + 1][data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			for (int successor = 1; successor <= data.n; successor++) {
+				if (job == successor) {
+					continue;
+				}
+				double hStart = backwardHWindowStart(job, successor, lp);
+				double hEnd = backwardHWindowEnd(job, successor, lp);
+				dynamicBackwardHStartByPair[job][successor] = hStart;
+				dynamicBackwardHEndByPair[job][successor] = hEnd;
+				if (!Utility.compareGt(hStart, hEnd)) {
+					dynamicBackwardPenaltyByPair[job][successor] = data.penaltyFunction[job].setDomain(hStart, hEnd,
+							true);
+				}
+			}
+		}
+	}
+
 	private PiecewiseLinearFunction getDynamicForwardJobPenalty(int prevJob, int job) {
 		if (useJobLevelDynamicWindowCache) {
 			return dynamicJobPenaltyByJob == null ? null : dynamicJobPenaltyByJob[job];
@@ -605,6 +666,30 @@ public class GCBidirectional {
 			return dynamicJobHEnd[job];
 		}
 		return dynamicPairHEnd[prevJob][job];
+	}
+
+	private PiecewiseLinearFunction getDynamicBackwardJobPenalty(int job, int successor) {
+		if (successor == data.n + 1) {
+			return dynamicBackwardPenaltyToSinkByJob == null ? null : dynamicBackwardPenaltyToSinkByJob[job];
+		}
+		if (useJobLevelDynamicWindowCache) {
+			return dynamicBackwardPenaltyToSinkByJob == null ? null : dynamicBackwardPenaltyToSinkByJob[job];
+		}
+		return dynamicBackwardPenaltyByPair == null ? null : dynamicBackwardPenaltyByPair[job][successor];
+	}
+
+	private double getDynamicBackwardHStart(int job, int successor) {
+		if (successor == data.n + 1 || useJobLevelDynamicWindowCache) {
+			return dynamicBackwardHStartToSinkByJob[job];
+		}
+		return dynamicBackwardHStartByPair[job][successor];
+	}
+
+	private double getDynamicBackwardHEnd(int job, int successor) {
+		if (successor == data.n + 1 || useJobLevelDynamicWindowCache) {
+			return dynamicBackwardHEndToSinkByJob[job];
+		}
+		return dynamicBackwardHEndByPair[job][successor];
 	}
 
 	private double hWindowStart(int prevJob, int job, LP lp) {
@@ -626,6 +711,46 @@ public class GCBidirectional {
 	private double hWindowGamma(int prevJob, int job, LP lp) {
 		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
 		return data.getSetupCostAdvantage(prevJob, job) + Math.min(lp.getJobDual(job), baseline);
+	}
+
+	private double backwardHWindowStart(int job, int successor, LP lp) {
+		double gamma = backwardHWindowGamma(job, successor, lp);
+		if (!Utility.compareGt(data.w_e[job], 0.0)) {
+			return 0.0;
+		}
+		return Math.max(0.0, data.d_e[job] - gamma / data.w_e[job]);
+	}
+
+	private double backwardHWindowEnd(int job, int successor, LP lp) {
+		double gamma = backwardHWindowGamma(job, successor, lp);
+		if (!Utility.compareGt(data.w_t[job], 0.0)) {
+			return data.CmaxH;
+		}
+		return Math.min(data.CmaxH, data.d_l[job] + gamma / data.w_t[job]);
+	}
+
+	private double backwardHWindowGamma(int job, int successor, LP lp) {
+		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
+		if (successor == data.n + 1 || useJobLevelDynamicWindowCache) {
+			return Math.min(lp.getJobDual(job), baseline);
+		}
+		double bBackward = computeBackwardSetupCostAdvantage(job, successor);
+		return bBackward + Math.min(lp.getJobDual(job), baseline);
+	}
+
+	private double computeBackwardSetupCostAdvantage(int job, int successor) {
+		double best = 0.0;
+		for (int predecessor = 0; predecessor <= data.n; predecessor++) {
+			if (predecessor == job || predecessor == successor) {
+				continue;
+			}
+			double saving = data.getSetupCost(predecessor, successor) - data.getSetupCost(predecessor, job)
+					- data.getSetupCost(job, successor);
+			if (Utility.compareGt(saving, best)) {
+				best = saving;
+			}
+		}
+		return Math.max(0.0, best);
 	}
 
 	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {

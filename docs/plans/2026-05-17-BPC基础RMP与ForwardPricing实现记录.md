@@ -32,6 +32,8 @@ ng-set / DSSR 处理的是更一般的重复客户问题。label 扩展时根据
 
 最终加入主问题的列只来自 `pool`，也就是通过重复客户检查的负 reduced-cost route。非 elementary / duplicate route 不会被加入 LP，它们只作为 DSSR 更新 ng-set 的证据。加入数量由 `data.m_configure.addin_size` 控制：如果 `pool` 大于该上限，会先排序，然后把不在全局 pool 中的 route 逐条加入 `gn_index`，直到 `gn_index.size() >= addin_size`。因此一次 pricing 不是只加最优一条，也不是加所有找到的列，而是最多加 `addin_size` 条负 reduced-cost 的合法列。
 
+这里的“合法列”在旧 `GCNGBB` 里不是“只满足 ng-memory 的非 elementary route”。label 扩展时确实使用 ng-route 放松：`m_memory` 只保留 ng-set 内的有限记忆，所以搜索过程中可以产生真实访问重复的 label；但代码同时维护 `m_visit` 和 `m_duplicate`，用于记录实际访问过哪些客户以及是否发生真实重复。`Join()` 加列前检查 `label.m_low_duplicate / m_high_duplicate`、`lbf.m_low_duplicate / m_high_duplicate`，以及前后向 `m_visit` 的交集。只要这些检测表明 route 真实重复客户，就不会 `pool.AddRoute()`。因此，进入主问题的列必须是 elementary 意义下没有重复客户的 route；ng-feasible 但非 elementary 的 route 只用于发现重复环并更新 ng-set。
+
 ## 当前实现
 
 本次先把能够真正运行的第一版 BPC 主链路搭起来，目标不是一次性完成完整 branch-price-and-cut，而是先形成“RMP 能解、pricing 能生成负 reduced cost 列、列能回到 RMP、结果能输出和校验”的闭环。当前实现参考 `parallel_machine_scheduling_with_due_window.pdf` 中 set-partitioning/SP2 的建模思路，以及前面讨论过的“每个 dominance graph node 保留真实 label 集合，同时维护一个聚合 envelope 用于集合占优”的方案；旧 VRP BPC 代码里的 `GC`、`UL/TL`、按末端节点组织 label、arc branching 这些结构也尽量沿用了相近的命名和流程。

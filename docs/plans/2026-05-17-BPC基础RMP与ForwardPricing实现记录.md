@@ -10,6 +10,12 @@
 
 因此当前结论是：如果不把 “join 是同点还是 crossing arc” 视为流程差异，当前 TWET 双向 pricing 的主框架已经和旧 VRP 的双向 labeling 框架一致；当前仍未纳入的是旧 `GCNGBB` 的 NG/DSSR、complete/2-cycle bound、SRI cut 等强化机制，这些属于后续增强，不影响当前 elementary no-cut 双向框架判断。
 
+补充说明一次“normalize 后再裁到 `T^mid`”的含义。`add()` 本身只会取两个函数的公共定义域，它并不知道当前是 bounded bidirectional，也不知道 `T^mid` 是算法人为设定的半域边界。forward label 经过 `shiftX(delay) + add(jobPenalty) + fixed reduced-cost` 后，公共定义域右端可能仍然大于 `T^mid`，例如原 forward 半域 `[ell,T^mid]` 平移后会变成 `[ell+delay,T^mid+delay]`。因此双向算法还必须额外把保存域裁回 `[ell,T^mid]`。单向 `GC` 不做这个半域裁剪，它只做 `normalize(FORWARD)`，并继续保留到全局右端 `T/CmaxH` 的定义域。
+
+这里的裁剪不是为了替代硬时间窗，也不是因为 `add()` 没有改变定义域；它只是为了让 forward/backward 分别只保存自己负责的一半时间轴。硬时间窗仍然由新增 job penalty 的 `setDomain(hStart,hEnd,true)` 表达，`add()` 之后的公共域变化只反映函数相加的数学定义域，不等于双向半域截断。
+
+关于 `job -> sink` 这条虚拟终点弧，当前代码不能简单认为它没用。列的真实序列虽然只存 job 集合和顺序，但在 master 的 arc branching 语义里，`i -> sink` 表示 job `i` 是某条内部机器列的最后一个任务。`TWETColumn.visitsArc()` 明确把最后一个 job 到 `sinkId` 视为该列访问的弧；`ArcBrancher` 也会扫描包含 `sink` 的 arc 值。因此如果某个节点分支到了 `i -> sink`，RMP 会有对应 arc 分支约束，其 dual 就需要在 pricing reduced cost 里扣掉。没有这类分支时，`lp.getArcDual(i,sink)` 返回 0，所以这项不会影响根节点和普通节点。
+
 ## 2026-05-22：旧 VRP 中 GCNGB 与 GCNGBB 的 bound / DSS 流程区别
 
 旧 VRP 代码里 `GCNGB` 和 `GCNGBB` 都带有 `ng-route` 思想，但它们不是同一个层次的双向算法。`GCNGB.java` 文件头写的是 `ng-route with complete bound`，并特别注明这种 complete bound 不能直接和 bounded bidirectional search 组合，因为在 bounded 双向搜索里这个 bound 不再是完整的。这里的关键不是“ng-route 不能和双向 labeling 共存”，而是“`GCNGB` 那套单向扩展阶段使用的 complete-bound 剪枝公式不能直接搬到半程双向 join 里”。

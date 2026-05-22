@@ -936,3 +936,19 @@ java -Djava.library.path=D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\bin\x64_win
 因此后续实现应分两步做。第一步先把双向 exact pricing 的结构改成 v42 tex 的 elementary 版本：forward/backward 都保留显式 visited set，dominance graph 仍按集合 key 做完整占优，不做 partial dominance，也不接 ng-route/SRI；join 改成枚举 crossing arc `(i,r)`，并处理 source label 与 backward label 的 `(0,r)` join，保证覆盖右半侧开始的完整列。第二步再处理函数域细节：如果暂时不动半域定义域，可以先保留全域函数并只在 join 处按 tex 的常数延拓语义取值；如果要严格按论文实现，则 forward label 存 `[ell,Tmid]`，backward label 存 `[Tmid,rho]`，extension/dominance 在半域上做，join 时使用常数延拓计算 crossing arc 的最小 reduced cost。
 
 当前判断为：存在问题，不能直接在现有同点 join + 完整序列 evaluator 的框架上宣称已经实现 v42 tex 的 elementary 双向 labeling。下一步代码实现应以“新建或重写一个函数 label 型双向 exact pricing engine”为目标，而不是给现有标量 `GCBidirectional` 加局部判断。
+
+## 2026-05-22：按 v42 tex 重写双向 exact pricing
+
+基于前面的差异判断，本次直接重写了 `src/TWETBPC/GC/GCBidirectional.java`，不再保留原来那套“同一个中间 job 上 join + 标量 reduced-cost 占优”的实现。新的版本仍然沿用旧 VRP 双向 pricing 的外层控制框架，也就是 `FWUL/FWTL`、`BWUL/BWTL`、前向扩展、后向扩展、扩展后尝试 join 这套生命周期；但 label 内部状态、join 方式和函数处理都改成了更接近 v42 tex 的 TWET 语义。
+
+这次最核心的改动有四个。第一，join 从“同点 join”改成“跨弧 join”。现在 forward label 终止于 job `i`，backward label 起始于 job `r`，真正尝试拼接时走的是 crossing arc `(i,r)`，而不是要求 `i=r`。这一步是必要改动，因为论文里的双向内部定价本来就是前缀、连接弧和后缀三部分组成；如果继续用同点 join，就会漏掉中点落在两任务之间的列。第二，forward/backward 两侧都改成函数 label。`ForwardLabel` 和 `BackwardLabel` 都保存 `PiecewiseLinearFunction frontier`、`visitedSet`、`reachableSet` 和当前最小 reduced cost，而不再只保存一条具体序列的标量值。第三，加入了 `T^mid` 半域语义。forward frontier 被限制在 `[ell, Tmid]`，backward frontier 被限制在 `[Tmid, rho]`，join 时再把 backward frontier 用论文对应的常数延拓方式投影回 forward 时间轴。第四，最终加列前仍统一调用 `TWETColumnEvaluator` 对完整序列做一次真实成本复核，避免双向递推和 join 细节如果有遗漏时把错误的 reduced-cost 列加进主问题。
+
+join 的函数处理这次也一起改掉了。新的 `tryJoin()` 不再直接把正反向序列拼起来后重算一个标量近似，而是先取 forward frontier 在可 join 区间上的裁剪段，再构造 backward frontier 的 join 投影。这里 backward 的投影遵循当前实现里写入注释的语义：当 forward 时间 `x` 还没到 `Tmid-delta` 时，backward 侧取常数 `f_b(Tmid)`；当 `x` 进入右半边后，再取 `f_b(x+delta)` 的 shift 结果。随后把两边函数相加，再加 crossing arc 的 setup cost，最后用 `findMinimal(false, true)` 求 join 下界；只有这个函数级下界已经是负 reduced cost 时，才恢复完整序列并交给 `TWETColumnEvaluator` 做最终验证。
+
+forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 的做法。本轮定价开始时仍然根据当前 dual 预处理动态 `H_ij`，如果满足三角不等式就走 job 级缓存，否则走 pair 级缓存；forward 扩展时先做 `isDirectForwardExtensionTimeFeasible()` 的 O(1) 过滤，再用已经裁好的 `jobPenalty` 去做 `shiftX + add + fixed reduced-cost shift + normalize(FORWARD)`。backward 侧这次先保证函数递推和半域语义正确，但还没有补上完全对称的动态 `H^b_{ir}`。目前 backward extend 只使用已经写在 `data.penaltyFunction[j]` 里的静态粗硬时间窗，再做 `shiftX(-delay) + add + normalize(BACKWARD)`。这个版本会比最强实现弱一些，但不会破坏正确性；后续如果继续加强，只需要在 backward 侧也引入 pair 级动态窗口和对应裁剪即可。
+
+占优方面，这次先没有上论文里的最终 dominance graph 版函数占优，而是保留“同终点表内的 pairwise 函数完整占优”。具体来说，forward/backward 两侧分别在同一个 `jid` 的表里比较 `reachableSet` 是否为超集，以及 `frontier.dominates(other.frontier)` 是否成立；如果成立，就删除被支配 label，并在出队、join 时跳过 `isDominated` 的对象。也就是说，这次已经从原来的标量 dominance 升级成了函数级完整占优，但还没有做 paper 里那种更强的图结构维护，更没有接 partial dominance、ng-route、DSSR 或 cut。
+
+这次的验证分成两层。第一层是 pricing 对拍。重新编译 `GCBidirectional.java` 后，运行 `HEU.PricingAlgorithmComparisonTest`，3 个随机小例共 12 个 pricing 轮次中，单向 exact pricing 和新的双向 exact pricing 的最优 reduced cost 全部一致，结果写入 `test-results/bpc/2026-05-20-pricing-comparison.csv`。第二层是整棵小树回归。运行 `HEU.SmallBPCBatchTest` 后，8 个小规模实例全部完成，BPC 结果与 ArcFlow 对拍一致，同时 tariff 分支诊断例也通过，结果分别写入 `test-results/bpc/2026-05-19-small-bpc.csv` 和 `test-results/bpc/2026-05-19-small-bpc-branch.csv`。这说明当前版本至少在“小规模完整树 + 单轮 pricing 对拍”两个层面没有暴露错误。
+
+当前仍然保留两个明确限制。第一，backward 侧还没有做完全对称的 pair 级动态硬时间窗收缩，因此它的剪枝强度低于前向侧，也低于论文里更完整的实现。第二，当前双向 exact pricing 仍然是 elementary、no-cut、no-partial-dominance 的基础版，后续如果要继续追求 50 任务以上实例的 exact pricing 效率，优先顺序仍然应该是：补 backward 动态窗口、把函数级 dominance 从 pairwise list 提升到更强结构、再考虑 NG/DSSR 和 cut。

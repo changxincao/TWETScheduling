@@ -5,6 +5,9 @@ import java.util.HashSet;
 import java.util.PriorityQueue;
 
 import Basic.Data;
+import Common.PiecewiseLinearFunction;
+import Common.PiecewiseLinearFunction.Direction;
+import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.IO.TWETColumnEvaluator;
@@ -16,16 +19,21 @@ import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * no-cut 双向 labeling 定价器。
+ * no-cut 双向 exact pricing。
  * <p>
- * 2026-05-20: 该实现按旧 VRP 双向 GC 的框架组织为 FWExtend、BWExtend 和 Join：
- * forward label 从虚拟起点向后扩展，backward label 从虚拟终点向前扩展，二者在同一个中间
- * job 上拼接生成完整列。当前版本暂不接 SRI cut、ng-route、DSSR，也不改原 forward exact GC。
+ * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
+ * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
+ * 外层流程仍保持旧 VRP 双向 GC 的组织方式：前向扩展、后向扩展、两侧 label table、扩展后尝试 join。
  * <p>
- * TWET 的列成本依赖 setup time/cost 和分段线性完成时间惩罚。为了避免第一版双向拼接在动态
- * H_ij、反向函数定义域或 endpoint discontinuity 上引入错误，Join 后统一用项目现有
- * {@link TWETColumnEvaluator} 重新评价完整序列，并按当前 LP dual 精确计算 reduced cost。
- * 因此这个类主要复刻旧 VRP 的双向搜索流程；成本计算细节仍复用当前 TWET 的权威评价口径。
+ * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
+ * 1. forward label 存储在 [ell, Tmid]；
+ * 2. backward label 存储在 [Tmid, rho]；
+ * 3. join 时用论文里的常数延拓，只在 join 这一步把 backward 函数投影到 forward 的时间轴；
+ * 4. 最终列仍统一调用 {@link TWETColumnEvaluator} 复核真实成本，避免双向实现细节把错误 reduced-cost 列加进 RMP。
+ * <p>
+ * 2026-05-22: backward 侧暂时没有接入和 forward 完全对称的动态 H^b_{ir} 收缩，
+ * 只使用已经写入 job penalty 的静态粗硬时间窗。这会弱一些，但不会破坏正确性；
+ * 后续若继续加强，只需要在 backward extend 前把 jobPenalty 换成 pair 级窗口版本即可。
  */
 public class GCBidirectional {
 
@@ -34,13 +42,24 @@ public class GCBidirectional {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
-	private PriorityQueue<BiLabel> FWUL;
-	private PriorityQueue<BiLabel> BWUL;
-	private ArrayList<ArrayList<BiLabel>> FWTL;
-	private ArrayList<ArrayList<BiLabel>> BWTL;
+
+	private PriorityQueue<ForwardLabel> FWUL;
+	private PriorityQueue<BackwardLabel> BWUL;
+	private ArrayList<ArrayList<ForwardLabel>> FWTL;
+	private ArrayList<ArrayList<BackwardLabel>> BWTL;
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
+
+	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
+	private double tMid;
+	// 2026-05-22: forward 侧继续复用当前单向 exact 的动态 H_ij 缓存。
+	private boolean useJobLevelDynamicWindowCache;
+	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
+	private PiecewiseLinearFunction[][] dynamicJobPenaltyByPair;
+	private double[] dynamicJobHEnd;
+	private double[][] dynamicPairHEnd;
+
 	private String lastMessage = "Bidirectional pricing not executed";
 
 	public GCBidirectional(Data data, TWETBPCConfig config) {
@@ -50,16 +69,14 @@ public class GCBidirectional {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
+		Utility.resetCurUpperBound(Utility.big_M);
 		initialize(lp);
-		while (canContinue()) {
+		while (canContinue() && (!FWUL.isEmpty() || !BWUL.isEmpty())) {
 			if (!FWUL.isEmpty()) {
 				forwardExtend(lp);
 			}
 			if (canContinue() && !BWUL.isEmpty()) {
 				backwardExtend(lp);
-			}
-			if (FWUL.isEmpty() && BWUL.isEmpty()) {
-				break;
 			}
 		}
 		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns";
@@ -71,13 +88,14 @@ public class GCBidirectional {
 	}
 
 	private void initialize(LP lp) {
-		FWUL = new PriorityQueue<BiLabel>();
-		BWUL = new PriorityQueue<BiLabel>();
-		FWTL = new ArrayList<ArrayList<BiLabel>>(data.n + 1);
-		BWTL = new ArrayList<ArrayList<BiLabel>>(data.n + 1);
+		tMid = data.CmaxH * 0.5;
+		FWUL = new PriorityQueue<ForwardLabel>();
+		BWUL = new PriorityQueue<BackwardLabel>();
+		FWTL = new ArrayList<ArrayList<ForwardLabel>>(data.n + 1);
+		BWTL = new ArrayList<ArrayList<BackwardLabel>>(data.n + 1);
 		for (int i = 0; i <= data.n; i++) {
-			FWTL.add(new ArrayList<BiLabel>());
-			BWTL.add(new ArrayList<BiLabel>());
+			FWTL.add(new ArrayList<ForwardLabel>());
+			BWTL.add(new ArrayList<BackwardLabel>());
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
@@ -85,13 +103,25 @@ public class GCBidirectional {
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
-		PackedBitSet forwardVisited = new PackedBitSet(data.n + 2);
-		forwardVisited.add(0);
-		FWUL.add(BiLabel.source(forwardVisited));
+		precomputeDynamicPricingWindows(lp);
 
-		PackedBitSet backwardVisited = new PackedBitSet(data.n + 2);
-		backwardVisited.add(lp.getNode().sinkId());
-		BWUL.add(BiLabel.sink(lp.getNode().sinkId(), backwardVisited));
+		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
+		sourceVisited.add(0);
+		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
+		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
+		sourceFrontier.normalize(Direction.FORWARD);
+		ForwardLabel source = new ForwardLabel(0, null, sourceVisited,
+				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
+		FWTL.get(0).add(source);
+		FWUL.add(source);
+
+		PackedBitSet sinkVisited = new PackedBitSet(data.n + 2);
+		sinkVisited.add(lp.getNode().sinkId());
+		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
+		sinkFrontier.addSegment(tMid, data.CmaxH, 0.0, 0.0);
+		BackwardLabel sink = BackwardLabel.sink(lp.getNode().sinkId(), sinkVisited, sinkFrontier,
+				buildBackwardReachableSet(lp.getNode().sinkId(), sinkVisited, lp.getNode(), sinkFrontier));
+		BWUL.add(sink);
 	}
 
 	private boolean canContinue() {
@@ -99,116 +129,165 @@ public class GCBidirectional {
 	}
 
 	private void forwardExtend(LP lp) {
-		BiLabel label = FWUL.poll();
+		ForwardLabel label = FWUL.poll();
 		if (label.isDominated) {
 			return;
 		}
+		tryGenerateForwardColumn(label, lp);
+		joinFromForward(label, lp);
+
 		Node node = lp.getNode();
-		if (!label.sequence.isEmpty()) {
-			tryGenerateColumn(label.sequence, lp);
-			joinForward(label, lp);
-		}
-		if (!shouldExpandForward(label)) {
-			return;
-		}
-		int from = label.jid;
-		for (int job = 1; job <= data.n && canContinue(); job++) {
-			if (label.visited.contains(job) || node.isArcForbidden(from, job)) {
+		for (int nextJob = 1; nextJob <= data.n && canContinue(); nextJob++) {
+			if (!canExtendForward(label, nextJob, node)) {
 				continue;
 			}
-			double nextDuration = label.sourceDuration + data.getSetUp(from, job) + data.getProcessT(job);
-			if (Utility.compareGt(nextDuration, data.CmaxH)) {
+			ForwardLabel child = extendForward(label, nextJob, lp);
+			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 				continue;
 			}
-			BiLabel child = label.append(job, nextDuration);
-			child.dominanceReducedCost = dominanceReducedCost(child.sequence, lp);
-			addForwardLabel(child, lp);
+			if (!insertForward(child)) {
+				FWUL.add(child);
+			}
 		}
 	}
 
 	private void backwardExtend(LP lp) {
-		BiLabel label = BWUL.poll();
+		BackwardLabel label = BWUL.poll();
 		if (label.isDominated) {
 			return;
 		}
+		if (!label.isSinkRoot) {
+			joinFromBackward(label, lp);
+		}
+
 		Node node = lp.getNode();
-		if (!label.sequence.isEmpty()) {
-			tryGenerateColumn(label.sequence, lp);
-			joinBackward(label, lp);
-		}
-		if (!shouldExpandBackward(label)) {
-			return;
-		}
-		int first = label.sequence.isEmpty() ? node.sinkId() : label.jid;
-		for (int job = 1; job <= data.n && canContinue(); job++) {
-			if (label.visited.contains(job) || node.isArcForbidden(job, first)) {
+		for (int prevJob = 1; prevJob <= data.n && canContinue(); prevJob++) {
+			if (!canExtendBackward(label, prevJob, node)) {
 				continue;
 			}
-			double nextInternalDuration = label.sequence.isEmpty() ? data.getProcessT(job)
-					: data.getProcessT(job) + data.getSetUp(job, first) + label.internalDuration;
-			double nextSourceDuration = data.getSetUp(0, job) + nextInternalDuration;
-			if (Utility.compareGt(nextSourceDuration, data.CmaxH)) {
+			BackwardLabel child = extendBackward(label, prevJob, lp);
+			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 				continue;
 			}
-			BiLabel child = label.prepend(job, nextInternalDuration, nextSourceDuration);
-			child.dominanceReducedCost = dominanceReducedCost(child.sequence, lp);
-			addBackwardLabel(child, lp);
+			if (!insertBackward(child)) {
+				BWUL.add(child);
+			}
 		}
 	}
 
-	/**
-	 * forward 半程截断对应旧 VRP 中的 m_time < max_time/2。
-	 * <p>
-	 * 这里用最小 processing+setup duration 做资源代理；它只控制双向搜索规模，不承担最终
-	 * reduced-cost 正确性判断，完整列仍由 tryGenerateColumn 重新评价。
-	 */
-	private boolean shouldExpandForward(BiLabel label) {
-		return label.sequence.isEmpty() || Utility.compareLt(label.sourceDuration, data.CmaxH * 0.5);
-	}
-
-	/**
-	 * backward 侧使用从当前首 job 到后缀末端的内部 duration 做半程截断。
-	 * 这和旧 VRP 的 backward resource 截断作用一致：控制后向标签只覆盖路线后半段。
-	 */
-	private boolean shouldExpandBackward(BiLabel label) {
-		return label.sequence.isEmpty() || Utility.compareLt(label.internalDuration, data.CmaxH * 0.5);
-	}
-
-	private void addForwardLabel(BiLabel label, LP lp) {
-		if (isDominatedAndInsert(label, FWTL.get(label.jid))) {
-			return;
+	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
+		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
+			return false;
 		}
-		FWUL.add(label);
-		tryGenerateColumn(label.sequence, lp);
-		joinForward(label, lp);
+		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
-	private void addBackwardLabel(BiLabel label, LP lp) {
-		if (isDominatedAndInsert(label, BWTL.get(label.jid))) {
-			return;
+	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
+		if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
+			return false;
 		}
-		BWUL.add(label);
-		tryGenerateColumn(label.sequence, lp);
-		joinBackward(label, lp);
+		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
+		if (node.isArcForbidden(prevJob, successor)) {
+			return false;
+		}
+		return isDirectBackwardExtensionTimeFeasible(label, prevJob);
 	}
 
-	/**
-	 * 2026-05-20: 双向 pricing 的第一层旧 VRP 风格占优。
-	 * <p>
-	 * 旧 VRP 的 FW/BW label 入表前会比较 reduced cost、time/load 和 memory 集合，删除被支配 label。
-	 * 当前 TWET 双向第一版尚未把分段 reduced-cost 函数下沉到 label 层，因此这里先做一个保守的标量占优：
-	 * 同一端点上，若已有 label 的已访问集合不大于新 label，且 duration 与当前 partial reduced-cost bound
-	 * 都不差，则新 label 不需要继续扩展；反过来，新 label 也会删除表中被它支配的旧 label。
-	 * 后续若实现函数型 forward/backward dominance，应替换这里的标量 bound。
-	 */
-	private boolean isDominatedAndInsert(BiLabel label, ArrayList<BiLabel> table) {
+	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
+		if (!isDirectForwardExtensionTimeFeasible(label.frontier, label.jid, nextJob)) {
+			return null;
+		}
+		double delay = data.getSetUp(label.jid, nextJob) + data.getProcessT(nextJob);
+		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
+		if (shifted.head == null) {
+			return null;
+		}
+
+		PiecewiseLinearFunction jobPenalty = getDynamicForwardJobPenalty(label.jid, nextJob);
+		if (jobPenalty == null) {
+			return null;
+		}
+		PiecewiseLinearFunction nextFrontier = shifted.add(jobPenalty);
+		if (nextFrontier.head == null) {
+			return null;
+		}
+		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
+				- lp.getArcDual(label.jid, nextJob);
+		nextFrontier.shiftYInPlace(fixedReducedCost);
+		nextFrontier.normalize(Direction.FORWARD);
+		if (nextFrontier.head == null) {
+			return null;
+		}
+
+		double ell = nextFrontier.head.start;
+		if (Utility.compareGt(ell, tMid)) {
+			return null;
+		}
+		nextFrontier = cropToInterval(nextFrontier, ell, tMid);
+		if (nextFrontier.head == null) {
+			return null;
+		}
+
+		PackedBitSet visited = label.visitedSet.copy();
+		visited.add(nextJob);
+		PackedBitSet reachable = buildForwardReachableSet(nextJob, visited, lp.getNode(), nextFrontier);
+		return new ForwardLabel(nextJob, label, visited, reachable, nextFrontier);
+	}
+
+	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
+		Node node = lp.getNode();
+		PiecewiseLinearFunction nextFrontier;
+		double rho;
+		if (label.isSinkRoot) {
+			nextFrontier = data.penaltyFunction[prevJob].copy();
+			nextFrontier.shiftYInPlace(-lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId()));
+			nextFrontier.normalize(Direction.BACKWARD);
+			if (nextFrontier.head == null) {
+				return null;
+			}
+			rho = nextFrontier.tail.end;
+		} else {
+			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
+			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
+			if (shifted.head == null) {
+				return null;
+			}
+			nextFrontier = shifted.add(data.penaltyFunction[prevJob]);
+			if (nextFrontier.head == null) {
+				return null;
+			}
+			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
+					- lp.getArcDual(prevJob, label.jid);
+			nextFrontier.shiftYInPlace(fixedReducedCost);
+			nextFrontier.normalize(Direction.BACKWARD);
+			if (nextFrontier.head == null) {
+				return null;
+			}
+			rho = Math.min(label.frontier.tail.end - delay, nextFrontier.tail.end);
+		}
+		if (Utility.compareLt(rho, tMid)) {
+			return null;
+		}
+		nextFrontier = cropToInterval(nextFrontier, tMid, rho);
+		if (nextFrontier.head == null) {
+			return null;
+		}
+
+		PackedBitSet visited = label.visitedSet.copy();
+		visited.add(prevJob);
+		PackedBitSet reachable = buildBackwardReachableSet(prevJob, visited, lp.getNode(), nextFrontier);
+		return new BackwardLabel(prevJob, label, visited, reachable, nextFrontier, false);
+	}
+
+	private boolean insertForward(ForwardLabel label) {
+		ArrayList<ForwardLabel> table = FWTL.get(label.jid);
 		for (int i = 0; i < table.size(); i++) {
-			BiLabel existing = table.get(i);
-			if (dominates(existing, label)) {
+			ForwardLabel existing = table.get(i);
+			if (dominatesForward(existing, label)) {
 				label.isDominated = true;
 				return true;
 			}
-			if (dominates(label, existing)) {
+			if (dominatesForward(label, existing)) {
 				existing.isDominated = true;
 				table.remove(i);
 				i--;
@@ -218,69 +297,153 @@ public class GCBidirectional {
 		return false;
 	}
 
-	private boolean dominates(BiLabel a, BiLabel b) {
-		if (!a.visited.isSubsetOf(b.visited)) {
-			return false;
+	private boolean insertBackward(BackwardLabel label) {
+		ArrayList<BackwardLabel> table = BWTL.get(label.jid);
+		for (int i = 0; i < table.size(); i++) {
+			BackwardLabel existing = table.get(i);
+			if (dominatesBackward(existing, label)) {
+				label.isDominated = true;
+				return true;
+			}
+			if (dominatesBackward(label, existing)) {
+				existing.isDominated = true;
+				table.remove(i);
+				i--;
+			}
 		}
-		return !Utility.compareGt(a.sourceDuration, b.sourceDuration)
-				&& !Utility.compareGt(a.internalDuration, b.internalDuration)
-				&& !Utility.compareGt(a.dominanceReducedCost, b.dominanceReducedCost);
+		table.add(label);
+		return false;
 	}
 
-	/**
-	 * 对应旧 VRP Join：forward 和 backward 在同一个中间 job 上拼接。
-	 */
-	private void joinForward(BiLabel forward, LP lp) {
-		if (generatedColumns.size() >= config.maxExactPricingColumns || forward.sequence.isEmpty()) {
-			return;
-		}
-		for (BiLabel backward : BWTL.get(forward.jid)) {
-			if (backward.isDominated) {
-				continue;
-			}
-			tryJoin(forward, backward, lp);
-			if (generatedColumns.size() >= config.maxExactPricingColumns) {
-				return;
-			}
-		}
+	private boolean dominatesForward(ForwardLabel a, ForwardLabel b) {
+		return a.reachableSet.isSupersetOf(b.reachableSet) && a.frontier.dominates(b.frontier);
 	}
 
-	/**
-	 * 新 backward label 入表后，反向检查已有 forward label，保持 FW/BW 两侧对称。
-	 */
-	private void joinBackward(BiLabel backward, LP lp) {
-		if (generatedColumns.size() >= config.maxExactPricingColumns || backward.sequence.isEmpty()) {
-			return;
-		}
-		for (BiLabel forward : FWTL.get(backward.jid)) {
-			if (forward.isDominated) {
-				continue;
-			}
-			tryJoin(forward, backward, lp);
-			if (generatedColumns.size() >= config.maxExactPricingColumns) {
-				return;
-			}
-		}
+	private boolean dominatesBackward(BackwardLabel a, BackwardLabel b) {
+		return a.reachableSet.isSupersetOf(b.reachableSet) && a.frontier.dominates(b.frontier);
 	}
 
-	private void tryJoin(BiLabel forward, BiLabel backward, LP lp) {
-		if (forward.sequence.isEmpty() || backward.sequence.isEmpty() || forward.jid != backward.jid) {
+	private void tryGenerateForwardColumn(ForwardLabel label, LP lp) {
+		if (label.jid == 0 || generatedColumns.size() >= config.maxExactPricingColumns) {
 			return;
 		}
-		for (int i = 1; i < backward.sequence.size(); i++) {
-			if (forward.visited.contains(backward.sequence.get(i).intValue())) {
-				return;
-			}
-		}
-		double joinedDuration = forward.sourceDuration + backward.internalDuration - data.getProcessT(forward.jid);
-		if (Utility.compareGt(joinedDuration, data.CmaxH)) {
+		Node node = lp.getNode();
+		int sink = node.sinkId();
+		if (node.isArcForbidden(label.jid, sink)) {
 			return;
 		}
-		ArrayList<Integer> sequence = new ArrayList<Integer>(forward.sequence);
-		for (int i = 1; i < backward.sequence.size(); i++) {
-			sequence.add(backward.sequence.get(i));
+		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
+		if (!Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
+			return;
 		}
+		ArrayList<Integer> sequence = recoverForwardSequence(label);
 		tryGenerateColumn(sequence, lp);
+	}
+
+	private void joinFromForward(ForwardLabel forward, LP lp) {
+		if (generatedColumns.size() >= config.maxExactPricingColumns) {
+			return;
+		}
+		Node node = lp.getNode();
+		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
+			if (forward.jid == firstJob || node.isArcForbidden(forward.jid, firstJob)) {
+				continue;
+			}
+			ArrayList<BackwardLabel> table = BWTL.get(firstJob);
+			for (int i = 0; i < table.size() && canContinue(); i++) {
+				BackwardLabel backward = table.get(i);
+				if (!backward.isDominated) {
+					tryJoin(forward, backward, lp);
+				}
+			}
+		}
+	}
+
+	private void joinFromBackward(BackwardLabel backward, LP lp) {
+		if (generatedColumns.size() >= config.maxExactPricingColumns) {
+			return;
+		}
+		Node node = lp.getNode();
+		for (int lastJob = 0; lastJob <= data.n && canContinue(); lastJob++) {
+			if (lastJob == backward.jid || node.isArcForbidden(lastJob, backward.jid)) {
+				continue;
+			}
+			ArrayList<ForwardLabel> table = FWTL.get(lastJob);
+			for (int i = 0; i < table.size() && canContinue(); i++) {
+				ForwardLabel forward = table.get(i);
+				if (!forward.isDominated) {
+					tryJoin(forward, backward, lp);
+				}
+			}
+		}
+	}
+
+	private void tryJoin(ForwardLabel forward, BackwardLabel backward, LP lp) {
+		if (generatedColumns.size() >= config.maxExactPricingColumns) {
+			return;
+		}
+		if (forward.jid == backward.jid || forward.visitedSet.intersects(backward.visitedSet)) {
+			return;
+		}
+
+		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
+		double joinUpper = Math.min(tMid, backward.frontier.tail.end - delta);
+		double joinLower = forward.frontier.head.start;
+		if (Utility.compareGt(joinLower, joinUpper)) {
+			return;
+		}
+
+		PiecewiseLinearFunction forwardPart = cropToInterval(forward.frontier, joinLower, joinUpper);
+		if (forwardPart.head == null) {
+			return;
+		}
+		PiecewiseLinearFunction backwardProjection = buildJoinBackwardProjection(backward.frontier, delta, joinLower,
+				joinUpper);
+		if (backwardProjection == null || backwardProjection.head == null) {
+			return;
+		}
+		PiecewiseLinearFunction joinCost = forwardPart.add(backwardProjection);
+		if (joinCost.head == null) {
+			return;
+		}
+		joinCost.shiftYInPlace(data.getSetupCost(forward.jid, backward.jid));
+		double reducedCostBound = joinCost.findMinimal(false, true)[0];
+		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
+			return;
+		}
+
+		ArrayList<Integer> sequence = recoverJoinSequence(forward, backward);
+		tryGenerateColumn(sequence, lp);
+	}
+
+	/**
+	 * 2026-05-22: 论文里的 join 使用
+	 * f_b(max(Tmid, x + Delta))。
+	 * 这里把 backward 函数投影回 forward 时间轴：
+	 * 1. x < Tmid-Delta 时取常数 f_b(Tmid)；
+	 * 2. x >= Tmid-Delta 时取 shift 后的 f_b(x+Delta)。
+	 * 这个投影只在 join 阶段临时构造，不会写回 backward label。
+	 */
+	private PiecewiseLinearFunction buildJoinBackwardProjection(PiecewiseLinearFunction backward, double delta,
+			double xStart, double xEnd) {
+		if (backward == null || backward.head == null || Utility.compareGt(xStart, xEnd)) {
+			return null;
+		}
+		PiecewiseLinearFunction projection = new PiecewiseLinearFunction();
+		double split = tMid - delta;
+		double constantEnd = Math.min(xEnd, split);
+		if (Utility.compareLt(xStart, constantEnd)) {
+			projection.addSegment(xStart, constantEnd, 0.0, backward.evaluate(tMid));
+		}
+
+		double shiftedStart = Math.max(xStart, split);
+		if (!Utility.compareGt(shiftedStart, xEnd)) {
+			PiecewiseLinearFunction shifted = backward.shiftX(-delta);
+			PiecewiseLinearFunction shiftedPart = cropToInterval(shifted, shiftedStart, xEnd);
+			appendSegments(projection, shiftedPart);
+		}
+		mergeAdjacentEqualSegments(projection);
+		return projection;
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp) {
@@ -329,78 +492,264 @@ public class GCBidirectional {
 		return reducedCost;
 	}
 
-	private double dominanceReducedCost(ArrayList<Integer> sequence, LP lp) {
-		if (sequence.isEmpty()) {
-			return 0.0;
+	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {
+		if (frontier == null || frontier.head == null) {
+			return false;
 		}
-		double cost = evaluator.evaluate(sequence);
-		if (Utility.isBigMValue(cost)) {
-			return Utility.big_M;
+		PiecewiseLinearFunction jobPenalty = getDynamicForwardJobPenalty(prevJob, nextJob);
+		if (jobPenalty == null) {
+			return false;
 		}
-		double reducedCost = cost - lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			reducedCost -= lp.getJobDual(job);
-			reducedCost -= lp.getArcDual(prev, job);
-			prev = job;
-		}
-		return reducedCost;
+		double hEnd = getDynamicForwardHEnd(prevJob, nextJob);
+		double earliestCompletion = frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
+		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, tMid);
 	}
 
-	private static final class BiLabel implements Comparable<BiLabel> {
+	/**
+	 * 2026-05-22: backward 侧这里先只做 O(1) 的存在性交集检查。
+	 * 只要 [Tmid, rho'] 和 job 的静态粗硬窗还有交集，就允许进入真正的函数扩展。
+	 * 更强的 pair 级 H^b_{ir} 可以以后再补。
+	 */
+	private boolean isDirectBackwardExtensionTimeFeasible(BackwardLabel label, int prevJob) {
+		double rhoPrime;
+		if (label.isSinkRoot) {
+			rhoPrime = data.hardWindowEnd[prevJob];
+		} else {
+			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
+			rhoPrime = Math.min(label.frontier.tail.end - delay, data.hardWindowEnd[prevJob]);
+		}
+		double lower = Math.max(tMid, data.hardWindowStart[prevJob]);
+		return !Utility.compareLt(rhoPrime, lower);
+	}
+
+	private PackedBitSet buildForwardReachableSet(int fromJob, PackedBitSet visited, Node node,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet reachable = new PackedBitSet(data.n + 2);
+		for (int job = 1; job <= data.n; job++) {
+			if (!visited.contains(job) && !node.isArcForbidden(fromJob, job)
+					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+				reachable.add(job);
+			}
+		}
+		return reachable;
+	}
+
+	private PackedBitSet buildBackwardReachableSet(int firstJob, PackedBitSet visited, Node node,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet reachable = new PackedBitSet(data.n + 2);
+		BackwardLabel fake = new BackwardLabel(firstJob, null, visited, new PackedBitSet(data.n + 2), frontier,
+				firstJob == node.sinkId());
+		for (int job = 1; job <= data.n; job++) {
+			int successor = fake.isSinkRoot ? node.sinkId() : firstJob;
+			if (!visited.contains(job) && !node.isArcForbidden(job, successor)
+					&& isDirectBackwardExtensionTimeFeasible(fake, job)) {
+				reachable.add(job);
+			}
+		}
+		return reachable;
+	}
+
+	private void precomputeDynamicPricingWindows(LP lp) {
+		useJobLevelDynamicWindowCache = data.setupCostTriangleInequalitySatisfied;
+		dynamicJobPenaltyByJob = null;
+		dynamicJobPenaltyByPair = null;
+		dynamicJobHEnd = null;
+		dynamicPairHEnd = null;
+		if (useJobLevelDynamicWindowCache) {
+			precomputeJobLevelDynamicPricingWindows(lp);
+		} else {
+			precomputePairLevelDynamicPricingWindows(lp);
+		}
+	}
+
+	private void precomputeJobLevelDynamicPricingWindows(LP lp) {
+		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
+		dynamicJobHEnd = new double[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = hWindowStart(0, job, lp);
+			double hEnd = hWindowEnd(0, job, lp);
+			dynamicJobHEnd[job] = hEnd;
+			if (!Utility.compareGt(hStart, hEnd)) {
+				dynamicJobPenaltyByJob[job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+			}
+		}
+	}
+
+	private void precomputePairLevelDynamicPricingWindows(LP lp) {
+		dynamicJobPenaltyByPair = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
+		dynamicPairHEnd = new double[data.n + 1][data.n + 1];
+		for (int prevJob = 0; prevJob <= data.n; prevJob++) {
+			for (int job = 1; job <= data.n; job++) {
+				if (prevJob == job) {
+					continue;
+				}
+				double hStart = hWindowStart(prevJob, job, lp);
+				double hEnd = hWindowEnd(prevJob, job, lp);
+				dynamicPairHEnd[prevJob][job] = hEnd;
+				if (!Utility.compareGt(hStart, hEnd)) {
+					dynamicJobPenaltyByPair[prevJob][job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+				}
+			}
+		}
+	}
+
+	private PiecewiseLinearFunction getDynamicForwardJobPenalty(int prevJob, int job) {
+		if (useJobLevelDynamicWindowCache) {
+			return dynamicJobPenaltyByJob == null ? null : dynamicJobPenaltyByJob[job];
+		}
+		return dynamicJobPenaltyByPair == null ? null : dynamicJobPenaltyByPair[prevJob][job];
+	}
+
+	private double getDynamicForwardHEnd(int prevJob, int job) {
+		if (useJobLevelDynamicWindowCache) {
+			return dynamicJobHEnd[job];
+		}
+		return dynamicPairHEnd[prevJob][job];
+	}
+
+	private double hWindowStart(int prevJob, int job, LP lp) {
+		double gamma = hWindowGamma(prevJob, job, lp);
+		if (!Utility.compareGt(data.w_e[job], 0.0)) {
+			return 0.0;
+		}
+		return Math.max(0.0, data.d_e[job] - gamma / data.w_e[job]);
+	}
+
+	private double hWindowEnd(int prevJob, int job, LP lp) {
+		double gamma = hWindowGamma(prevJob, job, lp);
+		if (!Utility.compareGt(data.w_t[job], 0.0)) {
+			return data.CmaxH;
+		}
+		return Math.min(data.CmaxH, data.d_l[job] + gamma / data.w_t[job]);
+	}
+
+	private double hWindowGamma(int prevJob, int job, LP lp) {
+		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
+		return data.getSetupCostAdvantage(prevJob, job) + Math.min(lp.getJobDual(job), baseline);
+	}
+
+	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {
+		ArrayList<Integer> sequence = new ArrayList<Integer>();
+		ForwardLabel cursor = label;
+		while (cursor != null && cursor.jid != 0) {
+			sequence.add(0, Integer.valueOf(cursor.jid));
+			cursor = cursor.father;
+		}
+		return sequence;
+	}
+
+	private ArrayList<Integer> recoverBackwardSequence(BackwardLabel label) {
+		ArrayList<Integer> sequence = new ArrayList<Integer>();
+		BackwardLabel cursor = label;
+		while (cursor != null && !cursor.isSinkRoot) {
+			sequence.add(Integer.valueOf(cursor.jid));
+			cursor = cursor.father;
+		}
+		return sequence;
+	}
+
+	private ArrayList<Integer> recoverJoinSequence(ForwardLabel forward, BackwardLabel backward) {
+		ArrayList<Integer> sequence = recoverForwardSequence(forward);
+		sequence.addAll(recoverBackwardSequence(backward));
+		return sequence;
+	}
+
+	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {
+		PiecewiseLinearFunction cropped = new PiecewiseLinearFunction();
+		if (function == null || function.head == null || Utility.compareGt(start, end)) {
+			return cropped;
+		}
+		for (Segment seg = function.head; seg != null; seg = seg.next) {
+			double segStart = Math.max(seg.start, start);
+			double segEnd = Math.min(seg.end, end);
+			if (Utility.compareLt(segStart, segEnd)) {
+				cropped.addSegment(segStart, segEnd, seg.slope, seg.intercept);
+			}
+		}
+		mergeAdjacentEqualSegments(cropped);
+		return cropped;
+	}
+
+	private void appendSegments(PiecewiseLinearFunction target, PiecewiseLinearFunction source) {
+		if (target == null || source == null || source.head == null) {
+			return;
+		}
+		for (Segment seg = source.head; seg != null; seg = seg.next) {
+			target.addSegment(seg.start, seg.end, seg.slope, seg.intercept);
+		}
+	}
+
+	private void mergeAdjacentEqualSegments(PiecewiseLinearFunction function) {
+		if (function == null || function.head == null) {
+			return;
+		}
+		Segment cur = function.head;
+		while (cur.next != null) {
+			if (Utility.compareEq(cur.end, cur.next.start) && Utility.compareEq(cur.slope, cur.next.slope)
+					&& Utility.compareEq(cur.intercept, cur.next.intercept)) {
+				cur.end = cur.next.end;
+				cur.next = cur.next.next;
+			} else {
+				cur = cur.next;
+			}
+		}
+		function.tail = cur;
+	}
+
+	private abstract static class FunctionLabel implements Comparable<FunctionLabel> {
 		final int jid;
-		final PackedBitSet visited;
-		final ArrayList<Integer> sequence;
-		final double sourceDuration;
-		final double internalDuration;
-		double dominanceReducedCost;
+		final PackedBitSet visitedSet;
+		final PackedBitSet reachableSet;
+		final PiecewiseLinearFunction frontier;
+		double minReducedCost;
 		boolean isDominated;
 
-		private BiLabel(int jid, PackedBitSet visited, ArrayList<Integer> sequence, double sourceDuration,
-				double internalDuration) {
+		FunctionLabel(int jid, PackedBitSet visitedSet, PackedBitSet reachableSet, PiecewiseLinearFunction frontier) {
 			this.jid = jid;
-			this.visited = visited;
-			this.sequence = sequence;
-			this.sourceDuration = sourceDuration;
-			this.internalDuration = internalDuration;
-			this.dominanceReducedCost = 0.0;
+			this.visitedSet = visitedSet;
+			this.reachableSet = reachableSet;
+			this.frontier = frontier;
+			this.minReducedCost = frontier == null || frontier.head == null ? Utility.big_M
+					: frontier.findMinimal(false, true)[0];
 			this.isDominated = false;
 		}
 
-		static BiLabel source(PackedBitSet visited) {
-			return new BiLabel(0, visited, new ArrayList<Integer>(), 0.0, 0.0);
-		}
-
-		static BiLabel sink(int sinkId, PackedBitSet visited) {
-			return new BiLabel(sinkId, visited, new ArrayList<Integer>(), 0.0, 0.0);
-		}
-
-		BiLabel append(int job, double nextSourceDuration) {
-			PackedBitSet nextVisited = visited.copy();
-			nextVisited.add(job);
-			ArrayList<Integer> nextSequence = new ArrayList<Integer>(sequence);
-			nextSequence.add(Integer.valueOf(job));
-			return new BiLabel(job, nextVisited, nextSequence, nextSourceDuration, nextSourceDuration);
-		}
-
-		BiLabel prepend(int job, double nextInternalDuration, double nextSourceDuration) {
-			PackedBitSet nextVisited = visited.copy();
-			nextVisited.add(job);
-			ArrayList<Integer> nextSequence = new ArrayList<Integer>(sequence.size() + 1);
-			nextSequence.add(Integer.valueOf(job));
-			nextSequence.addAll(sequence);
-			return new BiLabel(job, nextVisited, nextSequence, nextSourceDuration, nextInternalDuration);
-		}
-
 		@Override
-		public int compareTo(BiLabel other) {
-			if (Utility.compareLt(sourceDuration, other.sourceDuration)) {
+		public int compareTo(FunctionLabel other) {
+			if (Utility.compareLt(minReducedCost, other.minReducedCost)) {
 				return -1;
 			}
-			if (Utility.compareGt(sourceDuration, other.sourceDuration)) {
+			if (Utility.compareGt(minReducedCost, other.minReducedCost)) {
 				return 1;
 			}
-			return Integer.compare(sequence.size(), other.sequence.size());
+			return Integer.compare(jid, other.jid);
+		}
+	}
+
+	private static final class ForwardLabel extends FunctionLabel {
+		final ForwardLabel father;
+
+		ForwardLabel(int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
+				PiecewiseLinearFunction frontier) {
+			super(jid, visitedSet, reachableSet, frontier);
+			this.father = father;
+		}
+	}
+
+	private static final class BackwardLabel extends FunctionLabel {
+		final BackwardLabel father;
+		final boolean isSinkRoot;
+
+		BackwardLabel(int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
+				PiecewiseLinearFunction frontier, boolean isSinkRoot) {
+			super(jid, visitedSet, reachableSet, frontier);
+			this.father = father;
+			this.isSinkRoot = isSinkRoot;
+		}
+
+		static BackwardLabel sink(int sinkId, PackedBitSet visitedSet, PiecewiseLinearFunction frontier,
+				PackedBitSet reachableSet) {
+			return new BackwardLabel(sinkId, null, visitedSet, reachableSet, frontier, true);
 		}
 	}
 }

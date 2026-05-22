@@ -1,2 +1,2 @@
 case_id,n,m,arcflow,bpc,bound,gap,status,nodes,branches,pricing_rounds,generated_columns,validation
-tariff_branch,5,2,10.0,10.0,10.0,0.0,FINISHED,3,1,6,5,true
+tariff_branch,5,2,10.0,10.0,10.0,0.0,FINISHED,3,1,6,0,true

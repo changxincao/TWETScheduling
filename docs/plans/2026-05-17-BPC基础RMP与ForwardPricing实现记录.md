@@ -1018,12 +1018,85 @@ forward 侧的动态硬时间窗逻辑继续复用了现有单向 exact pricing 
 
 回归验证继续通过。重新编译 `GCBidirectional.java` 后，`HEU.PricingAlgorithmComparisonTest` 仍保持 12/12 轮单向 exact 与双向 exact 的最优 reduced cost 完全一致；该组小例上的双向平均时间约为 `1.67 ms/round`。`HEU.SmallBPCBatchTest` 继续保持 8/8 个小例和 tariff 分支诊断例全部通过。说明这层 join 前置下界剪枝在当前实现里是安全的，而且能继续减少一部分无效的函数级 join 计算。
 
-## 2026-05-22：修正双向 frontier 的半域保存方式
+## 2026-05-22：修正双向 backward 半域的物理裁剪方式
 
-这轮重新检查 `GCBidirectional` 后，确认上一版双向 exact pricing 在 backward 半域上还有一个不够严谨的点。旧实现会在 `extendBackward()` 里直接把 frontier 物理裁成 `[lower, rho]`，但 `buildJoinBackwardProjection()` 又默认可以在 `T^mid` 取 `backward.evaluate(T^mid)`。当 `lower > T^mid` 时，这两个假设是冲突的：一方面 `[T^mid, lower)` 这段已经被裁掉，另一方面 join 又想把 `T^mid` 当成 backward 常数延拓的锚点。这样虽然在很多小例上未必立刻出错，但语义上不稳，也和前面单向 pricing / 启发式里“定义域外写成 big_M，不轻易物理删域”的处理风格不一致。
+这轮重新检查 `GCBidirectional` 后，确认上一版双向 exact pricing 在 backward 半域上还有一个不够严谨的点。旧实现会在 `extendBackward()` 里直接把 frontier 物理裁成 `[lower, rho]`，但 `buildJoinBackwardProjection()` 又默认可以在 `T^mid` 取 `backward.evaluate(T^mid)`。当 `lower > T^mid` 时，这两个假设是冲突的：一方面 `[T^mid, lower)` 这段已经被裁掉，另一方面 join 又想把 `T^mid` 当成 backward 常数延拓的锚点。
 
-这次改法是统一把双向 label 的 frontier 改成“固定半域 + 显式 big_M 补边”。forward 端始终保存 `[0, T^mid]`，backward 端始终保存 `[T^mid, CmaxH]`。扩展时，先继续使用本轮动态硬时间窗裁好的 job penalty 函数；完成 `shift/add/固定 reduced-cost 项` 之后，不再直接用 `cropToInterval()` 缩到真实可行子区间，而是先把整个半域补满：半域内当前没有定义的部分全部写成 `big_M` 段。随后再做 `normalize(Direction.FORWARD/BACKWARD)`。这样 forward 端仍保留左侧不可行的 `big_M` 头段，backward 端则会在 suffix-normalize 时把 `[T^mid, 真正最早可行点)` 自然压成常数，而不是被物理裁掉。normalize 完成后，再把半域边界上缺失的 `big_M` 段补回去，确保存进 label 的 frontier 始终覆盖整段半域。
+正确处理不是给 forward 左侧补 `big_M`，也不是给 backward 右侧补 `big_M`。按单向 pricing 和启发式函数操作的思路，不可行窗口应优先写在“新增 job 的 penalty 函数”里，也就是通过 `setDomain(hStart,hEnd,true)` 把窗口外变成 `big_M`；label frontier 本身只保留当前方向真正需要的半域。forward 扩展后仍按原来的方式 `normalize(FORWARD)`，再裁成 `[ell,T^mid]`。这里的左端 `ell` 是当前前缀最早可行完成时间，左侧不属于该 label 的可行域，不应该额外补回。
 
-半域补边后，`head.start/tail.end` 就不再等于真实的有限可行边界，因此这轮也同步把几个依赖边界的位置改成了“显式扫描有限段”。现在 `FunctionLabel` 新增缓存 `feasibleStart` 和 `feasibleEnd`，分别表示首个非 `big_M` 段的起点和最后一个非 `big_M` 段的终点。前向直接扩展过滤改用 `feasibleStart` 计算最早完成时间，反向直接扩展过滤改用 `feasibleEnd` 计算 `rho'`，join 的有效区间也改成 `forward.feasibleStart` 到 `backward.feasibleEnd - delta`。这样 reach、直接扩展和 join 都不会再被半域补边后的假 `head/tail` 误导。
+backward 端的关键改动是把裁剪顺序改成先裁 `[T^mid,rho]`，再执行 `normalize(BACKWARD)`。这样如果当前新增 job 的动态窗口左端 `lower` 大于 `T^mid`，那么 `[T^mid,lower)` 在裁剪后仍然存在，只是由于 job penalty 的窗口外语义暂时是 `big_M`；随后 suffix-min 会把这段自然压成 `lower` 处的常数值。也就是说，backward 左侧常数延拓由 `normalize(BACKWARD)` 产生，而不是通过额外补段硬造出来。右侧超过 `rho` 的部分不再保留，因为它已经不是当前 backward label 的可行半域。
 
-这次修改的核心目标不是再加一种新剪枝，而是把双向 frontier 的保存语义收紧到更稳的版本：半域始终存在，窗口外用 `big_M` 表达，不再把 join 需要用到的边界段物理删掉。回归上重新跑了 `HEU.PricingAlgorithmComparisonTest` 和 `HEU.SmallBPCBatchTest`。结果仍然是单向 exact 与双向 exact 12/12 轮最优 reduced cost 一致，小规模整树 8/8 对拍通过，tariff 分支诊断例也继续通过。说明这一轮修正没有破坏当前 exact pricing 的基线正确性，同时把半域定义和 join 语义补得更严谨了。
+这次同步撤掉了前一版错误加入的 `padToIntervalWithBigM`、`feasibleStart/feasibleEnd` 和对应扫描有限段的逻辑。现在 forward 仍使用 `head.start` 表示当前前缀最早可行点，backward 仍使用 `tail.end` 表示当前后缀最晚可行点，和半域物理保存方式一致。回归上重新跑了 `HEU.PricingAlgorithmComparisonTest` 和 `HEU.SmallBPCBatchTest`。结果仍然是单向 exact 与双向 exact 12/12 轮最优 reduced cost 一致，小规模整树 8/8 对拍通过，tariff 分支诊断例也继续通过。
+
+## 2026-05-22：双向 exact pricing 后续实现计划
+
+这次重新对照 `twet_outsourcing_models_revised_v42.tex`、当前单向 `GC`、当前 `GCBidirectional` 以及旧 VRP `GCNGBB` 后，先明确后续实现边界：不再采用“固定半域补 big_M”的方案。论文里的半域定义是 label 的存储域，forward label 存 `[ell,T^mid]`，backward label 存 `[T^mid,rho]`；不可行窗口应写进新增 job 的 penalty 函数，即通过 `setDomain(hStart,hEnd,true)` 把窗口外变成 `big_M`，而不是在 label frontier 外侧额外补一段。join 时才使用常数延拓：forward 在 `T^mid` 右侧取 `f(T^mid)`，backward 在 `T^mid` 左侧取 `f_b(T^mid)`。这些延拓只服务 crossing arc join，不写回 label。
+
+下一步实现应按四层推进。第一层是把现有 `GCBidirectional` 的代码语义清理干净：保留已经改回的 `[ell,T^mid]` 和 `[T^mid,rho]` 存储方式，删除或修正仍然暗示“固定半域补边”的旧注释，确保 `head.start` 和 `tail.end` 分别就是 forward 的 `ell` 与 backward 的 `rho`。第二层是复核扩展公式：forward 继续沿用单向 pricing 的 `shiftX(delay) + add(dynamicPenalty) + fixedReducedCost + normalize(FORWARD) + crop[ell,Tmid]`；backward 则固定为先算 `rho'`，再构造当前 job penalty 与后缀函数的组合，随后裁 `[Tmid,rho']`，再 `normalize(BACKWARD)`。如果 `hStart > Tmid`，`[Tmid,hStart)` 不物理删除，交给 job penalty 的 `big_M` 和 suffix-min 形成常数闭包。第三层是 join：只在 `t in [ell, min(Tmid,rho-Delta)]` 上拼接，先用 `minF + minB + setupCost - arcDual` 做安全乐观下界，再构造 `f_b(max(Tmid,t+Delta))` 的临时投影，做函数相加和 `findMinimal`，最后仍用 `TWETColumnEvaluator` 对恢复出的完整序列做真实成本复核。第四层是 dominance 和验证：当前先保留同端点、reachable superset、函数完整占优的 pairwise 版本，不在这一轮引入 partial dominance、NG/DSSR 或 SRI cut。
+
+旧 VRP `GCNGBB` 给当前实现的参考主要是外层生命周期，而不是成本公式本身。它的结构是 forward/backward 两侧队列和 table、扩展后入表占优、被支配 label 出队跳过、最后 join 生成列；TWET 应保持这个生命周期。但旧 VRP 是同一中间客户点 join，而 v42 tex 的 TWET 是 crossing arc `(i,r)` join，所以不能照搬 `JoinRoute(lbf,label)` 的同点拼接。旧 VRP 的 bound、NG 和 DSSR 也先不搬，只把流程框架和 label 生命周期对齐。
+
+验证计划分三步。首先做 focused 编译，至少编译 `GCBidirectional.java` 以及直接依赖类。其次跑 `HEU.PricingAlgorithmComparisonTest`，要求单向 exact 与双向 exact 在同一 RMP dual 下最优 reduced cost 一致；这个测试主要防止双向漏列。最后跑 `HEU.SmallBPCBatchTest`，要求小规模 BPC 与 ArcFlow 对拍继续通过，并检查 tariff 分支诊断例不退化。若后续新增专门边界测试，应优先覆盖 `hStart > T^mid` 的 backward 扩展，确认 `evaluate(T^mid)` 在 join 投影中有定义且不是靠错误补边得到。
+
+补充澄清：join 阶段更适合按论文写成“临时扩展两个半域函数”而不是只构造 backward 投影。具体做法是，对仍未被占优、需要参与 join 的 label，forward frontier 在右侧临时补 `[T^mid,CmaxH]` 常数段，常数值为 `f(T^mid)`；backward frontier 在左侧临时补 `[0,T^mid]` 常数段，常数值为 `f_b(T^mid)`。如果原本最右段或最左段已经是相同常数，可以直接延长该段，否则新增一段即可。这个扩展只服务 join 和剪枝，不写回 label，不再做方向化 normalize；最多只做相邻等值段合并。这样既保持 label 存储域是 `[ell,T^mid]` / `[T^mid,rho]`，又能在 join 时把两个函数放到统一时间轴上处理。
+
+关于剪枝，当前 `FunctionLabel.minReducedCost` 已经是 label 自身函数最小值，可以作为 join 前的第一层下界。若本轮 pricing 目标是找所有负 reduced-cost 列，安全剪枝阈值应仍为 0；如果后续把双向 exact 改成“只返回当前最优一条或先找最优再入池”，才可以进一步用当前已知最优 reduced cost 作为阈值剪掉不可能更优的 join。否则用当前最优值剪枝会漏掉虽然不是最优、但仍然为负且本轮本可加入 RMP 的列。
+## 2026-05-22：双向 pricing 半域、硬窗和单点语义澄清
+
+本次重新澄清双向 exact pricing 中几个容易混淆的语义，避免后续继续把“新增 job 的硬时间窗”“label 半域保存”和“join 临时延拓”混在一起。
+
+首先，新增 job 的函数是否已经把硬时间窗外写成 `big_M`，答案是已经处理过，但要分两层看。数据预处理层在 `Data.setPenaltyFunctions()` 中已经对每个 `data.penaltyFunction[j]` 调用 `setDomain(hardWindowStart[j], hardWindowEnd[j], true)`，因此启发式和 BPC 默认拿到的 job penalty 已经带有粗硬窗，窗外为 `big_M`，右端仍保留到 `CmaxH/T`。BPC pricing 还会在每轮 RMP dual 给定后，进一步按当前 dual 和前驱/后继计算动态 `H_ij`，再对该轮使用的 job penalty 副本调用 `setDomain(hStart, hEnd, true)`。启发式没有 LP dual，因此只使用预处理粗硬窗；它的首任务 `setDomain(s_0j+p_j, CmaxH)` 是起点完工时间限制，不是动态 `H_ij`。
+
+其次，backward label 的变量语义不是“第一个 job 必须恰好在 t 完成”，而是“第一个 job 完成时间不早于 t 时，后缀还能取得的最小 reduced cost”。因此如果新增 job 的可行完成窗口左端为 `hStart`，且 `hStart > T^mid`，那么在 `[T^mid,hStart)` 上虽然不能真的完成该 job，但允许等到 `hStart` 再完成，所以这段应通过 `normalize(BACKWARD)` 的 suffix-min 变成等于右侧可行段的常数值，而不是被物理删掉。实现上要先保留 backward 半域 `[T^mid,rho]`，把 job penalty 的窗外 `big_M` 留在里面，然后再做 backward normalize；如果先裁成 `[hStart,rho]`，`T^mid` 处就没定义，后续 join 也无法取 `f_b(T^mid)`。
+
+第三，`minReducedCost` 只是 join 前置剪枝需要的 label 函数最小值。严格来说它不必在每次 label 扩展时都立即重算；如果后续改成批量 join，可以在所有未占优 label 准备进入 join 前统一计算并缓存。当前代码在 label 构造时计算，写法简单但可能多做 `findMinimal`。后续如果优化，需要同时检查优先队列排序是否依赖这个值；如果队列仍按该值排序，则插入时仍需要它，否则可以延迟到 join 前。
+
+第四，双向 label 的定义域裁剪只应该表达半域边界，不应该表达硬时间窗。硬时间窗必须只写进新增 job penalty 的 `setDomain(hStart,hEnd,true)`。forward label 保存 `[ell,T^mid]`，backward label 保存 `[T^mid,rho]`。扩展后裁到半域，是因为双向算法只保存一半时间轴，而不是为了把不可行窗口删掉。join 阶段才临时做常数延拓：forward 在右侧 `[T^mid,CmaxH]` 补 `f(T^mid)`，backward 在左侧 `[0,T^mid]` 补 `f_b(T^mid)`；该延拓只服务 join 和剪枝，不写回 label，也不做方向化 normalize。当前 `GCBidirectional` 已经没有“半域外补 big_M”的错误方案，但 join 仍主要用 backward 投影写法，后续应按这里的语义改成正反向都临时常数延拓后再拼接。
+
+第五，分段线性函数里的单点处理不是“代码只能处理 Cmax 处单点”，但当前真正被认可的普通流程主要是右端点/尾部单点。`evaluate(t)` 对内部断点会取左右端值的较小值，对 `tail.end` 有特判；`add()` 和 `trimToDomain()` 的历史注释也主要围绕 Cmax/tail 处被裁成 `[T,T]` 的情况。三参数 `setDomain(start,end,true)` 如果遇到人为粗硬窗退化成 `[d,d]`，不会把内部单点继续传播，而是用 `WINDOW_EPSILON=0.1` 扩成一个很小的正长度区间，再把窗外写成 `big_M`。因此后续 pricing 若真的产生 `[T,T]` 这种零长度 label，仍应在 pricing 层直接收尾或跳过普通 dominance/merge，而不是让普通函数操作继续传播。
+
+当前结论是：单向 pricing 与启发式的“新增 job 函数先带硬窗 big_M，再 shift/add/normalize”的核心思路是对的；双向 pricing 也应沿用这个思路，只额外维护 `[ell,T^mid]` / `[T^mid,rho]` 的半域保存。真正还需要继续改的是双向 join 的实现形式，把现在的投影式 join 清理成论文语义下的正反向临时常数延拓 join，并在代码注释中说明延拓不写回 label。
+
+## 2026-05-22：双向 pricing 后续修改口径收敛
+
+继续讨论后，进一步明确后续修改口径。此前关于 backward 在 `[T^mid,hStart)` 依赖 suffix-min 形成常数的解释，是针对当前“半域内直接保留并 normalize”的实现做出的解释；如果后续按新的 join 方案执行，即 label 扩展阶段只保存严格半域、join 前再对参与拼接的 label 做临时常数延拓，那么这段解释就不再应作为主要实现依据。新的主线应是：扩展阶段尽量和单向 pricing 保持一致，只做 `shift/add(dynamic job penalty)/fixed reduced-cost/normalize`，再裁到当前方向的半域；不在扩展阶段为了 join 去额外制造常数延拓。
+
+`minReducedCost` 也应调整为 join 阶段的临时信息。也就是说，扩展、入队、普通 dominance 阶段先不强制计算每个 label 的函数最小值；等到真正进入 join 扫描时，只对仍未被占优、且确实需要尝试拼接的 label 计算并缓存最小值，用于 `minF + minB + setupCost - arcDual` 的乐观下界剪枝。这样可以避免在大量最终不会参与 join 的中间 label 上重复做 `findMinimal`。
+
+join 阶段按论文语义做临时函数延拓。forward label 原始只保存 `[ell,T^mid]`，join 前临时在 `[T^mid,CmaxH]` 补 `f(T^mid)` 的常数段；backward label 原始只保存 `[T^mid,rho]`，join 前临时在 `[0,T^mid]` 补 `f_b(T^mid)` 的常数段。延拓函数只用于本次 join 和剪枝，不写回 label，不参与后续扩展，也不做方向化 normalize。若边界段本身已经是相同常数，可以直接延长；否则新增常数段即可。后续代码应把当前 `buildJoinBackwardProjection()` 这种单侧投影写法替换成这个正反向对称的临时延拓流程。
+
+因此后续实现目标可以压缩为三点：第一，扩展逻辑继续对齐单向 pricing，新增 job 的动态硬窗只体现在 job penalty 的 `setDomain(hStart,hEnd,true)`；第二，label 保存域只表达双向半域，不额外补半域外 `big_M` 或常数；第三，所有 join 需要的常数延拓和 label 最小值都延迟到 join 阶段处理。
+
+在流程层面，目前没有新的原则性问题。剩下的是实现对齐：把当前双向 join 的单侧 backward projection 改成正反向临时常数延拓；把 `minReducedCost` 从扩展期强制计算改成 join 前按需计算；扩展继续保持和单向 pricing 一致。除此之外，后续如果要把单向的 set dominance/dominance graph 复用到双向，只需要做方向和 label 类型适配，不改变上述主流程。
+
+关于分段线性函数里的“单点”，当前代码语义也需要明确。这里的单点指函数物理定义域退化为一个时间点，例如 `[T,T]` 或内部窗口 `[d,d]`，不是普通分段函数的断点。当前真正允许或处理单点的入口主要有四类：一是两参数 `setDomain(start,end)` 通过 `trimToDomain()` 可能把 tail 段裁成 `[end,end]`，历史上主要是 Cmax/tail 处的闭端点；二是 `add()` 在公共区间计算中使用 `cur <= nxt`，理论上能把两个函数只有一个端点相交的情况作为零长度段传下去；三是 `evaluate(t)` 对内部相邻段断点取左右值较小者，并对 `tail.end` 单独取值；四是三参数 `setDomain(start,end,true)` 遇到人为硬窗退化成 `[d,d]` 时，不传播真单点，而是用 `WINDOW_EPSILON=0.1` 扩成小区间。相反，`mergeMinimum` 的设计前提是不让 `[T,T]` 这种单点 label 进入普通 merge/dominance；如果 pricing 真的生成零长度 label，应在 pricing 层直接收尾或跳过普通流程。
+
+继续追溯三参数 `setDomain(start,end,true)` 的引入原因后，需要强调它的主目的不是处理单点，而是表达 pricing/硬时间窗中的“窗外不可行但右端定义域仍保留到 T”。早期讨论已经明确：两参数 `setDomain(start,end)` 会物理裁剪 segment 链表，如果用于 BPC 的 profitable completion window，会导致 job penalty 和 label 相加后输出定义域右端短于 `T`，破坏 `[a,T]` 契约。因此才新增三参数版本，把窗口外写成 `big_M`，窗口内保留原函数，`tail.end/domainEnd` 不被裁短。单点扩展只是后来针对人为粗硬窗 `[d,d]` 的保护：如果粗窗恰好退化为一个点，不把这个内部点作为零长度 segment 传播，而是放宽成 `d±0.1` 的小区间。按当前建模，真实 pricing 的动态窗口通常来自外包 baseline、dual 和 setup-cost advantage，退化成精确单点不是主路径；即使出现，也应被这个 epsilon 兜底吸收，而不是依赖普通函数操作支持内部单点。
+
+继续复核历史日志和测试后，确认三参数 `setDomain(start,end,true)` 已经同时服务 forward 和 backward，不是只处理右侧窗口外区域。实现上它会在 `actualStart -> keepStart` 写左侧 `big_M`，在 `keepEnd -> actualEnd` 写右侧 `big_M`，中间保留原函数。forward 语义下，后续 `minimizePrefixInPlace()` 会把右侧可等待区间按前缀最优值闭包，而左侧早于窗口的不可行段仍保持 `big_M`；backward 语义下，后续 `minimizeSuffixInPlace()` 会把左侧“可以等到窗口内再完成”的部分闭包成右侧可行最小值，而右侧晚于窗口的不可行段仍保持 `big_M`。已有 `PiecewiseLinearFunctionPropertyTest` 覆盖了这两个方向：forward 检查右侧 `big_M` 被 prefix-min 闭包，backward 检查左侧 `big_M` 被 suffix-min 闭包、右侧仍不可行。
+
+这也解释了为什么启发式之前没有因为粗硬窗出问题：`Data.setPenaltyFunctions()` 已经把粗硬窗写入 `data.penaltyFunction[j]`，而 `Solution` 和 `HeuristicPricingEngine` 的 forward/backward profile 构造在每次 `add(data.penaltyFunction[j])` 后分别调用 prefix/suffix 最小化。因此，对启发式来说，三参数 `setDomain` 给出的窗外 `big_M` 会在方向化闭包里被解释成“前向可等待的右侧闭包”或“反向可等待的左侧闭包”。需要注意的是，如果某段代码只调用三参数 `setDomain` 却不做 prefix/suffix/normalize，那么它只得到“窗外是 `big_M`”的原始窗口函数，并不会自动形成方向化闭包。
+## 2026-05-22：右端 `[T,T]` 与 `normalize` 的 M 段处理语义
+
+继续澄清右端单点和 `normalize` 的关系。这里先不考虑内部单点，只看右侧退化成 `[T,T]` 的情况。右端 `[T,T]` 通常来自可行域刚好只剩全局右端，例如平移、相加或物理裁剪后，两个函数的公共定义域只在 `T/CmaxH` 这个点相交。当前代码对这种情况有一些兜底：两参数 `setDomain(start,end)` 通过 `trimToDomain()` 可能把 tail 裁成闭端点；`add()` 的公共区间循环允许 `cur <= nxt`，因此理论上能传下零长度交点；`evaluate(T)` 对 `tail.end` 有特判；prefix/suffix 最小化也已经修过边界真实最小值被误跳过的问题。
+
+但这些兜底不等于普通分段线性函数流程全面支持零长度 label。`mergeMinimum` 的契约仍然是不接收 `[T,T]` 这种单点 label，dominance graph/envelope 也不应依赖内部或尾部零长度段继续传播。如果 pricing 扩展后真实只剩 `[T,T]`，调用层应直接尝试连接终点生成完整列，或者判断无法继续后丢弃；不要再把它放进普通 merge/dominance 队列。这个约束和前面关于单点的结论一致：当前真正认可的是右端闭点兜底，不是通用零长度 segment 代数。
+
+`normalize` 也不是简单地把左右两侧连续 `big_M` 都砍掉。当前已经是方向化语义。`normalize(FORWARD)` 会删除左侧连续 `big_M`，因为它表示前向 label 的不可达起点；但它不会删除右侧连续 `big_M`，而是保留下来交给 `minimizePrefixInPlace()`，这样右侧等待区间可以被前缀最小值闭包，同时保持右端到 `T`。相反，`normalize(BACKWARD)` 会保留左侧 `big_M`，因为 backward 的固定端是左端 `0/domainStart`，这些左侧区间后续可以由 `minimizeSuffixInPlace()` 闭包；它会删除右侧连续 `big_M` 尾段，因为这表示 backward 侧过晚、无法接上的完成时间。
+
+因此后续判断时要区分两件事：`setDomain(..., true)` 负责把窗口外写成左右两侧 `big_M`，但不会自动解释这些 `big_M`；真正把它解释成 forward 等待闭包或 backward 等待闭包的是后续的 `normalize(FORWARD/BACKWARD)` 或直接的 prefix/suffix 最小化。若只调用三参数 `setDomain` 而不做方向化闭包，得到的只是“窗口外为 M、定义域仍保留”的原始窗口函数。
+
+由此可以给 pricing 扩展层一个明确约束：如果扩展过程中 label 的函数定义域退化成右端单点 `[T,T]`，应在扩展层单独处理，也就是直接尝试连接终点并生成完整列，或者确认无法继续后丢弃。只要这个约束成立，后续的合并、完整占优、dominance graph 和 envelope 更新都可以继续假设输入有正长度定义域，不需要再专门考虑 `[T,T]` 单点 label。
+
+这里的 `T` 在代码层最好理解成“该函数对象自己的右端定义域”，也就是正常契约下的 `domainEnd`，并且应同时满足 `tail.end == domainEnd`。对 BPC pricing 和启发式里从 `Data` 构造出来的成本函数，`domainEnd` 通常就是 `data.CmaxH`，所以这两个判断在正常情况下等价；但写扩展层特判时不建议只硬编码比较 `data.CmaxH`，更稳的条件是 `head.start == tail.end && tail.end == domainEnd`，必要时再用 `domainEnd == data.CmaxH` 做调试断言。这样可以避免两参数 `setDomain` 临时物理裁剪后出现 `tail.end < domainEnd` 时，把一个中途裁出来的单点误当成全局右端 `[T,T]`。
+
+边界一致性也要按方向理解，而不是要求四个边界始终都一致。前向 label 的核心契约是右端一致，即正常流程中应保持 `tail.end == domainEnd == T`；左端 `head.start` 可以随着最早可行完成时间、左侧 `big_M` 删除或半域裁剪而大于 `domainStart`。反向 label 的核心契约是左端一致，即正常流程中应保持 `head.start == domainStart`；右端 `tail.end` 可以随着最晚可行完成时间、右侧 `big_M` 删除或半域裁剪而小于 `domainEnd`。只有完整 job penalty 或窗口化 job penalty 这类全域函数，才通常同时满足 `head.start == domainStart` 与 `tail.end == domainEnd`。两参数 `setDomain(start,end)` 是例外入口，它会物理裁剪真实链表，再恢复原元数据，因此可能主动制造 `tail.end != domainEnd` 或 `head.start != domainStart`，不能把这种中间对象当成普通前向/反向 label 契约内对象。
+## 2026-05-22：双向 pricing 的 Tmid 单点保留与虚拟终点扩展
+
+本次按前面确认的半域语义继续收敛 `GCBidirectional`。forward label 仍只保存 `[ell,T^mid]`，backward label 仍只保存 `[T^mid,rho]`，不在扩展阶段额外给半域外补 `big_M` 或常数段。新增 job 的硬时间窗仍然只写在 job penalty 上，也就是通过 `setDomain(hStart,hEnd,true)` 表示窗口外不可行，随后再按方向做 `normalize(FORWARD/BACKWARD)`。
+
+这次具体修正了两个边界。第一，backward 从虚拟终点第一次扩展到真实 job 时，当前变量已经是这个 job 自己的完成时间，因此不应该再加 setup time 或 processing time 的平移，只需要扣掉该 job dual 和虚拟终点弧 dual。代码中已经在 `isSinkRoot` 分支旁补了注释，避免后续把它误改成普通 backward 扩展。第二，`cropToInterval()` 现在会保留零长度区间，例如半域刚好退化到 `T^mid` 的 `[T^mid,T^mid]`。这个点不进入普通 merge/dominance 流程，但 join 时需要能取 `T^mid` 处的常数延拓值，否则会把一个合法的边界拼接状态错误删掉。
+
+join 侧也同步补了单点投影处理。`buildJoinBackwardProjection()` 在 `xStart == xEnd` 时不再直接返回空函数，而是根据 `x` 是否落在 `T^mid - Delta` 左侧，分别取 backward 的 `f_b(T^mid)` 常数，或取平移后的 backward 函数在该点的值。这样 forward 或 backward 在半域边界退化成单点时，仍可在 join 阶段被正确评价；该处理只服务 join，不把单点 label 继续放进普通扩展队列。
+
+验证上重新编译 `GCBidirectional.java`、`PricingAlgorithmComparisonTest.java` 和 `SmallBPCBatchTest.java`，使用 CPLEX jar 后编译通过。随后运行 `HEU.PricingAlgorithmComparisonTest`，结果为 12/12 轮单向 exact 与双向 exact 最优 reduced cost 一致，平均时间约为 forward `1.00 ms/round`、bidirectional `0.83 ms/round`；运行 `HEU.SmallBPCBatchTest`，8 个随机小例与 ArcFlow 对拍全部一致，tariff 分支诊断例也通过。当前结论是，这次修改没有改变主流程，只是把 `T^mid` 边界单点和 backward 虚拟终点扩展语义补严。

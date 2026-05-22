@@ -113,11 +113,9 @@ public class GCBidirectional {
 
 		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
 		sourceVisited.add(0);
-		PiecewiseLinearFunction sourceFrontier = data.penaltyFunction[0].copy();
+		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
-		sourceFrontier = padToIntervalWithBigM(sourceFrontier, 0.0, tMid);
 		sourceFrontier.normalize(Direction.FORWARD);
-		sourceFrontier = padToIntervalWithBigM(sourceFrontier, 0.0, tMid);
 		ForwardLabel source = new ForwardLabel(0, null, sourceVisited,
 				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
 		FWTL.get(0).add(source);
@@ -222,15 +220,17 @@ public class GCBidirectional {
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
 				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
-		// 2026-05-22: forward frontier 固定保留 [0,Tmid] 半域；窗口外和移位后暂不可达部分写成 big_M，
-		// normalize 之后再把左侧缺失的 big_M 头段补回，避免 join/reach 再因为物理缩域丢掉半域语义。
-		nextFrontier = padToIntervalWithBigM(nextFrontier, 0.0, tMid);
 		nextFrontier.normalize(Direction.FORWARD);
 		if (nextFrontier.head == null) {
 			return null;
 		}
-		nextFrontier = padToIntervalWithBigM(nextFrontier, 0.0, tMid);
-		if (!hasFiniteSegment(nextFrontier)) {
+
+		double ell = nextFrontier.head.start;
+		if (Utility.compareGt(ell, tMid)) {
+			return null;
+		}
+		nextFrontier = cropToInterval(nextFrontier, ell, tMid);
+		if (nextFrontier.head == null) {
 			return null;
 		}
 
@@ -254,11 +254,13 @@ public class GCBidirectional {
 			if (jobPenalty == null) {
 				return null;
 			}
+			// 2026-05-22: backward 从虚拟终点出发时，第一次加入真实任务不需要按 setup/processing 平移；
+			// 当前变量已经是 prevJob 自己的完成时间，这里只扣 job/arc dual。
 			nextFrontier = jobPenalty.copy();
 			nextFrontier.shiftYInPlace(-lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId()));
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
-			rhoPrime = Math.min(label.feasibleEnd - delay, getDynamicBackwardHEnd(prevJob, label.jid));
+			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
 			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				return null;
 			}
@@ -278,15 +280,11 @@ public class GCBidirectional {
 					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
-		// 2026-05-22: backward 端先补满 [Tmid,T] 再做 suffix-normalize。
-		// 这样 [Tmid, 真正最早可行点) 会被 suffix-min 压成常数，而不是像旧实现那样被 crop 掉。
-		nextFrontier = padToIntervalWithBigM(nextFrontier, tMid, data.CmaxH);
+		// 2026-05-22: backward 只保留 [Tmid,rho] 半域，不补右侧。
+		// 若 [Tmid,lower) 因当前 job 窗口暂为 big_M，suffix-normalize 会把它压成 lower 处的常数值。
+		nextFrontier = cropToInterval(nextFrontier, tMid, rhoPrime);
 		nextFrontier.normalize(Direction.BACKWARD);
 		if (nextFrontier.head == null) {
-			return null;
-		}
-		nextFrontier = padToIntervalWithBigM(nextFrontier, tMid, data.CmaxH);
-		if (!hasFiniteSegment(nextFrontier)) {
 			return null;
 		}
 
@@ -419,8 +417,8 @@ public class GCBidirectional {
 		}
 
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
-		double joinUpper = Math.min(tMid, backward.feasibleEnd - delta);
-		double joinLower = forward.feasibleStart;
+		double joinUpper = Math.min(tMid, backward.frontier.tail.end - delta);
+		double joinLower = forward.frontier.head.start;
 		if (Utility.compareGt(joinLower, joinUpper)) {
 			return;
 		}
@@ -465,9 +463,19 @@ public class GCBidirectional {
 		}
 		PiecewiseLinearFunction projection = new PiecewiseLinearFunction();
 		double split = tMid - delta;
+		if (Utility.compareEq(xStart, xEnd)) {
+			if (!Utility.compareGt(xStart, split)) {
+				addConstantSegmentOrPoint(projection, xStart, xEnd, backward.evaluate(tMid));
+			} else {
+				PiecewiseLinearFunction shifted = backward.shiftX(-delta);
+				appendSegments(projection, cropToInterval(shifted, xStart, xEnd));
+			}
+			mergeAdjacentEqualSegments(projection);
+			return projection;
+		}
 		double constantEnd = Math.min(xEnd, split);
 		if (Utility.compareLt(xStart, constantEnd)) {
-			projection.addSegment(xStart, constantEnd, 0.0, backward.evaluate(tMid));
+			addConstantSegmentOrPoint(projection, xStart, constantEnd, backward.evaluate(tMid));
 		}
 
 		double shiftedStart = Math.max(xStart, split);
@@ -535,11 +543,7 @@ public class GCBidirectional {
 			return false;
 		}
 		double hEnd = getDynamicForwardHEnd(prevJob, nextJob);
-		double feasibleStart = firstFiniteStart(frontier);
-		if (!Double.isFinite(feasibleStart)) {
-			return false;
-		}
-		double earliestCompletion = feasibleStart + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
+		double earliestCompletion = frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
 		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, tMid);
 	}
 
@@ -554,7 +558,7 @@ public class GCBidirectional {
 			rhoPrime = getDynamicBackwardHEnd(prevJob, successor);
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
-			rhoPrime = Math.min(label.feasibleEnd - delay, getDynamicBackwardHEnd(prevJob, successor));
+			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
 		}
 		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, successor));
 		return !Utility.compareLt(rhoPrime, lower);
@@ -792,7 +796,21 @@ public class GCBidirectional {
 		if (function == null || function.head == null || Utility.compareGt(start, end)) {
 			return cropped;
 		}
+		// 2026-05-22: 双向半域可能刚好退化到 Tmid 单点。这个点不参与继续扩展，
+		// 但 join 时要能用 Tmid 处常数延拓评价，因此这里保留零长度常数段。
+		if (Utility.compareEq(start, end)) {
+			if (!Utility.compareLt(start, function.head.start) && !Utility.compareGt(start, function.tail.end)) {
+				addConstantSegmentOrPoint(cropped, start, end, function.evaluate(start));
+			}
+			return cropped;
+		}
 		for (Segment seg = function.head; seg != null; seg = seg.next) {
+			if (Utility.compareEq(seg.start, seg.end)
+					&& !Utility.compareLt(seg.start, start)
+					&& !Utility.compareGt(seg.start, end)) {
+				addConstantSegmentOrPoint(cropped, seg.start, seg.end, seg.getValue(seg.start));
+				continue;
+			}
 			double segStart = Math.max(seg.start, start);
 			double segEnd = Math.min(seg.end, end);
 			if (Utility.compareLt(segStart, segEnd)) {
@@ -803,55 +821,8 @@ public class GCBidirectional {
 		return cropped;
 	}
 
-	private PiecewiseLinearFunction padToIntervalWithBigM(PiecewiseLinearFunction function, double intervalStart,
-			double intervalEnd) {
-		PiecewiseLinearFunction padded = new PiecewiseLinearFunction(intervalStart, intervalEnd);
-		if (Utility.compareGt(intervalStart, intervalEnd)) {
-			return padded;
-		}
-		PiecewiseLinearFunction clipped = cropToInterval(function, intervalStart, intervalEnd);
-		if (clipped.head == null) {
-			padded.addSegment(intervalStart, intervalEnd, 0.0, Utility.big_M);
-			return padded;
-		}
-		if (Utility.compareLt(intervalStart, clipped.head.start)) {
-			padded.addSegment(intervalStart, clipped.head.start, 0.0, Utility.big_M);
-		}
-		appendSegments(padded, clipped);
-		if (Utility.compareLt(clipped.tail.end, intervalEnd)) {
-			padded.addSegment(clipped.tail.end, intervalEnd, 0.0, Utility.big_M);
-		}
-		mergeAdjacentEqualSegments(padded);
-		return padded;
-	}
-
-	private static boolean hasFiniteSegment(PiecewiseLinearFunction function) {
-		return Double.isFinite(firstFiniteStart(function));
-	}
-
-	private static double firstFiniteStart(PiecewiseLinearFunction function) {
-		if (function == null) {
-			return Double.POSITIVE_INFINITY;
-		}
-		for (Segment seg = function.head; seg != null; seg = seg.next) {
-			if (!Utility.isBigMValue(seg.intercept)) {
-				return seg.start;
-			}
-		}
-		return Double.POSITIVE_INFINITY;
-	}
-
-	private static double lastFiniteEnd(PiecewiseLinearFunction function) {
-		if (function == null) {
-			return Double.NEGATIVE_INFINITY;
-		}
-		double end = Double.NEGATIVE_INFINITY;
-		for (Segment seg = function.head; seg != null; seg = seg.next) {
-			if (!Utility.isBigMValue(seg.intercept)) {
-				end = seg.end;
-			}
-		}
-		return end;
+	private void addConstantSegmentOrPoint(PiecewiseLinearFunction target, double start, double end, double value) {
+		target.addSegment(start, end, 0.0, value);
 	}
 
 	private void appendSegments(PiecewiseLinearFunction target, PiecewiseLinearFunction source) {
@@ -885,8 +856,6 @@ public class GCBidirectional {
 		final PackedBitSet visitedSet;
 		final PackedBitSet reachableSet;
 		final PiecewiseLinearFunction frontier;
-		final double feasibleStart;
-		final double feasibleEnd;
 		double minReducedCost;
 		boolean isDominated;
 
@@ -895,8 +864,6 @@ public class GCBidirectional {
 			this.visitedSet = visitedSet;
 			this.reachableSet = reachableSet;
 			this.frontier = frontier;
-			this.feasibleStart = firstFiniteStart(frontier);
-			this.feasibleEnd = lastFiniteEnd(frontier);
 			this.minReducedCost = frontier == null || frontier.head == null ? Utility.big_M
 					: frontier.findMinimal(false, true)[0];
 			this.isDominated = false;

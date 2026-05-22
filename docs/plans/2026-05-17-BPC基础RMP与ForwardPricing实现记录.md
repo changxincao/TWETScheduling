@@ -12,6 +12,8 @@
 
 对当前 TWET-BPC 的含义是：如果后续做 NG + DSSR + 双向函数 label，应该参考 `GCNGBB` 的整体结构，而不是只把 `GCNGB` 的 bound 公式搬过来。TWET 的 label 还带有分段线性函数，剩余成本 bound 不能只按一个标量 reduced cost 粗暴剪枝；至少要证明它是对所有可行完成时间都安全的函数级下界，或者先只保留双向 join 和 DSSR，不加 complete-bound 剪枝。否则在半程 label 上套用完整路径 bound，会有错误剪枝风险。
 
+需要特别避免一个误解：`GCNGBB` 并不是“不使用 complete bound”。源码头部仍然写着 `using the complete bound to cut off some labels`，并且实际维护了 `m_ft_bound/m_bt_bound/m_fc_bound/m_bc_bound` 以及带 SRI 修正的 bound 表。准确说法是：`GCNGBB` 使用了 complete-bound 思想，但它不是直接复用 `GCNGB` 的 `m_fw_bound/m_bw_bound + CheckBoundFW/BW` 公式，而是为了 bounded bidirectional search 重新构造了 forward/backward、time/capacity、SRI/no-SRI 多套 bound，并把它们放在半程 label 扩展、bound 更新和 join/DSS 检查这一整套流程中使用。
+
 ## 当前实现
 
 本次先把能够真正运行的第一版 BPC 主链路搭起来，目标不是一次性完成完整 branch-price-and-cut，而是先形成“RMP 能解、pricing 能生成负 reduced cost 列、列能回到 RMP、结果能输出和校验”的闭环。当前实现参考 `parallel_machine_scheduling_with_due_window.pdf` 中 set-partitioning/SP2 的建模思路，以及前面讨论过的“每个 dominance graph node 保留真实 label 集合，同时维护一个聚合 envelope 用于集合占优”的方案；旧 VRP BPC 代码里的 `GC`、`UL/TL`、按末端节点组织 label、arc branching 这些结构也尽量沿用了相近的命名和流程。

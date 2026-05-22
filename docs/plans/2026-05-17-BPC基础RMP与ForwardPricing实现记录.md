@@ -1140,3 +1140,19 @@ join 侧也同步补了单点投影处理。`buildJoinBackwardProjection()` 在 
 反向侧逻辑同理，但本次发现虚拟 sink 初始函数虽然物理 segment 是 `[T^mid,CmaxH]`，此前没有同步 domain 元数据。现在已经在构造 `sinkFrontier` 时显式 `resetDomain(T^mid,CmaxH)`。这样 backward 初始 label、backward dynamic job penalty 以及后续扩展得到的函数都会以 `[T^mid,CmaxH]` 作为自身 domain；`shiftX(-delay)` 会自然按反向半域裁剪，`add(jobPenalty)` 也只在该半域公共定义域上操作。
 
 因此当前可以把 `T^mid` 理解成双向 pricing 中的半域版 `CmaxH`：forward 右端边界是 `T^mid`，backward 左端边界是 `T^mid`。这依赖两个条件同时成立：一是初始 label 的元数据和物理 segment 都在半域内；二是每个新增 job penalty 也先裁成同方向半域。只要这两个条件保持，扩展过程中不需要额外的 post-crop 来兜底。
+
+## 2026-05-23：当前 BPC 与双向 pricing 求解流程复核
+
+本次复核当前求解主流程，重点看 BPC 节点处理、pricing 调用顺序和双向 exact pricing 的函数递推。整体流程如下。`Tree.solve()` 先通过 `InitialColumnBuilder` 构造 root 初始列和 incumbent，然后用优先队列按节点 pseudo cost 处理分支节点。每个节点出队后先做 pseudo-cost 预剪枝，再构造 `LP` 并调用 `PC.solve()`。如果 RMP 不可行，`PC` 进入 repair 模式，只给当前新分支行加人工 slack，用当前 slack dual 引导启发式/精确定价补列；repair 成功后按 reduced cost 和当前正值列筛成正式子节点列集。若 RMP 可行，则进入普通 pricing 循环。
+
+普通 pricing 循环现在与旧 VRP 的主节奏一致：按 engine 顺序调用，先启发式 pricing，再 exact pricing；只要某个 engine 加到了列，就立刻加入 LP、重解 LP，并从第一个 engine 重新开始。这样只要启发式还能补负 reduced-cost 列，就不会提前调用更重的 exact pricing。当前 `TWETBPCContext` 默认启用 `HeuristicPricingEngine` 加 `BidirectionalPricingEngine`，单向 exact 和 paper-dominance forward exact 是关闭双向后才二选一使用的备选路径。
+
+双向 exact pricing 当前流程为：每轮 pricing 先固定 RMP dual 并预计算动态硬时间窗。若 setup cost 满足三角不等式，则 forward/backward 均用 job 级动态窗口缓存；否则用 pair 级窗口缓存。forward 初始 label 在 `[0,T^mid]` 上，backward sink 初始 label 在 `[T^mid,CmaxH]` 上；新增 job penalty 也先通过 `setDomain(hStart,hEnd,true)` 写入硬窗，再由 `cropToInterval()` 裁成对应半域并同步 domain 元数据。因此扩展时 `shiftX()` 会按自身半域自然 `trimToDomain()`，不需要额外 post-crop。forward 扩展为 `shiftX(setup+p)+add(jobPenalty)+fixed reduced-cost+normalize(FORWARD)`；backward 扩展对 sink root 特判为不加 setup/processing 平移，其余为 `shiftX(-(setup+p_successor))+add(jobPenalty)+fixed reduced-cost+normalize(BACKWARD)`。
+
+join 阶段采用 crossing arc `(i,r)`，不是旧 VRP 的同点 join。`joinFromForward` 和 `joinFromBackward` 都通过当前 label 的 `reachableSet` 找另一侧 table，从而避免全量枚举全部节点。`tryJoin()` 先检查 visited set 不相交，再用 `forward.minReducedCost + backward.minReducedCost + setupCost(i,r) - arcDual(i,r)` 做乐观下界剪枝；通过后才构造 forward 裁剪段和 backward 投影函数，做函数级 `add + findMinimal` 判断。真正加列前仍用 `TWETColumnEvaluator` 对完整序列重新计算真实成本，再用真实 reduced cost 判定是否加入列池，这一步是安全兜底。
+
+当前看起来没有明显会破坏正确性的流程漏洞。已修正的一个表述问题是 `Tree` 的最终结果 message 原来仍写着 forward exact pricing，现在改成 configured pricing engines，避免默认双向 pricing 时输出误导。需要注意的是，`maxExactPricingColumns=150` 仍是单轮返回列上限；这不会直接破坏列生成正确性，因为 PC 会加列后重解并重新调用 pricing，但会影响每轮返回列数量和总迭代次数。若以后要严格诊断“是否 exact pricing 被列数上限截断”，可以增加统计字段，而不是把它当作当前错误。
+
+可以精简或提高效率的点主要有四类。第一，`FunctionLabel` 构造时立即调用 `frontier.findMinimal()` 计算 `minReducedCost`，这个值用于 PQ 排序、big_M 过滤和 join 乐观下界，因此当前不是纯多余；但它确实会让每个中间 label 都做一次函数最小值计算。若后续 profiling 显示这里是瓶颈，可以改成 lazy min 或用更便宜的排序 key，但要重新确认队列顺序和剪枝安全性。第二，`buildForwardReachableSet/buildBackwardReachableSet` 每生成一个 label 都扫描 `1..n`，复杂度是每 label `O(n)`；这比预处理 reach bitset 更简单稳健，但在大规模 pricing 中可能是瓶颈。之前讨论过旧 VRP reach 预处理，但由于 TWET 动态硬窗依赖 dual 和 pair/job 窗口，直接搬过来收益不一定大。第三，`tryJoin()` 构造 backward projection 时仍会创建临时函数并调用 `shiftX/crop/add/findMinimal`；这是当前最重的函数级 join 成本，已经有标量下界剪枝，但后续可以写专门的 shifted-sum-min 扫描器减少临时函数对象。第四，最终加列前 `tryGenerateColumn()` 会恢复完整 sequence、重新 evaluator 计算真实成本并再扫一遍 reduced cost；这一步保证安全，短期不建议删，除非以后能证明双向函数 join 的 reduced cost 和 evaluator 完全一致并有充分对拍。
+
+本次没有发现必须立刻重构的地方。优先级建议为：短期保持当前流程，继续用小规模对拍和中规模 profiling 验证；若要优化，先统计 pricing 中 label 数、dominance 删除数、reachable 扫描次数、join 尝试次数、join 下界剪枝次数、函数级 join 耗时，再决定是优化 `findMinimal`、reachable 构造还是 join 临时函数。没有统计前不建议继续大改流程。

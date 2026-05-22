@@ -131,7 +131,7 @@ public class Tree {
 		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty());
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, pool.size(), incumbentColumnIds,
 				incumbentOutsourcingValues,
-				"TWET BPC solved with LP RMP and forward exact pricing; advanced cuts/pricing remain pending");
+				"TWET BPC solved with LP RMP and configured pricing engines; advanced cuts/pricing remain pending");
 	}
 
 	private double updateReportedBound(PriorityQueue<Node> queue, double currentNodeBound, double incumbentCost) {

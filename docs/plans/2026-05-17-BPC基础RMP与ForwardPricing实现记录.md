@@ -28,6 +28,10 @@ ng-set / DSSR 处理的是更一般的重复客户问题。label 扩展时根据
 
 双向扩展后仍然可以更新 bound，是因为 bound 表描述的是“到达某个中间状态的成本界”或“从某个中间状态继续的成本界”，不是必须已经形成完整路径。比如 `FWExtend()` 生成了一个到达客户 `cid`、时间为 `t`、载重为 `w` 的 forward bounded label，即使它还没有到终点，它也给出了一个真实前缀成本。`UpdateFWBound()` 就把这个前缀成本写入 `m_ft_bound[cid][t]` 和 `m_fc_bound[cid][w]` 的临时数组，再和原来的 DP bound 组合并单调化。`BWExtend()` 后的 `UpdateBWBound()` 同理，用 backward bounded label 去修正 backward bound。随后另一侧扩展或 join 再使用这些更新后的表。也就是说，半程 label 不能单独作为列，但可以作为某个中间状态的成本信息来收紧 bound。
 
+`GCNGBB` 的 DSSR 停止逻辑也要区分“找到负列”和“证明没有负列”。在每一轮中，`Join()` 会拼接 forward/backward label。如果 reduced cost 为负且没有重复客户，则直接加入本地 `pool`；如果 reduced cost 为负但存在 label 自身 duplicate 或前后向访问集合冲突，则不加入 `pool`，只在它优于当前 `m_min_cost` 时记录为 `m_best_cycle`，用于后续 `UpdateNGSet()`。一轮结束后先执行 `UpdateNGSet()`，然后判断：如果 `pool.GetSize() > 0`，说明已经找到了可加入主问题的 elementary/ng-feasible 负列，就停止本次 DSSR 循环并返回这些列；如果没有 pool 且也没有 duplicate，则说明当前 ng 放松下没有负列，可以结束；如果没有 pool 但存在 duplicate，则继续扩大 ng-set 并重跑。这意味着：当松弛最优或当前发现的负 route 是非 elementary 且没有同时找到合法负列时，会继续 DSSR 收紧；但只要本轮已经找到合法负列，就不会为了证明“本轮最优 elementary route”继续收紧。
+
+最终加入主问题的列只来自 `pool`，也就是通过重复客户检查的负 reduced-cost route。非 elementary / duplicate route 不会被加入 LP，它们只作为 DSSR 更新 ng-set 的证据。加入数量由 `data.m_configure.addin_size` 控制：如果 `pool` 大于该上限，会先排序，然后把不在全局 pool 中的 route 逐条加入 `gn_index`，直到 `gn_index.size() >= addin_size`。因此一次 pricing 不是只加最优一条，也不是加所有找到的列，而是最多加 `addin_size` 条负 reduced-cost 的合法列。
+
 ## 当前实现
 
 本次先把能够真正运行的第一版 BPC 主链路搭起来，目标不是一次性完成完整 branch-price-and-cut，而是先形成“RMP 能解、pricing 能生成负 reduced cost 列、列能回到 RMP、结果能输出和校验”的闭环。当前实现参考 `parallel_machine_scheduling_with_due_window.pdf` 中 set-partitioning/SP2 的建模思路，以及前面讨论过的“每个 dominance graph node 保留真实 label 集合，同时维护一个聚合 envelope 用于集合占优”的方案；旧 VRP BPC 代码里的 `GC`、`UL/TL`、按末端节点组织 label、arc branching 这些结构也尽量沿用了相近的命名和流程。

@@ -1209,4 +1209,6 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 
 用于检测的逻辑主要有两套。运行期分段函数契约检查由 `Configure.debugPWLFDomainCheck` 控制，默认关闭；打开后，`PiecewiseLinearFunction` 的 `setDomain/shiftX/add/normalize/mergeMinimum/updateDominatedIntervals` 等操作会调用 `Utility.debugCheckPWLFRightBound/LeftBound/MergeContract`，检查前向右端、反向左端和 merge 输入契约。这些检查不应在性能测试中打开。另一套是独立回归测试：`PaperDominanceGraphConsistencyTest` 比较论文式 dominance graph 与基准 dominance graph 的支配结果；`PricingAlgorithmComparisonTest` 用单向 exact 与双向 exact 对拍最优 reduced cost；`SmallBPCBatchTest` 用小规模 ArcFlow 与 BPC 对拍。当前这些检测仍是必要的回归保障，不属于生产路径开销。
 
-后续可以考虑但不急着做的精简是：等更大样本对拍和 profiling 稳定后，再考虑给 `TWETColumnEvaluator` 最终复核加调试开关，生产 exact pricing 直接使用 join 函数结果；或者让 `isSequenceCompatible()` 只在 debug 或分支节点启用。但这两项都会降低安全边界，当前不建议为了小幅速度收益删除。
+后续用户进一步确认后，本次把前两类安全复核做成和分段线性函数契约检查类似的调试开关。`Configure.debugBPCPricingColumnCheck` 默认关闭，正式运行时 `GCBidirectional` 不再对每条候选列额外调用 `TWETColumnEvaluator.evaluate()`，也不再对恢复出的完整 sequence 全量重扫 forbidden arc；列的真实目标值由双向 label/join 已经得到的 reduced cost 反推出，即 `cost = reducedCost + machineDual + jobDuals + arcDuals`。这个反推只是在 reduced-cost 口径和 RMP dual 口径之间换算，不改变列本身。调试时把该开关设为 `true`，则恢复完整 sequence 兼容性检查和 evaluator 成本复核，并把 evaluator 重新算出的 reduced cost 与双向推导值比较，用来验证 join、半域常数延拓和路径恢复没有偏差。
+
+这样处理后的含义是：生产路径信任已经对拍过的双向 pricing 递推，减少最终加列前的重复计算；debug 路径保留安全兜底，后续如果改 join、动态硬窗或 dominance graph，可以随时打开该开关做测试。扩展前 direct time filter 与扩展后函数可行性判断仍然保留，因为它们不是同一层语义：前者是便宜的一跳时间剪枝，后者确认分段函数公共定义域、动态窗口和方向化闭包后的真实可行性。

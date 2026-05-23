@@ -5,6 +5,7 @@ import java.util.HashSet;
 import java.util.PriorityQueue;
 
 import Basic.Data;
+import Common.Configure;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
@@ -29,7 +30,8 @@ import TWETBPC.Util.SequenceSignature;
  * 1. forward label 存储在 [ell, Tmid]；
  * 2. backward label 存储在 [Tmid, rho]；
  * 3. join 时用论文里的常数延拓，临时补齐 forward 右半域和 backward 左半域，然后按 crossing arc 对齐相加；
- * 4. 最终列仍统一调用 {@link TWETColumnEvaluator} 复核真实成本，避免双向实现细节把错误 reduced-cost 列加进 RMP。
+ * 4. 默认直接使用 label/join 推导出的 reduced cost 反推出列成本；如需完整序列复核，可打开
+ * {@link Configure#debugBPCPricingColumnCheck}。
  */
 public class GCBidirectional {
 
@@ -302,7 +304,7 @@ public class GCBidirectional {
 			return;
 		}
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
-		tryGenerateColumn(sequence, lp);
+		tryGenerateColumn(sequence, lp, reducedCost);
 	}
 
 	private void joinFromForward(ForwardLabel forward, LP lp) {
@@ -396,7 +398,7 @@ public class GCBidirectional {
 		}
 
 		ArrayList<Integer> sequence = recoverJoinSequence(forward, backward);
-		tryGenerateColumn(sequence, lp);
+		tryGenerateColumn(sequence, lp, reducedCostBound);
 	}
 
 	/**
@@ -454,26 +456,48 @@ public class GCBidirectional {
 		return function.evaluate(function.tail.end);
 	}
 
-	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp) {
+	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
 		if (sequence.isEmpty() || generatedColumns.size() >= config.maxExactPricingColumns) {
 			return;
 		}
 		Node node = lp.getNode();
-		if (!isSequenceCompatible(sequence, node)) {
+		if (Configure.debugBPCPricingColumnCheck && !isSequenceCompatible(sequence, node)) {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature) || !generatedSignatures.add(signature)) {
 			return;
 		}
-		double cost = evaluator.evaluate(sequence);
-		if (Utility.isBigMValue(cost)) {
-			return;
+		double cost = objectiveCostFromReducedCost(sequence, inferredReducedCost, lp);
+		double reducedCost = inferredReducedCost;
+		if (Configure.debugBPCPricingColumnCheck) {
+			double checkedCost = evaluator.evaluate(sequence);
+			if (Utility.isBigMValue(checkedCost)) {
+				return;
+			}
+			double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
+			if (Math.abs(checkedReducedCost - inferredReducedCost) > 1e-5) {
+				System.err.println("[debugBPCPricingColumnCheck] bidirectional pricing reduced-cost mismatch: inferred="
+						+ inferredReducedCost + ", checked=" + checkedReducedCost + ", sequence=" + sequence);
+			}
+			cost = checkedCost;
+			reducedCost = checkedReducedCost;
 		}
-		double reducedCost = reducedCost(sequence, cost, lp);
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			generatedColumns.add(new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false));
 		}
+	}
+
+	private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost, LP lp) {
+		double cost = reducedCost + lp.getMachineDual();
+		int prev = 0;
+		for (int job : sequence) {
+			cost += lp.getJobDual(job);
+			cost += lp.getArcDual(prev, job);
+			prev = job;
+		}
+		cost += lp.getArcDual(prev, lp.getNode().sinkId());
+		return cost;
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {

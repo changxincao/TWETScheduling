@@ -1228,3 +1228,13 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 实际对拍结果不稳定，因此没有保留代码修改。10-18 任务同一组随机例中，双向平均耗时从原来的约 1.73 ms/轮变成 2.59 ms/轮；20-30 任务从原来的约 7.69 ms/轮变成 10.31 ms/轮；40 任务单例则从原来的约 56.33 ms/轮降到 37.83 ms/轮。所有测试中单向/双向最优 reduced cost 仍一致，说明正确性没有问题，但性能收益只在较大规模下显现，中小规模反而因为 `nextSetBit()` 调用和循环条件复杂度变慢。
 
 因此当前结论是：不把扩展循环改成置位遍历，继续保留简单的 `1..n` 扫描。原因是这段不是当前稳定瓶颈，而且小规模/中规模 pricing 在 BPC 中仍会大量出现，不能为了一个 40 任务单例收益引入不稳定性能变化。后续如果要重新考虑这个方向，应先加入 label 数、reachableSet 密度、扩展尝试次数和 join 尝试次数统计，再根据 reachableSet 稀疏度自适应选择扫描方式，而不是固定替换。
+
+## 2026-05-23：外包成本为无穷大时的具体算例诊断
+
+本次按“外包成本为无穷大，只考虑机器调度”的场景做了具体算例测试。使用 `HEU.TanakaNoOutsourcingBPCTest`，该入口会把 `outsourcingCost[j]` 设为 `Utility.big_M`，因此 RMP 中外包变量不会被选择，求解退化为内部机器列的 branch-and-price。为了先获得可完成结果，从 `data/40-2/wet040_001_2m.dat` 截取了 20 和 30 任务子算例，保留原 setup time 子矩阵。
+
+20 任务、2 台机器、带 setup time 的 no-outsourcing 子算例可以在 root 直接闭合。双向 pricing 结果为：`status=ROOT_PROCESSED`，`incumbent=6343`，`bound=6343`，gap 为 0，处理节点数 1，pricing 轮数 14，列池 1604，耗时约 5.15 秒，解校验可行。关闭双向、使用单向 exact pricing 跑同一 20 任务子算例，结果同样为 root 闭合，目标值 6343，耗时约 5.23 秒。这个规模下单向/双向差别不明显，主要因为 RMP/列加入/启发式 pricing 的固定开销占比较高。
+
+继续缩小规模后，21 任务仍能 root 闭合，但耗时已经上升到约 60.65 秒，`incumbent=6829`，`bound=6829`，pricing 轮数 15，列池 1699。22 任务在 2 分钟内没有闭合，25 任务和 30 任务也都在 2 分钟内没有 root 结果。25 任务 verbose 显示，启发式 pricing 连续加列到列池约 3210 条后输出 `Tabu heuristic pricing found no negative reduced-cost column`，随后卡在 exact pricing；30 任务 verbose 中列池约 4158 条后出现同样现象。30 任务即使把 setup time 清零，2 分钟内也仍然没有闭合。这说明卡点已经从启发式 pricing 转移到双向 exact pricing 的兜底证明阶段，即需要证明在无外包覆盖下已经不存在更多负 reduced-cost 内部机器列。
+
+因此当前判断是：外包成本为无穷大时，问题难度会明显上升，原因不是 setup time 单独造成的，而是所有任务都必须由内部机器列覆盖，root 节点 exact pricing 的 elementary 搜索空间迅速扩大。在这组前缀算例中，20 任务约 5 秒闭合，21 任务约 60 秒闭合，22 任务起 2 分钟内无法闭合，40 任务同样超过 3 分钟未完成。后续如果目标是 no-outsourcing 或外包不可用的大规模精确求解，优先方向不是再做很小的循环级微优化，而是增强 exact pricing：例如 NG/DSSR、pair/join 候选更强剪枝、函数级 join 专用扫描器、以及更详细的 label/join 统计来定位真正瓶颈。

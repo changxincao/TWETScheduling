@@ -1254,3 +1254,10 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 因此当前判断是：外包成本为无穷大时，问题难度会明显上升，原因不是 setup time 单独造成的，而是所有任务都必须由内部机器列覆盖，root 节点 exact pricing 的 elementary 搜索空间迅速扩大。在这组前缀算例中，20 任务约 5 秒闭合，21 任务约 60 秒闭合，22 任务起 2 分钟内无法闭合，40 任务同样超过 3 分钟未完成。后续如果目标是 no-outsourcing 或外包不可用的大规模精确求解，优先方向不是再做很小的循环级微优化，而是增强 exact pricing：例如 NG/DSSR、pair/join 候选更强剪枝、函数级 join 专用扫描器、以及更详细的 label/join 统计来定位真正瓶颈。
 
 补充复核 20 任务 verbose 后，需要注意 `5.15s vs 5.23s` 这种完整 root 总时间不能直接解释为单向/双向 exact pricing 时间。该例中启发式 pricing 连续加到 1604 条列，随后输出 `Tabu heuristic pricing found no negative reduced-cost column`，双向 exact pricing 只在最后调用一次并返回 0 条列。也就是说，20 任务下 root 总时间主要由启发式 pricing 多轮加列、RMP 反复重解、列池维护和控制台/输出开销组成；双向 exact 只承担最后的“无负列证明”。因此这个小例里单向和双向总时间接近是正常的，不能说明双向 labeling 没有减少 label 扩展。要比较双向 exact 本身，应看 `PricingAlgorithmComparisonTest` 这种在同一个 RMP dual 下直接分别调用单向/双向 exact 的对拍，或者给 `PC` 增加每个 pricing engine 的耗时统计。
+## 2026-05-23：15 任务 no-outsourcing 下单向/双向 full BPC 对比
+
+为进一步判断双向 pricing 在完整 BPC 流程中是否有实际收益，本次从 `data/40-2/wet040_001_2m.dat` 到 `wet040_010_2m.dat` 各截取前 15 个任务，并同步截取 `0..15` 的 setup time 子矩阵，构造 10 个 no-outsourcing 子算例。测试入口仍为 `HEU.TanakaNoOutsourcingBPCTest`，即把外包成本设为 `Utility.big_M`，保留原 setup time，分别用 `twet.bpc.bidirectional=false/true` 跑单向 exact 和双向 exact。详细结果已保存到 `test-results/bpc/2026-05-23-no-outsourcing-15-bidir-vs-single.csv`，每个单独日志保存在 `test-results/bpc/2026-05-23-no-outsourcing-15/`。
+
+10 个算例中，单向和双向均在 root 节点直接闭合，目标值、下界、列数和 pricing 轮数完全一致。平均结果为：单向完整求解时间 717.0 ms，双向完整求解时间 749.4 ms；单向 exact pricing 平均 0.139 s，双向 exact pricing 平均 0.156 s；启发式 pricing 分别为 0.390 s 和 0.402 s；RMP/LP 时间基本相同。逐例看，双向只有 `wet015_006` 和 `wet015_010` 的总时间略低，其余多数持平或更慢。
+
+由此当前结论更明确：在 15 任务 no-outsourcing 的 full BPC root 流程中，双向 exact pricing 没有体现收益，甚至因为 join 和半域处理的固定开销略慢。原因不是解不一致，而是该规模下 exact pricing 通常只在启发式 pricing 找不到负列后调用一次，主要作用是兜底证明无负 reduced-cost 列；此时单向状态空间本身已经很小，双向减少 label 扩展的收益不足以抵消 join 端的额外开销。因此，双向 pricing 是否有用不能靠 15 任务 full BPC 来证明；目前它更可能在更大规模、exact pricing 占比更高、或启发式 pricing 较弱时才体现优势。短期结论是：15/20 任务 no-outsourcing full BPC 中默认双向没有明显必要；如果追求稳定速度，可以继续保留开关，用实测决定是否打开。

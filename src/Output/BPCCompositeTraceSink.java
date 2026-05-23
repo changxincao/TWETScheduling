@@ -52,17 +52,24 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 
 	@Override
 	public void onPricingCall(Node node, String engineName, boolean improved, int addedColumns, String message,
-			int poolSize) {
+			int poolSize, long elapsedNanos) {
 		for (BPCTraceSink sink : delegates) {
-			sink.onPricingCall(node, engineName, improved, addedColumns, message, poolSize);
+			sink.onPricingCall(node, engineName, improved, addedColumns, message, poolSize, elapsedNanos);
 		}
 	}
 
 	@Override
 	public void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
-			int cutPoolSize) {
+			int cutPoolSize, long elapsedNanos) {
 		for (BPCTraceSink sink : delegates) {
-			sink.onCutCall(node, generatorName, separated, addedCuts, message, cutPoolSize);
+			sink.onCutCall(node, generatorName, separated, addedCuts, message, cutPoolSize, elapsedNanos);
+		}
+	}
+
+	@Override
+	public void onMasterLpSolve(Node node, String phase, long elapsedNanos) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onMasterLpSolve(node, phase, elapsedNanos);
 		}
 	}
 

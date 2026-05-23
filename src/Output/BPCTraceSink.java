@@ -30,8 +30,21 @@ public interface BPCTraceSink {
 			int poolSize) {
 	}
 
+	default void onPricingCall(Node node, String engineName, boolean improved, int addedColumns, String message,
+			int poolSize, long elapsedNanos) {
+		onPricingCall(node, engineName, improved, addedColumns, message, poolSize);
+	}
+
 	default void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
 			int cutPoolSize) {
+	}
+
+	default void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
+			int cutPoolSize, long elapsedNanos) {
+		onCutCall(node, generatorName, separated, addedCuts, message, cutPoolSize);
+	}
+
+	default void onMasterLpSolve(Node node, String phase, long elapsedNanos) {
 	}
 
 	default void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {

@@ -45,9 +45,13 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private final LinkedHashMap<String, Integer> pricingCallCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> pricingSuccessCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> pricingColumnCount = new LinkedHashMap<String, Integer>();
+	private final LinkedHashMap<String, Long> pricingTimeNanos = new LinkedHashMap<String, Long>();
+	private final LinkedHashMap<String, Integer> masterLpCallCount = new LinkedHashMap<String, Integer>();
+	private final LinkedHashMap<String, Long> masterLpTimeNanos = new LinkedHashMap<String, Long>();
 	private final LinkedHashMap<String, Integer> cutCallCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> cutSuccessCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> cutCountByGenerator = new LinkedHashMap<String, Integer>();
+	private final LinkedHashMap<String, Long> cutTimeNanos = new LinkedHashMap<String, Long>();
 	private final LinkedHashMap<String, Integer> branchAttemptCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> branchSuccessCount = new LinkedHashMap<String, Integer>();
 	private String note;
@@ -102,30 +106,40 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	@Override
 	public void onPricingCall(Node node, String engineName, boolean improved, int addedColumns, String message,
-			int poolSize) {
+			int poolSize, long elapsedNanos) {
 		pricingRounds++;
 		increment(pricingCallCount, engineName, 1);
+		increment(pricingTimeNanos, engineName, elapsedNanos);
 		if (improved) {
 			generatedColumns += addedColumns;
 			increment(pricingSuccessCount, engineName, 1);
 			increment(pricingColumnCount, engineName, addedColumns);
 		}
 		maxPoolSize = Math.max(maxPoolSize, poolSize);
-		eventLines.add(BPCOutputFormatters.formatPricing(engineName, node.id, improved, addedColumns, poolSize, message));
+		eventLines.add(BPCOutputFormatters.formatPricing(engineName, node.id, improved, addedColumns, poolSize, message,
+				elapsedNanos));
 	}
 
 	@Override
 	public void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
-			int cutPoolSize) {
+			int cutPoolSize, long elapsedNanos) {
 		cutRounds++;
 		increment(cutCallCount, generatorName, 1);
+		increment(cutTimeNanos, generatorName, elapsedNanos);
 		if (separated) {
 			generatedCuts += addedCuts;
 			increment(cutSuccessCount, generatorName, 1);
 			increment(cutCountByGenerator, generatorName, addedCuts);
 		}
 		maxCutPoolSize = Math.max(maxCutPoolSize, cutPoolSize);
-		eventLines.add(BPCOutputFormatters.formatCut(generatorName, node.id, separated, addedCuts, cutPoolSize, message));
+		eventLines.add(BPCOutputFormatters.formatCut(generatorName, node.id, separated, addedCuts, cutPoolSize, message,
+				elapsedNanos));
+	}
+
+	@Override
+	public void onMasterLpSolve(Node node, String phase, long elapsedNanos) {
+		increment(masterLpCallCount, phase, 1);
+		increment(masterLpTimeNanos, phase, elapsedNanos);
 	}
 
 	@Override
@@ -170,6 +184,11 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private void increment(LinkedHashMap<String, Integer> counter, String key, int delta) {
 		Integer value = counter.get(key);
 		counter.put(key, Integer.valueOf((value == null ? 0 : value.intValue()) + delta));
+	}
+
+	private void increment(LinkedHashMap<String, Long> counter, String key, long delta) {
+		Long value = counter.get(key);
+		counter.put(key, Long.valueOf((value == null ? 0L : value.longValue()) + delta));
 	}
 
 	public String getInstanceName() {
@@ -276,6 +295,18 @@ public class BPCTraceSummary implements BPCTraceSink {
 		return Collections.unmodifiableMap(pricingColumnCount);
 	}
 
+	public Map<String, Long> getPricingTimeNanos() {
+		return Collections.unmodifiableMap(pricingTimeNanos);
+	}
+
+	public Map<String, Long> getMasterLpTimeNanos() {
+		return Collections.unmodifiableMap(masterLpTimeNanos);
+	}
+
+	public Map<String, Integer> getMasterLpCallCount() {
+		return Collections.unmodifiableMap(masterLpCallCount);
+	}
+
 	public Map<String, Integer> getCutCallCount() {
 		return Collections.unmodifiableMap(cutCallCount);
 	}
@@ -286,6 +317,10 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public Map<String, Integer> getCutCountByGenerator() {
 		return Collections.unmodifiableMap(cutCountByGenerator);
+	}
+
+	public Map<String, Long> getCutTimeNanos() {
+		return Collections.unmodifiableMap(cutTimeNanos);
 	}
 
 	public Map<String, Integer> getBranchAttemptCount() {

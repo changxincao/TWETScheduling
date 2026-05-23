@@ -43,10 +43,24 @@ public final class BPCOutputFormatters {
 				nodeId, Boolean.toString(improved), addedColumns, poolSize, safeMessage(message));
 	}
 
+	public static String formatPricing(String engineName, int nodeId, boolean improved, int addedColumns, int poolSize,
+			String message, long elapsedNanos) {
+		return String.format(Locale.US, "Pricing[%s] node=%d improved=%s addedColumns=%d pool=%d time=%.3f ms %s",
+				engineName, nodeId, Boolean.toString(improved), addedColumns, poolSize,
+				nanosToMillis(elapsedNanos), safeMessage(message));
+	}
+
 	public static String formatCut(String generatorName, int nodeId, boolean separated, int addedCuts, int cutPoolSize,
 			String message) {
 		return String.format(Locale.US, "Cuts[%s] node=%d separated=%s addedCuts=%d cutPool=%d %s", generatorName,
 				nodeId, Boolean.toString(separated), addedCuts, cutPoolSize, safeMessage(message));
+	}
+
+	public static String formatCut(String generatorName, int nodeId, boolean separated, int addedCuts, int cutPoolSize,
+			String message, long elapsedNanos) {
+		return String.format(Locale.US, "Cuts[%s] node=%d separated=%s addedCuts=%d cutPool=%d time=%.3f ms %s",
+				generatorName, nodeId, Boolean.toString(separated), addedCuts, cutPoolSize,
+				nanosToMillis(elapsedNanos), safeMessage(message));
 	}
 
 	public static String formatIncumbentUpdate(int nodeId, double incumbentCost) {
@@ -82,8 +96,12 @@ public final class BPCOutputFormatters {
 				summary.getIntegerNodeCount()));
 		builder.append(String.format(Locale.US, "pricing rounds=%d, added columns=%d%n", summary.getPricingRounds(),
 				summary.getGeneratedColumns()));
+		appendTimingSection(builder, "master LP time", summary.getMasterLpTimeNanos(),
+				summary.getMasterLpCallCount());
+		appendTimingSection(builder, "pricing time", summary.getPricingTimeNanos(), summary.getPricingCallCount());
 		builder.append(String.format(Locale.US, "cut rounds=%d, added cuts=%d%n", summary.getCutRounds(),
 				summary.getGeneratedCuts()));
+		appendTimingSection(builder, "cut time", summary.getCutTimeNanos(), summary.getCutCallCount());
 		builder.append(String.format(Locale.US, "branch calls=%d, incumbent updates=%d%n", summary.getBranchCalls(),
 				summary.getIncumbentUpdates()));
 		builder.append(String.format(Locale.US, "pruned by incumbent=%d, closed without branch=%d%n",
@@ -97,6 +115,38 @@ public final class BPCOutputFormatters {
 
 	private static String safeMessage(String message) {
 		return message == null || message.isEmpty() ? "" : message;
+	}
+
+	private static void appendTimingSection(StringBuilder builder, String title, java.util.Map<String, Long> nanosByKey,
+			java.util.Map<String, Integer> callCountByKey) {
+		if (nanosByKey.isEmpty()) {
+			return;
+		}
+		builder.append(title).append(": ");
+		boolean first = true;
+		for (java.util.Map.Entry<String, Long> entry : nanosByKey.entrySet()) {
+			if (!first) {
+				builder.append(", ");
+			}
+			first = false;
+			int calls = 0;
+			Integer callCount = callCountByKey.get(entry.getKey());
+			if (callCount != null) {
+				calls = callCount.intValue();
+			}
+			double seconds = entry.getValue().longValue() / 1_000_000_000.0;
+			builder.append(entry.getKey()).append("=")
+					.append(String.format(Locale.US, "%.3f s", seconds));
+			if (calls > 0) {
+				builder.append(String.format(Locale.US, " (%d calls, avg %.3f ms)", calls,
+						nanosToMillis(entry.getValue().longValue()) / calls));
+			}
+		}
+		builder.append(System.lineSeparator());
+	}
+
+	private static double nanosToMillis(long elapsedNanos) {
+		return elapsedNanos / 1_000_000.0;
 	}
 
 	public static double gapPercent(double bestBound, double incumbentCost) {

@@ -68,9 +68,12 @@ public final class BPCResultWriter {
 			writeNamedCounters(writer, "Pricing 调用次数", trace.getPricingCallCount());
 			writeNamedCounters(writer, "Pricing 成功次数", trace.getPricingSuccessCount());
 			writeNamedCounters(writer, "Pricing 新增列数", trace.getPricingColumnCount());
+			writeNamedTimes(writer, "Pricing 耗时", trace.getPricingTimeNanos(), trace.getPricingCallCount());
+			writeNamedTimes(writer, "RMP/LP 求解耗时", trace.getMasterLpTimeNanos(), trace.getMasterLpCallCount());
 			writeNamedCounters(writer, "Cut 调用次数", trace.getCutCallCount());
 			writeNamedCounters(writer, "Cut 成功次数", trace.getCutSuccessCount());
 			writeNamedCounters(writer, "Cut 新增数量", trace.getCutCountByGenerator());
+			writeNamedTimes(writer, "Cut 耗时", trace.getCutTimeNanos(), trace.getCutCallCount());
 			writeNamedCounters(writer, "Branch 尝试次数", trace.getBranchAttemptCount());
 			writeNamedCounters(writer, "Branch 成功次数", trace.getBranchSuccessCount());
 
@@ -168,6 +171,28 @@ public final class BPCResultWriter {
 		}
 		for (Map.Entry<String, Integer> entry : counters.entrySet()) {
 			writer.write("- " + entry.getKey() + ": " + entry.getValue() + "\n");
+		}
+		writer.write("\n");
+	}
+
+	private static void writeNamedTimes(BufferedWriter writer, String title, Map<String, Long> nanosByKey,
+			Map<String, Integer> callCountByKey) throws IOException {
+		writer.write(title + "：\n");
+		if (nanosByKey.isEmpty()) {
+			writer.write("- 暂无\n\n");
+			return;
+		}
+		for (Map.Entry<String, Long> entry : nanosByKey.entrySet()) {
+			Integer callCount = callCountByKey.get(entry.getKey());
+			int calls = callCount == null ? 0 : callCount.intValue();
+			if (calls > 0) {
+				writer.write(String.format(Locale.US, "- %s: %.3f s, %d 次, 平均 %.3f ms\n", entry.getKey(),
+						entry.getValue().longValue() / 1_000_000_000.0, calls,
+						entry.getValue().longValue() / 1_000_000.0 / calls));
+			} else {
+				writer.write(String.format(Locale.US, "- %s: %.3f s\n", entry.getKey(),
+						entry.getValue().longValue() / 1_000_000_000.0));
+			}
 		}
 		writer.write("\n");
 	}

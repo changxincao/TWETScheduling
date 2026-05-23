@@ -31,9 +31,9 @@ public class PC {
 	}
 
 	public TWETMasterSolution solve(LP lp) {
-		// TODO 2026-04-10: 真正接入 RMP 之后，还要补每轮 pricing/cut 前后的 dual、
-		// reduced cost、违反度等统计；当前骨架阶段只输出“是否找到改进”和“新增数量”。
-		TWETMasterSolution solution = lp.solveRelaxation();
+		// 2026-05-23: 以下计时只写入 trace，用于拆分 RMP、pricing 和 cut 的耗时，
+		// 不参与列选择、剪枝或对偶计算，避免改变 BPC 求解流程。
+		TWETMasterSolution solution = solveRelaxationTimed(lp, "initial");
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 			solution = repairInfeasibleMaster(lp);
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -44,7 +44,7 @@ public class PC {
 			// reduced cost 和分支兼容性筛出正式列集，再进入后续 pricing；repair 成功路径也会做同样筛选。
 			lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 					config.branchSeedReducedCostAllowance);
-			solution = lp.solveRelaxation();
+			solution = solveRelaxationTimed(lp, "after_column_filter");
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				solution = repairInfeasibleMaster(lp);
 				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -59,7 +59,9 @@ public class PC {
 			ArrayList<Integer> newCutIds = new ArrayList<Integer>();
 			boolean separated = false;
 			for (CutGenerator generator : cutGenerators) {
+				long cutStart = System.nanoTime();
 				CutGenerationResult result = generator.separate(lp);
+				long cutNanos = System.nanoTime() - cutStart;
 				int addedCuts = 0;
 				if (result.isSeparated()) {
 					separated = true;
@@ -69,13 +71,13 @@ public class PC {
 					addedCuts = result.getCuts().size();
 				}
 				traceSink.onCutCall(lp.getNode(), generator.getName(), result.isSeparated(), addedCuts,
-						result.getMessage(), lp.getCutPool().size());
+						result.getMessage(), lp.getCutPool().size(), cutNanos);
 			}
 			if (!separated) {
 				break;
 			}
 			lp.addCuts(newCutIds);
-			solution = lp.solveRelaxation();
+			solution = solveRelaxationTimed(lp, "after_cut");
 		}
 
 		return solution;
@@ -101,7 +103,7 @@ public class PC {
 				// 2026-05-19: 对齐旧 VRP PC 的普通 pricing 节奏。一个定价器加列后立即重解 LP，
 				// 并从第一个定价器重新开始；这样只要启发式还能补列，就不会提前调用更重的精确定价。
 				resetFollowingPricingEngines(engineIndex + 1);
-				solution = lp.resolveCurrentModel();
+				solution = resolveCurrentModelTimed(lp, "after_pricing");
 				addedColumn = true;
 				break;
 			}
@@ -116,7 +118,7 @@ public class PC {
 		// 2026-05-18: 正常 RMP 不可行时，先建立带人工 slack 的同一节点 LP；
 		// slack 产生的 dual 用于引导启发式和精确定价器补列，补到 slack=0 后再回到正常 RMP。
 		lp.setFeasibilityRepairMode(true);
-		TWETMasterSolution solution = lp.solveRelaxation();
+		TWETMasterSolution solution = solveRelaxationTimed(lp, "repair_slack_initial");
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 			lp.setFeasibilityRepairMode(false);
 			return solution;
@@ -147,7 +149,7 @@ public class PC {
 					}
 					addedInThisPass = true;
 					addedByThisEngine = true;
-					solution = lp.resolveCurrentModel();
+					solution = resolveCurrentModelTimed(lp, "repair_after_pricing");
 					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 						lp.setFeasibilityRepairMode(false);
 						return solution;
@@ -178,13 +180,15 @@ public class PC {
 		lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 				config.branchSeedReducedCostAllowance);
 		lp.setFeasibilityRepairMode(false);
-		return lp.solveRelaxation();
+		return solveRelaxationTimed(lp, "repair_final");
 	}
 
 	private ArrayList<Integer> generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
 			ArrayList<Integer> activeColumnIds) {
 		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
+		long pricingStart = System.nanoTime();
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
+		long pricingNanos = System.nanoTime() - pricingStart;
 		int addedColumns = 0;
 		if (result.isImproved()) {
 			for (int i = 0; i < result.getColumns().size(); i++) {
@@ -201,8 +205,22 @@ public class PC {
 		}
 		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
 		traceSink.onPricingCall(lp.getNode(), name, result.isImproved(), addedColumns, result.getMessage(),
-				lp.getPool().size());
+				lp.getPool().size(), pricingNanos);
 		return newColumnIds;
+	}
+
+	private TWETMasterSolution solveRelaxationTimed(LP lp, String phase) {
+		long start = System.nanoTime();
+		TWETMasterSolution solution = lp.solveRelaxation();
+		traceSink.onMasterLpSolve(lp.getNode(), phase, System.nanoTime() - start);
+		return solution;
+	}
+
+	private TWETMasterSolution resolveCurrentModelTimed(LP lp, String phase) {
+		long start = System.nanoTime();
+		TWETMasterSolution solution = lp.resolveCurrentModel();
+		traceSink.onMasterLpSolve(lp.getNode(), phase, System.nanoTime() - start);
+		return solution;
 	}
 
 	private void resetFollowingPricingEngines(int startIndex) {

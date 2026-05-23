@@ -1229,6 +1229,16 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 
 因此当前结论是：不把扩展循环改成置位遍历，继续保留简单的 `1..n` 扫描。原因是这段不是当前稳定瓶颈，而且小规模/中规模 pricing 在 BPC 中仍会大量出现，不能为了一个 40 任务单例收益引入不稳定性能变化。后续如果要重新考虑这个方向，应先加入 label 数、reachableSet 密度、扩展尝试次数和 join 尝试次数统计，再根据 reachableSet 稀疏度自适应选择扫描方式，而不是固定替换。
 
+## 2026-05-23：BPC 分段耗时统计口径
+
+本次给 BPC trace 增加了分段耗时记录，目的是把“完整 root 用时”拆开，避免继续只看总秒数推断单向/双向 exact pricing 的效果。当前计时只写入 `BPCTraceSink`，不参与列选择、剪枝、对偶更新或分支逻辑，因此不会改变求解结果。
+
+现在记录三类时间。第一类是 RMP/LP 求解时间，按 `initial`、`after_column_filter`、`after_pricing`、`after_cut`、`repair_*` 等 phase 累计，并同时记录调用次数和平均耗时。第二类是 pricing engine 时间，每次调用 `HeuristicPricing`、`BidirectionalPricing` 或 `PaperDominanceExactPricing` 时单独计时，summary 中按 engine 汇总总时间、调用次数和平均时间，verbose 输出中每轮 pricing 也会直接带 `time=... ms`。第三类是 cut generator 时间，目前主要用于确认 `NoOpCutGenerator` 和 `SubsetRowCutGenerator` 的占比接近 0。
+
+用 20 任务 no-outsourcing 子算例 `tmp-wet020_001_2m.dat` 复核后，双向版本在本次新口径下的结果为：root 闭合，目标/下界均为 6343，pricing 共 14 轮、列池 1604；`HeuristicPricing` 调用 13 次，累计约 1.467s，平均约 112.8ms；`BidirectionalPricing` 调用 1 次，约 7.995s；RMP/LP 的 `initial` 约 0.105s，12 次 `after_pricing` 合计约 0.024s；cut 合计可忽略。单向版本同例结果也闭合到 6343，`HeuristicPricing` 调用 13 次累计约 1.619s，`PaperDominanceExactPricing` 调用 1 次约 8.513s，RMP/LP 合计同样只有 0.1s 量级。
+
+这个结果说明，20 任务 no-outsourcing 的完整 root 总时间差异主要来自最后一次 exact pricing 兜底证明和启发式 pricing 的波动；RMP 重解不是瓶颈。双向 exact 在这次复核中比单向 exact 少约 0.52s，但因为只调用一次，完整 root 总时间仍会受 JVM/JIT、控制台输出和启发式 pricing 波动影响。后续比较算法改动时，应优先看 summary 中的 `pricing time` 分项，而不是只看 runner 最后一行的总 `ms`。
+
 ## 2026-05-23：外包成本为无穷大时的具体算例诊断
 
 本次按“外包成本为无穷大，只考虑机器调度”的场景做了具体算例测试。使用 `HEU.TanakaNoOutsourcingBPCTest`，该入口会把 `outsourcingCost[j]` 设为 `Utility.big_M`，因此 RMP 中外包变量不会被选择，求解退化为内部机器列的 branch-and-price。为了先获得可完成结果，从 `data/40-2/wet040_001_2m.dat` 截取了 20 和 30 任务子算例，保留原 setup time 子矩阵。

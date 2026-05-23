@@ -36,16 +36,16 @@ public final class BPCConsoleReporter implements BPCTraceSink {
 
 	@Override
 	public void onPricingCall(Node node, String engineName, boolean improved, int addedColumns, String message,
-			int poolSize) {
+			int poolSize, long elapsedNanos) {
 		System.out.println(BPCOutputFormatters.formatPricing(engineName, node.id, improved, addedColumns, poolSize,
-				message));
+				message, elapsedNanos));
 	}
 
 	@Override
 	public void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
-			int cutPoolSize) {
+			int cutPoolSize, long elapsedNanos) {
 		System.out.println(BPCOutputFormatters.formatCut(generatorName, node.id, separated, addedCuts, cutPoolSize,
-				message));
+				message, elapsedNanos));
 	}
 
 	@Override

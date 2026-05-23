@@ -48,7 +48,9 @@ public class GCBidirectional {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
+	private HashSet<Long> attemptedJoinPairs;
 	private ArrayList<Label> joinCandidateBuffer;
+	private int nextLabelId;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
@@ -105,7 +107,9 @@ public class GCBidirectional {
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
 		activeColumnSignatures = new HashSet<SequenceSignature>();
+		attemptedJoinPairs = new HashSet<Long>();
 		joinCandidateBuffer = new ArrayList<Label>();
+		nextLabelId = 0;
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
@@ -116,7 +120,7 @@ public class GCBidirectional {
 		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
-		ForwardLabel source = new ForwardLabel(0, null, sourceVisited,
+		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
 				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
 		FWTL.get(0).insertOrDominate(source);
 		FWUL.add(source);
@@ -128,7 +132,7 @@ public class GCBidirectional {
 		// 这样后续若发生 shiftX，trimToDomain 的边界和物理半域一致。
 		sinkFrontier.resetDomain(tMid, data.CmaxH);
 		sinkFrontier.addSegment(tMid, data.CmaxH, 0.0, 0.0);
-		BackwardLabel sink = BackwardLabel.sink(lp.getNode().sinkId(), sinkVisited, sinkFrontier,
+		BackwardLabel sink = BackwardLabel.sink(nextLabelId++, lp.getNode().sinkId(), sinkVisited, sinkFrontier,
 				buildBackwardReachableSet(lp.getNode().sinkId(), sinkVisited, lp.getNode(), sinkFrontier));
 		BWUL.add(sink);
 	}
@@ -228,7 +232,7 @@ public class GCBidirectional {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
 		PackedBitSet reachable = buildForwardReachableSet(nextJob, visited, lp.getNode(), nextFrontier);
-		return new ForwardLabel(nextJob, label, visited, reachable, nextFrontier);
+		return new ForwardLabel(nextLabelId++, nextJob, label, visited, reachable, nextFrontier);
 	}
 
 	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
@@ -279,7 +283,7 @@ public class GCBidirectional {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(prevJob);
 		PackedBitSet reachable = buildBackwardReachableSet(prevJob, visited, lp.getNode(), nextFrontier);
-		return new BackwardLabel(prevJob, label, visited, reachable, nextFrontier, false);
+		return new BackwardLabel(nextLabelId++, prevJob, label, visited, reachable, nextFrontier, false);
 	}
 
 	private boolean insertForward(ForwardLabel label) {
@@ -357,6 +361,13 @@ public class GCBidirectional {
 			return;
 		}
 		if (forward.jid == backward.jid || forward.visitedSet.intersects(backward.visitedSet)) {
+			return;
+		}
+		// 2026-05-23: 同一对 forward/backward label 可能分别在两侧出队时各 join 一次。
+		// 列签名去重发生在函数级拼接之后，太晚；这里先按 label 对去重，避免重复做常数延拓、
+		// shift/add/findMinimal 等重操作。crossing arc 由两个 label 的末端任务唯一确定。
+		long pairKey = (((long) forward.labelId) << 32) ^ (backward.labelId & 0xffffffffL);
+		if (!attemptedJoinPairs.add(pairKey)) {
 			return;
 		}
 
@@ -861,12 +872,15 @@ public class GCBidirectional {
 	}
 
 	private abstract static class FunctionLabel extends Label implements Comparable<Label> {
+		final int labelId;
 		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
 		PiecewiseLinearFunction joinExtendedFrontier;
 
-		FunctionLabel(int jid, PackedBitSet visitedSet, PackedBitSet reachableSet, PiecewiseLinearFunction frontier) {
+		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet reachableSet,
+				PiecewiseLinearFunction frontier) {
 			super(jid, null, visitedSet, reachableSet, frontier,
 					frontier == null || frontier.head == null ? Utility.big_M : frontier.findMinimal(false, true)[0]);
+			this.labelId = labelId;
 		}
 
 		@Override
@@ -884,9 +898,9 @@ public class GCBidirectional {
 	private static final class ForwardLabel extends FunctionLabel {
 		final ForwardLabel father;
 
-		ForwardLabel(int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
+		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 				PiecewiseLinearFunction frontier) {
-			super(jid, visitedSet, reachableSet, frontier);
+			super(labelId, jid, visitedSet, reachableSet, frontier);
 			this.father = father;
 		}
 	}
@@ -895,16 +909,16 @@ public class GCBidirectional {
 		final BackwardLabel father;
 		final boolean isSinkRoot;
 
-		BackwardLabel(int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
+		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 				PiecewiseLinearFunction frontier, boolean isSinkRoot) {
-			super(jid, visitedSet, reachableSet, frontier);
+			super(labelId, jid, visitedSet, reachableSet, frontier);
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
 		}
 
-		static BackwardLabel sink(int sinkId, PackedBitSet visitedSet, PiecewiseLinearFunction frontier,
+		static BackwardLabel sink(int labelId, int sinkId, PackedBitSet visitedSet, PiecewiseLinearFunction frontier,
 				PackedBitSet reachableSet) {
-			return new BackwardLabel(sinkId, null, visitedSet, reachableSet, frontier, true);
+			return new BackwardLabel(labelId, sinkId, null, visitedSet, reachableSet, frontier, true);
 		}
 	}
 }

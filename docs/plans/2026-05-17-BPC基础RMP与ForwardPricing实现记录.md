@@ -1198,3 +1198,15 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 第三，去掉 `buildBackwardReachableSet()` 里的 fake `BackwardLabel`。原来为了复用 `isDirectBackwardExtensionTimeFeasible()` 临时 new 一个 `BackwardLabel`，但 `BackwardLabel` 构造会计算 `frontier.findMinimal()`；这里实际上只需要 `firstJob/isSinkRoot/frontier` 做时间窗判断。现在改成传这三个值的轻量重载，避免每次构造 backward reachable set 时做一次无意义的函数最小值计算。
 
 验证结果：focused GC 编译通过；`PaperDominanceGraphConsistencyTest` 继续通过，`cases=200, insertions=16000`。使用 `D:\软件\cplex\ILOG\CPLEX_Studio2211` 的 jar/native 路径运行 `PricingAlgorithmComparisonTest`，13/13 轮单向 exact 与双向 exact 最优 reduced cost 一致，平均时间约 forward `1.54 ms/round`、bidirectional `1.08 ms/round`。运行 `SmallBPCBatchTest`，8/8 个小例与 ArcFlow 对拍一致，tariff 分支诊断例也通过。当前结论是这轮优化没有改变结果，且减少了双向 join 和 backward reachable 构造中的可见重复开销。
+
+## 2026-05-23：双向 pricing 剩余安全冗余与检测逻辑
+
+当前剩余的安全冗余主要有三类。第一类是最终真实列复核：`tryJoin()` 通过函数级 `findMinimal()` 判断可能存在负 reduced-cost 后，并不直接把 join 函数值作为列成本，而是恢复完整 sequence，调用 `TWETColumnEvaluator.evaluate()` 重算真实成本，再重新扣 machine/job/arc dual 计算真实 reduced cost。这一步会重复一部分函数评价和 dual 扫描，但它是当前最重要的安全兜底，能防止 crossing-arc join、半域常数延拓或边界点处理有细微误差时把伪负列加入 RMP。短期不建议删除。
+
+第二类是分支兼容性复核。join 时已经过滤了 crossing arc 是否 forbidden，扩展时也过滤了局部 forbidden arc，但 `tryGenerateColumn()` 仍会对恢复出的完整 sequence 调 `isSequenceCompatible()`，从起点弧、中间弧到终点弧全部检查一遍。正常情况下这大概率重复，但它覆盖了路径恢复、father 链和分支状态边界；相对函数 join 成本，这个 O(k) 检查不是主要瓶颈，也建议保留。
+
+第三类是扩展前的 direct time feasibility 与扩展后的函数空/`big_M` 判断。`reachableSet` 构造时已经通过 `isDirectForwardExtensionTimeFeasible()` / `isDirectBackwardExtensionTimeFeasible()` 做一跳时间窗过滤，真正扩展后仍然要检查 `shift/add/normalize` 是否为空，以及 `minReducedCost` 是否为 `big_M`。这是两层不同语义：前者只是便宜的 O(1) 时间窗预剪枝，后者才确认分段函数公共定义域、动态硬窗、半域裁剪和方向化闭包后的真实可行性。因此这不是可以简单合并删除的重复。
+
+用于检测的逻辑主要有两套。运行期分段函数契约检查由 `Configure.debugPWLFDomainCheck` 控制，默认关闭；打开后，`PiecewiseLinearFunction` 的 `setDomain/shiftX/add/normalize/mergeMinimum/updateDominatedIntervals` 等操作会调用 `Utility.debugCheckPWLFRightBound/LeftBound/MergeContract`，检查前向右端、反向左端和 merge 输入契约。这些检查不应在性能测试中打开。另一套是独立回归测试：`PaperDominanceGraphConsistencyTest` 比较论文式 dominance graph 与基准 dominance graph 的支配结果；`PricingAlgorithmComparisonTest` 用单向 exact 与双向 exact 对拍最优 reduced cost；`SmallBPCBatchTest` 用小规模 ArcFlow 与 BPC 对拍。当前这些检测仍是必要的回归保障，不属于生产路径开销。
+
+后续可以考虑但不急着做的精简是：等更大样本对拍和 profiling 稳定后，再考虑给 `TWETColumnEvaluator` 最终复核加调试开关，生产 exact pricing 直接使用 join 函数结果；或者让 `isSequenceCompatible()` 只在 debug 或分支节点启用。但这两项都会降低安全边界，当前不建议为了小幅速度收益删除。

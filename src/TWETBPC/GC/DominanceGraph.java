@@ -48,6 +48,12 @@ final class DominanceGraph implements DominanceStore {
 	@Override
 	public ArrayList<Label> getActiveLabels() {
 		ArrayList<Label> labels = new ArrayList<Label>();
+		collectActiveLabels(labels);
+		return labels;
+	}
+
+	@Override
+	public void collectActiveLabels(ArrayList<Label> labels) {
 		for (DominanceNode node : nodes) {
 			if (node.isEmpty()) {
 				continue;
@@ -58,7 +64,6 @@ final class DominanceGraph implements DominanceStore {
 				}
 			}
 		}
-		return labels;
 	}
 
 	private PiecewiseLinearFunction buildEligibleEnvelope(PackedBitSet reachableSet, DominanceNode excluded) {

@@ -67,6 +67,12 @@ final class PaperDominanceGraph implements DominanceStore {
 	@Override
 	public ArrayList<Label> getActiveLabels() {
 		ArrayList<Label> labels = new ArrayList<Label>();
+		collectActiveLabels(labels);
+		return labels;
+	}
+
+	@Override
+	public void collectActiveLabels(ArrayList<Label> labels) {
 		for (PaperDominanceNode node : nodes) {
 			if (!node.active) {
 				continue;
@@ -77,7 +83,6 @@ final class PaperDominanceGraph implements DominanceStore {
 				}
 			}
 		}
-		return labels;
 	}
 
 	private ArrayList<PaperDominanceNode> findTerminalSupersetNodes(PackedBitSet target) {

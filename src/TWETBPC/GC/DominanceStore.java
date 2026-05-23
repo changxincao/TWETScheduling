@@ -22,4 +22,10 @@ interface DominanceStore {
 	 */
 	ArrayList<Label> getActiveLabels();
 
+	/**
+	 * 2026-05-23: 高频 join 中避免每次新建 label 列表。
+	 * 调用方负责先清空 buffer，本方法只追加当前仍 active 的真实 label。
+	 */
+	void collectActiveLabels(ArrayList<Label> buffer);
+
 }

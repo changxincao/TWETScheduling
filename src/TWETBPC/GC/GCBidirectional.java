@@ -46,6 +46,7 @@ public class GCBidirectional {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
+	private ArrayList<Label> joinCandidateBuffer;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
@@ -102,6 +103,7 @@ public class GCBidirectional {
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
 		activeColumnSignatures = new HashSet<SequenceSignature>();
+		joinCandidateBuffer = new ArrayList<Label>();
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
@@ -315,9 +317,10 @@ public class GCBidirectional {
 			if (forward.visitedSet.contains(firstJob) || node.isArcForbidden(forward.jid, firstJob)) {
 				continue;
 			}
-			ArrayList<Label> table = BWTL.get(firstJob).getActiveLabels();
-			for (int i = 0; i < table.size() && canContinue(); i++) {
-				BackwardLabel backward = (BackwardLabel) table.get(i);
+			joinCandidateBuffer.clear();
+			BWTL.get(firstJob).collectActiveLabels(joinCandidateBuffer);
+			for (int i = 0; i < joinCandidateBuffer.size() && canContinue(); i++) {
+				BackwardLabel backward = (BackwardLabel) joinCandidateBuffer.get(i);
 				if (!backward.isDominated) {
 					tryJoin(forward, backward, lp);
 				}
@@ -336,9 +339,10 @@ public class GCBidirectional {
 			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
 				continue;
 			}
-			ArrayList<Label> table = FWTL.get(lastJob).getActiveLabels();
-			for (int i = 0; i < table.size() && canContinue(); i++) {
-				ForwardLabel forward = (ForwardLabel) table.get(i);
+			joinCandidateBuffer.clear();
+			FWTL.get(lastJob).collectActiveLabels(joinCandidateBuffer);
+			for (int i = 0; i < joinCandidateBuffer.size() && canContinue(); i++) {
+				ForwardLabel forward = (ForwardLabel) joinCandidateBuffer.get(i);
 				if (!forward.isDominated) {
 					tryJoin(forward, backward, lp);
 				}
@@ -370,12 +374,12 @@ public class GCBidirectional {
 			return;
 		}
 
-		PiecewiseLinearFunction forwardFull = buildForwardJoinExtension(forward.frontier);
+		PiecewiseLinearFunction forwardFull = getForwardJoinExtension(forward);
 		PiecewiseLinearFunction shiftedForward = forwardFull.shiftX(delta);
 		if (shiftedForward.head == null) {
 			return;
 		}
-		PiecewiseLinearFunction backwardFull = buildBackwardJoinExtension(backward.frontier);
+		PiecewiseLinearFunction backwardFull = getBackwardJoinExtension(backward);
 		if (backwardFull.head == null) {
 			return;
 		}
@@ -399,6 +403,13 @@ public class GCBidirectional {
 	 * 2026-05-23: join 前临时把 forward 半域右侧延拓为 f(Tmid)。
 	 * 这是论文实现里的 join 辅助函数，不写回 label。
 	 */
+	private PiecewiseLinearFunction getForwardJoinExtension(ForwardLabel label) {
+		if (label.joinExtendedFrontier == null) {
+			label.joinExtendedFrontier = buildForwardJoinExtension(label.frontier);
+		}
+		return label.joinExtendedFrontier;
+	}
+
 	private PiecewiseLinearFunction buildForwardJoinExtension(PiecewiseLinearFunction forward) {
 		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, data.CmaxH);
 		appendSegments(extended, forward);
@@ -413,6 +424,13 @@ public class GCBidirectional {
 	 * 2026-05-23: join 前临时把 backward 半域左侧延拓为 f_b(Tmid)。
 	 * 这是论文实现里的 join 辅助函数，不写回 label。
 	 */
+	private PiecewiseLinearFunction getBackwardJoinExtension(BackwardLabel label) {
+		if (label.joinExtendedFrontier == null) {
+			label.joinExtendedFrontier = buildBackwardJoinExtension(label.frontier);
+		}
+		return label.joinExtendedFrontier;
+	}
+
 	private PiecewiseLinearFunction buildBackwardJoinExtension(PiecewiseLinearFunction backward) {
 		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, data.CmaxH);
 		if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
@@ -500,13 +518,18 @@ public class GCBidirectional {
 	 * 真正的 reduced-cost 函数仍在 extendBackward 里通过 shift/add/normalize 递推。
 	 */
 	private boolean isDirectBackwardExtensionTimeFeasible(BackwardLabel label, int prevJob) {
-		int successor = label.isSinkRoot ? data.n + 1 : label.jid;
+		return isDirectBackwardExtensionTimeFeasible(label.jid, label.isSinkRoot, label.frontier, prevJob);
+	}
+
+	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier, int prevJob) {
+		int successor = isSinkRoot ? data.n + 1 : firstJob;
 		double rhoPrime;
-		if (label.isSinkRoot) {
+		if (isSinkRoot) {
 			rhoPrime = getDynamicBackwardHEnd(prevJob, successor);
 		} else {
-			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
-			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
+			double delay = data.getSetUp(prevJob, firstJob) + data.getProcessT(firstJob);
+			rhoPrime = Math.min(frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
 		}
 		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, successor));
 		return !Utility.compareLt(rhoPrime, lower);
@@ -527,12 +550,11 @@ public class GCBidirectional {
 	private PackedBitSet buildBackwardReachableSet(int firstJob, PackedBitSet visited, Node node,
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
-		BackwardLabel fake = new BackwardLabel(firstJob, null, visited, new PackedBitSet(data.n + 2), frontier,
-				firstJob == node.sinkId());
+		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			int successor = fake.isSinkRoot ? node.sinkId() : firstJob;
+			int successor = isSinkRoot ? node.sinkId() : firstJob;
 			if (!visited.contains(job) && !node.isArcForbidden(job, successor)
-					&& isDirectBackwardExtensionTimeFeasible(fake, job)) {
+					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}
@@ -815,6 +837,9 @@ public class GCBidirectional {
 	}
 
 	private abstract static class FunctionLabel extends Label implements Comparable<Label> {
+		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
+		PiecewiseLinearFunction joinExtendedFrontier;
+
 		FunctionLabel(int jid, PackedBitSet visitedSet, PackedBitSet reachableSet, PiecewiseLinearFunction frontier) {
 			super(jid, null, visitedSet, reachableSet, frontier,
 					frontier == null || frontier.head == null ? Utility.big_M : frontier.findMinimal(false, true)[0]);

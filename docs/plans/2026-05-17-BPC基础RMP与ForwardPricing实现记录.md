@@ -1188,3 +1188,13 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 效率上还有几个明确但非立即风险的点。第一，`joinFromForward/joinFromBackward` 现在按 terminal job 扫描另一侧 graph 的 active labels，比直接用半域 `reachableSet` 更稳，但可能更慢；后续可以维护单独的 join-reachable 候选集来减少扫描。第二，`getActiveLabels()` 每次会新建列表，join 多时会产生额外分配，可改成 `forEachActiveLabel`。第三，join 阶段为 forward/backward 常数延拓和 shifted 函数创建临时分段函数，后续若 profiling 显示这里是瓶颈，可以写专用 shifted-sum-min 扫描器。第四，label 构造时仍计算 `minReducedCost`，它目前用于队列排序、big_M 过滤和 join 乐观下界，不是纯冗余；如果以后要延迟计算，需要同时重写这些用途。
 
 本次复核没有发现必须立刻修的明确错误。验证层面，focused GC 编译和 `PaperDominanceGraphConsistencyTest` 已通过；当前会话没有完成单向/双向 pricing 对拍，因为命令行 classpath 缺 CPLEX `ilog.*` 依赖。后续若要把“双向完全可替代单向”作为结论，应优先在 IDE 或带 CPLEX jar 的命令行下跑 `PricingAlgorithmComparisonTest` 和若干 BPC 小例。
+
+## 2026-05-23：双向 pricing join 阶段低风险性能优化
+
+本次只做不改变数学语义的性能优化。第一，`DominanceStore` 增加 `collectActiveLabels(buffer)`，`GCBidirectional` 在 join 枚举时复用一个 `joinCandidateBuffer`，不再每扫描一个 terminal graph 就新建一个 `ArrayList`。原有 `getActiveLabels()` 保留给测试和普通调用，但内部也复用 `collectActiveLabels()`，避免两套逻辑分叉。这个修改主要降低 join 高频枚举时的小对象分配。
+
+第二，forward/backward label 新增 `joinExtendedFrontier` 缓存。join 阶段需要临时把 forward 右侧延拓为 `f(T^mid)`、把 backward 左侧延拓为 `f_b(T^mid)`。同一个 label 可能会和多个对侧 label 尝试拼接，原来每次 `tryJoin()` 都重新构造延拓函数；现在第一次 join 时构造，后续复用。由于 label 的 `frontier` 创建后不再修改，且 `shiftX/add` 都返回新函数，不会写回缓存对象，所以这个缓存不会改变结果。
+
+第三，去掉 `buildBackwardReachableSet()` 里的 fake `BackwardLabel`。原来为了复用 `isDirectBackwardExtensionTimeFeasible()` 临时 new 一个 `BackwardLabel`，但 `BackwardLabel` 构造会计算 `frontier.findMinimal()`；这里实际上只需要 `firstJob/isSinkRoot/frontier` 做时间窗判断。现在改成传这三个值的轻量重载，避免每次构造 backward reachable set 时做一次无意义的函数最小值计算。
+
+验证结果：focused GC 编译通过；`PaperDominanceGraphConsistencyTest` 继续通过，`cases=200, insertions=16000`。使用 `D:\软件\cplex\ILOG\CPLEX_Studio2211` 的 jar/native 路径运行 `PricingAlgorithmComparisonTest`，13/13 轮单向 exact 与双向 exact 最优 reduced cost 一致，平均时间约 forward `1.54 ms/round`、bidirectional `1.08 ms/round`。运行 `SmallBPCBatchTest`，8/8 个小例与 ArcFlow 对拍一致，tariff 分支诊断例也通过。当前结论是这轮优化没有改变结果，且减少了双向 join 和 backward reachable 构造中的可见重复开销。

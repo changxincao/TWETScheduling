@@ -1239,6 +1239,10 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 
 这个结果说明，20 任务 no-outsourcing 的完整 root 总时间差异主要来自最后一次 exact pricing 兜底证明和启发式 pricing 的波动；RMP 重解不是瓶颈。双向 exact 在这次复核中比单向 exact 少约 0.52s，但因为只调用一次，完整 root 总时间仍会受 JVM/JIT、控制台输出和启发式 pricing 波动影响。后续比较算法改动时，应优先看 summary 中的 `pricing time` 分项，而不是只看 runner 最后一行的总 `ms`。
 
+进一步解释这个结果时，需要承认一个事实：对这个 20 任务 no-outsourcing 例子而言，双向 exact pricing 的边际收益确实不大。它只在最后一轮证明“没有负 reduced-cost 列”时比单向少了约 0.52s，而完整 root 总时间没有明显下降。因此这个例子不能作为双向算法显著加速的证据，只能说明双向版本在当前实现下正确、略快，但优势被启发式加列、RMP 重解、列池维护和一次性 exact 兜底的结构稀释了。
+
+这并不等价于“双向永远没用”。前面的 `PricingAlgorithmComparisonTest` 在直接对拍单次 exact pricing 时，多个随机规模上双向平均明显快于单向，说明半域扩展和 join 下界剪枝本身是有收益的。当前这个 BPC root 例子的问题在于：启发式已经把负列基本找完，exact pricing 只做一次无负列证明；在这种调用结构下，双向能省的只是最后兜底证明的一部分，而不是整个列生成过程。后续如果要让双向在完整 BPC 时间上体现更大收益，要么需要更大的 exact pricing 占比，要么需要继续优化 exact 兜底阶段本身，例如 NG/DSSR、join 候选更强剪枝或函数级 join 专用扫描器。
+
 ## 2026-05-23：外包成本为无穷大时的具体算例诊断
 
 本次按“外包成本为无穷大，只考虑机器调度”的场景做了具体算例测试。使用 `HEU.TanakaNoOutsourcingBPCTest`，该入口会把 `outsourcingCost[j]` 设为 `Utility.big_M`，因此 RMP 中外包变量不会被选择，求解退化为内部机器列的 branch-and-price。为了先获得可完成结果，从 `data/40-2/wet040_001_2m.dat` 截取了 20 和 30 任务子算例，保留原 setup time 子矩阵。

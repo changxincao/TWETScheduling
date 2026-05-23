@@ -1212,3 +1212,11 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 后续用户进一步确认后，本次把前两类安全复核做成和分段线性函数契约检查类似的调试开关。`Configure.debugBPCPricingColumnCheck` 默认关闭，正式运行时 `GCBidirectional` 不再对每条候选列额外调用 `TWETColumnEvaluator.evaluate()`，也不再对恢复出的完整 sequence 全量重扫 forbidden arc；列的真实目标值由双向 label/join 已经得到的 reduced cost 反推出，即 `cost = reducedCost + machineDual + jobDuals + arcDuals`。这个反推只是在 reduced-cost 口径和 RMP dual 口径之间换算，不改变列本身。调试时把该开关设为 `true`，则恢复完整 sequence 兼容性检查和 evaluator 成本复核，并把 evaluator 重新算出的 reduced cost 与双向推导值比较，用来验证 join、半域常数延拓和路径恢复没有偏差。
 
 这样处理后的含义是：生产路径信任已经对拍过的双向 pricing 递推，减少最终加列前的重复计算；debug 路径保留安全兜底，后续如果改 join、动态硬窗或 dominance graph，可以随时打开该开关做测试。扩展前 direct time filter 与扩展后函数可行性判断仍然保留，因为它们不是同一层语义：前者是便宜的一跳时间剪枝，后者确认分段函数公共定义域、动态窗口和方向化闭包后的真实可行性。
+
+## 2026-05-23：单向与双向 exact pricing 批量速度对拍
+
+本次把 `PricingAlgorithmComparisonTest` 改成可通过 system property 调整测试规模，便于批量比较单向 paper-dominance exact pricing 和双向 exact pricing。新增参数包括 `twet.pricing.compare.cases`、`seedBase`、`baseN`、`nStep`、`machines` 和输出 `csv` 文件名；这些只影响测试入口，不改变正式 BPC 求解逻辑。
+
+测试分四批进行，分别覆盖 5-12、10-18、20-30 和单个 40 任务随机算例。所有 72 个 pricing 轮次中，单向与双向返回的最优 reduced cost 全部一致。整体平均耗时为：单向 23.64 ms/轮，双向 6.75 ms/轮，双向约快 3.5 倍；只看存在负 reduced-cost 列的 55 个轮次，单向 29.95 ms/轮，双向 7.55 ms/轮，双向约快 4.0 倍。各批次结果如下：5-12 任务为 3.35 vs 0.32 ms/轮，10-18 任务为 9.64 vs 1.73 ms/轮，20-30 任务为 34.15 vs 7.69 ms/轮，40 任务为 157.00 vs 56.33 ms/轮。
+
+当前双向更快的主要原因有三点。第一，双向只在 `[0,T^mid]` 和 `[T^mid,CmaxH]` 半域上扩展 label，单次分段函数操作的定义域更短，很多路径不会被完整前向展开到全时域。第二，join 前有 `forward.minReducedCost + backward.minReducedCost + setupCost(i,r) - arcDual(i,r)` 的乐观下界剪枝，只有下界仍可能为负时才进入函数级 join。第三，前一轮已经把最终 `TWETColumnEvaluator` 复核和完整 sequence 分支兼容性复核放到 debug 开关下，正式对拍时双向直接使用 label/join 推导出的 reduced cost 反推列成本，减少了最终加列前的重复计算。40 任务批次中双向优势缩小，主要是后期负列很少或无负列时，join 扫描、active label 收集和临时函数构造的固定开销占比变高；这说明后续如果继续优化，重点仍是 join 候选缩小和函数级 join 对象分配，而不是回退到单向。

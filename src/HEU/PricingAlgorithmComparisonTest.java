@@ -42,9 +42,15 @@ public class PricingAlgorithmComparisonTest {
 	}
 
 	private void run() throws Exception {
+		int cases = Integer.getInteger("twet.pricing.compare.cases", CASES);
+		int seedBase = Integer.getInteger("twet.pricing.compare.seedBase", 3000);
+		int baseN = Integer.getInteger("twet.pricing.compare.baseN", 5);
+		int nStep = Integer.getInteger("twet.pricing.compare.nStep", 1);
+		int machines = Integer.getInteger("twet.pricing.compare.machines", 2);
+		String csvName = System.getProperty("twet.pricing.compare.csv", "2026-05-20-pricing-comparison.csv");
 		Path outputDir = Path.of("test-results", "bpc");
 		Files.createDirectories(outputDir);
-		Path csv = outputDir.resolve("2026-05-20-pricing-comparison.csv");
+		Path csv = outputDir.resolve(csvName);
 
 		int comparedRounds = 0;
 		int matchedRounds = 0;
@@ -54,8 +60,9 @@ public class PricingAlgorithmComparisonTest {
 		try (BufferedWriter writer = Files.newBufferedWriter(csv)) {
 			writer.write(
 					"case_id,round,lp_obj,restricted_cols,pool_size,forward_cols,bidirectional_cols,forward_best_rc,bidirectional_best_rc,rc_diff,match,forward_ms,bidirectional_ms,added_union,forward_best_seq,bidirectional_best_seq\n");
-			for (int caseId = 0; caseId < CASES; caseId++) {
-				Data data = SmallExactHeuristicBatchTest.buildRandomCase(3000 + caseId, 5 + caseId, 2);
+			for (int caseId = 0; caseId < cases; caseId++) {
+				Data data = SmallExactHeuristicBatchTest.buildRandomCase(seedBase + caseId, baseN + caseId * nStep,
+						machines);
 				ComparisonRun run = runCase(data, caseId, writer);
 				comparedRounds += run.rounds;
 				matchedRounds += run.matchedRounds;

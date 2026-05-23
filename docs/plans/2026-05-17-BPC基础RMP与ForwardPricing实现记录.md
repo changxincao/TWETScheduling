@@ -1177,3 +1177,14 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 占优结构方面，双向两侧现在都复用 `PaperDominanceGraph`，但给 graph 增加了方向参数。forward graph 的 envelope 合并使用 `Direction.FORWARD`，backward graph 的 envelope 合并使用 `Direction.BACKWARD`，避免后向 label 在 set dominance envelope 中仍按 forward prefix-min 语义合并。`DominanceStore` 增加 `getActiveLabels()`，只是为了让 join 阶段从 dominance graph 中枚举尚未被支配的真实 label；它不是额外的 wrapper，也不改变 graph 负责插入、传播和占优判断的职责。
 
 验证结果：focused GC 编译通过，命令为 `javac -encoding UTF-8 -cp src -implicit:none src/TWETBPC/GC/GCBidirectional.java src/TWETBPC/GC/GC.java src/TWETBPC/GC/DominanceStore.java src/TWETBPC/GC/DominanceGraph.java src/TWETBPC/GC/DominanceNode.java src/TWETBPC/GC/PaperDominanceGraph.java src/TWETBPC/GC/Label.java`。`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`。尝试编译 `HEU.PricingAlgorithmComparisonTest` 时，本机 classpath 缺少 CPLEX 的 `ilog.concert/ilog.cplex` 依赖，因此未能运行单向/双向 pricing 对拍；后续如果要完整对拍，需要带上 CPLEX jar 或使用已有 IDE 配置运行。
+## 2026-05-23：双向 pricing 当前一致性复核结论
+
+按当前代码再次复核后，结论是双向 pricing 的主框架已经和旧 VRP 的双向 labeling 生命周期基本一致：都有 forward/backward 两侧未处理队列，按 label 出队扩展；每个 terminal job 维护一侧已处理 label table；新 label 进入 terminal table 时做 set dominance；两侧 label 通过 join 生成完整列；最后恢复真实序列并交给列池/RMP。TWET 的差异主要是问题细节而不是框架差异：旧 VRP 是同点 join，TWET 按 v42 文档使用 crossing arc `(i,r)` join；旧 VRP label 成本是标量资源/费用，TWET label frontier 是分段线性 reduced-cost 函数；旧 VRP 的可行性主要来自时间窗/容量，TWET 还要处理动态 H 窗口、setup time/cost、arc dual 和函数半域。
+
+当前实现也基本符合前面确认的论文语义和实现口径。forward label 只保留 `[0,T^mid]` 半域，backward label 只保留 `[T^mid,CmaxH]` 半域；新增 job 的动态硬窗通过 `setDomain(hStart,hEnd,true)` 写到 job penalty 上，然后再裁成对应半域。扩展阶段不额外给 label 半域外补段，join 阶段才临时把 forward 的右侧补为 `f(T^mid)` 常数，把 backward 的左侧补为 `f_b(T^mid)` 常数，这些临时函数不写回 label。join 前先检查 visited set 冲突、禁止弧和乐观下界，再做函数级 `shift/add/findMinimal`，最后仍用 `TWETColumnEvaluator` 对恢复出的真实序列复核真实 reduced cost。这个安全复核略重，但当前有助于避免双向函数拼接细节出错时把伪负列加入 RMP。
+
+当前最需要继续注意的是 dominance key 与 join 候选的理论边界。现在 dominance graph 的 node key 仍是“半域内继续扩展 reachableSet”，而 join 候选已经不再只依赖这个 set，而是按另一侧 terminal graph 扫描 active label。这避免了漏 join，但也意味着 set dominance 的严格证明需要依赖一个判断：如果一个 label 在同 terminal 下 frontier 被另一个 reachableSet 超集 label 完整支配，那么它对后续半域扩展和最终 crossing-arc join 都不会更优。这个判断在当前完整函数占优和真实序列复核下很可能成立，但后续如果引入 partial dominance、ng/DSSR 或更强剪枝，应重新检查 dominance key 是否还要加入 join-reachable 信息。短期不建议继续改逻辑，应先用单向 exact 对拍更多实例来确认。
+
+效率上还有几个明确但非立即风险的点。第一，`joinFromForward/joinFromBackward` 现在按 terminal job 扫描另一侧 graph 的 active labels，比直接用半域 `reachableSet` 更稳，但可能更慢；后续可以维护单独的 join-reachable 候选集来减少扫描。第二，`getActiveLabels()` 每次会新建列表，join 多时会产生额外分配，可改成 `forEachActiveLabel`。第三，join 阶段为 forward/backward 常数延拓和 shifted 函数创建临时分段函数，后续若 profiling 显示这里是瓶颈，可以写专用 shifted-sum-min 扫描器。第四，label 构造时仍计算 `minReducedCost`，它目前用于队列排序、big_M 过滤和 join 乐观下界，不是纯冗余；如果以后要延迟计算，需要同时重写这些用途。
+
+本次复核没有发现必须立刻修的明确错误。验证层面，focused GC 编译和 `PaperDominanceGraphConsistencyTest` 已通过；当前会话没有完成单向/双向 pricing 对拍，因为命令行 classpath 缺 CPLEX `ilog.*` 依赖。后续若要把“双向完全可替代单向”作为结论，应优先在 IDE 或带 CPLEX jar 的命令行下跑 `PricingAlgorithmComparisonTest` 和若干 BPC 小例。

@@ -27,6 +27,15 @@ final class PaperDominanceGraph implements DominanceStore {
 	private final ArrayList<PaperDominanceNode> nodes = new ArrayList<PaperDominanceNode>();
 	private final ArrayList<PaperDominanceNode> roots = new ArrayList<PaperDominanceNode>();
 	private final Map<PackedBitSet, PaperDominanceNode> nodeByReachableSet = new HashMap<PackedBitSet, PaperDominanceNode>();
+	private final Direction direction;
+
+	PaperDominanceGraph() {
+		this(Direction.FORWARD);
+	}
+
+	PaperDominanceGraph(Direction direction) {
+		this.direction = direction;
+	}
 
 	@Override
 	public boolean insertOrDominate(Label label) {
@@ -53,6 +62,22 @@ final class PaperDominanceGraph implements DominanceStore {
 		}
 		propagateAndTrim(inserted);
 		return false;
+	}
+
+	@Override
+	public ArrayList<Label> getActiveLabels() {
+		ArrayList<Label> labels = new ArrayList<Label>();
+		for (PaperDominanceNode node : nodes) {
+			if (!node.active) {
+				continue;
+			}
+			for (Label label : node.labels) {
+				if (!label.isDominated) {
+					labels.add(label);
+				}
+			}
+		}
+		return labels;
 	}
 
 	private ArrayList<PaperDominanceNode> findTerminalSupersetNodes(PackedBitSet target) {
@@ -84,7 +109,7 @@ final class PaperDominanceGraph implements DominanceStore {
 	}
 
 	private PaperDominanceNode insertNewNode(Label label, ArrayList<PaperDominanceNode> predecessors) {
-		PaperDominanceNode node = new PaperDominanceNode(label.reachableSet);
+		PaperDominanceNode node = new PaperDominanceNode(label.reachableSet, direction);
 		node.addLabel(label);
 		nodes.add(node);
 		nodeByReachableSet.put(node.reachableKey, node);
@@ -249,7 +274,7 @@ final class PaperDominanceGraph implements DominanceStore {
 			if (envelope == null || envelope.head == null) {
 				envelope = node.dominanceEnvelope.copy();
 			} else {
-				envelope.mergeMinimum(node.dominanceEnvelope, Direction.FORWARD);
+				envelope.mergeMinimum(node.dominanceEnvelope, direction);
 			}
 		}
 		return envelope;
@@ -277,13 +302,15 @@ final class PaperDominanceGraph implements DominanceStore {
 		final ArrayList<Label> labels = new ArrayList<Label>();
 		final ArrayList<PaperDominanceNode> predecessors = new ArrayList<PaperDominanceNode>();
 		final ArrayList<PaperDominanceNode> successors = new ArrayList<PaperDominanceNode>();
+		final Direction direction;
 		PiecewiseLinearFunction labelEnvelope;
 		PiecewiseLinearFunction predecessorEnvelope;
 		PiecewiseLinearFunction dominanceEnvelope;
 		boolean active = true;
 
-		PaperDominanceNode(PackedBitSet reachableKey) {
+		PaperDominanceNode(PackedBitSet reachableKey, Direction direction) {
 			this.reachableKey = reachableKey.copy();
+			this.direction = direction;
 		}
 
 		void addLabel(Label label) {
@@ -291,7 +318,7 @@ final class PaperDominanceGraph implements DominanceStore {
 			if (labelEnvelope == null || labelEnvelope.head == null) {
 				labelEnvelope = label.frontier.copy();
 			} else {
-				labelEnvelope.mergeMinimum(label.frontier, Direction.FORWARD);
+				labelEnvelope.mergeMinimum(label.frontier, direction);
 			}
 			recomputeDominanceEnvelope();
 		}
@@ -306,7 +333,7 @@ final class PaperDominanceGraph implements DominanceStore {
 				if (predecessorEnvelope == null || predecessorEnvelope.head == null) {
 					predecessorEnvelope = predecessor.dominanceEnvelope.copy();
 				} else {
-					predecessorEnvelope.mergeMinimum(predecessor.dominanceEnvelope, Direction.FORWARD);
+					predecessorEnvelope.mergeMinimum(predecessor.dominanceEnvelope, direction);
 				}
 			}
 		}
@@ -318,7 +345,7 @@ final class PaperDominanceGraph implements DominanceStore {
 			}
 			dominanceEnvelope = labelEnvelope.copy();
 			if (predecessorEnvelope != null && predecessorEnvelope.head != null) {
-				dominanceEnvelope.mergeMinimum(predecessorEnvelope, Direction.FORWARD);
+				dominanceEnvelope.mergeMinimum(predecessorEnvelope, direction);
 			}
 		}
 
@@ -353,7 +380,7 @@ final class PaperDominanceGraph implements DominanceStore {
 				if (labelEnvelope == null || labelEnvelope.head == null) {
 					labelEnvelope = label.frontier.copy();
 				} else {
-					labelEnvelope.mergeMinimum(label.frontier, Direction.FORWARD);
+					labelEnvelope.mergeMinimum(label.frontier, direction);
 				}
 			}
 		}

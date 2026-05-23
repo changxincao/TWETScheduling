@@ -1,5 +1,7 @@
 package TWETBPC.GC;
 
+import java.util.ArrayList;
+
 /**
  * 单个 terminal job 下 label 占优结构的统一接口。
  * <p>
@@ -14,5 +16,10 @@ interface DominanceStore {
 	 * @return true 表示该 label 已被当前结构完整占优并丢弃；false 表示它被保留。
 	 */
 	boolean insertOrDominate(Label label);
+
+	/**
+	 * 返回当前 graph 中仍然 active 的真实 label。用于双向 pricing 的 join 枚举。
+	 */
+	ArrayList<Label> getActiveLabels();
 
 }

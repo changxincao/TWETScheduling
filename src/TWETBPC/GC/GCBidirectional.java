@@ -28,12 +28,8 @@ import TWETBPC.Util.SequenceSignature;
  * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
  * 1. forward label 存储在 [ell, Tmid]；
  * 2. backward label 存储在 [Tmid, rho]；
- * 3. join 时用论文里的常数延拓，只在 join 这一步把 backward 函数投影到 forward 的时间轴；
+ * 3. join 时用论文里的常数延拓，临时补齐 forward 右半域和 backward 左半域，然后按 crossing arc 对齐相加；
  * 4. 最终列仍统一调用 {@link TWETColumnEvaluator} 复核真实成本，避免双向实现细节把错误 reduced-cost 列加进 RMP。
- * <p>
- * 2026-05-22: backward 侧暂时没有接入和 forward 完全对称的动态 H^b_{ir} 收缩，
- * 只使用已经写入 job penalty 的静态粗硬时间窗。这会弱一些，但不会破坏正确性；
- * 后续若继续加强，只需要在 backward extend 前把 jobPenalty 换成 pair 级窗口版本即可。
  */
 public class GCBidirectional {
 
@@ -45,8 +41,8 @@ public class GCBidirectional {
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
-	private ArrayList<ArrayList<ForwardLabel>> FWTL;
-	private ArrayList<ArrayList<BackwardLabel>> BWTL;
+	private ArrayList<DominanceStore> FWTL;
+	private ArrayList<DominanceStore> BWTL;
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
@@ -97,11 +93,11 @@ public class GCBidirectional {
 		tMid = data.CmaxH * 0.5;
 		FWUL = new PriorityQueue<ForwardLabel>();
 		BWUL = new PriorityQueue<BackwardLabel>();
-		FWTL = new ArrayList<ArrayList<ForwardLabel>>(data.n + 1);
-		BWTL = new ArrayList<ArrayList<BackwardLabel>>(data.n + 1);
+		FWTL = new ArrayList<DominanceStore>(data.n + 1);
+		BWTL = new ArrayList<DominanceStore>(data.n + 1);
 		for (int i = 0; i <= data.n; i++) {
-			FWTL.add(new ArrayList<ForwardLabel>());
-			BWTL.add(new ArrayList<BackwardLabel>());
+			FWTL.add(new PaperDominanceGraph(Direction.FORWARD));
+			BWTL.add(new PaperDominanceGraph(Direction.BACKWARD));
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
@@ -118,7 +114,7 @@ public class GCBidirectional {
 		sourceFrontier.normalize(Direction.FORWARD);
 		ForwardLabel source = new ForwardLabel(0, null, sourceVisited,
 				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
-		FWTL.get(0).add(source);
+		FWTL.get(0).insertOrDominate(source);
 		FWUL.add(source);
 
 		PackedBitSet sinkVisited = new PackedBitSet(data.n + 2);
@@ -199,13 +195,10 @@ public class GCBidirectional {
 		if (node.isArcForbidden(prevJob, successor)) {
 			return false;
 		}
-		return isDirectBackwardExtensionTimeFeasible(label, prevJob);
+		return true;
 	}
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
-		if (!isDirectForwardExtensionTimeFeasible(label.frontier, label.jid, nextJob)) {
-			return null;
-		}
 		double delay = data.getSetUp(label.jid, nextJob) + data.getProcessT(nextJob);
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
 		if (shifted.head == null) {
@@ -286,47 +279,11 @@ public class GCBidirectional {
 	}
 
 	private boolean insertForward(ForwardLabel label) {
-		ArrayList<ForwardLabel> table = FWTL.get(label.jid);
-		for (int i = 0; i < table.size(); i++) {
-			ForwardLabel existing = table.get(i);
-			if (dominatesForward(existing, label)) {
-				label.isDominated = true;
-				return true;
-			}
-			if (dominatesForward(label, existing)) {
-				existing.isDominated = true;
-				table.remove(i);
-				i--;
-			}
-		}
-		table.add(label);
-		return false;
+		return FWTL.get(label.jid).insertOrDominate(label);
 	}
 
 	private boolean insertBackward(BackwardLabel label) {
-		ArrayList<BackwardLabel> table = BWTL.get(label.jid);
-		for (int i = 0; i < table.size(); i++) {
-			BackwardLabel existing = table.get(i);
-			if (dominatesBackward(existing, label)) {
-				label.isDominated = true;
-				return true;
-			}
-			if (dominatesBackward(label, existing)) {
-				existing.isDominated = true;
-				table.remove(i);
-				i--;
-			}
-		}
-		table.add(label);
-		return false;
-	}
-
-	private boolean dominatesForward(ForwardLabel a, ForwardLabel b) {
-		return a.reachableSet.isSupersetOf(b.reachableSet) && a.frontier.dominates(b.frontier);
-	}
-
-	private boolean dominatesBackward(BackwardLabel a, BackwardLabel b) {
-		return a.reachableSet.isSupersetOf(b.reachableSet) && a.frontier.dominates(b.frontier);
+		return BWTL.get(label.jid).insertOrDominate(label);
 	}
 
 	private void tryGenerateForwardColumn(ForwardLabel label, LP lp) {
@@ -351,11 +308,16 @@ public class GCBidirectional {
 			return;
 		}
 		Node node = lp.getNode();
-		for (int firstJob = forward.reachableSet.nextSetBit(1); firstJob >= 0 && canContinue();
-				firstJob = forward.reachableSet.nextSetBit(firstJob + 1)) {
-			ArrayList<BackwardLabel> table = BWTL.get(firstJob);
+		// 2026-05-23: join 的候选不能直接复用 forward.reachableSet。
+		// reachableSet 表示“还能在左半域继续扩展”的任务；join 时 crossing arc 后的第一个 backward
+		// 任务可以落在右半域，所以这里按 terminal job graph 扫描，并在 tryJoin 前做轻量弧过滤。
+		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
+			if (forward.visitedSet.contains(firstJob) || node.isArcForbidden(forward.jid, firstJob)) {
+				continue;
+			}
+			ArrayList<Label> table = BWTL.get(firstJob).getActiveLabels();
 			for (int i = 0; i < table.size() && canContinue(); i++) {
-				BackwardLabel backward = table.get(i);
+				BackwardLabel backward = (BackwardLabel) table.get(i);
 				if (!backward.isDominated) {
 					tryJoin(forward, backward, lp);
 				}
@@ -368,20 +330,15 @@ public class GCBidirectional {
 			return;
 		}
 		Node node = lp.getNode();
-		if (!node.isArcForbidden(0, backward.jid)) {
-			ArrayList<ForwardLabel> sourceTable = FWTL.get(0);
-			for (int i = 0; i < sourceTable.size() && canContinue(); i++) {
-				ForwardLabel forward = sourceTable.get(i);
-				if (!forward.isDominated) {
-					tryJoin(forward, backward, lp);
-				}
+		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
+		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
+		for (int lastJob = 0; lastJob <= data.n && canContinue(); lastJob++) {
+			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
+				continue;
 			}
-		}
-		for (int lastJob = backward.reachableSet.nextSetBit(1); lastJob >= 0 && canContinue();
-				lastJob = backward.reachableSet.nextSetBit(lastJob + 1)) {
-			ArrayList<ForwardLabel> table = FWTL.get(lastJob);
+			ArrayList<Label> table = FWTL.get(lastJob).getActiveLabels();
 			for (int i = 0; i < table.size() && canContinue(); i++) {
-				ForwardLabel forward = table.get(i);
+				ForwardLabel forward = (ForwardLabel) table.get(i);
 				if (!forward.isDominated) {
 					tryJoin(forward, backward, lp);
 				}
@@ -400,7 +357,7 @@ public class GCBidirectional {
 		double joinFixedReducedCost = data.getSetupCost(forward.jid, backward.jid)
 				- lp.getArcDual(forward.jid, backward.jid);
 		// 2026-05-22: 先用 forward/backward frontier 的全局最小值做一次乐观下界。
-		// cropToInterval 和 backward projection 只会进一步收紧定义域或把取值抬高，
+		// join 的常数延拓和 crossing arc 对齐不会产生比两侧 frontier 全局最小值之和更低的下界，
 		// 因此若这个标量下界都不能为负，就没必要再构造 join 函数。
 		double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
 		if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
@@ -408,22 +365,21 @@ public class GCBidirectional {
 		}
 
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
-		double joinUpper = Math.min(tMid, backward.frontier.tail.end - delta);
-		double joinLower = forward.frontier.head.start;
-		if (Utility.compareGt(joinLower, joinUpper)) {
+		double earliestBackwardCompletion = forward.frontier.head.start + delta;
+		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
 			return;
 		}
 
-		PiecewiseLinearFunction forwardPart = cropToInterval(forward.frontier, joinLower, joinUpper);
-		if (forwardPart.head == null) {
+		PiecewiseLinearFunction forwardFull = buildForwardJoinExtension(forward.frontier);
+		PiecewiseLinearFunction shiftedForward = forwardFull.shiftX(delta);
+		if (shiftedForward.head == null) {
 			return;
 		}
-		PiecewiseLinearFunction backwardProjection = buildJoinBackwardProjection(backward.frontier, delta, joinLower,
-				joinUpper);
-		if (backwardProjection == null || backwardProjection.head == null) {
+		PiecewiseLinearFunction backwardFull = buildBackwardJoinExtension(backward.frontier);
+		if (backwardFull.head == null) {
 			return;
 		}
-		PiecewiseLinearFunction joinCost = forwardPart.add(backwardProjection);
+		PiecewiseLinearFunction joinCost = shiftedForward.add(backwardFull);
 		if (joinCost.head == null) {
 			return;
 		}
@@ -440,60 +396,44 @@ public class GCBidirectional {
 	}
 
 	/**
-	 * 2026-05-22: 论文里的 join 使用
-	 * f_b(max(Tmid, x + Delta))。
-	 * 这里把 backward 函数投影回 forward 时间轴：
-	 * 1. x < Tmid-Delta 时取常数 f_b(Tmid)；
-	 * 2. x >= Tmid-Delta 时取 shift 后的 f_b(x+Delta)。
-	 * 这个投影只在 join 阶段临时构造，不会写回 backward label。
+	 * 2026-05-23: join 前临时把 forward 半域右侧延拓为 f(Tmid)。
+	 * 这是论文实现里的 join 辅助函数，不写回 label。
 	 */
-	private PiecewiseLinearFunction buildJoinBackwardProjection(PiecewiseLinearFunction backward, double delta,
-			double xStart, double xEnd) {
-		if (backward == null || backward.head == null || Utility.compareGt(xStart, xEnd)) {
-			return null;
+	private PiecewiseLinearFunction buildForwardJoinExtension(PiecewiseLinearFunction forward) {
+		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, data.CmaxH);
+		appendSegments(extended, forward);
+		if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, data.CmaxH)) {
+			addConstantSegmentOrPoint(extended, forward.tail.end, data.CmaxH, valueAtOrNearest(forward, tMid));
 		}
-		PiecewiseLinearFunction projection = new PiecewiseLinearFunction();
-		projection.resetDomain(xStart, xEnd);
-		double split = tMid - delta;
-		if (Utility.compareEq(xStart, xEnd)) {
-			if (!Utility.compareGt(xStart, split)) {
-				addConstantSegmentOrPoint(projection, xStart, xEnd, backward.evaluate(tMid));
-			} else {
-				PiecewiseLinearFunction shifted = shiftBackwardForJoinProjection(backward, delta);
-				appendSegments(projection, cropToInterval(shifted, xStart, xEnd));
-			}
-			mergeAdjacentEqualSegments(projection);
-			return projection;
-		}
-		double constantEnd = Math.min(xEnd, split);
-		if (Utility.compareLt(xStart, constantEnd)) {
-			addConstantSegmentOrPoint(projection, xStart, constantEnd, backward.evaluate(tMid));
-		}
-
-		double shiftedStart = Math.max(xStart, split);
-		if (!Utility.compareGt(shiftedStart, xEnd)) {
-			PiecewiseLinearFunction shifted = shiftBackwardForJoinProjection(backward, delta);
-			PiecewiseLinearFunction shiftedPart = cropToInterval(shifted, shiftedStart, xEnd);
-			appendSegments(projection, shiftedPart);
-		}
-		mergeAdjacentEqualSegments(projection);
-		return projection;
+		mergeAdjacentEqualSegments(extended);
+		return extended;
 	}
 
 	/**
-	 * 2026-05-23: join 投影需要的是 f_b(x + delta)，定义域也应随之左移。
-	 * 不能直接调用 backward.shiftX(-delta)，因为 shiftX 会按 backward 原来的
-	 * [Tmid,CmaxH] 元数据 trim，误删 x<Tmid 但满足 x+delta>=Tmid 的合法投影段。
+	 * 2026-05-23: join 前临时把 backward 半域左侧延拓为 f_b(Tmid)。
+	 * 这是论文实现里的 join 辅助函数，不写回 label。
 	 */
-	private PiecewiseLinearFunction shiftBackwardForJoinProjection(PiecewiseLinearFunction backward, double delta) {
-		PiecewiseLinearFunction shifted = backward.copy();
-		shifted.resetDomain(backward.domainStart - delta, backward.domainEnd - delta);
-		for (Segment seg = shifted.head; seg != null; seg = seg.next) {
-			seg.start -= delta;
-			seg.end -= delta;
-			seg.intercept += seg.slope * delta;
+	private PiecewiseLinearFunction buildBackwardJoinExtension(PiecewiseLinearFunction backward) {
+		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, data.CmaxH);
+		if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
+			addConstantSegmentOrPoint(extended, 0.0, backward.head.start, valueAtOrNearest(backward, tMid));
 		}
-		return shifted;
+		appendSegments(extended, backward);
+		mergeAdjacentEqualSegments(extended);
+		return extended;
+	}
+
+	private double valueAtOrNearest(PiecewiseLinearFunction function, double t) {
+		if (function == null || function.head == null) {
+			return Utility.big_M;
+		}
+		if (!Utility.compareLt(t, function.head.start) && !Utility.compareGt(t, function.tail.end)) {
+			return function.evaluate(t);
+		}
+		if (Utility.compareLt(t, function.head.start)) {
+			return function.evaluate(function.head.start);
+		}
+		return function.evaluate(function.tail.end);
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp) {
@@ -874,26 +814,14 @@ public class GCBidirectional {
 		function.tail = cur;
 	}
 
-	private abstract static class FunctionLabel implements Comparable<FunctionLabel> {
-		final int jid;
-		final PackedBitSet visitedSet;
-		final PackedBitSet reachableSet;
-		final PiecewiseLinearFunction frontier;
-		double minReducedCost;
-		boolean isDominated;
-
+	private abstract static class FunctionLabel extends Label implements Comparable<Label> {
 		FunctionLabel(int jid, PackedBitSet visitedSet, PackedBitSet reachableSet, PiecewiseLinearFunction frontier) {
-			this.jid = jid;
-			this.visitedSet = visitedSet;
-			this.reachableSet = reachableSet;
-			this.frontier = frontier;
-			this.minReducedCost = frontier == null || frontier.head == null ? Utility.big_M
-					: frontier.findMinimal(false, true)[0];
-			this.isDominated = false;
+			super(jid, null, visitedSet, reachableSet, frontier,
+					frontier == null || frontier.head == null ? Utility.big_M : frontier.findMinimal(false, true)[0]);
 		}
 
 		@Override
-		public int compareTo(FunctionLabel other) {
+		public int compareTo(Label other) {
 			if (Utility.compareLt(minReducedCost, other.minReducedCost)) {
 				return -1;
 			}

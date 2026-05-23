@@ -31,12 +31,17 @@ public class Label implements Comparable<Label> {
 
 	public Label(int jid, Label father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 			PiecewiseLinearFunction frontier) {
+		this(jid, father, visitedSet, reachableSet, frontier, computeMin(frontier));
+	}
+
+	Label(int jid, Label father, PackedBitSet visitedSet, PackedBitSet reachableSet,
+			PiecewiseLinearFunction frontier, double minReducedCost) {
 		this.jid = jid;
 		this.father = father;
 		this.visitedSet = visitedSet;
 		this.reachableSet = reachableSet;
 		this.frontier = frontier;
-		this.minReducedCost = computeMin(frontier);
+		this.minReducedCost = minReducedCost;
 		this.isDominated = false;
 	}
 
@@ -45,7 +50,7 @@ public class Label implements Comparable<Label> {
 		this.minReducedCost = computeMin(frontier);
 	}
 
-	private double computeMin(PiecewiseLinearFunction f) {
+	private static double computeMin(PiecewiseLinearFunction f) {
 		if (f == null || f.head == null) {
 			return Utility.big_M;
 		}

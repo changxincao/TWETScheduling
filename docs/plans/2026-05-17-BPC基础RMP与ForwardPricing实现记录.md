@@ -1164,3 +1164,16 @@ join 阶段采用 crossing arc `(i,r)`，不是旧 VRP 的同点 join。`joinFro
 发现的主要问题在 join 投影：`buildJoinBackwardProjection()` 原来直接调用 `backward.shiftX(-delta)`，但 `shiftX()` 会按 backward 原始半域 `[T^mid,CmaxH]` 做 `trimToDomain()`。join 投影实际需要的是 `f_b(x+delta)`，其 shifted 后的定义域应为 `[T^mid-delta,CmaxH-delta]`；如果继续按原 `[T^mid,CmaxH]` 裁剪，就可能误删 `x<T^mid` 但满足 `x+delta>=T^mid` 的合法投影段。已改成专门的 `shiftBackwardForJoinProjection()`：先复制 backward 函数，把元数据同步左移，再手动平移 segment。这个修改只影响 join 的临时投影，不写回 label。
 
 当前双向实现仍有两类效率差异。第一，双向版本的 `insertForward/insertBackward` 仍是同一末端 table 内的线性扫描完整占优，没有接入 `PaperDominanceGraph`；这不破坏正确性，但和论文式 dominance graph 的高效流程还不一致。第二，扩展阶段存在一些保守的重复判断，例如 reachableSet 已经做过 direct time feasibility 过滤，`extendForward/extendBackward` 里仍会再检查一次；这属于安全冗余，不是错误。后续如果优化，应优先考虑给双向 label table 接入方向兼容的 dominance graph，而不是先删安全检查。
+
+
+## 2026-05-23：双向 pricing 的 join 候选枚举与 dominance graph 复用修正
+
+继续按前面确认的 v42 双向 pricing 语义整理 `GCBidirectional`。本次最重要的修正是 join 候选的枚举方式。之前一度把 `reachableSet` 直接用于 join 的另一侧 terminal 扫描，这个理解不严谨：在双向 bounded labeling 中，forward label 的 `reachableSet` 表示“还能在 `[0,T^mid]` 左半域继续扩展”的任务集合；但 crossing arc `(i,r)` 的右端 `r` 本来就可以落在右半域，由 backward label 表达。因此 join 候选不能只从 forward 的半域扩展集合里取，否则会漏掉“从前缀跨过 `T^mid` 后才接上后缀”的合法拼接。backward 侧同理，`backward.reachableSet` 是继续向左扩展的候选，不等价于所有可与该后缀拼接的 forward terminal。
+
+现在 `joinFromForward()` 改成按 real job terminal 扫描 `BWTL[j]`，先过滤当前 forward 已访问任务和禁止弧，再把对应 backward graph 中仍 active 的真实 label 取出来交给 `tryJoin()`。`joinFromBackward()` 对称地扫描 `FWTL[j]`，其中 `j=0` 表示 source label。真正的完整检查仍集中在 `tryJoin()`：先看 visited set 是否相交，再用 `forward.minReducedCost + backward.minReducedCost + setupCost(i,r) - arcDual(i,r)` 做乐观下界；只有下界仍可能为负时，才临时构造 forward 右半域常数延拓和 backward 左半域常数延拓，按 crossing arc 的时间位移对齐后做函数相加与 `findMinimal()`。
+
+join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段不再给 label 半域外补任何段；join 阶段才临时把 forward 的 `[T^mid,CmaxH]` 补成 `f(T^mid)`，把 backward 的 `[0,T^mid]` 补成 `f_b(T^mid)`。这些延拓只用于当前 join，不写回 label，也不再做方向化 normalize。为了处理边界单点和半域端点被前序 normalize 改写的情况，临时延拓取值使用 `valueAtOrNearest()`：正常情况下取 `T^mid` 处的值，若边界点因为零长段或裁剪元数据不完全落在函数物理定义域内，则退回最近端点值，避免因为 `evaluate(T^mid)` 落在定义域外而返回伪上界。
+
+占优结构方面，双向两侧现在都复用 `PaperDominanceGraph`，但给 graph 增加了方向参数。forward graph 的 envelope 合并使用 `Direction.FORWARD`，backward graph 的 envelope 合并使用 `Direction.BACKWARD`，避免后向 label 在 set dominance envelope 中仍按 forward prefix-min 语义合并。`DominanceStore` 增加 `getActiveLabels()`，只是为了让 join 阶段从 dominance graph 中枚举尚未被支配的真实 label；它不是额外的 wrapper，也不改变 graph 负责插入、传播和占优判断的职责。
+
+验证结果：focused GC 编译通过，命令为 `javac -encoding UTF-8 -cp src -implicit:none src/TWETBPC/GC/GCBidirectional.java src/TWETBPC/GC/GC.java src/TWETBPC/GC/DominanceStore.java src/TWETBPC/GC/DominanceGraph.java src/TWETBPC/GC/DominanceNode.java src/TWETBPC/GC/PaperDominanceGraph.java src/TWETBPC/GC/Label.java`。`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`。尝试编译 `HEU.PricingAlgorithmComparisonTest` 时，本机 classpath 缺少 CPLEX 的 `ilog.concert/ilog.cplex` 依赖，因此未能运行单向/双向 pricing 对拍；后续如果要完整对拍，需要带上 CPLEX jar 或使用已有 IDE 配置运行。

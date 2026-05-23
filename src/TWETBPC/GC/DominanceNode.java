@@ -19,11 +19,13 @@ final class DominanceNode {
 
 	final PackedBitSet reachableKey;
 	final ArrayList<Label> labels;
+	private final Direction direction;
 	PiecewiseLinearFunction labelEnvelope;
 
-	DominanceNode(PackedBitSet reachableKey) {
+	DominanceNode(PackedBitSet reachableKey, Direction direction) {
 		this.reachableKey = reachableKey.copy();
 		this.labels = new ArrayList<Label>();
+		this.direction = direction;
 	}
 
 	void addLabel(Label label) {
@@ -31,7 +33,7 @@ final class DominanceNode {
 		if (labelEnvelope == null || labelEnvelope.head == null) {
 			labelEnvelope = label.frontier.copy();
 		} else {
-			labelEnvelope.mergeMinimum(label.frontier, Direction.FORWARD);
+			labelEnvelope.mergeMinimum(label.frontier, direction);
 		}
 	}
 
@@ -66,7 +68,7 @@ final class DominanceNode {
 			if (labelEnvelope == null || labelEnvelope.head == null) {
 				labelEnvelope = label.frontier.copy();
 			} else {
-				labelEnvelope.mergeMinimum(label.frontier, Direction.FORWARD);
+				labelEnvelope.mergeMinimum(label.frontier, direction);
 			}
 		}
 	}

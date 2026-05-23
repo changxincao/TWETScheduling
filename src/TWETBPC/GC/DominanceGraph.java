@@ -17,6 +17,15 @@ import TWETBPC.Util.PackedBitSet;
 final class DominanceGraph implements DominanceStore {
 
 	private final ArrayList<DominanceNode> nodes = new ArrayList<DominanceNode>();
+	private final Direction direction;
+
+	DominanceGraph() {
+		this(Direction.FORWARD);
+	}
+
+	DominanceGraph(Direction direction) {
+		this.direction = direction;
+	}
 
 	/**
 	 * 尝试插入一个真实 label。
@@ -36,6 +45,22 @@ final class DominanceGraph implements DominanceStore {
 		return false;
 	}
 
+	@Override
+	public ArrayList<Label> getActiveLabels() {
+		ArrayList<Label> labels = new ArrayList<Label>();
+		for (DominanceNode node : nodes) {
+			if (node.isEmpty()) {
+				continue;
+			}
+			for (Label label : node.getLabels()) {
+				if (!label.isDominated) {
+					labels.add(label);
+				}
+			}
+		}
+		return labels;
+	}
+
 	private PiecewiseLinearFunction buildEligibleEnvelope(PackedBitSet reachableSet, DominanceNode excluded) {
 		PiecewiseLinearFunction envelope = null;
 		for (DominanceNode node : nodes) {
@@ -49,7 +74,7 @@ final class DominanceGraph implements DominanceStore {
 			if (envelope == null || envelope.head == null) {
 				envelope = node.labelEnvelope.copy();
 			} else {
-				envelope.mergeMinimum(node.labelEnvelope, Direction.FORWARD);
+				envelope.mergeMinimum(node.labelEnvelope, direction);
 			}
 		}
 		return envelope;
@@ -61,7 +86,7 @@ final class DominanceGraph implements DominanceStore {
 				return node;
 			}
 		}
-		DominanceNode node = new DominanceNode(reachableSet);
+		DominanceNode node = new DominanceNode(reachableSet, direction);
 		nodes.add(node);
 		return node;
 	}

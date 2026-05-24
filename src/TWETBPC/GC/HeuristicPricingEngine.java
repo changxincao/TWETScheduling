@@ -325,9 +325,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (sequence.size() <= 1) {
 				return TabuMove.invalid();
 			}
+			// 2026-05-24: 分支禁弧检查是 O(1) 的便宜剪枝，先做，避免无效候选先走 merge2 评估。
+			if (!isRemoveCompatible(pos, lp.getNode())) {
+				return TabuMove.invalid();
+			}
 			double candidateCost = removeCost(pos);
 			int removedJob = sequence.get(pos).intValue();
-			if (Utility.isBigMValue(candidateCost) || !isRemoveCompatible(pos, lp.getNode())) {
+			if (Utility.isBigMValue(candidateCost)) {
 				return TabuMove.invalid();
 			}
 			double rc = reducedCostAfterRemove(pos, removedJob, candidateCost, lp);
@@ -335,8 +339,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		TabuMove evaluateAdd(int job, int pos, LP lp) {
+			// 2026-05-24: add/exchange 的真正代价在 merge3Segments，先用兼容性判断挡掉禁弧候选。
+			if (!isInsertCompatible(pos, job, false, lp.getNode())) {
+				return TabuMove.invalid();
+			}
 			double candidateCost = insertOrReplaceCost(pos, job, false);
-			if (Utility.isBigMValue(candidateCost) || !isInsertCompatible(pos, job, false, lp.getNode())) {
+			if (Utility.isBigMValue(candidateCost)) {
 				return TabuMove.invalid();
 			}
 			double rc = reducedCostAfterAdd(pos, job, candidateCost, lp);
@@ -344,9 +352,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		TabuMove evaluateExchange(int job, int pos, LP lp) {
+			if (!isInsertCompatible(pos, job, true, lp.getNode())) {
+				return TabuMove.invalid();
+			}
 			double candidateCost = insertOrReplaceCost(pos, job, true);
 			int removedJob = sequence.get(pos).intValue();
-			if (Utility.isBigMValue(candidateCost) || !isInsertCompatible(pos, job, true, lp.getNode())) {
+			if (Utility.isBigMValue(candidateCost)) {
 				return TabuMove.invalid();
 			}
 			double rc = reducedCostAfterExchange(pos, job, removedJob, candidateCost, lp);

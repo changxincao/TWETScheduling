@@ -152,7 +152,10 @@ public class PiecewiseLinearFunction {
 	}
 
 	public PiecewiseLinearFunction copy() {
-		PiecewiseLinearFunction res = new PiecewiseLinearFunction(domainStart, domainEnd);
+		// 2026-05-24: 双向 local horizon 可能把半域裁成单点。
+		// 这类函数仍可能参与 backward 第一层和 join，因此 copy 不能再假设定义域必须有正长度。
+		PiecewiseLinearFunction res = new PiecewiseLinearFunction();
+		res.resetDomain(domainStart, domainEnd);
 		if (this.head == null)
 			return res;
 		TimerManager.start("分段线性函数复制");
@@ -1346,6 +1349,10 @@ public class PiecewiseLinearFunction {
 		// 1) 定位公共定义域 这里两个函数取小因该是要取并集的  不能取交集
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
+		if (!Utility.compareLt(start, end)) {
+			mergeDisjointMinimum(g, direction);
+			return;
+		}
 //		// 2026-05-14: pricing 调试开关。mergeMinimum 的有效输入应满足：
 //		// 1. 两个函数存在正长度公共区间，即 max(a1,a2)<min(end1,end2)；
 //		// 2. forward 标签函数右端应同为全局最大时间 T，因此 this.tail.end 与 g.tail.end 应相等；
@@ -1517,6 +1524,36 @@ public class PiecewiseLinearFunction {
 		
 		// 8) 末尾合并相邻同值同斜率片段、保持非增
 		//这个进入的时候还是有可能存在连续段的斜率和intercept是相同的，比如this函数最后一个和g相邻的部分，此时相当于前半部分取小，再和最后剩下的拼接，还是原来的东西
+		normalize(direction);
+		if (direction == Direction.BACKWARD) {
+			Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
+		} else {
+			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
+		}
+	}
+
+	private void mergeDisjointMinimum(PiecewiseLinearFunction g, Direction direction) {
+		if (g == null || g.head == null) {
+			return;
+		}
+		if (this.head == null) {
+			this.head = g.head;
+			this.tail = g.tail;
+			this.domainStart = g.domainStart;
+			this.domainEnd = g.domainEnd;
+			return;
+		}
+		if (Utility.compareLe(this.tail.end, g.head.start)) {
+			this.tail.next = g.head;
+			this.tail = g.tail;
+		} else if (Utility.compareLe(g.tail.end, this.head.start)) {
+			g.tail.next = this.head;
+			this.head = g.head;
+		} else {
+			return;
+		}
+		this.domainStart = Math.min(this.domainStart, g.domainStart);
+		this.domainEnd = Math.max(this.domainEnd, g.domainEnd);
 		normalize(direction);
 		if (direction == Direction.BACKWARD) {
 			Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);

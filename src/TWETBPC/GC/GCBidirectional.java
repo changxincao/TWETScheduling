@@ -39,6 +39,7 @@ import TWETBPC.Util.SequenceSignature;
 public class GCBidirectional {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
+	private static final double ROOT_LOCAL_HORIZON_MIDPOINT_RATIO = 0.75;
 
 	private final Data data;
 	private final TWETBPCConfig config;
@@ -61,6 +62,10 @@ public class GCBidirectional {
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
+	// 2026-05-24: 本轮 bidirectional pricing 实际使用的右侧 horizon。
+	// 若当前任务右端窗明显小于全局 CmaxH，就用它压住 midpoint 的右移，
+	// 避免 backward sink root 因 Tmid 过右而完全长不出真实标签。
+	private double pricingHorizon;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHEnd;
@@ -126,7 +131,8 @@ public class GCBidirectional {
 	private void initialize(LP lp) {
 		resetStatistics();
 		PaperDominanceGraph.resetStatistics();
-		tMid = data.CmaxH * 0.5;
+		pricingHorizon = data.CmaxH;
+		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		FWUL = new PriorityQueue<ForwardLabel>();
 		BWUL = new PriorityQueue<BackwardLabel>();
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
@@ -169,10 +175,10 @@ public class GCBidirectional {
 		PackedBitSet sinkVisited = new PackedBitSet(data.n + 2);
 		sinkVisited.add(lp.getNode().sinkId());
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
-		// 2026-05-23: backward 虚拟终点本身也要带 [Tmid,CmaxH] 元数据。
+		// 2026-05-23: backward 虚拟终点本身也要带 [Tmid,pricingHorizon] 元数据。
 		// 这样后续若发生 shiftX，trimToDomain 的边界和物理半域一致。
-		sinkFrontier.resetDomain(tMid, data.CmaxH);
-		sinkFrontier.addSegment(tMid, data.CmaxH, 0.0, 0.0);
+		sinkFrontier.resetDomain(tMid, pricingHorizon);
+		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
 		BackwardLabel sink = BackwardLabel.sink(nextLabelId++, lp.getNode().sinkId(), sinkVisited, sinkFrontier,
 				buildBackwardReachableSet(lp.getNode().sinkId(), sinkVisited, lp.getNode(), sinkFrontier));
 		BWUL.add(sink);
@@ -541,6 +547,7 @@ public class GCBidirectional {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
@@ -573,10 +580,10 @@ public class GCBidirectional {
 	}
 
 	private PiecewiseLinearFunction buildForwardJoinExtension(PiecewiseLinearFunction forward) {
-		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, data.CmaxH);
+		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
 		appendSegments(extended, forward);
-		if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, data.CmaxH)) {
-			addConstantSegmentOrPoint(extended, forward.tail.end, data.CmaxH, valueAtOrNearest(forward, tMid));
+		if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, pricingHorizon)) {
+			addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon, valueAtOrNearest(forward, tMid));
 		}
 		mergeAdjacentEqualSegments(extended);
 		return extended;
@@ -594,7 +601,7 @@ public class GCBidirectional {
 	}
 
 	private PiecewiseLinearFunction buildBackwardJoinExtension(PiecewiseLinearFunction backward) {
-		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, data.CmaxH);
+		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
 		if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
 			addConstantSegmentOrPoint(extended, 0.0, backward.head.start, valueAtOrNearest(backward, tMid));
 		}
@@ -789,10 +796,50 @@ public class GCBidirectional {
 		zeroDualSingletonOnlyJobs = null;
 		zeroDualSingletonOnlyJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
+		pricingHorizon = computeCurrentPricingHorizon(lp);
+		// 2026-05-24: 只在 root profitable window 真正收紧时用局部 horizon 调整 midpoint。
+		// 当前 hybrid-B 是先跑完整个 forward half，再跑 backward；若直接对半切 local horizon，
+		// midpoint 会过左，导致 backward label 爆炸、总时间反而更差。
+		tMid = dualProfitableWindowEnabled && Utility.compareLt(pricingHorizon, data.CmaxH)
+				? pricingHorizon * ROOT_LOCAL_HORIZON_MIDPOINT_RATIO
+				: data.CmaxH * 0.5;
 		precomputeZeroDualSingletonOnlyJobs(lp);
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows(lp);
 		precomputeBackwardDynamicPricingWindows(lp);
+	}
+
+	/**
+	 * 2026-05-24: 先按本轮实际使用的 job 右端时间窗求一个局部 horizon，
+	 * 再用它压住全局 CmaxH/2，避免 root no-cut 且 profitable window 明显收紧时，
+	 * backward sink root 因 Tmid 过右而完全无标签。
+	 */
+	private double computeCurrentPricingHorizon(LP lp) {
+		double localHorizon = 0.0;
+		boolean foundFiniteWindow = false;
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			double baseline = outsourcingBaseline(job);
+			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
+			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
+				double dynamicStart = hWindowStart(job, jobDual);
+				double dynamicEnd = hWindowEnd(job, jobDual);
+				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+					hStart = dynamicStart;
+					hEnd = dynamicEnd;
+				}
+			}
+			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hEnd)) {
+				localHorizon = Math.max(localHorizon, hEnd);
+				foundFiniteWindow = true;
+			}
+		}
+		if (!foundFiniteWindow) {
+			return data.CmaxH;
+		}
+		return Math.min(data.CmaxH, localHorizon);
 	}
 
 	private void precomputeJobLevelDynamicPricingWindows(LP lp) {
@@ -855,7 +902,7 @@ public class GCBidirectional {
 			// 2026-05-24: data.penaltyFunction[job] 已经包含基于 b_j 的静态粗硬窗。
 			// dual 不能进一步收紧时，双向 pricing 直接复用这两个半域缓存，避免每轮重复 setDomain/crop。
 			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, tMid);
-			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, data.CmaxH);
+			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, pricingHorizon);
 		}
 		baseHalfPenaltyCacheTMid = tMid;
 	}
@@ -896,9 +943,9 @@ public class GCBidirectional {
 	}
 
 	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
-		// 2026-05-23: backward 对称使用 [Tmid,CmaxH] 上的新增 job 函数。
+		// 2026-05-23: backward 对称使用 [Tmid,pricingHorizon] 上的新增 job 函数。
 		// 若窗口左侧为 big_M，后续 normalize(BACKWARD) 会通过 suffix-min 表达“可以等到窗口内完成”。
-		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, data.CmaxH);
+		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction getDynamicForwardJobPenalty(int prevJob, int job) {

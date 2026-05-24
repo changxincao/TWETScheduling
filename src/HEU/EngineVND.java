@@ -16,7 +16,9 @@ public class EngineVND {
 		this.data = data;
 		this.s = s;
 		Utility.resetCurUpperBound(s.curCost);
-		s.refreshDirtyMachineInformation();
+		for(int m=0;m<data.m;m++) {
+			s.updateInformationM(m);//重刷一次
+		}
 		
 	}
 

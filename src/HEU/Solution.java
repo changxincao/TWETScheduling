@@ -46,16 +46,9 @@ public class Solution {
 	TimeWindowSummary[][][] timeWindowSummary_hg;// 2026-05-17: 子序列 h..g 正向硬窗摘要，用于 move 前安全剪枝
 	TimeWindowSummary[][][] timeWindowSummary_gh;// 2026-05-17: 子序列 h..g 反向硬窗摘要，用于 reverse 片段剪枝
 
-	boolean[] dirtyMachines;// 2026-05-24: ALNS 改动后仅标记受影响机器，进入 VND 再局部刷新。
-	boolean[] sharedOneDimFunctions;// 2026-05-24: copy() 后一维前/后向函数初始与源解共享。
-	boolean[] sharedMachineState;// 2026-05-24: copy() 后二维函数、duration 和硬窗摘要初始与源解共享。
-
 	public Solution(Data data) {
 		this.data = data;
 		cost = new double[data.m];
-		dirtyMachines = new boolean[data.m];
-		sharedOneDimFunctions = new boolean[data.m];
-		sharedMachineState = new boolean[data.m];
 		this.sequences = new ArrayList<ArrayList<Integer>>();
 		this.outsourcedJobs = new ArrayList<Integer>();
 		this.fFunctions = new ArrayList<ArrayList<PiecewiseLinearFunction>>();
@@ -84,29 +77,24 @@ public class Solution {
 		solution.cost = Arrays.copyOf(this.cost, data.m);// 每个机器上的成本
 		solution.outsourcingBaselineTotal = this.outsourcingBaselineTotal;
 		solution.outsourcingCostTotal = this.outsourcingCostTotal;
-		solution.dirtyMachines = Arrays.copyOf(this.dirtyMachines, data.m);
-		Arrays.fill(solution.sharedOneDimFunctions, true);
-		Arrays.fill(solution.sharedMachineState, true);
 		solution.cumDurationNormal = new double[data.m][];
 		solution.cumDurationReverse = new double[data.m][];
 
 		for (int m = 0; m < data.m; m++) {
-			solution.cumDurationNormal[m] = cumDurationNormal == null || cumDurationNormal[m] == null ? null
-					: Arrays.copyOf(cumDurationNormal[m], cumDurationNormal[m].length);
-			solution.cumDurationReverse[m] = cumDurationReverse == null || cumDurationReverse[m] == null ? null
-					: Arrays.copyOf(cumDurationReverse[m], cumDurationReverse[m].length);
+			solution.cumDurationNormal[m] = Arrays.copyOf(cumDurationNormal[m], cumDurationNormal[m].length);
+			solution.cumDurationReverse[m] = Arrays.copyOf(cumDurationReverse[m], cumDurationReverse[m].length);
 
 		}
-		solution.fFunctions_hg = fFunctions_hg == null ? null : fFunctions_hg.clone();
-		solution.bFunctions_hg = bFunctions_hg == null ? null : bFunctions_hg.clone();// normal
-		solution.fFunctions_gh = fFunctions_gh == null ? null : fFunctions_gh.clone();
-		solution.bFunctions_gh = bFunctions_gh == null ? null : bFunctions_gh.clone();// reverse
-		solution.fFunctions_hgl_normal = fFunctions_hgl_normal == null ? null : fFunctions_hgl_normal.clone();
-		solution.bFunctions_hgl_normal = bFunctions_hgl_normal == null ? null : bFunctions_hgl_normal.clone();
-		solution.fFunctions_hgl_reverse = fFunctions_hgl_reverse == null ? null : fFunctions_hgl_reverse.clone();
-		solution.bFunctions_hgl_reverse = bFunctions_hgl_reverse == null ? null : bFunctions_hgl_reverse.clone();
-		solution.timeWindowSummary_hg = timeWindowSummary_hg == null ? null : timeWindowSummary_hg.clone();
-		solution.timeWindowSummary_gh = timeWindowSummary_gh == null ? null : timeWindowSummary_gh.clone();
+		solution.fFunctions_hg = fFunctions_hg;// 可直接等于，数组直接重新new 不会清空
+		solution.bFunctions_hg = bFunctions_hg;// normal
+		solution.fFunctions_gh = fFunctions_gh;
+		solution.bFunctions_gh = bFunctions_gh;// reverse
+		solution.fFunctions_hgl_normal = fFunctions_hgl_normal;
+		solution.bFunctions_hgl_normal = bFunctions_hgl_normal;
+		solution.fFunctions_hgl_reverse = fFunctions_hgl_reverse;
+		solution.bFunctions_hgl_reverse = bFunctions_hgl_reverse;
+		solution.timeWindowSummary_hg = timeWindowSummary_hg;
+		solution.timeWindowSummary_gh = timeWindowSummary_gh;
 
 		return solution;
 	}
@@ -140,7 +128,6 @@ public class Solution {
 			// 最后一位[size]表示h2=-1的时候,即把某一段插入到最前边
 			cumDurationNormal[m] = new double[size];
 			cumDurationReverse[m] = new double[size];
-			sharedMachineState[m] = false;
 		}
 	}
 
@@ -159,85 +146,7 @@ public class Solution {
 		// 最后一位[size]表示h2=-1的时候,即把某一段插入到最前边
 		cumDurationNormal[m] = new double[size];
 		cumDurationReverse[m] = new double[size];
-		sharedMachineState[m] = false;
 
-	}
-
-	private void markMachineDirty(int m) {
-		dirtyMachines[m] = true;
-	}
-
-	private void markAllMachinesDirty() {
-		Arrays.fill(dirtyMachines, true);
-	}
-
-	private void clearMachineDirty(int m) {
-		dirtyMachines[m] = false;
-	}
-
-	private void ensureMachineStateStorage() {
-		if (fFunctions_hg == null || bFunctions_hg == null || fFunctions_gh == null || bFunctions_gh == null
-				|| fFunctions_hgl_normal == null || bFunctions_hgl_normal == null || fFunctions_hgl_reverse == null
-				|| bFunctions_hgl_reverse == null || timeWindowSummary_hg == null || timeWindowSummary_gh == null
-				|| cumDurationNormal == null || cumDurationReverse == null) {
-			initialize_function();
-		}
-	}
-
-	private void detachSharedOneDimFunctions(int m) {
-		if (!sharedOneDimFunctions[m]) {
-			return;
-		}
-		fFunctions.set(m, new ArrayList<PiecewiseLinearFunction>());
-		bFunctions.set(m, new ArrayList<PiecewiseLinearFunction>());
-		sharedOneDimFunctions[m] = false;
-	}
-
-	private void detachSharedMachineState(int m) {
-		if (!sharedMachineState[m]) {
-			return;
-		}
-		if (fFunctions_hg != null) {
-			fFunctions_hg[m] = null;
-		}
-		if (bFunctions_hg != null) {
-			bFunctions_hg[m] = null;
-		}
-		if (fFunctions_gh != null) {
-			fFunctions_gh[m] = null;
-		}
-		if (bFunctions_gh != null) {
-			bFunctions_gh[m] = null;
-		}
-		if (fFunctions_hgl_normal != null) {
-			fFunctions_hgl_normal[m] = null;
-		}
-		if (bFunctions_hgl_normal != null) {
-			bFunctions_hgl_normal[m] = null;
-		}
-		if (fFunctions_hgl_reverse != null) {
-			fFunctions_hgl_reverse[m] = null;
-		}
-		if (bFunctions_hgl_reverse != null) {
-			bFunctions_hgl_reverse[m] = null;
-		}
-		if (timeWindowSummary_hg != null) {
-			timeWindowSummary_hg[m] = null;
-		}
-		if (timeWindowSummary_gh != null) {
-			timeWindowSummary_gh[m] = null;
-		}
-		sharedMachineState[m] = false;
-	}
-
-	public void refreshDirtyMachineInformation() {
-		ensureMachineStateStorage();
-		for (int m = 0; m < data.m; m++) {
-			if (!dirtyMachines[m]) {
-				continue;
-			}
-			updateInformationM(m);
-		}
 	}
 
 	public void setSequence(ArrayList<ArrayList<Integer>> sequences) {
@@ -245,9 +154,6 @@ public class Solution {
 		this.outsourcedJobs.clear();
 		this.outsourcingBaselineTotal = 0;
 		this.outsourcingCostTotal = 0;
-		Arrays.fill(sharedOneDimFunctions, false);
-		Arrays.fill(sharedMachineState, false);
-		markAllMachinesDirty();
 	}
 
 	/**
@@ -846,10 +752,6 @@ public class Solution {
 
 	public void updateInformationM(int m, double costM) {
 		int size = sequences.get(m).size();
-		ensureMachineStateStorage();
-		detachSharedOneDimFunctions(m);
-		detachSharedMachineState(m);
-		initialize_function(m);
 		// 单机器内优化size不变，不需要处理
 //		fFunctions_hg[m] = new PiecewiseLinearFunction[size][size];// 应该不需要包含起始点
 //		bFunctions_hg[m] = new PiecewiseLinearFunction[size][size];
@@ -873,7 +775,6 @@ public class Solution {
 		curCost = curCost - cost[m];
 		curCost += costM;
 		cost[m] = costM;
-		clearMachineDirty(m);
 
 	}
 
@@ -881,9 +782,6 @@ public class Solution {
 		// 这个暂时重新更新成本复杂度应该不会变大很多
 		//TODO 这种里边其实可以也按照3维那样，下次搜哪个更新哪个，而不需要一次性更新，应该会更快一些
 		//先不管了
-		ensureMachineStateStorage();
-		detachSharedOneDimFunctions(m);
-		detachSharedMachineState(m);
 		curCost -= cost[m];
 		releaseFunctions1(m);
 		releaseFunctions2(m);
@@ -901,7 +799,6 @@ public class Solution {
 //		updateFunctions3ForMachine(m);//不需要每次都更新，做Iopt的时候在更新
 		updateCumDuration(m);
 		updateTimeWindowSummariesForMachine(m);
-		clearMachineDirty(m);
 
 	}
 
@@ -1203,7 +1100,6 @@ public class Solution {
 		// 计算单个机器上序列成本
 		// 不存储0
 
-		detachSharedOneDimFunctions(m);
 		ArrayList<Integer> sequence = sequences.get(m);
 		ArrayList<Double> cTime = new ArrayList<Double>();
 
@@ -1217,8 +1113,6 @@ public class Solution {
 //			}
 //					}
 		if (sequence.size() == 0) {
-			fFunctions.get(m).clear();
-			bFunctions.get(m).clear();
 			cost[m] = 0;
 			return cost[m];
 		}
@@ -1375,7 +1269,6 @@ public class Solution {
 				curCost -= cost[m];
 				calCost(m);
 				curCost += cost[m];
-				markMachineDirty(m);
 			}
 		}
 		for (Integer job : toRemove) {
@@ -1392,7 +1285,6 @@ public class Solution {
 		curCost -= cost[m];
 		calCost(m);
 		curCost += cost[m];
-		markMachineDirty(m);
 
 	}
 
@@ -1410,9 +1302,6 @@ public class Solution {
 		this.outsourcingCostTotal = 0;
 		this.curCost = 0;
 		Arrays.fill(this.cost, 0);
-		Arrays.fill(this.sharedOneDimFunctions, false);
-		Arrays.fill(this.sharedMachineState, false);
-		Arrays.fill(this.dirtyMachines, false);
 		Collections.shuffle(jobs, Utility.rng);
 		for (int m = 0; m < data.m; m++) {
 			this.sequences.add(new ArrayList<Integer>());
@@ -1451,7 +1340,6 @@ public class Solution {
 			lastJobM[selectedM] = jid;
 			this.sequences.get(selectedM).add(jid);
 		}
-		markAllMachinesDirty();
 
 	}
 

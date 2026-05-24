@@ -38,7 +38,6 @@ public class GC {
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
 	// 2026-05-20: 当前 RMP dual 下的 job-level H_j 硬窗缓存，只在一次 pricing 调用内有效。
-	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	// 2026-05-24: 根节点无 cut 时才允许用 pi_j 动态 profitable window。
@@ -182,11 +181,9 @@ public class GC {
 	 * 这个缓存只在本次 pricing 内使用，不能写入全局禁弧矩阵，也不能影响分支候选。
 	 */
 	private void precomputeDynamicPricingWindows(LP lp) {
-		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
 		dynamicJobPenaltyByJob = null;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
-		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
@@ -205,7 +202,6 @@ public class GC {
 					penalty = Utility.compareGt(hStart, hEnd) ? null : data.penaltyFunction[job].setDomain(hStart, hEnd, true);
 				}
 			}
-			dynamicJobHStart[job] = hStart;
 			dynamicJobHEnd[job] = hEnd;
 			dynamicJobPenaltyByJob[job] = penalty;
 		}
@@ -305,10 +301,19 @@ public class GC {
 		ArrayList<Integer> sequence = new ArrayList<Integer>();
 		Label cursor = label;
 		while (cursor != null && cursor.jid != 0) {
-			sequence.add(0, Integer.valueOf(cursor.jid));
+			sequence.add(Integer.valueOf(cursor.jid));
 			cursor = cursor.father;
 		}
+		reverseInPlace(sequence);
 		return sequence;
+	}
+
+	private void reverseInPlace(ArrayList<Integer> sequence) {
+		for (int left = 0, right = sequence.size() - 1; left < right; left++, right--) {
+			Integer tmp = sequence.get(left);
+			sequence.set(left, sequence.get(right));
+			sequence.set(right, tmp);
+		}
 	}
 
 }

@@ -49,6 +49,7 @@ public class GCBidirectional {
 	private ArrayList<DominanceStore> FWTL;
 	private ArrayList<DominanceStore> BWTL;
 	private ArrayList<ArrayList<ForwardLabel>> activeForwardByLastJob;
+	private PackedBitSet activeForwardTerminalJobs;
 	private double[] minForwardReducedCostByLastJob;
 	private double[] minForwardEllByLastJob;
 	private ArrayList<TWETColumn> generatedColumns;
@@ -131,6 +132,7 @@ public class GCBidirectional {
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
 		BWTL = new ArrayList<DominanceStore>(data.n + 1);
 		activeForwardByLastJob = new ArrayList<ArrayList<ForwardLabel>>(data.n + 1);
+		activeForwardTerminalJobs = new PackedBitSet(data.n + 2);
 		minForwardReducedCostByLastJob = new double[data.n + 1];
 		minForwardEllByLastJob = new double[data.n + 1];
 		for (int i = 0; i <= data.n; i++) {
@@ -334,6 +336,7 @@ public class GCBidirectional {
 		if (!dominated) {
 			forwardLabelsKept++;
 			activeForwardByLastJob.get(label.jid).add(label);
+			activeForwardTerminalJobs.add(label.jid);
 			updateForwardScalarInfo(label);
 		} else {
 			forwardLabelsDominated++;
@@ -386,7 +389,8 @@ public class GCBidirectional {
 		Node node = lp.getNode();
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
-		for (int lastJob = 0; lastJob <= data.n && canContinue(); lastJob++) {
+		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
+				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
 			joinTerminalGroupsScanned++;
 			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
 				joinTerminalGroupsArcOrVisitPruned++;
@@ -876,9 +880,10 @@ public class GCBidirectional {
 		ArrayList<Integer> sequence = new ArrayList<Integer>();
 		ForwardLabel cursor = label;
 		while (cursor != null && cursor.jid != 0) {
-			sequence.add(0, Integer.valueOf(cursor.jid));
+			sequence.add(Integer.valueOf(cursor.jid));
 			cursor = cursor.father;
 		}
+		reverseInPlace(sequence);
 		return sequence;
 	}
 
@@ -896,6 +901,14 @@ public class GCBidirectional {
 		ArrayList<Integer> sequence = recoverForwardSequence(forward);
 		sequence.addAll(recoverBackwardSequence(backward));
 		return sequence;
+	}
+
+	private void reverseInPlace(ArrayList<Integer> sequence) {
+		for (int left = 0, right = sequence.size() - 1; left < right; left++, right--) {
+			Integer tmp = sequence.get(left);
+			sequence.set(left, sequence.get(right));
+			sequence.set(right, tmp);
+		}
 	}
 
 	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {

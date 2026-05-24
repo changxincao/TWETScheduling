@@ -1,6 +1,7 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 import Output.BPCTraceSink;
@@ -89,7 +90,7 @@ public class PC {
 			boolean addedColumn = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
 				PricingEngine engine = pricingEngines.get(engineIndex);
-				ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
+				HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
 				ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, engine, false, activeColumnIds);
 				if (newColumnIds.isEmpty()) {
 					continue;
@@ -133,7 +134,7 @@ public class PC {
 				boolean addedByThisEngine = false;
 				boolean keepCurrentEngine = true;
 				while (keepCurrentEngine && generatedForRepair < config.maxBranchRepairColumns) {
-					ArrayList<Integer> activeColumnIds = new ArrayList<Integer>(lp.getRestrictedColumnIds());
+					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
 					ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, engine, true, activeColumnIds);
 					if (newColumnIds.isEmpty()) {
 						break;
@@ -184,7 +185,7 @@ public class PC {
 	}
 
 	private ArrayList<Integer> generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
-			ArrayList<Integer> activeColumnIds) {
+			HashSet<Integer> activeColumnIds) {
 		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
 		long pricingStart = System.nanoTime();
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
@@ -196,8 +197,7 @@ public class PC {
 				int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
 						column.isSeedColumn());
 				Integer value = Integer.valueOf(id);
-				if (!activeColumnIds.contains(value)) {
-					activeColumnIds.add(value);
+				if (activeColumnIds.add(value)) {
 					newColumnIds.add(value);
 					addedColumns++;
 				}

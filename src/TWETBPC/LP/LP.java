@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -165,10 +166,12 @@ public class LP {
 
 	public int addColumns(List<Integer> columnIds) {
 		int added = 0;
+		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedColumnIds);
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
-			if (!restrictedColumnIds.contains(value) && isColumnCompatible(pool.getColumn(id))) {
+			if (!activeColumnIds.contains(value) && isColumnCompatible(pool.getColumn(id))) {
 				restrictedColumnIds.add(value);
+				activeColumnIds.add(value);
 				added++;
 				if (cplex != null && objective != null) {
 					try {

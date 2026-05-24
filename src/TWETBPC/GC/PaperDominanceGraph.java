@@ -2,6 +2,8 @@ package TWETBPC.GC;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -231,16 +233,22 @@ final class PaperDominanceGraph implements DominanceStore {
 	}
 
 	private ArrayList<PaperDominanceNode> removeRedundantSubsetCandidates(ArrayList<PaperDominanceNode> candidates) {
+		Collections.sort(candidates, new Comparator<PaperDominanceNode>() {
+			@Override
+			public int compare(PaperDominanceNode a, PaperDominanceNode b) {
+				return Integer.compare(b.reachableCardinality, a.reachableCardinality);
+			}
+		});
 		ArrayList<PaperDominanceNode> result = new ArrayList<PaperDominanceNode>();
 		for (PaperDominanceNode candidate : candidates) {
-			boolean dominatedByAnotherCandidate = false;
-			for (PaperDominanceNode other : candidates) {
-				if (candidate != other && other.reachableKey.isSupersetOf(candidate.reachableKey)) {
-					dominatedByAnotherCandidate = true;
+			boolean coveredByFrontier = false;
+			for (PaperDominanceNode kept : result) {
+				if (kept.reachableKey.isSupersetOf(candidate.reachableKey)) {
+					coveredByFrontier = true;
 					break;
 				}
 			}
-			if (!dominatedByAnotherCandidate) {
+			if (!coveredByFrontier) {
 				result.add(candidate);
 			}
 		}
@@ -312,10 +320,17 @@ final class PaperDominanceGraph implements DominanceStore {
 			disconnect(node, successor);
 		}
 		for (PaperDominanceNode predecessor : predecessors) {
+			if (!predecessor.active) {
+				continue;
+			}
+			ArrayList<PaperDominanceNode> compatibleSuccessors = new ArrayList<PaperDominanceNode>();
 			for (PaperDominanceNode successor : successors) {
-				if (predecessor.active && successor.active && predecessor.reachableKey.isSupersetOf(successor.reachableKey)) {
-					connect(predecessor, successor);
+				if (successor.active && predecessor.reachableKey.isSupersetOf(successor.reachableKey)) {
+					compatibleSuccessors.add(successor);
 				}
+			}
+			for (PaperDominanceNode successor : removeRedundantSubsetCandidates(compatibleSuccessors)) {
+				connect(predecessor, successor);
 			}
 		}
 		for (PaperDominanceNode successor : successors) {
@@ -346,12 +361,8 @@ final class PaperDominanceGraph implements DominanceStore {
 		if (from == to) {
 			return;
 		}
-		if (!from.successors.contains(to)) {
-			from.successors.add(to);
-		}
-		if (!to.predecessors.contains(from)) {
-			to.predecessors.add(from);
-		}
+		from.successors.add(to);
+		to.predecessors.add(from);
 	}
 
 	private void disconnect(PaperDominanceNode from, PaperDominanceNode to) {
@@ -361,9 +372,10 @@ final class PaperDominanceGraph implements DominanceStore {
 
 	private static final class PaperDominanceNode {
 		final PackedBitSet reachableKey;
+		final int reachableCardinality;
 		final ArrayList<Label> labels = new ArrayList<Label>();
-		final ArrayList<PaperDominanceNode> predecessors = new ArrayList<PaperDominanceNode>();
-		final ArrayList<PaperDominanceNode> successors = new ArrayList<PaperDominanceNode>();
+		final LinkedHashSet<PaperDominanceNode> predecessors = new LinkedHashSet<PaperDominanceNode>();
+		final LinkedHashSet<PaperDominanceNode> successors = new LinkedHashSet<PaperDominanceNode>();
 		final Direction direction;
 		PiecewiseLinearFunction labelEnvelope;
 		PiecewiseLinearFunction predecessorEnvelope;
@@ -372,6 +384,7 @@ final class PaperDominanceGraph implements DominanceStore {
 
 		PaperDominanceNode(PackedBitSet reachableKey, Direction direction) {
 			this.reachableKey = reachableKey.copy();
+			this.reachableCardinality = this.reachableKey.cardinality();
 			this.direction = direction;
 		}
 

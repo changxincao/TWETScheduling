@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.PriorityQueue;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -104,32 +105,51 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private ArrayList<TWETColumn> collectSeedColumns(final LP lp) {
-		ArrayList<ScoredSeed> scoredSeeds = new ArrayList<ScoredSeed>();
+		int limit = Math.max(0, config.heuristicPricingSeedColumns);
+		if (limit == 0) {
+			return new ArrayList<TWETColumn>();
+		}
+		PriorityQueue<ScoredSeed> bestSeeds = new PriorityQueue<ScoredSeed>(limit, new Comparator<ScoredSeed>() {
+			@Override
+			public int compare(ScoredSeed a, ScoredSeed b) {
+				return compareScoredSeed(b, a);
+			}
+		});
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
 			if (!column.getSequence().isEmpty()) {
 				// 2026-05-21: seed 排序前先缓存 reduced cost，避免 comparator 反复扫描同一条列。
-				scoredSeeds.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp)));
+				ScoredSeed candidate = new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp));
+				if (bestSeeds.size() < limit) {
+					bestSeeds.add(candidate);
+				} else if (compareScoredSeed(candidate, bestSeeds.peek()) < 0) {
+					bestSeeds.poll();
+					bestSeeds.add(candidate);
+				}
 			}
 		}
+		ArrayList<ScoredSeed> scoredSeeds = new ArrayList<ScoredSeed>(bestSeeds);
 		Collections.sort(scoredSeeds, new Comparator<ScoredSeed>() {
 			@Override
 			public int compare(ScoredSeed a, ScoredSeed b) {
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return 1;
-				}
-				return Integer.compare(a.column.size(), b.column.size());
+				return compareScoredSeed(a, b);
 			}
 		});
-		int limit = Math.min(config.heuristicPricingSeedColumns, scoredSeeds.size());
-		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(limit);
-		for (int i = 0; i < limit; i++) {
+		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(scoredSeeds.size());
+		for (int i = 0; i < scoredSeeds.size(); i++) {
 			seeds.add(scoredSeeds.get(i).column);
 		}
 		return seeds;
+	}
+
+	private static int compareScoredSeed(ScoredSeed a, ScoredSeed b) {
+		if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
+			return -1;
+		}
+		if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
+			return 1;
+		}
+		return Integer.compare(a.column.size(), b.column.size());
 	}
 
 	private void tabuSearch(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,
@@ -335,11 +355,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		void apply(TabuMove move, int tenureUntil) {
 			if (move.type == MoveType.REMOVE) {
-				this.sequence.remove(move.position);
+				applyRemove(move.position, move.primaryJob);
 			} else if (move.type == MoveType.ADD) {
-				this.sequence.add(move.position, Integer.valueOf(move.primaryJob));
+				applyAdd(move.position, move.primaryJob);
 			} else {
-				this.sequence.set(move.position, Integer.valueOf(move.primaryJob));
+				applyExchange(move.position, move.primaryJob, move.secondaryJob);
 			}
 			if (move.primaryJob >= 1 && move.primaryJob < tabuTenure.length) {
 				tabuTenure[move.primaryJob] = tenureUntil;
@@ -347,8 +367,60 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (move.secondaryJob >= 1 && move.secondaryJob < tabuTenure.length) {
 				tabuTenure[move.secondaryJob] = tenureUntil;
 			}
-			rebuild();
 			this.currentReducedCost = move.reducedCost;
+		}
+
+		private void applyRemove(int pos, int removedJob) {
+			PiecewiseLinearFunction[] oldForward = forward;
+			PiecewiseLinearFunction[] oldBackward = backward;
+			this.sequence.remove(pos);
+			if (removedJob >= 1 && removedJob <= data.n) {
+				used[removedJob] = false;
+			}
+			this.forward = new PiecewiseLinearFunction[sequence.size()];
+			this.backward = new PiecewiseLinearFunction[sequence.size()];
+			if (pos > 0) {
+				System.arraycopy(oldForward, 0, forward, 0, pos);
+			}
+			if (pos < sequence.size()) {
+				System.arraycopy(oldBackward, pos + 1, backward, pos, sequence.size() - pos);
+			}
+			recomputeForwardFrom(pos);
+			recomputeBackwardDownTo(pos - 1);
+			updateCost();
+		}
+
+		private void applyAdd(int pos, int job) {
+			PiecewiseLinearFunction[] oldForward = forward;
+			PiecewiseLinearFunction[] oldBackward = backward;
+			this.sequence.add(pos, Integer.valueOf(job));
+			if (job >= 1 && job <= data.n) {
+				used[job] = true;
+			}
+			this.forward = new PiecewiseLinearFunction[sequence.size()];
+			this.backward = new PiecewiseLinearFunction[sequence.size()];
+			if (pos > 0) {
+				System.arraycopy(oldForward, 0, forward, 0, pos);
+			}
+			if (pos < oldBackward.length) {
+				System.arraycopy(oldBackward, pos, backward, pos + 1, oldBackward.length - pos);
+			}
+			recomputeForwardFrom(pos);
+			recomputeBackwardDownTo(pos);
+			updateCost();
+		}
+
+		private void applyExchange(int pos, int addedJob, int removedJob) {
+			this.sequence.set(pos, Integer.valueOf(addedJob));
+			if (removedJob >= 1 && removedJob <= data.n) {
+				used[removedJob] = false;
+			}
+			if (addedJob >= 1 && addedJob <= data.n) {
+				used[addedJob] = true;
+			}
+			recomputeForwardFrom(pos);
+			recomputeBackwardDownTo(pos);
+			updateCost();
 		}
 
 		private double removeCost(int pos) {
@@ -429,8 +501,53 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			this.forward = buildForwardProfile(sequence, true);
 			this.backward = buildBackwardProfile(sequence);
-			this.cost = sequence.isEmpty() || forward.length == 0 || forward[forward.length - 1].isEmpty() ? Utility.big_M
-					: forward[forward.length - 1].tail.getValue(forward[forward.length - 1].tail.end);
+			updateCost();
+		}
+
+		private void recomputeForwardFrom(int start) {
+			if (sequence.isEmpty() || start >= sequence.size()) {
+				return;
+			}
+			for (int i = Math.max(0, start); i < sequence.size(); i++) {
+				int job = sequence.get(i).intValue();
+				PiecewiseLinearFunction cur;
+				if (i == 0) {
+					cur = data.penaltyFunction[job].copy();
+					cur = cur.setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+					cur.shiftYInPlace(data.getSetupCost(0, job));
+				} else {
+					int prev = sequence.get(i - 1).intValue();
+					cur = forward[i - 1].shiftX(data.s[prev][job] + data.p[job]).add(data.penaltyFunction[job]);
+					cur.shiftYInPlace(data.getSetupCost(prev, job));
+				}
+				cur.minimizePrefixInPlace();
+				forward[i] = cur;
+			}
+		}
+
+		private void recomputeBackwardDownTo(int start) {
+			if (sequence.isEmpty() || start < 0) {
+				return;
+			}
+			for (int i = Math.min(start, sequence.size() - 1); i >= 0; i--) {
+				int job = sequence.get(i).intValue();
+				PiecewiseLinearFunction cur;
+				if (i == sequence.size() - 1) {
+					cur = data.penaltyFunction[job].copy();
+				} else {
+					int next = sequence.get(i + 1).intValue();
+					cur = backward[i + 1].shiftX(-data.s[job][next] - data.p[next]).add(data.penaltyFunction[job]);
+					cur.shiftYInPlace(data.getSetupCost(job, next));
+				}
+				cur.minimizeSuffixInPlace();
+				backward[i] = cur;
+			}
+		}
+
+		private void updateCost() {
+			this.cost = sequence.isEmpty() || forward.length == 0 || forward[forward.length - 1] == null
+					|| forward[forward.length - 1].isEmpty() ? Utility.big_M
+							: forward[forward.length - 1].tail.getValue(forward[forward.length - 1].tail.end);
 		}
 	}
 

@@ -230,7 +230,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (isHeuristicPoolFull(negativeCandidates)) {
 			return;
 		}
-		if (sequence.isEmpty() || Utility.isBigMValue(cost) || hasDuplicateJobs(sequence)) {
+		if (sequence.isEmpty() || Utility.isBigMValue(cost)) {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
@@ -267,17 +267,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 		}
 		return !node.isArcForbidden(sequence.get(sequence.size() - 1).intValue(), node.sinkId());
-	}
-
-	private boolean hasDuplicateJobs(List<Integer> sequence) {
-		boolean[] seen = new boolean[data.n + 1];
-		for (int job : sequence) {
-			if (job < 1 || job > data.n || seen[job]) {
-				return true;
-			}
-			seen[job] = true;
-		}
-		return false;
 	}
 
 	private double reducedCost(List<Integer> sequence, double cost, LP lp) {

@@ -81,6 +81,9 @@ public class GC {
 	}
 
 	private void initialize(LP lp) {
+		if (usePaperDominanceGraph) {
+			PaperDominanceGraph.resetStatistics();
+		}
 		UL = new PriorityQueue<Label>();
 		TL = new ArrayList<DominanceStore>(data.n + 1);
 		for (int i = 0; i <= data.n; i++) {

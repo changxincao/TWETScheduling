@@ -1294,3 +1294,13 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 双向 `GCBidirectional` 同步采用相同判断，并额外缓存基准 forward/backward 半域 penalty。也就是说，`pi_j` 不能进一步收紧时，forward half 直接复用 `[0,T^mid]` 的基准半域函数，backward half 直接复用 `[T^mid,CmaxH]` 的基准半域函数；只有 dual 窗更窄时才临时重做 `setDomain + cropToInterval`。这保持了半域元数据语义，又减少了每轮 pricing 中大量重复的分段函数构造。
 
 验证方面，补入 CPLEX jar/native path 后 focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，`cases=200, insertions=16000`；`PricingAlgorithmComparisonTest` 通过，`matchedRounds=9/9`；`SmallBPCBatchTest` 通过，8/8 小例与 tariff branch 诊断均有效。测试刷新了本地 CSV 输出，但这些文件只作为验证产物，不纳入本次提交。
+
+## 2026-05-24：completion bound 之外的统计补充
+
+按“completion bound 先不动”的边界，本次没有接入 `PredList/AMin` 或 scalar completion bound，也没有调整任何剪枝条件。当前先补的是运行期可观测统计，目的是后续判断瓶颈到底来自 dominance graph 维护、join 候选枚举，还是函数级 `shift/add/findMinimal`。
+
+`PaperDominanceGraph` 增加了本轮 pricing 聚合计数，包括保留/拒绝 label 数、创建/删除 node 数、传播删除 label 数、superset/subset 搜索调用与访问节点数、propagation 调用与访问节点数、envelope merge 次数和函数完整占优检查次数。这些统计只在 `PaperDominanceExactPricingEngine` 和双向 pricing 的 message 中输出，不参与任何 dominance 判断。单向 paper-dominance pricing 在初始化时重置统计；双向 pricing 也在每次 `initialize()` 时重置，避免跨轮累计。
+
+`GCBidirectional` 额外记录 forward/backward label 保留与被支配数量、join terminal group 的扫描与剪枝原因、join candidate label 数、label-pair 层面的 set 冲突、重复 pair、标量下界剪枝、时间剪枝，以及真正进入函数级 join 的次数和函数级剪枝次数。这里仍然只做计数，不改变 `tryJoin()` 的执行顺序和数学判断。这样后续如果发现 `joinFunctionEvaluations` 很少但整体仍慢，应优先看 graph/envelope；如果函数级 join 次数很高，再考虑专门的 shifted-sum-min 扫描器或更强的 join 下界。
+
+验证结果为：focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，`cases=200, insertions=16000`；`PricingAlgorithmComparisonTest` 通过，`matchedRounds=9/9`；`SmallBPCBatchTest` 通过，8/8 小例与 tariff branch 诊断均有效。测试会刷新本地 `test-results/bpc/*.csv`，这些仍作为验证产物，不纳入提交。

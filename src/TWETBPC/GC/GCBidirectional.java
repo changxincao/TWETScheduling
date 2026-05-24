@@ -66,6 +66,25 @@ public class GCBidirectional {
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
 
+	private long forwardLabelsKept;
+	private long forwardLabelsDominated;
+	private long backwardLabelsKept;
+	private long backwardLabelsDominated;
+	private long joinTerminalGroupsScanned;
+	private long joinTerminalGroupsArcOrVisitPruned;
+	private long joinTerminalGroupsEmpty;
+	private long joinTerminalGroupsTimePruned;
+	private long joinTerminalGroupsCostPruned;
+	private long joinCandidateLabelsVisited;
+	private long joinCandidateLabelsDominated;
+	private long joinPairsTried;
+	private long joinPairsSetPruned;
+	private long joinPairsDedupPruned;
+	private long joinPairsLowerBoundPruned;
+	private long joinPairsTimePruned;
+	private long joinFunctionEvaluations;
+	private long joinFunctionPruned;
+
 	private String lastMessage = "Bidirectional pricing not executed";
 
 	public GCBidirectional(Data data, TWETBPCConfig config) {
@@ -88,7 +107,8 @@ public class GCBidirectional {
 		while (canContinue() && !BWUL.isEmpty()) {
 			backwardExtend(lp);
 		}
-		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns";
+		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns; "
+				+ statisticsSummary();
 		return generatedColumns;
 	}
 
@@ -97,6 +117,8 @@ public class GCBidirectional {
 	}
 
 	private void initialize(LP lp) {
+		resetStatistics();
+		PaperDominanceGraph.resetStatistics();
 		tMid = data.CmaxH * 0.5;
 		FWUL = new PriorityQueue<ForwardLabel>();
 		BWUL = new PriorityQueue<BackwardLabel>();
@@ -302,14 +324,23 @@ public class GCBidirectional {
 	private boolean insertForward(ForwardLabel label) {
 		boolean dominated = FWTL.get(label.jid).insertOrDominate(label);
 		if (!dominated) {
+			forwardLabelsKept++;
 			activeForwardByLastJob.get(label.jid).add(label);
 			updateForwardScalarInfo(label);
+		} else {
+			forwardLabelsDominated++;
 		}
 		return dominated;
 	}
 
 	private boolean insertBackward(BackwardLabel label) {
-		return BWTL.get(label.jid).insertOrDominate(label);
+		boolean dominated = BWTL.get(label.jid).insertOrDominate(label);
+		if (dominated) {
+			backwardLabelsDominated++;
+		} else {
+			backwardLabelsKept++;
+		}
+		return dominated;
 	}
 
 	private void updateForwardScalarInfo(ForwardLabel label) {
@@ -348,27 +379,35 @@ public class GCBidirectional {
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
 		for (int lastJob = 0; lastJob <= data.n && canContinue(); lastJob++) {
+			joinTerminalGroupsScanned++;
 			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
+				joinTerminalGroupsArcOrVisitPruned++;
 				continue;
 			}
 			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
 			if (candidates.isEmpty()) {
+				joinTerminalGroupsEmpty++;
 				continue;
 			}
 			double delay = data.getSetUp(lastJob, backward.jid) + data.getProcessT(backward.jid);
 			if (Utility.compareGt(minForwardEllByLastJob[lastJob] + delay, backward.frontier.tail.end)) {
+				joinTerminalGroupsTimePruned++;
 				continue;
 			}
 			double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost
 					+ data.getSetupCost(lastJob, backward.jid) - lp.getArcDual(lastJob, backward.jid);
 			if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
+				joinTerminalGroupsCostPruned++;
 				continue;
 			}
 			for (int i = 0; i < candidates.size() && canContinue(); i++) {
 				ForwardLabel forward = candidates.get(i);
-				if (!forward.isDominated) {
-					tryJoin(forward, backward, lp);
+				joinCandidateLabelsVisited++;
+				if (forward.isDominated) {
+					joinCandidateLabelsDominated++;
+					continue;
 				}
+				tryJoin(forward, backward, lp);
 			}
 		}
 	}
@@ -377,7 +416,9 @@ public class GCBidirectional {
 		if (generatedColumns.size() >= config.maxExactPricingColumns) {
 			return;
 		}
+		joinPairsTried++;
 		if (forward.jid == backward.jid || forward.visitedSet.intersects(backward.visitedSet)) {
+			joinPairsSetPruned++;
 			return;
 		}
 		// 2026-05-23: 同一对 forward/backward label 可能分别在两侧出队时各 join 一次。
@@ -385,6 +426,7 @@ public class GCBidirectional {
 		// shift/add/findMinimal 等重操作。crossing arc 由两个 label 的末端任务唯一确定。
 		long pairKey = (((long) forward.labelId) << 32) ^ (backward.labelId & 0xffffffffL);
 		if (!attemptedJoinPairs.add(pairKey)) {
+			joinPairsDedupPruned++;
 			return;
 		}
 
@@ -395,26 +437,32 @@ public class GCBidirectional {
 		// 因此若这个标量下界都不能为负，就没必要再构造 join 函数。
 		double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
 		if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
+			joinPairsLowerBoundPruned++;
 			return;
 		}
 
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
+			joinPairsTimePruned++;
 			return;
 		}
 
+		joinFunctionEvaluations++;
 		PiecewiseLinearFunction forwardFull = getForwardJoinExtension(forward);
 		PiecewiseLinearFunction shiftedForward = forwardFull.shiftX(delta);
 		if (shiftedForward.head == null) {
+			joinFunctionPruned++;
 			return;
 		}
 		PiecewiseLinearFunction backwardFull = getBackwardJoinExtension(backward);
 		if (backwardFull.head == null) {
+			joinFunctionPruned++;
 			return;
 		}
 		PiecewiseLinearFunction joinCost = shiftedForward.add(backwardFull);
 		if (joinCost.head == null) {
+			joinFunctionPruned++;
 			return;
 		}
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
@@ -422,11 +470,48 @@ public class GCBidirectional {
 		joinCost.shiftYInPlace(joinFixedReducedCost);
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
+			joinFunctionPruned++;
 			return;
 		}
 
 		ArrayList<Integer> sequence = recoverJoinSequence(forward, backward);
 		tryGenerateColumn(sequence, lp, reducedCostBound);
+	}
+
+	private void resetStatistics() {
+		forwardLabelsKept = 0;
+		forwardLabelsDominated = 0;
+		backwardLabelsKept = 0;
+		backwardLabelsDominated = 0;
+		joinTerminalGroupsScanned = 0;
+		joinTerminalGroupsArcOrVisitPruned = 0;
+		joinTerminalGroupsEmpty = 0;
+		joinTerminalGroupsTimePruned = 0;
+		joinTerminalGroupsCostPruned = 0;
+		joinCandidateLabelsVisited = 0;
+		joinCandidateLabelsDominated = 0;
+		joinPairsTried = 0;
+		joinPairsSetPruned = 0;
+		joinPairsDedupPruned = 0;
+		joinPairsLowerBoundPruned = 0;
+		joinPairsTimePruned = 0;
+		joinFunctionEvaluations = 0;
+		joinFunctionPruned = 0;
+	}
+
+	private String statisticsSummary() {
+		return "labels fw kept/dominated=" + forwardLabelsKept + "/" + forwardLabelsDominated
+				+ ", bw kept/dominated=" + backwardLabelsKept + "/" + backwardLabelsDominated
+				+ ", join groups scanned/arcOrVisit/empty/timeLB/costLB=" + joinTerminalGroupsScanned
+				+ "/" + joinTerminalGroupsArcOrVisitPruned + "/" + joinTerminalGroupsEmpty
+				+ "/" + joinTerminalGroupsTimePruned + "/" + joinTerminalGroupsCostPruned
+				+ ", join candidates visited/dominated=" + joinCandidateLabelsVisited + "/"
+				+ joinCandidateLabelsDominated
+				+ ", join pairs tried/set/dedup/lb/time/funcEval/funcPruned=" + joinPairsTried
+				+ "/" + joinPairsSetPruned + "/" + joinPairsDedupPruned + "/"
+				+ joinPairsLowerBoundPruned + "/" + joinPairsTimePruned + "/"
+				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", " + PaperDominanceGraph.statisticsSummary();
 	}
 
 	/**

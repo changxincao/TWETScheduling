@@ -43,3 +43,11 @@
 ## 5. 当前结论
 
 当前代码下，这 10 个 15 任务 no-outsourcing 子算例上，single 和 bidirectional 的最优目标与 final bound 完全一致；在同一 root seed 起点、放宽列池阈值后，双向在完整 root 时间和 exact 时间上都略优于单向，但优势幅度不大。更直接地说，这批例子的主耗时仍然不是 exact labeling，而是 heuristic pricing 多轮加列和 LP 重解；双向当前的收益已经能在完整 root 时间里体现出来，但还没有大到能主导整体时间。
+
+## 6. 2026-05-24：补跑 20 / 21 任务更大规模
+
+考虑到 15 任务 still 偏小，这次继续复用同一个 batch runner，单独挑了 `tmp-wet020_001_2m.dat` 和 `tmp-wet021_001_2m.dat` 两个更大 no-outsourcing 子算例做 full BPC 对比。为保持可比性，仍然沿用同一套设置：不允许外包、临时放大 heuristic/exact 列池阈值、并在每个 case 开始前按 case 名重置同一个随机 seed，让 single 和 bidirectional 共用 root seed 起点。结果 CSV 为 `test-results/bpc/2026-05-24-no-outsourcing-20-21-bidir-vs-single-rerun.csv`。
+
+这两个更大算例都在 root 闭合，single 和 bidirectional 的最终 incumbent、final bound 继续完全一致。`wet020_001_2m` 上，single 总时间 `10.467s`、exact 时间 `8.905s`；bidirectional 总时间 `9.311s`、exact 时间 `8.519s`。`wet021_001_2m` 上，single 总时间 `15.954s`、exact 时间 `15.203s`；bidirectional 总时间 `14.922s`、exact 时间 `14.125s`。这里和 15 任务相比，信号已经更清楚：一旦规模上来，完整 root 总时间的主要部分几乎都被 exact pricing 吃掉，双向在这两个例子上都稳定快于单向，且节省主要就来自 exact pricing 本身，而不是 LP 重解。
+
+这批 20/21 任务还有一个和 15 任务不同的现象：`wet020_001_2m` 里 single 和 bidirectional 都出现了 2 次 exact pricing 调用，说明 exact 不是单纯最后一次“零列证明”，而是先补了一轮负列，再做最终无负列证明。`wet021_001_2m` 则仍然只有 1 次 exact 调用，但 exact 时间已经占到总时间的 95% 左右。由此当前判断更明确：在更大的 no-outsourcing full BPC root 上，瓶颈已经非常集中到 exact pricing，双向的收益也开始更稳定地体现出来。

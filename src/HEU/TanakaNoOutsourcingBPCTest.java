@@ -88,14 +88,14 @@ public class TanakaNoOutsourcingBPCTest {
 				solver.getContext().pool.size(), validation.isFeasible(), millis, csv);
 	}
 
-	private static double gapPercent(double bound, double incumbent) {
+	static double gapPercent(double bound, double incumbent) {
 		if (!Double.isFinite(bound) || !Double.isFinite(incumbent) || Math.abs(incumbent) <= 1e-9) {
 			return Double.NaN;
 		}
 		return Math.max(0.0, (incumbent - bound) / Math.abs(incumbent) * 100.0);
 	}
 
-	private static Data loadTanakaMultiMachine(String instance, boolean zeroSetup) throws IOException {
+	static Data loadTanakaMultiMachine(String instance, boolean zeroSetup) throws IOException {
 		Data data = loadBaseDataQuietly();
 		try (BufferedReader reader = Files.newBufferedReader(Path.of(instance))) {
 			String[] header = split(reader.readLine());

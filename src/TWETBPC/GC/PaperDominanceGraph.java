@@ -4,6 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 import Common.PiecewiseLinearFunction;
@@ -39,7 +40,7 @@ final class PaperDominanceGraph implements DominanceStore {
 	private static long dominanceChecks;
 
 	private final ArrayList<PaperDominanceNode> nodes = new ArrayList<PaperDominanceNode>();
-	private final ArrayList<PaperDominanceNode> roots = new ArrayList<PaperDominanceNode>();
+	private final LinkedHashSet<PaperDominanceNode> roots = new LinkedHashSet<PaperDominanceNode>();
 	private final Map<PackedBitSet, PaperDominanceNode> nodeByReachableSet = new HashMap<PackedBitSet, PaperDominanceNode>();
 	private final Direction direction;
 
@@ -173,7 +174,7 @@ final class PaperDominanceGraph implements DominanceStore {
 				disconnect(predecessor, successor);
 			}
 		}
-		if (predecessors.isEmpty() && !roots.contains(node)) {
+		if (predecessors.isEmpty()) {
 			roots.add(node);
 		}
 		for (PaperDominanceNode successor : successors) {
@@ -192,9 +193,10 @@ final class PaperDominanceGraph implements DominanceStore {
 		if (predecessors.isEmpty()) {
 			starts.addAll(roots);
 		} else {
+			HashSet<PaperDominanceNode> startSet = new HashSet<PaperDominanceNode>();
 			for (PaperDominanceNode predecessor : predecessors) {
 				for (PaperDominanceNode successor : predecessor.successors) {
-					if (!starts.contains(successor)) {
+					if (startSet.add(successor)) {
 						starts.add(successor);
 					}
 				}
@@ -238,7 +240,7 @@ final class PaperDominanceGraph implements DominanceStore {
 					break;
 				}
 			}
-			if (!dominatedByAnotherCandidate && !result.contains(candidate)) {
+			if (!dominatedByAnotherCandidate) {
 				result.add(candidate);
 			}
 		}
@@ -317,7 +319,7 @@ final class PaperDominanceGraph implements DominanceStore {
 			}
 		}
 		for (PaperDominanceNode successor : successors) {
-			if (successor.active && successor.predecessors.isEmpty() && !roots.contains(successor)) {
+			if (successor.active && successor.predecessors.isEmpty()) {
 				roots.add(successor);
 			}
 		}

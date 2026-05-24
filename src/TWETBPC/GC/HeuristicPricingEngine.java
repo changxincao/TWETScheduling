@@ -493,8 +493,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private SegmentProfile singletonProfile(int job) {
 		SegmentProfile cached = singletonProfileCache[job];
 		// 2026-05-21: 单 job 的 normalize 结果只和 job 自身有关，先缓存模板。
-		// merge 过程可能修改传入函数，因此这里仍返回副本，避免共享缓存被污染。
-		return new SegmentProfile(cached.forward.copy(), cached.backward.copy());
+		// merge3Segments 当前只会改中间 forward 函数；backward 只读复用即可，避免每次多复制一份。
+		return new SegmentProfile(cached.forward.copy(), cached.backward);
 	}
 
 	private static final class SegmentProfile {

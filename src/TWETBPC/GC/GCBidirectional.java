@@ -55,7 +55,6 @@ public class GCBidirectional {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
-	private HashSet<Long> attemptedJoinPairs;
 	private int nextLabelId;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -85,7 +84,6 @@ public class GCBidirectional {
 	private long joinCandidateLabelsDominated;
 	private long joinPairsTried;
 	private long joinPairsSetPruned;
-	private long joinPairsDedupPruned;
 	private long joinPairsLowerBoundPruned;
 	private long joinPairsTimePruned;
 	private long joinFunctionEvaluations;
@@ -145,7 +143,6 @@ public class GCBidirectional {
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
 		activeColumnSignatures = new HashSet<SequenceSignature>();
-		attemptedJoinPairs = new HashSet<Long>();
 		nextLabelId = 0;
 		// 只记录当前 RMP active 列。全局 pool 自身会按 signature 去重；若历史列当前不 active，
 		// pricing 仍可把它返回给 PC，让 LP.addColumns() 重新激活已有列。
@@ -412,15 +409,29 @@ public class GCBidirectional {
 				joinTerminalGroupsCostPruned++;
 				continue;
 			}
-			for (int i = 0; i < candidates.size() && canContinue(); i++) {
+			int liveCount = 0;
+			double liveMinReducedCost = Utility.big_M;
+			double liveMinEll = Utility.big_M;
+			for (int i = 0; i < candidates.size(); i++) {
 				ForwardLabel forward = candidates.get(i);
 				joinCandidateLabelsVisited++;
 				if (forward.isDominated) {
 					joinCandidateLabelsDominated++;
 					continue;
 				}
-				tryJoin(forward, backward, lp);
+				candidates.set(liveCount++, forward);
+				if (Utility.compareLt(forward.minReducedCost, liveMinReducedCost)) {
+					liveMinReducedCost = forward.minReducedCost;
+				}
+				if (forward.frontier != null && forward.frontier.head != null
+						&& Utility.compareLt(forward.frontier.head.start, liveMinEll)) {
+					liveMinEll = forward.frontier.head.start;
+				}
+				if (canContinue()) {
+					tryJoin(forward, backward, lp);
+				}
 			}
+			refreshForwardGroupAfterJoinScan(lastJob, candidates, liveCount, liveMinReducedCost, liveMinEll);
 		}
 	}
 
@@ -431,14 +442,6 @@ public class GCBidirectional {
 		joinPairsTried++;
 		if (forward.jid == backward.jid || forward.visitedSet.intersects(backward.visitedSet)) {
 			joinPairsSetPruned++;
-			return;
-		}
-		// 2026-05-23: 同一对 forward/backward label 可能分别在两侧出队时各 join 一次。
-		// 列签名去重发生在函数级拼接之后，太晚；这里先按 label 对去重，避免重复做常数延拓、
-		// shift/add/findMinimal 等重操作。crossing arc 由两个 label 的末端任务唯一确定。
-		long pairKey = (((long) forward.labelId) << 32) ^ (backward.labelId & 0xffffffffL);
-		if (!attemptedJoinPairs.add(pairKey)) {
-			joinPairsDedupPruned++;
 			return;
 		}
 
@@ -504,7 +507,6 @@ public class GCBidirectional {
 		joinCandidateLabelsDominated = 0;
 		joinPairsTried = 0;
 		joinPairsSetPruned = 0;
-		joinPairsDedupPruned = 0;
 		joinPairsLowerBoundPruned = 0;
 		joinPairsTimePruned = 0;
 		joinFunctionEvaluations = 0;
@@ -519,12 +521,27 @@ public class GCBidirectional {
 				+ "/" + joinTerminalGroupsTimePruned + "/" + joinTerminalGroupsCostPruned
 				+ ", join candidates visited/dominated=" + joinCandidateLabelsVisited + "/"
 				+ joinCandidateLabelsDominated
-				+ ", join pairs tried/set/dedup/lb/time/funcEval/funcPruned=" + joinPairsTried
-				+ "/" + joinPairsSetPruned + "/" + joinPairsDedupPruned + "/"
-				+ joinPairsLowerBoundPruned + "/" + joinPairsTimePruned + "/"
+				+ ", join pairs tried/set/lb/time/funcEval/funcPruned=" + joinPairsTried
+				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
+				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
+	}
+
+	private void refreshForwardGroupAfterJoinScan(int lastJob, ArrayList<ForwardLabel> candidates, int liveCount,
+			double liveMinReducedCost, double liveMinEll) {
+		if (liveCount < candidates.size()) {
+			candidates.subList(liveCount, candidates.size()).clear();
+		}
+		if (liveCount == 0) {
+			activeForwardTerminalJobs.remove(lastJob);
+			minForwardReducedCostByLastJob[lastJob] = Utility.big_M;
+			minForwardEllByLastJob[lastJob] = Utility.big_M;
+			return;
+		}
+		minForwardReducedCostByLastJob[lastJob] = liveMinReducedCost;
+		minForwardEllByLastJob[lastJob] = liveMinEll;
 	}
 
 	/**
@@ -911,6 +928,28 @@ public class GCBidirectional {
 		}
 	}
 
+	/**
+	 * 2026-05-24: normal forward label 经 prefix-min normalize 后整体非增，
+	 * 最小 reduced cost 直接落在最右端，不必每次再全段 findMinimal。
+	 */
+	private static double forwardEndpointMin(PiecewiseLinearFunction frontier) {
+		if (frontier == null || frontier.tail == null) {
+			return Utility.big_M;
+		}
+		return frontier.tail.getValue(frontier.tail.end);
+	}
+
+	/**
+	 * 2026-05-24: normal backward label 经 suffix-min normalize 后整体非减，
+	 * 最小 reduced cost 直接落在最左端；只有 joinCost 那种未再方向化的函数才需要 findMinimal。
+	 */
+	private static double backwardEndpointMin(PiecewiseLinearFunction frontier) {
+		if (frontier == null || frontier.head == null) {
+			return Utility.big_M;
+		}
+		return frontier.head.getValue(frontier.head.start);
+	}
+
 	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {
 		PiecewiseLinearFunction cropped = new PiecewiseLinearFunction();
 		// 2026-05-23: crop 不只裁物理 segment，也要同步函数元数据。
@@ -981,9 +1020,8 @@ public class GCBidirectional {
 		PiecewiseLinearFunction joinExtendedFrontier;
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet reachableSet,
-				PiecewiseLinearFunction frontier) {
-			super(jid, null, visitedSet, reachableSet, frontier,
-					frontier == null || frontier.head == null ? Utility.big_M : frontier.findMinimal(false, true)[0]);
+				PiecewiseLinearFunction frontier, double minReducedCost) {
+			super(jid, null, visitedSet, reachableSet, frontier, minReducedCost);
 			this.labelId = labelId;
 		}
 
@@ -1004,7 +1042,7 @@ public class GCBidirectional {
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 				PiecewiseLinearFunction frontier) {
-			super(labelId, jid, visitedSet, reachableSet, frontier);
+			super(labelId, jid, visitedSet, reachableSet, frontier, forwardEndpointMin(frontier));
 			this.father = father;
 		}
 	}
@@ -1015,7 +1053,7 @@ public class GCBidirectional {
 
 		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 				PiecewiseLinearFunction frontier, boolean isSinkRoot) {
-			super(labelId, jid, visitedSet, reachableSet, frontier);
+			super(labelId, jid, visitedSet, reachableSet, frontier, backwardEndpointMin(frontier));
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
 		}

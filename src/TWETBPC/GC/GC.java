@@ -106,7 +106,8 @@ public class GC {
 		// 每条内部机器列在 RMP 的机器数约束中系数为 1，因此初始化时扣除该约束 dual。
 		frontier.shiftYInPlace(-lp.getMachineDual());
 		frontier.normalize(Direction.FORWARD);
-		Label source = new Label(0, null, visited, buildReachableSet(0, visited, lp.getNode(), frontier, lp), frontier);
+		Label source = new Label(0, null, visited, buildReachableSet(0, visited, lp.getNode(), frontier, lp), frontier,
+				forwardEndpointMin(frontier));
 		TL.get(0).insertOrDominate(source);
 		UL.add(source);
 	}
@@ -149,7 +150,8 @@ public class GC {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
 		return new Label(nextJob, label, visited,
-				buildReachableSetFromParent(label, nextJob, visited, lp.getNode(), nextFrontier, lp), nextFrontier);
+				buildReachableSetFromParent(label, nextJob, visited, lp.getNode(), nextFrontier, lp), nextFrontier,
+				forwardEndpointMin(nextFrontier));
 	}
 
 	/**
@@ -314,6 +316,17 @@ public class GC {
 			sequence.set(left, sequence.get(right));
 			sequence.set(right, tmp);
 		}
+	}
+
+	/**
+	 * 2026-05-24: exact forward pricing 的 frontier 在 normalize(FORWARD) 后整体非增，
+	 * 最小 reduced cost 直接位于最右端。
+	 */
+	private double forwardEndpointMin(PiecewiseLinearFunction frontier) {
+		if (frontier == null || frontier.tail == null) {
+			return Utility.big_M;
+		}
+		return frontier.tail.getValue(frontier.tail.end);
 	}
 
 }

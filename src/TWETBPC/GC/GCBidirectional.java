@@ -20,7 +20,10 @@ import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * no-cut 双向 exact pricing。
+ * no-cut 双向 pricing。
+ * <p>
+ * 只有在列数上限未截断、且 forward/backward 队列都被完整耗尽时，本轮结果才可作为 exact pricing
+ * certificate；若达到 {@link TWETBPCConfig#maxExactPricingColumns}，这里只表示“最多生成 K 条负列”。
  * <p>
  * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
  * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
@@ -65,6 +68,8 @@ public class GCBidirectional {
 	private PiecewiseLinearFunction[] baseForwardHalfPenaltyByJob;
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
+	// 2026-05-24: 只有根节点且没有 cut dual 时，pi_j profitable window 才保留三角不等式依据。
+	private boolean dualProfitableWindowEnabled;
 
 	private long forwardLabelsKept;
 	private long forwardLabelsDominated;
@@ -107,8 +112,9 @@ public class GCBidirectional {
 		while (canContinue() && !BWUL.isEmpty()) {
 			backwardExtend(lp);
 		}
-		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns; "
-				+ statisticsSummary();
+		String completionState = canContinue() ? "queues exhausted" : "column cap reached";
+		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
+				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
 	}
 
@@ -139,6 +145,8 @@ public class GCBidirectional {
 		activeColumnSignatures = new HashSet<SequenceSignature>();
 		attemptedJoinPairs = new HashSet<Long>();
 		nextLabelId = 0;
+		// 只记录当前 RMP active 列。全局 pool 自身会按 signature 去重；若历史列当前不 active，
+		// pricing 仍可把它返回给 PC，让 LP.addColumns() 重新激活已有列。
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
@@ -511,6 +519,7 @@ public class GCBidirectional {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsDedupPruned + "/"
 				+ joinPairsLowerBoundPruned + "/" + joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
 	}
 
@@ -732,6 +741,7 @@ public class GCBidirectional {
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
+		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows(lp);
 		precomputeBackwardDynamicPricingWindows(lp);
@@ -745,8 +755,8 @@ public class GCBidirectional {
 			double hEnd = data.hardWindowEnd[job];
 			PiecewiseLinearFunction penalty = baseForwardHalfPenaltyByJob[job];
 			double baseline = outsourcingBaseline(job);
-			double jobDual = Math.max(0.0, lp.getJobDual(job));
-			if (Utility.compareLt(jobDual, baseline)) {
+			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
+			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
 				double dynamicStart = hWindowStart(job, jobDual);
 				double dynamicEnd = hWindowEnd(job, jobDual);
 				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
@@ -770,8 +780,8 @@ public class GCBidirectional {
 			double hEnd = data.hardWindowEnd[job];
 			PiecewiseLinearFunction penalty = baseBackwardHalfPenaltyByJob[job];
 			double baseline = outsourcingBaseline(job);
-			double jobDual = Math.max(0.0, lp.getJobDual(job));
-			if (Utility.compareLt(jobDual, baseline)) {
+			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
+			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
 				double dynamicStart = hWindowStart(job, jobDual);
 				double dynamicEnd = hWindowEnd(job, jobDual);
 				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
@@ -800,6 +810,16 @@ public class GCBidirectional {
 			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, data.CmaxH);
 		}
 		baseHalfPenaltyCacheTMid = tMid;
+	}
+
+	private boolean canUseDualProfitableWindow(LP lp) {
+		Node node = lp.getNode();
+		if (node == null || node.depth != 0) {
+			return false;
+		}
+		// cut dual 或分支 dual 都可能让 reduced arc cost 不再满足原始 setup cost 的三角不等式。
+		// 当前只在根节点、且没有 active cuts 时使用 pi_j 进一步收紧静态外包窗。
+		return lp.getActiveCutIds().isEmpty();
 	}
 
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {

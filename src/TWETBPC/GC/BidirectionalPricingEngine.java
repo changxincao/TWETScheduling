@@ -10,7 +10,11 @@ import TWETBPC.Model.TWETColumn;
 /**
  * 双向 no-cut labeling 定价器入口。
  * <p>
- * 2026-05-20: 该类是 exact pricing 层的双向实现。当前通过
+ * 2026-05-24: 该类是 exact pricing 层的双向实现，但单次调用受
+ * {@link TWETBPCConfig#maxExactPricingColumns} 限制。只有底层 labeling 未触发列数上限并完整耗尽队列时，
+ * 才能把“没有返回列”解释为严格的无负 reduced-cost 证明。
+ * <p>
+ * 2026-05-20: 当前通过
  * {@code TWETBPCConfig.enableBidirectionalPricing} 和原单向 forward exact 二选一，
  * 不再把双向和单向串成顺序兜底。
  */

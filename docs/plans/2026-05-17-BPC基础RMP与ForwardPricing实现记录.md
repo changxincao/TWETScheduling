@@ -1304,3 +1304,15 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 `GCBidirectional` 额外记录 forward/backward label 保留与被支配数量、join terminal group 的扫描与剪枝原因、join candidate label 数、label-pair 层面的 set 冲突、重复 pair、标量下界剪枝、时间剪枝，以及真正进入函数级 join 的次数和函数级剪枝次数。这里仍然只做计数，不改变 `tryJoin()` 的执行顺序和数学判断。这样后续如果发现 `joinFunctionEvaluations` 很少但整体仍慢，应优先看 graph/envelope；如果函数级 join 次数很高，再考虑专门的 shifted-sum-min 扫描器或更强的 join 下界。
 
 验证结果为：focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，`cases=200, insertions=16000`；`PricingAlgorithmComparisonTest` 通过，`matchedRounds=9/9`；`SmallBPCBatchTest` 通过，8/8 小例与 tariff branch 诊断均有效。测试会刷新本地 `test-results/bpc/*.csv`，这些仍作为验证产物，不纳入提交。
+
+## 2026-05-24：root-only dual profitable window 修正
+
+前一版把 `gamma_j = min(max(0, pi_j), b_j)` 的 dual profitable window 作为所有节点的 job-level 动态窗使用。进一步复核后，这个条件只在 pricing 的有效 arc cost 仍等于原始 setup cost `kappa_ij` 时有严格依据。根节点、没有 active cut、也没有分支禁弧时，可以利用 setup cost 三角不等式说明：如果 job `j` 在某个完成时间下的 penalty 已经超过可获得的 job dual prize，那么从序列中删除 `j` 并用 shortcut arc 连接不会增加 setup cost，因此该时间点不需要保留。
+
+非根节点不能继续用这个论证。一方面，arc branching 可能让删除 `j` 后的 shortcut arc 不可行；另一方面，后续若加入带 arc-level dual 的 cut，pricing 里的 reduced arc cost 会变成 `kappa_ij - mu_ij`，即使原始 `kappa` 满足三角不等式，reduced arc cost 也不一定满足。因此 `pi_j` 窗不能作为非根节点的永久不可达资源，更不能写入 dominance reachable set。当前修正为：`GC` 和 `GCBidirectional` 只有在 `node.depth == 0` 且 `activeCutIds` 为空时启用 `pi_j` 动态收紧；其他情况下只复用 `data.penaltyFunction[j]` 已经包含的静态外包窗 `phi_j(t) <= b_j`。双向统计 message 中额外输出 `dualWindow=enabled/staticOutsourcingOnly`，用于后续看当前 pricing 是否启用了 dual 窗。
+
+列去重逻辑本次没有改。`activeColumnSignatures` 仍只记录当前 restricted master 中 active 的列，这是有意保留的：全局 `Pool.addColumn()` 已经按 `SequenceSignature` 去重，如果 pricing 重新发现的是历史 pool 中已有但当前不 active 的列，返回给 `PC` 后可以通过 `LP.addColumns()` 重新激活；如果提前按整个 pool 跳过，反而可能漏掉当前 dual 下应重新进入 RMP 的历史列。
+
+同时修正了双向 pricing 的注释和 message。`GCBidirectional` 单次调用受 `maxExactPricingColumns` 限制，达到列数上限时只能说明已经找到最多 K 条负列，不能把本轮结果当作完整 exact certificate；只有未触发上限并且 forward/backward 队列耗尽时，才对应严格的无负 reduced-cost 证明。completion bound 仍保持未接入。
+
+验证结果为：focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，`cases=200, insertions=16000`；`PricingAlgorithmComparisonTest` 通过，`matchedRounds=9/9`，本轮平均单向 2.89 ms、双向 1.67 ms；`SmallBPCBatchTest` 通过，8/8 小例与 ArcFlow 对齐，tariff branch 诊断有效。测试刷新了本地 CSV 输出，仍不纳入本次提交。

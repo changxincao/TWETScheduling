@@ -41,6 +41,8 @@ public class GC {
 	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
+	// 2026-05-24: 根节点无 cut 时才允许用 pi_j 动态 profitable window。
+	private boolean dualProfitableWindowEnabled;
 
 	public GC(Data data, TWETBPCConfig config) {
 		this(data, config, false);
@@ -92,6 +94,8 @@ public class GC {
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
 		activeColumnSignatures = new HashSet<SequenceSignature>();
+		// 只跳过当前 RMP 已 active 的列。全局 Pool.addColumn() 会按 signature 去重；
+		// 历史列若当前不 active，仍可由 pricing 返回并交给 PC 重新激活。
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
@@ -181,6 +185,7 @@ public class GC {
 		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
 		dynamicJobPenaltyByJob = null;
+		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
@@ -189,8 +194,8 @@ public class GC {
 			double hEnd = data.hardWindowEnd[job];
 			PiecewiseLinearFunction penalty = data.penaltyFunction[job];
 			double baseline = outsourcingBaseline(job);
-			double jobDual = Math.max(0.0, lp.getJobDual(job));
-			if (Utility.compareLt(jobDual, baseline)) {
+			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
+			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
 				double dynamicStart = hWindowStart(job, jobDual);
 				double dynamicEnd = hWindowEnd(job, jobDual);
 				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
@@ -204,6 +209,16 @@ public class GC {
 			dynamicJobHEnd[job] = hEnd;
 			dynamicJobPenaltyByJob[job] = penalty;
 		}
+	}
+
+	private boolean canUseDualProfitableWindow(LP lp) {
+		Node node = lp.getNode();
+		if (node == null || node.depth != 0) {
+			return false;
+		}
+		// 非根节点可能有 forbidden arc，root 加 cut 后也可能产生 arc-level dual。
+		// 这两类情形都不能保证 reduced arc cost 仍满足原始三角不等式，只保留 b_j 静态窗。
+		return lp.getActiveCutIds().isEmpty();
 	}
 
 	private PiecewiseLinearFunction getDynamicJobPenalty(int prevJob, int job) {

@@ -37,14 +37,10 @@ public class GC {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
-	// 2026-05-20: 当前 RMP dual 下的局部 H_ij 硬窗缓存，只在一次 pricing 调用内有效。
-	private boolean useJobLevelDynamicWindowCache;
+	// 2026-05-20: 当前 RMP dual 下的 job-level H_j 硬窗缓存，只在一次 pricing 调用内有效。
 	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
-	private double[][] dynamicPairHStart;
-	private double[][] dynamicPairHEnd;
-	private PiecewiseLinearFunction[][] dynamicJobPenaltyByPair;
 
 	public GC(Data data, TWETBPCConfig config) {
 		this(data, config, false);
@@ -67,7 +63,8 @@ public class GC {
 				continue;
 			}
 			tryGenerateColumn(label, lp);
-			for (int nextJob = 1; nextJob <= data.n; nextJob++) {
+			for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n;
+					nextJob = label.reachableSet.nextSetBit(nextJob + 1)) {
 				if (!canExtend(label, nextJob, node)) {
 					continue;
 				}
@@ -129,7 +126,7 @@ public class GC {
 		if (jobPenalty == null) {
 			return null;
 		}
-		// 2026-05-17: pricing 里使用动态 H_ij 时，只把窗口外改成 big_M，不物理删除右端定义域。
+		// 2026-05-17: pricing 里使用动态 H_j 时，只把窗口外改成 big_M，不物理删除右端定义域。
 		// 这样仍保持前向函数 [a,T] 结构，后续 add/merge/dominance 的假设不被破坏。
 		PiecewiseLinearFunction nextFrontier = shifted.add(jobPenalty);
 		if (nextFrontier.head == null) {
@@ -145,15 +142,15 @@ public class GC {
 
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
-		return new Label(nextJob, label, visited, buildReachableSet(nextJob, visited, lp.getNode(), nextFrontier, lp),
-				nextFrontier);
+		return new Label(nextJob, label, visited,
+				buildReachableSetFromParent(label, nextJob, visited, lp.getNode(), nextFrontier, lp), nextFrontier);
 	}
 
 	/**
 	 * 2026-05-17: pricing 的轻量级时间可行性过滤。
 	 * <p>
 	 * 当前 label 的 frontier 左端表示当前末端 job 最早可能完成到的时间上界。若再接 nextJob 后的
-	 * 最早完成时间已经超过动态 H_ij 的右端，则这条扩展不可能产生有效函数，没必要再做
+	 * 最早完成时间已经超过动态 H_j 的右端，则这条扩展不可能产生有效函数，没必要再做
 	 * shift/add/normalize 这些较重的分段函数操作。
 	 */
 	private boolean isDirectExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {
@@ -170,39 +167,23 @@ public class GC {
 	}
 
 	/**
-	 * 2026-05-20: 每轮 pricing 的 dual 固定，因此 H_ij 也固定在本次 pricing 调用内。
+	 * 2026-05-20: 每轮 pricing 的 dual 固定，因此 H_j 也固定在本次 pricing 调用内。
 	 * <p>
 	 * 旧写法在每个 label 扩展时重复计算 H_ij，并重复对 job penalty 执行 setDomain(...)。
-	 * 如果数据的 setup cost 满足当前 B_ij 公式对应的三角不等式，所有 B_ij 都为 0，H_ij
-	 * 不再依赖 prevJob，可以退化成 job 级一维缓存；否则仍使用 prevJob->job 的 pair 级缓存。
+	 * 当前模型直接假设 setup time/cost 满足三角不等式，且 B_ij=0，因此 profitable window
+	 * 退化为 job-level H_j；这里不再保留 pair-level H_ij 分支。
 	 * 这个缓存只在本次 pricing 内使用，不能写入全局禁弧矩阵，也不能影响分支候选。
 	 */
 	private void precomputeDynamicPricingWindows(LP lp) {
-		// 2026-05-24: BPC 改为 set covering 后，pricing 直接采用 job-level profitable window。
-		// 这里不再把 B_ij 放进 H_ij；否则 pair-level direct-unreachable 信息会被 dominance
-		// 当成永久不可达信息使用，在不满足闭包条件时有误剪风险。
-		useJobLevelDynamicWindowCache = true;
 		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
 		dynamicJobPenaltyByJob = null;
-		dynamicPairHStart = null;
-		dynamicPairHEnd = null;
-		dynamicJobPenaltyByPair = null;
-		if (useJobLevelDynamicWindowCache) {
-			precomputeJobLevelDynamicPricingWindows(lp);
-		} else {
-			precomputePairLevelDynamicPricingWindows(lp);
-		}
-	}
-
-	private void precomputeJobLevelDynamicPricingWindows(LP lp) {
 		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			// B_ij 全为 0 时 hWindowGamma 不依赖 prevJob，这里用 source 作为代表前驱即可。
-			double hStart = hWindowStart(0, job, lp);
-			double hEnd = hWindowEnd(0, job, lp);
+			double hStart = hWindowStart(job, lp);
+			double hEnd = hWindowEnd(job, lp);
 			dynamicJobHStart[job] = hStart;
 			dynamicJobHEnd[job] = hEnd;
 			if (!Utility.compareGt(hStart, hEnd)) {
@@ -211,57 +192,31 @@ public class GC {
 		}
 	}
 
-	private void precomputePairLevelDynamicPricingWindows(LP lp) {
-		dynamicPairHStart = new double[data.n + 1][data.n + 1];
-		dynamicPairHEnd = new double[data.n + 1][data.n + 1];
-		dynamicJobPenaltyByPair = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
-		for (int prevJob = 0; prevJob <= data.n; prevJob++) {
-			for (int job = 1; job <= data.n; job++) {
-				if (prevJob == job) {
-					continue;
-				}
-				double hStart = hWindowStart(prevJob, job, lp);
-				double hEnd = hWindowEnd(prevJob, job, lp);
-				dynamicPairHStart[prevJob][job] = hStart;
-				dynamicPairHEnd[prevJob][job] = hEnd;
-				if (!Utility.compareGt(hStart, hEnd)) {
-					dynamicJobPenaltyByPair[prevJob][job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
-				}
-			}
-		}
-	}
-
 	private PiecewiseLinearFunction getDynamicJobPenalty(int prevJob, int job) {
-		if (useJobLevelDynamicWindowCache) {
-			return dynamicJobPenaltyByJob == null ? null : dynamicJobPenaltyByJob[job];
-		}
-		return dynamicJobPenaltyByPair == null ? null : dynamicJobPenaltyByPair[prevJob][job];
+		return dynamicJobPenaltyByJob == null ? null : dynamicJobPenaltyByJob[job];
 	}
 
 	private double getDynamicHEnd(int prevJob, int job) {
-		if (useJobLevelDynamicWindowCache) {
-			return dynamicJobHEnd[job];
-		}
-		return dynamicPairHEnd[prevJob][job];
+		return dynamicJobHEnd[job];
 	}
 
-	private double hWindowStart(int prevJob, int job, LP lp) {
-		double gamma = hWindowGamma(prevJob, job, lp);
+	private double hWindowStart(int job, LP lp) {
+		double gamma = hWindowGamma(job, lp);
 		if (!Utility.compareGt(data.w_e[job], 0.0)) {
 			return 0.0;
 		}
 		return Math.max(0.0, data.d_e[job] - gamma / data.w_e[job]);
 	}
 
-	private double hWindowEnd(int prevJob, int job, LP lp) {
-		double gamma = hWindowGamma(prevJob, job, lp);
+	private double hWindowEnd(int job, LP lp) {
+		double gamma = hWindowGamma(job, lp);
 		if (!Utility.compareGt(data.w_t[job], 0.0)) {
 			return data.CmaxH;
 		}
 		return Math.min(data.CmaxH, data.d_l[job] + gamma / data.w_t[job]);
 	}
 
-	private double hWindowGamma(int prevJob, int job, LP lp) {
+	private double hWindowGamma(int job, LP lp) {
 		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
 		double jobDual = Math.max(0.0, lp.getJobDual(job));
 		return Math.min(jobDual, baseline);
@@ -271,6 +226,20 @@ public class GC {
 			LP lp) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
+			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+				reachable.add(job);
+			}
+		}
+		return reachable;
+	}
+
+	private PackedBitSet buildReachableSetFromParent(Label parent, int fromJob, PackedBitSet visited, Node node,
+			PiecewiseLinearFunction frontier, LP lp) {
+		PackedBitSet reachable = new PackedBitSet(data.n + 2);
+		// 2026-05-24: 在 setup time/cost 三角不等式下，父 label 中已经一跳不可达的 job，
+		// 继续追加真实 job 后不会重新变成可达。child reachable set 因此只需从父候选集中过滤。
+		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
+				job = parent.reachableSet.nextSetBit(job + 1)) {
 			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}

@@ -1277,3 +1277,10 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 join 所需的常数延拓仍保持 lazy：每个 label 只有第一次真正参与 join 时才构造 `joinExtendedFrontier`，后续同一 label 与其他 label 拼接时复用，不在 join 开始前全量预计算。当前仍保留“先做函数级拼接并得到 reduced cost，再做列签名去重”的列级路径，关于“是否应把列去重提前以减少函数拼接”本次只记录，不改逻辑；completion bound 也尚未接入。代码中不再保留 forward-side join 旧入口，实际 join 统一发生在 backward 出队阶段。
 
 验证方面，已运行 focused `javac`，覆盖 `GCBidirectional.java`、`GC.java`、`LP.java` 以及相关测试入口；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；`PricingAlgorithmComparisonTest` 在补充 CPLEX native path 后通过，`matchedRounds=9/9`，本轮平均单向 1.22 ms、双向 0.56 ms；`SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff 分支诊断也通过。测试会更新 `test-results/bpc/*.csv`，这些输出文件只作为本地验证产物，不纳入本次代码提交。
+## 2026-05-24：job-level window 精简与 reachable set 递推
+
+在前一版已经假设 setup time/cost 满足三角不等式、且 `B_ij=0` 后，继续保留 `useJobLevelDynamicWindowCache`、pair-level `H_ij` 数组和 pair-level penalty 缓存已经没有实际意义。本次把单向 `GC` 和双向 `GCBidirectional` 中这部分分支删掉，pricing 每轮只预计算 job-level `H_j`、forward half penalty 和 backward half penalty。`gamma` 仍按 set covering 对偶语义取 `min(max(0, pi_j), b_j)`，但不再通过 `prevJob` 传参，也不再构造任何 predecessor-dependent window。
+
+reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `1..n` 全量建立第一层候选；之后每次扩展 child label 时，不再重新扫描所有 job，而是从父 label 的 `reachableSet` 里遍历置位 job，删掉已访问任务后再用当前 frontier 做一步时间可行性过滤。这个递推依赖当前已经采用的三角不等式假设：父 label 中一跳已经不可达的 job，路径继续扩展后不会重新变成可达。因此新的 reachable set 是父 reachable set 的子集，能够避免大量无意义候选检查，同时保持 dominance key 的单调语义。
+
+扩展循环本身也改为直接遍历 `label.reachableSet.nextSetBit()`，而不是 `for job=1..n` 后再查 `contains(job)`。`canExtend` 里仍保留 visited、reachable 和 forbidden arc 检查作为安全边界，其中 forbidden arc 只影响当前 direct arc，不写入 reachable set。验证结果为：focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过；`PricingAlgorithmComparisonTest` 通过，`matchedRounds=9/9`；`SmallBPCBatchTest` 通过，8/8 小例和 tariff branch 均有效。小规模计时存在 JVM/JIT 波动，本次结论主要确认语义正确和去掉冗余路径，后续若要精确比较速度仍应看批量 profiling。

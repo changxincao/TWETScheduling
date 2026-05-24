@@ -178,7 +178,10 @@ public class GC {
 	 * 这个缓存只在本次 pricing 内使用，不能写入全局禁弧矩阵，也不能影响分支候选。
 	 */
 	private void precomputeDynamicPricingWindows(LP lp) {
-		useJobLevelDynamicWindowCache = data.setupCostTriangleInequalitySatisfied;
+		// 2026-05-24: BPC 改为 set covering 后，pricing 直接采用 job-level profitable window。
+		// 这里不再把 B_ij 放进 H_ij；否则 pair-level direct-unreachable 信息会被 dominance
+		// 当成永久不可达信息使用，在不满足闭包条件时有误剪风险。
+		useJobLevelDynamicWindowCache = true;
 		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
 		dynamicJobPenaltyByJob = null;
@@ -260,15 +263,15 @@ public class GC {
 
 	private double hWindowGamma(int prevJob, int job, LP lp) {
 		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
-		return data.getSetupCostAdvantage(prevJob, job) + Math.min(lp.getJobDual(job), baseline);
+		double jobDual = Math.max(0.0, lp.getJobDual(job));
+		return Math.min(jobDual, baseline);
 	}
 
 	private PackedBitSet buildReachableSet(int fromJob, PackedBitSet visited, Node node, PiecewiseLinearFunction frontier,
 			LP lp) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && !node.isArcForbidden(fromJob, job)
-					&& isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}

@@ -317,7 +317,10 @@ public class LP {
 				}
 			}
 			expr.addTerm(1.0, outsourceVars[job]);
-			coverRanges[job] = cplex.addEq(expr, 1.0, "cover_" + job);
+			// 2026-05-24: BPC pricing 后续按 set covering 对偶语义处理任务覆盖行。
+			// 在 setup time/cost 满足三角不等式的设定下，重复服务任务不会带来有利的列结构；
+			// 覆盖行放宽为 >= 后，job dual 非负，动态 profitable window 可退化为 job-level H_j。
+			coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
 		}
 	}
 

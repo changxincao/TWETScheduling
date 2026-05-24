@@ -45,11 +45,13 @@ public class GCBidirectional {
 	private PriorityQueue<BackwardLabel> BWUL;
 	private ArrayList<DominanceStore> FWTL;
 	private ArrayList<DominanceStore> BWTL;
+	private ArrayList<ArrayList<ForwardLabel>> activeForwardByLastJob;
+	private double[] minForwardReducedCostByLastJob;
+	private double[] minForwardEllByLastJob;
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
 	private HashSet<Long> attemptedJoinPairs;
-	private ArrayList<Label> joinCandidateBuffer;
 	private int nextLabelId;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -78,13 +80,16 @@ public class GCBidirectional {
 	public ArrayList<TWETColumn> solve(LP lp) {
 		Utility.resetCurUpperBound(Utility.big_M);
 		initialize(lp);
-		while (canContinue() && (!FWUL.isEmpty() || !BWUL.isEmpty())) {
-			if (!FWUL.isEmpty()) {
-				forwardExtend(lp);
-			}
-			if (canContinue() && !BWUL.isEmpty()) {
-				backwardExtend(lp);
-			}
+		// 2026-05-24: hybrid-B 流程。先完整生成 forward half labels，
+		// 再在 backward half 中用 crossing arc 和已有 forward labels 拼接。
+		while (canContinue() && !FWUL.isEmpty()) {
+			forwardExtend(lp);
+		}
+		if (canContinue()) {
+			initializeBackwardSink(lp);
+		}
+		while (canContinue() && !BWUL.isEmpty()) {
+			backwardExtend(lp);
 		}
 		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns";
 		return generatedColumns;
@@ -100,15 +105,20 @@ public class GCBidirectional {
 		BWUL = new PriorityQueue<BackwardLabel>();
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
 		BWTL = new ArrayList<DominanceStore>(data.n + 1);
+		activeForwardByLastJob = new ArrayList<ArrayList<ForwardLabel>>(data.n + 1);
+		minForwardReducedCostByLastJob = new double[data.n + 1];
+		minForwardEllByLastJob = new double[data.n + 1];
 		for (int i = 0; i <= data.n; i++) {
 			FWTL.add(new PaperDominanceGraph(Direction.FORWARD));
 			BWTL.add(new PaperDominanceGraph(Direction.BACKWARD));
+			activeForwardByLastJob.add(new ArrayList<ForwardLabel>());
+			minForwardReducedCostByLastJob[i] = Utility.big_M;
+			minForwardEllByLastJob[i] = Utility.big_M;
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();
 		activeColumnSignatures = new HashSet<SequenceSignature>();
 		attemptedJoinPairs = new HashSet<Long>();
-		joinCandidateBuffer = new ArrayList<Label>();
 		nextLabelId = 0;
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
@@ -122,9 +132,12 @@ public class GCBidirectional {
 		sourceFrontier.normalize(Direction.FORWARD);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
 				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
-		FWTL.get(0).insertOrDominate(source);
-		FWUL.add(source);
+		if (!insertForward(source)) {
+			FWUL.add(source);
+		}
+	}
 
+	private void initializeBackwardSink(LP lp) {
 		PackedBitSet sinkVisited = new PackedBitSet(data.n + 2);
 		sinkVisited.add(lp.getNode().sinkId());
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
@@ -147,7 +160,6 @@ public class GCBidirectional {
 			return;
 		}
 		tryGenerateForwardColumn(label, lp);
-		joinFromForward(label, lp);
 
 		Node node = lp.getNode();
 		for (int nextJob = 1; nextJob <= data.n && canContinue(); nextJob++) {
@@ -287,11 +299,27 @@ public class GCBidirectional {
 	}
 
 	private boolean insertForward(ForwardLabel label) {
-		return FWTL.get(label.jid).insertOrDominate(label);
+		boolean dominated = FWTL.get(label.jid).insertOrDominate(label);
+		if (!dominated) {
+			activeForwardByLastJob.get(label.jid).add(label);
+			updateForwardScalarInfo(label);
+		}
+		return dominated;
 	}
 
 	private boolean insertBackward(BackwardLabel label) {
 		return BWTL.get(label.jid).insertOrDominate(label);
+	}
+
+	private void updateForwardScalarInfo(ForwardLabel label) {
+		int lastJob = label.jid;
+		if (Utility.compareLt(label.minReducedCost, minForwardReducedCostByLastJob[lastJob])) {
+			minForwardReducedCostByLastJob[lastJob] = label.minReducedCost;
+		}
+		if (label.frontier != null && label.frontier.head != null
+				&& Utility.compareLt(label.frontier.head.start, minForwardEllByLastJob[lastJob])) {
+			minForwardEllByLastJob[lastJob] = label.frontier.head.start;
+		}
 	}
 
 	private void tryGenerateForwardColumn(ForwardLabel label, LP lp) {
@@ -311,29 +339,6 @@ public class GCBidirectional {
 		tryGenerateColumn(sequence, lp, reducedCost);
 	}
 
-	private void joinFromForward(ForwardLabel forward, LP lp) {
-		if (generatedColumns.size() >= config.maxExactPricingColumns) {
-			return;
-		}
-		Node node = lp.getNode();
-		// 2026-05-23: join 的候选不能直接复用 forward.reachableSet。
-		// reachableSet 表示“还能在左半域继续扩展”的任务；join 时 crossing arc 后的第一个 backward
-		// 任务可以落在右半域，所以这里按 terminal job graph 扫描，并在 tryJoin 前做轻量弧过滤。
-		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
-			if (forward.visitedSet.contains(firstJob) || node.isArcForbidden(forward.jid, firstJob)) {
-				continue;
-			}
-			joinCandidateBuffer.clear();
-			BWTL.get(firstJob).collectActiveLabels(joinCandidateBuffer);
-			for (int i = 0; i < joinCandidateBuffer.size() && canContinue(); i++) {
-				BackwardLabel backward = (BackwardLabel) joinCandidateBuffer.get(i);
-				if (!backward.isDominated) {
-					tryJoin(forward, backward, lp);
-				}
-			}
-		}
-	}
-
 	private void joinFromBackward(BackwardLabel backward, LP lp) {
 		if (generatedColumns.size() >= config.maxExactPricingColumns) {
 			return;
@@ -345,10 +350,21 @@ public class GCBidirectional {
 			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
 				continue;
 			}
-			joinCandidateBuffer.clear();
-			FWTL.get(lastJob).collectActiveLabels(joinCandidateBuffer);
-			for (int i = 0; i < joinCandidateBuffer.size() && canContinue(); i++) {
-				ForwardLabel forward = (ForwardLabel) joinCandidateBuffer.get(i);
+			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
+			if (candidates.isEmpty()) {
+				continue;
+			}
+			double delay = data.getSetUp(lastJob, backward.jid) + data.getProcessT(backward.jid);
+			if (Utility.compareGt(minForwardEllByLastJob[lastJob] + delay, backward.frontier.tail.end)) {
+				continue;
+			}
+			double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost
+					+ data.getSetupCost(lastJob, backward.jid) - lp.getArcDual(lastJob, backward.jid);
+			if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
+				continue;
+			}
+			for (int i = 0; i < candidates.size() && canContinue(); i++) {
+				ForwardLabel forward = candidates.get(i);
 				if (!forward.isDominated) {
 					tryJoin(forward, backward, lp);
 				}
@@ -574,8 +590,10 @@ public class GCBidirectional {
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && !node.isArcForbidden(fromJob, job)
-					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+			// 2026-05-24: dominance reachable-set 只放“永久不可达”信息。
+			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
+			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
+			if (!visited.contains(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -587,9 +605,7 @@ public class GCBidirectional {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			int successor = isSinkRoot ? node.sinkId() : firstJob;
-			if (!visited.contains(job) && !node.isArcForbidden(job, successor)
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+			if (!visited.contains(job) && isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}
@@ -597,7 +613,10 @@ public class GCBidirectional {
 	}
 
 	private void precomputeDynamicPricingWindows(LP lp) {
-		useJobLevelDynamicWindowCache = data.setupCostTriangleInequalitySatisfied;
+		// 2026-05-24: 当前 BPC 直接采用 set covering + job-level profitable window。
+		// 不再使用 B_ij 构造 pair-level H_ij，避免把 predecessor-dependent 信息放进
+		// dominance reachable-set 后破坏支配安全性。
+		useJobLevelDynamicWindowCache = true;
 		dynamicJobPenaltyByJob = null;
 		dynamicJobPenaltyByPair = null;
 		dynamicJobHEnd = null;
@@ -753,7 +772,8 @@ public class GCBidirectional {
 
 	private double hWindowGamma(int prevJob, int job, LP lp) {
 		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
-		return data.getSetupCostAdvantage(prevJob, job) + Math.min(lp.getJobDual(job), baseline);
+		double jobDual = Math.max(0.0, lp.getJobDual(job));
+		return Math.min(jobDual, baseline);
 	}
 
 	private double backwardHWindowStart(int job, int successor, LP lp) {
@@ -774,11 +794,8 @@ public class GCBidirectional {
 
 	private double backwardHWindowGamma(int job, int successor, LP lp) {
 		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
-		if (successor == data.n + 1 || useJobLevelDynamicWindowCache) {
-			return Math.min(lp.getJobDual(job), baseline);
-		}
-		double bBackward = data.getBackwardSetupCostAdvantage(job, successor);
-		return bBackward + Math.min(lp.getJobDual(job), baseline);
+		double jobDual = Math.max(0.0, lp.getJobDual(job));
+		return Math.min(jobDual, baseline);
 	}
 
 	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {

@@ -1265,3 +1265,15 @@ join 的函数处理也同步收敛到前面讨论的实现方式：扩展阶段
 复核双向实现时发现一个不影响正确性但会增加开销的问题：同一对 forward/backward label 可能分别在两侧 label 出队时各尝试一次 join，而原来的列签名去重发生在函数级 `shift/add/findMinimal` 之后，去重太晚。本次给每个双向 label 增加本轮唯一 id，并在 `tryJoin()` 开头用 label-pair 去重，避免重复做常数延拓和函数级拼接。修改后 `PricingAlgorithmComparisonTest` 仍然 13/13 轮单向/双向最优 reduced cost 一致，`PaperDominanceGraphConsistencyTest` 通过。
 
 重新跑同一批 10 个 15 任务 no-outsourcing 算例后，CSV 已更新。新一轮平均结果为：单向完整求解时间 1052.9 ms，双向完整求解时间 1080.4 ms；单向 exact pricing 0.190 s，双向 exact pricing 0.201 s。不同轮次绝对时间有 JVM 和机器负载波动，但结论没有变化：这个规模下双向并没有稳定优势，主要瓶颈仍不是重复 join，而是 full BPC 流程里 exact pricing 只做一次兜底证明，双向 join 的固定成本较难摊薄。
+
+## 2026-05-24：set covering 与 hybrid-B 双向 pricing 修正
+
+本次根据 `C:\Users\Changxin\Downloads\修改内容.txt` 和 `labeling_algorithm_modification_plan.pdf` 重新核对 BPC pricing 语义，先处理必须修改的部分，completion bound 相关内容继续暂缓。主问题覆盖约束已经从 set partitioning 的 `= 1` 改为 set covering 的 `>= 1`，因此 pricing 侧按非负 job dual 使用 profitable window，`gamma_j = min(max(0, pi_j), b_j)`，不再叠加 predecessor-dependent 的 setup cost advantage。这样做的直接目的，是避免 pair-level `B_ij/H_ij` 被放进 dominance reachable set 后变成不安全的“永久不可达”信息。
+
+单向 `GC` 和双向 `GCBidirectional` 的动态硬窗都改为 job-level 缓存，等价于当前先令 `B_ij = 0`。与此同时，dominance reachable set 不再检查 `node.isArcForbidden(i,j)`：禁弧只禁止当前 direct arc，不能说明该 job 后续不能通过其他前驱访问，因此不能进入 dominance key。实际扩展和 join 仍然单独检查 forbidden arc，所以分支约束没有放松，只是把 dominance key 恢复为只包含可安全传播的信息。
+
+双向 exact pricing 的主流程改为更接近旧 VRP `GCNGBB` 的 hybrid-B 组织：先完整展开 forward half label，维护每个 terminal job 下仍 active 的 forward label 列表和粗粒度最小 reduced-cost/最早完成信息；随后初始化 backward sink，从 backward half 出队扩展并用 crossing arc `(i,r)` 与已生成的 forward labels join。这样避免了旧实现中 forward/backward 交替出队时反复扫描另一侧 dominance graph 的问题，也避免在尚未有完整 forward half 信息时过早 join。join 阶段先做 terminal 组级别的时间可行性与标量乐观下界过滤，只有可能产生负 reduced cost 时才进入 label-pair 级别的函数拼接。
+
+join 所需的常数延拓仍保持 lazy：每个 label 只有第一次真正参与 join 时才构造 `joinExtendedFrontier`，后续同一 label 与其他 label 拼接时复用，不在 join 开始前全量预计算。当前仍保留“先做函数级拼接并得到 reduced cost，再做列签名去重”的列级路径，关于“是否应把列去重提前以减少函数拼接”本次只记录，不改逻辑；completion bound 也尚未接入。代码中不再保留 forward-side join 旧入口，实际 join 统一发生在 backward 出队阶段。
+
+验证方面，已运行 focused `javac`，覆盖 `GCBidirectional.java`、`GC.java`、`LP.java` 以及相关测试入口；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；`PricingAlgorithmComparisonTest` 在补充 CPLEX native path 后通过，`matchedRounds=9/9`，本轮平均单向 1.22 ms、双向 0.56 ms；`SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff 分支诊断也通过。测试会更新 `test-results/bpc/*.csv`，这些输出文件只作为本地验证产物，不纳入本次代码提交。

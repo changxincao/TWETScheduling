@@ -55,6 +55,8 @@ public class GCBidirectional {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
+	private boolean[] zeroDualSingletonOnlyJobs;
+	private int zeroDualSingletonOnlyJobCount;
 	private int nextLabelId;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -232,11 +234,17 @@ public class GCBidirectional {
 		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 			return false;
 		}
+		if (!isForwardSingletonOnlyExtensionAllowed(label.jid, nextJob)) {
+			return false;
+		}
 		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
+			return false;
+		}
+		if (!isBackwardSingletonOnlyExtensionAllowed(label, prevJob)) {
 			return false;
 		}
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
@@ -389,6 +397,10 @@ public class GCBidirectional {
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
 				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
 			joinTerminalGroupsScanned++;
+			if (isZeroDualSingletonOnlyJob(lastJob) || (isZeroDualSingletonOnlyJob(backward.jid) && lastJob != 0)) {
+				joinTerminalGroupsArcOrVisitPruned++;
+				continue;
+			}
 			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
 				joinTerminalGroupsArcOrVisitPruned++;
 				continue;
@@ -440,6 +452,10 @@ public class GCBidirectional {
 			return;
 		}
 		joinPairsTried++;
+		if (isZeroDualSingletonOnlyJob(forward.jid) || (isZeroDualSingletonOnlyJob(backward.jid) && forward.jid != 0)) {
+			joinPairsSetPruned++;
+			return;
+		}
 		if (forward.jid == backward.jid || forward.visitedSet.intersects(backward.visitedSet)) {
 			joinPairsSetPruned++;
 			return;
@@ -525,6 +541,7 @@ public class GCBidirectional {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
 	}
@@ -709,7 +726,8 @@ public class GCBidirectional {
 			// 2026-05-24: dominance reachable-set 只放“永久不可达”信息。
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
-			if (!visited.contains(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -722,7 +740,8 @@ public class GCBidirectional {
 		// 2026-05-24: 三角不等式下可达性随路径扩展单调收缩，child 不需要重新扫描 1..n。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -734,7 +753,8 @@ public class GCBidirectional {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+			if (!visited.contains(job) && (isSinkRoot || !isZeroDualSingletonOnlyJob(job))
+					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}
@@ -744,12 +764,16 @@ public class GCBidirectional {
 	private PackedBitSet buildBackwardReachableSetFromParent(BackwardLabel parent, int firstJob, PackedBitSet visited,
 			Node node, PiecewiseLinearFunction frontier) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
+		if (isZeroDualSingletonOnlyJob(firstJob)) {
+			return reachable;
+		}
 		boolean isSinkRoot = firstJob == node.sinkId();
 		// 2026-05-24: backward 方向同样只从父可达集合中过滤；已经无法接到旧后缀的前驱，
 		// 在中间再插入一个真实 job 后不会重新可达。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+			if (!visited.contains(job) && !isZeroDualSingletonOnlyJob(job)
+					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}
@@ -762,7 +786,10 @@ public class GCBidirectional {
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
+		zeroDualSingletonOnlyJobs = null;
+		zeroDualSingletonOnlyJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
+		precomputeZeroDualSingletonOnlyJobs(lp);
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows(lp);
 		precomputeBackwardDynamicPricingWindows(lp);
@@ -843,6 +870,25 @@ public class GCBidirectional {
 		return lp.getActiveCutIds().isEmpty();
 	}
 
+	/**
+	 * 2026-05-24: 根节点 no-cut pricing 中，pi_j=0 的任务只保留 singleton 列可能性。
+	 * forward 仍允许 source->j，backward 仍允许 sink->j 用于和 source join 成 singleton，
+	 * 但不再允许它与其他真实 job 形成多任务列。
+	 */
+	private void precomputeZeroDualSingletonOnlyJobs(LP lp) {
+		if (!dualProfitableWindowEnabled) {
+			return;
+		}
+		zeroDualSingletonOnlyJobs = new boolean[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			double jobDual = Math.max(0.0, lp.getJobDual(job));
+			if (Utility.compareEq(jobDual, 0.0)) {
+				zeroDualSingletonOnlyJobs[job] = true;
+				zeroDualSingletonOnlyJobCount++;
+			}
+		}
+	}
+
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
 		// 2026-05-23: 半域边界直接写入动态 job penalty。
 		// forward 的新增 job 函数只在 [0,Tmid] 上参与 add，公共定义域会自然把右端卡在 Tmid。
@@ -891,6 +937,31 @@ public class GCBidirectional {
 
 	private double outsourcingBaseline(int job) {
 		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : Math.max(0.0, data.outsourcingCost[job]);
+	}
+
+	private boolean isZeroDualSingletonOnlyJob(int job) {
+		return job > 0 && zeroDualSingletonOnlyJobs != null && job < zeroDualSingletonOnlyJobs.length
+				&& zeroDualSingletonOnlyJobs[job];
+	}
+
+	private boolean isForwardSingletonOnlyExtensionAllowed(int prevJob, int nextJob) {
+		if (isZeroDualSingletonOnlyJob(prevJob)) {
+			return false;
+		}
+		if (isZeroDualSingletonOnlyJob(nextJob) && prevJob != 0) {
+			return false;
+		}
+		return true;
+	}
+
+	private boolean isBackwardSingletonOnlyExtensionAllowed(BackwardLabel label, int prevJob) {
+		if (isZeroDualSingletonOnlyJob(prevJob)) {
+			return label.isSinkRoot;
+		}
+		if (!label.isSinkRoot && isZeroDualSingletonOnlyJob(label.jid)) {
+			return false;
+		}
+		return true;
 	}
 
 	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {

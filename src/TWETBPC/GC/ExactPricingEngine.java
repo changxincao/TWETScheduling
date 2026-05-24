@@ -28,9 +28,9 @@ public class ExactPricingEngine implements PricingEngine {
 		GC gc = new GC(data, config);
 		ArrayList<TWETColumn> columns = gc.solve(lp);
 		if (columns.isEmpty()) {
-			return PricingResult.noImprovement("No negative reduced-cost column");
+			return PricingResult.noImprovement(gc.getLastMessage());
 		}
-		return new PricingResult(columns, true, "Exact forward labeling generated " + columns.size() + " columns");
+		return new PricingResult(columns, true, gc.getLastMessage());
 	}
 
 	@Override

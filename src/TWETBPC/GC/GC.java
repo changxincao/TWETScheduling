@@ -37,6 +37,9 @@ public class GC {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
+	private boolean[] zeroDualSingletonOnlyJobs;
+	private int zeroDualSingletonOnlyJobCount;
+	private String lastMessage = "Exact forward labeling not executed";
 	// 2026-05-20: 当前 RMP dual 下的 job-level H_j 硬窗缓存，只在一次 pricing 调用内有效。
 	private double[] dynamicJobHEnd;
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
@@ -78,7 +81,15 @@ public class GC {
 				}
 			}
 		}
+		lastMessage = "Exact forward labeling generated " + generatedColumns.size() + " columns; dualWindow="
+				+ (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
+				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
+				+ (usePaperDominanceGraph ? ", " + PaperDominanceGraph.statisticsSummary() : "");
 		return generatedColumns;
+	}
+
+	public String getLastMessage() {
+		return lastMessage;
 	}
 
 	private void initialize(LP lp) {
@@ -114,6 +125,9 @@ public class GC {
 
 	private boolean canExtend(Label label, int nextJob, Node node) {
 		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
+			return false;
+		}
+		if (!isForwardSingletonOnlyExtensionAllowed(label.jid, nextJob)) {
 			return false;
 		}
 		return !node.isArcForbidden(label.jid, nextJob);
@@ -185,7 +199,10 @@ public class GC {
 	private void precomputeDynamicPricingWindows(LP lp) {
 		dynamicJobHEnd = null;
 		dynamicJobPenaltyByJob = null;
+		zeroDualSingletonOnlyJobs = null;
+		zeroDualSingletonOnlyJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
+		precomputeZeroDualSingletonOnlyJobs(lp);
 		dynamicJobHEnd = new double[data.n + 1];
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
@@ -219,6 +236,24 @@ public class GC {
 		return lp.getActiveCutIds().isEmpty();
 	}
 
+	/**
+	 * 2026-05-24: 根节点 no-cut pricing 中，pi_j=0 的任务只保留 singleton 列可能性。
+	 * 含这类任务的多任务列总能删去该任务得到不更差的列，因此不再让它和其他真实 job 相连。
+	 */
+	private void precomputeZeroDualSingletonOnlyJobs(LP lp) {
+		if (!dualProfitableWindowEnabled) {
+			return;
+		}
+		zeroDualSingletonOnlyJobs = new boolean[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			double jobDual = Math.max(0.0, lp.getJobDual(job));
+			if (Utility.compareEq(jobDual, 0.0)) {
+				zeroDualSingletonOnlyJobs[job] = true;
+				zeroDualSingletonOnlyJobCount++;
+			}
+		}
+	}
+
 	private PiecewiseLinearFunction getDynamicJobPenalty(int prevJob, int job) {
 		return dynamicJobPenaltyByJob == null ? null : dynamicJobPenaltyByJob[job];
 	}
@@ -245,11 +280,27 @@ public class GC {
 		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : Math.max(0.0, data.outsourcingCost[job]);
 	}
 
+	private boolean isZeroDualSingletonOnlyJob(int job) {
+		return job > 0 && zeroDualSingletonOnlyJobs != null && job < zeroDualSingletonOnlyJobs.length
+				&& zeroDualSingletonOnlyJobs[job];
+	}
+
+	private boolean isForwardSingletonOnlyExtensionAllowed(int prevJob, int nextJob) {
+		if (isZeroDualSingletonOnlyJob(prevJob)) {
+			return false;
+		}
+		if (isZeroDualSingletonOnlyJob(nextJob) && prevJob != 0) {
+			return false;
+		}
+		return true;
+	}
+
 	private PackedBitSet buildReachableSet(int fromJob, PackedBitSet visited, Node node, PiecewiseLinearFunction frontier,
 			LP lp) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+					&& isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -263,7 +314,8 @@ public class GC {
 		// 继续追加真实 job 后不会重新变成可达。child reachable set 因此只需从父候选集中过滤。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+					&& isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}

@@ -27,12 +27,10 @@ public class PaperDominanceExactPricingEngine implements PricingEngine {
 	public PricingResult price(LP lp) {
 		GC gc = new GC(data, config, true);
 		ArrayList<TWETColumn> columns = gc.solve(lp);
-		String stats = PaperDominanceGraph.statisticsSummary();
 		if (columns.isEmpty()) {
-			return PricingResult.noImprovement("No negative reduced-cost column; " + stats);
+			return PricingResult.noImprovement(gc.getLastMessage());
 		}
-		return new PricingResult(columns, true,
-				"Paper dominance exact forward labeling generated " + columns.size() + " columns; " + stats);
+		return new PricingResult(columns, true, gc.getLastMessage());
 	}
 
 	@Override

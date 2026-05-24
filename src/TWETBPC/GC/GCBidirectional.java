@@ -62,6 +62,9 @@ public class GCBidirectional {
 	private PiecewiseLinearFunction[] dynamicBackwardPenaltyByJob;
 	private double[] dynamicBackwardHStartByJob;
 	private double[] dynamicBackwardHEndByJob;
+	private PiecewiseLinearFunction[] baseForwardHalfPenaltyByJob;
+	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
+	private double baseHalfPenaltyCacheTMid = Double.NaN;
 
 	private String lastMessage = "Bidirectional pricing not executed";
 
@@ -644,6 +647,7 @@ public class GCBidirectional {
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
+		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows(lp);
 		precomputeBackwardDynamicPricingWindows(lp);
 	}
@@ -652,12 +656,23 @@ public class GCBidirectional {
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			double hStart = hWindowStart(job, lp);
-			double hEnd = hWindowEnd(job, lp);
-			dynamicJobHEnd[job] = hEnd;
-			if (!Utility.compareGt(hStart, hEnd)) {
-				dynamicJobPenaltyByJob[job] = buildForwardHalfPenalty(job, hStart, hEnd);
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			PiecewiseLinearFunction penalty = baseForwardHalfPenaltyByJob[job];
+			double baseline = outsourcingBaseline(job);
+			double jobDual = Math.max(0.0, lp.getJobDual(job));
+			if (Utility.compareLt(jobDual, baseline)) {
+				double dynamicStart = hWindowStart(job, jobDual);
+				double dynamicEnd = hWindowEnd(job, jobDual);
+				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+					hStart = dynamicStart;
+					hEnd = dynamicEnd;
+					penalty = Utility.compareGt(hStart, hEnd) ? null : buildForwardHalfPenalty(job, hStart, hEnd);
+				}
 			}
+			dynamicJobHEnd[job] = hEnd;
+			dynamicJobPenaltyByJob[job] = penalty;
 		}
 	}
 
@@ -666,14 +681,40 @@ public class GCBidirectional {
 		dynamicBackwardHStartByJob = new double[data.n + 1];
 		dynamicBackwardHEndByJob = new double[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			double hStart = hWindowStart(job, lp);
-			double hEnd = hWindowEnd(job, lp);
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			PiecewiseLinearFunction penalty = baseBackwardHalfPenaltyByJob[job];
+			double baseline = outsourcingBaseline(job);
+			double jobDual = Math.max(0.0, lp.getJobDual(job));
+			if (Utility.compareLt(jobDual, baseline)) {
+				double dynamicStart = hWindowStart(job, jobDual);
+				double dynamicEnd = hWindowEnd(job, jobDual);
+				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+					hStart = dynamicStart;
+					hEnd = dynamicEnd;
+					penalty = Utility.compareGt(hStart, hEnd) ? null : buildBackwardHalfPenalty(job, hStart, hEnd);
+				}
+			}
 			dynamicBackwardHStartByJob[job] = hStart;
 			dynamicBackwardHEndByJob[job] = hEnd;
-			if (!Utility.compareGt(hStart, hEnd)) {
-				dynamicBackwardPenaltyByJob[job] = buildBackwardHalfPenalty(job, hStart, hEnd);
-			}
+			dynamicBackwardPenaltyByJob[job] = penalty;
 		}
+	}
+
+	private void ensureBaseHalfPenaltyCache() {
+		if (baseForwardHalfPenaltyByJob != null && Utility.compareEq(baseHalfPenaltyCacheTMid, tMid)) {
+			return;
+		}
+		baseForwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
+		baseBackwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			// 2026-05-24: data.penaltyFunction[job] 已经包含基于 b_j 的静态粗硬窗。
+			// dual 不能进一步收紧时，双向 pricing 直接复用这两个半域缓存，避免每轮重复 setDomain/crop。
+			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, tMid);
+			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, data.CmaxH);
+		}
+		baseHalfPenaltyCacheTMid = tMid;
 	}
 
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
@@ -708,26 +749,22 @@ public class GCBidirectional {
 		return dynamicBackwardHEndByJob[job];
 	}
 
-	private double hWindowStart(int job, LP lp) {
-		double gamma = hWindowGamma(job, lp);
+	private double hWindowStart(int job, double gamma) {
 		if (!Utility.compareGt(data.w_e[job], 0.0)) {
 			return 0.0;
 		}
 		return Math.max(0.0, data.d_e[job] - gamma / data.w_e[job]);
 	}
 
-	private double hWindowEnd(int job, LP lp) {
-		double gamma = hWindowGamma(job, lp);
+	private double hWindowEnd(int job, double gamma) {
 		if (!Utility.compareGt(data.w_t[job], 0.0)) {
 			return data.CmaxH;
 		}
 		return Math.min(data.CmaxH, data.d_l[job] + gamma / data.w_t[job]);
 	}
 
-	private double hWindowGamma(int job, LP lp) {
-		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
-		double jobDual = Math.max(0.0, lp.getJobDual(job));
-		return Math.min(jobDual, baseline);
+	private double outsourcingBaseline(int job) {
+		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : Math.max(0.0, data.outsourcingCost[job]);
 	}
 
 	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {

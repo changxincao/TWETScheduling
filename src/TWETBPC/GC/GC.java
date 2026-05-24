@@ -182,13 +182,24 @@ public class GC {
 		dynamicJobHEnd = new double[data.n + 1];
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			double hStart = hWindowStart(job, lp);
-			double hEnd = hWindowEnd(job, lp);
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			PiecewiseLinearFunction penalty = data.penaltyFunction[job];
+			double baseline = outsourcingBaseline(job);
+			double jobDual = Math.max(0.0, lp.getJobDual(job));
+			if (Utility.compareLt(jobDual, baseline)) {
+				double dynamicStart = hWindowStart(job, jobDual);
+				double dynamicEnd = hWindowEnd(job, jobDual);
+				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+					hStart = dynamicStart;
+					hEnd = dynamicEnd;
+					penalty = Utility.compareGt(hStart, hEnd) ? null : data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+				}
+			}
 			dynamicJobHStart[job] = hStart;
 			dynamicJobHEnd[job] = hEnd;
-			if (!Utility.compareGt(hStart, hEnd)) {
-				dynamicJobPenaltyByJob[job] = data.penaltyFunction[job].setDomain(hStart, hEnd, true);
-			}
+			dynamicJobPenaltyByJob[job] = penalty;
 		}
 	}
 
@@ -200,26 +211,22 @@ public class GC {
 		return dynamicJobHEnd[job];
 	}
 
-	private double hWindowStart(int job, LP lp) {
-		double gamma = hWindowGamma(job, lp);
+	private double hWindowStart(int job, double gamma) {
 		if (!Utility.compareGt(data.w_e[job], 0.0)) {
 			return 0.0;
 		}
 		return Math.max(0.0, data.d_e[job] - gamma / data.w_e[job]);
 	}
 
-	private double hWindowEnd(int job, LP lp) {
-		double gamma = hWindowGamma(job, lp);
+	private double hWindowEnd(int job, double gamma) {
 		if (!Utility.compareGt(data.w_t[job], 0.0)) {
 			return data.CmaxH;
 		}
 		return Math.min(data.CmaxH, data.d_l[job] + gamma / data.w_t[job]);
 	}
 
-	private double hWindowGamma(int job, LP lp) {
-		double baseline = Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : data.outsourcingCost[job];
-		double jobDual = Math.max(0.0, lp.getJobDual(job));
-		return Math.min(jobDual, baseline);
+	private double outsourcingBaseline(int job) {
+		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : Math.max(0.0, data.outsourcingCost[job]);
 	}
 
 	private PackedBitSet buildReachableSet(int fromJob, PackedBitSet visited, Node node, PiecewiseLinearFunction frontier,

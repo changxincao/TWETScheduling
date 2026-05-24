@@ -1284,3 +1284,13 @@ join 所需的常数延拓仍保持 lazy：每个 label 只有第一次真正参
 reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `1..n` 全量建立第一层候选；之后每次扩展 child label 时，不再重新扫描所有 job，而是从父 label 的 `reachableSet` 里遍历置位 job，删掉已访问任务后再用当前 frontier 做一步时间可行性过滤。这个递推依赖当前已经采用的三角不等式假设：父 label 中一跳已经不可达的 job，路径继续扩展后不会重新变成可达。因此新的 reachable set 是父 reachable set 的子集，能够避免大量无意义候选检查，同时保持 dominance key 的单调语义。
 
 扩展循环本身也改为直接遍历 `label.reachableSet.nextSetBit()`，而不是 `for job=1..n` 后再查 `contains(job)`。`canExtend` 里仍保留 visited、reachable 和 forbidden arc 检查作为安全边界，其中 forbidden arc 只影响当前 direct arc，不写入 reachable set。验证结果为：focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过；`PricingAlgorithmComparisonTest` 通过，`matchedRounds=9/9`；`SmallBPCBatchTest` 通过，8/8 小例和 tariff branch 均有效。小规模计时存在 JVM/JIT 波动，本次结论主要确认语义正确和去掉冗余路径，后续若要精确比较速度仍应看批量 profiling。
+
+## 2026-05-24：H_j 基准窗复用与二次裁剪精简
+
+本次继续收缩 dynamic profitable window 的计算。静态预处理阶段的 `Data.setPreprocessedHardWindows()` 已改为只用单任务外包 baseline `b_j` 构造粗硬窗，不再叠加 `max_i B_ij` 或 `G(b_j)`。这和当前 pricing 假设一致：setup time/cost 满足三角不等式，因此 `B_ij=0`，动态窗的有效阈值就是 `gamma_j = min(max(0, pi_j), b_j)`。
+
+在此基础上，pricing 每轮不再对所有 job 无条件重建 `H_j` penalty。单向 `GC` 先读取 `data.hardWindowStart/End[j]` 和已经裁过的 `data.penaltyFunction[j]`；只有当 `max(0, pi_j) < b_j` 且得到的动态窗确实比静态窗更窄时，才再次调用 `setDomain(hStart,hEnd,true)`。若 `pi_j >= b_j`，说明 dual 不能比初始外包粗窗提供更强剪枝，直接复用原函数，避免重复裁剪。
+
+双向 `GCBidirectional` 同步采用相同判断，并额外缓存基准 forward/backward 半域 penalty。也就是说，`pi_j` 不能进一步收紧时，forward half 直接复用 `[0,T^mid]` 的基准半域函数，backward half 直接复用 `[T^mid,CmaxH]` 的基准半域函数；只有 dual 窗更窄时才临时重做 `setDomain + cropToInterval`。这保持了半域元数据语义，又减少了每轮 pricing 中大量重复的分段函数构造。
+
+验证方面，补入 CPLEX jar/native path 后 focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，`cases=200, insertions=16000`；`PricingAlgorithmComparisonTest` 通过，`matchedRounds=9/9`；`SmallBPCBatchTest` 通过，8/8 小例与 tariff branch 诊断均有效。测试刷新了本地 CSV 输出，但这些文件只作为验证产物，不纳入本次提交。

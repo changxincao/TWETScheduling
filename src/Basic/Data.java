@@ -294,27 +294,23 @@ public class Data {
 	}
 
 	/**
-	 * 2026-05-15: 基于外包 baseline cost 和 setup-cost advantage 预处理 job 级粗硬窗。
-	 * 这里只做不含 dual、不含给定前驱 i 的保守版本：对每个 job j 取 max_i B_ij，
-	 * 再用 b_j 给出不会误删的 completion 窗口。真正依赖 dual 和具体前驱的 H_ij，
-	 * 后续仍应在 pricing 扩展 i -> j 时重新计算。
+	 * 2026-05-15: 基于外包 baseline cost 预处理 job 级粗硬窗。
+	 * 2026-05-24: 当前 pricing 直接假设 setup 三角不等式，B_ij=0，因此这里不再叠加
+	 * setup-cost advantage。动态 profitable window 只在 max(0, pi_j) < b_j 时进一步收紧。
 	 */
 	public void setPreprocessedHardWindows() {
 		if (hardWindowStart == null || hardWindowStart.length != n + 1) {
 			hardWindowStart = new double[n + 1];
 			hardWindowEnd = new double[n + 1];
 		}
-		if (maxSetupCostAdvantage == null || maxSetupCostAdvantage.length != n + 1) {
-			maxSetupCostAdvantage = new double[n + 1];
-		}
-		precomputeSetupCostAdvantages();
 		hardWindowStart[0] = 0;
 		hardWindowEnd[0] = CmaxH;
 		for (int j = 1; j <= n; j++) {
 			double baselineOutsourcingCost = outsourcingCost == null ? Utility.big_M : outsourcingCost[j];
-			// 2026-05-16: b_j 只是外包 baseline，真正外包成本是 G(B)。
-			// 粗硬窗只需要一个安全上界；单任务外包成本用 G(b_j)-G(0)=G(b_j)。
-			double gamma = maxSetupCostAdvantage[j] + Math.max(0, evaluateOutsourcingCost(baselineOutsourcingCost));
+			// 2026-05-24: 当前 BPC pricing 已直接假设 setup time/cost 满足三角不等式，
+			// 因此 B_ij=0，静态粗硬窗只使用单任务外包 baseline b_j。动态 pricing 中若
+			// max(0, pi_j) >= b_j，就可以直接复用这里已经裁过的 penaltyFunction[j]。
+			double gamma = Utility.isBigMValue(baselineOutsourcingCost) ? Utility.big_M : Math.max(0, baselineOutsourcingCost);
 			double left = Utility.compareGt(w_e[j], 0) ? d_e[j] - gamma / w_e[j] : 0;
 			double right = Utility.compareGt(w_t[j], 0) ? d_l[j] + gamma / w_t[j] : CmaxH;
 			left = Math.max(0, left);

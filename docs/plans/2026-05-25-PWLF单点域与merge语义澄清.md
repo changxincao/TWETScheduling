@@ -1,5 +1,7 @@
 # 2026-05-25 PWLF 单点域与 merge 语义澄清
 
+2026-05-25 后续已把 `medianRightEnd` midpoint 实验分支从 `GCBidirectional` 里删除。当前代码不再读取 `twet.bpc.bidir.midpointStrategy` 系统属性，也不再记录 `midpointStrategy` 日志字段；`computeCurrentMidpoint()` 回到唯一规则：根节点 no-cut 且 profitable window 真实收紧时使用 `0.75 * pricingHorizon`，否则使用 `CmaxH / 2`。前面 `medianRightEnd` 的实验结果保留在本文和 `test-results/bpc/2026-05-25-*medianRightEnd*` 输出中，仅作为反例证据，不再作为可运行策略维护。
+
 这次只补三点语义说明，不改代码。
 
 第一，`PiecewiseLinearFunction.add()` 现在可以处理“两函数相加后的公共可行部分只剩一个点”的情况。这里不是新加的逻辑，而是原实现本来就在按 `cur <= nxt` 处理公共区间，因此当 `cur == nxt` 时仍会保留一个零长度 segment。仓库里 2025-04-23 的旧注释已经记录过这个边界：如果把这里写成严格 `<`，某些被上界裁到只剩单点的函数相加后会直接变成空函数。

@@ -456,17 +456,20 @@ public class GCBidirectional {
 			}
 		}
 		int labelCardinality = label.reachableCardinality;
-		for (int i = 0; i < store.liveLabels.size(); i++) {
-			L existing = store.liveLabels.get(i);
-			if (existing.isDominated) {
+		for (int cardinality = labelCardinality; cardinality < store.liveLabelsByCardinality.size(); cardinality++) {
+			ArrayList<L> bucket = store.liveLabelsByCardinality.get(cardinality);
+			if (bucket == null || bucket.isEmpty()) {
 				continue;
 			}
-			if (existing.reachableCardinality < labelCardinality) {
-				continue;
-			}
-			if (existing.reachableSet.isSupersetOf(label.reachableSet)
-					&& !Utility.compareGt(existing.minReducedCost, label.minReducedCost)) {
-				return true;
+			for (int i = 0; i < bucket.size(); i++) {
+				L existing = bucket.get(i);
+				if (existing.isDominated) {
+					continue;
+				}
+				if (existing.reachableSet.isSupersetOf(label.reachableSet)
+						&& !Utility.compareGt(existing.minReducedCost, label.minReducedCost)) {
+					return true;
+				}
 			}
 		}
 		return false;
@@ -474,22 +477,26 @@ public class GCBidirectional {
 
 	private <L extends FunctionLabel> void removeSinglePointsDominatedBy(SinglePointStore<L> store, L label) {
 		int labelCardinality = label.reachableCardinality;
-		for (int i = store.liveLabels.size() - 1; i >= 0; i--) {
-			L existing = store.liveLabels.get(i);
-			if (existing.isDominated) {
-				store.liveLabels.remove(i);
+		int maxCardinality = Math.min(labelCardinality, store.liveLabelsByCardinality.size() - 1);
+		for (int cardinality = maxCardinality; cardinality >= 0; cardinality--) {
+			ArrayList<L> bucket = store.liveLabelsByCardinality.get(cardinality);
+			if (bucket == null || bucket.isEmpty()) {
 				continue;
 			}
-			if (labelCardinality < existing.reachableCardinality) {
-				continue;
-			}
-			if (label.reachableSet.isSupersetOf(existing.reachableSet)
-					&& !Utility.compareGt(label.minReducedCost, existing.minReducedCost)) {
-				existing.isDominated = true;
-				store.liveLabels.remove(i);
-				L mapped = store.bestByReachable.get(existing.reachableSet);
-				if (mapped == existing) {
-					store.bestByReachable.remove(existing.reachableSet);
+			for (int i = bucket.size() - 1; i >= 0; i--) {
+				L existing = bucket.get(i);
+				if (existing.isDominated) {
+					bucket.remove(i);
+					continue;
+				}
+				if (label.reachableSet.isSupersetOf(existing.reachableSet)
+						&& !Utility.compareGt(label.minReducedCost, existing.minReducedCost)) {
+					existing.isDominated = true;
+					bucket.remove(i);
+					L mapped = store.bestByReachable.get(existing.reachableSet);
+					if (mapped == existing) {
+						store.bestByReachable.remove(existing.reachableSet);
+					}
 				}
 			}
 		}
@@ -497,7 +504,19 @@ public class GCBidirectional {
 
 	private <L extends FunctionLabel> void addSinglePointLabel(SinglePointStore<L> store, L label) {
 		store.bestByReachable.put(label.reachableSet, label);
-		store.liveLabels.add(label);
+		ensureSinglePointBucket(store, label.reachableCardinality).add(label);
+	}
+
+	private <L extends FunctionLabel> ArrayList<L> ensureSinglePointBucket(SinglePointStore<L> store, int cardinality) {
+		while (store.liveLabelsByCardinality.size() <= cardinality) {
+			store.liveLabelsByCardinality.add(null);
+		}
+		ArrayList<L> bucket = store.liveLabelsByCardinality.get(cardinality);
+		if (bucket == null) {
+			bucket = new ArrayList<L>();
+			store.liveLabelsByCardinality.set(cardinality, bucket);
+		}
+		return bucket;
 	}
 
 	private void updateForwardScalarInfo(ForwardLabel label) {
@@ -1292,7 +1311,9 @@ public class GCBidirectional {
 
 	private static final class SinglePointStore<L extends FunctionLabel> {
 		final HashMap<PackedBitSet, L> bestByReachable = new HashMap<PackedBitSet, L>();
-		final ArrayList<L> liveLabels = new ArrayList<L>();
+		// 2026-05-25: single-point 只按 reachable-set 支配，不需要复杂图结构；
+		// 但按基数分桶后，superset/subset 扫描可以少看很多明显不可能的候选。
+		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}
 
 	private abstract static class FunctionLabel extends Label implements Comparable<Label> {

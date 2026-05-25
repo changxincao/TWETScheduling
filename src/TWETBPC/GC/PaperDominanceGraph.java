@@ -137,13 +137,8 @@ final class PaperDominanceGraph implements DominanceStore {
 	@Override
 	public boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue) {
 		PaperDominanceNode sameNode = nodeByReachableSet.get(reachableSet);
-		ArrayList<PaperDominanceNode> candidates = new ArrayList<PaperDominanceNode>();
-		if (sameNode != null && sameNode.active) {
-			candidates.add(sameNode);
-		} else {
-			candidates.addAll(findTerminalSupersetNodes(reachableSet));
-		}
-		double best = bestPointDominanceValue(candidates, pointTime);
+		double best = sameNode != null && sameNode.active ? pointDominanceValue(sameNode.dominanceEnvelope, pointTime)
+				: bestTerminalSupersetPointDominanceValue(reachableSet, pointTime);
 		return !Utility.compareGt(best, pointValue);
 	}
 
@@ -377,15 +372,38 @@ final class PaperDominanceGraph implements DominanceStore {
 		return envelope;
 	}
 
-	private double bestPointDominanceValue(ArrayList<PaperDominanceNode> candidates, double pointTime) {
+	/**
+	 * 2026-05-25: single-point 查询只需要 terminal-superset 叶子上的最优 Tmid 点值；
+	 * 这里直接在 DFS 里累计最优值，避免先构造候选列表、再做第二遍扫描。
+	 */
+	private double bestTerminalSupersetPointDominanceValue(PackedBitSet target, double pointTime) {
+		supersetSearchCalls++;
 		double best = Utility.big_M;
-		for (PaperDominanceNode node : candidates) {
-			if (!node.active || node.dominanceEnvelope == null || node.dominanceEnvelope.head == null) {
+		HashSet<PaperDominanceNode> visited = new HashSet<PaperDominanceNode>();
+		ArrayDeque<PaperDominanceNode> stack = new ArrayDeque<PaperDominanceNode>();
+		for (PaperDominanceNode root : roots) {
+			if (root.active && root.reachableKey.isSupersetOf(target)) {
+				stack.push(root);
+			}
+		}
+		while (!stack.isEmpty()) {
+			PaperDominanceNode node = stack.pop();
+			if (!visited.add(node)) {
 				continue;
 			}
-			double candidateValue = pointDominanceValue(node.dominanceEnvelope, pointTime);
-			if (Utility.compareLt(candidateValue, best)) {
-				best = candidateValue;
+			supersetNodesVisited++;
+			boolean hasDeeperSuperset = false;
+			for (PaperDominanceNode successor : node.successors) {
+				if (successor.active && successor.reachableKey.isSupersetOf(target)) {
+					stack.push(successor);
+					hasDeeperSuperset = true;
+				}
+			}
+			if (!hasDeeperSuperset) {
+				double candidateValue = pointDominanceValue(node.dominanceEnvelope, pointTime);
+				if (Utility.compareLt(candidateValue, best)) {
+					best = candidateValue;
+				}
 			}
 		}
 		return best;

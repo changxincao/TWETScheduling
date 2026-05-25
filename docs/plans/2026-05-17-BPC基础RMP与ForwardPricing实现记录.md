@@ -8,6 +8,8 @@
 
 验证上，重新执行了 `javac -encoding UTF-8 -cp src src/Common/PiecewiseLinearFunction.java src/Basic/Data.java`，编译通过。更宽的 `GCBidirectional` 编译仍受本地 CPLEX `ilog.*` classpath 限制，不能在当前环境完整编译。
 
+随后又用 `-sourcepath __no_such_source_path__` 绕开 `Utility.java` 对 CPLEX 源码重编的依赖，执行 `PWLFTesting.PiecewiseLinearFunctionPropertyTest` 复核 `mergeMinimum()` 行为。结果为 `passed=23, warnings=2, failed=3`：普通 overlap、`[a,T]` 同右端契约、forward/backward 随机 frontier sweep 都通过；失败项集中在完全不相交定义域 `start > end` 的旧通用风险测试和一次随机 disjoint 样例。也就是说，这次删除 `start == end` 点接触特判没有破坏 BPC 双向 dominance 所需的正重叠合并语义，但公共 `mergeMinimum()` 是否还要支持完全 disjoint union-lower-envelope 仍是另一个未统一的工具函数契约问题。当前双向 BPC 不应依赖这个 disjoint 语义；如果未来要把 `mergeMinimum()` 恢复成通用 lower-envelope union 操作，应单独重写并验证 disjoint/touch 行为，而不是在 BPC 路径里用点接触补丁掩盖 single-point 分流问题。
+
 ## 2026-05-23：复核双向 pricing 流程与旧 VRP 双向框架的一致性
 
 本次重新对照当前 `GCBidirectional` 和旧 VRP 的 `GCBDT/GCNGBB` 后，确认当前双向 pricing 的外层流程已经按前面讨论的口径执行。当前实现先在 `initialize()` 中建立 forward/backward 两侧的未处理队列 `FWUL/BWUL` 和按端点分组的已处理表 `FWTL/BWTL`，forward 从虚拟起点 label 出发，backward 从虚拟终点 label 出发；随后 `solve()` 中交替处理两侧队列，出队时如果 label 已被后续 label 支配则直接跳过，否则先尝试生成列或 join，再做同方向扩展。扩展出的新 label 先进入同端点表做 dominance 检查，若被现有 label 支配则标记并丢弃；若能支配已有 label，则把旧 label 标记为 dominated 并从表中移除；未被支配的新 label 才进入未处理队列。

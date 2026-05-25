@@ -1,5 +1,13 @@
 # BPC 基础 RMP 与单向 Forward Pricing 实现记录
 
+## 2026-05-25：移除 `mergeMinimum` 单点接触拼接分支
+
+在修正 `Data.setPenaltyFunctions()` 后，重新复核了双向 pricing 的 dominance 输入不变量。当前 `GCBidirectional` 已经在 `insertForward()` 和 `insertBackward()` 入口把退化到 `T^mid` 的 single-point label 分流到专门的 single-point store，不再让这类 label 进入普通 `PaperDominanceGraph`。因此普通 forward label 入图时应满足物理定义域为 `[ell,T^mid]` 且 `ell<T^mid`，普通 backward label 入图时应满足 `[T^mid,rho]` 且 `rho>T^mid`。同一方向的 dominance envelope 合并只发生在这些普通 label 或由它们构成的 envelope 之间，所以 `mergeMinimum()` 在 BPC 双向路径里应当总有正长度公共区间。
+
+由此，前面为 `start == end` 加的 `mergeMinimumAtTouch()` 分支不再是有效补丁。它会把两个只在边界点接触的函数按左右顺序拼成一个 envelope，反而掩盖了上游半域或 single-point 分流不变量被破坏的问题。当前已删除该分支及其私有 helper，让 `start == end` 和 `start > end` 一样触发 `mergeMinimum requires positive overlap` 异常。这样后续如果再次出现点接触，就会直接暴露为上游构造问题，而不是在 `mergeMinimum` 内部静默修补。
+
+验证上，重新执行了 `javac -encoding UTF-8 -cp src src/Common/PiecewiseLinearFunction.java src/Basic/Data.java`，编译通过。更宽的 `GCBidirectional` 编译仍受本地 CPLEX `ilog.*` classpath 限制，不能在当前环境完整编译。
+
 ## 2026-05-23：复核双向 pricing 流程与旧 VRP 双向框架的一致性
 
 本次重新对照当前 `GCBidirectional` 和旧 VRP 的 `GCBDT/GCNGBB` 后，确认当前双向 pricing 的外层流程已经按前面讨论的口径执行。当前实现先在 `initialize()` 中建立 forward/backward 两侧的未处理队列 `FWUL/BWUL` 和按端点分组的已处理表 `FWTL/BWTL`，forward 从虚拟起点 label 出发，backward 从虚拟终点 label 出发；随后 `solve()` 中交替处理两侧队列，出队时如果 label 已被后续 label 支配则直接跳过，否则先尝试生成列或 join，再做同方向扩展。扩展出的新 label 先进入同端点表做 dominance 检查，若被现有 label 支配则标记并丢弃；若能支配已有 label，则把旧 label 标记为 dominated 并从表中移除；未被支配的新 label 才进入未处理队列。

@@ -1346,14 +1346,6 @@ public class PiecewiseLinearFunction {
 		// 1) 定位公共定义域 这里两个函数取小因该是要取并集的  不能取交集
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
-		if (Utility.compareEq(start, end)) {
-			// 2026-05-25: 当前 BPC pricing 的普通 half-domain frontier 仍可能出现“只在一个点接触”的情况，
-			// 例如 [906.75,945.888...] 和 [945.888...,1143...]。这不是 single-point label 本身，
-			// 而是两个正长度函数在边界点拼接。此时取最小值在各自开区间上就是原函数本身，
-			// 只需要按左右顺序拼回去，让 evaluate(t) 在断点处继续按左右极限较小值解释即可。
-			mergeMinimumAtTouch(g, direction);
-			return;
-		}
 		if (!Utility.compareLt(start, end)) {
 			throw new IllegalArgumentException("mergeMinimum requires positive overlap: this=[" + this.head.start
 					+ "," + this.tail.end + "], g=[" + g.head.start + "," + g.tail.end + "]");
@@ -1534,31 +1526,6 @@ public class PiecewiseLinearFunction {
 			Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
 		} else {
 			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
-		}
-	}
-
-	private void mergeMinimumAtTouch(PiecewiseLinearFunction g, Direction direction) {
-		PiecewiseLinearFunction merged = new PiecewiseLinearFunction();
-		merged.resetDomain(Math.min(this.domainStart, g.domainStart), Math.max(this.domainEnd, g.domainEnd));
-		PiecewiseLinearFunction left = Utility.compareLe(this.head.start, g.head.start) ? this : g;
-		PiecewiseLinearFunction right = left == this ? g : this;
-		appendCopiedSegments(merged, left);
-		appendCopiedSegments(merged, right);
-		this.head = merged.head;
-		this.tail = merged.tail;
-		this.domainStart = merged.domainStart;
-		this.domainEnd = merged.domainEnd;
-		normalize(direction);
-		if (direction == Direction.BACKWARD) {
-			Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
-		} else {
-			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
-		}
-	}
-
-	private static void appendCopiedSegments(PiecewiseLinearFunction target, PiecewiseLinearFunction source) {
-		for (Segment cur = source.head; cur != null; cur = cur.next) {
-			target.addSegment(cur.start, cur.end, cur.slope, cur.intercept);
 		}
 	}
 

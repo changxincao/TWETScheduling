@@ -1,0 +1,21 @@
+# 2026-05-25 PWLF 单点域与 merge 语义澄清
+
+这次只补三点语义说明，不改代码。
+
+第一，`PiecewiseLinearFunction.add()` 现在可以处理“两函数相加后的公共可行部分只剩一个点”的情况。这里不是新加的逻辑，而是原实现本来就在按 `cur <= nxt` 处理公共区间，因此当 `cur == nxt` 时仍会保留一个零长度 segment。仓库里 2025-04-23 的旧注释已经记录过这个边界：如果把这里写成严格 `<`，某些被上界裁到只剩单点的函数相加后会直接变成空函数。
+
+第二，“函数只剩一个点”和“`domainStart/domainEnd` 也一定变成同一个点”不是一回事。当前代码里二者已经刻意分开了。`GCBidirectional.cropToInterval()` 会先 `resetDomain(start, end)`，因此如果 half-domain 裁完后只剩 `Tmid` 一个点，那么元数据也会一起收成这个单点；但普通两参数 `setDomain()` 在物理裁剪后又把元数据恢复成原来的 `this.domainStart/this.domainEnd`。因此仓库现在允许一种状态：物理 segment 只剩一个点，但 domain 元数据仍然比它更宽。这里不是错误，而是为了兼容后续 `shiftX()/trimToDomain()` 这类依赖元数据边界的操作。
+
+第三，`mergeMinimum()` 在当前 pricing 主链里不会拿 forward label 和 backward label 混着 merge。`PaperDominanceGraph` 是分方向建图的，forward 图只 merge forward frontier/envelope，backward 图只 merge backward frontier/envelope。此次补的 `mergeDisjointMinimum()` 兜底，处理的是“同向函数经过 half-domain 或 local horizon 裁剪后，没有正长度公共区间”的边界：要么只在一个点接触，例如 `[0, Tmid]` 和 `[Tmid, Tmid]`；要么左右相邻但不重叠，例如 `[0, 900]` 和 `[905, 1200]`。旧的 overlap merge 默认假设 `start < end`，这些边界下容易留下坏链表或直接在 dominance envelope 合并里崩掉，所以才单独分出 disjoint merge 路径。
+
+再补三点更细的过程说明。第一，`cropToInterval()` 只在 `GCBidirectional` 里使用，它不是普通“裁一裁定义域”的通用入口，而是把函数显式变成 forward half 或 backward half 的工具。当前调用点只有四类：`sourceFrontier` 初始裁成 `[0,tMid]`；root/no-cut 下的 `baseForwardHalfPenaltyByJob` 和 `baseBackwardHalfPenaltyByJob` 缓存；以及动态 profitable window 收紧后新建的 `buildForwardHalfPenalty()` / `buildBackwardHalfPenalty()`。它和普通 `setDomain()` 最大的区别是：`cropToInterval()` 会同时把 `domainStart/domainEnd` 重设成这次 half-domain 的边界，因为后续 `shiftX()->trimToDomain()` 这条链就是靠元数据边界继续维护“只能活在这个半域里”的语义。若这里模仿普通 `setDomain()` 那样把物理段裁完后又把元数据恢复成旧全局域，那么 half-domain 的约束就只停留在当前一层物理段里，后续 shift/trim 会把它重新放宽。
+
+第二，`add()` 的旧语义一直是“只改物理 segment，不主动重写结果函数的 `domainStart/domainEnd`”。代码里结果对象直接按左操作数的元数据 `new PiecewiseLinearFunction(domainStart, domainEnd)` 创建，之后真正相加时只取两边物理段的公共部分 `[start,end] = [max(head.start), min(tail.end)]` 去扫。因此前向函数里完全可能出现：`domainStart != head.start`，甚至 `domainEnd != tail.end`。仓库里的 `Utility.debugCheckPWLFRightBound()` 也明确把这种状态当成允许存在的情况，并在注释里写了“`tail.end` 是链表真实右端，`domainEnd` 是对象元数据；`setDomain/trimToDomain` 之后可能出现前者小于后者”。所以这里不能把“前向函数的右端都应该和元数据终点一样”当成现在的全局不变量；它只是在旧的一部分 forward pricing 语义里经常成立。
+
+第三，当前 `mergeMinimum()` 真正该看的不是“会不会出现完全没交集”，而是“在 `PaperDominanceGraph` 里，输入给它的同向 envelope/frontier 是否仍然保证有正长度公共区间”。从代码路径看，`mergeMinimum()` 只发生在 `mergeGEnvelopes()`、`addLabel()`、`recomputePredecessorEnvelope()`、`recomputeDominanceEnvelope()` 这些同向 envelope 合并场景里。理论上旧 forward label 常常满足“右端同为全局 T”，但这次 local horizon/half-domain 进来以后，更常见的边界其实是：其中一个输入已经被裁成 `[Tmid,Tmid]` 这样的单点，另一个输入从 `Tmid` 或更靠右/左开始，于是两者的公共部分最多只剩一个点。这也是为什么当前最需要兜的是“零长度交集/单点接触”，而不是把“左右完全隔开的宽区间”当成主流输入。后者在当前 pricing 主链里并不是最核心的触发场景。
+
+最后再把 `setDomain(hStart, hEnd, true) -> cropToInterval(...)` 这条 root/no-cut dynamic window 路径单独说明一下。这里其实是两步裁剪，语义不同。第一步 `setDomain(hStart, hEnd, true)` 是“按当前 `pi_j` 的 profitable window 收缩 job 自己的完成时间窗，但不把函数对象的全局右端契约直接砍掉”。`true` 这个参数的意思不是普通物理裁剪，而是把窗口外区间写成 `big_M` 段，尽量保留原函数的元数据右端和整体 `[a,T]` 契约。第二步 `cropToInterval(..., 0, tMid)` 或 `cropToInterval(..., tMid, pricingHorizon)` 才是在双向语义里把它明确改写成 forward half 或 backward half 函数，也就是把“当前这个 job penalty 只允许在对应半域上参与 label 递推”写进函数元数据。
+
+2026-05-25 晚些时候重新按日志和代码路径复核后，需要把上一段判断收紧。当前没有找到任何真实运行日志表明 local horizon 版本曾因 `copy()` 抛出 `Invalid domain: start >= end`；`pricingHorizon/2` 那次 `wet021_001_2m` 的问题是 backward 标签爆涨到 `54053/625941`、耗时升到 `67.971s`，不是异常崩溃。进一步沿当前代码链检查后，`setDomain(hStart,hEnd,true)` 若窗口退化，会先尝试用 `WINDOW_EPSILON` 扩成正长度小区间，仍不行就直接返回整段 `big_M`；而 root local horizon 这条主路径里的 `cropToInterval(...,0,tMid)` 和 `cropToInterval(...,tMid,pricingHorizon)` 传入的 `start/end` 也都是正长度区间。因此“这条主路径自然生成单点元数据定义域，再把旧 `copy()` 触发炸掉”这一点，目前证据并不成立。更合理的结论是：`copy()` 这次修改更像预防性稳健补丁，用来允许今后显式构造出的单点域函数被安全复制；而本轮 local horizon 真正能从代码契约上解释得通的风险点，仍然是 `mergeMinimum()` 原先默认 `start < end` 的正长度公共区间假设被打破，也就是同向 envelope/frontier 若只在单点上接触，旧 overlap merge 不够稳。换句话说，当前日志能证明的是“midpoint 取半导致状态爆炸”，以及“`mergeMinimum()` 的旧输入契约过强值得兜底”；不能证明“这次确实是 `copy()` 炸过”。
+
+基于这个复核结论，2026-05-25 又把 `PiecewiseLinearFunction.copy()` 的单点域兜底改动撤回，只保留 `mergeMinimum()` 的零长度公共区间兜底。原因不是否认单点函数永远不可能出现，而是当前这条 root local horizon 主路径没有提供足够证据证明 `copy()` 改动是必要的；在缺少实际异常日志的情况下，优先回到更简单、证据更强的实现更稳。

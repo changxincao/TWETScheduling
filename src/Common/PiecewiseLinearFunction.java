@@ -152,10 +152,7 @@ public class PiecewiseLinearFunction {
 	}
 
 	public PiecewiseLinearFunction copy() {
-		// 2026-05-24: 双向 local horizon 可能把半域裁成单点。
-		// 这类函数仍可能参与 backward 第一层和 join，因此 copy 不能再假设定义域必须有正长度。
-		PiecewiseLinearFunction res = new PiecewiseLinearFunction();
-		res.resetDomain(domainStart, domainEnd);
+		PiecewiseLinearFunction res = new PiecewiseLinearFunction(domainStart, domainEnd);
 		if (this.head == null)
 			return res;
 		TimerManager.start("分段线性函数复制");

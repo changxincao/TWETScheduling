@@ -76,6 +76,10 @@ public class GCBidirectional {
 	private PiecewiseLinearFunction[] dynamicBackwardPenaltyByJob;
 	private double[] dynamicBackwardHStartByJob;
 	private double[] dynamicBackwardHEndByJob;
+	private boolean[] forwardHalfEligibleByJob;
+	private boolean[] backwardHalfEligibleByJob;
+	private int forwardHalfIneligibleJobCount;
+	private int backwardHalfIneligibleJobCount;
 	private PiecewiseLinearFunction[] baseForwardHalfPenaltyByJob;
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
@@ -698,6 +702,8 @@ public class GCBidirectional {
 	private String statisticsSummary() {
 		return "labels fw kept/dominated=" + forwardLabelsKept + "/" + forwardLabelsDominated
 				+ ", bw kept/dominated=" + backwardLabelsKept + "/" + backwardLabelsDominated
+				+ ", halfWindowIneligible fw/bw=" + forwardHalfIneligibleJobCount + "/"
+				+ backwardHalfIneligibleJobCount
 				+ ", singlePoint fw kept/storeDom/graphDom=" + forwardSinglePointKept + "/"
 				+ forwardSinglePointDominatedByStore + "/" + forwardSinglePointDominatedByGraph
 				+ ", bw kept/storeDom/graphDom=" + backwardSinglePointKept + "/"
@@ -899,7 +905,8 @@ public class GCBidirectional {
 			// 2026-05-24: dominance reachable-set 只放“永久不可达”信息。
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
-			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
+					&& isForwardSingletonOnlyExtensionAllowed(fromJob, job)
 					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -913,7 +920,8 @@ public class GCBidirectional {
 		// 2026-05-24: 三角不等式下可达性随路径扩展单调收缩，child 不需要重新扫描 1..n。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
+					&& isForwardSingletonOnlyExtensionAllowed(fromJob, job)
 					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -926,7 +934,8 @@ public class GCBidirectional {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && (isSinkRoot || !isZeroDualSingletonOnlyJob(job))
+			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
+					&& (isSinkRoot || !isZeroDualSingletonOnlyJob(job))
 					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -945,7 +954,8 @@ public class GCBidirectional {
 		// 在中间再插入一个真实 job 后不会重新可达。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && !isZeroDualSingletonOnlyJob(job)
+			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
+					&& !isZeroDualSingletonOnlyJob(job)
 					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -960,6 +970,10 @@ public class GCBidirectional {
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
+		forwardHalfEligibleByJob = null;
+		backwardHalfEligibleByJob = null;
+		forwardHalfIneligibleJobCount = 0;
+		backwardHalfIneligibleJobCount = 0;
 		zeroDualSingletonOnlyJobs = null;
 		zeroDualSingletonOnlyJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
@@ -974,6 +988,7 @@ public class GCBidirectional {
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows(lp);
 		precomputeBackwardDynamicPricingWindows(lp);
+		precomputeHalfDomainEligibility();
 	}
 
 	/**
@@ -1058,6 +1073,32 @@ public class GCBidirectional {
 			dynamicBackwardHStartByJob[job] = hStart;
 			dynamicBackwardHEndByJob[job] = hEnd;
 			dynamicBackwardPenaltyByJob[job] = penalty;
+		}
+	}
+
+	/**
+	 * 2026-05-25: 只抽取“和前驱/后继无关、单看 job 自己就落不到对应 half-domain”的信息。
+	 * forward 若整段硬窗都在 Tmid 右侧，则任何 forward prefix 都不需要再尝试它；
+	 * backward 对称地看整段硬窗是否已完全落在 Tmid 左侧。
+	 */
+	private void precomputeHalfDomainEligibility() {
+		forwardHalfEligibleByJob = new boolean[data.n + 1];
+		backwardHalfEligibleByJob = new boolean[data.n + 1];
+		forwardHalfIneligibleJobCount = 0;
+		backwardHalfIneligibleJobCount = 0;
+		for (int job = 1; job <= data.n; job++) {
+			boolean forwardEligible = dynamicJobPenaltyByJob[job] != null
+					&& !Utility.compareGt(dynamicJobHStart[job], tMid);
+			boolean backwardEligible = dynamicBackwardPenaltyByJob[job] != null
+					&& !Utility.compareLt(dynamicBackwardHEndByJob[job], tMid);
+			forwardHalfEligibleByJob[job] = forwardEligible;
+			backwardHalfEligibleByJob[job] = backwardEligible;
+			if (!forwardEligible) {
+				forwardHalfIneligibleJobCount++;
+			}
+			if (!backwardEligible) {
+				backwardHalfIneligibleJobCount++;
+			}
 		}
 	}
 
@@ -1162,6 +1203,16 @@ public class GCBidirectional {
 	private boolean isZeroDualSingletonOnlyJob(int job) {
 		return job > 0 && zeroDualSingletonOnlyJobs != null && job < zeroDualSingletonOnlyJobs.length
 				&& zeroDualSingletonOnlyJobs[job];
+	}
+
+	private boolean isForwardHalfEligibleJob(int job) {
+		return job > 0 && forwardHalfEligibleByJob != null && job < forwardHalfEligibleByJob.length
+				&& forwardHalfEligibleByJob[job];
+	}
+
+	private boolean isBackwardHalfEligibleJob(int job) {
+		return job > 0 && backwardHalfEligibleByJob != null && job < backwardHalfEligibleByJob.length
+				&& backwardHalfEligibleByJob[job];
 	}
 
 	private boolean isForwardSingletonOnlyExtensionAllowed(int prevJob, int nextJob) {

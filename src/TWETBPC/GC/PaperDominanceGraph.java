@@ -106,7 +106,7 @@ final class PaperDominanceGraph implements DominanceStore {
 			sameNode.addLabel(label);
 			inserted = sameNode;
 		} else {
-			inserted = insertNewNode(label, candidates);
+			inserted = insertNewNode(label, candidates, dominanceEnvelope);
 		}
 		labelsInserted++;
 		propagateAndTrim(inserted);
@@ -164,9 +164,11 @@ final class PaperDominanceGraph implements DominanceStore {
 		return result;
 	}
 
-	private PaperDominanceNode insertNewNode(Label label, ArrayList<PaperDominanceNode> predecessors) {
+	private PaperDominanceNode insertNewNode(Label label, ArrayList<PaperDominanceNode> predecessors,
+			PiecewiseLinearFunction precomputedPredecessorEnvelope) {
 		PaperDominanceNode node = new PaperDominanceNode(label.reachableSet, direction);
-		node.addLabel(label);
+		node.labels.add(label);
+		node.labelEnvelope = label.frontier.copy();
 		nodes.add(node);
 		nodesCreated++;
 		nodeByReachableSet.put(node.reachableKey, node);
@@ -185,7 +187,9 @@ final class PaperDominanceGraph implements DominanceStore {
 			roots.remove(successor);
 			connect(node, successor);
 		}
-		node.recomputePredecessorEnvelope();
+		// 2026-05-25: 当前新点的 predecessor 集合和上面支配检查时 merge 过的 candidates 相同，
+		// 这里直接复用那次合并后的 h，避免对同一批 predecessor 的 g_u 再做一遍 merge。
+		node.predecessorEnvelope = precomputedPredecessorEnvelope;
 		node.recomputeDominanceEnvelope();
 		return node;
 	}

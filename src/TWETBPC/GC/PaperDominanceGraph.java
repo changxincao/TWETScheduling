@@ -134,6 +134,19 @@ final class PaperDominanceGraph implements DominanceStore {
 		}
 	}
 
+	@Override
+	public boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue) {
+		PaperDominanceNode sameNode = nodeByReachableSet.get(reachableSet);
+		ArrayList<PaperDominanceNode> candidates = new ArrayList<PaperDominanceNode>();
+		if (sameNode != null && sameNode.active) {
+			candidates.add(sameNode);
+		} else {
+			candidates.addAll(findTerminalSupersetNodes(reachableSet));
+		}
+		double best = bestPointDominanceValue(candidates, pointTime);
+		return !Utility.compareGt(best, pointValue);
+	}
+
 	private ArrayList<PaperDominanceNode> findTerminalSupersetNodes(PackedBitSet target) {
 		supersetSearchCalls++;
 		ArrayList<PaperDominanceNode> result = new ArrayList<PaperDominanceNode>();
@@ -364,6 +377,20 @@ final class PaperDominanceGraph implements DominanceStore {
 		return envelope;
 	}
 
+	private double bestPointDominanceValue(ArrayList<PaperDominanceNode> candidates, double pointTime) {
+		double best = Utility.big_M;
+		for (PaperDominanceNode node : candidates) {
+			if (!node.active || node.dominanceEnvelope == null || node.dominanceEnvelope.head == null) {
+				continue;
+			}
+			double candidateValue = pointDominanceValue(node.dominanceEnvelope, pointTime);
+			if (Utility.compareLt(candidateValue, best)) {
+				best = candidateValue;
+			}
+		}
+		return best;
+	}
+
 	private static boolean canCoverDomain(PiecewiseLinearFunction candidate, PiecewiseLinearFunction target,
 			Direction direction) {
 		if (candidate == null || candidate.head == null || target == null || target.head == null) {
@@ -373,6 +400,22 @@ final class PaperDominanceGraph implements DominanceStore {
 			return !Utility.compareGt(candidate.head.start, target.head.start);
 		}
 		return !Utility.compareLt(candidate.tail.end, target.tail.end);
+	}
+
+	private double pointDominanceValue(PiecewiseLinearFunction envelope, double pointTime) {
+		if (envelope == null || envelope.head == null) {
+			return Utility.big_M;
+		}
+		if (Utility.compareLt(pointTime, envelope.head.start) || Utility.compareGt(pointTime, envelope.tail.end)) {
+			return Utility.big_M;
+		}
+		if (direction == Direction.FORWARD && Utility.compareEq(pointTime, envelope.tail.end)) {
+			return envelope.tail.getValue(envelope.tail.end);
+		}
+		if (direction == Direction.BACKWARD && Utility.compareEq(pointTime, envelope.head.start)) {
+			return envelope.head.getValue(envelope.head.start);
+		}
+		return envelope.evaluate(pointTime);
 	}
 
 	private void connect(PaperDominanceNode from, PaperDominanceNode to) {

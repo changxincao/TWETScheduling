@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.PriorityQueue;
 
@@ -50,6 +51,8 @@ public class GCBidirectional {
 	private ArrayList<DominanceStore> FWTL;
 	private ArrayList<DominanceStore> BWTL;
 	private ArrayList<ArrayList<ForwardLabel>> activeForwardByLastJob;
+	private ArrayList<SinglePointStore<ForwardLabel>> forwardSinglePointByLastJob;
+	private ArrayList<SinglePointStore<BackwardLabel>> backwardSinglePointByFirstJob;
 	private PackedBitSet activeForwardTerminalJobs;
 	private double[] minForwardReducedCostByLastJob;
 	private double[] minForwardEllByLastJob;
@@ -96,6 +99,12 @@ public class GCBidirectional {
 	private long joinPairsTimePruned;
 	private long joinFunctionEvaluations;
 	private long joinFunctionPruned;
+	private long forwardSinglePointKept;
+	private long forwardSinglePointDominatedByStore;
+	private long forwardSinglePointDominatedByGraph;
+	private long backwardSinglePointKept;
+	private long backwardSinglePointDominatedByStore;
+	private long backwardSinglePointDominatedByGraph;
 
 	private String lastMessage = "Bidirectional pricing not executed";
 
@@ -139,6 +148,8 @@ public class GCBidirectional {
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
 		BWTL = new ArrayList<DominanceStore>(data.n + 1);
 		activeForwardByLastJob = new ArrayList<ArrayList<ForwardLabel>>(data.n + 1);
+		forwardSinglePointByLastJob = new ArrayList<SinglePointStore<ForwardLabel>>(data.n + 1);
+		backwardSinglePointByFirstJob = new ArrayList<SinglePointStore<BackwardLabel>>(data.n + 1);
 		activeForwardTerminalJobs = new PackedBitSet(data.n + 2);
 		minForwardReducedCostByLastJob = new double[data.n + 1];
 		minForwardEllByLastJob = new double[data.n + 1];
@@ -146,6 +157,8 @@ public class GCBidirectional {
 			FWTL.add(new PaperDominanceGraph(Direction.FORWARD));
 			BWTL.add(new PaperDominanceGraph(Direction.BACKWARD));
 			activeForwardByLastJob.add(new ArrayList<ForwardLabel>());
+			forwardSinglePointByLastJob.add(new SinglePointStore<ForwardLabel>());
+			backwardSinglePointByFirstJob.add(new SinglePointStore<BackwardLabel>());
 			minForwardReducedCostByLastJob[i] = Utility.big_M;
 			minForwardEllByLastJob[i] = Utility.big_M;
 		}
@@ -167,7 +180,7 @@ public class GCBidirectional {
 		sourceFrontier.normalize(Direction.FORWARD);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
 				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
-		if (!insertForward(source)) {
+		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
 		}
 	}
@@ -206,7 +219,7 @@ public class GCBidirectional {
 			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 				continue;
 			}
-			if (!insertForward(child)) {
+			if (insertForward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 				FWUL.add(child);
 			}
 		}
@@ -231,7 +244,7 @@ public class GCBidirectional {
 			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 				continue;
 			}
-			if (!insertBackward(child)) {
+			if (insertBackward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 				BWUL.add(child);
 			}
 		}
@@ -343,27 +356,148 @@ public class GCBidirectional {
 		return new BackwardLabel(nextLabelId++, prevJob, label, visited, reachable, nextFrontier, false);
 	}
 
-	private boolean insertForward(ForwardLabel label) {
+	private InsertStatus insertForward(ForwardLabel label, LP lp) {
+		if (isSinglePointFrontier(label.frontier)) {
+			return insertForwardSinglePoint(label, lp);
+		}
 		boolean dominated = FWTL.get(label.jid).insertOrDominate(label);
 		if (!dominated) {
 			forwardLabelsKept++;
 			activeForwardByLastJob.get(label.jid).add(label);
 			activeForwardTerminalJobs.add(label.jid);
 			updateForwardScalarInfo(label);
-		} else {
-			forwardLabelsDominated++;
+			return InsertStatus.STORED_AND_ENQUEUE;
 		}
-		return dominated;
+		forwardLabelsDominated++;
+		return InsertStatus.DOMINATED;
 	}
 
-	private boolean insertBackward(BackwardLabel label) {
+	private InsertStatus insertBackward(BackwardLabel label, LP lp) {
+		if (isSinglePointFrontier(label.frontier)) {
+			return insertBackwardSinglePoint(label, lp);
+		}
 		boolean dominated = BWTL.get(label.jid).insertOrDominate(label);
 		if (dominated) {
 			backwardLabelsDominated++;
-		} else {
-			backwardLabelsKept++;
+			return InsertStatus.DOMINATED;
 		}
-		return dominated;
+		backwardLabelsKept++;
+		return InsertStatus.STORED_AND_ENQUEUE;
+	}
+
+	/**
+	 * 2026-05-25: Tmid 单点 forward label 不再进入普通 dominance graph，也不再入扩展队列；
+	 * 但仍要保留给 sink 收尾和后续 backward join。
+	 */
+	private InsertStatus insertForwardSinglePoint(ForwardLabel label, LP lp) {
+		SinglePointStore<ForwardLabel> store = forwardSinglePointByLastJob.get(label.jid);
+		if (isDominatedBySinglePointStore(store, label)) {
+			label.isDominated = true;
+			forwardLabelsDominated++;
+			forwardSinglePointDominatedByStore++;
+			return InsertStatus.DOMINATED;
+		}
+		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+			label.isDominated = true;
+			forwardLabelsDominated++;
+			forwardSinglePointDominatedByGraph++;
+			return InsertStatus.DOMINATED;
+		}
+		removeSinglePointsDominatedBy(store, label);
+		addSinglePointLabel(store, label);
+		forwardLabelsKept++;
+		forwardSinglePointKept++;
+		activeForwardByLastJob.get(label.jid).add(label);
+		activeForwardTerminalJobs.add(label.jid);
+		updateForwardScalarInfo(label);
+		tryGenerateForwardColumn(label, lp);
+		return InsertStatus.STORED_NO_EXPAND;
+	}
+
+	/**
+	 * 2026-05-25: Tmid 单点 backward label 只保留给 single-point store 和立即 join，
+	 * 不再进入普通 dominance graph 或 backward 扩展队列。
+	 */
+	private InsertStatus insertBackwardSinglePoint(BackwardLabel label, LP lp) {
+		SinglePointStore<BackwardLabel> store = backwardSinglePointByFirstJob.get(label.jid);
+		if (isDominatedBySinglePointStore(store, label)) {
+			label.isDominated = true;
+			backwardLabelsDominated++;
+			backwardSinglePointDominatedByStore++;
+			return InsertStatus.DOMINATED;
+		}
+		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+			label.isDominated = true;
+			backwardLabelsDominated++;
+			backwardSinglePointDominatedByGraph++;
+			return InsertStatus.DOMINATED;
+		}
+		removeSinglePointsDominatedBy(store, label);
+		addSinglePointLabel(store, label);
+		backwardLabelsKept++;
+		backwardSinglePointKept++;
+		joinFromBackward(label, lp);
+		return InsertStatus.STORED_NO_EXPAND;
+	}
+
+	private boolean isSinglePointFrontier(PiecewiseLinearFunction frontier) {
+		return frontier != null && frontier.head != null && frontier.tail != null
+				&& Utility.compareEq(frontier.head.start, frontier.tail.end)
+				&& Utility.compareEq(frontier.head.start, tMid);
+	}
+
+	private <L extends FunctionLabel> boolean isDominatedBySinglePointStore(SinglePointStore<L> store, L label) {
+		L exact = store.bestByReachable.get(label.reachableSet);
+		if (exact != null) {
+			if (exact.isDominated) {
+				store.bestByReachable.remove(label.reachableSet);
+			} else if (!Utility.compareLt(label.minReducedCost, exact.minReducedCost)) {
+				return true;
+			}
+		}
+		int labelCardinality = label.reachableCardinality;
+		for (int i = 0; i < store.liveLabels.size(); i++) {
+			L existing = store.liveLabels.get(i);
+			if (existing.isDominated) {
+				continue;
+			}
+			if (existing.reachableCardinality < labelCardinality) {
+				continue;
+			}
+			if (existing.reachableSet.isSupersetOf(label.reachableSet)
+					&& !Utility.compareGt(existing.minReducedCost, label.minReducedCost)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private <L extends FunctionLabel> void removeSinglePointsDominatedBy(SinglePointStore<L> store, L label) {
+		int labelCardinality = label.reachableCardinality;
+		for (int i = store.liveLabels.size() - 1; i >= 0; i--) {
+			L existing = store.liveLabels.get(i);
+			if (existing.isDominated) {
+				store.liveLabels.remove(i);
+				continue;
+			}
+			if (labelCardinality < existing.reachableCardinality) {
+				continue;
+			}
+			if (label.reachableSet.isSupersetOf(existing.reachableSet)
+					&& !Utility.compareGt(label.minReducedCost, existing.minReducedCost)) {
+				existing.isDominated = true;
+				store.liveLabels.remove(i);
+				L mapped = store.bestByReachable.get(existing.reachableSet);
+				if (mapped == existing) {
+					store.bestByReachable.remove(existing.reachableSet);
+				}
+			}
+		}
+	}
+
+	private <L extends FunctionLabel> void addSinglePointLabel(SinglePointStore<L> store, L label) {
+		store.bestByReachable.put(label.reachableSet, label);
+		store.liveLabels.add(label);
 	}
 
 	private void updateForwardScalarInfo(ForwardLabel label) {
@@ -534,11 +668,21 @@ public class GCBidirectional {
 		joinPairsTimePruned = 0;
 		joinFunctionEvaluations = 0;
 		joinFunctionPruned = 0;
+		forwardSinglePointKept = 0;
+		forwardSinglePointDominatedByStore = 0;
+		forwardSinglePointDominatedByGraph = 0;
+		backwardSinglePointKept = 0;
+		backwardSinglePointDominatedByStore = 0;
+		backwardSinglePointDominatedByGraph = 0;
 	}
 
 	private String statisticsSummary() {
 		return "labels fw kept/dominated=" + forwardLabelsKept + "/" + forwardLabelsDominated
 				+ ", bw kept/dominated=" + backwardLabelsKept + "/" + backwardLabelsDominated
+				+ ", singlePoint fw kept/storeDom/graphDom=" + forwardSinglePointKept + "/"
+				+ forwardSinglePointDominatedByStore + "/" + forwardSinglePointDominatedByGraph
+				+ ", bw kept/storeDom/graphDom=" + backwardSinglePointKept + "/"
+				+ backwardSinglePointDominatedByStore + "/" + backwardSinglePointDominatedByGraph
 				+ ", join groups scanned/arcOrVisit/empty/timeLB/costLB=" + joinTerminalGroupsScanned
 				+ "/" + joinTerminalGroupsArcOrVisitPruned + "/" + joinTerminalGroupsEmpty
 				+ "/" + joinTerminalGroupsTimePruned + "/" + joinTerminalGroupsCostPruned
@@ -1140,6 +1284,15 @@ public class GCBidirectional {
 			}
 		}
 		function.tail = cur;
+	}
+
+	private enum InsertStatus {
+		DOMINATED, STORED_NO_EXPAND, STORED_AND_ENQUEUE
+	}
+
+	private static final class SinglePointStore<L extends FunctionLabel> {
+		final HashMap<PackedBitSet, L> bestByReachable = new HashMap<PackedBitSet, L>();
+		final ArrayList<L> liveLabels = new ArrayList<L>();
 	}
 
 	private abstract static class FunctionLabel extends Label implements Comparable<Label> {

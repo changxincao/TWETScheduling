@@ -67,6 +67,24 @@ final class DominanceGraph implements DominanceStore {
 		}
 	}
 
+	@Override
+	public boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue) {
+		double best = Utility.big_M;
+		for (DominanceNode node : nodes) {
+			if (node.labelEnvelope == null || node.labelEnvelope.head == null) {
+				continue;
+			}
+			if (!node.reachableKey.isSupersetOf(reachableSet)) {
+				continue;
+			}
+			double candidateValue = pointDominanceValue(node.labelEnvelope, pointTime);
+			if (Utility.compareLt(candidateValue, best)) {
+				best = candidateValue;
+			}
+		}
+		return !Utility.compareGt(best, pointValue);
+	}
+
 	private PiecewiseLinearFunction buildEligibleEnvelope(PackedBitSet reachableSet, DominanceNode excluded) {
 		PiecewiseLinearFunction envelope = null;
 		for (DominanceNode node : nodes) {
@@ -138,6 +156,22 @@ final class DominanceGraph implements DominanceStore {
 			return !Utility.compareGt(candidate.head.start, target.head.start);
 		}
 		return !Utility.compareLt(candidate.tail.end, target.tail.end);
+	}
+
+	private double pointDominanceValue(PiecewiseLinearFunction envelope, double pointTime) {
+		if (envelope == null || envelope.head == null) {
+			return Utility.big_M;
+		}
+		if (Utility.compareLt(pointTime, envelope.head.start) || Utility.compareGt(pointTime, envelope.tail.end)) {
+			return Utility.big_M;
+		}
+		if (direction == Direction.FORWARD && Utility.compareEq(pointTime, envelope.tail.end)) {
+			return envelope.tail.getValue(envelope.tail.end);
+		}
+		if (direction == Direction.BACKWARD && Utility.compareEq(pointTime, envelope.head.start)) {
+			return envelope.head.getValue(envelope.head.start);
+		}
+		return envelope.evaluate(pointTime);
 	}
 
 }

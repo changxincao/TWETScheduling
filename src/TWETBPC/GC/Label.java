@@ -22,6 +22,7 @@ public class Label implements Comparable<Label> {
 	public PackedBitSet visitedSet;
 	/** 从当前 label 出发仍可能扩展的 job 集合，用于 dominance graph 的 node key。 */
 	public PackedBitSet reachableSet;
+	public int reachableCardinality;
 	/** 当前 partial sequence 的 reduced-cost 函数。 */
 	public PiecewiseLinearFunction frontier;
 	/** frontier 的全局最小值，供队列排序和快速过滤使用。 */
@@ -40,6 +41,7 @@ public class Label implements Comparable<Label> {
 		this.father = father;
 		this.visitedSet = visitedSet;
 		this.reachableSet = reachableSet;
+		this.reachableCardinality = reachableSet == null ? 0 : reachableSet.cardinality();
 		this.frontier = frontier;
 		this.minReducedCost = minReducedCost;
 		this.isDominated = false;

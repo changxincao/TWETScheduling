@@ -2,6 +2,8 @@ package TWETBPC.GC;
 
 import java.util.ArrayList;
 
+import TWETBPC.Util.PackedBitSet;
+
 /**
  * 单个 terminal job 下 label 占优结构的统一接口。
  * <p>
@@ -27,5 +29,13 @@ interface DominanceStore {
 	 * 调用方负责先清空 buffer，本方法只追加当前仍 active 的真实 label。
 	 */
 	void collectActiveLabels(ArrayList<Label> buffer);
+
+	/**
+	 * 2026-05-25: single-point label 不再插入普通 dominance graph，但仍可复用 graph 现有的 reachable-set
+	 * 层次搜索，判断它是否已经被某个 active 普通 label 在给定时间点压住。
+	 *
+	 * @return true 表示当前 graph 中已存在可支配该单点 label 的普通 label；false 表示未找到。
+	 */
+	boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue);
 
 }

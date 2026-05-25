@@ -11,6 +11,7 @@ import java.util.Map;
 
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
+import Common.Utility;
 import TWETBPC.Util.PackedBitSet;
 
 /**
@@ -93,7 +94,8 @@ final class PaperDominanceGraph implements DominanceStore {
 
 		PiecewiseLinearFunction dominanceEnvelope = mergeGEnvelopes(candidates);
 		dominanceChecks++;
-		if (dominanceEnvelope != null && dominanceEnvelope.dominates(label.frontier)) {
+		if (canCoverDomain(dominanceEnvelope, label.frontier, direction)
+				&& dominanceEnvelope.dominates(label.frontier)) {
 			label.isDominated = true;
 			labelsRejected++;
 			return true;
@@ -272,7 +274,8 @@ final class PaperDominanceGraph implements DominanceStore {
 			propagationNodesVisited++;
 			node.recomputePredecessorEnvelope();
 			dominanceChecks++;
-			if (node.predecessorEnvelope != null && node.predecessorEnvelope.dominates(node.labelEnvelope)) {
+			if (canCoverDomain(node.predecessorEnvelope, node.labelEnvelope, direction)
+					&& node.predecessorEnvelope.dominates(node.labelEnvelope)) {
 				ArrayList<PaperDominanceNode> affected = deleteNode(node);
 				for (PaperDominanceNode successor : affected) {
 					if (successor.active && queued.add(successor)) {
@@ -357,6 +360,17 @@ final class PaperDominanceGraph implements DominanceStore {
 		return envelope;
 	}
 
+	private static boolean canCoverDomain(PiecewiseLinearFunction candidate, PiecewiseLinearFunction target,
+			Direction direction) {
+		if (candidate == null || candidate.head == null || target == null || target.head == null) {
+			return false;
+		}
+		if (direction == Direction.FORWARD) {
+			return !Utility.compareGt(candidate.head.start, target.head.start);
+		}
+		return !Utility.compareLt(candidate.tail.end, target.tail.end);
+	}
+
 	private void connect(PaperDominanceNode from, PaperDominanceNode to) {
 		if (from == to) {
 			return;
@@ -432,7 +446,8 @@ final class PaperDominanceGraph implements DominanceStore {
 			for (int i = labels.size() - 1; i >= 0; i--) {
 				Label label = labels.get(i);
 				dominanceChecks++;
-				if (predecessorEnvelope.dominates(label.frontier)) {
+				if (canCoverDomain(predecessorEnvelope, label.frontier, direction)
+						&& predecessorEnvelope.dominates(label.frontier)) {
 					label.isDominated = true;
 					labels.remove(i);
 					labelsDeletedByPropagation++;

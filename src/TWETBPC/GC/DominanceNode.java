@@ -37,12 +37,12 @@ final class DominanceNode {
 		}
 	}
 
-	boolean removeDominatedBy(PiecewiseLinearFunction envelope) {
+	boolean removeDominatedBy(PiecewiseLinearFunction envelope, DominanceGraph graph) {
 		boolean changed = false;
 		Iterator<Label> iterator = labels.iterator();
 		while (iterator.hasNext()) {
 			Label label = iterator.next();
-			if (envelope.dominates(label.frontier)) {
+			if (graph.canCoverDomain(envelope, label.frontier) && envelope.dominates(label.frontier)) {
 				label.isDominated = true;
 				iterator.remove();
 				changed = true;

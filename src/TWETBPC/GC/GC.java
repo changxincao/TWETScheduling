@@ -41,6 +41,7 @@ public class GC {
 	private int zeroDualSingletonOnlyJobCount;
 	private String lastMessage = "Exact forward labeling not executed";
 	// 2026-05-20: 当前 RMP dual 下的 job-level H_j 硬窗缓存，只在一次 pricing 调用内有效。
+	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	// 2026-05-24: 根节点无 cut 时才允许用 pi_j 动态 profitable window。
@@ -183,8 +184,10 @@ public class GC {
 		if (jobPenalty == null) {
 			return false;
 		}
+		double hStart = getDynamicHStart(prevJob, nextJob);
 		double hEnd = getDynamicHEnd(prevJob, nextJob);
-		double earliestCompletion = frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
+		double earliestCompletion = Math.max(
+				frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob), hStart);
 		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, data.CmaxH);
 	}
 
@@ -197,12 +200,14 @@ public class GC {
 	 * 这个缓存只在本次 pricing 内使用，不能写入全局禁弧矩阵，也不能影响分支候选。
 	 */
 	private void precomputeDynamicPricingWindows(LP lp) {
+		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
 		dynamicJobPenaltyByJob = null;
 		zeroDualSingletonOnlyJobs = null;
 		zeroDualSingletonOnlyJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		precomputeZeroDualSingletonOnlyJobs(lp);
+		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
@@ -221,6 +226,7 @@ public class GC {
 					penalty = Utility.compareGt(hStart, hEnd) ? null : data.penaltyFunction[job].setDomain(hStart, hEnd, true);
 				}
 			}
+			dynamicJobHStart[job] = hStart;
 			dynamicJobHEnd[job] = hEnd;
 			dynamicJobPenaltyByJob[job] = penalty;
 		}
@@ -260,6 +266,10 @@ public class GC {
 
 	private double getDynamicHEnd(int prevJob, int job) {
 		return dynamicJobHEnd[job];
+	}
+
+	private double getDynamicHStart(int prevJob, int job) {
+		return dynamicJobHStart[job];
 	}
 
 	private double hWindowStart(int job, double gamma) {

@@ -68,6 +68,7 @@ public class GCBidirectional {
 	private double pricingHorizon;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
+	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
 	private PiecewiseLinearFunction[] dynamicBackwardPenaltyByJob;
 	private double[] dynamicBackwardHStartByJob;
@@ -699,8 +700,10 @@ public class GCBidirectional {
 		if (jobPenalty == null) {
 			return false;
 		}
+		double hStart = getDynamicForwardHStart(prevJob, nextJob);
 		double hEnd = getDynamicForwardHEnd(prevJob, nextJob);
-		double earliestCompletion = frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob);
+		double earliestCompletion = Math.max(
+				frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob), hStart);
 		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, tMid);
 	}
 
@@ -789,6 +792,7 @@ public class GCBidirectional {
 
 	private void precomputeDynamicPricingWindows(LP lp) {
 		dynamicJobPenaltyByJob = null;
+		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
@@ -844,6 +848,7 @@ public class GCBidirectional {
 
 	private void precomputeJobLevelDynamicPricingWindows(LP lp) {
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
+		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			double hStart = data.hardWindowStart[job];
@@ -861,6 +866,7 @@ public class GCBidirectional {
 					penalty = Utility.compareGt(hStart, hEnd) ? null : buildForwardHalfPenalty(job, hStart, hEnd);
 				}
 			}
+			dynamicJobHStart[job] = hStart;
 			dynamicJobHEnd[job] = hEnd;
 			dynamicJobPenaltyByJob[job] = penalty;
 		}
@@ -954,6 +960,10 @@ public class GCBidirectional {
 
 	private double getDynamicForwardHEnd(int prevJob, int job) {
 		return dynamicJobHEnd[job];
+	}
+
+	private double getDynamicForwardHStart(int prevJob, int job) {
+		return dynamicJobHStart[job];
 	}
 
 	private PiecewiseLinearFunction getDynamicBackwardJobPenalty(int job, int successor) {

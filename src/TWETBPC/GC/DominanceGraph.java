@@ -5,6 +5,7 @@ import java.util.Iterator;
 
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
+import Common.Utility;
 import TWETBPC.Util.PackedBitSet;
 
 /**
@@ -34,7 +35,7 @@ final class DominanceGraph implements DominanceStore {
 	 */
 	public boolean insertOrDominate(Label label) {
 		PiecewiseLinearFunction eligibleEnvelope = buildEligibleEnvelope(label.reachableSet, null);
-		if (eligibleEnvelope != null && eligibleEnvelope.dominates(label.frontier)) {
+		if (canCoverDomain(eligibleEnvelope, label.frontier) && eligibleEnvelope.dominates(label.frontier)) {
 			label.isDominated = true;
 			return true;
 		}
@@ -110,7 +111,8 @@ final class DominanceGraph implements DominanceStore {
 				if (eligibleEnvelope == null || eligibleEnvelope.head == null) {
 					continue;
 				}
-				if (eligibleEnvelope.dominates(node.labelEnvelope)) {
+				if (canCoverDomain(eligibleEnvelope, node.labelEnvelope)
+						&& eligibleEnvelope.dominates(node.labelEnvelope)) {
 					for (Label label : node.getLabels()) {
 						label.isDominated = true;
 					}
@@ -118,7 +120,7 @@ final class DominanceGraph implements DominanceStore {
 					changed = true;
 					continue;
 				}
-				if (node.removeDominatedBy(eligibleEnvelope)) {
+				if (node.removeDominatedBy(eligibleEnvelope, this)) {
 					changed = true;
 					if (node.isEmpty()) {
 						iterator.remove();
@@ -126,6 +128,16 @@ final class DominanceGraph implements DominanceStore {
 				}
 			}
 		} while (changed);
+	}
+
+	boolean canCoverDomain(PiecewiseLinearFunction candidate, PiecewiseLinearFunction target) {
+		if (candidate == null || candidate.head == null || target == null || target.head == null) {
+			return false;
+		}
+		if (direction == Direction.FORWARD) {
+			return !Utility.compareGt(candidate.head.start, target.head.start);
+		}
+		return !Utility.compareLt(candidate.tail.end, target.tail.end);
 	}
 
 }

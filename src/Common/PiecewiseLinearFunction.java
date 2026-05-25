@@ -1328,7 +1328,10 @@ public class PiecewiseLinearFunction {
 			Utility.debugCheckPWLFLeftBound("mergeMinimum.input.left", this);
 			Utility.debugCheckPWLFLeftBound("mergeMinimum.input.right", g);
 		}
-		// 函数g可以被舍弃，可随意修改，update不行
+		// 2026-05-26: 当前正式调用方把 label/frontier/envelope 缓存作为右参数传入，
+		// 因此 mergeMinimum 不能消耗或改写输入函数。2011 partial-dominance 那类
+		// “同一 S 的两个 label 直接取下包络并删除一个 label”理论上可以允许破坏式输入，
+		// 但合并后下包络已混合两条路径，难以恢复真实列序列，当前不采用这种语义。
 		// 如果 L1 为空，直接变成 L2 的拷贝
 		if (this.head == null) {
 			if (g.head != null) {

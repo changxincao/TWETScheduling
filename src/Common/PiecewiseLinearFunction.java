@@ -1332,8 +1332,9 @@ public class PiecewiseLinearFunction {
 		// 如果 L1 为空，直接变成 L2 的拷贝
 		if (this.head == null) {
 			if (g.head != null) {
-				this.head = g.head;
-				this.tail = g.tail;
+				PiecewiseLinearFunction copied = g.copy();
+				this.head = copied.head;
+				this.tail = copied.tail;
 			}
 			return;
 		}
@@ -1341,6 +1342,10 @@ public class PiecewiseLinearFunction {
 		if (g.head == null) {
 			return;
 		}
+		// 2026-05-25: mergeMinimum 内部会截断并拼接右参数的 Segment 链。
+		// dominance graph 会把 label/frontier/envelope 缓存作为右参数传入，因此这里必须先复制，
+		// 避免把右参数的物理 head/tail 改坏，造成 domainStart 与 head.start 不一致。
+		g = g.copy();
 
 		resetMinimum();
 		// 1) 定位公共定义域 这里两个函数取小因该是要取并集的  不能取交集

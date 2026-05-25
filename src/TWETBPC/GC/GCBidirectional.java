@@ -41,6 +41,9 @@ public class GCBidirectional {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
 	private static final double ROOT_LOCAL_HORIZON_MIDPOINT_RATIO = 0.75;
+	private static final String MIDPOINT_STRATEGY_PROPERTY = "twet.bpc.bidir.midpointStrategy";
+	private static final String MIDPOINT_STRATEGY_RATIO75 = "ratio75";
+	private static final String MIDPOINT_STRATEGY_MEDIAN_RIGHT_END = "medianRightEnd";
 
 	private final Data data;
 	private final TWETBPCConfig config;
@@ -85,6 +88,8 @@ public class GCBidirectional {
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
 	// 2026-05-24: 只有根节点且没有 cut dual 时，pi_j profitable window 才保留三角不等式依据。
 	private boolean dualProfitableWindowEnabled;
+	// 2026-05-25: 记录当前这轮 bidirectional pricing 实际采用的 midpoint 规则，便于和日志对齐。
+	private String midpointStrategy;
 
 	private long forwardLabelsKept;
 	private long forwardLabelsDominated;
@@ -718,6 +723,7 @@ public class GCBidirectional {
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
+				+ ", midpointStrategy=" + midpointStrategy
 				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
@@ -978,17 +984,73 @@ public class GCBidirectional {
 		zeroDualSingletonOnlyJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		pricingHorizon = computeCurrentPricingHorizon(lp);
-		// 2026-05-24: 只在 root profitable window 真正收紧时用局部 horizon 调整 midpoint。
-		// 当前 hybrid-B 是先跑完整个 forward half，再跑 backward；若直接对半切 local horizon，
-		// midpoint 会过左，导致 backward label 爆炸、总时间反而更差。
-		tMid = dualProfitableWindowEnabled && Utility.compareLt(pricingHorizon, data.CmaxH)
-				? pricingHorizon * ROOT_LOCAL_HORIZON_MIDPOINT_RATIO
-				: data.CmaxH * 0.5;
+		tMid = computeCurrentMidpoint(lp);
 		precomputeZeroDualSingletonOnlyJobs(lp);
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows(lp);
 		precomputeBackwardDynamicPricingWindows(lp);
 		precomputeHalfDomainEligibility();
+	}
+
+	/**
+	 * 2026-05-25: 默认仍保留验证过更稳的 0.75*pricingHorizon。
+	 * 仅在显式实验开关下，尝试把当前有效右端点的中位数作为 midpoint。
+	 */
+	private double computeCurrentMidpoint(LP lp) {
+		midpointStrategy = normalizeMidpointStrategy(System.getProperty(MIDPOINT_STRATEGY_PROPERTY));
+		if (dualProfitableWindowEnabled && Utility.compareLt(pricingHorizon, data.CmaxH)
+				&& MIDPOINT_STRATEGY_MEDIAN_RIGHT_END.equals(midpointStrategy)) {
+			double medianRightEnd = computeMedianEffectiveRightEnd(lp);
+			if (Double.isFinite(medianRightEnd)) {
+				return Math.max(0.0, Math.min(pricingHorizon, medianRightEnd));
+			}
+		}
+		return dualProfitableWindowEnabled && Utility.compareLt(pricingHorizon, data.CmaxH)
+				? pricingHorizon * ROOT_LOCAL_HORIZON_MIDPOINT_RATIO
+				: data.CmaxH * 0.5;
+	}
+
+	private String normalizeMidpointStrategy(String raw) {
+		if (raw == null) {
+			return MIDPOINT_STRATEGY_RATIO75;
+		}
+		String normalized = raw.trim();
+		if (MIDPOINT_STRATEGY_MEDIAN_RIGHT_END.equalsIgnoreCase(normalized)) {
+			return MIDPOINT_STRATEGY_MEDIAN_RIGHT_END;
+		}
+		return MIDPOINT_STRATEGY_RATIO75;
+	}
+
+	private double computeMedianEffectiveRightEnd(LP lp) {
+		double[] rightEnds = new double[data.n];
+		int count = 0;
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			double baseline = outsourcingBaseline(job);
+			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
+			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
+				double dynamicStart = hWindowStart(job, jobDual);
+				double dynamicEnd = hWindowEnd(job, jobDual);
+				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+					hStart = dynamicStart;
+					hEnd = dynamicEnd;
+				}
+			}
+			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hEnd)) {
+				rightEnds[count++] = hEnd;
+			}
+		}
+		if (count == 0) {
+			return Double.NaN;
+		}
+		java.util.Arrays.sort(rightEnds, 0, count);
+		int mid = count / 2;
+		if ((count & 1) == 1) {
+			return rightEnds[mid];
+		}
+		return 0.5 * (rightEnds[mid - 1] + rightEnds[mid]);
 	}
 
 	/**

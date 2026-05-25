@@ -1347,8 +1347,8 @@ public class PiecewiseLinearFunction {
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
 		if (!Utility.compareLt(start, end)) {
-			mergeDisjointMinimum(g, direction);
-			return;
+			throw new IllegalArgumentException("mergeMinimum requires positive overlap: this=[" + this.head.start
+					+ "," + this.tail.end + "], g=[" + g.head.start + "," + g.tail.end + "]");
 		}
 //		// 2026-05-14: pricing 调试开关。mergeMinimum 的有效输入应满足：
 //		// 1. 两个函数存在正长度公共区间，即 max(a1,a2)<min(end1,end2)；
@@ -1529,37 +1529,6 @@ public class PiecewiseLinearFunction {
 		}
 	}
 
-	private void mergeDisjointMinimum(PiecewiseLinearFunction g, Direction direction) {
-		if (g == null || g.head == null) {
-			return;
-		}
-		if (this.head == null) {
-			this.head = g.head;
-			this.tail = g.tail;
-			this.domainStart = g.domainStart;
-			this.domainEnd = g.domainEnd;
-			return;
-		}
-		if (Utility.compareLe(this.tail.end, g.head.start)) {
-			this.tail.next = g.head;
-			this.tail = g.tail;
-		} else if (Utility.compareLe(g.tail.end, this.head.start)) {
-			g.tail.next = this.head;
-			this.head = g.head;
-		} else {
-			return;
-		}
-		this.domainStart = Math.min(this.domainStart, g.domainStart);
-		this.domainEnd = Math.max(this.domainEnd, g.domainEnd);
-		normalize(direction);
-		if (direction == Direction.BACKWARD) {
-			Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
-		} else {
-			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
-		}
-	}
-
-	
 	public void release() {
 		if(!Configure.SegmentPool) return;
 		SegmentPool.release(this.head);

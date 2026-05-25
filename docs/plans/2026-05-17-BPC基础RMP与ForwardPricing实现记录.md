@@ -1332,3 +1332,12 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 `PaperDominanceGraph` 这边继续做低风险的结构优化。`connect()/disconnect()` 相关的前驱和后继邻接表从线性表改成集合，减少重复连边和断边时的 `contains/remove` 开销；`removeRedundantSubsetCandidates()` 不再对所有 candidate 做朴素两两比较，而是先按 reachable set 基数从大到小排序，再顺序保留 maximal subset frontier，只和当前已保留 frontier 比较。这样不改变“只保留 immediate subset successors”的语义，但可以减少无谓的二次比较。删点时仍然保留 predecessor 到 active successor 的重连逻辑，不过会先针对每个 predecessor 过滤出与之兼容的 maximal successor frontier，再做重连，避免把 deleted node 的所有 active successor 都无差别连回去。当前仍然没有去强行维护严格的 cover graph/Hasse 图，这一层后续如果要继续压缩图，再单独处理。
 
 验证方面，本轮先运行 `PaperDominanceGraphConsistencyTest`，结果仍为 `cases=200, insertions=16000`；随后用现有 `src` classpath 做 focused `javac` 增量编译，`HeuristicPricingEngine.java`、`PaperDominanceGraph.java`、`GCBidirectional.java` 和 `GC.java` 均通过。完整源码链路编译仍受本机缺失 CPLEX `ilog.*` classpath 约束，这次仍保持局部编译验证方式。当前结论是：这几项修改都属于“语义不动、减少结构开销”的优化，主要收益应体现在 restricted pool 较大时的 heuristic seed 选择、tabu accepted move 后的 profile 更新，以及 exact pricing 的 dominance graph 维护成本上。
+## 2026-05-25：基础 penalty 物理定义域补齐
+
+这次回头查双向 backward 半域异常时，核心问题没有落在 `merge`、`normalize(BACKWARD)` 或 join 辅助延拓上，而是在 `Data.setPenaltyFunctions()` 最开始构造 job penalty 的地方。原实现按条件拼三段：只有 `w_e>0 且 d_e>0` 才建 early 段，只有 `d_e!=d_l` 才建中间零惩罚段，tardy 段则总是从 `d_l` 接到 `CmaxH`。这样一来，只要出现 `w_e=0`、`d_e=0` 或 `d_e=d_l` 这类情况，数学语义上虽然 `[0,d_l]` 仍应是零成本，但物理 segment 链可能直接从 `d_l` 才开始。
+
+后续双向 pricing 里，`GCBidirectional.ensureBaseHalfPenaltyCache()` 和动态 backward penalty 都是从 `data.penaltyFunction[j]` 再做 `cropToInterval(..., Tmid, pricingHorizon)`。`cropToInterval` 只裁已有物理 segment，不会凭空补 `[Tmid,d_l)`；而 `setDomain(..., true)` 也是围绕当前物理 `head.start/tail.end` 写窗外 `big_M`，不会把缺失的左侧零成本段补回来。于是 backward sink root 第一次扩展时，`jobPenalty.copy()` 可能一出生就是 `[d_l, ...]`，不再满足“backward label 存在于 `[Tmid,\rho]` 且在 `Tmid` 处有值”的半域不变量，后面 merge 里看到的点接触只是这个上游缺口的外显结果。
+
+本次修正只动了 `Data.setPenaltyFunctions()`：新增 `buildBasePenaltyFunction(jid)`，显式维护一个 `coveredUntil`，若 early 段没有覆盖到 `d_l`，就补一段 `[coveredUntil,d_l]` 的零成本常数段，再接原 tardy 段。这样每个 job penalty 在物理上都连续覆盖 `[0,CmaxH]`，后续静态/动态 hard window、forward/backward half-domain crop 都建立在完整函数上，不再依赖后处理补丁。
+
+验证只做了和本次改动直接相关的最小检查：`git diff` 确认只修改 `src/Basic/Data.java`；`javac -encoding UTF-8 -cp src src/Basic/Data.java src/Common/PiecewiseLinearFunction.java` 通过。更宽的 `GCBidirectional` focused 编译仍会被仓库现有的 CPLEX `ilog.*` classpath 缺失阻断，这不是本次改动引入的问题。

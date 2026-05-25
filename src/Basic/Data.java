@@ -276,14 +276,7 @@ public class Data {
 		penaltyFunction[0] = new PiecewiseLinearFunction(0, CmaxH);
 		penaltyFunction[0].addSegment(0, CmaxH, 0, 0);
 		for (int jid = 1; jid < n + 1; jid++) {
-			penaltyFunction[jid] = new PiecewiseLinearFunction(0, CmaxH);
-			if ((!Utility.compareEq(0, d_e[jid])) && (!Utility.compareEq(w_e[jid], 0))) {
-				penaltyFunction[jid].addSegment(0, d_e[jid], -w_e[jid], w_e[jid] * d_e[jid]);
-			}
-			if (!Utility.compareEq(d_e[jid], d_l[jid])) {
-				penaltyFunction[jid].addSegment(d_e[jid], d_l[jid], 0, 0);
-			}
-			penaltyFunction[jid].addSegment(d_l[jid], CmaxH, w_t[jid], -w_t[jid] * d_l[jid]);
+			penaltyFunction[jid] = buildBasePenaltyFunction(jid);
 			// 2026-05-15: 预处理粗硬窗直接作用到原始 job 成本函数，但窗外只写成 big_M，不物理删除定义域。
 			// 这样启发式和后续 BPC pricing 仍能保持函数右端到 CmaxH/T 的结构；更窄的 H_ij 留给 pricing 扩展时动态处理。
 			penaltyFunction[jid] = penaltyFunction[jid].setDomain(hardWindowStart[jid], hardWindowEnd[jid], true);
@@ -427,6 +420,20 @@ public class Data {
 			}
 		}
 		return count;
+	}
+
+	private PiecewiseLinearFunction buildBasePenaltyFunction(int jid) {
+		PiecewiseLinearFunction function = new PiecewiseLinearFunction(0, CmaxH);
+		double coveredUntil = 0.0;
+		if ((!Utility.compareEq(0, d_e[jid])) && (!Utility.compareEq(w_e[jid], 0))) {
+			function.addSegment(0, d_e[jid], -w_e[jid], w_e[jid] * d_e[jid]);
+			coveredUntil = d_e[jid];
+		}
+		if (Utility.compareLt(coveredUntil, d_l[jid])) {
+			function.addSegment(coveredUntil, d_l[jid], 0, 0);
+		}
+		function.addSegment(d_l[jid], CmaxH, w_t[jid], -w_t[jid] * d_l[jid]);
+		return function;
 	}
 
 	/**

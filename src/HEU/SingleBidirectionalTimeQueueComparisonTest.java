@@ -31,6 +31,7 @@ public class SingleBidirectionalTimeQueueComparisonTest {
 		Path instanceDir = Path.of(System.getProperty("twet.bpc.timeCompare.dir",
 				"test-results/bpc/2026-05-24-no-outsourcing-20-21"));
 		String caseFilter = System.getProperty("twet.bpc.timeCompare.case", "wet021");
+		String modeFilter = System.getProperty("twet.bpc.timeCompare.mode", "both");
 		String resultStem = System.getProperty("twet.bpc.timeCompare.name",
 				"2026-05-26-single-vs-bidir-time-wet021");
 		Path outputDir = Path.of("test-results", "bpc", resultStem);
@@ -47,16 +48,29 @@ public class SingleBidirectionalTimeQueueComparisonTest {
 		lines.add(
 				"case,mode,status,incumbent,bound,gap,nodes,pricing,cols,pool,solve_s,root_s,heuristic_s,heuristic_calls,exact_engine,exact_s,exact_calls,master_lp_s,valid,log");
 		for (Path instance : instances) {
-			RunRecord single = runOne(instance, false, outputDir);
-			RunRecord bidirectional = runOne(instance, true, outputDir);
-			records.add(single);
-			records.add(bidirectional);
-			lines.add(single.toCsvLine());
-			lines.add(bidirectional.toCsvLine());
+			if (shouldRunSingle(modeFilter)) {
+				RunRecord single = runOne(instance, false, outputDir);
+				records.add(single);
+				lines.add(single.toCsvLine());
+			}
+			if (shouldRunBidirectional(modeFilter)) {
+				RunRecord bidirectional = runOne(instance, true, outputDir);
+				records.add(bidirectional);
+				lines.add(bidirectional.toCsvLine());
+			}
 		}
 
 		Files.write(csv, lines);
 		printSummary(records, csv);
+	}
+
+	private static boolean shouldRunSingle(String modeFilter) {
+		return "both".equalsIgnoreCase(modeFilter) || "single".equalsIgnoreCase(modeFilter);
+	}
+
+	private static boolean shouldRunBidirectional(String modeFilter) {
+		return "both".equalsIgnoreCase(modeFilter) || "bidir".equalsIgnoreCase(modeFilter)
+				|| "bidirectional".equalsIgnoreCase(modeFilter);
 	}
 
 	private static List<Path> listInstances(Path instanceDir, String caseFilter) throws Exception {

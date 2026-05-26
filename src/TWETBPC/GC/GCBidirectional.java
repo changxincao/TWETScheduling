@@ -1087,7 +1087,7 @@ public class GCBidirectional {
 		if (Double.isFinite(left) && Utility.compareLt(left, pricingHorizon)) {
 			candidate = (left + pricingHorizon) * 0.5;
 		} else {
-			// 2026-05-26: 当局部窗口已经贴到 horizon 时，仍要保留非退化的前/后向半区间。
+			// 2026-05-26: 当局部窗口已经贴到 pricingHorizon 时，回退到右偏切分，避免后向半区间长度为 0。
 			candidate = pricingHorizon * 0.75;
 		}
 		return clampCurrentMidpoint(candidate);
@@ -1097,6 +1097,7 @@ public class GCBidirectional {
 		if (!Double.isFinite(pricingHorizon) || !Utility.compareGt(pricingHorizon, 0.0)) {
 			return 0.0;
 		}
+		// midpoint 必须离 0 和 pricingHorizon 都有一点距离，否则某一侧 half-domain 会变成空区间。
 		double minWidth = Math.max(Utility.EPS * 10.0, pricingHorizon * 1e-9);
 		if (!Utility.compareGt(pricingHorizon, 2.0 * minWidth)) {
 			return pricingHorizon * 0.5;

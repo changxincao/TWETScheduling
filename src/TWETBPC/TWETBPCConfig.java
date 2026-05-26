@@ -46,7 +46,8 @@ public class TWETBPCConfig {
 	public String bidirectionalLabelQueueOrdering = "reducedCost";
 	/**
 	 * 2026-05-26: 双向 pricing 的 midpoint 固定比例实验开关。
-	 * 取 NaN 时使用动态 hard/profitable window 中点；取 0..1 时强制使用 pricingHorizon 的该比例。
+	 * 取 NaN 时使用动态 hard/profitable window 中点；
+	 * 取 0..1 时强制使用本轮 pricingHorizon 的该比例，不是全局 CmaxH 的比例。
 	 */
 	public double bidirectionalRootLocalHorizonMidpointRatio = Double.NaN;
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */

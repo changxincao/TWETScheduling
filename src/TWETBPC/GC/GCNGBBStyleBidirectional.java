@@ -1154,7 +1154,7 @@ public class GCNGBBStyleBidirectional {
 		if (!Double.isFinite(pricingHorizon) || !Utility.compareGt(pricingHorizon, 0.0)) {
 			return 0.0;
 		}
-		// midpoint 必须离 0 和 pricingHorizon 都有一点距离，否则某一侧 half-domain 会变成空区间。
+		// 正常 midpoint 公式应已落在 (0, pricingHorizon) 内；这里仅防御极小 horizon 或后续改公式造成贴边。
 		double minWidth = Math.max(Utility.EPS * 10.0, pricingHorizon * 1e-9);
 		if (!Utility.compareGt(pricingHorizon, 2.0 * minWidth)) {
 			return pricingHorizon * 0.5;

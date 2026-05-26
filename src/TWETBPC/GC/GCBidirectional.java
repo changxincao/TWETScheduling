@@ -41,8 +41,6 @@ import TWETBPC.Util.SequenceSignature;
 public class GCBidirectional {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
-	private static final double ROOT_LOCAL_HORIZON_MIDPOINT_RATIO = 0.75;
-
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}
@@ -1079,7 +1077,7 @@ public class GCBidirectional {
 
 	private double computeCurrentMidpoint(LP lp) {
 		return dualProfitableWindowEnabled && Utility.compareLt(pricingHorizon, data.CmaxH)
-				? pricingHorizon * ROOT_LOCAL_HORIZON_MIDPOINT_RATIO
+				? pricingHorizon * config.bidirectionalRootLocalHorizonMidpointRatio
 				: data.CmaxH * 0.5;
 	}
 

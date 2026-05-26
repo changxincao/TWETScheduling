@@ -127,6 +127,9 @@ public class SingleBidirectionalTimeQueueComparisonTest {
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
+		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.timeCompare.midpointRatio",
+				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));
 		return config;
 	}
 

@@ -1130,9 +1130,79 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private double computeCurrentMidpoint(LP lp) {
-		return dualProfitableWindowEnabled && Utility.compareLt(pricingHorizon, data.CmaxH)
-				? pricingHorizon * config.bidirectionalRootLocalHorizonMidpointRatio
-				: data.CmaxH * 0.5;
+		double candidate;
+		if (Double.isFinite(config.bidirectionalRootLocalHorizonMidpointRatio)
+				&& Utility.compareGt(config.bidirectionalRootLocalHorizonMidpointRatio, 0.0)
+				&& Utility.compareLt(config.bidirectionalRootLocalHorizonMidpointRatio, 1.0)) {
+			candidate = pricingHorizon * config.bidirectionalRootLocalHorizonMidpointRatio;
+			return clampCurrentMidpoint(candidate);
+		}
+		dynamicMinHStart = computeCurrentPricingWindowStart(lp);
+		dynamicMaxHEnd = pricingHorizon;
+		earliestSourceCompletion = computeEarliestSourceCompletion();
+		double left = Math.max(dynamicMinHStart, earliestSourceCompletion);
+		if (Double.isFinite(left) && Utility.compareLt(left, pricingHorizon)) {
+			candidate = (left + pricingHorizon) * 0.5;
+		} else {
+			// 2026-05-26: 当局部窗口已经贴到 horizon 时，仍要保留非退化的前/后向半区间。
+			candidate = pricingHorizon * 0.75;
+		}
+		return clampCurrentMidpoint(candidate);
+	}
+
+	private double clampCurrentMidpoint(double candidate) {
+		if (!Double.isFinite(pricingHorizon) || !Utility.compareGt(pricingHorizon, 0.0)) {
+			return 0.0;
+		}
+		double minWidth = Math.max(Utility.EPS * 10.0, pricingHorizon * 1e-9);
+		if (!Utility.compareGt(pricingHorizon, 2.0 * minWidth)) {
+			return pricingHorizon * 0.5;
+		}
+		if (!Double.isFinite(candidate)) {
+			candidate = pricingHorizon * 0.75;
+		}
+		double lower = minWidth;
+		double upper = pricingHorizon - minWidth;
+		if (Utility.compareLt(candidate, lower)) {
+			return lower;
+		}
+		if (Utility.compareGt(candidate, upper)) {
+			return upper;
+		}
+		return candidate;
+	}
+
+	private double computeCurrentPricingWindowStart(LP lp) {
+		double localStart = Utility.big_M;
+		boolean foundFiniteWindow = false;
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			double baseline = outsourcingBaseline(job);
+			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
+			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
+				double dynamicStart = hWindowStart(job, jobDual);
+				double dynamicEnd = hWindowEnd(job, jobDual);
+				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+					hStart = dynamicStart;
+					hEnd = dynamicEnd;
+				}
+			}
+			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hStart)) {
+				localStart = Math.min(localStart, hStart);
+				foundFiniteWindow = true;
+			}
+		}
+		return foundFiniteWindow ? localStart : 0.0;
+	}
+
+	private double computeEarliestSourceCompletion() {
+		double earliest = Utility.big_M;
+		for (int job = 1; job <= data.n; job++) {
+			earliest = Math.min(earliest, data.getSetUp(0, job) + data.getProcessT(job));
+		}
+		return earliest;
 	}
 
 	/**

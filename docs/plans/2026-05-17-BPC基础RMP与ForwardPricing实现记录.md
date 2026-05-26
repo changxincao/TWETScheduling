@@ -1359,3 +1359,11 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 这个版本先作为新实现保留，原 `GCBidirectional` 不删除。`TWETBPCConfig` 新增 `useGCNGBBStyleBidirectionalPricing`，默认置为 `true`，因此当前 `TWETBPCContext` 在启用双向 exact pricing 时会优先使用新框架；若需要回到前一版 hybrid-B，可把该开关置为 `false`。当前改动只调整双向定价外层组织和入口选择，不接入 NG/DSSR、PredList/AMin completion bound，也不改已有列 reduced-cost 计算、半域函数递推或分支禁弧语义。
 
 验证方面，focused `javac` 已带 CPLEX jar 编译 `GCNGBBStyleBidirectional.java`、`GCNGBBStyleBidirectionalPricingEngine.java`、`TWETBPCConfig.java` 和 `TWETBPCContext.java`，编译通过；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；带 CPLEX native path 重跑 `SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff branch 诊断也通过。第一次小批量运行时 PowerShell 曾把未加引号的 `-Djava.library.path` 解析错，改成引号包裹后正常运行。测试刷新了本地 `test-results/bpc/2026-05-19-small-bpc.csv`，该 CSV 只作为验证产物，不纳入本次提交。
+
+## 2026-05-26：GCNGBB-style final join 枚举优化
+
+继续复核 final join 时发现，`GCNGBBStyleBidirectional.joinAllBackwardLabels()` 为了拿到普通 backward label，会对每个 `BWTL[firstJob]` 调一次 `getActiveLabels()`。这个接口会重新遍历 dominance graph 的 active node 和 node 内 label，再把未 dominated 的 label 收集到临时列表；随后 join 又遍历一次临时列表。由于新框架已经在最后统一 join，不需要从 graph 反查所有 label，可以在 label 成功插入时直接登记。
+
+本次为 backward 侧补了与 forward 侧对称的 `activeBackwardByFirstJob`。normal backward label 通过 `BWTL` 占优检查并保留后，立即加入对应 first-job 列表；final join 直接扫描该列表，并继续用 `isDominated` 跳过后续被 graph propagation 标记删除的 label。forward 侧原本已有 `activeForwardByLastJob`，因此这次只是补齐 backward 侧，single-point backward label 仍然走独立 store。该修改只减少 final join 前的 graph 遍历和临时 list 构造，不改变 dominance graph 的占优职责，也不改变 crossing-arc join 或 reduced-cost 计算。
+
+验证方面，带 CPLEX jar 的 focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；带 CPLEX native path 的 `SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff branch 诊断有效。

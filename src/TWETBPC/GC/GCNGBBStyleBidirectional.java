@@ -51,6 +51,7 @@ public class GCNGBBStyleBidirectional {
 	private ArrayList<DominanceStore> FWTL;
 	private ArrayList<DominanceStore> BWTL;
 	private ArrayList<ArrayList<ForwardLabel>> activeForwardByLastJob;
+	private ArrayList<ArrayList<BackwardLabel>> activeBackwardByFirstJob;
 	private ArrayList<SinglePointStore<ForwardLabel>> forwardSinglePointByLastJob;
 	private ArrayList<SinglePointStore<BackwardLabel>> backwardSinglePointByFirstJob;
 	private PackedBitSet activeForwardTerminalJobs;
@@ -152,6 +153,7 @@ public class GCNGBBStyleBidirectional {
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
 		BWTL = new ArrayList<DominanceStore>(data.n + 1);
 		activeForwardByLastJob = new ArrayList<ArrayList<ForwardLabel>>(data.n + 1);
+		activeBackwardByFirstJob = new ArrayList<ArrayList<BackwardLabel>>(data.n + 1);
 		forwardSinglePointByLastJob = new ArrayList<SinglePointStore<ForwardLabel>>(data.n + 1);
 		backwardSinglePointByFirstJob = new ArrayList<SinglePointStore<BackwardLabel>>(data.n + 1);
 		activeForwardTerminalJobs = new PackedBitSet(data.n + 2);
@@ -161,6 +163,7 @@ public class GCNGBBStyleBidirectional {
 			FWTL.add(new PaperDominanceGraph(Direction.FORWARD));
 			BWTL.add(new PaperDominanceGraph(Direction.BACKWARD));
 			activeForwardByLastJob.add(new ArrayList<ForwardLabel>());
+			activeBackwardByFirstJob.add(new ArrayList<BackwardLabel>());
 			forwardSinglePointByLastJob.add(new SinglePointStore<ForwardLabel>());
 			backwardSinglePointByFirstJob.add(new SinglePointStore<BackwardLabel>());
 			minForwardReducedCostByLastJob[i] = Utility.big_M;
@@ -383,6 +386,7 @@ public class GCNGBBStyleBidirectional {
 			return InsertStatus.DOMINATED;
 		}
 		backwardLabelsKept++;
+		activeBackwardByFirstJob.get(label.jid).add(label);
 		return InsertStatus.STORED_AND_ENQUEUE;
 	}
 
@@ -553,9 +557,9 @@ public class GCNGBBStyleBidirectional {
 	 */
 	private void joinAllBackwardLabels(LP lp) {
 		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
-			ArrayList<Label> labels = BWTL.get(firstJob).getActiveLabels();
+			ArrayList<BackwardLabel> labels = activeBackwardByFirstJob.get(firstJob);
 			for (int i = 0; i < labels.size() && canContinue(); i++) {
-				BackwardLabel backward = (BackwardLabel) labels.get(i);
+				BackwardLabel backward = labels.get(i);
 				if (!backward.isDominated && !backward.isSinkRoot) {
 					joinFromBackward(backward, lp);
 				}

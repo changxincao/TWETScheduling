@@ -1379,3 +1379,11 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 本次给 `GCNGBBStyleBidirectional` 的 forward/backward 扩展优先队列增加排序策略开关，用于后续比较不同出队顺序对冗余扩展和 graph dominance 的影响。配置项为 `TWETBPCConfig.bidirectionalLabelQueueOrdering`，默认值保持 `reducedCost`，因此现有行为不变。可选值包括：`reducedCost`，按 label 自身乐观 `minReducedCost` 升序；`time`，forward 按最早完成时间越早越先出队，backward 按最晚完成时间越晚越先出队；`reachableSize`，按 reachable set 基数越大越先出队。
 
 这样做的动机是，按 reduced cost 出队时，一个较早扩展的 label 仍可能被后续才出队的 label 支配，从而产生冗余扩展。`time` 策略偏向先扩展时间边界更靠外的 label；`reachableSize` 策略则偏向先扩展仍有更多候选后继/前驱的 label，希望更早形成强 dominance frontier。三种策略都只改变队列出队顺序，不改变 label 生成、dominance 判定、final join 或 reduced-cost 计算。pricing message 中会输出 `queueOrdering=...`，便于批量日志确认当前策略。验证方面，默认 `reducedCost` 下 focused `javac` 通过，`PaperDominanceGraphConsistencyTest` 通过，带 CPLEX native path 的 `SmallBPCBatchTest` 通过。
+
+## 2026-05-26：20/21 任务双向队列策略小批量对比
+
+新增 `HEU.BidirectionalQueueStrategyComparisonTest`，专门比较旧 hybrid-B eager-join 与当前 GCNGBB-style final-join 下三种出队策略。测试使用 `test-results/bpc/2026-05-24-no-outsourcing-20-21` 中的 `wet020_001_2m.dat` 和 `wet021_001_2m.dat`，四个模式分别为：`oldHybrid`、`gcnReducedCost`、`gcnTime`、`gcnReachableSize`。所有模式都使用 no-outsourcing loader、关闭 ALNS seed、启用双向 exact pricing，并把 heuristic/exact 列数上限放大到 100000，避免工程阈值先截断。
+
+本轮结果全部 `valid=true`，两个算例的 incumbent 与 bound 在四个模式下完全一致。按 exact pricing 总耗时看，`wet020` 上 oldHybrid / gcnReducedCost / gcnTime / gcnReachableSize 分别为 `1.234s / 1.151s / 0.492s / 0.710s`；`wet021` 上分别为 `4.879s / 4.693s / 2.805s / 3.474s`。按两个算例平均，oldHybrid 为 `3.057s`，gcnReducedCost 为 `2.922s`，gcnTime 为 `1.649s`，gcnReachableSize 为 `2.092s`。因此这轮小样本里最好的是 `time`，其次是 `reachableSize`，当前 reduced-cost 出队和旧 eager-join 接近但都明显慢一些。
+
+日志里的结构性指标也支持这个结论。以 `wet021` 为例，`gcnReducedCost` 两轮 exact 中每轮约保留 `6441` 个 forward label，dominanceChecks 约 `218k`，join pairs 约 `335k`；`gcnTime` 降到约 `3630` 个 forward label，dominanceChecks 约 `61k`，join pairs 约 `264k`。这说明时间顺序确实让后续 label 更早形成有效 dominance frontier，减少了冗余扩展和 join 候选，而不是单纯 JVM 波动。输出 CSV 为 `test-results/bpc/2026-05-26-bidir-queue-strategy-20-21.csv`，逐轮日志在同名目录下。

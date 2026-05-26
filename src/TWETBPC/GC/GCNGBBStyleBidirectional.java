@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.PriorityQueue;
@@ -131,6 +132,7 @@ public class GCNGBBStyleBidirectional {
 			backwardExtend(lp);
 		}
 		if (canContinue()) {
+			sortActiveLabelListsForJoin();
 			joinAllBackwardLabels(lp);
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap reached";
@@ -549,6 +551,18 @@ public class GCNGBBStyleBidirectional {
 		}
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
 		tryGenerateColumn(sequence, lp, reducedCost);
+	}
+
+	/**
+	 * 2026-05-26: final join 前按 label 自身的乐观 min reduced cost 排序。
+	 * 这只影响达到列数上限时优先尝试哪些 label，不改变 dominance 或 reduced-cost 语义；
+	 * 后续若实验效果一般，可以只注释 solve() 中的调用。
+	 */
+	private void sortActiveLabelListsForJoin() {
+		for (int job = 1; job <= data.n; job++) {
+			Collections.sort(activeForwardByLastJob.get(job));
+			Collections.sort(activeBackwardByFirstJob.get(job));
+		}
 	}
 
 	/**

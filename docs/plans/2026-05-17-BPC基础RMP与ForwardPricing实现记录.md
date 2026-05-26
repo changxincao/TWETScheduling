@@ -1367,3 +1367,9 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 本次为 backward 侧补了与 forward 侧对称的 `activeBackwardByFirstJob`。normal backward label 通过 `BWTL` 占优检查并保留后，立即加入对应 first-job 列表；final join 直接扫描该列表，并继续用 `isDominated` 跳过后续被 graph propagation 标记删除的 label。forward 侧原本已有 `activeForwardByLastJob`，因此这次只是补齐 backward 侧，single-point backward label 仍然走独立 store。该修改只减少 final join 前的 graph 遍历和临时 list 构造，不改变 dominance graph 的占优职责，也不改变 crossing-arc join 或 reduced-cost 计算。
 
 验证方面，带 CPLEX jar 的 focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；带 CPLEX native path 的 `SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff branch 诊断有效。
+
+## 2026-05-26：final join 前按 label 乐观 reduced cost 排序
+
+在上一版已经让 forward/backward 普通 label 都有独立枚举 list 后，本次进一步把 final join 前的尝试顺序收紧。新增 `sortActiveLabelListsForJoin()`，在 `joinAllBackwardLabels()` 前对 `activeForwardByLastJob[j]` 和 `activeBackwardByFirstJob[j]` 按 label 自身的 `minReducedCost` 升序排序。这里的 `minReducedCost` 仍只是前缀或后缀 frontier 的乐观最小值，并不等于最终 crossing-arc join 后的列 reduced cost，因此该排序不提供“严格最小列优先”的保证；它的作用主要是在 `maxExactPricingColumns` 触发时，让更有希望产生负列的 label 先参与拼接。
+
+这个排序被封装成独立方法，并且只在 final join 前调用一次。后续如果批量结果显示排序成本大于收益，可以直接注释掉 `solve()` 中的调用，不影响 dominance、label 生成或 reduced-cost 语义。验证方面，带 CPLEX jar 的 focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；带 CPLEX native path 的 `SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff branch 诊断有效。

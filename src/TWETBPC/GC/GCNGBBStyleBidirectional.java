@@ -82,6 +82,9 @@ public class GCNGBBStyleBidirectional {
 	private PiecewiseLinearFunction[] dynamicBackwardPenaltyByJob;
 	private double[] dynamicBackwardHStartByJob;
 	private double[] dynamicBackwardHEndByJob;
+	private double dynamicMinHStart;
+	private double dynamicMaxHEnd;
+	private double earliestSourceCompletion;
 	private boolean[] forwardHalfEligibleByJob;
 	private boolean[] backwardHalfEligibleByJob;
 	private int forwardHalfIneligibleJobCount;
@@ -855,6 +858,8 @@ public class GCNGBBStyleBidirectional {
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
 				+ ", queueOrdering=" + queueOrdering
+				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
+				+ ", earliestSourceCompletion=" + earliestSourceCompletion
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
@@ -1167,6 +1172,9 @@ public class GCNGBBStyleBidirectional {
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
+		dynamicMinHStart = Utility.big_M;
+		dynamicMaxHEnd = 0.0;
+		earliestSourceCompletion = Utility.big_M;
 		for (int job = 1; job <= data.n; job++) {
 			double hStart = data.hardWindowStart[job];
 			double hEnd = data.hardWindowEnd[job];
@@ -1186,6 +1194,12 @@ public class GCNGBBStyleBidirectional {
 			dynamicJobHStart[job] = hStart;
 			dynamicJobHEnd[job] = hEnd;
 			dynamicJobPenaltyByJob[job] = penalty;
+			if (!Utility.compareGt(hStart, hEnd)) {
+				dynamicMinHStart = Math.min(dynamicMinHStart, hStart);
+				dynamicMaxHEnd = Math.max(dynamicMaxHEnd, hEnd);
+			}
+			earliestSourceCompletion = Math.min(earliestSourceCompletion,
+					data.getSetUp(0, job) + data.getProcessT(job));
 		}
 	}
 

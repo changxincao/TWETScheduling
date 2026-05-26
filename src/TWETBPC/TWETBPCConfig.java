@@ -62,6 +62,11 @@ public class TWETBPCConfig {
 	 * 可能让可修复子节点过早触发工程上限，因此先放宽到 100000。
 	 */
 	public int maxBranchRepairColumns = 100000;
+	/**
+	 * 2026-05-26: 单向 forward exact pricing 的 label 扩展队列排序。
+	 * 可选值：reducedCost、time、reachableSize。
+	 */
+	public String forwardLabelQueueOrdering = "reducedCost";
 	/** 2026-05-18: 对应旧 VRP Configure.m_initial_col_number，子节点初始 RMP 最多继承多少条低 reduced-cost 列。 */
 	public int branchSeedColumnLimit = 1000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_addin_red_cost，父节点 reduced cost 低于该阈值的列优先传给子节点。 */

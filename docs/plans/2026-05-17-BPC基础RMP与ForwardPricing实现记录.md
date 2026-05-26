@@ -1391,3 +1391,8 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 继续把同一队列排序开关接入旧 `GCBidirectional` 后，重新跑 `oldReducedCost`、`oldTime`、`oldReachableSize`、`gcnReducedCost`、`gcnTime`、`gcnReachableSize` 六种模式。第二轮结果仍全部 `valid=true`，目标和 bound 一致。按 exact pricing 时间，`wet020` 六种模式分别为 `1.352s / 0.972s / 0.616s / 0.794s / 0.609s / 0.629s`；`wet021` 分别为 `3.843s / 2.384s / 3.241s / 4.352s / 2.514s / 2.815s`。两个算例平均后，oldReducedCost `2.597s`、oldTime `1.678s`、oldReachableSize `1.928s`、gcnReducedCost `2.573s`、gcnTime `1.561s`、gcnReachableSize `1.722s`。
 
 这轮结论比上一轮更细：队列排序的影响大于 eager-join/final-join 外层框架本身；`time` 在两个算例平均上仍是最好，GCNGBB-style + time 略优于 old + time，但差距不大。`reachableSize` 在 `wet020` 上几乎追平 `time`，但在 `wet021` 上明显落后。reduced-cost 出队在 old 和 gcn 两条路径上都偏慢，原因仍是它会让一些低局部 reduced-cost 但后续会被支配的 label 过早扩展。第二轮输出 CSV 为 `test-results/bpc/2026-05-26-bidir-queue-strategy-old-vs-gcn-20-21.csv`，逐轮日志在同名目录下。
+## 2026-05-26：单向 GC label 队列排序策略开关
+
+本次把前面在双向 pricing 中试验的出队顺序也接到单向 `GC` 上。配置项为 `TWETBPCConfig.forwardLabelQueueOrdering`，默认值保持 `reducedCost`，因此不显式改配置时仍按原来的 label 乐观 reduced cost 升序扩展。新增的两个实验值分别是 `time` 和 `reachableSize`：`time` 按 forward label 当前最早完成时间越早越先出队；`reachableSize` 按 reachable set 基数越大越先出队。三种策略都只改变优先队列的弹出顺序，不改变 label 扩展、dominance 判定、列生成或 reduced-cost 计算语义。
+
+这样做的目的仍是减少“较早出队但随后被后续 label 支配”的冗余扩展。单向 forward 没有 backward/final join 的额外差异，因此这个开关主要用于后续对比单向 exact pricing 自身的 dominance frontier 形成速度。当前验证为：带 CPLEX jar 的 focused `javac` 编译 `GC.java`、双向 pricing 入口和 `TWETBPCConfig.java` 通过；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；带 CPLEX native path 的 `SmallBPCBatchTest` 通过，8/8 小例与 ArcFlow 对齐，tariff branch 诊断也通过。默认值未变，后续若要比较单向队列策略，可在 runner 中分别设置 `forwardLabelQueueOrdering=time/reachableSize`。

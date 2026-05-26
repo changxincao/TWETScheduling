@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.PriorityQueue;
 
@@ -28,6 +29,10 @@ public class GC {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
 
+	private enum LabelQueueOrdering {
+		REDUCED_COST, TIME, REACHABLE_SIZE
+	}
+
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
@@ -39,6 +44,7 @@ public class GC {
 	private HashSet<SequenceSignature> activeColumnSignatures;
 	private boolean[] zeroDualSingletonOnlyJobs;
 	private int zeroDualSingletonOnlyJobCount;
+	private LabelQueueOrdering queueOrdering;
 	private String lastMessage = "Exact forward labeling not executed";
 	// 2026-05-20: 当前 RMP dual 下的 job-level H_j 硬窗缓存，只在一次 pricing 调用内有效。
 	private double[] dynamicJobHStart;
@@ -84,6 +90,7 @@ public class GC {
 		}
 		lastMessage = "Exact forward labeling generated " + generatedColumns.size() + " columns; dualWindow="
 				+ (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
+				+ ", queueOrdering=" + queueOrdering
 				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
 				+ (usePaperDominanceGraph ? ", " + PaperDominanceGraph.statisticsSummary() : "");
 		return generatedColumns;
@@ -93,11 +100,69 @@ public class GC {
 		return lastMessage;
 	}
 
+	private LabelQueueOrdering parseQueueOrdering(String value) {
+		if (value == null) {
+			return LabelQueueOrdering.REDUCED_COST;
+		}
+		String normalized = value.trim().toLowerCase();
+		if ("time".equals(normalized)) {
+			return LabelQueueOrdering.TIME;
+		}
+		if ("reachablesize".equals(normalized) || "reachable_size".equals(normalized)
+				|| "reachable".equals(normalized)) {
+			return LabelQueueOrdering.REACHABLE_SIZE;
+		}
+		return LabelQueueOrdering.REDUCED_COST;
+	}
+
+	/**
+	 * 2026-05-26: 单向 GC 也提供 label 出队策略，便于和双向 pricing 的队列实验保持一致。
+	 */
+	private Comparator<Label> queueComparator(LabelQueueOrdering ordering) {
+		return new Comparator<Label>() {
+			@Override
+			public int compare(Label left, Label right) {
+				if (ordering == LabelQueueOrdering.TIME) {
+					int byTime = compareDoubleAsc(earliestCompletion(left), earliestCompletion(right));
+					return byTime != 0 ? byTime : compareReducedCost(left, right);
+				}
+				if (ordering == LabelQueueOrdering.REACHABLE_SIZE) {
+					int byReachable = Integer.compare(right.reachableCardinality, left.reachableCardinality);
+					return byReachable != 0 ? byReachable : compareReducedCost(left, right);
+				}
+				return compareReducedCost(left, right);
+			}
+		};
+	}
+
+	private static int compareReducedCost(Label left, Label right) {
+		int byCost = compareDoubleAsc(left.minReducedCost, right.minReducedCost);
+		if (byCost != 0) {
+			return byCost;
+		}
+		return Integer.compare(left.jid, right.jid);
+	}
+
+	private static int compareDoubleAsc(double left, double right) {
+		if (Utility.compareLt(left, right)) {
+			return -1;
+		}
+		if (Utility.compareGt(left, right)) {
+			return 1;
+		}
+		return 0;
+	}
+
+	private static double earliestCompletion(Label label) {
+		return label.frontier == null || label.frontier.head == null ? Utility.big_M : label.frontier.head.start;
+	}
+
 	private void initialize(LP lp) {
 		if (usePaperDominanceGraph) {
 			PaperDominanceGraph.resetStatistics();
 		}
-		UL = new PriorityQueue<Label>();
+		queueOrdering = parseQueueOrdering(config.forwardLabelQueueOrdering);
+		UL = new PriorityQueue<Label>(queueComparator(queueOrdering));
 		TL = new ArrayList<DominanceStore>(data.n + 1);
 		for (int i = 0; i <= data.n; i++) {
 			TL.add(usePaperDominanceGraph ? new PaperDominanceGraph() : new DominanceGraph());

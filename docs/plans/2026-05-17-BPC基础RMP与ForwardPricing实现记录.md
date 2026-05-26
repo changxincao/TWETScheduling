@@ -1351,3 +1351,11 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 本次修正只动了 `Data.setPenaltyFunctions()`：新增 `buildBasePenaltyFunction(jid)`，显式维护一个 `coveredUntil`，若 early 段没有覆盖到 `d_l`，就补一段 `[coveredUntil,d_l]` 的零成本常数段，再接原 tardy 段。这样每个 job penalty 在物理上都连续覆盖 `[0,CmaxH]`，后续静态/动态 hard window、forward/backward half-domain crop 都建立在完整函数上，不再依赖后处理补丁。
 
 验证只做了和本次改动直接相关的最小检查：`git diff` 确认只修改 `src/Basic/Data.java`；`javac -encoding UTF-8 -cp src src/Basic/Data.java src/Common/PiecewiseLinearFunction.java` 通过。更宽的 `GCBidirectional` focused 编译仍会被仓库现有的 CPLEX `ilog.*` classpath 缺失阻断，这不是本次改动引入的问题。
+
+## 2026-05-26：新增 GCNGBB-style 双向 pricing 框架
+
+本次按旧 VRP `GCNGBB` 的双向框架，新建 `GCNGBBStyleBidirectional` 和对应 `GCNGBBStyleBidirectionalPricingEngine`。它复用当前 `GCBidirectional` 已经稳定下来的 half-domain 函数 label、crossing-arc join、single-point store、dynamic window 与 dominance graph 逻辑，但把外层生命周期改成旧 VRP 风格：`initialize -> initializeBackwardSink -> 完整 forward 扩展 -> 完整 backward 扩展 -> 最后统一 join`。也就是说，backward label 插入普通 graph 或 single-point store 时不再立刻 join，而是在 `joinAllBackwardLabels()` 中统一扫描最终仍 active 的 backward 普通 label 和 single-point backward label，再用 crossing arc 连接所有可行 forward 前缀。
+
+这个版本先作为新实现保留，原 `GCBidirectional` 不删除。`TWETBPCConfig` 新增 `useGCNGBBStyleBidirectionalPricing`，默认置为 `true`，因此当前 `TWETBPCContext` 在启用双向 exact pricing 时会优先使用新框架；若需要回到前一版 hybrid-B，可把该开关置为 `false`。当前改动只调整双向定价外层组织和入口选择，不接入 NG/DSSR、PredList/AMin completion bound，也不改已有列 reduced-cost 计算、半域函数递推或分支禁弧语义。
+
+验证方面，focused `javac` 已带 CPLEX jar 编译 `GCNGBBStyleBidirectional.java`、`GCNGBBStyleBidirectionalPricingEngine.java`、`TWETBPCConfig.java` 和 `TWETBPCContext.java`，编译通过；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；带 CPLEX native path 重跑 `SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff branch 诊断也通过。第一次小批量运行时 PowerShell 曾把未加引号的 `-Djava.library.path` 解析错，改成引号包裹后正常运行。测试刷新了本地 `test-results/bpc/2026-05-19-small-bpc.csv`，该 CSV 只作为验证产物，不纳入本次提交。

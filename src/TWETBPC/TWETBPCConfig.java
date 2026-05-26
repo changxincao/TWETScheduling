@@ -34,6 +34,11 @@ public class TWETBPCConfig {
 	 * 选择原来的单向 forward exact 定价。这里是二选一开关，不把双向和单向串起来顺序兜底。
 	 */
 	public boolean enableBidirectionalPricing = true;
+	/**
+	 * 2026-05-26: 双向 exact pricing 是否使用旧 VRP GCNGBB 风格的外层流程。
+	 * true 时先完整生成 forward/backward 两侧 label，最后统一 join；false 时回到原 hybrid-B 实现。
+	 */
+	public boolean useGCNGBBStyleBidirectionalPricing = true;
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

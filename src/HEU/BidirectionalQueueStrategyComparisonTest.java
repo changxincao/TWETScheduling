@@ -20,6 +20,7 @@ import TWETBPC.TWETSolveResult;
 
 /**
  * 2026-05-26: 诊断 GCNGBB-style final-join 与旧 hybrid-B eager-join 的双向 pricing 表现。
+ * 两条路径都会测试 reducedCost / time / reachableSize 三种队列排序。
  * 该入口只用于本地实验，不改变正式求解流程。
  */
 public class BidirectionalQueueStrategyComparisonTest {
@@ -47,7 +48,9 @@ public class BidirectionalQueueStrategyComparisonTest {
 				"case,mode,queue_ordering,use_gcn_style,status,incumbent,bound,gap,nodes,pricing,cols,pool,solve_s,root_s,heuristic_s,heuristic_calls,exact_engine,exact_s,exact_calls,master_lp_s,valid,log");
 
 		for (Path instance : instances) {
-			records.add(runOne(instance, "oldHybrid", false, "reducedCost", outputDir));
+			records.add(runOne(instance, "oldReducedCost", false, "reducedCost", outputDir));
+			records.add(runOne(instance, "oldTime", false, "time", outputDir));
+			records.add(runOne(instance, "oldReachableSize", false, "reachableSize", outputDir));
 			records.add(runOne(instance, "gcnReducedCost", true, "reducedCost", outputDir));
 			records.add(runOne(instance, "gcnTime", true, "time", outputDir));
 			records.add(runOne(instance, "gcnReachableSize", true, "reachableSize", outputDir));

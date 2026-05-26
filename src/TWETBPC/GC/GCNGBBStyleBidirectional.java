@@ -2,6 +2,7 @@ package TWETBPC.GC;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.PriorityQueue;
@@ -43,6 +44,10 @@ public class GCNGBBStyleBidirectional {
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
 	private static final double ROOT_LOCAL_HORIZON_MIDPOINT_RATIO = 0.75;
 
+	private enum LabelQueueOrdering {
+		REDUCED_COST, TIME, REACHABLE_SIZE
+	}
+
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
@@ -64,6 +69,7 @@ public class GCNGBBStyleBidirectional {
 	private boolean[] zeroDualSingletonOnlyJobs;
 	private int zeroDualSingletonOnlyJobCount;
 	private int nextLabelId;
+	private LabelQueueOrdering queueOrdering;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
@@ -145,13 +151,98 @@ public class GCNGBBStyleBidirectional {
 		return lastMessage;
 	}
 
+	private LabelQueueOrdering parseQueueOrdering(String value) {
+		if (value == null) {
+			return LabelQueueOrdering.REDUCED_COST;
+		}
+		String normalized = value.trim().toLowerCase();
+		if ("time".equals(normalized)) {
+			return LabelQueueOrdering.TIME;
+		}
+		if ("reachablesize".equals(normalized) || "reachable_size".equals(normalized)
+				|| "reachable".equals(normalized)) {
+			return LabelQueueOrdering.REACHABLE_SIZE;
+		}
+		return LabelQueueOrdering.REDUCED_COST;
+	}
+
+	/**
+	 * 2026-05-26: 支持不同 label 出队策略，便于比较“低 reduced cost 优先”与“更可能被后续支配的
+	 * label 推后扩展”之间的取舍。
+	 */
+	private Comparator<ForwardLabel> forwardQueueComparator(LabelQueueOrdering ordering) {
+		return new Comparator<ForwardLabel>() {
+			@Override
+			public int compare(ForwardLabel left, ForwardLabel right) {
+				if (ordering == LabelQueueOrdering.TIME) {
+					int byTime = compareDoubleAsc(earliestForwardCompletion(left), earliestForwardCompletion(right));
+					return byTime != 0 ? byTime : compareReducedCost(left, right);
+				}
+				if (ordering == LabelQueueOrdering.REACHABLE_SIZE) {
+					int byReachable = Integer.compare(right.reachableCardinality, left.reachableCardinality);
+					return byReachable != 0 ? byReachable : compareReducedCost(left, right);
+				}
+				return compareReducedCost(left, right);
+			}
+		};
+	}
+
+	private Comparator<BackwardLabel> backwardQueueComparator(LabelQueueOrdering ordering) {
+		return new Comparator<BackwardLabel>() {
+			@Override
+			public int compare(BackwardLabel left, BackwardLabel right) {
+				if (ordering == LabelQueueOrdering.TIME) {
+					int byTime = compareDoubleDesc(latestBackwardCompletion(left), latestBackwardCompletion(right));
+					return byTime != 0 ? byTime : compareReducedCost(left, right);
+				}
+				if (ordering == LabelQueueOrdering.REACHABLE_SIZE) {
+					int byReachable = Integer.compare(right.reachableCardinality, left.reachableCardinality);
+					return byReachable != 0 ? byReachable : compareReducedCost(left, right);
+				}
+				return compareReducedCost(left, right);
+			}
+		};
+	}
+
+	private static int compareReducedCost(FunctionLabel left, FunctionLabel right) {
+		int byCost = compareDoubleAsc(left.minReducedCost, right.minReducedCost);
+		if (byCost != 0) {
+			return byCost;
+		}
+		int byJob = Integer.compare(left.jid, right.jid);
+		return byJob != 0 ? byJob : Integer.compare(left.labelId, right.labelId);
+	}
+
+	private static int compareDoubleAsc(double left, double right) {
+		if (Utility.compareLt(left, right)) {
+			return -1;
+		}
+		if (Utility.compareGt(left, right)) {
+			return 1;
+		}
+		return 0;
+	}
+
+	private static int compareDoubleDesc(double left, double right) {
+		return compareDoubleAsc(right, left);
+	}
+
+	private static double earliestForwardCompletion(ForwardLabel label) {
+		return label.frontier == null || label.frontier.head == null ? Utility.big_M : label.frontier.head.start;
+	}
+
+	private static double latestBackwardCompletion(BackwardLabel label) {
+		return label.frontier == null || label.frontier.tail == null ? -Utility.big_M : label.frontier.tail.end;
+	}
+
 	private void initialize(LP lp) {
 		resetStatistics();
 		PaperDominanceGraph.resetStatistics();
 		pricingHorizon = data.CmaxH;
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
-		FWUL = new PriorityQueue<ForwardLabel>();
-		BWUL = new PriorityQueue<BackwardLabel>();
+		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
+		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
+		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
 		BWTL = new ArrayList<DominanceStore>(data.n + 1);
 		activeForwardByLastJob = new ArrayList<ArrayList<ForwardLabel>>(data.n + 1);
@@ -765,6 +856,7 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", queueOrdering=" + queueOrdering
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")

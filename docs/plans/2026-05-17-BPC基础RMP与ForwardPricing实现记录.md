@@ -1373,3 +1373,9 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 在上一版已经让 forward/backward 普通 label 都有独立枚举 list 后，本次进一步把 final join 前的尝试顺序收紧。新增 `sortActiveLabelListsForJoin()`，在 `joinAllBackwardLabels()` 前对 `activeForwardByLastJob[j]` 和 `activeBackwardByFirstJob[j]` 按 label 自身的 `minReducedCost` 升序排序。这里的 `minReducedCost` 仍只是前缀或后缀 frontier 的乐观最小值，并不等于最终 crossing-arc join 后的列 reduced cost，因此该排序不提供“严格最小列优先”的保证；它的作用主要是在 `maxExactPricingColumns` 触发时，让更有希望产生负列的 label 先参与拼接。
 
 这个排序被封装成独立方法，并且只在 final join 前调用一次。后续如果批量结果显示排序成本大于收益，可以直接注释掉 `solve()` 中的调用，不影响 dominance、label 生成或 reduced-cost 语义。验证方面，带 CPLEX jar 的 focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过，结果为 `cases=200, insertions=16000`；带 CPLEX native path 的 `SmallBPCBatchTest` 通过，8/8 小算例与 ArcFlow 对齐，tariff branch 诊断有效。
+
+## 2026-05-26：GCNGBB-style label 队列排序策略开关
+
+本次给 `GCNGBBStyleBidirectional` 的 forward/backward 扩展优先队列增加排序策略开关，用于后续比较不同出队顺序对冗余扩展和 graph dominance 的影响。配置项为 `TWETBPCConfig.bidirectionalLabelQueueOrdering`，默认值保持 `reducedCost`，因此现有行为不变。可选值包括：`reducedCost`，按 label 自身乐观 `minReducedCost` 升序；`time`，forward 按最早完成时间越早越先出队，backward 按最晚完成时间越晚越先出队；`reachableSize`，按 reachable set 基数越大越先出队。
+
+这样做的动机是，按 reduced cost 出队时，一个较早扩展的 label 仍可能被后续才出队的 label 支配，从而产生冗余扩展。`time` 策略偏向先扩展时间边界更靠外的 label；`reachableSize` 策略则偏向先扩展仍有更多候选后继/前驱的 label，希望更早形成强 dominance frontier。三种策略都只改变队列出队顺序，不改变 label 生成、dominance 判定、final join 或 reduced-cost 计算。pricing message 中会输出 `queueOrdering=...`，便于批量日志确认当前策略。验证方面，默认 `reducedCost` 下 focused `javac` 通过，`PaperDominanceGraphConsistencyTest` 通过，带 CPLEX native path 的 `SmallBPCBatchTest` 通过。

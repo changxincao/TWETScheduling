@@ -39,6 +39,11 @@ public class TWETBPCConfig {
 	 * true 时先完整生成 forward/backward 两侧 label，最后统一 join；false 时回到原 hybrid-B 实现。
 	 */
 	public boolean useGCNGBBStyleBidirectionalPricing = true;
+	/**
+	 * 2026-05-26: GCNGBB-style 双向 pricing 的 label 扩展队列排序。
+	 * 可选值：reducedCost、time、reachableSize。
+	 */
+	public String bidirectionalLabelQueueOrdering = "reducedCost";
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

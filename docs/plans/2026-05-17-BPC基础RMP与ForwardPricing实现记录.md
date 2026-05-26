@@ -1,4 +1,4 @@
-# BPC 基础 RMP 与单向 Forward Pricing 实现记录
+﻿# BPC 基础 RMP 与单向 Forward Pricing 实现记录
 
 ## 2026-05-25：移除 `mergeMinimum` 单点接触拼接分支
 
@@ -1400,3 +1400,7 @@ reachable set 的计算也同步收缩。source/sink 初始 label 仍需要从 `
 随后新增本地诊断入口 `HEU.SingleBidirectionalTimeQueueComparisonTest`，默认筛选 `wet021`，并把单向 `forwardLabelQueueOrdering` 和双向 `bidirectionalLabelQueueOrdering` 都设为 `time`。在 `wet021_001_2m` no-outsourcing 算例上，两种模式均在 root 闭合，目标和 bound 都为 `6829.000000`，生成列数和 pool 规模都为 `2015`。单向 `PaperDominanceExactPricing` exact 时间为 `2.144s`，完整 solve 时间为 `2.975s`；GCNGBB-style 双向 `GCNGBBStyleBidirectionalPricing` exact 时间为 `1.272s`，完整 solve 时间为 `2.472s`。按 exact pricing 看，双向 time 约为单向 time 的 `1.69x`；按完整 solve 看约为 `1.20x`。输出 CSV 为 `test-results/bpc/2026-05-26-single-vs-bidir-time-wet021.csv`，逐轮日志在同名目录下。
 
 继续换几个 no-outsourcing 算例后，time 出队下双向仍整体更快，但优势随算例变化很大。`wet020_001_2m` 上单向 exact `5.259s`、双向 exact `0.662s`，双向约快 `7.95x`；`tmp-wet022_001_2m` 上单向 exact `57.675s`、双向 exact `26.733s`，约快 `2.16x`；`tmp-wet025_001_2m` 上单向 exact `733.543s`、双向 exact `637.197s`，约快 `1.15x`。`wet025` 额外用 `mode=bidir` 独立复跑了一次双向，exact 为 `630.837s`，与顺序对比里的 `637.197s` 接近，说明该算例下双向确实也很重，不是被前一个单向进程拖慢造成的假象。为便于这种分开跑法，诊断入口增加 `twet.bpc.timeCompare.mode=single/bidir/both`，默认仍为 `both`。
+
+关于“规模越大双向为什么也变慢”，从 20/22/25 的日志看，原因不是 backward 半边单独爆炸，而是当前 GCNGBB-style 仍需要完整生成 forward half 并维护 dominance graph，规模上来后 forward label 和 graph superset 搜索快速增长。`wet020` 的双向单轮约为 fw kept/dominated `2426/30227`、join candidates `183422`、superset visited `1551978`，exact 只有 `0.662s`；`tmp-wet022` 每轮约为 fw kept `8k-9k`、join candidates 接近 `1.0M`、superset visited `16M-18M`，三轮合计 exact `26.733s`；到 `tmp-wet025` 时单轮就变成 fw kept/dominated `74074/1163807`、join candidates `6972846`、superset visited `642106544`，exact 达到 `637.197s`。backward kept 仍只有几百个量级，因此瓶颈主要是 forward 状态空间、dominance graph 查询和 final join 候选规模共同放大。
+
+这也解释了为什么双向优势在 25 上只有 `1.15x`。当前实现的 midpoint 仍是 root local horizon 下偏右的 `0.75H`，它能压住 backward，但代价是 forward 半域较宽；当算例增大且有效窗口没有强到足以大量砍掉 forward 多步组合时，forward 侧接近单向 pricing 的主要复杂度。双向相比单向仍减少了 kept label、dominanceChecks 和 join/graph 压力，但减少比例不再像 20 那么大，所以绝对时间仍很高。后续若要改善 25+，重点不应只调出队顺序，而应考虑 midpoint 自适应、forward half dry-run、join 候选更强的 lower bound、或 NG/DSSR 这类直接限制多步组合的机制。

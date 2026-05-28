@@ -1483,3 +1483,9 @@ final join 侧新增 pair-level early break。由于每个 terminal group 已按
 验证方面，`javac -encoding UTF-8 -cp src -sourcepath src src/TWETBPC/GC/GCNGBBStyleBidirectional.java` 通过，`PaperDominanceGraphConsistencyTest` 通过（`cases=200, insertions=16000`）。当前还没有跑完整带 CPLEX 的 BPC 批量回归；后续需要重点观察 `candidatePool kept/seen/dropped` 统计，以及 top-K 选择后 root 迭代次数和总时间是否改善。
 
 随后进一步收紧 `pi_j=0` 的任务处理。此前实现名为 `zeroDualSingletonOnlyJobs`，语义是根节点 no-cut 下仍允许 `source->j->sink` 这类 singleton 旁路，只禁止它参与多任务列。复核后确认这和当前剪枝依据不一致：如果采用“无 cut/branch dual 且三角不等式成立时，`pi_j=0` 的 job 不可能出现在负 reduced-cost 列中”的判断，就不应再保留 singleton 例外。因此本次改成 `zeroDualExcludedJobs`：这类 job 在 forward/backward reachable-set 构建阶段就被排除，`canExtendForward/canExtendBackward` 也直接拒绝；join 中的 zero-dual 检查只作为防御性过滤，避免历史 label 或边界路径漏入。验证：focused `javac` 通过，`PaperDominanceGraphConsistencyTest` 通过（`cases=200, insertions=16000`）。
+
+## 2026-05-28 GCNGBB-style 当前版本复核
+
+本次只做当前版本复核，不改算法代码。前面讨论的三项主要修改已经落到 `GCNGBBStyleBidirectional`：一是 `zeroDualSingletonOnlyJobs` 已完全替换为 `zeroDualExcludedJobs`，根节点 no-cut 下 `pi_j=0` 的任务在 reachable-set 构建和 forward/backward 扩展入口都被排除，join 中的同名检查只剩防御作用；二是 forward->sink 收尾列已经并入以 forward terminal group 为外层的统一 final join 流程；三是 exact pricing 不再用列数上限提前停止搜索，而是用本地 top-K 候选堆按 reduced cost 保留当前最好的 `maxExactPricingColumns` 条列，并按 `SequenceSignature` 合并同序列候选。
+
+复核中未发现会直接漏列或 reduced-cost 计算错误的新问题。sink 收尾列没有叠加 `setupCost(lastJob,sink)`，这和当前数据结构一致：`Node.sinkId()` 为 `n+1`，而 `Data.setupCost` 只定义到真实任务 `0..n`，终点 setup cost 语义为 0；收尾只需要扣 `arcDual(lastJob,sink)`。剩余主要是维护性和效率问题：`canContinue()` 现在只表示 `maxExactPricingColumns > 0`，名字仍像“达到上限就停”；`joinTerminalGroupsEmpty` 统计已基本失效；backward active label list 当前虽然排序，但 final join 没利用该排序做 backward 侧 early break；`joinForwardGroupToBackwardLabels()` 仍按 `1..n` 扫所有 firstJob，后续可用 active backward job bitset 跳过空组。验证：`javac -encoding UTF-8 -cp src -sourcepath src src/TWETBPC/GC/GCNGBBStyleBidirectional.java` 通过，`PaperDominanceGraphConsistencyTest` 通过（`cases=200, insertions=16000`）。

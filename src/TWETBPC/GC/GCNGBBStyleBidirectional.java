@@ -65,8 +65,8 @@ public class GCNGBBStyleBidirectional {
 	private PriorityQueue<PricingColumnCandidate> generatedColumnCandidates;
 	private HashMap<SequenceSignature, PricingColumnCandidate> generatedCandidateBySignature;
 	private HashSet<SequenceSignature> activeColumnSignatures;
-	private boolean[] zeroDualSingletonOnlyJobs;
-	private int zeroDualSingletonOnlyJobCount;
+	private boolean[] zeroDualExcludedJobs;
+	private int zeroDualExcludedJobCount;
 	private int nextLabelId;
 	private int nextCandidateId;
 	private LabelQueueOrdering queueOrdering;
@@ -400,7 +400,7 @@ public class GCNGBBStyleBidirectional {
 		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 			return false;
 		}
-		if (!isForwardSingletonOnlyExtensionAllowed(label.jid, nextJob)) {
+		if (isZeroDualExcludedJob(nextJob)) {
 			return false;
 		}
 		return !node.isArcForbidden(label.jid, nextJob);
@@ -410,7 +410,7 @@ public class GCNGBBStyleBidirectional {
 		if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 			return false;
 		}
-		if (!isBackwardSingletonOnlyExtensionAllowed(label, prevJob)) {
+		if (isZeroDualExcludedJob(prevJob)) {
 			return false;
 		}
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
@@ -815,7 +815,7 @@ public class GCNGBBStyleBidirectional {
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
 		joinTerminalGroupsScanned++;
-		if (isZeroDualSingletonOnlyJob(lastJob) || (isZeroDualSingletonOnlyJob(backward.jid) && lastJob != 0)) {
+		if (isZeroDualExcludedJob(lastJob) || isZeroDualExcludedJob(backward.jid)) {
 			joinTerminalGroupsArcOrVisitPruned++;
 			return;
 		}
@@ -856,7 +856,7 @@ public class GCNGBBStyleBidirectional {
 			return;
 		}
 		joinPairsTried++;
-		if (isZeroDualSingletonOnlyJob(forward.jid) || (isZeroDualSingletonOnlyJob(backward.jid) && forward.jid != 0)) {
+		if (isZeroDualExcludedJob(forward.jid) || isZeroDualExcludedJob(backward.jid)) {
 			joinPairsSetPruned++;
 			return;
 		}
@@ -954,7 +954,7 @@ public class GCNGBBStyleBidirectional {
 				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
-				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
+				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
 	}
@@ -1168,7 +1168,7 @@ public class GCNGBBStyleBidirectional {
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
 			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
-					&& isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+					&& !isZeroDualExcludedJob(job)
 					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -1183,7 +1183,7 @@ public class GCNGBBStyleBidirectional {
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
 			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
-					&& isForwardSingletonOnlyExtensionAllowed(fromJob, job)
+					&& !isZeroDualExcludedJob(job)
 					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -1197,7 +1197,7 @@ public class GCNGBBStyleBidirectional {
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
 			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
-					&& (isSinkRoot || !isZeroDualSingletonOnlyJob(job))
+					&& !isZeroDualExcludedJob(job)
 					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -1208,7 +1208,7 @@ public class GCNGBBStyleBidirectional {
 	private PackedBitSet buildBackwardReachableSetFromParent(BackwardLabel parent, int firstJob, PackedBitSet visited,
 			Node node, PiecewiseLinearFunction frontier) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
-		if (isZeroDualSingletonOnlyJob(firstJob)) {
+		if (isZeroDualExcludedJob(firstJob)) {
 			return reachable;
 		}
 		boolean isSinkRoot = firstJob == node.sinkId();
@@ -1217,7 +1217,7 @@ public class GCNGBBStyleBidirectional {
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
 			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
-					&& !isZeroDualSingletonOnlyJob(job)
+					&& !isZeroDualExcludedJob(job)
 					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -1238,12 +1238,12 @@ public class GCNGBBStyleBidirectional {
 		backwardHalfEligibleByJob = null;
 		forwardHalfIneligibleJobCount = 0;
 		backwardHalfIneligibleJobCount = 0;
-		zeroDualSingletonOnlyJobs = null;
-		zeroDualSingletonOnlyJobCount = 0;
+		zeroDualExcludedJobs = null;
+		zeroDualExcludedJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		precomputeEffectivePricingWindows(lp);
 		tMid = computeCurrentMidpoint();
-		precomputeZeroDualSingletonOnlyJobs(lp);
+		precomputeZeroDualExcludedJobs(lp);
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows();
 		precomputeBackwardDynamicPricingWindows();
@@ -1452,20 +1452,19 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	/**
-	 * 2026-05-24: 根节点 no-cut pricing 中，pi_j=0 的任务只保留 singleton 列可能性。
-	 * forward 仍允许 source->j，backward 仍允许 sink->j 用于和 source join 成 singleton，
-	 * 但不再允许它与其他真实 job 形成多任务列。
+	 * 2026-05-28: 根节点 no-cut pricing 中，pi_j=0 的任务不进入 pricing 扩展。
+	 * 在当前无 cut/branch dual 的三角不等式语义下，这类 job 不可能改善负 reduced-cost 列。
 	 */
-	private void precomputeZeroDualSingletonOnlyJobs(LP lp) {
+	private void precomputeZeroDualExcludedJobs(LP lp) {
 		if (!dualProfitableWindowEnabled) {
 			return;
 		}
-		zeroDualSingletonOnlyJobs = new boolean[data.n + 1];
+		zeroDualExcludedJobs = new boolean[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			double jobDual = Math.max(0.0, lp.getJobDual(job));
 			if (Utility.compareEq(jobDual, 0.0)) {
-				zeroDualSingletonOnlyJobs[job] = true;
-				zeroDualSingletonOnlyJobCount++;
+				zeroDualExcludedJobs[job] = true;
+				zeroDualExcludedJobCount++;
 			}
 		}
 	}
@@ -1524,9 +1523,9 @@ public class GCNGBBStyleBidirectional {
 		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : Math.max(0.0, data.outsourcingCost[job]);
 	}
 
-	private boolean isZeroDualSingletonOnlyJob(int job) {
-		return job > 0 && zeroDualSingletonOnlyJobs != null && job < zeroDualSingletonOnlyJobs.length
-				&& zeroDualSingletonOnlyJobs[job];
+	private boolean isZeroDualExcludedJob(int job) {
+		return job > 0 && zeroDualExcludedJobs != null && job < zeroDualExcludedJobs.length
+				&& zeroDualExcludedJobs[job];
 	}
 
 	private boolean isForwardHalfEligibleJob(int job) {
@@ -1537,26 +1536,6 @@ public class GCNGBBStyleBidirectional {
 	private boolean isBackwardHalfEligibleJob(int job) {
 		return job > 0 && backwardHalfEligibleByJob != null && job < backwardHalfEligibleByJob.length
 				&& backwardHalfEligibleByJob[job];
-	}
-
-	private boolean isForwardSingletonOnlyExtensionAllowed(int prevJob, int nextJob) {
-		if (isZeroDualSingletonOnlyJob(prevJob)) {
-			return false;
-		}
-		if (isZeroDualSingletonOnlyJob(nextJob) && prevJob != 0) {
-			return false;
-		}
-		return true;
-	}
-
-	private boolean isBackwardSingletonOnlyExtensionAllowed(BackwardLabel label, int prevJob) {
-		if (isZeroDualSingletonOnlyJob(prevJob)) {
-			return label.isSinkRoot;
-		}
-		if (!label.isSinkRoot && isZeroDualSingletonOnlyJob(label.jid)) {
-			return false;
-		}
-		return true;
 	}
 
 	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {

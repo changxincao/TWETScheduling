@@ -1481,3 +1481,5 @@ final join 侧新增 pair-level early break。由于每个 terminal group 已按
 这里选择“有界最大堆”而不是“list 全量收集后排序”，主要是为了控制 final join 候选很多时的内存占用。list+sort 实现更简单，也能得到同样的 top-K，但需要保存所有负列；当前 exact join 在大算例上可能产生大量候选，保留 K 个最好候选已经足够满足本轮返回列需求。代价是搜索阶段不再因收满 K 条列而提前停止，因此单轮 exact pricing 可能比发现即截断更久；但返回列质量更接近旧 VRP `GCNGBB` 的“候选池超量后按 reduced cost 选最好”的语义，也避免 forward/sink 或早期 join 列抢占上限。
 
 验证方面，`javac -encoding UTF-8 -cp src -sourcepath src src/TWETBPC/GC/GCNGBBStyleBidirectional.java` 通过，`PaperDominanceGraphConsistencyTest` 通过（`cases=200, insertions=16000`）。当前还没有跑完整带 CPLEX 的 BPC 批量回归；后续需要重点观察 `candidatePool kept/seen/dropped` 统计，以及 top-K 选择后 root 迭代次数和总时间是否改善。
+
+随后进一步收紧 `pi_j=0` 的任务处理。此前实现名为 `zeroDualSingletonOnlyJobs`，语义是根节点 no-cut 下仍允许 `source->j->sink` 这类 singleton 旁路，只禁止它参与多任务列。复核后确认这和当前剪枝依据不一致：如果采用“无 cut/branch dual 且三角不等式成立时，`pi_j=0` 的 job 不可能出现在负 reduced-cost 列中”的判断，就不应再保留 singleton 例外。因此本次改成 `zeroDualExcludedJobs`：这类 job 在 forward/backward reachable-set 构建阶段就被排除，`canExtendForward/canExtendBackward` 也直接拒绝；join 中的 zero-dual 检查只作为防御性过滤，避免历史 label 或边界路径漏入。验证：focused `javac` 通过，`PaperDominanceGraphConsistencyTest` 通过（`cases=200, insertions=16000`）。

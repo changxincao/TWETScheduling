@@ -219,7 +219,50 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	private void initializeDynamicBoundaries() {
-		// 2026-05-28: 诊断版本。固定 HB/HF 为静态 Tmid，用来隔离“非对称队列流程”
+		// 2026-05-28: 下面保留三种试过的初始化方案，便于后续复现实验。
+		//
+		// 方案 A：PDF 风格的全宽动态空间。实测会过早放宽扩展边界，生成大量静态 Tmid 本会截掉的 label。
+		// double lower = Math.max(dynamicMinHStart, earliestSourceCompletion);
+		// if (!Double.isFinite(lower) || Utility.isBigMValue(lower)) {
+		//     lower = 0.0;
+		// }
+		// if (Utility.compareLt(lower, 0.0)) {
+		//     lower = 0.0;
+		// }
+		// double upper = pricingHorizon;
+		// if (!Double.isFinite(upper) || Utility.compareLt(upper, lower)) {
+		//     upper = lower;
+		// }
+		// dynamicHB = lower;
+		// dynamicHF = upper;
+		//
+		// 方案 B：围绕静态 Tmid 收窄一半。能减少部分单边 label，但会增加另一侧后缀和 final join。
+		// double lower = Math.max(dynamicMinHStart, earliestSourceCompletion);
+		// if (!Double.isFinite(lower) || Utility.isBigMValue(lower)) {
+		//     lower = 0.0;
+		// }
+		// if (Utility.compareLt(lower, 0.0)) {
+		//     lower = 0.0;
+		// }
+		// double upper = pricingHorizon;
+		// if (!Double.isFinite(upper) || Utility.compareLt(upper, lower)) {
+		//     upper = lower;
+		// }
+		// dynamicHB = (lower + tMid) * 0.5;
+		// dynamicHF = (tMid + upper) * 0.5;
+		// if (Utility.compareLt(dynamicHB, lower)) {
+		//     dynamicHB = lower;
+		// }
+		// if (Utility.compareGt(dynamicHF, upper)) {
+		//     dynamicHF = upper;
+		// }
+		// if (Utility.compareGt(dynamicHB, dynamicHF)) {
+		//     double midpoint = (lower + upper) * 0.5;
+		//     dynamicHB = midpoint;
+		//     dynamicHF = midpoint;
+		// }
+		//
+		// 方案 C：当前诊断默认。固定 HB/HF 为静态 Tmid，用来隔离“非对称队列流程”
 		// 与“动态中间边界”两类因素的影响。
 		dynamicHB = tMid;
 		dynamicHF = tMid;

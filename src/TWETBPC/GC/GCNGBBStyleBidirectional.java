@@ -106,7 +106,6 @@ public class GCNGBBStyleBidirectional {
 	private long backwardLabelsDominated;
 	private long joinTerminalGroupsScanned;
 	private long joinTerminalGroupsArcOrVisitPruned;
-	private long joinTerminalGroupsEmpty;
 	private long joinTerminalGroupsTimePruned;
 	private long joinTerminalGroupsCostPruned;
 	private long joinCandidateLabelsVisited;
@@ -909,7 +908,6 @@ public class GCNGBBStyleBidirectional {
 		backwardLabelsDominated = 0;
 		joinTerminalGroupsScanned = 0;
 		joinTerminalGroupsArcOrVisitPruned = 0;
-		joinTerminalGroupsEmpty = 0;
 		joinTerminalGroupsTimePruned = 0;
 		joinTerminalGroupsCostPruned = 0;
 		joinCandidateLabelsVisited = 0;
@@ -939,8 +937,8 @@ public class GCNGBBStyleBidirectional {
 				+ forwardSinglePointDominatedByStore + "/" + forwardSinglePointDominatedByGraph
 				+ ", bw kept/storeDom/graphDom=" + backwardSinglePointKept + "/"
 				+ backwardSinglePointDominatedByStore + "/" + backwardSinglePointDominatedByGraph
-				+ ", join groups scanned/arcOrVisit/empty/timeLB/costLB=" + joinTerminalGroupsScanned
-				+ "/" + joinTerminalGroupsArcOrVisitPruned + "/" + joinTerminalGroupsEmpty
+				+ ", join groups scanned/arcOrVisit/timeLB/costLB=" + joinTerminalGroupsScanned
+				+ "/" + joinTerminalGroupsArcOrVisitPruned
 				+ "/" + joinTerminalGroupsTimePruned + "/" + joinTerminalGroupsCostPruned
 				+ ", join candidates visited/dominated=" + joinCandidateLabelsVisited + "/"
 				+ joinCandidateLabelsDominated

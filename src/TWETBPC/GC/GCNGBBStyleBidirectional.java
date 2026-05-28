@@ -79,6 +79,8 @@ public class GCNGBBStyleBidirectional {
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
+	private double[] effectiveJobHStart;
+	private double[] effectiveJobHEnd;
 	private PiecewiseLinearFunction[] dynamicBackwardPenaltyByJob;
 	private double[] dynamicBackwardHStartByJob;
 	private double[] dynamicBackwardHEndByJob;
@@ -92,6 +94,7 @@ public class GCNGBBStyleBidirectional {
 	private PiecewiseLinearFunction[] baseForwardHalfPenaltyByJob;
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
+	private double baseHalfPenaltyCacheHorizon = Double.NaN;
 	// 2026-05-24: 只有根节点且没有 cut dual 时，pi_j profitable window 才保留三角不等式依据。
 	private boolean dualProfitableWindowEnabled;
 
@@ -139,8 +142,11 @@ public class GCNGBBStyleBidirectional {
 			backwardExtend(lp);
 		}
 		if (canContinue()) {
-			sortActiveLabelListsForJoin();
+			compactAndSortActiveLabelListsForJoin();
 			joinAllBackwardLabels(lp);
+			if (canContinue()) {
+				generateForwardSinkColumns(lp);
+			}
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap reached";
 		lastMessage = "GCNGBB-style bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
@@ -177,10 +183,14 @@ public class GCNGBBStyleBidirectional {
 			public int compare(ForwardLabel left, ForwardLabel right) {
 				if (ordering == LabelQueueOrdering.TIME) {
 					int byTime = compareDoubleAsc(earliestForwardCompletion(left), earliestForwardCompletion(right));
-					return byTime != 0 ? byTime : compareReducedCost(left, right);
+					if (byTime != 0) {
+						return byTime;
+					}
+					int byReachable = compareReachableCardinalityDesc(left, right);
+					return byReachable != 0 ? byReachable : compareReducedCost(left, right);
 				}
 				if (ordering == LabelQueueOrdering.REACHABLE_SIZE) {
-					int byReachable = Integer.compare(right.reachableCardinality, left.reachableCardinality);
+					int byReachable = compareReachableCardinalityDesc(left, right);
 					return byReachable != 0 ? byReachable : compareReducedCost(left, right);
 				}
 				return compareReducedCost(left, right);
@@ -194,10 +204,14 @@ public class GCNGBBStyleBidirectional {
 			public int compare(BackwardLabel left, BackwardLabel right) {
 				if (ordering == LabelQueueOrdering.TIME) {
 					int byTime = compareDoubleDesc(latestBackwardCompletion(left), latestBackwardCompletion(right));
-					return byTime != 0 ? byTime : compareReducedCost(left, right);
+					if (byTime != 0) {
+						return byTime;
+					}
+					int byReachable = compareReachableCardinalityDesc(left, right);
+					return byReachable != 0 ? byReachable : compareReducedCost(left, right);
 				}
 				if (ordering == LabelQueueOrdering.REACHABLE_SIZE) {
-					int byReachable = Integer.compare(right.reachableCardinality, left.reachableCardinality);
+					int byReachable = compareReachableCardinalityDesc(left, right);
 					return byReachable != 0 ? byReachable : compareReducedCost(left, right);
 				}
 				return compareReducedCost(left, right);
@@ -212,6 +226,10 @@ public class GCNGBBStyleBidirectional {
 		}
 		int byJob = Integer.compare(left.jid, right.jid);
 		return byJob != 0 ? byJob : Integer.compare(left.labelId, right.labelId);
+	}
+
+	private static int compareReachableCardinalityDesc(FunctionLabel left, FunctionLabel right) {
+		return Integer.compare(right.reachableCardinality, left.reachableCardinality);
 	}
 
 	private static int compareDoubleAsc(double left, double right) {
@@ -308,7 +326,6 @@ public class GCNGBBStyleBidirectional {
 		if (label.isDominated) {
 			return;
 		}
-		tryGenerateForwardColumn(label, lp);
 
 		Node node = lp.getNode();
 		for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
@@ -509,7 +526,6 @@ public class GCNGBBStyleBidirectional {
 		activeForwardByLastJob.get(label.jid).add(label);
 		activeForwardTerminalJobs.add(label.jid);
 		updateForwardScalarInfo(label);
-		tryGenerateForwardColumn(label, lp);
 		return InsertStatus.STORED_NO_EXPAND;
 	}
 
@@ -645,16 +661,78 @@ public class GCNGBBStyleBidirectional {
 		tryGenerateColumn(sequence, lp, reducedCost);
 	}
 
-	/**
-	 * 2026-05-26: final join 前按 label 自身的乐观 min reduced cost 排序。
-	 * 这只影响达到列数上限时优先尝试哪些 label，不改变 dominance 或 reduced-cost 语义；
-	 * 后续若实验效果一般，可以只注释 solve() 中的调用。
-	 */
-	private void sortActiveLabelListsForJoin() {
-		for (int job = 1; job <= data.n; job++) {
-			Collections.sort(activeForwardByLastJob.get(job));
-			Collections.sort(activeBackwardByFirstJob.get(job));
+	private void generateForwardSinkColumns(LP lp) {
+		for (int lastJob = activeForwardTerminalJobs.nextSetBit(1);
+				lastJob > 0 && lastJob <= data.n && canContinue();
+				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
+			ArrayList<ForwardLabel> labels = activeForwardByLastJob.get(lastJob);
+			for (int i = 0; i < labels.size() && canContinue(); i++) {
+				ForwardLabel label = labels.get(i);
+				if (!label.isDominated) {
+					tryGenerateForwardColumn(label, lp);
+				}
+			}
 		}
+	}
+
+	/**
+	 * 2026-05-28: final join 前统一清掉已被后续 label 支配的旧条目，再排序。
+	 * 这样完整列只从最终仍存活的 label table 里生成，不受早期出队顺序影响。
+	 */
+	private void compactAndSortActiveLabelListsForJoin() {
+		for (int job = 1; job <= data.n; job++) {
+			compactForwardLabelsForJoin(job);
+			compactBackwardLabelsForJoin(job);
+		}
+	}
+
+	private void compactForwardLabelsForJoin(int job) {
+		ArrayList<ForwardLabel> labels = activeForwardByLastJob.get(job);
+		int liveCount = 0;
+		double liveMinReducedCost = Utility.big_M;
+		double liveMinEll = Utility.big_M;
+		for (int i = 0; i < labels.size(); i++) {
+			ForwardLabel label = labels.get(i);
+			if (label.isDominated) {
+				continue;
+			}
+			labels.set(liveCount++, label);
+			if (Utility.compareLt(label.minReducedCost, liveMinReducedCost)) {
+				liveMinReducedCost = label.minReducedCost;
+			}
+			if (label.frontier != null && label.frontier.head != null
+					&& Utility.compareLt(label.frontier.head.start, liveMinEll)) {
+				liveMinEll = label.frontier.head.start;
+			}
+		}
+		if (liveCount < labels.size()) {
+			labels.subList(liveCount, labels.size()).clear();
+		}
+		if (liveCount == 0) {
+			activeForwardTerminalJobs.remove(job);
+			minForwardReducedCostByLastJob[job] = Utility.big_M;
+			minForwardEllByLastJob[job] = Utility.big_M;
+			return;
+		}
+		Collections.sort(labels);
+		minForwardReducedCostByLastJob[job] = liveMinReducedCost;
+		minForwardEllByLastJob[job] = liveMinEll;
+		activeForwardTerminalJobs.add(job);
+	}
+
+	private void compactBackwardLabelsForJoin(int job) {
+		ArrayList<BackwardLabel> labels = activeBackwardByFirstJob.get(job);
+		int liveCount = 0;
+		for (int i = 0; i < labels.size(); i++) {
+			BackwardLabel label = labels.get(i);
+			if (!label.isDominated) {
+				labels.set(liveCount++, label);
+			}
+		}
+		if (liveCount < labels.size()) {
+			labels.subList(liveCount, labels.size()).clear();
+		}
+		Collections.sort(labels);
 	}
 
 	/**
@@ -719,15 +797,14 @@ public class GCNGBBStyleBidirectional {
 				joinTerminalGroupsTimePruned++;
 				continue;
 			}
+			double joinFixedReducedCost = data.getSetupCost(lastJob, backward.jid)
+					- lp.getArcDual(lastJob, backward.jid);
 			double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost
-					+ data.getSetupCost(lastJob, backward.jid) - lp.getArcDual(lastJob, backward.jid);
+					+ joinFixedReducedCost;
 			if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
 				joinTerminalGroupsCostPruned++;
 				continue;
 			}
-			int liveCount = 0;
-			double liveMinReducedCost = Utility.big_M;
-			double liveMinEll = Utility.big_M;
 			for (int i = 0; i < candidates.size(); i++) {
 				ForwardLabel forward = candidates.get(i);
 				joinCandidateLabelsVisited++;
@@ -735,23 +812,19 @@ public class GCNGBBStyleBidirectional {
 					joinCandidateLabelsDominated++;
 					continue;
 				}
-				candidates.set(liveCount++, forward);
-				if (Utility.compareLt(forward.minReducedCost, liveMinReducedCost)) {
-					liveMinReducedCost = forward.minReducedCost;
-				}
-				if (forward.frontier != null && forward.frontier.head != null
-						&& Utility.compareLt(forward.frontier.head.start, liveMinEll)) {
-					liveMinEll = forward.frontier.head.start;
+				double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
+				if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
+					joinPairsLowerBoundPruned++;
+					break;
 				}
 				if (canContinue()) {
-					tryJoin(forward, backward, lp);
+					tryJoin(forward, backward, lp, joinFixedReducedCost);
 				}
 			}
-			refreshForwardGroupAfterJoinScan(lastJob, candidates, liveCount, liveMinReducedCost, liveMinEll);
 		}
 	}
 
-	private void tryJoin(ForwardLabel forward, BackwardLabel backward, LP lp) {
+	private void tryJoin(ForwardLabel forward, BackwardLabel backward, LP lp, double joinFixedReducedCost) {
 		if (generatedColumns.size() >= config.maxExactPricingColumns) {
 			return;
 		}
@@ -762,17 +835,6 @@ public class GCNGBBStyleBidirectional {
 		}
 		if (forward.jid == backward.jid || forward.visitedSet.intersects(backward.visitedSet)) {
 			joinPairsSetPruned++;
-			return;
-		}
-
-		double joinFixedReducedCost = data.getSetupCost(forward.jid, backward.jid)
-				- lp.getArcDual(forward.jid, backward.jid);
-		// 2026-05-22: 先用 forward/backward frontier 的全局最小值做一次乐观下界。
-		// join 的常数延拓和 crossing arc 对齐不会产生比两侧 frontier 全局最小值之和更低的下界，
-		// 因此若这个标量下界都不能为负，就没必要再构造 join 函数。
-		double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
-		if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
-			joinPairsLowerBoundPruned++;
 			return;
 		}
 
@@ -864,21 +926,6 @@ public class GCNGBBStyleBidirectional {
 				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
-	}
-
-	private void refreshForwardGroupAfterJoinScan(int lastJob, ArrayList<ForwardLabel> candidates, int liveCount,
-			double liveMinReducedCost, double liveMinEll) {
-		if (liveCount < candidates.size()) {
-			candidates.subList(liveCount, candidates.size()).clear();
-		}
-		if (liveCount == 0) {
-			activeForwardTerminalJobs.remove(lastJob);
-			minForwardReducedCostByLastJob[lastJob] = Utility.big_M;
-			minForwardEllByLastJob[lastJob] = Utility.big_M;
-			return;
-		}
-		minForwardReducedCostByLastJob[lastJob] = liveMinReducedCost;
-		minForwardEllByLastJob[lastJob] = liveMinEll;
 	}
 
 	/**
@@ -1110,6 +1157,8 @@ public class GCNGBBStyleBidirectional {
 		dynamicJobPenaltyByJob = null;
 		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
+		effectiveJobHStart = null;
+		effectiveJobHEnd = null;
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
@@ -1120,16 +1169,76 @@ public class GCNGBBStyleBidirectional {
 		zeroDualSingletonOnlyJobs = null;
 		zeroDualSingletonOnlyJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
-		pricingHorizon = computeCurrentPricingHorizon(lp);
-		tMid = computeCurrentMidpoint(lp);
+		precomputeEffectivePricingWindows(lp);
+		tMid = computeCurrentMidpoint();
 		precomputeZeroDualSingletonOnlyJobs(lp);
 		ensureBaseHalfPenaltyCache();
-		precomputeJobLevelDynamicPricingWindows(lp);
-		precomputeBackwardDynamicPricingWindows(lp);
+		precomputeJobLevelDynamicPricingWindows();
+		precomputeBackwardDynamicPricingWindows();
 		precomputeHalfDomainEligibility();
 	}
 
-	private double computeCurrentMidpoint(LP lp) {
+	private void precomputeEffectivePricingWindows(LP lp) {
+		effectiveJobHStart = new double[data.n + 1];
+		effectiveJobHEnd = new double[data.n + 1];
+		dynamicMinHStart = Utility.big_M;
+		dynamicMaxHEnd = 0.0;
+		earliestSourceCompletion = computeEarliestSourceCompletion();
+
+		if (!dualProfitableWindowEnabled) {
+			pricingHorizon = data.CmaxH;
+			for (int job = 1; job <= data.n; job++) {
+				recordEffectiveWindow(job, data.hardWindowStart[job], data.hardWindowEnd[job]);
+			}
+			finalizeEffectiveWindowStatistics(false, data.CmaxH);
+			return;
+		}
+
+		double localHorizon = 0.0;
+		boolean foundFiniteWindow = false;
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			double baseline = outsourcingBaseline(job);
+			double jobDual = Math.max(0.0, lp.getJobDual(job));
+			if (Utility.compareLt(jobDual, baseline)) {
+				double dynamicStart = hWindowStart(job, jobDual);
+				double dynamicEnd = hWindowEnd(job, jobDual);
+				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+					hStart = dynamicStart;
+					hEnd = dynamicEnd;
+				}
+			}
+			recordEffectiveWindow(job, hStart, hEnd);
+			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hEnd)) {
+				localHorizon = Math.max(localHorizon, hEnd);
+				foundFiniteWindow = true;
+			}
+		}
+		finalizeEffectiveWindowStatistics(foundFiniteWindow, localHorizon);
+	}
+
+	private void recordEffectiveWindow(int job, double hStart, double hEnd) {
+		effectiveJobHStart[job] = hStart;
+		effectiveJobHEnd[job] = hEnd;
+		if (!Utility.compareGt(hStart, hEnd)) {
+			if (Double.isFinite(hStart)) {
+				dynamicMinHStart = Math.min(dynamicMinHStart, hStart);
+			}
+			dynamicMaxHEnd = Math.max(dynamicMaxHEnd, hEnd);
+		}
+	}
+
+	private void finalizeEffectiveWindowStatistics(boolean useLocalHorizon, double localHorizon) {
+		if (Utility.isBigMValue(dynamicMinHStart)) {
+			dynamicMinHStart = 0.0;
+		}
+		pricingHorizon = useLocalHorizon ? Math.min(data.CmaxH, localHorizon) : data.CmaxH;
+		dynamicMaxHEnd = Math.max(dynamicMaxHEnd, pricingHorizon);
+	}
+
+	private double computeCurrentMidpoint() {
 		double candidate;
 		if (Double.isFinite(config.bidirectionalRootLocalHorizonMidpointRatio)
 				&& Utility.compareGt(config.bidirectionalRootLocalHorizonMidpointRatio, 0.0)
@@ -1137,9 +1246,6 @@ public class GCNGBBStyleBidirectional {
 			candidate = pricingHorizon * config.bidirectionalRootLocalHorizonMidpointRatio;
 			return clampCurrentMidpoint(candidate);
 		}
-		dynamicMinHStart = computeCurrentPricingWindowStart(lp);
-		dynamicMaxHEnd = pricingHorizon;
-		earliestSourceCompletion = computeEarliestSourceCompletion();
 		double left = Math.max(dynamicMinHStart, earliestSourceCompletion);
 		if (Double.isFinite(left) && Utility.compareLt(left, pricingHorizon)) {
 			candidate = (left + pricingHorizon) * 0.5;
@@ -1173,31 +1279,6 @@ public class GCNGBBStyleBidirectional {
 		return candidate;
 	}
 
-	private double computeCurrentPricingWindowStart(LP lp) {
-		double localStart = Utility.big_M;
-		boolean foundFiniteWindow = false;
-		for (int job = 1; job <= data.n; job++) {
-			double hStart = data.hardWindowStart[job];
-			double hEnd = data.hardWindowEnd[job];
-			double baseline = outsourcingBaseline(job);
-			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
-			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
-				double dynamicStart = hWindowStart(job, jobDual);
-				double dynamicEnd = hWindowEnd(job, jobDual);
-				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
-						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
-					hStart = dynamicStart;
-					hEnd = dynamicEnd;
-				}
-			}
-			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hStart)) {
-				localStart = Math.min(localStart, hStart);
-				foundFiniteWindow = true;
-			}
-		}
-		return foundFiniteWindow ? localStart : 0.0;
-	}
-
 	private double computeEarliestSourceCompletion() {
 		double earliest = Utility.big_M;
 		for (int job = 1; job <= data.n; job++) {
@@ -1206,98 +1287,43 @@ public class GCNGBBStyleBidirectional {
 		return earliest;
 	}
 
-	/**
-	 * 2026-05-24: 先按本轮实际使用的 job 右端时间窗求一个局部 horizon，
-	 * 再用它压住全局 CmaxH/2，避免 root no-cut 且 profitable window 明显收紧时，
-	 * backward sink root 因 Tmid 过右而完全无标签。
-	 */
-	private double computeCurrentPricingHorizon(LP lp) {
-		double localHorizon = 0.0;
-		boolean foundFiniteWindow = false;
-		for (int job = 1; job <= data.n; job++) {
-			double hStart = data.hardWindowStart[job];
-			double hEnd = data.hardWindowEnd[job];
-			double baseline = outsourcingBaseline(job);
-			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
-			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
-				double dynamicStart = hWindowStart(job, jobDual);
-				double dynamicEnd = hWindowEnd(job, jobDual);
-				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
-						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
-					hStart = dynamicStart;
-					hEnd = dynamicEnd;
-				}
-			}
-			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hEnd)) {
-				localHorizon = Math.max(localHorizon, hEnd);
-				foundFiniteWindow = true;
-			}
-		}
-		if (!foundFiniteWindow) {
-			return data.CmaxH;
-		}
-		return Math.min(data.CmaxH, localHorizon);
-	}
-
-	private void precomputeJobLevelDynamicPricingWindows(LP lp) {
+	private void precomputeJobLevelDynamicPricingWindows() {
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
-		dynamicMinHStart = Utility.big_M;
-		dynamicMaxHEnd = 0.0;
-		earliestSourceCompletion = Utility.big_M;
 		for (int job = 1; job <= data.n; job++) {
-			double hStart = data.hardWindowStart[job];
-			double hEnd = data.hardWindowEnd[job];
+			double hStart = effectiveJobHStart[job];
+			double hEnd = effectiveJobHEnd[job];
 			PiecewiseLinearFunction penalty = baseForwardHalfPenaltyByJob[job];
-			double baseline = outsourcingBaseline(job);
-			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
-			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
-				double dynamicStart = hWindowStart(job, jobDual);
-				double dynamicEnd = hWindowEnd(job, jobDual);
-				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
-						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
-					hStart = dynamicStart;
-					hEnd = dynamicEnd;
-					penalty = Utility.compareGt(hStart, hEnd) ? null : buildForwardHalfPenalty(job, hStart, hEnd);
-				}
+			if (isEffectiveWindowTighterThanHard(job)) {
+				penalty = Utility.compareGt(hStart, hEnd) ? null : buildForwardHalfPenalty(job, hStart, hEnd);
 			}
 			dynamicJobHStart[job] = hStart;
 			dynamicJobHEnd[job] = hEnd;
 			dynamicJobPenaltyByJob[job] = penalty;
-			if (!Utility.compareGt(hStart, hEnd)) {
-				dynamicMinHStart = Math.min(dynamicMinHStart, hStart);
-				dynamicMaxHEnd = Math.max(dynamicMaxHEnd, hEnd);
-			}
-			earliestSourceCompletion = Math.min(earliestSourceCompletion,
-					data.getSetUp(0, job) + data.getProcessT(job));
 		}
 	}
 
-	private void precomputeBackwardDynamicPricingWindows(LP lp) {
+	private void precomputeBackwardDynamicPricingWindows() {
 		dynamicBackwardPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		dynamicBackwardHStartByJob = new double[data.n + 1];
 		dynamicBackwardHEndByJob = new double[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			double hStart = data.hardWindowStart[job];
-			double hEnd = data.hardWindowEnd[job];
+			double hStart = effectiveJobHStart[job];
+			double hEnd = effectiveJobHEnd[job];
 			PiecewiseLinearFunction penalty = baseBackwardHalfPenaltyByJob[job];
-			double baseline = outsourcingBaseline(job);
-			double jobDual = dualProfitableWindowEnabled ? Math.max(0.0, lp.getJobDual(job)) : baseline;
-			if (dualProfitableWindowEnabled && Utility.compareLt(jobDual, baseline)) {
-				double dynamicStart = hWindowStart(job, jobDual);
-				double dynamicEnd = hWindowEnd(job, jobDual);
-				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
-						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
-					hStart = dynamicStart;
-					hEnd = dynamicEnd;
-					penalty = Utility.compareGt(hStart, hEnd) ? null : buildBackwardHalfPenalty(job, hStart, hEnd);
-				}
+			if (isEffectiveWindowTighterThanHard(job)) {
+				penalty = Utility.compareGt(hStart, hEnd) ? null : buildBackwardHalfPenalty(job, hStart, hEnd);
 			}
 			dynamicBackwardHStartByJob[job] = hStart;
 			dynamicBackwardHEndByJob[job] = hEnd;
 			dynamicBackwardPenaltyByJob[job] = penalty;
 		}
+	}
+
+	private boolean isEffectiveWindowTighterThanHard(int job) {
+		return Utility.compareGt(effectiveJobHStart[job], data.hardWindowStart[job])
+				|| Utility.compareLt(effectiveJobHEnd[job], data.hardWindowEnd[job]);
 	}
 
 	/**
@@ -1327,7 +1353,8 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private void ensureBaseHalfPenaltyCache() {
-		if (baseForwardHalfPenaltyByJob != null && Utility.compareEq(baseHalfPenaltyCacheTMid, tMid)) {
+		if (baseForwardHalfPenaltyByJob != null && Utility.compareEq(baseHalfPenaltyCacheTMid, tMid)
+				&& Utility.compareEq(baseHalfPenaltyCacheHorizon, pricingHorizon)) {
 			return;
 		}
 		baseForwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
@@ -1339,6 +1366,7 @@ public class GCNGBBStyleBidirectional {
 			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, pricingHorizon);
 		}
 		baseHalfPenaltyCacheTMid = tMid;
+		baseHalfPenaltyCacheHorizon = pricingHorizon;
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
@@ -1604,6 +1632,9 @@ public class GCNGBBStyleBidirectional {
 
 		@Override
 		public int compareTo(Label other) {
+			if (other instanceof FunctionLabel) {
+				return compareReducedCost(this, (FunctionLabel) other);
+			}
 			if (Utility.compareLt(minReducedCost, other.minReducedCost)) {
 				return -1;
 			}

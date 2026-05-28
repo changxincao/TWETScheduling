@@ -62,11 +62,13 @@ public class GCNGBBStyleBidirectional {
 	private double[] minForwardReducedCostByLastJob;
 	private double[] minForwardEllByLastJob;
 	private ArrayList<TWETColumn> generatedColumns;
-	private HashSet<SequenceSignature> generatedSignatures;
+	private PriorityQueue<PricingColumnCandidate> generatedColumnCandidates;
+	private HashMap<SequenceSignature, PricingColumnCandidate> generatedCandidateBySignature;
 	private HashSet<SequenceSignature> activeColumnSignatures;
 	private boolean[] zeroDualSingletonOnlyJobs;
 	private int zeroDualSingletonOnlyJobCount;
 	private int nextLabelId;
+	private int nextCandidateId;
 	private LabelQueueOrdering queueOrdering;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -121,6 +123,8 @@ public class GCNGBBStyleBidirectional {
 	private long backwardSinglePointKept;
 	private long backwardSinglePointDominatedByStore;
 	private long backwardSinglePointDominatedByGraph;
+	private long generatedCandidateCount;
+	private long generatedCandidateDroppedByHeap;
 
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
@@ -143,12 +147,10 @@ public class GCNGBBStyleBidirectional {
 		}
 		if (canContinue()) {
 			compactAndSortActiveLabelListsForJoin();
-			joinAllBackwardLabels(lp);
-			if (canContinue()) {
-				generateForwardSinkColumns(lp);
-			}
+			joinAllForwardTerminalGroups(lp);
+			finalizeGeneratedColumns();
 		}
-		String completionState = canContinue() ? "queues exhausted" : "column cap reached";
+		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
 		lastMessage = "GCNGBB-style bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
@@ -228,6 +230,32 @@ public class GCNGBBStyleBidirectional {
 		return byJob != 0 ? byJob : Integer.compare(left.labelId, right.labelId);
 	}
 
+	private static Comparator<PricingColumnCandidate> candidateWorstFirstComparator() {
+		return new Comparator<PricingColumnCandidate>() {
+			@Override
+			public int compare(PricingColumnCandidate left, PricingColumnCandidate right) {
+				return -compareCandidateBestFirst(left, right);
+			}
+		};
+	}
+
+	private static Comparator<PricingColumnCandidate> candidateBestFirstComparator() {
+		return new Comparator<PricingColumnCandidate>() {
+			@Override
+			public int compare(PricingColumnCandidate left, PricingColumnCandidate right) {
+				return compareCandidateBestFirst(left, right);
+			}
+		};
+	}
+
+	private static int compareCandidateBestFirst(PricingColumnCandidate left, PricingColumnCandidate right) {
+		int byCost = compareDoubleAsc(left.reducedCost, right.reducedCost);
+		if (byCost != 0) {
+			return byCost;
+		}
+		return Integer.compare(left.candidateId, right.candidateId);
+	}
+
 	private static int compareReachableCardinalityDesc(FunctionLabel left, FunctionLabel right) {
 		return Integer.compare(right.reachableCardinality, left.reachableCardinality);
 	}
@@ -282,9 +310,12 @@ public class GCNGBBStyleBidirectional {
 			minForwardEllByLastJob[i] = Utility.big_M;
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
-		generatedSignatures = new HashSet<SequenceSignature>();
+		generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
+				Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
+		generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
 		activeColumnSignatures = new HashSet<SequenceSignature>();
 		nextLabelId = 0;
+		nextCandidateId = 0;
 		// 只记录当前 RMP active 列。全局 pool 自身会按 signature 去重；若历史列当前不 active，
 		// pricing 仍可把它返回给 PC，让 LP.addColumns() 重新激活已有列。
 		for (int columnId : lp.getRestrictedColumnIds()) {
@@ -318,7 +349,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private boolean canContinue() {
-		return generatedColumns.size() < config.maxExactPricingColumns;
+		return config.maxExactPricingColumns > 0;
 	}
 
 	private void forwardExtend(LP lp) {
@@ -645,7 +676,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private void tryGenerateForwardColumn(ForwardLabel label, LP lp) {
-		if (label.jid == 0 || generatedColumns.size() >= config.maxExactPricingColumns) {
+		if (label.jid == 0 || config.maxExactPricingColumns <= 0) {
 			return;
 		}
 		Node node = lp.getNode();
@@ -659,20 +690,6 @@ public class GCNGBBStyleBidirectional {
 		}
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
 		tryGenerateColumn(sequence, lp, reducedCost);
-	}
-
-	private void generateForwardSinkColumns(LP lp) {
-		for (int lastJob = activeForwardTerminalJobs.nextSetBit(1);
-				lastJob > 0 && lastJob <= data.n && canContinue();
-				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
-			ArrayList<ForwardLabel> labels = activeForwardByLastJob.get(lastJob);
-			for (int i = 0; i < labels.size() && canContinue(); i++) {
-				ForwardLabel label = labels.get(i);
-				if (!label.isDominated) {
-					tryGenerateForwardColumn(label, lp);
-				}
-			}
-		}
 	}
 
 	/**
@@ -736,25 +753,39 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	/**
-	 * 2026-05-26: 统一收尾 join。这里对应旧 VRP GCNGBB 的 Join(lp)：两侧 label table 都生成完以后，
-	 * 再扫描 backward label，用 crossing arc 连接所有可行 forward 前缀。
+	 * 2026-05-28: 统一收尾 join。两侧 label table 都生成完以后，以 forward terminal group 为外层，
+	 * 同时处理 crossing-arc join 和 forward->sink 收尾，避免 sink 列绕过统一候选筛选。
 	 */
-	private void joinAllBackwardLabels(LP lp) {
+	private void joinAllForwardTerminalGroups(LP lp) {
+		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
+				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
+			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
+			if (candidates.isEmpty()) {
+				continue;
+			}
+			joinForwardGroupToBackwardLabels(lastJob, candidates, lp);
+			joinForwardGroupToSink(candidates, lp);
+		}
+	}
+
+	private void joinForwardGroupToBackwardLabels(int lastJob, ArrayList<ForwardLabel> candidates, LP lp) {
 		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
 			ArrayList<BackwardLabel> labels = activeBackwardByFirstJob.get(firstJob);
 			for (int i = 0; i < labels.size() && canContinue(); i++) {
 				BackwardLabel backward = labels.get(i);
 				if (!backward.isDominated && !backward.isSinkRoot) {
-					joinFromBackward(backward, lp);
+					joinForwardGroupWithBackward(lastJob, candidates, backward, lp);
 				}
 			}
 		}
 		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
-			joinBackwardSinglePointLabels(backwardSinglePointByFirstJob.get(firstJob), lp);
+			joinForwardGroupWithBackwardSinglePoints(lastJob, candidates, backwardSinglePointByFirstJob.get(firstJob),
+					lp);
 		}
 	}
 
-	private void joinBackwardSinglePointLabels(SinglePointStore<BackwardLabel> store, LP lp) {
+	private void joinForwardGroupWithBackwardSinglePoints(int lastJob, ArrayList<ForwardLabel> candidates,
+			SinglePointStore<BackwardLabel> store, LP lp) {
 		for (int cardinality = 0; cardinality < store.liveLabelsByCardinality.size() && canContinue(); cardinality++) {
 			ArrayList<BackwardLabel> bucket = store.liveLabelsByCardinality.get(cardinality);
 			if (bucket == null || bucket.isEmpty()) {
@@ -763,69 +794,65 @@ public class GCNGBBStyleBidirectional {
 			for (int i = 0; i < bucket.size() && canContinue(); i++) {
 				BackwardLabel backward = bucket.get(i);
 				if (!backward.isDominated && !backward.isSinkRoot) {
-					joinFromBackward(backward, lp);
+					joinForwardGroupWithBackward(lastJob, candidates, backward, lp);
 				}
 			}
 		}
 	}
 
-	private void joinFromBackward(BackwardLabel backward, LP lp) {
-		if (generatedColumns.size() >= config.maxExactPricingColumns) {
-			return;
+	private void joinForwardGroupToSink(ArrayList<ForwardLabel> candidates, LP lp) {
+		for (int i = 0; i < candidates.size() && canContinue(); i++) {
+			ForwardLabel label = candidates.get(i);
+			if (!label.isDominated) {
+				tryGenerateForwardColumn(label, lp);
+			}
 		}
+	}
+
+	private void joinForwardGroupWithBackward(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward,
+			LP lp) {
 		Node node = lp.getNode();
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
-		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
-				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
-			joinTerminalGroupsScanned++;
-			if (isZeroDualSingletonOnlyJob(lastJob) || (isZeroDualSingletonOnlyJob(backward.jid) && lastJob != 0)) {
-				joinTerminalGroupsArcOrVisitPruned++;
+		joinTerminalGroupsScanned++;
+		if (isZeroDualSingletonOnlyJob(lastJob) || (isZeroDualSingletonOnlyJob(backward.jid) && lastJob != 0)) {
+			joinTerminalGroupsArcOrVisitPruned++;
+			return;
+		}
+		if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
+			joinTerminalGroupsArcOrVisitPruned++;
+			return;
+		}
+		double delay = data.getSetUp(lastJob, backward.jid) + data.getProcessT(backward.jid);
+		if (Utility.compareGt(minForwardEllByLastJob[lastJob] + delay, backward.frontier.tail.end)) {
+			joinTerminalGroupsTimePruned++;
+			return;
+		}
+		double joinFixedReducedCost = data.getSetupCost(lastJob, backward.jid)
+				- lp.getArcDual(lastJob, backward.jid);
+		double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost + joinFixedReducedCost;
+		if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
+			joinTerminalGroupsCostPruned++;
+			return;
+		}
+		for (int i = 0; i < candidates.size(); i++) {
+			ForwardLabel forward = candidates.get(i);
+			joinCandidateLabelsVisited++;
+			if (forward.isDominated) {
+				joinCandidateLabelsDominated++;
 				continue;
 			}
-			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
-				joinTerminalGroupsArcOrVisitPruned++;
-				continue;
+			double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
+			if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
+				joinPairsLowerBoundPruned++;
+				break;
 			}
-			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
-			if (candidates.isEmpty()) {
-				joinTerminalGroupsEmpty++;
-				continue;
-			}
-			double delay = data.getSetUp(lastJob, backward.jid) + data.getProcessT(backward.jid);
-			if (Utility.compareGt(minForwardEllByLastJob[lastJob] + delay, backward.frontier.tail.end)) {
-				joinTerminalGroupsTimePruned++;
-				continue;
-			}
-			double joinFixedReducedCost = data.getSetupCost(lastJob, backward.jid)
-					- lp.getArcDual(lastJob, backward.jid);
-			double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost
-					+ joinFixedReducedCost;
-			if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
-				joinTerminalGroupsCostPruned++;
-				continue;
-			}
-			for (int i = 0; i < candidates.size(); i++) {
-				ForwardLabel forward = candidates.get(i);
-				joinCandidateLabelsVisited++;
-				if (forward.isDominated) {
-					joinCandidateLabelsDominated++;
-					continue;
-				}
-				double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
-				if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
-					joinPairsLowerBoundPruned++;
-					break;
-				}
-				if (canContinue()) {
-					tryJoin(forward, backward, lp, joinFixedReducedCost);
-				}
-			}
+			tryJoin(forward, backward, lp, joinFixedReducedCost);
 		}
 	}
 
 	private void tryJoin(ForwardLabel forward, BackwardLabel backward, LP lp, double joinFixedReducedCost) {
-		if (generatedColumns.size() >= config.maxExactPricingColumns) {
+		if (config.maxExactPricingColumns <= 0) {
 			return;
 		}
 		joinPairsTried++;
@@ -899,6 +926,8 @@ public class GCNGBBStyleBidirectional {
 		backwardSinglePointKept = 0;
 		backwardSinglePointDominatedByStore = 0;
 		backwardSinglePointDominatedByGraph = 0;
+		generatedCandidateCount = 0;
+		generatedCandidateDroppedByHeap = 0;
 	}
 
 	private String statisticsSummary() {
@@ -919,6 +948,8 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
+				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering
 				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
@@ -984,7 +1015,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
-		if (sequence.isEmpty() || generatedColumns.size() >= config.maxExactPricingColumns) {
+		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
 		Node node = lp.getNode();
@@ -992,7 +1023,7 @@ public class GCNGBBStyleBidirectional {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
-		if (activeColumnSignatures.contains(signature) || !generatedSignatures.add(signature)) {
+		if (activeColumnSignatures.contains(signature)) {
 			return;
 		}
 		double cost = objectiveCostFromReducedCost(sequence, inferredReducedCost, lp);
@@ -1011,7 +1042,48 @@ public class GCNGBBStyleBidirectional {
 			reducedCost = checkedReducedCost;
 		}
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
-			generatedColumns.add(new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false));
+			rememberGeneratedCandidate(signature,
+					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
+		}
+	}
+
+	private void rememberGeneratedCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
+		generatedCandidateCount++;
+		PricingColumnCandidate candidate = new PricingColumnCandidate(nextCandidateId++, signature, column,
+				reducedCost);
+		PricingColumnCandidate existing = generatedCandidateBySignature.get(signature);
+		if (existing != null) {
+			if (compareCandidateBestFirst(candidate, existing) >= 0) {
+				generatedCandidateDroppedByHeap++;
+				return;
+			}
+			generatedColumnCandidates.remove(existing);
+			generatedCandidateBySignature.remove(signature);
+			generatedCandidateDroppedByHeap++;
+		}
+		if (generatedColumnCandidates.size() < config.maxExactPricingColumns) {
+			generatedColumnCandidates.add(candidate);
+			generatedCandidateBySignature.put(signature, candidate);
+			return;
+		}
+		PricingColumnCandidate worstKept = generatedColumnCandidates.peek();
+		if (worstKept != null && compareCandidateBestFirst(candidate, worstKept) < 0) {
+			generatedCandidateDroppedByHeap++;
+			generatedColumnCandidates.poll();
+			generatedCandidateBySignature.remove(worstKept.signature);
+			generatedColumnCandidates.add(candidate);
+			generatedCandidateBySignature.put(signature, candidate);
+			return;
+		}
+		generatedCandidateDroppedByHeap++;
+	}
+
+	private void finalizeGeneratedColumns() {
+		generatedColumns.clear();
+		ArrayList<PricingColumnCandidate> candidates = new ArrayList<PricingColumnCandidate>(generatedColumnCandidates);
+		Collections.sort(candidates, candidateBestFirstComparator());
+		for (int i = 0; i < candidates.size(); i++) {
+			generatedColumns.add(candidates.get(i).column);
 		}
 	}
 
@@ -1610,6 +1682,20 @@ public class GCNGBBStyleBidirectional {
 
 	private enum InsertStatus {
 		DOMINATED, STORED_NO_EXPAND, STORED_AND_ENQUEUE
+	}
+
+	private static final class PricingColumnCandidate {
+		final int candidateId;
+		final SequenceSignature signature;
+		final TWETColumn column;
+		final double reducedCost;
+
+		PricingColumnCandidate(int candidateId, SequenceSignature signature, TWETColumn column, double reducedCost) {
+			this.candidateId = candidateId;
+			this.signature = signature;
+			this.column = column;
+			this.reducedCost = reducedCost;
+		}
 	}
 
 	private static final class SinglePointStore<L extends FunctionLabel> {

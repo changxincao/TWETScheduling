@@ -1453,3 +1453,31 @@ final join 侧新增 pair-level early break。由于每个 terminal group 已按
 窗口预计算也合并成一条 effective-window 路径。非根节点或已有 active cut 时，不再按 dual 收缩 profitable window，直接使用静态 hard window，并把 `pricingHorizon` 固定为全局 `data.CmaxH`，因此这些节点的 base half penalty 可以稳定复用。根节点且 no-cut 时，仍按当前 LP dual `pi_j` 重新计算本轮 effective window、局部 `pricingHorizon` 和 `tMid`；这一步必须每轮 pricing 前重算，因为根节点 RMP resolve 后 dual 会变化。`baseHalfPenaltyCache` 现在同时检查 `tMid` 和 `pricingHorizon`，避免 backward 半域 `[Tmid,pricingHorizon]` 在右端变动时复用旧缓存。
 
 关于 pool 语义，本次也确认当前 TWET 实现中 column 和 cut 都有全局池：`Pool` 保存所有已知 column 并按 `SequenceSignature` 去重，`CutPool` 保存所有已知 cut 并按 signature 去重；当前 node/RMP 只通过 `restrictedColumnIds` 和 `activeCutIds` 激活其中一部分。因此 pricing 内的 `activeColumnSignatures` 只表示当前 RMP 已 active 的列，不表示全局 pool 中所有已存在列。验证方面，`javac -encoding UTF-8 -cp src -sourcepath src src/TWETBPC/GC/GCNGBBStyleBidirectional.java` 通过，`PaperDominanceGraphConsistencyTest` 通过（`cases=200, insertions=16000`）。
+
+## 2026-05-28 旧 VRP GCNGBB 的候选列排序语义
+
+复查旧 VRP `D:\软件\Trae\项目\BPC\src\BPC\GC\GCNGBB.java` 后，可以确认 bounded bidirectional + DSSR 路径不是发现负列就立刻全部加入主问题。`Join()` 中合法 elementary 负列先进入定价器本地 `GCPool`，其中 `pool.AddRoute(route, cost)` 记录的是拼接后的 reduced cost；若拼接结果包含真实重复客户，则只更新 `m_best_cycle` 供 `UpdateNGSet()` 收紧 ng-set，不加入候选池。
+
+在 `Extend()` 结束阶段，旧代码只有当 `pool.GetSize() > addin_size` 时才调用 `pool.Sort()`，而 `GCPool.Sort()` 按 `m_reduce_cost` 升序排列。随后代码顺序遍历本地 pool，把不在当前 LP pool 中的 route 加入 `gn_index`，直到达到 `addin_size`。因此旧 `GCNGBB` 的语义是：候选数量不超过上限时按发现顺序加入；候选数量超过上限时先按 reduced cost 选更负的前若干条。旧基础双向 `GCBDT` 和单向 `GC` 则更接近发现即加，达到 `addin_size` 就提前停止，没有 `GCPool` 统一排序层。
+
+对应到当前 TWET `GCNGBBStyleBidirectional`，现在 final join 前的 label 排序只是“更可能找到负列”的尝试顺序，不等价于旧 `GCPool` 的候选列 reduced-cost 排序；`tryGenerateColumn()` 仍是发现一条负列就加入 `generatedColumns`，达到 `maxExactPricingColumns` 即停止。若要完全贴近旧 `GCNGBB` 的超量处理，应把 join 与 sink 收尾产生的合法负列先放入一个本地候选池，记录真实/推断 reduced cost，最后按 reduced cost 升序截取 `maxExactPricingColumns`。这会增加内存和需要更多候选扫描，属于策略修改，不是简单把 `Collections.sort(labels)` 换成列排序。
+
+## 2026-05-28 旧 VRP GCTabu 与当前启发式定价加列流程对照
+
+旧 VRP 的启发式 pricing 对应 `D:\软件\Trae\项目\BPC\src\BPC\GC\GCTabu.java`。它先从当前 LP 的 `route_index` 中按 CPLEX reduced cost 选出若干 seed route，然后对每个 seed 执行 tabu move。每次找到负 reduced-cost route 时，先查当前 LP 的 `lp.pool.Route2ID(temp_route)`，若不是已有 route，就把候选放入定价器本地 `GCPool`：`pool.AddRoute(temp_route, reduce_cost)`。本地池达到 `m_gen_size` 会停止继续搜索。
+
+旧 `GCTabu.Extend()` 结束时，如果本地 `pool.GetSize() > addin_size`，会调用 `pool.Sort()`，也就是按候选 route 的 reduced cost 升序排序。随后顺序遍历本地 pool，把当前 LP pool 中没有的 route 加入 `lp.pool` 并记录到 `gn_index`，直到 `gn_index.size() >= addin_size`。如果有新增列，`GCTabu` 会在定价器内部直接调用 `lp.AddColumn(gn_index)`，并返回 `true` 触发外层继续重解 LP。因此旧启发式是“本地候选池收集 -> 超量时按 reduced cost 排序 -> 最多加 `addin_size` 条 -> 定价器内部立即加列”。
+
+当前 TWET 的 `HeuristicPricingEngine` 在这一点上基本沿用了旧语义，但加列职责被移到了 `PC`。当前先用 `collectSeedColumns(lp)` 从当前 restricted columns 中取 reduced cost 较低的 seed；tabu 搜索过程中，负 reduced-cost 且不在当前 RMP active signatures、也不是本轮重复的 sequence，会进入 `negativeCandidates`。候选数达到 `heuristicPricingPoolSize` 后停止继续搜索。最后 `negativeCandidates` 按 reduced cost 升序排序，并返回前 `maxHeuristicPricingColumns` 条 `TWETColumn`。
+
+真正加入列池和 LP 的动作由 `PC.generateColumnsFromEngine()` 做：它遍历 engine 返回的列，调用全局 `Pool.addColumn()` 按 sequence signature 去重并拿到 column id；若该 id 当前 RMP 还未 active，就加入 `newColumnIds`。随后 `PC.solvePricingLoop()` 调用 `lp.addColumns(newColumnIds)`，增量加入当前 CPLEX 模型，并立即重解 LP，然后从第一个 pricing engine 重新开始。也就是说，当前启发式与旧 `GCTabu` 在“候选池排序截断”上是一致的，主要差别是旧代码由启发式定价器自己 `lp.AddColumn()`，当前统一由 `PC` 管理 pool 去重、active 检查、增量加列和重解。
+
+## 2026-05-28 GCNGBB-style 候选列统一筛选修改
+
+本次按讨论继续修改 `GCNGBBStyleBidirectional`，解决两个流程问题。第一，forward label 直接接 sink 的列不再作为 final join 之后的独立补扫，而是并入统一收尾流程：现在以 forward terminal group 为外层，先对该组扫描所有 backward normal/single-point label 做 crossing-arc join，再对同一组做 `forward->sink` 收尾。这样 sink 列和 crossing-arc join 列进入同一个候选筛选路径，不会因为处理位置靠后或靠前而绕过统一策略。
+
+第二，exact pricing 里的列数上限不再作为“搜索停止条件”。旧实现是一发现负列就加入 `generatedColumns`，达到 `maxExactPricingColumns` 后停止后续 backward/join/sink 扫描；这会让返回列依赖发现顺序，也可能让较早发现但 reduced cost 不够好的列占满上限。本次改成容量为 `maxExactPricingColumns` 的本地候选堆：每条合法负 reduced-cost 列先生成 `PricingColumnCandidate`，堆里只保留当前 reduced cost 最小的 K 条；当新候选比堆顶当前最差候选更好时，替换堆顶。候选同时按 `SequenceSignature` 建映射，同一 sequence 后续若以更低 reduced cost 出现，会替换旧候选；若不更好则丢弃。最终返回前再把堆中候选按 reduced cost 升序排序，写回 `generatedColumns`。
+
+这里选择“有界最大堆”而不是“list 全量收集后排序”，主要是为了控制 final join 候选很多时的内存占用。list+sort 实现更简单，也能得到同样的 top-K，但需要保存所有负列；当前 exact join 在大算例上可能产生大量候选，保留 K 个最好候选已经足够满足本轮返回列需求。代价是搜索阶段不再因收满 K 条列而提前停止，因此单轮 exact pricing 可能比发现即截断更久；但返回列质量更接近旧 VRP `GCNGBB` 的“候选池超量后按 reduced cost 选最好”的语义，也避免 forward/sink 或早期 join 列抢占上限。
+
+验证方面，`javac -encoding UTF-8 -cp src -sourcepath src src/TWETBPC/GC/GCNGBBStyleBidirectional.java` 通过，`PaperDominanceGraphConsistencyTest` 通过（`cases=200, insertions=16000`）。当前还没有跑完整带 CPLEX 的 BPC 批量回归；后续需要重点观察 `candidatePool kept/seen/dropped` 统计，以及 top-K 选择后 root 迭代次数和总时间是否改善。

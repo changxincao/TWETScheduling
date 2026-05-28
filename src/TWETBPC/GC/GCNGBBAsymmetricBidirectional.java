@@ -664,7 +664,7 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	private InsertStatus insertForward(ForwardLabel label, LP lp) {
-		if (isSinglePointFrontier(label.frontier)) {
+		if (isForwardBoundaryPointFrontier(label.frontier)) {
 			return insertForwardSinglePoint(label, lp);
 		}
 		boolean dominated = FWTL.get(label.jid).insertOrDominate(label);
@@ -680,7 +680,7 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	private InsertStatus insertBackward(BackwardLabel label, LP lp) {
-		if (isSinglePointFrontier(label.frontier)) {
+		if (isBackwardBoundaryPointFrontier(label.frontier)) {
 			return insertBackwardSinglePoint(label, lp);
 		}
 		boolean dominated = BWTL.get(label.jid).insertOrDominate(label);
@@ -705,7 +705,7 @@ public class GCNGBBAsymmetricBidirectional {
 			forwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, dynamicHF, label.minReducedCost)) {
 			label.isDominated = true;
 			forwardLabelsDominated++;
 			forwardSinglePointDominatedByGraph++;
@@ -733,7 +733,7 @@ public class GCNGBBAsymmetricBidirectional {
 			backwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, dynamicHB, label.minReducedCost)) {
 			label.isDominated = true;
 			backwardLabelsDominated++;
 			backwardSinglePointDominatedByGraph++;
@@ -746,10 +746,16 @@ public class GCNGBBAsymmetricBidirectional {
 		return InsertStatus.STORED_NO_EXPAND;
 	}
 
-	private boolean isSinglePointFrontier(PiecewiseLinearFunction frontier) {
+	private boolean isForwardBoundaryPointFrontier(PiecewiseLinearFunction frontier) {
 		return frontier != null && frontier.head != null && frontier.tail != null
 				&& Utility.compareEq(frontier.head.start, frontier.tail.end)
-				&& Utility.compareEq(frontier.head.start, tMid);
+				&& Utility.compareEq(frontier.head.start, dynamicHF);
+	}
+
+	private boolean isBackwardBoundaryPointFrontier(PiecewiseLinearFunction frontier) {
+		return frontier != null && frontier.head != null && frontier.tail != null
+				&& Utility.compareEq(frontier.head.start, frontier.tail.end)
+				&& Utility.compareEq(frontier.head.start, dynamicHB);
 	}
 
 	private <L extends FunctionLabel> boolean isDominatedBySinglePointStore(SinglePointStore<L> store, L label) {
@@ -1131,7 +1137,7 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	/**
-	 * 2026-05-23: join 前临时把 forward 半域右侧延拓为 f(Tmid)。
+	 * 2026-05-28: join 前临时把 forward 右侧延拓为 f(dynamicHF)。
 	 * 这是论文实现里的 join 辅助函数，不写回 label。
 	 */
 	private PiecewiseLinearFunction getForwardJoinExtension(ForwardLabel label) {
@@ -1145,14 +1151,15 @@ public class GCNGBBAsymmetricBidirectional {
 		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
 		appendSegments(extended, forward);
 		if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, pricingHorizon)) {
-			addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon, valueAtOrNearest(forward, tMid));
+			addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon,
+					valueAtOrNearest(forward, dynamicHF));
 		}
 		mergeAdjacentEqualSegments(extended);
 		return extended;
 	}
 
 	/**
-	 * 2026-05-23: join 前临时把 backward 半域左侧延拓为 f_b(Tmid)。
+	 * 2026-05-28: join 前临时把 backward 左侧延拓为 f_b(dynamicHB)。
 	 * 这是论文实现里的 join 辅助函数，不写回 label。
 	 */
 	private PiecewiseLinearFunction getBackwardJoinExtension(BackwardLabel label) {
@@ -1165,7 +1172,8 @@ public class GCNGBBAsymmetricBidirectional {
 	private PiecewiseLinearFunction buildBackwardJoinExtension(PiecewiseLinearFunction backward) {
 		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
 		if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
-			addConstantSegmentOrPoint(extended, 0.0, backward.head.start, valueAtOrNearest(backward, tMid));
+			addConstantSegmentOrPoint(extended, 0.0, backward.head.start,
+					valueAtOrNearest(backward, dynamicHB));
 		}
 		appendSegments(extended, backward);
 		mergeAdjacentEqualSegments(extended);

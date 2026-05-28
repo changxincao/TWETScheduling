@@ -457,13 +457,12 @@ public class GCBBAsymmetricBidirectional {
 			}
 
 			Node node = lp.getNode();
-			for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
-					nextJob = label.reachableSet.nextSetBit(nextJob + 1)) {
-				if (!canExtendForward(label, nextJob, node)) {
-					continue;
-				}
+			PackedBitSet currentReachable = currentForwardReachableCandidates(label, node);
+			for (int nextJob = currentReachable.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
+					nextJob = currentReachable.nextSetBit(nextJob + 1)) {
 				ForwardLabel child = extendForward(label, nextJob, lp);
-				if (child == null || Utility.isBigMValue(child.minReducedCost)) {
+				if (child == null || Utility.isBigMValue(child.minReducedCost)
+						|| !isForwardLabelWithinCurrentBoundary(child)) {
 					continue;
 				}
 				if (insertForward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
@@ -497,13 +496,12 @@ public class GCBBAsymmetricBidirectional {
 			}
 
 			Node node = lp.getNode();
-			for (int prevJob = label.reachableSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
-					prevJob = label.reachableSet.nextSetBit(prevJob + 1)) {
-				if (!canExtendBackward(label, prevJob, node)) {
-					continue;
-				}
+			PackedBitSet currentReachable = currentBackwardReachableCandidates(label, node);
+			for (int prevJob = currentReachable.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
+					prevJob = currentReachable.nextSetBit(prevJob + 1)) {
 				BackwardLabel child = extendBackward(label, prevJob, lp);
-				if (child == null || Utility.isBigMValue(child.minReducedCost)) {
+				if (child == null || Utility.isBigMValue(child.minReducedCost)
+						|| !isBackwardLabelWithinCurrentBoundary(child)) {
 					continue;
 				}
 				if (insertBackward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
@@ -580,6 +578,47 @@ public class GCBBAsymmetricBidirectional {
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * 2026-05-29: 动态 HB/HF 收紧后，旧 label 的 reachableSet 只作为候选上界使用。
+	 * 这里按当前 dynamicHF 重新做 direct feasibility，不直接改 label.reachableSet，避免破坏
+	 * dominance graph 中已经登记的 reachable-set 状态。
+	 */
+	private PackedBitSet currentForwardReachableCandidates(ForwardLabel label, Node node) {
+		PackedBitSet currentReachable = new PackedBitSet(data.n + 2);
+		for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n;
+				nextJob = label.reachableSet.nextSetBit(nextJob + 1)) {
+			if (canExtendForward(label, nextJob, node)
+					&& isDirectForwardExtensionTimeFeasible(label.frontier, label.jid, nextJob)) {
+				currentReachable.add(nextJob);
+			}
+		}
+		return currentReachable;
+	}
+
+	/**
+	 * 2026-05-29: backward 侧同理，旧 reachableSet 不回填更新；扩展前按当前 dynamicHB
+	 * 生成临时候选集，保证动态边界收紧后不会继续尝试已经越界的前驱。
+	 */
+	private PackedBitSet currentBackwardReachableCandidates(BackwardLabel label, Node node) {
+		PackedBitSet currentReachable = new PackedBitSet(data.n + 2);
+		for (int prevJob = label.reachableSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n;
+				prevJob = label.reachableSet.nextSetBit(prevJob + 1)) {
+			if (canExtendBackward(label, prevJob, node)
+					&& isDirectBackwardExtensionTimeFeasible(label.jid, label.isSinkRoot, label.frontier, prevJob)) {
+				currentReachable.add(prevJob);
+			}
+		}
+		return currentReachable;
+	}
+
+	private boolean isForwardLabelWithinCurrentBoundary(ForwardLabel label) {
+		return !Utility.compareGt(earliestForwardCompletion(label), dynamicHF);
+	}
+
+	private boolean isBackwardLabelWithinCurrentBoundary(BackwardLabel label) {
+		return !Utility.compareLt(latestBackwardCompletion(label), dynamicHB);
 	}
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {

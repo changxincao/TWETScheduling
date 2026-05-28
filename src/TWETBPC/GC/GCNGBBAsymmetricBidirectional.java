@@ -219,16 +219,31 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	private void initializeDynamicBoundaries() {
-		dynamicHF = pricingHorizon;
-		dynamicHB = Math.max(dynamicMinHStart, earliestSourceCompletion);
-		if (!Double.isFinite(dynamicHB) || Utility.isBigMValue(dynamicHB)) {
-			dynamicHB = 0.0;
+		double lower = Math.max(dynamicMinHStart, earliestSourceCompletion);
+		if (!Double.isFinite(lower) || Utility.isBigMValue(lower)) {
+			lower = 0.0;
 		}
-		if (Utility.compareLt(dynamicHB, 0.0)) {
-			dynamicHB = 0.0;
+		if (Utility.compareLt(lower, 0.0)) {
+			lower = 0.0;
+		}
+		double upper = pricingHorizon;
+		if (!Double.isFinite(upper) || Utility.compareLt(upper, lower)) {
+			upper = lower;
+		}
+		// 2026-05-28: 不再从 [L,U] 全宽动态区间开始，先围绕静态 Tmid 收窄一半，
+		// 给 HB/HF 留动态空间，同时避免早期生成大量静态 Tmid 本会截掉的 label。
+		dynamicHB = (lower + tMid) * 0.5;
+		dynamicHF = (tMid + upper) * 0.5;
+		if (Utility.compareLt(dynamicHB, lower)) {
+			dynamicHB = lower;
+		}
+		if (Utility.compareGt(dynamicHF, upper)) {
+			dynamicHF = upper;
 		}
 		if (Utility.compareGt(dynamicHB, dynamicHF)) {
-			dynamicHB = dynamicHF;
+			double midpoint = (lower + upper) * 0.5;
+			dynamicHB = midpoint;
+			dynamicHF = midpoint;
 		}
 	}
 

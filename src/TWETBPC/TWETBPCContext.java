@@ -15,6 +15,7 @@ import TWETBPC.CUT.NoOpCutGenerator;
 import TWETBPC.CUT.SubsetRowCutGenerator;
 import TWETBPC.GC.BidirectionalPricingEngine;
 import TWETBPC.GC.ExactPricingEngine;
+import TWETBPC.GC.GCNGBBStyleBidirectionalFullDomainPricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPricingEngine;
 import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.InitialColumnBuilder;
@@ -59,7 +60,9 @@ public class TWETBPCContext {
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
 		if (config.enableBidirectionalPricing) {
-			if (config.useGCNGBBStyleBidirectionalPricing) {
+			if (config.useGCNGBBFullDomainBidirectionalPricing) {
+				pricingEngines.add(new GCNGBBStyleBidirectionalFullDomainPricingEngine(data, config));
+			} else if (config.useGCNGBBStyleBidirectionalPricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalPricingEngine(data, config));
 			} else {
 				pricingEngines.add(new BidirectionalPricingEngine(data, config));

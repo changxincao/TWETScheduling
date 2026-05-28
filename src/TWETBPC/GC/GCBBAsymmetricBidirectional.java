@@ -23,25 +23,12 @@ import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * no-cut 双向 pricing。
- * <p>
- * 只有在列数上限未截断、且 forward/backward 队列都被完整耗尽时，本轮结果才可作为 exact pricing
- * certificate；若达到 {@link TWETBPCConfig#maxExactPricingColumns}，这里只表示“最多生成 K 条负列”。
- * <p>
- * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
- * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
- * 外层流程改为旧 VRP GCBB 风格：先完整生成 forward/backward 两侧 label table，再统一 join。
- * <p>
- * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
- * 1. forward label 存储在 [ell, Tmid]；
- * 2. backward label 存储在 [Tmid, rho]；
- * 3. join 时用论文里的常数延拓，临时补齐 forward 右半域和 backward 左半域，然后按 crossing arc 对齐相加；
- * 4. 默认直接使用 label/join 推导出的 reduced cost 反推出列成本；如需完整序列复核，可打开
- * {@link Configure#debugBPCPricingColumnCheck}。
- */
-/**
  * 2026-05-28: 基于 full-domain GCBB 的非对称动态双向实验版。
- * 函数定义域仍保持 full-domain，动态 HB/HF 只用于控制两侧队列扩展停止，不改变 final join 语义。
+ * <p>
+ * 该版本保留 crossing-arc final join，但 forward/backward 标签函数都直接定义在
+ * [0, pricingHorizon]，不再使用 half-domain 标签和 join 常数延拓。dynamicHB/dynamicHF
+ * 只用于控制两侧队列扩展边界；当前默认固定为 Tmid，用作非对称队列流程的诊断分支。
+ * 如需完整序列复核，可打开 {@link Configure#debugBPCPricingColumnCheck}。
  */
 public class GCBBAsymmetricBidirectional {
 
@@ -710,6 +697,8 @@ public class GCBBAsymmetricBidirectional {
 	/**
 	 * 2026-05-25: Tmid 单点 forward label 不再进入普通 dominance graph，也不再入扩展队列；
 	 * 但仍要保留给 sink 收尾和后续 backward join。
+	 * 2026-05-28: 当前固定边界下该逻辑安全；若以后恢复动态 HB/HF，single-point store
+	 * 需要把时间坐标纳入 key/比较条件，或者直接关闭这条 special handling。
 	 */
 	private InsertStatus insertForwardSinglePoint(ForwardLabel label, LP lp) {
 		SinglePointStore<ForwardLabel> store = forwardSinglePointByLastJob.get(label.jid);
@@ -738,6 +727,8 @@ public class GCBBAsymmetricBidirectional {
 	/**
 	 * 2026-05-25: Tmid 单点 backward label 只保留给 single-point store；
 	 * 2026-05-26: 在 GCBB-style 流程下不立即 join，而是在最后统一扫描 join。
+	 * 2026-05-28: 当前固定边界下该逻辑安全；若以后恢复动态 HB/HF，single-point store
+	 * 需要把时间坐标纳入 key/比较条件，或者直接关闭这条 special handling。
 	 */
 	private InsertStatus insertBackwardSinglePoint(BackwardLabel label, LP lp) {
 		SinglePointStore<BackwardLabel> store = backwardSinglePointByFirstJob.get(label.jid);
@@ -1153,6 +1144,8 @@ public class GCBBAsymmetricBidirectional {
 	/**
 	 * 2026-05-28: full-domain 标签按设计已经覆盖 [0,pricingHorizon]。
 	 * half-domain 版本需要的右侧常数延拓在这里不再生效，直接复用 label frontier。
+	 * 因此当前缓存不依赖 dynamicHF；若以后重新启用下面的常数延拓旧逻辑，缓存 key
+	 * 必须包含对应边界值，或者不要缓存。
 	 */
 	private PiecewiseLinearFunction getForwardJoinExtension(ForwardLabel label) {
 		if (label.joinExtendedFrontier == null) {
@@ -1177,6 +1170,8 @@ public class GCBBAsymmetricBidirectional {
 	/**
 	 * 2026-05-28: full-domain 标签按设计已经覆盖 [0,pricingHorizon]。
 	 * half-domain 版本需要的左侧常数延拓在这里不再生效，直接复用 label frontier。
+	 * 因此当前缓存不依赖 dynamicHB；若以后重新启用下面的常数延拓旧逻辑，缓存 key
+	 * 必须包含对应边界值，或者不要缓存。
 	 */
 	private PiecewiseLinearFunction getBackwardJoinExtension(BackwardLabel label) {
 		if (label.joinExtendedFrontier == null) {

@@ -45,6 +45,15 @@ public class TWETBPCConfig {
 	 */
 	public boolean useGCNGBBFullDomainBidirectionalPricing = false;
 	/**
+	 * 2026-05-28: 仅用于实验。true 时使用 full-domain 函数标签 + 动态 half-way 边界的非对称双向 pricing。
+	 */
+	public boolean useGCNGBBAsymmetricBidirectionalPricing = false;
+	/**
+	 * 2026-05-28: 非对称动态双向 pricing 的选边策略。
+	 * 可选值：moreLabels、fewerLabels。
+	 */
+	public String asymmetricBidirectionalSideSelection = "moreLabels";
+	/**
 	 * 2026-05-26: GCNGBB-style 双向 pricing 的 label 扩展队列排序。
 	 * 可选值：reducedCost、time、reachableSize。
 	 */

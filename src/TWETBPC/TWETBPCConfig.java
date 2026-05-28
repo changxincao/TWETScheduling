@@ -40,14 +40,14 @@ public class TWETBPCConfig {
 	 */
 	public boolean useGCNGBBStyleBidirectionalPricing = true;
 	/**
-	 * 2026-05-28: 仅用于效率对照。true 时 GCNGBB-style 双向 pricing 改用 full-domain 复制版本，
+	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。
 	 */
-	public boolean useGCNGBBFullDomainBidirectionalPricing = false;
+	public boolean useGCBBFullDomainBidirectionalPricing = false;
 	/**
 	 * 2026-05-28: 仅用于实验。true 时使用 full-domain 函数标签 + 动态 half-way 边界的非对称双向 pricing。
 	 */
-	public boolean useGCNGBBAsymmetricBidirectionalPricing = false;
+	public boolean useGCBBAsymmetricBidirectionalPricing = false;
 	/**
 	 * 2026-05-28: 非对称动态双向 pricing 的选边策略。
 	 * 可选值：moreLabels、fewerLabels。

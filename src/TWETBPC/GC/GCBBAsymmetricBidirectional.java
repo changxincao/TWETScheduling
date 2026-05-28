@@ -30,7 +30,7 @@ import TWETBPC.Util.SequenceSignature;
  * <p>
  * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
  * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
- * 外层流程改为旧 VRP GCNGBB 风格：先完整生成 forward/backward 两侧 label table，再统一 join。
+ * 外层流程改为旧 VRP GCBB 风格：先完整生成 forward/backward 两侧 label table，再统一 join。
  * <p>
  * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
  * 1. forward label 存储在 [ell, Tmid]；
@@ -40,10 +40,10 @@ import TWETBPC.Util.SequenceSignature;
  * {@link Configure#debugBPCPricingColumnCheck}。
  */
 /**
- * 2026-05-28: 基于 full-domain GCNGBB 的非对称动态双向实验版。
+ * 2026-05-28: 基于 full-domain GCBB 的非对称动态双向实验版。
  * 函数定义域仍保持 full-domain，动态 HB/HF 只用于控制两侧队列扩展停止，不改变 final join 语义。
  */
-public class GCNGBBAsymmetricBidirectional {
+public class GCBBAsymmetricBidirectional {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
 	private enum LabelQueueOrdering {
@@ -142,9 +142,9 @@ public class GCNGBBAsymmetricBidirectional {
 	private long forwardBoundaryClearedLabels;
 	private long backwardBoundaryClearedLabels;
 
-	private String lastMessage = "GCNGBB asymmetric bidirectional pricing not executed";
+	private String lastMessage = "GCBB asymmetric bidirectional pricing not executed";
 
-	public GCNGBBAsymmetricBidirectional(Data data, TWETBPCConfig config) {
+	public GCBBAsymmetricBidirectional(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
@@ -168,7 +168,7 @@ public class GCNGBBAsymmetricBidirectional {
 			finalizeGeneratedColumns();
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
-		lastMessage = "GCNGBB asymmetric bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
+		lastMessage = "GCBB asymmetric bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
 	}
@@ -737,7 +737,7 @@ public class GCNGBBAsymmetricBidirectional {
 
 	/**
 	 * 2026-05-25: Tmid 单点 backward label 只保留给 single-point store；
-	 * 2026-05-26: 在 GCNGBB-style 流程下不立即 join，而是在最后统一扫描 join。
+	 * 2026-05-26: 在 GCBB-style 流程下不立即 join，而是在最后统一扫描 join。
 	 */
 	private InsertStatus insertBackwardSinglePoint(BackwardLabel label, LP lp) {
 		SinglePointStore<BackwardLabel> store = backwardSinglePointByFirstJob.get(label.jid);

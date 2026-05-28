@@ -8,15 +8,15 @@ import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
 /**
- * 2026-05-28: GCNGBB-style 双向 pricing 的 full-domain 对照入口。
+ * 2026-05-28: GCBB full-domain 双向 pricing 对照入口。
  * 仅用于测试标签函数不做 half-domain 裁剪时的额外函数操作成本，默认正式路径不使用。
  */
-public class GCNGBBStyleBidirectionalFullDomainPricingEngine implements PricingEngine {
+public class GCBBStyleBidirectionalFullDomainPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
 
-	public GCNGBBStyleBidirectionalFullDomainPricingEngine(Data data, TWETBPCConfig config) {
+	public GCBBStyleBidirectionalFullDomainPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
 	}
@@ -24,9 +24,9 @@ public class GCNGBBStyleBidirectionalFullDomainPricingEngine implements PricingE
 	@Override
 	public PricingResult price(LP lp) {
 		if (!config.enableBidirectionalPricing) {
-			return PricingResult.noImprovement("GCNGBB-style full-domain bidirectional pricing disabled");
+			return PricingResult.noImprovement("GCBB-style full-domain bidirectional pricing disabled");
 		}
-		GCNGBBStyleBidirectionalFullDomain gc = new GCNGBBStyleBidirectionalFullDomain(data, config);
+		GCBBStyleBidirectionalFullDomain gc = new GCBBStyleBidirectionalFullDomain(data, config);
 		ArrayList<TWETColumn> columns = gc.solve(lp);
 		if (columns.isEmpty()) {
 			return PricingResult.noImprovement(gc.getLastMessage());
@@ -36,6 +36,6 @@ public class GCNGBBStyleBidirectionalFullDomainPricingEngine implements PricingE
 
 	@Override
 	public String getName() {
-		return "GCNGBBStyleBidirectionalFullDomainPricing";
+		return "GCBBStyleBidirectionalFullDomainPricing";
 	}
 }

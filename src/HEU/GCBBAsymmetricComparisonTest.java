@@ -19,22 +19,22 @@ import TWETBPC.TWETBPCSolver;
 import TWETBPC.TWETSolveResult;
 
 /**
- * 2026-05-28: 对照测试 GCNGBB-style 双向 pricing 的 half-domain 与 full-domain 函数定义域。
- * 其它 BPC 参数尽量保持一致，用于观察只放宽标签函数定义域后的效率变化。
+ * 2026-05-28: 对照测试 正式 half-domain、GCBB full-domain 与 GCBB 非对称动态 half-way 双向 pricing。
  */
-public class GCNGBBFullDomainComparisonTest {
+public class GCBBAsymmetricComparisonTest {
 
 	private static final String HEURISTIC_ENGINE = "HeuristicPricing";
 	private static final String NORMAL_ENGINE = "GCNGBBStyleBidirectionalPricing";
-	private static final String FULL_DOMAIN_ENGINE = "GCNGBBStyleBidirectionalFullDomainPricing";
+	private static final String FULL_DOMAIN_ENGINE = "GCBBStyleBidirectionalFullDomainPricing";
+	private static final String ASYMMETRIC_ENGINE = "GCBBAsymmetricBidirectionalPricing";
 
 	public static void main(String[] args) throws Exception {
-		Path instanceDir = Path.of(System.getProperty("twet.bpc.fullDomainCompare.dir",
+		Path instanceDir = Path.of(System.getProperty("twet.bpc.asymmetricCompare.dir",
 				"test-results/bpc/2026-05-24-no-outsourcing-20-21"));
-		String caseFilter = System.getProperty("twet.bpc.fullDomainCompare.case", "wet021");
-		String modeFilter = System.getProperty("twet.bpc.fullDomainCompare.mode", "both");
-		String resultStem = System.getProperty("twet.bpc.fullDomainCompare.name",
-				"2026-05-28-gcngbb-full-domain-wet021");
+		String caseFilter = System.getProperty("twet.bpc.asymmetricCompare.case", "wet021");
+		String modeFilter = System.getProperty("twet.bpc.asymmetricCompare.mode", "both");
+		String resultStem = System.getProperty("twet.bpc.asymmetricCompare.name",
+				"2026-05-28-gcbb-asymmetric-wet021");
 		Path outputDir = Path.of("test-results", "bpc", resultStem);
 		Files.createDirectories(outputDir);
 		Path csv = Path.of("test-results", "bpc", resultStem + ".csv");
@@ -50,14 +50,24 @@ public class GCNGBBFullDomainComparisonTest {
 				"case,mode,status,incumbent,bound,gap,nodes,pricing,cols,pool,solve_s,root_s,heuristic_s,heuristic_calls,exact_engine,exact_s,exact_calls,master_lp_s,valid,log");
 		for (Path instance : instances) {
 			if (shouldRunNormal(modeFilter)) {
-				RunRecord normal = runOne(instance, false, outputDir);
+				RunRecord normal = runOne(instance, "halfDomain", outputDir);
 				records.add(normal);
 				lines.add(normal.toCsvLine());
 			}
 			if (shouldRunFullDomain(modeFilter)) {
-				RunRecord fullDomain = runOne(instance, true, outputDir);
+				RunRecord fullDomain = runOne(instance, "fullDomain", outputDir);
 				records.add(fullDomain);
 				lines.add(fullDomain.toCsvLine());
+			}
+			if (shouldRunAsymmetricMore(modeFilter)) {
+				RunRecord asymmetricMore = runOne(instance, "asymmetricMore", outputDir);
+				records.add(asymmetricMore);
+				lines.add(asymmetricMore.toCsvLine());
+			}
+			if (shouldRunAsymmetricFewer(modeFilter)) {
+				RunRecord asymmetricFewer = runOne(instance, "asymmetricFewer", outputDir);
+				records.add(asymmetricFewer);
+				lines.add(asymmetricFewer.toCsvLine());
 			}
 		}
 
@@ -75,6 +85,18 @@ public class GCNGBBFullDomainComparisonTest {
 				|| "fullDomain".equalsIgnoreCase(modeFilter);
 	}
 
+	private static boolean shouldRunAsymmetricMore(String modeFilter) {
+		return "both".equalsIgnoreCase(modeFilter) || "asymmetric".equalsIgnoreCase(modeFilter)
+				|| "asym".equalsIgnoreCase(modeFilter) || "asymmetricMore".equalsIgnoreCase(modeFilter)
+				|| "more".equalsIgnoreCase(modeFilter) || "moreLabels".equalsIgnoreCase(modeFilter);
+	}
+
+	private static boolean shouldRunAsymmetricFewer(String modeFilter) {
+		return "both".equalsIgnoreCase(modeFilter) || "asymmetric".equalsIgnoreCase(modeFilter)
+				|| "asym".equalsIgnoreCase(modeFilter) || "asymmetricFewer".equalsIgnoreCase(modeFilter)
+				|| "fewer".equalsIgnoreCase(modeFilter) || "fewerLabels".equalsIgnoreCase(modeFilter);
+	}
+
 	private static List<Path> listInstances(Path instanceDir, String caseFilter) throws Exception {
 		ArrayList<Path> instances = new ArrayList<Path>();
 		try (var stream = Files.newDirectoryStream(instanceDir, "*.dat")) {
@@ -89,17 +111,16 @@ public class GCNGBBFullDomainComparisonTest {
 		return instances;
 	}
 
-	private static RunRecord runOne(Path instance, boolean fullDomain, Path outputDir) throws Exception {
+	private static RunRecord runOne(Path instance, String mode, Path outputDir) throws Exception {
 		resetHeuristicSeed(instance);
 		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(instance.toString(), false);
-		TWETBPCConfig config = buildConfig(instance, fullDomain);
+		TWETBPCConfig config = buildConfig(instance, mode);
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);
 		TWETSolveResult result = solver.solve();
 		BPCTraceSummary summary = solver.getContext().traceSummary;
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
 
-		String mode = fullDomain ? "fullDomain" : "halfDomain";
-		String exactEngine = fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE;
+		String exactEngine = exactEngineName(mode);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -113,27 +134,43 @@ public class GCNGBBFullDomainComparisonTest {
 				totalSeconds(summary.getMasterLpTimeNanos()), validation.isFeasible(), log.toString().replace('/', '\\'));
 	}
 
-	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain) {
+	private static String exactEngineName(String mode) {
+		if ("fullDomain".equals(mode)) {
+			return FULL_DOMAIN_ENGINE;
+		}
+		if (mode.startsWith("asymmetric")) {
+			return ASYMMETRIC_ENGINE;
+		}
+		return NORMAL_ENGINE;
+	}
+
+	private static TWETBPCConfig buildConfig(Path instance, String mode) {
 		TWETBPCConfig config = new TWETBPCConfig();
-		config.instanceName = stripDat(instance.getFileName().toString()) + "-no-outsourcing-domain";
+		config.instanceName = stripDat(instance.getFileName().toString()) + "-no-outsourcing-" + mode;
 		config.enableBPCConsoleOutput = false;
 		config.writeBPCResultFiles = false;
 		config.reuseConfiguredBestSolution = false;
 		config.runALNSForSeed = false;
-		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);
-		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxHeuristicColumns",
+		config.maxNodes = Integer.getInteger("twet.bpc.asymmetricCompare.maxNodes", 20000);
+		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.asymmetricCompare.maxHeuristicColumns",
 				100000);
-		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.fullDomainCompare.heuristicPoolSize",
+		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.asymmetricCompare.heuristicPoolSize",
 				100000);
-		config.maxExactPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxExactColumns", 100000);
-		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.fullDomainCompare.branchSeedColumnLimit", 20000);
+		config.maxExactPricingColumns = Integer.getInteger("twet.bpc.asymmetricCompare.maxExactColumns", 100000);
+		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.asymmetricCompare.branchSeedColumnLimit", 20000);
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
-		config.useGCNGBBFullDomainBidirectionalPricing = fullDomain;
+		config.useGCBBFullDomainBidirectionalPricing = "fullDomain".equals(mode);
+		config.useGCBBAsymmetricBidirectionalPricing = mode.startsWith("asymmetric");
+		if ("asymmetricFewer".equals(mode)) {
+			config.asymmetricBidirectionalSideSelection = "fewerLabels";
+		} else {
+			config.asymmetricBidirectionalSideSelection = "moreLabels";
+		}
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointRatio",
+				"twet.bpc.asymmetricCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));
 		return config;
 	}
@@ -163,7 +200,7 @@ public class GCNGBBFullDomainComparisonTest {
 	}
 
 	private static void printSummary(List<RunRecord> records, Path csv) {
-		System.out.println("GCNGBBFullDomainComparisonTest summary:");
+		System.out.println("GCBBAsymmetricComparisonTest summary:");
 		for (RunRecord record : records) {
 			System.out.printf(Locale.US,
 					"case=%s mode=%s status=%s obj=%.6f bound=%.6f solve=%.3fs exact=%s %.3fs calls=%d valid=%s log=%s%n",

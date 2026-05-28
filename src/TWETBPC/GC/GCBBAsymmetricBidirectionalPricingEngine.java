@@ -8,14 +8,14 @@ import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
 /**
- * 2026-05-28: GCNGBB-style 非对称动态 half-way 双向 pricing 实验入口。
+ * 2026-05-28: GCBB-style 非对称动态 half-way 双向 pricing 实验入口。
  */
-public class GCNGBBAsymmetricBidirectionalPricingEngine implements PricingEngine {
+public class GCBBAsymmetricBidirectionalPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
 
-	public GCNGBBAsymmetricBidirectionalPricingEngine(Data data, TWETBPCConfig config) {
+	public GCBBAsymmetricBidirectionalPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
 	}
@@ -23,9 +23,9 @@ public class GCNGBBAsymmetricBidirectionalPricingEngine implements PricingEngine
 	@Override
 	public PricingResult price(LP lp) {
 		if (!config.enableBidirectionalPricing) {
-			return PricingResult.noImprovement("GCNGBB asymmetric bidirectional pricing disabled");
+			return PricingResult.noImprovement("GCBB asymmetric bidirectional pricing disabled");
 		}
-		GCNGBBAsymmetricBidirectional gc = new GCNGBBAsymmetricBidirectional(data, config);
+		GCBBAsymmetricBidirectional gc = new GCBBAsymmetricBidirectional(data, config);
 		ArrayList<TWETColumn> columns = gc.solve(lp);
 		if (columns.isEmpty()) {
 			return PricingResult.noImprovement(gc.getLastMessage());
@@ -35,6 +35,6 @@ public class GCNGBBAsymmetricBidirectionalPricingEngine implements PricingEngine
 
 	@Override
 	public String getName() {
-		return "GCNGBBAsymmetricBidirectionalPricing";
+		return "GCBBAsymmetricBidirectionalPricing";
 	}
 }

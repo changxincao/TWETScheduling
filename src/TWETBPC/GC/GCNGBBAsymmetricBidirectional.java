@@ -1151,8 +1151,8 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	/**
-	 * 2026-05-28: join 前临时把 forward 右侧延拓为 f(dynamicHF)。
-	 * 这是论文实现里的 join 辅助函数，不写回 label。
+	 * 2026-05-28: full-domain 标签按设计已经覆盖 [0,pricingHorizon]。
+	 * half-domain 版本需要的右侧常数延拓在这里不再生效，直接复用 label frontier。
 	 */
 	private PiecewiseLinearFunction getForwardJoinExtension(ForwardLabel label) {
 		if (label.joinExtendedFrontier == null) {
@@ -1162,19 +1162,21 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	private PiecewiseLinearFunction buildForwardJoinExtension(PiecewiseLinearFunction forward) {
-		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
-		appendSegments(extended, forward);
-		if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, pricingHorizon)) {
-			addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon,
-					valueAtOrNearest(forward, dynamicHF));
-		}
-		mergeAdjacentEqualSegments(extended);
-		return extended;
+		return forward;
+		// full-domain 下不应再需要下面这种 half-domain 常数延拓；保留旧逻辑便于回看。
+		// PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
+		// appendSegments(extended, forward);
+		// if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, pricingHorizon)) {
+		//     addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon,
+		//             valueAtOrNearest(forward, dynamicHF));
+		// }
+		// mergeAdjacentEqualSegments(extended);
+		// return extended;
 	}
 
 	/**
-	 * 2026-05-28: join 前临时把 backward 左侧延拓为 f_b(dynamicHB)。
-	 * 这是论文实现里的 join 辅助函数，不写回 label。
+	 * 2026-05-28: full-domain 标签按设计已经覆盖 [0,pricingHorizon]。
+	 * half-domain 版本需要的左侧常数延拓在这里不再生效，直接复用 label frontier。
 	 */
 	private PiecewiseLinearFunction getBackwardJoinExtension(BackwardLabel label) {
 		if (label.joinExtendedFrontier == null) {
@@ -1184,14 +1186,16 @@ public class GCNGBBAsymmetricBidirectional {
 	}
 
 	private PiecewiseLinearFunction buildBackwardJoinExtension(PiecewiseLinearFunction backward) {
-		PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
-		if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
-			addConstantSegmentOrPoint(extended, 0.0, backward.head.start,
-					valueAtOrNearest(backward, dynamicHB));
-		}
-		appendSegments(extended, backward);
-		mergeAdjacentEqualSegments(extended);
-		return extended;
+		return backward;
+		// full-domain 下不应再需要下面这种 half-domain 常数延拓；保留旧逻辑便于回看。
+		// PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
+		// if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
+		//     addConstantSegmentOrPoint(extended, 0.0, backward.head.start,
+		//             valueAtOrNearest(backward, dynamicHB));
+		// }
+		// appendSegments(extended, backward);
+		// mergeAdjacentEqualSegments(extended);
+		// return extended;
 	}
 
 	private double valueAtOrNearest(PiecewiseLinearFunction function, double t) {

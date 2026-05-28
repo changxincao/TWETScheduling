@@ -461,6 +461,13 @@ public class GCNGBBAsymmetricBidirectional {
 				continue;
 			}
 			dynamicForwardPops++;
+			double completion = earliestForwardCompletion(label);
+			if (Utility.compareGt(completion, dynamicHB)) {
+				dynamicHB = completion;
+			}
+			if (Utility.compareGt(dynamicHB, dynamicHF)) {
+				dynamicHB = dynamicHF;
+			}
 
 			Node node = lp.getNode();
 			for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
@@ -494,6 +501,13 @@ public class GCNGBBAsymmetricBidirectional {
 				continue;
 			}
 			dynamicBackwardPops++;
+			double completion = latestBackwardCompletion(label);
+			if (Utility.compareLt(completion, dynamicHF)) {
+				dynamicHF = completion;
+			}
+			if (Utility.compareLt(dynamicHF, dynamicHB)) {
+				dynamicHF = dynamicHB;
+			}
 
 			Node node = lp.getNode();
 			for (int prevJob = label.reachableSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();

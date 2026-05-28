@@ -1051,13 +1051,8 @@ public class GCNGBBStyleBidirectional {
 				reducedCost);
 		PricingColumnCandidate existing = generatedCandidateBySignature.get(signature);
 		if (existing != null) {
-			if (compareCandidateBestFirst(candidate, existing) >= 0) {
-				generatedCandidateDroppedByHeap++;
-				return;
-			}
-			generatedColumnCandidates.remove(existing);
-			generatedCandidateBySignature.remove(signature);
 			generatedCandidateDroppedByHeap++;
+			return;
 		}
 		if (generatedColumnCandidates.size() < config.maxExactPricingColumns) {
 			generatedColumnCandidates.add(candidate);

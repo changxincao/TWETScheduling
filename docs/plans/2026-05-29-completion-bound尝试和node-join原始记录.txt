@@ -1,0 +1,1389 @@
+不要做扩展网络，就在原网络上，我现在要基于这两种松弛的labeling方式去做completion bound，即计算正向的和反向的到一个点i的最小成本。是一个函数。 1、允许任意环路，label应该只需要记录最早开始时间，reachable set 还有成本函数？然后应该不需要占优？到一个node的时候把两个label mergemunimum就好了。也不需要记录路径，因为我只需要一个最小成本函数。 2、不允许2-cycle的环路，这时候咋做呢？
+
+  
+
+#### ChatGPT 说：
+
+已思考 1m 6s
+
+对，你现在这个目标是**不构造扩展网络，只在原网络上算 forward/backward completion bound 函数**，那可以这么做。Spliet and Gabor 原文确实是通过 route relaxation 允许 nonelementary routes，并进一步比较 “allowing all cyclic routes” 和 “2-cycle elimination” 两种版本；他们用扩展无环图只是为了能直接套 Ioachim et al. 的算法，不是 relaxation 本身必须依赖扩展图。
+
+The Time Window Assignment Vehi…
+
+## 1\. 允许任意环路：每个 node 一个函数就够了
+
+你的理解基本对，但我会把它表述得更明确一点：
+
+在允许任意环路的 relaxation 下，不需要记录 visited set，也不需要记录 predecessor。对每个 node iii，维护一个函数
+
+Fi(t)F\_i(t)Fi​(t)
+
+表示：从 source 到 iii，并且 iii 的完成时间不晚于 ttt 时，可以达到的最小 reduced cost。
+
+那么 forward extension 可以写成：
+
+Ext⁡ij(Fi)(t)\=ϕj(t)+cˉij+min⁡u≤t−τijFi(u),\\operatorname{Ext}\_{ij}(F\_i)(t) = \\phi\_j(t)+\\bar c\_{ij} + \\min\_{u\\le t-\\tau\_{ij}} F\_i(u),Extij​(Fi​)(t)\=ϕj​(t)+cˉij​+u≤t−τij​min​Fi​(u),
+
+其中
+
+τij\=sij+pj,\\tau\_{ij}=s\_{ij}+p\_j,τij​\=sij​+pj​,
+
+cˉij\\bar c\_{ij}cˉij​ 是 arc fixed reduced cost，ϕj(t)\\phi\_j(t)ϕj​(t) 是 job jjj 的完成时间惩罚函数。然后更新：
+
+Fj(t)←min⁡{Fj(t),Ext⁡ij(Fi)(t)}.F\_j(t) \\leftarrow \\min\\{F\_j(t),\\operatorname{Ext}\_{ij}(F\_i)(t)\\}.Fj​(t)←min{Fj​(t),Extij​(Fi​)(t)}.
+
+也就是说，到同一个 node jjj 的所有 label 最后都 merge 成一个 lower envelope：
+
+Fj\=min⁡all predecessors iExt⁡ij(Fi).F\_j = \\min\_{\\text{all predecessors }i} \\operatorname{Ext}\_{ij}(F\_i).Fj​\=all predecessors imin​Extij​(Fi​).
+
+所以这里确实**不需要普通意义上的 dominance**。因为 dominance 已经被“取 lower envelope”吸收了：
+
+label dominance⟹function envelope update.\\text{label dominance} \\quad \\Longrightarrow \\quad \\text{function envelope update}.label dominance⟹function envelope update.
+
+也不需要存路径，因为你现在只要 completion bound，不需要回溯生成列。最多只需要一个 queue 标记哪些 FiF\_iFi​ 被更新过，然后继续向外传播。
+
+但有两个小修正：
+
+第一，**不需要 reachable set 作为 label 状态**。如果允许任意环路，future feasibility 和历史访问无关，因此 reachable set 不应该进状态。你可以保留一个临时候选集合，例如从 iii 出发当前还能直接到达哪些 jjj，但它只是加速扫描，不是 label state。
+
+第二，因为你不构造扩展无环图，在原网络上会有环，所以不能简单按拓扑顺序扫一遍。要用 label-correcting / Bellman-Ford-style 的 fixed-point 传播：
+
+Fi 改善 ⇒重新扩展 i→j.F\_i \\text{ 改善 } \\Rightarrow \\text{重新扩展 } i\\to j.Fi​ 改善 ⇒重新扩展 i→j.
+
+只要每次访问至少消耗正时间，且 horizon 有界，重复环路的次数仍然有限；但如果存在零时间负 reduced-cost 环，就会出问题。你这个调度问题里通常 pj\>0p\_j>0pj​\>0，所以问题不大。
+
+* * *
+
+## 2\. 不允许 2-cycle：必须记录“上一个节点”
+
+如果只禁止 2-cycle，即禁止：
+
+i→j→i,i\\to j\\to i,i→j→i,
+
+那么不能再只维护一个 Fi(t)F\_i(t)Fi​(t)。原因是：从 iii 出发扩展到 jjj 时，需要知道当前到达 iii 的路径上一跳是不是 jjj。
+
+比如当前 partial path 是：
+
+⋯→j→i.\\cdots \\to j \\to i.⋯→j→i.
+
+如果下一步扩展：
+
+i→j,i\\to j,i→j,
+
+就形成 2-cycle：
+
+j→i→j.j\\to i\\to j.j→i→j.
+
+所以 2-cycle elimination 只需要记住 immediate predecessor，不需要完整 visited set。
+
+最直接的状态是：
+
+Fh,i(t),F\_{h,i}(t),Fh,i​(t),
+
+表示：从 source 到 iii，且 iii 的 immediate predecessor 是 hhh 时，在 iii 不晚于 ttt 完成的最小 reduced cost。
+
+扩展规则是：
+
+Fi,j(t)←min⁡h≠jExt⁡ij(Fh,i)(t).F\_{i,j}(t) \\leftarrow \\min\_{h\\ne j} \\operatorname{Ext}\_{ij}(F\_{h,i})(t).Fi,j​(t)←h\=jmin​Extij​(Fh,i​)(t).
+
+也可以写成更方便的形式：
+
+Fi∖j(t)\=min⁡h≠jFh,i(t),F\_i^{\\setminus j}(t) = \\min\_{h\\ne j}F\_{h,i}(t),Fi∖j​(t)\=h\=jmin​Fh,i​(t),
+
+然后：
+
+Fi,j(t)←Ext⁡ij(Fi∖j)(t).F\_{i,j}(t) \\leftarrow \\operatorname{Ext}\_{ij}\\left(F\_i^{\\setminus j}\\right)(t).Fi,j​(t)←Extij​(Fi∖j​)(t).
+
+这就对应 Spliet and Gabor 里 2-cycle elimination 的思想：当直接扩展当前最优路径会形成 2-cycle 时，改用一个排除了相同 predecessor 的备选 dominance function Dv′(T)D'\_v(T)Dv′​(T)。原文定义 Dv′(T)D'\_v(T)Dv′​(T) 时就是排除 predecessor original customer 相同的 path；extension 会产生 2-cycle 时，用这个备选函数替代原来的 Dv(T)D\_v(T)Dv​(T)。
+
+The Time Window Assignment Vehi…
+
+所以在原网络上做，不构造扩展网络，最稳的实现方式就是：
+
+state\=(previous node,current node)。\\boxed{ \\text{state}=(\\text{previous node},\\text{current node})。 }state\=(previous node,current node)。​
+
+状态数量从 O(n)O(n)O(n) 变成 O(n2)O(n^2)O(n2)，但仍然远小于完整 elementary visited set。
+
+* * *
+
+## 3\. backward completion bound 对称地记录“下一个节点”
+
+如果你还要算 backward bound，也类似。
+
+允许任意环路时，每个 node 一个函数：
+
+Bi(t)B\_i(t)Bi​(t)
+
+表示：从 iii 出发到 sink，且 iii 在时间 ttt 完成时，后续 suffix 的最小 reduced cost。具体你可以用 suffix-min 形式维护。
+
+禁止 2-cycle 时，需要记录 immediate successor：
+
+Bi,k(t),B\_{i,k}(t),Bi,k​(t),
+
+表示：当前在 iii，下一步 immediate successor 是 kkk 的最小 suffix cost。
+
+如果要在 iii 前面接一个 predecessor hhh，形成：
+
+h→i→k,h\\to i\\to k,h→i→k,
+
+则必须要求：
+
+h≠k.h\\ne k.h\=k.
+
+因此 backward 的排除函数是：
+
+Bi∖h(t)\=min⁡k≠hBi,k(t).B\_i^{\\setminus h}(t) = \\min\_{k\\ne h}B\_{i,k}(t).Bi∖h​(t)\=k\=hmin​Bi,k​(t).
+
+然后用这个 Bi∖hB\_i^{\\setminus h}Bi∖h​ 来做从 h→ih\\to ih→i 的 backward extension。
+
+* * *
+
+## 4\. 如果用于 crossing-arc completion bound，要注意 join 处的 2-cycle
+
+如果你只算 all-cycles bound，那么 join 时直接用：
+
+Fi(t)+Bj(t)F\_i(t)+B\_j(t)Fi​(t)+Bj​(t)
+
+就行，得到的是一个更松的 lower bound。
+
+但如果你算的是 no-2-cycle bound，那么 crossing arc
+
+i→ji\\to ji→j
+
+两侧都要排除会在 join 处形成的 2-cycle。
+
+具体地：
+
+-   forward prefix ending at iii 的 predecessor 不能是 jjj，否则：
+    
+    j→i→jj\\to i\\to jj→i→j
+-   backward suffix starting at jjj 的 successor 不能是 iii，否则：
+    
+    i→j→ii\\to j\\to ii→j→i
+
+所以 join/completion bound 应该用：
+
+Fi∖jandBj∖i.F\_i^{\\setminus j} \\quad\\text{and}\\quad B\_j^{\\setminus i}.Fi∖j​andBj∖i​.
+
+也就是说，crossing arc i→ji\\to ji→j 的 no-2-cycle completion bound 应该是：
+
+min⁡t{shift⁡τij(Fi∖j)(t)+Bj∖i(t)+cˉij}.\\min\_t \\left\\{ \\operatorname{shift}\_{\\tau\_{ij}}\\left(F\_i^{\\setminus j}\\right)(t) + B\_j^{\\setminus i}(t) + \\bar c\_{ij} \\right\\}.tmin​{shiftτij​​(Fi∖j​)(t)+Bj∖i​(t)+cˉij​}.
+
+如果你直接用 FiF\_iFi​ 和 BjB\_jBj​，那得到的是 all-cycles bound，仍然可以作为 lower bound 使用，但不是 no-2-cycle relaxation 的最强 bound。
+
+* * *
+
+## 5\. 实现建议
+
+我建议你分两个版本写 completion bound。
+
+### 版本 A：all-cycles bound
+
+数据结构：
+
+```
+F[i] : PiecewiseLinearFunctionB[i] : PiecewiseLinearFunction
+```
+
+算法：
+
+```
+initialize F[source]while queue not empty:    pop i    for each arc i -> j:        candidate = extend(F[i], i, j)        if candidate improves F[j]:            F[j] = lowerEnvelope(F[j], candidate)            push j
+```
+
+backward 同理。
+
+这个版本最简单，bound 最弱，但作为 completion bound 很稳。
+
+### 版本 B：2-cycle elimination bound
+
+数据结构：
+
+```
+FPrev[h][i] : PiecewiseLinearFunctionFExcl[i][j] = min_{h != j} FPrev[h][i]BNext[i][k] : PiecewiseLinearFunctionBExcl[i][h] = min_{k != h} BNext[i][k]
+```
+
+forward update：
+
+```
+for each arc i -> j:    base = envelope over FPrev[h][i] for h != j    candidate = extend(base, i, j)    update FPrev[i][j]
+```
+
+backward update：
+
+```
+for each arc h -> i:    base = envelope over BNext[i][k] for k != h    candidate = backwardExtend(base, h, i)    update BNext[h][i]
+```
+
+如果先实现，不用做 Spliet 那种 per-segment D′D'D′ 复杂结构，直接维护 predecessor-indexed functions 最清楚。后续如果 O(n2)O(n^2)O(n2) envelope 太慢，再做“best/second-best predecessor envelope”加速。
+
+* * *
+
+## 6\. 你第 1 点的判断修正
+
+你说：
+
+> label应该只需要记录最早开始时间，reachable set 还有成本函数？然后应该不需要占优？到一个node的时候把两个label merge minimum就好了。也不需要记录路径，因为我只需要一个最小成本函数。
+
+我会改成：
+
+**允许任意环路时，label 不需要记录 reachable set，也不需要记录路径；每个 node 只维护一个最小成本函数 Fi(t)F\_i(t)Fi​(t)。所谓多个 label 到同一 node，本质上直接 merge 成 lower envelope。**
+
+唯一需要记录的是：
+
+node i+cost function Fi(t).\\text{node } i + \\text{cost function }F\_i(t).node i+cost function Fi​(t).
+
+如果你的函数已经是 prefix-min/suffix-min 形式，最早完成时间也可以从函数 domain 左端读出来，不一定单独存。
+
+* * *
+
+## 7\. 最终结论
+
+All-cycles relaxation: one function per node is enough.\\boxed{ \\text{All-cycles relaxation: one function per node is enough.} }All-cycles relaxation: one function per node is enough.​ 2-cycle elimination: one function per ordered pair (previous,current) is needed.\\boxed{ \\text{2-cycle elimination: one function per ordered pair }(previous,current)\\text{ is needed.} }2-cycle elimination: one function per ordered pair (previous,current) is needed.​
+
+forward 用 predecessor state，backward 用 successor state。  
+这正好是从“完全不记录历史”到“只记录一阶历史”的过渡。
+
+
+
+
+
+已思考 20s
+
+是的，**从状态信息的本质上看，他的 2-cycle elimination 就是在记录“一阶历史”**，也就是你说的类似：
+
+(previous node,current node)(\\text{previous node},\\text{current node})(previous node,current node)
+
+但他文章里的实现形式**不是显式维护一个二维状态函数 Fh,i(t)F\_{h,i}(t)Fh,i​(t)**，而是用更压缩的方式做。
+
+* * *
+
+## 1\. 文章里的 all-cycles 版本
+
+在允许任意环路时，对辅助图中的每个 node vvv，他维护一个 dominance function：
+
+Dv(T)D\_v(T)Dv​(T)
+
+表示：所有到达 vvv 的 partial paths 中，在 vvv 不晚于 TTT 服务的最小成本。
+
+这时候不管路径上之前访问过谁，也不管上一跳是谁，全部被 merge 到同一个函数：
+
+Dv(T)\=min⁡P∈PvgP(T).D\_v(T)=\\min\_{P\\in \\mathcal P\_v} g\_P(T).Dv​(T)\=P∈Pv​min​gP​(T).
+
+所以 all-cycles relaxation 下确实是：
+
+每个 node 一个最优函数。\\text{每个 node 一个最优函数。}每个 node 一个最优函数。
+
+* * *
+
+## 2\. 2-cycle elimination 需要知道 predecessor
+
+禁止 2-cycle 时，如果当前 partial path 是：
+
+⋯→i→j,\\cdots \\to i \\to j,⋯→i→j,
+
+那么下一步不能走：
+
+j→i.j \\to i.j→i.
+
+所以从 jjj 向外扩展到某个 node uuu 时，需要知道当前到达 jjj 的路径上一跳是不是 uuu。这就是一阶历史。
+
+文章里对每个 line piece lvkl\_v^klvk​ 记录它对应路径的 predecessor：
+
+Pred⁡(lvk).\\operatorname{Pred}(l\_v^k).Pred(lvk​).
+
+然后判断扩展 v→uv\\to uv→u 是否会形成 2-cycle：
+
+o(Pred⁡(lvk))\=o(u).o(\\operatorname{Pred}(l\_v^k)) = o(u).o(Pred(lvk​))\=o(u).
+
+如果不相等，就正常扩展当前最优 line piece。  
+如果相等，说明扩展会形成：
+
+u→v→u,u \\to v \\to u,u→v→u,
+
+于是不能用当前最优 line piece，而要换成一个“上一跳不是 uuu”的备选 line piece。文章就是这么定义 Dv′(T)D'\_v(T)Dv′​(T) 的：它在给定时间区间内只考虑 predecessor original customer 不同的 paths。
+
+The Time Window Assignment Vehi…
+
+* * *
+
+## 3\. 和 Fh,i(t)F\_{h,i}(t)Fh,i​(t) 的关系
+
+如果用你想要的原网络写法，可以把他的逻辑翻译成：
+
+Fh,i(t)F\_{h,i}(t)Fh,i​(t)
+
+表示：到达 current node iii，且上一跳是 hhh 的最小成本函数。
+
+那么普通 all-cycles 的函数就是：
+
+Fi(t)\=min⁡hFh,i(t).F\_i(t)=\\min\_h F\_{h,i}(t).Fi​(t)\=hmin​Fh,i​(t).
+
+而 2-cycle elimination 下，从 iii 扩展到 jjj 时，不能使用上一跳为 jjj 的状态，所以应该用：
+
+Fi∖j(t)\=min⁡h≠jFh,i(t).F\_i^{\\setminus j}(t) = \\min\_{h\\ne j} F\_{h,i}(t).Fi∖j​(t)\=h\=jmin​Fh,i​(t).
+
+然后扩展：
+
+Fi,j(t)←Ext⁡ij(Fi∖j)(t).F\_{i,j}(t) \\leftarrow \\operatorname{Ext}\_{ij}\\left(F\_i^{\\setminus j}\\right)(t).Fi,j​(t)←Extij​(Fi∖j​)(t).
+
+这就是我前面说的“状态是 (previous,current)(previous,current)(previous,current)”的意思。
+
+* * *
+
+## 4\. 但文章不是显式存 Fh,iF\_{h,i}Fh,i​
+
+他的实现更像是：
+
+Dv(T)\=min⁡hFh,v(T),D\_v(T)=\\min\_h F\_{h,v}(T),Dv​(T)\=hmin​Fh,v​(T),
+
+再对当前最优 line piece 额外维护一个替代函数：
+
+Dv′(T)\=min⁡h≠Pred⁡(lvk)Fh,v(T).D'\_v(T) = \\min\_{h\\ne \\operatorname{Pred}(l\_v^k)} F\_{h,v}(T).Dv′​(T)\=h\=Pred(lvk​)min​Fh,v​(T).
+
+也就是说，他没有为每个 predecessor hhh 都单独维护一整个函数 Fh,vF\_{h,v}Fh,v​，而是：
+
+1.  先维护总体最优 envelope DvD\_vDv​；
+2.  每个 line piece 知道自己的 predecessor；
+3.  如果正常最优 line piece 会导致 2-cycle，就临时用 Dv′D'\_vDv′​ 中的备选 line piece；
+4.  算法 2 里同时扩展 DvD\_vDv​ 和 Dv′D'\_vDv′​，从而保留后续可能需要的备选路径。
+    
+    The Time Window Assignment Vehi…
+    
+
+所以可以说：
+
+概念上等价于一阶历史状态；实现上是 predecessor-aware line-piece envelope。\\boxed{ \\text{概念上等价于一阶历史状态；实现上是 predecessor-aware line-piece envelope。} }概念上等价于一阶历史状态；实现上是 predecessor-aware line-piece envelope。​
+
+* * *
+
+## 5\. 对你现在原网络实现的启发
+
+如果你不做扩展网络、不想复刻他那套 Dv′D'\_vDv′​ 的 line-piece 机制，那么最稳的写法就是显式维护：
+
+Fh,i(t)F\_{h,i}(t)Fh,i​(t)
+
+或更实用地维护：
+
+Fi∖j(t)\=min⁡h≠jFh,i(t).F\_i^{\\setminus j}(t)=\\min\_{h\\ne j} F\_{h,i}(t).Fi∖j​(t)\=h\=jmin​Fh,i​(t).
+
+这和文章的思想一致，只是数据结构更直接。
+
+所以回答你的问题：
+
+**是的，他的 2-cycle relaxation 本质上就是多记一个 predecessor，用来禁止马上回到上一节点；但他不是显式地把 DP 状态写成 (previous,current)(previous,current)(previous,current)，而是通过每个 line piece 的 predecessor 和备选 dominance function Dv′D'\_vDv′​ 来实现。**	
+
+
+
+已思考 34s
+
+标准 VRP / VRPTW 里做 **2-cycle elimination**，核心就是：**label 需要额外记住 immediate predecessor，也就是上一跳节点**。这样扩展时禁止回到上一跳：
+
+⋯→h→i↛h.\\cdots \\to h \\to i \\not\\to h .⋯→h→i→h.
+
+所以它不是 full elementarity，也不是完整 visited set，只是一阶历史状态。
+
+* * *
+
+## 1\. 最基础的 2-cycle DP 状态
+
+在普通 SPPRC / VRPTW labeling 中，一个 label 通常是：
+
+L\=(i, qL, tL, cL, pred⁡(L)),L=(i,\\ q\_L,\\ t\_L,\\ c\_L,\\ \\operatorname{pred}(L)),L\=(i, qL​, tL​, cL​, pred(L)),
+
+其中：
+
+-   iii：当前节点；
+-   qLq\_LqL​：累计 load；
+-   tLt\_LtL​：当前时间；
+-   cLc\_LcL​：累计 reduced cost；
+-   pred⁡(L)\\operatorname{pred}(L)pred(L)：到达 iii 前的上一个节点。
+
+扩展 LLL 到节点 jjj 时，除了容量、时间窗等常规资源约束，还加一个条件：
+
+j≠pred⁡(L).j \\ne \\operatorname{pred}(L).j\=pred(L).
+
+这样就禁止了：
+
+pred⁡(L)→i→pred⁡(L).\\operatorname{pred}(L) \\to i \\to \\operatorname{pred}(L).pred(L)→i→pred(L).
+
+这就是标准的 **2-cycle elimination**。文献中也明确把这种 relaxation 称为 SPPRC with 2-cycle elimination，即禁止 i–j–ii\\text{--}j\\text{--}ii–j–i 这种短环；它比完全允许 cyclic routes 更强，但远弱于 elementary path。[download.uni-mainz.de+1](https://download.uni-mainz.de/fb03-logistikmanagement/tech-reports/OR-2003-01.pdf?utm_source=chatgpt.com)
+
+* * *
+
+## 2\. 最保守 dominance：只能同 predecessor 比较
+
+一旦 label 记了 predecessor，dominance 也要小心。
+
+如果两个 label 都停在同一个当前节点 iii，但上一跳不同：
+
+pred⁡(L1)\=h1,pred⁡(L2)\=h2,\\operatorname{pred}(L\_1)=h\_1,\\qquad \\operatorname{pred}(L\_2)=h\_2,pred(L1​)\=h1​,pred(L2​)\=h2​,
+
+即使 L1L\_1L1​ 在 cost、time、load 上都优于 L2L\_2L2​，也不能简单删掉 L2L\_2L2​。原因是：
+
+-   L1L\_1L1​ 不能扩展回 h1h\_1h1​；
+-   但 L2L\_2L2​ 可能可以扩展到 h1h\_1h1​。
+
+所以最保守、最常见的 2-cycle dominance 是：
+
+L1 can dominate L2L\_1 \\text{ can dominate } L\_2L1​ can dominate L2​
+
+只有当：
+
+i(L1)\=i(L2),pred⁡(L1)\=pred⁡(L2),i(L\_1)=i(L\_2),\\qquad \\operatorname{pred}(L\_1)=\\operatorname{pred}(L\_2),i(L1​)\=i(L2​),pred(L1​)\=pred(L2​),
+
+并且资源和 reduced cost 都不差时才成立。Irnich 和 Villeneuve 相关综述里也提到，普通 2-cycle-SPPRC 的常用 dominance 只适用于相同 ending node 和相同 predecessor node 的 labels；后续工作才进一步改进这种弱 dominance。[ResearchGate+1](https://www.researchgate.net/publication/244513067_The_shortest_path_problem_with_resource_constraints_and_k-cycle_elimination_with_k_3?utm_source=chatgpt.com)
+
+所以如果你要实现一个最稳的版本，就是：
+
+state\=(pred⁡,i),dominance only within the same (pred⁡,i).\\boxed{ \\text{state}=(\\operatorname{pred}, i),\\quad \\text{dominance only within the same }(\\operatorname{pred},i). }state\=(pred,i),dominance only within the same (pred,i).​
+
+* * *
+
+## 3\. 更强的做法：strong/weak dominance 或 predecessor-exclusion envelope
+
+标准文献后来会做得更聪明。思路是：
+
+如果 L1L\_1L1​ 在资源和成本上支配 L2L\_2L2​，但 predecessor 不同，那么 L1L\_1L1​ 可以替代 L2L\_2L2​ 的大部分后续扩展；唯一不能替代的是扩展到：
+
+pred⁡(L1).\\operatorname{pred}(L\_1).pred(L1​).
+
+因为 L1→pred⁡(L1)L\_1\\to \\operatorname{pred}(L\_1)L1​→pred(L1​) 会形成 2-cycle，而 L2L\_2L2​ 未必会。
+
+所以更强的 dominance 会把 L2L\_2L2​ 变成一种 **weak label**：它不需要完整保留所有扩展能力，只需要在某些特殊 extension 上作为替代路径存在。你搜到的相关资料里也提到，2-cycle elimination 可以用 strong-dominant label / weak-dominant label 的思想：weak label 在强 label 回到其 predecessor 会形成 2-cycle 时提供 alternative path。[ROSA P](https://rosap.ntl.bts.gov/view/dot/39948/dot_39948_DS1.pdf?utm_source=chatgpt.com)
+
+这和 Spliet & Gabor 文章里的 Dv′(T)D'\_v(T)Dv′​(T) 是同一个思想：当前最优 line piece 如果扩展会形成 2-cycle，就不用 Dv(T)D\_v(T)Dv​(T)，而用一个“predecessor 不同”的备选函数 Dv′(T)D'\_v(T)Dv′​(T)。文章里定义了 predecessor，并在 extension 形成 2-cycle 时改用排除相同 predecessor 的备选函数。
+
+The Time Window Assignment Vehi…
+
+* * *
+
+## 4\. 如果你在原网络上做函数 completion bound，怎么对应？
+
+你不想构造扩展网络，只想在原网络上算函数型 completion bound。那对应做法有两档。
+
+### 保守显式状态版本
+
+维护：
+
+Fh,i(t)F\_{h,i}(t)Fh,i​(t)
+
+表示：从 source 到 iii，且上一跳是 hhh，在 iii 不晚于 ttt 完成的最小 reduced-cost 函数。
+
+扩展 i→ji\\to ji→j 时：
+
+j≠h.j\\ne h.j\=h.
+
+更新：
+
+Fi,j(t)←min⁡{Fi,j(t),Ext⁡ij(Fh,i)(t)},h≠j.F\_{i,j}(t) \\leftarrow \\min\\left\\{ F\_{i,j}(t), \\operatorname{Ext}\_{ij}\\big(F\_{h,i}\\big)(t) \\right\\}, \\qquad h\\ne j.Fi,j​(t)←min{Fi,j​(t),Extij​(Fh,i​)(t)},h\=j.
+
+这个是最直接、最不容易错的 2-cycle DP。状态规模是：
+
+O(n2)O(n^2)O(n2)
+
+个函数，而不是每个 node 一个函数。
+
+### 压缩 envelope 版本
+
+为了减少每次枚举所有 hhh，可以维护：
+
+Fi(t)\=min⁡hFh,i(t),F\_i(t)=\\min\_h F\_{h,i}(t),Fi​(t)\=hmin​Fh,i​(t),
+
+以及对每个 forbidden successor jjj 的排除型 envelope：
+
+Fi∖j(t)\=min⁡h≠jFh,i(t).F\_i^{\\setminus j}(t)=\\min\_{h\\ne j}F\_{h,i}(t).Fi∖j​(t)\=h\=jmin​Fh,i​(t).
+
+那么扩展 i→ji\\to ji→j 时直接用：
+
+Fi∖j(t).F\_i^{\\setminus j}(t).Fi∖j​(t).
+
+这就非常接近 Spliet & Gabor 的 DvD\_vDv​ 和 Dv′D'\_vDv′​ 结构：DvD\_vDv​ 是总体最优函数，Dv′D'\_vDv′​ 是在当前最优 predecessor 会导致 2-cycle 时使用的备选函数。
+
+* * *
+
+## 5\. 和 all-cycles 版本的区别
+
+允许任意环路时：
+
+Fi(t)F\_i(t)Fi​(t)
+
+每个 node 一个函数就够了。
+
+禁止 2-cycle 时：
+
+Fi(t)F\_i(t)Fi​(t)
+
+不够，因为你必须知道上一跳是谁。所以至少需要：
+
+Fh,i(t)F\_{h,i}(t)Fh,i​(t)
+
+或者等价的：
+
+Fi∖j(t).F\_i^{\\setminus j}(t).Fi∖j​(t).
+
+一句话总结：
+
+标准 VRP 的 2-cycle DP 本质就是只记一阶历史 predecessor。\\boxed{ \\text{标准 VRP 的 2-cycle DP 本质就是只记一阶历史 predecessor。} }标准 VRP 的 2-cycle DP 本质就是只记一阶历史 predecessor。​
+
+最保守实现是按 (previous,current)(previous,current)(previous,current) 分组做 label / 函数；更高级实现用 strong/weak label 或排除 predecessor 的备选 envelope 来减少状态和比较。
+
+
+
+已思考 22s
+
+对，你这个纠正是对的。我前面把“label”说宽了。**经典 VRP 里 2-cycle elimination 更常见的说法不是 label 层面记录 predecessor，而是 q-route / relaxed route 的动态规划状态里多保留一阶历史信息。**
+
+可以更准确地说：
+
+## 1\. All-cycles q-route DP
+
+经典 all-cycles relaxation 下，允许客户重复访问。DP 状态通常类似：
+
+fj(q)f\_j(q)fj​(q)
+
+表示：从 depot 出发，到达当前客户 jjj，累计需求为 qqq 的最小 reduced cost。递推大概是：
+
+fj(q+dj)\=min⁡i{fi(q)+cˉij}.f\_j(q+d\_j) = \\min\_{i} \\left\\{ f\_i(q)+\\bar c\_{ij} \\right\\}.fj​(q+dj​)\=imin​{fi​(q)+cˉij​}.
+
+这里不记录 visited set，也不记录 predecessor，所以允许：
+
+i→j→i,i\\to j\\to i,i→j→i,
+
+也允许更长的回路。
+
+这对应你说的“完全松弛 elementary 约束”。
+
+* * *
+
+## 2\. 2-cycle elimination 的经典 DP 状态
+
+禁止 2-cycle 时，状态需要知道上一跳是谁。更标准的 DP 写法是：
+
+fi,j(q)f\_{i,j}(q)fi,j​(q)
+
+表示：当前 route 最后一条弧是
+
+i→j,i\\to j,i→j,
+
+并且累计需求为 qqq 的最小 reduced cost。然后从 jjj 扩展到 kkk 时，需要禁止
+
+k\=i.k=i.k\=i.
+
+所以递推是：
+
+fj,k(q+dk)\=min⁡i≠k{fi,j(q)+cˉjk}.f\_{j,k}(q+d\_k) = \\min\_{i\\ne k} \\left\\{ f\_{i,j}(q)+\\bar c\_{jk} \\right\\}.fj,k​(q+dk​)\=i\=kmin​{fi,j​(q)+cˉjk​}.
+
+这才是经典 2-cycle-free q-route DP 的核心：**状态不是完整 visited set，而是只记最后两个节点 (i,j)(i,j)(i,j)**。
+
+因此：
+
+All-cycles: state (j,q);2-cycle-free: state (i,j,q).\\boxed{ \\text{All-cycles: state }(j,q); \\qquad \\text{2-cycle-free: state }(i,j,q). }All-cycles: state (j,q);2-cycle-free: state (i,j,q).​
+
+你说得对，这更像“动态规划状态扩展”，不是普通 labeling 里加一个 predecessor field 后做 dominance。
+
+* * *
+
+## 3\. 更高效的实现：best / second-best predecessor
+
+显式维护所有
+
+fi,j(q)f\_{i,j}(q)fi,j​(q)
+
+是最直接的，但也可以压缩。对每个当前节点 jjj 和资源 qqq，维护：
+
+best1(j,q),pred1(j,q),\\text{best}\_1(j,q),\\quad \\text{pred}\_1(j,q),best1​(j,q),pred1​(j,q),
+
+以及
+
+best2(j,q),\\text{best}\_2(j,q),best2​(j,q),
+
+其中：
+
+-   best1(j,q)\\text{best}\_1(j,q)best1​(j,q)：到达 jjj 的最优 predecessor；
+-   pred1(j,q)\\text{pred}\_1(j,q)pred1​(j,q)：产生这个最优值的 predecessor；
+-   best2(j,q)\\text{best}\_2(j,q)best2​(j,q)：到达 jjj 的次优 predecessor，且 predecessor 不同于 pred1(j,q)\\text{pred}\_1(j,q)pred1​(j,q)。
+
+当要扩展
+
+j→kj\\to kj→k
+
+时：
+
+-   如果 pred1(j,q)≠k\\text{pred}\_1(j,q)\\ne kpred1​(j,q)\=k，用 best1；
+-   如果 pred1(j,q)\=k\\text{pred}\_1(j,q)=kpred1​(j,q)\=k，用 best2。
+
+也就是：
+
+min⁡i≠kfi,j(q)\={best1(j,q),if pred1(j,q)≠k,best2(j,q),if pred1(j,q)\=k.\\min\_{i\\ne k} f\_{i,j}(q) = \\begin{cases} \\text{best}\_1(j,q), & \\text{if } \\text{pred}\_1(j,q)\\ne k,\\\\ \\text{best}\_2(j,q), & \\text{if } \\text{pred}\_1(j,q)=k. \\end{cases}i\=kmin​fi,j​(q)\={best1​(j,q),best2​(j,q),​if pred1​(j,q)\=k,if pred1​(j,q)\=k.​
+
+这就是 2-cycle elimination 的核心技巧：不用完整枚举所有 predecessor，每次只要知道“最优 predecessor 是否正好等于要回去的节点”。
+
+* * *
+
+## 4\. Spliet 这篇里的做法本质上也是这个思想
+
+这篇文章在 all-cycles 版本里，对每个辅助图节点维护一个 dominance function：
+
+Dv(T)D\_v(T)Dv​(T)
+
+即所有到 vvv 的 partial paths 的 lower envelope。2-cycle elimination 时，它不是显式写成 fi,j(q)f\_{i,j}(q)fi,j​(q)，而是对每个 line piece 记录 predecessor，并构造一个排除相同 predecessor 的备选函数 Dv′(T)D'\_v(T)Dv′​(T)。当直接扩展会形成 2-cycle 时，就不用 Dv(T)D\_v(T)Dv​(T) 的当前最优 line piece，而改用 Dv′(T)D'\_v(T)Dv′​(T)。
+
+The Time Window Assignment Vehi…
+
+所以它和经典 best/second-best predecessor 的关系是：
+
+Dv(T)≈best1(v,T),D\_v(T) \\approx \\text{best}\_1(v,T),Dv​(T)≈best1​(v,T), Dv′(T)≈best alternative excluding the predecessor that would create a 2-cycle.D'\_v(T) \\approx \\text{best alternative excluding the predecessor that would create a 2-cycle}.Dv′​(T)≈best alternative excluding the predecessor that would create a 2-cycle.
+
+只不过这里的“best/second-best”不是标量 cost，而是分段线性函数的 line piece / lower envelope。
+
+* * *
+
+## 5\. 如果你要做函数型 completion bound，该怎么写更准确？
+
+### All-cycles bound
+
+如果不考虑 capacity/load，只是原网络上的 completion bound，可以维护：
+
+Fj(t)F\_j(t)Fj​(t)
+
+表示到达 jjj、完成时间不晚于 ttt 的最小函数成本。递推是：
+
+Fj←min⁡iExt⁡ij(Fi).F\_j \\leftarrow \\min\_i \\operatorname{Ext}\_{ij}(F\_i).Fj​←imin​Extij​(Fi​).
+
+这里是每个 node 一个函数。
+
+如果有离散资源 qqq，则应是：
+
+Fjq(t).F\_j^q(t).Fjq​(t).
+
+### 2-cycle-free bound
+
+更标准的状态应该写成：
+
+Fi,jq(t)F\_{i,j}^q(t)Fi,jq​(t)
+
+表示最后一条弧为 i→ji\\to ji→j、累计资源为 qqq 的最小函数成本。递推：
+
+Fj,kq+dk(t)←Ext⁡jk(min⁡i≠kFi,jq)(t).F\_{j,k}^{q+d\_k}(t) \\leftarrow \\operatorname{Ext}\_{jk} \\left( \\min\_{i\\ne k} F\_{i,j}^{q} \\right)(t).Fj,kq+dk​​(t)←Extjk​(i\=kmin​Fi,jq​)(t).
+
+如果你想压缩，就维护对每个 (j,q)(j,q)(j,q) 的：
+
+Fjq,best(t),pred⁡jq,best(t),Fjq,alt(t).F\_j^{q,\\text{best}}(t),\\qquad \\operatorname{pred}\_j^{q,\\text{best}}(t), \\qquad F\_j^{q,\\text{alt}}(t).Fjq,best​(t),predjq,best​(t),Fjq,alt​(t).
+
+但因为这里是函数，不是标量，best predecessor 可能随 ttt 变化，所以最稳的版本还是显式维护：
+
+Fi,jq(t)F\_{i,j}^q(t)Fi,jq​(t)
+
+或者维护“按 predecessor 分组的函数 envelope”。
+
+* * *
+
+## 6\. 结论
+
+你纠正得对。更准确的说法是：
+
+经典 VRP 的 2-cycle relaxation 是 DP 状态从 (j,q) 扩展为 (i,j,q).\\boxed{ \\text{经典 VRP 的 2-cycle relaxation 是 DP 状态从 }(j,q)\\text{ 扩展为 }(i,j,q). }经典 VRP 的 2-cycle relaxation 是 DP 状态从 (j,q) 扩展为 (i,j,q).​
+
+它不是 elementary labeling，也不需要 visited set。Spliet 这篇文章的 Dv′(T)D'\_v(T)Dv′​(T) 可以理解为这种一阶历史 DP 的函数型压缩实现：当最优函数对应的 predecessor 会导致 i−j−ii-j-ii−j−i 时，用排除该 predecessor 的备选函数来扩展。
+
+
+
+
+OK，有道理，给我总结下无环限制的和有2-cycle限制的这个预处理的completion bound的函数该如何做。以及这里我觉得可以处理一下，不像正式labeling做的时候正向反向是用arc拼接的，这是因为不用arc的话那一半的定义域不好设置，因为如果用node做应该第一次超过一半才停止，这样的话函数定义域不好设置。即使设置为全域的，此时也还是有点问题。因为在node拼的时候，此时相当于node i的成本函数和dual都被重复记录了应该减掉，但之前的label里边定义的是min以后的函数，此时没办法还原回去加了i函数以后的那个函数了。所以直接用arc拼接。 但其实可以这么做？ 1、还是双向的labeing里边，也是可以做单点拼接的，此时像上边说的，必须使用full-domain的函数定义域，此时可以减少拼接时候的arc 的平方级的复杂度。具体做法为，现在的label里边存储的函数为到达（比如前向的）任务i的时候，不超过t完成时的最小成本。而这个东西是根据上一个label，比如在j，即j完成的不超过t的最小成本函数加上i的成本函数和相关dual得到的，此时其实是两个步骤，即先加i的成本函数得到任务i恰好在t完成时的最小成本，然后前向minimize得到不超过t的最小成本。可以把那个恰好的函数记录到label里边。 2、这样的话，我们其实就可以在一个node去做拼接了，即使用这个node上的正向label的这个恰好的函数，减去这个node的这个惩罚函数（那其实好像就是上一个label的不超过的最小函数平移那段delta时间以后的函数），那好像直接存这个也行。从而利用这个东西其实就可以和反向的在当前点的做拼接了？相当于此时node i的惩罚函数被反向的label加上了，而setup相关的由正向的去做？ 同理，那completion bound的时候也可以类似的做法，而且有cycle的和2-cycle限制的应该都可以直接使用动态规划的状态去递推？不需要labeling? 好像还是需要？不然如何递推呢？ 给我分析下
+
+
+
+
+
+可以，这里可以把问题分成两层：**completion bound 的 relaxed DP 怎么算**，以及 **正式双向 pricing / join 是否可以从 arc join 改成 node join**。这两件事相关，但不完全一样。
+
+* * *
+
+## 1\. 先总结 completion bound：无环限制 relaxation 和 2-cycle relaxation
+
+设
+
+gi(t)g\_i(t)gi​(t)
+
+表示 job iii 在完成时间 ttt 的节点成本，包括时间惩罚和 job dual，例如可以理解为：
+
+gi(t)\=ϕi(t)−πi.g\_i(t)=\\phi\_i(t)-\\pi\_i.gi​(t)\=ϕi​(t)−πi​.
+
+设
+
+cˉij\\bar c\_{ij}cˉij​
+
+是 arc i→ji\\to ji→j 的 fixed reduced cost，Δij\\Delta\_{ij}Δij​ 是从 iii 完成到 jjj 完成需要增加的时间，例如：
+
+Δij\=sij+pj.\\Delta\_{ij}=s\_{ij}+p\_j.Δij​\=sij​+pj​.
+
+### 1.1 允许任意环路：all-cycles completion bound
+
+这个版本完全放松 elementarity，不记录 visited set，也不禁止重复访问。每个 node 只需要维护一个 forward 函数。
+
+定义：
+
+Fi(t)F\_i(t)Fi​(t)
+
+为从 source 到 iii，且 iii 的完成时间不晚于 ttt 时的最小 relaxed reduced cost。为了后面做 node join，还建议同时维护一个“exact-before-node”函数：
+
+Ui(t)U\_i(t)Ui​(t)
+
+表示到达 iii 并使 iii 可以在 ttt 完成时，进入 iii 之前的最小成本；也就是已经包含前面所有 job 和进入 iii 的 arc，但**不包含 iii 自己的节点成本**。
+
+那么有：
+
+Fˉi(t)\=Ui(t)+gi(t),\\bar F\_i(t)=U\_i(t)+g\_i(t),Fˉi​(t)\=Ui​(t)+gi​(t), Fi(t)\=min⁡u≤tFˉi(u).F\_i(t)=\\min\_{u\\le t}\\bar F\_i(u).Fi​(t)\=u≤tmin​Fˉi​(u).
+
+递推为：
+
+Uj(t)\=min⁡i{Fi(t−Δij)+cˉij},U\_j(t) = \\min\_i \\left\\{ F\_i(t-\\Delta\_{ij})+\\bar c\_{ij} \\right\\},Uj​(t)\=imin​{Fi​(t−Δij​)+cˉij​}, Fˉj(t)\=Uj(t)+gj(t),\\bar F\_j(t)=U\_j(t)+g\_j(t),Fˉj​(t)\=Uj​(t)+gj​(t), Fj(t)\=min⁡u≤tFˉj(u).F\_j(t)=\\min\_{u\\le t}\\bar F\_j(u).Fj​(t)\=u≤tmin​Fˉj​(u).
+
+这里的 min⁡u≤t\\min\_{u\\le t}minu≤t​ 就是 prefix-min normalize。
+
+Backward 对称地定义：
+
+Bˉi(t)\\bar B\_i(t)Bˉi​(t)
+
+为从 iii 出发到 sink 的最小 suffix cost，且 iii 在时间 ttt 完成，并且 Bˉi(t)\\bar B\_i(t)Bˉi​(t) **包含 iii 自己的节点成本**。再定义：
+
+Bi(t)\=min⁡u≥tBˉi(u).B\_i(t)=\\min\_{u\\ge t}\\bar B\_i(u).Bi​(t)\=u≥tmin​Bˉi​(u).
+
+于是 backward 递推可以写成：
+
+Bˉi(t)\=gi(t)+min⁡j{cˉij+Bj(t+Δij)},\\bar B\_i(t) = g\_i(t) + \\min\_j \\left\\{ \\bar c\_{ij}+B\_j(t+\\Delta\_{ij}) \\right\\},Bˉi​(t)\=gi​(t)+jmin​{cˉij​+Bj​(t+Δij​)}, Bi(t)\=min⁡u≥tBˉi(u).B\_i(t)=\\min\_{u\\ge t}\\bar B\_i(u).Bi​(t)\=u≥tmin​Bˉi​(u).
+
+这个版本的 completion bound 是最简单的。因为允许任意环路，所以状态就是：
+
+i\\boxed{ i }i​
+
+每个 node 一个 forward 函数、一个 backward 函数即可。Spliet and Gabor 文章里说的 “allowing all cyclic routes” 就是这种思路：放松 elementary route，允许 cyclic routes，从而 pricing 变容易，但 LP bound 会变弱。
+
+The Time Window Assignment Vehi…
+
+* * *
+
+### 1.2 禁止 2-cycle：2-cycle-free completion bound
+
+如果禁止
+
+i→j→i,i\\to j\\to i,i→j→i,
+
+那么只记录当前 node 不够，因为你需要知道上一跳是谁。
+
+Forward 状态应变成：
+
+Fh,i(t),F\_{h,i}(t),Fh,i​(t),
+
+表示当前最后一条 arc 是
+
+h→i,h\\to i,h→i,
+
+且 iii 的完成时间不晚于 ttt 的最小 relaxed reduced cost。
+
+对应地，仍然可以定义 exact-before-node 函数：
+
+Uh,i(t)U\_{h,i}(t)Uh,i​(t)
+
+表示进入 iii 之前的成本，最后一条 arc 是 h→ih\\to ih→i，但不包含 iii 的节点成本。则：
+
+Fˉh,i(t)\=Uh,i(t)+gi(t),\\bar F\_{h,i}(t)=U\_{h,i}(t)+g\_i(t),Fˉh,i​(t)\=Uh,i​(t)+gi​(t), Fh,i(t)\=min⁡u≤tFˉh,i(u).F\_{h,i}(t)=\\min\_{u\\le t}\\bar F\_{h,i}(u).Fh,i​(t)\=u≤tmin​Fˉh,i​(u).
+
+从 iii 扩展到 jjj 时，不能使用上一跳为 jjj 的状态。因此先定义排除型 envelope：
+
+Fi∖j(t)\=min⁡h≠jFh,i(t).F\_i^{\\setminus j}(t) = \\min\_{h\\ne j}F\_{h,i}(t).Fi∖j​(t)\=h\=jmin​Fh,i​(t).
+
+然后递推：
+
+Ui,j(t)\=Fi∖j(t−Δij)+cˉij,U\_{i,j}(t) = F\_i^{\\setminus j}(t-\\Delta\_{ij})+\\bar c\_{ij},Ui,j​(t)\=Fi∖j​(t−Δij​)+cˉij​, Fˉi,j(t)\=Ui,j(t)+gj(t),\\bar F\_{i,j}(t)=U\_{i,j}(t)+g\_j(t),Fˉi,j​(t)\=Ui,j​(t)+gj​(t), Fi,j(t)\=min⁡u≤tFˉi,j(u).F\_{i,j}(t)=\\min\_{u\\le t}\\bar F\_{i,j}(u).Fi,j​(t)\=u≤tmin​Fˉi,j​(u).
+
+Backward 也类似。定义：
+
+Bi,k(t)B\_{i,k}(t)Bi,k​(t)
+
+表示从 iii 出发到 sink，第一条 arc 是
+
+i→k,i\\to k,i→k,
+
+且 iii 的完成时间不早于/不小于某个时间要求时的最小 suffix cost。更方便的是 exact 版本：
+
+Bˉi,k(t)\\bar B\_{i,k}(t)Bˉi,k​(t)
+
+表示 iii 在时间 ttt 完成、下一跳是 kkk 的 suffix cost，包含 iii 的节点成本。
+
+为了禁止 2-cycle，如果要在 iii 前面接一个 predecessor hhh，则 suffix 的下一跳不能是 hhh。所以定义：
+
+Bi∖h(t)\=min⁡k≠hBi,k(t),B\_i^{\\setminus h}(t)=\\min\_{k\\ne h}B\_{i,k}(t),Bi∖h​(t)\=k\=hmin​Bi,k​(t),
+
+并有递推：
+
+Bˉi,k(t)\=gi(t)+cˉik+Bk∖i(t+Δik),\\bar B\_{i,k}(t) = g\_i(t) + \\bar c\_{ik} + B\_k^{\\setminus i}(t+\\Delta\_{ik}),Bˉi,k​(t)\=gi​(t)+cˉik​+Bk∖i​(t+Δik​), Bi,k(t)\=min⁡u≥tBˉi,k(u).B\_{i,k}(t)=\\min\_{u\\ge t}\\bar B\_{i,k}(u).Bi,k​(t)\=u≥tmin​Bˉi,k​(u).
+
+所以 2-cycle-free 版本的状态是：
+
+(h,i)\\boxed{(h,i)}(h,i)​
+
+也就是经典 VRP 里 q-route 2-cycle elimination 的状态思想：all-cycles 是 (i,q)(i,q)(i,q)，2-cycle-free 是 (h,i,q)(h,i,q)(h,i,q)。如果你当前不显式加 load 维度，那就是 (i)(i)(i) 和 (h,i)(h,i)(h,i)。
+
+Spliet and Gabor 的文章没有显式写成 Fh,iF\_{h,i}Fh,i​，而是用每个 line piece 的 predecessor 和备选函数 Dv′(T)D'\_v(T)Dv′​(T) 实现同样的逻辑：当扩展当前最优 line piece 会产生 2-cycle 时，改用 predecessor 不同的备选函数。
+
+The Time Window Assignment Vehi…
+
+* * *
+
+## 2\. 这是不是 labeling？还是动态规划？
+
+严格说，它仍然是 dynamic programming，也可以用 label-correcting 的方式实现。
+
+区别在于：
+
+-   正式 elementary labeling：state 里有 visited set / reachable set，label 数量多，需要 dominance；
+-   all-cycles relaxed DP：state 只有 node，每个 node 维护一个 lower-envelope 函数；
+-   2-cycle-free relaxed DP：state 是 ordered pair (h,i)(h,i)(h,i)，每个 state 维护一个函数。
+
+所以可以说：
+
+它不是 elementary labeling，但实现上仍然是函数型 label-correcting DP。\\text{它不是 elementary labeling，但实现上仍然是函数型 label-correcting DP。}它不是 elementary labeling，但实现上仍然是函数型 label-correcting DP。
+
+因为你不构造扩展无环网络，在原网络上有环，所以不能只拓扑扫一遍。需要用 queue：
+
+```
+某个函数 F_i 或 F_{h,i} 被改善→ 将对应 state 入队→ 扩展它的出弧→ 更新后继 state 的 lower envelope→ 直到没有函数再改善
+```
+
+只要每次循环消耗正时间，且 horizon 有界，这个过程在函数分段有限的情况下是可控的。工程上可以用“函数是否被 lower envelope 改善”作为入队条件。
+
+* * *
+
+## 3\. 关于 node join：你的想法是对的，但必须存 exact/pre-node 函数
+
+你前面说的核心问题非常对：正式双向 labeling 里如果直接在 node iii 拼接，用普通函数
+
+Fi(t)\=min⁡u≤tFˉi(u)F\_i(t)=\\min\_{u\\le t}\\bar F\_i(u)Fi​(t)\=u≤tmin​Fˉi​(u)
+
+会有 double-counting 和信息丢失问题。
+
+原因是 Fi(t)F\_i(t)Fi​(t) 是 prefix-min 后的函数，它只表示“在不晚于 ttt 完成 iii 的最小成本”。这个最小值可能来自某个更早时间 u<tu<tu<t。所以你不能从 Fi(t)F\_i(t)Fi​(t) 里恢复“iii 恰好在 ttt 完成时，已经加过 gi(t)g\_i(t)gi​(t) 的成本”。
+
+因此如果只存 Fi(t)F\_i(t)Fi​(t)，node join 写成：
+
+Fi(t)+Bi(t)−gi(t)F\_i(t)+B\_i(t)-g\_i(t)Fi​(t)+Bi​(t)−gi​(t)
+
+是不严谨的。因为 Fi(t)F\_i(t)Fi​(t) 里的 gig\_igi​ 可能对应的是 uuu 而不是 ttt。
+
+但如果你额外存 exact 函数，就可以做 node join。
+
+最干净的定义是：
+
+Ui(t)U\_i(t)Ui​(t)
+
+表示完成 iii 于 ttt 之前的 prefix cost，**不含 iii 自己的节点成本**。也就是：
+
+Fˉi(t)\=Ui(t)+gi(t),\\bar F\_i(t)=U\_i(t)+g\_i(t),Fˉi​(t)\=Ui​(t)+gi​(t), Fi(t)\=min⁡u≤tFˉi(u).F\_i(t)=\\min\_{u\\le t}\\bar F\_i(u).Fi​(t)\=u≤tmin​Fˉi​(u).
+
+Backward 则存：
+
+Bˉi(t)\\bar B\_i(t)Bˉi​(t)
+
+表示 iii 在 ttt 完成时的 suffix cost，**包含 iii 自己的节点成本**。
+
+那么 node join 就可以写成：
+
+min⁡t{Ui(t)+Bˉi(t)}.\\boxed{ \\min\_t\\{U\_i(t)+\\bar B\_i(t)\\}. }tmin​{Ui​(t)+Bˉi​(t)}.​
+
+这样 iii 的节点成本只被 backward 侧计算一次；进入 iii 的 setup/arc cost 由 forward 侧 Ui(t)U\_i(t)Ui​(t) 负责；离开 iii 的 setup/arc cost由 backward 侧负责。
+
+这正好对应你说的：
+
+> setup 相关的由正向去做，node iii 的惩罚函数由反向 label 加上。
+
+更准确地说：**incoming setup/arc 由 forward 侧负责，node iii 及 outgoing suffix 由 backward 侧负责。**
+
+* * *
+
+## 4\. 2-cycle-free 情况下的 node join
+
+如果用 2-cycle-free completion bound，node join 时还要避免在拼接点形成 2-cycle。
+
+假设 forward prefix 最后一条 arc 是：
+
+h→i,h\\to i,h→i,
+
+backward suffix 第一条 arc 是：
+
+i→k.i\\to k.i→k.
+
+那么必须要求：
+
+h≠k.h\\ne k.h\=k.
+
+否则拼起来就是：
+
+h→i→h.h\\to i\\to h.h→i→h.
+
+因此 node join 应该使用：
+
+Uh,i(t)U\_{h,i}(t)Uh,i​(t)
+
+和排除 hhh 的 backward exact suffix：
+
+Bˉi∖h(t)\=min⁡k≠hBˉi,k(t).\\bar B\_i^{\\setminus h}(t)=\\min\_{k\\ne h}\\bar B\_{i,k}(t).Bˉi∖h​(t)\=k\=hmin​Bˉi,k​(t).
+
+于是：
+
+min⁡hmin⁡t{Uh,i(t)+Bˉi∖h(t)}.\\boxed{ \\min\_{h}\\min\_t \\left\\{ U\_{h,i}(t)+\\bar B\_i^{\\setminus h}(t) \\right\\}. }hmin​tmin​{Uh,i​(t)+Bˉi∖h​(t)}.​
+
+这就是 node join 下 2-cycle-free 的自然形式。
+
+* * *
+
+## 5\. 为什么正式双向 pricing 之前更自然用 arc join？
+
+你前面总结得很对。arc join 的好处是：两个 label 没有共享 node，天然不会 double-count node cost。
+
+如果 forward label ending at iii 已经包含 iii，backward label starting at jjj 已经包含 jjj，那么 crossing arc join 直接是：
+
+Fi+cˉij+Bj.F\_i + \\bar c\_{ij} + B\_j.Fi​+cˉij​+Bj​.
+
+中间没有重叠节点，所以不需要 subtract gi(t)g\_i(t)gi​(t)，也不需要恢复 exact-before-node function。
+
+而 node join 要成立，必须在 label 里额外存：
+
+Ui(t)orFˉi(t)U\_i(t) \\quad\\text{or}\\quad \\bar F\_i(t)Ui​(t)orFˉi​(t)
+
+这种 exact 函数。否则 prefix-min 后的信息已经被压缩掉了。
+
+所以：
+
+arc join 对现有 prefix-min/suffix-min label 更自然；\\boxed{ \\text{arc join 对现有 prefix-min/suffix-min label 更自然；} }arc join 对现有 prefix-min/suffix-min label 更自然；​ node join 可以做，但需要额外存 exact/pre-node 函数。\\boxed{ \\text{node join 可以做，但需要额外存 exact/pre-node 函数。} }node join 可以做，但需要额外存 exact/pre-node 函数。​
+
+* * *
+
+## 6\. node join 是否能降低复杂度？
+
+可以。arc join 需要枚举 crossing arc：
+
+(i,j),(i,j),(i,j),
+
+理论上是 O(n2)O(n^2)O(n2) 的 terminal-pair 组合。
+
+node join 只在同一个 node iii 上拼：
+
+i.i.i.
+
+理论上可以把一部分 join 复杂度降到 O(n)O(n)O(n) 个 node group。
+
+但代价是：
+
+1.  label 要多存 exact/pre-node 函数；
+2.  backward 也要有以同一 node 为 anchor 的 exact suffix 函数；
+3.  elementary/visited-set 情况下，node join 仍要检查两侧 visited sets 是否只在 iii 处相交；
+4.  2-cycle-free 情况下，还要检查 predecessor/successor 不相等；
+5.  full-domain 函数会比 half-domain 函数更重。
+
+所以这不是无成本优化。作为 completion bound 很值得做；作为正式 pricing 的主 join 方式，需要实验比较。
+
+* * *
+
+## 7\. 对 completion bound 来说，node join 更自然
+
+completion bound 不需要恢复完整路径，也不需要严格生成列。它只需要一个合法的 relaxed lower bound。因此在 completion bound 里，node join 是非常合适的。
+
+All-cycles completion bound：
+
+CBiall\=min⁡t{Ui(t)+Bˉi(t)}.\\boxed{ CB\_i^{\\text{all}} = \\min\_t \\left\\{ U\_i(t)+\\bar B\_i(t) \\right\\}. }CBiall​\=tmin​{Ui​(t)+Bˉi​(t)}.​
+
+2-cycle-free completion bound：
+
+CBi2\-cyc\=min⁡hmin⁡t{Uh,i(t)+Bˉi∖h(t)}.\\boxed{ CB\_i^{2\\text{-cyc}} = \\min\_h\\min\_t \\left\\{ U\_{h,i}(t)+\\bar B\_i^{\\setminus h}(t) \\right\\}. }CBi2\-cyc​\=hmin​tmin​{Uh,i​(t)+Bˉi∖h​(t)}.​
+
+如果你愿意接受更松的 lower bound，也可以用 prefix-min/suffix-min 函数直接拼，但那会混合不同 completion time，bound 会更弱。若希望这个 completion bound 尽量强，就存 exact/pre-node 函数。
+
+* * *
+
+## 8\. 最终建议
+
+我建议你先按下面顺序做。
+
+第一步，做 **all-cycles completion bound**：
+
+Fi(t),Ui(t),Bˉi(t),Bi(t).F\_i(t),\\quad U\_i(t),\\quad \\bar B\_i(t),\\quad B\_i(t).Fi​(t),Ui​(t),Bˉi​(t),Bi​(t).
+
+每个 node 一个函数，queue-based fixed-point 更新。
+
+第二步，做 **2-cycle-free completion bound**：
+
+Fh,i(t),Uh,i(t),Bˉi,k(t),Bi,k(t).F\_{h,i}(t),\\quad U\_{h,i}(t),\\quad \\bar B\_{i,k}(t),\\quad B\_{i,k}(t).Fh,i​(t),Uh,i​(t),Bˉi,k​(t),Bi,k​(t).
+
+用排除型 envelope：
+
+Fi∖j(t)\=min⁡h≠jFh,i(t),F\_i^{\\setminus j}(t)=\\min\_{h\\ne j}F\_{h,i}(t),Fi∖j​(t)\=h\=jmin​Fh,i​(t), Bi∖h(t)\=min⁡k≠hBi,k(t).B\_i^{\\setminus h}(t)=\\min\_{k\\ne h}B\_{i,k}(t).Bi∖h​(t)\=k\=hmin​Bi,k​(t).
+
+第三步，再考虑把正式 bidirectional pricing 的 arc join 改成 node join。那时必须让 forward label 除了 prefix-min frontier 外，再存一个 exact/pre-node frontier，例如：
+
+UL(t).U\_L(t).UL​(t).
+
+否则 node join 会出现你说的 double-counting 和无法还原 exact node cost 的问题。
+
+一句话总结：
+
+completion bound 可以直接用 relaxed DP 做，all-cycles 是 node-state，2-cycle 是 last-arc-state。\\boxed{ \\text{completion bound 可以直接用 relaxed DP 做，all-cycles 是 node-state，2-cycle 是 last-arc-state。} }completion bound 可以直接用 relaxed DP 做，all-cycles 是 node-state，2-cycle 是 last-arc-state。​ node join 可以做，但前提是额外存 exact/pre-node 函数；只存 prefix-min frontier 不够。\\boxed{ \\text{node join 可以做，但前提是额外存 exact/pre-node 函数；只存 prefix-min frontier 不够。} } node join 可以做，但前提是额外存 exact/pre-node 函数；只存 prefix-min frontier 不够。
+
+
+
+递推式子是这样没错，但是递推顺序呢？这种是不是应该像label correcting那么做？递推以后如果一个状态有改进，那么让他重新进入队列？以进一步更新其他节点？如果这么做是对的话？那其实也可以直接用动态规划的状态去做递推。 不需要labeling 以及2-cycle的completion bound不需要那个判断反向和正向的是否存在2-cycle吧，现在的逻辑应该是，正向的2-cycle的completion bound是正向任意路径到点j的最小成本的下界，反向的则是elementary的到点j的最小成本，没必要做你说的那个吧？
+
+
+
+对，你这次理解更准确。
+
+## 1\. 递推顺序：在原网络上做时，应当是 label-correcting 式的 DP
+
+如果不构造扩展无环网络，而是在原网络 GGG 上直接做 relaxed completion bound，那么原网络里有环，所以不能像 Spliet and Gabor 在辅助无环图 G^\\hat GG^ 上那样按拓扑顺序扫一遍。他们之所以构造 G^\\hat GG^，就是为了把 capacity/load 和访问次数状态展开成无环图，从而可以直接套 Ioachim et al. 的动态规划算法；但如果你不展开，就需要做 queue-based correcting。
+
+The Time Window Assignment Vehi…
+
+也就是说，流程应该是：
+
+```
+初始化 source 状态函数把 source 状态入队while queue 非空:    弹出一个状态    用它扩展后继状态    如果某个后继状态函数被 lower envelope 改善        把后继状态重新入队
+```
+
+所以本质上是：
+
+state function improved⇒re-propagate from this state.\\text{state function improved} \\Rightarrow \\text{re-propagate from this state}.state function improved⇒re-propagate from this state.
+
+这确实是动态规划，不是你正式 elementary pricing 里的那种“保留大量 path labels + dominance”的 labeling。更准确地说，它是 **functional label-correcting DP**：state 是 node 或 last-arc，状态值是一个分段线性函数。
+
+* * *
+
+## 2\. 允许任意环路的 completion bound
+
+这个最简单。状态就是 node：
+
+Fi(t).F\_i(t).Fi​(t).
+
+含义是：从 source 到 iii，且 iii 不晚于 ttt 完成时的最小 relaxed reduced cost。
+
+递推是：
+
+Fj←min⁡{Fj,Ext⁡ij(Fi)}.F\_j \\leftarrow \\min\\{F\_j,\\operatorname{Ext}\_{ij}(F\_i)\\}.Fj​←min{Fj​,Extij​(Fi​)}.
+
+如果 FjF\_jFj​ 被改善，就把 jjj 重新入队。
+
+所以它的伪代码就是：
+
+```
+F[i] = +infty for all iF[source] = source functionQ = {source}while Q not empty:    i = pop(Q)    for each j:        candidate = extend(F[i], i, j)        newF = lowerEnvelope(F[j], candidate)        if newF improves F[j]:            F[j] = newF            push(Q, j)
+```
+
+这里不需要：
+
+-   visited set；
+-   reachable set 作为状态；
+-   path；
+-   dominance graph。
+
+因为到同一个 node 的所有 partial paths 都已经被压成一个 lower-envelope function：
+
+Fi(t)\=min⁡all relaxed paths ending at iFP(t).F\_i(t)=\\min\_{\\text{all relaxed paths ending at }i} F\_P(t).Fi​(t)\=all relaxed paths ending at imin​FP​(t).
+
+* * *
+
+## 3\. 2-cycle 限制的 completion bound
+
+如果禁止 2-cycle，那么状态变成 last-arc：
+
+Fh,i(t).F\_{h,i}(t).Fh,i​(t).
+
+含义是：最后一条弧是
+
+h→i,h\\to i,h→i,
+
+且 iii 不晚于 ttt 完成时的最小 relaxed reduced cost。
+
+递推是：
+
+Fi,j←min⁡{Fi,j,Ext⁡ij(Fh,i)},j≠h.F\_{i,j} \\leftarrow \\min\\left\\{ F\_{i,j}, \\operatorname{Ext}\_{ij}(F\_{h,i}) \\right\\}, \\qquad j\\ne h.Fi,j​←min{Fi,j​,Extij​(Fh,i​)},j\=h.
+
+也就是：
+
+```
+F[h][i] = +inftyinitialize F[source][j] for source -> jQ = all improved states (source, j)while Q not empty:    (h, i) = pop(Q)    for each j:        if j == h:            continue   // eliminate i-j-i        candidate = extend(F[h][i], i, j)        if candidate improves F[i][j]:            F[i][j] = lowerEnvelope(F[i][j], candidate)            push(Q, (i, j))
+```
+
+所以你说得对：**可以直接用 DP 状态递推，不需要正式 elementary labeling。** 只是这个 DP 在有环网络上要用 correcting 顺序，不是拓扑顺序。
+
+Spliet and Gabor 的 2-cycle 版本本质上也是这个一阶历史思想，只是他们没有显式维护 Fh,iF\_{h,i}Fh,i​，而是对 dominance function 的 line piece 记录 predecessor，并在会产生 2-cycle 时使用排除相同 predecessor 的备选函数 Dv′D'\_vDv′​。
+
+The Time Window Assignment Vehi…
+
+* * *
+
+## 4\. 你说的 “2-cycle completion bound 不需要 join 处检查 2-cycle” 是对的，但要看用途
+
+如果 completion bound 只是用于给正式 elementary pricing 做剪枝，例如：
+
+当前 label cost+relaxed remaining bound≥0⇒剪枝,\\text{当前 label cost} + \\text{relaxed remaining bound} \\ge 0 \\Rightarrow \\text{剪枝},当前 label cost+relaxed remaining bound≥0⇒剪枝,
+
+那么不需要检查“正向和反向拼起来是否产生 2-cycle”。
+
+原因是：completion bound 只要是一个 **lower bound** 就够了。  
+即使它允许在拼接处出现 2-cycle，得到的成本只会更小、更乐观：
+
+relaxed bound≤true feasible completion cost.\\text{relaxed bound} \\le \\text{true feasible completion cost}.relaxed bound≤true feasible completion cost.
+
+这不会导致错误剪枝，只会导致剪枝弱一点。
+
+例如当前 exact prefix 是：
+
+⋯→h→i.\\cdots \\to h\\to i.⋯→h→i.
+
+如果 backward relaxed suffix 从 iii 出发选择：
+
+i→h,i\\to h,i→h,
+
+那拼起来有 2-cycle：
+
+h→i→h.h\\to i\\to h.h→i→h.
+
+这个 suffix 对当前 prefix 不可行，但它的成本仍然可以作为下界，因为它属于更大的 relaxed feasible set。用它剪枝是安全的，只是更松。
+
+所以你说的逻辑可以成立：
+
+forward 2-cycle completion bound\=到 j 的 relaxed 最小成本下界,\\text{forward 2-cycle completion bound} = \\text{到 }j\\text{ 的 relaxed 最小成本下界},forward 2-cycle completion bound\=到 j 的 relaxed 最小成本下界, backward completion bound\=从 j 到终点的 relaxed/elementary 最小成本下界,\\text{backward completion bound} = \\text{从 }j\\text{ 到终点的 relaxed/elementary 最小成本下界},backward completion bound\=从 j 到终点的 relaxed/elementary 最小成本下界,
+
+二者不必保证拼接后仍满足 2-cycle-free 或 elementary 条件。
+
+* * *
+
+## 5\. 什么时候才需要我之前说的 2-cycle join compatibility？
+
+只有当你想计算的是：
+
+“整个拼接路径在 2-cycle relaxation 下的最强 bound”\\text{“整个拼接路径在 2-cycle relaxation 下的最强 bound”}“整个拼接路径在 2-cycle relaxation 下的最强 bound”
+
+或者你想让 forward/backward relaxed DP 的 node join 严格对应某个 no-2-cycle route relaxation，才需要检查：
+
+forward predecessor≠backward successor.\\text{forward predecessor} \\ne \\text{backward successor}.forward predecessor\=backward successor.
+
+也就是：
+
+h→i→k,h≠k.h\\to i\\to k,\\qquad h\\ne k.h→i→k,h\=k.
+
+但如果你的目标只是 **completion bound for pruning**，那么没必要这么强。忽略 join compatibility 会得到更松的下界，但仍然安全。
+
+因此可以把结论改成：
+
+用于剪枝的 completion bound 不需要在拼接处检查 2-cycle compatibility。\\boxed{ \\text{用于剪枝的 completion bound 不需要在拼接处检查 2-cycle compatibility。} }用于剪枝的 completion bound 不需要在拼接处检查 2-cycle compatibility。​ 用于精确表示 no-2-cycle relaxed full route 的双向拼接时，才需要检查。\\boxed{ \\text{用于精确表示 no-2-cycle relaxed full route 的双向拼接时，才需要检查。} }用于精确表示 no-2-cycle relaxed full route 的双向拼接时，才需要检查。​
+
+* * *
+
+## 6\. 关于 node join 的 double-counting 问题
+
+你前面说 node join 会重复记录 node iii 的成本，这个判断仍然对。若只是做 one-sided completion bound，不需要 node join，自然没有这个问题。
+
+若要做 two-sided node join，并且想让 bound 尽量强，就最好存两类函数：
+
+Ui(t)U\_i(t)Ui​(t)
+
+表示进入 iii 前的成本，不含 iii 的节点成本；
+
+Bˉi(t)\\bar B\_i(t)Bˉi​(t)
+
+表示从 iii 出发的 suffix exact cost，含 iii 的节点成本。
+
+然后 node join 用：
+
+min⁡t{Ui(t)+Bˉi(t)}.\\min\_t \\{U\_i(t)+\\bar B\_i(t)\\}.tmin​{Ui​(t)+Bˉi​(t)}.
+
+但如果你只是用 forward bound 或 backward bound 去剪正式 label，不一定需要做 node join。
+
+* * *
+
+## 7\. 最终建议
+
+你的 completion bound 可以先这样做：
+
+### All-cycles bound
+
+状态：
+
+i.i.i.
+
+维护：
+
+Fi(t)F\_i(t)Fi​(t)
+
+queue-correcting 递推。
+
+### 2-cycle-free bound
+
+状态：
+
+(h,i).(h,i).(h,i).
+
+维护：
+
+Fh,i(t)F\_{h,i}(t)Fh,i​(t)
+
+queue-correcting 递推，扩展时只禁止：
+
+j\=h.j=h.j\=h.
+
+### 用于剪枝时
+
+不需要强行检查 forward/backward 拼接处是否仍 2-cycle-free。  
+因为你要的是下界，越 relaxed 越安全，只是越弱。
+
+一句话总结：
+
+**对，你可以把它实现成 DP state correcting，而不是正式 labeling；2-cycle 版本只是在 DP 状态里多记上一跳。用于 completion bound 剪枝时，拼接处不需要再保证 2-cycle compatibility，除非你追求的是严格的 no-2-cycle relaxed full-route bound。**
+
+
+
+初始化 source 状态函数 把 source 状态入队 while queue 非空: 弹出一个状态 用它扩展后继状态 如果某个后继状态函数被 lower envelope 改善 把后继状态重新入队 这个动态规划流程确定没问题吗？能保证最优性吗？
+
+展开收起
+
+  
+
+#### ChatGPT 说：
+
+已思考 16s
+
+可以，**这个流程在逻辑上是对的**，但它的正确性有几个前提。更准确地说，它不是“一次性动态规划”，而是 **label-correcting / Bellman-Ford-style 的函数值迭代**。只要状态空间和可行 walk 数量在 horizon 下是有限的，并且每次函数更新都精确取 lower envelope，它可以收敛到 relaxed DP 的最优 completion bound。
+
+* * *
+
+## 1\. 为什么这个流程可以保证最优性？
+
+假设先看 all-cycles relaxation。对每个状态 iii 维护函数
+
+Fi(t),F\_i(t),Fi​(t),
+
+表示从 source 到 iii，并且 iii 不晚于 ttt 完成的最小 relaxed reduced cost。
+
+递推算子是：
+
+Fj←min⁡{Fj,Ext⁡ij(Fi)},F\_j \\leftarrow \\min\\left\\{ F\_j,\\operatorname{Ext}\_{ij}(F\_i) \\right\\},Fj​←min{Fj​,Extij​(Fi​)},
+
+其中 Ext⁡ij(⋅)\\operatorname{Ext}\_{ij}(\\cdot)Extij​(⋅) 表示从 iii 扩展到 jjj 后得到的函数。
+
+如果在原网络上有环，那么不能像无环图那样按拓扑顺序只扫一遍。正确做法就是：
+
+```
+如果 F_j 被改善，就把 j 重新入队，因为 F_j 的改善可能继续改善它的后继节点。
+```
+
+这和最短路里的 Bellman-Ford / label-correcting 是同一个逻辑。区别只是这里的“距离”不是一个标量，而是一个分段线性函数。
+
+因此，只要队列最终清空，就意味着对所有 arc i→ji\\to ji→j 都有：
+
+Fj≤Ext⁡ij(Fi),F\_j \\le \\operatorname{Ext}\_{ij}(F\_i),Fj​≤Extij​(Fi​),
+
+也就是所有 DP 递推都已经无法继续改善。此时得到的 FFF 就是这个 relaxed DP 的最小 fixed point，也就是允许环路 relaxation 下的最优 completion bound。
+
+* * *
+
+## 2\. 什么时候会终止？
+
+终止依赖一个关键条件：
+
+每次循环访问都会消耗正的时间或正的离散资源，且 horizon/capacity 有界。\\text{每次循环访问都会消耗正的时间或正的离散资源，且 horizon/capacity 有界。}每次循环访问都会消耗正的时间或正的离散资源，且 horizon/capacity 有界。
+
+在你的机器调度/VRP pricing 语境下，通常有：
+
+Δij\=sij+pj\>0,\\Delta\_{ij}=s\_{ij}+p\_j>0,Δij​\=sij​+pj​\>0,
+
+并且有一个有限 horizon：
+
+\[0,H\].\[0,H\].\[0,H\].
+
+那么一个 relaxed walk 最多只能包含有限次扩展：
+
+number of visits≤⌊HΔmin⁡⌋,\\text{number of visits} \\le \\left\\lfloor \\frac{H}{\\Delta\_{\\min}}\\right\\rfloor,number of visits≤⌊Δmin​H​⌋,
+
+其中
+
+Δmin⁡\=min⁡i,jΔij\>0.\\Delta\_{\\min}=\\min\_{i,j}\\Delta\_{ij}>0.Δmin​\=i,jmin​Δij​\>0.
+
+所以即使允许任意环路，可行 walk 的长度仍然有上界。所有可能生成的 path functions 是有限集合，lower envelope 的更新次数也是有限的。因此 label-correcting 过程理论上可以终止。
+
+如果有容量状态 qqq，同理：
+
+q≤Qq\\le Qq≤Q
+
+也会给访问次数提供上界。Spliet and Gabor 是通过构造辅助无环图 G^\\hat GG^ 来显式利用累计 load 和访问次数状态，使得 pricing 可以按无环图顺序求解；如果你不构造无环图，而是在原网络上做，就需要用这种 queue-correcting 顺序。
+
+The Time Window Assignment Vehi…
+
+* * *
+
+## 3\. 什么时候会出问题？
+
+主要有三类风险。
+
+第一，如果存在零时间环：
+
+Δij\=0\\Delta\_{ij}=0Δij​\=0
+
+并且这个环的 reduced cost 可以为负，那么 relaxed pricing 可能出现无限下降，DP 没有有限最优值。
+
+第二，如果没有 horizon 或 capacity 这类上界，允许环路时可行 walk 数量无限，算法不一定终止。
+
+第三，如果函数 lower envelope 的“是否改善”判断只用数值采样或近似判断，可能出现震荡或漏更新。最好用精确分段线性 envelope，并设置合理 tolerance。
+
+* * *
+
+## 4\. 2-cycle relaxation 也一样，只是状态换了
+
+如果禁止 2-cycle，状态不是 node iii，而是 last arc：
+
+(h,i).(h,i).(h,i).
+
+函数为：
+
+Fh,i(t),F\_{h,i}(t),Fh,i​(t),
+
+表示最后一条弧是 h→ih\\to ih→i，且 iii 不晚于 ttt 完成时的最小 relaxed reduced cost。
+
+递推为：
+
+Fi,j←min⁡{Fi,j,Ext⁡ij(Fh,i)},j≠h.F\_{i,j} \\leftarrow \\min\\left\\{ F\_{i,j}, \\operatorname{Ext}\_{ij}(F\_{h,i}) \\right\\}, \\qquad j\\ne h.Fi,j​←min{Fi,j​,Extij​(Fh,i​)},j\=h.
+
+于是 queue 里放的是 state (h,i)(h,i)(h,i)，而不是 iii。流程是：
+
+```
+初始化 source -> j 的状态函数把被初始化的 (source, j) 状态入队while queue 非空:    弹出状态 (h, i)    for each successor j:        if j == h:            continue        candidate = extend(F[h,i], i, j)        if F[i,j] 被 lower envelope 改善:            更新 F[i,j]            把 (i,j) 入队
+```
+
+这个也能保证得到 **2-cycle-free relaxed DP** 的最优 completion bound，前提仍然是 horizon/capacity 有界、每次扩展消耗正资源、函数更新精确。
+
+* * *
+
+## 5\. 所以“不需要 labeling”这句话怎么理解？
+
+可以说 **不需要 elementary labeling**，也不需要 visited set / dominance graph。
+
+但从实现形式上，它仍然是一个“状态函数 correcting”过程。也就是说：
+
+-   状态是 iii 或 (h,i)(h,i)(h,i)；
+-   每个状态只有一个当前最优函数；
+-   多条路径到同一个状态时直接取 lower envelope；
+-   状态函数改善后重新入队传播。
+
+所以它不是正式 pricing 里的 path-labeling；它是 relaxed DP。
+
+* * *
+
+结论：
+
+这个 queue-correcting DP 流程是正确的。\\boxed{ \\text{这个 queue-correcting DP 流程是正确的。} }这个 queue-correcting DP 流程是正确的。​
+
+但它保证最优性的条件是：
+
+有限 horizon/capacity、正资源消耗、无零资源负环、精确 lower-envelope 更新。\\boxed{ \\text{有限 horizon/capacity、正资源消耗、无零资源负环、精确 lower-envelope 更新。} }有限 horizon/capacity、正资源消耗、无零资源负环、精确 lower-envelope 更新。​
+
+在这些条件下，队列清空时得到的函数就是对应 relaxation 下的最优 completion bound。

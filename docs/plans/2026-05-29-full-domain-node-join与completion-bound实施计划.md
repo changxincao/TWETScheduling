@@ -2,6 +2,33 @@
 
 本文基于 `docs/plans/2026-05-29-completion-bound与node-join分析记录.md` 和当前 `GCBBStyleBidirectionalFullDomain` 的实现，记录下一步实现计划。目标分成两条线：第一条是在 full-domain GCBB 双向 pricing 上复制一个 node join 实验类；第二条是单独实现 completion bound 计算器，按当前 branch-and-price 节点的 dual、分支弧约束和时间窗信息计算 all-cycles 与 2-cycle-free 两类 relaxed bound。两条线先解耦，不在第一版里把 completion bound 直接接入正式 pricing 剪枝。
 
+## 0. 总体流程框架
+
+这次不要直接改现有 `GCBBStyleBidirectionalFullDomain` 的正式对照逻辑，而是拆成两个独立增量。第一个增量是新增一个 full-domain node join pricing 实验类，复用现有 full-domain label 扩展、dominance、top-K 候选池和 debug 复核，只把 label 中间函数拆成“传播函数”和“拼接函数”，并把最终 crossing-arc join 改成同一 job 上的 node join。第二个增量是新增 completion bound calculator，它读取当前 branch-and-price node 的 LP dual、分支弧状态和时间窗信息，单独做 relaxed DP 并输出 bound 与统计；第一版不参与 pricing 剪枝。
+
+因此第一阶段的主调用链保持为：
+
+```text
+TWETBPCContext
+  -> GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine
+  -> GCBBStyleBidirectionalFullDomainNodeJoin.solve(lp)
+  -> initialize / forward labeling / backward labeling
+  -> nodeJoinAllGroups
+  -> finalizeGeneratedColumns
+```
+
+第二阶段的 completion bound 主调用链保持独立：
+
+```text
+TWETBPCContext 或调试 runner
+  -> GCBBCompletionBoundCalculator.compute(lp)
+  -> computeAllCyclesBound
+  -> computeNoTwoCycleBound
+  -> CompletionBoundResult
+```
+
+这样安排的原因是 node join 会影响“生成列的方式”，completion bound 会影响“剪枝依据”。两者如果同时接入，后续结果变快或变慢时很难判断原因。第一版先要求 node join 自己能复现 arc join 的目标、bound 和 reduced-cost 复核；completion bound 自己能给出计算时间、状态数、函数段数和 bound 强度。等两个模块都稳定后，再讨论是否把 bound 接到 reachable set、label 插入前剪枝或 final join 剪枝。
+
 ## 1. Full-Domain Node Join Pricing 新类
 
 ### 1.1 新增类与入口

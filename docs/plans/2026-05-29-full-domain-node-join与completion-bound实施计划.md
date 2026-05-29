@@ -375,3 +375,11 @@ nodeJoinNoTwoCycleRelaxed
 final join 已从 crossing-arc join 改为同 job node join。流程按 join job 分组，只拼接 `activeForwardByLastJob[j]` 与 `activeBackwardByFirstJob[j]`，集合兼容性检查改为“除 join job 外不相交”，恢复序列时去掉 backward 序列开头重复的 join job。node join 函数用 `forward.preNodeFrontier + backward.exactSuffixFrontier` 求最小值，不再额外加入 crossing arc setup cost 或 arc dual。
 
 当前第一版为了保证返回列成本严格可靠，`tryGenerateColumn()` 对 node join 和 forward->sink 候选统一调用 `TWETColumnEvaluator` 复核真实成本，并用恢复序列重新计算 reduced cost 后再放入候选池。相应地，原 crossing-arc join 中基于函数最小值的 group/pair lower-bound 剪枝暂时不作为安全剪枝使用。这样做的代价是性能明显下降：`wet020_001_2m` nodeJoin 单例可得到 `obj=bound=6343` 且 `valid=true`，但 exact pricing 时间约 `20.920s`；日志中 join phase 约 `20.618s`，joinMeasuredShare 约 `98.84%`。这说明当前实现是语义安全基线，不是最终优化版。后续若要让 node join 真正加速，需要先证明 `preNodeFrontier + exactSuffixFrontier` 的函数最小值对恢复序列 reduced cost 是安全 lower bound，或者引入 completion bound/更强 group 筛选来减少 evaluator 调用次数。
+
+### 6.1 对三个实现口径的补充澄清
+
+关于 backward 是否需要 `exactSuffixFrontier`：原计划确实希望第一版不动 backward 字段，直接用 `backward.frontier` 做拼接，以减少改动面。但 `backward.frontier` 是 suffix-min 后的传播函数，它的值可能来自后缀内部更晚/更右侧的完成时间，而不一定对应当前 join node 同一时间点的真实后缀代价。node join 需要的是“当前 join job 在时间 `t` 完成时，从该 job 往右接完整后缀的真实函数”，因此直接用 suffix-min 后的传播函数会让 join 函数偏乐观，并在 debug 复核中出现 inferred reduced cost 与恢复序列 checked reduced cost 不一致。当前新增 `exactSuffixFrontier` 只是保存 normalize 前的后缀函数，backward 的扩展、占优和入队仍使用原 `frontier`，所以它不是改变 backward 搜索流程，而是补足 node join 的成本口径。
+
+关于 terminal 候选为什么不能用 half-domain eligibility：普通 reachable set 仍服务“还能继续扩展”的 half-way label，因此 forward 侧会排除整个窗口都在 `Tmid` 右侧的 job，backward 侧会排除整个窗口都在 `Tmid` 左侧的 job。这在 crossing-arc join 里可以接受，因为 join arc 可以跨过中点；但 node join 必须把跨过 `Tmid` 的那个 job 本身生成出来，否则同点拼接没有 join node。terminal label 的作用正是保留这“第一跳跨界”的 job，它只参与最终 join，不再继续扩展。因此 terminal 候选不能问“它是否还属于 half-domain 可扩展 job”，只能问“它的 full-domain penalty 是否存在、当前直连是否时间可行、没有访问/zero-dual/禁弧问题”。
+
+关于当前版本为什么慢：最初想用 `preNodeFrontier + exactSuffixFrontier` 的最小值直接做 negative-column 判断，但 debug 显示这个推导值和恢复序列的 evaluator 值仍有差异。差异可能来自 normalize 前后函数口径、同点时间同步、以及恢复序列对应的实际最优完成时间不一定就是 join 函数最小点。为了不把错误成本放进列池，当前实现改为所有候选列都用 evaluator 得到真实成本；同时，在没有证明 join 函数值是安全 lower bound 之前，暂时不再用它做 group/pair 剪枝。这样正确性更稳，但 evaluator 调用量随 node join pair 数爆炸，所以 wet020 的 join 时间升到约 20 秒。后续优化方向不是简单恢复旧剪枝，而是先建立一个可证明安全的 lower bound，或让 completion bound 在进入 evaluator 前先过滤大部分候选。

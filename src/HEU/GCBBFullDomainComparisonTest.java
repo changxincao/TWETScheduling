@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Random;
 
 import Basic.Data;
+import Common.Configure;
 import Common.Utility;
 import Output.BPCSolutionValidator;
 import Output.BPCTraceSummary;
@@ -27,8 +28,10 @@ public class GCBBFullDomainComparisonTest {
 	private static final String HEURISTIC_ENGINE = "HeuristicPricing";
 	private static final String NORMAL_ENGINE = "GCNGBBStyleBidirectionalPricing";
 	private static final String FULL_DOMAIN_ENGINE = "GCBBStyleBidirectionalFullDomainPricing";
+	private static final String NODE_JOIN_ENGINE = "GCBBStyleBidirectionalFullDomainNodeJoinPricing";
 
 	public static void main(String[] args) throws Exception {
+		Configure.debugBPCPricingColumnCheck = Boolean.getBoolean("twet.bpc.fullDomainCompare.debugColumnCheck");
 		Path instanceDir = Path.of(System.getProperty("twet.bpc.fullDomainCompare.dir",
 				"test-results/bpc/2026-05-24-no-outsourcing-20-21"));
 		String caseFilter = System.getProperty("twet.bpc.fullDomainCompare.case", "wet021");
@@ -59,6 +62,11 @@ public class GCBBFullDomainComparisonTest {
 				records.add(fullDomain);
 				lines.add(fullDomain.toCsvLine());
 			}
+			if (shouldRunNodeJoin(modeFilter)) {
+				RunRecord nodeJoin = runOne(instance, false, true, outputDir);
+				records.add(nodeJoin);
+				lines.add(nodeJoin.toCsvLine());
+			}
 		}
 
 		Files.write(csv, lines);
@@ -73,6 +81,11 @@ public class GCBBFullDomainComparisonTest {
 	private static boolean shouldRunFullDomain(String modeFilter) {
 		return "both".equalsIgnoreCase(modeFilter) || "full".equalsIgnoreCase(modeFilter)
 				|| "fullDomain".equalsIgnoreCase(modeFilter);
+	}
+
+	private static boolean shouldRunNodeJoin(String modeFilter) {
+		return "node".equalsIgnoreCase(modeFilter) || "nodeJoin".equalsIgnoreCase(modeFilter)
+				|| "fullNodeJoin".equalsIgnoreCase(modeFilter);
 	}
 
 	private static List<Path> listInstances(Path instanceDir, String caseFilter) throws Exception {
@@ -90,16 +103,21 @@ public class GCBBFullDomainComparisonTest {
 	}
 
 	private static RunRecord runOne(Path instance, boolean fullDomain, Path outputDir) throws Exception {
+		return runOne(instance, fullDomain, false, outputDir);
+	}
+
+	private static RunRecord runOne(Path instance, boolean fullDomain, boolean nodeJoin, Path outputDir)
+			throws Exception {
 		resetHeuristicSeed(instance);
 		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(instance.toString(), false);
-		TWETBPCConfig config = buildConfig(instance, fullDomain);
+		TWETBPCConfig config = buildConfig(instance, fullDomain, nodeJoin);
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);
 		TWETSolveResult result = solver.solve();
 		BPCTraceSummary summary = solver.getContext().traceSummary;
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
 
-		String mode = fullDomain ? "fullDomain" : "halfDomain";
-		String exactEngine = fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE;
+		String mode = nodeJoin ? "nodeJoin" : (fullDomain ? "fullDomain" : "halfDomain");
+		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -114,6 +132,10 @@ public class GCBBFullDomainComparisonTest {
 	}
 
 	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain) {
+		return buildConfig(instance, fullDomain, false);
+	}
+
+	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain, boolean nodeJoin) {
 		TWETBPCConfig config = new TWETBPCConfig();
 		config.instanceName = stripDat(instance.getFileName().toString()) + "-no-outsourcing-domain";
 		config.enableBPCConsoleOutput = false;
@@ -130,6 +152,7 @@ public class GCBBFullDomainComparisonTest {
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;
+		config.useGCBBFullDomainNodeJoinBidirectionalPricing = nodeJoin;
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(

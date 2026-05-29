@@ -45,6 +45,11 @@ public class TWETBPCConfig {
 	 */
 	public boolean useGCBBFullDomainBidirectionalPricing = false;
 	/**
+	 * 2026-05-29: 仅用于实验。true 时使用 full-domain 函数标签，并将 final join
+	 * 从 crossing arc 改为同一 job 上的 node join。
+	 */
+	public boolean useGCBBFullDomainNodeJoinBidirectionalPricing = false;
+	/**
 	 * 2026-05-28: 仅用于实验。true 时使用 full-domain 函数标签 + 动态 half-way 边界的非对称双向 pricing。
 	 */
 	public boolean useGCBBAsymmetricBidirectionalPricing = false;

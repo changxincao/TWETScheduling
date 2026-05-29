@@ -361,3 +361,17 @@ nodeJoinNoTwoCycleRelaxed
 `wet021_001_2m` 有两轮 full-domain exact pricing。第一轮总耗时约 `950.428 ms`，forward/backward 扩展合计 `628.191 ms`，join `202.080 ms`，join 在“扩展+join”中占 `24.34%`；第二轮总耗时约 `375.961 ms`，扩展合计 `270.331 ms`，join `103.230 ms`，join 占 `27.63%`。两轮合计看，join 约 `305.310 ms`，扩展约 `898.522 ms`，join 在可解释的扩展+join 阶段中约 `25.36%`，按 exact 调用总时间约 `23.02%`。
 
 当前小样例结论为：full-domain arc join 不是唯一主耗时，扩展尤其 forward 扩展更长；但 join 已经稳定占到约四分之一到三分之一的核心 pricing 时间。node join 如果只减少 final join，不应期待数量级加速；真正有价值的情形应是它同时减少 crossing-arc pair/function evaluation，或配合 completion bound 提前剪掉一部分 label/候选。
+
+## 6. Node Join 第一版实现记录
+
+2026-05-29 已新增 `GCBBStyleBidirectionalFullDomainNodeJoin` 和 `GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine`，并通过 `TWETBPCConfig.useGCBBFullDomainNodeJoinBidirectionalPricing` 接入 `TWETBPCContext`。比较 runner `GCBBFullDomainComparisonTest` 增加 `nodeJoin` 模式，便于和现有 full-domain arc join 单独对比。
+
+实现中 forward label 增加 `preNodeFrontier`，对应前面定义的 `U_state`。扩展时先对父 `frontier` 做一次 `shiftX(delay)`，再原地加入 incoming setup cost 和 incoming arc dual，形成 `preNodeFrontier`；随后在同一个中间函数上加当前 job penalty 并扣 job dual，再做 forward normalize 得到继续传播用的 `frontier`。这样避免了对父函数重复平移，也让 node join 使用的拼接函数和传播函数来源一致。
+
+初始设计曾考虑 backward 侧不新增字段、直接复用 suffix-min 后的 `backward.frontier`。实际 debug 复核发现，这会让 node join 推断 reduced cost 与恢复序列的 evaluator 结果出现口径差异。因此第一版最终在 backward label 中保存 `exactSuffixFrontier`：它是在加入当前前驱 job 成本和 arc/job dual 后、执行 `normalize(Direction.BACKWARD)` 之前复制出来的后缀函数。backward 的传播、dominance、reachable set 和入队逻辑仍使用原 `frontier`，新增字段只服务 node join。
+
+关于 `Tmid`，普通 reachable set 仍保持 half-way 裁剪，只决定哪些 label 可以继续扩展和入队。node join 额外生成“第一跳跨过 `Tmid`”的 terminal label：forward 侧允许第一次到达 `Tmid` 右侧，backward 侧允许第一次到达 `Tmid` 左侧；这些 terminal label 会进入 active join table，但不进入 dominance graph，也不重新入队。这里不能继续使用 `isForwardHalfEligibleJob/isBackwardHalfEligibleJob` 判断 terminal 候选，否则整个有效窗口落在另一半域的 join node 会被提前排掉；当前实现改为只要求对应 full-domain penalty 非空、未访问、非 zero-dual、直连弧未禁用，并通过 full-domain direct feasibility。
+
+final join 已从 crossing-arc join 改为同 job node join。流程按 join job 分组，只拼接 `activeForwardByLastJob[j]` 与 `activeBackwardByFirstJob[j]`，集合兼容性检查改为“除 join job 外不相交”，恢复序列时去掉 backward 序列开头重复的 join job。node join 函数用 `forward.preNodeFrontier + backward.exactSuffixFrontier` 求最小值，不再额外加入 crossing arc setup cost 或 arc dual。
+
+当前第一版为了保证返回列成本严格可靠，`tryGenerateColumn()` 对 node join 和 forward->sink 候选统一调用 `TWETColumnEvaluator` 复核真实成本，并用恢复序列重新计算 reduced cost 后再放入候选池。相应地，原 crossing-arc join 中基于函数最小值的 group/pair lower-bound 剪枝暂时不作为安全剪枝使用。这样做的代价是性能明显下降：`wet020_001_2m` nodeJoin 单例可得到 `obj=bound=6343` 且 `valid=true`，但 exact pricing 时间约 `20.920s`；日志中 join phase 约 `20.618s`，joinMeasuredShare 约 `98.84%`。这说明当前实现是语义安全基线，不是最终优化版。后续若要让 node join 真正加速，需要先证明 `preNodeFrontier + exactSuffixFrontier` 的函数最小值对恢复序列 reduced cost 是安全 lower bound，或者引入 completion bound/更强 group 筛选来减少 evaluator 调用次数。

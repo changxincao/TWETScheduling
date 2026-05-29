@@ -16,6 +16,7 @@ import TWETBPC.CUT.SubsetRowCutGenerator;
 import TWETBPC.GC.BidirectionalPricingEngine;
 import TWETBPC.GC.ExactPricingEngine;
 import TWETBPC.GC.GCBBAsymmetricBidirectionalPricingEngine;
+import TWETBPC.GC.GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine;
 import TWETBPC.GC.GCBBStyleBidirectionalFullDomainPricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPricingEngine;
 import TWETBPC.GC.HeuristicPricingEngine;
@@ -63,6 +64,8 @@ public class TWETBPCContext {
 		if (config.enableBidirectionalPricing) {
 			if (config.useGCBBAsymmetricBidirectionalPricing) {
 				pricingEngines.add(new GCBBAsymmetricBidirectionalPricingEngine(data, config));
+			} else if (config.useGCBBFullDomainNodeJoinBidirectionalPricing) {
+				pricingEngines.add(new GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine(data, config));
 			} else if (config.useGCBBFullDomainBidirectionalPricing) {
 				pricingEngines.add(new GCBBStyleBidirectionalFullDomainPricingEngine(data, config));
 			} else if (config.useGCNGBBStyleBidirectionalPricing) {

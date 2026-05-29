@@ -334,3 +334,39 @@ if F_changed:
 第四点是 queue-correcting 的最优性条件不能省略。只要 horizon 有界、每次扩展有正时间或正离散资源消耗、没有零资源负 reduced-cost 环，并且 lower-envelope 操作精确，队列清空时才可解释为 relaxed DP 的最优 fixed point。若后续引入零处理时间、零 setup 或特殊 big-M/退化时间段，就要重新检查是否可能出现无限改善或数值震荡。
 
 第五点是 full-domain 比 half-domain 不慢很多只是当前实验观察，不是理论保证。它足以支持“可以在 full-domain 上尝试 node join”，但不能直接推出 node join 一定更快。后续实现时应保留 arc join/full-domain/node join 的对照开关，并至少比较标签数、join 候选数、函数求值次数和最终 exact pricing 时间。
+
+## 9. 关于 arc join 原因与 `U_state` 更新的进一步说明
+
+前面说 arc join 更适配 half-domain，这只是主要原因之一，不是全部原因。Arc join 之所以在当前双向 pricing 中更自然，还有几个实现语义上的原因。
+
+第一，arc join 天然避免 join node 双计数。Forward 侧以 `i` 结束，backward 侧以 `j` 开始，中间显式支付 crossing arc `i -> j` 以及相应的 processing/setup 位移，`j` 的节点成本由 backward 侧负责。两侧没有共同的真实 job，因此不用额外保存 pre-node/exact-suffix 函数去处理“同一个 node 的成本算一次还是两次”。
+
+第二，arc join 不要求两侧在同一个完成时间上同步。它只要求 forward frontier 平移 `setup(i,j)+p_j` 后与 backward frontier 有时间交集，然后在交集上求最小 reduced cost。Node join 则要求两侧在同一个 node 的同一个完成时间 `t` 上拼接；一旦 forward/backward 函数都做过 prefix/suffix normalize，就必须额外保存未被 normalize 抹掉的拼接函数，否则时间语义不够。
+
+第三，arc join 与当前 label 状态更匹配。现有 label 只保存一个用于扩展和 dominance 的 frontier，配合 visited/reachable set 就能做 crossing arc 拼接。Node join 则需要至少多保存 `U_state` 或 `Bbar_state`，并要保证这些函数和传播 frontier 的 envelope 关系一致。这会增加状态字段、缓存失效规则和 dominance 后 active label 清理的复杂度。
+
+第四，arc join 的集合兼容性更直接。Crossing arc join 检查的是 forward visited set 与 backward visited set 是否相交，以及 `i -> j` 是否 forbidden。Node join 允许两侧共享同一个 join node，但除 join node 外不能相交；实现上要把“允许的交集”从空集改成单点集合，并且还要保证该 node 的成本只算一次。这不是不能做，但比 arc join 更容易写错。
+
+第五，arc join 与 half-domain 的 dominance/边界剪枝可以保持一致。Forward/backward label 在各自半域内扩展和支配，final join 只负责跨边界组合；node join 如果仍想半域化，就需要定义“同一个 node 在哪一侧生成、在哪个时间点可拼、是否要越过中点后保留”等规则，这些规则会反过来影响 dominance 和 reachable set 语义。
+
+因此更准确的结论是：arc join 不是唯一可行方案，而是当前 half-domain 双向 pricing 下状态最少、边界最清楚、双计数最少、兼容性检查最直接的方案。Node join 更适合在 full-domain 基础上作为一个新的实验分支尝试。
+
+关于 `U_state` 改善但 `F_state` 不改善，可以用下面这个语义理解。`U_state` 是“进入当前 node 前”的函数，用于 node join；`F_state` 是“已经加上当前 node 成本并 prefix-min 后”的函数，用于继续扩展。继续扩展只关心 `F_state`，因为后续 job 只需要知道当前 node 不晚于某时间完成的最小 prefix 成本。但 node join 关心的是同一时间 `t` 上的 `U_state(t) + Bbar_state(t)`，因此 `U_state` 在某些时间点的改善即使没有传导成 `F_state` 改善，也可能让 node join 更好。
+
+一个典型情形是：某个新候选让 `U_state(t0)` 变小，但 `g_i(t0)` 较大，或者 `F_state(t0)` 已经被更早时间 `u < t0` 的 prefix-min 值覆盖，所以 `F_state` 没有变化。这时没有必要把该 state 重新入队，因为继续扩展看不到新收益；但是如果 backward 的 `Bbar_state(t0)` 在 `t0` 很好，那么 `U_state(t0) + Bbar_state(t0)` 可能改进 node join。若不保存这次 `U_state` 改善，node join bound 就会偏弱。
+
+所以实现上应区分两类更新：
+
+```text
+U_state 改善：更新 U_state，供 node join 使用；不一定入队。
+F_state 改善：更新 F_state，并重新入队继续传播。
+```
+
+Backward 方向同理：
+
+```text
+Bbar_state 改善：更新 Bbar_state，供 node join 使用；不一定入队。
+B_state 改善：更新 B_state，并重新入队继续向前传播。
+```
+
+这不是说 `U_state` 比 `F_state` 更重要，而是二者服务的目标不同。`F_state/B_state` 决定 relaxed DP 的传播闭包；`U_state/Bbar_state` 决定同 node 拼接时能否正确、尽量强地评价 bound。

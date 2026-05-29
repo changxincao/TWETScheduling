@@ -378,15 +378,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			}
 			extendForwardAndStore(label, nextJob, lp, false);
 		}
-		// 2026-05-29: Node join 需要“第一个越过 Tmid 的真实 job”作为同点拼接节点。
-		// 这些候选不在原 reachableSet 中，因为 reachableSet 仍按 forward half-way 边界裁剪。
-		// 这里只生成 terminal-only label，不入队继续扩展，避免把 forward 搜索放宽到整个 horizon。
-		for (int nextJob = 1; nextJob <= data.n && canContinue(); nextJob++) {
-			if (label.reachableSet.contains(nextJob) || !canConsiderForwardFullDomainCandidate(label, nextJob, node)) {
-				continue;
-			}
-			extendForwardAndStore(label, nextJob, lp, true);
-		}
 	}
 
 	private void backwardExtend(LP lp) {
@@ -403,14 +394,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			}
 			extendBackwardAndStore(label, prevJob, lp, false);
 		}
-		// 2026-05-29: backward 侧对称保留第一次越过 Tmid 左侧的 terminal suffix。
-		// 它只用于 node join，不再继续向左扩展。
-		for (int prevJob = 1; prevJob <= data.n && canContinue(); prevJob++) {
-			if (label.reachableSet.contains(prevJob) || !canConsiderBackwardFullDomainCandidate(label, prevJob, node)) {
-				continue;
-			}
-			extendBackwardAndStore(label, prevJob, lp, true);
-		}
 	}
 
 	private void extendForwardAndStore(ForwardLabel label, int nextJob, LP lp, boolean terminalCandidate) {
@@ -418,6 +401,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 			return;
 		}
+		// 2026-05-29: node-join 版本的 reachableSet 已经是 full-domain 一跳可达集合；
+		// Tmid 只决定 child 是否还能继续扩展。第一次越过 Tmid 的 child 只保留为
+		// terminal label 参与同点 join，不入队。
 		if (terminalCandidate || Utility.compareGt(earliestForwardCompletion(child), tMid)) {
 			insertForwardBoundaryTerminal(child);
 			return;
@@ -428,10 +414,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private void extendBackwardAndStore(BackwardLabel label, int prevJob, LP lp, boolean terminalCandidate) {
-		BackwardLabel child = extendBackward(label, prevJob, lp, !terminalCandidate);
+		BackwardLabel child = extendBackward(label, prevJob, lp, false);
 		if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 			return;
 		}
+		// 2026-05-29: backward 侧对称处理。先按 full-domain 一跳可行性生成 child；
+		// 若它已经跨到 Tmid 左侧，则只作为 terminal suffix 保存，不再继续向左扩展。
 		if (terminalCandidate || Utility.compareLt(latestBackwardCompletion(child), tMid)) {
 			insertBackwardBoundaryTerminal(child);
 			return;
@@ -442,9 +430,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		// 2026-05-29: 调用方只枚举 label.reachableSet；visited、zero-dual
-		// 和时间可行性已经在 reachable set 构造时维护。下面旧检查保留为防御性说明，
-		// 正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
+		// 2026-05-29: node-join 类的 reachableSet 表示 full-domain 一跳可达候选；
+		// visited、zero-dual 和时间可行性已经在 reachable set 构造时维护。下面旧检查
+		// 保留为防御性说明，实际会随节点变化、必须即时检查的是直连禁弧。
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
@@ -456,9 +444,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		// 2026-05-29: reachable set 已维护 visited、zero-dual 和时间可行性；
-		// 下面旧检查保留为防御性说明，正常不应触发；backward 扩展点只需即时检查
-		// prevJob -> successor 这条直连弧是否被禁。
+		// 2026-05-29: reachable set 已维护 full-domain 一跳时间可行性、visited 和 zero-dual；
+		// backward 扩展点只需即时检查 prevJob -> successor 这条直连弧是否被禁。
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
@@ -466,29 +453,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// 	return false;
 		// }
 		return !node.isArcForbidden(prevJob, successor);
-	}
-
-	private boolean canConsiderForwardFullDomainCandidate(ForwardLabel label, int nextJob, Node node) {
-		return !label.visitedSet.contains(nextJob)
-				// 2026-05-29: terminal node-join 候选不能继续套 half-way eligibility。
-				// 普通 reachableSet 只覆盖仍可继续向前扩展的任务；这里需要允许第一跳越过 Tmid，
-				// 因此只检查 full-domain job penalty 是否可用。
-				&& getDynamicForwardJobPenalty(label.jid, nextJob) != null
-				&& !isZeroDualExcludedJob(nextJob)
-				&& !node.isArcForbidden(label.jid, nextJob)
-				&& isDirectForwardExtensionTimeFeasibleFullDomain(label.frontier, label.jid, nextJob);
-	}
-
-	private boolean canConsiderBackwardFullDomainCandidate(BackwardLabel label, int prevJob, Node node) {
-		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		return !label.visitedSet.contains(prevJob)
-				// 2026-05-29: backward terminal suffix 同理，允许第一跳跨到 Tmid 左侧；
-				// 是否继续扩展仍由普通 reachableSet 控制。
-				&& getDynamicBackwardJobPenalty(prevJob, successor) != null
-				&& !isZeroDualExcludedJob(prevJob)
-				&& !node.isArcForbidden(prevJob, successor)
-				&& isDirectBackwardExtensionTimeFeasibleFullDomain(label.jid, label.isSinkRoot, label.frontier,
-						prevJob);
 	}
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
@@ -1265,12 +1229,13 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			// 2026-05-24: dominance reachable-set 只放“永久不可达”信息。
+			// 2026-05-29: node-join 版本的 reachableSet 改为 full-domain 一跳可达集合，
+			// 不再用 Tmid 裁掉第一次跨界的 job；Tmid 只在 child 生成后决定是否入队。
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
-			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
+			if (!visited.contains(job)
 					&& !isZeroDualExcludedJob(job)
-					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1280,12 +1245,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private PackedBitSet buildForwardReachableSetFromParent(ForwardLabel parent, int fromJob, PackedBitSet visited,
 			Node node, PiecewiseLinearFunction frontier) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
-		// 2026-05-24: 三角不等式下可达性随路径扩展单调收缩，child 不需要重新扫描 1..n。
+		// 2026-05-29: 仍从父 reachableSet 过滤，保持单调收缩；但集合本身不再含 Tmid 裁剪。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
+			if (!visited.contains(job)
 					&& !isZeroDualExcludedJob(job)
-					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1297,9 +1262,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
+			if (!visited.contains(job)
 					&& !isZeroDualExcludedJob(job)
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1313,13 +1278,13 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return reachable;
 		}
 		boolean isSinkRoot = firstJob == node.sinkId();
-		// 2026-05-24: backward 方向同样只从父可达集合中过滤；已经无法接到旧后缀的前驱，
-		// 在中间再插入一个真实 job 后不会重新可达。
+		// 2026-05-29: backward 对称使用 full-domain 一跳可达集合；是否越过 Tmid 左侧由
+		// child 生成后的 latestBackwardCompletion 判断，不写入 reachableSet。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
+			if (!visited.contains(job)
 					&& !isZeroDualExcludedJob(job)
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}

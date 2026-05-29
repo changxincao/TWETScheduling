@@ -370,7 +370,7 @@ nodeJoinNoTwoCycleRelaxed
 
 初始设计曾考虑 backward 侧不新增字段、直接复用 suffix-min 后的 `backward.frontier`。实际 debug 复核发现，这会让 node join 推断 reduced cost 与恢复序列的 evaluator 结果出现口径差异。因此第一版最终在 backward label 中保存 `exactSuffixFrontier`：它是在加入当前前驱 job 成本和 arc/job dual 后、执行 `normalize(Direction.BACKWARD)` 之前复制出来的后缀函数。backward 的传播、dominance、reachable set 和入队逻辑仍使用原 `frontier`，新增字段只服务 node join。
 
-关于 `Tmid`，普通 reachable set 仍保持 half-way 裁剪，只决定哪些 label 可以继续扩展和入队。node join 额外生成“第一跳跨过 `Tmid`”的 terminal label：forward 侧允许第一次到达 `Tmid` 右侧，backward 侧允许第一次到达 `Tmid` 左侧；这些 terminal label 会进入 active join table，但不进入 dominance graph，也不重新入队。这里不能继续使用 `isForwardHalfEligibleJob/isBackwardHalfEligibleJob` 判断 terminal 候选，否则整个有效窗口落在另一半域的 join node 会被提前排掉；当前实现改为只要求对应 full-domain penalty 非空、未访问、非 zero-dual、直连弧未禁用，并通过 full-domain direct feasibility。
+关于 `Tmid`，node-join 类的 `reachableSet` 不再沿用 full-domain crossing-arc 对照版里的 half-way 裁剪口径，而是表示当前 label 的 full-domain 一跳可达候选。扩展时统一从 `reachableSet` 枚举 child，然后用 child 生成后的边界位置决定后续动作：forward child 的最早完成时间若不超过 `Tmid`，正常进入 dominance table 并入队；若已经超过 `Tmid`，只作为 terminal label 保存给 node join，不再入队。backward 侧对称处理，第一次跨到 `Tmid` 左侧的 suffix label 只参与 node join，不继续向左扩展。这样 `Tmid` 不再写入 reachable set 的构造条件，只作为“是否继续扩展”的出队边界。
 
 final join 已从 crossing-arc join 改为同 job node join。流程按 join job 分组，只拼接 `activeForwardByLastJob[j]` 与 `activeBackwardByFirstJob[j]`，集合兼容性检查改为“除 join job 外不相交”，恢复序列时去掉 backward 序列开头重复的 join job。node join 函数用 `forward.preNodeFrontier + backward.exactSuffixFrontier` 求最小值，不再额外加入 crossing arc setup cost 或 arc dual。
 
@@ -380,6 +380,6 @@ final join 已从 crossing-arc join 改为同 job node join。流程按 join job
 
 关于 backward 是否需要 `exactSuffixFrontier`：原计划确实希望第一版不动 backward 字段，直接用 `backward.frontier` 做拼接，以减少改动面。但 `backward.frontier` 是 suffix-min 后的传播函数，它的值可能来自后缀内部更晚/更右侧的完成时间，而不一定对应当前 join node 同一时间点的真实后缀代价。node join 需要的是“当前 join job 在时间 `t` 完成时，从该 job 往右接完整后缀的真实函数”，因此直接用 suffix-min 后的传播函数会让 join 函数偏乐观，并在 debug 复核中出现 inferred reduced cost 与恢复序列 checked reduced cost 不一致。当前新增 `exactSuffixFrontier` 只是保存 normalize 前的后缀函数，backward 的扩展、占优和入队仍使用原 `frontier`，所以它不是改变 backward 搜索流程，而是补足 node join 的成本口径。
 
-关于 terminal 候选为什么不能用 half-domain eligibility：普通 reachable set 仍服务“还能继续扩展”的 half-way label，因此 forward 侧会排除整个窗口都在 `Tmid` 右侧的 job，backward 侧会排除整个窗口都在 `Tmid` 左侧的 job。这在 crossing-arc join 里可以接受，因为 join arc 可以跨过中点；但 node join 必须把跨过 `Tmid` 的那个 job 本身生成出来，否则同点拼接没有 join node。terminal label 的作用正是保留这“第一跳跨界”的 job，它只参与最终 join，不再继续扩展。因此 terminal 候选不能问“它是否还属于 half-domain 可扩展 job”，只能问“它的 full-domain penalty 是否存在、当前直连是否时间可行、没有访问/zero-dual/禁弧问题”。
+关于 terminal 候选和 `reachableSet` 的关系：更清楚的实现不是在 `reachableSet` 外再扫一遍候选，而是直接修改 node-join 类的 reachable set 语义。`reachableSet` 负责记录 full-domain 一跳可达候选；是否跨过 `Tmid` 不在这里判断。跨界限制只发生在 child 生成后：第一次跨界的 child 保留为 terminal label，且不入队，因此不会出现第二次、第三次跨界扩展。这样既保留了 node join 需要的跨界 join node，也不会把 forward/backward 搜索真正放宽到整个 horizon 多步扩展。
 
 关于当前版本为什么慢：最初想用 `preNodeFrontier + exactSuffixFrontier` 的最小值直接做 negative-column 判断，但 debug 显示这个推导值和恢复序列的 evaluator 值仍有差异。差异可能来自 normalize 前后函数口径、同点时间同步、以及恢复序列对应的实际最优完成时间不一定就是 join 函数最小点。为了不把错误成本放进列池，当前实现改为所有候选列都用 evaluator 得到真实成本；同时，在没有证明 join 函数值是安全 lower bound 之前，暂时不再用它做 group/pair 剪枝。这样正确性更稳，但 evaluator 调用量随 node join pair 数爆炸，所以 wet020 的 join 时间升到约 20 秒。后续优化方向不是简单恢复旧剪枝，而是先建立一个可证明安全的 lower bound，或让 completion bound 在进入 evaluator 前先过滤大部分候选。

@@ -68,10 +68,9 @@ Backward label：
 
 ```text
 frontier = B_state
-exactSuffixFrontier = Bbar_state
 ```
 
-其中 `B_state` 是 suffix-min 后的传播函数，用于继续向左扩展和 dominance；`Bbar_state` 是当前 node 在时间 `t` 完成并继续到 sink 的 exact suffix 函数，包含当前 node 成本，用于 node join。
+第一版不额外修改 backward label。当前 backward 的 `frontier` 已经是包含当前 job 成本和 suffix-min 的后缀函数，原 crossing-arc join 也是直接使用该函数拼接。为了减少改动面，node join 第一版也先用 `backward.frontier` 与 forward 的 `preNodeFrontier` 拼接。若后续发现 suffix-min 语义导致 node join bound 过松或 reduced-cost 复核不稳定，再补 `exactSuffixFrontier/Bbar_state`。
 
 这次只改复制出来的新类。原 `GCBBStyleBidirectionalFullDomain` 保持 crossing-arc join 对照语义不变。
 
@@ -103,6 +102,17 @@ F_candidate_j
   = prefixMin(Fbar_candidate_j)
 ```
 
+实现时注意不要重复计算平移函数。`PiecewiseLinearFunction.shiftX()` 平移后会调用 `trimToDomain()`，因此超出当前定义域右侧的物理段会被裁掉。推荐顺序是：
+
+```text
+shifted = F_i.shiftX(delay)
+U_candidate = shifted 加 incoming setup reduced cost
+Fbar_candidate = U_candidate + penalty_j - jobDual(j)
+F_candidate = prefixMin(Fbar_candidate)
+```
+
+也就是说，先得到一次平移结果，再在这个结果上形成 `U_candidate`；随后用同一个 `U_candidate` 加当前 job 的 penalty 和 job dual 得到传播函数。这样既保证 `U_state` 和 `F_state` 口径一致，也避免对父 label frontier 做两次 `shiftX()`。
+
 构造 `ForwardLabel` 时保存：
 
 ```text
@@ -112,44 +122,25 @@ frontier = F_candidate_j
 
 source label 的 `frontier` 仍使用当前 source frontier 并扣 machine dual；source 的 `preNodeFrontier` 可以直接指向同一函数或一个 copy，因为 source 不参与 node join 生成真实任务列。为了减少特殊分支，建议构造 source 时也填充非空 `preNodeFrontier`。
 
+这里还有一个与 `Tmid` 有关的关键变化。当前 full-domain 对照类虽然 label 函数定义在 `[0, pricingHorizon]`，但 `isDirectForwardExtensionTimeFeasible()` 仍要求一跳后的 earliest completion 不超过 `tMid`，`buildForwardReachableSet()` 也依赖这个判断。因此现有 `reachableSet` 只覆盖“还能继续作为 forward half 扩展”的候选，不覆盖第一次跨过 `Tmid` 的 join node。
+
+Node join 需要把“第一次跨过 `Tmid` 的 forward child”物化出来，用它的 `preNodeFrontier` 去和同 job 的 backward label 拼接。第一版建议把 forward child 分成两类：
+
+```text
+earliestCompletion <= tMid:
+    插入正常 dominance table，并入队继续扩展
+
+earliestCompletion > tMid 且 earliestCompletion <= job window/horizon:
+    只作为 node-join terminal label 保存，不入队，不继续扩展
+```
+
+这样扩展深度和 dominance 主体仍接近原 half-way 逻辑，但 node join 拥有必要的跨界 join node。实现上不能只枚举 `label.reachableSet`，因为它已经被 `tMid` 裁过；需要新增一个 forward terminal candidate helper，按当前 label、visited、zero-dual、job penalty 和 direct full-domain feasibility 生成“可跨界但不扩展”的候选。
+
 ### 1.4 Backward 扩展流程
 
-当前 `extendBackward()` 在生成 `nextFrontier` 后执行 `normalize(BACKWARD)`。新类中应在 normalize 前保存 exact suffix：
+第一版 backward 扩展流程尽量不动。当前 `extendBackward()` 已经负责从 sink root 或后继 label 递推 backward `frontier`，并在最后执行 `normalize(Direction.BACKWARD)`。Node join 只需要有同 job 的 backward suffix 函数参与拼接，而当前 `backward.frontier` 已经可用。
 
-非 sink root 扩展 `prev -> first`：
-
-```text
-Bbar_candidate_prev(t)
-  = shift(B_first, -(setup(prev,first)+p_first))(t)
-  + penalty_prev(t)
-  + setupCost(prev,first)
-  - jobDual(prev)
-  - arcDual(prev,first)
-
-B_candidate_prev
-  = suffixMin(Bbar_candidate_prev)
-```
-
-sink root 扩展到真实任务 `prev` 时，沿用当前逻辑，不额外引入 setup cost：
-
-```text
-Bbar_candidate_prev(t)
-  = penalty_prev(t)
-  - jobDual(prev)
-  - arcDual(prev,sink)
-
-B_candidate_prev
-  = suffixMin(Bbar_candidate_prev)
-```
-
-构造 `BackwardLabel` 时保存：
-
-```text
-exactSuffixFrontier = Bbar_candidate_prev
-frontier = B_candidate_prev
-```
-
-sink root 自身不参与 node join，可以让 `exactSuffixFrontier` 指向零函数或保持非空零函数，避免空判断扩散。
+因此暂时不新增 `exactSuffixFrontier`，也不改变 backward dominance、reachable set 和入队规则。这样 node join 新类的主要风险集中在 forward 侧 `preNodeFrontier` 和 final join 方式上，调试面更小。
 
 ### 1.5 Node Join 替换 Crossing-Arc Join
 
@@ -165,11 +156,11 @@ for each job i:
 Node join 的函数计算为：
 
 ```text
-joinCost_i(t) = forward.preNodeFrontier(t) + backward.exactSuffixFrontier(t)
+joinCost_i(t) = forward.preNodeFrontier(t) + backward.frontier(t)
 reducedCostBound = min_t joinCost_i(t)
 ```
 
-这里不再加 crossing arc 的 setup cost 或 arc dual，因为 incoming arc 已经包含在 forward 的 `U_state` 中，join node 自身成本和后缀由 backward 的 `Bbar_state` 负责。这样 join node 成本只计算一次。
+这里不再加 crossing arc 的 setup cost 或 arc dual，因为 incoming arc 已经包含在 forward 的 `U_state` 中，join node 自身成本和后缀由 backward 的 `frontier` 负责。这样 join node 成本只计算一次。
 
 ### 1.6 集合兼容性与序列恢复
 

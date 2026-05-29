@@ -383,3 +383,10 @@ final join 已从 crossing-arc join 改为同 job node join。流程按 join job
 关于 terminal 候选和 `reachableSet` 的关系：更清楚的实现不是在 `reachableSet` 外再扫一遍候选，而是直接修改 node-join 类的 reachable set 语义。`reachableSet` 负责记录 full-domain 一跳可达候选；是否跨过 `Tmid` 不在这里判断。跨界限制只发生在 child 生成后：第一次跨界的 child 保留为 terminal label，且不入队，因此不会出现第二次、第三次跨界扩展。这样既保留了 node join 需要的跨界 join node，也不会把 forward/backward 搜索真正放宽到整个 horizon 多步扩展。
 
 关于当前版本为什么慢：最初想用 `preNodeFrontier + exactSuffixFrontier` 的最小值直接做 negative-column 判断，但 debug 显示这个推导值和恢复序列的 evaluator 值仍有差异。差异可能来自 normalize 前后函数口径、同点时间同步、以及恢复序列对应的实际最优完成时间不一定就是 join 函数最小点。为了不把错误成本放进列池，当前实现改为所有候选列都用 evaluator 得到真实成本；同时，在没有证明 join 函数值是安全 lower bound 之前，暂时不再用它做 group/pair 剪枝。这样正确性更稳，但 evaluator 调用量随 node join pair 数爆炸，所以 wet020 的 join 时间升到约 20 秒。后续优化方向不是简单恢复旧剪枝，而是先建立一个可证明安全的 lower bound，或让 completion bound 在进入 evaluator 前先过滤大部分候选。
+### 6.2 zero-dual 排除口径统一
+
+2026-05-29 继续统一所有 GC pricing 中的 `pi_j=0` 处理。触发条件保持为根节点且当前没有 active cuts，即 `node.depth == 0 && lp.getActiveCutIds().isEmpty()`；该条件下不再采用早期的 singleton-only 口径，而是把这些 job 当成本轮 pricing 的 excluded job。
+
+实现口径改为：预处理阶段仍计算 `zeroDualExcludedJobs`；初始化 source label 和 sink root label 时，直接把这些 job 加入各自的 `visitedSet`。之后 reachable set 构造不再显式判断 `!isZeroDualExcludedJob(job)`，只按父 reachable set、visited 和 direct feasibility 过滤。这样 zero-dual 的排除入口统一在 source/sink，后续扩展和占优仍走普通 label 流程，避免每个扩展点重复写一套规则。
+
+双向 join 需要额外处理一个细节：source 和 sink 都会共同预标记 excluded job，因此这些标记不是路径真实访问，不能让 `visitedSet` 交集检查误判为 forward/backward 路径冲突。普通 arc join 类改用 `visitedSetsIntersectForJoin()`，node join 类的 `intersectsExceptJoin()` 也忽略 excluded 标记；真实冲突仍然按非 excluded job 判断。当前已同步到 `GC`、`GCBidirectional`、`GCNGBBStyleBidirectional`、`GCBBStyleBidirectionalFullDomain`、`GCBBAsymmetricBidirectional` 和 `GCBBStyleBidirectionalFullDomainNodeJoin`。

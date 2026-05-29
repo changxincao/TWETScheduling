@@ -336,6 +336,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
 		sourceVisited.add(0);
+		addZeroDualExcludedJobs(sourceVisited);
 		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0,
 				pricingHorizon);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
@@ -351,6 +352,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private void initializeBackwardSink(LP lp) {
 		PackedBitSet sinkVisited = new PackedBitSet(data.n + 2);
 		sinkVisited.add(lp.getNode().sinkId());
+		addZeroDualExcludedJobs(sinkVisited);
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
 		// 2026-05-28: full-domain 对照版本中，sink root 也直接使用完整 [0,pricingHorizon] 定义域。
 		sinkFrontier.resetDomain(0.0, pricingHorizon);
@@ -430,13 +432,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
+		// 2026-05-29: zero-dual 排除统一由 source/sink 的 visited 初始化承载；
+		// reachableSet 只保留路径层面的候选收缩，这里只即时检查直连禁弧。
 		// 2026-05-29: node-join 类的 reachableSet 表示 full-domain 一跳可达候选；
 		// visited、zero-dual 和时间可行性已经在 reachable set 构造时维护。下面旧检查
 		// 保留为防御性说明，实际会随节点变化、必须即时检查的是直连禁弧。
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
-		// 	return false;
-		// }
-		// if (isZeroDualExcludedJob(nextJob)) {
 		// 	return false;
 		// }
 		return !node.isArcForbidden(label.jid, nextJob);
@@ -444,12 +445,11 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
+		// 2026-05-29: backward 同样只把分支禁弧留到这里即时检查；
+		// zero-dual 排除不再在扩展点重复判断。
 		// 2026-05-29: reachable set 已维护 full-domain 一跳时间可行性、visited 和 zero-dual；
 		// backward 扩展点只需即时检查 prevJob -> successor 这条直连弧是否被禁。
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
-		// 	return false;
-		// }
-		// if (isZeroDualExcludedJob(prevJob)) {
 		// 	return false;
 		// }
 		return !node.isArcForbidden(prevJob, successor);
@@ -872,7 +872,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private void joinForwardGroupWithBackward(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward,
 			LP lp) {
 		joinTerminalGroupsScanned++;
-		if (lastJob != backward.jid || isZeroDualExcludedJob(lastJob)) {
+		if (lastJob != backward.jid) {
 			joinTerminalGroupsArcOrVisitPruned++;
 			return;
 		}
@@ -896,7 +896,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return;
 		}
 		joinPairsTried++;
-		if (forward.jid != backward.jid || isZeroDualExcludedJob(forward.jid)) {
+		if (forward.jid != backward.jid) {
 			joinPairsSetPruned++;
 			return;
 		}
@@ -1234,7 +1234,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
 			if (!visited.contains(job)
-					&& !isZeroDualExcludedJob(job)
 					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -1249,7 +1248,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
 			if (!visited.contains(job)
-					&& !isZeroDualExcludedJob(job)
 					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -1263,7 +1261,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
 			if (!visited.contains(job)
-					&& !isZeroDualExcludedJob(job)
 					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -1274,16 +1271,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private PackedBitSet buildBackwardReachableSetFromParent(BackwardLabel parent, int firstJob, PackedBitSet visited,
 			Node node, PiecewiseLinearFunction frontier) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
-		if (isZeroDualExcludedJob(firstJob)) {
-			return reachable;
-		}
 		boolean isSinkRoot = firstJob == node.sinkId();
 		// 2026-05-29: backward 对称使用 full-domain 一跳可达集合；是否越过 Tmid 左侧由
 		// child 生成后的 latestBackwardCompletion 判断，不写入 reachableSet。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
 			if (!visited.contains(job)
-					&& !isZeroDualExcludedJob(job)
 					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -1591,6 +1584,17 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				&& zeroDualExcludedJobs[job];
 	}
 
+	private void addZeroDualExcludedJobs(PackedBitSet visited) {
+		if (zeroDualExcludedJobs == null) {
+			return;
+		}
+		for (int job = 1; job <= data.n; job++) {
+			if (isZeroDualExcludedJob(job)) {
+				visited.add(job);
+			}
+		}
+	}
+
 	private boolean isForwardHalfEligibleJob(int job) {
 		return job > 0 && forwardHalfEligibleByJob != null && job < forwardHalfEligibleByJob.length
 				&& forwardHalfEligibleByJob[job];
@@ -1640,7 +1644,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private boolean intersectsExceptJoin(PackedBitSet left, PackedBitSet right, int joinJob) {
 		for (int job = left.nextSetBit(1); job >= 0; job = left.nextSetBit(job + 1)) {
-			if (job != joinJob && right.contains(job)) {
+			// 2026-05-29: source/sink 会共同预标记 zero-dual excluded job；
+			// node join 的路径冲突检查要忽略这些非真实访问标记。
+			if (job != joinJob && !isZeroDualExcludedJob(job) && right.contains(job)) {
 				return true;
 			}
 		}

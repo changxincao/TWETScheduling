@@ -42,8 +42,8 @@ public class GC {
 	private ArrayList<TWETColumn> generatedColumns;
 	private HashSet<SequenceSignature> generatedSignatures;
 	private HashSet<SequenceSignature> activeColumnSignatures;
-	private boolean[] zeroDualSingletonOnlyJobs;
-	private int zeroDualSingletonOnlyJobCount;
+	private boolean[] zeroDualExcludedJobs;
+	private int zeroDualExcludedJobCount;
 	private LabelQueueOrdering queueOrdering;
 	private String lastMessage = "Exact forward labeling not executed";
 	// 2026-05-20: 当前 RMP dual 下的 job-level H_j 硬窗缓存，只在一次 pricing 调用内有效。
@@ -91,7 +91,7 @@ public class GC {
 		lastMessage = "Exact forward labeling generated " + generatedColumns.size() + " columns; dualWindow="
 				+ (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", queueOrdering=" + queueOrdering
-				+ ", zeroDualSingletonOnlyJobs=" + zeroDualSingletonOnlyJobCount
+				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ (usePaperDominanceGraph ? ", " + PaperDominanceGraph.statisticsSummary() : "");
 		return generatedColumns;
 	}
@@ -179,6 +179,7 @@ public class GC {
 
 		PackedBitSet visited = new PackedBitSet(data.n + 2);
 		visited.add(0);
+		addZeroDualExcludedJobs(visited);
 		PiecewiseLinearFunction frontier = data.penaltyFunction[0].copy();
 		// 每条内部机器列在 RMP 的机器数约束中系数为 1，因此初始化时扣除该约束 dual。
 		frontier.shiftYInPlace(-lp.getMachineDual());
@@ -190,13 +191,10 @@ public class GC {
 	}
 
 	private boolean canExtend(Label label, int nextJob, Node node) {
-		// 2026-05-29: 调用方只枚举 label.reachableSet；visited、singleton/zero-dual
+		// 2026-05-29: 调用方只枚举 label.reachableSet；visited
 		// 和时间可行性已经在 reachable set 构造时维护。下面旧检查保留为防御性说明，
 		// 正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
-		// 	return false;
-		// }
-		// if (!isForwardSingletonOnlyExtensionAllowed(label.jid, nextJob)) {
 		// 	return false;
 		// }
 		return !node.isArcForbidden(label.jid, nextJob);
@@ -271,10 +269,10 @@ public class GC {
 		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
 		dynamicJobPenaltyByJob = null;
-		zeroDualSingletonOnlyJobs = null;
-		zeroDualSingletonOnlyJobCount = 0;
+		zeroDualExcludedJobs = null;
+		zeroDualExcludedJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
-		precomputeZeroDualSingletonOnlyJobs(lp);
+		precomputeZeroDualExcludedJobs(lp);
 		dynamicJobHStart = new double[data.n + 1];
 		dynamicJobHEnd = new double[data.n + 1];
 		dynamicJobPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
@@ -311,19 +309,19 @@ public class GC {
 	}
 
 	/**
-	 * 2026-05-24: 根节点 no-cut pricing 中，pi_j=0 的任务只保留 singleton 列可能性。
-	 * 含这类任务的多任务列总能删去该任务得到不更差的列，因此不再让它和其他真实 job 相连。
+	 * 2026-05-29: 根节点 no-cut pricing 中，pi_j=0 的任务整轮不进入 pricing 扩展。
+	 * 初始化 source visited 时会直接标记这些 job，reachable set 后续只按 visited 过滤。
 	 */
-	private void precomputeZeroDualSingletonOnlyJobs(LP lp) {
+	private void precomputeZeroDualExcludedJobs(LP lp) {
 		if (!dualProfitableWindowEnabled) {
 			return;
 		}
-		zeroDualSingletonOnlyJobs = new boolean[data.n + 1];
+		zeroDualExcludedJobs = new boolean[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			double jobDual = Math.max(0.0, lp.getJobDual(job));
 			if (Utility.compareEq(jobDual, 0.0)) {
-				zeroDualSingletonOnlyJobs[job] = true;
-				zeroDualSingletonOnlyJobCount++;
+				zeroDualExcludedJobs[job] = true;
+				zeroDualExcludedJobCount++;
 			}
 		}
 	}
@@ -358,27 +356,27 @@ public class GC {
 		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M : Math.max(0.0, data.outsourcingCost[job]);
 	}
 
-	private boolean isZeroDualSingletonOnlyJob(int job) {
-		return job > 0 && zeroDualSingletonOnlyJobs != null && job < zeroDualSingletonOnlyJobs.length
-				&& zeroDualSingletonOnlyJobs[job];
+	private boolean isZeroDualExcludedJob(int job) {
+		return job > 0 && zeroDualExcludedJobs != null && job < zeroDualExcludedJobs.length
+				&& zeroDualExcludedJobs[job];
 	}
 
-	private boolean isForwardSingletonOnlyExtensionAllowed(int prevJob, int nextJob) {
-		if (isZeroDualSingletonOnlyJob(prevJob)) {
-			return false;
+	private void addZeroDualExcludedJobs(PackedBitSet visited) {
+		if (zeroDualExcludedJobs == null) {
+			return;
 		}
-		if (isZeroDualSingletonOnlyJob(nextJob) && prevJob != 0) {
-			return false;
+		for (int job = 1; job <= data.n; job++) {
+			if (isZeroDualExcludedJob(job)) {
+				visited.add(job);
+			}
 		}
-		return true;
 	}
 
 	private PackedBitSet buildReachableSet(int fromJob, PackedBitSet visited, Node node, PiecewiseLinearFunction frontier,
 			LP lp) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
-					&& isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -392,8 +390,7 @@ public class GC {
 		// 继续追加真实 job 后不会重新变成可达。child reachable set 因此只需从父候选集中过滤。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isForwardSingletonOnlyExtensionAllowed(fromJob, job)
-					&& isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}

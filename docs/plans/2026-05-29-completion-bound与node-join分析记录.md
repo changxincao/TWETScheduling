@@ -298,7 +298,9 @@ if changed:
 
 当前可以使用 node join 的原因是：full-domain 标签已经把 forward/backward frontier 定义在完整 `[0,Cmax]` 或 `pricingHorizon` 上，正反两侧在同一个 node、同一个完成时间 `t` 上都有可评价的函数。只要额外保存 pre-node/exact-suffix 这类避免双计数的函数，就可以在 node 上拼接，而不必枚举所有 crossing arc。
 
-之前没有优先使用 node join，而采用 arc join，主要是因为 half-domain 双向框架下 arc join 更自然。Arc join 允许 forward/backward label 到 `Tmid` 附近就停止扩展，中间 crossing arc 可以横跨 `Tmid`，因此函数定义域可以裁成半域。Node join 则要求同一 node 同一时间相遇，往往要等 label 第一次超过半区间后才知道是否可拼，半域边界不好定义；为了让 node join 干净成立，基本只能使用 full-domain 函数定义域。
+之前没有优先使用 node join，而采用 arc join，最核心原因是旧 label frontier 的定义不适合在同一个 node 上扣重。当前 forward/backward frontier 都是经过 prefix/suffix normalize 后的“已包含当前 node 成本”的函数；如果直接在 node `i` 上拼，`i` 的惩罚成本和 job dual 会被两侧重复计入，而 normalize 后的 frontier 又不能稳定还原“恰好在同一时间 `t` 加入的 `g_i(t)`”。因此旧实现使用 crossing arc，把 forward 终点和 backward 起点放在两个不同 job 上，天然避开同一 node 成本扣重问题。
+
+第二个主要原因才是 half-domain/Tmid。Arc join 允许 forward/backward label 到 `Tmid` 附近就停止扩展，中间 crossing arc 可以横跨 `Tmid`，因此函数定义域可以裁成半域。Node join 则要求同一 node 同一时间相遇，往往要等 label 第一次超过半区间后才知道是否可拼，半域边界不好定义；为了让 node join 干净成立，基本只能使用 full-domain 函数定义域。
 
 Full-domain 的实验现象说明，它并没有比只取一半定义域慢很多，一些样例还会更快。因此，在 full-domain GCBB 上尝试 node join 是合理的实验方向，不必被“函数定义域翻倍一定很慢”的直觉限制。
 
@@ -337,19 +339,19 @@ if F_changed:
 
 ## 9. 关于 arc join 原因与 `U_state` 更新的进一步说明
 
-前面说 arc join 更适配 half-domain，这只是主要原因之一，不是全部原因。Arc join 之所以在当前双向 pricing 中更自然，还有几个实现语义上的原因。
+前面关于 arc join 原因的主次需要明确：**第一主因是 node join 在旧 label 函数定义下不好处理同一 node 的惩罚成本和 dual 扣重；第二主因是 half-domain/Tmid 边界。** 其他工程原因只是这两个主因的延伸。
 
-第一，arc join 天然避免 join node 双计数。Forward 侧以 `i` 结束，backward 侧以 `j` 开始，中间显式支付 crossing arc `i -> j` 以及相应的 processing/setup 位移，`j` 的节点成本由 backward 侧负责。两侧没有共同的真实 job，因此不用额外保存 pre-node/exact-suffix 函数去处理“同一个 node 的成本算一次还是两次”。
+第一，arc join 天然避免 join node 双计数。Forward 侧以 `i` 结束，backward 侧以 `j` 开始，中间显式支付 crossing arc `i -> j` 以及相应的 processing/setup 位移，`j` 的节点成本由 backward 侧负责。两侧没有共同的真实 job，因此不用额外保存 pre-node/exact-suffix 函数去处理“同一个 node 的成本算一次还是两次”。这是之前选择 arc join 的核心原因。
 
-第二，arc join 不要求两侧在同一个完成时间上同步。它只要求 forward frontier 平移 `setup(i,j)+p_j` 后与 backward frontier 有时间交集，然后在交集上求最小 reduced cost。Node join 则要求两侧在同一个 node 的同一个完成时间 `t` 上拼接；一旦 forward/backward 函数都做过 prefix/suffix normalize，就必须额外保存未被 normalize 抹掉的拼接函数，否则时间语义不够。
+第二，arc join 更适配 half-domain/Tmid。它只要求 forward frontier 平移 `setup(i,j)+p_j` 后与 backward frontier 有时间交集，中间 crossing arc 可以跨过 `Tmid`；node join 则要求两侧在同一个 node 的同一个完成时间 `t` 上拼接，半域边界不好定。这是第二个主要原因。
 
-第三，arc join 与当前 label 状态更匹配。现有 label 只保存一个用于扩展和 dominance 的 frontier，配合 visited/reachable set 就能做 crossing arc 拼接。Node join 则需要至少多保存 `U_state` 或 `Bbar_state`，并要保证这些函数和传播 frontier 的 envelope 关系一致。这会增加状态字段、缓存失效规则和 dominance 后 active label 清理的复杂度。
+第三，arc join 不要求两侧在同一个完成时间上同步。它只要求 forward frontier 平移后与 backward frontier 有时间交集，然后在交集上求最小 reduced cost。Node join 则要求同 node 同时间拼接；一旦 forward/backward 函数都做过 prefix/suffix normalize，就必须额外保存未被 normalize 抹掉的拼接函数，否则时间语义不够。这个问题本质上还是来自第一点的函数定义。
 
-第四，arc join 的集合兼容性更直接。Crossing arc join 检查的是 forward visited set 与 backward visited set 是否相交，以及 `i -> j` 是否 forbidden。Node join 允许两侧共享同一个 join node，但除 join node 外不能相交；实现上要把“允许的交集”从空集改成单点集合，并且还要保证该 node 的成本只算一次。这不是不能做，但比 arc join 更容易写错。
+第四，arc join 与当前 label 状态更匹配。现有 label 只保存一个用于扩展和 dominance 的 frontier，配合 visited/reachable set 就能做 crossing arc 拼接。Node join 则需要至少多保存 `U_state` 或 `Bbar_state`，并要保证这些函数和传播 frontier 的 envelope 关系一致。这会增加状态字段、缓存失效规则和 dominance 后 active label 清理的复杂度。
 
-第五，arc join 与 half-domain 的 dominance/边界剪枝可以保持一致。Forward/backward label 在各自半域内扩展和支配，final join 只负责跨边界组合；node join 如果仍想半域化，就需要定义“同一个 node 在哪一侧生成、在哪个时间点可拼、是否要越过中点后保留”等规则，这些规则会反过来影响 dominance 和 reachable set 语义。
+第五，arc join 的集合兼容性更直接。Crossing arc join 检查的是 forward visited set 与 backward visited set 是否相交，以及 `i -> j` 是否 forbidden。Node join 允许两侧共享同一个 join node，但除 join node 外不能相交；实现上要把“允许的交集”从空集改成单点集合，并且还要保证该 node 的成本只算一次。这不是不能做，但比 arc join 更容易写错。
 
-因此更准确的结论是：arc join 不是唯一可行方案，而是当前 half-domain 双向 pricing 下状态最少、边界最清楚、双计数最少、兼容性检查最直接的方案。Node join 更适合在 full-domain 基础上作为一个新的实验分支尝试。
+因此更准确的结论是：arc join 不是唯一可行方案，而是旧标签函数定义下最自然地规避 node 成本扣重问题、同时又适配 half-domain/Tmid 的方案。Node join 要成立，首先要补 `U_state/Bbar_state` 这类不重复计数的拼接函数；其次最好放在 full-domain 基础上，避免再和 `Tmid` 半域边界纠缠。
 
 关于 `U_state` 改善但 `F_state` 不改善，可以用下面这个语义理解。`U_state` 是“进入当前 node 前”的函数，用于 node join；`F_state` 是“已经加上当前 node 成本并 prefix-min 后”的函数，用于继续扩展。继续扩展只关心 `F_state`，因为后续 job 只需要知道当前 node 不晚于某时间完成的最小 prefix 成本。但 node join 关心的是同一时间 `t` 上的 `U_state(t) + Bbar_state(t)`，因此 `U_state` 在某些时间点的改善即使没有传导成 `F_state` 改善，也可能让 node join 更好。
 

@@ -171,6 +171,33 @@ F_state(t) = prefixMin(Fbar_state)(t)
 
 Backward 方向同理，只是方向相反。可以保存一个“当前 node exact suffix”函数 `Bbar_state`，它包含当前 node 成本，用于和 forward 的 `U_state` 拼接；同时保存 suffix-min 后的 `B_state`，用于继续向前扩展。
 
+为了避免符号混淆，可以把你原文里的两步拆开看。你原来写的是：先从来源状态的“不超过函数”平移到当前 node，这一步其实还没有加入当前 node 的惩罚成本；再把它加上当前 node 惩罚函数并做 minimize，得到新的“不超过函数”。这里前一步就是本文记的 `U_state`，后一步就是 `F_state`。如果中间显式写出“恰好完成且已加入当前 node 成本”的函数，它是 `Fbar_state = U_state + g_i`。
+
+更具体地，对 forward 的一个状态 `state = i`，或者 2-cycle-free 里的 `state = (h,i)`，设当前 node 是 `i`，`g_i(t)` 表示 node `i` 在完成时间 `t` 的 reduced node cost，也就是时间窗惩罚减去 job dual。若从前驱状态 `pred` 扩展到 `i`，有：
+
+```text
+U_candidate(t) = shift(F_pred, Delta_pred,i)(t) + reducedArcCost(pred, i)
+Fbar_candidate(t) = U_candidate(t) + g_i(t)
+F_candidate(t) = prefixMin(Fbar_candidate)(t)
+```
+
+其中 `U_candidate(t)` 是“到达/接入 node i、但还没把 i 自己的惩罚成本算进去”的函数；`Fbar_candidate(t)` 是“node i 恰好在 t 完成、且已经包含 i 成本”的函数；`F_candidate(t)` 是“node i 不晚于 t 完成的最小 prefix 成本”。状态最终维护的是这些候选的 lower envelope：
+
+```text
+U_state = lowerEnvelope(all U_candidate)
+F_state = lowerEnvelope(all F_candidate)
+```
+
+因此 `U_state` 不是一个路径意义上的完整 label frontier，它少算当前 node 的成本，专门给 node join 用；`F_state` 才是继续向后扩展时使用的完整 prefix frontier。你原文里说“不好不需要记录这个恰好的函数？直接记录来源的那个不超过的函数平移以后的那个就好了”，对应的就是记录 `U_state`，而不是记录 `Fbar_state`。
+
+Backward 侧的对应关系反过来。`Bbar_state(t)` 表示“从当前 node `i` 在 `t` 完成开始往右走到 sink 的 exact suffix 成本”，它包含当前 node `i` 的成本；`B_state(t)` 是对 `Bbar_state` 做 suffix-min 后得到的传播函数，用来继续向左扩展。node join 时用：
+
+```text
+join_i = min_t { U_forward_state_at_i(t) + Bbar_backward_state_at_i(t) }
+```
+
+这样当前 node `i` 的成本只在 backward 的 `Bbar_state` 里算一次，forward 的 `U_state` 不再重复算 `i`。
+
 这也解释了为什么 node join 虽然要求 label 里多记录函数，但不一定增加计算量。Arc join 里原本在尝试拼接时也会做 shift、add、find-minimal 之类的函数运算，只是这些中间结果没有保存在 label 状态里。Node join 的做法是把其中一部分中间函数显式留住，减少后续重复计算，并换取按 node 分组拼接的可能性。
 
 ## 4. 原始问题三：递推顺序是否应当 label-correcting

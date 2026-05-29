@@ -22,14 +22,17 @@ import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * no-cut 双向 pricing。
+ * no-cut 双向 pricing 的 hybrid-B 基准版。
  * <p>
  * 只有在列数上限未截断、且 forward/backward 队列都被完整耗尽时，本轮结果才可作为 exact pricing
  * certificate；若达到 {@link TWETBPCConfig#maxExactPricingColumns}，这里只表示“最多生成 K 条负列”。
  * <p>
  * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
  * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
- * 外层流程仍保持旧 VRP 双向 GC 的组织方式：前向扩展、后向扩展、两侧 label table、扩展后尝试 join。
+ * 相对正式 GCBB-style final join 基准，本类的主要差异是外层流程：先完整生成 forward
+ * half labels，再处理 backward half；backward label 出队时立即和已有 forward labels 做
+ * crossing-arc join，同时 forward label 出队时尝试 forward->sink 收尾。因此列生成会受 label
+ * 出队顺序影响，不使用统一 final top-K 候选池。
  * <p>
  * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
  * 1. forward label 存储在 [ell, Tmid]；
@@ -344,14 +347,28 @@ public class GCBidirectional {
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
 		// 2026-05-29: 调用方只枚举 label.reachableSet；visited、singleton/zero-dual
-		// 和时间可行性已经在 reachable set 构造时维护。这里保留实际会随节点变化的直连禁弧检查。
+		// 和时间可行性已经在 reachable set 构造时维护。下面旧检查保留为防御性说明，
+		// 正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
+		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
+		// 	return false;
+		// }
+		// if (!isForwardSingletonOnlyExtensionAllowed(label.jid, nextJob)) {
+		// 	return false;
+		// }
 		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
 		// 2026-05-29: reachable set 已维护 visited、singleton/zero-dual 和时间可行性；
-		// backward 扩展点只需检查 prevJob -> successor 这条直连弧是否被禁。
+		// 下面旧检查保留为防御性说明，正常不应触发；backward 扩展点只需即时检查
+		// prevJob -> successor 这条直连弧是否被禁。
+		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
+		// 	return false;
+		// }
+		// if (!isBackwardSingletonOnlyExtensionAllowed(label, prevJob)) {
+		// 	return false;
+		// }
 		return !node.isArcForbidden(prevJob, successor);
 	}
 

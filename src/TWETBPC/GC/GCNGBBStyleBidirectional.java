@@ -23,14 +23,17 @@ import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * no-cut 双向 pricing。
+ * no-cut 双向 pricing 的正式 half-domain GCBB-style 基准版。
  * <p>
  * 只有在列数上限未截断、且 forward/backward 队列都被完整耗尽时，本轮结果才可作为 exact pricing
  * certificate；若达到 {@link TWETBPCConfig#maxExactPricingColumns}，这里只表示“最多生成 K 条负列”。
  * <p>
  * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
  * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
- * 外层流程改为旧 VRP GCNGBB 风格：先完整生成 forward/backward 两侧 label table，再统一 join。
+ * 类名中的 GCNGBB 保留早期命名；当前实现没有 NG memory，实际语义更接近 GCBB-style
+ * final join。相对 {@link GCBidirectional}，本类先完整生成 forward/backward 两侧 label
+ * table，再统一做 crossing-arc final join；forward->sink 收尾也并入 final join 流程，并用本地
+ * top-K 候选池统一按 reduced cost 输出，减少出队顺序对列返回集合的影响。
  * <p>
  * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
  * 1. forward label 存储在 [ell, Tmid]；
@@ -397,14 +400,28 @@ public class GCNGBBStyleBidirectional {
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
 		// 2026-05-29: 调用方只枚举 label.reachableSet；visited、zero-dual
-		// 和时间可行性已经在 reachable set 构造时维护。这里保留实际会随节点变化的直连禁弧检查。
+		// 和时间可行性已经在 reachable set 构造时维护。下面旧检查保留为防御性说明，
+		// 正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
+		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
+		// 	return false;
+		// }
+		// if (isZeroDualExcludedJob(nextJob)) {
+		// 	return false;
+		// }
 		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
 		// 2026-05-29: reachable set 已维护 visited、zero-dual 和时间可行性；
-		// backward 扩展点只需检查 prevJob -> successor 这条直连弧是否被禁。
+		// 下面旧检查保留为防御性说明，正常不应触发；backward 扩展点只需即时检查
+		// prevJob -> successor 这条直连弧是否被禁。
+		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
+		// 	return false;
+		// }
+		// if (isZeroDualExcludedJob(prevJob)) {
+		// 	return false;
+		// }
 		return !node.isArcForbidden(prevJob, successor);
 	}
 

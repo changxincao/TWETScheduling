@@ -25,8 +25,10 @@ import TWETBPC.Util.SequenceSignature;
 /**
  * 2026-05-28: 基于 full-domain GCBB 的非对称动态双向实验版。
  * <p>
- * 该版本保留 crossing-arc final join，但 forward/backward 标签函数都直接定义在
- * [0, pricingHorizon]，不再使用 half-domain 标签和 join 常数延拓。dynamicHB/dynamicHF
+ * 相对 full-domain 对照版 {@link GCBBStyleBidirectionalFullDomain}，本类保留同样的
+ * crossing-arc final join 和 top-K 候选池，但外层不再固定“先耗尽 forward、再耗尽 backward”，
+ * 而是在两侧队列之间按策略交错出队。forward/backward 标签函数仍直接定义在
+ * [0, pricingHorizon]，不使用 half-domain 标签和 join 常数延拓。dynamicHB/dynamicHF
  * 只用于控制两侧队列扩展边界；当前默认固定为 Tmid，用作非对称队列流程的诊断分支。
  * 如需完整序列复核，可打开 {@link Configure#debugBPCPricingColumnCheck}。
  */
@@ -565,14 +567,27 @@ public class GCBBAsymmetricBidirectional {
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
 		// 2026-05-29: 调用方只枚举当前边界候选；该候选来自 label.reachableSet，
 		// visited、zero-dual 和时间可行性已在 reachable set/边界候选构造时维护。
-		// 这里保留实际会随节点变化的直连禁弧检查。
+		// 下面旧检查保留为防御性说明，正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
+		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
+		// 	return false;
+		// }
+		// if (isZeroDualExcludedJob(nextJob)) {
+		// 	return false;
+		// }
 		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
 		// 2026-05-29: 当前边界候选已维护 visited、zero-dual 和时间可行性；
-		// backward 扩展点只需检查 prevJob -> successor 这条直连弧是否被禁。
+		// 下面旧检查保留为防御性说明，正常不应触发；backward 扩展点只需即时检查
+		// prevJob -> successor 这条直连弧是否被禁。
+		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
+		// 	return false;
+		// }
+		// if (isZeroDualExcludedJob(prevJob)) {
+		// 	return false;
+		// }
 		return !node.isArcForbidden(prevJob, successor);
 	}
 

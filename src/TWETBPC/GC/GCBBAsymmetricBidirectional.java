@@ -593,9 +593,15 @@ public class GCBBAsymmetricBidirectional {
 
 	/**
 	 * 2026-05-29: 动态 HB/HF 收紧后，旧 label 的 reachableSet 只作为候选上界使用。
-	 * 这里仅按当前 dynamicHF 重做 direct feasibility，不混入 zero-dual 或 forbidden-arc
-	 * 等扩展合法性判断；这些仍由 canExtendForward 统一检查，避免把分支弧约束写进
-	 * dominance graph 中已经登记的 reachable-set 状态。
+	 * 正常固定边界下，只需要直接扩展 label.reachableSet 中的候选 job；但若后续恢复真正
+	 * 动态的 HB/HF，早期 label 创建时的边界可能更宽，等它出队时当前 dynamicHF 已经收紧，
+	 * 原 reachableSet 里的部分 job 就不再满足当前边界下的一跳时间可行性。这里仅按当前
+	 * dynamicHF 重做 direct feasibility，跳过这类已经越界的扩展。
+	 * <p>
+	 * 注意这里不回写 label.reachableSet。该集合已经作为 dominance 状态登记进 graph，事后修改
+	 * 会让图结构里的 key 和对象状态不一致；而 reachableSet 偏宽只是辅助候选集变弱，不会导致
+	 * 漏掉可行列，正确性上可以接受。zero-dual、forbidden-arc 等扩展合法性仍由 canExtendForward
+	 * 统一检查，避免把分支弧约束写进 dominance key。
 	 */
 	private PackedBitSet currentForwardBoundaryCandidates(ForwardLabel label) {
 		PackedBitSet currentReachable = new PackedBitSet(data.n + 2);
@@ -609,9 +615,10 @@ public class GCBBAsymmetricBidirectional {
 	}
 
 	/**
-	 * 2026-05-29: backward 侧同理，旧 reachableSet 不回填更新；扩展前只按当前
-	 * dynamicHB 生成边界候选集，visited、zero-dual 和 forbidden-arc 检查继续留在
-	 * canExtendBackward 中。
+	 * 2026-05-29: backward 侧同理。早期后缀 label 可能在更宽的 dynamicHB 下生成，出队时
+	 * 当前 dynamicHB 已经右移，旧 reachableSet 中的一些前驱不再能接到当前后缀。这里只生成
+	 * 当前边界下仍满足 direct feasibility 的临时候选，不回填更新 label.reachableSet；visited、
+	 * zero-dual 和 forbidden-arc 检查继续留在 canExtendBackward 中。
 	 */
 	private PackedBitSet currentBackwardBoundaryCandidates(BackwardLabel label) {
 		PackedBitSet currentReachable = new PackedBitSet(data.n + 2);

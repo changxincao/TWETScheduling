@@ -127,6 +127,9 @@ public class GCBBStyleBidirectionalFullDomain {
 	private long backwardSinglePointDominatedByGraph;
 	private long generatedCandidateCount;
 	private long generatedCandidateDroppedByHeap;
+	private long forwardExtensionNanos;
+	private long backwardExtensionNanos;
+	private long joinPhaseNanos;
 
 	private String lastMessage = "GCBB-style full-domain bidirectional pricing not executed";
 
@@ -142,14 +145,20 @@ public class GCBBStyleBidirectionalFullDomain {
 		initializeBackwardSink(lp);
 		// 2026-05-26: GCBB-style 外层流程。先分别耗尽两侧队列，最后统一扫描 backward labels 做 crossing-arc join。
 		while (canContinue() && !FWUL.isEmpty()) {
+			long phaseStart = System.nanoTime();
 			forwardExtend(lp);
+			forwardExtensionNanos += System.nanoTime() - phaseStart;
 		}
 		while (canContinue() && !BWUL.isEmpty()) {
+			long phaseStart = System.nanoTime();
 			backwardExtend(lp);
+			backwardExtensionNanos += System.nanoTime() - phaseStart;
 		}
 		if (canContinue()) {
+			long phaseStart = System.nanoTime();
 			compactAndSortActiveLabelListsForJoin();
 			joinAllForwardTerminalGroups(lp);
+			joinPhaseNanos += System.nanoTime() - phaseStart;
 			finalizeGeneratedColumns();
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
@@ -932,9 +941,14 @@ public class GCBBStyleBidirectionalFullDomain {
 		backwardSinglePointDominatedByGraph = 0;
 		generatedCandidateCount = 0;
 		generatedCandidateDroppedByHeap = 0;
+		forwardExtensionNanos = 0;
+		backwardExtensionNanos = 0;
+		joinPhaseNanos = 0;
 	}
 
 	private String statisticsSummary() {
+		long extensionNanos = forwardExtensionNanos + backwardExtensionNanos;
+		long measuredNanos = extensionNanos + joinPhaseNanos;
 		return "labels fw kept/dominated=" + forwardLabelsKept + "/" + forwardLabelsDominated
 				+ ", bw kept/dominated=" + backwardLabelsKept + "/" + backwardLabelsDominated
 				+ ", halfWindowIneligible fw/bw=" + forwardHalfIneligibleJobCount + "/"
@@ -955,12 +969,27 @@ public class GCBBStyleBidirectionalFullDomain {
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering
+				+ ", timingMs fwExt/bwExt/join/extTotal/measuredTotal=" + formatMillis(forwardExtensionNanos)
+				+ "/" + formatMillis(backwardExtensionNanos) + "/" + formatMillis(joinPhaseNanos)
+				+ "/" + formatMillis(extensionNanos) + "/" + formatMillis(measuredNanos)
+				+ ", joinMeasuredShare=" + formatPercent(joinPhaseNanos, measuredNanos)
 				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
+	}
+
+	private static String formatMillis(long nanos) {
+		return String.format("%.3f", nanos / 1_000_000.0);
+	}
+
+	private static String formatPercent(long part, long total) {
+		if (total <= 0L) {
+			return "0.00%";
+		}
+		return String.format("%.2f%%", part * 100.0 / total);
 	}
 
 	/**

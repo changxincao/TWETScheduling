@@ -333,3 +333,13 @@ nodeJoinNoTwoCycleRelaxed
 2. `U_state` 和 `F_state` 的 dominance 关系第一版不改：dominance 仍以现有 `frontier` 传播函数为准。这样最小改动，但可能丢掉某些只对 node join 有价值、但被 `F_state` dominance 支配的 `U_state`。如果实测发现 node join bound 偏弱，需要重新审视 dominance 是否也要考虑 `U_state`。
 3. cut dual 暂不进入 completion bound。若后续要在 active cuts 下使用 bound 做剪枝，必须证明忽略 cut dual 仍是安全 lower bound，或扩展状态记录 cut 相关信息。
 4. Node join 减少 crossing-arc 枚举只是实验假设。实际速度取决于同一 node 上 forward/backward label 数、集合兼容检查和函数求最小的成本，需要统计验证。
+
+## 5. Arc Join 阶段计时基线
+
+2026-05-29 先在 `GCBBStyleBidirectionalFullDomain` 中补充 pricing 内部阶段计时，分别记录 forward 扩展、backward 扩展和最终 compact+crossing-arc join 阶段。该计时不改变搜索逻辑，只用于判断 node join 是否值得优先做。
+
+`wet020_001_2m` 的 full-domain exact pricing 一轮总耗时约 `382.631 ms`。其中 forward 扩展 `132.840 ms`，backward 扩展 `57.345 ms`，join phase `90.676 ms`；在“扩展+join”这部分中 join 占 `32.28%`，若按整个 exact pricing 调用时间算约 `23.69%`。因此该例扩展阶段更长，主要是 forward 扩展和 dominance 相关工作。
+
+`wet021_001_2m` 有两轮 full-domain exact pricing。第一轮总耗时约 `950.428 ms`，forward/backward 扩展合计 `628.191 ms`，join `202.080 ms`，join 在“扩展+join”中占 `24.34%`；第二轮总耗时约 `375.961 ms`，扩展合计 `270.331 ms`，join `103.230 ms`，join 占 `27.63%`。两轮合计看，join 约 `305.310 ms`，扩展约 `898.522 ms`，join 在可解释的扩展+join 阶段中约 `25.36%`，按 exact 调用总时间约 `23.02%`。
+
+当前小样例结论为：full-domain arc join 不是唯一主耗时，扩展尤其 forward 扩展更长；但 join 已经稳定占到约四分之一到三分之一的核心 pricing 时间。node join 如果只减少 final join，不应期待数量级加速；真正有价值的情形应是它同时减少 crossing-arc pair/function evaluation，或配合 completion bound 提前剪掉一部分 label/候选。

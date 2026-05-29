@@ -401,3 +401,5 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 这不是说 `U_state` 比 `F_state` 更重要，而是二者服务的目标不同。`F_state/B_state` 决定 relaxed DP 的传播闭包；`U_state/Bbar_state` 决定同 node 拼接时能否正确、尽量强地评价 bound。
 
 换句话说，原始判断“记录来源的不超过函数平移后的那个，再记录它加当前 node 惩罚后 minimize 的函数”是正确方向。这里需要避免的错误不是这个定义本身，而是实现时把二者绑得太死：如果只在 `F_state` 改善时才更新 `U_state`，那么某些只改善 node join、但不改善后续扩展传播的候选会被丢掉。正确口径是 `U_state` 和 `F_state` 都维护各自的 lower envelope；重新入队只看传播函数 `F_state/B_state` 是否改善。
+
+因此 forward 的一次 label-correcting 更新流程应理解为：当前出队状态用自己的 `F_state` 向后扩展，先得到到达后继 node 的 `U_candidate`，再由 `U_candidate + g_j` 做 prefix-min 得到 `F_candidate`。更新目标状态时，`U_state` 用 `U_candidate` 取 lower envelope，`F_state` 用 `F_candidate` 取 lower envelope。若只有 `U_state` 改善而 `F_state` 没改善，则不需要重新入队，因为继续扩展依赖的是 `F_state`；但这次 `U_state` 改善必须保留，供后续 node join 使用。若 `F_state` 改善，则目标状态需要重新入队。Backward 侧完全对称：`Bbar_state` 改善只更新拼接函数，`B_state` 改善才重新入队。

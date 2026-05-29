@@ -343,27 +343,16 @@ public class GCBidirectional {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
-			return false;
-		}
-		if (!isForwardSingletonOnlyExtensionAllowed(label.jid, nextJob)) {
-			return false;
-		}
+		// 2026-05-29: 调用方只枚举 label.reachableSet；visited、singleton/zero-dual
+		// 和时间可行性已经在 reachable set 构造时维护。这里保留实际会随节点变化的直连禁弧检查。
 		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
-		if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
-			return false;
-		}
-		if (!isBackwardSingletonOnlyExtensionAllowed(label, prevJob)) {
-			return false;
-		}
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		if (node.isArcForbidden(prevJob, successor)) {
-			return false;
-		}
-		return true;
+		// 2026-05-29: reachable set 已维护 visited、singleton/zero-dual 和时间可行性；
+		// backward 扩展点只需检查 prevJob -> successor 这条直连弧是否被禁。
+		return !node.isArcForbidden(prevJob, successor);
 	}
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {

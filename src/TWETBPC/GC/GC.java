@@ -190,12 +190,8 @@ public class GC {
 	}
 
 	private boolean canExtend(Label label, int nextJob, Node node) {
-		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
-			return false;
-		}
-		if (!isForwardSingletonOnlyExtensionAllowed(label.jid, nextJob)) {
-			return false;
-		}
+		// 2026-05-29: 调用方只枚举 label.reachableSet；visited、singleton/zero-dual
+		// 和时间可行性已经在 reachable set 构造时维护。这里保留实际会随节点变化的直连禁弧检查。
 		return !node.isArcForbidden(label.jid, nextJob);
 	}
 

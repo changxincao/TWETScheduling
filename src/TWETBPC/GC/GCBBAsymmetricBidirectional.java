@@ -563,27 +563,17 @@ public class GCBBAsymmetricBidirectional {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
-			return false;
-		}
-		if (isZeroDualExcludedJob(nextJob)) {
-			return false;
-		}
+		// 2026-05-29: 调用方只枚举当前边界候选；该候选来自 label.reachableSet，
+		// visited、zero-dual 和时间可行性已在 reachable set/边界候选构造时维护。
+		// 这里保留实际会随节点变化的直连禁弧检查。
 		return !node.isArcForbidden(label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
-		if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
-			return false;
-		}
-		if (isZeroDualExcludedJob(prevJob)) {
-			return false;
-		}
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		if (node.isArcForbidden(prevJob, successor)) {
-			return false;
-		}
-		return true;
+		// 2026-05-29: 当前边界候选已维护 visited、zero-dual 和时间可行性；
+		// backward 扩展点只需检查 prevJob -> successor 这条直连弧是否被禁。
+		return !node.isArcForbidden(prevJob, successor);
 	}
 
 	/**

@@ -566,8 +566,8 @@ public class GCBBAsymmetricBidirectional {
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
 		// 2026-05-29: 调用方只枚举当前边界候选；该候选来自 label.reachableSet，
-		// visited、zero-dual 和时间可行性已在 reachable set/边界候选构造时维护。
-		// 下面旧检查保留为防御性说明，正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
+		// visited、zero-dual 和静态时间可行性已在 reachable set/边界候选构造时维护。
+		// 这里仅检查不应写入 dominance key 的节点/预处理直连禁弧。
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
@@ -579,9 +579,9 @@ public class GCBBAsymmetricBidirectional {
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		// 2026-05-29: 当前边界候选已维护 visited、zero-dual 和时间可行性；
-		// 下面旧检查保留为防御性说明，正常不应触发；backward 扩展点只需即时检查
-		// prevJob -> successor 这条直连弧是否被禁。
+		// 2026-05-29: 当前边界候选来自 label.reachableSet，visited、zero-dual
+		// 和静态时间可行性已由 reachable set/边界候选维护；这里仅检查
+		// 不应写入 dominance key 的 prevJob -> successor 直连禁弧。
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
@@ -600,8 +600,9 @@ public class GCBBAsymmetricBidirectional {
 	 * <p>
 	 * 注意这里不回写 label.reachableSet。该集合已经作为 dominance 状态登记进 graph，事后修改
 	 * 会让图结构里的 key 和对象状态不一致；而 reachableSet 偏宽只是辅助候选集变弱，不会导致
-	 * 漏掉可行列，正确性上可以接受。zero-dual、forbidden-arc 等扩展合法性仍由 canExtendForward
-	 * 统一检查，避免把分支弧约束写进 dominance key。
+	 * 漏掉可行列，正确性上可以接受。zero-dual、visited 等静态合法性依赖 reachableSet
+	 * 的构造不变量；forbidden-arc 这类当前直连弧约束仍由 canExtendForward 即时检查，
+	 * 避免把分支弧约束写进 dominance key。
 	 */
 	private PackedBitSet currentForwardBoundaryCandidates(ForwardLabel label) {
 		PackedBitSet currentReachable = new PackedBitSet(data.n + 2);
@@ -617,8 +618,9 @@ public class GCBBAsymmetricBidirectional {
 	/**
 	 * 2026-05-29: backward 侧同理。早期后缀 label 可能在更宽的 dynamicHB 下生成，出队时
 	 * 当前 dynamicHB 已经右移，旧 reachableSet 中的一些前驱不再能接到当前后缀。这里只生成
-	 * 当前边界下仍满足 direct feasibility 的临时候选，不回填更新 label.reachableSet；visited、
-	 * zero-dual 和 forbidden-arc 检查继续留在 canExtendBackward 中。
+	 * 当前边界下仍满足 direct feasibility 的临时候选，不回填更新 label.reachableSet；
+	 * visited 和 zero-dual 依赖 reachableSet 构造不变量，当前直连 forbidden arc 则留在
+	 * canExtendBackward 中即时检查。
 	 */
 	private PackedBitSet currentBackwardBoundaryCandidates(BackwardLabel label) {
 		PackedBitSet currentReachable = new PackedBitSet(data.n + 2);
@@ -1488,6 +1490,9 @@ public class GCBBAsymmetricBidirectional {
 		precomputeEffectivePricingWindows(lp);
 		tMid = computeCurrentMidpoint();
 		precomputeZeroDualExcludedJobs(lp);
+		if (dualProfitableWindowEnabled && Configure.debugBPCPricingColumnCheck) {
+			assertRootArcDualsAreZero(lp);
+		}
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows();
 		precomputeBackwardDynamicPricingWindows();
@@ -1689,6 +1694,20 @@ public class GCBBAsymmetricBidirectional {
 		// cut dual 或分支 dual 都可能让 reduced arc cost 不再满足原始 setup cost 的三角不等式。
 		// 当前只在根节点、且没有 active cuts 时使用 pi_j 进一步收紧静态外包窗。
 		return lp.getActiveCutIds().isEmpty();
+	}
+
+	private void assertRootArcDualsAreZero(LP lp) {
+		Node node = lp.getNode();
+		int sink = node.sinkId();
+		for (int from = 0; from <= sink; from++) {
+			for (int to = 0; to <= sink; to++) {
+				double arcDual = lp.getArcDual(from, to);
+				if (!Utility.compareEq(arcDual, 0.0)) {
+					throw new IllegalStateException("dual profitable window assumes zero root arc duals, but arc "
+							+ from + " -> " + to + " has dual " + arcDual);
+				}
+			}
+		}
 	}
 
 	/**

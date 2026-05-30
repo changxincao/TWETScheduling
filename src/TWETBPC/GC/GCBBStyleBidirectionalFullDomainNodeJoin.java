@@ -35,7 +35,7 @@ import TWETBPC.Util.SequenceSignature;
  * 当前版本用于 full-domain 诊断：
  * 1. forward/backward label 都覆盖 [0, pricingHorizon]；
  * 2. dynamic window 只影响 job penalty 的有效区间，不把标签裁成 half-domain；
- * 3. final join 按同一 job 拼接 forward pre-node frontier 和 backward normalize 前的 exact suffix frontier；
+ * 3. final join 按同一 job 拼接 forward pre-node frontier 和 backward suffix-min frontier；
  * 4. 返回列成本统一用 {@link TWETColumnEvaluator} 复核，join 函数值只作为诊断口径，避免实验分支
  * 的中间函数语义差异污染列池。
  */
@@ -536,9 +536,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
-		// 2026-05-29: node join 需要同一 job 上的 exact suffix 成本；frontier 继续保持
-		// suffix-min 后的传播函数，用于 dominance 和继续向左扩展。
-		PiecewiseLinearFunction exactSuffixFrontier = nextFrontier.copy();
+		// 2026-05-30: node join 使用 backward 的 suffix-min 传播函数。它表示当前 job
+		// 完成时间不早于 t 时的最优后缀成本，正好对应 arc join 等价变换后的同点拼接口径。
 		nextFrontier.normalize(Direction.BACKWARD);
 		if (nextFrontier.head == null) {
 			return null;
@@ -548,8 +547,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		visited.add(prevJob);
 		PackedBitSet reachable = buildBackwardReachableSetFromParent(label, prevJob, visited, lp.getNode(),
 				nextFrontier);
-		return new BackwardLabel(nextLabelId++, prevJob, label, visited, reachable, nextFrontier,
-				exactSuffixFrontier, false);
+		return new BackwardLabel(nextLabelId++, prevJob, label, visited, reachable, nextFrontier, false);
 	}
 
 	private InsertStatus insertForward(ForwardLabel label, LP lp) {
@@ -919,7 +917,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 
 		joinFunctionEvaluations++;
-		PiecewiseLinearFunction backwardFull = backward.exactSuffixFrontier;
+		PiecewiseLinearFunction backwardFull = backward.frontier;
 		if (backwardFull.head == null) {
 			joinFunctionPruned++;
 			return;
@@ -1824,21 +1822,18 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private static final class BackwardLabel extends FunctionLabel {
 		final BackwardLabel father;
-		/** 2026-05-29: normalize 前的 exact suffix 函数，只供 node join 精确拼接使用。 */
-		final PiecewiseLinearFunction exactSuffixFrontier;
 		final boolean isSinkRoot;
 
 		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
-				PiecewiseLinearFunction frontier, PiecewiseLinearFunction exactSuffixFrontier, boolean isSinkRoot) {
+				PiecewiseLinearFunction frontier, boolean isSinkRoot) {
 			super(labelId, jid, visitedSet, reachableSet, frontier, backwardEndpointMin(frontier));
 			this.father = father;
-			this.exactSuffixFrontier = exactSuffixFrontier;
 			this.isSinkRoot = isSinkRoot;
 		}
 
 		static BackwardLabel sink(int labelId, int sinkId, PackedBitSet visitedSet, PiecewiseLinearFunction frontier,
 				PackedBitSet reachableSet) {
-			return new BackwardLabel(labelId, sinkId, null, visitedSet, reachableSet, frontier, frontier, true);
+			return new BackwardLabel(labelId, sinkId, null, visitedSet, reachableSet, frontier, true);
 		}
 	}
 }

@@ -577,3 +577,13 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 从 `wet020/wet021` root 结果看，当前这笔交换不划算。node join 的 joinMeasuredShare 确实比 arc join 低，但扩展和 dominance 的放大远大于 join 阶段节省：`wet020` 中 node join 的 join phase 约 `279ms`，arc join 约 `62ms`，node join 的 join 本身甚至没有更短；真正拉开差距的是扩展总时间从 arc join 的约 `76ms` 增至 node join 的约 `3296ms`。`wet021` 两轮也类似，node join join phase 约 `2204ms`，arc join 约 `412ms`，但扩展总时间从约 `1378ms` 增至约 `30326ms`。因此当前结论不是“node join 公式一定差”，而是当前 full-domain terminal 显式化方式让扩展/占优成本超过了它在 join 端可能带来的收益。
 
 所以短期判断应偏向继续保留 arc join 作为更好的默认方向。node join 若要继续尝试，优化重点不应再放在 final join，而应放在 terminal label 的生成和存储语义上：normal label 仍使用半域 reachable 参与普通 dominance；跨界 terminal 候选单独生成、单独轻量支配或直接面向 join 存储；避免把 full-domain reachable key 放进普通 dominance graph。只有先把这部分额外扩展和占优成本压下来，node join 才有可能靠更直接的同点拼接抵消成本。
+
+### 6.13 对“是否为实现错误导致误判”的代码复查
+
+2026-05-30 又按代码路径复查了一遍，当前效率判断不是由简单实现错误导致的。`GCBBStyleBidirectionalFullDomainNodeJoin` 的扩展逻辑确实是：`forwardExtend/backwardExtend` 从 full-domain `reachableSet` 枚举候选，先完整生成 child；如果 child 已经跨过 `Tmid`，则调用 `insertForwardBoundaryTerminal()` 或 `insertBackwardBoundaryTerminal()`，随后立即 `return`，不会执行 `FWUL.add(child)` 或 `BWUL.add(child)`。因此没有发现 terminal label 反复入队、继续多步扩展的错误。
+
+但这些 terminal child 不是轻量旁路保存。`insertForwardBoundaryTerminal()` 内部仍调用普通 `insertForward()`，`insertBackwardBoundaryTerminal()` 内部仍调用普通 `insertBackward()`。也就是说，跨界 terminal label 会进入 `FWTL/BWTL` 做完整 dominance 检查，保留下来后还会进入 active join table，final join 前也会参与 compact 和排序。这正好解释了统计中 boundary terminal kept/dominated、paperGraph rejected 和 dominanceChecks 的放大。
+
+对照 `GCBBStyleBidirectionalFullDomain`，arc join 版的 reachable 构造仍带 `isForwardHalfEligibleJob/isBackwardHalfEligibleJob`，direct feasibility 也直接以 `Tmid` 为边界。因此一跳就跨过 `Tmid` 的 child 在 arc join 扩展阶段根本不会被创建，也不会进入 dominance graph。node join 版则通过 `isDirectForwardExtensionTimeFeasibleFullDomain(..., false)` 和对应 backward full-domain 判断，把这些候选显式纳入 reachable set。两版差异是代码中真实存在的语义差异，不是日志口径或统计字段误读。
+
+因此当前结论可以更准确地表述为：没有发现“terminal 误入队导致无限或多步扩展”的实现 bug；但如果原设计目标只是“在半域 arc join 基础上额外补第一跨界 node join 候选”，当前实现确实偏宽，因为 normal reachable/dominance 也被 full-domain 语义放大了。这个偏宽本身就是当前慢因之一，而不是性能结论的误判来源。后续若继续优化 node join，应把 normal label 的半域 continuation key 和 terminal-only 候选存储拆开验证。

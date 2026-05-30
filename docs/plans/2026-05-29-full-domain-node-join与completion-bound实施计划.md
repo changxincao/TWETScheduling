@@ -631,4 +631,18 @@ cost = reducedCost + machineDual
 
 但对正 reduced-cost 的固定 sequence，这个结论不成立。一个 sequence 在完整时间域上的最优完成时间可能落在某个 job 的 profitable window 外，完整 evaluator 会选择那个时间并得到一个正 reduced cost；pricing 侧被 window 裁掉后，只能在 restricted domain 内取另一个完成时间，数值可能更大或更小，但反正它仍然是非负候选，不影响是否加入列池。此前 `wet020` 大量 mismatch 全部是 positive-only，正是这个现象：它说明 window 改变了正候选的固定 sequence 最优值，但没有观察到负候选符号被改变。
 
-当前测试能支持的结论应写得保守一些：在已跑的 `wet020/wet021/wet022/wet025` root/no-cut 样例里，所有最终生成逻辑前的负候选都没有发现 evaluator mismatch；正候选存在不一致，且已确认会被非负过滤挡掉。这不是对所有实例、所有节点、所有 cut dual 的证明。代码里也只在 `canUseDualProfitableWindow()` 返回 true 时启用该 window，即根节点且没有 active cuts；一旦进入非根或有 cut dual，当前实现回到静态窗口，避免把这个基于三角不等式和 job dual 的推理扩展到不满足条件的场景。
+当前测试能支持的结论应写得保守一些：在已跑的 root/no-cut 样例里，arc join 暂未观察到负候选 evaluator mismatch；node join 重新诊断后发现少量 both-negative 数值差异，但没有 sign-critical。正候选存在不一致，且已确认会被非负过滤挡掉。这不是对所有实例、所有节点、所有 cut dual 的证明。代码里也只在 `canUseDualProfitableWindow()` 返回 true 时启用该 window，即根节点且没有 active cuts；一旦进入非根或有 cut dual，当前实现回到静态窗口，避免把这个基于三角不等式和 job dual 的推理扩展到不满足条件的场景。
+
+### 6.17 正候选下界诊断与负列成本一致性修正
+
+2026-05-30 在 node join 性能分支中新增正函数剪枝统计，用来回答“乐观下界为负但最终拼接为正”的 pair 到底长什么样。该统计记录的是 `forward.preNodeMinReducedCost + backward.minReducedCost < 0`，但实际执行 `forward.preNodeFrontier + backward.frontier` 并 `findMinimal()` 后得到非负 reduced cost 的 pair。它们会被 `joinFunctionPruned` 剪掉，不会进入候选池。
+
+`wet020_001_2m` root-only node join 中，正函数剪枝 pair 为 `938981` 个。它们的 pair 乐观下界范围为 `[-2456.0, -0.1000000000003638]`，平均约 `-565.7182`；实际拼接函数最小 reduced cost 范围为 `[0.0, 3607.0]`，平均约 `1064.5355`；从乐观下界抬到真实拼接值的最大幅度为 `5009.0`。这说明很多 pair 的两侧各自最小值确实很负，但这些最小值不在同一个 join completion time 上，拼接后公共时间域里的最小值完全可以变成很大的正数。
+
+`wet021_001_2m` root-only node join 有两轮 exact pricing。第一轮正函数剪枝 pair 为 `2063268` 个，pair 下界范围 `[-2663.400000000002, -0.028571428567374824]`，平均约 `-592.9154`；实际拼接 reduced cost 范围约 `[-3.64e-12, 3814.4571]`，平均约 `1185.7535`，最大抬升 `5573.3`。第二轮正函数剪枝 pair 为 `2007005` 个，pair 下界范围 `[-2664.279999999998, -0.013333333330137975]`，平均约 `-591.9139`；实际拼接 reduced cost 范围约 `[-3.64e-12, 3813.5771]`，平均约 `1180.9370`，最大抬升仍约 `5573.3`。
+
+这组数据说明，正候选不是“生成了一条正列再加入列池”，而是 pair lower bound 过于乐观导致它们进入了函数拼接；函数拼接后的 reduced cost 非负，所以在恢复 sequence 前就被剪掉。completion bound 若接入这里，目标应是提前识别这类 pair，减少函数 add/findMinimal，而不是替代最终的函数非负检查。
+
+同时，本轮重新跑 `wet021` 后需要修正前面对负列 cost 一致性的表述。node join 第一轮 `debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=14/4/0/4/10.8`：14 个 inferred 为负的候选在进入 top-K 前都做了 evaluator 复核，其中 4 个与 evaluator 的 reduced cost 数值不一致，但二者都仍为负，没有 sign-critical。也就是说，当前样例支持的是“负候选的符号没有被 pi-window/node-join 口径改变”，不支持“负候选固定 sequence 的最小 cost 与完整时间域 evaluator 完全一致”。如果这类 inferred cost 直接反推 `TWETColumn.cost` 写入主问题，就可能带来最多约 10.8 的目标系数偏差。
+
+因此更稳妥的结论是：`pi` 时间窗在 root/no-cut 下可作为负列保留筛选，但不是任意固定 sequence 的成本等价变换；node join 当前的 `preNodeFrontier + backward.frontier` 也只能作为寻找负候选的 reduced-cost 依据，不能在没有进一步证明时替代 evaluator 作为最终列成本。若该实验分支要作为 exact pricing 使用，最终加入 `TWETColumn` 前应恢复 evaluator 对负候选的真实成本重算，或者至少在调试统计长期证明 both-negative 数值差异为 0 后再关闭。

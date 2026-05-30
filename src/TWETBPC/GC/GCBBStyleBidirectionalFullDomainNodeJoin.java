@@ -118,6 +118,14 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private long joinPairsTimePruned;
 	private long joinFunctionEvaluations;
 	private long joinFunctionPruned;
+	private long joinFunctionPositivePruned;
+	private double joinPositivePairLBMin;
+	private double joinPositivePairLBSum;
+	private double joinPositivePairLBMax;
+	private double joinPositiveReducedCostMin;
+	private double joinPositiveReducedCostSum;
+	private double joinPositiveReducedCostMax;
+	private double joinPositiveMaxLift;
 	private long forwardSinglePointKept;
 	private long forwardSinglePointDominatedByStore;
 	private long forwardSinglePointDominatedByGraph;
@@ -919,11 +927,11 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				joinPairsLowerBoundPruned++;
 				break;
 			}
-			tryJoin(forward, backward, lp);
+			tryJoin(forward, backward, optimisticJoinLB, lp);
 		}
 	}
 
-	private void tryJoin(ForwardLabel forward, BackwardLabel backward, LP lp) {
+	private void tryJoin(ForwardLabel forward, BackwardLabel backward, double optimisticJoinLB, LP lp) {
 		if (config.maxExactPricingColumns <= 0) {
 			return;
 		}
@@ -957,10 +965,30 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
 			joinFunctionPruned++;
+			recordPositiveFunctionPruned(optimisticJoinLB, reducedCostBound);
 			return;
 		}
 		ArrayList<Integer> sequence = recoverNodeJoinSequence(forward, backward);
 		tryGenerateColumn(sequence, lp, reducedCostBound);
+	}
+
+	private void recordPositiveFunctionPruned(double optimisticJoinLB, double reducedCostBound) {
+		joinFunctionPositivePruned++;
+		if (joinFunctionPositivePruned == 1) {
+			joinPositivePairLBMin = optimisticJoinLB;
+			joinPositivePairLBMax = optimisticJoinLB;
+			joinPositiveReducedCostMin = reducedCostBound;
+			joinPositiveReducedCostMax = reducedCostBound;
+			joinPositiveMaxLift = reducedCostBound - optimisticJoinLB;
+		} else {
+			joinPositivePairLBMin = Math.min(joinPositivePairLBMin, optimisticJoinLB);
+			joinPositivePairLBMax = Math.max(joinPositivePairLBMax, optimisticJoinLB);
+			joinPositiveReducedCostMin = Math.min(joinPositiveReducedCostMin, reducedCostBound);
+			joinPositiveReducedCostMax = Math.max(joinPositiveReducedCostMax, reducedCostBound);
+			joinPositiveMaxLift = Math.max(joinPositiveMaxLift, reducedCostBound - optimisticJoinLB);
+		}
+		joinPositivePairLBSum += optimisticJoinLB;
+		joinPositiveReducedCostSum += reducedCostBound;
 	}
 
 	private void resetStatistics() {
@@ -980,6 +1008,14 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		joinPairsTimePruned = 0;
 		joinFunctionEvaluations = 0;
 		joinFunctionPruned = 0;
+		joinFunctionPositivePruned = 0;
+		joinPositivePairLBMin = 0.0;
+		joinPositivePairLBSum = 0.0;
+		joinPositivePairLBMax = 0.0;
+		joinPositiveReducedCostMin = 0.0;
+		joinPositiveReducedCostSum = 0.0;
+		joinPositiveReducedCostMax = 0.0;
+		joinPositiveMaxLift = 0.0;
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -1020,6 +1056,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", join positiveFuncPruned count/lbMin/lbAvg/lbMax/rcMin/rcAvg/rcMax/maxLift="
+				+ joinFunctionPositivePruned + "/" + positivePairLBMin() + "/" + positivePairLBAvg()
+				+ "/" + positivePairLBMax() + "/" + positiveReducedCostMin() + "/"
+				+ positiveReducedCostAvg() + "/" + positiveReducedCostMax() + "/" + joinPositiveMaxLift
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", boundaryTerminal fw kept/dominated=" + forwardBoundaryTerminalKept + "/"
@@ -1052,6 +1092,30 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return "0.00%";
 		}
 		return String.format("%.2f%%", part * 100.0 / total);
+	}
+
+	private double positivePairLBMin() {
+		return joinFunctionPositivePruned == 0 ? 0.0 : joinPositivePairLBMin;
+	}
+
+	private double positivePairLBAvg() {
+		return joinFunctionPositivePruned == 0 ? 0.0 : joinPositivePairLBSum / joinFunctionPositivePruned;
+	}
+
+	private double positivePairLBMax() {
+		return joinFunctionPositivePruned == 0 ? 0.0 : joinPositivePairLBMax;
+	}
+
+	private double positiveReducedCostMin() {
+		return joinFunctionPositivePruned == 0 ? 0.0 : joinPositiveReducedCostMin;
+	}
+
+	private double positiveReducedCostAvg() {
+		return joinFunctionPositivePruned == 0 ? 0.0 : joinPositiveReducedCostSum / joinFunctionPositivePruned;
+	}
+
+	private double positiveReducedCostMax() {
+		return joinFunctionPositivePruned == 0 ? 0.0 : joinPositiveReducedCostMax;
 	}
 
 	// 2026-05-30: getForwardJoinExtension/getBackwardJoinExtension/valueAtOrNearest 是

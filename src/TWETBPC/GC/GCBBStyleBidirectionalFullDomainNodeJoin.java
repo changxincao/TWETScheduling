@@ -37,7 +37,7 @@ import TWETBPC.Util.SequenceSignature;
  * 2. dynamic window 只影响 job penalty 的有效区间，不把标签裁成 half-domain；
  * 3. final join 按同一 job 拼接 forward pre-node frontier 和 backward suffix-min frontier；
  * 4. 当前性能分支仿照旧双向 join，先用 node-join 乐观下界和函数最小值筛掉非负候选，
- * 再用 join 推导 reduced cost 反推列成本；evaluator 复核路径暂时停用。
+ * inferred 为负的候选在入 K 堆前用 evaluator 重算真实列成本，避免 pi-window 口径污染主问题。
  */
 public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
@@ -49,8 +49,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
-	// 2026-05-30: 性能分支仍用 join 推导 reduced cost 反推列成本；evaluator 只在
-	// debugBPCPricingColumnCheck 下复核最终生成的负列，用来确认 pi-window 没有造成负列符号错误。
+	// 2026-05-30: inferred 为负的候选进入 K 堆前统一用 evaluator 重算真实列成本；
+	// debugBPCPricingColumnCheck 只额外统计 inferred 与 checked reduced cost 的差异。
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -1135,17 +1135,24 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (activeColumnSignatures.contains(signature)) {
 			return;
 		}
-		double reducedCost = inferredReducedCost;
-		double cost = objectiveCostFromReducedCost(sequence, reducedCost, lp);
-		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
-			if (Configure.debugBPCPricingColumnCheck) {
-				recordGeneratedNegativeDebug(sequence, reducedCost, lp);
-			}
-			// 2026-05-30: 正式列成本仍由 join 推导 reduced cost 反推；上面的 evaluator
-			// 只做 debug 统计，不改变性能分支的加列口径。
-			rememberGeneratedCandidate(signature,
-					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
+		if (!Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
+			return;
 		}
+		double checkedCost = evaluator.evaluate(sequence);
+		if (Utility.isBigMValue(checkedCost)) {
+			return;
+		}
+		double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
+		if (Configure.debugBPCPricingColumnCheck) {
+			recordGeneratedNegativeDebug(inferredReducedCost, checkedReducedCost);
+		}
+		if (!Utility.compareLt(checkedReducedCost, REDUCED_COST_TOLERANCE)) {
+			return;
+		}
+		// 2026-05-30: pi-window/inferred 只负责找候选；进入永久列池前必须回到原始 sequence 成本。
+		rememberGeneratedCandidate(signature,
+				new TWETColumn(-1, sequence, data.n, checkedCost, ColumnSource.PRICING_EXACT, false),
+				checkedReducedCost);
 	}
 
 	private void rememberGeneratedCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
@@ -1183,21 +1190,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 	}
 
-	private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost, LP lp) {
-		double cost = reducedCost + lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			cost += lp.getJobDual(job);
-			cost += lp.getArcDual(prev, job);
-			prev = job;
-		}
-		cost += lp.getArcDual(prev, lp.getNode().sinkId());
-		return cost;
-	}
-
-	private void recordGeneratedNegativeDebug(ArrayList<Integer> sequence, double inferredReducedCost, LP lp) {
-		double checkedCost = evaluator.evaluate(sequence);
-		double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
+	private void recordGeneratedNegativeDebug(double inferredReducedCost, double checkedReducedCost) {
 		double diff = Math.abs(inferredReducedCost - checkedReducedCost);
 		debugGeneratedNegativeChecked++;
 		if (Utility.compareGt(diff, Math.max(1e-5, Utility.EPS * 100.0))) {

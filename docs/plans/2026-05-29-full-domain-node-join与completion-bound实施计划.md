@@ -675,3 +675,11 @@ cost = reducedCost + machineDual
 若只在最终 K 条即将加入 master 前复核，可以保证这 K 条写入列池和主问题的 objective coefficient 是真实 evaluator 成本；如果发现 both-negative mismatch，则直接改成 evaluator cost，不会丢掉这条真实负列。若发现 inferred 负但 evaluator 非负，则应丢弃该列，因为它不是当前真实主问题下的负列。这个做法能解决“错误 cost 污染永久列池”的主要风险，但它不保证 top-K 排序仍然是按真实 reduced cost 的 top-K，因为一些被 inferred 高估而提前挤出堆的候选不会被复核，也无法补回。
 
 因此更稳的实现位置是在 `tryGenerateColumn()` 中、进入 `rememberGeneratedCandidate()` 之前复核所有 inferred 为负的候选：恢复 sequence 后调用 `TWETColumnEvaluator.evaluate()` 得到真实 cost，再用当前 dual 重算 checked reduced cost。只有 checked reduced cost 仍为负时，才用 checked cost 和 checked reduced cost 进入 K 堆。这样评估范围仍然只是 inferred 负候选，不是所有 join pair；同时 K 堆排序、最终列成本和列池去重后的永久 cost 都回到真实原始 sequence 成本口径。若为了性能只复核最终 K 条，则应把该分支视为启发式加列或近似 top-K，而不是严格的真实 top-K exact pricing 输出。
+
+### 6.21 node join 负候选入堆前复核实现
+
+2026-05-30 已把上述更稳的口径落到 `GCBBStyleBidirectionalFullDomainNodeJoin.tryGenerateColumn()`。当前流程为：先用 inferred reduced cost 做快速负性判断；只有 inferred 为负的 sequence 才调用 `TWETColumnEvaluator.evaluate()` 重算原始列成本，再用当前 `machineDual/jobDual/arcDual` 重算 checked reduced cost。若 checked reduced cost 不再为负，则候选直接丢弃；若仍为负，则用 checked cost 构造 `TWETColumn`，并用 checked reduced cost 进入 top-K 候选堆。`debugBPCPricingColumnCheck` 现在只负责统计 inferred 与 checked 的差异，不再额外重复 evaluator 计算，也不再决定正式列成本口径。
+
+这样处理后，`inferred` 仍然承担“从大量 join pair 中找出可能负列”的筛选作用，但不会再作为永久列池里的 objective coefficient 来源。K 堆排序也改为真实 checked reduced cost，因此比“最终 K 条再复核”更接近 exact pricing 的 top-K 语义。仍需注意的是，若某个真实负列在 pi-window 下被算成非负，它仍不会进入复核；当前 root/no-cut profitable window 的安全性依赖前面关于负列保留规则的假设和样例证据，不是由这次 cost 复核本身证明。
+
+验证方面，focused `javac` 已通过。随后用 `wet021_001_2m` 做 root-only node join 回归，结果为 `status=ROOT_PROCESSED`、`obj=6829`、`bound=6829`、`valid=true`，日志位于 `test-results/bpc/tmp-nodejoin-checked-cost-wet021/wet021_001_2m-nodeJoin.log`。第一轮 exact pricing 中 `debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=14/4/0/4/10.800000000001774`，说明 14 个 inferred 负候选都被复核，其中 4 个存在 both-negative 数值差异但没有 sign-critical；这些候选现在已用 evaluator 的 checked cost/reduced cost 入堆或被过滤。第二轮没有负候选，统计为 `0/0/0/0/0.0`。

@@ -558,3 +558,12 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 `wet021` 的规模差异也类似。arc join 两轮 forward/backward kept label 合计 `4862/3392`，node join 为 `29791/62144`；paper dominance kept/rejected 从 `8254/88775` 增至 `91935/592982`，dominance checks 从 `107218` 增至 `1594409`。函数评价从 `1132311` 增至 `7257555`，候选访问从 `2160156` 增至 `18859071`。node join 生成的负列数量略多，第一轮 candidatePool 为 `10/32/22`，arc join 为 `8/15/7`，但这个收益远不足以抵消 label 和 dominance 规模膨胀。
 
 当前判断是：node join 的流程已经和旧双向的剪枝骨架对齐，join phase 占比也低，说明前置 group/pair/function 三层过滤生效；但 node join 版本为了保证同点拼接完整性，扩展侧保留了大量 terminal 和 full-domain 可达 label，使 dominance graph 成本显著上升。因此短期内 node join 不是更快版本，除非继续加入 completion bound 或更强的 label/terminal 前置剪枝，把扩展阶段的 label 数先压下来。后续优化不应只盯 final join，应优先看 backward terminal suffix、reachable 收缩和 completion bound 接入点。
+### 6.11 node join 效率差距的实现口径复查
+
+2026-05-30 复查 node join 与 full-domain arc join 的扩展语义后，当前判断需要修正得更精确：如果只是在 arc join 的半域扩展基础上额外保留第一次跨过 `Tmid` 的 child，那么确实可以理解为“每个 label 最多多尝试一层 terminal 扩展”。但当前 `GCBBStyleBidirectionalFullDomainNodeJoin` 的实现不只是这个语义，它把 normal label 的 `reachableSet` 本身也改成了 full-domain 一跳可达集合，并让 terminal child 继续走普通 `FWTL/BWTL` dominance 和 active list。
+
+这会带来两层放大。第一，某个父 label 不再只生成一个跨界 terminal child，而是会对所有 full-domain 一跳可行、但半域下本应被 `Tmid` 挡掉的 job 都生成 terminal child；因此额外工作量是每个父 label 乘以跨界候选数，而不是每个 label 至多一次。第二，这些 terminal child 虽然不入 `FWUL/BWUL` 继续扩展，但仍进入普通 dominance graph 和 active join table；同时 normal label 的 reachable key 变宽后，占优关系更难成立，导致保留 label、rejected label 和 dominance checks 一起膨胀。
+
+现有 root 对照数据支持这个解释。`wet020` 中 node join 的 boundary terminal 保留/支配为 forward `1975/34096`、backward `7471/65325`，paper dominance kept/rejected 从 arc join 的 `2588/21845` 增至 `22399/127572`，dominance checks 从 `26907` 增至 `336228`。`wet021` 两轮中 node join 的 boundary terminal 尝试规模更大，paper dominance kept/rejected 从 `8254/88775` 增至 `91935/592982`，dominance checks 从 `107218` 增至 `1594409`。因此 17x-23x 的总耗时差距主要不是 final join 公式本身，而是当前 full-domain reachable 与 terminal 存储口径已经偏离了“只多一层”的预期。
+
+由此得到的实现判断是：当前代码没有表现出 terminal label 被反复入队的无限扩展错误，因为跨界 child 保留后确实不再入队；但如果设计目标是“相对 arc join 只额外补第一跨界 node join 候选”，那么当前实现偏宽，属于需要重新收窄的实现问题。后续若要验证这个方向，应考虑把 normal label 的 reachable/dominance 仍保持半域语义，再单独扫描或保存跨界 terminal 候选；terminal 候选也不宜直接用 full-domain reachable key 扩大普通 dominance graph，至少应评估 terminal-only store 或使用半域 continuation key。

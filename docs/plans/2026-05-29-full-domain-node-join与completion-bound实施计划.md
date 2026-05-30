@@ -531,3 +531,16 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 当前还存在一些冗余或残留。`getForwardJoinExtension()`、`getBackwardJoinExtension()`、`valueAtOrNearest()` 和 `appendSegments()` 是 half-domain 常数延拓时期留下的工具，在当前 full-domain node join 路径中没有被调用。`minForwardReducedCostByLastJob` 仍被维护，但 node join 的 group lower bound 已改用 `minForwardPreNodeReducedCostByLastJob`，前者目前只属于旧流程残留。由于 evaluator 复核已停用，`CandidateSource`、`recordDebugReducedCostMismatch()` 以及 `debugRcMismatch` 相关统计也变成诊断残留；现在 `debugBPCPricingColumnCheck` 实际只保留序列兼容性检查，不再做成本复核。`forwardHalfEligibleByJob/backwardHalfEligibleByJob` 在 node-join full-domain 路径里也只用于统计，不参与扩展或 join 判定。
 
 旧流程中主要的加速 trick 已经迁回：active forward 排序后 pair lower bound 可以 `break`；group lower bound 可以整组跳过；函数最小值非负时不恢复序列；top-K 候选池仍按 best reduced cost 保留。尚未迁入或暂未使用的加速方向主要不是旧流程已有 trick，而是后续可选增强，例如用当前 top-K 最差负 reduced cost 替代固定 `REDUCED_COST_TOLERANCE` 做更强剪枝，或把 completion bound 接到 label/terminal/join 前筛选。这些都需要单独证明安全性。
+### 6.9 清理 full-domain node join 中的历史残留
+
+2026-05-30 对 `GCBBStyleBidirectionalFullDomainNodeJoin` 做了一轮小清理，只处理已经确认不参与当前 node-join 主路径的残留。核心原则是不改变 `preNodeFrontier + backward.frontier` 的拼接、group/pair lower bound、函数 `findMinimal` 和 top-K 候选池逻辑，只把容易误导后续判断的旧诊断和旧半域工具从活跃代码里拿掉。
+
+本次下线的主要残留有四类。第一类是 evaluator mismatch 诊断，包括 `CandidateSource`、`recordDebugReducedCostMismatch()` 和 `debugRcMismatch` 相关统计。它们之前出现，是因为 node join 早期仍用 `TWETColumnEvaluator` 复核每条候选，想区分 inferred reduced cost 与完整序列评价之间的口径差异。现在性能分支已经先在 join 函数层剪掉非负候选，并直接用 inferred reduced cost 反推列成本，这套来源分类和 mismatch 统计已经没有数据来源，继续保留只会让日志像还在做 evaluator 复核。
+
+第二类是 half-domain 常数延拓工具，包括 `getForwardJoinExtension()`、`getBackwardJoinExtension()`、`valueAtOrNearest()`、`appendSegments()` 和对应的 `joinExtendedFrontier` 缓存。它们是旧 half-domain crossing-arc join 的残留：当时两侧 label 只覆盖半域，join 前需要把缺失一侧用 `Tmid` 附近的常数补齐。当前 full-domain node join 的 forward/backward label 都覆盖 `[0, pricingHorizon]`，并且最终拼的是 `forward.preNodeFrontier + backward.frontier`，不再需要任何常数延拓。
+
+第三类是旧 crossing-arc 下界标量 `minForwardReducedCostByLastJob`。旧流程的 group lower bound 可以直接用 forward frontier 的最小 reduced cost；node join 中 join job 的 penalty/job dual 不能在两侧重复计算，因此下界必须改用未加入 join job 成本的 `preNodeMinReducedCost`。现在只维护 `minForwardPreNodeReducedCostByLastJob`。
+
+第四类是 half-domain eligibility 统计。`forwardHalfEligibleByJob/backwardHalfEligibleByJob` 之前用于判断某个 job 是否天然落不到对应半域。full-domain node join 已经不再用它裁剪 reachable set 或扩展候选，`Tmid` 只决定 child 是否继续入队。因此这套计算只剩统计意义，且容易误导后续以为仍有半域剪枝参与当前实验分支。
+
+保留的一个“残留说明”是：文件里仍留下了简短中文注释，解释 evaluator 复核和 half-domain 延拓为什么曾经存在、现在为什么不用。这样做比保留整段不可达代码更清楚，也能避免后续继续维护已经失效的统计口径。

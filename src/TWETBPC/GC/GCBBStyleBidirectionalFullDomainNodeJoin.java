@@ -41,18 +41,15 @@ import TWETBPC.Util.SequenceSignature;
 public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
-	private static final int DEBUG_MISMATCH_PRINT_LIMIT = 12;
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
-	}
-	private enum CandidateSource {
-		NODE_JOIN, FORWARD_SINK
 	}
 
 	private final Data data;
 	private final TWETBPCConfig config;
-	// 2026-05-30: 性能诊断分支暂时停用 evaluator 复核，避免 final join 为大量候选重复做完整序列评价。
-	// private final TWETColumnEvaluator evaluator;
+	// 2026-05-30: 早期 node-join 分支保留 evaluator 复核，用来定位 inferred reduced cost
+	// 与完整序列评价之间的口径差异；当前性能分支已经改为先用 join 下界剪枝，再用 join 推导值
+	// 反推列成本，因此 evaluator 和 mismatch source 分类不再进入活跃路径。
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -63,7 +60,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private ArrayList<SinglePointStore<ForwardLabel>> forwardSinglePointByLastJob;
 	private ArrayList<SinglePointStore<BackwardLabel>> backwardSinglePointByFirstJob;
 	private PackedBitSet activeForwardTerminalJobs;
-	private double[] minForwardReducedCostByLastJob;
+	// 2026-05-30: crossing-arc 旧流程曾维护 forward frontier 最小值作为组下界；
+	// node join 必须用未加入 join job 成本的 pre-node 标量，旧标量不再维护。
 	private double[] minForwardPreNodeReducedCostByLastJob;
 	private double[] minForwardEllByLastJob;
 	private ArrayList<TWETColumn> generatedColumns;
@@ -94,10 +92,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private double dynamicMinHStart;
 	private double dynamicMaxHEnd;
 	private double earliestSourceCompletion;
-	private boolean[] forwardHalfEligibleByJob;
-	private boolean[] backwardHalfEligibleByJob;
-	private int forwardHalfIneligibleJobCount;
-	private int backwardHalfIneligibleJobCount;
+	// 2026-05-30: half-domain eligibility 只服务于旧半域剪枝。full-domain node join
+	// 不再用它裁剪标签或 job；保留 dynamic window 本身即可，避免多做无效统计。
 	private PiecewiseLinearFunction[] baseForwardHalfPenaltyByJob;
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
@@ -136,25 +132,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
 	private long joinPhaseNanos;
-	private long debugReducedCostMismatchCount;
-	private long debugNodeJoinMismatchCount;
-	private long debugForwardSinkMismatchCount;
-	private long debugBothNegativeMismatchCount;
-	private long debugSignCriticalMismatchCount;
-	private long debugPositiveOnlyMismatchCount;
-	private long debugMismatchPrintCount;
-	private double debugMaxReducedCostMismatchAbs;
-	private double debugMaxMismatchInferred;
-	private double debugMaxMismatchChecked;
-	private CandidateSource debugMaxMismatchSource;
-	private ArrayList<Integer> debugMaxMismatchSequence;
 
 	private String lastMessage = "GCBB-style full-domain node-join bidirectional pricing not executed";
 
 	public GCBBStyleBidirectionalFullDomainNodeJoin(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		// this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -337,7 +320,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		forwardSinglePointByLastJob = new ArrayList<SinglePointStore<ForwardLabel>>(data.n + 1);
 		backwardSinglePointByFirstJob = new ArrayList<SinglePointStore<BackwardLabel>>(data.n + 1);
 		activeForwardTerminalJobs = new PackedBitSet(data.n + 2);
-		minForwardReducedCostByLastJob = new double[data.n + 1];
 		minForwardPreNodeReducedCostByLastJob = new double[data.n + 1];
 		minForwardEllByLastJob = new double[data.n + 1];
 		for (int i = 0; i <= data.n; i++) {
@@ -347,7 +329,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			activeBackwardByFirstJob.add(new ArrayList<BackwardLabel>());
 			forwardSinglePointByLastJob.add(new SinglePointStore<ForwardLabel>());
 			backwardSinglePointByFirstJob.add(new SinglePointStore<BackwardLabel>());
-			minForwardReducedCostByLastJob[i] = Utility.big_M;
 			minForwardPreNodeReducedCostByLastJob[i] = Utility.big_M;
 			minForwardEllByLastJob[i] = Utility.big_M;
 		}
@@ -765,9 +746,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private void updateForwardScalarInfo(ForwardLabel label) {
 		int lastJob = label.jid;
-		if (Utility.compareLt(label.minReducedCost, minForwardReducedCostByLastJob[lastJob])) {
-			minForwardReducedCostByLastJob[lastJob] = label.minReducedCost;
-		}
 		if (Utility.compareLt(label.preNodeMinReducedCost, minForwardPreNodeReducedCostByLastJob[lastJob])) {
 			minForwardPreNodeReducedCostByLastJob[lastJob] = label.preNodeMinReducedCost;
 		}
@@ -788,7 +766,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
-		tryGenerateColumn(sequence, lp, reducedCost, CandidateSource.FORWARD_SINK);
+		tryGenerateColumn(sequence, lp, reducedCost);
 	}
 
 	/**
@@ -805,7 +783,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private void compactForwardLabelsForJoin(int job) {
 		ArrayList<ForwardLabel> labels = activeForwardByLastJob.get(job);
 		int liveCount = 0;
-		double liveMinReducedCost = Utility.big_M;
 		double liveMinPreNodeReducedCost = Utility.big_M;
 		double liveMinEll = Utility.big_M;
 		for (int i = 0; i < labels.size(); i++) {
@@ -814,9 +791,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				continue;
 			}
 			labels.set(liveCount++, label);
-			if (Utility.compareLt(label.minReducedCost, liveMinReducedCost)) {
-				liveMinReducedCost = label.minReducedCost;
-			}
 			if (Utility.compareLt(label.preNodeMinReducedCost, liveMinPreNodeReducedCost)) {
 				liveMinPreNodeReducedCost = label.preNodeMinReducedCost;
 			}
@@ -830,13 +804,11 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		if (liveCount == 0) {
 			activeForwardTerminalJobs.remove(job);
-			minForwardReducedCostByLastJob[job] = Utility.big_M;
 			minForwardPreNodeReducedCostByLastJob[job] = Utility.big_M;
 			minForwardEllByLastJob[job] = Utility.big_M;
 			return;
 		}
 		Collections.sort(labels, forwardJoinLowerBoundComparator());
-		minForwardReducedCostByLastJob[job] = liveMinReducedCost;
 		minForwardPreNodeReducedCostByLastJob[job] = liveMinPreNodeReducedCost;
 		minForwardEllByLastJob[job] = liveMinEll;
 		activeForwardTerminalJobs.add(job);
@@ -981,7 +953,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return;
 		}
 		ArrayList<Integer> sequence = recoverNodeJoinSequence(forward, backward);
-		tryGenerateColumn(sequence, lp, reducedCostBound, CandidateSource.NODE_JOIN);
+		tryGenerateColumn(sequence, lp, reducedCostBound);
 	}
 
 	private void resetStatistics() {
@@ -1016,18 +988,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
 		joinPhaseNanos = 0;
-		debugReducedCostMismatchCount = 0;
-		debugNodeJoinMismatchCount = 0;
-		debugForwardSinkMismatchCount = 0;
-		debugBothNegativeMismatchCount = 0;
-		debugSignCriticalMismatchCount = 0;
-		debugPositiveOnlyMismatchCount = 0;
-		debugMismatchPrintCount = 0;
-		debugMaxReducedCostMismatchAbs = 0.0;
-		debugMaxMismatchInferred = 0.0;
-		debugMaxMismatchChecked = 0.0;
-		debugMaxMismatchSource = null;
-		debugMaxMismatchSequence = null;
 	}
 
 	private String statisticsSummary() {
@@ -1035,8 +995,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		long measuredNanos = extensionNanos + joinPhaseNanos;
 		return "labels fw kept/dominated=" + forwardLabelsKept + "/" + forwardLabelsDominated
 				+ ", bw kept/dominated=" + backwardLabelsKept + "/" + backwardLabelsDominated
-				+ ", halfWindowIneligible fw/bw=" + forwardHalfIneligibleJobCount + "/"
-				+ backwardHalfIneligibleJobCount
 				+ ", singlePoint fw kept/storeDom/graphDom=" + forwardSinglePointKept + "/"
 				+ forwardSinglePointDominatedByStore + "/" + forwardSinglePointDominatedByGraph
 				+ ", bw kept/storeDom/graphDom=" + backwardSinglePointKept + "/"
@@ -1061,14 +1019,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ "/" + formatMillis(backwardExtensionNanos) + "/" + formatMillis(joinPhaseNanos)
 				+ "/" + formatMillis(extensionNanos) + "/" + formatMillis(measuredNanos)
 				+ ", joinMeasuredShare=" + formatPercent(joinPhaseNanos, measuredNanos)
-				+ ", debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/maxAbs="
-				+ debugReducedCostMismatchCount + "/" + debugNodeJoinMismatchCount + "/"
-				+ debugForwardSinkMismatchCount + "/" + debugBothNegativeMismatchCount + "/"
-				+ debugSignCriticalMismatchCount + "/" + debugPositiveOnlyMismatchCount + "/"
-				+ debugMaxReducedCostMismatchAbs
-				+ ", debugRcMismatchMax source/inferred/checked/sequence=" + debugMaxMismatchSource
-				+ "/" + debugMaxMismatchInferred + "/" + debugMaxMismatchChecked + "/"
-				+ debugMaxMismatchSequence
 				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
@@ -1088,67 +1038,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		return String.format("%.2f%%", part * 100.0 / total);
 	}
 
-	/**
-	 * 2026-05-28: full-domain 标签按设计已经覆盖 [0,pricingHorizon]。
-	 * half-domain 版本需要的右侧常数延拓在这里不再生效，直接复用 label frontier。
-	 */
-	private PiecewiseLinearFunction getForwardJoinExtension(ForwardLabel label) {
-		if (label.joinExtendedFrontier == null) {
-			label.joinExtendedFrontier = buildForwardJoinExtension(label.frontier);
-		}
-		return label.joinExtendedFrontier;
-	}
+	// 2026-05-30: getForwardJoinExtension/getBackwardJoinExtension/valueAtOrNearest 是
+	// half-domain crossing-arc join 的常数延拓残留。旧流程只保存半域 frontier，join 前需要
+	// 把另一侧补成常数；当前 full-domain node join 直接拼 preNodeFrontier 和 backward.frontier，
+	// 因此不再需要延拓缓存和最近端点取值。
 
-	private PiecewiseLinearFunction buildForwardJoinExtension(PiecewiseLinearFunction forward) {
-		return forward;
-		// full-domain 下不应再需要下面这种 half-domain 常数延拓；保留旧逻辑便于回看。
-		// PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
-		// appendSegments(extended, forward);
-		// if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, pricingHorizon)) {
-		//     addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon, valueAtOrNearest(forward, tMid));
-		// }
-		// mergeAdjacentEqualSegments(extended);
-		// return extended;
-	}
-
-	/**
-	 * 2026-05-28: full-domain 标签按设计已经覆盖 [0,pricingHorizon]。
-	 * half-domain 版本需要的左侧常数延拓在这里不再生效，直接复用 label frontier。
-	 */
-	private PiecewiseLinearFunction getBackwardJoinExtension(BackwardLabel label) {
-		if (label.joinExtendedFrontier == null) {
-			label.joinExtendedFrontier = buildBackwardJoinExtension(label.frontier);
-		}
-		return label.joinExtendedFrontier;
-	}
-
-	private PiecewiseLinearFunction buildBackwardJoinExtension(PiecewiseLinearFunction backward) {
-		return backward;
-		// full-domain 下不应再需要下面这种 half-domain 常数延拓；保留旧逻辑便于回看。
-		// PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
-		// if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
-		//     addConstantSegmentOrPoint(extended, 0.0, backward.head.start, valueAtOrNearest(backward, tMid));
-		// }
-		// appendSegments(extended, backward);
-		// mergeAdjacentEqualSegments(extended);
-		// return extended;
-	}
-
-	private double valueAtOrNearest(PiecewiseLinearFunction function, double t) {
-		if (function == null || function.head == null) {
-			return Utility.big_M;
-		}
-		if (!Utility.compareLt(t, function.head.start) && !Utility.compareGt(t, function.tail.end)) {
-			return function.evaluate(t);
-		}
-		if (Utility.compareLt(t, function.head.start)) {
-			return function.evaluate(function.head.start);
-		}
-		return function.evaluate(function.tail.end);
-	}
-
-	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost,
-			CandidateSource source) {
+	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
@@ -1160,57 +1055,14 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (activeColumnSignatures.contains(signature)) {
 			return;
 		}
-		// 2026-05-30: 性能诊断分支仿照旧双向 pricing，不再对每个负候选调用 evaluator。
-		// evaluator 复核此前只用于诊断正候选口径差异；这里直接用 join 推导的 reduced cost
-		// 反推 objective cost，避免 final join 阶段被完整序列重算拖慢。
 		double reducedCost = inferredReducedCost;
 		double cost = objectiveCostFromReducedCost(sequence, reducedCost, lp);
-		// double checkedCost = evaluator.evaluate(sequence);
-		// if (Utility.isBigMValue(checkedCost)) {
-		// 	return;
-		// }
-		// double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
-		// if (Configure.debugBPCPricingColumnCheck && Math.abs(checkedReducedCost - inferredReducedCost) > 1e-5) {
-		// 	recordDebugReducedCostMismatch(source, sequence, inferredReducedCost, checkedReducedCost);
-		// }
+		// 2026-05-30: evaluator 复核已经从性能分支下线。它之前用于确认 node-join
+		// inferred cost 与完整序列评价是否同口径；现在非负候选已在 join 函数层剪掉，
+		// 这里直接用 inferred reduced cost 反推 objective cost。
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			rememberGeneratedCandidate(signature,
 					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
-		}
-	}
-
-	private void recordDebugReducedCostMismatch(CandidateSource source, ArrayList<Integer> sequence,
-			double inferredReducedCost, double checkedReducedCost) {
-		debugReducedCostMismatchCount++;
-		if (source == CandidateSource.NODE_JOIN) {
-			debugNodeJoinMismatchCount++;
-		} else if (source == CandidateSource.FORWARD_SINK) {
-			debugForwardSinkMismatchCount++;
-		}
-		boolean inferredNegative = Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE);
-		boolean checkedNegative = Utility.compareLt(checkedReducedCost, REDUCED_COST_TOLERANCE);
-		if (inferredNegative && checkedNegative) {
-			debugBothNegativeMismatchCount++;
-		} else if (inferredNegative != checkedNegative) {
-			debugSignCriticalMismatchCount++;
-		} else {
-			debugPositiveOnlyMismatchCount++;
-		}
-		double absGap = Math.abs(checkedReducedCost - inferredReducedCost);
-		if (Utility.compareGt(absGap, debugMaxReducedCostMismatchAbs)) {
-			debugMaxReducedCostMismatchAbs = absGap;
-			debugMaxMismatchInferred = inferredReducedCost;
-			debugMaxMismatchChecked = checkedReducedCost;
-			debugMaxMismatchSource = source;
-			debugMaxMismatchSequence = new ArrayList<Integer>(sequence);
-		}
-		// 2026-05-30: 这里不再打印所有正 reduced-cost 候选的差异。那些候选不会进列池，
-		// 真正会影响剪枝安全的是 sign-critical mismatch，因此只限量打印这类样本。
-		if (inferredNegative != checkedNegative && debugMismatchPrintCount < DEBUG_MISMATCH_PRINT_LIMIT) {
-			debugMismatchPrintCount++;
-			System.err.println("[debugBPCPricingColumnCheck] nodeJoin sign-critical reduced-cost mismatch: source="
-					+ source + ", inferred=" + inferredReducedCost + ", checked=" + checkedReducedCost
-					+ ", sequence=" + sequence);
 		}
 	}
 
@@ -1273,22 +1125,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		return !node.isArcForbidden(sequence.get(sequence.size() - 1).intValue(), node.sinkId());
 	}
 
-	private double reducedCost(ArrayList<Integer> sequence, double cost, LP lp) {
-		double reducedCost = cost - lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			reducedCost -= lp.getJobDual(job);
-			reducedCost -= lp.getArcDual(prev, job);
-			prev = job;
-		}
-		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());
-		return reducedCost;
-	}
-
-	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {
-		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, true);
-	}
-
 	private boolean isDirectForwardExtensionTimeFeasibleFullDomain(PiecewiseLinearFunction frontier, int prevJob,
 			int nextJob) {
 		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, false);
@@ -1315,15 +1151,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	 * 2026-05-22: backward 侧和论文一致，先用本轮预计算的 H^b_{ir} 做 O(1) 交集过滤；
 	 * 真正的 reduced-cost 函数仍在 extendBackward 里通过 shift/add/normalize 递推。
 	 */
-	private boolean isDirectBackwardExtensionTimeFeasible(BackwardLabel label, int prevJob) {
-		return isDirectBackwardExtensionTimeFeasible(label.jid, label.isSinkRoot, label.frontier, prevJob);
-	}
-
-	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
-			PiecewiseLinearFunction frontier, int prevJob) {
-		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, true);
-	}
-
 	private boolean isDirectBackwardExtensionTimeFeasibleFullDomain(int firstJob, boolean isSinkRoot,
 			PiecewiseLinearFunction frontier, int prevJob) {
 		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, false);
@@ -1412,10 +1239,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
-		forwardHalfEligibleByJob = null;
-		backwardHalfEligibleByJob = null;
-		forwardHalfIneligibleJobCount = 0;
-		backwardHalfIneligibleJobCount = 0;
 		zeroDualExcludedJobs = null;
 		zeroDualExcludedJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
@@ -1425,7 +1248,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows();
 		precomputeBackwardDynamicPricingWindows();
-		precomputeHalfDomainEligibility();
 	}
 
 	private void precomputeEffectivePricingWindows(LP lp) {
@@ -1576,32 +1398,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				|| Utility.compareLt(effectiveJobHEnd[job], data.hardWindowEnd[job]);
 	}
 
-	/**
-	 * 2026-05-25: 只抽取“和前驱/后继无关、单看 job 自己就落不到对应 half-domain”的信息。
-	 * forward 若整段硬窗都在 Tmid 右侧，则任何 forward prefix 都不需要再尝试它；
-	 * backward 对称地看整段硬窗是否已完全落在 Tmid 左侧。
-	 */
-	private void precomputeHalfDomainEligibility() {
-		forwardHalfEligibleByJob = new boolean[data.n + 1];
-		backwardHalfEligibleByJob = new boolean[data.n + 1];
-		forwardHalfIneligibleJobCount = 0;
-		backwardHalfIneligibleJobCount = 0;
-		for (int job = 1; job <= data.n; job++) {
-			boolean forwardEligible = dynamicJobPenaltyByJob[job] != null
-					&& !Utility.compareGt(dynamicJobHStart[job], tMid);
-			boolean backwardEligible = dynamicBackwardPenaltyByJob[job] != null
-					&& !Utility.compareLt(dynamicBackwardHEndByJob[job], tMid);
-			forwardHalfEligibleByJob[job] = forwardEligible;
-			backwardHalfEligibleByJob[job] = backwardEligible;
-			if (!forwardEligible) {
-				forwardHalfIneligibleJobCount++;
-			}
-			if (!backwardEligible) {
-				backwardHalfIneligibleJobCount++;
-			}
-		}
-	}
-
 	private void ensureBaseHalfPenaltyCache() {
 		if (baseForwardHalfPenaltyByJob != null && Utility.compareEq(baseHalfPenaltyCacheTMid, tMid)
 				&& Utility.compareEq(baseHalfPenaltyCacheHorizon, pricingHorizon)) {
@@ -1714,16 +1510,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 	}
 
-	private boolean isForwardHalfEligibleJob(int job) {
-		return job > 0 && forwardHalfEligibleByJob != null && job < forwardHalfEligibleByJob.length
-				&& forwardHalfEligibleByJob[job];
-	}
-
-	private boolean isBackwardHalfEligibleJob(int job) {
-		return job > 0 && backwardHalfEligibleByJob != null && job < backwardHalfEligibleByJob.length
-				&& backwardHalfEligibleByJob[job];
-	}
-
 	private ArrayList<Integer> recoverForwardSequence(ForwardLabel label) {
 		ArrayList<Integer> sequence = new ArrayList<Integer>();
 		ForwardLabel cursor = label;
@@ -1742,12 +1528,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			sequence.add(Integer.valueOf(cursor.jid));
 			cursor = cursor.father;
 		}
-		return sequence;
-	}
-
-	private ArrayList<Integer> recoverJoinSequence(ForwardLabel forward, BackwardLabel backward) {
-		ArrayList<Integer> sequence = recoverForwardSequence(forward);
-		sequence.addAll(recoverBackwardSequence(backward));
 		return sequence;
 	}
 
@@ -1840,15 +1620,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		target.addSegment(start, end, 0.0, value);
 	}
 
-	private void appendSegments(PiecewiseLinearFunction target, PiecewiseLinearFunction source) {
-		if (target == null || source == null || source.head == null) {
-			return;
-		}
-		for (Segment seg = source.head; seg != null; seg = seg.next) {
-			target.addSegment(seg.start, seg.end, seg.slope, seg.intercept);
-		}
-	}
-
 	private void mergeAdjacentEqualSegments(PiecewiseLinearFunction function) {
 		if (function == null || function.head == null) {
 			return;
@@ -1893,8 +1664,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private abstract static class FunctionLabel extends Label implements Comparable<Label> {
 		final int labelId;
-		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
-		PiecewiseLinearFunction joinExtendedFrontier;
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet reachableSet,
 				PiecewiseLinearFunction frontier, double minReducedCost) {

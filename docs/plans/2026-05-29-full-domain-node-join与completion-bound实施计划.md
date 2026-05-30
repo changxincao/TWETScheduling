@@ -620,3 +620,15 @@ cost = reducedCost + machineDual
 旧 VRP 的列标识也按代码查证了。`src/BPC/LP/Pool.java` 使用 `HashMap<ArrayList<Integer>, Integer> schedule_check_map`，`AddRoute()` 直接用 `Schedule.jobSeq` 作为 key；Java 的 `ArrayList.equals/hashCode` 是顺序敏感的。因此旧 VRP 的列去重也是按完整有序 route sequence，而不是客户集合。`src/BPC/LP/LP.java` 加列时不仅把 route cost 放入目标函数，还把 route 中相邻节点登记到 `arc2schedule`，并用于分支弧约束、cut 或后续 route 筛选。由此，同一客户集合但顺序不同的 route 在同一个 node 上不能只保留一条：它们覆盖约束系数相同，但成本、访问弧、分支兼容性和 cut 响应都可能不同。只有在纯集合覆盖、成本也只依赖集合且没有弧/cut 约束的模型里，才可以把同集合不同顺序合并；当前 TWET 和旧 VRP 都不满足这个条件。
 
 旧 VRP 中没有发现“把当前 RMP 所有变量临时设为整数求上界”的启发式。`src/BPC/LP/LP.java` 中 route 变量用 `IloNumVarType.Float` 建模，`IsInteger()` 只是检查当前 LP 解是否已经整数，并在整数时提取路线；它不是把 LP 重新改成 MIP 求一个 restricted-master incumbent。当前 TWET 的 BPC 也是类似思路：树搜索中如果 LP 解本身整数则更新 incumbent，启发式 pricing 负责找负列而不是求 integerized RMP。因此若后续要加这个上界启发式，应作为新功能单独实现，并且要把“不整数可行只说明当前列池不足”写进使用口径。
+
+### 6.16 关于负列复核范围和 pi-window 正负不一致的进一步澄清
+
+2026-05-30 继续确认复核范围。`GCBBStyleBidirectionalFullDomainNodeJoin.tryGenerateColumn()` 中的 debug 负列复核发生在 `rememberGeneratedCandidate()` 之前，因此覆盖的是所有通过结构检查、当前 active 列去重、且 inferred reduced cost 为负的候选，而不是最终 top-K heap 中保留下来的 K 条。换句话说，`wet021` node join 里 `debugNegGenerated checked=32` 对应的是本轮所有进入候选池逻辑前的负候选，随后其中 10 条被 top-K 保留、22 条被堆容量或重复逻辑丢弃。full-domain arc join 的 debug 复核也发生在 `rememberGeneratedCandidate()` 前；它会先用 evaluator 重算候选 sequence 的真实成本和 reduced cost，再决定是否进入候选池。
+
+列成本当前不是只对最终 K 条计算。node join 性能分支在 `tryGenerateColumn()` 一进来就用 inferred reduced cost 反推 `cost`，随后才判断 reduced cost 是否为负、是否进入 top-K。arc join 也在候选池前构造成本；debug 开启时还会对候选 sequence 调 evaluator。这样写比较直接，但从性能角度并不是最省的。如果后续要进一步优化，可以把候选池内部从“直接持有 `TWETColumn`”改成“先持有 sequence + reducedCost + 必要的 cost 生成信息”，最终 `finalizeGeneratedColumns()` 时只对保留下来的 K 条构造 `TWETColumn.cost`。这会减少被 top-K 丢弃候选的成本反推或 evaluator 调用，但需要小心去重和 active 列过滤仍然基于 sequence。
+
+关于“为什么正候选可能不一致而负候选目前没有观察到不一致”，当前可给出的解释是保留规则层面的，而不是对任意 sequence 的逐点等价。`pi` 时间窗本质上是用当前 job dual 推出每个 job 的 profitable completion 区间：若某个 job 在这个区间外完成，仅该 job 的 earliness/tardiness penalty 就已经足以抵掉它的 job dual 收益，按 root/no-cut 且弧 reduced cost 仍满足原始三角不等式的假设，它不应成为真正负 reduced-cost 列的最优完成时间。因此，负 reduced-cost 最优列应当能在这些 profitable window 内找到等价或更优的完成时间；这就是为什么该 window 可以作为“负列保留规则”使用。
+
+但对正 reduced-cost 的固定 sequence，这个结论不成立。一个 sequence 在完整时间域上的最优完成时间可能落在某个 job 的 profitable window 外，完整 evaluator 会选择那个时间并得到一个正 reduced cost；pricing 侧被 window 裁掉后，只能在 restricted domain 内取另一个完成时间，数值可能更大或更小，但反正它仍然是非负候选，不影响是否加入列池。此前 `wet020` 大量 mismatch 全部是 positive-only，正是这个现象：它说明 window 改变了正候选的固定 sequence 最优值，但没有观察到负候选符号被改变。
+
+当前测试能支持的结论应写得保守一些：在已跑的 `wet020/wet021/wet022/wet025` root/no-cut 样例里，所有最终生成逻辑前的负候选都没有发现 evaluator mismatch；正候选存在不一致，且已确认会被非负过滤挡掉。这不是对所有实例、所有节点、所有 cut dual 的证明。代码里也只在 `canUseDualProfitableWindow()` 返回 true 时启用该 window，即根节点且没有 active cuts；一旦进入非根或有 cut dual，当前实现回到静态窗口，避免把这个基于三角不等式和 job dual 的推理扩展到不满足条件的场景。

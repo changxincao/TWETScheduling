@@ -501,3 +501,11 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 当前 `GCBBStyleBidirectionalFullDomainNodeJoin` 可以作为 node join 实验分支继续使用。它已经完成的关键点包括：forward 保存 `preNodeFrontier/U_state`；backward 不再保存额外 suffix 状态；reachable set 改成 full-domain 一跳可达；第一次跨过 `Tmid` 的 child 作为 terminal label 参与 join；terminal label 走普通 dominance 但不入队；debug 输出按来源和符号临界性分类。
 
 尚未完成的是性能优化。现在 final join 仍大量调用函数 add/findMinimal 和 evaluator 复核，`wet020_001_2m` debug 分类跑中 exact pricing 约 `74.784s`，join phase 占主要部分。这不是拼接公式错误，而是安全基线版本缺少可靠剪枝。后续如果要加速，应优先证明哪些 node join inferred value 可以作为安全 lower bound，或把 completion bound 作为前置筛选；在更多样例确认 `signCritical=0` 之前，不应直接用所有 inferred 数值替代 evaluator，也不应恢复不可靠的函数 lower-bound prune。
+
+### 6.6 当前 node join 的剪枝顺序
+
+当前 `GCBBStyleBidirectionalFullDomainNodeJoin` 的 final join 不是先用 reduced-cost 下界判断再拼接。现有流程只保留轻量的结构和时间过滤：先按同一个 `joinJob` 分组，只拿 `activeForwardByLastJob[j]` 和 `activeBackwardByFirstJob[j]` 配对；随后检查除 join job 以外的 visited set 是否相交；再检查 `forward.preNodeFrontier` 和 `backward.frontier` 的时间定义域是否有交集。通过这些检查后，代码直接执行 `forward.preNodeFrontier.add(backward.frontier)`，再对得到的 `joinCost` 调用 `findMinimal(false, true)`。
+
+因此这里的 `reducedCostBound` 这个变量名容易误导。它不是前置剪枝用的安全 lower bound，而是函数拼接之后得到的 inferred reduced cost，只传给 `tryGenerateColumn()` 做 debug 复核口径。真正决定候选是否进入列池的是 `TWETColumnEvaluator` 对恢复序列重新计算出的 reduced cost。`joinPairsLowerBoundPruned` 目前只是保留的统计字段，当前 node-join 路径没有实际增加它；此前 `wet020_001_2m` 的统计里该项也保持为 0。
+
+这个选择是有意的安全基线。虽然本轮 debug 分类显示 `signCritical=0`，没有发现负列符号被算错，但 dual profitable window 下大量正候选的 inferred/evaluator 数值仍不逐点一致。只要还没有证明某个 inferred value 对所有样例都是安全 lower bound，就不应把它放回 final join 的 cost-LB 剪枝。后续若要恢复类似旧 crossing-arc join 的下界判断，应先明确下界的定义域、是否受 dual window 影响、以及它是否只用于丢弃确定不可能为负的 pair。

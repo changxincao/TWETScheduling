@@ -599,3 +599,24 @@ join 后出现正 reduced cost 并不奇怪。group/pair 下界使用的是 `for
 列加入主问题时的目标系数来自 `TWETColumn.cost`。`LP` 在 objective 和增量加列时都直接使用 column cost，覆盖约束只看 job 是否被该列包含，分支弧约束则看列的有序 sequence 是否访问对应 arc。当前 `Pool` 使用 `SequenceSignature` 去重，签名是完整有序 job 序列，不是 job 集合；同一 job 集合但顺序不同会作为不同列保留，因为成本和访问弧可能不同。相反，如果完全相同的 sequence 后续以不同 cost 再次生成，`Pool.addColumn()` 会直接返回已有列 id，不会更新 cost。因此列成本必须是与 sequence 固定绑定的真实原始目标成本；如果某条列的 cost 受当前 `pi` 时间窗或当前 dual 影响，就不应作为永久 objective coefficient 写入列池，至少应由 evaluator 重算真实成本，或在 pool 层明确处理同序列成本更新。
 
 当前启发式 pricing 没有使用这套 `pi` 时间窗。`HeuristicPricingEngine` 直接用原始 `data.penaltyFunction` 和 `TWETColumnEvaluator` 同口径的序列成本，再用当前 dual 计算 reduced cost。若后续增加“把当前 RMP 变量设为整数求解上界”的启发式，它只能证明当前受限列集合里是否找到一个整数可行解；若整数不可行，不能说明原问题不可行，只能说明当前列池还不够。若列池中存在 window 口径导致的偏大 cost，用它求出的上界也会偏保守，因此任何 incumbent 最好按真实 sequence evaluator 重新计价。
+
+### 6.15 pi-window 负列复核、列成本与旧 VRP 列标识补充
+
+2026-05-30 按“多跑几个样例”的要求，在 node join 和 full-domain arc join 上补了 root-only debug 验证。node join 侧在 `GCBBStyleBidirectionalFullDomainNodeJoin` 里恢复了一个 debug-only 的负列复核：只有当 inferred reduced cost 已经为负、并且 `Configure.debugBPCPricingColumnCheck=true` 时，才用 `TWETColumnEvaluator` 对恢复出的 sequence 重新计算原始成本和 reduced cost；该统计不改变实际加列成本，仍然保留性能分支“用 join 推导 reduced cost 反推 objective cost”的口径。`wet020/wet021/wet022` 的 node join root 结果中，`wet021` 第一轮生成了 32 条负候选并全部通过复核，`debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=32/0/0/0/0.0`；`wet020` 和 `wet022` 没有生成负候选。`wet025` 的 node join 运行过慢，已改用 arc join 做同类 pi-window 验证。
+
+arc join 侧复用 `GCBBStyleBidirectionalFullDomain` 既有 debug 复核路径，跑了 `wet020/wet021/wet022/wet025` 四个 root-only 样例。四个样例均 `valid=true`，运行过程中没有出现 inferred/evaluator mismatch 输出；其中 `wet021` 第一轮 exact pricing 的候选池统计为 `candidatePool kept/seen/dropped=8/15/7`，其余 `wet020/wet022/wet025` 没有生成负候选。当前证据说明：至少在这些 root/no-cut 且 `dualWindow=enabled` 的样例上，最终生成的负列在 pi-window 下的 inferred reduced cost 与原始 evaluator reduced cost 没有观察到差异。这个结论是经验验证，不是形式证明；它支持继续用 arc join 做默认方向，也支持把 node join 的 evaluator 复核收缩到 debug-only 负列统计，但不能替代对 dynamic window 安全性的数学证明。
+
+列加入主问题时的成本口径也重新按代码确认了一遍。`LP.readDuals()` 在每次 LP 求解后把 cover dual 写入 `jobDual[j]`，把机器数约束 dual 写入 `machineDual`，把分支弧约束 dual 写入 `arcDual[from][to]`。pricing 生成列时如果只有 reduced cost，就通过
+
+```text
+cost = reducedCost + machineDual
+       + sum jobDual(job)
+       + sum arcDual(prev, job)
+       + arcDual(last, sink)
+```
+
+反推出 `TWETColumn.cost`。这里不是从 label 中读取 dual 累加值，而是扫描恢复出的有序 sequence，并读取 LP 当前缓存的 dual 数组。label 传播过程中的 frontier 已经包含 reduced-cost 递推项，但最终 objective coefficient 必须写成原始主问题成本，因此需要这一步反推。后续如果担心同一 sequence 在不同 pi-window 下被算出不同 cost，问题不在 LP 目标系数公式本身，而在“生成 `TWETColumn.cost` 时是否用了真实原始 sequence 成本”。当前启发式 pricing 使用 evaluator 原始成本；node join 性能分支使用 inferred reduced cost 反推，所以才需要上述负列复核继续监控。
+
+旧 VRP 的列标识也按代码查证了。`src/BPC/LP/Pool.java` 使用 `HashMap<ArrayList<Integer>, Integer> schedule_check_map`，`AddRoute()` 直接用 `Schedule.jobSeq` 作为 key；Java 的 `ArrayList.equals/hashCode` 是顺序敏感的。因此旧 VRP 的列去重也是按完整有序 route sequence，而不是客户集合。`src/BPC/LP/LP.java` 加列时不仅把 route cost 放入目标函数，还把 route 中相邻节点登记到 `arc2schedule`，并用于分支弧约束、cut 或后续 route 筛选。由此，同一客户集合但顺序不同的 route 在同一个 node 上不能只保留一条：它们覆盖约束系数相同，但成本、访问弧、分支兼容性和 cut 响应都可能不同。只有在纯集合覆盖、成本也只依赖集合且没有弧/cut 约束的模型里，才可以把同集合不同顺序合并；当前 TWET 和旧 VRP 都不满足这个条件。
+
+旧 VRP 中没有发现“把当前 RMP 所有变量临时设为整数求上界”的启发式。`src/BPC/LP/LP.java` 中 route 变量用 `IloNumVarType.Float` 建模，`IsInteger()` 只是检查当前 LP 解是否已经整数，并在整数时提取路线；它不是把 LP 重新改成 MIP 求一个 restricted-master incumbent。当前 TWET 的 BPC 也是类似思路：树搜索中如果 LP 解本身整数则更新 incumbent，启发式 pricing 负责找负列而不是求 integerized RMP。因此若后续要加这个上界启发式，应作为新功能单独实现，并且要把“不整数可行只说明当前列池不足”写进使用口径。

@@ -14,6 +14,7 @@ import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -47,9 +48,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private final Data data;
 	private final TWETBPCConfig config;
-	// 2026-05-30: 早期 node-join 分支保留 evaluator 复核，用来定位 inferred reduced cost
-	// 与完整序列评价之间的口径差异；当前性能分支已经改为先用 join 下界剪枝，再用 join 推导值
-	// 反推列成本，因此 evaluator 和 mismatch source 分类不再进入活跃路径。
+	private final TWETColumnEvaluator evaluator;
+	// 2026-05-30: 性能分支仍用 join 推导 reduced cost 反推列成本；evaluator 只在
+	// debugBPCPricingColumnCheck 下复核最终生成的负列，用来确认 pi-window 没有造成负列符号错误。
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -132,12 +133,18 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
 	private long joinPhaseNanos;
+	private long debugGeneratedNegativeChecked;
+	private long debugGeneratedNegativeMismatch;
+	private long debugGeneratedNegativeSignCritical;
+	private long debugGeneratedNegativeBothNegative;
+	private double debugGeneratedNegativeMaxAbsMismatch;
 
 	private String lastMessage = "GCBB-style full-domain node-join bidirectional pricing not executed";
 
 	public GCBBStyleBidirectionalFullDomainNodeJoin(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
+		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -988,6 +995,11 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
 		joinPhaseNanos = 0;
+		debugGeneratedNegativeChecked = 0;
+		debugGeneratedNegativeMismatch = 0;
+		debugGeneratedNegativeSignCritical = 0;
+		debugGeneratedNegativeBothNegative = 0;
+		debugGeneratedNegativeMaxAbsMismatch = 0.0;
 	}
 
 	private String statisticsSummary() {
@@ -1024,6 +1036,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
+				+ ", debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs="
+				+ debugGeneratedNegativeChecked + "/" + debugGeneratedNegativeMismatch + "/"
+				+ debugGeneratedNegativeSignCritical + "/" + debugGeneratedNegativeBothNegative + "/"
+				+ debugGeneratedNegativeMaxAbsMismatch
 				+ ", " + PaperDominanceGraph.statisticsSummary();
 	}
 
@@ -1057,10 +1073,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		double reducedCost = inferredReducedCost;
 		double cost = objectiveCostFromReducedCost(sequence, reducedCost, lp);
-		// 2026-05-30: evaluator 复核已经从性能分支下线。它之前用于确认 node-join
-		// inferred cost 与完整序列评价是否同口径；现在非负候选已在 join 函数层剪掉，
-		// 这里直接用 inferred reduced cost 反推 objective cost。
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
+			if (Configure.debugBPCPricingColumnCheck) {
+				recordGeneratedNegativeDebug(sequence, reducedCost, lp);
+			}
+			// 2026-05-30: 正式列成本仍由 join 推导 reduced cost 反推；上面的 evaluator
+			// 只做 debug 统计，不改变性能分支的加列口径。
 			rememberGeneratedCandidate(signature,
 					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
 		}
@@ -1111,6 +1129,36 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		cost += lp.getArcDual(prev, lp.getNode().sinkId());
 		return cost;
+	}
+
+	private void recordGeneratedNegativeDebug(ArrayList<Integer> sequence, double inferredReducedCost, LP lp) {
+		double checkedCost = evaluator.evaluate(sequence);
+		double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
+		double diff = Math.abs(inferredReducedCost - checkedReducedCost);
+		debugGeneratedNegativeChecked++;
+		if (Utility.compareGt(diff, Math.max(1e-5, Utility.EPS * 100.0))) {
+			debugGeneratedNegativeMismatch++;
+			debugGeneratedNegativeMaxAbsMismatch = Math.max(debugGeneratedNegativeMaxAbsMismatch, diff);
+			boolean inferredNegative = Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE);
+			boolean checkedNegative = Utility.compareLt(checkedReducedCost, REDUCED_COST_TOLERANCE);
+			if (inferredNegative != checkedNegative) {
+				debugGeneratedNegativeSignCritical++;
+			} else if (inferredNegative && checkedNegative) {
+				debugGeneratedNegativeBothNegative++;
+			}
+		}
+	}
+
+	private double reducedCost(ArrayList<Integer> sequence, double cost, LP lp) {
+		double reducedCost = cost - lp.getMachineDual();
+		int prev = 0;
+		for (int job : sequence) {
+			reducedCost -= lp.getJobDual(job);
+			reducedCost -= lp.getArcDual(prev, job);
+			prev = job;
+		}
+		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());
+		return reducedCost;
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {

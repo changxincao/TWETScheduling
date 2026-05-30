@@ -521,3 +521,13 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 本次也按性能诊断要求停用了 `TWETColumnEvaluator` 复核路径。`tryGenerateColumn()` 现在直接使用 join 推导的 `inferredReducedCost` 作为候选 reduced cost，并通过 `objectiveCostFromReducedCost()` 反推出列的 objective cost；原 evaluator 相关代码保留为注释，便于后续需要 debug 时恢复。这使 node join 更接近旧双向 pricing 的运行口径，但也意味着当前分支不再用 evaluator 兜底检查函数口径差异。
 
 验证上，用 `wet020_001_2m`、`mode=nodeJoin`、`maxNodes=1` 重新跑 root 节点，结果为 `obj=bound=6343`、`valid=true`。exact pricing 时间约 `5.537s`，其中 forward 扩展约 `1.336s`，backward 扩展约 `3.768s`，join phase 约 `0.327s`，joinMeasuredShare 约 `6.01%`。本轮统计中 `joinTerminalGroupsCostPruned=44`，`joinPairsLowerBoundPruned=10850`，`joinFunctionEvaluations=937228` 且这些函数评价全部在 `findMinimal` 后被非负过滤掉，候选池没有新增负列。相比 evaluator 安全版，这说明旧双向风格的前置下界剪枝确实把 final join 成本压了下来。后续若要把该分支推广到更多样例，还需要继续关注不同实例上列有效性、BPC bound 是否一致，以及停用 evaluator 后是否会隐藏新的符号临界问题。
+
+### 6.8 与旧双向流程的对齐检查
+
+当前 node-join 版本与 `GCBBStyleBidirectionalFullDomain`、`GCBBAsymmetricBidirectional` 和 `GCNGBBStyleBidirectional` 的 final join 骨架已经基本一致：final join 前 compact active label；forward 候选按用于 pair lower bound 的标量排序；join 时先做 group lower bound，再做 pair lower bound，随后做集合和时间检查；只有通过这些轻量过滤后才执行函数 add 和 `findMinimal`；`findMinimal` 非负则直接剪掉；负候选再恢复序列并进入 top-K 候选池。
+
+不一致的地方主要来自 node join 自身语义，而不是流程缺失。旧 crossing-arc join 使用 `forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost` 作为 group/pair 下界，并在函数拼接时执行 `forward.shiftX(delta) + backward + joinFixedReducedCost`。node join 版本则把 `joinFixedReducedCost` 和 `shiftX(delta)` 前移到 forward 扩展阶段，存成 `preNodeFrontier/U_j`，因此下界改为 `preNodeMinReducedCost + backward.minReducedCost`，函数拼接改为 `preNodeFrontier + backward.frontier`。集合检查也从“forward/backward visited 完全不相交”改成“除 join job 外不相交”，恢复序列时删除 backward 开头重复的 join job。
+
+当前还存在一些冗余或残留。`getForwardJoinExtension()`、`getBackwardJoinExtension()`、`valueAtOrNearest()` 和 `appendSegments()` 是 half-domain 常数延拓时期留下的工具，在当前 full-domain node join 路径中没有被调用。`minForwardReducedCostByLastJob` 仍被维护，但 node join 的 group lower bound 已改用 `minForwardPreNodeReducedCostByLastJob`，前者目前只属于旧流程残留。由于 evaluator 复核已停用，`CandidateSource`、`recordDebugReducedCostMismatch()` 以及 `debugRcMismatch` 相关统计也变成诊断残留；现在 `debugBPCPricingColumnCheck` 实际只保留序列兼容性检查，不再做成本复核。`forwardHalfEligibleByJob/backwardHalfEligibleByJob` 在 node-join full-domain 路径里也只用于统计，不参与扩展或 join 判定。
+
+旧流程中主要的加速 trick 已经迁回：active forward 排序后 pair lower bound 可以 `break`；group lower bound 可以整组跳过；函数最小值非负时不恢复序列；top-K 候选池仍按 best reduced cost 保留。尚未迁入或暂未使用的加速方向主要不是旧流程已有 trick，而是后续可选增强，例如用当前 top-K 最差负 reduced cost 替代固定 `REDUCED_COST_TOLERANCE` 做更强剪枝，或把 completion bound 接到 label/terminal/join 前筛选。这些都需要单独证明安全性。

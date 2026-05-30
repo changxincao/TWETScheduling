@@ -567,3 +567,13 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 现有 root 对照数据支持这个解释。`wet020` 中 node join 的 boundary terminal 保留/支配为 forward `1975/34096`、backward `7471/65325`，paper dominance kept/rejected 从 arc join 的 `2588/21845` 增至 `22399/127572`，dominance checks 从 `26907` 增至 `336228`。`wet021` 两轮中 node join 的 boundary terminal 尝试规模更大，paper dominance kept/rejected 从 `8254/88775` 增至 `91935/592982`，dominance checks 从 `107218` 增至 `1594409`。因此 17x-23x 的总耗时差距主要不是 final join 公式本身，而是当前 full-domain reachable 与 terminal 存储口径已经偏离了“只多一层”的预期。
 
 由此得到的实现判断是：当前代码没有表现出 terminal label 被反复入队的无限扩展错误，因为跨界 child 保留后确实不再入队；但如果设计目标是“相对 arc join 只额外补第一跨界 node join 候选”，那么当前实现偏宽，属于需要重新收窄的实现问题。后续若要验证这个方向，应考虑把 normal label 的 reachable/dominance 仍保持半域语义，再单独扫描或保存跨界 terminal 候选；terminal 候选也不宜直接用 full-domain reachable key 扩大普通 dominance graph，至少应评估 terminal-only store 或使用半域 continuation key。
+
+### 6.12 node join 与 arc join 的成本交换关系
+
+进一步讨论后，可以把当前差距概括为一个成本交换问题。full-domain arc join 在扩展阶段仍保留半域可达性判断：如果某个 child 一生成就跨过 `Tmid`，旧流程不会生成它，也不会对它做 `shift/add/normalize`、dominance 插入、active list 登记和后续 compact。相应地，arc join 把这部分组合留到 final join 里，通过 crossing arc 拼接两侧 label。它的代价是 join 阶段 pair 更多、函数拼接更多，但扩展侧 label 规模被半域截断压住。
+
+当前 node join 正好反过来。为了让两侧在同一个 job 上拼接，它把第一次跨过 `Tmid` 的 child 也显式生成出来，并作为 terminal label 保留。这样 final join 只按同一个 `joinJob` 拼，group 数和语义都更直接，join phase 占比也明显降低；但扩展阶段要为每个父 label 枚举所有 full-domain 一跳可行的跨界 job，额外生成的 terminal child 还进入普通 dominance graph 和 active join table。因此 node join 省下的是 final join 的一部分扫描/拼接成本，付出的是大量扩展和占优成本。
+
+从 `wet020/wet021` root 结果看，当前这笔交换不划算。node join 的 joinMeasuredShare 确实比 arc join 低，但扩展和 dominance 的放大远大于 join 阶段节省：`wet020` 中 node join 的 join phase 约 `279ms`，arc join 约 `62ms`，node join 的 join 本身甚至没有更短；真正拉开差距的是扩展总时间从 arc join 的约 `76ms` 增至 node join 的约 `3296ms`。`wet021` 两轮也类似，node join join phase 约 `2204ms`，arc join 约 `412ms`，但扩展总时间从约 `1378ms` 增至约 `30326ms`。因此当前结论不是“node join 公式一定差”，而是当前 full-domain terminal 显式化方式让扩展/占优成本超过了它在 join 端可能带来的收益。
+
+所以短期判断应偏向继续保留 arc join 作为更好的默认方向。node join 若要继续尝试，优化重点不应再放在 final join，而应放在 terminal label 的生成和存储语义上：normal label 仍使用半域 reachable 参与普通 dominance；跨界 terminal 候选单独生成、单独轻量支配或直接面向 join 存储；避免把 full-domain reachable key 放进普通 dominance graph。只有先把这部分额外扩展和占优成本压下来，node join 才有可能靠更直接的同点拼接抵消成本。

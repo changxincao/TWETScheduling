@@ -667,3 +667,11 @@ cost = reducedCost + machineDual
 1.2.1：最终的那K个保存下来的挨个评估一次，看看是否等价，不等价的话直接把成本改掉。但我不知道这个会不会很耗时间。
 1.2.2：不做评估？没想到啥好办法。不太能确定一个被高估的负列，是否可能被二次生成他准确的列成本。
 ```
+
+### 6.20 inferred 值与 K 堆复核位置
+
+这里讨论中的 `inferred` 指 pricing 函数递推或 join 函数拼接直接推导出的 reduced cost。对 node join 来说，它是 `forward.preNodeFrontier.add(backward.frontier).findMinimal(false, true)[0]` 得到的 `reducedCostBound`；对 forward-sink 收尾来说，它是 `label.minReducedCost - arcDual(last, sink)`。它不是“堆”本身，但当前 `PricingColumnCandidate` 会把这个值作为 `reducedCost` 存入 top-K 候选堆，并用它反推 `TWETColumn.cost`。因此一旦不做 evaluator 复核，K 堆里的排序值和准备写入 master 的列成本都来自 inferred 口径。
+
+若只在最终 K 条即将加入 master 前复核，可以保证这 K 条写入列池和主问题的 objective coefficient 是真实 evaluator 成本；如果发现 both-negative mismatch，则直接改成 evaluator cost，不会丢掉这条真实负列。若发现 inferred 负但 evaluator 非负，则应丢弃该列，因为它不是当前真实主问题下的负列。这个做法能解决“错误 cost 污染永久列池”的主要风险，但它不保证 top-K 排序仍然是按真实 reduced cost 的 top-K，因为一些被 inferred 高估而提前挤出堆的候选不会被复核，也无法补回。
+
+因此更稳的实现位置是在 `tryGenerateColumn()` 中、进入 `rememberGeneratedCandidate()` 之前复核所有 inferred 为负的候选：恢复 sequence 后调用 `TWETColumnEvaluator.evaluate()` 得到真实 cost，再用当前 dual 重算 checked reduced cost。只有 checked reduced cost 仍为负时，才用 checked cost 和 checked reduced cost 进入 K 堆。这样评估范围仍然只是 inferred 负候选，不是所有 join pair；同时 K 堆排序、最终列成本和列池去重后的永久 cost 都回到真实原始 sequence 成本口径。若为了性能只复核最终 K 条，则应把该分支视为启发式加列或近似 top-K，而不是严格的真实 top-K exact pricing 输出。

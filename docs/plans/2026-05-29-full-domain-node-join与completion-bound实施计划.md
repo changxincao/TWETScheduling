@@ -396,3 +396,20 @@ final join 已从 crossing-arc join 改为同 job node join。流程按 join job
 2026-05-30 按最新讨论修正 node join terminal label 的插入语义。第一次跨过 `Tmid` 的 forward/backward child 不再绕过普通 dominance table，而是和普通 label 一样先调用 `insertForward()` / `insertBackward()` 进入 `FWTL` / `BWTL` 做占优判断。若被保留，它会正常登记到 active label list，后续参与 node join；区别只在于调用方不把它加入 `FWUL` / `BWUL`，因此不会继续向后或向左扩展。
 
 这个口径等价于“普通 label：dominance table 保留后进入 active list 并入队；terminal label：dominance table 保留后进入 active list 但不入队”。这样 terminal label 的支配关系和旧 label 逻辑保持一致，不再引入单独的旁路 store 或特殊支配规则。已有 active list 中被后续 terminal label 支配的旧 label 仍按原流程延迟清理，在 final join 前由 `compactAndSortActiveLabelListsForJoin()` 过滤。
+
+### 6.4 node join mismatch 的分类诊断结论
+
+2026-05-30 对 `GCBBStyleBidirectionalFullDomainNodeJoin` 的 debug mismatch 输出做了分类，不再把所有正 reduced-cost 候选逐条打印。新的统计按候选来源区分 `NODE_JOIN` 和 `FORWARD_SINK`，并把 mismatch 分为三类：两边都是负 reduced cost、符号临界不一致、两边都是非负 reduced cost。这里真正会影响列池和剪枝安全的是“符号临界不一致”，即一边认为是负列而另一边认为不是负列。
+
+带 CPLEX classpath 对 `wet020_001_2m` 运行 `debugBPCPricingColumnCheck=true` 后，root 节点 exact pricing 完整跑完，结果仍为 `obj=bound=6343` 且 `valid=true`。本轮统计为：
+
+```text
+debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/maxAbs=
+542786/542238/548/0/0/542786/2357.999999999989
+```
+
+因此这次刷屏的直接原因不是 node join 公式会把负列算错，而是 debug 复核在安全版里对大量不会进入列池的正候选也比较了函数推导 reduced cost 和 `TWETColumnEvaluator` 复核 reduced cost。所有 mismatch 都落在 `positiveOnly`，没有 `bothNeg`，也没有 `signCritical`。换句话说，当前证据没有发现“真实负列被 inferred 算成非负”或“inferred 负列但 evaluator 非负”的情况。
+
+这些正候选为什么数值不完全一致，主要是口径差异造成的：pricing 侧启用了 root/no-cut 下的 dual profitable window，`dualWindow=enabled`，本轮有效时间域被收紧到 `dynamicHStartMin=512.9999999999998`、`pricingHorizon=1188.0000000000007`；而 `TWETColumnEvaluator` 是按恢复出的完整 sequence 在原始目标函数口径下重新求序列成本。profitable window 的作用是保证负 reduced-cost 的最优候选不会被删掉，不保证任意一个正 reduced-cost sequence 的函数值和原始 evaluator 值逐点一致。因此正候选上出现 `inferred > checked` 是预期内的诊断噪声，不应据此判断 node join 公式错误。
+
+当前结论相应修正为：`preNodeFrontier + backward.frontier` 的 node join 公式在本轮 sign 层面没有暴露错误；`exactSuffixFrontier` 仍不需要恢复。短期仍保留 evaluator 复核返回列，因为函数值和 evaluator 的全量数值口径尚未做到逐候选一致，不能直接把 inferred 用作通用列成本。但如果只讨论是否会错过负列，本次分类结果显示该问题没有在 `wet020_001_2m` root 节点复现。后续若要把 inferred 接回剪枝，需要继续在更多样例上统计 `signCritical` 是否始终为 0，而不是看正候选的绝对数值差。

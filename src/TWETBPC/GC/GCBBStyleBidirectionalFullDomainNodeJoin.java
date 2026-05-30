@@ -42,8 +42,12 @@ import TWETBPC.Util.SequenceSignature;
 public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
+	private static final int DEBUG_MISMATCH_PRINT_LIMIT = 12;
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
+	}
+	private enum CandidateSource {
+		NODE_JOIN, FORWARD_SINK
 	}
 
 	private final Data data;
@@ -131,6 +135,18 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
 	private long joinPhaseNanos;
+	private long debugReducedCostMismatchCount;
+	private long debugNodeJoinMismatchCount;
+	private long debugForwardSinkMismatchCount;
+	private long debugBothNegativeMismatchCount;
+	private long debugSignCriticalMismatchCount;
+	private long debugPositiveOnlyMismatchCount;
+	private long debugMismatchPrintCount;
+	private double debugMaxReducedCostMismatchAbs;
+	private double debugMaxMismatchInferred;
+	private double debugMaxMismatchChecked;
+	private CandidateSource debugMaxMismatchSource;
+	private ArrayList<Integer> debugMaxMismatchSequence;
 
 	private String lastMessage = "GCBB-style full-domain node-join bidirectional pricing not executed";
 
@@ -756,7 +772,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
-		tryGenerateColumn(sequence, lp, reducedCost);
+		tryGenerateColumn(sequence, lp, reducedCost, CandidateSource.FORWARD_SINK);
 	}
 
 	/**
@@ -929,7 +945,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		ArrayList<Integer> sequence = recoverNodeJoinSequence(forward, backward);
-		tryGenerateColumn(sequence, lp, reducedCostBound);
+		tryGenerateColumn(sequence, lp, reducedCostBound, CandidateSource.NODE_JOIN);
 	}
 
 	private void resetStatistics() {
@@ -964,6 +980,18 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
 		joinPhaseNanos = 0;
+		debugReducedCostMismatchCount = 0;
+		debugNodeJoinMismatchCount = 0;
+		debugForwardSinkMismatchCount = 0;
+		debugBothNegativeMismatchCount = 0;
+		debugSignCriticalMismatchCount = 0;
+		debugPositiveOnlyMismatchCount = 0;
+		debugMismatchPrintCount = 0;
+		debugMaxReducedCostMismatchAbs = 0.0;
+		debugMaxMismatchInferred = 0.0;
+		debugMaxMismatchChecked = 0.0;
+		debugMaxMismatchSource = null;
+		debugMaxMismatchSequence = null;
 	}
 
 	private String statisticsSummary() {
@@ -997,6 +1025,14 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ "/" + formatMillis(backwardExtensionNanos) + "/" + formatMillis(joinPhaseNanos)
 				+ "/" + formatMillis(extensionNanos) + "/" + formatMillis(measuredNanos)
 				+ ", joinMeasuredShare=" + formatPercent(joinPhaseNanos, measuredNanos)
+				+ ", debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/maxAbs="
+				+ debugReducedCostMismatchCount + "/" + debugNodeJoinMismatchCount + "/"
+				+ debugForwardSinkMismatchCount + "/" + debugBothNegativeMismatchCount + "/"
+				+ debugSignCriticalMismatchCount + "/" + debugPositiveOnlyMismatchCount + "/"
+				+ debugMaxReducedCostMismatchAbs
+				+ ", debugRcMismatchMax source/inferred/checked/sequence=" + debugMaxMismatchSource
+				+ "/" + debugMaxMismatchInferred + "/" + debugMaxMismatchChecked + "/"
+				+ debugMaxMismatchSequence
 				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
@@ -1075,7 +1111,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		return function.evaluate(function.tail.end);
 	}
 
-	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
+	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost,
+			CandidateSource source) {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
@@ -1095,12 +1132,46 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		double reducedCost = reducedCost(sequence, cost, lp);
 		if (Configure.debugBPCPricingColumnCheck && Math.abs(reducedCost - inferredReducedCost) > 1e-5) {
-			System.err.println("[debugBPCPricingColumnCheck] bidirectional pricing reduced-cost mismatch: inferred="
-					+ inferredReducedCost + ", checked=" + reducedCost + ", sequence=" + sequence);
+			recordDebugReducedCostMismatch(source, sequence, inferredReducedCost, reducedCost);
 		}
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			rememberGeneratedCandidate(signature,
 					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
+		}
+	}
+
+	private void recordDebugReducedCostMismatch(CandidateSource source, ArrayList<Integer> sequence,
+			double inferredReducedCost, double checkedReducedCost) {
+		debugReducedCostMismatchCount++;
+		if (source == CandidateSource.NODE_JOIN) {
+			debugNodeJoinMismatchCount++;
+		} else if (source == CandidateSource.FORWARD_SINK) {
+			debugForwardSinkMismatchCount++;
+		}
+		boolean inferredNegative = Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE);
+		boolean checkedNegative = Utility.compareLt(checkedReducedCost, REDUCED_COST_TOLERANCE);
+		if (inferredNegative && checkedNegative) {
+			debugBothNegativeMismatchCount++;
+		} else if (inferredNegative != checkedNegative) {
+			debugSignCriticalMismatchCount++;
+		} else {
+			debugPositiveOnlyMismatchCount++;
+		}
+		double absGap = Math.abs(checkedReducedCost - inferredReducedCost);
+		if (Utility.compareGt(absGap, debugMaxReducedCostMismatchAbs)) {
+			debugMaxReducedCostMismatchAbs = absGap;
+			debugMaxMismatchInferred = inferredReducedCost;
+			debugMaxMismatchChecked = checkedReducedCost;
+			debugMaxMismatchSource = source;
+			debugMaxMismatchSequence = new ArrayList<Integer>(sequence);
+		}
+		// 2026-05-30: 这里不再打印所有正 reduced-cost 候选的差异。那些候选不会进列池，
+		// 真正会影响剪枝安全的是 sign-critical mismatch，因此只限量打印这类样本。
+		if (inferredNegative != checkedNegative && debugMismatchPrintCount < DEBUG_MISMATCH_PRINT_LIMIT) {
+			debugMismatchPrintCount++;
+			System.err.println("[debugBPCPricingColumnCheck] nodeJoin sign-critical reduced-cost mismatch: source="
+					+ source + ", inferred=" + inferredReducedCost + ", checked=" + checkedReducedCost
+					+ ", sequence=" + sequence);
 		}
 	}
 

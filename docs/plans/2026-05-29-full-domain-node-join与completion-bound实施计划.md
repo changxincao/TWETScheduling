@@ -417,3 +417,87 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 这里的关键区别是：dual profitable window 不是保持每一条固定 sequence 成本不变的等价变换，而是一个用于 pricing 搜索的负列保留规则。对单个 job 来说，若完成时间落在动态窗口外，则该 job 的原始惩罚成本已经不低于当前 job dual，`penalty_j(t)-pi_j` 对 reduced cost 不再提供负贡献。在 root/no-cut 且 reduced setup cost 仍满足三角不等式的假设下，这类完成时间不会构成真正负列的必要部分，因此 pricing 可以把它从函数域里裁掉，以减少搜索。这样做只保证“负 reduced-cost 最优列不被裁掉”，不保证一个已经被判定为正的固定 sequence 在裁剪前后的最优时间和 reduced cost 完全一致。
 
 因此正候选出现偏差并不矛盾：evaluator 会在原始完整时间域上重新优化该 sequence，可能选到某些 dynamic window 外、但对这条固定正 sequence 更便宜的完成时间；pricing inferred 则只能在 effective window 内评价，所以数值可能更高。由于两边结果都仍是非负 reduced cost，这种差异不影响列池。负成本候选没有在本轮出现偏差，是因为一旦一条 sequence 真能形成负 reduced cost，它的获利完成时间应落在每个相关 job 的 profitable window 内；窗口裁剪没有改变其负列判定。这也是后续判断安全性的核心指标应看 `signCritical`，而不是看所有正候选的数值差。
+
+### 6.5 本轮 node join 讨论的完整沉淀
+
+本轮围绕 full-domain node join 的主要问题，是确认 crossing-arc join 是否可以改写为同一个 job 上的 node join，以及这个改写在现有 label 定义、`Tmid` 边界、dominance、reachable set 和 debug 复核口径下是否仍然安全。最终结论是：当前 `GCBBStyleBidirectionalFullDomainNodeJoin` 的拼接口径已经和原始 arc join 等价，作为实验分支可以认为列生成语义正确；但函数推导值暂时仍只作为诊断值，不直接替代 evaluator，也不直接用于剪枝。
+
+1. node join 的公式口径
+
+原 crossing-arc join 可以写成：
+
+```text
+F_i(t - Delta_ij) + cbar_ij + B_j(t)
+```
+
+其中 `F_i` 是 forward prefix-min 后的传播函数，`B_j` 是 backward suffix-min 后的后缀传播函数，`Delta_ij = setup(i,j) + p_j`，`cbar_ij = setupCost(i,j) - arcDual(i,j)`。如果先把 forward label 从 `i` 扩展到 `j`，但不加入 `j` 自己的 penalty 和 job dual，就得到：
+
+```text
+U_j(t) = F_i(t - Delta_ij) + cbar_ij
+```
+
+于是原来的 crossing-arc join 等价于：
+
+```text
+min_t { U_j(t) + B_j(t) }
+```
+
+当前代码中的 `ForwardLabel.preNodeFrontier` 正是这个 `U_j(t)`。`extendForward()` 里先对父 `frontier` 做一次 `shiftX(delay)`，再加入 incoming setup cost 和 incoming arc dual，形成 `preNodeFrontier`；之后才把 job penalty 和 job dual 加进去，normalize 成继续传播用的 `frontier/F_j`。这个顺序避免了 join job 的 penalty/job dual 被 forward 和 backward 两侧重复计算。
+
+2. backward 不需要 `exactSuffixFrontier`
+
+讨论中一度考虑过给 backward label 额外保存 normalize 前的后缀函数，但后来确认这是不必要的。node join 不是要把 backward 侧还原成“精确完成在 t 的后缀成本”，而是要复用原 arc join 中已经使用的 `B_j(t)` 语义：当 join job 的完成时间不早于当前时间界限时，后续后缀可取得的最小 reduced cost。这个函数本来就是 backward `frontier` 经 suffix-min 后的结果。
+
+因此正确拼接就是：
+
+```text
+forward.preNodeFrontier + backward.frontier
+```
+
+不应再引入 `exactSuffixFrontier`。额外保存 normalize 前函数不仅增加状态和修改面，还会把 node join 的语义从“arc join 的等价改写”转到另一个口径上，反而更容易造成双计数或时间同步误解。当前代码已删除该字段，并保持 backward 扩展、dominance、reachable set 和入队逻辑与普通 full-domain 流程一致。
+
+3. `Tmid` 的作用：只控制是否继续扩展，不写入 reachable set
+
+node join 版本和原 full-domain crossing-arc 对照版的一个关键区别是，第一次越过 `Tmid` 的 label 仍然有价值。因为 node join 需要同一个 join job 上两侧都包含该 job，如果 forward child 的最早完成时间刚越过 `Tmid`，它不能继续向右扩展，但仍然应该保留为 terminal label 参与 node join；backward 侧对称，第一次跨到 `Tmid` 左侧的 suffix label 也应保留为 terminal suffix。
+
+因此当前实现把 `reachableSet` 改成 full-domain 一跳可达候选，不再在 reachable set 构造时用 `Tmid` 裁掉第一次跨界 job。扩展流程是：从父 label 的 `reachableSet` 枚举候选，生成 child，生成后再看 child 的边界位置。如果 forward child 的 `earliestForwardCompletion(child) > tMid`，或 backward child 的 `latestBackwardCompletion(child) < tMid`，则该 child 进入 terminal 路径，只保留到 active list 供 final join 使用，不再进入 `FWUL/BWUL` 继续扩展。
+
+这个口径避免了两类错误：一是 reachable set 过早裁剪导致缺少 node join 必需的跨界 join node；二是完全放开 full-domain 多步扩展导致 label 数量膨胀。`Tmid` 仍然存在，但语义变成“是否继续入队扩展”的边界，而不是 reachable set 的可达性判定条件。
+
+4. terminal label 仍按普通 dominance 处理
+
+讨论中明确 terminal label 不应绕过普通 dominance table。最终实现是：
+
+```text
+普通 label: dominance table 保留后 -> active list -> enqueue
+terminal label: dominance table 保留后 -> active list -> 不 enqueue
+```
+
+也就是说，terminal label 和普通 label 使用同一套 `FWTL/BWTL` 占优规则；区别只在于保留后是否继续入队扩展。这样做的好处是 dominance 语义不分裂，terminal label 仍可以支配旧 active label，也可以被普通 label 或其他 terminal label 支配。final join 前仍通过 `compactAndSortActiveLabelListsForJoin()` 清掉已经被后续 label 支配的旧条目。
+
+这里不需要额外引入“terminal-only store”，也不需要把 `preNodeFrontier/U_state` 放进正式 dominance 定义。正式扩展仍然只看传播函数 `frontier/F_state` 和 reachable set；`preNodeFrontier` 是 node join 辅助函数，不改变继续扩展的 dominance 口径。当前没有证据表明必须为了 `U_state` 单独维护一套支配规则。
+
+5. visited、reachable 和 zero-dual 的关系
+
+当前 reachable set 的更新仍从父节点的 `reachableSet` 出发做单调过滤，而不是每次重新扫描所有 job。新 child 的 reachable set 只保留父 reachable 中尚未 visited、并且满足 full-domain 一跳时间可行性的 job。visited set 记录路径已经访问过的真实 job，以及 root/no-cut 条件下预先排除的 zero-dual job。
+
+zero-dual 的统一口径是：只有 `node.depth == 0 && lp.getActiveCutIds().isEmpty()` 时启用，预处理出 `pi_j=0` 的 job 后直接加入 source 和 sink 的初始 visited set。之后扩展点不再重复判断 zero-dual，reachable set 也不额外写一套 zero-dual 条件。双向 join 的 visited 交集检查要忽略这些 source/sink 共同预标记的 excluded job，因为它们不是路径真实访问，只是本轮 pricing 的排除标记。
+
+6. debug mismatch 的最终解释
+
+删除 `exactSuffixFrontier`、改回 `preNodeFrontier + backward.frontier` 后，开启 `debugBPCPricingColumnCheck` 曾出现大量 `inferred > checked` 的 reduced-cost mismatch。分类统计后确认，这些 mismatch 全部是 positive-only：
+
+```text
+debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/maxAbs=
+542786/542238/548/0/0/542786/2357.999999999989
+```
+
+这说明没有发现“真实负列被 inferred 算成非负”，也没有发现“inferred 负但 evaluator 非负”的 sign-critical 情况。刷屏的直接原因是安全版会把大量正 reduced-cost 候选也送入 evaluator 复核，而 pricing 侧启用了 root/no-cut 下的 dual profitable window；该 window 是负列保留规则，不是固定 sequence 成本等价变换。它保证不会裁掉真正可能产生负 reduced-cost 的最优时间区域，但不保证每条正 sequence 在 effective window 内的函数值和 evaluator 在原始完整时间域上的值逐点一致。
+
+因此当前判断是：node join 公式和代码拼接口径没有在负列符号层面暴露错误，之前的 mismatch 主要是正候选上的诊断噪声。短期仍保留 evaluator 复核返回列，避免中间函数口径在更多样例上未完全验证前污染列池；但从本轮证据看，`preNodeFrontier + backward.frontier` 是正确方向。
+
+7. 当前代码状态和后续边界
+
+当前 `GCBBStyleBidirectionalFullDomainNodeJoin` 可以作为 node join 实验分支继续使用。它已经完成的关键点包括：forward 保存 `preNodeFrontier/U_state`；backward 不再保存额外 suffix 状态；reachable set 改成 full-domain 一跳可达；第一次跨过 `Tmid` 的 child 作为 terminal label 参与 join；terminal label 走普通 dominance 但不入队；debug 输出按来源和符号临界性分类。
+
+尚未完成的是性能优化。现在 final join 仍大量调用函数 add/findMinimal 和 evaluator 复核，`wet020_001_2m` debug 分类跑中 exact pricing 约 `74.784s`，join phase 占主要部分。这不是拼接公式错误，而是安全基线版本缺少可靠剪枝。后续如果要加速，应优先证明哪些 node join inferred value 可以作为安全 lower bound，或把 completion bound 作为前置筛选；在更多样例确认 `signCritical=0` 之前，不应直接用所有 inferred 数值替代 evaluator，也不应恢复不可靠的函数 lower-bound prune。

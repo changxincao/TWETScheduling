@@ -509,3 +509,15 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 因此这里的 `reducedCostBound` 这个变量名容易误导。它不是前置剪枝用的安全 lower bound，而是函数拼接之后得到的 inferred reduced cost，只传给 `tryGenerateColumn()` 做 debug 复核口径。真正决定候选是否进入列池的是 `TWETColumnEvaluator` 对恢复序列重新计算出的 reduced cost。`joinPairsLowerBoundPruned` 目前只是保留的统计字段，当前 node-join 路径没有实际增加它；此前 `wet020_001_2m` 的统计里该项也保持为 0。
 
 这个选择是有意的安全基线。虽然本轮 debug 分类显示 `signCritical=0`，没有发现负列符号被算错，但 dual profitable window 下大量正候选的 inferred/evaluator 数值仍不逐点一致。只要还没有证明某个 inferred value 对所有样例都是安全 lower bound，就不应把它放回 final join 的 cost-LB 剪枝。后续若要恢复类似旧 crossing-arc join 的下界判断，应先明确下界的定义域、是否受 dual window 影响、以及它是否只用于丢弃确定不可能为负的 pair。
+
+### 6.7 恢复旧双向风格的 join 下界剪枝
+
+2026-05-30 按性能优先的方向调整 node-join 实验类，恢复类似旧 full-domain 双向 crossing-arc join 的三层过滤。第一层是 group 级 lower bound：对同一个 join job，先用该组 forward label 中最小的 `preNodeFrontier/U_j` 端点最小值，加上 backward label 的 `minReducedCost`。如果这个乐观下界已经不小于 reduced-cost 阈值，则整组 backward suffix 不再进入 pair 扫描，并计入 `joinTerminalGroupsCostPruned`。
+
+第二层是 pair 级 lower bound：forward active list 在 final join 前改按 `preNodeMinReducedCost` 升序排序。扫描某个 backward suffix 时，若当前 forward 的 `preNodeMinReducedCost + backward.minReducedCost` 已经不为负，则后续 forward label 的该下界也不会更好，可以像旧流程一样直接 `break`，并计入 `joinPairsLowerBoundPruned`。这一步发生在函数 add 之前，目标是减少不必要的 `preNodeFrontier.add(backward.frontier)`。
+
+第三层是函数拼接后的精确 inferred 过滤：只有通过前两层下界的 pair 才执行 `preNodeFrontier + backward.frontier` 并调用 `findMinimal(false, true)`。若得到的 `reducedCostBound` 仍非负，则计入 `joinFunctionPruned`，不再恢复序列，也不再进入候选池。
+
+本次也按性能诊断要求停用了 `TWETColumnEvaluator` 复核路径。`tryGenerateColumn()` 现在直接使用 join 推导的 `inferredReducedCost` 作为候选 reduced cost，并通过 `objectiveCostFromReducedCost()` 反推出列的 objective cost；原 evaluator 相关代码保留为注释，便于后续需要 debug 时恢复。这使 node join 更接近旧双向 pricing 的运行口径，但也意味着当前分支不再用 evaluator 兜底检查函数口径差异。
+
+验证上，用 `wet020_001_2m`、`mode=nodeJoin`、`maxNodes=1` 重新跑 root 节点，结果为 `obj=bound=6343`、`valid=true`。exact pricing 时间约 `5.537s`，其中 forward 扩展约 `1.336s`，backward 扩展约 `3.768s`，join phase 约 `0.327s`，joinMeasuredShare 约 `6.01%`。本轮统计中 `joinTerminalGroupsCostPruned=44`，`joinPairsLowerBoundPruned=10850`，`joinFunctionEvaluations=937228` 且这些函数评价全部在 `findMinimal` 后被非负过滤掉，候选池没有新增负列。相比 evaluator 安全版，这说明旧双向风格的前置下界剪枝确实把 final join 成本压了下来。后续若要把该分支推广到更多样例，还需要继续关注不同实例上列有效性、BPC bound 是否一致，以及停用 evaluator 后是否会隐藏新的符号临界问题。

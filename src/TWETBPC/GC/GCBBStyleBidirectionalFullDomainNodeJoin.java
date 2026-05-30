@@ -14,7 +14,6 @@ import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
-import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -36,8 +35,8 @@ import TWETBPC.Util.SequenceSignature;
  * 1. forward/backward label 都覆盖 [0, pricingHorizon]；
  * 2. dynamic window 只影响 job penalty 的有效区间，不把标签裁成 half-domain；
  * 3. final join 按同一 job 拼接 forward pre-node frontier 和 backward suffix-min frontier；
- * 4. 返回列成本统一用 {@link TWETColumnEvaluator} 复核，join 函数值只作为诊断口径，避免实验分支
- * 的中间函数语义差异污染列池。
+ * 4. 当前性能分支仿照旧双向 join，先用 node-join 乐观下界和函数最小值筛掉非负候选，
+ * 再用 join 推导 reduced cost 反推列成本；evaluator 复核路径暂时停用。
  */
 public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
@@ -52,7 +51,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private final Data data;
 	private final TWETBPCConfig config;
-	private final TWETColumnEvaluator evaluator;
+	// 2026-05-30: 性能诊断分支暂时停用 evaluator 复核，避免 final join 为大量候选重复做完整序列评价。
+	// private final TWETColumnEvaluator evaluator;
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -64,6 +64,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private ArrayList<SinglePointStore<BackwardLabel>> backwardSinglePointByFirstJob;
 	private PackedBitSet activeForwardTerminalJobs;
 	private double[] minForwardReducedCostByLastJob;
+	private double[] minForwardPreNodeReducedCostByLastJob;
 	private double[] minForwardEllByLastJob;
 	private ArrayList<TWETColumn> generatedColumns;
 	private PriorityQueue<PricingColumnCandidate> generatedColumnCandidates;
@@ -153,7 +154,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	public GCBBStyleBidirectionalFullDomainNodeJoin(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.evaluator = new TWETColumnEvaluator(data);
+		// this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -277,6 +278,16 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		};
 	}
 
+	private static Comparator<ForwardLabel> forwardJoinLowerBoundComparator() {
+		return new Comparator<ForwardLabel>() {
+			@Override
+			public int compare(ForwardLabel left, ForwardLabel right) {
+				int byPreNodeCost = compareDoubleAsc(left.preNodeMinReducedCost, right.preNodeMinReducedCost);
+				return byPreNodeCost != 0 ? byPreNodeCost : compareReducedCost(left, right);
+			}
+		};
+	}
+
 	private static int compareCandidateBestFirst(PricingColumnCandidate left, PricingColumnCandidate right) {
 		int byCost = compareDoubleAsc(left.reducedCost, right.reducedCost);
 		if (byCost != 0) {
@@ -327,6 +338,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		backwardSinglePointByFirstJob = new ArrayList<SinglePointStore<BackwardLabel>>(data.n + 1);
 		activeForwardTerminalJobs = new PackedBitSet(data.n + 2);
 		minForwardReducedCostByLastJob = new double[data.n + 1];
+		minForwardPreNodeReducedCostByLastJob = new double[data.n + 1];
 		minForwardEllByLastJob = new double[data.n + 1];
 		for (int i = 0; i <= data.n; i++) {
 			FWTL.add(new PaperDominanceGraph(Direction.FORWARD));
@@ -336,6 +348,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			forwardSinglePointByLastJob.add(new SinglePointStore<ForwardLabel>());
 			backwardSinglePointByFirstJob.add(new SinglePointStore<BackwardLabel>());
 			minForwardReducedCostByLastJob[i] = Utility.big_M;
+			minForwardPreNodeReducedCostByLastJob[i] = Utility.big_M;
 			minForwardEllByLastJob[i] = Utility.big_M;
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
@@ -755,6 +768,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (Utility.compareLt(label.minReducedCost, minForwardReducedCostByLastJob[lastJob])) {
 			minForwardReducedCostByLastJob[lastJob] = label.minReducedCost;
 		}
+		if (Utility.compareLt(label.preNodeMinReducedCost, minForwardPreNodeReducedCostByLastJob[lastJob])) {
+			minForwardPreNodeReducedCostByLastJob[lastJob] = label.preNodeMinReducedCost;
+		}
 		if (label.frontier != null && label.frontier.head != null
 				&& Utility.compareLt(label.frontier.head.start, minForwardEllByLastJob[lastJob])) {
 			minForwardEllByLastJob[lastJob] = label.frontier.head.start;
@@ -790,6 +806,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		ArrayList<ForwardLabel> labels = activeForwardByLastJob.get(job);
 		int liveCount = 0;
 		double liveMinReducedCost = Utility.big_M;
+		double liveMinPreNodeReducedCost = Utility.big_M;
 		double liveMinEll = Utility.big_M;
 		for (int i = 0; i < labels.size(); i++) {
 			ForwardLabel label = labels.get(i);
@@ -799,6 +816,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			labels.set(liveCount++, label);
 			if (Utility.compareLt(label.minReducedCost, liveMinReducedCost)) {
 				liveMinReducedCost = label.minReducedCost;
+			}
+			if (Utility.compareLt(label.preNodeMinReducedCost, liveMinPreNodeReducedCost)) {
+				liveMinPreNodeReducedCost = label.preNodeMinReducedCost;
 			}
 			if (label.frontier != null && label.frontier.head != null
 					&& Utility.compareLt(label.frontier.head.start, liveMinEll)) {
@@ -811,11 +831,13 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (liveCount == 0) {
 			activeForwardTerminalJobs.remove(job);
 			minForwardReducedCostByLastJob[job] = Utility.big_M;
+			minForwardPreNodeReducedCostByLastJob[job] = Utility.big_M;
 			minForwardEllByLastJob[job] = Utility.big_M;
 			return;
 		}
-		Collections.sort(labels);
+		Collections.sort(labels, forwardJoinLowerBoundComparator());
 		minForwardReducedCostByLastJob[job] = liveMinReducedCost;
+		minForwardPreNodeReducedCostByLastJob[job] = liveMinPreNodeReducedCost;
 		minForwardEllByLastJob[job] = liveMinEll;
 		activeForwardTerminalJobs.add(job);
 	}
@@ -901,12 +923,22 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			joinTerminalGroupsTimePruned++;
 			return;
 		}
+		double groupLB = minForwardPreNodeReducedCostByLastJob[lastJob] + backward.minReducedCost;
+		if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
+			joinTerminalGroupsCostPruned++;
+			return;
+		}
 		for (int i = 0; i < candidates.size(); i++) {
 			ForwardLabel forward = candidates.get(i);
 			joinCandidateLabelsVisited++;
 			if (forward.isDominated) {
 				joinCandidateLabelsDominated++;
 				continue;
+			}
+			double optimisticJoinLB = forward.preNodeMinReducedCost + backward.minReducedCost;
+			if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
+				joinPairsLowerBoundPruned++;
+				break;
 			}
 			tryJoin(forward, backward, lp);
 		}
@@ -944,6 +976,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return;
 		}
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
+		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
+			joinFunctionPruned++;
+			return;
+		}
 		ArrayList<Integer> sequence = recoverNodeJoinSequence(forward, backward);
 		tryGenerateColumn(sequence, lp, reducedCostBound, CandidateSource.NODE_JOIN);
 	}
@@ -1124,16 +1160,19 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (activeColumnSignatures.contains(signature)) {
 			return;
 		}
-		// 2026-05-29: node-join 实验类会生成跨 Tmid 的 terminal label。为避免中间函数
-		// 推导值和恢复序列之间出现细微口径差异，返回给列池的成本统一用 evaluator 复核值。
-		double cost = evaluator.evaluate(sequence);
-		if (Utility.isBigMValue(cost)) {
-			return;
-		}
-		double reducedCost = reducedCost(sequence, cost, lp);
-		if (Configure.debugBPCPricingColumnCheck && Math.abs(reducedCost - inferredReducedCost) > 1e-5) {
-			recordDebugReducedCostMismatch(source, sequence, inferredReducedCost, reducedCost);
-		}
+		// 2026-05-30: 性能诊断分支仿照旧双向 pricing，不再对每个负候选调用 evaluator。
+		// evaluator 复核此前只用于诊断正候选口径差异；这里直接用 join 推导的 reduced cost
+		// 反推 objective cost，避免 final join 阶段被完整序列重算拖慢。
+		double reducedCost = inferredReducedCost;
+		double cost = objectiveCostFromReducedCost(sequence, reducedCost, lp);
+		// double checkedCost = evaluator.evaluate(sequence);
+		// if (Utility.isBigMValue(checkedCost)) {
+		// 	return;
+		// }
+		// double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
+		// if (Configure.debugBPCPricingColumnCheck && Math.abs(checkedReducedCost - inferredReducedCost) > 1e-5) {
+		// 	recordDebugReducedCostMismatch(source, sequence, inferredReducedCost, checkedReducedCost);
+		// }
 		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			rememberGeneratedCandidate(signature,
 					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
@@ -1882,12 +1921,14 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		final ForwardLabel father;
 		/** 2026-05-29: 当前 job 成本之前的 U_state，用于同 job node join，避免 join node 双计数。 */
 		final PiecewiseLinearFunction preNodeFrontier;
+		final double preNodeMinReducedCost;
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 				PiecewiseLinearFunction frontier, PiecewiseLinearFunction preNodeFrontier) {
 			super(labelId, jid, visitedSet, reachableSet, frontier, forwardEndpointMin(frontier));
 			this.father = father;
 			this.preNodeFrontier = preNodeFrontier;
+			this.preNodeMinReducedCost = forwardEndpointMin(preNodeFrontier);
 		}
 	}
 

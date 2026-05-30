@@ -587,3 +587,15 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 对照 `GCBBStyleBidirectionalFullDomain`，arc join 版的 reachable 构造仍带 `isForwardHalfEligibleJob/isBackwardHalfEligibleJob`，direct feasibility 也直接以 `Tmid` 为边界。因此一跳就跨过 `Tmid` 的 child 在 arc join 扩展阶段根本不会被创建，也不会进入 dominance graph。node join 版则通过 `isDirectForwardExtensionTimeFeasibleFullDomain(..., false)` 和对应 backward full-domain 判断，把这些候选显式纳入 reachable set。两版差异是代码中真实存在的语义差异，不是日志口径或统计字段误读。
 
 因此当前结论可以更准确地表述为：没有发现“terminal 误入队导致无限或多步扩展”的实现 bug；但如果原设计目标只是“在半域 arc join 基础上额外补第一跨界 node join 候选”，当前实现确实偏宽，因为 normal reachable/dominance 也被 full-domain 语义放大了。这个偏宽本身就是当前慢因之一，而不是性能结论的误判来源。后续若继续优化 node join，应把 normal label 的半域 continuation key 和 terminal-only 候选存储拆开验证。
+
+### 6.14 node join、pi-window 与列成本口径的补充问题
+
+2026-05-30 继续围绕 node join 的几个口径问题做代码层面解释。所谓“当前实现偏宽”，不是说 terminal label 会反复入队，而是说现在 normal label 的 `reachableSet` 已经从半域一跳可达变成 full-domain 一跳可达。这样每个父 label 会显式生成所有 full-domain 下可行、但半域下本来会被 `Tmid` 挡掉的跨界 child；这些 child 虽然不再入队，但仍进入普通 `FWTL/BWTL` dominance graph 和 active join table。因此额外工作量不是“每个 label 最多多一个 child”，而是“每个 label 乘以所有跨界候选 job”，并且还放大了 dominance key 和 active label 规模。
+
+join 后出现正 reduced cost 并不奇怪。group/pair 下界使用的是 `forward.preNodeMinReducedCost + backward.minReducedCost`，这两个最小值可以来自不同完成时间；真正 node join 时必须在同一个 join job 完成时间上把 `forward.preNodeFrontier + backward.frontier` 相加。公共时间域里的函数最小值可能远高于两侧各自最优值之和，所以会出现乐观下界为负、真实拼接函数最小值为正的情况。当前代码已经在 `findMinimal` 后过滤非负值，因此这些正候选不会进入列池；completion bound 的作用更适合作为前置过滤，减少进入函数 add/findMinimal 的正候选，而不是替代最终非负检查。
+
+`pi` 时间窗需要区分“负列保留规则”和“固定序列成本等价”。当前 root/no-cut 下的 dynamic profitable window 会收紧 job penalty 的有效区间，它的设计目标是保留可能产生负 reduced cost 的最优列，不是保证任意固定 sequence 在 restricted window 内的最优成本等于完整时间域 evaluator 成本。因此正 reduced-cost 候选出现 inferred/evaluator 不一致属于预期诊断噪声；此前 `wet020_001_2m` debug 中 mismatch 全部为 positive-only，未发现 sign-critical 或 both-negative。这个结果只能说明该样例没有暴露负列符号错误，不能单独证明所有样例上“负列成本完全一致”。若要把 evaluator 复核长期下线，需要继续多样例统计，或者给出当前 dynamic window 与 inferred reduced cost 的严格证明。
+
+列加入主问题时的目标系数来自 `TWETColumn.cost`。`LP` 在 objective 和增量加列时都直接使用 column cost，覆盖约束只看 job 是否被该列包含，分支弧约束则看列的有序 sequence 是否访问对应 arc。当前 `Pool` 使用 `SequenceSignature` 去重，签名是完整有序 job 序列，不是 job 集合；同一 job 集合但顺序不同会作为不同列保留，因为成本和访问弧可能不同。相反，如果完全相同的 sequence 后续以不同 cost 再次生成，`Pool.addColumn()` 会直接返回已有列 id，不会更新 cost。因此列成本必须是与 sequence 固定绑定的真实原始目标成本；如果某条列的 cost 受当前 `pi` 时间窗或当前 dual 影响，就不应作为永久 objective coefficient 写入列池，至少应由 evaluator 重算真实成本，或在 pool 层明确处理同序列成本更新。
+
+当前启发式 pricing 没有使用这套 `pi` 时间窗。`HeuristicPricingEngine` 直接用原始 `data.penaltyFunction` 和 `TWETColumnEvaluator` 同口径的序列成本，再用当前 dual 计算 reduced cost。若后续增加“把当前 RMP 变量设为整数求解上界”的启发式，它只能证明当前受限列集合里是否找到一个整数可行解；若整数不可行，不能说明原问题不可行，只能说明当前列池还不够。若列池中存在 window 口径导致的偏大 cost，用它求出的上界也会偏保守，因此任何 incumbent 最好按真实 sequence evaluator 重新计价。

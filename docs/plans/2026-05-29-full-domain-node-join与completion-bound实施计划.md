@@ -544,3 +544,17 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 第四类是 half-domain eligibility 统计。`forwardHalfEligibleByJob/backwardHalfEligibleByJob` 之前用于判断某个 job 是否天然落不到对应半域。full-domain node join 已经不再用它裁剪 reachable set 或扩展候选，`Tmid` 只决定 child 是否继续入队。因此这套计算只剩统计意义，且容易误导后续以为仍有半域剪枝参与当前实验分支。
 
 保留的一个“残留说明”是：文件里仍留下了简短中文注释，解释 evaluator 复核和 half-domain 延拓为什么曾经存在、现在为什么不用。这样做比保留整段不可达代码更清楚，也能避免后续继续维护已经失效的统计口径。
+
+### 6.10 node join 与 full-domain arc join 的 root 效率对照
+
+2026-05-30 用 `GCBBFullDomainComparisonTest` 在 `tmp-wet020_001_2m` 和 `tmp-wet021_001_2m` 上对照 full-domain crossing-arc join 与 full-domain node join，均限制 `maxNodes=1`，只看 root pricing 行为。两组结果的结论一致：node join 的 final join 阶段占比确实被压低，但因为 full-domain node join 保留了第一次跨过 `Tmid` 的 terminal label，并且同 job node join 的 active label 规模明显更大，主要瓶颈转移到了 forward/backward 扩展和 dominance graph。
+
+`wet020` root 上，arc join 的 exact pricing 为 `0.161s`，node join 为 `3.652s`，约慢 `22.7x`。arc join 的内部 measured time 为 `138.138ms`，其中 forward 扩展 `31.760ms`、backward 扩展 `44.507ms`、join `61.872ms`，join 占 `44.79%`。node join 的 measured time 为 `3575.100ms`，其中 forward 扩展 `840.641ms`、backward 扩展 `2455.006ms`、join `279.452ms`，join 只占 `7.82%`。也就是说 node join 的 join 本身约为 arc join 的 `4.5x`，但扩展总时间约为 `43.2x`，总时间主要被扩展阶段拖慢。
+
+规模上，`wet020` arc join 的 forward/backward kept label 为 `1157/1431`，node join 为 `6992/15407`；paper dominance kept/rejected 从 `2588/21845` 增至 `22399/127572`，dominance checks 从 `26907` 增至 `336228`。join 侧 arc join 尝试 `522957` 对、函数评价 `296741` 次；node join 尝试 `2312798` 对、函数评价 `937228` 次。node join 的 group 数反而更少，`10894` 对 `29316`，因为它只按同 job 拼接；但每组 forward 候选更厚，导致候选访问和 pair 数上升。
+
+`wet021` root 上有两轮 exact pricing。arc join 合计 exact pricing `1.886s`，node join 合计 `32.683s`，约慢 `17.3x`。arc join 两轮 measured time 合计 `1789.802ms`，其中 forward `1097.974ms`、backward `280.200ms`、join `411.629ms`；node join measured time 合计 `32529.682ms`，其中 forward `11861.958ms`、backward `18463.899ms`、join `2203.826ms`。这里 node join 的 join 约为 arc join 的 `5.35x`，但扩展约为 `22.0x`，仍然是扩展和 dominance 主导。
+
+`wet021` 的规模差异也类似。arc join 两轮 forward/backward kept label 合计 `4862/3392`，node join 为 `29791/62144`；paper dominance kept/rejected 从 `8254/88775` 增至 `91935/592982`，dominance checks 从 `107218` 增至 `1594409`。函数评价从 `1132311` 增至 `7257555`，候选访问从 `2160156` 增至 `18859071`。node join 生成的负列数量略多，第一轮 candidatePool 为 `10/32/22`，arc join 为 `8/15/7`，但这个收益远不足以抵消 label 和 dominance 规模膨胀。
+
+当前判断是：node join 的流程已经和旧双向的剪枝骨架对齐，join phase 占比也低，说明前置 group/pair/function 三层过滤生效；但 node join 版本为了保证同点拼接完整性，扩展侧保留了大量 terminal 和 full-domain 可达 label，使 dominance graph 成本显著上升。因此短期内 node join 不是更快版本，除非继续加入 completion bound 或更强的 label/terminal 前置剪枝，把扩展阶段的 label 数先压下来。后续优化不应只盯 final join，应优先看 backward terminal suffix、reachable 收缩和 completion bound 接入点。

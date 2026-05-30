@@ -390,3 +390,9 @@ final join 已从 crossing-arc join 改为同 job node join。流程按 join job
 实现口径改为：预处理阶段仍计算 `zeroDualExcludedJobs`；初始化 source label 和 sink root label 时，直接把这些 job 加入各自的 `visitedSet`。之后 reachable set 构造不再显式判断 `!isZeroDualExcludedJob(job)`，只按父 reachable set、visited 和 direct feasibility 过滤。这样 zero-dual 的排除入口统一在 source/sink，后续扩展和占优仍走普通 label 流程，避免每个扩展点重复写一套规则。
 
 双向 join 需要额外处理一个细节：source 和 sink 都会共同预标记 excluded job，因此这些标记不是路径真实访问，不能让 `visitedSet` 交集检查误判为 forward/backward 路径冲突。普通 arc join 类改用 `visitedSetsIntersectForJoin()`，node join 类的 `intersectsExceptJoin()` 也忽略 excluded 标记；真实冲突仍然按非 excluded job 判断。当前已同步到 `GC`、`GCBidirectional`、`GCNGBBStyleBidirectional`、`GCBBStyleBidirectionalFullDomain`、`GCBBAsymmetricBidirectional` 和 `GCBBStyleBidirectionalFullDomainNodeJoin`。
+
+### 6.3 terminal label 的占优处理
+
+2026-05-30 按最新讨论修正 node join terminal label 的插入语义。第一次跨过 `Tmid` 的 forward/backward child 不再绕过普通 dominance table，而是和普通 label 一样先调用 `insertForward()` / `insertBackward()` 进入 `FWTL` / `BWTL` 做占优判断。若被保留，它会正常登记到 active label list，后续参与 node join；区别只在于调用方不把它加入 `FWUL` / `BWUL`，因此不会继续向后或向左扩展。
+
+这个口径等价于“普通 label：dominance table 保留后进入 active list 并入队；terminal label：dominance table 保留后进入 active list 但不入队”。这样 terminal label 的支配关系和旧 label 逻辑保持一致，不再引入单独的旁路 store 或特殊支配规则。已有 active list 中被后续 terminal label 支配的旧 label 仍按原流程延迟清理，在 final join 前由 `compactAndSortActiveLabelListsForJoin()` 过滤。

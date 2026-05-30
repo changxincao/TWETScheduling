@@ -125,7 +125,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private long generatedCandidateCount;
 	private long generatedCandidateDroppedByHeap;
 	private long forwardBoundaryTerminalKept;
+	private long forwardBoundaryTerminalDominated;
 	private long backwardBoundaryTerminalKept;
+	private long backwardBoundaryTerminalDominated;
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
 	private long joinPhaseNanos;
@@ -407,7 +409,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// Tmid 只决定 child 是否还能继续扩展。第一次越过 Tmid 的 child 只保留为
 		// terminal label 参与同点 join，不入队。
 		if (terminalCandidate || Utility.compareGt(earliestForwardCompletion(child), tMid)) {
-			insertForwardBoundaryTerminal(child);
+			insertForwardBoundaryTerminal(child, lp);
 			return;
 		}
 		if (insertForward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
@@ -423,7 +425,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// 2026-05-29: backward 侧对称处理。先按 full-domain 一跳可行性生成 child；
 		// 若它已经跨到 Tmid 左侧，则只作为 terminal suffix 保存，不再继续向左扩展。
 		if (terminalCandidate || Utility.compareLt(latestBackwardCompletion(child), tMid)) {
-			insertBackwardBoundaryTerminal(child);
+			insertBackwardBoundaryTerminal(child, lp);
 			return;
 		}
 		if (insertBackward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
@@ -580,21 +582,26 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		return InsertStatus.STORED_AND_ENQUEUE;
 	}
 
-	private void insertForwardBoundaryTerminal(ForwardLabel label) {
-		// 2026-05-29: 跨过 Tmid 的 forward label 只用于 node join，不进入普通 dominance graph。
-		// 这里避免用空 reachable set 对 terminal label 做过强支配，因为 join 还依赖 visited set 兼容性。
-		forwardLabelsKept++;
+	private void insertForwardBoundaryTerminal(ForwardLabel label, LP lp) {
+		// 2026-05-30: terminal label 仍按普通 label 进入 dominance table；
+		// 与普通 label 的唯一区别是保留后只参与 node join，不再入 FWUL 继续扩展。
+		InsertStatus status = insertForward(label, lp);
+		if (status == InsertStatus.DOMINATED) {
+			forwardBoundaryTerminalDominated++;
+			return;
+		}
 		forwardBoundaryTerminalKept++;
-		activeForwardByLastJob.get(label.jid).add(label);
-		activeForwardTerminalJobs.add(label.jid);
-		updateForwardScalarInfo(label);
 	}
 
-	private void insertBackwardBoundaryTerminal(BackwardLabel label) {
-		// 2026-05-29: backward 对称保留第一次越过 Tmid 左侧的 suffix label，只参与 node join。
-		backwardLabelsKept++;
+	private void insertBackwardBoundaryTerminal(BackwardLabel label, LP lp) {
+		// 2026-05-30: backward terminal suffix 同样走 BWTL 占优；
+		// 被保留后只进入 active list，不进入 BWUL。
+		InsertStatus status = insertBackward(label, lp);
+		if (status == InsertStatus.DOMINATED) {
+			backwardBoundaryTerminalDominated++;
+			return;
+		}
 		backwardBoundaryTerminalKept++;
-		activeBackwardByFirstJob.get(label.jid).add(label);
 	}
 
 	/**
@@ -953,7 +960,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		generatedCandidateCount = 0;
 		generatedCandidateDroppedByHeap = 0;
 		forwardBoundaryTerminalKept = 0;
+		forwardBoundaryTerminalDominated = 0;
 		backwardBoundaryTerminalKept = 0;
+		backwardBoundaryTerminalDominated = 0;
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
 		joinPhaseNanos = 0;
@@ -981,8 +990,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
-				+ ", boundaryTerminal fw/bw=" + forwardBoundaryTerminalKept + "/"
-				+ backwardBoundaryTerminalKept
+				+ ", boundaryTerminal fw kept/dominated=" + forwardBoundaryTerminalKept + "/"
+				+ forwardBoundaryTerminalDominated
+				+ ", bw kept/dominated=" + backwardBoundaryTerminalKept + "/"
+				+ backwardBoundaryTerminalDominated
 				+ ", queueOrdering=" + queueOrdering
 				+ ", timingMs fwExt/bwExt/join/extTotal/measuredTotal=" + formatMillis(forwardExtensionNanos)
 				+ "/" + formatMillis(backwardExtensionNanos) + "/" + formatMillis(joinPhaseNanos)

@@ -655,3 +655,15 @@ cost = reducedCost + machineDual
 因此，用户担心的列池问题是实际存在的工程风险。`Pool.addColumn()` 按完整有序 `SequenceSignature` 去重；如果相同 sequence 已经存在，会直接返回已有 id，不更新 `TWETColumn.cost`。而 `TWETColumn.cost` 是主问题目标系数，`LP.addColumnToCurrentModel()` 会直接把它放入 objective。若某条 both-negative 但被 pi-window/node-join 口径高估的列先进入列池，后续即使在另一个 dual/window 下重新生成同一 sequence 的真实低成本版本，也不会自动修正旧 cost。这和外包硬时间窗不同：外包窗口是问题层面的全局有效剪枝，而 pi-window 只是当前 root/no-cut pricing 轮根据 dual 推出来的保留规则，不能作为永久列成本定义。
 
 不重新计算时，很难可靠检测某个固定 sequence 是否发生了这种 cost 偏差。能做的 cheap signal 只有“该 sequence 中存在 effective window 严格小于 hard window 的 job”“拼接最优点贴近 dynamic window 边界”“dualWindow=enabled 且 jobDual 小于 outsourcing baseline”等可疑条件，但这些只能提示风险，不能证明成本一致或不一致。真正可靠的检测仍然是对恢复出的 sequence 调用 `TWETColumnEvaluator.evaluate()`，再用当前 dual 重算 reduced cost。若后续要把 node join 分支作为 exact pricing 的加列来源，建议至少在构造 `TWETColumn` 前对 inferred 负候选做 evaluator 复核，并用 evaluator 的真实 cost 写入列池；若 checked reduced cost 已非负，则丢弃该候选。这样评估量只发生在 inferred 负候选上，远少于 millions 级别的 pair/function evaluation，也能避免同序列错误 cost 永久留在 pool 中。
+
+### 6.19 用户关于 pi-window 列成本风险的原始分析
+
+以下为 2026-05-30 讨论中用户对 `pi` 时间窗、负列成本和列池去重风险的原始分析，先原样保留，后续实现时按这里的风险点逐项对照。
+
+```text
+1、你多测试几个算例，arc join的，node join的看看是不是都会这样。以及是否有比较好的方式检测某个列发生了这样？在不重新算的情况下。 反正这个东西应该就是都是正的无所谓，pi-时间窗是正，真实是负也无所谓，即使当前这一轮没加进去但这个很关键，必然可以在某轮加入，因为不会丢掉最优解的。然后pi-时间窗负的，真实正的不可能，因为加时间窗以后的约束更严格。所以最后只有一种会有影响，即都是负数，但pi时间窗的更大，此时如果加入的话，可能导致问题。因为这个列以及他的对应的最优列成本 是有可能在最终的最优解的，pi仅仅是当前求解pricing的时候的输入，只限制本次pricing 这个列不会是最优解，但可能是下一次的最优解。但是如果本轮加入以后，下一轮虽然在最优解里边，但检测到了已经存在的话可能就会出问题了。这时候应该就不会加入了？
+1.1：这里的话和b_j 外包导致的硬时间窗是不一样的，这个时间窗全局有效的，即使不加时间窗的时候这个列的真实成本确实更好，但他可以被删掉那个超出时间窗的job以后，让这个job去外包。此时组合成本是更好的。但pi那个不能这么理解。
+1.2：处理方法我当前想到的几种是：
+1.2.1：最终的那K个保存下来的挨个评估一次，看看是否等价，不等价的话直接把成本改掉。但我不知道这个会不会很耗时间。
+1.2.2：不做评估？没想到啥好办法。不太能确定一个被高估的负列，是否可能被二次生成他准确的列成本。
+```

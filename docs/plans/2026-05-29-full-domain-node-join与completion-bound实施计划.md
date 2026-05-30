@@ -413,3 +413,7 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 这些正候选为什么数值不完全一致，主要是口径差异造成的：pricing 侧启用了 root/no-cut 下的 dual profitable window，`dualWindow=enabled`，本轮有效时间域被收紧到 `dynamicHStartMin=512.9999999999998`、`pricingHorizon=1188.0000000000007`；而 `TWETColumnEvaluator` 是按恢复出的完整 sequence 在原始目标函数口径下重新求序列成本。profitable window 的作用是保证负 reduced-cost 的最优候选不会被删掉，不保证任意一个正 reduced-cost sequence 的函数值和原始 evaluator 值逐点一致。因此正候选上出现 `inferred > checked` 是预期内的诊断噪声，不应据此判断 node join 公式错误。
 
 当前结论相应修正为：`preNodeFrontier + backward.frontier` 的 node join 公式在本轮 sign 层面没有暴露错误；`exactSuffixFrontier` 仍不需要恢复。短期仍保留 evaluator 复核返回列，因为函数值和 evaluator 的全量数值口径尚未做到逐候选一致，不能直接把 inferred 用作通用列成本。但如果只讨论是否会错过负列，本次分类结果显示该问题没有在 `wet020_001_2m` root 节点复现。后续若要把 inferred 接回剪枝，需要继续在更多样例上统计 `signCritical` 是否始终为 0，而不是看正候选的绝对数值差。
+
+这里的关键区别是：dual profitable window 不是保持每一条固定 sequence 成本不变的等价变换，而是一个用于 pricing 搜索的负列保留规则。对单个 job 来说，若完成时间落在动态窗口外，则该 job 的原始惩罚成本已经不低于当前 job dual，`penalty_j(t)-pi_j` 对 reduced cost 不再提供负贡献。在 root/no-cut 且 reduced setup cost 仍满足三角不等式的假设下，这类完成时间不会构成真正负列的必要部分，因此 pricing 可以把它从函数域里裁掉，以减少搜索。这样做只保证“负 reduced-cost 最优列不被裁掉”，不保证一个已经被判定为正的固定 sequence 在裁剪前后的最优时间和 reduced cost 完全一致。
+
+因此正候选出现偏差并不矛盾：evaluator 会在原始完整时间域上重新优化该 sequence，可能选到某些 dynamic window 外、但对这条固定正 sequence 更便宜的完成时间；pricing inferred 则只能在 effective window 内评价，所以数值可能更高。由于两边结果都仍是非负 reduced cost，这种差异不影响列池。负成本候选没有在本轮出现偏差，是因为一旦一条 sequence 真能形成负 reduced cost，它的获利完成时间应落在每个相关 job 的 profitable window 内；窗口裁剪没有改变其负列判定。这也是后续判断安全性的核心指标应看 `signCritical`，而不是看所有正候选的数值差。

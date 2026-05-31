@@ -699,3 +699,9 @@ cost = reducedCost + machineDual
 为避免每个类重复写成本反推和复核逻辑，新增了 `PricingColumnCostRechecker`。它提供两件事：进入 K 堆前用 inferred reduced cost 反推临时候选列成本；K 堆固定后按 sequence 调用 `TWETColumnEvaluator`，得到 checked cost 和 checked reduced cost。当前已接入有 top-K 候选堆的双向 pricing 类：`GCBBStyleBidirectionalFullDomain`、`GCBBStyleBidirectionalFullDomainNodeJoin`、`GCNGBBStyleBidirectional` 和 `GCBBAsymmetricBidirectional`。普通 `GCBidirectional` 没有这套 K 堆流程，暂不适用这个“final K 后复核”的位置。
 
 验证方面，focused `javac` 已通过。`wet021_001_2m` root-only node join 结果为 `obj=bound=6829`、`valid=true`，输出在 `test-results/bpc/tmp-nodejoin-finalk-checked-wet021.csv`；第一轮 `candidatePool kept/seen/dropped=5/14/9`，而 `debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=5/2/0/2/10.800000000001774`，说明当前只复核最终 K 堆里的 5 条，不再复核全部 14 个 seen 候选。full-domain arc join 同样 `obj=bound=6829`、`valid=true`，输出在 `test-results/bpc/tmp-arcjoin-finalk-checked-wet021.csv`；第一轮 `candidatePool kept/seen/dropped=5/10/5`，debug 输出只对应最终 kept 候选中的 mismatch。
+
+### 6.24 K 堆最终复核的根节点限定
+
+2026-05-31 继续收紧最终 K 候选复核口径。复核只在 `dualProfitableWindowEnabled=true` 时执行，也就是根节点、无 active cuts、启用了 `pi` profitable window 的 pricing 轮。非根节点、cut 节点或其他未启用 `pi` 时间窗加强的 pricing 中，候选函数口径已经回到原 hard window，不需要额外用 evaluator 扫最终 K 条，`finalizeGeneratedColumns(lp)` 直接把 K 堆列输出。
+
+同时去掉了“复核后真实 reduced cost 仍为负才加入”的二次判断。原因是 `pi` 时间窗是原 hard window 的子区间，按该窗口计算的 inferred 成本不低于完整时间域 evaluator 成本；如果 inferred reduced cost 已经小于负列阈值，则真实 reduced cost 只会更小。这里的 evaluator 复核目的不是重新判断正负，而是把最终写入列池和主问题的 `TWETColumn.cost` 修正为真实 sequence 成本，避免把带 `pi` 时间窗口径的临时成本写成永久列成本。

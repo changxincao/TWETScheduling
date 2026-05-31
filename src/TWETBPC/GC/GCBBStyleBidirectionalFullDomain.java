@@ -1088,10 +1088,17 @@ public class GCBBStyleBidirectionalFullDomain {
 		Collections.sort(candidates, candidateBestFirstComparator());
 		for (int i = 0; i < candidates.size(); i++) {
 			PricingColumnCandidate candidate = candidates.get(i);
+			if (!dualProfitableWindowEnabled) {
+				generatedColumns.add(candidate.column);
+				continue;
+			}
+			// 2026-05-31: 只有根节点 no-cut pi-window 会让 K 堆候选成本口径偏紧。
+			// pi-window 是原 hard window 的子区间，因此 inferred 成本不低于真实列成本；
+			// inferred reduced cost 已为负时，真实 reduced cost 只会更小，这里只修正列成本。
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column,
 					candidate.reducedCost, lp, data, evaluator, Configure.debugBPCPricingColumnCheck,
 					"[debugBPCPricingColumnCheck] bidirectional pricing");
-			if (checked != null && Utility.compareLt(checked.checkedReducedCost, REDUCED_COST_TOLERANCE)) {
+			if (checked != null) {
 				generatedColumns.add(checked.checkedColumn(data));
 			}
 		}

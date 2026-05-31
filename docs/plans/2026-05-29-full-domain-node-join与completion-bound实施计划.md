@@ -683,3 +683,11 @@ cost = reducedCost + machineDual
 这样处理后，`inferred` 仍然承担“从大量 join pair 中找出可能负列”的筛选作用，但不会再作为永久列池里的 objective coefficient 来源。K 堆排序也改为真实 checked reduced cost，因此比“最终 K 条再复核”更接近 exact pricing 的 top-K 语义。仍需注意的是，若某个真实负列在 pi-window 下被算成非负，它仍不会进入复核；当前 root/no-cut profitable window 的安全性依赖前面关于负列保留规则的假设和样例证据，不是由这次 cost 复核本身证明。
 
 验证方面，focused `javac` 已通过。随后用 `wet021_001_2m` 做 root-only node join 回归，结果为 `status=ROOT_PROCESSED`、`obj=6829`、`bound=6829`、`valid=true`，日志位于 `test-results/bpc/tmp-nodejoin-checked-cost-wet021/wet021_001_2m-nodeJoin.log`。第一轮 exact pricing 中 `debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=14/4/0/4/10.800000000001774`，说明 14 个 inferred 负候选都被复核，其中 4 个存在 both-negative 数值差异但没有 sign-critical；这些候选现在已用 evaluator 的 checked cost/reduced cost 入堆或被过滤。第二轮没有负候选，统计为 `0/0/0/0/0.0`。
+
+### 6.22 arc join 负候选入堆前复核同步
+
+2026-05-31 继续把同一列成本口径同步到 `GCBBStyleBidirectionalFullDomain`。此前 arc join 默认路径仍然用 label/join 推导出的 inferred reduced cost 反推 `TWETColumn.cost`，只有打开 `debugBPCPricingColumnCheck` 时才会用 evaluator 覆盖成本。现在 arc join 与 node join 一致：先用 inferred reduced cost 判断候选是否可能为负，只有 inferred 为负才调用 `TWETColumnEvaluator.evaluate()`，再以 checked reduced cost 判断是否进入 top-K 候选堆，并用 checked cost 构造 `TWETColumn`。
+
+这次同步后，arc join 和 node join 都不再把 `pi` 时间窗或 join 函数口径下的 inferred cost 写入永久列池。两者仍保留 inferred 作为候选筛选依据，因此不会把 evaluator 调用扩大到所有正 pair；评估量只与 inferred 负候选数量相关。
+
+验证方面，focused `javac` 已通过。`wet021_001_2m` root-only full-domain arc join 回归结果为 `status=ROOT_PROCESSED`、`obj=6829`、`bound=6829`、`valid=true`，输出位于 `test-results/bpc/tmp-arcjoin-checked-cost-wet021.csv` 和 `test-results/bpc/tmp-arcjoin-checked-cost-wet021/wet021_001_2m-fullDomain.log`。该次运行第一轮 exact pricing `candidatePool kept/seen/dropped=5/10/5`，并在 debug 输出中观察到 3 条 both-negative mismatch，例如同一 sequence 的 `inferred=-4.400000000000546`、`checked=-14.000000000002501`。这修正了前面对 arc join“未观察到 mismatch”的经验判断：更准确的结论是已测样例中没有 sign-critical，但 arc join 也可能出现 both-negative 数值差异，因此也应使用 evaluator 的 checked cost 写入列池。

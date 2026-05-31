@@ -39,8 +39,7 @@ import TWETBPC.Util.SequenceSignature;
  * 1. forward/backward label 都覆盖 [0, pricingHorizon]；
  * 2. dynamic window 只影响 job penalty 的有效区间，不把标签裁成 half-domain；
  * 3. crossing-arc final join 直接使用原始 label frontier；
- * 4. 默认直接使用 label/join 推导出的 reduced cost 反推出列成本；如需完整序列复核，可打开
- * {@link Configure#debugBPCPricingColumnCheck}。
+ * 4. inferred 为负的候选在入 K 堆前用 evaluator 重算真实列成本，避免 pi-window 口径污染主问题。
  */
 public class GCBBStyleBidirectionalFullDomain {
 
@@ -1051,25 +1050,27 @@ public class GCBBStyleBidirectionalFullDomain {
 		if (activeColumnSignatures.contains(signature)) {
 			return;
 		}
-		double cost = objectiveCostFromReducedCost(sequence, inferredReducedCost, lp);
-		double reducedCost = inferredReducedCost;
+		if (!Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
+			return;
+		}
+		double checkedCost = evaluator.evaluate(sequence);
+		if (Utility.isBigMValue(checkedCost)) {
+			return;
+		}
+		double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
 		if (Configure.debugBPCPricingColumnCheck) {
-			double checkedCost = evaluator.evaluate(sequence);
-			if (Utility.isBigMValue(checkedCost)) {
-				return;
-			}
-			double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
 			if (Math.abs(checkedReducedCost - inferredReducedCost) > 1e-5) {
 				System.err.println("[debugBPCPricingColumnCheck] bidirectional pricing reduced-cost mismatch: inferred="
 						+ inferredReducedCost + ", checked=" + checkedReducedCost + ", sequence=" + sequence);
 			}
-			cost = checkedCost;
-			reducedCost = checkedReducedCost;
 		}
-		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
-			rememberGeneratedCandidate(signature,
-					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
+		if (!Utility.compareLt(checkedReducedCost, REDUCED_COST_TOLERANCE)) {
+			return;
 		}
+		// 2026-05-31: pi-window/inferred 只负责找候选；进入永久列池前必须回到原始 sequence 成本。
+		rememberGeneratedCandidate(signature,
+				new TWETColumn(-1, sequence, data.n, checkedCost, ColumnSource.PRICING_EXACT, false),
+				checkedReducedCost);
 	}
 
 	private void rememberGeneratedCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
@@ -1105,18 +1106,6 @@ public class GCBBStyleBidirectionalFullDomain {
 		for (int i = 0; i < candidates.size(); i++) {
 			generatedColumns.add(candidates.get(i).column);
 		}
-	}
-
-	private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost, LP lp) {
-		double cost = reducedCost + lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			cost += lp.getJobDual(job);
-			cost += lp.getArcDual(prev, job);
-			prev = job;
-		}
-		cost += lp.getArcDual(prev, lp.getNode().sinkId());
-		return cost;
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {

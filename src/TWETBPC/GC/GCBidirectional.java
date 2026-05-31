@@ -40,7 +40,18 @@ import TWETBPC.Util.SequenceSignature;
  * 3. join 时用论文里的常数延拓，临时补齐 forward 右半域和 backward 左半域，然后按 crossing arc 对齐相加；
  * 4. 默认直接使用 label/join 推导出的 reduced cost 反推出列成本；如需完整序列复核，可打开
  * {@link Configure#debugBPCPricingColumnCheck}。
+ * <p>
+ * 2026-05-31: 本类已封存，不再作为后续维护或实验入口。原因是它的外层流程本身不适合当前
+ * top-K exact pricing 口径：负列在 forward 出队收尾和 backward 出队 join 时在线加入
+ * {@code generatedColumns}，达到 {@link TWETBPCConfig#maxExactPricingColumns} 后立即停止，
+ * 因此得到的是“扫描顺序下最先发现的 K 条负列”，不是统一候选池中的 best K。更重要的是，
+ * 根节点 no-cut 下启用 pi profitable window 时，label/join inferred 成本只是当前 pricing 的
+ * 临时窗口口径；本类正常路径不会在最终加列前用 {@link TWETColumnEvaluator} 修正
+ * {@link TWETColumn#cost}，只有 debug 开关下才会复核。继续在这里补丁式维护会同时保留
+ * first-K 流程问题和 pi-window 永久列成本污染风险。后续双向 pricing 修改统一放到带
+ * final top-K 候选堆和 K 堆固定后成本复核的 GCBB/GCNGBB-style 实现中。
  */
+@Deprecated
 public class GCBidirectional {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
@@ -126,22 +137,9 @@ public class GCBidirectional {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
-		Utility.resetCurUpperBound(Utility.big_M);
-		initialize(lp);
-		// 2026-05-24: hybrid-B 流程。先完整生成 forward half labels，
-		// 再在 backward half 中用 crossing arc 和已有 forward labels 拼接。
-		while (canContinue() && !FWUL.isEmpty()) {
-			forwardExtend(lp);
-		}
-		if (canContinue()) {
-			initializeBackwardSink(lp);
-		}
-		while (canContinue() && !BWUL.isEmpty()) {
-			backwardExtend(lp);
-		}
-		String completionState = canContinue() ? "queues exhausted" : "column cap reached";
-		lastMessage = "Bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
-				+ completionState + "); " + statisticsSummary();
+		generatedColumns = new ArrayList<TWETColumn>();
+		lastMessage = "Deprecated hybrid-B bidirectional pricing is disabled: the old online first-K flow has no final top-K heap, "
+				+ "and root pi-window inferred costs are not repaired before columns enter the master problem";
 		return generatedColumns;
 	}
 

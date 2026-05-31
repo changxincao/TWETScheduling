@@ -694,9 +694,9 @@ cost = reducedCost + machineDual
 
 ### 6.23 复核位置修正：只复核最终 K 堆候选
 
-2026-05-31 进一步修正前两节实现。上一版把 evaluator 复核放在 `tryGenerateColumn()`、即候选进入 K 堆之前；这会对所有 inferred 为负的候选做 evaluator，范围大于最终保留下来的 K 条，违背“先用 pi-window/inferred 维护 K 堆，K 堆固定后再校正成本”的目标。当前实现已改回：`tryGenerateColumn()` 只用 inferred reduced cost 构造候选并维护 top-K；`finalizeGeneratedColumns(lp)` 中才对已经固定的 K 堆候选调用 evaluator。若 checked reduced cost 仍为负，则用 checked cost 构造最终 `TWETColumn`；若 checked reduced cost 已非负，则该候选不输出给主问题。
+2026-05-31 进一步修正前两节实现。上一版把 evaluator 复核放在 `tryGenerateColumn()`、即候选进入 K 堆之前；这会对所有 inferred 为负的候选做 evaluator，范围大于最终保留下来的 K 条，违背“先用 pi-window/inferred 维护 K 堆，K 堆固定后再校正成本”的目标。当前实现已改回：`tryGenerateColumn()` 只用 inferred reduced cost 构造候选并维护 top-K；`finalizeGeneratedColumns(lp)` 中才对已经固定的 K 堆候选调用 evaluator，并用 checked cost 构造最终 `TWETColumn`。
 
-为避免每个类重复写成本反推和复核逻辑，新增了 `PricingColumnCostRechecker`。它提供两件事：进入 K 堆前用 inferred reduced cost 反推临时候选列成本；K 堆固定后按 sequence 调用 `TWETColumnEvaluator`，得到 checked cost 和 checked reduced cost。当前已接入有 top-K 候选堆的双向 pricing 类：`GCBBStyleBidirectionalFullDomain`、`GCBBStyleBidirectionalFullDomainNodeJoin`、`GCNGBBStyleBidirectional` 和 `GCBBAsymmetricBidirectional`。普通 `GCBidirectional` 没有这套 K 堆流程，暂不适用这个“final K 后复核”的位置。
+为避免每个类重复写成本反推和复核逻辑，新增了 `PricingColumnCostRechecker`。它提供两件事：进入 K 堆前用 inferred reduced cost 反推临时候选列成本；K 堆固定后按 sequence 调用 `TWETColumnEvaluator`，得到 checked cost。当前已接入有 top-K 候选堆的双向 pricing 类：`GCBBStyleBidirectionalFullDomain`、`GCBBStyleBidirectionalFullDomainNodeJoin`、`GCNGBBStyleBidirectional` 和 `GCBBAsymmetricBidirectional`。普通 `GCBidirectional` 没有这套 K 堆流程，暂不适用这个“final K 后复核”的位置。
 
 验证方面，focused `javac` 已通过。`wet021_001_2m` root-only node join 结果为 `obj=bound=6829`、`valid=true`，输出在 `test-results/bpc/tmp-nodejoin-finalk-checked-wet021.csv`；第一轮 `candidatePool kept/seen/dropped=5/14/9`，而 `debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=5/2/0/2/10.800000000001774`，说明当前只复核最终 K 堆里的 5 条，不再复核全部 14 个 seen 候选。full-domain arc join 同样 `obj=bound=6829`、`valid=true`，输出在 `test-results/bpc/tmp-arcjoin-finalk-checked-wet021.csv`；第一轮 `candidatePool kept/seen/dropped=5/10/5`，debug 输出只对应最终 kept 候选中的 mismatch。
 
@@ -726,4 +726,10 @@ cost = reducedCost + machineDual
 
 随后在 `GCBBStyleBidirectionalFullDomain` 中把 `finalizeGeneratedColumns()` 和其中的 evaluator recheck 单独计时，避免继续用“pricing 总时间减内部计时”的差值做归因。新的关闭 debug 复跑结果为：第一轮 `time=563.830ms`，内部统计 `timingMs fwExt/bwExt/join/finalize/recheck/extTotal/measuredTotal=272.364/59.807/106.826/9.058/7.994/332.171/448.055`，`finalRecheckCount=5`；第二轮 `time=334.633ms`，`timingMs ...=234.251/20.071/77.799/0.027/0.000/254.322/332.148`，`finalRecheckCount=0`。
 
-因此前面按差值估算 `0.1~0.3s` 的说法需要作废：那个差值混入了框架、日志、JVM 和其它未单独计量开销，不能代表最终 K 条 evaluator 复核本身。以本次精确埋点为准，`wet021_001_2m` 第一轮 5 次最终复核合计约 `7.994ms`，约占本轮内部 measured total `448.055ms` 的 `1.8%`，占该轮 pricing 输出总时间 `563.830ms` 的 `1.4%`。在这个样例和 `K=5` 下，最终 K 复核不是主要耗时；但它仍随最终 K 条数线性增长，若后续把 K 放大，需要继续看 `finalRecheckCount` 和 `recheck` 两个字段，而不能再用总时间差粗估。
+因此前面按差值估算 `0.1~0.3s` 的说法需要作废：那个差值混入了框架、日志、JVM 和其它未单独计量开销，不能代表最终 K 条 evaluator 复核本身。以本次精确埋点为准，`wet021_001_2m` 第一轮 5 次最终复核合计约 `7.994ms`，约占本轮内部 measured total `448.055ms` 的 `1.8%`，占该轮 pricing 输出总时间 `563.830ms` 的 `1.4%`。在这个样例和 `K=5` 下，最终 K 复核不是主要耗时；但它仍随最终 K 条数线性增长，若后续把 K 放大，需要重新打开临时 recheck 计时，而不能再用总时间差粗估。
+
+### 6.28 关闭最终 K 复核诊断冗余
+
+2026-05-31 在确认“最终 K 后复核并用 evaluator cost 输出”这条主流程后，关闭了前面为验证临时增加的冗余诊断。`PricingColumnCostRechecker.evaluate()` 现在只调用 `TWETColumnEvaluator` 得到真实 objective cost，不再重算 checked reduced cost，也不再按 debug 开关输出 inferred/checked mismatch。`GCBBStyleBidirectionalFullDomain` 中用于测量 `finalize/recheck/finalRecheckCount` 的临时计时字段也已撤掉，日志恢复为原来的 forward/backward/join 三段内部耗时。`GCBBStyleBidirectionalFullDomainNodeJoin` 中 final K mismatch 计数同样关闭，只保留注释说明后续如需重新诊断可在该位置恢复。
+
+这次清理不改变加列口径：K 堆仍按 inferred reduced cost 维护；只有根节点 no-cut 且启用 `pi` profitable window 时，`finalizeGeneratedColumns(lp)` 才对最终 K 堆候选调用 evaluator；最终输出给 `PC` 和列池的 `TWETColumn.cost` 使用 evaluator 的真实 sequence cost。关闭的是诊断和重复 reduced-cost 计算，不是最终成本修正。

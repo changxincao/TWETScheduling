@@ -140,11 +140,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
 	private long joinPhaseNanos;
-	private long debugGeneratedNegativeChecked;
-	private long debugGeneratedNegativeMismatch;
-	private long debugGeneratedNegativeSignCritical;
-	private long debugGeneratedNegativeBothNegative;
-	private double debugGeneratedNegativeMaxAbsMismatch;
 
 	private String lastMessage = "GCBB-style full-domain node-join bidirectional pricing not executed";
 
@@ -1030,11 +1025,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
 		joinPhaseNanos = 0;
-		debugGeneratedNegativeChecked = 0;
-		debugGeneratedNegativeMismatch = 0;
-		debugGeneratedNegativeSignCritical = 0;
-		debugGeneratedNegativeBothNegative = 0;
-		debugGeneratedNegativeMaxAbsMismatch = 0.0;
 	}
 
 	private String statisticsSummary() {
@@ -1075,10 +1065,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
-				+ ", debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs="
-				+ debugGeneratedNegativeChecked + "/" + debugGeneratedNegativeMismatch + "/"
-				+ debugGeneratedNegativeSignCritical + "/" + debugGeneratedNegativeBothNegative + "/"
-				+ debugGeneratedNegativeMaxAbsMismatch
 				+ ", " + PaperDominanceGraph.statisticsSummary();
 	}
 
@@ -1179,32 +1165,14 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			// 2026-05-31: 只有根节点 no-cut pi-window 会让 K 堆候选成本口径偏紧。
 			// pi-window 是原 hard window 的子区间，因此 inferred 成本不低于真实列成本；
 			// inferred reduced cost 已为负时，真实 reduced cost 只会更小，这里只修正列成本。
-			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column,
-					candidate.reducedCost, lp, data, evaluator, Configure.debugBPCPricingColumnCheck,
-					"[debugBPCPricingColumnCheck] node-join bidirectional pricing");
+			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column, data,
+					evaluator);
 			if (checked == null) {
 				continue;
 			}
-			if (Configure.debugBPCPricingColumnCheck) {
-				recordGeneratedNegativeDebug(candidate.reducedCost, checked.checkedReducedCost);
-			}
+			// 2026-05-31: node-join 实验分支不再记录 inferred/checked mismatch 统计。
+			// 若后续重新启用该分支诊断，可在这里恢复 final K 候选的 debug 计数。
 			generatedColumns.add(checked.checkedColumn(data));
-		}
-	}
-
-	private void recordGeneratedNegativeDebug(double inferredReducedCost, double checkedReducedCost) {
-		double diff = Math.abs(inferredReducedCost - checkedReducedCost);
-		debugGeneratedNegativeChecked++;
-		if (Utility.compareGt(diff, Math.max(1e-5, Utility.EPS * 100.0))) {
-			debugGeneratedNegativeMismatch++;
-			debugGeneratedNegativeMaxAbsMismatch = Math.max(debugGeneratedNegativeMaxAbsMismatch, diff);
-			boolean inferredNegative = Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE);
-			boolean checkedNegative = Utility.compareLt(checkedReducedCost, REDUCED_COST_TOLERANCE);
-			if (inferredNegative != checkedNegative) {
-				debugGeneratedNegativeSignCritical++;
-			} else if (inferredNegative && checkedNegative) {
-				debugGeneratedNegativeBothNegative++;
-			}
 		}
 	}
 

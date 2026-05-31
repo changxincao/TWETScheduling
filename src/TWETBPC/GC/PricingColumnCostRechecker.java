@@ -14,10 +14,12 @@ import TWETBPC.Model.TWETColumn;
  * <p>
  * pricing 阶段可以先用 label/join 推导出的 inferred reduced cost 维护 top-K 候选堆；
  * K 堆固定后，再用该工具对最终候选恢复真实 sequence cost，避免把 pi-window 口径写入永久列池。
+ * <p>
+ * 2026-05-31: inferred/checked reduced-cost mismatch 诊断已关闭。当前正式路径只需要
+ * evaluator 的真实 objective cost；若后续要重新诊断 pi-window 数值差异，再在这里临时恢复
+ * checked reduced cost 计算和 mismatch 输出。
  */
 final class PricingColumnCostRechecker {
-
-	private static final double DEBUG_MISMATCH_TOLERANCE = 1e-5;
 
 	private PricingColumnCostRechecker() {
 	}
@@ -28,19 +30,12 @@ final class PricingColumnCostRechecker {
 				false);
 	}
 
-	static Result evaluate(TWETColumn candidateColumn, double inferredReducedCost, LP lp, Data data,
-			TWETColumnEvaluator evaluator, boolean debug, String debugPrefix) {
+	static Result evaluate(TWETColumn candidateColumn, Data data, TWETColumnEvaluator evaluator) {
 		double checkedCost = evaluator.evaluate(candidateColumn.getSequence());
 		if (Utility.isBigMValue(checkedCost)) {
 			return null;
 		}
-		double checkedReducedCost = reducedCost(candidateColumn.getSequence(), checkedCost, lp);
-		if (debug && Utility.compareGt(Math.abs(checkedReducedCost - inferredReducedCost),
-				DEBUG_MISMATCH_TOLERANCE)) {
-			System.err.println(debugPrefix + " reduced-cost mismatch: inferred=" + inferredReducedCost
-					+ ", checked=" + checkedReducedCost + ", sequence=" + candidateColumn.getSequence());
-		}
-		return new Result(candidateColumn, checkedCost, checkedReducedCost);
+		return new Result(candidateColumn, checkedCost);
 	}
 
 	private static double objectiveCostFromReducedCost(List<Integer> sequence, double reducedCost, LP lp) {
@@ -55,27 +50,13 @@ final class PricingColumnCostRechecker {
 		return cost;
 	}
 
-	private static double reducedCost(List<Integer> sequence, double cost, LP lp) {
-		double reducedCost = cost - lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			reducedCost -= lp.getJobDual(job);
-			reducedCost -= lp.getArcDual(prev, job);
-			prev = job;
-		}
-		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());
-		return reducedCost;
-	}
-
 	static final class Result {
 		final TWETColumn originalColumn;
 		final double checkedCost;
-		final double checkedReducedCost;
 
-		Result(TWETColumn originalColumn, double checkedCost, double checkedReducedCost) {
+		Result(TWETColumn originalColumn, double checkedCost) {
 			this.originalColumn = originalColumn;
 			this.checkedCost = checkedCost;
-			this.checkedReducedCost = checkedReducedCost;
 		}
 
 		TWETColumn checkedColumn(Data data) {

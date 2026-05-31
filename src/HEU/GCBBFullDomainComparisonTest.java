@@ -124,7 +124,7 @@ public class GCBBFullDomainComparisonTest {
 		}
 		String completionBound = config.bidirectionalCompletionBoundRelaxation == null
 				? "off" : config.bidirectionalCompletionBoundRelaxation.trim();
-		if (nodeJoin && !completionBound.isEmpty() && !"off".equalsIgnoreCase(completionBound)) {
+		if ((fullDomain || nodeJoin) && !completionBound.isEmpty() && !"off".equalsIgnoreCase(completionBound)) {
 			mode += "-cb-" + completionBound;
 		}
 		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE);

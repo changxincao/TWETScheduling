@@ -423,3 +423,13 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 2026-05-31 决定收紧实现口径：completion-bound cutoff 固定为 `REDUCED_COST_TOLERANCE`，不再读取 `joinBestThresholdMode` 或 `bestGeneratedReducedCost`。这样日志中的 completion-bound cutoff 始终表示“负列可补全”判断，`bestUB/bestRecord` 的影响范围限定在 final join 阶段。这个选择牺牲了一部分 record-only 剪枝潜力，但保留了每轮返回多条负列和 exact pricing certificate 的语义。
 
 关于 `allCycles` 与 `twoCycle` 的规模效应，当前小样例上 `allCycles` 更快不应被理解为 `twoCycle` 没有价值。`twoCycle` 的额外成本主要来自二维 last-arc state、更多函数合并和更长的 correcting 收敛；收益则来自更强 lower bound 对后续 label 子树的提前剪枝。在 `wet020/wet021` 这类 pricing 已被 `allCycles` 压到很短的样例里，额外剪枝空间很小，所以 `twoCycle` 的构建成本显得不划算。若规模变大、root dual 结构导致 all-cycles bound 仍然留下大量可扩展 label，`twoCycle` 可能通过更强 bound 大幅减少后续扩展、dominance 和 join 时间，此时总时间可能反超。后续实验应按 `completionBoundBuildMs`、`fwPruned/bwPruned`、`fwExt/bwExt/join` 分项判断，而不是只看总秒数。
+
+## 11. 2026-05-31 arc-join full-domain completion bound 试跑
+
+本次把同一套 completion bound 先移植到 `GCBBStyleBidirectionalFullDomain`，也就是 full-domain crossing-arc join 对照类。接入口径和 node-join 分支保持一致：`off/allCycles/twoCycle` 由 `bidirectionalCompletionBoundRelaxation` 控制，正向 child label 用 `F_label + R_i` 判断是否还能补成负列，反向 child label 用 `U_i + B_label` 判断；cutoff 固定为 `REDUCED_COST_TOLERANCE`，不读取当前 best reduced cost。比较入口 `GCBBFullDomainComparisonTest` 也同步让 full-domain arc-join 模式在非 `off` 时写出 `-cb-allCycles/-cb-twoCycle` 后缀，避免和无剪枝结果混在同一个目录。
+
+在 no-outsourcing 的 `wet020_001_2m` root-only 对照中，三组结果均 `valid=true` 且根节点 `obj=bound=6343`。无剪枝时 exact pricing 为 `0.296s`，保留 label 为 `fw/bw=1153/1395`，join function evaluation 为 `274192`。`allCycles` 后 exact pricing 降到 `0.115s`，保留 label 为 `26/13`，`fwPruned/bwPruned=295/187`，bound 构建约 `62.193ms`。`twoCycle` 的 label 更少，为 `8/11`，join function evaluation 只有 `7`，说明 bound 确实更强；但构建约 `247.479ms`，最终 exact pricing 为 `0.299s`，基本抵消了后续节省。
+
+在 `wet021_001_2m` root-only 对照中，三组同样 `valid=true` 且 `obj=bound=6829`。无剪枝两轮 exact pricing 合计约 `0.745s`；`allCycles` 合计约 `0.202s`，第一轮 label 从 `2103/1424` 降到 `16/16`，`fwPruned/bwPruned=163/227`，构建约 `80.235ms`；第二轮构建约 `56.961ms`，几乎直接剪到 source 附近。`twoCycle` 在该算例上剪枝数和 `allCycles` 完全相同，但构建约 `338.619ms + 303.779ms`，总 exact pricing 约 `0.714s`，接近无剪枝。
+
+当前判断是：在 full-domain arc join 上，completion bound 的收益比 node-join 更容易体现，因为它直接减少后续扩展、dominance 和 crossing-arc join 的规模；但默认更应先用 `allCycles`。`twoCycle` 在 `wet020` 上确实更强，可把 join evaluation 从 `60` 进一步压到 `7`，但当前样例的额外构建成本更大；在 `wet021` 上甚至没有额外剪枝。因此后续如果继续找 `twoCycle` 的适用场景，应优先找 all-cycles 仍留下大量 label 或 join evaluation 的实例，而不是已经被 all-cycles 压到毫秒级的 root pricing。尝试直接跑原始 `data/40-2/wet040_001_2m` 时，off 版本超过三分钟未完成，bound 版本也不适合本轮交互验证；该数据口径和当前 no-outsourcing 对照集不同，暂不纳入结论。

@@ -433,3 +433,12 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 在 `wet021_001_2m` root-only 对照中，三组同样 `valid=true` 且 `obj=bound=6829`。无剪枝两轮 exact pricing 合计约 `0.745s`；`allCycles` 合计约 `0.202s`，第一轮 label 从 `2103/1424` 降到 `16/16`，`fwPruned/bwPruned=163/227`，构建约 `80.235ms`；第二轮构建约 `56.961ms`，几乎直接剪到 source 附近。`twoCycle` 在该算例上剪枝数和 `allCycles` 完全相同，但构建约 `338.619ms + 303.779ms`，总 exact pricing 约 `0.714s`，接近无剪枝。
 
 当前判断是：在 full-domain arc join 上，completion bound 的收益比 node-join 更容易体现，因为它直接减少后续扩展、dominance 和 crossing-arc join 的规模；但默认更应先用 `allCycles`。`twoCycle` 在 `wet020` 上确实更强，可把 join evaluation 从 `60` 进一步压到 `7`，但当前样例的额外构建成本更大；在 `wet021` 上甚至没有额外剪枝。因此后续如果继续找 `twoCycle` 的适用场景，应优先找 all-cycles 仍留下大量 label 或 join evaluation 的实例，而不是已经被 all-cycles 压到毫秒级的 root pricing。尝试直接跑原始 `data/40-2/wet040_001_2m` 时，off 版本超过三分钟未完成，bound 版本也不适合本轮交互验证；该数据口径和当前 no-outsourcing 对照集不同，暂不纳入结论。
+## 12. 2026-05-31 arc-join completion bound 在 wet025/wet030 上的 10 分钟试跑
+
+本轮继续用 full-domain crossing-arc join 对照类试 `wet025_001` 和 `wet030_001`，仍采用 root-only、`maxExactColumns=5`、no-outsourcing 临时输入，并分别跑 `allCycles/twoCycle/off`。目标不是完整批量结论，而是看规模从 20/21 放大到 25/30 后，completion bound 的构建成本和扩展剪枝收益是否开始分化。
+
+`wet025_001` 三组都跑完且结果一致，均为 `obj=bound=10037, valid=true`。无 completion bound 时 solve 为 `20.228s`，exact pricing 为 `18.105s`；`allCycles` 后 solve 降到 `2.554s`、exact pricing 降到 `0.353s`，第一轮日志中 completion-bound 构建约 `202.995ms`，剪掉 `fw/bw=4112/1224` 个 label。`twoCycle` 也明显快于 off，solve 为 `3.453s`、exact pricing 为 `1.401s`，但构建约 `1247.146ms`，比 all-cycles 多出的剪枝不足以抵消构建成本。
+
+`wet030_001` 在 10 分钟预算内完成了 `allCycles` 和 `twoCycle`，`off` 启动后一直未完成，剩余预算内手动停止，因此本轮不把 off 纳入完成结果。`allCycles` 得到 `NODE_LIMIT`，`obj=46152, bound=15261.833333, valid=true`，solve 为 `9.037s`，exact pricing 合计 `3.086s`，5 次 pricing 中每次 completion-bound 构建约 `0.44-0.55s`。`twoCycle` 同样为 `NODE_LIMIT` 且目标和界一致，但 solve 增至 `38.467s`，exact pricing 合计 `31.194s`，每次构建约 `5.43-6.90s`。从日志看 two-cycle 的 label 和 join 候选确实更少，例如最后一轮保留 label 从 all-cycles 的 `fw/bw=429/125` 降到 `157/96`，join function evaluation 从 `6863` 降到 `2032`；但二维 bound 的构建成本已经远大于后续节省。
+
+当前结论进一步支持把 `allCycles` 作为 arc-join full-domain completion bound 的默认优先项。`twoCycle` 的 bound 强度没有问题，但在 25/30 规模上仍然不是瓶颈换取成功的方向；它只有在 all-cycles 构建后仍留下非常大的扩展、dominance 或 join 残余时才值得继续试。`wet030 off` 未在本轮 10 分钟预算内完成，反过来说明 completion bound 已经从“局部优化”变成了 full-domain arc join 在较大样例上能否交互式跑完的关键开关。

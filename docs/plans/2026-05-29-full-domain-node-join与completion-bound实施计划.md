@@ -733,3 +733,21 @@ cost = reducedCost + machineDual
 2026-05-31 在确认“最终 K 后复核并用 evaluator cost 输出”这条主流程后，关闭了前面为验证临时增加的冗余诊断。`PricingColumnCostRechecker.evaluate()` 现在只调用 `TWETColumnEvaluator` 得到真实 objective cost，不再重算 checked reduced cost，也不再按 debug 开关输出 inferred/checked mismatch。`GCBBStyleBidirectionalFullDomain` 中用于测量 `finalize/recheck/finalRecheckCount` 的临时计时字段也已撤掉，日志恢复为原来的 forward/backward/join 三段内部耗时。`GCBBStyleBidirectionalFullDomainNodeJoin` 中 final K mismatch 计数同样关闭，只保留注释说明后续如需重新诊断可在该位置恢复。
 
 这次清理不改变加列口径：K 堆仍按 inferred reduced cost 维护；只有根节点 no-cut 且启用 `pi` profitable window 时，`finalizeGeneratedColumns(lp)` 才对最终 K 堆候选调用 evaluator；最终输出给 `PC` 和列池的 `TWETColumn.cost` 使用 evaluator 的真实 sequence cost。关闭的是诊断和重复 reduced-cost 计算，不是最终成本修正。
+
+### 6.29 join 下界阈值与 completion bound 预计算复查
+
+2026-05-31 继续复查当前 join 剪枝阈值。`GCBBStyleBidirectionalFullDomain` 和 `GCBBStyleBidirectionalFullDomainNodeJoin` 现在的 group lower bound、pair lower bound 以及函数正式拼接后的 `findMinimal()` 结果，都是只和 `REDUCED_COST_TOLERANCE` 比较，也就是只判断是否可能为负列。K 堆只在 `rememberGeneratedCandidate()` 里生效：候选已经恢复 sequence、构造临时列并进入候选池逻辑后，若堆已满，才用当前 K 堆最差候选决定是否替换。因此当前代码没有在 join 前用 K 堆阈值剪掉“虽为负但不可能进入最终 K 堆”的 pair。
+
+如果要加强这层剪枝，阈值不应使用“当前最好列”的 reduced cost。当前最好列是最负的那条；一旦用它作为下界阈值，后续只有比当前最好列还好的候选才会继续保留，极容易退化成一轮只剩一条列。这和 top-K 的语义不一致。更合适的阈值是：K 堆未满时仍用 0，因为任何负列都可能用于填满 K；K 堆已满后，使用当前 K 堆中最差的 kept reduced cost，也就是 worst-first heap 的 `peek()`。因此剪枝阈值可以理解为 `threshold = heapFull ? min(0, worstKeptReducedCost) : 0`。由于 worst kept 本身应为负，实际就是“未满看 0，已满看当前第 K 好列”。只有 lower bound 已经不可能小于这个阈值时，才说明该 group/pair 不可能进入当前 top-K，可以提前剪掉。
+
+这层加强适合放在两个位置。第一是在 group LB 和 pair LB 处，用当前阈值替代固定的 0；因为这些 lower bound 是乐观下界，若下界都不优于当前第 K 好列，则真实拼接值也不可能进入 K 堆。第二是在函数已经正式 `add/findMinimal()` 之后，若 reduced cost 为负但不优于当前满堆的最差候选，可以跳过 sequence 恢复和候选构造。这时函数计算已经付出，收益只剩少量对象构造和堆操作节省；但它不应改变“负列才更新 K 堆”的原则。需要注意，这个动态阈值只保证“已见候选的 top-K”维护更紧，不把 pricing 变成 exact certificate；若后续仍要证明不存在更好负列，仍要依赖队列耗尽和安全 lower bound。
+
+旧 VRP 代码没有看到在 `GCNGBB` 的 bounded bidirectional join 中使用“当前最好列”或“K 堆最差列”作为动态 join 阈值。`GCNGBB` 文件头写的是先生成 1000 条负 reduced-cost route，再选最好的 30 条；实际 join 中先用 `lbf.m_nosr_redcost + label.m_reduced_cost + lp.mu[cid] > -tolerance` 这类条件按 0 过滤，算出完整 cost 后也是 `cost < -tolerance` 才加入 `GCPool`。最后若 pool 大于 `addin_size`，再排序并取前 `addin_size` 条加入主 LP。代码里的 `m_min_cost` 主要用于记录更优的 cycle / NG-memory 相关 route，服务后续 NG-set 更新，不是 join 阶段 top-K 剪枝阈值。旧 `GCPulse` 里确实存在 `best_cost` 型 bound 剪枝，但那是 pulse 路径搜索，不是 `GCNGBB` 这套 bounded bidirectional label join 的主流程。
+
+completion bound 预计算可以直接采用 node join 思路，而且不应被当前正式 node join pricing 的高复杂度吓住。正式 node join pricing 慢，主要是 elementary label 侧把 full-domain 跨界 terminal 候选显式放进普通 dominance graph 和 active join table，导致 label、reachable key 和 dominance 检查规模膨胀；node join 的公式本身不是主要矛盾。completion bound 是 relaxed DP，不保存每条路径的 visited set，也不维护每个 node 上大量 label，而是每个 relaxed state 维护一组 lower-envelope 函数。因此它可以直接使用 `U_state + Bbar_state` 的同 node 拼接口径。
+
+第一版 all-cycles completion bound 可以按 node state 做：forward 维护 `U_i(t)` 和 `F_i(t)`，其中 `U_i` 是到达 node `i`、尚未加入 `i` 的 job penalty/job dual 的 pre-node 函数，`F_i` 是加入当前 node 成本后做 prefix-min 的传播函数；backward 维护含当前 node 成本的 `Bbar_i(t)` 和 suffix-min 后用于继续向前传播的 `B_i(t)`。forward 扩展从 `F_i` 出发，平移 setup/processing 后加 reduced arc cost 得到后继 `U_candidate_j`，再加 `g_j(t)` 并 prefix-min 得到 `F_candidate_j`。`U_j` 和 `F_j` 都取 lower envelope；是否重新入队主要看 `F_j` 是否改善，但 `U_j` 的改善也要保留，因为它会增强后续 `min_t U_j(t)+Bbar_j(t)` 的 node join bound。backward 方向同理，`Bbar` 服务拼接，`B` 服务传播。
+
+2-cycle-free completion bound 则把 state 扩成 last-arc 口径：forward state 为 `(h,i)`，backward state 为 `(i,k)`，转移时禁止立即回到上一点。做严格 node join 时，`(h,i)` 只能和 `k != h` 的 backward suffix 拼；工程上可以为每个 join node 预存 backward 最优和 second-best suffix envelope，类似旧 VRP 中 `m_bd_fid/m_sec_bound` 的作用，避免每次枚举全部 successor。若第一版只把 completion bound 用作剪枝 lower bound，也可以先用更松的 `min_k Bbar_{i,k}`，不检查 `k != h`；这会让 bound 更弱，但不会造成错误剪枝。
+
+因此建议后续把 completion bound 做成独立 calculator，而不是复用已封存的 node join pricing 类。输入使用当前 pricing 轮的 reduced arc cost、job dual、machine dual、hard/effective window 和分支 forbidden arc；第一版先不处理 cut dual 或 required-arc 的强制语义，只保证 bound 对当前节点是安全偏松的。输出可以先给每个 node 或 last-arc state 的 relaxed suffix/preffix bound 和统计。接入剪枝时，阈值同样沿用上面的规则：K 堆未满按 0 剪，K 堆已满按当前第 K 好列剪。这样 completion bound 既能减少进入函数 add/findMinimal 的正 pair，也能在 K 堆已经满后避免继续处理不可能进入最终 K 的负 pair。

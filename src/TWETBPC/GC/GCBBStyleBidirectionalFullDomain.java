@@ -129,6 +129,9 @@ public class GCBBStyleBidirectionalFullDomain {
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
 	private long joinPhaseNanos;
+	private long finalizeColumnsNanos;
+	private long finalCandidateRecheckNanos;
+	private long finalCandidateRecheckCount;
 
 	private String lastMessage = "GCBB-style full-domain bidirectional pricing not executed";
 
@@ -158,7 +161,9 @@ public class GCBBStyleBidirectionalFullDomain {
 			compactAndSortActiveLabelListsForJoin();
 			joinAllForwardTerminalGroups(lp);
 			joinPhaseNanos += System.nanoTime() - phaseStart;
+			phaseStart = System.nanoTime();
 			finalizeGeneratedColumns(lp);
+			finalizeColumnsNanos += System.nanoTime() - phaseStart;
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
 		lastMessage = "GCBB-style full-domain bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
@@ -931,11 +936,14 @@ public class GCBBStyleBidirectionalFullDomain {
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
 		joinPhaseNanos = 0;
+		finalizeColumnsNanos = 0;
+		finalCandidateRecheckNanos = 0;
+		finalCandidateRecheckCount = 0;
 	}
 
 	private String statisticsSummary() {
 		long extensionNanos = forwardExtensionNanos + backwardExtensionNanos;
-		long measuredNanos = extensionNanos + joinPhaseNanos;
+		long measuredNanos = extensionNanos + joinPhaseNanos + finalizeColumnsNanos;
 		return "labels fw kept/dominated=" + forwardLabelsKept + "/" + forwardLabelsDominated
 				+ ", bw kept/dominated=" + backwardLabelsKept + "/" + backwardLabelsDominated
 				+ ", halfWindowIneligible fw/bw=" + forwardHalfIneligibleJobCount + "/"
@@ -956,9 +964,12 @@ public class GCBBStyleBidirectionalFullDomain {
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering
-				+ ", timingMs fwExt/bwExt/join/extTotal/measuredTotal=" + formatMillis(forwardExtensionNanos)
+				+ ", timingMs fwExt/bwExt/join/finalize/recheck/extTotal/measuredTotal="
+				+ formatMillis(forwardExtensionNanos)
 				+ "/" + formatMillis(backwardExtensionNanos) + "/" + formatMillis(joinPhaseNanos)
+				+ "/" + formatMillis(finalizeColumnsNanos) + "/" + formatMillis(finalCandidateRecheckNanos)
 				+ "/" + formatMillis(extensionNanos) + "/" + formatMillis(measuredNanos)
+				+ ", finalRecheckCount=" + finalCandidateRecheckCount
 				+ ", joinMeasuredShare=" + formatPercent(joinPhaseNanos, measuredNanos)
 				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
@@ -1095,9 +1106,12 @@ public class GCBBStyleBidirectionalFullDomain {
 			// 2026-05-31: 只有根节点 no-cut pi-window 会让 K 堆候选成本口径偏紧。
 			// pi-window 是原 hard window 的子区间，因此 inferred 成本不低于真实列成本；
 			// inferred reduced cost 已为负时，真实 reduced cost 只会更小，这里只修正列成本。
+			long recheckStart = System.nanoTime();
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column,
 					candidate.reducedCost, lp, data, evaluator, Configure.debugBPCPricingColumnCheck,
 					"[debugBPCPricingColumnCheck] bidirectional pricing");
+			finalCandidateRecheckNanos += System.nanoTime() - recheckStart;
+			finalCandidateRecheckCount++;
 			if (checked != null) {
 				generatedColumns.add(checked.checkedColumn(data));
 			}

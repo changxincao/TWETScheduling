@@ -724,4 +724,6 @@ cost = reducedCost + machineDual
 
 2026-05-31 重新用 `GCBBFullDomainComparisonTest` 跑 `wet021_001_2m`、`mode=fullDomain`、`maxNodes=1`，检查 full-domain arc join 的最终 K 堆复核次数和耗时。当前 root 一共两轮 exact pricing。第一轮 `candidatePool kept/seen/dropped=5/10/5`，说明 10 个 inferred 负候选中最终 K 堆只保留 5 条，因此 evaluator 最终复核 5 次；第二轮 `candidatePool kept/seen/dropped=0/0/0`，复核 0 次。打开 `debugColumnCheck` 时输出了 2 条 both-negative mismatch，说明这 5 条最终候选中至少 2 条确实需要用 evaluator cost 修正。
 
-耗时方面，关闭 debug 输出的复跑结果为 exact pricing 两轮合计 `2.045s`。第一轮 pricing 总时间 `1345.434ms`，内部已计量的 forward/backward/join 合计 `1027.547ms`，差值约 `318ms`；第二轮没有最终候选，总时间 `699.887ms`，内部计量 `695.164ms`，差值约 `5ms`。由于这个差值还包含少量未单独计时的 finalize 和框架开销，只能粗略估计第一轮 5 次最终 evaluator 复核的额外成本在 `0.1~0.3s` 量级。相对于该轮 90 万级 join pair、51 万级函数评价和约 1 秒级内部 pricing 时间，它不是主要瓶颈，但在 K 很大时仍会线性增长。
+随后在 `GCBBStyleBidirectionalFullDomain` 中把 `finalizeGeneratedColumns()` 和其中的 evaluator recheck 单独计时，避免继续用“pricing 总时间减内部计时”的差值做归因。新的关闭 debug 复跑结果为：第一轮 `time=563.830ms`，内部统计 `timingMs fwExt/bwExt/join/finalize/recheck/extTotal/measuredTotal=272.364/59.807/106.826/9.058/7.994/332.171/448.055`，`finalRecheckCount=5`；第二轮 `time=334.633ms`，`timingMs ...=234.251/20.071/77.799/0.027/0.000/254.322/332.148`，`finalRecheckCount=0`。
+
+因此前面按差值估算 `0.1~0.3s` 的说法需要作废：那个差值混入了框架、日志、JVM 和其它未单独计量开销，不能代表最终 K 条 evaluator 复核本身。以本次精确埋点为准，`wet021_001_2m` 第一轮 5 次最终复核合计约 `7.994ms`，约占本轮内部 measured total `448.055ms` 的 `1.8%`，占该轮 pricing 输出总时间 `563.830ms` 的 `1.4%`。在这个样例和 `K=5` 下，最终 K 复核不是主要耗时；但它仍随最终 K 条数线性增长，若后续把 K 放大，需要继续看 `finalRecheckCount` 和 `recheck` 两个字段，而不能再用总时间差粗估。

@@ -691,3 +691,11 @@ cost = reducedCost + machineDual
 这次同步后，arc join 和 node join 都不再把 `pi` 时间窗或 join 函数口径下的 inferred cost 写入永久列池。两者仍保留 inferred 作为候选筛选依据，因此不会把 evaluator 调用扩大到所有正 pair；评估量只与 inferred 负候选数量相关。
 
 验证方面，focused `javac` 已通过。`wet021_001_2m` root-only full-domain arc join 回归结果为 `status=ROOT_PROCESSED`、`obj=6829`、`bound=6829`、`valid=true`，输出位于 `test-results/bpc/tmp-arcjoin-checked-cost-wet021.csv` 和 `test-results/bpc/tmp-arcjoin-checked-cost-wet021/wet021_001_2m-fullDomain.log`。该次运行第一轮 exact pricing `candidatePool kept/seen/dropped=5/10/5`，并在 debug 输出中观察到 3 条 both-negative mismatch，例如同一 sequence 的 `inferred=-4.400000000000546`、`checked=-14.000000000002501`。这修正了前面对 arc join“未观察到 mismatch”的经验判断：更准确的结论是已测样例中没有 sign-critical，但 arc join 也可能出现 both-negative 数值差异，因此也应使用 evaluator 的 checked cost 写入列池。
+
+### 6.23 复核位置修正：只复核最终 K 堆候选
+
+2026-05-31 进一步修正前两节实现。上一版把 evaluator 复核放在 `tryGenerateColumn()`、即候选进入 K 堆之前；这会对所有 inferred 为负的候选做 evaluator，范围大于最终保留下来的 K 条，违背“先用 pi-window/inferred 维护 K 堆，K 堆固定后再校正成本”的目标。当前实现已改回：`tryGenerateColumn()` 只用 inferred reduced cost 构造候选并维护 top-K；`finalizeGeneratedColumns(lp)` 中才对已经固定的 K 堆候选调用 evaluator。若 checked reduced cost 仍为负，则用 checked cost 构造最终 `TWETColumn`；若 checked reduced cost 已非负，则该候选不输出给主问题。
+
+为避免每个类重复写成本反推和复核逻辑，新增了 `PricingColumnCostRechecker`。它提供两件事：进入 K 堆前用 inferred reduced cost 反推临时候选列成本；K 堆固定后按 sequence 调用 `TWETColumnEvaluator`，得到 checked cost 和 checked reduced cost。当前已接入有 top-K 候选堆的双向 pricing 类：`GCBBStyleBidirectionalFullDomain`、`GCBBStyleBidirectionalFullDomainNodeJoin`、`GCNGBBStyleBidirectional` 和 `GCBBAsymmetricBidirectional`。普通 `GCBidirectional` 没有这套 K 堆流程，暂不适用这个“final K 后复核”的位置。
+
+验证方面，focused `javac` 已通过。`wet021_001_2m` root-only node join 结果为 `obj=bound=6829`、`valid=true`，输出在 `test-results/bpc/tmp-nodejoin-finalk-checked-wet021.csv`；第一轮 `candidatePool kept/seen/dropped=5/14/9`，而 `debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=5/2/0/2/10.800000000001774`，说明当前只复核最终 K 堆里的 5 条，不再复核全部 14 个 seen 候选。full-domain arc join 同样 `obj=bound=6829`、`valid=true`，输出在 `test-results/bpc/tmp-arcjoin-finalk-checked-wet021.csv`；第一轮 `candidatePool kept/seen/dropped=5/10/5`，debug 输出只对应最终 kept 候选中的 mismatch。

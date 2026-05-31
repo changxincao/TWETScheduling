@@ -154,7 +154,7 @@ public class GCBBAsymmetricBidirectional {
 		if (canContinue()) {
 			compactAndSortActiveLabelListsForJoin();
 			joinAllForwardTerminalGroups(lp);
-			finalizeGeneratedColumns();
+			finalizeGeneratedColumns(lp);
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
 		lastMessage = "GCBB asymmetric bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
@@ -1265,24 +1265,9 @@ public class GCBBAsymmetricBidirectional {
 		if (activeColumnSignatures.contains(signature)) {
 			return;
 		}
-		double cost = objectiveCostFromReducedCost(sequence, inferredReducedCost, lp);
-		double reducedCost = inferredReducedCost;
-		if (Configure.debugBPCPricingColumnCheck) {
-			double checkedCost = evaluator.evaluate(sequence);
-			if (Utility.isBigMValue(checkedCost)) {
-				return;
-			}
-			double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
-			if (Math.abs(checkedReducedCost - inferredReducedCost) > 1e-5) {
-				System.err.println("[debugBPCPricingColumnCheck] bidirectional pricing reduced-cost mismatch: inferred="
-						+ inferredReducedCost + ", checked=" + checkedReducedCost + ", sequence=" + sequence);
-			}
-			cost = checkedCost;
-			reducedCost = checkedReducedCost;
-		}
-		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
-			rememberGeneratedCandidate(signature,
-					new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
+		if (Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
+			rememberGeneratedCandidate(signature, PricingColumnCostRechecker.buildInferredColumn(sequence,
+					inferredReducedCost, lp, data, ColumnSource.PRICING_EXACT), inferredReducedCost);
 		}
 	}
 
@@ -1312,25 +1297,19 @@ public class GCBBAsymmetricBidirectional {
 		generatedCandidateDroppedByHeap++;
 	}
 
-	private void finalizeGeneratedColumns() {
+	private void finalizeGeneratedColumns(LP lp) {
 		generatedColumns.clear();
 		ArrayList<PricingColumnCandidate> candidates = new ArrayList<PricingColumnCandidate>(generatedColumnCandidates);
 		Collections.sort(candidates, candidateBestFirstComparator());
 		for (int i = 0; i < candidates.size(); i++) {
-			generatedColumns.add(candidates.get(i).column);
+			PricingColumnCandidate candidate = candidates.get(i);
+			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column,
+					candidate.reducedCost, lp, data, evaluator, Configure.debugBPCPricingColumnCheck,
+					"[debugBPCPricingColumnCheck] asymmetric bidirectional pricing");
+			if (checked != null && Utility.compareLt(checked.checkedReducedCost, REDUCED_COST_TOLERANCE)) {
+				generatedColumns.add(checked.checkedColumn(data));
+			}
 		}
-	}
-
-	private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost, LP lp) {
-		double cost = reducedCost + lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			cost += lp.getJobDual(job);
-			cost += lp.getArcDual(prev, job);
-			prev = job;
-		}
-		cost += lp.getArcDual(prev, lp.getNode().sinkId());
-		return cost;
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {
@@ -1343,18 +1322,6 @@ public class GCBBAsymmetricBidirectional {
 			}
 		}
 		return !node.isArcForbidden(sequence.get(sequence.size() - 1).intValue(), node.sinkId());
-	}
-
-	private double reducedCost(ArrayList<Integer> sequence, double cost, LP lp) {
-		double reducedCost = cost - lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			reducedCost -= lp.getJobDual(job);
-			reducedCost -= lp.getArcDual(prev, job);
-			prev = job;
-		}
-		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());
-		return reducedCost;
 	}
 
 	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {

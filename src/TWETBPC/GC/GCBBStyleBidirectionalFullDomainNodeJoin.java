@@ -37,7 +37,7 @@ import TWETBPC.Util.SequenceSignature;
  * 2. dynamic window 只影响 job penalty 的有效区间，不把标签裁成 half-domain；
  * 3. final join 按同一 job 拼接 forward pre-node frontier 和 backward suffix-min frontier；
  * 4. 当前性能分支仿照旧双向 join，先用 node-join 乐观下界和函数最小值筛掉非负候选，
- * inferred 为负的候选在入 K 堆前用 evaluator 重算真实列成本，避免 pi-window 口径污染主问题。
+ * top-K 候选堆仍按 inferred reduced cost 维护；K 堆固定后再用 evaluator 修正最终列成本。
  */
 public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
@@ -49,8 +49,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
-	// 2026-05-30: inferred 为负的候选进入 K 堆前统一用 evaluator 重算真实列成本；
-	// debugBPCPricingColumnCheck 只额外统计 inferred 与 checked reduced cost 的差异。
+	// 2026-05-31: 为避免额外评估所有 inferred 负候选，evaluator 只在 K 堆固定后复核最终候选。
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -176,7 +175,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			compactAndSortActiveLabelListsForJoin();
 			joinAllForwardTerminalGroups(lp);
 			joinPhaseNanos += System.nanoTime() - phaseStart;
-			finalizeGeneratedColumns();
+			finalizeGeneratedColumns(lp);
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
 		lastMessage = "GCBB-style full-domain node-join bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
@@ -1135,24 +1134,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (activeColumnSignatures.contains(signature)) {
 			return;
 		}
-		if (!Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
-			return;
+		if (Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
+			rememberGeneratedCandidate(signature, PricingColumnCostRechecker.buildInferredColumn(sequence,
+					inferredReducedCost, lp, data, ColumnSource.PRICING_EXACT), inferredReducedCost);
 		}
-		double checkedCost = evaluator.evaluate(sequence);
-		if (Utility.isBigMValue(checkedCost)) {
-			return;
-		}
-		double checkedReducedCost = reducedCost(sequence, checkedCost, lp);
-		if (Configure.debugBPCPricingColumnCheck) {
-			recordGeneratedNegativeDebug(inferredReducedCost, checkedReducedCost);
-		}
-		if (!Utility.compareLt(checkedReducedCost, REDUCED_COST_TOLERANCE)) {
-			return;
-		}
-		// 2026-05-30: pi-window/inferred 只负责找候选；进入永久列池前必须回到原始 sequence 成本。
-		rememberGeneratedCandidate(signature,
-				new TWETColumn(-1, sequence, data.n, checkedCost, ColumnSource.PRICING_EXACT, false),
-				checkedReducedCost);
 	}
 
 	private void rememberGeneratedCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
@@ -1181,12 +1166,24 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		generatedCandidateDroppedByHeap++;
 	}
 
-	private void finalizeGeneratedColumns() {
+	private void finalizeGeneratedColumns(LP lp) {
 		generatedColumns.clear();
 		ArrayList<PricingColumnCandidate> candidates = new ArrayList<PricingColumnCandidate>(generatedColumnCandidates);
 		Collections.sort(candidates, candidateBestFirstComparator());
 		for (int i = 0; i < candidates.size(); i++) {
-			generatedColumns.add(candidates.get(i).column);
+			PricingColumnCandidate candidate = candidates.get(i);
+			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column,
+					candidate.reducedCost, lp, data, evaluator, Configure.debugBPCPricingColumnCheck,
+					"[debugBPCPricingColumnCheck] node-join bidirectional pricing");
+			if (checked == null) {
+				continue;
+			}
+			if (Configure.debugBPCPricingColumnCheck) {
+				recordGeneratedNegativeDebug(candidate.reducedCost, checked.checkedReducedCost);
+			}
+			if (Utility.compareLt(checked.checkedReducedCost, REDUCED_COST_TOLERANCE)) {
+				generatedColumns.add(checked.checkedColumn(data));
+			}
 		}
 	}
 
@@ -1204,18 +1201,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				debugGeneratedNegativeBothNegative++;
 			}
 		}
-	}
-
-	private double reducedCost(ArrayList<Integer> sequence, double cost, LP lp) {
-		double reducedCost = cost - lp.getMachineDual();
-		int prev = 0;
-		for (int job : sequence) {
-			reducedCost -= lp.getJobDual(job);
-			reducedCost -= lp.getArcDual(prev, job);
-			prev = job;
-		}
-		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());
-		return reducedCost;
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {

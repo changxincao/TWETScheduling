@@ -410,6 +410,6 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 
 剪枝位置放在正反向 child label 生成以后、进入 terminal/dominance table 以前。Forward label 已经包含当前 job 的 penalty/job dual，所以补全侧使用 `R_i`，下界为 `F_label + R_i` 的函数最小值；Backward label 已经包含当前 job 的后缀成本，所以补全侧使用 `U_i`，下界为 `U_i + B_label` 的函数最小值。这个口径不同于 final node join 的 `forward.preNodeFrontier + backward.frontier`，因为 completion bound 是用来判断“当前 label 是否还可能补成负列”的松弛下界，不负责生成真实列。
 
-阈值也按扩展剪枝语义处理，而不是 final join 的 K 堆阈值。`zero` 模式使用 0 附近的 reduced-cost cutoff；原先命名为 `bestLB` 的模式在最小化 reduced-cost 语义下应理解为 `bestUB`，因此代码中改成 `BEST_UB`，并保留旧字符串 `bestLB` 作为兼容别名。`bestUB/bestRecord` 只有在当前已记录到负的 best reduced cost 时才用该值作为更紧 cutoff，否则回退到 0。需要注意，当前 full-domain node-join 流程是在两侧队列耗尽后才 final join，因此这一版 completion bound 在现有流程里主要立即受益于 `zero` cutoff；`bestUB` 钩子为后续若引入边扩展边记录候选或外部初始上界预留。
+阈值也按扩展剪枝语义处理，而不是 final join 的 K 堆阈值。`zero` 模式使用 0 附近的 reduced-cost cutoff；原先命名为 `bestLB` 的模式在最小化 reduced-cost 语义下应改为 `bestUB`，因此代码中只保留 `BEST_UB/bestUB` 口径，不再解析旧 `bestLB` 字符串，避免后续实验继续沿用错误命名。`bestUB/bestRecord` 只有在当前已记录到负的 best reduced cost 时才用该值作为更紧 cutoff，否则回退到 0。需要注意，当前 full-domain node-join 流程是在两侧队列耗尽后才 final join，因此这一版 completion bound 在现有流程里主要立即受益于 `zero` cutoff；`bestUB` 钩子为后续若引入边扩展边记录候选或外部初始上界预留。
 
 实现时还同步修正了比较实验入口：`GCBBFullDomainComparisonTest` 透传 `twet.bpc.fullDomainCompare.completionBound`，非 `off` 时在 mode 名追加 completion-bound 后缀，方便对照 `allCycles/twoCycle`。验证使用 focused `javac` 覆盖新增修改类通过，`git diff --check` 仅提示既有 CRLF 风格；没有运行完整 BPC 样例，因为当前工作区未找到 CPLEX jar。

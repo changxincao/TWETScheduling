@@ -67,7 +67,6 @@ public class TWETBPCConfig {
 	 * 2026-05-31: 使用 K 堆的双向 final join 是否用当前最好负列加强剪枝。
 	 * 可选值：zero（只和 0 比，默认）、bestUB（仅 group/pair 下界和当前最好负列上界比）、
 	 * bestRecord（下界和函数真实值都必须刷新 bestRC 才保留）。
-	 * 旧实验脚本里的 bestLB 仍作为 bestUB 的兼容别名解析。
 	 * bestRecord 是激进的 record-only 对照模式，会显著减少每轮加列数，默认不作为后续正式路径使用。
 	 */
 	public String bidirectionalJoinBestThresholdMode = "zero";

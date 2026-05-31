@@ -201,8 +201,7 @@ public class GCBBStyleBidirectionalFullDomain {
 			return JoinBestThresholdMode.ZERO;
 		}
 		String normalized = value.trim().toLowerCase();
-		if ("bestub".equals(normalized) || "best_ub".equals(normalized) || "best-ub".equals(normalized)
-				|| "bestlb".equals(normalized) || "best_lb".equals(normalized) || "best-lb".equals(normalized)) {
+		if ("bestub".equals(normalized) || "best_ub".equals(normalized) || "best-ub".equals(normalized)) {
 			return JoinBestThresholdMode.BEST_UB;
 		}
 		if ("bestrecord".equals(normalized) || "best_record".equals(normalized)

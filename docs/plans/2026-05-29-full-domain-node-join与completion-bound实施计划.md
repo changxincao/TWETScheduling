@@ -719,3 +719,9 @@ cost = reducedCost + machineDual
 封存原因有两类。第一是前一节提到的流程问题：它在线生成负列，达到 `maxExactPricingColumns` 后停止，不能表达当前 GCBB-style 分支采用的“先维护 top-K 候选堆，再在 K 堆固定后统一 finalize”的语义。第二是 pi-window 成本问题：根节点 no-cut 下的 pi profitable window 只是当前 pricing 的负列保留规则，不是永久列成本定义。旧类默认用 inferred reduced cost 反推 `TWETColumn.cost`，只有 `debugBPCPricingColumnCheck` 打开时才用 evaluator 复核，因此在正常运行中可能把带 pi-window 口径的临时成本写入列池和主问题。继续在这个类上局部补最终 K 复核并不合适，因为它没有最终 K 堆这个统一出口。
 
 本次同时复查了其它双向 pricing 源码。除已封存的 `GCBidirectional` 外，当前实际算法类 `GCBBStyleBidirectionalFullDomain`、`GCBBStyleBidirectionalFullDomainNodeJoin`、`GCNGBBStyleBidirectional` 和 `GCBBAsymmetricBidirectional` 都使用 `generatedColumnCandidates` 维护 top-K 候选堆，并在 `finalizeGeneratedColumns(lp)` 中统一输出。它们当前只在 `dualProfitableWindowEnabled=true`，即根节点 no-cut 且启用 pi-window 加强时，对最终 K 堆候选调用 `PricingColumnCostRechecker.evaluate()` 修正列成本；非 pi-window 轮次直接输出 K 堆列，不做额外 evaluator 扫描。
+
+### 6.27 full-domain arc join 最终 K 复核耗时检查
+
+2026-05-31 重新用 `GCBBFullDomainComparisonTest` 跑 `wet021_001_2m`、`mode=fullDomain`、`maxNodes=1`，检查 full-domain arc join 的最终 K 堆复核次数和耗时。当前 root 一共两轮 exact pricing。第一轮 `candidatePool kept/seen/dropped=5/10/5`，说明 10 个 inferred 负候选中最终 K 堆只保留 5 条，因此 evaluator 最终复核 5 次；第二轮 `candidatePool kept/seen/dropped=0/0/0`，复核 0 次。打开 `debugColumnCheck` 时输出了 2 条 both-negative mismatch，说明这 5 条最终候选中至少 2 条确实需要用 evaluator cost 修正。
+
+耗时方面，关闭 debug 输出的复跑结果为 exact pricing 两轮合计 `2.045s`。第一轮 pricing 总时间 `1345.434ms`，内部已计量的 forward/backward/join 合计 `1027.547ms`，差值约 `318ms`；第二轮没有最终候选，总时间 `699.887ms`，内部计量 `695.164ms`，差值约 `5ms`。由于这个差值还包含少量未单独计时的 finalize 和框架开销，只能粗略估计第一轮 5 次最终 evaluator 复核的额外成本在 `0.1~0.3s` 量级。相对于该轮 90 万级 join pair、51 万级函数评价和约 1 秒级内部 pricing 时间，它不是主要瓶颈，但在 K 很大时仍会线性增长。

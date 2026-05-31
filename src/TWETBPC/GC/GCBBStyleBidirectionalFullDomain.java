@@ -49,7 +49,10 @@ public class GCBBStyleBidirectionalFullDomain {
 	}
 
 	private enum JoinBestThresholdMode {
-		ZERO, BEST_LB, BEST_RECORD
+		ZERO,
+		BEST_LB,
+		// 2026-05-31: 激进 record-only 对照模式；会减少每轮返回列数，默认不作为后续正式路径使用。
+		BEST_RECORD
 	}
 
 	private final Data data;

@@ -117,6 +117,11 @@ public class GCBBFullDomainComparisonTest {
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
 
 		String mode = nodeJoin ? "nodeJoin" : (fullDomain ? "fullDomain" : "halfDomain");
+		String joinBestMode = config.bidirectionalJoinBestThresholdMode == null
+				? "zero" : config.bidirectionalJoinBestThresholdMode.trim();
+		if (!joinBestMode.isEmpty() && !"zero".equalsIgnoreCase(joinBestMode)) {
+			mode += "-" + joinBestMode;
+		}
 		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
@@ -155,6 +160,8 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCBBFullDomainNodeJoinBidirectionalPricing = nodeJoin;
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
+		config.bidirectionalJoinBestThresholdMode = System.getProperty(
+				"twet.bpc.fullDomainCompare.joinBestMode", config.bidirectionalJoinBestThresholdMode);
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));

@@ -64,6 +64,12 @@ public class TWETBPCConfig {
 	 */
 	public String bidirectionalLabelQueueOrdering = "reducedCost";
 	/**
+	 * 2026-05-31: GCBB-style final join 是否用当前最好负列加强剪枝。
+	 * 可选值：zero（只和 0 比，默认）、bestLB（仅 group/pair 下界和 bestRC 比）、
+	 * bestRecord（下界和函数真实值都必须刷新 bestRC 才保留）。
+	 */
+	public String bidirectionalJoinBestThresholdMode = "zero";
+	/**
 	 * 2026-05-26: 双向 pricing 的 midpoint 固定比例实验开关。
 	 * 取 NaN 时使用动态 hard/profitable window 中点；
 	 * 取 0..1 时强制使用本轮 pricingHorizon 的该比例，不是全局 CmaxH 的比例。

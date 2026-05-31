@@ -48,6 +48,10 @@ public class GCBBStyleBidirectionalFullDomain {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}
 
+	private enum JoinBestThresholdMode {
+		ZERO, BEST_LB, BEST_RECORD
+	}
+
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
@@ -72,6 +76,8 @@ public class GCBBStyleBidirectionalFullDomain {
 	private int nextLabelId;
 	private int nextCandidateId;
 	private LabelQueueOrdering queueOrdering;
+	private JoinBestThresholdMode joinBestThresholdMode;
+	private double bestGeneratedReducedCost;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
@@ -115,9 +121,11 @@ public class GCBBStyleBidirectionalFullDomain {
 	private long joinPairsTried;
 	private long joinPairsSetPruned;
 	private long joinPairsLowerBoundPruned;
+	private long joinPairsBestBoundPruned;
 	private long joinPairsTimePruned;
 	private long joinFunctionEvaluations;
 	private long joinFunctionPruned;
+	private long joinFunctionBestRecordPruned;
 	private long forwardSinglePointKept;
 	private long forwardSinglePointDominatedByStore;
 	private long forwardSinglePointDominatedByGraph;
@@ -183,6 +191,21 @@ public class GCBBStyleBidirectionalFullDomain {
 			return LabelQueueOrdering.REACHABLE_SIZE;
 		}
 		return LabelQueueOrdering.REDUCED_COST;
+	}
+
+	private JoinBestThresholdMode parseJoinBestThresholdMode(String value) {
+		if (value == null) {
+			return JoinBestThresholdMode.ZERO;
+		}
+		String normalized = value.trim().toLowerCase();
+		if ("bestlb".equals(normalized) || "best_lb".equals(normalized) || "best-lb".equals(normalized)) {
+			return JoinBestThresholdMode.BEST_LB;
+		}
+		if ("bestrecord".equals(normalized) || "best_record".equals(normalized)
+				|| "best-record".equals(normalized) || "record".equals(normalized)) {
+			return JoinBestThresholdMode.BEST_RECORD;
+		}
+		return JoinBestThresholdMode.ZERO;
 	}
 
 	/**
@@ -298,6 +321,8 @@ public class GCBBStyleBidirectionalFullDomain {
 		pricingHorizon = data.CmaxH;
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
+		joinBestThresholdMode = parseJoinBestThresholdMode(config.bidirectionalJoinBestThresholdMode);
+		bestGeneratedReducedCost = Utility.big_M;
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
@@ -835,9 +860,13 @@ public class GCBBStyleBidirectionalFullDomain {
 		}
 		double joinFixedReducedCost = data.getSetupCost(lastJob, backward.jid)
 				- lp.getArcDual(lastJob, backward.jid);
+		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost + joinFixedReducedCost;
-		if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
+		if (!Utility.compareLt(groupLB, joinThreshold)) {
 			joinTerminalGroupsCostPruned++;
+			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
+				joinPairsBestBoundPruned++;
+			}
 			return;
 		}
 		for (int i = 0; i < candidates.size(); i++) {
@@ -848,8 +877,11 @@ public class GCBBStyleBidirectionalFullDomain {
 				continue;
 			}
 			double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
-			if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
+			if (!Utility.compareLt(optimisticJoinLB, joinThreshold)) {
 				joinPairsLowerBoundPruned++;
+				if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
+					joinPairsBestBoundPruned++;
+				}
 				break;
 			}
 			tryJoin(forward, backward, lp, joinFixedReducedCost);
@@ -894,8 +926,11 @@ public class GCBBStyleBidirectionalFullDomain {
 		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
 		joinCost.shiftYInPlace(joinFixedReducedCost);
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
-		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
+		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;
+			if (Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
+				joinFunctionBestRecordPruned++;
+			}
 			return;
 		}
 
@@ -917,9 +952,11 @@ public class GCBBStyleBidirectionalFullDomain {
 		joinPairsTried = 0;
 		joinPairsSetPruned = 0;
 		joinPairsLowerBoundPruned = 0;
+		joinPairsBestBoundPruned = 0;
 		joinPairsTimePruned = 0;
 		joinFunctionEvaluations = 0;
 		joinFunctionPruned = 0;
+		joinFunctionBestRecordPruned = 0;
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -953,6 +990,9 @@ public class GCBBStyleBidirectionalFullDomain {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", joinBest mode/bestRC/lbPruned/recordPruned=" + joinBestThresholdMode
+				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
+				+ "/" + joinFunctionBestRecordPruned
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering
@@ -977,6 +1017,27 @@ public class GCBBStyleBidirectionalFullDomain {
 			return "0.00%";
 		}
 		return String.format("%.2f%%", part * 100.0 / total);
+	}
+
+	private double joinLowerBoundThreshold() {
+		if ((joinBestThresholdMode == JoinBestThresholdMode.BEST_LB
+				|| joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD)
+				&& !Utility.isBigMValue(bestGeneratedReducedCost)) {
+			return bestGeneratedReducedCost;
+		}
+		return REDUCED_COST_TOLERANCE;
+	}
+
+	private boolean shouldKeepJoinedReducedCost(double reducedCost) {
+		double threshold = joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD
+				? joinLowerBoundThreshold() : REDUCED_COST_TOLERANCE;
+		return Utility.compareLt(reducedCost, threshold);
+	}
+
+	private void updateBestGeneratedReducedCost(double reducedCost) {
+		if (Utility.compareLt(reducedCost, bestGeneratedReducedCost)) {
+			bestGeneratedReducedCost = reducedCost;
+		}
 	}
 
 	/**
@@ -1051,6 +1112,11 @@ public class GCBBStyleBidirectionalFullDomain {
 			return;
 		}
 		if (Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
+			if (joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD
+					&& !Utility.compareLt(inferredReducedCost, joinLowerBoundThreshold())) {
+				generatedCandidateDroppedByHeap++;
+				return;
+			}
 			rememberGeneratedCandidate(signature, PricingColumnCostRechecker.buildInferredColumn(sequence,
 					inferredReducedCost, lp, data, ColumnSource.PRICING_EXACT), inferredReducedCost);
 		}
@@ -1065,6 +1131,7 @@ public class GCBBStyleBidirectionalFullDomain {
 			generatedCandidateDroppedByHeap++;
 			return;
 		}
+		updateBestGeneratedReducedCost(reducedCost);
 		if (generatedColumnCandidates.size() < config.maxExactPricingColumns) {
 			generatedColumnCandidates.add(candidate);
 			generatedCandidateBySignature.put(signature, candidate);

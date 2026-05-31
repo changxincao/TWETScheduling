@@ -84,9 +84,14 @@ public class BidirectionalQueueStrategyComparisonTest {
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
 
 		String caseName = stripDat(instance.getFileName().toString());
+		String exactEngine = useGcnStyle ? GCN_ENGINE : OLD_ENGINE;
+		String joinBestMode = config.bidirectionalJoinBestThresholdMode == null
+				? "zero" : config.bidirectionalJoinBestThresholdMode.trim();
+		if (useGcnStyle && !joinBestMode.isEmpty() && !"zero".equalsIgnoreCase(joinBestMode)) {
+			mode += "-" + joinBestMode;
+		}
 		Path log = outputDir.resolve(caseName + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
-		String exactEngine = useGcnStyle ? GCN_ENGINE : OLD_ENGINE;
 		return new RunRecord(caseName, mode, queueOrdering, useGcnStyle, result.getStatus().toString(),
 				result.getIncumbentCost(), result.getBestBound(),
 				TanakaNoOutsourcingBPCTest.gapPercent(result.getBestBound(), result.getIncumbentCost()),
@@ -113,6 +118,8 @@ public class BidirectionalQueueStrategyComparisonTest {
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = useGcnStyle;
 		config.bidirectionalLabelQueueOrdering = queueOrdering;
+		config.bidirectionalJoinBestThresholdMode = System.getProperty(
+				"twet.bpc.queueCompare.joinBestMode", config.bidirectionalJoinBestThresholdMode);
 		return config;
 	}
 

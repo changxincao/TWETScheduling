@@ -121,6 +121,11 @@ public class GCBBAsymmetricComparisonTest {
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
 
 		String exactEngine = exactEngineName(mode);
+		String joinBestMode = config.bidirectionalJoinBestThresholdMode == null
+				? "zero" : config.bidirectionalJoinBestThresholdMode.trim();
+		if (!joinBestMode.isEmpty() && !"zero".equalsIgnoreCase(joinBestMode)) {
+			mode += "-" + joinBestMode;
+		}
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -162,6 +167,8 @@ public class GCBBAsymmetricComparisonTest {
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = "fullDomain".equals(mode);
 		config.useGCBBAsymmetricBidirectionalPricing = mode.startsWith("asymmetric");
+		config.bidirectionalJoinBestThresholdMode = System.getProperty(
+				"twet.bpc.asymmetricCompare.joinBestMode", config.bidirectionalJoinBestThresholdMode);
 		if ("asymmetricFewer".equals(mode)) {
 			config.asymmetricBidirectionalSideSelection = "fewerLabels";
 		} else {

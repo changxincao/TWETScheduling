@@ -98,6 +98,11 @@ public class SingleBidirectionalTimeQueueComparisonTest {
 
 		String mode = bidirectional ? "bidirTime" : "singleTime";
 		String exactEngine = bidirectional ? BIDIRECTIONAL_EXACT_ENGINE : SINGLE_EXACT_ENGINE;
+		String joinBestMode = config.bidirectionalJoinBestThresholdMode == null
+				? "zero" : config.bidirectionalJoinBestThresholdMode.trim();
+		if (bidirectional && !joinBestMode.isEmpty() && !"zero".equalsIgnoreCase(joinBestMode)) {
+			mode += "-" + joinBestMode;
+		}
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -127,6 +132,8 @@ public class SingleBidirectionalTimeQueueComparisonTest {
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
+		config.bidirectionalJoinBestThresholdMode = System.getProperty(
+				"twet.bpc.timeCompare.joinBestMode", config.bidirectionalJoinBestThresholdMode);
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.timeCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));

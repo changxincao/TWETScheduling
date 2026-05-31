@@ -64,7 +64,7 @@ public class TWETBPCConfig {
 	 */
 	public String bidirectionalLabelQueueOrdering = "reducedCost";
 	/**
-	 * 2026-05-31: GCBB-style final join 是否用当前最好负列加强剪枝。
+	 * 2026-05-31: 使用 K 堆的双向 final join 是否用当前最好负列加强剪枝。
 	 * 可选值：zero（只和 0 比，默认）、bestLB（仅 group/pair 下界和 bestRC 比）、
 	 * bestRecord（下界和函数真实值都必须刷新 bestRC 才保留）。
 	 * bestRecord 是激进的 record-only 对照模式，会显著减少每轮加列数，默认不作为后续正式路径使用。

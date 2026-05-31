@@ -161,6 +161,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private long completionBackwardLabelsPruned;
 	private long completionBoundFunctionEvaluations;
 	private long completionBoundBuildNanos;
+	private double completionBoundLastEvaluationCutoff;
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
 	private long joinPhaseNanos;
@@ -1108,6 +1109,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		completionBackwardLabelsPruned = 0;
 		completionBoundFunctionEvaluations = 0;
 		completionBoundBuildNanos = 0;
+		completionBoundLastEvaluationCutoff = Double.NaN;
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
 		joinPhaseNanos = 0;
@@ -1135,7 +1137,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
 				+ "/" + joinFunctionBestRecordPruned
 				+ ", completionBound mode/cutoff/buildMs/eval/fwPruned/bwPruned=" + completionBoundRelaxation
-				+ "/" + completionBoundCutoff() + "/" + formatMillis(completionBoundBuildNanos)
+				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
 				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
 				+ "/" + completionBackwardLabelsPruned
 				+ ", join positiveFuncPruned count/lbMin/lbAvg/lbMax/rcMin/rcAvg/rcMax/maxLift="
@@ -1190,6 +1192,11 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		return REDUCED_COST_TOLERANCE;
 	}
 
+	private double completionBoundCutoffForSummary() {
+		return Double.isNaN(completionBoundLastEvaluationCutoff)
+				? completionBoundCutoff() : completionBoundLastEvaluationCutoff;
+	}
+
 	private boolean shouldKeepJoinedReducedCost(double reducedCost) {
 		double threshold = joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD
 				? joinLowerBoundThreshold() : REDUCED_COST_TOLERANCE;
@@ -1227,7 +1234,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return false;
 		}
 		double lowerBound = completion.findMinimal(false, true)[0];
-		return !Utility.compareLt(lowerBound, completionBoundCutoff());
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
 	private boolean isBackwardCompletionBoundPruned(BackwardLabel label) {
@@ -1245,7 +1254,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return false;
 		}
 		double lowerBound = completion.findMinimal(false, true)[0];
-		return !Utility.compareLt(lowerBound, completionBoundCutoff());
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
 	private double positivePairLBMin() {

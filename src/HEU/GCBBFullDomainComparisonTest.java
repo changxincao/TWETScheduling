@@ -122,6 +122,11 @@ public class GCBBFullDomainComparisonTest {
 		if (!joinBestMode.isEmpty() && !"zero".equalsIgnoreCase(joinBestMode)) {
 			mode += "-" + joinBestMode;
 		}
+		String completionBound = config.bidirectionalCompletionBoundRelaxation == null
+				? "off" : config.bidirectionalCompletionBoundRelaxation.trim();
+		if (nodeJoin && !completionBound.isEmpty() && !"off".equalsIgnoreCase(completionBound)) {
+			mode += "-cb-" + completionBound;
+		}
 		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
@@ -162,6 +167,8 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalJoinBestThresholdMode = System.getProperty(
 				"twet.bpc.fullDomainCompare.joinBestMode", config.bidirectionalJoinBestThresholdMode);
+		config.bidirectionalCompletionBoundRelaxation = System.getProperty(
+				"twet.bpc.fullDomainCompare.completionBound", config.bidirectionalCompletionBoundRelaxation);
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));

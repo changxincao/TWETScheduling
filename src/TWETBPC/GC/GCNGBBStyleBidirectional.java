@@ -51,7 +51,7 @@ public class GCNGBBStyleBidirectional {
 
 	private enum JoinBestThresholdMode {
 		ZERO,
-		BEST_LB,
+		BEST_UB,
 		// 2026-05-31: 激进 record-only 对照模式；会减少每轮返回列数，默认不作为后续正式路径使用。
 		BEST_RECORD
 	}
@@ -193,8 +193,9 @@ public class GCNGBBStyleBidirectional {
 			return JoinBestThresholdMode.ZERO;
 		}
 		String normalized = value.trim().toLowerCase();
-		if ("bestlb".equals(normalized) || "best_lb".equals(normalized) || "best-lb".equals(normalized)) {
-			return JoinBestThresholdMode.BEST_LB;
+		if ("bestub".equals(normalized) || "best_ub".equals(normalized) || "best-ub".equals(normalized)
+				|| "bestlb".equals(normalized) || "best_lb".equals(normalized) || "best-lb".equals(normalized)) {
+			return JoinBestThresholdMode.BEST_UB;
 		}
 		if ("bestrecord".equals(normalized) || "best_record".equals(normalized)
 				|| "best-record".equals(normalized) || "record".equals(normalized)) {
@@ -995,9 +996,9 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private double joinLowerBoundThreshold() {
-		if ((joinBestThresholdMode == JoinBestThresholdMode.BEST_LB
+		if ((joinBestThresholdMode == JoinBestThresholdMode.BEST_UB
 				|| joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD)
-				&& !Utility.isBigMValue(bestGeneratedReducedCost)) {
+				&& Utility.compareLt(bestGeneratedReducedCost, REDUCED_COST_TOLERANCE)) {
 			return bestGeneratedReducedCost;
 		}
 		return REDUCED_COST_TOLERANCE;

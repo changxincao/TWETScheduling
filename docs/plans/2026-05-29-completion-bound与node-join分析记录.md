@@ -403,3 +403,13 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 换句话说，原始判断“记录来源的不超过函数平移后的那个，再记录它加当前 node 惩罚后 minimize 的函数”是正确方向。这里需要避免的错误不是这个定义本身，而是实现时把二者绑得太死：如果只在 `F_state` 改善时才更新 `U_state`，那么某些只改善 node join、但不改善后续扩展传播的候选会被丢掉。正确口径是 `U_state` 和 `F_state` 都维护各自的 lower envelope；重新入队只看传播函数 `F_state/B_state` 是否改善。
 
 因此 forward 的一次 label-correcting 更新流程应理解为：当前出队状态用自己的 `F_state` 向后扩展，先得到到达后继 node 的 `U_candidate`，再由 `U_candidate + g_j` 做 prefix-min 得到 `F_candidate`。更新目标状态时，`U_state` 用 `U_candidate` 取 lower envelope，`F_state` 用 `F_candidate` 取 lower envelope。若只有 `U_state` 改善而 `F_state` 没改善，则不需要重新入队，因为继续扩展依赖的是 `F_state`；但这次 `U_state` 改善必须保留，供后续 node join 使用。若 `F_state` 改善，则目标状态需要重新入队。Backward 侧完全对称：`Bbar_state` 改善只更新拼接函数，`B_state` 改善才重新入队。
+
+## 10. 2026-05-31 completion bound 第一版实现记录
+
+本次把 completion bound 先落在 full-domain node-join 实验分支中，并保留默认关闭。新增配置 `bidirectionalCompletionBoundRelaxation`，取值为 `off/allCycles/twoCycle`。`allCycles` 使用按 node 聚合的 relaxed DP，正向维护不含当前 node 成本的 `U_i` 和已含当前 node 成本、可继续传播的 `F_i`，反向维护不含当前 node 成本的 `R_i` 和已含当前 node 成本、可继续传播的 `B_i`。`twoCycle` 使用二维 last-arc state：正向为 `(h,i)`，反向为 `(i,k)`，只在 DP 转移中禁止立即回跳；二维函数收敛后再对每个 job 聚合成一维 lower envelope，因此正式 label 使用补全函数时不再额外检查上一跳或下一跳兼容性。这和 2-cycle forbidden arc 没有关系。
+
+剪枝位置放在正反向 child label 生成以后、进入 terminal/dominance table 以前。Forward label 已经包含当前 job 的 penalty/job dual，所以补全侧使用 `R_i`，下界为 `F_label + R_i` 的函数最小值；Backward label 已经包含当前 job 的后缀成本，所以补全侧使用 `U_i`，下界为 `U_i + B_label` 的函数最小值。这个口径不同于 final node join 的 `forward.preNodeFrontier + backward.frontier`，因为 completion bound 是用来判断“当前 label 是否还可能补成负列”的松弛下界，不负责生成真实列。
+
+阈值也按扩展剪枝语义处理，而不是 final join 的 K 堆阈值。`zero` 模式使用 0 附近的 reduced-cost cutoff；原先命名为 `bestLB` 的模式在最小化 reduced-cost 语义下应理解为 `bestUB`，因此代码中改成 `BEST_UB`，并保留旧字符串 `bestLB` 作为兼容别名。`bestUB/bestRecord` 只有在当前已记录到负的 best reduced cost 时才用该值作为更紧 cutoff，否则回退到 0。需要注意，当前 full-domain node-join 流程是在两侧队列耗尽后才 final join，因此这一版 completion bound 在现有流程里主要立即受益于 `zero` cutoff；`bestUB` 钩子为后续若引入边扩展边记录候选或外部初始上界预留。
+
+实现时还同步修正了比较实验入口：`GCBBFullDomainComparisonTest` 透传 `twet.bpc.fullDomainCompare.completionBound`，非 `off` 时在 mode 名追加 completion-bound 后缀，方便对照 `allCycles/twoCycle`。验证使用 focused `javac` 覆盖新增修改类通过，`git diff --check` 仅提示既有 CRLF 风格；没有运行完整 BPC 样例，因为当前工作区未找到 CPLEX jar。

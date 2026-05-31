@@ -65,11 +65,17 @@ public class TWETBPCConfig {
 	public String bidirectionalLabelQueueOrdering = "reducedCost";
 	/**
 	 * 2026-05-31: 使用 K 堆的双向 final join 是否用当前最好负列加强剪枝。
-	 * 可选值：zero（只和 0 比，默认）、bestLB（仅 group/pair 下界和 bestRC 比）、
+	 * 可选值：zero（只和 0 比，默认）、bestUB（仅 group/pair 下界和当前最好负列上界比）、
 	 * bestRecord（下界和函数真实值都必须刷新 bestRC 才保留）。
+	 * 旧实验脚本里的 bestLB 仍作为 bestUB 的兼容别名解析。
 	 * bestRecord 是激进的 record-only 对照模式，会显著减少每轮加列数，默认不作为后续正式路径使用。
 	 */
 	public String bidirectionalJoinBestThresholdMode = "zero";
+	/**
+	 * 2026-05-31: full-domain node-join 实验分支的 completion bound 松弛模式。
+	 * 可选值：off、allCycles、twoCycle。默认关闭，避免改变现有对照实验语义。
+	 */
+	public String bidirectionalCompletionBoundRelaxation = "off";
 	/**
 	 * 2026-05-26: 双向 pricing 的 midpoint 固定比例实验开关。
 	 * 取 NaN 时使用动态 hard/profitable window 中点；

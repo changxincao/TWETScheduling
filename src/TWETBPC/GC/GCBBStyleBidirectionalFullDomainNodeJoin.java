@@ -1184,11 +1184,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private double completionBoundCutoff() {
-		if ((joinBestThresholdMode == JoinBestThresholdMode.BEST_UB
-				|| joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD)
-				&& Utility.compareLt(bestGeneratedReducedCost, REDUCED_COST_TOLERANCE)) {
-			return bestGeneratedReducedCost;
-		}
+		// 2026-05-31: completion bound 用于扩展阶段判断“这个 label 是否还能补成负列”。
+		// 这里固定使用 0 附近阈值，不使用当前 best reduced cost；否则会变成 record-only
+		// 语义，剪掉仍为负但不刷新当前最优记录的列，影响 top-K 加列和 exact pricing 口径。
 		return REDUCED_COST_TOLERANCE;
 	}
 

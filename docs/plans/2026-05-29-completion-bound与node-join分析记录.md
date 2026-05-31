@@ -410,7 +410,7 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 
 剪枝位置放在正反向 child label 生成以后、进入 terminal/dominance table 以前。Forward label 已经包含当前 job 的 penalty/job dual，所以补全侧使用 `R_i`，下界为 `F_label + R_i` 的函数最小值；Backward label 已经包含当前 job 的后缀成本，所以补全侧使用 `U_i`，下界为 `U_i + B_label` 的函数最小值。这个口径不同于 final node join 的 `forward.preNodeFrontier + backward.frontier`，因为 completion bound 是用来判断“当前 label 是否还可能补成负列”的松弛下界，不负责生成真实列。
 
-阈值也按扩展剪枝语义处理，而不是 final join 的 K 堆阈值。`zero` 模式使用 0 附近的 reduced-cost cutoff；原先命名为 `bestLB` 的模式在最小化 reduced-cost 语义下应改为 `bestUB`，因此代码中只保留 `BEST_UB/bestUB` 口径，不再解析旧 `bestLB` 字符串，避免后续实验继续沿用错误命名。`bestUB/bestRecord` 只有在当前已记录到负的 best reduced cost 时才用该值作为更紧 cutoff，否则回退到 0。需要注意，当前 full-domain node-join 流程是在两侧队列耗尽后才 final join，因此这一版 completion bound 在现有流程里主要立即受益于 `zero` cutoff；`bestUB` 钩子为后续若引入边扩展边记录候选或外部初始上界预留。
+阈值也按扩展剪枝语义处理，而不是 final join 的 K 堆阈值。completion bound 只回答“当前 label 是否还能补成负 reduced-cost 列”，因此固定使用 0 附近的 reduced-cost cutoff。原先命名为 `bestLB` 的 join 阈值模式在最小化 reduced-cost 语义下应改为 `bestUB`，因此代码中只保留 `BEST_UB/bestUB` 口径，不再解析旧 `bestLB` 字符串，避免后续实验继续沿用错误命名。但 `bestUB/bestRecord` 只影响 final join 的 group/pair/function 过滤，不参与 completion-bound 扩展剪枝；否则会变成 record-only 语义，剪掉仍为负但不刷新当前最优记录的列，影响 top-K 加列和 exact pricing 口径。
 
 实现时还同步修正了比较实验入口：`GCBBFullDomainComparisonTest` 透传 `twet.bpc.fullDomainCompare.completionBound`，非 `off` 时在 mode 名追加 completion-bound 后缀，方便对照 `allCycles/twoCycle`。验证使用 focused `javac` 覆盖新增修改类通过，`git diff --check` 仅提示既有 CRLF 风格；没有运行完整 BPC 样例，因为当前工作区未找到 CPLEX jar。
 
@@ -418,4 +418,6 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 
 2026-05-31 继续分析 all-cycles 与 2-cycle-free 的时间差异。`twoCycle` 的 bound 理论上不弱于 `allCycles`，因为它在 relaxed DP 中额外保留 last-arc state，排除了立即回跳的二环；但这个强度需要用更高的状态维度、更多函数数组、更频繁的 lower-envelope 合并和更长的 queue-correcting 收敛过程换取。当前 `wet020/wet021` 这类 root-only 样例里，`allCycles` 已经足以把主要 label 扩展子树剪掉，`twoCycle` 额外排除二环没有带来明显更多的 `fwPruned/bwPruned`，因此总时间反而更慢。由此当前实用判断是：默认优先尝试 `allCycles`，只有在日志显示 all-cycles 剪枝不足、且 two-cycle 额外剪枝明显超过构建成本时，再考虑切到 `twoCycle`。
 
-关于 `bestUB` 参与 completion-bound 剪枝，需要区分“是否安全”和“当前流程是否能立即受益”。如果本轮已经有一个负 reduced-cost incumbent `bestGeneratedReducedCost`，那么对某个 label 计算 relaxed completion lower bound 后，若 `lowerBound >= bestGeneratedReducedCost`，则该 label 后续不可能生成比当前 best 更好的列，用 `bestUB` 丢掉它在“只追求更好记录/更强 incumbent”的语义下是安全的。但这会减少返回的负列数量，不等价于保留所有负列；若目标是 exact certificate 或尽量返回 top-K 负列，应使用 0 cutoff 或第 K 好候选阈值，而不是当前最好列。当前 node-join 实现是先耗尽 forward/backward 队列，再统一 final join，因此扩展阶段通常还没有 incumbent，`bestUB` 对 completion-bound 阶段没有实际加强。若后续要让它生效，合理做法是在扩展过程中提前生成可行完整列作为 incumbent，例如 forward label 可接 sink 时即时尝试一次，或增加轻量初始列/启发式 reduced-cost incumbent；这样 completion-bound 才有可用的动态 cutoff。
+关于 `bestUB` 参与 completion-bound 剪枝，需要区分“找更好记录”和“保留负列集合”两个目标。如果本轮已经有一个负 reduced-cost incumbent `bestGeneratedReducedCost`，那么对某个 label 计算 relaxed completion lower bound 后，若 `lowerBound >= bestGeneratedReducedCost`，该 label 后续确实不可能生成比当前 best 更好的列；但它仍可能生成负列，仍可能进入 top-K 加列集合。因此在当前 exact pricing / top-K 负列语义下，completion bound 不使用当前最优 reduced cost，而固定使用 0 cutoff。`bestUB` 可以继续作为 final join 的性能实验开关，用于减少不可能刷新当前 best 的 group/pair 扫描；但不放进扩展阶段的 completion-bound 判断。
+
+2026-05-31 决定收紧实现口径：completion-bound cutoff 固定为 `REDUCED_COST_TOLERANCE`，不再读取 `joinBestThresholdMode` 或 `bestGeneratedReducedCost`。这样日志中的 completion-bound cutoff 始终表示“负列可补全”判断，`bestUB/bestRecord` 的影响范围限定在 final join 阶段。这个选择牺牲了一部分 record-only 剪枝潜力，但保留了每轮返回多条负列和 exact pricing certificate 的语义。

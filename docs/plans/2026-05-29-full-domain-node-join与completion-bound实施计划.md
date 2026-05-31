@@ -705,3 +705,9 @@ cost = reducedCost + machineDual
 2026-05-31 继续收紧最终 K 候选复核口径。复核只在 `dualProfitableWindowEnabled=true` 时执行，也就是根节点、无 active cuts、启用了 `pi` profitable window 的 pricing 轮。非根节点、cut 节点或其他未启用 `pi` 时间窗加强的 pricing 中，候选函数口径已经回到原 hard window，不需要额外用 evaluator 扫最终 K 条，`finalizeGeneratedColumns(lp)` 直接把 K 堆列输出。
 
 同时去掉了“复核后真实 reduced cost 仍为负才加入”的二次判断。原因是 `pi` 时间窗是原 hard window 的子区间，按该窗口计算的 inferred 成本不低于完整时间域 evaluator 成本；如果 inferred reduced cost 已经小于负列阈值，则真实 reduced cost 只会更小。这里的 evaluator 复核目的不是重新判断正负，而是把最终写入列池和主问题的 `TWETColumn.cost` 修正为真实 sequence 成本，避免把带 `pi` 时间窗口径的临时成本写成永久列成本。
+
+### 6.25 `GCBidirectional` 与 K 堆流程的差异
+
+2026-05-31 复查 `GCBidirectional` 后确认，它不是当前 GCBB-style 的 top-K 候选堆流程。`solve()` 先完整扩展 forward half，并在每个 forward label 出队时尝试 forward-to-sink；随后扩展 backward half，每个 backward label 出队时立即与已有 forward terminal labels 做 crossing-arc join。只要某条 sequence 的 inferred reduced cost 为负，`tryGenerateColumn()` 就直接加入 `generatedColumns`；`canContinue()` 只检查 `generatedColumns.size() < maxExactPricingColumns`，达到上限后直接停止后续扩展和 join。
+
+因此 `GCBidirectional` 在列数上限触发时返回的是“当前队列排序和扫描顺序下最先发现的 K 条负列”，不是全局 reduced cost 最小的 K 条。默认 reduced-cost 队列排序会让低 label frontier 下界的 label 更早扩展，但 crossing-arc join 候选没有最终统一排序，也没有候选堆替换最差列。只有当 forward/backward 队列都耗尽、未触发上限时，它枚举到的负列集合才可作为 exact pricing 结果；若上限触发，则语义更接近在线生成前 K 条负列。若后续要让它也使用最终 K 堆复核，需要把直接 `generatedColumns.add()` 改成候选池，并明确是“已见候选 top-K”还是继续枚举到可证明没有更好候选。

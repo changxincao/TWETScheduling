@@ -150,6 +150,15 @@ public class GCBBStyleBidirectionalFullDomain {
 	private long completionBackwardLabelsPruned;
 	private long completionBoundFunctionEvaluations;
 	private long completionBoundBuildNanos;
+	private long completionBoundForwardBuildNanos;
+	private long completionBoundBackwardBuildNanos;
+	private long completionBoundAggregateNanos;
+	private long completionBoundForwardCandidateAttempts;
+	private long completionBoundBackwardCandidateAttempts;
+	private long completionBoundForwardQueuePops;
+	private long completionBoundBackwardQueuePops;
+	private long completionBoundMergeCalls;
+	private long completionBoundMergeChanged;
 	private double completionBoundLastEvaluationCutoff;
 	private long forwardExtensionNanos;
 	private long backwardExtensionNanos;
@@ -1014,6 +1023,15 @@ public class GCBBStyleBidirectionalFullDomain {
 		completionBackwardLabelsPruned = 0;
 		completionBoundFunctionEvaluations = 0;
 		completionBoundBuildNanos = 0;
+		completionBoundForwardBuildNanos = 0;
+		completionBoundBackwardBuildNanos = 0;
+		completionBoundAggregateNanos = 0;
+		completionBoundForwardCandidateAttempts = 0;
+		completionBoundBackwardCandidateAttempts = 0;
+		completionBoundForwardQueuePops = 0;
+		completionBoundBackwardQueuePops = 0;
+		completionBoundMergeCalls = 0;
+		completionBoundMergeChanged = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
 		forwardExtensionNanos = 0;
 		backwardExtensionNanos = 0;
@@ -1047,6 +1065,13 @@ public class GCBBStyleBidirectionalFullDomain {
 				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
 				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
 				+ "/" + completionBackwardLabelsPruned
+				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
+				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
+				+ formatMillis(completionBoundAggregateNanos)
+				+ ", completionBoundInternal counts fCand/bCand/fPop/bPop/merge/changed="
+				+ completionBoundForwardCandidateAttempts + "/" + completionBoundBackwardCandidateAttempts
+				+ "/" + completionBoundForwardQueuePops + "/" + completionBoundBackwardQueuePops
+				+ "/" + completionBoundMergeCalls + "/" + completionBoundMergeChanged
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering
@@ -1875,6 +1900,7 @@ public class GCBBStyleBidirectionalFullDomain {
 			boolean[] inForwardQueue = new boolean[data.n + 1];
 			boolean[] inBackwardQueue = new boolean[data.n + 1];
 
+			long phaseStart = System.nanoTime();
 			PiecewiseLinearFunction source = sourcePropagationFunction(lp);
 			for (int job = 1; job <= data.n; job++) {
 				if (!isCompletionJobAvailable(job) || node.isArcForbidden(0, job)) {
@@ -1892,6 +1918,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				}
 			}
 			while (!forwardQueue.isEmpty()) {
+				completionBoundForwardQueuePops++;
 				int prev = forwardQueue.poll().intValue();
 				inForwardQueue[prev] = false;
 				PiecewiseLinearFunction prevF = forwardF[prev];
@@ -1913,7 +1940,9 @@ public class GCBBStyleBidirectionalFullDomain {
 					}
 				}
 			}
+			completionBoundForwardBuildNanos += System.nanoTime() - phaseStart;
 
+			phaseStart = System.nanoTime();
 			for (int job = 1; job <= data.n; job++) {
 				if (!isCompletionJobAvailable(job) || node.isArcForbidden(job, sink)) {
 					continue;
@@ -1930,6 +1959,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				}
 			}
 			while (!backwardQueue.isEmpty()) {
+				completionBoundBackwardQueuePops++;
 				int successor = backwardQueue.poll().intValue();
 				inBackwardQueue[successor] = false;
 				PiecewiseLinearFunction successorB = backwardB[successor];
@@ -1951,6 +1981,7 @@ public class GCBBStyleBidirectionalFullDomain {
 					}
 				}
 			}
+			completionBoundBackwardBuildNanos += System.nanoTime() - phaseStart;
 			return bounds;
 		}
 
@@ -1965,6 +1996,7 @@ public class GCBBStyleBidirectionalFullDomain {
 			boolean[][] inForwardQueue = new boolean[data.n + 1][data.n + 1];
 			boolean[][] inBackwardQueue = new boolean[data.n + 1][data.n + 2];
 
+			long phaseStart = System.nanoTime();
 			PiecewiseLinearFunction source = sourcePropagationFunction(lp);
 			for (int job = 1; job <= data.n; job++) {
 				if (!isCompletionJobAvailable(job) || node.isArcForbidden(0, job)) {
@@ -1982,6 +2014,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				}
 			}
 			while (!forwardQueue.isEmpty()) {
+				completionBoundForwardQueuePops++;
 				int[] state = forwardQueue.poll();
 				int prevPrev = state[0];
 				int prev = state[1];
@@ -2006,7 +2039,9 @@ public class GCBBStyleBidirectionalFullDomain {
 					}
 				}
 			}
+			completionBoundForwardBuildNanos += System.nanoTime() - phaseStart;
 
+			phaseStart = System.nanoTime();
 			for (int job = 1; job <= data.n; job++) {
 				if (!isCompletionJobAvailable(job) || node.isArcForbidden(job, sink)) {
 					continue;
@@ -2023,6 +2058,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				}
 			}
 			while (!backwardQueue.isEmpty()) {
+				completionBoundBackwardQueuePops++;
 				int[] state = backwardQueue.poll();
 				int current = state[0];
 				int successor = state[1];
@@ -2047,7 +2083,9 @@ public class GCBBStyleBidirectionalFullDomain {
 					}
 				}
 			}
+			completionBoundBackwardBuildNanos += System.nanoTime() - phaseStart;
 
+			phaseStart = System.nanoTime();
 			for (int job = 1; job <= data.n; job++) {
 				for (int prev = 0; prev <= data.n; prev++) {
 					mergeForward(bounds.forwardUByJob, job, forwardU[prev][job]);
@@ -2056,10 +2094,12 @@ public class GCBBStyleBidirectionalFullDomain {
 					mergeBackward(bounds.backwardRByJob, job, backwardR[job][successor]);
 				}
 			}
+			completionBoundAggregateNanos += System.nanoTime() - phaseStart;
 			return bounds;
 		}
 
 		private FunctionPair buildForwardCandidate(PiecewiseLinearFunction parentF, int prevJob, int job) {
+			completionBoundForwardCandidateAttempts++;
 			if (parentF == null || parentF.head == null) {
 				return null;
 			}
@@ -2097,6 +2137,7 @@ public class GCBBStyleBidirectionalFullDomain {
 		}
 
 		private FunctionPair buildBackwardCandidate(PiecewiseLinearFunction successorB, int job, int successor) {
+			completionBoundBackwardCandidateAttempts++;
 			if (successorB == null || successorB.head == null) {
 				return null;
 			}
@@ -2171,14 +2212,20 @@ public class GCBBStyleBidirectionalFullDomain {
 		if (!hasPositiveDomain(candidate)) {
 			return false;
 		}
+		completionBoundMergeCalls++;
 		PiecewiseLinearFunction current = targetByJob[job];
 		if (current == null || current.head == null) {
 			targetByJob[job] = candidate.copy();
+			completionBoundMergeChanged++;
 			return true;
 		}
 		PiecewiseLinearFunction before = current.copy();
 		current.mergeMinimum(candidate, direction);
-		return !sameFunction(before, current);
+		boolean changed = !sameFunction(before, current);
+		if (changed) {
+			completionBoundMergeChanged++;
+		}
+		return changed;
 	}
 
 	private boolean hasPositiveDomain(PiecewiseLinearFunction function) {

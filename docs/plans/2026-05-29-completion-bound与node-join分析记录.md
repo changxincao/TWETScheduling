@@ -456,3 +456,13 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 开启 `runALNSForSeed=true` 后，同样 5 个 seed 的 incumbent 直接降到 `15325/15330/15325/15679/15571`，根列池整数化结果为 `15325/15330/15325/15403/15571`，最佳 gap 约 `0.41%`。其中多数 seed 的 root integer 直接选中初始两条 ALNS 列 `[0, 1]`，说明 ALNS 已经能构造接近根下界的 2 机整数解；个别 seed 如 `202605310303`，root pricing 后的列池整数化还能把 ALNS incumbent 从 `15679` 改到 `15403`。因此 `wet030` 的大 gap 不是数据本身或 pricing bound 异常，而是前面对照实验为了隔离 pricing 成本关闭了 ALNS，导致初始上界只代表随机可行构造质量。
 
 为避免后续误解，`RootColumnIntegerDiagnostic` 的 CSV 增加了 `initial_cols/incumbent_cols/initial_incumbent` 三列。用 `runALNSForSeed=true` 复核 seed `202605310300` 时，`initial_cols=58`、`incumbent_cols=2`、`initial_incumbent=15325`。这说明 ALNS 过程中刷新过的历史 best 解确实已经通过 `useBestSolutionHistoryForInitialColumns` 加入 root 初始列池；但 incumbent 仍只由最终 seed 解对应的 2 条机器列表示。
+
+## 14. 2026-06-01 two-cycle completion bound 内部计时与队列顺序
+
+本次先只给 full-domain arc-join 的 completion bound 构造过程加内部计时和计数，不改变剪枝逻辑。新增统计把 bound 构造拆成 forward correcting、backward correcting 和 two-cycle 最后的二维到一维聚合，同时记录候选转移尝试次数、队列出队次数、`mergeFunction` 调用次数和实际改变次数。focused `javac` 已通过，随后用 `wet030_001` root-only、`maxExactColumns=5` 对 `allCycles/twoCycle` 各跑一遍。
+
+`twoCycle` 的慢因基本确认不在最终聚合。5 次 pricing 中，构建总时间约 `6.12-6.62s`，其中 forward correcting 约 `1.29-1.70s`，backward correcting 约 `4.38-5.22s`，最后聚合只有 `44-66ms`。计数上，每轮 forward candidate 约 `15-16.7万`，backward candidate 约 `17.4-19.9万`，出队约 `5350-5965 / 6216-7046`，`mergeFunction` 调用约 `62-70万`，实际改变约 `18.3-20.0万`。相比之下，`allCycles` 每轮构建约 `0.59-0.74s`，forward 约 `0.11-0.20s`，backward 约 `0.46-0.57s`，候选尝试只有约 `0.6-0.8万` 每侧，merge 调用约 `2.7-3.0万`。因此 two-cycle 更慢主要来自二维 last-arc state 的 queue-correcting 状态数和函数 lower-envelope 合并次数，尤其 backward 侧；不是 final join，也不是最终 evaluator 复核。
+
+当前状态队列没有按 reduced cost、时间、函数下界或状态编号排序，而是 `ArrayDeque` 的 FIFO。`allCycles` 中 forward 初始按 `job=1..n` 入队，出队一个 node 后按 `job=1..n` 扫描后继；若目标 `F_j` lower envelope 改善且该 job 不在队列中，就追加到队尾。Backward 对称，初始按 `job=1..n` 生成 `job -> sink`，出队一个 successor 后按 `prev=1..n` 扫描前驱，改善则追加队尾。`twoCycle` 也是同样的 FIFO，只是状态从 node 变成 forward `(prevPrev, prev)` 和 backward `(current, successor)`；出队一个二维状态后按自然 job 顺序扫描下一跳或前一跳，改善目标二维状态时追加队尾。也就是说，这里是 Bellman-Ford-style queue-correcting 的发现/改善顺序，不是 Dijkstra-like priority queue。
+
+这个顺序本身不影响 fixed point 语义，但会影响收敛速度。two-cycle 的状态维度放大后，FIFO 会让同一状态在不同函数 envelope 改善后多次重新传播；再叠加当前 `mergeFunction` 为判断是否 changed 会复制旧函数并做 segment 比较，构建时间就和精确 pricing 本体同量级甚至更高。下一步若优化 two-cycle，优先方向应是减少 envelope merge 成本、给状态传播加更强的时间/成本可行性预筛，或尝试更合适的工作队列顺序；但在当前数据上，直接默认使用 `allCycles` 更稳。

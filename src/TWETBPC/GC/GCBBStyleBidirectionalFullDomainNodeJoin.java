@@ -53,6 +53,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		BEST_RECORD
 	}
 
+	private enum NodeJoinCrossingSide {
+		BOTH, FORWARD, BACKWARD
+	}
+
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
@@ -81,6 +85,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	private int nextCandidateId;
 	private LabelQueueOrdering queueOrdering;
 	private JoinBestThresholdMode joinBestThresholdMode;
+	private NodeJoinCrossingSide crossingSide;
 	private CompletionBoundCalculator.Relaxation completionBoundRelaxation;
 	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
 	private CompletionBoundCalculator.Bounds completionBounds;
@@ -241,6 +246,28 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		return JoinBestThresholdMode.ZERO;
 	}
 
+	private NodeJoinCrossingSide parseCrossingSide(String value) {
+		if (value == null) {
+			return NodeJoinCrossingSide.BOTH;
+		}
+		String normalized = value.trim().toLowerCase();
+		if ("forward".equals(normalized) || "fw".equals(normalized)) {
+			return NodeJoinCrossingSide.FORWARD;
+		}
+		if ("backward".equals(normalized) || "bw".equals(normalized)) {
+			return NodeJoinCrossingSide.BACKWARD;
+		}
+		return NodeJoinCrossingSide.BOTH;
+	}
+
+	private boolean allowForwardCrossing() {
+		return crossingSide == NodeJoinCrossingSide.BOTH || crossingSide == NodeJoinCrossingSide.FORWARD;
+	}
+
+	private boolean allowBackwardCrossing() {
+		return crossingSide == NodeJoinCrossingSide.BOTH || crossingSide == NodeJoinCrossingSide.BACKWARD;
+	}
+
 	private CompletionBoundCalculator.Relaxation parseCompletionBoundRelaxation(String value) {
 		if (value == null) {
 			return null;
@@ -394,6 +421,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
 		joinBestThresholdMode = parseJoinBestThresholdMode(config.bidirectionalJoinBestThresholdMode);
+		crossingSide = parseCrossingSide(config.fullDomainNodeJoinCrossingSide);
 		completionBoundRelaxation = parseCompletionBoundRelaxation(config.bidirectionalCompletionBoundRelaxation);
 		completionBoundQueueOrdering = parseCompletionBoundQueueOrdering(
 				config.bidirectionalCompletionBoundQueueOrdering);
@@ -439,7 +467,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		sourceVisited.add(0);
 		addZeroDualExcludedJobs(sourceVisited);
 		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0,
-				pricingHorizon);
+				allowForwardCrossing() ? pricingHorizon : tMid);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
@@ -455,9 +483,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		sinkVisited.add(lp.getNode().sinkId());
 		addZeroDualExcludedJobs(sinkVisited);
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
-		// 2026-05-28: full-domain 对照版本中，sink root 也直接使用完整 [0,pricingHorizon] 定义域。
-		sinkFrontier.resetDomain(0.0, pricingHorizon);
-		sinkFrontier.addSegment(0.0, pricingHorizon, 0.0, 0.0);
+		double sinkStart = allowBackwardCrossing() ? 0.0 : tMid;
+		// 2026-06-01: one-sided node join 对照中，未越界的一侧保留半域 root，避免两侧都越过 Tmid。
+		sinkFrontier.resetDomain(sinkStart, pricingHorizon);
+		sinkFrontier.addSegment(sinkStart, pricingHorizon, 0.0, 0.0);
 		BackwardLabel sink = BackwardLabel.sink(nextLabelId++, lp.getNode().sinkId(), sinkVisited, sinkFrontier,
 				buildBackwardReachableSet(lp.getNode().sinkId(), sinkVisited, lp.getNode(), sinkFrontier));
 		BWUL.add(sink);
@@ -511,7 +540,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// 2026-05-29: node-join 版本的 reachableSet 已经是 full-domain 一跳可达集合；
 		// Tmid 只决定 child 是否还能继续扩展。第一次越过 Tmid 的 child 只保留为
 		// terminal label 参与同点 join，不入队。
-		if (terminalCandidate || Utility.compareGt(earliestForwardCompletion(child), tMid)) {
+		if (terminalCandidate || (allowForwardCrossing() && Utility.compareGt(earliestForwardCompletion(child), tMid))) {
 			insertForwardBoundaryTerminal(child, lp);
 			return;
 		}
@@ -521,7 +550,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private void extendBackwardAndStore(BackwardLabel label, int prevJob, LP lp, boolean terminalCandidate) {
-		BackwardLabel child = extendBackward(label, prevJob, lp, false);
+		BackwardLabel child = extendBackward(label, prevJob, lp, !allowBackwardCrossing());
 		if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 			return;
 		}
@@ -531,7 +560,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		// 2026-05-29: backward 侧对称处理。先按 full-domain 一跳可行性生成 child；
 		// 若它已经跨到 Tmid 左侧，则只作为 terminal suffix 保存，不再继续向左扩展。
-		if (terminalCandidate || Utility.compareLt(latestBackwardCompletion(child), tMid)) {
+		if (terminalCandidate || (allowBackwardCrossing() && Utility.compareLt(latestBackwardCompletion(child), tMid))) {
 			insertBackwardBoundaryTerminal(child, lp);
 			return;
 		}
@@ -1188,6 +1217,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ forwardBoundaryTerminalDominated
 				+ ", bw kept/dominated=" + backwardBoundaryTerminalKept + "/"
 				+ backwardBoundaryTerminalDominated
+				+ ", crossingSide=" + crossingSide
 				+ ", queueOrdering=" + queueOrdering
 				+ ", timingMs fwExt/bwExt/join/extTotal/measuredTotal=" + formatMillis(forwardExtensionNanos)
 				+ "/" + formatMillis(backwardExtensionNanos) + "/" + formatMillis(joinPhaseNanos)
@@ -1436,7 +1466,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private boolean isDirectForwardExtensionTimeFeasibleFullDomain(PiecewiseLinearFunction frontier, int prevJob,
 			int nextJob) {
-		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, false);
+		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, !allowForwardCrossing());
 	}
 
 	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob,
@@ -1462,7 +1492,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	 */
 	private boolean isDirectBackwardExtensionTimeFeasibleFullDomain(int firstJob, boolean isSinkRoot,
 			PiecewiseLinearFunction frontier, int prevJob) {
-		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, false);
+		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob,
+				!allowBackwardCrossing());
 	}
 
 	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
@@ -1715,9 +1746,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		baseForwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		baseBackwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			// 2026-05-28: full-domain 对照版本保留原来的可达性和 join 流程，只放宽标签函数定义域。
-			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, pricingHorizon);
-			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, pricingHorizon);
+			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0,
+					allowForwardCrossing() ? pricingHorizon : tMid);
+			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job],
+					allowBackwardCrossing() ? 0.0 : tMid, pricingHorizon);
 		}
 		baseHalfPenaltyCacheTMid = tMid;
 		baseHalfPenaltyCacheHorizon = pricingHorizon;
@@ -1752,13 +1784,13 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
-		// 2026-05-28: full-domain 对照版本不按 Tmid 裁剪新增 job 函数。
-		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, pricingHorizon);
+		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0,
+				allowForwardCrossing() ? pricingHorizon : tMid);
 	}
 
 	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
-		// 2026-05-28: full-domain 对照版本不按 Tmid 裁剪新增 job 函数。
-		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, pricingHorizon);
+		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true),
+				allowBackwardCrossing() ? 0.0 : tMid, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction getDynamicForwardJobPenalty(int prevJob, int job) {

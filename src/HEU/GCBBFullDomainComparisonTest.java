@@ -117,6 +117,11 @@ public class GCBBFullDomainComparisonTest {
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
 
 		String mode = nodeJoin ? "nodeJoin" : (fullDomain ? "fullDomain" : "halfDomain");
+		String crossingSide = config.fullDomainNodeJoinCrossingSide == null
+				? "both" : config.fullDomainNodeJoinCrossingSide.trim();
+		if (nodeJoin && !crossingSide.isEmpty() && !"both".equalsIgnoreCase(crossingSide)) {
+			mode += "-cross" + crossingSide;
+		}
 		String joinBestMode = config.bidirectionalJoinBestThresholdMode == null
 				? "zero" : config.bidirectionalJoinBestThresholdMode.trim();
 		if (!joinBestMode.isEmpty() && !"zero".equalsIgnoreCase(joinBestMode)) {
@@ -172,6 +177,8 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalCompletionBoundQueueOrdering = System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBoundQueue",
 				config.bidirectionalCompletionBoundQueueOrdering);
+		config.fullDomainNodeJoinCrossingSide = System.getProperty(
+				"twet.bpc.fullDomainCompare.nodeJoinCrossingSide", config.fullDomainNodeJoinCrossingSide);
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));

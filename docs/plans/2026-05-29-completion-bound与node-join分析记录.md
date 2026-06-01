@@ -594,3 +594,15 @@ twoCycle 的 `exact_s=30.492s` 是 exact pricing engine 的总耗时，里面包
 从实验判断看，wet030 root-only 中 two-cycle bound 对 label/join 的确有剪枝，但相对 all-cycles 的最终作用不大；主要求解结果、列池规模和有效性一致，剪枝节省的 label/join 时间不到 `0.5s`，而 bound 构造多花约 `28s`。因此当前工程默认应只把 `ALL_CYCLES + FIFO` 作为基础 completion bound 组件：它构造快，剪枝效果已经接近 two-cycle，整体性价比明显更高。two-cycle 可以保留为可选对照和论文中的强化 relaxation 说明，但不应作为默认定价流程。
 
 论文表述上可以突出两点。第一，当前函数型占优/分段线性 reduced-cost pricing 的实现里，relaxed completion bound 这类按 job 聚合的函数下界并不常见；它不依赖 elementary label 的 visited/reachable 状态，却能在 join 前对 forward/backward 函数组合做有效剪枝，这一点有独立贡献价值。第二，可以把 all-cycles 作为主算法组件，把 two-cycle 写成更强但更重的扩展 relaxation：理论上更紧，实验上在当前实例中边际收益不足以抵消构造成本。后续若实现 NG-set pricing，还可以复用这套 completion bound 思路重新测试；NG memory 本身会改变可达状态和 join 候选结构，completion bound 的相对收益可能不同，值得作为后续实验项保留。
+
+## 24. 2026-06-01 node join 单侧越过 Tmid 对照
+
+本轮针对 full-domain node join 做了一个更小的实验开关：`TWETBPCConfig.fullDomainNodeJoinCrossingSide`，可选 `both/forward/backward`，默认仍为 `both`，保持原有实验口径。含义是 node join 中哪一侧允许生成“第一次越过 Tmid”的 boundary terminal label；未被允许越界的一侧回到对应半域，forward 限制在 `[0,Tmid]`，backward 限制在 `[Tmid,pricingHorizon]`。这样可以测试“同一个 node join 只需要一侧跨过 Tmid，另一侧不必也做 full-domain 扩展”的判断。
+
+在 `wet020_001_2m` 和 `wet021_001_2m` 上，completion bound 均保持 `off`，比较 full-domain arc join、原 node join 双侧越界、forward-only 越界和 backward-only 越界。结果均保持 `ROOT_PROCESSED`、目标值等于 bound、验证可行。full-domain arc join 仍最快：`wet020` 为 `solve=1.878s, exact=0.640s`，`wet021` 为 `solve=2.435s, exact=0.911s`。原 node join 双侧越界明显最慢：`wet020` 为 `solve=6.870s, exact=5.783s`，`wet021` 为 `solve=24.305s, exact=22.420s`。
+
+单侧越界能显著降低 node join 成本。forward-only 越界得到 `wet020 solve=3.196s, exact=2.042s`，`wet021 solve=8.862s, exact=7.126s`；相对原 node join，exact 时间分别降低约 `64.7%` 和 `68.2%`。backward-only 越界也有改善，但不如 forward-only：`wet020 solve=5.917s, exact=4.569s`，`wet021 solve=15.788s, exact=14.052s`，相对原 node join exact 时间分别降低约 `21.0%` 和 `37.3%`。
+
+从日志看，forward-only 的收益主要来自 backward 侧 label 和 join 候选大幅减少。以 `wet021` 第一轮为例，原 `both` 的 backward kept/dominated 为 `23574/107948`，boundary terminal bw 为 `13658/98686`，join function evaluation 为 `2063282`；forward-only 下 backward kept/dominated 降为 `967/10071`，boundary terminal bw 为 `0/0`，join function evaluation 降为 `57188`。forward 侧保持原 full-domain boundary，仍能覆盖“第一个跨过 Tmid 的 join job”，因此本轮没有损失最终目标和 bound。backward-only 对称地压缩 forward 侧，但由于 backward 侧本身更重，保留 backward full-domain 后整体仍明显慢于 forward-only。
+
+当前结论是：如果继续维护 node join 分支，默认候选应优先考虑 `crossingSide=forward`，而不是原来的双侧越界。它仍慢于 full-domain arc join，但已经把 node join 的额外成本从一个数量级拉回到可比较范围；后续若要继续看 node join 的价值，应先在 20/21 以外的样例确认 forward-only 不会漏列或增加迭代轮数，再决定是否替换默认 node-join 实验口径。

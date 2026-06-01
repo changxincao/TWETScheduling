@@ -50,6 +50,11 @@ public class TWETBPCConfig {
 	 */
 	public boolean useGCBBFullDomainNodeJoinBidirectionalPricing = false;
 	/**
+	 * 2026-06-01: full-domain node-join 诊断分支中，哪一侧允许生成第一次越过 Tmid 的
+	 * boundary terminal label。可选 both/forward/backward；默认 both 保持原实验口径。
+	 */
+	public String fullDomainNodeJoinCrossingSide = "both";
+	/**
 	 * 2026-05-28: 仅用于实验。true 时使用 full-domain 函数标签 + 动态 half-way 边界的非对称双向 pricing。
 	 */
 	public boolean useGCBBAsymmetricBidirectionalPricing = false;

@@ -450,3 +450,5 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 5 个 seed 的结果显示，初始 incumbent 对随机 seed 很敏感，范围为 `42257-61629`；但同一批 root 列池整数化后，目标稳定在 `15325-15835`，显著接近根 bound。最佳 seed `202605310304` 的 root 列池整数解为 `15325`，选中 2 条列，缺失任务数为 0、重复覆盖数为 0，因此不是 set-covering 重复覆盖造成的假解。由此可以判断，`wet030` 上之前看到的大 gap 主要来自当前 BPC 在 root LP 分数时不额外求一次 restricted master integer 来刷新 incumbent；根节点列池本身已经包含接近下界的整数列组合。
 
 这提示后续可以考虑增加一个可选的 root/节点后处理：当 column generation 结束且 LP 仍为分数解时，用当前列池求一次受限整数主问题作为 incumbent polishing。该步骤不改变下界，也不改变 pricing 正确性，只用于把已有列组合转成更好的上界；是否默认开启需要再看额外 MIP 时间和较大列池上的稳定性。
+
+进一步复查初始 incumbent 来源后确认，`GCBBFullDomainComparisonTest` 这类定价对照入口显式设置 `reuseConfiguredBestSolution=false` 和 `runALNSForSeed=false`。因此初始解只来自 `Solution.setInitSolution()`：先随机打乱 job 顺序，再对每个 job 随机选择一个当前不违反粗硬窗的机器插入。它只保证构造出可行机器序列，不做局部搜索、VND 或 ALNS 改进，也不按惩罚成本选择最优插入位置。`wet030` 中多个 seed 的 incumbent 差异很大正是这个随机构造造成的。后续 root pricing 生成了大量好列，但当前 BPC 只在 master LP 解本身为整数时才刷新 incumbent；如果 root LP 是分数解，这些好列不会自动组合成新的整数上界，除非额外求一次 restricted master integer。

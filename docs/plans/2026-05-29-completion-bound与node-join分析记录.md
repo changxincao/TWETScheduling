@@ -518,3 +518,9 @@ completion bound 不能直接复用这两个半域缓存。原因是它要回答
 full-domain arc/node 分支本身没有左右半域标签，正式 label 和 completion bound 输入都使用 `[0, pricingHorizon]` 上的 penalty。这里的“full-domain”不表示忽略 job 的有效时间窗；若 pi-window 生效，代码仍会先对 `data.penaltyFunction[job]` 做 `setDomain(hStart, hEnd, true)`，再裁到 `[0, pricingHorizon]`。所以 full-domain 是相对于 Tmid half-domain 的标签定义域，不是相对于 hard window 或 pi-window 的无限放宽。
 
 最终列成本复核也要区分路径。当前带 top-K 候选堆的双向 pricing，包括 Tmid、full-domain arc、full-domain node 和非对称分支，在 `dualProfitableWindowEnabled=true` 时会在 `finalizeGeneratedColumns()` 对最终 K 条候选调用 `PricingColumnCostRechecker.evaluate(...)`，用完整 evaluator 成本写回列。该条件只在根节点且没有 active cuts 时成立，也正是 pi-window 会启用的场景；非 pi-window 场景下 inferred 成本已经按原 hard/static outsourcing window 口径计算，不额外复核。单向 `GC` 没有 K 堆最终复核流程，但它同样使用动态 job penalty 生成列；该路径后续不作为主要性能路径维护。
+
+## 21. 2026-06-01 单向 GC 的列成本生成口径
+
+单向 `GC` 的流程不是“先把候选列放进 K 堆，最后统一 finalize”，而是在每个 label 出队时直接尝试接到 sink。它先用 label 递推得到的 `label.minReducedCost - arcDual(last, sink)` 判断该序列是否可能是负列；这里的 `label.minReducedCost` 确实来自当前 pricing 使用的动态 penalty，根节点 no-cut 时可能包含 pi-window 收紧后的口径。
+
+但通过负 reduced-cost 筛选后，单向 `GC` 并不会把这个 label 上的 inferred cost 直接写进 `TWETColumn`。代码会先 `recoverSequence(label)` 恢复完整 job 序列，然后调用 `evaluator.evaluate(sequence)` 重新按完整序列计算列成本，最后用这个 evaluator cost 构造 `TWETColumn`。因此单向路径不需要像 top-K 双向路径那样在 `finalizeGeneratedColumns()` 里再做一遍 `PricingColumnCostRechecker`；它没有 finalize 阶段，但每条实际返回列在加入 `generatedColumns` 前已经走了 evaluator 成本口径。这里仍要注意，单向 GC 返回的是发现顺序下的前 K 条负列，不是全局 top-K 候选堆。

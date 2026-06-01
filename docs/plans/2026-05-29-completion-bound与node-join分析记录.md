@@ -574,3 +574,9 @@ REDUCED_COST 模式当前使用 `PriorityQueue<QueueState>`。为了让队列中
 2026-06-01 已按上述方案修改 `CompletionBoundCalculator` 的 REDUCED_COST 队列。priority entry 现在保存 state、最早时间、reduced-cost priority 和入队序号；不同 state 先按最早时间、再按 reduced cost、再按 state id 排序，同一 state 按更大的入队序号优先。poll 前会跳过 `seq != state.latestQueueSeq` 的 stale entry，并统计 `priorityQueueStalePops`。FIFO 逻辑保持原样，仍用 `inQueue` 保证一个 state 至多一个队列项。
 
 wet030 root-only allCycles 对照显示，lazy priority 只解决了 Java `PriorityQueue.remove(Object)` 的线性删除问题，没有改变 REDUCED_COST 排序本身不适合 fixed-point propagation 的结论。新 lazy priority 结果为 `solve=72.883s, exact=65.289s`，比旧 remove/reinsert 记录 `exact=68.318s` 略好，但仍远慢于 FIFO 本轮 `solve=10.961s, exact=3.237s`，也慢于早前 FIFO 记录 `exact=2.323s`。内部统计也说明原因：FIFO 第一轮约 `fCand/bCand=7251/7743, merge=29710`；lazy priority 第一轮约 `fCand/bCand=29146/171709, stale=9836, merge=388042`。因此主要问题不是 remove 的线性复杂度，而是 priority 顺序让 envelope 更新更碎、反复传播更多状态；当前默认继续保持 FIFO。
+
+2026-06-01 继续补充 FIFO 更快的原因。completion bound 的队列不是最短路 label-setting，而是 lower-envelope fixed-point propagation；一个 state 的函数会被很多前驱/后继路径逐步改善，队列项本身也不保存函数快照，真正函数保存在 `forwardF/backwardB` 或二维数组里。FIFO 中如果 state 已经在队列里，新改善只更新数组里的最新 envelope，不重复入队；等这个 state 原来的队列项出队时，会一次性用最新 envelope 扩展。因此多个小改善会被自然合并成一次扩展，减少中间 envelope 传播。
+
+priority 队列即使用 lazy duplicate 去掉了线性 remove，也会更倾向于把局部 priority 看起来好的 state 立刻拿出来扩展。问题是这个局部低 reduced cost 不代表该 state 的整条 envelope 已经稳定，也不代表它扩展出去后会减少总工作量；后续同一 state 或相邻 state 的 envelope 继续降低时，前面已经扩展出去的候选大多会变成中间结果，仍然增加 candidate 构造、`mergeMinimum` 和后续入队。wet030 中 backward 侧尤其明显，lazy priority 的 stale entry 虽然能跳过同 state 旧队列项，但无法撤销旧 envelope 已经向前驱传播造成的额外 merge。
+
+因此 FIFO 快的原因可以概括为两点。第一是数据结构便宜：`ArrayDeque` 加 `inQueue`，入队判重和出队都是 O(1)，且没有 stale entry。第二更重要，是传播节奏更适合这个问题：FIFO 对同一 state 的多次改善有天然 coalescing 效果，出队时读取的是最新函数；priority 则追求局部排序新鲜度，反而破坏这种合并效果，让 fixed-point 过程产生更多临时 envelope。当前数据也支持这个判断：lazy priority 比旧 priority 略快，说明数据结构优化有效；但它仍比 FIFO 慢一个数量级，说明主导因素是传播顺序而不是 `PriorityQueue.remove(Object)`。

@@ -524,3 +524,17 @@ full-domain arc/node 分支本身没有左右半域标签，正式 label 和 com
 单向 `GC` 的流程不是“先把候选列放进 K 堆，最后统一 finalize”，而是在每个 label 出队时直接尝试接到 sink。它先用 label 递推得到的 `label.minReducedCost - arcDual(last, sink)` 判断该序列是否可能是负列；这里的 `label.minReducedCost` 确实来自当前 pricing 使用的动态 penalty，根节点 no-cut 时可能包含 pi-window 收紧后的口径。
 
 但通过负 reduced-cost 筛选后，单向 `GC` 并不会把这个 label 上的 inferred cost 直接写进 `TWETColumn`。代码会先 `recoverSequence(label)` 恢复完整 job 序列，然后调用 `evaluator.evaluate(sequence)` 重新按完整序列计算列成本，最后用这个 evaluator cost 构造 `TWETColumn`。因此单向路径不需要像 top-K 双向路径那样在 `finalizeGeneratedColumns()` 里再做一遍 `PricingColumnCostRechecker`；它没有 finalize 阶段，但每条实际返回列在加入 `generatedColumns` 前已经走了 evaluator 成本口径。这里仍要注意，单向 GC 返回的是发现顺序下的前 K 条负列，不是全局 top-K 候选堆。
+
+## 22. 2026-06-01 completion bound 当前优化点复查
+
+本轮复查 `CompletionBoundCalculator` 后，当前最需要优先处理的是两个确定成本点：`mergeFunction()` 为了判断 envelope 是否 changed，每次都会 `current.copy()`，再调用 `mergeMinimum()`，最后逐 segment 做 `sameFunction()`；同时 `forwardJobReducedPenalty()` 和 `backwardJobReducedPenalty()` 在每次 candidate 构造中都会复制 job penalty 并平移 job dual。这两个位置都位于 fixed-point propagation 的内层循环，比全量扫描 `job=1..n` 更值得先优化。
+
+`mergeMinimum()` 目前返回 `void`，且内部注释也明确要求两个函数有正长度公共区间，不支持单点交集。若要从根上去掉 `mergeFunction()` 的 copy/compare，最干净的改法是让 `PiecewiseLinearFunction.mergeMinimum(...)` 返回 `boolean changed`，在替换片段、拼接左/右扩展或 normalize 后发生实际变化时置 true。这样可以省掉当前 completion bound 的整函数复制和二次扫描。不过这个函数也被 `DominanceGraph`、`DominanceNode` 和 `PaperDominanceGraph` 调用，修改签名会牵涉多个调用点；可以兼容地新增 `mergeMinimumAndReportChange(...)`，旧 `mergeMinimum(...)` 继续保留为包装方法，降低风险。cheap precheck 只能作为辅助，因为 candidate 的端点最小值不一定能证明整段 envelope 不改善，特别是分段函数有交点和方向化后下包络时，不能只看一个端点。
+
+penalty reduced copy 的优化更局部、更安全。calculator 构造时可以预先生成 `forwardReducedPenaltyByJob[job]` 和 `backwardReducedPenaltyByJob[job]`：对输入 penalty copy 一次并 `shiftYInPlace(-lp.getJobDual(job))`。后续 `buildForwardCandidate()` / `buildBackwardCandidate()` 直接取数组传给 `add()`。如果 `add()` 不改写右参数，这样可直接复用；若后续不确定 `add()` 是否破坏输入，再保守地在数组里存 reduced penalty、调用点按需 copy，但至少能把 job dual shift 从 candidate 内层拿出去。当前看这个优化不改变数学语义，适合先做。
+
+single-point domain 的问题需要谨慎。当前 `hasPositiveDomain()` 严格要求 `head.start < tail.end`，因此所有零长度函数都会被丢掉；`mergeMinimum()` 本身也不能处理只有一个点的 overlap。对 completion bound 来说，丢掉可行 relaxed completion 会让 `U_i/R_i` 偏高，用于剪枝时存在风险。实际影响大概率集中在右边界 `pricingHorizon` 或半域交界 `Tmid` 附近的退化点，尤其是 Tmid 正式 labeling 已经专门支持 single-point label，说明这类边界不是理论上不存在。短期更稳的做法不是强行让 completion bound merge 单点，而是补一个统计：记录 candidate 因 `head.start == tail.end` 或 overlap 单点被丢弃的次数和位置，先确认 wet020/025/030 是否真的出现。如果确实只在 `pricingHorizon` 点出现，且该点代表完整收尾边界，可以考虑专门把“单点可完成”作为剪枝保护条件：遇到这种 candidate 不参与 relaxed bound 传播，但也不能因此提高 bound 去剪 label。
+
+FIFO 与 reduced-cost queue 的复杂度也已经能解释。FIFO 模式中，一个 state 已在队列里时再次改善不会重复入队，数组里的函数 envelope 会被更新，等原队列项出队时读取最新函数；`enqueue` 和 `poll` 都是摊还 O(1)。reduced-cost 模式用 `PriorityQueue`，为了更新已有 state 的 priority，当前调用 `priorityQueue.remove(state)`，这是 O(q) 线性删除，然后再 O(log q) 插入；`poll` 是 O(log q)。更关键的是它会改变 fixed-point 收敛路径，之前 wet030 实测 merge 次数显著增加。因此 reduced-cost 队列不只是数据结构维护更贵，也可能让更多未稳定 envelope 过早传播，当前不应作为默认。
+
+每次出队扫描所有 job 的 O(pop*n) 循环可以后置优化。all-cycles 状态少一些，two-cycle 状态是二维 last-arc，扫描代价会放大；预处理 `availableForwardSucc[prev]` 和 `availableBackwardPred[succ]` 能减少 zero-dual、forbidden arc、自环和 2-cycle 检查，但这需要按当前 node 的 forbidden arc 每轮构造邻接表。当前主要瓶颈仍更可能来自每条候选上的函数构造、penalty copy 和 merge copy，因此邻接表优化优先级低于前两项。

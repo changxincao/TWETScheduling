@@ -1509,3 +1509,12 @@ final join 侧新增 pair-level early break。由于每个 terminal group 已按
 full-domain 的优势主要体现在 dominance graph 搜索路径上。由于函数定义域更宽，reachable set 在扩展过程中不容易被半域边界切碎，很多 label 可能落到较少的 superset 搜索路径上；`wet025` 的 `superset visited` 从 half 的 `44,085,562` 降到 full 的 `33,835,821`，`wet022` 从 `2,559,456` 降到 `1,642,380`。因此 full-domain 有时 wall time 反而略快，例如 `wet025` paired run 中 exact `17.757s/16.280s`，单独 JVM 中 `18.163s/17.045s`；但 `wet022` 又变慢为 `0.832s/0.958s`。这说明 full-domain 不是单调改进，而是在 dominance graph 和 join 两个热点之间转移复杂度。
 
 从当前样本看，两者的最终时间差并不大。14 个 paired case 的平均 exact 时间 half/full 为 `1.414s/1.290s`，平均 solve 时间为 `2.038s/1.882s`；这个平均还被 15 任务毫秒级小样例和 JVM/CPLEX 预热噪声影响。较大的 `wet022/wet025` 也只表现为十几个百分点以内的上下浮动，并且两版目标、bound、valid 都一致。因此暂时没有必要把 full-domain 继续推进成正式候选，也没有必要为它做复杂的“保留 half-domain lower bound、内部携带 full-domain 函数”的第三版微基准。后续若要继续优化，更值得先做 exact pricing 分段计时和 dominance/join 热点拆分，而不是在函数定义域口径上继续投入。
+## 2026-06-01 旧 VRP dual stabilization 复核
+
+复查旧 VRP `src/BPC/LP/LP.java` 后，代码里确实有一段标注为 `for stabilization` 的变量和方法：`vars/vars_bound/vars_value/init_value/step_size`，在 VRPTW 模式下 `Construct()` 会调用 `add_slacks()`，给每个 customer coverage 行加一个高成本人工变量。后续还定义了 `set_bounds()`、`update_slacks()` 和 `close_slacks()`：`set_bounds()` 试图把 slack 成本设为 `max(0, mu[i]-init_value)`，`update_slacks()` 在 slack 仍为正时逐步提高对应成本。这一套看起来像早期尝试的 penalty/box 型 dual stabilization 或人工变量稳定化。
+
+但从调用关系看，旧 VRP 主流程并没有真正使用这套动态 stabilization。全仓搜索只发现 `set_bounds()`、`update_slacks()`、`close_slacks()` 的定义，没有实际调用；`GC.Solve()` 每轮只是 `lp.Solve()`、`lp.GetDual()`、再 `Extend(lp)`。因此旧 VRP 真正进入 pricing 的 dual 基本就是 CPLEX 当前 RMP dual：`mu[i]`、`arc_mu[i][j]` 和 subset-row dual。VRPTW 模式下可能会存在初始高成本 slack 列，但动态调整 slack cost 来稳定 dual 的逻辑没有接入列生成循环。
+
+当前 TWET-BPC 没有复用旧 VRP 这套 dual stabilization。`TWETBPC/LP/LP.java` 中只保存 `jobDual`、`machineDual`、`arcDual`，每次 `solveCurrentModel()` 直接从 CPLEX `getDual(...)` 读取后供 pricing 使用；没有历史 dual center、box step、alpha smoothing、penalty slack cost update 等机制。当前和旧 VRP 有关的 slack 复用，主要是子节点 RMP 不可行时的 repair slack：只给当前新增分支行加人工 slack，用其 dual 引导补列，slack 归零后回到正常 RMP。这属于 feasibility repair，不是 dual stabilization。
+
+因此如果后续要做真正的 dual stabilization，需要作为新功能重新设计，而不是认为已经从旧 VRP 迁移过来了。比较稳妥的方向是先记录每轮 dual 波动和 pricing 迭代次数，再决定是否引入 stabilized dual 用于 pricing；实现上要格外小心，因为当前 TWET pricing 还把 dual 用于动态 profitable window 和 completion bound，若用平滑 dual 生成列，需要保证最终仍能用真实 RMP dual 做 reduced-cost 判定，避免错过负列或生成无效窗口。

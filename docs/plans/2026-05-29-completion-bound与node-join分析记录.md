@@ -508,3 +508,13 @@ Tmid pricing 的正式 label 仍然使用左右半域 penalty；但 completion b
 按当前维护判断，单向 forward pricing 和非对称双向分支后续预计不再作为性能主路径使用，因此本次不接入 completion bound，只在 `GC` 与 `GCBBAsymmetricBidirectional` 类注释中明确该范围选择，避免后续误以为遗漏。源码中未找到 `GCNGBBAsymmetricBidirectional.java`，只存在历史 `.class` 编译产物；因此可维护注释只落在现有 Java 源码上。
 
 验证方面，focused `javac` 覆盖 `CompletionBoundCalculator`、Tmid 双向、非对称、单向入口和配置类通过。随后用 `tmp-wet020_001_2m` 做 root-only normal/Tmid 对照：`completionBound=off` 和 `completionBound=allCycles` 均得到 `obj=6343, bound=6343, valid=true`。开启 `allCycles` 后该轮 exact pricing 从约 `0.472s` 降到 `0.257s`，日志显示 `fwPruned/bwPruned=752/318`，说明 Tmid 路径已经实际使用 completion bound，且该小样例结果口径一致。
+
+## 20. 2026-06-01 半域 penalty、pi-window 与最终列成本复核口径
+
+Tmid 双向和 full-domain 双向在 penalty 函数定义域上的差异需要分清。Tmid `GCNGBBStyleBidirectional` 的正式标签使用半域缓存：forward job penalty 裁到 `[0, Tmid]`，backward job penalty 裁到 `[Tmid, pricingHorizon]`。如果根节点 no-cut 下启用了 pi-window，则先把 job penalty 的有效窗收紧到动态 `[hStart, hEnd]`，再分别裁到左右半域。因此半域缓存不是只记录时间可行性，而是实际进入 label 递推的分段惩罚函数定义域。
+
+completion bound 不能直接复用这两个半域缓存。原因是它要回答“当前半域 label 是否还能补成一条完整负列”。例如 forward label 自身定义在左半域，如果把 backward completion 的 job penalty 也只定义在右半域，那么 `F_label + R_i` 做函数相加时公共定义域很可能只剩 `Tmid` 附近，甚至为空；这样算出来的下界不是完整补全下界，而是被人为限制成“必须在半域交界点附近拼上”的下界。因此 Tmid 路径现在单独构造 full-domain completion-bound penalty：仍尊重本轮 effective window / pi-window，但外层裁剪为 `[0, pricingHorizon]`。
+
+full-domain arc/node 分支本身没有左右半域标签，正式 label 和 completion bound 输入都使用 `[0, pricingHorizon]` 上的 penalty。这里的“full-domain”不表示忽略 job 的有效时间窗；若 pi-window 生效，代码仍会先对 `data.penaltyFunction[job]` 做 `setDomain(hStart, hEnd, true)`，再裁到 `[0, pricingHorizon]`。所以 full-domain 是相对于 Tmid half-domain 的标签定义域，不是相对于 hard window 或 pi-window 的无限放宽。
+
+最终列成本复核也要区分路径。当前带 top-K 候选堆的双向 pricing，包括 Tmid、full-domain arc、full-domain node 和非对称分支，在 `dualProfitableWindowEnabled=true` 时会在 `finalizeGeneratedColumns()` 对最终 K 条候选调用 `PricingColumnCostRechecker.evaluate(...)`，用完整 evaluator 成本写回列。该条件只在根节点且没有 active cuts 时成立，也正是 pi-window 会启用的场景；非 pi-window 场景下 inferred 成本已经按原 hard/static outsourcing window 口径计算，不额外复核。单向 `GC` 没有 K 堆最终复核流程，但它同样使用动态 job penalty 生成列；该路径后续不作为主要性能路径维护。

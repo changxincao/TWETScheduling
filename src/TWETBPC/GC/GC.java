@@ -25,6 +25,11 @@ import TWETBPC.Util.SequenceSignature;
  * 当前版本把 TL[j] 升级为 dominance graph；每个 graph node 保存真实 label 集合和聚合 envelope，
  * 用于实现完整 set dominance。暂不做 partial dominance、SRI、ng-route 和双向拼接。
  * <p>
+ * 2026-06-01: 本单向版本达到 {@link TWETBPCConfig#maxExactPricingColumns} 后直接停止，
+ * 返回的是当前队列/扫描顺序下最先发现的 K 条负列，不是枚举后按 reduced cost 选出的最优 K 条。
+ * 这和旧 VRP 基础单向 GC 一致，但可能让外层列生成迭代次数增加；当前性能主路径仍优先使用
+ * 带候选堆的双向 GCBB-style pricing。
+ * <p>
  * 2026-06-01: completion bound 后续优先维护在 Tmid 双向和 full-domain 诊断分支；
  * 单向 forward pricing 预计不再作为性能主路径，暂不在本类接入 completion-bound 预剪枝。
  */
@@ -425,6 +430,8 @@ public class GC {
 		if (!generatedSignatures.add(signature)) {
 			return;
 		}
+		// 2026-06-01: 单向 GC 在线发现负列后立即计入返回集合，满 K 即停；
+		// 这里不维护 top-K 候选堆，因此不是“所有已见负列中最好的 K 条”语义。
 		double cost = evaluator.evaluate(sequence);
 		generatedColumns.add(new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false));
 	}

@@ -466,3 +466,11 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 当前状态队列没有按 reduced cost、时间、函数下界或状态编号排序，而是 `ArrayDeque` 的 FIFO。`allCycles` 中 forward 初始按 `job=1..n` 入队，出队一个 node 后按 `job=1..n` 扫描后继；若目标 `F_j` lower envelope 改善且该 job 不在队列中，就追加到队尾。Backward 对称，初始按 `job=1..n` 生成 `job -> sink`，出队一个 successor 后按 `prev=1..n` 扫描前驱，改善则追加队尾。`twoCycle` 也是同样的 FIFO，只是状态从 node 变成 forward `(prevPrev, prev)` 和 backward `(current, successor)`；出队一个二维状态后按自然 job 顺序扫描下一跳或前一跳，改善目标二维状态时追加队尾。也就是说，这里是 Bellman-Ford-style queue-correcting 的发现/改善顺序，不是 Dijkstra-like priority queue。
 
 这个顺序本身不影响 fixed point 语义，但会影响收敛速度。two-cycle 的状态维度放大后，FIFO 会让同一状态在不同函数 envelope 改善后多次重新传播；再叠加当前 `mergeFunction` 为判断是否 changed 会复制旧函数并做 segment 比较，构建时间就和精确 pricing 本体同量级甚至更高。下一步若优化 two-cycle，优先方向应是减少 envelope merge 成本、给状态传播加更强的时间/成本可行性预筛，或尝试更合适的工作队列顺序；但在当前数据上，直接默认使用 `allCycles` 更稳。
+
+## 15. 2026-06-01 completion bound 队列重复计算语义
+
+复查代码后确认，当前 correcting 队列已经有 `inForwardQueue/inBackwardQueue` 去重，因此不会出现同一个状态在队列里同时存在 10 份的情况。无论是 all-cycles 的一维 node state，还是 two-cycle 的二维 last-arc state，只要目标传播函数 `F/B` 改善且状态已在队列中，代码只更新数组里的最新函数 envelope，不会再追加一个重复队列项。等该状态真正出队时，读取的是数组中的最新函数，而不是入队那一刻的旧快照。因此“队列中已有状态被其他状态连续改善 10 次，只需要最后一次最新状态传播”的优化，在当前实现里已经基本成立。
+
+当前仍然存在的重复计算是另一类：一个状态出队并按当时的 `F/B` 传播完以后，后续又被其他状态进一步改善，于是会重新入队并再次扫描所有后继或前驱。这个是 label-correcting fixed point 的正常代价，不是队列重复项造成的 stale work。若不重新传播，就会漏掉后续改善对下游状态的影响。队列顺序只影响一个状态是在更多改善到达前还是之后出队，从而影响是否需要多轮传播；但因为这里是 lower-envelope merge，不是正式 label dominance，`FIFO`、按最早完成时间或按简单下界排序都不改变最终结果，可能只改变收敛轮数。
+
+因此，two-cycle 目前慢的主要矛盾不是“队列里同一状态堆了很多份”，而是二维状态数和每次出队的全量扫描太大：每次出队都枚举一整轮 `job=1..n` 或 `prev=1..n`，每条候选又要构造分段函数、merge envelope、复制旧函数并比较是否 changed。更可能有效的优化方向是减少每次出队扫描的候选弧、降低 `mergeFunction` 判断 changed 的成本、维护增量改善片段避免整函数重传，或设计能让状态尽量在主要改善到齐后再传播的队列策略。单纯把 FIFO 换成最早完成时间队列，预计收益不会像减少 merge 次数那样稳定。

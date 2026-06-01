@@ -482,6 +482,9 @@ final class CompletionBoundCalculator {
 	}
 
 	private boolean hasPositiveDomain(PiecewiseLinearFunction function) {
+		// 2026-06-01: completion bound 传播只维护可继续接后继 job 的正长度函数。
+		// 单点 candidate 最多代表边界时刻的收尾值，不能作为 relaxed completion 的后续状态继续传播；
+		// 直接纳入 mergeMinimum 还会破坏 PWLF 当前“正长度 overlap”的合并契约。
 		return function != null && function.head != null && function.tail != null
 				&& Utility.compareLt(function.head.start, function.tail.end);
 	}

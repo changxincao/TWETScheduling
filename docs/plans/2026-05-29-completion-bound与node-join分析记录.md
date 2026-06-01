@@ -442,3 +442,11 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 `wet030_001` 在 10 分钟预算内完成了 `allCycles` 和 `twoCycle`，`off` 启动后一直未完成，剩余预算内手动停止，因此本轮不把 off 纳入完成结果。`allCycles` 得到 `NODE_LIMIT`，`obj=46152, bound=15261.833333, valid=true`，solve 为 `9.037s`，exact pricing 合计 `3.086s`，5 次 pricing 中每次 completion-bound 构建约 `0.44-0.55s`。`twoCycle` 同样为 `NODE_LIMIT` 且目标和界一致，但 solve 增至 `38.467s`，exact pricing 合计 `31.194s`，每次构建约 `5.43-6.90s`。从日志看 two-cycle 的 label 和 join 候选确实更少，例如最后一轮保留 label 从 all-cycles 的 `fw/bw=429/125` 降到 `157/96`，join function evaluation 从 `6863` 降到 `2032`；但二维 bound 的构建成本已经远大于后续节省。
 
 当前结论进一步支持把 `allCycles` 作为 arc-join full-domain completion bound 的默认优先项。`twoCycle` 的 bound 强度没有问题，但在 25/30 规模上仍然不是瓶颈换取成功的方向；它只有在 all-cycles 构建后仍留下非常大的扩展、dominance 或 join 残余时才值得继续试。`wet030 off` 未在本轮 10 分钟预算内完成，反过来说明 completion bound 已经从“局部优化”变成了 full-domain arc join 在较大样例上能否交互式跑完的关键开关。
+
+## 13. 2026-05-31 wet030 root 列池整数诊断
+
+针对 `wet030_001` root-only 输出中 `incumbent=46152`、`bound=15261.833333` 的大 gap，新增了一个窄用途诊断入口 `HEU.RootColumnIntegerDiagnostic`。该入口不改主 BPC 流程：每个 seed 先按 full-domain arc join + `allCycles` completion bound 跑 root-only pricing，然后把当前 root 列池固定下来，解一个二进制 restricted master。该整数模型只使用已有列，约束为每个 job 至少覆盖一次、列数不超过机器数；在 no-outsourcing 输入下可用于判断根节点生成的列本身是否已经能拼出较好整数解。
+
+5 个 seed 的结果显示，初始 incumbent 对随机 seed 很敏感，范围为 `42257-61629`；但同一批 root 列池整数化后，目标稳定在 `15325-15835`，显著接近根 bound。最佳 seed `202605310304` 的 root 列池整数解为 `15325`，选中 2 条列，缺失任务数为 0、重复覆盖数为 0，因此不是 set-covering 重复覆盖造成的假解。由此可以判断，`wet030` 上之前看到的大 gap 主要来自当前 BPC 在 root LP 分数时不额外求一次 restricted master integer 来刷新 incumbent；根节点列池本身已经包含接近下界的整数列组合。
+
+这提示后续可以考虑增加一个可选的 root/节点后处理：当 column generation 结束且 LP 仍为分数解时，用当前列池求一次受限整数主问题作为 incumbent polishing。该步骤不改变下界，也不改变 pricing 正确性，只用于把已有列组合转成更好的上界；是否默认开启需要再看额外 MIP 时间和较大列池上的稳定性。

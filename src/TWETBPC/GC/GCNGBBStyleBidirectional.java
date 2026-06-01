@@ -154,6 +154,7 @@ public class GCNGBBStyleBidirectional {
 	private long completionBoundBackwardCandidateAttempts;
 	private long completionBoundForwardQueuePops;
 	private long completionBoundBackwardQueuePops;
+	private long completionBoundPriorityQueueStalePops;
 	private long completionBoundMergeCalls;
 	private long completionBoundMergeChanged;
 	private double completionBoundLastEvaluationCutoff;
@@ -1032,6 +1033,7 @@ public class GCNGBBStyleBidirectional {
 		completionBoundBackwardCandidateAttempts = 0;
 		completionBoundForwardQueuePops = 0;
 		completionBoundBackwardQueuePops = 0;
+		completionBoundPriorityQueueStalePops = 0;
 		completionBoundMergeCalls = 0;
 		completionBoundMergeChanged = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
@@ -1067,9 +1069,10 @@ public class GCNGBBStyleBidirectional {
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
 				+ formatMillis(completionBoundAggregateNanos)
-				+ ", completionBoundInternal counts fCand/bCand/fPop/bPop/merge/changed="
+				+ ", completionBoundInternal counts fCand/bCand/fPop/bPop/stale/merge/changed="
 				+ completionBoundForwardCandidateAttempts + "/" + completionBoundBackwardCandidateAttempts
 				+ "/" + completionBoundForwardQueuePops + "/" + completionBoundBackwardQueuePops
+				+ "/" + completionBoundPriorityQueueStalePops
 				+ "/" + completionBoundMergeCalls + "/" + completionBoundMergeChanged
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
@@ -1141,6 +1144,7 @@ public class GCNGBBStyleBidirectional {
 		completionBoundBackwardCandidateAttempts += stats.backwardCandidateAttempts;
 		completionBoundForwardQueuePops += stats.forwardQueuePops;
 		completionBoundBackwardQueuePops += stats.backwardQueuePops;
+		completionBoundPriorityQueueStalePops += stats.priorityQueueStalePops;
 		completionBoundMergeCalls += stats.mergeCalls;
 		completionBoundMergeChanged += stats.mergeChanged;
 	}

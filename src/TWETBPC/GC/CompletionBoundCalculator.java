@@ -49,6 +49,7 @@ final class CompletionBoundCalculator {
 		long backwardCandidateAttempts;
 		long forwardQueuePops;
 		long backwardQueuePops;
+		long priorityQueueStalePops;
 		long mergeCalls;
 		long mergeChanged;
 	}
@@ -548,22 +549,41 @@ final class CompletionBoundCalculator {
 		return frontier.tail.getValue(frontier.tail.end);
 	}
 
+	private double queueTimePriority(PiecewiseLinearFunction frontier) {
+		if (frontier == null || frontier.head == null) {
+			return Utility.big_M;
+		}
+		return frontier.head.start;
+	}
+
 	private final class StateQueue {
 		private final ArrayDeque<QueueState> fifoQueue;
-		private final PriorityQueue<QueueState> priorityQueue;
+		private final PriorityQueue<QueueEntry> priorityQueue;
+		private long nextQueueSeq = 0L;
 
 		StateQueue() {
 			if (queueOrdering == QueueOrdering.REDUCED_COST) {
 				fifoQueue = null;
-				priorityQueue = new PriorityQueue<QueueState>(new Comparator<QueueState>() {
+				priorityQueue = new PriorityQueue<QueueEntry>(new Comparator<QueueEntry>() {
 					@Override
-					public int compare(QueueState left, QueueState right) {
-						int byPriority = compareDoubleAsc(left.priority, right.priority);
-						if (byPriority != 0) {
-							return byPriority;
+					public int compare(QueueEntry left, QueueEntry right) {
+						if (left.state == right.state) {
+							return Long.compare(right.seq, left.seq);
 						}
-						int byFirst = Integer.compare(left.first, right.first);
-						return byFirst != 0 ? byFirst : Integer.compare(left.second, right.second);
+						int byTime = compareDoubleAsc(left.timePriority, right.timePriority);
+						if (byTime != 0) {
+							return byTime;
+						}
+						int byCost = compareDoubleAsc(left.costPriority, right.costPriority);
+						if (byCost != 0) {
+							return byCost;
+						}
+						int byFirst = Integer.compare(left.state.first, right.state.first);
+						if (byFirst != 0) {
+							return byFirst;
+						}
+						int bySecond = Integer.compare(left.state.second, right.state.second);
+						return bySecond != 0 ? bySecond : Long.compare(right.seq, left.seq);
 					}
 				});
 			} else {
@@ -573,30 +593,50 @@ final class CompletionBoundCalculator {
 		}
 
 		void enqueue(QueueState state, PiecewiseLinearFunction frontier) {
+			if (priorityQueue != null) {
+				long seq = ++nextQueueSeq;
+				state.latestQueueSeq = seq;
+				state.inQueue = true;
+				priorityQueue.add(new QueueEntry(state, queueTimePriority(frontier), queuePriority(frontier), seq));
+				return;
+			}
 			if (state.inQueue) {
-				if (priorityQueue != null) {
-					priorityQueue.remove(state);
-				} else {
 					return;
-				}
 			}
 			state.priority = queuePriority(frontier);
 			state.inQueue = true;
-			if (priorityQueue != null) {
-				priorityQueue.add(state);
-			} else {
-				fifoQueue.add(state);
-			}
+			fifoQueue.add(state);
 		}
 
 		boolean isEmpty() {
-			return priorityQueue != null ? priorityQueue.isEmpty() : fifoQueue.isEmpty();
+			if (priorityQueue != null) {
+				discardStalePriorityEntries();
+				return priorityQueue.isEmpty();
+			}
+			return fifoQueue.isEmpty();
 		}
 
 		QueueState poll() {
-			QueueState state = priorityQueue != null ? priorityQueue.poll() : fifoQueue.poll();
+			if (priorityQueue != null) {
+				discardStalePriorityEntries();
+				QueueEntry entry = priorityQueue.poll();
+				if (entry == null) {
+					return null;
+				}
+				entry.state.inQueue = false;
+				return entry.state;
+			}
+			QueueState state = fifoQueue.poll();
 			state.inQueue = false;
 			return state;
+		}
+
+		private void discardStalePriorityEntries() {
+			while (priorityQueue != null && !priorityQueue.isEmpty()
+					&& priorityQueue.peek().seq != priorityQueue.peek().state.latestQueueSeq) {
+				priorityQueue.poll();
+				stats.priorityQueueStalePops++;
+			}
 		}
 	}
 
@@ -615,10 +655,25 @@ final class CompletionBoundCalculator {
 		final int second;
 		double priority;
 		boolean inQueue;
+		long latestQueueSeq;
 
 		QueueState(int first, int second) {
 			this.first = first;
 			this.second = second;
+		}
+	}
+
+	private static final class QueueEntry {
+		final QueueState state;
+		final double timePriority;
+		final double costPriority;
+		final long seq;
+
+		QueueEntry(QueueState state, double timePriority, double costPriority, long seq) {
+			this.state = state;
+			this.timePriority = timePriority;
+			this.costPriority = costPriority;
+			this.seq = seq;
 		}
 	}
 

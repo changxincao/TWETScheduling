@@ -17,3 +17,5 @@
 当前还需要注意一个配置事实：`TWETBPCConfig.enableBidirectionalPricing=true` 时，正式 exact pricing 会使用双向 pricing engine，而不是这里分析的单向 `GC`。只有关闭双向时，才会按 `usePaperDominancePricing` 选择 `PaperDominanceExactPricingEngine` 或普通 `ExactPricingEngine`。因此本次结论针对“单向 exact pricing 实现本身”，不是当前默认 BPC 运行时一定使用的 exact engine。
 
 当前判断：在不考虑 cut 和 TWET 特有函数评估的前提下，单向 exact labeling 的流程与旧 VRP 最简单 `GC` 已经基本一致；主要差异是有意引入的 paper dominance graph 与 `PackedBitSet` 封装。它们不会改变列生成逻辑，只影响占优组织方式和常数效率。后续如果要做严格性能对比，可以通过关闭 `enableBidirectionalPricing`，再切换 `usePaperDominancePricing=true/false`，直接比较 paper dominance graph 和全量扫描 dominance graph 的标签数、占优删除数、pricing 耗时。
+
+2026-06-01 复查旧 VRP 基础单向 `BPC.GC.GC` 的 `FindColumn()` 后确认，单向最简单 GC 不是“完整枚举所有负列后排序取最好的 `addin_size` 条”。它在扩展到 sink 后，如果 route reduced cost 为负且不在 `lp.pool` 中，就立刻 `lp.pool.AddRoute(route)` 并加入 `gn_index`；当 `gn_index.size() >= data.m_configure.addin_size` 时，会跳出内层循环和外层 `UL` 循环，随后直接 `lp.AddColumn(gn_index)`。因此基础单向 GC 返回的是队列/扫描顺序下最先发现的 `addin_size` 条负列，和当前 TWET 单向 `GC` 的 first-K 语义一致。此前讨论中“收集本地 pool 后排序取前 K”对应的是旧 `GCNGBB` 双向 join 或 `GCTabu` 启发式这类本地候选池流程，不应混到基础单向 GC 上。

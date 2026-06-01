@@ -1322,6 +1322,10 @@ public class PiecewiseLinearFunction {
 //	private static long mergeMinimumDomainViolationCount = 0;
 	
 	public void mergeMinimum(PiecewiseLinearFunction g, Direction direction) {
+		mergeMinimum(g, direction, false);
+	}
+
+	public boolean mergeMinimum(PiecewiseLinearFunction g, Direction direction, boolean reportChanged) {
 		if (direction == Direction.FORWARD) {
 			Utility.debugCheckPWLFMergeContract("mergeMinimum.input", this, g);
 		} else {
@@ -1338,13 +1342,15 @@ public class PiecewiseLinearFunction {
 				PiecewiseLinearFunction copied = g.copy();
 				this.head = copied.head;
 				this.tail = copied.tail;
+				return true;
 			}
-			return;
+			return false;
 		}
 		// 如果 L2 为空，不用动
 		if (g.head == null) {
-			return;
+			return false;
 		}
+		boolean changed = reportChanged && willMergeMinimumChange(g);
 		// 2026-05-25: mergeMinimum 内部会截断并拼接右参数的 Segment 链。
 		// dominance graph 会把 label/frontier/envelope 缓存作为右参数传入，因此这里必须先复制，
 		// 避免把右参数的物理 head/tail 改坏，造成 domainStart 与 head.start 不一致。
@@ -1535,6 +1541,51 @@ public class PiecewiseLinearFunction {
 		} else {
 			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
 		}
+		return changed;
+	}
+
+	private boolean willMergeMinimumChange(PiecewiseLinearFunction g) {
+		if (this.head == null) {
+			return g != null && g.head != null;
+		}
+		if (g == null || g.head == null) {
+			return false;
+		}
+		if (Utility.compareLt(g.head.start, this.head.start) || Utility.compareGt(g.tail.end, this.tail.end)) {
+			return true;
+		}
+		double start = Math.max(this.head.start, g.head.start);
+		double end = Math.min(this.tail.end, g.tail.end);
+		if (!Utility.compareLt(start, end)) {
+			return false;
+		}
+		Segment p = this.head;
+		while (p != null && Utility.compareLt(p.end, start)) {
+			p = p.next;
+		}
+		Segment q = g.head;
+		while (q != null && Utility.compareLt(q.end, start)) {
+			q = q.next;
+		}
+		double cur = start;
+		while (p != null && q != null && Utility.compareLt(cur, end)) {
+			double nxt = Math.min(Math.min(p.end, q.end), end);
+			double f1s = p.slope * cur + p.intercept;
+			double f1e = p.slope * nxt + p.intercept;
+			double f2s = q.slope * cur + q.intercept;
+			double f2e = q.slope * nxt + q.intercept;
+			if (Utility.compareLt(f2s, f1s) || Utility.compareLt(f2e, f1e)) {
+				return true;
+			}
+			cur = nxt;
+			if (Utility.compareEq(nxt, p.end)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(nxt, q.end)) {
+				q = q.next;
+			}
+		}
+		return false;
 	}
 
 	public void release() {

@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.PriorityQueue;
 
@@ -69,8 +70,12 @@ final class CompletionBoundCalculator {
 	private final double pricingHorizon;
 	private final PiecewiseLinearFunction[] forwardPenaltyByJob;
 	private final PiecewiseLinearFunction[] backwardPenaltyByJob;
+	private final PiecewiseLinearFunction[] forwardReducedPenaltyByJob;
+	private final PiecewiseLinearFunction[] backwardReducedPenaltyByJob;
 	private final boolean[] zeroDualExcludedJobs;
 	private final QueueOrdering queueOrdering;
+	private final int[][] forwardSuccessorsByJob;
+	private final int[][] backwardPredecessorsByJob;
 	private final Stats stats = new Stats();
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
@@ -83,13 +88,70 @@ final class CompletionBoundCalculator {
 		this.pricingHorizon = pricingHorizon;
 		this.forwardPenaltyByJob = forwardPenaltyByJob;
 		this.backwardPenaltyByJob = backwardPenaltyByJob;
+		this.forwardReducedPenaltyByJob = buildReducedPenaltyCache(forwardPenaltyByJob);
+		this.backwardReducedPenaltyByJob = buildReducedPenaltyCache(backwardPenaltyByJob);
 		this.zeroDualExcludedJobs = zeroDualExcludedJobs;
 		this.queueOrdering = queueOrdering == null ? QueueOrdering.FIFO : queueOrdering;
+		this.forwardSuccessorsByJob = buildForwardSuccessorLists();
+		this.backwardPredecessorsByJob = buildBackwardPredecessorLists();
 	}
 
 	Result build(Relaxation relaxation) {
 		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle() : buildAllCycles();
 		return new Result(bounds, stats);
+	}
+
+	private PiecewiseLinearFunction[] buildReducedPenaltyCache(PiecewiseLinearFunction[] penaltyByJob) {
+		if (penaltyByJob == null) {
+			return null;
+		}
+		PiecewiseLinearFunction[] reducedByJob = new PiecewiseLinearFunction[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			PiecewiseLinearFunction penalty = job < penaltyByJob.length ? penaltyByJob[job] : null;
+			if (penalty == null) {
+				continue;
+			}
+			PiecewiseLinearFunction reduced = penalty.copy();
+			reduced.shiftYInPlace(-lp.getJobDual(job));
+			reducedByJob[job] = reduced;
+		}
+		return reducedByJob;
+	}
+
+	private int[][] buildForwardSuccessorLists() {
+		int[][] successorsByJob = new int[data.n + 1][];
+		for (int prev = 0; prev <= data.n; prev++) {
+			ArrayList<Integer> successors = new ArrayList<Integer>();
+			for (int job = 1; job <= data.n; job++) {
+				if (job != prev && isCompletionJobAvailable(job) && !node.isArcForbidden(prev, job)) {
+					successors.add(Integer.valueOf(job));
+				}
+			}
+			successorsByJob[prev] = toIntArray(successors);
+		}
+		return successorsByJob;
+	}
+
+	private int[][] buildBackwardPredecessorLists() {
+		int[][] predecessorsByJob = new int[data.n + 2][];
+		for (int successor = 1; successor <= data.n + 1; successor++) {
+			ArrayList<Integer> predecessors = new ArrayList<Integer>();
+			for (int prev = 1; prev <= data.n; prev++) {
+				if (prev != successor && isCompletionJobAvailable(prev) && !node.isArcForbidden(prev, successor)) {
+					predecessors.add(Integer.valueOf(prev));
+				}
+			}
+			predecessorsByJob[successor] = toIntArray(predecessors);
+		}
+		return predecessorsByJob;
+	}
+
+	private int[] toIntArray(ArrayList<Integer> values) {
+		int[] array = new int[values.size()];
+		for (int i = 0; i < values.size(); i++) {
+			array[i] = values.get(i).intValue();
+		}
+		return array;
 	}
 
 	private StateQueue stateQueue() {
@@ -125,10 +187,8 @@ final class CompletionBoundCalculator {
 
 		long phaseStart = System.nanoTime();
 		PiecewiseLinearFunction source = sourcePropagationFunction();
-		for (int job = 1; job <= data.n; job++) {
-			if (!isCompletionJobAvailable(job) || node.isArcForbidden(0, job)) {
-				continue;
-			}
+		for (int idx = 0; idx < forwardSuccessorsByJob[0].length; idx++) {
+			int job = forwardSuccessorsByJob[0][idx];
 			FunctionPair candidate = buildForwardCandidate(source, 0, job);
 			if (candidate == null) {
 				continue;
@@ -145,10 +205,9 @@ final class CompletionBoundCalculator {
 			if (prevF == null || prevF.head == null) {
 				continue;
 			}
-			for (int job = 1; job <= data.n; job++) {
-				if (job == prev || !isCompletionJobAvailable(job) || node.isArcForbidden(prev, job)) {
-					continue;
-				}
+			int[] successors = forwardSuccessorsByJob[prev];
+			for (int idx = 0; idx < successors.length; idx++) {
+				int job = successors[idx];
 				FunctionPair candidate = buildForwardCandidate(prevF, prev, job);
 				if (candidate == null) {
 					continue;
@@ -162,10 +221,9 @@ final class CompletionBoundCalculator {
 		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
 
 		phaseStart = System.nanoTime();
-		for (int job = 1; job <= data.n; job++) {
-			if (!isCompletionJobAvailable(job) || node.isArcForbidden(job, sink)) {
-				continue;
-			}
+		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
+		for (int idx = 0; idx < sinkPredecessors.length; idx++) {
+			int job = sinkPredecessors[idx];
 			FunctionPair candidate = buildBackwardSinkCandidate(job);
 			if (candidate == null) {
 				continue;
@@ -182,10 +240,9 @@ final class CompletionBoundCalculator {
 			if (successorB == null || successorB.head == null) {
 				continue;
 			}
-			for (int prev = 1; prev <= data.n; prev++) {
-				if (prev == successor || !isCompletionJobAvailable(prev) || node.isArcForbidden(prev, successor)) {
-					continue;
-				}
+			int[] predecessors = backwardPredecessorsByJob[successor];
+			for (int idx = 0; idx < predecessors.length; idx++) {
+				int prev = predecessors[idx];
 				FunctionPair candidate = buildBackwardCandidate(successorB, prev, successor);
 				if (candidate == null) {
 					continue;
@@ -213,10 +270,8 @@ final class CompletionBoundCalculator {
 
 		long phaseStart = System.nanoTime();
 		PiecewiseLinearFunction source = sourcePropagationFunction();
-		for (int job = 1; job <= data.n; job++) {
-			if (!isCompletionJobAvailable(job) || node.isArcForbidden(0, job)) {
-				continue;
-			}
+		for (int idx = 0; idx < forwardSuccessorsByJob[0].length; idx++) {
+			int job = forwardSuccessorsByJob[0][idx];
 			FunctionPair candidate = buildForwardCandidate(source, 0, job);
 			if (candidate == null) {
 				continue;
@@ -235,9 +290,10 @@ final class CompletionBoundCalculator {
 			if (prevF == null || prevF.head == null) {
 				continue;
 			}
-			for (int job = 1; job <= data.n; job++) {
-				if (job == prev || job == prevPrev || !isCompletionJobAvailable(job)
-						|| node.isArcForbidden(prev, job)) {
+			int[] successors = forwardSuccessorsByJob[prev];
+			for (int idx = 0; idx < successors.length; idx++) {
+				int job = successors[idx];
+				if (job == prevPrev) {
 					continue;
 				}
 				FunctionPair candidate = buildForwardCandidate(prevF, prev, job);
@@ -253,10 +309,9 @@ final class CompletionBoundCalculator {
 		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
 
 		phaseStart = System.nanoTime();
-		for (int job = 1; job <= data.n; job++) {
-			if (!isCompletionJobAvailable(job) || node.isArcForbidden(job, sink)) {
-				continue;
-			}
+		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
+		for (int idx = 0; idx < sinkPredecessors.length; idx++) {
+			int job = sinkPredecessors[idx];
 			FunctionPair candidate = buildBackwardSinkCandidate(job);
 			if (candidate == null) {
 				continue;
@@ -275,9 +330,10 @@ final class CompletionBoundCalculator {
 			if (currentB == null || currentB.head == null) {
 				continue;
 			}
-			for (int prev = 1; prev <= data.n; prev++) {
-				if (prev == current || prev == successor || !isCompletionJobAvailable(prev)
-						|| node.isArcForbidden(prev, current)) {
+			int[] predecessors = backwardPredecessorsByJob[current];
+			for (int idx = 0; idx < predecessors.length; idx++) {
+				int prev = predecessors[idx];
+				if (prev == successor) {
 					continue;
 				}
 				FunctionPair candidate = buildBackwardCandidate(currentB, prev, current);
@@ -375,23 +431,11 @@ final class CompletionBoundCalculator {
 	}
 
 	private PiecewiseLinearFunction forwardJobReducedPenalty(int job) {
-		PiecewiseLinearFunction penalty = forwardPenaltyByJob == null ? null : forwardPenaltyByJob[job];
-		if (penalty == null) {
-			return null;
-		}
-		PiecewiseLinearFunction reduced = penalty.copy();
-		reduced.shiftYInPlace(-lp.getJobDual(job));
-		return reduced;
+		return forwardReducedPenaltyByJob == null ? null : forwardReducedPenaltyByJob[job];
 	}
 
 	private PiecewiseLinearFunction backwardJobReducedPenalty(int job) {
-		PiecewiseLinearFunction penalty = backwardPenaltyByJob == null ? null : backwardPenaltyByJob[job];
-		if (penalty == null) {
-			return null;
-		}
-		PiecewiseLinearFunction reduced = penalty.copy();
-		reduced.shiftYInPlace(-lp.getJobDual(job));
-		return reduced;
+		return backwardReducedPenaltyByJob == null ? null : backwardReducedPenaltyByJob[job];
 	}
 
 	private PiecewiseLinearFunction constantFunction(double value) {
@@ -430,9 +474,7 @@ final class CompletionBoundCalculator {
 			stats.mergeChanged++;
 			return true;
 		}
-		PiecewiseLinearFunction before = current.copy();
-		current.mergeMinimum(candidate, direction);
-		boolean changed = !sameFunction(before, current);
+		boolean changed = current.mergeMinimum(candidate, direction, true);
 		if (changed) {
 			stats.mergeChanged++;
 		}
@@ -442,20 +484,6 @@ final class CompletionBoundCalculator {
 	private boolean hasPositiveDomain(PiecewiseLinearFunction function) {
 		return function != null && function.head != null && function.tail != null
 				&& Utility.compareLt(function.head.start, function.tail.end);
-	}
-
-	private boolean sameFunction(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
-		Segment l = left == null ? null : left.head;
-		Segment r = right == null ? null : right.head;
-		while (l != null && r != null) {
-			if (!Utility.compareEq(l.start, r.start) || !Utility.compareEq(l.end, r.end)
-					|| !Utility.compareEq(l.slope, r.slope) || !Utility.compareEq(l.intercept, r.intercept)) {
-				return false;
-			}
-			l = l.next;
-			r = r.next;
-		}
-		return l == null && r == null;
 	}
 
 	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {

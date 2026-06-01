@@ -588,3 +588,9 @@ priority 队列即使用 lazy duplicate 去掉了线性 remove，也会更倾向
 需要注意，上述 `GCBBFullDomainComparisonTest` 对照没有打开 ALNS seed。该 runner 中 `config.runALNSForSeed=false`，log 里的 `heuristic_s` 来自 BPC root 过程中的 `HeuristicPricingEngine` Tabu pricing，不是 ALNS/VND 初始解改进。因此 `obj=46152` 是初始 seed incumbent，log 中也显示 `initial incumbent=46152`、`incumbent updates=0`。如果要比较打开 ALNS 后的 incumbent 或 root gap，需要单独给 runner 增加开关或换用支持 seed ALNS 的入口。
 
 twoCycle 的 `exact_s=30.492s` 是 exact pricing engine 的总耗时，里面包含 completion bound 构造。拆开看，5 次 exact call 的 twoCycle `completionBound buildMs` 合计约 `30.034s`，而 exact call 总计 `30.492s`，相差约 `0.458s`；日志中的 `timingMs fwExt/bwExt/join/extTotal/measuredTotal` 合计约 `0.322s`。也就是说，在这个设置下 twoCycle 真正 label 扩展和 join 部分确实不到 0.5 秒，总时间基本都被 completion bound 的二维 relaxed propagation 吃掉了。
+
+2026-06-01 进一步明确后续默认选择。当前简单测试已经比较稳定地表明，completion bound 的 two-cycle relaxation 虽然更紧，但计算复杂度很难像经典 VRP 标量 bound 那样有效压缩。原因是这里的状态值不是一个 reduced-cost 数值，而是一条分段线性函数；对每个 `(prev,current)` 或 `(current,successor)` 状态都要维护完整 PWLF envelope，并在 fixed-point propagation 中反复 merge。经典 VRP 中每个节点保留最优和次优两个标量值的 trick，不能直接迁移到这里，因为不同时间点的最优前驱/后继可能不同，无法用两个标量概括整条函数下包络。因此 two-cycle 版本基本需要完整二维数组建表和迭代更新，短期没有明显的低风险复杂度优化空间。
+
+从实验判断看，wet030 root-only 中 two-cycle bound 对 label/join 的确有剪枝，但相对 all-cycles 的最终作用不大；主要求解结果、列池规模和有效性一致，剪枝节省的 label/join 时间不到 `0.5s`，而 bound 构造多花约 `28s`。因此当前工程默认应只把 `ALL_CYCLES + FIFO` 作为基础 completion bound 组件：它构造快，剪枝效果已经接近 two-cycle，整体性价比明显更高。two-cycle 可以保留为可选对照和论文中的强化 relaxation 说明，但不应作为默认定价流程。
+
+论文表述上可以突出两点。第一，当前函数型占优/分段线性 reduced-cost pricing 的实现里，relaxed completion bound 这类按 job 聚合的函数下界并不常见；它不依赖 elementary label 的 visited/reachable 状态，却能在 join 前对 forward/backward 函数组合做有效剪枝，这一点有独立贡献价值。第二，可以把 all-cycles 作为主算法组件，把 two-cycle 写成更强但更重的扩展 relaxation：理论上更紧，实验上在当前实例中边际收益不足以抵消构造成本。后续若实现 NG-set pricing，还可以复用这套 completion bound 思路重新测试；NG memory 本身会改变可达状态和 join 候选结构，completion bound 的相对收益可能不同，值得作为后续实验项保留。

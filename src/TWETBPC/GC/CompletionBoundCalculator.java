@@ -23,6 +23,10 @@ import TWETBPC.LP.Node;
 final class CompletionBoundCalculator {
 	enum Relaxation {
 		ALL_CYCLES,
+		// 2026-06-01: two-cycle relaxed bound 需要维护 last-arc 维度的函数状态。
+		// 它不像经典 VRP 的标量 completion bound 那样只保留 best/second-best 值即可；
+		// 每个二维状态都是 PWLF envelope，仍要完整建表并迭代更新。wet030 当前实测表明
+		// 其剪枝收益接近 all-cycles，但构造时间显著更高，因此暂只保留为对照/论文扩展选项。
 		TWO_CYCLE
 	}
 

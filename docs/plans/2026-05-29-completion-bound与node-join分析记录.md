@@ -482,3 +482,9 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 `wet030_001` root-only、`allCycles` 的试验结果不支持这个方向。`reducedCost` 模式下整体 solve 为 `74.260s`，exact pricing 为 `68.318s`，而同一代码默认 `fifo` 复核为 `7.675s`、exact pricing `2.323s`。从内部统计看，`reducedCost` 不只是多了优先队列维护成本，它还明显改变了 correcting 收敛路径：第一轮 merge 调用从 FIFO 的 `29710` 增到 `603704`，后续几轮也在 `72-80万` 左右；candidate 尝试从约 `0.6-0.8万` 每侧扩大到十几万每侧。也就是说，用右端值优先出队反而让更多中间 envelope 被提前传播，导致后续又被反复改进和重传。
 
 当前判断是：completion bound 的状态传播不是 label dominance 那类“先扩展低 reduced-cost label 更可能早剪掉别人”的过程，而是函数 lower-envelope fixed point。一个状态右端值小，不代表它的整段 envelope 已经接近稳定，也不代表先传播它能减少后续 merge；相反，过早传播局部较优但尚未稳定的函数，可能把大量中间结果推到下游，随后再被更好的 envelope 覆盖。因此 reduced-cost 出队顺序在当前口径下比 FIFO 差很多。后续若继续改队列，优先应找能减少重传的稳定性指标，而不是单点右端值；更直接的优化仍是减少候选扫描和 merge 成本。
+
+## 17. 2026-06-01 completion bound 两份实现的同步状态
+
+当前 completion bound 不是一个独立共享类，而是分别内嵌在 `GCBBStyleBidirectionalFullDomain` 和 `GCBBStyleBidirectionalFullDomainNodeJoin` 的 `CompletionBoundBuilder` 中。两者最初使用同一套 relaxed DP 语义：`allCycles` 是 node state，`twoCycle` 是 last-arc state，正向维护 `U/F`，反向维护 `R/B`，并在 label child 入表前用 `F_label + R_i` 或 `U_i + B_label` 做是否还能补成负列的剪枝判断。
+
+但工程实现现在已经分叉。最近的内部计时、候选/merge 计数、`completionBoundQueue` 日志字段，以及 `fifo/reducedCost` 队列顺序实验，只加在 full-domain arc-join 对照类 `GCBBStyleBidirectionalFullDomain` 里；node-join 实验类仍保留较早的 FIFO `ArrayDeque` 版本，没有这些内部统计和队列顺序开关。也就是说，若讨论“当前试出来 reduced-cost 队列很慢”“内部 merge 次数是多少”，这些结论直接对应 arc-join 这份实现；node-join 的 completion bound 数学口径相同，但代码没有同步这些诊断改动。后续如果还要继续推进 completion bound，较合理的方向是把这套 relaxed DP 抽成共享 builder，避免两个实验分支长期手工复制后发生口径漂移。

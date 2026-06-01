@@ -48,7 +48,8 @@ public class RootColumnIntegerDiagnostic {
 		}
 
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("case,seed,status,incumbent,bound,gap,root_int_obj,root_int_cols,pool,pricing,"
+		lines.add("case,seed,status,incumbent,bound,gap,initial_cols,incumbent_cols,initial_incumbent,"
+				+ "root_int_obj,root_int_cols,pool,pricing,"
 				+ "solve_s,exact_s,heuristic_s,valid,root_int_missing,root_int_duplicate_cover,root_int_column_ids");
 		for (Path instance : instances) {
 			for (int offset = 0; offset < seedCount; offset++) {
@@ -78,6 +79,8 @@ public class RootColumnIntegerDiagnostic {
 		return new RunRecord(stripDat(instance.getFileName().toString()), seed, result.getStatus().toString(),
 				result.getIncumbentCost(), result.getBestBound(),
 				TanakaNoOutsourcingBPCTest.gapPercent(result.getBestBound(), result.getIncumbentCost()),
+				summary.getInitialColumnCount(), summary.getInitialIncumbentColumnCount(),
+				summary.getInitialIncumbentCost(),
 				rootInteger.objective, rootInteger.selectedColumns, rootInteger.selectedColumnIds,
 				rootInteger.missingJobs, rootInteger.duplicateCover, solver.getContext().pool.size(),
 				summary.getPricingRounds(), summary.getSolveTimeSeconds(),
@@ -239,6 +242,9 @@ public class RootColumnIntegerDiagnostic {
 		final double incumbent;
 		final double bound;
 		final double gap;
+		final int initialColumns;
+		final int incumbentColumns;
+		final double initialIncumbent;
 		final double rootIntegerObjective;
 		final int rootIntegerColumns;
 		final ArrayList<Integer> rootIntegerColumnIds;
@@ -252,15 +258,19 @@ public class RootColumnIntegerDiagnostic {
 		final boolean valid;
 
 		RunRecord(String caseName, long seed, String status, double incumbent, double bound, double gap,
-				double rootIntegerObjective, int rootIntegerColumns, ArrayList<Integer> rootIntegerColumnIds,
-				int rootIntegerMissingJobs, int rootIntegerDuplicateCover, int poolSize, int pricingRounds,
-				double solveSeconds, double exactSeconds, double heuristicSeconds, boolean valid) {
+				int initialColumns, int incumbentColumns, double initialIncumbent, double rootIntegerObjective,
+				int rootIntegerColumns, ArrayList<Integer> rootIntegerColumnIds, int rootIntegerMissingJobs,
+				int rootIntegerDuplicateCover, int poolSize, int pricingRounds, double solveSeconds,
+				double exactSeconds, double heuristicSeconds, boolean valid) {
 			this.caseName = caseName;
 			this.seed = seed;
 			this.status = status;
 			this.incumbent = incumbent;
 			this.bound = bound;
 			this.gap = gap;
+			this.initialColumns = initialColumns;
+			this.incumbentColumns = incumbentColumns;
+			this.initialIncumbent = initialIncumbent;
 			this.rootIntegerObjective = rootIntegerObjective;
 			this.rootIntegerColumns = rootIntegerColumns;
 			this.rootIntegerColumnIds = rootIntegerColumnIds;
@@ -276,10 +286,12 @@ public class RootColumnIntegerDiagnostic {
 
 		String toCsvLine() {
 			return "\"" + caseName + "\"," + seed + ",\"" + status + "\"," + fmt(incumbent) + "," + fmt(bound)
-					+ "," + fmt(gap) + "," + fmt(rootIntegerObjective) + "," + rootIntegerColumns + ","
-					+ poolSize + "," + pricingRounds + "," + fmt(solveSeconds) + "," + fmt(exactSeconds)
-					+ "," + fmt(heuristicSeconds) + "," + valid + "," + rootIntegerMissingJobs + ","
-					+ rootIntegerDuplicateCover + ",\"" + rootIntegerColumnIds + "\"";
+					+ "," + fmt(gap) + "," + initialColumns + "," + incumbentColumns + ","
+					+ fmt(initialIncumbent) + "," + fmt(rootIntegerObjective) + "," + rootIntegerColumns
+					+ "," + poolSize + "," + pricingRounds + "," + fmt(solveSeconds) + ","
+					+ fmt(exactSeconds) + "," + fmt(heuristicSeconds) + "," + valid + ","
+					+ rootIntegerMissingJobs + "," + rootIntegerDuplicateCover + ",\""
+					+ rootIntegerColumnIds + "\"";
 		}
 	}
 }

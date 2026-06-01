@@ -1515,6 +1515,8 @@ full-domain 的优势主要体现在 dominance graph 搜索路径上。由于函
 
 但从调用关系看，旧 VRP 主流程并没有真正使用这套动态 stabilization。全仓搜索只发现 `set_bounds()`、`update_slacks()`、`close_slacks()` 的定义，没有实际调用；`GC.Solve()` 每轮只是 `lp.Solve()`、`lp.GetDual()`、再 `Extend(lp)`。因此旧 VRP 真正进入 pricing 的 dual 基本就是 CPLEX 当前 RMP dual：`mu[i]`、`arc_mu[i][j]` 和 subset-row dual。VRPTW 模式下可能会存在初始高成本 slack 列，但动态调整 slack cost 来稳定 dual 的逻辑没有接入列生成循环。
 
+进一步按更严格口径复核后，`is_zero()` 也同样只有定义没有主流程调用；`add_slacks()` 是唯一被 `Construct()` 接上的 stabilization 相关入口，且只是在 VRPTW 下加静态高成本 artificial slack。也就是说，旧代码最多保留了一个人工可行性/极弱 dual bounding 的残留设计，不能等同于列生成文献里通常说的 stabilized pricing dual。真正的 stabilization 至少应在每轮 RMP 后维护中心 dual、box/penalty 参数或平滑 dual，并用该 dual 指导 pricing；这些更新步骤在旧 `src/BPC/GC/GC.java` 的列生成循环里不存在。
+
 当前 TWET-BPC 没有复用旧 VRP 这套 dual stabilization。`TWETBPC/LP/LP.java` 中只保存 `jobDual`、`machineDual`、`arcDual`，每次 `solveCurrentModel()` 直接从 CPLEX `getDual(...)` 读取后供 pricing 使用；没有历史 dual center、box step、alpha smoothing、penalty slack cost update 等机制。当前和旧 VRP 有关的 slack 复用，主要是子节点 RMP 不可行时的 repair slack：只给当前新增分支行加人工 slack，用其 dual 引导补列，slack 归零后回到正常 RMP。这属于 feasibility repair，不是 dual stabilization。
 
 因此如果后续要做真正的 dual stabilization，需要作为新功能重新设计，而不是认为已经从旧 VRP 迁移过来了。比较稳妥的方向是先记录每轮 dual 波动和 pricing 迭代次数，再决定是否引入 stabilized dual 用于 pricing；实现上要格外小心，因为当前 TWET pricing 还把 dual 用于动态 profitable window 和 completion bound，若用平滑 dual 生成列，需要保证最终仍能用真实 RMP dual 做 reduced-cost 判定，避免错过负列或生成无效窗口。

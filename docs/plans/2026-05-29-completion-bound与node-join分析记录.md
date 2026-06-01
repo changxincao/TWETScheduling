@@ -558,3 +558,5 @@ single-point domain 这次不扩展传播语义。当前 completion bound 是 re
 这里的 `reportChanged=true` 不是免费开关，它会额外扫描一次当前函数和候选函数的公共分段。这样做的目标是替代旧的 `current.copy() -> mergeMinimum() -> sameFunction()`，也就是用一次只读数值扫描替代整函数复制、破坏式合并后的整函数比较和大量 segment 对象分配。当前实现仍然在扫描后执行原 merge，因此每次 merge 都还有正常合并成本；进一步优化可以考虑在 `changed=false` 时直接跳过实际 merge，但这需要确认该预判在所有有效输入下都等价于“合并结果完全不变”。
 
 因此这一版优化的预期不能理解成减少一次完整函数遍历的数量级成本。它主要减少的是对象分配和合并后比较：旧流程中为了知道是否 changed，需要先复制 current，再破坏式 merge，最后对 before/current 做逐段比较；新流程改为 merge 前只读扫描，避免复制 current 和 sameFunction。由于当前即使 `changed=false` 仍继续执行原 merge，真正的 merge、右参数 `g.copy()` 和 normalize 成本还在，所以收益会受 no-op merge 比例影响。若统计显示大量 `mergeCalls` 没有 `mergeChanged`，下一步更有价值的是让 completion bound 在预判 `changed=false` 时直接跳过实际 merge。
+
+2026-06-01 继续检查 job penalty copy。正式 pricing 的 backward sink-root 扩展仍需要 `jobPenalty.copy()`，因为后续会直接 `shiftYInPlace()` 扣 job/arc dual，不能改写缓存的 job penalty。completion bound 这边则进一步收掉一个初始化阶段冗余：若 forward/backward completion penalty 数组中的同一 job 指向同一个 `PiecewiseLinearFunction` 对象，则 reduced penalty 只复制和平移一次，另一侧直接复用该 reduced 缓存。这个场景会出现在 Tmid completion bound 使用 full-domain completion penalty 时；由于 reduced penalty 只依赖 job dual，且 `add()` 不改写右参数，复用是安全的。

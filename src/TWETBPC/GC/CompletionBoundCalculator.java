@@ -68,8 +68,6 @@ final class CompletionBoundCalculator {
 	private final Node node;
 	private final int sink;
 	private final double pricingHorizon;
-	private final PiecewiseLinearFunction[] forwardPenaltyByJob;
-	private final PiecewiseLinearFunction[] backwardPenaltyByJob;
 	private final PiecewiseLinearFunction[] forwardReducedPenaltyByJob;
 	private final PiecewiseLinearFunction[] backwardReducedPenaltyByJob;
 	private final boolean[] zeroDualExcludedJobs;
@@ -86,10 +84,9 @@ final class CompletionBoundCalculator {
 		this.node = lp.getNode();
 		this.sink = node.sinkId();
 		this.pricingHorizon = pricingHorizon;
-		this.forwardPenaltyByJob = forwardPenaltyByJob;
-		this.backwardPenaltyByJob = backwardPenaltyByJob;
-		this.forwardReducedPenaltyByJob = buildReducedPenaltyCache(forwardPenaltyByJob);
-		this.backwardReducedPenaltyByJob = buildReducedPenaltyCache(backwardPenaltyByJob);
+		this.forwardReducedPenaltyByJob = buildReducedPenaltyCache(forwardPenaltyByJob, null, null);
+		this.backwardReducedPenaltyByJob = buildReducedPenaltyCache(backwardPenaltyByJob, forwardPenaltyByJob,
+				forwardReducedPenaltyByJob);
 		this.zeroDualExcludedJobs = zeroDualExcludedJobs;
 		this.queueOrdering = queueOrdering == null ? QueueOrdering.FIFO : queueOrdering;
 		this.forwardSuccessorsByJob = buildForwardSuccessorLists();
@@ -101,7 +98,8 @@ final class CompletionBoundCalculator {
 		return new Result(bounds, stats);
 	}
 
-	private PiecewiseLinearFunction[] buildReducedPenaltyCache(PiecewiseLinearFunction[] penaltyByJob) {
+	private PiecewiseLinearFunction[] buildReducedPenaltyCache(PiecewiseLinearFunction[] penaltyByJob,
+			PiecewiseLinearFunction[] reusablePenaltyByJob, PiecewiseLinearFunction[] reusableReducedByJob) {
 		if (penaltyByJob == null) {
 			return null;
 		}
@@ -109,6 +107,14 @@ final class CompletionBoundCalculator {
 		for (int job = 1; job <= data.n; job++) {
 			PiecewiseLinearFunction penalty = job < penaltyByJob.length ? penaltyByJob[job] : null;
 			if (penalty == null) {
+				continue;
+			}
+			// 2026-06-01: Tmid completion bound 会把同一个 full-domain penalty 同时作为
+			// forward/backward 输入。reduced penalty 只依赖 job dual，add() 不改写右参数，
+			// 因此同一个 penalty 对象可以复用同一个 reduced 缓存，避免初始化阶段复制两份。
+			if (reusablePenaltyByJob != null && reusableReducedByJob != null
+					&& job < reusablePenaltyByJob.length && reusablePenaltyByJob[job] == penalty) {
+				reducedByJob[job] = reusableReducedByJob[job];
 				continue;
 			}
 			PiecewiseLinearFunction reduced = penalty.copy();

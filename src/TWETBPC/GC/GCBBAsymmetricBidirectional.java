@@ -30,6 +30,9 @@ import TWETBPC.Util.SequenceSignature;
  * 而是在两侧队列之间按策略交错出队。forward/backward 标签函数仍直接定义在
  * [0, pricingHorizon]，不使用 half-domain 标签和 join 常数延拓。dynamicHB/dynamicHF
  * 只用于控制两侧队列扩展边界；当前默认固定为 Tmid，用作非对称队列流程的诊断分支。
+ * <p>
+ * 2026-06-01: completion bound 暂只接入 Tmid 双向和 full-domain 诊断分支；本非对称分支
+ * 后续预计不作为性能主路径使用，暂不继续接入 completion-bound 预剪枝，避免扩大维护面。
  * 如需完整序列复核，可打开 {@link Configure#debugBPCPricingColumnCheck}。
  */
 public class GCBBAsymmetricBidirectional {

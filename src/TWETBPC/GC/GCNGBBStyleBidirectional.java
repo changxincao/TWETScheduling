@@ -81,6 +81,9 @@ public class GCNGBBStyleBidirectional {
 	private int nextCandidateId;
 	private LabelQueueOrdering queueOrdering;
 	private JoinBestThresholdMode joinBestThresholdMode;
+	private CompletionBoundCalculator.Relaxation completionBoundRelaxation;
+	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
+	private CompletionBoundCalculator.Bounds completionBounds;
 	private double bestGeneratedReducedCost;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -98,6 +101,8 @@ public class GCNGBBStyleBidirectional {
 	private PiecewiseLinearFunction[] dynamicBackwardPenaltyByJob;
 	private double[] dynamicBackwardHStartByJob;
 	private double[] dynamicBackwardHEndByJob;
+	private PiecewiseLinearFunction[] completionForwardPenaltyByJob;
+	private PiecewiseLinearFunction[] completionBackwardPenaltyByJob;
 	private double dynamicMinHStart;
 	private double dynamicMaxHEnd;
 	private double earliestSourceCompletion;
@@ -138,6 +143,20 @@ public class GCNGBBStyleBidirectional {
 	private long backwardSinglePointDominatedByGraph;
 	private long generatedCandidateCount;
 	private long generatedCandidateDroppedByHeap;
+	private long completionForwardLabelsPruned;
+	private long completionBackwardLabelsPruned;
+	private long completionBoundFunctionEvaluations;
+	private long completionBoundBuildNanos;
+	private long completionBoundForwardBuildNanos;
+	private long completionBoundBackwardBuildNanos;
+	private long completionBoundAggregateNanos;
+	private long completionBoundForwardCandidateAttempts;
+	private long completionBoundBackwardCandidateAttempts;
+	private long completionBoundForwardQueuePops;
+	private long completionBoundBackwardQueuePops;
+	private long completionBoundMergeCalls;
+	private long completionBoundMergeChanged;
+	private double completionBoundLastEvaluationCutoff;
 
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
@@ -201,6 +220,35 @@ public class GCNGBBStyleBidirectional {
 			return JoinBestThresholdMode.BEST_RECORD;
 		}
 		return JoinBestThresholdMode.ZERO;
+	}
+
+	private CompletionBoundCalculator.Relaxation parseCompletionBoundRelaxation(String value) {
+		if (value == null) {
+			return null;
+		}
+		String normalized = value.trim().toLowerCase();
+		if ("allcycles".equals(normalized) || "all_cycles".equals(normalized)
+				|| "all-cycles".equals(normalized) || "all".equals(normalized)) {
+			return CompletionBoundCalculator.Relaxation.ALL_CYCLES;
+		}
+		if ("twocycle".equals(normalized) || "two_cycle".equals(normalized)
+				|| "two-cycle".equals(normalized) || "2cycle".equals(normalized)
+				|| "2-cycle".equals(normalized)) {
+			return CompletionBoundCalculator.Relaxation.TWO_CYCLE;
+		}
+		return null;
+	}
+
+	private CompletionBoundCalculator.QueueOrdering parseCompletionBoundQueueOrdering(String value) {
+		if (value == null) {
+			return CompletionBoundCalculator.QueueOrdering.FIFO;
+		}
+		String normalized = value.trim().toLowerCase();
+		if ("reducedcost".equals(normalized) || "reduced_cost".equals(normalized)
+				|| "reduced-cost".equals(normalized) || "rc".equals(normalized)) {
+			return CompletionBoundCalculator.QueueOrdering.REDUCED_COST;
+		}
+		return CompletionBoundCalculator.QueueOrdering.FIFO;
 	}
 
 	/**
@@ -317,6 +365,10 @@ public class GCNGBBStyleBidirectional {
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
 		joinBestThresholdMode = parseJoinBestThresholdMode(config.bidirectionalJoinBestThresholdMode);
+		completionBoundRelaxation = parseCompletionBoundRelaxation(config.bidirectionalCompletionBoundRelaxation);
+		completionBoundQueueOrdering = parseCompletionBoundQueueOrdering(
+				config.bidirectionalCompletionBoundQueueOrdering);
+		completionBounds = null;
 		bestGeneratedReducedCost = Utility.big_M;
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
@@ -352,6 +404,7 @@ public class GCNGBBStyleBidirectional {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
 		precomputeDynamicPricingWindows(lp);
+		buildCompletionBounds(lp);
 
 		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
 		sourceVisited.add(0);
@@ -400,6 +453,10 @@ public class GCNGBBStyleBidirectional {
 			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 				continue;
 			}
+			if (isForwardCompletionBoundPruned(child)) {
+				completionForwardLabelsPruned++;
+				continue;
+			}
 			if (insertForward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 				FWUL.add(child);
 			}
@@ -420,6 +477,10 @@ public class GCNGBBStyleBidirectional {
 			}
 			BackwardLabel child = extendBackward(label, prevJob, lp);
 			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
+				continue;
+			}
+			if (isBackwardCompletionBoundPruned(child)) {
+				completionBackwardLabelsPruned++;
 				continue;
 			}
 			if (insertBackward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
@@ -960,6 +1021,20 @@ public class GCNGBBStyleBidirectional {
 		backwardSinglePointDominatedByGraph = 0;
 		generatedCandidateCount = 0;
 		generatedCandidateDroppedByHeap = 0;
+		completionForwardLabelsPruned = 0;
+		completionBackwardLabelsPruned = 0;
+		completionBoundFunctionEvaluations = 0;
+		completionBoundBuildNanos = 0;
+		completionBoundForwardBuildNanos = 0;
+		completionBoundBackwardBuildNanos = 0;
+		completionBoundAggregateNanos = 0;
+		completionBoundForwardCandidateAttempts = 0;
+		completionBoundBackwardCandidateAttempts = 0;
+		completionBoundForwardQueuePops = 0;
+		completionBoundBackwardQueuePops = 0;
+		completionBoundMergeCalls = 0;
+		completionBoundMergeChanged = 0;
+		completionBoundLastEvaluationCutoff = Double.NaN;
 	}
 
 	private String statisticsSummary() {
@@ -983,6 +1058,19 @@ public class GCNGBBStyleBidirectional {
 				+ ", joinBest mode/bestRC/lbPruned/recordPruned=" + joinBestThresholdMode
 				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
 				+ "/" + joinFunctionBestRecordPruned
+				+ ", completionBound mode/cutoff/buildMs/eval/fwPruned/bwPruned="
+				+ completionBoundRelaxationForSummary()
+				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
+				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
+				+ "/" + completionBackwardLabelsPruned
+				+ ", completionBoundQueue=" + completionBoundQueueOrdering
+				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
+				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
+				+ formatMillis(completionBoundAggregateNanos)
+				+ ", completionBoundInternal counts fCand/bCand/fPop/bPop/merge/changed="
+				+ completionBoundForwardCandidateAttempts + "/" + completionBoundBackwardCandidateAttempts
+				+ "/" + completionBoundForwardQueuePops + "/" + completionBoundBackwardQueuePops
+				+ "/" + completionBoundMergeCalls + "/" + completionBoundMergeChanged
 				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering
@@ -992,6 +1080,10 @@ public class GCNGBBStyleBidirectional {
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
+	}
+
+	private static String formatMillis(long nanos) {
+		return String.format("%.3f", nanos / 1_000_000.0);
 	}
 
 	private double joinLowerBoundThreshold() {
@@ -1007,6 +1099,90 @@ public class GCNGBBStyleBidirectional {
 		double threshold = joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD
 				? joinLowerBoundThreshold() : REDUCED_COST_TOLERANCE;
 		return Utility.compareLt(reducedCost, threshold);
+	}
+
+	private double completionBoundCutoff() {
+		// 2026-06-01: completion bound 只判断 label 是否还能补成负列；
+		// 不使用当前 best reduced cost，避免变成 record-only 剪枝并丢掉 top-K 负列。
+		return REDUCED_COST_TOLERANCE;
+	}
+
+	private double completionBoundCutoffForSummary() {
+		return Double.isNaN(completionBoundLastEvaluationCutoff)
+				? completionBoundCutoff() : completionBoundLastEvaluationCutoff;
+	}
+
+	private String completionBoundRelaxationForSummary() {
+		return completionBoundRelaxation == null ? "OFF" : completionBoundRelaxation.toString();
+	}
+
+	private void buildCompletionBounds(LP lp) {
+		if (completionBoundRelaxation == null) {
+			return;
+		}
+		long start = System.nanoTime();
+		CompletionBoundCalculator calculator = new CompletionBoundCalculator(data, lp, pricingHorizon,
+				completionForwardPenaltyByJob, completionBackwardPenaltyByJob, zeroDualExcludedJobs,
+				completionBoundQueueOrdering);
+		CompletionBoundCalculator.Result result = calculator.build(completionBoundRelaxation);
+		completionBounds = result.bounds;
+		recordCompletionBoundStats(result.stats);
+		completionBoundBuildNanos += System.nanoTime() - start;
+	}
+
+	private void recordCompletionBoundStats(CompletionBoundCalculator.Stats stats) {
+		if (stats == null) {
+			return;
+		}
+		completionBoundForwardBuildNanos += stats.forwardBuildNanos;
+		completionBoundBackwardBuildNanos += stats.backwardBuildNanos;
+		completionBoundAggregateNanos += stats.aggregateNanos;
+		completionBoundForwardCandidateAttempts += stats.forwardCandidateAttempts;
+		completionBoundBackwardCandidateAttempts += stats.backwardCandidateAttempts;
+		completionBoundForwardQueuePops += stats.forwardQueuePops;
+		completionBoundBackwardQueuePops += stats.backwardQueuePops;
+		completionBoundMergeCalls += stats.mergeCalls;
+		completionBoundMergeChanged += stats.mergeChanged;
+	}
+
+	private boolean isForwardCompletionBoundPruned(ForwardLabel label) {
+		if (completionBounds == null || label.jid <= 0 || label.jid > data.n || label.frontier == null
+				|| label.frontier.head == null) {
+			return false;
+		}
+		PiecewiseLinearFunction suffix = completionBounds.backwardRByJob[label.jid];
+		if (suffix == null || suffix.head == null) {
+			return false;
+		}
+		completionBoundFunctionEvaluations++;
+		PiecewiseLinearFunction completion = label.frontier.add(suffix);
+		if (completion.head == null) {
+			return false;
+		}
+		double lowerBound = completion.findMinimal(false, true)[0];
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		return !Utility.compareLt(lowerBound, cutoff);
+	}
+
+	private boolean isBackwardCompletionBoundPruned(BackwardLabel label) {
+		if (completionBounds == null || label.isSinkRoot || label.jid <= 0 || label.jid > data.n
+				|| label.frontier == null || label.frontier.head == null) {
+			return false;
+		}
+		PiecewiseLinearFunction prefix = completionBounds.forwardUByJob[label.jid];
+		if (prefix == null || prefix.head == null) {
+			return false;
+		}
+		completionBoundFunctionEvaluations++;
+		PiecewiseLinearFunction completion = prefix.add(label.frontier);
+		if (completion.head == null) {
+			return false;
+		}
+		double lowerBound = completion.findMinimal(false, true)[0];
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
 	private void updateBestGeneratedReducedCost(double reducedCost) {
@@ -1257,6 +1433,8 @@ public class GCNGBBStyleBidirectional {
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
+		completionForwardPenaltyByJob = null;
+		completionBackwardPenaltyByJob = null;
 		forwardHalfEligibleByJob = null;
 		backwardHalfEligibleByJob = null;
 		forwardHalfIneligibleJobCount = 0;
@@ -1270,6 +1448,7 @@ public class GCNGBBStyleBidirectional {
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows();
 		precomputeBackwardDynamicPricingWindows();
+		precomputeCompletionBoundPricingWindows();
 		precomputeHalfDomainEligibility();
 	}
 
@@ -1416,6 +1595,19 @@ public class GCNGBBStyleBidirectional {
 		}
 	}
 
+	private void precomputeCompletionBoundPricingWindows() {
+		completionForwardPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
+		completionBackwardPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = effectiveJobHStart[job];
+			double hEnd = effectiveJobHEnd[job];
+			PiecewiseLinearFunction penalty = Utility.compareGt(hStart, hEnd)
+					? null : buildCompletionBoundPenalty(job, hStart, hEnd);
+			completionForwardPenaltyByJob[job] = penalty;
+			completionBackwardPenaltyByJob[job] = penalty;
+		}
+	}
+
 	private boolean isEffectiveWindowTighterThanHard(int job) {
 		return Utility.compareGt(effectiveJobHStart[job], data.hardWindowStart[job])
 				|| Utility.compareLt(effectiveJobHEnd[job], data.hardWindowEnd[job]);
@@ -1502,6 +1694,15 @@ public class GCNGBBStyleBidirectional {
 		// 2026-05-23: backward 对称使用 [Tmid,pricingHorizon] 上的新增 job 函数。
 		// 若窗口左侧为 big_M，后续 normalize(BACKWARD) 会通过 suffix-min 表达“可以等到窗口内完成”。
 		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, pricingHorizon);
+	}
+
+	private PiecewiseLinearFunction buildCompletionBoundPenalty(int job, double hStart, double hEnd) {
+		// 2026-06-01: Tmid pricing 的正式 label 仍使用左右半域函数；completion bound
+		// 需要判断半域 label 是否还能补成完整负列，因此单独使用完整 [0, pricingHorizon] 定义域。
+		if (isEffectiveWindowTighterThanHard(job)) {
+			return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, pricingHorizon);
+		}
+		return cropToInterval(data.penaltyFunction[job], 0.0, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction getDynamicForwardJobPenalty(int prevJob, int job) {

@@ -498,3 +498,13 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 验证方面，focused `javac` 覆盖共享计算器、arc full-domain、node-join、比较入口和配置类通过。随后用 `tmp-wet020_001_2m` 做 root-only smoke：arc full-domain + `allCycles/fifo` 得到 `obj=bound=6343, valid=true`，node-join + `allCycles/fifo` 同样 `obj=bound=6343, valid=true`；再用 arc full-domain + `allCycles/reducedCost` 验证队列配置入口能走通，结果仍为 `obj=bound=6343, valid=true`。这些验证只证明抽取后两条路径功能正常，wet030 上关于 reduced-cost 队列显著变慢的结论仍沿用前一节的大样例结果。
 
 当前需要注意的是，completion bound 仍只接入了两个 full-domain GCBB 实验分支：`GCBBStyleBidirectionalFullDomain` 和 `GCBBStyleBidirectionalFullDomainNodeJoin`。如果按后续应维护的 active pricing 口径看，正式剩余的是单向 pricing、Tmid 双向 `GCNGBBStyleBidirectional`、非对称双向 `GCBBAsymmetricBidirectional`；最早的 hybrid-B `GCBidirectional` 已经在 `solve()` 入口直接返回空列并标记为 disabled，不再作为维护对象。上述三个正式 active 口径目前都还没有接入 completion bound。因此目前这个加强是“full-domain arc/node 实验分支可用”，不是所有 active pricing 的全局默认加强。启动开关是 `TWETBPCConfig.bidirectionalCompletionBoundRelaxation`，默认 `off`；设置为 `allCycles` 或 `twoCycle` 时才会构建并应用 bound，队列顺序由 `bidirectionalCompletionBoundQueueOrdering` 控制，默认 `fifo`。
+
+## 19. 2026-06-01 Tmid 双向 completion bound 接入范围收口
+
+本次把共享 `CompletionBoundCalculator` 接入到正式 Tmid 双向 `GCNGBBStyleBidirectional`。接入口和 full-domain 分支保持一致：读取 `bidirectionalCompletionBoundRelaxation=off/allCycles/twoCycle`，默认关闭；开启后在正反向 child label 生成后、进入 dominance table 前分别用 `F_label + R_i` 和 `U_i + B_label` 判断是否还能补成负 reduced-cost 列。统计中新增 build time、内部 forward/backward 构建计时、candidate/merge/queue 计数以及正反向剪枝数，便于后续和 full-domain 分支对齐观察。
+
+Tmid pricing 的正式 label 仍然使用左右半域 penalty；但 completion bound 的目标是判断半域 label 是否还能补成完整列，因此这里没有把半域 penalty 直接传给 calculator，而是按本轮 effective window 单独构造完整 `[0, pricingHorizon]` 的 completion-bound penalty。否则 forward 左半域 label 与 backward 补全函数会被人为限制在半域交集上，既可能削弱剪枝，也容易让日志语义和 full-domain 分支不一致。
+
+按当前维护判断，单向 forward pricing 和非对称双向分支后续预计不再作为性能主路径使用，因此本次不接入 completion bound，只在 `GC` 与 `GCBBAsymmetricBidirectional` 类注释中明确该范围选择，避免后续误以为遗漏。源码中未找到 `GCNGBBAsymmetricBidirectional.java`，只存在历史 `.class` 编译产物；因此可维护注释只落在现有 Java 源码上。
+
+验证方面，focused `javac` 覆盖 `CompletionBoundCalculator`、Tmid 双向、非对称、单向入口和配置类通过。随后用 `tmp-wet020_001_2m` 做 root-only normal/Tmid 对照：`completionBound=off` 和 `completionBound=allCycles` 均得到 `obj=6343, bound=6343, valid=true`。开启 `allCycles` 后该轮 exact pricing 从约 `0.472s` 降到 `0.257s`，日志显示 `fwPruned/bwPruned=752/318`，说明 Tmid 路径已经实际使用 completion bound，且该小样例结果口径一致。

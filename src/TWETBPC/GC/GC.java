@@ -24,6 +24,9 @@ import TWETBPC.Util.SequenceSignature;
  * 结构上尽量贴近旧 VRP 代码的 GC：UL 是待扩展队列，TL 按末端 job 存 label。
  * 当前版本把 TL[j] 升级为 dominance graph；每个 graph node 保存真实 label 集合和聚合 envelope，
  * 用于实现完整 set dominance。暂不做 partial dominance、SRI、ng-route 和双向拼接。
+ * <p>
+ * 2026-06-01: completion bound 后续优先维护在 Tmid 双向和 full-domain 诊断分支；
+ * 单向 forward pricing 预计不再作为性能主路径，暂不在本类接入 completion-bound 预剪枝。
  */
 public class GC {
 

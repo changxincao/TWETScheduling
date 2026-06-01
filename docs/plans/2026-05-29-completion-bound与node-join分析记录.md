@@ -554,3 +554,5 @@ single-point domain 这次不扩展传播语义。当前 completion bound 是 re
 2026-06-01 补充 single-point completion candidate 的代码注释。`CompletionBoundCalculator.hasPositiveDomain()` 仍只接受正长度函数；注释明确这里不是普通 label single-point 语义，而是 relaxed completion bound 的状态传播语义：单点 candidate 最多表示某个边界时刻的收尾值，不能继续作为可接后继 job 的函数状态传播。继续保持这一限制可以避免把 `mergeMinimum()` 的正长度 overlap 契约扩展到单点情形。
 
 2026-06-01 进一步澄清 `mergeMinimum(..., true)` 的 changed 语义。原 `mergeMinimum()` 的执行流程本身不是为返回 changed 设计的：它会在 lower-envelope 合并过程中拆段、替换、拼接并最终 normalize，这些链表结构操作不等价于“函数值真的变低”。如果直接在流程中看到替换或拼接就返回 changed，会把很多纯结构重写也算成改善，导致 completion bound fixed-point 队列反复入队。当前实现不是依赖原流程中的结构操作判断 changed，而是在真正破坏式 merge 前额外做一次轻量扫描：只要候选函数在正长度公共区间某个端点严格低于当前函数，或者候选扩展了当前函数定义域，才认为 lower envelope 发生有效改善。随后仍调用原 merge 逻辑完成实际合并，因此旧调用结果不变，新返回值只服务于 completion bound 是否重入队。
+
+这里的 `reportChanged=true` 不是免费开关，它会额外扫描一次当前函数和候选函数的公共分段。这样做的目标是替代旧的 `current.copy() -> mergeMinimum() -> sameFunction()`，也就是用一次只读数值扫描替代整函数复制、破坏式合并后的整函数比较和大量 segment 对象分配。当前实现仍然在扫描后执行原 merge，因此每次 merge 都还有正常合并成本；进一步优化可以考虑在 `changed=false` 时直接跳过实际 merge，但这需要确认该预判在所有有效输入下都等价于“合并结果完全不变”。

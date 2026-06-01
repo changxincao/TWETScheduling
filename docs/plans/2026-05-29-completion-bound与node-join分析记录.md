@@ -488,3 +488,11 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 当前 completion bound 不是一个独立共享类，而是分别内嵌在 `GCBBStyleBidirectionalFullDomain` 和 `GCBBStyleBidirectionalFullDomainNodeJoin` 的 `CompletionBoundBuilder` 中。两者最初使用同一套 relaxed DP 语义：`allCycles` 是 node state，`twoCycle` 是 last-arc state，正向维护 `U/F`，反向维护 `R/B`，并在 label child 入表前用 `F_label + R_i` 或 `U_i + B_label` 做是否还能补成负列的剪枝判断。
 
 但工程实现现在已经分叉。最近的内部计时、候选/merge 计数、`completionBoundQueue` 日志字段，以及 `fifo/reducedCost` 队列顺序实验，只加在 full-domain arc-join 对照类 `GCBBStyleBidirectionalFullDomain` 里；node-join 实验类仍保留较早的 FIFO `ArrayDeque` 版本，没有这些内部统计和队列顺序开关。也就是说，若讨论“当前试出来 reduced-cost 队列很慢”“内部 merge 次数是多少”，这些结论直接对应 arc-join 这份实现；node-join 的 completion bound 数学口径相同，但代码没有同步这些诊断改动。后续如果还要继续推进 completion bound，较合理的方向是把这套 relaxed DP 抽成共享 builder，避免两个实验分支长期手工复制后发生口径漂移。
+
+## 18. 2026-06-01 抽取共享 CompletionBoundCalculator
+
+本次按上述判断把 completion bound 的 relaxed DP 从两个 pricing 类中抽出为 `TWETBPC.GC.CompletionBoundCalculator`。该类只负责接收当前 pricing 轮已经预处理好的 forward/backward job penalty、zero-dual 排除集合、pricing horizon 和 LP dual，返回按 job 聚合的 `forwardUByJob/backwardRByJob`，同时返回构建阶段的内部计时和计数。`GCBBStyleBidirectionalFullDomain` 和 `GCBBStyleBidirectionalFullDomainNodeJoin` 现在只保留配置解析、输入准备、剪枝调用和日志汇总，不再各自维护一份 `CompletionBoundBuilder`。
+
+队列顺序也统一放在共享计算器里，配置仍是 `bidirectionalCompletionBoundQueueOrdering`，可选 `fifo/reducedCost`。默认保留 `fifo`，并在代码注释里说明当前 wet030 实测 FIFO 更稳；`reducedCost` 只是对照开关，不作为默认优化方向。共享计算器的 `reducedCost` 模式仍保持“同一状态在队列中最多一份”的语义：状态已在队列中又被改善时，优先队列会删除旧项并用当前函数右端值重新插入。
+
+验证方面，focused `javac` 覆盖共享计算器、arc full-domain、node-join、比较入口和配置类通过。随后用 `tmp-wet020_001_2m` 做 root-only smoke：arc full-domain + `allCycles/fifo` 得到 `obj=bound=6343, valid=true`，node-join + `allCycles/fifo` 同样 `obj=bound=6343, valid=true`；再用 arc full-domain + `allCycles/reducedCost` 验证队列配置入口能走通，结果仍为 `obj=bound=6343, valid=true`。这些验证只证明抽取后两条路径功能正常，wet030 上关于 reduced-cost 队列显著变慢的结论仍沿用前一节的大样例结果。

@@ -1,7 +1,6 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
-import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -56,17 +55,6 @@ public class GCBBStyleBidirectionalFullDomain {
 		BEST_RECORD
 	}
 
-	private enum CompletionBoundRelaxation {
-		OFF,
-		ALL_CYCLES,
-		TWO_CYCLE
-	}
-
-	private enum CompletionBoundQueueOrdering {
-		FIFO,
-		REDUCED_COST
-	}
-
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
@@ -92,9 +80,9 @@ public class GCBBStyleBidirectionalFullDomain {
 	private int nextCandidateId;
 	private LabelQueueOrdering queueOrdering;
 	private JoinBestThresholdMode joinBestThresholdMode;
-	private CompletionBoundRelaxation completionBoundRelaxation;
-	private CompletionBoundQueueOrdering completionBoundQueueOrdering;
-	private CompletionBounds completionBounds;
+	private CompletionBoundCalculator.Relaxation completionBoundRelaxation;
+	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
+	private CompletionBoundCalculator.Bounds completionBounds;
 	private double bestGeneratedReducedCost;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -240,33 +228,33 @@ public class GCBBStyleBidirectionalFullDomain {
 		return JoinBestThresholdMode.ZERO;
 	}
 
-	private CompletionBoundRelaxation parseCompletionBoundRelaxation(String value) {
+	private CompletionBoundCalculator.Relaxation parseCompletionBoundRelaxation(String value) {
 		if (value == null) {
-			return CompletionBoundRelaxation.OFF;
+			return null;
 		}
 		String normalized = value.trim().toLowerCase();
 		if ("allcycles".equals(normalized) || "all_cycles".equals(normalized)
 				|| "all-cycles".equals(normalized) || "all".equals(normalized)) {
-			return CompletionBoundRelaxation.ALL_CYCLES;
+			return CompletionBoundCalculator.Relaxation.ALL_CYCLES;
 		}
 		if ("twocycle".equals(normalized) || "two_cycle".equals(normalized)
 				|| "two-cycle".equals(normalized) || "2cycle".equals(normalized)
 				|| "2-cycle".equals(normalized)) {
-			return CompletionBoundRelaxation.TWO_CYCLE;
+			return CompletionBoundCalculator.Relaxation.TWO_CYCLE;
 		}
-		return CompletionBoundRelaxation.OFF;
+		return null;
 	}
 
-	private CompletionBoundQueueOrdering parseCompletionBoundQueueOrdering(String value) {
+	private CompletionBoundCalculator.QueueOrdering parseCompletionBoundQueueOrdering(String value) {
 		if (value == null) {
-			return CompletionBoundQueueOrdering.FIFO;
+			return CompletionBoundCalculator.QueueOrdering.FIFO;
 		}
 		String normalized = value.trim().toLowerCase();
 		if ("reducedcost".equals(normalized) || "reduced_cost".equals(normalized)
 				|| "reduced-cost".equals(normalized) || "rc".equals(normalized)) {
-			return CompletionBoundQueueOrdering.REDUCED_COST;
+			return CompletionBoundCalculator.QueueOrdering.REDUCED_COST;
 		}
-		return CompletionBoundQueueOrdering.FIFO;
+		return CompletionBoundCalculator.QueueOrdering.FIFO;
 	}
 
 	/**
@@ -1081,7 +1069,8 @@ public class GCBBStyleBidirectionalFullDomain {
 				+ ", joinBest mode/bestRC/lbPruned/recordPruned=" + joinBestThresholdMode
 				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
 				+ "/" + joinFunctionBestRecordPruned
-				+ ", completionBound mode/cutoff/buildMs/eval/fwPruned/bwPruned=" + completionBoundRelaxation
+				+ ", completionBound mode/cutoff/buildMs/eval/fwPruned/bwPruned="
+				+ completionBoundRelaxationForSummary()
 				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
 				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
 				+ "/" + completionBackwardLabelsPruned
@@ -1152,14 +1141,37 @@ public class GCBBStyleBidirectionalFullDomain {
 				? completionBoundCutoff() : completionBoundLastEvaluationCutoff;
 	}
 
+	private String completionBoundRelaxationForSummary() {
+		return completionBoundRelaxation == null ? "OFF" : completionBoundRelaxation.toString();
+	}
+
 	private void buildCompletionBounds(LP lp) {
-		if (completionBoundRelaxation == CompletionBoundRelaxation.OFF) {
+		if (completionBoundRelaxation == null) {
 			return;
 		}
 		long start = System.nanoTime();
-		CompletionBoundBuilder builder = new CompletionBoundBuilder(lp);
-		completionBounds = builder.build(completionBoundRelaxation);
+		CompletionBoundCalculator calculator = new CompletionBoundCalculator(data, lp, pricingHorizon,
+				dynamicJobPenaltyByJob, dynamicBackwardPenaltyByJob, zeroDualExcludedJobs,
+				completionBoundQueueOrdering);
+		CompletionBoundCalculator.Result result = calculator.build(completionBoundRelaxation);
+		completionBounds = result.bounds;
+		recordCompletionBoundStats(result.stats);
 		completionBoundBuildNanos += System.nanoTime() - start;
+	}
+
+	private void recordCompletionBoundStats(CompletionBoundCalculator.Stats stats) {
+		if (stats == null) {
+			return;
+		}
+		completionBoundForwardBuildNanos += stats.forwardBuildNanos;
+		completionBoundBackwardBuildNanos += stats.backwardBuildNanos;
+		completionBoundAggregateNanos += stats.aggregateNanos;
+		completionBoundForwardCandidateAttempts += stats.forwardCandidateAttempts;
+		completionBoundBackwardCandidateAttempts += stats.backwardCandidateAttempts;
+		completionBoundForwardQueuePops += stats.forwardQueuePops;
+		completionBoundBackwardQueuePops += stats.backwardQueuePops;
+		completionBoundMergeCalls += stats.mergeCalls;
+		completionBoundMergeChanged += stats.mergeChanged;
 	}
 
 	private boolean isForwardCompletionBoundPruned(ForwardLabel label) {
@@ -1892,494 +1904,6 @@ public class GCBBStyleBidirectionalFullDomain {
 
 	private enum InsertStatus {
 		DOMINATED, STORED_NO_EXPAND, STORED_AND_ENQUEUE
-	}
-
-	private final class CompletionBoundBuilder {
-		private final LP lp;
-		private final Node node;
-		private final int sink;
-
-		CompletionBoundBuilder(LP lp) {
-			this.lp = lp;
-			this.node = lp.getNode();
-			this.sink = node.sinkId();
-		}
-
-		CompletionBounds build(CompletionBoundRelaxation relaxation) {
-			if (relaxation == CompletionBoundRelaxation.TWO_CYCLE) {
-				return buildTwoCycle();
-			}
-			return buildAllCycles();
-		}
-
-		private CompletionStateWorkQueue completionStateQueue() {
-			return new CompletionStateWorkQueue();
-		}
-
-		private CompletionQueueState completionState(CompletionQueueState[] states, int first) {
-			CompletionQueueState state = states[first];
-			if (state == null) {
-				state = new CompletionQueueState(first, 0);
-				states[first] = state;
-			}
-			return state;
-		}
-
-		private CompletionQueueState completionState(CompletionQueueState[][] states, int first, int second) {
-			CompletionQueueState state = states[first][second];
-			if (state == null) {
-				state = new CompletionQueueState(first, second);
-				states[first][second] = state;
-			}
-			return state;
-		}
-
-		private void enqueueCompletionState(CompletionStateWorkQueue queue, CompletionQueueState state,
-				PiecewiseLinearFunction frontier) {
-			queue.enqueue(state, frontier);
-		}
-
-		private CompletionQueueState pollCompletionState(CompletionStateWorkQueue queue) {
-			return queue.poll();
-		}
-
-		private double completionQueuePriority(PiecewiseLinearFunction frontier) {
-			if (frontier == null || frontier.tail == null) {
-				return Utility.big_M;
-			}
-			return frontier.tail.getValue(frontier.tail.end);
-		}
-
-		private final class CompletionStateWorkQueue {
-			private final ArrayDeque<CompletionQueueState> fifoQueue;
-			private final PriorityQueue<CompletionQueueState> priorityQueue;
-
-			CompletionStateWorkQueue() {
-				if (completionBoundQueueOrdering == CompletionBoundQueueOrdering.REDUCED_COST) {
-					fifoQueue = null;
-					priorityQueue = new PriorityQueue<CompletionQueueState>(
-							new Comparator<CompletionQueueState>() {
-								@Override
-								public int compare(CompletionQueueState left, CompletionQueueState right) {
-									int byPriority = compareDoubleAsc(left.priority, right.priority);
-									if (byPriority != 0) {
-										return byPriority;
-									}
-									int byFirst = Integer.compare(left.first, right.first);
-									return byFirst != 0 ? byFirst : Integer.compare(left.second, right.second);
-								}
-							});
-				} else {
-					fifoQueue = new ArrayDeque<CompletionQueueState>();
-					priorityQueue = null;
-				}
-			}
-
-			void enqueue(CompletionQueueState state, PiecewiseLinearFunction frontier) {
-				if (state.inQueue) {
-					if (priorityQueue != null) {
-						priorityQueue.remove(state);
-					} else {
-						return;
-					}
-				}
-				state.priority = completionQueuePriority(frontier);
-				state.inQueue = true;
-				if (priorityQueue != null) {
-					priorityQueue.add(state);
-				} else {
-					fifoQueue.add(state);
-				}
-			}
-
-			boolean isEmpty() {
-				return priorityQueue != null ? priorityQueue.isEmpty() : fifoQueue.isEmpty();
-			}
-
-			CompletionQueueState poll() {
-				CompletionQueueState state = priorityQueue != null ? priorityQueue.poll() : fifoQueue.poll();
-				state.inQueue = false;
-				return state;
-			}
-		}
-
-		private CompletionBounds buildAllCycles() {
-			CompletionBounds bounds = new CompletionBounds(data.n);
-			PiecewiseLinearFunction[] forwardF = new PiecewiseLinearFunction[data.n + 1];
-			PiecewiseLinearFunction[] backwardB = new PiecewiseLinearFunction[data.n + 1];
-			CompletionStateWorkQueue forwardQueue = completionStateQueue();
-			CompletionStateWorkQueue backwardQueue = completionStateQueue();
-			CompletionQueueState[] forwardStates = new CompletionQueueState[data.n + 1];
-			CompletionQueueState[] backwardStates = new CompletionQueueState[data.n + 1];
-
-			long phaseStart = System.nanoTime();
-			PiecewiseLinearFunction source = sourcePropagationFunction(lp);
-			for (int job = 1; job <= data.n; job++) {
-				if (!isCompletionJobAvailable(job) || node.isArcForbidden(0, job)) {
-					continue;
-				}
-				FunctionPair candidate = buildForwardCandidate(source, 0, job);
-				if (candidate == null) {
-					continue;
-				}
-				mergeForward(bounds.forwardUByJob, job, candidate.u);
-				boolean fChanged = mergeForward(forwardF, job, candidate.f);
-				if (fChanged) {
-					enqueueCompletionState(forwardQueue, completionState(forwardStates, job), forwardF[job]);
-				}
-			}
-			while (!forwardQueue.isEmpty()) {
-				completionBoundForwardQueuePops++;
-				int prev = pollCompletionState(forwardQueue).first;
-				PiecewiseLinearFunction prevF = forwardF[prev];
-				if (prevF == null || prevF.head == null) {
-					continue;
-				}
-				for (int job = 1; job <= data.n; job++) {
-					if (job == prev || !isCompletionJobAvailable(job) || node.isArcForbidden(prev, job)) {
-						continue;
-					}
-					FunctionPair candidate = buildForwardCandidate(prevF, prev, job);
-					if (candidate == null) {
-						continue;
-					}
-					mergeForward(bounds.forwardUByJob, job, candidate.u);
-					if (mergeForward(forwardF, job, candidate.f)) {
-						enqueueCompletionState(forwardQueue, completionState(forwardStates, job), forwardF[job]);
-					}
-				}
-			}
-			completionBoundForwardBuildNanos += System.nanoTime() - phaseStart;
-
-			phaseStart = System.nanoTime();
-			for (int job = 1; job <= data.n; job++) {
-				if (!isCompletionJobAvailable(job) || node.isArcForbidden(job, sink)) {
-					continue;
-				}
-				FunctionPair candidate = buildBackwardSinkCandidate(job);
-				if (candidate == null) {
-					continue;
-				}
-				mergeBackward(bounds.backwardRByJob, job, candidate.u);
-				boolean bChanged = mergeBackward(backwardB, job, candidate.f);
-				if (bChanged) {
-					enqueueCompletionState(backwardQueue, completionState(backwardStates, job), backwardB[job]);
-				}
-			}
-			while (!backwardQueue.isEmpty()) {
-				completionBoundBackwardQueuePops++;
-				int successor = pollCompletionState(backwardQueue).first;
-				PiecewiseLinearFunction successorB = backwardB[successor];
-				if (successorB == null || successorB.head == null) {
-					continue;
-				}
-				for (int prev = 1; prev <= data.n; prev++) {
-					if (prev == successor || !isCompletionJobAvailable(prev) || node.isArcForbidden(prev, successor)) {
-						continue;
-					}
-					FunctionPair candidate = buildBackwardCandidate(successorB, prev, successor);
-					if (candidate == null) {
-						continue;
-					}
-					mergeBackward(bounds.backwardRByJob, prev, candidate.u);
-					if (mergeBackward(backwardB, prev, candidate.f)) {
-						enqueueCompletionState(backwardQueue, completionState(backwardStates, prev), backwardB[prev]);
-					}
-				}
-			}
-			completionBoundBackwardBuildNanos += System.nanoTime() - phaseStart;
-			return bounds;
-		}
-
-		private CompletionBounds buildTwoCycle() {
-			CompletionBounds bounds = new CompletionBounds(data.n);
-			PiecewiseLinearFunction[][] forwardU = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
-			PiecewiseLinearFunction[][] forwardF = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
-			PiecewiseLinearFunction[][] backwardR = new PiecewiseLinearFunction[data.n + 1][data.n + 2];
-			PiecewiseLinearFunction[][] backwardB = new PiecewiseLinearFunction[data.n + 1][data.n + 2];
-			CompletionStateWorkQueue forwardQueue = completionStateQueue();
-			CompletionStateWorkQueue backwardQueue = completionStateQueue();
-			CompletionQueueState[][] forwardStates = new CompletionQueueState[data.n + 1][data.n + 1];
-			CompletionQueueState[][] backwardStates = new CompletionQueueState[data.n + 1][data.n + 2];
-
-			long phaseStart = System.nanoTime();
-			PiecewiseLinearFunction source = sourcePropagationFunction(lp);
-			for (int job = 1; job <= data.n; job++) {
-				if (!isCompletionJobAvailable(job) || node.isArcForbidden(0, job)) {
-					continue;
-				}
-				FunctionPair candidate = buildForwardCandidate(source, 0, job);
-				if (candidate == null) {
-					continue;
-				}
-				mergeForward(forwardU[0], job, candidate.u);
-				boolean fChanged = mergeForward(forwardF[0], job, candidate.f);
-				if (fChanged) {
-					enqueueCompletionState(forwardQueue, completionState(forwardStates, 0, job), forwardF[0][job]);
-				}
-			}
-			while (!forwardQueue.isEmpty()) {
-				completionBoundForwardQueuePops++;
-				CompletionQueueState state = pollCompletionState(forwardQueue);
-				int prevPrev = state.first;
-				int prev = state.second;
-				PiecewiseLinearFunction prevF = forwardF[prevPrev][prev];
-				if (prevF == null || prevF.head == null) {
-					continue;
-				}
-				for (int job = 1; job <= data.n; job++) {
-					if (job == prev || job == prevPrev || !isCompletionJobAvailable(job)
-							|| node.isArcForbidden(prev, job)) {
-						continue;
-					}
-					FunctionPair candidate = buildForwardCandidate(prevF, prev, job);
-					if (candidate == null) {
-						continue;
-					}
-					mergeForward(forwardU[prev], job, candidate.u);
-					if (mergeForward(forwardF[prev], job, candidate.f)) {
-						enqueueCompletionState(forwardQueue, completionState(forwardStates, prev, job),
-								forwardF[prev][job]);
-					}
-				}
-			}
-			completionBoundForwardBuildNanos += System.nanoTime() - phaseStart;
-
-			phaseStart = System.nanoTime();
-			for (int job = 1; job <= data.n; job++) {
-				if (!isCompletionJobAvailable(job) || node.isArcForbidden(job, sink)) {
-					continue;
-				}
-				FunctionPair candidate = buildBackwardSinkCandidate(job);
-				if (candidate == null) {
-					continue;
-				}
-				mergeBackward(backwardR[job], sink, candidate.u);
-				boolean bChanged = mergeBackward(backwardB[job], sink, candidate.f);
-				if (bChanged) {
-					enqueueCompletionState(backwardQueue, completionState(backwardStates, job, sink),
-							backwardB[job][sink]);
-				}
-			}
-			while (!backwardQueue.isEmpty()) {
-				completionBoundBackwardQueuePops++;
-				CompletionQueueState state = pollCompletionState(backwardQueue);
-				int current = state.first;
-				int successor = state.second;
-				PiecewiseLinearFunction currentB = backwardB[current][successor];
-				if (currentB == null || currentB.head == null) {
-					continue;
-				}
-				for (int prev = 1; prev <= data.n; prev++) {
-					if (prev == current || prev == successor || !isCompletionJobAvailable(prev)
-							|| node.isArcForbidden(prev, current)) {
-						continue;
-					}
-					FunctionPair candidate = buildBackwardCandidate(currentB, prev, current);
-					if (candidate == null) {
-						continue;
-					}
-					mergeBackward(backwardR[prev], current, candidate.u);
-					if (mergeBackward(backwardB[prev], current, candidate.f)) {
-						enqueueCompletionState(backwardQueue, completionState(backwardStates, prev, current),
-								backwardB[prev][current]);
-					}
-				}
-			}
-			completionBoundBackwardBuildNanos += System.nanoTime() - phaseStart;
-
-			phaseStart = System.nanoTime();
-			for (int job = 1; job <= data.n; job++) {
-				for (int prev = 0; prev <= data.n; prev++) {
-					mergeForward(bounds.forwardUByJob, job, forwardU[prev][job]);
-				}
-				for (int successor = 1; successor <= data.n + 1; successor++) {
-					mergeBackward(bounds.backwardRByJob, job, backwardR[job][successor]);
-				}
-			}
-			completionBoundAggregateNanos += System.nanoTime() - phaseStart;
-			return bounds;
-		}
-
-		private FunctionPair buildForwardCandidate(PiecewiseLinearFunction parentF, int prevJob, int job) {
-			completionBoundForwardCandidateAttempts++;
-			if (parentF == null || parentF.head == null) {
-				return null;
-			}
-			double delay = data.getSetUp(prevJob, job) + data.getProcessT(job);
-			PiecewiseLinearFunction u = parentF.shiftX(delay);
-			if (!hasPositiveDomain(u)) {
-				return null;
-			}
-			u.shiftYInPlace(data.getSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
-			u.normalize(Direction.FORWARD);
-			PiecewiseLinearFunction jobCost = forwardJobReducedPenalty(job);
-			if (jobCost == null) {
-				return null;
-			}
-			PiecewiseLinearFunction f = u.add(jobCost);
-			if (!hasPositiveDomain(f)) {
-				return null;
-			}
-			f.normalize(Direction.FORWARD);
-			return hasPositiveDomain(f) ? new FunctionPair(u, f) : null;
-		}
-
-		private FunctionPair buildBackwardSinkCandidate(int job) {
-			PiecewiseLinearFunction r = constantFunction(-lp.getArcDual(job, sink));
-			PiecewiseLinearFunction jobCost = backwardJobReducedPenalty(job);
-			if (jobCost == null) {
-				return null;
-			}
-			PiecewiseLinearFunction b = r.add(jobCost);
-			if (!hasPositiveDomain(b)) {
-				return null;
-			}
-			b.normalize(Direction.BACKWARD);
-			return hasPositiveDomain(b) ? new FunctionPair(r, b) : null;
-		}
-
-		private FunctionPair buildBackwardCandidate(PiecewiseLinearFunction successorB, int job, int successor) {
-			completionBoundBackwardCandidateAttempts++;
-			if (successorB == null || successorB.head == null) {
-				return null;
-			}
-			double delay = data.getSetUp(job, successor) + data.getProcessT(successor);
-			PiecewiseLinearFunction r = successorB.shiftX(-delay);
-			if (!hasPositiveDomain(r)) {
-				return null;
-			}
-			r.shiftYInPlace(data.getSetupCost(job, successor) - lp.getArcDual(job, successor));
-			r.normalize(Direction.BACKWARD);
-			PiecewiseLinearFunction jobCost = backwardJobReducedPenalty(job);
-			if (jobCost == null) {
-				return null;
-			}
-			PiecewiseLinearFunction b = r.add(jobCost);
-			if (!hasPositiveDomain(b)) {
-				return null;
-			}
-			b.normalize(Direction.BACKWARD);
-			return hasPositiveDomain(b) ? new FunctionPair(r, b) : null;
-		}
-
-		private PiecewiseLinearFunction sourcePropagationFunction(LP lp) {
-			PiecewiseLinearFunction source = cropToInterval(data.penaltyFunction[0].copy(), 0.0, pricingHorizon);
-			source.shiftYInPlace(-lp.getMachineDual());
-			source.normalize(Direction.FORWARD);
-			return source;
-		}
-
-		private PiecewiseLinearFunction forwardJobReducedPenalty(int job) {
-			PiecewiseLinearFunction penalty = getDynamicForwardJobPenalty(0, job);
-			if (penalty == null) {
-				return null;
-			}
-			PiecewiseLinearFunction reduced = penalty.copy();
-			reduced.shiftYInPlace(-lp.getJobDual(job));
-			return reduced;
-		}
-
-		private PiecewiseLinearFunction backwardJobReducedPenalty(int job) {
-			PiecewiseLinearFunction penalty = getDynamicBackwardJobPenalty(job, sink);
-			if (penalty == null) {
-				return null;
-			}
-			PiecewiseLinearFunction reduced = penalty.copy();
-			reduced.shiftYInPlace(-lp.getJobDual(job));
-			return reduced;
-		}
-
-		private PiecewiseLinearFunction constantFunction(double value) {
-			PiecewiseLinearFunction function = new PiecewiseLinearFunction();
-			function.resetDomain(0.0, pricingHorizon);
-			function.addSegment(0.0, pricingHorizon, 0.0, value);
-			return function;
-		}
-
-		private boolean isCompletionJobAvailable(int job) {
-			return job > 0 && job <= data.n && !isZeroDualExcludedJob(job);
-		}
-	}
-
-	private boolean mergeForward(PiecewiseLinearFunction[] targetByJob, int job, PiecewiseLinearFunction candidate) {
-		return mergeFunction(targetByJob, job, candidate, Direction.FORWARD);
-	}
-
-	private boolean mergeBackward(PiecewiseLinearFunction[] targetByJob, int job, PiecewiseLinearFunction candidate) {
-		return mergeFunction(targetByJob, job, candidate, Direction.BACKWARD);
-	}
-
-	private boolean mergeFunction(PiecewiseLinearFunction[] targetByJob, int job, PiecewiseLinearFunction candidate,
-			Direction direction) {
-		if (!hasPositiveDomain(candidate)) {
-			return false;
-		}
-		completionBoundMergeCalls++;
-		PiecewiseLinearFunction current = targetByJob[job];
-		if (current == null || current.head == null) {
-			targetByJob[job] = candidate.copy();
-			completionBoundMergeChanged++;
-			return true;
-		}
-		PiecewiseLinearFunction before = current.copy();
-		current.mergeMinimum(candidate, direction);
-		boolean changed = !sameFunction(before, current);
-		if (changed) {
-			completionBoundMergeChanged++;
-		}
-		return changed;
-	}
-
-	private boolean hasPositiveDomain(PiecewiseLinearFunction function) {
-		return function != null && function.head != null && function.tail != null
-				&& Utility.compareLt(function.head.start, function.tail.end);
-	}
-
-	private boolean sameFunction(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
-		Segment l = left == null ? null : left.head;
-		Segment r = right == null ? null : right.head;
-		while (l != null && r != null) {
-			if (!Utility.compareEq(l.start, r.start) || !Utility.compareEq(l.end, r.end)
-					|| !Utility.compareEq(l.slope, r.slope) || !Utility.compareEq(l.intercept, r.intercept)) {
-				return false;
-			}
-			l = l.next;
-			r = r.next;
-		}
-		return l == null && r == null;
-	}
-
-	private static final class CompletionBounds {
-		final PiecewiseLinearFunction[] forwardUByJob;
-		final PiecewiseLinearFunction[] backwardRByJob;
-
-		CompletionBounds(int n) {
-			this.forwardUByJob = new PiecewiseLinearFunction[n + 1];
-			this.backwardRByJob = new PiecewiseLinearFunction[n + 1];
-		}
-	}
-
-	private static final class FunctionPair {
-		final PiecewiseLinearFunction u;
-		final PiecewiseLinearFunction f;
-
-		FunctionPair(PiecewiseLinearFunction u, PiecewiseLinearFunction f) {
-			this.u = u;
-			this.f = f;
-		}
-	}
-
-	private static final class CompletionQueueState {
-		final int first;
-		final int second;
-		double priority;
-		boolean inQueue;
-
-		CompletionQueueState(int first, int second) {
-			this.first = first;
-			this.second = second;
-		}
 	}
 
 	private static final class PricingColumnCandidate {

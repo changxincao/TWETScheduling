@@ -75,7 +75,7 @@ public class TWETBPCConfig {
 	 * 可选值：off、allCycles、twoCycle。默认关闭，避免改变现有对照实验语义。
 	 */
 	public String bidirectionalCompletionBoundRelaxation = "off";
-	/** 2026-06-01: completion bound correcting 队列顺序；可选 fifo/reducedCost。 */
+	/** 2026-06-01: completion bound correcting 队列顺序；可选 fifo/reducedCost，当前实测 FIFO 更稳。 */
 	public String bidirectionalCompletionBoundQueueOrdering = "fifo";
 	/**
 	 * 2026-05-26: 双向 pricing 的 midpoint 固定比例实验开关。

@@ -169,6 +169,9 @@ public class GCBBFullDomainComparisonTest {
 				"twet.bpc.fullDomainCompare.joinBestMode", config.bidirectionalJoinBestThresholdMode);
 		config.bidirectionalCompletionBoundRelaxation = System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBound", config.bidirectionalCompletionBoundRelaxation);
+		config.bidirectionalCompletionBoundQueueOrdering = System.getProperty(
+				"twet.bpc.fullDomainCompare.completionBoundQueue",
+				config.bidirectionalCompletionBoundQueueOrdering);
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));

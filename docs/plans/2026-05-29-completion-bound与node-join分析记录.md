@@ -474,3 +474,11 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 当前仍然存在的重复计算是另一类：一个状态出队并按当时的 `F/B` 传播完以后，后续又被其他状态进一步改善，于是会重新入队并再次扫描所有后继或前驱。这个是 label-correcting fixed point 的正常代价，不是队列重复项造成的 stale work。若不重新传播，就会漏掉后续改善对下游状态的影响。队列顺序只影响一个状态是在更多改善到达前还是之后出队，从而影响是否需要多轮传播；但因为这里是 lower-envelope merge，不是正式 label dominance，`FIFO`、按最早完成时间或按简单下界排序都不改变最终结果，可能只改变收敛轮数。
 
 因此，two-cycle 目前慢的主要矛盾不是“队列里同一状态堆了很多份”，而是二维状态数和每次出队的全量扫描太大：每次出队都枚举一整轮 `job=1..n` 或 `prev=1..n`，每条候选又要构造分段函数、merge envelope、复制旧函数并比较是否 changed。更可能有效的优化方向是减少每次出队扫描的候选弧、降低 `mergeFunction` 判断 changed 的成本、维护增量改善片段避免整函数重传，或设计能让状态尽量在主要改善到齐后再传播的队列策略。单纯把 FIFO 换成最早完成时间队列，预计收益不会像减少 merge 次数那样稳定。
+
+## 16. 2026-06-01 reduced-cost 优先 completion-bound 队列试验
+
+按“右端 reduced cost 最小的状态先出队”的想法，给 full-domain arc-join 的 completion-bound correcting 队列增加了可选顺序 `bidirectionalCompletionBoundQueueOrdering`。默认仍为 `fifo`；比较入口可用 `twet.bpc.fullDomainCompare.completionBoundQueue=reducedCost` 切换，`wet020_001` 小样例烟测日志已确认输出 `completionBoundQueue=REDUCED_COST`。实现上没有让同一状态在队列中重复存在：若状态已经在队列里又被改善，`reducedCost` 模式会先从 `PriorityQueue` 删除旧项，再按当前传播函数右端值重新插入；`fifo` 模式保持原逻辑，队列中已有状态只更新数组里的函数，不调整队列位置。
+
+`wet030_001` root-only、`allCycles` 的试验结果不支持这个方向。`reducedCost` 模式下整体 solve 为 `74.260s`，exact pricing 为 `68.318s`，而同一代码默认 `fifo` 复核为 `7.675s`、exact pricing `2.323s`。从内部统计看，`reducedCost` 不只是多了优先队列维护成本，它还明显改变了 correcting 收敛路径：第一轮 merge 调用从 FIFO 的 `29710` 增到 `603704`，后续几轮也在 `72-80万` 左右；candidate 尝试从约 `0.6-0.8万` 每侧扩大到十几万每侧。也就是说，用右端值优先出队反而让更多中间 envelope 被提前传播，导致后续又被反复改进和重传。
+
+当前判断是：completion bound 的状态传播不是 label dominance 那类“先扩展低 reduced-cost label 更可能早剪掉别人”的过程，而是函数 lower-envelope fixed point。一个状态右端值小，不代表它的整段 envelope 已经接近稳定，也不代表先传播它能减少后续 merge；相反，过早传播局部较优但尚未稳定的函数，可能把大量中间结果推到下游，随后再被更好的 envelope 覆盖。因此 reduced-cost 出队顺序在当前口径下比 FIFO 差很多。后续若继续改队列，优先应找能减少重传的稳定性指标，而不是单点右端值；更直接的优化仍是减少候选扫描和 merge 成本。

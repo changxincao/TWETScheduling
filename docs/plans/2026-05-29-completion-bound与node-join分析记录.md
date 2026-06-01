@@ -452,3 +452,5 @@ B_state 改善：更新 B_state，并重新入队继续向前传播。
 这提示后续可以考虑增加一个可选的 root/节点后处理：当 column generation 结束且 LP 仍为分数解时，用当前列池求一次受限整数主问题作为 incumbent polishing。该步骤不改变下界，也不改变 pricing 正确性，只用于把已有列组合转成更好的上界；是否默认开启需要再看额外 MIP 时间和较大列池上的稳定性。
 
 进一步复查初始 incumbent 来源后确认，`GCBBFullDomainComparisonTest` 这类定价对照入口显式设置 `reuseConfiguredBestSolution=false` 和 `runALNSForSeed=false`。因此初始解只来自 `Solution.setInitSolution()`：先随机打乱 job 顺序，再对每个 job 随机选择一个当前不违反粗硬窗的机器插入。它只保证构造出可行机器序列，不做局部搜索、VND 或 ALNS 改进，也不按惩罚成本选择最优插入位置。`wet030` 中多个 seed 的 incumbent 差异很大正是这个随机构造造成的。后续 root pricing 生成了大量好列，但当前 BPC 只在 master LP 解本身为整数时才刷新 incumbent；如果 root LP 是分数解，这些好列不会自动组合成新的整数上界，除非额外求一次 restricted master integer。
+
+开启 `runALNSForSeed=true` 后，同样 5 个 seed 的 incumbent 直接降到 `15325/15330/15325/15679/15571`，根列池整数化结果为 `15325/15330/15325/15403/15571`，最佳 gap 约 `0.41%`。其中多数 seed 的 root integer 直接选中初始两条 ALNS 列 `[0, 1]`，说明 ALNS 已经能构造接近根下界的 2 机整数解；个别 seed 如 `202605310303`，root pricing 后的列池整数化还能把 ALNS incumbent 从 `15679` 改到 `15403`。因此 `wet030` 的大 gap 不是数据本身或 pricing bound 异常，而是前面对照实验为了隔离 pricing 成本关闭了 ALNS，导致初始上界只代表随机可行构造质量。

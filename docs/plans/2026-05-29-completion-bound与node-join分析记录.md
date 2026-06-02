@@ -767,3 +767,13 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 `wet022/wet025/wet030` 的严格对照显示结构性收益更清楚。`wet022` 中 scalar 让函数拼接次数从 `427` 降到 `208`，并把 backward kept 从 `11` 降到 `0`，exact pricing 从 `0.445s` 降到 `0.199s`。`wet025` 中函数拼接次数从 `5729` 降到 `4357`，backward kept 从 `72` 降到 `37`，exact pricing 从 `0.335s` 降到 `0.149s`。`wet030` 是 node-limit 样例，四轮 pricing 中 scalar 的函数拼接总次数从 `74334` 降到 `71012`，但本次 exact 总时间为 `6.129s` 对 `4.973s`，没有表现为总时间收益；该样例里 completion bound DP 构造时间波动很大，且 scalar 改变后续生成列数量和 bound，不能只按总秒数判断。
 
 当前结论为：scalar 预筛在统计上是有效的，确实能减少 completion bound 后续的重函数拼接，并且在 `wet022/wet025` 这种中等 case 上还会通过更早剪掉后缀 label 减少 join 工作；但它不是稳定的 wall-time 保证，特别是 `wet030` 这类多轮、node-limit 且 completion bound 构造时间占主导的 case，会被 DP 构造波动和列集差异掩盖。作为默认开启的轻量预筛是合理的，但若后续优化方向是大幅降时间，重点仍应放在 completion bound 构造阶段和减少多轮重复构造，而不是只继续打磨 scalar 查询本身。
+
+### 36.1 wet030 差异复查与 unavailable 口径修正
+
+复查 `wet030` 后，上面关于“列集差异”的解释需要修正。若 scalar 只是 sufficient prune，它不应该改变最终列池；第 1 轮 on/off 的 `addedColumns=363`、`candidatePool=363/689/326`、label 数、join 统计完全一致，说明正常 scalar 命中只是在跳过部分 completion-bound 函数拼接。差异从第 2 轮开始出现，而 scalar-on 每轮恰好有 `unavailable=1`，因此问题来自此前把 `UBefore/RAfter` 返回 `big_M` 当成“无可补全点”直接剪枝。
+
+这个直接剪枝口径过强。当前 pricing 和 completion bound 函数仍是连续 PWLF，effective/profitable window 和 `Tmid` 也可能是非整数；离散整数缓存没有 finite 值，只能说明整数预筛不可用，不能证明完整函数拼接没有连续时间交集。因此 `unavailable` 必须回退原来的 `add/findMinimal`，这样 scalar 才保持“只做轻量预筛，不改变列池”的语义。
+
+修正后复跑 `tmp-wet030_001_2m` root-only `fullDomain-cb-allCycles`，四轮列池与 scalar-off 对齐：`addedColumns` 为 `363/15/1/0`，pool 最终为 `5163`，bound 同为 `15261.833333`。每轮函数拼接次数仍下降：`51020->44290`、`12371->11132`、`10574->9360`、`10369->9170`，合计从 `74334` 降到 `63952`。`unavailable=1` 的轮次现在计入 fallback，不再改变剪枝结果。
+
+离散数组构造本身不是这里的主要耗时。当前实现对每个 bound 函数扫一次 segment 链表，只填该 segment 覆盖到的整数点；在 `wet030` 约 30 个 job、horizon 约 1343 的规模下，数组量级只有几万格。日志里的 `completionBoundBuildNanos` 包含完整 relaxed DP 的 forward/backward fixed-point 构造，不是单独的离散 cache 构造时间；on/off 中 buildMs 的差异主要来自运行波动和 DP 构造本身，不能归因于整数数组。

@@ -32,9 +32,13 @@ import TWETBPC.Util.SequenceSignature;
  * node join。forward label 额外保存未加入当前 job 成本的 pre-node frontier，用于避免 join node
  * 的 penalty/job dual 被两侧重复计算。该类只作为实验分支，不作为默认正式入口。
  * <p>
- * 当前版本用于 full-domain 诊断：
- * 1. forward/backward label 都覆盖 [0, pricingHorizon]；
- * 2. dynamic window 只影响 job penalty 的有效区间，不把标签裁成 half-domain；
+ * 当前版本用于 full-domain/node-join 诊断。需要注意：当
+ * {@link TWETBPCConfig#fullDomainNodeJoinCrossingSide} 不是 both 时，当前实现保留了
+ * one-sided half-domain 加速变体，非 crossing 侧会裁掉另一半定义域；这不是严格
+ * full-domain 对照，而是用更短定义域增强 dominance、减少扩展和 join 工作量的工程口径。
+ * 1. both 模式下 forward/backward label 都覆盖 [0, pricingHorizon]；
+ * 2. one-sided 模式下，允许 crossing 的一侧可首次越过 Tmid，另一侧保持对应 half-domain；
+ *    dynamic window 仍只影响 job penalty 的有效区间；
  * 3. final join 按同一 job 拼接 forward pre-node frontier 和 backward suffix-min frontier；
  * 4. 当前性能分支仿照旧双向 join，先用 node-join 乐观下界和函数最小值筛掉非负候选，
  * top-K 候选堆仍按 inferred reduced cost 维护；K 堆固定后再用 evaluator 修正最终列成本。
@@ -1075,9 +1079,13 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			joinFunctionPruned++;
 			return;
 		}
-		// 2026-06-02: node join 这里直接拼 pre-node forward 与 backward frontier，
-		// 不像 arc-join Tmid 版本那样在 join 前做常数延拓。因此 one-sided 模式若保留了半域裁剪，
-		// 被裁的一侧会按半域定义域参与 add()，不会在 final join 前临时补回另一半。
+		// 2026-06-02: node join 这里直接拼 pre-node forward 与 backward frontier。
+		// 同一 join node 已经物化进两侧标签语义，forward.preNodeFrontier 与 backward.frontier
+		// 处在同一个 completion-time 坐标上，不需要 arc-join crossing arc 的 delta shift。
+		// 因此这里也不做 half-domain arc join 那种常数延拓；one-sided 模式若保留半域裁剪，
+		// 被裁的一侧就按半域物理定义域参与 add()，结果只覆盖两侧公共区间。
+		// 若退化成 Tmid 单点，insertForward/Backward 的 SinglePointStore 已负责旁路保存；
+		// add() 对普通单点接触会生成零长度结果，但不要把它泛化为内部跳变点的严格点值语义。
 		PiecewiseLinearFunction joinCost = forward.preNodeFrontier.add(backwardFull);
 		if (joinCost.head == null) {
 			joinFunctionPruned++;
@@ -1750,8 +1758,10 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		baseBackwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			// 2026-06-02: 严格的 full-domain one-sided node join 不应在非 crossing 侧裁掉半域；
-			// 这里只保留当前工程变体：裁掉另一半定义域会让 dominance 只比较半域函数，通常能更早支配
-			// 并减少 kept label。若后续要做纯 full-domain 对照，应把两侧都改回 [0, pricingHorizon]。
+			// 这里只保留当前工程变体：node join 只需要一侧承担“第一次越过 Tmid”的 terminal label，
+			// 另一侧裁成 half-domain 后，函数占优不必比较被裁掉的另一半，通常能更早支配并减少 kept label。
+			// 若后续要做纯 full-domain 对照，应把两侧都改回 [0, pricingHorizon]，只用入队/terminal
+			// 规则控制是否继续越过 Tmid。
 			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0,
 					allowForwardCrossing() ? pricingHorizon : tMid);
 			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job],

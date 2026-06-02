@@ -27,6 +27,8 @@ final class CompletionBoundCalculator {
 		// 它不像经典 VRP 的标量 completion bound 那样只保留 best/second-best 值即可；
 		// 每个二维状态都是 PWLF envelope，仍要完整建表并迭代更新。wet030 当前实测表明
 		// 其剪枝收益接近 all-cycles，但构造时间显著更高，因此暂只保留为对照/论文扩展选项。
+		// 当前输出会把 last-arc 二维状态再合并成按 job 聚合的一维 bound，无法在正式 label
+		// 拼接时排除“刚好接回上一点”的那一维状态，因此比完整 two-cycle 状态查询略弱。
 		TWO_CYCLE
 	}
 

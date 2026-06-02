@@ -732,9 +732,9 @@ lowerBound = completion.findMinimal(false, true)[0];
 
 这一步确实重，可以先加一个离散 scalar 预筛。forward label 在 job `i` 的最早完成时间为 `L` 时，后缀 completion bound 只可能在 `t >= L` 的时间上拼接；如果预先缓存 `RAfter[i][k] = min_{t >= k} R_i(t)`，就可以先用 `label.minReducedCost + RAfter[i][floor(L)]` 做一次便宜判断。若这个值已经不小于当前 cutoff，则完整函数 `add/findMinimal` 一定也不会产生可保留负列，可以直接剪掉。backward label 对称地用当前最晚完成时间 `P` 查 `UBefore[i][ceil(P)] = min_{t <= k} U_i(t)`，再和 `label.minReducedCost` 相加。
 
-用户关于 `floor(L)` / `ceil(P)` 不会越界的修正是合理的，尤其在当前 completion bound 使用 full-domain penalty 的口径下更成立。`backwardRByJob[i]` 是 suffix-min 归一后的 backward bound，整体应非减，且 completion bound 的输入函数按 `[0, pricingHorizon]` 构造；forward label 的 `L` 已经来自可行 label frontier，通常不会小于 0，也不会落到 suffix bound 的物理定义域左侧之外。用 `floor(L)` 查询时，最小索引自然是 0；如果 `L` 更早，本身也应在前置时间可行性中被挡掉。forward prefix bound 对称地经 prefix-min 后整体非增，右侧定义域应到 `pricingHorizon`；backward label 的 `P` 若超过右边界，通常也已经在扩展阶段被剪掉。因此在当前整数 horizon / full-domain completion bound 语义下，我之前说的“查不到值要回退”不是常态风险。
+用户关于 `floor(L)` / `ceil(P)` 的修正是合理的，尤其在当前 completion bound 使用 full-domain penalty 的口径下更成立。`backwardRByJob[i]` 是 suffix-min 归一后的 backward bound，整体应非减；forward label 的 `L` 已经来自可行 label frontier，所以真正有意义的是 `L` 之后、且落在 `R_i` 物理定义域内的整数点。forward prefix bound 对称地经 prefix-min 后整体非增；backward label 的 `P` 只需要看 `P` 之前、且落在 `U_i` 物理定义域内的整数点。`allCycles` 和 `twoCycle` 只影响上游如何得到最终的一维 `U_i/R_i` 函数，离散缓存本身只读这两个最终函数数组。
 
-实现时仍建议保留防御性回退，而不是把它作为主要逻辑。原因不是预期会频繁出现越界，而是当前代码里 PWLF 的物理 `head/tail` 和元数据 domain 曾经出现过不一致风险，且未来如果 local horizon、非 full-domain completion penalty、非 `Tmid` 裁剪点或小数时间离散化进入这个缓存，边界假设可能变化。最稳妥的实现口径是：正常情况下 `floor(L)` clamp 到 `[0,H]`、`ceil(P)` clamp 到 `[0,H]` 并返回 finite scalar；如果缓存值缺失或为 `big_M`，只回退到现有函数 `add/findMinimal`，不直接据此剪枝。这样不会削弱当前你说的整数时间加速思路，也能避免未来边界变动时出现误剪。
+实现口径因此改成：缓存数组先整体初始化为 `big_M`，只在函数 segment 实际覆盖的整数点上填有限值，不再对 head 左侧或 tail 右侧做常数外推。正常 full-domain completion bound 下，正向 `U_i` 的右端 `T` 和反向 `R_i` 的左端 `0` 应该存在；如果某个查询落在函数物理定义域之外，scalar 方法把它记为 `unavailable` 并回退到原来的 `add/findMinimal`，不直接据此剪枝。这个回退不是算法主体，而是防止函数物理段缺失、非整数 horizon 或未来改动导致误剪。
 
 取整方向仍按“取更小的那一侧”理解。forward label 用 `floor(L)` 查 suffix，是把可拼接时间集合从 `t >= L` 放大为 `t >= floor(L)`，得到的 `RAfter` 不大于真实后缀最小值，因此更松但安全。backward label 用 `ceil(P)` 查 prefix，是把可拼接集合从 `t <= P` 放大为 `t <= ceil(P)`，得到的 `UBefore` 也不大于真实前缀最小值，同样更松但安全。这个预筛只能在 scalar bound 已经超过 cutoff 时避免重函数拼接；如果没有超过 cutoff，仍需走原来的函数 `add/findMinimal` 做精确判断。
 
@@ -742,7 +742,7 @@ lowerBound = completion.findMinimal(false, true)[0];
 
 本次把上一节的离散预筛先接入 `GCBBStyleBidirectionalFullDomain`，也就是 full-domain crossing-arc join 对照类。共享 `CompletionBoundCalculator.Bounds` 现在在构造完 `forwardUByJob/backwardRByJob` 后额外生成两个整数时间缓存：`forwardUBeforeByJob[job][k]` 表示 `min_{t<=k} U_i(t)`，`backwardRAfterByJob[job][k]` 表示 `min_{t>=k} R_i(t)`。由于 `U_i` 已经 prefix-min 归一、`R_i` 已经 suffix-min 归一，缓存只需要基于最终一维函数数组构造，和前面使用 `allCycles` 还是 `twoCycle` 无关。
 
-2026-06-02 追加修正：缓存构造不能逐整数点调用 `evaluate()`，否则每个点都可能从函数头重新扫描 segment，违背离散预筛的加速目的。当前实现改为一次遍历函数的 segment 链表：先把数组初始化为 `big_M`，再对每个 segment 计算它覆盖的整数区间 `[ceil(start), floor(end)]`，直接用 `segment.getValue(time)` 写入缓存；如果相邻 segment 在同一个整数断点都覆盖该点，则取两侧值的 `min`，保持和底层 `evaluate()` 在内部断点取较小值的口径一致。Forward 的 `k` 超过物理 tail 时，用 tail 端点值填充后续整数点，表示当前已知 `t<=k` 范围内的最小前缀 bound；Backward 的 `k` 早于物理 head 时，用 head 端点值填充左侧整数点，表示当前已知 `t>=k` 范围内的最小后缀 bound。右侧超出 backward tail 仍为 `big_M`，调用方会回退到原函数拼接，不据此剪枝。
+2026-06-02 追加修正：缓存构造不能逐整数点调用 `evaluate()`，否则每个点都可能从函数头重新扫描 segment，违背离散预筛的加速目的。当前实现改为一次遍历函数的 segment 链表：先把数组初始化为 `big_M`，再对每个 segment 计算它覆盖的整数区间 `[ceil(start), floor(end)]`，直接用 `segment.getValue(time)` 写入缓存；如果相邻 segment 在同一个整数断点都覆盖该点，则取两侧值的 `min`，保持和底层 `evaluate()` 在内部断点取较小值的口径一致。segment 没覆盖到的整数点保持 `big_M`，调用方会回退到原函数拼接，不据此剪枝。
 
 正式 label prune 的接入口仍保持保守。Forward child label 先用 `label.minReducedCost + backwardRAfterFloor(job, label.frontier.head.start)` 做 scalar 判断；Backward child label 对称地用 `label.minReducedCost + forwardUBeforeCeil(job, label.frontier.tail.end)`。只有 scalar lower bound 已经不小于 cutoff 时才直接剪枝；如果缓存不可用、返回 `big_M`，或者 scalar 仍可能小于 cutoff，则回退到原来的函数 `add/findMinimal`。因此这次实现不会用离散值替代精确函数判断，只是在明显不可能生成负列时跳过重函数拼接。
 
@@ -751,3 +751,5 @@ lowerBound = completion.findMinimal(false, true)[0];
 本机对 `wet020_001_2m` 做 root-only smoke，模式为 `fullDomain-cb-allCycles`、`maxNodes=1`，结果 `obj=bound=6343, valid=true`。本轮日志显示 `completionBoundScalar check/pruned/fallback/unavailable=521/116/405/0`，说明 scalar 预筛确实命中，直接省掉了 116 次完整函数拼接；剩余 405 次继续走精确函数判断。该单例 exact pricing 时间为 `0.180s`，completion bound 构造约 `86.694ms`。由于历史对照日志来自不同临时运行和 JVM 状态，不能据此直接断言 wall time 更快；当前只能确认它减少了重函数评价次数，是否转化为稳定提速还需要在 20/21/22/25/30 等样例上做同口径批量对照。
 
 按 segment 扫描版复跑同一 smoke 后，结果仍为 `obj=bound=6343, valid=true`，scalar 统计仍为 `521/116/405/0`。本次 exact pricing 为 `0.188s`，completion bound 构造约 `87.129ms`。这个小例子上构造时间没有明显下降，说明缓存构造本身不是主要瓶颈；但实现口径已经从“每个整数点重复 evaluate 扫函数”改为“每个 segment 只扫自己覆盖的整数点”，后续在更大 horizon 或更多段的样例上更合理。
+
+最终边界口径再次收紧：`UBefore/RAfter` 不再对函数物理定义域之外的整数点做 head/tail 常数填充，也不把越界查询 clamp 到最后一格；这些位置保持或返回 `big_M`，由 scalar 入口统计为 `unavailable` 并回退到原函数拼接。复跑 `wet020_001_2m` root-only `fullDomain-cb-allCycles`，结果仍为 `obj=bound=6343, valid=true`，日志为 `completionBoundScalar check/pruned/fallback/unavailable=521/116/405/0`，说明当前 full-domain completion bound 的 `0/T` 边界覆盖正常，边界修正没有改变该样例的剪枝命中。

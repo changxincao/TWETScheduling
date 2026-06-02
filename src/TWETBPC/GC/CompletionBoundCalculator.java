@@ -62,7 +62,7 @@ final class CompletionBoundCalculator {
 				return Utility.big_M;
 			}
 			if (index > maxDiscreteTime) {
-				index = maxDiscreteTime;
+				return Utility.big_M;
 			}
 			return discreteValue(forwardUBeforeByJob[job], index);
 		}
@@ -73,7 +73,7 @@ final class CompletionBoundCalculator {
 			}
 			int index = (int) Math.floor(earliestTime);
 			if (index < 0) {
-				index = 0;
+				return Utility.big_M;
 			}
 			if (index > maxDiscreteTime) {
 				return Utility.big_M;
@@ -429,7 +429,7 @@ final class CompletionBoundCalculator {
 	/**
 	 * 2026-06-02: prefix-min 后的 U_i(t) 整体非增，因此整数 k 上的
 	 * UBefore[k] 可直接表示 min_{t<=k} U_i(t)。这里按 segment 链表一次填充，
-	 * 不逐点调用 evaluate()；右端之后用 tail 端点值表示“当前已知前缀 bound 的最小值”。
+	 * 不逐点调用 evaluate()；物理定义域外保持 big_M，由调用方回退到原函数拼接。
 	 */
 	private double[] buildForwardBeforeCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
@@ -438,18 +438,13 @@ final class CompletionBoundCalculator {
 		double[] values = new double[maxDiscreteTime + 1];
 		Arrays.fill(values, Utility.big_M);
 		fillDiscreteValuesFromSegments(values, function);
-		int firstAfterTail = Math.max(0, (int) Math.floor(function.tail.end) + 1);
-		if (firstAfterTail <= maxDiscreteTime) {
-			double tailValue = function.tail.getValue(function.tail.end);
-			Arrays.fill(values, firstAfterTail, maxDiscreteTime + 1, tailValue);
-		}
 		return values;
 	}
 
 	/**
 	 * 2026-06-02: suffix-min 后的 R_i(t) 整体非减，因此整数 k 上的
 	 * RAfter[k] 可直接表示 min_{t>=k} R_i(t)。这里按 segment 链表一次填充，
-	 * 不逐点调用 evaluate()；左端之前用 head 端点值表示“当前已知后缀 bound 的最小值”。
+	 * 不逐点调用 evaluate()；物理定义域外保持 big_M，由调用方回退到原函数拼接。
 	 */
 	private double[] buildBackwardAfterCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
@@ -457,11 +452,6 @@ final class CompletionBoundCalculator {
 		}
 		double[] values = new double[maxDiscreteTime + 1];
 		Arrays.fill(values, Utility.big_M);
-		int lastBeforeHead = Math.min(maxDiscreteTime, (int) Math.ceil(function.head.start) - 1);
-		if (lastBeforeHead >= 0) {
-			double headValue = function.head.getValue(function.head.start);
-			Arrays.fill(values, 0, lastBeforeHead + 1, headValue);
-		}
 		fillDiscreteValuesFromSegments(values, function);
 		return values;
 	}

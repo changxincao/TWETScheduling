@@ -1,4 +1,4 @@
-# Completion Bound 与 Node Join 设计整理
+﻿# Completion Bound 与 Node Join 设计整理
 
 本文整理自 `docs/plans/2026-05-29-completion-bound尝试和node-join原始记录.txt`，并融合后续关于 full-domain、node join 和状态函数 correcting 的补充判断。目标不是给出最终代码，而是把当前关于 completion bound 和 node join 的核心逻辑沉淀清楚，方便后续实现时逐项对照。
 
@@ -857,3 +857,8 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 配置上新增 `enableRestrictedMasterIntegerHeuristic=true` 和 `restrictedMasterIntegerHeuristicTimeLimitSeconds`。默认时间限制为 `0`，表示不限制，尽量求当前 restricted master integer 的最优解；如果后续大节点发现该 MIP 成本过高，可以把时间限制设为正数，此时仍可用找到的可行整数解刷新上界，但不再保证 restricted master integer 已最优。
 
 验证方面，相关 `Basic/Common/HEU/Output/TWETBPC` 子集已通过 `javac`。`tmp-wet020_001_2m` 半域 root-only 仍为 `ROOT_PROCESSED, obj=bound=6343, valid=true`，该例 root LP 本身已整数，因此不会触发额外整数启发式。`tmp-wet030_001_2m` 半域 root-only 在 `completionBound=allCycles`、`maxNodes=1` 下触发了新组件：初始 incumbent 为 `46152`，root LP bound 为 `15261.833333` 且不是整数节点；restricted MIP 用 `0.854s` 得到 `obj=15325`、选中 2 条列，并把 incumbent 刷新到 `15325`。最终状态仍是 `NODE_LIMIT`，因为 `maxNodes=1` 不允许继续分支；验证结果 `valid=true`，gap 约 `0.4122%`。这正好闭合了此前 root-only 大 gap 的问题：列池里已有好整数列组合，只是原主流程没有在 fractional root 后额外求一次整数 restricted master。
+### 39.1 为什么 restricted integer 启发式单独复制 MIP
+
+当前实现选择单独复制一个 restricted master integer MIP，而不是直接把原 `LP` 对象里的变量临时改成整数。这个选择主要是为了隔离语义和避免污染后续 pricing。原 `LP` 模型是当前节点的 LP relaxation，后续还要保留它的 LP 解、dual 和 reduced cost 口径，用于分支、列生成和 trace。MIP 解没有同样意义的 dual，如果在原 CPLEX 模型上临时改变量类型再改回来，容易让后续 LP 状态、basis/dual 或变量类型语义变得不清楚。
+
+因此 restricted integer 组件只复制当前节点已经稳定的列池和分支状态，单独求一个整数 RMP，用得到的整数解刷新启发式上界；它不参与 reduced cost，不改变原 LP 的 dual，也不会因为找到整数上界就把 fractional node 直接关闭。后续若该 MIP 建模时间成为瓶颈，可以考虑缓存覆盖矩阵、列到弧/相邻 pair 的映射或 tariff segment 辅助结构，但仍建议保持独立 CPLEX model，而不是直接修改原 LP relaxation 模型。

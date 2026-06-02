@@ -805,3 +805,5 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 2026-06-02 追加复测：在当前收窄实现下再次跑 `tmp-wet030_001_2m` root-only，同一轮 scalar-on exact pricing 总时间为 `2.428s`，scalar-off 为 `2.745s`；两者均为 `addedColumns=363/15/1/0`、pool `5163`、bound `15261.833333`。scalar-on 每轮函数拼接次数为 `44290/11132/9355/9170`，scalar-off 为 `51020/12371/10574/10369`，也就是总计从 `74334` 降到 `63947`。这个结果说明当前 scalar 预筛在 wet030 上确实能略省 exact pricing 时间，但 wall time 仍受 completion-bound DP 构造和 JVM/CPLEX 波动影响，不能只按单次秒数做强结论。
 
 2026-06-02 继续查历史日志：当前工作区没有找到 `tmp-wet030_001_2m` 的 full-domain `completionBound=off` 有效结果。`test-results/bpc/tmp-arc-cb-wet030-off/` 目录存在但为空，也没有对应 CSV。现存 wet030 full-domain 记录主要是 `allCycles`、`twoCycle`、`allCycles-scalarOff`；其中 `scalarOff` 只是关闭 scalar 预筛，completion bound 仍然开启，不能作为 completion-bound-off 对照。若需要 wet030 关闭 completion bound 的时间，需要重新跑。
+
+随后实际尝试运行 `tmp-wet030_001_2m` root-only `fullDomain`、`completionBound=off`。该运行超过二十分钟仍未完成，期间 Java 主进程持续占用 CPU，终止前累计 CPU 约 `1498s`、内存约 `1.86GB`，没有写出完整 CSV/log 结果。由此可以确认 wet030 full-domain 关闭 completion bound 后不是几秒级对照，而是会在 exact pricing 的 label/join 阶段严重膨胀；当前不再等待完整 off 结果。

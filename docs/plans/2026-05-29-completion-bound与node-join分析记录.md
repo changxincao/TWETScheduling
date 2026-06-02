@@ -740,10 +740,14 @@ lowerBound = completion.findMinimal(false, true)[0];
 
 ## 35. 2026-06-02 full-domain arc join 离散 scalar 预筛实现
 
-本次把上一节的离散预筛先接入 `GCBBStyleBidirectionalFullDomain`，也就是 full-domain crossing-arc join 对照类。共享 `CompletionBoundCalculator.Bounds` 现在在构造完 `forwardUByJob/backwardRByJob` 后额外生成两个整数时间缓存：`forwardUBeforeByJob[job][k]` 表示 `min_{t<=k} U_i(t)`，`backwardRAfterByJob[job][k]` 表示 `min_{t>=k} R_i(t)`。由于 `U_i` 已经 prefix-min 归一、`R_i` 已经 suffix-min 归一，缓存值可以直接通过端点 clamp 后 evaluate 得到，不需要再扫描完整函数。
+本次把上一节的离散预筛先接入 `GCBBStyleBidirectionalFullDomain`，也就是 full-domain crossing-arc join 对照类。共享 `CompletionBoundCalculator.Bounds` 现在在构造完 `forwardUByJob/backwardRByJob` 后额外生成两个整数时间缓存：`forwardUBeforeByJob[job][k]` 表示 `min_{t<=k} U_i(t)`，`backwardRAfterByJob[job][k]` 表示 `min_{t>=k} R_i(t)`。由于 `U_i` 已经 prefix-min 归一、`R_i` 已经 suffix-min 归一，缓存只需要基于最终一维函数数组构造，和前面使用 `allCycles` 还是 `twoCycle` 无关。
+
+2026-06-02 追加修正：缓存构造不能逐整数点调用 `evaluate()`，否则每个点都可能从函数头重新扫描 segment，违背离散预筛的加速目的。当前实现改为一次遍历函数的 segment 链表：先把数组初始化为 `big_M`，再对每个 segment 计算它覆盖的整数区间 `[ceil(start), floor(end)]`，直接用 `segment.getValue(time)` 写入缓存；如果相邻 segment 在同一个整数断点都覆盖该点，则取两侧值的 `min`，保持和底层 `evaluate()` 在内部断点取较小值的口径一致。Forward 的 `k` 超过物理 tail 时，用 tail 端点值填充后续整数点，表示当前已知 `t<=k` 范围内的最小前缀 bound；Backward 的 `k` 早于物理 head 时，用 head 端点值填充左侧整数点，表示当前已知 `t>=k` 范围内的最小后缀 bound。右侧超出 backward tail 仍为 `big_M`，调用方会回退到原函数拼接，不据此剪枝。
 
 正式 label prune 的接入口仍保持保守。Forward child label 先用 `label.minReducedCost + backwardRAfterFloor(job, label.frontier.head.start)` 做 scalar 判断；Backward child label 对称地用 `label.minReducedCost + forwardUBeforeCeil(job, label.frontier.tail.end)`。只有 scalar lower bound 已经不小于 cutoff 时才直接剪枝；如果缓存不可用、返回 `big_M`，或者 scalar 仍可能小于 cutoff，则回退到原来的函数 `add/findMinimal`。因此这次实现不会用离散值替代精确函数判断，只是在明显不可能生成负列时跳过重函数拼接。
 
 日志中新增 `completionBoundScalar check/pruned/fallback/unavailable` 四个计数，用来回答 scalar 预筛是否触发。`check` 是尝试次数，`pruned` 是直接由 scalar 剪掉、没有进入函数拼接的次数，`fallback` 是 scalar 没有剪掉而继续走 `add/findMinimal` 的次数，`unavailable` 是缓存缺失或边界不可用导致回退的次数。`completionBoundFunctionEvaluations` 现在只统计真正进入函数拼接的次数。
 
 本机对 `wet020_001_2m` 做 root-only smoke，模式为 `fullDomain-cb-allCycles`、`maxNodes=1`，结果 `obj=bound=6343, valid=true`。本轮日志显示 `completionBoundScalar check/pruned/fallback/unavailable=521/116/405/0`，说明 scalar 预筛确实命中，直接省掉了 116 次完整函数拼接；剩余 405 次继续走精确函数判断。该单例 exact pricing 时间为 `0.180s`，completion bound 构造约 `86.694ms`。由于历史对照日志来自不同临时运行和 JVM 状态，不能据此直接断言 wall time 更快；当前只能确认它减少了重函数评价次数，是否转化为稳定提速还需要在 20/21/22/25/30 等样例上做同口径批量对照。
+
+按 segment 扫描版复跑同一 smoke 后，结果仍为 `obj=bound=6343, valid=true`，scalar 统计仍为 `521/116/405/0`。本次 exact pricing 为 `0.188s`，completion bound 构造约 `87.129ms`。这个小例子上构造时间没有明显下降，说明缓存构造本身不是主要瓶颈；但实现口径已经从“每个整数点重复 evaluate 扫函数”改为“每个 segment 只扫自己覆盖的整数点”，后续在更大 horizon 或更多段的样例上更合理。

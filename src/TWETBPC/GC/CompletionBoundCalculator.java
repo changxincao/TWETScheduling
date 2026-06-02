@@ -2,6 +2,7 @@ package TWETBPC.GC;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.PriorityQueue;
 
@@ -427,44 +428,55 @@ final class CompletionBoundCalculator {
 
 	/**
 	 * 2026-06-02: prefix-min 后的 U_i(t) 整体非增，因此整数 k 上的
-	 * UBefore[k] 可直接表示 min_{t<=k} U_i(t)。超出右端时取 tail 值，
-	 * 缓存缺失则由调用方回退到原函数拼接。
+	 * UBefore[k] 可直接表示 min_{t<=k} U_i(t)。这里按 segment 链表一次填充，
+	 * 不逐点调用 evaluate()；右端之后用 tail 端点值表示“当前已知前缀 bound 的最小值”。
 	 */
 	private double[] buildForwardBeforeCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
 			return null;
 		}
 		double[] values = new double[maxDiscreteTime + 1];
-		for (int time = 0; time <= maxDiscreteTime; time++) {
-			if (Utility.compareLt(time, function.head.start)) {
-				values[time] = Utility.big_M;
-			} else {
-				double queryTime = Utility.compareGt(time, function.tail.end) ? function.tail.end : time;
-				values[time] = function.evaluate(queryTime);
-			}
+		Arrays.fill(values, Utility.big_M);
+		fillDiscreteValuesFromSegments(values, function);
+		int firstAfterTail = Math.max(0, (int) Math.floor(function.tail.end) + 1);
+		if (firstAfterTail <= maxDiscreteTime) {
+			double tailValue = function.tail.getValue(function.tail.end);
+			Arrays.fill(values, firstAfterTail, maxDiscreteTime + 1, tailValue);
 		}
 		return values;
 	}
 
 	/**
 	 * 2026-06-02: suffix-min 后的 R_i(t) 整体非减，因此整数 k 上的
-	 * RAfter[k] 可直接表示 min_{t>=k} R_i(t)。左端之前取 head 值，
-	 * 右端之后记为不可用，由调用方回退到原函数拼接。
+	 * RAfter[k] 可直接表示 min_{t>=k} R_i(t)。这里按 segment 链表一次填充，
+	 * 不逐点调用 evaluate()；左端之前用 head 端点值表示“当前已知后缀 bound 的最小值”。
 	 */
 	private double[] buildBackwardAfterCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
 			return null;
 		}
 		double[] values = new double[maxDiscreteTime + 1];
-		for (int time = 0; time <= maxDiscreteTime; time++) {
-			if (Utility.compareGt(time, function.tail.end)) {
-				values[time] = Utility.big_M;
-			} else {
-				double queryTime = Utility.compareLt(time, function.head.start) ? function.head.start : time;
-				values[time] = function.evaluate(queryTime);
+		Arrays.fill(values, Utility.big_M);
+		int lastBeforeHead = Math.min(maxDiscreteTime, (int) Math.ceil(function.head.start) - 1);
+		if (lastBeforeHead >= 0) {
+			double headValue = function.head.getValue(function.head.start);
+			Arrays.fill(values, 0, lastBeforeHead + 1, headValue);
+		}
+		fillDiscreteValuesFromSegments(values, function);
+		return values;
+	}
+
+	private void fillDiscreteValuesFromSegments(double[] values, PiecewiseLinearFunction function) {
+		int maxDiscreteTime = values.length - 1;
+		for (Segment segment = function.head; segment != null; segment = segment.next) {
+			int firstTime = Math.max(0, (int) Math.ceil(segment.start));
+			int lastTime = Math.min(maxDiscreteTime, (int) Math.floor(segment.end));
+			for (int time = firstTime; time <= lastTime; time++) {
+				if (!Utility.compareLt(time, segment.start) && !Utility.compareGt(time, segment.end)) {
+					values[time] = Math.min(values[time], segment.getValue(time));
+				}
 			}
 		}
-		return values;
 	}
 
 	private FunctionPair buildForwardCandidate(PiecewiseLinearFunction parentF, int prevJob, int job) {

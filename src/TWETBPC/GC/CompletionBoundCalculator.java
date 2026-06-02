@@ -40,10 +40,51 @@ final class CompletionBoundCalculator {
 	static final class Bounds {
 		final PiecewiseLinearFunction[] forwardUByJob;
 		final PiecewiseLinearFunction[] backwardRByJob;
+		final double[][] forwardUBeforeByJob;
+		final double[][] backwardRAfterByJob;
+		final int maxDiscreteTime;
 
-		Bounds(int n) {
+		Bounds(int n, double pricingHorizon) {
 			this.forwardUByJob = new PiecewiseLinearFunction[n + 1];
 			this.backwardRByJob = new PiecewiseLinearFunction[n + 1];
+			this.forwardUBeforeByJob = new double[n + 1][];
+			this.backwardRAfterByJob = new double[n + 1][];
+			this.maxDiscreteTime = Math.max(0, (int) Math.ceil(pricingHorizon));
+		}
+
+		double forwardUBeforeCeil(int job, double latestTime) {
+			if (job <= 0 || job >= forwardUBeforeByJob.length || !Double.isFinite(latestTime)) {
+				return Utility.big_M;
+			}
+			int index = (int) Math.ceil(latestTime);
+			if (index < 0) {
+				return Utility.big_M;
+			}
+			if (index > maxDiscreteTime) {
+				index = maxDiscreteTime;
+			}
+			return discreteValue(forwardUBeforeByJob[job], index);
+		}
+
+		double backwardRAfterFloor(int job, double earliestTime) {
+			if (job <= 0 || job >= backwardRAfterByJob.length || !Double.isFinite(earliestTime)) {
+				return Utility.big_M;
+			}
+			int index = (int) Math.floor(earliestTime);
+			if (index < 0) {
+				index = 0;
+			}
+			if (index > maxDiscreteTime) {
+				return Utility.big_M;
+			}
+			return discreteValue(backwardRAfterByJob[job], index);
+		}
+
+		private double discreteValue(double[] values, int index) {
+			if (values == null || index < 0 || index >= values.length) {
+				return Utility.big_M;
+			}
+			return values[index];
 		}
 	}
 
@@ -102,6 +143,7 @@ final class CompletionBoundCalculator {
 
 	Result build(Relaxation relaxation) {
 		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle() : buildAllCycles();
+		buildDiscreteCaches(bounds);
 		return new Result(bounds, stats);
 	}
 
@@ -190,7 +232,7 @@ final class CompletionBoundCalculator {
 	}
 
 	private Bounds buildAllCycles() {
-		Bounds bounds = new Bounds(data.n);
+		Bounds bounds = new Bounds(data.n, pricingHorizon);
 		PiecewiseLinearFunction[] forwardF = new PiecewiseLinearFunction[data.n + 1];
 		PiecewiseLinearFunction[] backwardB = new PiecewiseLinearFunction[data.n + 1];
 		StateQueue forwardQueue = stateQueue();
@@ -271,7 +313,7 @@ final class CompletionBoundCalculator {
 	}
 
 	private Bounds buildTwoCycle() {
-		Bounds bounds = new Bounds(data.n);
+		Bounds bounds = new Bounds(data.n, pricingHorizon);
 		PiecewiseLinearFunction[][] forwardU = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
 		PiecewiseLinearFunction[][] forwardF = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
 		PiecewiseLinearFunction[][] backwardR = new PiecewiseLinearFunction[data.n + 1][data.n + 2];
@@ -372,6 +414,57 @@ final class CompletionBoundCalculator {
 		}
 		stats.aggregateNanos += System.nanoTime() - phaseStart;
 		return bounds;
+	}
+
+	private void buildDiscreteCaches(Bounds bounds) {
+		for (int job = 1; job <= data.n; job++) {
+			bounds.forwardUBeforeByJob[job] = buildForwardBeforeCache(bounds.forwardUByJob[job],
+					bounds.maxDiscreteTime);
+			bounds.backwardRAfterByJob[job] = buildBackwardAfterCache(bounds.backwardRByJob[job],
+					bounds.maxDiscreteTime);
+		}
+	}
+
+	/**
+	 * 2026-06-02: prefix-min 后的 U_i(t) 整体非增，因此整数 k 上的
+	 * UBefore[k] 可直接表示 min_{t<=k} U_i(t)。超出右端时取 tail 值，
+	 * 缓存缺失则由调用方回退到原函数拼接。
+	 */
+	private double[] buildForwardBeforeCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
+		if (function == null || function.head == null) {
+			return null;
+		}
+		double[] values = new double[maxDiscreteTime + 1];
+		for (int time = 0; time <= maxDiscreteTime; time++) {
+			if (Utility.compareLt(time, function.head.start)) {
+				values[time] = Utility.big_M;
+			} else {
+				double queryTime = Utility.compareGt(time, function.tail.end) ? function.tail.end : time;
+				values[time] = function.evaluate(queryTime);
+			}
+		}
+		return values;
+	}
+
+	/**
+	 * 2026-06-02: suffix-min 后的 R_i(t) 整体非减，因此整数 k 上的
+	 * RAfter[k] 可直接表示 min_{t>=k} R_i(t)。左端之前取 head 值，
+	 * 右端之后记为不可用，由调用方回退到原函数拼接。
+	 */
+	private double[] buildBackwardAfterCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
+		if (function == null || function.head == null) {
+			return null;
+		}
+		double[] values = new double[maxDiscreteTime + 1];
+		for (int time = 0; time <= maxDiscreteTime; time++) {
+			if (Utility.compareGt(time, function.tail.end)) {
+				values[time] = Utility.big_M;
+			} else {
+				double queryTime = Utility.compareLt(time, function.head.start) ? function.head.start : time;
+				values[time] = function.evaluate(queryTime);
+			}
+		}
+		return values;
 	}
 
 	private FunctionPair buildForwardCandidate(PiecewiseLinearFunction parentF, int prevJob, int job) {

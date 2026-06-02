@@ -143,6 +143,10 @@ public class GCBBStyleBidirectionalFullDomain {
 	private long completionForwardLabelsPruned;
 	private long completionBackwardLabelsPruned;
 	private long completionBoundFunctionEvaluations;
+	private long completionBoundScalarChecks;
+	private long completionBoundScalarPruned;
+	private long completionBoundScalarFunctionFallbacks;
+	private long completionBoundScalarUnavailable;
 	private long completionBoundBuildNanos;
 	private long completionBoundForwardBuildNanos;
 	private long completionBoundBackwardBuildNanos;
@@ -1031,6 +1035,10 @@ public class GCBBStyleBidirectionalFullDomain {
 		completionForwardLabelsPruned = 0;
 		completionBackwardLabelsPruned = 0;
 		completionBoundFunctionEvaluations = 0;
+		completionBoundScalarChecks = 0;
+		completionBoundScalarPruned = 0;
+		completionBoundScalarFunctionFallbacks = 0;
+		completionBoundScalarUnavailable = 0;
 		completionBoundBuildNanos = 0;
 		completionBoundForwardBuildNanos = 0;
 		completionBoundBackwardBuildNanos = 0;
@@ -1076,6 +1084,9 @@ public class GCBBStyleBidirectionalFullDomain {
 				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
 				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
 				+ "/" + completionBackwardLabelsPruned
+				+ ", completionBoundScalar check/pruned/fallback/unavailable=" + completionBoundScalarChecks
+				+ "/" + completionBoundScalarPruned + "/" + completionBoundScalarFunctionFallbacks
+				+ "/" + completionBoundScalarUnavailable
 				+ ", completionBoundQueue=" + completionBoundQueueOrdering
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
@@ -1187,14 +1198,17 @@ public class GCBBStyleBidirectionalFullDomain {
 		if (suffix == null || suffix.head == null) {
 			return false;
 		}
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		if (isForwardCompletionBoundScalarPruned(label, cutoff)) {
+			return true;
+		}
 		completionBoundFunctionEvaluations++;
 		PiecewiseLinearFunction completion = label.frontier.add(suffix);
 		if (completion.head == null) {
 			return false;
 		}
 		double lowerBound = completion.findMinimal(false, true)[0];
-		double cutoff = completionBoundCutoff();
-		completionBoundLastEvaluationCutoff = cutoff;
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
@@ -1207,15 +1221,58 @@ public class GCBBStyleBidirectionalFullDomain {
 		if (prefix == null || prefix.head == null) {
 			return false;
 		}
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		if (isBackwardCompletionBoundScalarPruned(label, cutoff)) {
+			return true;
+		}
 		completionBoundFunctionEvaluations++;
 		PiecewiseLinearFunction completion = prefix.add(label.frontier);
 		if (completion.head == null) {
 			return false;
 		}
 		double lowerBound = completion.findMinimal(false, true)[0];
-		double cutoff = completionBoundCutoff();
-		completionBoundLastEvaluationCutoff = cutoff;
 		return !Utility.compareLt(lowerBound, cutoff);
+	}
+
+	/**
+	 * 2026-06-02: 离散 scalar 只做 sufficient prune。若 lower bound 已经不小于 cutoff，
+	 * 后续完整函数拼接也不可能生成负列；否则必须回退到原来的 add/findMinimal 精确判断。
+	 */
+	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {
+		completionBoundScalarChecks++;
+		double suffixLowerBound = completionBounds.backwardRAfterFloor(label.jid, label.frontier.head.start);
+		if (Utility.isBigMValue(suffixLowerBound)) {
+			completionBoundScalarUnavailable++;
+			return false;
+		}
+		double scalarLowerBound = label.minReducedCost + suffixLowerBound;
+		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
+			completionBoundScalarPruned++;
+			return true;
+		}
+		completionBoundScalarFunctionFallbacks++;
+		return false;
+	}
+
+	/**
+	 * 2026-06-02: backward 对称使用 prefix completion bound 的 ceil(P) 离散查询；
+	 * 缓存不可用或 scalar 仍可能为负时，不据此剪枝。
+	 */
+	private boolean isBackwardCompletionBoundScalarPruned(BackwardLabel label, double cutoff) {
+		completionBoundScalarChecks++;
+		double prefixLowerBound = completionBounds.forwardUBeforeCeil(label.jid, label.frontier.tail.end);
+		if (Utility.isBigMValue(prefixLowerBound)) {
+			completionBoundScalarUnavailable++;
+			return false;
+		}
+		double scalarLowerBound = label.minReducedCost + prefixLowerBound;
+		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
+			completionBoundScalarPruned++;
+			return true;
+		}
+		completionBoundScalarFunctionFallbacks++;
+		return false;
 	}
 
 	/**

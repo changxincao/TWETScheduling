@@ -737,3 +737,13 @@ lowerBound = completion.findMinimal(false, true)[0];
 实现时仍建议保留防御性回退，而不是把它作为主要逻辑。原因不是预期会频繁出现越界，而是当前代码里 PWLF 的物理 `head/tail` 和元数据 domain 曾经出现过不一致风险，且未来如果 local horizon、非 full-domain completion penalty、非 `Tmid` 裁剪点或小数时间离散化进入这个缓存，边界假设可能变化。最稳妥的实现口径是：正常情况下 `floor(L)` clamp 到 `[0,H]`、`ceil(P)` clamp 到 `[0,H]` 并返回 finite scalar；如果缓存值缺失或为 `big_M`，只回退到现有函数 `add/findMinimal`，不直接据此剪枝。这样不会削弱当前你说的整数时间加速思路，也能避免未来边界变动时出现误剪。
 
 取整方向仍按“取更小的那一侧”理解。forward label 用 `floor(L)` 查 suffix，是把可拼接时间集合从 `t >= L` 放大为 `t >= floor(L)`，得到的 `RAfter` 不大于真实后缀最小值，因此更松但安全。backward label 用 `ceil(P)` 查 prefix，是把可拼接集合从 `t <= P` 放大为 `t <= ceil(P)`，得到的 `UBefore` 也不大于真实前缀最小值，同样更松但安全。这个预筛只能在 scalar bound 已经超过 cutoff 时避免重函数拼接；如果没有超过 cutoff，仍需走原来的函数 `add/findMinimal` 做精确判断。
+
+## 35. 2026-06-02 full-domain arc join 离散 scalar 预筛实现
+
+本次把上一节的离散预筛先接入 `GCBBStyleBidirectionalFullDomain`，也就是 full-domain crossing-arc join 对照类。共享 `CompletionBoundCalculator.Bounds` 现在在构造完 `forwardUByJob/backwardRByJob` 后额外生成两个整数时间缓存：`forwardUBeforeByJob[job][k]` 表示 `min_{t<=k} U_i(t)`，`backwardRAfterByJob[job][k]` 表示 `min_{t>=k} R_i(t)`。由于 `U_i` 已经 prefix-min 归一、`R_i` 已经 suffix-min 归一，缓存值可以直接通过端点 clamp 后 evaluate 得到，不需要再扫描完整函数。
+
+正式 label prune 的接入口仍保持保守。Forward child label 先用 `label.minReducedCost + backwardRAfterFloor(job, label.frontier.head.start)` 做 scalar 判断；Backward child label 对称地用 `label.minReducedCost + forwardUBeforeCeil(job, label.frontier.tail.end)`。只有 scalar lower bound 已经不小于 cutoff 时才直接剪枝；如果缓存不可用、返回 `big_M`，或者 scalar 仍可能小于 cutoff，则回退到原来的函数 `add/findMinimal`。因此这次实现不会用离散值替代精确函数判断，只是在明显不可能生成负列时跳过重函数拼接。
+
+日志中新增 `completionBoundScalar check/pruned/fallback/unavailable` 四个计数，用来回答 scalar 预筛是否触发。`check` 是尝试次数，`pruned` 是直接由 scalar 剪掉、没有进入函数拼接的次数，`fallback` 是 scalar 没有剪掉而继续走 `add/findMinimal` 的次数，`unavailable` 是缓存缺失或边界不可用导致回退的次数。`completionBoundFunctionEvaluations` 现在只统计真正进入函数拼接的次数。
+
+本机对 `wet020_001_2m` 做 root-only smoke，模式为 `fullDomain-cb-allCycles`、`maxNodes=1`，结果 `obj=bound=6343, valid=true`。本轮日志显示 `completionBoundScalar check/pruned/fallback/unavailable=521/116/405/0`，说明 scalar 预筛确实命中，直接省掉了 116 次完整函数拼接；剩余 405 次继续走精确函数判断。该单例 exact pricing 时间为 `0.180s`，completion bound 构造约 `86.694ms`。由于历史对照日志来自不同临时运行和 JVM 状态，不能据此直接断言 wall time 更快；当前只能确认它减少了重函数评价次数，是否转化为稳定提速还需要在 20/21/22/25/30 等样例上做同口径批量对照。

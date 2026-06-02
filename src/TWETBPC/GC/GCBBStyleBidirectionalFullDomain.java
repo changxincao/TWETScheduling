@@ -1166,7 +1166,7 @@ public class GCBBStyleBidirectionalFullDomain {
 		long start = System.nanoTime();
 		CompletionBoundCalculator calculator = new CompletionBoundCalculator(data, lp, pricingHorizon,
 				dynamicJobPenaltyByJob, dynamicBackwardPenaltyByJob, zeroDualExcludedJobs,
-				completionBoundQueueOrdering);
+				completionBoundQueueOrdering, config.bidirectionalCompletionBoundScalarPruning);
 		CompletionBoundCalculator.Result result = calculator.build(completionBoundRelaxation);
 		completionBounds = result.bounds;
 		recordCompletionBoundStats(result.stats);
@@ -1200,7 +1200,8 @@ public class GCBBStyleBidirectionalFullDomain {
 		}
 		double cutoff = completionBoundCutoff();
 		completionBoundLastEvaluationCutoff = cutoff;
-		if (isForwardCompletionBoundScalarPruned(label, cutoff)) {
+		if (config.bidirectionalCompletionBoundScalarPruning
+				&& isForwardCompletionBoundScalarPruned(label, cutoff)) {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
@@ -1223,7 +1224,8 @@ public class GCBBStyleBidirectionalFullDomain {
 		}
 		double cutoff = completionBoundCutoff();
 		completionBoundLastEvaluationCutoff = cutoff;
-		if (isBackwardCompletionBoundScalarPruned(label, cutoff)) {
+		if (config.bidirectionalCompletionBoundScalarPruning
+				&& isBackwardCompletionBoundScalarPruned(label, cutoff)) {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;

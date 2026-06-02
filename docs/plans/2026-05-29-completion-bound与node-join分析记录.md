@@ -757,3 +757,13 @@ lowerBound = completion.findMinimal(false, true)[0];
 对这个做法的安全性判断为：作为 sufficient scalar prune 是成立的。Forward label 查询 `RAfter[floor(L)]` 时，把真实可拼接集合 `t >= L` 放大到 `t >= floor(L)`，得到的是不强于真实后缀最小值的下界；Backward label 查询 `UBefore[ceil(P)]` 时，把真实可拼接集合 `t <= P` 放大到 `t <= ceil(P)`，也只会得到更松的前缀下界。只有这个松下界已经不小于 cutoff 时才剪枝，因此不会漏掉可能为负的完整列。`allCycles/twoCycle` 的差别已经被吸收到最终一维 `U_i/R_i` 函数里，离散缓存不依赖 relaxation 类型。
 
 进一步修正后，full-domain scalar 入口已经不再对 `big_M` 回退，而是直接剪枝并同时计入 `pruned/unavailable`。这个语义和当前整数离散预筛保持一致：如果 forward label 查询的 `RAfter[floor(L)]` 没有 finite 值，表示 `L` 之后没有可用后缀补全点；如果 backward label 查询的 `UBefore[ceil(P)]` 没有 finite 值，表示 `P` 之前没有可用前缀补全点。后续若要处理非整数时间或非 full-domain completion penalty，需要重新定义这个 `big_M` 是否仍表示“不可能补全”，否则不能混用当前直接剪枝口径。
+
+## 36. 2026-06-02 scalar 预计算开关对照测试
+
+本轮测试的目的是确认离散 scalar 预筛在 completion bound 已经开启的基础上是否还能进一步节省时间。为避免对照口径不干净，先给 full-domain 对照路径增加了 `bidirectionalCompletionBoundScalarPruning` 开关：开启时构建并使用 `UBefore/RAfter` 整数缓存，关闭时不仅跳过 scalar 判断，也不再构建这两个缓存。`GCBBFullDomainComparisonTest` 同步支持 `twet.bpc.fullDomainCompare.completionBoundScalar=false`，并在 mode 后缀中标记 `scalarOff`。
+
+root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO completion bound 队列。`wet020/wet021` 中，scalar 开启后 `wet020` exact pricing 从 `0.182s` 降到 `0.149s`，`completionBoundFunctionEvaluations` 从 `521` 降到 `405`；`wet021` 两轮 exact 合计基本持平，函数拼接次数从 `424+41` 降到 `277+23`。这说明小样例上 scalar 可以稳定减少函数级 `add/findMinimal` 次数，但 wall time 只在部分样例上转化为明显收益。
+
+`wet022/wet025/wet030` 的严格对照显示结构性收益更清楚。`wet022` 中 scalar 让函数拼接次数从 `427` 降到 `208`，并把 backward kept 从 `11` 降到 `0`，exact pricing 从 `0.445s` 降到 `0.199s`。`wet025` 中函数拼接次数从 `5729` 降到 `4357`，backward kept 从 `72` 降到 `37`，exact pricing 从 `0.335s` 降到 `0.149s`。`wet030` 是 node-limit 样例，四轮 pricing 中 scalar 的函数拼接总次数从 `74334` 降到 `71012`，但本次 exact 总时间为 `6.129s` 对 `4.973s`，没有表现为总时间收益；该样例里 completion bound DP 构造时间波动很大，且 scalar 改变后续生成列数量和 bound，不能只按总秒数判断。
+
+当前结论为：scalar 预筛在统计上是有效的，确实能减少 completion bound 后续的重函数拼接，并且在 `wet022/wet025` 这种中等 case 上还会通过更早剪掉后缀 label 减少 join 工作；但它不是稳定的 wall-time 保证，特别是 `wet030` 这类多轮、node-limit 且 completion bound 构造时间占主导的 case，会被 DP 构造波动和列集差异掩盖。作为默认开启的轻量预筛是合理的，但若后续优化方向是大幅降时间，重点仍应放在 completion bound 构造阶段和减少多轮重复构造，而不是只继续打磨 scalar 查询本身。

@@ -121,6 +121,7 @@ final class CompletionBoundCalculator {
 	private final PiecewiseLinearFunction[] backwardReducedPenaltyByJob;
 	private final boolean[] zeroDualExcludedJobs;
 	private final QueueOrdering queueOrdering;
+	private final boolean buildDiscreteCaches;
 	private final int[][] forwardSuccessorsByJob;
 	private final int[][] backwardPredecessorsByJob;
 	private final Stats stats = new Stats();
@@ -128,6 +129,13 @@ final class CompletionBoundCalculator {
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
 			boolean[] zeroDualExcludedJobs, QueueOrdering queueOrdering) {
+		this(data, lp, pricingHorizon, forwardPenaltyByJob, backwardPenaltyByJob, zeroDualExcludedJobs,
+				queueOrdering, true);
+	}
+
+	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
+			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
+			boolean[] zeroDualExcludedJobs, QueueOrdering queueOrdering, boolean buildDiscreteCaches) {
 		this.data = data;
 		this.lp = lp;
 		this.node = lp.getNode();
@@ -138,13 +146,16 @@ final class CompletionBoundCalculator {
 				forwardReducedPenaltyByJob);
 		this.zeroDualExcludedJobs = zeroDualExcludedJobs;
 		this.queueOrdering = queueOrdering == null ? QueueOrdering.FIFO : queueOrdering;
+		this.buildDiscreteCaches = buildDiscreteCaches;
 		this.forwardSuccessorsByJob = buildForwardSuccessorLists();
 		this.backwardPredecessorsByJob = buildBackwardPredecessorLists();
 	}
 
 	Result build(Relaxation relaxation) {
 		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle() : buildAllCycles();
-		buildDiscreteCaches(bounds);
+		if (buildDiscreteCaches) {
+			buildDiscreteCaches(bounds);
+		}
 		return new Result(bounds, stats);
 	}
 

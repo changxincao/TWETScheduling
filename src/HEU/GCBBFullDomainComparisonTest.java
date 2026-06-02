@@ -131,6 +131,9 @@ public class GCBBFullDomainComparisonTest {
 				? "off" : config.bidirectionalCompletionBoundRelaxation.trim();
 		if ((fullDomain || nodeJoin) && !completionBound.isEmpty() && !"off".equalsIgnoreCase(completionBound)) {
 			mode += "-cb-" + completionBound;
+			if (fullDomain && !config.bidirectionalCompletionBoundScalarPruning) {
+				mode += "-scalarOff";
+			}
 		}
 		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
@@ -177,6 +180,9 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalCompletionBoundQueueOrdering = System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBoundQueue",
 				config.bidirectionalCompletionBoundQueueOrdering);
+		config.bidirectionalCompletionBoundScalarPruning = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.completionBoundScalar",
+				Boolean.toString(config.bidirectionalCompletionBoundScalarPruning)));
 		config.fullDomainNodeJoinCrossingSide = System.getProperty(
 				"twet.bpc.fullDomainCompare.nodeJoinCrossingSide", config.fullDomainNodeJoinCrossingSide);
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(

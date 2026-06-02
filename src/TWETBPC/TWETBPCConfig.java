@@ -82,6 +82,8 @@ public class TWETBPCConfig {
 	public String bidirectionalCompletionBoundRelaxation = "off";
 	/** 2026-06-01: completion bound correcting 队列顺序；可选 fifo/reducedCost，当前实测 FIFO 更稳。 */
 	public String bidirectionalCompletionBoundQueueOrdering = "fifo";
+	/** 2026-06-02: completion bound 是否启用离散 scalar 预筛；仅用于 full-domain 对照路径。 */
+	public boolean bidirectionalCompletionBoundScalarPruning = true;
 	/**
 	 * 2026-05-26: 双向 pricing 的 midpoint 固定比例实验开关。
 	 * 取 NaN 时使用动态 hard/profitable window 中点；

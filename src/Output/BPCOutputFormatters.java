@@ -67,6 +67,14 @@ public final class BPCOutputFormatters {
 		return String.format(Locale.US, "Incumbent updated at node=%d cost=%.6f", nodeId, incumbentCost);
 	}
 
+	public static String formatRestrictedMasterIntegerHeuristic(int nodeId, boolean feasible, boolean improved,
+			double objective, int selectedColumns, String message, long elapsedNanos) {
+		return String.format(Locale.US,
+				"RestrictedInteger node=%d feasible=%s improved=%s obj=%.6f cols=%d time=%.3f ms %s",
+				nodeId, Boolean.toString(feasible), Boolean.toString(improved), objective, selectedColumns,
+				nanosToMillis(elapsedNanos), safeMessage(message));
+	}
+
 	public static String formatNodeClosed(int nodeId, String reason, int queueSizeAfterClose) {
 		return String.format(Locale.US, "Close node=%d reason=%s queue=%d", nodeId, reason, queueSizeAfterClose);
 	}
@@ -104,6 +112,14 @@ public final class BPCOutputFormatters {
 		appendTimingSection(builder, "cut time", summary.getCutTimeNanos(), summary.getCutCallCount());
 		builder.append(String.format(Locale.US, "branch calls=%d, incumbent updates=%d%n", summary.getBranchCalls(),
 				summary.getIncumbentUpdates()));
+		if (summary.getRestrictedIntegerHeuristicCalls() > 0) {
+			builder.append(String.format(Locale.US,
+					"restricted integer heuristic=%d calls, feasible=%d, improved=%d, time=%.3f s%n",
+					summary.getRestrictedIntegerHeuristicCalls(),
+					summary.getRestrictedIntegerHeuristicFeasibleCount(),
+					summary.getRestrictedIntegerHeuristicImproveCount(),
+					summary.getRestrictedIntegerHeuristicTimeNanos() / 1_000_000_000.0));
+		}
 		builder.append(String.format(Locale.US, "pruned by incumbent=%d, closed without branch=%d%n",
 				summary.getPrunedByIncumbentCount(), summary.getClosedWithoutBranchCount()));
 		builder.append(String.format(Locale.US, "peak queue=%d, peak pool=%d, peak cut pool=%d%n", summary.getQueuePeak(),

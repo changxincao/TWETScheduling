@@ -47,6 +47,10 @@ public interface BPCTraceSink {
 	default void onMasterLpSolve(Node node, String phase, long elapsedNanos) {
 	}
 
+	default void onRestrictedMasterIntegerHeuristic(Node node, boolean feasible, boolean improved, double objective,
+			int selectedColumns, String message, long elapsedNanos) {
+	}
+
 	default void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 	}
 

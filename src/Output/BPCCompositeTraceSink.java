@@ -74,6 +74,15 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onRestrictedMasterIntegerHeuristic(Node node, boolean feasible, boolean improved, double objective,
+			int selectedColumns, String message, long elapsedNanos) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onRestrictedMasterIntegerHeuristic(node, feasible, improved, objective, selectedColumns, message,
+					elapsedNanos);
+		}
+	}
+
+	@Override
 	public void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 		for (BPCTraceSink sink : delegates) {
 			sink.onIncumbentUpdated(node, solution, incumbentCost);

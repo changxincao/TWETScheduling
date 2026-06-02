@@ -28,6 +28,7 @@ public class Tree {
 	private final CutPool cutPool;
 	private final InitialColumnBuilder initialColumnBuilder;
 	private final PC pc;
+	private final RestrictedMasterIntegerHeuristic restrictedMasterIntegerHeuristic;
 	private final List<Brancher> branchers;
 	private final BPCTraceSink traceSink;
 
@@ -39,6 +40,7 @@ public class Tree {
 		this.cutPool = cutPool;
 		this.initialColumnBuilder = initialColumnBuilder;
 		this.pc = pc;
+		this.restrictedMasterIntegerHeuristic = new RestrictedMasterIntegerHeuristic(data, config);
 		this.branchers = branchers;
 		this.traceSink = traceSink;
 	}
@@ -88,18 +90,35 @@ public class Tree {
 			}
 
 			boolean incumbentUpdated = false;
+			boolean lpIntegerIncumbentUpdated = false;
 			if (solution.isInteger() && Utility.compareLt(solution.getObjectiveValue(), incumbentCost)) {
 				incumbentCost = solution.getObjectiveValue();
 				incumbentColumnIds = new ArrayList<Integer>(solution.getActiveColumnIds());
 				incumbentOutsourcingValues = solution.getOutsourcingValues();
 				incumbentUpdated = true;
+				lpIntegerIncumbentUpdated = true;
 				traceSink.onIncumbentUpdated(node, solution, incumbentCost);
+			}
+			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic) {
+				RestrictedMasterIntegerHeuristic.Result integerResult = restrictedMasterIntegerHeuristic.solve(lp);
+				boolean heuristicImproved = integerResult.isFeasible()
+						&& Utility.compareLt(integerResult.getObjective(), incumbentCost);
+				traceSink.onRestrictedMasterIntegerHeuristic(node, integerResult.isFeasible(), heuristicImproved,
+						integerResult.getObjective(), integerResult.getSelectedColumnIds().size(),
+						integerResult.getStatus(), integerResult.getElapsedNanos());
+				if (heuristicImproved) {
+					incumbentCost = integerResult.getObjective();
+					incumbentColumnIds = integerResult.getSelectedColumnIds();
+					incumbentOutsourcingValues = integerResult.getOutsourcingValues();
+					incumbentUpdated = true;
+					traceSink.onIncumbentUpdated(node, integerResult.getSolution(), incumbentCost);
+				}
 			}
 
 			traceSink.onMasterSolved(node, solution, lp.getRestrictedColumnIds().size(), lp.getActiveCutIds().size(),
 					bestBound, incumbentCost, queue.size(), pool.size(), cutPool.size(), incumbentUpdated);
 
-			if (incumbentUpdated) {
+			if (lpIntegerIncumbentUpdated) {
 				traceSink.onNodeClosed(node, "integer_incumbent", queue.size());
 				continue;
 			}

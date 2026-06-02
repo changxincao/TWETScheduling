@@ -123,5 +123,9 @@ public class TWETBPCConfig {
 	public double branchingTolerance = 1e-6;
 	/** 节点初始伪成本占位值。 */
 	public double pseudoCostInf = 1e18;
+	/** 2026-06-02: 每个节点 LP 松弛完成后，是否用当前 restricted columns 求一次整数 RMP 刷新启发式上界。 */
+	public boolean enableRestrictedMasterIntegerHeuristic = true;
+	/** 2026-06-02: restricted integer RMP 的 CPLEX 时间限制；小于等于 0 表示不设限制。 */
+	public double restrictedMasterIntegerHeuristicTimeLimitSeconds = 0.0;
 
 }

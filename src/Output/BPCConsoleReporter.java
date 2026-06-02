@@ -49,6 +49,13 @@ public final class BPCConsoleReporter implements BPCTraceSink {
 	}
 
 	@Override
+	public void onRestrictedMasterIntegerHeuristic(Node node, boolean feasible, boolean improved, double objective,
+			int selectedColumns, String message, long elapsedNanos) {
+		System.out.println(BPCOutputFormatters.formatRestrictedMasterIntegerHeuristic(node.id, feasible, improved,
+				objective, selectedColumns, message, elapsedNanos));
+	}
+
+	@Override
 	public void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 		System.out.println(BPCOutputFormatters.formatIncumbentUpdate(node.id, incumbentCost));
 	}

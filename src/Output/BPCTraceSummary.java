@@ -31,6 +31,10 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private int generatedCuts;
 	private int branchCalls;
 	private int incumbentUpdates;
+	private int restrictedIntegerHeuristicCalls;
+	private int restrictedIntegerHeuristicFeasibleCount;
+	private int restrictedIntegerHeuristicImproveCount;
+	private long restrictedIntegerHeuristicTimeNanos;
 	private int prunedByIncumbentCount;
 	private int closedWithoutBranchCount;
 	private int queuePeak;
@@ -143,6 +147,21 @@ public class BPCTraceSummary implements BPCTraceSink {
 	}
 
 	@Override
+	public void onRestrictedMasterIntegerHeuristic(Node node, boolean feasible, boolean improved, double objective,
+			int selectedColumns, String message, long elapsedNanos) {
+		restrictedIntegerHeuristicCalls++;
+		restrictedIntegerHeuristicTimeNanos += elapsedNanos;
+		if (feasible) {
+			restrictedIntegerHeuristicFeasibleCount++;
+		}
+		if (improved) {
+			restrictedIntegerHeuristicImproveCount++;
+		}
+		eventLines.add(BPCOutputFormatters.formatRestrictedMasterIntegerHeuristic(node.id, feasible, improved,
+				objective, selectedColumns, message, elapsedNanos));
+	}
+
+	@Override
 	public void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 		incumbentUpdates++;
 		eventLines.add(BPCOutputFormatters.formatIncumbentUpdate(node.id, incumbentCost));
@@ -237,6 +256,22 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public int getIncumbentUpdates() {
 		return incumbentUpdates;
+	}
+
+	public int getRestrictedIntegerHeuristicCalls() {
+		return restrictedIntegerHeuristicCalls;
+	}
+
+	public int getRestrictedIntegerHeuristicFeasibleCount() {
+		return restrictedIntegerHeuristicFeasibleCount;
+	}
+
+	public int getRestrictedIntegerHeuristicImproveCount() {
+		return restrictedIntegerHeuristicImproveCount;
+	}
+
+	public long getRestrictedIntegerHeuristicTimeNanos() {
+		return restrictedIntegerHeuristicTimeNanos;
 	}
 
 	public int getPrunedByIncumbentCount() {

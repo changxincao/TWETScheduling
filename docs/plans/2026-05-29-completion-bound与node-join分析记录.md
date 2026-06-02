@@ -847,3 +847,13 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 2026-06-02 追加原始 40-job root-only 测试。使用 `data/40-2/wet040_001_2m.dat`，半域 `GCNGBBStyleBidirectionalPricing`、`completionBound=allCycles`、scalar 开启、`maxNodes=1`。该算例完成 root 节点耗时明显放大：`status=NODE_LIMIT`、`obj=83938`、root bound `26155.750000`、gap `68.839%`，总 `solve=225.547s`，其中 heuristic pricing `18.715s/30` 次，exact pricing `205.178s/5` 次，master LP `1.419s`，最终 pool `10239`，验证为 `valid=true`。exact 加列序列为 `612/195/47/15/0`，说明最后一轮已经完成 exact pricing 证明无新负列；`NODE_LIMIT` 只是因为 `maxNodes=1` 不允许继续分支。
 
 该 40-job 样例说明 completion bound 构造不是当前主要瓶颈。5 轮 exact pricing 的 completion-bound buildMs 约为 `2010/2004/1919/1961/2006ms`，合计约 `9.9s`，只占 `exact=205.178s` 的一小部分；真正重的是正式半域 label/dominance 和 final join。第一轮 label kept 已达 `fw=109192`、`bw=86813`，join pairs tried `77254669`，join function eval `53234863`；后续几轮仍保持千万级函数评价。scalar 预筛本轮命中规模也很大，第一轮 `check/pruned/fallback/unavailable=6286147/1700759/4585388/0`，但 fallback 仍有数百万次，说明单靠当前 completion-bound scalar 预筛无法把 40-job root 变成秒级。后续如果要推动 40-job，优化重点应转向进一步压缩 join pair、label table 和 dominance 扫描，而不是只继续降低 completion-bound DP 构造时间。
+
+## 39. 2026-06-02 restricted master 整数启发式上界接入
+
+前面 root 列池整数诊断已经说明，`wet030` root pricing 后列池本身能拼出接近根下界的整数解，但主 BPC 只在 LP 松弛解本身为整数时刷新 incumbent。为了把这个诊断正式接入流程，本次新增 `TWETBPC.LP.RestrictedMasterIntegerHeuristic`，在每个节点 `pc.solve(lp)` 已经完成、当前 restricted columns 已稳定后，单独复制当前节点列池和分支状态，重新建一个小型整数 restricted master。
+
+这个整数模型不修改原 `LP` 对象，也不参与 reduced cost 或 dual 计算。列变量、外包变量和 tariff segment active 变量取整数，coverage 约束沿用当前 RMP 的 set-covering 语义 `>=1`，机器数上下界、directed arc 分支、无向相邻 pair 分支和 tariff segment 分支都复制到这个 MIP。得到的整数解只用于刷新启发式上界；如果当前 LP 松弛仍是分数解，即使整数启发式改善了 incumbent，也不能把节点按 `integer_incumbent` 关闭，后续仍要按 LP bound 做 incumbent 剪枝或继续分支。
+
+配置上新增 `enableRestrictedMasterIntegerHeuristic=true` 和 `restrictedMasterIntegerHeuristicTimeLimitSeconds`。默认时间限制为 `0`，表示不限制，尽量求当前 restricted master integer 的最优解；如果后续大节点发现该 MIP 成本过高，可以把时间限制设为正数，此时仍可用找到的可行整数解刷新上界，但不再保证 restricted master integer 已最优。
+
+验证方面，相关 `Basic/Common/HEU/Output/TWETBPC` 子集已通过 `javac`。`tmp-wet020_001_2m` 半域 root-only 仍为 `ROOT_PROCESSED, obj=bound=6343, valid=true`，该例 root LP 本身已整数，因此不会触发额外整数启发式。`tmp-wet030_001_2m` 半域 root-only 在 `completionBound=allCycles`、`maxNodes=1` 下触发了新组件：初始 incumbent 为 `46152`，root LP bound 为 `15261.833333` 且不是整数节点；restricted MIP 用 `0.854s` 得到 `obj=15325`、选中 2 条列，并把 incumbent 刷新到 `15325`。最终状态仍是 `NODE_LIMIT`，因为 `maxNodes=1` 不允许继续分支；验证结果 `valid=true`，gap 约 `0.4122%`。这正好闭合了此前 root-only 大 gap 的问题：列池里已有好整数列组合，只是原主流程没有在 fractional root 后额外求一次整数 restricted master。

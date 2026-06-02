@@ -827,3 +827,11 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 右子节点表示两个 job 必须相邻但不固定方向，写入 `adjacencyPairState=REQUIRED`。LP 构建时增加 `sum_r (b_ij^r+b_ji^r) lambda_r >= 1`，并在 `readDuals()` 中把该行 dual 同时加到 `arcDual[i][j]` 和 `arcDual[j][i]`，从而让 pricing 在两条方向弧上都反映这条 branching constraint。pricing graph 本身不删弧、不固定方向，后续如果 `q_ij` 已为 1 但 `x_ij`、`x_ji` 仍有方向性分数，才会落到原有 `ArcBrancher` 继续做 directed arc 分支。
 
 这次没有把段落中的 full strong branching 一并接入。原因是当前 `Brancher` 接口只拿到已经求解的 `LP`，没有 `PC`、pricing engine 或安全的 probe mode；如果直接在 brancher 内临时跑完整 price-and-cut，会污染全局列池和 trace，也难以限定为 heuristic-only。后续若要实现 strong branching，建议在 `Tree` 层增加专门的 probe evaluator，候选可以先按接近 0.5 截取少量 pair，再对左右子节点用受控的 restricted LP 或 heuristic pricing 估计 `LB_0/LB_1`，最后按 `max min(LB_0,LB_1)` 选择。
+
+## 38. 2026-06-02 completion bound scalar 预筛覆盖补齐
+
+此前离散 scalar 预筛只接在 `GCBBStyleBidirectionalFullDomain`，也就是 full-domain arc join 路径。半域 `GCNGBBStyleBidirectional` 和 full-domain `GCBBStyleBidirectionalFullDomainNodeJoin` 虽然已经使用 `CompletionBoundCalculator` 做函数 completion bound，但 label prune 仍然每次直接执行 `frontier.add(bound).findMinimal()`，没有先查 `backwardRAfterFloor` / `forwardUBeforeCeil` 的轻量下界。
+
+本次把同一套预筛口径补到这两条路径。forward label 先用 `label.minReducedCost + backwardRAfterFloor(job, label.frontier.head.start)` 判断；backward label 先用 `label.minReducedCost + forwardUBeforeCeil(job, label.frontier.tail.end)` 判断。若 backward label 右端贴着 `pricingHorizon`，仍沿用 full-domain arc join 中已经定位过的边界处理，直接取 `forwardUMin(job)`，避免非整数 horizon 或浮点微偏导致 ceil 到右端外一格。只有 scalar 下界仍可能小于 cutoff 时，才回到原来的完整函数拼接。
+
+三条主路径现在都通过 `config.bidirectionalCompletionBoundScalarPruning` 控制是否构造离散缓存和是否启用 scalar prune，并在统计中输出 `completionBoundScalar check/pruned/fallback/unavailable`。验证方面，focused `javac` 已通过：`GCNGBBStyleBidirectional`、`GCBBStyleBidirectionalFullDomainNodeJoin` 和 `CompletionBoundCalculator` 均编译成功。后续需要用 20/21/22/25/30 的同口径实验确认半域和 nodejoin 上的实际收益。

@@ -146,6 +146,10 @@ public class GCNGBBStyleBidirectional {
 	private long completionForwardLabelsPruned;
 	private long completionBackwardLabelsPruned;
 	private long completionBoundFunctionEvaluations;
+	private long completionBoundScalarChecks;
+	private long completionBoundScalarPruned;
+	private long completionBoundScalarFunctionFallbacks;
+	private long completionBoundScalarUnavailable;
 	private long completionBoundBuildNanos;
 	private long completionBoundForwardBuildNanos;
 	private long completionBoundBackwardBuildNanos;
@@ -1025,6 +1029,10 @@ public class GCNGBBStyleBidirectional {
 		completionForwardLabelsPruned = 0;
 		completionBackwardLabelsPruned = 0;
 		completionBoundFunctionEvaluations = 0;
+		completionBoundScalarChecks = 0;
+		completionBoundScalarPruned = 0;
+		completionBoundScalarFunctionFallbacks = 0;
+		completionBoundScalarUnavailable = 0;
 		completionBoundBuildNanos = 0;
 		completionBoundForwardBuildNanos = 0;
 		completionBoundBackwardBuildNanos = 0;
@@ -1065,6 +1073,9 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
 				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
 				+ "/" + completionBackwardLabelsPruned
+				+ ", completionBoundScalar check/pruned/fallback/unavailable=" + completionBoundScalarChecks
+				+ "/" + completionBoundScalarPruned + "/" + completionBoundScalarFunctionFallbacks
+				+ "/" + completionBoundScalarUnavailable
 				+ ", completionBoundQueue=" + completionBoundQueueOrdering
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
@@ -1126,7 +1137,7 @@ public class GCNGBBStyleBidirectional {
 		long start = System.nanoTime();
 		CompletionBoundCalculator calculator = new CompletionBoundCalculator(data, lp, pricingHorizon,
 				completionForwardPenaltyByJob, completionBackwardPenaltyByJob, zeroDualExcludedJobs,
-				completionBoundQueueOrdering);
+				completionBoundQueueOrdering, config.bidirectionalCompletionBoundScalarPruning);
 		CompletionBoundCalculator.Result result = calculator.build(completionBoundRelaxation);
 		completionBounds = result.bounds;
 		recordCompletionBoundStats(result.stats);
@@ -1158,14 +1169,18 @@ public class GCNGBBStyleBidirectional {
 		if (suffix == null || suffix.head == null) {
 			return false;
 		}
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		if (config.bidirectionalCompletionBoundScalarPruning
+				&& isForwardCompletionBoundScalarPruned(label, cutoff)) {
+			return true;
+		}
 		completionBoundFunctionEvaluations++;
 		PiecewiseLinearFunction completion = label.frontier.add(suffix);
 		if (completion.head == null) {
 			return false;
 		}
 		double lowerBound = completion.findMinimal(false, true)[0];
-		double cutoff = completionBoundCutoff();
-		completionBoundLastEvaluationCutoff = cutoff;
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
@@ -1178,15 +1193,59 @@ public class GCNGBBStyleBidirectional {
 		if (prefix == null || prefix.head == null) {
 			return false;
 		}
+		double cutoff = completionBoundCutoff();
+		completionBoundLastEvaluationCutoff = cutoff;
+		if (config.bidirectionalCompletionBoundScalarPruning
+				&& isBackwardCompletionBoundScalarPruned(label, cutoff)) {
+			return true;
+		}
 		completionBoundFunctionEvaluations++;
 		PiecewiseLinearFunction completion = prefix.add(label.frontier);
 		if (completion.head == null) {
 			return false;
 		}
 		double lowerBound = completion.findMinimal(false, true)[0];
-		double cutoff = completionBoundCutoff();
-		completionBoundLastEvaluationCutoff = cutoff;
 		return !Utility.compareLt(lowerBound, cutoff);
+	}
+
+	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {
+		completionBoundScalarChecks++;
+		double suffixLowerBound = completionBounds.backwardRAfterFloor(label.jid, label.frontier.head.start);
+		if (Utility.isBigMValue(suffixLowerBound)) {
+			completionBoundScalarUnavailable++;
+			completionBoundScalarPruned++;
+			return true;
+		}
+		double scalarLowerBound = label.minReducedCost + suffixLowerBound;
+		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
+			completionBoundScalarPruned++;
+			return true;
+		}
+		completionBoundScalarFunctionFallbacks++;
+		return false;
+	}
+
+	private boolean isBackwardCompletionBoundScalarPruned(BackwardLabel label, double cutoff) {
+		completionBoundScalarChecks++;
+		double prefixLowerBound = isAtPricingHorizon(label.frontier.tail.end)
+				? completionBounds.forwardUMin(label.jid)
+				: completionBounds.forwardUBeforeCeil(label.jid, label.frontier.tail.end);
+		if (Utility.isBigMValue(prefixLowerBound)) {
+			completionBoundScalarUnavailable++;
+			completionBoundScalarPruned++;
+			return true;
+		}
+		double scalarLowerBound = label.minReducedCost + prefixLowerBound;
+		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
+			completionBoundScalarPruned++;
+			return true;
+		}
+		completionBoundScalarFunctionFallbacks++;
+		return false;
+	}
+
+	private boolean isAtPricingHorizon(double time) {
+		return Utility.compareEq(time, pricingHorizon);
 	}
 
 	private void updateBestGeneratedReducedCost(double reducedCost) {

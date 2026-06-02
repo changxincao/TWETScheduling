@@ -809,3 +809,7 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 随后实际尝试运行 `tmp-wet030_001_2m` root-only `fullDomain`、`completionBound=off`。该运行超过二十分钟仍未完成，期间 Java 主进程持续占用 CPU，终止前累计 CPU 约 `1498s`、内存约 `1.86GB`，没有写出完整 CSV/log 结果。由此可以确认 wet030 full-domain 关闭 completion bound 后不是几秒级对照，而是会在 exact pricing 的 label/join 阶段严重膨胀；当前不再等待完整 off 结果。
 
 2026-06-02 继续扩大搜索后，更正上一段“没有历史有效结果”的表述：工作区确实没有 `wet030 completionBound=off` 的完整 CSV/log，但 2026-05-31 的专题第 12 节和全局修改记录已经写过一次未完成试跑。当时 `wet030_001` 在 10 分钟预算内完成了 `allCycles=9.037s` 和 `twoCycle=38.467s` 两个 root-only 对照，`off` 启动后一直未完成并被手动停止。因此历史结论不是“没有做过”，而是“做过但没有完整完成时间”。这与本次超过二十分钟仍未完成后终止的观察一致，说明 `wet030` full-domain 关闭 completion bound 的成本已经远超当前可交互验证范围。
+
+2026-06-02 进一步按完整 BPC 流程验证 `tmp-wet030_001_2m`。这次给 `GCBBFullDomainComparisonTest` 增加了 `twet.bpc.fullDomainCompare.runALNSForSeed` 开关，默认仍关闭 ALNS；显式打开后，初始列为 `63`，其中 incumbent 列为 `2`，初始 incumbent 已为 `15325`。使用 `fullDomain`、`completionBound=allCycles`、FIFO 队列和当前 scalar 预筛，完整流程得到 `status=FINISHED`、`obj=15325`、`bound=15325`、`gap=0`、`valid=true`。总时间 `101.666s`，root 用时 `21.360s`，处理节点数 `13`，其中整数节点 `5`，分支调用 `6` 次，最终列池 `12267`。pricing 统计为总 `168` 轮，其中 heuristic pricing `135` 次、`49.436s`，full-domain exact pricing `33` 次、`44.216s`，master LP 合计 `3.981s`。输出位于 `test-results/bpc/tmp-wet030-full-alns-cb-allCycles-current.csv` 和同名日志目录。
+
+这个结果把前面 root-only 的 gap 解释闭合了：`wet030` 不是 bound 算错或 root 列池质量差，而是对照 runner 关闭 ALNS 时初始上界太差，root-only 又不会额外解 restricted master integer 来刷新 incumbent。打开 ALNS 后，初始上界已经等于最终最优值；BPC 后续通过 13 个节点把下界推到同一值，证明了最优性。

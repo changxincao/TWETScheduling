@@ -159,7 +159,8 @@ public class GCBBFullDomainComparisonTest {
 		config.enableBPCConsoleOutput = false;
 		config.writeBPCResultFiles = false;
 		config.reuseConfiguredBestSolution = false;
-		config.runALNSForSeed = false;
+		// 2026-06-02: 对照实验默认仍关闭 ALNS；需要验证完整 BPC 上界质量时可显式打开。
+		config.runALNSForSeed = Boolean.getBoolean("twet.bpc.fullDomainCompare.runALNSForSeed");
 		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);
 		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxHeuristicColumns",
 				100000);

@@ -1075,6 +1075,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			joinFunctionPruned++;
 			return;
 		}
+		// 2026-06-02: node join 这里直接拼 pre-node forward 与 backward frontier，
+		// 不像 arc-join Tmid 版本那样在 join 前做常数延拓。因此 one-sided 模式若保留了半域裁剪，
+		// 被裁的一侧会按半域定义域参与 add()，不会在 final join 前临时补回另一半。
 		PiecewiseLinearFunction joinCost = forward.preNodeFrontier.add(backwardFull);
 		if (joinCost.head == null) {
 			joinFunctionPruned++;
@@ -1746,6 +1749,9 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		baseForwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		baseBackwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
+			// 2026-06-02: 严格的 full-domain one-sided node join 不应在非 crossing 侧裁掉半域；
+			// 这里只保留当前工程变体：裁掉另一半定义域会让 dominance 只比较半域函数，通常能更早支配
+			// 并减少 kept label。若后续要做纯 full-domain 对照，应把两侧都改回 [0, pricingHorizon]。
 			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0,
 					allowForwardCrossing() ? pricingHorizon : tMid);
 			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job],
@@ -1784,11 +1790,15 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
+		// 2026-06-02: 同 ensureBaseHalfPenaltyCache()；one-sided 时这里可能裁成半域，
+		// 这是保留的加速变体，不是严格 full-domain 语义。
 		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0,
 				allowForwardCrossing() ? pricingHorizon : tMid);
 	}
 
 	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
+		// 2026-06-02: 同 ensureBaseHalfPenaltyCache()；one-sided 时这里可能裁成半域，
+		// 这是保留的加速变体，不是严格 full-domain 语义。
 		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true),
 				allowBackwardCrossing() ? 0.0 : tMid, pricingHorizon);
 	}

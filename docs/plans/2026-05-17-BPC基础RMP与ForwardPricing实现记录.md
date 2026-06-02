@@ -1520,3 +1520,13 @@ full-domain 的优势主要体现在 dominance graph 搜索路径上。由于函
 当前 TWET-BPC 没有复用旧 VRP 这套 dual stabilization。`TWETBPC/LP/LP.java` 中只保存 `jobDual`、`machineDual`、`arcDual`，每次 `solveCurrentModel()` 直接从 CPLEX `getDual(...)` 读取后供 pricing 使用；没有历史 dual center、box step、alpha smoothing、penalty slack cost update 等机制。当前和旧 VRP 有关的 slack 复用，主要是子节点 RMP 不可行时的 repair slack：只给当前新增分支行加人工 slack，用其 dual 引导补列，slack 归零后回到正常 RMP。这属于 feasibility repair，不是 dual stabilization。
 
 因此如果后续要做真正的 dual stabilization，需要作为新功能重新设计，而不是认为已经从旧 VRP 迁移过来了。比较稳妥的方向是先记录每轮 dual 波动和 pricing 迭代次数，再决定是否引入 stabilized dual 用于 pricing；实现上要格外小心，因为当前 TWET pricing 还把 dual 用于动态 profitable window 和 completion bound，若用平滑 dual 生成列，需要保证最终仍能用真实 RMP dual 做 reduced-cost 判定，避免错过负列或生成无效窗口。
+
+## 2026-06-02 旧 VRP 分支机制与当前 TWET-BPC 的借鉴关系
+
+复查旧 VRP `src/BPC/LP/Node.java`、`src/BPC/LP/LP.java` 和 `src/BPC/GC/GC.java` 后，可以确认旧代码中明确落地并影响主流程的分支主要有两类。第一类是机器数分支，节点中保存 `min_machine_number/max_machine_number`，RMP 中的第 0 行是车辆/机器数范围约束。第二类是弧分支，节点用 `feasible_arc[i][j]` 记录弧状态，`0` 表示可行、`-1` 表示禁止、`1` 表示必须。LP 中对被分支的弧额外加一行 `brarc,i,j`，并把该行 dual 累加到 `arc_mu[i][j]`；pricing 扩展时跳过 `feasible_arc=-1` 的弧，同时 reduced cost 中扣除 `lp.arc_mu[label.cid][i]`。旧节点还保存 `sudo_cost` 并按它排序，用作分支树队列的伪下界。旧代码注释里提到 BranchA/BranchD 一类策略，但当前从实际代码能稳定追到主流程的是机器数分支、弧分支、分支行 slack repair 和 `sudo_cost` 这几部分。
+
+当前 TWET-BPC 没有直接搬旧 VRP 的分支类，而是抽成 `Brancher` 接口后重写了对应语义。`MachineCountBrancher` 对应旧机器数分支：当当前 master 解的机器使用量为分数时，左子节点设 `maxMachineCount=floor(value)`，右子节点设 `minMachineCount=ceil(value)`。`ArcBrancher` 对应旧弧分支：在当前解中找最接近 0.5 的分数弧，左子节点禁止该弧，右子节点要求该弧；右分支还额外禁止同一真实前驱的其他后继、同一真实后继的其他前驱，以表达调度序列中相邻关系的排他性。`Tree` 中的 `pseudoCost` 则对应旧 `sudo_cost`，子节点用父节点 LP objective 作为伪下界，队列按它排序，并可在伪下界不优于 incumbent 时提前剪枝。
+
+当前实现相对旧 VRP 做了两点明显扩展。第一，`TariffSegmentBrancher` 是 TWET 外包 tariff segment 的新分支，旧 VRP 没有对应机制；它优先处理 `z_s` 的分数值，当前分支顺序也是 tariff segment、machine count、arc。第二，当前 `Node.arcState` 只记录显式分支状态，预处理得到的全局不可行弧通过 `data.isPreprocessedArcForbidden()` 过滤，不写入分支状态，也不在 RMP 里建多余分支行。LP 层则和旧 VRP 保持同一核心接口：required/forbidden arc 都变成 master 行，`readDuals()` 读取后写入 `arcDual[from][to]`，exact 和 heuristic pricing 都通过 `lp.getArcDual()` 把分支 dual 纳入 reduced cost。
+
+因此现在真正“借鉴旧 VRP”的不是 tariff 分支，而是 BPC 分支框架的三件事：节点轻量保存分支状态，RMP 用分支行表达状态并把 dual 传回 pricing，树搜索用 pseudo/sudo bound 排队和预剪枝。TWET-specific 的部分是外包 segment 分支、sink/depot 语义下的弧排他处理、以及只给当前新增分支行加 repair slack 的可行性修复。

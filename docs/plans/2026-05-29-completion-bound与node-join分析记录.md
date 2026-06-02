@@ -793,3 +793,11 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 以第一条为例，`pricingHorizon=1337.6250000000005`、`maxDiscrete=1338`，对应 forward bound 的 `boundTail=1337.6250000000005`，旧数组在 `1338` 没有 segment 覆盖，返回 `big_M`；但诊断同时显示 `nearestFiniteLeft=1337:-33.37499999998363`。也就是说 `UBefore[1338]` 按定义应表示 `min_{t<=1338} U(t)`，显然应该继承左侧 finite 值，而旧实现把它当成了 `U(1338)` 点值。第三条还暴露了浮点边界：`queryTime=1334.000000000002`、`boundTail=1334.0`，由于 `ceil()` 变成 `1335`，同样会越过真实右端一格。
 
 因此实际 bug 更窄：`forward U` 确实到达右侧 horizon，但 horizon 非整数或有浮点微小上偏时，`ceil(P)` 会查到 segment 物理右端外的整数格。当前 prefix-min 修正能覆盖这个问题；如果后续要进一步收窄实现，也可以只对 `UBefore` 的右端 rounded-up 格做有限值延拓，并对称考虑 `RAfter` 的左端 rounded-down 格。但从数组语义上讲，`UBefore/RAfter` 本来就是前缀/后缀集合最小值，做完整 prefix/suffix 扫描仍是和命名一致的实现。
+
+### 36.4 按实际触发点收窄实现
+
+根据 36.3 的诊断，最终实现不再对整张离散表做 prefix/suffix min 传播。`CompletionBoundCalculator` 的 `forwardUBeforeByJob/backwardRAfterByJob` 重新只记录函数物理定义域内部真实覆盖到的整数点；`ceil/floor` 前先用 `Math.rint()` 和 `Utility.compareEq()` 把 `1334.000000000002` 这类浮点微偏吸附到最近整数，避免边界上无意义地多跳一格。
+
+针对真实 bug，只在 `GCBBStyleBidirectionalFullDomain` 的 backward scalar 中处理：如果 backward label 的 `frontier.tail` 与 `pricingHorizon` 数值相等，则不再查 `forwardUBeforeCeil(P)`，而是直接使用预计算的 `forward U_i` 全局最小值。这个 label 不一定是 `sinkRoot`，旧诊断中三次均为 `sinkRoot=false`；原因是 sink 侧扩出的普通 backward label 经过等待/后缀归一后，右端仍会贴到 `pricingHorizon`。source root 和 sink root 本身不会走 completion bound：forward root 因 `jid<=0` 被跳过，backward sink root 因 `label.isSinkRoot` 被跳过。
+
+复跑 `tmp-wet030_001_2m` root-only `fullDomain-cb-allCycles` 后，scalar-on 四轮 exact pricing 仍为 `addedColumns=363/15/1/0`、pool `5163`、bound `15261.833333`，每轮 unavailable 均为 `0`；scalar-off 同口径复跑得到相同 pool 和 bound。scalar-on 的函数拼接次数为 `44290/11132/9355/9170`，仍明显低于 scalar-off，其中第 3 轮比完整 prefix/suffix 版本又少 5 次，来自浮点整数吸附后不再误判边界。

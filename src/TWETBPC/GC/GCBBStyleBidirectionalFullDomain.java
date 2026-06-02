@@ -1238,9 +1238,8 @@ public class GCBBStyleBidirectionalFullDomain {
 	}
 
 	/**
-	 * 2026-06-02: 离散 scalar 只做 sufficient prune。UBefore/RAfter 缓存已传播成
-	 * prefix/suffix 最小值；此时 big_M 表示对应可拼接方向没有 finite completion bound 点，
-	 * 可以直接剪枝，而不是回退完整函数拼接。
+	 * 2026-06-02: forward 侧只查 backward bound 函数内部整数点。若返回 big_M，
+	 * 表示当前起点之后没有可用离散后缀点，可以直接剪枝。
 	 */
 	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {
 		completionBoundScalarChecks++;
@@ -1260,12 +1259,15 @@ public class GCBBStyleBidirectionalFullDomain {
 	}
 
 	/**
-	 * 2026-06-02: backward 对称使用 prefix completion bound 的 ceil(P) 离散查询；
-	 * big_M 表示 P 左侧没有 finite prefix completion bound 点，直接剪枝。
+	 * 2026-06-02: backward label 的右端若贴着 pricingHorizon，直接使用 forward U 的
+	 * 全局最小值；这是 sink 侧扩出的普通后缀 label 常见形态，避免非整数 horizon 被
+	 * ceil 到右端外一格。其他情形仍只查函数内部整数点。
 	 */
 	private boolean isBackwardCompletionBoundScalarPruned(BackwardLabel label, double cutoff) {
 		completionBoundScalarChecks++;
-		double prefixLowerBound = completionBounds.forwardUBeforeCeil(label.jid, label.frontier.tail.end);
+		double prefixLowerBound = isAtPricingHorizon(label.frontier.tail.end)
+				? completionBounds.forwardUMin(label.jid)
+				: completionBounds.forwardUBeforeCeil(label.jid, label.frontier.tail.end);
 		if (Utility.isBigMValue(prefixLowerBound)) {
 			completionBoundScalarUnavailable++;
 			completionBoundScalarPruned++;
@@ -1278,6 +1280,10 @@ public class GCBBStyleBidirectionalFullDomain {
 		}
 		completionBoundScalarFunctionFallbacks++;
 		return false;
+	}
+
+	private boolean isAtPricingHorizon(double time) {
+		return Utility.compareEq(time, pricingHorizon);
 	}
 
 	/**

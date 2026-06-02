@@ -43,6 +43,7 @@ final class CompletionBoundCalculator {
 		final PiecewiseLinearFunction[] backwardRByJob;
 		final double[][] forwardUBeforeByJob;
 		final double[][] backwardRAfterByJob;
+		final double[] forwardUMinByJob;
 		final int maxDiscreteTime;
 
 		Bounds(int n, double pricingHorizon) {
@@ -50,6 +51,8 @@ final class CompletionBoundCalculator {
 			this.backwardRByJob = new PiecewiseLinearFunction[n + 1];
 			this.forwardUBeforeByJob = new double[n + 1][];
 			this.backwardRAfterByJob = new double[n + 1][];
+			this.forwardUMinByJob = new double[n + 1];
+			Arrays.fill(this.forwardUMinByJob, Utility.big_M);
 			this.maxDiscreteTime = Math.max(0, (int) Math.ceil(pricingHorizon));
 		}
 
@@ -57,7 +60,7 @@ final class CompletionBoundCalculator {
 			if (job <= 0 || job >= forwardUBeforeByJob.length || !Double.isFinite(latestTime)) {
 				return Utility.big_M;
 			}
-			int index = (int) Math.ceil(latestTime);
+			int index = (int) Math.ceil(snapToNearestInteger(latestTime));
 			if (index < 0) {
 				return Utility.big_M;
 			}
@@ -71,7 +74,7 @@ final class CompletionBoundCalculator {
 			if (job <= 0 || job >= backwardRAfterByJob.length || !Double.isFinite(earliestTime)) {
 				return Utility.big_M;
 			}
-			int index = (int) Math.floor(earliestTime);
+			int index = (int) Math.floor(snapToNearestInteger(earliestTime));
 			if (index < 0) {
 				return Utility.big_M;
 			}
@@ -79,6 +82,18 @@ final class CompletionBoundCalculator {
 				return Utility.big_M;
 			}
 			return discreteValue(backwardRAfterByJob[job], index);
+		}
+
+		double forwardUMin(int job) {
+			if (job <= 0 || job >= forwardUMinByJob.length) {
+				return Utility.big_M;
+			}
+			return forwardUMinByJob[job];
+		}
+
+		private double snapToNearestInteger(double value) {
+			double rounded = Math.rint(value);
+			return Utility.compareEq(value, rounded) ? rounded : value;
 		}
 
 		private double discreteValue(double[] values, int index) {
@@ -430,6 +445,7 @@ final class CompletionBoundCalculator {
 
 	private void buildDiscreteCaches(Bounds bounds) {
 		for (int job = 1; job <= data.n; job++) {
+			bounds.forwardUMinByJob[job] = functionMin(bounds.forwardUByJob[job]);
 			bounds.forwardUBeforeByJob[job] = buildForwardBeforeCache(bounds.forwardUByJob[job],
 					bounds.maxDiscreteTime);
 			bounds.backwardRAfterByJob[job] = buildBackwardAfterCache(bounds.backwardRByJob[job],
@@ -438,8 +454,8 @@ final class CompletionBoundCalculator {
 	}
 
 	/**
-	 * 2026-06-02: 先只填真实 segment 覆盖到的整数点，再向右传播前缀最小值。
-	 * 这样 UBefore[k] 才真正表示 min_{t<=k} U_i(t)，而不是 U_i(k) 本身。
+	 * 2026-06-02: 只记录函数物理定义域内部真实覆盖到的整数点；边界上的特殊前缀/后缀
+	 * 语义由调用方按 label 场景处理，不在这里对整张表做外推。
 	 */
 	private double[] buildForwardBeforeCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
@@ -448,13 +464,12 @@ final class CompletionBoundCalculator {
 		double[] values = new double[maxDiscreteTime + 1];
 		Arrays.fill(values, Utility.big_M);
 		fillDiscreteValuesFromSegments(values, function);
-		applyPrefixMinimum(values);
 		return values;
 	}
 
 	/**
-	 * 2026-06-02: 先只填真实 segment 覆盖到的整数点，再向左传播后缀最小值。
-	 * 这样 RAfter[k] 才真正表示 min_{t>=k} R_i(t)，而不是 R_i(k) 本身。
+	 * 2026-06-02: 只记录函数物理定义域内部真实覆盖到的整数点；边界上的特殊前缀/后缀
+	 * 语义由调用方按 label 场景处理，不在这里对整张表做外推。
 	 */
 	private double[] buildBackwardAfterCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
@@ -463,8 +478,14 @@ final class CompletionBoundCalculator {
 		double[] values = new double[maxDiscreteTime + 1];
 		Arrays.fill(values, Utility.big_M);
 		fillDiscreteValuesFromSegments(values, function);
-		applySuffixMinimum(values);
 		return values;
+	}
+
+	private double functionMin(PiecewiseLinearFunction function) {
+		if (function == null || function.head == null) {
+			return Utility.big_M;
+		}
+		return function.findMinimal(false, true)[0];
 	}
 
 	private void fillDiscreteValuesFromSegments(double[] values, PiecewiseLinearFunction function) {
@@ -477,22 +498,6 @@ final class CompletionBoundCalculator {
 					values[time] = Math.min(values[time], segment.getValue(time));
 				}
 			}
-		}
-	}
-
-	private void applyPrefixMinimum(double[] values) {
-		double best = Utility.big_M;
-		for (int time = 0; time < values.length; time++) {
-			best = Math.min(best, values[time]);
-			values[time] = best;
-		}
-	}
-
-	private void applySuffixMinimum(double[] values) {
-		double best = Utility.big_M;
-		for (int time = values.length - 1; time >= 0; time--) {
-			best = Math.min(best, values[time]);
-			values[time] = best;
 		}
 	}
 

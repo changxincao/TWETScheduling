@@ -1238,17 +1238,17 @@ public class GCBBStyleBidirectionalFullDomain {
 	}
 
 	/**
-	 * 2026-06-02: 离散 scalar 只做 sufficient prune。若 lower bound 已经不小于 cutoff，
-	 * 后续完整函数拼接也不可能生成负列；若缓存返回 big_M，只说明整数预筛不可用，
-	 * 必须回退完整函数拼接，避免非整数定义域或离散空洞改变列池。
+	 * 2026-06-02: 离散 scalar 只做 sufficient prune。UBefore/RAfter 缓存已传播成
+	 * prefix/suffix 最小值；此时 big_M 表示对应可拼接方向没有 finite completion bound 点，
+	 * 可以直接剪枝，而不是回退完整函数拼接。
 	 */
 	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {
 		completionBoundScalarChecks++;
 		double suffixLowerBound = completionBounds.backwardRAfterFloor(label.jid, label.frontier.head.start);
 		if (Utility.isBigMValue(suffixLowerBound)) {
 			completionBoundScalarUnavailable++;
-			completionBoundScalarFunctionFallbacks++;
-			return false;
+			completionBoundScalarPruned++;
+			return true;
 		}
 		double scalarLowerBound = label.minReducedCost + suffixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
@@ -1261,15 +1261,15 @@ public class GCBBStyleBidirectionalFullDomain {
 
 	/**
 	 * 2026-06-02: backward 对称使用 prefix completion bound 的 ceil(P) 离散查询；
-	 * 缓存返回 big_M 时回退完整函数拼接，保持 scalar 只做等价预筛。
+	 * big_M 表示 P 左侧没有 finite prefix completion bound 点，直接剪枝。
 	 */
 	private boolean isBackwardCompletionBoundScalarPruned(BackwardLabel label, double cutoff) {
 		completionBoundScalarChecks++;
 		double prefixLowerBound = completionBounds.forwardUBeforeCeil(label.jid, label.frontier.tail.end);
 		if (Utility.isBigMValue(prefixLowerBound)) {
 			completionBoundScalarUnavailable++;
-			completionBoundScalarFunctionFallbacks++;
-			return false;
+			completionBoundScalarPruned++;
+			return true;
 		}
 		double scalarLowerBound = label.minReducedCost + prefixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {

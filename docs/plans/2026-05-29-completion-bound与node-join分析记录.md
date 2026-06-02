@@ -777,3 +777,11 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 修正后复跑 `tmp-wet030_001_2m` root-only `fullDomain-cb-allCycles`，四轮列池与 scalar-off 对齐：`addedColumns` 为 `363/15/1/0`，pool 最终为 `5163`，bound 同为 `15261.833333`。每轮函数拼接次数仍下降：`51020->44290`、`12371->11132`、`10574->9360`、`10369->9170`，合计从 `74334` 降到 `63952`。`unavailable=1` 的轮次现在计入 fallback，不再改变剪枝结果。
 
 离散数组构造本身不是这里的主要耗时。当前实现对每个 bound 函数扫一次 segment 链表，只填该 segment 覆盖到的整数点；在 `wet030` 约 30 个 job、horizon 约 1343 的规模下，数组量级只有几万格。日志里的 `completionBoundBuildNanos` 包含完整 relaxed DP 的 forward/backward fixed-point 构造，不是单独的离散 cache 构造时间；on/off 中 buildMs 的差异主要来自运行波动和 DP 构造本身，不能归因于整数数组。
+
+### 36.2 unavailable 的真正原因
+
+继续复查后，上面 36.1 中“unavailable 必须 fallback”的判断仍然不对。问题不在 `big_M` 语义本身，而在 `UBefore/RAfter` 离散缓存的构造没有实现名字里的前缀/后缀最小值。旧实现只是把函数 segment 覆盖到的整数点写入数组，没有把 `UBefore[k] = min_{t<=k} U_i(t)` 向右传播，也没有把 `RAfter[k] = min_{t>=k} R_i(t)` 向左传播。因此当查询点 `k` 自身没有被 segment 覆盖时，即使 `k` 左侧或右侧存在可用 completion bound 点，数组仍返回 `big_M`，形成假的 unavailable。
+
+修正后，缓存构造流程为：先按 segment 覆盖的整数点填有限值，内部断点仍取较小值；随后 `UBefore` 做一次从左到右的 prefix-min 扫描，`RAfter` 做一次从右到左的 suffix-min 扫描。这样 `big_M` 才重新表示对应前缀或后缀集合没有 finite completion bound 点，可以直接剪枝，不需要 fallback。
+
+用当前代码复跑 `tmp-wet030_001_2m` root-only `fullDomain-cb-allCycles` 后，scalar-on 四轮 exact pricing 的 `addedColumns` 为 `363/15/1/0`，pool 最终为 `5163`，bound 为 `15261.833333`；scalar-off 同口径复跑也是同样的列数、pool 和 bound。修正后的 scalar-on 每轮 `completionBoundScalar ... unavailable` 均为 `0`，函数拼接次数仍从 scalar-off 的 `51020/12371/10574/10369` 降到 `44290/11132/9360/9170`。由此当前结论改为：不需要 fallback；需要保证离散缓存真正表达 prefix/suffix min，之后 `big_M` 才可以作为不可补全的剪枝信号。

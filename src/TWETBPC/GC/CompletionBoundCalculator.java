@@ -438,9 +438,8 @@ final class CompletionBoundCalculator {
 	}
 
 	/**
-	 * 2026-06-02: prefix-min 后的 U_i(t) 整体非增，因此整数 k 上的
-	 * UBefore[k] 可直接表示 min_{t<=k} U_i(t)。这里按 segment 链表一次填充，
-	 * 不逐点调用 evaluate()；物理定义域外保持 big_M，由调用方回退到原函数拼接。
+	 * 2026-06-02: 先只填真实 segment 覆盖到的整数点，再向右传播前缀最小值。
+	 * 这样 UBefore[k] 才真正表示 min_{t<=k} U_i(t)，而不是 U_i(k) 本身。
 	 */
 	private double[] buildForwardBeforeCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
@@ -449,13 +448,13 @@ final class CompletionBoundCalculator {
 		double[] values = new double[maxDiscreteTime + 1];
 		Arrays.fill(values, Utility.big_M);
 		fillDiscreteValuesFromSegments(values, function);
+		applyPrefixMinimum(values);
 		return values;
 	}
 
 	/**
-	 * 2026-06-02: suffix-min 后的 R_i(t) 整体非减，因此整数 k 上的
-	 * RAfter[k] 可直接表示 min_{t>=k} R_i(t)。这里按 segment 链表一次填充，
-	 * 不逐点调用 evaluate()；物理定义域外保持 big_M，由调用方回退到原函数拼接。
+	 * 2026-06-02: 先只填真实 segment 覆盖到的整数点，再向左传播后缀最小值。
+	 * 这样 RAfter[k] 才真正表示 min_{t>=k} R_i(t)，而不是 R_i(k) 本身。
 	 */
 	private double[] buildBackwardAfterCache(PiecewiseLinearFunction function, int maxDiscreteTime) {
 		if (function == null || function.head == null) {
@@ -464,6 +463,7 @@ final class CompletionBoundCalculator {
 		double[] values = new double[maxDiscreteTime + 1];
 		Arrays.fill(values, Utility.big_M);
 		fillDiscreteValuesFromSegments(values, function);
+		applySuffixMinimum(values);
 		return values;
 	}
 
@@ -477,6 +477,22 @@ final class CompletionBoundCalculator {
 					values[time] = Math.min(values[time], segment.getValue(time));
 				}
 			}
+		}
+	}
+
+	private void applyPrefixMinimum(double[] values) {
+		double best = Utility.big_M;
+		for (int time = 0; time < values.length; time++) {
+			best = Math.min(best, values[time]);
+			values[time] = best;
+		}
+	}
+
+	private void applySuffixMinimum(double[] values) {
+		double best = Utility.big_M;
+		for (int time = values.length - 1; time >= 0; time--) {
+			best = Math.min(best, values[time]);
+			values[time] = best;
 		}
 	}
 

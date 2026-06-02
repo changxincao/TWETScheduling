@@ -753,3 +753,7 @@ lowerBound = completion.findMinimal(false, true)[0];
 按 segment 扫描版复跑同一 smoke 后，结果仍为 `obj=bound=6343, valid=true`，scalar 统计仍为 `521/116/405/0`。本次 exact pricing 为 `0.188s`，completion bound 构造约 `87.129ms`。这个小例子上构造时间没有明显下降，说明缓存构造本身不是主要瓶颈；但实现口径已经从“每个整数点重复 evaluate 扫函数”改为“每个 segment 只扫自己覆盖的整数点”，后续在更大 horizon 或更多段的样例上更合理。
 
 最终边界口径再次收紧：`UBefore/RAfter` 不再对函数物理定义域之外的整数点做 head/tail 常数填充，也不把越界查询 clamp 到最后一格；这些位置保持或返回 `big_M`，由 scalar 入口统计为 `unavailable` 并回退到原函数拼接。复跑 `wet020_001_2m` root-only `fullDomain-cb-allCycles`，结果仍为 `obj=bound=6343, valid=true`，日志为 `completionBoundScalar check/pruned/fallback/unavailable=521/116/405/0`，说明当前 full-domain completion bound 的 `0/T` 边界覆盖正常，边界修正没有改变该样例的剪枝命中。
+
+对这个做法的安全性判断为：作为 sufficient scalar prune 是成立的。Forward label 查询 `RAfter[floor(L)]` 时，把真实可拼接集合 `t >= L` 放大到 `t >= floor(L)`，得到的是不强于真实后缀最小值的下界；Backward label 查询 `UBefore[ceil(P)]` 时，把真实可拼接集合 `t <= P` 放大到 `t <= ceil(P)`，也只会得到更松的前缀下界。只有这个松下界已经不小于 cutoff 时才剪枝，因此不会漏掉可能为负的完整列。`allCycles/twoCycle` 的差别已经被吸收到最终一维 `U_i/R_i` 函数里，离散缓存不依赖 relaxation 类型。
+
+当前保守点在于：domain 外或缓存缺失返回 `big_M` 后，scalar 入口只记 `unavailable` 并回退原函数拼接，不把它直接当作“必不可拼接”剪掉。这保证了不会因为函数物理段、整数化边界或未来 horizon 改动出错而误剪；但如果某个 backward label 的时间域确实早于 `U_i` 最左可用位置，或者某个 forward label 的时间域确实晚于 `R_i` 最右可用位置，当前实现最多回到旧的 `add/findMinimal` 逻辑，未额外吃到这类“无时间交集”的强剪枝。若后续要进一步加速，可以单独增加基于 `U_i.head/tail`、`R_i.head/tail` 与 label frontier 物理域的 no-overlap 剪枝，并先确认旧逻辑中 `completion.head == null` 返回 false 的语义是否需要收紧。

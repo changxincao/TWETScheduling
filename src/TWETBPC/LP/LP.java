@@ -53,6 +53,7 @@ public class LP {
 	private IloRange[] coverRanges;
 	private IloRange machineRange;
 	private HashMap<Long, IloRange> arcBranchRanges;
+	private HashMap<Long, IloRange> adjacencyBranchRanges;
 	private IloRange[] tariffActiveBounds;
 	private IloRange[] tariffBranchRanges;
 	private ArrayList<TariffSegment> outsourcingTariffSegments;
@@ -257,6 +258,7 @@ public class LP {
 		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
 		repairSlackVars = new ArrayList<IloNumVar>();
 		arcBranchRanges = new HashMap<Long, IloRange>();
+		adjacencyBranchRanges = new HashMap<Long, IloRange>();
 		outsourcingTariffSegments = collectOutsourcingTariffSegments();
 
 		buildVariables();
@@ -264,6 +266,7 @@ public class LP {
 		buildCoverageConstraints();
 		buildMachineConstraint();
 		buildArcBranchConstraints();
+		buildAdjacencyBranchConstraints();
 		buildOutsourcingTariffConstraints();
 		if (feasibilityRepairMode) {
 			addFeasibilitySlacks();
@@ -358,6 +361,30 @@ public class LP {
 		}
 	}
 
+	private void buildAdjacencyBranchConstraints() throws IloException {
+		addAdjacencyBranchConstraints(node.getForbiddenAdjacencyPairs(), false);
+		addAdjacencyBranchConstraints(node.getRequiredAdjacencyPairs(), true);
+	}
+
+	private void addAdjacencyBranchConstraints(List<int[]> pairs, boolean required) throws IloException {
+		int sink = node.sinkId();
+		for (int[] pair : pairs) {
+			int first = pair[0];
+			int second = pair[1];
+			IloLinearNumExpr expr = cplex.linearNumExpr();
+			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
+				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
+				if (column.visitsArc(first, second, sink) || column.visitsArc(second, first, sink)) {
+					expr.addTerm(1.0, lambdaVars[idx]);
+				}
+			}
+			// 2026-06-02: 无向相邻右支只要求两方向之一出现，不在 pricing graph 中固定方向。
+			IloRange range = required ? cplex.addGe(expr, 1.0, "requiredAdjacency_" + first + "_" + second)
+					: cplex.addEq(expr, 0.0, "forbiddenAdjacency_" + first + "_" + second);
+			adjacencyBranchRanges.put(Long.valueOf(pairKey(first, second)), range);
+		}
+	}
+
 	private void buildOutsourcingTariffConstraints() throws IloException {
 		IloLinearNumExpr baselineFromJobs = cplex.linearNumExpr();
 		for (int job = 1; job <= data.n; job++) {
@@ -416,6 +443,13 @@ public class LP {
 				addRepairSlack(range, coeff,
 						"arcBranchSlack_" + node.getRepairFrom() + "_" + node.getRepairTo(), penalty);
 			}
+		} else if (type == Node.REPAIR_ADJACENCY_FORBIDDEN || type == Node.REPAIR_ADJACENCY_REQUIRED) {
+			IloRange range = adjacencyBranchRanges.get(Long.valueOf(pairKey(node.getRepairFrom(), node.getRepairTo())));
+			if (range != null) {
+				double coeff = type == Node.REPAIR_ADJACENCY_REQUIRED ? 1.0 : -1.0;
+				addRepairSlack(range, coeff,
+						"adjacencyBranchSlack_" + node.getRepairFrom() + "_" + node.getRepairTo(), penalty);
+			}
 		} else if (type == Node.REPAIR_TARIFF_FORBIDDEN || type == Node.REPAIR_TARIFF_REQUIRED) {
 			int segment = node.getRepairSegment();
 			if (tariffBranchRanges != null && segment >= 0 && segment < tariffBranchRanges.length
@@ -445,6 +479,13 @@ public class LP {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
 			if (column.visitsArc(from, to, node.sinkId())) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			}
+		}
+		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
+			int first = decodeFrom(entry.getKey().longValue());
+			int second = decodeTo(entry.getKey().longValue());
+			if (node.columnCoversAdjacencyPair(column, first, second)) {
 				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
 			}
 		}
@@ -557,6 +598,13 @@ public class LP {
 			int to = decodeTo(entry.getKey().longValue());
 			arcDual[from][to] = cplex.getDual(entry.getValue());
 		}
+		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
+			int first = decodeFrom(entry.getKey().longValue());
+			int second = decodeTo(entry.getKey().longValue());
+			double dual = cplex.getDual(entry.getValue());
+			arcDual[first][second] += dual;
+			arcDual[second][first] += dual;
+		}
 	}
 
 	private LinkedHashMap<Integer, Double> readColumnValues() throws IloException {
@@ -627,6 +675,12 @@ public class LP {
 
 	private long arcKey(int from, int to) {
 		return ((long) from) * (data.n + 2L) + to;
+	}
+
+	private long pairKey(int first, int second) {
+		int a = Math.min(first, second);
+		int b = Math.max(first, second);
+		return arcKey(a, b);
 	}
 
 	private int decodeFrom(long key) {

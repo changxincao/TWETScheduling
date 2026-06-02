@@ -20,6 +20,10 @@ public class Node implements Comparable<Node> {
 	public static final byte ARC_FORBIDDEN = -1;
 	public static final byte ARC_REQUIRED = 1;
 
+	public static final byte ADJACENCY_FREE = 0;
+	public static final byte ADJACENCY_FORBIDDEN = -1;
+	public static final byte ADJACENCY_REQUIRED = 1;
+
 	public static final byte SEGMENT_FREE = 0;
 	public static final byte SEGMENT_FORBIDDEN = -1;
 	public static final byte SEGMENT_REQUIRED = 1;
@@ -33,6 +37,8 @@ public class Node implements Comparable<Node> {
 	public static final byte REPAIR_ARC_REQUIRED = 4;
 	public static final byte REPAIR_TARIFF_FORBIDDEN = 5;
 	public static final byte REPAIR_TARIFF_REQUIRED = 6;
+	public static final byte REPAIR_ADJACENCY_FORBIDDEN = 7;
+	public static final byte REPAIR_ADJACENCY_REQUIRED = 8;
 
 	private final Data data;
 	public int id;
@@ -44,6 +50,7 @@ public class Node implements Comparable<Node> {
 	public ArrayList<Integer> incumbentColumnIds;
 	public ArrayList<Integer> activeCutIds;
 	private byte[][] arcState;
+	private byte[][] adjacencyPairState;
 	private byte[] tariffSegmentState;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
@@ -62,6 +69,7 @@ public class Node implements Comparable<Node> {
 		this.incumbentColumnIds = new ArrayList<Integer>(incumbentColumnIds);
 		this.activeCutIds = new ArrayList<Integer>();
 		this.arcState = new byte[data.n + 2][data.n + 2];
+		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
@@ -80,6 +88,10 @@ public class Node implements Comparable<Node> {
 		for (int i = 0; i < arcState.length; i++) {
 			copy.arcState[i] = arcState[i].clone();
 		}
+		copy.adjacencyPairState = new byte[adjacencyPairState.length][];
+		for (int i = 0; i < adjacencyPairState.length; i++) {
+			copy.adjacencyPairState[i] = adjacencyPairState[i].clone();
+		}
 		copy.tariffSegmentState = tariffSegmentState.clone();
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
@@ -96,6 +108,15 @@ public class Node implements Comparable<Node> {
 		return arcState[from][to];
 	}
 
+	public byte getAdjacencyPairState(int firstJob, int secondJob) {
+		int a = normalizedPairFirst(firstJob, secondJob);
+		int b = normalizedPairSecond(firstJob, secondJob);
+		if (a <= 0 || b <= 0 || a >= adjacencyPairState.length || b >= adjacencyPairState.length) {
+			return ADJACENCY_FREE;
+		}
+		return adjacencyPairState[a][b];
+	}
+
 	/**
 	 * 2026-05-20: 判断一条弧是否不能用于生成列。
 	 * <p>
@@ -103,7 +124,8 @@ public class Node implements Comparable<Node> {
 	 * arcState，避免 RMP 把这些静态过滤弧误建成分支约束行。
 	 */
 	public boolean isArcForbidden(int from, int to) {
-		return data.isPreprocessedArcForbidden(from, to) || getArcState(from, to) == ARC_FORBIDDEN;
+		return data.isPreprocessedArcForbidden(from, to) || getArcState(from, to) == ARC_FORBIDDEN
+				|| isAdjacencyPairForbiddenArc(from, to);
 	}
 
 	public void forbidArc(int from, int to) {
@@ -112,6 +134,14 @@ public class Node implements Comparable<Node> {
 
 	public void requireArc(int from, int to) {
 		arcState[from][to] = ARC_REQUIRED;
+	}
+
+	public void forbidAdjacencyPair(int firstJob, int secondJob) {
+		setAdjacencyPairState(firstJob, secondJob, ADJACENCY_FORBIDDEN);
+	}
+
+	public void requireAdjacencyPair(int firstJob, int secondJob) {
+		setAdjacencyPairState(firstJob, secondJob, ADJACENCY_REQUIRED);
 	}
 
 	public void markMachineUpperRepair() {
@@ -128,6 +158,13 @@ public class Node implements Comparable<Node> {
 		repairType = required ? REPAIR_ARC_REQUIRED : REPAIR_ARC_FORBIDDEN;
 		repairFrom = from;
 		repairTo = to;
+		repairSegment = -1;
+	}
+
+	public void markAdjacencyPairRepair(int firstJob, int secondJob, boolean required) {
+		repairType = required ? REPAIR_ADJACENCY_REQUIRED : REPAIR_ADJACENCY_FORBIDDEN;
+		repairFrom = normalizedPairFirst(firstJob, secondJob);
+		repairTo = normalizedPairSecond(firstJob, secondJob);
 		repairSegment = -1;
 	}
 
@@ -202,6 +239,14 @@ public class Node implements Comparable<Node> {
 		return arcs;
 	}
 
+	public List<int[]> getRequiredAdjacencyPairs() {
+		return collectAdjacencyPairs(ADJACENCY_REQUIRED);
+	}
+
+	public List<int[]> getForbiddenAdjacencyPairs() {
+		return collectAdjacencyPairs(ADJACENCY_FORBIDDEN);
+	}
+
 	/** 判断一条列是否违反当前节点的 forbidden arc。 */
 	public boolean isColumnCompatible(TWETColumn column) {
 		List<Integer> seq = column.getSequence();
@@ -243,6 +288,44 @@ public class Node implements Comparable<Node> {
 
 	public boolean columnCoversRequiredArc(TWETColumn column, int from, int to) {
 		return column.visitsArc(from, to, sinkId());
+	}
+
+	public boolean columnCoversAdjacencyPair(TWETColumn column, int firstJob, int secondJob) {
+		return column.visitsArc(firstJob, secondJob, sinkId()) || column.visitsArc(secondJob, firstJob, sinkId());
+	}
+
+	private void setAdjacencyPairState(int firstJob, int secondJob, byte state) {
+		int a = normalizedPairFirst(firstJob, secondJob);
+		int b = normalizedPairSecond(firstJob, secondJob);
+		if (a <= 0 || b <= 0 || a >= adjacencyPairState.length || b >= adjacencyPairState.length) {
+			return;
+		}
+		adjacencyPairState[a][b] = state;
+	}
+
+	private boolean isAdjacencyPairForbiddenArc(int from, int to) {
+		return from > 0 && to > 0 && from <= data.n && to <= data.n
+				&& getAdjacencyPairState(from, to) == ADJACENCY_FORBIDDEN;
+	}
+
+	private ArrayList<int[]> collectAdjacencyPairs(byte state) {
+		ArrayList<int[]> pairs = new ArrayList<int[]>();
+		for (int first = 1; first <= data.n; first++) {
+			for (int second = first + 1; second <= data.n; second++) {
+				if (adjacencyPairState[first][second] == state) {
+					pairs.add(new int[] { first, second });
+				}
+			}
+		}
+		return pairs;
+	}
+
+	private int normalizedPairFirst(int firstJob, int secondJob) {
+		return Math.min(firstJob, secondJob);
+	}
+
+	private int normalizedPairSecond(int firstJob, int secondJob) {
+		return Math.max(firstJob, secondJob);
 	}
 
 	private int countTariffSegments(Data data) {

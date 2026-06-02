@@ -785,3 +785,11 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 修正后，缓存构造流程为：先按 segment 覆盖的整数点填有限值，内部断点仍取较小值；随后 `UBefore` 做一次从左到右的 prefix-min 扫描，`RAfter` 做一次从右到左的 suffix-min 扫描。这样 `big_M` 才重新表示对应前缀或后缀集合没有 finite completion bound 点，可以直接剪枝，不需要 fallback。
 
 用当前代码复跑 `tmp-wet030_001_2m` root-only `fullDomain-cb-allCycles` 后，scalar-on 四轮 exact pricing 的 `addedColumns` 为 `363/15/1/0`，pool 最终为 `5163`，bound 为 `15261.833333`；scalar-off 同口径复跑也是同样的列数、pool 和 bound。修正后的 scalar-on 每轮 `completionBoundScalar ... unavailable` 均为 `0`，函数拼接次数仍从 scalar-off 的 `51020/12371/10574/10369` 降到 `44290/11132/9360/9170`。由此当前结论改为：不需要 fallback；需要保证离散缓存真正表达 prefix/suffix min，之后 `big_M` 才可以作为不可补全的剪枝信号。
+
+### 36.3 旧版本 unavailable 的实际触发点
+
+按用户要求回到旧的 direct-prune 版本 `bec835b` 做临时诊断，真实触发点不是函数中间不连续或有洞，而是 backward scalar 查询 `forwardUBeforeCeil()` 时遇到非整数右端。三次 unavailable 全部为 `dir=BW, job=13, sinkRoot=false`，对应查询分别为 `queryTime=1337.6250000000005, index=1338`、`queryTime=1333.999999999996, index=1334`、`queryTime=1334.000000000002, index=1335`。这些 label 不是 sink root，但 backward label 的 `frontier.tail` 等于当前 `pricingHorizon`，因此会用 `ceil(P)` 查到 horizon 右侧的下一个整数格。
+
+以第一条为例，`pricingHorizon=1337.6250000000005`、`maxDiscrete=1338`，对应 forward bound 的 `boundTail=1337.6250000000005`，旧数组在 `1338` 没有 segment 覆盖，返回 `big_M`；但诊断同时显示 `nearestFiniteLeft=1337:-33.37499999998363`。也就是说 `UBefore[1338]` 按定义应表示 `min_{t<=1338} U(t)`，显然应该继承左侧 finite 值，而旧实现把它当成了 `U(1338)` 点值。第三条还暴露了浮点边界：`queryTime=1334.000000000002`、`boundTail=1334.0`，由于 `ceil()` 变成 `1335`，同样会越过真实右端一格。
+
+因此实际 bug 更窄：`forward U` 确实到达右侧 horizon，但 horizon 非整数或有浮点微小上偏时，`ceil(P)` 会查到 segment 物理右端外的整数格。当前 prefix-min 修正能覆盖这个问题；如果后续要进一步收窄实现，也可以只对 `UBefore` 的右端 rounded-up 格做有限值延拓，并对称考虑 `RAfter` 的左端 rounded-down 格。但从数组语义上讲，`UBefore/RAfter` 本来就是前缀/后缀集合最小值，做完整 prefix/suffix 扫描仍是和命名一致的实现。

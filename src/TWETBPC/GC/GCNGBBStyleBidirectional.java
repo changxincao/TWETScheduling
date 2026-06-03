@@ -146,6 +146,11 @@ public class GCNGBBStyleBidirectional {
 	private long generatedCandidateDroppedByHeap;
 	private long forwardSinkLabelsVisited;
 	private long forwardSinkNegativeCandidates;
+	private long forwardExtensionCandidates;
+	private long forwardExtensionArcPruned;
+	private long forwardExtensionInfeasible;
+	private long forwardExtensionConstructed;
+	private long forwardExtensionBoundSurvivors;
 	private long[] forwardLabelsKeptByDepth;
 	private long[] forwardSinkNegativeByDepth;
 	private long forwardLabelsKeptReachableSum;
@@ -497,17 +502,22 @@ public class GCNGBBStyleBidirectional {
 		Node node = lp.getNode();
 		for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
 				nextJob = label.reachableSet.nextSetBit(nextJob + 1)) {
+			forwardExtensionCandidates++;
 			if (!canExtendForward(label, nextJob, node)) {
+				forwardExtensionArcPruned++;
 				continue;
 			}
 			ForwardLabel child = extendForward(label, nextJob, lp);
 			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
+				forwardExtensionInfeasible++;
 				continue;
 			}
+			forwardExtensionConstructed++;
 			if (isForwardCompletionBoundPruned(child)) {
 				completionForwardLabelsPruned++;
 				continue;
 			}
+			forwardExtensionBoundSurvivors++;
 			if (insertForward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 				FWUL.add(child);
 			}
@@ -1079,6 +1089,11 @@ public class GCNGBBStyleBidirectional {
 		generatedCandidateDroppedByHeap = 0;
 		forwardSinkLabelsVisited = 0;
 		forwardSinkNegativeCandidates = 0;
+		forwardExtensionCandidates = 0;
+		forwardExtensionArcPruned = 0;
+		forwardExtensionInfeasible = 0;
+		forwardExtensionConstructed = 0;
+		forwardExtensionBoundSurvivors = 0;
 		forwardLabelsKeptByDepth = new long[data.n + 1];
 		forwardSinkNegativeByDepth = new long[data.n + 1];
 		forwardLabelsKeptReachableSum = 0;
@@ -1168,6 +1183,10 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + formatMillis(completionBoundArcFixingNanos)
 				+ ", forwardSink visited/negative=" + forwardSinkLabelsVisited
 				+ "/" + forwardSinkNegativeCandidates
+				+ ", forwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors="
+				+ forwardExtensionCandidates + "/" + forwardExtensionArcPruned
+				+ "/" + forwardExtensionInfeasible + "/" + forwardExtensionConstructed
+				+ "/" + forwardExtensionBoundSurvivors
 				+ ", forwardDepth kept/negSink=" + formatDepthHistogram(forwardLabelsKeptByDepth)
 				+ "/" + formatDepthHistogram(forwardSinkNegativeByDepth)
 				+ ", forwardReach kept avg/min/max=" + formatAverage(forwardLabelsKeptReachableSum,

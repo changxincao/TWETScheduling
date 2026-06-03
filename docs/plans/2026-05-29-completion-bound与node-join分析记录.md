@@ -1054,3 +1054,17 @@ job dual 诊断也支持“dual 口径改变”而不是“纯 pricing 实现变
 四组结果放在一起后，核心触发点已经很明确：不是 completion-bound 删除 arc 的判据，也不是同一 dual 下 pricing 图变稀，更不是 master 里存在 forbidden 行本身。真正把 wet030 child 打爆的是 `after_column_filter` 这一步。正式 subtree on 的流程在 child 初始 LP 可行后调用 `resetRestrictedColumnsByCurrentReducedCost()`，该函数先执行 `if (!isColumnCompatible(column)) continue;`，把包含 701 条 subtree forbidden arc 的历史列全部排掉，使 Node 2 exact 入口列池从 off 的 `4801` 变成 `2003`。此时 master forbidden 行大多变成空行/零 dual，child RMP 进入残余图冷启动；后续 half-domain exact pricing 被迫枚举大量不用 eliminated arcs 的替代长 forward-only 列，形成 `forwardSink negative=69952` 和 `fw kept=121210`。
 
 因此更准确的修正方向不是继续怀疑 completion bound，也不是认为“arc elimination 本身会变慢”，而是不要让 subtree elimination 和正常 branch arc 共享同一个“必须过滤历史列”的语义。subtree reduced-cost fixing 若要保留，应分成两层：pricing 层可以直接禁弧；child RMP seed/filter 层不能简单按 `Node.isColumnCompatible()` 把所有含 eliminated arcs 的列清空，至少不能在缺少 residual seed columns 时这么做。可选做法是把 subtree-eliminated arc 独立存储，不进入 `arcState`；或在正式过滤前先为 residual graph 生成足够替代 seed；或像 pricing-only 实验那样先只用于 exact pricing 禁弧，等有更稳的列池策略后再考虑永久继承。
+
+### 41.9 2026-06-03 completion bound 是否失效的漏斗复核
+
+用户指出如果只是 residual graph 冷启动，直觉上应表现为 pricing 次数增加，而不是单次 exact pricing 暴涨；怀疑点转向 completion bound 是否没有起作用。本轮在 half-domain pricing 中补充 forward 扩展漏斗计数：`reachableSet` 枚举候选数、被 forbidden arc 跳过数、成功构造 child 数、通过 completion bound 后进入 dominance 的数量。该计数只做诊断，不改变算法。
+
+同口径复跑 `tmp-wet030_001_2m`、half-domain、`completionBound=allCycles`、`runALNSForSeed=false`、关闭无向相邻分支、`maxNodes=2`。`subtree=off` 的 Node 2 第一轮 exact 为 `forwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=31083/59/0/31024/1483`，completion bound forward prune 为 `29541`，即在成功构造的 child 中约 `95.2%` 被剪掉，最终 `fw kept/dominated=1442/42`、`forwardSink negative=45`。这说明正常口径下 completion bound 非常有效。
+
+`subtree=on` 的 Node 2 第一轮 exact 变成 `2154533/1674333/0/480200/198552`，completion bound forward prune 为 `281648`，即它仍然剪掉了 28 万多个 child，但剪枝率只有约 `58.7%`；通过 bound 的 child 从 `1483` 暴涨到 `198552`，随后 `fw kept/dominated=121210/77343`，`forwardSink negative=69952`。因此不能说 completion bound 完全没起作用，它确实在工作；但在 subtree 正式继承后的对偶口径下，大量 prefix 的 lower bound 已经低于 0，bound 按 exact pricing 语义不能剪。
+
+这也解释了为什么单次 pricing 会暴涨，而不是只增加 pricing 次数。该 child 的第一轮 exact 并不是“缺几条列慢慢补”，而是在当前 LP dual 下真实存在大量可直接接 sink 的负 reduced-cost forward-only 列。因为 `maxExactColumns=100000`，本轮需要耗尽队列并返回所有负列以形成 exact pricing 证书；既然实际负列数达到 `69952`，单次 pricing 自然会很重。后续加完这些列后，同一 node 的第二轮 exact 立刻回到 `fw kept=3529`、`forwardSink negative=13`，说明第一轮暴涨本质上是在一次性补 residual graph 的大批负列。
+
+另一个可独立优化的点是 forbidden arc 没有进入 dominance reachable-set key。subtree-on 下 `reachableSet` 仍会枚举大量当前 node 已禁的直连 arc，然后在 `canExtendForward()` 被跳过，导致 `arcPruned=1674333`。这部分是纯枚举开销，可以后续用 node/pricing-local forbidden matrix 在构造 reachable set 时过滤，以减少循环次数；但它不是主要原因，因为跳过这些 arc 后仍成功构造了 `480200` 个 child，并有 `198552` 个通过 completion bound。
+
+因此本轮结论进一步收窄为：completion bound 没有失效，但 subtree 正式继承导致当前 dual 下 completion lower bound 对大量长 forward prefix 不再能证明非负，剪枝率从 `95%` 降到 `59%`；同时 reachable 候选枚举暴涨，dominance 负担随 `boundSurvivors` 暴涨。工程上应优先避免在该口径下无限制 exact 返回全部负列，或者在 subtree child 先做 residual seed/列数上限/record 型过渡，而不是把问题归因于 completion bound 构造时间或函数未调用。

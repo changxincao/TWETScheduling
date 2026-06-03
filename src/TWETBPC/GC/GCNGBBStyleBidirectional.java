@@ -182,6 +182,19 @@ public class GCNGBBStyleBidirectional {
 	private double diagnosticJobDualMin;
 	private double diagnosticJobDualMax;
 	private double diagnosticJobDualSum;
+	private int diagnosticRestrictedColumnCount;
+	private int diagnosticIncompatibleRestrictedColumnCount;
+	private double diagnosticRestrictedColumnAvgLength;
+	private int diagnosticAllowedJobArcDualNonZeroCount;
+	private int diagnosticForbiddenJobArcDualNonZeroCount;
+	private int diagnosticSinkArcDualNonZeroCount;
+	private double diagnosticAllowedJobArcDualMin;
+	private double diagnosticAllowedJobArcDualMax;
+	private double diagnosticAllowedJobArcDualAbsSum;
+	private double diagnosticForbiddenJobArcDualAbsSum;
+	private double diagnosticSinkArcDualMin;
+	private double diagnosticSinkArcDualMax;
+	private double diagnosticSinkArcDualAbsSum;
 
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
@@ -1103,6 +1116,19 @@ public class GCNGBBStyleBidirectional {
 		diagnosticJobDualMin = 0.0;
 		diagnosticJobDualMax = 0.0;
 		diagnosticJobDualSum = 0.0;
+		diagnosticRestrictedColumnCount = 0;
+		diagnosticIncompatibleRestrictedColumnCount = 0;
+		diagnosticRestrictedColumnAvgLength = 0.0;
+		diagnosticAllowedJobArcDualNonZeroCount = 0;
+		diagnosticForbiddenJobArcDualNonZeroCount = 0;
+		diagnosticSinkArcDualNonZeroCount = 0;
+		diagnosticAllowedJobArcDualMin = 0.0;
+		diagnosticAllowedJobArcDualMax = 0.0;
+		diagnosticAllowedJobArcDualAbsSum = 0.0;
+		diagnosticForbiddenJobArcDualAbsSum = 0.0;
+		diagnosticSinkArcDualMin = 0.0;
+		diagnosticSinkArcDualMax = 0.0;
+		diagnosticSinkArcDualAbsSum = 0.0;
 	}
 
 	private String statisticsSummary() {
@@ -1148,6 +1174,17 @@ public class GCNGBBStyleBidirectional {
 				+ ", nodeDiag forbiddenJobArcs/jobDual min/max/sum/pos=" + diagnosticForbiddenJobArcCount
 				+ "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax + "/"
 				+ diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
+				+ ", nodeDiag columns/incompat/avgLen=" + diagnosticRestrictedColumnCount
+				+ "/" + diagnosticIncompatibleRestrictedColumnCount + "/"
+				+ String.format("%.3f", diagnosticRestrictedColumnAvgLength)
+				+ ", nodeDiag arcDual allowedNZ/min/max/absSum=" + diagnosticAllowedJobArcDualNonZeroCount
+				+ "/" + diagnosticAllowedJobArcDualMin + "/" + diagnosticAllowedJobArcDualMax
+				+ "/" + diagnosticAllowedJobArcDualAbsSum
+				+ ", forbiddenNZ/absSum=" + diagnosticForbiddenJobArcDualNonZeroCount
+				+ "/" + diagnosticForbiddenJobArcDualAbsSum
+				+ ", sinkNZ/min/max/absSum=" + diagnosticSinkArcDualNonZeroCount
+				+ "/" + diagnosticSinkArcDualMin + "/" + diagnosticSinkArcDualMax
+				+ "/" + diagnosticSinkArcDualAbsSum
 				+ ", completionBoundQueue=" + completionBoundQueueOrdering
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
@@ -1221,15 +1258,39 @@ public class GCNGBBStyleBidirectional {
 	private void recordPricingDiagnostics(LP lp) {
 		Node node = lp.getNode();
 		int forbidden = 0;
+		int allowedDualNonZero = 0;
+		int forbiddenDualNonZero = 0;
+		double allowedDualMin = Utility.big_M;
+		double allowedDualMax = -Utility.big_M;
+		double allowedDualAbsSum = 0.0;
+		double forbiddenDualAbsSum = 0.0;
 		if (node != null) {
 			for (int from = 1; from <= data.n; from++) {
 				for (int to = 1; to <= data.n; to++) {
-					if (from != to && node.isArcForbidden(from, to)) {
+					if (from == to) {
+						continue;
+					}
+					boolean arcForbidden = node.isArcForbidden(from, to);
+					if (arcForbidden) {
 						forbidden++;
+					}
+					double dual = lp.getArcDual(from, to);
+					if (isDiagnosticNonZero(dual)) {
+						if (arcForbidden) {
+							forbiddenDualNonZero++;
+							forbiddenDualAbsSum += Math.abs(dual);
+						} else {
+							allowedDualNonZero++;
+							allowedDualMin = Math.min(allowedDualMin, dual);
+							allowedDualMax = Math.max(allowedDualMax, dual);
+							allowedDualAbsSum += Math.abs(dual);
+						}
 					}
 				}
 			}
 		}
+		recordRestrictedColumnDiagnostics(lp, node);
+		recordSinkArcDualDiagnostics(lp, node);
 		double min = Utility.big_M;
 		double max = -Utility.big_M;
 		double sum = 0.0;
@@ -1248,6 +1309,58 @@ public class GCNGBBStyleBidirectional {
 		diagnosticJobDualMin = Utility.isBigMValue(min) ? 0.0 : min;
 		diagnosticJobDualMax = Utility.isBigMValue(-max) ? 0.0 : max;
 		diagnosticJobDualSum = sum;
+		diagnosticAllowedJobArcDualNonZeroCount = allowedDualNonZero;
+		diagnosticForbiddenJobArcDualNonZeroCount = forbiddenDualNonZero;
+		diagnosticAllowedJobArcDualMin = Utility.isBigMValue(allowedDualMin) ? 0.0 : allowedDualMin;
+		diagnosticAllowedJobArcDualMax = Utility.isBigMValue(-allowedDualMax) ? 0.0 : allowedDualMax;
+		diagnosticAllowedJobArcDualAbsSum = allowedDualAbsSum;
+		diagnosticForbiddenJobArcDualAbsSum = forbiddenDualAbsSum;
+	}
+
+	private void recordRestrictedColumnDiagnostics(LP lp, Node node) {
+		diagnosticRestrictedColumnCount = lp.getRestrictedColumnIds().size();
+		if (diagnosticRestrictedColumnCount == 0) {
+			diagnosticIncompatibleRestrictedColumnCount = 0;
+			diagnosticRestrictedColumnAvgLength = 0.0;
+			return;
+		}
+		int incompatible = 0;
+		long totalLength = 0;
+		for (int columnId : lp.getRestrictedColumnIds()) {
+			TWETColumn column = lp.getPool().getColumn(columnId);
+			if (node != null && !node.isColumnCompatible(column)) {
+				incompatible++;
+			}
+			totalLength += column.getSequence().size();
+		}
+		diagnosticIncompatibleRestrictedColumnCount = incompatible;
+		diagnosticRestrictedColumnAvgLength = ((double) totalLength) / diagnosticRestrictedColumnCount;
+	}
+
+	private void recordSinkArcDualDiagnostics(LP lp, Node node) {
+		int sink = node == null ? data.n + 1 : node.sinkId();
+		int nonZero = 0;
+		double min = Utility.big_M;
+		double max = -Utility.big_M;
+		double absSum = 0.0;
+		for (int job = 1; job <= data.n; job++) {
+			double dual = lp.getArcDual(job, sink);
+			if (!isDiagnosticNonZero(dual)) {
+				continue;
+			}
+			nonZero++;
+			min = Math.min(min, dual);
+			max = Math.max(max, dual);
+			absSum += Math.abs(dual);
+		}
+		diagnosticSinkArcDualNonZeroCount = nonZero;
+		diagnosticSinkArcDualMin = Utility.isBigMValue(min) ? 0.0 : min;
+		diagnosticSinkArcDualMax = Utility.isBigMValue(-max) ? 0.0 : max;
+		diagnosticSinkArcDualAbsSum = absSum;
+	}
+
+	private boolean isDiagnosticNonZero(double value) {
+		return Utility.compareGt(Math.abs(value), 1e-8);
 	}
 
 	private double joinLowerBoundThreshold() {

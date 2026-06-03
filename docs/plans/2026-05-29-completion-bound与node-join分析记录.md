@@ -1016,3 +1016,17 @@ job dual 诊断也支持“dual 口径改变”而不是“纯 pricing 实现变
 更精确的当前结论是：subtree formal inheritance 不是单纯“减少 pricing 候选 arc”，而是提前改变了 child 的可用历史列、分支过滤、heuristic pricing 状态和随后 LP 对偶；经过 `after_column_filter` 后列应已兼容 forbidden arc，但 child RMP 的列空间已经和 subtree-off/local-arcfix 路径不同。这个不同的 RMP/dual 使半域 exact pricing 在该 child 上出现大量长 forward-only 负列。数据上也能看到这一点：`subtree=off/local-arcfix` 的 Node 2 第一轮 `bestRC=-38.0`，而 `subtree=on` 为 `bestRC=-411.45`；`forwardReach` 平均从约 `21.5` 降到 `17.8`，dominance 的 `subset visited` 从 `21935` 暴涨到 `65207363`。这些都是“剩余标签更难被支配、且大量可直接接 sink 为负”的直接表现。
 
 因此后续不要再把“master forbidden 行直接含旧列”当作定论。更合理的下一步诊断是记录 `after_column_filter` 前后的列数、因当前 forbidden arc 不兼容被删的列数、正值列保留数、low reduced-cost 候选数，以及 exact pricing 入口时的 column length histogram、job dual/arc dual/sink arc dual 分布。只有拿到这些数据，才能继续判断是列池压缩后的 LP 对偶退化、某些 sink arc dual/branch dual 异常，还是 half-domain forward completion bound 在 branch child 上过弱。当前已经确定的是：爆炸的直接形态是 depth 12-15 的 forward->sink 负列大量产生；local arc fixing 证明删弧本身不是原因；subtree formal inheritance 改变 child 入口状态是触发条件。
+
+### 41.6 2026-06-03 arc dual 复核后的核心原因
+
+继续按用户要求追问“为什么 arc 少了 label 反而更多”。本轮补充 exact pricing 入口诊断：restricted column 数、其中与当前 node 不兼容的列数、平均列长，以及 `lp.getArcDual()` 在 allowed job-job arc、forbidden job-job arc、job->sink arc 上的非零统计。重新跑 `tmp-wet030_001_2m`、half-domain、`completionBound=allCycles`、`runALNSForSeed=false`、关闭无向相邻分支、关闭本轮 local arc fixing、`maxNodes=2` 的 subtree off/on 对照。
+
+结果首先排除一个可能误判：不是 arc branch dual 把剩余路径压负。Node 2 第一轮 exact 入口中，`subtree=off` 和 `subtree=on` 的 `arcDual allowedNZ`、`forbiddenNZ`、`sinkNZ` 全部为 `0`。因此，701 条 subtree fixed arc 即使写入 `arcState` 并建了 forbidden row，本轮数据里也没有通过 `lp.getArcDual()` 直接改变可走 arc 或 sink arc 的 reduced cost。之前怀疑的“forbidden row dual 直接影响 pricing”在这组数据下不成立。
+
+真正的核心差异是 child exact pricing 入口的列集被砍瘦了。`subtree=off` 的 Node 2 第一轮 exact 入口有 `4801` 条 restricted columns，`incompat=0`，平均长度 `14.342`；`subtree=on` 只有 `2003` 条 restricted columns，`incompat=0`，平均长度 `14.947`。也就是说，`after_column_filter` 确实已经把不兼容列过滤掉了，但 subtree 继承让父节点 4896 条左右的 route set 只剩约 2000 条能在 child 上继续使用。local arc fixing 不会改 master 列集，所以同样跳过大量 arc 时仍然保留 4800 条左右的 active restricted columns，不会触发大规模补列。
+
+这就是“arc 少了但 label 爆炸”的核心机制：pricing 不是在固定同一套 dual 和同一套 active columns 上单调比较图大小；它是在当前 RMP dual 下寻找缺失的负 reduced-cost 列。subtree 继承先把已有列池中大量使用 eliminated arcs 的列移出 child RMP，导致 exact pricing 从一个严重缺列的 residual graph LP 出发。剩下的 job-job arc 虽然只有约 169 条，但对 30-job、depth 12-15 的 forward path 来说仍然有指数级组合空间；而当前 RMP 缺少这些“不用 eliminated arcs 的替代长列”，所以 reduced-cost cutoff 和 completion bound 会让大量 forward prefix 存活并直接接 sink。最终第一轮 exact 一次性补出 `69952` 条列。
+
+因此当前更准确的结论是：subtree arc elimination 作为 reduced-cost fixing 可能是安全的，但把它正式继承到 child 会造成“残余图列池冷启动”。根节点已有的 restricted columns 主要服务于未删弧图；一次删掉 80% job-job arc 后，child 需要的是 residual graph 上的新 route inventory。local arc fixing 快，是因为它只用于当前 pricing 轮剪函数评价，不会让 child RMP 丢掉这几千条已有列。subtree-on 慢，是因为它先丢掉大半可用 route set，再让 exact pricing 用半域 label 从头补 residual graph 的大量替代负列。
+
+由此，后续若继续做 subtree arc elimination，核心修复方向不是继续猜 dominance 或 arc dual，而是避免 child 残余图冷启动。可选方案包括：只保留诊断不正式继承；或者正式继承时先为 child residual graph 做一轮轻量 heuristic/repair seed 扩充，再进入 exact；或者把 subtree eliminated arc 独立于 branch `arcState` 存储，并在 `prepareChildSeedColumns` 阶段显式统计和补偿被删列数；又或者限制 branch node 单轮 exact 返回列数，避免一次从 2000 列直接膨胀到 7 万列。当前数据下，最直接的坏点不是“label 为什么凭空多”，而是 child RMP 从 `4801` 列退化到 `2003` 列后，exact pricing 被迫枚举 residual graph 的替代列。

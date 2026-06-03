@@ -992,3 +992,15 @@ Node 3 真正耗时集中在 forward label 和 dominance。第一轮 `completion
 job dual 诊断也支持“dual 口径改变”而不是“纯 pricing 实现变慢”。subtree off 的 Node 2 第一轮 30 个 job dual 全为正，最小值约 `446`；subtree on 后只有 28 个为正，最小值为 `0`，最大值从约 `2407` 提到 `2702`，sum 略降。这不是决定性证明，但至少说明两边 pricing 使用的 reduced-cost 价格体系已经不同。结合 `forbiddenJobArcs=702`、DP 构造变快、forwardSink 负候选暴涨，可以确定当前变坏的直接原因是：大量永久禁弧改变 child RMP/dual 后，半域 pricing 在该 child 上退化为 forward-only 负列大量枚举，而不是 completion-bound scalar、arc scan 或 backward join 的问题。
 
 因此后续判断应更精确：subtree arc elimination 的永久继承判据可以是安全的，但“安全删除 arc”不等于“LP/pricing 更快”。在当前 half-domain + 大 K + 无 ALNS 的弱列池路径下，它会让 child 一次 exact pricing 返回近 7 万列，导致列池从 `5709` 膨胀到 `75661`。后续若继续尝试该技术，应优先处理两个工程问题：一是限制 branch node 单轮 exact 返回列数或使用 K 堆当前 worst reduced cost 做 record 型加速，但最后 certificate 轮仍回到 cutoff 0；二是继续记录 child 初始 RMP 中有多少历史列因 forbidden arc 不兼容、禁弧行 dual 和 sink arc dual 分布，用数据确认到底是哪类 dual 诱发 forward->sink 列爆炸。
+
+### 41.4 2026-06-03 进一步隔离：不是“少 arc 本身”导致爆炸
+
+用户再次指出不能把现象简单归因于 dual。本轮补一个更直接的隔离实验：关闭 subtree arc elimination 正式继承，但开启当前 pricing 轮的 local completion-bound arc fixing。这样 pricing 图同样会跳过大量 arc，但不会把这些 arc 写进 `Node.arcState`，也不会在 master 中生成大量 `forbiddenArc_i_j` 行。测试口径仍为 `tmp-wet030_001_2m`、half-domain、`completionBound=allCycles`、`runALNSForSeed=false`、关闭无向相邻分支、`maxNodes=2`、`maxExactColumns=100000`。
+
+结果为 `solve=17.062s`、exact `4.427s/7`，比 subtree off 的 `24.048s/5.567s` 还快，更没有出现 subtree on 的 `53.948s/40.651s`。Node 2 第一轮 exact 中，local arc fixing 扫描 `869` 条 arc，固定 `749` 条，比 subtree on 的 root 固定 `701` 条还多；但 pricing 统计仍保持在正常规模：`fw kept/dominated=1442/42`，`forwardSink visited/negative=1441/45`，`addedColumns=45`。completion-bound eval 从 subtree off 的 `29313` 降到 `4710`，说明 local arc fixing 的确减少了函数判定工作，但没有改变负列数量级。
+
+这组对照基本排除“删 arc 或 pricing 图变稀导致 forward label 爆炸”的解释。真正有问题的是 subtree 正式继承的实现层级：当前 `CompletionBoundSubtreeArcEliminator.applyTo()` 调用 `node.forbidArc(i,j)`，这些 arc 与正常 branching arc 混在同一个 `arcState` 里。随后 `LP.buildArcBranchConstraints()` 会对每条 `ARC_FORBIDDEN` 建一条 `x_ij=0` 的 master 等式行。也就是说，701 条 reduced-cost fixing 被实现成了 701 条 branch forbidden arc 行，而不是单纯的“后继子树不再生成/使用这些 arc”。
+
+这不是一个语义上无关的小差别。local arc fixing 证明，在同一个 LP 对偶口径下，pricing 里跳过 700 多条 arc 只会让 eval 变少，不会让负列暴涨。subtree on 的不同点是 child master 被永久加了 701 条额外等式行，并且 child 首次 `LP.construct()` 仍先继承父节点 seed columns，之后靠这些等式行和后续 `resetRestrictedColumnsByCurrentReducedCost()` 再处理兼容性。最终 subtree on 的 Node 2 一轮 exact 后 restricted columns 达到 `72002`，而 subtree off 和 local arc fixing 都只有 `4888`。这说明爆炸发生在“RMP 结构 + half-domain exact pricing 的反馈环”里，而不是 completion-bound arc 判据本身。
+
+因此当前更准确的结论是：subtree arc elimination 的判据可以继续作为 reduced-cost fixing 候选，但不应该直接写成 `Node.arcState=ARC_FORBIDDEN` 并进入 master branch rows。更合理的实现应把“subtree eliminated arc”与真正 branch arc 分开存储：pricing 和列兼容性检查应禁止这些 arc；child 初始列集也应过滤掉包含 eliminated arc 的列；但 `LP.buildArcBranchConstraints()` 不应为它们建 `forbiddenArc` 行，也不应把它们当成需要 repair slack 的分支约束。这样才能验证“永久删除 arc 本身”是否有效，而不混入大量额外 master 行造成的反馈。

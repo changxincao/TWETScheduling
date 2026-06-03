@@ -163,7 +163,7 @@ public class Tree {
 	private CompletionBoundSubtreeArcEliminator.Result evaluateSubtreeArcElimination(LP lp, double incumbentCost,
 			double nodeLowerBound) {
 		CompletionBoundSubtreeArcEliminator.Result result = completionBoundSubtreeArcEliminator.evaluate(lp,
-				incumbentCost, nodeLowerBound);
+				incumbentCost, nodeLowerBound, pc.getLastReusableSubtreeArcEliminationBounds());
 		if (result.isAvailable()) {
 			traceSink.onCompletionBoundSubtreeArcElimination(lp.getNode(),
 					config.bidirectionalCompletionBoundSubtreeArcElimination,

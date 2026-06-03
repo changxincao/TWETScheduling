@@ -6,7 +6,6 @@ import java.util.Locale;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
-import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.LP.LP;
@@ -52,17 +51,49 @@ public final class CompletionBoundSubtreeArcEliminator {
 			return Result.skipped("node gap already closed");
 		}
 
-		long start = System.nanoTime();
-		PiecewiseLinearFunction[] penalties = buildHardWindowCompletionPenalties();
-		CompletionBoundCalculator calculator = new CompletionBoundCalculator(data, lp, data.CmaxH, penalties,
-				penalties, null, parseQueueOrdering(config.bidirectionalCompletionBoundQueueOrdering), false);
-		CompletionBoundCalculator.Result cbResult = calculator.build(relaxation);
-		long buildNanos = System.nanoTime() - start;
+		return evaluate(lp, incumbentCost, nodeLowerBound, null);
+	}
 
+	public Result evaluate(LP lp, double incumbentCost, double nodeLowerBound, PreparedBounds preparedBounds) {
+		if (lp == null || lp.getNode() == null) {
+			return Result.skipped("empty LP");
+		}
+		if (!config.bidirectionalCompletionBoundSubtreeArcEliminationDiagnostic
+				&& !config.bidirectionalCompletionBoundSubtreeArcElimination) {
+			return Result.skipped("subtree arc elimination disabled");
+		}
+		CompletionBoundCalculator.Relaxation relaxation = parseRelaxation(config.bidirectionalCompletionBoundRelaxation);
+		if (relaxation == null) {
+			return Result.skipped("completion bound disabled");
+		}
+		if (!Double.isFinite(incumbentCost) || !Double.isFinite(nodeLowerBound)) {
+			return Result.skipped("missing finite incumbent or node bound");
+		}
+		double gap = incumbentCost - nodeLowerBound;
+		if (!Utility.compareGt(gap, config.branchingTolerance)) {
+			return Result.skipped("node gap already closed");
+		}
+
+		long start = System.nanoTime();
+		long buildNanos = 0L;
+		boolean reusedBounds = preparedBounds != null && preparedBounds.isCompatible(data.CmaxH, relaxation,
+				parseQueueOrdering(config.bidirectionalCompletionBoundQueueOrdering));
+		CompletionBoundCalculator.Bounds bounds;
+		if (reusedBounds) {
+			bounds = preparedBounds.bounds;
+		} else {
+			PiecewiseLinearFunction[] penalties = buildHardWindowCompletionPenalties();
+			CompletionBoundCalculator calculator = new CompletionBoundCalculator(data, lp, data.CmaxH, penalties,
+					penalties, null, parseQueueOrdering(config.bidirectionalCompletionBoundQueueOrdering), false);
+			CompletionBoundCalculator.Result cbResult = calculator.build(relaxation);
+			bounds = cbResult.bounds;
+			buildNanos = System.nanoTime() - start;
+		}
 		long scanStart = System.nanoTime();
-		Result result = scanArcs(lp, cbResult.bounds, gap);
+		Result result = scanArcs(lp, bounds, gap);
 		result.gap = gap;
 		result.buildNanos = buildNanos;
+		result.reusedBounds = reusedBounds;
 		result.scanNanos = System.nanoTime() - scanStart;
 		result.totalNanos = System.nanoTime() - start;
 		return result;
@@ -133,28 +164,33 @@ public final class CompletionBoundSubtreeArcEliminator {
 	private PiecewiseLinearFunction[] buildHardWindowCompletionPenalties() {
 		PiecewiseLinearFunction[] penalties = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			penalties[job] = cropToInterval(data.penaltyFunction[job], 0.0, data.CmaxH);
+			// data.penaltyFunction[job] 已经在 Data 初始化阶段写入静态 hard window；
+			// CompletionBoundCalculator 会在减 job dual 前复制函数，这里直接复用引用即可。
+			penalties[job] = data.penaltyFunction[job];
 		}
 		return penalties;
 	}
 
-	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {
-		PiecewiseLinearFunction cropped = new PiecewiseLinearFunction();
-		cropped.resetDomain(start, end);
-		if (function == null || function.head == null || Utility.compareGt(start, end)) {
-			return cropped;
+	public static final class PreparedBounds {
+		private final CompletionBoundCalculator.Bounds bounds;
+		private final double horizon;
+		private final CompletionBoundCalculator.Relaxation relaxation;
+		private final CompletionBoundCalculator.QueueOrdering queueOrdering;
+
+		PreparedBounds(CompletionBoundCalculator.Bounds bounds, double horizon,
+				CompletionBoundCalculator.Relaxation relaxation,
+				CompletionBoundCalculator.QueueOrdering queueOrdering) {
+			this.bounds = bounds;
+			this.horizon = horizon;
+			this.relaxation = relaxation;
+			this.queueOrdering = queueOrdering;
 		}
-		for (Segment seg = function.head; seg != null; seg = seg.next) {
-			double segStart = Math.max(seg.start, start);
-			double segEnd = Math.min(seg.end, end);
-			if (Utility.compareLt(segStart, segEnd)) {
-				cropped.addSegment(segStart, segEnd, seg.slope, seg.intercept);
-			} else if (Utility.compareEq(seg.start, seg.end)
-					&& !Utility.compareLt(seg.start, start) && !Utility.compareGt(seg.start, end)) {
-				cropped.addSegment(seg.start, seg.end, 0.0, seg.getValue(seg.start));
-			}
+
+		private boolean isCompatible(double expectedHorizon, CompletionBoundCalculator.Relaxation expectedRelaxation,
+				CompletionBoundCalculator.QueueOrdering expectedQueueOrdering) {
+			return bounds != null && Utility.compareEq(horizon, expectedHorizon)
+					&& relaxation == expectedRelaxation && queueOrdering == expectedQueueOrdering;
 		}
-		return cropped;
 	}
 
 	private CompletionBoundCalculator.Relaxation parseRelaxation(String value) {
@@ -199,6 +235,7 @@ public final class CompletionBoundSubtreeArcEliminator {
 		private long scanNanos;
 		private long totalNanos;
 		private double gap;
+		private boolean reusedBounds;
 
 		private Result(String status) {
 			this.status = status;
@@ -293,9 +330,9 @@ public final class CompletionBoundSubtreeArcEliminator {
 				return status;
 			}
 			return String.format(Locale.US,
-					"gap=%.6f candidates/fixed/domain/scalar/unavailable/funcEval=%d/%d/%d/%d/%d/%d buildMs=%.3f scanMs=%.3f",
+					"gap=%.6f candidates/fixed/domain/scalar/unavailable/funcEval=%d/%d/%d/%d/%d/%d buildMs=%.3f scanMs=%.3f bounds=%s",
 					gap, candidates, fixed, domainFixed, scalarFixed, unavailable, functionEvaluations,
-					buildNanos / 1_000_000.0, scanNanos / 1_000_000.0);
+					buildNanos / 1_000_000.0, scanNanos / 1_000_000.0, reusedBounds ? "reused" : "rebuilt");
 		}
 	}
 }

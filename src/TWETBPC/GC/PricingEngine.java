@@ -34,6 +34,10 @@ public interface PricingEngine {
 	default void reset() {
 	}
 
+	default CompletionBoundSubtreeArcEliminator.PreparedBounds getReusableSubtreeArcEliminationBounds() {
+		return null;
+	}
+
 	/** @return 定价器名称，主要用于日志和调试。 */
 	default boolean repeatFindFeasibleUntilExhausted() {
 		return false;

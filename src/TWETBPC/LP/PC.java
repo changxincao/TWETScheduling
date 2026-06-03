@@ -8,6 +8,7 @@ import Output.BPCTraceSink;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.CUT.CutGenerationResult;
 import TWETBPC.CUT.CutGenerator;
+import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.Model.TWETMasterStatus;
@@ -22,6 +23,7 @@ public class PC {
 	private final List<PricingEngine> pricingEngines;
 	private final List<CutGenerator> cutGenerators;
 	private final BPCTraceSink traceSink;
+	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
 
 	public PC(TWETBPCConfig config, List<PricingEngine> pricingEngines, List<CutGenerator> cutGenerators,
 			BPCTraceSink traceSink) {
@@ -32,6 +34,7 @@ public class PC {
 	}
 
 	public TWETMasterSolution solve(LP lp) {
+		lastReusableSubtreeArcEliminationBounds = null;
 		// 2026-05-23: 以下计时只写入 trace，用于拆分 RMP、pricing 和 cut 的耗时，
 		// 不参与列选择、剪枝或对偶计算，避免改变 BPC 求解流程。
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "initial");
@@ -77,11 +80,16 @@ public class PC {
 			if (!separated) {
 				break;
 			}
+			lastReusableSubtreeArcEliminationBounds = null;
 			lp.addCuts(newCutIds);
 			solution = solveRelaxationTimed(lp, "after_cut");
 		}
 
 		return solution;
+	}
+
+	public CompletionBoundSubtreeArcEliminator.PreparedBounds getLastReusableSubtreeArcEliminationBounds() {
+		return lastReusableSubtreeArcEliminationBounds;
 	}
 
 	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
@@ -104,6 +112,7 @@ public class PC {
 				// 2026-05-19: 对齐旧 VRP PC 的普通 pricing 节奏。一个定价器加列后立即重解 LP，
 				// 并从第一个定价器重新开始；这样只要启发式还能补列，就不会提前调用更重的精确定价。
 				resetFollowingPricingEngines(engineIndex + 1);
+				lastReusableSubtreeArcEliminationBounds = null;
 				solution = resolveCurrentModelTimed(lp, "after_pricing");
 				addedColumn = true;
 				break;
@@ -190,6 +199,11 @@ public class PC {
 		long pricingStart = System.nanoTime();
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
 		long pricingNanos = System.nanoTime() - pricingStart;
+		if (!repairMode && !result.isImproved()) {
+			lastReusableSubtreeArcEliminationBounds = engine.getReusableSubtreeArcEliminationBounds();
+		} else if (!repairMode) {
+			lastReusableSubtreeArcEliminationBounds = null;
+		}
 		int addedColumns = 0;
 		if (result.isImproved()) {
 			for (int i = 0; i < result.getColumns().size(); i++) {

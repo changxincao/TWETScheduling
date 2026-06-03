@@ -862,3 +862,11 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 当前实现选择单独复制一个 restricted master integer MIP，而不是直接把原 `LP` 对象里的变量临时改成整数。这个选择主要是为了隔离语义和避免污染后续 pricing。原 `LP` 模型是当前节点的 LP relaxation，后续还要保留它的 LP 解、dual 和 reduced cost 口径，用于分支、列生成和 trace。MIP 解没有同样意义的 dual，如果在原 CPLEX 模型上临时改变量类型再改回来，容易让后续 LP 状态、basis/dual 或变量类型语义变得不清楚。
 
 因此 restricted integer 组件只复制当前节点已经稳定的列池和分支状态，单独求一个整数 RMP，用得到的整数解刷新启发式上界；它不参与 reduced cost，不改变原 LP 的 dual，也不会因为找到整数上界就把 fractional node 直接关闭。后续若该 MIP 建模时间成为瓶颈，可以考虑缓存覆盖矩阵、列到弧/相邻 pair 的映射或 tariff segment 辅助结构，但仍建议保持独立 CPLEX model，而不是直接修改原 LP relaxation 模型。
+
+### 39.2 restricted integer 上界正确性复核
+
+本组件的无条件正确部分是流程隔离：它在 `pc.solve(lp)` 完成后读取当前 node 的 restricted columns 和分支状态，单独建 MIP，只用 MIP 结果刷新 incumbent，不读取 MIP dual，也不修改原 LP relaxation。因此它不会污染后续 pricing 的 dual/reduced-cost 口径，也不会改变当前 node 的 LP lower bound。当前实现也只在原 LP 解本身整数时关闭 node；restricted integer 找到上界时，fractional node 仍然按 LP bound 继续剪枝或分支，这一点是正确的。
+
+作为“原问题可行上界”的正确性依赖两个建模假设。第一，当前列池中的每条 `TWETColumn` 本身必须是可行机器序列，且 node 上的机器数、directed arc、无向相邻 pair、tariff segment 分支约束已经被复制到 restricted integer MIP；当前实现已经覆盖这些约束。第二，coverage 继续使用 RMP 的 `>=1` set-covering 语义，因此严格上界语义依赖当前三角不等式/非负成本假设：最优整数解不会保留重复覆盖，或者重复覆盖可以不增成本地化简为不重复覆盖的排程。若后续进入不满足该性质的数据、负成本列、或某些分支约束让“删除重复访问”不再保持可行，则需要把该启发式改成 `==1` 或在接受 incumbent 前做重复覆盖校验/修复。当前 `wet030` 验证中 selected columns 无重复覆盖，validator 也通过，因此现有 no-outsourcing/TWET 实验口径下该上界可接受。
+
+active cuts 当前没有复制进这个 MIP。只要 cuts 是原问题有效不等式，不复制 cuts 不会破坏原问题上界的可行性；它只可能让 restricted integer 解违反某些 LP 强化行。但如果未来引入的 cut 带有非全局有效或类似分支的语义，就必须同步复制，否则该启发式上界可能与当前 node 语义不一致。

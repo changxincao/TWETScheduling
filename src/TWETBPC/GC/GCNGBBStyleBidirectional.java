@@ -1227,8 +1227,7 @@ public class GCNGBBStyleBidirectional {
 
 	private boolean isCompletionBoundArcTimeDisjoint(PiecewiseLinearFunction prefix, PiecewiseLinearFunction suffix,
 			double delay) {
-		return Utility.compareGt(prefix.head.start + delay, suffix.tail.end)
-				|| Utility.compareLt(prefix.tail.end + delay, suffix.head.start);
+		return Utility.compareGt(prefix.head.start + delay, suffix.tail.end);
 	}
 
 	private boolean isCompletionBoundArcScalarPruned(int fromJob, int toJob, double fixedReducedCost, double cutoff) {

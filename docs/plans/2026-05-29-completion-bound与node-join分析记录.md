@@ -968,3 +968,11 @@ Node 3 真正耗时集中在 forward label 和 dominance。第一轮 `completion
 这个结果说明，永久 subtree arc elimination 和本轮 local arc fixing 不是同一种优化。local arc fixing 只在当前 pricing 轮跳过不可能出现在负 reduced-cost 列中的 arc，不改变 master LP；而 subtree elimination 会把大量 arc 写进 child node 的永久 forbidden 结构，改变 child RMP 的可用列、分支行和对偶解。虽然可行路径集合变小，但 LP 对偶可能变得更退化，half-domain completion bound 又把 backward side 全部剪掉，于是大量 forward prefix 在当前 dual 下看起来仍能直接接 sink 形成负 reduced-cost 列，导致一次 exact pricing 返回近 7 万列。
 
 当前确定的变坏原因是：在弱初始列池/无 ALNS 的 root 路径上，subtree arc elimination 正式写入 child 后改变了 child dual，使半域 pricing 退化成 forward-only 大量负列枚举。它不是 scalar 预筛问题，也不是无向相邻分支问题；有 ALNS 初始列池时，同样加回 subtree 没有复现该坏结果。后续默认策略应更保守：subtree arc elimination 继续保留诊断；正式继承只应在有稳定上界和足够初始列池的场景测试，或者先只用于 pricing-local 层，不直接写入 master forbidden arc 行。若要继续使用正式继承，还需要记录 child 构造后有多少历史列被 branch/filter 排除、LP job dual/arc dual 的极值、以及 forward->sink 候选数量，判断是不是对偶退化而非算法实现错误。
+
+进一步解释这个现象的本质：对 pricing 子问题来说，arc 少了通常会减少扩展候选；但对 BPC 的 child node 来说，永久删弧同时改变了 restricted master 的 LP relaxation。`Node.isArcForbidden(i,j)` 会在三个层面生效：历史列进入 child 初始 RMP 时会被兼容性过滤；LP 会为 forbidden arc 建 `x_ij=0` 行；pricing 图后续也不能再生成这些 arc。因此它不是只把子问题图剪小，而是先把 RMP 的列空间和对偶价格体系重算了一遍。
+
+在 wet030 的坏路径里，root 一次性继承 `701/870` 条 job-job forbidden arc，child 的可用历史列和可生成结构都被大幅改变。由于没有 ALNS 的较好初始列池支撑，child RMP 需要用更少、更偏的列满足覆盖和分支约束，LP 对偶就可能变得更极端。这个对偶会进入 reduced cost：`-jobDual`、`-arcDual` 和 branch row dual 都会改变 pricing 中每条路径的吸引力。于是虽然物理可走 arc 变少了，剩下路径上的 reduced cost 反而可能更负，导致大量 forward prefix 不能被 completion bound 剪掉。
+
+半域实现还放大了这个问题。branch node 下 `dualWindow=staticOutsourcingOnly`，`pricingHorizon` 回到完整 `CmaxH`，backward 第一层真实 job label 又被 completion-bound reduced-cost cutoff 全部剪掉，crossing join 基本消失；但是 forward label 仍可以通过 `forward->sink` 直接生成完整列。这样一来，问题从“少边后的双向拼接”退化为“在剩余图上枚举大量能直接接 sink 的 forward-only 负列”。这解释了为什么 subtree 后 completion-bound DP 构造更快、arc 更少，但 final exact pricing 反而从 `45` 条负列变成 `69952` 条负列。
+
+因此这里的反直觉并不矛盾：如果固定同一套 dual、同一套 label 状态，删 arc 一定不会增加可扩展 child 数；但 BPC 分支后的 LP dual 不是固定的。永久 arc elimination 改变了 master relaxation，可能让剩余列的 reduced cost 结构更差。当前 subtree 判据只保证“被删 arc 不会出现在能改进 incumbent 的整数解中”，并不保证“删除后 child LP 更容易”或“pricing 负列更少”。这也是后续不能把它默认正式继承的主要原因。

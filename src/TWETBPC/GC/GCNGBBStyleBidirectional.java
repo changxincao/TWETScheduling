@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -189,6 +190,7 @@ public class GCNGBBStyleBidirectional {
 	private double diagnosticJobDualMin;
 	private double diagnosticJobDualMax;
 	private double diagnosticJobDualSum;
+	private double[] diagnosticJobDualQuantiles;
 	private int diagnosticRestrictedColumnCount;
 	private int diagnosticIncompatibleRestrictedColumnCount;
 	private double diagnosticRestrictedColumnAvgLength;
@@ -1132,6 +1134,7 @@ public class GCNGBBStyleBidirectional {
 		diagnosticJobDualMin = 0.0;
 		diagnosticJobDualMax = 0.0;
 		diagnosticJobDualSum = 0.0;
+		diagnosticJobDualQuantiles = null;
 		diagnosticRestrictedColumnCount = 0;
 		diagnosticIncompatibleRestrictedColumnCount = 0;
 		diagnosticRestrictedColumnAvgLength = 0.0;
@@ -1195,6 +1198,8 @@ public class GCNGBBStyleBidirectional {
 				+ diagnosticForbiddenJobArcCount + "/" + diagnosticPricingOnlyJobArcCount
 				+ "/" + diagnosticMachineDual + "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax
 				+ "/" + diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
+				+ ", nodeDiag jobDual q0/q10/q25/q50/q75/q90/q100="
+				+ formatJobDualQuantiles()
 				+ ", nodeDiag columns/incompat/avgLen=" + diagnosticRestrictedColumnCount
 				+ "/" + diagnosticIncompatibleRestrictedColumnCount + "/"
 				+ String.format("%.3f", diagnosticRestrictedColumnAvgLength)
@@ -1321,8 +1326,10 @@ public class GCNGBBStyleBidirectional {
 		double max = -Utility.big_M;
 		double sum = 0.0;
 		int positive = 0;
+		double[] jobDuals = new double[data.n];
 		for (int job = 1; job <= data.n; job++) {
 			double dual = lp.getJobDual(job);
+			jobDuals[job - 1] = dual;
 			min = Math.min(min, dual);
 			max = Math.max(max, dual);
 			sum += dual;
@@ -1336,6 +1343,7 @@ public class GCNGBBStyleBidirectional {
 		diagnosticJobDualMin = Utility.isBigMValue(min) ? 0.0 : min;
 		diagnosticJobDualMax = Utility.isBigMValue(-max) ? 0.0 : max;
 		diagnosticJobDualSum = sum;
+		diagnosticJobDualQuantiles = computeQuantiles(jobDuals);
 		diagnosticAllowedJobArcDualNonZeroCount = allowedDualNonZero;
 		diagnosticForbiddenJobArcDualNonZeroCount = forbiddenDualNonZero;
 		diagnosticAllowedJobArcDualMin = Utility.isBigMValue(allowedDualMin) ? 0.0 : allowedDualMin;
@@ -1388,6 +1396,48 @@ public class GCNGBBStyleBidirectional {
 
 	private boolean isDiagnosticNonZero(double value) {
 		return Utility.compareGt(Math.abs(value), 1e-8);
+	}
+
+	private double[] computeQuantiles(double[] values) {
+		if (values == null || values.length == 0) {
+			return new double[0];
+		}
+		double[] sorted = values.clone();
+		Arrays.sort(sorted);
+		double[] probabilities = new double[] {0.0, 0.10, 0.25, 0.50, 0.75, 0.90, 1.0};
+		double[] quantiles = new double[probabilities.length];
+		for (int i = 0; i < probabilities.length; i++) {
+			quantiles[i] = quantile(sorted, probabilities[i]);
+		}
+		return quantiles;
+	}
+
+	private double quantile(double[] sorted, double probability) {
+		if (sorted.length == 1) {
+			return sorted[0];
+		}
+		double position = probability * (sorted.length - 1);
+		int lower = (int) Math.floor(position);
+		int upper = (int) Math.ceil(position);
+		if (lower == upper) {
+			return sorted[lower];
+		}
+		double weight = position - lower;
+		return sorted[lower] * (1.0 - weight) + sorted[upper] * weight;
+	}
+
+	private String formatJobDualQuantiles() {
+		if (diagnosticJobDualQuantiles == null || diagnosticJobDualQuantiles.length == 0) {
+			return "-";
+		}
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < diagnosticJobDualQuantiles.length; i++) {
+			if (i > 0) {
+				builder.append('/');
+			}
+			builder.append(String.format("%.3f", diagnosticJobDualQuantiles[i]));
+		}
+		return builder.toString();
 	}
 
 	private double joinLowerBoundThreshold() {

@@ -954,3 +954,17 @@ Node 3 真正耗时集中在 forward label 和 dominance。第一轮 `completion
 2026-06-03 再次对照“之前 wet030 很快求到最优”的日志后，确认前后不是同一个实验口径。之前的 `tmp-wet030-full-alns-cb-allCycles-current` 使用的是 `fullDomain` arc-join exact pricing，显式打开 `runALNSForSeed` 后初始 incumbent 已经是 `15325`，初始列 `63`，root 中 heuristic pricing 先把 pool 扩到 `5797`，随后 full-domain exact pricing 只返回 `74/2/1/0` 条列。root 后仍由 directed `ArcBrancher` 在 `(3,4)` 上分支，但 Node 2 的 full-domain exact 第一轮只保留 `fw=3831,bw=1120`，Node 3 第一轮只保留 `fw=2796,bw=618`，没有出现半域路径的十万级 forward-only 标签。整个流程 `FINISHED, obj=bound=15325`，总时间 `101.666s`。
 
 当前 directed-only 慢实验使用的是 `halfDomain` GCNGBB-style exact pricing，comparison 入口默认没有打开 ALNS，root 初始 incumbent 是 `46152`，直到 root 完成后才由 restricted integer heuristic 刷到 `15325`；同时开启了 subtree arc elimination，root 后继承了 `701` 条永久禁弧。更重要的是，branch child 中 half-domain 的 backward side 基本被 completion bound 剪空，pricing 退化成大量 forward label 直接 `forward->sink` 收尾的负列生成：Node 2 一轮返回 `69952` 条，Node 3 一轮候选堆打满 `100000`。因此这次慢不是“wet030 本来应该快但突然不快”，而是半域 branch-node 路径、subtree elimination 和大 K 返回列数共同暴露了一个新瓶颈。若要复现之前快的路线，应使用 `mode=fullDomain`、打开 `runALNSForSeed=true`，并先不启用 subtree elimination 正式写入；若要继续优化半域路线，则应针对 branch node 的 forward-only 列爆炸单独处理。
+
+### 41.2 2026-06-03 wet030 旧配置单变量复现
+
+为避免把多个开关混在一起，本轮按“旧快跑配置”做 `maxNodes=2` 受控复现。基准配置为 `tmp-wet030_001_2m`、`completionBound=allCycles`、`runALNSForSeed=true`、关闭无向相邻分支、关闭 subtree arc elimination 正式写入、关闭本轮 local arc fixing、`maxExactColumns=100000`。只跑到 root 和第一个 child，目的是定位第一个明显变坏的配置，而不是完整求最优。
+
+先复现旧 full-domain 路径，结果为 `solve=34.385s`、exact `9.843s/8`，Node 2 第一轮 full-domain exact 返回 `146` 列，`fw kept=3831`、`bw kept=1120`，与此前完整最优日志的 Node 2 结构一致。随后只把 `mode` 改成 half-domain，其余不变，结果为 `solve=35.551s`、exact `7.011s/6`。这个 half-domain Node 2 的 backward 仍然被剪空，但 exact 第一轮只返回 `85` 列，`fw kept=3613`，没有出现十万级 forward-only 枚举。因此，half-domain 本身不是变坏的充分原因。
+
+接着只在 ALNS 旧口径上加回 subtree arc elimination 正式继承，结果为 `solve=27.650s`、exact `4.847s/7`，没有变坏，反而略快。再只关闭 ALNS、但不启用 subtree，结果为 `solve=22.645s`、exact `6.278s/7`，同样没有爆炸。这说明“无 ALNS”单独也不是根因。
+
+真正复现坏路径的是“无 ALNS + subtree arc elimination 正式继承”的组合：`solve=66.722s`、exact `46.817s/7`。在同样 root、同样 `(3,4)` directed arc 分支下，root 的 subtree elimination 把 `701/870` 条 job-job arc 写入两个 child。Node 2 的 exact 第一轮从未继承 subtree 时的 `added=45, fw kept=1442, bw kept=0`，变成继承后的 `added=69952, fw kept=121210, bw kept=0`。completion-bound 构造反而更快，从约 `673ms` 降到 `61ms`，因为图被大量删弧后 DP 状态更少；真正变慢的是 half-domain forward label/dominance 和 forward->sink 负列枚举。
+
+这个结果说明，永久 subtree arc elimination 和本轮 local arc fixing 不是同一种优化。local arc fixing 只在当前 pricing 轮跳过不可能出现在负 reduced-cost 列中的 arc，不改变 master LP；而 subtree elimination 会把大量 arc 写进 child node 的永久 forbidden 结构，改变 child RMP 的可用列、分支行和对偶解。虽然可行路径集合变小，但 LP 对偶可能变得更退化，half-domain completion bound 又把 backward side 全部剪掉，于是大量 forward prefix 在当前 dual 下看起来仍能直接接 sink 形成负 reduced-cost 列，导致一次 exact pricing 返回近 7 万列。
+
+当前确定的变坏原因是：在弱初始列池/无 ALNS 的 root 路径上，subtree arc elimination 正式写入 child 后改变了 child dual，使半域 pricing 退化成 forward-only 大量负列枚举。它不是 scalar 预筛问题，也不是无向相邻分支问题；有 ALNS 初始列池时，同样加回 subtree 没有复现该坏结果。后续默认策略应更保守：subtree arc elimination 继续保留诊断；正式继承只应在有稳定上界和足够初始列池的场景测试，或者先只用于 pricing-local 层，不直接写入 master forbidden arc 行。若要继续使用正式继承，还需要记录 child 构造后有多少历史列被 branch/filter 排除、LP job dual/arc dual 的极值、以及 forward->sink 候选数量，判断是不是对偶退化而非算法实现错误。

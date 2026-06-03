@@ -87,7 +87,9 @@ public class TWETBPCContext {
 		this.branchers = new ArrayList<Brancher>();
 		branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));
 		branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
-		branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
+		if (config.enableUndirectedAdjacencyBranching) {
+			branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
+		}
 		branchers.add(new ArcBrancher(config.branchingTolerance));
 
 		this.traceSummary = new BPCTraceSummary();

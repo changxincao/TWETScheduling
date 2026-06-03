@@ -171,6 +171,9 @@ public class GCBBFullDomainComparisonTest {
 				100000);
 		config.maxExactPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxExactColumns", 100000);
 		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.fullDomainCompare.branchSeedColumnLimit", 20000);
+		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableUndirectedAdjacencyBranching",
+				Boolean.toString(config.enableUndirectedAdjacencyBranching)));
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

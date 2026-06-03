@@ -144,6 +144,8 @@ public class GCNGBBStyleBidirectional {
 	private long backwardSinglePointDominatedByGraph;
 	private long generatedCandidateCount;
 	private long generatedCandidateDroppedByHeap;
+	private long forwardSinkLabelsVisited;
+	private long forwardSinkNegativeCandidates;
 	private long completionForwardLabelsPruned;
 	private long completionBackwardLabelsPruned;
 	private long completionBoundFunctionEvaluations;
@@ -170,6 +172,11 @@ public class GCNGBBStyleBidirectional {
 	private long completionBoundMergeCalls;
 	private long completionBoundMergeChanged;
 	private double completionBoundLastEvaluationCutoff;
+	private int diagnosticForbiddenJobArcCount;
+	private int diagnosticJobDualPositiveCount;
+	private double diagnosticJobDualMin;
+	private double diagnosticJobDualMax;
+	private double diagnosticJobDualSum;
 
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
@@ -426,6 +433,7 @@ public class GCNGBBStyleBidirectional {
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
+		recordPricingDiagnostics(lp);
 		precomputeDynamicPricingWindows(lp);
 		buildCompletionBounds(lp);
 
@@ -799,10 +807,12 @@ public class GCNGBBStyleBidirectional {
 		if (node.isArcForbidden(label.jid, sink)) {
 			return;
 		}
+		forwardSinkLabelsVisited++;
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
 		if (!Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			return;
 		}
+		forwardSinkNegativeCandidates++;
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
 		tryGenerateColumn(sequence, lp, reducedCost);
 	}
@@ -1047,6 +1057,8 @@ public class GCNGBBStyleBidirectional {
 		backwardSinglePointDominatedByGraph = 0;
 		generatedCandidateCount = 0;
 		generatedCandidateDroppedByHeap = 0;
+		forwardSinkLabelsVisited = 0;
+		forwardSinkNegativeCandidates = 0;
 		completionForwardLabelsPruned = 0;
 		completionBackwardLabelsPruned = 0;
 		completionBoundFunctionEvaluations = 0;
@@ -1073,6 +1085,11 @@ public class GCNGBBStyleBidirectional {
 		completionBoundMergeCalls = 0;
 		completionBoundMergeChanged = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
+		diagnosticForbiddenJobArcCount = 0;
+		diagnosticJobDualPositiveCount = 0;
+		diagnosticJobDualMin = 0.0;
+		diagnosticJobDualMax = 0.0;
+		diagnosticJobDualSum = 0.0;
 	}
 
 	private String statisticsSummary() {
@@ -1109,6 +1126,11 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + completionBoundArcFixingDomainPruned + "/" + completionBoundArcFixingScalarPruned
 				+ "/" + completionBoundArcFixingUnavailable + "/" + completionBoundArcFixingFunctionEvaluations
 				+ "/" + formatMillis(completionBoundArcFixingNanos)
+				+ ", forwardSink visited/negative=" + forwardSinkLabelsVisited
+				+ "/" + forwardSinkNegativeCandidates
+				+ ", nodeDiag forbiddenJobArcs/jobDual min/max/sum/pos=" + diagnosticForbiddenJobArcCount
+				+ "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax + "/"
+				+ diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
 				+ ", completionBoundQueue=" + completionBoundQueueOrdering
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
@@ -1131,6 +1153,38 @@ public class GCNGBBStyleBidirectional {
 
 	private static String formatMillis(long nanos) {
 		return String.format("%.3f", nanos / 1_000_000.0);
+	}
+
+	private void recordPricingDiagnostics(LP lp) {
+		Node node = lp.getNode();
+		int forbidden = 0;
+		if (node != null) {
+			for (int from = 1; from <= data.n; from++) {
+				for (int to = 1; to <= data.n; to++) {
+					if (from != to && node.isArcForbidden(from, to)) {
+						forbidden++;
+					}
+				}
+			}
+		}
+		double min = Utility.big_M;
+		double max = -Utility.big_M;
+		double sum = 0.0;
+		int positive = 0;
+		for (int job = 1; job <= data.n; job++) {
+			double dual = lp.getJobDual(job);
+			min = Math.min(min, dual);
+			max = Math.max(max, dual);
+			sum += dual;
+			if (Utility.compareGt(dual, 0.0)) {
+				positive++;
+			}
+		}
+		diagnosticForbiddenJobArcCount = forbidden;
+		diagnosticJobDualPositiveCount = positive;
+		diagnosticJobDualMin = Utility.isBigMValue(min) ? 0.0 : min;
+		diagnosticJobDualMax = Utility.isBigMValue(-max) ? 0.0 : max;
+		diagnosticJobDualSum = sum;
 	}
 
 	private double joinLowerBoundThreshold() {

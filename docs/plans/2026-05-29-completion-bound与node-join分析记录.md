@@ -976,3 +976,19 @@ Node 3 真正耗时集中在 forward label 和 dominance。第一轮 `completion
 半域实现还放大了这个问题。branch node 下 `dualWindow=staticOutsourcingOnly`，`pricingHorizon` 回到完整 `CmaxH`，backward 第一层真实 job label 又被 completion-bound reduced-cost cutoff 全部剪掉，crossing join 基本消失；但是 forward label 仍可以通过 `forward->sink` 直接生成完整列。这样一来，问题从“少边后的双向拼接”退化为“在剩余图上枚举大量能直接接 sink 的 forward-only 负列”。这解释了为什么 subtree 后 completion-bound DP 构造更快、arc 更少，但 final exact pricing 反而从 `45` 条负列变成 `69952` 条负列。
 
 因此这里的反直觉并不矛盾：如果固定同一套 dual、同一套 label 状态，删 arc 一定不会增加可扩展 child 数；但 BPC 分支后的 LP dual 不是固定的。永久 arc elimination 改变了 master relaxation，可能让剩余列的 reduced cost 结构更差。当前 subtree 判据只保证“被删 arc 不会出现在能改进 incumbent 的整数解中”，并不保证“删除后 child LP 更容易”或“pricing 负列更少”。这也是后续不能把它默认正式继承的主要原因。
+
+### 41.3 2026-06-03 subtree 变慢路径的直接数据复核
+
+用户指出前述解释仍然偏推断，因此本轮只补诊断字段并重跑同口径对照，没有改算法逻辑。新增统计包括当前 pricing node 的 job-job forbidden arc 数、job dual 的 `min/max/sum/positiveCount`，以及 `forward->sink` 收尾时访问的 forward label 数和其中负 reduced-cost 候选数。测试仍为 `tmp-wet030_001_2m`、half-domain、`completionBound=allCycles`、`runALNSForSeed=false`、关闭无向相邻分支、关闭本轮 local arc fixing、`maxNodes=2`、`maxExactColumns=100000`，只比较 subtree arc elimination 是否正式写入 child。
+
+结果为：subtree 关闭时 `solve=24.048s`、exact `5.567s/7`；subtree 开启时 `solve=53.948s`、exact `40.651s/7`。两者 root pricing 的列池都在 `4896`，root bound 和分支 arc 都一致，差异从 Node 2 开始出现。Node 2 第一轮 exact pricing 的关键数据如下：
+
+`subtree=off`：`forbiddenJobArcs=1`，即只有 directed arc 分支禁掉的 `(3,4)`；heuristic pricing 先加 `840` 列，pool 到 `5736`；exact 第一轮 `time=771ms`，`fw kept/dominated=1442/42`，`bw kept=0`，`completionBound buildMs=672.835`，`completionBound eval=29313`，`forwardSink visited/negative=1441/45`，最终 `addedColumns=45`。此时 job dual 为 `min=446.0, max=2407.0, sum=33726.0, positive=30`。
+
+`subtree=on`：root 后 `SubtreeArcElim` 把 `701/870` 条 job-job arc 写入 child，因此 Node 2 第一轮看到 `forbiddenJobArcs=702`。heuristic pricing 只加 `813` 列，pool 到 `5709`，规模与 off 基本同一量级；exact 第一轮却变成 `time=37675ms`，`fw kept/dominated=121210/77343`，`bw kept=0`，`completionBound buildMs=44.857`，`completionBound eval=446298`，`forwardSink visited/negative=121186/69952`，最终 `addedColumns=69952`。此时 job dual 为 `min=-0.0, max=2701.864, sum=33163.909, positive=28`。
+
+这组数据说明两件事。第一，subtree 写入后 completion-bound DP 构造确实更轻，从 `673ms` 降到 `45ms`，启发式 pricing 也从数百毫秒降到二三十毫秒；所以慢点不在 bound 构造，也不是“图更大”。第二，真正的爆点是 exact pricing 中的 forward-only 收尾：`forwardSink negative` 从 `45` 变为 `69952`，并且这些候选全部进了 K 堆，没有被 dropped。也就是说，删弧后的 child LP dual 使大量剩余 forward prefix 的 reduced cost 变得足够负，可以直接接 sink 成完整列。
+
+job dual 诊断也支持“dual 口径改变”而不是“纯 pricing 实现变慢”。subtree off 的 Node 2 第一轮 30 个 job dual 全为正，最小值约 `446`；subtree on 后只有 28 个为正，最小值为 `0`，最大值从约 `2407` 提到 `2702`，sum 略降。这不是决定性证明，但至少说明两边 pricing 使用的 reduced-cost 价格体系已经不同。结合 `forbiddenJobArcs=702`、DP 构造变快、forwardSink 负候选暴涨，可以确定当前变坏的直接原因是：大量永久禁弧改变 child RMP/dual 后，半域 pricing 在该 child 上退化为 forward-only 负列大量枚举，而不是 completion-bound scalar、arc scan 或 backward join 的问题。
+
+因此后续判断应更精确：subtree arc elimination 的永久继承判据可以是安全的，但“安全删除 arc”不等于“LP/pricing 更快”。在当前 half-domain + 大 K + 无 ALNS 的弱列池路径下，它会让 child 一次 exact pricing 返回近 7 万列，导致列池从 `5709` 膨胀到 `75661`。后续若继续尝试该技术，应优先处理两个工程问题：一是限制 branch node 单轮 exact 返回列数或使用 K 堆当前 worst reduced cost 做 record 型加速，但最后 certificate 轮仍回到 cutoff 0；二是继续记录 child 初始 RMP 中有多少历史列因 forbidden arc 不兼容、禁弧行 dual 和 sink arc dual 分布，用数据确认到底是哪类 dual 诱发 forward->sink 列爆炸。

@@ -75,6 +75,15 @@ public final class BPCOutputFormatters {
 				nanosToMillis(elapsedNanos), safeMessage(message));
 	}
 
+	public static String formatCompletionBoundSubtreeArcElimination(int nodeId, boolean applied, long candidates,
+			long fixed, long domainFixed, long scalarFixed, long unavailable, long functionEvaluations, double gap,
+			String message, long elapsedNanos) {
+		return String.format(Locale.US,
+				"SubtreeArcElim node=%d applied=%s gap=%.6f candidates/fixed/domain/scalar/unavailable/funcEval=%d/%d/%d/%d/%d/%d time=%.3f ms %s",
+				nodeId, Boolean.toString(applied), gap, candidates, fixed, domainFixed, scalarFixed, unavailable,
+				functionEvaluations, nanosToMillis(elapsedNanos), safeMessage(message));
+	}
+
 	public static String formatNodeClosed(int nodeId, String reason, int queueSizeAfterClose) {
 		return String.format(Locale.US, "Close node=%d reason=%s queue=%d", nodeId, reason, queueSizeAfterClose);
 	}
@@ -119,6 +128,14 @@ public final class BPCOutputFormatters {
 					summary.getRestrictedIntegerHeuristicFeasibleCount(),
 					summary.getRestrictedIntegerHeuristicImproveCount(),
 					summary.getRestrictedIntegerHeuristicTimeNanos() / 1_000_000_000.0));
+		}
+		if (summary.getCompletionBoundSubtreeArcEliminationCalls() > 0) {
+			builder.append(String.format(Locale.US,
+					"subtree arc elimination=%d calls, fixed=%d, applied=%d, time=%.3f s%n",
+					summary.getCompletionBoundSubtreeArcEliminationCalls(),
+					summary.getCompletionBoundSubtreeArcEliminationFixed(),
+					summary.getCompletionBoundSubtreeArcEliminationApplied(),
+					summary.getCompletionBoundSubtreeArcEliminationTimeNanos() / 1_000_000_000.0));
 		}
 		builder.append(String.format(Locale.US, "pruned by incumbent=%d, closed without branch=%d%n",
 				summary.getPrunedByIncumbentCount(), summary.getClosedWithoutBranchCount()));

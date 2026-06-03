@@ -12,6 +12,7 @@ import TWETBPC.TWETSolveResult;
 import TWETBPC.TWETSolveStatus;
 import TWETBPC.BP.BranchResult;
 import TWETBPC.BP.Brancher;
+import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
 import TWETBPC.Model.TWETMasterSolution;
@@ -29,6 +30,7 @@ public class Tree {
 	private final InitialColumnBuilder initialColumnBuilder;
 	private final PC pc;
 	private final RestrictedMasterIntegerHeuristic restrictedMasterIntegerHeuristic;
+	private final CompletionBoundSubtreeArcEliminator completionBoundSubtreeArcEliminator;
 	private final List<Brancher> branchers;
 	private final BPCTraceSink traceSink;
 
@@ -41,6 +43,7 @@ public class Tree {
 		this.initialColumnBuilder = initialColumnBuilder;
 		this.pc = pc;
 		this.restrictedMasterIntegerHeuristic = new RestrictedMasterIntegerHeuristic(data, config);
+		this.completionBoundSubtreeArcEliminator = new CompletionBoundSubtreeArcEliminator(data, config);
 		this.branchers = branchers;
 		this.traceSink = traceSink;
 	}
@@ -128,6 +131,9 @@ public class Tree {
 				continue;
 			}
 
+			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = evaluateSubtreeArcElimination(lp,
+					incumbentCost, solution.getObjectiveValue());
+
 			boolean branched = false;
 			for (Brancher brancher : branchers) {
 				BranchResult result = brancher.branch(lp);
@@ -135,6 +141,7 @@ public class Tree {
 					traceSink.onBranchRejected(node, brancher.getName(), result.getMessage());
 					continue;
 				}
+				applySubtreeArcElimination(result, subtreeArcElimination);
 				enqueueChild(queue, result.getLeftNode(), lp);
 				enqueueChild(queue, result.getRightNode(), lp);
 				traceSink.onBranch(node, brancher.getName(), result, queue.size());
@@ -151,6 +158,30 @@ public class Tree {
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, pool.size(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and configured pricing engines; advanced cuts/pricing remain pending");
+	}
+
+	private CompletionBoundSubtreeArcEliminator.Result evaluateSubtreeArcElimination(LP lp, double incumbentCost,
+			double nodeLowerBound) {
+		CompletionBoundSubtreeArcEliminator.Result result = completionBoundSubtreeArcEliminator.evaluate(lp,
+				incumbentCost, nodeLowerBound);
+		if (result.isAvailable()) {
+			traceSink.onCompletionBoundSubtreeArcElimination(lp.getNode(),
+					config.bidirectionalCompletionBoundSubtreeArcElimination,
+					result.getCandidates(), result.getFixed(), result.getDomainFixed(), result.getScalarFixed(),
+					result.getUnavailable(), result.getFunctionEvaluations(), result.getGap(), result.summary(),
+					result.getTotalNanos());
+		}
+		return result;
+	}
+
+	private void applySubtreeArcElimination(BranchResult branchResult,
+			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination) {
+		if (!config.bidirectionalCompletionBoundSubtreeArcElimination || subtreeArcElimination == null
+				|| !subtreeArcElimination.isAvailable()) {
+			return;
+		}
+		subtreeArcElimination.applyTo(branchResult.getLeftNode());
+		subtreeArcElimination.applyTo(branchResult.getRightNode());
 	}
 
 	private double updateReportedBound(PriorityQueue<Node> queue, double currentNodeBound, double incumbentCost) {

@@ -51,6 +51,11 @@ public interface BPCTraceSink {
 			int selectedColumns, String message, long elapsedNanos) {
 	}
 
+	default void onCompletionBoundSubtreeArcElimination(Node node, boolean applied, long candidates, long fixed,
+			long domainFixed, long scalarFixed, long unavailable, long functionEvaluations, double gap,
+			String message, long elapsedNanos) {
+	}
+
 	default void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 	}
 

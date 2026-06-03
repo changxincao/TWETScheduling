@@ -83,6 +83,16 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onCompletionBoundSubtreeArcElimination(Node node, boolean applied, long candidates, long fixed,
+			long domainFixed, long scalarFixed, long unavailable, long functionEvaluations, double gap,
+			String message, long elapsedNanos) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onCompletionBoundSubtreeArcElimination(node, applied, candidates, fixed, domainFixed, scalarFixed,
+					unavailable, functionEvaluations, gap, message, elapsedNanos);
+		}
+	}
+
+	@Override
 	public void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 		for (BPCTraceSink sink : delegates) {
 			sink.onIncumbentUpdated(node, solution, incumbentCost);

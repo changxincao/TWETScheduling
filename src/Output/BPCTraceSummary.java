@@ -35,6 +35,10 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private int restrictedIntegerHeuristicFeasibleCount;
 	private int restrictedIntegerHeuristicImproveCount;
 	private long restrictedIntegerHeuristicTimeNanos;
+	private int completionBoundSubtreeArcEliminationCalls;
+	private long completionBoundSubtreeArcEliminationFixed;
+	private long completionBoundSubtreeArcEliminationApplied;
+	private long completionBoundSubtreeArcEliminationTimeNanos;
 	private int prunedByIncumbentCount;
 	private int closedWithoutBranchCount;
 	private int queuePeak;
@@ -162,6 +166,20 @@ public class BPCTraceSummary implements BPCTraceSink {
 	}
 
 	@Override
+	public void onCompletionBoundSubtreeArcElimination(Node node, boolean applied, long candidates, long fixed,
+			long domainFixed, long scalarFixed, long unavailable, long functionEvaluations, double gap,
+			String message, long elapsedNanos) {
+		completionBoundSubtreeArcEliminationCalls++;
+		completionBoundSubtreeArcEliminationFixed += fixed;
+		if (applied) {
+			completionBoundSubtreeArcEliminationApplied += fixed;
+		}
+		completionBoundSubtreeArcEliminationTimeNanos += elapsedNanos;
+		eventLines.add(BPCOutputFormatters.formatCompletionBoundSubtreeArcElimination(node.id, applied, candidates,
+				fixed, domainFixed, scalarFixed, unavailable, functionEvaluations, gap, message, elapsedNanos));
+	}
+
+	@Override
 	public void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 		incumbentUpdates++;
 		eventLines.add(BPCOutputFormatters.formatIncumbentUpdate(node.id, incumbentCost));
@@ -272,6 +290,22 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public long getRestrictedIntegerHeuristicTimeNanos() {
 		return restrictedIntegerHeuristicTimeNanos;
+	}
+
+	public int getCompletionBoundSubtreeArcEliminationCalls() {
+		return completionBoundSubtreeArcEliminationCalls;
+	}
+
+	public long getCompletionBoundSubtreeArcEliminationFixed() {
+		return completionBoundSubtreeArcEliminationFixed;
+	}
+
+	public long getCompletionBoundSubtreeArcEliminationApplied() {
+		return completionBoundSubtreeArcEliminationApplied;
+	}
+
+	public long getCompletionBoundSubtreeArcEliminationTimeNanos() {
+		return completionBoundSubtreeArcEliminationTimeNanos;
 	}
 
 	public int getPrunedByIncumbentCount() {

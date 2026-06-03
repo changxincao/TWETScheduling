@@ -88,6 +88,10 @@ public class TWETBPCConfig {
 	public boolean bidirectionalCompletionBoundArcFixing = false;
 	/** 2026-06-03: 只诊断 completion bound 能否在当前 pricing 轮安全判掉 job-job arc，不写回 node。 */
 	public boolean bidirectionalCompletionBoundArcFixingDiagnostic = false;
+	/** 2026-06-03: node LP 最优且已有上界后，是否把 completion-bound reduced-cost fixing 继承到子节点。 */
+	public boolean bidirectionalCompletionBoundSubtreeArcElimination = false;
+	/** 2026-06-03: 只统计 subtree arc elimination 潜力和耗时，不写入子节点。 */
+	public boolean bidirectionalCompletionBoundSubtreeArcEliminationDiagnostic = false;
 	/**
 	 * 2026-05-26: 双向 pricing 的 midpoint 固定比例实验开关。
 	 * 取 NaN 时使用动态 hard/profitable window 中点；

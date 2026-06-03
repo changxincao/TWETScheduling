@@ -56,6 +56,15 @@ public final class BPCConsoleReporter implements BPCTraceSink {
 	}
 
 	@Override
+	public void onCompletionBoundSubtreeArcElimination(Node node, boolean applied, long candidates, long fixed,
+			long domainFixed, long scalarFixed, long unavailable, long functionEvaluations, double gap,
+			String message, long elapsedNanos) {
+		System.out.println(BPCOutputFormatters.formatCompletionBoundSubtreeArcElimination(node.id, applied,
+				candidates, fixed, domainFixed, scalarFixed, unavailable, functionEvaluations, gap, message,
+				elapsedNanos));
+	}
+
+	@Override
 	public void onIncumbentUpdated(Node node, TWETMasterSolution solution, double incumbentCost) {
 		System.out.println(BPCOutputFormatters.formatIncumbentUpdate(node.id, incumbentCost));
 	}

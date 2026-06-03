@@ -166,7 +166,8 @@ public class Tree {
 				incumbentCost, nodeLowerBound, pc.getLastReusableSubtreeArcEliminationBounds());
 		if (result.isAvailable()) {
 			traceSink.onCompletionBoundSubtreeArcElimination(lp.getNode(),
-					config.bidirectionalCompletionBoundSubtreeArcElimination,
+					config.bidirectionalCompletionBoundSubtreeArcElimination
+							|| config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly,
 					result.getCandidates(), result.getFixed(), result.getDomainFixed(), result.getScalarFixed(),
 					result.getUnavailable(), result.getFunctionEvaluations(), result.getGap(), result.summary(),
 					result.getTotalNanos());
@@ -178,6 +179,11 @@ public class Tree {
 			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination) {
 		if (!config.bidirectionalCompletionBoundSubtreeArcElimination || subtreeArcElimination == null
 				|| !subtreeArcElimination.isAvailable()) {
+			if (config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly
+					&& subtreeArcElimination != null && subtreeArcElimination.isAvailable()) {
+				subtreeArcElimination.applyToPricingOnly(branchResult.getLeftNode());
+				subtreeArcElimination.applyToPricingOnly(branchResult.getRightNode());
+			}
 			return;
 		}
 		subtreeArcElimination.applyTo(branchResult.getLeftNode());

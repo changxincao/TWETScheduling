@@ -40,7 +40,8 @@ public final class CompletionBoundSubtreeArcEliminator {
 			return Result.skipped("empty LP");
 		}
 		if (!config.bidirectionalCompletionBoundSubtreeArcEliminationDiagnostic
-				&& !config.bidirectionalCompletionBoundSubtreeArcElimination) {
+				&& !config.bidirectionalCompletionBoundSubtreeArcElimination
+				&& !config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly) {
 			return Result.skipped("subtree arc elimination disabled");
 		}
 		CompletionBoundCalculator.Relaxation relaxation = parseRelaxation(config.bidirectionalCompletionBoundRelaxation);
@@ -253,6 +254,23 @@ public final class CompletionBoundSubtreeArcEliminator {
 					continue;
 				}
 				node.forbidArc(arc[0], arc[1]);
+				applied++;
+			}
+			return applied;
+		}
+
+		public int applyToPricingOnly(Node node) {
+			if (node == null || fixedArcs.isEmpty()) {
+				return 0;
+			}
+			int applied = 0;
+			for (int[] arc : fixedArcs) {
+				if (node.getArcState(arc[0], arc[1]) == Node.ARC_REQUIRED
+						|| node.getAdjacencyPairState(arc[0], arc[1]) == Node.ADJACENCY_REQUIRED
+						|| node.isArcForbidden(arc[0], arc[1]) || node.isPricingOnlyArcForbidden(arc[0], arc[1])) {
+					continue;
+				}
+				node.forbidPricingOnlyArc(arc[0], arc[1]);
 				applied++;
 			}
 			return applied;

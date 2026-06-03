@@ -178,6 +178,7 @@ public class GCNGBBStyleBidirectional {
 	private long completionBoundMergeChanged;
 	private double completionBoundLastEvaluationCutoff;
 	private int diagnosticForbiddenJobArcCount;
+	private int diagnosticPricingOnlyJobArcCount;
 	private int diagnosticJobDualPositiveCount;
 	private double diagnosticMachineDual;
 	private double diagnosticJobDualMin;
@@ -546,8 +547,7 @@ public class GCNGBBStyleBidirectional {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(label.jid, nextJob)
-				&& !isCompletionBoundArcFixed(label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -558,8 +558,7 @@ public class GCNGBBStyleBidirectional {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(prevJob, successor)
-				&& !isCompletionBoundArcFixed(prevJob, successor);
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
@@ -825,7 +824,7 @@ public class GCNGBBStyleBidirectional {
 		}
 		Node node = lp.getNode();
 		int sink = node.sinkId();
-		if (node.isArcForbidden(label.jid, sink)) {
+		if (isPricingArcForbidden(node, label.jid, sink)) {
 			return;
 		}
 		forwardSinkLabelsVisited++;
@@ -962,8 +961,7 @@ public class GCNGBBStyleBidirectional {
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
 		joinTerminalGroupsScanned++;
-		if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)
-				|| isCompletionBoundArcFixed(lastJob, backward.jid)) {
+		if (backward.visitedSet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
 			joinTerminalGroupsArcOrVisitPruned++;
 			return;
 		}
@@ -1113,6 +1111,7 @@ public class GCNGBBStyleBidirectional {
 		completionBoundMergeChanged = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
 		diagnosticForbiddenJobArcCount = 0;
+		diagnosticPricingOnlyJobArcCount = 0;
 		diagnosticJobDualPositiveCount = 0;
 		diagnosticMachineDual = 0.0;
 		diagnosticJobDualMin = 0.0;
@@ -1173,9 +1172,10 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + formatDepthHistogram(forwardSinkNegativeByDepth)
 				+ ", forwardReach kept avg/min/max=" + formatAverage(forwardLabelsKeptReachableSum,
 						forwardLabelsKept) + "/" + formatReachableMin() + "/" + forwardLabelsKeptReachableMax
-				+ ", nodeDiag forbiddenJobArcs/machineDual/jobDual min/max/sum/pos=" + diagnosticForbiddenJobArcCount
-				+ "/" + diagnosticMachineDual + "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax + "/"
-				+ diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
+				+ ", nodeDiag forbiddenJobArcs/pricingOnlyJobArcs/machineDual/jobDual min/max/sum/pos="
+				+ diagnosticForbiddenJobArcCount + "/" + diagnosticPricingOnlyJobArcCount
+				+ "/" + diagnosticMachineDual + "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax
+				+ "/" + diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
 				+ ", nodeDiag columns/incompat/avgLen=" + diagnosticRestrictedColumnCount
 				+ "/" + diagnosticIncompatibleRestrictedColumnCount + "/"
 				+ String.format("%.3f", diagnosticRestrictedColumnAvgLength)
@@ -1260,6 +1260,7 @@ public class GCNGBBStyleBidirectional {
 	private void recordPricingDiagnostics(LP lp) {
 		Node node = lp.getNode();
 		int forbidden = 0;
+		int pricingOnlyForbidden = 0;
 		int allowedDualNonZero = 0;
 		int forbiddenDualNonZero = 0;
 		double allowedDualMin = Utility.big_M;
@@ -1275,6 +1276,9 @@ public class GCNGBBStyleBidirectional {
 					boolean arcForbidden = node.isArcForbidden(from, to);
 					if (arcForbidden) {
 						forbidden++;
+					}
+					if (node.isPricingOnlyArcForbidden(from, to)) {
+						pricingOnlyForbidden++;
 					}
 					double dual = lp.getArcDual(from, to);
 					if (isDiagnosticNonZero(dual)) {
@@ -1308,6 +1312,7 @@ public class GCNGBBStyleBidirectional {
 			}
 		}
 		diagnosticForbiddenJobArcCount = forbidden;
+		diagnosticPricingOnlyJobArcCount = pricingOnlyForbidden;
 		diagnosticJobDualPositiveCount = positive;
 		diagnosticJobDualMin = Utility.isBigMValue(min) ? 0.0 : min;
 		diagnosticJobDualMax = Utility.isBigMValue(-max) ? 0.0 : max;
@@ -1495,6 +1500,11 @@ public class GCNGBBStyleBidirectional {
 	private boolean isCompletionBoundArcFixed(int fromJob, int toJob) {
 		return fromJob > 0 && fromJob <= data.n && toJob > 0 && toJob <= data.n
 				&& completionBoundFixedArc != null && completionBoundFixedArc[fromJob][toJob];
+	}
+
+	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
+		return node.isArcForbidden(fromJob, toJob) || node.isPricingOnlyArcForbidden(fromJob, toJob)
+				|| isCompletionBoundArcFixed(fromJob, toJob);
 	}
 
 	private void recordCompletionBoundStats(CompletionBoundCalculator.Stats stats) {

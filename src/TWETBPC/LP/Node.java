@@ -50,6 +50,7 @@ public class Node implements Comparable<Node> {
 	public ArrayList<Integer> incumbentColumnIds;
 	public ArrayList<Integer> activeCutIds;
 	private byte[][] arcState;
+	private boolean[][] pricingOnlyForbiddenArc;
 	private byte[][] adjacencyPairState;
 	private byte[] tariffSegmentState;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
@@ -69,6 +70,7 @@ public class Node implements Comparable<Node> {
 		this.incumbentColumnIds = new ArrayList<Integer>(incumbentColumnIds);
 		this.activeCutIds = new ArrayList<Integer>();
 		this.arcState = new byte[data.n + 2][data.n + 2];
+		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.repairType = REPAIR_NONE;
@@ -87,6 +89,10 @@ public class Node implements Comparable<Node> {
 		copy.arcState = new byte[arcState.length][];
 		for (int i = 0; i < arcState.length; i++) {
 			copy.arcState[i] = arcState[i].clone();
+		}
+		copy.pricingOnlyForbiddenArc = new boolean[pricingOnlyForbiddenArc.length][];
+		for (int i = 0; i < pricingOnlyForbiddenArc.length; i++) {
+			copy.pricingOnlyForbiddenArc[i] = pricingOnlyForbiddenArc[i].clone();
 		}
 		copy.adjacencyPairState = new byte[adjacencyPairState.length][];
 		for (int i = 0; i < adjacencyPairState.length; i++) {
@@ -130,6 +136,23 @@ public class Node implements Comparable<Node> {
 
 	public void forbidArc(int from, int to) {
 		arcState[from][to] = ARC_FORBIDDEN;
+	}
+
+	/**
+	 * 2026-06-03: 仅用于 subtree arc elimination 的隔离实验。该状态只给 pricing 图禁弧，
+	 * 不进入 master 分支行，也不参与历史列兼容性过滤，用来排除 RMP/dual 变化的影响。
+	 */
+	public void forbidPricingOnlyArc(int from, int to) {
+		if (from < 0 || to < 0 || from >= pricingOnlyForbiddenArc.length
+				|| to >= pricingOnlyForbiddenArc[from].length) {
+			return;
+		}
+		pricingOnlyForbiddenArc[from][to] = true;
+	}
+
+	public boolean isPricingOnlyArcForbidden(int from, int to) {
+		return from >= 0 && to >= 0 && from < pricingOnlyForbiddenArc.length
+				&& to < pricingOnlyForbiddenArc[from].length && pricingOnlyForbiddenArc[from][to];
 	}
 
 	public void requireArc(int from, int to) {

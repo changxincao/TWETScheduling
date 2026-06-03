@@ -87,6 +87,7 @@ public class GCNGBBStyleBidirectional {
 	private CompletionBoundCalculator.Bounds completionBounds;
 	private boolean[][] completionBoundFixedArc;
 	private double bestGeneratedReducedCost;
+	private long debugStopAfterGeneratedCandidates;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
@@ -427,6 +428,7 @@ public class GCNGBBStyleBidirectional {
 		completionBounds = null;
 		completionBoundFixedArc = null;
 		bestGeneratedReducedCost = Utility.big_M;
+		debugStopAfterGeneratedCandidates = Long.getLong("twet.bpc.debugStopAfterGeneratedCandidates", -1L);
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
@@ -492,7 +494,9 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0;
+		return config.maxExactPricingColumns > 0
+				&& (debugStopAfterGeneratedCandidates < 0
+						|| generatedCandidateCount < debugStopAfterGeneratedCandidates);
 	}
 
 	private void forwardExtend(LP lp) {

@@ -154,6 +154,7 @@ public class GCNGBBStyleBidirectional {
 	private long completionBoundArcFixingCandidates;
 	private long completionBoundArcFixingFixed;
 	private long completionBoundArcFixingDomainPruned;
+	private long completionBoundArcFixingScalarPruned;
 	private long completionBoundArcFixingUnavailable;
 	private long completionBoundArcFixingFunctionEvaluations;
 	private long completionBoundArcFixingNanos;
@@ -1047,6 +1048,7 @@ public class GCNGBBStyleBidirectional {
 		completionBoundArcFixingCandidates = 0;
 		completionBoundArcFixingFixed = 0;
 		completionBoundArcFixingDomainPruned = 0;
+		completionBoundArcFixingScalarPruned = 0;
 		completionBoundArcFixingUnavailable = 0;
 		completionBoundArcFixingFunctionEvaluations = 0;
 		completionBoundArcFixingNanos = 0;
@@ -1093,10 +1095,11 @@ public class GCNGBBStyleBidirectional {
 				+ ", completionBoundScalar check/pruned/fallback/unavailable=" + completionBoundScalarChecks
 				+ "/" + completionBoundScalarPruned + "/" + completionBoundScalarFunctionFallbacks
 				+ "/" + completionBoundScalarUnavailable
-				+ ", completionBoundArcFixing candidates/fixed/domain/unavailable/funcEval/ms="
+				+ ", completionBoundArcFixing candidates/fixed/domain/scalar/unavailable/funcEval/ms="
 				+ completionBoundArcFixingCandidates + "/" + completionBoundArcFixingFixed
-				+ "/" + completionBoundArcFixingDomainPruned + "/" + completionBoundArcFixingUnavailable
-				+ "/" + completionBoundArcFixingFunctionEvaluations + "/" + formatMillis(completionBoundArcFixingNanos)
+				+ "/" + completionBoundArcFixingDomainPruned + "/" + completionBoundArcFixingScalarPruned
+				+ "/" + completionBoundArcFixingUnavailable + "/" + completionBoundArcFixingFunctionEvaluations
+				+ "/" + formatMillis(completionBoundArcFixingNanos)
 				+ ", completionBoundQueue=" + completionBoundQueueOrdering
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
@@ -1191,6 +1194,16 @@ public class GCNGBBStyleBidirectional {
 					continue;
 				}
 				double delay = data.getSetUp(fromJob, toJob) + data.getProcessT(toJob);
+				if (isCompletionBoundArcTimeDisjoint(prefix, suffix, delay)) {
+					rememberCompletionBoundFixedArc(fromJob, toJob, true);
+					continue;
+				}
+				double fixedReducedCost = data.getSetupCost(fromJob, toJob) - lp.getArcDual(fromJob, toJob);
+				if (isCompletionBoundArcScalarPruned(fromJob, toJob, fixedReducedCost, cutoff)) {
+					rememberCompletionBoundFixedArc(fromJob, toJob, false);
+					completionBoundArcFixingScalarPruned++;
+					continue;
+				}
 				PiecewiseLinearFunction shiftedPrefix = prefix.shiftX(delay);
 				if (shiftedPrefix.head == null) {
 					rememberCompletionBoundFixedArc(fromJob, toJob, true);
@@ -1201,7 +1214,7 @@ public class GCNGBBStyleBidirectional {
 					rememberCompletionBoundFixedArc(fromJob, toJob, true);
 					continue;
 				}
-				arcBound.shiftYInPlace(data.getSetupCost(fromJob, toJob) - lp.getArcDual(fromJob, toJob));
+				arcBound.shiftYInPlace(fixedReducedCost);
 				completionBoundArcFixingFunctionEvaluations++;
 				double lowerBound = arcBound.findMinimal(false, true)[0];
 				if (!Utility.compareLt(lowerBound, cutoff)) {
@@ -1210,6 +1223,22 @@ public class GCNGBBStyleBidirectional {
 			}
 		}
 		completionBoundArcFixingNanos += System.nanoTime() - start;
+	}
+
+	private boolean isCompletionBoundArcTimeDisjoint(PiecewiseLinearFunction prefix, PiecewiseLinearFunction suffix,
+			double delay) {
+		return Utility.compareGt(prefix.head.start + delay, suffix.tail.end)
+				|| Utility.compareLt(prefix.tail.end + delay, suffix.head.start);
+	}
+
+	private boolean isCompletionBoundArcScalarPruned(int fromJob, int toJob, double fixedReducedCost, double cutoff) {
+		double prefixMin = completionBounds.forwardFMin(fromJob);
+		double suffixMin = completionBounds.backwardBMin(toJob);
+		if (Utility.isBigMValue(prefixMin) || Utility.isBigMValue(suffixMin)) {
+			return false;
+		}
+		double lowerBound = prefixMin + suffixMin + fixedReducedCost;
+		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
 	private void rememberCompletionBoundFixedArc(int fromJob, int toJob, boolean domainPruned) {

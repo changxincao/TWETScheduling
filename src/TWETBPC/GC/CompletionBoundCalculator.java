@@ -46,6 +46,8 @@ final class CompletionBoundCalculator {
 		final double[][] forwardUBeforeByJob;
 		final double[][] backwardRAfterByJob;
 		final double[] forwardUMinByJob;
+		final double[] forwardFMinByJob;
+		final double[] backwardBMinByJob;
 		final int maxDiscreteTime;
 
 		Bounds(int n, double pricingHorizon) {
@@ -56,7 +58,11 @@ final class CompletionBoundCalculator {
 			this.forwardUBeforeByJob = new double[n + 1][];
 			this.backwardRAfterByJob = new double[n + 1][];
 			this.forwardUMinByJob = new double[n + 1];
+			this.forwardFMinByJob = new double[n + 1];
+			this.backwardBMinByJob = new double[n + 1];
 			Arrays.fill(this.forwardUMinByJob, Utility.big_M);
+			Arrays.fill(this.forwardFMinByJob, Utility.big_M);
+			Arrays.fill(this.backwardBMinByJob, Utility.big_M);
 			this.maxDiscreteTime = Math.max(0, (int) Math.ceil(pricingHorizon));
 		}
 
@@ -93,6 +99,20 @@ final class CompletionBoundCalculator {
 				return Utility.big_M;
 			}
 			return forwardUMinByJob[job];
+		}
+
+		double forwardFMin(int job) {
+			if (job <= 0 || job >= forwardFMinByJob.length) {
+				return Utility.big_M;
+			}
+			return forwardFMinByJob[job];
+		}
+
+		double backwardBMin(int job) {
+			if (job <= 0 || job >= backwardBMinByJob.length) {
+				return Utility.big_M;
+			}
+			return backwardBMinByJob[job];
 		}
 
 		private double snapToNearestInteger(double value) {
@@ -172,6 +192,7 @@ final class CompletionBoundCalculator {
 
 	Result build(Relaxation relaxation) {
 		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle() : buildAllCycles();
+		buildCompletionFunctionMins(bounds);
 		if (buildDiscreteCaches) {
 			buildDiscreteCaches(bounds);
 		}
@@ -467,6 +488,13 @@ final class CompletionBoundCalculator {
 					bounds.maxDiscreteTime);
 			bounds.backwardRAfterByJob[job] = buildBackwardAfterCache(bounds.backwardRByJob[job],
 					bounds.maxDiscreteTime);
+		}
+	}
+
+	private void buildCompletionFunctionMins(Bounds bounds) {
+		for (int job = 1; job <= data.n; job++) {
+			bounds.forwardFMinByJob[job] = functionMin(bounds.forwardFByJob[job]);
+			bounds.backwardBMinByJob[job] = functionMin(bounds.backwardBByJob[job]);
 		}
 	}
 

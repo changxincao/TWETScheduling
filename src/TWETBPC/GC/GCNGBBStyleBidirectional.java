@@ -146,6 +146,11 @@ public class GCNGBBStyleBidirectional {
 	private long generatedCandidateDroppedByHeap;
 	private long forwardSinkLabelsVisited;
 	private long forwardSinkNegativeCandidates;
+	private long[] forwardLabelsKeptByDepth;
+	private long[] forwardSinkNegativeByDepth;
+	private long forwardLabelsKeptReachableSum;
+	private int forwardLabelsKeptReachableMin;
+	private int forwardLabelsKeptReachableMax;
 	private long completionForwardLabelsPruned;
 	private long completionBackwardLabelsPruned;
 	private long completionBoundFunctionEvaluations;
@@ -635,6 +640,7 @@ public class GCNGBBStyleBidirectional {
 			activeForwardByLastJob.get(label.jid).add(label);
 			activeForwardTerminalJobs.add(label.jid);
 			updateForwardScalarInfo(label);
+			recordForwardKeptDiagnostics(label);
 			return InsertStatus.STORED_AND_ENQUEUE;
 		}
 		forwardLabelsDominated++;
@@ -680,6 +686,7 @@ public class GCNGBBStyleBidirectional {
 		activeForwardByLastJob.get(label.jid).add(label);
 		activeForwardTerminalJobs.add(label.jid);
 		updateForwardScalarInfo(label);
+		recordForwardKeptDiagnostics(label);
 		return InsertStatus.STORED_NO_EXPAND;
 	}
 
@@ -813,6 +820,7 @@ public class GCNGBBStyleBidirectional {
 			return;
 		}
 		forwardSinkNegativeCandidates++;
+		recordDepthCount(forwardSinkNegativeByDepth, label.depth);
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
 		tryGenerateColumn(sequence, lp, reducedCost);
 	}
@@ -1059,6 +1067,11 @@ public class GCNGBBStyleBidirectional {
 		generatedCandidateDroppedByHeap = 0;
 		forwardSinkLabelsVisited = 0;
 		forwardSinkNegativeCandidates = 0;
+		forwardLabelsKeptByDepth = new long[data.n + 1];
+		forwardSinkNegativeByDepth = new long[data.n + 1];
+		forwardLabelsKeptReachableSum = 0;
+		forwardLabelsKeptReachableMin = Integer.MAX_VALUE;
+		forwardLabelsKeptReachableMax = 0;
 		completionForwardLabelsPruned = 0;
 		completionBackwardLabelsPruned = 0;
 		completionBoundFunctionEvaluations = 0;
@@ -1128,6 +1141,10 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + formatMillis(completionBoundArcFixingNanos)
 				+ ", forwardSink visited/negative=" + forwardSinkLabelsVisited
 				+ "/" + forwardSinkNegativeCandidates
+				+ ", forwardDepth kept/negSink=" + formatDepthHistogram(forwardLabelsKeptByDepth)
+				+ "/" + formatDepthHistogram(forwardSinkNegativeByDepth)
+				+ ", forwardReach kept avg/min/max=" + formatAverage(forwardLabelsKeptReachableSum,
+						forwardLabelsKept) + "/" + formatReachableMin() + "/" + forwardLabelsKeptReachableMax
 				+ ", nodeDiag forbiddenJobArcs/jobDual min/max/sum/pos=" + diagnosticForbiddenJobArcCount
 				+ "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax + "/"
 				+ diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
@@ -1153,6 +1170,52 @@ public class GCNGBBStyleBidirectional {
 
 	private static String formatMillis(long nanos) {
 		return String.format("%.3f", nanos / 1_000_000.0);
+	}
+
+	private void recordForwardKeptDiagnostics(ForwardLabel label) {
+		if (label == null || label.jid == 0) {
+			return;
+		}
+		recordDepthCount(forwardLabelsKeptByDepth, label.depth);
+		forwardLabelsKeptReachableSum += label.reachableCardinality;
+		forwardLabelsKeptReachableMin = Math.min(forwardLabelsKeptReachableMin, label.reachableCardinality);
+		forwardLabelsKeptReachableMax = Math.max(forwardLabelsKeptReachableMax, label.reachableCardinality);
+	}
+
+	private void recordDepthCount(long[] histogram, int depth) {
+		if (histogram == null || depth < 0) {
+			return;
+		}
+		int bucket = Math.min(depth, histogram.length - 1);
+		histogram[bucket]++;
+	}
+
+	private String formatDepthHistogram(long[] histogram) {
+		if (histogram == null) {
+			return "-";
+		}
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < histogram.length; i++) {
+			if (histogram[i] == 0) {
+				continue;
+			}
+			if (builder.length() > 0) {
+				builder.append(';');
+			}
+			builder.append(i).append(':').append(histogram[i]);
+		}
+		return builder.length() == 0 ? "-" : builder.toString();
+	}
+
+	private String formatAverage(long sum, long count) {
+		if (count <= 0) {
+			return "0.000";
+		}
+		return String.format("%.3f", ((double) sum) / count);
+	}
+
+	private int formatReachableMin() {
+		return forwardLabelsKeptReachableMin == Integer.MAX_VALUE ? 0 : forwardLabelsKeptReachableMin;
 	}
 
 	private void recordPricingDiagnostics(LP lp) {
@@ -2193,11 +2256,13 @@ public class GCNGBBStyleBidirectional {
 
 	private static final class ForwardLabel extends FunctionLabel {
 		final ForwardLabel father;
+		final int depth;
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 				PiecewiseLinearFunction frontier) {
 			super(labelId, jid, visitedSet, reachableSet, frontier, forwardEndpointMin(frontier));
 			this.father = father;
+			this.depth = father == null ? 0 : father.depth + 1;
 		}
 	}
 

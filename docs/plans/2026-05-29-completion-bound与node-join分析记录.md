@@ -1068,3 +1068,13 @@ job dual 诊断也支持“dual 口径改变”而不是“纯 pricing 实现变
 另一个可独立优化的点是 forbidden arc 没有进入 dominance reachable-set key。subtree-on 下 `reachableSet` 仍会枚举大量当前 node 已禁的直连 arc，然后在 `canExtendForward()` 被跳过，导致 `arcPruned=1674333`。这部分是纯枚举开销，可以后续用 node/pricing-local forbidden matrix 在构造 reachable set 时过滤，以减少循环次数；但它不是主要原因，因为跳过这些 arc 后仍成功构造了 `480200` 个 child，并有 `198552` 个通过 completion bound。
 
 因此本轮结论进一步收窄为：completion bound 没有失效，但 subtree 正式继承导致当前 dual 下 completion lower bound 对大量长 forward prefix 不再能证明非负，剪枝率从 `95%` 降到 `59%`；同时 reachable 候选枚举暴涨，dominance 负担随 `boundSurvivors` 暴涨。工程上应优先避免在该口径下无限制 exact 返回全部负列，或者在 subtree child 先做 residual seed/列数上限/record 型过渡，而不是把问题归因于 completion bound 构造时间或函数未调用。
+
+### 41.10 2026-06-03 为什么不是表现为多轮 heuristic 补列
+
+用户继续指出，如果 subtree 后只是 child 残余图缺列，理论上 heuristic pricing 应先补列，或者表现为多轮 pricing，而不应在一次 exact pricing 里暴涨。本轮基于已有日志进一步解释该现象。
+
+wet030 subtree-on 的 Node 2 在进入第一轮 exact 前，确实已经跑过多轮 heuristic pricing：依次加了 `343/202/133/93/30/12` 条列，总计 `813` 条，然后 heuristic 报告没有负 reduced-cost 列。问题在于当前 heuristic 只是在受限局部搜索/局部池里找负列，它不是 residual graph 的完备枚举器。subtree 正式过滤以后，真正缺的是大量 depth 12-15 的长 forward-only 路径；这些路径组合数很大、且受禁弧后结构更偏，heuristic 没有覆盖到。随后 exact pricing 才发现仍有 `69952` 条负列。
+
+这也解释了为什么不是很多轮 exact。当前 `maxExactColumns=100000`，而第一轮 exact 找到的负列数是 `69952`，没有撞到 K 上限；同时 GCNGBB-style exact pricing 的这一轮目标是耗尽 forward/backward 队列来形成 exact pricing 证书，而不是找到少量负列就停。因此它会在单轮里继续扩展，直到队列耗尽，并一次性把这 69952 条负列放入候选池。如果把 K 降低或使用 record/top-K 提前停止策略，现象可能会变成多轮 exact/CG；但当前大 K exact 口径会把 residual graph 的负列库存一次性释放出来。
+
+因此“冷启动”不是指每轮只能补几条列，而是指 child RMP 在过滤后缺少 residual graph 上的大批替代长列；heuristic 只能补到其中很小一部分，exact 又被配置成完整枚举当前所有负列，所以单轮时间暴涨。这里的慢不是 completion-bound 构造慢，也不是 heuristic 没运行，而是 heuristic 覆盖不足加上 exact 大 K 完整证书口径共同造成的。

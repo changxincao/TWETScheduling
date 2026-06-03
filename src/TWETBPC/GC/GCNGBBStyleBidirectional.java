@@ -179,6 +179,7 @@ public class GCNGBBStyleBidirectional {
 	private double completionBoundLastEvaluationCutoff;
 	private int diagnosticForbiddenJobArcCount;
 	private int diagnosticJobDualPositiveCount;
+	private double diagnosticMachineDual;
 	private double diagnosticJobDualMin;
 	private double diagnosticJobDualMax;
 	private double diagnosticJobDualSum;
@@ -1113,6 +1114,7 @@ public class GCNGBBStyleBidirectional {
 		completionBoundLastEvaluationCutoff = Double.NaN;
 		diagnosticForbiddenJobArcCount = 0;
 		diagnosticJobDualPositiveCount = 0;
+		diagnosticMachineDual = 0.0;
 		diagnosticJobDualMin = 0.0;
 		diagnosticJobDualMax = 0.0;
 		diagnosticJobDualSum = 0.0;
@@ -1171,8 +1173,8 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + formatDepthHistogram(forwardSinkNegativeByDepth)
 				+ ", forwardReach kept avg/min/max=" + formatAverage(forwardLabelsKeptReachableSum,
 						forwardLabelsKept) + "/" + formatReachableMin() + "/" + forwardLabelsKeptReachableMax
-				+ ", nodeDiag forbiddenJobArcs/jobDual min/max/sum/pos=" + diagnosticForbiddenJobArcCount
-				+ "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax + "/"
+				+ ", nodeDiag forbiddenJobArcs/machineDual/jobDual min/max/sum/pos=" + diagnosticForbiddenJobArcCount
+				+ "/" + diagnosticMachineDual + "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax + "/"
 				+ diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
 				+ ", nodeDiag columns/incompat/avgLen=" + diagnosticRestrictedColumnCount
 				+ "/" + diagnosticIncompatibleRestrictedColumnCount + "/"
@@ -1291,6 +1293,7 @@ public class GCNGBBStyleBidirectional {
 		}
 		recordRestrictedColumnDiagnostics(lp, node);
 		recordSinkArcDualDiagnostics(lp, node);
+		diagnosticMachineDual = lp.getMachineDual();
 		double min = Utility.big_M;
 		double max = -Utility.big_M;
 		double sum = 0.0;

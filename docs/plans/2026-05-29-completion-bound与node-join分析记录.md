@@ -1030,3 +1030,15 @@ job dual 诊断也支持“dual 口径改变”而不是“纯 pricing 实现变
 因此当前更准确的结论是：subtree arc elimination 作为 reduced-cost fixing 可能是安全的，但把它正式继承到 child 会造成“残余图列池冷启动”。根节点已有的 restricted columns 主要服务于未删弧图；一次删掉 80% job-job arc 后，child 需要的是 residual graph 上的新 route inventory。local arc fixing 快，是因为它只用于当前 pricing 轮剪函数评价，不会让 child RMP 丢掉这几千条已有列。subtree-on 慢，是因为它先丢掉大半可用 route set，再让 exact pricing 用半域 label 从头补 residual graph 的大量替代负列。
 
 由此，后续若继续做 subtree arc elimination，核心修复方向不是继续猜 dominance 或 arc dual，而是避免 child 残余图冷启动。可选方案包括：只保留诊断不正式继承；或者正式继承时先为 child residual graph 做一轮轻量 heuristic/repair seed 扩充，再进入 exact；或者把 subtree eliminated arc 独立于 branch `arcState` 存储，并在 `prepareChildSeedColumns` 阶段显式统计和补偿被删列数；又或者限制 branch node 单轮 exact 返回列数，避免一次从 2000 列直接膨胀到 7 万列。当前数据下，最直接的坏点不是“label 为什么凭空多”，而是 child RMP 从 `4801` 列退化到 `2003` 列后，exact pricing 被迫枚举 residual graph 的替代列。
+
+### 41.7 2026-06-03 subtree label 爆炸的 reduced-cost 组成复核
+
+用户继续追问“列变少也只是 dual 变化，为什么对 pricing 来说 arc 少了还会更难”。本轮补上此前缺失的 `machineDual` 诊断，并重新跑同口径三组实验：`tmp-wet030_001_2m`、half-domain、`completionBound=allCycles`、`runALNSForSeed=false`、关闭无向相邻分支、`maxNodes=2`、`maxExactColumns=100000`。另外尝试 `wet020/wet025` 小算例，但两者根节点即结束，不能触发 child subtree 场景，因此不适合定位该 bug。
+
+关键对照如下。`subtree=off` 时，Node 2 第一轮 exact 入口 `forbiddenJobArcs=1`，`machineDual=-9198.0`，`jobDual min/max/sum/pos=446.0/2407.0/33726.0/30`，`columns=4801`，`arcDual allowed/forbidden/sink` 全为 0；pricing 结果为 `fw kept/dominated=1442/42`，`forwardSink visited/negative=1441/45`，`bestRC=-38.0`，`addedColumns=45`。`subtree=on` 时，Node 2 第一轮 exact 入口 `forbiddenJobArcs=702`，`machineDual=-8916.95`，`jobDual min/max/sum/pos=0.0/2701.86/33163.91/28`，`columns=2003`，arc dual 仍全为 0；pricing 结果变为 `fw kept/dominated=121210/77343`，`forwardSink visited/negative=121186/69952`，`bestRC=-411.45`，`addedColumns=69952`。总时间也从 `solve=19.533s/exact=5.443s` 变为 `solve=58.475s/exact=42.192s`。
+
+再看隔离实验：关闭 subtree 正式继承，但打开当前 pricing 轮 local arc fixing。Node 2 第一轮 local arc fixing 判掉 `749/869` 条 arc，比 subtree root 继承的 `701/870` 还多；但它不改变 child RMP 和 `machineDual`，入口仍为 `machineDual=-9198.0`、`columns=4801`，结果仍是 `fw kept/dominated=1442/42`、`forwardSink visited/negative=1441/45`、`addedColumns=45`，总时间反而降到 `solve=13.686s/exact=3.736s`。这组数据把“arc 少本身导致 label 爆炸”排除了。
+
+因此本次更精确的核心原因是：subtree 正式继承不是在同一套 reduced cost 下单调删边，而是先把 child RMP 的可用列空间从约 4800 条压到约 2000 条，使 LP 对偶重新定价；其中 `machineDual` 从 `-9198.0` 变到 `-8916.95`。在当前 reduced-cost 公式里，source label 会执行 `sourceFrontier.shiftYInPlace(-machineDual)`，因此 `machineDual` 这个变化会把所有列的 reduced cost 整体压低约 `281`。再叠加 job dual 分布变化，剩余图中大量 depth 12-15 的 forward prefix 直接接 sink 后低于 0，形成近 7 万条负列。arc dual 这轮为 0，所以不是 forbidden row dual 或 sink dual 直接导致。
+
+这解释了为什么“物理 arc 更少”仍然可能“label 更多”：如果固定 dual，删 arc 不会增加扩展；但这里 subtree formal inheritance 改变了 master LP 的列空间和 dual，尤其是机器数范围约束的 dual 全局平移了所有 route reduced cost。local arc fixing 在同一 dual 下删更多 arc 仍然更快，正好说明 pricing 图剪边本身是有效的，问题出在正式继承后的 child LP 重新定价和半域 forward-only 负列枚举。后续优化应围绕两个方向：一是保留 local arc fixing，暂不默认正式继承 subtree eliminated arcs；二是若继续正式继承，必须控制 child residual graph 冷启动后的 exact pricing 行为，例如限制单轮返回列数、先补 residual seed columns，或在 certificate 轮之前使用更保守的 top-K/record 机制。

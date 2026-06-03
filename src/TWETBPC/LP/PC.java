@@ -200,7 +200,11 @@ public class PC {
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
 		long pricingNanos = System.nanoTime() - pricingStart;
 		if (!repairMode && !result.isImproved()) {
-			lastReusableSubtreeArcEliminationBounds = engine.getReusableSubtreeArcEliminationBounds();
+			CompletionBoundSubtreeArcEliminator.PreparedBounds reusableBounds =
+					engine.getReusableSubtreeArcEliminationBounds();
+			if (reusableBounds != null) {
+				lastReusableSubtreeArcEliminationBounds = reusableBounds;
+			}
 		} else if (!repairMode) {
 			lastReusableSubtreeArcEliminationBounds = null;
 		}

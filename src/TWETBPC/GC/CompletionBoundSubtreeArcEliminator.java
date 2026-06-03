@@ -32,25 +32,6 @@ public final class CompletionBoundSubtreeArcEliminator {
 	}
 
 	public Result evaluate(LP lp, double incumbentCost, double nodeLowerBound) {
-		if (lp == null || lp.getNode() == null) {
-			return Result.skipped("empty LP");
-		}
-		if (!config.bidirectionalCompletionBoundSubtreeArcEliminationDiagnostic
-				&& !config.bidirectionalCompletionBoundSubtreeArcElimination) {
-			return Result.skipped("subtree arc elimination disabled");
-		}
-		CompletionBoundCalculator.Relaxation relaxation = parseRelaxation(config.bidirectionalCompletionBoundRelaxation);
-		if (relaxation == null) {
-			return Result.skipped("completion bound disabled");
-		}
-		if (!Double.isFinite(incumbentCost) || !Double.isFinite(nodeLowerBound)) {
-			return Result.skipped("missing finite incumbent or node bound");
-		}
-		double gap = incumbentCost - nodeLowerBound;
-		if (!Utility.compareGt(gap, config.branchingTolerance)) {
-			return Result.skipped("node gap already closed");
-		}
-
 		return evaluate(lp, incumbentCost, nodeLowerBound, null);
 	}
 

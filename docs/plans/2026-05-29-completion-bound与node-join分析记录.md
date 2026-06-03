@@ -870,3 +870,19 @@ root-only 对照均使用 `fullDomain-cb-allCycles`、`maxNodes=1`、FIFO comple
 作为“原问题可行上界”的正确性依赖两个建模假设。第一，当前列池中的每条 `TWETColumn` 本身必须是可行机器序列，且 node 上的机器数、directed arc、无向相邻 pair、tariff segment 分支约束已经被复制到 restricted integer MIP；当前实现已经覆盖这些约束。第二，coverage 继续使用 RMP 的 `>=1` set-covering 语义，因此严格上界语义依赖当前三角不等式/非负成本假设：最优整数解不会保留重复覆盖，或者重复覆盖可以不增成本地化简为不重复覆盖的排程。若后续进入不满足该性质的数据、负成本列、或某些分支约束让“删除重复访问”不再保持可行，则需要把该启发式改成 `==1` 或在接受 incumbent 前做重复覆盖校验/修复。当前 `wet030` 验证中 selected columns 无重复覆盖，validator 也通过，因此现有 no-outsourcing/TWET 实验口径下该上界可接受。
 
 active cuts 当前没有复制进这个 MIP。只要 cuts 是原问题有效不等式，不复制 cuts 不会破坏原问题上界的可行性；它只可能让 restricted integer 解违反某些 LP 强化行。但如果未来引入的 cut 带有非全局有效或类似分支的语义，就必须同步复制，否则该启发式上界可能与当前 node 语义不一致。
+
+## 40. 2026-06-03 completion bound arc fixing 诊断与半域接入
+
+本次尝试利用每轮 pricing 已经构造的 completion bound 做一个本地 arc fixing。这里不能直接写入 `Node.forbidArc()`，因为 completion bound 使用当前 LP dual 构造，dual 在下一轮加列后会变化；如果把这类结论固化到 node 上，就会把某一轮 reduced-cost 口径下的判断错误带到后续轮次。因此当前实现只在 `GCNGBBStyleBidirectional.solve()` 内维护本轮局部的 `completionBoundFixedArc[from][to]`，且只处理真实 job 到真实 job 的 arc，不处理 source/sink arc。
+
+判据使用的是 completion bound 的 relaxed lower bound。`CompletionBoundCalculator` 额外暴露 `forwardFByJob` 和 `backwardBByJob`：前者表示完整到达 job `i` 的 relaxed prefix，后者表示完整从 job `j` 出发到 sink 的 relaxed suffix。对 arc `(i,j)`，构造
+
+`forwardF_i` 平移 `setup(i,j)+p_j` 后，加上 `backwardB_j`，再加固定项 `setupCost(i,j)-arcDual(i,j)`。
+
+如果这个函数没有公共定义域，说明在该 relaxed completion 口径下也没有可拼接路径；如果其最小值不小于 pricing cutoff，则任何真实 elementary 列使用该 arc 都不可能成为负 reduced-cost 列。由于 relaxed bound 只会比真实 elementary completion 更乐观，这个 sufficient condition 用于剪掉负列搜索是安全的。当前开关分成两层：`bidirectionalCompletionBoundArcFixingDiagnostic` 只统计潜力，不改变扩展；`bidirectionalCompletionBoundArcFixing` 会把判掉的 job-job arc 写入本轮局部矩阵，并让 forward/backward 扩展和 final crossing join 跳过它们。
+
+验证使用 `tmp-wet030_001_2m` 半域 root-only，`completionBound=allCycles`。只开诊断时，每轮 870 条候选 job-job arc 中，分别可判掉 `685/744/753/752` 条，其中时间域无交集为 `9/8/8/8` 条；诊断扫描本身约 `4.933/18.008/2.574/2.945 ms`。诊断不改变结果，bound 仍为 `15261.833333`、最终 pool 仍为 `4896`。
+
+实际开启本地 arc fixing 后，结果仍与关闭时对齐：`status=NODE_LIMIT`、bound `15261.833333`、加列序列仍为 `147/22/3/0`、最终 pool `4896`、验证 `valid=true`。内部统计显示效果主要体现在减少后续函数拼接。关闭 arc fixing 的即时对照中，四轮 join function eval 为 `17425/3203/1822/1754`，开启后降为 `4563/755/450/424`；completion-bound function fallback 从 `35707/8747/7476/7557` 降为 `9531/1788/1465/1494`。本轮 wall time 受运行波动影响较大：开启后 `solve=15.767s`、`exact=3.485s`，关闭对照为 `solve=18.214s`、`exact=5.568s`，历史同口径关闭诊断曾为 `solve=7.500s`、`exact=1.972s`。因此当前更可靠的结论是：arc fixing 语义上没有改变 root 结果，并显著压低函数评价数量；真实 wall-time 收益需要更多 seed/case 复测。
+
+后续如果要把它作为默认优化，还需要继续做三件事：一是扩展到 full-domain arc join 和 nodejoin 路径，并确认三条路径的列池不变；二是在 40-job root-only 上检查是否能压低千万级 join function eval；三是考虑把 arc-use lower bound 的函数最小化再做离散 scalar 化，避免每轮 `n(n-1)` 条 arc 都执行一次完整 `shift/add/findMinimal`。

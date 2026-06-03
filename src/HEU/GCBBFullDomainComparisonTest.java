@@ -187,6 +187,12 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalCompletionBoundScalarPruning = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBoundScalar",
 				Boolean.toString(config.bidirectionalCompletionBoundScalarPruning)));
+		config.bidirectionalCompletionBoundArcFixing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.completionBoundArcFixing",
+				Boolean.toString(config.bidirectionalCompletionBoundArcFixing)));
+		config.bidirectionalCompletionBoundArcFixingDiagnostic = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.completionBoundArcFixingDiagnostic",
+				Boolean.toString(config.bidirectionalCompletionBoundArcFixingDiagnostic)));
 		config.fullDomainNodeJoinCrossingSide = System.getProperty(
 				"twet.bpc.fullDomainCompare.nodeJoinCrossingSide", config.fullDomainNodeJoinCrossingSide);
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(

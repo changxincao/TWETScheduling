@@ -41,6 +41,8 @@ final class CompletionBoundCalculator {
 	static final class Bounds {
 		final PiecewiseLinearFunction[] forwardUByJob;
 		final PiecewiseLinearFunction[] backwardRByJob;
+		final PiecewiseLinearFunction[] forwardFByJob;
+		final PiecewiseLinearFunction[] backwardBByJob;
 		final double[][] forwardUBeforeByJob;
 		final double[][] backwardRAfterByJob;
 		final double[] forwardUMinByJob;
@@ -49,6 +51,8 @@ final class CompletionBoundCalculator {
 		Bounds(int n, double pricingHorizon) {
 			this.forwardUByJob = new PiecewiseLinearFunction[n + 1];
 			this.backwardRByJob = new PiecewiseLinearFunction[n + 1];
+			this.forwardFByJob = new PiecewiseLinearFunction[n + 1];
+			this.backwardBByJob = new PiecewiseLinearFunction[n + 1];
 			this.forwardUBeforeByJob = new double[n + 1][];
 			this.backwardRAfterByJob = new double[n + 1][];
 			this.forwardUMinByJob = new double[n + 1];
@@ -301,6 +305,7 @@ final class CompletionBoundCalculator {
 			}
 		}
 		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
+		copyCompletionFunctions(bounds.forwardFByJob, forwardF);
 
 		phaseStart = System.nanoTime();
 		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
@@ -336,6 +341,7 @@ final class CompletionBoundCalculator {
 			}
 		}
 		stats.backwardBuildNanos += System.nanoTime() - phaseStart;
+		copyCompletionFunctions(bounds.backwardBByJob, backwardB);
 		return bounds;
 	}
 
@@ -434,13 +440,24 @@ final class CompletionBoundCalculator {
 		for (int job = 1; job <= data.n; job++) {
 			for (int prev = 0; prev <= data.n; prev++) {
 				mergeForward(bounds.forwardUByJob, job, forwardU[prev][job]);
+				mergeForward(bounds.forwardFByJob, job, forwardF[prev][job]);
 			}
 			for (int successor = 1; successor <= data.n + 1; successor++) {
 				mergeBackward(bounds.backwardRByJob, job, backwardR[job][successor]);
+				mergeBackward(bounds.backwardBByJob, job, backwardB[job][successor]);
 			}
 		}
 		stats.aggregateNanos += System.nanoTime() - phaseStart;
 		return bounds;
+	}
+
+	private void copyCompletionFunctions(PiecewiseLinearFunction[] targetByJob, PiecewiseLinearFunction[] sourceByJob) {
+		for (int job = 1; job <= data.n; job++) {
+			PiecewiseLinearFunction source = sourceByJob[job];
+			if (source != null && source.head != null) {
+				targetByJob[job] = source.copy();
+			}
+		}
 	}
 
 	private void buildDiscreteCaches(Bounds bounds) {

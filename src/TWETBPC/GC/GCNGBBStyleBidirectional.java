@@ -84,6 +84,7 @@ public class GCNGBBStyleBidirectional {
 	private CompletionBoundCalculator.Relaxation completionBoundRelaxation;
 	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
 	private CompletionBoundCalculator.Bounds completionBounds;
+	private boolean[][] completionBoundFixedArc;
 	private double bestGeneratedReducedCost;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -150,6 +151,12 @@ public class GCNGBBStyleBidirectional {
 	private long completionBoundScalarPruned;
 	private long completionBoundScalarFunctionFallbacks;
 	private long completionBoundScalarUnavailable;
+	private long completionBoundArcFixingCandidates;
+	private long completionBoundArcFixingFixed;
+	private long completionBoundArcFixingDomainPruned;
+	private long completionBoundArcFixingUnavailable;
+	private long completionBoundArcFixingFunctionEvaluations;
+	private long completionBoundArcFixingNanos;
 	private long completionBoundBuildNanos;
 	private long completionBoundForwardBuildNanos;
 	private long completionBoundBackwardBuildNanos;
@@ -374,6 +381,7 @@ public class GCNGBBStyleBidirectional {
 		completionBoundQueueOrdering = parseCompletionBoundQueueOrdering(
 				config.bidirectionalCompletionBoundQueueOrdering);
 		completionBounds = null;
+		completionBoundFixedArc = null;
 		bestGeneratedReducedCost = Utility.big_M;
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
@@ -501,7 +509,8 @@ public class GCNGBBStyleBidirectional {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(label.jid, nextJob);
+		return !node.isArcForbidden(label.jid, nextJob)
+				&& !isCompletionBoundArcFixed(label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -512,7 +521,8 @@ public class GCNGBBStyleBidirectional {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(prevJob, successor);
+		return !node.isArcForbidden(prevJob, successor)
+				&& !isCompletionBoundArcFixed(prevJob, successor);
 	}
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
@@ -910,7 +920,8 @@ public class GCNGBBStyleBidirectional {
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
 		joinTerminalGroupsScanned++;
-		if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
+		if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)
+				|| isCompletionBoundArcFixed(lastJob, backward.jid)) {
 			joinTerminalGroupsArcOrVisitPruned++;
 			return;
 		}
@@ -1033,6 +1044,12 @@ public class GCNGBBStyleBidirectional {
 		completionBoundScalarPruned = 0;
 		completionBoundScalarFunctionFallbacks = 0;
 		completionBoundScalarUnavailable = 0;
+		completionBoundArcFixingCandidates = 0;
+		completionBoundArcFixingFixed = 0;
+		completionBoundArcFixingDomainPruned = 0;
+		completionBoundArcFixingUnavailable = 0;
+		completionBoundArcFixingFunctionEvaluations = 0;
+		completionBoundArcFixingNanos = 0;
 		completionBoundBuildNanos = 0;
 		completionBoundForwardBuildNanos = 0;
 		completionBoundBackwardBuildNanos = 0;
@@ -1076,6 +1093,10 @@ public class GCNGBBStyleBidirectional {
 				+ ", completionBoundScalar check/pruned/fallback/unavailable=" + completionBoundScalarChecks
 				+ "/" + completionBoundScalarPruned + "/" + completionBoundScalarFunctionFallbacks
 				+ "/" + completionBoundScalarUnavailable
+				+ ", completionBoundArcFixing candidates/fixed/domain/unavailable/funcEval/ms="
+				+ completionBoundArcFixingCandidates + "/" + completionBoundArcFixingFixed
+				+ "/" + completionBoundArcFixingDomainPruned + "/" + completionBoundArcFixingUnavailable
+				+ "/" + completionBoundArcFixingFunctionEvaluations + "/" + formatMillis(completionBoundArcFixingNanos)
 				+ ", completionBoundQueue=" + completionBoundQueueOrdering
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
@@ -1142,6 +1163,68 @@ public class GCNGBBStyleBidirectional {
 		completionBounds = result.bounds;
 		recordCompletionBoundStats(result.stats);
 		completionBoundBuildNanos += System.nanoTime() - start;
+		evaluateCompletionBoundArcFixing(lp);
+	}
+
+	private void evaluateCompletionBoundArcFixing(LP lp) {
+		if ((!config.bidirectionalCompletionBoundArcFixingDiagnostic
+				&& !config.bidirectionalCompletionBoundArcFixing) || completionBounds == null) {
+			return;
+		}
+		if (config.bidirectionalCompletionBoundArcFixing) {
+			completionBoundFixedArc = new boolean[data.n + 1][data.n + 1];
+		}
+		long start = System.nanoTime();
+		Node node = lp.getNode();
+		double cutoff = completionBoundCutoff();
+		for (int fromJob = 1; fromJob <= data.n; fromJob++) {
+			for (int toJob = 1; toJob <= data.n; toJob++) {
+				if (fromJob == toJob || isZeroDualExcludedJob(fromJob) || isZeroDualExcludedJob(toJob)
+						|| node.isArcForbidden(fromJob, toJob)) {
+					continue;
+				}
+				completionBoundArcFixingCandidates++;
+				PiecewiseLinearFunction prefix = completionBounds.forwardFByJob[fromJob];
+				PiecewiseLinearFunction suffix = completionBounds.backwardBByJob[toJob];
+				if (prefix == null || prefix.head == null || suffix == null || suffix.head == null) {
+					completionBoundArcFixingUnavailable++;
+					continue;
+				}
+				double delay = data.getSetUp(fromJob, toJob) + data.getProcessT(toJob);
+				PiecewiseLinearFunction shiftedPrefix = prefix.shiftX(delay);
+				if (shiftedPrefix.head == null) {
+					rememberCompletionBoundFixedArc(fromJob, toJob, true);
+					continue;
+				}
+				PiecewiseLinearFunction arcBound = shiftedPrefix.add(suffix);
+				if (arcBound.head == null) {
+					rememberCompletionBoundFixedArc(fromJob, toJob, true);
+					continue;
+				}
+				arcBound.shiftYInPlace(data.getSetupCost(fromJob, toJob) - lp.getArcDual(fromJob, toJob));
+				completionBoundArcFixingFunctionEvaluations++;
+				double lowerBound = arcBound.findMinimal(false, true)[0];
+				if (!Utility.compareLt(lowerBound, cutoff)) {
+					rememberCompletionBoundFixedArc(fromJob, toJob, false);
+				}
+			}
+		}
+		completionBoundArcFixingNanos += System.nanoTime() - start;
+	}
+
+	private void rememberCompletionBoundFixedArc(int fromJob, int toJob, boolean domainPruned) {
+		completionBoundArcFixingFixed++;
+		if (domainPruned) {
+			completionBoundArcFixingDomainPruned++;
+		}
+		if (completionBoundFixedArc != null) {
+			completionBoundFixedArc[fromJob][toJob] = true;
+		}
+	}
+
+	private boolean isCompletionBoundArcFixed(int fromJob, int toJob) {
+		return fromJob > 0 && fromJob <= data.n && toJob > 0 && toJob <= data.n
+				&& completionBoundFixedArc != null && completionBoundFixedArc[fromJob][toJob];
 	}
 
 	private void recordCompletionBoundStats(CompletionBoundCalculator.Stats stats) {

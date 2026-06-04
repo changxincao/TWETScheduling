@@ -1158,3 +1158,17 @@ child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `par
 但它仍有防御性意义。`LP.construct()` 是 RMP 建模入口，不只表达父子继承语义；历史列池、调试运行、配置切换、初始 incumbent/外部 seed 或未来新增的列来源，都可能把旧口径下生成的列传进来。全局 preprocessing forbidden arc 是所有节点都应遵守的硬不可行信息，放在入口再过滤一次，可以避免这些 stale columns 被重新放回 RMP。当前这一步不检查普通 branch/subtree forbidden arc，因此不会破坏 child “先继承父列集带新分支行试可行性”的设计；它只兜底全局静态预处理禁弧。若后续追求极致效率，可以加诊断统计确认该过滤长期命中为 0，再考虑删除或改成断言。
 
 关于 formal subtree-on 日志里的 `nodeDiag columns=2003`，需要更正一个容易误读的点：这个数不是 `resetRestrictedColumnsByCurrentReducedCost()` 刚筛完后的列数，而是 Node 2 第一轮 exact pricing 入口的 restricted columns 数。Node 2 在进入 exact 前，heuristic pricing 已经连续加了 `343+202+133+93+30+12=813` 条列。因此刚经过 child column filter 后的列数应约为 `2003-813=1190`，而不是 2003。这个 1190 仍然超过默认 `branchSeedColumnLimit=1000`，原因应是筛选逻辑会先无条件保留当前 LP 正值列，只有在正值列不足 `maxColumns` 时才用低 reduced-cost 候选补足。当前日志没有单独输出 positive/candidate/selected 计数，因此还不能确认 1190 中正值列的精确数量；若后续要彻底验证，应在 `resetRestrictedColumnsByCurrentReducedCost()` 增加一次性统计。
+
+### 41.16 2026-06-04 扩充 30-job 子样例的 subtree 开关对照
+
+为继续验证 subtree arc elimination 开关在多个 30-job 样例上的影响，本轮从 `data/40-2/wet040_004_2m.dat` 到 `wet040_008_2m.dat` 又截取了 5 个真 30-job 临时样例：`tmp-wet030_from040_004_2m.dat` 到 `tmp-wet030_from040_008_2m.dat`。生成方式仍是保留前 30 个 job，并截取 setup 矩阵 `0..30` 行列子矩阵。随后按 half-domain、`completionBound=allCycles`、scalar 开启、`maxNodes=2`、subtree 开关唯一变化的口径，完成了 `004..006` 的成对复跑；`007/008` 在 baseline 路径下几分钟内没有完成成对结果，本轮先中止，不作为结论样本。
+
+`from040_004` 强复现了原 `tmp-wet030_001_2m` 的坏模式。subtree off 为 `solve=17.703s, exact=4.810s, pool=5975`，subtree on 变为 `solve=21.288s, exact=9.074s, pool=23083`。Node 2 第一轮 exact 入口列数从 `4709` 降到 `1355`，forbidden job arc 从 `2` 增到 `737`，machine dual 从 `-9077.0` 变为 `-8227.5`；同时 `fw kept` 从 `2795` 增到 `30701`，`forwardSink negative` 从 `37` 增到 `16898`，本轮 exact 时间从约 `584ms` 增到 `3745ms`。这组说明：当 formal subtree 明显压缩 child restricted columns，并且 dual 形状尤其 machine dual 明显变化时，会再次出现大量 forward-only 负列和 pool 暴涨。
+
+`from040_005` 是重要反例。subtree off 为 `solve=21.345s, exact=6.020s, pool=5028`，subtree on 反而变快为 `solve=13.266s, exact=2.901s, pool=5102`。Node 2 第一轮 exact 的列数同样从 `4841` 降到 `2013`，forbidden job arc 从 `2` 增到 `634`，但 machine dual 基本稳定在 `-7871.0 -> -7884.6`；`fw kept` 从 `1893` 降到 `425`，`forwardSink negative` 保持 `38`，本轮 exact 时间从约 `833ms` 降到 `166ms`。这组说明：列数缩小本身不必然导致 label 暴涨；若 dual 没有被推到有害区域，subtree 删弧仍可能按理论预期加速。
+
+`from040_006` 在两种开关下都根节点闭合，不适合观察 child subtree 行为。off 为 `ROOT_PROCESSED, solve=13.311s, exact=2.669s, pool=5530`，on 为 `ROOT_PROCESSED, solve=10.370s, exact=2.333s, pool=5530`。这只能说明 root-only 路径下 subtree 开销不明显，不能用于判断 child restricted column filter 的影响。
+
+把原 `tmp-wet030_001_2m`、`from040_003` 和本轮 `from040_004/005/006` 放在一起看，结论需要比前面更精确：subtree formal-on 的效率变化不是单调的。原 `001` 和新 `004` 都表现为 child 列池被大幅压缩后，machine dual/dual 形状改变，把大量 forward->sink 路径推成负 reduced-cost 列，导致 exact pricing 和全局 pool 暴涨；`003` 只是温和变慢，因为列数几乎没降；`005` 则证明即便列数从 4841 降到 2013，只要 dual 没有发生有害平移，删弧仍会减少 label。因此当前更稳的判断是：machine dual 的 200 到 800 量级变化很可能是放大器，但不是唯一条件；灾难级变慢来自 subtree forbidden arc 继承、child column filter 和重新定价后的 dual 形状共同作用。
+
+本轮可复现输出保存在 `test-results/bpc/tmp-wet030-from040-004-006-baseline-off-n2-half-current.csv`、`test-results/bpc/tmp-wet030-from040-004-006-formal-on-n2-half-current.csv` 及同名目录。后续若要继续扩大样本，应优先挑能进入 child 的 30-job 子样例，或者降低 `007/008` 的运行预算口径后先拿到 Node 2 第一轮 exact summary；否则 root 闭合样例不能回答 subtree child filter 的问题。

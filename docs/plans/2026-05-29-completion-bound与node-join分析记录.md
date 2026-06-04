@@ -1194,3 +1194,25 @@ child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `par
 真正“600 秒不动”的是 `009/011/013/014/015` 这批重样例。当前落盘证据显示这些目录大多没有正式 `halfDomain.log`，也没有 CSV；也就是说进程在外层 600 秒限制内没有完成一次可写 summary 的运行。由于当前日志只在每轮 pricing 完成后打印，而不是在 pricing/LP/MIP 开始时写 heartbeat，所以这些空目录无法精确定位到“卡在某一条 exact pricing、root restricted integer heuristic、还是某个 Java 运行阶段”。能确定的是：它们不是像 010 那样已经跑完 2 个节点后 `NODE_LIMIT`，而是完整实例级运行未返回。继续用这批样例盲跑 subtree 开关，信息密度很低。
 
 后续若要判断“求解不动卡在哪里”，需要先改诊断口径，而不是继续扩大样本。建议在 `Tree`/`PC` 周围加开始/结束 heartbeat：node 开始、initial LP、repair、heuristic pricing、exact pricing、cut、restricted integer heuristic、subtree elimination、branch，每个阶段进入时也写一行，并刷新日志。这样即使 600 秒被杀，也能从最后一条 start heartbeat 看出卡在 exact pricing 还是 restricted integer heuristic。当前从 010 看，restricted integer heuristic 已经是显著大头；对 009/011/013/014/015，要先拿到阶段 heartbeat 后再决定是否降低 integer heuristic 频率、给 MIP 加时间上限，或只跑 root/Node2 第一轮 pricing 诊断。
+
+### 41.19 2026-06-04 010 root restricted integer heuristic 可行性和列筛选诊断
+
+用户追问 `RMIH` 的整数解为什么不应天然就是最终可行解。本轮新增独立诊断类 `HEU.RestrictedMasterIntegerFilterDiagnostic`，不改正式 `Tree` 和 `RestrictedMasterIntegerHeuristic` 流程，只复用 010 root LP/pricing 后的列池和 reduced cost，对 root restricted columns 做不同列筛选规模下的二进制 set covering / set partitioning MIP 对照。诊断配置复用 `GCBBAsymmetricComparisonTest` 的随机 seed 公式，因此 root LP 与历史 010 对齐：`root_lp=16148.8`，`restricted_cols=5341`，LP 正值列 `8` 条。
+
+最关键的验证结果是：历史 root RMIH 的 `obj=17599` 可以被诊断复现，但它不是原问题意义下的可行 partition。使用 `>=` 覆盖、`rc2000 + jobK10`、`rc3000 + jobK10`、`rc4000 + jobK10` 或全量 `5341` 列时，最优解均为两条列 `[3321, 4523]`，目标值 `17599`，但重复覆盖 job `[19, 29]`，`duplicate_cover=2`。两条列分别为：
+
+`3321:[4, 19, 25, 22, 7, 8, 1, 9, 29, 3, 11, 13, 27, 18, 5, 12]`
+
+`4523:[17, 2, 10, 15, 20, 16, 30, 29, 14, 28, 23, 26, 19, 21, 24, 6]`
+
+也就是说，`>=` 的 MIP 认为所有任务至少覆盖一次，因此可行；但原问题/validator 要求任务不能被两个内部列重复服务，所以该 incumbent 应拒绝。对应的 `==` 覆盖在 `rc4000 + jobK10` 和全量 `5341` 列下可行，最优解为 `[301, 2700]`，目标值 `17723`，无重复覆盖。`rc2000 + jobK10` 在 `==` 下不可行，说明只保留 2000 条低 reduced-cost 列尚不足以拼出合法 partition；但 `>=` 已经能拼出低目标的 covering 解，这正是当前 `RMIH` invalid incumbent 的来源。
+
+这也解释了为什么“三角不等式 + set covering”不能直接保证 RMIH integer incumbent 合法。三角不等式只能支持“单条路径内部若存在绕路/重复访问，理论上可用更短路径替代”这类局部支配；它不能保证两个已经选中的固定列之间不会共享 job。RMIH 面对的是一个固定列池，不能自动把列 `3321` 或 `4523` 中的 job 19/29 删除后重新生成成本更低且时间窗可行的新列。即使这种修剪后的列在完整列空间中存在，也不一定已经在当前 restricted pool 里；如果不在池里，set covering MIP 无法用它替换。因此，LP 主问题为了对偶语义使用 `>=` 可以成立，但用于更新 incumbent 的整数启发式必须额外保证原问题 partition 语义，至少要在更新前通过 validator。
+
+列筛选规模方面，本次 root 诊断得到一个很清晰的阈值。`rc500 + jobK10` 在 `>=/==` 下均不可行；`rc1000 + jobK10` 在 `>=` 下可行但目标 `19025` 且重复覆盖 2 个 job，`==` 不可行；`rc2000 + jobK10` 在 `>=` 下达到历史 invalid 目标 `17599`，`==` 仍不可行；`rc4000 + jobK10` 在 `==` 下首次得到合法目标 `17723`，全量 `5341` 列下的合法 `==` 目标仍是 `17723`。因此对 010 root 来说，按 reduced cost 排序保留列时，`4000 + 每 job 前 10 条` 已经能达到全量合法解质量；`2000` 太少，只能得到 covering 可行但 partition 不可行的低目标解。
+
+求解时间也支持“先筛列，再整数化”的方向。诊断 MIP 为了隔离列选择和覆盖语义，省略了原 RMIH 中 no-outsourcing 情况下仍存在的 tariff segment/baseline 变量，因此绝对时间低于历史 `RestrictedInteger node=1 time=23.95s`，但相对趋势仍有参考价值：`rc2000 >=` 用 `1.47s`，首次 incumbent `0.42s`；`rc4000 >=` 用 `5.31s`，首次 incumbent `1.09s`；全量 `5341 >=` 用 `5.62s`，首次 incumbent `0.24s`。`==` 口径在有合法解后反而更快：`rc4000 ==` 用 `0.319s`，全量 `5341 ==` 用 `0.437s`。这说明当前慢不只是“列多”，还和覆盖模型允许重复覆盖后产生更复杂的 covering 组合有关；合法 partition 口径未必更慢。
+
+文献上，这类 restricted master heuristic 一般也不是把所有生成列无脑丢给 MIP。Joncour 等的 column-generation primal heuristic 综述指出，restricted master heuristic 通常在列子集上解静态 IP，列子集可以来自 LP 过程生成列、启发式列或二者混合；列选择可使用 reduced cost、约束满足贡献或 LP 解值，且 restricted integer problem 常因列集不足而不可行。Cavaliere、Bendotti 和 Fischetti 的 CVRP restricted set partitioning heuristic 更具体：先选成本较好的 5000 到 10000 条 route 作为 core set，再用 reduced cost filtering，并在每个 customer 上保留 reduced cost 最小的一批 route，最终 restricted SP 用商业 MIP 求解但设置 aggressive time limit 和 polishing。这和本轮 `reduced cost 前 N + 每 job 前 K` 的方向一致。
+
+当前工程建议因此分两层。第一层先保证 correctness：`RMIH` 用于更新 BPC incumbent 前，必须满足原问题可行性；对 no-outsourcing/内部列 partition 场景，覆盖应使用 `==1`，或者至少在 `Tree` 更新 incumbent 前调用 validator，失败则只记录诊断、不更新上界。第二层再做加速：先保留 LP 正值列、已有 incumbent 列，再按 reduced cost 升序保留前 `N` 条，并对每个 job 保留 `K=10` 条覆盖该 job 的低 reduced-cost 列；从 010 root 的结果看，`N=4000,K=10` 已达到全量合法目标，`N=2000,K=10` 不足。后续若要把该策略正式接入，应继续在更多能进入 child 的 30-job 样例上记录 `N/K/列数/合法目标/首次 incumbent 时间/总 MIP 时间`，再决定默认阈值和是否给大列数场景加时间限制。

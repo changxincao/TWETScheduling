@@ -1172,3 +1172,15 @@ child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `par
 把原 `tmp-wet030_001_2m`、`from040_003` 和本轮 `from040_004/005/006` 放在一起看，结论需要比前面更精确：subtree formal-on 的效率变化不是单调的。原 `001` 和新 `004` 都表现为 child 列池被大幅压缩后，machine dual/dual 形状改变，把大量 forward->sink 路径推成负 reduced-cost 列，导致 exact pricing 和全局 pool 暴涨；`003` 只是温和变慢，因为列数几乎没降；`005` 则证明即便列数从 4841 降到 2013，只要 dual 没有发生有害平移，删弧仍会减少 label。因此当前更稳的判断是：machine dual 的 200 到 800 量级变化很可能是放大器，但不是唯一条件；灾难级变慢来自 subtree forbidden arc 继承、child column filter 和重新定价后的 dual 形状共同作用。
 
 本轮可复现输出保存在 `test-results/bpc/tmp-wet030-from040-004-006-baseline-off-n2-half-current.csv`、`test-results/bpc/tmp-wet030-from040-004-006-formal-on-n2-half-current.csv` 及同名目录。后续若要继续扩大样本，应优先挑能进入 child 的 30-job 子样例，或者降低 `007/008` 的运行预算口径后先拿到 Node 2 第一轮 exact summary；否则 root 闭合样例不能回答 subtree child filter 的问题。
+
+### 41.17 2026-06-04 继续扩样本后的运行分布和使用判断
+
+用户要求继续多造 30-job 样例，并把单次运行限制放宽到 10 分钟。本轮从 `data/40-2/wet040_009_2m.dat` 到 `wet040_015_2m.dat` 又截取了 7 个 30-job 临时样例：`tmp-wet030_from040_009_2m.dat` 到 `tmp-wet030_from040_015_2m.dat`。生成方式仍是保留前 30 个 job，并截取 setup 矩阵 `0..30` 行列子矩阵。
+
+这批样例的第一观察是：很多截样例已经明显重于前面的 `004..006`，不适合继续用同一个 `maxNodes=2` 口径快速拿成对统计。`from040_009` 在 subtree off 和 formal-on 两侧都 600 秒未完成；`from040_011` 也是两侧 600 秒未完成；`from040_013`、`from040_014`、`from040_015` 的 baseline off 都在 600 秒内没有完成，因此没有继续耗对应 formal-on。`from040_012` 本轮未继续跑，因为前面连续重样例已经说明这批数据分布偏重。这个结果本身说明，继续盲目截取 40-job 前 30 个 job 会混入很多根/子节点极重样例，难以作为快速参数对照集。
+
+`from040_010` 是本轮唯一完成 off/on 成对的样例，但两侧 `valid=false`，因此只能作为 pricing 行为参考，不能当作严格算法优劣结论。总体结果为：subtree off `NODE_LIMIT, solve=67.376s, exact=11.453s, pool=6213, valid=false`；formal-on `NODE_LIMIT, solve=67.812s, exact=8.746s, pool=5996, valid=false`。从 Node 2 第一轮 exact 看，formal-on 把 forbidden job arcs 从 `2` 增到 `35`，machine dual 从 `-10217.0` 变到 `-10324.0`，入口列数基本相近 `5109 -> 5114`，`fw kept` 从 `3107` 降到 `2260`，`forwardSink negative` 从 `132` 降到 `12`，本轮 exact 时间从约 `1243ms` 降到 `964ms`。这组和 `from040_005` 一致：当 formal subtree 没有把 child restricted columns 压成残余冷启动，并且 machine dual 没有朝有害方向大幅平移时，删弧本身会减少 forward-only 负列和 label。
+
+把目前所有可用样例合起来看，subtree arc elimination 的使用判断更清楚了。第一，作为纯 pricing 图删弧或在 dual 稳定的 formal-on 场景下，它确实能减少 label 和负列，例如 `005`、`010`。第二，一旦 formal-on 同时触发 child column filter 大幅压缩历史列池，并把 machine dual/其他 dual 推到有害区域，就会出现 `001`、`004` 那样的灾难级 forward->sink 负列暴涨。第三，还有一批 `009/011/013/014/015` 在当前口径下 10 分钟都不能完成 baseline，对这些样例继续谈 subtree 开关优劣意义不大，应该先改实验设计。
+
+因此当前不建议把 subtree arc elimination 无条件作为普通 branch forbidden arc 正式继承。更稳的工程策略是分层使用：默认先作为 pricing-only elimination 或 local arc fixing 使用；只有在 child 重新筛列后 restricted columns 没有大幅下降、machine dual 相对父/无 subtree 参考没有明显有害平移、或 residual seed columns 足够覆盖被删弧后的替代路径时，才允许 formal-on 进入普通 forbidden arc 语义。若要进一步自动化，需要在 `resetRestrictedColumnsByCurrentReducedCost()` 后输出 selected/positive/candidate/incompatible 计数，并给 subtree formal-on 加一个保护条件，例如列池保留率过低或 machine dual 跳变过大时回退为 pricing-only。

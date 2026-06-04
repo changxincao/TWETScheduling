@@ -1,0 +1,2 @@
+case,mode,status,incumbent,bound,gap,nodes,pricing,cols,pool,solve_s,root_s,heuristic_s,heuristic_calls,exact_engine,exact_s,exact_calls,master_lp_s,valid,log
+"tmp-wet030_from040_010_2m","halfDomain","NODE_LIMIT",17060.000000,16148.800000,5.341149,2,46,6213,6213,67.375961,47.262561,18.136305,39,"GCNGBBStyleBidirectionalPricing",11.453075,7,1.604911,false,"test-results\bpc\tmp-wet030-from040-010-baseline-off-n2-half-current\tmp-wet030_from040_010_2m-halfDomain.log"

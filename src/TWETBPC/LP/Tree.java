@@ -81,6 +81,7 @@ public class Tree {
 
 			LP lp = new LP(data, pool, cutPool);
 			lp.construct(node, node.seedColumnIds);
+			heartbeat(node, "pc.solve.start");
 			TWETMasterSolution solution = pc.solve(lp);
 
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -103,6 +104,7 @@ public class Tree {
 				traceSink.onIncumbentUpdated(node, solution, incumbentCost);
 			}
 			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic) {
+				heartbeat(node, "rmih.start");
 				RestrictedMasterIntegerHeuristic.Result integerResult = restrictedMasterIntegerHeuristic.solve(lp);
 				boolean heuristicImproved = integerResult.isFeasible()
 						&& Utility.compareLt(integerResult.getObjective(), incumbentCost);
@@ -131,10 +133,12 @@ public class Tree {
 				continue;
 			}
 
+			heartbeat(node, "subtreeArcElimination.start");
 			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = evaluateSubtreeArcElimination(lp,
 					incumbentCost, solution.getObjectiveValue());
 
 			boolean branched = false;
+			heartbeat(node, "branch.start");
 			for (Brancher brancher : branchers) {
 				BranchResult result = brancher.branch(lp);
 				if (!result.isBranched()) {
@@ -173,6 +177,16 @@ public class Tree {
 					result.getTotalNanos());
 		}
 		return result;
+	}
+
+	private void heartbeat(Node node, String phase) {
+		if (!config.diagnosticStageHeartbeat) {
+			return;
+		}
+		String nodeId = node == null ? "-" : Integer.toString(node.id);
+		System.out.println("[BPC heartbeat] node=" + nodeId + " phase=" + phase
+				+ " pool=" + pool.size() + " cuts=" + cutPool.size());
+		System.out.flush();
 	}
 
 	private void applySubtreeArcElimination(BranchResult branchResult,

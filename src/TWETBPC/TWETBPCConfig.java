@@ -150,5 +150,7 @@ public class TWETBPCConfig {
 	public int restrictedMasterIntegerHeuristicPerJobColumnLimit = 10;
 	/** 2026-06-04: 单列重复 job 不超过该数量时枚举所有删除组合生成修复列。 */
 	public int restrictedMasterIntegerHeuristicRepairEnumerationDuplicateLimit = 5;
+	/** 2026-06-04: 长运行诊断用阶段开始 heartbeat；默认关闭，不改变求解逻辑。 */
+	public boolean diagnosticStageHeartbeat = false;
 
 }

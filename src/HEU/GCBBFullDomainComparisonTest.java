@@ -164,6 +164,18 @@ public class GCBBFullDomainComparisonTest {
 		config.enableHeuristicPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableHeuristicPricing",
 				Boolean.toString(config.enableHeuristicPricing)));
+		config.enableBPCConsoleOutput = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableConsoleOutput",
+				Boolean.toString(config.enableBPCConsoleOutput)));
+		config.enableRestrictedMasterIntegerHeuristic = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableRestrictedMasterIntegerHeuristic",
+				Boolean.toString(config.enableRestrictedMasterIntegerHeuristic)));
+		config.restrictedMasterIntegerHeuristicTimeLimitSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.restrictedMasterIntegerTimeLimit",
+				Double.toString(config.restrictedMasterIntegerHeuristicTimeLimitSeconds)));
+		config.diagnosticStageHeartbeat = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.stageHeartbeat",
+				Boolean.toString(config.diagnosticStageHeartbeat)));
 		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);
 		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxHeuristicColumns",
 				100000);

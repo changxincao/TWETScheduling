@@ -1244,3 +1244,17 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 因此 010 不能再作为“subtree 导致 invalid”或“求解卡死”的例子。它现在是一个温和的 tradeoff 样例：formal-on 更快、列池更小、pricing 指标更好，但 `maxNodes=2` 内上界略差；baseline-off 慢约 `2.3s`，但找到更好的合法 incumbent。后续若要判断 subtree 是否值得默认开启，应同时记录 wall time、exact/heuristic/RMIH 时间和最终上界，而不能只看 exact pricing 秒数。若目标是尽快拿强上界，可以考虑在 subtree-on 路径下保留更多 root/Node2 低 reduced-cost 列给 branch-free RMIH，或者让 RMIH 使用一个不受 subtree 删弧过度影响的全局候选列视图。
 
 关于 `009/011/013/014/015` 的“求解不动”，当前结论仍不变：它们和 010 不是同一类现象。010 当前和旧版都有完整 CSV/log，只是旧版上界非法；新复跑更证明它能在 20 多秒内返回。`009/011/013/014/015` 的对应目录仍基本为空，没有正式 `halfDomain.log` 和 CSV，说明外层 600 秒内没有完成一次可写 summary 的运行。这不是统计脚本漏读 010 那种问题，而是运行没有返回到写结果阶段。由于当前日志缺少阶段 start heartbeat，仍不能断言它们卡在 root exact pricing、heuristic pricing、RMIH，还是某个初始 LP/Java 阶段。30 个任务并不意味着难度接近；这些实例是从不同 40-job 数据截前 30 个 job 得到的，setup/time-window/外包结构可能让 root 列生成或 restricted MIP 难很多。下一步应先加 heartbeat 或做更小口径隔离运行，例如 `maxNodes=1`、禁用 RMIH、只跑 root exact pricing，才能判断 011 到底是哪一阶段不返回。
+
+### 41.22 2026-06-04 011 heartbeat 隔离和 subtree 适用条件复核
+
+按上一节建议，本轮给 `Tree` 和 `PC` 增加了默认关闭的阶段 start heartbeat，并在 `GCBBFullDomainComparisonTest` 中暴露 `stageHeartbeat`、`enableConsoleOutput`、`enableRestrictedMasterIntegerHeuristic` 和 `restrictedMasterIntegerTimeLimit` 等 JVM property。这个诊断只在阶段进入时向 console 打印当前 node、phase、restricted 列数、pool 和 cut 数，不改变 LP、pricing、RMIH 或 branching 逻辑。这样即使外层 600 秒超时导致没有 CSV，也能知道最后进入了哪一个长阶段。
+
+对 `tmp-wet030_from040_011_2m` 做 `maxNodes=1`、subtree off、RMIH 开启的 root 诊断后，运行先经历多轮 heuristic pricing，restricted 列数从 2 增至 4777。后期 heuristic pricing 单轮已经变重，出现约 `1.1s` 到 `3.4s` 的多轮小幅补列；随后 heartbeat 显示进入 `pricing.GCNGBBStyleBidirectionalPricing.start`，之后超过 60 秒没有返回。本轮中止进程前没有进入 RMIH heartbeat，因此 011 当前“求解不动”的第一卡点不是 RMIH，也不是 subtree，而是 root exact pricing 单次调用。
+
+为了排除“heuristic 先生成了 4777 条列导致 exact 变难”的可能，又在同一 011 root 上关闭 heuristic pricing。此时 initial LP 后直接进入 `pricing.GCNGBBStyleBidirectionalPricing.start`，restricted 仍只有 2 条列，但 60 秒内同样没有返回。这说明 011 的重不只是列池过大造成的，而是该实例 root exact pricing 本身的状态空间很难。30 个任务数量相同并不意味着定价难度接近；setup、time window、外包成本和 LP 对偶会共同决定 label 数、completion-bound 剪枝率和负 reduced-cost 路径库存。当前已有证据足以说明：`009/011/013/014/015` 那类空目录不是统计漏读，而是至少 011 在 root exact pricing 内部长时间没有完成。
+
+这也把 010 和 011 的性质分开了。010 当前代码下能在 20 多秒返回，旧日志中主要耗时来自非法 `>=` RMIH 证明和修复前的上界口径；011 则还没到 RMIH 阶段就卡在 exact pricing。因此后续若要处理 011，应优先看 exact pricing 内部剪枝，而不是继续调 RMIH。可选方向包括：给 exact pricing 增加内部 heartbeat 或阶段计数，输出 completion-bound build、forward/backward label 扩展和 join 的开始/结束；对重样例限制 root exact 的返回列数或加入安全时间阈值；或者先用 pricing-only/local arc fixing 降低 exact 的状态空间。继续盲跑 subtree 开关意义不大，因为 subtree 只有在 root LP/pricing 和上界更新之后才会作用到 child。
+
+当前对 subtree arc elimination 的使用判断也更清楚。它有用的情形是：删弧没有把 child restricted pool 压成冷启动，或者 dual 尤其 machine dual 没有朝有害方向大幅平移；这时 forbidden arc 能直接减少 label、负 sink 列和 exact 时间，典型例子是 `from040_005` 和当前修正后的 `from040_010`。它没用甚至有害的情形是：formal-on 通过普通 forbidden arc 语义触发 child column filter 大幅删掉历史列池，并把 dual 推到使大量 forward-only 长路径为负 reduced cost 的区域，典型例子是 `tmp-wet030_001_2m` 和 `from040_004`。还有一种中间情形是当前 010：subtree 对 pricing 更快，但有限节点预算内的全局 RMIH 上界略差，因为 formal-on 改变了后续能生成的列池。
+
+因此 subtree 不能只按“理论上删弧减少图规模”来决定是否默认正式继承。当前更稳的口径仍是：优先作为 pricing-only/local fixing 使用；若要 formal-on，应加保护指标，例如 child column filter 后列池保留率、machine dual 跳变、Node 2 第一轮 `forwardSink negative` 和 `fw kept` 的异常阈值。若这些指标显示 residual graph 冷启动，就应回退为 pricing-only，避免把 subtree fixing 当成普通 branch forbidden arc 直接继承。

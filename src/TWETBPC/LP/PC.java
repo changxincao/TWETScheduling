@@ -196,6 +196,7 @@ public class PC {
 	private ArrayList<Integer> generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
 			HashSet<Integer> activeColumnIds) {
 		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
+		heartbeat(lp, (repairMode ? "pricing.repair." : "pricing.") + engine.getName() + ".start");
 		long pricingStart = System.nanoTime();
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
 		long pricingNanos = System.nanoTime() - pricingStart;
@@ -228,6 +229,7 @@ public class PC {
 	}
 
 	private TWETMasterSolution solveRelaxationTimed(LP lp, String phase) {
+		heartbeat(lp, "master." + phase + ".start");
 		long start = System.nanoTime();
 		TWETMasterSolution solution = lp.solveRelaxation();
 		traceSink.onMasterLpSolve(lp.getNode(), phase, System.nanoTime() - start);
@@ -235,6 +237,7 @@ public class PC {
 	}
 
 	private TWETMasterSolution resolveCurrentModelTimed(LP lp, String phase) {
+		heartbeat(lp, "master." + phase + ".start");
 		long start = System.nanoTime();
 		TWETMasterSolution solution = lp.resolveCurrentModel();
 		traceSink.onMasterLpSolve(lp.getNode(), phase, System.nanoTime() - start);
@@ -245,6 +248,18 @@ public class PC {
 		for (int i = startIndex; i < pricingEngines.size(); i++) {
 			pricingEngines.get(i).reset();
 		}
+	}
+
+	private void heartbeat(LP lp, String phase) {
+		if (!config.diagnosticStageHeartbeat) {
+			return;
+		}
+		Node node = lp.getNode();
+		String nodeId = node == null ? "-" : Integer.toString(node.id);
+		System.out.println("[BPC heartbeat] node=" + nodeId + " phase=" + phase
+				+ " restricted=" + lp.getRestrictedColumnIds().size()
+				+ " pool=" + lp.getPool().size() + " cuts=" + lp.getCutPool().size());
+		System.out.flush();
 	}
 
 }

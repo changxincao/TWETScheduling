@@ -82,6 +82,8 @@ public class LP {
 		for (int columnId : columnIds) {
 			// 2026-05-20: child 首次 LP 不按当前分支状态提前筛列，但静态预处理禁弧是全局不可行，
 			// 如果历史列池里残留这类列，继续建模会把已证明不可行的列重新放回 RMP。
+			// 2026-06-04: 正常父子继承路径下父节点列通常已经满足该条件；这里主要是防御性兜底，
+			// 防止外部 seed、旧配置列或调试列绕过 pricing 后把全局预处理禁弧带回模型。
 			TWETColumn column = pool.getColumn(columnId);
 			if (node == null || node.isColumnPreprocessingCompatible(column)) {
 				this.restrictedColumnIds.add(Integer.valueOf(columnId));

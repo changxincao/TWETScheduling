@@ -1140,3 +1140,15 @@ subtree arc elimination 的原理是 reduced-cost fixing / arc elimination。假
 实际尝试把 baseline-off 的 Node 2 machineDual 覆盖成 formal-on 的 `-8916.954545454555` 后，完整运行超过 5 分钟仍未结束，进程终止前 CPU 约 `404s`、内存接近 `1.9GB`；把候选早停设为 `1000` 仍没有快速返回。这个实验说明 Node 2 pricing 对 machineDual 覆盖非常敏感，但它不是干净的单变量 exact 试验：override 会影响 Node 2 的 heuristic pricing、completion bound 构造和 exact pricing，而不只是第一轮 exact 的 source 常数。因此不能据此断言“就是 281 的 machineDual 差导致 69952 列”。更严谨的下一步应做一个 exact-one-shot harness：加载已知 child 的 filtered restricted columns 和 LP dual，冻结 jobDual/arcDual/列池/forbidden arcs，只替换 GCNGBB exact 内部 source/completion-bound 使用的 machineDual，再比较第一轮 label 漏斗。
 
 当前最稳判断是：machineDual 是能造成大规模 reduced-cost 平移的候选机制；但原 wet030 的实证因果链更完整地表现为“subtree formal 写入 -> child column filter 把父列池压成残余图列池 -> LP dual 包括 machineDual/jobDual 重新定价 -> completion bound 通过量和 forward->sink 负列暴涨”。如果要把 machineDual 单独确认为主因，还需要上面的 exact-one-shot harness，而不是直接在完整 BPC 流程里覆盖 `LP.getMachineDual()`。
+
+### 41.15 2026-06-04 child 初始 LP、列筛选和不可行 repair 的真实时序
+
+用户指出“子节点的列不是重新挑选一部分吗”，本轮重新核对 `Tree`、`PC` 和 `LP` 的代码后，结论是：child 的列确实会重新挑选，但不是在 child 第一次 LP 建模之前，而是在第一次 child LP 解完之后。这个时序很关键。
+
+child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `parentLp.getRestrictedColumnIds()` 复制到 `child.seedColumnIds`。child 出队后，`Tree` 用 `lp.construct(node, node.seedColumnIds)` 建模；`LP.construct()` 此时只做 `node.isColumnPreprocessingCompatible(column)` 检查，也就是只过滤全局静态 preprocessing forbidden arc，不按当前分支 forbidden arc、required arc 或 subtree arc elimination 的 forbidden arc 提前筛列。这样做的目的，是先用“父节点列集 + 新分支行”判断 child 初始 RMP 是否可行。
+
+若 child 第一次 `solveRelaxationTimed(lp, "initial")` 可行，`PC.solve()` 才调用 `LP.resetRestrictedColumnsByCurrentReducedCost()`。这一步才是正式的 child 列筛选：先用 `isColumnCompatible(column)` 按当前 node 的 forbidden arc 过滤不兼容列，再保留当前 LP 正值列，并按 reduced cost 从低到高补到 `branchSeedColumnLimit`，条件为 reduced cost 小于 `branchSeedReducedCostAllowance`。因此 `4801 -> 2003` 这类差距发生在 child 初始 LP 可行之后、正式 pricing 之前。
+
+若 child 初始 LP 不可行，`PC.solve()` 会进入 `repairInfeasibleMaster()`。repair 的做法是把 `lp.setFeasibilityRepairMode(true)` 打开后重建同一个 node 的 LP，此时 `LP.buildModel()` 会调用 `addFeasibilitySlacks()`。这个 slack 不是给所有约束加，而是只给当前 child 新增的 repair branch 行加：机器上下界、arc required/forbidden、无向相邻 required/forbidden 或 tariff branch。coverage 不加 repair slack，仍然依赖 pricing/外包变量修复。repair LP 解出 slack dual 后，`PC` 调用各 pricing engine 的 `findFeasible(lp)` 生成能减少 slack 的列；每加一批列就 `resolveCurrentModelTimed(lp, "repair_after_pricing")`。若 slack 归零，再调用 `resetRestrictedColumnsByCurrentReducedCost()` 筛正式 child 列集，关闭 repair mode，并用 `"repair_final"` 重解正常 RMP。若达到 `maxBranchRepairColumns` 后 slack 仍为正，则 child 判不可行。
+
+所以完整时序是：child 先继承父节点 restricted columns；第一次 LP 不提前按当前分支筛列；可行则筛正式列后 pricing；不可行则只对当前新分支行加人工 slack，用 slack dual 引导 pricing 补列，repair 成功后再筛正式列。这个流程来自旧 VRP 的 `UpdateRouteSet/FindFeasible` 思路，但当前 subtree arc elimination 复用普通 forbidden arc 后，会在这个“repair 或初始 LP 之后的正式筛列”阶段把大量历史列过滤掉，这是 wet030 formal subtree-on 变慢链条中的关键时序点。

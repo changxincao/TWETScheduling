@@ -1230,3 +1230,17 @@ child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `par
 这组结果有两个含义。第一，三角不等式不能自动让 set covering 的整数 incumbent 合法，因为 MIP 只能使用当前有限列池；但从重复覆盖解生成删点列，确实可以把 covering incumbent 转成 partition 候选，并且在 010 root 上比直接等式列池解更好。第二，列数和上界质量不是单调关系：`rc1000` 的修复结果 `16412` 优于 `rc2000/full` 的修复结果 `16444`，说明修复后仍需重新求整数 MIP，不能只按“更多 reduced-cost 列一定更好”判断。
 
 当前工程建议调整为三步。第一，正式 `RMIH` 不能直接用 `>=` 解更新 incumbent；至少要在更新前做 validator，失败则不能刷新上界。第二，若保留 `>=` 作为寻找低成本 covering 结构的启发式，应在发现重复覆盖后生成删点修复列，并用 `==` 覆盖复解一次；这个修复比直接 `==` 更稳，因为它能补出有限列池里缺失的删点列。第三，列筛选仍建议从 LP 正值列、低 reduced-cost 前 N 条和每 job 前 K 条开始；010 root 上 `rc1000+jobK10+repair` 已能得到强合法上界，`rc500` 太少不可行，`rc4000/full` 会增加 `>=` 证明时间但修复后质量未更好。正式接入前应再把该 repair 逻辑放到更多 node 上测试，并记录 `>=` 首 incumbent 时间、修复列数、repair `==` 时间和 validator 结果。
+
+### 41.21 2026-06-04 当前 RMIH 修正后复跑 010 的 subtree 结论
+
+在 RMIH 改为 branch-free 全局上界启发式，并采用 `>=` 找重复结构、删点补列、最终 `==` 复解之后，重新按同口径复跑 `tmp-wet030_from040_010_2m`。配置仍为 half-domain、`completionBound=allCycles`、`maxNodes=2`，分别关闭和开启 formal subtree arc elimination。当前结果已经和旧日志明显不同：两侧均 `valid=true`，说明旧的 `valid=false` 确实来自原 RMIH 把 `>=` 重复覆盖解当作 incumbent，而不是 pricing 或 subtree 本身破坏了最终解。
+
+baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%, solve=23.407s, exact=7.174s, heuristic=10.224s, RMIH=4.959s, pool=6221, valid=true`。formal-on 当前为 `NODE_LIMIT, incumbent=16444, bound=16148.8, gap=1.7952%, solve=21.120s, exact=6.057s, heuristic=7.587s, RMIH=5.502s, subtree=0.823s, pool=6058, valid=true`。也就是说，在当前合法 RMIH 口径下，formal-on 仍然略省时间，主要省在 heuristic pricing 和 exact pricing；但它没有在前两个节点内找到 baseline off 的 `16281` 上界，因此如果只看 `maxNodes=2` 结果，baseline 的上界质量更好。
+
+从 Node 2 第一轮 exact pricing 看，subtree 的行为仍符合此前判断。baseline off 的入口约为 `columns=5109`、`forbiddenJobArcs=2`、`machineDual=-10217.0`、`fw kept=3107`、`forwardSink negative=132`、本轮 exact 约 `990ms`。formal-on 继承了 root 后 `350` 条 subtree arc，Node 2 第一轮入口为 `columns=4286`、`forbiddenJobArcs=351`、`machineDual=-10099.5`、`fw kept=2894`、`forwardSink negative=72`、本轮 exact 约 `553ms`。这不是 `from040_004` 那种残余列池冷启动导致负列暴涨的坏模式；相反，subtree 这次确实减少了负 sink 列、候选列和 exact 时间。formal-on 总 exact 从 `7.174s` 降到 `6.057s`，也支持这一点。
+
+当前 010 更准确的结论是：subtree 对 pricing 是有帮助的，但对有限节点预算下的启发式上界质量不一定有帮助。formal-on 删除 arc 后，Node 2 的候选空间更窄、总列池更小，RMIH 在 Node 2 找到的合法解为 `16818`，没有优于 root 的 `16444`；baseline off 在 Node 2 则通过修复后的 RMIH 找到 `16281` 并更新 incumbent。由于 RMIH 现在是 branch-free 全局启发式，这个差异不是因为 formal-on 加了 branch 约束，而是因为 subtree 改变了后续 pricing 生成的列池，有限 restricted pool 中可组合出的全局上界不同。
+
+因此 010 不能再作为“subtree 导致 invalid”或“求解卡死”的例子。它现在是一个温和的 tradeoff 样例：formal-on 更快、列池更小、pricing 指标更好，但 `maxNodes=2` 内上界略差；baseline-off 慢约 `2.3s`，但找到更好的合法 incumbent。后续若要判断 subtree 是否值得默认开启，应同时记录 wall time、exact/heuristic/RMIH 时间和最终上界，而不能只看 exact pricing 秒数。若目标是尽快拿强上界，可以考虑在 subtree-on 路径下保留更多 root/Node2 低 reduced-cost 列给 branch-free RMIH，或者让 RMIH 使用一个不受 subtree 删弧过度影响的全局候选列视图。
+
+关于 `009/011/013/014/015` 的“求解不动”，当前结论仍不变：它们和 010 不是同一类现象。010 当前和旧版都有完整 CSV/log，只是旧版上界非法；新复跑更证明它能在 20 多秒内返回。`009/011/013/014/015` 的对应目录仍基本为空，没有正式 `halfDomain.log` 和 CSV，说明外层 600 秒内没有完成一次可写 summary 的运行。这不是统计脚本漏读 010 那种问题，而是运行没有返回到写结果阶段。由于当前日志缺少阶段 start heartbeat，仍不能断言它们卡在 root exact pricing、heuristic pricing、RMIH，还是某个初始 LP/Java 阶段。30 个任务并不意味着难度接近；这些实例是从不同 40-job 数据截前 30 个 job 得到的，setup/time-window/外包结构可能让 root 列生成或 restricted MIP 难很多。下一步应先加 heartbeat 或做更小口径隔离运行，例如 `maxNodes=1`、禁用 RMIH、只跑 root exact pricing，才能判断 011 到底是哪一阶段不返回。

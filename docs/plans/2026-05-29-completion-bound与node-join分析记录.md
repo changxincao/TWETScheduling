@@ -1293,6 +1293,16 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 
 同口径复查 010 也正常：half-domain、`completionBound=allCycles`、`maxNodes=1`、console 关闭，结果为 `NODE_LIMIT`、incumbent `16444`、bound `16148.8`、`valid=true`，总时间 `10.948s`，exact pricing `2.661s/4`。因此当前修正没有破坏 010 的正常 completion-bound 剪枝，且把 011 从初始化阶段不返回修成可完成 root。
 
+### 41.25 2026-06-04 mergeMinimum changed 语义问题分析
+
+这次问题已经可以定位为 `PiecewiseLinearFunction.mergeMinimum(g, direction, reportChanged)` 的 `changed` 返回语义和 completion-bound builder 的使用需求不一致。`mergeMinimum` 本体负责把 `this` 改成 `min(this,g)`，这个合并操作本身仍然可用；真正出问题的是 `reportChanged=true` 时内部先调用 `willMergeMinimumChange(g)` 预判 changed，然后 completion-bound builder 把这个返回值当成“目标 job 的下包络真实变小，因此需要重新入队传播”。在队列型 DP 中，这个条件必须非常严格，否则一次伪 changed 会触发该 job 对所有后继的再次扩展，进而指数式放大。
+
+`willMergeMinimumChange()` 的逻辑是：若 `g` 的物理定义域向 `this` 左右外扩，就直接返回 true；否则在公共区间上按当前两个函数的分段端点扫描，只要 `g` 在某个小段端点严格低于 `this`，也返回 true。这个判断对普通“我要知道 merge 后链表是否可能变了”比较宽松，但对 completion-bound 的队列重入不够准确。原因有三点。第一，定义域外扩并不一定意味着 completion-bound 后续传播所需的函数值下界变小，特别是在前后缀语义里，外扩出来的区间可能只是结构补齐或与后续有效时间无关。第二，`mergeMinimum` 随后还会 `normalize(direction)`，相邻同值段、前缀/后缀最小化和边界处理可能把预判中的结构差异消掉。第三，`willMergeMinimumChange()` 是合并前预判，而不是合并后比较；它不知道实际 `mergeMinimum` 是否只做了等值替换、分段切割或相邻段合并。
+
+011 的现象正好符合这种误用：builder heartbeat 显示队列规模一直只有个位到十几个，但 `mergeChanged` 巨量增长，说明不是某个 job 一次性产生了巨大队列，而是同一批 job 被反复判为 changed 并重新入队。开启严格改进检查后，011 立刻从 60 秒仍在 `allCycles.forward.loop` 变成 root 12.699 秒完整返回，说明大量重入不是必要的真实下包络改进，而是 changed 预判过宽导致的伪传播。
+
+因此当前代码选择不改 `mergeMinimum` 的通用语义，而是在 `CompletionBoundCalculator.mergeFunction()` 中加一层更严格的队列重入判定：只在 candidate 相对 current 有正长度区间上的严格值改进，或确实扩展了当前需要传播的定义域时，才调用 `mergeMinimum(..., false)` 并把该 job 入队。这个设计保留了 `mergeMinimum` 作为通用链表合并操作的兼容性，同时把 completion-bound builder 所需的“真实改进才传播”语义放在调用方控制。后续如果要从根上整理，可以把 `mergeMinimum` 的返回值拆成两个概念：`structureChanged` 和 `valueImproved`，避免其他调用方继续把二者混用。
+
 进一步按用户指出的“同一 job 反复进出队可能是 changed 误判”检查，确实发现问题不在理论负循环，而在 `mergeMinimum(..., reportChanged=true)` 的返回值不能直接作为 completion-bound 队列重入条件。对 011 打开 `completionBoundChangeAudit` 后，每隔 10000 次 `mergeChanged` 复制 before/after 做分段精确比较；从 `mergeChanged=10000` 到至少 `230000` 的所有审计点都显示 before/after 没有任何严格下降，但仍被计为 changed 并触发入队。这说明前述“有效工作”的判断过宽，实际大量循环是 changed 假阳性。
 
 修复方式没有改全局 `PiecewiseLinearFunction.mergeMinimum`，而是在 `CompletionBoundCalculator.mergeFunction()` 内部增加严格改善检查：只有 candidate 在公共定义域某个分段端点严格低于 current，或者真实扩展了定义域时，才执行 merge 并返回 changed；否则直接跳过，不入队。这样把 completion-bound 的传播语义收紧为“下包络真的变强才继续松弛”，避免把结构性等价合并当作改进。

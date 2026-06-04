@@ -142,4 +142,13 @@ public class TWETBPCConfig {
 	/** 2026-06-02: restricted integer RMP 的 CPLEX 时间限制；小于等于 0 表示不设限制。 */
 	public double restrictedMasterIntegerHeuristicTimeLimitSeconds = 0.0;
 
+	/** 2026-06-04: RMIH 模式；coverRepair=筛列 >= + 修复列 + ==，partition=全量 ==。 */
+	public String restrictedMasterIntegerHeuristicMode = "coverRepair";
+	/** 2026-06-04: coverRepair 中按 reduced cost 排序保留的列数；小于等于 0 表示全保留。 */
+	public int restrictedMasterIntegerHeuristicReducedCostColumnLimit = 2000;
+	/** 2026-06-04: coverRepair 中每个 job 额外保留的最低 reduced cost 覆盖列数。 */
+	public int restrictedMasterIntegerHeuristicPerJobColumnLimit = 10;
+	/** 2026-06-04: 单列重复 job 不超过该数量时枚举所有删除组合生成修复列。 */
+	public int restrictedMasterIntegerHeuristicRepairEnumerationDuplicateLimit = 5;
+
 }

@@ -1284,3 +1284,17 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 这也修正了“它只是简单 Bellman-Ford DP”的理解。当前 all-cycles completion bound 不是按“每个 job 最多松弛 n 轮”的标量最短路；它维护的是按 job 聚合的 piecewise-linear 下包络，且允许重复访问 job。由于 reduced cost 中 job dual 很大，某些 job-job 循环在有限时间 horizon 内可以持续降低下包络。时间 horizon 虽然有限，避免了真正的无界负无穷，但会变成按时间/函数段数量增长的伪多项式传播；在 011 上表现为几十万次有效 merge change，远超 010。当前没有证据表明是 Java 线程死循环或单个函数操作卡死，更像是 all-cycles relaxed bound 对该实例过松并遇到了负循环式改进。
 
 由此得到的下一步判断是：若要让 011 可跑，不能简单认为 all-cycles 一定便宜。可以先尝试三类修正。第一，给 completion-bound 构造加安全阈值或超时，超过阈值时回退为 `off` 或更弱但可控的 scalar/local arc fixing，避免 exact 初始化被 bound 构造吞掉。第二，尝试 two-cycle 或更强的禁止短循环状态，但要注意当前 two-cycle 以前记录过构造更贵，不一定直接更好。第三，从理论上改成时间离散 DP 或限制循环长度/重复次数；这会改变 bound 的定义和成本，需要单独验证剪枝收益。当前最直接的工程修复方向，是保留 builder heartbeat，并在 all-cycles 构造超限时自动降级。
+
+继续检查后，上一段“更像负循环式真实改进”的判断需要收紧。问题的直接原因不是 all-cycles 必然存在大量真实负循环改进，而是 `PiecewiseLinearFunction.mergeMinimum(candidate, direction, true)` 的 `reportChanged=true` 预判过宽：它会把数值等价或结构性合并也报成 changed，completion-bound builder 于是把同一个 job 反复重新入队。由于每次入队又会扩展 30 个后继，这个伪 changed 会被快速放大成百万级 candidate。
+
+修正方式是在 `CompletionBoundCalculator.mergeFunction()` 中不再直接信任 `mergeMinimum(..., true)` 的 changed 返回值，而是先用 `candidateStrictlyImproves(current, candidate)` 做严格改进检查。检查逻辑只在 current/candidate 的真实重叠区间上扫描分段端点；如果 candidate 的定义域向 current 外扩展，或者在某个正长度重叠小段端点上严格低于 current，才认为它会带来新的下包络并允许入队。随后实际合并时使用 `mergeMinimum(..., false)`，避免再次触发宽松 changed 预判。这里利用的是分段线性差值在同一小段内仍为线性函数，若存在正长度内部严格改进，端点也能检测到；单点改进不会作为 completion-bound 后续传播状态。
+
+修正后同口径复测 011：half-domain、`completionBound=allCycles`、`maxNodes=1`、heuristic pricing 开启、builder heartbeat 和 change audit 开启。root 完整返回，状态为 `NODE_LIMIT`、`valid=true`，总时间 `12.699s`，exact pricing `1.941s/4`。第一轮 all-cycles completion-bound builder 约 `488.501ms`，内部计数为 `fCand=7164`、`bCand=7975`、`fPop=246`、`bPop=275`、`merge=30268`、`changed=11727`；exact 阶段 `fwPruned=4267`、`bwPruned=11956`，最终 RMIH 找到合法 incumbent `14258`。这和修正前 60 秒仍停在 `allCycles.forward.loop`、`fPop=50589`、`fCand=1467082`、`merge=2934128` 的状态相比，说明根因就是 changed 误判导致的伪循环传播。
+
+同口径复查 010 也正常：half-domain、`completionBound=allCycles`、`maxNodes=1`、console 关闭，结果为 `NODE_LIMIT`、incumbent `16444`、bound `16148.8`、`valid=true`，总时间 `10.948s`，exact pricing `2.661s/4`。因此当前修正没有破坏 010 的正常 completion-bound 剪枝，且把 011 从初始化阶段不返回修成可完成 root。
+
+进一步按用户指出的“同一 job 反复进出队可能是 changed 误判”检查，确实发现问题不在理论负循环，而在 `mergeMinimum(..., reportChanged=true)` 的返回值不能直接作为 completion-bound 队列重入条件。对 011 打开 `completionBoundChangeAudit` 后，每隔 10000 次 `mergeChanged` 复制 before/after 做分段精确比较；从 `mergeChanged=10000` 到至少 `230000` 的所有审计点都显示 before/after 没有任何严格下降，但仍被计为 changed 并触发入队。这说明前述“有效工作”的判断过宽，实际大量循环是 changed 假阳性。
+
+修复方式没有改全局 `PiecewiseLinearFunction.mergeMinimum`，而是在 `CompletionBoundCalculator.mergeFunction()` 内部增加严格改善检查：只有 candidate 在公共定义域某个分段端点严格低于 current，或者真实扩展了定义域时，才执行 merge 并返回 changed；否则直接跳过，不入队。这样把 completion-bound 的传播语义收紧为“下包络真的变强才继续松弛”，避免把结构性等价合并当作改进。
+
+修复后同口径重跑 `tmp-wet030_from040_011_2m`、half-domain、`completionBound=allCycles`、`maxNodes=1`。root 能完整返回，`valid=true`，总时间 `13.614s`。第一轮 all-cycles forward builder 从之前 60 秒仍未结束降为约 `203ms`，统计为 `fPop=246`、`fCand=7164`、`merge=30268`、`changed=11727`；后续 exact pricing 4 轮合计 `2.255s`，completion-bound 构造每轮约 `0.35..0.58s`，root RMIH `4.332s`，最终 root incumbent `14258`、bound `13525.866667`。这证明 011 求解不动的直接原因是 completion-bound 队列的 changed 假阳性，而不是 all-cycles bound 理论上必然很慢。

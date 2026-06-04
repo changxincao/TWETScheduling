@@ -168,6 +168,11 @@ final class CompletionBoundCalculator {
 	private final long diagnosticHeartbeatIntervalNanos;
 	private long diagnosticBuildStartNanos;
 	private long diagnosticLastHeartbeatNanos;
+	private final boolean diagnosticChangeAudit;
+	private final long diagnosticChangeAuditInterval;
+	private long diagnosticChangedAudits;
+	private long diagnosticChangedAuditNoSampleImprovement;
+	private double diagnosticLargestSampleImprovement;
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
@@ -195,6 +200,9 @@ final class CompletionBoundCalculator {
 		this.diagnosticHeartbeat = Boolean.getBoolean("twet.bpc.completionBoundHeartbeat");
 		long intervalMillis = Long.getLong("twet.bpc.completionBoundHeartbeatIntervalMillis", 10000L);
 		this.diagnosticHeartbeatIntervalNanos = Math.max(1L, intervalMillis) * 1000000L;
+		this.diagnosticChangeAudit = Boolean.getBoolean("twet.bpc.completionBoundChangeAudit");
+		this.diagnosticChangeAuditInterval = Math.max(1L, Long.getLong(
+				"twet.bpc.completionBoundChangeAuditInterval", 1000L));
 	}
 
 	Result build(Relaxation relaxation) {
@@ -686,11 +694,61 @@ final class CompletionBoundCalculator {
 			stats.mergeChanged++;
 			return true;
 		}
-		boolean changed = current.mergeMinimum(candidate, direction, true);
-		if (changed) {
-			stats.mergeChanged++;
+		if (!candidateStrictlyImproves(current, candidate)) {
+			return false;
 		}
-		return changed;
+		boolean auditThisMerge = shouldAuditNextChangedMerge();
+		PiecewiseLinearFunction beforeAudit = auditThisMerge ? current.copy() : null;
+		current.mergeMinimum(candidate, direction, false);
+		stats.mergeChanged++;
+		auditChangedMerge(beforeAudit, current, direction, true);
+		return true;
+	}
+
+	private boolean candidateStrictlyImproves(PiecewiseLinearFunction current, PiecewiseLinearFunction candidate) {
+		// 2026-06-04: completion bound 的队列重入必须只由真实下包络改进触发。
+		// PiecewiseLinearFunction.mergeMinimum(..., reportChanged=true) 的预判在 011 上会把
+		// 数值等价/结构性合并报成 changed，导致同一 job 反复入队；这里按分段端点严格检查。
+		if (current == null || current.head == null) {
+			return candidate != null && candidate.head != null;
+		}
+		if (candidate == null || candidate.head == null) {
+			return false;
+		}
+		if (Utility.compareLt(candidate.head.start, current.head.start)
+				|| Utility.compareGt(candidate.tail.end, current.tail.end)) {
+			return true;
+		}
+		double start = Math.max(current.head.start, candidate.head.start);
+		double end = Math.min(current.tail.end, candidate.tail.end);
+		if (!Utility.compareLt(start, end)) {
+			return false;
+		}
+		Segment p = current.head;
+		while (p != null && Utility.compareLe(p.end, start)) {
+			p = p.next;
+		}
+		Segment q = candidate.head;
+		while (q != null && Utility.compareLe(q.end, start)) {
+			q = q.next;
+		}
+		double cur = start;
+		while (p != null && q != null && Utility.compareLt(cur, end)) {
+			double next = Math.min(Math.min(p.end, q.end), end);
+			if (Utility.compareLt(cur, next)
+					&& (Utility.compareLt(q.getValue(cur), p.getValue(cur))
+							|| Utility.compareLt(q.getValue(next), p.getValue(next)))) {
+				return true;
+			}
+			cur = next;
+			if (Utility.compareEq(next, p.end)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(next, q.end)) {
+				q = q.next;
+			}
+		}
+		return false;
 	}
 
 	private boolean hasPositiveDomain(PiecewiseLinearFunction function) {
@@ -921,10 +979,81 @@ final class CompletionBoundCalculator {
 				+ " bPop=" + stats.backwardQueuePops
 				+ " merge=" + stats.mergeCalls
 				+ " changed=" + stats.mergeChanged
+				+ " audit=" + diagnosticChangedAudits + "/" + diagnosticChangedAuditNoSampleImprovement
+				+ "/" + formatMillis(diagnosticLargestSampleImprovement)
 				+ " stale=" + stats.priorityQueueStalePops);
 	}
 
 	private String formatMillis(double millis) {
 		return String.format(java.util.Locale.US, "%.3f", millis);
+	}
+
+	private boolean shouldAuditNextChangedMerge() {
+		return diagnosticChangeAudit && (stats.mergeChanged + 1L) % diagnosticChangeAuditInterval == 0L;
+	}
+
+	private void auditChangedMerge(PiecewiseLinearFunction before, PiecewiseLinearFunction currentAfter,
+			Direction direction, boolean changed) {
+		if (!diagnosticChangeAudit || !changed || before == null || before.head == null
+				|| currentAfter == null || currentAfter.head == null
+				|| stats.mergeChanged % diagnosticChangeAuditInterval != 0L) {
+			return;
+		}
+		diagnosticChangedAudits++;
+		double bestImprovement = maxStrictImprovement(before, currentAfter);
+		if (!Utility.compareGt(bestImprovement, 0.0)) {
+			boolean domainExtended = Utility.compareLt(currentAfter.head.start, before.head.start)
+					|| Utility.compareGt(currentAfter.tail.end, before.tail.end);
+			if (!domainExtended) {
+				diagnosticChangedAuditNoSampleImprovement++;
+				System.out.println("[completion-bound change audit] no exact improvement"
+						+ " direction=" + direction
+						+ " mergeChanged=" + stats.mergeChanged
+						+ " before=[" + before.head.start + "," + before.tail.end + "]"
+						+ " after=[" + currentAfter.head.start + "," + currentAfter.tail.end + "]"
+						+ " exactBest=" + bestImprovement);
+			}
+		} else if (Utility.compareGt(bestImprovement, diagnosticLargestSampleImprovement)) {
+			diagnosticLargestSampleImprovement = bestImprovement;
+		}
+	}
+
+	private double maxStrictImprovement(PiecewiseLinearFunction before, PiecewiseLinearFunction after) {
+		double start = Math.max(before.head.start, after.head.start);
+		double end = Math.min(before.tail.end, after.tail.end);
+		if (!Utility.compareLt(start, end)) {
+			return 0.0;
+		}
+		double best = 0.0;
+		Segment p = before.head;
+		while (p != null && Utility.compareLe(p.end, start)) {
+			p = p.next;
+		}
+		Segment q = after.head;
+		while (q != null && Utility.compareLe(q.end, start)) {
+			q = q.next;
+		}
+		double cur = start;
+		while (p != null && q != null && Utility.compareLt(cur, end)) {
+			double next = Math.min(Math.min(p.end, q.end), end);
+			if (Utility.compareLt(cur, next)) {
+				double startImprovement = p.getValue(cur) - q.getValue(cur);
+				double endImprovement = p.getValue(next) - q.getValue(next);
+				if (Utility.compareGt(startImprovement, best)) {
+					best = startImprovement;
+				}
+				if (Utility.compareGt(endImprovement, best)) {
+					best = endImprovement;
+				}
+			}
+			cur = next;
+			if (Utility.compareEq(next, p.end)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(next, q.end)) {
+				q = q.next;
+			}
+		}
+		return best;
 	}
 }

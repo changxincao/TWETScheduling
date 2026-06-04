@@ -1184,3 +1184,13 @@ child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `par
 把目前所有可用样例合起来看，subtree arc elimination 的使用判断更清楚了。第一，作为纯 pricing 图删弧或在 dual 稳定的 formal-on 场景下，它确实能减少 label 和负列，例如 `005`、`010`。第二，一旦 formal-on 同时触发 child column filter 大幅压缩历史列池，并把 machine dual/其他 dual 推到有害区域，就会出现 `001`、`004` 那样的灾难级 forward->sink 负列暴涨。第三，还有一批 `009/011/013/014/015` 在当前口径下 10 分钟都不能完成 baseline，对这些样例继续谈 subtree 开关优劣意义不大，应该先改实验设计。
 
 因此当前不建议把 subtree arc elimination 无条件作为普通 branch forbidden arc 正式继承。更稳的工程策略是分层使用：默认先作为 pricing-only elimination 或 local arc fixing 使用；只有在 child 重新筛列后 restricted columns 没有大幅下降、machine dual 相对父/无 subtree 参考没有明显有害平移、或 residual seed columns 足够覆盖被删弧后的替代路径时，才允许 formal-on 进入普通 forbidden arc 语义。若要进一步自动化，需要在 `resetRestrictedColumnsByCurrentReducedCost()` 后输出 selected/positive/candidate/incompatible 计数，并给 subtree formal-on 加一个保护条件，例如列池保留率过低或 machine dual 跳变过大时回退为 pricing-only。
+
+### 41.18 2026-06-04 010 与 600 秒超时样例的状态区分
+
+用户追问“求解不动”到底卡在哪里。本轮重新检查 `009/010/011/013/014/015` 的结果目录、CSV 和日志后，需要先区分两类现象。`from040_010` 不是求解不动，它两侧都有完整 CSV 和 `halfDomain.log`，日志中已经打印 `BPC Summary`，状态均为 `NODE_LIMIT`。baseline off 为 `solve=67.376s, exact=11.453s, restricted integer heuristic=35.835s`，formal-on 为 `solve=67.812s, exact=8.746s, restricted integer heuristic=39.251s`。因此 010 的主要时间不在 exact pricing 卡住，而是在每个节点后的 restricted integer heuristic；两侧都正常处理了 2 个节点后按 `maxNodes=2` 截断。
+
+010 的 `valid=false` 是另一件事，不能和“卡死”混在一起看。日志显示 baseline 在 Node 2 的 restricted integer heuristic 找到 `obj=17060` 并更新 incumbent，formal-on 在 Node 2 的 restricted integer heuristic 只得到 `obj=17723`，没有优于 root incumbent `17599`。CSV 中两侧 `valid=false` 说明最终解校验没有通过，因此这组不能作为严格的算法优劣结论；但 pricing 行为仍有参考价值：formal-on 在 Node 2 第一轮 exact 中把 `forbiddenJobArcs` 从 `2` 增到 `35`，入口列数基本不变 `5109 -> 5114`，machine dual 只从 `-10217.0` 到 `-10324.0`，`fw kept` 从 `3107` 降到 `2260`，`forwardSink negative` 从 `132` 降到 `12`。这说明在没有残余列池冷启动、dual 没有朝有害方向大幅移动时，subtree 删弧仍可能减少 label。
+
+真正“600 秒不动”的是 `009/011/013/014/015` 这批重样例。当前落盘证据显示这些目录大多没有正式 `halfDomain.log`，也没有 CSV；也就是说进程在外层 600 秒限制内没有完成一次可写 summary 的运行。由于当前日志只在每轮 pricing 完成后打印，而不是在 pricing/LP/MIP 开始时写 heartbeat，所以这些空目录无法精确定位到“卡在某一条 exact pricing、root restricted integer heuristic、还是某个 Java 运行阶段”。能确定的是：它们不是像 010 那样已经跑完 2 个节点后 `NODE_LIMIT`，而是完整实例级运行未返回。继续用这批样例盲跑 subtree 开关，信息密度很低。
+
+后续若要判断“求解不动卡在哪里”，需要先改诊断口径，而不是继续扩大样本。建议在 `Tree`/`PC` 周围加开始/结束 heartbeat：node 开始、initial LP、repair、heuristic pricing、exact pricing、cut、restricted integer heuristic、subtree elimination、branch，每个阶段进入时也写一行，并刷新日志。这样即使 600 秒被杀，也能从最后一条 start heartbeat 看出卡在 exact pricing 还是 restricted integer heuristic。当前从 010 看，restricted integer heuristic 已经是显著大头；对 009/011/013/014/015，要先拿到阶段 heartbeat 后再决定是否降低 integer heuristic 频率、给 MIP 加时间上限，或只跑 root/Node2 第一轮 pricing 诊断。

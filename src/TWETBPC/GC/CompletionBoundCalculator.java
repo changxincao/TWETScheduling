@@ -164,6 +164,10 @@ final class CompletionBoundCalculator {
 	private final int[][] forwardSuccessorsByJob;
 	private final int[][] backwardPredecessorsByJob;
 	private final Stats stats = new Stats();
+	private final boolean diagnosticHeartbeat;
+	private final long diagnosticHeartbeatIntervalNanos;
+	private long diagnosticBuildStartNanos;
+	private long diagnosticLastHeartbeatNanos;
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
@@ -188,13 +192,22 @@ final class CompletionBoundCalculator {
 		this.buildDiscreteCaches = buildDiscreteCaches;
 		this.forwardSuccessorsByJob = buildForwardSuccessorLists();
 		this.backwardPredecessorsByJob = buildBackwardPredecessorLists();
+		this.diagnosticHeartbeat = Boolean.getBoolean("twet.bpc.completionBoundHeartbeat");
+		long intervalMillis = Long.getLong("twet.bpc.completionBoundHeartbeatIntervalMillis", 10000L);
+		this.diagnosticHeartbeatIntervalNanos = Math.max(1L, intervalMillis) * 1000000L;
 	}
 
 	Result build(Relaxation relaxation) {
+		diagnosticBuildStartNanos = System.nanoTime();
+		diagnosticLastHeartbeatNanos = 0L;
+		diagnosticHeartbeat("build.start." + relaxation, 0, 0, 0, true);
 		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle() : buildAllCycles();
+		diagnosticHeartbeat("build.after_relaxation." + relaxation, 0, 0, 0, true);
 		buildCompletionFunctionMins(bounds);
+		diagnosticHeartbeat("build.after_mins." + relaxation, 0, 0, 0, true);
 		if (buildDiscreteCaches) {
 			buildDiscreteCaches(bounds);
+			diagnosticHeartbeat("build.after_discrete." + relaxation, 0, 0, 0, true);
 		}
 		return new Result(bounds, stats);
 	}
@@ -305,9 +318,11 @@ final class CompletionBoundCalculator {
 				forwardQueue.enqueue(state(forwardStates, job), forwardF[job]);
 			}
 		}
+		diagnosticHeartbeat("allCycles.forward.seed.done", forwardQueue.size(), 0, 0, true);
 		while (!forwardQueue.isEmpty()) {
 			stats.forwardQueuePops++;
 			int prev = forwardQueue.poll().first;
+			diagnosticHeartbeat("allCycles.forward.loop", forwardQueue.size(), prev, 0, false);
 			PiecewiseLinearFunction prevF = forwardF[prev];
 			if (prevF == null || prevF.head == null) {
 				continue;
@@ -325,6 +340,7 @@ final class CompletionBoundCalculator {
 				}
 			}
 		}
+		diagnosticHeartbeat("allCycles.forward.done", forwardQueue.size(), 0, 0, true);
 		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
 		copyCompletionFunctions(bounds.forwardFByJob, forwardF);
 
@@ -341,9 +357,11 @@ final class CompletionBoundCalculator {
 				backwardQueue.enqueue(state(backwardStates, job), backwardB[job]);
 			}
 		}
+		diagnosticHeartbeat("allCycles.backward.seed.done", backwardQueue.size(), 0, 0, true);
 		while (!backwardQueue.isEmpty()) {
 			stats.backwardQueuePops++;
 			int successor = backwardQueue.poll().first;
+			diagnosticHeartbeat("allCycles.backward.loop", backwardQueue.size(), successor, 0, false);
 			PiecewiseLinearFunction successorB = backwardB[successor];
 			if (successorB == null || successorB.head == null) {
 				continue;
@@ -361,6 +379,7 @@ final class CompletionBoundCalculator {
 				}
 			}
 		}
+		diagnosticHeartbeat("allCycles.backward.done", backwardQueue.size(), 0, 0, true);
 		stats.backwardBuildNanos += System.nanoTime() - phaseStart;
 		copyCompletionFunctions(bounds.backwardBByJob, backwardB);
 		return bounds;
@@ -390,11 +409,13 @@ final class CompletionBoundCalculator {
 				forwardQueue.enqueue(state(forwardStates, 0, job), forwardF[0][job]);
 			}
 		}
+		diagnosticHeartbeat("twoCycle.forward.seed.done", forwardQueue.size(), 0, 0, true);
 		while (!forwardQueue.isEmpty()) {
 			stats.forwardQueuePops++;
 			QueueState state = forwardQueue.poll();
 			int prevPrev = state.first;
 			int prev = state.second;
+			diagnosticHeartbeat("twoCycle.forward.loop", forwardQueue.size(), prevPrev, prev, false);
 			PiecewiseLinearFunction prevF = forwardF[prevPrev][prev];
 			if (prevF == null || prevF.head == null) {
 				continue;
@@ -415,6 +436,7 @@ final class CompletionBoundCalculator {
 				}
 			}
 		}
+		diagnosticHeartbeat("twoCycle.forward.done", forwardQueue.size(), 0, 0, true);
 		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
 
 		phaseStart = System.nanoTime();
@@ -430,11 +452,13 @@ final class CompletionBoundCalculator {
 				backwardQueue.enqueue(state(backwardStates, job, sink), backwardB[job][sink]);
 			}
 		}
+		diagnosticHeartbeat("twoCycle.backward.seed.done", backwardQueue.size(), 0, 0, true);
 		while (!backwardQueue.isEmpty()) {
 			stats.backwardQueuePops++;
 			QueueState state = backwardQueue.poll();
 			int current = state.first;
 			int successor = state.second;
+			diagnosticHeartbeat("twoCycle.backward.loop", backwardQueue.size(), current, successor, false);
 			PiecewiseLinearFunction currentB = backwardB[current][successor];
 			if (currentB == null || currentB.head == null) {
 				continue;
@@ -455,9 +479,11 @@ final class CompletionBoundCalculator {
 				}
 			}
 		}
+		diagnosticHeartbeat("twoCycle.backward.done", backwardQueue.size(), 0, 0, true);
 		stats.backwardBuildNanos += System.nanoTime() - phaseStart;
 
 		phaseStart = System.nanoTime();
+		diagnosticHeartbeat("twoCycle.aggregate.start", 0, 0, 0, true);
 		for (int job = 1; job <= data.n; job++) {
 			for (int prev = 0; prev <= data.n; prev++) {
 				mergeForward(bounds.forwardUByJob, job, forwardU[prev][job]);
@@ -468,6 +494,7 @@ final class CompletionBoundCalculator {
 				mergeBackward(bounds.backwardBByJob, job, backwardB[job][successor]);
 			}
 		}
+		diagnosticHeartbeat("twoCycle.aggregate.done", 0, 0, 0, true);
 		stats.aggregateNanos += System.nanoTime() - phaseStart;
 		return bounds;
 	}
@@ -794,6 +821,14 @@ final class CompletionBoundCalculator {
 			return fifoQueue.isEmpty();
 		}
 
+		int size() {
+			if (priorityQueue != null) {
+				discardStalePriorityEntries();
+				return priorityQueue.size();
+			}
+			return fifoQueue.size();
+		}
+
 		QueueState poll() {
 			if (priorityQueue != null) {
 				discardStalePriorityEntries();
@@ -863,5 +898,33 @@ final class CompletionBoundCalculator {
 			this.u = u;
 			this.f = f;
 		}
+	}
+
+	private void diagnosticHeartbeat(String phase, int queueSize, int first, int second, boolean force) {
+		if (!diagnosticHeartbeat) {
+			return;
+		}
+		long now = System.nanoTime();
+		if (!force && diagnosticLastHeartbeatNanos > 0L
+				&& now - diagnosticLastHeartbeatNanos < diagnosticHeartbeatIntervalNanos) {
+			return;
+		}
+		diagnosticLastHeartbeatNanos = now;
+		double elapsedMs = diagnosticBuildStartNanos == 0L ? 0.0 : (now - diagnosticBuildStartNanos) / 1000000.0;
+		System.out.println("[completion-bound heartbeat] phase=" + phase
+				+ " elapsedMs=" + formatMillis(elapsedMs)
+				+ " queue=" + queueSize
+				+ " state=" + first + "," + second
+				+ " fCand=" + stats.forwardCandidateAttempts
+				+ " bCand=" + stats.backwardCandidateAttempts
+				+ " fPop=" + stats.forwardQueuePops
+				+ " bPop=" + stats.backwardQueuePops
+				+ " merge=" + stats.mergeCalls
+				+ " changed=" + stats.mergeChanged
+				+ " stale=" + stats.priorityQueueStalePops);
+	}
+
+	private String formatMillis(double millis) {
+		return String.format(java.util.Locale.US, "%.3f", millis);
 	}
 }

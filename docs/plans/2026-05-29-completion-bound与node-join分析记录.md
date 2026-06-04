@@ -1274,3 +1274,13 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 补充说明：上一段中的 `cbFPruned=0` 来自内部 heartbeat 的短诊断口径，该口径没有显式传入 `twet.bpc.fullDomainCompare.completionBound=allCycles`，因此实际按配置默认值 `off` 运行。它只能说明“completion bound 未启用时 011 的 exact forward 会快速膨胀”，不能证明 all-cycles completion bound 本身无效。2026-06-04 随后显式用 `completionBound=allCycles`、half-domain、`maxNodes=1`、heuristic pricing 开启和内部 heartbeat 重跑 `tmp-wet030_from040_011_2m`。运行经过 18 轮 heuristic pricing 后进入 `pricing.GCNGBBStyleBidirectionalPricing`，只打印到 `[BPC exact heartbeat] phase=initialize.start`；约 90 秒仍没有 `initialize.done`，随后手动停止。这说明在 011 上把 completion bound 打开后，当前主要长耗时前移到 exact 初始化中的 completion-bound 构造/预处理阶段，尚未走到 forward/backward label 扩展，也就看不到 `fwPruned/bwPruned` 的实际剪枝收益。
 
 因此更准确的判断是：011 的问题不是“completion bound 开了但完全没效果”，而是两个口径下卡点不同。`completionBound=off` 时，exact 能进入 forward，但 label 状态快速膨胀；`completionBound=allCycles` 时，理论上可能剪掉后续状态，但 all-cycles 补全下界本身在该实例和该对偶状态下构造成本很高，短时间内没有完成初始化。后续若要判断 all-cycles 是否值得，需要给 completion-bound builder 自身增加内部 heartbeat，例如 forward/backward 补全 DP 的 candidate、queue pop、merge 次数和耗时；否则只能看到 `initialize.start`，无法区分是前向补全、后向补全、聚合，还是某个函数 merge 卡住。
+
+### 41.24 2026-06-04 011 all-cycles completion bound 构造慢的直接原因
+
+继续给 `CompletionBoundCalculator` 增加默认关闭的 builder 内部 heartbeat 后，011 的卡点进一步明确。显式使用 half-domain、`completionBound=allCycles`、`maxNodes=1`、heuristic pricing 开启，root 在进入 exact pricing 后，completion-bound builder 能正常打印 `build.start.ALL_CYCLES` 和 `allCycles.forward.seed.done`，随后长期停留在 `allCycles.forward.loop`。这说明不是某个单次 `mergeMinimum` 调用死锁，也不是构造前置对象卡住，而是 all-cycles 前向松弛队列一直有有效改进。
+
+011 在 60 秒附近的 builder 计数为：`queue=8`、`fPop=50589`、`fCand=1467082`、`merge=2934128`、`changed=533780`，仍没有 `allCycles.forward.done`。队列规模一直只有个位到十几个，但相同 job 状态被反复重新入队，说明函数下包络持续被新的循环路径压低。对照 010 的同口径 root 运行，all-cycles builder 很快结束：第一轮 forward completion bound 约 `280ms`，`fPop=251`、`fCand=7309`、`merge=34050`、`changed=11757`；后续几轮也只有 `fPop≈228..240`、`bPop≈313..318`，整轮构造在 `0.69..1.14s`。因此 011 和 010 的差别不是 builder 通用实现慢，而是 011 的 reduced-cost/time 结构让 all-cycles 松弛出现大量循环改进。
+
+这也修正了“它只是简单 Bellman-Ford DP”的理解。当前 all-cycles completion bound 不是按“每个 job 最多松弛 n 轮”的标量最短路；它维护的是按 job 聚合的 piecewise-linear 下包络，且允许重复访问 job。由于 reduced cost 中 job dual 很大，某些 job-job 循环在有限时间 horizon 内可以持续降低下包络。时间 horizon 虽然有限，避免了真正的无界负无穷，但会变成按时间/函数段数量增长的伪多项式传播；在 011 上表现为几十万次有效 merge change，远超 010。当前没有证据表明是 Java 线程死循环或单个函数操作卡死，更像是 all-cycles relaxed bound 对该实例过松并遇到了负循环式改进。
+
+由此得到的下一步判断是：若要让 011 可跑，不能简单认为 all-cycles 一定便宜。可以先尝试三类修正。第一，给 completion-bound 构造加安全阈值或超时，超过阈值时回退为 `off` 或更弱但可控的 scalar/local arc fixing，避免 exact 初始化被 bound 构造吞掉。第二，尝试 two-cycle 或更强的禁止短循环状态，但要注意当前 two-cycle 以前记录过构造更贵，不一定直接更好。第三，从理论上改成时间离散 DP 或限制循环长度/重复次数；这会改变 bound 的定义和成本，需要单独验证剪枝收益。当前最直接的工程修复方向，是保留 builder heartbeat，并在 all-cycles 构造超限时自动降级。

@@ -205,6 +205,10 @@ public class GCNGBBStyleBidirectional {
 	private double diagnosticSinkArcDualMin;
 	private double diagnosticSinkArcDualMax;
 	private double diagnosticSinkArcDualAbsSum;
+	private long diagnosticLastHeartbeatNanos;
+	private long diagnosticHeartbeatIntervalNanos;
+	private long diagnosticForwardPops;
+	private long diagnosticBackwardPops;
 
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
@@ -216,19 +220,30 @@ public class GCNGBBStyleBidirectional {
 
 	public ArrayList<TWETColumn> solve(LP lp) {
 		Utility.resetCurUpperBound(Utility.big_M);
+		diagnosticHeartbeat(lp, "initialize.start", true);
 		initialize(lp);
+		diagnosticHeartbeat(lp, "initialize.done", true);
 		initializeBackwardSink(lp);
+		diagnosticHeartbeat(lp, "backwardSink.done", true);
 		// 2026-05-26: GCNGBB-style 外层流程。先分别耗尽两侧队列，最后统一扫描 backward labels 做 crossing-arc join。
+		diagnosticHeartbeat(lp, "forward.start", true);
 		while (canContinue() && !FWUL.isEmpty()) {
 			forwardExtend(lp);
 		}
+		diagnosticHeartbeat(lp, "forward.done", true);
+		diagnosticHeartbeat(lp, "backward.start", true);
 		while (canContinue() && !BWUL.isEmpty()) {
 			backwardExtend(lp);
 		}
+		diagnosticHeartbeat(lp, "backward.done", true);
 		if (canContinue()) {
+			diagnosticHeartbeat(lp, "join.compact.start", true);
 			compactAndSortActiveLabelListsForJoin();
+			diagnosticHeartbeat(lp, "join.start", true);
 			joinAllForwardTerminalGroups(lp);
+			diagnosticHeartbeat(lp, "finalize.start", true);
 			finalizeGeneratedColumns(lp);
+			diagnosticHeartbeat(lp, "finalize.done", true);
 		}
 		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
 		lastMessage = "GCNGBB-style bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
@@ -504,6 +519,7 @@ public class GCNGBBStyleBidirectional {
 		if (label.isDominated) {
 			return;
 		}
+		diagnosticForwardPops++;
 
 		Node node = lp.getNode();
 		for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
@@ -528,6 +544,7 @@ public class GCNGBBStyleBidirectional {
 				FWUL.add(child);
 			}
 		}
+		diagnosticHeartbeat(lp, "forward.progress", false);
 	}
 
 	private void backwardExtend(LP lp) {
@@ -535,6 +552,7 @@ public class GCNGBBStyleBidirectional {
 		if (label.isDominated) {
 			return;
 		}
+		diagnosticBackwardPops++;
 
 		Node node = lp.getNode();
 		for (int prevJob = label.reachableSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
@@ -554,6 +572,7 @@ public class GCNGBBStyleBidirectional {
 				BWUL.add(child);
 			}
 		}
+		diagnosticHeartbeat(lp, "backward.progress", false);
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
@@ -1152,6 +1171,48 @@ public class GCNGBBStyleBidirectional {
 		diagnosticSinkArcDualMin = 0.0;
 		diagnosticSinkArcDualMax = 0.0;
 		diagnosticSinkArcDualAbsSum = 0.0;
+		diagnosticLastHeartbeatNanos = 0;
+		diagnosticHeartbeatIntervalNanos = Long.getLong("twet.bpc.diagnosticHeartbeatIntervalMillis", 10000L)
+				* 1000000L;
+		diagnosticForwardPops = 0;
+		diagnosticBackwardPops = 0;
+	}
+
+	private void diagnosticHeartbeat(LP lp, String phase, boolean force) {
+		if (!config.diagnosticStageHeartbeat) {
+			return;
+		}
+		long now = System.nanoTime();
+		if (!force && diagnosticHeartbeatIntervalNanos > 0 && diagnosticLastHeartbeatNanos > 0
+				&& now - diagnosticLastHeartbeatNanos < diagnosticHeartbeatIntervalNanos) {
+			return;
+		}
+		diagnosticLastHeartbeatNanos = now;
+		Node node = lp == null ? null : lp.getNode();
+		String nodeId = node == null ? "-" : Integer.toString(node.id);
+		System.out.println("[BPC exact heartbeat] node=" + nodeId
+				+ " phase=" + phase
+				+ " fwQueue=" + queueSize(FWUL)
+				+ " bwQueue=" + queueSize(BWUL)
+				+ " fwPops=" + diagnosticForwardPops
+				+ " bwPops=" + diagnosticBackwardPops
+				+ " fwKept=" + forwardLabelsKept
+				+ " fwDom=" + forwardLabelsDominated
+				+ " bwKept=" + backwardLabelsKept
+				+ " bwDom=" + backwardLabelsDominated
+				+ " fCand=" + forwardExtensionCandidates
+				+ " fBuilt=" + forwardExtensionConstructed
+				+ " fBoundSurvivors=" + forwardExtensionBoundSurvivors
+				+ " cbFPruned=" + completionForwardLabelsPruned
+				+ " cbBPruned=" + completionBackwardLabelsPruned
+				+ " joinPairs=" + joinPairsTried
+				+ " generated=" + generatedCandidateCount
+				+ " bestRC=" + bestGeneratedReducedCost);
+		System.out.flush();
+	}
+
+	private int queueSize(PriorityQueue<?> queue) {
+		return queue == null ? 0 : queue.size();
 	}
 
 	private String statisticsSummary() {

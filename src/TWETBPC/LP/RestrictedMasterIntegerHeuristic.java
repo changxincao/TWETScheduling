@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -83,28 +84,39 @@ public final class RestrictedMasterIntegerHeuristic {
 	}
 
 	private Result solveCoverRepair(LP lp, long start) throws IloException {
+		long selectStart = System.nanoTime();
 		ArrayList<Integer> screened = selectCoverRepairColumns(lp);
+		long selectNanos = System.nanoTime() - selectStart;
+		long coverStart = System.nanoTime();
 		Attempt covering = solveOnce(lp, screened, false, "coverRepair_covering");
+		long coverNanos = System.nanoTime() - coverStart;
 		long elapsed = System.nanoTime() - start;
 		if (!covering.solved) {
 			return Result.notSolved("restricted integer heuristic coverRepair covering not solved: "
-					+ covering.status + " screenedCols=" + screened.size(), elapsed);
+					+ covering.status + " screenedCols=" + screened.size()
+					+ timingSummary(selectNanos, coverNanos, 0L, 0L), elapsed);
 		}
 		if (covering.coverage.valid()) {
 			return buildFeasibleResult(covering, "restricted integer heuristic coverRepair covering "
-					+ covering.status + " screenedCols=" + screened.size(), elapsed);
+					+ covering.status + " screenedCols=" + screened.size()
+					+ timingSummary(selectNanos, coverNanos, 0L, 0L), elapsed);
 		}
 
+		long repairStart = System.nanoTime();
 		RepairGeneration repair = generateRepairColumns(lp, covering.selectedColumnIds,
 				covering.outsourcingValues, covering.coverage);
+		long repairNanos = System.nanoTime() - repairStart;
 		LinkedHashSet<Integer> finalColumnIds = new LinkedHashSet<Integer>(screened);
 		finalColumnIds.addAll(repair.repairColumnIds);
 
+		long partitionStart = System.nanoTime();
 		Attempt partition = solveOnce(lp, new ArrayList<Integer>(finalColumnIds), true, "coverRepair_partition");
+		long partitionNanos = System.nanoTime() - partitionStart;
 		elapsed = System.nanoTime() - start;
 		String prefix = "restricted integer heuristic coverRepair covering=" + covering.status + " "
 				+ covering.coverage.summary() + " screenedCols=" + screened.size() + " repairCols="
-				+ repair.repairColumnIds.size() + " repairMode=heuristic partition=" + partition.status;
+				+ repair.repairColumnIds.size() + " repairMode=heuristic partition=" + partition.status
+				+ timingSummary(selectNanos, coverNanos, repairNanos, partitionNanos);
 		if (!partition.solved) {
 			return Result.notSolved(prefix, elapsed);
 		}
@@ -112,6 +124,17 @@ public final class RestrictedMasterIntegerHeuristic {
 			return Result.notSolved(prefix + " invalid coverage: " + partition.coverage.summary(), elapsed);
 		}
 		return buildFeasibleResult(partition, prefix, elapsed);
+	}
+
+	private String timingSummary(long selectNanos, long coverNanos, long repairNanos, long partitionNanos) {
+		return " timingMs select=" + formatMillis(selectNanos)
+				+ " coverSolve=" + formatMillis(coverNanos)
+				+ " repair=" + formatMillis(repairNanos)
+				+ " partitionSolve=" + formatMillis(partitionNanos);
+	}
+
+	private String formatMillis(long nanos) {
+		return String.format(Locale.US, "%.3f", nanos / 1000000.0);
 	}
 
 	private Attempt solveOnce(LP lp, List<Integer> columnIds, boolean exactCover, String label) throws IloException {

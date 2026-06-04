@@ -376,7 +376,12 @@ public final class RestrictedMasterIntegerHeuristic {
 			addEnumerationRepairColumns(lp, columnId.intValue(), duplicatedInColumn, outsourcedDuplicateJobs, repair);
 		}
 		if (needsFallback) {
-			addMinLossFallbackRepairColumns(lp, selectedColumnIds, duplicateJobs, outsourcedDuplicateJobs, repair);
+			addMinLossFallbackRepairColumns(lp, selectedColumnIds, duplicateJobs, outsourcedDuplicateJobs, true,
+					repair);
+			if (!outsourcedDuplicateJobs.isEmpty()) {
+				addMinLossFallbackRepairColumns(lp, selectedColumnIds, duplicateJobs, outsourcedDuplicateJobs, false,
+						repair);
+			}
 		}
 		return repair;
 	}
@@ -424,15 +429,25 @@ public final class RestrictedMasterIntegerHeuristic {
 		if (optionalDuplicates.isEmpty()) {
 			return;
 		}
+		enumerateRemovedDuplicateSubsets(lp, originalColumnId, original.getSequence(), forcedRemoved,
+				optionalDuplicates, repair);
+		if (!forcedRemoved.isEmpty()) {
+			enumerateRemovedDuplicateSubsets(lp, originalColumnId, original.getSequence(), new HashSet<Integer>(),
+					optionalDuplicates, repair);
+		}
+	}
+
+	private void enumerateRemovedDuplicateSubsets(LP lp, int originalColumnId, List<Integer> originalSequence,
+			HashSet<Integer> fixedRemoved, ArrayList<Integer> optionalDuplicates, RepairGeneration repair) {
 		int combinations = 1 << optionalDuplicates.size();
 		for (int mask = 1; mask < combinations; mask++) {
-			HashSet<Integer> removed = new HashSet<Integer>(forcedRemoved);
+			HashSet<Integer> removed = new HashSet<Integer>(fixedRemoved);
 			for (int bit = 0; bit < optionalDuplicates.size(); bit++) {
 				if ((mask & (1 << bit)) != 0) {
 					removed.add(optionalDuplicates.get(bit));
 				}
 			}
-			ArrayList<Integer> sequence = removeJobs(original.getSequence(), removed);
+			ArrayList<Integer> sequence = removeJobs(originalSequence, removed);
 			if (!sequence.isEmpty()) {
 				addRepairColumn(lp, originalColumnId, sequence, repair);
 			}
@@ -440,14 +455,14 @@ public final class RestrictedMasterIntegerHeuristic {
 	}
 
 	private void addMinLossFallbackRepairColumns(LP lp, List<Integer> selectedColumnIds, HashSet<Integer> duplicateJobs,
-			HashSet<Integer> outsourcedDuplicateJobs, RepairGeneration repair) {
+			HashSet<Integer> outsourcedDuplicateJobs, boolean keepOutsourcingDuplicates, RepairGeneration repair) {
 		LinkedHashMap<Integer, ArrayList<Integer>> current = new LinkedHashMap<Integer, ArrayList<Integer>>();
 		for (Integer columnId : selectedColumnIds) {
 			current.put(columnId, new ArrayList<Integer>(lp.getPool().getColumn(columnId.intValue()).getSequence()));
 		}
 		for (Integer job : duplicateJobs) {
 			Integer keepColumnId = null;
-			if (!outsourcedDuplicateJobs.contains(job)) {
+			if (!keepOutsourcingDuplicates || !outsourcedDuplicateJobs.contains(job)) {
 				double smallestReduction = Double.POSITIVE_INFINITY;
 				for (Integer columnId : selectedColumnIds) {
 					ArrayList<Integer> sequence = current.get(columnId);

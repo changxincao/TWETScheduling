@@ -92,18 +92,16 @@ public final class RestrictedMasterIntegerHeuristic {
 					+ covering.status + " screenedCols=" + screened.size(), elapsed);
 		}
 
-		RepairGeneration repair = generateRepairColumns(lp, covering.selectedColumnIds, covering.coverage);
-		FixedRepairResult fixedRepair = solveFixedDeletionRepair(lp, repair.variants, covering.coverage);
+		RepairGeneration repair = generateRepairColumns(lp, covering.selectedColumnIds,
+				covering.outsourcingValues, covering.coverage);
 		LinkedHashSet<Integer> finalColumnIds = new LinkedHashSet<Integer>(screened);
 		finalColumnIds.addAll(repair.repairColumnIds);
-		finalColumnIds.addAll(fixedRepair.selectedColumnIds);
 
 		Attempt partition = solveOnce(lp, new ArrayList<Integer>(finalColumnIds), true, "coverRepair_partition");
 		elapsed = System.nanoTime() - start;
 		String prefix = "restricted integer heuristic coverRepair covering=" + covering.status + " "
 				+ covering.coverage.summary() + " screenedCols=" + screened.size() + " repairCols="
-				+ repair.repairColumnIds.size() + " fixedRepair=" + fixedRepair.status + " partition="
-				+ partition.status;
+				+ repair.repairColumnIds.size() + " repairMode=" + repair.summary() + " partition=" + partition.status;
 		if (!partition.solved) {
 			return Result.notSolved(prefix, elapsed);
 		}
@@ -359,9 +357,11 @@ public final class RestrictedMasterIntegerHeuristic {
 		return new ArrayList<Integer>(selected);
 	}
 
-	private RepairGeneration generateRepairColumns(LP lp, List<Integer> selectedColumnIds, CoverageStats coverage) {
+	private RepairGeneration generateRepairColumns(LP lp, List<Integer> selectedColumnIds, double[] outsourcingValues,
+			CoverageStats coverage) {
 		RepairGeneration repair = new RepairGeneration();
 		HashSet<Integer> duplicateJobs = new HashSet<Integer>(coverage.duplicateJobs);
+		HashSet<Integer> outsourcedDuplicateJobs = outsourcedDuplicateJobs(outsourcingValues, duplicateJobs);
 		boolean needsFallback = false;
 		for (Integer columnId : selectedColumnIds) {
 			TWETColumn column = lp.getPool().getColumn(columnId.intValue());
@@ -373,12 +373,24 @@ public final class RestrictedMasterIntegerHeuristic {
 				needsFallback = true;
 				continue;
 			}
-			addEnumerationRepairColumns(lp, columnId.intValue(), duplicatedInColumn, repair);
+			addEnumerationRepairColumns(lp, columnId.intValue(), duplicatedInColumn, outsourcedDuplicateJobs, repair);
 		}
 		if (needsFallback) {
-			addMinLossFallbackRepairColumns(lp, selectedColumnIds, duplicateJobs, repair);
+			addMinLossFallbackRepairColumns(lp, selectedColumnIds, duplicateJobs, outsourcedDuplicateJobs, repair);
 		}
 		return repair;
+	}
+
+	private HashSet<Integer> outsourcedDuplicateJobs(double[] outsourcingValues, HashSet<Integer> duplicateJobs) {
+		HashSet<Integer> outsourced = new HashSet<Integer>();
+		for (Integer job : duplicateJobs) {
+			int id = job.intValue();
+			if (id >= 1 && id < outsourcingValues.length
+					&& Utility.compareGt(outsourcingValues[id], INTEGER_TOLERANCE)) {
+				outsourced.add(job);
+			}
+		}
+		return outsourced;
 	}
 
 	private ArrayList<Integer> duplicatedJobsInColumn(TWETColumn column, HashSet<Integer> duplicateJobs) {
@@ -392,135 +404,92 @@ public final class RestrictedMasterIntegerHeuristic {
 	}
 
 	private void addEnumerationRepairColumns(LP lp, int originalColumnId, ArrayList<Integer> duplicatedJobs,
-			RepairGeneration repair) {
+			HashSet<Integer> outsourcedDuplicateJobs, RepairGeneration repair) {
 		TWETColumn original = lp.getPool().getColumn(originalColumnId);
-		int combinations = 1 << duplicatedJobs.size();
-		addRepairVariant(lp, originalColumnId, original.getSequence(), duplicatedJobs, repair);
+		HashSet<Integer> forcedRemoved = new HashSet<Integer>();
+		ArrayList<Integer> optionalDuplicates = new ArrayList<Integer>();
+		for (Integer job : duplicatedJobs) {
+			if (outsourcedDuplicateJobs.contains(job)) {
+				forcedRemoved.add(job);
+			} else {
+				optionalDuplicates.add(job);
+			}
+		}
+		ArrayList<Integer> baseSequence = forcedRemoved.isEmpty()
+				? new ArrayList<Integer>(original.getSequence())
+				: removeJobs(original.getSequence(), forcedRemoved);
+		if (!forcedRemoved.isEmpty() && !baseSequence.isEmpty()) {
+			addRepairColumn(lp, originalColumnId, baseSequence, repair);
+		}
+		if (optionalDuplicates.isEmpty()) {
+			return;
+		}
+		int combinations = 1 << optionalDuplicates.size();
 		for (int mask = 1; mask < combinations; mask++) {
-			HashSet<Integer> removed = new HashSet<Integer>();
-			for (int bit = 0; bit < duplicatedJobs.size(); bit++) {
+			HashSet<Integer> removed = new HashSet<Integer>(forcedRemoved);
+			for (int bit = 0; bit < optionalDuplicates.size(); bit++) {
 				if ((mask & (1 << bit)) != 0) {
-					removed.add(duplicatedJobs.get(bit));
+					removed.add(optionalDuplicates.get(bit));
 				}
 			}
 			ArrayList<Integer> sequence = removeJobs(original.getSequence(), removed);
 			if (!sequence.isEmpty()) {
-				addRepairVariant(lp, originalColumnId, sequence, duplicatedJobs, repair);
+				addRepairColumn(lp, originalColumnId, sequence, repair);
 			}
 		}
 	}
 
 	private void addMinLossFallbackRepairColumns(LP lp, List<Integer> selectedColumnIds, HashSet<Integer> duplicateJobs,
-			RepairGeneration repair) {
+			HashSet<Integer> outsourcedDuplicateJobs, RepairGeneration repair) {
 		LinkedHashMap<Integer, ArrayList<Integer>> current = new LinkedHashMap<Integer, ArrayList<Integer>>();
 		for (Integer columnId : selectedColumnIds) {
 			current.put(columnId, new ArrayList<Integer>(lp.getPool().getColumn(columnId.intValue()).getSequence()));
 		}
 		for (Integer job : duplicateJobs) {
 			Integer keepColumnId = null;
-			double smallestReduction = Double.POSITIVE_INFINITY;
+			if (!outsourcedDuplicateJobs.contains(job)) {
+				double smallestReduction = Double.POSITIVE_INFINITY;
+				for (Integer columnId : selectedColumnIds) {
+					ArrayList<Integer> sequence = current.get(columnId);
+					if (!sequence.contains(job)) {
+						continue;
+					}
+					ArrayList<Integer> removedSequence = removeJob(sequence, job.intValue());
+					if (removedSequence.isEmpty()) {
+						continue;
+					}
+					double reduction = columnEvaluator.evaluate(sequence) - columnEvaluator.evaluate(removedSequence);
+					if (Utility.compareLt(reduction, smallestReduction)) {
+						smallestReduction = reduction;
+						keepColumnId = columnId;
+					}
+				}
+				if (keepColumnId == null) {
+					continue;
+				}
+			}
 			for (Integer columnId : selectedColumnIds) {
+				if (columnId.equals(keepColumnId)) {
+					continue;
+				}
 				ArrayList<Integer> sequence = current.get(columnId);
 				if (!sequence.contains(job)) {
 					continue;
 				}
-				ArrayList<Integer> removedSequence = removeJob(sequence, job.intValue());
-				if (removedSequence.isEmpty()) {
-					continue;
+				ArrayList<Integer> repaired = removeJob(sequence, job.intValue());
+				current.put(columnId, repaired);
+				if (!repaired.isEmpty()) {
+					addRepairColumn(lp, columnId.intValue(), repaired, repair);
 				}
-				double reduction = columnEvaluator.evaluate(sequence) - columnEvaluator.evaluate(removedSequence);
-				if (Utility.compareLt(reduction, smallestReduction)) {
-					smallestReduction = reduction;
-					keepColumnId = columnId;
-				}
-			}
-			if (keepColumnId == null) {
-				continue;
-			}
-			for (Integer columnId : selectedColumnIds) {
-				if (!columnId.equals(keepColumnId)) {
-					current.put(columnId, removeJob(current.get(columnId), job.intValue()));
-				}
-			}
-		}
-		for (Integer columnId : selectedColumnIds) {
-			ArrayList<Integer> sequence = current.get(columnId);
-			if (!sequence.isEmpty() && !sequence.equals(lp.getPool().getColumn(columnId.intValue()).getSequence())) {
-				addRepairVariant(lp, columnId.intValue(), sequence, new ArrayList<Integer>(duplicateJobs), repair);
 			}
 		}
 	}
 
-	private void addRepairVariant(LP lp, int originalColumnId, List<Integer> sequence,
-			List<Integer> duplicatedJobs, RepairGeneration repair) {
+	private void addRepairColumn(LP lp, int originalColumnId, List<Integer> sequence, RepairGeneration repair) {
 		double cost = columnEvaluator.evaluate(sequence);
 		int columnId = lp.getPool().addColumn(sequence, cost, ColumnSource.MANUAL, false);
 		if (columnId != originalColumnId) {
 			repair.repairColumnIds.add(Integer.valueOf(columnId));
-		}
-		HashSet<Integer> retainedDuplicateJobs = new HashSet<Integer>();
-		for (Integer job : duplicatedJobs) {
-			if (sequence.contains(job)) {
-				retainedDuplicateJobs.add(job);
-			}
-		}
-		repair.variants.add(new RepairVariant(originalColumnId, columnId, retainedDuplicateJobs, cost));
-	}
-
-	private FixedRepairResult solveFixedDeletionRepair(LP lp, ArrayList<RepairVariant> variants,
-			CoverageStats coverage) throws IloException {
-		if (variants.isEmpty() || coverage.duplicateJobs.isEmpty()) {
-			return FixedRepairResult.skipped("skipped");
-		}
-		ArrayList<Integer> originalColumnIds = new ArrayList<Integer>();
-		for (RepairVariant variant : variants) {
-			if (!originalColumnIds.contains(Integer.valueOf(variant.originalColumnId))) {
-				originalColumnIds.add(Integer.valueOf(variant.originalColumnId));
-			}
-		}
-		IloCplex cplex = null;
-		try {
-			cplex = new IloCplex();
-			cplex.setOut(null);
-			IloIntVar[] use = new IloIntVar[variants.size()];
-			IloLinearNumExpr obj = cplex.linearNumExpr();
-			for (int idx = 0; idx < variants.size(); idx++) {
-				use[idx] = cplex.boolVar("rmih_repairVariant_" + idx);
-				obj.addTerm(variants.get(idx).cost, use[idx]);
-			}
-			cplex.addMinimize(obj);
-			for (Integer originalColumnId : originalColumnIds) {
-				IloLinearNumExpr expr = cplex.linearNumExpr();
-				for (int idx = 0; idx < variants.size(); idx++) {
-					if (variants.get(idx).originalColumnId == originalColumnId.intValue()) {
-						expr.addTerm(1.0, use[idx]);
-					}
-				}
-				cplex.addEq(expr, 1.0, "rmih_repairChooseOne_" + originalColumnId);
-			}
-			for (Integer job : coverage.duplicateJobs) {
-				IloLinearNumExpr expr = cplex.linearNumExpr();
-				for (int idx = 0; idx < variants.size(); idx++) {
-					if (variants.get(idx).retainedDuplicateJobs.contains(job)) {
-						expr.addTerm(1.0, use[idx]);
-					}
-				}
-				cplex.addEq(expr, 1.0, "rmih_repairKeepJob_" + job);
-			}
-			if (!cplex.solve()) {
-				return FixedRepairResult.skipped(cplex.getStatus().toString());
-			}
-			ArrayList<Integer> selectedColumnIds = new ArrayList<Integer>();
-			for (int idx = 0; idx < variants.size(); idx++) {
-				if (Utility.compareGt(cplex.getValue(use[idx]), INTEGER_TOLERANCE)) {
-					selectedColumnIds.add(Integer.valueOf(variants.get(idx).columnId));
-				}
-			}
-			return new FixedRepairResult(cplex.getStatus().toString(), selectedColumnIds);
-		} finally {
-			if (cplex != null) {
-				cplex.end();
-			}
 		}
 	}
 
@@ -737,34 +706,9 @@ public final class RestrictedMasterIntegerHeuristic {
 
 	private static final class RepairGeneration {
 		final LinkedHashSet<Integer> repairColumnIds = new LinkedHashSet<Integer>();
-		final ArrayList<RepairVariant> variants = new ArrayList<RepairVariant>();
-	}
 
-	private static final class RepairVariant {
-		final int originalColumnId;
-		final int columnId;
-		final HashSet<Integer> retainedDuplicateJobs;
-		final double cost;
-
-		RepairVariant(int originalColumnId, int columnId, HashSet<Integer> retainedDuplicateJobs, double cost) {
-			this.originalColumnId = originalColumnId;
-			this.columnId = columnId;
-			this.retainedDuplicateJobs = retainedDuplicateJobs;
-			this.cost = cost;
-		}
-	}
-
-	private static final class FixedRepairResult {
-		final String status;
-		final ArrayList<Integer> selectedColumnIds;
-
-		FixedRepairResult(String status, ArrayList<Integer> selectedColumnIds) {
-			this.status = status;
-			this.selectedColumnIds = selectedColumnIds;
-		}
-
-		static FixedRepairResult skipped(String status) {
-			return new FixedRepairResult(status, new ArrayList<Integer>());
+		String summary() {
+			return "heuristic";
 		}
 	}
 

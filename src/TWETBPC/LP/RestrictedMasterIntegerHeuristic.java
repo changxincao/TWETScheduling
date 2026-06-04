@@ -135,7 +135,6 @@ public final class RestrictedMasterIntegerHeuristic {
 
 	private Model buildModel(IloCplex cplex, LP lp, List<Integer> columnIds, boolean exactCover)
 			throws IloException {
-		Node node = lp.getNode();
 		ArrayList<TariffSegment> segments = collectOutsourcingTariffSegments();
 		IloIntVar[] x = new IloIntVar[columnIds.size()];
 		IloIntVar[] y = new IloIntVar[data.n + 1];
@@ -163,10 +162,8 @@ public final class RestrictedMasterIntegerHeuristic {
 		cplex.addMinimize(obj);
 
 		buildCoverage(cplex, lp, columnIds, x, y, exactCover);
-		buildMachineConstraint(cplex, node, x);
-		buildArcBranchConstraints(cplex, lp, columnIds, x);
-		buildAdjacencyBranchConstraints(cplex, lp, columnIds, x);
-		buildTariffConstraints(cplex, node, y, z, baseline, segments);
+		buildMachineConstraint(cplex, x);
+		buildTariffConstraints(cplex, y, z, baseline, segments);
 		return new Model(new ArrayList<Integer>(columnIds), x, y, z);
 	}
 
@@ -188,65 +185,15 @@ public final class RestrictedMasterIntegerHeuristic {
 		}
 	}
 
-	private void buildMachineConstraint(IloCplex cplex, Node node, IloIntVar[] x) throws IloException {
+	private void buildMachineConstraint(IloCplex cplex, IloIntVar[] x) throws IloException {
 		IloLinearNumExpr expr = cplex.linearNumExpr();
 		for (IloIntVar var : x) {
 			expr.addTerm(1.0, var);
 		}
-		cplex.addRange(node.minMachineCount, expr, node.maxMachineCount, "rmih_machineCount");
+		cplex.addRange(0.0, expr, data.m, "rmih_machineCount");
 	}
 
-	private void buildArcBranchConstraints(IloCplex cplex, LP lp, List<Integer> columnIds, IloIntVar[] x)
-			throws IloException {
-		Node node = lp.getNode();
-		int sink = node.sinkId();
-		for (int from = 0; from <= sink; from++) {
-			for (int to = 1; to <= sink; to++) {
-				byte state = node.getArcState(from, to);
-				if (from == to || state == Node.ARC_FREE) {
-					continue;
-				}
-				IloLinearNumExpr expr = cplex.linearNumExpr();
-				for (int idx = 0; idx < columnIds.size(); idx++) {
-					TWETColumn column = lp.getPool().getColumn(columnIds.get(idx).intValue());
-					if (column.visitsArc(from, to, sink)) {
-						expr.addTerm(1.0, x[idx]);
-					}
-				}
-				if (state == Node.ARC_REQUIRED) {
-					cplex.addEq(expr, 1.0, "rmih_requiredArc_" + from + "_" + to);
-				} else {
-					cplex.addEq(expr, 0.0, "rmih_forbiddenArc_" + from + "_" + to);
-				}
-			}
-		}
-	}
-
-	private void buildAdjacencyBranchConstraints(IloCplex cplex, LP lp, List<Integer> columnIds, IloIntVar[] x)
-			throws IloException {
-		addAdjacencyBranchConstraints(cplex, lp, columnIds, x, lp.getNode().getForbiddenAdjacencyPairs(), false);
-		addAdjacencyBranchConstraints(cplex, lp, columnIds, x, lp.getNode().getRequiredAdjacencyPairs(), true);
-	}
-
-	private void addAdjacencyBranchConstraints(IloCplex cplex, LP lp, List<Integer> columnIds, IloIntVar[] x,
-			List<int[]> pairs, boolean required) throws IloException {
-		for (int[] pair : pairs) {
-			IloLinearNumExpr expr = cplex.linearNumExpr();
-			for (int idx = 0; idx < columnIds.size(); idx++) {
-				TWETColumn column = lp.getPool().getColumn(columnIds.get(idx).intValue());
-				if (lp.getNode().columnCoversAdjacencyPair(column, pair[0], pair[1])) {
-					expr.addTerm(1.0, x[idx]);
-				}
-			}
-			if (required) {
-				cplex.addGe(expr, 1.0, "rmih_requiredAdjacency_" + pair[0] + "_" + pair[1]);
-			} else {
-				cplex.addEq(expr, 0.0, "rmih_forbiddenAdjacency_" + pair[0] + "_" + pair[1]);
-			}
-		}
-	}
-
-	private void buildTariffConstraints(IloCplex cplex, Node node, IloIntVar[] y, IloIntVar[] z,
+	private void buildTariffConstraints(IloCplex cplex, IloIntVar[] y, IloIntVar[] z,
 			IloNumVar[] baseline, ArrayList<TariffSegment> segments) throws IloException {
 		if (segments.isEmpty()) {
 			return;
@@ -263,12 +210,6 @@ public final class RestrictedMasterIntegerHeuristic {
 			TariffSegment tariff = segments.get(segment);
 			baselineFromSegments.addTerm(1.0, baseline[segment]);
 			active.addTerm(1.0, z[segment]);
-			byte state = node.getTariffSegmentState(segment);
-			if (state == Node.SEGMENT_FORBIDDEN) {
-				cplex.addLe(z[segment], 0.0, "rmih_outSegForbidden_" + segment);
-			} else if (state == Node.SEGMENT_REQUIRED) {
-				cplex.addGe(z[segment], 1.0, "rmih_outSegRequired_" + segment);
-			}
 			cplex.addGe(baseline[segment], cplex.prod(tariff.start, z[segment]), "rmih_outSegLB_" + segment);
 			cplex.addLe(baseline[segment], cplex.prod(tariff.end, z[segment]), "rmih_outSegUB_" + segment);
 		}

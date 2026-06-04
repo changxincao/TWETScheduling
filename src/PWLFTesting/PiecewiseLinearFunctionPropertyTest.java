@@ -70,6 +70,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testFindMinimalPositionSelectionCases();
 		testDominanceDomainCoverageRisk();
 		testMergeMinimumOverlappingCases();
+		testMergeMinimumChangedReturnRegression();
 		testMergeMinimumDisjointDomainRisk();
 		testUpdateDominatedIntervalsBasicCases();
 		testUpdateDominatedIntervalsComplexCases();
@@ -780,6 +781,38 @@ public class PiecewiseLinearFunctionPropertyTest {
 		}
 	}
 
+	private void testMergeMinimumChangedReturnRegression() {
+		PiecewiseLinearFunction equalBase = function(0, 20, seg(0, 10, 0, 5));
+		PiecewiseLinearFunction equalCandidate = function(0, 20, seg(0, 5, 0, 5), seg(5, 10, 0, 5));
+		PiecewiseLinearFunction equalMerged = equalBase.copy();
+		int beforeSegments = segmentCount(equalMerged);
+		boolean equalChanged = equalMerged.mergeMinimum(equalCandidate, PiecewiseLinearFunction.Direction.FORWARD, true);
+		boolean ok = true;
+		if (equalChanged) {
+			fail("mergeMinimum changed return: equal candidate", "equal-valued candidate must not report changed");
+			ok = false;
+		}
+		if (segmentCount(equalMerged) != beforeSegments) {
+			fail("mergeMinimum changed return: equal candidate structure",
+					"equal-valued candidate should not split or replace the current envelope");
+			ok = false;
+		}
+		ok &= checkClose("mergeMinimum changed return equal value at left", evalRef(equalBase, 0), evalRef(equalMerged, 0));
+		ok &= checkClose("mergeMinimum changed return equal value at right", evalRef(equalBase, 10), evalRef(equalMerged, 10));
+
+		PiecewiseLinearFunction strictMerged = equalBase.copy();
+		PiecewiseLinearFunction strictCandidate = function(0, 20, seg(0, 10, 0, 4));
+		boolean strictChanged = strictMerged.mergeMinimum(strictCandidate, PiecewiseLinearFunction.Direction.FORWARD, true);
+		if (!strictChanged) {
+			fail("mergeMinimum changed return: strict candidate", "strictly lower candidate must report changed");
+			ok = false;
+		}
+		ok &= checkClose("mergeMinimum changed return strict value", 4.0, evalRef(strictMerged, 0));
+		if (ok) {
+			pass("mergeMinimum: changed return ignores equal structure and reports strict improvement");
+		}
+	}
+
 	private void testRandomDirectionalUpdateDominatedSweep() {
 		int localFailures = 0;
 		for (int i = 0; i < RANDOM_CASES; i++) {
@@ -877,6 +910,14 @@ public class PiecewiseLinearFunctionPropertyTest {
 			f.addSegment(s[0], s[1], s[2], s[3]);
 		}
 		return f;
+	}
+
+	private static int segmentCount(PiecewiseLinearFunction f) {
+		int count = 0;
+		for (Segment s = f.head; s != null; s = s.next) {
+			count++;
+		}
+		return count;
 	}
 
 	private PiecewiseLinearFunction randomContractFunction(double rightBound) {

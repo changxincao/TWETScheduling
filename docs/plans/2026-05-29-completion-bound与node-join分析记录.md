@@ -1308,3 +1308,15 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 修复方式没有改全局 `PiecewiseLinearFunction.mergeMinimum`，而是在 `CompletionBoundCalculator.mergeFunction()` 内部增加严格改善检查：只有 candidate 在公共定义域某个分段端点严格低于 current，或者真实扩展了定义域时，才执行 merge 并返回 changed；否则直接跳过，不入队。这样把 completion-bound 的传播语义收紧为“下包络真的变强才继续松弛”，避免把结构性等价合并当作改进。
 
 修复后同口径重跑 `tmp-wet030_from040_011_2m`、half-domain、`completionBound=allCycles`、`maxNodes=1`。root 能完整返回，`valid=true`，总时间 `13.614s`。第一轮 all-cycles forward builder 从之前 60 秒仍未结束降为约 `203ms`，统计为 `fPop=246`、`fCand=7164`、`merge=30268`、`changed=11727`；后续 exact pricing 4 轮合计 `2.255s`，completion-bound 构造每轮约 `0.35..0.58s`，root RMIH `4.332s`，最终 root incumbent `14258`、bound `13525.866667`。这证明 011 求解不动的直接原因是 completion-bound 队列的 changed 假阳性，而不是 all-cycles bound 理论上必然很慢。
+
+### 41.26 2026-06-04 mergeMinimum changed 返回值的最终修正
+
+用户进一步指出，`changed` 是否真实发生变化应由 `mergeMinimum` 自身返回，而不是在 `CompletionBoundCalculator` 里额外加一层 `candidateStrictlyImproves()` 预筛。这个要求是合理的：如果调用方每次先扫一遍 candidate/current，再让 `mergeMinimum` 再扫一遍做实际合并，会把 completion-bound builder 内层最热路径变成双倍扫描；更重要的是，`mergeMinimum(..., true)` 这个 API 名义上已经承诺返回 changed，就不应让调用方再猜它到底是什么意思。
+
+重新分析后，旧实现没有准确判断出“没发生变化”的直接原因有两个。第一，`willMergeMinimumChange()` 是合并前预判，它只看 candidate 是否可能在公共分段端点更低，或者是否扩展定义域；但实际 merge 后还会拆段、替换、相邻段合并和 `normalize(direction)`，预判里的结构差异可能被消掉。第二，实际 merge 条件使用的是 `f2 <= f1`，因此 candidate 和 current 完全等值时也会把 candidate 段替换进链表。对普通 lower envelope 结果来说这不改变函数值，但对 completion-bound 队列来说，如果这种等值替换被报成 changed，就会把同一个 job 重新入队，造成伪传播。
+
+最终修正把 changed 判定收回到 `PiecewiseLinearFunction.mergeMinimum(g, direction, reportChanged)` 内部，并删除旧的 `willMergeMinimumChange()`。现在 `mergeMinimum` 在实际扫描小段 `[cur,nxt)` 时只在两类情况下设置 `changed=true`：其一，candidate 在该正长度小段上不劣且至少一个端点严格低于 current，此时才执行替换；其二，candidate 的物理定义域确实向 current 左侧或右侧扩展。若 candidate 和 current 只是等值，即使分段结构不同，也不替换、不置 changed。这样 `changed` 的含义变成“合并后 lower envelope 的可传播内容真的变强或定义域真的变宽”，而不是“链表可能被结构性改写”。
+
+调用方也同步恢复为直接信任 `mergeMinimum(..., true)`：`CompletionBoundCalculator.mergeFunction()` 不再调用 `candidateStrictlyImproves()`，而是在 `current.mergeMinimum(candidate, direction, true)` 返回 true 时才增加 `mergeChanged` 并入队。为了继续排查异常，默认关闭的 `completionBoundChangeAudit` 仍保留；它只在抽样审计时复制 before/after，不属于正常路径成本。
+
+这次还补了一个 PWLF 回归测试：等值 candidate 被拆成更多段时，`mergeMinimum(..., true)` 必须返回 false，且不能把 current 拆成更多段；严格更低的 candidate 必须返回 true。验证结果为：带 CPLEX jar 的 focused 编译通过；`PiecewiseLinearFunctionPropertyTest` 为 `passed=24, warnings=2, failed=3`，新增 changed-return 回归通过，剩余 3 个失败仍是历史已知的 disjoint `mergeMinimum` 契约外输入。另用 `tmp-wet020_001_2m` 做 root smoke，结果 `ROOT_PROCESSED`、`incumbent=bound=6343`、`valid=true`。尝试用 `TanakaNoOutsourcingBPCTest` 直接传 `-Dtwet.bpc.completionBound=allCycles` 重跑 011 时，发现该 runner 没有把该 JVM property 写入 `TWETBPCConfig.bidirectionalCompletionBoundRelaxation`，输出仍为 `completionBound=OFF`，因此这条命令不能作为 all-cycles 复核证据；前一轮 011 all-cycles 完整返回结果仍来自显式设置 config 的诊断口径。

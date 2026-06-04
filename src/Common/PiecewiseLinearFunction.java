@@ -1350,7 +1350,9 @@ public class PiecewiseLinearFunction {
 		if (g.head == null) {
 			return false;
 		}
-		boolean changed = reportChanged && willMergeMinimumChange(g);
+		boolean changed = false;
+		double originalHeadStart = this.head.start;
+		double originalTailEnd = this.tail.end;
 		// 2026-05-25: mergeMinimum 内部会截断并拼接右参数的 Segment 链。
 		// dominance graph 会把 label/frontier/envelope 缓存作为右参数传入，因此这里必须先复制，
 		// 避免把右参数的物理 head/tail 改坏，造成 domainStart 与 head.start 不一致。
@@ -1403,6 +1405,9 @@ public class PiecewiseLinearFunction {
 				gh=gh.next;
 			}
 			lastGSegBeforeDomain=SegmentPool.obtain(gh.start, start, gh.slope, gh.intercept);
+			if (reportChanged && Utility.compareLt(g.head.start, originalHeadStart)) {
+				changed = true;
+			}
 			//不管是否相等了gh.start=start
 			
 			//先记录下来，while以后再拼上去，不然直接拼head后边被改变了
@@ -1446,7 +1451,12 @@ public class PiecewiseLinearFunction {
 			double f2s = q.slope * cur + q.intercept;
 			double f2e = q.slope * nxt + q.intercept;
 
-			if (Utility.compareLe(f2s, f1s) && Utility.compareLe(f2e, f1e)) {
+			boolean gNoWorse = Utility.compareLe(f2s, f1s) && Utility.compareLe(f2e, f1e);
+			boolean gStrictlyBetter = Utility.compareLt(f2s, f1s) || Utility.compareLt(f2e, f1e);
+			if (gNoWorse && gStrictlyBetter) {
+				if (reportChanged && Utility.compareLt(cur, nxt)) {
+					changed = true;
+				}
 				// L2 整段支配 L1 --> 用 L2 片段替换 this 上 [cur, nxt)
 //	                replaceSegment(prev, p, cur, nxt, q.slope, q.intercept);
 				// 更新 prev/p 到刚插入的常量段后
@@ -1505,6 +1515,9 @@ public class PiecewiseLinearFunction {
 		}
 
 		if (q != null) {
+			if (reportChanged && Utility.compareGt(g.tail.end, originalTailEnd)) {
+				changed = true;
+			}
 			// 函数g末尾还有一段，需要合并进来
 			if(Utility.compareEq(q.slope, prev.slope)&&Utility.compareEq(q.intercept, prev.intercept)) {
 				prev.end=q.end;
@@ -1542,50 +1555,6 @@ public class PiecewiseLinearFunction {
 			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
 		}
 		return changed;
-	}
-
-	private boolean willMergeMinimumChange(PiecewiseLinearFunction g) {
-		if (this.head == null) {
-			return g != null && g.head != null;
-		}
-		if (g == null || g.head == null) {
-			return false;
-		}
-		if (Utility.compareLt(g.head.start, this.head.start) || Utility.compareGt(g.tail.end, this.tail.end)) {
-			return true;
-		}
-		double start = Math.max(this.head.start, g.head.start);
-		double end = Math.min(this.tail.end, g.tail.end);
-		if (!Utility.compareLt(start, end)) {
-			return false;
-		}
-		Segment p = this.head;
-		while (p != null && Utility.compareLt(p.end, start)) {
-			p = p.next;
-		}
-		Segment q = g.head;
-		while (q != null && Utility.compareLt(q.end, start)) {
-			q = q.next;
-		}
-		double cur = start;
-		while (p != null && q != null && Utility.compareLt(cur, end)) {
-			double nxt = Math.min(Math.min(p.end, q.end), end);
-			double f1s = p.slope * cur + p.intercept;
-			double f1e = p.slope * nxt + p.intercept;
-			double f2s = q.slope * cur + q.intercept;
-			double f2e = q.slope * nxt + q.intercept;
-			if (Utility.compareLt(f2s, f1s) || Utility.compareLt(f2e, f1e)) {
-				return true;
-			}
-			cur = nxt;
-			if (Utility.compareEq(nxt, p.end)) {
-				p = p.next;
-			}
-			if (Utility.compareEq(nxt, q.end)) {
-				q = q.next;
-			}
-		}
-		return false;
 	}
 
 	public void release() {

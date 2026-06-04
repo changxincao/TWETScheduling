@@ -7,7 +7,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -57,7 +56,11 @@ public final class RestrictedMasterIntegerHeuristic {
 			if (MODE_PARTITION.equalsIgnoreCase(mode)) {
 				return solvePartition(lp, lp.getRestrictedColumnIds(), "partition", start);
 			}
-			return solveCoverRepair(lp, start);
+			if (MODE_COVER_REPAIR.equalsIgnoreCase(mode)) {
+				return solveCoverRepair(lp, start);
+			}
+			return Result.notSolved("restricted integer heuristic skipped: unknown mode " + mode,
+					System.nanoTime() - start);
 		} catch (IloException ex) {
 			return Result.notSolved("restricted integer heuristic error: " + ex.getMessage(),
 					System.nanoTime() - start);
@@ -101,7 +104,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		elapsed = System.nanoTime() - start;
 		String prefix = "restricted integer heuristic coverRepair covering=" + covering.status + " "
 				+ covering.coverage.summary() + " screenedCols=" + screened.size() + " repairCols="
-				+ repair.repairColumnIds.size() + " repairMode=" + repair.summary() + " partition=" + partition.status;
+				+ repair.repairColumnIds.size() + " repairMode=heuristic partition=" + partition.status;
 		if (!partition.solved) {
 			return Result.notSolved(prefix, elapsed);
 		}
@@ -125,7 +128,7 @@ public final class RestrictedMasterIntegerHeuristic {
 			if (!solved) {
 				return Attempt.notSolved(label, cplex.getStatus().toString());
 			}
-			return readAttempt(cplex, lp, model, label, exactCover);
+			return readAttempt(cplex, lp, model);
 		} finally {
 			if (cplex != null) {
 				cplex.end();
@@ -217,8 +220,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		cplex.addEq(active, 1.0, "rmih_outsourceOneSegment");
 	}
 
-	private Attempt readAttempt(IloCplex cplex, LP lp, Model model, String label, boolean exactCover)
-			throws IloException {
+	private Attempt readAttempt(IloCplex cplex, LP lp, Model model) throws IloException {
 		ArrayList<Integer> selectedColumnIds = new ArrayList<Integer>();
 		for (int idx = 0; idx < model.columnIds.size(); idx++) {
 			if (Utility.compareGt(cplex.getValue(model.columnVars[idx]), INTEGER_TOLERANCE)) {
@@ -234,8 +236,8 @@ public final class RestrictedMasterIntegerHeuristic {
 			segmentValues[segment] = cplex.getValue(model.segmentVars[segment]) > INTEGER_TOLERANCE ? 1.0 : 0.0;
 		}
 		CoverageStats coverage = inspectCoverage(lp, selectedColumnIds, outsourcingValues);
-		return new Attempt(true, label, cplex.getStatus().toString(), cplex.getObjValue(), selectedColumnIds,
-				outsourcingValues, segmentValues, coverage, exactCover);
+		return new Attempt(true, cplex.getStatus().toString(), cplex.getObjValue(), selectedColumnIds,
+				outsourcingValues, segmentValues, coverage);
 	}
 
 	private Result buildFeasibleResult(Attempt attempt, String status, long elapsedNanos) {
@@ -246,7 +248,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		TWETMasterSolution solution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues,
 				attempt.outsourcingValues, attempt.segmentValues, attempt.objective, true, status);
 		return Result.feasible(attempt.objective, attempt.selectedColumnIds, attempt.outsourcingValues,
-				attempt.segmentValues, status, elapsedNanos, solution);
+				status, elapsedNanos, solution);
 	}
 
 	private ArrayList<Integer> selectCoverRepairColumns(LP lp) {
@@ -515,28 +517,24 @@ public final class RestrictedMasterIntegerHeuristic {
 		private final double objective;
 		private final ArrayList<Integer> selectedColumnIds;
 		private final double[] outsourcingValues;
-		private final double[] segmentValues;
 		private final String status;
 		private final long elapsedNanos;
 		private final TWETMasterSolution solution;
 
 		private Result(boolean feasible, double objective, ArrayList<Integer> selectedColumnIds,
-				double[] outsourcingValues, double[] segmentValues, String status, long elapsedNanos,
-				TWETMasterSolution solution) {
+				double[] outsourcingValues, String status, long elapsedNanos, TWETMasterSolution solution) {
 			this.feasible = feasible;
 			this.objective = objective;
 			this.selectedColumnIds = selectedColumnIds;
 			this.outsourcingValues = outsourcingValues;
-			this.segmentValues = segmentValues;
 			this.status = status;
 			this.elapsedNanos = elapsedNanos;
 			this.solution = solution;
 		}
 
 		static Result feasible(double objective, ArrayList<Integer> selectedColumnIds, double[] outsourcingValues,
-				double[] segmentValues, String status, long elapsedNanos, TWETMasterSolution solution) {
-			return new Result(true, objective, selectedColumnIds, outsourcingValues, segmentValues, status,
-					elapsedNanos, solution);
+				String status, long elapsedNanos, TWETMasterSolution solution) {
+			return new Result(true, objective, selectedColumnIds, outsourcingValues, status, elapsedNanos, solution);
 		}
 
 		static Result notSolved(String status) {
@@ -544,8 +542,8 @@ public final class RestrictedMasterIntegerHeuristic {
 		}
 
 		static Result notSolved(String status, long elapsedNanos) {
-			return new Result(false, Double.POSITIVE_INFINITY, new ArrayList<Integer>(), new double[0], new double[0],
-					status, elapsedNanos, null);
+			return new Result(false, Double.POSITIVE_INFINITY, new ArrayList<Integer>(), new double[0], status,
+					elapsedNanos, null);
 		}
 
 		public boolean isFeasible() {
@@ -575,39 +573,31 @@ public final class RestrictedMasterIntegerHeuristic {
 		public TWETMasterSolution getSolution() {
 			return solution;
 		}
-
-		public String summary() {
-			return String.format(Locale.US, "%s obj=%.6f cols=%d", status, objective, selectedColumnIds.size());
-		}
 	}
 
 	private static final class Attempt {
 		final boolean solved;
-		final String label;
 		final String status;
 		final double objective;
 		final ArrayList<Integer> selectedColumnIds;
 		final double[] outsourcingValues;
 		final double[] segmentValues;
 		final CoverageStats coverage;
-		final boolean exactCover;
 
-		Attempt(boolean solved, String label, String status, double objective, ArrayList<Integer> selectedColumnIds,
-				double[] outsourcingValues, double[] segmentValues, CoverageStats coverage, boolean exactCover) {
+		Attempt(boolean solved, String status, double objective, ArrayList<Integer> selectedColumnIds,
+				double[] outsourcingValues, double[] segmentValues, CoverageStats coverage) {
 			this.solved = solved;
-			this.label = label;
 			this.status = status;
 			this.objective = objective;
 			this.selectedColumnIds = selectedColumnIds;
 			this.outsourcingValues = outsourcingValues;
 			this.segmentValues = segmentValues;
 			this.coverage = coverage;
-			this.exactCover = exactCover;
 		}
 
 		static Attempt notSolved(String label, String status) {
-			return new Attempt(false, label, status, Double.POSITIVE_INFINITY, new ArrayList<Integer>(),
-					new double[0], new double[0], CoverageStats.empty(), false);
+			return new Attempt(false, status, Double.POSITIVE_INFINITY, new ArrayList<Integer>(), new double[0],
+					new double[0], CoverageStats.empty());
 		}
 	}
 
@@ -662,10 +652,6 @@ public final class RestrictedMasterIntegerHeuristic {
 
 	private static final class RepairGeneration {
 		final LinkedHashSet<Integer> repairColumnIds = new LinkedHashSet<Integer>();
-
-		String summary() {
-			return "heuristic";
-		}
 	}
 
 	private static final class TariffSegment {

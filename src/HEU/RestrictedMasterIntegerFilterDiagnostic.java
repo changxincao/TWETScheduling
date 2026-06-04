@@ -12,17 +12,21 @@ import java.util.Locale;
 import java.util.Random;
 
 import Basic.Data;
+import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETBPCContext;
 import TWETBPC.GC.InitialColumnBundle;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
+import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import ilog.concert.IloException;
 import ilog.concert.IloIntVar;
 import ilog.concert.IloLinearNumExpr;
+import ilog.concert.IloNumVar;
 import ilog.cplex.IloCplex;
 
 /**
@@ -59,16 +63,20 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 		ArrayList<ColumnScore> scores = collectScores(lp, restricted, rootLp);
 
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("case,root_lp,restricted_cols,selection,cover_sense,selected_cols,positive_cols,per_job_k,"
+		lines.add("case,root_lp,restricted_cols,selection,model,cover_sense,selected_cols,repair_cols,positive_cols,per_job_k,"
 				+ "status,obj,best_bound,mip_gap,solve_s,first_incumbent_s,first_incumbent_obj,"
 				+ "missing_jobs,duplicate_cover,max_cover,duplicate_jobs,selected_column_ids,selected_sequences");
 
 		for (int limit : reducedCostLimits) {
 			ArrayList<Integer> selected = selectColumns(scores, restricted, rootLp, data, context, limit, perJobK);
 			runAndAppend(lines, instance, rootLp, restricted.size(), "rc" + limit + "_jobK" + perJobK,
-					">=", selected, rootLp.getActiveColumnIds().size(), perJobK, data, context, false, timeLimit);
+					"formal", ">=", selected, 0, rootLp.getActiveColumnIds().size(), perJobK, data, context, root,
+					false, timeLimit);
 			runAndAppend(lines, instance, rootLp, restricted.size(), "rc" + limit + "_jobK" + perJobK,
-					"==", selected, rootLp.getActiveColumnIds().size(), perJobK, data, context, true, timeLimit);
+					"formal", "==", selected, 0, rootLp.getActiveColumnIds().size(), perJobK, data, context, root,
+					true, timeLimit);
+			runRepairAndAppend(lines, instance, rootLp, restricted.size(), "rc" + limit + "_jobK" + perJobK,
+					selected, rootLp.getActiveColumnIds().size(), perJobK, data, context, root, timeLimit);
 		}
 
 		Files.createDirectories(csv.getParent());
@@ -151,27 +159,44 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 	}
 
 	private static void runAndAppend(ArrayList<String> lines, Path instance, TWETMasterSolution rootLp,
-			int restrictedColumns, String selectionName, String coverSense, List<Integer> selectedColumns,
-			int positiveColumns, int perJobK, Data data, TWETBPCContext context, boolean exactCover,
+			int restrictedColumns, String selectionName, String modelName, String coverSense,
+			List<Integer> selectedColumns, int repairColumns, int positiveColumns, int perJobK, Data data,
+			TWETBPCContext context, Node node, boolean exactCover,
 			double timeLimit) throws IloException {
-		SolveRecord record = solveInteger(data, context, selectedColumns, exactCover, timeLimit);
+		SolveRecord record = solveInteger(data, context, node, selectedColumns, exactCover, timeLimit);
 		lines.add(quote(stripDat(instance.getFileName().toString())) + "," + fmt(rootLp.getObjectiveValue()) + ","
-				+ restrictedColumns + "," + quote(selectionName) + "," + quote(coverSense) + ","
-				+ selectedColumns.size() + "," + positiveColumns + "," + perJobK + "," + quote(record.status)
-				+ "," + fmt(record.objective) + "," + fmt(record.bestBound) + "," + fmt(record.mipGap) + ","
-				+ fmt(record.solveSeconds) + "," + fmt(record.firstIncumbentSeconds) + ","
-				+ fmt(record.firstIncumbentObjective) + "," + record.missingJobs + ","
-				+ record.duplicateCover + "," + record.maxCover + "," + quote(record.duplicateJobs) + ","
-				+ quote(record.selectedColumnIds) + "," + quote(record.selectedSequences));
+				+ restrictedColumns + "," + quote(selectionName) + "," + quote(modelName) + ","
+				+ quote(coverSense) + "," + selectedColumns.size() + "," + repairColumns + "," + positiveColumns
+				+ "," + perJobK + "," + quote(record.status) + "," + fmt(record.objective) + ","
+				+ fmt(record.bestBound) + "," + fmt(record.mipGap) + "," + fmt(record.solveSeconds) + ","
+				+ fmt(record.firstIncumbentSeconds) + "," + fmt(record.firstIncumbentObjective) + ","
+				+ record.missingJobs + "," + record.duplicateCover + "," + record.maxCover + ","
+				+ quote(record.duplicateJobs) + "," + quote(record.selectedColumnIds) + ","
+				+ quote(record.selectedSequences));
 		System.out.printf(Locale.US,
-				"selection=%s cover=%s cols=%d status=%s obj=%.6f bound=%.6f time=%.3fs first=%.3fs dup=%d missing=%d%n",
-				selectionName, coverSense, selectedColumns.size(), record.status, record.objective,
+				"selection=%s model=%s cover=%s cols=%d repair=%d status=%s obj=%.6f bound=%.6f time=%.3fs first=%.3fs dup=%d missing=%d%n",
+				selectionName, modelName, coverSense, selectedColumns.size(), repairColumns, record.status, record.objective,
 				record.bestBound, record.solveSeconds, record.firstIncumbentSeconds, record.duplicateCover,
 				record.missingJobs);
 	}
 
+	private static void runRepairAndAppend(ArrayList<String> lines, Path instance, TWETMasterSolution rootLp,
+			int restrictedColumns, String selectionName, List<Integer> selectedColumns, int positiveColumns,
+			int perJobK, Data data, TWETBPCContext context, Node node, double timeLimit) throws IloException {
+		SolveRecord covering = solveInteger(data, context, node, selectedColumns, false, timeLimit);
+		ArrayList<Integer> repaired = new ArrayList<Integer>(selectedColumns);
+		int added = addDuplicateDeletionRepairColumns(data, context, covering.chosenColumnIds, repaired);
+		runAndAppend(lines, instance, rootLp, restrictedColumns, selectionName, "formalRepair", "repair==",
+				repaired, added, positiveColumns, perJobK, data, context, node, true, timeLimit);
+	}
+
 	private static SolveRecord solveInteger(Data data, TWETBPCContext context, List<Integer> selectedColumns,
 			boolean exactCover, double timeLimit) throws IloException {
+		return solveInteger(data, context, null, selectedColumns, exactCover, timeLimit);
+	}
+
+	private static SolveRecord solveInteger(Data data, TWETBPCContext context, Node node,
+			List<Integer> selectedColumns, boolean exactCover, double timeLimit) throws IloException {
 		IloCplex cplex = new IloCplex();
 		long start = System.nanoTime();
 		IncumbentProbe probe = new IncumbentProbe();
@@ -181,11 +206,27 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 				cplex.setParam(IloCplex.Param.TimeLimit, timeLimit);
 			}
 			IloIntVar[] x = new IloIntVar[selectedColumns.size()];
+			IloIntVar[] y = new IloIntVar[data.n + 1];
+			ArrayList<TariffSegment> segments = collectOutsourcingTariffSegments(data);
+			IloIntVar[] z = new IloIntVar[segments.size()];
+			IloNumVar[] baseline = new IloNumVar[segments.size()];
 			IloLinearNumExpr obj = cplex.linearNumExpr();
 			for (int idx = 0; idx < selectedColumns.size(); idx++) {
 				int columnId = selectedColumns.get(idx).intValue();
 				x[idx] = cplex.boolVar("x_" + columnId);
 				obj.addTerm(context.pool.getColumn(columnId).getCost(), x[idx]);
+			}
+			for (int job = 1; job <= data.n; job++) {
+				double ub = Utility.isBigMValue(data.outsourcingCost[job]) ? 0.0 : 1.0;
+				y[job] = cplex.boolVar("y_" + job);
+				y[job].setUB(ub);
+			}
+			for (int segment = 0; segment < segments.size(); segment++) {
+				TariffSegment tariff = segments.get(segment);
+				z[segment] = cplex.boolVar("outSegActive_" + segment);
+				baseline[segment] = cplex.numVar(0.0, tariff.end, "outSegBaseline_" + segment);
+				obj.addTerm(tariff.slope, baseline[segment]);
+				obj.addTerm(tariff.intercept, z[segment]);
 			}
 			cplex.addMinimize(obj);
 			for (int job = 1; job <= data.n; job++) {
@@ -195,6 +236,7 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 						cover.addTerm(1.0, x[idx]);
 					}
 				}
+				cover.addTerm(1.0, y[job]);
 				if (exactCover) {
 					cplex.addEq(cover, 1.0, "diag_cover_" + job);
 				} else {
@@ -205,7 +247,10 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 			for (IloIntVar var : x) {
 				machineCount.addTerm(1.0, var);
 			}
-			cplex.addRange(0.0, machineCount, data.m, "diag_machineCount");
+			double minMachines = node == null ? 0.0 : node.minMachineCount;
+			double maxMachines = node == null ? data.m : node.maxMachineCount;
+			cplex.addRange(minMachines, machineCount, maxMachines, "diag_machineCount");
+			buildTariffConstraints(cplex, data, node, y, z, baseline, segments);
 			cplex.use(new IloCplex.MIPInfoCallback() {
 				@Override
 				protected void main() throws IloException {
@@ -221,7 +266,7 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 			if (!solved) {
 				return new SolveRecord(cplex.getStatus().toString(), Double.POSITIVE_INFINITY,
 						safeBestBound(cplex), safeGap(cplex), elapsed, probe.firstSeconds(),
-						probe.firstIncumbentObjective, 0, data.n, 0, "", "", "");
+						probe.firstIncumbentObjective, 0, data.n, 0, "", "", "", new ArrayList<Integer>());
 			}
 			int[] coverCount = new int[data.n + 1];
 			ArrayList<Integer> chosen = new ArrayList<Integer>();
@@ -235,6 +280,13 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 					if (job >= 1 && job <= data.n) {
 						coverCount[job]++;
 					}
+				}
+			}
+			ArrayList<Integer> outsourced = new ArrayList<Integer>();
+			for (int job = 1; job <= data.n; job++) {
+				if (Utility.compareGt(cplex.getValue(y[job]), 0.5)) {
+					outsourced.add(Integer.valueOf(job));
+					coverCount[job]++;
 				}
 			}
 			int missing = 0;
@@ -253,10 +305,112 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 			}
 			return new SolveRecord(cplex.getStatus().toString(), cplex.getObjValue(), safeBestBound(cplex),
 					safeGap(cplex), elapsed, probe.firstSeconds(), probe.firstIncumbentObjective, duplicate,
-					missing, maxCover, duplicateJobs.toString(), sequences(context, chosen), chosen.toString());
+					missing, maxCover, duplicateJobs.toString(), sequences(context, chosen), chosen.toString(),
+					chosen);
 		} finally {
 			cplex.end();
 		}
+	}
+
+	private static void buildTariffConstraints(IloCplex cplex, Data data, Node node, IloIntVar[] y, IloIntVar[] z,
+			IloNumVar[] baseline, ArrayList<TariffSegment> segments) throws IloException {
+		if (segments.isEmpty()) {
+			return;
+		}
+		IloLinearNumExpr baselineFromJobs = cplex.linearNumExpr();
+		for (int job = 1; job <= data.n; job++) {
+			if (!Utility.isBigMValue(data.outsourcingCost[job])) {
+				baselineFromJobs.addTerm(data.outsourcingCost[job], y[job]);
+			}
+		}
+		IloLinearNumExpr baselineFromSegments = cplex.linearNumExpr();
+		IloLinearNumExpr active = cplex.linearNumExpr();
+		for (int segment = 0; segment < segments.size(); segment++) {
+			TariffSegment tariff = segments.get(segment);
+			baselineFromSegments.addTerm(1.0, baseline[segment]);
+			active.addTerm(1.0, z[segment]);
+			if (node != null) {
+				byte state = node.getTariffSegmentState(segment);
+				if (state == Node.SEGMENT_FORBIDDEN) {
+					cplex.addLe(z[segment], 0.0, "diag_outSegForbidden_" + segment);
+				} else if (state == Node.SEGMENT_REQUIRED) {
+					cplex.addGe(z[segment], 1.0, "diag_outSegRequired_" + segment);
+				}
+			}
+			cplex.addGe(baseline[segment], cplex.prod(tariff.start, z[segment]), "diag_outSegLB_" + segment);
+			cplex.addLe(baseline[segment], cplex.prod(tariff.end, z[segment]), "diag_outSegUB_" + segment);
+		}
+		cplex.addEq(baselineFromJobs, baselineFromSegments, "diag_outsourceBaseline");
+		cplex.addEq(active, 1.0, "diag_outsourceOneSegment");
+	}
+
+	private static ArrayList<TariffSegment> collectOutsourcingTariffSegments(Data data) {
+		data.evaluateOutsourcingCost(0.0);
+		ArrayList<TariffSegment> segments = new ArrayList<TariffSegment>();
+		if (data.outsourcingCostFunction == null || data.outsourcingCostFunction.head == null) {
+			return segments;
+		}
+		for (PiecewiseLinearFunction.Segment seg = data.outsourcingCostFunction.head; seg != null; seg = seg.next) {
+			segments.add(new TariffSegment(seg.start, seg.end, seg.slope, seg.intercept));
+		}
+		return segments;
+	}
+
+	private static int addDuplicateDeletionRepairColumns(Data data, TWETBPCContext context,
+			List<Integer> chosenColumnIds, ArrayList<Integer> selectedColumns) {
+		if (chosenColumnIds.isEmpty()) {
+			return 0;
+		}
+		int[] coverCount = new int[data.n + 1];
+		for (int columnId : chosenColumnIds) {
+			for (int job : context.pool.getColumn(columnId).getSequence()) {
+				if (job >= 1 && job <= data.n) {
+					coverCount[job]++;
+				}
+			}
+		}
+		HashSet<Integer> duplicateJobs = new HashSet<Integer>();
+		for (int job = 1; job <= data.n; job++) {
+			if (coverCount[job] > 1) {
+				duplicateJobs.add(Integer.valueOf(job));
+			}
+		}
+		if (duplicateJobs.isEmpty()) {
+			return 0;
+		}
+		HashSet<Integer> selectedSet = new HashSet<Integer>(selectedColumns);
+		TWETColumnEvaluator evaluator = new TWETColumnEvaluator(data);
+		int added = 0;
+		for (int columnId : chosenColumnIds) {
+			List<Integer> sequence = context.pool.getColumn(columnId).getSequence();
+			ArrayList<Integer> removable = new ArrayList<Integer>();
+			for (int job : sequence) {
+				if (duplicateJobs.contains(Integer.valueOf(job))) {
+					removable.add(Integer.valueOf(job));
+				}
+			}
+			int subsetCount = 1 << removable.size();
+			for (int mask = 1; mask < subsetCount; mask++) {
+				ArrayList<Integer> repairedSequence = new ArrayList<Integer>();
+				for (int job : sequence) {
+					int pos = removable.indexOf(Integer.valueOf(job));
+					if (pos >= 0 && ((mask >>> pos) & 1) == 1) {
+						continue;
+					}
+					repairedSequence.add(Integer.valueOf(job));
+				}
+				if (repairedSequence.isEmpty()) {
+					continue;
+				}
+				int repairedId = context.pool.addColumn(repairedSequence, evaluator.evaluate(repairedSequence),
+						ColumnSource.MANUAL, false);
+				if (selectedSet.add(Integer.valueOf(repairedId))) {
+					selectedColumns.add(Integer.valueOf(repairedId));
+					added++;
+				}
+			}
+		}
+		return added;
 	}
 
 	private static String sequences(TWETBPCContext context, List<Integer> columnIds) {
@@ -336,6 +490,20 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 		}
 	}
 
+	private static final class TariffSegment {
+		final double start;
+		final double end;
+		final double slope;
+		final double intercept;
+
+		TariffSegment(double start, double end, double slope, double intercept) {
+			this.start = start;
+			this.end = end;
+			this.slope = slope;
+			this.intercept = intercept;
+		}
+	}
+
 	private static final class SolveRecord {
 		final String status;
 		final double objective;
@@ -350,11 +518,12 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 		final String duplicateJobs;
 		final String selectedColumnIds;
 		final String selectedSequences;
+		final ArrayList<Integer> chosenColumnIds;
 
 		SolveRecord(String status, double objective, double bestBound, double mipGap, double solveSeconds,
 				double firstIncumbentSeconds, double firstIncumbentObjective, int duplicateCover,
 				int missingJobs, int maxCover, String duplicateJobs, String selectedSequences,
-				String selectedColumnIds) {
+				String selectedColumnIds, ArrayList<Integer> chosenColumnIds) {
 			this.status = status;
 			this.objective = objective;
 			this.bestBound = bestBound;
@@ -368,6 +537,7 @@ public final class RestrictedMasterIntegerFilterDiagnostic {
 			this.duplicateJobs = duplicateJobs;
 			this.selectedColumnIds = selectedColumnIds;
 			this.selectedSequences = selectedSequences;
+			this.chosenColumnIds = chosenColumnIds;
 		}
 	}
 }

@@ -1216,3 +1216,17 @@ child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `par
 文献上，这类 restricted master heuristic 一般也不是把所有生成列无脑丢给 MIP。Joncour 等的 column-generation primal heuristic 综述指出，restricted master heuristic 通常在列子集上解静态 IP，列子集可以来自 LP 过程生成列、启发式列或二者混合；列选择可使用 reduced cost、约束满足贡献或 LP 解值，且 restricted integer problem 常因列集不足而不可行。Cavaliere、Bendotti 和 Fischetti 的 CVRP restricted set partitioning heuristic 更具体：先选成本较好的 5000 到 10000 条 route 作为 core set，再用 reduced cost filtering，并在每个 customer 上保留 reduced cost 最小的一批 route，最终 restricted SP 用商业 MIP 求解但设置 aggressive time limit 和 polishing。这和本轮 `reduced cost 前 N + 每 job 前 K` 的方向一致。
 
 当前工程建议因此分两层。第一层先保证 correctness：`RMIH` 用于更新 BPC incumbent 前，必须满足原问题可行性；对 no-outsourcing/内部列 partition 场景，覆盖应使用 `==1`，或者至少在 `Tree` 更新 incumbent 前调用 validator，失败则只记录诊断、不更新上界。第二层再做加速：先保留 LP 正值列、已有 incumbent 列，再按 reduced cost 升序保留前 `N` 条，并对每个 job 保留 `K=10` 条覆盖该 job 的低 reduced-cost 列；从 010 root 的结果看，`N=4000,K=10` 已达到全量合法目标，`N=2000,K=10` 不足。后续若要把该策略正式接入，应继续在更多能进入 child 的 30-job 样例上记录 `N/K/列数/合法目标/首次 incumbent 时间/总 MIP 时间`，再决定默认阈值和是否给大列数场景加时间限制。
+
+### 41.20 2026-06-04 010 RMIH 正式口径复核与重复覆盖修复诊断
+
+用户指出上一轮 `RMIH` 诊断把 no-outsourcing 情况下仍存在的 `y_j`、tariff segment active 和 baseline 变量省掉了，因此不能拿简化 MIP 的绝对时间解释正式 `RestrictedMasterIntegerHeuristic`。本轮已修正诊断类 `HEU.RestrictedMasterIntegerFilterDiagnostic`：整数模型恢复原 `RMIH` 口径，包含内部列二进制变量、外包 `y_j` 变量、tariff segment active 变量、baseline 变量、外包 baseline 等式、segment active 等式和 segment 上下界；同时保留 `>=` / `==` 覆盖对照。root LP 仍为 `16148.8`，restricted columns 仍为 `5341`，因此列池口径和上一轮一致。
+
+正式口径复核后，`>=` 覆盖仍稳定复现 invalid incumbent：`rc2000+jobK10` 为 `17599`，用时 `2.505s`，首次 incumbent `0.734s`；`rc4000+jobK10` 为 `17599`，用时 `9.727s`，首次 incumbent `1.836s`；全量 `5341` 为 `17599`，用时 `10.005s`，首次 incumbent `0.475s`。三者选中的都是列 `[3321,4523]`，重复覆盖 job `[19,29]`。因此 `010 valid=false` 的主因没有变化：当前 `RMIH` 的 set covering 整数解满足 `>=1`，但不满足原问题/validator 的 partition 语义。
+
+正式 `==` 覆盖结果也更清楚：`rc2000+jobK10` 不可行；`rc4000+jobK10` 和全量 `5341` 均可行且目标为 `17723`，用时分别为 `0.466s` 和 `0.653s`，选中列 `[301,2700]`。这说明“直接 `==` 不一定更慢”，在 010 root 上反而比 `>=` covering 更快，但列太少时确实可能不可行。`rc500+jobK10` 在 `>=/==` 下都不可行；`rc1000+jobK10` 的 `>=` 可行但目标 `19025` 且重复覆盖 job `[7,29]`，`==` 仍不可行。
+
+用户提出的“满足三角不等式时，重复 job 可以从某条列里删掉，成本应不增；但有限列池里未必已经有删点列”这一判断被本轮修复诊断支持。诊断做法是：先解正式 `>=` MIP，找到被重复覆盖的 job；对当前 `>=` 解中包含这些重复 job 的列，枚举删除重复 job 的非空子集，用 `TWETColumnEvaluator` 重新计算删点序列成本并加入列池；随后在原筛选列加修复列上解正式 `==` MIP。结果为：`rc2000`、`rc4000`、全量 `5341` 都只需新增 `6` 条修复列，`==` 复解即可得到合法 partition，目标 `16444`，用时约 `0.20s/0.51s/0.62s`，无缺失、无重复覆盖。`rc1000` 新增 `6` 条修复列后得到更好的合法目标 `16412`，用时 `0.066s`。对应 `rc1000` 解保留列 `4455`，并新增删掉重复 job 29 和 7 后的列 `5346`。
+
+这组结果有两个含义。第一，三角不等式不能自动让 set covering 的整数 incumbent 合法，因为 MIP 只能使用当前有限列池；但从重复覆盖解生成删点列，确实可以把 covering incumbent 转成 partition 候选，并且在 010 root 上比直接等式列池解更好。第二，列数和上界质量不是单调关系：`rc1000` 的修复结果 `16412` 优于 `rc2000/full` 的修复结果 `16444`，说明修复后仍需重新求整数 MIP，不能只按“更多 reduced-cost 列一定更好”判断。
+
+当前工程建议调整为三步。第一，正式 `RMIH` 不能直接用 `>=` 解更新 incumbent；至少要在更新前做 validator，失败则不能刷新上界。第二，若保留 `>=` 作为寻找低成本 covering 结构的启发式，应在发现重复覆盖后生成删点修复列，并用 `==` 覆盖复解一次；这个修复比直接 `==` 更稳，因为它能补出有限列池里缺失的删点列。第三，列筛选仍建议从 LP 正值列、低 reduced-cost 前 N 条和每 job 前 K 条开始；010 root 上 `rc1000+jobK10+repair` 已能得到强合法上界，`rc500` 太少不可行，`rc4000/full` 会增加 `>=` 证明时间但修复后质量未更好。正式接入前应再把该 repair 逻辑放到更多 node 上测试，并记录 `>=` 首 incumbent 时间、修复列数、repair `==` 时间和 validator 结果。

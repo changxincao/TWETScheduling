@@ -1,11 +1,18 @@
 package TWETBPC.GC;
 
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.PriorityQueue;
 
 import Basic.Data;
@@ -479,6 +486,7 @@ public class GCNGBBStyleBidirectional {
 		if (config.diagnosticPricingSummaryDetails) {
 			recordPricingDiagnostics(lp);
 		}
+		maybeDumpPricingSnapshot(lp);
 		precomputeDynamicPricingWindows(lp);
 		buildCompletionBounds(lp);
 
@@ -498,6 +506,196 @@ public class GCNGBBStyleBidirectional {
 	private String pricingDiagnosticContext(LP lp) {
 		Node node = lp == null ? null : lp.getNode();
 		return node == null ? "node=-" : node.diagnosticSummary();
+	}
+
+	/**
+	 * 2026-06-05: 按指定节点落盘当前 exact pricing 输入，便于复盘禁弧很多但 label 仍爆炸的结构原因。
+	 * 默认关闭；设置 twet.bpc.pricingSnapshot=true 或 twet.bpc.pricingSnapshotNodeId=<nodeId> 后启用。
+	 */
+	private void maybeDumpPricingSnapshot(LP lp) {
+		Node node = lp == null ? null : lp.getNode();
+		if (node == null) {
+			return;
+		}
+		int targetNodeId = Integer.getInteger("twet.bpc.pricingSnapshotNodeId", -1);
+		boolean enabled = Boolean.getBoolean("twet.bpc.pricingSnapshot") || targetNodeId >= 0;
+		if (!enabled || (targetNodeId >= 0 && node.id != targetNodeId)) {
+			return;
+		}
+		Path dir = Paths.get(System.getProperty("twet.bpc.pricingSnapshotDir",
+				"test-results/bpc/pricing-snapshots"));
+		String prefix = "pricing-node-" + node.id + "-" + System.currentTimeMillis();
+		try {
+			Files.createDirectories(dir);
+			writePricingSnapshotSummary(lp, dir.resolve(prefix + "-summary.txt"));
+			writePricingSnapshotJobDuals(lp, dir.resolve(prefix + "-job-duals.tsv"));
+			writePricingSnapshotArcs(lp, dir.resolve(prefix + "-arcs.tsv"));
+			writePricingSnapshotColumns(lp, dir.resolve(prefix + "-columns.tsv"));
+			System.out.println("[pricingSnapshot] node=" + node.id + " dir=" + dir.toAbsolutePath()
+					+ " prefix=" + prefix);
+		} catch (IOException ex) {
+			System.err.println("[pricingSnapshot] failed for node " + node.id + ": " + ex.getMessage());
+		}
+	}
+
+	private void writePricingSnapshotSummary(LP lp, Path file) throws IOException {
+		Node node = lp.getNode();
+		int jobArcAllowed = 0;
+		int jobArcForbidden = 0;
+		int pricingOnlyForbidden = 0;
+		for (int from = 1; from <= data.n; from++) {
+			for (int to = 1; to <= data.n; to++) {
+				if (from == to) {
+					continue;
+				}
+				if (isPricingArcForbidden(node, from, to)) {
+					jobArcForbidden++;
+				} else {
+					jobArcAllowed++;
+				}
+				if (node.isPricingOnlyArcForbidden(from, to)) {
+					pricingOnlyForbidden++;
+				}
+			}
+		}
+		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+			out.write("node\t" + node.diagnosticSummary());
+			out.newLine();
+			out.write("n\t" + data.n);
+			out.newLine();
+			out.write("m\t" + data.m);
+			out.newLine();
+			out.write("CmaxH\t" + data.CmaxH);
+			out.newLine();
+			out.write("restrictedColumns\t" + lp.getRestrictedColumnIds().size());
+			out.newLine();
+			out.write("machineDual\t" + lp.getMachineDual());
+			out.newLine();
+			out.write("jobJobPricingForbidden\t" + jobArcForbidden);
+			out.newLine();
+			out.write("jobJobPricingAllowed\t" + jobArcAllowed);
+			out.newLine();
+			out.write("jobJobPricingOnlyForbidden\t" + pricingOnlyForbidden);
+			out.newLine();
+			out.write("requiredAdjacencyPairs\t" + formatPairs(node.getRequiredAdjacencyPairs()));
+			out.newLine();
+			out.write("forbiddenAdjacencyPairs\t" + formatPairs(node.getForbiddenAdjacencyPairs()));
+			out.newLine();
+		}
+	}
+
+	private void writePricingSnapshotJobDuals(LP lp, Path file) throws IOException {
+		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+			out.write("job\tdual");
+			out.newLine();
+			for (int job = 1; job <= data.n; job++) {
+				out.write(job + "\t" + lp.getJobDual(job));
+				out.newLine();
+			}
+		}
+	}
+
+	private void writePricingSnapshotArcs(LP lp, Path file) throws IOException {
+		Node node = lp.getNode();
+		int sink = node.sinkId();
+		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+			out.write("from\tto\trealForbidden\tpricingOnlyForbidden\tpricingForbidden\tarcDual");
+			out.newLine();
+			for (int from = 0; from <= sink; from++) {
+				for (int to = 1; to <= sink; to++) {
+					if (from == to) {
+						continue;
+					}
+					boolean realForbidden = node.isArcForbidden(from, to);
+					boolean pricingOnly = node.isPricingOnlyArcForbidden(from, to);
+					boolean pricingForbidden = isPricingArcForbidden(node, from, to);
+					out.write(from + "\t" + to + "\t" + realForbidden + "\t" + pricingOnly + "\t"
+							+ pricingForbidden + "\t" + lp.getArcDual(from, to));
+					out.newLine();
+				}
+			}
+		}
+	}
+
+	private void writePricingSnapshotColumns(LP lp, Path file) throws IOException {
+		Node node = lp.getNode();
+		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+			out.write("columnId\tcost\tlength\trealForbidden\tpricingOnlyForbidden\tpricingForbidden\tsequence");
+			out.newLine();
+			for (int columnId : lp.getRestrictedColumnIds()) {
+				TWETColumn column = lp.getPool().getColumn(columnId);
+				List<Integer> sequence = column.getSequence();
+				boolean realForbidden = sequenceUsesRealForbiddenArc(node, sequence);
+				boolean pricingOnly = sequenceUsesPricingOnlyForbiddenArc(node, sequence);
+				boolean pricingForbidden = sequenceUsesPricingForbiddenArc(node, sequence);
+				out.write(columnId + "\t" + column.getCost() + "\t" + sequence.size() + "\t" + realForbidden
+						+ "\t" + pricingOnly + "\t" + pricingForbidden + "\t" + formatSequence(sequence));
+				out.newLine();
+			}
+		}
+	}
+
+	private String formatPairs(List<int[]> pairs) {
+		StringBuilder builder = new StringBuilder();
+		for (int[] pair : pairs) {
+			if (builder.length() > 0) {
+				builder.append(' ');
+			}
+			builder.append(pair[0]).append('-').append(pair[1]);
+		}
+		return builder.length() == 0 ? "-" : builder.toString();
+	}
+
+	private String formatSequence(List<Integer> sequence) {
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < sequence.size(); i++) {
+			if (i > 0) {
+				builder.append(' ');
+			}
+			builder.append(sequence.get(i).intValue());
+		}
+		return builder.toString();
+	}
+
+	private boolean sequenceUsesRealForbiddenArc(Node node, List<Integer> sequence) {
+		return sequenceUsesForbiddenArc(node, sequence, ForbiddenArcMode.REAL);
+	}
+
+	private boolean sequenceUsesPricingOnlyForbiddenArc(Node node, List<Integer> sequence) {
+		return sequenceUsesForbiddenArc(node, sequence, ForbiddenArcMode.PRICING_ONLY);
+	}
+
+	private boolean sequenceUsesPricingForbiddenArc(Node node, List<Integer> sequence) {
+		return sequenceUsesForbiddenArc(node, sequence, ForbiddenArcMode.PRICING);
+	}
+
+	private boolean sequenceUsesForbiddenArc(Node node, List<Integer> sequence, ForbiddenArcMode mode) {
+		if (sequence.isEmpty()) {
+			return false;
+		}
+		if (isForbiddenByMode(node, 0, sequence.get(0).intValue(), mode)) {
+			return true;
+		}
+		for (int i = 1; i < sequence.size(); i++) {
+			if (isForbiddenByMode(node, sequence.get(i - 1).intValue(), sequence.get(i).intValue(), mode)) {
+				return true;
+			}
+		}
+		return isForbiddenByMode(node, sequence.get(sequence.size() - 1).intValue(), node.sinkId(), mode);
+	}
+
+	private boolean isForbiddenByMode(Node node, int from, int to, ForbiddenArcMode mode) {
+		if (mode == ForbiddenArcMode.REAL) {
+			return node.isArcForbidden(from, to);
+		}
+		if (mode == ForbiddenArcMode.PRICING_ONLY) {
+			return node.isPricingOnlyArcForbidden(from, to);
+		}
+		return isPricingArcForbidden(node, from, to);
+	}
+
+	private enum ForbiddenArcMode {
+		REAL, PRICING_ONLY, PRICING
 	}
 
 	private void initializeBackwardSink(LP lp) {
@@ -1889,15 +2087,15 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {
-		if (node.isArcForbidden(0, sequence.get(0).intValue())) {
+		if (isPricingArcForbidden(node, 0, sequence.get(0).intValue())) {
 			return false;
 		}
 		for (int i = 1; i < sequence.size(); i++) {
-			if (node.isArcForbidden(sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
+			if (isPricingArcForbidden(node, sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
 				return false;
 			}
 		}
-		return !node.isArcForbidden(sequence.get(sequence.size() - 1).intValue(), node.sinkId());
+		return !isPricingArcForbidden(node, sequence.get(sequence.size() - 1).intValue(), node.sinkId());
 	}
 
 	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {

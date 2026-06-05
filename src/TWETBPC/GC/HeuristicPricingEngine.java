@@ -258,15 +258,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (sequence.isEmpty()) {
 			return false;
 		}
-		if (node.isArcForbidden(0, sequence.get(0).intValue())) {
+		if (isPricingArcForbidden(node, 0, sequence.get(0).intValue())) {
 			return false;
 		}
 		for (int i = 1; i < sequence.size(); i++) {
-			if (node.isArcForbidden(sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
+			if (isPricingArcForbidden(node, sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
 				return false;
 			}
 		}
-		return !node.isArcForbidden(sequence.get(sequence.size() - 1).intValue(), node.sinkId());
+		return !isPricingArcForbidden(node, sequence.get(sequence.size() - 1).intValue(), node.sinkId());
+	}
+
+	private boolean isPricingArcForbidden(Node node, int from, int to) {
+		return node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to);
 	}
 
 	private double reducedCost(List<Integer> sequence, double cost, LP lp) {
@@ -481,7 +485,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private boolean isRemoveCompatible(int pos, Node node) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? node.sinkId() : sequence.get(pos + 1).intValue();
-			return !node.isArcForbidden(prev, next);
+			return !isPricingArcForbidden(node, prev, next);
 		}
 
 		private boolean isInsertCompatible(int pos, int job, boolean replace, Node node) {
@@ -489,7 +493,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int suffixStart = replace ? pos + 1 : pos;
 			int prev = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
 			int next = suffixStart >= sequence.size() ? node.sinkId() : sequence.get(suffixStart).intValue();
-			return !node.isArcForbidden(prev, job) && !node.isArcForbidden(job, next);
+			return !isPricingArcForbidden(node, prev, job) && !isPricingArcForbidden(node, job, next);
 		}
 
 		private void rebuild() {

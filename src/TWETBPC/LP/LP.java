@@ -156,14 +156,6 @@ public class LP {
 
 	/** @return 机器数量约束 dual；每条内部列的系数为 1。 */
 	public double getMachineDual() {
-		double override = Double.parseDouble(System.getProperty("twet.bpc.debugMachineDualOverride", "NaN"));
-		int overrideNode = Integer.getInteger("twet.bpc.debugMachineDualOverrideNode", -1);
-		if (overrideNode >= 0 && (node == null || node.id != overrideNode)) {
-			return machineDual;
-		}
-		if (Double.isFinite(override)) {
-			return override;
-		}
 		return machineDual;
 	}
 

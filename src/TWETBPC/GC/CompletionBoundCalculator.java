@@ -703,16 +703,22 @@ final class CompletionBoundCalculator {
 			stats.mergeChanged++;
 			return true;
 		}
-		boolean auditThisMerge = shouldAuditNextChangedMerge();
-		// 2026-06-05: 默认关闭的 011 定位诊断。只在开关打开时复制 before，
-		// 用来区分 changed 来自真实函数下降、定义域扩展，还是不可见变化。
-		PiecewiseLinearFunction beforeAudit = (auditThisMerge || diagnosticChangeSource) ? current.copy() : null;
+		PiecewiseLinearFunction beforeAudit = null;
+		if (diagnosticChangeAudit || diagnosticChangeSource) {
+			boolean auditThisMerge = shouldAuditNextChangedMerge();
+			// 2026-06-05: 默认关闭的 011 定位诊断。只在开关打开时复制 before。
+			beforeAudit = (auditThisMerge || diagnosticChangeSource) ? current.copy() : null;
+		}
 		boolean changed = current.mergeMinimum(candidate, direction, true);
 		if (changed) {
 			stats.mergeChanged++;
 		}
-		classifyChangedMerge(beforeAudit, candidate, current, direction, changed);
-		auditChangedMerge(beforeAudit, current, direction, changed);
+		if (diagnosticChangeSource) {
+			classifyChangedMerge(beforeAudit, candidate, current, direction, changed);
+		}
+		if (diagnosticChangeAudit) {
+			auditChangedMerge(beforeAudit, current, direction, changed);
+		}
 		return changed;
 	}
 

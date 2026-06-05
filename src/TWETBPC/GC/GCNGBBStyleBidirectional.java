@@ -87,7 +87,6 @@ public class GCNGBBStyleBidirectional {
 	private CompletionBoundCalculator.Bounds completionBounds;
 	private boolean[][] completionBoundFixedArc;
 	private double bestGeneratedReducedCost;
-	private long debugStopAfterGeneratedCandidates;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
@@ -443,7 +442,6 @@ public class GCNGBBStyleBidirectional {
 		completionBounds = null;
 		completionBoundFixedArc = null;
 		bestGeneratedReducedCost = Utility.big_M;
-		debugStopAfterGeneratedCandidates = Long.getLong("twet.bpc.debugStopAfterGeneratedCandidates", -1L);
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
@@ -477,7 +475,9 @@ public class GCNGBBStyleBidirectional {
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
-		recordPricingDiagnostics(lp);
+		if (config.diagnosticPricingSummaryDetails) {
+			recordPricingDiagnostics(lp);
+		}
 		precomputeDynamicPricingWindows(lp);
 		buildCompletionBounds(lp);
 
@@ -509,9 +509,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0
-				&& (debugStopAfterGeneratedCandidates < 0
-						|| generatedCandidateCount < debugStopAfterGeneratedCandidates);
+		return config.maxExactPricingColumns > 0;
 	}
 
 	private void forwardExtend(LP lp) {
@@ -1259,23 +1257,7 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + formatDepthHistogram(forwardSinkNegativeByDepth)
 				+ ", forwardReach kept avg/min/max=" + formatAverage(forwardLabelsKeptReachableSum,
 						forwardLabelsKept) + "/" + formatReachableMin() + "/" + forwardLabelsKeptReachableMax
-				+ ", nodeDiag forbiddenJobArcs/pricingOnlyJobArcs/machineDual/jobDual min/max/sum/pos="
-				+ diagnosticForbiddenJobArcCount + "/" + diagnosticPricingOnlyJobArcCount
-				+ "/" + diagnosticMachineDual + "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax
-				+ "/" + diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
-				+ ", nodeDiag jobDual q0/q10/q25/q50/q75/q90/q100="
-				+ formatJobDualQuantiles()
-				+ ", nodeDiag columns/incompat/avgLen=" + diagnosticRestrictedColumnCount
-				+ "/" + diagnosticIncompatibleRestrictedColumnCount + "/"
-				+ String.format("%.3f", diagnosticRestrictedColumnAvgLength)
-				+ ", nodeDiag arcDual allowedNZ/min/max/absSum=" + diagnosticAllowedJobArcDualNonZeroCount
-				+ "/" + diagnosticAllowedJobArcDualMin + "/" + diagnosticAllowedJobArcDualMax
-				+ "/" + diagnosticAllowedJobArcDualAbsSum
-				+ ", forbiddenNZ/absSum=" + diagnosticForbiddenJobArcDualNonZeroCount
-				+ "/" + diagnosticForbiddenJobArcDualAbsSum
-				+ ", sinkNZ/min/max/absSum=" + diagnosticSinkArcDualNonZeroCount
-				+ "/" + diagnosticSinkArcDualMin + "/" + diagnosticSinkArcDualMax
-				+ "/" + diagnosticSinkArcDualAbsSum
+				+ nodeDiagnosticsSummary()
 				+ ", completionBoundQueue=" + completionBoundQueueOrdering
 				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
 				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
@@ -1294,6 +1276,29 @@ public class GCNGBBStyleBidirectional {
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraph.statisticsSummary();
+	}
+
+	private String nodeDiagnosticsSummary() {
+		if (!config.diagnosticPricingSummaryDetails) {
+			return "";
+		}
+		return ", nodeDiag forbiddenJobArcs/pricingOnlyJobArcs/machineDual/jobDual min/max/sum/pos="
+				+ diagnosticForbiddenJobArcCount + "/" + diagnosticPricingOnlyJobArcCount
+				+ "/" + diagnosticMachineDual + "/" + diagnosticJobDualMin + "/" + diagnosticJobDualMax
+				+ "/" + diagnosticJobDualSum + "/" + diagnosticJobDualPositiveCount
+				+ ", nodeDiag jobDual q0/q10/q25/q50/q75/q90/q100="
+				+ formatJobDualQuantiles()
+				+ ", nodeDiag columns/incompat/avgLen=" + diagnosticRestrictedColumnCount
+				+ "/" + diagnosticIncompatibleRestrictedColumnCount + "/"
+				+ String.format("%.3f", diagnosticRestrictedColumnAvgLength)
+				+ ", nodeDiag arcDual allowedNZ/min/max/absSum=" + diagnosticAllowedJobArcDualNonZeroCount
+				+ "/" + diagnosticAllowedJobArcDualMin + "/" + diagnosticAllowedJobArcDualMax
+				+ "/" + diagnosticAllowedJobArcDualAbsSum
+				+ ", forbiddenNZ/absSum=" + diagnosticForbiddenJobArcDualNonZeroCount
+				+ "/" + diagnosticForbiddenJobArcDualAbsSum
+				+ ", sinkNZ/min/max/absSum=" + diagnosticSinkArcDualNonZeroCount
+				+ "/" + diagnosticSinkArcDualMin + "/" + diagnosticSinkArcDualMax
+				+ "/" + diagnosticSinkArcDualAbsSum;
 	}
 
 	private static String formatMillis(long nanos) {

@@ -203,6 +203,15 @@ public class GCBBStyleBidirectionalFullDomain {
 		return lastMessage;
 	}
 
+	CompletionBoundSubtreeArcEliminator.PreparedBounds reusableSubtreeArcEliminationBounds() {
+		if (completionBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
+				|| zeroDualExcludedJobs != null || !Utility.compareEq(pricingHorizon, data.CmaxH)) {
+			return null;
+		}
+		return new CompletionBoundSubtreeArcEliminator.PreparedBounds(completionBounds, pricingHorizon,
+				completionBoundRelaxation, completionBoundQueueOrdering);
+	}
+
 	private LabelQueueOrdering parseQueueOrdering(String value) {
 		if (value == null) {
 			return LabelQueueOrdering.REDUCED_COST;

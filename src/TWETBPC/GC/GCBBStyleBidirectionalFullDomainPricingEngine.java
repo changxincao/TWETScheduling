@@ -15,6 +15,7 @@ public class GCBBStyleBidirectionalFullDomainPricingEngine implements PricingEng
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
 
 	public GCBBStyleBidirectionalFullDomainPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
@@ -23,15 +24,27 @@ public class GCBBStyleBidirectionalFullDomainPricingEngine implements PricingEng
 
 	@Override
 	public PricingResult price(LP lp) {
+		lastReusableSubtreeArcEliminationBounds = null;
 		if (!config.enableBidirectionalPricing) {
 			return PricingResult.noImprovement("GCBB-style full-domain bidirectional pricing disabled");
 		}
 		GCBBStyleBidirectionalFullDomain gc = new GCBBStyleBidirectionalFullDomain(data, config);
 		ArrayList<TWETColumn> columns = gc.solve(lp);
 		if (columns.isEmpty()) {
+			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
 			return PricingResult.noImprovement(gc.getLastMessage());
 		}
 		return new PricingResult(columns, true, gc.getLastMessage());
+	}
+
+	@Override
+	public CompletionBoundSubtreeArcEliminator.PreparedBounds getReusableSubtreeArcEliminationBounds() {
+		return lastReusableSubtreeArcEliminationBounds;
+	}
+
+	@Override
+	public void reset() {
+		lastReusableSubtreeArcEliminationBounds = null;
 	}
 
 	@Override

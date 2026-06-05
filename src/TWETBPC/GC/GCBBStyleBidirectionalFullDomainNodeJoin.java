@@ -424,7 +424,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private void initialize(LP lp) {
 		resetStatistics();
-		PaperDominanceGraph.resetStatistics();
+		PaperDominanceGraphs.resetStatistics();
 		pricingHorizon = data.CmaxH;
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
@@ -447,8 +447,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		minForwardPreNodeReducedCostByLastJob = new double[data.n + 1];
 		minForwardEllByLastJob = new double[data.n + 1];
 		for (int i = 0; i <= data.n; i++) {
-			FWTL.add(new PaperDominanceGraph(Direction.FORWARD));
-			BWTL.add(new PaperDominanceGraph(Direction.BACKWARD));
+			FWTL.add(PaperDominanceGraphs.create(Direction.FORWARD));
+			BWTL.add(PaperDominanceGraphs.create(Direction.BACKWARD));
 			activeForwardByLastJob.add(new ArrayList<ForwardLabel>());
 			activeBackwardByFirstJob.add(new ArrayList<BackwardLabel>());
 			forwardSinglePointByLastJob.add(new SinglePointStore<ForwardLabel>());
@@ -1250,7 +1250,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
-				+ ", " + PaperDominanceGraph.statisticsSummary();
+				+ ", " + PaperDominanceGraphs.statisticsSummary();
 	}
 
 	private static String formatMillis(long nanos) {

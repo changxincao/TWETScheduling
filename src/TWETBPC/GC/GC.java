@@ -100,7 +100,7 @@ public class GC {
 				+ (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", queueOrdering=" + queueOrdering
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
-				+ (usePaperDominanceGraph ? ", " + PaperDominanceGraph.statisticsSummary() : "");
+				+ (usePaperDominanceGraph ? ", " + PaperDominanceGraphs.statisticsSummary() : "");
 		return generatedColumns;
 	}
 
@@ -167,13 +167,13 @@ public class GC {
 
 	private void initialize(LP lp) {
 		if (usePaperDominanceGraph) {
-			PaperDominanceGraph.resetStatistics();
+			PaperDominanceGraphs.resetStatistics();
 		}
 		queueOrdering = parseQueueOrdering(config.forwardLabelQueueOrdering);
 		UL = new PriorityQueue<Label>(queueComparator(queueOrdering));
 		TL = new ArrayList<DominanceStore>(data.n + 1);
 		for (int i = 0; i <= data.n; i++) {
-			TL.add(usePaperDominanceGraph ? new PaperDominanceGraph() : new DominanceGraph());
+			TL.add(usePaperDominanceGraph ? PaperDominanceGraphs.create() : new DominanceGraph());
 		}
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedSignatures = new HashSet<SequenceSignature>();

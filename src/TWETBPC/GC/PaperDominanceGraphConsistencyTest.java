@@ -31,13 +31,20 @@ public class PaperDominanceGraphConsistencyTest {
 		for (int caseId = 0; caseId < CASES; caseId++) {
 			DominanceStore baseline = new DominanceGraph();
 			DominanceStore paper = new PaperDominanceGraph();
+			DominanceStore indexed = new IndexedPaperDominanceGraph();
 			for (int labelId = 0; labelId < LABELS_PER_CASE; labelId++) {
 				LabelPair pair = randomLabelPair(labelId);
 				boolean baselineDominated = baseline.insertOrDominate(pair.baselineLabel);
 				boolean paperDominated = paper.insertOrDominate(pair.paperLabel);
+				boolean indexedDominated = indexed.insertOrDominate(pair.indexedLabel);
 				if (baselineDominated != paperDominated) {
 					throw new AssertionError("PaperDominanceGraph mismatch at case=" + caseId + ", label=" + labelId
 							+ ", baselineDominated=" + baselineDominated + ", paperDominated=" + paperDominated);
+				}
+				if (paperDominated != indexedDominated) {
+					throw new AssertionError("IndexedPaperDominanceGraph mismatch at case=" + caseId + ", label="
+							+ labelId + ", paperDominated=" + paperDominated + ", indexedDominated="
+							+ indexedDominated);
 				}
 				insertions++;
 			}
@@ -51,7 +58,8 @@ public class PaperDominanceGraphConsistencyTest {
 		PiecewiseLinearFunction frontier = randomFrontier();
 		Label baseline = new Label(jid % (JOB_COUNT + 1), null, visited.copy(), reachable.copy(), frontier.copy());
 		Label paper = new Label(jid % (JOB_COUNT + 1), null, visited.copy(), reachable.copy(), frontier.copy());
-		return new LabelPair(baseline, paper);
+		Label indexed = new Label(jid % (JOB_COUNT + 1), null, visited.copy(), reachable.copy(), frontier.copy());
+		return new LabelPair(baseline, paper, indexed);
 	}
 
 	private static PackedBitSet randomReachableSet() {
@@ -82,10 +90,12 @@ public class PaperDominanceGraphConsistencyTest {
 	private static final class LabelPair {
 		final Label baselineLabel;
 		final Label paperLabel;
+		final Label indexedLabel;
 
-		LabelPair(Label baselineLabel, Label paperLabel) {
+		LabelPair(Label baselineLabel, Label paperLabel, Label indexedLabel) {
 			this.baselineLabel = baselineLabel;
 			this.paperLabel = paperLabel;
+			this.indexedLabel = indexedLabel;
 		}
 	}
 

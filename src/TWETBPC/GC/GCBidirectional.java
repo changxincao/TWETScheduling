@@ -232,7 +232,7 @@ public class GCBidirectional {
 
 	private void initialize(LP lp) {
 		resetStatistics();
-		PaperDominanceGraph.resetStatistics();
+		PaperDominanceGraphs.resetStatistics();
 		pricingHorizon = data.CmaxH;
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
@@ -247,8 +247,8 @@ public class GCBidirectional {
 		minForwardReducedCostByLastJob = new double[data.n + 1];
 		minForwardEllByLastJob = new double[data.n + 1];
 		for (int i = 0; i <= data.n; i++) {
-			FWTL.add(new PaperDominanceGraph(Direction.FORWARD));
-			BWTL.add(new PaperDominanceGraph(Direction.BACKWARD));
+			FWTL.add(PaperDominanceGraphs.create(Direction.FORWARD));
+			BWTL.add(PaperDominanceGraphs.create(Direction.BACKWARD));
 			activeForwardByLastJob.add(new ArrayList<ForwardLabel>());
 			forwardSinglePointByLastJob.add(new SinglePointStore<ForwardLabel>());
 			backwardSinglePointByFirstJob.add(new SinglePointStore<BackwardLabel>());
@@ -801,7 +801,7 @@ public class GCBidirectional {
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
-				+ ", " + PaperDominanceGraph.statisticsSummary();
+				+ ", " + PaperDominanceGraphs.statisticsSummary();
 	}
 
 	private void refreshForwardGroupAfterJoinScan(int lastJob, ArrayList<ForwardLabel> candidates, int liveCount,

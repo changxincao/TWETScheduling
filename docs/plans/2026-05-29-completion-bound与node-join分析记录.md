@@ -1320,3 +1320,13 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 调用方也同步恢复为直接信任 `mergeMinimum(..., true)`：`CompletionBoundCalculator.mergeFunction()` 不再调用 `candidateStrictlyImproves()`，而是在 `current.mergeMinimum(candidate, direction, true)` 返回 true 时才增加 `mergeChanged` 并入队。为了继续排查异常，默认关闭的 `completionBoundChangeAudit` 仍保留；它只在抽样审计时复制 before/after，不属于正常路径成本。
 
 这次还补了一个 PWLF 回归测试：等值 candidate 被拆成更多段时，`mergeMinimum(..., true)` 必须返回 false，且不能把 current 拆成更多段；严格更低的 candidate 必须返回 true。验证结果为：带 CPLEX jar 的 focused 编译通过；`PiecewiseLinearFunctionPropertyTest` 为 `passed=24, warnings=2, failed=3`，新增 changed-return 回归通过，剩余 3 个失败仍是历史已知的 disjoint `mergeMinimum` 契约外输入。另用 `tmp-wet020_001_2m` 做 root smoke，结果 `ROOT_PROCESSED`、`incumbent=bound=6343`、`valid=true`。尝试用 `TanakaNoOutsourcingBPCTest` 直接传 `-Dtwet.bpc.completionBound=allCycles` 重跑 011 时，发现该 runner 没有把该 JVM property 写入 `TWETBPCConfig.bidirectionalCompletionBoundRelaxation`，输出仍为 `completionBound=OFF`，因此这条命令不能作为 all-cycles 复核证据；前一轮 011 all-cycles 完整返回结果仍来自显式设置 config 的诊断口径。
+
+### 41.27 2026-06-05 011 当前 HEAD 的 changed 来源复核
+
+按用户要求，本次重新在 `tmp-wet030_from040_011_2m` 上做现场复核，而不是继续拿抽象例子解释。为避免再次混淆旧实现和当前实现，在 `CompletionBoundCalculator` 里新增默认关闭的 `twet.bpc.completionBoundChangeSource` 诊断。该诊断只在开关打开时复制 merge 前函数，并把 `mergeMinimum(..., true)` 返回 changed 的来源分成三类：公共正长度区间上有严格值下降、只发生物理定义域扩展、以及既没有严格下降也没有扩域的不可见 changed。普通运行不开这个开关，不增加热路径成本，也不改变 DP 逻辑。
+
+用 `GCBBFullDomainComparisonTest` 显式设置 `completionBound=allCycles`、`maxNodes=1`、`mode=halfDomain` 重跑 011，当前代码完整返回：`status=NODE_LIMIT`，`valid=true`，`solve=29.923s`，exact pricing 4 次合计 `6.294s`，heuristic pricing 24 次合计 `10.832s`，RMIH 一次 `11.494s`。第一轮 all-cycles builder 统计为 `fCand=7164`、`bCand=7975`、`fPop=246`、`bPop=275`、`merge=30268`、`changed=11727`，其中 `changedClass=11607/0/0`；差额 120 次来自 forward/backward seed 阶段对空 current 的初始赋值，不进入 before/after 分类。后续三轮也分别为 `changedClass=10903/0/0`、`10864/0/0`、`10938/0/0`。这说明当前 HEAD 上，011 的 `mergeMinimum(..., true)` 没有再出现“没变化却 changed”的现场证据。
+
+因此现在需要把两个阶段分清。旧的百万级 `fCand=1467082`、`merge=2934128`、`changed=533780` 是修复 changed 语义前或中间实现口径下的现象；它的直接原因是等值/结构性变化被当作 changed，导致同一 job 反复入队。当前 `mergeMinimum` 已经改成只在 `gNoWorse && gStrictlyBetter` 的真实严格改进小段上替换并置 changed，等值候选不会触发 changed；011 现场复核也支持这一点。也就是说，当前代码里已经不是“一个 Bellman-Ford DP 仍然迭代 100 多万次”的状态，之前的 100 多万次不能再作为当前 HEAD 的性能事实。
+
+当前 011 仍然比 010 重，但瓶颈已经不是 completion-bound builder 的伪 changed 循环。按本次日志，root 总时间主要由 RMIH `11.494s`、heuristic pricing `10.832s`、exact pricing `6.294s` 构成；exact 内部每轮 all-cycles 构造约 `1.06s..1.81s`，并且能剪掉大量 label（第一轮 `fwPruned=4267`、`bwPruned=11956`）。如果后续继续优化 011，优先看 RMIH covering MIP 和 heuristic pricing 接近耗尽时的重复调用，其次才是 all-cycles builder 常数开销；不应再把当前 011 归因于 `mergeMinimum` changed 假阳性。

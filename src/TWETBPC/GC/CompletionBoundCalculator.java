@@ -173,6 +173,12 @@ final class CompletionBoundCalculator {
 	private long diagnosticChangedAudits;
 	private long diagnosticChangedAuditNoSampleImprovement;
 	private double diagnosticLargestSampleImprovement;
+	private final boolean diagnosticChangeSource;
+	private final int diagnosticChangeSourceDumpLimit;
+	private long diagnosticChangedStrictValue;
+	private long diagnosticChangedDomainOnly;
+	private long diagnosticChangedNoVisible;
+	private int diagnosticChangedNoVisibleDumps;
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
@@ -203,6 +209,9 @@ final class CompletionBoundCalculator {
 		this.diagnosticChangeAudit = Boolean.getBoolean("twet.bpc.completionBoundChangeAudit");
 		this.diagnosticChangeAuditInterval = Math.max(1L, Long.getLong(
 				"twet.bpc.completionBoundChangeAuditInterval", 1000L));
+		this.diagnosticChangeSource = Boolean.getBoolean("twet.bpc.completionBoundChangeSource");
+		this.diagnosticChangeSourceDumpLimit = Math.max(0,
+				Integer.getInteger("twet.bpc.completionBoundChangeSourceDumpLimit", 0));
 	}
 
 	Result build(Relaxation relaxation) {
@@ -695,11 +704,14 @@ final class CompletionBoundCalculator {
 			return true;
 		}
 		boolean auditThisMerge = shouldAuditNextChangedMerge();
-		PiecewiseLinearFunction beforeAudit = auditThisMerge ? current.copy() : null;
+		// 2026-06-05: 默认关闭的 011 定位诊断。只在开关打开时复制 before，
+		// 用来区分 changed 来自真实函数下降、定义域扩展，还是不可见变化。
+		PiecewiseLinearFunction beforeAudit = (auditThisMerge || diagnosticChangeSource) ? current.copy() : null;
 		boolean changed = current.mergeMinimum(candidate, direction, true);
 		if (changed) {
 			stats.mergeChanged++;
 		}
+		classifyChangedMerge(beforeAudit, candidate, current, direction, changed);
 		auditChangedMerge(beforeAudit, current, direction, changed);
 		return changed;
 	}
@@ -932,9 +944,18 @@ final class CompletionBoundCalculator {
 				+ " bPop=" + stats.backwardQueuePops
 				+ " merge=" + stats.mergeCalls
 				+ " changed=" + stats.mergeChanged
+				+ changeSourceSummary()
 				+ " audit=" + diagnosticChangedAudits + "/" + diagnosticChangedAuditNoSampleImprovement
 				+ "/" + formatMillis(diagnosticLargestSampleImprovement)
 				+ " stale=" + stats.priorityQueueStalePops);
+	}
+
+	private String changeSourceSummary() {
+		if (!diagnosticChangeSource) {
+			return "";
+		}
+		return " changedClass=" + diagnosticChangedStrictValue + "/"
+				+ diagnosticChangedDomainOnly + "/" + diagnosticChangedNoVisible;
 	}
 
 	private String formatMillis(double millis) {
@@ -969,6 +990,64 @@ final class CompletionBoundCalculator {
 		} else if (Utility.compareGt(bestImprovement, diagnosticLargestSampleImprovement)) {
 			diagnosticLargestSampleImprovement = bestImprovement;
 		}
+	}
+
+	private void classifyChangedMerge(PiecewiseLinearFunction before, PiecewiseLinearFunction candidate,
+			PiecewiseLinearFunction currentAfter, Direction direction, boolean changed) {
+		if (!diagnosticChangeSource || !changed || before == null || before.head == null
+				|| currentAfter == null || currentAfter.head == null) {
+			return;
+		}
+		double bestImprovement = maxStrictImprovement(before, currentAfter);
+		if (Utility.compareGt(bestImprovement, 0.0)) {
+			diagnosticChangedStrictValue++;
+			return;
+		}
+		boolean domainExtended = Utility.compareLt(currentAfter.head.start, before.head.start)
+				|| Utility.compareGt(currentAfter.tail.end, before.tail.end);
+		if (domainExtended) {
+			diagnosticChangedDomainOnly++;
+			return;
+		}
+		diagnosticChangedNoVisible++;
+		if (diagnosticChangedNoVisibleDumps < diagnosticChangeSourceDumpLimit) {
+			diagnosticChangedNoVisibleDumps++;
+			System.out.println("[completion-bound change source] no visible change"
+					+ " direction=" + direction
+					+ " mergeChanged=" + stats.mergeChanged
+					+ " before=" + functionSummary(before, 10)
+					+ " candidate=" + functionSummary(candidate, 10)
+					+ " after=" + functionSummary(currentAfter, 10));
+		}
+	}
+
+	private String functionSummary(PiecewiseLinearFunction function, int maxSegments) {
+		if (function == null || function.head == null) {
+			return "empty";
+		}
+		StringBuilder builder = new StringBuilder();
+		builder.append('[').append(function.head.start).append(',').append(function.tail.end).append("]{");
+		int count = 0;
+		for (Segment seg = function.head; seg != null && count < maxSegments; seg = seg.next, count++) {
+			if (count > 0) {
+				builder.append(';');
+			}
+			builder.append('(').append(seg.start).append(',').append(seg.end)
+					.append(",a=").append(seg.slope).append(",b=").append(seg.intercept).append(')');
+		}
+		if (functionSegmentCount(function) > maxSegments) {
+			builder.append(";...");
+		}
+		builder.append('}');
+		return builder.toString();
+	}
+
+	private int functionSegmentCount(PiecewiseLinearFunction function) {
+		int count = 0;
+		for (Segment seg = function.head; seg != null; seg = seg.next) {
+			count++;
+		}
+		return count;
 	}
 
 	private double maxStrictImprovement(PiecewiseLinearFunction before, PiecewiseLinearFunction after) {

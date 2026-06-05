@@ -89,6 +89,7 @@ public final class CompletionBoundSubtreeArcEliminator {
 			PiecewiseLinearFunction prefix = bounds.forwardFByJob[fromJob];
 			for (int toJob = 1; toJob <= data.n; toJob++) {
 				if (fromJob == toJob || node.isArcForbidden(fromJob, toJob)
+						|| node.isPricingOnlyArcForbidden(fromJob, toJob)
 						|| node.getArcState(fromJob, toJob) == Node.ARC_REQUIRED) {
 					continue;
 				}

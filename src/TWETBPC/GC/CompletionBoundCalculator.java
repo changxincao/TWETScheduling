@@ -260,7 +260,7 @@ final class CompletionBoundCalculator {
 		for (int prev = 0; prev <= data.n; prev++) {
 			ArrayList<Integer> successors = new ArrayList<Integer>();
 			for (int job = 1; job <= data.n; job++) {
-				if (job != prev && isCompletionJobAvailable(job) && !node.isArcForbidden(prev, job)) {
+				if (job != prev && isCompletionJobAvailable(job) && !isCompletionArcForbidden(prev, job)) {
 					successors.add(Integer.valueOf(job));
 				}
 			}
@@ -274,13 +274,17 @@ final class CompletionBoundCalculator {
 		for (int successor = 1; successor <= data.n + 1; successor++) {
 			ArrayList<Integer> predecessors = new ArrayList<Integer>();
 			for (int prev = 1; prev <= data.n; prev++) {
-				if (prev != successor && isCompletionJobAvailable(prev) && !node.isArcForbidden(prev, successor)) {
+				if (prev != successor && isCompletionJobAvailable(prev) && !isCompletionArcForbidden(prev, successor)) {
 					predecessors.add(Integer.valueOf(prev));
 				}
 			}
 			predecessorsByJob[successor] = toIntArray(predecessors);
 		}
 		return predecessorsByJob;
+	}
+
+	private boolean isCompletionArcForbidden(int from, int to) {
+		return node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to);
 	}
 
 	private int[] toIntArray(ArrayList<Integer> values) {

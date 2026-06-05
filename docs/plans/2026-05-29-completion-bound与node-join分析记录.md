@@ -1390,3 +1390,21 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 这也解释了为什么 formal 类策略有时更糟。正式禁弧不只是“图更少所以 bound 更强”，它还会改变 child RMP：一方面可能过滤历史列、改变 restricted column pool；另一方面 forbidden arc 行或 required adjacency 行会改变 LP dual，pricing 的 reduced cost 结构随之变化。`004-formal` 的 node2 已新增 `17066` 条 exact 列，node3 更是 `exact=123.477s/add35370`、`fw kept=139952`、`forwardSink visited=139898`，pool 到 `56383`。`formalSkipFilter` 的 node2 直接新增 `60451` 条列，pool/restricted 都到 `65843`。也就是说 formal 写入 child 后，虽然物理弧更少，但 dual 诱导出的负 reduced-cost 路径更多，且 reachable key 更分散，反而把 PaperDominanceGraph 推到更坏区域。005 的旧 maxNodes=2 结果里 formal 曾经有利，是因为该样例的 dual/列池变化没有诱发负列暴涨，反而降低了 node2 的 `fw kept`；这说明 formal 的收益高度依赖实例和节点，不适合无保护默认开启。
 
 因此当前更客观的结论是：这不是 completion-bound DP 死循环，也不是 Java 死锁；是 exact pricing 中 paper dominance graph 的关系查询在某些节点进入了组合爆炸区。触发条件一般包括：LP dual 使大量 forward label 仍有负或接近负的潜力；completion bound/pricing-only arc 没有把扩展压到足够小；reachableSet 的包含关系分散，same-key 复用少，导致 `nodeByReachableSet` 命中少；以及 formal 分支行或列池变化让负列批量出现。后续若要继续优化，应优先考虑给 `PaperDominanceGraph` 加 finer-grained 计数和保护，例如按 cardinality 分层索引 superset/subset 查询、限制单次 exact pricing 返回列数或 label 数、对访问量异常的 node 回退为更粗的 dominance/heap top-K，或者让 subtree formal-on 受 child 列池保留率、第一轮 `fw kept/forwardSink negative/subset visited` 等指标保护。
+
+### 41.32 2026-06-05 `PaperDominanceGraph` DFS 热点的精确优化方向
+
+继续追问“是不是大部分时间耗在 DFS 找集合”时，需要分清全局和局部。对当前卡住的 004/005 后续节点，是的，线程采样反复落在 `findTerminalSupersetNodes()` 和 `findImmediateSubsetNodes()`，而且 004-pricingOnly node9 的完整日志已经显示，即使该节点能在 7.142s 内完成，两轮 exact pricing 也分别有 `superset visited=138185/127438`、`subset visited=384084/341578`。completion-bound 构造在同一节点只有约 `10..20ms`，因此当前卡点不是 bound DP，而是 dominance graph 为维护 reachable-set 包含关系做的大量 DFS 和 bitset 包含判断。这个判断只针对这些爆炸节点；根节点和轻节点仍可能主要耗在 heuristic pricing、RMIH 或 completion-bound 构造。
+
+当前 `PaperDominanceGraph` 的查询没有集合索引。`findTerminalSupersetNodes(target)` 从 roots 出发，只沿 `reachableKey` 是 target 超集的 successor 往下 DFS，最后返回没有更深超集的 terminal superset；`findImmediateSubsetNodes(newKey, predecessors)` 从 roots 或 predecessor 的 successor 出发，沿 DAG 找 `reachableKey` 是 newKey 子集的节点，再用 `removeRedundantSubsetCandidates()` 保留极大子集。这个逻辑本身是精确的，但当 active reachable key 很多且交叉包含关系复杂时，每插入一个新 node 都要在 DAG 上重新搜索，subset 查询尤其容易放大。004-pricingOnly node9 第一轮 `nodes created=11062`，对应 `subset visited=384084`，已经说明平均每次插入都不是常数级操作；off/formal 在后续节点把 reachable key 数继续放大后，就会长时间停在这里。
+
+如果要求“精确办法”，不应采用 label 上限、top-K、随机丢弃、近似 dominance 这类策略；那些只能作为保护开关，会改变列生成结果。比较稳的精确优化是保留现有 dominance 语义，只替换 superset/subset 候选枚举后端。
+
+第一步建议做 cardinality 分层索引。每个 active `PaperDominanceNode` 按 `reachableCardinality` 放入桶。superset 查询只需要检查 cardinality 不小于 `target` 的桶，subset 查询只需要检查 cardinality 不大于 `newKey` 的桶。这个改动最小，结果完全一致，但剪枝力度有限，更多是低风险基线。
+
+更有效的方案是给每个 terminal-job 的 `PaperDominanceGraph` 维护 inverted index：对每个 job bit `j`，维护所有 active node 中 `reachableKey` 包含 `j` 的集合。superset 查询 target 时，所有候选必须同时出现在 target 中每个 job 的 posting list 里。实现上可以用 `BitSet` 或 node id 集合，从 target 中 posting 最短的 job 开始，逐个求交，再用 `reachableKey.isSupersetOf(target)` 做最终校验。得到所有 active superset 后，再按当前语义过滤 terminal superset：若某个 candidate 存在 active successor 仍是 target 的超集，则它不是 terminal；否则保留。这样返回集合和原 DFS 一致，但枚举范围从“沿 DAG 访问大量节点”变成“posting 交集后的少量候选”。
+
+subset 查询也可以精确索引化。`S ⊆ newKey` 等价于 S 不包含任何 `U \ newKey` 中的 job。维护 active node 全集和每个 job 的 posting 后，可先取 cardinality 不大于 `|newKey|` 的 active node，再减去所有 excluded job posting 的并集，剩下的候选再用 `isSubsetOf(newKey)` 校验。之后仍按当前 `removeRedundantSubsetCandidates()` 的语义保留极大子集，即如果候选 A 被另一个候选 B 超集覆盖，A 不作为 immediate successor。这里也可以继续用现有排序 pairwise 检查，第一版先保证正确；若候选仍大，再用同一个 superset index 在候选集合内判断是否已有 kept superset，避免 `O(k^2)`。
+
+实现时要注意三点。第一，索引必须和 node active 状态同步；创建 node 时加入 cardinality 桶和各 job posting，删除 node 时可以急切移除，也可以 lazy 标记 inactive 并在查询过滤时跳过。第二，索引化查询初期应保留旧 DFS 作为 debug 对照开关，在小样例或抽样节点上比较旧结果和新结果的 node id 集合，确认 terminal superset 和 immediate subset 完全一致后再默认启用。第三，若 n 不超过 63，可以给 reachableKey 缓存一个 `long mask` 快速做 subset/superset；更通用的实现仍应保留 `PackedBitSet` 路径，避免后续 100 job 算例受限。
+
+因此当前推荐的精确优化路线是：先给 `PaperDominanceGraph` 增加更细的统计，把 superset/subset 查询分别输出 calls、visited、candidate、terminal/immediate kept 和最大单次访问量；然后实现 indexed superset/subset backend，并用旧 DFS 做一致性断言；最后再复测 004/005 的 off/pricingOnly 后续节点。若索引后 node9 这类 `subset visited` 从几十万降到候选过滤级别，而 pricing 结果和列集合一致，就说明这条优化解决的是当前真实热路径。subtree、completion bound 仍然有用，但它们是减少输入规模；这个索引优化才是直接降低 dominance graph 集合查询复杂度。

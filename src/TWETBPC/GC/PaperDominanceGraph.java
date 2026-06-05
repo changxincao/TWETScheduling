@@ -28,6 +28,8 @@ import TWETBPC.Util.PackedBitSet;
  */
 final class PaperDominanceGraph implements DominanceStore {
 
+	private static final boolean TIMING_DIAGNOSTIC = Boolean.getBoolean("twet.bpc.paperGraphTiming");
+
 	private static long labelsInserted;
 	private static long labelsRejected;
 	private static long nodesCreated;
@@ -35,12 +37,17 @@ final class PaperDominanceGraph implements DominanceStore {
 	private static long labelsDeletedByPropagation;
 	private static long supersetSearchCalls;
 	private static long supersetNodesVisited;
+	private static long supersetSearchNanos;
+	private static long maxSupersetSearchNanos;
 	private static long subsetSearchCalls;
 	private static long subsetNodesVisited;
+	private static long subsetSearchNanos;
+	private static long maxSubsetSearchNanos;
 	private static long propagationCalls;
 	private static long propagationNodesVisited;
 	private static long envelopeMergeCalls;
 	private static long dominanceChecks;
+	private static long markSeed;
 
 	private final ArrayList<PaperDominanceNode> nodes = new ArrayList<PaperDominanceNode>();
 	private final LinkedHashSet<PaperDominanceNode> roots = new LinkedHashSet<PaperDominanceNode>();
@@ -63,8 +70,12 @@ final class PaperDominanceGraph implements DominanceStore {
 		labelsDeletedByPropagation = 0;
 		supersetSearchCalls = 0;
 		supersetNodesVisited = 0;
+		supersetSearchNanos = 0;
+		maxSupersetSearchNanos = 0;
 		subsetSearchCalls = 0;
 		subsetNodesVisited = 0;
+		subsetSearchNanos = 0;
+		maxSubsetSearchNanos = 0;
 		propagationCalls = 0;
 		propagationNodesVisited = 0;
 		envelopeMergeCalls = 0;
@@ -77,6 +88,7 @@ final class PaperDominanceGraph implements DominanceStore {
 				+ ", labelsDeleted=" + labelsDeletedByPropagation
 				+ ", superset calls/visited=" + supersetSearchCalls + "/" + supersetNodesVisited
 				+ ", subset calls/visited=" + subsetSearchCalls + "/" + subsetNodesVisited
+				+ timingSummary()
 				+ ", propagate calls/visited=" + propagationCalls + "/" + propagationNodesVisited
 				+ ", envelopeMerges=" + envelopeMergeCalls
 				+ ", dominanceChecks=" + dominanceChecks;
@@ -143,30 +155,41 @@ final class PaperDominanceGraph implements DominanceStore {
 	}
 
 	private ArrayList<PaperDominanceNode> findTerminalSupersetNodes(PackedBitSet target) {
+		long begin = TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
 		supersetSearchCalls++;
 		ArrayList<PaperDominanceNode> result = new ArrayList<PaperDominanceNode>();
-		HashSet<PaperDominanceNode> visited = new HashSet<PaperDominanceNode>();
 		ArrayDeque<PaperDominanceNode> stack = new ArrayDeque<PaperDominanceNode>();
-		for (PaperDominanceNode root : roots) {
-			if (root.active && root.reachableKey.isSupersetOf(target)) {
-				stack.push(root);
-			}
-		}
-		while (!stack.isEmpty()) {
-			PaperDominanceNode node = stack.pop();
-			if (!visited.add(node)) {
-				continue;
-			}
-			supersetNodesVisited++;
-			boolean hasDeeperSuperset = false;
-			for (PaperDominanceNode successor : node.successors) {
-				if (successor.active && successor.reachableKey.isSupersetOf(target)) {
-					stack.push(successor);
-					hasDeeperSuperset = true;
+		long visitMark = nextMark();
+		int targetCardinality = target.cardinality();
+		try {
+			for (PaperDominanceNode root : roots) {
+				if (root.active && root.reachableCardinality >= targetCardinality
+						&& root.reachableKey.isSupersetOf(target)) {
+					stack.push(root);
 				}
 			}
-			if (!hasDeeperSuperset) {
-				result.add(node);
+			while (!stack.isEmpty()) {
+				PaperDominanceNode node = stack.pop();
+				if (node.visitMark == visitMark) {
+					continue;
+				}
+				node.visitMark = visitMark;
+				supersetNodesVisited++;
+				boolean hasDeeperSuperset = false;
+				for (PaperDominanceNode successor : node.successors) {
+					if (successor.active && successor.reachableCardinality >= targetCardinality
+							&& successor.reachableKey.isSupersetOf(target)) {
+						stack.push(successor);
+						hasDeeperSuperset = true;
+					}
+				}
+				if (!hasDeeperSuperset) {
+					result.add(node);
+				}
+			}
+		} finally {
+			if (TIMING_DIAGNOSTIC) {
+				recordSupersetSearchNanos(System.nanoTime() - begin);
 			}
 		}
 		return result;
@@ -204,46 +227,56 @@ final class PaperDominanceGraph implements DominanceStore {
 
 	private ArrayList<PaperDominanceNode> findImmediateSubsetNodes(PackedBitSet newKey,
 			ArrayList<PaperDominanceNode> predecessors) {
+		long begin = TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
 		subsetSearchCalls++;
 		ArrayList<PaperDominanceNode> starts = new ArrayList<PaperDominanceNode>();
-		if (predecessors.isEmpty()) {
-			starts.addAll(roots);
-		} else {
-			HashSet<PaperDominanceNode> startSet = new HashSet<PaperDominanceNode>();
-			for (PaperDominanceNode predecessor : predecessors) {
-				for (PaperDominanceNode successor : predecessor.successors) {
-					if (startSet.add(successor)) {
-						starts.add(successor);
+		long startMark = nextMark();
+		long visitMark = nextMark();
+		int newCardinality = newKey.cardinality();
+		try {
+			if (predecessors.isEmpty()) {
+				starts.addAll(roots);
+			} else {
+				for (PaperDominanceNode predecessor : predecessors) {
+					for (PaperDominanceNode successor : predecessor.successors) {
+						if (successor.startMark != startMark) {
+							successor.startMark = startMark;
+							starts.add(successor);
+						}
 					}
 				}
 			}
-		}
 
-		ArrayList<PaperDominanceNode> candidates = new ArrayList<PaperDominanceNode>();
-		HashSet<PaperDominanceNode> visited = new HashSet<PaperDominanceNode>();
-		ArrayDeque<PaperDominanceNode> stack = new ArrayDeque<PaperDominanceNode>();
-		for (PaperDominanceNode start : starts) {
-			if (start.active) {
-				stack.push(start);
-			}
-		}
-		while (!stack.isEmpty()) {
-			PaperDominanceNode node = stack.pop();
-			if (!visited.add(node)) {
-				continue;
-			}
-			subsetNodesVisited++;
-			if (node.reachableKey.isSubsetOf(newKey)) {
-				candidates.add(node);
-				continue;
-			}
-			for (PaperDominanceNode successor : node.successors) {
-				if (successor.active) {
-					stack.push(successor);
+			ArrayList<PaperDominanceNode> candidates = new ArrayList<PaperDominanceNode>();
+			ArrayDeque<PaperDominanceNode> stack = new ArrayDeque<PaperDominanceNode>();
+			for (PaperDominanceNode start : starts) {
+				if (start.active) {
+					stack.push(start);
 				}
 			}
+			while (!stack.isEmpty()) {
+				PaperDominanceNode node = stack.pop();
+				if (node.visitMark == visitMark) {
+					continue;
+				}
+				node.visitMark = visitMark;
+				subsetNodesVisited++;
+				if (node.reachableCardinality <= newCardinality && node.reachableKey.isSubsetOf(newKey)) {
+					candidates.add(node);
+					continue;
+				}
+				for (PaperDominanceNode successor : node.successors) {
+					if (successor.active) {
+						stack.push(successor);
+					}
+				}
+			}
+			return removeRedundantSubsetCandidates(candidates);
+		} finally {
+			if (TIMING_DIAGNOSTIC) {
+				recordSubsetSearchNanos(System.nanoTime() - begin);
+			}
 		}
-		return removeRedundantSubsetCandidates(candidates);
 	}
 
 	private ArrayList<PaperDominanceNode> removeRedundantSubsetCandidates(ArrayList<PaperDominanceNode> candidates) {
@@ -377,33 +410,44 @@ final class PaperDominanceGraph implements DominanceStore {
 	 * 这里直接在 DFS 里累计最优值，避免先构造候选列表、再做第二遍扫描。
 	 */
 	private double bestTerminalSupersetPointDominanceValue(PackedBitSet target, double pointTime) {
+		long begin = TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
 		supersetSearchCalls++;
 		double best = Utility.big_M;
-		HashSet<PaperDominanceNode> visited = new HashSet<PaperDominanceNode>();
 		ArrayDeque<PaperDominanceNode> stack = new ArrayDeque<PaperDominanceNode>();
-		for (PaperDominanceNode root : roots) {
-			if (root.active && root.reachableKey.isSupersetOf(target)) {
-				stack.push(root);
-			}
-		}
-		while (!stack.isEmpty()) {
-			PaperDominanceNode node = stack.pop();
-			if (!visited.add(node)) {
-				continue;
-			}
-			supersetNodesVisited++;
-			boolean hasDeeperSuperset = false;
-			for (PaperDominanceNode successor : node.successors) {
-				if (successor.active && successor.reachableKey.isSupersetOf(target)) {
-					stack.push(successor);
-					hasDeeperSuperset = true;
+		long visitMark = nextMark();
+		int targetCardinality = target.cardinality();
+		try {
+			for (PaperDominanceNode root : roots) {
+				if (root.active && root.reachableCardinality >= targetCardinality
+						&& root.reachableKey.isSupersetOf(target)) {
+					stack.push(root);
 				}
 			}
-			if (!hasDeeperSuperset) {
-				double candidateValue = pointDominanceValue(node.dominanceEnvelope, pointTime);
-				if (Utility.compareLt(candidateValue, best)) {
-					best = candidateValue;
+			while (!stack.isEmpty()) {
+				PaperDominanceNode node = stack.pop();
+				if (node.visitMark == visitMark) {
+					continue;
 				}
+				node.visitMark = visitMark;
+				supersetNodesVisited++;
+				boolean hasDeeperSuperset = false;
+				for (PaperDominanceNode successor : node.successors) {
+					if (successor.active && successor.reachableCardinality >= targetCardinality
+							&& successor.reachableKey.isSupersetOf(target)) {
+						stack.push(successor);
+						hasDeeperSuperset = true;
+					}
+				}
+				if (!hasDeeperSuperset) {
+					double candidateValue = pointDominanceValue(node.dominanceEnvelope, pointTime);
+					if (Utility.compareLt(candidateValue, best)) {
+						best = candidateValue;
+					}
+				}
+			}
+		} finally {
+			if (TIMING_DIAGNOSTIC) {
+				recordSupersetSearchNanos(System.nanoTime() - begin);
 			}
 		}
 		return best;
@@ -449,6 +493,42 @@ final class PaperDominanceGraph implements DominanceStore {
 		to.predecessors.remove(from);
 	}
 
+	private static long nextMark() {
+		markSeed++;
+		if (markSeed == Long.MAX_VALUE) {
+			markSeed = 1;
+		}
+		return markSeed;
+	}
+
+	private static void recordSupersetSearchNanos(long nanos) {
+		supersetSearchNanos += nanos;
+		if (nanos > maxSupersetSearchNanos) {
+			maxSupersetSearchNanos = nanos;
+		}
+	}
+
+	private static void recordSubsetSearchNanos(long nanos) {
+		subsetSearchNanos += nanos;
+		if (nanos > maxSubsetSearchNanos) {
+			maxSubsetSearchNanos = nanos;
+		}
+	}
+
+	private static String formatMillis(long nanos) {
+		return Double.toString(Math.round((nanos / 1000000.0) * 1000.0) / 1000.0);
+	}
+
+	private static String timingSummary() {
+		if (!TIMING_DIAGNOSTIC) {
+			return "";
+		}
+		return ", superset ms/max=" + formatMillis(supersetSearchNanos) + "/"
+				+ formatMillis(maxSupersetSearchNanos)
+				+ ", subset ms/max=" + formatMillis(subsetSearchNanos) + "/"
+				+ formatMillis(maxSubsetSearchNanos);
+	}
+
 	private static final class PaperDominanceNode {
 		final PackedBitSet reachableKey;
 		final int reachableCardinality;
@@ -460,6 +540,8 @@ final class PaperDominanceGraph implements DominanceStore {
 		PiecewiseLinearFunction predecessorEnvelope;
 		PiecewiseLinearFunction dominanceEnvelope;
 		boolean active = true;
+		long startMark;
+		long visitMark;
 
 		PaperDominanceNode(PackedBitSet reachableKey, Direction direction) {
 			this.reachableKey = reachableKey.copy();

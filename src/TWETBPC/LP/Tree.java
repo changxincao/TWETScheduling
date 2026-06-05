@@ -68,6 +68,7 @@ public class Tree {
 			Node node = queue.poll();
 			node.id = ++processedNodes;
 			traceSink.onNodePicked(node, queue.size(), pool.size(), cutPool.size());
+			heartbeat(node, "node.pick " + node.diagnosticSummary());
 
 			// 2026-05-19: 对齐旧 VRP 的 sudo_cost 预剪枝。root 的 pseudoCost 是占位大数，不能用来剪；
 			// 非根节点若 pseudoCost 已不小于 incumbent，由于队列按 pseudoCost 升序，当前节点和剩余节点

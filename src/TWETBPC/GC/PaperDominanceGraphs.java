@@ -25,6 +25,10 @@ final class PaperDominanceGraphs {
 		PaperDominanceGraph.resetStatistics();
 	}
 
+	static void setDiagnosticContext(String context) {
+		PaperDominanceGraph.setDiagnosticContext(context);
+	}
+
 	static String statisticsSummary() {
 		return PaperDominanceGraph.statisticsSummary();
 	}

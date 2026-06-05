@@ -155,6 +155,55 @@ public class Node implements Comparable<Node> {
 				&& to < pricingOnlyForbiddenArc[from].length && pricingOnlyForbiddenArc[from][to];
 	}
 
+	public int countRequiredArcStates() {
+		return countArcStates(ARC_REQUIRED);
+	}
+
+	public int countForbiddenArcStates() {
+		return countArcStates(ARC_FORBIDDEN);
+	}
+
+	public int countPricingOnlyForbiddenArcs() {
+		int count = 0;
+		for (int from = 0; from < pricingOnlyForbiddenArc.length; from++) {
+			for (int to = 0; to < pricingOnlyForbiddenArc[from].length; to++) {
+				if (pricingOnlyForbiddenArc[from][to]) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
+	public int countRequiredAdjacencyPairs() {
+		return countAdjacencyPairs(ADJACENCY_REQUIRED);
+	}
+
+	public int countForbiddenAdjacencyPairs() {
+		return countAdjacencyPairs(ADJACENCY_FORBIDDEN);
+	}
+
+	public int countRequiredTariffSegments() {
+		return countTariffSegments(SEGMENT_REQUIRED);
+	}
+
+	public int countForbiddenTariffSegments() {
+		return countTariffSegments(SEGMENT_FORBIDDEN);
+	}
+
+	/**
+	 * 2026-06-05: 轻量节点诊断摘要，只用于 heartbeat / paper graph 运行中定位卡点。
+	 */
+	public String diagnosticSummary() {
+		return "id=" + id + ",depth=" + depth + ",pseudo=" + pseudoCost + ",machine=[" + minMachineCount + ","
+				+ maxMachineCount + "],seed=" + seedColumnIds.size() + ",cuts=" + activeCutIds.size()
+				+ ",arcReq=" + countRequiredArcStates() + ",arcForbid=" + countForbiddenArcStates()
+				+ ",pricingOnlyArc=" + countPricingOnlyForbiddenArcs()
+				+ ",adjReq=" + countRequiredAdjacencyPairs() + ",adjForbid=" + countForbiddenAdjacencyPairs()
+				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
+				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment;
+	}
+
 	public void requireArc(int from, int to) {
 		arcState[from][to] = ARC_REQUIRED;
 	}
@@ -237,6 +286,40 @@ public class Node implements Comparable<Node> {
 		byte[] expanded = new byte[segment + 1];
 		System.arraycopy(tariffSegmentState, 0, expanded, 0, tariffSegmentState.length);
 		tariffSegmentState = expanded;
+	}
+
+	private int countArcStates(byte state) {
+		int count = 0;
+		for (int from = 0; from < arcState.length; from++) {
+			for (int to = 0; to < arcState[from].length; to++) {
+				if (arcState[from][to] == state) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
+	private int countAdjacencyPairs(byte state) {
+		int count = 0;
+		for (int first = 1; first <= data.n; first++) {
+			for (int second = first + 1; second <= data.n; second++) {
+				if (adjacencyPairState[first][second] == state) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
+	private int countTariffSegments(byte state) {
+		int count = 0;
+		for (int segment = 0; segment < tariffSegmentState.length; segment++) {
+			if (tariffSegmentState[segment] == state) {
+				count++;
+			}
+		}
+		return count;
 	}
 
 	public boolean hasRequiredArcs() {

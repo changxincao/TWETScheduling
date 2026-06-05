@@ -431,6 +431,7 @@ public class GCNGBBStyleBidirectional {
 
 	private void initialize(LP lp) {
 		resetStatistics();
+		PaperDominanceGraphs.setDiagnosticContext(pricingDiagnosticContext(lp));
 		PaperDominanceGraphs.resetStatistics();
 		pricingHorizon = data.CmaxH;
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
@@ -492,6 +493,11 @@ public class GCNGBBStyleBidirectional {
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
 		}
+	}
+
+	private String pricingDiagnosticContext(LP lp) {
+		Node node = lp == null ? null : lp.getNode();
+		return node == null ? "node=-" : node.diagnosticSummary();
 	}
 
 	private void initializeBackwardSink(LP lp) {

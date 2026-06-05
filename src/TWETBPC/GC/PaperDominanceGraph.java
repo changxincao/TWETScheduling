@@ -55,6 +55,7 @@ final class PaperDominanceGraph implements DominanceStore {
 	private static long markSeed;
 	private static long timingStartNanos;
 	private static long nextTimingHeartbeatNanos;
+	private static String diagnosticContext = "";
 
 	private final ArrayList<PaperDominanceNode> nodes = new ArrayList<PaperDominanceNode>();
 	private final LinkedHashSet<PaperDominanceNode> roots = new LinkedHashSet<PaperDominanceNode>();
@@ -90,6 +91,10 @@ final class PaperDominanceGraph implements DominanceStore {
 		propagationNodesVisited = 0;
 		envelopeMergeCalls = 0;
 		dominanceChecks = 0;
+	}
+
+	static void setDiagnosticContext(String context) {
+		diagnosticContext = context == null ? "" : context;
 	}
 
 	static String statisticsSummary() {
@@ -561,6 +566,7 @@ final class PaperDominanceGraph implements DominanceStore {
 		}
 		nextTimingHeartbeatNanos = now + TIMING_HEARTBEAT_INTERVAL_NANOS;
 		System.out.println("[paperGraph heartbeat] phase=" + phase
+				+ " context=" + diagnosticContext
 				+ " elapsedMs=" + formatMillis(now - timingStartNanos)
 				+ " labels=" + labelsInserted + "/" + labelsRejected
 				+ " nodes=" + nodesCreated + "/" + nodesDeleted

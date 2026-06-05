@@ -1342,3 +1342,17 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 需要注意的是，这个判断依赖 current 已经是方向化闭包函数。如果 current 不是 prefix/suffix-min 后的函数，确实可能存在“局部更低但被已有更早/更晚的低值闭包覆盖”的场景；那属于 `mergeMinimum` 输入契约外。当前 completion-bound builder 中，target 函数每次 merge 后都会 normalize，后续 candidate 也由这些已闭包函数继续传播，因此满足这个前提。
 
 本次补充了一个直接来自 011 旧假阳性的回归测试：`before` 左段 `[60,147]` 为常数高值，右段 `[147,244]` 与 `candidate` 完全相同，要求 `mergeMinimum(..., true)` 返回 `false` 且 merge 后函数值不变。这个测试覆盖的正是旧 `p.end==start` 边界点误判，而不是人工构造的等值拆段。重新运行 `PiecewiseLinearFunctionPropertyTest` 后，changed-return 回归通过；整体结果为 `passed=24, warnings=2, failed=3`，剩余失败仍是历史已知的 disjoint `mergeMinimum` 契约外输入和随机 disjoint 样例，不是 changed 判断引入的新问题。
+
+### 41.29 2026-06-05 changed 修复后 all-cycles/two-cycle 与 30-job 卡点复测
+
+按当前 HEAD 重新跑 `tmp-wet030_001_2m` root-only 对照，配置为 half-domain、`maxNodes=1`，只切换 `completionBound=allCycles/twoCycle`。当前 all-cycles 为 `NODE_LIMIT, valid=true, solve=13.735s, exact=3.475s/4, completion-bound buildMs 合计约 2.718s`；two-cycle 为 `NODE_LIMIT, valid=true, solve=32.089s, exact=22.098s/4, completion-bound buildMs 合计约 21.332s`。两者的 incumbent、bound 和列池规模一致，都是 `incumbent=15325, bound=15261.833333, pool=4896`。
+
+这组结果说明 changed 假阳性修正后，two-cycle 仍然显著慢于 all-cycles。以前记录中 two-cycle build 合计约 `30.034s`，当前降到约 `21.332s`，可能确实受 changed 语义修正和运行环境波动影响；但 all-cycles 当前 build 约 `2.718s`，two-cycle 仍约为其 `7.85` 倍，solve 总时间差仍有约 `18.35s`。因此原先“two-cycle 的主要问题是二维状态传播导致 candidate/merge 数量大幅放大”的结论没有被推翻，只是差距幅度比旧日志小。当前 root 日志中 all-cycles 四轮 completion-bound internal 统计合计约 `fw=0.514s, bw=2.181s`；two-cycle 为 `fw=4.184s, bw=16.863s, agg=0.259s`，主要慢点仍在 backward/二维状态传播，而不是 final join 或 LP。
+
+随后重跑此前没有完整返回记录的 30-job 截断样例，统一使用 half-domain、`completionBound=allCycles`、`maxNodes=2`，并显式关闭 `completionBoundSubtreeArcElimination=false` 和 `completionBoundSubtreeArcEliminationPricingOnly=false`。需要说明的是，日志里仍会出现 `subtreeArcElimination.start` heartbeat；这是 `Tree` 进入评估函数前的阶段打印，配置关闭时 `CompletionBoundSubtreeArcEliminator.evaluate()` 会直接返回不可用结果，不会把删弧正式继承到 child，也不会作为 pricing-only fixing 生效。
+
+本轮 `009/011/013/014/015` 均能正常返回，不再复现“600 秒没有写 summary”的状态。结果分别为：`009 ROOT_PROCESSED, solve=9.454s, exact=2.402s/3, obj=bound=14065`；`011 NODE_LIMIT, solve=35.337s, exact=6.014s/6, incumbent=14258, bound=13525.866667, gap=5.135%`；`013 NODE_LIMIT, solve=18.842s, exact=8.651s/7, incumbent=14433, bound=14287.625, gap=1.007%`；`014 ROOT_PROCESSED, solve=17.598s, exact=10.858s/4, obj=bound=10288`；`015 ROOT_PROCESSED, solve=14.830s, exact=6.726s/5, obj=bound=13394`。所有结果均 `valid=true`。
+
+从 pricing summary 看，这几个 30-job 样例仍然难度差别很大。`009` 很轻，最大 exact 规模只有 `fw kept=94, bw kept=258, join pairs tried=838`。`011` 已经明显变重，最大约为 `fw kept=461, bw kept=835, join pairs tried=20633`。`013` 的双向 label 和 join 都大，最大约为 `fw kept=2938, bw kept=3250, join pairs tried=265935`。`014` 和 `015` 的特点是 backward 侧很重，`014` 最大 `bw kept=11514, join pairs tried=244071`，`015` 最大 `bw kept=6508, join pairs tried=177822`。这解释了为什么同样是 30 个任务，运行时间和卡点完全不同：真正决定 exact pricing 难度的是 LP 对偶、时间窗、setup/processing 结构和 completion-bound 剪枝后的 label/join 状态规模，而不是 job 数本身。
+
+当前对“之前求解不动”的判断也要更新。旧的 011/013/014/015 空目录不是统计脚本漏读，而是在旧 changed 语义或旧配置下确实没有返回到写 CSV；但在当前 changed 修复后，显式启用 all-cycles completion bound 并关闭 subtree，5 个样例都能返回，说明旧的长时间不返回很大程度上受 completion-bound builder 的 changed 假阳性影响。现在剩余的性能差异主要来自不同样例的 label/join 规模：013/014/015 仍比 009/011 重，但已经是几十秒内可控的重，而不是 DP 死循环或无限传播。

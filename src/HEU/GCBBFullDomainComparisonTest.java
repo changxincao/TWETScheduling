@@ -176,7 +176,11 @@ public class GCBBFullDomainComparisonTest {
 		config.diagnosticStageHeartbeat = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.stageHeartbeat",
 				Boolean.toString(config.diagnosticStageHeartbeat)));
+		config.diagnosticNodeProgressSummary = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.nodeProgressSummary",
+				Boolean.toString(config.diagnosticNodeProgressSummary)));
 		config.diagnosticPricingSummaryDetails = config.diagnosticStageHeartbeat
+				|| config.diagnosticNodeProgressSummary
 				|| Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.pricingDiagnostics",
 						Boolean.toString(config.diagnosticPricingSummaryDetails)));
 		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);

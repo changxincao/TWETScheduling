@@ -92,7 +92,7 @@ public class TWETBPCContext {
 		}
 		branchers.add(new ArcBrancher(config.branchingTolerance));
 
-		this.traceSummary = new BPCTraceSummary();
+		this.traceSummary = new BPCTraceSummary(config);
 		this.consoleReporter = new BPCConsoleReporter();
 		ArrayList<BPCTraceSink> sinks = new ArrayList<BPCTraceSink>();
 		sinks.add(traceSummary);

@@ -152,6 +152,8 @@ public class TWETBPCConfig {
 	public int restrictedMasterIntegerHeuristicRepairEnumerationDuplicateLimit = 5;
 	/** 2026-06-04: 长运行诊断用阶段开始 heartbeat；默认关闭，不改变求解逻辑。 */
 	public boolean diagnosticStageHeartbeat = false;
+	/** 2026-06-05: 每个节点处理完成后输出一行聚合诊断，便于定位长跑主要耗时阶段。 */
+	public boolean diagnosticNodeProgressSummary = false;
 	/** 2026-06-05: subtree/dual 诊断明细；默认关闭，避免每轮 pricing 扫描列池和所有 job arc。 */
 	public boolean diagnosticPricingSummaryDetails = false;
 

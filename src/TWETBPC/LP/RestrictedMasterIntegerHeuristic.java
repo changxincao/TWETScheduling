@@ -27,9 +27,9 @@ import ilog.cplex.IloCplex;
 /**
  * 当前节点 restricted master 的整数化启发式。
  * <p>
- * 这个组件不修改原 LP 对象，只复用当前列池、节点分支状态和 outsourcing tariff 结构，单独构造整数
- * RMP。2026-06-04: 支持两种上界刷新口径：全量 exact-cover partition MIP，以及 screened covering
- * MIP + 重复覆盖修复列 + exact-cover partition MIP。
+ * 这个组件不修改原 LP 对象，只把当前列池作为候选列来源；整数模型按全局上界启发式口径构造，不加入当前
+ * 节点的 machine/arc/adjacency/tariff 分支行。2026-06-04: 支持两种上界刷新口径：全量 exact-cover
+ * partition MIP，以及 screened covering MIP + 重复覆盖修复列 + exact-cover partition MIP。
  */
 public final class RestrictedMasterIntegerHeuristic {
 

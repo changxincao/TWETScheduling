@@ -800,6 +800,25 @@ public class PiecewiseLinearFunctionPropertyTest {
 		ok &= checkClose("mergeMinimum changed return equal value at left", evalRef(equalBase, 0), evalRef(equalMerged, 0));
 		ok &= checkClose("mergeMinimum changed return equal value at right", evalRef(equalBase, 10), evalRef(equalMerged, 10));
 
+		PiecewiseLinearFunction leftBigMBase = function(0, 10, seg(0, 10, 0, 5));
+		PiecewiseLinearFunction leftBigMCandidate = function(-5, 10, seg(-5, 0, 0, Utility.big_M),
+				seg(0, 10, 0, 5));
+		int leftBigMSegments = segmentCount(leftBigMBase);
+		boolean leftBigMChanged = leftBigMBase.mergeMinimum(leftBigMCandidate,
+				PiecewiseLinearFunction.Direction.FORWARD, true);
+		if (leftBigMChanged) {
+			fail("mergeMinimum changed return: forward left BigM extension",
+					"left BigM-only extension is removed by forward normalize and must not report changed");
+			ok = false;
+		}
+		if (!Utility.compareEq(leftBigMBase.head.start, 0.0) || segmentCount(leftBigMBase) != leftBigMSegments
+				|| !Utility.compareEq(leftBigMBase.evaluate(0), 5.0)
+				|| !Utility.compareEq(leftBigMBase.evaluate(10), 5.0)) {
+			fail("mergeMinimum changed return: forward left BigM extension result",
+					"left BigM-only extension should leave the normalized envelope unchanged");
+			ok = false;
+		}
+
 		PiecewiseLinearFunction strictMerged = equalBase.copy();
 		PiecewiseLinearFunction strictCandidate = function(0, 20, seg(0, 10, 0, 4));
 		boolean strictChanged = strictMerged.mergeMinimum(strictCandidate, PiecewiseLinearFunction.Direction.FORWARD, true);

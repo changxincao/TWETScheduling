@@ -1405,8 +1405,7 @@ public class PiecewiseLinearFunction {
 				gh=gh.next;
 			}
 			lastGSegBeforeDomain=SegmentPool.obtain(gh.start, start, gh.slope, gh.intercept);
-			if (reportChanged && Utility.compareLt(g.head.start, originalHeadStart)
-					&& leftExtensionCanSurviveNormalize(g.head, start, direction)) {
+			if (reportChanged && Utility.compareLt(g.head.start, originalHeadStart)) {
 				changed = true;
 			}
 			//不管是否相等了gh.start=start
@@ -1516,8 +1515,7 @@ public class PiecewiseLinearFunction {
 		}
 
 		if (q != null) {
-			if (reportChanged && Utility.compareGt(g.tail.end, originalTailEnd)
-					&& rightExtensionCanSurviveNormalize(q, direction)) {
+			if (reportChanged && Utility.compareGt(g.tail.end, originalTailEnd)) {
 				changed = true;
 			}
 			// 函数g末尾还有一段，需要合并进来
@@ -1557,33 +1555,6 @@ public class PiecewiseLinearFunction {
 			Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
 		}
 		return changed;
-	}
-
-	private boolean leftExtensionCanSurviveNormalize(Segment segment, double end, Direction direction) {
-		if (direction != Direction.FORWARD) {
-			return true;
-		}
-		for (Segment s = segment; s != null && Utility.compareLt(s.start, end); s = s.next) {
-			if (!Utility.isBigMValue(s.intercept)) {
-				return true;
-			}
-			if (!Utility.compareLt(s.end, end)) {
-				break;
-			}
-		}
-		return false;
-	}
-
-	private boolean rightExtensionCanSurviveNormalize(Segment segment, Direction direction) {
-		if (direction != Direction.BACKWARD) {
-			return true;
-		}
-		for (Segment s = segment; s != null; s = s.next) {
-			if (!Utility.isBigMValue(s.intercept)) {
-				return true;
-			}
-		}
-		return false;
 	}
 
 	public void release() {

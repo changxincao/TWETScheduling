@@ -1320,11 +1320,3 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 调用方也同步恢复为直接信任 `mergeMinimum(..., true)`：`CompletionBoundCalculator.mergeFunction()` 不再调用 `candidateStrictlyImproves()`，而是在 `current.mergeMinimum(candidate, direction, true)` 返回 true 时才增加 `mergeChanged` 并入队。为了继续排查异常，默认关闭的 `completionBoundChangeAudit` 仍保留；它只在抽样审计时复制 before/after，不属于正常路径成本。
 
 这次还补了一个 PWLF 回归测试：等值 candidate 被拆成更多段时，`mergeMinimum(..., true)` 必须返回 false，且不能把 current 拆成更多段；严格更低的 candidate 必须返回 true。验证结果为：带 CPLEX jar 的 focused 编译通过；`PiecewiseLinearFunctionPropertyTest` 为 `passed=24, warnings=2, failed=3`，新增 changed-return 回归通过，剩余 3 个失败仍是历史已知的 disjoint `mergeMinimum` 契约外输入。另用 `tmp-wet020_001_2m` 做 root smoke，结果 `ROOT_PROCESSED`、`incumbent=bound=6343`、`valid=true`。尝试用 `TanakaNoOutsourcingBPCTest` 直接传 `-Dtwet.bpc.completionBound=allCycles` 重跑 011 时，发现该 runner 没有把该 JVM property 写入 `TWETBPCConfig.bidirectionalCompletionBoundRelaxation`，输出仍为 `completionBound=OFF`，因此这条命令不能作为 all-cycles 复核证据；前一轮 011 all-cycles 完整返回结果仍来自显式设置 config 的诊断口径。
-
-### 41.27 2026-06-05 mergeMinimum changed 误判例子的补充澄清
-
-前面用“等值 candidate 被拆成更多段”的例子解释 changed 语义，主要用于说明等值结构变化不应触发队列重入，但它不是最贴近当前代码的误判形态。重新用现有函数实际复现后，最直接的问题是：旧 `willMergeMinimumChange()` 把物理定义域外扩直接视为 changed，但方向化 `normalize()` 可能会立即删掉这些外扩出来的无效 `big_M` 段，最终 lower envelope 没有任何变化。
-
-最小复现为 forward 方向：`current F(t)=5, t in [0,10]`；`candidate G(t)=big_M, t in [-5,0]`，且 `G(t)=5, t in [0,10]`。旧逻辑看到 `candidate.head.start=-5 < current.head.start=0`，直接返回 changed=true。真实 merge 会先把 `[-5,0]` 这段拼到左侧，但随后 `normalize(FORWARD)` 会删除左侧连续 `big_M` 头段，最终函数仍是 `F(t)=5, t in [0,10]`。也就是说，物理链表中间经历过拼接，但规范化后的可传播 lower envelope 完全没变。
-
-这类例子说明，`changed` 不能只看物理定义域是否外扩，还必须考虑方向化 normalize 后这个外扩是否仍然存在。最终修正是在 `mergeMinimum(..., true)` 内部继续按真实替换设置 changed，同时对定义域外扩增加方向化过滤：forward 左侧只有 `big_M` 的外扩不报 changed，因为会被 `normalizeForward()` 删除；backward 右侧只有 `big_M` 的外扩也不报 changed，因为会被 `normalizeBackward()` 裁掉。新增回归测试已覆盖上述 forward 左侧 `big_M` 外扩例子。

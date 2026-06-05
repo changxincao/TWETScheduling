@@ -808,6 +808,24 @@ public class PiecewiseLinearFunctionPropertyTest {
 			ok = false;
 		}
 		ok &= checkClose("mergeMinimum changed return strict value", 4.0, evalRef(strictMerged, 0));
+
+		PiecewiseLinearFunction boundaryBase = function(0, 1039,
+				seg(60, 147, 0, 9930.647058823535),
+				seg(147, 244, -4, 10126.411764705888));
+		PiecewiseLinearFunction boundaryCandidate = function(0, 1039,
+				seg(147, 244, -4, 10126.411764705888));
+		PiecewiseLinearFunction boundaryMerged = boundaryBase.copy();
+		boolean boundaryChanged = boundaryMerged.mergeMinimum(boundaryCandidate,
+				PiecewiseLinearFunction.Direction.FORWARD, true);
+		if (boundaryChanged) {
+			fail("mergeMinimum changed return: boundary touch",
+					"candidate equal to the right segment at p.end==start must not report changed");
+			ok = false;
+		}
+		ok &= checkClose("mergeMinimum changed return boundary before value",
+				evalRef(boundaryBase, 146.5), evalRef(boundaryMerged, 146.5));
+		ok &= checkClose("mergeMinimum changed return boundary common value",
+				evalRef(boundaryBase, 180), evalRef(boundaryMerged, 180));
 		if (ok) {
 			pass("mergeMinimum: changed return ignores equal structure and reports strict improvement");
 		}

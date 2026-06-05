@@ -1334,3 +1334,11 @@ baseline off 当前为 `NODE_LIMIT, incumbent=16281, bound=16148.8, gap=0.8120%,
 继续用旧提交 `82796d5` 的 changed 预判在 011 上复现第一条假阳性，可以看到真实错误并不是抽象构造例子。运行到 `mergeChanged=2025` 时，`job=1`、`direction=FORWARD`，旧实现返回 changed，但 before 和 after 的函数摘要完全一致。该次 `before` 的物理定义域为 `[60,1039]`，前两段为 `(60,147,a=0,b=9930.647058823535)` 和 `(147,157,a=-4,b=10126.411764705888)`；`candidate` 定义域为 `[147,1039]`，第一段为 `(147,244,a=-4,b=10126.411764705888)`。也就是说，从 `147` 开始 candidate 与 before 的右侧段完全相同，但旧 `willMergeMinimumChange()` 在定位公共域起点时使用 `while (p.end < start)`，没有跳过 `p.end == start` 的左侧段 `(60,147)`。随后它在零长度区间 `cur=nxt=147` 上比较 candidate 值 `-4*147+10126.411...=9538.411...` 和左侧常数段值 `9930.647...`，认为 candidate 更低，于是返回 true。
 
 这个判断对 completion-bound 队列是错误的，因为 `147` 只是段交界点，不是一个可传播的正长度时间区间；在 `[147,157]` 以及后续公共正长度区间上，candidate 没有比 before 更低。实际 `mergeMinimum` 完成后，`after` 与 `before` 完全相同，却因为旧预判返回 true 触发了 job 重新入队。当前实现避免这个问题有两层：第一，changed 不再由单独的合并前 `willMergeMinimumChange()` 预判，而是在实际 merge 扫描中设置；第二，只有在 `Utility.compareLt(cur,nxt)` 的正长度小段上，且 `candidate` 不劣并至少一个端点严格更低时，才替换并置 changed。零长度边界点不会再触发 changed。
+
+### 41.28 2026-06-05 mergeMinimum changed 与 normalize 的关系复核
+
+继续复核用户提出的一个风险：`mergeMinimum` 在扫描阶段发现 candidate 更低并置 `changed=true`，但最后 `normalize(FORWARD/BACKWARD)` 做 prefix/suffix min 后，结果是否可能又和原函数等价。当前结论是：在 completion-bound 当前输入契约下，这种情况不应发生。原因是进入 `mergeMinimum` 的 current 本身已经按方向 normalize，forward 是 prefix-min 闭包，backward 是 suffix-min 闭包；candidate 也来自同一类 completion 函数传播，进入合并前已经是可传播的下包络函数。若在某个正长度小段上 candidate 严格低于 current，则取 `min(current,candidate)` 后该小段至少有一个端点严格低于原 current。forward normalize 只会把这个更低值向右传播，backward normalize 只会把它向左传播，不会把一个已经低于当前闭包的值抬回去。因此该严格下降不会被最终 normalize “吃掉”。
+
+需要注意的是，这个判断依赖 current 已经是方向化闭包函数。如果 current 不是 prefix/suffix-min 后的函数，确实可能存在“局部更低但被已有更早/更晚的低值闭包覆盖”的场景；那属于 `mergeMinimum` 输入契约外。当前 completion-bound builder 中，target 函数每次 merge 后都会 normalize，后续 candidate 也由这些已闭包函数继续传播，因此满足这个前提。
+
+本次补充了一个直接来自 011 旧假阳性的回归测试：`before` 左段 `[60,147]` 为常数高值，右段 `[147,244]` 与 `candidate` 完全相同，要求 `mergeMinimum(..., true)` 返回 `false` 且 merge 后函数值不变。这个测试覆盖的正是旧 `p.end==start` 边界点误判，而不是人工构造的等值拆段。重新运行 `PiecewiseLinearFunctionPropertyTest` 后，changed-return 回归通过；整体结果为 `passed=24, warnings=2, failed=3`，剩余失败仍是历史已知的 disjoint `mergeMinimum` 契约外输入和随机 disjoint 样例，不是 changed 判断引入的新问题。

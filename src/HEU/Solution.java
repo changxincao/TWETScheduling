@@ -346,14 +346,30 @@ public class Solution {
 	 * 在“不能晚于后继任务最优完工时间减去 setup 和加工时间”的上界内，重新从对应 prefix 函数取最小值。
 	 */
 	public double[] computeBestCompletionTimesForMachine(int m) {
+		return computeBestCompletionTimesForMachine(m, true);
+	}
+
+	/**
+	 * 复用调用方刚刚更新过的 forward prefix functions，避免列 timing 统计时重复刷新同一批函数。
+	 */
+	public double[] computeBestCompletionTimesFromCurrentForwardFunctions(int m) {
+		return computeBestCompletionTimesForMachine(m, false);
+	}
+
+	private double[] computeBestCompletionTimesForMachine(int m, boolean refreshForwardFunctions) {
 		ArrayList<Integer> sequence = sequences.get(m);
 		int size = sequence.size();
 		if (size == 0) {
 			return new double[0];
 		}
-		updateFFunctions1ForMachine(m);
-		double[] bestCompletions = new double[size];
+		if (refreshForwardFunctions) {
+			updateFFunctions1ForMachine(m);
+		}
 		ArrayList<PiecewiseLinearFunction> functions = fFunctions.get(m);
+		if (functions.size() != size) {
+			throw new IllegalStateException("Forward functions are not synchronized with machine sequence");
+		}
+		double[] bestCompletions = new double[size];
 		bestCompletions[size - 1] = functions.get(size - 1).findMinimal(true, true)[1];
 		for (int index = size - 2; index >= 0; index--) {
 			int job = sequence.get(index);

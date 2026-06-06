@@ -58,7 +58,7 @@ public class TWETColumnEvaluator {
 		}
 		Solution scratch = buildScratch(sequence);
 		double cost = scratch.calCost(0);
-		double[] completions = scratch.computeBestCompletionTimesForMachine(0);
+		double[] completions = scratch.computeBestCompletionTimesFromCurrentForwardFunctions(0);
 		double lastCompletion = completions.length == 0 ? 0.0 : completions[completions.length - 1];
 		int halfIndex = completions.length == 0 ? 0 : (completions.length - 1) / 2;
 		double halfCompletion = completions.length == 0 ? 0.0 : completions[halfIndex];

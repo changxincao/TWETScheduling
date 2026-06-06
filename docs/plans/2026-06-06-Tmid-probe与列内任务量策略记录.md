@@ -83,14 +83,14 @@ probe 不是正式 pricing，也不是证明无负列的过程。它只是在正
 
 ## 7. 2026-06-06 实现口径
 
-本次已按“先完整实现、暂不跑算例实验”的口径完成代码接入。`GCNGBBStyleBidirectional` 新增 `columnTaskMedian` 和 `columnTaskCenter` 两个策略名，二者当前语义相同：从 reduced cost 较好的兼容 restricted columns 中取最多 `bidirectionalMidpointColumnLimit` 条列，用 `TWETColumnEvaluator.evaluateTiming()` 重算完整 PWLF timing，收集所有列内任务完成时间，取这些完成时间的中位数作为 `reference`，并直接把该 reference clamp 后作为最终 `Tmid`，不再做 `(L+U)/2`。
+本次已按“先完整实现、暂不跑算例实验”的口径完成代码接入。`GCNGBBStyleBidirectional` 新增 `columnTaskMedian` 和 `columnTaskCenter` 两个策略名，二者当前语义相同，`center` 只是兼容别名：从 reduced cost 较好的兼容 restricted columns 中取最多 `bidirectionalMidpointColumnLimit=400` 条列，用 `TWETColumnEvaluator.evaluateTiming()` 重算完整 PWLF timing，收集所有列内任务完成时间，取这些完成时间的中位数作为 `reference`，并直接把该 reference clamp 后作为最终 `Tmid`，不再做 `(L+U)/2`。
 
 统计输出中补充了 `midpointColumnTasks count/minAvgMedianMax`，用于观察当前节点好列的任务完成时间分布。原有 `midpointColumns count/lastMinAvgMax/halfMinAvgMax` 保留，便于和 `columnLastAvg`、`columnHalfAvg` 对比。
 
-probe 默认关闭，由 `bidirectionalMidpointProbe` 控制。开启后，正式 pricing 前会用当前 `reference` 乘以 `bidirectionalMidpointProbeFractions` 中的比例生成候选 `Tmid`，默认比例为 `0.45,0.65,0.85,1.0`。每个候选重新初始化一套 label store、队列、single-point store 和候选池，设置对应 `Tmid` 后重建 half-domain penalty，再进行有限 pop dry-run。dry-run 不执行 final join，不 finalize generated columns，不向 RMP 加列；它只统计 label 压力。候选之间会清空 probe 影响的统计，最后正式 pricing 也会重新初始化搜索状态，因此 probe 不会把 label 或 dominance graph 状态带进正式求解。
+probe 默认关闭，由 `bidirectionalMidpointProbe` 控制。开启后，正式 pricing 前先测试 `reference` 本身，然后按上一个候选的左右压力动态移动：若左侧/forward 压力更大，则下一轮 `Tmid = current * (1 - moveRatio)`；否则 `Tmid = current * (1 + moveRatio)`。默认 `moveRatio=0.10`，最多测试 `bidirectionalMidpointProbeMaxCandidates=6` 个候选。每个候选重新初始化一套 label store、队列、single-point store 和候选池，设置对应 `Tmid` 后重建 half-domain penalty，再进行有限 pop dry-run。dry-run 不执行 final join，不 finalize generated columns，不向 RMP 加列；它只统计 label 压力。候选之间会清空 probe 影响的统计，最后正式 pricing 也会重新初始化搜索状态，因此 probe 不会把 label 或 dominance graph 状态带进正式求解。
 
 probe 的扩展顺序没有照正式流程“先完整 forward 再 backward”，而是每次扩展当前队列较大的一侧。这样做是为了在有限 pop 下同时观察两侧压力，否则大多数预算可能全消耗在 forward，无法估计 backward。这个顺序只用于 probe，不改变正式 exact pricing。
 
 当前实现输出三类 score：`kept` 使用 `fwKept/bwKept`；`queue` 使用 `fwKept+fwQueuePeak` 和 `bwKept+bwQueuePeak`；`bound` 使用 `forwardExtensionBoundSurvivors+fwQueuePeak` 和 `bwKept+bwQueuePeak`。score 公式均为 `abs(log((left+1)/(right+1)))`，没有引入 alpha 总量惩罚。自动选择由 `bidirectionalMidpointProbeScore` 控制，默认 `queue`。summary 中会输出所有候选的 `kept/q/bound/cb/score`，后续实验可比较哪个 score 更贴近真实耗时。
 
-为便于命令行测试，`GCBBFullDomainComparisonTest` 增加了 `twet.bpc.fullDomainCompare.midpointProbe`、`midpointProbePopLimit`、`midpointProbeFractions` 和 `midpointProbeScore` 系统属性读取。验证只做 focused `javac`，没有按用户要求启动算例实验。
+为便于命令行测试，`GCBBFullDomainComparisonTest` 增加了 `twet.bpc.fullDomainCompare.midpointProbe`、`midpointProbePopLimit`、`midpointProbeMaxCandidates`、`midpointProbeMoveRatio` 和 `midpointProbeScore` 系统属性读取。验证只做 focused `javac`，没有按用户要求启动算例实验。

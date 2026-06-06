@@ -240,8 +240,12 @@ public class GCBBFullDomainComparisonTest {
 				"twet.bpc.fullDomainCompare.midpointProbe", Boolean.toString(config.bidirectionalMidpointProbe)));
 		config.bidirectionalMidpointProbePopLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.midpointProbePopLimit", config.bidirectionalMidpointProbePopLimit);
-		config.bidirectionalMidpointProbeFractions = System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointProbeFractions", config.bidirectionalMidpointProbeFractions);
+		config.bidirectionalMidpointProbeMaxCandidates = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.midpointProbeMaxCandidates",
+				config.bidirectionalMidpointProbeMaxCandidates);
+		config.bidirectionalMidpointProbeMoveRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeMoveRatio",
+				Double.toString(config.bidirectionalMidpointProbeMoveRatio)));
 		config.bidirectionalMidpointProbeScore = System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeScore", config.bidirectionalMidpointProbeScore);
 		return config;

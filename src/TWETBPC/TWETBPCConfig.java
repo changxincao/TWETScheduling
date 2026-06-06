@@ -105,13 +105,15 @@ public class TWETBPCConfig {
 	/** 2026-06-06: GCNGBB-style bidirectional pricing 的 Tmid 策略；默认 default 保持原有逻辑。 */
 	public String bidirectionalMidpointStrategy = "default";
 	/** 2026-06-06: column-based Tmid 策略最多评价多少条低 reduced-cost 当前列。 */
-	public int bidirectionalMidpointColumnLimit = 200;
+	public int bidirectionalMidpointColumnLimit = 400;
 	/** 2026-06-06: 是否在正式 exact pricing 前用有限 pop dry-run 试探多个 Tmid。 */
 	public boolean bidirectionalMidpointProbe = false;
 	/** 2026-06-06: 每个 Tmid probe 候选最多弹出多少个 label。 */
 	public int bidirectionalMidpointProbePopLimit = 20000;
-	/** 2026-06-06: Tmid probe 候选比例，乘以当前 midpoint reference。 */
-	public String bidirectionalMidpointProbeFractions = "0.45,0.65,0.85,1.0";
+	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
+	public int bidirectionalMidpointProbeMaxCandidates = 6;
+	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.10 表示左移 *0.9，右移 *1.1。 */
+	public double bidirectionalMidpointProbeMoveRatio = 0.10;
 	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound。 */
 	public String bidirectionalMidpointProbeScore = "queue";
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */

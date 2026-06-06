@@ -505,22 +505,25 @@ public class GCNGBBStyleBidirectional {
 			midpointProbeSummary = "skipped:noReference";
 			return;
 		}
-		ArrayList<Double> fractions = midpointProbeFractions();
-		if (fractions.isEmpty()) {
-			midpointProbeSummary = "skipped:noFractions";
-			return;
-		}
 		int popLimit = Math.max(1, config.bidirectionalMidpointProbePopLimit);
+		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
+		double moveRatio = normalizedProbeMoveRatio();
 		ArrayList<MidpointProbeResult> results = new ArrayList<MidpointProbeResult>();
 		MidpointProbeResult best = null;
-		for (double fraction : fractions) {
-			double candidate = clampCurrentMidpoint(reference * fraction);
+		HashSet<String> seen = new HashSet<String>();
+		double candidate = clampCurrentMidpoint(reference);
+		for (int i = 0; i < maxCandidates; i++) {
+			String key = String.format("%.9f", candidate);
+			if (!seen.add(key)) {
+				break;
+			}
 			MidpointProbeResult result = runMidpointProbeCandidate(lp, candidate, popLimit);
 			results.add(result);
 			if (best == null || Utility.compareLt(result.score(config.bidirectionalMidpointProbeScore),
 					best.score(config.bidirectionalMidpointProbeScore))) {
 				best = result;
 			}
+			candidate = nextMidpointProbeCandidate(result, candidate, moveRatio);
 		}
 		if (best == null) {
 			midpointProbeSummary = "skipped:noResult";
@@ -542,29 +545,20 @@ public class GCNGBBStyleBidirectional {
 		return tMid;
 	}
 
-	private ArrayList<Double> midpointProbeFractions() {
-		ArrayList<Double> fractions = new ArrayList<Double>();
-		String raw = config.bidirectionalMidpointProbeFractions;
-		if (raw == null || raw.trim().isEmpty()) {
-			raw = "0.45,0.65,0.85,1.0";
+	private double normalizedProbeMoveRatio() {
+		double ratio = config.bidirectionalMidpointProbeMoveRatio;
+		if (!Double.isFinite(ratio) || !Utility.compareGt(ratio, 0.0) || !Utility.compareLt(ratio, 0.5)) {
+			return 0.10;
 		}
-		String[] parts = raw.split("[,;\\s]+");
-		HashSet<String> seen = new HashSet<String>();
-		for (String part : parts) {
-			if (part == null || part.trim().isEmpty()) {
-				continue;
-			}
-			try {
-				double value = Double.parseDouble(part.trim());
-				if (Double.isFinite(value) && Utility.compareGt(value, 0.0)
-						&& seen.add(String.format("%.12f", value))) {
-					fractions.add(Double.valueOf(value));
-				}
-			} catch (NumberFormatException ex) {
-				// 忽略非法片段，后续由空候选触发 skipped。
-			}
-		}
-		return fractions;
+		return ratio;
+	}
+
+	private double nextMidpointProbeCandidate(MidpointProbeResult result, double current, double moveRatio) {
+		String mode = normalizeProbeScoreMode(config.bidirectionalMidpointProbeScore);
+		double leftPressure = result.leftPressure(mode);
+		double rightPressure = result.rightPressure(mode);
+		double multiplier = Utility.compareGt(leftPressure, rightPressure) ? (1.0 - moveRatio) : (1.0 + moveRatio);
+		return clampCurrentMidpoint(current * multiplier);
 	}
 
 	private MidpointProbeResult runMidpointProbeCandidate(LP lp, double candidateTMid, int popLimit) {
@@ -599,6 +593,8 @@ public class GCNGBBStyleBidirectional {
 		builder.append("ref=").append(reference)
 				.append(", selected=").append(best.tMid)
 				.append(", scoreMode=").append(normalizeProbeScoreMode(config.bidirectionalMidpointProbeScore))
+				.append(", moveRatio=").append(normalizedProbeMoveRatio())
+				.append(", maxCandidates=").append(Math.max(1, config.bidirectionalMidpointProbeMaxCandidates))
 				.append(", candidates=");
 		for (int i = 0; i < results.size(); i++) {
 			if (i > 0) {
@@ -3220,6 +3216,28 @@ public class GCNGBBStyleBidirectional {
 				return boundScore;
 			}
 			return queueScore;
+		}
+
+		double leftPressure(String mode) {
+			String normalized = normalizeProbeScoreMode(mode);
+			if ("kept".equals(normalized)) {
+				return forwardKept;
+			}
+			if ("bound".equals(normalized)) {
+				return forwardBoundSurvivors + forwardQueuePeak;
+			}
+			return forwardKept + forwardQueuePeak;
+		}
+
+		double rightPressure(String mode) {
+			String normalized = normalizeProbeScoreMode(mode);
+			if ("kept".equals(normalized)) {
+				return backwardKept;
+			}
+			if ("bound".equals(normalized)) {
+				return backwardKept + backwardQueuePeak;
+			}
+			return backwardKept + backwardQueuePeak;
 		}
 
 		String compactSummary() {

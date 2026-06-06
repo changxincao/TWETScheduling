@@ -338,6 +338,62 @@ public class Solution {
 
 	}
 
+	/**
+	 * 基于当前 forward prefix functions，回算固定机器序列在整条列最优排程下的各任务完工时间。
+	 *
+	 * <p>
+	 * 这里不使用 no-wait 简化。先在最后一个 prefix 函数上取整条列的最优末完工时间，再按固定顺序从后往前，
+	 * 在“不能晚于后继任务最优完工时间减去 setup 和加工时间”的上界内，重新从对应 prefix 函数取最小值。
+	 */
+	public double[] computeBestCompletionTimesForMachine(int m) {
+		ArrayList<Integer> sequence = sequences.get(m);
+		int size = sequence.size();
+		if (size == 0) {
+			return new double[0];
+		}
+		updateFFunctions1ForMachine(m);
+		double[] bestCompletions = new double[size];
+		ArrayList<PiecewiseLinearFunction> functions = fFunctions.get(m);
+		bestCompletions[size - 1] = functions.get(size - 1).findMinimal(true, true)[1];
+		for (int index = size - 2; index >= 0; index--) {
+			int job = sequence.get(index);
+			int nextJob = sequence.get(index + 1);
+			double latestCompletion = bestCompletions[index + 1] - data.s[job][nextJob] - data.p[nextJob];
+			bestCompletions[index] = findBestCompletionAtOrBefore(functions.get(index), latestCompletion);
+		}
+		return bestCompletions;
+	}
+
+	private double findBestCompletionAtOrBefore(PiecewiseLinearFunction function, double latestCompletion) {
+		if (function == null || function.head == null || !Double.isFinite(latestCompletion)
+				|| Utility.compareLt(latestCompletion, function.head.start)) {
+			return Double.NaN;
+		}
+		double bestValue = Utility.big_M;
+		double bestTime = Double.NaN;
+		for (PiecewiseLinearFunction.Segment segment = function.head; segment != null; segment = segment.next) {
+			if (Utility.compareGt(segment.start, latestCompletion)) {
+				break;
+			}
+			double right = Math.min(segment.end, latestCompletion);
+			double startValue = segment.getValue(segment.start);
+			if (Double.isNaN(bestTime) || Utility.compareLt(startValue, bestValue)
+					|| (Utility.compareEq(startValue, bestValue) && Utility.compareLt(segment.start, bestTime))) {
+				bestValue = startValue;
+				bestTime = segment.start;
+			}
+			if (Utility.compareGt(right, segment.start)) {
+				double rightValue = segment.getValue(right);
+				if (Utility.compareLt(rightValue, bestValue)
+						|| (Utility.compareEq(rightValue, bestValue) && Utility.compareLt(right, bestTime))) {
+					bestValue = rightValue;
+					bestTime = right;
+				}
+			}
+		}
+		return bestTime;
+	}
+
 	public void updatebFunctions1ForMachine(int m) {
 
 		List<Integer> seq = sequences.get(m);

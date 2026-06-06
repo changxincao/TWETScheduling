@@ -137,6 +137,10 @@ public class SingleBidirectionalTimeQueueComparisonTest {
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.timeCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));
+		config.bidirectionalMidpointStrategy = System.getProperty(
+				"twet.bpc.timeCompare.midpointStrategy", config.bidirectionalMidpointStrategy);
+		config.bidirectionalMidpointColumnLimit = Integer.getInteger(
+				"twet.bpc.timeCompare.midpointColumnLimit", config.bidirectionalMidpointColumnLimit);
 		return config;
 	}
 

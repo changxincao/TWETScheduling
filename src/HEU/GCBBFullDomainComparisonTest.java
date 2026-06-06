@@ -232,6 +232,10 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));
+		config.bidirectionalMidpointStrategy = System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointStrategy", config.bidirectionalMidpointStrategy);
+		config.bidirectionalMidpointColumnLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.midpointColumnLimit", config.bidirectionalMidpointColumnLimit);
 		return config;
 	}
 

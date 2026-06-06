@@ -83,8 +83,9 @@ public class ArcBrancher implements Brancher {
 	private ArcChoice findBestEndpointArc(LP lp, TWETMasterSolution solution, Node node, int sink) {
 		ArcChoice best = null;
 		for (int job = 1; job < sink; job++) {
+			// 2026-06-06: sink 是虚拟终点。endpoint 分支只保留 source->job，避免把无实际顺序含义的 job->sink
+			// 写成后续节点的硬分支约束，干扰 pricing/subtree 的弧语义分析。
 			best = betterArcChoice(best, lp, solution, node, sink, 0, job);
-			best = betterArcChoice(best, lp, solution, node, sink, job, sink);
 		}
 		return best;
 	}

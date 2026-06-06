@@ -44,6 +44,28 @@ public class TWETColumnEvaluator {
 		if (sequence.isEmpty()) {
 			return 0.0;
 		}
+		Solution scratch = buildScratch(sequence);
+		scratch.updateInformationM(0);
+		return scratch.calCost(0);
+	}
+
+	/**
+	 * 计算列成本以及完整 PWLF 口径下的最优完工时间信息，供 Tmid 诊断和策略使用。
+	 */
+	public Timing evaluateTiming(List<Integer> sequence) {
+		if (sequence.isEmpty()) {
+			return new Timing(0.0, 0.0, 0.0, new double[0]);
+		}
+		Solution scratch = buildScratch(sequence);
+		double cost = scratch.calCost(0);
+		double[] completions = scratch.computeBestCompletionTimesForMachine(0);
+		double lastCompletion = completions.length == 0 ? 0.0 : completions[completions.length - 1];
+		int halfIndex = completions.length == 0 ? 0 : (completions.length - 1) / 2;
+		double halfCompletion = completions.length == 0 ? 0.0 : completions[halfIndex];
+		return new Timing(cost, lastCompletion, halfCompletion, completions);
+	}
+
+	private Solution buildScratch(List<Integer> sequence) {
 		Solution scratch = new Solution(data);
 		ArrayList<ArrayList<Integer>> sequences = new ArrayList<ArrayList<Integer>>(data.m);
 		for (int machine = 0; machine < data.m; machine++) {
@@ -52,8 +74,21 @@ public class TWETColumnEvaluator {
 		sequences.get(0).addAll(sequence);
 		scratch.setSequence(sequences);
 		scratch.initialize_function();
-		scratch.updateInformationM(0);
-		return scratch.calCost(0);
+		return scratch;
+	}
+
+	public static final class Timing {
+		public final double cost;
+		public final double lastCompletion;
+		public final double halfCompletion;
+		public final double[] completions;
+
+		Timing(double cost, double lastCompletion, double halfCompletion, double[] completions) {
+			this.cost = cost;
+			this.lastCompletion = lastCompletion;
+			this.halfCompletion = halfCompletion;
+			this.completions = completions;
+		}
 	}
 
 }

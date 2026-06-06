@@ -21,6 +21,7 @@ import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
+import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
@@ -101,6 +102,16 @@ public class GCNGBBStyleBidirectional {
 	// 若当前任务右端窗明显小于全局 CmaxH，就用它压住 midpoint 的右移，
 	// 避免 backward sink root 因 Tmid 过右而完全长不出真实标签。
 	private double pricingHorizon;
+	private String midpointStrategyUsed = "default";
+	private double midpointReferenceTime = Double.NaN;
+	private int midpointColumnSelectedCount;
+	private double midpointColumnLastMin = Double.NaN;
+	private double midpointColumnLastAvg = Double.NaN;
+	private double midpointColumnLastMax = Double.NaN;
+	private double midpointColumnHalfMin = Double.NaN;
+	private double midpointColumnHalfAvg = Double.NaN;
+	private double midpointColumnHalfMax = Double.NaN;
+	private long midpointStrategyNanos;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHStart;
@@ -488,7 +499,9 @@ public class GCNGBBStyleBidirectional {
 		}
 		maybeDumpPricingSnapshot(lp);
 		precomputeDynamicPricingWindows(lp);
-		buildCompletionBounds(lp);
+		if (completionBounds == null) {
+			buildCompletionBounds(lp);
+		}
 
 		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
 		sourceVisited.add(0);
@@ -1352,6 +1365,16 @@ public class GCNGBBStyleBidirectional {
 		completionBoundMergeCalls = 0;
 		completionBoundMergeChanged = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
+		midpointStrategyUsed = "default";
+		midpointReferenceTime = Double.NaN;
+		midpointColumnSelectedCount = 0;
+		midpointColumnLastMin = Double.NaN;
+		midpointColumnLastAvg = Double.NaN;
+		midpointColumnLastMax = Double.NaN;
+		midpointColumnHalfMin = Double.NaN;
+		midpointColumnHalfAvg = Double.NaN;
+		midpointColumnHalfMax = Double.NaN;
+		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
 		diagnosticPricingOnlyJobArcCount = 0;
 		diagnosticJobDualPositiveCount = 0;
@@ -1477,6 +1500,11 @@ public class GCNGBBStyleBidirectional {
 				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
+				+ ", midpointStrategy/ref/ms=" + midpointStrategyUsed + "/" + midpointReferenceTime + "/"
+				+ formatMillis(midpointStrategyNanos)
+				+ ", midpointColumns count/lastMinAvgMax/halfMinAvgMax=" + midpointColumnSelectedCount
+				+ "/" + midpointColumnLastMin + "/" + midpointColumnLastAvg + "/" + midpointColumnLastMax
+				+ "/" + midpointColumnHalfMin + "/" + midpointColumnHalfAvg + "/" + midpointColumnHalfMax
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraphs.statisticsSummary();
@@ -2212,12 +2240,17 @@ public class GCNGBBStyleBidirectional {
 		zeroDualExcludedJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		precomputeEffectivePricingWindows(lp);
-		tMid = computeCurrentMidpoint();
 		precomputeZeroDualExcludedJobs(lp);
+		tMid = computeDefaultMidpoint();
 		ensureBaseHalfPenaltyCache();
 		precomputeJobLevelDynamicPricingWindows();
 		precomputeBackwardDynamicPricingWindows();
 		precomputeCompletionBoundPricingWindows();
+		if (requiresCompletionBoundForMidpoint()) {
+			buildCompletionBounds(lp);
+		}
+		tMid = computeCurrentMidpoint(lp);
+		ensureBaseHalfPenaltyCache();
 		precomputeHalfDomainEligibility();
 	}
 
@@ -2281,15 +2314,75 @@ public class GCNGBBStyleBidirectional {
 		dynamicMaxHEnd = Math.max(dynamicMaxHEnd, pricingHorizon);
 	}
 
-	private double computeCurrentMidpoint() {
+	private double computeCurrentMidpoint(LP lp) {
+		long start = System.nanoTime();
+		midpointStrategyUsed = configuredMidpointStrategy();
+		midpointReferenceTime = Double.NaN;
+		midpointColumnSelectedCount = 0;
+		midpointColumnLastMin = Double.NaN;
+		midpointColumnLastAvg = Double.NaN;
+		midpointColumnLastMax = Double.NaN;
+		midpointColumnHalfMin = Double.NaN;
+		midpointColumnHalfAvg = Double.NaN;
+		midpointColumnHalfMax = Double.NaN;
 		double candidate;
 		if (Double.isFinite(config.bidirectionalRootLocalHorizonMidpointRatio)
 				&& Utility.compareGt(config.bidirectionalRootLocalHorizonMidpointRatio, 0.0)
 				&& Utility.compareLt(config.bidirectionalRootLocalHorizonMidpointRatio, 1.0)) {
+			midpointStrategyUsed = "ratio";
+			midpointReferenceTime = pricingHorizon;
 			candidate = pricingHorizon * config.bidirectionalRootLocalHorizonMidpointRatio;
+			midpointStrategyNanos += System.nanoTime() - start;
 			return clampCurrentMidpoint(candidate);
 		}
-		double left = Math.max(dynamicMinHStart, earliestSourceCompletion);
+
+		double left = midpointLeftBound();
+		if ("incumbentMakespan".equalsIgnoreCase(midpointStrategyUsed)) {
+			double reference = incumbentBestMakespan();
+			if (Double.isFinite(reference)) {
+				midpointReferenceTime = reference;
+				midpointStrategyNanos += System.nanoTime() - start;
+				return clampCurrentMidpoint((left + Math.min(reference, pricingHorizon)) * 0.5);
+			}
+		} else if ("completionBound".equalsIgnoreCase(midpointStrategyUsed)) {
+			double reference = completionBoundArgminTime();
+			if (Double.isFinite(reference)) {
+				midpointReferenceTime = reference;
+				midpointStrategyNanos += System.nanoTime() - start;
+				return clampCurrentMidpoint((left + Math.min(reference, pricingHorizon)) * 0.5);
+			}
+		} else if ("columnLastAvg".equalsIgnoreCase(midpointStrategyUsed)
+				|| "columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed)) {
+			MidpointColumnTimingStats stats = evaluateMidpointColumnTiming(lp);
+			if (stats.count > 0) {
+				midpointReferenceTime = "columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed) ? stats.halfAvg
+						: stats.lastAvg;
+				midpointColumnSelectedCount = stats.count;
+				midpointColumnLastMin = stats.lastMin;
+				midpointColumnLastAvg = stats.lastAvg;
+				midpointColumnLastMax = stats.lastMax;
+				midpointColumnHalfMin = stats.halfMin;
+				midpointColumnHalfAvg = stats.halfAvg;
+				midpointColumnHalfMax = stats.halfMax;
+				double reference = Math.min(midpointReferenceTime, pricingHorizon);
+				midpointStrategyNanos += System.nanoTime() - start;
+				if ("columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed)) {
+					return clampCurrentMidpoint(reference);
+				}
+				return clampCurrentMidpoint((left + reference) * 0.5);
+			}
+		}
+
+		midpointStrategyUsed = "default";
+		candidate = computeDefaultMidpoint();
+		midpointReferenceTime = pricingHorizon;
+		midpointStrategyNanos += System.nanoTime() - start;
+		return candidate;
+	}
+
+	private double computeDefaultMidpoint() {
+		double left = midpointLeftBound();
+		double candidate;
 		if (Double.isFinite(left) && Utility.compareLt(left, pricingHorizon)) {
 			candidate = (left + pricingHorizon) * 0.5;
 		} else {
@@ -2297,6 +2390,110 @@ public class GCNGBBStyleBidirectional {
 			candidate = pricingHorizon * 0.75;
 		}
 		return clampCurrentMidpoint(candidate);
+	}
+
+	private String configuredMidpointStrategy() {
+		String strategy = config.bidirectionalMidpointStrategy == null ? "default"
+				: config.bidirectionalMidpointStrategy.trim();
+		return strategy.isEmpty() ? "default" : strategy;
+	}
+
+	private boolean requiresCompletionBoundForMidpoint() {
+		return "completionBound".equalsIgnoreCase(configuredMidpointStrategy()) && completionBoundRelaxation != null;
+	}
+
+	private double midpointLeftBound() {
+		double left = Math.max(dynamicMinHStart, earliestSourceCompletion);
+		return Double.isFinite(left) ? left : 0.0;
+	}
+
+	private double incumbentBestMakespan() {
+		if (data.configure == null || data.configure.bestSolution == null) {
+			return Double.NaN;
+		}
+		Solution incumbent = data.configure.bestSolution;
+		ArrayList<ArrayList<Integer>> sequences = incumbent.getSequencesCopy();
+		double makespan = Double.NaN;
+		for (ArrayList<Integer> sequence : sequences) {
+			if (sequence.isEmpty()) {
+				continue;
+			}
+			TWETColumnEvaluator.Timing timing = evaluator.evaluateTiming(sequence);
+			if (Double.isFinite(timing.lastCompletion)) {
+				makespan = Double.isNaN(makespan) ? timing.lastCompletion : Math.max(makespan, timing.lastCompletion);
+			}
+		}
+		return makespan;
+	}
+
+	private double completionBoundArgminTime() {
+		if (completionBounds == null) {
+			return Double.NaN;
+		}
+		MidpointFunctionArgmin all = new MidpointFunctionArgmin();
+		MidpointFunctionArgmin negative = new MidpointFunctionArgmin();
+		for (int job = 1; job <= data.n; job++) {
+			recordCompletionBoundArgmin(completionBounds.forwardFByJob[job], all, negative);
+			recordCompletionBoundArgmin(completionBounds.forwardUByJob[job], all, negative);
+			recordCompletionBoundArgmin(completionBounds.backwardBByJob[job], all, negative);
+			recordCompletionBoundArgmin(completionBounds.backwardRByJob[job], all, negative);
+		}
+		return negative.count > 0 ? negative.maxTime : all.maxTime;
+	}
+
+	private void recordCompletionBoundArgmin(PiecewiseLinearFunction function, MidpointFunctionArgmin all,
+			MidpointFunctionArgmin negative) {
+		if (function == null) {
+			return;
+		}
+		double[] min = function.findMinimal(false, true);
+		if (min == null || min.length < 2 || !Double.isFinite(min[0]) || !Double.isFinite(min[1])) {
+			return;
+		}
+		all.accept(min[1]);
+		if (Utility.compareLt(min[0], 0.0)) {
+			negative.accept(min[1]);
+		}
+	}
+
+	private MidpointColumnTimingStats evaluateMidpointColumnTiming(LP lp) {
+		MidpointColumnTimingStats stats = new MidpointColumnTimingStats();
+		List<ColumnMidpointCandidate> candidates = selectMidpointColumnCandidates(lp);
+		int limit = Math.max(0, config.bidirectionalMidpointColumnLimit);
+		for (ColumnMidpointCandidate candidate : candidates) {
+			if (limit > 0 && stats.count >= limit) {
+				break;
+			}
+			TWETColumn column = lp.getPool().getColumn(candidate.columnId);
+			ArrayList<Integer> sequence = new ArrayList<Integer>(column.getSequence());
+			if (!isSequenceCompatible(sequence, lp.getNode())) {
+				continue;
+			}
+			TWETColumnEvaluator.Timing timing = evaluator.evaluateTiming(sequence);
+			if (Double.isFinite(timing.lastCompletion) && Double.isFinite(timing.halfCompletion)) {
+				stats.accept(timing.lastCompletion, timing.halfCompletion);
+			}
+		}
+		return stats;
+	}
+
+	private List<ColumnMidpointCandidate> selectMidpointColumnCandidates(LP lp) {
+		ArrayList<ColumnMidpointCandidate> candidates = new ArrayList<ColumnMidpointCandidate>();
+		for (int columnId : lp.getRestrictedColumnIds()) {
+			TWETColumn column = lp.getPool().getColumn(columnId);
+			if (column.getSequence().isEmpty()) {
+				continue;
+			}
+			candidates.add(new ColumnMidpointCandidate(columnId, lp.getColumnReducedCost(columnId)));
+		}
+		Collections.sort(candidates, new Comparator<ColumnMidpointCandidate>() {
+			@Override
+			public int compare(ColumnMidpointCandidate a, ColumnMidpointCandidate b) {
+				int byReducedCost = Double.compare(a.reducedCost, b.reducedCost);
+				return byReducedCost != 0 ? byReducedCost : Integer.compare(a.columnId, b.columnId);
+			}
+		});
+		return candidates;
 	}
 
 	private double clampCurrentMidpoint(double candidate) {
@@ -2674,6 +2871,53 @@ public class GCNGBBStyleBidirectional {
 
 	private enum InsertStatus {
 		DOMINATED, STORED_NO_EXPAND, STORED_AND_ENQUEUE
+	}
+
+	private static final class ColumnMidpointCandidate {
+		final int columnId;
+		final double reducedCost;
+
+		ColumnMidpointCandidate(int columnId, double reducedCost) {
+			this.columnId = columnId;
+			this.reducedCost = reducedCost;
+		}
+	}
+
+	private static final class MidpointFunctionArgmin {
+		int count;
+		double maxTime = Double.NaN;
+
+		void accept(double time) {
+			if (!Double.isFinite(time)) {
+				return;
+			}
+			count++;
+			maxTime = Double.isNaN(maxTime) ? time : Math.max(maxTime, time);
+		}
+	}
+
+	private static final class MidpointColumnTimingStats {
+		int count;
+		double lastMin = Double.POSITIVE_INFINITY;
+		double lastMax = Double.NEGATIVE_INFINITY;
+		double lastSum;
+		double lastAvg = Double.NaN;
+		double halfMin = Double.POSITIVE_INFINITY;
+		double halfMax = Double.NEGATIVE_INFINITY;
+		double halfSum;
+		double halfAvg = Double.NaN;
+
+		void accept(double lastCompletion, double halfCompletion) {
+			count++;
+			lastMin = Math.min(lastMin, lastCompletion);
+			lastMax = Math.max(lastMax, lastCompletion);
+			lastSum += lastCompletion;
+			lastAvg = lastSum / count;
+			halfMin = Math.min(halfMin, halfCompletion);
+			halfMax = Math.max(halfMax, halfCompletion);
+			halfSum += halfCompletion;
+			halfAvg = halfSum / count;
+		}
 	}
 
 	private static final class PricingColumnCandidate {

@@ -102,6 +102,10 @@ public class TWETBPCConfig {
 	 * 取 0..1 时强制使用本轮 pricingHorizon 的该比例，不是全局 CmaxH 的比例。
 	 */
 	public double bidirectionalRootLocalHorizonMidpointRatio = Double.NaN;
+	/** 2026-06-06: GCNGBB-style bidirectional pricing 的 Tmid 策略；默认 default 保持原有逻辑。 */
+	public String bidirectionalMidpointStrategy = "default";
+	/** 2026-06-06: column-based Tmid 策略最多评价多少条低 reduced-cost 当前列。 */
+	public int bidirectionalMidpointColumnLimit = 200;
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

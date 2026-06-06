@@ -5,7 +5,6 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.PriorityQueue;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -48,7 +47,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("Heuristic pricing disabled");
 		}
 
-		ArrayList<TWETColumn> seeds = collectSeedColumns(lp);
+		ArrayList<TWETColumn> seeds = collectSeedColumnsBySortedPrefix(lp);
 		if (seeds.isEmpty()) {
 			return PricingResult.noImprovement("No active seed column for heuristic pricing");
 		}
@@ -104,43 +103,29 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return true;
 	}
 
-	private ArrayList<TWETColumn> collectSeedColumns(final LP lp) {
+	private ArrayList<TWETColumn> collectSeedColumnsBySortedPrefix(final LP lp) {
 		int limit = Math.max(0, config.heuristicPricingSeedColumns);
 		if (limit == 0) {
 			return new ArrayList<TWETColumn>();
 		}
-		PriorityQueue<ScoredSeed> bestSeeds = new PriorityQueue<ScoredSeed>(limit, new Comparator<ScoredSeed>() {
-			@Override
-			public int compare(ScoredSeed a, ScoredSeed b) {
-				return compareScoredSeed(b, a);
-			}
-		});
+		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(lp.getRestrictedColumnIds().size());
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
-			if (!isSequenceCompatible(lp.getNode(), column.getSequence())) {
-				continue;
-			}
-			if (!column.getSequence().isEmpty()) {
-				// 2026-05-21: seed 排序前先缓存 reduced cost，避免 comparator 反复扫描同一条列。
-				ScoredSeed candidate = new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp));
-				if (bestSeeds.size() < limit) {
-					bestSeeds.add(candidate);
-				} else if (compareScoredSeed(candidate, bestSeeds.peek()) < 0) {
-					bestSeeds.poll();
-					bestSeeds.add(candidate);
-				}
-			}
+			candidates.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp)));
 		}
-		ArrayList<ScoredSeed> scoredSeeds = new ArrayList<ScoredSeed>(bestSeeds);
-		Collections.sort(scoredSeeds, new Comparator<ScoredSeed>() {
+		Collections.sort(candidates, new Comparator<ScoredSeed>() {
 			@Override
 			public int compare(ScoredSeed a, ScoredSeed b) {
 				return compareScoredSeed(a, b);
 			}
 		});
-		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(scoredSeeds.size());
-		for (int i = 0; i < scoredSeeds.size(); i++) {
-			seeds.add(scoredSeeds.get(i).column);
+
+		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(Math.min(limit, candidates.size()));
+		for (int i = 0; i < candidates.size() && seeds.size() < limit; i++) {
+			TWETColumn column = candidates.get(i).column;
+			if (isSequenceCompatible(lp.getNode(), column.getSequence())) {
+				seeds.add(column);
+			}
 		}
 		return seeds;
 	}
@@ -152,7 +137,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
 			return 1;
 		}
-		return Integer.compare(a.column.size(), b.column.size());
+		int sizeCompare = Integer.compare(a.column.size(), b.column.size());
+		if (sizeCompare != 0) {
+			return sizeCompare;
+		}
+		return Integer.compare(a.column.getId(), b.column.getId());
 	}
 
 	private void tabuSearch(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,

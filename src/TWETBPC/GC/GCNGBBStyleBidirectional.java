@@ -1432,7 +1432,11 @@ public class GCNGBBStyleBidirectional {
 				+ " cbBPruned=" + completionBackwardLabelsPruned
 				+ " joinPairs=" + joinPairsTried
 				+ " generated=" + generatedCandidateCount
-				+ " bestRC=" + bestGeneratedReducedCost);
+				+ " bestRC=" + bestGeneratedReducedCost
+				+ " pricingHorizon=" + pricingHorizon
+				+ " tMid=" + tMid
+				+ " midpointStrategy=" + midpointStrategyUsed
+				+ " midpointRef=" + midpointReferenceTime);
 		System.out.flush();
 	}
 

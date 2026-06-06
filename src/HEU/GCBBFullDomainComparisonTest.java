@@ -236,6 +236,14 @@ public class GCBBFullDomainComparisonTest {
 				"twet.bpc.fullDomainCompare.midpointStrategy", config.bidirectionalMidpointStrategy);
 		config.bidirectionalMidpointColumnLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.midpointColumnLimit", config.bidirectionalMidpointColumnLimit);
+		config.bidirectionalMidpointProbe = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbe", Boolean.toString(config.bidirectionalMidpointProbe)));
+		config.bidirectionalMidpointProbePopLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.midpointProbePopLimit", config.bidirectionalMidpointProbePopLimit);
+		config.bidirectionalMidpointProbeFractions = System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeFractions", config.bidirectionalMidpointProbeFractions);
+		config.bidirectionalMidpointProbeScore = System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeScore", config.bidirectionalMidpointProbeScore);
 		return config;
 	}
 

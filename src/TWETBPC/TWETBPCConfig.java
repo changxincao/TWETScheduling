@@ -106,6 +106,14 @@ public class TWETBPCConfig {
 	public String bidirectionalMidpointStrategy = "default";
 	/** 2026-06-06: column-based Tmid 策略最多评价多少条低 reduced-cost 当前列。 */
 	public int bidirectionalMidpointColumnLimit = 200;
+	/** 2026-06-06: 是否在正式 exact pricing 前用有限 pop dry-run 试探多个 Tmid。 */
+	public boolean bidirectionalMidpointProbe = false;
+	/** 2026-06-06: 每个 Tmid probe 候选最多弹出多少个 label。 */
+	public int bidirectionalMidpointProbePopLimit = 20000;
+	/** 2026-06-06: Tmid probe 候选比例，乘以当前 midpoint reference。 */
+	public String bidirectionalMidpointProbeFractions = "0.45,0.65,0.85,1.0";
+	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound。 */
+	public String bidirectionalMidpointProbeScore = "queue";
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

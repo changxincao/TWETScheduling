@@ -111,6 +111,12 @@ public class GCNGBBStyleBidirectional {
 	private double midpointColumnHalfMin = Double.NaN;
 	private double midpointColumnHalfAvg = Double.NaN;
 	private double midpointColumnHalfMax = Double.NaN;
+	private int midpointColumnTaskSampleCount;
+	private double midpointColumnTaskMin = Double.NaN;
+	private double midpointColumnTaskAvg = Double.NaN;
+	private double midpointColumnTaskMedian = Double.NaN;
+	private double midpointColumnTaskMax = Double.NaN;
+	private String midpointProbeSummary = "off";
 	private long midpointStrategyNanos;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
@@ -461,6 +467,162 @@ public class GCNGBBStyleBidirectional {
 		completionBounds = null;
 		completionBoundFixedArc = null;
 		bestGeneratedReducedCost = Utility.big_M;
+		initializeSearchState(lp);
+		if (config.diagnosticPricingSummaryDetails) {
+			recordPricingDiagnostics(lp);
+		}
+		maybeDumpPricingSnapshot(lp);
+		precomputeDynamicPricingWindows(lp);
+		if (completionBounds == null) {
+			buildCompletionBounds(lp);
+		}
+		runMidpointProbeIfEnabled(lp);
+		initializeSearchState(lp);
+		initializeForwardSource(lp);
+	}
+
+	private void initializeForwardSource(LP lp) {
+		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
+		sourceVisited.add(0);
+		addZeroDualExcludedJobs(sourceVisited);
+		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
+		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
+		sourceFrontier.normalize(Direction.FORWARD);
+		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
+				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
+		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
+			FWUL.add(source);
+		}
+	}
+
+	private void runMidpointProbeIfEnabled(LP lp) {
+		if (!config.bidirectionalMidpointProbe) {
+			midpointProbeSummary = "off";
+			return;
+		}
+		double reference = midpointProbeReference();
+		if (!Double.isFinite(reference) || !Utility.compareGt(reference, 0.0)) {
+			midpointProbeSummary = "skipped:noReference";
+			return;
+		}
+		ArrayList<Double> fractions = midpointProbeFractions();
+		if (fractions.isEmpty()) {
+			midpointProbeSummary = "skipped:noFractions";
+			return;
+		}
+		int popLimit = Math.max(1, config.bidirectionalMidpointProbePopLimit);
+		ArrayList<MidpointProbeResult> results = new ArrayList<MidpointProbeResult>();
+		MidpointProbeResult best = null;
+		for (double fraction : fractions) {
+			double candidate = clampCurrentMidpoint(reference * fraction);
+			MidpointProbeResult result = runMidpointProbeCandidate(lp, candidate, popLimit);
+			results.add(result);
+			if (best == null || Utility.compareLt(result.score(config.bidirectionalMidpointProbeScore),
+					best.score(config.bidirectionalMidpointProbeScore))) {
+				best = result;
+			}
+		}
+		if (best == null) {
+			midpointProbeSummary = "skipped:noResult";
+			return;
+		}
+		tMid = best.tMid;
+		rebuildHalfDomainForCurrentMidpoint();
+		resetProbeAffectedStatistics();
+		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results);
+	}
+
+	private double midpointProbeReference() {
+		if (Double.isFinite(midpointColumnTaskMedian)) {
+			return midpointColumnTaskMedian;
+		}
+		if (Double.isFinite(midpointReferenceTime)) {
+			return midpointReferenceTime;
+		}
+		return tMid;
+	}
+
+	private ArrayList<Double> midpointProbeFractions() {
+		ArrayList<Double> fractions = new ArrayList<Double>();
+		String raw = config.bidirectionalMidpointProbeFractions;
+		if (raw == null || raw.trim().isEmpty()) {
+			raw = "0.45,0.65,0.85,1.0";
+		}
+		String[] parts = raw.split("[,;\\s]+");
+		HashSet<String> seen = new HashSet<String>();
+		for (String part : parts) {
+			if (part == null || part.trim().isEmpty()) {
+				continue;
+			}
+			try {
+				double value = Double.parseDouble(part.trim());
+				if (Double.isFinite(value) && Utility.compareGt(value, 0.0)
+						&& seen.add(String.format("%.12f", value))) {
+					fractions.add(Double.valueOf(value));
+				}
+			} catch (NumberFormatException ex) {
+				// 忽略非法片段，后续由空候选触发 skipped。
+			}
+		}
+		return fractions;
+	}
+
+	private MidpointProbeResult runMidpointProbeCandidate(LP lp, double candidateTMid, int popLimit) {
+		tMid = candidateTMid;
+		rebuildHalfDomainForCurrentMidpoint();
+		resetProbeAffectedStatistics();
+		initializeSearchState(lp);
+		initializeForwardSource(lp);
+		initializeBackwardSink(lp);
+		long fwQueuePeak = queueSize(FWUL);
+		long bwQueuePeak = queueSize(BWUL);
+		int pops = 0;
+		while (pops < popLimit && (!FWUL.isEmpty() || !BWUL.isEmpty())) {
+			boolean useForward = !FWUL.isEmpty() && (BWUL.isEmpty() || FWUL.size() >= BWUL.size());
+			if (useForward) {
+				forwardExtend(lp);
+			} else {
+				backwardExtend(lp);
+			}
+			pops++;
+			fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
+			bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
+		}
+		return new MidpointProbeResult(candidateTMid, pops, FWUL.isEmpty(), BWUL.isEmpty(),
+				forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,
+				completionForwardLabelsPruned, completionBackwardLabelsPruned, fwQueuePeak, bwQueuePeak);
+	}
+
+	private String formatMidpointProbeSummary(double reference, MidpointProbeResult best,
+			ArrayList<MidpointProbeResult> results) {
+		StringBuilder builder = new StringBuilder();
+		builder.append("ref=").append(reference)
+				.append(", selected=").append(best.tMid)
+				.append(", scoreMode=").append(normalizeProbeScoreMode(config.bidirectionalMidpointProbeScore))
+				.append(", candidates=");
+		for (int i = 0; i < results.size(); i++) {
+			if (i > 0) {
+				builder.append('|');
+			}
+			MidpointProbeResult result = results.get(i);
+			builder.append(result.compactSummary());
+		}
+		return builder.toString();
+	}
+
+	private static String normalizeProbeScoreMode(String mode) {
+		if (mode == null) {
+			return "queue";
+		}
+		String normalized = mode.trim().toLowerCase();
+		if ("kept".equals(normalized) || "queue".equals(normalized) || "bound".equals(normalized)) {
+			return normalized;
+		}
+		return "queue";
+	}
+
+	private void initializeSearchState(LP lp) {
+		PaperDominanceGraphs.resetStatistics();
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
@@ -493,26 +655,6 @@ public class GCNGBBStyleBidirectional {
 		// pricing 仍可把它返回给 PC，让 LP.addColumns() 重新激活已有列。
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
-		}
-		if (config.diagnosticPricingSummaryDetails) {
-			recordPricingDiagnostics(lp);
-		}
-		maybeDumpPricingSnapshot(lp);
-		precomputeDynamicPricingWindows(lp);
-		if (completionBounds == null) {
-			buildCompletionBounds(lp);
-		}
-
-		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
-		sourceVisited.add(0);
-		addZeroDualExcludedJobs(sourceVisited);
-		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
-		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
-		sourceFrontier.normalize(Direction.FORWARD);
-		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
-				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
-		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
-			FWUL.add(source);
 		}
 	}
 
@@ -1374,6 +1516,12 @@ public class GCNGBBStyleBidirectional {
 		midpointColumnHalfMin = Double.NaN;
 		midpointColumnHalfAvg = Double.NaN;
 		midpointColumnHalfMax = Double.NaN;
+		midpointColumnTaskSampleCount = 0;
+		midpointColumnTaskMin = Double.NaN;
+		midpointColumnTaskAvg = Double.NaN;
+		midpointColumnTaskMedian = Double.NaN;
+		midpointColumnTaskMax = Double.NaN;
+		midpointProbeSummary = "off";
 		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
 		diagnosticPricingOnlyJobArcCount = 0;
@@ -1399,6 +1547,57 @@ public class GCNGBBStyleBidirectional {
 		diagnosticLastHeartbeatNanos = 0;
 		diagnosticHeartbeatIntervalNanos = Long.getLong("twet.bpc.diagnosticHeartbeatIntervalMillis", 10000L)
 				* 1000000L;
+		diagnosticForwardPops = 0;
+		diagnosticBackwardPops = 0;
+	}
+
+	private void resetProbeAffectedStatistics() {
+		forwardLabelsKept = 0;
+		forwardLabelsDominated = 0;
+		backwardLabelsKept = 0;
+		backwardLabelsDominated = 0;
+		joinTerminalGroupsScanned = 0;
+		joinTerminalGroupsArcOrVisitPruned = 0;
+		joinTerminalGroupsTimePruned = 0;
+		joinTerminalGroupsCostPruned = 0;
+		joinCandidateLabelsVisited = 0;
+		joinCandidateLabelsDominated = 0;
+		joinPairsTried = 0;
+		joinPairsSetPruned = 0;
+		joinPairsLowerBoundPruned = 0;
+		joinPairsBestBoundPruned = 0;
+		joinPairsTimePruned = 0;
+		joinFunctionEvaluations = 0;
+		joinFunctionPruned = 0;
+		joinFunctionBestRecordPruned = 0;
+		forwardSinglePointKept = 0;
+		forwardSinglePointDominatedByStore = 0;
+		forwardSinglePointDominatedByGraph = 0;
+		backwardSinglePointKept = 0;
+		backwardSinglePointDominatedByStore = 0;
+		backwardSinglePointDominatedByGraph = 0;
+		generatedCandidateCount = 0;
+		generatedCandidateDroppedByHeap = 0;
+		forwardSinkLabelsVisited = 0;
+		forwardSinkNegativeCandidates = 0;
+		forwardExtensionCandidates = 0;
+		forwardExtensionArcPruned = 0;
+		forwardExtensionInfeasible = 0;
+		forwardExtensionConstructed = 0;
+		forwardExtensionBoundSurvivors = 0;
+		forwardLabelsKeptByDepth = new long[data.n + 1];
+		forwardSinkNegativeByDepth = new long[data.n + 1];
+		forwardLabelsKeptReachableSum = 0;
+		forwardLabelsKeptReachableMin = Integer.MAX_VALUE;
+		forwardLabelsKeptReachableMax = 0;
+		completionForwardLabelsPruned = 0;
+		completionBackwardLabelsPruned = 0;
+		completionBoundFunctionEvaluations = 0;
+		completionBoundScalarChecks = 0;
+		completionBoundScalarPruned = 0;
+		completionBoundScalarFunctionFallbacks = 0;
+		completionBoundScalarUnavailable = 0;
+		completionBoundLastEvaluationCutoff = Double.NaN;
 		diagnosticForwardPops = 0;
 		diagnosticBackwardPops = 0;
 	}
@@ -1509,6 +1708,10 @@ public class GCNGBBStyleBidirectional {
 				+ ", midpointColumns count/lastMinAvgMax/halfMinAvgMax=" + midpointColumnSelectedCount
 				+ "/" + midpointColumnLastMin + "/" + midpointColumnLastAvg + "/" + midpointColumnLastMax
 				+ "/" + midpointColumnHalfMin + "/" + midpointColumnHalfAvg + "/" + midpointColumnHalfMax
+				+ ", midpointColumnTasks count/minAvgMedianMax=" + midpointColumnTaskSampleCount
+				+ "/" + midpointColumnTaskMin + "/" + midpointColumnTaskAvg + "/" + midpointColumnTaskMedian
+				+ "/" + midpointColumnTaskMax
+				+ ", midpointProbe=" + midpointProbeSummary
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraphs.statisticsSummary();
@@ -2254,7 +2457,13 @@ public class GCNGBBStyleBidirectional {
 			buildCompletionBounds(lp);
 		}
 		tMid = computeCurrentMidpoint(lp);
+		rebuildHalfDomainForCurrentMidpoint();
+	}
+
+	private void rebuildHalfDomainForCurrentMidpoint() {
 		ensureBaseHalfPenaltyCache();
+		precomputeJobLevelDynamicPricingWindows();
+		precomputeBackwardDynamicPricingWindows();
 		precomputeHalfDomainEligibility();
 	}
 
@@ -2356,11 +2565,15 @@ public class GCNGBBStyleBidirectional {
 				return clampCurrentMidpoint((left + Math.min(reference, pricingHorizon)) * 0.5);
 			}
 		} else if ("columnLastAvg".equalsIgnoreCase(midpointStrategyUsed)
-				|| "columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed)) {
+				|| "columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed)
+				|| "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)
+				|| "columnTaskCenter".equalsIgnoreCase(midpointStrategyUsed)) {
 			MidpointColumnTimingStats stats = evaluateMidpointColumnTiming(lp);
 			if (stats.count > 0) {
-				midpointReferenceTime = "columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed) ? stats.halfAvg
-						: stats.lastAvg;
+				boolean taskMedianStrategy = "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)
+						|| "columnTaskCenter".equalsIgnoreCase(midpointStrategyUsed);
+				midpointReferenceTime = taskMedianStrategy ? stats.taskMedian
+						: ("columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed) ? stats.halfAvg : stats.lastAvg);
 				midpointColumnSelectedCount = stats.count;
 				midpointColumnLastMin = stats.lastMin;
 				midpointColumnLastAvg = stats.lastAvg;
@@ -2368,9 +2581,14 @@ public class GCNGBBStyleBidirectional {
 				midpointColumnHalfMin = stats.halfMin;
 				midpointColumnHalfAvg = stats.halfAvg;
 				midpointColumnHalfMax = stats.halfMax;
+				midpointColumnTaskSampleCount = stats.taskCount;
+				midpointColumnTaskMin = stats.taskMin;
+				midpointColumnTaskAvg = stats.taskAvg;
+				midpointColumnTaskMedian = stats.taskMedian;
+				midpointColumnTaskMax = stats.taskMax;
 				double reference = Math.min(midpointReferenceTime, pricingHorizon);
 				midpointStrategyNanos += System.nanoTime() - start;
-				if ("columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed)) {
+				if ("columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed) || taskMedianStrategy) {
 					return clampCurrentMidpoint(reference);
 				}
 				return clampCurrentMidpoint((left + reference) * 0.5);
@@ -2475,9 +2693,10 @@ public class GCNGBBStyleBidirectional {
 			}
 			TWETColumnEvaluator.Timing timing = evaluator.evaluateTiming(sequence);
 			if (Double.isFinite(timing.lastCompletion) && Double.isFinite(timing.halfCompletion)) {
-				stats.accept(timing.lastCompletion, timing.halfCompletion);
+				stats.accept(timing);
 			}
 		}
+		stats.finish();
 		return stats;
 	}
 
@@ -2910,9 +3129,18 @@ public class GCNGBBStyleBidirectional {
 		double halfMax = Double.NEGATIVE_INFINITY;
 		double halfSum;
 		double halfAvg = Double.NaN;
+		ArrayList<Double> taskCompletions = new ArrayList<Double>();
+		int taskCount;
+		double taskMin = Double.NaN;
+		double taskMax = Double.NaN;
+		double taskSum;
+		double taskAvg = Double.NaN;
+		double taskMedian = Double.NaN;
 
-		void accept(double lastCompletion, double halfCompletion) {
+		void accept(TWETColumnEvaluator.Timing timing) {
 			count++;
+			double lastCompletion = timing.lastCompletion;
+			double halfCompletion = timing.halfCompletion;
 			lastMin = Math.min(lastMin, lastCompletion);
 			lastMax = Math.max(lastMax, lastCompletion);
 			lastSum += lastCompletion;
@@ -2921,6 +3149,92 @@ public class GCNGBBStyleBidirectional {
 			halfMax = Math.max(halfMax, halfCompletion);
 			halfSum += halfCompletion;
 			halfAvg = halfSum / count;
+			for (double completion : timing.completions) {
+				if (Double.isFinite(completion)) {
+					taskCompletions.add(Double.valueOf(completion));
+					taskSum += completion;
+				}
+			}
+		}
+
+		void finish() {
+			taskCount = taskCompletions.size();
+			if (taskCount == 0) {
+				return;
+			}
+			Collections.sort(taskCompletions);
+			taskMin = taskCompletions.get(0).doubleValue();
+			taskMax = taskCompletions.get(taskCount - 1).doubleValue();
+			taskAvg = taskSum / taskCount;
+			int middle = taskCount / 2;
+			if (taskCount % 2 == 1) {
+				taskMedian = taskCompletions.get(middle).doubleValue();
+			} else {
+				taskMedian = (taskCompletions.get(middle - 1).doubleValue()
+						+ taskCompletions.get(middle).doubleValue()) * 0.5;
+			}
+		}
+	}
+
+	private static final class MidpointProbeResult {
+		final double tMid;
+		final int pops;
+		final boolean forwardExhausted;
+		final boolean backwardExhausted;
+		final long forwardKept;
+		final long backwardKept;
+		final long forwardBoundSurvivors;
+		final long forwardBoundPruned;
+		final long backwardBoundPruned;
+		final long forwardQueuePeak;
+		final long backwardQueuePeak;
+		final double keptScore;
+		final double queueScore;
+		final double boundScore;
+
+		MidpointProbeResult(double tMid, int pops, boolean forwardExhausted, boolean backwardExhausted,
+				long forwardKept, long backwardKept, long forwardBoundSurvivors,
+				long forwardBoundPruned, long backwardBoundPruned, long forwardQueuePeak, long backwardQueuePeak) {
+			this.tMid = tMid;
+			this.pops = pops;
+			this.forwardExhausted = forwardExhausted;
+			this.backwardExhausted = backwardExhausted;
+			this.forwardKept = forwardKept;
+			this.backwardKept = backwardKept;
+			this.forwardBoundSurvivors = forwardBoundSurvivors;
+			this.forwardBoundPruned = forwardBoundPruned;
+			this.backwardBoundPruned = backwardBoundPruned;
+			this.forwardQueuePeak = forwardQueuePeak;
+			this.backwardQueuePeak = backwardQueuePeak;
+			this.keptScore = imbalance(forwardKept, backwardKept);
+			this.queueScore = imbalance(forwardKept + forwardQueuePeak, backwardKept + backwardQueuePeak);
+			this.boundScore = imbalance(forwardBoundSurvivors + forwardQueuePeak, backwardKept + backwardQueuePeak);
+		}
+
+		double score(String mode) {
+			String normalized = normalizeProbeScoreMode(mode);
+			if ("kept".equals(normalized)) {
+				return keptScore;
+			}
+			if ("bound".equals(normalized)) {
+				return boundScore;
+			}
+			return queueScore;
+		}
+
+		String compactSummary() {
+			return "t=" + tMid
+					+ ",pop=" + pops
+					+ ",ex=" + (forwardExhausted ? "F" : "f") + (backwardExhausted ? "B" : "b")
+					+ ",kept=" + forwardKept + ":" + backwardKept
+					+ ",q=" + forwardQueuePeak + ":" + backwardQueuePeak
+					+ ",bound=" + forwardBoundSurvivors + ":" + backwardKept
+					+ ",cb=" + forwardBoundPruned + ":" + backwardBoundPruned
+					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore;
+		}
+
+		private static double imbalance(long left, long right) {
+			return Math.abs(Math.log(((double) left + 1.0) / ((double) right + 1.0)));
 		}
 	}
 

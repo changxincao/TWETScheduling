@@ -1580,3 +1580,13 @@ pricing snapshot 已经能保存这个节点的输入，路径为 `test-results/
 “只剩 143 条 job-job 弧为什么还有百万 label”的原因是：label 不是弧，而是路径前缀、已访问集合、reachable/dominance key 和分段函数 envelope 的组合状态。基于 snapshot 的 allowed job-job 图做结构统计，虽然总边数只有 `143`，但其中有一个 29 个 job 的强连通分量；允许出度最高的 job 包括 `5:10, 14:9, 22/28/25/2:7`，允许入度最高的 job 包括 `18/22/5/17:10`。从任意 job 出发、不重复 job 的简单路径前缀数到长度 8 已经为：长度 1 为 `30`，长度 2 为 `143`，长度 3 为 `724`，长度 4 为 `3522`，长度 5 为 `15906`，长度 6 为 `65474`，长度 7 为 `243785`，长度 8 为 `829235`。因此，143 条边仍然足以产生大量不同前缀。
 
 同时 dual 结构会让这些前缀难以被 bound 和 dominance 迅速剪掉。node8 的高 job dual 包括 `job1=2707.58, job12=2068.625, job30=1950, job2=1824.17, job27=1760.5, job21=1748.33, job28=1747.5, job5=1720.5`，再叠加很大的负 machine dual，相当于很多内部列前缀都有强负 reduced-cost 潜力。completion bound 已经剪了约 `1429779` 个 forward 扩展，但仍有 `3287223` 个 bound survivor，说明问题不是 bound 没启用，而是 formal/on 后的 child RMP/dual/剩余图组合让 forward 状态空间本身过大。
+
+### 41.48 2026-06-06 012 pricingOnly “一会能一会不能”的口径复核
+
+继续复核 012 的 pricingOnly 为什么看起来有时能求解、有时又求解不出来。当前证据更支持“实验控制口径混乱”，而不是同一配置本身随机失效。第一次被记录为 600 秒没有结果的 pricingOnly 运行，使用的是 `Start-Process` 包装 Java 的方式；该次 `out.log/err.log` 都是 0 字节，也没有 CSV。后续确认 `Start-Process` 被杀掉时没有同步杀掉真实 Java 子进程，因此这个结果只能说明包装器没有拿到可靠输出，不能作为 pricingOnly 不收敛的证据。
+
+有效的直接 Java 运行是 `tmp-subtree-10min-20260605b-tmp-wet030_from040_012-pricingOnly`。同样是 half-domain、`completionBound=allCycles`、formal subtree 关闭、pricingOnly subtree 打开、`maxNodes=20000`，该运行正常写出 CSV，状态为 `FINISHED`，`incumbent=bound=13360`，`valid=true`，总时间约 `260.227s`，处理 `10` 个节点。因此，若讨论“之前那个 pricingOnly 到底能不能求出来”，当前应以这个直接 Java 结果为准：它能在 10 分钟内收敛。
+
+造成“看起来不动”的真实原因是有效运行里有两个很重的后续节点。node7 用时 `111.912s`，其中 exact pricing `108.969s/2 calls`，最后一轮有 `fw kept/dominated=332142/36318`、`forwardExtend candidates=5554199`。node9 用时 `106.055s`，其中 exact `101.749s/4 calls`，最后一轮约 `fw kept/dominated=219589/19401`、`forwardExtend candidates=3723151`。如果没有 node progress summary 或 stdout 没有可靠落盘，这两个百秒级 exact pricing 阶段很容易被误读成“求解不动”。
+
+这和 formal/on 的情况不同。formal/on 的有效诊断显示它前 7 个节点只到约 `38.536s`，真正卡在 node8 forward exact pricing，最后 heartbeat 已经超过百万级队列且没有进入 backward/join；pricingOnly 的重节点是 node7/node9，但它们最终都能耗尽队列并返回 node summary。由此当前结论为：012 上 pricingOnly 并不是“一会能一会不能”的算法性不稳定，旧的“不能”主要来自无效 wrapper/进程管理和缺少中间 heartbeat；真正的性能风险是后续节点 exact pricing 可以出现约百秒级 label/dominance 工作量。后续若再比较 012，必须用直接 Java 进程、可靠 PID 超时清理、node progress summary 和固定配置，否则不要把 0 字节日志或没有 CSV 的 wrapper 结果当成算法证据。

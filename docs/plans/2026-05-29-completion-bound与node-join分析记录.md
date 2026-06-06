@@ -1590,3 +1590,19 @@ pricing snapshot 已经能保存这个节点的输入，路径为 `test-results/
 造成“看起来不动”的真实原因是有效运行里有两个很重的后续节点。node7 用时 `111.912s`，其中 exact pricing `108.969s/2 calls`，最后一轮有 `fw kept/dominated=332142/36318`、`forwardExtend candidates=5554199`。node9 用时 `106.055s`，其中 exact `101.749s/4 calls`，最后一轮约 `fw kept/dominated=219589/19401`、`forwardExtend candidates=3723151`。如果没有 node progress summary 或 stdout 没有可靠落盘，这两个百秒级 exact pricing 阶段很容易被误读成“求解不动”。
 
 这和 formal/on 的情况不同。formal/on 的有效诊断显示它前 7 个节点只到约 `38.536s`，真正卡在 node8 forward exact pricing，最后 heartbeat 已经超过百万级队列且没有进入 backward/join；pricingOnly 的重节点是 node7/node9，但它们最终都能耗尽队列并返回 node summary。由此当前结论为：012 上 pricingOnly 并不是“一会能一会不能”的算法性不稳定，旧的“不能”主要来自无效 wrapper/进程管理和缺少中间 heartbeat；真正的性能风险是后续节点 exact pricing 可以出现约百秒级 label/dominance 工作量。后续若再比较 012，必须用直接 Java 进程、可靠 PID 超时清理、node progress summary 和固定配置，否则不要把 0 字节日志或没有 CSV 的 wrapper 结果当成算法证据。
+
+### 41.49 2026-06-06 012 pricingOnly node7/node9 慢点原因
+
+继续按 node8 的方式分析 pricingOnly 有效运行中两个慢节点。node7 用时 `111.912s`，其中 pricing `110.365s`、exact `108.969s/2 calls`；node9 用时 `106.055s`，其中 pricing `104.152s`、exact `101.749s/4 calls`。二者都不是 LP、RMIH、subtree 构造或 join 慢：node7 的 LP 只有 `0.625s/7`，RMIH `0.883s`，subtree `1.803ms`；node9 的 LP `0.652s/10`，RMIH `1.219s`。exact heartbeat 也显示 backward 和 join 基本为空，真正耗时都在 forward label 扩展和 dominance 插入。
+
+从最后一轮 exact 看，node7 的 forward 扩展为 `forwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=5554199/3836070/0/1718129/368459`，最终 `fw kept/dominated=332142/36318`，`forwardSink negative=0`。node9 最后一轮为 `3723151/2584441/0/1138710/238989`，最终 `fw kept/dominated=219589/19401`，也没有新的负列。也就是说 completion bound 和 pricingOnly 禁弧已经剪掉了大量候选，但剩下的 survivor 仍然太多，导致必须把几十万 forward label 插入 paper dominance graph 后才能证明没有负列。
+
+这两个节点和 formal/on node8 的共同点是：都属于 forward 状态空间爆炸，而不是 join 爆炸。区别是 formal/on node8 没跑完，最后仍有 `fwQueue` 超过百万；pricingOnly node7/node9 虽然大，但队列最终清空。node7/node9 的慢更像“可结束的重证明”：最后只找到少量负列或没有负列，但为了证明没有更多负列，需要枚举大量 near-zero 前缀。
+
+为什么禁了 `710` 条 pricingOnly arc 后还会这么大，关键不在剩余弧数量本身，而在 dual 结构和 required adjacency。node7/node9 的 job-job 口径约为 `forbiddenJobArcs=4, pricingOnlyJobArcs=710`，剩余 job-job 边约 `156` 条，和快节点 node8 的规模接近；但 node7 有 `adjReq=1, adjForbid=2`，node9 有 `adjReq=2, adjForbid=2`，并且 required adjacency 对应的 allowed arc dual 很大。node7 最后一轮 `arcDual allowedNZ/absSum=2/960`，node9 最后一轮为 `4/2064`，而快节点 node8 只有约 `2/53`。这些非零 arc dual 会进入 reduced-cost 评价，使包含 required adjacency 相关弧的许多前缀看起来有负 reduced-cost 潜力，因此不容易被 completion bound 或 dominance 提前删掉。
+
+depth 分布也支持这个判断。node7 最后一轮 forward label 在深度 `12..16` 达到高峰：`50155/68127/71109/53724/26274`；node9 类似，在深度 `12..16` 为 `36251/47127/45944/32057/13958`。相对地，pricingOnly 的 node8 最后一轮每层最多只有二十多个 label。也就是说，node7/node9 不是短路径或单个局部结构慢，而是 required-adjacency dual 和当前 LP dual 让大量中长前缀同时保留下来。
+
+paper dominance graph 是这些 label 最终转化为 wall time 的直接位置。node7 最后一轮 `paperGraph labels kept/rejected=332144/36318`，`nodes created=310588`，`superset visited=9517379`，`subset visited=65862002`；node9 最后一轮 `labels kept/rejected=219597/19413`，`nodes created=204410`，`superset visited=4925452`，`subset visited=34798625`。这解释了为什么每轮 exact 都要二十多秒到五十多秒：不仅 label 多，每个新 reachable-set node 还要维护包含关系 DAG，subset 查询访问量达到千万级。
+
+由此当前结论为：012 pricingOnly 的 node7/node9 慢，是“required adjacency dual + 很小全局 gap + 仍有强连通剩余 pricing 图”共同造成的 forward near-zero label 证明成本。pricingOnly subtree 在这些节点没有失效，它已经把大量 arc 剪掉并让队列最终清空；但它不能消除 required adjacency dual 带来的 profitable 前缀扩散。后续若要进一步优化这一类节点，方向不是再看 subtree 构造时间，而是两类：一是改善 required adjacency 分支在 pricing 中的处理方式，例如更强地利用 required-pair 结构约束，而不是仅通过 arc dual 诱导；二是优化 paper dominance graph 的 subset/superset 查询，降低大量 near-zero label 被保留时的证明成本。

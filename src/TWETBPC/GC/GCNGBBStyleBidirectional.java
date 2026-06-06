@@ -2277,8 +2277,7 @@ public class GCNGBBStyleBidirectional {
 		if (Utility.isBigMValue(dynamicMinHStart)) {
 			dynamicMinHStart = 0.0;
 		}
-		pricingHorizon = useLocalHorizon ? Math.min(data.CmaxH, localHorizon)
-				: config.capNoWindowPricingHorizon(data.CmaxH, data.CmaxH, earliestSourceCompletion);
+		pricingHorizon = useLocalHorizon ? Math.min(data.CmaxH, localHorizon) : data.CmaxH;
 		dynamicMaxHEnd = Math.max(dynamicMaxHEnd, pricingHorizon);
 	}
 

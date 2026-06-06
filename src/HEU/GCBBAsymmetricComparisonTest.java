@@ -179,9 +179,6 @@ public class GCBBAsymmetricComparisonTest {
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.asymmetricCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));
-		config.bidirectionalNoWindowHorizonFactor = Double.parseDouble(System.getProperty(
-				"twet.bpc.asymmetricCompare.noWindowHorizonFactor",
-				Double.toString(config.bidirectionalNoWindowHorizonFactor)));
 		return config;
 	}
 

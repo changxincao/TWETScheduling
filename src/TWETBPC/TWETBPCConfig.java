@@ -102,22 +102,6 @@ public class TWETBPCConfig {
 	 * 取 0..1 时强制使用本轮 pricingHorizon 的该比例，不是全局 CmaxH 的比例。
 	 */
 	public double bidirectionalRootLocalHorizonMidpointRatio = Double.NaN;
-	/**
-	 * 2026-06-06: 仅用于无动态 profitable window 的节点实验性压缩 pricing horizon。
-	 * NaN 保持原逻辑；取 (0,1) 时把无窗口节点的 U 上限设为 data.CmaxH 的该比例。
-	 */
-	public double bidirectionalNoWindowHorizonFactor = Double.NaN;
-
-	public double capNoWindowPricingHorizon(double currentHorizon, double globalHorizon, double minimumHorizon) {
-		double factor = bidirectionalNoWindowHorizonFactor;
-		if (!Double.isFinite(factor) || factor <= 0.0 || factor >= 1.0 || !Double.isFinite(globalHorizon)
-				|| globalHorizon <= 0.0) {
-			return currentHorizon;
-		}
-		double cap = globalHorizon * factor;
-		double floor = Double.isFinite(minimumHorizon) && minimumHorizon > 0.0 ? minimumHorizon : 0.0;
-		return Math.max(floor, Math.min(currentHorizon, cap));
-	}
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

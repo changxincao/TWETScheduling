@@ -232,9 +232,6 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalRootLocalHorizonMidpointRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointRatio",
 				Double.toString(config.bidirectionalRootLocalHorizonMidpointRatio)));
-		config.bidirectionalNoWindowHorizonFactor = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.noWindowHorizonFactor",
-				Double.toString(config.bidirectionalNoWindowHorizonFactor)));
 		return config;
 	}
 

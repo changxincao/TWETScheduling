@@ -117,6 +117,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		});
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
+			if (!isSequenceCompatible(lp.getNode(), column.getSequence())) {
+				continue;
+			}
 			if (!column.getSequence().isEmpty()) {
 				// 2026-05-21: seed 排序前先缓存 reduced cost，避免 comparator 反复扫描同一条列。
 				ScoredSeed candidate = new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp));
@@ -257,6 +260,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private boolean isSequenceCompatible(Node node, List<Integer> sequence) {
 		if (sequence.isEmpty()) {
 			return false;
+		}
+		if (node == null) {
+			return true;
 		}
 		if (isPricingArcForbidden(node, 0, sequence.get(0).intValue())) {
 			return false;

@@ -1606,3 +1606,17 @@ depth 分布也支持这个判断。node7 最后一轮 forward label 在深度 `
 paper dominance graph 是这些 label 最终转化为 wall time 的直接位置。node7 最后一轮 `paperGraph labels kept/rejected=332144/36318`，`nodes created=310588`，`superset visited=9517379`，`subset visited=65862002`；node9 最后一轮 `labels kept/rejected=219597/19413`，`nodes created=204410`，`superset visited=4925452`，`subset visited=34798625`。这解释了为什么每轮 exact 都要二十多秒到五十多秒：不仅 label 多，每个新 reachable-set node 还要维护包含关系 DAG，subset 查询访问量达到千万级。
 
 由此当前结论为：012 pricingOnly 的 node7/node9 慢，是“required adjacency dual + 很小全局 gap + 仍有强连通剩余 pricing 图”共同造成的 forward near-zero label 证明成本。pricingOnly subtree 在这些节点没有失效，它已经把大量 arc 剪掉并让队列最终清空；但它不能消除 required adjacency dual 带来的 profitable 前缀扩散。后续若要进一步优化这一类节点，方向不是再看 subtree 构造时间，而是两类：一是改善 required adjacency 分支在 pricing 中的处理方式，例如更强地利用 required-pair 结构约束，而不是仅通过 arc dual 诱导；二是优化 paper dominance graph 的 subset/superset 查询，降低大量 near-zero label 被保留时的证明成本。
+
+### 41.50 2026-06-06 node7/node9 正反向 label 不均衡原因
+
+继续解释 node7/node9 中为什么 forward label 达到二三十万，而 backward label 只有个位数。首先，这不是队列调度没有给 backward 机会。当前 `GCNGBBStyleBidirectional` 的流程是先耗尽 forward 队列，再耗尽 backward 队列，最后统一 join；日志中 backward.start/backward.done 都出现了，说明 backward 队列确实被处理完，只是很快被剪空。
+
+直接原因有三点。第一，half-domain 实现本来就不完全对称。forward 从 source 出发，frontier 在 `[0,Tmid]`，每个 forward label 都会尝试 `last -> sink` 直接生成完整列；也就是说，只要一条内部列可以在左半域完成，它不需要 backward 后缀就能被发现或被证明。backward 从虚拟 sink 出发，frontier 在 `[Tmid,CmaxH]`，主要服务于“必须跨过 Tmid 的 crossing-arc join”。如果当前负列/near-zero 列大多能在 `Tmid=1620.5` 前完成，forward 自然会膨胀，backward 不会同步膨胀。
+
+第二，012 的 node7/node9 确实表现为 forward 直接闭合主导。node7 第一轮 exact 中 `forwardSink visited=332067` 且生成了 `3` 条负列，最后一轮 `forwardSink visited=331905` 但无负列；node9 四轮 exact 中 `forwardSink visited` 分别约为 `202387/220811/221280/219503`，生成负列 `19/2/2/0`。join 侧几乎没有工作：node7 的 join groups 只有 `62`，node9 只有 `248`，join candidates/pairs 都为 0。这说明后续节点需要证明的大量候选主要是“forward 前缀直接接 sink”的完整列，而不是 forward+backward 拼接列。
+
+第三，backward 被 completion bound 和时间半域很早剪掉。node7 最后一轮 backward 侧只有 `bw kept/dominated=2/0`，但 `bwPruned=48`；node9 最后一轮为 `8/12`，`bwPruned=84`。halfWindowIneligible 为 0，说明不是 job 窗口完全落在左半域导致 backward 没资格，而是从 sink 反向长出来的少量后缀一旦和 forward prefix bound 相加，就无法低于 `-1e-6` cutoff，于是被 backward completion bound 剪掉。换句话说，后缀本身不够“有利”；真正有利或 near-zero 的 reduced-cost 结构集中在 source 出发的长前缀里。
+
+这个不均衡还和 reduced-cost 组成有关。forward label 从 source 出发，包含机器 dual 的固定项，然后每加入一个 job 都扣 job dual 和对应 arc dual；node7/node9 的 required adjacency arc dual 很大，沿着这些弧向前扩展会不断制造看起来有希望的前缀。backward 从 sink 出发时，先面对的是 `job -> sink` 和右半域时间，required adjacency 的大 dual 未必能立刻进入短后缀；即使某个后缀单独看起来不错，completion bound 还会用对应 job 的最优 forward prefix 下界把它剪掉。因此大 dual 的影响主要在 forward 中长前缀里累积，而不是在 backward 短后缀里扩散。
+
+因此，node7/node9 的正反向不均衡不是 bug，而是当前 half-domain 设计和该节点 dual/时间结构共同导致的结果：这些节点的难点是大量可在左半域完成、直接接 sink 的 near-zero 完整列证明；backward 只负责跨 Tmid 的后缀，而这些后缀很少且容易被 completion bound 剪掉。若希望更均衡，只能改变 pricing 策略本身，例如强制 bidirectional crossing 生成、动态移动 Tmid、或限制 forward direct-sink 证明方式；但这些都会改变当前算法行为，需要单独实验验证，不能简单认为 backward 少就是错误。

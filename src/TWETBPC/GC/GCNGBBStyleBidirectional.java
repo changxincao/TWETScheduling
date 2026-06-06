@@ -2562,12 +2562,10 @@ public class GCNGBBStyleBidirectional {
 			}
 		} else if ("columnLastAvg".equalsIgnoreCase(midpointStrategyUsed)
 				|| "columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed)
-				|| "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)
-				|| "columnTaskCenter".equalsIgnoreCase(midpointStrategyUsed)) {
+				|| "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)) {
 			MidpointColumnTimingStats stats = evaluateMidpointColumnTiming(lp);
 			if (stats.count > 0) {
-				boolean taskMedianStrategy = "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)
-						|| "columnTaskCenter".equalsIgnoreCase(midpointStrategyUsed);
+				boolean taskMedianStrategy = "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed);
 				midpointReferenceTime = taskMedianStrategy ? stats.taskMedian
 						: ("columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed) ? stats.halfAvg : stats.lastAvg);
 				midpointColumnSelectedCount = stats.count;

@@ -536,12 +536,6 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private double midpointProbeReference() {
-		if (Double.isFinite(midpointColumnTaskMedian)) {
-			return midpointColumnTaskMedian;
-		}
-		if (Double.isFinite(midpointReferenceTime)) {
-			return midpointReferenceTime;
-		}
 		return tMid;
 	}
 
@@ -562,6 +556,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private MidpointProbeResult runMidpointProbeCandidate(LP lp, double candidateTMid, int popLimit) {
+		long start = System.nanoTime();
 		tMid = candidateTMid;
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
@@ -582,7 +577,8 @@ public class GCNGBBStyleBidirectional {
 			fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
 			bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
 		}
-		return new MidpointProbeResult(candidateTMid, pops, FWUL.isEmpty(), BWUL.isEmpty(),
+		double elapsedMillis = (System.nanoTime() - start) / 1_000_000.0;
+		return new MidpointProbeResult(candidateTMid, elapsedMillis, pops, FWUL.isEmpty(), BWUL.isEmpty(),
 				forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,
 				completionForwardLabelsPruned, completionBackwardLabelsPruned, fwQueuePeak, bwQueuePeak);
 	}
@@ -3227,6 +3223,7 @@ public class GCNGBBStyleBidirectional {
 
 	private static final class MidpointProbeResult {
 		final double tMid;
+		final double elapsedMillis;
 		final int pops;
 		final boolean forwardExhausted;
 		final boolean backwardExhausted;
@@ -3241,10 +3238,11 @@ public class GCNGBBStyleBidirectional {
 		final double queueScore;
 		final double boundScore;
 
-		MidpointProbeResult(double tMid, int pops, boolean forwardExhausted, boolean backwardExhausted,
+		MidpointProbeResult(double tMid, double elapsedMillis, int pops, boolean forwardExhausted, boolean backwardExhausted,
 				long forwardKept, long backwardKept, long forwardBoundSurvivors,
 				long forwardBoundPruned, long backwardBoundPruned, long forwardQueuePeak, long backwardQueuePeak) {
 			this.tMid = tMid;
+			this.elapsedMillis = elapsedMillis;
 			this.pops = pops;
 			this.forwardExhausted = forwardExhausted;
 			this.backwardExhausted = backwardExhausted;
@@ -3295,6 +3293,7 @@ public class GCNGBBStyleBidirectional {
 
 		String compactSummary() {
 			return "t=" + tMid
+					+ ",ms=" + elapsedMillis
 					+ ",pop=" + pops
 					+ ",ex=" + (forwardExhausted ? "F" : "f") + (backwardExhausted ? "B" : "b")
 					+ ",kept=" + forwardKept + ":" + backwardKept

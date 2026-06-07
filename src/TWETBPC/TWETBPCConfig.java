@@ -114,9 +114,9 @@ public class TWETBPCConfig {
 	public int bidirectionalMidpointProbeMaxCandidates = 5;
 	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.15 表示左移 *0.85，右移 *1.15。 */
 	public double bidirectionalMidpointProbeMoveRatio = 0.15;
-	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound/peak。 */
+	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound/remaining/peak。 */
 	public String bidirectionalMidpointProbeScore = "queue";
-	/** 2026-06-07: Tmid probe 主指标很接近时的二级 score；可选 off/kept/queue/bound/peak。 */
+	/** 2026-06-07: Tmid probe 主指标很接近时的二级 score；可选 off/kept/queue/bound/remaining/peak。 */
 	public String bidirectionalMidpointProbeTieScore = "off";
 	/** 2026-06-07: 主指标倍数差不超过该值时，才使用二级 score 打破平局。 */
 	public double bidirectionalMidpointProbeTieTolerance = 0.0;

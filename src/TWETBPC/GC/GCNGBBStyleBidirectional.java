@@ -866,7 +866,7 @@ public class GCNGBBStyleBidirectional {
 		}
 		String normalized = mode.trim().toLowerCase();
 		if ("kept".equals(normalized) || "queue".equals(normalized) || "bound".equals(normalized)
-				|| "peak".equals(normalized)) {
+				|| "peak".equals(normalized) || "remaining".equals(normalized)) {
 			return normalized;
 		}
 		return "queue";
@@ -3518,6 +3518,7 @@ public class GCNGBBStyleBidirectional {
 		final double queueScore;
 		final double boundScore;
 		final double peakScore;
+		final double remainingScore;
 
 		MidpointProbeResult(double tMid, double elapsedMillis, int pops, boolean forwardExhausted, boolean backwardExhausted,
 				int forwardPops, int backwardPops,
@@ -3544,6 +3545,7 @@ public class GCNGBBStyleBidirectional {
 			this.queueScore = imbalance(forwardKept + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
 			this.boundScore = imbalance(forwardBoundSurvivors + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
 			this.peakScore = imbalance(forwardKept + forwardQueuePeak, backwardKept + backwardQueuePeak);
+			this.remainingScore = imbalance(forwardQueueRemaining, backwardQueueRemaining);
 		}
 
 		double score(String mode) {
@@ -3556,6 +3558,9 @@ public class GCNGBBStyleBidirectional {
 			}
 			if ("peak".equals(normalized)) {
 				return peakScore;
+			}
+			if ("remaining".equals(normalized)) {
+				return remainingScore;
 			}
 			return queueScore;
 		}
@@ -3571,6 +3576,9 @@ public class GCNGBBStyleBidirectional {
 			if ("peak".equals(normalized)) {
 				return forwardKept + forwardQueuePeak;
 			}
+			if ("remaining".equals(normalized)) {
+				return forwardQueueRemaining;
+			}
 			return forwardKept + forwardQueueRemaining;
 		}
 
@@ -3584,6 +3592,9 @@ public class GCNGBBStyleBidirectional {
 			}
 			if ("peak".equals(normalized)) {
 				return backwardKept + backwardQueuePeak;
+			}
+			if ("remaining".equals(normalized)) {
+				return backwardQueueRemaining;
 			}
 			return backwardKept + backwardQueueRemaining;
 		}
@@ -3614,8 +3625,10 @@ public class GCNGBBStyleBidirectional {
 					+ ",rank=" + reliabilityRank(mode)
 					+ ",direction=" + pressureDirection(normalized)
 					+ ",queueRatio=" + queueScore
+					+ ",remainingRatio=" + remainingScore
 					+ ",selectedScore=" + normalized + ":" + score(normalized)
-					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore + "/" + peakScore;
+					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore + "/" + peakScore + "/"
+					+ remainingScore;
 		}
 
 		private static double imbalance(long left, long right) {

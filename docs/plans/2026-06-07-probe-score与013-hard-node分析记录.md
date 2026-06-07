@@ -65,3 +65,18 @@
 3. 保留“方向阈值”和 bracket/二分思路，但先不实现。具体想法是：当 `left/right` 差距不大时认为当前 split 足够均衡；当连续向左后方向反转，再在左右 bracket 中试探，而不是一直乘 `0.9/1.1`。
 
 这次实现已经把“分数口径”和“可靠性等级”拆开，后续实验能明确区分：是候选点本身不好，还是 probe 没有足够观测两侧。
+
+## 5. 2026-06-07 平衡 pop 调度复核
+
+继续检查后发现，上一版 probe 的 pop 调度仍有一个结构性偏差：它每次选择当前队列更大的一侧扩展。这个规则适合做“哪边已经更大就继续压测哪边”的 stress test，但不适合公平比较 forward/backward 压力。典型现象是 `sidePop=5000:0`，forward 一侧越扩越大，于是预算继续被 forward 吃掉，backward 没有机会展开。此时 score 只能说明 forward 初期增长很快，不能说明该 `Tmid` 下两侧真实压力是否均衡。
+
+本次将 `runMidpointProbeCandidate` 改为两侧配额采样。`popLimit` 仍表示总预算，但拆成 `forwardLimit=(popLimit+1)/2` 和 `backwardLimit=popLimit/2`；先扩展 forward 到配额或队列为空，再扩展 backward 到配额或队列为空。这样 `popLimit=5000` 时，候选点一般会得到 `sidePop=2500:2500`，不会再出现一侧独占预算。由于 probe 默认关闭，但开启时原默认 `popLimit=20000` 已经偏重，本次同步把默认值调为 `5000`。
+
+用同一 013 hard node 复测：
+
+1. `queue, balanced pop=5000`：`solve=61.084s`，node3 `nodeTime=39.626s`，node3 exact `36.408s`，其中 probe 合计约 `9.737s`，非 probe 约 `26.671s`。node3 四次 exact 的候选均为 `sidePop=2500:2500, rank=1`，最后一轮正式 labels 为 `fw=8547, bw=47292`。相比旧 `queue pop=5000` 的 `solve=66.160s/node3 exact=37.894s/probe≈10.976s`，平衡采样略快，且诊断语义更干净。
+2. `queue, balanced pop=10000`：`solve=63.192s`，node3 `nodeTime=41.212s`，node3 exact `37.906s`，其中 probe 合计约 `15.131s`，非 probe 约 `22.775s`。最后一轮正式 labels 为 `fw=11095, bw=43089`。它比 balanced `5000` 更重，没有带来端到端收益。
+
+因此当前更明确的结论是：默认应使用平衡 pop，且默认预算保持 `5000`。继续简单增加 pop 不划算；它会让 probe 更充分，但会把大量时间花在 dry-run 上。后续如果要继续优化 probe，不应回到“队列大优先”，而应改候选迭代策略。
+
+关于候选迭代，目前仍是从 reference 开始，若当前候选的 forward 压力大则乘 `0.9` 往左，否则乘 `1.1` 往右，最多 6 个候选。这种单向乘法能快速把 `completionBound` 偏大的 `Tmid` 往左拉，但它确实可能过于灵敏：当左右压力量级接近时仍会移动；当方向反转时也没有 bracket。当前不急着做完整二分，因为 balanced pop 后每个候选已经能公平观测两侧，先用它判断 score 是否稳定。若后续仍出现候选来回跳或明显错选，再实现 bracket 版：只有当 `left/right` 超过阈值才移动；一旦方向反转，就在左右两个候选之间做 1-2 次二分，而不是继续乘 `0.9/1.1`。

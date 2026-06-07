@@ -109,7 +109,7 @@ public class TWETBPCConfig {
 	/** 2026-06-06: 是否在正式 exact pricing 前用有限 pop dry-run 试探多个 Tmid。 */
 	public boolean bidirectionalMidpointProbe = false;
 	/** 2026-06-06: 每个 Tmid probe 候选最多弹出多少个 label。 */
-	public int bidirectionalMidpointProbePopLimit = 20000;
+	public int bidirectionalMidpointProbePopLimit = 5000;
 	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
 	public int bidirectionalMidpointProbeMaxCandidates = 6;
 	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.10 表示左移 *0.9，右移 *1.1。 */

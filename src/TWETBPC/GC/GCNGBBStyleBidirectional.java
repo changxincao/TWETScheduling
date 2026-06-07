@@ -605,22 +605,25 @@ public class GCNGBBStyleBidirectional {
 		initializeBackwardSink(lp);
 		long fwQueuePeak = queueSize(FWUL);
 		long bwQueuePeak = queueSize(BWUL);
-		int pops = 0;
+		int forwardLimit = (popLimit + 1) / 2;
+		int backwardLimit = popLimit / 2;
 		int forwardPops = 0;
 		int backwardPops = 0;
-		while (pops < popLimit && (!FWUL.isEmpty() || !BWUL.isEmpty())) {
-			boolean useForward = !FWUL.isEmpty() && (BWUL.isEmpty() || FWUL.size() >= BWUL.size());
-			if (useForward) {
-				forwardExtend(lp);
-				forwardPops++;
-			} else {
-				backwardExtend(lp);
-				backwardPops++;
-			}
-			pops++;
+		// 2026-06-07: probe 是为了比较两侧压力，不按当前队列大小抢占预算。
+		// 否则容易出现 sidePop=N:0，只测到 forward 爆炸而没有 backward 样本。
+		while (forwardPops < forwardLimit && !FWUL.isEmpty()) {
+			forwardExtend(lp);
+			forwardPops++;
 			fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
+		}
+		while (backwardPops < backwardLimit && !BWUL.isEmpty()) {
+			backwardExtend(lp);
+			backwardPops++;
 			bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
 		}
+		int pops = forwardPops + backwardPops;
+		fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
+		bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
 		double elapsedMillis = (System.nanoTime() - start) / 1_000_000.0;
 		return new MidpointProbeResult(candidateTMid, elapsedMillis, pops, FWUL.isEmpty(), BWUL.isEmpty(),
 				forwardPops, backwardPops, forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,

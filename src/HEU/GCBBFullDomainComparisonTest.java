@@ -265,6 +265,9 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeReuseWithinNode = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinNode",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinNode)));
+		config.bidirectionalMidpointProbeExactFeedback = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeExactFeedback",
+				Boolean.toString(config.bidirectionalMidpointProbeExactFeedback)));
 		return config;
 	}
 

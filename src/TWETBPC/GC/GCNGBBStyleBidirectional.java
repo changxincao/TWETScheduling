@@ -120,6 +120,7 @@ public class GCNGBBStyleBidirectional {
 	private double midpointColumnTaskMax = Double.NaN;
 	private String midpointProbeSummary = "off";
 	private String midpointProbeReferenceSource = "strategy";
+	private String midpointProbeFeedbackSummary = "off";
 	private long midpointStrategyNanos;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
@@ -283,6 +284,7 @@ public class GCNGBBStyleBidirectional {
 			finalizeGeneratedColumns(lp);
 			diagnosticHeartbeat(lp, "finalize.done", true);
 		}
+		storeMidpointProbeExactFeedback(lp);
 		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
 		lastMessage = "GCNGBB-style bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
@@ -711,12 +713,42 @@ public class GCNGBBStyleBidirectional {
 		midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), Double.valueOf(selectedTMid));
 	}
 
+	private void storeMidpointProbeExactFeedback(LP lp) {
+		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinNode
+				|| !config.bidirectionalMidpointProbeExactFeedback || midpointProbeReuseByNode == null
+				|| lp == null || lp.getNode() == null || !Double.isFinite(tMid)) {
+			midpointProbeFeedbackSummary = "off";
+			return;
+		}
+		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
+		double threshold = normalizedProbeEarlyStopRatio();
+		double feedbackTMid = tMid;
+		String action = "keep";
+		if (Utility.compareGt(threshold, 1.0) && Utility.compareGt(ratio, threshold)) {
+			if (forwardLabelsKept > backwardLabelsKept) {
+				feedbackTMid = clampCurrentMidpoint(tMid * (1.0 - normalizedProbeMoveRatio()));
+				action = "left";
+			} else if (backwardLabelsKept > forwardLabelsKept) {
+				feedbackTMid = clampCurrentMidpoint(tMid * (1.0 + normalizedProbeMoveRatio()));
+				action = "right";
+			}
+		}
+		midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), Double.valueOf(feedbackTMid));
+		midpointProbeFeedbackSummary = "exactRatio=" + ratio + ", action=" + action + ", nextRef=" + feedbackTMid;
+	}
+
 	private double normalizedProbeMoveRatio() {
 		double ratio = config.bidirectionalMidpointProbeMoveRatio;
 		if (!Double.isFinite(ratio) || !Utility.compareGt(ratio, 0.0) || !Utility.compareLt(ratio, 0.5)) {
 			return 0.10;
 		}
 		return ratio;
+	}
+
+	private double directionalImbalance(long left, long right) {
+		double l = (double) left + 1.0;
+		double r = (double) right + 1.0;
+		return Math.max(l / r, r / l);
 	}
 
 	private double normalizedProbeEarlyStopRatio() {
@@ -811,7 +843,7 @@ public class GCNGBBStyleBidirectional {
 		tMid = candidateTMid;
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
-		initializeSearchState(lp);
+		initializeProbeSearchState();
 		initializeForwardSource(lp);
 		initializeBackwardSink(lp);
 		long fwQueuePeak = queueSize(FWUL);
@@ -893,6 +925,20 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private void initializeSearchState(LP lp) {
+		initializeLabelSearchState();
+		initializeCandidateState(lp);
+	}
+
+	private void initializeProbeSearchState() {
+		initializeLabelSearchState();
+		generatedColumns = new ArrayList<TWETColumn>();
+		generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
+				Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
+		generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
+		activeColumnSignatures = new HashSet<SequenceSignature>();
+	}
+
+	private void initializeLabelSearchState() {
 		PaperDominanceGraphs.resetStatistics();
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
@@ -915,12 +961,15 @@ public class GCNGBBStyleBidirectional {
 			minForwardReducedCostByLastJob[i] = Utility.big_M;
 			minForwardEllByLastJob[i] = Utility.big_M;
 		}
+		nextLabelId = 0;
+	}
+
+	private void initializeCandidateState(LP lp) {
 		generatedColumns = new ArrayList<TWETColumn>();
 		generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
 				Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
 		generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
 		activeColumnSignatures = new HashSet<SequenceSignature>();
-		nextLabelId = 0;
 		nextCandidateId = 0;
 		// 只记录当前 RMP active 列。全局 pool 自身会按 signature 去重；若历史列当前不 active，
 		// pricing 仍可把它返回给 PC，让 LP.addColumns() 重新激活已有列。
@@ -1793,6 +1842,7 @@ public class GCNGBBStyleBidirectional {
 		midpointColumnTaskMedian = Double.NaN;
 		midpointColumnTaskMax = Double.NaN;
 		midpointProbeSummary = "off";
+		midpointProbeFeedbackSummary = "off";
 		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
 		diagnosticPricingOnlyJobArcCount = 0;
@@ -1984,6 +2034,7 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + midpointColumnTaskMin + "/" + midpointColumnTaskAvg + "/" + midpointColumnTaskMedian
 				+ "/" + midpointColumnTaskMax
 				+ ", midpointProbe=" + midpointProbeSummary
+				+ ", midpointProbeFeedback=" + midpointProbeFeedbackSummary
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + PaperDominanceGraphs.statisticsSummary();

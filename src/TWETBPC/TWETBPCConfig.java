@@ -114,7 +114,7 @@ public class TWETBPCConfig {
 	public int bidirectionalMidpointProbeMaxCandidates = 6;
 	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.10 表示左移 *0.9，右移 *1.1。 */
 	public double bidirectionalMidpointProbeMoveRatio = 0.10;
-	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound。 */
+	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound/peak/growth/pressure。 */
 	public String bidirectionalMidpointProbeScore = "queue";
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;

@@ -2562,10 +2562,14 @@ public class GCNGBBStyleBidirectional {
 			}
 		} else if ("columnLastAvg".equalsIgnoreCase(midpointStrategyUsed)
 				|| "columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed)
-				|| "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)) {
-			MidpointColumnTimingStats stats = evaluateMidpointColumnTiming(lp);
+				|| "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)
+				|| "columnTaskMedianTopLast".equalsIgnoreCase(midpointStrategyUsed)) {
+			boolean topLastTaskMedianStrategy = "columnTaskMedianTopLast".equalsIgnoreCase(midpointStrategyUsed);
+			MidpointColumnTimingStats stats = topLastTaskMedianStrategy ? evaluateTopLastMidpointColumnTiming(lp)
+					: evaluateMidpointColumnTiming(lp);
 			if (stats.count > 0) {
-				boolean taskMedianStrategy = "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed);
+				boolean taskMedianStrategy = "columnTaskMedian".equalsIgnoreCase(midpointStrategyUsed)
+						|| topLastTaskMedianStrategy;
 				midpointReferenceTime = taskMedianStrategy ? stats.taskMedian
 						: ("columnHalfAvg".equalsIgnoreCase(midpointStrategyUsed) ? stats.halfAvg : stats.lastAvg);
 				midpointColumnSelectedCount = stats.count;
@@ -2689,6 +2693,47 @@ public class GCNGBBStyleBidirectional {
 			if (Double.isFinite(timing.lastCompletion) && Double.isFinite(timing.halfCompletion)) {
 				stats.accept(timing);
 			}
+		}
+		stats.finish();
+		return stats;
+	}
+
+	/**
+	 * 2026-06-07: 先从 low reduced-cost 列中评价 2K 条，再按列末完工时间取最晚 K 条。
+	 * 这样保留任务量 median 的语义，同时减少短列或早完工列把 Tmid 拉得过左。
+	 */
+	private MidpointColumnTimingStats evaluateTopLastMidpointColumnTiming(LP lp) {
+		List<ColumnMidpointCandidate> candidates = selectMidpointColumnCandidates(lp);
+		int selectedLimit = Math.max(0, config.bidirectionalMidpointColumnLimit);
+		int timingLimit = selectedLimit > 0 ? selectedLimit * 2 : 0;
+		ArrayList<ColumnMidpointTimingCandidate> timedCandidates = new ArrayList<ColumnMidpointTimingCandidate>();
+		for (ColumnMidpointCandidate candidate : candidates) {
+			if (timingLimit > 0 && timedCandidates.size() >= timingLimit) {
+				break;
+			}
+			TWETColumn column = lp.getPool().getColumn(candidate.columnId);
+			ArrayList<Integer> sequence = new ArrayList<Integer>(column.getSequence());
+			if (!isSequenceCompatible(sequence, lp.getNode())) {
+				continue;
+			}
+			TWETColumnEvaluator.Timing timing = evaluator.evaluateTiming(sequence);
+			if (Double.isFinite(timing.lastCompletion) && Double.isFinite(timing.halfCompletion)) {
+				timedCandidates.add(new ColumnMidpointTimingCandidate(candidate.columnId, timing));
+			}
+		}
+		Collections.sort(timedCandidates, new Comparator<ColumnMidpointTimingCandidate>() {
+			@Override
+			public int compare(ColumnMidpointTimingCandidate a, ColumnMidpointTimingCandidate b) {
+				int byLastCompletion = -Double.compare(a.timing.lastCompletion, b.timing.lastCompletion);
+				return byLastCompletion != 0 ? byLastCompletion : Integer.compare(a.columnId, b.columnId);
+			}
+		});
+		MidpointColumnTimingStats stats = new MidpointColumnTimingStats();
+		for (ColumnMidpointTimingCandidate candidate : timedCandidates) {
+			if (selectedLimit > 0 && stats.count >= selectedLimit) {
+				break;
+			}
+			stats.accept(candidate.timing);
 		}
 		stats.finish();
 		return stats;
@@ -3167,6 +3212,16 @@ public class GCNGBBStyleBidirectional {
 				taskMedian = (taskCompletions.get(middle - 1).doubleValue()
 						+ taskCompletions.get(middle).doubleValue()) * 0.5;
 			}
+		}
+	}
+
+	private static final class ColumnMidpointTimingCandidate {
+		final int columnId;
+		final TWETColumnEvaluator.Timing timing;
+
+		ColumnMidpointTimingCandidate(int columnId, TWETColumnEvaluator.Timing timing) {
+			this.columnId = columnId;
+			this.timing = timing;
 		}
 	}
 

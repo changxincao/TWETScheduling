@@ -756,14 +756,15 @@ public class GCNGBBStyleBidirectional {
 		double aPrimaryScore = a.score(scoreMode);
 		double bPrimaryScore = b.score(scoreMode);
 		int score = compareDouble(aPrimaryScore, bPrimaryScore);
-		if (score != 0) {
-			String tieMode = normalizeProbeTieScoreMode(config.bidirectionalMidpointProbeTieScore);
-			if (!"off".equals(tieMode) && isProbePrimaryScoreClose(aPrimaryScore, bPrimaryScore)) {
-				int tieScore = compareDouble(a.score(tieMode), b.score(tieMode));
-				if (tieScore != 0) {
-					return tieScore;
-				}
+		String tieMode = normalizeProbeTieScoreMode(config.bidirectionalMidpointProbeTieScore);
+		if (!"off".equals(tieMode) && isProbePrimaryScoreClose(aPrimaryScore, bPrimaryScore)
+				&& isProbeTieScoreComparable(a, b, tieMode)) {
+			int tieScore = compareDouble(a.score(tieMode), b.score(tieMode));
+			if (tieScore != 0) {
+				return tieScore;
 			}
+		}
+		if (score != 0) {
 			return score;
 		}
 		int pressure = Long.compare(a.totalPressure(scoreMode), b.totalPressure(scoreMode));
@@ -785,6 +786,14 @@ public class GCNGBBStyleBidirectional {
 		double tolerance = config.bidirectionalMidpointProbeTieTolerance;
 		return Double.isFinite(tolerance) && Utility.compareGt(tolerance, 0.0)
 				&& Utility.compareLe(Math.abs(a - b), tolerance);
+	}
+
+	private boolean isProbeTieScoreComparable(MidpointProbeResult a, MidpointProbeResult b, String tieMode) {
+		if (!"remaining".equals(tieMode)) {
+			return true;
+		}
+		// remaining 只比较两个未耗尽候选的剩余队列压力；任一侧已经耗尽时，0 队列会破坏可比性。
+		return !a.forwardExhausted && !a.backwardExhausted && !b.forwardExhausted && !b.backwardExhausted;
 	}
 
 	private int compareDouble(double a, double b) {

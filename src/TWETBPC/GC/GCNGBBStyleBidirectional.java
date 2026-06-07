@@ -509,7 +509,6 @@ public class GCNGBBStyleBidirectional {
 		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
 		double moveRatio = normalizedProbeMoveRatio();
 		ArrayList<MidpointProbeResult> results = new ArrayList<MidpointProbeResult>();
-		MidpointProbeResult best = null;
 		HashSet<String> seen = new HashSet<String>();
 		double candidate = clampCurrentMidpoint(reference);
 		for (int i = 0; i < maxCandidates; i++) {
@@ -519,12 +518,9 @@ public class GCNGBBStyleBidirectional {
 			}
 			MidpointProbeResult result = runMidpointProbeCandidate(lp, candidate, popLimit);
 			results.add(result);
-			if (best == null || Utility.compareLt(result.score(config.bidirectionalMidpointProbeScore),
-					best.score(config.bidirectionalMidpointProbeScore))) {
-				best = result;
-			}
 			candidate = nextMidpointProbeCandidate(result, candidate, moveRatio);
 		}
+		MidpointProbeResult best = selectMidpointProbeResult(results, config.bidirectionalMidpointProbeScore);
 		if (best == null) {
 			midpointProbeSummary = "skipped:noResult";
 			return;
@@ -555,6 +551,50 @@ public class GCNGBBStyleBidirectional {
 		return clampCurrentMidpoint(current * multiplier);
 	}
 
+	private MidpointProbeResult selectMidpointProbeResult(ArrayList<MidpointProbeResult> results, String scoreMode) {
+		MidpointProbeResult best = null;
+		for (MidpointProbeResult result : results) {
+			if (best == null || compareMidpointProbeResult(result, best, scoreMode) < 0) {
+				best = result;
+			}
+		}
+		return best;
+	}
+
+	private int compareMidpointProbeResult(MidpointProbeResult a, MidpointProbeResult b, String scoreMode) {
+		int reliability = Integer.compare(a.reliabilityRank(scoreMode), b.reliabilityRank(scoreMode));
+		if (reliability != 0) {
+			return reliability;
+		}
+		int score = compareDouble(a.score(scoreMode), b.score(scoreMode));
+		if (score != 0) {
+			return score;
+		}
+		int pressure = Long.compare(a.totalPressure(scoreMode), b.totalPressure(scoreMode));
+		if (pressure != 0) {
+			return pressure;
+		}
+		int pops = Integer.compare(a.pops, b.pops);
+		if (pops != 0) {
+			return pops;
+		}
+		int elapsed = compareDouble(a.elapsedMillis, b.elapsedMillis);
+		if (elapsed != 0) {
+			return elapsed;
+		}
+		return compareDouble(a.tMid, b.tMid);
+	}
+
+	private int compareDouble(double a, double b) {
+		if (Utility.compareLt(a, b)) {
+			return -1;
+		}
+		if (Utility.compareGt(a, b)) {
+			return 1;
+		}
+		return 0;
+	}
+
 	private MidpointProbeResult runMidpointProbeCandidate(LP lp, double candidateTMid, int popLimit) {
 		long start = System.nanoTime();
 		tMid = candidateTMid;
@@ -566,12 +606,16 @@ public class GCNGBBStyleBidirectional {
 		long fwQueuePeak = queueSize(FWUL);
 		long bwQueuePeak = queueSize(BWUL);
 		int pops = 0;
+		int forwardPops = 0;
+		int backwardPops = 0;
 		while (pops < popLimit && (!FWUL.isEmpty() || !BWUL.isEmpty())) {
 			boolean useForward = !FWUL.isEmpty() && (BWUL.isEmpty() || FWUL.size() >= BWUL.size());
 			if (useForward) {
 				forwardExtend(lp);
+				forwardPops++;
 			} else {
 				backwardExtend(lp);
+				backwardPops++;
 			}
 			pops++;
 			fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
@@ -579,8 +623,9 @@ public class GCNGBBStyleBidirectional {
 		}
 		double elapsedMillis = (System.nanoTime() - start) / 1_000_000.0;
 		return new MidpointProbeResult(candidateTMid, elapsedMillis, pops, FWUL.isEmpty(), BWUL.isEmpty(),
-				forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,
-				completionForwardLabelsPruned, completionBackwardLabelsPruned, fwQueuePeak, bwQueuePeak);
+				forwardPops, backwardPops, forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,
+				completionForwardLabelsPruned, completionBackwardLabelsPruned, queueSize(FWUL), queueSize(BWUL),
+				fwQueuePeak, bwQueuePeak);
 	}
 
 	private String formatMidpointProbeSummary(double reference, MidpointProbeResult best,
@@ -597,7 +642,7 @@ public class GCNGBBStyleBidirectional {
 				builder.append('|');
 			}
 			MidpointProbeResult result = results.get(i);
-			builder.append(result.compactSummary());
+			builder.append(result.compactSummary(config.bidirectionalMidpointProbeScore));
 		}
 		return builder.toString();
 	}
@@ -607,7 +652,8 @@ public class GCNGBBStyleBidirectional {
 			return "queue";
 		}
 		String normalized = mode.trim().toLowerCase();
-		if ("kept".equals(normalized) || "queue".equals(normalized) || "bound".equals(normalized)) {
+		if ("kept".equals(normalized) || "queue".equals(normalized) || "bound".equals(normalized)
+				|| "peak".equals(normalized)) {
 			return normalized;
 		}
 		return "queue";
@@ -3225,6 +3271,8 @@ public class GCNGBBStyleBidirectional {
 		final double tMid;
 		final double elapsedMillis;
 		final int pops;
+		final int forwardPops;
+		final int backwardPops;
 		final boolean forwardExhausted;
 		final boolean backwardExhausted;
 		final long forwardKept;
@@ -3232,18 +3280,25 @@ public class GCNGBBStyleBidirectional {
 		final long forwardBoundSurvivors;
 		final long forwardBoundPruned;
 		final long backwardBoundPruned;
+		final long forwardQueueRemaining;
+		final long backwardQueueRemaining;
 		final long forwardQueuePeak;
 		final long backwardQueuePeak;
 		final double keptScore;
 		final double queueScore;
 		final double boundScore;
+		final double peakScore;
 
 		MidpointProbeResult(double tMid, double elapsedMillis, int pops, boolean forwardExhausted, boolean backwardExhausted,
+				int forwardPops, int backwardPops,
 				long forwardKept, long backwardKept, long forwardBoundSurvivors,
-				long forwardBoundPruned, long backwardBoundPruned, long forwardQueuePeak, long backwardQueuePeak) {
+				long forwardBoundPruned, long backwardBoundPruned, long forwardQueueRemaining, long backwardQueueRemaining,
+				long forwardQueuePeak, long backwardQueuePeak) {
 			this.tMid = tMid;
 			this.elapsedMillis = elapsedMillis;
 			this.pops = pops;
+			this.forwardPops = forwardPops;
+			this.backwardPops = backwardPops;
 			this.forwardExhausted = forwardExhausted;
 			this.backwardExhausted = backwardExhausted;
 			this.forwardKept = forwardKept;
@@ -3251,11 +3306,14 @@ public class GCNGBBStyleBidirectional {
 			this.forwardBoundSurvivors = forwardBoundSurvivors;
 			this.forwardBoundPruned = forwardBoundPruned;
 			this.backwardBoundPruned = backwardBoundPruned;
+			this.forwardQueueRemaining = forwardQueueRemaining;
+			this.backwardQueueRemaining = backwardQueueRemaining;
 			this.forwardQueuePeak = forwardQueuePeak;
 			this.backwardQueuePeak = backwardQueuePeak;
 			this.keptScore = imbalance(forwardKept, backwardKept);
-			this.queueScore = imbalance(forwardKept + forwardQueuePeak, backwardKept + backwardQueuePeak);
-			this.boundScore = imbalance(forwardBoundSurvivors + forwardQueuePeak, backwardKept + backwardQueuePeak);
+			this.queueScore = imbalance(forwardKept + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
+			this.boundScore = imbalance(forwardBoundSurvivors + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
+			this.peakScore = imbalance(forwardKept + forwardQueuePeak, backwardKept + backwardQueuePeak);
 		}
 
 		double score(String mode) {
@@ -3266,6 +3324,9 @@ public class GCNGBBStyleBidirectional {
 			if ("bound".equals(normalized)) {
 				return boundScore;
 			}
+			if ("peak".equals(normalized)) {
+				return peakScore;
+			}
 			return queueScore;
 		}
 
@@ -3275,9 +3336,12 @@ public class GCNGBBStyleBidirectional {
 				return forwardKept;
 			}
 			if ("bound".equals(normalized)) {
-				return forwardBoundSurvivors + forwardQueuePeak;
+				return forwardBoundSurvivors + forwardQueueRemaining;
 			}
-			return forwardKept + forwardQueuePeak;
+			if ("peak".equals(normalized)) {
+				return forwardKept + forwardQueuePeak;
+			}
+			return forwardKept + forwardQueueRemaining;
 		}
 
 		double rightPressure(String mode) {
@@ -3286,21 +3350,42 @@ public class GCNGBBStyleBidirectional {
 				return backwardKept;
 			}
 			if ("bound".equals(normalized)) {
+				return backwardKept + backwardQueueRemaining;
+			}
+			if ("peak".equals(normalized)) {
 				return backwardKept + backwardQueuePeak;
 			}
-			return backwardKept + backwardQueuePeak;
+			return backwardKept + backwardQueueRemaining;
 		}
 
-		String compactSummary() {
+		int reliabilityRank(String mode) {
+			if (forwardExhausted && backwardExhausted) {
+				return 0;
+			}
+			if (forwardPops > 0 && backwardPops > 0
+					&& Utility.compareGt(leftPressure(mode), 0.0) && Utility.compareGt(rightPressure(mode), 0.0)) {
+				return 1;
+			}
+			return 2;
+		}
+
+		long totalPressure(String mode) {
+			return Math.round(leftPressure(mode) + rightPressure(mode));
+		}
+
+		String compactSummary(String mode) {
 			return "t=" + tMid
 					+ ",ms=" + elapsedMillis
 					+ ",pop=" + pops
+					+ ",sidePop=" + forwardPops + ":" + backwardPops
 					+ ",ex=" + (forwardExhausted ? "F" : "f") + (backwardExhausted ? "B" : "b")
 					+ ",kept=" + forwardKept + ":" + backwardKept
-					+ ",q=" + forwardQueuePeak + ":" + backwardQueuePeak
+					+ ",q=" + forwardQueueRemaining + ":" + backwardQueueRemaining
+					+ ",qPeak=" + forwardQueuePeak + ":" + backwardQueuePeak
 					+ ",bound=" + forwardBoundSurvivors + ":" + backwardKept
 					+ ",cb=" + forwardBoundPruned + ":" + backwardBoundPruned
-					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore;
+					+ ",rank=" + reliabilityRank(mode)
+					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore + "/" + peakScore;
 		}
 
 		private static double imbalance(long left, long right) {

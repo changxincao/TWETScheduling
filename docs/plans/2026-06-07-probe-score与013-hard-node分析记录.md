@@ -136,3 +136,20 @@
 013 node3 的现象更像是这种结构：较小的 `Tmid` 把 forward 半域压住了，所以 probe 截面上 forward 和 backward 看起来接近；但 backward 侧剩余队列中的 label 在继续扩展时能产生很多可保留后缀，且 completion bound 没有在这些后缀早期把它们全部剪掉。于是 full expansion 结束后 backward label 数从浅层截面的接近均衡，放大成 5-6 倍。换句话说，有限 pop 的 `queueRatio` 是局部截面指标，不是剩余子树大小估计。
 
 这也解释了为什么简单加大 pop 有改善但不划算。`pop=10000/20000` 能让 probe 更深入，full ratio 从 `5-6` 倍降到更接近 `2-4` 倍，但 probe 自身成本明显上升，端到端反而更慢。后续如果继续优化，不应再尝试单一静态 score，而应考虑更直接地估计“剩余队列的后代规模”：例如只对 queue score 最好的少数候选做更深二阶段 probe，或者在正式 pricing 的前几轮复用上一轮 full expansion 观察到的偏差来修正同一 node 后续 `Tmid`。这些都比把 `growth/pressure` 作为全局 score 更稳。
+
+## 11. 2026-06-07 node3 probe/full ratio 差距的具体来源
+
+继续把 `tmp-probe-balanced-013-completionBound-queue-pop5000-n4` 的 node3 四轮 selected 候选和正式 full pricing 对齐后，可以更具体地看出差距来自哪一侧。四轮 selected 的 probe 截面分别为：
+
+1. `Tmid=325.360`：probe 左侧压力 `5725+3225=8950`，右侧压力 `6074+3575=9649`，ratio 约 `1.078`；full 为 `fw=7353,bw=39088`，ratio 约 `5.315`。
+2. `Tmid=355.278`：probe 左侧压力 `6399+3899=10298`，右侧压力 `6321+3822=10143`，ratio 约 `1.015`；full 为 `fw=9504,bw=62437`，ratio 约 `6.569`。
+3. `Tmid=347.405`：probe 左侧压力 `6145+3645=9790`，右侧压力 `6074+3575=9649`，ratio 约 `1.015`；full 为 `fw=8605,bw=47393`，ratio 约 `5.507`。
+4. `Tmid=347.405`：probe 左侧压力 `6086+3586=9672`，右侧压力 `6027+3528=9555`，ratio 约 `1.012`；full 为 `fw=8547,bw=47292`，ratio 约 `5.533`。
+
+这里最关键的观察是：full 的 forward kept 并没有比 probe 左侧压力大，反而同量级或略小；真正放大的是 backward。第二轮中，probe 右侧压力约 `10143`，full backward kept 到 `62437`，约为 `6.16` 倍；第三、四轮也约为 `4.9-5.0` 倍。也就是说，有限 probe 的误差主要是没有估计出 backward 队列中那些 label 的后续可扩展后代，而不是两侧同时等比例增长。
+
+这说明 `queueRatio` 的局限不是“公式错”，而是它把每个队列 label 当成一个单位压力。对 hard node 来说，两个队列长度相近时，剩余子树规模可能完全不同：forward 队列里的 label 后续很快被时间、dominance 或 completion bound 截掉；backward 队列里的 label 虽然数量相近，但每个 label 还能向前接出更多可保留前驱，且在早期不容易被 completion bound 证明为无用。于是浅层截面看起来平衡，完整展开后 backward 明显放大。
+
+这也解释了为什么 queue 对 completionBound reference 仍然有用。reference 附近的候选，例如第一轮 `Tmid=551`，probe 已经显示左侧压力约 `20236`、右侧约 `7545`，forward 过重；因此 queue 把 `Tmid` 往左拉是对的。它修正的是“completionBound 的 reference 太右”这个一阶错误。但拉到 `325-355` 后，queue 只能保证浅层截面接近平衡，不能保证剩余右侧子树不会继续膨胀。
+
+因此后续若要继续优化，方向应更具体：不是换 score，而是给 `rank=1` 候选估计队列后代规模。比较实用的方式可能有两个。第一，对 queue score 最好的 1-2 个候选做二阶段 probe：第一阶段仍用 `pop=5000` 找候选，第二阶段只加深这些候选的 backward/forward 各一小段，看右侧是否开始持续放大。第二，在同一 node 的后续 pricing round 中利用上一轮 full expansion 的实际偏差，如果上轮 selected 的 `fullRatio/probeRatio` 显示 backward 被低估 5 倍，那么下一轮同类 reference 不应再仅按浅层 queueRatio 选点，而应对更靠右或更低 backward 后代风险的候选加权。前者更局部、实现更直接；后者利用真实 full 信息，但需要谨慎避免 dual 变化后误用。

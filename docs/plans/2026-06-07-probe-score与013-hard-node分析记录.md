@@ -124,3 +124,15 @@
 `pressure` 结果为 `NODE_LIMIT, solve=93.527s, exact=79.616s, pricing=65, cols=7161, valid=true`，也慢于 `queue` 基线。node3 第一轮选到 `Tmid=340.417`，完整 pricing 为 `fw:bw=12141:45519`；第二轮甚至选到 `319.750`，完整比例扩大到 `6526:73716`，backward 压力显著恶化。它验证了一个负结论：只看总压力会偏向更左的候选，但更左不等于更均衡，可能把后续工作量转移到 backward。
 
 由此当前结论是：`growth` 和 `pressure` 暂时只保留为诊断 score，不建议设为默认。`queue` 仍是当前最稳的 probe score，尽管它在 rank=1 hard node 上会低估 full imbalance。后续如果继续改 probe，重点不应是再换一个单一 score，而应做两件事：一是把 probe 的候选选择和正式 full pricing 结果对齐记录，形成可学习的 hard-node 样本；二是考虑“先用 queue 找低 imbalance 候选，再用 total pressure/growth 作为次级 tie-break 或 reject 规则”，而不是直接用 total pressure 或 growth 覆盖 queue。
+
+## 10. 2026-06-07 弃用 growth/pressure 后的 queue 问题复盘
+
+继续讨论后，决定不保留 `growth/pressure` 两个 score 的代码路径。原因不是它们完全没有信息，而是当前实测已经说明：`growth` 没能解释 node3 后续 backward 爆炸，`pressure` 又容易把 `Tmid` 拉得过左，把压力转移到 backward。保留这两个可选项只会增加配置和日志理解成本。因此代码恢复为 `kept/queue/bound/peak` 四个 score，`growth/pressure` 只作为这次负实验结论写入记录。
+
+回到 `queue` 本身，它在 013 node3 上确实比直接使用 `completionBound` reference 更好。`completionBound` 给出的 `Tmid` 约在 `563.5`，明显偏右，forward 左半域太宽，正式 pricing 会在 forward 阶段积累大量 label，甚至还没进入 backward 就已经很重。`queue probe` 的作用是从这个偏右 reference 开始试探，把 `Tmid` 往左拉到 `325-355` 一带；虽然 full ratio 仍不均衡，但 node3 的 exact 时间已经从 completionBound reference 下的严重 forward 爆炸降到几十秒量级。也就是说，queue 的主要收益不是“准确预测最终左右比例”，而是“发现 completionBound reference 太右，并把 split 拉到一个明显更可用的区间”。
+
+`probe ratio = 1.078/1.015/1.015/1.012` 到 `full ratio = 5.315/6.569/5.507/5.533` 的差距，核心原因是有限 pop 只观察了搜索树的浅层截面。balanced `pop=5000` 时，每侧大约只 pop 2500 次；在 node3 这种 hard node 上，两侧队列都没有耗尽，`rank=1` 只表示两边都被采样过，不表示两边的状态空间已经展开完整。此时 `queueRatio` 看到的是“当前已保留 label + 当前队列”的截面比例，而 full pricing 看到的是这个截面后面所有后代 label 的总量。若某一侧的队列虽然当前不大，但里面的 label 更容易继续扩展出大量后代，有限 pop 就会低估它的最终规模。
+
+013 node3 的现象更像是这种结构：较小的 `Tmid` 把 forward 半域压住了，所以 probe 截面上 forward 和 backward 看起来接近；但 backward 侧剩余队列中的 label 在继续扩展时能产生很多可保留后缀，且 completion bound 没有在这些后缀早期把它们全部剪掉。于是 full expansion 结束后 backward label 数从浅层截面的接近均衡，放大成 5-6 倍。换句话说，有限 pop 的 `queueRatio` 是局部截面指标，不是剩余子树大小估计。
+
+这也解释了为什么简单加大 pop 有改善但不划算。`pop=10000/20000` 能让 probe 更深入，full ratio 从 `5-6` 倍降到更接近 `2-4` 倍，但 probe 自身成本明显上升，端到端反而更慢。后续如果继续优化，不应再尝试单一静态 score，而应考虑更直接地估计“剩余队列的后代规模”：例如只对 queue score 最好的少数候选做更深二阶段 probe，或者在正式 pricing 的前几轮复用上一轮 full expansion 观察到的偏差来修正同一 node 后续 `Tmid`。这些都比把 `growth/pressure` 作为全局 score 更稳。

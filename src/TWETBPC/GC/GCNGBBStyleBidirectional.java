@@ -607,46 +607,28 @@ public class GCNGBBStyleBidirectional {
 		long bwQueuePeak = queueSize(BWUL);
 		int forwardLimit = (popLimit + 1) / 2;
 		int backwardLimit = popLimit / 2;
-		int forwardMidpoint = Math.max(1, forwardLimit / 2);
-		int backwardMidpoint = Math.max(1, Math.max(1, backwardLimit) / 2);
 		int forwardPops = 0;
 		int backwardPops = 0;
-		long forwardMidPressure = -1L;
-		long backwardMidPressure = -1L;
 		// 2026-06-07: probe 是为了比较两侧压力，不按当前队列大小抢占预算。
 		// 否则容易出现 sidePop=N:0，只测到 forward 爆炸而没有 backward 样本。
 		while (forwardPops < forwardLimit && !FWUL.isEmpty()) {
 			forwardExtend(lp);
 			forwardPops++;
 			fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
-			if (forwardPops == forwardMidpoint) {
-				forwardMidPressure = forwardLabelsKept + queueSize(FWUL);
-			}
 		}
 		while (backwardPops < backwardLimit && !BWUL.isEmpty()) {
 			backwardExtend(lp);
 			backwardPops++;
 			bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
-			if (backwardPops == backwardMidpoint) {
-				backwardMidPressure = backwardLabelsKept + queueSize(BWUL);
-			}
 		}
 		int pops = forwardPops + backwardPops;
 		fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
 		bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
-		long forwardEndPressure = forwardLabelsKept + queueSize(FWUL);
-		long backwardEndPressure = backwardLabelsKept + queueSize(BWUL);
-		if (forwardMidPressure < 0L) {
-			forwardMidPressure = forwardEndPressure;
-		}
-		if (backwardMidPressure < 0L) {
-			backwardMidPressure = backwardEndPressure;
-		}
 		double elapsedMillis = (System.nanoTime() - start) / 1_000_000.0;
 		return new MidpointProbeResult(candidateTMid, elapsedMillis, pops, FWUL.isEmpty(), BWUL.isEmpty(),
 				forwardPops, backwardPops, forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,
 				completionForwardLabelsPruned, completionBackwardLabelsPruned, queueSize(FWUL), queueSize(BWUL),
-				fwQueuePeak, bwQueuePeak, forwardMidPressure, backwardMidPressure);
+				fwQueuePeak, bwQueuePeak);
 	}
 
 	private String formatMidpointProbeSummary(double reference, MidpointProbeResult best,
@@ -674,7 +656,7 @@ public class GCNGBBStyleBidirectional {
 		}
 		String normalized = mode.trim().toLowerCase();
 		if ("kept".equals(normalized) || "queue".equals(normalized) || "bound".equals(normalized)
-				|| "peak".equals(normalized) || "growth".equals(normalized) || "pressure".equals(normalized)) {
+				|| "peak".equals(normalized)) {
 			return normalized;
 		}
 		return "queue";
@@ -3305,22 +3287,16 @@ public class GCNGBBStyleBidirectional {
 		final long backwardQueueRemaining;
 		final long forwardQueuePeak;
 		final long backwardQueuePeak;
-		final long forwardMidPressure;
-		final long backwardMidPressure;
-		final double forwardGrowth;
-		final double backwardGrowth;
 		final double keptScore;
 		final double queueScore;
 		final double boundScore;
 		final double peakScore;
-		final double growthScore;
-		final double pressureScore;
 
 		MidpointProbeResult(double tMid, double elapsedMillis, int pops, boolean forwardExhausted, boolean backwardExhausted,
 				int forwardPops, int backwardPops,
 				long forwardKept, long backwardKept, long forwardBoundSurvivors,
 				long forwardBoundPruned, long backwardBoundPruned, long forwardQueueRemaining, long backwardQueueRemaining,
-				long forwardQueuePeak, long backwardQueuePeak, long forwardMidPressure, long backwardMidPressure) {
+				long forwardQueuePeak, long backwardQueuePeak) {
 			this.tMid = tMid;
 			this.elapsedMillis = elapsedMillis;
 			this.pops = pops;
@@ -3337,16 +3313,10 @@ public class GCNGBBStyleBidirectional {
 			this.backwardQueueRemaining = backwardQueueRemaining;
 			this.forwardQueuePeak = forwardQueuePeak;
 			this.backwardQueuePeak = backwardQueuePeak;
-			this.forwardMidPressure = forwardMidPressure;
-			this.backwardMidPressure = backwardMidPressure;
-			this.forwardGrowth = growth(forwardKept + forwardQueueRemaining, forwardMidPressure);
-			this.backwardGrowth = growth(backwardKept + backwardQueueRemaining, backwardMidPressure);
 			this.keptScore = imbalance(forwardKept, backwardKept);
 			this.queueScore = imbalance(forwardKept + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
 			this.boundScore = imbalance(forwardBoundSurvivors + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
 			this.peakScore = imbalance(forwardKept + forwardQueuePeak, backwardKept + backwardQueuePeak);
-			this.growthScore = queueScore + imbalance(forwardGrowth, backwardGrowth);
-			this.pressureScore = Math.log((double) totalQueuePressure() + 1.0);
 		}
 
 		double score(String mode) {
@@ -3359,12 +3329,6 @@ public class GCNGBBStyleBidirectional {
 			}
 			if ("peak".equals(normalized)) {
 				return peakScore;
-			}
-			if ("growth".equals(normalized)) {
-				return growthScore;
-			}
-			if ("pressure".equals(normalized)) {
-				return pressureScore;
 			}
 			return queueScore;
 		}
@@ -3412,10 +3376,6 @@ public class GCNGBBStyleBidirectional {
 			return Math.round(leftPressure(mode) + rightPressure(mode));
 		}
 
-		long totalQueuePressure() {
-			return forwardKept + forwardQueueRemaining + backwardKept + backwardQueueRemaining;
-		}
-
 		String compactSummary(String mode) {
 			String normalized = normalizeProbeScoreMode(mode);
 			return "t=" + tMid
@@ -3430,23 +3390,14 @@ public class GCNGBBStyleBidirectional {
 					+ ",cb=" + forwardBoundPruned + ":" + backwardBoundPruned
 					+ ",rank=" + reliabilityRank(mode)
 					+ ",queueRatio=" + Math.exp(queueScore)
-					+ ",growth=" + forwardGrowth + ":" + backwardGrowth
 					+ ",selectedScore=" + normalized + ":" + score(normalized)
-					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore + "/" + peakScore
-					+ "/" + growthScore + "/" + pressureScore;
+					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore + "/" + peakScore;
 		}
 
 		private static double imbalance(long left, long right) {
 			return Math.abs(Math.log(((double) left + 1.0) / ((double) right + 1.0)));
 		}
 
-		private static double imbalance(double left, double right) {
-			return Math.abs(Math.log((left + 1.0e-9) / (right + 1.0e-9)));
-		}
-
-		private static double growth(long endPressure, long midPressure) {
-			return ((double) endPressure + 1.0) / ((double) Math.max(0L, midPressure) + 1.0);
-		}
 	}
 
 	private static final class PricingColumnCandidate {

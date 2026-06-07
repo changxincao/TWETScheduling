@@ -69,6 +69,7 @@ public class GCNGBBStyleBidirectional {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
+	private final HashMap<Integer, Double> midpointProbeReuseByNode;
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -118,6 +119,7 @@ public class GCNGBBStyleBidirectional {
 	private double midpointColumnTaskMedian = Double.NaN;
 	private double midpointColumnTaskMax = Double.NaN;
 	private String midpointProbeSummary = "off";
+	private String midpointProbeReferenceSource = "strategy";
 	private long midpointStrategyNanos;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
@@ -238,9 +240,15 @@ public class GCNGBBStyleBidirectional {
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
 	public GCNGBBStyleBidirectional(Data data, TWETBPCConfig config) {
+		this(data, config, null);
+	}
+
+	public GCNGBBStyleBidirectional(Data data, TWETBPCConfig config,
+			HashMap<Integer, Double> midpointProbeReuseByNode) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
+		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -615,7 +623,7 @@ public class GCNGBBStyleBidirectional {
 			midpointProbeSummary = "off";
 			return;
 		}
-		double reference = midpointProbeReference();
+		double reference = midpointProbeReference(lp);
 		if (!Double.isFinite(reference) || !Utility.compareGt(reference, 0.0)) {
 			midpointProbeSummary = "skipped:noReference";
 			return;
@@ -623,16 +631,51 @@ public class GCNGBBStyleBidirectional {
 		int popLimit = Math.max(1, config.bidirectionalMidpointProbePopLimit);
 		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
 		double moveRatio = normalizedProbeMoveRatio();
+		double earlyStopRatio = normalizedProbeEarlyStopRatio();
+		int extraAfterThreshold = Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold);
 		ArrayList<MidpointProbeResult> results = new ArrayList<MidpointProbeResult>();
 		HashSet<String> seen = new HashSet<String>();
 		double candidate = clampCurrentMidpoint(reference);
+		MidpointProbeResult previous = null;
+		int extraCandidatesRemaining = -1;
+		String stopReason = "maxCandidates";
 		for (int i = 0; i < maxCandidates; i++) {
 			String key = String.format("%.9f", candidate);
 			if (!seen.add(key)) {
+				stopReason = "duplicate";
 				break;
 			}
 			MidpointProbeResult result = runMidpointProbeCandidate(lp, candidate, popLimit);
 			results.add(result);
+			if (result.reliabilityRank(config.bidirectionalMidpointProbeScore) == 0) {
+				stopReason = "rank0";
+				break;
+			}
+			if (config.bidirectionalMidpointProbeBracketOnDirectionChange && previous != null
+					&& isProbeDirectionReversed(previous, result, config.bidirectionalMidpointProbeScore)) {
+				double bracketMidpoint = clampCurrentMidpoint((previous.tMid + result.tMid) * 0.5);
+				String bracketKey = String.format("%.9f", bracketMidpoint);
+				if (seen.add(bracketKey)) {
+					results.add(runMidpointProbeCandidate(lp, bracketMidpoint, popLimit));
+				}
+				stopReason = "bracket";
+				break;
+			}
+			if (extraCandidatesRemaining > 0) {
+				extraCandidatesRemaining--;
+				if (extraCandidatesRemaining == 0) {
+					stopReason = "thresholdExtra";
+					break;
+				}
+			} else if (extraCandidatesRemaining < 0 && Utility.compareGt(earlyStopRatio, 1.0)
+					&& Utility.compareLe(result.score(config.bidirectionalMidpointProbeScore), earlyStopRatio)) {
+				extraCandidatesRemaining = extraAfterThreshold;
+				if (extraCandidatesRemaining == 0) {
+					stopReason = "threshold";
+					break;
+				}
+			}
+			previous = result;
 			candidate = nextMidpointProbeCandidate(result, candidate, moveRatio);
 		}
 		MidpointProbeResult best = selectMidpointProbeResult(results, config.bidirectionalMidpointProbeScore);
@@ -643,11 +686,29 @@ public class GCNGBBStyleBidirectional {
 		tMid = best.tMid;
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
-		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results);
+		storeMidpointProbeReuse(lp, best.tMid);
+		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results, stopReason);
 	}
 
-	private double midpointProbeReference() {
+	private double midpointProbeReference(LP lp) {
+		midpointProbeReferenceSource = "strategy";
+		if (config.bidirectionalMidpointProbeReuseWithinNode && midpointProbeReuseByNode != null
+				&& lp.getNode() != null) {
+			Double cached = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
+			if (cached != null && Double.isFinite(cached.doubleValue()) && Utility.compareGt(cached.doubleValue(), 0.0)) {
+				midpointProbeReferenceSource = "reuse";
+				return cached.doubleValue();
+			}
+		}
 		return tMid;
+	}
+
+	private void storeMidpointProbeReuse(LP lp, double selectedTMid) {
+		if (!config.bidirectionalMidpointProbeReuseWithinNode || midpointProbeReuseByNode == null
+				|| lp.getNode() == null || !Double.isFinite(selectedTMid)) {
+			return;
+		}
+		midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), Double.valueOf(selectedTMid));
 	}
 
 	private double normalizedProbeMoveRatio() {
@@ -656,6 +717,17 @@ public class GCNGBBStyleBidirectional {
 			return 0.10;
 		}
 		return ratio;
+	}
+
+	private double normalizedProbeEarlyStopRatio() {
+		double ratio = config.bidirectionalMidpointProbeEarlyStopRatio;
+		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 0.0;
+	}
+
+	private boolean isProbeDirectionReversed(MidpointProbeResult previous, MidpointProbeResult current, String mode) {
+		int previousDirection = previous.pressureDirection(mode);
+		int currentDirection = current.pressureDirection(mode);
+		return previousDirection != 0 && currentDirection != 0 && previousDirection != currentDirection;
 	}
 
 	private double nextMidpointProbeCandidate(MidpointProbeResult result, double current, double moveRatio) {
@@ -747,12 +819,18 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private String formatMidpointProbeSummary(double reference, MidpointProbeResult best,
-			ArrayList<MidpointProbeResult> results) {
+			ArrayList<MidpointProbeResult> results, String stopReason) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("ref=").append(reference)
+				.append("(").append(midpointProbeReferenceSource).append(")")
 				.append(", selected=").append(best.tMid)
 				.append(", scoreMode=").append(normalizeProbeScoreMode(config.bidirectionalMidpointProbeScore))
 				.append(", moveRatio=").append(normalizedProbeMoveRatio())
+				.append(", earlyStopRatio=").append(normalizedProbeEarlyStopRatio())
+				.append(", extraAfterThreshold=")
+				.append(Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold))
+				.append(", bracket=").append(config.bidirectionalMidpointProbeBracketOnDirectionChange)
+				.append(", stop=").append(stopReason)
 				.append(", maxCandidates=").append(Math.max(1, config.bidirectionalMidpointProbeMaxCandidates))
 				.append(", candidates=");
 		for (int i = 0; i < results.size(); i++) {
@@ -3486,11 +3564,7 @@ public class GCNGBBStyleBidirectional {
 			if (forwardExhausted && backwardExhausted) {
 				return 0;
 			}
-			if (forwardPops > 0 && backwardPops > 0
-					&& Utility.compareGt(leftPressure(mode), 0.0) && Utility.compareGt(rightPressure(mode), 0.0)) {
-				return 1;
-			}
-			return 2;
+			return 1;
 		}
 
 		long totalPressure(String mode) {
@@ -3510,13 +3584,28 @@ public class GCNGBBStyleBidirectional {
 					+ ",bound=" + forwardBoundSurvivors + ":" + backwardKept
 					+ ",cb=" + forwardBoundPruned + ":" + backwardBoundPruned
 					+ ",rank=" + reliabilityRank(mode)
-					+ ",queueRatio=" + Math.exp(queueScore)
+					+ ",direction=" + pressureDirection(normalized)
+					+ ",queueRatio=" + queueScore
 					+ ",selectedScore=" + normalized + ":" + score(normalized)
 					+ ",score=" + keptScore + "/" + queueScore + "/" + boundScore + "/" + peakScore;
 		}
 
 		private static double imbalance(long left, long right) {
-			return Math.abs(Math.log(((double) left + 1.0) / ((double) right + 1.0)));
+			double l = (double) left + 1.0;
+			double r = (double) right + 1.0;
+			return Math.max(l / r, r / l);
+		}
+
+		int pressureDirection(String mode) {
+			double left = leftPressure(mode);
+			double right = rightPressure(mode);
+			if (Utility.compareGt(left, right)) {
+				return 1;
+			}
+			if (Utility.compareLt(left, right)) {
+				return -1;
+			}
+			return 0;
 		}
 
 	}

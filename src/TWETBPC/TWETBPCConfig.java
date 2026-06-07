@@ -111,11 +111,19 @@ public class TWETBPCConfig {
 	/** 2026-06-06: 每个 Tmid probe 候选最多弹出多少个 label。 */
 	public int bidirectionalMidpointProbePopLimit = 5000;
 	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
-	public int bidirectionalMidpointProbeMaxCandidates = 6;
-	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.10 表示左移 *0.9，右移 *1.1。 */
-	public double bidirectionalMidpointProbeMoveRatio = 0.10;
+	public int bidirectionalMidpointProbeMaxCandidates = 5;
+	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.15 表示左移 *0.85，右移 *1.15。 */
+	public double bidirectionalMidpointProbeMoveRatio = 0.15;
 	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound/peak。 */
 	public String bidirectionalMidpointProbeScore = "queue";
+	/** 2026-06-07: rank=1 候选达到该不均衡倍数后，再额外试少量候选即可停止；小于等于 1 表示关闭。 */
+	public double bidirectionalMidpointProbeEarlyStopRatio = 1.5;
+	/** 2026-06-07: 达到早停阈值后额外继续试探的候选数。 */
+	public int bidirectionalMidpointProbeExtraCandidatesAfterThreshold = 1;
+	/** 2026-06-07: Tmid 试探方向反转时，是否在前后两个候选之间额外试一次中点后停止。 */
+	public boolean bidirectionalMidpointProbeBracketOnDirectionChange = true;
+	/** 2026-06-07: 同一 BPC node 后续 pricing round 是否以上一轮选中的 Tmid 作为 probe reference。 */
+	public boolean bidirectionalMidpointProbeReuseWithinNode = false;
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

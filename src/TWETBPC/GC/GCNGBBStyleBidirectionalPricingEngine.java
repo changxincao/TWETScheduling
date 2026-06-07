@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
@@ -16,10 +17,12 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
+	private final HashMap<Integer, Double> midpointProbeReuseByNode;
 
 	public GCNGBBStyleBidirectionalPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
+		this.midpointProbeReuseByNode = new HashMap<Integer, Double>();
 	}
 
 	@Override
@@ -28,7 +31,7 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 		if (!config.enableBidirectionalPricing) {
 			return PricingResult.noImprovement("GCNGBB-style bidirectional pricing disabled");
 		}
-		GCNGBBStyleBidirectional gc = new GCNGBBStyleBidirectional(data, config);
+		GCNGBBStyleBidirectional gc = new GCNGBBStyleBidirectional(data, config, midpointProbeReuseByNode);
 		ArrayList<TWETColumn> columns = gc.solve(lp);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -45,6 +48,7 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 	@Override
 	public void reset() {
 		lastReusableSubtreeArcEliminationBounds = null;
+		midpointProbeReuseByNode.clear();
 	}
 
 	@Override

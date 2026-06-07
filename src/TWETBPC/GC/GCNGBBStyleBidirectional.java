@@ -54,6 +54,7 @@ import TWETBPC.Util.SequenceSignature;
 public class GCNGBBStyleBidirectional {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
+	private static final HashSet<Integer> FULL_MIDPOINT_DIAGNOSTIC_DONE = new HashSet<Integer>();
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}
@@ -232,6 +233,7 @@ public class GCNGBBStyleBidirectional {
 	private long diagnosticHeartbeatIntervalNanos;
 	private long diagnosticForwardPops;
 	private long diagnosticBackwardPops;
+	private boolean fullMidpointDiagnosticRan;
 
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
@@ -246,6 +248,11 @@ public class GCNGBBStyleBidirectional {
 		diagnosticHeartbeat(lp, "initialize.start", true);
 		initialize(lp);
 		diagnosticHeartbeat(lp, "initialize.done", true);
+		if (fullMidpointDiagnosticRan && Boolean.getBoolean("twet.bpc.midpointFullDiagnosticStopAfter")) {
+			generatedColumns.clear();
+			lastMessage = "GCNGBB-style bidirectional midpoint full diagnostic executed; exact pricing skipped";
+			return generatedColumns;
+		}
 		initializeBackwardSink(lp);
 		diagnosticHeartbeat(lp, "backwardSink.done", true);
 		// 2026-05-26: GCNGBB-style 外层流程。先分别耗尽两侧队列，最后统一扫描 backward labels 做 crossing-arc join。
@@ -479,6 +486,114 @@ public class GCNGBBStyleBidirectional {
 		runMidpointProbeIfEnabled(lp);
 		initializeSearchState(lp);
 		initializeForwardSource(lp);
+		runFullMidpointDiagnosticIfEnabled(lp);
+	}
+
+	private void runFullMidpointDiagnosticIfEnabled(LP lp) {
+		int targetNodeId = Integer.getInteger("twet.bpc.midpointFullDiagnosticNodeId", -1);
+		if (targetNodeId < 0 || lp.getNode() == null || lp.getNode().id != targetNodeId) {
+			return;
+		}
+		String tmidList = System.getProperty("twet.bpc.midpointFullDiagnosticTMids", "").trim();
+		if (tmidList.isEmpty()) {
+			return;
+		}
+		if (!FULL_MIDPOINT_DIAGNOSTIC_DONE.add(Integer.valueOf(lp.getNode().id))) {
+			return;
+		}
+		double originalTMid = tMid;
+		String originalProbeSummary = midpointProbeSummary;
+		double forwardSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.midpointFullDiagnosticForwardSeconds", "180.0"));
+		double backwardSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.midpointFullDiagnosticBackwardSeconds", "120.0"));
+		System.out.println("[midpointFullDiagnostic] node=" + lp.getNode().id
+				+ " pricingHorizon=" + pricingHorizon
+				+ " originalTmid=" + originalTMid
+				+ " forwardSeconds=" + forwardSeconds
+				+ " backwardSeconds=" + backwardSeconds
+				+ " tmids=" + tmidList);
+		System.out.flush();
+		for (String token : tmidList.split(",")) {
+			String trimmed = token.trim();
+			if (trimmed.isEmpty()) {
+				continue;
+			}
+			double candidate = clampCurrentMidpoint(Double.parseDouble(trimmed));
+			runFullMidpointDiagnosticCandidate(lp, candidate, forwardSeconds, backwardSeconds);
+		}
+		fullMidpointDiagnosticRan = true;
+		tMid = originalTMid;
+		midpointProbeSummary = originalProbeSummary;
+		rebuildHalfDomainForCurrentMidpoint();
+		resetProbeAffectedStatistics();
+		initializeSearchState(lp);
+		initializeForwardSource(lp);
+	}
+
+	private void runFullMidpointDiagnosticCandidate(LP lp, double candidateTMid, double forwardSeconds,
+			double backwardSeconds) {
+		tMid = candidateTMid;
+		rebuildHalfDomainForCurrentMidpoint();
+		resetProbeAffectedStatistics();
+		initializeSearchState(lp);
+		initializeForwardSource(lp);
+		initializeBackwardSink(lp);
+		long start = System.nanoTime();
+		long forwardDeadline = deadlineNanos(start, forwardSeconds);
+		while (canContinue() && !FWUL.isEmpty() && !timeReached(forwardDeadline)) {
+			forwardExtend(lp);
+		}
+		long forwardElapsed = System.nanoTime() - start;
+		long forwardKept = forwardLabelsKept;
+		long forwardQueue = queueSize(FWUL);
+		boolean forwardExhausted = FWUL.isEmpty();
+
+		long backwardStart = System.nanoTime();
+		long backwardDeadline = deadlineNanos(backwardStart, backwardSeconds);
+		while (canContinue() && !BWUL.isEmpty() && !timeReached(backwardDeadline)) {
+			backwardExtend(lp);
+		}
+		long backwardElapsed = System.nanoTime() - backwardStart;
+		long backwardKept = backwardLabelsKept;
+		long backwardQueue = queueSize(BWUL);
+		boolean backwardExhausted = BWUL.isEmpty();
+		System.out.println("[midpointFullDiagnostic] node=" + lp.getNode().id
+				+ " tMid=" + candidateTMid
+				+ " fwElapsedMs=" + formatMillis(forwardElapsed)
+				+ " bwElapsedMs=" + formatMillis(backwardElapsed)
+				+ " fwExhausted=" + forwardExhausted
+				+ " bwExhausted=" + backwardExhausted
+				+ " fwKept=" + forwardKept
+				+ " bwKept=" + backwardKept
+				+ " fwQueue=" + forwardQueue
+				+ " bwQueue=" + backwardQueue
+				+ " keptQueueRatio=" + directionalRatio(forwardKept + forwardQueue, backwardKept + backwardQueue)
+				+ " queueOnlyRatio=" + directionalRatio(forwardQueue, backwardQueue)
+				+ " keptRatio=" + directionalRatio(forwardKept, backwardKept)
+				+ " fwPops=" + diagnosticForwardPops
+				+ " bwPops=" + diagnosticBackwardPops
+				+ " fCand=" + forwardExtensionCandidates
+				+ " fBuilt=" + forwardExtensionConstructed
+				+ " fBoundSurvivors=" + forwardExtensionBoundSurvivors
+				+ " cbFPruned=" + completionForwardLabelsPruned
+				+ " cbBPruned=" + completionBackwardLabelsPruned);
+		System.out.flush();
+	}
+
+	private long deadlineNanos(long start, double seconds) {
+		if (!Double.isFinite(seconds) || !Utility.compareGt(seconds, 0.0)) {
+			return start;
+		}
+		return start + (long) (seconds * 1_000_000_000.0);
+	}
+
+	private boolean timeReached(long deadlineNanos) {
+		return System.nanoTime() >= deadlineNanos;
+	}
+
+	private String directionalRatio(long forward, long backward) {
+		return forward + ":" + backward + "(" + ((double) forward + 1.0) / ((double) backward + 1.0) + ")";
 	}
 
 	private void initializeForwardSource(LP lp) {
@@ -1641,6 +1756,7 @@ public class GCNGBBStyleBidirectional {
 		completionBoundLastEvaluationCutoff = Double.NaN;
 		diagnosticForwardPops = 0;
 		diagnosticBackwardPops = 0;
+		fullMidpointDiagnosticRan = false;
 	}
 
 	private void diagnosticHeartbeat(LP lp, String phase, boolean force) {

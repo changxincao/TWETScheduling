@@ -248,6 +248,11 @@ public class GCBBFullDomainComparisonTest {
 				Double.toString(config.bidirectionalMidpointProbeMoveRatio)));
 		config.bidirectionalMidpointProbeScore = System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeScore", config.bidirectionalMidpointProbeScore);
+		config.bidirectionalMidpointProbeTieScore = System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeTieScore", config.bidirectionalMidpointProbeTieScore);
+		config.bidirectionalMidpointProbeTieTolerance = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeTieTolerance",
+				Double.toString(config.bidirectionalMidpointProbeTieTolerance)));
 		config.bidirectionalMidpointProbeEarlyStopRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeEarlyStopRatio",
 				Double.toString(config.bidirectionalMidpointProbeEarlyStopRatio)));

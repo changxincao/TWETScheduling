@@ -753,8 +753,17 @@ public class GCNGBBStyleBidirectional {
 		if (reliability != 0) {
 			return reliability;
 		}
-		int score = compareDouble(a.score(scoreMode), b.score(scoreMode));
+		double aPrimaryScore = a.score(scoreMode);
+		double bPrimaryScore = b.score(scoreMode);
+		int score = compareDouble(aPrimaryScore, bPrimaryScore);
 		if (score != 0) {
+			String tieMode = normalizeProbeTieScoreMode(config.bidirectionalMidpointProbeTieScore);
+			if (!"off".equals(tieMode) && isProbePrimaryScoreClose(aPrimaryScore, bPrimaryScore)) {
+				int tieScore = compareDouble(a.score(tieMode), b.score(tieMode));
+				if (tieScore != 0) {
+					return tieScore;
+				}
+			}
 			return score;
 		}
 		int pressure = Long.compare(a.totalPressure(scoreMode), b.totalPressure(scoreMode));
@@ -770,6 +779,12 @@ public class GCNGBBStyleBidirectional {
 			return elapsed;
 		}
 		return compareDouble(a.tMid, b.tMid);
+	}
+
+	private boolean isProbePrimaryScoreClose(double a, double b) {
+		double tolerance = config.bidirectionalMidpointProbeTieTolerance;
+		return Double.isFinite(tolerance) && Utility.compareGt(tolerance, 0.0)
+				&& Utility.compareLe(Math.abs(a - b), tolerance);
 	}
 
 	private int compareDouble(double a, double b) {
@@ -825,6 +840,8 @@ public class GCNGBBStyleBidirectional {
 				.append("(").append(midpointProbeReferenceSource).append(")")
 				.append(", selected=").append(best.tMid)
 				.append(", scoreMode=").append(normalizeProbeScoreMode(config.bidirectionalMidpointProbeScore))
+				.append(", tieScoreMode=").append(normalizeProbeTieScoreMode(config.bidirectionalMidpointProbeTieScore))
+				.append(", tieTolerance=").append(Math.max(0.0, config.bidirectionalMidpointProbeTieTolerance))
 				.append(", moveRatio=").append(normalizedProbeMoveRatio())
 				.append(", earlyStopRatio=").append(normalizedProbeEarlyStopRatio())
 				.append(", extraAfterThreshold=")
@@ -853,6 +870,17 @@ public class GCNGBBStyleBidirectional {
 			return normalized;
 		}
 		return "queue";
+	}
+
+	private static String normalizeProbeTieScoreMode(String mode) {
+		if (mode == null) {
+			return "off";
+		}
+		String normalized = mode.trim().toLowerCase();
+		if ("off".equals(normalized) || "none".equals(normalized)) {
+			return "off";
+		}
+		return normalizeProbeScoreMode(normalized);
 	}
 
 	private void initializeSearchState(LP lp) {

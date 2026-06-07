@@ -116,6 +116,10 @@ public class TWETBPCConfig {
 	public double bidirectionalMidpointProbeMoveRatio = 0.15;
 	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound/peak。 */
 	public String bidirectionalMidpointProbeScore = "queue";
+	/** 2026-06-07: Tmid probe 主指标很接近时的二级 score；可选 off/kept/queue/bound/peak。 */
+	public String bidirectionalMidpointProbeTieScore = "off";
+	/** 2026-06-07: 主指标倍数差不超过该值时，才使用二级 score 打破平局。 */
+	public double bidirectionalMidpointProbeTieTolerance = 0.0;
 	/** 2026-06-07: rank=1 候选达到该不均衡倍数后，再额外试少量候选即可停止；小于等于 1 表示关闭。 */
 	public double bidirectionalMidpointProbeEarlyStopRatio = 1.5;
 	/** 2026-06-07: 达到早停阈值后额外继续试探的候选数。 */

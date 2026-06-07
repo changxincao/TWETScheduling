@@ -2817,13 +2817,18 @@ public class GCNGBBStyleBidirectional {
 		}
 		double lower = minWidth;
 		double upper = pricingHorizon - minWidth;
+		double clamped = candidate;
 		if (Utility.compareLt(candidate, lower)) {
-			return lower;
+			clamped = lower;
+		} else if (Utility.compareGt(candidate, upper)) {
+			clamped = upper;
 		}
-		if (Utility.compareGt(candidate, upper)) {
-			return upper;
+		// 2026-06-07: Tmid 只是半域切分点，优先取整数时间，避免 0.9 连乘产生的日志和 cache 小数噪声。
+		double rounded = Math.round(clamped);
+		if (Utility.compareGt(rounded, lower) && Utility.compareLt(rounded, upper)) {
+			return rounded;
 		}
-		return candidate;
+		return clamped;
 	}
 
 	private double computeEarliestSourceCompletion() {

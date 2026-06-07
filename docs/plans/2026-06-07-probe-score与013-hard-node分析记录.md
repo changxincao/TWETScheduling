@@ -153,3 +153,20 @@
 这也解释了为什么 queue 对 completionBound reference 仍然有用。reference 附近的候选，例如第一轮 `Tmid=551`，probe 已经显示左侧压力约 `20236`、右侧约 `7545`，forward 过重；因此 queue 把 `Tmid` 往左拉是对的。它修正的是“completionBound 的 reference 太右”这个一阶错误。但拉到 `325-355` 后，queue 只能保证浅层截面接近平衡，不能保证剩余右侧子树不会继续膨胀。
 
 因此后续若要继续优化，方向应更具体：不是换 score，而是给 `rank=1` 候选估计队列后代规模。比较实用的方式可能有两个。第一，对 queue score 最好的 1-2 个候选做二阶段 probe：第一阶段仍用 `pop=5000` 找候选，第二阶段只加深这些候选的 backward/forward 各一小段，看右侧是否开始持续放大。第二，在同一 node 的后续 pricing round 中利用上一轮 full expansion 的实际偏差，如果上轮 selected 的 `fullRatio/probeRatio` 显示 backward 被低估 5 倍，那么下一轮同类 reference 不应再仅按浅层 queueRatio 选点，而应对更靠右或更低 backward 后代风险的候选加权。前者更局部、实现更直接；后者利用真实 full 信息，但需要谨慎避免 dual 变化后误用。
+
+## 12. 2026-06-07 小数 Tmid 与 node3 多轮 pricing 说明
+
+继续检查 `tmp-probe-balanced-013-completionBound-queue-pop5000-n4` 后，`347.405` 出现两次的原因已经明确：这是同一个 BPC node 内的第三、第四轮 exact pricing，不是同一轮被重复计算。第三轮在 `Tmid=347.40495` 下生成了 1 条负 reduced-cost 列并加入 RMP；随后 LP 重新求解，dual 和列池状态变化，第四轮再次 exact pricing。由于 completion bound reference 仍为 `1034.0`，probe 起点仍为 `(25+1034)/2=529.5`，动态候选序列也再次选到 `347.40495`。两轮看起来 Tmid 一样，但 pricing 问题已经不同，因此 full label 数分别是 `fw=8605,bw=47393` 和 `fw=8547,bw=47292`，并不矛盾。
+
+probe 里“label 已经比最终完整更多”的现象来自统计口径混用。probe 的 queue score 使用的是 `kept+queue` 压力，例如第三轮选中点左侧为 `6145+3645=9790`，右侧为 `6074+3575=9649`；正式 full pricing 的 `labels fw/bw` 只记录最终 kept label，队列已经耗尽。`kept+queue` 不是最终 kept 的下界或上界，只是有限 pop 截面上的压力估计。若只比较 kept，第三轮 probe 为 `6145:6074`，full 为 `8605:47393`，真正被低估的是 backward 后续子树规模。
+
+这份日志中 completion bound 策略给出的 raw reference 和 probe 起点如下：
+
+1. 第一轮：`midpointStrategy/ref=completionBound/1077.0`，`earliestSourceCompletion=25.0`，所以 probe 起点 `Tmid=(25+1077)/2=551.0`。该点 probe 压力为 `20236:7545`，倍数约 `2.68`；selected `325.360` 的 probe 压力为 `8950:9649`，倍数约 `1.08`，但 full 为 `7353:39088`，倍数约 `5.32`。
+2. 第二轮：reference `1058.0`，probe 起点 `541.5`，probe 压力倍数约 `14912:8153=1.83`；selected `355.278` 的 probe 倍数约 `1.02`，full 倍数约 `6.57`。
+3. 第三轮：reference `1034.0`，probe 起点 `529.5`，probe 压力倍数约 `15898:8129=1.96`；selected `347.405` 的 probe 倍数约 `1.02`，full 倍数约 `5.51`。
+4. 第四轮：reference `1034.0`，probe 起点 `529.5`，probe 压力倍数约 `15688:8055=1.95`；selected `347.405` 的 probe 倍数约 `1.01`，full 倍数约 `5.53`。
+
+因此 queue probe 对 completion bound reference 的作用仍然成立：它能识别出 `529-551` 一带偏右，左侧 forward 压力明显过大，并把 Tmid 拉到 `325-355` 一带。但它不能准确预测 full expansion 的最终左右 label 比例，因为 rank=1 候选只展开了有限截面，未估计队列 label 的后代规模。当前若要输出“每种策略在同一 node/同一 LP 状态下的 full label 数”，现有日志不够；不同策略单独跑会改变列生成路径和分支树，不能当作同一个 pricing 状态直接横比。真正严谨的做法是增加一个只用于诊断的 multi-Tmid replay：在同一 LP dual、同一 node、同一列池上，对若干指定 Tmid 分别 dry-run 完整 exact pricing，且不向 RMP 加列。这个诊断成本较高，适合只在 hard node 上打开。
+
+代码层面已把 `clampCurrentMidpoint` 改成先防贴边、再尽量四舍五入为整数 Tmid。Tmid 只是半域切分点，优先取整数可以避免 `347.40495000000004` 这类 `0.9` 连乘小数污染日志和 cache key；若整数会贴到半域边界，则保留原 clamped 值。

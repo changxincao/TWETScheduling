@@ -394,3 +394,12 @@ exact pricing 的主要慢点仍在 node3。当前复现 node3 的三次 exact p
 本次把 RMIH incumbent cutoff 的实验开关从代码中删除，不再保留配置项和测试入口。这个想法曾经是为了让 RMIH 只搜索不劣于当前全局上界的整数解，但实际语义有明显限制：`coverRepair_covering` 是 `>=` 的中间 covering MIP，用于先找到含重复 job 的列组合，再通过删重复 job 生成修复列；该 covering 解的目标可能高于 incumbent，但修复后的 `==` partition 解仍可能变好。因此 cutoff 不能加在 `>=` 阶段，否则会直接漏掉潜在修复列。即使只加在最终 `==` 阶段，011 对照也没有加速，反而增加了整体波动。当前结论是：cutoff 只作为历史尝试记录，不进入主线实现。
 
 同一轮也撤回 `Tmid` 强制取整。此前取整只是为了减少 `0.9` 连乘导致的小数日志噪声，但半域切分、本地时间函数、completion bound 和列 timing 都是 double 口径；把 midpoint 四舍五入为整数会人为移动半域边界，收益不明确。当前代码只保留防贴边 clamp，`Tmid` 在 clamp 后继续保持小数值。
+
+
+## 33. 2026-06-08 013 慢于历史与 011 initopt 差异复查
+
+本次复查 `tmp-probe-balanced-013-completionBound-queue-pop5000-n4` 和 `tmp-current-repro-013-pop5000-cand6-n4-tl4`。两者最终 `incumbent=14433,bound=14322.5,nodes=4,valid=true` 一致，但历史快 run 为 `solve=61.084s, exact=49.105s, heuristic=8.144s`，当前复现为 `solve=95.635s, exact=71.800s, heuristic=18.125s`。因此差距不是 RMIH，RMIH 分别约 `2.53s` 和 `2.92s`，只差约 `0.4s`；主要差在 HeuristicPricing 多约 `10s`，exact pricing 多约 `22.7s`。
+
+013 的 exact pricing 慢差主要集中在 node3。历史 node3 四轮 exact 约为 `8.571s/10.864s/8.586s/8.387s`，当前复现约为 `19.381s/12.407s/10.102s/10.166s`。其中当前第一轮最异常，虽然 join pair 数量比历史第一轮少，但 completion-bound build 从约 `0.70s` 增到 `1.73s`，paperGraph superset visited 从约 `2.72M` 增到 `3.73M`，并且 HeuristicPricing 平均耗时从 `154ms` 增到 `370ms`。这说明当前慢因不是单一 Tmid 选错，而是同类 Tmid 下列池、dual、completion-bound 构造和 dominance 查询负担更重，再叠加 heuristic seed/兼容性扫描成本上升。
+
+同时复查 `011-bestexact` 与 `011-initopt` 的差异，确认用户的判断是对的：如果初始化优化只是把 candidate/signature 状态推迟到正式 join 前，那么理论上不应改变最终列生成路径。日志也支持这一点：两组都是 `nodes=4, pricing=64, cols=6011, incumbent=14024,bound=13528.866667`，exact pricing 分别为 `20.828s` 和 `20.982s`，几乎相同。真正拉开端到端时间的是 RMIH covering MIP：bestexact 的四个节点 RMIH 约 `4.600s/4.886s/3.020s/1.841s`，initopt 为 `13.090s/11.055s/5.153s/2.998s`，差距主要来自 `coverSolve`。因此不能把这组 011 慢差归因到 probe 初始化优化改变了列；它更像是同一类 screened covering MIP 在 CPLEX 证明阶段的耗时波动，或极小模型/列顺序差异放大到 MIP bound 证明时间，而不是 exact pricing 逻辑变化。

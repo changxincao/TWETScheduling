@@ -177,7 +177,7 @@ public class TWETBPCConfig {
 	/** 2026-06-02: 每个节点 LP 松弛完成后，是否用当前 restricted columns 求一次整数 RMP 刷新启发式上界。 */
 	public boolean enableRestrictedMasterIntegerHeuristic = true;
 	/** 2026-06-02: restricted integer RMP 的 CPLEX 时间限制；小于等于 0 表示不设限制。 */
-	public double restrictedMasterIntegerHeuristicTimeLimitSeconds = 0.0;
+	public double restrictedMasterIntegerHeuristicTimeLimitSeconds = 4.0;
 
 	/** 2026-06-04: RMIH 模式；coverRepair=筛列 >= + 修复列 + ==，partition=全量 ==。 */
 	public String restrictedMasterIntegerHeuristicMode = "coverRepair";

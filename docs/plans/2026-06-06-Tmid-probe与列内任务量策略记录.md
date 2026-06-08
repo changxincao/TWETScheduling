@@ -357,3 +357,15 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 `013` 三组最终都为 `incumbent=14433`、`bound=14322.5`。RMIH 合计时间为 `3.954s/5.258s/4.285s`，相比总时间 `112-113s` 很小；总时间大头是 exact pricing，三组 exact 分别约 `85.75s/88.73s/85.77s`。因此 `013` 的主线仍是 pricing hard node，不是 RMIH 控频；RMIH 限时不会显著改变总耗时。
 
 综合这三个算例，当前更合理的默认实验候选是 `restrictedMasterIntegerTimeLimit=2s`。它在 `011` 保留关键非根改进，在 `010/013` 不破坏 4 节点最终 incumbent，同时显著避免 covering MIP 证明最优的长尾。`3s/5s` 可以作为保守备选，但从这轮看收益不稳定；频率控制应放在第二阶段，比如“root 必跑，非根限时 2s；若连续若干 RMIH 无改进或当前 gap 很小，再降低触发频率”。直接每 5 个节点跑一次目前证据不足，因为它会牺牲非根上界刷新机会。
+
+## 29. 2026-06-08 RMIH 默认限时与失败语义
+
+用户倾向先把 RMIH 默认限时设为 `4s`，因为相对 `2s` 多出的时间不大，并且 `010` root 上 `3s/5s` 的 RMIH 自身上界比 `2s` 更好。当前代码已将 `restrictedMasterIntegerHeuristicTimeLimitSeconds` 默认值改为 `4.0`，测试入口仍可用 `twet.bpc.fullDomainCompare.restrictedMasterIntegerTimeLimit` 覆盖。
+
+RMIH 在规定时间内如果找不到任何可行整数解，或者 CPLEX 证明 infeasible，`solveOnce()` 会返回 `Attempt.notSolved`，外层 `Result.notSolved` 的 `feasible=false`、`objective=+inf`、`solution=null`。`Tree` 只在 `integerResult.isFeasible()` 且目标优于当前 `incumbentCost` 时更新 incumbent，所以这种失败只会记录一条 RMIH 事件，不会改变上界，也不会关闭节点。若 CPLEX 在限时内已有 incumbent，即使未证明最优，`cplex.solve()` 通常会返回可用的 `Feasible` 状态，当前逻辑会读取该解并继续做覆盖有效性检查。
+
+把当前全局上界加入 RMIH 是合理的后续优化，但不适合和本次默认限时一起混改。语义上，RMIH 的目标只是刷新上界，因此可以在内部 MIP 加 `obj <= incumbentCost - eps`，或用 CPLEX cutoff，让它只找严格改进解；没有改进解时返回 notSolved 即可。潜在收益是减少“已找到不优解后继续证明”的无效搜索。实现上需要把 `Tree` 当前 `incumbentCost` 传入 `RestrictedMasterIntegerHeuristic.solve()`，并注意 outsourcing tariff 的目标表达式必须和 cutoff 用同一套 obj 口径。该优化后续可单独测试，不影响当前 `4s` 限时结论。
+
+关于 probe 初始化优化和 RMIH 慢因，需要分清因果。旧版 `initialize()` 和每个 probe candidate 会初始化 label 状态、candidate heap、signature map、active column signatures，并扫描 restricted columns；新版 probe 只初始化 label/dominance/queue 状态，正式 join 前才初始化 candidate/signature 状态。这个改动只减少重复初始化，按设计不应改变正式 pricing 生成的列集合。之前两次 011 四节点运行的差异，日志显示主要来自 RMIH `coverRepair_covering` 的 CPLEX coverSolve 波动，而不是 exact pricing 或列路径改变：两次 exact pricing 约为 `20.828s` 和 `20.982s`，而 RMIH covering solve 从约 `14.69s` 增到 `30.53s`。结合 MIP 日志，covering MIP 往往很快找到可行上界，长尾主要在 bound 证明，因此这类差异更像 CPLEX MIP 证明阶段的运行波动，而不是 probe 初始化优化导致列不同。
+
+013 的历史日志也支持“RMIH 不是主瓶颈”。浅层 `maxNodes=2` 中，`completionBound` 一度是最快口径；但深节点 node3 曾出现 `Tmid=563.5` 下 forward label 爆炸，180 秒内仍停在 forward 阶段，因此 013 的核心问题是 exact pricing hard node。最近 RMIH `2/3/5s` 四节点矩阵中，013 三组最终均为 `incumbent=14433`、`bound=14322.5`，总时间约 `112-113s`，exact pricing 为 `85.75-88.73s`，RMIH 只有 `3.95-5.26s`。因此 013 上继续调 RMIH 限时对总时间影响有限，后续主要还是看 Tmid/probe 或 pricing 结构。

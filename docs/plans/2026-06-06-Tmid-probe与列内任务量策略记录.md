@@ -345,3 +345,15 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 进一步跑 `maxNodes=4,timeLimit=2s`，最终仍为 `incumbent=14024`、`bound=13528.866667`、`valid=true`。四次 RMIH 都以 `covering=Feasible` 返回，而不是证明 `Optimal`：node1/node2/node3/node4 的 RMIH 时间分别约 `2.43s/2.36s/2.49s/2.40s`，合计 `9.689s`。对比此前不限时新 run 的 RMIH 约 `32.30s`，限时显著降低了这部分开销；该次总时间为 `57.496s`，比慢 run 的 `70.114s` 好，但 exact pricing 本身波动到 `27.805s`，所以总时间不会完全按 RMIH 节省线性下降。
 
 当前策略判断是：先优先测试 RMIH 小时间限制，而不是马上改成每 5 个节点跑一次。原因是限时不改变触发频率，仍保留 node4 这类非根节点改进 incumbent 的机会；而 root-only 或每 5 点一次可能直接错过关键上界刷新。建议下一轮批量比较 `restrictedMasterIntegerTimeLimit=2/3/5`，如果某些算例 `2s` 上界质量下降，再考虑非根节点用 `3-5s` 或结合“若干节点未改进才触发”的频率控制。
+
+## 28. 2026-06-08 RMIH `2/3/5s` 小矩阵
+
+按上一节建议，本轮用 `010/011/013` 三个 30 任务算例、`maxNodes=4`、`completionBound=allCycles`、`midpointProbe=true`、同一套 probe/reuse 参数，测试 `restrictedMasterIntegerTimeLimit=2/3/5`。这个口径不是求全局收敛，只看前 4 个节点中 RMIH 限时对上界和耗时的影响。
+
+结果表明，`010` 三组最终都为 `incumbent=16258`、`bound=16205.5`。RMIH root 解在 `2s` 时为 `16642`，`3s/5s` 时为 `16444`，说明限时会影响 root RMIH 自身质量；但 4 节点最终 incumbent 未受影响。三组 RMIH 合计时间分别为 `3.731s/5.028s/4.558s`，其中 node2/node4 的 covering MIP 本身不可行或快速失败。`010` 上 `3s/5s` 比 `2s` 的 root RMIH 更好，但最终结果一致。
+
+`011` 三组最终都为 `incumbent=14024`、`bound=13528.866667`。`2s`、`3s`、`5s` 的 RMIH 合计时间分别为 `9.154s/12.027s/18.841s`；node4 都能刷新到 `14024`。因此 `011` 上 `2s` 最划算，`3s/5s` 没带来更好上界，只增加 RMIH 耗时。该结果也进一步支持“先限时，而不是降低频率”：如果改成只 root 或每 5 个节点跑一次，可能错过 node4 的 `14024`。
+
+`013` 三组最终都为 `incumbent=14433`、`bound=14322.5`。RMIH 合计时间为 `3.954s/5.258s/4.285s`，相比总时间 `112-113s` 很小；总时间大头是 exact pricing，三组 exact 分别约 `85.75s/88.73s/85.77s`。因此 `013` 的主线仍是 pricing hard node，不是 RMIH 控频；RMIH 限时不会显著改变总耗时。
+
+综合这三个算例，当前更合理的默认实验候选是 `restrictedMasterIntegerTimeLimit=2s`。它在 `011` 保留关键非根改进，在 `010/013` 不破坏 4 节点最终 incumbent，同时显著避免 covering MIP 证明最优的长尾。`3s/5s` 可以作为保守备选，但从这轮看收益不稳定；频率控制应放在第二阶段，比如“root 必跑，非根限时 2s；若连续若干 RMIH 无改进或当前 gap 很小，再降低触发频率”。直接每 5 个节点跑一次目前证据不足，因为它会牺牲非根上界刷新机会。

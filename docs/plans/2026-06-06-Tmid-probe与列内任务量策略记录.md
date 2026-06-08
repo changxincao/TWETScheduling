@@ -249,3 +249,19 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 再打开 `exactFeedback` 后，第二轮仍从 `349` 出发并选中 `323`，但完整 pricing 的真实比例为 `fwKept:bwKept=1536:2462`，超过 `earlyStopRatio=1.5` 且表现为 backward 偏重，于是 feedback 把下一轮 reference 右移到 `371`。第三轮从 `371` 出发，试探 `371 -> 315 -> 343`，选中 `343`，完整 pricing 为 `fwKept=2580,bwKept=2352,time=2560.600ms`。相比单独 reuse 的第三轮 `Tmid=347,time=2738.836ms`，feedback 略微改善了真实左右压力和耗时。
 
 当前结论是：root smoke 不能说明 reuse/feedback 的价值；在 011 node3 这类 hard node 上，`reuseWithinNode` 明确有收益，`exactFeedback` 也有小幅追加收益。更稳妥的落地建议是，`initializeProbeSearchState()` 这种 label-only 初始化优化可以保留；`reuseWithinNode` 可以作为 hard-node 配置优先测试；`exactFeedback` 仍保持实验开关，原因是它依赖上一轮完整 pricing 的 kept label 比例，在不同 dual/列池变化更剧烈的节点上还需要 012/013 继续验证。
+
+## 20. 2026-06-08 Tmid 策略收敛到 probe 的当前判断
+
+本轮讨论把 Tmid 策略的重点重新收敛到 probe。之前测试过的 `columnTaskMedian` 偏左，导致 backward label 和 join 压力上升。最初怀疑是当前列池里较短列或可直接接 sink 的列较多，把任务级 completion time 的中位数往左拉。之后又试过“先按 reduced cost 选较好列，再按列末最优完工时间从大到小取一部分列，再在这些列内任务完工时间上取中位数”的 `columnTaskMedianTopLast` 思路，但 013 上算出来的中位数几乎没有右移，效果仍然不好。
+
+这个现象可能有两个原因。第一，很多列内部的大部分任务确实很早完成，只有少数尾部任务把列末完工时间拉到右侧；此时即使先筛选列末更晚的列，任务级中位数仍会停在较早位置。第二，任务级中位数、75 分位数等统计量可能在某些算例上有较大的平台区间，换一种列筛选方式不一定能改变最终 Tmid。也可以继续尝试按列内任务数较多的列来计算 median，但这仍然是一次性启发式设点，无法保证在每个 node 上都不左偏或右偏。因此当前不再继续把主要精力放在改 median 上，median 只保留为一种初始 reference 策略。
+
+这和 `completionBound`、`columnLastAvg` 等策略的结论是一致的：它们都能提供一个有信息的 reference，但没有一个策略能保证每个 node 上都给出正好均衡的 Tmid。一旦 reference 偏差较大，half-domain 双向会退化成接近单向的扩展，进而出现 hard node 上 forward 或 backward label 爆炸。因此后续更合理的主线是把这些策略都当作初始 reference，再用 probe 类似强分支的方式对多个候选 Tmid 做局部试探。
+
+当前 probe 的定位也进一步明确。有限 pop 下的正反向压力比例和完整 exact pricing 的最终比例并不完全一致，尤其是 `rank=1` 候选会低估后续队列的子孙规模；之前 013 node3 就出现过 probe 看起来近似均衡、完整扩展后仍有数倍差异的情况。但 probe 仍然有价值，因为它能筛掉极端偏右或偏左的 Tmid，把搜索从明显趋近单向扩展的区域拉回可求解区间。由于 completion bound 已经参与 probe 扩展，若某个 Tmid 在早期就明显导致单侧 survivor 队列膨胀，这种差异通常能在有限 pop 内体现出来。换句话说，probe 未必选到最快的 Tmid，但希望能选到“足够接近均衡、至少能求解动”的 Tmid。
+
+由此形成当前工作假设：后续重点放在优化 probe，而不是继续深挖 median。具体包括候选生成、方向反转 bracket、同 node 复用、exactFeedback、低成本初始化、以及 hard-node 触发条件。median、completionBound、columnLastAvg 等策略只作为 reference 来源；如果 reference 已经很好，probe 应尽量低成本结束；如果 reference 明显偏，probe 负责把 Tmid 拉回合理区间。
+
+还有一个待实现问题是 `rank=0` probe 结果是否可以直接复用。很多 node 上 probe 候选会把 forward/backward 队列跑空，此时从 label 扩展角度看，它已经完成了正式 pricing 的主要 labeling 阶段。如果这个候选最终被选中，理论上可以直接基于 probe 产生的 label 状态执行正式 join 和候选列生成，而不必再用同一个 Tmid 重建 half-domain 并完整跑一次 exact pricing。这个方向的收益可能很直接，尤其是 root 或简单 node 上 `rank=0` 频繁出现。但实现上要确保 probe 状态和正式状态完全一致，包括 candidate pool、signature 去重、join 所需索引、统计字段、以及不会因为 probe 省略了某些初始化而缺少正式 pricing 需要的数据。当前先记录为后续优化点，不立即改。
+
+最后，非对称双向 labeling 仍值得重新测试。之前非对称版本效果差，主要是在没有当前 completion bound 体系参与的口径下比较，动态边界对正向较松，导致扩展出大量 label。现在如果把 completion bound 接入非对称双向，可能会改善这种过松扩展；但它和当前 half-domain probe 的机制不同，因为非对称版本不存在固定半域裁剪，相关实现和统计口径会更多。后续可以单独开一轮实验：先确认非对称双向是否完整接入 completion bound，再和当前 probe-based half-domain 在 011/012/013 hard node 上比较。如果非对称仍然不稳，主线继续放在 probe 优化上。

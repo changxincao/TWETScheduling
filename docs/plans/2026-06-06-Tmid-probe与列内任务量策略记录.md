@@ -439,3 +439,13 @@ node3 的关键分叉发生在第一轮 exact pricing。历史快 run 在 node3 
 在同一轮 probe 内，不同候选 Tmid 的 dry-run 使用的是同一套 LP dual，只是在不同半域切分下试探左右 label 压力。正式加入列时，只会用最终选中的 Tmid 做一次完整 exact pricing。不同 Tmid 会改变 forward/backward label 分布、join 组合顺序、dominance graph 压力和候选列发现路径，因此即使 dual 相同，输出的负列数量和顺序也可能不同；但历史和当前这种 `743` vs `75` 的大差异，主要还叠加了前序列池/dual 路径不同。
 
 当前对 probe 的定位应更保守：它不是能预测最快 Tmid 的 oracle，也不能保证选中点生成最多负列。它的主要价值是用有限 pop 排除明显偏左或偏右、趋近单向 labeling 的极端 Tmid，使定价不至于落到明显爆炸的点。由于 probe 只能看浅层压力，且 score 与完整 exact pricing 的真实耗时/负列产出并不严格一致，所以它可能选到“可求解但不是最快”的点。013 说明了这一点：probe 能把 completionBound reference 附近的极端偏右点拉回来，但不保证拉到历史最快路径。
+
+## 37. 2026-06-08 013 历史与当前差距的具体位置
+
+把历史 balanced run 和当前 `tieScore=off` run 按 node 拆分后，差距主要集中在三处。第一，HeuristicPricing 固定开销上升：历史四个 node 合计约 `8.14s`，当前约 `13.33s`，多 `5.18s`。其中 node1 同样生成 `5060` 条启发式列，但历史约 `3.66s`，当前约 `5.01s`；node2 历史约 `2.08s`，当前约 `3.67s`。这说明当前启发式 seed/兼容性扫描成本更高。
+
+第二，node2 exact pricing 明显更慢：历史约 `3.59s`，当前约 `6.37s`，多 `2.77s`。node2 生成列数量从历史 `157` 变成当前 `141`，数量差不大，但当前 exact 的 completion bound 和 label/dominance 过程更重。
+
+第三，也是最大项，node3 exact pricing：历史约 `36.41s`，当前约 `45.03s`，多 `8.62s`。node3 第一轮差异最关键。历史第一轮 `Tmid=325.36`，生成 `743` 条负列，耗时 `8.57s`；当前第一轮 `Tmid=338.38`，只生成 `75` 条负列，但耗时反而 `16.29s`。这轮当前的 join pair 更少，`2.25M` 对比历史 `2.85M`，函数评估也更少，`0.92M` 对比历史 `1.34M`；但当前 completion-bound build 从 `0.70s` 到 `1.07s`，superset visited 从 `2.72M` 到 `3.73M`，forward kept/dominated 从 `7353/24774` 到 `9414/31975`。因此当前第一轮慢不是因为 join 更多，而是 forward 扩展和 dominance graph 查询更重，且最终找到的负列少得多。
+
+node3 后三轮当前并不都更差。历史第二轮很重，`10.86s`，当前第二轮为 `9.30s`；历史第三/四轮 `8.59s/8.39s`，当前第三/四轮 `9.62s/9.82s`。所以 node3 总差距主要由第一轮 `+7.71s` 和后两轮小幅变慢构成。RMIH 不是差距来源：历史四个 node 合计约 `2.53s`，当前约 `2.42s`，当前还略少。

@@ -333,3 +333,15 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 如果要更保守，可以先只做配置实验，不改代码：分别测试 `enableRestrictedMasterIntegerHeuristic=false`、`timeLimit=1/2/5`、`root-only` 的模拟口径。`false` 可以判断 RMIH 对 pruning 和 incumbent 的真实贡献；小 time limit 可以判断是否能保留大部分上界收益；root-only 可以验证“只在根节点做一次”是否足够。当前 011 对比里 node4 的 RMIH 把 incumbent 改到 `14024`，因此完全 root-only 可能会丢掉这个后续改进；更稳的默认候选不是“只 root”，而是“root 必跑 + 非根限时 + 改进空间/停滞触发”。
 
 这里还要区分两个启发式耗时来源。`HeuristicPricing` 是每轮 LP 后用于生成负 reduced-cost 列的 tabu pricing 启发式，011 四节点约 `12-15s/50 calls`，平均每次 `250-300ms`；它的收益是尽快补充列、减少 exact pricing 压力。RMIH 是节点 LP 收敛后用于刷新整数上界的 restricted integer heuristic，011 这次约 `16-32s/4 calls`，平均每次数秒，且 node2/node3 没有改进 incumbent。因此如果要先降总时间，优先控 RMIH 的时间和频率；HeuristicPricing 的优化方向则是自适应降低 seed/迭代次数、连续几轮新增列很少时跳过、或给每次调用加软时间预算。
+
+## 27. 2026-06-08 RMIH MIP log 诊断和限时实验
+
+为判断 RMIH covering MIP 长时间是在找上界还是证明下界，本次新增默认关闭的诊断开关 `diagnosticRestrictedIntegerMipLog`，测试入口为 `twet.bpc.fullDomainCompare.restrictedMasterIntegerMipLog`。开启后只让 `RestrictedMasterIntegerHeuristic.solveOnce()` 内部的 CPLEX 打印 MIP log，不改变默认求解逻辑。该开关用于短期诊断，不建议在批量实验中打开。
+
+在 `tmp-wet030_from040_011_2m`、`maxNodes=1`、`completionBound=allCycles`、`midpointProbe=true` 口径下打开 MIP log 后，RMIH 的第一阶段 `coverRepair_covering` 显示：root relaxation 为 `13525.8667`；CPLEX 很快在根节点得到 covering incumbent `15003`，随后找到 `14959`；后续主要把 `Best Bound` 从约 `13642` 提升到 `14102` 一带，并继续关闭 gap。也就是说，长耗时主要发生在已有 covering 可行解之后的下界证明/最优性证明，而不是一直找不到上界。更关键的是，最终用于更新 incumbent 的 `14258` 来自后续 repair columns + `==` partition MIP，而不是 covering MIP 自己的 incumbent。因此，强行证明 covering MIP 最优对上界启发式不是必要工作。
+
+随后测试 RMIH 时间限制。root-only 下，`timeLimit=1s` 得到 `obj=14313`，RMIH 用时约 `1.47s`；`timeLimit=2s` 得到 `obj=14258`，用时约 `2.46s`；`timeLimit=5s` 也得到 `14258`，用时约 `5.43s`；不限时诊断 run 得到同样 `14258`，但 RMIH 用时约 `8.10s`。这说明在该节点上 `1s` 略短，`2s` 已经足够保留不限时的上界质量。
+
+进一步跑 `maxNodes=4,timeLimit=2s`，最终仍为 `incumbent=14024`、`bound=13528.866667`、`valid=true`。四次 RMIH 都以 `covering=Feasible` 返回，而不是证明 `Optimal`：node1/node2/node3/node4 的 RMIH 时间分别约 `2.43s/2.36s/2.49s/2.40s`，合计 `9.689s`。对比此前不限时新 run 的 RMIH 约 `32.30s`，限时显著降低了这部分开销；该次总时间为 `57.496s`，比慢 run 的 `70.114s` 好，但 exact pricing 本身波动到 `27.805s`，所以总时间不会完全按 RMIH 节省线性下降。
+
+当前策略判断是：先优先测试 RMIH 小时间限制，而不是马上改成每 5 个节点跑一次。原因是限时不改变触发频率，仍保留 node4 这类非根节点改进 incumbent 的机会；而 root-only 或每 5 点一次可能直接错过关键上界刷新。建议下一轮批量比较 `restrictedMasterIntegerTimeLimit=2/3/5`，如果某些算例 `2s` 上界质量下降，再考虑非根节点用 `3-5s` 或结合“若干节点未改进才触发”的频率控制。

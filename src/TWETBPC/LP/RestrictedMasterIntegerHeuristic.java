@@ -141,7 +141,12 @@ public final class RestrictedMasterIntegerHeuristic {
 		IloCplex cplex = null;
 		try {
 			cplex = new IloCplex();
-			cplex.setOut(null);
+			if (config.diagnosticRestrictedIntegerMipLog) {
+				cplex.setOut(System.out);
+				cplex.setParam(IloCplex.Param.MIP.Display, 2);
+			} else {
+				cplex.setOut(null);
+			}
 			if (Utility.compareGt(config.restrictedMasterIntegerHeuristicTimeLimitSeconds, 0.0)) {
 				cplex.setParam(IloCplex.Param.TimeLimit,
 						config.restrictedMasterIntegerHeuristicTimeLimitSeconds);

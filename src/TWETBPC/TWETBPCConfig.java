@@ -187,6 +187,8 @@ public class TWETBPCConfig {
 	public int restrictedMasterIntegerHeuristicPerJobColumnLimit = 10;
 	/** 2026-06-04: 单列重复 job 不超过该数量时枚举所有删除组合生成修复列。 */
 	public int restrictedMasterIntegerHeuristicRepairEnumerationDuplicateLimit = 5;
+	/** 2026-06-08: 是否打印 RMIH 内部 CPLEX MIP 日志；默认关闭，仅用于判断耗时是在找可行解还是证明最优。 */
+	public boolean diagnosticRestrictedIntegerMipLog = false;
 	/** 2026-06-04: 长运行诊断用阶段开始 heartbeat；默认关闭，不改变求解逻辑。 */
 	public boolean diagnosticStageHeartbeat = false;
 	/** 2026-06-05: 每个节点处理完成后输出一行聚合诊断，便于定位长跑主要耗时阶段。 */

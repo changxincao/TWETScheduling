@@ -759,7 +759,7 @@ public class GCNGBBStyleBidirectional {
 		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
 		long labelTotal = forwardLabelsKept + backwardLabelsKept;
 		String action = reuse.considerExact(tMid, exactMillis, ratio, labelTotal,
-				normalizedExactTimeTieTolerance(), normalizedExactBalanceImprovementTolerance());
+				config.bidirectionalMidpointProbeExactTimeTieTolerance, normalizedExactBalanceImprovementTolerance());
 		midpointProbeFeedbackSummary = "exactReuse=" + action + ", exactMs=" + exactMillis + ", ratio=" + ratio
 				+ ", labels=" + labelTotal + ", bestT=" + reuse.bestExactTmid + ", bestMs="
 				+ reuse.bestExactMillis + ", bestRatio=" + reuse.bestExactRatio + ", bestLabels="
@@ -783,12 +783,6 @@ public class GCNGBBStyleBidirectional {
 	private double normalizedProbeEarlyStopRatio() {
 		double ratio = config.bidirectionalMidpointProbeEarlyStopRatio;
 		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 0.0;
-	}
-
-	private double normalizedExactTimeTieTolerance() {
-		double tolerance = config.bidirectionalMidpointProbeExactTimeTieTolerance;
-		return Double.isFinite(tolerance) && Utility.compareGe(tolerance, 0.0)
-				&& Utility.compareLe(tolerance, 1.0) ? tolerance : 0.10;
 	}
 
 	private double normalizedExactBalanceImprovementTolerance() {

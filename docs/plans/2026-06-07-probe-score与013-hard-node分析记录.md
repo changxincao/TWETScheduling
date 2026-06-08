@@ -241,3 +241,8 @@ probe 候选数建议上限先设为 5。若没有早停且方向未反转，就
 移动比例 `0.9/1.1` 目前是可用的粗步长，但也需要测试。`0.85/1.15` 更快离开错误 reference，但更容易越过均衡区；`0.95/1.05` 更细，但可能需要更多候选。建议与候选上限一起测试三组：`0.85`、`0.90`、`0.95`。若加入方向反转 bracket，`0.90` 很可能仍是较好的折中。
 
 同 node 复用 Tmid 是否有意义也需要单独测试。测试方式为：每个 node 第一轮 exact pricing 正常 probe，记录 selected Tmid；后续同一 node 的 exact pricing 先以上一轮 selected Tmid 为 reference，只做一次小预算检查，若 `rank=0` 或 `rank=1` 且倍数低于阈值则复用，否则在该 Tmid 附近局部 probe。对照组为每轮都从 completionBound reference 重新 probe。比较指标应拆为 probe 时间、正式 exact 时间、节点总时间、full label 和 join 规模，避免只看端到端时间无法判断复用是否真的省了 probe。
+
+
+## 12. 2026-06-08 Tmid 取整撤回说明
+
+前文关于整数 Tmid 的诊断只保留为历史实验记录。当前代码已经撤回 `clampCurrentMidpoint` 中的四舍五入逻辑，不再把小数候选强行改成整数。原因是 midpoint 本身只是一条半域切分边界，而时间函数、completion bound、列内最优完工时间和 probe 候选都按 double 计算；取整虽然能让日志更整齐，但会改变真实半域边界，容易让新旧实验结果多一个非必要差异。后续 Tmid 对照应直接使用 clamp 后的小数值。

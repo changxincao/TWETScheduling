@@ -178,9 +178,6 @@ public class TWETBPCConfig {
 	public boolean enableRestrictedMasterIntegerHeuristic = true;
 	/** 2026-06-02: restricted integer RMP 的 CPLEX 时间限制；小于等于 0 表示不设限制。 */
 	public double restrictedMasterIntegerHeuristicTimeLimitSeconds = 4.0;
-	/** 2026-06-08: RMIH 是否用当前全局上界加目标 cutoff 约束；默认关闭，仅用于对照实验。 */
-	public boolean restrictedMasterIntegerHeuristicIncumbentCutoff = false;
-
 	/** 2026-06-04: RMIH 模式；coverRepair=筛列 >= + 修复列 + ==，partition=全量 ==。 */
 	public String restrictedMasterIntegerHeuristicMode = "coverRepair";
 	/** 2026-06-04: coverRepair 中按 reduced cost 排序保留的列数；小于等于 0 表示全保留。 */

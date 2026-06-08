@@ -3132,11 +3132,6 @@ public class GCNGBBStyleBidirectional {
 		} else if (Utility.compareGt(candidate, upper)) {
 			clamped = upper;
 		}
-		// 2026-06-07: Tmid 只是半域切分点，优先取整数时间，避免 0.9 连乘产生的日志和 cache 小数噪声。
-		double rounded = Math.round(clamped);
-		if (Utility.compareGt(rounded, lower) && Utility.compareLt(rounded, upper)) {
-			return rounded;
-		}
 		return clamped;
 	}
 

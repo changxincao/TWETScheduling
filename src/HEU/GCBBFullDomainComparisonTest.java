@@ -173,9 +173,6 @@ public class GCBBFullDomainComparisonTest {
 		config.restrictedMasterIntegerHeuristicTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerTimeLimit",
 				Double.toString(config.restrictedMasterIntegerHeuristicTimeLimitSeconds)));
-		config.restrictedMasterIntegerHeuristicIncumbentCutoff = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.restrictedMasterIntegerIncumbentCutoff",
-				Boolean.toString(config.restrictedMasterIntegerHeuristicIncumbentCutoff)));
 		config.diagnosticRestrictedIntegerMipLog = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerMipLog",
 				Boolean.toString(config.diagnosticRestrictedIntegerMipLog)));

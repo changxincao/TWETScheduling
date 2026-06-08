@@ -47,7 +47,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		this.columnEvaluator = new TWETColumnEvaluator(data);
 	}
 
-	public Result solve(LP lp, double incumbentCost) {
+	public Result solve(LP lp) {
 		if (lp == null || lp.getNode() == null || lp.getRestrictedColumnIds().isEmpty()) {
 			return Result.notSolved("restricted integer heuristic skipped: empty LP");
 		}
@@ -55,10 +55,10 @@ public final class RestrictedMasterIntegerHeuristic {
 		try {
 			String mode = config.restrictedMasterIntegerHeuristicMode;
 			if (MODE_PARTITION.equalsIgnoreCase(mode)) {
-				return solvePartition(lp, lp.getRestrictedColumnIds(), "partition", incumbentCost, start);
+				return solvePartition(lp, lp.getRestrictedColumnIds(), "partition", start);
 			}
 			if (MODE_COVER_REPAIR.equalsIgnoreCase(mode)) {
-				return solveCoverRepair(lp, incumbentCost, start);
+				return solveCoverRepair(lp, start);
 			}
 			return Result.notSolved("restricted integer heuristic skipped: unknown mode " + mode,
 					System.nanoTime() - start);
@@ -68,9 +68,9 @@ public final class RestrictedMasterIntegerHeuristic {
 		}
 	}
 
-	private Result solvePartition(LP lp, List<Integer> columnIds, String label, double incumbentCost, long start)
+	private Result solvePartition(LP lp, List<Integer> columnIds, String label, long start)
 			throws IloException {
-		Attempt attempt = solveOnce(lp, columnIds, true, label, incumbentCost);
+		Attempt attempt = solveOnce(lp, columnIds, true, label);
 		long elapsed = System.nanoTime() - start;
 		if (!attempt.solved) {
 			return Result.notSolved("restricted integer heuristic " + label + " not solved: " + attempt.status,
@@ -84,12 +84,12 @@ public final class RestrictedMasterIntegerHeuristic {
 				elapsed);
 	}
 
-	private Result solveCoverRepair(LP lp, double incumbentCost, long start) throws IloException {
+	private Result solveCoverRepair(LP lp, long start) throws IloException {
 		long selectStart = System.nanoTime();
 		ArrayList<Integer> screened = selectCoverRepairColumns(lp);
 		long selectNanos = System.nanoTime() - selectStart;
 		long coverStart = System.nanoTime();
-		Attempt covering = solveOnce(lp, screened, false, "coverRepair_covering", incumbentCost);
+		Attempt covering = solveOnce(lp, screened, false, "coverRepair_covering");
 		long coverNanos = System.nanoTime() - coverStart;
 		long elapsed = System.nanoTime() - start;
 		if (!covering.solved) {
@@ -111,8 +111,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		finalColumnIds.addAll(repair.repairColumnIds);
 
 		long partitionStart = System.nanoTime();
-		Attempt partition = solveOnce(lp, new ArrayList<Integer>(finalColumnIds), true, "coverRepair_partition",
-				incumbentCost);
+		Attempt partition = solveOnce(lp, new ArrayList<Integer>(finalColumnIds), true, "coverRepair_partition");
 		long partitionNanos = System.nanoTime() - partitionStart;
 		elapsed = System.nanoTime() - start;
 		String prefix = "restricted integer heuristic coverRepair covering=" + covering.status + " "
@@ -139,7 +138,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		return String.format(Locale.US, "%.3f", nanos / 1000000.0);
 	}
 
-	private Attempt solveOnce(LP lp, List<Integer> columnIds, boolean exactCover, String label, double incumbentCost)
+	private Attempt solveOnce(LP lp, List<Integer> columnIds, boolean exactCover, String label)
 			throws IloException {
 		IloCplex cplex = null;
 		try {
@@ -154,7 +153,7 @@ public final class RestrictedMasterIntegerHeuristic {
 				cplex.setParam(IloCplex.Param.TimeLimit,
 						config.restrictedMasterIntegerHeuristicTimeLimitSeconds);
 			}
-			Model model = buildModel(cplex, lp, columnIds, exactCover, incumbentCost);
+			Model model = buildModel(cplex, lp, columnIds, exactCover);
 			boolean solved = cplex.solve();
 			if (!solved) {
 				return Attempt.notSolved(label, cplex.getStatus().toString());
@@ -167,8 +166,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		}
 	}
 
-	private Model buildModel(IloCplex cplex, LP lp, List<Integer> columnIds, boolean exactCover,
-			double incumbentCost)
+	private Model buildModel(IloCplex cplex, LP lp, List<Integer> columnIds, boolean exactCover)
 			throws IloException {
 		ArrayList<TariffSegment> segments = collectOutsourcingTariffSegments();
 		IloIntVar[] x = new IloIntVar[columnIds.size()];
@@ -195,9 +193,9 @@ public final class RestrictedMasterIntegerHeuristic {
 			obj.addTerm(tariff.intercept, z[segment]);
 		}
 		cplex.addMinimize(obj);
-		if (exactCover && config.restrictedMasterIntegerHeuristicIncumbentCutoff && Double.isFinite(incumbentCost)) {
-			cplex.addLe(obj, incumbentCost, "rmih_incumbentCutoff");
-		}
+		// 2026-06-08: 不在 RMIH 内加 incumbent cutoff。coverRepair 的第一阶段是 >= covering
+		// 中间模型，目标可能高于当前上界，但删重复 job 后的修复列可能让最终 == 解变好；
+		// 即使只限制 == 阶段，011 对照也没有收益，因此该实验开关已移除。
 
 		buildCoverage(cplex, lp, columnIds, x, y, exactCover);
 		buildMachineConstraint(cplex, x);

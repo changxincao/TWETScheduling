@@ -311,3 +311,11 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 用 `tmp-wet030_from040_011_2m`、`maxNodes=4`、`completionBound=allCycles`、`midpointStrategy=completionBound`、`midpointProbe=true`、`reuseWithinNode=true` 复测，结果为 `NODE_LIMIT, incumbent=14024, bound=13528.866667, solve=44.555s, exact=19.144s, exactCalls=14, valid=true`。这比上一版错误更新规则的 `solve=54.817s, exact=20.829s` 明显更快，也略好于此前 base probe 记录的 `solve=48.800s, exact=23.009s`，接近旧 `reuse+exactFeedback` 的 `solve=43.863s, exact=18.551s`。日志中 node3 的第三轮从历史 best `323` 出发试到 `347`，虽然 `347` 的 F/B ratio 更好，但 exact 耗时 `2843.895ms` 相比历史 best `323` 的 `1938.877ms` 已慢出 30% 以上，因此按新规则保留 `323`。这正是本次修正规则想要的行为：时间明显变差时不再为了平衡 ratio 替换 best；时间接近时才让二级平衡指标介入。
 
 由此也解释了此前“当前版本反而比基准 probe 慢”的原因：一方面旧 reset 路径会在前置启发式加列后清空同 node reuse map，导致 reuse 实际上没有稳定跨轮保留；另一方面上一版 best 更新规则过于容易被近似时间波动带偏，再叠加后续轮次仍试 5 个候选，使复用收益被重复 probe 成本抵消。当前版本修正 reset 保留、best 更新语义和 reuse 后候选数后，011 hard-node 口径下已经回到比 base probe 更快的状态。
+
+## 25. 2026-06-08 probe 初始化拆分与慢因复核
+
+继续检查 probe 路径后，发现 `initialize()` 开头原来会先调用完整 `initializeSearchState(lp)`，而该方法同时初始化 label 队列、dominance table、候选列堆、signature 去重集合，并扫描当前 restricted columns。随后每个 probe candidate 又会重建自己的 label 状态；probe 结束后，正式 pricing 还会再次初始化正式 label/candidate 状态。由于前置 diagnostics、snapshot、dynamic window 和 completion bound 构造都不依赖 candidate/signature 状态，probe candidate 本身也不生成列，本次把初始化拆开：`initialize()` 开头只保留空 `generatedColumns`，probe candidate 只调用 `initializeLabelSearchState()`，正式 join 前才调用 `initializeCandidateState(lp)`。这样去掉了 probe 前一次无效的 restricted column signature 扫描，也去掉了每个 probe candidate 的无效候选堆/hash 初始化。
+
+验证口径为 focused `javac` 和 `tmp-wet030_from040_011_2m,maxNodes=1`，开启 completionBound、probe、reuse 后得到 `solve=18.747s, exact=4.144s, valid=true`。该 smoke 主要验证状态拆分没有破坏 rank0 label 复用和 join；时间本身受 RMIH/CPLEX 波动影响，不作为速度结论。
+
+同时对比 `tmp-probe-bestexact-reuse-011-n4-tie010` 与本次 `tmp-probe-initopt-011-n4-tie010` 的 4 节点日志。当前 run 总时间从 `49.472s` 增到 `70.114s`，但 exact pricing 只从 `20.828s` 增到 `20.982s`，几乎不是主因。真正差异主要来自 RMIH 的 cover MIP：node1 从 `4.372s` 增到 `12.749s`，node2 从 `4.666s` 增到 `10.835s`，node3 从 `2.811s` 增到 `4.947s`，node4 从 `1.838s` 增到 `2.996s`，合计约多 `17.95s`；启发式 pricing 约多 `2.08s`，master LP 约多 `0.38s`。因此这次看到的总时间变慢主要是 RMIH/CPLEX 整数启发式 coverSolve 的波动或路径成本，不是 midpoint probe 初始化拆分导致的 exact pricing 变慢。

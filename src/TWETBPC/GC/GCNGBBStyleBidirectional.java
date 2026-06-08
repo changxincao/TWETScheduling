@@ -493,7 +493,7 @@ public class GCNGBBStyleBidirectional {
 		completionBounds = null;
 		completionBoundFixedArc = null;
 		bestGeneratedReducedCost = Utility.big_M;
-		initializeSearchState(lp);
+		generatedColumns = new ArrayList<TWETColumn>();
 		if (config.diagnosticPricingSummaryDetails) {
 			recordPricingDiagnostics(lp);
 		}
@@ -878,7 +878,7 @@ public class GCNGBBStyleBidirectional {
 		tMid = candidateTMid;
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
-		initializeProbeSearchState();
+		initializeLabelSearchState();
 		initializeForwardSource(lp);
 		initializeBackwardSink(lp);
 		long fwQueuePeak = queueSize(FWUL);
@@ -962,15 +962,6 @@ public class GCNGBBStyleBidirectional {
 	private void initializeSearchState(LP lp) {
 		initializeLabelSearchState();
 		initializeCandidateState(lp);
-	}
-
-	private void initializeProbeSearchState() {
-		initializeLabelSearchState();
-		generatedColumns = new ArrayList<TWETColumn>();
-		generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
-				Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
-		generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
-		activeColumnSignatures = new HashSet<SequenceSignature>();
 	}
 
 	private void initializeLabelSearchState() {

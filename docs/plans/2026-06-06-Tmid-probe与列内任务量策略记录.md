@@ -463,3 +463,15 @@ node3 后三轮当前并不都更差。历史第二轮很重，`10.86s`，当前
 node18 第一轮加列后，第二轮 exact pricing 仍然没有明显变轻。中止前第二轮仍在 forward 阶段，`Tmid=392.67875`，已达到约 `fwPops=77306, fwKept=133160, fwDom=1451960, fBuilt=1929579`，forward 队列仍有五万级。这说明第一轮生成的 33 条列没有显著缓解该节点的 dual/pricing 难度，后续即使继续跑，也很可能还要在 node18 消耗较长时间。
 
 当前结论是：关闭 RMIH 后，ALNS 仍能提供可用上界，搜索也能把 incumbent 从 `14908` 推到 `14450`，并把 gap 压到约 `0.16%`，但没有在短时间内闭合到最优。主要瓶颈不在 RMIH，而在深层 node18 的 exact pricing。RMIH 关闭后可能减少上界启发式开销，但也少了后续 restricted integer heuristic 刷新 incumbent 的机会；本次已经有 ALNS 和整数 LP 解把上界推到 `14450`，但 node18 的定价证明成本仍然足以拖住完整收敛。后续若继续这个方向，应优先分析 node18 的 branch 状态、dual、Tmid probe 候选和 label 分布，而不是继续调 RMIH。
+
+## 39. 2026-06-09 node18 pricing 爆炸原因分析
+
+继续分析 `013` 在 ALNS 开启、RMIH 上界启发式关闭时卡住的 node18。该节点中止前 incumbent 已到 `14450`，全局 bound 已到 `14427.0`，gap 约 `0.1592%`。这说明搜索已经进入尾段证明区间：上界和下界很接近，但还必须通过 exact pricing 证明当前节点没有足够好的负 reduced-cost 列，或者继续补出少量列。此时定价不再是“快速找到明显负列”，而是“大量近零候选都不能轻易剪掉，最后只证明少数列有用”。
+
+node18 的第一轮 exact pricing 已经能说明问题本质：`Tmid=388.705`，forward 有 `fwPops=117693, fwKept=127120, fwDom=2139144`，backward 有 `bwPops=923759, bwKept=943942, bwDom=2319467`，`joinPairs=44223987`，但最终只生成 `33` 条负列，`bestRC=-19.25`。completion bound 并不是没起作用，它已经剪掉了 `cbFPruned=519244, cbBPruned=18446937`，尤其 backward 剪枝非常多；问题是剪完以后仍有近百万 backward survivor 和四千多万 join 组合。也就是说，这不是单纯的死循环或 Tmid 选偏，而是当前节点的定价状态空间本身太大，且松弛下界不足以把这些近零 reduced-cost 的部分路径提前判死。
+
+当前判断是：小 gap 会显著放大这种现象，但小 gap 不是唯一原因。小 gap 意味着 reduced-cost cutoff 很紧，很多标签的 relaxed completion bound 仍然可能低于 0，不能被安全剪掉；同时为了证明节点 bound，exact pricing 不能像启发式 pricing 那样“找不到就算了”。但如果该节点有大量硬禁弧、强时间窗或明显劣化的 dual 结构，也可能很快剪完。node18 的特殊点在于 hard arc pruning 并不强，主要仍是在密图上处理 elementarity、adjacency/branch dual 和 TWET 函数成本；这些因素让 dominance 很弱，许多访问集合不同、成本相近的标签互相不能支配。
+
+completion bound 的局限也比较明确：它是 relaxed prefix/suffix 下界，用来判断“这个 partial label 是否无论怎么补都不可能负 reduced cost”。它考虑了当前禁止弧口径，但不能完全表达当前 label 的 visited set、elementarity 冲突、精确 join 后的序列结构和所有主问题退化影响。因此当 relaxed completion 仍可能为负时，标签必须保留，即使最终 elementary join 后大概率不会形成好列。node18 的 `cbBPruned=18446937` 说明 bound 很有用；`bwKept=943942` 又说明 bound 在该节点上还不够强。
+
+这类现象和文献里的 ESPPRC pricing label explosion、column generation tailing-off/degeneracy 是一致的。BPC 尾段经常出现很多接近零 reduced cost 的列，主问题目标改善很小，但定价子问题仍要花大量时间证明不存在更好的列。当前 node18 第一轮“44M join 只换 33 条负列”就是典型症状。后续如果继续优化，应优先考虑三条线：一是保存 node18 pricing 快照，记录 branch 状态、dual、Tmid candidates、arc 数量和 label 深度分布；二是用 ng-set 或 restricted non-elementary route pricing 减弱 elementarity 状态爆炸；三是对 hard node 单独考虑更强的结构剪枝、dual stabilization、或替代 pricing proof。继续微调 Tmid/probe 只能避免极端单侧爆炸，不能根治这种两侧 survivor 都很多的尾段 proof 节点。

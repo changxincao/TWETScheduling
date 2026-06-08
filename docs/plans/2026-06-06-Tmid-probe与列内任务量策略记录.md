@@ -449,3 +449,17 @@ node3 的关键分叉发生在第一轮 exact pricing。历史快 run 在 node3 
 第三，也是最大项，node3 exact pricing：历史约 `36.41s`，当前约 `45.03s`，多 `8.62s`。node3 第一轮差异最关键。历史第一轮 `Tmid=325.36`，生成 `743` 条负列，耗时 `8.57s`；当前第一轮 `Tmid=338.38`，只生成 `75` 条负列，但耗时反而 `16.29s`。这轮当前的 join pair 更少，`2.25M` 对比历史 `2.85M`，函数评估也更少，`0.92M` 对比历史 `1.34M`；但当前 completion-bound build 从 `0.70s` 到 `1.07s`，superset visited 从 `2.72M` 到 `3.73M`，forward kept/dominated 从 `7353/24774` 到 `9414/31975`。因此当前第一轮慢不是因为 join 更多，而是 forward 扩展和 dominance graph 查询更重，且最终找到的负列少得多。
 
 node3 后三轮当前并不都更差。历史第二轮很重，`10.86s`，当前第二轮为 `9.30s`；历史第三/四轮 `8.59s/8.39s`，当前第三/四轮 `9.62s/9.82s`。所以 node3 总差距主要由第一轮 `+7.71s` 和后两轮小幅变慢构成。RMIH 不是差距来源：历史四个 node 合计约 `2.53s`，当前约 `2.42s`，当前还略少。
+
+## 38. 2026-06-08 013 ALNS 开启且关闭 RMIH 上界启发式的中止实验
+
+按用户要求，用当前求解配置直接跑 `tmp-wet030_from040_013_2m` 完整树，打开 ALNS seed，关闭 RMIH 上界启发式，即 `runALNSForSeed=true`、`enableRestrictedMasterIntegerHeuristic=false`。其余关键配置保持当前主线：`halfDomain`、`completionBound=allCycles`、`midpointStrategy=completionBound`、`midpointProbe=true`、`popLimit=5000`、`maxCandidates=6`、`moveRatio=0.15`、`tieScore=off`、`bracket=true`、`reuseWithinNode=false`，并打开 `nodeProgressSummary/stageHeartbeat`。实验名为 `tmp-current-013-full-alns-no-rmih-20260608`。
+
+本次运行按用户要求在 node18 处理中手动停止，因此没有形成完整 CSV，也不能作为最优性结果。测试目录 `test-results/bpc/tmp-current-013-full-alns-no-rmih-20260608/` 已创建，但因进程被中止，程序未正常落盘结果文件；本节记录来自控制台 heartbeat 和 node summary。运行过程中未出现 RMIH 事件，node summary 里也没有 RMIH 耗时字段，说明 RMIH 上界启发式确实被关闭。ALNS seed 生效，根节点初始列池明显大于无 ALNS 的极小 seed。
+
+中止前搜索已经推进到 node18。前几个关键节点如下：node1 用时 `9.779s`，`inc=14908`，`bound=14287.625`；node2 用时 `5.203s`；node3 是第一处明显慢点，用时 `52.381s`，其中 pricing `51.949s`、exact `49.137s`，新增 `1003` 条列。后续 node12 时 incumbent 已到 `14451`，bound 到 `14393.8`；node13 后 bound 到 `14411.969697`；node14 和 node15 又各自出现约 `45s` 的 pricing，其中 node15 找到整数 incumbent `14450`，此时 gap 约 `0.2175%`。node16、node17 被 incumbent 剪掉，node17 后 bound 到 `14427.0`，gap 约 `0.1592%`。
+
+真正导致本次不能短时间闭合的是 node18。node18 第一轮 exact pricing 的规模异常大：`Tmid=388.705`，forward `fwPops=117693, fwKept=127120, fwDom=2139144`，backward `bwPops=923759, bwKept=943942, bwDom=2319467`，`fBuilt=2785507`，completion bound 剪枝为 `cbFPruned=519244, cbBPruned=18446937`，最终 `joinPairs=44223987`，只生成 `33` 条负列，`bestRC=-19.25`。这说明该节点并不是死循环，而是一个极重的 exact pricing 证明过程：completion bound 做了大量剪枝，但剩余状态空间仍然很大，而且生成负列很少，性价比很低。
+
+node18 第一轮加列后，第二轮 exact pricing 仍然没有明显变轻。中止前第二轮仍在 forward 阶段，`Tmid=392.67875`，已达到约 `fwPops=77306, fwKept=133160, fwDom=1451960, fBuilt=1929579`，forward 队列仍有五万级。这说明第一轮生成的 33 条列没有显著缓解该节点的 dual/pricing 难度，后续即使继续跑，也很可能还要在 node18 消耗较长时间。
+
+当前结论是：关闭 RMIH 后，ALNS 仍能提供可用上界，搜索也能把 incumbent 从 `14908` 推到 `14450`，并把 gap 压到约 `0.16%`，但没有在短时间内闭合到最优。主要瓶颈不在 RMIH，而在深层 node18 的 exact pricing。RMIH 关闭后可能减少上界启发式开销，但也少了后续 restricted integer heuristic 刷新 incumbent 的机会；本次已经有 ALNS 和整数 LP 解把上界推到 `14450`，但 node18 的定价证明成本仍然足以拖住完整收敛。后续若继续这个方向，应优先分析 node18 的 branch 状态、dual、Tmid probe 候选和 label 分布，而不是继续调 RMIH。

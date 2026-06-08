@@ -121,6 +121,7 @@ public class GCNGBBStyleBidirectional {
 	private String midpointProbeSummary = "off";
 	private String midpointProbeReferenceSource = "strategy";
 	private String midpointProbeFeedbackSummary = "off";
+	private boolean midpointProbeLabelsReadyForJoin;
 	private long midpointStrategyNanos;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
@@ -262,19 +263,25 @@ public class GCNGBBStyleBidirectional {
 			lastMessage = "GCNGBB-style bidirectional midpoint full diagnostic executed; exact pricing skipped";
 			return generatedColumns;
 		}
-		initializeBackwardSink(lp);
-		diagnosticHeartbeat(lp, "backwardSink.done", true);
+		if (!midpointProbeLabelsReadyForJoin) {
+			initializeBackwardSink(lp);
+			diagnosticHeartbeat(lp, "backwardSink.done", true);
+		} else {
+			diagnosticHeartbeat(lp, "probe.rank0.reuse", true);
+		}
 		// 2026-05-26: GCNGBB-style 外层流程。先分别耗尽两侧队列，最后统一扫描 backward labels 做 crossing-arc join。
-		diagnosticHeartbeat(lp, "forward.start", true);
-		while (canContinue() && !FWUL.isEmpty()) {
-			forwardExtend(lp);
+		if (!midpointProbeLabelsReadyForJoin) {
+			diagnosticHeartbeat(lp, "forward.start", true);
+			while (canContinue() && !FWUL.isEmpty()) {
+				forwardExtend(lp);
+			}
+			diagnosticHeartbeat(lp, "forward.done", true);
+			diagnosticHeartbeat(lp, "backward.start", true);
+			while (canContinue() && !BWUL.isEmpty()) {
+				backwardExtend(lp);
+			}
+			diagnosticHeartbeat(lp, "backward.done", true);
 		}
-		diagnosticHeartbeat(lp, "forward.done", true);
-		diagnosticHeartbeat(lp, "backward.start", true);
-		while (canContinue() && !BWUL.isEmpty()) {
-			backwardExtend(lp);
-		}
-		diagnosticHeartbeat(lp, "backward.done", true);
 		if (canContinue()) {
 			diagnosticHeartbeat(lp, "join.compact.start", true);
 			compactAndSortActiveLabelListsForJoin();
@@ -285,7 +292,8 @@ public class GCNGBBStyleBidirectional {
 			diagnosticHeartbeat(lp, "finalize.done", true);
 		}
 		storeMidpointProbeExactFeedback(lp);
-		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
+		String completionState = midpointProbeLabelsReadyForJoin ? "probe rank0 queues exhausted"
+				: (canContinue() ? "queues exhausted" : "column cap disabled");
 		lastMessage = "GCNGBB-style bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
@@ -494,8 +502,14 @@ public class GCNGBBStyleBidirectional {
 			buildCompletionBounds(lp);
 		}
 		runMidpointProbeIfEnabled(lp);
-		initializeSearchState(lp);
-		initializeForwardSource(lp);
+		if (midpointProbeLabelsReadyForJoin) {
+			// 2026-06-08: 被选中的 rank0 probe 已经耗尽两侧 label 队列，可以直接进入 join。
+			// 这里只补正式候选列去重/堆状态，避免同一个 Tmid 再跑一遍 labeling。
+			initializeCandidateState(lp);
+		} else {
+			initializeSearchState(lp);
+			initializeForwardSource(lp);
+		}
 		runFullMidpointDiagnosticIfEnabled(lp);
 	}
 
@@ -511,6 +525,7 @@ public class GCNGBBStyleBidirectional {
 		if (!FULL_MIDPOINT_DIAGNOSTIC_DONE.add(Integer.valueOf(lp.getNode().id))) {
 			return;
 		}
+		midpointProbeLabelsReadyForJoin = false;
 		double originalTMid = tMid;
 		String originalProbeSummary = midpointProbeSummary;
 		double forwardSeconds = Double.parseDouble(System.getProperty(
@@ -539,6 +554,7 @@ public class GCNGBBStyleBidirectional {
 		resetProbeAffectedStatistics();
 		initializeSearchState(lp);
 		initializeForwardSource(lp);
+		midpointProbeLabelsReadyForJoin = false;
 	}
 
 	private void runFullMidpointDiagnosticCandidate(LP lp, double candidateTMid, double forwardSeconds,
@@ -621,6 +637,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private void runMidpointProbeIfEnabled(LP lp) {
+		midpointProbeLabelsReadyForJoin = false;
 		if (!config.bidirectionalMidpointProbe) {
 			midpointProbeSummary = "off";
 			return;
@@ -639,6 +656,7 @@ public class GCNGBBStyleBidirectional {
 		HashSet<String> seen = new HashSet<String>();
 		double candidate = clampCurrentMidpoint(reference);
 		MidpointProbeResult previous = null;
+		MidpointProbeResult currentStateResult = null;
 		int extraCandidatesRemaining = -1;
 		String stopReason = "maxCandidates";
 		for (int i = 0; i < maxCandidates; i++) {
@@ -648,6 +666,7 @@ public class GCNGBBStyleBidirectional {
 				break;
 			}
 			MidpointProbeResult result = runMidpointProbeCandidate(lp, candidate, popLimit);
+			currentStateResult = result;
 			results.add(result);
 			if (result.reliabilityRank(config.bidirectionalMidpointProbeScore) == 0) {
 				stopReason = "rank0";
@@ -658,7 +677,9 @@ public class GCNGBBStyleBidirectional {
 				double bracketMidpoint = clampCurrentMidpoint((previous.tMid + result.tMid) * 0.5);
 				String bracketKey = String.format("%.9f", bracketMidpoint);
 				if (seen.add(bracketKey)) {
-					results.add(runMidpointProbeCandidate(lp, bracketMidpoint, popLimit));
+					MidpointProbeResult bracketResult = runMidpointProbeCandidate(lp, bracketMidpoint, popLimit);
+					currentStateResult = bracketResult;
+					results.add(bracketResult);
 				}
 				stopReason = "bracket";
 				break;
@@ -686,10 +707,17 @@ public class GCNGBBStyleBidirectional {
 			return;
 		}
 		tMid = best.tMid;
-		rebuildHalfDomainForCurrentMidpoint();
-		resetProbeAffectedStatistics();
+		midpointProbeLabelsReadyForJoin = best == currentStateResult
+				&& best.reliabilityRank(config.bidirectionalMidpointProbeScore) == 0;
+		if (!midpointProbeLabelsReadyForJoin) {
+			rebuildHalfDomainForCurrentMidpoint();
+			resetProbeAffectedStatistics();
+		}
 		storeMidpointProbeReuse(lp, best.tMid);
 		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results, stopReason);
+		if (midpointProbeLabelsReadyForJoin) {
+			midpointProbeSummary += ", rank0LabelsReused=true";
+		}
 	}
 
 	private double midpointProbeReference(LP lp) {
@@ -1843,6 +1871,7 @@ public class GCNGBBStyleBidirectional {
 		midpointColumnTaskMax = Double.NaN;
 		midpointProbeSummary = "off";
 		midpointProbeFeedbackSummary = "off";
+		midpointProbeLabelsReadyForJoin = false;
 		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
 		diagnosticPricingOnlyJobArcCount = 0;

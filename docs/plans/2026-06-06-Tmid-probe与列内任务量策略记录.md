@@ -265,3 +265,15 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 还有一个待实现问题是 `rank=0` probe 结果是否可以直接复用。很多 node 上 probe 候选会把 forward/backward 队列跑空，此时从 label 扩展角度看，它已经完成了正式 pricing 的主要 labeling 阶段。如果这个候选最终被选中，理论上可以直接基于 probe 产生的 label 状态执行正式 join 和候选列生成，而不必再用同一个 Tmid 重建 half-domain 并完整跑一次 exact pricing。这个方向的收益可能很直接，尤其是 root 或简单 node 上 `rank=0` 频繁出现。但实现上要确保 probe 状态和正式状态完全一致，包括 candidate pool、signature 去重、join 所需索引、统计字段、以及不会因为 probe 省略了某些初始化而缺少正式 pricing 需要的数据。当前先记录为后续优化点，不立即改。
 
 最后，非对称双向 labeling 仍值得重新测试。之前非对称版本效果差，主要是在没有当前 completion bound 体系参与的口径下比较，动态边界对正向较松，导致扩展出大量 label。现在如果把 completion bound 接入非对称双向，可能会改善这种过松扩展；但它和当前 half-domain probe 的机制不同，因为非对称版本不存在固定半域裁剪，相关实现和统计口径会更多。后续可以单独开一轮实验：先确认非对称双向是否完整接入 completion bound，再和当前 probe-based half-domain 在 011/012/013 hard node 上比较。如果非对称仍然不稳，主线继续放在 probe 优化上。
+
+## 21. 2026-06-08 rank0 probe label 复用实现
+
+本次把前面记录的 `rank=0` probe 复用点做成了保守实现。核心判断是：只有被最终选中的 probe 候选正好是当前内存里最后一次跑完的候选，并且该候选的 `reliabilityRank(...) == 0`，也就是 forward/backward 两侧队列都已经耗尽，才允许复用 probe 已生成的 label 状态直接进入正式 join。其它情况仍走原来的正式 pricing 流程：按选中的 `Tmid` 重建 half-domain，再重新初始化 source/sink 并完整 labeling。
+
+这里没有为任意历史候选做深拷贝，也没有尝试复用不是最终选中候选的 label。原因是 probe 会连续尝试多个 `Tmid`，每次都会重建 half-domain 和 label/dominance 状态；如果最终 best 不是最后一次候选，当前内存状态已经不对应 best，直接 join 会错。因此当前实现只复用“最后一次候选就是 best 且 rank0”的状态，收益范围小一些，但状态一致性最清楚。
+
+复用路径下，probe 已经完成正式 labeling 所需的 forward/backward label 扩展和 dominance 插入；`initialize()` 不再调用完整 `initializeSearchState()`，只补一次 `initializeCandidateState(lp)`，用于正式 join 阶段的候选列堆、signature 去重和 active restricted column signature。随后 `solve()` 跳过 `initializeBackwardSink()`、forward 扩展和 backward 扩展，直接 compact、join、finalize。这样避免同一个 `Tmid` 在 rank0 情况下被 probe 跑完一次、正式 pricing 又跑一遍。
+
+为了避免误复用，增加了两个失效保护。第一，`resetStatistics()` 和 `runMidpointProbeIfEnabled()` 开头都会清掉 `midpointProbeLabelsReadyForJoin`。第二，如果 `runFullMidpointDiagnosticIfEnabled()` 执行，它会重建搜索状态用于诊断，所以会显式清掉该标记，避免 diagnostic 之后主流程误以为 probe label 仍可 join。日志中会在 pricing summary 里追加 `rank0LabelsReused=true`，并把 completion state 写成 `probe rank0 queues exhausted`，方便后续识别。
+
+验证口径为 `tmp-wet030_from040_011_2m`、`halfDomain`、`completionBound=allCycles`、`maxNodes=1`、`midpointStrategy=completionBound`、`midpointProbe=true`、`popLimit=5000`、`score=queue`、`tieScore=remaining`。结果为 `NODE_LIMIT, incumbent=14258, bound=13525.866667, solve=15.176s, exact=3.233s, exactCalls=4, valid=true`。日志中 4 次 exact pricing 都出现 `probe rank0 queues exhausted` 和 `rank0LabelsReused=true`，说明 rank0 复用路径已经实际触发并能正常 join/finalize。

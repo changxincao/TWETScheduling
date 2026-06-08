@@ -17,12 +17,12 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
-	private final HashMap<Integer, Double> midpointProbeReuseByNode;
+	private final HashMap<Integer, GCNGBBStyleBidirectional.MidpointProbeNodeReuse> midpointProbeReuseByNode;
 
 	public GCNGBBStyleBidirectionalPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.midpointProbeReuseByNode = new HashMap<Integer, Double>();
+		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectional.MidpointProbeNodeReuse>();
 	}
 
 	@Override
@@ -48,7 +48,9 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 	@Override
 	public void reset() {
 		lastReusableSubtreeArcEliminationBounds = null;
-		midpointProbeReuseByNode.clear();
+		if (!config.bidirectionalMidpointProbeReuseWithinNode) {
+			midpointProbeReuseByNode.clear();
+		}
 	}
 
 	@Override

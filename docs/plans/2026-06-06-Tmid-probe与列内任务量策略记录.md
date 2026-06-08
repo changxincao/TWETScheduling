@@ -277,3 +277,27 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 为了避免误复用，增加了两个失效保护。第一，`resetStatistics()` 和 `runMidpointProbeIfEnabled()` 开头都会清掉 `midpointProbeLabelsReadyForJoin`。第二，如果 `runFullMidpointDiagnosticIfEnabled()` 执行，它会重建搜索状态用于诊断，所以会显式清掉该标记，避免 diagnostic 之后主流程误以为 probe label 仍可 join。日志中会在 pricing summary 里追加 `rank0LabelsReused=true`，并把 completion state 写成 `probe rank0 queues exhausted`，方便后续识别。
 
 验证口径为 `tmp-wet030_from040_011_2m`、`halfDomain`、`completionBound=allCycles`、`maxNodes=1`、`midpointStrategy=completionBound`、`midpointProbe=true`、`popLimit=5000`、`score=queue`、`tieScore=remaining`。结果为 `NODE_LIMIT, incumbent=14258, bound=13525.866667, solve=15.176s, exact=3.233s, exactCalls=4, valid=true`。日志中 4 次 exact pricing 都出现 `probe rank0 queues exhausted` 和 `rank0LabelsReused=true`，说明 rank0 复用路径已经实际触发并能正常 join/finalize。
+
+## 22. 2026-06-08 node 内 Tmid 复用策略再整理
+
+继续讨论后，当前更合理的方向是把 `rank=0` probe 语义改得更直接：probe 过程中一旦某个候选把 forward/backward 两侧队列都跑空，就立即接受这个候选，不再继续试其它候选，也不再走“收集 candidates 后再选 best”的逻辑。原因是 `rank=0` 已经说明该 `Tmid` 在 probe 阶段完成了正式 labeling 的主要扩展工作；此时继续试探其它 `Tmid` 的边际收益小，而且会破坏当前内存里可直接 join 的 label 状态。保守状态检查仍然需要保留，但语义上应从“最后一次候选恰好是 best 才复用”收敛成“rank0 候选即接受并复用”。
+
+`reuseWithinNode` 也不应继续简单写回本轮 probe 选出的 `best.tMid`。本轮 probe score 最小不等于后续 exact pricing 最快；更稳的做法是为每个 node 维护一个小的 reuse state，记录本 node 历史 exact pricing 表现最好的 `Tmid`。主准则先用完整 exact pricing 的耗时，直接用更小耗时更新，不额外加 `0.95` 这类噪声阈值。若两个 `Tmid` 的 exact 耗时接近，例如较大耗时的 30% 范围内，再用完整 pricing 后的 forward/backward kept label 均衡程度作为辅助选择。这样 reuse 的目标从“上一轮 probe 觉得好”改成“历史完整 pricing 真的跑得好”。
+
+基于这个思路，`exactFeedback` 的方向修正暂时不作为主线。它用上一轮完整 pricing 的 forward/backward kept 比例决定下一轮 reference 左移或右移，直觉上合理，但阈值和步长都难稳定设定；如果上轮左移后下一轮又右移，还需要额外维护 bracket。相比之下，历史最优 exact 表现复用已经隐含利用了完整 pricing 反馈：耗时最小且较均衡的 `Tmid` 会自然留下来，后续 probe 只需围绕这个 reference 再局部试探。因此当前建议保留一种主 reuse：同一 node 内优先复用历史 exact 表现最好的 `Tmid`；`exactFeedback` 方向修正先保持实验开关或暂不启用。
+
+该假设的依据是，同一 BPC node 内 branch、forbidden arc、pricing graph 等结构不变；对固定路径而言，任务最优完成时间、setup 和 release/due 约束都是常数，不随 dual 变化。因此合理 `Tmid` 的时间量级通常不会在同一 node 的相邻 pricing 轮次之间剧烈变化。dual 会改变 reduced cost、completion bound 剪枝和 survivor 分布，所以复用不是严格保证，但作为 reference 起点比每轮重新从 completionBound 偏右 reference 左探更合理。子节点继承父节点 `Tmid` 更激进，因为 branch 结构已经变化，暂时不做。
+
+后续还可以把 probe 候选次数做成 node 内自适应。第一次进入某个 node 时没有历史 reference，可以允许 `maxCandidates=6` 之类较充分试探；一旦该 node 已有历史 best exact Tmid，后续轮次可以只试较少候选，例如最多 3 次，围绕历史 reference 做局部校准。这样能减少重复 probe 成本，同时保留在 dual 变化后微调 `Tmid` 的能力。
+
+## 23. 2026-06-08 历史 exact best Tmid 复用实现
+
+本次把上一节的 reuse 思路落到代码里。`rank=0` probe 现在语义上直接作为接受候选：一旦某个 probe 候选耗尽 forward/backward 两侧队列，就立即停止试探，最终 best 直接取这个候选，并复用当前 label 状态进入 join。这样避免 rank0 候选还参与后续候选选择，也避免因为继续试探覆盖掉可直接 join 的 label 状态。
+
+同一 node 的 Tmid 复用从单个 `Double` 改成 `MidpointProbeNodeReuse` 状态。该状态只记录少量标量：历史 best exact Tmid、best exact 耗时、best F/B kept ratio、best kept label 总数，以及最近一次 exact 的对应指标。更新时不新增路径、函数或 label 计算，只复用本轮 exact pricing 已经有的 `System.nanoTime()` 耗时和 `forwardLabelsKept/backwardLabelsKept` 统计。
+
+更新规则为：若当前 exact 耗时更小，直接替换历史 best；若当前耗时没有更小，但和历史 best 的耗时差不超过较大耗时的 `bidirectionalMidpointProbeExactTimeTieTolerance`，默认 30%，则进入二级比较；只有当前 F/B kept ratio 比历史 best 至少改善 `bidirectionalMidpointProbeExactBalanceImprovementTolerance`，默认 30%，才用当前 Tmid 替换历史 best。两个 30% 是独立参数，测试入口分别为 `twet.bpc.fullDomainCompare.midpointProbeExactTimeTieTolerance` 和 `twet.bpc.fullDomainCompare.midpointProbeExactBalanceImprovementTolerance`。
+
+实现时还修正了一个容易削弱 reuse 的点：`GCNGBBStyleBidirectionalPricingEngine.reset()` 原来会清空 `midpointProbeReuseByNode`。但该 reset 会在前置启发式定价器加列后触发，如果清空，则 exact pricing 在同一 node 的多轮改进之间无法复用历史 Tmid。现在当 `bidirectionalMidpointProbeReuseWithinNode=true` 时，reset 只清理 reusable subtree bound，不清理 node Tmid reuse map；map 仍按 node id 区分，不跨 node 混用。
+
+验证口径一为 `tmp-wet030_from040_011_2m,maxNodes=1`，开启 `reuseWithinNode` 和两个 30% 参数后，结果为 `NODE_LIMIT, incumbent=14258, bound=13525.866667, solve=16.249s, exact=3.247s, exactCalls=4, valid=true`。日志显示第一轮 `ref=strategy`，后续 exact pricing 均为 `ref=reuseBestExact`，并输出 `exactReuse=init/time/keep`。口径二为同算例 `maxNodes=4`，结果为 `NODE_LIMIT, incumbent=14024, bound=13528.866667, solve=54.817s, exact=20.829s, exactCalls=14, valid=true`。node3 中第一轮从 strategy reference 选到 `349`，第二轮从历史 best `349` 出发并通过 bracket 找到 rank0 `323`，第三轮从 `323` 出发继续局部试探，说明历史 best exact reuse 已在 hard node 中生效。该结果不说明它已经稳定优于 exactFeedback 方向修正，只说明新机制可运行且状态复用口径正确；后续还需继续和旧 reuse/exactFeedback 口径做多算例对照。

@@ -129,10 +129,14 @@ public class TWETBPCConfig {
 	/** 2026-06-07: 同一 BPC node 后续 pricing round 是否以上一轮选中的 Tmid 作为 probe reference。 */
 	public boolean bidirectionalMidpointProbeReuseWithinNode = false;
 	/**
-	 * 2026-06-07: 实验开关。同一 node 内复用 Tmid 时，是否用上一轮完整 exact pricing 的
-	 * forward/backward 实际 label 压力修正下一轮 probe reference。
+	 * 2026-06-07: 保留的实验开关。当前主线改为复用同一 node 内历史 exact 表现最好的 Tmid，
+	 * 不再默认用上一轮 forward/backward 压力做方向乘法修正。
 	 */
 	public boolean bidirectionalMidpointProbeExactFeedback = false;
+	/** 2026-06-08: node 内历史 Tmid 复用时，两个 exact 耗时相差不超过较大值的该比例才进入二级比较。 */
+	public double bidirectionalMidpointProbeExactTimeTieTolerance = 0.30;
+	/** 2026-06-08: exact 耗时接近时，F/B kept ratio 至少改善该比例才替换历史最快 Tmid。 */
+	public double bidirectionalMidpointProbeExactBalanceImprovementTolerance = 0.30;
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
 	public int maxHeuristicPricingColumns = 150;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

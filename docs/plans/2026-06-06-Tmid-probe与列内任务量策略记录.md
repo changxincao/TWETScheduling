@@ -319,3 +319,17 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 验证口径为 focused `javac` 和 `tmp-wet030_from040_011_2m,maxNodes=1`，开启 completionBound、probe、reuse 后得到 `solve=18.747s, exact=4.144s, valid=true`。该 smoke 主要验证状态拆分没有破坏 rank0 label 复用和 join；时间本身受 RMIH/CPLEX 波动影响，不作为速度结论。
 
 同时对比 `tmp-probe-bestexact-reuse-011-n4-tie010` 与本次 `tmp-probe-initopt-011-n4-tie010` 的 4 节点日志。当前 run 总时间从 `49.472s` 增到 `70.114s`，但 exact pricing 只从 `20.828s` 增到 `20.982s`，几乎不是主因。真正差异主要来自 RMIH 的 cover MIP：node1 从 `4.372s` 增到 `12.749s`，node2 从 `4.666s` 增到 `10.835s`，node3 从 `2.811s` 增到 `4.947s`，node4 从 `1.838s` 增到 `2.996s`，合计约多 `17.95s`；启发式 pricing 约多 `2.08s`，master LP 约多 `0.38s`。因此这次看到的总时间变慢主要是 RMIH/CPLEX 整数启发式 coverSolve 的波动或路径成本，不是 midpoint probe 初始化拆分导致的 exact pricing 变慢。
+
+## 26. 2026-06-08 RMIH 耗时波动与启发式控频策略
+
+继续复核 011 四节点对比后，当前可以更明确地解释“为什么差这么多”。两次运行的节点数、pricing 次数、exact pricing 次数、列池规模和最终目标都一致：`nodes=4`、`pricingCalls=64`、`exactCalls=14`、`pool=6011`、`incumbent=14024`、`bound=13528.866667`。这说明搜索路径和列生成结果基本没有变；如果某次总时间明显变慢，首先应看各组件内部求解耗时，而不是直接归因到 `Tmid` 或 probe 选点变化。
+
+组件拆分显示，慢因集中在 `RestrictedMasterIntegerHeuristic.solveCoverRepair()` 的第一阶段 covering MIP。该阶段先筛 `screenedCols=2000`，再用 `>=` 覆盖约束求一次二进制整数模型。如果结果有重复覆盖，再生成删点修复列并求一次 `==` partition MIP。两次对比中，`repair` 和 `partitionSolve` 都很小，真正波动的是 `coverSolve`：旧 run 四个节点合计约 `14.69s`，新 run 四个节点合计约 `30.53s`。由于当前 `restrictedMasterIntegerHeuristicTimeLimitSeconds=0.0`，RMIH 会让 CPLEX 尽量证明这个 screened covering MIP 的最优性；它是启发式上界组件，但实际在求一个 2000 列二进制 set-covering 子 MIP 的最优证明，因此同样的模型规模也可能因 CPLEX branch-and-bound、cut、内部启发式和 tie 顺序产生数秒级波动。
+
+文献上这类做法本来就是 branch-and-price 里的 restricted master heuristic：把当前生成列或启发式生成列限制成一个较小静态整数主问题来找原问题可行整数解。它的关键取舍是子问题必须足够小、足够快，同时还要包含高质量可行解。Joncour 等关于 column generation primal heuristics 的讨论也指出，restricted master integer problem 可能不可行，需要应用相关的 repair；GCG 相关 restricted master heuristic 记录里也强调 restriction rate 不能太小，否则可行性差，不能太大，否则计算量上去。这和当前实现的 `coverRepair` 路径一致：我们用筛列控制规模，用删点修复处理 `>=` 覆盖导致的重复 job，再用 `==` 复解确保最终解合法。
+
+因此后续优化 RMIH 的主线不应是继续微调 probe，而是给这个“上界启发式 MIP”加预算和触发规则。最直接的策略是给 `restrictedMasterIntegerHeuristicTimeLimitSeconds` 设置小正数，例如 `1-5s`；它只是上界启发式，找到可行解即可刷新 incumbent，不必每个节点都证明 screened covering MIP 最优。第二个策略是按节点触发：root 必跑，非根只在 LP bound 与 incumbent 仍有足够改进空间、或者若干节点没有改进、或者本节点新增列达到阈值时才跑。第三个策略是按深度或频率触发：root 和浅层节点跑，深层每 `K` 个节点或 incumbent 停滞时跑。第四个策略是按规模降级：非根把 `restrictedMasterIntegerHeuristicReducedCostColumnLimit=2000` 降到更小，或者只保留 LP 正值列、低 reduced cost 列和每 job 前 `K` 条列；当前 coverSolve 是大头，减少 screened MIP 规模通常比减少删点修复更有效。
+
+如果要更保守，可以先只做配置实验，不改代码：分别测试 `enableRestrictedMasterIntegerHeuristic=false`、`timeLimit=1/2/5`、`root-only` 的模拟口径。`false` 可以判断 RMIH 对 pruning 和 incumbent 的真实贡献；小 time limit 可以判断是否能保留大部分上界收益；root-only 可以验证“只在根节点做一次”是否足够。当前 011 对比里 node4 的 RMIH 把 incumbent 改到 `14024`，因此完全 root-only 可能会丢掉这个后续改进；更稳的默认候选不是“只 root”，而是“root 必跑 + 非根限时 + 改进空间/停滞触发”。
+
+这里还要区分两个启发式耗时来源。`HeuristicPricing` 是每轮 LP 后用于生成负 reduced-cost 列的 tabu pricing 启发式，011 四节点约 `12-15s/50 calls`，平均每次 `250-300ms`；它的收益是尽快补充列、减少 exact pricing 压力。RMIH 是节点 LP 收敛后用于刷新整数上界的 restricted integer heuristic，011 这次约 `16-32s/4 calls`，平均每次数秒，且 node2/node3 没有改进 incumbent。因此如果要先降总时间，优先控 RMIH 的时间和频率；HeuristicPricing 的优化方向则是自适应降低 seed/迭代次数、连续几轮新增列很少时跳过、或给每次调用加软时间预算。

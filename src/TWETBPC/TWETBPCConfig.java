@@ -136,7 +136,7 @@ public class TWETBPCConfig {
 	 */
 	public boolean bidirectionalMidpointProbeExactFeedback = false;
 	/** 2026-06-08: node 内历史 Tmid 复用时，两个 exact 耗时相差不超过较大值的该比例才进入二级比较。 */
-	public double bidirectionalMidpointProbeExactTimeTieTolerance = 0.30;
+	public double bidirectionalMidpointProbeExactTimeTieTolerance = 0.10;
 	/** 2026-06-08: exact 耗时接近时，F/B kept ratio 至少改善该比例才替换历史最快 Tmid。 */
 	public double bidirectionalMidpointProbeExactBalanceImprovementTolerance = 0.30;
 	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */

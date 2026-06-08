@@ -304,7 +304,7 @@ node3 的日志能解释收益来源。base 的第一轮 exact pricing 从 `ref=
 
 ## 24. 2026-06-08 exact best 比较规则修正与自适应 probe 次数
 
-继续按用户指出修正历史 exact best 的更新语义。上一版实现把“当前 exact 耗时更小”作为直接替换条件，即使当前耗时和历史 best 耗时只差在 30% 以内，也会因为微小时间波动覆盖掉原来更均衡的 `Tmid`。这和当前设计目标不一致：30% time tie tolerance 的含义应是“时间接近时先用二级指标判断”，而不是“只有当前更慢时才看二级指标”。因此本次把规则改为：若当前 exact 耗时和历史 best 耗时在 `bidirectionalMidpointProbeExactTimeTieTolerance` 范围内，则只在当前 F/B kept ratio 按 `bidirectionalMidpointProbeExactBalanceImprovementTolerance` 明显改善时更新；若两者耗时不接近，才由耗时支配，当前更快则更新、当前更慢则保留历史 best。两个 30% 仍是独立参数，前者控制“时间是否接近”，后者控制“平衡改善是否足够大”。
+继续按用户指出修正历史 exact best 的更新语义。上一版实现把“当前 exact 耗时更小”作为直接替换条件，即使当前耗时和历史 best 耗时只差在 30% 以内，也会因为微小时间波动覆盖掉原来更均衡的 `Tmid`。这和当前设计目标不一致：time tie tolerance 的含义应是“时间接近时先用二级指标判断”，而不是“只有当前更慢时才看二级指标”。因此本次把规则改为：若当前 exact 耗时和历史 best 耗时在 `bidirectionalMidpointProbeExactTimeTieTolerance` 范围内，则只在当前 F/B kept ratio 按 `bidirectionalMidpointProbeExactBalanceImprovementTolerance` 明显改善时更新；若两者耗时不接近，才由耗时支配，当前更快则更新、当前更慢则保留历史 best。当前 time tie tolerance 默认改为 10%，balance improvement tolerance 仍默认 30%；前者控制“时间是否接近”，后者控制“平衡改善是否足够大”。
 
 同时实现了同一 node 内已有历史 exact best 后的自适应 probe 次数。第一次进入某个 node 时仍使用 `bidirectionalMidpointProbeMaxCandidates`，默认最多 5 个候选；一旦 reference 来源变成 `reuseBestExact`，候选上限改为 `min(maxCandidates, bidirectionalMidpointProbeReuseMaxCandidates)`，默认 3 个。这样后续轮次仍会围绕历史 best 做局部校准，但不会每轮都从 completionBound reference 开始做完整 5 次试探，减少重复 dry-run 成本。测试入口新增 `twet.bpc.fullDomainCompare.midpointProbeReuseMaxCandidates`。
 

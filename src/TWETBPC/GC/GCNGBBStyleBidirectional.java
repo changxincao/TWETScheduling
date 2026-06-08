@@ -788,7 +788,7 @@ public class GCNGBBStyleBidirectional {
 	private double normalizedExactTimeTieTolerance() {
 		double tolerance = config.bidirectionalMidpointProbeExactTimeTieTolerance;
 		return Double.isFinite(tolerance) && Utility.compareGe(tolerance, 0.0)
-				&& Utility.compareLe(tolerance, 1.0) ? tolerance : 0.30;
+				&& Utility.compareLe(tolerance, 1.0) ? tolerance : 0.10;
 	}
 
 	private double normalizedExactBalanceImprovementTolerance() {

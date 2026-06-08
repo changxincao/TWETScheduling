@@ -409,3 +409,15 @@ exact pricing 的主要慢点仍在 node3。当前复现 node3 的三次 exact p
 node3 的关键分叉发生在第一轮 exact pricing。历史快 run 在 node3 第一轮选 `Tmid=325.36`，生成 `743` 条负列；当前复现选 `Tmid=338.0`，只生成 `75` 条负列。当前这一轮 forward kept 反而更多，深度分布也更深，说明不是扩展不够，而是 LP dual/列池状态已经不同，导致真正负 reduced-cost 候选明显少。随后当前第二轮又补出 `368` 条列，但已经进入另一条 dual/列池演化路径，node3 后续三轮 exact 合计仍明显慢于历史。这个偏差很可能由 root/node2 早期列生成差异逐步放大：历史到 node3 前 pool 约 `5974`，当前约 `5938`，数量只差几十，但列内容和 dual 足以改变 node3 第一轮负列结构。
 
 因此 013 不能简单说成“纯波动”。它包含两类因素：一类是可解释的固定开销上升，例如 HeuristicPricing 平均耗时从约 `154ms` 到 `370ms`，当前 seed/兼容性扫描明显更贵；另一类是列生成路径敏感性，root/node2 轻微列差异和不同 `Tmid/probe` 候选会改变 LP dual，最终在 node3 第一轮表现为 `743` vs `75` 的负列数量差。后者不是单个组件卡死，而是 BPC 列池-对偶-定价闭环的路径依赖。
+
+## 34. 2026-06-08 当前代码重跑 013
+
+按当前代码重新跑 `tmp-wet030_from040_013_2m`，使用 `halfDomain`、`completionBound=allCycles`、`midpointStrategy=completionBound`、`midpointProbe=true`、`popLimit=5000`、`maxCandidates=6`、`moveRatio=0.15`、`earlyStopRatio=1.5`、`extraAfterThreshold=1`、`bracket=true`、`reuseWithinNode=false`、`RMIH timeLimit=4s`、`maxNodes=4`。
+
+第一轮按近期讨论里的 `tieScore=remaining,tieTolerance=0.05` 跑，结果为 `nodes=4, incumbent=14433, bound=14322.5, solve=114.664s, exact=86.446s, heuristic=21.676s, cols=6434, valid=true`。日志路径为 `test-results/bpc/tmp-current-rerun-013-20260608/tmp-wet030_from040_013_2m-halfDomain.log`。这个结果比上一轮当前复现更慢，关键原因是 node3 第三次 exact pricing 在 probe 中把 `Tmid=376.594` 选为候选；该点和 `346.059` 的 probe 主指标非常接近，二级 remaining 指标略优，但正式 exact 下 label 和 join 压力更大，耗时约 `14.706s`，而同类 `346` 口径约 `10s`。
+
+为避免把配置差异误认为代码变化，又补跑严格 `tieScore=off` 口径。结果为 `nodes=4, incumbent=14433, bound=14322.5, solve=77.792s, exact=60.204s, heuristic=13.327s, cols=6434, valid=true`，日志路径为 `test-results/bpc/tmp-current-rerun-013-20260608-tieoff/tmp-wet030_from040_013_2m-halfDomain.log`。这一轮比上一轮 current repro 的 `95.635s/71.800s` 快，但仍慢于历史 balanced 的 `61.084s/49.105s`。
+
+按 node 汇总，`tieScore=off` 下当前 exact pricing 为：node1 `5.509s`、node2 `6.367s`、node3 `45.025s`、node4 `3.303s`。历史 balanced 分别约为 `5.311s/3.594s/36.408s/3.792s`。因此当前主要差距仍在 node2 和 node3，尤其 node3。当前 node3 四轮 exact 为 `16.285s/9.299s/9.619s/9.822s`，历史为 `8.571s/10.864s/8.586s/8.387s`。当前 node3 第一轮仍只生成 `75` 条负列，而历史第一轮生成 `743` 条负列，说明早期列池/dual 路径仍和历史不同；这不是 RMIH 问题，RMIH 本轮只约 `2.42s`。
+
+当前结论是：如果使用二级 remaining 作为 tie-break，013 这类 hard node 会有明显选点误差风险；`tieScore=off` 当前更稳，至少能把当前代码跑回 `77.8s` 量级。013 仍慢于历史快 run 的主要原因仍是 node3 exact pricing 路径和 HeuristicPricing 固定开销，而不是 RMIH 或树搜索分支路径。

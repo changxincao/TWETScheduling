@@ -112,6 +112,8 @@ public class TWETBPCConfig {
 	public int bidirectionalMidpointProbePopLimit = 5000;
 	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
 	public int bidirectionalMidpointProbeMaxCandidates = 5;
+	/** 2026-06-08: 同一 node 已有历史 exact best Tmid 时，后续 probe 最多试探多少个候选点。 */
+	public int bidirectionalMidpointProbeReuseMaxCandidates = 3;
 	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.15 表示左移 *0.85，右移 *1.15。 */
 	public double bidirectionalMidpointProbeMoveRatio = 0.15;
 	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound/remaining/peak。 */

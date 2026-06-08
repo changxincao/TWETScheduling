@@ -649,7 +649,7 @@ public class GCNGBBStyleBidirectional {
 			return;
 		}
 		int popLimit = Math.max(1, config.bidirectionalMidpointProbePopLimit);
-		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
+		int maxCandidates = midpointProbeMaxCandidatesForCurrentReference();
 		double moveRatio = normalizedProbeMoveRatio();
 		double earlyStopRatio = normalizedProbeEarlyStopRatio();
 		int extraAfterThreshold = Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold);
@@ -717,7 +717,7 @@ public class GCNGBBStyleBidirectional {
 			rebuildHalfDomainForCurrentMidpoint();
 			resetProbeAffectedStatistics();
 		}
-		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results, stopReason);
+		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results, stopReason, maxCandidates);
 		if (midpointProbeLabelsReadyForJoin) {
 			midpointProbeSummary += ", rank0LabelsReused=true";
 		}
@@ -734,6 +734,14 @@ public class GCNGBBStyleBidirectional {
 			}
 		}
 		return tMid;
+	}
+
+	private int midpointProbeMaxCandidatesForCurrentReference() {
+		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
+		if ("reuseBestExact".equals(midpointProbeReferenceSource)) {
+			maxCandidates = Math.min(maxCandidates, Math.max(1, config.bidirectionalMidpointProbeReuseMaxCandidates));
+		}
+		return maxCandidates;
 	}
 
 	private void updateMidpointProbeReuseAfterExact(LP lp, long exactNanos) {
@@ -908,7 +916,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private String formatMidpointProbeSummary(double reference, MidpointProbeResult best,
-			ArrayList<MidpointProbeResult> results, String stopReason) {
+			ArrayList<MidpointProbeResult> results, String stopReason, int maxCandidates) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("ref=").append(reference)
 				.append("(").append(midpointProbeReferenceSource).append(")")
@@ -922,7 +930,7 @@ public class GCNGBBStyleBidirectional {
 				.append(Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold))
 				.append(", bracket=").append(config.bidirectionalMidpointProbeBracketOnDirectionChange)
 				.append(", stop=").append(stopReason)
-				.append(", maxCandidates=").append(Math.max(1, config.bidirectionalMidpointProbeMaxCandidates))
+				.append(", maxCandidates=").append(maxCandidates)
 				.append(", candidates=");
 		for (int i = 0; i < results.size(); i++) {
 			if (i > 0) {
@@ -3616,14 +3624,14 @@ public class GCNGBBStyleBidirectional {
 				updateBest(tMid, exactMillis, ratio, labelTotal);
 				return "init";
 			}
-			if (Utility.compareLt(exactMillis, bestExactMillis)) {
-				updateBest(tMid, exactMillis, ratio, labelTotal);
-				return "time";
-			}
-			if (isTimeClose(exactMillis, bestExactMillis, timeTieTolerance)
-					&& isBalanceMeaningfullyBetter(ratio, bestExactRatio, balanceImprovementTolerance)) {
+			boolean timeClose = isTimeClose(exactMillis, bestExactMillis, timeTieTolerance);
+			if (timeClose && isBalanceMeaningfullyBetter(ratio, bestExactRatio, balanceImprovementTolerance)) {
 				updateBest(tMid, exactMillis, ratio, labelTotal);
 				return "balance";
+			}
+			if (!timeClose && Utility.compareLt(exactMillis, bestExactMillis)) {
+				updateBest(tMid, exactMillis, ratio, labelTotal);
+				return "time";
 			}
 			return "keep";
 		}

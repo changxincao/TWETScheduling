@@ -243,6 +243,9 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeMaxCandidates = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.midpointProbeMaxCandidates",
 				config.bidirectionalMidpointProbeMaxCandidates);
+		config.bidirectionalMidpointProbeReuseMaxCandidates = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.midpointProbeReuseMaxCandidates",
+				config.bidirectionalMidpointProbeReuseMaxCandidates);
 		config.bidirectionalMidpointProbeMoveRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeMoveRatio",
 				Double.toString(config.bidirectionalMidpointProbeMoveRatio)));

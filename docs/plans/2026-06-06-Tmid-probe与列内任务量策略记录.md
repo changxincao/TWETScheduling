@@ -421,3 +421,13 @@ node3 的关键分叉发生在第一轮 exact pricing。历史快 run 在 node3 
 按 node 汇总，`tieScore=off` 下当前 exact pricing 为：node1 `5.509s`、node2 `6.367s`、node3 `45.025s`、node4 `3.303s`。历史 balanced 分别约为 `5.311s/3.594s/36.408s/3.792s`。因此当前主要差距仍在 node2 和 node3，尤其 node3。当前 node3 四轮 exact 为 `16.285s/9.299s/9.619s/9.822s`，历史为 `8.571s/10.864s/8.586s/8.387s`。当前 node3 第一轮仍只生成 `75` 条负列，而历史第一轮生成 `743` 条负列，说明早期列池/dual 路径仍和历史不同；这不是 RMIH 问题，RMIH 本轮只约 `2.42s`。
 
 当前结论是：如果使用二级 remaining 作为 tie-break，013 这类 hard node 会有明显选点误差风险；`tieScore=off` 当前更稳，至少能把当前代码跑回 `77.8s` 量级。013 仍慢于历史快 run 的主要原因仍是 node3 exact pricing 路径和 HeuristicPricing 固定开销，而不是 RMIH 或树搜索分支路径。
+
+## 35. 2026-06-08 关闭 remaining 二级 tie-break 的默认使用
+
+当前代码里 `bidirectionalMidpointProbeTieScore` 默认已经是 `off`，本次只在配置注释里补充说明：`remaining` 只能作为实验口径，不能因为个别算例直接作为全局默认。原因是 013 的两轮当前代码实验已经给出反例：在 node3 第三轮，`Tmid=346.059` 和 `376.594` 的主 `queue` 指标非常接近，`remaining` 略偏向 `376.594`，但正式 exact pricing 中 `376.594` 的 label 和 join 压力更大，导致该轮从约 `9-10s` 量级变成约 `14.7s`。这说明 remaining 可以作为诊断指标，但目前不适合默认参与最终候选选择。
+
+与历史 `tmp-probe-balanced-013-completionBound-queue-pop5000-n4` 相比，当前 `tieScore=off` 仍慢，主要不是 RMIH 或分支路径。两者 branch path 一致，都是 `(3,5) -> (1,7) -> (5,15) -> (1,21)`；RMIH 当前约 `2.42s`，历史约 `2.53s`，反而当前略少。慢差主要来自两块：一是 HeuristicPricing，历史约 `8.14s`，当前约 `13.33s`，同样 node1 生成 `5060` 条启发式列，但当前单次 seed/兼容性扫描更贵；二是 exact pricing，历史约 `49.11s`，当前约 `60.20s`，其中 node3 从 `36.41s` 增到 `45.03s`。
+
+配置层面也有真实差异。历史 balanced 日志中的 probe `moveRatio=0.1`，当前复现使用的是 `0.15`；历史 node3 第一轮从 `ref=551` 依次试 `551,495.9,446.31,401.679,361.511,325.360`，最终选 `325.360`，一次生成 `743` 条负列。当前 node3 第一轮从 `ref=551` 试 `551,468.35,398.10,338.38,287.63,313.00`，最终选 `338.38`，只生成 `75` 条负列。也就是说，当前并不是只慢在“同一个 Tmid 下计算更慢”，而是 probe 步长和早期列池/dual 细微差异把 node3 第一轮推到了另一条列生成路径上。后续当前第二轮补出 `368` 条负列，但已经进入不同 dual/列池演化路径，因此 node3 总耗时仍高于历史。
+
+当前更保守的判断是：`tieScore=off` 应保持默认；`moveRatio=0.1` 比 `0.15` 在 013 历史快 run 上有更好证据，但这仍只是少量算例证据，后续若要改默认，应单独用多算例矩阵比较 `0.1/0.15`。HeuristicPricing 固定开销上升也需要单独处理，例如缓存 seed 兼容性或减少重复全池扫描，但这和 remaining tie-break 是两个问题。

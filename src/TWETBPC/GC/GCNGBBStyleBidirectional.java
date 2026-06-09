@@ -2342,7 +2342,65 @@ public class GCNGBBStyleBidirectional {
 		completionBounds = result.bounds;
 		recordCompletionBoundStats(result.stats);
 		completionBoundBuildNanos += System.nanoTime() - start;
+		maybeDumpCompletionBoundMinDiagnostic(lp);
 		evaluateCompletionBoundArcFixing(lp);
+	}
+
+	/**
+	 * 2026-06-09: 诊断 required adjacency dual 是否把 relaxed suffix 下界压得过低。
+	 * 只按系统属性显式指定节点时输出，不影响正式 pricing 语义。
+	 */
+	private void maybeDumpCompletionBoundMinDiagnostic(LP lp) {
+		Node currentNode = lp == null ? null : lp.getNode();
+		if (currentNode == null || completionBounds == null) {
+			return;
+		}
+		int targetNodeId = Integer.getInteger("twet.bpc.completionBoundMinDiagnosticNodeId", -1);
+		if (targetNodeId < 0 || currentNode.id != targetNodeId) {
+			return;
+		}
+
+		int count = 0;
+		int negative = 0;
+		double min = Double.POSITIVE_INFINITY;
+		double max = Double.NEGATIVE_INFINITY;
+		double sum = 0.0;
+		StringBuilder detail = new StringBuilder();
+		for (int job = 1; job <= data.n; job++) {
+			PiecewiseLinearFunction function = completionBounds.backwardRByJob[job];
+			if (function == null || function.head == null) {
+				detail.append(" job=").append(job).append(":NA");
+				continue;
+			}
+			double[] argmin = function.findMinimal(false, true);
+			if (argmin == null || argmin.length < 2 || !Double.isFinite(argmin[0])) {
+				detail.append(" job=").append(job).append(":NA");
+				continue;
+			}
+			double value = argmin[0];
+			double time = argmin[1];
+			count++;
+			sum += value;
+			min = Math.min(min, value);
+			max = Math.max(max, value);
+			if (Utility.compareLt(value, 0.0)) {
+				negative++;
+			}
+			detail.append(" job=").append(job).append(":").append(value).append("@").append(time);
+		}
+		double avg = count == 0 ? Double.NaN : sum / count;
+		System.out.println("[completionBoundMinDiagnostic] node=" + currentNode.id
+				+ " relaxation=" + completionBoundRelaxationForSummary()
+				+ " backwardR count/negative/min/max/avg=" + count + "/" + negative
+				+ "/" + min + "/" + max + "/" + avg);
+		for (int[] pair : currentNode.getRequiredAdjacencyPairs()) {
+			int first = pair[0];
+			int second = pair[1];
+			System.out.println("[completionBoundMinDiagnostic] requiredAdjacency=" + first + "-" + second
+					+ " arcDual(" + first + "," + second + ")=" + lp.getArcDual(first, second)
+					+ " arcDual(" + second + "," + first + ")=" + lp.getArcDual(second, first));
+		}
+		System.out.println("[completionBoundMinDiagnostic] backwardRByJob" + detail.toString());
 	}
 
 	private void evaluateCompletionBoundArcFixing(LP lp) {

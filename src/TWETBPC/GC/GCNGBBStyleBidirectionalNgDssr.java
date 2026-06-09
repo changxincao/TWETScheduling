@@ -3017,7 +3017,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				extensionSet.add(job);
 			}
 		}
-		return new NgDominanceSets(extensionSet, unavailableSet, buildNgDominanceKey(extensionSet, ngMemory));
+		return new NgDominanceSets(extensionSet, unavailableSet, extensionSet);
 	}
 
 	private NgDominanceSets buildBackwardNgDominanceSets(int firstJob, PackedBitSet ngMemory, Node node,
@@ -3035,27 +3035,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				extensionSet.add(job);
 			}
 		}
-		return new NgDominanceSets(extensionSet, unavailableSet, buildNgDominanceKey(extensionSet, ngMemory));
-	}
-
-	/**
-	 * 2026-06-09: ng-DSSR 的 dominance key 同时编码“一步可扩展集合”和 ng-memory。
-	 * PaperDominanceGraph 的语义是 key 越大越强；因此前半段放 extensionSet，
-	 * 后半段放 not-memory，使 A key 覆盖 B key 等价于 A 可扩展任务不少于 B，
-	 * 且 A 的 ng-memory 不比 B 更大。
-	 */
-	private PackedBitSet buildNgDominanceKey(PackedBitSet extensionSet, PackedBitSet ngMemory) {
-		int offset = data.n + 2;
-		PackedBitSet key = new PackedBitSet(offset * 2);
-		for (int job = extensionSet.nextSetBit(1); job > 0 && job <= data.n; job = extensionSet.nextSetBit(job + 1)) {
-			key.add(job);
-		}
-		for (int job = 1; job <= data.n; job++) {
-			if (!ngMemory.contains(job)) {
-				key.add(offset + job);
-			}
-		}
-		return key;
+		return new NgDominanceSets(extensionSet, unavailableSet, extensionSet);
 	}
 
 	private void precomputeDynamicPricingWindows(LP lp) {
@@ -4099,8 +4079,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private static final class SinglePointStore<L extends FunctionLabel> {
-		// 2026-06-09: key 使用 FunctionLabel.reachableSet 中的组合 dominance key，
-		// 不是实际扩展用的 extensionSet。
+		// 2026-06-09: ng-DSSR 的 dominance key 使用不可达并集的补集，即实际 extensionSet。
 		final HashMap<PackedBitSet, L> bestByDominanceKey = new HashMap<PackedBitSet, L>();
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}

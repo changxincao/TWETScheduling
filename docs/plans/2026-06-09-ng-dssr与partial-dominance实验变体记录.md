@@ -202,3 +202,13 @@ join 阶段当前先检查 crossing arc 的直接禁弧，再用 `backward.ngMem
 因此，当前代码 `dominanceKey=extensionSet` 只能说使用了不可达并集的可用补集，不能称为严格安全的 ng-dominance。若要保证 ng-memory 转移安全，至少需要额外要求支配 label 的 memory 不大于被支配 label，即 `M_A⊆M_B`；这样对任意后续节点 `j` 都有 `(M_A∩N_j)∪{j} ⊆ (M_B∩N_j)∪{j}`。在现有 `PaperDominanceGraph` 的 key 越大越强语义下，这个条件可以通过第二段 `not-ng-memory` 补集编码表达，也就是 `extensionSet + not-ng-memory`；或者更保守地按相同 `ngMemorySet` 分桶后再做 dominance。single-point store 也必须同步使用同一套 memory-aware key，否则 Tmid 单点 label 仍可能被误删。
 
 当前最新判断是：第 21 节修改符合“不可达并集补集”的口径，但它不是严格安全的 ng-DSSR dominance；若下一步要以 correctness 为先，应恢复或重做 memory-aware 条件，而不是只保留 `extensionSet`。
+
+23. 2026-06-09 对照旧 VRP 的 ng dominance 条件
+
+继续对照旧 VRP 后，可以更明确地描述当前 TWET 与旧 `GCNGBB` 的差距。旧 `GCNGBB.java` 在 `FWIsDominate/BWIsDominate` 里不是只比较当前一步可扩展集合，而是把 reach 和 memory 分开处理。已有 label `lb` 支配新 label `label` 时，除 reduced cost、weight、time 不差以外，还要求 `lb.memory ⊆ label.memory ∪ ~label.reach`。这句话的含义是：支配方记住的每个 customer，要么被被支配方也记住，要么被被支配方在资源/时间意义上已经不可达；如果被支配方还可能到达某个 customer，而支配方却因为 memory 记住了它，那么不能支配。
+
+旧 `GCNGBB_C.java` 使用的是更简单的条件 `lb.memory ⊆ label.memory`，不利用 `~reach` 放松；旧 `GCNGBB.java` 则更强一些，允许“支配方多记住的点在被支配方那里已经资源不可达”。二者共同点是 memory 条件始终显式参与支配判断，而不是只通过当前 extension/reach key 间接体现。
+
+当前 TWET ng-DSSR 的 `extensionSet` 等价于 `resourceReach ∩ ~memory`。把它直接作为 graph key，只能表达 `resourceReach_A∩~M_A ⊇ resourceReach_B∩~M_B`。这个条件无法推出旧 VRP 的 `M_A ⊆ M_B ∪ ~resourceReach_B`，因为 `extensionSet` 混合了“因为 memory 不可达”和“因为资源不可达”两种原因。也就是说，当前 graph 可能看到两个 label 当前可扩展集合有包含关系，但不知道支配方是不是额外记住了一个被支配方后续仍可能到达的 job。严格对齐旧 VRP 时，需要把 resourceReach 与 memory 拆开编码；仅用 `extensionSet` 不够。
+
+如果沿用现有 `PaperDominanceGraph` 的“key 越大越强”结构，一个接近旧 `GCNGBB.java` 的 key 可以拆成两部分：第一部分放 `resourceReach`，第二部分放 `resourceReach ∩ ~memory`，从而在 superset 判断中同时表达资源可达不弱，以及在被支配方可达范围内支配方 memory 不更多。若只想复刻旧 `GCNGBB_C.java`，第二部分可以直接用全局 `~memory`，表达 `M_A⊆M_B`。后续实现前应先决定是复刻 `GCNGBB` 的 `memory | ~reach` 放松，还是使用更保守的 `GCNGBB_C` 口径。

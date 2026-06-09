@@ -227,6 +227,9 @@ public class GCBBFullDomainComparisonTest {
 		config.debugSkipBranchColumnFilter = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.debugSkipBranchColumnFilter",
 				Boolean.toString(config.debugSkipBranchColumnFilter)));
+		config.debugIgnorePricingOnlyArcsAtNode = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.debugIgnorePricingOnlyArcsAtNode",
+				config.debugIgnorePricingOnlyArcsAtNode);
 		config.bidirectionalCompletionBoundSubtreeArcEliminationDiagnostic = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBoundSubtreeArcEliminationDiagnostic",
 				Boolean.toString(config.bidirectionalCompletionBoundSubtreeArcEliminationDiagnostic)));

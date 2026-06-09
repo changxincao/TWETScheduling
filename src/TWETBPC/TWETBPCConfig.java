@@ -94,6 +94,8 @@ public class TWETBPCConfig {
 	public boolean bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = false;
 	/** 2026-06-03: debug 对照；child 初始 LP 可行后不按当前 forbidden arc 过滤 RMP 列。 */
 	public boolean debugSkipBranchColumnFilter = false;
+	/** 2026-06-09: 诊断开关；指定 node 在 pricing/CB 中临时忽略 pricingOnly arc，默认关闭。 */
+	public int debugIgnorePricingOnlyArcsAtNode = -1;
 	/** 2026-06-03: 只统计 subtree arc elimination 潜力和耗时，不写入子节点。 */
 	public boolean bidirectionalCompletionBoundSubtreeArcEliminationDiagnostic = false;
 	/**

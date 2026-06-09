@@ -2336,7 +2336,8 @@ public class GCNGBBStyleBidirectional {
 		long start = System.nanoTime();
 		CompletionBoundCalculator calculator = new CompletionBoundCalculator(data, lp, pricingHorizon,
 				completionForwardPenaltyByJob, completionBackwardPenaltyByJob, zeroDualExcludedJobs,
-				completionBoundQueueOrdering, config.bidirectionalCompletionBoundScalarPruning);
+				completionBoundQueueOrdering, config.bidirectionalCompletionBoundScalarPruning,
+				ignorePricingOnlyArcsForNode(lp.getNode()));
 		CompletionBoundCalculator.Result result = calculator.build(completionBoundRelaxation);
 		completionBounds = result.bounds;
 		recordCompletionBoundStats(result.stats);
@@ -2431,8 +2432,14 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
-		return node.isArcForbidden(fromJob, toJob) || node.isPricingOnlyArcForbidden(fromJob, toJob)
+		return node.isArcForbidden(fromJob, toJob)
+				|| (!ignorePricingOnlyArcsForNode(node) && node.isPricingOnlyArcForbidden(fromJob, toJob))
 				|| isCompletionBoundArcFixed(fromJob, toJob);
+	}
+
+	private boolean ignorePricingOnlyArcsForNode(Node node) {
+		return node != null && config.debugIgnorePricingOnlyArcsAtNode >= 0
+				&& node.id == config.debugIgnorePricingOnlyArcsAtNode;
 	}
 
 	private void recordCompletionBoundStats(CompletionBoundCalculator.Stats stats) {

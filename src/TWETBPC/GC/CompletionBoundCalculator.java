@@ -156,6 +156,7 @@ final class CompletionBoundCalculator {
 	private final Node node;
 	private final int sink;
 	private final double pricingHorizon;
+	private final boolean ignorePricingOnlyArcs;
 	private final PiecewiseLinearFunction[] forwardReducedPenaltyByJob;
 	private final PiecewiseLinearFunction[] backwardReducedPenaltyByJob;
 	private final boolean[] zeroDualExcludedJobs;
@@ -190,11 +191,20 @@ final class CompletionBoundCalculator {
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
 			boolean[] zeroDualExcludedJobs, QueueOrdering queueOrdering, boolean buildDiscreteCaches) {
+		this(data, lp, pricingHorizon, forwardPenaltyByJob, backwardPenaltyByJob, zeroDualExcludedJobs,
+				queueOrdering, buildDiscreteCaches, false);
+	}
+
+	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
+			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
+			boolean[] zeroDualExcludedJobs, QueueOrdering queueOrdering, boolean buildDiscreteCaches,
+			boolean ignorePricingOnlyArcs) {
 		this.data = data;
 		this.lp = lp;
 		this.node = lp.getNode();
 		this.sink = node.sinkId();
 		this.pricingHorizon = pricingHorizon;
+		this.ignorePricingOnlyArcs = ignorePricingOnlyArcs;
 		this.forwardReducedPenaltyByJob = buildReducedPenaltyCache(forwardPenaltyByJob, null, null);
 		this.backwardReducedPenaltyByJob = buildReducedPenaltyCache(backwardPenaltyByJob, forwardPenaltyByJob,
 				forwardReducedPenaltyByJob);
@@ -284,7 +294,8 @@ final class CompletionBoundCalculator {
 	}
 
 	private boolean isCompletionArcForbidden(int from, int to) {
-		return node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to);
+		return node.isArcForbidden(from, to)
+				|| (!ignorePricingOnlyArcs && node.isPricingOnlyArcForbidden(from, to));
 	}
 
 	private int[] toIntArray(ArrayList<Integer> values) {

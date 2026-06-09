@@ -265,7 +265,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private boolean isPricingArcForbidden(Node node, int from, int to) {
-		return node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to);
+		return node.isArcForbidden(from, to)
+				|| (!ignorePricingOnlyArcsForNode(node) && node.isPricingOnlyArcForbidden(from, to));
+	}
+
+	private boolean ignorePricingOnlyArcsForNode(Node node) {
+		return node != null && config.debugIgnorePricingOnlyArcsAtNode >= 0
+				&& node.id == config.debugIgnorePricingOnlyArcsAtNode;
 	}
 
 	private double reducedCost(List<Integer> sequence, double cost, LP lp) {

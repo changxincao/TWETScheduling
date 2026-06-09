@@ -1839,7 +1839,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
 		joinTerminalGroupsScanned++;
-		if (isPricingArcForbidden(node, lastJob, backward.jid)) {
+		if (backward.visitedSet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
 			joinTerminalGroupsArcOrVisitPruned++;
 			return;
 		}
@@ -1884,6 +1884,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		joinPairsTried++;
 		if (forward.jid == backward.jid) {
+			joinPairsSetPruned++;
+			return;
+		}
+		if (visitedSetsIntersectForJoin(forward.visitedSet, backward.visitedSet)) {
+			// 2026-06-09: 这里不能为每个重叠拼接恢复完整序列，否则会把大量集合剪枝 pair
+			// 变成 father-chain 回溯。DSSR 的重复 route 记录应发生在少量实际候选 route 上。
 			joinPairsSetPruned++;
 			return;
 		}

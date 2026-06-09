@@ -620,7 +620,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private static int compareReachableCardinalityDesc(FunctionLabel left, FunctionLabel right) {
-		return Integer.compare(right.reachableCardinality, left.reachableCardinality);
+		return Integer.compare(right.extensionCardinality, left.extensionCardinality);
 	}
 
 	private static int compareDoubleAsc(double left, double right) {
@@ -2284,9 +2284,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		recordDepthCount(forwardLabelsKeptByDepth, label.depth);
-		forwardLabelsKeptReachableSum += label.reachableCardinality;
-		forwardLabelsKeptReachableMin = Math.min(forwardLabelsKeptReachableMin, label.reachableCardinality);
-		forwardLabelsKeptReachableMax = Math.max(forwardLabelsKeptReachableMax, label.reachableCardinality);
+		forwardLabelsKeptReachableSum += label.extensionCardinality;
+		forwardLabelsKeptReachableMin = Math.min(forwardLabelsKeptReachableMin, label.extensionCardinality);
+		forwardLabelsKeptReachableMax = Math.max(forwardLabelsKeptReachableMax, label.extensionCardinality);
 	}
 
 	private void recordDepthCount(long[] histogram, int depth) {
@@ -3007,7 +3007,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
 		PackedBitSet unavailableSet = new PackedBitSet(data.n + 2);
-		PackedBitSet dominanceKey = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
 			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
 					|| !isForwardHalfEligibleJob(job)
@@ -3016,17 +3015,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				unavailableSet.add(job);
 			} else {
 				extensionSet.add(job);
-				dominanceKey.add(job);
 			}
 		}
-		return new NgDominanceSets(extensionSet, unavailableSet, dominanceKey);
+		return new NgDominanceSets(extensionSet, unavailableSet, buildNgDominanceKey(extensionSet, ngMemory));
 	}
 
 	private NgDominanceSets buildBackwardNgDominanceSets(int firstJob, PackedBitSet ngMemory, Node node,
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
 		PackedBitSet unavailableSet = new PackedBitSet(data.n + 2);
-		PackedBitSet dominanceKey = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
 			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
@@ -3036,10 +3033,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				unavailableSet.add(job);
 			} else {
 				extensionSet.add(job);
-				dominanceKey.add(job);
 			}
 		}
-		return new NgDominanceSets(extensionSet, unavailableSet, dominanceKey);
+		return new NgDominanceSets(extensionSet, unavailableSet, buildNgDominanceKey(extensionSet, ngMemory));
+	}
+
+	/**
+	 * 2026-06-09: ng-DSSR 的 dominance key 同时编码“一步可扩展集合”和 ng-memory。
+	 * PaperDominanceGraph 的语义是 key 越大越强；因此前半段放 extensionSet，
+	 * 后半段放 not-memory，使 A key 覆盖 B key 等价于 A 可扩展任务不少于 B，
+	 * 且 A 的 ng-memory 不比 B 更大。
+	 */
+	private PackedBitSet buildNgDominanceKey(PackedBitSet extensionSet, PackedBitSet ngMemory) {
+		int offset = data.n + 2;
+		PackedBitSet key = new PackedBitSet(offset * 2);
+		for (int job = extensionSet.nextSetBit(1); job > 0 && job <= data.n; job = extensionSet.nextSetBit(job + 1)) {
+			key.add(job);
+		}
+		for (int job = 1; job <= data.n; job++) {
+			if (!ngMemory.contains(job)) {
+				key.add(offset + job);
+			}
+		}
+		return key;
 	}
 
 	private void precomputeDynamicPricingWindows(LP lp) {
@@ -4083,9 +4099,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private static final class SinglePointStore<L extends FunctionLabel> {
+		// 2026-06-09: key 使用 FunctionLabel.reachableSet 中的组合 dominance key，
+		// 不是实际扩展用的 extensionSet。
 		final HashMap<PackedBitSet, L> bestByDominanceKey = new HashMap<PackedBitSet, L>();
-		// 2026-06-09: ng-DSSR 下这里的 key 不是“一跳 reachable set”，而是
-		// unavailable-set 的可用补集。这样 single-point 与普通 graph 使用同一套 ng 状态语义。
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}
 
@@ -4106,6 +4122,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final int labelId;
 		final PackedBitSet ngMemorySet;
 		final PackedBitSet extensionSet;
+		final int extensionCardinality;
 		final PackedBitSet dominanceUnavailableSet;
 		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
 		PiecewiseLinearFunction joinExtendedFrontier;
@@ -4116,6 +4133,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			super(jid, null, visitedSet, dominanceKey, frontier, minReducedCost);
 			this.labelId = labelId;
 			this.extensionSet = extensionSet;
+			this.extensionCardinality = extensionSet == null ? 0 : extensionSet.cardinality();
 			this.dominanceUnavailableSet = dominanceUnavailableSet;
 			this.ngMemorySet = ngMemorySet;
 		}

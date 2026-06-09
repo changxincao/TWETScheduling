@@ -240,12 +240,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private boolean fullMidpointDiagnosticRan;
 	private PackedBitSet[] ngNeighborhoodByJob;
 	private ArrayList<ArrayList<Integer>> nonElementaryNegativeSequences;
+	private double bestNonElementaryReducedCost;
 	private int ngDssrRound;
 	private int ngDssrRoundsExecuted;
 	private int ngDssrTotalNgSetUpdates;
 	private int ngDssrTotalNonElementaryRoutes;
-	private boolean ngDssrUsedFallback;
-	private CompletionBoundSubtreeArcEliminator.PreparedBounds ngDssrFallbackReusableBounds;
+	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
+	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
 
 	private String lastMessage = "GCNGBB-style ng-DSSR bidirectional pricing not executed";
 
@@ -335,8 +336,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		lastMessage = lastMessage + " | ng-DSSR reason=" + reason
 				+ ", rounds=" + ngDssrRoundsExecuted
 				+ ", totalNonElementaryRoutes=" + ngDssrTotalNonElementaryRoutes
-				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
-				+ ", fallback=" + ngDssrUsedFallback;
+				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates;
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -344,12 +344,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrRoundsExecuted = 0;
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
-		ngDssrUsedFallback = false;
-		ngDssrFallbackReusableBounds = null;
+		ngDssrReusableCompletionBounds = null;
+		ngDssrReusableCompletionBoundFixedArc = null;
 
-		int maxRounds = Math.max(1, config.ngDssrMaxRounds);
-		for (ngDssrRound = 1; ngDssrRound <= maxRounds; ngDssrRound++) {
+		for (ngDssrRound = 1; ; ngDssrRound++) {
 			nonElementaryNegativeSequences = new ArrayList<ArrayList<Integer>>();
+			bestNonElementaryReducedCost = Utility.big_M;
 			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
 			ngDssrRoundsExecuted = ngDssrRound;
 			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeSequences.size();
@@ -368,20 +368,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return columns;
 			}
 		}
-
-		if (config.ngDssrFallbackToElementaryPricing) {
-			ngDssrUsedFallback = true;
-			GCNGBBStyleBidirectional fallback = new GCNGBBStyleBidirectional(data, config);
-			ArrayList<TWETColumn> columns = fallback.solve(lp);
-			ngDssrFallbackReusableBounds = fallback.reusableSubtreeArcEliminationBounds();
-			lastMessage = fallback.getLastMessage() + " | ng-DSSR fallback after rounds=" + ngDssrRoundsExecuted
-					+ ", nonElementaryRoutes=" + ngDssrTotalNonElementaryRoutes
-					+ ", ngSetUpdates=" + ngDssrTotalNgSetUpdates;
-			return columns;
-		}
-
-		appendNgDssrSummary("max DSSR rounds reached without certificate");
-		return generatedColumns == null ? new ArrayList<TWETColumn>() : generatedColumns;
 	}
 
 	private ArrayList<TWETColumn> solveRelaxedRound(LP lp) {
@@ -436,9 +422,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	CompletionBoundSubtreeArcEliminator.PreparedBounds reusableSubtreeArcEliminationBounds() {
-		if (ngDssrUsedFallback) {
-			return ngDssrFallbackReusableBounds;
-		}
 		if (completionBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
 				|| zeroDualExcludedJobs != null || !Utility.compareEq(pricingHorizon, data.CmaxH)) {
 			return null;
@@ -624,8 +607,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundRelaxation = parseCompletionBoundRelaxation(config.bidirectionalCompletionBoundRelaxation);
 		completionBoundQueueOrdering = parseCompletionBoundQueueOrdering(
 				config.bidirectionalCompletionBoundQueueOrdering);
-		completionBounds = null;
-		completionBoundFixedArc = null;
+		completionBounds = ngDssrReusableCompletionBounds;
+		completionBoundFixedArc = ngDssrReusableCompletionBoundFixedArc;
 		bestGeneratedReducedCost = Utility.big_M;
 		generatedColumns = new ArrayList<TWETColumn>();
 		if (config.diagnosticPricingSummaryDetails) {
@@ -635,6 +618,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		precomputeDynamicPricingWindows(lp);
 		if (completionBounds == null) {
 			buildCompletionBounds(lp);
+		}
+		if (ngDssrReusableCompletionBounds == null && completionBounds != null) {
+			ngDssrReusableCompletionBounds = completionBounds;
+			ngDssrReusableCompletionBoundFixedArc = completionBoundFixedArc;
 		}
 		runMidpointProbeIfEnabled(lp);
 		if (midpointProbeLabelsReadyForJoin) {
@@ -1839,7 +1826,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
 		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
 		joinTerminalGroupsScanned++;
-		if (backward.visitedSet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
+		if (backward.ngMemorySet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
 			joinTerminalGroupsArcOrVisitPruned++;
 			return;
 		}
@@ -1887,9 +1874,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			joinPairsSetPruned++;
 			return;
 		}
-		if (visitedSetsIntersectForJoin(forward.visitedSet, backward.visitedSet)) {
-			// 2026-06-09: 这里不能为每个重叠拼接恢复完整序列，否则会把大量集合剪枝 pair
-			// 变成 father-chain 回溯。DSSR 的重复 route 记录应发生在少量实际候选 route 上。
+		if (bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
+			// 2026-06-09: ng-DSSR 只用 ng-memory 判断拼接是否违反当前记忆；
+			// 真实重复必须等负 reduced-cost route 恢复后再记录 cycle，用于后续更新 ng-set。
 			joinPairsSetPruned++;
 			return;
 		}
@@ -2856,9 +2843,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void recordNonElementaryNegativeSequence(ArrayList<Integer> sequence, double inferredReducedCost) {
 		if (!Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)
 				|| nonElementaryNegativeSequences == null
-				|| nonElementaryNegativeSequences.size() >= Math.max(0, config.ngDssrMaxNonElementaryRecords)) {
+				|| !Utility.compareLt(inferredReducedCost, bestNonElementaryReducedCost)) {
 			return;
 		}
+		// 2026-06-09: 对齐旧 VRP DSSR，每轮只用最负的非 elementary route 更新 ng-set。
+		bestNonElementaryReducedCost = inferredReducedCost;
+		nonElementaryNegativeSequences.clear();
 		nonElementaryNegativeSequences.add(new ArrayList<Integer>(sequence));
 	}
 
@@ -3046,7 +3036,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		precomputeJobLevelDynamicPricingWindows();
 		precomputeBackwardDynamicPricingWindows();
 		precomputeCompletionBoundPricingWindows();
-		if (requiresCompletionBoundForMidpoint()) {
+		if (requiresCompletionBoundForMidpoint() && completionBounds == null) {
 			buildCompletionBounds(lp);
 		}
 		tMid = computeCurrentMidpoint(lp);
@@ -3588,7 +3578,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 	}
 
-	private boolean visitedSetsIntersectForJoin(PackedBitSet left, PackedBitSet right) {
+	private boolean bitSetsIntersectForJoin(PackedBitSet left, PackedBitSet right) {
 		for (int job = left.nextSetBit(1); job >= 0; job = left.nextSetBit(job + 1)) {
 			if (!isZeroDualExcludedJob(job) && right.contains(job)) {
 				return true;

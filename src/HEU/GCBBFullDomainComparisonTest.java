@@ -214,14 +214,6 @@ public class GCBBFullDomainComparisonTest {
 				config.ngDssrInitialNgSetMode);
 		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrInitialSize",
 				config.ngDssrInitialNgSetSize);
-		config.ngDssrMaxRounds = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrMaxRounds",
-				config.ngDssrMaxRounds);
-		config.ngDssrMaxNonElementaryRecords = Integer.getInteger(
-				"twet.bpc.fullDomainCompare.ngDssrMaxNonElementaryRecords",
-				config.ngDssrMaxNonElementaryRecords);
-		config.ngDssrFallbackToElementaryPricing = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.ngDssrFallback",
-				Boolean.toString(config.ngDssrFallbackToElementaryPricing)));
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalJoinBestThresholdMode = System.getProperty(

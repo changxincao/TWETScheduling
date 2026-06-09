@@ -262,18 +262,28 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
 	}
 
-	private void initializeNgNeighborhoods() {
+	private void initializeNgNeighborhoods(LP lp) {
 		ngNeighborhoodByJob = new PackedBitSet[data.n + 2];
 		for (int job = 1; job <= data.n; job++) {
 			ngNeighborhoodByJob[job] = new PackedBitSet(data.n + 2);
 			ngNeighborhoodByJob[job].add(job);
 		}
-		if (!"empty".equalsIgnoreCase(config.ngDssrInitialNgSetMode)) {
-			int targetSize = Math.max(1, config.ngDssrInitialNgSetSize);
+		String mode = config.ngDssrInitialNgSetMode == null ? "nearestK" : config.ngDssrInitialNgSetMode;
+		int targetSize = Math.max(1, config.ngDssrInitialNgSetSize);
+		if ("empty".equalsIgnoreCase(mode)) {
+			return;
+		}
+		if ("dualPair".equalsIgnoreCase(mode) || "reducedCostPair".equalsIgnoreCase(mode)) {
+			addDualPairNgNeighborhoods(lp, targetSize);
+			return;
+		}
+		if ("nearestK".equalsIgnoreCase(mode)) {
 			for (int job = 1; job <= data.n; job++) {
 				addNearestJobsToNgNeighborhood(job, targetSize);
 			}
+			return;
 		}
+		throw new IllegalArgumentException("Unsupported ngDssrInitialNgSetMode: " + mode);
 	}
 
 	private void addNearestJobsToNgNeighborhood(final int centerJob, int targetSize) {
@@ -302,6 +312,45 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double ngDistance(int from, int to) {
 		return data.getSetUp(from, to) + data.getSetUp(to, from)
 				+ data.getSetupCost(from, to) + data.getSetupCost(to, from);
+	}
+
+	private void addDualPairNgNeighborhoods(LP lp, int targetSize) {
+		if (targetSize <= 1) {
+			return;
+		}
+		ArrayList<NgPair> pairs = new ArrayList<NgPair>();
+		for (int first = 1; first <= data.n; first++) {
+			for (int second = first + 1; second <= data.n; second++) {
+				double reducedPairCost = data.getSetupCost(first, second) - lp.getArcDual(first, second)
+						- lp.getJobDual(second)
+						+ data.getSetupCost(second, first) - lp.getArcDual(second, first) - lp.getJobDual(first);
+				if (Utility.compareLt(reducedPairCost, REDUCED_COST_TOLERANCE)) {
+					pairs.add(new NgPair(first, second, reducedPairCost));
+				}
+			}
+		}
+		Collections.sort(pairs, new Comparator<NgPair>() {
+			@Override
+			public int compare(NgPair left, NgPair right) {
+				int byCost = compareDoubleAsc(left.reducedPairCost, right.reducedPairCost);
+				if (byCost != 0) {
+					return byCost;
+				}
+				if (left.first != right.first) {
+					return Integer.compare(left.first, right.first);
+				}
+				return Integer.compare(left.second, right.second);
+			}
+		});
+		for (int i = 0; i < pairs.size(); i++) {
+			NgPair pair = pairs.get(i);
+			if (ngNeighborhoodByJob[pair.first].cardinality() >= targetSize
+					|| ngNeighborhoodByJob[pair.second].cardinality() >= targetSize) {
+				continue;
+			}
+			ngNeighborhoodByJob[pair.first].add(pair.second);
+			ngNeighborhoodByJob[pair.second].add(pair.first);
+		}
 	}
 
 	private int updateNgNeighborhoodsFromNonElementaryRoutes() {
@@ -340,7 +389,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
-		initializeNgNeighborhoods();
+		initializeNgNeighborhoods(lp);
 		ngDssrRoundsExecuted = 0;
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
@@ -2802,10 +2851,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
-		Node node = lp.getNode();
-		if (!isSequenceCompatible(sequence, node)) {
-			return;
-		}
 		if (!isElementarySequence(sequence)) {
 			recordNonElementaryNegativeSequence(sequence, inferredReducedCost);
 			return;
@@ -4036,6 +4081,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			this.signature = signature;
 			this.column = column;
 			this.reducedCost = reducedCost;
+		}
+	}
+
+	private static final class NgPair {
+		final int first;
+		final int second;
+		final double reducedPairCost;
+
+		NgPair(int first, int second, double reducedPairCost) {
+			this.first = first;
+			this.second = second;
+			this.reducedPairCost = reducedPairCost;
 		}
 	}
 

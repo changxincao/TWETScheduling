@@ -27,6 +27,8 @@ public class GCBBFullDomainComparisonTest {
 
 	private static final String HEURISTIC_ENGINE = "HeuristicPricing";
 	private static final String NORMAL_ENGINE = "GCNGBBStyleBidirectionalPricing";
+	private static final String PARTIAL_DOMINANCE_ENGINE = "GCNGBBStylePartialDominancePricing";
+	private static final String NG_DSSR_ENGINE = "GCNGBBStyleNgDssrPricing";
 	private static final String FULL_DOMAIN_ENGINE = "GCBBStyleBidirectionalFullDomainPricing";
 	private static final String NODE_JOIN_ENGINE = "GCBBStyleBidirectionalFullDomainNodeJoinPricing";
 
@@ -135,7 +137,9 @@ public class GCBBFullDomainComparisonTest {
 				mode += "-scalarOff";
 			}
 		}
-		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE : NORMAL_ENGINE);
+		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
+				: (config.useGCNGBBStyleNgDssrPricing ? NG_DSSR_ENGINE
+						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE)));
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -200,6 +204,24 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;
 		config.useGCBBFullDomainNodeJoinBidirectionalPricing = nodeJoin;
+		config.useGCNGBBStylePartialDominancePricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.partialDominance",
+				Boolean.toString(config.useGCNGBBStylePartialDominancePricing)));
+		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssr",
+				Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
+		config.ngDssrInitialNgSetMode = System.getProperty("twet.bpc.fullDomainCompare.ngDssrInitialMode",
+				config.ngDssrInitialNgSetMode);
+		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrInitialSize",
+				config.ngDssrInitialNgSetSize);
+		config.ngDssrMaxRounds = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrMaxRounds",
+				config.ngDssrMaxRounds);
+		config.ngDssrMaxNonElementaryRecords = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrMaxNonElementaryRecords",
+				config.ngDssrMaxNonElementaryRecords);
+		config.ngDssrFallbackToElementaryPricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrFallback",
+				Boolean.toString(config.ngDssrFallbackToElementaryPricing)));
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalJoinBestThresholdMode = System.getProperty(

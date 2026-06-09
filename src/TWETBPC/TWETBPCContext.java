@@ -19,6 +19,8 @@ import TWETBPC.GC.ExactPricingEngine;
 import TWETBPC.GC.GCBBAsymmetricBidirectionalPricingEngine;
 import TWETBPC.GC.GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine;
 import TWETBPC.GC.GCBBStyleBidirectionalFullDomainPricingEngine;
+import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrPricingEngine;
+import TWETBPC.GC.GCNGBBStyleBidirectionalPartialDominancePricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPricingEngine;
 import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.InitialColumnBuilder;
@@ -69,6 +71,10 @@ public class TWETBPCContext {
 				pricingEngines.add(new GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine(data, config));
 			} else if (config.useGCBBFullDomainBidirectionalPricing) {
 				pricingEngines.add(new GCBBStyleBidirectionalFullDomainPricingEngine(data, config));
+			} else if (config.useGCNGBBStyleNgDssrPricing) {
+				pricingEngines.add(new GCNGBBStyleBidirectionalNgDssrPricingEngine(data, config));
+			} else if (config.useGCNGBBStylePartialDominancePricing) {
+				pricingEngines.add(new GCNGBBStyleBidirectionalPartialDominancePricingEngine(data, config));
 			} else if (config.useGCNGBBStyleBidirectionalPricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalPricingEngine(data, config));
 			} else {

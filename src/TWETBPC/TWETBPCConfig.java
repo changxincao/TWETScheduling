@@ -40,6 +40,26 @@ public class TWETBPCConfig {
 	 */
 	public boolean useGCNGBBStyleBidirectionalPricing = true;
 	/**
+	 * 2026-06-09: 实验开关。true 时使用 GCNGBB-style 半域双向的 partial-list dominance
+	 * 复制版本；默认关闭，避免影响当前主要求解路径。
+	 */
+	public boolean useGCNGBBStylePartialDominancePricing = false;
+	/**
+	 * 2026-06-09: 实验开关。true 时使用独立复制的 GCNGBB-style 半域 ng-relaxation + DSSR
+	 * 版本；默认关闭，避免影响当前 elementary 主路径。
+	 */
+	public boolean useGCNGBBStyleNgDssrPricing = false;
+	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK。 */
+	public String ngDssrInitialNgSetMode = "nearestK";
+	/** 2026-06-09: nearestK 初始 ng-set 的目标大小，包含任务自身。 */
+	public int ngDssrInitialNgSetSize = 8;
+	/** 2026-06-09: 单次 exact pricing 内 DSSR 最多重跑多少轮 relaxed pricing。 */
+	public int ngDssrMaxRounds = 5;
+	/** 2026-06-09: 每轮最多记录多少条 non-elementary 负 reduced-cost route 用于 DSSR update。 */
+	public int ngDssrMaxNonElementaryRecords = 10000;
+	/** 2026-06-09: DSSR 达到轮数上限仍未证明时，是否回退到当前 elementary GCNGBB 定价器。 */
+	public boolean ngDssrFallbackToElementaryPricing = true;
+	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。
 	 */

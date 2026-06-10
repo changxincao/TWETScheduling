@@ -270,3 +270,11 @@ join 阶段当前先检查 crossing arc 的直接禁弧，再用 `backward.ngMem
 ng-set 更新规则是：对记录的 non-elementary route，逐个找重复 job 的两次出现位置；对两次出现之间的每个 middle job，把 repeated job 加入 `N_middleJob`。这样下一轮扩展经过 middle job 后，ng-memory 会继续记住 repeated job，从而阻止同一条重复结构再次作为 ng-feasible route 出现。当前每轮只记录 reduced cost 最负的一条 non-elementary negative route，因此一次更新可能增加多个 `N_j` 条目，但来源只有这条最负重复 route。如果发现存在 non-elementary negative route 但 update 没有改变任何 ng-set，代码会抛 `IllegalStateException`，因为按当前 DSSR 更新语义这不应发生。
 
 最终加入主问题的列只来自 `generatedColumns`，也就是本轮确认 elementary、signature 未重复、reduced cost 为负并通过候选堆保留的列。non-elementary negative route 从不直接入 pool/RMP，只用于 DSSR 更新。`BEST_RECORD` 若开启会进一步要求 elementary 负列刷新 bestRC 才保留；但当前默认和近期 ng-DSSR 测试均为 `ZERO`，所以本流程通常保留普通负列。
+
+31. 2026-06-10 elementary 判定与 DSSR 更新粒度
+
+当前 `tryGenerateColumn()` 的 elementary 判定仍然是在恢复真实 sequence 后调用 `isElementarySequence(sequence)` 扫描整条序列完成。虽然 forward/backward label 已经保存了 `visitedSet`，但两个 `visitedSet` 取交集只能判断拼接两侧是否访问了同一个 job，不能判断某一侧 label 内部是否已经因为 ng-memory 遗忘而重复访问了某个 job。forward-sink 收尾也只有单侧 label，更不能靠两侧交集判断。因此在当前只保存 visited set、没有保存 duplicate mask 的实现下，扫描真实 sequence 是稳妥但略冗余的做法。
+
+如果后续要优化这一步，应在 label 扩展时同步维护 `duplicateSet` 或 `hasDuplicate`：扩展到新 job 时，如果该 job 已在真实 `visitedSet` 中出现，就把它记为重复。这样 join 后可以用 `forward.hasDuplicate || backward.hasDuplicate || forward.visitedSet∩backward.visitedSet` 快速判断 non-elementary。即便如此，负的 non-elementary route 仍需要恢复真实 sequence，因为 DSSR 更新要知道重复 job 两次出现之间有哪些 middle jobs；elementary 负列也需要 sequence 构造 signature 和列对象。所以这个优化主要是去掉每次的 boolean 扫描和分配，不是完全取消 route 恢复。
+
+ng-set 更新粒度方面，当前 TWET 和旧 VRP `GCNGBB` 的核心口径一致：每轮 DSSR 只保留 reduced cost 最负的一条 non-elementary negative route 作为本轮更新来源，而不是把本轮所有重复负 route 都拿来更新。但在这条 route 内，如果存在多个重复 job，或者同一个 job 多次重复，当前 `updateNgNeighborhoodsFromNonElementaryRoutes()` 会逐个处理相邻两次出现之间的区间，把 repeated job 加入所有 middle job 的 ng-neighborhood。旧 VRP 的 `m_best_cycle/UpdateNGSet()` 也是“一条 best cycle route”，但会遍历这条 route 中的重复 customer 并更新对应中间 customer 的 ng-set。因此更准确的说法是：一轮只选一条最负重复 route；这条 route 内可以一次更新多个重复环/重复段。

@@ -220,3 +220,11 @@ join 阶段当前先检查 crossing arc 的直接禁弧，再用 `backward.ngMem
 旧 VRP 之所以不只比较 `M∪R`，是因为 ng-memory 的转移会遗忘：`M'=(M∩N_j)∪{j}`。如果 L1 多记住某个 customer `a`，但 L2 当前只是因为资源不可达 `a`，那么在当前 `D` 里二者都把 `a` 当成不可达；但扩展到下一个点后，L2 的资源不可达原因可能变化，而 L1 的 memory 可能继续保留。因此“当前并集不可达包含”不能直接推出“所有后续路径包含”。旧 `GCNGBB` 的 `M_1⊆M_2∪~Reach_2` 条件正是在处理这个差异：只有当 L1 多记住的点在 L2 那边已经资源不可达时，才允许把它视为不影响支配。
 
 因此当前判断为：如果能证明 TWET 的 `resourceUnavailable` 对后续扩展是单调吸收的，即当前资源不可达的 job 未来永远不可达，那么并集比较可以成立；但当前 direct time/半域过滤不显然满足这个性质，所以仍需要像旧 VRP 一样把 memory 与 resource reach 拆开比较，或者通过对拍证明现有并集 key 不会误删。
+
+25. 2026-06-10 对当前 extensionSet key 的条件式判断
+
+继续按 ng-set 扩展语义复核后，需要修正上一节的表述强度。用户指出的关键是：如果 label A 支配 B 时，A 的不可达集合是 B 的子集，那么不可能出现“当前 A 不能访问 c、但当前 B 能访问 c”的情况；若资源不可达本身又是沿路径单调的，即当前资源不可达的 c 在继续扩展若干 job 后仍不可达，那么当前 `D=M∪R` 的并集比较就可以支持后续路径包含。
+
+因此，`dominanceKey=extensionSet` 并不是必然错误。它是否安全取决于 `resourceUnavailable` 的语义。如果 `R` 是硬资源/时间不可达，并且满足类似 VRPTW 中“时间只会向前增加、setup 满足三角不等式、直接到不了则绕路更到不了”的单调性，那么 `D_A⊆D_B` 可以解释为 B 当前及未来能走的点 A 都能走，再配合 frontier 支配和 domain cover，当前 graph 口径是有可能成立的。旧 VRP 中 `~reach` 正是这种单调不可达集合。
+
+当前仍需确认的是 TWET 里的 `resourceUnavailable` 是否只包含这种单调硬不可达。代码中 `extensionSet` 排除的不只是 ng-memory，还包括 zero-dual 过滤、half-domain 过滤，以及 `getDynamicForward/BackwardHStart/HEnd` 和 direct extension time feasibility。这些窗口包含 pricing/dynamic/profitable 语义，且依赖 predecessor/successor arc；如果某个 job 当前因这些动态窗口不可达，但换一个前驱后又可能可达，那么它就不是旧 VRP 意义上的单调 `~reach`，并集 key 就仍有风险。因此下一步不应直接改代码，而应先核对这些过滤是否都是安全且单调的 resource reach；若是，当前 `extensionSet` key 可以保留；若不是，需要把硬 resource reach 和动态剪枝分开，dominance key 只使用单调部分。

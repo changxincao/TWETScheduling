@@ -334,3 +334,18 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 `Tmid≈T` 在 root 上变快并不矛盾。这个设置确实让双向几乎退化为单向：backward 侧基本只剩 sink root，第一轮日志里 `bw kept=1`、`halfWindowIneligible bw=29`。但 root 节点当前并不是 forward 标签已经爆炸、必须靠 backward 分担的场景；相反，默认 midpoint 下还要构造一批 backward label，并做大量 forward/backward join。对照第一轮 exact pricing，默认 midpoint 的 join pairs 约 `52927`，函数评估约 `47911`；`Tmid≈T` 后 join pairs 只有 `77`，函数评估 `73`，所以 exact pricing 直接变快。
 
 代价也很明显：`Tmid≈T` 不是更好的双向切分，而是用“少做 backward 和 join”换速度。第一轮 exact 生成负列从默认的 `162` 降到 `4`，列生成路径更依赖 forward-to-sink 和后续启发式补列；总体 root 时间只从 `16.327s` 降到 `15.984s`，exact 省下的时间被更多 heuristic calls 和更多 pricing rounds 抵消了一部分。因此当前判断仍然是：root 上可作为诊断和对照，不能说明深层节点也会更稳，更不能直接替代 probe/balanced midpoint。
+
+38. 2026-06-10 多算例 root `Tmid≈T` 对照
+
+继续按用户要求扩大 root-only 对照，测试 `tmp-wet030_from040_010/011/012/013/014/015_2m`。口径保持一致：`ngDssr=true, nearestK,size=8,routeUpdateLimit=10, completionBound=allCycles, midpointProbe=false, ALNS seed on, RMIH off, maxNodes=1`，不打开 pricingOnly subtree。结果显示，默认双向 midpoint 在 6 个算例的总时间上全部不慢于 `Tmid≈T`，其中 010/011/012/014/015 明显更快，013 本轮也从默认 `16.752s` 对 `Tmid≈T` 的 `16.925s` 略快。汇总如下：
+
+`010`: 默认 `solve=14.997s, exact=4.351s/8 calls, pricing=38`；`Tmid≈T` 为 `16.335s, exact=4.757s/7 calls, pricing=41`。
+`011`: 默认 `11.976s, exact=3.118s/6, pricing=32`；`Tmid≈T` 为 `14.608s, exact=4.971s/10, pricing=44`。
+`012`: 默认 `11.635s, exact=2.747s/4, pricing=30`；`Tmid≈T` 为 `13.902s, exact=4.161s/6, pricing=35`。
+`013`: 默认 `16.752s, exact=6.425s/9, pricing=41`；`Tmid≈T` 为 `16.925s, exact=4.957s/6, pricing=46`。
+`014`: 默认 `16.613s, exact=6.251s/9, pricing=45`；`Tmid≈T` 为 `18.362s, exact=7.976s/10, pricing=49`。
+`015`: 默认 `10.206s, exact=2.056s/3, pricing=27`；`Tmid≈T` 为 `13.220s, exact=3.123s/7, pricing=42`。
+
+第一轮 exact 的细节说明了为什么单次看起来会有错觉。`Tmid≈T` 下 backward 侧全部近似退化为 `bw kept=1`，join pairs 只有几十个；默认双向会做几千到五万级 join pairs，因此首轮 exact 有时 `Tmid≈T` 更快。例如 015 首轮 `Tmid≈T` 为 `0.797s`，默认为 `1.178s`。但默认双向首轮生成的负列显著更多：010 为 `30` 对 `9`，011 为 `29` 对 `3`，012 为 `41` 对 `14`，013 为 `162` 对 `4`，014 为 `71` 对 `11`，015 为 `267` 对 `45`。因此默认双向虽然每轮更“重”，但补列质量和数量更好，后续 pricing 轮数、heuristic calls 和 exact calls 通常更少，整体更快。
+
+当前结论修正为：`Tmid≈T` 只是在个别单次 exact pricing 中通过跳过 backward/join 降低局部成本；从 root RMP 收敛过程看，默认双向 midpoint 更稳定、更快。之前 013 单点的“exact 变快”不能解读为单向化更好，只能说明该节点首轮 join 成本较高。

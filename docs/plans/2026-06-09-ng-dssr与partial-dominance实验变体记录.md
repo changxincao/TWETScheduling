@@ -349,3 +349,11 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 第一轮 exact 的细节说明了为什么单次看起来会有错觉。`Tmid≈T` 下 backward 侧全部近似退化为 `bw kept=1`，join pairs 只有几十个；默认双向会做几千到五万级 join pairs，因此首轮 exact 有时 `Tmid≈T` 更快。例如 015 首轮 `Tmid≈T` 为 `0.797s`，默认为 `1.178s`。但默认双向首轮生成的负列显著更多：010 为 `30` 对 `9`，011 为 `29` 对 `3`，012 为 `41` 对 `14`，013 为 `162` 对 `4`，014 为 `71` 对 `11`，015 为 `267` 对 `45`。因此默认双向虽然每轮更“重”，但补列质量和数量更好，后续 pricing 轮数、heuristic calls 和 exact calls 通常更少，整体更快。
 
 当前结论修正为：`Tmid≈T` 只是在个别单次 exact pricing 中通过跳过 backward/join 降低局部成本；从 root RMP 收敛过程看，默认双向 midpoint 更稳定、更快。之前 013 单点的“exact 变快”不能解读为单向化更好，只能说明该节点首轮 join 成本较高。
+
+39. 2026-06-10 40 任务 root `Tmid≈T` 对照
+
+继续测试真实 40 任务 2m 算例 `data/40-2/wet040_001_2m.dat`。同样使用 `ngDssr=true, nearestK,size=8,routeUpdateLimit=10, completionBound=allCycles, midpointProbe=false, ALNS seed on, RMIH off, maxNodes=1`，不打开 pricingOnly subtree。默认双向 midpoint 结果为 `status=NODE_LIMIT, inc=26319, bound=26155.75, gap=0.620274%, solve=154.802s, exact=64.274s/12 calls, heuristic=74.611s/48 calls, pricing=60, cols=10896`。`Tmid≈T` 结果为同样上下界，但 `solve=239.803s, exact=99.851s/22 calls, heuristic=98.573s/63 calls, pricing=85, cols=10860`。因此 40 任务 root 上单向化明显更慢。
+
+首轮 exact 细节显示，`Tmid≈T` 仍然几乎消掉 backward 和 join：默认首轮 `fwKept=2040,bwKept=1420,joinPairs=69543,funcEval=67673,added=207,time=4325.944ms`；`Tmid≈T` 首轮 `fwKept=3795,bwKept=1,joinPairs=98,funcEval=96,forwardSinkNeg=133,added=171,time=4275.347ms`。两者首轮时间接近，说明 40 任务 root 下省掉 join 后，forward 单侧标签增加基本抵消了收益；同时 `Tmid≈T` 首轮负列更少，后续 exact calls 从 `12` 增到 `22`，heuristic calls 从 `48` 增到 `63`，最终总时间显著变差。
+
+当前判断进一步加强：规模上来后，默认双向切分的价值更明显。`Tmid≈T` 可以减少 join，但会让 forward 侧承担几乎全部状态空间，并减少每轮有效补列；在 40 任务 root 上已经明显不划算。

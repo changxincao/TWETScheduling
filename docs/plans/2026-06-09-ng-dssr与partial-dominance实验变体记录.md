@@ -296,3 +296,13 @@ focused 编译命令 `javac -encoding UTF-8 -cp "lib/*;src" src/TWETBPC/TWETBPCC
 第二批浅层对照使用 `maxNodes=2`，只跑代表配置 `nearestK/top1`、`nearestK/top10`、`empty/top10`。结果更清楚：010 中 `nearestK/top1` 为 `solve=27.164s, exact=9.300s, calls=13`，`nearestK/top10` 降到 `solve=25.989s, exact=7.675s, calls=11`，而 `empty/top10` 为 `solve=33.854s, exact=10.694s, calls=15`。011 中 `nearestK/top1` 为 `29.117s/10.628s/14 calls`，`nearestK/top10` 为 `25.840s/8.177s/12 calls`，`empty/top10` 为 `29.401s/9.043s/12 calls`。013 中 `nearestK/top1` 为 `32.481s/16.694s/16 calls`，`nearestK/top10` 为 `27.115s/12.708s/13 calls`，`empty/top10` 为 `34.054s/17.530s/17 calls`。这些结果说明 topK 更新确实能减少 DSSR 轮数和 exact calls，尤其在分支浅层更明显；但 `empty` 初始集会让 ng-relaxation 初期过松，带来更多 DSSR 收紧和更多 pricing 调用，不推荐作为默认效率策略。
 
 当前建议是：若继续保留 ng-DSSR 实验分支，默认初始 critical set 仍用 `nearestK,size=8`；每轮更新 route 数可以从 1 调到 10 做下一轮对照，因为它在 010/011/013 的 maxNodes=2 上都减少 exact 时间和 calls。top5 在 root 上部分有效，但不如 top10 稳定；是否存在更优的 topK 需要后续再试 8/12/15。需要注意的是，本轮只证明 ng-DSSR 内部 topK 更新比 top1 更稳，不代表 ng-DSSR 已经整体优于当前 elementary 主 pricing。
+
+34. 2026-06-10 best ng-DSSR 与 elementary 同口径对照
+
+继续用当前最好的 ng-DSSR 配置 `nearestK,size=8,routeUpdateLimit=10` 和 elementary `GCNGBBStyleBidirectionalPricing` 做同口径对照。测试口径保持 `completionBound=allCycles, midpointProbe=true`，分别跑 root-only `maxNodes=1` 和浅层 `maxNodes=2`，算例为 `tmp-wet030_from040_010/011/013_2m`。
+
+root-only 结果显示，ng-DSSR 不再是全面更慢。010 上 ng 明显更快：`solve/exact/calls=13.996s/2.997s/5`，elementary 为 `22.163s/6.757s/5`，incumbent 同为 `16759`。011 上 ng 也略快：`14.704s/3.352s/5`，elementary 为 `16.978s/3.661s/3`，incumbent 同为 `13935`。013 上总时间 ng 略快但质量较差：ng 为 `18.344s/7.941s/9, incumbent=14573`，elementary 为 `19.385s/6.995s/3, incumbent=14474`。这说明 ng 在 root 可能减少总时间，但 exact calls 往往更多，列生成路径也可能导致较差上界。
+
+`maxNodes=2` 结果更能体现浅层分支效果。010 上 ng 优势明显：`25.989s/7.675s/11, incumbent=16237`，elementary 为 `38.031s/11.843s/8, incumbent=16266`。011 上 ng 总时间更快但 exact pricing 本身更慢：ng 为 `25.840s/8.177s/12`，elementary 为 `28.898s/7.169s/6`，incumbent 都是 `13935`。013 上 ng 总时间略快但 exact pricing 更慢且上界更差：ng 为 `27.115s/12.708s/13, incumbent=14573`，elementary 为 `28.417s/11.652s/6, incumbent=14474`。
+
+当前判断是：top10 修正后，ng-DSSR 已经不是“明显慢于 elementary”的状态，在 010 上甚至明显更好；但它仍不是稳定优于 elementary 的默认方案。主要原因是 ng-DSSR 的 exact calls 明显更多，non-elementary route 收紧改变列生成路径，某些算例如 013 会得到较差 incumbent。短期更合理的定位是把 `nearestK8/top10` 作为实验候选或 hard-node 对照，而不是直接替换主线 elementary pricing。后续若要继续推进，需要比较更深 node limit 或完整收敛，以及观察 ng 是否能在真正 hard node 上减少单次 exact 爆炸。

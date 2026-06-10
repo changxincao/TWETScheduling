@@ -278,3 +278,11 @@ ng-set 更新规则是：对记录的 non-elementary route，逐个找重复 job
 如果后续要优化这一步，应在 label 扩展时同步维护 `duplicateSet` 或 `hasDuplicate`：扩展到新 job 时，如果该 job 已在真实 `visitedSet` 中出现，就把它记为重复。这样 join 后可以用 `forward.hasDuplicate || backward.hasDuplicate || forward.visitedSet∩backward.visitedSet` 快速判断 non-elementary。即便如此，负的 non-elementary route 仍需要恢复真实 sequence，因为 DSSR 更新要知道重复 job 两次出现之间有哪些 middle jobs；elementary 负列也需要 sequence 构造 signature 和列对象。所以这个优化主要是去掉每次的 boolean 扫描和分配，不是完全取消 route 恢复。
 
 ng-set 更新粒度方面，当前 TWET 和旧 VRP `GCNGBB` 的核心口径一致：每轮 DSSR 只保留 reduced cost 最负的一条 non-elementary negative route 作为本轮更新来源，而不是把本轮所有重复负 route 都拿来更新。但在这条 route 内，如果存在多个重复 job，或者同一个 job 多次重复，当前 `updateNgNeighborhoodsFromNonElementaryRoutes()` 会逐个处理相邻两次出现之间的区间，把 repeated job 加入所有 middle job 的 ng-neighborhood。旧 VRP 的 `m_best_cycle/UpdateNGSet()` 也是“一条 best cycle route”，但会遍历这条 route 中的重复 customer 并更新对应中间 customer 的 ng-set。因此更准确的说法是：一轮只选一条最负重复 route；这条 route 内可以一次更新多个重复环/重复段。
+
+32. 2026-06-10 当前 ng-DSSR 状态复核结论
+
+再次检查当前 `GCNGBBStyleBidirectionalNgDssr` 后，流程层面暂未发现新的硬错误。forward/backward 扩展均使用 `M'=(M∩N_current)∪{current}` 更新 ng-memory；真实 `visitedSet` 不阻止扩展，只用于恢复 route 和 elementary/non-elementary 判定；join 阶段先检查 crossing arc、backward memory 是否仍记住前缀末端，以及两侧 ng-memory 是否冲突，然后才做函数拼接与 reduced-cost 判断；负的 elementary route 进入候选池，负的 non-elementary route 不入主问题，只用于 DSSR 更新。
+
+当前实现也没有把 forbidden/pricingOnly arc 混进 dominance key。`extensionSet` 中排除的是 zero-dual 全局过滤、ng-memory、半域 eligibility 和 direct time/window feasibility；直连 forbidden/pricingOnly arc 在 `canExtendForward/Backward`、join crossing arc 和必要的 sequence 检查中即时过滤。这符合之前确定的语义：禁弧只表示当前直连弧不可用，不表示该 job 对所有后续路径永久不可达。
+
+因此当前结论是：ng-DSSR 的主流程、入列规则、DSSR 更新粒度和旧 VRP 的大方向已经基本对齐，可以作为当前实验版本继续测试。剩余风险主要有两类：第一，`extensionSet` 作为 dominance key 的严格安全性依赖 direct time/window 不可达的单调性，以及 zero-dual/half-domain 过滤不会破坏支配前提；第二，当前没有维护 duplicate mask，所以 elementary 判定仍需恢复 sequence 后扫描，速度上还有优化空间但不影响语义正确性。速度收益方面仍不能保证优于 elementary，尤其在 non-elementary negative route 多、DSSR 多轮但 elementary 负列少的节点上可能更慢。

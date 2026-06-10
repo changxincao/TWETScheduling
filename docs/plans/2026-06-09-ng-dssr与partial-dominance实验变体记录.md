@@ -234,3 +234,11 @@ join 阶段当前先检查 crossing arc 的直接禁弧，再用 `backward.ngMem
 继续检查当前 `GCNGBBStyleBidirectionalNgDssr` 后，确认 forbidden arc 没有进入 `buildForwardNgDominanceSets()` / `buildBackwardNgDominanceSets()` 的 `unavailable` 判断。当前 dominance key 里的不可达来源只有 zero-dual 全局排除、ng-memory、half-domain eligibility，以及 direct time/window feasibility。forbidden arc 只在 `canExtendForward()`、`canExtendBackward()`、join crossing arc 和 sequence compatibility 中即时检查。这一点是合理的：某条 forbidden arc 只表示当前 terminal 到某个 job 的直连弧不能用，不表示这个 job 在后续通过其他前驱永远不能访问；如果把 forbidden arc 放进 dominance 不可达集合，会把“当前直连不可用”误当成“该 job 对后续路径不可达”，反而可能导致错误支配。
 
 当前 dominance key 是否安全，重点仍在 direct time/window feasibility 是否具备单调不可达性质。forward 侧如果 setup time 满足三角不等式且处理时间非负，那么从当前 terminal 直接到某 job 已经太晚时，中间再插入其他 job 只会更晚，因此 direct time 不可达可以视为单调不可达。backward 侧同理，若直接把某 job 放在当前 suffix 前都放不下，中间再插入任务只会占用更多时间，也不会让它重新可达。half-domain eligibility 和 zero-dual 排除是同一侧所有 label 的全局过滤，不是 label 间相对支配差异的主要来源。由此看，当前“不把 forbidden arc 放进 dominance，不可达集合只放 ng-memory 与时间/半域/全局过滤”的方向是合理的；需要后续确认的是实例和预处理是否确实满足上述三角不等式/单调时间前提。
+
+27. 2026-06-10 清理 ng-DSSR 冗余字段与 BEST_RECORD 语义
+
+本次检查 `JoinBestThresholdMode.BEST_RECORD` 后确认它不是死代码。`ZERO` 口径下 join 只按负 reduced cost 保留候选；`BEST_UB` 会在已有负列记录时用当前 best reduced cost 加强 join lower-bound 剪枝，但最终仍可保留普通负列；`BEST_RECORD` 更激进，既用当前 best reduced cost 做 lower-bound 阈值，也要求实际拼接出的列必须刷新当前 best 才进入候选池。因此它本质上是 record-only 的 join 候选压缩模式，会减少每轮返回列数并改变列生成路径，适合做诊断/对照，不应按“未使用代码”删除。
+
+代码清理方面，当前 graph/single-point 实际使用的 key 已经是 `extensionSet`，原来的 `dominanceUnavailableSet` 只在构造阶段保存，后续没有参与 `Label`、`PaperDominanceGraph` 或 single-point store 的比较；`dominanceKey` 也始终等于 `extensionSet`。本次删除 `NgDominanceSets` 包装类、`FunctionLabel.dominanceUnavailableSet` 字段和对应构造传参，改为直接构造并传递 `PackedBitSet extensionSet`。这不改变支配语义，只是把“实际用的是 extensionSet”写清楚，避免注释和字段名继续暗示 graph 同时使用另一个不可达集合。
+
+同时更新了类头和扩展过滤注释。当前 ng-DSSR 的 label 确实维护 `ngMemorySet`，重复任务不是靠 `visitedSet` 阻止扩展，而是在恢复真实 route 后判断 elementary/non-elementary 并用 DSSR 更新 ng-set；`canExtendForward/Backward` 中即时检查的是当前直连 forbidden/pricingOnly arc。验证方面，`rg` 确认 `dominanceUnavailableSet`、`dominanceKey`、`NgDominanceSets` 等旧名字已无残留，focused `javac -encoding UTF-8 -cp "lib/*;src" src/TWETBPC/GC/GCNGBBStyleBidirectionalNgDssr.java` 通过。该修改只清理冗余和注释，不新增 dominance 条件。

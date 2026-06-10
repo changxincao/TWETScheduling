@@ -39,10 +39,11 @@ import TWETBPC.Util.SequenceSignature;
  * <p>
  * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
  * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
- * 类名中的 GCNGBB 保留早期命名；当前实现没有 NG memory，实际语义更接近 GCBB-style
- * final join。相对 {@link GCBidirectional}，本类先完整生成 forward/backward 两侧 label
- * table，再统一做 crossing-arc final join；forward->sink 收尾也并入 final join 流程，并用本地
- * top-K 候选池统一按 reduced cost 输出，减少出队顺序对列返回集合的影响。
+ * 类名中的 GCNGBB 保留早期命名；当前版本在 label 中维护 ng-memory，并用 DSSR 逐轮收紧
+ * ng-neighborhood。相对 {@link GCBidirectional}，本类先完整生成 forward/backward 两侧 label
+ * table，再统一做 crossing-arc final join；forward->sink 收尾也并入 final join 流程。join
+ * 后先按 ng-memory 检查拼接兼容性，再恢复真实序列判断 elementary/non-elementary，负的
+ * elementary 列进入本地 top-K 候选池，负的 non-elementary 序列用于更新 ng-set。
  * <p>
  * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
  * 1. forward label 存储在 [ell, Tmid]；
@@ -801,10 +802,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
 		PackedBitSet sourceNgMemory = new PackedBitSet(data.n + 2);
-		NgDominanceSets sourceSets = buildForwardNgDominanceSets(0, sourceNgMemory, lp.getNode(), sourceFrontier);
+		PackedBitSet sourceExtensionSet = buildForwardExtensionSet(0, sourceNgMemory, sourceFrontier);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
-				sourceSets.extensionSet, sourceSets.dominanceUnavailableSet, sourceSets.dominanceKey,
-				sourceNgMemory, sourceFrontier);
+				sourceExtensionSet, sourceNgMemory, sourceFrontier);
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
 		}
@@ -1382,11 +1382,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sinkFrontier.resetDomain(tMid, pricingHorizon);
 		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
 		PackedBitSet sinkNgMemory = new PackedBitSet(data.n + 2);
-		NgDominanceSets sinkSets = buildBackwardNgDominanceSets(lp.getNode().sinkId(), sinkNgMemory, lp.getNode(),
+		PackedBitSet sinkExtensionSet = buildBackwardExtensionSet(lp.getNode().sinkId(), sinkNgMemory, lp.getNode(),
 				sinkFrontier);
 		BackwardLabel sink = new BackwardLabel(nextLabelId++, lp.getNode().sinkId(), null, sinkVisited,
-				sinkSets.extensionSet, sinkSets.dominanceUnavailableSet, sinkSets.dominanceKey,
-				sinkNgMemory, sinkFrontier, true);
+				sinkExtensionSet, sinkNgMemory, sinkFrontier, true);
 		BWUL.add(sink);
 	}
 
@@ -1456,23 +1455,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		// 2026-06-09: 调用方只枚举 extensionSet；visited
-		// 和时间可行性已经在 extensionSet 构造时维护。下面旧检查保留为防御性说明，
-		// 正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
-		// if (label.visitedSet.contains(nextJob) || !label.extensionSet.contains(nextJob)) {
-		// 	return false;
-		// }
+		// 2026-06-10: 调用方只枚举 extensionSet；它已经排除 ng-memory 和时间半域不可达点。
+		// 真实 visited 不用于 ng-relaxation 扩展过滤，重复任务在恢复 route 后交给 DSSR 处理。
+		// 直连禁弧依赖当前 node/pricingOnly 状态，仍在扩展点即时检查。
 		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		// 2026-06-09: extensionSet 已维护 visited 和时间可行性；
-		// 下面旧检查保留为防御性说明，正常不应触发；backward 扩展点只需即时检查
-		// prevJob -> successor 这条直连弧是否被禁。
-		// if (label.visitedSet.contains(prevJob) || !label.extensionSet.contains(prevJob)) {
-		// 	return false;
-		// }
+		// 2026-06-10: backward 同样只枚举 extensionSet；真实重复由 DSSR route 恢复后处理。
+		// 这里即时检查 prevJob -> successor 直连弧，避免 pricingOnly/分支禁弧绕过扩展过滤。
 		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
@@ -1502,9 +1494,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
 		PackedBitSet childNgMemory = updateNgMemory(label.ngMemorySet, nextJob);
-		NgDominanceSets childSets = buildForwardNgDominanceSets(nextJob, childNgMemory, lp.getNode(), nextFrontier);
-		return new ForwardLabel(nextLabelId++, nextJob, label, visited, childSets.extensionSet,
-				childSets.dominanceUnavailableSet, childSets.dominanceKey, childNgMemory, nextFrontier);
+		PackedBitSet childExtensionSet = buildForwardExtensionSet(nextJob, childNgMemory, nextFrontier);
+		return new ForwardLabel(nextLabelId++, nextJob, label, visited, childExtensionSet, childNgMemory,
+				nextFrontier);
 	}
 
 	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
@@ -1555,9 +1547,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(prevJob);
 		PackedBitSet childNgMemory = updateNgMemory(label.ngMemorySet, prevJob);
-		NgDominanceSets childSets = buildBackwardNgDominanceSets(prevJob, childNgMemory, lp.getNode(), nextFrontier);
-		return new BackwardLabel(nextLabelId++, prevJob, label, visited, childSets.extensionSet,
-				childSets.dominanceUnavailableSet, childSets.dominanceKey, childNgMemory, nextFrontier, false);
+		PackedBitSet childExtensionSet = buildBackwardExtensionSet(prevJob, childNgMemory, lp.getNode(), nextFrontier);
+		return new BackwardLabel(nextLabelId++, prevJob, label, visited, childExtensionSet, childNgMemory,
+				nextFrontier, false);
 	}
 
 	private InsertStatus insertForward(ForwardLabel label, LP lp) {
@@ -3003,39 +2995,33 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return memory;
 	}
 
-	private NgDominanceSets buildForwardNgDominanceSets(int fromJob, PackedBitSet ngMemory, Node node,
+	private PackedBitSet buildForwardExtensionSet(int fromJob, PackedBitSet ngMemory,
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
-		PackedBitSet unavailableSet = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
 			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
 					|| !isForwardHalfEligibleJob(job)
 					|| !isDirectForwardExtensionTimeFeasible(frontier, fromJob, job);
-			if (unavailable) {
-				unavailableSet.add(job);
-			} else {
+			if (!unavailable) {
 				extensionSet.add(job);
 			}
 		}
-		return new NgDominanceSets(extensionSet, unavailableSet, extensionSet);
+		return extensionSet;
 	}
 
-	private NgDominanceSets buildBackwardNgDominanceSets(int firstJob, PackedBitSet ngMemory, Node node,
+	private PackedBitSet buildBackwardExtensionSet(int firstJob, PackedBitSet ngMemory, Node node,
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
-		PackedBitSet unavailableSet = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
 			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
 					|| !isBackwardHalfEligibleJob(job)
 					|| !isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job);
-			if (unavailable) {
-				unavailableSet.add(job);
-			} else {
+			if (!unavailable) {
 				extensionSet.add(job);
 			}
 		}
-		return new NgDominanceSets(extensionSet, unavailableSet, extensionSet);
+		return extensionSet;
 	}
 
 	private void precomputeDynamicPricingWindows(LP lp) {
@@ -4084,36 +4070,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}
 
-	private static final class NgDominanceSets {
-		final PackedBitSet extensionSet;
-		final PackedBitSet dominanceUnavailableSet;
-		final PackedBitSet dominanceKey;
-
-		NgDominanceSets(PackedBitSet extensionSet, PackedBitSet dominanceUnavailableSet,
-				PackedBitSet dominanceKey) {
-			this.extensionSet = extensionSet;
-			this.dominanceUnavailableSet = dominanceUnavailableSet;
-			this.dominanceKey = dominanceKey;
-		}
-	}
-
 	private abstract static class FunctionLabel extends Label implements Comparable<Label> {
 		final int labelId;
 		final PackedBitSet ngMemorySet;
 		final PackedBitSet extensionSet;
 		final int extensionCardinality;
-		final PackedBitSet dominanceUnavailableSet;
 		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
 		PiecewiseLinearFunction joinExtendedFrontier;
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet extensionSet,
-				PackedBitSet dominanceUnavailableSet, PackedBitSet dominanceKey, PackedBitSet ngMemorySet,
-				PiecewiseLinearFunction frontier, double minReducedCost) {
-			super(jid, null, visitedSet, dominanceKey, frontier, minReducedCost);
+				PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier, double minReducedCost) {
+			super(jid, null, visitedSet, extensionSet, frontier, minReducedCost);
 			this.labelId = labelId;
 			this.extensionSet = extensionSet;
 			this.extensionCardinality = extensionSet == null ? 0 : extensionSet.cardinality();
-			this.dominanceUnavailableSet = dominanceUnavailableSet;
 			this.ngMemorySet = ngMemorySet;
 		}
 
@@ -4137,9 +4107,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final int depth;
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet extensionSet,
-				PackedBitSet dominanceUnavailableSet, PackedBitSet dominanceKey, PackedBitSet ngMemorySet,
-				PiecewiseLinearFunction frontier) {
-			super(labelId, jid, visitedSet, extensionSet, dominanceUnavailableSet, dominanceKey, ngMemorySet, frontier,
+				PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier) {
+			super(labelId, jid, visitedSet, extensionSet, ngMemorySet, frontier,
 					forwardEndpointMin(frontier));
 			this.father = father;
 			this.depth = father == null ? 0 : father.depth + 1;
@@ -4151,18 +4120,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final boolean isSinkRoot;
 
 		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet extensionSet,
-				PackedBitSet dominanceUnavailableSet, PackedBitSet dominanceKey, PackedBitSet ngMemorySet,
-				PiecewiseLinearFunction frontier, boolean isSinkRoot) {
-			super(labelId, jid, visitedSet, extensionSet, dominanceUnavailableSet, dominanceKey, ngMemorySet, frontier,
+				PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier, boolean isSinkRoot) {
+			super(labelId, jid, visitedSet, extensionSet, ngMemorySet, frontier,
 					backwardEndpointMin(frontier));
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
-		}
-
-		static BackwardLabel sink(int labelId, int sinkId, PackedBitSet visitedSet, PiecewiseLinearFunction frontier,
-				PackedBitSet reachableSet) {
-			return new BackwardLabel(labelId, sinkId, null, visitedSet, reachableSet, new PackedBitSet(sinkId + 1),
-					reachableSet.copy(), new PackedBitSet(sinkId + 1), frontier, true);
 		}
 	}
 }

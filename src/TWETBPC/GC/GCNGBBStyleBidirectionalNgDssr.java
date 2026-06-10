@@ -3181,7 +3181,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double candidate;
 		if (Double.isFinite(config.bidirectionalRootLocalHorizonMidpointRatio)
 				&& Utility.compareGt(config.bidirectionalRootLocalHorizonMidpointRatio, 0.0)
-				&& Utility.compareLt(config.bidirectionalRootLocalHorizonMidpointRatio, 1.0)) {
+				&& Utility.compareLe(config.bidirectionalRootLocalHorizonMidpointRatio, 1.0)) {
 			midpointStrategyUsed = "ratio";
 			midpointReferenceTime = pricingHorizon;
 			candidate = pricingHorizon * config.bidirectionalRootLocalHorizonMidpointRatio;

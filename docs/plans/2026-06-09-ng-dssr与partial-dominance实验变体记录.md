@@ -306,3 +306,25 @@ root-only 结果显示，ng-DSSR 不再是全面更慢。010 上 ng 明显更快
 `maxNodes=2` 结果更能体现浅层分支效果。010 上 ng 优势明显：`25.989s/7.675s/11, incumbent=16237`，elementary 为 `38.031s/11.843s/8, incumbent=16266`。011 上 ng 总时间更快但 exact pricing 本身更慢：ng 为 `25.840s/8.177s/12`，elementary 为 `28.898s/7.169s/6`，incumbent 都是 `13935`。013 上 ng 总时间略快但 exact pricing 更慢且上界更差：ng 为 `27.115s/12.708s/13, incumbent=14573`，elementary 为 `28.417s/11.652s/6, incumbent=14474`。
 
 当前判断是：top10 修正后，ng-DSSR 已经不是“明显慢于 elementary”的状态，在 010 上甚至明显更好；但它仍不是稳定优于 elementary 的默认方案。主要原因是 ng-DSSR 的 exact calls 明显更多，non-elementary route 收紧改变列生成路径，某些算例如 013 会得到较差 incumbent。短期更合理的定位是把 `nearestK8/top10` 作为实验候选或 hard-node 对照，而不是直接替换主线 elementary pricing。后续若要继续推进，需要比较更深 node limit 或完整收敛，以及观察 ng 是否能在真正 hard node 上减少单次 exact 爆炸。
+
+35. 2026-06-10 013 pricingOnly + ng-DSSR 完整求解记录
+
+按用户要求继续测试 013：启用当前认为较好的 ng-DSSR 配置 `nearestK,size=8,routeUpdateLimit=10`，打开 `completionBound=allCycles`、`midpointProbe`、ALNS seed 和 `completionBoundSubtreeArcEliminationPricingOnly=true`，关闭 RMIH 上界启发式，运行名为 `tmp-ngdssr-013-pricingonly-debug-20260610`。这次运行没有复现之前 pricingOnly 在 node3 直接卡死的现象，node3 正常完成并继续往下搜索。node3 约 `100.268s`，其中 exact `95.757s/6 calls/add30`，此时全局 `inc=14908,bound=14322.5,gap=3.9274%`；node3 的 subtree 本轮 `fixed=0`，说明该节点后续难度主要来自 pricing 证明和列生成路径，而不是本节点新增大量禁弧。
+
+后续搜索中 node9、node12、node20、node21 都出现多轮 exact pricing。典型 heartbeat 显示每轮 forward/bwd kept 在几千级，joinPairs 大多为二十万到六十万级，生成列常为 `0` 或 `1`，说明后段主要是在证明没有足够负 reduced-cost 列，而不是单次 label 数彻底爆炸。最终 node21 找到整数解并闭合上下界：`obj=14433,bound=14433,gap=0.0000%`，总耗时 `804.814s`，exact pricing 累计 `706.620s/144 calls`，最终 `valid=true`。node22 随后被 pseudo-cost 剪掉，队列清空，状态为 `FINISHED`。
+
+当前结论是：在这组配置下，ng-DSSR + pricingOnly 可以把 013 完整求到最优，且 hard point 没有停在之前关注的 node3；但 exact pricing 仍是绝对大头，尤其后段大量 calls 每次只生成少量列。这个结果说明 ng-DSSR/top10 对 hard-node 证明有一定实际价值，但还不能说明它稳定优于 elementary，因为列生成路径、incumbent 质量和 exact calls 都会明显改变。
+
+从上下界演化看，这轮不是主要在“找第一个可行解”。初始 ALNS seed 已经给出 `inc=14908`，RMIH 上界启发式关闭，因此前半段主要是在根节点和浅层节点通过 pricing/branch 提高下界并补列。node11 找到整数解后 incumbent 从 `14908` 跳到 `14451`，gap 从约 `3.52%` 降到 `0.3958%`；node15 再到 `14450`，node21 到 `14433` 并闭合。因此中后段同时有可行解改进，但主要耗时仍是证明和收敛下界：总耗时 `804.814s` 中 exact pricing 为 `706.620s/144 calls`，启发式 pricing 为 `79.537s/342 calls`，LP 只有 `9.728s`。
+
+本轮配置需要和之前实验区分清楚：formal subtree 没开，`completionBoundSubtreeArcEliminationPricingOnly=true` 打开，所以消元弧只进入 pricing/completion-bound 口径；RMIH 上界启发式关闭，整数上界来自 ALNS 初始解和后续节点 LP 自身变整数。日志中 root `fixed=205`，后续节点有 `pricingOnlyArc=205` 起步，最终 node22 前达到 `pricingOnlyArc=454`，说明 pricingOnly 弧确实沿树传播并参与后续定价。
+
+arc fixing 数量也要区分“本节点新增”和“某条路径累计”。node summary 中有 subtree 记录的节点新增 fixed 分别为：node1 `205`、node2 `49`、node3 `0`、node4 `35`、node5 `40`、node6 `58`、node7 `18`、node8 `19`、node9 `0`、node10 `0`、node13 `231`、node14 `85`。这些新增量跨不同分支合计为 `740`，只能说明整棵树处理过程中触发过多少次新增 pricingOnly arc fixing；不能直接当作任一后续节点的累计禁弧数。对单个后续节点应看它继承的祖先链累计，终端输出里后段 node22 的 `pricingOnlyArc=454` 是这次运行观察到的路径累计量级。
+
+36. 2026-06-10 root 节点 `Tmid≈T` 的 ng-DSSR 对照
+
+按用户要求测试“根节点直接把 `Tmid` 设到右侧 `T`”对 ng-DSSR 的影响。先发现 `midpointRatio=1.0` 原来不会生效，因为 `GCNGBBStyleBidirectional` 和 `GCNGBBStyleBidirectionalNgDssr` 都要求 ratio 严格小于 1；本次只把上界判断从 `<1.0` 放宽为 `<=1.0`，仍保留 `clampCurrentMidpoint()`，因此实际 `Tmid` 是贴近 `pricingHorizon` 的 `T-eps`，避免半域完全退化。
+
+对照口径为 013 root-only：`ngDssr=true, nearestK,size=8,routeUpdateLimit=10, completionBound=allCycles, midpointProbe=false, ALNS seed on, RMIH off, maxNodes=1`，不打开 pricingOnly subtree。默认 midpoint 结果为 `solve=16.327s, exact=6.526s/9 calls, heuristic=5.983s/32 calls, pool=5378`；`Tmid≈T` 结果为 `solve=15.984s, exact=4.640s/6 calls, heuristic=7.336s/40 calls, pool=5256`。上下界相同，都是 `inc=14908,bound=14287.625,gap=4.1614%`。
+
+从日志看，`Tmid≈T` 后 backward 侧几乎只剩虚拟 sink root，`bw kept=1`、`halfWindowIneligible bw=29`，join pairs 降到几十甚至为零；负列主要来自 forward sink，因此 exact pricing 变快。但这也意味着它不再是平衡双向搜索，生成列更少，导致启发式 pricing 和 LP/pricing 轮数变多。当前结论是：root 上 `Tmid≈T` 能降低 ng exact 时间，但总时间只小幅改善，且列生成路径更偏，不能据此直接作为默认策略，需要继续看深层节点是否会因为列少或单向化而变慢。

@@ -53,6 +53,8 @@ public class TWETBPCConfig {
 	public String ngDssrInitialNgSetMode = "nearestK";
 	/** 2026-06-09: nearestK 初始 ng-set 的目标大小，包含任务自身。 */
 	public int ngDssrInitialNgSetSize = 8;
+	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
+	public int ngDssrNonElementaryRouteUpdateLimit = 1;
 	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。

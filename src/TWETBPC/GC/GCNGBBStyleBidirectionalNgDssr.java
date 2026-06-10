@@ -240,8 +240,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long diagnosticBackwardPops;
 	private boolean fullMidpointDiagnosticRan;
 	private PackedBitSet[] ngNeighborhoodByJob;
-	private ArrayList<ArrayList<Integer>> nonElementaryNegativeSequences;
-	private double bestNonElementaryReducedCost;
+	private ArrayList<NonElementaryNegativeRoute> nonElementaryNegativeRoutes;
 	private int ngDssrRound;
 	private int ngDssrRoundsExecuted;
 	private int ngDssrTotalNgSetUpdates;
@@ -356,8 +355,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private int updateNgNeighborhoodsFromNonElementaryRoutes() {
 		int changed = 0;
-		for (int routeIndex = 0; routeIndex < nonElementaryNegativeSequences.size(); routeIndex++) {
-			ArrayList<Integer> sequence = nonElementaryNegativeSequences.get(routeIndex);
+		for (int routeIndex = 0; routeIndex < nonElementaryNegativeRoutes.size(); routeIndex++) {
+			ArrayList<Integer> sequence = nonElementaryNegativeRoutes.get(routeIndex).sequence;
 			int[] lastPosition = new int[data.n + 1];
 			Arrays.fill(lastPosition, -1);
 			for (int pos = 0; pos < sequence.size(); pos++) {
@@ -398,16 +397,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrReusableCompletionBoundFixedArc = null;
 
 		for (ngDssrRound = 1; ; ngDssrRound++) {
-			nonElementaryNegativeSequences = new ArrayList<ArrayList<Integer>>();
-			bestNonElementaryReducedCost = Utility.big_M;
+			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
 			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
 			ngDssrRoundsExecuted = ngDssrRound;
-			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeSequences.size();
+			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeRoutes.size();
 			if (!columns.isEmpty()) {
 				appendNgDssrSummary("elementary negative columns returned");
 				return columns;
 			}
-			if (nonElementaryNegativeSequences.isEmpty()) {
+			if (nonElementaryNegativeRoutes.isEmpty()) {
 				appendNgDssrSummary("relaxed pricing found no negative route");
 				return columns;
 			}
@@ -2882,14 +2880,60 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void recordNonElementaryNegativeSequence(ArrayList<Integer> sequence, double inferredReducedCost) {
 		if (!Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)
-				|| nonElementaryNegativeSequences == null
-				|| !Utility.compareLt(inferredReducedCost, bestNonElementaryReducedCost)) {
+				|| nonElementaryNegativeRoutes == null) {
 			return;
 		}
-		// 2026-06-09: 对齐旧 VRP DSSR，每轮只用最负的非 elementary route 更新 ng-set。
-		bestNonElementaryReducedCost = inferredReducedCost;
-		nonElementaryNegativeSequences.clear();
-		nonElementaryNegativeSequences.add(new ArrayList<Integer>(sequence));
+		int limit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
+		for (int i = 0; i < nonElementaryNegativeRoutes.size(); i++) {
+			NonElementaryNegativeRoute route = nonElementaryNegativeRoutes.get(i);
+			if (route.sequence.equals(sequence)) {
+				if (Utility.compareLt(inferredReducedCost, route.reducedCost)) {
+					nonElementaryNegativeRoutes.set(i,
+							new NonElementaryNegativeRoute(sequence, inferredReducedCost));
+					sortNonElementaryNegativeRoutes();
+				}
+				return;
+			}
+		}
+		if (nonElementaryNegativeRoutes.size() < limit) {
+			nonElementaryNegativeRoutes.add(new NonElementaryNegativeRoute(sequence, inferredReducedCost));
+			sortNonElementaryNegativeRoutes();
+			return;
+		}
+		NonElementaryNegativeRoute worst = nonElementaryNegativeRoutes.get(nonElementaryNegativeRoutes.size() - 1);
+		if (Utility.compareLt(inferredReducedCost, worst.reducedCost)) {
+			nonElementaryNegativeRoutes.set(nonElementaryNegativeRoutes.size() - 1,
+					new NonElementaryNegativeRoute(sequence, inferredReducedCost));
+			sortNonElementaryNegativeRoutes();
+		}
+	}
+
+	private void sortNonElementaryNegativeRoutes() {
+		Collections.sort(nonElementaryNegativeRoutes, new Comparator<NonElementaryNegativeRoute>() {
+			@Override
+			public int compare(NonElementaryNegativeRoute left, NonElementaryNegativeRoute right) {
+				int byCost = compareDoubleAsc(left.reducedCost, right.reducedCost);
+				if (byCost != 0) {
+					return byCost;
+				}
+				int bySize = Integer.compare(left.sequence.size(), right.sequence.size());
+				if (bySize != 0) {
+					return bySize;
+				}
+				return compareSequence(left.sequence, right.sequence);
+			}
+		});
+	}
+
+	private int compareSequence(ArrayList<Integer> left, ArrayList<Integer> right) {
+		int size = Math.min(left.size(), right.size());
+		for (int i = 0; i < size; i++) {
+			int diff = Integer.compare(left.get(i).intValue(), right.get(i).intValue());
+			if (diff != 0) {
+				return diff;
+			}
+		}
+		return Integer.compare(left.size(), right.size());
 	}
 
 	private void rememberGeneratedCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
@@ -4061,6 +4105,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			this.first = first;
 			this.second = second;
 			this.reducedPairCost = reducedPairCost;
+		}
+	}
+
+	private static final class NonElementaryNegativeRoute {
+		final ArrayList<Integer> sequence;
+		final double reducedCost;
+
+		NonElementaryNegativeRoute(ArrayList<Integer> sequence, double reducedCost) {
+			this.sequence = new ArrayList<Integer>(sequence);
+			this.reducedCost = reducedCost;
 		}
 	}
 

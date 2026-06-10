@@ -137,6 +137,10 @@ public class GCBBFullDomainComparisonTest {
 				mode += "-scalarOff";
 			}
 		}
+		if (config.useGCNGBBStyleNgDssrPricing) {
+			mode += "-ng-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
+					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
+		}
 		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
 				: (config.useGCNGBBStyleNgDssrPricing ? NG_DSSR_ENGINE
 						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE)));
@@ -214,6 +218,9 @@ public class GCBBFullDomainComparisonTest {
 				config.ngDssrInitialNgSetMode);
 		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrInitialSize",
 				config.ngDssrInitialNgSetSize);
+		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
+				config.ngDssrNonElementaryRouteUpdateLimit);
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalJoinBestThresholdMode = System.getProperty(

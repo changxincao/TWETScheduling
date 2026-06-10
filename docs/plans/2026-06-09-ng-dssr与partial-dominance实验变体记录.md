@@ -242,3 +242,11 @@ join 阶段当前先检查 crossing arc 的直接禁弧，再用 `backward.ngMem
 代码清理方面，当前 graph/single-point 实际使用的 key 已经是 `extensionSet`，原来的 `dominanceUnavailableSet` 只在构造阶段保存，后续没有参与 `Label`、`PaperDominanceGraph` 或 single-point store 的比较；`dominanceKey` 也始终等于 `extensionSet`。本次删除 `NgDominanceSets` 包装类、`FunctionLabel.dominanceUnavailableSet` 字段和对应构造传参，改为直接构造并传递 `PackedBitSet extensionSet`。这不改变支配语义，只是把“实际用的是 extensionSet”写清楚，避免注释和字段名继续暗示 graph 同时使用另一个不可达集合。
 
 同时更新了类头和扩展过滤注释。当前 ng-DSSR 的 label 确实维护 `ngMemorySet`，重复任务不是靠 `visitedSet` 阻止扩展，而是在恢复真实 route 后判断 elementary/non-elementary 并用 DSSR 更新 ng-set；`canExtendForward/Backward` 中即时检查的是当前直连 forbidden/pricingOnly arc。验证方面，`rg` 确认 `dominanceUnavailableSet`、`dominanceKey`、`NgDominanceSets` 等旧名字已无残留，focused `javac -encoding UTF-8 -cp "lib/*;src" src/TWETBPC/GC/GCNGBBStyleBidirectionalNgDssr.java` 通过。该修改只清理冗余和注释，不新增 dominance 条件。
+
+28. 2026-06-10 joinBest 模式与 ng-DSSR 轮数关系
+
+继续复核 `JoinBestThresholdMode` 后，需要修正对默认配置的直觉判断。当前 `TWETBPCConfig.bidirectionalJoinBestThresholdMode` 默认值是 `zero`，不是 `bestUB`。`GCBBFullDomainComparisonTest` 只从 `twet.bpc.fullDomainCompare.joinBestMode` 读取覆盖值；没有显式传参时仍使用默认 `zero`。近期 013 ratio 和 pricingOnly 等日志中的 exact pricing 明细也打印为 `joinBest mode=ZERO/.../recordPruned=0`，说明这些测试不是在 `BEST_RECORD` 下跑的。
+
+因此，当前 ng-DSSR 迭代次数偏多不能归因于 `BEST_RECORD` 把非最优但仍为负的列砍掉。`BEST_RECORD` 的确会只保留刷新 bestRC 的负列，可能导致每轮加列少、RMP 迭代变多；但近期 ng-DSSR 对照没有使用它。当前更合理的解释仍是：ng-relaxation 产生较多 non-elementary negative route，这些 route 只用于更新 ng-set、不进主问题；同时每轮真正 elementary 的负列数量不足，导致 DSSR 需要多轮收紧，exact calls 增多。
+
+从正式策略角度看，`BEST_RECORD` 不适合作为默认。若要在 join 阶段利用当前 bestRC，又不想丢掉普通负列，更合理的是 `BEST_UB`：它只用 bestRC 做 lower-bound 剪枝，未被剪掉的真实负列仍可进入候选池。后续若想比较 join 剪枝强度，应优先做 `ZERO` 与 `BEST_UB` 的同口径对照；`BEST_RECORD` 只保留为压缩候选数量的诊断模式。

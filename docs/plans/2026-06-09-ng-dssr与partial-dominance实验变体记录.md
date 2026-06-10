@@ -250,3 +250,11 @@ join 阶段当前先检查 crossing arc 的直接禁弧，再用 `backward.ngMem
 因此，当前 ng-DSSR 迭代次数偏多不能归因于 `BEST_RECORD` 把非最优但仍为负的列砍掉。`BEST_RECORD` 的确会只保留刷新 bestRC 的负列，可能导致每轮加列少、RMP 迭代变多；但近期 ng-DSSR 对照没有使用它。当前更合理的解释仍是：ng-relaxation 产生较多 non-elementary negative route，这些 route 只用于更新 ng-set、不进主问题；同时每轮真正 elementary 的负列数量不足，导致 DSSR 需要多轮收紧，exact calls 增多。
 
 从正式策略角度看，`BEST_RECORD` 不适合作为默认。若要在 join 阶段利用当前 bestRC，又不想丢掉普通负列，更合理的是 `BEST_UB`：它只用 bestRC 做 lower-bound 剪枝，未被剪掉的真实负列仍可进入候选池。后续若想比较 join 剪枝强度，应优先做 `ZERO` 与 `BEST_UB` 的同口径对照；`BEST_RECORD` 只保留为压缩候选数量的诊断模式。
+
+29. 2026-06-10 PaperDominanceGraph 是否使用 visitedSet
+
+本次专门检查 `PaperDominanceGraphs`、`PaperDominanceGraph`、`IndexedPaperDominanceGraph` 和 `PartialListDominanceStore`，结论是当前正在使用的 paper dominance backend 没有把 `visitedSet` 放进支配判断。`PaperDominanceGraphs.create()` 当前返回经典 `PaperDominanceGraph`；`insertOrDominate(label)` 只用 `label.reachableSet` 找同 key 节点或 terminal superset 节点，再把这些节点的 `dominanceEnvelope` 与 `label.frontier` 比较。新节点也只保存 `reachableKey = label.reachableSet.copy()`、label list 和 envelope，不保存 visited 集合。single-point 查询 `dominatesSinglePoint()` 同样只传入 reachable key、时间点和值。
+
+`PaperDominanceGraph` 的传播裁剪、subset/superset 查找和 envelope 合并也只围绕 `reachableKey` 与 `frontier` 展开。实验保留的 `IndexedPaperDominanceGraph` 结构相同，也只保存 reachable key、labels 和 envelope；当前运行入口还没有使用 indexed backend。`PartialListDominanceStore` 也只检查 `existing.reachableSet.isSupersetOf(label.reachableSet)` 和函数裁剪，不看 `visitedSet`。
+
+因此，就当前 ng-DSSR 路径而言，`visitedSet` 只用于恢复真实 route、join/sequence 检查以及最终判断 elementary/non-elementary，不会在 `PaperDominanceGraph.insertOrDominate()` 中造成额外的 elementary dominance 条件。剩余风险仍回到 `extensionSet/reachableSet` 本身是否是正确的 ng dominance key，而不是 graph 内部偷偷使用了真实 visited 集合。

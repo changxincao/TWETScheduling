@@ -20,6 +20,7 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - PASS: findMinimal: left/right position selection on continuous and discontinuous endpoints
 - PASS: dominates: rejects insufficient domain coverage
 - PASS: mergeMinimum: overlapping domains under forward frontier semantics
+- PASS: mergeMinimum: changed return ignores equal structure and reports strict improvement
 - FAIL: mergeMinimum disjoint-left domain throws exception. IllegalArgumentException: mergeMinimum requires positive overlap: this=[5.0,8.0], g=[0.0,3.0]
 - FAIL: mergeMinimum disjoint-right domain throws exception. IllegalArgumentException: mergeMinimum requires positive overlap: this=[5.0,8.0], g=[10.0,12.0]
 - PASS: updateDominatedIntervals: full domination
@@ -32,4 +33,4 @@ Reference idea: route-evaluation operations in Ibaraki et al. style piecewise-li
 - WARN: random sweep found failures. failureCount=1 / 500
 - PASS: random frontier sweep: mergeMinimum on 500 prefix-minimized cases
 
-Summary: passed=23, warnings=2, failed=3
+Summary: passed=24, warnings=2, failed=3

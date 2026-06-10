@@ -1,2 +1,8 @@
 /bin/
 /target/
+*.class
+/.history/
+/.serena/
+/.spec-workflow/
+/tmp/
+/test-results/

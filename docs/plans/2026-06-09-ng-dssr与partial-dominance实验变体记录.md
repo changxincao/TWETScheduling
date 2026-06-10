@@ -258,3 +258,15 @@ join 阶段当前先检查 crossing arc 的直接禁弧，再用 `backward.ngMem
 `PaperDominanceGraph` 的传播裁剪、subset/superset 查找和 envelope 合并也只围绕 `reachableKey` 与 `frontier` 展开。实验保留的 `IndexedPaperDominanceGraph` 结构相同，也只保存 reachable key、labels 和 envelope；当前运行入口还没有使用 indexed backend。`PartialListDominanceStore` 也只检查 `existing.reachableSet.isSupersetOf(label.reachableSet)` 和函数裁剪，不看 `visitedSet`。
 
 因此，就当前 ng-DSSR 路径而言，`visitedSet` 只用于恢复真实 route、join/sequence 检查以及最终判断 elementary/non-elementary，不会在 `PaperDominanceGraph.insertOrDominate()` 中造成额外的 elementary dominance 条件。剩余风险仍回到 `extensionSet/reachableSet` 本身是否是正确的 ng dominance key，而不是 graph 内部偷偷使用了真实 visited 集合。
+
+30. 2026-06-10 当前一轮 DSSR 后的 ng-set 更新与入列流程
+
+当前 `GCNGBBStyleBidirectionalNgDssr.solve()` 的外层循环是：初始化当前 ng-neighborhood 与可复用 completion bound，然后重复执行一轮 ng-relaxed bidirectional pricing。每轮开始时清空 `nonElementaryNegativeSequences` 和本轮 `generatedColumns`，再调用 `executeOneNgDssrPricingRound(lp)` 生成 label、做 join 和 forward-sink 收尾。
+
+一轮内部，label 扩展使用当前 `ngNeighborhoodByJob` 更新 ng-memory，公式为 `M'=(M∩N_current)∪{current}`。扩展阶段允许真实重复访问，只要重复 job 不在当前 ng-memory 中。join 或 forward-sink 得到负 reduced-cost 序列后，`tryGenerateColumn()` 先恢复真实 sequence，再检查是否 elementary。若 sequence 无重复，则按 signature 去重、按 reduced cost 进入本地 top-K 候选堆；若 sequence 有重复，则不进主问题候选池，只用 `recordNonElementaryNegativeSequence()` 记录本轮 reduced cost 最负的 non-elementary negative route。
+
+一轮结束后，若 `generatedColumns` 非空，说明本轮已经找到真实 elementary 负列，`solve()` 直接返回这些列给 pricing engine，后续由外层 BPC 把这些列加入 pool/RMP 并重解 LP。此时即使本轮也见过 non-elementary negative route，当前实现不会继续收紧 ng-set，而是优先把合法负列交给主问题。若 `generatedColumns` 为空但存在 non-elementary negative route，则调用 `updateNgNeighborhoodsFromNonElementaryRoutes()` 收紧 ng-set 并开始下一轮。
+
+ng-set 更新规则是：对记录的 non-elementary route，逐个找重复 job 的两次出现位置；对两次出现之间的每个 middle job，把 repeated job 加入 `N_middleJob`。这样下一轮扩展经过 middle job 后，ng-memory 会继续记住 repeated job，从而阻止同一条重复结构再次作为 ng-feasible route 出现。当前每轮只记录 reduced cost 最负的一条 non-elementary negative route，因此一次更新可能增加多个 `N_j` 条目，但来源只有这条最负重复 route。如果发现存在 non-elementary negative route 但 update 没有改变任何 ng-set，代码会抛 `IllegalStateException`，因为按当前 DSSR 更新语义这不应发生。
+
+最终加入主问题的列只来自 `generatedColumns`，也就是本轮确认 elementary、signature 未重复、reduced cost 为负并通过候选堆保留的列。non-elementary negative route 从不直接入 pool/RMP，只用于 DSSR 更新。`BEST_RECORD` 若开启会进一步要求 elementary 负列刷新 bestRC 才保留；但当前默认和近期 ng-DSSR 测试均为 `ZERO`，所以本流程通常保留普通负列。

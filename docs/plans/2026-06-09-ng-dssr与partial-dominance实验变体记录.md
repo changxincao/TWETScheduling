@@ -357,3 +357,13 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 首轮 exact 细节显示，`Tmid≈T` 仍然几乎消掉 backward 和 join：默认首轮 `fwKept=2040,bwKept=1420,joinPairs=69543,funcEval=67673,added=207,time=4325.944ms`；`Tmid≈T` 首轮 `fwKept=3795,bwKept=1,joinPairs=98,funcEval=96,forwardSinkNeg=133,added=171,time=4275.347ms`。两者首轮时间接近，说明 40 任务 root 下省掉 join 后，forward 单侧标签增加基本抵消了收益；同时 `Tmid≈T` 首轮负列更少，后续 exact calls 从 `12` 增到 `22`，heuristic calls 从 `48` 增到 `63`，最终总时间显著变差。
 
 当前判断进一步加强：规模上来后，默认双向切分的价值更明显。`Tmid≈T` 可以减少 join，但会让 forward 侧承担几乎全部状态空间，并减少每轮有效补列；在 40 任务 root 上已经明显不划算。
+
+40. 2026-06-10 恢复默认 Tmid 口径与 partial dominance 复核
+
+在多算例 root 对照后，本次把 `GCNGBBStyleBidirectional` 和 `GCNGBBStyleBidirectionalNgDssr` 中的显式 `bidirectionalRootLocalHorizonMidpointRatio` 判断改回严格 `<1.0`。也就是说，`midpointRatio=1.0` 不再把 `Tmid` 强制推到右侧 `T`，默认仍走当前双向 half-domain/probe 口径。原因是前面的 30/40 任务 root 对照已经说明：`Tmid≈T` 只是在部分首轮 exact pricing 中省掉 backward/join，看起来局部更快；但它负列更少、pricing 轮数更多，整体不如默认双向稳定。后续若还要测试单向化，应单独新增诊断开关，而不是复用 midpoint ratio 的正常取值语义。
+
+同时复核了 `GCNGBBStyleBidirectionalPartialDominance` 当前实现。它仍是默认关闭的独立实验 engine，只替换 half-domain elementary 分支的 dominance backend，不接入 ng/DSSR/SRI。`PartialListDominanceStore` 使用 flat list 保存 active labels：当已有 label 的 `reachableSet` 是新 label 的超集，并且已有 frontier 在某些时间区间上不劣于新 frontier 时，通过 `PiecewiseLinearFunction.updateDominatedIntervals()` 把新 frontier 的被支配区间置为 big-M；如果 frontier 被全部清空则丢弃 label，否则保留剩余未被支配区间。反向处理已有 label 时同理。single-point label 也只在普通 graph 中找 `reachableSet` 超集且该点函数值不劣的 label。
+
+从语义上看，这个 partial-list 版本对当前“不带 ng 的 elementary half-domain”分支是合理的：`visitedSet` 不参与 dominance，支配条件仍然是 terminal job 相同、未来可扩展集合不更差、frontier 在对应时间区间不更差。`updateDominatedIntervals()` 会按方向 normalize，forward 保留右端 big-M 尾段以便 prefix-min 闭包，backward 使用对应方向 normalize。当前没有发现会直接漏掉负列的硬错误。需要注意的是，这个结论不适用于 ng-DSSR；ng-DSSR 的 memory/reach 语义是另一套问题，不能把 partial-list 直接搬过去。
+
+主要风险仍是工程成熟度和性能，而不是默认求解正确性。partial-list 是 `O(labels^2 * function operations)` 的全扫描结构，可能在大节点比当前 paper dominance graph 更慢；它还会就地修改 label frontier，因此必须依赖 PWLF 的 big-M/normalize 语义保持稳定。验证方面，本次 focused `javac` 覆盖 `GCNGBBStyleBidirectional`、`GCNGBBStyleBidirectionalNgDssr`、`GCNGBBStyleBidirectionalPartialDominance` 和 `PartialListDominanceStore` 通过；`tmp-wet020_001_2m,maxNodes=1,partialDominance=true` smoke 返回 `ROOT_PROCESSED,obj=bound=6343,valid=true`，exact 为 `0.720s/1 call`。当前建议仍是：partial dominance 保持默认关闭，只作为诊断/对照分支；若未来要转正，必须补小算例与普通 paper graph 的 negative-column/最终 bound 对拍。

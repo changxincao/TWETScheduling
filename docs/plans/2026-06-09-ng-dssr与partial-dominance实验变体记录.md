@@ -328,3 +328,9 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 对照口径为 013 root-only：`ngDssr=true, nearestK,size=8,routeUpdateLimit=10, completionBound=allCycles, midpointProbe=false, ALNS seed on, RMIH off, maxNodes=1`，不打开 pricingOnly subtree。默认 midpoint 结果为 `solve=16.327s, exact=6.526s/9 calls, heuristic=5.983s/32 calls, pool=5378`；`Tmid≈T` 结果为 `solve=15.984s, exact=4.640s/6 calls, heuristic=7.336s/40 calls, pool=5256`。上下界相同，都是 `inc=14908,bound=14287.625,gap=4.1614%`。
 
 从日志看，`Tmid≈T` 后 backward 侧几乎只剩虚拟 sink root，`bw kept=1`、`halfWindowIneligible bw=29`，join pairs 降到几十甚至为零；负列主要来自 forward sink，因此 exact pricing 变快。但这也意味着它不再是平衡双向搜索，生成列更少，导致启发式 pricing 和 LP/pricing 轮数变多。当前结论是：root 上 `Tmid≈T` 能降低 ng exact 时间，但总时间只小幅改善，且列生成路径更偏，不能据此直接作为默认策略，需要继续看深层节点是否会因为列少或单向化而变慢。
+
+37. 2026-06-10 root `Tmid≈T` 变快原因的解释
+
+`Tmid≈T` 在 root 上变快并不矛盾。这个设置确实让双向几乎退化为单向：backward 侧基本只剩 sink root，第一轮日志里 `bw kept=1`、`halfWindowIneligible bw=29`。但 root 节点当前并不是 forward 标签已经爆炸、必须靠 backward 分担的场景；相反，默认 midpoint 下还要构造一批 backward label，并做大量 forward/backward join。对照第一轮 exact pricing，默认 midpoint 的 join pairs 约 `52927`，函数评估约 `47911`；`Tmid≈T` 后 join pairs 只有 `77`，函数评估 `73`，所以 exact pricing 直接变快。
+
+代价也很明显：`Tmid≈T` 不是更好的双向切分，而是用“少做 backward 和 join”换速度。第一轮 exact 生成负列从默认的 `162` 降到 `4`，列生成路径更依赖 forward-to-sink 和后续启发式补列；总体 root 时间只从 `16.327s` 降到 `15.984s`，exact 省下的时间被更多 heuristic calls 和更多 pricing rounds 抵消了一部分。因此当前判断仍然是：root 上可作为诊断和对照，不能说明深层节点也会更稳，更不能直接替代 probe/balanced midpoint。

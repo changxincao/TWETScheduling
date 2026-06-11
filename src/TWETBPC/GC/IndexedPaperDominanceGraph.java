@@ -173,14 +173,19 @@ final class IndexedPaperDominanceGraph implements DominanceStore {
 	}
 
 	@Override
-	public boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue) {
+	public boolean dominatesSinglePoint(PackedBitSet reachableSet, int reachableCardinality, double pointTime,
+			double pointValue) {
 		PaperDominanceNode sameNode = nodeByReachableSet.get(reachableSet);
 		double best = sameNode != null && sameNode.active ? pointDominanceValue(sameNode.dominanceEnvelope, pointTime)
-				: bestTerminalSupersetPointDominanceValue(reachableSet, pointTime);
+				: bestTerminalSupersetPointDominanceValue(reachableSet, reachableCardinality, pointTime);
 		return !Utility.compareGt(best, pointValue);
 	}
 
 	private ArrayList<PaperDominanceNode> findTerminalSupersetNodes(PackedBitSet target) {
+		return findTerminalSupersetNodes(target, target.cardinality());
+	}
+
+	private ArrayList<PaperDominanceNode> findTerminalSupersetNodes(PackedBitSet target, int targetCardinality) {
 		long begin = TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
 		supersetSearchCalls++;
 		if (USE_SUPERSET_CACHE) {
@@ -195,7 +200,6 @@ final class IndexedPaperDominanceGraph implements DominanceStore {
 			supersetCacheMisses++;
 		}
 		ArrayList<PaperDominanceNode> result = new ArrayList<PaperDominanceNode>();
-		int targetCardinality = target.cardinality();
 		try {
 			ArrayList<PaperDominanceNode> candidates;
 			if (shouldUseSupersetSetTrie(targetCardinality)) {
@@ -770,9 +774,10 @@ final class IndexedPaperDominanceGraph implements DominanceStore {
 	 * 2026-05-25: single-point 查询只需要 terminal-superset 叶子上的最优 Tmid 点值；
 	 * 这里直接在 DFS 里累计最优值，避免先构造候选列表、再做第二遍扫描。
 	 */
-	private double bestTerminalSupersetPointDominanceValue(PackedBitSet target, double pointTime) {
+	private double bestTerminalSupersetPointDominanceValue(PackedBitSet target, int targetCardinality,
+			double pointTime) {
 		double best = Utility.big_M;
-		for (PaperDominanceNode node : findTerminalSupersetNodes(target)) {
+		for (PaperDominanceNode node : findTerminalSupersetNodes(target, targetCardinality)) {
 			double candidateValue = pointDominanceValue(node.dominanceEnvelope, pointTime);
 			if (Utility.compareLt(candidateValue, best)) {
 				best = candidateValue;

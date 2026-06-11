@@ -477,3 +477,11 @@ graph-partial 暂时不建议作为默认候选。它适合作为后续研究方
 该优化不改变 dominance 语义，只减少不可能成立的 bitset superset 检查和后续函数裁剪调用。为观察效果，日志新增 `cardinalitySkips`。`wet015_001_2m` root partial-list 中，`comparisons=78`，其中 `cardinalitySkips=29`；`tmp-wet030_001_2m` root 三轮 exact 中分别为 `32829/11178`、`14894/4974`、`11354/3683`。说明 cardinality 过滤命中比例不低。需要注意，本轮 30 任务 wall time 受 completion bound 构造时间波动影响很大，不能只凭单次总耗时判断该过滤的净收益；更可靠的意义是减少后续 bitset 和 PWLF 裁剪机会，作为低风险基础优化保留。
 
 后续还能考虑把 partial-list 按 `reachableCardinality` 分桶或排序：第一轮“旧 label 支配新 label”可在 cardinality 低于目标时提前停止，第二轮“新 label 裁剪旧 label”可跳过 cardinality 高于目标的前缀。但这种会改变 label 访问顺序，而 partial trim 是就地修改 frontier，访问顺序可能影响生成路径；因此暂不直接改，只记录为后续可控实验项。
+
+51. 2026-06-12 partial-list cardinality 缓存化补充
+
+前一节加入的 cardinality 必要条件过滤不是在每次比较时重新扫描 bitset。普通 label 在 `Label` 构造时已经计算并缓存 `reachableCardinality`，partial-list 两两比较直接读取该字段；因此过滤本身只是一次整数比较，只有通过必要条件后才进入 `isSupersetOf()` 和后续 PWLF 裁剪。
+
+本次进一步把 single-point dominance 的接口也改成同时传入 `reachableCardinality`。原来 single-point 只有 `reachableSet`，`PartialListDominanceStore.dominatesSinglePoint()` 会在入口处调用一次 `reachableSet.cardinality()`；现在调用点直接传 `label.reachableCardinality`，partial-list 不再在 single-point 检查中现场计数。旧 `DominanceGraph` 节点也补了 `reachableCardinality` 缓存，paper graph / indexed graph 的 single-point 路径接收该值并复用到 superset 搜索。
+
+这次修改不改变 dominance 语义，只减少重复 cardinality 计算和明显不可能成立的 superset 检查。验证方面，focused `javac` 覆盖 `DominanceStore`、三套 dominance backend 和主要双向 pricing 类通过；`wet015_001_2m,maxNodes=1,partialDominance=true` smoke 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true`，日志中 `comparisons=78,cardinalitySkips=29`，说明过滤仍正常生效。

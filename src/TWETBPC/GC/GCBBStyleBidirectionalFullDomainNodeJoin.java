@@ -767,7 +767,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			forwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, label.reachableCardinality, tMid,
+				label.minReducedCost)) {
 			label.isDominated = true;
 			forwardLabelsDominated++;
 			forwardSinglePointDominatedByGraph++;
@@ -795,7 +796,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			backwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, label.reachableCardinality, tMid,
+				label.minReducedCost)) {
 			label.isDominated = true;
 			backwardLabelsDominated++;
 			backwardSinglePointDominatedByGraph++;

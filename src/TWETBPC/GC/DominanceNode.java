@@ -18,12 +18,14 @@ import TWETBPC.Util.PackedBitSet;
 final class DominanceNode {
 
 	final PackedBitSet reachableKey;
+	final int reachableCardinality;
 	final ArrayList<Label> labels;
 	private final Direction direction;
 	PiecewiseLinearFunction labelEnvelope;
 
 	DominanceNode(PackedBitSet reachableKey, Direction direction) {
 		this.reachableKey = reachableKey.copy();
+		this.reachableCardinality = this.reachableKey.cardinality();
 		this.labels = new ArrayList<Label>();
 		this.direction = direction;
 	}

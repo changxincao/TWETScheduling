@@ -68,10 +68,14 @@ final class DominanceGraph implements DominanceStore {
 	}
 
 	@Override
-	public boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue) {
+	public boolean dominatesSinglePoint(PackedBitSet reachableSet, int reachableCardinality, double pointTime,
+			double pointValue) {
 		double best = Utility.big_M;
 		for (DominanceNode node : nodes) {
 			if (node.labelEnvelope == null || node.labelEnvelope.head == null) {
+				continue;
+			}
+			if (node.reachableCardinality < reachableCardinality) {
 				continue;
 			}
 			if (!node.reachableKey.isSupersetOf(reachableSet)) {

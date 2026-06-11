@@ -135,9 +135,9 @@ final class PartialListDominanceStore implements DominanceStore {
 	}
 
 	@Override
-	public boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue) {
+	public boolean dominatesSinglePoint(PackedBitSet reachableSet, int reachableCardinality, double pointTime,
+			double pointValue) {
 		singlePointChecks++;
-		int reachableCardinality = reachableSet == null ? 0 : reachableSet.cardinality();
 		for (Label label : labels) {
 			if (label.isDominated || label.frontier == null || label.frontier.head == null
 					|| label.reachableCardinality < reachableCardinality

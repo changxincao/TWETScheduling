@@ -36,6 +36,7 @@ interface DominanceStore {
 	 *
 	 * @return true 表示当前 graph 中已存在可支配该单点 label 的普通 label；false 表示未找到。
 	 */
-	boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue);
+	boolean dominatesSinglePoint(PackedBitSet reachableSet, int reachableCardinality, double pointTime,
+			double pointValue);
 
 }

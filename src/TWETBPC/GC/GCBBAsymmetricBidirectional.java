@@ -793,7 +793,8 @@ public class GCBBAsymmetricBidirectional {
 			forwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, dynamicHF, label.minReducedCost)) {
+		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, label.reachableCardinality, dynamicHF,
+				label.minReducedCost)) {
 			label.isDominated = true;
 			forwardLabelsDominated++;
 			forwardSinglePointDominatedByGraph++;
@@ -823,7 +824,8 @@ public class GCBBAsymmetricBidirectional {
 			backwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, dynamicHB, label.minReducedCost)) {
+		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, label.reachableCardinality, dynamicHB,
+				label.minReducedCost)) {
 			label.isDominated = true;
 			backwardLabelsDominated++;
 			backwardSinglePointDominatedByGraph++;

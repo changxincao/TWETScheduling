@@ -1424,7 +1424,8 @@ public class GCNGBBStyleBidirectional {
 			forwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+		if (FWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, label.reachableCardinality, tMid,
+				label.minReducedCost)) {
 			label.isDominated = true;
 			forwardLabelsDominated++;
 			forwardSinglePointDominatedByGraph++;
@@ -1453,7 +1454,8 @@ public class GCNGBBStyleBidirectional {
 			backwardSinglePointDominatedByStore++;
 			return InsertStatus.DOMINATED;
 		}
-		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, tMid, label.minReducedCost)) {
+		if (BWTL.get(label.jid).dominatesSinglePoint(label.reachableSet, label.reachableCardinality, tMid,
+				label.minReducedCost)) {
 			label.isDominated = true;
 			backwardLabelsDominated++;
 			backwardSinglePointDominatedByGraph++;

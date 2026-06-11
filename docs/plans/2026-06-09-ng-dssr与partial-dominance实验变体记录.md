@@ -412,3 +412,13 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 011 的 normal 结果为 `obj=13963,bound=13526.478261,solve=20.159s,exact=3.332s,calls=3,valid=true`；partial 结果为 `obj=13963,bound=13525.709677,solve=18.705s,exact=4.612s,calls=5,valid=true`。011 仍然复现根界不一致：partial 的总时间略快，但 exact 时间更慢且 calls 更多。该差异与第 42 节结论一致，主要来自旧 011 算例违反 setup time 删除单调性，使 root dual profitable window 不能作为严格 exact 剪枝前提；不能把它解释为 partial dominance 单独错误或已经严格优于 normal。
 
 当前判断不变：在满足窗口前提的算例上，应继续用更多样本对拍 normal/partial 的 bound 一致性和速度；旧 011 这类不满足前提的算例只能用于说明窗口剪枝前提的重要性，不适合作为 partial dominance 正确性的反例或正例。
+
+44. 2026-06-11 三角化算例后的 partial dominance 对照
+
+前一轮复测仍使用旧 010/011，用户指出应先把算例改成满足三角不等式/删除单调性后再比较。本轮不覆盖原始数据，而是在 `test-results/bpc/tmp-triangle-20260611/` 下生成临时三角化版本。处理方式为对转移时间 `a_ij=s_ij+p_j` 做 Floyd-Warshall 闭包，再写回 `s_ij=max(0,a_ij-p_j)`，使 `s(i,k) <= s(i,j)+p_j+s(j,k)` 成立。生成后验证 010/011 的 deletion-monotonicity violation 均为 0。
+
+测试口径仍为 root-only：`maxNodes=1`、ALNS seed、启发式 pricing、`completionBound=allCycles`、关闭 RMIH 和 midpoint probe。三角化 010 的 normal 结果为 `obj=16718,bound=16139.8,solve=25.843s,exact=6.490s,calls=4,valid=true`；partial 结果为 `obj=16718,bound=16139.8,solve=26.648s,exact=6.406s,calls=4,valid=true`。两者根界一致，exact 时间基本持平，partial 略快 `1.3%`，总时间略慢。
+
+三角化 011 的 normal 结果为 `obj=13813,bound=13323.109589,solve=24.509s,exact=5.909s,calls=5,valid=true`；partial 结果为 `obj=13813,bound=13323.109589,solve=22.778s,exact=4.572s,calls=4,valid=true`。两者根界一致，partial exact 约快 `22.6%`，总时间约快 `7.1%`。这说明前面旧 011 的 bound 差异确实来自算例前提不满足，而不是 partial dominance 必然导致错误 bound。
+
+当前更合理的结论是：在满足删除单调性的三角化版本上，两个测试算例的 normal/partial root bound 已一致；速度方面 partial 在 011 更好，在 010 基本持平。样本仍然很少，partial 还不能直接设为默认，但它作为候选 dominance backend 的正确性风险比旧 011 结果显示的要小，后续应在新生成的合规算例上继续扩大样本。

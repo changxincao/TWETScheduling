@@ -433,3 +433,13 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 当前 normal 叠加 graph partial 后，不能期待与 partial-list 完全一致。原因是两者不是同一引擎只替换一个函数：partial-list 是 `PartialListDominanceStore`，按同 terminal 的 active label 做近似全量两两裁剪；graph-partial 是 `PaperPartialDominanceGraph`，在 paper dominance graph 的节点包络、前驱包络和传播结构上做区间裁剪。前者更直接、更强地裁剪局部 frontier，但复杂度偏二次；后者更贴近 normal graph 结构，便于和 paper graph 对照，但裁剪机会受 graph 节点结构和传播顺序影响。再加上 graph-partial 当前挂在 ng-DSSR 入口上，即使 full ng-set 语义上接近 elementary，也仍多了 ng-memory、DSSR 记账和不同初始化路径，因此负列数和列池轨迹不必与 elementary partial-list 完全一致。
 
 当前效率结论应收紧为：partial-list 在这个 30 root 上 exact 略快于 ordinary normal，但总时间略慢，说明 exact 局部收益被启发式 pricing、主问题和列生成路径差异抵消；graph-partial 在 full-ng 入口上总时间略快于 full-ng normal，但 exact 时间几乎相同，收益主要来自较少的 pricing/heuristic 轮次和列池差异，而不是单次 exact 大幅加速。二者目前都更适合作为实验对照，不宜直接宣布稳定优于 normal。
+
+46. 2026-06-11 小规模跟踪 graph-partial 与 partial-list 的 label 差异
+
+为解释 full-ng normal 与 full-ng graph-partial 为什么 label 数会不同，追加运行 `wet015_001_2m` root-only 小规模对照。三组结果均为 `obj=bound=3360, valid=true`：full-ng normal 为 `solve=0.560s, exact=0.148s/1 call`，full-ng graph-partial 为 `0.669s, exact=0.163s/1 call`，elementary partial-list 为 `0.564s, exact=0.155s/1 call`。
+
+这个小例子显示差异从 dominance 插入阶段就会出现。full-ng normal 的 exact 统计为 `labels fw kept/dominated=23/2, bw=9/0`，`paperGraph labels kept/rejected=32/2`，`forwardExtend constructed=249`。graph-partial 的统计为 `labels fw kept/dominated=23/0, bw=9/0`，`paperPartialGraph labels kept/rejected=32/0`，但有 `partialTrim checks/partial/full=12/12/0`，同时 `forwardExtend constructed=233`、`infeasible=11`。也就是说，graph-partial 没有把那类 label 直接整条删掉，而是把 frontier 中被 envelope 覆盖的时间区间裁成不可行；这些裁剪区间随后会改变子 label 的可扩展时间域，使部分后续扩展不再构造或变成 infeasible。因此 label 数量不同不是 bug，也不是简单的“多个 label 占优同一个 label 应该等价”，而是 partial dominance 本身改变了 label frontier 的定义域。
+
+同一个 15 任务上，partial-list 与 graph-partial 的外部统计基本一致：`labels fw/bw`、join groups、join pairs、candidatePool 都相同；但 partial-list 的 `trims partial/full=24/0`，graph-partial 为 `12/0`。这说明在很小规模上，两种 partial 可能最终走到同一组候选列，但裁剪来源和次数已经不同。规模稍大到 21 任务时差异开始显性化：partial-list 第一轮 `bw kept=70`、join candidates `249`、funcEval `71`，graph-partial 为 `bw kept=72`、join candidates `267`、funcEval `72`；30 任务第一轮 partial-list 返回 `35` 条负列，graph-partial 返回 `37` 条。原因是 partial-list 是同 terminal active label 的 flat-list 两两裁剪，而 graph-partial 是 paper dominance graph 上的节点包络、前驱包络和传播裁剪；后者只在 graph 结构认为可比较的 envelope 路径上裁剪，不能覆盖 flat-list 的所有两两比较机会。
+
+当前结论是：normal、graph-partial、partial-list 三者在根节点 bound 一致时，可以认为都没有明显漏掉负列的证据；但它们保留的 frontier 区间、后续扩展、join 候选和入池负列数天然可能不同。partial-list 通常裁剪更直接、更强，但有二次比较开销；graph-partial 更贴近原 paper graph 结构，便于作为 normal 的增量实验，但不能期待与 partial-list 逐 label 等价。

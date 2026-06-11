@@ -443,3 +443,11 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 同一个 15 任务上，partial-list 与 graph-partial 的外部统计基本一致：`labels fw/bw`、join groups、join pairs、candidatePool 都相同；但 partial-list 的 `trims partial/full=24/0`，graph-partial 为 `12/0`。这说明在很小规模上，两种 partial 可能最终走到同一组候选列，但裁剪来源和次数已经不同。规模稍大到 21 任务时差异开始显性化：partial-list 第一轮 `bw kept=70`、join candidates `249`、funcEval `71`，graph-partial 为 `bw kept=72`、join candidates `267`、funcEval `72`；30 任务第一轮 partial-list 返回 `35` 条负列，graph-partial 返回 `37` 条。原因是 partial-list 是同 terminal active label 的 flat-list 两两裁剪，而 graph-partial 是 paper dominance graph 上的节点包络、前驱包络和传播裁剪；后者只在 graph 结构认为可比较的 envelope 路径上裁剪，不能覆盖 flat-list 的所有两两比较机会。
 
 当前结论是：normal、graph-partial、partial-list 三者在根节点 bound 一致时，可以认为都没有明显漏掉负列的证据；但它们保留的 frontier 区间、后续扩展、join 候选和入池负列数天然可能不同。partial-list 通常裁剪更直接、更强，但有二次比较开销；graph-partial 更贴近原 paper graph 结构，便于作为 normal 的增量实验，但不能期待与 partial-list 逐 label 等价。
+
+47. 2026-06-11 partial 裁剪为什么不等价于简单聚合占优
+
+进一步解释 partial-list 与 graph-partial 的差异。若只看一个静态目标函数 `L` 和同一批支配函数 `A/B`，先聚合成 `E=min(A,B)` 再裁剪 `L`，与分别用 `A`、`B` 顺序裁剪 `L`，理论上应当得到相同的剩余定义域。例如 `L(t)=10,t∈[0,10]`，`A(t)=5,t∈[0,4]`，`B(t)=5,t∈[6,10]`，则两种方式都会删掉 `[0,4]∪[6,10]`，只留下 `(4,6)`。如果当前问题只是“多个 label 同时占优同一个 label”，用户的直觉是对的。
+
+但 labeling 里的 partial dominance 不是一次静态集合操作。一个 label 被部分裁剪后，不是立刻消失，而是带着缩小后的 frontier 继续作为后续扩展源和后续支配者。比如 `L(t)=10,t∈[0,10]`，支配函数只覆盖 `[0,6]`，partial 后 `L` 仍在 `[6,10]` 活着；如果下一步扩展需要 `t≤5`，它就不能再扩展，如果下一步扩展需要 `t≥8`，它仍然可以扩展。因此裁剪会改变后续 constructed extension、infeasible extension、join 候选和负列集合。这也是 15 任务日志中 normal `forwardExtend constructed=249`，graph-partial 降到 `233` 并出现 `11` 个 infeasible 的直接原因。
+
+另一个差异是“进入聚合 envelope 的 label 集合”并不总是和 partial-list 的两两扫描集合完全相同。partial-list 对同 terminal active label 做 flat-list 检查，只要 existing 的 reachableSet 是目标的超集，就直接裁剪；graph-partial 则依赖 paper dominance graph 的同节点、前驱 envelope、superset/subset 结构和传播顺序。它压缩了很多比较，但也意味着 partial trim 的时机和对象不等价于 flat-list 全扫描。于是即使最终 bound 一致，标签数量、被裁剪区间、join 候选和负列数量仍可能不同。

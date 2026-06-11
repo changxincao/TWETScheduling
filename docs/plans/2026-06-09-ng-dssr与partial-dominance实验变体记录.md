@@ -485,3 +485,11 @@ graph-partial 暂时不建议作为默认候选。它适合作为后续研究方
 本次进一步把 single-point dominance 的接口也改成同时传入 `reachableCardinality`。原来 single-point 只有 `reachableSet`，`PartialListDominanceStore.dominatesSinglePoint()` 会在入口处调用一次 `reachableSet.cardinality()`；现在调用点直接传 `label.reachableCardinality`，partial-list 不再在 single-point 检查中现场计数。旧 `DominanceGraph` 节点也补了 `reachableCardinality` 缓存，paper graph / indexed graph 的 single-point 路径接收该值并复用到 superset 搜索。
 
 这次修改不改变 dominance 语义，只减少重复 cardinality 计算和明显不可能成立的 superset 检查。验证方面，focused `javac` 覆盖 `DominanceStore`、三套 dominance backend 和主要双向 pricing 类通过；`wet015_001_2m,maxNodes=1,partialDominance=true` smoke 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true`，日志中 `comparisons=78,cardinalitySkips=29`，说明过滤仍正常生效。
+
+52. 2026-06-12 partial-list cardinality 正确性与分桶思路
+
+继续复查当前代码后，`reachableCardinality` 缓存的正确性依赖一个简单不变式：`Label` 创建后 `reachableSet` 不再被原地修改。当前 GC 代码中 `label.reachableSet` 后续主要用于 `nextSetBit()` 遍历、`isSupersetOf()` 判断和作为 dominance key，未发现对该对象的 set/clear 原地修改；子 label 使用新构造的 reachable set。因此缓存值与集合内容保持一致，可以安全用于必要条件过滤。
+
+cardinality 过滤本身也是严格必要条件，不会误删 label。若 `A.reachableSet` 要成为 `B.reachableSet` 的超集，则必然有 `|A| >= |B|`。当前新增逻辑只在该必要条件不满足时跳过后续 `isSupersetOf()` 和函数裁剪；满足时仍按原来的 superset + frontier partial trim 判断。因此它只减少比较成本，不改变 partial dominance 的支配集合。
+
+partial-list 后续可以按 `reachableCardinality` 分桶，以减少无效比较。第一遍“旧 label 裁剪新 label”只需要扫描 cardinality 不小于新 label 的 bucket；第二遍“新 label 裁剪旧 label”只需要扫描 cardinality 不大于新 label 的 bucket。这样不会改变理论支配条件，但实现时要注意 partial trim 是就地修改 frontier，且当前 list 顺序会影响数值路径和生成列轨迹；因此建议先做一个保守版本：bucket 只用于缩小候选范围，每个 bucket 内仍保持插入顺序，先不排序、不提前重排 active labels。这个版本改动较小，也便于和当前 flat-list 对拍。

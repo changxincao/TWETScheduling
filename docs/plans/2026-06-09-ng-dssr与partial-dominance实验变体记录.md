@@ -402,3 +402,13 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 根因仍落在 dual profitable window 的理论前提。对代表列，只有 job 14 超出 normal final dual window；如果删除 job 14，序列 reduced cost 反而从 `-31.652174` 变成 `+262.304348`，不存在“删掉窗外 job 后得到更好负列”的单调性。直接检查 setup time 可见 `13->14->23` 的连接时间为 `s(13,14)+p14+s(14,23)=2+2+1=5`，而直连 `s(13,23)=31`，删除 job 14 会让后继连接增加 26。该 011 数据共有 259 组三元组违反类似 `s(i,k) <= s(i,j)+p_j+s(j,k)` 的删除单调性。因此当前这批旧算例不满足 root dual profitable window 作为 exact 剪枝所需的结构前提。
 
 本次不修改正式算法逻辑。后续默认算例生成应直接保证 setup time/cost 满足相应三角不等式或删除单调性；在不满足该前提的历史算例上，带 dual profitable window 的 exact pricing 只能作为启发式加速口径使用，不能把最终 bound 当成严格列生成收敛证明。为了后续继续复查，保留 `diagnosticCrossCheckPartialDominance` 默认关闭开关；它只在主 pricing 返回空列后运行另一套 dominance 对拍，不影响正式求解。
+
+43. 2026-06-11 partial dominance 二次复测
+
+按用户要求重新选 2 个算例复测 normal 与 partial dominance。配置沿用第 41 节的 root-only 对照口径：`maxNodes=1`、ALNS seed、启发式 pricing、`completionBound=allCycles`、关闭 RMIH 和 midpoint probe。010 用于确认正常一致性，011 用于确认前面定位出的旧算例窗口前提问题是否仍然复现。
+
+010 的 normal 结果为 `obj=16489,bound=16148.8,solve=26.716s,exact=5.373s,calls=3,valid=true`；partial 结果为 `obj=16489,bound=16148.8,solve=24.814s,exact=4.319s,calls=3,valid=true`。因此在 010 上两者根界一致，partial 的 exact 时间约快 `19.6%`，总时间约快 `7.1%`。
+
+011 的 normal 结果为 `obj=13963,bound=13526.478261,solve=20.159s,exact=3.332s,calls=3,valid=true`；partial 结果为 `obj=13963,bound=13525.709677,solve=18.705s,exact=4.612s,calls=5,valid=true`。011 仍然复现根界不一致：partial 的总时间略快，但 exact 时间更慢且 calls 更多。该差异与第 42 节结论一致，主要来自旧 011 算例违反 setup time 删除单调性，使 root dual profitable window 不能作为严格 exact 剪枝前提；不能把它解释为 partial dominance 单独错误或已经严格优于 normal。
+
+当前判断不变：在满足窗口前提的算例上，应继续用更多样本对拍 normal/partial 的 bound 一致性和速度；旧 011 这类不满足前提的算例只能用于说明窗口剪枝前提的重要性，不适合作为 partial dominance 正确性的反例或正例。

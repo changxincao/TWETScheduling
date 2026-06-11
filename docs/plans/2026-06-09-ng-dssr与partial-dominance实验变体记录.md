@@ -422,3 +422,14 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 三角化 011 的 normal 结果为 `obj=13813,bound=13323.109589,solve=24.509s,exact=5.909s,calls=5,valid=true`；partial 结果为 `obj=13813,bound=13323.109589,solve=22.778s,exact=4.572s,calls=4,valid=true`。两者根界一致，partial exact 约快 `22.6%`，总时间约快 `7.1%`。这说明前面旧 011 的 bound 差异确实来自算例前提不满足，而不是 partial dominance 必然导致错误 bound。
 
 当前更合理的结论是：在满足删除单调性的三角化版本上，两个测试算例的 normal/partial root bound 已一致；速度方面 partial 在 011 更好，在 010 基本持平。样本仍然很少，partial 还不能直接设为默认，但它作为候选 dominance backend 的正确性风险比旧 011 结果显示的要小，后续应在新生成的合规算例上继续扩大样本。
+45. 2026-06-11 graph partial 与 partial-list 的 30 任务 root 对照校正
+
+本轮重新检查“30 任务求解不动”和“normal 叠加 partial 后是否应接近 partial-list”的问题。先校正一个测试口径：前一次 `tmp-ng-full-normal-30-20260611` 使用的是 `twet.bpc.maxNodes=1`，但 `GCBBFullDomainComparisonTest` 实际读取的是 `twet.bpc.fullDomainCompare.maxNodes`，因此那次并没有真正限制为 root-only，不能作为“30 root pricing 卡住”的证据。
+
+按正确 root-only 口径重跑 `tmp-wet030_001_2m` 后，四组都能正常返回，且 obj/bound 一致。普通 elementary normal 为 `solve=7.153s, exact=1.423s/3 calls, pool=4571`；普通 partial-list 为 `solve=7.449s, exact=1.397s/3 calls, pool=4513`；full-ng normal 为 `solve=7.364s, exact=1.475s/3 calls, pool=4571`；full-ng graph-partial 为 `solve=6.964s, exact=1.477s/3 calls, pool=4506`。因此，当前 30 root 并没有因为 partial dominance 或 full-ng 直接“求解不动”；之前的不动更可能是继续进入后续分支搜索后的现象。
+
+从 exact 统计看，partial-list 和 graph-partial 都会减少负列数量和 join 工作量，但幅度和路径不同。普通 normal 第一轮 exact 加入 `102` 条负列，partial-list 第一轮加入 `35` 条，full-ng graph-partial 第一轮加入 `37` 条；对应 join candidates 约为 `9853 / 5095 / 5263`，函数评价约为 `6484 / 3174 / 3296`。这说明 partial 裁剪确实减少了后续 join，但不是免费收益。partial-list 需要 flat-list 两两比较，第一轮比较约 `32829` 次；graph-partial 复用 dominance graph 的 superset/subset 和 envelope 传播，第一轮 partial trim 为 `checks/partial/full=732/569/163`，图遍历也仍有成本。
+
+当前 normal 叠加 graph partial 后，不能期待与 partial-list 完全一致。原因是两者不是同一引擎只替换一个函数：partial-list 是 `PartialListDominanceStore`，按同 terminal 的 active label 做近似全量两两裁剪；graph-partial 是 `PaperPartialDominanceGraph`，在 paper dominance graph 的节点包络、前驱包络和传播结构上做区间裁剪。前者更直接、更强地裁剪局部 frontier，但复杂度偏二次；后者更贴近 normal graph 结构，便于和 paper graph 对照，但裁剪机会受 graph 节点结构和传播顺序影响。再加上 graph-partial 当前挂在 ng-DSSR 入口上，即使 full ng-set 语义上接近 elementary，也仍多了 ng-memory、DSSR 记账和不同初始化路径，因此负列数和列池轨迹不必与 elementary partial-list 完全一致。
+
+当前效率结论应收紧为：partial-list 在这个 30 root 上 exact 略快于 ordinary normal，但总时间略慢，说明 exact 局部收益被启发式 pricing、主问题和列生成路径差异抵消；graph-partial 在 full-ng 入口上总时间略快于 full-ng normal，但 exact 时间几乎相同，收益主要来自较少的 pricing/heuristic 轮次和列池差异，而不是单次 exact 大幅加速。二者目前都更适合作为实验对照，不宜直接宣布稳定优于 normal。

@@ -367,3 +367,24 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 从语义上看，这个 partial-list 版本对当前“不带 ng 的 elementary half-domain”分支是合理的：`visitedSet` 不参与 dominance，支配条件仍然是 terminal job 相同、未来可扩展集合不更差、frontier 在对应时间区间不更差。`updateDominatedIntervals()` 会按方向 normalize，forward 保留右端 big-M 尾段以便 prefix-min 闭包，backward 使用对应方向 normalize。当前没有发现会直接漏掉负列的硬错误。需要注意的是，这个结论不适用于 ng-DSSR；ng-DSSR 的 memory/reach 语义是另一套问题，不能把 partial-list 直接搬过去。
 
 主要风险仍是工程成熟度和性能，而不是默认求解正确性。partial-list 是 `O(labels^2 * function operations)` 的全扫描结构，可能在大节点比当前 paper dominance graph 更慢；它还会就地修改 label frontier，因此必须依赖 PWLF 的 big-M/normalize 语义保持稳定。验证方面，本次 focused `javac` 覆盖 `GCNGBBStyleBidirectional`、`GCNGBBStyleBidirectionalNgDssr`、`GCNGBBStyleBidirectionalPartialDominance` 和 `PartialListDominanceStore` 通过；`tmp-wet020_001_2m,maxNodes=1,partialDominance=true` smoke 返回 `ROOT_PROCESSED,obj=bound=6343,valid=true`，exact 为 `0.720s/1 call`。当前建议仍是：partial dominance 保持默认关闭，只作为诊断/对照分支；若未来要转正，必须补小算例与普通 paper graph 的 negative-column/最终 bound 对拍。
+
+41. 2026-06-11 partial dominance 的 30 任务根节点对照
+
+本次继续测试 `tmp-wet030_from040_010/011/012/013/014/015_2m` 六个 30 任务算例。为了尽量只比较 dominance backend，统一使用 `maxNodes=1`、ALNS seed、启发式 pricing、`completionBound=allCycles`、关闭 RMIH 和 subtree，并关闭 midpoint probe，使 normal 与 partial 从同一个固定 Tmid 口径开始。normal 使用 `PaperDominanceGraphs`，partial 使用 `PartialListDominanceStore`，其余配置一致。
+
+| 算例 | normal solve / exact | partial solve / exact | exact 比值 | 根界 normal / partial | exact calls normal / partial |
+| --- | --- | --- | --- | --- | --- |
+| 010 | `20.599s / 4.798s` | `21.237s / 3.491s` | `0.728` | `16148.8 / 16148.8` | `3 / 3` |
+| 011 | `14.212s / 3.163s` | `24.206s / 5.426s` | `1.715` | `13526.478261 / 13525.709677` | `3 / 5` |
+| 012 | `23.310s / 4.927s` | `22.295s / 5.300s` | `1.076` | `13258.521739 / 13258.521739` | `3 / 4` |
+| 013 | `29.509s / 10.984s` | `26.542s / 7.692s` | `0.700` | `14287.625 / 14287.625` | `5 / 4` |
+| 014 | `41.432s / 21.321s` | `33.073s / 16.429s` | `0.771` | `10288 / 10288` | `4 / 5` |
+| 015 | `29.708s / 7.674s` | `24.886s / 6.218s` | `0.810` | `13394 / 13394` | `4 / 4` |
+
+六个算例累计 exact 时间从 normal 的 `52.867s` 降到 partial 的 `44.557s`，减少约 `15.7%`；累计总时间从 `158.770s` 降到 `152.239s`，只减少约 `4.1%`。收益并不稳定：partial 在 010、013、014、015 的 exact 阶段更快，012 基本持平，011 则慢 `71.5%`。因此不能只用平均值判断它优于 paper graph。
+
+日志显示两种 backend 会实质改变保留的 frontier 区间和负列集合，不是单纯替换数据结构。以累计 exact 统计为例，010 的 normal/partial 新增负列为 `134/106`，013 为 `698/397`，014 为 `176/159`。partial 的 flat-list 比较量也很大：010 约 `225 万` 次，013 约 `304 万` 次，014 约 `1.19 亿` 次；014 仍然更快，说明一次 flat-list 包含判断通常比 paper graph 的 DFS、集合查询和 envelope 传播便宜，但这是算例相关的，标签规模继续增大时二次复杂度仍有爆炸风险。normal 在 014 中 superset/subset 共访问约 `1412 万` 个 graph node，也说明当前 paper graph 的图遍历本身并不便宜。
+
+最重要的新结果是 011。normal 的 exact 过程依次加入 `49、3、0` 条列，最终根界为 `13526.478261`；partial 依次加入 `36、12、5、2、0` 条列，最终根界为 `13525.709677`。即使关闭 midpoint probe，这个差异仍然复现，因此不是 Tmid 选择偶然造成的。两边最终整数解都通过 validator，但根 LP 界不同意味着至少有一套 dominance/列生成路径没有对同一个完整定价问题给出一致的停止证明。partial 得到更低的最小化目标，可能说明经典 whole-label dominance 删除了仍有价值的局部函数区间；也可能是 partial 的就地裁剪、normalize 或 join 对裁剪 frontier 的使用存在额外语义差异。仅凭当前结果还不能判断哪一边正确。
+
+因此需要修正第 40 节中“未发现直接漏列硬错误”的表述强度。当前可以确认的是：partial 在多数 root 算例上有速度潜力，但还没有通过 exactness 对拍，不能默认启用。下一步若继续推进，应固定 011 的同一组 dual，同时分别调用 normal 和 partial pricing，导出各自最负列及 reduced cost，再用 `TWETColumnEvaluator` 和对方 backend 交叉验证；只有两边都能在对方最终 dual 下证明不存在负列，才能把根界差异解释为数值或退化路径问题。关闭全部启发式 pricing 的纯 exact 隔离也尝试过，但 011 normal 根节点运行超过三分钟仍未完成，说明该口径不适合直接做批量性能实验。

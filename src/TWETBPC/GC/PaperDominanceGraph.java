@@ -26,7 +26,7 @@ import TWETBPC.Util.PackedBitSet;
  * <p>
  * 当前仍只做完整占优，不做 partial dominance；这样不会因为函数切段实现不完整而误删最优列。
  */
-final class PaperDominanceGraph implements DominanceStore {
+class PaperDominanceGraph implements DominanceStore {
 
 	private static final boolean TIMING_DIAGNOSTIC = Boolean.getBoolean("twet.bpc.paperGraphTiming");
 	private static final boolean TIMING_HEARTBEAT = TIMING_DIAGNOSTIC
@@ -52,6 +52,9 @@ final class PaperDominanceGraph implements DominanceStore {
 	private static long propagationNodesVisited;
 	private static long envelopeMergeCalls;
 	private static long dominanceChecks;
+	private static long partialTrimChecks;
+	private static long partialTrims;
+	private static long partialFullTrims;
 	private static long markSeed;
 	private static long timingStartNanos;
 	private static long nextTimingHeartbeatNanos;
@@ -61,13 +64,19 @@ final class PaperDominanceGraph implements DominanceStore {
 	private final LinkedHashSet<PaperDominanceNode> roots = new LinkedHashSet<PaperDominanceNode>();
 	private final Map<PackedBitSet, PaperDominanceNode> nodeByReachableSet = new HashMap<PackedBitSet, PaperDominanceNode>();
 	private final Direction direction;
+	private final boolean partialDominance;
 
 	PaperDominanceGraph() {
 		this(Direction.FORWARD);
 	}
 
 	PaperDominanceGraph(Direction direction) {
+		this(direction, false);
+	}
+
+	PaperDominanceGraph(Direction direction, boolean partialDominance) {
 		this.direction = direction;
+		this.partialDominance = partialDominance;
 	}
 
 	static void resetStatistics() {
@@ -91,6 +100,9 @@ final class PaperDominanceGraph implements DominanceStore {
 		propagationNodesVisited = 0;
 		envelopeMergeCalls = 0;
 		dominanceChecks = 0;
+		partialTrimChecks = 0;
+		partialTrims = 0;
+		partialFullTrims = 0;
 	}
 
 	static void setDiagnosticContext(String context) {
@@ -106,7 +118,9 @@ final class PaperDominanceGraph implements DominanceStore {
 				+ timingSummary()
 				+ ", propagate calls/visited=" + propagationCalls + "/" + propagationNodesVisited
 				+ ", envelopeMerges=" + envelopeMergeCalls
-				+ ", dominanceChecks=" + dominanceChecks;
+				+ ", dominanceChecks=" + dominanceChecks
+				+ ", partialTrim checks/partial/full=" + partialTrimChecks + "/" + partialTrims + "/"
+				+ partialFullTrims;
 	}
 
 	@Override
@@ -121,8 +135,7 @@ final class PaperDominanceGraph implements DominanceStore {
 
 		PiecewiseLinearFunction dominanceEnvelope = mergeGEnvelopes(candidates);
 		dominanceChecks++;
-		if (canCoverDomain(dominanceEnvelope, label.frontier, direction)
-				&& dominanceEnvelope.dominates(label.frontier)) {
+		if (dominatesOrTrimsToEmpty(dominanceEnvelope, label)) {
 			label.isDominated = true;
 			labelsRejected++;
 			return true;
@@ -130,6 +143,9 @@ final class PaperDominanceGraph implements DominanceStore {
 
 		PaperDominanceNode inserted;
 		if (sameNode != null && sameNode.active) {
+			if (partialDominance) {
+				sameNode.trimLabelsBy(label.frontier);
+			}
 			sameNode.addLabel(label);
 			inserted = sameNode;
 		} else {
@@ -350,7 +366,7 @@ final class PaperDominanceGraph implements DominanceStore {
 				}
 				continue;
 			}
-			if (node.removeLabelsDominatedByPredecessors()) {
+			if (node.removeLabelsDominatedByPredecessors(partialDominance)) {
 				if (node.labels.isEmpty()) {
 					ArrayList<PaperDominanceNode> affected = deleteNode(node);
 					for (PaperDominanceNode successor : affected) {
@@ -424,6 +440,30 @@ final class PaperDominanceGraph implements DominanceStore {
 			}
 		}
 		return envelope;
+	}
+
+	private boolean dominatesOrTrimsToEmpty(PiecewiseLinearFunction envelope, Label label) {
+		if (!canCoverDomain(envelope, label.frontier, direction)) {
+			return false;
+		}
+		if (!partialDominance) {
+			return envelope.dominates(label.frontier);
+		}
+		return trimLabelByEnvelope(label, envelope, direction);
+	}
+
+	private static boolean trimLabelByEnvelope(Label label, PiecewiseLinearFunction envelope, Direction direction) {
+		partialTrimChecks++;
+		boolean deleted = label.frontier.updateDominatedIntervals(envelope, direction);
+		label.refreshMinReducedCost();
+		if (deleted || label.frontier == null || label.frontier.head == null
+				|| Utility.isBigMValue(label.minReducedCost)) {
+			label.isDominated = true;
+			partialFullTrims++;
+			return true;
+		}
+		partialTrims++;
+		return false;
 	}
 
 	/**
@@ -637,7 +677,7 @@ final class PaperDominanceGraph implements DominanceStore {
 			}
 		}
 
-		boolean removeLabelsDominatedByPredecessors() {
+		boolean removeLabelsDominatedByPredecessors(boolean partialDominance) {
 			if (predecessorEnvelope == null || predecessorEnvelope.head == null) {
 				return false;
 			}
@@ -645,7 +685,12 @@ final class PaperDominanceGraph implements DominanceStore {
 			for (int i = labels.size() - 1; i >= 0; i--) {
 				Label label = labels.get(i);
 				dominanceChecks++;
-				if (canCoverDomain(predecessorEnvelope, label.frontier, direction)
+				if (partialDominance && canCoverDomain(predecessorEnvelope, label.frontier, direction)
+						&& trimLabelByEnvelope(label, predecessorEnvelope, direction)) {
+					labels.remove(i);
+					labelsDeletedByPropagation++;
+					changed = true;
+				} else if (!partialDominance && canCoverDomain(predecessorEnvelope, label.frontier, direction)
 						&& predecessorEnvelope.dominates(label.frontier)) {
 					label.isDominated = true;
 					labels.remove(i);
@@ -663,6 +708,25 @@ final class PaperDominanceGraph implements DominanceStore {
 				recomputeDominanceEnvelope();
 			}
 			return changed;
+		}
+
+		void trimLabelsBy(PiecewiseLinearFunction frontier) {
+			if (frontier == null || frontier.head == null) {
+				return;
+			}
+			boolean changed = false;
+			for (int i = labels.size() - 1; i >= 0; i--) {
+				Label label = labels.get(i);
+				dominanceChecks++;
+				if (canCoverDomain(frontier, label.frontier, direction) && trimLabelByEnvelope(label, frontier, direction)) {
+					labels.remove(i);
+					labelsDeletedByPropagation++;
+					changed = true;
+				}
+			}
+			if (changed && labels.isEmpty()) {
+				labelEnvelope = null;
+			}
 		}
 
 		private void rebuildLabelEnvelope() {

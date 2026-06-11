@@ -247,6 +247,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrTotalNonElementaryRoutes;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
+	private final boolean useGraphPartialDominance;
 
 	private String lastMessage = "GCNGBB-style ng-DSSR bidirectional pricing not executed";
 
@@ -256,10 +257,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode) {
+		this(data, config, midpointProbeReuseByNode, false);
+	}
+
+	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
+			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, boolean useGraphPartialDominance) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
 		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
+		this.useGraphPartialDominance = useGraphPartialDominance;
 	}
 
 	private void initializeNgNeighborhoods(LP lp) {
@@ -646,8 +653,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void initialize(LP lp) {
 		resetStatistics();
-		PaperDominanceGraphs.setDiagnosticContext(pricingDiagnosticContext(lp));
-		PaperDominanceGraphs.resetStatistics();
+		setDominanceDiagnosticContext(pricingDiagnosticContext(lp));
+		resetDominanceStatistics();
 		pricingHorizon = data.CmaxH;
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
@@ -1135,8 +1142,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		initializeCandidateState(lp);
 	}
 
+	private void setDominanceDiagnosticContext(String context) {
+		if (useGraphPartialDominance) {
+			PaperPartialDominanceGraphs.setDiagnosticContext(context);
+		} else {
+			PaperDominanceGraphs.setDiagnosticContext(context);
+		}
+	}
+
+	private void resetDominanceStatistics() {
+		if (useGraphPartialDominance) {
+			PaperPartialDominanceGraphs.resetStatistics();
+		} else {
+			PaperDominanceGraphs.resetStatistics();
+		}
+	}
+
+	private DominanceStore createDominanceStore(Direction direction) {
+		return useGraphPartialDominance ? PaperPartialDominanceGraphs.create(direction)
+				: PaperDominanceGraphs.create(direction);
+	}
+
+	private String dominanceStatisticsSummary() {
+		return useGraphPartialDominance ? PaperPartialDominanceGraphs.statisticsSummary()
+				: PaperDominanceGraphs.statisticsSummary();
+	}
+
 	private void initializeLabelSearchState() {
-		PaperDominanceGraphs.resetStatistics();
+		resetDominanceStatistics();
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
 		BWUL = new PriorityQueue<BackwardLabel>(backwardQueueComparator(queueOrdering));
 		FWTL = new ArrayList<DominanceStore>(data.n + 1);
@@ -1149,8 +1182,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		minForwardReducedCostByLastJob = new double[data.n + 1];
 		minForwardEllByLastJob = new double[data.n + 1];
 		for (int i = 0; i <= data.n; i++) {
-			FWTL.add(PaperDominanceGraphs.create(Direction.FORWARD));
-			BWTL.add(PaperDominanceGraphs.create(Direction.BACKWARD));
+			FWTL.add(createDominanceStore(Direction.FORWARD));
+			BWTL.add(createDominanceStore(Direction.BACKWARD));
 			activeForwardByLastJob.add(new ArrayList<ForwardLabel>());
 			activeBackwardByFirstJob.add(new ArrayList<BackwardLabel>());
 			forwardSinglePointByLastJob.add(new SinglePointStore<ForwardLabel>());
@@ -2239,7 +2272,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", midpointProbeFeedback=" + midpointProbeFeedbackSummary
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
-				+ ", " + PaperDominanceGraphs.statisticsSummary();
+				+ ", " + dominanceStatisticsSummary();
 	}
 
 	private String nodeDiagnosticsSummary() {

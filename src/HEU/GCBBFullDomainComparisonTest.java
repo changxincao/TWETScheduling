@@ -29,6 +29,7 @@ public class GCBBFullDomainComparisonTest {
 	private static final String NORMAL_ENGINE = "GCNGBBStyleBidirectionalPricing";
 	private static final String PARTIAL_DOMINANCE_ENGINE = "GCNGBBStylePartialDominancePricing";
 	private static final String NG_DSSR_ENGINE = "GCNGBBStyleNgDssrPricing";
+	private static final String NG_DSSR_GRAPH_PARTIAL_ENGINE = "GCNGBBStyleNgDssrGraphPartialDominancePricing";
 	private static final String FULL_DOMAIN_ENGINE = "GCBBStyleBidirectionalFullDomainPricing";
 	private static final String NODE_JOIN_ENGINE = "GCBBStyleBidirectionalFullDomainNodeJoinPricing";
 
@@ -137,13 +138,17 @@ public class GCBBFullDomainComparisonTest {
 				mode += "-scalarOff";
 			}
 		}
-		if (config.useGCNGBBStyleNgDssrPricing) {
+		if (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
+			mode += "-ngGraphPartial-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
+					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
+		} else if (config.useGCNGBBStyleNgDssrPricing) {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		}
 		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
-				: (config.useGCNGBBStyleNgDssrPricing ? NG_DSSR_ENGINE
-						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE)));
+				: (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing ? NG_DSSR_GRAPH_PARTIAL_ENGINE
+						: (config.useGCNGBBStyleNgDssrPricing ? NG_DSSR_ENGINE
+						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE))));
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -217,6 +222,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssr",
 				Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
+		config.useGCNGBBStyleNgDssrGraphPartialDominancePricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrGraphPartialDominance",
+				Boolean.toString(config.useGCNGBBStyleNgDssrGraphPartialDominancePricing)));
 		config.ngDssrInitialNgSetMode = System.getProperty("twet.bpc.fullDomainCompare.ngDssrInitialMode",
 				config.ngDssrInitialNgSetMode);
 		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrInitialSize",

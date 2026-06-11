@@ -22,6 +22,7 @@ final class PartialListDominanceStore implements DominanceStore {
 	private static long labelsRejected;
 	private static long labelsDeleted;
 	private static long comparisons;
+	private static long cardinalitySkips;
 	private static long partialTrims;
 	private static long fullTrims;
 	private static long singlePointChecks;
@@ -40,6 +41,7 @@ final class PartialListDominanceStore implements DominanceStore {
 		labelsRejected = 0L;
 		labelsDeleted = 0L;
 		comparisons = 0L;
+		cardinalitySkips = 0L;
 		partialTrims = 0L;
 		fullTrims = 0L;
 		singlePointChecks = 0L;
@@ -51,8 +53,9 @@ final class PartialListDominanceStore implements DominanceStore {
 
 	static String statisticsSummary() {
 		return "partialList labels kept/rejected/deleted=" + labelsInserted + "/" + labelsRejected + "/"
-				+ labelsDeleted + ", comparisons=" + comparisons + ", trims partial/full=" + partialTrims + "/"
-				+ fullTrims + ", singlePointChecks=" + singlePointChecks + diagnosticSuffix();
+				+ labelsDeleted + ", comparisons=" + comparisons + ", cardinalitySkips=" + cardinalitySkips
+				+ ", trims partial/full=" + partialTrims + "/" + fullTrims + ", singlePointChecks="
+				+ singlePointChecks + diagnosticSuffix();
 	}
 
 	@Override
@@ -67,6 +70,10 @@ final class PartialListDominanceStore implements DominanceStore {
 				continue;
 			}
 			comparisons++;
+			if (existing.reachableCardinality < label.reachableCardinality) {
+				cardinalitySkips++;
+				continue;
+			}
 			if (existing.reachableSet.isSupersetOf(label.reachableSet)
 					&& trimFrontierBy(label, existing.frontier)) {
 				label.isDominated = true;
@@ -90,6 +97,10 @@ final class PartialListDominanceStore implements DominanceStore {
 				continue;
 			}
 			comparisons++;
+			if (label.reachableCardinality < existing.reachableCardinality) {
+				cardinalitySkips++;
+				continue;
+			}
 			if (!label.reachableSet.isSupersetOf(existing.reachableSet)) {
 				continue;
 			}
@@ -126,8 +137,10 @@ final class PartialListDominanceStore implements DominanceStore {
 	@Override
 	public boolean dominatesSinglePoint(PackedBitSet reachableSet, double pointTime, double pointValue) {
 		singlePointChecks++;
+		int reachableCardinality = reachableSet == null ? 0 : reachableSet.cardinality();
 		for (Label label : labels) {
 			if (label.isDominated || label.frontier == null || label.frontier.head == null
+					|| label.reachableCardinality < reachableCardinality
 					|| !label.reachableSet.isSupersetOf(reachableSet)) {
 				continue;
 			}

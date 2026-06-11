@@ -469,3 +469,11 @@ graph-partial 暂时不建议作为默认候选。它适合作为后续研究方
 另一个关键差异是裁剪强度。partial-list 是同 terminal active labels 的直接两两扫描，只要 existing 的 reachableSet 是目标的超集，就尝试裁剪；graph-partial 只在 graph 结构维护的 same-node/predecessor envelope 路径上裁剪，压缩了比较次数，但也可能少做一些 flat-list 会做的裁剪。因此当前结果表现为：graph-partial 在理论上有更好的扩展方向，但在现有实现和当前规模下，隐藏维护成本较高、裁剪机会又少于 partial-list，所以没有显著快于 partial-list。
 
 更准确的取舍应是：当每个 terminal 下 active label 数很大、可比较集合高度重叠、且 graph envelope 可以低成本复用时，graph-partial 才可能超过 partial-list；当 label 数还不极端、flat-list 两两比较常数小、且 graph 查询/传播较重时，partial-list 反而更实用。当前 TWET 的 root 对照更接近后一种情况。
+
+50. 2026-06-12 partial-list 的 cardinality 必要条件过滤
+
+复查 `PartialListDominanceStore` 后发现，原实现每次两两比较直接调用 `isSupersetOf()`，没有先使用 reachable-set 大小做必要条件过滤。由于 `Label` 已缓存 `reachableCardinality`，本次在两个方向的裁剪中加入安全过滤：若 existing 的 reachable cardinality 小于目标 label，则 existing 不可能是目标的超集；反向裁剪时若新 label 的 cardinality 小于 existing，则新 label 不可能支配 existing。single-point dominance 同步先计算目标 cardinality，再进入 superset 检查。
+
+该优化不改变 dominance 语义，只减少不可能成立的 bitset superset 检查和后续函数裁剪调用。为观察效果，日志新增 `cardinalitySkips`。`wet015_001_2m` root partial-list 中，`comparisons=78`，其中 `cardinalitySkips=29`；`tmp-wet030_001_2m` root 三轮 exact 中分别为 `32829/11178`、`14894/4974`、`11354/3683`。说明 cardinality 过滤命中比例不低。需要注意，本轮 30 任务 wall time 受 completion bound 构造时间波动影响很大，不能只凭单次总耗时判断该过滤的净收益；更可靠的意义是减少后续 bitset 和 PWLF 裁剪机会，作为低风险基础优化保留。
+
+后续还能考虑把 partial-list 按 `reachableCardinality` 分桶或排序：第一轮“旧 label 支配新 label”可在 cardinality 低于目标时提前停止，第二轮“新 label 裁剪旧 label”可跳过 cardinality 高于目标的前缀。但这种会改变 label 访问顺序，而 partial trim 是就地修改 frontier，访问顺序可能影响生成路径；因此暂不直接改，只记录为后续可控实验项。

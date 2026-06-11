@@ -459,3 +459,13 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 因此当前更务实的结论是：如果目标是近期在当前 exact pricing 框架下尝试 partial dominance 提速，partial-list 比 graph-partial 更值得继续推进。它结构简单，语义直接，裁剪强度更可控；在三角化 010/011 和 30/40 root 的已有结果里，也更容易看到 exact pricing 层面的收益。它的问题是复杂度偏二次，规模继续变大时可能爆炸，并且未来接入 SRI/subset-row cut 或其他资源状态时，必须把这些状态显式纳入 dominance key，不能直接复用当前 store。
 
 graph-partial 暂时不建议作为默认候选。它适合作为后续研究方向保留：如果将来优化了 paper graph 的集合查询、减少 envelope 传播开销，或者在更大节点上 flat-list 明显二次爆炸，graph-partial 可能重新有价值。但基于当前证据，它没有比 partial-list 更好，甚至因为裁剪机会更少和入口更复杂，收益更不稳定。
+
+49. 2026-06-12 graph envelope 理想复杂度与当前实现差异
+
+用户进一步指出：如果有 5 个新 label 都需要被 5 个旧 label 的下包络裁剪，partial-list 需要 `5*5=25` 次比较，而 dominance graph 若预先存了下包络，只需要对 5 个新 label 各比较一次，因此直觉上 graph 应该更高效。这个判断在静态同候选集场景下成立：若所有新 label 的可比较旧 label 集合完全相同，且旧 label 的 lower envelope 已经稳定缓存，那么用 envelope 做 5 次裁剪确实优于 flat-list 的 25 次两两裁剪。
+
+但当前 pricing 里的 paper graph 不是这样一个全局静态 envelope。每个 label 的 dominance key/reachableSet 不同，可比较的旧 label 集合也不同；graph 需要先做 superset/subset 查询，找到同节点或前驱节点集合，再 merge 这些节点的 envelope。也就是说，所谓“1 次 envelope 比较”前面还有图搜索、节点 envelope 合并、后继传播和缓存维护成本。并且 partial trim 会改变 label frontier 的定义域，导致 node 的 labelEnvelope/dominanceEnvelope 需要更新，并可能继续影响后继节点。当前日志里这些成本体现在 superset/subset visited、propagate visited、envelopeMerges 和 dominanceChecks 上。
+
+另一个关键差异是裁剪强度。partial-list 是同 terminal active labels 的直接两两扫描，只要 existing 的 reachableSet 是目标的超集，就尝试裁剪；graph-partial 只在 graph 结构维护的 same-node/predecessor envelope 路径上裁剪，压缩了比较次数，但也可能少做一些 flat-list 会做的裁剪。因此当前结果表现为：graph-partial 在理论上有更好的扩展方向，但在现有实现和当前规模下，隐藏维护成本较高、裁剪机会又少于 partial-list，所以没有显著快于 partial-list。
+
+更准确的取舍应是：当每个 terminal 下 active label 数很大、可比较集合高度重叠、且 graph envelope 可以低成本复用时，graph-partial 才可能超过 partial-list；当 label 数还不极端、flat-list 两两比较常数小、且 graph 查询/传播较重时，partial-list 反而更实用。当前 TWET 的 root 对照更接近后一种情况。

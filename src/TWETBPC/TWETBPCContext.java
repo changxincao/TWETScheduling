@@ -80,6 +80,20 @@ public class TWETBPCContext {
 			} else {
 				pricingEngines.add(new BidirectionalPricingEngine(data, config));
 			}
+			if (config.diagnosticCrossCheckPartialDominance
+					&& config.useGCNGBBStyleBidirectionalPricing
+					&& !config.useGCNGBBStyleNgDssrPricing
+					&& !config.useGCBBAsymmetricBidirectionalPricing
+					&& !config.useGCBBFullDomainNodeJoinBidirectionalPricing
+					&& !config.useGCBBFullDomainBidirectionalPricing) {
+				// 主定价器有列时 PC 会立即重解；只有主定价器返回空列，另一套 dominance
+				// 才会在完全相同的 RMP 与 dual 上运行，因此可直接检查停止条件是否一致。
+				if (config.useGCNGBBStylePartialDominancePricing) {
+					pricingEngines.add(new GCNGBBStyleBidirectionalPricingEngine(data, config));
+				} else {
+					pricingEngines.add(new GCNGBBStyleBidirectionalPartialDominancePricingEngine(data, config, true));
+				}
+			}
 		} else if (config.usePaperDominancePricing) {
 			pricingEngines.add(new PaperDominanceExactPricingEngine(data, config));
 		} else {

@@ -45,6 +45,11 @@ public class TWETBPCConfig {
 	 */
 	public boolean useGCNGBBStylePartialDominancePricing = false;
 	/**
+	 * 2026-06-11: 仅用于 exactness 对拍。主双向定价器返回空列后，再用另一套
+	 * whole/partial dominance 在同一 LP dual 上复查；默认关闭，不参与正式求解。
+	 */
+	public boolean diagnosticCrossCheckPartialDominance = false;
+	/**
 	 * 2026-06-09: 实验开关。true 时使用独立复制的 GCNGBB-style 半域 ng-relaxation + DSSR
 	 * 版本；默认关闭，避免影响当前 elementary 主路径。
 	 */

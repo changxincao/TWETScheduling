@@ -211,6 +211,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCNGBBStylePartialDominancePricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.partialDominance",
 				Boolean.toString(config.useGCNGBBStylePartialDominancePricing)));
+		config.diagnosticCrossCheckPartialDominance = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.crossCheckPartialDominance",
+				Boolean.toString(config.diagnosticCrossCheckPartialDominance)));
 		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssr",
 				Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));

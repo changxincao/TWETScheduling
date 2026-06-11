@@ -18,19 +18,28 @@ public class GCNGBBStyleBidirectionalPartialDominancePricingEngine implements Pr
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private final boolean diagnosticForceEnabled;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
 	private final HashMap<Integer, GCNGBBStyleBidirectionalPartialDominance.MidpointProbeNodeReuse> midpointProbeReuseByNode;
 
 	public GCNGBBStyleBidirectionalPartialDominancePricingEngine(Data data, TWETBPCConfig config) {
+		this(data, config, false);
+	}
+
+	/** 仅供同一 dual 下的 whole/partial dominance 停止条件对拍。 */
+	public GCNGBBStyleBidirectionalPartialDominancePricingEngine(Data data, TWETBPCConfig config,
+			boolean diagnosticForceEnabled) {
 		this.data = data;
 		this.config = config;
+		this.diagnosticForceEnabled = diagnosticForceEnabled;
 		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectionalPartialDominance.MidpointProbeNodeReuse>();
 	}
 
 	@Override
 	public PricingResult price(LP lp) {
 		lastReusableSubtreeArcEliminationBounds = null;
-		if (!config.enableBidirectionalPricing || !config.useGCNGBBStylePartialDominancePricing) {
+		if (!config.enableBidirectionalPricing
+				|| (!diagnosticForceEnabled && !config.useGCNGBBStylePartialDominancePricing)) {
 			return PricingResult.noImprovement("GCNGBB-style partial-dominance bidirectional pricing disabled");
 		}
 		GCNGBBStyleBidirectionalPartialDominance gc = new GCNGBBStyleBidirectionalPartialDominance(data, config,

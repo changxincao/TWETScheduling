@@ -388,3 +388,17 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 最重要的新结果是 011。normal 的 exact 过程依次加入 `49、3、0` 条列，最终根界为 `13526.478261`；partial 依次加入 `36、12、5、2、0` 条列，最终根界为 `13525.709677`。即使关闭 midpoint probe，这个差异仍然复现，因此不是 Tmid 选择偶然造成的。两边最终整数解都通过 validator，但根 LP 界不同意味着至少有一套 dominance/列生成路径没有对同一个完整定价问题给出一致的停止证明。partial 得到更低的最小化目标，可能说明经典 whole-label dominance 删除了仍有价值的局部函数区间；也可能是 partial 的就地裁剪、normalize 或 join 对裁剪 frontier 的使用存在额外语义差异。仅凭当前结果还不能判断哪一边正确。
 
 因此需要修正第 40 节中“未发现直接漏列硬错误”的表述强度。当前可以确认的是：partial 在多数 root 算例上有速度潜力，但还没有通过 exactness 对拍，不能默认启用。下一步若继续推进，应固定 011 的同一组 dual，同时分别调用 normal 和 partial pricing，导出各自最负列及 reduced cost，再用 `TWETColumnEvaluator` 和对方 backend 交叉验证；只有两边都能在对方最终 dual 下证明不存在负列，才能把根界差异解释为数值或退化路径问题。关闭全部启发式 pricing 的纯 exact 隔离也尝试过，但 011 normal 根节点运行超过三分钟仍未完成，说明该口径不适合直接做批量性能实验。
+
+42. 2026-06-11 011 根界差异的交叉验证与原因
+
+继续固定 011 root 的同一实验口径，新增默认关闭的 `diagnosticCrossCheckPartialDominance` 对拍开关：当主 exact pricing 返回空列时，再用另一套 whole/partial dominance 在完全相同的 RMP 和 dual 上复查。normal-primary 的最终 dual 下，forced partial 也返回空列；partial-primary 的最终 dual 下，normal 也返回空列。这个结果说明 011 的差异不是简单的“某一套 dominance 在最终 dual 下能找到而另一套找不到”，而是更早的列生成轨迹已经分叉。
+
+随后导出两边最终 exact pricing 调用的 job dual、machine dual 和列池，直接按根节点 reduced cost 公式 `cost - sum(pi_j) - mu` 手算。partial 路径最终列池中有 44 条 normal 没有的列，其中 10 条在 normal 最终 dual 下仍为严格负 reduced cost，最小为 `-31.652174`。代表列为 `15 21 17 4 2 29 19 22 20 13 14 23 7 6 16 9`，真实成本 `6338`。这说明 normal 路径的 `13526.478261` 不是当前完整列空间下的可靠停止界；如果把 partial 已生成的列加入 normal 的最终 RMP，normal 还应继续下降。
+
+进一步追踪这条代表列在 partial 路径中的出现时机。它不是在 final dual 下“穿过”窗口剪枝生成的，而是在第 4 次 exact pricing 前已经进入列池。按每轮 dual 手算，该列在 partial 第 3 次 snapshot 下 reduced cost 约为 `-9.26087`，当时 job 14 的 dual window 上界约 `492.13043`，而该列真实最优完成时间中 job 14 为 `493`，只超出约 `0.86957`。由于 job 14 的 tardiness 权重为 `8`，把 job 14 压回窗口上界带来的额外代价约 `6.9565`，仍不能把该列变成非负列，因此该列能在那一轮被生成并加入池。后续 final dual 下同一列 reduced cost 约为 0，窗口上界约 `491.26613`，如果重新从零生成则会被当前窗口逻辑排除，但列池已经保留了它。
+
+这个现象解释了为什么 partial 能生成而 normal 没生成：partial dominance 改变了中间轮次保留的 labels/frontier 区间和负列集合，使它在某个中间 dual 下碰到了这条列；normal 沿另一条列生成路径走到最终 dual 后，窗口已经更窄，无法再补出这条列。因此它不是 partial-list 本身“没被砍掉”的最终轮证明，而是列池历史保留效应导致的路径分化。
+
+根因仍落在 dual profitable window 的理论前提。对代表列，只有 job 14 超出 normal final dual window；如果删除 job 14，序列 reduced cost 反而从 `-31.652174` 变成 `+262.304348`，不存在“删掉窗外 job 后得到更好负列”的单调性。直接检查 setup time 可见 `13->14->23` 的连接时间为 `s(13,14)+p14+s(14,23)=2+2+1=5`，而直连 `s(13,23)=31`，删除 job 14 会让后继连接增加 26。该 011 数据共有 259 组三元组违反类似 `s(i,k) <= s(i,j)+p_j+s(j,k)` 的删除单调性。因此当前这批旧算例不满足 root dual profitable window 作为 exact 剪枝所需的结构前提。
+
+本次不修改正式算法逻辑。后续默认算例生成应直接保证 setup time/cost 满足相应三角不等式或删除单调性；在不满足该前提的历史算例上，带 dual profitable window 的 exact pricing 只能作为启发式加速口径使用，不能把最终 bound 当成严格列生成收敛证明。为了后续继续复查，保留 `diagnosticCrossCheckPartialDominance` 默认关闭开关；它只在主 pricing 返回空列后运行另一套 dominance 对拍，不影响正式求解。

@@ -451,3 +451,11 @@ arc fixing 数量也要区分“本节点新增”和“某条路径累计”。
 但 labeling 里的 partial dominance 不是一次静态集合操作。一个 label 被部分裁剪后，不是立刻消失，而是带着缩小后的 frontier 继续作为后续扩展源和后续支配者。比如 `L(t)=10,t∈[0,10]`，支配函数只覆盖 `[0,6]`，partial 后 `L` 仍在 `[6,10]` 活着；如果下一步扩展需要 `t≤5`，它就不能再扩展，如果下一步扩展需要 `t≥8`，它仍然可以扩展。因此裁剪会改变后续 constructed extension、infeasible extension、join 候选和负列集合。这也是 15 任务日志中 normal `forwardExtend constructed=249`，graph-partial 降到 `233` 并出现 `11` 个 infeasible 的直接原因。
 
 另一个差异是“进入聚合 envelope 的 label 集合”并不总是和 partial-list 的两两扫描集合完全相同。partial-list 对同 terminal active label 做 flat-list 检查，只要 existing 的 reachableSet 是目标的超集，就直接裁剪；graph-partial 则依赖 paper dominance graph 的同节点、前驱 envelope、superset/subset 结构和传播顺序。它压缩了很多比较，但也意味着 partial trim 的时机和对象不等价于 flat-list 全扫描。于是即使最终 bound 一致，标签数量、被裁剪区间、join 候选和负列数量仍可能不同。
+
+48. 2026-06-12 partial-list 与 graph-partial 的当前取舍判断
+
+从直觉上，paper dominance graph 叠加 partial 裁剪应该更有吸引力，因为它希望保留 graph 的 superset/subset 压缩能力，同时避免 whole-label dominance 过粗。但当前实测并没有体现这个优势。主要原因有三点：第一，当前 graph 的 DFS、node envelope、predecessor envelope 和传播维护本身不便宜，之前 normal paper graph 在部分 30/40 root 上已经出现大量 superset/subset 访问；第二，graph-partial 只在 graph 结构认为可比较的 envelope 路径上裁剪，裁剪机会少于 partial-list 的 flat-list 两两扫描；第三，当前 graph-partial 挂在 ng-DSSR 入口上，哪怕 full ng-set 语义接近 elementary，也仍有 ng-memory、DSSR 记账和不同列生成路径的额外影响。
+
+因此当前更务实的结论是：如果目标是近期在当前 exact pricing 框架下尝试 partial dominance 提速，partial-list 比 graph-partial 更值得继续推进。它结构简单，语义直接，裁剪强度更可控；在三角化 010/011 和 30/40 root 的已有结果里，也更容易看到 exact pricing 层面的收益。它的问题是复杂度偏二次，规模继续变大时可能爆炸，并且未来接入 SRI/subset-row cut 或其他资源状态时，必须把这些状态显式纳入 dominance key，不能直接复用当前 store。
+
+graph-partial 暂时不建议作为默认候选。它适合作为后续研究方向保留：如果将来优化了 paper graph 的集合查询、减少 envelope 传播开销，或者在更大节点上 flat-list 明显二次爆炸，graph-partial 可能重新有价值。但基于当前证据，它没有比 partial-list 更好，甚至因为裁剪机会更少和入口更复杂，收益更不稳定。

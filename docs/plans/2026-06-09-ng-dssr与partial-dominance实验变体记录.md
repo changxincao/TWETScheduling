@@ -685,3 +685,12 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 这说明当前问题的直接链条是：partial dominance 在插入早期目标前缀时裁掉了低完成时间/低 reduced-cost 的 frontier 区间，导致后续目标子路径的 completion-bound 检查变差并提前剪枝；`PAPER` 因为不做局部区间裁剪，保留了这段 frontier，最终生成负列。
 
 为什么 ng-DSSR 下这种 partial 裁剪不安全，当前更准确的解释是：ng 的 `extensionSet` 不是 elementary 版本里的“未访问且资源可达集合”，而是“未被当前 ng-memory 记住且资源可达集合”。一个 label 可能已经真实访问过某些 job，但由于 ng-memory 遗忘，这些 job 仍会出现在 `extensionSet` 中。于是 partial dominance 可能用一个成本更低、`extensionSet` 不差的 relaxed prefix 裁掉目标 prefix 的某段 frontier；但这个 relaxed prefix 后续接上目标剩余 job 时可能形成非基本 route，不能替代被裁掉的 elementary target prefix。normal elementary 版本中 `reachableSet` 排除了全部 visited job，超集关系隐含“支配 label 至少没有访问目标后续所需 job”；ng-DSSR 里这个性质不成立。这才是 partial-list 和 graph-partial 同状态漏列的核心差异。
+72. 2026-06-12 小规模 ng-DSSR partial sanity check
+
+在继续排查 node4 同状态漏列问题前，先按“最多用 20 任务、小规模多试几个”的口径做了一轮 sanity check。第一次尝试把 heuristic pricing 关闭，只让 exact ng-DSSR 在 `wet015_001_2m` root 上补列，结果 paper 后端单 root 就用了约 `216s`，随后 list-partial 也长时间运行。这个配置不适合用来判断“小规模是否会出错”，因为它和历史快跑口径不同：没有 heuristic pricing 先补 restricted pool，exact pricing 被迫承担大量补列工作，容易把诊断变成纯枚举压力测试。
+
+随后改回历史对照口径：`maxNodes=1`、heuristic pricing 打开、RMIH 关闭、ALNS 关闭、`ngDssr=true`、`nearestK,size=8`、`routeUpdateLimit=10`、`joinBestMode=bestUB`，只切换 ng-DSSR 的 terminal dominance 后端。`wet015_001_2m` 上，`PAPER/LIST_PARTIAL/GRAPH_PARTIAL` 均得到 `obj=bound=3360, valid=true`，exact 时间分别约 `0.174s/0.137s/0.158s`；`wet020_001_2m` 上，三者均得到 `obj=bound=6343, valid=true`，exact 时间分别约 `0.277s/0.217s/0.265s`，列数均为 `1882`。
+
+进一步把 15 任务的 10 个算例全部按同一口径跑完。三种后端在 10 个 root 节点上全部 `valid=true`，每个算例的 incumbent、bound 和最终列数完全一致；10 个算例合计 exact 时间为：`PAPER=0.262s`、`LIST_PARTIAL=0.187s`、`GRAPH_PARTIAL=0.252s`，合计列数均为 `8379`。其中 `wet015_001_2m` 的日志显示 list-partial 和 graph-partial 都确实发生了 partial trim，但最终没有影响 root 结论。
+
+因此当前小规模结论是：15/20 root 正常配置下没有复现 partial 后端漏列，且 list-partial 在这些小例子上略快；但这不能推翻 node4 同状态 cross-check 的结论。小规模 root 的 dual、DSSR 轮次和后续可替代路径都简单，partial 裁掉的区间没有导致最终负列缺失；而 30 任务 010 的 node4 已经证明，在特定 ng-memory 遗忘和 completion-bound 剪枝组合下，partial-list 与 graph-partial 都可能少于 paper 后端。因此 partial 后端目前仍只能作为实验/启发式后端，不能作为 exact bound 的可信默认后端。

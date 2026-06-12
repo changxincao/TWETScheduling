@@ -579,3 +579,13 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 验证方面，focused `javac` 通过。补上 scalar restore 后，两个 smoke run 均 `valid=true`：`wet015_001_2m,maxNodes=1,ngDssr=true,nearestK8,top5` 返回 `ROOT_PROCESSED,obj=bound=3360,solve=1.468s,exact=0.212s/call=1`；三角化 30 任务 `tmp-wet030_from040_010_2m,maxNodes=1` 返回 `NODE_LIMIT,obj=16718,bound=16139.8,solve=17.304s,exact=3.522s/calls=5`。日志中多轮 DSSR 的后续 round 继续显示 completion bound build time 为 0，且 `pricingHorizon/dynamicHStartMin/dynamicHEndMax/tMid` 保持与当前 dual window 一致，说明原有 bound 复用没有被破坏。
 
 需要注意，这次优化降低的是 DSSR round 内重复预处理成本，不会减少 DSSR 轮数，也不保证单个算例总时间一定下降。若某个节点的主要耗时仍在 label 扩展、join 或非基本 route 多轮收紧上，这次优化只能降低固定开销。后续若继续优化 ng，优先观察多轮 DSSR 中 `precompute/init` 占比是否还明显；如果不明显，就应转向减少 DSSR 轮数、减少无效 join 或改善 initial ng-set。
+
+62. 2026-06-12 ng-DSSR 缓存修正后的正确性复核
+
+复核时重点检查了 `tmp-ng-cache-smoke-30-010-20260612` 和 `tmp-ng-cache-check-30-010-20260612` 的差异。旧 smoke 中第三次及后续若干 exact pricing 出现了明显异常：多轮 DSSR 的后续 round 中 `pricingHorizon=4342.0`、`tMid≈2270`、`bw kept=0`、`halfWindowIneligible bw=30`，但同一轮的 `dynamicHEndMax` 仍约为 `1300`。这说明当时只复用 effective window 数组，没有恢复 `pricingHorizon` 等标量，导致后续 round 近似退化成单向 forward pricing。修正后对应日志中 `pricingHorizon≈1306`、`tMid≈748`、backward label 正常生成，说明数组与标量已重新一致。
+
+因此“30 任务 exact calls 从 9 降到 5”不能解释为简单的性能优化收益，更准确地说是：旧版本存在标量未恢复导致的错误定价轨迹，修正后列生成批次、DSSR 轮次和 RMP 收敛路径自然改变。该差异本身反而是正确性修复生效的证据之一；后续若要评估纯性能收益，应只在修正后的同一提交上重复运行多次，不能拿修正前的 9 calls 作基准。
+
+ng-DSSR 主流程再次核对后，当前未发现新的语义错误。初始 ng-set 仍按配置 `nearestK/dualPair/empty` 构造；memory 更新为 `(oldMemory ∩ N_current) ∪ {current}`，forward 和 backward 都按当前扩展到的真实 job 更新；join 先用 ng-memory 冲突和 forbidden arc 过滤，负 reduced-cost route 恢复后再用真实 sequence 判断 elementary。elementary 负列进入候选池；non-elementary 负 route 只用于更新 ng-set，不直接加入主问题；每轮可按 `ngDssrNonElementaryRouteUpdateLimit` 记录 topK route，更新时一个 route 内多个重复段都会处理。这个流程与当前讨论确定的 ng-DSSR 语义一致。
+
+partial-list 也重新核对了一遍。bucket 化只用 `reachableCardinality` 做必要条件过滤，真正裁剪前仍要求 `existing.reachableSet.isSupersetOf(label.reachableSet)` 或反向的 `label.reachableSet.isSupersetOf(existing.reachableSet)`，因此不会因为 cardinality 过滤误删 label。single-point 路径同样先按 cardinality 限制候选，再做 superset 和 cost 比较。当前已知不足仍是性能/统计层面：`updateDominatedIntervals()` 只返回“是否被裁空”，不区分 no-change 和 partial trim，因此可能产生无效 normalize 和 partialTrims 统计偏高；但这不会把本不该删除的 label 当作完全删除。

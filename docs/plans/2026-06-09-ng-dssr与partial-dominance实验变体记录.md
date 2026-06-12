@@ -660,3 +660,15 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 011 中三者都闭合到 `13511`。`PAPER` 为 `solve=150.125s,pricing=423,cols=10818,exact=88.380s/126,valid=true`；`GRAPH_PARTIAL` 为 `solve=183.837s,pricing=426,cols=11046,exact=114.809s/133,valid=true`，明显慢于默认 paper；`LIST_PARTIAL` 为 `solve=100.547s,pricing=455,cols=11595,exact=53.408s/133,valid=true`，这次明显快于默认 paper。也就是说，list-partial 对 011 的 exact 扩展和列生成路径有正面作用，但在 010 上总时间没有收益。
 
 当前结论是：默认 `PAPER` 后端仍是最稳的 ng-DSSR 完整求解后端；`LIST_PARTIAL` 是值得继续保留的实验后端，011 上加速明显，但 010 上略慢，不能简单替换默认；`GRAPH_PARTIAL` 当前不应继续用于完整求解结论，因为 010 已经出现和其他后端不一致的闭合目标。后续若要排查 graph-partial，应优先在 010 上定位它为什么漏掉能把 incumbent 从 `16224.125` 降到 `16222` 的列，而不是继续比较速度。
+
+70. 2026-06-12 graph-partial 010 结果不一致的原因分析
+
+`GRAPH_PARTIAL` 在 010 上得到 `16224.125/16224.125`，而默认 `PAPER` 和 `LIST_PARTIAL` 都得到 `16222/16222`。这类差异不能用“列生成路径不同”解释为正常波动，因为完整闭合时若 pricing 完备，最终 lower bound 不应高于真实可达 incumbent。这里的 `valid=true` 只说明最终 incumbent 列组合自身可行，不说明 graph-partial 的定价停止条件完备。
+
+当前最可疑、也和代码吻合的问题是 graph-partial 的 envelope 缓存没有随 partial trim 完整失效。`PaperPartialDominanceGraph` 只是把 `PaperDominanceGraph` 的 `partialDominance` 打开，主流程仍复用原 paper graph 的 `labelEnvelope/predecessorEnvelope/dominanceEnvelope` 缓存和传播机制。普通 paper graph 中 label 只有“保留/删除”两种状态，node 的 `labelEnvelope` 只需要在插入和整删时更新；但 partial trim 会改变已存在 label 的 frontier 定义域和函数值，这会让原有 `labelEnvelope` 立即过期。
+
+具体代码风险有两处。第一，`PaperDominanceNode.removeLabelsDominatedByPredecessors()` 里，partial 模式调用 `trimLabelByEnvelope(label, predecessorEnvelope, direction)`，但该 helper 目前返回 boolean，且只有裁空时返回 true；如果只是部分裁剪，它已经修改了 `label.frontier` 并刷新了 `minReducedCost`，但调用侧 `changed` 仍为 false，于是不会 `rebuildLabelEnvelope()`，也不会 `recomputeDominanceEnvelope()`。第二，`trimLabelsBy()` 在同 reachable-set node 中用新 label 裁旧 label 时也有同样问题：部分裁剪不会触发 `changed`，旧的 `labelEnvelope` 继续包含被裁掉前的低值片段。后续 graph 用这个过强的 `dominanceEnvelope` 去支配新 label，就可能把本应保留的 label 裁掉或裁空。
+
+这能解释本轮现象：graph-partial 日志里 partial trim 次数非常多，例如 010 node 7 最后一轮有 `partialTrim checks/partial/full=5966/3459/863`，但 graph 的 label/envelope 更新只对 full trim 做了可靠传播。若这些 partial trim 中有任何一个把真实 lower envelope 抬高，而缓存仍保留旧低值，就会导致后续定价低估 relaxed bound、误判没有负 reduced-cost 列，最终提前闭合到 `16224.125`。
+
+修复方向应是让 graph-partial 的裁剪接口返回三态，而不是 boolean。`trimLabelByEnvelope()` 应把 `NO_CHANGE/PARTIAL/EMPTY` 暴露给 graph 调用侧；`removeLabelsDominatedByPredecessors()` 和 `trimLabelsBy()` 在 `PARTIAL` 时也必须标记 changed，并重建 `labelEnvelope`、重算 `dominanceEnvelope`，同时继续向 successors 传播。新 label 被 predecessor envelope 部分裁剪后再插入是可接受的，因为它还没有进入 graph，使用裁剪后的 frontier 建 node 即可。修复后需要重跑 010，对照 graph-partial 是否回到 `16222`；若仍不一致，再继续查 predecessor envelope 的传播顺序和 single-point dominance。

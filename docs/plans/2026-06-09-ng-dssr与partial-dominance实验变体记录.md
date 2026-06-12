@@ -527,3 +527,11 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 如果继续优化 graph，优先级较高的是“减少重复查询和重复 merge”，而不是重新设计 dominance 语义。比较可控的方向包括：1）给 node 维护更轻量的 cardinality 分层入口，superset/subset 查询先按 cardinality bucket 限定候选，再做 bitset 判断；2）对 predecessor envelope 增量维护或版本化缓存，避免每次传播都从所有 predecessors 重新 merge；3）把 propagation 的 `HashSet<PaperDominanceNode> queued` 换成 node 上的 mark 字段，降低长传播链上的对象分配；4）给 `mergeGEnvelopes()` 增加“单候选直接 copy / 空候选直接返回”的快路径，并统计候选数量分布，判断是否值得做 envelope reuse；5）在 graph partial 模式下，进一步区分“只 partial trim label”与“需要重建并传播 envelope”的场景，避免无变化时仍向后传播。
 
 不建议现在马上重启 indexed backend 作为默认优化，因为它之前已经表现出不稳定，而且它会同时引入索引维护、cache 失效和 set trie 路径选择问题。更稳的做法是先在经典 graph 上补更细的计时字段：superset/subset 查询时间、mergeGEnvelopes 总时间和候选数、propagation 重算 predecessor/dominance envelope 时间、删除/重连次数。只有确认某一块稳定占大头后，再做针对性优化。
+
+57. 2026-06-12 indexed backend 与当前几种 ng-DSSR dominance 策略的区别
+
+`indexed backend` 指代码中保留的 `IndexedPaperDominanceGraph`，它不是新的 dominance 语义，而是试图给 paper dominance graph 的 reachable-set 包含关系查询加索引。相比当前默认的 `PaperDominanceGraph` 从 roots 沿 successors 做 DFS，它额外维护按 cardinality、按 job、set-trie 和 superset cache 等结构，希望更快找到 terminal superset nodes 和 immediate subset nodes。但这些索引也带来插入、删除、结构版本、cache 失效、set-trie 路径选择等维护成本。此前实验中端到端收益不稳定，所以 `PaperDominanceGraphs.create()` 已经固定回经典 DFS graph，indexed 代码只保留为实验实现。
+
+当前 ng-DSSR 下几种策略的主流程是一样的：ng-set 初始化、label 扩展、DSSR 更新、completion bound、Tmid/probe 和 final join 都沿用 `GCNGBBStyleBidirectionalNgDssr`。差别集中在 terminal job 下的 dominance store。`PAPER` 使用普通 paper graph：按 reachable-set 节点建图，插入 label 时要找 superset predecessors、merge dominance envelope、必要时建新 node 并向后传播。`GRAPH_PARTIAL` 仍使用 graph 结构，但把完整支配扩展为 partial trim。`LIST_PARTIAL` 不建 graph，只在同 terminal 的 partial-list/bucket 中直接扫描满足 cardinality 条件的真实 labels，用 superset + frontier 区间不劣做 partial trim。
+
+因此可以把当前三种 ng-DSSR dominance 策略理解为“同一套 ng 定价主流程 + 不同 terminal dominance 后端”。normal/paper 的优势是尝试复用 graph envelope、减少重复支配计算；代价是图查询、envelope merge、边维护和传播。partial-list 的优势是结构成本低、直接比较真实 label；代价是当同 terminal label 数很大时，两两扫描仍可能爆炸。当前小到中等 root 实验里，partial-list/bucket 的常数更低，但这不等于它在所有节点和更大规模上一定更优。

@@ -553,3 +553,15 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 更具体的优化顺序建议为：第一，把 `updateDominatedIntervals()` 改为返回三态结果，例如 `NO_CHANGE / PARTIAL / EMPTY`，并在没有任何被支配区间时不改写 segment、不 normalize、不刷新 `minReducedCost`；第二，在 partial-list 调用前加非常便宜的定义域 overlap 快速判断，公共定义域为空则直接跳过；第三，给同 terminal 下的完全相同 reachableSet 建 exact-key 小桶，先比较同 key label，因为这一类最容易发生完整或大段 partial 裁剪，若新 label 已经被裁空就不必再扫更大的 superset bucket；第四，统计用的 `countLabelsInBuckets()` 可以改为维护 bucket size 累计或诊断开关下才计算，但这只是小优化，不是主矛盾。
 
 对于 ng + partial-list，当前可优化方向不是单独再调 partial-list，而是减少 DSSR 主体的重复成本。需要确认 completion bound、half cache 和候选状态是否在同一组 dual 下跨 DSSR 轮被复用；若仍有重复初始化，应优先消除。其次可以继续比较 topK non-elementary 更新、初始 ng-set 和 route 去重策略是否减少 DSSR 轮数。ng 版本慢时，很多时候不是 dominance store 慢，而是 DSSR 轮次和每轮重新定价次数多。
+
+60. 2026-06-12 ng-DSSR 重复计算与冗余初始化排查
+
+按“ng 流程本身不动，只查重复计算”的口径复核 `GCNGBBStyleBidirectionalNgDssr`。首先确认一个之前担心的点已经处理：`solve()` 中 `ngDssrReusableCompletionBounds` 和 `ngDssrReusableCompletionBoundFixedArc` 会在同一次 pricing 的 DSSR 多轮之间复用，`initialize()` 先把 `completionBounds` 指向可复用对象，只有为空时才 `buildCompletionBounds(lp)`。因此当前不是每轮 DSSR 都重建 completion bound。
+
+当前仍可能存在的冗余主要有三类。第一，每轮 relaxed round 都会重新 `precomputeDynamicPricingWindows(lp)`，其中包括 effective window、zero-dual excluded jobs、job-level dynamic windows、backward windows、completion-bound pricing windows 和 half-domain eligibility。这里大部分只依赖当前 LP dual、node、pricing horizon 和 `tMid`；在同一次 DSSR 内 dual/node 不变，只有 ng-set 变，因此除 `tMid/probe` 可能导致的 half-domain 部分外，很多数组理论上可跨 DSSR round 复用。需要注意，如果 midpoint probe 每轮重新选出不同 `tMid`，half-domain penalty 和 eligibility 必须重建，但 effective window、zero-dual、completion-bound penalty 可以不重算。
+
+第二，`initializeCandidateState(lp)` 每个 round 都扫描当前 restricted columns 构造 `activeColumnSignatures`，并重建 generated candidate heap/hash。对于中间 DSSR round，若这一轮最终只发现 non-elementary negative route，候选列池最后不会返回主问题；但当前仍需要候选池来保存本轮 elementary negative columns，因为一旦有 elementary negative columns 就会立即返回。可优化方向不是简单删除 candidate state，而是延迟初始化：先记录 elementary negative sequence/cost 的轻量候选，确定需要返回列时再建立 signature/heap 去重；或者把 `activeColumnSignatures` 在同一次 solve 中缓存，因为 restricted columns 在 DSSR 多轮内不变。
+
+第三，`maybeDumpPricingSnapshot(lp)`、`recordPricingDiagnostics(lp)`、dominance diagnostic context 和若干统计数组在每轮 round 都重新初始化。默认关闭时影响很小；但开启诊断或 snapshot 时会产生明显重复 I/O 或扫描。这个不影响正式求解，但应避免在性能实验中打开。
+
+已经不存在或不是主问题的点也要明确：rank0 midpoint probe 已经做了 label 复用，`midpointProbeLabelsReadyForJoin` 为 true 时不再重跑 forward/backward labeling，只补 `initializeCandidateState(lp)` 后 join；base half penalty 也有 `baseHalfPenaltyCacheTMid/baseHalfPenaltyCacheHorizon` 缓存，同一 `tMid/horizon` 下不会重复 crop 静态半域函数。因此当前最可做的优化是跨 DSSR round 缓存“只依赖 dual/node 的预处理”和 `activeColumnSignatures`，而不是再改 DSSR 更新流程。

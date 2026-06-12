@@ -670,3 +670,12 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 当前可由日志确认的事实是：graph-partial 在 010 node 7 后段仍能连续生成负列，最后一次 exact pricing 才返回 `relaxed pricing found no negative route`；该最后一轮有 `partialTrim checks/partial/full=5966/3459/863`、`candidatePool kept=0`、`joinBest bestRC=1.0E8`。list-partial 在自己的 node 7 最后一轮也返回无负列，但它进入 node 7 时 incumbent、restricted columns 和前序列池已经不同，最终 incumbent 为 `16222`。因此现在只能说 graph-partial 的完整路径产生了更差闭合值，不能说 envelope 缓存已经导致同状态漏列。
 
 后续正确的排查方式应改成同状态 cross-check：在 graph-partial 某次 exact pricing 返回空列时，保留同一个 `LP`、同一个 node、同一个 restricted column set 和同一组 dual，立即用 `PAPER` 和 `LIST_PARTIAL` 后端各跑一次 ng-DSSR pricing，且不把 cross-check 生成的列加入主问题。若 paper/list 在同状态找到负列，才说明 graph-partial dominance 或 join 确实漏列；再进一步 dump 这条 sequence，追踪它的 label 是否被 partial graph 裁掉。若 paper/list 同状态也找不到负列，则 `16224.125` 的差异更可能来自早期列生成路径分叉，需要把 cross-check 前移到第一次后端结果不同的 exact call。
+71. 2026-06-12 node4 同状态 cross-check 对 graph-partial 问题的更新结论
+
+在 `tmp-wet030_from040_010_2m` 上新增只用于诊断的同状态 cross-check：`GRAPH_PARTIAL` 正式返回后，不改变主问题列池，临时用同一个 LP 状态分别复跑 `PAPER` 和 `LIST_PARTIAL`。测试配置仍为三角化 010、ng-DSSR、`nearestK,size=8,top10`、`completionBound=allCycles`、`midpointProbe=true`、pricingOnly subtree、关闭 RMIH。诊断只限制在 node4，避免全树复跑过重。
+
+这次得到的关键证据是：`GRAPH_PARTIAL` 不是唯一问题，`LIST_PARTIAL` 在同一个 node4 状态下也会漏掉 `PAPER` 找到的负列。node4 第一轮 exact 中，graph 返回 6 列，list-partial 也返回同样 6 列，而 paper 返回 15 列，其中 9 条不在 graph 返回集合中；代表缺失列 reduced cost 约为 `-24`、`-20`、`-19`。node4 后段更直接：graph 返回 0 列，list-partial 也返回 0 列，但 paper 在同一 LP 状态下仍找到 1 条负列，reduced cost 约为 `-0.125`，序列为 `[17, 27, 10, 15, 20, 16, 1, 13, 30, 3, 11, 26, 19, 21, 24, 6]`。
+
+因此当前结论要修正为：问题不是 graph envelope 缓存单独导致的，也不是只发生在 `GRAPH_PARTIAL` 后端。更准确地说，当前 partial dominance 语义在 ng-DSSR 中还不能作为 exact pricing 的可信证明路径；它会在某些 LP 状态下比普通 `PAPER` 完整 dominance 少保留可形成负列的 label。`LIST_PARTIAL` 之前在完整 010 run 中也能得到 `16222`，只是因为列生成路径不同，恰好提前得到了足够好的列，并不能证明同状态下它没有漏列。
+
+这也解释了为什么 graph-partial 最终闭合到 `16224.125`：它不是找到更好的模型解，而是在 partial 裁剪路径下缺少 paper 后端还能生成的负列，从而给出了不可信的闭合证明。后续除非重新证明并修正 partial dominance 的裁剪条件，否则 `GRAPH_PARTIAL` 和 `LIST_PARTIAL` 都只能作为实验或启发式加速分支，不能用于最终 exact bound 结论。默认完整求解仍应使用 `PAPER` 后端。

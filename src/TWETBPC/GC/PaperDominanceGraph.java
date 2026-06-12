@@ -455,20 +455,25 @@ class PaperDominanceGraph implements DominanceStore {
 	}
 
 	private static boolean trimLabelByEnvelope(Label label, PiecewiseLinearFunction envelope, Direction direction) {
+		return trimLabelByEnvelopeDetailed(label, envelope, direction) == TrimResult.EMPTY;
+	}
+
+	private static TrimResult trimLabelByEnvelopeDetailed(Label label, PiecewiseLinearFunction envelope,
+			Direction direction) {
 		partialTrimChecks++;
 		TrimResult result = label.frontier.updateDominatedIntervalsDetailed(envelope, direction);
 		if (result == TrimResult.NO_CHANGE) {
-			return false;
+			return TrimResult.NO_CHANGE;
 		}
 		label.refreshMinReducedCost();
 		if (result == TrimResult.EMPTY || label.frontier == null || label.frontier.head == null
 				|| Utility.isBigMValue(label.minReducedCost)) {
 			label.isDominated = true;
 			partialFullTrims++;
-			return true;
+			return TrimResult.EMPTY;
 		}
 		partialTrims++;
-		return false;
+		return TrimResult.PARTIAL;
 	}
 
 	/**
@@ -690,11 +695,15 @@ class PaperDominanceGraph implements DominanceStore {
 			for (int i = labels.size() - 1; i >= 0; i--) {
 				Label label = labels.get(i);
 				dominanceChecks++;
-				if (partialDominance && canCoverDomain(predecessorEnvelope, label.frontier, direction)
-						&& trimLabelByEnvelope(label, predecessorEnvelope, direction)) {
-					labels.remove(i);
-					labelsDeletedByPropagation++;
-					changed = true;
+				if (partialDominance && canCoverDomain(predecessorEnvelope, label.frontier, direction)) {
+					TrimResult trimResult = trimLabelByEnvelopeDetailed(label, predecessorEnvelope, direction);
+					if (trimResult == TrimResult.EMPTY) {
+						labels.remove(i);
+						labelsDeletedByPropagation++;
+						changed = true;
+					} else if (trimResult == TrimResult.PARTIAL) {
+						changed = true;
+					}
 				} else if (!partialDominance && canCoverDomain(predecessorEnvelope, label.frontier, direction)
 						&& predecessorEnvelope.dominates(label.frontier)) {
 					label.isDominated = true;
@@ -723,14 +732,23 @@ class PaperDominanceGraph implements DominanceStore {
 			for (int i = labels.size() - 1; i >= 0; i--) {
 				Label label = labels.get(i);
 				dominanceChecks++;
-				if (canCoverDomain(frontier, label.frontier, direction) && trimLabelByEnvelope(label, frontier, direction)) {
-					labels.remove(i);
-					labelsDeletedByPropagation++;
-					changed = true;
+				if (canCoverDomain(frontier, label.frontier, direction)) {
+					TrimResult trimResult = trimLabelByEnvelopeDetailed(label, frontier, direction);
+					if (trimResult == TrimResult.EMPTY) {
+						labels.remove(i);
+						labelsDeletedByPropagation++;
+						changed = true;
+					} else if (trimResult == TrimResult.PARTIAL) {
+						changed = true;
+					}
 				}
 			}
 			if (changed && labels.isEmpty()) {
 				labelEnvelope = null;
+				recomputeDominanceEnvelope();
+			} else if (changed) {
+				rebuildLabelEnvelope();
+				recomputeDominanceEnvelope();
 			}
 		}
 

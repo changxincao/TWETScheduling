@@ -679,3 +679,7 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 因此当前结论要修正为：问题不是 graph envelope 缓存单独导致的，也不是只发生在 `GRAPH_PARTIAL` 后端。更准确地说，当前 partial dominance 语义在 ng-DSSR 中还不能作为 exact pricing 的可信证明路径；它会在某些 LP 状态下比普通 `PAPER` 完整 dominance 少保留可形成负列的 label。`LIST_PARTIAL` 之前在完整 010 run 中也能得到 `16222`，只是因为列生成路径不同，恰好提前得到了足够好的列，并不能证明同状态下它没有漏列。
 
 这也解释了为什么 graph-partial 最终闭合到 `16224.125`：它不是找到更好的模型解，而是在 partial 裁剪路径下缺少 paper 后端还能生成的负列，从而给出了不可信的闭合证明。后续除非重新证明并修正 partial dominance 的裁剪条件，否则 `GRAPH_PARTIAL` 和 `LIST_PARTIAL` 都只能作为实验或启发式加速分支，不能用于最终 exact bound 结论。默认完整求解仍应使用 `PAPER` 后端。
+
+进一步看代码后，当前最可信的问题解释是：ng-DSSR 的 partial dominance 用 `extensionSet` 作为 dominance key，而 `extensionSet` 是“当前下一步可扩展 job 集合”，等价于把 `ngMemorySet` 禁止、时间/资源不可达、零 dual 排除等原因合并后的可达补集。这个 key 对继续单向扩展比较自然，但对双向 join 不够，因为 join 阶段不是只看 `extensionSet`，还会直接检查 `forward.ngMemorySet ∩ backward.ngMemorySet` 以及 `backward.ngMemorySet.contains(lastJob)`。因此两个 label 即使 `extensionSet` 有包含关系，ng-memory 本身也可能不同；一个低成本 label 可以在某个时间段 partial 裁掉另一个 label，但它未必能和后者原本可拼接的 backward suffix 通过 ng-memory join 检查。这样就会出现 partial/list 都把某些时间段删掉，而 paper 完整 dominance 因为没有裁掉局部区间，仍保留了能拼出负列的 label。
+
+换句话说，问题不在于 lower envelope 更新后“局部更优函数不能裁剪”这个一般逻辑，而在于当前裁剪条件没有保留 join 所需的 ng-memory 兼容性。`PAPER` 后端也使用 reachable/extension 集合，但它只做整函数支配，攻击性弱得多；这次同状态对拍说明 partial 的局部区间裁剪把这个风险放大到了会漏负列的程度。

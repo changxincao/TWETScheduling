@@ -640,3 +640,13 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 011 中，normal 为 `NODE_LIMIT,obj=13813,bound=13323.109589,solve=23.371s,exact=6.103s/5,pricing=29,cols=5657,valid=true`；partial-list 为 `NODE_LIMIT,obj=13813,bound=13323.109589,solve=21.199s,exact=4.671s/4,pricing=27,cols=5517,valid=true`。两者上界、根界和有效性一致，partial-list 总时间约快 `9.3%`，exact 时间约快 `23.5%`，并少了一轮 exact pricing 和两轮 pricing 调用。
 
 当前结论是：在这两个三角化 30 任务 root 上，交点修复后的 partial-list 结果与 normal 一致，并且本轮都更快。不过这仍只是 root-only、两个算例的证据；此前 010 曾出现 partial-list 慢于 graph 的波动，说明 partial-list 是否稳定更快还要看节点、dual 路径和 terminal 下 label 数量。现阶段可以认为 partial-list 是可用的实验分支，但还不足以替换默认 paper graph。
+
+68. 2026-06-12 ng-DSSR + probe + pricingOnly 完整求解 010/011
+
+按“开启 ng，并把之前认为有帮助的策略都打开”的口径，重新求解三角化 30 任务 010/011 到闭合。测试目录为 `test-results/bpc/tmp-triangle-20260611/`，配置为 ALNS seed 开启、`completionBound=allCycles`、`midpointProbe=true`、ng-DSSR 开启、初始 ng-set 使用 `nearestK,size=8`、每轮 non-elementary route 更新上限为 10、completion-bound subtree 开启且采用 pricingOnly 固定弧，RMIH 上界启发式关闭。这样记录的是 BPC + ng-DSSR pricing 本身的闭合能力，不把 screened integer RMP 启发式耗时混进来。
+
+010 结果为 `FINISHED,obj=16222,bound=16222,gap=0,nodes=7,pricing=190,cols=8608,pool=8608,solve=100.962s,root=25.696s,heuristic=39.614s/136,exact=48.236s/54,masterLP=5.685s,valid=true`。根节点 `lpObj=16139.8`，subtree 第一次固定 175 条 pricingOnly 弧；随后 node 3 找到整数解 16258，node 4 更新到 16222，node 7 闭合。该算例没有出现单个 ng-DSSR 节点长时间卡住，耗时主要分散在 heuristic pricing 与 exact pricing 多次调用上。
+
+011 结果为 `FINISHED,obj=13511,bound=13511,gap=0,nodes=17,pricing=423,cols=10818,pool=10818,solve=150.125s,root=30.736s,heuristic=42.996s/297,exact=88.380s/126,masterLP=9.636s,valid=true`。根节点 `lpObj=13323.109589`，subtree 第一次固定 325 条 pricingOnly 弧；node 6 在 `73.881s` 找到整数解 13511，之后主要是在收敛剩余节点下界，node 17 闭合。011 的 exact ng-DSSR 总耗时明显高于 010，主要原因是搜索节点和 pricing 调用更多，而不是某一个节点直接求解不动。
+
+当前结论是：在三角化 010/011 上，`ng-DSSR + allCycles completion bound + midpoint probe + pricingOnly subtree + ALNS seed` 可以闭合，且结果校验均为 `valid=true`。011 求到最优约 150 秒，010 约 101 秒。pricingOnly 固定弧没有破坏正确性；在这两个实例里，它配合 ng-DSSR 能稳定推进分支树，但 exact pricing 仍是主要耗时来源，011 尤其体现为更多 exact calls 和更多搜索节点。

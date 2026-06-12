@@ -493,3 +493,11 @@ graph-partial 暂时不建议作为默认候选。它适合作为后续研究方
 cardinality 过滤本身也是严格必要条件，不会误删 label。若 `A.reachableSet` 要成为 `B.reachableSet` 的超集，则必然有 `|A| >= |B|`。当前新增逻辑只在该必要条件不满足时跳过后续 `isSupersetOf()` 和函数裁剪；满足时仍按原来的 superset + frontier partial trim 判断。因此它只减少比较成本，不改变 partial dominance 的支配集合。
 
 partial-list 后续可以按 `reachableCardinality` 分桶，以减少无效比较。第一遍“旧 label 裁剪新 label”只需要扫描 cardinality 不小于新 label 的 bucket；第二遍“新 label 裁剪旧 label”只需要扫描 cardinality 不大于新 label 的 bucket。这样不会改变理论支配条件，但实现时要注意 partial trim 是就地修改 frontier，且当前 list 顺序会影响数值路径和生成列轨迹；因此建议先做一个保守版本：bucket 只用于缩小候选范围，每个 bucket 内仍保持插入顺序，先不排序、不提前重排 active labels。这个版本改动较小，也便于和当前 flat-list 对拍。
+
+53. 2026-06-12 partial-list 按 cardinality bucket 扫描
+
+按讨论进一步把 `PartialListDominanceStore` 从单个 flat `labels` 改成 `labelsByCardinality`。新 label 插入时，第一轮“旧 label 裁剪新 label”只扫描 cardinality 不小于新 label 的 bucket；第二轮“新 label 裁剪旧 label”只扫描 cardinality 不大于新 label 的 bucket；single-point dominance 也只扫描 cardinality 不小于目标点 label 的 bucket。`cardinalitySkips` 保留为诊断统计，但含义变为整 bucket 跳过的候选 label 数量，而不是逐个 label 扫到以后再跳过。
+
+该实现不再保留全局插入顺序，bucket 内仍保持原插入顺序。由于 partial trim 是就地裁剪 frontier，生成列轨迹可能与 flat-list 略有差异，但支配条件仍是原来的 `reachableSet` 超集加 frontier 区间不劣，因此不会因为 bucket 本身放宽或加强 dominance 语义。这个版本的收益来自减少无效候选扫描，而不是改变裁剪规则。
+
+验证结果：focused `javac` 通过。`wet015_001_2m,maxNodes=1,partialDominance=true` 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true`，exact 时间 `0.188s`，日志中 `comparisons=49,cardinalitySkips=29`；同口径 flat-list 缓存版为 `comparisons=78,cardinalitySkips=29`。`tmp-wet030_001_2m,maxNodes=1,partialDominance=true` 返回 `NODE_LIMIT,obj=46152,bound=15261.833333,valid=true`，三轮 exact 的 partial-list 统计分别为 `comparisons/cardinalitySkips=19929/11241`、`9343/4995`、`7160/3709`；此前 flat-list 缓存版对应为 `32829/11178`、`14894/4974`、`11354/3683`。因此 bucket 版在不改变结果有效性的前提下明显减少了 partial-list dominance 的实际比较次数。

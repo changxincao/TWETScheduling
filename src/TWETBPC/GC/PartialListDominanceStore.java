@@ -28,11 +28,11 @@ final class PartialListDominanceStore implements DominanceStore {
 	private static long singlePointChecks;
 	private static String diagnosticContext = "";
 
-	private final ArrayList<Label> labels;
+	private final ArrayList<ArrayList<Label>> labelsByCardinality;
 	private final Direction direction;
 
 	PartialListDominanceStore(Direction direction) {
-		this.labels = new ArrayList<Label>();
+		this.labelsByCardinality = new ArrayList<ArrayList<Label>>();
 		this.direction = direction;
 	}
 
@@ -65,21 +65,21 @@ final class PartialListDominanceStore implements DominanceStore {
 			return true;
 		}
 
-		for (Label existing : labels) {
-			if (existing.isDominated || existing.frontier == null || existing.frontier.head == null) {
-				continue;
-			}
-			comparisons++;
-			if (existing.reachableCardinality < label.reachableCardinality) {
-				cardinalitySkips++;
-				continue;
-			}
-			if (existing.reachableSet.isSupersetOf(label.reachableSet)
-					&& trimFrontierBy(label, existing.frontier)) {
-				label.isDominated = true;
-				labelsRejected++;
-				fullTrims++;
-				return true;
+		cardinalitySkips += countLabelsInBuckets(0, label.reachableCardinality - 1);
+		for (int cardinality = label.reachableCardinality; cardinality < labelsByCardinality.size(); cardinality++) {
+			ArrayList<Label> bucket = labelsByCardinality.get(cardinality);
+			for (Label existing : bucket) {
+				if (existing.isDominated || existing.frontier == null || existing.frontier.head == null) {
+					continue;
+				}
+				comparisons++;
+				if (existing.reachableSet.isSupersetOf(label.reachableSet)
+						&& trimFrontierBy(label, existing.frontier)) {
+					label.isDominated = true;
+					labelsRejected++;
+					fullTrims++;
+					return true;
+				}
 			}
 		}
 		label.refreshMinReducedCost();
@@ -90,30 +90,31 @@ final class PartialListDominanceStore implements DominanceStore {
 			return true;
 		}
 
-		for (Iterator<Label> it = labels.iterator(); it.hasNext();) {
-			Label existing = it.next();
-			if (existing.isDominated || existing.frontier == null || existing.frontier.head == null) {
-				it.remove();
-				continue;
-			}
-			comparisons++;
-			if (label.reachableCardinality < existing.reachableCardinality) {
-				cardinalitySkips++;
-				continue;
-			}
-			if (!label.reachableSet.isSupersetOf(existing.reachableSet)) {
-				continue;
-			}
-			boolean deleted = trimFrontierBy(existing, label.frontier);
-			if (deleted || Utility.isBigMValue(existing.minReducedCost)) {
-				existing.isDominated = true;
-				it.remove();
-				labelsDeleted++;
-				fullTrims++;
+		cardinalitySkips += countLabelsInBuckets(label.reachableCardinality + 1, labelsByCardinality.size() - 1);
+		int maxCandidateCardinality = Math.min(label.reachableCardinality, labelsByCardinality.size() - 1);
+		for (int cardinality = 0; cardinality <= maxCandidateCardinality; cardinality++) {
+			ArrayList<Label> bucket = labelsByCardinality.get(cardinality);
+			for (Iterator<Label> it = bucket.iterator(); it.hasNext();) {
+				Label existing = it.next();
+				if (existing.isDominated || existing.frontier == null || existing.frontier.head == null) {
+					it.remove();
+					continue;
+				}
+				comparisons++;
+				if (!label.reachableSet.isSupersetOf(existing.reachableSet)) {
+					continue;
+				}
+				boolean deleted = trimFrontierBy(existing, label.frontier);
+				if (deleted || Utility.isBigMValue(existing.minReducedCost)) {
+					existing.isDominated = true;
+					it.remove();
+					labelsDeleted++;
+					fullTrims++;
+				}
 			}
 		}
 
-		labels.add(label);
+		bucketFor(label.reachableCardinality).add(label);
 		labelsInserted++;
 		return false;
 	}
@@ -127,9 +128,11 @@ final class PartialListDominanceStore implements DominanceStore {
 
 	@Override
 	public void collectActiveLabels(ArrayList<Label> buffer) {
-		for (Label label : labels) {
-			if (!label.isDominated && label.frontier != null && label.frontier.head != null) {
-				buffer.add(label);
+		for (ArrayList<Label> bucket : labelsByCardinality) {
+			for (Label label : bucket) {
+				if (!label.isDominated && label.frontier != null && label.frontier.head != null) {
+					buffer.add(label);
+				}
 			}
 		}
 	}
@@ -138,15 +141,18 @@ final class PartialListDominanceStore implements DominanceStore {
 	public boolean dominatesSinglePoint(PackedBitSet reachableSet, int reachableCardinality, double pointTime,
 			double pointValue) {
 		singlePointChecks++;
-		for (Label label : labels) {
-			if (label.isDominated || label.frontier == null || label.frontier.head == null
-					|| label.reachableCardinality < reachableCardinality
-					|| !label.reachableSet.isSupersetOf(reachableSet)) {
-				continue;
-			}
-			double value = label.frontier.evaluate(pointTime);
-			if (!Utility.compareGt(value, pointValue)) {
-				return true;
+		cardinalitySkips += countLabelsInBuckets(0, reachableCardinality - 1);
+		for (int cardinality = reachableCardinality; cardinality < labelsByCardinality.size(); cardinality++) {
+			ArrayList<Label> bucket = labelsByCardinality.get(cardinality);
+			for (Label label : bucket) {
+				if (label.isDominated || label.frontier == null || label.frontier.head == null
+						|| !label.reachableSet.isSupersetOf(reachableSet)) {
+					continue;
+				}
+				double value = label.frontier.evaluate(pointTime);
+				if (!Utility.compareGt(value, pointValue)) {
+					return true;
+				}
 			}
 		}
 		return false;
@@ -165,5 +171,22 @@ final class PartialListDominanceStore implements DominanceStore {
 
 	private static String diagnosticSuffix() {
 		return diagnosticContext == null || diagnosticContext.isEmpty() ? "" : ", context=" + diagnosticContext;
+	}
+
+	private ArrayList<Label> bucketFor(int cardinality) {
+		while (labelsByCardinality.size() <= cardinality) {
+			labelsByCardinality.add(new ArrayList<Label>());
+		}
+		return labelsByCardinality.get(cardinality);
+	}
+
+	private long countLabelsInBuckets(int fromCardinality, int toCardinality) {
+		int from = Math.max(0, fromCardinality);
+		int to = Math.min(toCardinality, labelsByCardinality.size() - 1);
+		long count = 0L;
+		for (int cardinality = from; cardinality <= to; cardinality++) {
+			count += labelsByCardinality.get(cardinality).size();
+		}
+		return count;
 	}
 }

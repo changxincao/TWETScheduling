@@ -615,3 +615,10 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 第四点“按 bucket 更细索引、避免挨个比”暂时不做。当前正确性更重要，且 main cost 更像 PWLF no-change 仍改写和 normalize，而不是 bucket 扫描本身。第五点统计可以顺手收敛：`cardinalitySkips += countLabelsInBuckets(...)` 每次 insert 都会扫 bucket，虽然不是主瓶颈，但这些统计只服务诊断。若要改，可加一个开关，只在 diagnostic 开启时计算；或者维护总数/前缀计数。不过这属于小优化，优先级低于三态和只读预扫描。
 
 整体难度判断：定义域 overlap 快速跳过最容易；三态返回本身也不难，但需要兼容旧 boolean 调用；只读预扫描是主要工作，难度中等，因为要正确处理线段交点、零长度点段和 forward/backward 的定义域语义。建议实现顺序为：先加三态和 overlap，跑现有 PWLF + pricing smoke；再加只读预扫描，专门构造“无裁剪但 segment 边界不对齐”的回归测试，确保 no-change 后函数结构不变。
+65. 2026-06-12 partial dominance 三态裁剪实现
+
+本次按第 64 节的方案实现了热路径优化。`PiecewiseLinearFunction` 新增 `TrimResult { NO_CHANGE, PARTIAL, EMPTY }` 和 `updateDominatedIntervalsDetailed()`，原来的 boolean `updateDominatedIntervals()` 保留为兼容 wrapper，仍只在裁空时返回 `true`。详细方法在真正改写函数前先做只读扫描：如果公共定义域内不存在任何正长度 `g(t) <= this(t)` 区间，则直接返回 `NO_CHANGE`，不拆分 segment、不 normalize、不刷新最小值。这样可以避免大量“比较了但没有裁剪”的 partial dominance 调用污染 PWLF 结构。
+
+调用侧也同步改为三态处理。`PartialListDominanceStore.trimFrontierBy()` 先做正长度定义域 overlap 快速跳过；只有 `PARTIAL/EMPTY` 才刷新 `minReducedCost`，其中 `PARTIAL` 才累计 `partialTrims`，`NO_CHANGE` 不再被误计为有效裁剪。`PaperDominanceGraph` 的 graph partial 路径同样切到三态接口，避免 no-change 时继续刷新 label。该修改不改变 dominance 语义，只减少无效 PWLF 改写和统计噪声。
+
+验证方面，focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过 `cases=200, insertions=16000`；`PiecewiseLinearFunctionPropertyTest` 新增的 “no-change does not rewrite frontier” 回归测试通过。该 property test 仍保留历史 `mergeMinimum` 无重叠定义域和随机 forward-closure 诊断失败，和本次三态裁剪优化无直接关系。15 任务 smoke 中，非 ng partial-list 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true, exact=0.223s/call=1`；ng + partial-list 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true, exact=0.265s/call=1`。当前结论是三态接口和 no-change 快速返回可用，后续再看 30/40 任务上是否能稳定降低 partial-list 的函数改写成本。

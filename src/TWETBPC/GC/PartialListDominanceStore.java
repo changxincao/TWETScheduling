@@ -5,6 +5,7 @@ import java.util.Iterator;
 
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
+import Common.PiecewiseLinearFunction.TrimResult;
 import Common.Utility;
 import TWETBPC.Util.PackedBitSet;
 
@@ -159,14 +160,27 @@ final class PartialListDominanceStore implements DominanceStore {
 	}
 
 	private boolean trimFrontierBy(Label label, PiecewiseLinearFunction dominatingFrontier) {
-		boolean deleted = label.frontier.updateDominatedIntervals(dominatingFrontier, direction);
+		if (!hasPositiveOverlap(label.frontier, dominatingFrontier)) {
+			return false;
+		}
+		TrimResult result = label.frontier.updateDominatedIntervalsDetailed(dominatingFrontier, direction);
+		if (result == TrimResult.NO_CHANGE) {
+			return false;
+		}
 		label.refreshMinReducedCost();
-		if (deleted || label.frontier == null || label.frontier.head == null) {
+		if (result == TrimResult.EMPTY || label.frontier == null || label.frontier.head == null) {
 			label.isDominated = true;
 			return true;
 		}
 		partialTrims++;
 		return false;
+	}
+
+	private boolean hasPositiveOverlap(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
+		if (left == null || right == null || left.head == null || right.head == null) {
+			return false;
+		}
+		return Utility.compareLt(Math.max(left.head.start, right.head.start), Math.min(left.tail.end, right.tail.end));
 	}
 
 	private static String diagnosticSuffix() {

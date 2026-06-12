@@ -73,6 +73,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testMergeMinimumChangedReturnRegression();
 		testMergeMinimumDisjointDomainRisk();
 		testUpdateDominatedIntervalsBasicCases();
+		testUpdateDominatedIntervalsNoChangeDoesNotRewrite();
 		testUpdateDominatedIntervalsComplexCases();
 		testRandomDirectionalMergeSweep();
 		testRandomDirectionalUpdateDominatedSweep();
@@ -831,6 +832,24 @@ public class PiecewiseLinearFunctionPropertyTest {
 		}
 	}
 
+	private void testUpdateDominatedIntervalsNoChangeDoesNotRewrite() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 6, 0, 1),
+				seg(6, 20, 0, 2));
+		PiecewiseLinearFunction g = function(0, 20,
+				seg(2, 4, 0, 10),
+				seg(4, 12, 0, 11));
+		String before = signature(f);
+		PiecewiseLinearFunction.TrimResult result = f.updateDominatedIntervalsDetailed(g,
+				PiecewiseLinearFunction.Direction.FORWARD);
+		if (result != PiecewiseLinearFunction.TrimResult.NO_CHANGE || !before.equals(signature(f))) {
+			fail("updateDominatedIntervals: no-change does not rewrite frontier",
+					"result=" + result + ", before=" + before + ", after=" + signature(f));
+		} else {
+			pass("updateDominatedIntervals: no-change does not rewrite frontier");
+		}
+	}
+
 	private void testRandomDirectionalUpdateDominatedSweep() {
 		int localFailures = 0;
 		for (int i = 0; i < RANDOM_CASES; i++) {
@@ -936,6 +955,18 @@ public class PiecewiseLinearFunctionPropertyTest {
 			count++;
 		}
 		return count;
+	}
+
+	private static String signature(PiecewiseLinearFunction f) {
+		StringBuilder sb = new StringBuilder();
+		for (Segment s = f.head; s != null; s = s.next) {
+			if (sb.length() > 0) {
+				sb.append('|');
+			}
+			sb.append(String.format(Locale.US, "%.12f,%.12f,%.12f,%.12f", s.start, s.end, s.slope,
+					s.intercept));
+		}
+		return sb.toString();
 	}
 
 	private PiecewiseLinearFunction randomContractFunction(double rightBound) {

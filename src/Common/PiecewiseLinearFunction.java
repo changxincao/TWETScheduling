@@ -27,6 +27,16 @@ public class PiecewiseLinearFunction {
 		BACKWARD
 	}
 
+	/**
+	 * partial dominance 裁剪结果。NO_CHANGE 表示没有正长度区间被裁掉，
+	 * PARTIAL 表示函数仍非空但被改写，EMPTY 表示函数已被完全裁空。
+	 */
+	public enum TrimResult {
+		NO_CHANGE,
+		PARTIAL,
+		EMPTY
+	}
+
 	public static class Segment {
 		public double start, end; // local coordinates
 		public double slope;
@@ -944,6 +954,10 @@ public class PiecewiseLinearFunction {
 	 * 替换为前面段的最低值（保持非增性）。
 	 */
 	public boolean updateDominatedIntervals(PiecewiseLinearFunction g, Direction direction) {
+		return updateDominatedIntervalsDetailed(g, direction) == TrimResult.EMPTY;
+	}
+
+	public TrimResult updateDominatedIntervalsDetailed(PiecewiseLinearFunction g, Direction direction) {
 		if (direction == Direction.BACKWARD) {
 			Utility.debugCheckPWLFLeftBound("updateDominatedIntervals.input.left", this);
 			Utility.debugCheckPWLFLeftBound("updateDominatedIntervals.input.right", g);
@@ -960,18 +974,23 @@ public class PiecewiseLinearFunction {
 			// 如果 L2 为空，直接拿过来 L1 的整条链（nonono)
 //			this.head = g.head;
 //			this.tail = g.tail;//不是取小
-			return true;
+			return TrimResult.EMPTY;
 		}
 		if (g.head == null) {
 			// 如果 L1 为空，无事可做
-			return false;
+			return TrimResult.NO_CHANGE;
 		}
-		resetMinimum();
 		// 公共定义域
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
 		if (!Utility.compareLt(start, end))
-			return false;
+			return TrimResult.NO_CHANGE;
+		// 2026-06-12: partial dominance 热路径先做只读扫描。若没有任何正长度
+		// 被支配区间，直接返回，避免为了扫描对齐拆分 segment 并 normalize。
+		if (!hasDominatedInterval(g, start, end)) {
+			return TrimResult.NO_CHANGE;
+		}
+		resetMinimum();
 
 		// 跳到 L2（this）上第一个与 start 重叠的分段，并累计起始前最小值
 		Segment p = this.head, prev = null;
@@ -1081,7 +1100,47 @@ public class PiecewiseLinearFunction {
 		} else {
 			Utility.debugCheckPWLFRightBound("updateDominatedIntervals.output", this);
 		}
-		if(this.isEmpty()) return true;
+		if(this.isEmpty()) return TrimResult.EMPTY;
+		return TrimResult.PARTIAL;
+	}
+
+	private boolean hasDominatedInterval(PiecewiseLinearFunction g, double start, double end) {
+		Segment p = this.head;
+		while (p != null && Utility.compareLt(p.end, start)) {
+			p = p.next;
+		}
+		Segment q = g.head;
+		while (q != null && Utility.compareLt(q.end, start)) {
+			q = q.next;
+		}
+
+		double cur = start;
+		while (p != null && q != null && Utility.compareLt(cur, end)) {
+			double nxt = Math.min(Math.min(p.end, q.end), end);
+			double l2s = p.slope * cur + p.intercept;
+			double l2e = p.slope * nxt + p.intercept;
+			double l1s = q.slope * cur + q.intercept;
+			double l1e = q.slope * nxt + q.intercept;
+			if (Utility.compareLe(l1s, l2s) && Utility.compareLe(l1e, l2e)) {
+				return true;
+			}
+
+			double ds = p.slope - q.slope;
+			if (!Utility.compareEq(ds, 0.0)) {
+				double tCross = (q.intercept - p.intercept) / ds;
+				if (Utility.compareLt(cur, tCross) && Utility.compareLt(tCross, nxt)) {
+					nxt = tCross;
+				}
+			}
+
+			cur = nxt;
+			if (Utility.compareEq(p.end, cur)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(q.end, cur)) {
+				q = q.next;
+			}
+		}
 		return false;
 	}
 

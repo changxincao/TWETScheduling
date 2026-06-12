@@ -11,6 +11,7 @@ import java.util.Map;
 
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
+import Common.PiecewiseLinearFunction.TrimResult;
 import Common.Utility;
 import TWETBPC.Util.PackedBitSet;
 
@@ -455,9 +456,12 @@ class PaperDominanceGraph implements DominanceStore {
 
 	private static boolean trimLabelByEnvelope(Label label, PiecewiseLinearFunction envelope, Direction direction) {
 		partialTrimChecks++;
-		boolean deleted = label.frontier.updateDominatedIntervals(envelope, direction);
+		TrimResult result = label.frontier.updateDominatedIntervalsDetailed(envelope, direction);
+		if (result == TrimResult.NO_CHANGE) {
+			return false;
+		}
 		label.refreshMinReducedCost();
-		if (deleted || label.frontier == null || label.frontier.head == null
+		if (result == TrimResult.EMPTY || label.frontier == null || label.frontier.head == null
 				|| Utility.isBigMValue(label.minReducedCost)) {
 			label.isDominated = true;
 			partialFullTrims++;

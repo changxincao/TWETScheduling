@@ -535,3 +535,13 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 当前 ng-DSSR 下几种策略的主流程是一样的：ng-set 初始化、label 扩展、DSSR 更新、completion bound、Tmid/probe 和 final join 都沿用 `GCNGBBStyleBidirectionalNgDssr`。差别集中在 terminal job 下的 dominance store。`PAPER` 使用普通 paper graph：按 reachable-set 节点建图，插入 label 时要找 superset predecessors、merge dominance envelope、必要时建新 node 并向后传播。`GRAPH_PARTIAL` 仍使用 graph 结构，但把完整支配扩展为 partial trim。`LIST_PARTIAL` 不建 graph，只在同 terminal 的 partial-list/bucket 中直接扫描满足 cardinality 条件的真实 labels，用 superset + frontier 区间不劣做 partial trim。
 
 因此可以把当前三种 ng-DSSR dominance 策略理解为“同一套 ng 定价主流程 + 不同 terminal dominance 后端”。normal/paper 的优势是尝试复用 graph envelope、减少重复支配计算；代价是图查询、envelope merge、边维护和传播。partial-list 的优势是结构成本低、直接比较真实 label；代价是当同 terminal label 数很大时，两两扫描仍可能爆炸。当前小到中等 root 实验里，partial-list/bucket 的常数更低，但这不等于它在所有节点和更大规模上一定更优。
+
+58. 2026-06-12 非 ng partial-list 当前 30 root 对照
+
+按“不要用 ng，只测优化后的 partial-list”的口径，重新在三角化后的 30 任务 010/011 root 节点做 normal 与 partial-list 对照。统一配置为 `maxNodes=1`、`completionBound=allCycles`、启发式 pricing 开启、ALNS seed 开启、RMIH 关闭、midpoint probe 关闭、ng-DSSR 相关开关关闭。010 中 normal 为 `solve=17.051s, heuristic=8.231s/22, exact=4.037s/4, bound=16139.8`，partial-list 为 `solve=20.380s, heuristic=10.757s/22, exact=5.774s/4, bound=16139.8`。011 中 normal 为 `solve=25.784s, heuristic=11.562s/24, exact=5.640s/5, bound=13323.109589`，partial-list 为 `solve=22.550s, heuristic=10.864s/23, exact=4.453s/4, bound=13323.109589`。
+
+这组结果说明，bucket partial-list 当前不是稳定快于 paper graph。它在 011 上减少了一轮 exact pricing 和一轮 heuristic pricing，因此总时间更好；但在 010 上虽然负列路径仍有效，partial-list 的两两裁剪本身较重，第一轮就有约 `49.7` 万次 comparisons 和 `32,267` 次 partial trim，导致 exact 与 heuristic 总体都慢。normal paper graph 在 010 上维护 graph 的成本被 label/envelope 复用摊薄得更好，partial-list 的直接扫描没有占到便宜。
+
+当前 partial-list 插入流程是双向裁剪：先扫描 cardinality 不小于新 label 的 bucket，用已有 label 的 frontier 裁新 label；如果新 label 被完全裁空，则拒绝插入。若新 label 仍有有效区间，则再扫描 cardinality 不大于新 label 的 bucket，用新 label 裁已有 label，旧 label 被裁空就从 bucket 删除；最后把新 label 放入自己的 cardinality bucket。也就是说，它确实是逐个比较、互相裁掉被对方占优的时间区间，然后后续扩展基于被裁剪后的 frontier 继续进行。
+
+关于 ng-DSSR 的 partial 版本，目前实现上并没有额外优化到足以成为默认。它复用同一个 `PartialListDominanceStore` 作为 `LIST_PARTIAL` backend，因此 dominance store 层面的常数低、语义直接；但 ng-DSSR 主体还有 ng-memory、DSSR 多轮、non-elementary route 记录与更新等额外成本。此前 30 root smoke 中普通 ng-DSSR 为 `exact=2.199s/4 calls`，ng + partial-list 为 `exact=2.754s/6 calls`，说明 partial-list 后端在 ng 框架下不一定减少 DSSR 轮数，反而可能改变列生成轨迹并增加 exact calls。当前结论是：非 ng partial-list 可以继续作为实验分支；ng + partial-list 目前只能算可用但未证明高效。

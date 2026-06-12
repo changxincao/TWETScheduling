@@ -20,6 +20,7 @@ import Common.Configure;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
+import Common.PiecewiseLinearFunction.TrimResult;
 import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
@@ -681,6 +682,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void initialize(LP lp) {
 		resetStatistics();
 		initializeTargetTrace(lp);
+		installPartialListTrimTrace();
 		setDominanceDiagnosticContext(pricingDiagnosticContext(lp));
 		resetDominanceStatistics();
 		pricingHorizon = data.CmaxH;
@@ -746,6 +748,19 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		traceTarget("init backend=" + dominanceBackend + " node="
 				+ (lp == null || lp.getNode() == null ? -1 : lp.getNode().id)
 				+ " target=" + targetTraceSequence);
+	}
+
+	private void installPartialListTrimTrace() {
+		if (dominanceBackend != DominanceBackend.LIST_PARTIAL || targetTraceSequence == null) {
+			PartialListDominanceStore.setTrimListener(null);
+			return;
+		}
+		PartialListDominanceStore.setTrimListener(new PartialListDominanceStore.TrimListener() {
+			@Override
+			public void onTrim(Label trimmed, Label dominator, TrimResult result, Direction direction) {
+				traceTargetPartialListTrim(trimmed, dominator, result, direction);
+			}
+		});
 	}
 
 	private ArrayList<Integer> parseTraceSequence(String raw) {
@@ -3961,6 +3976,89 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " dominated=" + label.isDominated);
 	}
 
+	private void traceTargetPartialListTrim(Label trimmed, Label dominator, TrimResult result, Direction direction) {
+		if (targetTraceSequence == null || trimmed == null || dominator == null) {
+			return;
+		}
+		ArrayList<Integer> trimmedSequence = recoverAnySequence(trimmed);
+		if (trimmedSequence == null) {
+			return;
+		}
+		boolean targetSide = direction == Direction.FORWARD
+				? isTargetPrefix(trimmedSequence)
+				: isTargetSuffix(trimmedSequence);
+		if (!targetSide) {
+			return;
+		}
+		ArrayList<Integer> dominatorSequence = recoverAnySequence(dominator);
+		traceTarget("PARTIAL_TRIM " + direction
+				+ " result=" + result
+				+ " trimmed#" + labelId(trimmed)
+				+ " seq=" + trimmedSequence
+				+ " min=" + trimmed.minReducedCost
+				+ " domain=" + labelDomain(trimmed)
+				+ " state=" + labelStateSummary(trimmed)
+				+ " by#" + labelId(dominator)
+				+ " seq=" + dominatorSequence
+				+ " min=" + dominator.minReducedCost
+				+ " domain=" + labelDomain(dominator)
+				+ " state=" + labelStateSummary(dominator)
+				+ " forgottenTargetJobs=" + forgottenTargetJobs(dominator, trimmedSequence, direction));
+	}
+
+	private ArrayList<Integer> recoverAnySequence(Label label) {
+		if (label instanceof ForwardLabel) {
+			return recoverForwardSequence((ForwardLabel) label);
+		}
+		if (label instanceof BackwardLabel) {
+			return recoverBackwardSequence((BackwardLabel) label);
+		}
+		return null;
+	}
+
+	private int labelId(Label label) {
+		return label instanceof FunctionLabel ? ((FunctionLabel) label).labelId : -1;
+	}
+
+	private String labelStateSummary(Label label) {
+		int visited = label.visitedSet == null ? 0 : label.visitedSet.cardinality();
+		int reachable = label.reachableCardinality;
+		if (label instanceof FunctionLabel) {
+			FunctionLabel functionLabel = (FunctionLabel) label;
+			int ng = functionLabel.ngMemorySet == null ? 0 : functionLabel.ngMemorySet.cardinality();
+			int ext = functionLabel.extensionCardinality;
+			return "visited/ng/ext=" + visited + "/" + ng + "/" + ext;
+		}
+		return "visited/reach=" + visited + "/" + reachable;
+	}
+
+	private String forgottenTargetJobs(Label label, ArrayList<Integer> trimmedSequence, Direction direction) {
+		if (!(label instanceof FunctionLabel) || trimmedSequence == null) {
+			return "[]";
+		}
+		FunctionLabel functionLabel = (FunctionLabel) label;
+		ArrayList<Integer> jobs = new ArrayList<Integer>();
+		if (direction == Direction.FORWARD) {
+			for (int i = trimmedSequence.size(); i < targetTraceSequence.size(); i++) {
+				int job = targetTraceSequence.get(i).intValue();
+				if (label.visitedSet != null && label.visitedSet.contains(job)
+						&& !functionLabel.ngMemorySet.contains(job)) {
+					jobs.add(Integer.valueOf(job));
+				}
+			}
+		} else {
+			int suffixStart = targetTraceSequence.size() - trimmedSequence.size();
+			for (int i = 0; i < suffixStart; i++) {
+				int job = targetTraceSequence.get(i).intValue();
+				if (label.visitedSet != null && label.visitedSet.contains(job)
+						&& !functionLabel.ngMemorySet.contains(job)) {
+					jobs.add(Integer.valueOf(job));
+				}
+			}
+		}
+		return jobs.toString();
+	}
+
 	private boolean isTargetPrefix(ArrayList<Integer> sequence) {
 		if (sequence.size() > targetTraceSequence.size()) {
 			return false;
@@ -3986,7 +4084,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return true;
 	}
 
-	private String labelDomain(FunctionLabel label) {
+	private String labelDomain(Label label) {
 		if (label.frontier == null || label.frontier.head == null || label.frontier.tail == null) {
 			return "empty";
 		}

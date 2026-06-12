@@ -28,6 +28,8 @@ final class PartialListDominanceStore implements DominanceStore {
 	private static long fullTrims;
 	private static long singlePointChecks;
 	private static String diagnosticContext = "";
+	// 2026-06-12: 仅用于目标序列诊断，默认关闭，不参与 dominance 决策。
+	private static TrimListener trimListener;
 
 	private final ArrayList<ArrayList<Label>> labelsByCardinality;
 	private final Direction direction;
@@ -50,6 +52,10 @@ final class PartialListDominanceStore implements DominanceStore {
 
 	static void setDiagnosticContext(String context) {
 		diagnosticContext = context == null ? "" : context;
+	}
+
+	static void setTrimListener(TrimListener listener) {
+		trimListener = listener;
 	}
 
 	static String statisticsSummary() {
@@ -75,7 +81,7 @@ final class PartialListDominanceStore implements DominanceStore {
 				}
 				comparisons++;
 				if (existing.reachableSet.isSupersetOf(label.reachableSet)
-						&& trimFrontierBy(label, existing.frontier)) {
+						&& trimFrontierBy(label, existing)) {
 					label.isDominated = true;
 					labelsRejected++;
 					fullTrims++;
@@ -105,7 +111,7 @@ final class PartialListDominanceStore implements DominanceStore {
 				if (!label.reachableSet.isSupersetOf(existing.reachableSet)) {
 					continue;
 				}
-				boolean deleted = trimFrontierBy(existing, label.frontier);
+				boolean deleted = trimFrontierBy(existing, label);
 				if (deleted || Utility.isBigMValue(existing.minReducedCost)) {
 					existing.isDominated = true;
 					it.remove();
@@ -159,13 +165,17 @@ final class PartialListDominanceStore implements DominanceStore {
 		return false;
 	}
 
-	private boolean trimFrontierBy(Label label, PiecewiseLinearFunction dominatingFrontier) {
+	private boolean trimFrontierBy(Label label, Label dominatingLabel) {
+		PiecewiseLinearFunction dominatingFrontier = dominatingLabel == null ? null : dominatingLabel.frontier;
 		if (!hasPositiveOverlap(label.frontier, dominatingFrontier)) {
 			return false;
 		}
 		TrimResult result = label.frontier.updateDominatedIntervalsDetailed(dominatingFrontier, direction);
 		if (result == TrimResult.NO_CHANGE) {
 			return false;
+		}
+		if (trimListener != null) {
+			trimListener.onTrim(label, dominatingLabel, result, direction);
 		}
 		label.refreshMinReducedCost();
 		if (result == TrimResult.EMPTY || label.frontier == null || label.frontier.head == null) {
@@ -202,5 +212,9 @@ final class PartialListDominanceStore implements DominanceStore {
 			count += labelsByCardinality.get(cardinality).size();
 		}
 		return count;
+	}
+
+	interface TrimListener {
+		void onTrim(Label trimmed, Label dominator, TrimResult result, Direction direction);
 	}
 }

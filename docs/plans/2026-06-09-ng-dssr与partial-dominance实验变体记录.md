@@ -694,3 +694,13 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 进一步把 15 任务的 10 个算例全部按同一口径跑完。三种后端在 10 个 root 节点上全部 `valid=true`，每个算例的 incumbent、bound 和最终列数完全一致；10 个算例合计 exact 时间为：`PAPER=0.262s`、`LIST_PARTIAL=0.187s`、`GRAPH_PARTIAL=0.252s`，合计列数均为 `8379`。其中 `wet015_001_2m` 的日志显示 list-partial 和 graph-partial 都确实发生了 partial trim，但最终没有影响 root 结论。
 
 因此当前小规模结论是：15/20 root 正常配置下没有复现 partial 后端漏列，且 list-partial 在这些小例子上略快；但这不能推翻 node4 同状态 cross-check 的结论。小规模 root 的 dual、DSSR 轮次和后续可替代路径都简单，partial 裁掉的区间没有导致最终负列缺失；而 30 任务 010 的 node4 已经证明，在特定 ng-memory 遗忘和 completion-bound 剪枝组合下，partial-list 与 graph-partial 都可能少于 paper 后端。因此 partial 后端目前仍只能作为实验/启发式后端，不能作为 exact bound 的可信默认后端。
+
+73. 2026-06-12 list-partial 目标前缀裁剪 trace
+
+继续沿用三角化 010 的 node4 同状态 cross-check 口径，本轮给 `LIST_PARTIAL` 增加默认关闭的裁剪 trace，只在指定目标序列 `[17, 27, 10, 15, 20, 16, 1, 13, 30, 3, 11, 26, 19, 21, 24, 6]` 的 prefix/suffix 被 partial trim 时输出裁剪者。运行目录为 `test-results/bpc/tmp-ngdssr-listpartial-trimtrace-node4-20260612`，正式 graph-partial 仍闭合到 `16224.125`，同状态 cross-check 中 `PAPER` 在 node4 后段仍能找到 reduced cost 约 `-0.125` 的目标列，而 `LIST_PARTIAL` 返回 0 列。
+
+新的关键证据是：`LIST_PARTIAL` 中目标 prefix 从一开始就被若干 relaxed label 局部裁剪，其中多条裁剪者已经真实访问过目标后续 job，但该 job 不在当前 `ngMemorySet` 中。例如目标 prefix `[17]` 被 `[19,17]` 裁剪时记录为 `forgottenTargetJobs=[19]`；prefix `[17,27]` 被 `[19,27]`、`[4,19,27]`、`[4,19,28,27]` 等裁剪时也出现 `forgottenTargetJobs=[19]`；prefix `[17,27,10]` 和 `[17,27,10,15]` 也多次被包含 19 的 relaxed prefix 裁剪。也就是说，裁剪者在真实 route 语义下已经用过未来目标列还需要的 job 19，但 ng-memory 已经遗忘 19，所以它的 `extensionSet` 仍看起来不差。
+
+这使之前的推断从“可能是 ng-memory 遗忘导致”变成了有日志证据的链条：`buildForwardExtensionSet()` 排除的是 `ngMemory.contains(job)`，不是 `visitedSet.contains(job)`；因此一个 non-elementary relaxed prefix 可以在 dominance key 上看起来拥有不小于目标 prefix 的可扩展集合，并用较低 frontier 裁掉目标 prefix 的低完成时间区间。但这个 relaxed prefix 后续若接上目标剩余序列会重复访问 19，不能替代 elementary target prefix。最终表现为 list-partial 中 `[17,27,10,15,20]` 的构造状态变成 `min=7006.125, domain=[597,2185.5]` 并被 `F_CB_PRUNED`；paper 同状态下同一 prefix 为 `min=6716.125, domain=[425,2185.5]`，可以继续扩展到完整负列。
+
+当前结论因此更明确：ng-DSSR 下把 partial dominance 直接套在 `extensionSet` 语义上不安全，不是单纯 graph envelope 缓存问题，也不是 join 或候选池 top-K 丢列。`PAPER` 后端仍应作为 exact pricing 的可信默认；`LIST_PARTIAL` 和 `GRAPH_PARTIAL` 可以保留为实验/启发式加速分支，但不能用于最终下界闭合证明，除非后续把 partial trim 条件改成能保证“裁剪者的真实访问历史不会排除被裁剪 label 未来需要的 elementary job”的更强条件。

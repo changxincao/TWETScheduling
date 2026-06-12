@@ -589,3 +589,15 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 ng-DSSR 主流程再次核对后，当前未发现新的语义错误。初始 ng-set 仍按配置 `nearestK/dualPair/empty` 构造；memory 更新为 `(oldMemory ∩ N_current) ∪ {current}`，forward 和 backward 都按当前扩展到的真实 job 更新；join 先用 ng-memory 冲突和 forbidden arc 过滤，负 reduced-cost route 恢复后再用真实 sequence 判断 elementary。elementary 负列进入候选池；non-elementary 负 route 只用于更新 ng-set，不直接加入主问题；每轮可按 `ngDssrNonElementaryRouteUpdateLimit` 记录 topK route，更新时一个 route 内多个重复段都会处理。这个流程与当前讨论确定的 ng-DSSR 语义一致。
 
 partial-list 也重新核对了一遍。bucket 化只用 `reachableCardinality` 做必要条件过滤，真正裁剪前仍要求 `existing.reachableSet.isSupersetOf(label.reachableSet)` 或反向的 `label.reachableSet.isSupersetOf(existing.reachableSet)`，因此不会因为 cardinality 过滤误删 label。single-point 路径同样先按 cardinality 限制候选，再做 superset 和 cost 比较。当前已知不足仍是性能/统计层面：`updateDominatedIntervals()` 只返回“是否被裁空”，不区分 no-change 和 partial trim，因此可能产生无效 normalize 和 partialTrims 统计偏高；但这不会把本不该删除的 label 当作完全删除。
+
+63. 2026-06-12 normal / ng / partial-list 正确性复查
+
+本轮只复查语义正确性，不比较效率。入口上，normal、partial-list、ng-DSSR、ng-DSSR + partial-list 是互斥 exact pricing 路径；partial-list 只替换 `FWTL/BWTL` 的 dominance store，ng-DSSR 则复用主双向 labeling 框架，但把 elementary 过滤放宽为 ng-memory 过滤，并在恢复完整 route 后再区分 elementary 和 non-elementary。
+
+normal 与 partial-list 的扩展和 join 口径一致：forward/backward 扩展只枚举当前 `reachableSet`，随后即时检查 `isPricingArcForbidden()`，该函数统一包含真实 forbidden arc、pricingOnly arc 和 completion-bound 固定弧；final join 对 crossing arc 和 forward-to-sink 也使用同一个禁止弧口径。elementary 版本的 join 继续用真实 `visitedSet` 交集排除重复 job，因此不会生成重复任务列。partial-list 版本没有改这些逻辑，只把完整函数占优换为“先裁剪被支配区间，裁空后才删除 label”。`updateDominatedIntervals()` 的返回语义是“裁空返回 true，部分裁剪返回 false”，因此 partial-list 不会因为部分裁剪把新 label 当作已删除。
+
+ng-DSSR 的语义也再次核对。label 的 `reachableSet` 在 ng 版本中实际是当前一跳 `extensionSet`，构造时排除了 zero-dual excluded job、ng-memory 中的 job、半域不可达 job 和当前资源不可达 job；forbidden arc 不进入 dominance key，只在实际扩展和 join 时检查。memory 更新为 `(oldMemory ∩ N_current) ∪ {current}`，forward/backward 都按当前扩展到的真实 job 更新。join 时只用 ng-memory 冲突过滤，不用真实 visited-set 交集提前过滤；恢复完整 sequence 后，elementary 负列进入候选池，non-elementary 负 route 只进入 DSSR 更新，不加入主问题。若存在 non-elementary negative route 但 ng-set 无法更新，当前直接抛异常，不静默 fallback。
+
+graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predecessor 或同 key 新 label 部分裁剪时，`labelEnvelope` 可能不是立刻重建；但被裁剪区间已经由 predecessor/new frontier 提供不差的下包络，后续 `dominanceEnvelope = min(labelEnvelope, predecessorEnvelope)` 不会比真实可用下包络更激进。因此这里当前判断为缓存/统计层面的保守性问题，没有发现会误删可行 label 的直接证据。若后续要彻底规整，可把 partial trim 的 no-change/partial/full 三态返回补齐，再按三态重建 envelope。
+
+验证方面，focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过 `cases=200, insertions=16000`；`PiecewiseLinearFunctionPropertyTest` 中 `updateDominatedIntervals` 的 full/partial/random sweep 均为 PASS，报告里的 3 个 FAIL 来自 `mergeMinimum` 无重叠定义域的诊断项，不指向本轮 partial 裁剪逻辑。15 任务 `wet015_001_2m,maxNodes=1,completionBound=allCycles,midpointProbe=false` 下，normal、partial-list、ng-DSSR、ng-DSSR + partial-list 四条路径均返回 `valid=true`，且根节点闭合到 `obj=bound=3360`。当前没有发现必须立即修复的正确性错误，剩余问题主要是性能和统计口径。

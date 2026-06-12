@@ -622,3 +622,11 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 调用侧也同步改为三态处理。`PartialListDominanceStore.trimFrontierBy()` 先做正长度定义域 overlap 快速跳过；只有 `PARTIAL/EMPTY` 才刷新 `minReducedCost`，其中 `PARTIAL` 才累计 `partialTrims`，`NO_CHANGE` 不再被误计为有效裁剪。`PaperDominanceGraph` 的 graph partial 路径同样切到三态接口，避免 no-change 时继续刷新 label。该修改不改变 dominance 语义，只减少无效 PWLF 改写和统计噪声。
 
 验证方面，focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 通过 `cases=200, insertions=16000`；`PiecewiseLinearFunctionPropertyTest` 新增的 “no-change does not rewrite frontier” 回归测试通过。该 property test 仍保留历史 `mergeMinimum` 无重叠定义域和随机 forward-closure 诊断失败，和本次三态裁剪优化无直接关系。15 任务 smoke 中，非 ng partial-list 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true, exact=0.223s/call=1`；ng + partial-list 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true, exact=0.265s/call=1`。当前结论是三态接口和 no-change 快速返回可用，后续再看 30/40 任务上是否能稳定降低 partial-list 的函数改写成本。
+
+66. 2026-06-12 partial dominance 只读预扫描交点漏判修正
+
+再次复查第 65 节实现时发现一个真实正确性风险：`hasDominatedInterval()` 在处理单个线性子区间内的交点时，原本只把 `cur` 推到交点继续扫描。这能发现“交点右侧被支配”的情况，但会漏掉“交点左侧被支配、右侧不被支配”的情况。例如 `this(t)=10-t`、`g(t)=5` 在 `[0,10]` 上相交于 `t=5`，`[0,5]` 是正长度被支配区间；旧预扫描会跳到 `t=5` 后继续看右侧，从而误报 `NO_CHANGE`。这类 false negative 会让本该执行的 partial trim 被跳过，因此不是单纯性能问题。
+
+修正方式是：在只读预扫描发现内部交点时，如果交点两侧任一端点已经满足 `g(t) <= this(t)`，则直接返回存在被支配正长度区间。这样不需要在预扫描里真的拆分 segment，同时和原修改流程“遇到交点后回到子区间重算”的语义一致。新增 `testUpdateDominatedIntervalsDetectsLeftSideCrossing()` 覆盖上述左侧交点案例。
+
+验证结果：focused `javac` 通过；`PiecewiseLinearFunctionPropertyTest` 中 no-change 与 crossing 两个新增测试均通过，原先 partial trim 随机 forward/directional 失败不再出现，整体从上一轮 `failed=13` 降为 `failed=3`，剩余失败均为历史 `mergeMinimum` 无重叠定义域诊断；`PaperDominanceGraphConsistencyTest` 通过 `cases=200, insertions=16000`。15 任务 smoke 中，非 ng partial-list 和 ng+partial-list 均返回 `ROOT_PROCESSED,obj=bound=3360,valid=true`。当前结论是三态裁剪的 no-change 快速返回已经修正到和原交点处理一致。

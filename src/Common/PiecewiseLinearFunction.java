@@ -1129,7 +1129,9 @@ public class PiecewiseLinearFunction {
 			if (!Utility.compareEq(ds, 0.0)) {
 				double tCross = (q.intercept - p.intercept) / ds;
 				if (Utility.compareLt(cur, tCross) && Utility.compareLt(tCross, nxt)) {
-					nxt = tCross;
+					if (Utility.compareLe(l1s, l2s) || Utility.compareLe(l1e, l2e)) {
+						return true;
+					}
 				}
 			}
 

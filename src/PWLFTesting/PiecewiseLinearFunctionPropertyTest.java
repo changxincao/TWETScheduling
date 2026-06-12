@@ -74,6 +74,7 @@ public class PiecewiseLinearFunctionPropertyTest {
 		testMergeMinimumDisjointDomainRisk();
 		testUpdateDominatedIntervalsBasicCases();
 		testUpdateDominatedIntervalsNoChangeDoesNotRewrite();
+		testUpdateDominatedIntervalsDetectsLeftSideCrossing();
 		testUpdateDominatedIntervalsComplexCases();
 		testRandomDirectionalMergeSweep();
 		testRandomDirectionalUpdateDominatedSweep();
@@ -847,6 +848,22 @@ public class PiecewiseLinearFunctionPropertyTest {
 					"result=" + result + ", before=" + before + ", after=" + signature(f));
 		} else {
 			pass("updateDominatedIntervals: no-change does not rewrite frontier");
+		}
+	}
+
+	private void testUpdateDominatedIntervalsDetectsLeftSideCrossing() {
+		PiecewiseLinearFunction f = function(0, 20,
+				seg(0, 10, -1, 10),
+				seg(10, 20, 0, 0));
+		PiecewiseLinearFunction g = function(0, 20,
+				seg(0, 20, 0, 5));
+		PiecewiseLinearFunction.TrimResult result = f.updateDominatedIntervalsDetailed(g,
+				PiecewiseLinearFunction.Direction.FORWARD);
+		if (result == PiecewiseLinearFunction.TrimResult.NO_CHANGE) {
+			fail("updateDominatedIntervals: crossing dominated interval detected",
+					"left side of an internal crossing is dominated but was reported as NO_CHANGE");
+		} else {
+			pass("updateDominatedIntervals: crossing dominated interval detected");
 		}
 	}
 

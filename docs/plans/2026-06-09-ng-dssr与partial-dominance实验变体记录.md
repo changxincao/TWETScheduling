@@ -630,3 +630,13 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 修正方式是：在只读预扫描发现内部交点时，如果交点两侧任一端点已经满足 `g(t) <= this(t)`，则直接返回存在被支配正长度区间。这样不需要在预扫描里真的拆分 segment，同时和原修改流程“遇到交点后回到子区间重算”的语义一致。新增 `testUpdateDominatedIntervalsDetectsLeftSideCrossing()` 覆盖上述左侧交点案例。
 
 验证结果：focused `javac` 通过；`PiecewiseLinearFunctionPropertyTest` 中 no-change 与 crossing 两个新增测试均通过，原先 partial trim 随机 forward/directional 失败不再出现，整体从上一轮 `failed=13` 降为 `failed=3`，剩余失败均为历史 `mergeMinimum` 无重叠定义域诊断；`PaperDominanceGraphConsistencyTest` 通过 `cases=200, insertions=16000`。15 任务 smoke 中，非 ng partial-list 和 ng+partial-list 均返回 `ROOT_PROCESSED,obj=bound=3360,valid=true`。当前结论是三态裁剪的 no-change 快速返回已经修正到和原交点处理一致。
+
+67. 2026-06-12 partial-list 与 normal 当前 HEAD root 对照
+
+在交点漏判修正后，重新用三角化 30 任务 010/011 做 root-only 同口径对照。测试目录为 `test-results/bpc/tmp-triangle-20260611/`，配置保持 `maxNodes=1`、ALNS seed 开启、启发式 pricing 开启、`completionBound=allCycles`、RMIH 关闭、midpoint probe 关闭，不打开 subtree；normal 使用 `GCNGBBStyleBidirectionalPricing`，partial-list 使用 `GCNGBBStylePartialDominancePricing`，其余配置一致。
+
+010 中，normal 为 `NODE_LIMIT,obj=16718,bound=16139.8,solve=26.530s,exact=6.494s/4,pricing=26,cols=5074,valid=true`；partial-list 为 `NODE_LIMIT,obj=16718,bound=16139.8,solve=25.519s,exact=5.932s/4,pricing=26,cols=4963,valid=true`。两者上界、根界和有效性一致，partial-list 总时间约快 `3.8%`，exact 时间约快 `8.7%`。
+
+011 中，normal 为 `NODE_LIMIT,obj=13813,bound=13323.109589,solve=23.371s,exact=6.103s/5,pricing=29,cols=5657,valid=true`；partial-list 为 `NODE_LIMIT,obj=13813,bound=13323.109589,solve=21.199s,exact=4.671s/4,pricing=27,cols=5517,valid=true`。两者上界、根界和有效性一致，partial-list 总时间约快 `9.3%`，exact 时间约快 `23.5%`，并少了一轮 exact pricing 和两轮 pricing 调用。
+
+当前结论是：在这两个三角化 30 任务 root 上，交点修复后的 partial-list 结果与 normal 一致，并且本轮都更快。不过这仍只是 root-only、两个算例的证据；此前 010 曾出现 partial-list 慢于 graph 的波动，说明 partial-list 是否稳定更快还要看节点、dual 路径和 terminal 下 label 数量。现阶段可以认为 partial-list 是可用的实验分支，但还不足以替换默认 paper graph。

@@ -545,3 +545,11 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 当前 partial-list 插入流程是双向裁剪：先扫描 cardinality 不小于新 label 的 bucket，用已有 label 的 frontier 裁新 label；如果新 label 被完全裁空，则拒绝插入。若新 label 仍有有效区间，则再扫描 cardinality 不大于新 label 的 bucket，用新 label 裁已有 label，旧 label 被裁空就从 bucket 删除；最后把新 label 放入自己的 cardinality bucket。也就是说，它确实是逐个比较、互相裁掉被对方占优的时间区间，然后后续扩展基于被裁剪后的 frontier 继续进行。
 
 关于 ng-DSSR 的 partial 版本，目前实现上并没有额外优化到足以成为默认。它复用同一个 `PartialListDominanceStore` 作为 `LIST_PARTIAL` backend，因此 dominance store 层面的常数低、语义直接；但 ng-DSSR 主体还有 ng-memory、DSSR 多轮、non-elementary route 记录与更新等额外成本。此前 30 root smoke 中普通 ng-DSSR 为 `exact=2.199s/4 calls`，ng + partial-list 为 `exact=2.754s/6 calls`，说明 partial-list 后端在 ng 框架下不一定减少 DSSR 轮数，反而可能改变列生成轨迹并增加 exact calls。当前结论是：非 ng partial-list 可以继续作为实验分支；ng + partial-list 目前只能算可用但未证明高效。
+
+59. 2026-06-12 partial-list 后续真正可优化的位置
+
+进一步区分“慢的原因”和“能动手优化的点”。当前 partial-list 的主要可优化点不应是再泛泛减少二次比较，而是降低每次比较进入 PWLF 裁剪后的无效成本。`PartialListDominanceStore.trimFrontierBy()` 现在调用 `updateDominatedIntervals()` 后总会刷新 `minReducedCost`，而 `updateDominatedIntervals()` 当前只返回“是否被裁空”，不区分“发生了部分裁剪”和“完全没有变化”。更重要的是，函数内部在非支配区间上也可能为了扫描对齐拆分 segment，最后仍执行 normalize。也就是说，即使一个 existing label 没有真正裁掉目标 label 的任何区间，也可能产生函数结构改写、normalize 和 `findMinimal()` 成本。这是当前最值得优先处理的工程优化。
+
+更具体的优化顺序建议为：第一，把 `updateDominatedIntervals()` 改为返回三态结果，例如 `NO_CHANGE / PARTIAL / EMPTY`，并在没有任何被支配区间时不改写 segment、不 normalize、不刷新 `minReducedCost`；第二，在 partial-list 调用前加非常便宜的定义域 overlap 快速判断，公共定义域为空则直接跳过；第三，给同 terminal 下的完全相同 reachableSet 建 exact-key 小桶，先比较同 key label，因为这一类最容易发生完整或大段 partial 裁剪，若新 label 已经被裁空就不必再扫更大的 superset bucket；第四，统计用的 `countLabelsInBuckets()` 可以改为维护 bucket size 累计或诊断开关下才计算，但这只是小优化，不是主矛盾。
+
+对于 ng + partial-list，当前可优化方向不是单独再调 partial-list，而是减少 DSSR 主体的重复成本。需要确认 completion bound、half cache 和候选状态是否在同一组 dual 下跨 DSSR 轮被复用；若仍有重复初始化，应优先消除。其次可以继续比较 topK non-elementary 更新、初始 ng-set 和 route 去重策略是否减少 DSSR 轮数。ng 版本慢时，很多时候不是 dominance store 慢，而是 DSSR 轮次和每轮重新定价次数多。

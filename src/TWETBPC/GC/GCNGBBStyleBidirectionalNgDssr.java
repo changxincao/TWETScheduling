@@ -260,6 +260,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double ngDssrReusableEarliestSourceCompletion;
 	private HashSet<SequenceSignature> ngDssrReusableActiveColumnSignatures;
 	private final DominanceBackend dominanceBackend;
+	private ArrayList<Integer> targetTraceSequence;
+	private StringBuilder targetTrace;
+	private int targetTraceEventLimit;
 
 	private String lastMessage = "GCNGBB-style ng-DSSR bidirectional pricing not executed";
 
@@ -677,6 +680,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void initialize(LP lp) {
 		resetStatistics();
+		initializeTargetTrace(lp);
 		setDominanceDiagnosticContext(pricingDiagnosticContext(lp));
 		resetDominanceStatistics();
 		pricingHorizon = data.CmaxH;
@@ -712,6 +716,59 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			initializeForwardSource(lp);
 		}
 		runFullMidpointDiagnosticIfEnabled(lp);
+	}
+
+	/**
+	 * 2026-06-12: 仅用于定位同状态 partial 漏列。目标序列通过系统属性传入，默认关闭；
+	 * trace 只写入 lastMessage，不改变 label、dominance 或候选列逻辑。
+	 */
+	private void initializeTargetTrace(LP lp) {
+		targetTraceSequence = null;
+		targetTrace = null;
+		String raw = System.getProperty("twet.bpc.ngDssrTraceSequence",
+				System.getProperty("twet.bpc.fullDomainCompare.ngDssrTraceSequence", "")).trim();
+		if (raw.isEmpty()) {
+			return;
+		}
+		int targetNode = Integer.getInteger("twet.bpc.ngDssrTraceNode",
+				Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrTraceNode", -1));
+		if (targetNode >= 0 && (lp == null || lp.getNode() == null || lp.getNode().id != targetNode)) {
+			return;
+		}
+		ArrayList<Integer> sequence = parseTraceSequence(raw);
+		if (sequence.isEmpty()) {
+			return;
+		}
+		targetTraceSequence = sequence;
+		targetTrace = new StringBuilder();
+		targetTraceEventLimit = Integer.getInteger("twet.bpc.ngDssrTraceLimit",
+				Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrTraceLimit", 120));
+		traceTarget("init backend=" + dominanceBackend + " node="
+				+ (lp == null || lp.getNode() == null ? -1 : lp.getNode().id)
+				+ " target=" + targetTraceSequence);
+	}
+
+	private ArrayList<Integer> parseTraceSequence(String raw) {
+		ArrayList<Integer> sequence = new ArrayList<Integer>();
+		String cleaned = raw.replace("[", "").replace("]", "").replace(";", ",");
+		for (String token : cleaned.split(",")) {
+			String trimmed = token.trim();
+			if (!trimmed.isEmpty()) {
+				sequence.add(Integer.valueOf(Integer.parseInt(trimmed)));
+			}
+		}
+		return sequence;
+	}
+
+	private void traceTarget(String message) {
+		if (targetTrace == null || targetTraceEventLimit <= 0) {
+			return;
+		}
+		targetTraceEventLimit--;
+		if (targetTrace.length() > 0) {
+			targetTrace.append(" || ");
+		}
+		targetTrace.append(message);
 	}
 
 	private void runFullMidpointDiagnosticIfEnabled(LP lp) {
@@ -1492,12 +1549,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				continue;
 			}
 			forwardExtensionConstructed++;
+			traceTargetForward("F_CONSTRUCT", child);
 			if (isForwardCompletionBoundPruned(child)) {
 				completionForwardLabelsPruned++;
+				traceTargetForward("F_CB_PRUNED", child);
 				continue;
 			}
 			forwardExtensionBoundSurvivors++;
-			if (insertForward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
+			InsertStatus status = insertForward(child, lp);
+			traceTargetForward("F_INSERT_" + status, child);
+			if (status == InsertStatus.STORED_AND_ENQUEUE) {
 				FWUL.add(child);
 			}
 		}
@@ -1521,11 +1582,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 				continue;
 			}
+			traceTargetBackward("B_CONSTRUCT", child);
 			if (isBackwardCompletionBoundPruned(child)) {
 				completionBackwardLabelsPruned++;
+				traceTargetBackward("B_CB_PRUNED", child);
 				continue;
 			}
-			if (insertBackward(child, lp) == InsertStatus.STORED_AND_ENQUEUE) {
+			InsertStatus status = insertBackward(child, lp);
+			traceTargetBackward("B_INSERT_" + status, child);
+			if (status == InsertStatus.STORED_AND_ENQUEUE) {
 				BWUL.add(child);
 			}
 		}
@@ -1994,14 +2059,27 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		joinPairsTried++;
+		boolean targetJoinPair = isTargetJoinPair(forward, backward);
+		if (targetJoinPair) {
+			traceTarget("JOIN_PAIR f#" + forward.labelId + " b#" + backward.labelId
+					+ " f=" + recoverForwardSequence(forward) + " b=" + recoverBackwardSequence(backward)
+					+ " fMin=" + forward.minReducedCost + " bMin=" + backward.minReducedCost);
+		}
 		if (forward.jid == backward.jid) {
 			joinPairsSetPruned++;
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED sameTerminal");
+			}
 			return;
 		}
 		if (bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
 			// 2026-06-09: ng-DSSR 只用 ng-memory 判断拼接是否违反当前记忆；
 			// 真实重复必须等负 reduced-cost route 恢复后再记录 cycle，用于后续更新 ng-set。
 			joinPairsSetPruned++;
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED ngMemoryIntersect fMem=" + forward.ngMemorySet
+						+ " bMem=" + backward.ngMemorySet);
+			}
 			return;
 		}
 
@@ -2009,6 +2087,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
 			joinPairsTimePruned++;
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED time earliestBackwardCompletion=" + earliestBackwardCompletion
+						+ " bTail=" + backward.frontier.tail.end);
+			}
 			return;
 		}
 
@@ -2017,16 +2099,25 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PiecewiseLinearFunction shiftedForward = forwardFull.shiftX(delta);
 		if (shiftedForward.head == null) {
 			joinFunctionPruned++;
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED shiftedForwardEmpty");
+			}
 			return;
 		}
 		PiecewiseLinearFunction backwardFull = getBackwardJoinExtension(backward);
 		if (backwardFull.head == null) {
 			joinFunctionPruned++;
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED backwardFullEmpty");
+			}
 			return;
 		}
 		PiecewiseLinearFunction joinCost = shiftedForward.add(backwardFull);
 		if (joinCost.head == null) {
 			joinFunctionPruned++;
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED joinCostEmpty");
+			}
 			return;
 		}
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
@@ -2038,10 +2129,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
 				joinFunctionBestRecordPruned++;
 			}
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED reducedCostBound=" + reducedCostBound);
+			}
 			return;
 		}
 
 		ArrayList<Integer> sequence = recoverJoinSequence(forward, backward);
+		if (targetJoinPair) {
+			traceTarget("JOIN_KEEP reducedCostBound=" + reducedCostBound);
+		}
 		tryGenerateColumn(sequence, lp, reducedCostBound);
 	}
 
@@ -2319,9 +2416,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ "/" + midpointColumnTaskMax
 				+ ", midpointProbe=" + midpointProbeSummary
 				+ ", midpointProbeFeedback=" + midpointProbeFeedbackSummary
+				+ targetTraceSummary()
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
 				+ ", " + dominanceStatisticsSummary();
+	}
+
+	private String targetTraceSummary() {
+		if (targetTrace == null) {
+			return "";
+		}
+		return ", targetTrace=" + targetTrace.toString();
 	}
 
 	private String nodeDiagnosticsSummary() {
@@ -2926,19 +3031,32 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
+		boolean targetSequence = isTargetSequence(sequence);
 		if (!isElementarySequence(sequence)) {
+			if (targetSequence) {
+				traceTarget("COLUMN_REJECT nonElementary inferredRC=" + inferredReducedCost);
+			}
 			recordNonElementaryNegativeSequence(sequence, inferredReducedCost);
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature)) {
+			if (targetSequence) {
+				traceTarget("COLUMN_REJECT alreadyActive inferredRC=" + inferredReducedCost);
+			}
 			return;
 		}
 		if (Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
 			if (joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD
 					&& !Utility.compareLt(inferredReducedCost, joinLowerBoundThreshold())) {
 				generatedCandidateDroppedByHeap++;
+				if (targetSequence) {
+					traceTarget("COLUMN_REJECT bestRecordThreshold inferredRC=" + inferredReducedCost);
+				}
 				return;
+			}
+			if (targetSequence) {
+				traceTarget("COLUMN_CANDIDATE inferredRC=" + inferredReducedCost);
 			}
 			rememberGeneratedCandidate(signature, PricingColumnCostRechecker.buildInferredColumn(sequence,
 					inferredReducedCost, lp, data, ColumnSource.PRICING_EXACT), inferredReducedCost);
@@ -3020,17 +3138,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void rememberGeneratedCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
 		generatedCandidateCount++;
+		boolean targetSignature = isTargetSignature(signature);
 		PricingColumnCandidate candidate = new PricingColumnCandidate(nextCandidateId++, signature, column,
 				reducedCost);
 		PricingColumnCandidate existing = generatedCandidateBySignature.get(signature);
 		if (existing != null) {
 			generatedCandidateDroppedByHeap++;
+			if (targetSignature) {
+				traceTarget("COLUMN_DROP duplicate reducedCost=" + reducedCost);
+			}
 			return;
 		}
 		updateBestGeneratedReducedCost(reducedCost);
 		if (generatedColumnCandidates.size() < config.maxExactPricingColumns) {
 			generatedColumnCandidates.add(candidate);
 			generatedCandidateBySignature.put(signature, candidate);
+			if (targetSignature) {
+				traceTarget("COLUMN_KEEP heapNotFull reducedCost=" + reducedCost);
+			}
 			return;
 		}
 		PricingColumnCandidate worstKept = generatedColumnCandidates.peek();
@@ -3040,9 +3165,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			generatedCandidateBySignature.remove(worstKept.signature);
 			generatedColumnCandidates.add(candidate);
 			generatedCandidateBySignature.put(signature, candidate);
+			if (targetSignature) {
+				traceTarget("COLUMN_KEEP replacedWorst reducedCost=" + reducedCost);
+			}
 			return;
 		}
 		generatedCandidateDroppedByHeap++;
+		if (targetSignature) {
+			traceTarget("COLUMN_DROP heapWorse reducedCost=" + reducedCost);
+		}
 	}
 
 	private void finalizeGeneratedColumns(LP lp) {
@@ -3784,6 +3915,82 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ArrayList<Integer> sequence = recoverForwardSequence(forward);
 		sequence.addAll(recoverBackwardSequence(backward));
 		return sequence;
+	}
+
+	private boolean isTargetSequence(ArrayList<Integer> sequence) {
+		return targetTraceSequence != null && targetTraceSequence.equals(sequence);
+	}
+
+	private boolean isTargetSignature(SequenceSignature signature) {
+		return targetTraceSequence != null && signature.equals(new SequenceSignature(targetTraceSequence));
+	}
+
+	private boolean isTargetJoinPair(ForwardLabel forward, BackwardLabel backward) {
+		if (targetTraceSequence == null) {
+			return false;
+		}
+		ArrayList<Integer> sequence = recoverJoinSequence(forward, backward);
+		return targetTraceSequence.equals(sequence);
+	}
+
+	private void traceTargetForward(String stage, ForwardLabel label) {
+		if (targetTraceSequence == null || label == null) {
+			return;
+		}
+		ArrayList<Integer> sequence = recoverForwardSequence(label);
+		if (!isTargetPrefix(sequence)) {
+			return;
+		}
+		traceTarget(stage + " f#" + label.labelId + " depth=" + label.depth + " seq=" + sequence
+				+ " min=" + label.minReducedCost + " domain=" + labelDomain(label)
+				+ " ext=" + label.extensionCardinality + " ng=" + label.ngMemorySet.cardinality()
+				+ " dominated=" + label.isDominated);
+	}
+
+	private void traceTargetBackward(String stage, BackwardLabel label) {
+		if (targetTraceSequence == null || label == null || label.isSinkRoot) {
+			return;
+		}
+		ArrayList<Integer> sequence = recoverBackwardSequence(label);
+		if (!isTargetSuffix(sequence)) {
+			return;
+		}
+		traceTarget(stage + " b#" + label.labelId + " seq=" + sequence
+				+ " min=" + label.minReducedCost + " domain=" + labelDomain(label)
+				+ " ext=" + label.extensionCardinality + " ng=" + label.ngMemorySet.cardinality()
+				+ " dominated=" + label.isDominated);
+	}
+
+	private boolean isTargetPrefix(ArrayList<Integer> sequence) {
+		if (sequence.size() > targetTraceSequence.size()) {
+			return false;
+		}
+		for (int i = 0; i < sequence.size(); i++) {
+			if (!targetTraceSequence.get(i).equals(sequence.get(i))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private boolean isTargetSuffix(ArrayList<Integer> sequence) {
+		if (sequence.size() > targetTraceSequence.size()) {
+			return false;
+		}
+		int offset = targetTraceSequence.size() - sequence.size();
+		for (int i = 0; i < sequence.size(); i++) {
+			if (!targetTraceSequence.get(offset + i).equals(sequence.get(i))) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private String labelDomain(FunctionLabel label) {
+		if (label.frontier == null || label.frontier.head == null || label.frontier.tail == null) {
+			return "empty";
+		}
+		return "[" + label.frontier.head.start + "," + label.frontier.tail.end + "]";
 	}
 
 	private void reverseInPlace(ArrayList<Integer> sequence) {

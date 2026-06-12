@@ -650,3 +650,13 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 011 结果为 `FINISHED,obj=13511,bound=13511,gap=0,nodes=17,pricing=423,cols=10818,pool=10818,solve=150.125s,root=30.736s,heuristic=42.996s/297,exact=88.380s/126,masterLP=9.636s,valid=true`。根节点 `lpObj=13323.109589`，subtree 第一次固定 325 条 pricingOnly 弧；node 6 在 `73.881s` 找到整数解 13511，之后主要是在收敛剩余节点下界，node 17 闭合。011 的 exact ng-DSSR 总耗时明显高于 010，主要原因是搜索节点和 pricing 调用更多，而不是某一个节点直接求解不动。
 
 当前结论是：在三角化 010/011 上，`ng-DSSR + allCycles completion bound + midpoint probe + pricingOnly subtree + ALNS seed` 可以闭合，且结果校验均为 `valid=true`。011 求到最优约 150 秒，010 约 101 秒。pricingOnly 固定弧没有破坏正确性；在这两个实例里，它配合 ng-DSSR 能稳定推进分支树，但 exact pricing 仍是主要耗时来源，011 尤其体现为更多 exact calls 和更多搜索节点。
+
+69. 2026-06-12 ng-DSSR 三种 dominance 后端完整对照
+
+上一节的 ng-DSSR 结果使用的是默认 `PAPER` 后端，也就是普通 paper dominance graph，不是 partial-list，也不是 graph-partial。本轮在相同求解配置下补测三种后端：`PAPER`、`GRAPH_PARTIAL` 和 `LIST_PARTIAL`。共同配置仍为 ALNS seed、`completionBound=allCycles`、midpoint probe、pricingOnly subtree、`nearestK,size=8`、non-elementary route top10 更新，RMIH 上界启发式关闭。
+
+010 的结果差异很明显。`PAPER` 为 `obj=bound=16222,solve=100.962s,pricing=190,cols=8608,exact=48.236s/54,valid=true`；`LIST_PARTIAL` 也闭合到 `16222`，但为 `solve=108.621s,pricing=222,cols=8010,exact=44.155s/64,valid=true`，即 exact 时间略少但 pricing 调用和 heuristic 路径更重，总时间慢于默认 paper；`GRAPH_PARTIAL` 闭合到 `16224.125`，为 `solve=142.491s,pricing=244,cols=8343,exact=78.180s/72,valid=true`。由于同一算例同一模型下默认 paper 和 list-partial 都能得到 `16222`，graph-partial 的 `16224.125` 不能视为正确最优值，说明该后端当前存在漏列或不完备风险，不能作为可信完整求解后端。
+
+011 中三者都闭合到 `13511`。`PAPER` 为 `solve=150.125s,pricing=423,cols=10818,exact=88.380s/126,valid=true`；`GRAPH_PARTIAL` 为 `solve=183.837s,pricing=426,cols=11046,exact=114.809s/133,valid=true`，明显慢于默认 paper；`LIST_PARTIAL` 为 `solve=100.547s,pricing=455,cols=11595,exact=53.408s/133,valid=true`，这次明显快于默认 paper。也就是说，list-partial 对 011 的 exact 扩展和列生成路径有正面作用，但在 010 上总时间没有收益。
+
+当前结论是：默认 `PAPER` 后端仍是最稳的 ng-DSSR 完整求解后端；`LIST_PARTIAL` 是值得继续保留的实验后端，011 上加速明显，但 010 上略慢，不能简单替换默认；`GRAPH_PARTIAL` 当前不应继续用于完整求解结论，因为 010 已经出现和其他后端不一致的闭合目标。后续若要排查 graph-partial，应优先在 010 上定位它为什么漏掉能把 incumbent 从 `16224.125` 降到 `16222` 的列，而不是继续比较速度。

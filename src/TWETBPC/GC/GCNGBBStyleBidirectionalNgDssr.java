@@ -67,6 +67,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		BEST_RECORD
 	}
 
+	public enum DominanceBackend {
+		PAPER,
+		GRAPH_PARTIAL,
+		LIST_PARTIAL
+	}
+
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
@@ -247,7 +253,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrTotalNonElementaryRoutes;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
-	private final boolean useGraphPartialDominance;
+	private final DominanceBackend dominanceBackend;
 
 	private String lastMessage = "GCNGBB-style ng-DSSR bidirectional pricing not executed";
 
@@ -257,16 +263,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode) {
-		this(data, config, midpointProbeReuseByNode, false);
+		this(data, config, midpointProbeReuseByNode, DominanceBackend.PAPER);
 	}
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, boolean useGraphPartialDominance) {
+		this(data, config, midpointProbeReuseByNode,
+				useGraphPartialDominance ? DominanceBackend.GRAPH_PARTIAL : DominanceBackend.PAPER);
+	}
+
+	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
+			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, DominanceBackend dominanceBackend) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
 		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
-		this.useGraphPartialDominance = useGraphPartialDominance;
+		this.dominanceBackend = dominanceBackend == null ? DominanceBackend.PAPER : dominanceBackend;
 	}
 
 	private void initializeNgNeighborhoods(LP lp) {
@@ -1143,29 +1155,43 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void setDominanceDiagnosticContext(String context) {
-		if (useGraphPartialDominance) {
+		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
 			PaperPartialDominanceGraphs.setDiagnosticContext(context);
+		} else if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
+			PartialListDominanceStore.setDiagnosticContext(context);
 		} else {
 			PaperDominanceGraphs.setDiagnosticContext(context);
 		}
 	}
 
 	private void resetDominanceStatistics() {
-		if (useGraphPartialDominance) {
+		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
 			PaperPartialDominanceGraphs.resetStatistics();
+		} else if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
+			PartialListDominanceStore.resetStatistics();
 		} else {
 			PaperDominanceGraphs.resetStatistics();
 		}
 	}
 
 	private DominanceStore createDominanceStore(Direction direction) {
-		return useGraphPartialDominance ? PaperPartialDominanceGraphs.create(direction)
-				: PaperDominanceGraphs.create(direction);
+		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
+			return PaperPartialDominanceGraphs.create(direction);
+		}
+		if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
+			return new PartialListDominanceStore(direction);
+		}
+		return PaperDominanceGraphs.create(direction);
 	}
 
 	private String dominanceStatisticsSummary() {
-		return useGraphPartialDominance ? PaperPartialDominanceGraphs.statisticsSummary()
-				: PaperDominanceGraphs.statisticsSummary();
+		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
+			return PaperPartialDominanceGraphs.statisticsSummary();
+		}
+		if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
+			return PartialListDominanceStore.statisticsSummary();
+		}
+		return PaperDominanceGraphs.statisticsSummary();
 	}
 
 	private void initializeLabelSearchState() {

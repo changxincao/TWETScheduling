@@ -20,6 +20,7 @@ import TWETBPC.GC.GCBBAsymmetricBidirectionalPricingEngine;
 import TWETBPC.GC.GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine;
 import TWETBPC.GC.GCBBStyleBidirectionalFullDomainPricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine;
+import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrPricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPartialDominancePricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPricingEngine;
@@ -72,6 +73,8 @@ public class TWETBPCContext {
 				pricingEngines.add(new GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine(data, config));
 			} else if (config.useGCBBFullDomainBidirectionalPricing) {
 				pricingEngines.add(new GCBBStyleBidirectionalFullDomainPricingEngine(data, config));
+			} else if (config.useGCNGBBStyleNgDssrPartialDominancePricing) {
+				pricingEngines.add(new GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine(data, config));
 			} else if (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine(data, config));
 			} else if (config.useGCNGBBStyleNgDssrPricing) {
@@ -85,6 +88,7 @@ public class TWETBPCContext {
 			}
 			if (config.diagnosticCrossCheckPartialDominance
 					&& config.useGCNGBBStyleBidirectionalPricing
+					&& !config.useGCNGBBStyleNgDssrPartialDominancePricing
 					&& !config.useGCNGBBStyleNgDssrGraphPartialDominancePricing
 					&& !config.useGCNGBBStyleNgDssrPricing
 					&& !config.useGCBBAsymmetricBidirectionalPricing

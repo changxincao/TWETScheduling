@@ -54,6 +54,8 @@ public class TWETBPCConfig {
 	 * 版本；默认关闭，避免影响当前 elementary 主路径。
 	 */
 	public boolean useGCNGBBStyleNgDssrPricing = false;
+	/** 2026-06-12: 实验开关；复用 ng-DSSR 主体，仅把 dominance store 切到 partial-list bucket 版本。 */
+	public boolean useGCNGBBStyleNgDssrPartialDominancePricing = false;
 	/** 2026-06-11: 实验开关；复用 ng-DSSR 主体，仅把 dominance store 切到 graph partial dominance。 */
 	public boolean useGCNGBBStyleNgDssrGraphPartialDominancePricing = false;
 	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK。 */

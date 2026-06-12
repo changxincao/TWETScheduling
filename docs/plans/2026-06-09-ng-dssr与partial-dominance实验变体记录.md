@@ -511,3 +511,19 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 另一个实际差异是裁剪粒度。partial-list 直接拿真实旧 label frontier 去裁真实新 label frontier，也会反向用新 label 裁旧 label；它不需要先把多个 label 聚合成 graph node envelope 再传播。graph 的聚合 envelope 在理论上能复用，但复用前要付出查询和传播代价；并且 partial trim 修改 frontier 后还会触发 envelope 重建/传播，使维护成本进一步上升。因此当前看到 partial-list 快，不矛盾：它是低结构开销、强直接裁剪；graph 是高结构开销、试图复用包络，只有当 label 数更大且查询/传播能显著少于两两比较时才可能反超。
 
 由此当前判断是：partial-list/bucket 适合继续作为实验分支，因为它简单、常数低、便于对拍；paper graph 仍有价值，但需要进一步优化 superset/subset 查询、envelope merge 和传播成本，或者等到更大规模/更高重复查询场景下才可能体现优势。
+
+55. 2026-06-12 ng-DSSR + partial-list dominance 实验入口
+
+本次按“优先做 ng 版本 partial-list”的要求，没有复制整套 `GCNGBBStyleBidirectionalNgDssr`，而是在现有 ng-DSSR 主体中把 dominance backend 从原来的 boolean graph partial 扩展为三种：`PAPER`、`GRAPH_PARTIAL`、`LIST_PARTIAL`。这样 ng-set 初始化、DSSR 轮次、non-elementary route 更新、completion bound、Tmid/probe 和 final join 全部沿用当前 ng-DSSR 实现，只替换 terminal dominance store。新增入口类为 `GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine`，配置开关为 `useGCNGBBStyleNgDssrPartialDominancePricing`，测试属性为 `twet.bpc.fullDomainCompare.ngDssrPartialDominance=true`。
+
+当前这个版本使用的是 bucket 化后的 `PartialListDominanceStore`。因此在 ng-DSSR 标签构造出的 `reachableSet/extensionSet` 语义下，它会按同一套 dominance key 做 partial-list 裁剪；这与已有 graph partial 入口并列，便于后续直接比较 `ng`、`ngGraphPartial` 和 `ngPartial`。需要注意，这仍是实验分支，不改变默认主线。
+
+验证方面，focused `javac` 覆盖配置、context、ng-DSSR 主体、新 engine 和 `GCBBFullDomainComparisonTest` 通过。`wet015_001_2m,maxNodes=1,ngDssrPartialDominance=true,nearestK8,top5,completionBound=allCycles` 返回 `ROOT_PROCESSED,obj=bound=3360,valid=true`，exact engine 为 `GCNGBBStyleNgDssrPartialDominancePricing`，日志输出 `partialList labels kept/rejected/deleted=32/0/0, comparisons=47, cardinalitySkips=31`，说明确实走了 partial-list backend。`tmp-wet030_001_2m` 同口径返回 `NODE_LIMIT,obj=46152,bound=15261.833333,valid=true`，exact 为 `2.754s/6 calls`；普通 ng-DSSR 同口径为 `2.199s/4 calls`，bound 相同。因此当前只证明新组合可用且结果有效，不能说明它比普通 ng 更快。
+
+56. 2026-06-12 dominance graph 后续可优化点
+
+当前主用 `PaperDominanceGraphs` 已明确回到经典 DFS backend，`IndexedPaperDominanceGraph` 仍保留但不再通过运行参数参与主路径，说明此前 containment index / set trie / superset cache 的端到端收益不稳定。结合当前代码，graph 的主要成本集中在四块：第一，`findTerminalSupersetNodes()` 从 roots DFS 到 terminal superset node；第二，`findImmediateSubsetNodes()` 查找新 node 的 immediate subset successors 并做冗余候选过滤；第三，`mergeGEnvelopes()` 和 node 内 `recomputePredecessorEnvelope()/recomputeDominanceEnvelope()` 反复 copy/merge PWLF；第四，`propagateAndTrim()` 用队列向后传播，过程中可能删除 node、重连边并重算后继 envelope。
+
+如果继续优化 graph，优先级较高的是“减少重复查询和重复 merge”，而不是重新设计 dominance 语义。比较可控的方向包括：1）给 node 维护更轻量的 cardinality 分层入口，superset/subset 查询先按 cardinality bucket 限定候选，再做 bitset 判断；2）对 predecessor envelope 增量维护或版本化缓存，避免每次传播都从所有 predecessors 重新 merge；3）把 propagation 的 `HashSet<PaperDominanceNode> queued` 换成 node 上的 mark 字段，降低长传播链上的对象分配；4）给 `mergeGEnvelopes()` 增加“单候选直接 copy / 空候选直接返回”的快路径，并统计候选数量分布，判断是否值得做 envelope reuse；5）在 graph partial 模式下，进一步区分“只 partial trim label”与“需要重建并传播 envelope”的场景，避免无变化时仍向后传播。
+
+不建议现在马上重启 indexed backend 作为默认优化，因为它之前已经表现出不稳定，而且它会同时引入索引维护、cache 失效和 set trie 路径选择问题。更稳的做法是先在经典 graph 上补更细的计时字段：superset/subset 查询时间、mergeGEnvelopes 总时间和候选数、propagation 重算 predecessor/dominance envelope 时间、删除/重连次数。只有确认某一块稳定占大头后，再做针对性优化。

@@ -29,6 +29,7 @@ public class GCBBFullDomainComparisonTest {
 	private static final String NORMAL_ENGINE = "GCNGBBStyleBidirectionalPricing";
 	private static final String PARTIAL_DOMINANCE_ENGINE = "GCNGBBStylePartialDominancePricing";
 	private static final String NG_DSSR_ENGINE = "GCNGBBStyleNgDssrPricing";
+	private static final String NG_DSSR_PARTIAL_ENGINE = "GCNGBBStyleNgDssrPartialDominancePricing";
 	private static final String NG_DSSR_GRAPH_PARTIAL_ENGINE = "GCNGBBStyleNgDssrGraphPartialDominancePricing";
 	private static final String FULL_DOMAIN_ENGINE = "GCBBStyleBidirectionalFullDomainPricing";
 	private static final String NODE_JOIN_ENGINE = "GCBBStyleBidirectionalFullDomainNodeJoinPricing";
@@ -138,7 +139,10 @@ public class GCBBFullDomainComparisonTest {
 				mode += "-scalarOff";
 			}
 		}
-		if (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
+		if (config.useGCNGBBStyleNgDssrPartialDominancePricing) {
+			mode += "-ngPartial-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
+					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
+		} else if (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
 			mode += "-ngGraphPartial-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		} else if (config.useGCNGBBStyleNgDssrPricing) {
@@ -146,9 +150,10 @@ public class GCBBFullDomainComparisonTest {
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		}
 		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
+				: (config.useGCNGBBStyleNgDssrPartialDominancePricing ? NG_DSSR_PARTIAL_ENGINE
 				: (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing ? NG_DSSR_GRAPH_PARTIAL_ENGINE
 						: (config.useGCNGBBStyleNgDssrPricing ? NG_DSSR_ENGINE
-						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE))));
+						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE)))));
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -222,6 +227,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssr",
 				Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
+		config.useGCNGBBStyleNgDssrPartialDominancePricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrPartialDominance",
+				Boolean.toString(config.useGCNGBBStyleNgDssrPartialDominancePricing)));
 		config.useGCNGBBStyleNgDssrGraphPartialDominancePricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrGraphPartialDominance",
 				Boolean.toString(config.useGCNGBBStyleNgDssrGraphPartialDominancePricing)));

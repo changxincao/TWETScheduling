@@ -253,6 +253,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrTotalNonElementaryRoutes;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
+	private boolean ngDssrReusablePricingWindowPrecomputeReady;
+	private double ngDssrReusablePricingHorizon;
+	private double ngDssrReusableDynamicMinHStart;
+	private double ngDssrReusableDynamicMaxHEnd;
+	private double ngDssrReusableEarliestSourceCompletion;
+	private HashSet<SequenceSignature> ngDssrReusableActiveColumnSignatures;
 	private final DominanceBackend dominanceBackend;
 
 	private String lastMessage = "GCNGBB-style ng-DSSR bidirectional pricing not executed";
@@ -414,6 +420,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalNonElementaryRoutes = 0;
 		ngDssrReusableCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
+		ngDssrReusablePricingWindowPrecomputeReady = false;
+		ngDssrReusablePricingHorizon = Double.NaN;
+		ngDssrReusableDynamicMinHStart = Double.NaN;
+		ngDssrReusableDynamicMaxHEnd = Double.NaN;
+		ngDssrReusableEarliestSourceCompletion = Double.NaN;
+		ngDssrReusableActiveColumnSignatures = null;
 
 		for (ngDssrRound = 1; ; ngDssrRound++) {
 			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
@@ -1225,13 +1237,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
 				Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
 		generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
-		activeColumnSignatures = new HashSet<SequenceSignature>();
+		activeColumnSignatures = activeColumnSignaturesForCurrentDssrSolve(lp);
 		nextCandidateId = 0;
-		// 只记录当前 RMP active 列。全局 pool 自身会按 signature 去重；若历史列当前不 active，
-		// pricing 仍可把它返回给 PC，让 LP.addColumns() 重新激活已有列。
-		for (int columnId : lp.getRestrictedColumnIds()) {
-			activeColumnSignatures.add(lp.getPool().getColumn(columnId).getSignature());
+	}
+
+	private HashSet<SequenceSignature> activeColumnSignaturesForCurrentDssrSolve(LP lp) {
+		if (ngDssrReusableActiveColumnSignatures != null) {
+			return ngDssrReusableActiveColumnSignatures;
 		}
+		HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
+		// 2026-06-12: 同一次 ng-DSSR pricing 的 DSSR 多轮只改变 ng-set，RMP active 列集不变。
+		// active signature 只需第一轮扫描 restricted columns，后续 round 复用这个只读集合。
+		for (int columnId : lp.getRestrictedColumnIds()) {
+			signatures.add(lp.getPool().getColumn(columnId).getSignature());
+		}
+		ngDssrReusableActiveColumnSignatures = signatures;
+		return signatures;
 	}
 
 	private String pricingDiagnosticContext(LP lp) {
@@ -3133,32 +3154,55 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		dynamicJobPenaltyByJob = null;
 		dynamicJobHStart = null;
 		dynamicJobHEnd = null;
-		effectiveJobHStart = null;
-		effectiveJobHEnd = null;
 		dynamicBackwardPenaltyByJob = null;
 		dynamicBackwardHStartByJob = null;
 		dynamicBackwardHEndByJob = null;
-		completionForwardPenaltyByJob = null;
-		completionBackwardPenaltyByJob = null;
 		forwardHalfEligibleByJob = null;
 		backwardHalfEligibleByJob = null;
 		forwardHalfIneligibleJobCount = 0;
 		backwardHalfIneligibleJobCount = 0;
-		zeroDualExcludedJobs = null;
-		zeroDualExcludedJobCount = 0;
-		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
-		precomputeEffectivePricingWindows(lp);
-		precomputeZeroDualExcludedJobs(lp);
+		if (!ngDssrReusablePricingWindowPrecomputeReady) {
+			precomputeDssrReusablePricingWindows(lp);
+			cacheDssrReusablePricingWindowScalars();
+			ngDssrReusablePricingWindowPrecomputeReady = true;
+		} else {
+			restoreDssrReusablePricingWindowScalars();
+		}
 		tMid = computeDefaultMidpoint();
 		ensureBaseHalfPenaltyCache();
-		precomputeJobLevelDynamicPricingWindows();
-		precomputeBackwardDynamicPricingWindows();
-		precomputeCompletionBoundPricingWindows();
 		if (requiresCompletionBoundForMidpoint() && completionBounds == null) {
 			buildCompletionBounds(lp);
 		}
 		tMid = computeCurrentMidpoint(lp);
 		rebuildHalfDomainForCurrentMidpoint();
+	}
+
+	private void precomputeDssrReusablePricingWindows(LP lp) {
+		effectiveJobHStart = null;
+		effectiveJobHEnd = null;
+		completionForwardPenaltyByJob = null;
+		completionBackwardPenaltyByJob = null;
+		zeroDualExcludedJobs = null;
+		zeroDualExcludedJobCount = 0;
+		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
+		precomputeEffectivePricingWindows(lp);
+		precomputeZeroDualExcludedJobs(lp);
+		precomputeCompletionBoundPricingWindows();
+	}
+
+	private void cacheDssrReusablePricingWindowScalars() {
+		// 2026-06-12: initialize() 每轮会先重置 pricingHorizon；复用 window 数组时必须同步恢复这些标量。
+		ngDssrReusablePricingHorizon = pricingHorizon;
+		ngDssrReusableDynamicMinHStart = dynamicMinHStart;
+		ngDssrReusableDynamicMaxHEnd = dynamicMaxHEnd;
+		ngDssrReusableEarliestSourceCompletion = earliestSourceCompletion;
+	}
+
+	private void restoreDssrReusablePricingWindowScalars() {
+		pricingHorizon = ngDssrReusablePricingHorizon;
+		dynamicMinHStart = ngDssrReusableDynamicMinHStart;
+		dynamicMaxHEnd = ngDssrReusableDynamicMaxHEnd;
+		earliestSourceCompletion = ngDssrReusableEarliestSourceCompletion;
 	}
 
 	private void rebuildHalfDomainForCurrentMidpoint() {

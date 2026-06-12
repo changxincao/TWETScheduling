@@ -565,3 +565,17 @@ paper dominance graph 的一次插入看起来像“用已有 envelope 比一次
 第三，`maybeDumpPricingSnapshot(lp)`、`recordPricingDiagnostics(lp)`、dominance diagnostic context 和若干统计数组在每轮 round 都重新初始化。默认关闭时影响很小；但开启诊断或 snapshot 时会产生明显重复 I/O 或扫描。这个不影响正式求解，但应避免在性能实验中打开。
 
 已经不存在或不是主问题的点也要明确：rank0 midpoint probe 已经做了 label 复用，`midpointProbeLabelsReadyForJoin` 为 true 时不再重跑 forward/backward labeling，只补 `initializeCandidateState(lp)` 后 join；base half penalty 也有 `baseHalfPenaltyCacheTMid/baseHalfPenaltyCacheHorizon` 缓存，同一 `tMid/horizon` 下不会重复 crop 静态半域函数。因此当前最可做的优化是跨 DSSR round 缓存“只依赖 dual/node 的预处理”和 `activeColumnSignatures`，而不是再改 DSSR 更新流程。
+
+61. 2026-06-12 ng-DSSR 跨 DSSR round 缓存优化
+
+本次先按上一节确认的方向做低风险优化，不改 ng-set 更新、DSSR 停止条件、join 语义和 dominance 语义。核心判断是：同一次 `solve(lp)` 内，DSSR 多轮只改变 ng-neighborhood；当前 LP dual、node、pricing horizon、restricted column 集合都不变。因此依赖这些固定信息的预处理不应每个 DSSR round 重算。
+
+代码层面做了两处缓存。第一，新增 `ngDssrReusablePricingWindowPrecomputeReady`，把 `effectiveJobHStart/effectiveJobHEnd`、zero-dual excluded jobs、dual profitable window 开关、completion-bound pricing window penalty 等只依赖 dual/node 的数组移到 `precomputeDssrReusablePricingWindows(lp)`，同一次 pricing 只算一次。`precomputeDynamicPricingWindows(lp)` 仍会每轮重建 job-level dynamic window、backward dynamic window 和 half-domain eligibility，因为这些会受到最终 `tMid` 影响；如果 midpoint 策略或 probe 让 `tMid` 变化，这部分必须重算，不能缓存。
+
+正确性复核时发现这里不能只缓存数组，还必须同步缓存 `pricingHorizon`、`dynamicMinHStart`、`dynamicMaxHEnd` 和 `earliestSourceCompletion`。原因是 `initialize()` 每轮 relaxed round 开头会先把 `pricingHorizon` 重置为 `data.CmaxH`；如果后续 round 复用第一轮的 effective window 数组，却不恢复这些标量，那么 midpoint、completion bound 和 half-domain 的右端点可能与数组对应的窗口不一致。因此最终实现中增加了 scalar cache/restore，第一轮预处理后保存，后续 DSSR round 先恢复这些标量，再按当前 `tMid` 重建 half-domain。
+
+第二，新增 `ngDssrReusableActiveColumnSignatures`，把 active restricted columns 的 signature 集合缓存到同一次 pricing 内。候选列 heap/hash 仍每轮重建，因为每一轮 DSSR 的 elementary negative columns 需要独立记录；但“当前 RMP 已 active 的列”集合在 DSSR 多轮内不变，只需第一轮扫描 restricted columns。这样可以避免每轮都重新遍历 restricted pool 构造相同的 signature set。
+
+验证方面，focused `javac` 通过。补上 scalar restore 后，两个 smoke run 均 `valid=true`：`wet015_001_2m,maxNodes=1,ngDssr=true,nearestK8,top5` 返回 `ROOT_PROCESSED,obj=bound=3360,solve=1.468s,exact=0.212s/call=1`；三角化 30 任务 `tmp-wet030_from040_010_2m,maxNodes=1` 返回 `NODE_LIMIT,obj=16718,bound=16139.8,solve=17.304s,exact=3.522s/calls=5`。日志中多轮 DSSR 的后续 round 继续显示 completion bound build time 为 0，且 `pricingHorizon/dynamicHStartMin/dynamicHEndMax/tMid` 保持与当前 dual window 一致，说明原有 bound 复用没有被破坏。
+
+需要注意，这次优化降低的是 DSSR round 内重复预处理成本，不会减少 DSSR 轮数，也不保证单个算例总时间一定下降。若某个节点的主要耗时仍在 label 扩展、join 或非基本 route 多轮收紧上，这次优化只能降低固定开销。后续若继续优化 ng，优先观察多轮 DSSR 中 `precompute/init` 占比是否还明显；如果不明显，就应转向减少 DSSR 轮数、减少无效 join 或改善 initial ng-set。

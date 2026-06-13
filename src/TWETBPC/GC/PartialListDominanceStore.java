@@ -33,10 +33,16 @@ final class PartialListDominanceStore implements DominanceStore {
 
 	private final ArrayList<ArrayList<Label>> labelsByCardinality;
 	private final Direction direction;
+	private final DominanceFrontierAdjuster frontierAdjuster;
 
 	PartialListDominanceStore(Direction direction) {
+		this(direction, null);
+	}
+
+	PartialListDominanceStore(Direction direction, DominanceFrontierAdjuster frontierAdjuster) {
 		this.labelsByCardinality = new ArrayList<ArrayList<Label>>();
 		this.direction = direction;
+		this.frontierAdjuster = frontierAdjuster;
 	}
 
 	static void resetStatistics() {
@@ -167,6 +173,9 @@ final class PartialListDominanceStore implements DominanceStore {
 
 	private boolean trimFrontierBy(Label label, Label dominatingLabel) {
 		PiecewiseLinearFunction dominatingFrontier = dominatingLabel == null ? null : dominatingLabel.frontier;
+		if (frontierAdjuster != null) {
+			dominatingFrontier = frontierAdjuster.adjustDominatingFrontier(label, dominatingLabel, direction);
+		}
 		if (!hasPositiveOverlap(label.frontier, dominatingFrontier)) {
 			return false;
 		}
@@ -215,6 +224,10 @@ final class PartialListDominanceStore implements DominanceStore {
 			count += labelsByCardinality.get(cardinality).size();
 		}
 		return count;
+	}
+
+	interface DominanceFrontierAdjuster {
+		PiecewiseLinearFunction adjustDominatingFrontier(Label trimmed, Label dominator, Direction direction);
 	}
 
 	interface TrimListener {

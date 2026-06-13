@@ -3,10 +3,11 @@ package TWETBPC.GC;
 /**
  * 带 SRI 状态的 label 标记接口。
  *
- * 2026-06-13: SRI dual 会让两个 reachable set 相同的 label 在未来扩展时承担不同
- * subset-row penalty。第一版先按完整 SRI count 状态分桶，只允许同状态 label 互相 dominance，
- * 保证不会因为忽略 SRI 状态而误删 label。
+ * 2026-06-13: SRI-aware dominance 需要读取当前 subset-row 计数。label 构造后计数数组
+ * 不再修改，因此这里直接暴露只读语义的内部数组，避免 dominance 热路径反复复制。
  */
 interface SriStateLabel {
 	String sriStateKey();
+
+	byte[] sriCounts();
 }

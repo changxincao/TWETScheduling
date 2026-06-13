@@ -1349,7 +1349,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
 			if (sriPricingEnabled) {
-				return new SriAwarePartialListDominanceStore(direction);
+				return new SriAwarePartialListDominanceStore(direction, sriDuals, sriScopes);
 			}
 			return new PartialListDominanceStore(direction);
 		}
@@ -4897,6 +4897,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		@Override
 		public String sriStateKey() {
 			return sriStateKey;
+		}
+
+		@Override
+		public byte[] sriCounts() {
+			return sriCounts;
 		}
 
 		private static String buildSriStateKey(byte[] counts) {

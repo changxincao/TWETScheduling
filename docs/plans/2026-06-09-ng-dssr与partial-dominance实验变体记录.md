@@ -730,3 +730,11 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 保护版本中，早期 partial trim 被跳过后，目标路径确实继续向后扩展：`[17] -> [17,27] -> [17,27,10] -> [17,27,10,15] -> [17,27,10,15,20] -> [17,27,10,15,20,16]` 都能够构造并插入，且每一步的下一个目标 job 均显示 `ext=true, ng=false, half=true, time=true, arcForbidden=false`。但是继续扩到 `[17,27,10,15,20,16,1]` 后，该前缀被 `F_CB_PRUNED`，没有生成完整目标列。因此这个目标列不是“只要禁止 partial trim 就一定恢复”的直接反例；保护只能证明 partial trim 确实提前杀掉了这条目标路径的一部分，不能单独证明完整目标列在当前保护路径下仍应返回。
 
 同时重新跑了 ng-DSSR 的 `PAPER` 后端对照，确认必须使用 `twet.bpc.fullDomainCompare.ngDssr=true` 才是同一套 ng-DSSR 流程；若三个 ng 开关都关掉，会退回普通 elementary pricing，不能对照 partial-list。`PAPER` 后端在该 node4 路径下也没有稳定生成完整目标序列，后几轮甚至会在 `[17,27]` 处完整占优。因此当前结论应收敛为：这次保护实验没有直接找到“保护目标前缀即可恢复 paper 独有列”的充分证据，但它确认了 partial-list 会通过多个不同历史 label 的分段裁剪提前改变目标路径的可用 frontier；后续若继续定位 exactness 问题，应优先在同一 LP 状态下记录 paper 独有列的完整 prefix 轨迹和 partial 后端的裁剪轨迹，而不是只盯单条旧目标序列。
+
+77. 2026-06-13 SRI partial-list dominance 改为旧 VRP 补偿口径
+
+前一版 SRI 接入过于保守：`SriAwarePartialListDominanceStore` 按完整 SRI count signature 分桶，只有 `[0,1,0,2,...]` 和完全相同状态的 label 才互相比较。这样不会漏掉 subset-row penalty 风险，但会明显削弱 dominance。本次按旧 VRP 的 `UseSR` 思路改为跨 SRI 状态补偿式比较：普通 partial-list store 仍按 reachable superset 和函数区间裁剪工作；当支配方在某个 SRI 上计数为 1、被支配方计数为偶数，并且被支配方还能到达一个支配方没有访问过的 cut 内 job 时，说明支配方未来可能额外触发一次 SRI penalty。比较前临时把支配方 frontier 整体上移 `-dual`，再做 partial dominance。该平移只用于本次比较，不修改 label 自身保存的真实 frontier。
+
+这等价于旧 VRP 中 `lb.m_reduced_cost - mu1 <= label.m_reduced_cost` 的函数版：`mu1` 是负的 SRI dual，`-mu1` 是支配方可能多承担的正 penalty。当前实现只在 `-dual > 0` 时补偿，因此不会把非 penalty 情形错误放宽。`DominanceStore.dominatesSinglePoint(...)` 暂时仍不做跨 SRI 状态补偿，因为该接口没有传入单点 label 的 `visitedSet/sriCounts`，无法可靠复现 `UseSR` 条件；单点之间继续在 `SinglePointStore` 中按相同 SRI key 比较。
+
+关于 ng-relaxation 下 SRI dual 是否会重复加，本次也做了语义复核。扩展阶段 `applySriExtensionShift()` 先检查真实 `visitedSet`，同一个 job 的重复访问不会再次增加 SRI 计数；计数最多只记到 2，只有从 1 变成 2 时才加一次 `-dual`。正反向 join 阶段再按两个半路径的 count 做修正：两边都已经触发过时去掉重复 penalty，两边各有一个不同 cut 内 job 时补上一次 penalty。因此即使用 ng relaxed route，单个 subset-row 对一条完整 route 的 pricing 贡献仍是“是否覆盖至少两个不同 job”的 0/1 系数，不会因为重复访问同一个 job 而多次加 dual。completion bound 的 SRI-aware 加强本次没有改，仍维持上一版“正式 frontier 计入 SRI，completion bound 不加 SRI 状态维度”的弱 bound 口径。

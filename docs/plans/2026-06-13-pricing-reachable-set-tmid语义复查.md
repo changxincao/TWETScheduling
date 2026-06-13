@@ -27,3 +27,5 @@
 3. graph partial dominance：`obj=16222.000000`，`bound=16222.000000`，`solve=71.707s`，exact pricing `28.386s / 57 calls`，`valid=true`。
 
 这说明此前 `graphPartial=16224.125` 的不一致在当前修复后没有复现。当前判断是：把 Tmid 半域条件从 dominance key 中移出后，三种后端在该问题配置下的停止条件和最终整数结果已经一致；graph partial 仍需继续在更多实例上对拍，但这个问题点已通过目标值、下界和值合法性验证。
+
+继续在同目录另一个 30 任务三角实例 `tmp-wet030_from040_011_2m` 上使用相同配置测试，三种后端同样得到一致最优值 `13511.000000`。paper dominance 总时间 `153.473s`，exact pricing `95.861s / 113 calls`；partial-list dominance 总时间 `150.358s`，exact pricing `88.658s / 133 calls`；graph partial dominance 总时间 `186.694s`，exact pricing `123.801s / 116 calls`。该结果说明 partial-list 在当前修复后并不是稳定变慢：它在 010 上总时间略慢于 paper，但在 011 上反而略快；主要差异来自列生成路径和 exact call 次数变化，而不是目标值不一致。graph partial 在 010 上最快，但 011 上明显变慢，当前只能判断其性能波动更大，还不适合作为默认后端。

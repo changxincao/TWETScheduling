@@ -59,7 +59,7 @@ final class SriAwarePartialListDominanceStore implements DominanceStore {
 		if (dominator == null || dominator.frontier == null) {
 			return null;
 		}
-		double compensation = sriDominanceCompensation(dominator, trimmed);
+		double compensation = sriDominanceCompensation(dominator, trimmed, sriDuals, sriScopes);
 		if (!Utility.compareGt(compensation, 0.0)) {
 			return dominator.frontier;
 		}
@@ -68,8 +68,10 @@ final class SriAwarePartialListDominanceStore implements DominanceStore {
 		return adjusted;
 	}
 
-	private double sriDominanceCompensation(Label dominator, Label dominated) {
-		if (!(dominator instanceof SriStateLabel) || !(dominated instanceof SriStateLabel)) {
+	static double sriDominanceCompensation(Label dominator, Label dominated, ArrayList<Double> sriDuals,
+			ArrayList<int[]> sriScopes) {
+		if (!(dominator instanceof SriStateLabel) || !(dominated instanceof SriStateLabel) || sriDuals == null
+				|| sriScopes == null) {
 			return 0.0;
 		}
 		byte[] dominatorCounts = ((SriStateLabel) dominator).sriCounts();
@@ -86,7 +88,7 @@ final class SriAwarePartialListDominanceStore implements DominanceStore {
 		return compensation;
 	}
 
-	private boolean mayDominatedUseSriLater(Label dominator, Label dominated, int[] scope) {
+	private static boolean mayDominatedUseSriLater(Label dominator, Label dominated, int[] scope) {
 		if (scope == null || dominated.reachableSet == null || dominated.visitedSet == null || dominator.visitedSet == null) {
 			return false;
 		}

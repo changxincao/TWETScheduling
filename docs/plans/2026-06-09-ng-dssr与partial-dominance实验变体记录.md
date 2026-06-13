@@ -789,3 +789,10 @@ ng-DSSR 中的 non-elementary route 只是 relaxed subproblem 的状态和 DSSR 
 理论上可以优化。当前 `GCNGBBStyleBidirectionalNgDssr` 的 `SinglePointStore` 保存的是完整 `FunctionLabel`，因此在 `isDominatedBySinglePointStore()` 和 `removeSinglePointsDominatedBy()` 中可以拿到双方的 `visitedSet/reachableSet/sriCounts`，按 `SriAwarePartialListDominanceStore` 的同一补偿逻辑比较标量：如果支配方某个 SRI count 为 1、被支配方为偶数，且被支配方还能到达一个支配方未访问的 cut 内 job，则比较前把支配方的 single-point value 加上 `-dual`。这样可以去掉“必须 sameSriState”的限制。
 
 当前暂不做，原因是 single-point 只是半域交界处的 shortcut，不是主要 dominance store；保守同状态比较已经正确，且跨状态补偿要把同一套 SRI compensation 抽成公共 helper，避免 partial-list store 和 single-point 各自复制一份逻辑。若后续 SRI active 后 label 数明显增加，再把该优化作为局部性能项处理即可。
+85. 2026-06-13 single-point SRI dominance 补偿接入
+
+按“改动不大就做”的要求，本次把 single-point dominance 也改为旧 VRP 式 SRI 补偿比较。实现上没有复制第二套 SRI 逻辑，而是把 `SriAwarePartialListDominanceStore` 中的 `sriDominanceCompensation()` 改为包内静态 helper；普通 partial-list frontier 裁剪和 single-point 标量比较都复用这一套补偿条件。
+
+具体变化为：`isDominatedBySinglePointStore()` 和 `removeSinglePointsDominatedBy()` 不再要求两个 single-point label 的 `sriStateKey` 完全相同。只要 reachable superset 条件成立，就计算支配方相对被支配方的 SRI compensation；若 `dominator.minReducedCost + compensation <= dominated.minReducedCost`，则允许支配。补偿条件仍是旧 VRP `UseSR` 口径：支配方某个 SRI count 为 1，被支配方为偶数，并且被支配方还能到达一个支配方未访问过的 cut 内 job。
+
+`bestByDominanceKey` 的 O(1) shortcut 在 SRI active 时仍关闭，因为该 map 每个 reachable key 只保存一个 label，跨 SRI 状态需要按被比较对象动态计算 compensation，不能安全压成一个全局 best。该修改只增强 live bucket 扫描中的 single-point dominance，语义上与 partial-list SRI 补偿保持一致。

@@ -1945,11 +1945,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			for (int i = 0; i < bucket.size(); i++) {
 				L existing = bucket.get(i);
-				if (existing.isDominated || !sameSriState(existing, label)) {
+				if (existing.isDominated) {
 					continue;
 				}
 				if (existing.reachableSet.isSupersetOf(label.reachableSet)
-						&& !Utility.compareGt(existing.minReducedCost, label.minReducedCost)) {
+						&& singlePointDominates(existing, label)) {
 					return true;
 				}
 			}
@@ -1971,11 +1971,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					bucket.remove(i);
 					continue;
 				}
-				if (!sameSriState(label, existing)) {
-					continue;
-				}
 				if (label.reachableSet.isSupersetOf(existing.reachableSet)
-						&& !Utility.compareGt(label.minReducedCost, existing.minReducedCost)) {
+						&& singlePointDominates(label, existing)) {
 					existing.isDominated = true;
 					bucket.remove(i);
 					if (!sriPricingEnabled) {
@@ -1996,8 +1993,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ensureSinglePointBucket(store, label.reachableCardinality).add(label);
 	}
 
-	private <L extends FunctionLabel> boolean sameSriState(L first, L second) {
-		return !sriPricingEnabled || first.sriStateKey.equals(second.sriStateKey);
+	private <L extends FunctionLabel> boolean singlePointDominates(L dominator, L dominated) {
+		double compensation = sriPricingEnabled
+				? SriAwarePartialListDominanceStore.sriDominanceCompensation(dominator, dominated, sriDuals, sriScopes)
+				: 0.0;
+		return !Utility.compareGt(dominator.minReducedCost + compensation, dominated.minReducedCost);
 	}
 
 	private <L extends FunctionLabel> ArrayList<L> ensureSinglePointBucket(SinglePointStore<L> store, int cardinality) {

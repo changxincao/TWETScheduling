@@ -3082,8 +3082,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean isForwardCompletionBoundPruned(ForwardLabel label) {
-		if (completionBounds == null || label.jid <= 0 || label.jid > data.n || label.frontier == null
-				|| label.frontier.head == null) {
+		if (completionBounds == null || label.jid <= 0 || label.jid > data.n || label.noSriFrontier == null
+				|| label.noSriFrontier.head == null) {
 			return false;
 		}
 		PiecewiseLinearFunction suffix = completionBounds.backwardRByJob[label.jid];
@@ -3097,7 +3097,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
-		PiecewiseLinearFunction completion = label.frontier.add(suffix);
+		// 2026-06-13: SRI active 时不维护旧 VRP 那种 m_*sr_bound，completion bound 只用不含 SRI 的松弛成本。
+		PiecewiseLinearFunction completion = label.noSriFrontier.add(suffix);
 		if (completion.head == null) {
 			return false;
 		}
@@ -3107,7 +3108,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean isBackwardCompletionBoundPruned(BackwardLabel label) {
 		if (completionBounds == null || label.isSinkRoot || label.jid <= 0 || label.jid > data.n
-				|| label.frontier == null || label.frontier.head == null) {
+				|| label.noSriFrontier == null || label.noSriFrontier.head == null) {
 			return false;
 		}
 		PiecewiseLinearFunction prefix = completionBounds.forwardUByJob[label.jid];
@@ -3121,7 +3122,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
-		PiecewiseLinearFunction completion = prefix.add(label.frontier);
+		// 2026-06-13: 与 forward 一致，completion-bound 剪枝不使用已计入 SRI penalty 的 frontier。
+		PiecewiseLinearFunction completion = prefix.add(label.noSriFrontier);
 		if (completion.head == null) {
 			return false;
 		}
@@ -3131,13 +3133,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {
 		completionBoundScalarChecks++;
-		double suffixLowerBound = completionBounds.backwardRAfterFloor(label.jid, label.frontier.head.start);
+		double suffixLowerBound = completionBounds.backwardRAfterFloor(label.jid, label.noSriFrontier.head.start);
 		if (Utility.isBigMValue(suffixLowerBound)) {
 			completionBoundScalarUnavailable++;
 			completionBoundScalarPruned++;
 			return true;
 		}
-		double scalarLowerBound = label.minReducedCost + suffixLowerBound;
+		double scalarLowerBound = label.noSriMinReducedCost + suffixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
 			completionBoundScalarPruned++;
 			return true;
@@ -3148,15 +3150,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean isBackwardCompletionBoundScalarPruned(BackwardLabel label, double cutoff) {
 		completionBoundScalarChecks++;
-		double prefixLowerBound = isAtPricingHorizon(label.frontier.tail.end)
+		double prefixLowerBound = isAtPricingHorizon(label.noSriFrontier.tail.end)
 				? completionBounds.forwardUMin(label.jid)
-				: completionBounds.forwardUBeforeCeil(label.jid, label.frontier.tail.end);
+				: completionBounds.forwardUBeforeCeil(label.jid, label.noSriFrontier.tail.end);
 		if (Utility.isBigMValue(prefixLowerBound)) {
 			completionBoundScalarUnavailable++;
 			completionBoundScalarPruned++;
 			return true;
 		}
-		double scalarLowerBound = label.minReducedCost + prefixLowerBound;
+		double scalarLowerBound = label.noSriMinReducedCost + prefixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
 			completionBoundScalarPruned++;
 			return true;
@@ -4876,6 +4878,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final PackedBitSet extensionSet;
 		final int extensionCardinality;
 		final PiecewiseLinearFunction noSriFrontier;
+		final double noSriMinReducedCost;
 		final byte[] sriCounts;
 		final String sriStateKey;
 		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
@@ -4883,13 +4886,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
-				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double minReducedCost) {
+				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double minReducedCost,
+				double noSriMinReducedCost) {
 			super(jid, null, visitedSet, dominanceSet, frontier, minReducedCost);
 			this.labelId = labelId;
 			this.extensionSet = extensionSet;
 			this.extensionCardinality = extensionSet == null ? 0 : extensionSet.cardinality();
 			this.ngMemorySet = ngMemorySet;
 			this.noSriFrontier = noSriFrontier == null ? frontier : noSriFrontier;
+			this.noSriMinReducedCost = noSriMinReducedCost;
 			this.sriCounts = sriCounts == null ? new byte[0] : sriCounts;
 			this.sriStateKey = buildSriStateKey(this.sriCounts);
 		}
@@ -4941,7 +4946,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
 				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts) {
 			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
-					forwardEndpointMin(frontier));
+					forwardEndpointMin(frontier), forwardEndpointMin(noSriFrontier == null ? frontier : noSriFrontier));
 			this.father = father;
 			this.depth = father == null ? 0 : father.depth + 1;
 		}
@@ -4955,7 +4960,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
 				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, boolean isSinkRoot) {
 			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
-					backwardEndpointMin(frontier));
+					backwardEndpointMin(frontier), backwardEndpointMin(noSriFrontier == null ? frontier : noSriFrontier));
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
 		}

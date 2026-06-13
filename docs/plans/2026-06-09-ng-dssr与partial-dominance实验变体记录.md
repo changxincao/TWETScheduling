@@ -796,3 +796,33 @@ ng-DSSR 中的 non-elementary route 只是 relaxed subproblem 的状态和 DSSR 
 具体变化为：`isDominatedBySinglePointStore()` 和 `removeSinglePointsDominatedBy()` 不再要求两个 single-point label 的 `sriStateKey` 完全相同。只要 reachable superset 条件成立，就计算支配方相对被支配方的 SRI compensation；若 `dominator.minReducedCost + compensation <= dominated.minReducedCost`，则允许支配。补偿条件仍是旧 VRP `UseSR` 口径：支配方某个 SRI count 为 1，被支配方为偶数，并且被支配方还能到达一个支配方未访问过的 cut 内 job。
 
 `bestByDominanceKey` 的 O(1) shortcut 在 SRI active 时仍关闭，因为该 map 每个 reachable key 只保存一个 label，跨 SRI 状态需要按被比较对象动态计算 compensation，不能安全压成一个全局 best。该修改只增强 live bucket 扫描中的 single-point dominance，语义上与 partial-list SRI 补偿保持一致。
+86. 2026-06-13 旧 VRP completion bound 与 SRI 的关系解释
+
+旧 VRP 的 `m_fw_bound/m_bw_bound` 不是带完整 SRI 状态的 bound 表，也不是完全不考虑 SRI。它采用的是“构造 bound 时去掉单侧已经触发的 SRI penalty，实际拼接时再按两侧 SRI count 重新合并”的口径。旧 label 的 `m_reduced_cost` 在扩展过程中已经在 `sr_count` 从 1 到 2 时扣过一次 `sr_mu`；由于 `sr_mu < 0`，这相当于给 reduced cost 加了一个正 penalty `-sr_mu`。构造 bound 表时，如果某个 label 的 `sr_count > 1`，旧代码把 `lp.sr_mu` 加回去，即去掉这条半路径自己已经付过的 SRI penalty。因此 bound 表更接近“不含已触发 SRI penalty 的基础半路径成本”。
+
+这样做的目的，是避免 completion bound 表需要保存每个 SRI 的 count 状态。bound 表只存 terminal/time 下最便宜的基础半路径；当 forward/backward 真正拼接成完整 route 时，再用两边 label 的真实 `sr_count` 做 SRI 合并修正：两边都已经触发同一 SRI，则完整 route 只能触发一次，需要把重复付的一次去掉；两边各有一个不同 cut 内 job，则单边都没触发，但完整 route 触发一次，需要补一次 penalty。也就是说，旧 bound 计算本身只以“去 SRI penalty 后的基础成本”进入表；SRI 不是作为状态维度进入 bound，而是在真正组合两侧 label 时按 count 重新结算。
+
+当前 TWET completion bound 暂未做这套 SRI-aware 去罚/重组逻辑。正式 label frontier 已经计入 SRI penalty，join 时也做了左右半路径合并修正；但 completion bound 用的补全函数不带 SRI count 状态，也没有把 suffix/prefix 的已触发 SRI penalty去掉后再按当前 label 状态重组。因此它应理解为不懂 SRI 状态的松弛 bound。由于 SRI penalty 是非负成本，忽略未来 SRI penalty 会让补全下界偏低，通常只会少剪，不会因为高估补全成本而误剪负列；但它也会比旧 VRP 的处理弱一些。
+87. 2026-06-13 更正旧 VRP completion bound 与 SRI 的代码口径
+
+重新核对旧 `BPC/GC/GCNGBB.java` 后，前一节把不同 bound 实现混在一起了，需要更正。`GCNGBB` 的初始 bound 不是简单的 label bound，而是先由 `BoundFTExtend/BoundBTExtend/BoundFCExtend/BoundBCExtend` 建二维 time/capacity bound，并用 `m_sec_bound` 和 `m_bd_fid` 保留 second best 来避免 2-cycle；这部分确实是 2-cycle-free bound。
+
+但 `GCNGBB` 后续每轮 `FWExtend/BWExtend` 后还会调用 `UpdateFWBound/UpdateBWBound`，用当前已生成 labels 的 `m_nosr_redcost` 和 `m_reduced_cost` 去收紧 `m_ft_bound/m_bt_bound/m_fc_bound/m_bc_bound` 以及 `m_ftsr_bound/m_btsr_bound/m_fcsr_bound/m_bcsr_bound`。因此“bound 和 label 有关系”说的是这一步动态 tighten，而不是初始 2-cycle-free bound 的构造来源。SRI 相关地，扩展时先用不含 SRI 的 bound 检查 `lbcost + m_bt_bound`，再用含 SRI 的 tightened bound 检查 `lbcost_nosr + m_btsr_bound`；join 处仍按两边 `sr_count` 做重复触发/合并触发修正。
+
+当前 TWET 的 `CompletionBoundCalculator` 与旧 `GCNGBB` 这套并不等价：它目前主要是基于 penalty 函数的 completion bound，没有旧 VRP 那种每轮用 labels 回写 tighten 的 `UpdateFWBound/UpdateBWBound` 机制，也没有为 SRI 单独维护 `m_*sr_bound`。所以后续讨论时要区分三件事：初始 2-cycle-free bound、用 labels 动态收紧 bound、SRI-aware 的含/不含 SRI 双 bound 表。
+
+88. 2026-06-13 GCNGBB 中基础 bound 与 SRI bound 的具体用法
+
+继续核对旧 `GCNGBB.java` 后，明确区分两套东西。前面误提的 `m_fw_bound/m_bw_bound` 名字主要出现在旧 `GCNGB.java`、`GCNGBB_C.java` 等变体；当前对照的 `GCNGBB.java` 使用的是 `m_ft_bound/m_bt_bound`、`m_fc_bound/m_bc_bound` 以及对应的 `m_ftsr_bound/m_btsr_bound`、`m_fcsr_bound/m_bcsr_bound`。
+
+`GCNGBB.java` 中基础 bound 的初始计算由 `BoundFTExtend/BoundBTExtend/BoundFCExtend/BoundBCExtend` 完成。以 time 维度为例，`m_ft_bound[cid][t]` 表示从 depot 正向到达 `cid`、消耗时间状态为 `t` 的松弛最小 reduced cost；转移成本为 `distance - arc_mu - mu`。若下一点正好等于上一状态记录的 best predecessor，则使用 `m_sec_bound` 代替 best bound，避免形成 2-cycle；否则使用 best bound。`m_bt_bound` 是反向从 sink 出发的同类表。capacity 维度的 `m_fc_bound/m_bc_bound` 同理，只是状态从 time 换成 capacity。
+
+SRI bound 初始时只是基础 bound 的拷贝：`m_ftsr_bound = m_ft_bound`、`m_btsr_bound = m_bt_bound` 等。真正区别来自每轮 label 扩展后的 `UpdateFWBound/UpdateBWBound`。更新时，基础表用当前 label 的 `m_nosr_redcost` tighten；SRI 表用当前 label 的 `m_reduced_cost` tighten。之后扩展新 label 时会先用基础 bound 检查 `lbcost + oppositeBaseBound + mu`，再用 SRI bound 检查 `lbcost_nosr + oppositeSriBound + mu`。因此 SRI 表不是完整 SRI 状态 DP，而是“由含 SRI label 成本收紧过的补全 bound”。
+
+89. 2026-06-13 SRI active 时 completion-bound 剪枝改用 no-SRI label cost
+
+按当前决定，TWET 暂不实现旧 `GCNGBB` 中每轮用 label 回写更新的 `m_*sr_bound`。因此 SRI active 时，completion-bound 剪枝不能使用已经计入 SRI penalty 的 `frontier/minReducedCost` 去和当前 all-cycle completion bound 相加，否则相当于把“没有 SRI 状态维度的 bound”与“含 SRI 的当前半路径”混在一起，剪枝口径会变得不清楚。
+
+本次实现保持正式 label reduced cost、dominance、join 和候选列过滤仍使用含 SRI 的 `frontier`；只在 completion-bound 剪枝中切换为 `noSriFrontier`。同时给 `FunctionLabel` 缓存 `noSriMinReducedCost`，scalar completion-bound 预筛也使用 no-SRI min 值，避免 scalar 分支仍按含 SRI 成本提前剪枝。这样当前 completion bound 与无 SRI 时的 all-cycle bound 口径一致：它只提供不含 SRI penalty 的松弛补全下界，可能偏弱，但不会因为 SRI 状态缺失而做更激进的 SR-bound 剪枝。
+
+验证：排除历史 `src/BPC` 包后，对当前 `src` 下 TWETBPC/Basic/Common/HEU/Output 相关 128 个 Java 文件执行 focused `javac -encoding UTF-8 -cp cplex.jar`，编译通过，仅有历史 deprecation warning。

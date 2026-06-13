@@ -48,10 +48,21 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		}
 
 		HashSet<String> activeTriples = activeSubsetRowTriples(lp);
+		// 2026-06-13: 对齐旧 VRP 的 lp.sr_cus_number：appearance 限制按当前 active cuts 累计，而不是只看本轮新增。
+		int[] appearances = activeSubsetRowAppearances(lp);
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
 		for (int first = 1; first <= lp.getData().n; first++) {
+			if (appearances[first] >= config.maxSubsetRowCutAppearancesPerJob) {
+				continue;
+			}
 			for (int second = first + 1; second <= lp.getData().n; second++) {
+				if (appearances[second] >= config.maxSubsetRowCutAppearancesPerJob) {
+					continue;
+				}
 				for (int third = second + 1; third <= lp.getData().n; third++) {
+					if (appearances[third] >= config.maxSubsetRowCutAppearancesPerJob) {
+						continue;
+					}
 					String signature = tripleSignature(first, second, third);
 					if (activeTriples.contains(signature)) {
 						continue;
@@ -90,8 +101,6 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		}
 
 		ArrayList<TWETCut> cuts = new ArrayList<TWETCut>();
-		// 2026-06-13: 对齐旧 VRP 的 lp.sr_cus_number：appearance 限制按当前 active cuts 累计，而不是只看本轮新增。
-		int[] appearances = activeSubsetRowAppearances(lp);
 		for (Candidate candidate : candidates) {
 			if (cuts.size() >= config.maxSubsetRowCutsPerRound) {
 				break;

@@ -77,3 +77,13 @@ SRI 分离阈值同步复核旧 `SRCut.java` 和 `Configure.java`：每轮最多
 关于 SRI active 时重算候选列真实成本：pricing 里用于排序和判断负列的是 reduced cost，含 `objective - machineDual - jobDual - arcDual - SRI dual contribution`。`PricingColumnCostRechecker.buildInferredColumn()` 只能从 reduced cost 加回 machine/job/arc dual 来临时构造列成本；SRI active 时如果仍走这条反推路径，就少加回 SRI cut dual contribution，导致 `TWETColumn.cost` 不是原始调度目标成本。RMP 目标必须使用真实列成本，所以 SRI active 下最终入池前统一调用 evaluator 按 sequence 重算真实 objective cost。
 
 验证：focused `javac` 通过；`wet020_001_2m` 与 `wet021_001_2m` 的 partial-list ng-DSSR + SRI 开关 root 烟测继续 valid，分别约 1.187s 和 1.802s。两个小样例未触发 violated SRI cut，因此仍属于 no-cut 链路烟测。
+
+### 2026-06-13 SRI appearance 语义与影响范围复核
+
+这里的 appearance 不是指一个 job 在某条 route/column 中出现多少次，而是指同一个 job 已经参与了多少条 active subset-row cuts。旧 `SRCut.java` 使用 `lp.sr_cus_number[c]` 在枚举三元组前过滤，并在新增 SRI cut 后对该 cut 中三个 customer 的计数各加一；默认上限来自 `Configure.m_max_appear_number=20`。当前 TWET 实现已改为相同语义：先统计 `lp.getActiveCutIds()` 中所有 active SRI cut 的 job 出现次数，再枚举候选三元组；达到 `maxSubsetRowCutAppearancesPerJob` 的 job 不再参与新 cut。候选加入时继续递增本轮计数，避免同一轮内超过上限。
+
+效率上，原实现先枚举和计算所有 violated triples，再在加 cut 阶段过滤 appearance，结果正确但会多做 `subsetRowValue()`。本轮把 appearance 过滤前移到三重循环入口，和旧 VRP 一样提前跳过已满 job。当前分离复杂度仍是按三元组枚举并扫描当前正值内部列，和旧 VRP 的 route_customer 矩阵扫描属于同一类策略；对 30/40/50 任务规模一般可接受。后续若 SRI 分离本身成为瓶颈，再考虑按 column 反向累计 pair/triple 分数，而不是现在改动。
+
+影响范围上，SRI 默认关闭。`SubsetRowCutGenerator` 只有在 `enableSubsetRowCutsForPartialDominance=true` 且 `useGCNGBBStyleNgDssrPartialDominancePricing=true` 时才会产生 cut；pricing 侧也只有 LIST_PARTIAL ng-DSSR 会读取 SRI dual。其他 exact pricing 策略不会生成 SRI cut，也不会读取 SRI dual。需要注意的是，如果外部手工把 SRI cut id 注入 activeCutIds，同时又切到非 SRI-aware pricing，则理论上会破坏列生成闭合；正常配置路径不会这么做。
+
+验证：focused `javac` 通过；`wet020_001_2m` root 小样例在 partial-list ng-DSSR + SRI 开关下继续 valid，用时约 1.274s，仍未触发 violated SRI cut。

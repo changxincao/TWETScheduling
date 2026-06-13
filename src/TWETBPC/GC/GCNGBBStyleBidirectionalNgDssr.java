@@ -29,6 +29,7 @@ import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETCut;
 import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
@@ -252,6 +253,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrRoundsExecuted;
 	private int ngDssrTotalNgSetUpdates;
 	private int ngDssrTotalNonElementaryRoutes;
+	private boolean sriPricingEnabled;
+	private ArrayList<Integer> sriCutIds;
+	private ArrayList<Double> sriDuals;
+	private ArrayList<int[]> sriScopes;
+	private ArrayList<Integer>[] sriCutsByJob;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
 	private boolean ngDssrReusablePricingWindowPrecomputeReady;
@@ -703,6 +709,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			recordPricingDiagnostics(lp);
 		}
 		maybeDumpPricingSnapshot(lp);
+		precomputeSriPricing(lp);
 		precomputeDynamicPricingWindows(lp);
 		if (completionBounds == null) {
 			buildCompletionBounds(lp);
@@ -913,6 +920,64 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return forward + ":" + backward + "(" + ((double) forward + 1.0) / ((double) backward + 1.0) + ")";
 	}
 
+	@SuppressWarnings("unchecked")
+	private void precomputeSriPricing(LP lp) {
+		sriPricingEnabled = false;
+		sriCutIds = new ArrayList<Integer>();
+		sriDuals = new ArrayList<Double>();
+		sriScopes = new ArrayList<int[]>();
+		sriCutsByJob = new ArrayList[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			sriCutsByJob[job] = new ArrayList<Integer>();
+		}
+		if (!config.enableSubsetRowCutsForPartialDominance || dominanceBackend != DominanceBackend.LIST_PARTIAL) {
+			return;
+		}
+		List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
+		List<Double> duals = lp.getActiveSubsetRowPricingDuals();
+		for (int idx = 0; idx < cutIds.size(); idx++) {
+			TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
+			if (cut.getScopeJobs().size() != 3) {
+				continue;
+			}
+			int activeIndex = sriCutIds.size();
+			int[] scope = new int[3];
+			for (int pos = 0; pos < 3; pos++) {
+				scope[pos] = cut.getScopeJobs().get(pos).intValue();
+				if (scope[pos] >= 1 && scope[pos] <= data.n) {
+					sriCutsByJob[scope[pos]].add(Integer.valueOf(activeIndex));
+				}
+			}
+			sriCutIds.add(cutIds.get(idx));
+			sriDuals.add(duals.get(idx));
+			sriScopes.add(scope);
+		}
+		sriPricingEnabled = !sriCutIds.isEmpty();
+	}
+
+	private byte[] emptySriCounts() {
+		return sriPricingEnabled ? new byte[sriCutIds.size()] : new byte[0];
+	}
+
+	private byte[] copySriCounts(byte[] counts) {
+		return counts == null || counts.length == 0 ? new byte[0] : counts.clone();
+	}
+
+	private double applySriExtensionShift(byte[] counts, PackedBitSet visitedBeforeExtension, int job) {
+		if (!sriPricingEnabled || job <= 0 || job > data.n || visitedBeforeExtension.contains(job)) {
+			return 0.0;
+		}
+		double shift = 0.0;
+		for (int sriIndex : sriCutsByJob[job]) {
+			int nextCount = Math.min(2, counts[sriIndex] + 1);
+			if (counts[sriIndex] == 1 && nextCount == 2) {
+				shift -= sriDuals.get(sriIndex).doubleValue();
+			}
+			counts[sriIndex] = (byte) nextCount;
+		}
+		return shift;
+	}
+
 	private void initializeForwardSource(LP lp) {
 		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
 		sourceVisited.add(0);
@@ -924,7 +989,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet sourceDominanceSet = buildForwardDominanceSet(0, sourceNgMemory, sourceFrontier);
 		PackedBitSet sourceExtensionSet = buildForwardExtensionSet(sourceDominanceSet, 0, sourceFrontier);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
-				sourceDominanceSet, sourceExtensionSet, sourceNgMemory, sourceFrontier);
+				sourceDominanceSet, sourceExtensionSet, sourceNgMemory, sourceFrontier, sourceFrontier.copy(),
+				emptySriCounts());
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
 		}
@@ -1282,6 +1348,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return PaperPartialDominanceGraphs.create(direction);
 		}
 		if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
+			if (sriPricingEnabled) {
+				return new SriAwarePartialListDominanceStore(direction);
+			}
 			return new PartialListDominanceStore(direction);
 		}
 		return PaperDominanceGraphs.create(direction);
@@ -1556,7 +1625,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet sinkExtensionSet = buildBackwardExtensionSet(sinkDominanceSet, lp.getNode().sinkId(), true,
 				sinkFrontier);
 		BackwardLabel sink = new BackwardLabel(nextLabelId++, lp.getNode().sinkId(), null, sinkVisited,
-				sinkDominanceSet, sinkExtensionSet, sinkNgMemory, sinkFrontier, true);
+				sinkDominanceSet, sinkExtensionSet, sinkNgMemory, sinkFrontier, sinkFrontier.copy(), emptySriCounts(), true);
 		BWUL.add(sink);
 	}
 
@@ -1658,7 +1727,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
 		double delay = data.getSetUp(label.jid, nextJob) + data.getProcessT(nextJob);
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
-		if (shifted.head == null) {
+		PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(delay);
+		if (shifted.head == null || shiftedNoSri.head == null) {
 			return null;
 		}
 
@@ -1667,14 +1737,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return null;
 		}
 		PiecewiseLinearFunction nextFrontier = shifted.add(jobPenalty);
-		if (nextFrontier.head == null) {
+		PiecewiseLinearFunction nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
+		if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
 			return null;
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
 				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
+		nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+		byte[] childSriCounts = copySriCounts(label.sriCounts);
+		double sriShift = applySriExtensionShift(childSriCounts, label.visitedSet, nextJob);
+		if (!Utility.compareEq(sriShift, 0.0)) {
+			nextFrontier.shiftYInPlace(sriShift);
+		}
 		nextFrontier.normalize(Direction.FORWARD);
-		if (nextFrontier.head == null) {
+		nextNoSriFrontier.normalize(Direction.FORWARD);
+		if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
 			return null;
 		}
 
@@ -1684,12 +1762,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet childDominanceSet = buildForwardDominanceSet(nextJob, childNgMemory, nextFrontier);
 		PackedBitSet childExtensionSet = buildForwardExtensionSet(childDominanceSet, nextJob, nextFrontier);
 		return new ForwardLabel(nextLabelId++, nextJob, label, visited, childDominanceSet, childExtensionSet,
-				childNgMemory, nextFrontier);
+				childNgMemory, nextFrontier, nextNoSriFrontier, childSriCounts);
 	}
 
 	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
 		Node node = lp.getNode();
 		PiecewiseLinearFunction nextFrontier;
+		PiecewiseLinearFunction nextNoSriFrontier;
 		double successorHStart = getDynamicBackwardHStart(prevJob, label.isSinkRoot ? node.sinkId() : label.jid);
 		double rhoPrime;
 		if (label.isSinkRoot) {
@@ -1704,7 +1783,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			// 2026-05-22: backward 从虚拟终点出发时，第一次加入真实任务不需要按 setup/processing 平移；
 			// 当前变量已经是 prevJob 自己的完成时间，这里只扣 job/arc dual。
 			nextFrontier = jobPenalty.copy();
-			nextFrontier.shiftYInPlace(-lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId()));
+			nextNoSriFrontier = jobPenalty.copy();
+			double fixedReducedCost = -lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId());
+			nextFrontier.shiftYInPlace(fixedReducedCost);
+			nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
 			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
@@ -1712,7 +1794,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return null;
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
-			if (shifted.head == null) {
+			PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(-delay);
+			if (shifted.head == null || shiftedNoSri.head == null) {
 				return null;
 			}
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, label.jid);
@@ -1720,15 +1803,23 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return null;
 			}
 			nextFrontier = shifted.add(jobPenalty);
-			if (nextFrontier.head == null) {
+			nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
+			if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
 					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
+			nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+		}
+		byte[] childSriCounts = copySriCounts(label.sriCounts);
+		double sriShift = applySriExtensionShift(childSriCounts, label.visitedSet, prevJob);
+		if (!Utility.compareEq(sriShift, 0.0)) {
+			nextFrontier.shiftYInPlace(sriShift);
 		}
 		nextFrontier.normalize(Direction.BACKWARD);
-		if (nextFrontier.head == null) {
+		nextNoSriFrontier.normalize(Direction.BACKWARD);
+		if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
 			return null;
 		}
 
@@ -1739,7 +1830,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				nextFrontier);
 		PackedBitSet childExtensionSet = buildBackwardExtensionSet(childDominanceSet, prevJob, false, nextFrontier);
 		return new BackwardLabel(nextLabelId++, prevJob, label, visited, childDominanceSet, childExtensionSet,
-				childNgMemory, nextFrontier, false);
+				childNgMemory, nextFrontier, nextNoSriFrontier, childSriCounts, false);
 	}
 
 	private InsertStatus insertForward(ForwardLabel label, LP lp) {
@@ -1836,12 +1927,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private <L extends FunctionLabel> boolean isDominatedBySinglePointStore(SinglePointStore<L> store, L label) {
-		L exact = store.bestByDominanceKey.get(label.reachableSet);
-		if (exact != null) {
-			if (exact.isDominated) {
-				store.bestByDominanceKey.remove(label.reachableSet);
-			} else if (!Utility.compareLt(label.minReducedCost, exact.minReducedCost)) {
-				return true;
+		if (!sriPricingEnabled) {
+			L exact = store.bestByDominanceKey.get(label.reachableSet);
+			if (exact != null) {
+				if (exact.isDominated) {
+					store.bestByDominanceKey.remove(label.reachableSet);
+				} else if (!Utility.compareLt(label.minReducedCost, exact.minReducedCost)) {
+					return true;
+				}
 			}
 		}
 		int labelCardinality = label.reachableCardinality;
@@ -1852,7 +1945,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			for (int i = 0; i < bucket.size(); i++) {
 				L existing = bucket.get(i);
-				if (existing.isDominated) {
+				if (existing.isDominated || !sameSriState(existing, label)) {
 					continue;
 				}
 				if (existing.reachableSet.isSupersetOf(label.reachableSet)
@@ -1878,13 +1971,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					bucket.remove(i);
 					continue;
 				}
+				if (!sameSriState(label, existing)) {
+					continue;
+				}
 				if (label.reachableSet.isSupersetOf(existing.reachableSet)
 						&& !Utility.compareGt(label.minReducedCost, existing.minReducedCost)) {
 					existing.isDominated = true;
 					bucket.remove(i);
-					L mapped = store.bestByDominanceKey.get(existing.reachableSet);
-					if (mapped == existing) {
-						store.bestByDominanceKey.remove(existing.reachableSet);
+					if (!sriPricingEnabled) {
+						L mapped = store.bestByDominanceKey.get(existing.reachableSet);
+						if (mapped == existing) {
+							store.bestByDominanceKey.remove(existing.reachableSet);
+						}
 					}
 				}
 			}
@@ -1892,8 +1990,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private <L extends FunctionLabel> void addSinglePointLabel(SinglePointStore<L> store, L label) {
-		store.bestByDominanceKey.put(label.reachableSet, label);
+		if (!sriPricingEnabled) {
+			store.bestByDominanceKey.put(label.reachableSet, label);
+		}
 		ensureSinglePointBucket(store, label.reachableCardinality).add(label);
+	}
+
+	private <L extends FunctionLabel> boolean sameSriState(L first, L second) {
+		return !sriPricingEnabled || first.sriStateKey.equals(second.sriStateKey);
 	}
 
 	private <L extends FunctionLabel> ArrayList<L> ensureSinglePointBucket(SinglePointStore<L> store, int cardinality) {
@@ -2178,6 +2282,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
 		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
 		joinCost.shiftYInPlace(joinFixedReducedCost);
+		double sriJoinShift = sriJoinShift(forward, backward);
+		if (!Utility.compareEq(sriJoinShift, 0.0)) {
+			joinCost.shiftYInPlace(sriJoinShift);
+		}
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;
@@ -2195,6 +2303,46 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			traceTarget("JOIN_KEEP reducedCostBound=" + reducedCostBound);
 		}
 		tryGenerateColumn(sequence, lp, reducedCostBound);
+	}
+
+	/**
+	 * 2026-06-13: SRI 状态在单侧扩展时只知道该半路径内部是否已经达到第二个 job。
+	 * 拼接时如果左右半路径分别贡献一个不同 job，完整 route 才触发一次 SRI，需要在这里补回。
+	 */
+	private double sriJoinShift(ForwardLabel forward, BackwardLabel backward) {
+		if (!sriPricingEnabled) {
+			return 0.0;
+		}
+		double shift = 0.0;
+		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
+			int forwardCount = forward.sriCounts[sriIndex];
+			int backwardCount = backward.sriCounts[sriIndex];
+			double dual = sriDuals.get(sriIndex).doubleValue();
+			if (forwardCount > 1 && backwardCount > 1) {
+				// 两半各自已经扣过一次，同一个完整 route 只能扣一次。
+				shift += dual;
+			} else if (forwardCount == 1 && backwardCount == 1
+					&& sriHalvesContainDifferentScopeJobs(forward, backward, sriScopes.get(sriIndex))) {
+				shift -= dual;
+			}
+		}
+		return shift;
+	}
+
+	private boolean sriHalvesContainDifferentScopeJobs(ForwardLabel forward, BackwardLabel backward, int[] scope) {
+		boolean forwardOnly = false;
+		boolean backwardOnly = false;
+		for (int job : scope) {
+			boolean inForward = forward.visitedSet.contains(job);
+			boolean inBackward = backward.visitedSet.contains(job);
+			if (inForward && !inBackward) {
+				forwardOnly = true;
+			}
+			if (inBackward && !inForward) {
+				backwardOnly = true;
+			}
+		}
+		return forwardOnly && backwardOnly;
 	}
 
 	private void resetStatistics() {
@@ -4722,22 +4870,47 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}
 
-	private abstract static class FunctionLabel extends Label implements Comparable<Label> {
+	private abstract static class FunctionLabel extends Label implements Comparable<Label>, SriStateLabel {
 		final int labelId;
 		final PackedBitSet ngMemorySet;
 		final PackedBitSet extensionSet;
 		final int extensionCardinality;
+		final PiecewiseLinearFunction noSriFrontier;
+		final byte[] sriCounts;
+		final String sriStateKey;
 		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
 		PiecewiseLinearFunction joinExtendedFrontier;
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
-				double minReducedCost) {
+				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double minReducedCost) {
 			super(jid, null, visitedSet, dominanceSet, frontier, minReducedCost);
 			this.labelId = labelId;
 			this.extensionSet = extensionSet;
 			this.extensionCardinality = extensionSet == null ? 0 : extensionSet.cardinality();
 			this.ngMemorySet = ngMemorySet;
+			this.noSriFrontier = noSriFrontier == null ? frontier : noSriFrontier;
+			this.sriCounts = sriCounts == null ? new byte[0] : sriCounts;
+			this.sriStateKey = buildSriStateKey(this.sriCounts);
+		}
+
+		@Override
+		public String sriStateKey() {
+			return sriStateKey;
+		}
+
+		private static String buildSriStateKey(byte[] counts) {
+			if (counts == null || counts.length == 0) {
+				return "";
+			}
+			StringBuilder key = new StringBuilder(counts.length);
+			for (int i = 0; i < counts.length; i++) {
+				if (i > 0) {
+					key.append(',');
+				}
+				key.append((int) counts[i]);
+			}
+			return key.toString();
 		}
 
 		@Override
@@ -4760,8 +4933,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final int depth;
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
-				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier) {
-			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier,
+				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
+				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts) {
+			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
 					forwardEndpointMin(frontier));
 			this.father = father;
 			this.depth = father == null ? 0 : father.depth + 1;
@@ -4774,8 +4948,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
-				boolean isSinkRoot) {
-			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier,
+				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, boolean isSinkRoot) {
+			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
 					backwardEndpointMin(frontier));
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;

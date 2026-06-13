@@ -195,6 +195,16 @@ public class TWETBPCConfig {
 	public double branchSeedReducedCostAllowance = 5000.0;
 	/** 单个节点内最多进行多少轮 cut separation。 */
 	public int maxCutRounds = 8;
+	/** 2026-06-13: 是否启用三元 subset-row cut；当前只允许 partial-list ng-DSSR exact pricing 使用其 dual。 */
+	public boolean enableSubsetRowCutsForPartialDominance = false;
+	/** 2026-06-13: 每轮 subset-row separation 最多加入多少条 cut。 */
+	public int maxSubsetRowCutsPerRound = 10;
+	/** 2026-06-13: 同一 job 在单轮新增 subset-row cut 中最多出现多少次。 */
+	public int maxSubsetRowCutAppearancesPerJob = 3;
+	/** 2026-06-13: subset-row cut 加入阈值；旧 VRP 中首条 cut 至少需要达到约 1.1。 */
+	public double subsetRowCutMinimumViolationValue = 1.1;
+	/** 2026-06-13: subset-row cut 扫描停止阈值；低于该行值的候选不再加入。 */
+	public double subsetRowCutMinimumThreshold = 1.02;
 	/** 判断是否整数时使用的容差。 */
 	public double branchingTolerance = 1e-6;
 	/** 2026-06-03: Whether to branch on undirected job adjacency before directed arc branching. */

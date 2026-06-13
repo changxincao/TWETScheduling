@@ -110,7 +110,7 @@ public class TWETBPCContext {
 
 		this.cutGenerators = new ArrayList<CutGenerator>();
 		cutGenerators.add(new NoOpCutGenerator());
-		cutGenerators.add(new SubsetRowCutGenerator());
+		cutGenerators.add(new SubsetRowCutGenerator(config));
 
 		this.branchers = new ArrayList<Brancher>();
 		branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));

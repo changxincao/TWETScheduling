@@ -13,6 +13,8 @@ import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETCut;
+import TWETBPC.Model.TWETCutType;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 import ilog.concert.IloColumn;
@@ -54,6 +56,9 @@ public class LP {
 	private IloRange machineRange;
 	private HashMap<Long, IloRange> arcBranchRanges;
 	private HashMap<Long, IloRange> adjacencyBranchRanges;
+	private HashMap<Integer, IloRange> subsetRowCutRanges;
+	private ArrayList<Integer> activeSubsetRowPricingCutIds;
+	private ArrayList<Double> activeSubsetRowPricingDuals;
 	private IloRange[] tariffActiveBounds;
 	private IloRange[] tariffBranchRanges;
 	private ArrayList<TariffSegment> outsourcingTariffSegments;
@@ -116,6 +121,22 @@ public class LP {
 
 	public List<Integer> getActiveCutIds() {
 		return activeCutIds;
+	}
+
+	/** @return 当前 LP dual 下真正参与 SRI pricing 的 subset-row cut id；只包含负 dual 的行。 */
+	public List<Integer> getActiveSubsetRowPricingCutIds() {
+		if (activeSubsetRowPricingCutIds == null) {
+			return Collections.emptyList();
+		}
+		return Collections.unmodifiableList(activeSubsetRowPricingCutIds);
+	}
+
+	/** @return 与 getActiveSubsetRowPricingCutIds() 同下标的 SRI dual。 */
+	public List<Double> getActiveSubsetRowPricingDuals() {
+		if (activeSubsetRowPricingDuals == null) {
+			return Collections.emptyList();
+		}
+		return Collections.unmodifiableList(activeSubsetRowPricingDuals);
 	}
 
 	public TWETMasterSolution getLastSolution() {
@@ -261,6 +282,9 @@ public class LP {
 		repairSlackVars = new ArrayList<IloNumVar>();
 		arcBranchRanges = new HashMap<Long, IloRange>();
 		adjacencyBranchRanges = new HashMap<Long, IloRange>();
+		subsetRowCutRanges = new HashMap<Integer, IloRange>();
+		activeSubsetRowPricingCutIds = new ArrayList<Integer>();
+		activeSubsetRowPricingDuals = new ArrayList<Double>();
 		outsourcingTariffSegments = collectOutsourcingTariffSegments();
 
 		buildVariables();
@@ -269,6 +293,7 @@ public class LP {
 		buildMachineConstraint();
 		buildArcBranchConstraints();
 		buildAdjacencyBranchConstraints();
+		buildSubsetRowCutConstraints();
 		buildOutsourcingTariffConstraints();
 		if (feasibilityRepairMode) {
 			addFeasibilitySlacks();
@@ -387,6 +412,38 @@ public class LP {
 		}
 	}
 
+	private void buildSubsetRowCutConstraints() throws IloException {
+		for (int cutId : activeCutIds) {
+			TWETCut cut = cutPool.getCut(cutId);
+			if (cut.getType() != TWETCutType.SUBSET_ROW) {
+				continue;
+			}
+			IloLinearNumExpr expr = cplex.linearNumExpr();
+			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
+				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
+				if (subsetRowCoefficient(column, cut) > 0.0) {
+					expr.addTerm(1.0, lambdaVars[idx]);
+				}
+			}
+			// 2026-06-13: 模仿旧 VRP 的三元 subset-row cut：包含 cut 中至少两个 job 的内部列系数为 1，行上界为 1。
+			IloRange range = cplex.addLe(expr, cut.getRhs(), "subsetRow_" + cutId);
+			subsetRowCutRanges.put(Integer.valueOf(cutId), range);
+		}
+	}
+
+	private double subsetRowCoefficient(TWETColumn column, TWETCut cut) {
+		int count = 0;
+		for (int job : cut.getScopeJobs()) {
+			if (column.containsJob(job)) {
+				count++;
+				if (count >= 2) {
+					return 1.0;
+				}
+			}
+		}
+		return 0.0;
+	}
+
 	private void buildOutsourcingTariffConstraints() throws IloException {
 		IloLinearNumExpr baselineFromJobs = cplex.linearNumExpr();
 		for (int job = 1; job <= data.n; job++) {
@@ -488,6 +545,12 @@ public class LP {
 			int first = decodeFrom(entry.getKey().longValue());
 			int second = decodeTo(entry.getKey().longValue());
 			if (node.columnCoversAdjacencyPair(column, first, second)) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			}
+		}
+		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
+			TWETCut cut = cutPool.getCut(entry.getKey().intValue());
+			if (subsetRowCoefficient(column, cut) > 0.0) {
 				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
 			}
 		}
@@ -607,6 +670,13 @@ public class LP {
 			arcDual[first][second] += dual;
 			arcDual[second][first] += dual;
 		}
+		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
+			double dual = cplex.getDual(entry.getValue());
+			if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
+				activeSubsetRowPricingCutIds.add(entry.getKey());
+				activeSubsetRowPricingDuals.add(Double.valueOf(dual));
+			}
+		}
 	}
 
 	private LinkedHashMap<Integer, Double> readColumnValues() throws IloException {
@@ -672,6 +742,12 @@ public class LP {
 			for (int j = 0; j < arcDual[i].length; j++) {
 				arcDual[i][j] = 0.0;
 			}
+		}
+		if (activeSubsetRowPricingCutIds != null) {
+			activeSubsetRowPricingCutIds.clear();
+		}
+		if (activeSubsetRowPricingDuals != null) {
+			activeSubsetRowPricingDuals.clear();
 		}
 	}
 

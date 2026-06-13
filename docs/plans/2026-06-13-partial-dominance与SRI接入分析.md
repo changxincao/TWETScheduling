@@ -97,3 +97,9 @@ SRI 分离阈值同步复核旧 `SRCut.java` 和 `Configure.java`：每轮最多
 性能上，当前配置对 011/30 明显偏重。前几轮 exact pricing 通常在 2-12 秒之间，后续随着 active cut 和列池增加，单次 exact pricing 已经出现 30.5 秒和 43.2 秒的闭合轮；最后中断前仍处在 root，第三轮 cut 闭合后又分离了第 4 批 10 条 SRI cut，并且下一轮 heuristic 已经重新生成 160 条列。中断时列池规模已超过 9400，仍没有进入 branch。
 
 当前结论是：SRI 接入链路已经能触发 cut、重解 LP 并重新 pricing，但默认“每轮最多 10 条、总轮数不限”的 separation 对 011/30 过于激进，短时间内主要消耗在 root 的反复 cut-and-price，而不是推进搜索树。后续如果要把 SRI 用作实际求解配置，应优先增加总 cut 轮数或总 active SRI cuts 上限，或者先用更保守的每轮 cut 数做对照；否则它更适合作为 cut 机制验证，而不是当前 30 任务主线配置。
+
+### 2026-06-13 SRI active 后启发式 pricing 口径问题
+
+复查 011/30 中断实验时发现，`HeuristicPricingEngine` 当前仍按 machine/job/arc dual 计算初始 reduced cost 和 remove/add/exchange 的局部增量，没有读取 `LP.getActiveSubsetRowPricingCutIds()` / `getActiveSubsetRowPricingDuals()`。因此一旦 root 加入 SRI cut，启发式生成的“负 reduced-cost 列”只是无 SRI 口径下的负列，不一定违反当前含 SRI row 的 LP dual。把这些列加入 RMP 本身不会破坏正确性，因为 LP 会给列补 SRI row 系数、目标成本也是真实成本；但它会显著放大无效列生成，解释了 011/30 中每轮 SRI cut 后 heuristic 仍批量生成 100+ 列的现象。
+
+当前建议是：SRI active 后要么直接关闭 heuristic pricing，要么给启发式补上 SRI-aware reduced cost 与 move 增量；在补齐前，SRI 性能测试不应把 heuristic 大量出列理解为 cut 后真的存在大量 violated columns。此前完整无 SRI/普通 ng 后端对照中，三角化 011/30 已求到 `incumbent=bound=13511`；本次 SRI 中断运行没有写出最终 summary，也没有可靠当前 bound，只能确认初始上界仍为 ALNS 的 13813 且 root 尚未闭合。

@@ -9,11 +9,11 @@ import TWETBPC.Util.PackedBitSet;
 /**
  * SRI-aware 的 partial-list dominance 包装器。
  *
- * 2026-06-13: 这里按旧 VRP 的 subset-row dominance 思路处理跨 SRI 状态比较：如果支配方
- * 当前某个 SRI 计数为 1，而被支配方为偶数，并且被支配方还能到达一个支配方没有访问过的
- * cut 内 job，则支配方未来可能额外触发一次 SRI penalty。比较前临时把支配方函数整体上移
- * 这份 penalty，再交给普通 partial-list dominance。这样比“相同 SRI signature 才比较”更强，
- * 同时不改变 label 自身保存的真实 frontier。
+ * 2026-06-13: 按旧 VRP 的 subset-row dominance 思路处理跨 SRI 状态比较。若支配方
+ * 在某个 SRI 上当前只覆盖了一个不同 job，被支配方为偶数状态，并且被支配方仍可到达
+ * 一个支配方没有访问过的 cut 内 job，则支配方未来可能额外触发一次 SRI penalty。
+ * 比较前临时把支配方函数整体上移这份 penalty，再交给普通 partial-list dominance。
+ * 该平移只用于本次比较，不改变 label 自身保存的真实 frontier。
  */
 final class SriAwarePartialListDominanceStore implements DominanceStore {
 

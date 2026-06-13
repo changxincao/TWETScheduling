@@ -738,3 +738,47 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 这等价于旧 VRP 中 `lb.m_reduced_cost - mu1 <= label.m_reduced_cost` 的函数版：`mu1` 是负的 SRI dual，`-mu1` 是支配方可能多承担的正 penalty。当前实现只在 `-dual > 0` 时补偿，因此不会把非 penalty 情形错误放宽。`DominanceStore.dominatesSinglePoint(...)` 暂时仍不做跨 SRI 状态补偿，因为该接口没有传入单点 label 的 `visitedSet/sriCounts`，无法可靠复现 `UseSR` 条件；单点之间继续在 `SinglePointStore` 中按相同 SRI key 比较。
 
 关于 ng-relaxation 下 SRI dual 是否会重复加，本次也做了语义复核。扩展阶段 `applySriExtensionShift()` 先检查真实 `visitedSet`，同一个 job 的重复访问不会再次增加 SRI 计数；计数最多只记到 2，只有从 1 变成 2 时才加一次 `-dual`。正反向 join 阶段再按两个半路径的 count 做修正：两边都已经触发过时去掉重复 penalty，两边各有一个不同 cut 内 job 时补上一次 penalty。因此即使用 ng relaxed route，单个 subset-row 对一条完整 route 的 pricing 贡献仍是“是否覆盖至少两个不同 job”的 0/1 系数，不会因为重复访问同一个 job 而多次加 dual。completion bound 的 SRI-aware 加强本次没有改，仍维持上一版“正式 frontier 计入 SRI，completion bound 不加 SRI 状态维度”的弱 bound 口径。
+78. 2026-06-13 SRI 系数与 ng-route 重复访问的语义澄清
+
+重新核对后，需要把 SRI 的一般定义和当前 TWET 实现口径区分开。一般 subset-row inequality 来自主问题覆盖行的 Chvatal-Gomory 取整，因此某条列在 SRI 行里的系数应按该列在被选覆盖行上的主问题系数之和取整，例如三任务 SRI 常见形式为 `floor((a_i^r+a_j^r+a_k^r)/2)`。如果某个模型允许一条列对同一个覆盖行有系数大于 1，那么重复访问确实可能让 SRI 系数大于 1，pricing 中对应 cut dual 也应按这个系数计入。
+
+但当前 TWET 主问题不是这个口径。覆盖行建模使用 `column.containsJob(job)`，SRI 行和分离也按 `containsJob` 判断三元组中有几个不同 job 被列覆盖，因此当前有效列的 SRI 系数是 distinct-job 口径：三任务 SRI 中覆盖至少两个不同 job 时系数为 1，否则为 0。ng-DSSR 中 non-elementary route 只用于松弛定价和更新 ng-set，不作为真实列加入主问题；真实进入 RMP 的 `TWETColumn` 仍按 `containsJob` 贡献 SRI 系数。因此当前代码里 `applySriExtensionShift()` 用真实 `visitedSet` 去重、只在第一个不同 cut 内 job 后又加入第二个不同 job 时触发一次 `-dual`，和当前 LP SRI 行是一致的。
+
+后续如果改成“非基本 ng-route 也能作为列加入主问题”，或者把主问题覆盖行系数改成访问次数而不是是否覆盖，那么 SRI pricing 必须同步改为计数型系数：同一 cut 内累计访问次数从 1 到 2、3 到 4 等都要再次触发对应 dual，join 修正也要从 0/1 系数改成 `floor(total/2)` 的合并逻辑。当前没有这么做，不能把 relaxed ng-route 的重复访问次数混入现有 0/1 覆盖 master 的 SRI 系数里。
+79. 2026-06-13 ng-route 下 SRI dual 计数口径的进一步澄清
+
+进一步讨论后，需要把“当前实现是否错误”和“是否可以定义更强的 ng-walk SRI 口径”分开。ng-DSSR 的列生成过程确实在 relaxed subproblem 中搜索 ng-route，非基本 relaxed route 可能重复访问同一个 job。若把这个 relaxed route 当成一条 walk，并按访问次数定义 SRI 系数，那么三任务 SRI 的贡献应为 `floor(totalVisitsInScope/2)`，同一个 cut 内 job 重复 4 次会贡献 2 次 dual。这是一种可定义的 relaxed pricing 口径。
+
+但当前代码和旧 VRP 迁移口径不是这个定义。旧 VRP 的 SRI 扩展在更新 `sr_count` 前会检查 `CheckVisit(label,i)`，即只在第一次访问某个 cut 内 customer 时更新计数；当前 TWET 版 `applySriExtensionShift()` 也同样使用真实 `visitedSet` 去重。这种口径把 ng-route 的重复访问看作松弛产生的循环伪影，SRI 成本只按 route 覆盖了 cut 中多少个不同 job 计算。它和当前 master 的 `containsJob` 0/1 覆盖行完全一致，并保证所有 elementary route 的 reduced cost 与 RMP 列系数一致。
+
+从 DSSR correctness 角度看，关键条件是 relaxed pricing 的可行域包含所有 elementary route，且每条 elementary route 的 reduced cost 与主问题一致。非基本 ng-route 的 SRI 成本可以看作 relaxed subproblem 的人工延拓：按 distinct-job 计数会比 visit-count 更松，可能产生更多 non-elementary negative witness 和更多 ng-set 更新，但不会把 elementary 负列的 reduced cost 算错。若未来希望减少非基本负 route 或更贴近 walk 口径，可以改成 visit-count SRI，但那不是只删掉 `visitedSet` 判断这么简单：扩展要在累计计数 `1->2, 3->4, ...` 时重复加 `-dual`；label 需要保存不封顶的 count 或至少 floor/parity 信息；join 修正要按 `floor((countF+countB)/2)-floor(countF/2)-floor(countB/2)` 计算；dominance 补偿也要从旧 VRP 的 `count==1 && other even` 推广到奇偶/未来访问次数的补偿条件。
+
+当前结论是：现有“只加一次”的实现不代表通用 SRI 定义只能加一次，而是选择了旧 VRP 和当前 0/1 master 一致的 distinct-job relaxed pricing 口径。这个口径偏松但语义可解释；如果后续实验发现 non-elementary SRI witness 过多或 DSSR 轮数受影响，可以单独实现并对照 visit-count 口径。
+80. 2026-06-13 当前 distinct-job SRI 在 ng-relaxed pricing 中的正确性判断
+
+继续澄清后，当前问题不应表述为“不同口径都可以”，而应判断现有 distinct-job SRI 是否能从当前 master 推导为正确的 ng-relaxed pricing。结论是：在当前 TWET 主问题中，覆盖行和 SRI 行的列系数均为 `containsJob` 的 0/1 覆盖系数，且 non-elementary ng-route 不作为列加入 RMP 的前提下，现有实现是可以推导成立的。
+
+推导逻辑为：subset-row cut 是当前 RMP 上的 cut，真实列 `r` 的系数为 `floor(sum_{j in S} a_jr / 2)`。当前 `a_jr = 1` 当且仅当 `TWETColumn.containsJob(j)`，因此对真实 elementary column 来说，SRI 系数只取决于 cut 内不同 job 的覆盖数量，三任务 SRI 的系数最多为 1。pricing 必须保证所有真实 elementary column 的 reduced cost 与 RMP 中该列的系数一致；当前 `applySriExtensionShift()` 用真实 visitedSet 去重，只在第二个不同 cut 内 job 首次出现时加 `-dual`，正好满足这一点。
+
+ng-DSSR 中的 non-elementary route 只是 relaxed subproblem 的状态和 DSSR witness，不是 RMP 变量。因此 relaxed ng-route 上的 SRI 成本只需要是一个对 elementary cost 一致的延拓。当前 distinct-job 延拓会把重复访问视为 ng relaxation 产生的循环，不额外增加 SRI penalty；这样会比 visit-count 延拓更松，可能产生更多 non-elementary negative route 和更多 ng-set 更新，但不会导致“无负 relaxed route”时漏掉 elementary 负列。原因是 elementary route 属于 relaxed route 集合，且其 reduced cost 在当前延拓下与 RMP 完全一致。
+
+如果未来把 non-elementary ng-route 本身作为列加入主问题，或把主问题覆盖行改成访问次数系数，那么上述推导不再成立，SRI 必须改为 visit-count 口径。但这不是当前模型。当前模型下，visit-count SRI 是另一种更强的 relaxed-cost 延拓选择，不是正确性所必需；distinct-job SRI 是和当前 0/1 column coefficient 一致的、偏松但合法的延拓。
+81. 2026-06-13 截断列系数的三行 SRI 是否 valid
+
+本次重新从 cut validity 角度澄清：若主问题覆盖行是 set partitioning 等式 `sum_r a_ir x_r = 1`，变量为非负整数/0-1，且 `a_ir` 为非负整数，则即使某些列形式上存在 `a_ir > 1`，把 SRI 中的行系数先截断为 `b_ir = 1[a_ir > 0]` 再构造三行 SRI 仍然 valid。原因是任何整数可行解中，只要某个选中列对行 i 有 `a_ir > 0`，由于该行右端为 1 且所有系数非负，必然有 `a_ir = 1` 且没有其他选中列覆盖 i；若 `a_ir > 1`，该列根本不可能在整数可行解中被选中。因此在所有整数可行解的支持上，`b_ir` 与真实 `a_ir` 等价，标准 SRI `sum_r floor((b_1r+b_2r+b_3r)/2) x_r <= floor(3/2)=1` 有效。
+
+但如果主问题是 set covering `sum_r a_ir x_r >= 1`，这个结论不成立。即便所有 `a_ir` 都是 0/1，三行 SRI 的 `<=1` 也一般不是 covering 可行解的 valid inequality。例如一个整数解选两条列，分别覆盖 `{1,2}` 和 `{2,3}`，它满足三行 covering 约束，但截断 SRI 左端为 2，会违反 `<=1`。因此 SRI 作为正式 cut 接入时必须明确基于等式覆盖/最终 exact-cover 语义；若仍在 `>=` RMP 上直接加，会有 validness 风险。
+
+对 ng-DSSR pricing 的含义是：若采用等式覆盖语义下的截断 SRI，重复访问同一 job 的 relaxed ng-route 可以按 `b_ir=1[a_ir>0]` 的 distinct-job 系数延拓，这对真实整数列保持一致且偏松；如果要在访问次数系数的主问题中使用 SRI，则不能截断，必须按 `floor(totalVisitsInScope/2)` 修改扩展、join 和 dominance 补偿。
+82. 2026-06-13 >= 过程 RMP 与 SRI validness 的关系
+
+进一步澄清：当前覆盖约束用 `>=` 是列生成过程中的 set-covering RMP，并不等于最终目标问题允许重复服务。若在当前 TWET 假设下，任意重复服务的整数解都可以通过删点/替换为子序列列而不增成本，并且主问题列池或定价闭包能补出这些删点列，则目标整数最优解可以限制在 `==1` 的 exact-cover 解中。这个结论说的是“存在一个最优解满足 ==”，不是说 `>=` RMP 的每个整数可行解或 LP 最优解都天然满足 ==。
+
+因此 SRI 的使用要分两层看。第一，作为原始 `>=` covering 多面体的 valid inequality，三行 SRI `<=1` 一般不 valid，反例是两条列分别覆盖 `{1,2}` 和 `{2,3}`。第二，如果算法目标明确是 exact-cover 整数可行域，而 `>=` 只是生成列和获得下界的过程松弛，那么只要加入的 SRI 对所有 exact-cover 整数解 valid，`covering + SRI` 仍然包含目标整数解的凸包，因而它的 LP 最优值仍是目标最优值的下界。也就是说，SRI 不必对所有被过程 RMP 放进来的重复覆盖整数解 valid，但必须对真正目标整数解 valid。
+
+实际实现上仍要谨慎：若后续还用 `lastSolution.integer` 或 RMIH 把当前 `>=` RMP 的整数解直接当 incumbent，则需要先做去重修复/重解 `==` RMP，不能把违反 SRI 的重复覆盖解当作正式可行 incumbent。SRI active 后，root pi-window 等基于无 cut/覆盖松弛的窗口也应继续关闭或重新证明。当前结论是：`>=` 作为过程不阻止加入 exact-cover valid 的 SRI，但代码和日志必须明确 lower bound 的目标可行域是 `==` exact-cover，不是完整 set-covering 整数可行域。
+83. 2026-06-13 保持旧 VRP distinct-visit SRI 口径
+
+本轮最终决定保持旧 VRP 的 SRI 处理方式不变：在 ng-DSSR relaxed route 中，SRI 计数按 cut 内不同 job 的首次访问更新，而不是按 walk 中的重复访问次数累计。这样可以理解为在列系数可能大于 1 的理论 visit-count SRI 上做了弱化：例如一个 relaxed ng-route 中 cut 内三个 job 各重复访问两次，标准 visit-count 系数可能为 `floor(6/2)=3`，当前 distinct-visit 系数仍为 `floor(3/2)=1`。因此 relaxed pricing 中这个 cut 更弱，可能带来更多 non-elementary negative witness 和 DSSR 更新，但不会把 elementary 列的 reduced cost 算错。
+
+保持该口径的主要原因是当前真正加入主问题的都是基本列，主问题中的覆盖系数和 SRI cut 系数均按 `containsJob` 的 0/1 覆盖语义计算。对这些真实列而言，distinct-visit SRI 与主问题 cut 行完全一致，不存在 cut 强度下降；弱化只发生在 ng-relaxation 的非基本 walk 估价上。若未来允许非基本 route 入主问题，或把主问题覆盖系数改成访问次数，则再单独实现 visit-count SRI。

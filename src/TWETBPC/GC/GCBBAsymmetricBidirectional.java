@@ -601,7 +601,7 @@ public class GCBBAsymmetricBidirectional {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		// 2026-05-29: 调用方只枚举当前边界候选；该候选来自 label.reachableSet，
+		// 2026-06-13: 调用方只枚举当前边界候选；该候选来自 label.extensionSet，
 		// visited 和静态时间可行性已在 reachable set/边界候选构造时维护。
 		// 这里仅检查不应写入 dominance key 的节点/预处理直连禁弧。
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
@@ -612,7 +612,7 @@ public class GCBBAsymmetricBidirectional {
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		// 2026-05-29: 当前边界候选来自 label.reachableSet，visited
+		// 2026-06-13: 当前边界候选来自 label.extensionSet，visited
 		// 和静态时间可行性已由 reachable set/边界候选维护；这里仅检查
 		// 不应写入 dominance key 的 prevJob -> successor 直连禁弧。
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {

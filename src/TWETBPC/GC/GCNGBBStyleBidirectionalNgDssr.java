@@ -4717,7 +4717,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private static final class SinglePointStore<L extends FunctionLabel> {
-		// 2026-06-09: ng-DSSR 的 dominance key 使用不可达并集的补集，即实际 extensionSet。
+		// 2026-06-13: ng-DSSR 的 dominance key 使用 full-domain dominanceSet；extensionSet 只控制当前半域扩展。
 		final HashMap<PackedBitSet, L> bestByDominanceKey = new HashMap<PackedBitSet, L>();
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}

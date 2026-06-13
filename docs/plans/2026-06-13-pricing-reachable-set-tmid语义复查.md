@@ -17,3 +17,13 @@
 资源不可达仍然应该进入 dominance key，但这个“资源不可达”必须是不依赖 Tmid 的硬不可达。forward 方向可沿用当前 direct feasibility 的主体判断，即 `earliestCompletion <= hEnd`，但不能再加 `earliestCompletion <= tMid`，也不能用 `isForwardHalfEligibleJob()`。backward 方向可用 `rhoPrime >= hStart`，但不能用 `rhoPrime >= tMid` 或 `isBackwardHalfEligibleJob()`。如果 dual profitable window / outsourcing window 本身已经收缩了 job 的硬定义域，可以继续作为 `hStart/hEnd` 的一部分；问题只在于不能再额外用 Tmid 半域裁剪 dominance key。
 
 实现上要注意 parent 过滤。当前 `buildForwardReachableSetFromParent()` 是从 `parent.reachableSet` 继续过滤，如果父集合已经被 Tmid 裁窄，后续永远恢复不了。因此修复时不仅要改初始构造，还要让 parent 继承使用新的 `dominanceReachableSet`。扩展循环不能再直接枚举 `label.reachableSet`，应枚举单独的 `extensionSet`，或者即时从 `dominanceReachableSet` 里再过滤出满足 Tmid 半域的候选。这样才能同时满足两个条件：Tmid 仍限制当前方向 labeling 的规模；dominance key 不把“另一侧半域负责的 job”误记为永久不可达。
+
+2026-06-13 复测记录：完成 `reachableSet` / `extensionSet` 拆分后，重新检查了主要非 node-join 双向定价类。`isForwardHalfEligibleJob()`、`isBackwardHalfEligibleJob()` 和 `requireTmid=true` 只出现在实际 `extensionSet` 构造与扩展可行性判断中；传给 dominance graph、partial-list 和 single-point dominance 的 `reachableSet` 使用不含 Tmid 的 full-domain direct feasibility。旧注释中“调用方只枚举 reachableSet”的表述已同步改为 `extensionSet`，避免后续误读。
+
+在之前出现 ng-DSSR graph partial 结果不一致的 30 任务三角实例 `tmp-wet030_from040_010_2m` 上，使用同一配置复测三种后端：ALNS seed 开启、completion bound=allCycles、midpoint probe 开启、ng 初始集 nearestK8、每轮更新 top10、subtree arc elimination 使用 pricingOnly、RMIH 关闭。结果如下：
+
+1. paper dominance：`obj=16222.000000`，`bound=16222.000000`，`solve=79.329s`，exact pricing `37.856s / 54 calls`，`valid=true`。
+2. partial-list dominance：`obj=16222.000000`，`bound=16222.000000`，`solve=81.711s`，exact pricing `36.542s / 67 calls`，`valid=true`。
+3. graph partial dominance：`obj=16222.000000`，`bound=16222.000000`，`solve=71.707s`，exact pricing `28.386s / 57 calls`，`valid=true`。
+
+这说明此前 `graphPartial=16224.125` 的不一致在当前修复后没有复现。当前判断是：把 Tmid 半域条件从 dominance key 中移出后，三种后端在该问题配置下的停止条件和最终整数结果已经一致；graph partial 仍需继续在更多实例上对拍，但这个问题点已通过目标值、下界和值合法性验证。

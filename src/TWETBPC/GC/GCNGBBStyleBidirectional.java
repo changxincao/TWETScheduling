@@ -1283,7 +1283,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		// 2026-05-29: 调用方只枚举 label.reachableSet；visited
+		// 2026-06-13: 调用方只枚举 label.extensionSet；visited
 		// 和时间可行性已经在 reachable set 构造时维护。下面旧检查保留为防御性说明，
 		// 正常不应触发；实际会随节点变化、必须即时检查的是直连禁弧。
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {

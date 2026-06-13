@@ -272,8 +272,9 @@ public class GCBidirectional {
 		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
-		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
-				buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier), sourceFrontier);
+		PackedBitSet sourceReachable = buildForwardReachableSet(0, sourceVisited, lp.getNode(), sourceFrontier);
+		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited, sourceReachable,
+				buildForwardExtensionSet(sourceReachable, 0, sourceFrontier), sourceFrontier);
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
 		}
@@ -288,8 +289,11 @@ public class GCBidirectional {
 		// 这样后续若发生 shiftX，trimToDomain 的边界和物理半域一致。
 		sinkFrontier.resetDomain(tMid, pricingHorizon);
 		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
+		PackedBitSet sinkReachable = buildBackwardReachableSet(lp.getNode().sinkId(), sinkVisited, lp.getNode(),
+				sinkFrontier);
 		BackwardLabel sink = BackwardLabel.sink(nextLabelId++, lp.getNode().sinkId(), sinkVisited, sinkFrontier,
-				buildBackwardReachableSet(lp.getNode().sinkId(), sinkVisited, lp.getNode(), sinkFrontier));
+				sinkReachable,
+				buildBackwardExtensionSet(sinkReachable, lp.getNode().sinkId(), true, sinkFrontier));
 		BWUL.add(sink);
 	}
 
@@ -305,8 +309,8 @@ public class GCBidirectional {
 		tryGenerateForwardColumn(label, lp);
 
 		Node node = lp.getNode();
-		for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
-				nextJob = label.reachableSet.nextSetBit(nextJob + 1)) {
+		for (int nextJob = label.extensionSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
+				nextJob = label.extensionSet.nextSetBit(nextJob + 1)) {
 			if (!canExtendForward(label, nextJob, node)) {
 				continue;
 			}
@@ -330,8 +334,8 @@ public class GCBidirectional {
 		}
 
 		Node node = lp.getNode();
-		for (int prevJob = label.reachableSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
-				prevJob = label.reachableSet.nextSetBit(prevJob + 1)) {
+		for (int prevJob = label.extensionSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
+				prevJob = label.extensionSet.nextSetBit(prevJob + 1)) {
 			if (!canExtendBackward(label, prevJob, node)) {
 				continue;
 			}
@@ -393,7 +397,8 @@ public class GCBidirectional {
 		visited.add(nextJob);
 		PackedBitSet reachable = buildForwardReachableSetFromParent(label, nextJob, visited, lp.getNode(),
 				nextFrontier);
-		return new ForwardLabel(nextLabelId++, nextJob, label, visited, reachable, nextFrontier);
+		return new ForwardLabel(nextLabelId++, nextJob, label, visited, reachable,
+				buildForwardExtensionSet(reachable, nextJob, nextFrontier), nextFrontier);
 	}
 
 	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
@@ -445,7 +450,8 @@ public class GCBidirectional {
 		visited.add(prevJob);
 		PackedBitSet reachable = buildBackwardReachableSetFromParent(label, prevJob, visited, lp.getNode(),
 				nextFrontier);
-		return new BackwardLabel(nextLabelId++, prevJob, label, visited, reachable, nextFrontier, false);
+		return new BackwardLabel(nextLabelId++, prevJob, label, visited, reachable,
+				buildBackwardExtensionSet(reachable, prevJob, false, nextFrontier), nextFrontier, false);
 	}
 
 	private InsertStatus insertForward(ForwardLabel label, LP lp) {
@@ -945,6 +951,16 @@ public class GCBidirectional {
 	}
 
 	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {
+		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, true);
+	}
+
+	private boolean isDirectForwardExtensionTimeFeasibleFullDomain(PiecewiseLinearFunction frontier, int prevJob,
+			int nextJob) {
+		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, false);
+	}
+
+	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob,
+			boolean requireTmid) {
 		if (frontier == null || frontier.head == null) {
 			return false;
 		}
@@ -956,7 +972,8 @@ public class GCBidirectional {
 		double hEnd = getDynamicForwardHEnd(prevJob, nextJob);
 		double earliestCompletion = Math.max(
 				frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob), hStart);
-		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, tMid);
+		return !Utility.compareGt(earliestCompletion, hEnd)
+				&& (!requireTmid || !Utility.compareGt(earliestCompletion, tMid));
 	}
 
 	/**
@@ -969,6 +986,16 @@ public class GCBidirectional {
 
 	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
 			PiecewiseLinearFunction frontier, int prevJob) {
+		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, true);
+	}
+
+	private boolean isDirectBackwardExtensionTimeFeasibleFullDomain(int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier, int prevJob) {
+		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, false);
+	}
+
+	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier, int prevJob, boolean requireTmid) {
 		int successor = isSinkRoot ? data.n + 1 : firstJob;
 		double rhoPrime;
 		if (isSinkRoot) {
@@ -977,7 +1004,8 @@ public class GCBidirectional {
 			double delay = data.getSetUp(prevJob, firstJob) + data.getProcessT(firstJob);
 			rhoPrime = Math.min(frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
 		}
-		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, successor));
+		double hStart = getDynamicBackwardHStart(prevJob, successor);
+		double lower = requireTmid ? Math.max(tMid, hStart) : hStart;
 		return !Utility.compareLt(rhoPrime, lower);
 	}
 
@@ -988,8 +1016,7 @@ public class GCBidirectional {
 			// 2026-05-24: dominance reachable-set 只放“永久不可达”信息。
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
-			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
-					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1002,8 +1029,7 @@ public class GCBidirectional {
 		// 2026-05-24: 三角不等式下可达性随路径扩展单调收缩，child 不需要重新扫描 1..n。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isForwardHalfEligibleJob(job)
-					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1015,8 +1041,8 @@ public class GCBidirectional {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+			if (!visited.contains(job)
+					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1031,12 +1057,37 @@ public class GCBidirectional {
 		// 在中间再插入一个真实 job 后不会重新可达。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isBackwardHalfEligibleJob(job)
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+			if (!visited.contains(job)
+					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
 		}
 		return reachable;
+	}
+
+	private PackedBitSet buildForwardExtensionSet(PackedBitSet dominanceReachable, int fromJob,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet extension = new PackedBitSet(data.n + 2);
+		for (int job = dominanceReachable.nextSetBit(1); job > 0 && job <= data.n;
+				job = dominanceReachable.nextSetBit(job + 1)) {
+			if (isForwardHalfEligibleJob(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+				extension.add(job);
+			}
+		}
+		return extension;
+	}
+
+	private PackedBitSet buildBackwardExtensionSet(PackedBitSet dominanceReachable, int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet extension = new PackedBitSet(data.n + 2);
+		for (int job = dominanceReachable.nextSetBit(1); job > 0 && job <= data.n;
+				job = dominanceReachable.nextSetBit(job + 1)) {
+			if (isBackwardHalfEligibleJob(job)
+					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+				extension.add(job);
+			}
+		}
+		return extension;
 	}
 
 	private void precomputeDynamicPricingWindows(LP lp) {
@@ -1513,13 +1564,15 @@ public class GCBidirectional {
 
 	private abstract static class FunctionLabel extends Label implements Comparable<Label> {
 		final int labelId;
+		final PackedBitSet extensionSet;
 		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
 		PiecewiseLinearFunction joinExtendedFrontier;
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet reachableSet,
-				PiecewiseLinearFunction frontier, double minReducedCost) {
+				PackedBitSet extensionSet, PiecewiseLinearFunction frontier, double minReducedCost) {
 			super(jid, null, visitedSet, reachableSet, frontier, minReducedCost);
 			this.labelId = labelId;
+			this.extensionSet = extensionSet;
 		}
 
 		@Override
@@ -1538,8 +1591,8 @@ public class GCBidirectional {
 		final ForwardLabel father;
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
-				PiecewiseLinearFunction frontier) {
-			super(labelId, jid, visitedSet, reachableSet, frontier, forwardEndpointMin(frontier));
+				PackedBitSet extensionSet, PiecewiseLinearFunction frontier) {
+			super(labelId, jid, visitedSet, reachableSet, extensionSet, frontier, forwardEndpointMin(frontier));
 			this.father = father;
 		}
 	}
@@ -1549,15 +1602,15 @@ public class GCBidirectional {
 		final boolean isSinkRoot;
 
 		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet reachableSet,
-				PiecewiseLinearFunction frontier, boolean isSinkRoot) {
-			super(labelId, jid, visitedSet, reachableSet, frontier, backwardEndpointMin(frontier));
+				PackedBitSet extensionSet, PiecewiseLinearFunction frontier, boolean isSinkRoot) {
+			super(labelId, jid, visitedSet, reachableSet, extensionSet, frontier, backwardEndpointMin(frontier));
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
 		}
 
 		static BackwardLabel sink(int labelId, int sinkId, PackedBitSet visitedSet, PiecewiseLinearFunction frontier,
-				PackedBitSet reachableSet) {
-			return new BackwardLabel(labelId, sinkId, null, visitedSet, reachableSet, frontier, true);
+				PackedBitSet reachableSet, PackedBitSet extensionSet) {
+			return new BackwardLabel(labelId, sinkId, null, visitedSet, reachableSet, extensionSet, frontier, true);
 		}
 	}
 }

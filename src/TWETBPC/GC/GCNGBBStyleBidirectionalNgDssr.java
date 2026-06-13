@@ -921,9 +921,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
 		PackedBitSet sourceNgMemory = new PackedBitSet(data.n + 2);
-		PackedBitSet sourceExtensionSet = buildForwardExtensionSet(0, sourceNgMemory, sourceFrontier);
+		PackedBitSet sourceDominanceSet = buildForwardDominanceSet(0, sourceNgMemory, sourceFrontier);
+		PackedBitSet sourceExtensionSet = buildForwardExtensionSet(sourceDominanceSet, 0, sourceFrontier);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
-				sourceExtensionSet, sourceNgMemory, sourceFrontier);
+				sourceDominanceSet, sourceExtensionSet, sourceNgMemory, sourceFrontier);
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
 		}
@@ -1550,10 +1551,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sinkFrontier.resetDomain(tMid, pricingHorizon);
 		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
 		PackedBitSet sinkNgMemory = new PackedBitSet(data.n + 2);
-		PackedBitSet sinkExtensionSet = buildBackwardExtensionSet(lp.getNode().sinkId(), sinkNgMemory, lp.getNode(),
+		PackedBitSet sinkDominanceSet = buildBackwardDominanceSet(lp.getNode().sinkId(), sinkNgMemory, lp.getNode(),
+				sinkFrontier);
+		PackedBitSet sinkExtensionSet = buildBackwardExtensionSet(sinkDominanceSet, lp.getNode().sinkId(), true,
 				sinkFrontier);
 		BackwardLabel sink = new BackwardLabel(nextLabelId++, lp.getNode().sinkId(), null, sinkVisited,
-				sinkExtensionSet, sinkNgMemory, sinkFrontier, true);
+				sinkDominanceSet, sinkExtensionSet, sinkNgMemory, sinkFrontier, true);
 		BWUL.add(sink);
 	}
 
@@ -1678,9 +1681,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
 		PackedBitSet childNgMemory = updateNgMemory(label.ngMemorySet, nextJob);
-		PackedBitSet childExtensionSet = buildForwardExtensionSet(nextJob, childNgMemory, nextFrontier);
-		return new ForwardLabel(nextLabelId++, nextJob, label, visited, childExtensionSet, childNgMemory,
-				nextFrontier);
+		PackedBitSet childDominanceSet = buildForwardDominanceSet(nextJob, childNgMemory, nextFrontier);
+		PackedBitSet childExtensionSet = buildForwardExtensionSet(childDominanceSet, nextJob, nextFrontier);
+		return new ForwardLabel(nextLabelId++, nextJob, label, visited, childDominanceSet, childExtensionSet,
+				childNgMemory, nextFrontier);
 	}
 
 	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
@@ -1731,9 +1735,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(prevJob);
 		PackedBitSet childNgMemory = updateNgMemory(label.ngMemorySet, prevJob);
-		PackedBitSet childExtensionSet = buildBackwardExtensionSet(prevJob, childNgMemory, lp.getNode(), nextFrontier);
-		return new BackwardLabel(nextLabelId++, prevJob, label, visited, childExtensionSet, childNgMemory,
-				nextFrontier, false);
+		PackedBitSet childDominanceSet = buildBackwardDominanceSet(prevJob, childNgMemory, lp.getNode(),
+				nextFrontier);
+		PackedBitSet childExtensionSet = buildBackwardExtensionSet(childDominanceSet, prevJob, false, nextFrontier);
+		return new BackwardLabel(nextLabelId++, prevJob, label, visited, childDominanceSet, childExtensionSet,
+				childNgMemory, nextFrontier, false);
 	}
 
 	private InsertStatus insertForward(ForwardLabel label, LP lp) {
@@ -3259,6 +3265,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {
+		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, true);
+	}
+
+	private boolean isDirectForwardExtensionTimeFeasibleFullDomain(PiecewiseLinearFunction frontier, int prevJob,
+			int nextJob) {
+		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, false);
+	}
+
+	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob,
+			boolean requireTmid) {
 		if (frontier == null || frontier.head == null) {
 			return false;
 		}
@@ -3270,7 +3286,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double hEnd = getDynamicForwardHEnd(prevJob, nextJob);
 		double earliestCompletion = Math.max(
 				frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob), hStart);
-		return !Utility.compareGt(earliestCompletion, hEnd) && !Utility.compareGt(earliestCompletion, tMid);
+		return !Utility.compareGt(earliestCompletion, hEnd)
+				&& (!requireTmid || !Utility.compareGt(earliestCompletion, tMid));
 	}
 
 	/**
@@ -3283,6 +3300,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
 			PiecewiseLinearFunction frontier, int prevJob) {
+		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, true);
+	}
+
+	private boolean isDirectBackwardExtensionTimeFeasibleFullDomain(int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier, int prevJob) {
+		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, false);
+	}
+
+	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier, int prevJob, boolean requireTmid) {
 		int successor = isSinkRoot ? data.n + 1 : firstJob;
 		double rhoPrime;
 		if (isSinkRoot) {
@@ -3291,7 +3318,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			double delay = data.getSetUp(prevJob, firstJob) + data.getProcessT(firstJob);
 			rhoPrime = Math.min(frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
 		}
-		double lower = Math.max(tMid, getDynamicBackwardHStart(prevJob, successor));
+		double hStart = getDynamicBackwardHStart(prevJob, successor);
+		double lower = requireTmid ? Math.max(tMid, hStart) : hStart;
 		return !Utility.compareLt(rhoPrime, lower);
 	}
 
@@ -3301,29 +3329,51 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return memory;
 	}
 
-	private PackedBitSet buildForwardExtensionSet(int fromJob, PackedBitSet ngMemory,
-			PiecewiseLinearFunction frontier) {
-		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
+	private PackedBitSet buildForwardDominanceSet(int fromJob, PackedBitSet ngMemory, PiecewiseLinearFunction frontier) {
+		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
 			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
-					|| !isForwardHalfEligibleJob(job)
-					|| !isDirectForwardExtensionTimeFeasible(frontier, fromJob, job);
+					|| !isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job);
 			if (!unavailable) {
+				dominanceSet.add(job);
+			}
+		}
+		return dominanceSet;
+	}
+
+	private PackedBitSet buildForwardExtensionSet(PackedBitSet dominanceSet, int fromJob,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
+		for (int job = dominanceSet.nextSetBit(1); job > 0 && job <= data.n;
+				job = dominanceSet.nextSetBit(job + 1)) {
+			if (isForwardHalfEligibleJob(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				extensionSet.add(job);
 			}
 		}
 		return extensionSet;
 	}
 
-	private PackedBitSet buildBackwardExtensionSet(int firstJob, PackedBitSet ngMemory, Node node,
+	private PackedBitSet buildBackwardDominanceSet(int firstJob, PackedBitSet ngMemory, Node node,
 			PiecewiseLinearFunction frontier) {
-		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
+		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
 			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
-					|| !isBackwardHalfEligibleJob(job)
-					|| !isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job);
+					|| !isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job);
 			if (!unavailable) {
+				dominanceSet.add(job);
+			}
+		}
+		return dominanceSet;
+	}
+
+	private PackedBitSet buildBackwardExtensionSet(PackedBitSet dominanceSet, int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
+		for (int job = dominanceSet.nextSetBit(1); job > 0 && job <= data.n;
+				job = dominanceSet.nextSetBit(job + 1)) {
+			if (isBackwardHalfEligibleJob(job)
+					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				extensionSet.add(job);
 			}
 		}
@@ -4680,9 +4730,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
 		PiecewiseLinearFunction joinExtendedFrontier;
 
-		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet extensionSet,
-				PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier, double minReducedCost) {
-			super(jid, null, visitedSet, extensionSet, frontier, minReducedCost);
+		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet dominanceSet,
+				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
+				double minReducedCost) {
+			super(jid, null, visitedSet, dominanceSet, frontier, minReducedCost);
 			this.labelId = labelId;
 			this.extensionSet = extensionSet;
 			this.extensionCardinality = extensionSet == null ? 0 : extensionSet.cardinality();
@@ -4708,9 +4759,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final ForwardLabel father;
 		final int depth;
 
-		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet extensionSet,
-				PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier) {
-			super(labelId, jid, visitedSet, extensionSet, ngMemorySet, frontier,
+		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
+				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier) {
+			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier,
 					forwardEndpointMin(frontier));
 			this.father = father;
 			this.depth = father == null ? 0 : father.depth + 1;
@@ -4721,9 +4772,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final BackwardLabel father;
 		final boolean isSinkRoot;
 
-		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet extensionSet,
-				PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier, boolean isSinkRoot) {
-			super(labelId, jid, visitedSet, extensionSet, ngMemorySet, frontier,
+		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
+				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
+				boolean isSinkRoot) {
+			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier,
 					backwardEndpointMin(frontier));
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;

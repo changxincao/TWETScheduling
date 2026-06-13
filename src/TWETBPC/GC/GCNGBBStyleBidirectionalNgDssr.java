@@ -264,6 +264,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ArrayList<Integer> targetTraceSequence;
 	private StringBuilder targetTrace;
 	private int targetTraceEventLimit;
+	private boolean targetTraceProtectTarget;
+	private boolean targetTraceDominatorFollow;
+	private HashSet<Integer> targetTraceWatchedLabelIds;
 
 	private String lastMessage = "GCNGBB-style ng-DSSR bidirectional pricing not executed";
 
@@ -727,6 +730,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void initializeTargetTrace(LP lp) {
 		targetTraceSequence = null;
 		targetTrace = null;
+		targetTraceProtectTarget = false;
+		targetTraceDominatorFollow = false;
+		targetTraceWatchedLabelIds = null;
 		String raw = System.getProperty("twet.bpc.ngDssrTraceSequence",
 				System.getProperty("twet.bpc.fullDomainCompare.ngDssrTraceSequence", "")).trim();
 		if (raw.isEmpty()) {
@@ -745,8 +751,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		targetTrace = new StringBuilder();
 		targetTraceEventLimit = Integer.getInteger("twet.bpc.ngDssrTraceLimit",
 				Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrTraceLimit", 120));
+		targetTraceProtectTarget = Boolean.parseBoolean(System.getProperty("twet.bpc.ngDssrTraceProtectTarget",
+				System.getProperty("twet.bpc.fullDomainCompare.ngDssrTraceProtectTarget", "false")));
+		targetTraceDominatorFollow = Boolean.parseBoolean(System.getProperty("twet.bpc.ngDssrTraceDominator",
+				System.getProperty("twet.bpc.fullDomainCompare.ngDssrTraceDominator", "false")));
+		targetTraceWatchedLabelIds = new HashSet<Integer>();
 		traceTarget("init backend=" + dominanceBackend + " node="
 				+ (lp == null || lp.getNode() == null ? -1 : lp.getNode().id)
+				+ " protect=" + targetTraceProtectTarget
+				+ " followDominator=" + targetTraceDominatorFollow
 				+ " target=" + targetTraceSequence);
 	}
 
@@ -756,6 +769,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		PartialListDominanceStore.setTrimListener(new PartialListDominanceStore.TrimListener() {
+			@Override
+			public boolean skipTrim(Label trimmed, Label dominator, Direction direction) {
+				return shouldProtectTargetTrim(trimmed, dominator, direction);
+			}
+
 			@Override
 			public void onTrim(Label trimmed, Label dominator, TrimResult result, Direction direction) {
 				traceTargetPartialListTrim(trimmed, dominator, result, direction);
@@ -1549,6 +1567,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		diagnosticForwardPops++;
+		traceWatchedLabel("WATCH_F_POP", label);
 
 		Node node = lp.getNode();
 		for (int nextJob = label.extensionSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
@@ -1564,15 +1583,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				continue;
 			}
 			forwardExtensionConstructed++;
-			traceTargetForward("F_CONSTRUCT", child);
+			traceTargetForward("F_CONSTRUCT", child, lp);
+			traceWatchedChild("WATCH_F_CHILD", label, child, nextJob);
 			if (isForwardCompletionBoundPruned(child)) {
 				completionForwardLabelsPruned++;
-				traceTargetForward("F_CB_PRUNED", child);
+				traceTargetForward("F_CB_PRUNED", child, lp);
+				traceWatchedLabel("WATCH_F_CB_PRUNED", child);
 				continue;
 			}
 			forwardExtensionBoundSurvivors++;
 			InsertStatus status = insertForward(child, lp);
-			traceTargetForward("F_INSERT_" + status, child);
+			traceTargetForward("F_INSERT_" + status, child, lp);
+			traceWatchedLabel("WATCH_F_INSERT_" + status, child);
 			if (status == InsertStatus.STORED_AND_ENQUEUE) {
 				FWUL.add(child);
 			}
@@ -1586,6 +1608,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		diagnosticBackwardPops++;
+		traceWatchedLabel("WATCH_B_POP", label);
 
 		Node node = lp.getNode();
 		for (int prevJob = label.extensionSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
@@ -1598,13 +1621,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				continue;
 			}
 			traceTargetBackward("B_CONSTRUCT", child);
+			traceWatchedChild("WATCH_B_CHILD", label, child, prevJob);
 			if (isBackwardCompletionBoundPruned(child)) {
 				completionBackwardLabelsPruned++;
 				traceTargetBackward("B_CB_PRUNED", child);
+				traceWatchedLabel("WATCH_B_CB_PRUNED", child);
 				continue;
 			}
 			InsertStatus status = insertBackward(child, lp);
 			traceTargetBackward("B_INSERT_" + status, child);
+			traceWatchedLabel("WATCH_B_INSERT_" + status, child);
 			if (status == InsertStatus.STORED_AND_ENQUEUE) {
 				BWUL.add(child);
 			}
@@ -1894,10 +1920,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Node node = lp.getNode();
 		int sink = node.sinkId();
 		if (isPricingArcForbidden(node, label.jid, sink)) {
+			traceWatchedLabel("WATCH_F_SINK_ARC_FORBIDDEN", label);
 			return;
 		}
 		forwardSinkLabelsVisited++;
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
+		if (isWatchedLabel(label)) {
+			traceTarget("WATCH_F_SINK_CHECK #" + labelId(label)
+					+ " seq=" + recoverForwardSequence(label)
+					+ " rc=" + reducedCost
+					+ " min=" + label.minReducedCost
+					+ " arcDual=" + lp.getArcDual(label.jid, sink));
+		}
 		if (!Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
 			return;
 		}
@@ -3948,7 +3982,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return targetTraceSequence.equals(sequence);
 	}
 
-	private void traceTargetForward(String stage, ForwardLabel label) {
+	private void traceTargetForward(String stage, ForwardLabel label, LP lp) {
 		if (targetTraceSequence == null || label == null) {
 			return;
 		}
@@ -3959,7 +3993,26 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		traceTarget(stage + " f#" + label.labelId + " depth=" + label.depth + " seq=" + sequence
 				+ " min=" + label.minReducedCost + " domain=" + labelDomain(label)
 				+ " ext=" + label.extensionCardinality + " ng=" + label.ngMemorySet.cardinality()
-				+ " dominated=" + label.isDominated);
+				+ " dominated=" + label.isDominated
+				+ " next=" + targetForwardNextStatus(label, sequence, lp));
+	}
+
+	private String targetForwardNextStatus(ForwardLabel label, ArrayList<Integer> sequence, LP lp) {
+		if (targetTraceSequence == null || sequence.size() >= targetTraceSequence.size()) {
+			return "end";
+		}
+		int next = targetTraceSequence.get(sequence.size()).intValue();
+		boolean inExtension = label.extensionSet != null && label.extensionSet.contains(next);
+		boolean inNgMemory = label.ngMemorySet != null && label.ngMemorySet.contains(next);
+		boolean halfEligible = isForwardHalfEligibleJob(next);
+		boolean timeFeasible = label.frontier != null
+				&& isDirectForwardExtensionTimeFeasible(label.frontier, label.jid, next);
+		boolean arcForbidden = lp != null && lp.getNode() != null && isPricingArcForbidden(lp.getNode(), label.jid, next);
+		return next + "{ext=" + inExtension
+				+ ",ng=" + inNgMemory
+				+ ",half=" + halfEligible
+				+ ",time=" + timeFeasible
+				+ ",arcForbidden=" + arcForbidden + "}";
 	}
 
 	private void traceTargetBackward(String stage, BackwardLabel label) {
@@ -3991,6 +4044,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		ArrayList<Integer> dominatorSequence = recoverAnySequence(dominator);
+		watchTargetDominator(dominator, direction, dominatorSequence, trimmedSequence);
 		traceTarget("PARTIAL_TRIM " + direction
 				+ " result=" + result
 				+ " trimmed#" + labelId(trimmed)
@@ -4004,6 +4058,51 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " domain=" + labelDomain(dominator)
 				+ " state=" + labelStateSummary(dominator)
 				+ " forgottenTargetJobs=" + forgottenTargetJobs(dominator, trimmedSequence, direction));
+	}
+
+	private boolean shouldProtectTargetTrim(Label trimmed, Label dominator, Direction direction) {
+		if (!targetTraceProtectTarget || targetTraceSequence == null || trimmed == null) {
+			return false;
+		}
+		ArrayList<Integer> trimmedSequence = recoverAnySequence(trimmed);
+		if (trimmedSequence == null) {
+			return false;
+		}
+		boolean targetSide = direction == Direction.FORWARD
+				? isTargetPrefix(trimmedSequence)
+				: isTargetSuffix(trimmedSequence);
+		if (!targetSide) {
+			return false;
+		}
+		ArrayList<Integer> dominatorSequence = recoverAnySequence(dominator);
+		watchTargetDominator(dominator, direction, dominatorSequence, trimmedSequence);
+		traceTarget("PARTIAL_TRIM_SKIPPED " + direction
+				+ " trimmed#" + labelId(trimmed)
+				+ " seq=" + trimmedSequence
+				+ " domain=" + labelDomain(trimmed)
+				+ " by#" + labelId(dominator)
+				+ " seq=" + dominatorSequence
+				+ " domain=" + labelDomain(dominator)
+				+ " forgottenTargetJobs=" + forgottenTargetJobs(dominator, trimmedSequence, direction));
+		return true;
+	}
+
+	private void watchTargetDominator(Label dominator, Direction direction, ArrayList<Integer> dominatorSequence,
+			ArrayList<Integer> trimmedSequence) {
+		if (!targetTraceDominatorFollow || dominator == null || targetTraceWatchedLabelIds == null) {
+			return;
+		}
+		int id = labelId(dominator);
+		if (id < 0 || !targetTraceWatchedLabelIds.add(Integer.valueOf(id))) {
+			return;
+		}
+		traceTarget("WATCH_DOMINATOR " + direction
+				+ " #" + id
+				+ " seq=" + dominatorSequence
+				+ " min=" + dominator.minReducedCost
+				+ " domain=" + labelDomain(dominator)
+				+ " trimmedSeq=" + trimmedSequence
+				+ " state=" + labelStateSummary(dominator));
 	}
 
 	private ArrayList<Integer> recoverAnySequence(Label label) {
@@ -4057,6 +4156,45 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		}
 		return jobs.toString();
+	}
+
+	private void traceWatchedChild(String stage, FunctionLabel parent, FunctionLabel child, int extensionJob) {
+		if (!targetTraceDominatorFollow || !isWatchedLabel(parent) || child == null) {
+			return;
+		}
+		watchLabel(child);
+		traceTarget(stage
+				+ " parent#" + labelId(parent)
+				+ " child#" + labelId(child)
+				+ " via=" + extensionJob
+				+ " seq=" + recoverAnySequence(child)
+				+ " min=" + child.minReducedCost
+				+ " domain=" + labelDomain(child)
+				+ " state=" + labelStateSummary(child));
+	}
+
+	private void traceWatchedLabel(String stage, FunctionLabel label) {
+		if (!targetTraceDominatorFollow || !isWatchedLabel(label)) {
+			return;
+		}
+		traceTarget(stage
+				+ " #" + labelId(label)
+				+ " seq=" + recoverAnySequence(label)
+				+ " min=" + label.minReducedCost
+				+ " domain=" + labelDomain(label)
+				+ " dominated=" + label.isDominated
+				+ " state=" + labelStateSummary(label));
+	}
+
+	private boolean isWatchedLabel(Label label) {
+		return targetTraceWatchedLabelIds != null && labelId(label) >= 0
+				&& targetTraceWatchedLabelIds.contains(Integer.valueOf(labelId(label)));
+	}
+
+	private void watchLabel(Label label) {
+		if (targetTraceWatchedLabelIds != null && labelId(label) >= 0) {
+			targetTraceWatchedLabelIds.add(Integer.valueOf(labelId(label)));
+		}
 	}
 
 	private boolean isTargetPrefix(ArrayList<Integer> sequence) {

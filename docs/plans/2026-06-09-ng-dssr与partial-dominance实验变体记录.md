@@ -704,3 +704,29 @@ graph partial 的 envelope 缓存也做了语义核对。已有 label 被 predec
 这使之前的推断从“可能是 ng-memory 遗忘导致”变成了有日志证据的链条：`buildForwardExtensionSet()` 排除的是 `ngMemory.contains(job)`，不是 `visitedSet.contains(job)`；因此一个 non-elementary relaxed prefix 可以在 dominance key 上看起来拥有不小于目标 prefix 的可扩展集合，并用较低 frontier 裁掉目标 prefix 的低完成时间区间。但这个 relaxed prefix 后续若接上目标剩余序列会重复访问 19，不能替代 elementary target prefix。最终表现为 list-partial 中 `[17,27,10,15,20]` 的构造状态变成 `min=7006.125, domain=[597,2185.5]` 并被 `F_CB_PRUNED`；paper 同状态下同一 prefix 为 `min=6716.125, domain=[425,2185.5]`，可以继续扩展到完整负列。
 
 当前结论因此更明确：ng-DSSR 下把 partial dominance 直接套在 `extensionSet` 语义上不安全，不是单纯 graph envelope 缓存问题，也不是 join 或候选池 top-K 丢列。`PAPER` 后端仍应作为 exact pricing 的可信默认；`LIST_PARTIAL` 和 `GRAPH_PARTIAL` 可以保留为实验/启发式加速分支，但不能用于最终下界闭合证明，除非后续把 partial trim 条件改成能保证“裁剪者的真实访问历史不会排除被裁剪 label 未来需要的 elementary job”的更强条件。
+
+74. 2026-06-13 对 ng-DSSR partial 漏列原因的进一步修正
+
+前一节中“relaxed prefix 后续若接上目标剩余序列会重复访问 19，不能替代 elementary target prefix”的说法仍然过强。更准确的判断是：理论上的 NG dominance 本身没有问题；如果 relaxed prefix 在 NG 状态下确实支配了目标 prefix，那么它可以在 relaxed pricing 中替代目标 prefix。但这种替代会带来一个 DSSR 层面的不变量要求：若替代后的完整 route 是 non-elementary 且 reduced cost 为负，它必须被实际生成出来并记录为 non-elementary negative route，从而触发 ng-set 更新。否则 partial 裁剪就会把 elementary 负列对应的 frontier 区间删掉，却没有留下能够更新 ng-set 的 cycle witness，后续 DSSR round 就可能错误地认为 relaxed pricing 已经没有负列。
+
+旧 VRP 的 `GCNGBB` dominance 条件本质上是 `memory_dominator ⊆ memory_dominated ∪ unreachable_dominated`，并配合时间、容量和 reduced cost 不劣。当前 TWET 的 `extensionSet` 可以看成某种不可达并集的补集；如果其中的资源不可达确实是单调硬不可达，那么局部 NG dominance 条件并不必然错。因此本轮不再把“裁剪者真实访问过未来 job”单独当作错误证据。真正由 node4 trace 说明的问题是：目标列 `[17,27,10,15,20,16,1,13,30,3,11,26,19,21,24,6]` 的早期 prefix 多次被包含 19、但当前 ng-memory 已遗忘 19 的 relaxed label 局部裁剪；按 NG relaxation，这些 relaxed label 若继续接目标后缀，应当形成包含重复 19 的 non-elementary 负 route 或其更优替代，并被 DSSR 用于更新 ng-set。但实际 `LIST_PARTIAL/GRAPH_PARTIAL` 最后一轮返回 0 列，日志 reason 为 `relaxed pricing found no negative route`，而同状态 `PAPER` 仍找到 reduced cost 约 `-0.125` 的 elementary 负列。这才是当前 partial 后端不能作为 exact pricing 证明路径的核心矛盾。
+
+因此当前更精确的结论是：问题不一定是 NG dominance 的数学条件本身错，而是 partial dominance 与 DSSR 更新机制之间缺少 witness 保证。完整 dominance 删除一个 label 时，替代 label 会作为一个完整状态继续扩展；partial dominance 删除的是 frontier 的若干时间区间，这些区间可能由多个 relaxed label 分段替代。如果这些替代分支没有最终 materialize 成负 route 并更新 ng-set，就会出现“被裁掉的 elementary 区间不在了，替代它的 non-elementary 证据也没进入 DSSR”的情况。后续若要把 partial 后端做成 exact，需要增加能够追踪/强制保留这类 non-elementary witness 的机制，或者只在能证明不会丢失 DSSR witness 的条件下允许 partial trim。在此之前，`PAPER` 仍是 ng-DSSR 的可信默认后端，partial 后端只用于实验对照或启发式加速。
+75. 2026-06-13 对 partial 漏列原因的再次修正：关键在 join 可替代性
+
+上一轮把问题表述为“partial trim 缺少 DSSR witness”，这个说法仍然不够准确。用户指出如果裁剪者 B 真的支配 A，那么 B 自身就携带 predecessor 路径，不存在“路径证据凭空丢失”。这一点是对的。重新按当前代码语义分析后，更准确的核心原因应改为：当前 ng-DSSR partial 后端使用的 `extensionSet` dominance key 把两类不可达原因混在了一起，而 bidirectional join 只对其中一类敏感。
+
+在 `GCNGBBStyleBidirectionalNgDssr` 中，`extensionSet` 的构造排除了 `ngMemory.contains(job)`、half-domain 不可达和当前 frontier 下的直连时间不可达。于是两个 label 可能都无法下一步扩展到 job 19：一个是因为它已经真实访问过 19 但 ng-memory 当前遗忘或记住状态导致不可达，另一个是因为当前时间/资源下 19 不能作为下一跳。对“继续单向扩展”而言，这两者都表现为 19 不在 `extensionSet` 中；但对“和 backward suffix 做 join”而言，它们不是等价的。join 关心的是真实重复/NG-memory 冲突，而不是 19 此刻能不能作为下一跳。
+
+这正好解释了 node4 trace：目标 elementary 列 `[17,27,10,15,20,16,1,13,30,3,11,26,19,21,24,6]` 的早期 prefix 被一些包含未来 job 19 的 relaxed prefix 裁剪。这些 relaxed prefix 在 `extensionSet` 上可能不差，frontier 也更低；但如果它们后续接上同一个包含 19 的 suffix，就不能作为目标 elementary prefix 的等价替代，至少需要进入 non-elementary route 更新流程。当前 partial trim 在 forward prefix 阶段已经删掉目标 prefix 的低时间区间，后续 completion bound 进一步剪掉目标分支；而裁剪者是否能在 join 语义下替代目标 prefix，并没有被 `extensionSet` 这个单一 key 严格保证。
+
+因此当前更准确的结论是：问题不是“B 比 A 好却没有路径”，而是“B 在单向 extensionSet 意义下看起来不差，不代表 B 对所有 backward join suffix 也能替代 A”。`extensionSet` 把 ng-memory 不可达和资源/时间不可达合成一个补集，这对单向扩展可能足够，但对双向 join 的 exact dominance 不够。后续如果要让 ng-DSSR partial 后端变成可信 exact pricing，要么 dominance 条件显式保留足够的 ng-memory/真实访问历史关系以保证 join 可替代性，要么 partial trim 只能作为启发式加速，不能用于最终闭合证明。
+76. 2026-06-13 目标前缀保护诊断
+
+按“前面迭代保持原样，只让目标列相关前缀/后缀不参与 partial trim”的口径，给 `LIST_PARTIAL` 增加了默认关闭的 trace 保护开关：`twet.bpc.fullDomainCompare.ngDssrTraceProtectTarget=true`。测试仍使用三角化 010 的 node4，目标序列为 `[17,27,10,15,20,16,1,13,30,3,11,26,19,21,24,6]`，配置保持 `nearestK,size=8,top5`、`completionBound=allCycles`、`midpointProbe=true`、RMIH 关闭。
+
+无保护版本中，目标前缀 `[17,27]` 在插入 dominance store 前被多个不同历史的 label 联合裁空：先被 `[27]` 和 `[19,27]` 做部分裁剪，最后被 `[2,27]` 裁成空域，随后 `F_INSERT_DOMINATED`。被跟踪的 dominator `[2,27]` 后续确实继续扩展，扩展到 1/2/3/.../30 的一批子 label；其中大多数被 completion bound 剪掉，少数进入队列，但该轮最终 `candidatePool kept/seen/dropped=0/0/0`，没有生成负列。
+
+保护版本中，早期 partial trim 被跳过后，目标路径确实继续向后扩展：`[17] -> [17,27] -> [17,27,10] -> [17,27,10,15] -> [17,27,10,15,20] -> [17,27,10,15,20,16]` 都能够构造并插入，且每一步的下一个目标 job 均显示 `ext=true, ng=false, half=true, time=true, arcForbidden=false`。但是继续扩到 `[17,27,10,15,20,16,1]` 后，该前缀被 `F_CB_PRUNED`，没有生成完整目标列。因此这个目标列不是“只要禁止 partial trim 就一定恢复”的直接反例；保护只能证明 partial trim 确实提前杀掉了这条目标路径的一部分，不能单独证明完整目标列在当前保护路径下仍应返回。
+
+同时重新跑了 ng-DSSR 的 `PAPER` 后端对照，确认必须使用 `twet.bpc.fullDomainCompare.ngDssr=true` 才是同一套 ng-DSSR 流程；若三个 ng 开关都关掉，会退回普通 elementary pricing，不能对照 partial-list。`PAPER` 后端在该 node4 路径下也没有稳定生成完整目标序列，后几轮甚至会在 `[17,27]` 处完整占优。因此当前结论应收敛为：这次保护实验没有直接找到“保护目标前缀即可恢复 paper 独有列”的充分证据，但它确认了 partial-list 会通过多个不同历史 label 的分段裁剪提前改变目标路径的可用 frontier；后续若继续定位 exactness 问题，应优先在同一 LP 状态下记录 paper 独有列的完整 prefix 轨迹和 partial 后端的裁剪轨迹，而不是只盯单条旧目标序列。

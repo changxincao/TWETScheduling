@@ -170,6 +170,9 @@ final class PartialListDominanceStore implements DominanceStore {
 		if (!hasPositiveOverlap(label.frontier, dominatingFrontier)) {
 			return false;
 		}
+		if (trimListener != null && trimListener.skipTrim(label, dominatingLabel, direction)) {
+			return false;
+		}
 		TrimResult result = label.frontier.updateDominatedIntervalsDetailed(dominatingFrontier, direction);
 		if (result == TrimResult.NO_CHANGE) {
 			return false;
@@ -215,6 +218,10 @@ final class PartialListDominanceStore implements DominanceStore {
 	}
 
 	interface TrimListener {
+		default boolean skipTrim(Label trimmed, Label dominator, Direction direction) {
+			return false;
+		}
+
 		void onTrim(Label trimmed, Label dominator, TrimResult result, Direction direction);
 	}
 }

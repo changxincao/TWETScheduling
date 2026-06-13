@@ -782,3 +782,10 @@ ng-DSSR 中的 non-elementary route 只是 relaxed subproblem 的状态和 DSSR 
 本轮最终决定保持旧 VRP 的 SRI 处理方式不变：在 ng-DSSR relaxed route 中，SRI 计数按 cut 内不同 job 的首次访问更新，而不是按 walk 中的重复访问次数累计。这样可以理解为在列系数可能大于 1 的理论 visit-count SRI 上做了弱化：例如一个 relaxed ng-route 中 cut 内三个 job 各重复访问两次，标准 visit-count 系数可能为 `floor(6/2)=3`，当前 distinct-visit 系数仍为 `floor(3/2)=1`。因此 relaxed pricing 中这个 cut 更弱，可能带来更多 non-elementary negative witness 和 DSSR 更新，但不会把 elementary 列的 reduced cost 算错。
 
 保持该口径的主要原因是当前真正加入主问题的都是基本列，主问题中的覆盖系数和 SRI cut 系数均按 `containsJob` 的 0/1 覆盖语义计算。对这些真实列而言，distinct-visit SRI 与主问题 cut 行完全一致，不存在 cut 强度下降；弱化只发生在 ng-relaxation 的非基本 walk 估价上。若未来允许非基本 route 入主问题，或把主问题覆盖系数改成访问次数，则再单独实现 visit-count SRI。
+84. 2026-06-13 single-point SRI dominance 是否需要继续增强
+
+继续复核 SRI 接入后，single-point dominance 仍保持保守实现：SRI active 时，只允许相同 SRI count signature 的 single-point label 互相比较，不做旧 VRP `UseSR` 式跨状态补偿。这个不会导致误删，因为它只减少 dominance 机会；影响主要是 single-point shortcut 偏弱。
+
+理论上可以优化。当前 `GCNGBBStyleBidirectionalNgDssr` 的 `SinglePointStore` 保存的是完整 `FunctionLabel`，因此在 `isDominatedBySinglePointStore()` 和 `removeSinglePointsDominatedBy()` 中可以拿到双方的 `visitedSet/reachableSet/sriCounts`，按 `SriAwarePartialListDominanceStore` 的同一补偿逻辑比较标量：如果支配方某个 SRI count 为 1、被支配方为偶数，且被支配方还能到达一个支配方未访问的 cut 内 job，则比较前把支配方的 single-point value 加上 `-dual`。这样可以去掉“必须 sameSriState”的限制。
+
+当前暂不做，原因是 single-point 只是半域交界处的 shortcut，不是主要 dominance store；保守同状态比较已经正确，且跨状态补偿要把同一套 SRI compensation 抽成公共 helper，避免 partial-list store 和 single-point 各自复制一份逻辑。若后续 SRI active 后 label 数明显增加，再把该优化作为局部性能项处理即可。

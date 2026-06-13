@@ -87,3 +87,13 @@ SRI 分离阈值同步复核旧 `SRCut.java` 和 `Configure.java`：每轮最多
 影响范围上，SRI 默认关闭。`SubsetRowCutGenerator` 只有在 `enableSubsetRowCutsForPartialDominance=true` 且 `useGCNGBBStyleNgDssrPartialDominancePricing=true` 时才会产生 cut；pricing 侧也只有 LIST_PARTIAL ng-DSSR 会读取 SRI dual。其他 exact pricing 策略不会生成 SRI cut，也不会读取 SRI dual。需要注意的是，如果外部手工把 SRI cut id 注入 activeCutIds，同时又切到非 SRI-aware pricing，则理论上会破坏列生成闭合；正常配置路径不会这么做。
 
 验证：focused `javac` 通过；`wet020_001_2m` root 小样例在 partial-list ng-DSSR + SRI 开关下继续 valid，用时约 1.274s，仍未触发 violated SRI cut。
+
+### 2026-06-13 011/30 SRI 长跑中断观察
+
+使用三角化 `tmp-wet030_from040_011_2m` 做了一次 partial-list ng-DSSR + SRI cut 的 30 任务测试。配置包括 ALNS seed、all-cycle completion bound、pricing-only subtree、midpoint probe、`ngDssrRouteUpdateLimit=5`，并打开 `enableSubsetRowCutsForPartialDominance=true`、每轮最多 10 条 SRI cut、每个 job 在 active SRI cuts 中最多出现 20 次。
+
+本次运行没有跑到分支阶段，而是在 root 的 price-and-cut 循环中中断。运行过程确认 SRI separation 已经真正生效：root 先完成 no-cut pricing closure，然后连续分离出多批 violated SRI cut。观察到 cutPool 依次从 20 增至 30、40、50、60，每批都是 10 条；对应 best lhs 大约为 1.296、1.342、1.286、1.277。每次加 cut 后 dual 明显变化，启发式 pricing 会再次批量生成列，exact pricing 随后继续闭合。
+
+性能上，当前配置对 011/30 明显偏重。前几轮 exact pricing 通常在 2-12 秒之间，后续随着 active cut 和列池增加，单次 exact pricing 已经出现 30.5 秒和 43.2 秒的闭合轮；最后中断前仍处在 root，第三轮 cut 闭合后又分离了第 4 批 10 条 SRI cut，并且下一轮 heuristic 已经重新生成 160 条列。中断时列池规模已超过 9400，仍没有进入 branch。
+
+当前结论是：SRI 接入链路已经能触发 cut、重解 LP 并重新 pricing，但默认“每轮最多 10 条、总轮数不限”的 separation 对 011/30 过于激进，短时间内主要消耗在 root 的反复 cut-and-price，而不是推进搜索树。后续如果要把 SRI 用作实际求解配置，应优先增加总 cut 轮数或总 active SRI cuts 上限，或者先用更保守的每轮 cut 数做对照；否则它更适合作为 cut 机制验证，而不是当前 30 任务主线配置。

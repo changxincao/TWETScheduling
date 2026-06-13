@@ -48,6 +48,10 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		}
 
 		HashSet<String> activeTriples = activeSubsetRowTriples(lp);
+		int remainingNodeCuts = config.maxSubsetRowCutsPerNode - activeTriples.size();
+		if (remainingNodeCuts <= 0) {
+			return CutGenerationResult.empty("subset-row node cut limit reached: " + activeTriples.size());
+		}
 		// 2026-06-13: 对齐旧 VRP 的 lp.sr_cus_number：appearance 限制按当前 active cuts 累计，而不是只看本轮新增。
 		int[] appearances = activeSubsetRowAppearances(lp);
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
@@ -102,7 +106,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 
 		ArrayList<TWETCut> cuts = new ArrayList<TWETCut>();
 		for (Candidate candidate : candidates) {
-			if (cuts.size() >= config.maxSubsetRowCutsPerRound) {
+			if (cuts.size() >= config.maxSubsetRowCutsPerRound || cuts.size() >= remainingNodeCuts) {
 				break;
 			}
 			if (Utility.compareLt(candidate.value, config.subsetRowCutMinimumThreshold)) {

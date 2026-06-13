@@ -245,6 +245,8 @@ public class GCBBFullDomainComparisonTest {
 				Boolean.toString(config.enableSubsetRowCutsForPartialDominance)));
 		config.maxSubsetRowCutsPerRound = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.maxSubsetRowCutsPerRound", config.maxSubsetRowCutsPerRound);
+		config.maxSubsetRowCutsPerNode = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.maxSubsetRowCutsPerNode", config.maxSubsetRowCutsPerNode);
 		config.maxSubsetRowCutAppearancesPerJob = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.maxSubsetRowCutAppearancesPerJob",
 				config.maxSubsetRowCutAppearancesPerJob);

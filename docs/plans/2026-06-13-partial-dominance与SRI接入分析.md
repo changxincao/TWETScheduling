@@ -121,3 +121,11 @@ Tabu 搜索内部新增当前序列的 SRI count 和 penalty 缓存。remove/add
 当前结论是：启发式 SRI 修正方向有效，但默认 SRI separation 对 011/30 仍过重。若要把 SRI 用作实际求解配置，下一步更应该加总 active SRI cuts 或总 cut rounds 限制，或者先用每轮 1 条/更高 violation 阈值做对照；否则它可以验证 cut 机制，但不适合作为 30 任务默认主线配置。
 
 关于 completion bound 的作用，本次 011 受控日志说明它仍然非常有用。107 次 exact pricing `finalize.done` 记录中，forward candidate 总数约 2438 万，`cbFPruned` 约 2073 万，平均每轮剪掉约 19.4 万，占 forward built candidate 的约 85%；后期 `cuts=20` 时单轮也常见 30 万级候选中剪掉 24 万到 29 万。也就是说，如果没有 completion bound，当前 SRI root 闭合会明显更重。当前问题不是 bound 没用，而是 SRI active 后使用的是 no-SRI 松弛 bound，安全但偏弱；同时 cut 不限轮数导致 dual 和列池反复变化，每次 still 需要做较重的 exact pricing 证明。
+
+### 2026-06-13 每个 node 最多 10 条 SRI cut 的 root 对照
+
+为避免 011/30 在 root 内无限 cut-and-price，本轮把 SRI cut 从“每轮最多 10 条”进一步限制为“每个 BPC node active SRI cut 总数最多 10 条”。实现上新增 `maxSubsetRowCutsPerNode`，`SubsetRowCutGenerator` 在分离前先统计当前 active subset-row triples；若达到上限则直接返回 `node cut limit reached`，否则本轮新增数量同时受 `maxSubsetRowCutsPerRound` 和剩余额度限制。`GCBBFullDomainComparisonTest` 同步增加 `twet.bpc.fullDomainCompare.maxSubsetRowCutsPerNode` 入口。
+
+用三角化 `tmp-wet030_from040_011_2m` 做 root-only 对照，其他配置保持 partial-list ng-DSSR、ALNS seed、all-cycle completion bound、pricing-only subtree、midpoint probe、RMIH 关闭。无 SRI 基线为 `bound=13323.109589`，root solve `27.200s`，exact `4.934s`，列池 `5264`。开启 SRI 且每 node 最多 10 条 cut 后，root bound 提高到 `13413.526174`，提升 `90.416585`，相当于基线 bound 的约 `0.679%`；以 incumbent `13813` 计算，root gap 从 `3.5466%` 降到 `2.8920%`，减少约 `0.655` 个百分点。代价是 root solve 增至 `131.001s`，exact pricing `103.028s/15 calls`，列池 `5853`，cutPool `10`。
+
+当前判断是：每 node 10 条 SRI cut 能明显抬高 root 下界，但代价较高，主要来自 cut 后 exact pricing 难度上升。相比不限轮版本，它至少能让 root 正常返回并进入 branching，因此更适合后续做完整树对照；但是否值得作为默认，还需要继续比较 `maxSubsetRowCutsPerNode=1/3/5/10` 或提高 violation 阈值后的单位时间 bound 提升。

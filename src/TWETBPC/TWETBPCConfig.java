@@ -199,6 +199,8 @@ public class TWETBPCConfig {
 	public boolean enableSubsetRowCutsForPartialDominance = false;
 	/** 2026-06-13: 每轮 subset-row separation 最多加入多少条 cut。 */
 	public int maxSubsetRowCutsPerRound = 10;
+	/** 2026-06-13: 单个 BPC node 内最多保留多少条 active subset-row cut。*/
+	public int maxSubsetRowCutsPerNode = 10;
 	/** 2026-06-13: 同一 job 在 active subset-row cuts 中最多出现多少次；默认对齐旧 VRP m_max_appear_number。 */
 	public int maxSubsetRowCutAppearancesPerJob = 20;
 	/** 2026-06-13: subset-row cut 加入阈值；旧 VRP 中首条 cut 至少需要达到约 1.1。 */

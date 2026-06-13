@@ -90,7 +90,8 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		}
 
 		ArrayList<TWETCut> cuts = new ArrayList<TWETCut>();
-		int[] appearances = new int[lp.getData().n + 1];
+		// 2026-06-13: 对齐旧 VRP 的 lp.sr_cus_number：appearance 限制按当前 active cuts 累计，而不是只看本轮新增。
+		int[] appearances = activeSubsetRowAppearances(lp);
 		for (Candidate candidate : candidates) {
 			if (cuts.size() >= config.maxSubsetRowCutsPerRound) {
 				break;
@@ -136,6 +137,22 @@ public class SubsetRowCutGenerator implements CutGenerator {
 			triples.add(tripleSignature(jobs.get(0).intValue(), jobs.get(1).intValue(), jobs.get(2).intValue()));
 		}
 		return triples;
+	}
+
+	private int[] activeSubsetRowAppearances(LP lp) {
+		int[] appearances = new int[lp.getData().n + 1];
+		for (int cutId : lp.getActiveCutIds()) {
+			TWETCut cut = lp.getCutPool().getCut(cutId);
+			if (cut.getType() != TWETCutType.SUBSET_ROW) {
+				continue;
+			}
+			for (int job : cut.getScopeJobs()) {
+				if (job >= 1 && job <= lp.getData().n) {
+					appearances[job]++;
+				}
+			}
+		}
+		return appearances;
 	}
 
 	private double subsetRowValue(LP lp, TWETMasterSolution solution, int first, int second, int third) {

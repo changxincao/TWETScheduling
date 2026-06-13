@@ -59,6 +59,11 @@ public class PC {
 
 		solution = solvePricingLoop(lp, solution);
 
+		// 2026-06-13: 对齐旧 VRP PC.Solve()：pricing 收敛后若 LP 已经整数，不再做 cut separation。
+		if (solution.isInteger()) {
+			return solution;
+		}
+
 		for (int round = 0; round < config.maxCutRounds; round++) {
 			ArrayList<Integer> newCutIds = new ArrayList<Integer>();
 			boolean separated = false;
@@ -83,6 +88,14 @@ public class PC {
 			lastReusableSubtreeArcEliminationBounds = null;
 			lp.addCuts(newCutIds);
 			solution = solveRelaxationTimed(lp, "after_cut");
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				return solution;
+			}
+			// 2026-06-13: 新 cut 改变 dual 和 reduced cost，必须重新定价闭合；否则 SRI dual 已读出但没有进入 pricing。
+			solution = solvePricingLoop(lp, solution);
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE || solution.isInteger()) {
+				return solution;
+			}
 		}
 
 		return solution;

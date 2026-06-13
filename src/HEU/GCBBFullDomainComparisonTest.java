@@ -240,6 +240,14 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
 				config.ngDssrNonElementaryRouteUpdateLimit);
+		config.enableSubsetRowCutsForPartialDominance = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableSubsetRowCutsForPartialDominance",
+				Boolean.toString(config.enableSubsetRowCutsForPartialDominance)));
+		config.maxSubsetRowCutsPerRound = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.maxSubsetRowCutsPerRound", config.maxSubsetRowCutsPerRound);
+		config.maxSubsetRowCutAppearancesPerJob = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.maxSubsetRowCutAppearancesPerJob",
+				config.maxSubsetRowCutAppearancesPerJob);
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalJoinBestThresholdMode = System.getProperty(

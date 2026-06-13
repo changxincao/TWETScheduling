@@ -199,8 +199,8 @@ public class TWETBPCConfig {
 	public boolean enableSubsetRowCutsForPartialDominance = false;
 	/** 2026-06-13: 每轮 subset-row separation 最多加入多少条 cut。 */
 	public int maxSubsetRowCutsPerRound = 10;
-	/** 2026-06-13: 同一 job 在单轮新增 subset-row cut 中最多出现多少次。 */
-	public int maxSubsetRowCutAppearancesPerJob = 3;
+	/** 2026-06-13: 同一 job 在 active subset-row cuts 中最多出现多少次；默认对齐旧 VRP m_max_appear_number。 */
+	public int maxSubsetRowCutAppearancesPerJob = 20;
 	/** 2026-06-13: subset-row cut 加入阈值；旧 VRP 中首条 cut 至少需要达到约 1.1。 */
 	public double subsetRowCutMinimumViolationValue = 1.1;
 	/** 2026-06-13: subset-row cut 扫描停止阈值；低于该行值的候选不再加入。 */

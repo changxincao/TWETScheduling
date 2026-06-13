@@ -111,3 +111,11 @@ SRI 分离阈值同步复核旧 `SRCut.java` 和 `Configure.java`：每轮最多
 Tabu 搜索内部新增当前序列的 SRI count 和 penalty 缓存。remove/add/exchange move 仍沿用原来的分段函数局部成本变化、job dual 和 arc dual 增量；额外只计算本次 move 对 SRI count 从 1 到 2 或从 2 到 1 的 penalty 变化。exchange move 按“先删后加”的计数语义处理，避免 removed job 和 added job 同属一个 SRI cut 时重复或漏算。由于启发式内部仍维护 `used[job]`，生成序列是 elementary 的，SRI count 口径与正式 partial-list ng-DSSR pricing 的 distinct-visit penalty 一致。
 
 验证方面，focused `javac` 编译 `Basic/Common/HEU/Output/TWETBPC` 通过；随后用 `wet020_001_2m` 做 partial-list ng-DSSR + SRI 开关 root smoke，得到 `ROOT_PROCESSED,obj=bound=6343,valid=true`，用时约 1.8s。该小样例未触发 violated SRI cut，因此验证的是 no-active-cut 路径和配置开关未破坏；active SRI heuristic 分支主要通过代码口径对照确认与正式 pricing 的 `shift -= sriDual` 一致。后续若继续测 011/30 SRI 性能，应重新观察 heuristic 出列量是否下降。
+
+### 2026-06-13 011/30 补齐 SRI 启发式后的受控测试
+
+补齐启发式 pricing 的 SRI reduced-cost 口径后，重新用三角化 `tmp-wet030_from040_011_2m` 做了 180 秒 root-only 受控测试。配置沿用 partial-list ng-DSSR、ALNS seed、all-cycle completion bound、pricing-only subtree、midpoint probe、`ngDssrInitialMode=nearestK,size=8`、`ngDssrRouteUpdateLimit=5`，并打开 `enableSubsetRowCutsForPartialDominance=true`、每轮最多 10 条 SRI cut、每个 job 在 active SRI cuts 中最多出现 20 次。由于当前测试入口没有总 cut 数或总 cut 轮数限制，本次到 180 秒主动停止，未写出 summary CSV。
+
+这次运行确认了两个现象。第一，启发式在 active SRI cut 后的批量出列明显下降：第一批 10 条 cut 后列池从 5264 增到 5853，第二批 cut 后从 5853 增到 5942；相比之前未接 SRI 的启发式在 cut 后继续大批量生成 100+ 列，当前已经不再是主要无效出列来源。第二，root 仍没有闭合，主要时间转移到 exact pricing 的反复证明上。`cuts=20` 后多轮 exact pricing 的 forward candidates 约 30 万到 38 万，`cbFPruned` 约 25 万到 32 万，backward pops 只有 18 到 20，常见结果是 `generated=0`，偶尔只有 reduced cost 很小的负列，例如 `-0.0699`、`-0.0144`。这说明当前瓶颈已经不是启发式 SRI 口径错误，而是 SRI cut 不限轮数导致 root 内反复 cut-and-price，且后期 exact pricing 每轮仍需要较重的 forward 证明。
+
+当前结论是：启发式 SRI 修正方向有效，但默认 SRI separation 对 011/30 仍过重。若要把 SRI 用作实际求解配置，下一步更应该加总 active SRI cuts 或总 cut rounds 限制，或者先用每轮 1 条/更高 violation 阈值做对照；否则它可以验证 cut 机制，但不适合作为 30 任务默认主线配置。

@@ -103,3 +103,11 @@ SRI 分离阈值同步复核旧 `SRCut.java` 和 `Configure.java`：每轮最多
 复查 011/30 中断实验时发现，`HeuristicPricingEngine` 当前仍按 machine/job/arc dual 计算初始 reduced cost 和 remove/add/exchange 的局部增量，没有读取 `LP.getActiveSubsetRowPricingCutIds()` / `getActiveSubsetRowPricingDuals()`。因此一旦 root 加入 SRI cut，启发式生成的“负 reduced-cost 列”只是无 SRI 口径下的负列，不一定违反当前含 SRI row 的 LP dual。把这些列加入 RMP 本身不会破坏正确性，因为 LP 会给列补 SRI row 系数、目标成本也是真实成本；但它会显著放大无效列生成，解释了 011/30 中每轮 SRI cut 后 heuristic 仍批量生成 100+ 列的现象。
 
 当前建议是：SRI active 后要么直接关闭 heuristic pricing，要么给启发式补上 SRI-aware reduced cost 与 move 增量；在补齐前，SRI 性能测试不应把 heuristic 大量出列理解为 cut 后真的存在大量 violated columns。此前完整无 SRI/普通 ng 后端对照中，三角化 011/30 已求到 `incumbent=bound=13511`；本次 SRI 中断运行没有写出最终 summary，也没有可靠当前 bound，只能确认初始上界仍为 ALNS 的 13813 且 root 尚未闭合。
+
+### 2026-06-13 启发式 pricing 补齐 SRI reduced-cost 口径
+
+本轮把 `HeuristicPricingEngine` 的 SRI 口径补齐，但限定在 `enableSubsetRowCutsForPartialDominance=true` 且 `useGCNGBBStyleNgDssrPartialDominancePricing=true` 的路径下启用；没有 active SRI cut 时仍完全走旧的 machine/job/arc reduced-cost 口径。实现上在每次启发式 pricing 开始时构造一个 `SriPricingContext`，预处理当前 active SRI cut 的 scope、dual penalty `-dual`，以及每个 job 关联的 cut 下标。seed 排序时先统计该列访问了哪些 SRI scope job，再把已触发 cut 的 penalty 加到 reduced cost 中。
+
+Tabu 搜索内部新增当前序列的 SRI count 和 penalty 缓存。remove/add/exchange move 仍沿用原来的分段函数局部成本变化、job dual 和 arc dual 增量；额外只计算本次 move 对 SRI count 从 1 到 2 或从 2 到 1 的 penalty 变化。exchange move 按“先删后加”的计数语义处理，避免 removed job 和 added job 同属一个 SRI cut 时重复或漏算。由于启发式内部仍维护 `used[job]`，生成序列是 elementary 的，SRI count 口径与正式 partial-list ng-DSSR pricing 的 distinct-visit penalty 一致。
+
+验证方面，focused `javac` 编译 `Basic/Common/HEU/Output/TWETBPC` 通过；随后用 `wet020_001_2m` 做 partial-list ng-DSSR + SRI 开关 root smoke，得到 `ROOT_PROCESSED,obj=bound=6343,valid=true`，用时约 1.8s。该小样例未触发 violated SRI cut，因此验证的是 no-active-cut 路径和配置开关未破坏；active SRI heuristic 分支主要通过代码口径对照确认与正式 pricing 的 `shift -= sriDual` 一致。后续若继续测 011/30 SRI 性能，应重新观察 heuristic 出列量是否下降。

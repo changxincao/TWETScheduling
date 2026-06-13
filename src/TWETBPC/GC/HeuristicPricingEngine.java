@@ -15,6 +15,7 @@ import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETCut;
 import TWETBPC.Util.SequenceSignature;
 
 /**
@@ -47,7 +48,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("Heuristic pricing disabled");
 		}
 
-		ArrayList<TWETColumn> seeds = collectSeedColumnsBySortedPrefix(lp);
+		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
+		ArrayList<TWETColumn> seeds = collectSeedColumnsBySortedPrefix(lp, sriContext);
 		if (seeds.isEmpty()) {
 			return PricingResult.noImprovement("No active seed column for heuristic pricing");
 		}
@@ -61,7 +63,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (isHeuristicPoolFull(negativeCandidates)) {
 				break;
 			}
-			tabuSearch(seed.getSequence(), lp, activeSignatures, generatedSignatures, negativeCandidates);
+			tabuSearch(seed.getSequence(), lp, sriContext, activeSignatures, generatedSignatures, negativeCandidates);
 		}
 
 		if (negativeCandidates.isEmpty()) {
@@ -103,7 +105,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return true;
 	}
 
-	private ArrayList<TWETColumn> collectSeedColumnsBySortedPrefix(final LP lp) {
+	private ArrayList<TWETColumn> collectSeedColumnsBySortedPrefix(final LP lp, SriPricingContext sriContext) {
 		int limit = Math.max(0, config.heuristicPricingSeedColumns);
 		if (limit == 0) {
 			return new ArrayList<TWETColumn>();
@@ -111,7 +113,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(lp.getRestrictedColumnIds().size());
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
-			candidates.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp)));
+			double sriPenalty = sriContext.isActive() ? sriContext.penalty(sriContext.initialCounts(column.getSequence()))
+					: 0.0;
+			candidates.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty)));
 		}
 		Collections.sort(candidates, new Comparator<ScoredSeed>() {
 			@Override
@@ -144,9 +148,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return Integer.compare(a.column.getId(), b.column.getId());
 	}
 
-	private void tabuSearch(List<Integer> seed, LP lp, HashSet<SequenceSignature> activeSignatures,
-			HashSet<SequenceSignature> generatedSignatures, ArrayList<ScoredSequence> negativeCandidates) {
-		TabuRouteState state = new TabuRouteState(seed);
+	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
+			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
+			ArrayList<ScoredSequence> negativeCandidates) {
+		TabuRouteState state = new TabuRouteState(seed, sriContext);
 		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence)) {
 			return;
 		}
@@ -274,11 +279,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 				&& node.id == config.debugIgnorePricingOnlyArcsAtNode;
 	}
 
-	private double reducedCost(List<Integer> sequence, double cost, LP lp) {
+	private double reducedCost(List<Integer> sequence, double cost, LP lp, double sriPenalty) {
 		if (sequence.isEmpty() || Utility.isBigMValue(cost)) {
 			return Utility.big_M;
 		}
-		double reducedCost = cost - lp.getMachineDual();
+		double reducedCost = cost - lp.getMachineDual() + sriPenalty;
 		int prev = 0;
 		for (int job : sequence) {
 			reducedCost -= lp.getJobDual(job);
@@ -298,11 +303,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private PiecewiseLinearFunction[] backward;
 		private double cost;
 		private double currentReducedCost;
+		private final SriPricingContext sriContext;
+		private int[] sriCounts;
+		private double sriPenalty;
 
-		TabuRouteState(List<Integer> seed) {
+		TabuRouteState(List<Integer> seed, SriPricingContext sriContext) {
 			this.sequence = new ArrayList<Integer>(seed);
 			this.used = new boolean[data.n + 1];
 			this.tabuTenure = new int[data.n + 1];
+			this.sriContext = sriContext;
 			rebuild();
 		}
 
@@ -311,7 +320,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		double reducedCost(LP lp) {
-			currentReducedCost = HeuristicPricingEngine.this.reducedCost(sequence, cost, lp);
+			currentReducedCost = HeuristicPricingEngine.this.reducedCost(sequence, cost, lp, sriPenalty);
 			return currentReducedCost;
 		}
 
@@ -382,6 +391,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (removedJob >= 1 && removedJob <= data.n) {
 				used[removedJob] = false;
 			}
+			this.sriPenalty += sriContext.applyRemove(sriCounts, removedJob);
 			this.forward = new PiecewiseLinearFunction[sequence.size()];
 			this.backward = new PiecewiseLinearFunction[sequence.size()];
 			if (pos > 0) {
@@ -402,6 +412,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (job >= 1 && job <= data.n) {
 				used[job] = true;
 			}
+			this.sriPenalty += sriContext.applyAdd(sriCounts, job);
 			this.forward = new PiecewiseLinearFunction[sequence.size()];
 			this.backward = new PiecewiseLinearFunction[sequence.size()];
 			if (pos > 0) {
@@ -423,6 +434,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (addedJob >= 1 && addedJob <= data.n) {
 				used[addedJob] = true;
 			}
+			this.sriPenalty += sriContext.applyRemove(sriCounts, removedJob);
+			this.sriPenalty += sriContext.applyAdd(sriCounts, addedJob);
 			recomputeForwardFrom(pos);
 			recomputeBackwardDownTo(pos);
 			updateCost();
@@ -464,23 +477,24 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
 			// 2026-05-21: 对齐旧 VRP GCTabu，候选 move 的 reduced cost 只做局部增量更新。
 			// 机器真实成本变化由分段函数拼接给出；dual 部分只需要替换受影响的 job 和两三条弧。
-			return currentReducedCost + candidateCost - cost + lp.getJobDual(removedJob)
-					+ lp.getArcDual(prev, removedJob) + lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next);
+			return currentReducedCost + candidateCost - cost + sriContext.removeDelta(sriCounts, removedJob)
+					+ lp.getJobDual(removedJob) + lp.getArcDual(prev, removedJob)
+					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next);
 		}
 
 		private double reducedCostAfterAdd(int pos, int job, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() ? lp.getNode().sinkId() : sequence.get(pos).intValue();
-			return currentReducedCost + candidateCost - cost - lp.getJobDual(job) - lp.getArcDual(prev, job)
-					- lp.getArcDual(job, next) + lp.getArcDual(prev, next);
+			return currentReducedCost + candidateCost - cost + sriContext.addDelta(sriCounts, job) - lp.getJobDual(job)
+					- lp.getArcDual(prev, job) - lp.getArcDual(job, next) + lp.getArcDual(prev, next);
 		}
 
 		private double reducedCostAfterExchange(int pos, int job, int removedJob, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
-			return currentReducedCost + candidateCost - cost + lp.getJobDual(removedJob) - lp.getJobDual(job)
-					+ lp.getArcDual(prev, removedJob) + lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job)
-					- lp.getArcDual(job, next);
+			return currentReducedCost + candidateCost - cost + sriContext.exchangeDelta(sriCounts, removedJob, job)
+					+ lp.getJobDual(removedJob) - lp.getJobDual(job) + lp.getArcDual(prev, removedJob)
+					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job) - lp.getArcDual(job, next);
 		}
 
 		private boolean isRemoveCompatible(int pos, Node node) {
@@ -506,6 +520,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			this.forward = buildForwardProfile(sequence, true);
 			this.backward = buildBackwardProfile(sequence);
+			this.sriCounts = sriContext.initialCounts(sequence);
+			this.sriPenalty = sriContext.penalty(sriCounts);
 			updateCost();
 		}
 
@@ -617,6 +633,167 @@ public class HeuristicPricingEngine implements PricingEngine {
 		// 2026-05-21: 单 job 的 normalize 结果只和 job 自身有关，先缓存模板。
 		// merge3Segments 当前只会改中间 forward 函数；backward 只读复用即可，避免每次多复制一份。
 		return new SegmentProfile(cached.forward.copy(), cached.backward);
+	}
+
+	/**
+	 * 2026-06-13: 启发式 pricing 的 SRI reduced-cost 上下文。
+	 * 只在 partial-list ng-DSSR + subset-row cut active 时启用；否则所有 delta 为 0，保持旧启发式口径。
+	 */
+	private static final class SriPricingContext {
+		private static final int[] EMPTY_INDICES = new int[0];
+		private static final int[] EMPTY_COUNTS = new int[0];
+		private static final SriPricingContext INACTIVE = new SriPricingContext(new double[0], new int[0][]);
+
+		private final double[] penalties;
+		private final int[][] cutIndicesByJob;
+
+		private SriPricingContext(double[] penalties, int[][] cutIndicesByJob) {
+			this.penalties = penalties;
+			this.cutIndicesByJob = cutIndicesByJob;
+		}
+
+		static SriPricingContext from(LP lp, TWETBPCConfig config, int jobCount) {
+			List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
+			List<Double> duals = lp.getActiveSubsetRowPricingDuals();
+			if (!config.enableSubsetRowCutsForPartialDominance || !config.useGCNGBBStyleNgDssrPartialDominancePricing
+					|| cutIds.isEmpty()) {
+				return INACTIVE;
+			}
+			double[] penalties = new double[cutIds.size()];
+			int[][] scopes = new int[cutIds.size()][];
+			int[] jobOccurrences = new int[jobCount + 1];
+			for (int idx = 0; idx < cutIds.size(); idx++) {
+				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
+				List<Integer> jobs = cut.getScopeJobs();
+				scopes[idx] = new int[jobs.size()];
+				for (int pos = 0; pos < jobs.size(); pos++) {
+					int job = jobs.get(pos).intValue();
+					scopes[idx][pos] = job;
+					if (job >= 1 && job <= jobCount) {
+						jobOccurrences[job]++;
+					}
+				}
+				penalties[idx] = -duals.get(idx).doubleValue();
+			}
+
+			int[][] byJob = new int[jobCount + 1][];
+			for (int job = 1; job <= jobCount; job++) {
+				byJob[job] = new int[jobOccurrences[job]];
+				jobOccurrences[job] = 0;
+			}
+			for (int idx = 0; idx < scopes.length; idx++) {
+				for (int job : scopes[idx]) {
+					if (job >= 1 && job <= jobCount) {
+						byJob[job][jobOccurrences[job]++] = idx;
+					}
+				}
+			}
+			return new SriPricingContext(penalties, byJob);
+		}
+
+		boolean isActive() {
+			return penalties.length > 0;
+		}
+
+		int[] initialCounts(List<Integer> sequence) {
+			if (penalties.length == 0) {
+				return EMPTY_COUNTS;
+			}
+			int[] counts = new int[penalties.length];
+			for (int job : sequence) {
+				if (job >= 1 && job < cutIndicesByJob.length) {
+					for (int cutIndex : cutIndicesByJob[job]) {
+						counts[cutIndex]++;
+					}
+				}
+			}
+			return counts;
+		}
+
+		double penalty(int[] counts) {
+			double value = 0.0;
+			for (int idx = 0; idx < counts.length; idx++) {
+				if (counts[idx] >= 2) {
+					value += penalties[idx];
+				}
+			}
+			return value;
+		}
+
+		double removeDelta(int[] counts, int job) {
+			if (!hasJobCuts(job)) {
+				return 0.0;
+			}
+			double delta = 0.0;
+			for (int cutIndex : cutIndicesByJob[job]) {
+				delta += triggeredPenalty(cutIndex, counts[cutIndex] - 1) - triggeredPenalty(cutIndex, counts[cutIndex]);
+			}
+			return delta;
+		}
+
+		double addDelta(int[] counts, int job) {
+			if (!hasJobCuts(job)) {
+				return 0.0;
+			}
+			double delta = 0.0;
+			for (int cutIndex : cutIndicesByJob[job]) {
+				delta += triggeredPenalty(cutIndex, counts[cutIndex] + 1) - triggeredPenalty(cutIndex, counts[cutIndex]);
+			}
+			return delta;
+		}
+
+		double exchangeDelta(int[] counts, int removedJob, int addedJob) {
+			if (!hasJobCuts(removedJob) && !hasJobCuts(addedJob)) {
+				return 0.0;
+			}
+			double delta = removeDelta(counts, removedJob);
+			if (!hasJobCuts(addedJob)) {
+				return delta;
+			}
+			int[] removedCuts = hasJobCuts(removedJob) ? cutIndicesByJob[removedJob] : EMPTY_INDICES;
+			for (int cutIndex : cutIndicesByJob[addedJob]) {
+				int countAfterRemove = counts[cutIndex] - (contains(removedCuts, cutIndex) ? 1 : 0);
+				delta += triggeredPenalty(cutIndex, countAfterRemove + 1) - triggeredPenalty(cutIndex, countAfterRemove);
+			}
+			return delta;
+		}
+
+		double applyRemove(int[] counts, int job) {
+			double delta = removeDelta(counts, job);
+			if (hasJobCuts(job)) {
+				for (int cutIndex : cutIndicesByJob[job]) {
+					counts[cutIndex]--;
+				}
+			}
+			return delta;
+		}
+
+		double applyAdd(int[] counts, int job) {
+			double delta = addDelta(counts, job);
+			if (hasJobCuts(job)) {
+				for (int cutIndex : cutIndicesByJob[job]) {
+					counts[cutIndex]++;
+				}
+			}
+			return delta;
+		}
+
+		private boolean hasJobCuts(int job) {
+			return job >= 1 && job < cutIndicesByJob.length && cutIndicesByJob[job].length > 0;
+		}
+
+		private double triggeredPenalty(int cutIndex, int count) {
+			return count >= 2 ? penalties[cutIndex] : 0.0;
+		}
+
+		private static boolean contains(int[] values, int target) {
+			for (int value : values) {
+				if (value == target) {
+					return true;
+				}
+			}
+			return false;
+		}
 	}
 
 	private static final class SegmentProfile {

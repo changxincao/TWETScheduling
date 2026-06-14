@@ -356,3 +356,9 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 对 dominance 侧也重新判断。之前说“没有显式 memory-bucket dominance 一定偏弱”表述偏重。按当前扩展逻辑，只要 label 的当前 `jid` 不在某条 lm-SRI cut 的 memory set 中，扩展/prepend 到该点时对应 state 已经被清 0；因此在 `SriAwarePartialListDominanceStore` 的补偿条件里，`dominatorCounts[s]==1` 这类需要保守补偿的情况通常不会出现。换句话说，很多 memory-bucket 判断已经被 state 更新自然吸收了：不在 memory 的 bucket 上 state 为 0，不会阻碍比较。
 
 仍需要保留的谨慎点是：当前 dominance 补偿函数没有显式知道每条 cut 的 memory set，只看 residual state、scope、visited/reachable。如果 state 维护完全正确，它不会因为 `jid ∉ M_s` 而额外补偿；若后续引入更一般的 multiplier、非三元 SRI 或改变 backward state 语义，就需要重新检查这条推理。当前三元 lm-SRI 口径下，更准确的结论是：join 和 reduced-cost 计算已按 lm 语义实现；dominance 补偿大概率不会因为缺少显式 memory-bucket 判断而损失同等强度，但这还没有通过专门对照实验量化。
+
+### 2026-06-14 full-SRI 冗余计算复查
+
+顺带复查 full-SRI 的计算路径。LP 侧建 cut 行和动态加列仍需要对列序列调用 `SubsetRowCutEvaluator.coefficient()`，这是建模阶段按列计算系数，频率远低于 label 扩展；exact pricing 侧 full-SRI 使用 label 内的 `byte[] sriCounts` 做增量更新，扩展一个 job 时只检查该 job 关联的 cut，若从 1 到 2 才扣一次 dual。join 时只根据左右半路径的 count 和 scope visited 情况补偿重复触发或 crossing 新触发，没有恢复完整序列重扫。
+
+启发式侧 full-SRI 也保持计数增量：seed 排序和 route 初始化需要扫描一次得到初始 count/penalty；tabu remove/add/exchange 候选通过 `removeDelta/addDelta/exchangeDelta` 用 cut count 增量计算，接受 move 后只修改相关 cut 的 count，不重扫整条序列。因此当前 full-SRI 没有发现明显冗余计算热点。剩余常数开销主要是 exact label 扩展时复制 `byte[] sriCounts`，这是每个 label 必须携带独立 SRI state 的代价，除非改成结构共享或稀疏状态，否则不建议为了常数项复杂化实现。

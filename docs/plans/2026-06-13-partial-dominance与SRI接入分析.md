@@ -295,13 +295,13 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 
 ### 2026-06-14 010/30 lm-SRI 同配置对照
 
-按前一次 010/30 empty-ng SRI 的同一套参数重新测试，只把 `subsetRowCutMemoryMode` 从 full 改为 `nodeMemory`。配置仍为 partial-list ng-DSSR、`ngDssrInitialMode=empty`、`ngDssrRouteUpdateLimit=10`、每轮最多 10 条 SRI cut、单 node 不限制 active cut 总数、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree 和 midpoint probe。运行名为 `tmp-lmsri-010-emptyng-15m-20260614`。
+按前一次 010/30 empty-ng SRI 的同一套参数重新测试，只把 `subsetRowCutMemoryMode` 从 full 改为 `nodeMemory`。配置仍为 partial-list ng-DSSR、`ngDssrInitialMode=empty`、`ngDssrRouteUpdateLimit=10`、每轮最多 10 条 SRI cut、单 node 不限制 active cut 总数、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree 和 midpoint probe。此前 `tmp-lmsri-010-emptyng-15m-20260614` 的运行是在 lm-SRI 反向 state 和启发式增量修正前得到的，结论已作废；对应旧结果目录已删除，避免后续误用。
 
-这次运行没有闭合，且被手动停止；因为进程被强制终止，测试框架没有写出 summary CSV，输出目录为空。有效证据来自控制台 heartbeat。对照 full-SRI empty-ng baseline：full-SRI 在 `cuts=50` 时 root 闭合，结果为 `incumbent=bound=16222`、`valid=true`、总时间 `655.755s`、exact `623.492s/57 calls`、列池 `5379`。lm-SRI 则在运行过程中先到 `cuts=30`，随后继续补列；之后到 `cuts=50` 仍未闭合，并继续进入 `cuts=60`。中止前仍停留在 root pricing loop，列池约 `5290`，最后仍能偶尔生成很小负 reduced-cost 列，例如 `bestRC≈-0.3076`、`generated=1`，说明还没有完成 pricing closure。
+修正后重新计算，运行名为 `tmp-lmsri-010-emptyng-current-20260614`。这次 root 自然闭合，结果为 `incumbent=bound=16222`、`gap=0`、`valid=true`，总时间 `504.008s`，exact pricing `467.904s/86 calls/add232`，启发式 pricing `29.530s/138 calls/add5158`，LP `3.572s/138`，最终列池 `5458`，active SRI cut `80`。对照此前 full-SRI empty-ng baseline 的 `655.755s`、`cuts=50` root 闭合，当前 lm-SRI empty-ng 在 010 上反而更快，但需要更多 cut 轮和更多 exact calls。
 
-从单轮规模看，lm-SRI 没有出现 full-ng 那种百万级 forward 爆炸，多数 exact 轮的 `fCand` 在 `5万-15万`，后期也出现过 `15.8万` 左右；completion bound 仍剪掉大量候选。但这个优势没有转化为总时间优势，原因是 lm-SRI 使 cut/pricing 闭环更长：full-SRI empty 在 `cuts=50` 可以闭合，而 lm-SRI 到 `cuts=60` 仍需继续 pricing。当前结论是，在这套 010/30 empty-ng 配置下，node-memory SRI 不优于 full-SRI，至少不能作为默认替代。
+从单轮规模看，lm-SRI 修正后仍存在明显的双向不均衡。SRI active 后 root pi-window 关闭，`pricingHorizon=4342`，probe 将默认中点 `2185.5` 调到 `1140.845`，但完整 exact 扩展里 forward 仍远多于 backward；最终节点摘要中 `fw kept/dominated=9968/20457`，`bw kept/dominated=57/100`，completion bound 统计为 `fwPruned=195437,bwPruned=408`。这说明 midpoint probe 是开启的，但有限 probe 对 SRI active 后的大 horizon 和 completion-bound 剪枝结构估计仍偏粗，不能保证真实 exact pricing 两侧均衡。
 
-这个结果并不说明 lm-SRI 机制一定无效，而是说明当前第一版实现和配置下，它主要削弱了部分 cut 的全局强度，导致需要更多 cut/更多 pricing closure；同时 exact pricing 中为了保证 lm-SRI 顺序语义采用半路径/完整路径重扫，也会增加常数。后续如果继续研究 lm-SRI，应优先记录 active memory 大小、每条 cut 在当前正值列上的 full/lm 系数一致性、以及同 cut 数下的 root bound 提升幅度，而不是只看单轮 label 数。
+当前结论应改为：修正后的 node-memory SRI 在 010/30 empty-ng 配置下是有效的，并且本轮结果优于此前 full-SRI empty-ng 时间；但它的有效性仍依赖 cut/pricing 闭环，且双向标签不均衡问题没有消失。后续如果继续研究 lm-SRI，应优先记录 active memory 大小、每条 cut 的 full/lm 系数差异、同 cut 数下 root bound 提升，以及 probe 选点和完整 exact 标签比例的偏差。
 
 ### 2026-06-14 010/30 lm-SRI full ng-set 对照
 

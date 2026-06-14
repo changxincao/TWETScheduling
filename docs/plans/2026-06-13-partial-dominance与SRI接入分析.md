@@ -348,3 +348,11 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 效率上，exact join 已经不再为 lm-SRI 恢复完整序列重扫；真正保留的 `recoverJoinSequence()` 只发生在 reduced-cost bound 通过后，用于构造候选列和后续验证。启发式 pricing 中，每个 seed 仍需要一次线性扫描计算初始 SRI penalty；进入 tabu 后，remove/add/exchange 候选用 prefix/suffix state profile 做局部计算，避免每个候选 move 重扫整条序列。接受 move 后当前实现会重建该 route 的 SRI profile，复杂度为当前 route 长度乘 active cut 数；这比候选级重扫便宜很多，但仍是后续可优化点。
 
 当前仍不完整的是 dominance 侧而不是 join 侧。`SriAwarePartialListDominanceStore` 仍按 scope/visited/residual state 做旧 full-SRI 风格补偿，没有显式接入 memory set，也没有只在 `jid ∈ M_s` 的 bucket 上比较对应 lm-SRI state。因此它是保守或偏弱的 SRI-aware dominance，不是论文里的最强 memory-bucket dominance。这个限制会影响剪枝强度和性能判断，但不等同于 join 的 SRI reduced-cost 拼接错误。
+
+### 2026-06-14 lm-SRI 单一模式与 dominance 补偿再判断
+
+进一步按“同一轮只开启一种 SRI 口径”的约束清理代码。当前不再在 lm-SRI join 中兼容混入 full-SRI cut：full 模式直接走 `sriJoinShift()`，lm 模式直接走 `limitedMemorySriJoinShift()`；`sriLimitedMemoryByCut` 这种逐 cut 类型判断已删除。这个假设和当前配置一致，即 `subsetRowCutMemoryMode=full` 时 active cut 都是 full-SRI，`nodeMemory/lm/limitedMemory` 时新分离 cut 都是 lm-SRI，不再把两种 cut 混在同一 active 集合作为需要支持的主路径。
+
+对 dominance 侧也重新判断。之前说“没有显式 memory-bucket dominance 一定偏弱”表述偏重。按当前扩展逻辑，只要 label 的当前 `jid` 不在某条 lm-SRI cut 的 memory set 中，扩展/prepend 到该点时对应 state 已经被清 0；因此在 `SriAwarePartialListDominanceStore` 的补偿条件里，`dominatorCounts[s]==1` 这类需要保守补偿的情况通常不会出现。换句话说，很多 memory-bucket 判断已经被 state 更新自然吸收了：不在 memory 的 bucket 上 state 为 0，不会阻碍比较。
+
+仍需要保留的谨慎点是：当前 dominance 补偿函数没有显式知道每条 cut 的 memory set，只看 residual state、scope、visited/reachable。如果 state 维护完全正确，它不会因为 `jid ∉ M_s` 而额外补偿；若后续引入更一般的 multiplier、非三元 SRI 或改变 backward state 语义，就需要重新检查这条推理。当前三元 lm-SRI 口径下，更准确的结论是：join 和 reduced-cost 计算已按 lm 语义实现；dominance 补偿大概率不会因为缺少显式 memory-bucket 判断而损失同等强度，但这还没有通过专门对照实验量化。

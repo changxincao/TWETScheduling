@@ -260,7 +260,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ArrayList<int[]> sriScopes;
 	private ArrayList<Integer>[] sriCutsByJob;
 	private ArrayList<boolean[]> sriMemoryByCut;
-	private ArrayList<Boolean> sriLimitedMemoryByCut;
 	private boolean limitedMemorySriPricing;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
@@ -941,7 +940,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sriDuals = new ArrayList<Double>();
 		sriScopes = new ArrayList<int[]>();
 		sriMemoryByCut = new ArrayList<boolean[]>();
-		sriLimitedMemoryByCut = new ArrayList<Boolean>();
 		sriCutsByJob = new ArrayList[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			sriCutsByJob[job] = new ArrayList<Integer>();
@@ -981,7 +979,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			sriDuals.add(duals.get(idx));
 			sriScopes.add(scope);
 			sriMemoryByCut.add(memory);
-			sriLimitedMemoryByCut.add(Boolean.valueOf(limitedMemory));
 		}
 		sriPricingEnabled = !sriCutIds.isEmpty();
 	}
@@ -1003,14 +1000,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return 0.0;
 		}
 		double shift = 0.0;
-		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
-			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue() && !sriMemoryByCut.get(sriIndex)[job]) {
-				states[sriIndex] = 0;
+		if (limitedMemorySriPricing) {
+			for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
+				if (!sriMemoryByCut.get(sriIndex)[job]) {
+					states[sriIndex] = 0;
+				}
 			}
-		}
-		boolean firstVisit = !visitedBeforeExtension.contains(job);
-		for (int sriIndex : sriCutsByJob[job]) {
-			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()) {
+			for (int sriIndex : sriCutsByJob[job]) {
 				if (!sriMemoryByCut.get(sriIndex)[job]) {
 					continue;
 				}
@@ -1020,12 +1016,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					next -= 2;
 				}
 				states[sriIndex] = (byte) next;
-			} else if (firstVisit && states[sriIndex] < 2) {
-				int next = states[sriIndex] + 1;
-				if (states[sriIndex] == 1 && next == 2) {
-					shift -= sriDuals.get(sriIndex).doubleValue();
+			}
+		} else {
+			boolean firstVisit = !visitedBeforeExtension.contains(job);
+			for (int sriIndex : sriCutsByJob[job]) {
+				if (firstVisit && states[sriIndex] < 2) {
+					int next = states[sriIndex] + 1;
+					if (states[sriIndex] == 1 && next == 2) {
+						shift -= sriDuals.get(sriIndex).doubleValue();
+					}
+					states[sriIndex] = (byte) next;
 				}
-				states[sriIndex] = (byte) next;
 			}
 		}
 		return shift;
@@ -1040,14 +1041,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return 0.0;
 		}
 		double shift = 0.0;
-		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
-			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue() && !sriMemoryByCut.get(sriIndex)[job]) {
-				states[sriIndex] = 0;
+		if (limitedMemorySriPricing) {
+			for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
+				if (!sriMemoryByCut.get(sriIndex)[job]) {
+					states[sriIndex] = 0;
+				}
 			}
-		}
-		boolean firstVisit = !visitedBeforeExtension.contains(job);
-		for (int sriIndex : sriCutsByJob[job]) {
-			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()) {
+			for (int sriIndex : sriCutsByJob[job]) {
 				if (!sriMemoryByCut.get(sriIndex)[job]) {
 					continue;
 				}
@@ -1057,12 +1057,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					next -= 2;
 				}
 				states[sriIndex] = (byte) next;
-			} else if (firstVisit && states[sriIndex] < 2) {
-				int next = states[sriIndex] + 1;
-				if (states[sriIndex] == 1 && next == 2) {
-					shift -= sriDuals.get(sriIndex).doubleValue();
+			}
+		} else {
+			boolean firstVisit = !visitedBeforeExtension.contains(job);
+			for (int sriIndex : sriCutsByJob[job]) {
+				if (firstVisit && states[sriIndex] < 2) {
+					int next = states[sriIndex] + 1;
+					if (states[sriIndex] == 1 && next == 2) {
+						shift -= sriDuals.get(sriIndex).doubleValue();
+					}
+					states[sriIndex] = (byte) next;
 				}
-				states[sriIndex] = (byte) next;
 			}
 		}
 		return shift;
@@ -2458,20 +2463,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		double shift = 0.0;
 		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
-			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()) {
-				if (forward.sriCounts[sriIndex] + backward.sriCounts[sriIndex] >= 2) {
-					shift -= sriDuals.get(sriIndex).doubleValue();
-				}
-			} else {
-				int forwardCount = forward.sriCounts[sriIndex];
-				int backwardCount = backward.sriCounts[sriIndex];
-				double dual = sriDuals.get(sriIndex).doubleValue();
-				if (forwardCount > 1 && backwardCount > 1) {
-					shift += dual;
-				} else if (forwardCount == 1 && backwardCount == 1
-						&& sriHalvesContainDifferentScopeJobs(forward, backward, sriScopes.get(sriIndex))) {
-					shift -= dual;
-				}
+			if (forward.sriCounts[sriIndex] + backward.sriCounts[sriIndex] >= 2) {
+				shift -= sriDuals.get(sriIndex).doubleValue();
 			}
 		}
 		return shift;

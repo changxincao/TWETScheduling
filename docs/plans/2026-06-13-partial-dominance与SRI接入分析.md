@@ -340,3 +340,11 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 启发式定价也同步改掉了重复重扫。`HeuristicPricingEngine` 现在在构造当前 seed route 时维护每个位置的 lm-SRI prefix state / suffix state 和对应 penalty；remove/add/exchange 的 SRI 变化由 `prefix + changed middle + suffix + joinShift` 计算。每次实际接受 move 后会重建该 route 的 profile，后续候选 move 不再为每个候选序列调用完整 evaluator 重扫。seed 排序阶段仍需要对每条 seed 做一次线性扫描得到当前 SRI penalty，但已改用同一套 state 推进，而不是调用独立 evaluator 路径。
 
 这次修正后，lm-SRI 的 reduced-cost 口径更接近文档里的“沿当前搜索方向推进 state”语义，也去掉了 exact join 和启发式 move 热路径里的完整序列 SRI 重扫。验证方面，使用项目 CPLEX jar 对 `Basic/Common/HEU/Output/TWETBPC` focused 编译通过，仅有历史 deprecation warning。剩余需要实验确认的是性能收益和在 010/011 这类 30 任务算例上的 cut/pricing 行为变化。
+
+### 2026-06-14 lm-SRI join 与效率复查
+
+再次复查当前实现后，lm-SRI 的 LP 系数、exact pricing reduced cost 和启发式 reduced cost 口径是一致的。LP 建 cut 行和动态加列仍通过 `SubsetRowCutEvaluator.coefficient()` 计算真实列系数；exact pricing 中 forward label 维护 source 到当前点的 residual half-state，backward label 维护从当前点沿反向后缀到第一个 memory 断点前的 residual half-state。两侧 join 时只需要检查 `forwardState + backwardState >= 2`，满足则补一次 `-dual`，这与 full-SRI 的“左右各自计入 penalty 后在 join 处修正重复或新触发”是同一类结构，只是 full-SRI 依赖 distinct scope job，lm-SRI 依赖 crossing arc 两侧的 residual state。
+
+效率上，exact join 已经不再为 lm-SRI 恢复完整序列重扫；真正保留的 `recoverJoinSequence()` 只发生在 reduced-cost bound 通过后，用于构造候选列和后续验证。启发式 pricing 中，每个 seed 仍需要一次线性扫描计算初始 SRI penalty；进入 tabu 后，remove/add/exchange 候选用 prefix/suffix state profile 做局部计算，避免每个候选 move 重扫整条序列。接受 move 后当前实现会重建该 route 的 SRI profile，复杂度为当前 route 长度乘 active cut 数；这比候选级重扫便宜很多，但仍是后续可优化点。
+
+当前仍不完整的是 dominance 侧而不是 join 侧。`SriAwarePartialListDominanceStore` 仍按 scope/visited/residual state 做旧 full-SRI 风格补偿，没有显式接入 memory set，也没有只在 `jid ∈ M_s` 的 bucket 上比较对应 lm-SRI state。因此它是保守或偏弱的 SRI-aware dominance，不是论文里的最强 memory-bucket dominance。这个限制会影响剪枝强度和性能判断，但不等同于 join 的 SRI reduced-cost 拼接错误。

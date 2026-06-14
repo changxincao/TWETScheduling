@@ -302,3 +302,13 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 从单轮规模看，lm-SRI 没有出现 full-ng 那种百万级 forward 爆炸，多数 exact 轮的 `fCand` 在 `5万-15万`，后期也出现过 `15.8万` 左右；completion bound 仍剪掉大量候选。但这个优势没有转化为总时间优势，原因是 lm-SRI 使 cut/pricing 闭环更长：full-SRI empty 在 `cuts=50` 可以闭合，而 lm-SRI 到 `cuts=60` 仍需继续 pricing。当前结论是，在这套 010/30 empty-ng 配置下，node-memory SRI 不优于 full-SRI，至少不能作为默认替代。
 
 这个结果并不说明 lm-SRI 机制一定无效，而是说明当前第一版实现和配置下，它主要削弱了部分 cut 的全局强度，导致需要更多 cut/更多 pricing closure；同时 exact pricing 中为了保证 lm-SRI 顺序语义采用半路径/完整路径重扫，也会增加常数。后续如果继续研究 lm-SRI，应优先记录 active memory 大小、每条 cut 在当前正值列上的 full/lm 系数一致性、以及同 cut 数下的 root bound 提升幅度，而不是只看单轮 label 数。
+
+### 2026-06-14 010/30 lm-SRI full ng-set 对照
+
+按同一套 010/30 lm-SRI / nodeMemory 配置继续测试，只把初始 ng-set 从 `empty` 改成 `full`。也就是 `subsetRowCutMemoryMode=nodeMemory`、partial-list ng-DSSR、每轮最多 10 条 SRI cut、单 node 不限制 active cut 总数、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree 和 midpoint probe 都保持不变，仅设置 `ngDssrInitialMode=full`。运行名为 `tmp-lmsri-010-fullng-15m-20260614`，输出目录为 `test-results/bpc/tmp-lmsri-010-fullng-15m-20260614/`。
+
+本次 15 分钟外部限时超时，目录中写出了 `TIMEOUT_15M` 和 `console.log`，没有 summary CSV。root 无 cut 阶段仍能正常闭合，`pricingHorizon` 约为 `1300`。加入 lm-SRI 后，时间域同样放大到 `pricingHorizon=4342`，`tMid≈1140.845`。在 `cuts=10` 时，首次 cut 后 exact pricing 已达到 `fCand=617843`、`joinPairs=59349`、`generated=99`；到 `cuts=20` 时，首次 exact pricing 为 `fCand=1031943`、`joinPairs=195419`、`generated=320`；到 `cuts=30` 时，首次 exact pricing 为 `fCand=2324816`、`joinPairs=451605`、`generated=309`。
+
+后续进入 `cuts=40` 后规模进一步放大。典型一轮 exact pricing 达到 `fwPops=433358`、`fwKept=437364`、`fCand=5575277`、`fBuilt=5520933`、`cbFPruned=5021185`、`joinPairs=1054677`、`generated=251`；下一轮仍有 `fwPops=379238`、`fCand=4761257`、`joinPairs=981057`、`generated=4`。超时前还停留在 root 的 `cuts=40` 后续 exact forward labeling，最后 heartbeat 约为 `fwPops=70801`、`fwKept=94223`、`fCand=1599988`，说明并未进入节点闭合或写出最终结果。
+
+与前面的两个基线相比，结论比较明确。full-SRI + empty-ng 在 `655.755s` root 闭合到 `16222`；lm-SRI + empty-ng 到 `cuts=60` 仍未闭合，但单轮规模没有 full-ng 这么大；lm-SRI + full-ng 则在 15 分钟内卡在 root `cuts=40`，且单轮 forward candidate 和 join pair 已明显爆炸。由此看，node-memory SRI 没有改变 full-ng 的负面结论：`full` 初始 ng-set 让状态过于接近 elementary，削弱 dominance 合并，在 SRI active 后的大时间域下会显著放大 exact pricing。当前仍不建议把 full-ng 作为 SRI 或 lm-SRI 下的默认配置。

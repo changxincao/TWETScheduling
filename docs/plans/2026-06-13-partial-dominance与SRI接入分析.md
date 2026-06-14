@@ -282,3 +282,13 @@ pricing 侧只改 partial-list ng-DSSR 这条 SRI-aware 路径。full-SRI 仍走
 启发式 pricing 也补了 lm-SRI 口径。full-SRI 继续使用原 add/remove/exchange 增量；lm-SRI 因为 reset 依赖完整序列，候选 move 评估和实际 apply 时都重扫候选序列的 SRI penalty。这样避免写复杂且容易出错的局部 delta，代价只在 lm-SRI 显式开启时产生。
 
 验证方面，Serena 对修改文件未报 Java 诊断；`javac` 对 `TWETCutType/TWETCut/SubsetRowCutEvaluator` 的无 CPLEX 窄编译通过。全量 focused 编译仍因当前环境没有 `ilog.*` CPLEX jar 而失败，失败位置在既有 CPLEX 依赖导入，不是本次新增代码。当前还没有跑算例；下一步若要评估效果，应固定 partial-list ng-DSSR + SRI 配置，对比 `subsetRowCutMemoryMode=full/nodeMemory` 的 root bound、exact pricing 时间、DSSR rounds 和 active cut 数。
+
+### 2026-06-14 lm-SRI 实现正确性复查
+
+按“检验实现正确性”的要求，重新检查 lm-SRI 第一版。核心一致性现在主要由 `SubsetRowCutEvaluator` 保证：LP 建 cut 行、LP 动态加列、exact pricing 的 lm penalty、启发式 pricing 的 lm penalty 都走同一个序列扫描口径。对 full-SRI，evaluator 保持当前旧口径，即同一 job 重复访问只按 distinct visit 计一次；对 lm-SRI，evaluator 按 `alpha(C,M,p,r)` 扫描序列，遇到 memory 外 job 时清零 state，遇到 scope job 时累加 `p=1/2`，达到 1 后系数加 1 并扣回 state。这个行为用临时 Java harness 做了直接测试，覆盖了 full-SRI 两点触发、同 job 重复不触发、lm-SRI memory 内触发、离开 memory 清零、清零后再次触发、重复 scope occurrence 触发以及 penalty 符号，测试均通过。
+
+exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/backward 扩展不再尝试局部推导 cut delta，而是恢复当前半路径序列并重扫得到半路径 penalty 和残余 state；join 时恢复完整序列，用完整序列 lm penalty 减去左右半路径已计入的 penalty 作为 crossing 修正。因此只要 `recoverForwardSequence/recoverBackwardSequence/recoverJoinSequence` 的路径恢复口径正确，lm-SRI 的 reduced cost 与 LP 系数口径一致。full-SRI active 时仍走原来的 distinct-count 增量和 join 修正，不受 lm 分支影响。
+
+启发式 pricing 侧也按同一原则处理。full-SRI 继续走原来的 add/remove/exchange 局部增量；只要 active cut 中存在 lm-SRI，就把 SRI penalty 切到 sequence-based 模式，候选 move 和 apply 后都按完整候选序列重扫。这样会比局部增量慢，但避免了 memory reset 依赖中间节点时的错误 delta。
+
+本次还补做了带项目 `.classpath` 中 CPLEX jar 的 focused 编译：对 `TWETBPCConfig`、`TWETCut`、`SubsetRowCutEvaluator`、`SubsetRowCutGenerator`、`LP`、`GCNGBBStyleBidirectionalNgDssr`、`HeuristicPricingEngine` 和 `GCBBFullDomainComparisonTest` 编译到临时目录，结果通过。当前没有发现会导致 LP 列系数、pricing reduced cost 或启发式 penalty 口径不一致的明确错误。剩余风险是性能和强度问题：lm-SRI 下 exact pricing 为了保证顺序语义采用半路径/完整路径重扫，可能增加单 label 常数；`SriAwarePartialListDominanceStore` 的补偿仍沿用 scope-based 保守逻辑，没有做更精细的 memory-aware 补偿，因此更可能少剪 label，而不是错剪负列。

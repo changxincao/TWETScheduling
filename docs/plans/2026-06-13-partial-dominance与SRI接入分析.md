@@ -320,3 +320,13 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 本次 15 分钟限时超时，没有 summary CSV，目录中写出 `TIMEOUT_15M` 和约 1.08MB 的 `console.log`。运行停留在 root 的 `cuts=50` 后续 pricing loop。日志尾部显示列池从约 `5891` 继续增长到 `5961`，仍有 exact pricing 偶发生成负列，例如 `generated=33`、`bestRC≈-30.038`；随后又有多轮 `generated=0` 的证明轮。典型后期 exact pricing 规模为 `fCand≈26万-35万`、`fBoundSurvivors≈4.2万-5.8万`、`cbFPruned≈21万-29万`、`joinPairs≈700-1700`。最大 `fCand` 约 `346944`，远低于 full-ng 的数百万级，但仍需要反复 closure。
 
 这说明 nearestK8 相比 full-ng 确实缓解了单轮标签爆炸，但没有解决 lm-SRI 的核心问题。011 之前能在 `644.310s` root 闭合的那次并不是 lm-SRI nearestK8，而是 classical full-SRI，并且 separation 一轮直接加入 188 条 cut，root bound 被一次性抬到闭合；当前 lm-SRI 版本每轮最多 10 条 cut，且 node-memory 系数本身比 full-SRI 弱，导致需要更多 cut 轮和更多 pricing closure。换句话说，差异主要来自 cut 强度和 cut 加入策略，而不是 nearestK 本身。当前证据下，lm-SRI + nearestK8 在 011/30 上仍不优于 classical full-SRI 的一次性强 cut 路径。
+
+### 2026-06-14 lm-SRI 实现再次复核
+
+重新对照 `node_memory_lm_src_summary_formula_clean_final.pdf` 和当前代码后，需要把正确性结论拆开看。第一层，master 行系数和 pricing reduced cost 口径是统一的：`SubsetRowCutEvaluator` 负责 full/lm SRI 的列系数和 penalty；LP 建 cut 行、动态加列、exact pricing 的 lm penalty、启发式 pricing 的 lm penalty 都调用同一套扫描逻辑。lm-SRI 的扫描满足文档里的 `alpha(C,M,p,r)` 语义：离开 memory set 时 state 清零，访问 scope job 时累加 `p=1/2`，达到 1 后 coefficient 增 1 并扣回 state。`PC.solve()` 也已经按“pricing 闭合后 cut separation，加 cut 后重新解 LP 并重新 pricing”的闭环执行。focused `javac` 对当前 `Basic/Common/HEU/Output/TWETBPC` 路径编译通过。
+
+第二层，exact pricing 中 lm-SRI 的 reduced cost 计算是保守但口径正确的。lm-SRI active 时，forward/backward 扩展通过恢复半路径序列重扫得到半路径 penalty 和 residual state；join 时恢复完整序列，用完整序列 penalty 减去左右半路径已计入的 penalty，因此 crossing arc 两侧的 memory 连续、reset 和重复触发都按完整 route 语义处理。completion bound 则仍使用 `noSriFrontier/noSriMinReducedCost`，没有引入 lm-SRI 状态维度；这会变弱，但不会因为忽略未来非负 SRI penalty 而错误剪掉可能负 reduced-cost 的列。
+
+第三层，也就是当前还不能声称“完全等同论文 lm-SRI”的地方，是 partial-list dominance 的 SRI 补偿。文档强调 lm-SRI 的优势是只有当前 bucket 节点位于某条 cut 的 memory set 时，该 cut 的 state 才影响 dominance；当前实现没有把 `memoryJobs` 显式传入 `SriAwarePartialListDominanceStore`，补偿函数仍主要按 scope、visitedSet 和 residual state 做旧 full-SRI 风格的充分补偿。forward label 结束在 memory 外时 residual state 会自然清零，因此这一路通常不会错；但 backward label 的 residual state 是按后缀正向扫描后的末端 state，不能完全表达“当前 bucket 节点是否在 M 内”以及 prefix 进入该 suffix 时的 memory reset 语义。因此这部分目前更准确地说是：reduced cost 计算正确，dominance 补偿偏保守/不完整，尚未实现论文中 memory-bucket 级别的最强 dominance，也没有完成严格证明。
+
+由此当前结论为：lm-SRI 第一版可以作为实验实现继续跑，因为 LP 系数、定价 reduced cost、启发式 penalty 和 cut/pricing 循环没有发现口径不一致；但不应把它称为完整论文版 node-memory SRC。若后续要把 lm-SRI 作为可信默认，需要补两件事：一是把 active cut 的 memory set 带入 SRI-aware dominance，让只在 `jid ∈ M_s` 的 bucket 中比较该 cut state；二是重新推导 backward label 的 lm-SRI dominance state，避免把后缀末端 residual state 当作当前 bucket 的 memory state 使用。当前性能结论也应按这个限制理解：lm-SRI 慢或弱，既可能来自 cut 本身弱化，也可能来自 dominance 没有真正释放 node-memory 的优势。

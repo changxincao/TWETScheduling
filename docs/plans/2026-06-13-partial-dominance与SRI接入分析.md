@@ -292,3 +292,13 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 启发式 pricing 侧也按同一原则处理。full-SRI 继续走原来的 add/remove/exchange 局部增量；只要 active cut 中存在 lm-SRI，就把 SRI penalty 切到 sequence-based 模式，候选 move 和 apply 后都按完整候选序列重扫。这样会比局部增量慢，但避免了 memory reset 依赖中间节点时的错误 delta。
 
 本次还补做了带项目 `.classpath` 中 CPLEX jar 的 focused 编译：对 `TWETBPCConfig`、`TWETCut`、`SubsetRowCutEvaluator`、`SubsetRowCutGenerator`、`LP`、`GCNGBBStyleBidirectionalNgDssr`、`HeuristicPricingEngine` 和 `GCBBFullDomainComparisonTest` 编译到临时目录，结果通过。当前没有发现会导致 LP 列系数、pricing reduced cost 或启发式 penalty 口径不一致的明确错误。剩余风险是性能和强度问题：lm-SRI 下 exact pricing 为了保证顺序语义采用半路径/完整路径重扫，可能增加单 label 常数；`SriAwarePartialListDominanceStore` 的补偿仍沿用 scope-based 保守逻辑，没有做更精细的 memory-aware 补偿，因此更可能少剪 label，而不是错剪负列。
+
+### 2026-06-14 010/30 lm-SRI 同配置对照
+
+按前一次 010/30 empty-ng SRI 的同一套参数重新测试，只把 `subsetRowCutMemoryMode` 从 full 改为 `nodeMemory`。配置仍为 partial-list ng-DSSR、`ngDssrInitialMode=empty`、`ngDssrRouteUpdateLimit=10`、每轮最多 10 条 SRI cut、单 node 不限制 active cut 总数、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree 和 midpoint probe。运行名为 `tmp-lmsri-010-emptyng-15m-20260614`。
+
+这次运行没有闭合，且被手动停止；因为进程被强制终止，测试框架没有写出 summary CSV，输出目录为空。有效证据来自控制台 heartbeat。对照 full-SRI empty-ng baseline：full-SRI 在 `cuts=50` 时 root 闭合，结果为 `incumbent=bound=16222`、`valid=true`、总时间 `655.755s`、exact `623.492s/57 calls`、列池 `5379`。lm-SRI 则在运行过程中先到 `cuts=30`，随后继续补列；之后到 `cuts=50` 仍未闭合，并继续进入 `cuts=60`。中止前仍停留在 root pricing loop，列池约 `5290`，最后仍能偶尔生成很小负 reduced-cost 列，例如 `bestRC≈-0.3076`、`generated=1`，说明还没有完成 pricing closure。
+
+从单轮规模看，lm-SRI 没有出现 full-ng 那种百万级 forward 爆炸，多数 exact 轮的 `fCand` 在 `5万-15万`，后期也出现过 `15.8万` 左右；completion bound 仍剪掉大量候选。但这个优势没有转化为总时间优势，原因是 lm-SRI 使 cut/pricing 闭环更长：full-SRI empty 在 `cuts=50` 可以闭合，而 lm-SRI 到 `cuts=60` 仍需继续 pricing。当前结论是，在这套 010/30 empty-ng 配置下，node-memory SRI 不优于 full-SRI，至少不能作为默认替代。
+
+这个结果并不说明 lm-SRI 机制一定无效，而是说明当前第一版实现和配置下，它主要削弱了部分 cut 的全局强度，导致需要更多 cut/更多 pricing closure；同时 exact pricing 中为了保证 lm-SRI 顺序语义采用半路径/完整路径重扫，也会增加常数。后续如果继续研究 lm-SRI，应优先记录 active memory 大小、每条 cut 在当前正值列上的 full/lm 系数一致性、以及同 cut 数下的 root bound 提升幅度，而不是只看单轮 label 数。

@@ -364,3 +364,9 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 顺带复查 full-SRI 的计算路径。LP 侧建 cut 行和动态加列仍需要对列序列调用 `SubsetRowCutEvaluator.coefficient()`，这是建模阶段按列计算系数，频率远低于 label 扩展；exact pricing 侧 full-SRI 使用 label 内的 `byte[] sriCounts` 做增量更新，扩展一个 job 时只检查该 job 关联的 cut，若从 1 到 2 才扣一次 dual。join 时只根据左右半路径的 count 和 scope visited 情况补偿重复触发或 crossing 新触发，没有恢复完整序列重扫。
 
 启发式侧 full-SRI 也保持计数增量：seed 排序和 route 初始化需要扫描一次得到初始 count/penalty；tabu remove/add/exchange 候选通过 `removeDelta/addDelta/exchangeDelta` 用 cut count 增量计算，接受 move 后只修改相关 cut 的 count，不重扫整条序列。因此当前 full-SRI 没有发现明显冗余计算热点。剩余常数开销主要是 exact label 扩展时复制 `byte[] sriCounts`，这是每个 label 必须携带独立 SRI state 的代价，除非改成结构共享或稀疏状态，否则不建议为了常数项复杂化实现。
+
+### 2026-06-14 midpoint probe 高不均衡续探
+
+复查 ng-DSSR 的 probe 流程后确认：probe 在每一轮 DSSR relaxed pricing 的 `initialize()` 中运行，forward/backward 扩展调用的就是当前 `ngNeighborhoodByJob`，因此它使用的是该 DSSR 轮已经更新后的 ng-set；如果上一轮发现 non-elementary negative route 并更新了 ng-neighborhood，下一轮 probe 会自然看到新的 ng 口径。SRI 方面，probe 也走正式扩展函数，含 SRI frontier 会计入 penalty，completion-bound 剪枝仍和正式 exact pricing 一样使用 no-SRI 松弛口径。
+
+010/30 lm-SRI 的最后证明轮暴露出一个停止策略问题：默认最多 5 个 probe 候选时，queue 比例虽然从约 `4571` 降到 `71.6`，但仍明显不均衡，循环却因为 `maxCandidates=5` 停止。由此修改为：基础候选数仍保持原配置；当达到基础上限后，如果当前 score 仍超过 `bidirectionalMidpointProbeHighImbalanceRatio`（默认 10.0），且试探方向没有反转，则允许继续同方向试探，最多额外 `bidirectionalMidpointProbeHighImbalanceExtraCandidates` 个候选（默认 5）。一旦方向反转，仍按原逻辑在前后两个点之间额外试一次中点后停止；若 score 已降到阈值以下，则停止并从已有候选中选最优。这个改动只影响 probe 的候选搜索长度，不改 label 扩展、join、SRI reduced-cost 或 completion-bound 语义。

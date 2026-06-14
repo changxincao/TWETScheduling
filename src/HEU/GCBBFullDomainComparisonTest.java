@@ -323,6 +323,12 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeBracketOnDirectionChange = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeBracket",
 				Boolean.toString(config.bidirectionalMidpointProbeBracketOnDirectionChange)));
+		config.bidirectionalMidpointProbeHighImbalanceRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeHighImbalanceRatio",
+				Double.toString(config.bidirectionalMidpointProbeHighImbalanceRatio)));
+		config.bidirectionalMidpointProbeHighImbalanceExtraCandidates = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.midpointProbeHighImbalanceExtraCandidates",
+				config.bidirectionalMidpointProbeHighImbalanceExtraCandidates);
 		config.bidirectionalMidpointProbeReuseWithinNode = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinNode",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinNode)));

@@ -155,6 +155,10 @@ public class TWETBPCConfig {
 	public int bidirectionalMidpointProbeExtraCandidatesAfterThreshold = 1;
 	/** 2026-06-07: Tmid 试探方向反转时，是否在前后两个候选之间额外试一次中点后停止。 */
 	public boolean bidirectionalMidpointProbeBracketOnDirectionChange = true;
+	/** 2026-06-14: probe 到达基础候选数后，如果不均衡仍超过该倍数，则允许继续同方向试探。 */
+	public double bidirectionalMidpointProbeHighImbalanceRatio = 10.0;
+	/** 2026-06-14: 高不均衡续探的额外候选数上限，防止单个 pricing round 无界消耗时间。 */
+	public int bidirectionalMidpointProbeHighImbalanceExtraCandidates = 5;
 	/** 2026-06-07: 同一 BPC node 后续 pricing round 是否以上一轮选中的 Tmid 作为 probe reference。 */
 	public boolean bidirectionalMidpointProbeReuseWithinNode = false;
 	/**

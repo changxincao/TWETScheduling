@@ -312,3 +312,11 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 后续进入 `cuts=40` 后规模进一步放大。典型一轮 exact pricing 达到 `fwPops=433358`、`fwKept=437364`、`fCand=5575277`、`fBuilt=5520933`、`cbFPruned=5021185`、`joinPairs=1054677`、`generated=251`；下一轮仍有 `fwPops=379238`、`fCand=4761257`、`joinPairs=981057`、`generated=4`。超时前还停留在 root 的 `cuts=40` 后续 exact forward labeling，最后 heartbeat 约为 `fwPops=70801`、`fwKept=94223`、`fCand=1599988`，说明并未进入节点闭合或写出最终结果。
 
 与前面的两个基线相比，结论比较明确。full-SRI + empty-ng 在 `655.755s` root 闭合到 `16222`；lm-SRI + empty-ng 到 `cuts=60` 仍未闭合，但单轮规模没有 full-ng 这么大；lm-SRI + full-ng 则在 15 分钟内卡在 root `cuts=40`，且单轮 forward candidate 和 join pair 已明显爆炸。由此看，node-memory SRI 没有改变 full-ng 的负面结论：`full` 初始 ng-set 让状态过于接近 elementary，削弱 dominance 合并，在 SRI active 后的大时间域下会显著放大 exact pricing。当前仍不建议把 full-ng 作为 SRI 或 lm-SRI 下的默认配置。
+
+### 2026-06-14 011/30 lm-SRI nearestK8 对照
+
+针对“011 之前使用 SRI 是否已经求解完”的疑问，重新用三角化 `tmp-wet030_from040_011_2m` 测试 lm-SRI + nearest ng-set。配置为 `subsetRowCutMemoryMode=nodeMemory`、partial-list ng-DSSR、`ngDssrInitialMode=nearestK`、`ngDssrInitialSize=8`、`ngDssrRouteUpdateLimit=10`、每轮最多 10 条 SRI cut、单 node 不限制 active cut 总数、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree 和 midpoint probe。运行名为 `tmp-lmsri-011-nearestK8-15m-20260614`，输出目录为 `test-results/bpc/tmp-lmsri-011-nearestK8-15m-20260614/`。
+
+本次 15 分钟限时超时，没有 summary CSV，目录中写出 `TIMEOUT_15M` 和约 1.08MB 的 `console.log`。运行停留在 root 的 `cuts=50` 后续 pricing loop。日志尾部显示列池从约 `5891` 继续增长到 `5961`，仍有 exact pricing 偶发生成负列，例如 `generated=33`、`bestRC≈-30.038`；随后又有多轮 `generated=0` 的证明轮。典型后期 exact pricing 规模为 `fCand≈26万-35万`、`fBoundSurvivors≈4.2万-5.8万`、`cbFPruned≈21万-29万`、`joinPairs≈700-1700`。最大 `fCand` 约 `346944`，远低于 full-ng 的数百万级，但仍需要反复 closure。
+
+这说明 nearestK8 相比 full-ng 确实缓解了单轮标签爆炸，但没有解决 lm-SRI 的核心问题。011 之前能在 `644.310s` root 闭合的那次并不是 lm-SRI nearestK8，而是 classical full-SRI，并且 separation 一轮直接加入 188 条 cut，root bound 被一次性抬到闭合；当前 lm-SRI 版本每轮最多 10 条 cut，且 node-memory 系数本身比 full-SRI 弱，导致需要更多 cut 轮和更多 pricing closure。换句话说，差异主要来自 cut 强度和 cut 加入策略，而不是 nearestK 本身。当前证据下，lm-SRI + nearestK8 在 011/30 上仍不优于 classical full-SRI 的一次性强 cut 路径。

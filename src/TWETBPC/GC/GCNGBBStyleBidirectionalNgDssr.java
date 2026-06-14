@@ -1107,8 +1107,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double moveRatio = normalizedProbeMoveRatio();
 		double earlyStopRatio = normalizedProbeEarlyStopRatio();
 		double highImbalanceRatio = normalizedProbeHighImbalanceRatio();
-		int highImbalanceExtraCandidates = Math.max(0, config.bidirectionalMidpointProbeHighImbalanceExtraCandidates);
-		int candidateLimit = maxCandidates + highImbalanceExtraCandidates;
 		int extraAfterThreshold = Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold);
 		String scoreMode = config.bidirectionalMidpointProbeScore;
 		ArrayList<MidpointProbeResult> results = new ArrayList<MidpointProbeResult>();
@@ -1120,7 +1118,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int extraCandidatesRemaining = -1;
 		String stopReason = "maxCandidates";
 		int candidateCount = 0;
-		while (candidateCount < candidateLimit) {
+		while (true) {
 			String key = String.format("%.9f", candidate);
 			if (!seen.add(key)) {
 				stopReason = "duplicate";
@@ -1151,10 +1149,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				if (!shouldContinueHighImbalanceProbe(previous, result, scoreMode, highImbalanceRatio)) {
 					stopReason = Utility.compareLe(result.score(scoreMode), highImbalanceRatio)
 							? "highImbalanceResolved" : "maxCandidates";
-					break;
-				}
-				if (candidateCount >= candidateLimit) {
-					stopReason = "highImbalanceExtraLimit";
 					break;
 				}
 			}
@@ -1189,7 +1183,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			resetProbeAffectedStatistics();
 		}
 		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results, stopReason, maxCandidates,
-				candidateLimit);
+				results.size());
 		if (midpointProbeLabelsReadyForJoin) {
 			midpointProbeSummary += ", rank0LabelsReused=true";
 		}
@@ -1403,7 +1397,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private String formatMidpointProbeSummary(double reference, MidpointProbeResult best,
-			ArrayList<MidpointProbeResult> results, String stopReason, int maxCandidates, int candidateLimit) {
+			ArrayList<MidpointProbeResult> results, String stopReason, int maxCandidates, int candidateCount) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("ref=").append(reference)
 				.append("(").append(midpointProbeReferenceSource).append(")")
@@ -1416,12 +1410,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(", extraAfterThreshold=")
 				.append(Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold))
 				.append(", highImbalanceRatio=").append(normalizedProbeHighImbalanceRatio())
-				.append(", highImbalanceExtra=")
-				.append(Math.max(0, config.bidirectionalMidpointProbeHighImbalanceExtraCandidates))
 				.append(", bracket=").append(config.bidirectionalMidpointProbeBracketOnDirectionChange)
 				.append(", stop=").append(stopReason)
 				.append(", maxCandidates=").append(maxCandidates)
-				.append(", candidateLimit=").append(candidateLimit)
+				.append(", candidateCount=").append(candidateCount)
 				.append(", candidates=");
 		for (int i = 0; i < results.size(); i++) {
 			if (i > 0) {

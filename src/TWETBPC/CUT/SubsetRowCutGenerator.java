@@ -121,7 +121,13 @@ public class SubsetRowCutGenerator implements CutGenerator {
 			scope.add(Integer.valueOf(candidate.first));
 			scope.add(Integer.valueOf(candidate.second));
 			scope.add(Integer.valueOf(candidate.third));
-			cuts.add(new TWETCut(-1, TWETCutType.SUBSET_ROW, scope, 1.0, "SRI3"));
+			if (isNodeMemorySubsetRowCut()) {
+				cuts.add(new TWETCut(-1, TWETCutType.SUBSET_ROW, scope,
+						buildLimitedMemorySet(lp, solution, candidate.first, candidate.second, candidate.third), 0.5,
+						1.0, "lmSRI3"));
+			} else {
+				cuts.add(new TWETCut(-1, TWETCutType.SUBSET_ROW, scope, 1.0, "SRI3"));
+			}
 			appearances[candidate.first]++;
 			appearances[candidate.second]++;
 			appearances[candidate.third]++;
@@ -187,6 +193,65 @@ public class SubsetRowCutGenerator implements CutGenerator {
 			}
 		}
 		return value;
+	}
+
+	private boolean isNodeMemorySubsetRowCut() {
+		return "nodeMemory".equalsIgnoreCase(config.subsetRowCutMemoryMode)
+				|| "lm".equalsIgnoreCase(config.subsetRowCutMemoryMode)
+				|| "limitedMemory".equalsIgnoreCase(config.subsetRowCutMemoryMode);
+	}
+
+	private ArrayList<Integer> buildLimitedMemorySet(LP lp, TWETMasterSolution solution, int first, int second,
+			int third) {
+		boolean[] scope = new boolean[lp.getData().n + 1];
+		scope[first] = true;
+		scope[second] = true;
+		scope[third] = true;
+		HashSet<Integer> memory = new HashSet<Integer>();
+		memory.add(Integer.valueOf(first));
+		memory.add(Integer.valueOf(second));
+		memory.add(Integer.valueOf(third));
+		for (Map.Entry<Integer, Double> entry : solution.getColumnValues().entrySet()) {
+			if (!Utility.compareGt(entry.getValue().doubleValue(), VALUE_TOLERANCE)) {
+				continue;
+			}
+			TWETColumn column = lp.getPool().getColumn(entry.getKey().intValue());
+			if (!containsAtLeastTwoScopeJobs(column, first, second, third)) {
+				continue;
+			}
+			HashSet<Integer> aux = new HashSet<Integer>();
+			int stateUnits = 0;
+			for (int job : column.getSequence()) {
+				if (job >= 1 && job < scope.length && scope[job]) {
+					stateUnits++;
+				}
+				if (stateUnits >= 2) {
+					memory.addAll(aux);
+					aux.clear();
+					stateUnits -= 2;
+				}
+				if (stateUnits > 0 && job >= 1 && job <= lp.getData().n) {
+					aux.add(Integer.valueOf(job));
+				}
+			}
+		}
+		ArrayList<Integer> result = new ArrayList<Integer>(memory);
+		Collections.sort(result);
+		return result;
+	}
+
+	private boolean containsAtLeastTwoScopeJobs(TWETColumn column, int first, int second, int third) {
+		int count = 0;
+		if (column.containsJob(first)) {
+			count++;
+		}
+		if (column.containsJob(second)) {
+			count++;
+		}
+		if (column.containsJob(third)) {
+			count++;
+		}
+		return count >= 2;
 	}
 
 	private String tripleSignature(int first, int second, int third) {

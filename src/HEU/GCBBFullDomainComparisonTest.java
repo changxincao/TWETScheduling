@@ -250,6 +250,8 @@ public class GCBBFullDomainComparisonTest {
 		config.maxSubsetRowCutAppearancesPerJob = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.maxSubsetRowCutAppearancesPerJob",
 				config.maxSubsetRowCutAppearancesPerJob);
+		config.subsetRowCutMemoryMode = System.getProperty("twet.bpc.fullDomainCompare.subsetRowCutMemoryMode",
+				config.subsetRowCutMemoryMode);
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalJoinBestThresholdMode = System.getProperty(

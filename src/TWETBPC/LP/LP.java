@@ -12,6 +12,7 @@ import java.util.Map;
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
+import TWETBPC.CUT.SubsetRowCutEvaluator;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
@@ -421,27 +422,19 @@ public class LP {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
 			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
 				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
-				if (subsetRowCoefficient(column, cut) > 0.0) {
-					expr.addTerm(1.0, lambdaVars[idx]);
+				double coefficient = subsetRowCoefficient(column, cut);
+				if (coefficient > 0.0) {
+					expr.addTerm(coefficient, lambdaVars[idx]);
 				}
 			}
-			// 2026-06-13: 模仿旧 VRP 的三元 subset-row cut：包含 cut 中至少两个 job 的内部列系数为 1，行上界为 1。
+			// 2026-06-14: 普通 SRI 仍是 0/1 系数；limited-memory SRI 可能产生更大整数系数。
 			IloRange range = cplex.addLe(expr, cut.getRhs(), "subsetRow_" + cutId);
 			subsetRowCutRanges.put(Integer.valueOf(cutId), range);
 		}
 	}
 
 	private double subsetRowCoefficient(TWETColumn column, TWETCut cut) {
-		int count = 0;
-		for (int job : cut.getScopeJobs()) {
-			if (column.containsJob(job)) {
-				count++;
-				if (count >= 2) {
-					return 1.0;
-				}
-			}
-		}
-		return 0.0;
+		return SubsetRowCutEvaluator.coefficient(cut, column.getSequence(), data.n);
 	}
 
 	private void buildOutsourcingTariffConstraints() throws IloException {
@@ -550,8 +543,9 @@ public class LP {
 		}
 		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
 			TWETCut cut = cutPool.getCut(entry.getKey().intValue());
-			if (subsetRowCoefficient(column, cut) > 0.0) {
-				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			double coefficient = subsetRowCoefficient(column, cut);
+			if (coefficient > 0.0) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), coefficient));
 			}
 		}
 		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "lambda_" + columnId);

@@ -165,3 +165,120 @@ Tabu 搜索内部新增当前序列的 SRI count 和 penalty 缓存。remove/add
 用三角化 `tmp-wet030_from040_011_2m` 做 `partial-list ng-DSSR + SRI + full-ng + maxNodes=1 + stageHeartbeat` 诊断。cut 前 root pricing 很快，`pricingHorizon` 约为 `1021-1023`，第一轮 exact 约 `fCand=20724, joinPairs=54784, generated=878`，后续几轮逐步降到 `generated=0`。第一次 separation 加入 10 条 SRI 后，active cut 使 root pi-window 关闭，`pricingHorizon` 直接回到 `3500`。随后的 exact pricing 单轮规模明显放大：`cuts=10` 时出现 `fCand=306122, joinPairs=7148224, generated=370`，后续仍有 `fCand=243256, joinPairs=5649043` 等；`cuts=20/30/40/50` 后仍继续 cut-and-price，单轮 forward candidate 常在 `20万-80万+`，join pairs 可达 `1000万-3000万+`。在 `cuts=50` 后某轮 forward 已到 `fCand=1358323`，队列仍未清空，因此中止。
 
 当前结论是：full-ng 初始化本身不是这次慢的直接主因，真正放大来自 SRI active 后关闭 root pi-window，导致 pricing horizon 从约 1000 放大到 3500；同时不限制单 node SRI cut 总数会让 root 内持续追加 cut，每次 cut 后都要重新闭合更大的 pricing 问题。completion bound 仍在大量剪枝，但当前 no-SRI bound 对 SRI active 的大时间域只能保证安全，强度不够把证明规模压回 no-cut 水平。后续如果继续测试 unrestricted SRI，应优先加实时日志或限制运行时间；如果作为主要求解配置，仍需要比较 per-node cap、cut round cap、提高 violation 阈值或补 SRI-aware bound 的收益。
+
+### 2026-06-14 SRI 慢因正确性复查
+
+本轮重点检查 011/30 上 partial-list ng-DSSR + SRI 明显变慢是否可能来自实现错误，而不是算法代价。复查顺序为旧 VRP `SRCut` 口径、当前 `SubsetRowCutGenerator` 分离、LP cut 行、cut dual 暴露、pricing 中 SRI penalty、join 修正、single-point/partial-list dominance 以及 completion-bound 剪枝。
+
+旧 VRP 中 `m_max_sr_number=10` 表示每轮最多加入 10 条 subset-row cut，`m_max_appear_number=20` 表示同一 customer 在 active SRI cuts 中最多出现 20 次；没有看到默认“单 node 总 SRI 数最多 10 条”的限制。当前 TWET 代码已经回到这个口径：`maxSubsetRowCutsPerRound=10`，`maxSubsetRowCutAppearancesPerJob=20`，`maxSubsetRowCutsPerNode` 默认不限制。`SubsetRowCutGenerator` 会先统计 active SRI triples 和 active job appearance，跳过已存在三元组和达到 appearance 上限的 job；候选 lhs 按当前正值内部列计算，只有包含三元组中至少两个 job 的列计 1。这和 LP 中 `SUBSET_ROW` 行的列系数一致。
+
+LP 侧也没有发现符号或系数错误。active SRI cut 建成 `sum a_r lambda_r <= 1`，新列动态加入时补同一系数；CPLEX 对 minimization 下 `<=` 行给出的 dual 为非正，pricing 只读取负 dual。扩展时当某个 SRI 的 distinct visit count 从 1 变成 2，代码执行 `shift -= sriDual`，由于 `sriDual < 0`，这等价于增加正 penalty，方向正确。join 时如果左右两半都已触发同一 SRI，则加回一次 dual 去掉重复 penalty；如果左右两半各有一个不同 cut member，则补一次 `-dual` penalty。这与旧 VRP 的 reduced-cost 修正逻辑一致。
+
+completion bound 当前仍是保守简化：正式扩展、dominance 和 join 使用含 SRI penalty 的 frontier；completion-bound 函数和 scalar 剪枝使用 `noSriFrontier/noSriMinReducedCost`。这会忽略未来 SRI penalty，因此下界偏低、剪枝偏弱，但不会高估补全成本，也就不会因为 SRI 而错剪潜在负列。SRI active 后 root dual profitable window 关闭也是必要行为，因为原 pi-window 依赖 no-cut 口径；这会把 011 root 的 pricing horizon 从约 1000 放大到 3500，是当前慢的主要结构性来源之一。
+
+当前核查结论是：没有看到会导致错误 bound、错剪负列、错加 cut 或 reduced cost 反号的直接证据。011/30 的慢更符合“active SRI 后时间域变大 + no-SRI completion bound 偏弱 + 每轮 10 条 cut 后反复重新 pricing closure”的算法代价。后续优化应优先比较 cut 策略和 SRI-aware bound，而不是继续把当前慢现象先当作 correctness bug。
+
+### 2026-06-14 SRI 后 dominance 统计解释
+
+进一步对比 011/30 root 的无 SRI 与 SRI 日志后，可以把“是不是 SRI 让占优基本不发生”这个问题拆开看。当前证据不支持这个判断。无 SRI 路径最后一轮 exact pricing 中，`pricingHorizon` 约为 1027，`forwardExtend candidates≈5506`，completion bound 剪掉约 5193 个 forward 扩展，最终 forward label 为 `kept/dominated=258/31`，partial-list comparisons 约 5k。SRI node-cap10 路径中，active cut 关闭 root pi-window 后 `pricingHorizon=3500`，最后一轮 exact pricing 的 forward label 为 `kept/dominated=8005/16985`，partial-list 统计达到 `labels kept/rejected/deleted≈8025/17020/3345`、`comparisons≈1.68M`、`trims partial/full≈479k/20k`，DSSR rounds 达到 14。
+
+所以从比例上看，占优并没有消失，甚至 dominated label 的比例更高；真正的问题是基数被放大了。SRI active 后可扩展时间域从约 1000 放大到 3500，forward candidates 从几千级变成十几万到几十万级。completion bound 仍然在剪枝，部分日志中 forward 剪枝比例可达八成以上，但因为当前 bound 不带 SRI 状态，只能作为 no-SRI 松弛下界使用，强度不足以把幸存标签压回 no-cut 规模。partial trim 也大量发生，但 partial trim 很多时候只是裁掉 frontier 的一段区间，不会直接减少 label 个数；这些仍然存活的 label 继续参与后续 bucket 比较和 DSSR round。
+
+当前更准确的结论是：SRI 慢不是由于 dominance 失效，而是 active SRI cut 改变了定价闭合问题的规模。主要放大链条为：SRI cut 使 root pi-window 必须关闭，`pricingHorizon` 回到全局上界；no-SRI completion bound 保守偏弱；每轮 cut 后 dual 改变，必须重新 pricing closure；ng-DSSR 又会因为 non-elementary negative route 多而增加 round 数。后续优化优先级应放在 SRI-aware bound、cut 数/阈值策略、以及 active cut 下是否能构造安全 profitable window，而不是继续微调现有 partial-list dominance。
+### 2026-06-14 换 010/30 复测 SRI 后根节点表现
+
+按“不要再测 normal、保持前面 SRI 配置”的要求，换用三角化 `tmp-wet030_from040_010_2m` 重新跑 partial-list ng-DSSR + SRI。配置保持 ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree、midpoint probe、`ngDssrInitialMode=nearestK,size=8`、`ngDssrRouteUpdateLimit=10`，并打开 `enableSubsetRowCutsForPartialDominance=true`、每轮最多 10 条 SRI cut、单 node 不限制 active SRI cut 总数。
+
+本次运行没有跑到完整 summary。观察到 root 前半段无 cut pricing 很轻，`pricingHorizon` 约 `1300`，单轮 exact 的 `fCand` 多在 `6k-8k`，`generated` 从若干条逐步降到 0。随后 separation 加入到 `cuts=20`，active SRI 使 root pi-window 关闭，`pricingHorizon` 跳到 `4342`，选出的 `tMid` 约 `1140.84`。cut 后 exact pricing 明显变重，典型单轮 `fCand` 在 `10万-20万`，`cbFPruned` 在 `8万-17万`，forward kept 常在 `5k-10k`，backward pops 只有三四十；多数轮 `generated=0`，偶尔仍生成极少负列，例如 `-0.1538`、`-3.9167`、`-17.6667`，列池从约 `5260` 缓慢涨到 `5304` 左右。运行持续停留在 root 的 cut/pricing 闭合阶段，因此手动停止。
+
+这个换算例结果说明，011 上看到的 SRI 慢并非单个算例偶然。010 中 cut 数只有 20 时已经复现同样结构：SRI active 后时间域放大，no-SRI completion bound 仍大量剪枝但偏弱，exact pricing 需要反复证明或补少量负列。当前可以确认的不是 normal 的问题，也不是关闭 bound 后的现象，而是 SRI active 后 root price-and-cut 本身过重。后续如果继续推进 SRI，优先比较更保守的 cut 策略，例如限制总 cut 数、限制 cut rounds、提高 violation 阈值或补 SRI-aware bound；不要再用关闭 completion bound 的实验来判断 SRI 是否有效。
+
+### 2026-06-14 010/30 SRI 15 分钟限时完整运行
+
+按前一轮相同 SRI 配置继续执行三角化 `tmp-wet030_from040_010_2m`，外部限时 15 分钟。配置为 partial-list ng-DSSR、`nearestK8` 初始 ng-set、`ngDssrRouteUpdateLimit=10`、SRI 每轮最多 10 条且单 node 不限制总 active cut、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree、midpoint probe。运行目录为 `test-results/bpc/tmp-sri-010-allcomponents-15m-20260614/`。
+
+本次没有超时，最终在 root 节点直接闭合，状态为 `ROOT_PROCESSED`，`incumbent=bound=16222`，`gap=0`，`valid=true`，总时间 `892.782s`，已经非常接近 15 分钟上限。最终只处理 1 个节点，pricing 调用 178 次，列数和列池规模均为 5418，active SRI cut 数为 40。耗时结构非常集中：exact pricing `849.827s/65 calls/add155`，启发式 pricing `36.857s/113 calls/add5195`，master LP `2.994s/113`。因此本例的主要时间仍然花在 SRI active 后的 exact pricing closure，而不是主问题求解。
+
+日志中可以看到 root 前半段无 cut pricing 较轻；加入 SRI 后 root pi-window 关闭，`pricingHorizon` 回到 `4342`，最终使用的 `tMid≈1140.845`。在 `cuts=40` 附近，单轮 exact pricing 经常出现 `fCand` 数十万、`cbFPruned` 数十万、`generated=0`，偶尔只补 1-5 条很小负列，例如 `-0.1714`、`-1`、`-2`、`-5`。最后一轮 exact pricing 的统计为 `fw kept/dominated=19081/38613`、`bw kept/dominated=61/101`、`fCand=400410`、`fBuilt=395717`、`cbFPruned=338024`、`joinPairs=9913`、`generated=0`，随后 node summary 给出整数 incumbent 并闭合 root。
+
+当前结论需要比前一轮手动停止更准确：010/30 在这套 SRI 配置下不是完全跑不动，而是能在 15 分钟内靠 root SRI cut 闭合；但代价很重，且几乎全部来自 root 内 cut-and-price。和 011/30 的 `188` 条一次性 SRI cut root 闭合不同，010/30 在“每轮 10 条、逐轮闭合”的口径下最终用了 40 条 cut，耗时约 893 秒。由此说明 SRI 对 bound 的确有用，但当前实现作为默认主线仍偏重；后续优化重点仍是 cut 策略、SRI-aware bound 或 active cut 下的安全 profitable window，而不是继续怀疑 partial-list dominance 本身。
+
+### 2026-06-14 `generated=0` 日志层级语义
+
+本次 010/30 SRI 日志里多次出现 exact pricing `generated=0`，但这不能直接理解为“马上进入 cut separation”。当前 `PC.solve()` 的控制流是：先反复跑所有 pricing engine；只要任意 engine 加入了新列，就立刻重解 LP，并从第一个 pricing engine 重新开始。只有当一整轮 pricing loop 里所有 pricing engine 都没有新增列时，才会离开 pricing loop。离开后如果当前 LP 已经整数，就直接返回；如果不是整数，才进入 cut separation。若 separation 加入新 cut，则重解 LP，并重新进入 pricing loop。
+
+因此，单条 exact heartbeat 里的 `generated=0` 只表示该次 exact pricing 调用没有返回 elementary 负列；它不是节点级 pricing closure。对 ng-DSSR 来说，还要再区分一层：一次 exact pricing 调用内部可能有多轮 relaxed ng pricing，如果某轮没有 elementary 负列但发现了 non-elementary negative route，会更新 ng-set 并再次 initialize；这种情况下日志也可能看到 `generated=0`，但 exact engine 还没有真正结束。只有最终整轮 pricing engine 都不加列，且 cut separation 也不再加 cut，或者 LP 已经整数，节点才真正闭合。
+
+所以“近 20 次 exact 多数 `generated=0`，偶尔 1-2 条小负列”的含义是：当前 cut 集下定价已经接近收敛，但偶尔仍能找到很小负 reduced-cost 的列；每补一两条列都要重解 LP，并从启发式/精确定价重新开始。这个阶段看起来接近闭合，但不等于已经可以进入下一层 cut 或结束节点。010/30 最终正是经历了这类长尾后，在 `cuts=40` 的最后一轮 exact pricing 返回 `generated=0`，随后 LP 为整数，root 直接闭合。
+
+### 2026-06-14 SRI 下 ng-set 初始化策略判断
+
+当前 010/30 15 分钟运行使用的是 `ngDssrInitialMode=nearestK`、`ngDssrInitialSize=8`、`ngDssrRouteUpdateLimit=10`。代码中每次 exact pricing 调用都会重新初始化 ng-neighborhood：`empty` 只保留自身，`nearestK` 按对称 setup time/cost 距离补到目标大小，`dualPair/reducedCostPair` 按 setup cost、job dual 和 arc dual 的 pair reduced cost 预加负 pair，`full` 则每个 `N_i` 初始包含所有任务点。DSSR 内部发现 non-elementary negative route 后，会把重复 job 加入环内中间 job 的 ng-neighborhood；但这些更新当前只在本次 exact pricing 调用内生效，下一次 LP 重解后的 pricing 会重新从初始 ng-set 开始。
+
+从当前证据看，`nearestK8` 是一个合理的默认折中，但不能说已经最优。它的优点是稳定、便宜、和时间/距离结构一致，不依赖当前 dual，因此每次 LP 重解后不会因为 dual 抖动而大幅改变初始记忆。缺点是它不看 SRI cut、也不看当前 LP 正值列或历史 DSSR 发现的重复环；SRI active 后 dual 和定价目标已经明显改变，nearestK 仍只按静态相邻性初始化，可能无法提前排除那些由 cut dual 驱动的非基本负 route。
+
+`empty` 通常不适合作为 SRI 后的默认，因为它 relaxation 太松，单轮可能便宜，但更容易产生 non-elementary negative route，导致 DSSR 轮数增加。`full` 最接近 elementary，能减少重复 route 和 DSSR 更新，但初始记忆过强会让标签状态更接近原始 elementary，dominance 更难合并，未必能降低总时间；011 的 full-ng 诊断也显示真正慢因仍是 SRI active 后时间域从约 1000 放大到 3500，而不是 nearestK 本身。`dualPair/reducedCostPair` 之前在无 SRI 的浅层测试里没有改善 013，主要因为当前 pair 分数只看 setup cost、job dual 和 arc dual，不含列内时间函数、SRI 状态和未来 penalty，因此对 TWET 的实际重复环解释力有限。
+
+更值得试的方向有两个。第一是混合初始化：以 `nearestK` 作为基础，再补少量 dual/reduced-cost pair 或当前正值列/ALNS 列中的相邻 job pair。这样既保留静态局部性，又能把当前 LP 中高价值、容易形成重复环的关系提前放入 ng-set。第二是同一 node 内复用 DSSR 学到的 ng-neighborhood。SRI 后同一个 root 会反复“加少量列、重解 LP、重新 pricing”，branch 结构和大部分 cut 集在一段时间内不变，上一轮 exact pricing 发现的重复环很可能仍然有参考价值。把上一轮最终 ng-set 作为下一次 pricing 的 warm start，不会破坏正确性，因为更大的 ng-set 只是让 relaxed pricing 更接近 elementary；风险主要是过大的 ng-set 可能增加单轮标签数，所以应该配成可选实验，并记录 DSSR rounds、nonElementaryRoutes、label kept/dominated 和总 exact 时间。
+
+因此当前判断是：SRI 导致标签过多的主因仍是 active cut 关闭 root pi-window，使 `pricingHorizon` 大幅变大，并叠加 no-SRI completion bound 偏弱；调整 ng-set 初始化只能缓解 DSSR 重复 route 和部分长尾 exact calls，不会根治 SRI 后的大时间域问题。短期建议先保留 `nearestK8` 作为基线，再做 `K=4/6/8/12/16`、`nearestK+dualPair`、以及“同 node DSSR ng-set warm start”的受控对照，评价指标不只看 root 是否闭合，还要看 exact 总时间、DSSR 轮数、non-elementary route 数和最后几轮 generated 小负列的频率。
+
+补充查阅 ng-route / DSSR 文献后，这个判断基本符合通用做法。ng-route relaxation 的原始动机就是把每个客户的记忆集合初始化为其空间或成本意义上的近邻，用局部 elementarity 防止局部小环；后续 DSSR 思路则是在发现违反 elementarity/ng-feasibility 的负 route 后迭代增大相关 neighborhood。也就是说，`nearestK` 是合理基线，不是随便选的；但文献里的增强方向通常也是围绕“更有效的 neighborhood 选择”和“DSSR 迭代增广”，而不是把 neighborhood 一开始就设成 full。对当前 TWET + SRI 来说，更贴近问题结构的改法应是：保留 nearestK 的空间/时间局部性，再加入当前 dual 或历史非基本 route 暴露出的关键 pair；或者把同一 node 内上一轮 DSSR 学到的 ng-set 作为下一轮 warm start。这样更符合 DSSR 精神，也比 full-ng 更可能控制 label 数。
+
+### 2026-06-14 010/30 SRI full ng-set 对照
+
+按同一套 partial-list ng-DSSR + SRI 配置复测三角化 `tmp-wet030_from040_010_2m`，仅把初始 ng-set 从 `nearestK8` 改为 `full`，即每个任务的初始 ng-neighborhood 包含全部任务点。其余配置保持 ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree、midpoint probe、每轮最多 10 条 SRI cut、单 node 不限制 active SRI cut 总数。运行目录为 `test-results/bpc/tmp-sri-010-fullng-15m-20260614/`。
+
+本次 15 分钟限时未完成，状态文件为 `TIMEOUT_15M`，没有写出 summary CSV。日志显示无 cut 阶段仍能推进，随后 `cuts=10` 后继续补列并进入 `cuts=20`。真正卡住的是 `cuts=20` 后的一次 exact pricing：`pricingHorizon=4342.0`，`tMid=1140.8446593749998`，一直停在 forward labeling，未到 `forward.done`、`backward.done` 或 join。最后 heartbeat 为 `fwPops=570068`、`fwKept=580459`、`fwDom=85318`、`fCand=6886556`、`fBuilt=6783634`、`fBoundSurvivors=665776`、`cbFPruned=6117858`、`fwQueue=10390`，此时 `bwPops=0`、`joinPairs=0`、`generated=0`。
+
+这个结果比 `nearestK8` 明显差。相同 010/30 SRI 配置下，`nearestK8` 能在 `892.782s` 内 root 闭合到 `incumbent=bound=16222`，active SRI cut 为 40；而 `full` 在同样 15 分钟内连 root 的 `cuts=20` 后一轮 exact forward 都没有完成。由此可以更明确地判断：full ng-set 虽然减少了 relaxation 中允许重复的程度，但它让状态更接近 elementary pricing，dominance 合并更弱，不能解决 SRI active 后 root pi-window 关闭带来的大时间域问题，反而显著放大标签数量。后续不建议把 full ng-set 作为 SRI 默认；更合理的方向仍是保留 `nearestK` 基线，再测试 dual/历史 route pair 补充或同一 node 内 DSSR ng-set warm start。
+
+### 2026-06-14 010/30 SRI empty ng-set 对照
+
+继续按同一套 010/30 SRI 配置测试最小初始 ng-set，即 `ngDssrInitialMode=empty`，每个任务初始只记住自己。运行目录为 `test-results/bpc/tmp-sri-010-emptyng-15m-20260614/`，其余配置仍保持 partial-list ng-DSSR、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree、midpoint probe、每轮最多 10 条 SRI cut、单 node 不限制 active SRI cut 总数。
+
+本次 root 直接闭合，结果为 `incumbent=bound=16222`、`gap=0`、`valid=true`。总时间 `655.755s`，其中 exact pricing `623.492s/57 calls/add167`，启发式 pricing `26.517s/95 calls/add5144`，master LP `2.704s/95`；最终列池 `5379`，active SRI cut 数 `50`，pricing 总调用 `152`。最后一轮 exact pricing 的统计为 `fw kept/dominated=16382/28507`、`bw kept/dominated=56/93`、`fCand=350903`、`fBuilt=347806`、`cbFPruned=302918`、`joinPairs=7516`、`generated=0`。
+
+从过程看，empty 和 full 的行为完全不同。empty relaxation 更松，每一轮 exact pricing 都能正常 finalize，不会出现 full 那种单轮 forward 标签爆炸；但它更容易产生 non-elementary 或小负列，因此在 `cuts=20/30/40` 后有较长的“多数轮 generated=0，偶尔补 1-8 条小负列”的长尾。最终它仍然比 `nearestK8` 更快：`nearestK8` 为 `892.782s`、exact `849.827s/65 calls`、cut 数 40、列池 5418；empty 为 `655.755s`、exact `623.492s/57 calls`、cut 数 50、列池 5379。也就是说，在这个 010/30 SRI 算例上，最小 ng-set 反而是三种初始策略里当前最好的：`empty < nearestK8 << full`。
+
+这条结果说明 ng-set 的作用不是单调的。`full` 太接近 elementary，会削弱 dominance 合并并导致单轮爆炸；`nearestK8` 是稳健折中；`empty` 虽然 relaxation 最松、DSSR/长尾风险更高，但单轮标签规模更小，当前算例上总时间反而最短。因此后续不应简单认为“更大的 ng-set 一定更好”。SRI 场景下更值得系统比较 `empty`、`nearestK4/8/12/16` 和同 node warm start，而不是只围绕 full-ng 调整。
+
+### 2026-06-14 SRI 当前阶段总结
+
+当前可以形成一个比较明确的阶段结论：SRI cut 是有效的，但在当前 TWET + partial-list ng-DSSR 定价框架下代价很高。有效性体现在两个方面。第一，SRI 能显著抬高 root bound，部分 30 任务算例可以直接在 root 闭合，例如 011/30 不限制 root 内 SRI 总数时闭合到 `13511`，010/30 在逐轮每次最多 10 条 cut 的口径下闭合到 `16222`。第二，SRI 触发后 cut/pricing/重解 LP 的闭环是通的，启发式和 exact pricing 都已经按 active SRI dual 口径定价，当前没有看到明显的错误 bound 或错剪负列证据。
+
+主要问题是求解非常重。SRI active 后，root 的 dual profitable window 不能继续使用，`pricingHorizon` 会从无 cut 时约 `1000-1300` 放大到全局上界，例如 010/30 为 `4342`、011/30 为 `3500`。时间域放大后，forward candidate 从几千级变成十几万到几十万级；completion bound 仍能剪掉大量候选，常见剪枝比例很高，但因为当前使用的是 no-SRI 松弛 bound，没有 SRI 状态维度，强度不足以把 label 数压回无 cut 规模。于是 root 内每轮 SRI cut 后都要做很重的 exact pricing closure，表现为大量 `generated=0` 的证明轮次，夹杂少量很小负 reduced-cost 列，导致反复重解 LP。
+
+`generated=0` 的日志语义也应固定下来：它只说明某一次 exact pricing 调用或某一轮 ng-DSSR relaxed pricing 没有返回 elementary 负列，不等于整个 node 已经 pricing closure。只有一整轮所有 pricing engine 都不加列，且 cut separation 不再加 cut，或者 LP 已经整数，节点才真正闭合。因此“很多轮 `generated=0`，偶尔 1-2 条小负列”说明当前 cut 集下已经接近闭合，但还没有彻底闭合；每次偶发小负列都会使 LP 重解并重新开始 pricing loop。
+
+ng-set 的结论也更清楚了：在 SRI 场景下，初始 ng-set 大小不是单调越大越好。010/30 上 `empty` 用 `655.755s` root 闭合，`nearestK8` 用 `892.782s` root 闭合，`full` 15 分钟超时并卡在 forward labeling。`full` 太接近 elementary，会削弱 dominance 合并并使单轮标签爆炸；`empty` relaxation 更松，可能带来更多小负列长尾，但单轮标签规模小，当前反而更快。因此后续 ng-set 实验应系统比较 `empty`、不同 K 的 `nearestK`、以及同 node 内 DSSR warm start，而不是默认认为 full 更强。
+
+当前不建议把 SRI 作为默认主线配置。更合适的定位是：SRI 机制已经验证可用，可以作为加强 root bound 或诊断 cut-and-price 能力的实验组件；若要进入主线，需要继续优化三件事：一是更保守或更有选择性的 cut 策略，例如限制 cut rounds、限制总 cut 数、提高 violation 阈值或动态停止 separation；二是实现 SRI-aware completion bound 或 active-cut 下安全的 profitable window，避免 SRI 一开就把时间域完全放大；三是继续测试更合适的 ng-set 初始化和同 node warm start，降低 SRI active 后的 exact pricing 长尾。
+
+### 2026-06-14 node-memory / limited-memory SRI 新策略分析
+
+根据 `node_memory_lm_src_summary_formula_clean_final.pdf`，limited-memory SRI 的核心不是改变 violated cut 的识别方式，而是在识别出 classical full SRI 后，为该 cut 构造一个较小的 memory set `M`，使当前 LP 正值且贡献该 cut 的列在 lm-SRI 中保持相同系数，同时让其他潜在 route 在离开 `M` 后遗忘 cut state，降低 pricing 中 nonrobust cut 对 dominance 的破坏。
+
+具体到当前代码，cut 识别流程可以保持现状：仍枚举三元组 `C={i,j,k}`，仍用当前 master 正值内部列按 classical SRI 口径计算 violation，即一条列包含 `C` 中至少两个 job 时对左端贡献 1，超过阈值后生成候选 cut。变化发生在加入 cut 前：对每个 violated full SRI，先取当前 LP 正值且 full coefficient 大于 0 的内部列，沿其序列扫描构造 memory set。初始化 `M=C`；每条正值列扫描时维护 `state` 和 `Aux`。访问 `C` 中 job 时 `state += p`；当 `state >= 1` 时说明这段路径在 full SRI 中触发了一个 coefficient，为了让 lm-SRI 也触发，需要把该段累计过程中记录的 `Aux` 加入 `M`，然后 `state -= 1`、清空 `Aux`；若 `0 < state < 1`，则当前节点加入 `Aux`。对于当前的 3-SRI，`p=1/2`、`rhs=1`，这相当于保留正值列中两个 cut job 之间的必要中间节点。
+
+加入 master 时，不能再用当前 `subsetRowCoefficient(column, cut)` 的“包含两个 scope job 就返回 1”的逻辑。应改为按 `alpha(C,M,p,r)` 扫描列序列：初始化 `coeff=0,state=0`；遇到 `M` 外节点时 `state=0`；遇到 `C` 中节点时 `state += p`；若 `state >= 1`，则 `coeff++` 且 `state -= 1`。这个系数用于建 LP 行、动态加列、以及候选列入池时的 cut 行系数。若 `M=V+`，该系数退化为 classical SRI；若 `M` 较小，它对非当前正值 route 可能更弱。当前 TWET 列通常是 elementary，因此三元 `p=1/2` 时系数仍多为 0/1，但实现上应保留整数系数，避免后续 ng 或重复 job 口径扩展时埋假设。
+
+pricing 中也要从 classical SRI count 改为 lm-SRI state。当前 `GCNGBBStyleBidirectionalNgDssr` 里保存的是每条 SRI 的 `sriCounts`，扩展到 cut scope job 时从 1 到 2 才加一次 `-dual` penalty；这对应 full-memory / distinct-visit SRI。lm-SRI 应改为每条 active cut 保存离散 state。对 3-SRI 可以用 byte 表示 0 或 1，语义为 `state = 0` 或 `state = 1/2`；扩展到 job `j` 时，若 `j` 不在该 cut 的 `M` 中，则该 cut 的 state 先清 0；若 `j` 在 `C` 中，则 state 增加 1 个 half；达到 2 个 half 时给 reduced cost 加 `-dual`，并把 state 减回 0。更通用地可以保存 `stateUnits`，其中 `p=1/2` 时阈值为 2。forward/backward 扩展都应使用相同的扫描更新；join 时需要根据左右半路径 state 和拼接顺序重新处理跨拼接点是否触发 lm-SRI penalty，不能沿用 classical SRI 中“左右各有一个不同 scope job 就补一次”的逻辑。
+
+dominance 的变化是 lm-SRI 最有价值的地方。文档中的原则是：只有当 label 当前所在节点属于某条 lm-SRI 的 memory set 时，这条 cut 的 state 才会影响该 bucket 的 dominance；如果当前节点在 `M` 外，该 cut state 已经被遗忘，默认归零，不应让它继续削弱 dominance。放到当前实现里，`sriStateKey` 和 `SriAwarePartialListDominanceStore` 不应再对所有 active cut 无条件比较 state。更合适的做法是，构造 label 的 dominance key 或 state key 时，只包含那些 `M_s` 包含当前 `jid` 的 active lm-SRI；对 `jid` 不在 `M_s` 的 cut，该 label 的 state 应为 0 且不参与补偿项。这样在大量非 memory 节点的 bucket 中，lm-SRI 不再破坏 dominance，正是它比 classical SRI 更轻的原因。
+
+实现组织上，不建议把 lm-SRI 直接硬塞进现有 classical SRI 分支。当前 `TWETCut`、`LP.subsetRowCoefficient()`、`SubsetRowCutGenerator`、`GCNGBBStyleBidirectionalNgDssr`、`SriAwarePartialListDominanceStore`、`HeuristicPricingEngine.SriPricingContext` 都已经有较多 classical SRI 逻辑。为了保持现有代码不变并便于对照，建议新增一个配置项，例如 `subsetRowCutMemoryMode=FULL|NODE_MEMORY`，默认仍为 `FULL`；`TWETCut` 增加可选的 `memoryJobs` 和 `multiplier` 元数据，或新增轻量 `SubsetRowCutData` 工具类统一读取 scope/memory/p/rhs；`SubsetRowCutGenerator` 在 `NODE_MEMORY` 下生成带 memory 的 cut；LP 和 pricing 统一通过一个 `SubsetRowCutEvaluator` 计算列系数和扩展 state。这样 classical SRI 与 lm-SRI 可以共用 cut 分离入口，但系数计算和 pricing state 由策略分派，后续实验也能直接横向比较。
+
+当前暂不建议第一步就做 rollback、route enumeration 或 SRI-aware completion bound。可以先按用户要求只改 cut 加入和 pricing：识别 full SRI、构造 memory、以 lm-SRI 系数加入 master、pricing 扩展和 dominance 使用 lm state。completion bound 仍可沿用 no-SRI 松弛 bound，安全但偏弱；如果 lm-SRI 后 pricing 已明显变轻，再考虑补更强的 lm-SRI-aware bound。风险点主要有两个：一是双向 join 下 lm-SRI state 的合并必须严格按完整 route 扫描语义验证；二是启发式 pricing 当前基于 add/remove/exchange 的局部 SRI delta，lm-SRI 的 reset 依赖序列中间节点，局部增量不再容易安全维护，初版更适合在 lm-SRI active 时关闭启发式 SRI delta 或每次 move 后重扫序列计算 lm-SRI penalty，以保证正确优先。
+
+### 2026-06-14 lm-SRI cut 第一版实现
+
+本轮按“只做 lm-SRI cut，不动 bound/rollback”的范围完成第一版实现。默认行为保持 classical full-SRI：新增 `subsetRowCutMemoryMode`，默认 `full`；只有显式传 `nodeMemory`、`lm` 或 `limitedMemory` 时，`SubsetRowCutGenerator` 才会在识别 violated 三元 full SRI 后构造 memory set 并生成 `lmSRI3` cut。cut 识别仍按当前 LP 正值内部列的 full-SRI violation 做，不改变 separation 入口。
+
+代码上给 `TWETCut` 增加了可选 `memoryJobs` 和 `multiplier` 元数据；新增 `SubsetRowCutEvaluator` 统一计算 full/lm SRI 的列系数与 pricing penalty。LP 建 cut 行和动态加列时不再把正系数硬写成 1，而是调用 evaluator 得到真实整数系数。对当前 elementary 列，full SRI 基本仍是 0/1；lm-SRI 则按 `alpha(C,M,p,r)` 扫描序列，离开 memory 后 state 清零。
+
+pricing 侧只改 partial-list ng-DSSR 这条 SRI-aware 路径。full-SRI 仍走原来的 distinct count 增量；lm-SRI active 时，label 扩展对当前半路径序列重扫得到 SRI penalty 和残余 state。这样做比局部自动机慢，但能保证 backward prepend 的顺序语义正确。join 阶段不再沿用 full-SRI 的“左右各一个 scope job 就补 penalty”公式，而是恢复完整序列后重扫 lm penalty，再减去左右半路径已经计入的 penalty，保证 crossing arc 两侧 memory 连续或清零都按完整 route 处理。completion bound 仍使用 no-SRI frontier，不增加 SRI 状态维度。
+
+启发式 pricing 也补了 lm-SRI 口径。full-SRI 继续使用原 add/remove/exchange 增量；lm-SRI 因为 reset 依赖完整序列，候选 move 评估和实际 apply 时都重扫候选序列的 SRI penalty。这样避免写复杂且容易出错的局部 delta，代价只在 lm-SRI 显式开启时产生。
+
+验证方面，Serena 对修改文件未报 Java 诊断；`javac` 对 `TWETCutType/TWETCut/SubsetRowCutEvaluator` 的无 CPLEX 窄编译通过。全量 focused 编译仍因当前环境没有 `ilog.*` CPLEX jar 而失败，失败位置在既有 CPLEX 依赖导入，不是本次新增代码。当前还没有跑算例；下一步若要评估效果，应固定 partial-list ng-DSSR + SRI 配置，对比 `subsetRowCutMemoryMode=full/nodeMemory` 的 root bound、exact pricing 时间、DSSR rounds 和 active cut 数。

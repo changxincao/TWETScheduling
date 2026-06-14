@@ -11,6 +11,7 @@ import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.CUT.SubsetRowCutEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -113,8 +114,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(lp.getRestrictedColumnIds().size());
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
-			double sriPenalty = sriContext.isActive() ? sriContext.penalty(sriContext.initialCounts(column.getSequence()))
-					: 0.0;
+			double sriPenalty = sriContext.isActive() ? sriContext.penalty(column.getSequence()) : 0.0;
 			candidates.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty)));
 		}
 		Collections.sort(candidates, new Comparator<ScoredSeed>() {
@@ -391,7 +391,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (removedJob >= 1 && removedJob <= data.n) {
 				used[removedJob] = false;
 			}
-			this.sriPenalty += sriContext.applyRemove(sriCounts, removedJob);
+			if (sriContext.isSequenceBased()) {
+				this.sriCounts = sriContext.initialCounts(sequence);
+				this.sriPenalty = sriContext.penalty(sequence);
+			} else {
+				this.sriPenalty += sriContext.applyRemove(sriCounts, removedJob);
+			}
 			this.forward = new PiecewiseLinearFunction[sequence.size()];
 			this.backward = new PiecewiseLinearFunction[sequence.size()];
 			if (pos > 0) {
@@ -412,7 +417,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (job >= 1 && job <= data.n) {
 				used[job] = true;
 			}
-			this.sriPenalty += sriContext.applyAdd(sriCounts, job);
+			if (sriContext.isSequenceBased()) {
+				this.sriCounts = sriContext.initialCounts(sequence);
+				this.sriPenalty = sriContext.penalty(sequence);
+			} else {
+				this.sriPenalty += sriContext.applyAdd(sriCounts, job);
+			}
 			this.forward = new PiecewiseLinearFunction[sequence.size()];
 			this.backward = new PiecewiseLinearFunction[sequence.size()];
 			if (pos > 0) {
@@ -434,8 +444,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (addedJob >= 1 && addedJob <= data.n) {
 				used[addedJob] = true;
 			}
-			this.sriPenalty += sriContext.applyRemove(sriCounts, removedJob);
-			this.sriPenalty += sriContext.applyAdd(sriCounts, addedJob);
+			if (sriContext.isSequenceBased()) {
+				this.sriCounts = sriContext.initialCounts(sequence);
+				this.sriPenalty = sriContext.penalty(sequence);
+			} else {
+				this.sriPenalty += sriContext.applyRemove(sriCounts, removedJob);
+				this.sriPenalty += sriContext.applyAdd(sriCounts, addedJob);
+			}
 			recomputeForwardFrom(pos);
 			recomputeBackwardDownTo(pos);
 			updateCost();
@@ -477,7 +492,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
 			// 2026-05-21: 对齐旧 VRP GCTabu，候选 move 的 reduced cost 只做局部增量更新。
 			// 机器真实成本变化由分段函数拼接给出；dual 部分只需要替换受影响的 job 和两三条弧。
-			return currentReducedCost + candidateCost - cost + sriContext.removeDelta(sriCounts, removedJob)
+			return currentReducedCost + candidateCost - cost + sriRemoveDelta(pos)
 					+ lp.getJobDual(removedJob) + lp.getArcDual(prev, removedJob)
 					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next);
 		}
@@ -485,16 +500,43 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double reducedCostAfterAdd(int pos, int job, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() ? lp.getNode().sinkId() : sequence.get(pos).intValue();
-			return currentReducedCost + candidateCost - cost + sriContext.addDelta(sriCounts, job) - lp.getJobDual(job)
+			return currentReducedCost + candidateCost - cost + sriAddDelta(pos, job) - lp.getJobDual(job)
 					- lp.getArcDual(prev, job) - lp.getArcDual(job, next) + lp.getArcDual(prev, next);
 		}
 
 		private double reducedCostAfterExchange(int pos, int job, int removedJob, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
-			return currentReducedCost + candidateCost - cost + sriContext.exchangeDelta(sriCounts, removedJob, job)
+			return currentReducedCost + candidateCost - cost + sriExchangeDelta(pos, removedJob, job)
 					+ lp.getJobDual(removedJob) - lp.getJobDual(job) + lp.getArcDual(prev, removedJob)
 					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job) - lp.getArcDual(job, next);
+		}
+
+		private double sriRemoveDelta(int pos) {
+			if (!sriContext.isSequenceBased()) {
+				return sriContext.removeDelta(sriCounts, sequence.get(pos).intValue());
+			}
+			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
+			candidate.remove(pos);
+			return sriContext.penalty(candidate) - sriPenalty;
+		}
+
+		private double sriAddDelta(int pos, int job) {
+			if (!sriContext.isSequenceBased()) {
+				return sriContext.addDelta(sriCounts, job);
+			}
+			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
+			candidate.add(pos, Integer.valueOf(job));
+			return sriContext.penalty(candidate) - sriPenalty;
+		}
+
+		private double sriExchangeDelta(int pos, int removedJob, int addedJob) {
+			if (!sriContext.isSequenceBased()) {
+				return sriContext.exchangeDelta(sriCounts, removedJob, addedJob);
+			}
+			ArrayList<Integer> candidate = new ArrayList<Integer>(sequence);
+			candidate.set(pos, Integer.valueOf(addedJob));
+			return sriContext.penalty(candidate) - sriPenalty;
 		}
 
 		private boolean isRemoveCompatible(int pos, Node node) {
@@ -521,7 +563,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			this.forward = buildForwardProfile(sequence, true);
 			this.backward = buildBackwardProfile(sequence);
 			this.sriCounts = sriContext.initialCounts(sequence);
-			this.sriPenalty = sriContext.penalty(sriCounts);
+			this.sriPenalty = sriContext.penalty(sequence);
 			updateCost();
 		}
 
@@ -642,14 +684,24 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private static final class SriPricingContext {
 		private static final int[] EMPTY_INDICES = new int[0];
 		private static final int[] EMPTY_COUNTS = new int[0];
-		private static final SriPricingContext INACTIVE = new SriPricingContext(new double[0], new int[0][]);
+		private static final SriPricingContext INACTIVE = new SriPricingContext(new double[0], new int[0][],
+				new ArrayList<TWETCut>(), new ArrayList<Double>(), 0, false);
 
 		private final double[] penalties;
 		private final int[][] cutIndicesByJob;
+		private final ArrayList<TWETCut> cuts;
+		private final ArrayList<Double> duals;
+		private final int jobCount;
+		private final boolean sequenceBased;
 
-		private SriPricingContext(double[] penalties, int[][] cutIndicesByJob) {
+		private SriPricingContext(double[] penalties, int[][] cutIndicesByJob, ArrayList<TWETCut> cuts,
+				ArrayList<Double> duals, int jobCount, boolean sequenceBased) {
 			this.penalties = penalties;
 			this.cutIndicesByJob = cutIndicesByJob;
+			this.cuts = cuts;
+			this.duals = duals;
+			this.jobCount = jobCount;
+			this.sequenceBased = sequenceBased;
 		}
 
 		static SriPricingContext from(LP lp, TWETBPCConfig config, int jobCount) {
@@ -661,9 +713,17 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			double[] penalties = new double[cutIds.size()];
 			int[][] scopes = new int[cutIds.size()][];
+			ArrayList<TWETCut> cuts = new ArrayList<TWETCut>();
+			ArrayList<Double> activeDuals = new ArrayList<Double>();
+			boolean sequenceBased = false;
 			int[] jobOccurrences = new int[jobCount + 1];
 			for (int idx = 0; idx < cutIds.size(); idx++) {
 				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
+				cuts.add(cut);
+				activeDuals.add(duals.get(idx));
+				if (cut.hasMemoryJobs()) {
+					sequenceBased = true;
+				}
 				List<Integer> jobs = cut.getScopeJobs();
 				scopes[idx] = new int[jobs.size()];
 				for (int pos = 0; pos < jobs.size(); pos++) {
@@ -688,15 +748,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 					}
 				}
 			}
-			return new SriPricingContext(penalties, byJob);
+			return new SriPricingContext(penalties, byJob, cuts, activeDuals, jobCount, sequenceBased);
 		}
 
 		boolean isActive() {
 			return penalties.length > 0;
 		}
 
+		boolean isSequenceBased() {
+			return sequenceBased;
+		}
+
 		int[] initialCounts(List<Integer> sequence) {
-			if (penalties.length == 0) {
+			if (penalties.length == 0 || sequenceBased) {
 				return EMPTY_COUNTS;
 			}
 			int[] counts = new int[penalties.length];
@@ -708,6 +772,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 				}
 			}
 			return counts;
+		}
+
+		double penalty(List<Integer> sequence) {
+			if (penalties.length == 0) {
+				return 0.0;
+			}
+			if (sequenceBased) {
+				return SubsetRowCutEvaluator.penalty(cuts, duals, sequence, jobCount);
+			}
+			return penalty(initialCounts(sequence));
 		}
 
 		double penalty(int[] counts) {

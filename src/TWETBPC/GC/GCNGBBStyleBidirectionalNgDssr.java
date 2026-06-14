@@ -24,7 +24,6 @@ import Common.PiecewiseLinearFunction.TrimResult;
 import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
-import TWETBPC.CUT.SubsetRowCutEvaluator;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -995,55 +994,78 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return counts == null || counts.length == 0 ? new byte[0] : counts.clone();
 	}
 
-	private double applySriExtensionShift(byte[] counts, PackedBitSet visitedBeforeExtension, int job) {
-		if (!sriPricingEnabled || job <= 0 || job > data.n || visitedBeforeExtension.contains(job)) {
+	/**
+	 * lm-SRI 下 forward label 的 state 表示从 source 扫到当前点后的剩余 half-state。
+	 * 扩展到新 job 时，memory 外节点先清零；memory 内 scope job 再累加并在达到阈值时扣 cut dual。
+	 */
+	private double applySriForwardExtensionShift(byte[] states, PackedBitSet visitedBeforeExtension, int job) {
+		if (!sriPricingEnabled || job <= 0 || job > data.n) {
 			return 0.0;
 		}
 		double shift = 0.0;
-		for (int sriIndex : sriCutsByJob[job]) {
-			int nextCount = Math.min(2, counts[sriIndex] + 1);
-			if (counts[sriIndex] == 1 && nextCount == 2) {
-				shift -= sriDuals.get(sriIndex).doubleValue();
+		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
+			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue() && !sriMemoryByCut.get(sriIndex)[job]) {
+				states[sriIndex] = 0;
 			}
-			counts[sriIndex] = (byte) nextCount;
+		}
+		boolean firstVisit = !visitedBeforeExtension.contains(job);
+		for (int sriIndex : sriCutsByJob[job]) {
+			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()) {
+				if (!sriMemoryByCut.get(sriIndex)[job]) {
+					continue;
+				}
+				int next = states[sriIndex] + 1;
+				if (next >= 2) {
+					shift -= sriDuals.get(sriIndex).doubleValue();
+					next -= 2;
+				}
+				states[sriIndex] = (byte) next;
+			} else if (firstVisit && states[sriIndex] < 2) {
+				int next = states[sriIndex] + 1;
+				if (states[sriIndex] == 1 && next == 2) {
+					shift -= sriDuals.get(sriIndex).doubleValue();
+				}
+				states[sriIndex] = (byte) next;
+			}
 		}
 		return shift;
 	}
 
-	private double limitedMemorySriPenalty(List<Integer> sequence) {
-		return SubsetRowCutEvaluator.penalty(sriCuts, sriDuals, sequence, data.n);
-	}
-
-	private byte[] limitedMemorySriState(List<Integer> sequence) {
-		byte[] states = new byte[sriCutIds.size()];
-		if (!sriPricingEnabled || sequence == null || sequence.isEmpty()) {
-			return states;
+	/**
+	 * lm-SRI 下 backward label 的 state 表示“从当前点向后，到第一个 memory 断点前”的剩余 half-state。
+	 * 因此向前 prepend 一个 job 时可以对称增量更新；这比恢复整个 suffix 重扫更准确也更便宜。
+	 */
+	private double applySriBackwardPrependShift(byte[] states, PackedBitSet visitedBeforeExtension, int job) {
+		if (!sriPricingEnabled || job <= 0 || job > data.n) {
+			return 0.0;
 		}
-		boolean[] seenJob = new boolean[data.n + 1];
-		for (int job : sequence) {
-			for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
-				if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()
-						&& (job < 1 || job > data.n || !sriMemoryByCut.get(sriIndex)[job])) {
-					states[sriIndex] = 0;
-				}
-			}
-			if (job >= 1 && job <= data.n) {
-				boolean firstVisit = !seenJob[job];
-				seenJob[job] = true;
-				for (int sriIndex : sriCutsByJob[job]) {
-					if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()) {
-						int next = states[sriIndex] + 1;
-						if (next >= 2) {
-							next -= 2;
-						}
-						states[sriIndex] = (byte) next;
-					} else if (firstVisit && states[sriIndex] < 2) {
-						states[sriIndex]++;
-					}
-				}
+		double shift = 0.0;
+		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
+			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue() && !sriMemoryByCut.get(sriIndex)[job]) {
+				states[sriIndex] = 0;
 			}
 		}
-		return states;
+		boolean firstVisit = !visitedBeforeExtension.contains(job);
+		for (int sriIndex : sriCutsByJob[job]) {
+			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()) {
+				if (!sriMemoryByCut.get(sriIndex)[job]) {
+					continue;
+				}
+				int next = states[sriIndex] + 1;
+				if (next >= 2) {
+					shift -= sriDuals.get(sriIndex).doubleValue();
+					next -= 2;
+				}
+				states[sriIndex] = (byte) next;
+			} else if (firstVisit && states[sriIndex] < 2) {
+				int next = states[sriIndex] + 1;
+				if (states[sriIndex] == 1 && next == 2) {
+					shift -= sriDuals.get(sriIndex).doubleValue();
+				}
+				states[sriIndex] = (byte) next;
+			}
+		}
+		return shift;
 	}
 
 	private void initializeForwardSource(LP lp) {
@@ -1817,16 +1839,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		byte[] childSriCounts;
 		double childSriPenalty;
 		double sriShift;
-		if (limitedMemorySriPricing) {
-			ArrayList<Integer> childSequence = recoverForwardSequence(label);
-			childSequence.add(Integer.valueOf(nextJob));
-			childSriPenalty = limitedMemorySriPenalty(childSequence);
-			childSriCounts = limitedMemorySriState(childSequence);
-			sriShift = childSriPenalty - label.sriPenalty;
+		if (sriPricingEnabled) {
+			childSriCounts = copySriCounts(label.sriCounts);
+			sriShift = applySriForwardExtensionShift(childSriCounts, label.visitedSet, nextJob);
+			childSriPenalty = label.sriPenalty + sriShift;
 		} else {
 			childSriCounts = copySriCounts(label.sriCounts);
-			sriShift = applySriExtensionShift(childSriCounts, label.visitedSet, nextJob);
-			childSriPenalty = label.sriPenalty + sriShift;
+			sriShift = 0.0;
+			childSriPenalty = label.sriPenalty;
 		}
 		if (!Utility.compareEq(sriShift, 0.0)) {
 			nextFrontier.shiftYInPlace(sriShift);
@@ -1896,16 +1916,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		byte[] childSriCounts;
 		double childSriPenalty;
 		double sriShift;
-		if (limitedMemorySriPricing) {
-			ArrayList<Integer> childSequence = recoverBackwardSequence(label);
-			childSequence.add(0, Integer.valueOf(prevJob));
-			childSriPenalty = limitedMemorySriPenalty(childSequence);
-			childSriCounts = limitedMemorySriState(childSequence);
-			sriShift = childSriPenalty - label.sriPenalty;
+		if (sriPricingEnabled) {
+			childSriCounts = copySriCounts(label.sriCounts);
+			sriShift = applySriBackwardPrependShift(childSriCounts, label.visitedSet, prevJob);
+			childSriPenalty = label.sriPenalty + sriShift;
 		} else {
 			childSriCounts = copySriCounts(label.sriCounts);
-			sriShift = applySriExtensionShift(childSriCounts, label.visitedSet, prevJob);
-			childSriPenalty = label.sriPenalty + sriShift;
+			sriShift = 0.0;
+			childSriPenalty = label.sriPenalty;
 		}
 		if (!Utility.compareEq(sriShift, 0.0)) {
 			nextFrontier.shiftYInPlace(sriShift);
@@ -2378,8 +2396,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ArrayList<Integer> sequence = null;
 		double sriJoinShift;
 		if (limitedMemorySriPricing) {
-			sequence = recoverJoinSequence(forward, backward);
-			sriJoinShift = limitedMemorySriPenalty(sequence) - forward.sriPenalty - backward.sriPenalty;
+			sriJoinShift = limitedMemorySriJoinShift(forward, backward);
 		} else {
 			sriJoinShift = sriJoinShift(forward, backward);
 		}
@@ -2426,6 +2443,35 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			} else if (forwardCount == 1 && backwardCount == 1
 					&& sriHalvesContainDifferentScopeJobs(forward, backward, sriScopes.get(sriIndex))) {
 				shift -= dual;
+			}
+		}
+		return shift;
+	}
+
+	/**
+	 * lm-SRI join 只需要检查 crossing arc 两侧是否把同一 cut 的 residual half-state 拼成一次触发。
+	 * backward state 已按“当前点向后第一个 memory 断点前”的语义维护，因此无需恢复完整序列重扫。
+	 */
+	private double limitedMemorySriJoinShift(ForwardLabel forward, BackwardLabel backward) {
+		if (!sriPricingEnabled) {
+			return 0.0;
+		}
+		double shift = 0.0;
+		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
+			if (sriLimitedMemoryByCut.get(sriIndex).booleanValue()) {
+				if (forward.sriCounts[sriIndex] + backward.sriCounts[sriIndex] >= 2) {
+					shift -= sriDuals.get(sriIndex).doubleValue();
+				}
+			} else {
+				int forwardCount = forward.sriCounts[sriIndex];
+				int backwardCount = backward.sriCounts[sriIndex];
+				double dual = sriDuals.get(sriIndex).doubleValue();
+				if (forwardCount > 1 && backwardCount > 1) {
+					shift += dual;
+				} else if (forwardCount == 1 && backwardCount == 1
+						&& sriHalvesContainDifferentScopeJobs(forward, backward, sriScopes.get(sriIndex))) {
+					shift -= dual;
+				}
 			}
 		}
 		return shift;

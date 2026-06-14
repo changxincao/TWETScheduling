@@ -330,3 +330,13 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 第三层，也就是当前还不能声称“完全等同论文 lm-SRI”的地方，是 partial-list dominance 的 SRI 补偿。文档强调 lm-SRI 的优势是只有当前 bucket 节点位于某条 cut 的 memory set 时，该 cut 的 state 才影响 dominance；当前实现没有把 `memoryJobs` 显式传入 `SriAwarePartialListDominanceStore`，补偿函数仍主要按 scope、visitedSet 和 residual state 做旧 full-SRI 风格的充分补偿。forward label 结束在 memory 外时 residual state 会自然清零，因此这一路通常不会错；但 backward label 的 residual state 是按后缀正向扫描后的末端 state，不能完全表达“当前 bucket 节点是否在 M 内”以及 prefix 进入该 suffix 时的 memory reset 语义。因此这部分目前更准确地说是：reduced cost 计算正确，dominance 补偿偏保守/不完整，尚未实现论文中 memory-bucket 级别的最强 dominance，也没有完成严格证明。
 
 由此当前结论为：lm-SRI 第一版可以作为实验实现继续跑，因为 LP 系数、定价 reduced cost、启发式 penalty 和 cut/pricing 循环没有发现口径不一致；但不应把它称为完整论文版 node-memory SRC。若后续要把 lm-SRI 作为可信默认，需要补两件事：一是把 active cut 的 memory set 带入 SRI-aware dominance，让只在 `jid ∈ M_s` 的 bucket 中比较该 cut state；二是重新推导 backward label 的 lm-SRI dominance state，避免把后缀末端 residual state 当作当前 bucket 的 memory state 使用。当前性能结论也应按这个限制理解：lm-SRI 慢或弱，既可能来自 cut 本身弱化，也可能来自 dominance 没有真正释放 node-memory 的优势。
+
+### 2026-06-14 lm-SRI 反向 state 与重扫优化修正
+
+进一步复查后，前一版关于 backward state 的描述和实现都不够准确。lm-SRI 的反向 label 不应该把“当前点到 sink 的后缀按正向扫描后的末端 state”当作 join state；反向定价本质上是在从 sink 侧反着延伸后缀，所以它应该维护“从当前点沿 backward label 方向，到第一个 memory 断点前”的 residual half-state。这样 forward state 和 backward state 在 crossing arc 两侧直接相加，就能判断是否跨 join 触发一次 lm-SRI penalty。
+
+本次代码按这个语义修正：`GCNGBBStyleBidirectionalNgDssr` 中 full-SRI 仍保持 distinct-count 增量；lm-SRI 的 forward extension 和 backward prepend 都通过同一类 memory reset / scope 累加规则增量更新 state。join 阶段不再恢复完整序列来重算 lm-SRI penalty，而是对每条 active cut 检查 `forwardState + backwardState >= 2`，满足时补一次对应 cut dual。完整序列仍会在真正生成 `TWETColumn` 前恢复，但那是为了建列和验证，不再用于 SRI 成本重扫。
+
+启发式定价也同步改掉了重复重扫。`HeuristicPricingEngine` 现在在构造当前 seed route 时维护每个位置的 lm-SRI prefix state / suffix state 和对应 penalty；remove/add/exchange 的 SRI 变化由 `prefix + changed middle + suffix + joinShift` 计算。每次实际接受 move 后会重建该 route 的 profile，后续候选 move 不再为每个候选序列调用完整 evaluator 重扫。seed 排序阶段仍需要对每条 seed 做一次线性扫描得到当前 SRI penalty，但已改用同一套 state 推进，而不是调用独立 evaluator 路径。
+
+这次修正后，lm-SRI 的 reduced-cost 口径更接近文档里的“沿当前搜索方向推进 state”语义，也去掉了 exact join 和启发式 move 热路径里的完整序列 SRI 重扫。验证方面，使用项目 CPLEX jar 对 `Basic/Common/HEU/Output/TWETBPC` focused 编译通过，仅有历史 deprecation warning。剩余需要实验确认的是性能收益和在 010/011 这类 30 任务算例上的 cut/pricing 行为变化。

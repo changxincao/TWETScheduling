@@ -129,3 +129,39 @@ Tabu 搜索内部新增当前序列的 SRI count 和 penalty 缓存。remove/add
 用三角化 `tmp-wet030_from040_011_2m` 做 root-only 对照，其他配置保持 partial-list ng-DSSR、ALNS seed、all-cycle completion bound、pricing-only subtree、midpoint probe、RMIH 关闭。无 SRI 基线为 `bound=13323.109589`，root solve `27.200s`，exact `4.934s`，列池 `5264`。开启 SRI 且每 node 最多 10 条 cut 后，root bound 提高到 `13413.526174`，提升 `90.416585`，相当于基线 bound 的约 `0.679%`；以 incumbent `13813` 计算，root gap 从 `3.5466%` 降到 `2.8920%`，减少约 `0.655` 个百分点。代价是 root solve 增至 `131.001s`，exact pricing `103.028s/15 calls`，列池 `5853`，cutPool `10`。
 
 当前判断是：每 node 10 条 SRI cut 能明显抬高 root 下界，但代价较高，主要来自 cut 后 exact pricing 难度上升。相比不限轮版本，它至少能让 root 正常返回并进入 branching，因此更适合后续做完整树对照；但是否值得作为默认，还需要继续比较 `maxSubsetRowCutsPerNode=1/3/5/10` 或提高 violation 阈值后的单位时间 bound 提升。
+### 2026-06-13 SRI 旧 VRP 对齐程度与慢因复核
+
+本次重新按旧 `GCNGBB_C/GCNGB` 的核心代码复核，当前 TWET 的 SRI reduced-cost 口径与旧 VRP 主流程基本一致：扩展时只在某个 active SRI 的 distinct visit count 从 1 到 2 时加入 `-dual` penalty；join 时如果左右半路径都已经触发同一个 SRI，则去掉重复 penalty，如果左右各有一个不同 cut member，则补上拼接后新触发的 penalty；partial-list 和 single-point store 内部比较也已经复用旧 `UseSR` 思路做跨 SRI 状态补偿。换言之，当前慢不能简单归因于“没有把 SRI dual 算进去”。
+
+但当前实现仍然不是旧 VRP 的完全等价版本。主要差异有两个。第一，旧 `GCNGB` 里明确有 `m_*sr_bound` 这类 SRI-aware bound 表，`GCNGBB_C` 也会在 bound labeling 后用 `UpdateFWBound/UpdateBWBound` 更新基础 bound；当前 TWET 只用 `noSriFrontier + all-cycle completion bound` 做安全剪枝，忽略未来 SRI penalty，因此下界安全但更弱。第二，TWET 的 label frontier 是分段线性函数，不是旧 VRP 的标量资源成本；SRI active 后只要窗口变大，partial-list 裁剪和函数拼接开销会被放大。
+
+011 root 对照说明慢因很集中。无 SRI 时 root exact pricing 为 `4.934s/5 calls`，最后一次 exact 的 `pricingHorizon≈1027`、`dualWindow=enabled`、`forwardExtend candidates≈5506`、`boundSurvivors≈288`。每 node 最多 10 条 SRI 后，root exact pricing 变成 `103.028s/15 calls`；cut active 后 root dual profitable window 被关闭，`pricingHorizon` 直接回到 `3500`，后期 exact 单轮常见 `forwardExtend candidates≈154k-207k`、`boundSurvivors≈19k-27k`，partial-list comparisons 到 `1.1M-1.7M`，DSSR 轮数也从 no-cut 的 1 轮变成 9-14 轮。completion bound 仍然剪掉大量候选，例如 20 万级 candidate 中仍能剪掉 16 万左右，但 no-SRI 松弛 bound 已不足以把 cut 后的大域证明压回原来的规模。
+
+因此当前结论是：SRI 的 reduced-cost、join、dominance 口径大体对齐旧 VRP；慢的主因是 SRI active 后关闭 root pi-window 导致定价域从约 1000 放大到 3500，再叠加当前没有旧 VRP 那套 SRI-aware bound 更新，导致 exact pricing 需要在更大时间域上反复证明没有负列。后续若要把 SRI 作为默认求解组件，优先方向不是继续微调 SRI dual 计数，而是测试更保守的 cut 策略，或补 SRI-aware completion bound / 重新设计 active-cut 下的安全 profitable window。
+### 2026-06-13 011/30 不限制 SRI cut 次数的完整 root 收敛测试
+
+按用户要求取消 SRI 加入次数限制后，重新跑三角化 `tmp-wet030_from040_011_2m`。配置为 partial-list ng-DSSR、`nearestK,size=8,top10`、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree、midpoint probe，并把 `maxSubsetRowCutsPerRound/maxSubsetRowCutsPerNode` 都设为很大值，等价于不做人为 cut 条数截断。
+
+这次运行在 root 直接闭合，结果为 `incumbent=bound=13511`，`gap=0`，状态 `ROOT_PROCESSED`，没有进入分支。root 总时间 `644.306s`，总求解时间 `644.310s`；pricing 共 `95` 轮，加入列 `7332`，最终列池 `7390`。其中启发式 pricing 为 `22.318s/74 calls/add6447`，exact pricing 为 `600.677s/21 calls/add885`，master LP 为 `17.282s`。SRI separation 只发生一轮，但一次性加入 `188` 条 cut，cutPool 最终为 `188`。
+
+这说明不限制 SRI 时，011/30 的 root bound 能直接推到整数最优；但代价很高，主要来自 SRI active 后 root pi-window 被关闭，`pricingHorizon` 回到 `3500`，exact pricing 需要在更大的时间域上反复证明。后期虽然负列数量已经降到个位数甚至 0，但单轮 exact 仍可能需要十几秒到接近百秒。当前结论是：不限制 SRI 可以显著加强 root 下界，甚至本例 root 闭合；但作为默认求解配置过重，更适合做强 cut 对照或小批量验证。若要用于主线，应继续比较有限 cut 策略和不限制策略的单位时间收益。
+
+### 2026-06-14 011/30 运行中 generated=0 后继续 initialize 的解释
+
+复查 `tmp-011-all-components-uncapped-sri-20260613-235730` 日志和 `PC.solve()` / `GCNGBBStyleBidirectionalNgDssr.solve()` 控制流后，确认这里没有发现 cut/pricing 循环错误。日志中出现的“generated=0 后又 initialize”来自两种不同层级。
+
+第一种是外层 price-and-cut 的正常行为。root no-cut pricing 收敛时，exact pricing 在日志第 38 行返回 `generated 0`，此时当前 LP 还不是整数解，所以 `PC.solve()` 随后进入 cut separation，第 40 行一次性加入 188 条 SRI cut。cut 改变 LP dual 和 reduced cost，因此第 90-95 行的 `after_cut` 重解 LP 后必须重新进入 pricing loop；否则 SRI dual 虽然已经读出，但没有被 pricing 用来闭合新的 reduced-cost 口径。这一轮重新 initialize 是正确的。
+
+第二种是 ng-DSSR 内部的正常行为。一次 exact pricing 调用内，如果 relaxed ng pricing 没有 elementary 负列，但找到了 non-elementary negative route，代码会更新 ng-neighborhood 并重新跑下一轮 relaxed pricing。每一轮 relaxed pricing 都会调用一次 `initialize()`，直到找到 elementary 负列返回，或者某一轮 relaxed pricing 连 non-elementary negative route 也找不到。最终第 101 行的 `generated 0` 带有 `ng-DSSR reason=relaxed pricing found no negative route, rounds=8,totalNonElementaryRoutes=69,totalNgSetUpdates=83`，含义是前面 7 轮只发现非基本负 route 并更新 ng-set，第 8 轮证明 relaxed pricing 已经无负 route，因此整个 exact pricing 返回 no improvement。
+
+从日志顺序看，第 101 行最终 `generated 0` 后没有再次进入 cut separation 或下一次 pricing，后面直接是 node summary 和 `ROOT_PROCESSED`。因此当前正确性判断为：`generated=0` 后继续 initialize 不是外层无限循环，而是 cut 后重定价和 DSSR 内部收紧 ng-set 的预期行为；最终 no-improvement 后节点正常结束。
+
+### 2026-06-14 full-ng 初始化与 SRI 限制口径修正
+
+本轮澄清了两个配置语义。第一，`full-ng` 指每个 job 的初始 ng-neighborhood 都包含所有任务点，而不是 `nearestK`。此前 `ngDssrInitialMode` 只支持 `empty/nearestK/dualPair/reducedCostPair`，现在补充 `full` 模式：初始化后对每个 `N_i` 加入 `1..n`。这种配置会让 ng-memory 初始不遗忘任何任务，更接近 elementary 口径，用于对照 ng relaxation 本身的影响。
+
+第二，SRI cut 的限制应按旧 VRP 口径保留“每轮最多加 10 条”，而不应默认限制单个 node 内 active SRI cut 总数。此前为了避免 root 过重，临时把 `maxSubsetRowCutsPerNode` 默认设成 10；这会改变 unrestricted node cut 语义。现在默认改为 `Integer.MAX_VALUE`，即不限制单 node 总数；`maxSubsetRowCutsPerRound=10` 仍保留，命令行仍可显式传 `maxSubsetRowCutsPerNode` 做受控实验。
+
+用三角化 `tmp-wet030_from040_011_2m` 做 `partial-list ng-DSSR + SRI + full-ng + maxNodes=1 + stageHeartbeat` 诊断。cut 前 root pricing 很快，`pricingHorizon` 约为 `1021-1023`，第一轮 exact 约 `fCand=20724, joinPairs=54784, generated=878`，后续几轮逐步降到 `generated=0`。第一次 separation 加入 10 条 SRI 后，active cut 使 root pi-window 关闭，`pricingHorizon` 直接回到 `3500`。随后的 exact pricing 单轮规模明显放大：`cuts=10` 时出现 `fCand=306122, joinPairs=7148224, generated=370`，后续仍有 `fCand=243256, joinPairs=5649043` 等；`cuts=20/30/40/50` 后仍继续 cut-and-price，单轮 forward candidate 常在 `20万-80万+`，join pairs 可达 `1000万-3000万+`。在 `cuts=50` 后某轮 forward 已到 `fCand=1358323`，队列仍未清空，因此中止。
+
+当前结论是：full-ng 初始化本身不是这次慢的直接主因，真正放大来自 SRI active 后关闭 root pi-window，导致 pricing horizon 从约 1000 放大到 3500；同时不限制单 node SRI cut 总数会让 root 内持续追加 cut，每次 cut 后都要重新闭合更大的 pricing 问题。completion bound 仍在大量剪枝，但当前 no-SRI bound 对 SRI active 的大时间域只能保证安全，强度不够把证明规模压回 no-cut 水平。后续如果继续测试 unrestricted SRI，应优先加实时日志或限制运行时间；如果作为主要求解配置，仍需要比较 per-node cap、cut round cap、提高 violation 阈值或补 SRI-aware bound 的收益。

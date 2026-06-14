@@ -311,6 +311,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if ("empty".equalsIgnoreCase(mode)) {
 			return;
 		}
+		if ("full".equalsIgnoreCase(mode)) {
+			for (int job = 1; job <= data.n; job++) {
+				for (int other = 1; other <= data.n; other++) {
+					ngNeighborhoodByJob[job].add(other);
+				}
+			}
+			return;
+		}
 		if ("dualPair".equalsIgnoreCase(mode) || "reducedCostPair".equalsIgnoreCase(mode)) {
 			addDualPairNgNeighborhoods(lp, targetSize);
 			return;

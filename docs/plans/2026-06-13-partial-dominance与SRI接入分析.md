@@ -303,6 +303,8 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 
 当前结论应改为：修正后的 node-memory SRI 在 010/30 empty-ng 配置下是有效的，并且本轮结果优于此前 full-SRI empty-ng 时间；但它的有效性仍依赖 cut/pricing 闭环，且双向标签不均衡问题没有消失。后续如果继续研究 lm-SRI，应优先记录 active memory 大小、每条 cut 的 full/lm 系数差异、同 cut 数下 root bound 提升，以及 probe 选点和完整 exact 标签比例的偏差。
 
+进一步检查 midpoint probe 后确认，010 本次并不是 probe 没开启。启动参数中 `midpointProbe=true`，日志中每轮也会列出 `midpointProbe=...`；最后证明轮从默认 `tMid=2185.5` 依次试到 `1857.675/1579.024/1342.170/1140.845`，probe 的 queue 比例从约 `4571` 降到 `71.6` 后因 `maxCandidates=5` 停止，并选择 `1140.845`。因此 probe 是有效降低了极端右偏，但仍没找到均衡点。根本原因是 SRI active 后 `pricingHorizon=4342`，dual profitable window 只剩 outsourcing 静态口径，completion bound 又按 no-SRI 松弛成本剪枝；有限 pop 看到的是早期队列压力，而完整 exact 闭包后 forward 继续增长，最终变成 `fw kept/dominated=9968/20457`、`bw kept/dominated=57/100`。这说明当前 probe 对 SRI active 后的大 horizon 情况估计偏浅，后续若优化，应优先考虑 SRI active 时增加候选数/加大左移步长/在同向且 score 仍很大时继续试探，而不是怀疑 SRI reduced-cost 没进入 probe。
+
 ### 2026-06-14 010/30 lm-SRI full ng-set 对照
 
 按同一套 010/30 lm-SRI / nodeMemory 配置继续测试，只把初始 ng-set 从 `empty` 改成 `full`。也就是 `subsetRowCutMemoryMode=nodeMemory`、partial-list ng-DSSR、每轮最多 10 条 SRI cut、单 node 不限制 active cut 总数、ALNS seed、RMIH 4s、all-cycle completion bound、pricing-only subtree 和 midpoint probe 都保持不变，仅设置 `ngDssrInitialMode=full`。运行名为 `tmp-lmsri-010-fullng-15m-20260614`，输出目录为 `test-results/bpc/tmp-lmsri-010-fullng-15m-20260614/`。

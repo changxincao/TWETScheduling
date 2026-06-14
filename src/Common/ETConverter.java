@@ -127,7 +127,33 @@ public final class ETConverter {
                 setup[i][j] = sampleRoundedTruncatedNormal(random, avgSetup, stdDev, 0.0, upperBound);
             }
         }
+        enforceDirectedTriangleInequality(setup);
         return setup;
+    }
+
+    /**
+     * 2026-06-14: pricing/启发式会直接使用 setup 三角不等式做安全剪枝。
+     * 因此生成数据时直接对包含虚拟起点 0 在内的完整 setup 图做 Floyd 闭包，
+     * 避免后续临时算例只局部修正、仍残留经 0 中转的三角违例。
+     */
+    private static void enforceDirectedTriangleInequality(int[][] setup) {
+        int size = setup.length;
+        for (int k = 0; k < size; k++) {
+            for (int i = 0; i < size; i++) {
+                if (i == k) {
+                    continue;
+                }
+                for (int j = 0; j < size; j++) {
+                    if (i == j || j == k) {
+                        continue;
+                    }
+                    int via = setup[i][k] + setup[k][j];
+                    if (via < setup[i][j]) {
+                        setup[i][j] = via;
+                    }
+                }
+            }
+        }
     }
 
     private static long buildSetupSeed(int[] p, int[] d, int[] wE, int[] wT, int m) {

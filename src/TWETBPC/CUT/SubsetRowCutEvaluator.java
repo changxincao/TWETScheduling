@@ -23,6 +23,9 @@ public final class SubsetRowCutEvaluator {
 			return 0;
 		}
 		boolean[] scope = membership(cut.getScopeJobs(), jobCount);
+		if (cut.hasMemoryArcs()) {
+			return arcMemoryCoefficient(scope, cut, cut.getMultiplier(), sequence);
+		}
 		if (cut.hasMemoryJobs()) {
 			return limitedMemoryCoefficient(scope, membership(cut.getMemoryJobs(), jobCount), cut.getMultiplier(),
 					sequence);
@@ -44,6 +47,11 @@ public final class SubsetRowCutEvaluator {
 			}
 		}
 		return penalty;
+	}
+
+	/** 统一的 arc 编码，避免 memory arc 存储依赖当前 n。 */
+	public static long arcKey(int from, int to) {
+		return (((long) from) << 32) ^ (to & 0xffffffffL);
 	}
 
 	private static int fullCoefficient(boolean[] scope, double multiplier, List<Integer> sequence) {
@@ -81,6 +89,26 @@ public final class SubsetRowCutEvaluator {
 					state -= 1.0;
 				}
 			}
+		}
+		return coefficient;
+	}
+
+	private static int arcMemoryCoefficient(boolean[] scope, TWETCut cut, double multiplier, List<Integer> sequence) {
+		double state = 0.0;
+		int coefficient = 0;
+		int previous = 0;
+		for (int job : sequence) {
+			if (!cut.containsMemoryArc(arcKey(previous, job))) {
+				state = 0.0;
+			}
+			if (job >= 0 && job < scope.length && scope[job]) {
+				state += multiplier;
+				while (state + VALUE_TOLERANCE >= 1.0) {
+					coefficient++;
+					state -= 1.0;
+				}
+			}
+			previous = job;
 		}
 		return coefficient;
 	}

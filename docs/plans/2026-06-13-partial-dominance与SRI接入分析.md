@@ -386,3 +386,13 @@ exact pricing 侧复查的重点是双向拼接。lm-SRI active 时，forward/ba
 dominance 方面，第一版可以沿用当前 SRI-aware partial-list 的保守补偿框架，但要承认它未必能完全释放 arc-memory 的优势。arc-memory 的好处是很多具体入弧不在 memory 中，state 会自然归零；如果 label state 更新严格正确，非 memory arc 后的 bucket 不会携带该 cut 的残余 state。更强的论文式实现可以进一步按“当前 terminal 与未来 outgoing/incoming memory arc”决定哪些 cut state 参与补偿，但这会更复杂。completion bound 可以暂时继续用 no-SRI frontier，和当前 full/lm-SRI 一样安全但偏弱。
 
 当前判断是：arc-memory 值得作为下一种 SRI 实验口径，尤其针对 40 任务里 full-SRI 900 秒 root 未闭合、node-memory SRI 能推进但仍明显慢于 no-SRI 的情况。它比 node-memory 更细，可能减少 active SRI 后的 label state 负担；但它不是小改动，主要工作量在 exact/backward/join 和启发式的 arc-aware state 转移。建议实现时新增 `subsetRowCutMemoryMode=arcMemory`，保留 full 和 nodeMemory 两条旧路径，先只接入 partial-list ng-DSSR + 启发式 SRI 口径，不碰 completion-bound SRI 更新和 route enumeration。验证顺序应先做手工序列 coefficient 对拍，再做 pricing reduced cost 与 LP cut 系数一致性检查，最后在 30/40 root 上比较 full/node/arc 三种 memory 的 root bound、active cut 数、exact pricing 时间和 label 数。
+
+### 2026-06-15 arc-memory rank-1/SRC 第一版实现
+
+本轮按上一节方案新增 `subsetRowCutMemoryMode=arcMemory`，同时保留 `full` 和 `nodeMemory` 两条旧路径。cut 分离入口不变，仍先按当前 positive master columns 识别 violated 三元 full-SRI；当配置为 arc-memory 时，`SubsetRowCutGenerator` 会沿这些正值列扫描 scope job 之间传递 half-state 的弧，并生成 `arcLmSRI3` cut。这里记录的是 memory arcs，而不是 memory jobs。进入第一个 scope job 的弧通常不需要保留，因为进入前 state 为 0；真正需要保留的是已经有 residual state 后、继续向下一个 scope job 传递这段 state 的弧。
+
+列系数统一由 `SubsetRowCutEvaluator` 计算。arc-memory 的扫描口径为：沿 route 依次看 `(prev, job)`，如果该弧不在 `A_M` 中，则先把 cut state 清零；随后如果 head job 属于 scope，仍然把它作为新段起点累加 multiplier。也就是说，非 memory arc 只断开前一段 residual state，不会让当前 scope job 永久失效。`TWETCut` 里新增了 memory arc membership 缓存，避免 LP 建行、动态加列和列成本校验时反复把 memory arc list 构造成 `HashSet`。
+
+pricing 侧目前只接入 partial-list ng-DSSR 这条 SRI-aware 主路径，并同步接入启发式 pricing。exact pricing 中，forward 扩展按 `(last,next)` 更新 arc-memory state；backward prepend 按 `(prev,current)` 更新 suffix 前端 residual state；join 时只有 crossing arc `(forwardLast, backwardFirst)` 属于对应 cut 的 memory arcs，才允许把两边 residual state 相加触发一次 `-dual`。启发式 pricing 继续使用 prefix/suffix profile 做局部计算，只是 profile 的 state 转移从 job-based 改为 arc-aware，因此 remove/add/exchange 不需要为每个候选完整重扫序列。full-SRI 的 distinct-count 增量路径和 node-memory 的 job-memory 路径保持不变。
+
+验证方面，本轮完成了两层检查。第一，排除历史 `src/BPC` 包后，用项目 `.classpath` 中的 CPLEX jar 对当前 `src` 做 focused `javac` 编译，通过，仅有历史 deprecation warning。第二，用极小 jshell harness 检查 arc-memory 系数口径：`A_M={(1,2)}` 时序列 `[1,2]` 触发 1 次，`[1,3,2]` 被非 memory arc 打断后触发 0 次；`A_M={(1,2),(2,3)}` 时 `[1,2,3]` 触发 1 次。当前还没有跑 30/40 算例对照，后续应固定 partial-list ng-DSSR + SRI 配置，对比 `full/nodeMemory/arcMemory` 的 root bound、active cut 数、exact pricing 时间、label 数和最终 gap。

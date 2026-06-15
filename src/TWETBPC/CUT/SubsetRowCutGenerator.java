@@ -121,7 +121,11 @@ public class SubsetRowCutGenerator implements CutGenerator {
 			scope.add(Integer.valueOf(candidate.first));
 			scope.add(Integer.valueOf(candidate.second));
 			scope.add(Integer.valueOf(candidate.third));
-			if (isNodeMemorySubsetRowCut()) {
+			if (isArcMemorySubsetRowCut()) {
+				cuts.add(new TWETCut(-1, TWETCutType.SUBSET_ROW, scope, null,
+						buildLimitedMemoryArcSet(lp, solution, candidate.first, candidate.second, candidate.third), 0.5,
+						1.0, "arcLmSRI3"));
+			} else if (isNodeMemorySubsetRowCut()) {
 				cuts.add(new TWETCut(-1, TWETCutType.SUBSET_ROW, scope,
 						buildLimitedMemorySet(lp, solution, candidate.first, candidate.second, candidate.third), 0.5,
 						1.0, "lmSRI3"));
@@ -201,6 +205,12 @@ public class SubsetRowCutGenerator implements CutGenerator {
 				|| "limitedMemory".equalsIgnoreCase(config.subsetRowCutMemoryMode);
 	}
 
+	private boolean isArcMemorySubsetRowCut() {
+		return "arcMemory".equalsIgnoreCase(config.subsetRowCutMemoryMode)
+				|| "arcLm".equalsIgnoreCase(config.subsetRowCutMemoryMode)
+				|| "limitedArcMemory".equalsIgnoreCase(config.subsetRowCutMemoryMode);
+	}
+
 	private ArrayList<Integer> buildLimitedMemorySet(LP lp, TWETMasterSolution solution, int first, int second,
 			int third) {
 		boolean[] scope = new boolean[lp.getData().n + 1];
@@ -236,6 +246,44 @@ public class SubsetRowCutGenerator implements CutGenerator {
 			}
 		}
 		ArrayList<Integer> result = new ArrayList<Integer>(memory);
+		Collections.sort(result);
+		return result;
+	}
+
+	private ArrayList<Long> buildLimitedMemoryArcSet(LP lp, TWETMasterSolution solution, int first, int second,
+			int third) {
+		boolean[] scope = new boolean[lp.getData().n + 1];
+		scope[first] = true;
+		scope[second] = true;
+		scope[third] = true;
+		HashSet<Long> memory = new HashSet<Long>();
+		for (Map.Entry<Integer, Double> entry : solution.getColumnValues().entrySet()) {
+			if (!Utility.compareGt(entry.getValue().doubleValue(), VALUE_TOLERANCE)) {
+				continue;
+			}
+			TWETColumn column = lp.getPool().getColumn(entry.getKey().intValue());
+			if (!containsAtLeastTwoScopeJobs(column, first, second, third)) {
+				continue;
+			}
+			ArrayList<Long> aux = new ArrayList<Long>();
+			int stateUnits = 0;
+			int previous = 0;
+			for (int job : column.getSequence()) {
+				if (stateUnits > 0) {
+					aux.add(Long.valueOf(SubsetRowCutEvaluator.arcKey(previous, job)));
+				}
+				if (job >= 1 && job < scope.length && scope[job]) {
+					stateUnits++;
+				}
+				if (stateUnits >= 2) {
+					memory.addAll(aux);
+					aux.clear();
+					stateUnits -= 2;
+				}
+				previous = job;
+			}
+		}
+		ArrayList<Long> result = new ArrayList<Long>(memory);
 		Collections.sort(result);
 		return result;
 	}

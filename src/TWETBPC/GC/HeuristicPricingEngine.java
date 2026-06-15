@@ -536,11 +536,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double sequenceBasedPenalty(int prefixLength, int suffixStart, int... middleJobs) {
 			byte[] states = sriContext.copyStates(sriPrefixStates[prefixLength]);
 			double value = sriPrefixPenalty[prefixLength];
+			int previous = prefixLength == 0 ? 0 : sequence.get(prefixLength - 1).intValue();
 			for (int job : middleJobs) {
-				value += sriContext.applyForwardExtension(states, job);
+				value += sriContext.applyForwardExtension(states, previous, job);
+				previous = job;
 			}
 			value += sriSuffixPenalty[suffixStart];
-			value += sriContext.joinShift(states, sriSuffixStates[suffixStart]);
+			if (suffixStart < sequence.size()) {
+				value += sriContext.joinShift(states, previous, sequence.get(suffixStart).intValue(),
+						sriSuffixStates[suffixStart]);
+			}
 			return value;
 		}
 
@@ -586,14 +591,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 			sriPrefixStates[0] = new byte[cutCount];
 			for (int i = 0; i < size; i++) {
 				byte[] states = sriContext.copyStates(sriPrefixStates[i]);
-				double shift = sriContext.applyForwardExtension(states, sequence.get(i).intValue());
+				int from = i == 0 ? 0 : sequence.get(i - 1).intValue();
+				double shift = sriContext.applyForwardExtension(states, from, sequence.get(i).intValue());
 				sriPrefixStates[i + 1] = states;
 				sriPrefixPenalty[i + 1] = sriPrefixPenalty[i] + shift;
 			}
 			sriSuffixStates[size] = new byte[cutCount];
 			for (int i = size - 1; i >= 0; i--) {
 				byte[] states = sriContext.copyStates(sriSuffixStates[i + 1]);
-				double shift = sriContext.applyBackwardPrepend(states, sequence.get(i).intValue());
+				int to = i == size - 1 ? data.n + 1 : sequence.get(i + 1).intValue();
+				double shift = sriContext.applyBackwardPrepend(states, sequence.get(i).intValue(), to);
 				sriSuffixStates[i] = states;
 				sriSuffixPenalty[i] = sriSuffixPenalty[i + 1] + shift;
 			}
@@ -719,24 +726,23 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private static final int[] EMPTY_INDICES = new int[0];
 		private static final int[] EMPTY_COUNTS = new int[0];
 		private static final SriPricingContext INACTIVE = new SriPricingContext(new double[0], new int[0][],
-				new ArrayList<TWETCut>(), new ArrayList<Double>(), 0, false);
+				new boolean[0][], new boolean[0][], new boolean[0], 0, false);
 
 		private final double[] penalties;
 		private final int[][] cutIndicesByJob;
 		private final boolean[][] memoryByCut;
+		private final boolean[][] arcMemoryByCut;
+		private final boolean[] arcMemoryCut;
 		private final int jobCount;
 		private final boolean sequenceBased;
 
-		private SriPricingContext(double[] penalties, int[][] cutIndicesByJob, ArrayList<TWETCut> cuts,
-				ArrayList<Double> duals, int jobCount, boolean sequenceBased) {
-			this(penalties, cutIndicesByJob, new boolean[0][], cuts, duals, jobCount, sequenceBased);
-		}
-
 		private SriPricingContext(double[] penalties, int[][] cutIndicesByJob, boolean[][] memoryByCut,
-				ArrayList<TWETCut> cuts, ArrayList<Double> duals, int jobCount, boolean sequenceBased) {
+				boolean[][] arcMemoryByCut, boolean[] arcMemoryCut, int jobCount, boolean sequenceBased) {
 			this.penalties = penalties;
 			this.cutIndicesByJob = cutIndicesByJob;
 			this.memoryByCut = memoryByCut;
+			this.arcMemoryByCut = arcMemoryByCut;
+			this.arcMemoryCut = arcMemoryCut;
 			this.jobCount = jobCount;
 			this.sequenceBased = sequenceBased;
 		}
@@ -751,19 +757,29 @@ public class HeuristicPricingEngine implements PricingEngine {
 			double[] penalties = new double[cutIds.size()];
 			int[][] scopes = new int[cutIds.size()][];
 			boolean[][] memoryByCut = new boolean[cutIds.size()][];
-			ArrayList<TWETCut> cuts = new ArrayList<TWETCut>();
-			ArrayList<Double> activeDuals = new ArrayList<Double>();
+			boolean[][] arcMemoryByCut = new boolean[cutIds.size()][];
+			boolean[] arcMemoryCut = new boolean[cutIds.size()];
 			boolean sequenceBased = false;
 			int[] jobOccurrences = new int[jobCount + 1];
+			int arcTableSize = (jobCount + 2) * (jobCount + 2);
 			for (int idx = 0; idx < cutIds.size(); idx++) {
 				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
-				cuts.add(cut);
-				activeDuals.add(duals.get(idx));
-				if (cut.hasMemoryJobs()) {
+				if (cut.hasLimitedMemory()) {
 					sequenceBased = true;
 				}
 				memoryByCut[idx] = new boolean[jobCount + 1];
-				if (cut.hasMemoryJobs()) {
+				arcMemoryByCut[idx] = new boolean[arcTableSize];
+				if (cut.hasMemoryArcs()) {
+					arcMemoryCut[idx] = true;
+					for (Long encoded : cut.getMemoryArcs()) {
+						long key = encoded.longValue();
+						int from = (int) (key >> 32);
+						int to = (int) key;
+						if (from >= 0 && from <= jobCount + 1 && to >= 0 && to <= jobCount + 1) {
+							arcMemoryByCut[idx][arcIndex(jobCount, from, to)] = true;
+						}
+					}
+				} else if (cut.hasMemoryJobs()) {
 					for (int memoryJob : cut.getMemoryJobs()) {
 						if (memoryJob >= 1 && memoryJob <= jobCount) {
 							memoryByCut[idx][memoryJob] = true;
@@ -798,7 +814,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 					}
 				}
 			}
-			return new SriPricingContext(penalties, byJob, memoryByCut, cuts, activeDuals, jobCount, sequenceBased);
+			return new SriPricingContext(penalties, byJob, memoryByCut, arcMemoryByCut, arcMemoryCut, jobCount,
+					sequenceBased);
 		}
 
 		boolean isActive() {
@@ -817,18 +834,22 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return states == null || states.length == 0 ? new byte[penalties.length] : states.clone();
 		}
 
-		double applyForwardExtension(byte[] states, int job) {
+		double applyForwardExtension(byte[] states, int from, int job) {
 			if (!sequenceBased || job <= 0 || job > jobCount) {
 				return 0.0;
 			}
 			double shift = 0.0;
 			for (int cutIndex = 0; cutIndex < penalties.length; cutIndex++) {
-				if (!memoryByCut[cutIndex][job]) {
+				if (arcMemoryCut[cutIndex]) {
+					if (!isMemoryArc(cutIndex, from, job)) {
+						states[cutIndex] = 0;
+					}
+				} else if (!memoryByCut[cutIndex][job]) {
 					states[cutIndex] = 0;
 				}
 			}
 			for (int cutIndex : cutIndicesByJob[job]) {
-				if (!memoryByCut[cutIndex][job]) {
+				if (!arcMemoryCut[cutIndex] && !memoryByCut[cutIndex][job]) {
 					continue;
 				}
 				int next = states[cutIndex] + 1;
@@ -841,16 +862,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return shift;
 		}
 
-		double applyBackwardPrepend(byte[] states, int job) {
-			return applyForwardExtension(states, job);
+		double applyBackwardPrepend(byte[] states, int job, int to) {
+			return applyForwardExtension(states, job, to);
 		}
 
-		double joinShift(byte[] forwardStates, byte[] suffixStates) {
+		double joinShift(byte[] forwardStates, int from, int to, byte[] suffixStates) {
 			if (!sequenceBased) {
 				return 0.0;
 			}
 			double shift = 0.0;
 			for (int cutIndex = 0; cutIndex < penalties.length; cutIndex++) {
+				if (arcMemoryCut[cutIndex] && !isMemoryArc(cutIndex, from, to)) {
+					continue;
+				}
 				if (forwardStates[cutIndex] + suffixStates[cutIndex] >= 2) {
 					shift += penalties[cutIndex];
 				}
@@ -880,8 +904,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (sequenceBased) {
 				byte[] states = new byte[penalties.length];
 				double value = 0.0;
+				int previous = 0;
 				for (int job : sequence) {
-					value += applyForwardExtension(states, job);
+					value += applyForwardExtension(states, previous, job);
+					previous = job;
 				}
 				return value;
 			}
@@ -958,6 +984,17 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		private boolean hasJobCuts(int job) {
 			return job >= 1 && job < cutIndicesByJob.length && cutIndicesByJob[job].length > 0;
+		}
+
+		private boolean isMemoryArc(int cutIndex, int from, int to) {
+			if (from < 0 || from > jobCount + 1 || to < 0 || to > jobCount + 1) {
+				return false;
+			}
+			return arcMemoryByCut[cutIndex][arcIndex(jobCount, from, to)];
+		}
+
+		private static int arcIndex(int jobCount, int from, int to) {
+			return from * (jobCount + 2) + to;
 		}
 
 		private double triggeredPenalty(int cutIndex, int count) {

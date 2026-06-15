@@ -260,6 +260,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ArrayList<int[]> sriScopes;
 	private ArrayList<Integer>[] sriCutsByJob;
 	private ArrayList<boolean[]> sriMemoryByCut;
+	private ArrayList<boolean[]> sriArcMemoryByCut;
 	private boolean limitedMemorySriPricing;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
@@ -940,6 +941,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sriDuals = new ArrayList<Double>();
 		sriScopes = new ArrayList<int[]>();
 		sriMemoryByCut = new ArrayList<boolean[]>();
+		sriArcMemoryByCut = new ArrayList<boolean[]>();
 		sriCutsByJob = new ArrayList[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			sriCutsByJob[job] = new ArrayList<Integer>();
@@ -949,6 +951,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
 		List<Double> duals = lp.getActiveSubsetRowPricingDuals();
+		int arcTableSize = (data.n + 2) * (data.n + 2);
 		for (int idx = 0; idx < cutIds.size(); idx++) {
 			TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
 			if (cut.getScopeJobs().size() != 3) {
@@ -962,9 +965,19 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					sriCutsByJob[scope[pos]].add(Integer.valueOf(activeIndex));
 				}
 			}
-			boolean limitedMemory = cut.hasMemoryJobs();
 			boolean[] memory = new boolean[data.n + 1];
-			if (limitedMemory) {
+			boolean[] arcMemory = new boolean[arcTableSize];
+			if (cut.hasMemoryArcs()) {
+				for (Long encoded : cut.getMemoryArcs()) {
+					long key = encoded.longValue();
+					int from = (int) (key >> 32);
+					int to = (int) key;
+					if (from >= 0 && from <= data.n + 1 && to >= 0 && to <= data.n + 1) {
+						arcMemory[sriArcMemoryIndex(from, to)] = true;
+					}
+				}
+				limitedMemorySriPricing = true;
+			} else if (cut.hasMemoryJobs()) {
 				for (int job : cut.getMemoryJobs()) {
 					if (job >= 1 && job <= data.n) {
 						memory[job] = true;
@@ -979,8 +992,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			sriDuals.add(duals.get(idx));
 			sriScopes.add(scope);
 			sriMemoryByCut.add(memory);
+			sriArcMemoryByCut.add(arcMemory);
 		}
 		sriPricingEnabled = !sriCutIds.isEmpty();
+	}
+
+	private int sriArcMemoryIndex(int from, int to) {
+		return from * (data.n + 2) + to;
+	}
+
+	private boolean isSriMemoryArc(int sriIndex, int from, int to) {
+		if (from < 0 || from > data.n + 1 || to < 0 || to > data.n + 1) {
+			return false;
+		}
+		return sriArcMemoryByCut.get(sriIndex)[sriArcMemoryIndex(from, to)];
 	}
 
 	private byte[] emptySriCounts() {
@@ -992,22 +1017,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * lm-SRI 下 forward label 的 state 表示从 source 扫到当前点后的剩余 half-state。
-	 * 扩展到新 job 时，memory 外节点先清零；memory 内 scope job 再累加并在达到阈值时扣 cut dual。
+	 * limited-memory SRI 中 forward label 的 state 表示从 source 扫到当前点后的剩余 half-state。
+	 * node-memory 的非 memory job 会清零且不计入；arc-memory 的非 memory arc 只清零，
+	 * 当前 head job 若属于 scope 仍作为新段起点计入。
 	 */
-	private double applySriForwardExtensionShift(byte[] states, PackedBitSet visitedBeforeExtension, int job) {
+	private double applySriForwardExtensionShift(byte[] states, PackedBitSet visitedBeforeExtension, int from, int job) {
 		if (!sriPricingEnabled || job <= 0 || job > data.n) {
 			return 0.0;
 		}
 		double shift = 0.0;
 		if (limitedMemorySriPricing) {
 			for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
-				if (!sriMemoryByCut.get(sriIndex)[job]) {
+				TWETCut cut = sriCuts.get(sriIndex);
+				if (cut.hasMemoryArcs()) {
+					if (!isSriMemoryArc(sriIndex, from, job)) {
+						states[sriIndex] = 0;
+					}
+				} else if (!sriMemoryByCut.get(sriIndex)[job]) {
 					states[sriIndex] = 0;
 				}
 			}
 			for (int sriIndex : sriCutsByJob[job]) {
-				if (!sriMemoryByCut.get(sriIndex)[job]) {
+				TWETCut cut = sriCuts.get(sriIndex);
+				if (!cut.hasMemoryArcs() && !sriMemoryByCut.get(sriIndex)[job]) {
 					continue;
 				}
 				int next = states[sriIndex] + 1;
@@ -1033,22 +1065,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * lm-SRI 下 backward label 的 state 表示“从当前点向后，到第一个 memory 断点前”的剩余 half-state。
-	 * 因此向前 prepend 一个 job 时可以对称增量更新；这比恢复整个 suffix 重扫更准确也更便宜。
+	 * limited-memory SRI 中 backward label 的 state 表示按反向扩展顺序扫描 suffix 后的剩余 half-state。
+	 * prepend 一个 job 时，node-memory 按新 job 判断；arc-memory 按新扩展弧 (job,to) 判断是否延续旧 state。
+	 * arc 不在 memory 中只断开旧 state，不跳过当前 job 的新段贡献。
 	 */
-	private double applySriBackwardPrependShift(byte[] states, PackedBitSet visitedBeforeExtension, int job) {
+	private double applySriBackwardPrependShift(byte[] states, PackedBitSet visitedBeforeExtension, int job, int to) {
 		if (!sriPricingEnabled || job <= 0 || job > data.n) {
 			return 0.0;
 		}
 		double shift = 0.0;
 		if (limitedMemorySriPricing) {
 			for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
-				if (!sriMemoryByCut.get(sriIndex)[job]) {
+				TWETCut cut = sriCuts.get(sriIndex);
+				if (cut.hasMemoryArcs()) {
+					if (!isSriMemoryArc(sriIndex, job, to)) {
+						states[sriIndex] = 0;
+					}
+				} else if (!sriMemoryByCut.get(sriIndex)[job]) {
 					states[sriIndex] = 0;
 				}
 			}
 			for (int sriIndex : sriCutsByJob[job]) {
-				if (!sriMemoryByCut.get(sriIndex)[job]) {
+				TWETCut cut = sriCuts.get(sriIndex);
+				if (!cut.hasMemoryArcs() && !sriMemoryByCut.get(sriIndex)[job]) {
 					continue;
 				}
 				int next = states[sriIndex] + 1;
@@ -1892,7 +1931,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double sriShift;
 		if (sriPricingEnabled) {
 			childSriCounts = copySriCounts(label.sriCounts);
-			sriShift = applySriForwardExtensionShift(childSriCounts, label.visitedSet, nextJob);
+			sriShift = applySriForwardExtensionShift(childSriCounts, label.visitedSet, label.jid, nextJob);
 			childSriPenalty = label.sriPenalty + sriShift;
 		} else {
 			childSriCounts = copySriCounts(label.sriCounts);
@@ -1969,7 +2008,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double sriShift;
 		if (sriPricingEnabled) {
 			childSriCounts = copySriCounts(label.sriCounts);
-			sriShift = applySriBackwardPrependShift(childSriCounts, label.visitedSet, prevJob);
+			sriShift = applySriBackwardPrependShift(childSriCounts, label.visitedSet, prevJob,
+					label.isSinkRoot ? node.sinkId() : label.jid);
 			childSriPenalty = label.sriPenalty + sriShift;
 		} else {
 			childSriCounts = copySriCounts(label.sriCounts);
@@ -2475,8 +2515,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-13: SRI 状态在单侧扩展时只知道该半路径内部是否已经达到第二个 job。
-	 * 拼接时如果左右半路径分别贡献一个不同 job，完整 route 才触发一次 SRI，需要在这里补回。
+	 * 2026-06-13: full-SRI 状态在单侧扩展时只知道该半路径内部是否已经触发。
+	 * 拼接时如果左右半路径各贡献一个不同 scope job，完整 route 才触发一次 SRI，需要在这里补回。
 	 */
 	private double sriJoinShift(ForwardLabel forward, BackwardLabel backward) {
 		if (!sriPricingEnabled) {
@@ -2488,7 +2528,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			int backwardCount = backward.sriCounts[sriIndex];
 			double dual = sriDuals.get(sriIndex).doubleValue();
 			if (forwardCount > 1 && backwardCount > 1) {
-				// 两半各自已经扣过一次，同一个完整 route 只能扣一次。
+				// 两半各自已经扣过一次，同一条完整 route 只应扣一次。
 				shift += dual;
 			} else if (forwardCount == 1 && backwardCount == 1
 					&& sriHalvesContainDifferentScopeJobs(forward, backward, sriScopes.get(sriIndex))) {
@@ -2499,8 +2539,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * lm-SRI join 只需要检查 crossing arc 两侧是否把同一 cut 的 residual half-state 拼成一次触发。
-	 * backward state 已按“当前点向后第一个 memory 断点前”的语义维护，因此无需恢复完整序列重扫。
+	 * limited-memory join 只检查 crossing arc 两侧是否把同一 cut 的 residual half-state 拼成一次触发。
+	 * node-memory 的连续性由 backward 首节点是否在 memory 中体现；arc-memory 还必须要求 crossing arc 在该 cut 的 memory arcs 中。
 	 */
 	private double limitedMemorySriJoinShift(ForwardLabel forward, BackwardLabel backward) {
 		if (!sriPricingEnabled) {
@@ -2508,6 +2548,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		double shift = 0.0;
 		for (int sriIndex = 0; sriIndex < sriCutIds.size(); sriIndex++) {
+			if (sriCuts.get(sriIndex).hasMemoryArcs() && !isSriMemoryArc(sriIndex, forward.jid, backward.jid)) {
+				continue;
+			}
 			if (forward.sriCounts[sriIndex] + backward.sriCounts[sriIndex] >= 2) {
 				shift -= sriDuals.get(sriIndex).doubleValue();
 			}

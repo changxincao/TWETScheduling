@@ -209,7 +209,7 @@ public class TWETBPCConfig {
 	public double subsetRowCutMinimumViolationValue = 1.1;
 	/** 2026-06-13: subset-row cut 扫描停止阈值；低于该行值的候选不再加入。 */
 	public double subsetRowCutMinimumThreshold = 1.02;
-	/** 2026-06-14: subset-row cut memory 口径；full 保持旧 SRI，nodeMemory 使用 lm-SRI。 */
+	/** 2026-06-15: subset-row cut memory 口径；full 保持旧 SRI，nodeMemory/arcMemory 使用 limited-memory SRI。 */
 	public String subsetRowCutMemoryMode = "full";
 	/** 判断是否整数时使用的容差。 */
 	public double branchingTolerance = 1e-6;

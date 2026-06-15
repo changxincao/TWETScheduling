@@ -855,10 +855,10 @@ root 还没有分支禁弧或 pricingOnly 禁弧约束，早期 `nodeDiag forbid
 
 93. 2026-06-15 将 full-domain comparison 默认启发式上限改为 `1500/5000` 并完整闭合 40 任务
 
-在前一轮 `150/1000` 过小、`100000/100000` 又过大的对照基础上，本轮把 `GCBBFullDomainComparisonTest` 的实验入口默认值改为 `maxHeuristicColumns=1500, heuristicPoolSize=5000`。主配置 `TWETBPCConfig` 中旧 VRP 口径的 `150/1000` 仍保留不动，避免影响非 full-domain comparison 的默认求解语义。
+在前一轮 `150/1000` 过小、`100000/100000` 又过大的对照基础上，本轮先把 `GCBBFullDomainComparisonTest` 的实验入口默认值改为 `maxHeuristicColumns=1500, heuristicPoolSize=5000`，随后将 `TWETBPCConfig` 的全局默认也同步改为 `1500/5000`。原因是列多一点主要增加 RMP 规模，当前观察并不构成主要瓶颈；列少反而会把负列分批加入，增加 LP/pricing 轮数和实验波动。
 
 用同一套 normal ng-DSSR nearestK 配置重新求解 `data/40-2/wet040_001_2m.dat` 到收敛。配置仍为 ALNS seed、RMIH 4s、`completionBound=allCycles`、`completionBoundArcFixing=true`、`completionBoundSubtreeArcEliminationPricingOnly=true`、`midpointProbe=true`、同 node probe 复用、`joinBestMode=best_ub`、`ngDssrInitialMode=nearestK`、`ngDssrInitialSize=8`、`ngDssrRouteUpdateLimit=10`，并关闭无向 adjacency branching。结果为 `FINISHED`，`incumbent=bound=22580`，总时间 `813.249s`，处理 `149` 个节点，pricing 调用 `4070` 次，总加列 `211279`，最终列池 `211279`，validator 为 `true`。
 
 阶段表现上，root 为 `116.061s`，heuristic pricing `34.557s/47 calls/add9057`，exact pricing `62.565s/11 calls/add361`，RMIH 在 root 找到 `22582`；后续在 node 50 附近仍为 `22582/22561.2/gap≈0.0921%`，随后继续推进并在中段把 incumbent 改进到 `22580`，最终 node149 将 bound 抬到 `22580` 闭合。与 `100000/100000` 的 `maxNodes=50` 对照相比，`1500/5000` 在前 50 个节点没有明显削弱列生成，root 仍加到同样的 `9057` 条 heuristic 负列，且 root heuristic 时间更低；与 `150/1000` 相比则明显避免了 root 中负列分批过细导致的 LP/pricing 轮数膨胀。
 
-当前结论是：`1500/5000` 比 `150/1000` 稳定得多，又比 `100000/100000` 更合理，适合作为 full-domain comparison 入口的默认启发式 pricing 上限。它不是全局主配置默认值，后续若要推广到正式 BPC 默认配置，还需要继续比较其他 40/50 任务实例。
+当前结论是：`1500/5000` 比 `150/1000` 稳定得多，又比 `100000/100000` 更合理，因此已提升为当前全局默认启发式 pricing 上限。后续若在更大规模上发现 RMP 规模成为主瓶颈，再考虑按节点深度、root/child 或收益阶段做自适应收缩，而不是恢复统一小上限。

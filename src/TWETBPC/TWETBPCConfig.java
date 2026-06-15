@@ -168,12 +168,12 @@ public class TWETBPCConfig {
 	public double bidirectionalMidpointProbeExactTimeTieTolerance = 0.10;
 	/** 2026-06-08: exact 耗时接近时，F/B kept ratio 至少改善该比例才替换历史最快 Tmid。 */
 	public double bidirectionalMidpointProbeExactBalanceImprovementTolerance = 0.30;
-	/** 2026-05-18: 对应旧 VRP Configure.addin_size，启发式定价最多返回给 RMP 的优质负 reduced-cost 列数。 */
-	public int maxHeuristicPricingColumns = 150;
+	/** 2026-06-15: 40 任务测试显示 150/1000 过小会增加 pricing 轮数和波动，默认放宽到 1500。 */
+	public int maxHeuristicPricingColumns = 1500;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */
 	public int heuristicPricingSeedColumns = 30;
-	/** 2026-05-18: 对应旧 VRP Configure.m_gen_size，本地负 reduced-cost 候选池生成上限。 */
-	public int heuristicPricingPoolSize = 1000;
+	/** 2026-06-15: 本地负 reduced-cost 候选池生成上限；与 maxHeuristicPricingColumns 配套放宽到 5000。 */
+	public int heuristicPricingPoolSize = 5000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_iteration_number，每条 seed 的 tabu 搜索轮数。 */
 	public int heuristicPricingTabuIterations = 50;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_tenure，tabu 禁忌长度。 */

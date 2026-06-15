@@ -838,3 +838,11 @@ root-only 运行结果为 `NODE_LIMIT`，`incumbent=22582`，`bound=22490`，gap
 `maxNodes=2` 复跑结果为 `NODE_LIMIT`，上下界仍为 `22582/22490`，总时间 `129.126s`，exact pricing `64.247s/15 calls`，validator 为 `true`。root 是主要耗时，node2 只用 `9.749s`，其中 pricing `7.310s`，exact `5.046s/4 calls`，子节点继续固定 `79` 条 pricingOnly arc。当前结果说明这套配置在 40 任务上能够正常推进，根节点能把 gap 压到约 `0.4%`，但 root pricing 仍是大头；后续若要完整闭合 40 任务，需要继续看后续节点是否能靠 branching/RMIH 收敛，而不是只优化 root。
 
 补跑 `maxNodes=50`，其余配置不变，外层 15 分钟硬限时内正常结束。结果为 `NODE_LIMIT`，`incumbent=22582`，`bound=22561.2`，gap `0.0921%`，总时间 `468.030s`，root 时间约 `129.013s`，exact pricing `247.927s/416 calls`，heuristic pricing `121.479s/1181 calls`，LP `27.650s`，总列池 `68841`，validator 为 `true`。节点 1 仍是最大单点耗时，后续节点通常为数秒到十余秒，node50 后队列仍有 `27` 个节点。该结果说明当前 normal ng-DSSR nearestK 组件全开后，在 40 任务上能够持续收紧下界，从 root gap `0.4074%` 降到 `0.0921%`，但小 gap 阶段需要继续处理较多 arc-branch 节点，完整闭合预计仍要明显超过 8 分钟。
+
+91. 2026-06-15 40 任务 root 耗时原因拆解
+
+`wet040_001_2m` root 慢的主因不是 master LP 或 RMIH，而是根节点列生成从很稀的初始池开始，需要补出大量负 reduced-cost 列。root 初始只有 `100` 条 seed columns，第一批 heuristic pricing 连续 16 轮就把 pool 从 `100` 扩到 `8894`，累计新增 `8794` 条；整个 root heuristic pricing 共 `47` 次、加 `9057` 条、耗时约 `45.6s`。这说明 root 的 LP dual 下存在大量明显 profitable 的局部列，启发式需要多轮把这些列灌进 RMP。
+
+exact pricing 的耗时主要来自 completion bound 的反复构造和最终证明，而不是 join 本身失控。root exact pricing 共 `11` 次、加 `361` 条、耗时约 `62.2s`。早期 exact 调用中 completion bound buildMs 多在 `6.1s~6.9s`，`completionBoundInternal merge` 约 `5.7万~6.2万` 次；join pairs 虽有上万，但大量被 `joinBest` 和函数剪枝压掉。由于每轮 heuristic/exact 加列后 LP dual 都会变，root 的 completion bound 不能简单复用旧 dual 下的函数，因此这些构造成本会重复出现。后期 bound 可复用或 exact 快很多，但还需要最后一次 generated=0 的证明。
+
+root 还没有分支禁弧或 pricingOnly 禁弧约束，早期 `nodeDiag forbiddenJobArcs/pricingOnlyJobArcs=0/0`，pricing 图基本是完整 40-job 图；只有 root 处理结束后 subtree 才固定 `1186/1560` 条 pricingOnly arc，供子节点使用。因此子节点图明显更小，node2 之后每个节点通常只需数秒到十余秒。root 后处理中的 RMIH 约 `2.3s`、subtree arc elimination 约 `6.9s`、LP 约 `2.5s`，都不是根节点 `~120s` 的主因。

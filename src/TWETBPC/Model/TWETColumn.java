@@ -139,6 +139,18 @@ public final class TWETColumn {
 		return to == sinkId && sequence.get(sequence.size() - 1) == from;
 	}
 
+	/**
+	 * 判断列中是否连续出现 first -> middle -> third。
+	 */
+	public boolean visitsArcPair(int first, int middle, int third) {
+		for (int i = 2; i < sequence.size(); i++) {
+			if (sequence.get(i - 2) == first && sequence.get(i - 1) == middle && sequence.get(i) == third) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	@Override
 	public String toString() {
 		return "TWETColumn{id=" + id + ", seq=" + sequence + ", cost=" + cost + ", source=" + source + "}";

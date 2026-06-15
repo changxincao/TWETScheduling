@@ -155,4 +155,15 @@ public final class TWETMasterSolution {
 		return Utility.compareGt(getArcValue(pool, from, to, sinkId), 0.0);
 	}
 
+	public double getArcPairValue(Pool pool, int firstJob, int middleJob, int thirdJob) {
+		double value = 0.0;
+		for (Map.Entry<Integer, Double> entry : columnValues.entrySet()) {
+			TWETColumn column = pool.getColumn(entry.getKey());
+			if (column.visitsArcPair(firstJob, middleJob, thirdJob)) {
+				value += entry.getValue();
+			}
+		}
+		return value;
+	}
+
 }

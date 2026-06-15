@@ -90,7 +90,8 @@ public final class CompletionBoundSubtreeArcEliminator {
 			for (int toJob = 1; toJob <= data.n; toJob++) {
 				if (fromJob == toJob || node.isArcForbidden(fromJob, toJob)
 						|| node.isPricingOnlyArcForbidden(fromJob, toJob)
-						|| node.getArcState(fromJob, toJob) == Node.ARC_REQUIRED) {
+						|| node.getArcState(fromJob, toJob) == Node.ARC_REQUIRED
+						|| node.isArcRequiredByArcPair(fromJob, toJob)) {
 					continue;
 				}
 				result.candidates++;
@@ -251,6 +252,7 @@ public final class CompletionBoundSubtreeArcEliminator {
 			for (int[] arc : fixedArcs) {
 				if (node.getArcState(arc[0], arc[1]) == Node.ARC_REQUIRED
 						|| node.getAdjacencyPairState(arc[0], arc[1]) == Node.ADJACENCY_REQUIRED
+						|| node.isArcRequiredByArcPair(arc[0], arc[1])
 						|| node.isArcForbidden(arc[0], arc[1])) {
 					continue;
 				}
@@ -268,6 +270,7 @@ public final class CompletionBoundSubtreeArcEliminator {
 			for (int[] arc : fixedArcs) {
 				if (node.getArcState(arc[0], arc[1]) == Node.ARC_REQUIRED
 						|| node.getAdjacencyPairState(arc[0], arc[1]) == Node.ADJACENCY_REQUIRED
+						|| node.isArcRequiredByArcPair(arc[0], arc[1])
 						|| node.isArcForbidden(arc[0], arc[1]) || node.isPricingOnlyArcForbidden(arc[0], arc[1])) {
 					continue;
 				}

@@ -57,6 +57,7 @@ public class LP {
 	private IloRange machineRange;
 	private HashMap<Long, IloRange> arcBranchRanges;
 	private HashMap<Long, IloRange> adjacencyBranchRanges;
+	private HashMap<Long, IloRange> arcPairBranchRanges;
 	private HashMap<Integer, IloRange> subsetRowCutRanges;
 	private ArrayList<Integer> activeSubsetRowPricingCutIds;
 	private ArrayList<Double> activeSubsetRowPricingDuals;
@@ -68,6 +69,7 @@ public class LP {
 	private double[] jobDual;
 	private double machineDual;
 	private double[][] arcDual;
+	private HashMap<Long, Double> arcPairDual;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
 		this.data = data;
@@ -77,6 +79,7 @@ public class LP {
 		this.activeCutIds = new ArrayList<Integer>();
 		this.jobDual = new double[data.n + 1];
 		this.arcDual = new double[data.n + 2][data.n + 2];
+		this.arcPairDual = new HashMap<Long, Double>();
 		this.feasibilityRepairMode = false;
 	}
 
@@ -189,6 +192,15 @@ public class LP {
 		return arcDual[from][to];
 	}
 
+	public double getArcPairDual(int first, int middle, int third) {
+		Double dual = arcPairDual.get(Long.valueOf(arcPairKey(first, middle, third)));
+		return dual == null ? 0.0 : dual.doubleValue();
+	}
+
+	public boolean hasArcPairDuals() {
+		return arcPairDual != null && !arcPairDual.isEmpty();
+	}
+
 	public int addColumns(List<Integer> columnIds) {
 		int added = 0;
 		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedColumnIds);
@@ -283,6 +295,7 @@ public class LP {
 		repairSlackVars = new ArrayList<IloNumVar>();
 		arcBranchRanges = new HashMap<Long, IloRange>();
 		adjacencyBranchRanges = new HashMap<Long, IloRange>();
+		arcPairBranchRanges = new HashMap<Long, IloRange>();
 		subsetRowCutRanges = new HashMap<Integer, IloRange>();
 		activeSubsetRowPricingCutIds = new ArrayList<Integer>();
 		activeSubsetRowPricingDuals = new ArrayList<Double>();
@@ -294,6 +307,7 @@ public class LP {
 		buildMachineConstraint();
 		buildArcBranchConstraints();
 		buildAdjacencyBranchConstraints();
+		buildArcPairBranchConstraints();
 		buildSubsetRowCutConstraints();
 		buildOutsourcingTariffConstraints();
 		if (feasibilityRepairMode) {
@@ -394,6 +408,11 @@ public class LP {
 		addAdjacencyBranchConstraints(node.getRequiredAdjacencyPairs(), true);
 	}
 
+	private void buildArcPairBranchConstraints() throws IloException {
+		addArcPairBranchConstraints(node.getForbiddenArcPairs(), false);
+		addArcPairBranchConstraints(node.getRequiredArcPairs(), true);
+	}
+
 	private void addAdjacencyBranchConstraints(List<int[]> pairs, boolean required) throws IloException {
 		int sink = node.sinkId();
 		for (int[] pair : pairs) {
@@ -410,6 +429,25 @@ public class LP {
 			IloRange range = required ? cplex.addGe(expr, 1.0, "requiredAdjacency_" + first + "_" + second)
 					: cplex.addEq(expr, 0.0, "forbiddenAdjacency_" + first + "_" + second);
 			adjacencyBranchRanges.put(Long.valueOf(pairKey(first, second)), range);
+		}
+	}
+
+	private void addArcPairBranchConstraints(List<int[]> triples, boolean required) throws IloException {
+		for (int[] triple : triples) {
+			int first = triple[0];
+			int middle = triple[1];
+			int third = triple[2];
+			IloLinearNumExpr expr = cplex.linearNumExpr();
+			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
+				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
+				if (column.visitsArcPair(first, middle, third)) {
+					expr.addTerm(1.0, lambdaVars[idx]);
+				}
+			}
+			IloRange range = required ? cplex.addGe(expr, 1.0,
+					"requiredArcPair_" + first + "_" + middle + "_" + third)
+					: cplex.addEq(expr, 0.0, "forbiddenArcPair_" + first + "_" + middle + "_" + third);
+			arcPairBranchRanges.put(Long.valueOf(arcPairKey(first, middle, third)), range);
 		}
 	}
 
@@ -502,6 +540,15 @@ public class LP {
 				addRepairSlack(range, coeff,
 						"adjacencyBranchSlack_" + node.getRepairFrom() + "_" + node.getRepairTo(), penalty);
 			}
+		} else if (type == Node.REPAIR_ARC_PAIR_FORBIDDEN || type == Node.REPAIR_ARC_PAIR_REQUIRED) {
+			IloRange range = arcPairBranchRanges.get(Long.valueOf(arcPairKey(node.getRepairFrom(), node.getRepairTo(),
+					node.getRepairThird())));
+			if (range != null) {
+				double coeff = type == Node.REPAIR_ARC_PAIR_REQUIRED ? 1.0 : -1.0;
+				addRepairSlack(range, coeff,
+						"arcPairBranchSlack_" + node.getRepairFrom() + "_" + node.getRepairTo() + "_"
+								+ node.getRepairThird(), penalty);
+			}
 		} else if (type == Node.REPAIR_TARIFF_FORBIDDEN || type == Node.REPAIR_TARIFF_REQUIRED) {
 			int segment = node.getRepairSegment();
 			if (tariffBranchRanges != null && segment >= 0 && segment < tariffBranchRanges.length
@@ -538,6 +585,14 @@ public class LP {
 			int first = decodeFrom(entry.getKey().longValue());
 			int second = decodeTo(entry.getKey().longValue());
 			if (node.columnCoversAdjacencyPair(column, first, second)) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			}
+		}
+		for (Map.Entry<Long, IloRange> entry : arcPairBranchRanges.entrySet()) {
+			int first = decodeArcPairFirst(entry.getKey().longValue());
+			int middle = decodeArcPairMiddle(entry.getKey().longValue());
+			int third = decodeArcPairThird(entry.getKey().longValue());
+			if (column.visitsArcPair(first, middle, third)) {
 				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
 			}
 		}
@@ -664,6 +719,9 @@ public class LP {
 			arcDual[first][second] += dual;
 			arcDual[second][first] += dual;
 		}
+		for (Map.Entry<Long, IloRange> entry : arcPairBranchRanges.entrySet()) {
+			arcPairDual.put(entry.getKey(), Double.valueOf(cplex.getDual(entry.getValue())));
+		}
 		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
 			double dual = cplex.getDual(entry.getValue());
 			if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
@@ -743,6 +801,9 @@ public class LP {
 		if (activeSubsetRowPricingDuals != null) {
 			activeSubsetRowPricingDuals.clear();
 		}
+		if (arcPairDual != null) {
+			arcPairDual.clear();
+		}
 	}
 
 	private long arcKey(int from, int to) {
@@ -755,12 +816,32 @@ public class LP {
 		return arcKey(a, b);
 	}
 
+	private long arcPairKey(int first, int middle, int third) {
+		long base = data.n + 2L;
+		return ((long) first) * base * base + ((long) middle) * base + third;
+	}
+
 	private int decodeFrom(long key) {
 		return (int) (key / (data.n + 2L));
 	}
 
 	private int decodeTo(long key) {
 		return (int) (key % (data.n + 2L));
+	}
+
+	private int decodeArcPairFirst(long key) {
+		long base = data.n + 2L;
+		return (int) (key / (base * base));
+	}
+
+	private int decodeArcPairMiddle(long key) {
+		long base = data.n + 2L;
+		return (int) ((key / base) % base);
+	}
+
+	private int decodeArcPairThird(long key) {
+		long base = data.n + 2L;
+		return (int) (key % base);
 	}
 
 	private static final class TariffSegment {

@@ -265,6 +265,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 				return false;
 			}
 		}
+		for (int i = 2; i < sequence.size(); i++) {
+			if (node.isArcPairForbidden(sequence.get(i - 2).intValue(), sequence.get(i - 1).intValue(),
+					sequence.get(i).intValue())) {
+				return false;
+			}
+		}
 		return !isPricingArcForbidden(node, sequence.get(sequence.size() - 1).intValue(), node.sinkId());
 	}
 
@@ -289,8 +295,18 @@ public class HeuristicPricingEngine implements PricingEngine {
 			reducedCost -= lp.getArcDual(prev, job);
 			prev = job;
 		}
+		reducedCost += arcPairReducedCost(sequence, lp);
 		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());
 		return reducedCost;
+	}
+
+	private double arcPairReducedCost(List<Integer> sequence, LP lp) {
+		double value = 0.0;
+		for (int i = 2; i < sequence.size(); i++) {
+			value -= lp.getArcPairDual(sequence.get(i - 2).intValue(), sequence.get(i - 1).intValue(),
+					sequence.get(i).intValue());
+		}
+		return value;
 	}
 
 	private final class TabuRouteState {
@@ -494,14 +510,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 			// 机器真实成本变化由分段函数拼接给出；dual 部分只需要替换受影响的 job 和两三条弧。
 			return currentReducedCost + candidateCost - cost + sriRemoveDelta(pos)
 					+ lp.getJobDual(removedJob) + lp.getArcDual(prev, removedJob)
-					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next);
+					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next)
+					+ arcPairReducedCostAfterRemove(pos, lp) - arcPairReducedCost(sequence, lp);
 		}
 
 		private double reducedCostAfterAdd(int pos, int job, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() ? lp.getNode().sinkId() : sequence.get(pos).intValue();
 			return currentReducedCost + candidateCost - cost + sriAddDelta(pos, job) - lp.getJobDual(job)
-					- lp.getArcDual(prev, job) - lp.getArcDual(job, next) + lp.getArcDual(prev, next);
+					- lp.getArcDual(prev, job) - lp.getArcDual(job, next) + lp.getArcDual(prev, next)
+					+ arcPairReducedCostAfterAdd(pos, job, lp) - arcPairReducedCost(sequence, lp);
 		}
 
 		private double reducedCostAfterExchange(int pos, int job, int removedJob, double candidateCost, LP lp) {
@@ -509,7 +527,56 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
 			return currentReducedCost + candidateCost - cost + sriExchangeDelta(pos, removedJob, job)
 					+ lp.getJobDual(removedJob) - lp.getJobDual(job) + lp.getArcDual(prev, removedJob)
-					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job) - lp.getArcDual(job, next);
+					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job) - lp.getArcDual(job, next)
+					+ arcPairReducedCostAfterExchange(pos, job, lp) - arcPairReducedCost(sequence, lp);
+		}
+
+		private double arcPairReducedCostAfterRemove(int removedPos, LP lp) {
+			double value = 0.0;
+			int a = 0;
+			int b = 0;
+			for (int i = 0; i < sequence.size(); i++) {
+				if (i == removedPos) {
+					continue;
+				}
+				int c = sequence.get(i).intValue();
+				if (a > 0 && b > 0) {
+					value -= lp.getArcPairDual(a, b, c);
+				}
+				a = b;
+				b = c;
+			}
+			return value;
+		}
+
+		private double arcPairReducedCostAfterAdd(int pos, int job, LP lp) {
+			double value = 0.0;
+			int a = 0;
+			int b = 0;
+			for (int i = 0; i <= sequence.size(); i++) {
+				int c = i == pos ? job : sequence.get(i < pos ? i : i - 1).intValue();
+				if (a > 0 && b > 0) {
+					value -= lp.getArcPairDual(a, b, c);
+				}
+				a = b;
+				b = c;
+			}
+			return value;
+		}
+
+		private double arcPairReducedCostAfterExchange(int pos, int job, LP lp) {
+			double value = 0.0;
+			int a = 0;
+			int b = 0;
+			for (int i = 0; i < sequence.size(); i++) {
+				int c = i == pos ? job : sequence.get(i).intValue();
+				if (a > 0 && b > 0) {
+					value -= lp.getArcPairDual(a, b, c);
+				}
+				a = b;
+				b = c;
+			}
+			return value;
 		}
 
 		private double sriRemoveDelta(int pos) {
@@ -547,7 +614,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private boolean isRemoveCompatible(int pos, Node node) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? node.sinkId() : sequence.get(pos + 1).intValue();
-			return !isPricingArcForbidden(node, prev, next);
+			int prevPrev = pos <= 1 ? 0 : sequence.get(pos - 2).intValue();
+			int nextNext = pos >= sequence.size() - 2 ? node.sinkId() : sequence.get(pos + 2).intValue();
+			return !isPricingArcForbidden(node, prev, next) && !node.isArcPairForbidden(prevPrev, prev, next)
+					&& !node.isArcPairForbidden(prev, next, nextNext);
 		}
 
 		private boolean isInsertCompatible(int pos, int job, boolean replace, Node node) {
@@ -555,7 +625,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int suffixStart = replace ? pos + 1 : pos;
 			int prev = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
 			int next = suffixStart >= sequence.size() ? node.sinkId() : sequence.get(suffixStart).intValue();
-			return !isPricingArcForbidden(node, prev, job) && !isPricingArcForbidden(node, job, next);
+			return !isPricingArcForbidden(node, prev, job) && !isPricingArcForbidden(node, job, next)
+					&& (prev <= 0 || prefixEnd == 0
+							|| !node.isArcPairForbidden(sequence.get(prefixEnd - 1).intValue(), prev, job))
+					&& (next > data.n || suffixStart >= sequence.size() - 1
+							|| !node.isArcPairForbidden(job, next, sequence.get(suffixStart + 1).intValue()))
+					&& !node.isArcPairForbidden(prev, job, next);
 		}
 
 		private void rebuild() {

@@ -836,3 +836,5 @@ SRI bound 初始时只是基础 bound 的拷贝：`m_ftsr_bound = m_ft_bound`、
 root-only 运行结果为 `NODE_LIMIT`，`incumbent=22582`，`bound=22490`，gap `0.4074%`，总时间 `135.981s`，exact pricing `62.249s/11 calls`，heuristic pricing `45.608s/47 calls`，RMIH 找到可行上界并改进到 `22582`，subtree/pricingOnly 扫 `1560` 条候选、固定 `1186` 条 arc，validator 为 `true`。
 
 `maxNodes=2` 复跑结果为 `NODE_LIMIT`，上下界仍为 `22582/22490`，总时间 `129.126s`，exact pricing `64.247s/15 calls`，validator 为 `true`。root 是主要耗时，node2 只用 `9.749s`，其中 pricing `7.310s`，exact `5.046s/4 calls`，子节点继续固定 `79` 条 pricingOnly arc。当前结果说明这套配置在 40 任务上能够正常推进，根节点能把 gap 压到约 `0.4%`，但 root pricing 仍是大头；后续若要完整闭合 40 任务，需要继续看后续节点是否能靠 branching/RMIH 收敛，而不是只优化 root。
+
+补跑 `maxNodes=50`，其余配置不变，外层 15 分钟硬限时内正常结束。结果为 `NODE_LIMIT`，`incumbent=22582`，`bound=22561.2`，gap `0.0921%`，总时间 `468.030s`，root 时间约 `129.013s`，exact pricing `247.927s/416 calls`，heuristic pricing `121.479s/1181 calls`，LP `27.650s`，总列池 `68841`，validator 为 `true`。节点 1 仍是最大单点耗时，后续节点通常为数秒到十余秒，node50 后队列仍有 `27` 个节点。该结果说明当前 normal ng-DSSR nearestK 组件全开后，在 40 任务上能够持续收紧下界，从 root gap `0.4074%` 降到 `0.0921%`，但小 gap 阶段需要继续处理较多 arc-branch 节点，完整闭合预计仍要明显超过 8 分钟。

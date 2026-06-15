@@ -826,3 +826,13 @@ SRI bound 初始时只是基础 bound 的拷贝：`m_ftsr_bound = m_ft_bound`、
 本次实现保持正式 label reduced cost、dominance、join 和候选列过滤仍使用含 SRI 的 `frontier`；只在 completion-bound 剪枝中切换为 `noSriFrontier`。同时给 `FunctionLabel` 缓存 `noSriMinReducedCost`，scalar completion-bound 预筛也使用 no-SRI min 值，避免 scalar 分支仍按含 SRI 成本提前剪枝。这样当前 completion bound 与无 SRI 时的 all-cycle bound 口径一致：它只提供不含 SRI penalty 的松弛补全下界，可能偏弱，但不会因为 SRI 状态缺失而做更激进的 SR-bound 剪枝。
 
 验证：排除历史 `src/BPC` 包后，对当前 `src` 下 TWETBPC/Basic/Common/HEU/Output 相关 128 个 Java 文件执行 focused `javac -encoding UTF-8 -cp cplex.jar`，编译通过，仅有历史 deprecation warning。
+
+90. 2026-06-15 40 任务 normal ng-DSSR nearestK 组件全开浅层测试
+
+本轮先复查当前 normal ng-DSSR 相关计算路径，没有发现新的明显计算错误。`pricingOnly` 禁弧已经统一进入普通/旧 exact pricing、ng-DSSR、启发式 pricing 和 completion bound DP 构图；`ngDssrInitialNgSetMode` 当前支持 `empty/full/dualPair/reducedCostPair/nearestK`，本轮使用 `nearestK`；局部 `completionBoundArcFixing` 已跳过 pricingOnly 禁弧，避免重复扫描。focused `javac` 通过，仅有历史 deprecation warning。
+
+随后用 `data/40-2/wet040_001_2m.dat` 做 normal ng-DSSR nearestK 浅层测试。配置为：ALNS seed 开启，RMIH 开启且 time limit 为 `4s`，`completionBound=allCycles`，局部 `completionBoundArcFixing=true`，`completionBoundSubtreeArcEliminationPricingOnly=true`，`midpointProbe=true`，同 node probe 复用开启，`joinBestMode=best_ub`，`ngDssrInitialMode=nearestK`，`ngDssrInitialSize=8`，`ngDssrRouteUpdateLimit=10`，关闭 undirected adjacency branching。
+
+root-only 运行结果为 `NODE_LIMIT`，`incumbent=22582`，`bound=22490`，gap `0.4074%`，总时间 `135.981s`，exact pricing `62.249s/11 calls`，heuristic pricing `45.608s/47 calls`，RMIH 找到可行上界并改进到 `22582`，subtree/pricingOnly 扫 `1560` 条候选、固定 `1186` 条 arc，validator 为 `true`。
+
+`maxNodes=2` 复跑结果为 `NODE_LIMIT`，上下界仍为 `22582/22490`，总时间 `129.126s`，exact pricing `64.247s/15 calls`，validator 为 `true`。root 是主要耗时，node2 只用 `9.749s`，其中 pricing `7.310s`，exact `5.046s/4 calls`，子节点继续固定 `79` 条 pricingOnly arc。当前结果说明这套配置在 40 任务上能够正常推进，根节点能把 gap 压到约 `0.4%`，但 root pricing 仍是大头；后续若要完整闭合 40 任务，需要继续看后续节点是否能靠 branching/RMIH 收敛，而不是只优化 root。

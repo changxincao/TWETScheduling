@@ -34,4 +34,12 @@ completion bound 和 group-level join lower bound 没有三连片段状态维度
 
 复查中发现一个遗漏：`GCNGBBStyleBidirectionalNgDssr.tryGenerateColumn()` 在恢复 relaxed 序列后，原来没有像其他 exact pricing 一样在入池/记录 non-elementary route 前统一调用 `isSequenceCompatible()`。这会让 ng-DSSR 在极端情况下把违反 pricingOnly arc 或 forbidden arc-pair 的恢复序列加入候选，或者用它更新 ng-set。现已补上最终兼容性检查。该检查属于兜底验证，正常扩展和 join 已经会尽量避免产生非法序列，但 ng-DSSR 恢复序列是 relaxed 路径，保留最终检查更稳。
 
-当前还保留两个性能上的可优化点。第一，`Node.isArcRequiredByArcPair(from,to)` 现在按 required 三元片段列表扫描，分支深时可以在 node 或 eliminator 内缓存为布尔矩阵。第二，启发式 pricing 的 remove/add/exchange 当前按完整序列重算 arc-pair dual 增量，正确但可局部化为只看受影响的最多三个三元片段。由于 arc-pair branching 默认关闭，且 30 任务序列长度较小，这两点暂不影响正确性。
+复查当时还识别到两个性能上的可优化点。第一，`Node.isArcRequiredByArcPair(from,to)` 按 required 三元片段列表扫描，分支深时可以在 node 或 eliminator 内缓存为布尔矩阵。第二，启发式 pricing 的 remove/add/exchange 按完整序列重算 arc-pair dual 增量，正确但可局部化为只看受影响的最多三个三元片段。第 7 节已继续处理这两点。
+
+## 7. 2026-06-15 arc-pair 热路径优化
+
+继续把第 6 节提到的两个冗余点直接优化掉。`Node` 现在维护 `requiredArcPairArc[from][to]` 布尔缓存，`requireArcPair/forbidArcPair` 经由 `setArcPairState()` 更新状态时，只要 required 三元片段集合发生相关变化，就重建该缓存；`isArcRequiredByArcPair(from,to)` 变为 O(1) 查询。这样 `CompletionBoundSubtreeArcEliminator` 在扫描 O(n^2) 普通弧时，不再对每条弧重复扫描 required 三元片段列表。
+
+启发式 pricing 中，tabu remove/add/exchange 的 arc-pair dual 增量也改为局部计算。remove 只比较旧序列中包含被删点的三个三元片段和删除后新形成的两个三元片段；add 只比较插入前被打断的两个三元片段和插入后包含新 job 的三个三元片段；exchange 只比较替换位置附近的三个三元片段。该改动不改变 reduced-cost 语义，只把原来的整条序列重扫改成常数个 `getArcPairDual()` 查询。
+
+验证：`git diff --check` 通过；`Basic/Common/Output/TWETBPC/HEU` focused `javac` 通过；另用 10000 组随机序列对 add/remove/exchange 的局部 delta 与完整重扫结果做对拍，全部一致。

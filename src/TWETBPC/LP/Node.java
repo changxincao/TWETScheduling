@@ -61,6 +61,7 @@ public class Node implements Comparable<Node> {
 	private boolean[][] pricingOnlyForbiddenArc;
 	private byte[][] adjacencyPairState;
 	private HashMap<Long, Byte> arcPairState;
+	private boolean[][] requiredArcPairArc;
 	private byte[] tariffSegmentState;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
@@ -83,6 +84,7 @@ public class Node implements Comparable<Node> {
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.arcPairState = new HashMap<Long, Byte>();
+		this.requiredArcPairArc = new boolean[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
@@ -111,6 +113,10 @@ public class Node implements Comparable<Node> {
 			copy.adjacencyPairState[i] = adjacencyPairState[i].clone();
 		}
 		copy.arcPairState = new HashMap<Long, Byte>(arcPairState);
+		copy.requiredArcPairArc = new boolean[requiredArcPairArc.length][];
+		for (int i = 0; i < requiredArcPairArc.length; i++) {
+			copy.requiredArcPairArc[i] = requiredArcPairArc[i].clone();
+		}
 		copy.tariffSegmentState = tariffSegmentState.clone();
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
@@ -489,19 +495,8 @@ public class Node implements Comparable<Node> {
 	}
 
 	public boolean isArcRequiredByArcPair(int fromJob, int toJob) {
-		for (Map.Entry<Long, Byte> entry : arcPairState.entrySet()) {
-			if (entry.getValue() == null || entry.getValue().byteValue() != ARC_PAIR_REQUIRED) {
-				continue;
-			}
-			long key = entry.getKey().longValue();
-			int first = decodeArcPairFirst(key);
-			int middle = decodeArcPairMiddle(key);
-			int third = decodeArcPairThird(key);
-			if ((first == fromJob && middle == toJob) || (middle == fromJob && third == toJob)) {
-				return true;
-			}
-		}
-		return false;
+		return fromJob >= 0 && toJob >= 0 && fromJob < requiredArcPairArc.length
+				&& toJob < requiredArcPairArc[fromJob].length && requiredArcPairArc[fromJob][toJob];
 	}
 
 	private void setAdjacencyPairState(int firstJob, int secondJob, byte state) {
@@ -524,10 +519,30 @@ public class Node implements Comparable<Node> {
 			return;
 		}
 		long key = arcPairKey(firstJob, middleJob, thirdJob);
+		Byte oldState = arcPairState.get(Long.valueOf(key));
 		if (state == ARC_PAIR_FREE) {
 			arcPairState.remove(Long.valueOf(key));
 		} else {
 			arcPairState.put(Long.valueOf(key), Byte.valueOf(state));
+		}
+		byte old = oldState == null ? ARC_PAIR_FREE : oldState.byteValue();
+		if (old == ARC_PAIR_REQUIRED || state == ARC_PAIR_REQUIRED) {
+			rebuildRequiredArcPairArcCache();
+		}
+	}
+
+	private void rebuildRequiredArcPairArcCache() {
+		requiredArcPairArc = new boolean[data.n + 2][data.n + 2];
+		for (Map.Entry<Long, Byte> entry : arcPairState.entrySet()) {
+			if (entry.getValue() == null || entry.getValue().byteValue() != ARC_PAIR_REQUIRED) {
+				continue;
+			}
+			long key = entry.getKey().longValue();
+			int first = decodeArcPairFirst(key);
+			int middle = decodeArcPairMiddle(key);
+			int third = decodeArcPairThird(key);
+			requiredArcPairArc[first][middle] = true;
+			requiredArcPairArc[middle][third] = true;
 		}
 	}
 

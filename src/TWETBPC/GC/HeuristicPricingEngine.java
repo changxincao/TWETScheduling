@@ -511,7 +511,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return currentReducedCost + candidateCost - cost + sriRemoveDelta(pos)
 					+ lp.getJobDual(removedJob) + lp.getArcDual(prev, removedJob)
 					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next)
-					+ arcPairReducedCostAfterRemove(pos, lp) - arcPairReducedCost(sequence, lp);
+					+ arcPairReducedCostDeltaRemove(pos, lp);
 		}
 
 		private double reducedCostAfterAdd(int pos, int job, double candidateCost, LP lp) {
@@ -519,7 +519,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int next = pos == sequence.size() ? lp.getNode().sinkId() : sequence.get(pos).intValue();
 			return currentReducedCost + candidateCost - cost + sriAddDelta(pos, job) - lp.getJobDual(job)
 					- lp.getArcDual(prev, job) - lp.getArcDual(job, next) + lp.getArcDual(prev, next)
-					+ arcPairReducedCostAfterAdd(pos, job, lp) - arcPairReducedCost(sequence, lp);
+					+ arcPairReducedCostDeltaAdd(pos, job, lp);
 		}
 
 		private double reducedCostAfterExchange(int pos, int job, int removedJob, double candidateCost, LP lp) {
@@ -528,55 +528,94 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return currentReducedCost + candidateCost - cost + sriExchangeDelta(pos, removedJob, job)
 					+ lp.getJobDual(removedJob) - lp.getJobDual(job) + lp.getArcDual(prev, removedJob)
 					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job) - lp.getArcDual(job, next)
-					+ arcPairReducedCostAfterExchange(pos, job, lp) - arcPairReducedCost(sequence, lp);
+					+ arcPairReducedCostDeltaExchange(pos, job, lp);
 		}
 
-		private double arcPairReducedCostAfterRemove(int removedPos, LP lp) {
-			double value = 0.0;
-			int a = 0;
-			int b = 0;
-			for (int i = 0; i < sequence.size(); i++) {
-				if (i == removedPos) {
-					continue;
-				}
-				int c = sequence.get(i).intValue();
-				if (a > 0 && b > 0) {
-					value -= lp.getArcPairDual(a, b, c);
-				}
-				a = b;
-				b = c;
+		private double arcPairReducedCostDeltaRemove(int removedPos, LP lp) {
+			double removed = 0.0;
+			for (int start = removedPos - 2; start <= removedPos; start++) {
+				removed += arcPairContribution(start, lp);
 			}
-			return value;
+			double added = 0.0;
+			int newSize = sequence.size() - 1;
+			for (int start = removedPos - 2; start <= removedPos - 1; start++) {
+				added += arcPairContributionAfterRemove(start, removedPos, newSize, lp);
+			}
+			return added - removed;
 		}
 
-		private double arcPairReducedCostAfterAdd(int pos, int job, LP lp) {
-			double value = 0.0;
-			int a = 0;
-			int b = 0;
-			for (int i = 0; i <= sequence.size(); i++) {
-				int c = i == pos ? job : sequence.get(i < pos ? i : i - 1).intValue();
-				if (a > 0 && b > 0) {
-					value -= lp.getArcPairDual(a, b, c);
-				}
-				a = b;
-				b = c;
+		private double arcPairReducedCostDeltaAdd(int pos, int job, LP lp) {
+			double removed = 0.0;
+			for (int start = pos - 2; start <= pos - 1; start++) {
+				removed += arcPairContribution(start, lp);
 			}
-			return value;
+			double added = 0.0;
+			int newSize = sequence.size() + 1;
+			for (int start = pos - 2; start <= pos; start++) {
+				added += arcPairContributionAfterAdd(start, pos, job, newSize, lp);
+			}
+			return added - removed;
 		}
 
-		private double arcPairReducedCostAfterExchange(int pos, int job, LP lp) {
-			double value = 0.0;
-			int a = 0;
-			int b = 0;
-			for (int i = 0; i < sequence.size(); i++) {
-				int c = i == pos ? job : sequence.get(i).intValue();
-				if (a > 0 && b > 0) {
-					value -= lp.getArcPairDual(a, b, c);
-				}
-				a = b;
-				b = c;
+		private double arcPairReducedCostDeltaExchange(int pos, int job, LP lp) {
+			double removed = 0.0;
+			double added = 0.0;
+			for (int start = pos - 2; start <= pos; start++) {
+				removed += arcPairContribution(start, lp);
+				added += arcPairContributionAfterExchange(start, pos, job, lp);
 			}
-			return value;
+			return added - removed;
+		}
+
+		private double arcPairContribution(int start, LP lp) {
+			if (start < 0 || start + 2 >= sequence.size()) {
+				return 0.0;
+			}
+			return arcPairContribution(sequence.get(start).intValue(), sequence.get(start + 1).intValue(),
+					sequence.get(start + 2).intValue(), lp);
+		}
+
+		private double arcPairContributionAfterRemove(int start, int removedPos, int newSize, LP lp) {
+			if (start < 0 || start + 2 >= newSize) {
+				return 0.0;
+			}
+			return arcPairContribution(jobAfterRemove(start, removedPos), jobAfterRemove(start + 1, removedPos),
+					jobAfterRemove(start + 2, removedPos), lp);
+		}
+
+		private int jobAfterRemove(int index, int removedPos) {
+			return sequence.get(index < removedPos ? index : index + 1).intValue();
+		}
+
+		private double arcPairContributionAfterAdd(int start, int pos, int job, int newSize, LP lp) {
+			if (start < 0 || start + 2 >= newSize) {
+				return 0.0;
+			}
+			return arcPairContribution(jobAfterAdd(start, pos, job), jobAfterAdd(start + 1, pos, job),
+					jobAfterAdd(start + 2, pos, job), lp);
+		}
+
+		private int jobAfterAdd(int index, int pos, int job) {
+			if (index == pos) {
+				return job;
+			}
+			return sequence.get(index < pos ? index : index - 1).intValue();
+		}
+
+		private double arcPairContributionAfterExchange(int start, int pos, int job, LP lp) {
+			if (start < 0 || start + 2 >= sequence.size()) {
+				return 0.0;
+			}
+			return arcPairContribution(jobAfterExchange(start, pos, job), jobAfterExchange(start + 1, pos, job),
+					jobAfterExchange(start + 2, pos, job), lp);
+		}
+
+		private int jobAfterExchange(int index, int pos, int job) {
+			return index == pos ? job : sequence.get(index).intValue();
+		}
+
+		private double arcPairContribution(int first, int middle, int third, LP lp) {
+			return -lp.getArcPairDual(first, middle, third);
 		}
 
 		private double sriRemoveDelta(int pos) {

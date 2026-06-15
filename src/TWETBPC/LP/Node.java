@@ -526,7 +526,7 @@ public class Node implements Comparable<Node> {
 			arcPairState.put(Long.valueOf(key), Byte.valueOf(state));
 		}
 		byte old = oldState == null ? ARC_PAIR_FREE : oldState.byteValue();
-		if (old == ARC_PAIR_REQUIRED || state == ARC_PAIR_REQUIRED) {
+		if (old != state && (old == ARC_PAIR_REQUIRED || state == ARC_PAIR_REQUIRED)) {
 			rebuildRequiredArcPairArcCache();
 		}
 	}

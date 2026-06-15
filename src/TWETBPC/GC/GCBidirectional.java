@@ -356,7 +356,7 @@ public class GCBidirectional {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(label.jid, nextJob)
+		return !isPricingArcForbidden(node, label.jid, nextJob)
 				&& !node.isArcPairForbidden(previousForwardJob(label), label.jid, nextJob);
 	}
 
@@ -368,8 +368,18 @@ public class GCBidirectional {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(prevJob, successor)
+		return !isPricingArcForbidden(node, prevJob, successor)
 				&& !node.isArcPairForbidden(prevJob, successor, nextBackwardJob(label, node));
+	}
+
+	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
+		return node.isArcForbidden(fromJob, toJob)
+				|| (!ignorePricingOnlyArcsForNode(node) && node.isPricingOnlyArcForbidden(fromJob, toJob));
+	}
+
+	private boolean ignorePricingOnlyArcsForNode(Node node) {
+		return node != null && config.debugIgnorePricingOnlyArcsAtNode >= 0
+				&& node.id == config.debugIgnorePricingOnlyArcsAtNode;
 	}
 
 	private int previousForwardJob(ForwardLabel label) {
@@ -650,7 +660,7 @@ public class GCBidirectional {
 		}
 		Node node = lp.getNode();
 		int sink = node.sinkId();
-		if (node.isArcForbidden(label.jid, sink)) {
+		if (isPricingArcForbidden(node, label.jid, sink)) {
 			return;
 		}
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
@@ -671,7 +681,7 @@ public class GCBidirectional {
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
 				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
 			joinTerminalGroupsScanned++;
-			if (backward.visitedSet.contains(lastJob) || node.isArcForbidden(lastJob, backward.jid)) {
+			if (backward.visitedSet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
 				joinTerminalGroupsArcOrVisitPruned++;
 				continue;
 			}

@@ -43,3 +43,11 @@ completion bound 和 group-level join lower bound 没有三连片段状态维度
 启发式 pricing 中，tabu remove/add/exchange 的 arc-pair dual 增量也改为局部计算。remove 只比较旧序列中包含被删点的三个三元片段和删除后新形成的两个三元片段；add 只比较插入前被打断的两个三元片段和插入后包含新 job 的三个三元片段；exchange 只比较替换位置附近的三个三元片段。该改动不改变 reduced-cost 语义，只把原来的整条序列重扫改成常数个 `getArcPairDual()` 查询。
 
 验证：`git diff --check` 通过；`Basic/Common/Output/TWETBPC/HEU` focused `javac` 通过；另用 10000 组随机序列对 add/remove/exchange 的局部 delta 与完整重扫结果做对拍，全部一致。
+
+## 8. 2026-06-15 再次全面复查
+
+本次继续按“不要最后兜底过滤、约束应在扩展和 join 过程中生效”的口径复查。主线 `GCNGBBStyleBidirectional`、partial dominance、ng-DSSR 和启发式 pricing 已经使用 `isPricingArcForbidden()`，会同时考虑永久禁弧、pricingOnly 禁弧和 completion-bound fixing 禁弧；但仍可通过配置选中的旧 exact pricing 类只检查了 `node.isArcForbidden()`，没有处理 pricingOnly 禁弧。已补齐 `GC`、`GCBidirectional`、`GCBBAsymmetricBidirectional`、`GCBBStyleBidirectionalFullDomain` 和 `GCBBStyleBidirectionalFullDomainNodeJoin` 的扩展、到 sink 和 join 入口，使旧实验引擎也不会生成绕过 pricingOnly arc 的候选列。
+
+同时把 `Node` 中 required arc-pair 布尔缓存的重建条件收紧为“状态确实变化且 required 依赖集合可能变化”时才重建，避免重复设置同一 required 三元片段时做无意义的全表扫描。复查确认 `arcPairState` 没有绕过 `setArcPairState()` 的直接写入口，`copy()` 会复制缓存，因此该优化不改变语义。
+
+验证：`git diff --check` 通过；排除历史 `src/BPC` 包后，对 `Basic/Common/Output/TWETBPC/HEU` 相关源码执行 focused `javac -encoding UTF-8 -cp cplex.jar`，编译通过，仅有历史 deprecation warning。当前未发现新的正确性问题；剩余可优化点主要是旧 exact pricing helper 重复实现，后续若这些实验类继续长期保留，可以再统一抽成共享工具，当前先不做结构性重构。

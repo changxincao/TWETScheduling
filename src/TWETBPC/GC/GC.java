@@ -205,8 +205,18 @@ public class GC {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(label.jid, nextJob)
+		return !isPricingArcForbidden(node, label.jid, nextJob)
 				&& !node.isArcPairForbidden(previousJob(label), label.jid, nextJob);
+	}
+
+	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
+		return node.isArcForbidden(fromJob, toJob)
+				|| (!ignorePricingOnlyArcsForNode(node) && node.isPricingOnlyArcForbidden(fromJob, toJob));
+	}
+
+	private boolean ignorePricingOnlyArcsForNode(Node node) {
+		return node != null && config.debugIgnorePricingOnlyArcsAtNode >= 0
+				&& node.id == config.debugIgnorePricingOnlyArcsAtNode;
 	}
 
 	private int previousJob(Label label) {
@@ -416,7 +426,7 @@ public class GC {
 		}
 		Node node = lp.getNode();
 		int sink = node.sinkId();
-		if (node.isArcForbidden(label.jid, sink)) {
+		if (isPricingArcForbidden(node, label.jid, sink)) {
 			return;
 		}
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);

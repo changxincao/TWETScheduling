@@ -38,3 +38,11 @@
 ## 6. 当前结论
 
 adjacency 分支的问题主要来自“无向聚合关系”和 pricing 状态不匹配；`i-j-k` 连续片段分支更局部、更有向，左支可以直接在扩展端处理，理论上比 required adjacency 更稳。右支仍然可能带来 dual-based bound 偏差，但由于片段是有向且结构更具体，风险应低于无向 adjacency。当前先记录设计，不立即实现；后续建议在 011/30 这类已暴露 adjacency 问题的算例上做 A/B 测试。
+
+## 7. 2026-06-15 其他尽量不影响 pricing 的分支候选
+
+重新查阅 branch-and-price 常见 branching 分类后，当前判断是：真正“不改变 pricing 子问题结构”的分支主要来自 master 侧已有变量或聚合量。文献里常见分类包括 conventional variable branching、constraint/Ryan-Foster branching 和 follow-on/subproblem branching；其中 variable branching 对 pricing 结构影响最小，但 0-branch 往往很弱，Ryan-Foster/same-different 会要求 subproblem 强制同组或不同组，follow-on/arc 类分支则明确需要改 subproblem 扩展规则。
+
+落到当前 TWET 模型，已经存在且基本不改变 pricing 结构的分支是 `TariffSegmentBrancher` 和 `MachineCountBrancher`。前者只固定外包 tariff segment 的 master 变量 `z_s`，后者只调整机器数上下界；它们会改变 LP dual 和 master 可行域，但不会给 pricing label 增加新资源状态。还可以考虑新增的 master-only 分支包括：对单个外包变量 `y_j` 分支、对总外包数量 `sum y_j` 分支、对外包 baseline 总量分支，以及极端兜底的当前列变量 `lambda_r` 分支。不过 `y_j=1` 在当前覆盖行仍为 `>=` 时不能自动排除内部列重复覆盖该 job；如果要表达“该 job 必须外包且不能内部服务”，就必须禁止所有含 job 的内部列，这会影响 pricing。因此 `y_j` 分支只适合作为弱的 master 变量分支，不能当作完整的服务归属分支。
+
+不建议作为“完全不影响 pricing”的候选包括 Ryan-Foster 同机/不同机分支、无向 adjacency 分支、连续片段 `i-j-k` 分支和其他需要记录顺序状态的 follow-on 分支。它们不是不能用，而是会改变 pricing 扩展规则或使 completion bound / join lower bound 缺少状态，风险已经在 adjacency 和 arc-pair 实验里暴露。当前主线建议仍是：保留 tariff segment 与 machine count 作为必要 master 侧分支；关闭或降低 adjacency 优先级；route 结构分支优先使用 directed `ArcBrancher`。

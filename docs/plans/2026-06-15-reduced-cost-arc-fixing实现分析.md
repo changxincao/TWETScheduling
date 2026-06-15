@@ -117,3 +117,15 @@ PDF 中的 reduced-cost arc fixing 思路是正确的，但它的公式针对固
 4. 两者叠加：`solve=20.692s`，exact `8.916s/8 calls`。
 
 当前结论是：arc fixing 在这个口径下确实有用，不是完全被普通 completion-bound pruning 包含；但局部 fixing 和 pricingOnly subtree fixing 高度相关，叠加收益小于各自单独收益之和。推荐保留两个独立开关：局部 fixing 用于当前轮快速减少扩展，pricingOnly subtree 用于把可靠禁弧传递给子节点。永久 `forbidArc()` 仍不建议默认开，因为它会改变 RMP/filter/dual 路径。
+
+## 10. 2026-06-15 符号口径修正
+
+需要区分两个量。第一，arc 自身的 reduced cost 只是不含左右补全的局部项：
+
+`bar_c_ij = setupCost(i,j) - arcDual(i,j)`。
+
+第二，文档里的强制 arc 下界，严格说应记为 `hat_c_ij`，含义是所有经过 `(i,j)` 的完整列 reduced cost 的最乐观下界。当前代码用 completion bound 计算的正是这个量：
+
+`hat_c_ij = min_t { F_i(t) + bar_c_ij + B_j(t + setupTime(i,j) + p_j) }`。
+
+因此，用户提出的“直接用 completion bound 在 arc 左右两侧加一下”对应的是 `hat_c_ij`，不是 `bar_c_ij`。此前记录中把 `c_a` 同时用于这两个量，容易造成歧义。后续描述统一为：`bar_c_ij` 表示 arc 自身 reduced cost；`hat_c_ij` 表示强制包含该 arc 的完整列 reduced-cost 下界。

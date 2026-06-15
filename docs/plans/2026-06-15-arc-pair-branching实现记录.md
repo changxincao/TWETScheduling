@@ -27,3 +27,11 @@ completion bound 和 group-level join lower bound 没有三连片段状态维度
 在首版实现基础上，继续把仍可通过配置选中的旧 pricing 引擎补齐到同一语义，包括单向 `GC`、普通 `GCBidirectional`、`GCBBAsymmetricBidirectional`、`GCBBStyleBidirectionalFullDomain` 和 `GCBBStyleBidirectionalFullDomainNodeJoin`。现在这些引擎在扩展时都会检查 forbidden `i-j-k`，并把对应 arc-pair dual 写入 reduced cost；arc-join 会检查跨拼接边形成的三元片段，node-join 会检查拼接点两侧形成的三元片段。最终候选列入池前统一强制检查分支兼容性，不再只依赖 debug 开关。
 
 仍然保留的保守处理是：只要 active arc-pair dual 存在，缺少三元片段状态维度的 group lower bound / optimistic join lower bound 不用于剪枝，避免因为漏掉未来三元片段 dual 奖励而误剪负列。这样不同 pricing 引擎的差别主要回到各自的核心搜索、dominance、join 方式，而不是分支约束或 reduced-cost 口径不一致。
+
+## 6. 2026-06-15 全局复查与 ng-DSSR 修正
+
+本次围绕两个新增内容做全局复查：一是 `i-j-k` 连续片段分支在 LP、分支器、主线/旧 exact pricing、ng-DSSR、partial dominance、启发式 pricing 和列成本回算中的一致性；二是 reduced-cost arc fixing 与 required arc-pair 的兼容性。复查确认：LP 分支行、repair slack、dual 读取、动态加列系数、pricing 扩展/拼接处的 forbidden 检查、reduced-cost dual 符号，以及 `PricingColumnCostRechecker` 的 objective cost 反推口径是一致的；`CompletionBoundSubtreeArcEliminator` 会跳过 required arc-pair 依赖的普通弧，避免 subtree/permanent/pricingOnly arc fixing 与右支 required 片段互相冲突。
+
+复查中发现一个遗漏：`GCNGBBStyleBidirectionalNgDssr.tryGenerateColumn()` 在恢复 relaxed 序列后，原来没有像其他 exact pricing 一样在入池/记录 non-elementary route 前统一调用 `isSequenceCompatible()`。这会让 ng-DSSR 在极端情况下把违反 pricingOnly arc 或 forbidden arc-pair 的恢复序列加入候选，或者用它更新 ng-set。现已补上最终兼容性检查。该检查属于兜底验证，正常扩展和 join 已经会尽量避免产生非法序列，但 ng-DSSR 恢复序列是 relaxed 路径，保留最终检查更稳。
+
+当前还保留两个性能上的可优化点。第一，`Node.isArcRequiredByArcPair(from,to)` 现在按 required 三元片段列表扫描，分支深时可以在 node 或 eliminator 内缓存为布尔矩阵。第二，启发式 pricing 的 remove/add/exchange 当前按完整序列重算 arc-pair dual 增量，正确但可局部化为只看受影响的最多三个三元片段。由于 arc-pair branching 默认关闭，且 30 任务序列长度较小，这两点暂不影响正确性。

@@ -607,7 +607,8 @@ public class GCBBAsymmetricBidirectional {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(label.jid, nextJob);
+		return !node.isArcForbidden(label.jid, nextJob)
+				&& !node.isArcPairForbidden(previousForwardJob(label), label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -618,7 +619,19 @@ public class GCBBAsymmetricBidirectional {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(prevJob, successor);
+		return !node.isArcForbidden(prevJob, successor)
+				&& !node.isArcPairForbidden(prevJob, successor, nextBackwardJob(label, node));
+	}
+
+	private int previousForwardJob(ForwardLabel label) {
+		return label != null && label.father != null ? label.father.jid : 0;
+	}
+
+	private int nextBackwardJob(BackwardLabel label, Node node) {
+		if (label == null || label.isSinkRoot || label.father == null || label.father.isSinkRoot) {
+			return node.sinkId();
+		}
+		return label.father.jid;
 	}
 
 	/**
@@ -687,7 +700,7 @@ public class GCBBAsymmetricBidirectional {
 			return null;
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
-				- lp.getArcDual(label.jid, nextJob);
+				- lp.getArcDual(label.jid, nextJob) - lp.getArcPairDual(previousForwardJob(label), label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
 		nextFrontier.normalize(Direction.FORWARD);
 		if (nextFrontier.head == null) {
@@ -739,7 +752,8 @@ public class GCBBAsymmetricBidirectional {
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
-					- lp.getArcDual(prevJob, label.jid);
+					- lp.getArcDual(prevJob, label.jid)
+					- lp.getArcPairDual(prevJob, label.jid, nextBackwardJob(label, node));
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
 		nextFrontier.normalize(Direction.BACKWARD);
@@ -1093,7 +1107,7 @@ public class GCBBAsymmetricBidirectional {
 				- lp.getArcDual(lastJob, backward.jid);
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost + joinFixedReducedCost;
-		if (!Utility.compareLt(groupLB, joinThreshold)) {
+		if (!lp.hasArcPairDuals() && !Utility.compareLt(groupLB, joinThreshold)) {
 			joinTerminalGroupsCostPruned++;
 			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 				joinPairsBestBoundPruned++;
@@ -1108,7 +1122,7 @@ public class GCBBAsymmetricBidirectional {
 				continue;
 			}
 			double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
-			if (!Utility.compareLt(optimisticJoinLB, joinThreshold)) {
+			if (!lp.hasArcPairDuals() && !Utility.compareLt(optimisticJoinLB, joinThreshold)) {
 				joinPairsLowerBoundPruned++;
 				if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 					joinPairsBestBoundPruned++;
@@ -1125,6 +1139,12 @@ public class GCBBAsymmetricBidirectional {
 		}
 		joinPairsTried++;
 		if (forward.jid == backward.jid || visitedSetsIntersectForJoin(forward.visitedSet, backward.visitedSet)) {
+			joinPairsSetPruned++;
+			return;
+		}
+		Node node = lp.getNode();
+		if (node.isArcPairForbidden(previousForwardJob(forward), forward.jid, backward.jid)
+				|| node.isArcPairForbidden(forward.jid, backward.jid, nextBackwardJob(backward, node))) {
 			joinPairsSetPruned++;
 			return;
 		}
@@ -1155,7 +1175,9 @@ public class GCBBAsymmetricBidirectional {
 		}
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
 		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
-		joinCost.shiftYInPlace(joinFixedReducedCost);
+		double arcPairReducedCost = -lp.getArcPairDual(previousForwardJob(forward), forward.jid, backward.jid)
+				- lp.getArcPairDual(forward.jid, backward.jid, nextBackwardJob(backward, node));
+		joinCost.shiftYInPlace(joinFixedReducedCost + arcPairReducedCost);
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;
@@ -1332,7 +1354,7 @@ public class GCBBAsymmetricBidirectional {
 			return;
 		}
 		Node node = lp.getNode();
-		if (Configure.debugBPCPricingColumnCheck && !isSequenceCompatible(sequence, node)) {
+		if (!isSequenceCompatible(sequence, node)) {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
@@ -1404,6 +1426,12 @@ public class GCBBAsymmetricBidirectional {
 		}
 		for (int i = 1; i < sequence.size(); i++) {
 			if (node.isArcForbidden(sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
+				return false;
+			}
+		}
+		for (int i = 2; i < sequence.size(); i++) {
+			if (node.isArcPairForbidden(sequence.get(i - 2).intValue(), sequence.get(i - 1).intValue(),
+					sequence.get(i).intValue())) {
 				return false;
 			}
 		}

@@ -8,7 +8,6 @@ import java.util.HashSet;
 import java.util.PriorityQueue;
 
 import Basic.Data;
-import Common.Configure;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
@@ -595,7 +594,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(label.jid, nextJob);
+		return !node.isArcForbidden(label.jid, nextJob)
+				&& !node.isArcPairForbidden(previousForwardJob(label), label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -607,7 +607,19 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !node.isArcForbidden(prevJob, successor);
+		return !node.isArcForbidden(prevJob, successor)
+				&& !node.isArcPairForbidden(prevJob, successor, nextBackwardJob(label, node));
+	}
+
+	private int previousForwardJob(ForwardLabel label) {
+		return label != null && label.father != null ? label.father.jid : 0;
+	}
+
+	private int nextBackwardJob(BackwardLabel label, Node node) {
+		if (label == null || label.isSinkRoot || label.father == null || label.father.isSinkRoot) {
+			return node.sinkId();
+		}
+		return label.father.jid;
 	}
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
@@ -625,7 +637,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// shift 一次得到 shifted，再原地加 incoming reduced arc cost 形成 preNodeFrontier；
 		// 后续 F_state 直接复用它加 job penalty/job dual，避免重复 shiftX。
 		PiecewiseLinearFunction preNodeFrontier = shifted;
-		preNodeFrontier.shiftYInPlace(data.getSetupCost(label.jid, nextJob) - lp.getArcDual(label.jid, nextJob));
+		preNodeFrontier.shiftYInPlace(data.getSetupCost(label.jid, nextJob) - lp.getArcDual(label.jid, nextJob)
+				- lp.getArcPairDual(previousForwardJob(label), label.jid, nextJob));
 		PiecewiseLinearFunction nextFrontier = preNodeFrontier.add(jobPenalty);
 		if (nextFrontier.head == null) {
 			return null;
@@ -686,7 +699,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
-					- lp.getArcDual(prevJob, label.jid);
+					- lp.getArcDual(prevJob, label.jid)
+					- lp.getArcPairDual(prevJob, label.jid, nextBackwardJob(label, node));
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
 		// 2026-05-30: node join 使用 backward 的 suffix-min 传播函数。它表示当前 job
@@ -1042,7 +1056,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardPreNodeReducedCostByLastJob[lastJob] + backward.minReducedCost;
-		if (!Utility.compareLt(groupLB, joinThreshold)) {
+		if (!lp.hasArcPairDuals() && !Utility.compareLt(groupLB, joinThreshold)) {
 			joinTerminalGroupsCostPruned++;
 			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 				joinPairsBestBoundPruned++;
@@ -1057,7 +1071,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				continue;
 			}
 			double optimisticJoinLB = forward.preNodeMinReducedCost + backward.minReducedCost;
-			if (!Utility.compareLt(optimisticJoinLB, joinThreshold)) {
+			if (!lp.hasArcPairDuals() && !Utility.compareLt(optimisticJoinLB, joinThreshold)) {
 				joinPairsLowerBoundPruned++;
 				if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 					joinPairsBestBoundPruned++;
@@ -1078,6 +1092,11 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return;
 		}
 		if (intersectsExceptJoin(forward.visitedSet, backward.visitedSet, forward.jid)) {
+			joinPairsSetPruned++;
+			return;
+		}
+		Node node = lp.getNode();
+		if (node.isArcPairForbidden(previousForwardJob(forward), forward.jid, nextBackwardJob(backward, node))) {
 			joinPairsSetPruned++;
 			return;
 		}
@@ -1106,6 +1125,8 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			joinFunctionPruned++;
 			return;
 		}
+		joinCost.shiftYInPlace(-lp.getArcPairDual(previousForwardJob(forward), forward.jid,
+				nextBackwardJob(backward, node)));
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;
@@ -1464,7 +1485,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			return;
 		}
 		Node node = lp.getNode();
-		if (Configure.debugBPCPricingColumnCheck && !isSequenceCompatible(sequence, node)) {
+		if (!isSequenceCompatible(sequence, node)) {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
@@ -1539,6 +1560,12 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		for (int i = 1; i < sequence.size(); i++) {
 			if (node.isArcForbidden(sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
+				return false;
+			}
+		}
+		for (int i = 2; i < sequence.size(); i++) {
+			if (node.isArcPairForbidden(sequence.get(i - 2).intValue(), sequence.get(i - 1).intValue(),
+					sequence.get(i).intValue())) {
 				return false;
 			}
 		}

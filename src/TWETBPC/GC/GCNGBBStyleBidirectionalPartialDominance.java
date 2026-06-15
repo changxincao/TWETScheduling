@@ -16,7 +16,6 @@ import java.util.List;
 import java.util.PriorityQueue;
 
 import Basic.Data;
-import Common.Configure;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
@@ -2712,7 +2711,7 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 			return;
 		}
 		Node node = lp.getNode();
-		if (Configure.debugBPCPricingColumnCheck && !isSequenceCompatible(sequence, node)) {
+		if (!isSequenceCompatible(sequence, node)) {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);

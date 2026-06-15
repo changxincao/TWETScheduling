@@ -92,3 +92,28 @@
 PDF 中的 reduced-cost arc fixing 思路是正确的，但它的公式针对固定 path 数、arc-time shortest-path 网络。当前 TWET 项目已有的 completion-bound subtree arc elimination 是同一思想在 piecewise-linear pricing 下的保守版本，更适合当前代码结构。
 
 后续最稳的路线不是新增一套独立 arc-time fixing，而是继续完善 `CompletionBoundSubtreeArcEliminator` 的复用、诊断和与 branching/SRI 的兼容。`(m-1)c*` 项暂不建议加入当前主线，除非后续能明确构造出“剩余机器路径/外包决策”的有效 reduced-cost 下界 `R_a`。
+
+## 9. 2026-06-15 当前实现复核与小对照
+
+本轮重新复核后，当前 `c_a` 的计算应保持现在的口径：对强制使用 job arc `(i,j)`，固定弧自身的 reduced cost 为
+
+`c_a = setupCost(i,j) - arcDual(i,j)`。
+
+任务 `j` 的 processing time 进入时间平移 `setupTime(i,j)+p_j`，任务 `j` 的 job dual 已经在 completion bound 的 job reduced penalty 中扣除，所以不能再放进 `c_a`。代码中的函数式判定等价于：
+
+`min_t { F_i(t) + c_a + B_j(t + setupTime(i,j) + p_j) } >= gap`
+
+其中 `F_i` 是从 source 到 `i` 的 relaxed prefix completion bound，`B_j` 是从 `j` 到 sink 的 relaxed suffix completion bound。这个正是“在 arc 两侧用 completion bound 加起来”的实现。为了省时间，代码先做 `min(F_i)+min(B_j)+c_a` 的 scalar 预判；只有 scalar 不能判掉时才做完整 PWLF shift/add/min。
+
+这个机制和普通 completion-bound label pruning 不完全重复。普通 pruning 只在当前 labeling 过程中剪掉一批 label；局部 `completionBoundArcFixing` 会在当前 exact pricing 轮内直接禁止某些 job-job arc；`pricingOnly subtree arc elimination` 会把节点求解后识别出的 arc 写入子节点的 pricing-only 禁弧矩阵，使后续 pricing 和后续 completion bound DP 构图都跳过这些 arc。因此三者共享同一类 lower bound，但作用时点和作用范围不同。
+
+本轮发现一个低风险冗余点：局部 `completionBoundArcFixing` 扫描候选 arc 时原来只跳过永久禁弧，未跳过已经 `pricingOnly` 禁掉的弧。已在 `GCNGBBStyleBidirectional`、`GCNGBBStyleBidirectionalPartialDominance`、`GCNGBBStyleBidirectionalNgDssr` 中同步补上 pricing-only 跳过条件。这个修改只减少重复扫描，不改变可生成列集合。
+
+用三角化 `tmp-wet030_from040_011_2m`、`maxNodes=2`、`ngDSSR nearestK8/top10`、ALNS seed、RMIH 关闭、`completionBound=allCycles`、midpoint probe/reuse 做小对照。四组上下界一致，validator 均为 `true`：
+
+1. baseline：`solve=34.287s`，exact `14.663s/8 calls`。
+2. 只开局部 `completionBoundArcFixing`：`solve=23.108s`，exact `12.033s/8 calls`。
+3. 只开 `pricingOnly subtree arc elimination`：`solve=22.344s`，exact `9.945s/8 calls`；根节点扫 `870` 条候选、固定 `354` 条 arc，子节点又固定 `6` 条。
+4. 两者叠加：`solve=20.692s`，exact `8.916s/8 calls`。
+
+当前结论是：arc fixing 在这个口径下确实有用，不是完全被普通 completion-bound pruning 包含；但局部 fixing 和 pricingOnly subtree fixing 高度相关，叠加收益小于各自单独收益之和。推荐保留两个独立开关：局部 fixing 用于当前轮快速减少扩展，pricingOnly subtree 用于把可靠禁弧传递给子节点。永久 `forbidArc()` 仍不建议默认开，因为它会改变 RMP/filter/dual 路径。

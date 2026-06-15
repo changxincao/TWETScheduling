@@ -3168,7 +3168,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		for (int fromJob = 1; fromJob <= data.n; fromJob++) {
 			for (int toJob = 1; toJob <= data.n; toJob++) {
 				if (fromJob == toJob || isZeroDualExcludedJob(fromJob) || isZeroDualExcludedJob(toJob)
-						|| node.isArcForbidden(fromJob, toJob)) {
+						|| node.isArcForbidden(fromJob, toJob)
+						|| (!ignorePricingOnlyArcsForNode(node) && node.isPricingOnlyArcForbidden(fromJob, toJob))) {
 					continue;
 				}
 				completionBoundArcFixingCandidates++;

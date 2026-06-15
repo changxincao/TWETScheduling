@@ -852,3 +852,13 @@ root 还没有分支禁弧或 pricingOnly 禁弧约束，早期 `nodeDiag forbid
 本轮专门对比了启发式定价上限。此前 `GCBBFullDomainComparisonTest` 默认把 `maxHeuristicColumns` 和 `heuristicPoolSize` 都设为 `100000`，因此 root 早期会把 heuristic 找到的大量负列一次性加入。该口径 root-only 为 `135.981s`，heuristic pricing `45.608s/47 calls/add9057`，exact pricing `62.249s/11 calls/add361`，RMIH 将 incumbent 改到 `22582`。
 
 将同一配置改为 `maxHeuristicColumns=150, heuristicPoolSize=1000` 后，root-only 运行 `303.242s` 才结束，仍是 `NODE_LIMIT`，heuristic pricing `90.288s/80 calls/add6029`，exact pricing `173.964s/18 calls/add246`，incumbent 只到 `22584`。这说明 40 任务 root 上限列并不会让启发式更省，反而因为负列被分批加入，导致更多 LP/pricing 轮和更多 exact 证明成本。当前结论是：对 root 这种完整图、负列极多的节点，大上限 heuristic pricing 是有价值的；若要调小上限，更适合在子节点或低收益阶段做自适应，而不是统一恢复到默认 `150/1000`。
+
+93. 2026-06-15 将 full-domain comparison 默认启发式上限改为 `1500/5000` 并完整闭合 40 任务
+
+在前一轮 `150/1000` 过小、`100000/100000` 又过大的对照基础上，本轮把 `GCBBFullDomainComparisonTest` 的实验入口默认值改为 `maxHeuristicColumns=1500, heuristicPoolSize=5000`。主配置 `TWETBPCConfig` 中旧 VRP 口径的 `150/1000` 仍保留不动，避免影响非 full-domain comparison 的默认求解语义。
+
+用同一套 normal ng-DSSR nearestK 配置重新求解 `data/40-2/wet040_001_2m.dat` 到收敛。配置仍为 ALNS seed、RMIH 4s、`completionBound=allCycles`、`completionBoundArcFixing=true`、`completionBoundSubtreeArcEliminationPricingOnly=true`、`midpointProbe=true`、同 node probe 复用、`joinBestMode=best_ub`、`ngDssrInitialMode=nearestK`、`ngDssrInitialSize=8`、`ngDssrRouteUpdateLimit=10`，并关闭无向 adjacency branching。结果为 `FINISHED`，`incumbent=bound=22580`，总时间 `813.249s`，处理 `149` 个节点，pricing 调用 `4070` 次，总加列 `211279`，最终列池 `211279`，validator 为 `true`。
+
+阶段表现上，root 为 `116.061s`，heuristic pricing `34.557s/47 calls/add9057`，exact pricing `62.565s/11 calls/add361`，RMIH 在 root 找到 `22582`；后续在 node 50 附近仍为 `22582/22561.2/gap≈0.0921%`，随后继续推进并在中段把 incumbent 改进到 `22580`，最终 node149 将 bound 抬到 `22580` 闭合。与 `100000/100000` 的 `maxNodes=50` 对照相比，`1500/5000` 在前 50 个节点没有明显削弱列生成，root 仍加到同样的 `9057` 条 heuristic 负列，且 root heuristic 时间更低；与 `150/1000` 相比则明显避免了 root 中负列分批过细导致的 LP/pricing 轮数膨胀。
+
+当前结论是：`1500/5000` 比 `150/1000` 稳定得多，又比 `100000/100000` 更合理，适合作为 full-domain comparison 入口的默认启发式 pricing 上限。它不是全局主配置默认值，后续若要推广到正式 BPC 默认配置，还需要继续比较其他 40/50 任务实例。

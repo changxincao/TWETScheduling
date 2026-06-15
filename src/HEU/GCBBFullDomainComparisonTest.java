@@ -206,9 +206,9 @@ public class GCBBFullDomainComparisonTest {
 						Boolean.toString(config.diagnosticPricingSummaryDetails)));
 		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);
 		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxHeuristicColumns",
-				100000);
+				1500);
 		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.fullDomainCompare.heuristicPoolSize",
-				100000);
+				5000);
 		config.maxExactPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxExactColumns", 100000);
 		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.fullDomainCompare.branchSeedColumnLimit", 20000);
 		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(

@@ -846,3 +846,9 @@ root-only 运行结果为 `NODE_LIMIT`，`incumbent=22582`，`bound=22490`，gap
 exact pricing 的耗时主要来自 completion bound 的反复构造和最终证明，而不是 join 本身失控。root exact pricing 共 `11` 次、加 `361` 条、耗时约 `62.2s`。早期 exact 调用中 completion bound buildMs 多在 `6.1s~6.9s`，`completionBoundInternal merge` 约 `5.7万~6.2万` 次；join pairs 虽有上万，但大量被 `joinBest` 和函数剪枝压掉。由于每轮 heuristic/exact 加列后 LP dual 都会变，root 的 completion bound 不能简单复用旧 dual 下的函数，因此这些构造成本会重复出现。后期 bound 可复用或 exact 快很多，但还需要最后一次 generated=0 的证明。
 
 root 还没有分支禁弧或 pricingOnly 禁弧约束，早期 `nodeDiag forbiddenJobArcs/pricingOnlyJobArcs=0/0`，pricing 图基本是完整 40-job 图；只有 root 处理结束后 subtree 才固定 `1186/1560` 条 pricingOnly arc，供子节点使用。因此子节点图明显更小，node2 之后每个节点通常只需数秒到十余秒。root 后处理中的 RMIH 约 `2.3s`、subtree arc elimination 约 `6.9s`、LP 约 `2.5s`，都不是根节点 `~120s` 的主因。
+
+92. 2026-06-15 heuristic pricing 上限对 40 任务 root 的影响
+
+本轮专门对比了启发式定价上限。此前 `GCBBFullDomainComparisonTest` 默认把 `maxHeuristicColumns` 和 `heuristicPoolSize` 都设为 `100000`，因此 root 早期会把 heuristic 找到的大量负列一次性加入。该口径 root-only 为 `135.981s`，heuristic pricing `45.608s/47 calls/add9057`，exact pricing `62.249s/11 calls/add361`，RMIH 将 incumbent 改到 `22582`。
+
+将同一配置改为 `maxHeuristicColumns=150, heuristicPoolSize=1000` 后，root-only 运行 `303.242s` 才结束，仍是 `NODE_LIMIT`，heuristic pricing `90.288s/80 calls/add6029`，exact pricing `173.964s/18 calls/add246`，incumbent 只到 `22584`。这说明 40 任务 root 上限列并不会让启发式更省，反而因为负列被分批加入，导致更多 LP/pricing 轮和更多 exact 证明成本。当前结论是：对 root 这种完整图、负列极多的节点，大上限 heuristic pricing 是有价值的；若要调小上限，更适合在子节点或低收益阶段做自适应，而不是统一恢复到默认 `150/1000`。

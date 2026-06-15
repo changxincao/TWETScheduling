@@ -2735,13 +2735,11 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		Collections.sort(candidates, candidateBestFirstComparator());
 		for (int i = 0; i < candidates.size(); i++) {
 			PricingColumnCandidate candidate = candidates.get(i);
-			if (!dualProfitableWindowEnabled) {
-				generatedColumns.add(candidate.column);
-				continue;
-			}
 			// 2026-05-31: 只有根节点 no-cut pi-window 会让 K 堆候选成本口径偏紧。
 			// pi-window 是原 hard window 的子区间，因此 inferred 成本不低于真实列成本；
 			// inferred reduced cost 已为负时，真实 reduced cost 只会更小，这里只修正列成本。
+			// 2026-06-15: partial dominance 会把活 label 的 frontier 裁成搜索残余函数；
+			// 因此最终进入列池的候选必须按完整 sequence 恢复真实列成本。
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column, data,
 					evaluator);
 			if (checked != null) {

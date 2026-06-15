@@ -3617,7 +3617,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Collections.sort(candidates, candidateBestFirstComparator());
 		for (int i = 0; i < candidates.size(); i++) {
 			PricingColumnCandidate candidate = candidates.get(i);
-			if (!dualProfitableWindowEnabled && !sriPricingEnabled) {
+			if (!requiresExactColumnCostRecovery()) {
 				generatedColumns.add(candidate.column);
 				continue;
 			}
@@ -3625,12 +3625,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			// pi-window 是原 hard window 的子区间，因此 inferred 成本不低于真实列成本；
 			// inferred reduced cost 已为负时，真实 reduced cost 只会更小，这里只修正列成本。
 			// 2026-06-13: SRI active 时 inferred reduced cost 含 cut dual，不能只按 machine/job/arc dual 反推 objective cost。
+			// 2026-06-15: partial dominance 会原地裁剪搜索 frontier，活 label 的 minReducedCost
+			// 不再一定等于 recovered sequence 的完整列成本；只有 partial backend 需要在入池前恢复真实成本。
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column, data,
 					evaluator);
 			if (checked != null) {
 				generatedColumns.add(checked.checkedColumn(data));
 			}
 		}
+	}
+
+	private boolean requiresExactColumnCostRecovery() {
+		return dualProfitableWindowEnabled || sriPricingEnabled || dominanceBackend != DominanceBackend.PAPER;
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {

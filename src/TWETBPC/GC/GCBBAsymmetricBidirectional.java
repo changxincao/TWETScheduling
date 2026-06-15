@@ -1245,7 +1245,7 @@ public class GCBBAsymmetricBidirectional {
 				+ ", joinBest mode/bestRC/lbPruned/recordPruned=" + joinBestThresholdMode
 				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
 				+ "/" + joinFunctionBestRecordPruned
-				+ ", candidatePool kept/seen/dropped=" + generatedColumnCandidates.size() + "/"
+				+ ", candidatePool kept/seen/dropped=" + generatedCandidateBySignature.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering + ", dynamicSideSelection=" + dynamicSideSelection
 				+ ", dynamicHB/HF=" + dynamicHB + "/" + dynamicHF
@@ -1371,31 +1371,42 @@ public class GCBBAsymmetricBidirectional {
 		PricingColumnCandidate candidate = new PricingColumnCandidate(nextCandidateId++, signature, column,
 				reducedCost);
 		PricingColumnCandidate existing = generatedCandidateBySignature.get(signature);
-		if (existing != null) {
+		if (existing != null && compareCandidateBestFirst(candidate, existing) >= 0) {
 			generatedCandidateDroppedByHeap++;
 			return;
 		}
 		updateBestGeneratedReducedCost(reducedCost);
-		if (generatedColumnCandidates.size() < config.maxExactPricingColumns) {
-			generatedColumnCandidates.add(candidate);
-			generatedCandidateBySignature.put(signature, candidate);
-			return;
-		}
-		PricingColumnCandidate worstKept = generatedColumnCandidates.peek();
-		if (worstKept != null && compareCandidateBestFirst(candidate, worstKept) < 0) {
-			generatedCandidateDroppedByHeap++;
-			generatedColumnCandidates.poll();
+		generatedCandidateBySignature.put(signature, candidate);
+		generatedColumnCandidates.add(candidate);
+		pruneGeneratedCandidatePool();
+	}
+
+	private void pruneGeneratedCandidatePool() {
+		// 2026-06-16: 同一 sequence 可由多个 split 生成；旧候选留在堆中，map 只保留当前最优候选。
+		while (generatedCandidateBySignature.size() > config.maxExactPricingColumns) {
+			PricingColumnCandidate worstKept = pollCurrentWorstGeneratedCandidate();
+			if (worstKept == null) {
+				break;
+			}
 			generatedCandidateBySignature.remove(worstKept.signature);
-			generatedColumnCandidates.add(candidate);
-			generatedCandidateBySignature.put(signature, candidate);
-			return;
+			generatedCandidateDroppedByHeap++;
 		}
-		generatedCandidateDroppedByHeap++;
+	}
+
+	private PricingColumnCandidate pollCurrentWorstGeneratedCandidate() {
+		while (!generatedColumnCandidates.isEmpty()) {
+			PricingColumnCandidate candidate = generatedColumnCandidates.poll();
+			if (generatedCandidateBySignature.get(candidate.signature) == candidate) {
+				return candidate;
+			}
+		}
+		return null;
 	}
 
 	private void finalizeGeneratedColumns(LP lp) {
 		generatedColumns.clear();
-		ArrayList<PricingColumnCandidate> candidates = new ArrayList<PricingColumnCandidate>(generatedColumnCandidates);
+		ArrayList<PricingColumnCandidate> candidates = new ArrayList<PricingColumnCandidate>(
+				generatedCandidateBySignature.values());
 		Collections.sort(candidates, candidateBestFirstComparator());
 		for (int i = 0; i < candidates.size(); i++) {
 			PricingColumnCandidate candidate = candidates.get(i);

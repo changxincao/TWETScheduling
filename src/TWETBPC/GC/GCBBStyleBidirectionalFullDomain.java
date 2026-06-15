@@ -1387,10 +1387,6 @@ public class GCBBStyleBidirectionalFullDomain {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
-		Node node = lp.getNode();
-		if (!isSequenceCompatible(sequence, node)) {
-			return;
-		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature)) {
 			return;
@@ -1452,24 +1448,6 @@ public class GCBBStyleBidirectionalFullDomain {
 				generatedColumns.add(checked.checkedColumn(data));
 			}
 		}
-	}
-
-	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {
-		if (node.isArcForbidden(0, sequence.get(0).intValue())) {
-			return false;
-		}
-		for (int i = 1; i < sequence.size(); i++) {
-			if (node.isArcForbidden(sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
-				return false;
-			}
-		}
-		for (int i = 2; i < sequence.size(); i++) {
-			if (node.isArcPairForbidden(sequence.get(i - 2).intValue(), sequence.get(i - 1).intValue(),
-					sequence.get(i).intValue())) {
-				return false;
-			}
-		}
-		return !node.isArcForbidden(sequence.get(sequence.size() - 1).intValue(), node.sinkId());
 	}
 
 	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {

@@ -2710,10 +2710,6 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
-		Node node = lp.getNode();
-		if (!isSequenceCompatible(sequence, node)) {
-			return;
-		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature)) {
 			return;

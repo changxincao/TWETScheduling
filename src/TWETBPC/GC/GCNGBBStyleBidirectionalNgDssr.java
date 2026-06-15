@@ -3449,10 +3449,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
-		Node node = lp.getNode();
-		if (!isSequenceCompatible(sequence, node)) {
-			return;
-		}
 		boolean targetSequence = isTargetSequence(sequence);
 		if (!isElementarySequence(sequence)) {
 			if (targetSequence) {

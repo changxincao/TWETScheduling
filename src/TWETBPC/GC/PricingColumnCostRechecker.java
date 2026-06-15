@@ -41,12 +41,9 @@ final class PricingColumnCostRechecker {
 	private static double objectiveCostFromReducedCost(List<Integer> sequence, double reducedCost, LP lp) {
 		double cost = reducedCost + lp.getMachineDual();
 		int prev = 0;
-		int prevPrev = 0;
 		for (int job : sequence) {
 			cost += lp.getJobDual(job);
 			cost += lp.getArcDual(prev, job);
-			cost += lp.getArcPairDual(prevPrev, prev, job);
-			prevPrev = prev;
 			prev = job;
 		}
 		cost += lp.getArcDual(prev, lp.getNode().sinkId());

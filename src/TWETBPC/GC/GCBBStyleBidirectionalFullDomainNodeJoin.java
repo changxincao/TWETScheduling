@@ -594,8 +594,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, label.jid, nextJob)
-				&& !node.isArcPairForbidden(previousForwardJob(label), label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -607,8 +606,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, prevJob, successor)
-				&& !node.isArcPairForbidden(prevJob, successor, nextBackwardJob(label, node));
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -647,8 +645,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// shift 一次得到 shifted，再原地加 incoming reduced arc cost 形成 preNodeFrontier；
 		// 后续 F_state 直接复用它加 job penalty/job dual，避免重复 shiftX。
 		PiecewiseLinearFunction preNodeFrontier = shifted;
-		preNodeFrontier.shiftYInPlace(data.getSetupCost(label.jid, nextJob) - lp.getArcDual(label.jid, nextJob)
-				- lp.getArcPairDual(previousForwardJob(label), label.jid, nextJob));
+		preNodeFrontier.shiftYInPlace(data.getSetupCost(label.jid, nextJob) - lp.getArcDual(label.jid, nextJob));
 		PiecewiseLinearFunction nextFrontier = preNodeFrontier.add(jobPenalty);
 		if (nextFrontier.head == null) {
 			return null;
@@ -709,8 +706,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
-					- lp.getArcDual(prevJob, label.jid)
-					- lp.getArcPairDual(prevJob, label.jid, nextBackwardJob(label, node));
+					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
 		// 2026-05-30: node join 使用 backward 的 suffix-min 传播函数。它表示当前 job
@@ -1066,7 +1062,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		}
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardPreNodeReducedCostByLastJob[lastJob] + backward.minReducedCost;
-		if (!lp.hasArcPairDuals() && !Utility.compareLt(groupLB, joinThreshold)) {
+		if (!Utility.compareLt(groupLB, joinThreshold)) {
 			joinTerminalGroupsCostPruned++;
 			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 				joinPairsBestBoundPruned++;
@@ -1081,7 +1077,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 				continue;
 			}
 			double optimisticJoinLB = forward.preNodeMinReducedCost + backward.minReducedCost;
-			if (!lp.hasArcPairDuals() && !Utility.compareLt(optimisticJoinLB, joinThreshold)) {
+			if (!Utility.compareLt(optimisticJoinLB, joinThreshold)) {
 				joinPairsLowerBoundPruned++;
 				if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 					joinPairsBestBoundPruned++;
@@ -1105,12 +1101,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			joinPairsSetPruned++;
 			return;
 		}
-		Node node = lp.getNode();
-		if (node.isArcPairForbidden(previousForwardJob(forward), forward.jid, nextBackwardJob(backward, node))) {
-			joinPairsSetPruned++;
-			return;
-		}
-
 		if (forward.preNodeFrontier == null || forward.preNodeFrontier.head == null
 				|| Utility.compareGt(forward.preNodeFrontier.head.start, backward.frontier.tail.end)) {
 			joinPairsTimePruned++;
@@ -1135,8 +1125,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			joinFunctionPruned++;
 			return;
 		}
-		joinCost.shiftYInPlace(-lp.getArcPairDual(previousForwardJob(forward), forward.jid,
-				nextBackwardJob(backward, node)));
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;

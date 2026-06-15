@@ -1,9 +1,7 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -26,10 +24,6 @@ public class Node implements Comparable<Node> {
 	public static final byte ADJACENCY_FORBIDDEN = -1;
 	public static final byte ADJACENCY_REQUIRED = 1;
 
-	public static final byte ARC_PAIR_FREE = 0;
-	public static final byte ARC_PAIR_FORBIDDEN = -1;
-	public static final byte ARC_PAIR_REQUIRED = 1;
-
 	public static final byte SEGMENT_FREE = 0;
 	public static final byte SEGMENT_FORBIDDEN = -1;
 	public static final byte SEGMENT_REQUIRED = 1;
@@ -45,8 +39,6 @@ public class Node implements Comparable<Node> {
 	public static final byte REPAIR_TARIFF_REQUIRED = 6;
 	public static final byte REPAIR_ADJACENCY_FORBIDDEN = 7;
 	public static final byte REPAIR_ADJACENCY_REQUIRED = 8;
-	public static final byte REPAIR_ARC_PAIR_FORBIDDEN = 9;
-	public static final byte REPAIR_ARC_PAIR_REQUIRED = 10;
 
 	private final Data data;
 	public int id;
@@ -60,14 +52,11 @@ public class Node implements Comparable<Node> {
 	private byte[][] arcState;
 	private boolean[][] pricingOnlyForbiddenArc;
 	private byte[][] adjacencyPairState;
-	private HashMap<Long, Byte> arcPairState;
-	private boolean[][] requiredArcPairArc;
 	private byte[] tariffSegmentState;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
 	private int repairFrom;
 	private int repairTo;
-	private int repairThird;
 	private int repairSegment;
 
 	public Node(Data data, List<Integer> seedColumnIds, List<Integer> incumbentColumnIds, double pseudoCost) {
@@ -83,13 +72,10 @@ public class Node implements Comparable<Node> {
 		this.arcState = new byte[data.n + 2][data.n + 2];
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
-		this.arcPairState = new HashMap<Long, Byte>();
-		this.requiredArcPairArc = new boolean[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
 		this.repairTo = -1;
-		this.repairThird = -1;
 		this.repairSegment = -1;
 	}
 
@@ -112,16 +98,10 @@ public class Node implements Comparable<Node> {
 		for (int i = 0; i < adjacencyPairState.length; i++) {
 			copy.adjacencyPairState[i] = adjacencyPairState[i].clone();
 		}
-		copy.arcPairState = new HashMap<Long, Byte>(arcPairState);
-		copy.requiredArcPairArc = new boolean[requiredArcPairArc.length][];
-		for (int i = 0; i < requiredArcPairArc.length; i++) {
-			copy.requiredArcPairArc[i] = requiredArcPairArc[i].clone();
-		}
 		copy.tariffSegmentState = tariffSegmentState.clone();
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
 		copy.repairTo = repairTo;
-		copy.repairThird = repairThird;
 		copy.repairSegment = repairSegment;
 		return copy;
 	}
@@ -141,15 +121,6 @@ public class Node implements Comparable<Node> {
 			return ADJACENCY_FREE;
 		}
 		return adjacencyPairState[a][b];
-	}
-
-	public byte getArcPairState(int firstJob, int middleJob, int thirdJob) {
-		if (!isRealJob(firstJob) || !isRealJob(middleJob) || !isRealJob(thirdJob)
-				|| firstJob == middleJob || middleJob == thirdJob || firstJob == thirdJob) {
-			return ARC_PAIR_FREE;
-		}
-		Byte state = arcPairState.get(Long.valueOf(arcPairKey(firstJob, middleJob, thirdJob)));
-		return state == null ? ARC_PAIR_FREE : state.byteValue();
 	}
 
 	/**
@@ -212,14 +183,6 @@ public class Node implements Comparable<Node> {
 		return countAdjacencyPairs(ADJACENCY_FORBIDDEN);
 	}
 
-	public int countRequiredArcPairs() {
-		return countArcPairs(ARC_PAIR_REQUIRED);
-	}
-
-	public int countForbiddenArcPairs() {
-		return countArcPairs(ARC_PAIR_FORBIDDEN);
-	}
-
 	public int countRequiredTariffSegments() {
 		return countTariffSegments(SEGMENT_REQUIRED);
 	}
@@ -236,11 +199,9 @@ public class Node implements Comparable<Node> {
 				+ maxMachineCount + "],seed=" + seedColumnIds.size() + ",cuts=" + activeCutIds.size()
 				+ ",arcReq=" + countRequiredArcStates() + ",arcForbid=" + countForbiddenArcStates()
 				+ ",pricingOnlyArc=" + countPricingOnlyForbiddenArcs()
-				+ ",arcPairReq=" + countRequiredArcPairs() + ",arcPairForbid=" + countForbiddenArcPairs()
 				+ ",adjReq=" + countRequiredAdjacencyPairs() + ",adjForbid=" + countForbiddenAdjacencyPairs()
 				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
-				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "->" + repairThird
-				+ "/seg=" + repairSegment;
+				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment;
 	}
 
 	public void requireArc(int from, int to) {
@@ -255,29 +216,20 @@ public class Node implements Comparable<Node> {
 		setAdjacencyPairState(firstJob, secondJob, ADJACENCY_REQUIRED);
 	}
 
-	public void forbidArcPair(int firstJob, int middleJob, int thirdJob) {
-		setArcPairState(firstJob, middleJob, thirdJob, ARC_PAIR_FORBIDDEN);
-	}
-
-	public void requireArcPair(int firstJob, int middleJob, int thirdJob) {
-		setArcPairState(firstJob, middleJob, thirdJob, ARC_PAIR_REQUIRED);
-	}
-
 	public void markMachineUpperRepair() {
 		repairType = REPAIR_MACHINE_UPPER;
-		repairFrom = repairTo = repairThird = repairSegment = -1;
+		repairFrom = repairTo = repairSegment = -1;
 	}
 
 	public void markMachineLowerRepair() {
 		repairType = REPAIR_MACHINE_LOWER;
-		repairFrom = repairTo = repairThird = repairSegment = -1;
+		repairFrom = repairTo = repairSegment = -1;
 	}
 
 	public void markArcRepair(int from, int to, boolean required) {
 		repairType = required ? REPAIR_ARC_REQUIRED : REPAIR_ARC_FORBIDDEN;
 		repairFrom = from;
 		repairTo = to;
-		repairThird = -1;
 		repairSegment = -1;
 	}
 
@@ -285,22 +237,12 @@ public class Node implements Comparable<Node> {
 		repairType = required ? REPAIR_ADJACENCY_REQUIRED : REPAIR_ADJACENCY_FORBIDDEN;
 		repairFrom = normalizedPairFirst(firstJob, secondJob);
 		repairTo = normalizedPairSecond(firstJob, secondJob);
-		repairThird = -1;
-		repairSegment = -1;
-	}
-
-	public void markArcPairRepair(int firstJob, int middleJob, int thirdJob, boolean required) {
-		repairType = required ? REPAIR_ARC_PAIR_REQUIRED : REPAIR_ARC_PAIR_FORBIDDEN;
-		repairFrom = firstJob;
-		repairTo = middleJob;
-		repairThird = thirdJob;
 		repairSegment = -1;
 	}
 
 	public void markTariffRepair(int segment, boolean required) {
 		repairType = required ? REPAIR_TARIFF_REQUIRED : REPAIR_TARIFF_FORBIDDEN;
 		repairFrom = repairTo = -1;
-		repairThird = -1;
 		repairSegment = segment;
 	}
 
@@ -314,10 +256,6 @@ public class Node implements Comparable<Node> {
 
 	public int getRepairTo() {
 		return repairTo;
-	}
-
-	public int getRepairThird() {
-		return repairThird;
 	}
 
 	public int getRepairSegment() {
@@ -374,16 +312,6 @@ public class Node implements Comparable<Node> {
 		return count;
 	}
 
-	private int countArcPairs(byte state) {
-		int count = 0;
-		for (Byte value : arcPairState.values()) {
-			if (value != null && value.byteValue() == state) {
-				count++;
-			}
-		}
-		return count;
-	}
-
 	private int countTariffSegments(byte state) {
 		int count = 0;
 		for (int segment = 0; segment < tariffSegmentState.length; segment++) {
@@ -425,14 +353,6 @@ public class Node implements Comparable<Node> {
 		return collectAdjacencyPairs(ADJACENCY_FORBIDDEN);
 	}
 
-	public List<int[]> getRequiredArcPairs() {
-		return collectArcPairs(ARC_PAIR_REQUIRED);
-	}
-
-	public List<int[]> getForbiddenArcPairs() {
-		return collectArcPairs(ARC_PAIR_FORBIDDEN);
-	}
-
 	/** 判断一条列是否违反当前节点的 forbidden arc。 */
 	public boolean isColumnCompatible(TWETColumn column) {
 		List<Integer> seq = column.getSequence();
@@ -444,12 +364,6 @@ public class Node implements Comparable<Node> {
 		}
 		for (int i = 1; i < seq.size(); i++) {
 			if (isArcForbidden(seq.get(i - 1).intValue(), seq.get(i).intValue())) {
-				return false;
-			}
-		}
-		for (int i = 2; i < seq.size(); i++) {
-			if (isArcPairForbidden(seq.get(i - 2).intValue(), seq.get(i - 1).intValue(),
-					seq.get(i).intValue())) {
 				return false;
 			}
 		}
@@ -486,19 +400,6 @@ public class Node implements Comparable<Node> {
 		return column.visitsArc(firstJob, secondJob, sinkId()) || column.visitsArc(secondJob, firstJob, sinkId());
 	}
 
-	public boolean columnCoversArcPair(TWETColumn column, int firstJob, int middleJob, int thirdJob) {
-		return column.visitsArcPair(firstJob, middleJob, thirdJob);
-	}
-
-	public boolean isArcPairForbidden(int firstJob, int middleJob, int thirdJob) {
-		return getArcPairState(firstJob, middleJob, thirdJob) == ARC_PAIR_FORBIDDEN;
-	}
-
-	public boolean isArcRequiredByArcPair(int fromJob, int toJob) {
-		return fromJob >= 0 && toJob >= 0 && fromJob < requiredArcPairArc.length
-				&& toJob < requiredArcPairArc[fromJob].length && requiredArcPairArc[fromJob][toJob];
-	}
-
 	private void setAdjacencyPairState(int firstJob, int secondJob, byte state) {
 		int a = normalizedPairFirst(firstJob, secondJob);
 		int b = normalizedPairSecond(firstJob, secondJob);
@@ -513,39 +414,6 @@ public class Node implements Comparable<Node> {
 				&& getAdjacencyPairState(from, to) == ADJACENCY_FORBIDDEN;
 	}
 
-	private void setArcPairState(int firstJob, int middleJob, int thirdJob, byte state) {
-		if (!isRealJob(firstJob) || !isRealJob(middleJob) || !isRealJob(thirdJob)
-				|| firstJob == middleJob || middleJob == thirdJob || firstJob == thirdJob) {
-			return;
-		}
-		long key = arcPairKey(firstJob, middleJob, thirdJob);
-		Byte oldState = arcPairState.get(Long.valueOf(key));
-		if (state == ARC_PAIR_FREE) {
-			arcPairState.remove(Long.valueOf(key));
-		} else {
-			arcPairState.put(Long.valueOf(key), Byte.valueOf(state));
-		}
-		byte old = oldState == null ? ARC_PAIR_FREE : oldState.byteValue();
-		if (old != state && (old == ARC_PAIR_REQUIRED || state == ARC_PAIR_REQUIRED)) {
-			rebuildRequiredArcPairArcCache();
-		}
-	}
-
-	private void rebuildRequiredArcPairArcCache() {
-		requiredArcPairArc = new boolean[data.n + 2][data.n + 2];
-		for (Map.Entry<Long, Byte> entry : arcPairState.entrySet()) {
-			if (entry.getValue() == null || entry.getValue().byteValue() != ARC_PAIR_REQUIRED) {
-				continue;
-			}
-			long key = entry.getKey().longValue();
-			int first = decodeArcPairFirst(key);
-			int middle = decodeArcPairMiddle(key);
-			int third = decodeArcPairThird(key);
-			requiredArcPairArc[first][middle] = true;
-			requiredArcPairArc[middle][third] = true;
-		}
-	}
-
 	private ArrayList<int[]> collectAdjacencyPairs(byte state) {
 		ArrayList<int[]> pairs = new ArrayList<int[]>();
 		for (int first = 1; first <= data.n; first++) {
@@ -556,42 +424,6 @@ public class Node implements Comparable<Node> {
 			}
 		}
 		return pairs;
-	}
-
-	private ArrayList<int[]> collectArcPairs(byte state) {
-		ArrayList<int[]> pairs = new ArrayList<int[]>();
-		for (Map.Entry<Long, Byte> entry : arcPairState.entrySet()) {
-			if (entry.getValue() == null || entry.getValue().byteValue() != state) {
-				continue;
-			}
-			long key = entry.getKey().longValue();
-			pairs.add(new int[] { decodeArcPairFirst(key), decodeArcPairMiddle(key), decodeArcPairThird(key) });
-		}
-		return pairs;
-	}
-
-	private boolean isRealJob(int job) {
-		return job > 0 && job <= data.n;
-	}
-
-	private long arcPairKey(int firstJob, int middleJob, int thirdJob) {
-		long base = data.n + 2L;
-		return ((long) firstJob) * base * base + ((long) middleJob) * base + thirdJob;
-	}
-
-	private int decodeArcPairFirst(long key) {
-		long base = data.n + 2L;
-		return (int) (key / (base * base));
-	}
-
-	private int decodeArcPairMiddle(long key) {
-		long base = data.n + 2L;
-		return (int) ((key / base) % base);
-	}
-
-	private int decodeArcPairThird(long key) {
-		long base = data.n + 2L;
-		return (int) (key % base);
 	}
 
 	private int normalizedPairFirst(int firstJob, int secondJob) {

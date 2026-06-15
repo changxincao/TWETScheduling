@@ -105,7 +105,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
 	private CompletionBoundCalculator.Bounds completionBounds;
 	private boolean[][] completionBoundFixedArc;
-	private boolean arcPairDualActiveForPricing;
 	private double bestGeneratedReducedCost;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -715,7 +714,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				config.bidirectionalCompletionBoundQueueOrdering);
 		completionBounds = ngDssrReusableCompletionBounds;
 		completionBoundFixedArc = ngDssrReusableCompletionBoundFixedArc;
-		arcPairDualActiveForPricing = lp.hasArcPairDuals();
 		bestGeneratedReducedCost = Utility.big_M;
 		generatedColumns = new ArrayList<TWETColumn>();
 		if (config.diagnosticPricingSummaryDetails) {
@@ -1847,16 +1845,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-06-10: 调用方只枚举 extensionSet；它已经排除 ng-memory 和时间半域不可达点。
 		// 真实 visited 不用于 ng-relaxation 扩展过滤，重复任务在恢复 route 后交给 DSSR 处理。
 		// 直连禁弧依赖当前 node/pricingOnly 状态，仍在扩展点即时检查。
-		return !isPricingArcForbidden(node, label.jid, nextJob)
-				&& !node.isArcPairForbidden(previousForwardJob(label), label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
 		// 2026-06-10: backward 同样只枚举 extensionSet；真实重复由 DSSR route 恢复后处理。
 		// 这里即时检查 prevJob -> successor 直连弧，避免 pricingOnly/分支禁弧绕过扩展过滤。
-		return !isPricingArcForbidden(node, prevJob, successor)
-				&& !node.isArcPairForbidden(prevJob, successor, nextBackwardJob(label, node));
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private int previousForwardJob(ForwardLabel label) {
@@ -1888,8 +1884,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return null;
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
-				- lp.getArcDual(label.jid, nextJob)
-				- lp.getArcPairDual(previousForwardJob(label), label.jid, nextJob);
+				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
 		nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
 		byte[] childSriCounts;
@@ -1965,8 +1960,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
-					- lp.getArcDual(prevJob, label.jid)
-					- lp.getArcPairDual(prevJob, label.jid, nextBackwardJob(label, node));
+					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 			nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
 		}
@@ -2355,7 +2349,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				- lp.getArcDual(lastJob, backward.jid);
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost + joinFixedReducedCost;
-		if (!arcPairDualActiveForPricing && !Utility.compareLt(groupLB, joinThreshold)) {
+		if (!Utility.compareLt(groupLB, joinThreshold)) {
 			joinTerminalGroupsCostPruned++;
 			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 				joinPairsBestBoundPruned++;
@@ -2370,7 +2364,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				continue;
 			}
 			double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
-			if (!arcPairDualActiveForPricing && !Utility.compareLt(optimisticJoinLB, joinThreshold)) {
+			if (!Utility.compareLt(optimisticJoinLB, joinThreshold)) {
 				joinPairsLowerBoundPruned++;
 				if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 					joinPairsBestBoundPruned++;
@@ -2409,16 +2403,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
-		Node node = lp.getNode();
-		if (node.isArcPairForbidden(previousForwardJob(forward), forward.jid, backward.jid)
-				|| node.isArcPairForbidden(forward.jid, backward.jid, nextBackwardJob(backward, node))) {
-			joinPairsSetPruned++;
-			if (targetJoinPair) {
-				traceTarget("JOIN_PRUNED arcPair");
-			}
-			return;
-		}
-
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
@@ -2458,9 +2442,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
 		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
-		double arcPairReducedCost = -lp.getArcPairDual(previousForwardJob(forward), forward.jid, backward.jid)
-				- lp.getArcPairDual(forward.jid, backward.jid, nextBackwardJob(backward, node));
-		joinCost.shiftYInPlace(joinFixedReducedCost + arcPairReducedCost);
+		joinCost.shiftYInPlace(joinFixedReducedCost);
 		ArrayList<Integer> sequence = null;
 		double sriJoinShift;
 		if (limitedMemorySriPricing) {
@@ -3177,9 +3159,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				&& !config.bidirectionalCompletionBoundArcFixing) || completionBounds == null) {
 			return;
 		}
-		if (arcPairDualActiveForPricing) {
-			return;
-		}
 		if (config.bidirectionalCompletionBoundArcFixing) {
 			completionBoundFixedArc = new boolean[data.n + 1][data.n + 1];
 		}
@@ -3289,9 +3268,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean isForwardCompletionBoundPruned(ForwardLabel label) {
-		if (arcPairDualActiveForPricing) {
-			return false;
-		}
 		if (completionBounds == null || label.jid <= 0 || label.jid > data.n || label.noSriFrontier == null
 				|| label.noSriFrontier.head == null) {
 			return false;
@@ -3317,9 +3293,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean isBackwardCompletionBoundPruned(BackwardLabel label) {
-		if (arcPairDualActiveForPricing) {
-			return false;
-		}
 		if (completionBounds == null || label.isSinkRoot || label.jid <= 0 || label.jid > data.n
 				|| label.noSriFrontier == null || label.noSriFrontier.head == null) {
 			return false;
@@ -3622,12 +3595,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		for (int i = 1; i < sequence.size(); i++) {
 			if (isPricingArcForbidden(node, sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
-				return false;
-			}
-		}
-		for (int i = 2; i < sequence.size(); i++) {
-			if (node.isArcPairForbidden(sequence.get(i - 2).intValue(), sequence.get(i - 1).intValue(),
-					sequence.get(i).intValue())) {
 				return false;
 			}
 		}

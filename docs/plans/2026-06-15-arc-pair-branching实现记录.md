@@ -1,4 +1,4 @@
-# 2026-06-15 arc-pair branching 实现记录
+﻿# 2026-06-15 arc-pair branching 实现记录
 
 ## 1. 实现范围
 
@@ -51,3 +51,9 @@ completion bound 和 group-level join lower bound 没有三连片段状态维度
 同时把 `Node` 中 required arc-pair 布尔缓存的重建条件收紧为“状态确实变化且 required 依赖集合可能变化”时才重建，避免重复设置同一 required 三元片段时做无意义的全表扫描。复查确认 `arcPairState` 没有绕过 `setArcPairState()` 的直接写入口，`copy()` 会复制缓存，因此该优化不改变语义。
 
 验证：`git diff --check` 通过；排除历史 `src/BPC` 包后，对 `Basic/Common/Output/TWETBPC/HEU` 相关源码执行 focused `javac -encoding UTF-8 -cp cplex.jar`，编译通过，仅有历史 deprecation warning。当前未发现新的正确性问题；剩余可优化点主要是旧 exact pricing helper 重复实现，后续若这些实验类继续长期保留，可以再统一抽成共享工具，当前先不做结构性重构。
+
+## 9. 2026-06-15 撤回连续片段分支实现
+
+继续分析后决定撤回 `i-j-k` 连续片段分支。主要原因不是左支 forbidden 片段本身难处理，而是右支 `sum a_ijk lambda >= 1` 产生的 arc-pair dual 需要 pricing label 记住上一条弧，才能在 completion bound、group lower bound、optimistic join lower bound 和 arc fixing 中安全使用。当前 completion bound 和 join 下界都没有三连片段状态，若强行使用这些下界可能漏掉未来获得三连片段 dual 奖励的负列；若保守关闭这些剪枝，又会明显削弱本来最关键的 bound 组件，实际预期会比普通 arc branching 更不稳定。
+
+本次删除了 `ArcPairBrancher`、`Node` 中的三连片段状态、`LP` 中的三连片段分支行和 dual、`TWETColumn/TWETMasterSolution` 中的三连片段统计，以及各 exact/heuristic pricing 中的三连片段 forbidden 检查和 reduced-cost dual 项。普通 arc forbidden、pricingOnly arc、completion-bound arc fixing 以及前面统一的 `isPricingArcForbidden()` 口径保留不动。后续若还要做 follow-on 类型分支，应重新设计带状态的 bound 或只采用不会破坏现有 bound 语义的分支形式。

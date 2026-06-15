@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import Basic.Data;
-import TWETBPC.BP.ArcPairBrancher;
 import Output.BPCCompositeTraceSink;
 import Output.BPCConsoleReporter;
 import Output.BPCTraceSink;
@@ -118,9 +117,6 @@ public class TWETBPCContext {
 		branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
 		if (config.enableUndirectedAdjacencyBranching) {
 			branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
-		}
-		if (config.enableArcPairBranching) {
-			branchers.add(new ArcPairBrancher(config.branchingTolerance));
 		}
 		branchers.add(new ArcBrancher(config.branchingTolerance));
 

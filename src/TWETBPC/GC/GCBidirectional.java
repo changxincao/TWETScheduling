@@ -356,8 +356,7 @@ public class GCBidirectional {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, label.jid, nextJob)
-				&& !node.isArcPairForbidden(previousForwardJob(label), label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -368,8 +367,7 @@ public class GCBidirectional {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, prevJob, successor)
-				&& !node.isArcPairForbidden(prevJob, successor, nextBackwardJob(label, node));
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -409,7 +407,7 @@ public class GCBidirectional {
 			return null;
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
-				- lp.getArcDual(label.jid, nextJob) - lp.getArcPairDual(previousForwardJob(label), label.jid, nextJob);
+				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
 		nextFrontier.normalize(Direction.FORWARD);
 		if (nextFrontier.head == null) {
@@ -461,8 +459,7 @@ public class GCBidirectional {
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
-					- lp.getArcDual(prevJob, label.jid)
-					- lp.getArcPairDual(prevJob, label.jid, nextBackwardJob(label, node));
+					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
 		nextFrontier.normalize(Direction.BACKWARD);
@@ -697,7 +694,7 @@ public class GCBidirectional {
 			}
 			double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost
 					+ data.getSetupCost(lastJob, backward.jid) - lp.getArcDual(lastJob, backward.jid);
-			if (!lp.hasArcPairDuals() && !Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
+			if (!Utility.compareLt(groupLB, REDUCED_COST_TOLERANCE)) {
 				joinTerminalGroupsCostPruned++;
 				continue;
 			}
@@ -736,20 +733,13 @@ public class GCBidirectional {
 			joinPairsSetPruned++;
 			return;
 		}
-		Node node = lp.getNode();
-		if (node.isArcPairForbidden(previousForwardJob(forward), forward.jid, backward.jid)
-				|| node.isArcPairForbidden(forward.jid, backward.jid, nextBackwardJob(backward, node))) {
-			joinPairsSetPruned++;
-			return;
-		}
-
 		double joinFixedReducedCost = data.getSetupCost(forward.jid, backward.jid)
 				- lp.getArcDual(forward.jid, backward.jid);
 		// 2026-05-22: 先用 forward/backward frontier 的全局最小值做一次乐观下界。
 		// join 的常数延拓和 crossing arc 对齐不会产生比两侧 frontier 全局最小值之和更低的下界，
 		// 因此若这个标量下界都不能为负，就没必要再构造 join 函数。
 		double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
-		if (!lp.hasArcPairDuals() && !Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
+		if (!Utility.compareLt(optimisticJoinLB, REDUCED_COST_TOLERANCE)) {
 			joinPairsLowerBoundPruned++;
 			return;
 		}
@@ -780,9 +770,7 @@ public class GCBidirectional {
 		}
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
 		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
-		double arcPairReducedCost = -lp.getArcPairDual(previousForwardJob(forward), forward.jid, backward.jid)
-				- lp.getArcPairDual(forward.jid, backward.jid, nextBackwardJob(backward, node));
-		joinCost.shiftYInPlace(joinFixedReducedCost + arcPairReducedCost);
+		joinCost.shiftYInPlace(joinFixedReducedCost);
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
 			joinFunctionPruned++;
@@ -945,12 +933,9 @@ public class GCBidirectional {
 	private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost, LP lp) {
 		double cost = reducedCost + lp.getMachineDual();
 		int prev = 0;
-		int prevPrev = 0;
 		for (int job : sequence) {
 			cost += lp.getJobDual(job);
 			cost += lp.getArcDual(prev, job);
-			cost += lp.getArcPairDual(prevPrev, prev, job);
-			prevPrev = prev;
 			prev = job;
 		}
 		cost += lp.getArcDual(prev, lp.getNode().sinkId());
@@ -960,12 +945,9 @@ public class GCBidirectional {
 	private double reducedCost(ArrayList<Integer> sequence, double cost, LP lp) {
 		double reducedCost = cost - lp.getMachineDual();
 		int prev = 0;
-		int prevPrev = 0;
 		for (int job : sequence) {
 			reducedCost -= lp.getJobDual(job);
 			reducedCost -= lp.getArcDual(prev, job);
-			reducedCost -= lp.getArcPairDual(prevPrev, prev, job);
-			prevPrev = prev;
 			prev = job;
 		}
 		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());

@@ -205,8 +205,7 @@ public class GC {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, label.jid, nextJob)
-				&& !node.isArcPairForbidden(previousJob(label), label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -217,10 +216,6 @@ public class GC {
 	private boolean ignorePricingOnlyArcsForNode(Node node) {
 		return node != null && config.debugIgnorePricingOnlyArcsAtNode >= 0
 				&& node.id == config.debugIgnorePricingOnlyArcsAtNode;
-	}
-
-	private int previousJob(Label label) {
-		return label != null && label.father != null ? label.father.jid : 0;
 	}
 
 	private Label extend(Label label, int nextJob, LP lp) {
@@ -244,7 +239,7 @@ public class GC {
 			return null;
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
-				- lp.getArcDual(label.jid, nextJob) - lp.getArcPairDual(previousJob(label), label.jid, nextJob);
+				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
 		nextFrontier.normalize(Direction.FORWARD);
 		if (nextFrontier.head == null) {

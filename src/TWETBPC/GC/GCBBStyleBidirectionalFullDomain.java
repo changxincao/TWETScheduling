@@ -519,8 +519,7 @@ public class GCBBStyleBidirectionalFullDomain {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, label.jid, nextJob)
-				&& !node.isArcPairForbidden(previousForwardJob(label), label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -531,8 +530,7 @@ public class GCBBStyleBidirectionalFullDomain {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, prevJob, successor)
-				&& !node.isArcPairForbidden(prevJob, successor, nextBackwardJob(label, node));
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -572,7 +570,7 @@ public class GCBBStyleBidirectionalFullDomain {
 			return null;
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
-				- lp.getArcDual(label.jid, nextJob) - lp.getArcPairDual(previousForwardJob(label), label.jid, nextJob);
+				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
 		nextFrontier.normalize(Direction.FORWARD);
 		if (nextFrontier.head == null) {
@@ -624,8 +622,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
-					- lp.getArcDual(prevJob, label.jid)
-					- lp.getArcPairDual(prevJob, label.jid, nextBackwardJob(label, node));
+					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 		}
 		nextFrontier.normalize(Direction.BACKWARD);
@@ -969,7 +966,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				- lp.getArcDual(lastJob, backward.jid);
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost + joinFixedReducedCost;
-		if (!lp.hasArcPairDuals() && !Utility.compareLt(groupLB, joinThreshold)) {
+		if (!Utility.compareLt(groupLB, joinThreshold)) {
 			joinTerminalGroupsCostPruned++;
 			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 				joinPairsBestBoundPruned++;
@@ -984,7 +981,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				continue;
 			}
 			double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
-			if (!lp.hasArcPairDuals() && !Utility.compareLt(optimisticJoinLB, joinThreshold)) {
+			if (!Utility.compareLt(optimisticJoinLB, joinThreshold)) {
 				joinPairsLowerBoundPruned++;
 				if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
 					joinPairsBestBoundPruned++;
@@ -1004,13 +1001,6 @@ public class GCBBStyleBidirectionalFullDomain {
 			joinPairsSetPruned++;
 			return;
 		}
-		Node node = lp.getNode();
-		if (node.isArcPairForbidden(previousForwardJob(forward), forward.jid, backward.jid)
-				|| node.isArcPairForbidden(forward.jid, backward.jid, nextBackwardJob(backward, node))) {
-			joinPairsSetPruned++;
-			return;
-		}
-
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
@@ -1037,9 +1027,7 @@ public class GCBBStyleBidirectionalFullDomain {
 		}
 		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
 		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
-		double arcPairReducedCost = -lp.getArcPairDual(previousForwardJob(forward), forward.jid, backward.jid)
-				- lp.getArcPairDual(forward.jid, backward.jid, nextBackwardJob(backward, node));
-		joinCost.shiftYInPlace(joinFixedReducedCost + arcPairReducedCost);
+		joinCost.shiftYInPlace(joinFixedReducedCost);
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;

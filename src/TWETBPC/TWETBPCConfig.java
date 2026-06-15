@@ -215,8 +215,6 @@ public class TWETBPCConfig {
 	public double branchingTolerance = 1e-6;
 	/** 2026-06-03: Whether to branch on undirected job adjacency before directed arc branching. */
 	public boolean enableUndirectedAdjacencyBranching = true;
-	/** 2026-06-15: Whether to branch on directed consecutive fragment i->j->k before directed arc branching. */
-	public boolean enableArcPairBranching = false;
 	/** 节点初始伪成本占位值。 */
 	public double pseudoCostInf = 1e18;
 	/** 2026-06-02: 每个节点 LP 松弛完成后，是否用当前 restricted columns 求一次整数 RMP 刷新启发式上界。 */

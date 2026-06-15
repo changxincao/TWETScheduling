@@ -862,3 +862,11 @@ root 还没有分支禁弧或 pricingOnly 禁弧约束，早期 `nodeDiag forbid
 阶段表现上，root 为 `116.061s`，heuristic pricing `34.557s/47 calls/add9057`，exact pricing `62.565s/11 calls/add361`，RMIH 在 root 找到 `22582`；后续在 node 50 附近仍为 `22582/22561.2/gap≈0.0921%`，随后继续推进并在中段把 incumbent 改进到 `22580`，最终 node149 将 bound 抬到 `22580` 闭合。与 `100000/100000` 的 `maxNodes=50` 对照相比，`1500/5000` 在前 50 个节点没有明显削弱列生成，root 仍加到同样的 `9057` 条 heuristic 负列，且 root heuristic 时间更低；与 `150/1000` 相比则明显避免了 root 中负列分批过细导致的 LP/pricing 轮数膨胀。
 
 当前结论是：`1500/5000` 比 `150/1000` 稳定得多，又比 `100000/100000` 更合理，因此已提升为当前全局默认启发式 pricing 上限。后续若在更大规模上发现 RMP 规模成为主瓶颈，再考虑按节点深度、root/child 或收益阶段做自适应收缩，而不是恢复统一小上限。
+
+94. 2026-06-15 40 任务 partial-list ng-DSSR + full-SRI 900s 限时测试
+
+按同一 40 任务 `wet040_001_2m` 和上一节的 normal ng-DSSR nearestK 配置，只把 exact pricing 后端改为 partial-list ng-DSSR，并打开 classical full-SRI cut。具体差异为 `ngDssr=false, ngDssrPartialDominance=true, enableSubsetRowCutsForPartialDominance=true, subsetRowCutMemoryMode=full`，其余仍保留 ALNS seed、RMIH 4s、`completionBound=allCycles`、pricingOnly subtree、midpoint probe/reuse、`joinBestMode=best_ub`、nearestK8/top10、关闭无向 adjacency branching。外层限时 900s。
+
+本次运行先后因 PowerShell 参数拆分问题失败两次，正式运行编号为 `tmp-wet040-001-ngpartial-fullsri-900-20260615c`。正式运行启动后进入 root 内部，900s 截止时 Java 进程 CPU 约 `927s`、内存约 `1.16GB`，但 stdout/stderr 仍为 0 字节，没有输出 root node summary，也没有生成 CSV。因此该口径下截至 900s 没有可读取的 incumbent/bound 行；只能判断为 root cut-pricing closure 尚未完成。
+
+与无 SRI 的 `1500/5000` 完整闭合结果相比，这个差异非常大：无 SRI 整棵树 `813.249s` 已闭合到 `22580`，而 full-SRI partial-list 900s 内尚未完成 root。当前结论是，40 任务上 classical full-SRI 直接全开过重，瓶颈发生在 root 内部的 cut/pricing closure，而不是后续分支树。若后续还要比较 SRI 对 bound 的贡献，应优先启用更细的 stage heartbeat 或改成受控 cut 策略，例如限制 root cut 轮数、使用 lm-SRI、只做 root 少轮 cut，或者先输出 root 内部 incumbent/relaxation 诊断；否则 900s 截止时无法得到用户关心的 bound/incumbent。

@@ -3617,14 +3617,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Collections.sort(candidates, candidateBestFirstComparator());
 		for (int i = 0; i < candidates.size(); i++) {
 			PricingColumnCandidate candidate = candidates.get(i);
-			if (!dualProfitableWindowEnabled && !sriPricingEnabled) {
-				generatedColumns.add(candidate.column);
-				continue;
-			}
 			// 2026-05-31: 只有根节点 no-cut pi-window 会让 K 堆候选成本口径偏紧。
 			// pi-window 是原 hard window 的子区间，因此 inferred 成本不低于真实列成本；
 			// inferred reduced cost 已为负时，真实 reduced cost 只会更小，这里只修正列成本。
 			// 2026-06-13: SRI active 时 inferred reduced cost 含 cut dual，不能只按 machine/job/arc dual 反推 objective cost。
+			// 2026-06-15: partial-list/ng/half-domain 的 inferred reduced cost 只用于候选排序和剪枝；
+			// 永久列池必须写入 evaluator 对完整 sequence 重算的真实成本。
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column, data,
 					evaluator);
 			if (checked != null) {

@@ -870,3 +870,11 @@ root 还没有分支禁弧或 pricingOnly 禁弧约束，早期 `nodeDiag forbid
 本次运行先后因 PowerShell 参数拆分问题失败两次，正式运行编号为 `tmp-wet040-001-ngpartial-fullsri-900-20260615c`。正式运行启动后进入 root 内部，900s 截止时 Java 进程 CPU 约 `927s`、内存约 `1.16GB`，但 stdout/stderr 仍为 0 字节，没有输出 root node summary，也没有生成 CSV。因此该口径下截至 900s 没有可读取的 incumbent/bound 行；只能判断为 root cut-pricing closure 尚未完成。
 
 与无 SRI 的 `1500/5000` 完整闭合结果相比，这个差异非常大：无 SRI 整棵树 `813.249s` 已闭合到 `22580`，而 full-SRI partial-list 900s 内尚未完成 root。当前结论是，40 任务上 classical full-SRI 直接全开过重，瓶颈发生在 root 内部的 cut/pricing closure，而不是后续分支树。若后续还要比较 SRI 对 bound 的贡献，应优先启用更细的 stage heartbeat 或改成受控 cut 策略，例如限制 root cut 轮数、使用 lm-SRI、只做 root 少轮 cut，或者先输出 root 内部 incumbent/relaxation 诊断；否则 900s 截止时无法得到用户关心的 bound/incumbent。
+
+95. 2026-06-15 40 任务 partial-list ng-DSSR + lm-SRI 900s 限时测试
+
+继续沿用第 94 节配置，只把 `subsetRowCutMemoryMode` 从 `full` 改为 `nodeMemory`，即使用 lm-SRI。运行编号为 `tmp-wet040-001-ngpartial-lmsri-900-20260615`，外层仍按 900s 左右手动截止。
+
+lm-SRI 明显好于 full-SRI：root 在 `451.511s` 输出 summary，而 full-SRI 900s 内没有完成 root。root 结果为 `lpObj=22525.168360`，`incumbent=22584`，cutPool `80`，pricing `432.296s/225 calls/add10594`，其中 heuristic `63.353s/148 calls/add9997`，exact `368.943s/77 calls/add597`。root 后继续处理 node2，node2 用 `361.049s`，其 LP 值为 `22569.758621`，但全局 bound 仍是 root 的 `22525.168360`，incumbent 仍为 `22584`，gap `0.2605%`，队列为 `3`，cutPool 增至 `157`。900s 截止时进程仍在跑，未生成 CSV，最后可读状态来自 node2 summary。
+
+与 no-SRI 对照相比，lm-SRI 仍然不划算：no-SRI 同配置整棵树 `813.249s` 已闭合到 `22580`，而 lm-SRI 到约 900s 只完成两个节点，当前上界 `22584`、下界 `22525.168360`。因此 lm-SRI 在 40 任务上虽然比 classical full-SRI 可运行得多，但仍显著拖慢 root 和浅层节点。当前判断是：SRI 类 cut 在该实例上确实能改变 root LP，但 cut-pricing closure 成本太高，短时限内不如 no-SRI 主线；若继续研究，应优先限制 cut 轮数或只把 lm-SRI 作为 root 少轮 bound 增强诊断，而不是默认全开。

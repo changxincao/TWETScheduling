@@ -974,3 +974,11 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 `"main"` 线程处于 `PiecewiseLinearFunction.minimizeSuffixInPlace -> normalizeBackward -> normalize -> mergeMinimum -> CompletionBoundCalculator.mergeFunction -> mergeBackward -> buildAllCycles -> build -> GCNGBBStyleBidirectionalNgDssr.buildCompletionBounds`。
 
 同一栈快照里其余活跃线程是 JVM 的 Reference/Finalizer/Attach Listener/Service Thread/JIT Compiler/GC 线程，没有其它业务线程执行 `CompletionBoundCalculator`。因此当前 completion-bound DP 和 PWLF merge 是业务单线程执行；前面统计出的 backward normalize 百秒级耗时不能靠“已有并行被隐藏”解释。后续若要并行化，只能显式改造，例如按 job/state 分批传播或并行构造候选，但这会牵涉 shared envelope 合并、队列重入和确定性，风险明显高于先优化 `normalizeBackward/minimizeSuffixInPlace` 的串行热点。
+
+104. 2026-06-16 清理真实求解热路径中的调试统计
+
+在删除 `minimizeSuffixInPlace()` 主循环内的 `getSegmentNum()` 之后，继续全局搜索 `debugMap`、`getSegmentNum()`、`TimerManager` 和诊断输出。确认 `TimerManager` 由 `Configure.timeManage=false` 默认关闭，`Utility.debugCheckPWLF...` 也由 `debugPWLFDomainCheck=false` 控制，剩余真正会混入热路径的是两类无条件统计：一类是 `PiecewiseLinearFunction.add()`、`minimizePrefixInPlace()`、`trimToDomain()` 末尾顺手调用 `getSegmentNum()`，会扫描整条 segment 链并写 `Utility.debugMap`；另一类是 `Solution.merge2Segments/merge3Segments()` 中的 `M2S/M3S Total/Skip` 计数，会在 ALNS/VND 拼接热路径频繁写 `debugMap`。
+
+本次新增两个默认关闭开关：`Configure.debugPWLFSegmentStats` 和 `Configure.debugAlgorithmCounters`。`getSegmentNum()` 仍保留真实计数返回值，便于显式诊断或测试调用，但只有 `debugPWLFSegmentStats=true` 时才写 `debugMap`；上述 PWLF 末尾统计改为 `recordSegmentNumIfEnabled()`，正常求解不再触发扫描。HEU 的 `M2S/M3S` 计数改为 `recordDebugCounter()`，只有 `debugAlgorithmCounters=true` 时才写 map。这样不改变任何函数值、列成本、reduced cost、分支兼容性或求解路径，只去掉默认求解中的统计副作用。
+
+验证方面，重新搜索后，`debugMap` 写入要么位于上述开关内，要么属于测试/诊断输出；排除历史 `src/BPC` 包后，focused `javac` 通过，仅保留原有 deprecation 提示。后续若再临时加入诊断统计，必须默认关闭，并避免在 PWLF segment 级循环或 pricing label 扩展循环里无条件扫描链表或写 `HashMap`。

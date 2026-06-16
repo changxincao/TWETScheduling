@@ -127,13 +127,20 @@ public class PiecewiseLinearFunction {
 			num++;
 			p=p.next;
 		}
-		if(num==1&&Utility.compareEq(p.intercept,Utility.curUpperBound)&&Utility.compareEq(p.slope,0)) {
-			Utility.debugMap.put("PWLF_Only1Seg_Equal_UB",Utility.debugMap.getOrDefault("PWLF_Only1Seg_Equal_UB", 0)+1);
-			
+		if (Configure.debugPWLFSegmentStats) {
+			if(num==1&&Utility.compareEq(p.intercept,Utility.curUpperBound)&&Utility.compareEq(p.slope,0)) {
+				Utility.debugMap.put("PWLF_Only1Seg_Equal_UB",Utility.debugMap.getOrDefault("PWLF_Only1Seg_Equal_UB", 0)+1);
+			}
+			Utility.debugMap.put("segmentNum",Utility.debugMap.getOrDefault("segmentNum", 0)+num);
 		}
-		Utility.debugMap.put("segmentNum",Utility.debugMap.getOrDefault("segmentNum", 0)+num);
 
 		return num;
+	}
+
+	private void recordSegmentNumIfEnabled() {
+		if (Configure.debugPWLFSegmentStats) {
+			getSegmentNum();
+		}
 	}
 	//做了测试，这玩意慢了很多很多，GPT说java对小尺寸对象回收很快，不需要。。
 	public static class SegmentPool {
@@ -508,7 +515,7 @@ public class PiecewiseLinearFunction {
 				q = q.next;
 		}
 		TimerManager.end("分段线性函数相加");
-		res.getSegmentNum();
+		res.recordSegmentNumIfEnabled();
 		Utility.debugCheckPWLFRightBound("add.output", res);
 		return res;
 	}
@@ -608,7 +615,7 @@ public class PiecewiseLinearFunction {
 		this.tail = write;
 		Utility.debugCheckPWLFRightBound("minimizePrefix.output", this);
 		TimerManager.end("分段线性函数前缀最小化");
-		getSegmentNum();
+		recordSegmentNumIfEnabled();
 	}
 
 	// 这个取min的操作应该是通用的了，不管函数的分段线性是什么样子，不连续、增减交替
@@ -904,7 +911,7 @@ public class PiecewiseLinearFunction {
 			}
 		}
 		TimerManager.end("分段线性函数切割可行域");
-		getSegmentNum();
+		recordSegmentNumIfEnabled();
 	}
 
 	/**

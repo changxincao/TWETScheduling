@@ -46,6 +46,12 @@ public class Solution {
 	TimeWindowSummary[][][] timeWindowSummary_hg;// 2026-05-17: 子序列 h..g 正向硬窗摘要，用于 move 前安全剪枝
 	TimeWindowSummary[][][] timeWindowSummary_gh;// 2026-05-17: 子序列 h..g 反向硬窗摘要，用于 reverse 片段剪枝
 
+	private static void recordDebugCounter(String key) {
+		if (Configure.debugAlgorithmCounters) {
+			Utility.debugMap.put(key, Utility.debugMap.getOrDefault(key, 0) + 1);
+		}
+	}
+
 	public Solution(Data data) {
 		this.data = data;
 		cost = new double[data.m];
@@ -996,14 +1002,14 @@ public class Solution {
 		// 三段拼接新产生的两条桥接弧不属于任何原段，因此由 bridgeCost1/bridgeCost2 显式补入。
 		if (f1.isEmpty() || f2.isEmpty() || b2.isEmpty() || b3.isEmpty())
 			return Utility.big_M;
-		Utility.debugMap.put("M3S Total:",Utility.debugMap.getOrDefault("M3S Total:",0)+1);
+		recordDebugCounter("M3S Total:");
 		double bridgeCost = bridgeCost1 + bridgeCost2;
 		
 		double f1_LB = f1.tail.getValue(f1.tail.end);
 		double f2_LB = f2.tail.getValue(f2.tail.end);
 		double b3_LB = b3.head.getValue(b3.head.start);
 		if (Utility.compareGe(f1_LB + f2_LB + b3_LB + bridgeCost, Utility.curUpperBound)) {
-			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
+			recordDebugCounter("M3S Skip:");
 			return f1_LB + f2_LB + b3_LB + bridgeCost;
 		}
 
@@ -1019,7 +1025,7 @@ public class Solution {
 			//这>=先不管，影响不大应该？
 //			Utility.debugNumPlus();
 //			System.out.println("M错误？");// 假设不可能
-			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
+			recordDebugCounter("M3S Skip:");
 			
 			return Utility.curUpperBound;// 应该就可以直接返回了，不需要往后做了
 		}
@@ -1034,7 +1040,7 @@ public class Solution {
 		if (Utility.compareGe(cost23 + bridgeCost, Utility.curUpperBound)) {
 //			Utility.debugNumPlus();
 //			System.out.println("M错误？");// 假设不可能
-			Utility.debugMap.put("M3S Skip:",Utility.debugMap.getOrDefault("M3S Skip:",0)+1);
+			recordDebugCounter("M3S Skip:");
 			return Utility.curUpperBound;// 应该就可以直接返回了，不需要往后做了
 
 		}
@@ -1148,13 +1154,13 @@ public class Solution {
 //		}
 		//TODO 通过对b2取更好的下界，直接砍掉的多了一点，但时间会慢点
 		//整体的影响不大感觉
-		Utility.debugMap.put("M2S Total:",Utility.debugMap.getOrDefault("M2S Total:",0)+1);
+		recordDebugCounter("M2S Total:");
 		
 		double f1_LB = f1.tail.getValue(f1.tail.end);
 		double b2_LB = b2.head.getValue(b2.head.start);
 		if (Utility.compareGe(f1_LB + b2_LB + bridgeCost, Utility.curUpperBound)) {
 //			System.out.println("下界跳出");
-			Utility.debugMap.put("M2S Skip:",Utility.debugMap.getOrDefault("M2S Skip:",0)+1);
+			recordDebugCounter("M2S Skip:");
 			return f1_LB + b2_LB + bridgeCost;
 		}
 		double bestCost = 0;

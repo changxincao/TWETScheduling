@@ -16,6 +16,10 @@ public class Configure {
 	// 2026-05-23: 双向 exact pricing 的列生成复核开关。默认关闭，正式运行直接信任
 	// label/join 推导出的 reduced cost；调试时打开，用完整序列 evaluator 和分支兼容性做兜底校验。
 	public static boolean debugBPCPricingColumnCheck=false;
+	// 2026-06-16: 分段数量统计会扫描整条 PWLF 链，默认关闭，避免混入真实求解热路径。
+	public static boolean debugPWLFSegmentStats=false;
+	// 2026-06-16: HEU 拼接次数统计只用于诊断，默认关闭，避免频繁写 debugMap。
+	public static boolean debugAlgorithmCounters=false;
 	public Solution bestSolution;
 	private final ArrayList<Solution> bestSolutionHistory = new ArrayList<Solution>();
 	

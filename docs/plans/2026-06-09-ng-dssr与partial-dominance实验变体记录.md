@@ -943,6 +943,16 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 
 结合代码看，`normalizeBackward()` 当前流程是先裁右侧 big-M、合并相邻同段、调用 `minimizeSuffixInPlace()`、再做一次相邻同段压缩；而 `minimizeSuffixInPlace()` 会把链表扫进 `ArrayList<Segment>`，再倒序重建链表。当前最明确的下一步优化目标不是 right-argument copy，也不是粗 hull delta propagation，而是继续拆 `normalizeBackward/minimizeSuffixInPlace`：先增加内部子阶段统计，确认耗时集中在装数组、倒序 suffix-min 重建、SegmentPool.obtain/insert 还是最后 compact；再考虑在 backward 已经满足 suffix-min 或只发生局部小改动时跳过/局部执行 suffix-min。这个方向需要比 no-copy 更谨慎，因为它会直接影响 lower envelope 的方向化闭包语义。
 
+102. 2026-06-16 normalizeBackward 内部子阶段诊断
+
+继续沿第 101 节结论，把 observer 限定在 `mergeMinimum()` 内部调用 `normalize()` 的范围内，并把 normalize 拆成四段统计：裁 big-M 或边界 trim、前置相邻段压缩、方向化 prefix/suffix-min、后置相邻段压缩。这样可以避免把 candidate 构造阶段的其他 normalize 混入 completion-bound merge timing。默认仍由 `twet.bpc.completionBoundMergeTiming` 控制，关闭时不安装 observer。
+
+同一个 40-2 zero setup root-only 配置复跑，结果仍为 `NODE_LIMIT, incumbent=17887, bound=17866.666667, valid=true`。本次 run 总时间 `124.891s`、exact `81.295s/9 calls`，和上一轮绝对时间不直接比较，因为 Java/JIT/缓存和诊断组合会带来波动；这里只看子阶段占比。
+
+只看 9 次 exact build，forward normalize 累计约 `0.753s`，backward normalize 累计约 `45.526s`。backward normalize 的四段拆分为 `trim/pre/min/post=0.333s/0.304s/44.593s/0.174s`，其中 `minimizeSuffixInPlace()` 占 `97.95%`。backward merge timing 总体中，normalize 占约 `88.88%`，copy 仍只有 `0.41%`。把 root 后 subtree 那次也加入，结论也一致：backward normalize 累计约 `49.855s`，其中 suffix-min 约 `48.837s`，占 `97.96%`。
+
+因此新的修改目标已经进一步收窄：不是 `mergeMinimum` 主体，也不是 `normalizeBackward` 的 big-M 裁剪或 compact，而是 `minimizeSuffixInPlace()` 自身。当前实现先把链表扫入 `ArrayList<Segment>`，再倒序构造新链表，并用 `SegmentPool.obtain/insertSegment` 生成水平段和保留段。下一步应优先统计或优化这三个点：1）装数组是否必要，能否用临时栈或复用数组减少分配；2）倒序 suffix-min 是否总是必须完整重建，是否能在输入已满足 suffix-min 时直接跳过；3）能否像 forward 一样更少创建新 segment，或在 backward changed 区间很小时做局部 suffix-min。相比之下，no-copy 和 domain-extension 快路径现在都不是第一优先级。
+
 102. 2026-06-16 completion-bound 是否单线程的验证
 
 针对“单线程？”这个问题，本次先做静态搜索，再做运行期线程栈采样。静态上，`CompletionBoundCalculator`、各 `GC*Bidirectional*` pricing engine、`CompletionBoundSubtreeArcEliminator` 中没有 `parallelStream`、`Executor`、`ForkJoin` 或手动 `new Thread` 参与 completion-bound 构造；`ThreadLocal<MergeMinimumObserver>` 只是为了避免诊断 hook 泄漏到其它调用方，不表示当前算法本身并行。

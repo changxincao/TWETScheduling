@@ -148,6 +148,10 @@ final class CompletionBoundCalculator {
 		long forwardMergeCopyNanos;
 		long forwardMergeBodyNanos;
 		long forwardMergeNormalizeNanos;
+		long forwardNormalizeTrimNanos;
+		long forwardNormalizePreCompactNanos;
+		long forwardNormalizeDirectionalMinNanos;
+		long forwardNormalizePostCompactNanos;
 		long backwardMergeSkipped;
 		long backwardMergeFull;
 		long backwardMergeFullChanged;
@@ -155,6 +159,10 @@ final class CompletionBoundCalculator {
 		long backwardMergeCopyNanos;
 		long backwardMergeBodyNanos;
 		long backwardMergeNormalizeNanos;
+		long backwardNormalizeTrimNanos;
+		long backwardNormalizePreCompactNanos;
+		long backwardNormalizeDirectionalMinNanos;
+		long backwardNormalizePostCompactNanos;
 		long forwardSegmentSamples;
 		long forwardTargetSegments;
 		long forwardCandidateSegments;
@@ -271,6 +279,13 @@ final class CompletionBoundCalculator {
 						long copyNanos, long bodyNanos, long normalizeNanos) {
 					recordMergeMinimumTiming(direction, skipped, changed, skipNanos, copyNanos, bodyNanos,
 							normalizeNanos);
+				}
+
+				@Override
+				public void recordNormalize(Direction direction, long trimNanos, long preCompactNanos,
+						long directionalMinNanos, long postCompactNanos) {
+					recordMergeMinimumNormalizeTiming(direction, trimNanos, preCompactNanos,
+							directionalMinNanos, postCompactNanos);
 				}
 			});
 		}
@@ -982,6 +997,21 @@ final class CompletionBoundCalculator {
 		}
 	}
 
+	private void recordMergeMinimumNormalizeTiming(Direction direction, long trimNanos, long preCompactNanos,
+			long directionalMinNanos, long postCompactNanos) {
+		if (direction == Direction.FORWARD) {
+			stats.forwardNormalizeTrimNanos += trimNanos;
+			stats.forwardNormalizePreCompactNanos += preCompactNanos;
+			stats.forwardNormalizeDirectionalMinNanos += directionalMinNanos;
+			stats.forwardNormalizePostCompactNanos += postCompactNanos;
+		} else {
+			stats.backwardNormalizeTrimNanos += trimNanos;
+			stats.backwardNormalizePreCompactNanos += preCompactNanos;
+			stats.backwardNormalizeDirectionalMinNanos += directionalMinNanos;
+			stats.backwardNormalizePostCompactNanos += postCompactNanos;
+		}
+	}
+
 	private void printMergeTiming(Relaxation relaxation) {
 		System.out.println("[completionBoundMergeTiming] relaxation=" + relaxation
 				+ " fwSkip/full/changed=" + stats.forwardMergeSkipped + "/" + stats.forwardMergeFull
@@ -995,7 +1025,15 @@ final class CompletionBoundCalculator {
 				+ " bwMs skip/copy/body/normalize=" + formatNanos(stats.backwardMergeSkipNanos)
 				+ "/" + formatNanos(stats.backwardMergeCopyNanos)
 				+ "/" + formatNanos(stats.backwardMergeBodyNanos)
-				+ "/" + formatNanos(stats.backwardMergeNormalizeNanos));
+				+ "/" + formatNanos(stats.backwardMergeNormalizeNanos)
+				+ " fwNormMs trim/pre/min/post=" + formatNanos(stats.forwardNormalizeTrimNanos)
+				+ "/" + formatNanos(stats.forwardNormalizePreCompactNanos)
+				+ "/" + formatNanos(stats.forwardNormalizeDirectionalMinNanos)
+				+ "/" + formatNanos(stats.forwardNormalizePostCompactNanos)
+				+ " bwNormMs trim/pre/min/post=" + formatNanos(stats.backwardNormalizeTrimNanos)
+				+ "/" + formatNanos(stats.backwardNormalizePreCompactNanos)
+				+ "/" + formatNanos(stats.backwardNormalizeDirectionalMinNanos)
+				+ "/" + formatNanos(stats.backwardNormalizePostCompactNanos));
 		System.out.flush();
 	}
 

@@ -63,10 +63,16 @@ public class PiecewiseLinearFunction {
 	public interface MergeMinimumObserver {
 		void record(Direction direction, boolean skipped, boolean changed, long skipNanos, long copyNanos,
 				long bodyNanos, long normalizeNanos);
+
+		default void recordNormalize(Direction direction, long trimNanos, long preCompactNanos,
+				long directionalMinNanos, long postCompactNanos) {
+		}
 	}
 
 	private static final ThreadLocal<MergeMinimumObserver> MERGE_MINIMUM_OBSERVER =
 			new ThreadLocal<MergeMinimumObserver>();
+	private static final ThreadLocal<Boolean> MERGE_MINIMUM_NORMALIZE_OBSERVER_ACTIVE =
+			new ThreadLocal<Boolean>();
 
 	public static MergeMinimumObserver setMergeMinimumObserver(MergeMinimumObserver observer) {
 		MergeMinimumObserver previous = MERGE_MINIMUM_OBSERVER.get();
@@ -1223,13 +1229,20 @@ public class PiecewiseLinearFunction {
 
 	private void normalizeForward() {
 		Utility.debugCheckPWLFRightBound("normalize.forward.input", this);
+		MergeMinimumObserver observer = Boolean.TRUE.equals(MERGE_MINIMUM_NORMALIZE_OBSERVER_ACTIVE.get())
+				? MERGE_MINIMUM_OBSERVER.get() : null;
+		long phaseStart = observer == null ? 0L : System.nanoTime();
 		//这个的作用还在于将tail复位
 		// 1) 删除头部无穷段
 		while (head != null && Utility.isBigMValue(head.intercept)) {
 			head = head.next;
 		}
+		long trimNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
 		if (head == null) {
 			tail = null;
+			if (observer != null) {
+				observer.recordNormalize(Direction.FORWARD, trimNanos, 0L, 0L, 0L);
+			}
 			return;
 		}
 
@@ -1239,6 +1252,7 @@ public class PiecewiseLinearFunction {
 		// 若尾部 M 被提前物理删除，后续 minimizePrefixInPlace() 就没机会用前缀最小值
 		// 把右尾闭包补回来。现在的语义是：左侧连续 M 仍然表示不可达起点并删除；
 		// 右侧 M 保留到 prefix-min 阶段处理，从而保持 forward 函数右端到 T。
+		phaseStart = observer == null ? 0L : System.nanoTime();
 		Segment cur = head;
 		tail = null;
 		while (cur != null) {
@@ -1261,18 +1275,33 @@ public class PiecewiseLinearFunction {
 		}
 
 		// 4) 保证非增
+		long preCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
+		phaseStart = observer == null ? 0L : System.nanoTime();
 		minimizePrefixInPlace();
+		long directionalMinNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
+		phaseStart = observer == null ? 0L : System.nanoTime();
 		compactAdjacentEqualSegments();
+		long postCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
+		if (observer != null) {
+			observer.recordNormalize(Direction.FORWARD, trimNanos, preCompactNanos,
+					directionalMinNanos, postCompactNanos);
+		}
 		Utility.debugCheckPWLFRightBound("normalize.forward.output", this);
 	}
 
 	private void normalizeBackward() {
 		Utility.debugCheckPWLFLeftBound("normalize.backward.input", this);
+		MergeMinimumObserver observer = Boolean.TRUE.equals(MERGE_MINIMUM_NORMALIZE_OBSERVER_ACTIVE.get())
+				? MERGE_MINIMUM_OBSERVER.get() : null;
 		if (head == null) {
 			tail = null;
+			if (observer != null) {
+				observer.recordNormalize(Direction.BACKWARD, 0L, 0L, 0L, 0L);
+			}
 			return;
 		}
 
+		long phaseStart = observer == null ? 0L : System.nanoTime();
 		// 2026-05-15: backward 方向与 forward normalize 对称。
 		// backward label 的固定端点是左端 0/domainStart，因此左侧 big_M 不能物理删除；
 		// 右侧连续 big_M 尾段表示后续无法接上的过晚完成时间，可以在 suffix-min 前裁掉。
@@ -1286,11 +1315,16 @@ public class PiecewiseLinearFunction {
 		}
 		if (lastNonBigM == null) {
 			head = tail = null;
+			if (observer != null) {
+				observer.recordNormalize(Direction.BACKWARD, System.nanoTime() - phaseStart, 0L, 0L, 0L);
+			}
 			return;
 		}
 		lastNonBigM.next = null;
 		tail = lastNonBigM;
+		long trimNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
 
+		phaseStart = observer == null ? 0L : System.nanoTime();
 		cur = head;
 		while (cur.next != null) {
 			if (Utility.compareEq(cur.slope, cur.next.slope) && Utility.compareEq(cur.intercept, cur.next.intercept)) {
@@ -1303,9 +1337,18 @@ public class PiecewiseLinearFunction {
 				cur = cur.next;
 			}
 		}
+		long preCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
 
+		phaseStart = observer == null ? 0L : System.nanoTime();
 		minimizeSuffixInPlace();
+		long directionalMinNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
+		phaseStart = observer == null ? 0L : System.nanoTime();
 		compactAdjacentEqualSegments();
+		long postCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
+		if (observer != null) {
+			observer.recordNormalize(Direction.BACKWARD, trimNanos, preCompactNanos,
+					directionalMinNanos, postCompactNanos);
+		}
 		Utility.debugCheckPWLFLeftBound("normalize.backward.output", this);
 	}
 
@@ -1752,7 +1795,16 @@ public class PiecewiseLinearFunction {
 		//这个进入的时候还是有可能存在连续段的斜率和intercept是相同的，比如this函数最后一个和g相邻的部分，此时相当于前半部分取小，再和最后剩下的拼接，还是原来的东西
 		long bodyNanos = observer == null ? 0L : System.nanoTime() - bodyStart;
 		long normalizeStart = observer == null ? 0L : System.nanoTime();
-		normalize(direction);
+		if (observer != null) {
+			MERGE_MINIMUM_NORMALIZE_OBSERVER_ACTIVE.set(Boolean.TRUE);
+		}
+		try {
+			normalize(direction);
+		} finally {
+			if (observer != null) {
+				MERGE_MINIMUM_NORMALIZE_OBSERVER_ACTIVE.remove();
+			}
+		}
 		long normalizeNanos = observer == null ? 0L : System.nanoTime() - normalizeStart;
 		if (observer != null) {
 			observer.record(direction, false, changed, skipNanos, copyNanos, bodyNanos, normalizeNanos);

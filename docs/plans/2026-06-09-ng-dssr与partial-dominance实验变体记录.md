@@ -998,3 +998,9 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 本次总时间 `68.643s`，root `46.906s`，heuristic pricing `22.404s/198`，ng-DSSR exact pricing `15.987s/79`，master LP `8.956s`，RMIH `2.891s/10`，subtree arc elimination `1.434s/7`。对比之前完整 zero-setup no-SRI 记录：最早同口径为 `474.103s`、exact `252.752s`、pool `129607`；safe no-change merge 后完整记录为 `242.100s`、exact `122.885s`、pool `129607`。当前 run 进一步降到 `68.643s`，同时最终目标仍为 `17881`。
 
 日志中 79 条 exact pricing 记录里，completion-bound build 非零 `57` 次，累计约 `12.546s`，最大单次 `1.338s`；内部正向累计约 `4.583s`、反向约 `7.826s`。这比第 98 节记录的 completion-bound build 累计 `112.040s` 和最大 `20.856s` 明显更低，说明删除 segment 级 debug 扫描、默认关闭 segment/algorithm 统计、以及本轮诊断入口收口后，zero setup 下的 completion-bound 热路径已经不再是百秒级瓶颈。当前总时间主要分布在 heuristic pricing、exact pricing、LP 和少量 RMIH 上，root 仍是最大单节点，但已经从原先的数分钟降到一分钟以内。
+
+107. 2026-06-16 再次确认 debug/统计热路径残留
+
+针对“是否还有类似 `getSegmentNum()` 混进真实求解热路径”的问题，本次继续搜索 `debugMap`、`debugNumPlus`、`getSegmentNum`、`System.out`、`diagnostic`、`heartbeat`、`TimerManager`、`nanoTime/currentTimeMillis` 等入口。当前结论是，normal ng-DSSR 主线中已经没有同类的链表全扫描或 `HashMap` 写入残留：`TimerManager` 默认由 `Configure.timeManage=false` 第一行返回，PWLF 段数统计由 `debugPWLFSegmentStats=false` 控制，HEU 拼接计数由 `debugAlgorithmCounters=false` 控制，completion-bound segment 统计、merge timing、paper graph timing、pricing snapshot、heartbeat 和 midpoint/full diagnostic 都需要显式系统属性或配置打开。默认真实求解路径中仍保留的只是 primitive long 计数和少量阶段耗时，用于正常 summary，不属于前面导致数量级变慢的统计副作用。
+
+本次额外发现并修掉一个较小残留：`PartialListDominanceStore` 的 `cardinalitySkips` 统计虽然只用于 summary，但原来每次插入/单点检查都会扫描若干 cardinality bucket 计数。它不影响第 106 节的 no-partial zero-setup 结果，但会影响 partial-list/SRI 实验。现在新增 `twet.bpc.partialListCardinalitySkipStats`，默认关闭该 bucket 计数扫描；需要诊断时才打开。focused `javac` 已通过。剩余未清理的输出主要是测试类 summary、显式诊断方法和 `Basic.Data` 中少量数据预处理打印，不在当前 pricing/completion-bound 热路径中。

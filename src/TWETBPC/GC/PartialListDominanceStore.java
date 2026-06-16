@@ -19,6 +19,9 @@ import TWETBPC.Util.PackedBitSet;
  */
 final class PartialListDominanceStore implements DominanceStore {
 
+	private static final boolean COLLECT_CARDINALITY_SKIP_STATS = Boolean.getBoolean(
+			"twet.bpc.partialListCardinalitySkipStats");
+
 	private static long labelsInserted;
 	private static long labelsRejected;
 	private static long labelsDeleted;
@@ -217,6 +220,9 @@ final class PartialListDominanceStore implements DominanceStore {
 	}
 
 	private long countLabelsInBuckets(int fromCardinality, int toCardinality) {
+		if (!COLLECT_CARDINALITY_SKIP_STATS) {
+			return 0L;
+		}
 		int from = Math.max(0, fromCardinality);
 		int to = Math.min(toCardinality, labelsByCardinality.size() - 1);
 		long count = 0L;

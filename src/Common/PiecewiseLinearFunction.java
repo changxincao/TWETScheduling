@@ -37,6 +37,29 @@ public class PiecewiseLinearFunction {
 		EMPTY
 	}
 
+	/**
+	 * 2026-06-16: mergeMinimum 的增量结果。多个离散改善区间先合并成一个 hull，
+	 * 供 completion-bound delta propagation 实验路径使用。
+	 */
+	public static final class MergeResult {
+		public boolean changed;
+		public double changedStart = Double.POSITIVE_INFINITY;
+		public double changedEnd = Double.NEGATIVE_INFINITY;
+
+		public boolean hasPositiveChangedInterval() {
+			return changed && Utility.compareLt(changedStart, changedEnd);
+		}
+
+		private void markChanged(double start, double end) {
+			if (!Utility.compareLt(start, end)) {
+				return;
+			}
+			changed = true;
+			changedStart = Math.min(changedStart, start);
+			changedEnd = Math.max(changedEnd, end);
+		}
+	}
+
 	public static class Segment {
 		public double start, end; // local coordinates
 		public double slope;
@@ -1387,6 +1410,17 @@ public class PiecewiseLinearFunction {
 	}
 
 	public boolean mergeMinimum(PiecewiseLinearFunction g, Direction direction, boolean reportChanged) {
+		return mergeMinimum(g, direction, reportChanged, null);
+	}
+
+	public MergeResult mergeMinimumWithChangeHull(PiecewiseLinearFunction g, Direction direction) {
+		MergeResult result = new MergeResult();
+		mergeMinimum(g, direction, true, result);
+		return result;
+	}
+
+	private boolean mergeMinimum(PiecewiseLinearFunction g, Direction direction, boolean reportChanged,
+			MergeResult changeHull) {
 		if (direction == Direction.FORWARD) {
 			Utility.debugCheckPWLFMergeContract("mergeMinimum.input", this, g);
 		} else {
@@ -1400,6 +1434,9 @@ public class PiecewiseLinearFunction {
 		// 如果 L1 为空，直接变成 L2 的拷贝
 		if (this.head == null) {
 			if (g.head != null) {
+				if (changeHull != null) {
+					changeHull.markChanged(g.head.start, g.tail.end);
+				}
 				PiecewiseLinearFunction copied = g.copy();
 				this.head = copied.head;
 				this.tail = copied.tail;
@@ -1469,6 +1506,9 @@ public class PiecewiseLinearFunction {
 			if (reportChanged && Utility.compareLt(g.head.start, originalHeadStart)) {
 				changed = true;
 			}
+			if (changeHull != null) {
+				changeHull.markChanged(g.head.start, originalHeadStart);
+			}
 			//不管是否相等了gh.start=start
 			
 			//先记录下来，while以后再拼上去，不然直接拼head后边被改变了
@@ -1517,6 +1557,9 @@ public class PiecewiseLinearFunction {
 			if (gNoWorse && gStrictlyBetter) {
 				if (reportChanged && Utility.compareLt(cur, nxt)) {
 					changed = true;
+				}
+				if (changeHull != null) {
+					changeHull.markChanged(cur, nxt);
 				}
 				// L2 整段支配 L1 --> 用 L2 片段替换 this 上 [cur, nxt)
 //	                replaceSegment(prev, p, cur, nxt, q.slope, q.intercept);
@@ -1578,6 +1621,9 @@ public class PiecewiseLinearFunction {
 		if (q != null) {
 			if (reportChanged && Utility.compareGt(g.tail.end, originalTailEnd)) {
 				changed = true;
+			}
+			if (changeHull != null) {
+				changeHull.markChanged(originalTailEnd, g.tail.end);
 			}
 			// 函数g末尾还有一段，需要合并进来
 			if(Utility.compareEq(q.slope, prev.slope)&&Utility.compareEq(q.intercept, prev.intercept)) {

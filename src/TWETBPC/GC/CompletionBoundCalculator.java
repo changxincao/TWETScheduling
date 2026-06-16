@@ -9,6 +9,7 @@ import java.util.PriorityQueue;
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
+import Common.PiecewiseLinearFunction.MergeResult;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.LP.LP;
@@ -190,6 +191,7 @@ final class CompletionBoundCalculator {
 	private double diagnosticLargestSampleImprovement;
 	private final boolean diagnosticChangeSource;
 	private final int diagnosticChangeSourceDumpLimit;
+	private final boolean deltaPropagation;
 	private long diagnosticChangedStrictValue;
 	private long diagnosticChangedDomainOnly;
 	private long diagnosticChangedNoVisible;
@@ -237,6 +239,7 @@ final class CompletionBoundCalculator {
 		this.diagnosticChangeSource = Boolean.getBoolean("twet.bpc.completionBoundChangeSource");
 		this.diagnosticChangeSourceDumpLimit = Math.max(0,
 				Integer.getInteger("twet.bpc.completionBoundChangeSourceDumpLimit", 0));
+		this.deltaPropagation = Boolean.getBoolean("twet.bpc.completionBoundDeltaPropagation");
 		this.diagnosticSegments = Boolean.getBoolean("twet.bpc.completionBoundSegments");
 	}
 
@@ -244,7 +247,8 @@ final class CompletionBoundCalculator {
 		diagnosticBuildStartNanos = System.nanoTime();
 		diagnosticLastHeartbeatNanos = 0L;
 		diagnosticHeartbeat("build.start." + relaxation, 0, 0, 0, true);
-		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle() : buildAllCycles();
+		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle()
+				: (deltaPropagation ? buildAllCyclesDelta() : buildAllCycles());
 		diagnosticHeartbeat("build.after_relaxation." + relaxation, 0, 0, 0, true);
 		buildCompletionFunctionMins(bounds);
 		diagnosticHeartbeat("build.after_mins." + relaxation, 0, 0, 0, true);
@@ -428,6 +432,99 @@ final class CompletionBoundCalculator {
 			}
 		}
 		diagnosticHeartbeat("allCycles.backward.done", backwardQueue.size(), 0, 0, true);
+		stats.backwardBuildNanos += System.nanoTime() - phaseStart;
+		copyCompletionFunctions(bounds.backwardBByJob, backwardB);
+		return bounds;
+	}
+
+	private Bounds buildAllCyclesDelta() {
+		Bounds bounds = new Bounds(data.n, pricingHorizon);
+		PiecewiseLinearFunction[] forwardF = new PiecewiseLinearFunction[data.n + 1];
+		PiecewiseLinearFunction[] backwardB = new PiecewiseLinearFunction[data.n + 1];
+		DeltaQueue forwardQueue = new DeltaQueue(data.n + 1);
+		DeltaQueue backwardQueue = new DeltaQueue(data.n + 1);
+
+		long phaseStart = System.nanoTime();
+		PiecewiseLinearFunction source = sourcePropagationFunction();
+		for (int idx = 0; idx < forwardSuccessorsByJob[0].length; idx++) {
+			int job = forwardSuccessorsByJob[0][idx];
+			FunctionPair candidate = buildForwardCandidate(source, 0, job);
+			if (candidate == null) {
+				continue;
+			}
+			mergeForward(bounds.forwardUByJob, job, candidate.u);
+			MergeResult changed = mergeForwardWithChangeHull(forwardF, job, candidate.f);
+			if (changed.hasPositiveChangedInterval()) {
+				forwardQueue.enqueue(job, changed.changedStart, changed.changedEnd);
+			}
+		}
+		diagnosticHeartbeat("allCyclesDelta.forward.seed.done", forwardQueue.size(), 0, 0, true);
+		while (!forwardQueue.isEmpty()) {
+			stats.forwardQueuePops++;
+			int prev = forwardQueue.poll();
+			double changedStart = forwardQueue.polledStart();
+			diagnosticHeartbeat("allCyclesDelta.forward.loop", forwardQueue.size(), prev, 0, false);
+			PiecewiseLinearFunction prevF = cropToInterval(forwardF[prev], changedStart, pricingHorizon);
+			if (!hasPositiveDomain(prevF)) {
+				continue;
+			}
+			int[] successors = forwardSuccessorsByJob[prev];
+			for (int idx = 0; idx < successors.length; idx++) {
+				int job = successors[idx];
+				FunctionPair candidate = buildForwardCandidate(prevF, prev, job);
+				if (candidate == null) {
+					continue;
+				}
+				mergeForward(bounds.forwardUByJob, job, candidate.u);
+				MergeResult changed = mergeForwardWithChangeHull(forwardF, job, candidate.f);
+				if (changed.hasPositiveChangedInterval()) {
+					forwardQueue.enqueue(job, changed.changedStart, changed.changedEnd);
+				}
+			}
+		}
+		diagnosticHeartbeat("allCyclesDelta.forward.done", forwardQueue.size(), 0, 0, true);
+		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
+		copyCompletionFunctions(bounds.forwardFByJob, forwardF);
+
+		phaseStart = System.nanoTime();
+		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
+		for (int idx = 0; idx < sinkPredecessors.length; idx++) {
+			int job = sinkPredecessors[idx];
+			FunctionPair candidate = buildBackwardSinkCandidate(job);
+			if (candidate == null) {
+				continue;
+			}
+			mergeBackward(bounds.backwardRByJob, job, candidate.u);
+			MergeResult changed = mergeBackwardWithChangeHull(backwardB, job, candidate.f);
+			if (changed.hasPositiveChangedInterval()) {
+				backwardQueue.enqueue(job, changed.changedStart, changed.changedEnd);
+			}
+		}
+		diagnosticHeartbeat("allCyclesDelta.backward.seed.done", backwardQueue.size(), 0, 0, true);
+		while (!backwardQueue.isEmpty()) {
+			stats.backwardQueuePops++;
+			int successor = backwardQueue.poll();
+			double changedEnd = backwardQueue.polledEnd();
+			diagnosticHeartbeat("allCyclesDelta.backward.loop", backwardQueue.size(), successor, 0, false);
+			PiecewiseLinearFunction successorB = cropToInterval(backwardB[successor], 0.0, changedEnd);
+			if (!hasPositiveDomain(successorB)) {
+				continue;
+			}
+			int[] predecessors = backwardPredecessorsByJob[successor];
+			for (int idx = 0; idx < predecessors.length; idx++) {
+				int prev = predecessors[idx];
+				FunctionPair candidate = buildBackwardCandidate(successorB, prev, successor);
+				if (candidate == null) {
+					continue;
+				}
+				mergeBackward(bounds.backwardRByJob, prev, candidate.u);
+				MergeResult changed = mergeBackwardWithChangeHull(backwardB, prev, candidate.f);
+				if (changed.hasPositiveChangedInterval()) {
+					backwardQueue.enqueue(prev, changed.changedStart, changed.changedEnd);
+				}
+			}
+		}
+		diagnosticHeartbeat("allCyclesDelta.backward.done", backwardQueue.size(), 0, 0, true);
 		stats.backwardBuildNanos += System.nanoTime() - phaseStart;
 		copyCompletionFunctions(bounds.backwardBByJob, backwardB);
 		return bounds;
@@ -722,6 +819,16 @@ final class CompletionBoundCalculator {
 		return mergeFunction(targetByJob, job, candidate, Direction.BACKWARD);
 	}
 
+	private MergeResult mergeForwardWithChangeHull(PiecewiseLinearFunction[] targetByJob, int job,
+			PiecewiseLinearFunction candidate) {
+		return mergeFunctionWithChangeHull(targetByJob, job, candidate, Direction.FORWARD);
+	}
+
+	private MergeResult mergeBackwardWithChangeHull(PiecewiseLinearFunction[] targetByJob, int job,
+			PiecewiseLinearFunction candidate) {
+		return mergeFunctionWithChangeHull(targetByJob, job, candidate, Direction.BACKWARD);
+	}
+
 	private boolean mergeFunction(PiecewiseLinearFunction[] targetByJob, int job, PiecewiseLinearFunction candidate,
 			Direction direction) {
 		if (!hasPositiveDomain(candidate)) {
@@ -755,6 +862,33 @@ final class CompletionBoundCalculator {
 			auditChangedMerge(beforeAudit, current, direction, changed);
 		}
 		return changed;
+	}
+
+	private MergeResult mergeFunctionWithChangeHull(PiecewiseLinearFunction[] targetByJob, int job,
+			PiecewiseLinearFunction candidate, Direction direction) {
+		if (!hasPositiveDomain(candidate)) {
+			return new MergeResult();
+		}
+		stats.mergeCalls++;
+		PiecewiseLinearFunction current = targetByJob[job];
+		if (current == null || current.head == null) {
+			targetByJob[job] = candidate.copy();
+			recordSegmentMerge(direction, 0, countSegments(candidate), countSegments(targetByJob[job]));
+			stats.mergeChanged++;
+			MergeResult result = new MergeResult();
+			result.changed = true;
+			result.changedStart = targetByJob[job].head.start;
+			result.changedEnd = targetByJob[job].tail.end;
+			return result;
+		}
+		int targetSegmentsBefore = diagnosticSegments ? countSegments(current) : 0;
+		int candidateSegments = diagnosticSegments ? countSegments(candidate) : 0;
+		MergeResult result = current.mergeMinimumWithChangeHull(candidate, direction);
+		if (result.changed) {
+			stats.mergeChanged++;
+		}
+		recordSegmentMerge(direction, targetSegmentsBefore, candidateSegments, countSegments(current));
+		return result;
 	}
 
 	private void recordSegmentMerge(Direction direction, int targetSegments, int candidateSegments, int afterSegments) {
@@ -859,6 +993,66 @@ final class CompletionBoundCalculator {
 			return Utility.big_M;
 		}
 		return frontier.head.start;
+	}
+
+	private static final class DeltaQueue {
+		private final ArrayDeque<Integer> queue = new ArrayDeque<Integer>();
+		private final boolean[] inQueue;
+		private final boolean[] hasPending;
+		private final double[] startByState;
+		private final double[] endByState;
+		private double lastStart;
+		private double lastEnd;
+
+		DeltaQueue(int stateCount) {
+			this.inQueue = new boolean[stateCount];
+			this.hasPending = new boolean[stateCount];
+			this.startByState = new double[stateCount];
+			this.endByState = new double[stateCount];
+		}
+
+		void enqueue(int state, double start, double end) {
+			if (state < 0 || state >= inQueue.length || !Utility.compareLt(start, end)) {
+				return;
+			}
+			if (hasPending[state]) {
+				startByState[state] = Math.min(startByState[state], start);
+				endByState[state] = Math.max(endByState[state], end);
+			} else {
+				hasPending[state] = true;
+				startByState[state] = start;
+				endByState[state] = end;
+			}
+			if (!inQueue[state]) {
+				inQueue[state] = true;
+				queue.add(Integer.valueOf(state));
+			}
+		}
+
+		boolean isEmpty() {
+			return queue.isEmpty();
+		}
+
+		int size() {
+			return queue.size();
+		}
+
+		int poll() {
+			int state = queue.poll().intValue();
+			inQueue[state] = false;
+			lastStart = startByState[state];
+			lastEnd = endByState[state];
+			hasPending[state] = false;
+			return state;
+		}
+
+		double polledStart() {
+			return lastStart;
+		}
+
+		double polledEnd() {
+			return lastEnd;
+		}
 	}
 
 	private final class StateQueue {

@@ -1004,3 +1004,11 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 针对“是否还有类似 `getSegmentNum()` 混进真实求解热路径”的问题，本次继续搜索 `debugMap`、`debugNumPlus`、`getSegmentNum`、`System.out`、`diagnostic`、`heartbeat`、`TimerManager`、`nanoTime/currentTimeMillis` 等入口。当前结论是，normal ng-DSSR 主线中已经没有同类的链表全扫描或 `HashMap` 写入残留：`TimerManager` 默认由 `Configure.timeManage=false` 第一行返回，PWLF 段数统计由 `debugPWLFSegmentStats=false` 控制，HEU 拼接计数由 `debugAlgorithmCounters=false` 控制，completion-bound segment 统计、merge timing、paper graph timing、pricing snapshot、heartbeat 和 midpoint/full diagnostic 都需要显式系统属性或配置打开。默认真实求解路径中仍保留的只是 primitive long 计数和少量阶段耗时，用于正常 summary，不属于前面导致数量级变慢的统计副作用。
 
 本次额外发现并修掉一个较小残留：`PartialListDominanceStore` 的 `cardinalitySkips` 统计虽然只用于 summary，但原来每次插入/单点检查都会扫描若干 cardinality bucket 计数。它不影响第 106 节的 no-partial zero-setup 结果，但会影响 partial-list/SRI 实验。现在新增 `twet.bpc.partialListCardinalitySkipStats`，默认关闭该 bucket 计数扫描；需要诊断时才打开。focused `javac` 已通过。剩余未清理的输出主要是测试类 summary、显式诊断方法和 `Basic.Data` 中少量数据预处理打印，不在当前 pricing/completion-bound 热路径中。
+
+108. 2026-06-16 重新求解 40-2 原始 setup 算例
+
+按第 106 节相同主线配置重新求解原始 `data/40-2/wet040_001_2m.dat`，即 normal ng-DSSR nearestK8/top10、no partial、no SRI、ALNS、RMIH 4s、`completionBound=allCycles`、`completionBoundArcFixing=true`、pricingOnly subtree、midpoint probe/reuse、`joinBest=BEST_UB`，并关闭无向 adjacency branching。运行名为 `tmp-wet040-001-setup-current-20260616`，结果为 `FINISHED`，`incumbent=bound=22580`，处理 `51` 个节点，pricing `1608` 轮，新增列 `85816`，最终 pool `85816`，validator 为 `true`。
+
+本次总时间 `313.587s`，root `95.623s`，heuristic pricing `105.163s/1170`，ng-DSSR exact pricing `106.642s/434`，master LP `31.239s`，RMIH `47.185s/34`，subtree arc elimination `1.891s/25`，root bound 为 `22490`，初始上界 `22584`，最终上界由 RMIH 在 root 更新到 `22582`，后续更新到 `22580` 并闭合。completion-bound build 在 exact pricing 记录中非零 `231` 次，累计约 `39.032s`，最大单次 `1.664s`，内部正向累计约 `17.890s`、反向约 `20.386s`。
+
+对比此前同配置原始 setup 的历史记录 `FINISHED, incumbent=bound=22580, nodes=149, solve=813.249s, exact=416.917s/1071, heuristic=190.739s/2987, pool=211279`，当前 run 明显更快，且节点数、列池规模和 pricing 次数都下降很多。与第 106 节 zero-setup 当前结果相比，原始 setup 仍更慢：`313.587s` 对 `68.643s`，节点 `51` 对 `14`，列池 `85816` 对 `29777`。当前判断是，前面清掉 debug/统计热路径后，原始 setup 的 completion-bound 不再表现为异常百秒瓶颈；剩余耗时主要来自更大的分支树、更多 heuristic/exact pricing 轮和 RMIH 调用，而不是单个 completion-bound build 卡住。

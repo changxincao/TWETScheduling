@@ -1902,3 +1902,15 @@ zero setup 正好放大了这个现象。setup 为 0 后，不同后缀路径的
 第二类是牺牲一部分 bound 强度换速度的策略。可以做两阶段 completion bound：先用 scalar/min bound 或较粗的离散 bound 快速判定；只有粗 bound 不能剪的状态或 arc，才调用完整 PWLF bound。这个对 root subtree arc elimination 很有意义，因为 root 现在为了扫描全部 arc 先重建完整 PWLF bound。关键要求是：弱 bound 只能用于“能剪则剪，不能剪再精确”，不能直接替代完整判据，否则会改变正确性或显著削弱后续剪枝。
 
 当前不建议直接把 all-cycles 换成 two-cycle 默认，也不建议在 zero setup 时关闭 completion bound。前者可能让 exact pricing 和 subtree 后续剪枝变弱，后者会把问题转移到 label 扩展和 join。更稳的实施顺序是：先做 no-change 快路径并用 `completionBoundSegments` 验证 merge 样本/段数/时间变化；再做精确段压缩；最后再评估两阶段弱 bound 是否值得加入。
+
+### 41.73 2026-06-16 completion-bound 迭代层面的优化判断
+
+当前 all-cycles completion bound 本质是 label-correcting/Bellman 固定点迭代。代码里每次某个 job 的 `forwardF/backwardB` 函数被 `mergeMinimum()` 改小，就把这个 job 放回队列，再用整条新函数去松弛所有 successor/predecessor。虽然实现上已有可选 priority queue 排序，但它仍然是 whole-function propagation：只要函数某一小段变了，后续传播时会拿整条函数重新 shift/add/normalize/merge。
+
+不能直接换成 Dijkstra 的主要原因是 reduced cost 里有 job dual、arc dual、machine dual 和 cut dual，单条转移的 reduced cost 不保证非负；函数值还会因 prefix/suffix normalize 表达“可以等待到更优时间”。因此不存在简单的“弹出一次即最终最优”的单调性。Floyd-Warshall/min-plus closure 在 n=40 的状态数上看似可行，但每个矩阵元素都是 PWLF，下包络合并会变成更多函数对的全量组合，通常不会比当前 queue relaxation 更好。
+
+真正可能有价值的迭代级优化是 delta propagation。也就是 `mergeMinimum()` 不只返回 changed=true/false，而是返回“哪些时间区间被 candidate 改小了”。后续只把这部分 changed interval 传播给 successor/predecessor，而不是整条函数。这样在段数很多但每轮只改善少量区间时，可以显著减少重复 shift/add/normalize/merge。难点是 prefix/suffix normalize 会把一个局部改善扩散到其右侧或左侧，因此 delta 区间必须在 normalize 后重新闭包，不能简单只传原始交点附近。
+
+另一个可做的迭代优化是有效子图 active-set。先用 scalar reduced-cost 下界、禁弧、pricingOnly arc、zero-dual job、粗 completion bound 找出可能影响负列的 job/arc 子集；完整 PWLF Bellman 只在 active 子图上跑。若最终 exact pricing 或 subtree 需要更强证明，再对剩余不确定部分补 full graph。这个思路和两阶段 bound 类似，但优化点在迭代图规模，而不是单次 merge。
+
+相比之下，单纯改队列顺序收益可能有限。当前已经能用 priority queue，继续调 FIFO/priority/time-first/cost-first 只能减少部分重复松弛，无法改变“整条函数重复传播”和“PWLF 段数爆炸”的根本成本。后续如果要做较大优化，优先级应是：先实现 merge no-change 快路径；再评估 delta propagation 的 changed interval 设计；最后才考虑 active-set/full-graph 回退结构。

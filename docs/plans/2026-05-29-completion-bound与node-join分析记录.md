@@ -1914,3 +1914,15 @@ zero setup 正好放大了这个现象。setup 为 0 后，不同后缀路径的
 另一个可做的迭代优化是有效子图 active-set。先用 scalar reduced-cost 下界、禁弧、pricingOnly arc、zero-dual job、粗 completion bound 找出可能影响负列的 job/arc 子集；完整 PWLF Bellman 只在 active 子图上跑。若最终 exact pricing 或 subtree 需要更强证明，再对剩余不确定部分补 full graph。这个思路和两阶段 bound 类似，但优化点在迭代图规模，而不是单次 merge。
 
 相比之下，单纯改队列顺序收益可能有限。当前已经能用 priority queue，继续调 FIFO/priority/time-first/cost-first 只能减少部分重复松弛，无法改变“整条函数重复传播”和“PWLF 段数爆炸”的根本成本。后续如果要做较大优化，优先级应是：先实现 merge no-change 快路径；再评估 delta propagation 的 changed interval 设计；最后才考虑 active-set/full-graph 回退结构。
+
+### 41.74 2026-06-16 completion-bound delta propagation 适用性分析
+
+delta propagation 值得作为 completion-bound 的下一步实验方向。它的核心不是改变 bound 语义，而是把当前的“状态函数只要 changed 就整条传播”改成“只传播新变小的时间区间”。当前 `mergeMinimum()` 只返回 true/false，因此一个 job 的 `backwardB[j]` 哪怕只在很窄的一段时间变小，也会用整条几百段函数去松弛所有 predecessor；zero setup 下这会反复触发昂贵的 shift/add/normalize/merge。若能记录 changed intervals，则后继传播可以先裁出这些区间对应的 delta 函数，只对这部分做平移、加 arc cost、加 job penalty和 normalize，再 merge 到下一状态。
+
+这个机制在 completion bound 中成立，原因是这里的状态是固定的。all-cycles 里状态就是 terminal job，two-cycle 里状态是 `(prev,current)` 或类似二元状态；状态间的 successor/predecessor 图在一次 bound 构造中固定。某个状态函数的新降低区间传播到哪个后继、怎样 shift 和加成本，完全由状态和 arc 决定。因此可以把“新降低区间”看作增量消息在固定图上传递，类似 shortest-path label-correcting 的 delta relaxation。
+
+这个思路不适合直接搬到 dominance graph。dominance graph 的 merge/envelope 通常来自新 label 插入，label 自身是新的路径对象，后续可扩展集合、visited/ng-memory、SRI 状态和可恢复 route 都跟 label 绑定；即使 envelope 某段变小，也不能只传播“envelope 的新区间”来代表某个具体 label。换句话说，completion bound 的函数是纯下界状态值，可以丢掉路径身份；dominance graph 的 label 不能丢掉身份。因此 delta propagation 主要是 completion-bound 专用优化。
+
+正确性上要注意 prefix/suffix normalize 的闭包。forward 中一个区间变小后，经 `normalize(FORWARD)` 可能影响该区间右侧的 prefix-min 值；backward 中一个区间变小后，经 `normalize(BACKWARD)` 可能影响该区间左侧的 suffix-min 值。因此 changed interval 不能只取 `mergeMinimum()` 原始替换区间，而应在 normalize 后重新计算“相对于旧函数真正变小的区间”。比较稳的实现方式是：每次状态函数更新前保留旧函数引用或快照，更新并 normalize 后，用只读 diff 扫描得到旧函数与新函数的严格改善区间；队列里存这些改善区间，而不是简单存原 candidate 的区间。
+
+第一版不建议马上重写所有函数操作。可以先在 `CompletionBoundCalculator.mergeFunction()` 增加一个诊断版 diff：在 changed=true 时统计 changed interval 总长度、段数、占完整定义域比例，以及这些 interval 经后续传播前后的段数。若大多数 changed 只覆盖很小比例，那么 delta propagation 预期收益高；若每次 changed 基本覆盖大半定义域，收益会有限。确认收益后，再实现真正的 delta queue：状态仍保存完整 bound 函数用于最终剪枝，队列 entry 额外携带 changed intervals，松弛时从完整函数裁出 delta 子函数传播。

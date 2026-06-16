@@ -10,6 +10,7 @@ import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.MergeResult;
+import Common.PiecewiseLinearFunction.MergeMinimumObserver;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.LP.LP;
@@ -140,6 +141,20 @@ final class CompletionBoundCalculator {
 		long priorityQueueStalePops;
 		long mergeCalls;
 		long mergeChanged;
+		long forwardMergeSkipped;
+		long forwardMergeFull;
+		long forwardMergeFullChanged;
+		long forwardMergeSkipNanos;
+		long forwardMergeCopyNanos;
+		long forwardMergeBodyNanos;
+		long forwardMergeNormalizeNanos;
+		long backwardMergeSkipped;
+		long backwardMergeFull;
+		long backwardMergeFullChanged;
+		long backwardMergeSkipNanos;
+		long backwardMergeCopyNanos;
+		long backwardMergeBodyNanos;
+		long backwardMergeNormalizeNanos;
 		long forwardSegmentSamples;
 		long forwardTargetSegments;
 		long forwardCandidateSegments;
@@ -197,6 +212,7 @@ final class CompletionBoundCalculator {
 	private long diagnosticChangedNoVisible;
 	private int diagnosticChangedNoVisibleDumps;
 	private final boolean diagnosticSegments;
+	private final boolean diagnosticMergeTiming;
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
@@ -241,22 +257,43 @@ final class CompletionBoundCalculator {
 				Integer.getInteger("twet.bpc.completionBoundChangeSourceDumpLimit", 0));
 		this.deltaPropagation = Boolean.getBoolean("twet.bpc.completionBoundDeltaPropagation");
 		this.diagnosticSegments = Boolean.getBoolean("twet.bpc.completionBoundSegments");
+		this.diagnosticMergeTiming = Boolean.getBoolean("twet.bpc.completionBoundMergeTiming");
 	}
 
 	Result build(Relaxation relaxation) {
 		diagnosticBuildStartNanos = System.nanoTime();
 		diagnosticLastHeartbeatNanos = 0L;
-		diagnosticHeartbeat("build.start." + relaxation, 0, 0, 0, true);
-		Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle()
-				: (deltaPropagation ? buildAllCyclesDelta() : buildAllCycles());
-		diagnosticHeartbeat("build.after_relaxation." + relaxation, 0, 0, 0, true);
-		buildCompletionFunctionMins(bounds);
-		diagnosticHeartbeat("build.after_mins." + relaxation, 0, 0, 0, true);
-		if (buildDiscreteCaches) {
-			buildDiscreteCaches(bounds);
-			diagnosticHeartbeat("build.after_discrete." + relaxation, 0, 0, 0, true);
+		MergeMinimumObserver previousObserver = null;
+		if (diagnosticMergeTiming) {
+			previousObserver = PiecewiseLinearFunction.setMergeMinimumObserver(new MergeMinimumObserver() {
+				@Override
+				public void record(Direction direction, boolean skipped, boolean changed, long skipNanos,
+						long copyNanos, long bodyNanos, long normalizeNanos) {
+					recordMergeMinimumTiming(direction, skipped, changed, skipNanos, copyNanos, bodyNanos,
+							normalizeNanos);
+				}
+			});
 		}
-		return new Result(bounds, stats);
+		try {
+			diagnosticHeartbeat("build.start." + relaxation, 0, 0, 0, true);
+			Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle()
+					: (deltaPropagation ? buildAllCyclesDelta() : buildAllCycles());
+			diagnosticHeartbeat("build.after_relaxation." + relaxation, 0, 0, 0, true);
+			buildCompletionFunctionMins(bounds);
+			diagnosticHeartbeat("build.after_mins." + relaxation, 0, 0, 0, true);
+			if (buildDiscreteCaches) {
+				buildDiscreteCaches(bounds);
+				diagnosticHeartbeat("build.after_discrete." + relaxation, 0, 0, 0, true);
+			}
+			if (diagnosticMergeTiming) {
+				printMergeTiming(relaxation);
+			}
+			return new Result(bounds, stats);
+		} finally {
+			if (diagnosticMergeTiming) {
+				PiecewiseLinearFunction.setMergeMinimumObserver(previousObserver);
+			}
+		}
 	}
 
 	private PiecewiseLinearFunction[] buildReducedPenaltyCache(PiecewiseLinearFunction[] penaltyByJob,
@@ -914,6 +951,54 @@ final class CompletionBoundCalculator {
 		}
 	}
 
+	private void recordMergeMinimumTiming(Direction direction, boolean skipped, boolean changed, long skipNanos,
+			long copyNanos, long bodyNanos, long normalizeNanos) {
+		if (direction == Direction.FORWARD) {
+			if (skipped) {
+				stats.forwardMergeSkipped++;
+			} else {
+				stats.forwardMergeFull++;
+				if (changed) {
+					stats.forwardMergeFullChanged++;
+				}
+			}
+			stats.forwardMergeSkipNanos += skipNanos;
+			stats.forwardMergeCopyNanos += copyNanos;
+			stats.forwardMergeBodyNanos += bodyNanos;
+			stats.forwardMergeNormalizeNanos += normalizeNanos;
+		} else {
+			if (skipped) {
+				stats.backwardMergeSkipped++;
+			} else {
+				stats.backwardMergeFull++;
+				if (changed) {
+					stats.backwardMergeFullChanged++;
+				}
+			}
+			stats.backwardMergeSkipNanos += skipNanos;
+			stats.backwardMergeCopyNanos += copyNanos;
+			stats.backwardMergeBodyNanos += bodyNanos;
+			stats.backwardMergeNormalizeNanos += normalizeNanos;
+		}
+	}
+
+	private void printMergeTiming(Relaxation relaxation) {
+		System.out.println("[completionBoundMergeTiming] relaxation=" + relaxation
+				+ " fwSkip/full/changed=" + stats.forwardMergeSkipped + "/" + stats.forwardMergeFull
+				+ "/" + stats.forwardMergeFullChanged
+				+ " bwSkip/full/changed=" + stats.backwardMergeSkipped + "/" + stats.backwardMergeFull
+				+ "/" + stats.backwardMergeFullChanged
+				+ " fwMs skip/copy/body/normalize=" + formatNanos(stats.forwardMergeSkipNanos)
+				+ "/" + formatNanos(stats.forwardMergeCopyNanos)
+				+ "/" + formatNanos(stats.forwardMergeBodyNanos)
+				+ "/" + formatNanos(stats.forwardMergeNormalizeNanos)
+				+ " bwMs skip/copy/body/normalize=" + formatNanos(stats.backwardMergeSkipNanos)
+				+ "/" + formatNanos(stats.backwardMergeCopyNanos)
+				+ "/" + formatNanos(stats.backwardMergeBodyNanos)
+				+ "/" + formatNanos(stats.backwardMergeNormalizeNanos));
+		System.out.flush();
+	}
+
 	private int countSegments(PiecewiseLinearFunction function) {
 		if (!diagnosticSegments || function == null || function.head == null) {
 			return 0;
@@ -1231,6 +1316,10 @@ final class CompletionBoundCalculator {
 
 	private String formatMillis(double millis) {
 		return String.format(java.util.Locale.US, "%.3f", millis);
+	}
+
+	private String formatNanos(long nanos) {
+		return formatMillis(nanos / 1000000.0);
 	}
 
 	private boolean shouldAuditNextChangedMerge() {

@@ -899,3 +899,46 @@ lm-SRI 明显好于 full-SRI：root 在 `451.511s` 输出 summary，而 full-SRI
 补充分析 root 变慢原因：zero setup 的 root 慢点几乎全部来自 all-cycles completion bound 的 PWLF merge，而不是 label 扩展或 join 爆炸。root 阶段 exact pricing 9 次、耗时 `214.453s`，其中 completion-bound build 累计 `215.633s`；原始 setup root exact pricing 11 次、耗时 `62.565s`，completion-bound build 累计仅 `42.081s`。zero setup 的前 5 次 buildMs 分别为 `21930/23494/15262/23809/19781 ms`，原始 setup 为 `4964/6991/7548/5865/6124 ms`。内部计数上，zero setup 的 merge/changed 为 `536746/268023`，原始 setup 为 `414076/194763`，次数只增加约三成，但时间增加约五倍，说明主要是单次 merge 的 PWLF 片段复杂度变重。方向上也很集中：zero setup 的 backward bound 构造累计约 `180.749s`，原始 setup 约 `37.740s`。
 
 subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1560` 条候选弧，zero setup 固定 `1383` 条、原始 setup 固定 `1186` 条，但 zero setup 的 bound rebuild 为 `39.821s`，原始 setup 只有 `5.551s`。因此 setup 清零让后续分支树明显变浅，但在 root 无 forbidden/pricingOnly arc 的完整图上，all-cycles bound 要在大量“时间平移更相似、互不支配的函数”之间取下包络，PWLF envelope 更碎，`mergeMinimum/normalizeBackward` 成为主瓶颈。这个解释也和运行中线程栈一致：长时间采样落在 `PiecewiseLinearFunction.mergeMinimum -> CompletionBoundCalculator.buildAllCycles -> CompletionBoundSubtreeArcEliminator.evaluate`。
+98. 2026-06-16 zero setup completion bound 优化后的可比复测
+
+在 safe merge / 精确相邻段压缩修改后，先做了一次不可比的 full run，结果明显偏慢。复查后发现该 run 的配置与第 97 节历史结果不一致：RMIH 被关闭，`completionBoundArcFixing` 被关闭，`pricingOnly subtree` 使用了错误属性名，且没有显式打开 midpoint probe/reuse。因此该慢结果不能用于判断 completion bound 修改是否变差。
+
+随后按第 97 节完全可比口径重跑 `wet040_001_2m_zeroSetup`：normal ng-DSSR nearestK8/top10、no partial、no SRI、ALNS、RMIH 4s、completionBound allCycles、completionBoundArcFixing、pricingOnly subtree、midpoint probe/reuse、joinBest=BEST_UB，并关闭无向 adjacency branching。结果为 `FINISHED, incumbent=bound=17881, nodes=12, pool=129607, pricing=338, valid=true`，与历史结果的搜索路径、节点数、列池规模、pricing 次数完全一致。
+
+耗时从历史 `474.103s` 降到 `242.100s`，root 从 `279.186s` 降到 `161.640s`，exact pricing 从 `252.752s/100 calls` 降到 `122.885s/100 calls`，master LP 从 `82.272s` 降到 `37.668s`，heuristic pricing 从 `57.688s` 降到 `43.096s`。root summary 中列生成序列也对齐，早期 exact pricing 仍依次生成 `69、40、22、15、25、44、17...` 条，说明不是因为少生成列或搜索树变了。
+
+关键差异在 completion-bound build。对两个日志抽取所有 `completionBound buildMs` 后，历史记录为 `111` 条 exact 记录、`68` 次非零 build，累计 `234.362s`，最大 `29.222s`；新记录同样为 `111/68`，累计降到 `112.040s`，最大 `20.856s`。root 最后一轮 node summary 的 buildMs 也从 `29.222s` 降到 `8.309s`。因此本次 safe merge no-change 快路径和精确相邻段压缩确实命中了 zero setup 中 PWLF merge/normalize 的瓶颈，且没有改变最终 bound、incumbent、节点数和列池规模。
+
+当前结论为：之前“跑得更慢”的 full run 是配置错误导致的误判；在可比配置下，completion-bound 优化是正收益。后续如果继续比较 completion bound 变体，必须固定 `enableRestrictedMasterIntegerHeuristic`、`completionBoundArcFixing`、`completionBoundSubtreeArcEliminationPricingOnly`、`midpointProbe/reuse` 和 adjacency branching 等关键开关，否则总时间不可解释。
+
+99. 2026-06-16 后续 completion bound 优化方向判断
+
+继续拆解第 98 节结果后，可以把后续优化分成两类。第一类是 PWLF merge 本身的剩余成本。当前 safe no-change 快路径已经把“candidate 没有改小 current 但仍完整 merge”的大头砍掉了一部分；精确相邻段压缩也减少了后续片段数。由于可比运行中 merge/changed 次数仍和历史相同，时间下降主要来自单次 merge 更便宜，而不是传播次数减少。下一步若继续做，应先加轻量诊断统计：按 forward/backward 记录 no-change 快路径命中率、失败原因、target/candidate/after 段数分布、full merge 耗时分布。只有确认“changed merge 只是局部小区间改善”占比很高时，才值得做更复杂的多区间 delta merge；否则继续优化 `canSkipMergeMinimum`、候选函数压缩和 domain-extension 快路径更稳。
+
+第三类问题是正反向 completion bound 构造严重不对称。日志累计显示，历史 zero setup 中 completion-bound 内部正向时间约 `8.285s`、反向约 `195.749s`，反向是正向 `23.6` 倍；优化后正向约 `6.860s`、反向约 `96.391s`，反向仍是正向 `14.1` 倍。也就是说本次优化同时加速了两边，但真正的剩余瓶颈仍在 backward bound。当前猜测是 zero setup 下反向从 sink 往前传播时，各 job 的后缀函数在 due/tardy 形态和可达 predecessor 组合上更容易形成互不支配的下包络，`normalizeBackward` 后片段更多，导致单次 merge 更贵。后续应优先记录 backward 的段数和 merge 失败原因，而不是盲目改传播顺序。
+
+可尝试但需要谨慎的方向包括：1）给 `mergeMinimum` 增加 domain-extension 快路径，如果候选只是在公共定义域不优、但扩展了当前定义域，则只拼接新增边界区间；2）针对 backward candidate 在 shift/add/normalize 后做更早的精确段压缩，减少进入 merge 的片段数；3）统计每个 job 的 backward envelope 段数，定位是否少数 job 拖慢全局；4）如果发现 backward 队列中同一 `(successor,prev)` 反复产生近似相同 candidate，再考虑缓存局部 shift 结果。暂时不建议继续使用 hull delta propagation，因为已有实验说明它减少 merge 次数但总时间变慢，说明粗粒度 hull 带来的额外构造和传播不划算。
+
+100. 2026-06-16 completion bound 后续优化中第 1/3 点复核
+
+继续复核第 1 点后，当前判断是它可以拆成两个层次。第一层是 `mergeMinimum()` 的 no-copy 破坏式右参数合并：当前公共 `mergeMinimum()` 在 no-change 快路径失败后必然 `g.copy()`，这是为了保护 dominance graph、label frontier 和 envelope 缓存传入的右参数不被 splice 破坏。但在 `CompletionBoundCalculator` 中，`buildForwardCandidate/buildBackwardCandidate` 里的 `shiftX()` 和 `add()` 都会生成本轮局部函数，传给 `mergeFunction()` 的 candidate 基本不是缓存里的父函数。因此可以新增仅供 completion bound 使用的内部入口，允许消耗右参数，省掉 changed merge 上的大量 candidate copy。该改动不能直接改公共 `mergeMinimum()`，否则会破坏 dominance 缓存语义；正确做法是保留默认安全口径，只在 completion bound 的 `mergeFunction()` 调用显式选择 destructive-right merge，并用可比 zero-setup 日志验证 bound、节点数、列池规模不变。
+
+第二层是 domain-extension 快路径。当前 `canSkipMergeMinimum()` 只处理“candidate 完全落在 current 定义域内且没有任何区间更优”的情况；一旦 candidate 左/右边界扩展了 current，即使公共定义域里完全没有改善，也会进入完整 copy+merge+normalize。理论上这类场景可以只拼接新增边界区间并做局部相邻段合并。但它和当前 `mergeMinimum()` 对 forward/backward 定义域契约绑定较深，尤其要分别处理左扩、右扩和 prefix/suffix normalize 后的边界语义，所以实现风险高于 no-copy。若只追求下一步收益，应优先做 completion-bound 专用 no-copy；domain-extension 快路径先通过诊断统计确认命中率后再动。
+
+第 3 点方面，最新段数诊断说明“反向慢”不能简单归因于段数更多。zero setup root-only 诊断中，backward 的 target/candidate/after 平均段数只约为 forward 的 1.13 倍，segment samples 约为 1.16 倍，但耗时仍约为 16 倍。这说明剩余瓶颈更可能在 backward full merge 的单位成本：反向 normalize/merge 链表扫描、候选复制、缓存失效或更频繁的 changed merge，而不是少数 job 拥有极端段数。因此后续诊断要按 direction 分别记录 no-change skip 命中、changed/full merge 次数、copy 耗时和每个 job 的 envelope 段数分布。单纯“统计每个 job 段数”只能定位是否有少数 job 拖慢全局，不能解释当前 16 倍差距。
+
+另外，subtree 复用不是缺失项。`PC` 在最后一轮 exact pricing 没有生成负列时会保存 engine 暴露的 `PreparedBounds`，`Tree` 随后传给 `CompletionBoundSubtreeArcEliminator`，而 eliminator 会在 horizon、relaxation、queueOrdering 兼容时直接复用。当前需要关注的是复用条件什么时候失效，例如 dual profitable window、zeroDualExcludedJobs、pricingHorizon 不等于 `data.CmaxH` 或某些 engine 没有暴露 bounds；不是重新设计整套 subtree 复用链路。
+
+补充修正：下一步不应直接实现 no-copy merge，而应先加统计。虽然 candidate copy 是当前最可疑的大头，但现有证据只说明 backward 的单位 merge 成本异常高，还没有把耗时拆成 no-change 扫描、candidate copy、full merge 扫描、normalize 这几部分。因此第一阶段修改目标应是 completion-bound 专用轻量诊断：按 forward/backward 分别记录 merge 调用数、no-change skip 命中数、full merge 数、changed 数、右参数 copy 的次数和累计耗时、mergeMinimum 本体耗时、normalize 耗时（如果能低侵入拆出来）、target/candidate/after 段数分布。只有统计确认 copy 或某个子阶段占大头后，再做 no-copy 或 domain-extension 快路径。
+
+101. 2026-06-16 completion-bound mergeMinimum 子阶段耗时诊断
+
+按上一节决定，本次先做诊断而不是直接做 no-copy。`PiecewiseLinearFunction.mergeMinimum()` 新增默认关闭的 thread-local observer，只有设置 `twet.bpc.completionBoundMergeTiming=true` 时才记录 no-change skip、右参数 copy、merge 本体和 normalize 四段耗时；`CompletionBoundCalculator` 在构造 bound 时临时安装该 observer，并按 forward/backward 分别汇总打印。默认求解路径不安装 observer，不改变函数合并语义，也不影响普通 dominance graph。
+
+用 40-2 zero setup root-only、normal ng-DSSR nearestK8/top10、no partial、no SRI、ALNS、RMIH 4s、allCycles completion bound、pricingOnly subtree、midpoint probe/reuse、joinBest=BEST_UB 的同口径配置做诊断，结果为 `NODE_LIMIT, incumbent=17887, bound=17866.666667, solve=250.417s, exact=160.178s/9 calls, valid=true`。该 run 额外打印 10 条 merge timing，其中 9 条来自 root exact pricing 的 completion-bound build，1 条来自 root 后 subtree elimination 的 bound rebuild。
+
+只看 9 次 exact build，forward merge 统计为 `skip/full/changed=124640/120792/120792`，累计约 `5.775s`；backward 为 `143050/146142/146142`，累计约 `109.479s`，backward 是 forward 的约 `19.0` 倍。backward 内部分解为：skip 扫描约 `5.867s`，copy 约 `0.409s`，merge body 约 `3.310s`，normalize 约 `99.438s`。因此 backward normalize 占 backward merge timing 的约 `90.8%`，而 candidate copy 只占约 `0.4%`。
+
+把 subtree 那次也算入 10 条记录后结论不变：backward 总计约 `121.153s`，其中 normalize 约 `109.848s`，占 `90.7%`；copy 约 `0.473s`，只占 `0.39%`。这直接推翻了“下一步优先做 completion-bound 专用 no-copy merge”的判断。no-copy 即使完全消除 copy，也只能节省不到 1 秒量级，远小于 backward normalize 的百秒量级瓶颈。
+
+结合代码看，`normalizeBackward()` 当前流程是先裁右侧 big-M、合并相邻同段、调用 `minimizeSuffixInPlace()`、再做一次相邻同段压缩；而 `minimizeSuffixInPlace()` 会把链表扫进 `ArrayList<Segment>`，再倒序重建链表。当前最明确的下一步优化目标不是 right-argument copy，也不是粗 hull delta propagation，而是继续拆 `normalizeBackward/minimizeSuffixInPlace`：先增加内部子阶段统计，确认耗时集中在装数组、倒序 suffix-min 重建、SegmentPool.obtain/insert 还是最后 compact；再考虑在 backward 已经满足 suffix-min 或只发生局部小改动时跳过/局部执行 suffix-min。这个方向需要比 no-copy 更谨慎，因为它会直接影响 lower envelope 的方向化闭包语义。

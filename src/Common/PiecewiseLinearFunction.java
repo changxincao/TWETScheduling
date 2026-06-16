@@ -60,6 +60,24 @@ public class PiecewiseLinearFunction {
 		}
 	}
 
+	public interface MergeMinimumObserver {
+		void record(Direction direction, boolean skipped, boolean changed, long skipNanos, long copyNanos,
+				long bodyNanos, long normalizeNanos);
+	}
+
+	private static final ThreadLocal<MergeMinimumObserver> MERGE_MINIMUM_OBSERVER =
+			new ThreadLocal<MergeMinimumObserver>();
+
+	public static MergeMinimumObserver setMergeMinimumObserver(MergeMinimumObserver observer) {
+		MergeMinimumObserver previous = MERGE_MINIMUM_OBSERVER.get();
+		if (observer == null) {
+			MERGE_MINIMUM_OBSERVER.remove();
+		} else {
+			MERGE_MINIMUM_OBSERVER.set(observer);
+		}
+		return previous;
+	}
+
 	public static class Segment {
 		public double start, end; // local coordinates
 		public double slope;
@@ -1482,6 +1500,7 @@ public class PiecewiseLinearFunction {
 
 	private boolean mergeMinimum(PiecewiseLinearFunction g, Direction direction, boolean reportChanged,
 			MergeResult changeHull) {
+		MergeMinimumObserver observer = MERGE_MINIMUM_OBSERVER.get();
 		if (direction == Direction.FORWARD) {
 			Utility.debugCheckPWLFMergeContract("mergeMinimum.input", this, g);
 		} else {
@@ -1512,7 +1531,13 @@ public class PiecewiseLinearFunction {
 		// 2026-06-16: completion bound 中大量候选函数只是在公共定义域上不优，
 		// 原实现仍会 copy 右函数、拆分链表并 normalize。这里先做只读扫描；若 g
 		// 没扩展定义域，且在所有正长度公共区间上都不低于当前 envelope，则直接返回。
-		if (canSkipMergeMinimum(g)) {
+		long skipStart = observer == null ? 0L : System.nanoTime();
+		boolean skipped = canSkipMergeMinimum(g);
+		long skipNanos = observer == null ? 0L : System.nanoTime() - skipStart;
+		if (skipped) {
+			if (observer != null) {
+				observer.record(direction, true, false, skipNanos, 0L, 0L, 0L);
+			}
 			return false;
 		}
 		boolean changed = false;
@@ -1521,9 +1546,12 @@ public class PiecewiseLinearFunction {
 		// 2026-05-25: mergeMinimum 内部会截断并拼接右参数的 Segment 链。
 		// dominance graph 会把 label/frontier/envelope 缓存作为右参数传入，因此这里必须先复制，
 		// 避免把右参数的物理 head/tail 改坏，造成 domainStart 与 head.start 不一致。
+		long copyStart = observer == null ? 0L : System.nanoTime();
 		g = g.copy();
+		long copyNanos = observer == null ? 0L : System.nanoTime() - copyStart;
 
 		resetMinimum();
+		long bodyStart = observer == null ? 0L : System.nanoTime();
 		// 1) 定位公共定义域 这里两个函数取小因该是要取并集的  不能取交集
 		double start = Math.max(this.head.start, g.head.start);
 		double end = Math.min(this.tail.end, g.tail.end);
@@ -1722,7 +1750,13 @@ public class PiecewiseLinearFunction {
 		
 		// 8) 末尾合并相邻同值同斜率片段、保持非增
 		//这个进入的时候还是有可能存在连续段的斜率和intercept是相同的，比如this函数最后一个和g相邻的部分，此时相当于前半部分取小，再和最后剩下的拼接，还是原来的东西
+		long bodyNanos = observer == null ? 0L : System.nanoTime() - bodyStart;
+		long normalizeStart = observer == null ? 0L : System.nanoTime();
 		normalize(direction);
+		long normalizeNanos = observer == null ? 0L : System.nanoTime() - normalizeStart;
+		if (observer != null) {
+			observer.record(direction, false, changed, skipNanos, copyNanos, bodyNanos, normalizeNanos);
+		}
 		if (direction == Direction.BACKWARD) {
 			Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
 		} else {

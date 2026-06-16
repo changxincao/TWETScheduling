@@ -942,3 +942,13 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 把 subtree 那次也算入 10 条记录后结论不变：backward 总计约 `121.153s`，其中 normalize 约 `109.848s`，占 `90.7%`；copy 约 `0.473s`，只占 `0.39%`。这直接推翻了“下一步优先做 completion-bound 专用 no-copy merge”的判断。no-copy 即使完全消除 copy，也只能节省不到 1 秒量级，远小于 backward normalize 的百秒量级瓶颈。
 
 结合代码看，`normalizeBackward()` 当前流程是先裁右侧 big-M、合并相邻同段、调用 `minimizeSuffixInPlace()`、再做一次相邻同段压缩；而 `minimizeSuffixInPlace()` 会把链表扫进 `ArrayList<Segment>`，再倒序重建链表。当前最明确的下一步优化目标不是 right-argument copy，也不是粗 hull delta propagation，而是继续拆 `normalizeBackward/minimizeSuffixInPlace`：先增加内部子阶段统计，确认耗时集中在装数组、倒序 suffix-min 重建、SegmentPool.obtain/insert 还是最后 compact；再考虑在 backward 已经满足 suffix-min 或只发生局部小改动时跳过/局部执行 suffix-min。这个方向需要比 no-copy 更谨慎，因为它会直接影响 lower envelope 的方向化闭包语义。
+
+102. 2026-06-16 completion-bound 是否单线程的验证
+
+针对“单线程？”这个问题，本次先做静态搜索，再做运行期线程栈采样。静态上，`CompletionBoundCalculator`、各 `GC*Bidirectional*` pricing engine、`CompletionBoundSubtreeArcEliminator` 中没有 `parallelStream`、`Executor`、`ForkJoin` 或手动 `new Thread` 参与 completion-bound 构造；`ThreadLocal<MergeMinimumObserver>` 只是为了避免诊断 hook 泄漏到其它调用方，不表示当前算法本身并行。
+
+运行期用 40-2 zero setup root 进程采样，第一次抓到的是 ALNS 初始解阶段，说明还没进入 bound。随后关闭 ALNS/RMIH 做短采样，在线程栈中抓到：
+
+`"main"` 线程处于 `PiecewiseLinearFunction.minimizeSuffixInPlace -> normalizeBackward -> normalize -> mergeMinimum -> CompletionBoundCalculator.mergeFunction -> mergeBackward -> buildAllCycles -> build -> GCNGBBStyleBidirectionalNgDssr.buildCompletionBounds`。
+
+同一栈快照里其余活跃线程是 JVM 的 Reference/Finalizer/Attach Listener/Service Thread/JIT Compiler/GC 线程，没有其它业务线程执行 `CompletionBoundCalculator`。因此当前 completion-bound DP 和 PWLF merge 是业务单线程执行；前面统计出的 backward normalize 百秒级耗时不能靠“已有并行被隐藏”解释。后续若要并行化，只能显式改造，例如按 job/state 分批传播或并行构造候选，但这会牵涉 shared envelope 合并、队列重入和确定性，风险明显高于先优化 `normalizeBackward/minimizeSuffixInPlace` 的串行热点。

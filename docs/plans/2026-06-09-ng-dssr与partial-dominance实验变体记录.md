@@ -887,3 +887,11 @@ lm-SRI 明显好于 full-SRI：root 在 `451.511s` 输出 summary，而 full-SRI
 从过程看，arc-memory SRI 能正常分离和定价：root cut 每轮仍按 10 条加入，依次到 `cuts=10,20,...,80`；多轮 exact pricing 中 completion bound 仍正常剪枝，典型最后一轮统计为 `fw kept/dominated=1720/2831`、`bw kept/dominated=1646/2266`、`fwPruned/bwPruned=37564/34690`。但 cut-pricing closure 仍很重，后期反复出现 `generated=0` 的证明轮和偶发少量负列，甚至在 `cuts=80` 后仍有一轮 `generated=32,bestRC≈-11.25`，说明新增 cut 后的 dual 会持续打开新的负列方向。
 
 与前两种 SRI 口径相比，arc-memory 这次没有达到“比 nodeMemory 明显更轻”的预期。full-SRI 在同配置下 900s 内 root 未完成且无可读 summary；nodeMemory/lm-SRI 能在 `451.511s` 完成 root，900s 内推进到 node2，得到全局 `bound=22525.168360,incumbent=22584,gap=0.2605%`；arcMemory 虽能完成 root，但 root 用时约 `900.6s`，且截至 root 的下界 `22518.580357` 低于 nodeMemory 记录。当前判断是：arc-memory 的 cut 系数更细并不自动转化为更快的 root closure，本例下它仍引入较多 cut/pricing 尾部小负列，短时限内不如 no-SRI 主线，也不如 nodeMemory/lm-SRI 的这次表现。后续若继续研究 arc-memory，应优先看每轮 cut 的 memory arc 数、cut violation 保留强度和 cut 后负列数量，而不是只看 memory 更细这一点。
+
+97. 2026-06-16 40-2 算例 setup time 清零对 normal ng-DSSR 的影响
+
+按“还是那个 40-2，把 setup 全部设为 0”的要求，本次从 `data/40-2/wet040_001_2m.dat` 生成临时输入 `test-results/bpc/tmp-wet040-001-zero-setup-input-20260616/wet040_001_2m_zeroSetup.dat`，只把 `SETUP` 块的 41 行 setup time 全部改为 0；该原始文件没有额外 `SETUP_COST` 块，因此目标中的 setup cost 本来就是 0。本次没有改机器数，仍为 2 台机器。
+
+求解配置保持第 93 节 normal ng-DSSR nearestK 主线：ALNS seed、RMIH 4s、`completionBound=allCycles`、pricingOnly subtree、midpoint probe/reuse、`joinBestMode=bestUB`、`ngDssrInitialMode=nearestK`、`ngDssrInitialSize=8`、`ngDssrRouteUpdateLimit=10`，关闭无向 adjacency branching，不使用 partial dominance 和 SRI。结果为 `FINISHED`，`incumbent=bound=17881`，总时间 `474.103s`，处理 `12` 个节点，pricing 调用 `338` 次，总加列 `129607`，最终列池 `129607`，validator 为 `true`。其中 root 为 `279.186s`，node1 summary 中 pricing `253.596s/42 calls/add9705`，heuristic `39.142s/33/add9471`，exact `214.453s/9/add234`，subtree `39.875s`；root completion bound 首次构造约 `29.222s`，内部 merge `59780` 次、changed `29068` 次。
+
+与原始 setup 的同配置完整结果 `FINISHED, incumbent=bound=22580, solve=813.249s, nodes=149, exact=416.917s/1071, heuristic=190.739s/2987, pool=211279` 相比，setup time 清零后总体确实更快，节点数也从 `149` 降到 `12`。但它不是 root 维度的单调加速：zero-setup root `279.186s` 明显慢于原始 root `116.061s`，主要因为 root exact pricing 和 subtree/completion-bound 函数合并更重；真正节省来自后续分支树大幅变浅、总 exact/heuristic 调用数和列池规模下降。因此当前结论是：setup time 清零会让本例整体更容易闭合，但也会改变 completion-bound 函数形态，root 阶段反而可能更慢。

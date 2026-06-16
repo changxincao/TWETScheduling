@@ -1020,3 +1020,13 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 造成这种差异的主要候选不是 completion-bound 函数计算本身，而是后续代码中引入的 map-based top-K duplicate signature 处理：旧逻辑对同一 sequence signature 候选基本是先到先保留，后来的同路径更低 reduced-cost 候选会被丢掉；当前逻辑改为 lazy replacement，始终在本轮候选池中保留同 signature 的更优 reduced-cost 版本。这会改变最终加入 RMP 的列，即使根节点目标和第一处分支看起来相同，也可能改变后续 LP dual、fractional arc 排序和节点优先级，从而让节点数、列池和 pricing 次数明显下降。旧日志还打开了 node progress / pricing details 诊断，存在 `149` 条 `[BPC node summary]` 和 `1077` 处 `nodeDiag`，当前 run 这些诊断为 0；这部分主要解释额外耗时和日志开销，不应单独解释节点数变化。
 
 因此，第 108 节的 313 秒结果应理解为“当前代码主线”的重新求解结果，而不是对第 93 节旧代码只做纯性能优化后的严格 A/B。若要严格拆分贡献，需要从旧 commit 分别 cherry-pick：只清 debug/统计、只改 duplicate signature、再组合运行；当前已有证据只能说明当前主线更快且结果正确，不能把节点数下降全部归因于 PWLF/completion-bound 加速。
+
+110. 2026-06-16 进一步定位 813 秒旧记录与 313 秒当前记录的实际分叉点
+
+继续对比旧日志 `tmp-wet040-001-ng-nearest-heur1500-5000-full-20260615` 和当前日志 `tmp-wet040-001-setup-current-20260616`，可以看到两次 run 在 root 前半段并不是一开始就不同。root 初始 17 轮 heuristic pricing 加列数完全一致，均为 `1036,1002,1351,806,725,701,603,504,482,457,447,257,201,167,49,6,0`；第一次 ng-DSSR exact pricing 的 label、join、completion-bound 统计也基本一致，并且同样返回 `150` 条列。差异首先出现在 exact pricing 的候选池去重统计：旧日志第一轮 exact 为 `candidatePool kept/seen/dropped=150/180/30`，当前为 `150/180/3`；第二轮 exact 旧日志为 `85/91/6`，当前为 `85/91/0`。这不是函数计算耗时差异，而是同一路径候选的保留规则已经不同。
+
+对应代码改动是 `1496c74 Keep best duplicate pricing candidates`。旧 `rememberGeneratedCandidate()` 遇到同一个 `SequenceSignature` 已存在时直接丢弃后来的候选；如果堆满，则只拿新候选和当前最差候选比较。当前逻辑改成 `generatedCandidateBySignature` 始终指向同 signature 的当前最好 reduced-cost 候选，旧候选留在 heap 里按 stale 跳过。这样 exact pricing 返回的列数可能相同，但具体列对象、列成本/排序和后续 LP dual 都可能不同。
+
+日志也支持这个判断：第二轮 exact 后两次后续 heuristic pricing 已经开始分叉。旧日志在 pool `9289` 后继续加 `9,16,5,8,3,6,4...`；当前日志在同样 pool `9289` 后变成 `3,7,11,8,1...`。这说明 LP 重新求解后的 dual 已变，后续不是同一棵搜索树。再往后 node2 分支 arc 也从旧 `(16,8)` 变为当前 `(30,7)`，节点数、列池和 pricing 次数下降就不再能用纯性能优化解释。
+
+因此，当前更精确的结论是：PWLF/completion-bound 优化主要解释单次 exact pricing 和 completion-bound 构造变快；搜索树变小主要应归因于 duplicate signature 候选保留策略改变了进入 RMP 的列集。旧 run 的 nodeDiag/progress 诊断会增加额外时间，但不解释分支路径变化。若需要确认是否“改错”，最直接的验证不是再看耗时，而是在当前代码临时恢复旧 duplicate 策略跑一次；若节点数回到接近旧记录，则说明差异来自该策略而非 PWLF。

@@ -1848,3 +1848,11 @@ zero setup 下 subtree arc elimination 在根节点也明显变慢。两组 root
 第二类优化是两阶段 bound。可以先构造廉价 scalar/min bound 或 two-cycle/弱 all-cycle 预筛，只对 scalar 无法判掉的状态或 arc 再构造完整 PWLF bound。这个方向对 root subtree 尤其有意义，因为当前 root 为了扫描所有 arc 先完整重建了一次 expensive bound。需要注意，它必须保持“弱判据不能剪时再回到完整判据”的安全结构，不能把弱 bound 直接当最终剪枝，否则会牺牲 completion bound 的正确性。
 
 第三类是特殊结构优化。zero setup 且 root 没有 arc dual/branch dual 时，transition 结构接近 job-only，理论上可以利用可分性减少函数传播；但这是强假设优化，只适合在确认 setup=0、arc dual 全零、无 pricingOnly/branch arc 状态时启用。通用路径仍应先做 no-change precheck 和段数压缩。当前不建议把 all-cycles 改成 two-cycle 默认，也不建议因 build 慢关闭 bound；更合理的顺序是先量化 PWLF 段数瓶颈，再做不改变语义的 merge 快路径。
+
+### 41.68 2026-06-16 subtree bounds reuse 与 SRI/cut-pricing 循环语义
+
+当前 subtree arc elimination 在 `Tree.solve()` 中每个 processed node 只调用一次，位置在该 node 的 `PC.solve(lp)` 完成、incumbent/RMIH 更新和 incumbent 剪枝之后、正式 branching 之前。它不是在 node 内每轮 pricing 后都执行，也不是从多份 bound 中挑一份“最优 bound”。`PC` 只在某个非 repair pricing engine 返回 `isImproved=false` 且 engine 暴露 reusable completion bounds 时，才把这份 bounds 保存到 `lastReusableSubtreeArcEliminationBounds`；只要 pricing 找到新列并重解 LP，旧 reusable bounds 会清空。由此，传给 subtree 的通常就是当前 node 最后一轮、当前 dual 下“已证明没有负 reduced-cost 列”的 exact pricing 留下的 bounds。
+
+SRI/cut 开启时，流程仍是先 pricing closure，再 cut separation；若新增 cut，则清空旧 reusable bounds，加入 cut、重解 LP，并重新进入 pricing loop，直到当前 active cut 集合下再次没有负列。`Tree` 只在 `PC.solve()` 返回后做 subtree，因此正常情况下 subtree 用的是最后一轮 cut-pricing 闭合后的 bounds。如果达到 `maxCutRounds`，当前实现不会再多做一轮“确认没有新 cut”的 separation，但最后一次已加入 cut 后仍会完成 pricing closure；subtree 基于的就是这组 active cuts 和最终 LP dual。
+
+SRI active 时，ng-DSSR pricing 的 completion-bound 剪枝使用不含 SRI penalty 的 `noSriFrontier` 松弛口径；subtree reuse 的也是这类 completion bounds。由于 SRI penalty 在 reduced cost 中是非负附加项，忽略它会得到更乐观的下界，只会让 subtree 少固定一些 arc，不会因为 SRI 而错误固定 arc。若 pricing bound 不满足复用条件，例如用了 root pi-window、zero-dual 排除或 pricing horizon 不等于 `data.CmaxH`，`PreparedBounds` 不会暴露给 subtree，subtree 会在需要时自己用 hard-window penalty 重建一份。

@@ -1188,20 +1188,9 @@ public class PiecewiseLinearFunction {
 			tail = null;
 			return;
 		}
-		while (head != null && Utility.compareEq(head.start, head.end)) {
-			head = head.next;
-		}
-		if (head == null) {
-			tail = null;
-			return;
-		}
 		Segment cur = head;
 		tail = head;
 		while (cur.next != null) {
-			if (Utility.compareEq(cur.next.start, cur.next.end)) {
-				cur.next = cur.next.next;
-				continue;
-			}
 			if (Utility.compareEq(cur.slope, cur.next.slope) && Utility.compareEq(cur.intercept, cur.next.intercept)
 					&& Utility.compareEq(cur.end, cur.next.start)) {
 				cur.end = cur.next.end;

@@ -990,3 +990,11 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 本次只补一个很小的残留点：`CompletionBoundCalculator.mergeFunction()` 和 `mergeFunctionWithChangeHull()` 在 segment 诊断关闭时虽然不会真的扫描段数，但仍会调用 `recordSegmentMerge(...)` 再由内部开关返回。现在改为只有 `diagnosticSegments=true` 时才计算 candidate/current 段数并进入记录函数。该修改不改变 completion bound 的函数合并、队列传播、剪枝结果或统计语义，只避免默认求解路径上残留的诊断入口调用。
 
 剩余没有处理的主要是两类。第一类是测试、批处理、诊断入口的 `System.out`，例如 comparison test、seed diagnosis、plotter 等，这些不是正式 BPC 热路径。第二类是 pricing summary 需要的 primitive 计数，例如 forward/backward pops、mergeCalls、mergeChanged 等，它们用于正常结果摘要和阶段判断，开销只是 long 加法，不属于前面发现的链表扫描或 `HashMap` 热点。`Basic.Data` 里还有少量老的 debug 打印，但它们不是当前 root pricing/completion-bound 的计算瓶颈，本轮先不把输出口径调整和性能清理混在一起。
+
+106. 2026-06-16 重新求解 40-2 zero setup
+
+按第 98 节相同口径重新求解 `wet040_001_2m_zeroSetup`：normal ng-DSSR nearestK8/top10、no partial、no SRI、ALNS、RMIH 4s、`completionBound=allCycles`、`completionBoundArcFixing=true`、pricingOnly subtree、midpoint probe/reuse、`joinBest=BEST_UB`，并关闭无向 adjacency branching。运行名为 `tmp-wet040-001-zero-setup-current-20260616`，结果为 `FINISHED`，`incumbent=bound=17881`，处理 `14` 个节点，pricing `277` 轮，新增列 `29710`，最终 pool `29777`，validator 为 `true`。
+
+本次总时间 `68.643s`，root `46.906s`，heuristic pricing `22.404s/198`，ng-DSSR exact pricing `15.987s/79`，master LP `8.956s`，RMIH `2.891s/10`，subtree arc elimination `1.434s/7`。对比之前完整 zero-setup no-SRI 记录：最早同口径为 `474.103s`、exact `252.752s`、pool `129607`；safe no-change merge 后完整记录为 `242.100s`、exact `122.885s`、pool `129607`。当前 run 进一步降到 `68.643s`，同时最终目标仍为 `17881`。
+
+日志中 79 条 exact pricing 记录里，completion-bound build 非零 `57` 次，累计约 `12.546s`，最大单次 `1.338s`；内部正向累计约 `4.583s`、反向约 `7.826s`。这比第 98 节记录的 completion-bound build 累计 `112.040s` 和最大 `20.856s` 明显更低，说明删除 segment 级 debug 扫描、默认关闭 segment/algorithm 统计、以及本轮诊断入口收口后，zero setup 下的 completion-bound 热路径已经不再是百秒级瓶颈。当前总时间主要分布在 heuristic pricing、exact pricing、LP 和少量 RMIH 上，root 仍是最大单节点，但已经从原先的数分钟降到一分钟以内。

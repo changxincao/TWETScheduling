@@ -1868,3 +1868,15 @@ SRI active 时，ng-DSSR pricing 的 completion-bound 剪枝使用不含 SRI pen
 从代码语义看，forward/backward 并不是完全镜像的。forward 从 source 的传播函数出发，先把 `machineDual` 放进 source，然后每次扩展做 `shiftX(+setup+p_j)`，再加当前 job 的 forward reduced penalty，并用 `normalize(FORWARD)` 做 prefix-min。backward 从 sink 侧每个 job 的常数函数出发，扩展时对 successor suffix 做 `shiftX(-(setup+p_successor))`，再加当前 job 的 backward reduced penalty，并用 `normalize(BACKWARD)` 做 suffix-min。二者数学目标相似，但函数定义域锚点不同：forward 的固定端在右侧 `T`，backward 的固定端在左侧 `0`；normalize 也分别调用 prefix/suffix 两套实现。因此它们不会天然有相同分段结构和相同运行时间。
 
 zero setup 下这种非对称会被放大。forward 扩展虽然也重叠，但 source 到 job 的起点和 job penalty 的 hard/release/due 结构会较早形成前缀最小包络，很多右侧尾段被水平 lower envelope 吸收；backward 则从 sink 向左传播大量 suffix，`shiftX(-delay)` 在 setup 为 0 时只按 processing time 左移，许多 successor suffix 在大段时间内重叠并互相交叉。此时 `mergeMinimum` 的调用次数没有明显爆炸，但每次 merge 需要处理更多交点、拆更多 segment，并且 backward normalize 当前会走 `minimizeSuffixInPlace()`，需要先把链表段收集成列表再倒序处理。由此，日志中的 `backwardBuild >> forwardBuild` 并不反常；它说明当前实例和实现让 suffix lower-envelope 分段复杂度远高于 prefix lower-envelope。
+
+### 41.70 2026-06-16 zero-setup completion-bound PWLF 段数诊断
+
+为确认“单次 merge 变贵”是否真的来自函数分段复杂度，本轮给 `CompletionBoundCalculator` 增加了默认关闭的段数诊断开关 `twet.bpc.completionBoundSegments`。该开关只在显式打开时统计每次 lower-envelope merge 前后的 target/candidate/after 段数；默认求解路径不会遍历函数段，因此不会增加正常运行开销。
+
+用同一 root-only 口径重新跑 40 任务原 setup 和 zero setup 后，结论非常明确。原 setup 根节点 12 次 exact 调用中有 9 次实际构造 completion bound，exact pricing 合计 `36.290s`，completion-bound build 合计约 `24.437s`；zero setup 根节点 10 次 exact 调用全部实际构造 bound，exact pricing 合计 `161.717s`，completion-bound build 合计约 `161.064s`。两者的 merge 次数反而是 zero setup 更少一些：原 setup `643140` 次，zero setup `606562` 次。但平均每次 merge 的 build 成本从约 `38.0us` 升到约 `265.5us`，接近 `7` 倍。
+
+段数统计解释了这个差距。原 setup 下，forward merge 后平均段数约 `138.7`，backward merge 后平均段数约 `155.1`，最大 after 段数分别为 `353/428`。zero setup 下，forward merge 后平均段数升到约 `346.8`，backward merge 后平均段数升到约 `388.7`，最大 after 段数分别达到 `938/1058`。candidate 函数自身也变复杂：原 setup 的 forward/backward candidate 平均段数约 `76.1/85.8`，zero setup 变为约 `187.0/211.0`。因此 zero setup 慢不是因为更多状态触发了更多 merge，而是每个 merge 处理的 PWLF 链表长度和交点数量显著增加。
+
+方向上，zero setup 的 backward build 仍是大头：`161.064s` 的 completion-bound build 中，backward 约 `155.500s`，forward 只有约 `5.535s`。这和前一节的判断一致：zero setup 让 successor suffix 函数在大时间区间内高度重叠，backward suffix lower-envelope 被切成很多交替最优的小段；forward 也变复杂，但 prefix-min 与 source/release/due 结构更容易吸收一部分尾段。
+
+因此当前详细原因可以收束为：zero setup 改变了 completion-bound DP 中候选函数的几何形态，造成 PWLF lower envelope 分段爆炸。Tmid probe、join pair 数和 label keep 数不是这次 root 变慢的主因；日志中 root probe 多数已经 rank0 或较均衡，而 exact 时间几乎全部花在 bound build 上。后续如果要继续优化，优先方向应是 `mergeMinimum/normalize` 的 no-change 快路径、相邻共线/极短段压缩、以及针对 backward suffix-min 的段数控制，而不是继续调 midpoint。

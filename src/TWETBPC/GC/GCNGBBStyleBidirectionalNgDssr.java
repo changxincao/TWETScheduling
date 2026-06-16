@@ -220,6 +220,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long completionBoundPriorityQueueStalePops;
 	private long completionBoundMergeCalls;
 	private long completionBoundMergeChanged;
+	private long completionBoundForwardSegmentSamples;
+	private long completionBoundForwardTargetSegments;
+	private long completionBoundForwardCandidateSegments;
+	private long completionBoundForwardAfterSegments;
+	private int completionBoundForwardMaxTargetSegments;
+	private int completionBoundForwardMaxCandidateSegments;
+	private int completionBoundForwardMaxAfterSegments;
+	private long completionBoundBackwardSegmentSamples;
+	private long completionBoundBackwardTargetSegments;
+	private long completionBoundBackwardCandidateSegments;
+	private long completionBoundBackwardAfterSegments;
+	private int completionBoundBackwardMaxTargetSegments;
+	private int completionBoundBackwardMaxCandidateSegments;
+	private int completionBoundBackwardMaxAfterSegments;
 	private double completionBoundLastEvaluationCutoff;
 	private int diagnosticForbiddenJobArcCount;
 	private int diagnosticPricingOnlyJobArcCount;
@@ -2638,6 +2652,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundPriorityQueueStalePops = 0;
 		completionBoundMergeCalls = 0;
 		completionBoundMergeChanged = 0;
+		completionBoundForwardSegmentSamples = 0;
+		completionBoundForwardTargetSegments = 0;
+		completionBoundForwardCandidateSegments = 0;
+		completionBoundForwardAfterSegments = 0;
+		completionBoundForwardMaxTargetSegments = 0;
+		completionBoundForwardMaxCandidateSegments = 0;
+		completionBoundForwardMaxAfterSegments = 0;
+		completionBoundBackwardSegmentSamples = 0;
+		completionBoundBackwardTargetSegments = 0;
+		completionBoundBackwardCandidateSegments = 0;
+		completionBoundBackwardAfterSegments = 0;
+		completionBoundBackwardMaxTargetSegments = 0;
+		completionBoundBackwardMaxCandidateSegments = 0;
+		completionBoundBackwardMaxAfterSegments = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
 		midpointStrategyUsed = "default";
 		midpointReferenceTime = Double.NaN;
@@ -2832,6 +2860,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ "/" + completionBoundForwardQueuePops + "/" + completionBoundBackwardQueuePops
 				+ "/" + completionBoundPriorityQueueStalePops
 				+ "/" + completionBoundMergeCalls + "/" + completionBoundMergeChanged
+				+ ", completionBoundSegments fwSamples/targetAvg/candAvg/afterAvg/maxTCA="
+				+ completionBoundForwardSegmentSamples
+				+ "/" + formatAverage(completionBoundForwardTargetSegments, completionBoundForwardSegmentSamples)
+				+ "/" + formatAverage(completionBoundForwardCandidateSegments, completionBoundForwardSegmentSamples)
+				+ "/" + formatAverage(completionBoundForwardAfterSegments, completionBoundForwardSegmentSamples)
+				+ "/" + completionBoundForwardMaxTargetSegments + "-" + completionBoundForwardMaxCandidateSegments
+				+ "-" + completionBoundForwardMaxAfterSegments
+				+ ", completionBoundSegments bwSamples/targetAvg/candAvg/afterAvg/maxTCA="
+				+ completionBoundBackwardSegmentSamples
+				+ "/" + formatAverage(completionBoundBackwardTargetSegments, completionBoundBackwardSegmentSamples)
+				+ "/" + formatAverage(completionBoundBackwardCandidateSegments, completionBoundBackwardSegmentSamples)
+				+ "/" + formatAverage(completionBoundBackwardAfterSegments, completionBoundBackwardSegmentSamples)
+				+ "/" + completionBoundBackwardMaxTargetSegments + "-" + completionBoundBackwardMaxCandidateSegments
+				+ "-" + completionBoundBackwardMaxAfterSegments
 				+ ", candidatePool kept/seen/dropped=" + generatedCandidateBySignature.size() + "/"
 				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
 				+ ", queueOrdering=" + queueOrdering
@@ -3309,6 +3351,26 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundPriorityQueueStalePops += stats.priorityQueueStalePops;
 		completionBoundMergeCalls += stats.mergeCalls;
 		completionBoundMergeChanged += stats.mergeChanged;
+		completionBoundForwardSegmentSamples += stats.forwardSegmentSamples;
+		completionBoundForwardTargetSegments += stats.forwardTargetSegments;
+		completionBoundForwardCandidateSegments += stats.forwardCandidateSegments;
+		completionBoundForwardAfterSegments += stats.forwardAfterSegments;
+		completionBoundForwardMaxTargetSegments = Math.max(completionBoundForwardMaxTargetSegments,
+				stats.forwardMaxTargetSegments);
+		completionBoundForwardMaxCandidateSegments = Math.max(completionBoundForwardMaxCandidateSegments,
+				stats.forwardMaxCandidateSegments);
+		completionBoundForwardMaxAfterSegments = Math.max(completionBoundForwardMaxAfterSegments,
+				stats.forwardMaxAfterSegments);
+		completionBoundBackwardSegmentSamples += stats.backwardSegmentSamples;
+		completionBoundBackwardTargetSegments += stats.backwardTargetSegments;
+		completionBoundBackwardCandidateSegments += stats.backwardCandidateSegments;
+		completionBoundBackwardAfterSegments += stats.backwardAfterSegments;
+		completionBoundBackwardMaxTargetSegments = Math.max(completionBoundBackwardMaxTargetSegments,
+				stats.backwardMaxTargetSegments);
+		completionBoundBackwardMaxCandidateSegments = Math.max(completionBoundBackwardMaxCandidateSegments,
+				stats.backwardMaxCandidateSegments);
+		completionBoundBackwardMaxAfterSegments = Math.max(completionBoundBackwardMaxAfterSegments,
+				stats.backwardMaxAfterSegments);
 	}
 
 	private boolean isForwardCompletionBoundPruned(ForwardLabel label) {

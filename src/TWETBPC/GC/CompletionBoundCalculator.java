@@ -139,6 +139,20 @@ final class CompletionBoundCalculator {
 		long priorityQueueStalePops;
 		long mergeCalls;
 		long mergeChanged;
+		long forwardSegmentSamples;
+		long forwardTargetSegments;
+		long forwardCandidateSegments;
+		long forwardAfterSegments;
+		int forwardMaxTargetSegments;
+		int forwardMaxCandidateSegments;
+		int forwardMaxAfterSegments;
+		long backwardSegmentSamples;
+		long backwardTargetSegments;
+		long backwardCandidateSegments;
+		long backwardAfterSegments;
+		int backwardMaxTargetSegments;
+		int backwardMaxCandidateSegments;
+		int backwardMaxAfterSegments;
 	}
 
 	static final class Result {
@@ -180,6 +194,7 @@ final class CompletionBoundCalculator {
 	private long diagnosticChangedDomainOnly;
 	private long diagnosticChangedNoVisible;
 	private int diagnosticChangedNoVisibleDumps;
+	private final boolean diagnosticSegments;
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
@@ -222,6 +237,7 @@ final class CompletionBoundCalculator {
 		this.diagnosticChangeSource = Boolean.getBoolean("twet.bpc.completionBoundChangeSource");
 		this.diagnosticChangeSourceDumpLimit = Math.max(0,
 				Integer.getInteger("twet.bpc.completionBoundChangeSourceDumpLimit", 0));
+		this.diagnosticSegments = Boolean.getBoolean("twet.bpc.completionBoundSegments");
 	}
 
 	Result build(Relaxation relaxation) {
@@ -715,9 +731,12 @@ final class CompletionBoundCalculator {
 		PiecewiseLinearFunction current = targetByJob[job];
 		if (current == null || current.head == null) {
 			targetByJob[job] = candidate.copy();
+			recordSegmentMerge(direction, 0, countSegments(candidate), countSegments(targetByJob[job]));
 			stats.mergeChanged++;
 			return true;
 		}
+		int targetSegmentsBefore = diagnosticSegments ? countSegments(current) : 0;
+		int candidateSegments = diagnosticSegments ? countSegments(candidate) : 0;
 		PiecewiseLinearFunction beforeAudit = null;
 		if (diagnosticChangeAudit || diagnosticChangeSource) {
 			boolean auditThisMerge = shouldAuditNextChangedMerge();
@@ -728,6 +747,7 @@ final class CompletionBoundCalculator {
 		if (changed) {
 			stats.mergeChanged++;
 		}
+		recordSegmentMerge(direction, targetSegmentsBefore, candidateSegments, countSegments(current));
 		if (diagnosticChangeSource) {
 			classifyChangedMerge(beforeAudit, candidate, current, direction, changed);
 		}
@@ -735,6 +755,42 @@ final class CompletionBoundCalculator {
 			auditChangedMerge(beforeAudit, current, direction, changed);
 		}
 		return changed;
+	}
+
+	private void recordSegmentMerge(Direction direction, int targetSegments, int candidateSegments, int afterSegments) {
+		if (!diagnosticSegments) {
+			return;
+		}
+		if (direction == Direction.FORWARD) {
+			stats.forwardSegmentSamples++;
+			stats.forwardTargetSegments += targetSegments;
+			stats.forwardCandidateSegments += candidateSegments;
+			stats.forwardAfterSegments += afterSegments;
+			stats.forwardMaxTargetSegments = Math.max(stats.forwardMaxTargetSegments, targetSegments);
+			stats.forwardMaxCandidateSegments = Math.max(stats.forwardMaxCandidateSegments, candidateSegments);
+			stats.forwardMaxAfterSegments = Math.max(stats.forwardMaxAfterSegments, afterSegments);
+		} else {
+			stats.backwardSegmentSamples++;
+			stats.backwardTargetSegments += targetSegments;
+			stats.backwardCandidateSegments += candidateSegments;
+			stats.backwardAfterSegments += afterSegments;
+			stats.backwardMaxTargetSegments = Math.max(stats.backwardMaxTargetSegments, targetSegments);
+			stats.backwardMaxCandidateSegments = Math.max(stats.backwardMaxCandidateSegments, candidateSegments);
+			stats.backwardMaxAfterSegments = Math.max(stats.backwardMaxAfterSegments, afterSegments);
+		}
+	}
+
+	private int countSegments(PiecewiseLinearFunction function) {
+		if (!diagnosticSegments || function == null || function.head == null) {
+			return 0;
+		}
+		int count = 0;
+		Segment segment = function.head;
+		while (segment != null) {
+			count++;
+			segment = segment.next;
+		}
+		return count;
 	}
 
 	private boolean hasPositiveDomain(PiecewiseLinearFunction function) {

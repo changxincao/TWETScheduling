@@ -1890,3 +1890,15 @@ zero setup 下这种非对称会被放大。forward 扩展虽然也重叠，但 
 因此段数的上界不能按 `n=40` 理解。更接近的来源是：候选函数数量、每个候选自身已有段数、候选之间的交点数量，以及 prefix/suffix normalize 后保留下来的交替最优区间。即使只有 40 个任务，松弛图里的候选路径数量也是组合级的；completion bound 不显式枚举所有路径，但 lower-envelope DP 会把很多路径在不同时间区间内成为最优的痕迹保留下来。只要不同路径在不同时间段轮流成为最优，最终 envelope 的段数就会远大于任务数。
 
 zero setup 正好放大了这个现象。setup 为 0 后，不同后缀路径的时间平移差异变小，函数定义域更大范围重叠，且 vertical cost 差异也更容易让它们在不同时间段交替成为最优。原 setup 中，一些路径因为 setup 时间/成本差异被错开或整体 dominated；zero setup 中这些候选更容易留下交点。因此 40 个任务下出现几百甚至上千段并不矛盾，它说明 lower envelope 保存的是“许多候选路径的交替最优边界”，不是“任务数个物理断点”。
+
+### 41.72 2026-06-16 completion-bound 段数爆炸的优化优先级
+
+当前优化应分成两类。第一类是不改变 bound 语义的安全优化，优先级最高。最应该先做的是 `mergeMinimum` 的只读 no-change 快路径：在真正改写链表、复制右函数和 normalize 前，先扫描公共定义域，判断 candidate 是否在任何正长度区间内低于当前 envelope，或是否扩展了有效定义域；如果没有，就直接返回 no-change。zero setup 日志里 merge 次数并不多，但单次 merge 很贵，因此跳过大量无效 merge 能直接减少链表拆分和 suffix normalize 成本。
+
+第二个安全优化是段数压缩。当前 lower envelope 经多轮 merge 后容易留下相邻同斜率同截距、近似共线、极短长度或数值误差造成的碎片段。对 completion bound 这种下界函数，可以在 normalize 后做更积极的相邻共线合并和极短段清理，但必须保持函数值不被抬高；如果要做近似压缩，只能向下放松下界，不能向上压，否则可能误剪负列。第一版建议先做精确共线/同值压缩，不碰近似误差。
+
+第三个安全优化是 backward suffix-min 的实现改造。当前 `minimizeSuffixInPlace()` 会把链表段收集到 `ArrayList` 再倒序处理，段数上百上千时额外开销明显。可以考虑给 segment 维护可反向遍历结构，或在 PWLF 内部提供专门的 backward normalize 快路径，减少每次 suffix-min 的临时列表构造。不过这个改动比 no-change precheck 风险大，建议放在第二阶段。
+
+第二类是牺牲一部分 bound 强度换速度的策略。可以做两阶段 completion bound：先用 scalar/min bound 或较粗的离散 bound 快速判定；只有粗 bound 不能剪的状态或 arc，才调用完整 PWLF bound。这个对 root subtree arc elimination 很有意义，因为 root 现在为了扫描全部 arc 先重建完整 PWLF bound。关键要求是：弱 bound 只能用于“能剪则剪，不能剪再精确”，不能直接替代完整判据，否则会改变正确性或显著削弱后续剪枝。
+
+当前不建议直接把 all-cycles 换成 two-cycle 默认，也不建议在 zero setup 时关闭 completion bound。前者可能让 exact pricing 和 subtree 后续剪枝变弱，后者会把问题转移到 label 扩展和 join。更稳的实施顺序是：先做 no-change 快路径并用 `completionBoundSegments` 验证 merge 样本/段数/时间变化；再做精确段压缩；最后再评估两阶段弱 bound 是否值得加入。

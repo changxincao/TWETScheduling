@@ -1050,3 +1050,15 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 因此，old-duplicate 消融的正确解释是：恢复旧 duplicate 策略足以把 early branch path 拉回旧方向，并证明 duplicate 策略是搜索树变化主因；但它没有复现完整历史代码状态，也没有保证后续每个节点状态相同。old-duplicate 这次虽然总节点数少于历史，却碰到一个局部极难节点，单点 exact pricing 产生 4 万多列，吞掉了大量时间，所以总时间反而略高。历史 813s 还混有 nodeDiag/progress 诊断成本，但它没有遇到这个 `node=69` 爆炸状态；两者总时间不能按节点数线性比较。
 
 当前结论为：这不是组件没开，也不是单纯统计混入导致的慢，而是搜索路径差异叠加局部 pricing 爆炸。要做严格 A/B，必须 checkout 到历史 commit 或完整恢复一组历史代码状态；只恢复 `rememberGeneratedCandidate()` 的 duplicate 判断只能验证该策略对树路径的影响，不能复刻历史 813s 的每个节点。
+
+113. 2026-06-17 old-duplicate 消融与历史配置仍不完全一致的原因
+
+继续对比历史日志、old-duplicate 消融日志和 `1496c74^..1496c74` 的代码 diff 后，可以把问题进一步收窄。历史版本的候选池语义不是简单的“同 `SequenceSignature` duplicate 已存在就丢弃”这一条。它还在最终 `finalizeGeneratedColumns()` 时从 `generatedColumnCandidates` priority queue 取候选，再排序后加入列池；而当前 lazy replacement 版本改成了 `generatedCandidateBySignature` 保存每个 signature 当前最优候选，最终从 map values 取候选。也就是说，候选池的数据结构语义、堆中保留对象、最终输出来源都变了。
+
+此前 old-duplicate 消融只临时恢复了 `rememberGeneratedCandidate()` 里的 duplicate 判断，即同 signature 已存在时直接丢弃后来的候选。但它没有完整恢复历史的 finalize 来源和候选池状态语义。因此这个消融可以让早期 duplicate 统计恢复到历史口径，例如第一次 exact 的 `150/180/30` 和第二次 exact 的 `85/91/6`，也可以把 node2 分支方向拉回 `(16,8)`，但它不能保证 exact 返回的具体列集合、列顺序和后续 LP dual 完全等同于历史版本。
+
+日志对比支持这一点。历史和 old-duplicate 的前 45 个 pricing event 在 engine、add 数和 pool 数上完全一致；第一次明确分叉出现在第 68 个 pricing event：历史 node2 的一次 heuristic pricing 为 `add=7,pool=10506`，old-duplicate 为 `add=6,pool=10505`。由于 `1496c74` 没有修改 `HeuristicPricingEngine`，这个分叉不应解释为 heuristic 代码直接变化，而应解释为前一轮 exact pricing 虽然统计数量接近，但实际加入 RMP 的列已经有差异，导致 LP dual 和后续启发式列生成发生偏移。
+
+因此当前结论是：要和第 93 节历史 813s 配置“真正一样”，不能只恢复 duplicate if 条件。严格复现有两种方式：一是直接 checkout 到历史 run 对应 commit，并使用相同输入、相同系统属性和诊断开关；二是在当前代码里做完整兼容开关，恢复 `1496c74^` 中 candidate pool 相关函数的整体语义，包括 duplicate 判断、堆满时替换逻辑、`generatedCandidateBySignature` 与 `generatedColumnCandidates` 的同步关系、以及 `finalizeGeneratedColumns()` 的候选来源。对于当前 normal ng-DSSR nearestK8/top10 这组配置，最小需要恢复的是 `GCNGBBStyleBidirectionalNgDssr` 的这组函数；若要覆盖其它 pricing engine，则还要同步恢复其它六个 engine 在 `1496c74` 中改过的同类候选池逻辑。
+
+这也解释了为什么 old-duplicate 消融会“指标更轻但更慢”。它不是历史 run 的完整复刻，而是当前代码状态下的一个混合版本：早期路径被拉向旧策略，但中后期仍可能走到历史 run 没有经历过的难节点。node69 的 4 万列爆炸就是这种混合路径的局部结果，不能用它和历史 node69 做同编号节点对比。

@@ -804,7 +804,6 @@ public class PiecewiseLinearFunction {
 				}
 
 			}
-			getSegmentNum();
 		}
 		double prevStart = head.start;
 		if (Utility.compareLt(prevStart, lastT)) {

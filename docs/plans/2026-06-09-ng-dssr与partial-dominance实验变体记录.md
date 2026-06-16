@@ -953,6 +953,18 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 
 因此新的修改目标已经进一步收窄：不是 `mergeMinimum` 主体，也不是 `normalizeBackward` 的 big-M 裁剪或 compact，而是 `minimizeSuffixInPlace()` 自身。当前实现先把链表扫入 `ArrayList<Segment>`，再倒序构造新链表，并用 `SegmentPool.obtain/insertSegment` 生成水平段和保留段。下一步应优先统计或优化这三个点：1）装数组是否必要，能否用临时栈或复用数组减少分配；2）倒序 suffix-min 是否总是必须完整重建，是否能在输入已满足 suffix-min 时直接跳过；3）能否像 forward 一样更少创建新 segment，或在 backward changed 区间很小时做局部 suffix-min。相比之下，no-copy 和 domain-extension 快路径现在都不是第一优先级。
 
+103. 2026-06-16 删除 minimizeSuffixInPlace 内层 getSegmentNum 调试扫描
+
+继续检查第 102 节定位出的 `minimizeSuffixInPlace()` 后，发现最可疑点不是算法本身，而是主循环尾部每处理一个 segment 都调用一次 `getSegmentNum()`。`getSegmentNum()` 会从 `head` 扫整条链表，并更新 `Utility.debugMap` 中的 `segmentNum` 等统计。因此在 segment 数较多时，这一行会把 suffix-min 的线性倒序处理放大成接近二次扫描，而且该调用不参与函数值、head/tail、链表拼接或 reduced cost 计算，只是调试计数。
+
+本次只删除 `minimizeSuffixInPlace()` 主循环内的这一次 `getSegmentNum()`，保留其他函数末尾的单次统计调用不动。这样不会改变 PWLF 语义，唯一变化是 `Utility.debugMap.segmentNum` 不再记录 suffix-min 内部每一轮的中间链表长度累加。这个统计本来就不是求解逻辑的一部分，且在当前 completion-bound 热路径中代价过高。
+
+同一个 40-2 zero setup root-only 配置复跑，结果保持 `NODE_LIMIT, incumbent=17887, bound=17866.666667, valid=true`。总时间降为 `74.065s`，exact pricing 降为 `17.740s/9 calls`。与第 102 节的诊断 run 相比，exact 从 `81.295s` 降到 `17.740s`，约 `4.58x` 加速。
+
+子阶段统计也对应验证了原因。10 条 timing 记录中，backward normalize 从上一轮约 `49.855s` 降到 `2.212s`，约 `22.5x`；`minimizeSuffixInPlace()` 子段从约 `48.837s` 降到约 `0.985s`。删除后 backward merge timing 的主要占比不再集中于 normalize：all-10 汇总中 backward skip 约 `4.514s`、body 约 `2.217s`、normalize 约 `2.212s`。因此当前最大单点瓶颈已经从 suffix-min 内层调试扫描转移到 no-change skip 扫描和 merge body 本身。
+
+当前下一步不应继续大改 suffix-min。更合理的优化顺序是：1）先保留当前结果跑一个可比 full zero-setup 或至少 root+若干节点确认整体收益；2）若继续优化 completion bound，再拆 `canSkipMergeMinimum()` 的 no-change 扫描和 merge body 里的分段拆分/替换成本；3）视需要把其他 `getSegmentNum()` 末尾统计也改成显式 debug 开关控制，但它们不是当前根节点瓶颈。
+
 102. 2026-06-16 completion-bound 是否单线程的验证
 
 针对“单线程？”这个问题，本次先做静态搜索，再做运行期线程栈采样。静态上，`CompletionBoundCalculator`、各 `GC*Bidirectional*` pricing engine、`CompletionBoundSubtreeArcEliminator` 中没有 `parallelStream`、`Executor`、`ForkJoin` 或手动 `new Thread` 参与 completion-bound 构造；`ThreadLocal<MergeMinimumObserver>` 只是为了避免诊断 hook 泄漏到其它调用方，不表示当前算法本身并行。

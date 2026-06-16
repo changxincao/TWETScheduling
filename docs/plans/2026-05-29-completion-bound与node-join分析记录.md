@@ -1834,3 +1834,17 @@ imbalance score 可以用两个层次。第一层只看最终保留/生成规模
 当前 half-domain 实现确实不是严格对称的 meet-in-the-middle。forward label 在左半域内可以直接接 sink 生成完整列，backward 更多是后缀 join 部件；当某个节点存在大量可在 Tmid 左侧完成的负 reduced-cost 列时，算法会退化成 forward-dominant。013 node18 的 `fwKept=127120,bwKept=943942,joinPairs=44223987` 是另一种不均衡形态，说明不对称/拼接压力会独立制造 hard node。但在 subtree-on 慢例里，日志显示两种配置本来都是 forward-only，formal on 只是把 forward-only 的规模放大了。
 
 因此，“如果双向更稳定一些是否会好一点”的答案是：可能会缓解一部分症状，尤其是减少 forward->sink 直接枚举或让后缀 join 更早参与；但它不能单独解释也不能保证修复 formal subtree 的慢。若 formal subtree 已经通过 child RMP/dual 制造出数万条真实负 reduced-cost 完整路径，纯粹把双向做得更对称，仍然需要生成、筛选或证明这些路径。后续若要验证，应在同一个 formal-on hard node 上做诊断：一版禁用/限制 forwardSink direct completion，强制走更对称的 join；另一版保持当前 pricingOnly 语义但不改变 child RMP。只有同节点同 dual 的对照，才能判断稳定双向到底能减少多少，而不能用不同分支路径的求解时间直接推断。
+
+### 41.67 2026-06-16 40 任务 zero-setup 根节点 completion bound 构造变慢分析
+
+本轮对比 `wet040_001_2m` 原 setup 与 zero setup 两组日志，确认 zero setup 根节点变慢的主要来源不是 label 扩展本身，而是 all-cycles completion bound 的函数构造。zero setup 根节点 9 次 exact pricing 中，completion bound build 合计约 `215.633s`，其中 forward build 约 `5.619s`，backward build 约 `180.749s`；原 setup 对照为 build 合计约 `42.081s`，backward build 约 `37.740s`。merge 次数只从约 `414076` 增到 `536746`，增加约 `30%`，但耗时增加约 `5` 倍，说明关键不是队列状态数线性变多，而是 `PiecewiseLinearFunction.mergeMinimum/normalize` 的分段复杂度和单次 merge 成本放大，尤其集中在 backward bound。
+
+zero setup 下 subtree arc elimination 在根节点也明显变慢。两组 root 都扫描 `1560` 条 job-job 候选 arc，原 setup 固定 `1186` 条、耗时约 `5.585s`，zero setup 固定 `1383` 条、耗时约 `39.875s`，其中绝大多数时间仍是 bound 重建而不是 arc 扫描。也就是说，zero setup 虽然让 subtree 能判掉更多 arc，但在根节点判掉这些 arc 之前，bound 必须先在完整图上构造出来；这个完整图上的 PWLF lower-envelope 传播才是当前瓶颈。
+
+非根节点明显变快，原因不是 zero setup 本身突然容易，而是根节点之后 pricing 图已经被大幅收缩，并且 subtree 能复用刚刚 exact pricing 留下的 completion bound。zero setup root 的 pricingOnly subtree 一次固定了 `1383/1560` 条候选 arc；后续 node 日志里 `nodeDiag forbiddenJobArcs` 已经在 `1392/1413/1433` 量级，label 扩展中大量 candidate 在 arc 检查阶段直接被剪掉，例如 node6 有 `forwardExtend candidates/arcPruned=55423/49199`，node8 有 `66217/59720`。同时后续 subtree 日志常见 `bounds=reused` 且 `buildMs=0`，例如 node5 只需约 `2.293ms`，node8 约 `1.367ms`。因此非根节点快，是因为它们在一个已经很稀疏的 pricing 图上工作，而且避免了重复重建根节点那种完整图 bound。
+
+当前可以进一步加速 completion bound，但不建议简单关闭或换成弱 bound，因为现有日志已经反复显示它对 exact pricing 和 subtree 都很关键。更稳的优化方向应先围绕函数合并成本做：第一，给 `CompletionBoundCalculator.mergeFunction()` 增加 segment 级诊断，记录 target/candidate 段数、changed/no-change、merge 时间和 normalize 时间，确认 zero setup 是否确实产生了分段爆炸；第二，在 `mergeMinimum` 里做真正的只读 no-change 预判，若 candidate 在公共定义域内没有降低 envelope 且没有扩展有效定义域，就直接跳过实际 merge 和 normalize；第三，进一步压缩 PWLF 中相邻同斜率、共线或极小长度的数值碎片，避免 lower-envelope 传播后段数持续膨胀。以上三项都不改变 bound 语义，属于优先级最高的安全加速。
+
+第二类优化是两阶段 bound。可以先构造廉价 scalar/min bound 或 two-cycle/弱 all-cycle 预筛，只对 scalar 无法判掉的状态或 arc 再构造完整 PWLF bound。这个方向对 root subtree 尤其有意义，因为当前 root 为了扫描所有 arc 先完整重建了一次 expensive bound。需要注意，它必须保持“弱判据不能剪时再回到完整判据”的安全结构，不能把弱 bound 直接当最终剪枝，否则会牺牲 completion bound 的正确性。
+
+第三类是特殊结构优化。zero setup 且 root 没有 arc dual/branch dual 时，transition 结构接近 job-only，理论上可以利用可分性减少函数传播；但这是强假设优化，只适合在确认 setup=0、arc dual 全零、无 pricingOnly/branch arc 状态时启用。通用路径仍应先做 no-change precheck 和段数压缩。当前不建议把 all-cycles 改成 two-cycle 默认，也不建议因 build 慢关闭 bound；更合理的顺序是先量化 PWLF 段数瓶颈，再做不改变语义的 merge 快路径。

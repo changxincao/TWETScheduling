@@ -1880,3 +1880,13 @@ zero setup 下这种非对称会被放大。forward 扩展虽然也重叠，但 
 方向上，zero setup 的 backward build 仍是大头：`161.064s` 的 completion-bound build 中，backward 约 `155.500s`，forward 只有约 `5.535s`。这和前一节的判断一致：zero setup 让 successor suffix 函数在大时间区间内高度重叠，backward suffix lower-envelope 被切成很多交替最优的小段；forward 也变复杂，但 prefix-min 与 source/release/due 结构更容易吸收一部分尾段。
 
 因此当前详细原因可以收束为：zero setup 改变了 completion-bound DP 中候选函数的几何形态，造成 PWLF lower envelope 分段爆炸。Tmid probe、join pair 数和 label keep 数不是这次 root 变慢的主因；日志中 root probe 多数已经 rank0 或较均衡，而 exact 时间几乎全部花在 bound build 上。后续如果要继续优化，优先方向应是 `mergeMinimum/normalize` 的 no-change 快路径、相邻共线/极短段压缩、以及针对 backward suffix-min 的段数控制，而不是继续调 midpoint。
+
+### 41.71 2026-06-16 completion-bound 段数为什么会超过任务数
+
+这里容易误解的是：completion bound 里的 `forwardF/backwardB` 不是一条最多经过 40 个任务的具体路线函数，而是 relaxed pricing 图上“所有可补全路径”的 reduced-cost 下包络。对某个 terminal job，比如 `backwardB[i]`，它表示从 `i` 往 sink 走任意后缀路径的最小补全成本函数。这个函数不是由 40 个 job 各贡献一个断点得到的，而是由大量候选后缀函数反复取 `min` 得到的。
+
+在 `buildAllCycles()` 中，一个 job 的 bound 会被许多 predecessor/successor 反复更新。以 backward 为例，`successorB` 先 `shiftX(-(setup+p_successor))`，再加 arc reduced cost、job penalty，并做 `normalize(BACKWARD)`；然后通过 `mergeMinimum()` 合并进 `backwardB[prev]`。每个 successor 都是一整条 PWLF，不是一个常数或一个断点。`mergeMinimum()` 在公共区间内比较两条分段线性函数，如果两条线段内部相交，就会把当前区间切成交点前后两段。由此，每合并一个候选函数，最多都可能给下包络增加多个新的交点和片段。
+
+因此段数的上界不能按 `n=40` 理解。更接近的来源是：候选函数数量、每个候选自身已有段数、候选之间的交点数量，以及 prefix/suffix normalize 后保留下来的交替最优区间。即使只有 40 个任务，松弛图里的候选路径数量也是组合级的；completion bound 不显式枚举所有路径，但 lower-envelope DP 会把很多路径在不同时间区间内成为最优的痕迹保留下来。只要不同路径在不同时间段轮流成为最优，最终 envelope 的段数就会远大于任务数。
+
+zero setup 正好放大了这个现象。setup 为 0 后，不同后缀路径的时间平移差异变小，函数定义域更大范围重叠，且 vertical cost 差异也更容易让它们在不同时间段交替成为最优。原 setup 中，一些路径因为 setup 时间/成本差异被错开或整体 dominated；zero setup 中这些候选更容易留下交点。因此 40 个任务下出现几百甚至上千段并不矛盾，它说明 lower envelope 保存的是“许多候选路径的交替最优边界”，不是“任务数个物理断点”。

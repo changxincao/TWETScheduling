@@ -1012,3 +1012,11 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 本次总时间 `313.587s`，root `95.623s`，heuristic pricing `105.163s/1170`，ng-DSSR exact pricing `106.642s/434`，master LP `31.239s`，RMIH `47.185s/34`，subtree arc elimination `1.891s/25`，root bound 为 `22490`，初始上界 `22584`，最终上界由 RMIH 在 root 更新到 `22582`，后续更新到 `22580` 并闭合。completion-bound build 在 exact pricing 记录中非零 `231` 次，累计约 `39.032s`，最大单次 `1.664s`，内部正向累计约 `17.890s`、反向约 `20.386s`。
 
 对比此前同配置原始 setup 的历史记录 `FINISHED, incumbent=bound=22580, nodes=149, solve=813.249s, exact=416.917s/1071, heuristic=190.739s/2987, pool=211279`，当前 run 明显更快，且节点数、列池规模和 pricing 次数都下降很多。与第 106 节 zero-setup 当前结果相比，原始 setup 仍更慢：`313.587s` 对 `68.643s`，节点 `51` 对 `14`，列池 `85816` 对 `29777`。当前判断是，前面清掉 debug/统计热路径后，原始 setup 的 completion-bound 不再表现为异常百秒瓶颈；剩余耗时主要来自更大的分支树、更多 heuristic/exact pricing 轮和 RMIH 调用，而不是单个 completion-bound build 卡住。
+
+109. 2026-06-16 解释原始 setup 当前节点数/列池为何低于旧记录
+
+继续复查第 93 节旧记录和第 108 节当前记录后，不能把 `813.249s -> 313.587s` 简单解释成“只优化了函数计算”。两次 root 的主指标很接近但不完全相同：旧 root 为 `pool=9520/restricted=9518`，当前 root 为 `pool=9534/restricted=9532`，root bound 都是 `22490`，第一处分支也同为 arc `(5,9)`。但是从第二个处理节点开始分支路径就已经不同：旧 node2 分支 arc `(16,8)`，当前 node2 分支 arc `(30,7)`。这说明两次 run 在 root 后的 LP 列集/基/dual 已经产生了足够差异，后续分支树不能再要求一致。
+
+造成这种差异的主要候选不是 completion-bound 函数计算本身，而是后续代码中引入的 map-based top-K duplicate signature 处理：旧逻辑对同一 sequence signature 候选基本是先到先保留，后来的同路径更低 reduced-cost 候选会被丢掉；当前逻辑改为 lazy replacement，始终在本轮候选池中保留同 signature 的更优 reduced-cost 版本。这会改变最终加入 RMP 的列，即使根节点目标和第一处分支看起来相同，也可能改变后续 LP dual、fractional arc 排序和节点优先级，从而让节点数、列池和 pricing 次数明显下降。旧日志还打开了 node progress / pricing details 诊断，存在 `149` 条 `[BPC node summary]` 和 `1077` 处 `nodeDiag`，当前 run 这些诊断为 0；这部分主要解释额外耗时和日志开销，不应单独解释节点数变化。
+
+因此，第 108 节的 313 秒结果应理解为“当前代码主线”的重新求解结果，而不是对第 93 节旧代码只做纯性能优化后的严格 A/B。若要严格拆分贡献，需要从旧 commit 分别 cherry-pick：只清 debug/统计、只改 duplicate signature、再组合运行；当前已有证据只能说明当前主线更快且结果正确，不能把节点数下降全部归因于 PWLF/completion-bound 加速。

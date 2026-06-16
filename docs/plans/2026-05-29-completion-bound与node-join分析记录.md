@@ -1856,3 +1856,11 @@ zero setup 下 subtree arc elimination 在根节点也明显变慢。两组 root
 SRI/cut 开启时，流程仍是先 pricing closure，再 cut separation；若新增 cut，则清空旧 reusable bounds，加入 cut、重解 LP，并重新进入 pricing loop，直到当前 active cut 集合下再次没有负列。`Tree` 只在 `PC.solve()` 返回后做 subtree，因此正常情况下 subtree 用的是最后一轮 cut-pricing 闭合后的 bounds。如果达到 `maxCutRounds`，当前实现不会再多做一轮“确认没有新 cut”的 separation，但最后一次已加入 cut 后仍会完成 pricing closure；subtree 基于的就是这组 active cuts 和最终 LP dual。
 
 SRI active 时，ng-DSSR pricing 的 completion-bound 剪枝使用不含 SRI penalty 的 `noSriFrontier` 松弛口径；subtree reuse 的也是这类 completion bounds。由于 SRI penalty 在 reduced cost 中是非负附加项，忽略它会得到更乐观的下界，只会让 subtree 少固定一些 arc，不会因为 SRI 而错误固定 arc。若 pricing bound 不满足复用条件，例如用了 root pi-window、zero-dual 排除或 pricing horizon 不等于 `data.CmaxH`，`PreparedBounds` 不会暴露给 subtree，subtree 会在需要时自己用 hard-window penalty 重建一份。
+
+### 41.69 2026-06-16 zero-setup bound 构造慢点进一步拆分
+
+进一步按 root exact pricing 日志拆分后，慢点可以更精确地定位到 backward completion-bound 的 PWLF lower-envelope 合并。`wet040_001_2m` 原 setup 根节点有 `7` 次实际重建 completion bound，pricing 合计约 `43.144s`，bound build 约 `42.081s`，其中 forward build 约 `4.306s`，backward build 约 `37.740s`。zero setup 根节点有 `8` 次实际重建，pricing 合计约 `187.417s`，bound build 约 `186.411s`，其中 forward build 约 `5.619s`，backward build 约 `180.749s`。因此 zero setup root 的 exact pricing 基本就是在构造 bound；而 bound build 中 `96%` 以上又花在 backward build。
+
+从计数看，这不是单纯的队列状态数或 merge 次数线性变多。原 setup 的 root merge 合计约 `414076`，changed 约 `194763`，平均每次 merge build 成本约 `101.6us`；zero setup 的 root merge 合计约 `476966`，changed 约 `238955`，平均每次 merge build 成本约 `390.8us`。merge 次数只增加约 `15%`，changed 比例也都在 `0.47-0.50` 附近，但单次 merge 成本接近 `3.8` 倍。这说明主要问题是 `PiecewiseLinearFunction.mergeMinimum/normalize` 处理的函数本身更复杂，可能是 lower envelope 分段数、交点数量或 normalize 后碎片数明显放大。
+
+结合 zero setup 的结构，合理解释是：setup time/cost 变为 0 后，不同 predecessor/successor 生成的 candidate 函数在时间轴上更容易重叠和交叉，较少被时间平移自然错开；backward DP 又需要从大量 successor 的 suffix 函数反向传播到 predecessor，因而 lower envelope 更容易被切成很多小段。正向 build 仍只有 `5.6s` 量级，说明不是所有 bound 方向都爆炸，而是 backward suffix envelope 对 zero setup 特别敏感。后续要验证这个判断，应直接在 `mergeFunction()` 输出 target/candidate 段数和 normalize 前后段数，而不是只继续看 merge 调用次数。

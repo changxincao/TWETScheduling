@@ -982,3 +982,11 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 本次新增两个默认关闭开关：`Configure.debugPWLFSegmentStats` 和 `Configure.debugAlgorithmCounters`。`getSegmentNum()` 仍保留真实计数返回值，便于显式诊断或测试调用，但只有 `debugPWLFSegmentStats=true` 时才写 `debugMap`；上述 PWLF 末尾统计改为 `recordSegmentNumIfEnabled()`，正常求解不再触发扫描。HEU 的 `M2S/M3S` 计数改为 `recordDebugCounter()`，只有 `debugAlgorithmCounters=true` 时才写 map。这样不改变任何函数值、列成本、reduced cost、分支兼容性或求解路径，只去掉默认求解中的统计副作用。
 
 验证方面，重新搜索后，`debugMap` 写入要么位于上述开关内，要么属于测试/诊断输出；排除历史 `src/BPC` 包后，focused `javac` 通过，仅保留原有 deprecation 提示。后续若再临时加入诊断统计，必须默认关闭，并避免在 PWLF segment 级循环或 pricing label 扩展循环里无条件扫描链表或写 `HashMap`。
+
+105. 2026-06-16 继续复查默认求解中的 debug/统计残留
+
+继续按 `debugMap`、`debugNumPlus`、`getSegmentNum`、`System.out`、`diagnostic`、`heartbeat`、`TimerManager`、`nanoTime/currentTimeMillis` 等关键字复查当前代码。结论是上一次那类真正混进真实求解热路径的 `HashMap` 计数和 segment 链表扫描已经基本清掉：`PiecewiseLinearFunction.getSegmentNum()` 的 `debugMap` 写入受 `debugPWLFSegmentStats` 控制，`Solution` 中的 `M2S/M3S` 计数受 `debugAlgorithmCounters` 控制，paper graph timing、completion-bound heartbeat、pricing snapshot、node progress summary 等诊断均有显式开关，默认不会输出或做额外 I/O。
+
+本次只补一个很小的残留点：`CompletionBoundCalculator.mergeFunction()` 和 `mergeFunctionWithChangeHull()` 在 segment 诊断关闭时虽然不会真的扫描段数，但仍会调用 `recordSegmentMerge(...)` 再由内部开关返回。现在改为只有 `diagnosticSegments=true` 时才计算 candidate/current 段数并进入记录函数。该修改不改变 completion bound 的函数合并、队列传播、剪枝结果或统计语义，只避免默认求解路径上残留的诊断入口调用。
+
+剩余没有处理的主要是两类。第一类是测试、批处理、诊断入口的 `System.out`，例如 comparison test、seed diagnosis、plotter 等，这些不是正式 BPC 热路径。第二类是 pricing summary 需要的 primitive 计数，例如 forward/backward pops、mergeCalls、mergeChanged 等，它们用于正常结果摘要和阶段判断，开销只是 long 加法，不属于前面发现的链表扫描或 `HashMap` 热点。`Basic.Data` 里还有少量老的 debug 打印，但它们不是当前 root pricing/completion-bound 的计算瓶颈，本轮先不把输出口径调整和性能清理混在一起。

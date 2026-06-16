@@ -890,7 +890,7 @@ final class CompletionBoundCalculator {
 		PiecewiseLinearFunction current = targetByJob[job];
 		if (current == null || current.head == null) {
 			targetByJob[job] = candidate.copy();
-			recordSegmentMerge(direction, 0, countSegments(candidate), countSegments(targetByJob[job]));
+			recordInitialSegmentMergeIfEnabled(direction, candidate, targetByJob[job]);
 			stats.mergeChanged++;
 			return true;
 		}
@@ -906,7 +906,7 @@ final class CompletionBoundCalculator {
 		if (changed) {
 			stats.mergeChanged++;
 		}
-		recordSegmentMerge(direction, targetSegmentsBefore, candidateSegments, countSegments(current));
+		recordSegmentMergeIfEnabled(direction, targetSegmentsBefore, candidateSegments, current);
 		if (diagnosticChangeSource) {
 			classifyChangedMerge(beforeAudit, candidate, current, direction, changed);
 		}
@@ -925,7 +925,7 @@ final class CompletionBoundCalculator {
 		PiecewiseLinearFunction current = targetByJob[job];
 		if (current == null || current.head == null) {
 			targetByJob[job] = candidate.copy();
-			recordSegmentMerge(direction, 0, countSegments(candidate), countSegments(targetByJob[job]));
+			recordInitialSegmentMergeIfEnabled(direction, candidate, targetByJob[job]);
 			stats.mergeChanged++;
 			MergeResult result = new MergeResult();
 			result.changed = true;
@@ -939,8 +939,22 @@ final class CompletionBoundCalculator {
 		if (result.changed) {
 			stats.mergeChanged++;
 		}
-		recordSegmentMerge(direction, targetSegmentsBefore, candidateSegments, countSegments(current));
+		recordSegmentMergeIfEnabled(direction, targetSegmentsBefore, candidateSegments, current);
 		return result;
+	}
+
+	private void recordInitialSegmentMergeIfEnabled(Direction direction, PiecewiseLinearFunction candidate,
+			PiecewiseLinearFunction after) {
+		if (diagnosticSegments) {
+			recordSegmentMerge(direction, 0, countSegments(candidate), countSegments(after));
+		}
+	}
+
+	private void recordSegmentMergeIfEnabled(Direction direction, int targetSegments, int candidateSegments,
+			PiecewiseLinearFunction after) {
+		if (diagnosticSegments) {
+			recordSegmentMerge(direction, targetSegments, candidateSegments, countSegments(after));
+		}
 	}
 
 	private void recordSegmentMerge(Direction direction, int targetSegments, int candidateSegments, int afterSegments) {

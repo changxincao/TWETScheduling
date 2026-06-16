@@ -1030,3 +1030,13 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 日志也支持这个判断：第二轮 exact 后两次后续 heuristic pricing 已经开始分叉。旧日志在 pool `9289` 后继续加 `9,16,5,8,3,6,4...`；当前日志在同样 pool `9289` 后变成 `3,7,11,8,1...`。这说明 LP 重新求解后的 dual 已变，后续不是同一棵搜索树。再往后 node2 分支 arc 也从旧 `(16,8)` 变为当前 `(30,7)`，节点数、列池和 pricing 次数下降就不再能用纯性能优化解释。
 
 因此，当前更精确的结论是：PWLF/completion-bound 优化主要解释单次 exact pricing 和 completion-bound 构造变快；搜索树变小主要应归因于 duplicate signature 候选保留策略改变了进入 RMP 的列集。旧 run 的 nodeDiag/progress 诊断会增加额外时间，但不解释分支路径变化。若需要确认是否“改错”，最直接的验证不是再看耗时，而是在当前代码临时恢复旧 duplicate 策略跑一次；若节点数回到接近旧记录，则说明差异来自该策略而非 PWLF。
+
+111. 2026-06-16 临时恢复旧 duplicate signature 策略的 40-2 验证
+
+按第 110 节判断，本轮只在当前代码上临时恢复 `GCNGBBStyleBidirectionalNgDssr.rememberGeneratedCandidate()` 的旧 duplicate 处理：同一 `SequenceSignature` 已存在时直接丢弃后来的候选，不再保留 reduced-cost 更低的同路径候选。其它配置保持第 108 节当前主线不变：normal ng-DSSR nearestK8/top10、no partial、no SRI、ALNS、RMIH 4s、`completionBound=allCycles`、`completionBoundArcFixing=true`、pricingOnly subtree、midpoint probe/reuse、`joinBest=BEST_UB`，并关闭无向 adjacency branching。运行目录为 `test-results/bpc/tmp-wet040-001-oldduplicate-current-20260616`。运行结束后已把源码和 `target/classes` 重新编译回当前 lazy replacement 版本，临时代码没有保留。
+
+结果为 `FINISHED`，`incumbent=bound=22580`，总时间 `876.994s`，处理 `105` 个节点，pricing `2985` 轮，新增列/最终 pool `173848`，root `134.790s`，heuristic pricing `205.429s/2194`，ng-DSSR exact pricing `452.928s/781`，master LP `58.589s`，validator 为 `true`。对比当前 lazy replacement 主线第 108 节 `313.587s / 51 nodes / 1608 pricing / pool 85816 / exact 106.642s/434 / heuristic 105.163s/1170`，旧 duplicate 策略确实把搜索规模和耗时显著拉回旧方向。对比第 93 节历史旧记录 `813.249s / 149 nodes / 4070 pricing / pool 211279 / exact 416.917s/1071 / heuristic 190.739s/2987`，本轮节点数和列池没有完全回到 149/211279，但量级已经接近旧记录而远离当前 313 秒记录。
+
+更关键的是分支路径验证：本轮 root 前 17 轮 heuristic 加列仍与旧记录一致；第一次 exact 的 duplicate 统计恢复为 `candidatePool kept/seen/dropped=150/180/30`，第二次 exact 恢复为 `85/91/6`。分支上，node1 仍为 `(5,9)`，node2 恢复为旧记录中的 `(16,8)`，而当前 lazy replacement 主线 node2 是 `(30,7)`。这基本确认搜索树变化主要由 duplicate signature 候选保留策略造成，而不是 PWLF/completion-bound 函数计算优化造成。
+
+本轮没有打开旧日志中的 node progress/nodeDiag 详细诊断，因此不能要求时间和节点数与第 93 节完全一致；此外当前代码中还有 PWLF no-change、debug gating、completion-bound 诊断关闭等后续性能改动，会影响单次 pricing 耗时。当前结论是：`1496c74` 的 lazy duplicate replacement 不是“纯提速”，它是一个会改变 RMP 入池列集的算法修正；从结果看它显著减少了后续树规模，并且最终最优值和 validator 均保持一致。

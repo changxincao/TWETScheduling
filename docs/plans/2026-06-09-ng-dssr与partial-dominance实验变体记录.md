@@ -1040,3 +1040,13 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 更关键的是分支路径验证：本轮 root 前 17 轮 heuristic 加列仍与旧记录一致；第一次 exact 的 duplicate 统计恢复为 `candidatePool kept/seen/dropped=150/180/30`，第二次 exact 恢复为 `85/91/6`。分支上，node1 仍为 `(5,9)`，node2 恢复为旧记录中的 `(16,8)`，而当前 lazy replacement 主线 node2 是 `(30,7)`。这基本确认搜索树变化主要由 duplicate signature 候选保留策略造成，而不是 PWLF/completion-bound 函数计算优化造成。
 
 本轮没有打开旧日志中的 node progress/nodeDiag 详细诊断，因此不能要求时间和节点数与第 93 节完全一致；此外当前代码中还有 PWLF no-change、debug gating、completion-bound 诊断关闭等后续性能改动，会影响单次 pricing 耗时。当前结论是：`1496c74` 的 lazy duplicate replacement 不是“纯提速”，它是一个会改变 RMP 入池列集的算法修正；从结果看它显著减少了后续树规模，并且最终最优值和 validator 均保持一致。
+
+112. 2026-06-17 old-duplicate 消融为何节点更少但总时间仍高于历史 813s
+
+继续拆解第 111 节结果后，不能只看 `nodes/pool/pricing` 总量。历史旧记录为 `149 nodes / 4070 pricing / pool 211279 / solve 813.249s`，old-duplicate 消融为 `105 nodes / 2985 pricing / pool 173848 / solve 876.994s`，表面上后者规模更小，但 exact/heuristic 的平均单次耗时更高：历史 exact 约 `416.917s/1071=0.389s/call`，old-duplicate 约 `452.928s/781=0.580s/call`；历史 heuristic 约 `190.739s/2987=0.064s/call`，old-duplicate 约 `205.429s/2194=0.094s/call`。因此矛盾点不是计数，而是 old-duplicate 这次路径里存在更重的单次 pricing。
+
+日志定位到最明显的异常是 old-duplicate 的 `node=69`：一次 ng-DSSR exact pricing 耗时 `18066.812 ms`，生成 `40994` 条列，`candidatePool kept/seen/dropped=40994/41950/956`，`join pairs tried/set/lb/time/funcEval/funcPruned=153068/1149/993/0/151919/17270`，forward kept/dominated 为 `14362/21120`。这说明该节点出现了局部候选列爆炸。历史旧日志中的 `node=69` 不是同一个搜索状态：同名节点处多轮 exact 仅生成几十条或个位数列，例如 `33`、`11`、`9` 条，单次耗时约 `0.17-0.19s`，并且 pricingOnly/job forbidden 状态、tMid 和标签分布也明显不同。也就是说节点编号相同没有可比性，两次搜索树虽然前几个分支相同，但中后段已经走到不同状态。
+
+因此，old-duplicate 消融的正确解释是：恢复旧 duplicate 策略足以把 early branch path 拉回旧方向，并证明 duplicate 策略是搜索树变化主因；但它没有复现完整历史代码状态，也没有保证后续每个节点状态相同。old-duplicate 这次虽然总节点数少于历史，却碰到一个局部极难节点，单点 exact pricing 产生 4 万多列，吞掉了大量时间，所以总时间反而略高。历史 813s 还混有 nodeDiag/progress 诊断成本，但它没有遇到这个 `node=69` 爆炸状态；两者总时间不能按节点数线性比较。
+
+当前结论为：这不是组件没开，也不是单纯统计混入导致的慢，而是搜索路径差异叠加局部 pricing 爆炸。要做严格 A/B，必须 checkout 到历史 commit 或完整恢复一组历史代码状态；只恢复 `rememberGeneratedCandidate()` 的 duplicate 判断只能验证该策略对树路径的影响，不能复刻历史 813s 的每个节点。

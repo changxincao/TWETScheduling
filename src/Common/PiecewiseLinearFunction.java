@@ -1183,6 +1183,37 @@ public class PiecewiseLinearFunction {
 		}
 	}
 
+	private void compactAdjacentEqualSegments() {
+		if (head == null) {
+			tail = null;
+			return;
+		}
+		while (head != null && Utility.compareEq(head.start, head.end)) {
+			head = head.next;
+		}
+		if (head == null) {
+			tail = null;
+			return;
+		}
+		Segment cur = head;
+		tail = head;
+		while (cur.next != null) {
+			if (Utility.compareEq(cur.next.start, cur.next.end)) {
+				cur.next = cur.next.next;
+				continue;
+			}
+			if (Utility.compareEq(cur.slope, cur.next.slope) && Utility.compareEq(cur.intercept, cur.next.intercept)
+					&& Utility.compareEq(cur.end, cur.next.start)) {
+				cur.end = cur.next.end;
+				cur.next = cur.next.next;
+			} else {
+				cur = cur.next;
+				tail = cur;
+			}
+		}
+		tail = cur;
+	}
+
 	private void normalizeForward() {
 		Utility.debugCheckPWLFRightBound("normalize.forward.input", this);
 		//这个的作用还在于将tail复位
@@ -1224,6 +1255,7 @@ public class PiecewiseLinearFunction {
 
 		// 4) 保证非增
 		minimizePrefixInPlace();
+		compactAdjacentEqualSegments();
 		Utility.debugCheckPWLFRightBound("normalize.forward.output", this);
 	}
 
@@ -1266,6 +1298,7 @@ public class PiecewiseLinearFunction {
 		}
 
 		minimizeSuffixInPlace();
+		compactAdjacentEqualSegments();
 		Utility.debugCheckPWLFLeftBound("normalize.backward.output", this);
 	}
 
@@ -1419,6 +1452,45 @@ public class PiecewiseLinearFunction {
 		return result;
 	}
 
+	private boolean canSkipMergeMinimum(PiecewiseLinearFunction g) {
+		if (this.head == null || g == null || g.head == null) {
+			return false;
+		}
+		if (Utility.compareLt(g.head.start, this.head.start) || Utility.compareGt(g.tail.end, this.tail.end)) {
+			return false;
+		}
+		double start = Math.max(this.head.start, g.head.start);
+		double end = Math.min(this.tail.end, g.tail.end);
+		if (!Utility.compareLt(start, end)) {
+			return false;
+		}
+		Segment p = this.head;
+		while (p != null && Utility.compareLe(p.end, start)) {
+			p = p.next;
+		}
+		Segment q = g.head;
+		while (q != null && Utility.compareLe(q.end, start)) {
+			q = q.next;
+		}
+		double cur = start;
+		while (p != null && q != null && Utility.compareLt(cur, end)) {
+			double nxt = Math.min(Math.min(p.end, q.end), end);
+			double diffStart = (q.slope - p.slope) * cur + (q.intercept - p.intercept);
+			double diffEnd = (q.slope - p.slope) * nxt + (q.intercept - p.intercept);
+			if (Utility.compareLt(diffStart, 0.0) || Utility.compareLt(diffEnd, 0.0)) {
+				return false;
+			}
+			cur = nxt;
+			if (Utility.compareEq(p.end, cur)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(q.end, cur)) {
+				q = q.next;
+			}
+		}
+		return true;
+	}
+
 	private boolean mergeMinimum(PiecewiseLinearFunction g, Direction direction, boolean reportChanged,
 			MergeResult changeHull) {
 		if (direction == Direction.FORWARD) {
@@ -1446,6 +1518,12 @@ public class PiecewiseLinearFunction {
 		}
 		// 如果 L2 为空，不用动
 		if (g.head == null) {
+			return false;
+		}
+		// 2026-06-16: completion bound 中大量候选函数只是在公共定义域上不优，
+		// 原实现仍会 copy 右函数、拆分链表并 normalize。这里先做只读扫描；若 g
+		// 没扩展定义域，且在所有正长度公共区间上都不低于当前 envelope，则直接返回。
+		if (canSkipMergeMinimum(g)) {
 			return false;
 		}
 		boolean changed = false;

@@ -1074,3 +1074,13 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 与历史第 93 节 `813.249s / 149 nodes / 4070 pricing / pool 211279 / exact 416.917s/1071 / heuristic 190.739s/2987 / master_lp 48.630s` 相比，统计清理确实有效：总时间下降约 `26.287s`，exact pricing 下降约 `120.783s`，root 从 `116.061s` 降到 `77.963s`。但 LP 时间和列池变大，且节点数也没有完全复刻成 149。这说明即使在相同历史候选池语义下，去掉热路径统计会改变运行时间分布，并可能因时序、数值退化或列池细节带来一定搜索波动；不过它没有把历史 run 变成当前主线的 313s 级别。
 
 因此当前结论更明确：统计污染是历史 813s 中的一部分额外成本，尤其影响 completion-bound/PWLF 相关 exact pricing；但当前主线 `313.587s / 51 nodes / pool 85816` 的大幅变化主要不是统计清理造成的，而是 `1496c74` 之后同 signature 候选保留更低 reduced cost 的策略改变了进入 RMP 的列集、LP dual 和分支树。若要让当前代码“和历史那次一样”，必须完整恢复 `1496c74^` 的 candidate pool 语义；若只想评估去统计污染的收益，本节实验已经给出更干净的对照。实验结束后临时 worktree 已删除，主工作区代码仍保持当前 `e3722ff` 版本。
+
+115. 2026-06-17 历史 clean-stats 重跑配置错配修正
+
+继续复核第 114 节后，确认其中 `nodes=117` 的完整 run 不能作为“只清理统计污染”的严格 A/B。原因不是统计清理会改变搜索树，而是该 run 的 subtree arc elimination 开关口径错了：命令同时打开了 `completionBoundSubtreeArcElimination=true` 和 `completionBoundSubtreeArcEliminationPricingOnly=true`。当前 `Tree.applySubtreeArcElimination()` 的语义是 hard 开关优先，只要 hard 为 true 就调用 `applyTo()` 把 subtree 固定弧写成普通 forbidden arc；只有 hard 为 false 且 pricingOnly 为 true 时，才调用 `applyToPricingOnly()`。
+
+日志证据很直接。历史 813s 记录在 node2 的诊断为 `forbiddenJobArcs/pricingOnlyJobArcs=1/1186`，说明 root subtree 固定的 1186 条弧只进入 pricingOnly 口径；而第 114 节那次 clean-stats 完整 run 和复查短跑在 node2 变成 `1187/0`，即同一批弧被硬禁。这个差异会改变 restricted columns、LP dual、启发式 seed 和 exact pricing 图，所以 node2 第一次启发式加列从历史的 `436` 变成 `518`，后续节点数变为 117 不能归因于统计清理。
+
+为验证这一点，在同一个历史 clean worktree 上只把 subtree 配置改成 `completionBoundSubtreeArcElimination=false`、`completionBoundSubtreeArcEliminationPricingOnly=true`，并设置 `maxNodes=2` 短跑。结果 node2 回到历史口径：`pool=10545`、`restricted=9977`、`pricing add=1025`、`heur add=639`、`exact add=386`、`subtree fixed=79`，和第 93 节历史 node2 summary 对齐。因此当前修正结论为：统计热路径清理确实能减少单次函数计算耗时，但第 114 节完整 run 的节点数差异主要来自 subtree hard/pricingOnly 配置错配；不能再用 `117 nodes` 解释统计清理收益。
+
+后续做可比实验时必须显式区分两种 subtree 口径。`completionBoundSubtreeArcElimination=true` 是永久/硬禁弧，会改变 RMP 列兼容性和分支树；`completionBoundSubtreeArcElimination=false` 且 `completionBoundSubtreeArcEliminationPricingOnly=true` 只影响 pricing/completion-bound，不把历史列从 RMP 中硬删掉，这是第 93 节历史 813s 记录对应的口径。这也说明此前“清洗统计仍导致 node 数变”这个判断是错误归因。严格评估去统计污染，应在 pricingOnly 口径下重跑完整收敛；当前短跑已经证明早期节点路径可对齐，但完整耗时还没有重新跑完。

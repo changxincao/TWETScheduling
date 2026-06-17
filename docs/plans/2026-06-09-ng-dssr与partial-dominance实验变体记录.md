@@ -1084,3 +1084,11 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 为验证这一点，在同一个历史 clean worktree 上只把 subtree 配置改成 `completionBoundSubtreeArcElimination=false`、`completionBoundSubtreeArcEliminationPricingOnly=true`，并设置 `maxNodes=2` 短跑。结果 node2 回到历史口径：`pool=10545`、`restricted=9977`、`pricing add=1025`、`heur add=639`、`exact add=386`、`subtree fixed=79`，和第 93 节历史 node2 summary 对齐。因此当前修正结论为：统计热路径清理确实能减少单次函数计算耗时，但第 114 节完整 run 的节点数差异主要来自 subtree hard/pricingOnly 配置错配；不能再用 `117 nodes` 解释统计清理收益。
 
 后续做可比实验时必须显式区分两种 subtree 口径。`completionBoundSubtreeArcElimination=true` 是永久/硬禁弧，会改变 RMP 列兼容性和分支树；`completionBoundSubtreeArcElimination=false` 且 `completionBoundSubtreeArcEliminationPricingOnly=true` 只影响 pricing/completion-bound，不把历史列从 RMP 中硬删掉，这是第 93 节历史 813s 记录对应的口径。这也说明此前“清洗统计仍导致 node 数变”这个判断是错误归因。严格评估去统计污染，应在 pricingOnly 口径下重跑完整收敛；当前短跑已经证明早期节点路径可对齐，但完整耗时还没有重新跑完。
+
+116. 2026-06-17 subtree hard-on 缺点的进一步确认
+
+后续在正确 pricingOnly 口径下完整重跑后，得到 `solve=597.417s, nodes=149, pool=211291, exact=193.933s, heuristic=158.576s, master_lp=49.960s`。与第 114 节那个误开 hard subtree 的完整 run 对比，hard subtree 为 `solve=786.962s, nodes=117, pool=225574, exact=296.134s, heuristic=201.021s, master_lp=106.046s`。这组数字说明 hard subtree 确实减少了处理节点数，但没有带来总时间收益，反而让 LP、pricing 和列池都变重。
+
+当前对原因的判断是，hard subtree 把 completion-bound/subtree 推出来的 arc fixing 永久写成 forbidden arc，会直接影响 restricted column 兼容性和后续子节点继承列。这样做会让 RMP 中可继承的历史列信息变少，一些本来可作为稳定基或 seed 的列被硬删，repair 和 pricing 需要重新补更多替代列。节点数虽然减少，但每个节点的信息更不完整，LP 更难、RMIH repair 更容易介入、pricing 也更频繁地补列，因此整体更慢。
+
+pricingOnly subtree 的语义更稳：它只让 pricing 和 completion-bound 在当前图上避开这些推断禁弧，不把它们上升为正式分支状态，也不强行删除 RMP 已有历史列。这样可以保留主问题列池和 dual 信息的连续性，同时让 pricing 图受益于删边。由此当前默认建议仍是 pricingOnly；hard subtree 只作为对照或诊断，不作为主线配置。

@@ -1092,3 +1092,11 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 当前对原因的判断是，hard subtree 把 completion-bound/subtree 推出来的 arc fixing 永久写成 forbidden arc，会直接影响 restricted column 兼容性和后续子节点继承列。这样做会让 RMP 中可继承的历史列信息变少，一些本来可作为稳定基或 seed 的列被硬删，repair 和 pricing 需要重新补更多替代列。节点数虽然减少，但每个节点的信息更不完整，LP 更难、RMIH repair 更容易介入、pricing 也更频繁地补列，因此整体更慢。
 
 pricingOnly subtree 的语义更稳：它只让 pricing 和 completion-bound 在当前图上避开这些推断禁弧，不把它们上升为正式分支状态，也不强行删除 RMP 已有历史列。这样可以保留主问题列池和 dual 信息的连续性，同时让 pricing 图受益于删边。由此当前默认建议仍是 pricingOnly；hard subtree 只作为对照或诊断，不作为主线配置。
+
+117. 2026-06-17 当前主线效率审计
+
+对当前主线做静态检查后，暂未发现默认求解路径里仍有明显误开的 debug/统计污染。`PiecewiseLinearFunction.getSegmentNum()` 的 debugMap 写入已由 `Configure.debugPWLFSegmentStats` 控制，completion-bound 的 segment/merge timing 诊断也默认由系统属性关闭；partial-list dominance 的 cardinality skip 统计同样需要显式打开。当前工作区仍有若干历史未提交测试文件和 `GCBBFullDomainComparisonTest` 的 incumbent audit 开关变更，但它们不属于主求解热路径。
+
+后续最明确的效率优化目标有三个。第一是 completion-bound/PWLF 合并：当前 `mergeMinimum()` 已有 no-change 快路径，但一旦需要合并仍会复制右函数并 normalize；40-2 当前主线日志显示 completion-bound build 累计仍约 39 秒，是 exact pricing 里的主要可控成本之一。下一步如果要继续做，应优先实现 completion-bound 专用的安全 destructive/right-consume merge 或 no-copy merge，而不是继续加粗粒度 delta hull。第二是 heuristic seed 选择：`HeuristicPricingEngine.collectSeedColumnsBySortedPrefix()` 每次 heuristic pricing 都会给当前 restricted columns 全量计算 reduced cost 并排序，heuristic 在 40-2 当前 run 中仍有 `105.163s/1170`，可以考虑在同一个 LP dual 下缓存 seed 排序，或用 bounded top-K 结构减少全排序成本。第三是 LP/RMIH 的列-约束构造：`TWETColumn.visitsArc()` 仍按序列线性扫描，LP 中构造 arc/adjacency/cut 行和增量加列时会重复调用；若以后 active branch/cut 增多，可在 `TWETColumn` 内缓存 arc bitset/adjacency key/SRI coefficient，避免反复扫序列。
+
+短期不建议优先动 hard subtree、SRI 或新的分支策略。当前证据显示 hard subtree 会让主问题继承列信息变少而变慢；SRI/lm-SRI 在 30/40 算例上提高 bound 的同时显著增加 label 和 dominance 状态复杂度，暂不适合作为默认提速方向。当前最稳的主线仍是 normal ng-DSSR nearestK8/top10、pricingOnly subtree、completionBound allCycles、midpoint probe/reuse、lazy duplicate replacement。

@@ -1062,3 +1062,15 @@ subtree 也验证了同一问题。root 的 subtree arc elimination 都扫描 `1
 因此当前结论是：要和第 93 节历史 813s 配置“真正一样”，不能只恢复 duplicate if 条件。严格复现有两种方式：一是直接 checkout 到历史 run 对应 commit，并使用相同输入、相同系统属性和诊断开关；二是在当前代码里做完整兼容开关，恢复 `1496c74^` 中 candidate pool 相关函数的整体语义，包括 duplicate 判断、堆满时替换逻辑、`generatedCandidateBySignature` 与 `generatedColumnCandidates` 的同步关系、以及 `finalizeGeneratedColumns()` 的候选来源。对于当前 normal ng-DSSR nearestK8/top10 这组配置，最小需要恢复的是 `GCNGBBStyleBidirectionalNgDssr` 的这组函数；若要覆盖其它 pricing engine，则还要同步恢复其它六个 engine 在 `1496c74` 中改过的同类候选池逻辑。
 
 这也解释了为什么 old-duplicate 消融会“指标更轻但更慢”。它不是历史 run 的完整复刻，而是当前代码状态下的一个混合版本：早期路径被拉向旧策略，但中后期仍可能走到历史 run 没有经历过的难节点。node69 的 4 万列爆炸就是这种混合路径的局部结果，不能用它和历史 node69 做同编号节点对比。
+
+114. 2026-06-17 历史 813s 代码口径去除统计污染后的重跑
+
+按“在历史那次里把统计污染项删掉重新跑，最后代码恢复当前版本”的要求，本轮没有在当前主工作区上回退代码，而是新建隔离 worktree 到 `1eccbd8 Raise default heuristic pricing cap`。这个 commit 位于 `1496c74 Keep best duplicate pricing candidates` 之前，对应第 93 节历史 813s run 的候选池语义：同 `SequenceSignature` duplicate 仍是先到先保留，后来的同路径候选直接丢弃，finalize 也仍从 `generatedColumnCandidates` heap 中取候选。
+
+在该历史 worktree 上只补两个统计清理：`1cea5af` 删除 `PiecewiseLinearFunction.minimizeSuffixInPlace()` 主循环内层的 `getSegmentNum()` 调用，避免每个 segment 都扫描整条链表并写 `Utility.debugMap`；`7a191fd` 给 `PiecewiseLinearFunction.getSegmentNum()` 和 `Solution.countAlgorithm()` 这类 debugMap 计数加显式开关，默认关闭。没有补 `a21c941`，因为它清理的是后续 merge timing / completion-bound segment diagnostics 引入后的 dormant 诊断结构，而 `1eccbd8` 历史基线里没有完整对应结构，硬套会改变代码上下文，不属于这次“历史配置去统计污染”的最小修改。
+
+重跑配置保持第 93 节口径：`wet040_001_2m`，normal ng-DSSR nearestK8/top10，ALNS seed，RMIH 4s，completionBound allCycles，completionBound arc fixing，pricingOnly subtree，midpoint probe/reuse，joinBest=BEST_UB，关闭无向 adjacency branching，启发式上限 `1500/5000`。输出保存为 `test-results/bpc/tmp-wet040-001-historical-cleanstats-20260617.csv` 和同名 log。结果为 `FINISHED`，`incumbent=bound=22580`，`nodes=117`，`pricing=3409`，`pool=225574`，`solve=786.962s`，`root=77.963s`，`exact=296.134s/939`，`heuristic=201.021s/2451`，`master_lp=106.046s`，`valid=true`。
+
+与历史第 93 节 `813.249s / 149 nodes / 4070 pricing / pool 211279 / exact 416.917s/1071 / heuristic 190.739s/2987 / master_lp 48.630s` 相比，统计清理确实有效：总时间下降约 `26.287s`，exact pricing 下降约 `120.783s`，root 从 `116.061s` 降到 `77.963s`。但 LP 时间和列池变大，且节点数也没有完全复刻成 149。这说明即使在相同历史候选池语义下，去掉热路径统计会改变运行时间分布，并可能因时序、数值退化或列池细节带来一定搜索波动；不过它没有把历史 run 变成当前主线的 313s 级别。
+
+因此当前结论更明确：统计污染是历史 813s 中的一部分额外成本，尤其影响 completion-bound/PWLF 相关 exact pricing；但当前主线 `313.587s / 51 nodes / pool 85816` 的大幅变化主要不是统计清理造成的，而是 `1496c74` 之后同 signature 候选保留更低 reduced cost 的策略改变了进入 RMP 的列集、LP dual 和分支树。若要让当前代码“和历史那次一样”，必须完整恢复 `1496c74^` 的 candidate pool 语义；若只想评估去统计污染的收益，本节实验已经给出更干净的对照。实验结束后临时 worktree 已删除，主工作区代码仍保持当前 `e3722ff` 版本。

@@ -3251,18 +3251,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ensureCompletionBoundsDetachedForLabelUpdate();
 		PiecewiseLinearFunction[] envelope = aggregateBackwardNoSriEnvelopeByJob();
 		boolean changed = false;
-		for (int job = 1; job <= data.n; job++) {
-			if (isZeroDualExcludedJob(job)) {
-				continue;
-			}
-			PiecewiseLinearFunction sinkCandidate = buildLabelDerivedBackwardSinkCandidate(job, lp);
-			if (sinkCandidate != null) {
-				if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, sinkCandidate)) {
-					changed = true;
-					completionBoundLabelUpdateBackwardChanged++;
-				}
-			}
-		}
 		for (int successor = 1; successor <= data.n; successor++) {
 			PiecewiseLinearFunction successorBound = envelope[successor];
 			if (!hasFunction(successorBound)) {
@@ -3356,11 +3344,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		u.shiftYInPlace(data.getSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
 		u.normalize(Direction.FORWARD);
 		return hasFunction(u) ? u : null;
-	}
-
-	private PiecewiseLinearFunction buildLabelDerivedBackwardSinkCandidate(int job, LP lp) {
-		PiecewiseLinearFunction r = constantCompletionFunction(-lp.getArcDual(job, lp.getNode().sinkId()));
-		return hasFunction(r) ? r : null;
 	}
 
 	private PiecewiseLinearFunction buildLabelDerivedBackwardCandidate(PiecewiseLinearFunction successorB, int job,

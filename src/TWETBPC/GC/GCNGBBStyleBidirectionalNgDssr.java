@@ -3326,7 +3326,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void mergeEnvelopeMinimum(PiecewiseLinearFunction[] envelopeByJob, int job,
 			PiecewiseLinearFunction candidate, Direction direction) {
-		if (!hasFunction(candidate)) {
+		if (!hasPositiveDomainFunction(candidate)) {
 			return;
 		}
 		if (envelopeByJob[job] == null || envelopeByJob[job].head == null) {
@@ -3338,32 +3338,32 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private PiecewiseLinearFunction buildLabelDerivedForwardCandidate(PiecewiseLinearFunction parentF, int prevJob,
 			int job, LP lp) {
-		if (!hasFunction(parentF)) {
+		if (!hasPositiveDomainFunction(parentF)) {
 			return null;
 		}
 		double delay = data.getSetUp(prevJob, job) + data.getProcessT(job);
 		PiecewiseLinearFunction u = parentF.shiftX(delay);
-		if (!hasFunction(u)) {
+		if (!hasPositiveDomainFunction(u)) {
 			return null;
 		}
 		u.shiftYInPlace(data.getSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
 		u.normalize(Direction.FORWARD);
-		return hasFunction(u) ? u : null;
+		return hasPositiveDomainFunction(u) ? u : null;
 	}
 
 	private PiecewiseLinearFunction buildLabelDerivedBackwardCandidate(PiecewiseLinearFunction successorB, int job,
 			int successor, LP lp) {
-		if (!hasFunction(successorB)) {
+		if (!hasPositiveDomainFunction(successorB)) {
 			return null;
 		}
 		double delay = data.getSetUp(job, successor) + data.getProcessT(successor);
 		PiecewiseLinearFunction r = successorB.shiftX(-delay);
-		if (!hasFunction(r)) {
+		if (!hasPositiveDomainFunction(r)) {
 			return null;
 		}
 		r.shiftYInPlace(data.getSetupCost(job, successor) - lp.getArcDual(job, successor));
 		r.normalize(Direction.BACKWARD);
-		return hasFunction(r) ? r : null;
+		return hasPositiveDomainFunction(r) ? r : null;
 	}
 
 	private PiecewiseLinearFunction constantCompletionFunction(double value) {
@@ -3467,6 +3467,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean hasFunction(PiecewiseLinearFunction function) {
 		return function != null && function.head != null && function.tail != null;
+	}
+
+	private boolean hasPositiveDomainFunction(PiecewiseLinearFunction function) {
+		return hasFunction(function) && Utility.compareLt(function.head.start, function.tail.end);
 	}
 
 	private PointwiseMaxResult pointwiseMaxOnTargetDomain(PiecewiseLinearFunction target,

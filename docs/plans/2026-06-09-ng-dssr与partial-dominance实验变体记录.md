@@ -1221,3 +1221,15 @@ backward 扩展不在候选构造时按 `max_time/2` 丢弃。它先检查把 `i
 pricing 轮内的临时 completion-bound arc fixing 仍在 `buildCompletionBounds()` 后立即执行，使用的是当时的 `completionBounds.forwardFByJob/backwardBByJob` 和 scalar min cache。它比较的是“某条 arc 在当前 pricing 中是否还能出现在负 reduced-cost 列里”，cutoff 约为 0，因此只影响当前 exact pricing 的扩展；如果 `bidirectionalCompletionBoundArcFixing=true`，会把这些 arc 记到 `completionBoundFixedArc`，后续 `isPricingArcForbidden()` 在扩展时避开。这里没有使用 label-derived enhanced U/R，因为 label-derived 更新发生在 forward/backward labeling 之后。
 
 subtree/pricingOnly arc elimination 是另一层。`Tree/PC` 在 node 处理后调用 `getReusableSubtreeArcEliminationBounds()` 取得 prepared bounds，再用 incumbent 和 node lower bound 的 gap 做判断。ng-DSSR 的 `reusableSubtreeArcEliminationBounds()` 会检查：如果当前 `completionBoundsLabelEnhanced=true`，则返回 base bound `ngDssrReusableCompletionBounds`，而不是 enhanced bound；如果存在 dual profitable window、zero-dual excluded jobs 或 pricing horizon 不是 `data.CmaxH`，则直接返回 null。这样可以保证 subtree/pricingOnly arc elimination 不被半域 label-derived bound 污染。
+
+128. 2026-06-19 label-derived bound 正确性与收益测试
+
+按“是否正确、是否有用、每次更新是否耗时”重新测试后，先发现一个实现问题：011 根节点开启 `ngDssrLabelDerivedCompletionBoundUpdate=true` 时，`aggregateForwardNoSriEnvelopeByJob()` 会把一个数值退化的 no-SRI frontier 传给 `mergeMinimum()`，报错区间为 `this=[497.0,503.9999999999993], g=[504.0,503.9999999999993]`。这说明 label-derived envelope 聚合路径不能只检查 head/tail 非空，还必须排除没有正长度定义域的 PWLF。修复方式是在该强化路径局部增加 `hasPositiveDomainFunction()`，只过滤 label-derived envelope 和 candidate 构造，不改变普通 single-point label、join 或主 pricing 的函数语义。
+
+修复后，011 根节点开启更新可以正常跑完，结果与关闭更新一致：`status=NODE_LIMIT, incumbent=11987, bound=11502.945946, valid=true`。010 根节点同样保持 `ROOT_PROCESSED, incumbent=bound=14318, valid=true`。因此当前至少在 010/011 根节点上没有观察到开启强化导致 bound 或列验证错误。
+
+从收益看，当前仍没有看到实际剪枝改善。010 根节点 off/on 的三轮 exact 中，`fw/bw kept`、`completionBound fwPruned/bwPruned`、`completionBoundScalar pruned`、candidate pool 和 DSSR rounds 全部一致；开启时第一轮 `completionBoundLabelUpdate=18.104ms, fwChanged=30, bwChanged=320`，后两轮因继承增强 bound 分别约 `2.147ms/0/0` 和 `2.446ms/0/0`。011 根节点修复后，开启时五轮更新耗时约 `23.544ms, 7.060ms, 6.359ms, 6.303ms, 2.548ms`，但所有轮次的 label 数、completion-bound pruned、scalar pruned 和生成列数仍与关闭更新一致。
+
+耗时判断也要谨慎。011 第一次 off run 为 `solve=19.555s, exact=3.617s`，随后 off rerun 变为 `solve=9.832s, exact=1.648s`；on 为 `solve=11.840s, exact=1.893s`。这种差异主要来自 `completionBound buildMs` 和运行环境波动，而不是 label-derived 更新本身，因为剪枝统计没有变化。按日志直接可归因的更新开销是每次 pricing 几毫秒到二十几毫秒，规模不大，但在没有剪枝收益时就是纯额外成本。
+
+当前结论：label-derived bound 的跨 DSSR 轮复用语义已经修正，空定义域 crash 也已修复；但在 010/011 根节点样本上，它没有减少 label、没有增加 completion-bound 剪枝、也没有改善生成列路径。默认保持关闭是合理的。后续若要继续研究，应选择已知难节点快照，观察开启后是否真的减少 backward/forward label，而不是只看 solve time。

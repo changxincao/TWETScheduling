@@ -518,15 +518,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				forwardExtend(lp);
 			}
 			diagnosticHeartbeat(lp, "forward.done", true);
+			updateCompletionBoundsFromForwardLabels(lp);
 			diagnosticHeartbeat(lp, "backward.start", true);
 			while (canContinue() && !BWUL.isEmpty()) {
 				backwardExtend(lp);
 			}
 			diagnosticHeartbeat(lp, "backward.done", true);
-			// 2026-06-19: label-derived bound 只能作为本轮完整 labeling 后的 DSSR 后续轮加强。
-			// 如果 forward 队列刚耗尽就立刻用 forward envelope 抬高 U 并剪本轮 backward，
-			// 会遗漏仍需通过 backward 半路径才能暴露的负列；011 root 已复现这种误剪。
-			updateCompletionBoundsFromForwardLabels(lp);
 			updateCompletionBoundsFromBackwardLabels(lp);
 		} else {
 			updateCompletionBoundsFromForwardLabels(lp);
@@ -3218,26 +3215,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long start = System.nanoTime();
 		ensureCompletionBoundsDetachedForLabelUpdate();
 		PiecewiseLinearFunction[] envelope = aggregateForwardNoSriEnvelopeByJob();
-		PiecewiseLinearFunction[] candidateEnvelope = new PiecewiseLinearFunction[data.n + 1];
 		boolean changed = false;
-		for (int prevJob = 0; prevJob <= data.n; prevJob++) {
-			PiecewiseLinearFunction parent = envelope[prevJob];
-			if (!hasPositiveDomainFunction(parent)) {
-				continue;
-			}
-			for (int job = 1; job <= data.n; job++) {
-				if (job == prevJob || isZeroDualExcludedJob(job) || isPricingArcForbidden(lp.getNode(), prevJob, job)) {
-					continue;
-				}
-				PiecewiseLinearFunction candidate = buildLabelDerivedForwardCandidate(parent, prevJob, job, lp);
-				if (candidate == null) {
-					continue;
-				}
-				mergeEnvelopeMinimum(candidateEnvelope, job, candidate, Direction.FORWARD);
-			}
-		}
 		for (int job = 1; job <= data.n; job++) {
-			PiecewiseLinearFunction candidate = candidateEnvelope[job];
+			PiecewiseLinearFunction candidate = finiteSupportOnly(envelope[job]);
 			if (strengthenCompletionBoundWithMax(completionBounds.forwardUByJob, job, candidate)) {
 				changed = true;
 				completionBoundLabelUpdateForwardChanged++;
@@ -3262,27 +3242,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long start = System.nanoTime();
 		ensureCompletionBoundsDetachedForLabelUpdate();
 		PiecewiseLinearFunction[] envelope = aggregateBackwardNoSriEnvelopeByJob();
-		PiecewiseLinearFunction[] candidateEnvelope = new PiecewiseLinearFunction[data.n + 1];
 		boolean changed = false;
-		for (int successor = 1; successor <= data.n; successor++) {
-			PiecewiseLinearFunction successorBound = envelope[successor];
-			if (!hasPositiveDomainFunction(successorBound)) {
-				continue;
-			}
-			for (int job = 1; job <= data.n; job++) {
-				if (job == successor || isZeroDualExcludedJob(job)
-						|| isPricingArcForbidden(lp.getNode(), job, successor)) {
-					continue;
-				}
-				PiecewiseLinearFunction candidate = buildLabelDerivedBackwardCandidate(successorBound, job, successor, lp);
-				if (candidate == null) {
-					continue;
-				}
-				mergeEnvelopeMinimum(candidateEnvelope, job, candidate, Direction.BACKWARD);
-			}
-		}
 		for (int job = 1; job <= data.n; job++) {
-			PiecewiseLinearFunction candidate = candidateEnvelope[job];
+			PiecewiseLinearFunction candidate = finiteSupportOnly(envelope[job]);
 			if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, candidate)) {
 				changed = true;
 				completionBoundLabelUpdateBackwardChanged++;
@@ -3349,60 +3311,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		envelopeByJob[job].mergeMinimum(candidate, direction, true);
 	}
 
-	private PiecewiseLinearFunction buildLabelDerivedForwardCandidate(PiecewiseLinearFunction parentF, int prevJob,
-			int job, LP lp) {
-		if (!hasPositiveDomainFunction(parentF)) {
+	private PiecewiseLinearFunction finiteSupportOnly(PiecewiseLinearFunction function) {
+		if (!hasFunction(function)) {
 			return null;
 		}
-		double delay = data.getSetUp(prevJob, job) + data.getProcessT(job);
-		// 2026-06-19: 本路径是在半域 label 已经生成后反推 completion-bound 下界。
-		// label frontier 的物理 segment 只覆盖半域。构造一跳候选前，需要先把缺口补成
-		// full-horizon M 段，否则 shiftX() 后 normalize 看不到半域外的 M 尾/头段，
-		// 就不能形成“可等待到更晚/更早时刻”的下界闭包，更新仍会局限在半域平移片段内。
-		PiecewiseLinearFunction u = fullHorizonWithBigMGaps(parentF).shiftX(delay);
-		if (!hasPositiveDomainFunction(u)) {
-			return null;
-		}
-		u.shiftYInPlace(data.getSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
-		u.normalize(Direction.FORWARD);
-		return hasPositiveDomainFunction(u) ? u : null;
-	}
-
-	private PiecewiseLinearFunction buildLabelDerivedBackwardCandidate(PiecewiseLinearFunction successorB, int job,
-			int successor, LP lp) {
-		if (!hasPositiveDomainFunction(successorB)) {
-			return null;
-		}
-		double delay = data.getSetUp(job, successor) + data.getProcessT(successor);
-		PiecewiseLinearFunction r = fullHorizonWithBigMGaps(successorB).shiftX(-delay);
-		if (!hasPositiveDomainFunction(r)) {
-			return null;
-		}
-		r.shiftYInPlace(data.getSetupCost(job, successor) - lp.getArcDual(job, successor));
-		r.normalize(Direction.BACKWARD);
-		return hasPositiveDomainFunction(r) ? r : null;
-	}
-
-	private PiecewiseLinearFunction fullHorizonWithBigMGaps(PiecewiseLinearFunction function) {
-		PiecewiseLinearFunction expanded = new PiecewiseLinearFunction();
-		expanded.resetDomain(0.0, pricingHorizon);
-		double cursor = 0.0;
+		PiecewiseLinearFunction finite = new PiecewiseLinearFunction();
+		finite.resetDomain(0.0, pricingHorizon);
 		for (Segment segment = function.head; segment != null; segment = segment.next) {
-			double start = Math.max(0.0, segment.start);
-			double end = Math.min(pricingHorizon, segment.end);
-			if (!Utility.compareLt(start, end)) {
-				continue;
+			if (!Utility.isBigMValue(segment.intercept) && Utility.compareLt(segment.start, segment.end)) {
+				finite.addSegment(segment.start, segment.end, segment.slope, segment.intercept);
 			}
-			if (Utility.compareLt(cursor, start)) {
-				expanded.addSegment(cursor, start, 0.0, Utility.big_M);
-			}
-			expanded.addSegment(start, end, segment.slope, segment.intercept);
-			cursor = end;
 		}
-		if (Utility.compareLt(cursor, pricingHorizon)) {
-			expanded.addSegment(cursor, pricingHorizon, 0.0, Utility.big_M);
-		}
-		return expanded;
+		return hasPositiveDomainFunction(finite) ? finite : null;
 	}
 
 	private PiecewiseLinearFunction constantCompletionFunction(double value) {

@@ -518,12 +518,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				forwardExtend(lp);
 			}
 			diagnosticHeartbeat(lp, "forward.done", true);
-			updateCompletionBoundsFromForwardLabels(lp);
 			diagnosticHeartbeat(lp, "backward.start", true);
 			while (canContinue() && !BWUL.isEmpty()) {
 				backwardExtend(lp);
 			}
 			diagnosticHeartbeat(lp, "backward.done", true);
+			// 2026-06-19: label-derived bound 只能作为本轮完整 labeling 后的 DSSR 后续轮加强。
+			// 如果 forward 队列刚耗尽就立刻用 forward envelope 抬高 U 并剪本轮 backward，
+			// 会遗漏仍需通过 backward 半路径才能暴露的负列；011 root 已复现这种误剪。
+			updateCompletionBoundsFromForwardLabels(lp);
 			updateCompletionBoundsFromBackwardLabels(lp);
 		} else {
 			updateCompletionBoundsFromForwardLabels(lp);

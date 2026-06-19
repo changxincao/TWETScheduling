@@ -43,3 +43,11 @@
 论文里的 arc fixing 现在单独放在节点 column generation 已闭合之后执行。它用当前节点 LP 下界 `LB` 和已有整数上界 `UB`，重新在 full-horizon time-expanded graph 上计算 forward shortest distance 和 backward shortest distance；对每条具体处理弧 `(from,to,t)` 计算穿过该弧的最小 reduced cost `cmin`，若 `cmin >= UB - LB`，则把该具体时间弧写入 node 的 time-indexed pricing-only 禁弧集合，供子节点的 graph pricing 避开。该 fixing 不使用当前 TWET 的 completion bound，也不调用 subtree arc elimination；在 `useTimeIndexedGraphPricing=true` 时，原 completion-bound subtree elimination 路径会跳过，避免两套 fixing 语义叠加。
 
 当前实现只固定处理弧 `(from,to,t)`，包括 source 到 job 的弧；暂不做论文里的 idle/sink arc 清理、顶点压缩和 `t*` 重算。这样先保证 no-cut graph pricing 和 paper reduced-cost arc fixing 的基本口径清楚，再决定是否补完整图压缩步骤。
+
+## 6. 与论文细节的再次核对
+
+再次读取论文后，当前实现和论文一致的部分是：图节点按 `(lastJob,t)` 表示；等待弧相当于论文 `A4`，成本为 0；处理弧相当于 `A1/A2`，时间推进为 `t+s_ij+p_j`，成本按 job 完工时间函数计算；机器数 dual 只在 source 到首任务弧上扣除；no-cut 情况下每个顶点只保留一个最短距离，等价于无额外 cut state 的 shortest-path pricing。reduced-cost arc fixing 也已经放到节点 column generation 闭合之后，用 `UB-LB` 和 full-horizon forward/backward shortest distance 计算穿过 `(from,to,t)` 的最小 reduced cost，这一点符合 Algorithm 7 的核心逻辑。
+
+仍然不等同完整论文版的地方也要明确。第一，当前只实现同质机单图口径，没有按 machine type `k` 拆多张图。第二，当前 no-cut 实验不带论文的 limited-memory rank-1 cut state，因此 Algorithm 7 中两侧 label 合并时的 `S_l+S'_l>=beta_l` 修正没有实现；这和“先做无 cut 版本”的目标一致。第三，当前只 fixing 处理弧 `(from,to,t)`，没有继续删除冗余 idle arc、sink arc，也没有做图顶点压缩和 `t*` 重算。第四，论文 DWM 的列系数按路径中 job 被处理次数计数，而当前 TWETColumn 仍按 `containsJob` 的 0/1 覆盖语义进入 RMP，所以该 graph pricing 只能作为实验对照，不能直接替代当前 elementary/ng exact pricing 的正确性证明。第五，TWET 当前目标包含 setup cost 和分支 arc dual，这比论文“目标函数只定义在完工时间上、setup 主要影响时间推进”的基础公式多了问题特定项；这些项是为了和现有 TWET RMP reduced-cost 口径一致，而不是论文原式本身。
+
+因此当前结论是：no-cut graph pricing 的 DAG 最短路骨架和 Algorithm 7 的 reduced-cost fixing 核心判定已经对齐，但不是完整论文 BCP 实现。后续若要声称“和论文完全一致”，至少还需要补 machine type 多图、DWM 路径系数口径、limited-memory rank-1 cut state、idle/sink/vertex cleanup，以及与论文相同的 branching/cut 主循环。

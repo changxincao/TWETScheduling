@@ -18,6 +18,8 @@ import Output.ValidationResult;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETBPCSolver;
 import TWETBPC.TWETSolveResult;
+import TWETBPC.IO.TWETColumnEvaluator;
+import TWETBPC.Model.TWETColumn;
 
 /**
  * 2026-05-28: 对照测试 正式 half-domain 双向 pricing 与 GCBB full-domain 函数定义域。
@@ -119,6 +121,10 @@ public class GCBBFullDomainComparisonTest {
 		TWETSolveResult result = solver.solve();
 		BPCTraceSummary summary = solver.getContext().traceSummary;
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
+		if (Boolean.getBoolean("twet.bpc.fullDomainCompare.incumbentColumnAudit")) {
+			writeIncumbentColumnAudit(outputDir, stripDat(instance.getFileName().toString()), data,
+					solver.getContext().pool, result);
+		}
 
 		String mode = nodeJoin ? "nodeJoin" : (fullDomain ? "fullDomain" : "halfDomain");
 		String crossingSide = config.fullDomainNodeJoinCrossingSide == null
@@ -169,6 +175,21 @@ public class GCBBFullDomainComparisonTest {
 
 	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain) {
 		return buildConfig(instance, fullDomain, false);
+	}
+
+	private static void writeIncumbentColumnAudit(Path outputDir, String caseName, Data data, TWETBPC.LP.Pool pool,
+			TWETSolveResult result) throws Exception {
+		TWETColumnEvaluator evaluator = new TWETColumnEvaluator(data);
+		ArrayList<String> lines = new ArrayList<String>();
+		lines.add("columnId,storedCost,evaluatorCost,diff,size,source,seed,sequence");
+		for (int columnId : result.getIncumbentColumnIds()) {
+			TWETColumn column = pool.getColumn(columnId);
+			double checked = evaluator.evaluate(column.getSequence());
+			lines.add(String.format(Locale.US, "%d,%.12f,%.12f,%.12f,%d,%s,%s,\"%s\"", columnId,
+					column.getCost(), checked, column.getCost() - checked, column.size(), column.getSource(),
+					Boolean.toString(column.isSeedColumn()), column.getSequence().toString()));
+		}
+		Files.write(outputDir.resolve(caseName + ".incumbentAudit.csv"), lines);
 	}
 
 	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain, boolean nodeJoin) {

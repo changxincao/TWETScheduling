@@ -398,3 +398,16 @@ pricing 侧目前只接入 partial-list ng-DSSR 这条 SRI-aware 主路径，并
 验证方面，本轮完成了两层检查。第一，排除历史 `src/BPC` 包后，用项目 `.classpath` 中的 CPLEX jar 对当前 `src` 做 focused `javac` 编译，通过，仅有历史 deprecation warning。第二，用极小 jshell harness 检查 arc-memory 系数口径：`A_M={(1,2)}` 时序列 `[1,2]` 触发 1 次，`[1,3,2]` 被非 memory arc 打断后触发 0 次；`A_M={(1,2),(2,3)}` 时 `[1,2,3]` 触发 1 次。当前还没有跑 30/40 算例对照，后续应固定 partial-list ng-DSSR + SRI 配置，对比 `full/nodeMemory/arcMemory` 的 root bound、active cut 数、exact pricing 时间、label 数和最终 gap。
 
 随后又专门复核了 exact pricing 的 backward residual state 是否会和完整列系数不一致。检查方法是穷举长度 1 到 4 的小序列、所有非空 scope 子集、以及 route 内所有 memory arc 子集；对每个 split 位置比较“forward 半路径系数 + backward suffix 内部系数 + crossing arc join 修正”和 `SubsetRowCutEvaluator` 完整正向扫描系数。450 个组合全部一致。这个检查确认了当前 3-SRI、`p=1/2` 口径下，backward label 维护 suffix 前端 residual state 是正确的；它不是完整 suffix 正向扫描的尾端 state，但正是 join 需要的那一段 residual。
+### 2026-06-17 40/4 node-memory SRI 对照
+
+为了检查“机器数更多时 SRI 是否更有用”，重新使用此前构造的 40 任务 4 机器临时算例 `test-results/bpc/tmp-wet040-001-m4-input-20260616/wet040_001_4m.dat`。no-SRI 的当前主线记录为 normal ng-DSSR nearestK8/top10、ALNS、RMIH 4s、all-cycle completion bound、pricingOnly subtree、midpoint probe/reuse 和 `BEST_UB`，结果为 `FINISHED, incumbent=bound=8473, nodes=129, solve=91.686s, root=51.147s, exact=16.411s/350, heuristic=39.120s/793, pool=18612, valid=true`。
+
+本次只把 pricing 改成 partial-list ng-DSSR 并打开 node-memory SRI，其他有效组件保持一致。`ngDssrInitialMode=nearestK, ngDssrInitialSize=8, ngDssrRouteUpdateLimit=10, enableSubsetRowCutsForPartialDominance=true, subsetRowCutMemoryMode=nodeMemory, maxSubsetRowCutsPerRound=10`。结果目录为 `test-results/bpc/tmp-wet040-m4-nodeSRI-nearestK8-20260617b/`，最终 `FINISHED, incumbent=bound=8473, nodes=8, solve=146.559s, root=108.382s, exact=41.841s/220, heuristic=88.639s/396, pool=6751, cutPool=376, valid=true`。
+
+这个结果说明 SRI 在 4 机器情形下确实更明显地强化了界：搜索节点从 129 降到 8，列池从 18612 降到 6751，node 5 时 bound 已到 8472，node 7 找到整数解后闭合。但它仍没有带来总时间收益，主要原因是 root 的 cut-pricing 代价太高。root 单节点从 no-SRI 的 51.147s 增至 108.382s，root 内启发式 pricing 为 71.679s，exact pricing 为 29.623s，并在 root 加到 80 条 SRI cut。后续节点虽然很快，但已经无法抵消 root 开销。
+
+顺带测试了同配置下 `ngDssrInitialMode=empty`。该 run 未继续到最优，因为 root 已明显慢于 nearestK8：node 1 `nodeTime=154.516s, total=161.032s, lpObj=8469.230769, inc=8473, cutPool=80, pricing=149.898s/221, heuristic=106.167s/147, exact=43.731s/74`，随后到 node 3 总时间已 179.750s。当前 40/4 node-memory SRI 下，empty ng-set 不如 nearestK8；这和此前个别 30/2 SRI 实验中 empty 更快的现象不同，说明 SRI active 后 ng-set 初始策略依赖算例和机器数，不能简单固定为 empty 或 full。
+
+当前结论是：机器数增加后，SRI 的“减少搜索树、提高下界”的作用更清楚，符合直觉；但在当前实现中，SRI active 后 label 携带 cut state、cut/pricing 循环和启发式定价都会显著变慢。对这个 40/4 算例，node-memory SRI 是更强的 bound 工具，但不是更快的默认求解配置。后续如果继续用 SRI，更合理的方向仍是选择性使用，例如 root-only、gap 很小时触发、限制 cut rounds，或者继续做 SRI-aware bound/probe，而不是全节点全开。
+
+这里保留一个后续需要继续验证的判断：从 SRI 的表达式看，机器数越多时，RMP 中可以同时选中的路径列越多，set covering 放松下由多条列共同造成的奇数集合/局部覆盖分数结构也可能更常见，因此 SRI 对下界和搜索树的改善空间可能比 `m=2` 更大。40/4 的结果支持这个方向，因为节点数和列池都明显下降；但这还不是“机器越多 SRI 越快”的结论。当前瓶颈在于 SRI 进入 labeling 后，每个 label 需要携带 cut state，cut/pricing 循环也会增加 root 的定价次数和启发式代价。因此更准确的结论是：`m` 增大可能提高 SRI 的 bound 价值，但是否能转化为总时间收益，取决于 SRI-aware pricing 的常数开销、cut 数量控制和 ng-set/dominance 是否足够有效。

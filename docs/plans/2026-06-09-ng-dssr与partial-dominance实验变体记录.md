@@ -1100,3 +1100,88 @@ pricingOnly subtree 的语义更稳：它只让 pricing 和 completion-bound 在
 后续最明确的效率优化目标有三个。第一是 completion-bound/PWLF 合并：当前 `mergeMinimum()` 已有 no-change 快路径，但一旦需要合并仍会复制右函数并 normalize；40-2 当前主线日志显示 completion-bound build 累计仍约 39 秒，是 exact pricing 里的主要可控成本之一。下一步如果要继续做，应优先实现 completion-bound 专用的安全 destructive/right-consume merge 或 no-copy merge，而不是继续加粗粒度 delta hull。第二是 heuristic seed 选择：`HeuristicPricingEngine.collectSeedColumnsBySortedPrefix()` 每次 heuristic pricing 都会给当前 restricted columns 全量计算 reduced cost 并排序，heuristic 在 40-2 当前 run 中仍有 `105.163s/1170`，可以考虑在同一个 LP dual 下缓存 seed 排序，或用 bounded top-K 结构减少全排序成本。第三是 LP/RMIH 的列-约束构造：`TWETColumn.visitsArc()` 仍按序列线性扫描，LP 中构造 arc/adjacency/cut 行和增量加列时会重复调用；若以后 active branch/cut 增多，可在 `TWETColumn` 内缓存 arc bitset/adjacency key/SRI coefficient，避免反复扫序列。
 
 短期不建议优先动 hard subtree、SRI 或新的分支策略。当前证据显示 hard subtree 会让主问题继承列信息变少而变慢；SRI/lm-SRI 在 30/40 算例上提高 bound 的同时显著增加 label 和 dominance 状态复杂度，暂不适合作为默认提速方向。当前最稳的主线仍是 normal ng-DSSR nearestK8/top10、pricingOnly subtree、completionBound allCycles、midpoint probe/reuse、lazy duplicate replacement。
+
+118. 2026-06-17 heuristic seed 与 RMIH repair 后续优化判断
+
+继续拆解第 117 节的第二、第三个优化点后，当前判断是 heuristic seed 选择暂时不适合作为第一优先级。现在 heuristic pricing 的 seed 不是按正值列优先，而是对当前 `restrictedColumnIds` 在当前 LP dual 下计算 reduced cost，按 reduced cost 从小到大选前若干条兼容 seed。正值列只是在 reduced cost 排名靠前时自然进入，并没有单独前置。这样做的原因是 pricing 的目标是找负 reduced-cost 邻域起点，而不是复用当前基解；每次加列后 RMP 会重新求解，dual 也会变化，所以跨 LP 轮次缓存 seed 排序并不安全。可以做的低风险优化只是把全排序改成 bounded top-K，减少排序成本，但仍必须扫描当前 restricted columns 并计算 reduced cost；如果日志没有证明排序本身是大头，收益可能有限。
+
+RMIH repair 的删除 job 成本评估更适合做小改。当前 fallback repair 在判断“删哪个重复 job 损失最小”时，会反复调用 `TWETColumnEvaluator.evaluate()` 评估当前序列和删点后序列；后续真正加入 repair column 时还可能再次评估同一个新序列。这里可以改成 lazy cost cache：每条当前序列维护一个 current cost，原始未删时直接用 `TWETColumn.getCost()`，某一轮处理重复 job 时只对包含该 job 的当前列评估一次删点后序列，并把该 job 局部的 removed cost 暂存；真正删除后更新 current sequence 和 current cost，进入下一轮重复 job。这个改动不改变启发式选择规则，只减少重复 evaluator 调用。考虑到很多节点里重复 job 数量可能很少，不建议预先给所有列、所有可能删点做全量预处理；按重复 job 懒计算更稳。
+
+`TWETColumn` 的 arc/adjacency 缓存暂时不作为当前优化项。它可以把 `visitsArc()` 从线性扫描变成 O(1)，但会给大列池增加额外内存和构造成本。当前默认关闭 adjacency 分支，active branch/cut 数量通常不高，LP 构造中的线性扫描还不是已经被日志确认的大头。后续如果 active cut/branch 变多，或者 LP 构造耗时在 summary 中明显上升，再考虑用轻量 packed arc key 缓存，而不是现在就给所有列加 HashSet。
+
+119. 2026-06-17 completion-bound 专用 no-copy merge 试验结论
+
+按第 117 节的第一个优化方向，本轮只试了 completion-bound 专用的 destructive/right-consume merge。实现方式是在 `PiecewiseLinearFunction.mergeMinimum()` 外增加仅供临时候选函数使用的入口，让 completion-bound DP 在合并临时 candidate 时不再复制右函数 segment 链；公共 `mergeMinimum()` 仍保持复制右参数的安全语义，避免 dominance graph 或 label/envelope 缓存被物理拼接破坏。为了保证语义，`targetByJob[job]` 为空时直接接管 candidate，非空时只在 completion-bound 路径调用 right-consume；诊断 `diagnosticChangeSource` 开启时仍走旧 copy 口径，避免诊断需要读取候选函数时被破坏。
+
+验证上，focused `javac` 通过，20/30 根节点 smoke 均保持 `valid=true`。随后用隔离 worktree 在同一份 40-2 zero setup root-only 配置上做 A/B：旧 copy 口径为 `solve=82.048s, exact=24.686s`；right-consume 口径重跑为 `solve=94.167s, exact=27.237s`。两者列数、bound 和有效性一致，但 right-consume 没有稳定减少 completion-bound build 时间，部分轮次反而更慢。结合此前 merge timing 中 copy 本身占比很小的证据，当前判断是该优化点不是主瓶颈；省掉右参数复制不足以抵消链表接管后可能带来的局部性/JVM 分配行为变化。
+
+因此本轮不保留该代码改动，`PiecewiseLinearFunction` 和 `CompletionBoundCalculator` 已恢复到原 copy merge 语义。后续若继续优化 completion-bound，应优先沿着 no-change 快路径、减少 full merge 次数、降低 backward envelope 的有效段数和避免不必要 normalize 方向继续，而不是先做 destructive merge。
+
+120. 2026-06-17 当前效率优化阶段性判断
+
+结合前面几轮实验，当前主线已经没有明显“改一小处就稳定提速”的低风险优化点。debug/统计污染已经清理，duplicate signature 候选保留策略已经带来主要搜索树收益，completion-bound 的 no-change 快路径和段压缩已经有效；本轮试过 no-copy/right-consume merge 后确认 copy 不是当前主要瓶颈。继续在 PWLF merge 上做更激进的修改，风险会明显高于预期收益。
+
+剩余可能优化方向仍然存在，但都不是马上应动的项。heuristic seed 的 bounded top-K 可能减少排序成本，但还没有证据说明排序是大头；RMIH repair 的 lazy cost cache 只在重复 job 较多时可能有用；`TWETColumn` arc/adjacency 缓存需要 active branch/cut 足够多才划算；SRI/lm-SRI/arc-memory cut 能增强 bound，但在当前实现里会显著增加 pricing 状态和 label 压力，不适合作为默认提速方向。subtree hard-on 已经证明会破坏列继承信息，默认仍应使用 pricingOnly。
+
+因此当前建议先保持 normal ng-DSSR nearestK8/top10、completionBound allCycles、pricingOnly subtree、midpoint probe/reuse、lazy duplicate replacement 这条主线。后续如果继续优化，应先通过具体日志定位新的瓶颈，再做针对性修改；不要再凭直觉加入大改动。
+
+121. 2026-06-17 旧 VRP GCNGBB 的 ng-DSSR bound 更新机制
+
+旧 VRP 的 `BPC/GC/GCNGBB.java` 在每次 `Extend()` 开始时先构造四套松弛 completion bound：正向/反向时间 bound `m_ft_bound/m_bt_bound`，正向/反向容量 bound `m_fc_bound/m_bc_bound`，以及对应的 SRI 口径 `m_ftsr_bound/m_btsr_bound/m_fcsr_bound/m_bcsr_bound`。这些初始 bound 是不带 ng-memory 状态的松弛 DP，按 customer + 单资源索引记录最小 reduced cost，并通过 2-cycle-free 的 second-best 处理避免同一前驱/后继立即回退。
+
+随后每轮 DSSR 都会执行 `FWExtend()`、`UpdateFWBound()`、`BWExtend()`、`UpdateBWBound()`、`Join()`、`UpdateNGSet()`。`FWExtend/BWExtend` 用时间作为半域资源，正向只扩到 `T/2` 内，反向也只把队列继续扩展到 `T/2` 内；但保留下来的 label 同时带有时间、容量、成本、SRI 状态和 ng-memory。`UpdateFWBound/UpdateBWBound` 会按 terminal customer 扫描本轮保留下来的半域 label，把同一 terminal、同一时间或同一容量下的最小 label cost 写入临时数组，再用 `Math.max(oldBound, labelBound)` 抬高原松弛 bound，同时保持资源单调性。这里的“更新容量 bound”不是从时间 bound 推出来的，而是同一批半域 label 额外按容量维度投影得到的经验下界。
+
+该更新是安全的直觉在于：初始 bound 是 ng-relaxation 更松的下界；DSSR 更新后的 ng-set 只会更强，后续可行补全集合只会变小。对某个 terminal 和资源消耗，当前半域 labeling 已经在同样半域限制和当前 ng-set 下给出一批真实 label，下界不能低于这些 label 的最小可达成本。旧代码用 `max(oldBound, labelMin)` 抬高，因此只加强，不会降低。时间作为半域资源只决定 label 生成范围；容量 bound 的加强来自这些 label 的容量投影，所以不会要求容量本身也作为半域切分标准。
+
+旧实现是 node join：正向和反向在同一个 `cid` 汇合，join 时先把反向 label 中的汇合点 visit/memory 清掉，避免汇合点重复计数，然后检查 memory 冲突、容量、时间和 SRI 合并修正。bound 表不是“只存前半段供前半段用”，而是正向 label 更新正向 bound，反向 label 更新反向 bound；正向扩展时用反向 bound 剪未来 suffix，反向扩展时用正向 bound 剪未来 prefix。即使两边 label 都只扩到半域内，它们仍覆盖 node join 所需的两侧半路径成本信息，因此对剪枝有用。
+
+122. 2026-06-17 旧 VRP 半域更新 bound 与 arc fixing 的适用边界
+
+旧 VRP 中正向扩展比较的是新 label 在 customer `i` 完成服务后的时间：`lbtime + service_i <= max_time / 2`。其中 `lbtime` 是到达 `i` 后取 `early_i` 等待修正后的开始服务时间。反向扩展的 `lbtime` 不是正向时钟，而是从 sink 反推的 suffix 时间资源；代码先检查 `early_i + service_i + suffixTime <= sinkLate`，再用 `max(suffixTime, max_time - (late_i + service_i))` 把其转成可和半域比较的反向资源，入队时要求 `lb.m_time < max_time / 2`。因此两边比较的都是各自方向下“当前半路径占用的时间资源”，不是同一个正向完成时刻。
+
+`UpdateFWBound/UpdateBWBound` 中用半域 label 投影更新 capacity bound，只适合当前 bounded bidirectional pricing 的局部剪枝，不能直接拿去做全局 arc fixing。原因是更新后的 `m_fc_bound/m_bc_bound` 已不再是“只给定 capacity=d 时所有可行 prefix/suffix 的纯容量松弛最小成本”，而是被当前半域 labeling、当前 ng-set 和当前方向状态过滤后的经验下界。它通过 `max(oldBound,labelMin)` 抬高原松弛 bound，在半域 join 语义下剪 label 是安全的；但如果把这个被半域条件抬高过的 capacity bound 用到 `LB(arc) >= UB` 这类永久删弧判断，就可能把那些需要另一种时间切分、但容量相同的可行 route 排除掉，从而产生误删。
+
+因此旧 VRP 的更新 capacity bound 可以用于 `FWExtend/BWExtend` 内部的“当前 label + 另一半 bound 是否仍可能负 reduced cost”判断；若要做 arc fixing，只能使用未被半域 label 更新污染的全域松弛 bound，或重新构造显式覆盖所有时间切分情况的 arc-specific bound。不能把 `UpdateFWBound/UpdateBWBound` 后的 capacity 表直接当作全局 capacity 最小成本表。
+### 2026-06-18 旧 VRP GCNGBB 的半资源扩展停止口径
+
+复查旧 VRP `BPC/GC/GCNGBB.java` 后确认，它的 bounded bidirectional labeling 主要用时间资源做半域停止，不用 `capacity/2` 停止扩展。构造函数中 `max_time` 取 depot/sink 的 late time，`time_bound` 同样取该值，`capacity` 仍是车辆完整容量。
+
+forward 扩展时，候选 `i` 的 `lbtime` 表示到达并开始服务 `i` 的时间。代码先要求 `lbtime <= late_i`，再取 `max(lbtime, early_i)`，随后如果 `lbtime + service_i > max_time/2 + tolerance` 就直接丢弃该候选。因此 forward label 一旦保留下来，其服务完当前点的时间不会超过半时间域；旧代码里 `lb.m_time < max_time/2` 的入队判断已被注释掉，实际停止由候选构造阶段的半时间检查完成。
+
+backward 扩展不在候选构造时按 `max_time/2` 丢弃。它先检查把 `i` 接到当前 suffix 前面后是否仍能满足全局 sink late time，再把 `lbtime` 修正为满足 `i` 的 late time 的最小 suffix 时间。新 backward label 会先进入 dominance/table 逻辑；只有 `!BWIsDominate(lb, lp) && lb.m_time < max_time/2` 时才加入 `BWUL` 继续向前扩展。也就是说，`m_time >= max_time/2` 的 backward label 可以保留在 `BWTL` 里用于最终 node join，但不会继续扩展。
+
+容量资源在旧实现中没有“一半容量停止”逻辑。扩展时只计算 `lbweight = label.m_weight + demand_i`，并用 capacity bound 做 lower-bound 剪枝；join 时检查 `forwardWeight + backwardWeight - demand_shared <= vehicleCapacity`。每轮 DSSR 后的 `UpdateFWBound/UpdateBWBound` 会用半时间域内生成的 label 同时投影更新时间 bound 和 capacity bound，但这个 capacity bound 是 bounded pricing 内部的辅助剪枝，不代表用容量一半截断过 labeling。
+
+旧 VRP 的 bound 更新分两层。第一层是在 `Extend()` 开头重新按当前 dual 和当前 node 禁弧构造四套初始松弛 bound：`BoundFTExtend()`、`BoundBTExtend()`、`BoundFCExtend()`、`BoundBCExtend()`，分别表示从 source 正向到 customer 的时间/容量 bound，以及从 sink 反向到 customer 的时间/容量 bound。它们都是基于非 elementary 松弛 DP 递推得到的 lower bound，并用 `m_sec_bound/m_bd_fid` 保留第二小值以避免直接 2-cycle。构造后还做 prefix-min，使资源上限更松时 bound 不比更紧时差。SRI 版本的 `*_sr_bound` 初始复制普通 bound。
+
+第二层是在每轮 ng-DSSR labeling 后，用真实半域 label 反向抬高这些初始 bound。`UpdateFWBound()` 扫描所有 forward label table。对每个 terminal customer，把相同时间 `t` 下的最小 `m_nosr_redcost` 写入临时 `m_lbt_bound[t]`，把相同容量 `cap` 下的最小 `m_nosr_redcost` 写入 `m_lbc_bound[cap]`；带 SRI 的临时 bound 则用 `label.m_reduced_cost`。随后用 `Math.max(oldBound, labelDerivedBound)` 抬高 `m_ft_bound/m_fc_bound`，再用相邻资源上的 prefix-min 保持单调。`UpdateBWBound()` 对 backward label table 做同样操作，更新 `m_bt_bound/m_bc_bound`。因此这里不是重新求一次 DP，而是用已经生成的 bounded labels 给原来的 relaxed bound 加强。
+
+这种更新的语义是：半域 labeling 已经比初始松弛 DP 多考虑了 ng-memory、真实可达、dominance 后保留下来的状态和当前半时间限制。在同一个 bounded pricing 口径下，如果某个 `cid, resource` 的 label 最小 reduced cost 已经高于初始 bound，就可以把 bound 抬高到这个值；之后同轮或下一轮 DSSR 的扩展剪枝会更强。它不能被解释成全局最小补全成本，也不能直接拿来做全局 arc fixing，因为它受半时间域和当前 DSSR label 集合限制。
+
+这里还要注意 backward label 的 `m_time` 不是 job 的服务开始时间。sink label 初始 `m_time=0`；若把 job `i` 接到当前 suffix 的最前面，先计算 `lbtime = label.m_time + service(currentCid) + dist(i,currentCid)`，这表示从 `i` 服务完成后到 sink 还需要的尾部时间，当前 suffix 首点的服务时间在这一项里补上。随后检查 `early_i + service_i + lbtime <= sinkLate`，确保 `i` 即使最早开始也能接上该 suffix；再做 `lbtime = max(lbtime, max_time - (late_i + service_i))`，把 `i` 的 late time 约束折算成尾部时间下界。因此 backward 的 `m_time` 可以理解为“从当前 cid 服务完成之后，到 sink 至少还需要预留的后缀时间”，不含当前 cid 自身服务时间。final join 中用 `forward.m_time + backward.m_time + service(sharedCid) <= max_time`，正好对应 forward 到 sharedCid 的服务开始时间，加 sharedCid 服务时间，再加 backward suffix 的尾部时间。
+
+123. 2026-06-18 TWET 中基于半域 label 更新 completion bound 的可行性分析
+
+沿着旧 VRP 的思路，TWET 里也可以考虑在一次 exact pricing / DSSR 轮次结束后，用已经生成的正向、反向 label 来加强 completion bound。直观做法是：对每个 terminal job `i`，把所有到达 `i` 的 forward label frontier 取下包络，得到当前半域内从 source 到 `i` 的最小 reduced-cost 函数；反向也类似，对到达 `i` 的 backward label frontier 取下包络，表示从 `i` 到 sink 的 suffix 最小函数。这个 label-derived envelope 可以和现有 relaxed completion bound 做同语义函数的逐点 `max`，因为二者都是下界，取更大的下界只会增强剪枝。
+
+但是这个 bound 的适用范围必须限定得很窄。它依赖当前 `Tmid`、当前 pricing horizon、当前 dual、当前 node 禁弧、当前 ng-set 和当前 cut/SRI 状态；一旦 RMP 加列重解、cut 增加、DSSR 更新 ng-set 或 midpoint probe 换了 `Tmid`，上一轮 label envelope 就不能当成全局 completion bound 复用。更重要的是，它只能在“本轮 exact labeling 确实完整展开，没有被候选列上限、probe 截断或早停截断”的前提下用于证明性剪枝。否则这个 envelope 只是已有 label 的经验包络，不覆盖未生成状态，拿来 `max` 会把下界抬高到不安全的位置。
+
+这个思路和当前 `CompletionBoundCalculator` 的四类函数语义也必须严格对齐。当前代码里 `forwardFByJob/backwardBByJob` 更像完整 prefix/suffix 函数，而 `forwardUByJob/backwardRByJob` 是经过一步转换后用于另一侧 label 剪枝的函数。若要从 label envelope 往外沿可扩展边扩展一步，不能简单说“只平移、不加 job 惩罚”就一定安全；是否加入 `jobPenalty - dual` 取决于目标 bound 对象是否已经由另一侧 label 包含该 job。尤其 `jobPenalty - dual` 可能为负，漏加负项会抬高下界，可能误剪负列。因此实现时必须复用或抽出 `CompletionBoundCalculator` 里构造 `F/U/B/R` 的同一套 helper，先明确每个函数代表的是“到 job 后”“从 job 前”“是否含当前 job reduced penalty”，再做转换。
+
+用户提出的“一步扩展后和现有 completion bound 合并，避免每个 label 每条边都做 bound 比较”在计算上有吸引力。复杂度大致从每个 label 扫很多边，变成每轮 pricing 对每个 job 的 envelope 做一次合并，再按可扩展 arc 做至多 `O(n^2)` 次函数平移和 merge。40/60 任务下这可能划算。但要注意，构造这个增强 bound 本身需要 PWLF 的逐点 `max` 操作，而当前主要成熟的是 `mergeMinimum`；逐点 `max` 不是简单换符号，仍要处理定义域、交点和前/后缀单调化，不能把它混进现有 min-envelope 逻辑里。
+
+这个 label-derived bound 不应直接用于 permanent/pricingOnly arc fixing。arc fixing 要求的是“所有包含该 arc 的完整列 reduced cost 下界”都已超过 gap，而且这个下界不能依赖某个半域切分。半域 label envelope 受到 `Tmid` 影响，可能漏掉另一种 split 下可行且更便宜的列；即使在当前 pricing round 内安全，也不能推出该 arc 在整个 node 中永久无用。因此第一版最多用于当前 exact pricing 内部的 label 剪枝或下一轮同 `Tmid`、同 dual、同状态的 DSSR 剪枝；如果要用于 arc fixing，必须重新构造不依赖半域切分的 arc-specific full-domain bound。
+
+当前可行的实现路线应是实验开关而不是默认主线：先在 forward 完整展开后，用 forward label envelope 加强 backward 扩展会用到的 prefix bound；backward 完整展开后，再用 backward envelope 加强下一轮或 join 前的 suffix bound。所有更新都必须带上“本轮完整 labeling 已结束”的标记，且只在同一 pricing call 内有效。验证上应固定小算例对比开启/关闭该增强 bound 后的负 reduced-cost 列集合、最终 LP bound 和 validator；若出现剪枝导致列减少但 bound 改变，就说明语义越界。当前结论是：这个方向值得作为 completion-bound 的后续实验，但它不是无条件安全的全局 bound，也不能直接用于 UB-LB permanent arc fixing。
+
+进一步讨论后需要修正上一段中过于保守的表述：如果 label-derived bound 保留的是 PWLF 时间函数和真实定义域，而不是像旧 VRP capacity bound 那样把半域信息压成单个资源维度的 scalar 表，那么它有机会用于当前 node 的 reduced-cost arc fixing。关键条件是只能在当前 node 最后一轮 exact pricing closure 后使用，并且只在 label 完整覆盖的时间定义域上做逐点 `max` 加强；定义域外仍保留原来的 full-domain relaxed completion bound。这样对某条 arc `i->j` 做 `min_t F_i(t)+c_ij+B_j(t+delta)` 时，如果最优 `t` 落在未加强区域，就退回原 bound；如果落在加强区域，则该区域的 label envelope 必须已经是同一半域、同一 dual、同一 ng/cut 状态下所有可行 prefix/suffix 的下界。因此它不像旧 VRP 半域 capacity bound 那样天然不能用于 fixing。
+
+但这仍不是“任何时候都能用于 permanent fixing”。安全使用需要满足几条硬条件：第一，labeling 必须是最终 exact 轮次，没有 probe 截断、候选上限导致的状态截断，也没有尚未完成的 DSSR ng-set 更新；第二，`F/U/B/R` 的函数语义必须和现有 completion bound 完全一致，不能把是否包含 job reduced penalty、arc dual、SRI/cut dual 的口径弄混；第三，ng relaxation 下用于 fixing 的 bound 必须仍是 elementary feasible column 的松弛下界，不能因为 SRI memory 或 partial dominance 的状态丢失而抬高；第四，这个 fixing 只能针对当前 node 及其后代在当前 LP lower bound / current dual 证明下成立，不能跨 RMP 重解过程提前使用。满足这些条件时，用“原 full-domain relaxed bound + final label envelope 的定义域内加强”做当前 node 的 arc fixing，理论上可以成立；不满足时只能作为当前 pricing 内部剪枝。
+
+124. 2026-06-18 ng-DSSR 轮内 label-derived completion bound 更新实现
+
+本次先实现最基础的版本：每轮 ng-DSSR relaxed labeling 中，forward 队列耗尽后，用当前保留下来的 forward label 的 no-SRI frontier 按 terminal job 聚合成 envelope，再按现有 `forwardF/forwardU` 的 completion-bound 语义写回当前 bound；随后 backward 扩展可以直接使用这份加强后的 prefix bound。backward 队列耗尽后同理用 backward label 和 backward single-point label 聚合 envelope，并写回 `backwardB/backwardR`。写回方式是逐点 `max(oldBound, labelDerivedBound)`，即只抬高下界，不降低原 relaxed bound。
+
+实现时刻意没有接 arc fixing。原因是本轮 label-derived bound 依赖当前 `Tmid`、当前 dual、当前 ng-set、当前 cut/SRI 状态以及本轮 label 是否完整生成；它先只服务于当前 pricing round 的剪枝。为了防止污染 subtree/permanent arc fixing，代码在更新前会复制一份当前 completion bound；如果发生 label-derived 加强，`reusableSubtreeArcEliminationBounds()` 仍返回原始 relaxed completion bound，而不是增强后的 bound。SRI active 时也仍使用 no-SRI frontier 更新和剪枝，保持“completion bound 不维护 SRI 状态”的松弛口径。
+
+技术上没有改公共 `PiecewiseLinearFunction.mergeMinimum()`。由于这里需要的是逐点最大值，不能通过取负后调用 `mergeMinimum()` 简化，否则 forward/backward normalize 的方向语义会不等价。因此在 ng-DSSR 内部加了一个局部 `pointwiseMaxOnTargetDomain()`，只在现有 bound 的定义域内比较候选 label bound，避免改变全局 PWLF 语义。验证上，`javac` 单独编译 `GCNGBBStyleBidirectionalNgDssr.java` 通过；进一步编译 `src/Common`、`src/Basic`、`src/HEU`、`src/TWETBPC` 主线源码通过。全仓库编译仍被旧 `src/BPC` 包的历史 API 不兼容拦住，和本次改动无关。

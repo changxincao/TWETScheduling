@@ -26,6 +26,11 @@ public class TWETBPCConfig {
 	public int maxNodes = 1000;
 	/** 是否使用按论文 dominance graph 伪代码实现的精确定价器；关闭后可回退旧的全量扫描版做效率对比。 */
 	public boolean usePaperDominancePricing = true;
+	/**
+	 * 2026-06-20: 实验开关。打开后用 time-indexed DAG pseudo-schedule pricing 替换当前 exact pricing。
+	 * 该图定价允许重复 job，和当前 RMP 的 0/1 覆盖列口径不完全一致，只用于和函数占优 pricing 做对照。
+	 */
+	public boolean useTimeIndexedGraphPricing = false;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**

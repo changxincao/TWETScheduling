@@ -28,6 +28,7 @@ import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.PaperDominanceExactPricingEngine;
 import TWETBPC.GC.PricingEngine;
+import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.IO.HeuristicSeedProvider;
 import TWETBPC.LP.CutPool;
 import TWETBPC.LP.PC;
@@ -66,7 +67,9 @@ public class TWETBPCContext {
 		pricingEngines.add(new HeuristicPricingEngine(data, config));
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
-		if (config.enableBidirectionalPricing) {
+		if (config.useTimeIndexedGraphPricing) {
+			pricingEngines.add(new TimeIndexedGraphPricingEngine(data, config));
+		} else if (config.enableBidirectionalPricing) {
 			if (config.useGCBBAsymmetricBidirectionalPricing) {
 				pricingEngines.add(new GCBBAsymmetricBidirectionalPricingEngine(data, config));
 			} else if (config.useGCBBFullDomainNodeJoinBidirectionalPricing) {

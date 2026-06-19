@@ -1205,3 +1205,9 @@ backward 扩展不在候选构造时按 `max_time/2` 丢弃。它先检查把 `i
 从代码时机看，这个结果也合理。forward 队列耗尽后加强 `forwardU`，理论上只可能影响随后 backward 扩展；本次样本中没有观察到 backward label 或 pruning 变化。backward 队列耗尽后加强 `backwardR`，当前轮已经不会再回头扩展 forward，join 也不直接消费这套 `R` 剪枝，所以这部分 changed 在当前轮基本只是诊断信息。由于 `completionBoundsLabelEnhanced` 后不会把增强 bound 暴露给 subtree/permanent arc fixing，且下一次 RMP/pricing dual 变化后也不能跨轮复用，收益窗口本来就很窄。
 
 因此当前处理是：保留实现和系统属性，默认关闭。后续只有在定位到具体难节点、并且能证明 `forwardU` 更新显著减少 backward label 或 DSSR 同轮剪枝时，再考虑重新启用；否则它只是额外 PWLF envelope 聚合和逐点 max 成本。
+
+随后修正了一个实现层面的遗漏：从算法语义看，若同一个 pricing call 内存在多轮 DSSR，上一轮基于较松 ng-set 得到的 label-derived bound，应该可以作为下一轮加强 ng-set 后的合法下界继续使用。原实现为了避免污染 subtree/permanent arc fixing，在更新前把 `completionBounds` 从 `ngDssrReusableCompletionBounds` detach 出来，但没有把 detach 后的增强 bound 保存在本次 pricing call 内，导致下一轮 DSSR 又回到原始 base bound。这和旧 VRP 的“每轮 DSSR 后更新 bound，下一轮继续用”口径不一致。
+
+当前修正为维护两份引用：`ngDssrReusableCompletionBounds` 仍保存原始 relaxed base bound，只供 subtree/pricingOnly arc fixing 复用；`ngDssrEnhancedCompletionBounds` 保存本次 pricing call 内的 label-derived 增强 bound，下一轮 DSSR 初始化时优先使用它。这样如果开关打开，增强 bound 会跨 DSSR 轮生效，但仍不会暴露给 subtree/permanent arc fixing。
+
+修正后重跑 30 任务 `tmp-wet030_from040_010_2m` 根节点，开启更新得到 `solve=7.604s, exact=1.249s/3 calls, bound=14318`。第一轮 exact 有 `completionBoundLabelUpdate=26.320ms, fwChanged=30, bwChanged=320`；后两轮更新计数变为 `0/0`，说明增强 bound 已被下一轮继承。但三轮的 label 数、completion-bound pruned、scalar pruned 和生成列数仍与关闭更新一致。因此新的结论是：跨 DSSR 轮复用语义已修正，但当前样本仍没有显示实际剪枝收益，默认关闭的判断不变。

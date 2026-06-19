@@ -281,6 +281,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ArrayList<boolean[]> sriArcMemoryByCut;
 	private boolean limitedMemorySriPricing;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
+	private CompletionBoundCalculator.Bounds ngDssrEnhancedCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
 	private boolean ngDssrReusablePricingWindowPrecomputeReady;
 	private double ngDssrReusablePricingHorizon;
@@ -462,6 +463,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
 		ngDssrReusableCompletionBounds = null;
+		ngDssrEnhancedCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
 		ngDssrReusablePricingWindowPrecomputeReady = false;
 		ngDssrReusablePricingHorizon = Double.NaN;
@@ -738,9 +740,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundRelaxation = parseCompletionBoundRelaxation(config.bidirectionalCompletionBoundRelaxation);
 		completionBoundQueueOrdering = parseCompletionBoundQueueOrdering(
 				config.bidirectionalCompletionBoundQueueOrdering);
-		completionBounds = ngDssrReusableCompletionBounds;
+		completionBounds = ngDssrEnhancedCompletionBounds != null
+				? ngDssrEnhancedCompletionBounds : ngDssrReusableCompletionBounds;
 		completionBoundFixedArc = ngDssrReusableCompletionBoundFixedArc;
-		completionBoundsLabelEnhanced = false;
+		completionBoundsLabelEnhanced = completionBounds != null && completionBounds == ngDssrEnhancedCompletionBounds;
 		bestGeneratedReducedCost = Utility.big_M;
 		generatedColumns = new ArrayList<TWETColumn>();
 		if (config.diagnosticPricingSummaryDetails) {
@@ -3234,6 +3237,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		if (changed) {
 			completionBoundsLabelEnhanced = true;
+			ngDssrEnhancedCompletionBounds = completionBounds;
 			rebuildForwardCompletionBoundCaches();
 		}
 		completionBoundLabelUpdateNanos += System.nanoTime() - start;
@@ -3273,6 +3277,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		if (changed) {
 			completionBoundsLabelEnhanced = true;
+			ngDssrEnhancedCompletionBounds = completionBounds;
 			rebuildBackwardCompletionBoundCaches();
 		}
 		completionBoundLabelUpdateNanos += System.nanoTime() - start;

@@ -3215,10 +3215,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long start = System.nanoTime();
 		ensureCompletionBoundsDetachedForLabelUpdate();
 		PiecewiseLinearFunction[] envelope = aggregateForwardNoSriEnvelopeByJob();
+		PiecewiseLinearFunction[] candidateEnvelope = new PiecewiseLinearFunction[data.n + 1];
 		boolean changed = false;
 		for (int prevJob = 0; prevJob <= data.n; prevJob++) {
 			PiecewiseLinearFunction parent = envelope[prevJob];
-			if (!hasFunction(parent)) {
+			if (!hasPositiveDomainFunction(parent)) {
 				continue;
 			}
 			for (int job = 1; job <= data.n; job++) {
@@ -3229,10 +3230,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				if (candidate == null) {
 					continue;
 				}
-				if (strengthenCompletionBoundWithMax(completionBounds.forwardUByJob, job, candidate)) {
-					changed = true;
-					completionBoundLabelUpdateForwardChanged++;
-				}
+				mergeEnvelopeMinimum(candidateEnvelope, job, candidate, Direction.FORWARD);
+			}
+		}
+		for (int job = 1; job <= data.n; job++) {
+			PiecewiseLinearFunction candidate = candidateEnvelope[job];
+			if (strengthenCompletionBoundWithMax(completionBounds.forwardUByJob, job, candidate)) {
+				changed = true;
+				completionBoundLabelUpdateForwardChanged++;
 			}
 		}
 		if (changed) {
@@ -3254,10 +3259,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long start = System.nanoTime();
 		ensureCompletionBoundsDetachedForLabelUpdate();
 		PiecewiseLinearFunction[] envelope = aggregateBackwardNoSriEnvelopeByJob();
+		PiecewiseLinearFunction[] candidateEnvelope = new PiecewiseLinearFunction[data.n + 1];
 		boolean changed = false;
 		for (int successor = 1; successor <= data.n; successor++) {
 			PiecewiseLinearFunction successorBound = envelope[successor];
-			if (!hasFunction(successorBound)) {
+			if (!hasPositiveDomainFunction(successorBound)) {
 				continue;
 			}
 			for (int job = 1; job <= data.n; job++) {
@@ -3269,10 +3275,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				if (candidate == null) {
 					continue;
 				}
-				if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, candidate)) {
-					changed = true;
-					completionBoundLabelUpdateBackwardChanged++;
-				}
+				mergeEnvelopeMinimum(candidateEnvelope, job, candidate, Direction.BACKWARD);
+			}
+		}
+		for (int job = 1; job <= data.n; job++) {
+			PiecewiseLinearFunction candidate = candidateEnvelope[job];
+			if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, candidate)) {
+				changed = true;
+				completionBoundLabelUpdateBackwardChanged++;
 			}
 		}
 		if (changed) {

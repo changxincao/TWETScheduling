@@ -1193,3 +1193,15 @@ backward 扩展不在候选构造时按 `max_time/2` 丢弃。它先检查把 `i
 因此本次把 ng-DSSR 轮内更新收窄：forward 队列耗尽后只用 forward label envelope 沿一条可扩展弧生成 `U_j` 并逐点 `max` 加强 `forwardUByJob[j]`；backward 队列耗尽后只生成 `R_j` 并加强 `backwardRByJob[j]`。不再构造 `F_j/B_j`，不再为此复制 job penalty 函数，也不再重建 `forwardFMin/backwardBMin` cache。这样保留了当前剪枝需要的下界强化，同时减少无用 PWLF add/normalize/merge 和 cache 计算。若以后要在最终 exact closure 后做 label-derived arc fixing，再单独恢复并严格验证 `F/B` 口径，而不要和当前基础剪枝路径混在一起。
 
 随后进一步收窄 backward 更新口径：轮内 label-derived 更新只应来自本轮实际生成的普通 job label envelope，不能为了对称额外构造 `job -> sink` 的 sink 边界候选。`job -> sink` 已经属于 base completion bound 的边界初始化，sink 本身没有普通 label，也不参与 envelope 聚合。因此当前 backward 更新只遍历普通 `job -> successor` 弧，用 `B_successor` 往前推出 `R_job`；直接到 sink 的下界仍由原始 relaxed bound 保留，不在 label-derived 更新中重复维护。
+
+126. 2026-06-19 label-derived completion bound A/B 诊断
+
+继续对第 125 节的 U/R 轮内更新做小规模 A/B 后，当前结论偏负面：该更新确实会改变部分 completion-bound 函数，但在已经测试的根节点样本上没有转化为实际剪枝收益，反而增加了少量 exact pricing 时间。因此它暂时不适合作为默认主线，只保留为诊断开关 `ngDssrLabelDerivedCompletionBoundUpdate`。
+
+20 任务 `tmp-wet020_001_2m` 根节点，normal ng-DSSR nearestK8/top1、allCycles、heuristic/RMIH 打开时，关闭更新得到 `solve=1.402s, exact=0.168850s, fw/bw kept=39/24, completionBound fwPruned/bwPruned=487/354, scalar pruned=349`；开启更新后得到 `solve=1.464s, exact=0.180824s`，label、completion-bound pruned 和 scalar pruned 完全一致，只多出 `completionBoundLabelUpdate=7.825ms, fwChanged=20, bwChanged=121`。这说明函数被抬高了，但没有改变任何剪枝决策。
+
+30 任务 `tmp-wet030_from040_010_2m` 根节点同配置下，关闭更新得到 `solve=6.208s, exact=0.947s/3 calls, bound=14318`；开启更新得到 `solve=6.452s, exact=1.109s/3 calls, bound=14318`。三次 exact pricing 的 added columns、fw/bw kept、completion-bound pruned、scalar pruned 都与关闭更新一致；仅出现 `completionBoundLabelUpdate` 开销，三轮分别约 `17.840ms/4.883ms/2.667ms`，changed 计数分别约 `30/320`、`30/320`、`30/297`。
+
+从代码时机看，这个结果也合理。forward 队列耗尽后加强 `forwardU`，理论上只可能影响随后 backward 扩展；本次样本中没有观察到 backward label 或 pruning 变化。backward 队列耗尽后加强 `backwardR`，当前轮已经不会再回头扩展 forward，join 也不直接消费这套 `R` 剪枝，所以这部分 changed 在当前轮基本只是诊断信息。由于 `completionBoundsLabelEnhanced` 后不会把增强 bound 暴露给 subtree/permanent arc fixing，且下一次 RMP/pricing dual 变化后也不能跨轮复用，收益窗口本来就很窄。
+
+因此当前处理是：保留实现和系统属性，默认关闭。后续只有在定位到具体难节点、并且能证明 `forwardU` 更新显著减少 backward label 或 DSSR 同轮剪枝时，再考虑重新启用；否则它只是额外 PWLF envelope 聚合和逐点 max 成本。

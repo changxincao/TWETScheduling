@@ -65,6 +65,11 @@ public class TWETBPCConfig {
 	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
 	public int ngDssrNonElementaryRouteUpdateLimit = 1;
 	/**
+	 * 2026-06-19: ng-DSSR 每轮 relaxed labeling 后，是否用本轮 label envelope 加强当前 U/R
+	 * completion bound。A/B 暂未观察到实际剪枝收益，默认关闭；开启仅用于继续诊断该强化的收益和开销。
+	 */
+	public boolean ngDssrLabelDerivedCompletionBoundUpdate = false;
+	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。
 	 */

@@ -3206,7 +3206,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	 * pricing round，不写回 subtree/permanent arc fixing 可复用的基础 bound。
 	 */
 	private void updateCompletionBoundsFromForwardLabels(LP lp) {
-		if (completionBounds == null) {
+		if (completionBounds == null || !config.ngDssrLabelDerivedCompletionBoundUpdate) {
 			return;
 		}
 		long start = System.nanoTime();
@@ -3244,7 +3244,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	 * backward 的 Tmid 单点 label 只放在 single-point store 中，需额外纳入 envelope。
 	 */
 	private void updateCompletionBoundsFromBackwardLabels(LP lp) {
-		if (completionBounds == null) {
+		if (completionBounds == null || !config.ngDssrLabelDerivedCompletionBoundUpdate) {
 			return;
 		}
 		long start = System.nanoTime();

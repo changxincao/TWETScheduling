@@ -1211,3 +1211,13 @@ backward 扩展不在候选构造时按 `max_time/2` 丢弃。它先检查把 `i
 当前修正为维护两份引用：`ngDssrReusableCompletionBounds` 仍保存原始 relaxed base bound，只供 subtree/pricingOnly arc fixing 复用；`ngDssrEnhancedCompletionBounds` 保存本次 pricing call 内的 label-derived 增强 bound，下一轮 DSSR 初始化时优先使用它。这样如果开关打开，增强 bound 会跨 DSSR 轮生效，但仍不会暴露给 subtree/permanent arc fixing。
 
 修正后重跑 30 任务 `tmp-wet030_from040_010_2m` 根节点，开启更新得到 `solve=7.604s, exact=1.249s/3 calls, bound=14318`。第一轮 exact 有 `completionBoundLabelUpdate=26.320ms, fwChanged=30, bwChanged=320`；后两轮更新计数变为 `0/0`，说明增强 bound 已被下一轮继承。但三轮的 label 数、completion-bound pruned、scalar pruned 和生成列数仍与关闭更新一致。因此新的结论是：跨 DSSR 轮复用语义已修正，但当前样本仍没有显示实际剪枝收益，默认关闭的判断不变。
+
+127. 2026-06-19 当前 completion bound 更新和 arc fixing 使用口径澄清
+
+当前 ng-DSSR 内部存在两类 completion bound。第一类是 base bound，即 `buildCompletionBounds()` 用当前 LP dual、node 禁弧、pricing horizon 和 completion-bound relaxation 构造出来的全域松弛下界。这份 bound 写在 `ngDssrReusableCompletionBounds` 中，在同一次 pricing call 的 DSSR 多轮之间复用，也可以在满足条件时提供给 subtree/pricingOnly arc elimination。
+
+第二类是 label-derived enhanced bound，即开启 `ngDssrLabelDerivedCompletionBoundUpdate` 后，用本轮已经完整生成的 forward/backward label envelope 对 `forwardUByJob/backwardRByJob` 做逐点 `max` 抬高后的 bound。这份增强 bound 写在 `ngDssrEnhancedCompletionBounds` 中，只在同一个 pricing call 内跨 DSSR 轮复用。它服务于后续 DSSR 轮的 label 剪枝，不作为 subtree/permanent arc fixing 的依据。原因是它依赖当前 Tmid、当前 ng-set、当前 cut/SRI 状态和本次 label 是否完整展开，不能直接外溢成全局 arc fixing 证据。
+
+pricing 轮内的临时 completion-bound arc fixing 仍在 `buildCompletionBounds()` 后立即执行，使用的是当时的 `completionBounds.forwardFByJob/backwardBByJob` 和 scalar min cache。它比较的是“某条 arc 在当前 pricing 中是否还能出现在负 reduced-cost 列里”，cutoff 约为 0，因此只影响当前 exact pricing 的扩展；如果 `bidirectionalCompletionBoundArcFixing=true`，会把这些 arc 记到 `completionBoundFixedArc`，后续 `isPricingArcForbidden()` 在扩展时避开。这里没有使用 label-derived enhanced U/R，因为 label-derived 更新发生在 forward/backward labeling 之后。
+
+subtree/pricingOnly arc elimination 是另一层。`Tree/PC` 在 node 处理后调用 `getReusableSubtreeArcEliminationBounds()` 取得 prepared bounds，再用 incumbent 和 node lower bound 的 gap 做判断。ng-DSSR 的 `reusableSubtreeArcEliminationBounds()` 会检查：如果当前 `completionBoundsLabelEnhanced=true`，则返回 base bound `ngDssrReusableCompletionBounds`，而不是 enhanced bound；如果存在 dual profitable window、zero-dual excluded jobs 或 pricing horizon 不是 `data.CmaxH`，则直接返回 null。这样可以保证 subtree/pricingOnly arc elimination 不被半域 label-derived bound 污染。

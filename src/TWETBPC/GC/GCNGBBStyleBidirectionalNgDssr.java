@@ -3352,7 +3352,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return null;
 		}
 		double delay = data.getSetUp(prevJob, job) + data.getProcessT(job);
-		PiecewiseLinearFunction u = parentF.shiftX(delay);
+		// 2026-06-19: 本路径是在半域 label 已经生成后反推 completion-bound 下界。
+		// label frontier 的物理 segment 只覆盖半域，但这里做一跳平移时不应继续受半域
+		// metadata 裁剪；否则 shiftX() 会在平移后按 [0,Tmid] 或 [Tmid,T] 直接截掉
+		// 本该用于加强 full-horizon bound 的区间。这里只扩展临时函数 metadata，不填充
+		// 未知区间，最终 pointwise max 仍只在现有 bound 定义域和 candidate 实际覆盖区间上生效。
+		PiecewiseLinearFunction u = fullHorizonMetadataCopy(parentF).shiftX(delay);
 		if (!hasPositiveDomainFunction(u)) {
 			return null;
 		}
@@ -3367,13 +3372,19 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return null;
 		}
 		double delay = data.getSetUp(job, successor) + data.getProcessT(successor);
-		PiecewiseLinearFunction r = successorB.shiftX(-delay);
+		PiecewiseLinearFunction r = fullHorizonMetadataCopy(successorB).shiftX(-delay);
 		if (!hasPositiveDomainFunction(r)) {
 			return null;
 		}
 		r.shiftYInPlace(data.getSetupCost(job, successor) - lp.getArcDual(job, successor));
 		r.normalize(Direction.BACKWARD);
 		return hasPositiveDomainFunction(r) ? r : null;
+	}
+
+	private PiecewiseLinearFunction fullHorizonMetadataCopy(PiecewiseLinearFunction function) {
+		PiecewiseLinearFunction copy = function.copy();
+		copy.resetDomain(0.0, pricingHorizon);
+		return copy;
 	}
 
 	private PiecewiseLinearFunction constantCompletionFunction(double value) {

@@ -1,6 +1,7 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 import Basic.Data;
@@ -51,6 +52,7 @@ public class Node implements Comparable<Node> {
 	public ArrayList<Integer> activeCutIds;
 	private byte[][] arcState;
 	private boolean[][] pricingOnlyForbiddenArc;
+	private HashSet<Long> timeIndexedPricingOnlyForbiddenArc;
 	private byte[][] adjacencyPairState;
 	private byte[] tariffSegmentState;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
@@ -71,6 +73,7 @@ public class Node implements Comparable<Node> {
 		this.activeCutIds = new ArrayList<Integer>();
 		this.arcState = new byte[data.n + 2][data.n + 2];
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
+		this.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>();
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.repairType = REPAIR_NONE;
@@ -94,6 +97,7 @@ public class Node implements Comparable<Node> {
 		for (int i = 0; i < pricingOnlyForbiddenArc.length; i++) {
 			copy.pricingOnlyForbiddenArc[i] = pricingOnlyForbiddenArc[i].clone();
 		}
+		copy.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>(timeIndexedPricingOnlyForbiddenArc);
 		copy.adjacencyPairState = new byte[adjacencyPairState.length][];
 		for (int i = 0; i < adjacencyPairState.length; i++) {
 			copy.adjacencyPairState[i] = adjacencyPairState[i].clone();
@@ -155,6 +159,28 @@ public class Node implements Comparable<Node> {
 				&& to < pricingOnlyForbiddenArc[from].length && pricingOnlyForbiddenArc[from][to];
 	}
 
+	/**
+	 * 2026-06-20: time-indexed graph pricing 专用的 pricing-only 禁弧。
+	 * <p>
+	 * 论文 arc fixing 删除的是具体时间弧 (from,to,t)，不是普通 job-job arc。这里不写入 master
+	 * 分支状态，只让后续 graph pricing 避开这些 time-expanded arcs。
+	 */
+	public void forbidTimeIndexedPricingOnlyArc(int from, int to, int time) {
+		if (from < 0 || to < 0 || from >= data.n + 2 || to >= data.n + 2 || time < 0) {
+			return;
+		}
+		timeIndexedPricingOnlyForbiddenArc.add(Long.valueOf(timeIndexedArcKey(from, to, time)));
+	}
+
+	public boolean isTimeIndexedPricingOnlyArcForbidden(int from, int to, int time) {
+		return from >= 0 && to >= 0 && from < data.n + 2 && to < data.n + 2 && time >= 0
+				&& timeIndexedPricingOnlyForbiddenArc.contains(Long.valueOf(timeIndexedArcKey(from, to, time)));
+	}
+
+	public int countTimeIndexedPricingOnlyForbiddenArcs() {
+		return timeIndexedPricingOnlyForbiddenArc.size();
+	}
+
 	public int countRequiredArcStates() {
 		return countArcStates(ARC_REQUIRED);
 	}
@@ -199,6 +225,7 @@ public class Node implements Comparable<Node> {
 				+ maxMachineCount + "],seed=" + seedColumnIds.size() + ",cuts=" + activeCutIds.size()
 				+ ",arcReq=" + countRequiredArcStates() + ",arcForbid=" + countForbiddenArcStates()
 				+ ",pricingOnlyArc=" + countPricingOnlyForbiddenArcs()
+				+ ",timePricingOnlyArc=" + countTimeIndexedPricingOnlyForbiddenArcs()
 				+ ",adjReq=" + countRequiredAdjacencyPairs() + ",adjForbid=" + countForbiddenAdjacencyPairs()
 				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
 				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment;
@@ -432,6 +459,10 @@ public class Node implements Comparable<Node> {
 
 	private int normalizedPairSecond(int firstJob, int secondJob) {
 		return Math.max(firstJob, secondJob);
+	}
+
+	private long timeIndexedArcKey(int from, int to, int time) {
+		return (((long) from) << 48) ^ (((long) to) << 32) ^ (time & 0xffffffffL);
 	}
 
 	private int countTariffSegments(Data data) {

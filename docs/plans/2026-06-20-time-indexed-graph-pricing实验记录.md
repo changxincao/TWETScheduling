@@ -18,7 +18,7 @@
 
 若 `last=0`，再减去 `machineDual`。结束弧只扣 `arcDual(last,sink)`。forbidden arc、preprocessing forbidden arc、pricingOnly arc 都在处理弧或结束弧生成时跳过；required arc 仍通过 RMP 分支行和 dual 影响 reduced cost，不强制每条 pricing 路径包含该弧。
 
-Reduced-cost arc fixing 暂按 pricing 调用内部的 suffix shortest-path bound 做：先反向计算每个状态到 sink 的最短 reduced cost；若某次 forward 扩展或等待后 `prefix + arc + suffix >= 0`，则该状态不可能产生负 reduced-cost pseudo-path，直接剪掉。这不是写回 node 的永久 arc fixing，也不依赖 completion bound。
+当前 time-indexed graph pricing 本身只做完整单向 DAG DP，不在 pricing 内部额外叠加 completion bound 或 suffix-bound 剪枝。等待弧和处理弧只受硬时间窗、预处理/分支 forbidden arc、pricingOnly arc，以及后续 paper reduced-cost fixing 写入的 time-indexed pricing-only arc 过滤。
 
 返回列时使用 `TWETColumnEvaluator` 重算真实 TWET 成本，再以 `ColumnSource.PRICING_EXACT` 交给现有 Pool/RMP。候选列按 `SequenceSignature` 去重，同一序列只保留 reduced cost 更小的候选，最多返回 `maxExactPricingColumns` 条。
 
@@ -35,3 +35,11 @@ Reduced-cost arc fixing 暂按 pricing 调用内部的 suffix shortest-path boun
 `javac -encoding UTF-8 -cp target/classes;D:\软件\cplex\ILOG\CPLEX_Studio2211\cplex\lib\cplex.jar -d target/classes ...`
 
 编译通过。当前机器命令行没有 `mvn`，因此未运行 Maven 全量编译。后续需要在小算例上打开 `useTimeIndexedGraphPricing=true` 做运行对照，重点观察 `bestPseudoRC`、`repeatedJobCandidates`、返回列是否重复 job，以及 LP bound 是否出现明显语义偏差。
+
+## 5. 2026-06-20 修正：区分 paper arc fixing 和当前 completion-bound fixing
+
+上一版实现把 time-indexed graph pricing 内部的后向最短路当成 suffix bound，在 forward DP 扩展时用 `prefix + arc + suffix >= 0` 提前剪枝。这个做法虽然可作为 shortest-path 加速，但不是论文 Algorithm 7 的 reduced-cost arc fixing，也容易和当前项目的 completion-bound arc fixing 混在一起。因此已撤回该 pricing 内部剪枝。
+
+论文里的 arc fixing 现在单独放在节点 column generation 已闭合之后执行。它用当前节点 LP 下界 `LB` 和已有整数上界 `UB`，重新在 full-horizon time-expanded graph 上计算 forward shortest distance 和 backward shortest distance；对每条具体处理弧 `(from,to,t)` 计算穿过该弧的最小 reduced cost `cmin`，若 `cmin >= UB - LB`，则把该具体时间弧写入 node 的 time-indexed pricing-only 禁弧集合，供子节点的 graph pricing 避开。该 fixing 不使用当前 TWET 的 completion bound，也不调用 subtree arc elimination；在 `useTimeIndexedGraphPricing=true` 时，原 completion-bound subtree elimination 路径会跳过，避免两套 fixing 语义叠加。
+
+当前实现只固定处理弧 `(from,to,t)`，包括 source 到 job 的弧；暂不做论文里的 idle/sink arc 清理、顶点压缩和 `t*` 重算。这样先保证 no-cut graph pricing 和 paper reduced-cost arc fixing 的基本口径清楚，再决定是否补完整图压缩步骤。

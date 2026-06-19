@@ -15,6 +15,7 @@ import TWETBPC.BP.Brancher;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
+import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 
@@ -134,9 +135,12 @@ public class Tree {
 				continue;
 			}
 
-			heartbeat(node, "subtreeArcElimination.start");
-			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = evaluateSubtreeArcElimination(lp,
-					incumbentCost, solution.getObjectiveValue());
+			applyTimeIndexedGraphArcFixing(lp, incumbentCost);
+			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = null;
+			if (!config.useTimeIndexedGraphPricing) {
+				heartbeat(node, "subtreeArcElimination.start");
+				subtreeArcElimination = evaluateSubtreeArcElimination(lp, incumbentCost, solution.getObjectiveValue());
+			}
 
 			boolean branched = false;
 			heartbeat(node, "branch.start");
@@ -178,6 +182,18 @@ public class Tree {
 					result.getTotalNanos());
 		}
 		return result;
+	}
+
+	private void applyTimeIndexedGraphArcFixing(LP lp, double incumbentCost) {
+		if (!config.useTimeIndexedGraphPricing) {
+			return;
+		}
+		heartbeat(lp.getNode(), "timeIndexedArcFixing.start");
+		TimeIndexedGraphPricingEngine.ArcFixingResult result =
+				TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, config, lp, incumbentCost);
+		if (result.isAvailable()) {
+			heartbeat(lp.getNode(), "timeIndexedArcFixing.done " + result.summary());
+		}
 	}
 
 	private void heartbeat(Node node, String phase) {

@@ -105,7 +105,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
 	private CompletionBoundCalculator.Bounds completionBounds;
 	private boolean[][] completionBoundFixedArc;
-	private boolean completionBoundsLabelEnhanced;
 	private double bestGeneratedReducedCost;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
@@ -211,9 +210,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long completionBoundArcFixingFunctionEvaluations;
 	private long completionBoundArcFixingNanos;
 	private long completionBoundBuildNanos;
-	private long completionBoundLabelUpdateNanos;
-	private long completionBoundLabelUpdateForwardChanged;
-	private long completionBoundLabelUpdateBackwardChanged;
 	private long completionBoundForwardBuildNanos;
 	private long completionBoundBackwardBuildNanos;
 	private long completionBoundAggregateNanos;
@@ -281,7 +277,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ArrayList<boolean[]> sriArcMemoryByCut;
 	private boolean limitedMemorySriPricing;
 	private CompletionBoundCalculator.Bounds ngDssrReusableCompletionBounds;
-	private CompletionBoundCalculator.Bounds ngDssrEnhancedCompletionBounds;
 	private boolean[][] ngDssrReusableCompletionBoundFixedArc;
 	private boolean ngDssrReusablePricingWindowPrecomputeReady;
 	private double ngDssrReusablePricingHorizon;
@@ -463,7 +458,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
 		ngDssrReusableCompletionBounds = null;
-		ngDssrEnhancedCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
 		ngDssrReusablePricingWindowPrecomputeReady = false;
 		ngDssrReusablePricingHorizon = Double.NaN;
@@ -518,16 +512,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				forwardExtend(lp);
 			}
 			diagnosticHeartbeat(lp, "forward.done", true);
-			updateCompletionBoundsFromForwardLabels(lp);
 			diagnosticHeartbeat(lp, "backward.start", true);
 			while (canContinue() && !BWUL.isEmpty()) {
 				backwardExtend(lp);
 			}
 			diagnosticHeartbeat(lp, "backward.done", true);
-			updateCompletionBoundsFromBackwardLabels(lp);
-		} else {
-			updateCompletionBoundsFromForwardLabels(lp);
-			updateCompletionBoundsFromBackwardLabels(lp);
 		}
 		if (canContinue()) {
 			diagnosticHeartbeat(lp, "join.compact.start", true);
@@ -551,13 +540,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	CompletionBoundSubtreeArcEliminator.PreparedBounds reusableSubtreeArcEliminationBounds() {
-		CompletionBoundCalculator.Bounds reusableBounds = completionBoundsLabelEnhanced
-				? ngDssrReusableCompletionBounds : completionBounds;
-		if (reusableBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
+		if (completionBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
 				|| zeroDualExcludedJobs != null || !Utility.compareEq(pricingHorizon, data.CmaxH)) {
 			return null;
 		}
-		return new CompletionBoundSubtreeArcEliminator.PreparedBounds(reusableBounds, pricingHorizon,
+		return new CompletionBoundSubtreeArcEliminator.PreparedBounds(completionBounds, pricingHorizon,
 				completionBoundRelaxation, completionBoundQueueOrdering);
 	}
 
@@ -740,10 +727,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundRelaxation = parseCompletionBoundRelaxation(config.bidirectionalCompletionBoundRelaxation);
 		completionBoundQueueOrdering = parseCompletionBoundQueueOrdering(
 				config.bidirectionalCompletionBoundQueueOrdering);
-		completionBounds = ngDssrEnhancedCompletionBounds != null
-				? ngDssrEnhancedCompletionBounds : ngDssrReusableCompletionBounds;
+		completionBounds = ngDssrReusableCompletionBounds;
 		completionBoundFixedArc = ngDssrReusableCompletionBoundFixedArc;
-		completionBoundsLabelEnhanced = completionBounds != null && completionBounds == ngDssrEnhancedCompletionBounds;
 		bestGeneratedReducedCost = Utility.big_M;
 		generatedColumns = new ArrayList<TWETColumn>();
 		if (config.diagnosticPricingSummaryDetails) {
@@ -2657,9 +2642,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundArcFixingFunctionEvaluations = 0;
 		completionBoundArcFixingNanos = 0;
 		completionBoundBuildNanos = 0;
-		completionBoundLabelUpdateNanos = 0;
-		completionBoundLabelUpdateForwardChanged = 0;
-		completionBoundLabelUpdateBackwardChanged = 0;
 		completionBoundForwardBuildNanos = 0;
 		completionBoundBackwardBuildNanos = 0;
 		completionBoundAggregateNanos = 0;
@@ -2850,8 +2832,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
 				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
 				+ "/" + completionBackwardLabelsPruned
-				+ ", completionBoundLabelUpdate ms/fwChanged/bwChanged=" + formatMillis(completionBoundLabelUpdateNanos)
-				+ "/" + completionBoundLabelUpdateForwardChanged + "/" + completionBoundLabelUpdateBackwardChanged
 				+ ", completionBoundScalar check/pruned/fallback/unavailable=" + completionBoundScalarChecks
 				+ "/" + completionBoundScalarPruned + "/" + completionBoundScalarFunctionFallbacks
 				+ "/" + completionBoundScalarUnavailable
@@ -3200,344 +3180,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundBuildNanos += System.nanoTime() - start;
 		maybeDumpCompletionBoundMinDiagnostic(lp);
 		evaluateCompletionBoundArcFixing(lp);
-	}
-
-	/**
-	 * 2026-06-18: 模仿旧 VRP 的 DSSR 轮内 bound 更新。这里用本轮已经保留的 forward label
-	 * 的 no-SRI reduced-cost 函数只更新当前 U bound；SRI penalty 不进入该 bound，保持和现有
-	 * completion-bound 剪枝的“无 SRI 状态松弛”口径一致。该更新依赖当前 Tmid，因此只用于当前
-	 * pricing round，不写回 subtree/permanent arc fixing 可复用的基础 bound。
-	 */
-	private void updateCompletionBoundsFromForwardLabels(LP lp) {
-		if (completionBounds == null || !config.ngDssrLabelDerivedCompletionBoundUpdate) {
-			return;
-		}
-		long start = System.nanoTime();
-		ensureCompletionBoundsDetachedForLabelUpdate();
-		PiecewiseLinearFunction[] envelope = aggregateForwardNoSriEnvelopeByJob();
-		boolean changed = false;
-		for (int job = 1; job <= data.n; job++) {
-			PiecewiseLinearFunction candidate = finiteSupportOnly(envelope[job]);
-			if (strengthenCompletionBoundWithMax(completionBounds.forwardUByJob, job, candidate)) {
-				changed = true;
-				completionBoundLabelUpdateForwardChanged++;
-			}
-		}
-		if (changed) {
-			completionBoundsLabelEnhanced = true;
-			ngDssrEnhancedCompletionBounds = completionBounds;
-			rebuildForwardCompletionBoundCaches();
-		}
-		completionBoundLabelUpdateNanos += System.nanoTime() - start;
-	}
-
-	/**
-	 * 2026-06-18: 和 forward 对称，用当前轮 backward label envelope 只更新 R bound。
-	 * backward 的 Tmid 单点 label 只放在 single-point store 中，需额外纳入 envelope。
-	 */
-	private void updateCompletionBoundsFromBackwardLabels(LP lp) {
-		if (completionBounds == null || !config.ngDssrLabelDerivedCompletionBoundUpdate) {
-			return;
-		}
-		long start = System.nanoTime();
-		ensureCompletionBoundsDetachedForLabelUpdate();
-		PiecewiseLinearFunction[] envelope = aggregateBackwardNoSriEnvelopeByJob();
-		boolean changed = false;
-		for (int job = 1; job <= data.n; job++) {
-			PiecewiseLinearFunction candidate = finiteSupportOnly(envelope[job]);
-			if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, candidate)) {
-				changed = true;
-				completionBoundLabelUpdateBackwardChanged++;
-			}
-		}
-		if (changed) {
-			completionBoundsLabelEnhanced = true;
-			ngDssrEnhancedCompletionBounds = completionBounds;
-			rebuildBackwardCompletionBoundCaches();
-		}
-		completionBoundLabelUpdateNanos += System.nanoTime() - start;
-	}
-
-	private PiecewiseLinearFunction[] aggregateForwardNoSriEnvelopeByJob() {
-		PiecewiseLinearFunction[] envelope = new PiecewiseLinearFunction[data.n + 1];
-		for (int job = 0; job <= data.n; job++) {
-			ArrayList<ForwardLabel> labels = activeForwardByLastJob.get(job);
-			for (int i = 0; i < labels.size(); i++) {
-				ForwardLabel label = labels.get(i);
-				if (!label.isDominated) {
-					mergeEnvelopeMinimum(envelope, job, label.noSriFrontier, Direction.FORWARD);
-				}
-			}
-		}
-		return envelope;
-	}
-
-	private PiecewiseLinearFunction[] aggregateBackwardNoSriEnvelopeByJob() {
-		PiecewiseLinearFunction[] envelope = new PiecewiseLinearFunction[data.n + 1];
-		for (int job = 1; job <= data.n; job++) {
-			ArrayList<BackwardLabel> labels = activeBackwardByFirstJob.get(job);
-			for (int i = 0; i < labels.size(); i++) {
-				BackwardLabel label = labels.get(i);
-				if (!label.isDominated && !label.isSinkRoot) {
-					mergeEnvelopeMinimum(envelope, job, label.noSriFrontier, Direction.BACKWARD);
-				}
-			}
-			SinglePointStore<BackwardLabel> store = backwardSinglePointByFirstJob.get(job);
-			for (int c = 0; c < store.liveLabelsByCardinality.size(); c++) {
-				ArrayList<BackwardLabel> bucket = store.liveLabelsByCardinality.get(c);
-				if (bucket == null) {
-					continue;
-				}
-				for (int i = 0; i < bucket.size(); i++) {
-					BackwardLabel label = bucket.get(i);
-					if (!label.isDominated && !label.isSinkRoot) {
-						mergeEnvelopeMinimum(envelope, job, label.noSriFrontier, Direction.BACKWARD);
-					}
-				}
-			}
-		}
-		return envelope;
-	}
-
-	private void mergeEnvelopeMinimum(PiecewiseLinearFunction[] envelopeByJob, int job,
-			PiecewiseLinearFunction candidate, Direction direction) {
-		if (!hasPositiveDomainFunction(candidate)) {
-			return;
-		}
-		if (envelopeByJob[job] == null || envelopeByJob[job].head == null) {
-			envelopeByJob[job] = candidate.copy();
-			return;
-		}
-		envelopeByJob[job].mergeMinimum(candidate, direction, true);
-	}
-
-	private PiecewiseLinearFunction finiteSupportOnly(PiecewiseLinearFunction function) {
-		if (!hasFunction(function)) {
-			return null;
-		}
-		PiecewiseLinearFunction finite = new PiecewiseLinearFunction();
-		finite.resetDomain(0.0, pricingHorizon);
-		for (Segment segment = function.head; segment != null; segment = segment.next) {
-			if (!Utility.isBigMValue(segment.intercept) && Utility.compareLt(segment.start, segment.end)) {
-				finite.addSegment(segment.start, segment.end, segment.slope, segment.intercept);
-			}
-		}
-		return hasPositiveDomainFunction(finite) ? finite : null;
-	}
-
-	private PiecewiseLinearFunction constantCompletionFunction(double value) {
-		PiecewiseLinearFunction function = new PiecewiseLinearFunction();
-		function.resetDomain(0.0, pricingHorizon);
-		function.addSegment(0.0, pricingHorizon, 0.0, value);
-		return function;
-	}
-
-	private boolean strengthenCompletionBoundWithMax(PiecewiseLinearFunction[] targetByJob, int job,
-			PiecewiseLinearFunction candidate) {
-		if (!hasFunction(candidate)) {
-			return false;
-		}
-		PiecewiseLinearFunction current = targetByJob[job];
-		if (!hasFunction(current)) {
-			targetByJob[job] = candidate.copy();
-			return true;
-		}
-		PointwiseMaxResult result = pointwiseMaxOnTargetDomain(current, candidate);
-		if (result.changed) {
-			targetByJob[job] = result.function;
-			return true;
-		}
-		return false;
-	}
-
-	private void ensureCompletionBoundsDetachedForLabelUpdate() {
-		if (completionBounds == ngDssrReusableCompletionBounds && completionBounds != null) {
-			completionBounds = copyCompletionBounds(completionBounds);
-		}
-	}
-
-	private CompletionBoundCalculator.Bounds copyCompletionBounds(CompletionBoundCalculator.Bounds source) {
-		CompletionBoundCalculator.Bounds copy = new CompletionBoundCalculator.Bounds(data.n, pricingHorizon);
-		copyFunctionArray(copy.forwardUByJob, source.forwardUByJob);
-		copyFunctionArray(copy.backwardRByJob, source.backwardRByJob);
-		copyFunctionArray(copy.forwardFByJob, source.forwardFByJob);
-		copyFunctionArray(copy.backwardBByJob, source.backwardBByJob);
-		copyDiscreteArray(copy.forwardUBeforeByJob, source.forwardUBeforeByJob);
-		copyDiscreteArray(copy.backwardRAfterByJob, source.backwardRAfterByJob);
-		System.arraycopy(source.forwardUMinByJob, 0, copy.forwardUMinByJob, 0, source.forwardUMinByJob.length);
-		System.arraycopy(source.forwardFMinByJob, 0, copy.forwardFMinByJob, 0, source.forwardFMinByJob.length);
-		System.arraycopy(source.backwardBMinByJob, 0, copy.backwardBMinByJob, 0, source.backwardBMinByJob.length);
-		return copy;
-	}
-
-	private void copyFunctionArray(PiecewiseLinearFunction[] target, PiecewiseLinearFunction[] source) {
-		for (int i = 0; i < source.length; i++) {
-			if (source[i] != null && source[i].head != null) {
-				target[i] = source[i].copy();
-			}
-		}
-	}
-
-	private void copyDiscreteArray(double[][] target, double[][] source) {
-		for (int i = 0; i < source.length; i++) {
-			if (source[i] != null) {
-				target[i] = Arrays.copyOf(source[i], source[i].length);
-			}
-		}
-	}
-
-	private void rebuildForwardCompletionBoundCaches() {
-		for (int job = 1; job <= data.n; job++) {
-			completionBounds.forwardUMinByJob[job] = functionMin(completionBounds.forwardUByJob[job]);
-			completionBounds.forwardUBeforeByJob[job] = buildDiscreteCache(completionBounds.forwardUByJob[job]);
-		}
-	}
-
-	private void rebuildBackwardCompletionBoundCaches() {
-		for (int job = 1; job <= data.n; job++) {
-			completionBounds.backwardRAfterByJob[job] = buildDiscreteCache(completionBounds.backwardRByJob[job]);
-		}
-	}
-
-	private double functionMin(PiecewiseLinearFunction function) {
-		if (function == null || function.head == null) {
-			return Utility.big_M;
-		}
-		return function.findMinimal(false, true)[0];
-	}
-
-	private double[] buildDiscreteCache(PiecewiseLinearFunction function) {
-		if (!hasFunction(function)) {
-			return null;
-		}
-		double[] values = new double[completionBounds.maxDiscreteTime + 1];
-		Arrays.fill(values, Utility.big_M);
-		for (Segment segment = function.head; segment != null; segment = segment.next) {
-			int firstTime = Math.max(0, (int) Math.ceil(segment.start));
-			int lastTime = Math.min(completionBounds.maxDiscreteTime, (int) Math.floor(segment.end));
-			for (int time = firstTime; time <= lastTime; time++) {
-				if (!Utility.compareLt(time, segment.start) && !Utility.compareGt(time, segment.end)) {
-					values[time] = Math.min(values[time], segment.getValue(time));
-				}
-			}
-		}
-		return values;
-	}
-
-	private boolean hasFunction(PiecewiseLinearFunction function) {
-		return function != null && function.head != null && function.tail != null;
-	}
-
-	private boolean hasPositiveDomainFunction(PiecewiseLinearFunction function) {
-		return hasFunction(function) && Utility.compareLt(function.head.start, function.tail.end);
-	}
-
-	private PointwiseMaxResult pointwiseMaxOnTargetDomain(PiecewiseLinearFunction target,
-			PiecewiseLinearFunction candidate) {
-		PiecewiseLinearFunction result = new PiecewiseLinearFunction();
-		result.resetDomain(target.domainStart, target.domainEnd);
-		boolean changed = false;
-		Segment q = candidate.head;
-		for (Segment p = target.head; p != null; p = p.next) {
-			if (Utility.compareEq(p.start, p.end)) {
-				appendSegmentCopy(result, p.start, p.end, p.slope, p.intercept);
-				continue;
-			}
-			double cur = p.start;
-			while (q != null && !Utility.compareGt(q.end, cur)) {
-				q = q.next;
-			}
-			Segment scan = q;
-			while (scan != null && Utility.compareLt(scan.start, p.end)) {
-				if (Utility.compareLt(cur, scan.start)) {
-					double end = Math.min(scan.start, p.end);
-					appendSegmentCopy(result, cur, end, p.slope, p.intercept);
-					cur = end;
-					if (!Utility.compareLt(cur, p.end)) {
-						break;
-					}
-				}
-				double lo = Math.max(cur, scan.start);
-				double hi = Math.min(p.end, scan.end);
-				if (Utility.compareLt(lo, hi) || Utility.compareEq(lo, hi)) {
-					AppendMaxOutcome outcome = appendMaxSegment(result, lo, hi, p, scan);
-					changed = changed || outcome.changed;
-					cur = hi;
-				}
-				if (!Utility.compareLt(cur, p.end)) {
-					break;
-				}
-				if (!Utility.compareGt(scan.end, cur)) {
-					scan = scan.next;
-					if (scan == q && q != null && !Utility.compareGt(q.end, cur)) {
-						q = q.next;
-						scan = q;
-					}
-				} else {
-					break;
-				}
-			}
-			if (Utility.compareLt(cur, p.end)) {
-				appendSegmentCopy(result, cur, p.end, p.slope, p.intercept);
-			}
-		}
-		mergeAdjacentEqualSegments(result);
-		return new PointwiseMaxResult(result, changed);
-	}
-
-	private AppendMaxOutcome appendMaxSegment(PiecewiseLinearFunction result, double start, double end, Segment target,
-			Segment candidate) {
-		if (Utility.compareEq(start, end)) {
-			double targetValue = target.getValue(start);
-			double candidateValue = candidate.getValue(start);
-			if (Utility.compareGt(candidateValue, targetValue)) {
-				appendSegmentCopy(result, start, end, 0.0, candidateValue);
-				return new AppendMaxOutcome(true);
-			}
-			appendSegmentCopy(result, start, end, 0.0, targetValue);
-			return new AppendMaxOutcome(false);
-		}
-		double diffStart = candidate.getValue(start) - target.getValue(start);
-		double diffEnd = candidate.getValue(end) - target.getValue(end);
-		if (!Utility.compareGt(diffStart, 0.0) && !Utility.compareGt(diffEnd, 0.0)) {
-			appendSegmentCopy(result, start, end, target.slope, target.intercept);
-			return new AppendMaxOutcome(false);
-		}
-		if (!Utility.compareLt(diffStart, 0.0) && !Utility.compareLt(diffEnd, 0.0)) {
-			appendSegmentCopy(result, start, end, candidate.slope, candidate.intercept);
-			return new AppendMaxOutcome(Utility.compareGt(diffStart, 0.0) || Utility.compareGt(diffEnd, 0.0));
-		}
-		double slopeDiff = candidate.slope - target.slope;
-		if (Utility.compareEq(slopeDiff, 0.0)) {
-			appendSegmentCopy(result, start, end, target.slope, target.intercept);
-			return new AppendMaxOutcome(false);
-		}
-		double root = -(candidate.intercept - target.intercept) / slopeDiff;
-		root = Math.max(start, Math.min(end, root));
-		boolean changed = false;
-		if (Utility.compareLt(start, root)) {
-			changed = appendMaxByMidpoint(result, start, root, target, candidate) || changed;
-		}
-		if (Utility.compareLt(root, end)) {
-			changed = appendMaxByMidpoint(result, root, end, target, candidate) || changed;
-		}
-		return new AppendMaxOutcome(changed);
-	}
-
-	private boolean appendMaxByMidpoint(PiecewiseLinearFunction result, double start, double end, Segment target,
-			Segment candidate) {
-		double mid = (start + end) * 0.5;
-		if (Utility.compareGt(candidate.getValue(mid), target.getValue(mid))) {
-			appendSegmentCopy(result, start, end, candidate.slope, candidate.intercept);
-			return true;
-		}
-		appendSegmentCopy(result, start, end, target.slope, target.intercept);
-		return false;
-	}
-
-	private void appendSegmentCopy(PiecewiseLinearFunction target, double start, double end, double slope,
-			double intercept) {
-		target.addSegment(start, end, slope, intercept);
 	}
 
 	/**
@@ -5187,24 +4829,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private enum InsertStatus {
 		DOMINATED, STORED_NO_EXPAND, STORED_AND_ENQUEUE
-	}
-
-	private static final class PointwiseMaxResult {
-		final PiecewiseLinearFunction function;
-		final boolean changed;
-
-		PointwiseMaxResult(PiecewiseLinearFunction function, boolean changed) {
-			this.function = function;
-			this.changed = changed;
-		}
-	}
-
-	private static final class AppendMaxOutcome {
-		final boolean changed;
-
-		AppendMaxOutcome(boolean changed) {
-			this.changed = changed;
-		}
 	}
 
 	private static final class ColumnMidpointCandidate {

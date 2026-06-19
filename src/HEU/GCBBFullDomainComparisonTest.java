@@ -261,9 +261,6 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
 				config.ngDssrNonElementaryRouteUpdateLimit);
-		config.ngDssrLabelDerivedCompletionBoundUpdate = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.ngDssrLabelBoundUpdate",
-				Boolean.toString(config.ngDssrLabelDerivedCompletionBoundUpdate)));
 		config.enableSubsetRowCutsForPartialDominance = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableSubsetRowCutsForPartialDominance",
 				Boolean.toString(config.enableSubsetRowCutsForPartialDominance)));

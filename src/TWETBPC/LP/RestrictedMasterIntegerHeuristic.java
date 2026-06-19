@@ -143,6 +143,8 @@ public final class RestrictedMasterIntegerHeuristic {
 		IloCplex cplex = null;
 		try {
 			cplex = new IloCplex();
+			// 2026-06-19: 和 RMP LP 保持一致，RMIH 的 CPLEX MIP 也固定为单线程。
+			cplex.setParam(IloCplex.Param.Threads, 1);
 			if (config.diagnosticRestrictedIntegerMipLog) {
 				cplex.setOut(System.out);
 				cplex.setParam(IloCplex.Param.MIP.Display, 2);

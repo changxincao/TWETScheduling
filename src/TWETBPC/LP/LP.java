@@ -278,6 +278,8 @@ public class LP {
 			cplex.end();
 		}
 		cplex = new IloCplex();
+		// 2026-06-19: 为了实验可复现和评估 CPLEX 并行开销，主 RMP 固定为单线程。
+		cplex.setParam(IloCplex.Param.Threads, 1);
 		objective = null;
 		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
 		repairSlackVars = new ArrayList<IloNumVar>();

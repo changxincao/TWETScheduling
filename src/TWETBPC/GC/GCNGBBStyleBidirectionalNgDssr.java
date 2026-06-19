@@ -3201,9 +3201,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	/**
 	 * 2026-06-18: 模仿旧 VRP 的 DSSR 轮内 bound 更新。这里用本轮已经保留的 forward label
-	 * 的 no-SRI reduced-cost 函数更新当前 completion bound；SRI penalty 不进入该 bound，
-	 * 保持和现有 completion-bound 剪枝的“无 SRI 状态松弛”口径一致。该更新依赖当前 Tmid，
-	 * 因此只用于当前 pricing round，不写回 subtree/permanent arc fixing 可复用的基础 bound。
+	 * 的 no-SRI reduced-cost 函数只更新当前 U bound；SRI penalty 不进入该 bound，保持和现有
+	 * completion-bound 剪枝的“无 SRI 状态松弛”口径一致。该更新依赖当前 Tmid，因此只用于当前
+	 * pricing round，不写回 subtree/permanent arc fixing 可复用的基础 bound。
 	 */
 	private void updateCompletionBoundsFromForwardLabels(LP lp) {
 		if (completionBounds == null) {
@@ -3212,31 +3212,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long start = System.nanoTime();
 		ensureCompletionBoundsDetachedForLabelUpdate();
 		PiecewiseLinearFunction[] envelope = aggregateForwardNoSriEnvelopeByJob();
-		PiecewiseLinearFunction[] reducedPenalty = buildReducedCompletionPenalty(completionForwardPenaltyByJob, lp);
 		boolean changed = false;
 		for (int prevJob = 0; prevJob <= data.n; prevJob++) {
 			PiecewiseLinearFunction parent = envelope[prevJob];
 			if (!hasFunction(parent)) {
 				continue;
 			}
-			if (prevJob > 0 && strengthenCompletionBoundWithMax(completionBounds.forwardFByJob, prevJob, parent)) {
-				changed = true;
-				completionBoundLabelUpdateForwardChanged++;
-			}
 			for (int job = 1; job <= data.n; job++) {
 				if (job == prevJob || isZeroDualExcludedJob(job) || isPricingArcForbidden(lp.getNode(), prevJob, job)) {
 					continue;
 				}
-				BoundFunctionPair candidate = buildLabelDerivedForwardCandidate(parent, prevJob, job,
-						reducedPenalty[job], lp);
+				PiecewiseLinearFunction candidate = buildLabelDerivedForwardCandidate(parent, prevJob, job, lp);
 				if (candidate == null) {
 					continue;
 				}
-				if (strengthenCompletionBoundWithMax(completionBounds.forwardUByJob, job, candidate.first)) {
-					changed = true;
-					completionBoundLabelUpdateForwardChanged++;
-				}
-				if (strengthenCompletionBoundWithMax(completionBounds.forwardFByJob, job, candidate.second)) {
+				if (strengthenCompletionBoundWithMax(completionBounds.forwardUByJob, job, candidate)) {
 					changed = true;
 					completionBoundLabelUpdateForwardChanged++;
 				}
@@ -3250,7 +3240,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-18: 和 forward 对称，用当前轮 backward label envelope 更新 R/B bound。
+	 * 2026-06-18: 和 forward 对称，用当前轮 backward label envelope 只更新 R bound。
 	 * backward 的 Tmid 单点 label 只放在 single-point store 中，需额外纳入 envelope。
 	 */
 	private void updateCompletionBoundsFromBackwardLabels(LP lp) {
@@ -3260,19 +3250,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long start = System.nanoTime();
 		ensureCompletionBoundsDetachedForLabelUpdate();
 		PiecewiseLinearFunction[] envelope = aggregateBackwardNoSriEnvelopeByJob();
-		PiecewiseLinearFunction[] reducedPenalty = buildReducedCompletionPenalty(completionBackwardPenaltyByJob, lp);
 		boolean changed = false;
 		for (int job = 1; job <= data.n; job++) {
 			if (isZeroDualExcludedJob(job)) {
 				continue;
 			}
-			BoundFunctionPair sinkCandidate = buildLabelDerivedBackwardSinkCandidate(job, reducedPenalty[job], lp);
+			PiecewiseLinearFunction sinkCandidate = buildLabelDerivedBackwardSinkCandidate(job, lp);
 			if (sinkCandidate != null) {
-				if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, sinkCandidate.first)) {
-					changed = true;
-					completionBoundLabelUpdateBackwardChanged++;
-				}
-				if (strengthenCompletionBoundWithMax(completionBounds.backwardBByJob, job, sinkCandidate.second)) {
+				if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, sinkCandidate)) {
 					changed = true;
 					completionBoundLabelUpdateBackwardChanged++;
 				}
@@ -3283,25 +3268,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (!hasFunction(successorBound)) {
 				continue;
 			}
-			if (strengthenCompletionBoundWithMax(completionBounds.backwardBByJob, successor, successorBound)) {
-				changed = true;
-				completionBoundLabelUpdateBackwardChanged++;
-			}
 			for (int job = 1; job <= data.n; job++) {
 				if (job == successor || isZeroDualExcludedJob(job)
 						|| isPricingArcForbidden(lp.getNode(), job, successor)) {
 					continue;
 				}
-				BoundFunctionPair candidate = buildLabelDerivedBackwardCandidate(successorBound, job, successor,
-						reducedPenalty[job], lp);
+				PiecewiseLinearFunction candidate = buildLabelDerivedBackwardCandidate(successorBound, job, successor, lp);
 				if (candidate == null) {
 					continue;
 				}
-				if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, candidate.first)) {
-					changed = true;
-					completionBoundLabelUpdateBackwardChanged++;
-				}
-				if (strengthenCompletionBoundWithMax(completionBounds.backwardBByJob, job, candidate.second)) {
+				if (strengthenCompletionBoundWithMax(completionBounds.backwardRByJob, job, candidate)) {
 					changed = true;
 					completionBoundLabelUpdateBackwardChanged++;
 				}
@@ -3367,26 +3343,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		envelopeByJob[job].mergeMinimum(candidate, direction, true);
 	}
 
-	private PiecewiseLinearFunction[] buildReducedCompletionPenalty(PiecewiseLinearFunction[] penaltyByJob, LP lp) {
-		PiecewiseLinearFunction[] reducedByJob = new PiecewiseLinearFunction[data.n + 1];
-		if (penaltyByJob == null) {
-			return reducedByJob;
-		}
-		for (int job = 1; job <= data.n; job++) {
-			PiecewiseLinearFunction penalty = penaltyByJob[job];
-			if (penalty == null || penalty.head == null) {
-				continue;
-			}
-			PiecewiseLinearFunction reduced = penalty.copy();
-			reduced.shiftYInPlace(-lp.getJobDual(job));
-			reducedByJob[job] = reduced;
-		}
-		return reducedByJob;
-	}
-
-	private BoundFunctionPair buildLabelDerivedForwardCandidate(PiecewiseLinearFunction parentF, int prevJob, int job,
-			PiecewiseLinearFunction jobReducedPenalty, LP lp) {
-		if (!hasFunction(parentF) || !hasFunction(jobReducedPenalty)) {
+	private PiecewiseLinearFunction buildLabelDerivedForwardCandidate(PiecewiseLinearFunction parentF, int prevJob,
+			int job, LP lp) {
+		if (!hasFunction(parentF)) {
 			return null;
 		}
 		double delay = data.getSetUp(prevJob, job) + data.getProcessT(job);
@@ -3396,31 +3355,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		u.shiftYInPlace(data.getSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
 		u.normalize(Direction.FORWARD);
-		PiecewiseLinearFunction f = u.add(jobReducedPenalty);
-		if (!hasFunction(f)) {
-			return null;
-		}
-		f.normalize(Direction.FORWARD);
-		return hasFunction(f) ? new BoundFunctionPair(u, f) : null;
+		return hasFunction(u) ? u : null;
 	}
 
-	private BoundFunctionPair buildLabelDerivedBackwardSinkCandidate(int job, PiecewiseLinearFunction jobReducedPenalty,
-			LP lp) {
-		if (!hasFunction(jobReducedPenalty)) {
-			return null;
-		}
+	private PiecewiseLinearFunction buildLabelDerivedBackwardSinkCandidate(int job, LP lp) {
 		PiecewiseLinearFunction r = constantCompletionFunction(-lp.getArcDual(job, lp.getNode().sinkId()));
-		PiecewiseLinearFunction b = r.add(jobReducedPenalty);
-		if (!hasFunction(b)) {
-			return null;
-		}
-		b.normalize(Direction.BACKWARD);
-		return hasFunction(b) ? new BoundFunctionPair(r, b) : null;
+		return hasFunction(r) ? r : null;
 	}
 
-	private BoundFunctionPair buildLabelDerivedBackwardCandidate(PiecewiseLinearFunction successorB, int job,
-			int successor, PiecewiseLinearFunction jobReducedPenalty, LP lp) {
-		if (!hasFunction(successorB) || !hasFunction(jobReducedPenalty)) {
+	private PiecewiseLinearFunction buildLabelDerivedBackwardCandidate(PiecewiseLinearFunction successorB, int job,
+			int successor, LP lp) {
+		if (!hasFunction(successorB)) {
 			return null;
 		}
 		double delay = data.getSetUp(job, successor) + data.getProcessT(successor);
@@ -3430,12 +3375,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		r.shiftYInPlace(data.getSetupCost(job, successor) - lp.getArcDual(job, successor));
 		r.normalize(Direction.BACKWARD);
-		PiecewiseLinearFunction b = r.add(jobReducedPenalty);
-		if (!hasFunction(b)) {
-			return null;
-		}
-		b.normalize(Direction.BACKWARD);
-		return hasFunction(b) ? new BoundFunctionPair(r, b) : null;
+		return hasFunction(r) ? r : null;
 	}
 
 	private PiecewiseLinearFunction constantCompletionFunction(double value) {
@@ -3502,14 +3442,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void rebuildForwardCompletionBoundCaches() {
 		for (int job = 1; job <= data.n; job++) {
 			completionBounds.forwardUMinByJob[job] = functionMin(completionBounds.forwardUByJob[job]);
-			completionBounds.forwardFMinByJob[job] = functionMin(completionBounds.forwardFByJob[job]);
 			completionBounds.forwardUBeforeByJob[job] = buildDiscreteCache(completionBounds.forwardUByJob[job]);
 		}
 	}
 
 	private void rebuildBackwardCompletionBoundCaches() {
 		for (int job = 1; job <= data.n; job++) {
-			completionBounds.backwardBMinByJob[job] = functionMin(completionBounds.backwardBByJob[job]);
 			completionBounds.backwardRAfterByJob[job] = buildDiscreteCache(completionBounds.backwardRByJob[job]);
 		}
 	}
@@ -5298,16 +5236,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private enum InsertStatus {
 		DOMINATED, STORED_NO_EXPAND, STORED_AND_ENQUEUE
-	}
-
-	private static final class BoundFunctionPair {
-		final PiecewiseLinearFunction first;
-		final PiecewiseLinearFunction second;
-
-		BoundFunctionPair(PiecewiseLinearFunction first, PiecewiseLinearFunction second) {
-			this.first = first;
-			this.second = second;
-		}
 	}
 
 	private static final class PointwiseMaxResult {

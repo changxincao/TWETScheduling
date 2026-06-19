@@ -1185,3 +1185,9 @@ backward 扩展不在候选构造时按 `max_time/2` 丢弃。它先检查把 `i
 实现时刻意没有接 arc fixing。原因是本轮 label-derived bound 依赖当前 `Tmid`、当前 dual、当前 ng-set、当前 cut/SRI 状态以及本轮 label 是否完整生成；它先只服务于当前 pricing round 的剪枝。为了防止污染 subtree/permanent arc fixing，代码在更新前会复制一份当前 completion bound；如果发生 label-derived 加强，`reusableSubtreeArcEliminationBounds()` 仍返回原始 relaxed completion bound，而不是增强后的 bound。SRI active 时也仍使用 no-SRI frontier 更新和剪枝，保持“completion bound 不维护 SRI 状态”的松弛口径。
 
 技术上没有改公共 `PiecewiseLinearFunction.mergeMinimum()`。由于这里需要的是逐点最大值，不能通过取负后调用 `mergeMinimum()` 简化，否则 forward/backward normalize 的方向语义会不等价。因此在 ng-DSSR 内部加了一个局部 `pointwiseMaxOnTargetDomain()`，只在现有 bound 的定义域内比较候选 label bound，避免改变全局 PWLF 语义。验证上，`javac` 单独编译 `GCNGBBStyleBidirectionalNgDssr.java` 通过；进一步编译 `src/Common`、`src/Basic`、`src/HEU`、`src/TWETBPC` 主线源码通过。全仓库编译仍被旧 `src/BPC` 包的历史 API 不兼容拦住，和本次改动无关。
+
+125. 2026-06-19 ng-DSSR label-derived completion bound 更新收窄为 U/R
+
+复查第 124 节实现后确认，当前 label-derived bound 真正被 label 剪枝消费的只有 `forwardUByJob` 和 `backwardRByJob`。forward label 的 completion-bound 剪枝查 `backwardRByJob[label.jid]`，backward label 的剪枝查 `forwardUByJob[label.jid]`；对应 scalar cache 也是 `forwardUMin/forwardUBefore` 和 `backwardRAfter`。`forwardFByJob/backwardBByJob` 主要服务于 completion-bound arc fixing、subtree elimination 和 argmin 诊断，而当前实现刻意不把 label-enhanced bound 写回 reusable subtree bound，且 arc fixing 的评估发生在 label-derived 更新之前，因此轮内维护 `F/B` 基本不会影响实际剪枝。
+
+因此本次把 ng-DSSR 轮内更新收窄：forward 队列耗尽后只用 forward label envelope 沿一条可扩展弧生成 `U_j` 并逐点 `max` 加强 `forwardUByJob[j]`；backward 队列耗尽后只生成 `R_j` 并加强 `backwardRByJob[j]`。不再构造 `F_j/B_j`，不再为此复制 job penalty 函数，也不再重建 `forwardFMin/backwardBMin` cache。这样保留了当前剪枝需要的下界强化，同时减少无用 PWLF add/normalize/merge 和 cache 计算。若以后要在最终 exact closure 后做 label-derived arc fixing，再单独恢复并严格验证 `F/B` 口径，而不要和当前基础剪枝路径混在一起。

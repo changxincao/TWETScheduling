@@ -45,6 +45,8 @@ public class Node implements Comparable<Node> {
 	public static final byte REPAIR_TARIFF_REQUIRED = 6;
 	public static final byte REPAIR_ADJACENCY_FORBIDDEN = 7;
 	public static final byte REPAIR_ADJACENCY_REQUIRED = 8;
+	public static final byte REPAIR_OUTSOURCE_BASELINE_UPPER = 9;
+	public static final byte REPAIR_OUTSOURCE_BASELINE_LOWER = 10;
 
 	private final Data data;
 	public int id;
@@ -291,6 +293,16 @@ public class Node implements Comparable<Node> {
 		repairType = required ? REPAIR_TARIFF_REQUIRED : REPAIR_TARIFF_FORBIDDEN;
 		repairFrom = repairTo = -1;
 		repairSegment = segment;
+	}
+
+	public void markOutsourcingBaselineUpperRepair() {
+		repairType = REPAIR_OUTSOURCE_BASELINE_UPPER;
+		repairFrom = repairTo = repairSegment = -1;
+	}
+
+	public void markOutsourcingBaselineLowerRepair() {
+		repairType = REPAIR_OUTSOURCE_BASELINE_LOWER;
+		repairFrom = repairTo = repairSegment = -1;
 	}
 
 	public byte getRepairType() {

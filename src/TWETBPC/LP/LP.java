@@ -643,6 +643,12 @@ public class LP {
 				double coeff = type == Node.REPAIR_TARIFF_REQUIRED ? 1.0 : -1.0;
 				addRepairSlack(tariffBranchRanges[segment], coeff, "tariffBranchSlack_" + segment, penalty);
 			}
+		} else if (type == Node.REPAIR_OUTSOURCE_BASELINE_UPPER
+				|| type == Node.REPAIR_OUTSOURCE_BASELINE_LOWER) {
+			if (outsourcingBaselineRange != null) {
+				double coeff = type == Node.REPAIR_OUTSOURCE_BASELINE_LOWER ? 1.0 : -1.0;
+				addRepairSlack(outsourcingBaselineRange, coeff, "outsourcingBaselineSlack", penalty);
+			}
 		}
 	}
 

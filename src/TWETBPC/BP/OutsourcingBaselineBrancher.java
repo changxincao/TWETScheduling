@@ -43,6 +43,8 @@ public class OutsourcingBaselineBrancher implements Brancher {
 		left.pseudoCost = right.pseudoCost = solution.getObjectiveValue();
 		left.tightenOutsourcingBaselineUpperBound(split);
 		right.tightenOutsourcingBaselineLowerBound(split);
+		left.markOutsourcingBaselineUpperRepair();
+		right.markOutsourcingBaselineLowerRepair();
 		return new BranchResult(true, left, right,
 				"Branched on outsourcing baseline B at " + split + " (current=" + currentBaseline + ")");
 	}

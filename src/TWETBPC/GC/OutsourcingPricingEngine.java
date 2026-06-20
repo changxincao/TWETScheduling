@@ -22,6 +22,7 @@ import TWETBPC.Model.TWETOutsourcingColumn;
 public class OutsourcingPricingEngine implements PricingEngine {
 
 	private static final double REDUCED_COST_TOLERANCE = 1e-8;
+	private static final double BASELINE_TOLERANCE = 1e-8;
 
 	private final Data data;
 	private final TWETBPCConfig config;
@@ -62,7 +63,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 					next.add(included);
 				}
 			}
-			labels = prune(next);
+			labels = prune(next, baselineLowerBound);
 		}
 
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
@@ -115,17 +116,17 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		return "OutsourcingPricing";
 	}
 
-	private ArrayList<Label> prune(ArrayList<Label> labels) {
+	private ArrayList<Label> prune(ArrayList<Label> labels, double baselineLowerBound) {
 		ArrayList<Label> kept = new ArrayList<Label>();
 		for (Label label : labels) {
 			boolean dominated = false;
 			for (int i = 0; i < kept.size(); i++) {
 				Label existing = kept.get(i);
-				if (existing.dominates(label)) {
+				if (existing.dominates(label, baselineLowerBound)) {
 					dominated = true;
 					break;
 				}
-				if (label.dominates(existing)) {
+				if (label.dominates(existing, baselineLowerBound)) {
 					kept.remove(i);
 					i--;
 				}
@@ -160,8 +161,17 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			return new Label(nextJobs, baseline + baselineDelta, profit + profitDelta);
 		}
 
-		boolean dominates(Label other) {
-			return Utility.compareLe(baseline, other.baseline) && Utility.compareGe(profit, other.profit);
+		boolean dominates(Label other, double baselineLowerBound) {
+			if (!Utility.compareLe(baseline, other.baseline) || !Utility.compareGe(profit, other.profit)) {
+				return false;
+			}
+			// 2026-06-20: 有 baseline 下界时，“baseline 更小”不一定更好：
+			// 支配者若尚未达到下界，可能和同一 future subset 拼接后仍低于 L，
+			// 而被支配者可以达到 L。只有支配者已达到下界，或两者 baseline 相同，
+			// 才能保留原来的 upper-bound 单调支配语义。
+			return Utility.compareLe(baselineLowerBound, BASELINE_TOLERANCE)
+					|| Utility.compareGe(baseline, baselineLowerBound)
+					|| Utility.compareLe(Math.abs(baseline - other.baseline), BASELINE_TOLERANCE);
 		}
 	}
 

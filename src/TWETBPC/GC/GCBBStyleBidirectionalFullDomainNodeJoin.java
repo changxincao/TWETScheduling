@@ -1484,9 +1484,6 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
-		if (PricingCompatibility.containsRequiredOutsourcedJob(lp.getNode(), sequence)) {
-			return;
-		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature)) {
 			return;

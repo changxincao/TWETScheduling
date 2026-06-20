@@ -330,9 +330,6 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (sequence.isEmpty()) {
 				return;
 			}
-			if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
-				return;
-			}
 			if (hasRepeatedJob(sequence)) {
 				duplicateJobCandidates++;
 			}

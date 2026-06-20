@@ -908,9 +908,6 @@ public class GCBidirectional {
 		if (sequence.isEmpty() || generatedColumns.size() >= config.maxExactPricingColumns) {
 			return;
 		}
-		if (PricingCompatibility.containsRequiredOutsourcedJob(lp.getNode(), sequence)) {
-			return;
-		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature) || !generatedSignatures.add(signature)) {
 			return;

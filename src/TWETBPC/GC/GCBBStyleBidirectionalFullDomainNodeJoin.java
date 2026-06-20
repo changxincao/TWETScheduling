@@ -594,8 +594,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
-				&& !isPricingArcForbidden(node, label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -607,8 +606,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !PricingCompatibility.isRequiredOutsourcedJob(node, prevJob)
-				&& !isPricingArcForbidden(node, prevJob, successor);
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -1616,7 +1614,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			// 不再用 Tmid 裁掉第一次跨界的 job；Tmid 只在 child 生成后决定是否入队。
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
-			if (!visited.contains(job)
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
 					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -1630,7 +1628,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// 2026-05-29: 仍从父 reachableSet 过滤，保持单调收缩；但集合本身不再含 Tmid 裁剪。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job)
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
 					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
@@ -1643,7 +1641,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job)
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
 					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -1659,7 +1657,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		// child 生成后的 latestBackwardCompletion 判断，不写入 reachableSet。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job)
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
 					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}

@@ -252,8 +252,12 @@ public class PC {
 		}
 		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
 		traceSink.onPricingCall(lp.getNode(), name, result.isImproved(), addedColumns, result.getMessage(),
-				lp.getPool().size(), pricingNanos);
+				totalPoolSize(lp), pricingNanos);
 		return generated;
+	}
+
+	private int totalPoolSize(LP lp) {
+		return lp.getPool().size() + (lp.isColumnizedOutsourcing() ? lp.getOutsourcingPool().size() : 0);
 	}
 
 	private TWETMasterSolution solveRelaxationTimed(LP lp, String phase) {

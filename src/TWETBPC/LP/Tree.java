@@ -71,7 +71,7 @@ public class Tree {
 		while (!queue.isEmpty() && processedNodes < config.maxNodes) {
 			Node node = queue.poll();
 			node.id = ++processedNodes;
-			traceSink.onNodePicked(node, queue.size(), pool.size(), cutPool.size());
+			traceSink.onNodePicked(node, queue.size(), totalPoolSize(), cutPool.size());
 			heartbeat(node, "node.pick " + node.diagnosticSummary());
 
 			// 2026-05-19: 对齐旧 VRP 的 sudo_cost 预剪枝。root 的 pseudoCost 是占位大数，不能用来剪；
@@ -126,7 +126,7 @@ public class Tree {
 			}
 
 			traceSink.onMasterSolved(node, solution, lp.getRestrictedColumnIds().size(), lp.getActiveCutIds().size(),
-					bestBound, incumbentCost, queue.size(), pool.size(), cutPool.size(), incumbentUpdated);
+					bestBound, incumbentCost, queue.size(), totalPoolSize(), cutPool.size(), incumbentUpdated);
 
 			if (lpIntegerIncumbentUpdated) {
 				traceSink.onNodeClosed(node, "integer_incumbent", queue.size());
@@ -167,9 +167,13 @@ public class Tree {
 
 		bestBound = finalBound(queue, incumbentCost, bestBound);
 		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty());
-		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, pool.size(), incumbentColumnIds,
+		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, totalPoolSize(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and configured pricing engines; advanced cuts/pricing remain pending");
+	}
+
+	private int totalPoolSize() {
+		return pool.size() + (config.useColumnizedOutsourcing() ? outsourcingPool.size() : 0);
 	}
 
 	private CompletionBoundSubtreeArcEliminator.Result evaluateSubtreeArcElimination(LP lp, double incumbentCost,
@@ -205,7 +209,7 @@ public class Tree {
 		}
 		String nodeId = node == null ? "-" : Integer.toString(node.id);
 		System.out.println("[BPC heartbeat] node=" + nodeId + " phase=" + phase
-				+ " pool=" + pool.size() + " cuts=" + cutPool.size());
+				+ " pool=" + totalPoolSize() + " cuts=" + cutPool.size());
 		System.out.flush();
 	}
 

@@ -49,7 +49,7 @@ public final class BPCResultWriter {
 			writer.write("未能继续分支而关闭的节点数：" + trace.getClosedWithoutBranchCount() + "\n\n");
 			writer.write("初始列数：" + trace.getInitialColumnCount() + "\n\n");
 			writer.write("初始 incumbent 列数：" + trace.getInitialIncumbentColumnCount() + "\n\n");
-			writer.write("全局列池大小：" + context.pool.size() + "\n\n");
+			writer.write("全局列池大小：" + totalPoolSize(context) + "\n\n");
 			writer.write("全局 cut 池大小：" + context.cutPool.size() + "\n\n");
 			writer.write("最终 incumbent 列数：" + result.getIncumbentColumnIds().size() + "\n\n");
 			writer.write("pricing 调用次数：" + trace.getPricingRounds() + "\n\n");
@@ -207,6 +207,11 @@ public final class BPCResultWriter {
 			}
 		}
 		return baseline;
+	}
+
+	private static int totalPoolSize(TWETBPCContext context) {
+		return context.pool.size()
+				+ (context.config.useColumnizedOutsourcing() ? context.outsourcingPool.size() : 0);
 	}
 
 }

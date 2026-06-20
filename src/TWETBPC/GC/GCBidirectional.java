@@ -356,8 +356,7 @@ public class GCBidirectional {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
-				&& !isPricingArcForbidden(node, label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -368,8 +367,7 @@ public class GCBidirectional {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !PricingCompatibility.isRequiredOutsourcedJob(node, prevJob)
-				&& !isPricingArcForbidden(node, prevJob, successor);
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -1022,7 +1020,8 @@ public class GCBidirectional {
 			// 2026-05-24: dominance reachable-set 只放“永久不可达”信息。
 			// forbidden arc 只禁止当前 direct arc，不代表该 job 后续不能通过其他前驱访问，
 			// 因此不能进入 dominance key；实际扩展仍在 canExtendForward 中单独检查 forbidden arc。
-			if (!visited.contains(job) && isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1035,7 +1034,8 @@ public class GCBidirectional {
 		// 2026-05-24: 三角不等式下可达性随路径扩展单调收缩，child 不需要重新扫描 1..n。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					&& isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -1047,7 +1047,7 @@ public class GCBidirectional {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job)
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
 					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}
@@ -1063,7 +1063,7 @@ public class GCBidirectional {
 		// 在中间再插入一个真实 job 后不会重新可达。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job)
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
 					&& isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job)) {
 				reachable.add(job);
 			}

@@ -205,8 +205,7 @@ public class GC {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
-				&& !isPricingArcForbidden(node, label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -395,7 +394,8 @@ public class GC {
 			LP lp) {
 		PackedBitSet reachable = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					&& isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}
@@ -409,7 +409,8 @@ public class GC {
 		// 继续追加真实 job 后不会重新变成可达。child reachable set 因此只需从父候选集中过滤。
 		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = parent.reachableSet.nextSetBit(job + 1)) {
-			if (!visited.contains(job) && isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (!visited.contains(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					&& isDirectExtensionTimeFeasible(frontier, fromJob, job)) {
 				reachable.add(job);
 			}
 		}

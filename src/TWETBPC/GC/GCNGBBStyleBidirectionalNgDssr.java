@@ -1134,7 +1134,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
 		PackedBitSet sourceNgMemory = new PackedBitSet(data.n + 2);
-		PackedBitSet sourceDominanceSet = buildForwardDominanceSet(0, sourceNgMemory, sourceFrontier);
+		PackedBitSet sourceDominanceSet = buildForwardDominanceSet(0, sourceNgMemory, lp.getNode(), sourceFrontier);
 		PackedBitSet sourceExtensionSet = buildForwardExtensionSet(sourceDominanceSet, 0, sourceFrontier);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
 				sourceDominanceSet, sourceExtensionSet, sourceNgMemory, sourceFrontier, sourceFrontier.copy(),
@@ -1898,16 +1898,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-06-10: 调用方只枚举 extensionSet；它已经排除 ng-memory 和时间半域不可达点。
 		// 真实 visited 不用于 ng-relaxation 扩展过滤，重复任务在恢复 route 后交给 DSSR 处理。
 		// 直连禁弧依赖当前 node/pricingOnly 状态，仍在扩展点即时检查。
-		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
-				&& !isPricingArcForbidden(node, label.jid, nextJob);
+		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
 		// 2026-06-10: backward 同样只枚举 extensionSet；真实重复由 DSSR route 恢复后处理。
 		// 这里即时检查 prevJob -> successor 直连弧，避免 pricingOnly/分支禁弧绕过扩展过滤。
-		return !PricingCompatibility.isRequiredOutsourcedJob(node, prevJob)
-				&& !isPricingArcForbidden(node, prevJob, successor);
+		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private int previousForwardJob(ForwardLabel label) {
@@ -1966,7 +1964,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet visited = label.visitedSet.copy();
 		visited.add(nextJob);
 		PackedBitSet childNgMemory = updateNgMemory(label.ngMemorySet, nextJob);
-		PackedBitSet childDominanceSet = buildForwardDominanceSet(nextJob, childNgMemory, nextFrontier);
+		PackedBitSet childDominanceSet = buildForwardDominanceSet(nextJob, childNgMemory, lp.getNode(), nextFrontier);
 		PackedBitSet childExtensionSet = buildForwardExtensionSet(childDominanceSet, nextJob, nextFrontier);
 		return new ForwardLabel(nextLabelId++, nextJob, label, visited, childDominanceSet, childExtensionSet,
 				childNgMemory, nextFrontier, nextNoSriFrontier, childSriCounts, childSriPenalty);
@@ -3788,10 +3786,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return memory;
 	}
 
-	private PackedBitSet buildForwardDominanceSet(int fromJob, PackedBitSet ngMemory, PiecewiseLinearFunction frontier) {
+	private PackedBitSet buildForwardDominanceSet(int fromJob, PackedBitSet ngMemory, Node node,
+			PiecewiseLinearFunction frontier) {
 		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
 		for (int job = 1; job <= data.n; job++) {
-			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
+			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					|| ngMemory.contains(job)
 					|| !isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job);
 			if (!unavailable) {
 				dominanceSet.add(job);
@@ -3817,7 +3817,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
 		for (int job = 1; job <= data.n; job++) {
-			boolean unavailable = isZeroDualExcludedJob(job) || ngMemory.contains(job)
+			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					|| ngMemory.contains(job)
 					|| !isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job);
 			if (!unavailable) {
 				dominanceSet.add(job);

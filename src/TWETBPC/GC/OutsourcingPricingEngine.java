@@ -37,6 +37,8 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("Outsourcing column pricing disabled");
 		}
 		Node node = lp.getNode();
+		double baselineLowerBound = node.getOutsourcingBaselineLowerBound();
+		double baselineUpperBound = node.getOutsourcingBaselineUpperBound();
 		ArrayList<Label> labels = new ArrayList<Label>();
 		labels.add(new Label());
 		for (int job = 1; job <= data.n; job++) {
@@ -55,7 +57,10 @@ public class OutsourcingPricingEngine implements PricingEngine {
 				next.addAll(labels);
 			}
 			for (Label label : labels) {
-				next.add(label.include(job, data.outsourcingCost[job], lp.getJobDual(job)));
+				Label included = label.include(job, data.outsourcingCost[job], lp.getJobDual(job));
+				if (Utility.compareLe(included.baseline, baselineUpperBound)) {
+					next.add(included);
+				}
 			}
 			labels = prune(next);
 		}
@@ -65,11 +70,16 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			if (label.jobs.isEmpty()) {
 				continue;
 			}
+			if (Utility.compareLt(label.baseline, baselineLowerBound)
+					|| Utility.compareGt(label.baseline, baselineUpperBound)) {
+				continue;
+			}
 			double cost = data.evaluateOutsourcingCost(label.baseline);
 			if (Utility.isBigMValue(cost)) {
 				continue;
 			}
-			double reducedCost = cost - label.profit - lp.getOutsourcingColumnDual();
+			double reducedCost = cost - label.profit - lp.getOutsourcingColumnDual()
+					- lp.getOutsourcingBaselineDual() * label.baseline;
 			if (Utility.compareLt(reducedCost, -REDUCED_COST_TOLERANCE)) {
 				candidates.add(new Candidate(label.jobs, label.baseline, cost, reducedCost));
 			}

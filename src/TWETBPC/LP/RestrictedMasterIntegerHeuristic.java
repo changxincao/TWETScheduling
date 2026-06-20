@@ -173,10 +173,17 @@ public final class RestrictedMasterIntegerHeuristic {
 			}
 			cplex.addRange(0.0, machine, data.m, "rmih_machineCount");
 			IloLinearNumExpr outsourcingCount = cplex.linearNumExpr();
+			IloLinearNumExpr outsourcingBaseline = cplex.linearNumExpr();
 			for (IloIntVar var : w) {
 				outsourcingCount.addTerm(1.0, var);
 			}
+			for (int i = 0; i < outsourcingIds.size(); i++) {
+				TWETOutsourcingColumn column = lp.getOutsourcingPool().getColumn(outsourcingIds.get(i).intValue());
+				outsourcingBaseline.addTerm(column.getBaseline(), w[i]);
+			}
 			cplex.addLe(outsourcingCount, 1.0, "rmih_outsourcingColumnCount");
+			cplex.addRange(lp.getNode().getOutsourcingBaselineLowerBound(), outsourcingBaseline,
+					lp.getNode().getOutsourcingBaselineUpperBound(), "rmih_outsourcingBaseline");
 			if (!cplex.solve()) {
 				return Attempt.notSolved(label, cplex.getStatus().toString());
 			}

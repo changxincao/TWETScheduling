@@ -10,6 +10,7 @@ import Output.BPCTraceSink;
 import Output.BPCTraceSummary;
 import TWETBPC.BP.ArcBrancher;
 import TWETBPC.BP.Brancher;
+import TWETBPC.BP.OutsourcingBaselineBrancher;
 import TWETBPC.BP.OutsourcingMembershipBrancher;
 import TWETBPC.BP.UndirectedAdjacencyBrancher;
 import TWETBPC.CUT.CutGenerator;
@@ -134,6 +135,7 @@ public class TWETBPCContext {
 				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
 			}
 			branchers.add(new ArcBrancher(config.branchingTolerance));
+			branchers.add(new OutsourcingBaselineBrancher(config.branchingTolerance));
 			branchers.add(new OutsourcingMembershipBrancher(config.branchingTolerance));
 		} else {
 			branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));

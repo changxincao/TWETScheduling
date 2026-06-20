@@ -62,6 +62,8 @@ public class Node implements Comparable<Node> {
 	private byte[][] adjacencyPairState;
 	private byte[] tariffSegmentState;
 	private byte[] outsourcingJobState;
+	private double outsourcingBaselineLowerBound;
+	private double outsourcingBaselineUpperBound;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
 	private int repairFrom;
@@ -85,6 +87,8 @@ public class Node implements Comparable<Node> {
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.outsourcingJobState = new byte[data.n + 1];
+		this.outsourcingBaselineLowerBound = 0.0;
+		this.outsourcingBaselineUpperBound = outsourcingBaselineDomainEnd(data);
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
 		this.repairTo = -1;
@@ -114,6 +118,8 @@ public class Node implements Comparable<Node> {
 		}
 		copy.tariffSegmentState = tariffSegmentState.clone();
 		copy.outsourcingJobState = outsourcingJobState.clone();
+		copy.outsourcingBaselineLowerBound = outsourcingBaselineLowerBound;
+		copy.outsourcingBaselineUpperBound = outsourcingBaselineUpperBound;
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
 		copy.repairTo = repairTo;
@@ -241,6 +247,7 @@ public class Node implements Comparable<Node> {
 				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
 				+ ",outReq=" + countOutsourcingJobStates(OUTSOURCE_REQUIRED)
 				+ ",outForbid=" + countOutsourcingJobStates(OUTSOURCE_FORBIDDEN)
+				+ ",outBase=[" + outsourcingBaselineLowerBound + "," + outsourcingBaselineUpperBound + "]"
 				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment;
 	}
 
@@ -346,6 +353,22 @@ public class Node implements Comparable<Node> {
 			}
 		}
 		return jobs;
+	}
+
+	public double getOutsourcingBaselineLowerBound() {
+		return outsourcingBaselineLowerBound;
+	}
+
+	public double getOutsourcingBaselineUpperBound() {
+		return outsourcingBaselineUpperBound;
+	}
+
+	public void tightenOutsourcingBaselineUpperBound(double upperBound) {
+		outsourcingBaselineUpperBound = Math.min(outsourcingBaselineUpperBound, upperBound);
+	}
+
+	public void tightenOutsourcingBaselineLowerBound(double lowerBound) {
+		outsourcingBaselineLowerBound = Math.max(outsourcingBaselineLowerBound, lowerBound);
 	}
 
 	private void ensureTariffSegmentCapacity(int segment) {
@@ -455,6 +478,9 @@ public class Node implements Comparable<Node> {
 	}
 
 	public boolean isOutsourcingColumnCompatible(TWETOutsourcingColumn column) {
+		if (!isOutsourcingBaselineCompatible(column.getBaseline())) {
+			return false;
+		}
 		for (int job = 1; job < outsourcingJobState.length; job++) {
 			byte state = outsourcingJobState[job];
 			if (state == OUTSOURCE_REQUIRED && !column.containsJob(job)) {
@@ -465,6 +491,11 @@ public class Node implements Comparable<Node> {
 			}
 		}
 		return true;
+	}
+
+	public boolean isOutsourcingBaselineCompatible(double baseline) {
+		return Utility.compareGe(baseline, outsourcingBaselineLowerBound)
+				&& Utility.compareLe(baseline, outsourcingBaselineUpperBound);
 	}
 
 	/**
@@ -546,6 +577,25 @@ public class Node implements Comparable<Node> {
 			seg = seg.next;
 		}
 		return count;
+	}
+
+	private double outsourcingBaselineDomainEnd(Data data) {
+		if (data.outsourcingCostFunction != null && data.outsourcingCostFunction.head != null) {
+			PiecewiseLinearFunction.Segment seg = data.outsourcingCostFunction.head;
+			double end = seg.end;
+			while (seg.next != null) {
+				seg = seg.next;
+				end = seg.end;
+			}
+			return end;
+		}
+		double total = 0.0;
+		for (int job = 1; job <= data.n; job++) {
+			if (!Utility.isBigMValue(data.outsourcingCost[job])) {
+				total += data.outsourcingCost[job];
+			}
+		}
+		return total;
 	}
 
 	@Override

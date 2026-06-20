@@ -61,3 +61,13 @@ Algorithm 7 的 reduced-cost fixing 也补齐为三类时间弧：processing arc
 关于 `t*`，当前实现仍是单向 full-horizon DAG shortest path，而不是论文后续带 cut 时的 bidirectional labeling 过程，因此没有一个需要重算的中间分界 `t*`。若后续实现论文式 bidirectional time-indexed graph pricing，再把 `t*` 作为该双向定价器自己的状态重算；在当前单向 DP 版本里强行加 `t*` 没有对应语义。
 
 本次 focused `javac` 已通过，编译范围包括 `TimeIndexedGraphPricingEngine`、`TWETColumn`、`LP`、`RestrictedMasterIntegerHeuristic`、`TWETMasterSolution`、`Node`、`Tree`、`TWETBPCConfig`、`TWETBPCContext`。后续如果打开 `useTimeIndexedGraphPricing=true` 做实验，要重点观察重复 job pseudo-schedule 对 master bound 的影响，以及 idle/end/time-indexed fixing 的数量是否符合预期。
+
+## 8. 2026-06-20 澄清：论文四类弧、根节点 horizon 和 fixing 等价范围
+
+论文图中弧集确实分为四类：`A1` 为 job-to-job processing arc，`A2` 为 dummy/source-to-job processing arc，`A3` 为 job-to-dummy/sink end arc，`A4` 为 idle arc。当前代码里把 `A1/A2` 共用一套 processing arc 递推实现，只在 `from=0` 时额外扣 machine dual；`A3` 对应 end candidate/end arc fixing；`A4` 对应 wait/idle arc。因此实现层面曾简称“三类操作弧”，但按论文分类应表述为四类弧，其中 `A1/A2` 只是代码复用。
+
+当前 graph pricing 的 horizon 仍直接取 `data.CmaxH`，并只用 `hardWindowStart/End` 把 job-time penalty 表中不可行时间置为无穷大。也就是说，它没有像主线函数定价那样在根节点 no-cut 时使用 dual profitable window 进一步缩短每个 job 的有效右端和全局 `pricingHorizon`。若要严格做高效版本，根节点无 cut、无分支 dual 干扰且三角不等式假设成立时，可以按现有主线的 dual-window 逻辑构造 graph pricing 的 effective window，并把 horizon 收到这些右端的最大值；但进入 RMP 的列成本仍应按完整 sequence evaluator 重算，不能把 dual-window 下的临时 reduced-cost 口径当作永久列成本。
+
+关于 reduced-cost arc fixing，论文 Algorithm 7 在完整 labeling 框架下运行 `ForwardLabeling(T,A)` 和 `BackwardLabeling(0,A)`，再对每条弧比较 `F(i,t)` 与 `B(j,t+t(i,j))` 中 label 对的最小拼接 reduced cost；有 active limited-memory rank-1 cuts 时，还要按两侧 cut state 做 `S_l+S'_l>=beta_l` 修正。当前 no-cut graph pricing 没有 cut state，且每个 time-expanded vertex 只保留一个最短距离，因此这个 label-pair minimum 退化为 `forwardDistance + arcReducedCost + backwardDistance`。所以当前 fixing 是 Algorithm 7 的 no-cut 最短路等价形式，不是带 cut 的完整论文版本。若后续接入 limited-memory rank-1 cuts 或论文双向 labeling，就必须回到 bucket label-pair 口径，不能继续只用单一 shortest distance。
+
+当前 forward/backward distance 不跨 RMP 轮次缓存，因为每次加列后 LP dual 会变化，arc reduced cost 随之变化；arc fixing 只在当前节点 column generation 闭合后使用最后一组 dual，理论上可以复用最后一次“证明无负列”的 forward distance，再额外算 backward distance，但代码暂未做这项优化。fixing 删除弧并做图清理后，后续若还要继续在已删弧图上判断，又需要重新计算距离。

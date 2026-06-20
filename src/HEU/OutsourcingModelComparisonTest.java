@@ -46,19 +46,19 @@ public final class OutsourcingModelComparisonTest {
 
 		ArrayList<PairRecord> pairs = new ArrayList<PairRecord>();
 		try (BufferedWriter writer = Files.newBufferedWriter(output)) {
-			writer.write("case_id,n,m,outsourcing_scale,model,status,incumbent,bound,gap_percent,valid,nodes,pricing_rounds,"
+			writer.write("case_id,n,m,outsourcing_scale,model,status,incumbent,bound,root_bound,gap_percent,valid,nodes,pricing_rounds,"
 					+ "generated_columns,pool_size,solve_s,root_s,heuristic_s,heuristic_calls,exact_s,"
 					+ "exact_calls,master_lp_s,internal_columns,internal_jobs,internal_cost,outsourced_jobs,"
-					+ "outsourcing_baseline,outsourcing_cost,pricing_detail,objective_match,bound_match\n");
+					+ "outsourcing_baseline,outsourcing_cost,pricing_detail,objective_match,bound_match,root_bound_match\n");
 			for (String token : caseTokens) {
 				int caseId = Integer.parseInt(token.trim());
 				RunRecord master = runCase(caseId, n, machines, outsourcingScale, "masterVariables");
 				RunRecord columns = runCase(caseId, n, machines, outsourcingScale, "columns");
 				PairRecord pair = new PairRecord(caseId, master, columns);
 				pairs.add(pair);
-				writer.write(master.toCsvLine(pair.objectiveMatch, pair.boundMatch));
+				writer.write(master.toCsvLine(pair.objectiveMatch, pair.boundMatch, pair.rootBoundMatch));
 				writer.newLine();
-				writer.write(columns.toCsvLine(pair.objectiveMatch, pair.boundMatch));
+				writer.write(columns.toCsvLine(pair.objectiveMatch, pair.boundMatch, pair.rootBoundMatch));
 				writer.newLine();
 				System.out.println(pair.summaryLine());
 			}
@@ -206,6 +206,7 @@ public final class OutsourcingModelComparisonTest {
 		final RunRecord columns;
 		final boolean objectiveMatch;
 		final boolean boundMatch;
+		final boolean rootBoundMatch;
 
 		PairRecord(int caseId, RunRecord master, RunRecord columns) {
 			this.caseId = caseId;
@@ -213,6 +214,7 @@ public final class OutsourcingModelComparisonTest {
 			this.columns = columns;
 			this.objectiveMatch = close(master.incumbent, columns.incumbent);
 			this.boundMatch = close(master.bound, columns.bound);
+			this.rootBoundMatch = close(master.rootBound, columns.rootBound);
 		}
 
 		String summaryLine() {
@@ -234,6 +236,7 @@ public final class OutsourcingModelComparisonTest {
 		final String status;
 		final double incumbent;
 		final double bound;
+		final double rootBound;
 		final double gap;
 		final boolean valid;
 		final int nodes;
@@ -265,6 +268,7 @@ public final class OutsourcingModelComparisonTest {
 			this.status = result.getStatus().toString();
 			this.incumbent = result.getIncumbentCost();
 			this.bound = result.getBestBound();
+			this.rootBound = summary.getRootBound();
 			this.gap = BPCOutputFormatters.gapPercent(bound, incumbent);
 			this.valid = validation.isFeasible();
 			this.nodes = result.getProcessedNodes();
@@ -332,16 +336,16 @@ public final class OutsourcingModelComparisonTest {
 			return calls;
 		}
 
-		String toCsvLine(boolean objectiveMatch, boolean boundMatch) {
+		String toCsvLine(boolean objectiveMatch, boolean boundMatch, boolean rootBoundMatch) {
 			return String.join(",", String.valueOf(caseId), String.valueOf(n), String.valueOf(machines),
-					fmt(outsourcingScale), quote(model), quote(status), fmt(incumbent), fmt(bound), fmt(gap),
+					fmt(outsourcingScale), quote(model), quote(status), fmt(incumbent), fmt(bound), fmt(rootBound), fmt(gap),
 					Boolean.toString(valid), String.valueOf(nodes), String.valueOf(pricingRounds),
 					String.valueOf(generatedColumns), String.valueOf(poolSize), fmt(solveSeconds), fmt(rootSeconds),
 					fmt(heuristicSeconds), String.valueOf(heuristicCalls), fmt(exactSeconds),
 					String.valueOf(exactCalls), fmt(masterLpSeconds), String.valueOf(internalColumns),
 					String.valueOf(internalJobs), fmt(internalCost), String.valueOf(outsourcedJobs),
 					fmt(outsourcingBaseline), fmt(outsourcingCost), quote(pricingDetail), Boolean.toString(objectiveMatch),
-					Boolean.toString(boundMatch));
+					Boolean.toString(boundMatch), Boolean.toString(rootBoundMatch));
 		}
 	}
 }

@@ -709,6 +709,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private int cleanupGraph() {
 			computeForwardDistances();
 			computeBackwardDistances();
+			boolean[][] usefulProcessingOutgoingAtOrAfter = computeUsefulProcessingOutgoingAtOrAfter();
 			int fixed = 0;
 			for (int t = 0; t <= horizon; t++) {
 				for (int from = 0; from <= n; from++) {
@@ -729,14 +730,16 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
 						fixed++;
 					}
-					if (from > 0 && isEndAllowed(from, t) && !fromReachable) {
-						node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
-						fixed++;
-					}
+					// 2026-06-20: no-cut time-indexed 图清理。若当前 job 可以直接结束，且后续再等待也无法到达任何
+					// 可共达的处理弧，则等待弧只会推迟同一条机器路径的结束，不会改善 reduced cost，可以安全删除。
 					if (from > 0 && t < horizon && isEndAllowed(from, t)
 							&& !isTimeIndexedArcForbidden(from, from, t)
-							&& !hasProcessingOutgoingAtOrAfter(from, t + 1)) {
+							&& !usefulProcessingOutgoingAtOrAfter[from][t + 1]) {
 						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+						fixed++;
+					}
+					if (from > 0 && isEndAllowed(from, t) && !fromReachable) {
+						node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
 						fixed++;
 					}
 				}
@@ -744,16 +747,32 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return fixed;
 		}
 
-		private boolean hasProcessingOutgoingAtOrAfter(int from, int startTime) {
-			for (int t = startTime; t <= horizon; t++) {
-				for (int to = 1; to <= n; to++) {
-					if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
-						continue;
+		private boolean[][] computeUsefulProcessingOutgoingAtOrAfter() {
+			boolean[][] result = new boolean[n + 1][width + 1];
+			for (int from = 0; from <= n; from++) {
+				boolean hasUsefulOutgoing = false;
+				for (int t = horizon; t >= 0; t--) {
+					if (hasUsefulProcessingOutgoingAt(from, t)) {
+						hasUsefulOutgoing = true;
 					}
-					int completion = t + durationByArc[from][to];
-					if (completion <= horizon && isCompletionFeasible(to, completion)) {
-						return true;
-					}
+					result[from][t] = hasUsefulOutgoing;
+				}
+			}
+			return result;
+		}
+
+		private boolean hasUsefulProcessingOutgoingAt(int from, int time) {
+			if (!isFinite(forward[index(from, time)])) {
+				return false;
+			}
+			for (int to = 1; to <= n; to++) {
+				if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, time)) {
+					continue;
+				}
+				int completion = time + durationByArc[from][to];
+				if (completion <= horizon && isCompletionFeasible(to, completion)
+						&& isFinite(backward[index(to, completion)]) && isFinite(processArcReducedCost(from, to, completion))) {
+					return true;
 				}
 			}
 			return false;

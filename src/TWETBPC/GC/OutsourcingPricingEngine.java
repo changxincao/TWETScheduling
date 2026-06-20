@@ -22,7 +22,6 @@ import TWETBPC.Model.TWETOutsourcingColumn;
 public class OutsourcingPricingEngine implements PricingEngine {
 
 	private static final double REDUCED_COST_TOLERANCE = 1e-8;
-	private static final double BASELINE_TOLERANCE = 1e-8;
 
 	private final Data data;
 	private final TWETBPCConfig config;
@@ -38,8 +37,6 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("Outsourcing column pricing disabled");
 		}
 		Node node = lp.getNode();
-		double baselineLowerBound = node.getOutsourcingBaselineLowerBound();
-		double baselineUpperBound = node.getOutsourcingBaselineUpperBound();
 		ArrayList<Label> labels = new ArrayList<Label>();
 		labels.add(new Label());
 		for (int job = 1; job <= data.n; job++) {
@@ -58,12 +55,9 @@ public class OutsourcingPricingEngine implements PricingEngine {
 				next.addAll(labels);
 			}
 			for (Label label : labels) {
-				Label included = label.include(job, data.outsourcingCost[job], lp.getJobDual(job));
-				if (Utility.compareLe(included.baseline, baselineUpperBound)) {
-					next.add(included);
-				}
+				next.add(label.include(job, data.outsourcingCost[job], lp.getJobDual(job)));
 			}
-			labels = prune(next, baselineLowerBound);
+			labels = prune(next);
 		}
 
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
@@ -71,16 +65,11 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			if (label.jobs.isEmpty()) {
 				continue;
 			}
-			if (Utility.compareLt(label.baseline, baselineLowerBound)
-					|| Utility.compareGt(label.baseline, baselineUpperBound)) {
-				continue;
-			}
 			double cost = data.evaluateOutsourcingCost(label.baseline);
 			if (Utility.isBigMValue(cost)) {
 				continue;
 			}
-			double reducedCost = cost - label.profit - lp.getOutsourcingColumnDual()
-					- lp.getOutsourcingBaselineDual() * label.baseline;
+			double reducedCost = cost - label.profit - lp.getOutsourcingColumnDual();
 			if (Utility.compareLt(reducedCost, -REDUCED_COST_TOLERANCE)) {
 				candidates.add(new Candidate(label.jobs, label.baseline, cost, reducedCost));
 			}
@@ -116,17 +105,17 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		return "OutsourcingPricing";
 	}
 
-	private ArrayList<Label> prune(ArrayList<Label> labels, double baselineLowerBound) {
+	private ArrayList<Label> prune(ArrayList<Label> labels) {
 		ArrayList<Label> kept = new ArrayList<Label>();
 		for (Label label : labels) {
 			boolean dominated = false;
 			for (int i = 0; i < kept.size(); i++) {
 				Label existing = kept.get(i);
-				if (existing.dominates(label, baselineLowerBound)) {
+				if (existing.dominates(label)) {
 					dominated = true;
 					break;
 				}
-				if (label.dominates(existing, baselineLowerBound)) {
+				if (label.dominates(existing)) {
 					kept.remove(i);
 					i--;
 				}
@@ -161,17 +150,8 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			return new Label(nextJobs, baseline + baselineDelta, profit + profitDelta);
 		}
 
-		boolean dominates(Label other, double baselineLowerBound) {
-			if (!Utility.compareLe(baseline, other.baseline) || !Utility.compareGe(profit, other.profit)) {
-				return false;
-			}
-			// 2026-06-20: 有 baseline 下界时，“baseline 更小”不一定更好：
-			// 支配者若尚未达到下界，可能和同一 future subset 拼接后仍低于 L，
-			// 而被支配者可以达到 L。只有支配者已达到下界，或两者 baseline 相同，
-			// 才能保留原来的 upper-bound 单调支配语义。
-			return Utility.compareLe(baselineLowerBound, BASELINE_TOLERANCE)
-					|| Utility.compareGe(baseline, baselineLowerBound)
-					|| Utility.compareLe(Math.abs(baseline - other.baseline), BASELINE_TOLERANCE);
+		boolean dominates(Label other) {
+			return Utility.compareLe(baseline, other.baseline) && Utility.compareGe(profit, other.profit);
 		}
 	}
 

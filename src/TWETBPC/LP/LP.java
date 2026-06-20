@@ -63,7 +63,6 @@ public class LP {
 	private IloRange[] coverRanges;
 	private IloRange machineRange;
 	private IloRange outsourcingColumnCountRange;
-	private IloRange outsourcingBaselineRange;
 	private HashMap<Long, IloRange> arcBranchRanges;
 	private HashMap<Long, IloRange> adjacencyBranchRanges;
 	private HashMap<Integer, IloRange> subsetRowCutRanges;
@@ -77,7 +76,6 @@ public class LP {
 	private double[] jobDual;
 	private double machineDual;
 	private double outsourcingColumnDual;
-	private double outsourcingBaselineDual;
 	private double[][] arcDual;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
@@ -226,10 +224,6 @@ public class LP {
 		return outsourcingColumnDual;
 	}
 
-	public double getOutsourcingBaselineDual() {
-		return outsourcingBaselineDual;
-	}
-
 	/** @return arc 分支约束 dual；没有对应约束时为 0。 */
 	public double getArcDual(int from, int to) {
 		if (from < 0 || from >= arcDual.length || to < 0 || to >= arcDual[from].length) {
@@ -336,7 +330,6 @@ public class LP {
 		arcBranchRanges = new HashMap<Long, IloRange>();
 		adjacencyBranchRanges = new HashMap<Long, IloRange>();
 		outsourcingColumnCountRange = null;
-		outsourcingBaselineRange = null;
 		subsetRowCutRanges = new HashMap<Integer, IloRange>();
 		activeSubsetRowPricingCutIds = new ArrayList<Integer>();
 		activeSubsetRowPricingDuals = new ArrayList<Double>();
@@ -459,18 +452,10 @@ public class LP {
 		machineRange = cplex.addRange(node.minMachineCount, expr, node.maxMachineCount, "machineCount");
 		if (isColumnizedOutsourcing()) {
 			IloLinearNumExpr outsourceExpr = cplex.linearNumExpr();
-			IloLinearNumExpr baselineExpr = cplex.linearNumExpr();
 			for (IloNumVar var : outsourceColumnVars) {
 				outsourceExpr.addTerm(1.0, var);
 			}
-			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
-				TWETOutsourcingColumn column =
-						outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
-				baselineExpr.addTerm(column.getBaseline(), outsourceColumnVars[idx]);
-			}
 			outsourcingColumnCountRange = cplex.addLe(outsourceExpr, 1.0, "outsourcingColumnCount");
-			outsourcingBaselineRange = cplex.addRange(node.getOutsourcingBaselineLowerBound(), baselineExpr,
-					node.getOutsourcingBaselineUpperBound(), "outsourcingBaseline");
 		}
 	}
 
@@ -643,12 +628,6 @@ public class LP {
 				double coeff = type == Node.REPAIR_TARIFF_REQUIRED ? 1.0 : -1.0;
 				addRepairSlack(tariffBranchRanges[segment], coeff, "tariffBranchSlack_" + segment, penalty);
 			}
-		} else if (type == Node.REPAIR_OUTSOURCE_BASELINE_UPPER
-				|| type == Node.REPAIR_OUTSOURCE_BASELINE_LOWER) {
-			if (outsourcingBaselineRange != null) {
-				double coeff = type == Node.REPAIR_OUTSOURCE_BASELINE_LOWER ? 1.0 : -1.0;
-				addRepairSlack(outsourcingBaselineRange, coeff, "outsourcingBaselineSlack", penalty);
-			}
 		}
 	}
 
@@ -699,9 +678,6 @@ public class LP {
 		TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
 		IloColumn cplexColumn = cplex.column(objective, column.getCost());
 		cplexColumn = cplexColumn.and(cplex.column(outsourcingColumnCountRange, 1.0));
-		if (outsourcingBaselineRange != null) {
-			cplexColumn = cplexColumn.and(cplex.column(outsourcingBaselineRange, column.getBaseline()));
-		}
 		for (int job = 1; job <= data.n; job++) {
 			if (column.containsJob(job)) {
 				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
@@ -857,8 +833,6 @@ public class LP {
 		machineDual = cplex.getDual(machineRange);
 		outsourcingColumnDual = isColumnizedOutsourcing() && outsourcingColumnCountRange != null
 				? cplex.getDual(outsourcingColumnCountRange) : 0.0;
-		outsourcingBaselineDual = isColumnizedOutsourcing() && outsourcingBaselineRange != null
-				? cplex.getDual(outsourcingBaselineRange) : 0.0;
 		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
@@ -964,7 +938,6 @@ public class LP {
 		}
 		machineDual = 0.0;
 		outsourcingColumnDual = 0.0;
-		outsourcingBaselineDual = 0.0;
 		for (int i = 0; i < arcDual.length; i++) {
 			for (int j = 0; j < arcDual[i].length; j++) {
 				arcDual[i][j] = 0.0;

@@ -33,3 +33,13 @@ root 后的 time-indexed arc fixing 统计为 `candidates=1314583, fixed=2261948
 该尝试没有继续跑到根节点闭合。原因是 root 节点列池快速膨胀：从初始 85 条 seed 列开始，time-indexed exact graph 连续多轮加列，约数分钟后仍停留在 node 1，restricted/pool 已增长到 7 万条以上，超过上一轮完整搜索最终 pool `36085` 的两倍，且根节点还没有进入 RMIH、arc fixing 或 branching。为避免继续消耗时间，手动中止该 run。
 
 这个结果说明，当前“直接关闭现有启发式 pricing”不是有效提速。现有启发式虽然耗时，但它相当于限制了每轮进入 RMP 的候选列形态；直接让 time-indexed exact graph 从 root 开始大量返回 pseudo-schedule 负列，会让 RMP 规模和重解次数膨胀。后续如果要贴近原文，更合理的方向不是完全关闭启发式，而是给 time-indexed graph 自身加原文式两阶段策略：第一阶段每个 bucket 只扩展 reduced cost 最小 label、每轮最多返回约 50 条负列；第二阶段才用完整 exact pricing 证明无负列，并限制每轮返回列数，避免 root 被 pseudo-schedule 列淹没。
+
+## 6. 每轮只加最优列的 exact-only 尝试
+
+继续按同一 40-2 zero setup 配置测试关闭启发式 pricing，但把 `twet.bpc.fullDomainCompare.maxExactColumns=1`，即每次 `TimeIndexedGraphPricing` 只把当前最优 reduced-cost 序列加入 RMP。该设置的目的，是验证上一节 exact-only 多列返回导致 root 列池爆炸的问题能否通过“单列列生成”控制住。
+
+这次运行没有出现 root 列池爆炸：root 能够完成并进入后续分支，列池增长基本是一轮一列的线性增长。运行到约 `380s` 后手动停止，最后完整节点摘要停在 node 30：`total=380.251s, incumbent=17881, bound=17118.953788, gap=4.2618%, queue=19, pool=2015, restricted=272`；随后 node 31 infeasible，node 32 刚开始处理时中断。由于是 Ctrl-C 中断，runner 没有写出最终 CSV，本节数据来自控制台 heartbeat/node summary。
+
+由此可以判断，`maxExactColumns=1` 确实解决了 exact-only 默认多列返回时的列池失控，但代价是 RMP 重解和 pricing 循环次数过多。典型节点中 exact pricing 每次只加 1 列，例如 node 3 有 `pricing=38.292s/448/add223`，node 30 有 `pricing=12.827s/104/add51`。它的列池规模远小于多列 exact-only，也小于启发式开启时的完整 run，但 bound 推进太慢：380s 时 gap 仍超过 4%，明显不如启发式开启的 time-indexed graph run（274.001s 完整收敛），也远慢于当前 normal ng-DSSR zero setup 记录（68.643s 完整收敛）。
+
+当前结论是：关闭启发式后“每轮只加最优列”可以作为诊断用的稳定版本，但不适合作为默认求解策略。它验证了问题不是 graph exact pricing 单次太慢，而是列返回策略和 RMP 循环之间需要平衡。若继续推进论文式 time-indexed pricing，更合理的方向是做原文那类两阶段/限量候选策略，例如先限制每个 bucket 或每轮返回一批质量较好的列，再用 exact 证明无负列，而不是只取 1 条或无控制地取大量 pseudo-schedule 列。

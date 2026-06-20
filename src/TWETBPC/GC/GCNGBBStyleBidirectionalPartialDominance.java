@@ -1288,7 +1288,8 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, label.jid, nextJob);
+		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
+				&& !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -1299,7 +1300,8 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, prevJob, successor);
+		return !PricingCompatibility.isRequiredOutsourcedJob(node, prevJob)
+				&& !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private int previousForwardJob(ForwardLabel label) {
@@ -2687,6 +2689,9 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
+		if (PricingCompatibility.containsRequiredOutsourcedJob(lp.getNode(), sequence)) {
+			return;
+		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature)) {
 			return;
@@ -2760,6 +2765,9 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {
+		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
+			return false;
+		}
 		if (isPricingArcForbidden(node, 0, sequence.get(0).intValue())) {
 			return false;
 		}

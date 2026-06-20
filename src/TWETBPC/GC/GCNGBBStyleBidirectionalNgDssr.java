@@ -1898,14 +1898,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-06-10: 调用方只枚举 extensionSet；它已经排除 ng-memory 和时间半域不可达点。
 		// 真实 visited 不用于 ng-relaxation 扩展过滤，重复任务在恢复 route 后交给 DSSR 处理。
 		// 直连禁弧依赖当前 node/pricingOnly 状态，仍在扩展点即时检查。
-		return !isPricingArcForbidden(node, label.jid, nextJob);
+		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
+				&& !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
 		// 2026-06-10: backward 同样只枚举 extensionSet；真实重复由 DSSR route 恢复后处理。
 		// 这里即时检查 prevJob -> successor 直连弧，避免 pricingOnly/分支禁弧绕过扩展过滤。
-		return !isPricingArcForbidden(node, prevJob, successor);
+		return !PricingCompatibility.isRequiredOutsourcedJob(node, prevJob)
+				&& !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private int previousForwardJob(ForwardLabel label) {
@@ -3528,6 +3530,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
+		if (PricingCompatibility.containsRequiredOutsourcedJob(lp.getNode(), sequence)) {
+			return;
+		}
 		boolean targetSequence = isTargetSequence(sequence);
 		if (!isElementarySequence(sequence)) {
 			if (targetSequence) {
@@ -3707,6 +3712,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {
+		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
+			return false;
+		}
 		if (isPricingArcForbidden(node, 0, sequence.get(0).intValue())) {
 			return false;
 		}

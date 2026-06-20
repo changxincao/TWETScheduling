@@ -330,6 +330,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (sequence.isEmpty()) {
 				return;
 			}
+			if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
+				return;
+			}
 			if (hasRepeatedJob(sequence)) {
 				duplicateJobCandidates++;
 			}
@@ -402,7 +405,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				for (int to = 1; to <= n; to++) {
 					durationByArc[from][to] =
 							(int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
-					processArcForbidden[from][to] = from == to || isProcessArcForbiddenByNode(from, to);
+					processArcForbidden[from][to] = from == to
+							|| PricingCompatibility.isRequiredOutsourcedJob(node, to)
+							|| isProcessArcForbiddenByNode(from, to);
 				}
 			}
 			for (int job = 1; job <= n; job++) {
@@ -811,7 +816,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				for (int to = 1; to <= n; to++) {
 					durationByArc[from][to] =
 							(int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
-					processArcForbidden[from][to] = from == to || isProcessArcForbiddenByNode(from, to);
+					processArcForbidden[from][to] = from == to
+							|| PricingCompatibility.isRequiredOutsourcedJob(node, to)
+							|| isProcessArcForbiddenByNode(from, to);
 				}
 			}
 			for (int job = 1; job <= n; job++) {

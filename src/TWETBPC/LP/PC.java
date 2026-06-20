@@ -229,6 +229,9 @@ public class PC {
 		if (result.isImproved()) {
 			for (int i = 0; i < result.getColumns().size(); i++) {
 				TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
+				if (lp.getNode() != null && !lp.getNode().isColumnCompatible(column)) {
+					continue;
+				}
 				int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
 						column.isSeedColumn());
 				Integer value = Integer.valueOf(id);

@@ -519,7 +519,8 @@ public class GCBBStyleBidirectionalFullDomain {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, label.jid, nextJob);
+		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
+				&& !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
@@ -530,7 +531,8 @@ public class GCBBStyleBidirectionalFullDomain {
 		// if (label.visitedSet.contains(prevJob) || !label.reachableSet.contains(prevJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, prevJob, successor);
+		return !PricingCompatibility.isRequiredOutsourcedJob(node, prevJob)
+				&& !isPricingArcForbidden(node, prevJob, successor);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -1383,6 +1385,9 @@ public class GCBBStyleBidirectionalFullDomain {
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
+			return;
+		}
+		if (PricingCompatibility.containsRequiredOutsourcedJob(lp.getNode(), sequence)) {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);

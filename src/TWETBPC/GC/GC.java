@@ -205,7 +205,8 @@ public class GC {
 		// if (label.visitedSet.contains(nextJob) || !label.reachableSet.contains(nextJob)) {
 		// 	return false;
 		// }
-		return !isPricingArcForbidden(node, label.jid, nextJob);
+		return !PricingCompatibility.isRequiredOutsourcedJob(node, nextJob)
+				&& !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int fromJob, int toJob) {
@@ -430,6 +431,9 @@ public class GC {
 		}
 
 		ArrayList<Integer> sequence = recoverSequence(label);
+		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
+			return;
+		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		// 2026-05-18: 旧 VRP GC 在计入 addin_size 前会先查全局 route pool。
 		// 这里对应地先跳过当前 RMP 已经 active 的同序列列，避免重复列消耗本轮返回列上限。

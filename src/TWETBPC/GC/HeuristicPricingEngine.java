@@ -257,6 +257,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (node == null) {
 			return true;
 		}
+		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
+			return false;
+		}
 		if (isPricingArcForbidden(node, 0, sequence.get(0).intValue())) {
 			return false;
 		}

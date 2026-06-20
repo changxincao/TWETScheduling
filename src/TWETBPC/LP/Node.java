@@ -8,6 +8,7 @@ import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETOutsourcingColumn;
 
 /**
  * 分支树节点状态。
@@ -29,6 +30,10 @@ public class Node implements Comparable<Node> {
 	public static final byte SEGMENT_FORBIDDEN = -1;
 	public static final byte SEGMENT_REQUIRED = 1;
 
+	public static final byte OUTSOURCE_FREE = 0;
+	public static final byte OUTSOURCE_FORBIDDEN = -1;
+	public static final byte OUTSOURCE_REQUIRED = 1;
+
 	// 2026-05-18: repairType 只记录“当前 child 新增的分支行”，用于 LP repair mode
 	// 给这条行挂人工 slack。coverage 等普通主问题约束不通过这里标记。
 	public static final byte REPAIR_NONE = 0;
@@ -48,6 +53,7 @@ public class Node implements Comparable<Node> {
 	public int minMachineCount;
 	public int maxMachineCount;
 	public ArrayList<Integer> seedColumnIds;
+	public ArrayList<Integer> seedOutsourcingColumnIds;
 	public ArrayList<Integer> incumbentColumnIds;
 	public ArrayList<Integer> activeCutIds;
 	private byte[][] arcState;
@@ -55,6 +61,7 @@ public class Node implements Comparable<Node> {
 	private HashSet<Long> timeIndexedPricingOnlyForbiddenArc;
 	private byte[][] adjacencyPairState;
 	private byte[] tariffSegmentState;
+	private byte[] outsourcingJobState;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
 	private int repairFrom;
@@ -69,6 +76,7 @@ public class Node implements Comparable<Node> {
 		this.minMachineCount = 0;
 		this.maxMachineCount = data.m;
 		this.seedColumnIds = new ArrayList<Integer>(seedColumnIds);
+		this.seedOutsourcingColumnIds = new ArrayList<Integer>();
 		this.incumbentColumnIds = new ArrayList<Integer>(incumbentColumnIds);
 		this.activeCutIds = new ArrayList<Integer>();
 		this.arcState = new byte[data.n + 2][data.n + 2];
@@ -76,6 +84,7 @@ public class Node implements Comparable<Node> {
 		this.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>();
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
+		this.outsourcingJobState = new byte[data.n + 1];
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
 		this.repairTo = -1;
@@ -88,6 +97,7 @@ public class Node implements Comparable<Node> {
 		copy.depth = depth;
 		copy.minMachineCount = minMachineCount;
 		copy.maxMachineCount = maxMachineCount;
+		copy.seedOutsourcingColumnIds = new ArrayList<Integer>(seedOutsourcingColumnIds);
 		copy.activeCutIds = new ArrayList<Integer>(activeCutIds);
 		copy.arcState = new byte[arcState.length][];
 		for (int i = 0; i < arcState.length; i++) {
@@ -103,6 +113,7 @@ public class Node implements Comparable<Node> {
 			copy.adjacencyPairState[i] = adjacencyPairState[i].clone();
 		}
 		copy.tariffSegmentState = tariffSegmentState.clone();
+		copy.outsourcingJobState = outsourcingJobState.clone();
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
 		copy.repairTo = repairTo;
@@ -228,6 +239,8 @@ public class Node implements Comparable<Node> {
 				+ ",timePricingOnlyArc=" + countTimeIndexedPricingOnlyForbiddenArcs()
 				+ ",adjReq=" + countRequiredAdjacencyPairs() + ",adjForbid=" + countForbiddenAdjacencyPairs()
 				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
+				+ ",outReq=" + countOutsourcingJobStates(OUTSOURCE_REQUIRED)
+				+ ",outForbid=" + countOutsourcingJobStates(OUTSOURCE_FORBIDDEN)
 				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment;
 	}
 
@@ -306,6 +319,35 @@ public class Node implements Comparable<Node> {
 		tariffSegmentState[segment] = SEGMENT_REQUIRED;
 	}
 
+	public byte getOutsourcingJobState(int job) {
+		if (job < 1 || job >= outsourcingJobState.length) {
+			return OUTSOURCE_FREE;
+		}
+		return outsourcingJobState[job];
+	}
+
+	public void forbidOutsourcingJob(int job) {
+		if (job >= 1 && job < outsourcingJobState.length) {
+			outsourcingJobState[job] = OUTSOURCE_FORBIDDEN;
+		}
+	}
+
+	public void requireOutsourcingJob(int job) {
+		if (job >= 1 && job < outsourcingJobState.length) {
+			outsourcingJobState[job] = OUTSOURCE_REQUIRED;
+		}
+	}
+
+	public List<Integer> getRequiredOutsourcingJobs() {
+		ArrayList<Integer> jobs = new ArrayList<Integer>();
+		for (int job = 1; job < outsourcingJobState.length; job++) {
+			if (outsourcingJobState[job] == OUTSOURCE_REQUIRED) {
+				jobs.add(Integer.valueOf(job));
+			}
+		}
+		return jobs;
+	}
+
 	private void ensureTariffSegmentCapacity(int segment) {
 		if (segment < tariffSegmentState.length) {
 			return;
@@ -349,6 +391,16 @@ public class Node implements Comparable<Node> {
 		return count;
 	}
 
+	private int countOutsourcingJobStates(byte state) {
+		int count = 0;
+		for (int job = 1; job < outsourcingJobState.length; job++) {
+			if (outsourcingJobState[job] == state) {
+				count++;
+			}
+		}
+		return count;
+	}
+
 	public boolean hasRequiredArcs() {
 		for (int from = 0; from < arcState.length; from++) {
 			for (int to = 0; to < arcState[from].length; to++) {
@@ -382,6 +434,11 @@ public class Node implements Comparable<Node> {
 
 	/** 判断一条列是否违反当前节点的 forbidden arc。 */
 	public boolean isColumnCompatible(TWETColumn column) {
+		for (int job = 1; job < outsourcingJobState.length; job++) {
+			if (outsourcingJobState[job] == OUTSOURCE_REQUIRED && column.containsJob(job)) {
+				return false;
+			}
+		}
 		List<Integer> seq = column.getSequence();
 		if (seq.isEmpty()) {
 			return true;
@@ -395,6 +452,19 @@ public class Node implements Comparable<Node> {
 			}
 		}
 		return !isArcForbidden(seq.get(seq.size() - 1).intValue(), sinkId());
+	}
+
+	public boolean isOutsourcingColumnCompatible(TWETOutsourcingColumn column) {
+		for (int job = 1; job < outsourcingJobState.length; job++) {
+			byte state = outsourcingJobState[job];
+			if (state == OUTSOURCE_REQUIRED && !column.containsJob(job)) {
+				return false;
+			}
+			if (state == OUTSOURCE_FORBIDDEN && column.containsJob(job)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/**

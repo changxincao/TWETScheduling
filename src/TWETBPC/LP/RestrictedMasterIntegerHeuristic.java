@@ -18,6 +18,7 @@ import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
+import TWETBPC.Model.TWETOutsourcingColumn;
 import ilog.concert.IloException;
 import ilog.concert.IloIntVar;
 import ilog.concert.IloLinearNumExpr;
@@ -53,6 +54,9 @@ public final class RestrictedMasterIntegerHeuristic {
 		}
 		long start = System.nanoTime();
 		try {
+			if (lp.isColumnizedOutsourcing()) {
+				return solveColumnizedOutsourcing(lp, start);
+			}
 			String mode = config.restrictedMasterIntegerHeuristicMode;
 			if (MODE_PARTITION.equalsIgnoreCase(mode)) {
 				return solvePartition(lp, lp.getRestrictedColumnIds(), "partition", start);
@@ -65,6 +69,92 @@ public final class RestrictedMasterIntegerHeuristic {
 		} catch (IloException ex) {
 			return Result.notSolved("restricted integer heuristic error: " + ex.getMessage(),
 					System.nanoTime() - start);
+		}
+	}
+
+	private Result solveColumnizedOutsourcing(LP lp, long start) throws IloException {
+		IloCplex cplex = null;
+		try {
+			cplex = new IloCplex();
+			cplex.setParam(IloCplex.Param.Threads, 1);
+			cplex.setOut(config.diagnosticRestrictedIntegerMipLog ? System.out : null);
+			if (Utility.compareGt(config.restrictedMasterIntegerHeuristicTimeLimitSeconds, 0.0)) {
+				cplex.setParam(IloCplex.Param.TimeLimit,
+						config.restrictedMasterIntegerHeuristicTimeLimitSeconds);
+			}
+			List<Integer> internalIds = lp.getRestrictedColumnIds();
+			List<Integer> outsourcingIds = lp.getRestrictedOutsourcingColumnIds();
+			IloIntVar[] x = new IloIntVar[internalIds.size()];
+			IloIntVar[] w = new IloIntVar[outsourcingIds.size()];
+			IloLinearNumExpr obj = cplex.linearNumExpr();
+			for (int i = 0; i < internalIds.size(); i++) {
+				int columnId = internalIds.get(i).intValue();
+				x[i] = cplex.boolVar("rmih_lambda_" + columnId);
+				obj.addTerm(lp.getPool().getColumn(columnId).getCost(), x[i]);
+			}
+			for (int i = 0; i < outsourcingIds.size(); i++) {
+				int columnId = outsourcingIds.get(i).intValue();
+				w[i] = cplex.boolVar("rmih_omega_" + columnId);
+				obj.addTerm(lp.getOutsourcingPool().getColumn(columnId).getCost(), w[i]);
+			}
+			cplex.addMinimize(obj);
+			for (int job = 1; job <= data.n; job++) {
+				IloLinearNumExpr expr = cplex.linearNumExpr();
+				for (int i = 0; i < internalIds.size(); i++) {
+					int coeff = lp.getPool().getColumn(internalIds.get(i).intValue()).getJobVisitCount(job);
+					if (coeff > 0) {
+						expr.addTerm(coeff, x[i]);
+					}
+				}
+				for (int i = 0; i < outsourcingIds.size(); i++) {
+					if (lp.getOutsourcingPool().getColumn(outsourcingIds.get(i).intValue()).containsJob(job)) {
+						expr.addTerm(1.0, w[i]);
+					}
+				}
+				cplex.addEq(expr, 1.0, "rmih_cover_" + job);
+			}
+			IloLinearNumExpr machine = cplex.linearNumExpr();
+			for (IloIntVar var : x) {
+				machine.addTerm(1.0, var);
+			}
+			cplex.addRange(0.0, machine, data.m, "rmih_machineCount");
+			IloLinearNumExpr outsourcingCount = cplex.linearNumExpr();
+			for (IloIntVar var : w) {
+				outsourcingCount.addTerm(1.0, var);
+			}
+			cplex.addLe(outsourcingCount, 1.0, "rmih_outsourcingColumnCount");
+			if (!cplex.solve()) {
+				return Result.notSolved("restricted integer heuristic columnized outsourcing not solved: "
+						+ cplex.getStatus(), System.nanoTime() - start);
+			}
+			ArrayList<Integer> selectedInternalIds = new ArrayList<Integer>();
+			LinkedHashMap<Integer, Double> columnValues = new LinkedHashMap<Integer, Double>();
+			double[] outsourcingValues = new double[data.n + 1];
+			for (int i = 0; i < internalIds.size(); i++) {
+				if (Utility.compareGt(cplex.getValue(x[i]), INTEGER_TOLERANCE)) {
+					Integer columnId = internalIds.get(i);
+					selectedInternalIds.add(columnId);
+					columnValues.put(columnId, Double.valueOf(1.0));
+				}
+			}
+			for (int i = 0; i < outsourcingIds.size(); i++) {
+				if (Utility.compareGt(cplex.getValue(w[i]), INTEGER_TOLERANCE)) {
+					TWETOutsourcingColumn column = lp.getOutsourcingPool().getColumn(outsourcingIds.get(i).intValue());
+					for (int job : column.getJobs()) {
+						outsourcingValues[job] = 1.0;
+					}
+				}
+			}
+			TWETMasterSolution solution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues,
+					outsourcingValues, new double[0], cplex.getObjValue(), true,
+					"restricted integer heuristic columnized outsourcing " + cplex.getStatus());
+			return Result.feasible(cplex.getObjValue(), selectedInternalIds, outsourcingValues,
+					"restricted integer heuristic columnized outsourcing " + cplex.getStatus(),
+					System.nanoTime() - start, solution);
+		} finally {
+			if (cplex != null) {
+				cplex.end();
+			}
 		}
 	}
 

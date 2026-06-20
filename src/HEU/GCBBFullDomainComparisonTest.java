@@ -244,6 +244,8 @@ public class GCBBFullDomainComparisonTest {
 		config.useTimeIndexedGraphPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphPricing",
 				Boolean.toString(config.useTimeIndexedGraphPricing)));
+		config.outsourcingModel = System.getProperty("twet.bpc.fullDomainCompare.outsourcingModel",
+				config.outsourcingModel);
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

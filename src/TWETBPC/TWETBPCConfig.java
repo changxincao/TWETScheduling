@@ -31,6 +31,11 @@ public class TWETBPCConfig {
 	 * 该图定价允许重复 job，TWETColumn/RMP 已按 visit count 接入；当前仍是不带 cut 的单向 DAG 对照实现。
 	 */
 	public boolean useTimeIndexedGraphPricing = false;
+	/**
+	 * 2026-06-20: 外包建模方式。masterVariables 保持当前 SP2 的 y_j + tariff segment 变量；
+	 * columns 使用 SP1 风格，把外包集合也作为列加入主问题，并启用外包集合定价与外包 membership 分支。
+	 */
+	public String outsourcingModel = "masterVariables";
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**
@@ -247,5 +252,11 @@ public class TWETBPCConfig {
 	public boolean diagnosticNodeProgressSummary = false;
 	/** 2026-06-05: subtree/dual 诊断明细；默认关闭，避免每轮 pricing 扫描列池和所有 job arc。 */
 	public boolean diagnosticPricingSummaryDetails = false;
+
+	public boolean useColumnizedOutsourcing() {
+		return "columns".equalsIgnoreCase(outsourcingModel)
+				|| "columnized".equalsIgnoreCase(outsourcingModel)
+				|| "sp1".equalsIgnoreCase(outsourcingModel);
+	}
 
 }

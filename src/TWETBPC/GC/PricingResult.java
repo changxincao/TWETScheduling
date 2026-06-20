@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.List;
 
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETOutsourcingColumn;
 
 /**
  * 一次 pricing 调用的结果对象。
@@ -16,6 +17,8 @@ public final class PricingResult {
 
 	/** 本次 pricing 返回的列集合。 */
 	private final ArrayList<TWETColumn> columns;
+	/** 本次 pricing 返回的外包集合列。 */
+	private final ArrayList<TWETOutsourcingColumn> outsourcingColumns;
 	/** 本次是否真正找到可加入主问题的改进列。 */
 	private final boolean improved;
 	/** 调试信息或备注。 */
@@ -25,7 +28,13 @@ public final class PricingResult {
 	 * 构造一个 pricing 结果。
 	 */
 	public PricingResult(List<TWETColumn> columns, boolean improved, String message) {
+		this(columns, Collections.<TWETOutsourcingColumn>emptyList(), improved, message);
+	}
+
+	public PricingResult(List<TWETColumn> columns, List<TWETOutsourcingColumn> outsourcingColumns, boolean improved,
+			String message) {
 		this.columns = new ArrayList<TWETColumn>(columns);
+		this.outsourcingColumns = new ArrayList<TWETOutsourcingColumn>(outsourcingColumns);
 		this.improved = improved;
 		this.message = message;
 	}
@@ -40,6 +49,10 @@ public final class PricingResult {
 	/** @return 本次 pricing 得到的列（只读） */
 	public List<TWETColumn> getColumns() {
 		return Collections.unmodifiableList(columns);
+	}
+
+	public List<TWETOutsourcingColumn> getOutsourcingColumns() {
+		return Collections.unmodifiableList(outsourcingColumns);
 	}
 
 	/** @return 是否有改进 */

@@ -112,12 +112,15 @@ public class PC {
 			for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
 				PricingEngine engine = pricingEngines.get(engineIndex);
 				HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-				ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, engine, false, activeColumnIds);
-				if (newColumnIds.isEmpty()) {
+				HashSet<Integer> activeOutsourcingColumnIds = new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
+				GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
+						activeOutsourcingColumnIds);
+				if (generated.isEmpty()) {
 					continue;
 				}
 
-				int addedColumns = lp.addColumns(newColumnIds);
+				int addedColumns = lp.addColumns(generated.internalColumnIds)
+						+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 				if (addedColumns == 0) {
 					continue;
 				}
@@ -157,15 +160,15 @@ public class PC {
 				boolean keepCurrentEngine = true;
 				while (keepCurrentEngine && generatedForRepair < config.maxBranchRepairColumns) {
 					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-					ArrayList<Integer> newColumnIds = generateColumnsFromEngine(lp, engine, true, activeColumnIds);
-					if (newColumnIds.isEmpty()) {
+					HashSet<Integer> activeOutsourcingColumnIds =
+							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
+					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, activeColumnIds,
+							activeOutsourcingColumnIds);
+					if (generated.isEmpty()) {
 						break;
 					}
-					if (generatedForRepair + newColumnIds.size() > config.maxBranchRepairColumns) {
-						newColumnIds = new ArrayList<Integer>(
-								newColumnIds.subList(0, config.maxBranchRepairColumns - generatedForRepair));
-					}
-					int addedColumns = lp.addColumns(newColumnIds);
+					int addedColumns = lp.addColumns(generated.internalColumnIds)
+							+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 					generatedForRepair += addedColumns;
 					if (addedColumns == 0) {
 						break;
@@ -206,9 +209,9 @@ public class PC {
 		return solveRelaxationTimed(lp, "repair_final");
 	}
 
-	private ArrayList<Integer> generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
-			HashSet<Integer> activeColumnIds) {
-		ArrayList<Integer> newColumnIds = new ArrayList<Integer>();
+	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
+			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds) {
+		GeneratedColumnIds generated = new GeneratedColumnIds();
 		heartbeat(lp, (repairMode ? "pricing.repair." : "pricing.") + engine.getName() + ".start");
 		long pricingStart = System.nanoTime();
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
@@ -230,7 +233,19 @@ public class PC {
 						column.isSeedColumn());
 				Integer value = Integer.valueOf(id);
 				if (activeColumnIds.add(value)) {
-					newColumnIds.add(value);
+					generated.internalColumnIds.add(value);
+					addedColumns++;
+				}
+			}
+			for (int i = 0; i < result.getOutsourcingColumns().size(); i++) {
+				TWETBPC.Model.TWETOutsourcingColumn column = result.getOutsourcingColumns().get(i);
+				int id = lp.getOutsourcingPool().addColumn(column);
+				if (id < 0) {
+					continue;
+				}
+				Integer value = Integer.valueOf(id);
+				if (activeOutsourcingColumnIds.add(value)) {
+					generated.outsourcingColumnIds.add(value);
 					addedColumns++;
 				}
 			}
@@ -238,7 +253,7 @@ public class PC {
 		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
 		traceSink.onPricingCall(lp.getNode(), name, result.isImproved(), addedColumns, result.getMessage(),
 				lp.getPool().size(), pricingNanos);
-		return newColumnIds;
+		return generated;
 	}
 
 	private TWETMasterSolution solveRelaxationTimed(LP lp, String phase) {
@@ -273,6 +288,15 @@ public class PC {
 				+ " restricted=" + lp.getRestrictedColumnIds().size()
 				+ " pool=" + lp.getPool().size() + " cuts=" + lp.getCutPool().size());
 		System.out.flush();
+	}
+
+	private static final class GeneratedColumnIds {
+		final ArrayList<Integer> internalColumnIds = new ArrayList<Integer>();
+		final ArrayList<Integer> outsourcingColumnIds = new ArrayList<Integer>();
+
+		boolean isEmpty() {
+			return internalColumnIds.isEmpty() && outsourcingColumnIds.isEmpty();
+		}
 	}
 
 }

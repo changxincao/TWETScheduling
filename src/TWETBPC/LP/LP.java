@@ -12,12 +12,14 @@ import java.util.Map;
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
+import TWETBPC.TWETBPCConfig;
 import TWETBPC.CUT.SubsetRowCutEvaluator;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
+import TWETBPC.Model.TWETOutsourcingColumn;
 import ilog.concert.IloColumn;
 import ilog.concert.IloException;
 import ilog.concert.IloLinearNumExpr;
@@ -40,8 +42,11 @@ public class LP {
 	private final Data data;
 	private final Pool pool;
 	private final CutPool cutPool;
+	private final TWETBPCConfig config;
+	private final OutsourcingPool outsourcingPool;
 	private Node node;
 	private ArrayList<Integer> restrictedColumnIds;
+	private ArrayList<Integer> restrictedOutsourcingColumnIds;
 	private ArrayList<Integer> activeCutIds;
 	private TWETMasterSolution lastSolution;
 
@@ -49,12 +54,15 @@ public class LP {
 	private IloObjective objective;
 	private IloNumVar[] lambdaVars;
 	private HashMap<Integer, IloNumVar> lambdaByColumnId;
+	private IloNumVar[] outsourceColumnVars;
+	private HashMap<Integer, IloNumVar> outsourceColumnById;
 	private IloNumVar[] outsourceVars;
 	private IloNumVar[] outsourceSegmentActive;
 	private IloNumVar[] outsourceSegmentBaseline;
 	private ArrayList<IloNumVar> repairSlackVars;
 	private IloRange[] coverRanges;
 	private IloRange machineRange;
+	private IloRange outsourcingColumnCountRange;
 	private HashMap<Long, IloRange> arcBranchRanges;
 	private HashMap<Long, IloRange> adjacencyBranchRanges;
 	private HashMap<Integer, IloRange> subsetRowCutRanges;
@@ -67,13 +75,21 @@ public class LP {
 
 	private double[] jobDual;
 	private double machineDual;
+	private double outsourcingColumnDual;
 	private double[][] arcDual;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
+		this(data, pool, cutPool, new TWETBPCConfig(), new OutsourcingPool(data));
+	}
+
+	public LP(Data data, Pool pool, CutPool cutPool, TWETBPCConfig config, OutsourcingPool outsourcingPool) {
 		this.data = data;
 		this.pool = pool;
 		this.cutPool = cutPool;
+		this.config = config;
+		this.outsourcingPool = outsourcingPool;
 		this.restrictedColumnIds = new ArrayList<Integer>();
+		this.restrictedOutsourcingColumnIds = new ArrayList<Integer>();
 		this.activeCutIds = new ArrayList<Integer>();
 		this.jobDual = new double[data.n + 1];
 		this.arcDual = new double[data.n + 2][data.n + 2];
@@ -91,8 +107,19 @@ public class LP {
 			// 2026-06-04: 正常父子继承路径下父节点列通常已经满足该条件；这里主要是防御性兜底，
 			// 防止外部 seed、旧配置列或调试列绕过 pricing 后把全局预处理禁弧带回模型。
 			TWETColumn column = pool.getColumn(columnId);
-			if (node == null || node.isColumnPreprocessingCompatible(column)) {
+			boolean compatible = node == null || (isColumnizedOutsourcing() ? node.isColumnCompatible(column)
+					: node.isColumnPreprocessingCompatible(column));
+			if (compatible) {
 				this.restrictedColumnIds.add(Integer.valueOf(columnId));
+			}
+		}
+		this.restrictedOutsourcingColumnIds = new ArrayList<Integer>();
+		if (isColumnizedOutsourcing()) {
+			for (int columnId : node.seedOutsourcingColumnIds) {
+				TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
+				if (node.isOutsourcingColumnCompatible(column)) {
+					this.restrictedOutsourcingColumnIds.add(Integer.valueOf(columnId));
+				}
 			}
 		}
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
@@ -112,12 +139,24 @@ public class LP {
 		return pool;
 	}
 
+	public OutsourcingPool getOutsourcingPool() {
+		return outsourcingPool;
+	}
+
 	public CutPool getCutPool() {
 		return cutPool;
 	}
 
 	public List<Integer> getRestrictedColumnIds() {
 		return restrictedColumnIds;
+	}
+
+	public List<Integer> getRestrictedOutsourcingColumnIds() {
+		return restrictedOutsourcingColumnIds;
+	}
+
+	public boolean isColumnizedOutsourcing() {
+		return config.useColumnizedOutsourcing();
 	}
 
 	public List<Integer> getActiveCutIds() {
@@ -179,6 +218,10 @@ public class LP {
 	/** @return 机器数量约束 dual；每条内部列的系数为 1。 */
 	public double getMachineDual() {
 		return machineDual;
+	}
+
+	public double getOutsourcingColumnDual() {
+		return outsourcingColumnDual;
 	}
 
 	/** @return arc 分支约束 dual；没有对应约束时为 0。 */
@@ -282,13 +325,15 @@ public class LP {
 		cplex.setParam(IloCplex.Param.Threads, 1);
 		objective = null;
 		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
+		outsourceColumnById = new HashMap<Integer, IloNumVar>();
 		repairSlackVars = new ArrayList<IloNumVar>();
 		arcBranchRanges = new HashMap<Long, IloRange>();
 		adjacencyBranchRanges = new HashMap<Long, IloRange>();
 		subsetRowCutRanges = new HashMap<Integer, IloRange>();
 		activeSubsetRowPricingCutIds = new ArrayList<Integer>();
 		activeSubsetRowPricingDuals = new ArrayList<Double>();
-		outsourcingTariffSegments = collectOutsourcingTariffSegments();
+		outsourcingTariffSegments = isColumnizedOutsourcing() ? new ArrayList<TariffSegment>()
+				: collectOutsourcingTariffSegments();
 
 		buildVariables();
 		buildObjective();
@@ -296,8 +341,10 @@ public class LP {
 		buildMachineConstraint();
 		buildArcBranchConstraints();
 		buildAdjacencyBranchConstraints();
-		buildSubsetRowCutConstraints();
-		buildOutsourcingTariffConstraints();
+		if (!isColumnizedOutsourcing()) {
+			buildSubsetRowCutConstraints();
+			buildOutsourcingTariffConstraints();
+		}
 		if (feasibilityRepairMode) {
 			addFeasibilitySlacks();
 		}
@@ -309,6 +356,19 @@ public class LP {
 			int columnId = restrictedColumnIds.get(idx).intValue();
 			lambdaVars[idx] = cplex.numVar(0.0, Double.MAX_VALUE, "lambda_" + columnId);
 			lambdaByColumnId.put(Integer.valueOf(columnId), lambdaVars[idx]);
+		}
+
+		if (isColumnizedOutsourcing()) {
+			outsourceColumnVars = new IloNumVar[restrictedOutsourcingColumnIds.size()];
+			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
+				int columnId = restrictedOutsourcingColumnIds.get(idx).intValue();
+				outsourceColumnVars[idx] = cplex.numVar(0.0, Double.MAX_VALUE, "omega_" + columnId);
+				outsourceColumnById.put(Integer.valueOf(columnId), outsourceColumnVars[idx]);
+			}
+			outsourceVars = new IloNumVar[data.n + 1];
+			outsourceSegmentActive = new IloNumVar[0];
+			outsourceSegmentBaseline = new IloNumVar[0];
+			return;
 		}
 
 		outsourceVars = new IloNumVar[data.n + 1];
@@ -334,6 +394,15 @@ public class LP {
 			TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
 			obj.addTerm(column.getCost(), lambdaVars[idx]);
 		}
+		if (isColumnizedOutsourcing()) {
+			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
+				TWETOutsourcingColumn column =
+						outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
+				obj.addTerm(column.getCost(), outsourceColumnVars[idx]);
+			}
+			objective = cplex.addMinimize(obj);
+			return;
+		}
 		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
 			TariffSegment seg = outsourcingTariffSegments.get(l);
 			obj.addTerm(seg.slope, outsourceSegmentBaseline[l]);
@@ -353,11 +422,22 @@ public class LP {
 					expr.addTerm(coefficient, lambdaVars[idx]);
 				}
 			}
-			expr.addTerm(1.0, outsourceVars[job]);
-			// 2026-05-24: BPC pricing 后续按 set covering 对偶语义处理任务覆盖行。
-			// 在 setup time/cost 满足三角不等式的设定下，重复服务任务不会带来有利的列结构；
-			// 覆盖行放宽为 >= 后，job dual 非负，动态 profitable window 可退化为 job-level H_j。
-			coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
+			if (isColumnizedOutsourcing()) {
+				for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
+					TWETOutsourcingColumn column =
+							outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
+					if (column.containsJob(job)) {
+						expr.addTerm(1.0, outsourceColumnVars[idx]);
+					}
+				}
+				coverRanges[job] = cplex.addEq(expr, 1.0, "cover_" + job);
+			} else {
+				expr.addTerm(1.0, outsourceVars[job]);
+				// 2026-05-24: BPC pricing 后续按 set covering 对偶语义处理任务覆盖行。
+				// 在 setup time/cost 满足三角不等式的设定下，重复服务任务不会带来有利的列结构；
+				// 覆盖行放宽为 >= 后，job dual 非负，动态 profitable window 可退化为 job-level H_j。
+				coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
+			}
 		}
 	}
 
@@ -368,6 +448,13 @@ public class LP {
 		}
 		// 2026-05-18: 带外包模型下允许真实机器为空，机器数按节点区间建模。
 		machineRange = cplex.addRange(node.minMachineCount, expr, node.maxMachineCount, "machineCount");
+		if (isColumnizedOutsourcing()) {
+			IloLinearNumExpr outsourceExpr = cplex.linearNumExpr();
+			for (IloNumVar var : outsourceColumnVars) {
+				outsourceExpr.addTerm(1.0, var);
+			}
+			outsourcingColumnCountRange = cplex.addLe(outsourceExpr, 1.0, "outsourcingColumnCount");
+		}
 	}
 
 	private void buildArcBranchConstraints() throws IloException {
@@ -396,6 +483,32 @@ public class LP {
 	private void buildAdjacencyBranchConstraints() throws IloException {
 		addAdjacencyBranchConstraints(node.getForbiddenAdjacencyPairs(), false);
 		addAdjacencyBranchConstraints(node.getRequiredAdjacencyPairs(), true);
+	}
+
+	public int addOutsourcingColumns(List<Integer> columnIds) {
+		if (!isColumnizedOutsourcing()) {
+			return 0;
+		}
+		int added = 0;
+		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedOutsourcingColumnIds);
+		for (int id : columnIds) {
+			Integer value = Integer.valueOf(id);
+			if (!activeColumnIds.contains(value)
+					&& node.isOutsourcingColumnCompatible(outsourcingPool.getColumn(id))) {
+				restrictedOutsourcingColumnIds.add(value);
+				activeColumnIds.add(value);
+				added++;
+				if (cplex != null && objective != null) {
+					try {
+						addOutsourcingColumnToCurrentModel(id);
+					} catch (IloException ex) {
+						throw new IllegalStateException("Failed to add outsourcing column " + id + " to current RMP",
+								ex);
+					}
+				}
+			}
+		}
+		return added;
 	}
 
 	private void addAdjacencyBranchConstraints(List<int[]> pairs, boolean required) throws IloException {
@@ -559,6 +672,20 @@ public class LP {
 		lambdaVars = append(lambdaVars, var);
 	}
 
+	private void addOutsourcingColumnToCurrentModel(int columnId) throws IloException {
+		TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
+		IloColumn cplexColumn = cplex.column(objective, column.getCost());
+		cplexColumn = cplexColumn.and(cplex.column(outsourcingColumnCountRange, 1.0));
+		for (int job = 1; job <= data.n; job++) {
+			if (column.containsJob(job)) {
+				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
+			}
+		}
+		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "omega_" + columnId);
+		outsourceColumnById.put(Integer.valueOf(columnId), var);
+		outsourceColumnVars = append(outsourceColumnVars, var);
+	}
+
 	private IloNumVar[] append(IloNumVar[] vars, IloNumVar var) {
 		IloNumVar[] expanded = new IloNumVar[vars.length + 1];
 		System.arraycopy(vars, 0, expanded, 0, vars.length);
@@ -627,6 +754,50 @@ public class LP {
 			restrictedColumnIds = selected;
 			lastSolution = null;
 		}
+		if (isColumnizedOutsourcing()) {
+			resetRestrictedOutsourcingColumnsByCurrentReducedCost(maxColumns, reducedCostAllowance);
+		}
+	}
+
+	private void resetRestrictedOutsourcingColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance) {
+		if (outsourceColumnById == null) {
+			return;
+		}
+		ArrayList<Integer> selected = new ArrayList<Integer>();
+		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
+		for (int columnId : restrictedOutsourcingColumnIds) {
+			TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
+			if (!node.isOutsourcingColumnCompatible(column)) {
+				continue;
+			}
+			double reducedCost = getOutsourcingColumnReducedCost(columnId);
+			if (isPositiveCurrentOutsourcingColumn(columnId)) {
+				selected.add(Integer.valueOf(columnId));
+				continue;
+			}
+			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
+				candidates.add(new ColumnReducedCost(columnId, reducedCost));
+			}
+		}
+		Collections.sort(candidates, new Comparator<ColumnReducedCost>() {
+			@Override
+			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
+				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
+					return -1;
+				}
+				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
+					return 1;
+				}
+				return Integer.compare(a.columnId, b.columnId);
+			}
+		});
+		for (int i = 0; i < candidates.size() && selected.size() < maxColumns; i++) {
+			selected.add(Integer.valueOf(candidates.get(i).columnId));
+		}
+		if (!selected.isEmpty()) {
+			restrictedOutsourcingColumnIds = selected;
+			lastSolution = null;
+		}
 	}
 
 	private boolean isPositiveCurrentColumn(int columnId) {
@@ -658,6 +829,8 @@ public class LP {
 			jobDual[job] = cplex.getDual(coverRanges[job]);
 		}
 		machineDual = cplex.getDual(machineRange);
+		outsourcingColumnDual = isColumnizedOutsourcing() && outsourcingColumnCountRange != null
+				? cplex.getDual(outsourcingColumnCountRange) : 0.0;
 		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
@@ -692,6 +865,19 @@ public class LP {
 
 	private double[] readOutsourcingValues() throws IloException {
 		double[] values = new double[data.n + 1];
+		if (isColumnizedOutsourcing()) {
+			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
+				double value = cplex.getValue(outsourceColumnVars[idx]);
+				if (Utility.compareGt(value, VALUE_TOLERANCE)) {
+					TWETOutsourcingColumn column =
+							outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
+					for (int job : column.getJobs()) {
+						values[job] += value;
+					}
+				}
+			}
+			return values;
+		}
 		for (int job = 1; job <= data.n; job++) {
 			values[job] = cplex.getValue(outsourceVars[job]);
 		}
@@ -699,6 +885,9 @@ public class LP {
 	}
 
 	private double[] readOutsourceSegmentValues() throws IloException {
+		if (isColumnizedOutsourcing()) {
+			return new double[0];
+		}
 		double[] values = new double[outsourceSegmentActive.length];
 		for (int segment = 0; segment < outsourceSegmentActive.length; segment++) {
 			values[segment] = cplex.getValue(outsourceSegmentActive[segment]);
@@ -716,6 +905,14 @@ public class LP {
 			if (!isIntegral01(outsourcingValues[job])) {
 				return false;
 			}
+		}
+		if (isColumnizedOutsourcing()) {
+			for (IloNumVar var : outsourceColumnVars) {
+				if (!isIntegral01(cplex.getValue(var))) {
+					return false;
+				}
+			}
+			return true;
 		}
 		for (IloNumVar var : outsourceSegmentActive) {
 			if (!isIntegral01(cplex.getValue(var))) {
@@ -738,6 +935,7 @@ public class LP {
 			jobDual[i] = 0.0;
 		}
 		machineDual = 0.0;
+		outsourcingColumnDual = 0.0;
 		for (int i = 0; i < arcDual.length; i++) {
 			for (int j = 0; j < arcDual[i].length; j++) {
 				arcDual[i][j] = 0.0;
@@ -748,6 +946,33 @@ public class LP {
 		}
 		if (activeSubsetRowPricingDuals != null) {
 			activeSubsetRowPricingDuals.clear();
+		}
+	}
+
+	private boolean isPositiveCurrentOutsourcingColumn(int columnId) {
+		IloNumVar var = outsourceColumnById.get(Integer.valueOf(columnId));
+		if (var == null) {
+			return false;
+		}
+		try {
+			return Utility.compareGt(cplex.getValue(var), VALUE_TOLERANCE);
+		} catch (IloException ex) {
+			return false;
+		}
+	}
+
+	public double getOutsourcingColumnReducedCost(int columnId) {
+		if (!isColumnizedOutsourcing() || cplex == null || outsourceColumnById == null) {
+			return Double.POSITIVE_INFINITY;
+		}
+		IloNumVar var = outsourceColumnById.get(Integer.valueOf(columnId));
+		if (var == null) {
+			return Double.POSITIVE_INFINITY;
+		}
+		try {
+			return cplex.getReducedCost(var);
+		} catch (IloException ex) {
+			return Double.POSITIVE_INFINITY;
 		}
 	}
 

@@ -10,6 +10,7 @@ import Output.BPCTraceSink;
 import Output.BPCTraceSummary;
 import TWETBPC.BP.ArcBrancher;
 import TWETBPC.BP.Brancher;
+import TWETBPC.BP.OutsourcingMembershipBrancher;
 import TWETBPC.BP.UndirectedAdjacencyBrancher;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.CUT.NoOpCutGenerator;
@@ -26,11 +27,13 @@ import TWETBPC.GC.GCNGBBStyleBidirectionalPartialDominancePricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPricingEngine;
 import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.InitialColumnBuilder;
+import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PaperDominanceExactPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.IO.HeuristicSeedProvider;
 import TWETBPC.LP.CutPool;
+import TWETBPC.LP.OutsourcingPool;
 import TWETBPC.LP.PC;
 import TWETBPC.LP.Pool;
 import TWETBPC.LP.Tree;
@@ -43,6 +46,7 @@ public class TWETBPCContext {
 	public final Data data;
 	public final TWETBPCConfig config;
 	public final Pool pool;
+	public final OutsourcingPool outsourcingPool;
 	public final CutPool cutPool;
 	public final HeuristicSeedProvider seedProvider;
 	public final InitialColumnBuilder initialColumnBuilder;
@@ -59,12 +63,17 @@ public class TWETBPCContext {
 		this.data = data;
 		this.config = config;
 		this.pool = new Pool(data);
+		this.outsourcingPool = new OutsourcingPool(data);
 		this.cutPool = new CutPool();
 		this.seedProvider = new HeuristicSeedProvider(data, config);
 		this.initialColumnBuilder = new InitialColumnBuilder(data, config, pool, seedProvider);
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		pricingEngines.add(new HeuristicPricingEngine(data, config));
+		if (config.useColumnizedOutsourcing()) {
+			// 2026-06-20: 列化外包 pricing 通常比内部机器 pricing 轻，先补外包列再跑内部 exact。
+			pricingEngines.add(new OutsourcingPricingEngine(data, config));
+		}
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
 		if (config.useTimeIndexedGraphPricing) {
@@ -110,18 +119,28 @@ public class TWETBPCContext {
 		} else {
 			pricingEngines.add(new ExactPricingEngine(data, config));
 		}
-
 		this.cutGenerators = new ArrayList<CutGenerator>();
 		cutGenerators.add(new NoOpCutGenerator());
-		cutGenerators.add(new SubsetRowCutGenerator(config));
+		if (!config.useColumnizedOutsourcing()) {
+			cutGenerators.add(new SubsetRowCutGenerator(config));
+		}
 
 		this.branchers = new ArrayList<Brancher>();
-		branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));
-		branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
-		if (config.enableUndirectedAdjacencyBranching) {
-			branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
+		if (config.useColumnizedOutsourcing()) {
+			branchers.add(new ArcBrancher(config.branchingTolerance));
+			branchers.add(new OutsourcingMembershipBrancher(config.branchingTolerance));
+			branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
+			if (config.enableUndirectedAdjacencyBranching) {
+				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
+			}
+		} else {
+			branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));
+			branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
+			if (config.enableUndirectedAdjacencyBranching) {
+				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
+			}
+			branchers.add(new ArcBrancher(config.branchingTolerance));
 		}
-		branchers.add(new ArcBrancher(config.branchingTolerance));
 
 		this.traceSummary = new BPCTraceSummary(config);
 		this.consoleReporter = new BPCConsoleReporter();
@@ -133,7 +152,7 @@ public class TWETBPCContext {
 		this.traceSink = new BPCCompositeTraceSink(sinks);
 
 		this.pc = new PC(config, pricingEngines, cutGenerators, traceSink);
-		this.tree = new Tree(data, config, pool, cutPool, initialColumnBuilder, pc, branchers, traceSink);
+		this.tree = new Tree(data, config, pool, outsourcingPool, cutPool, initialColumnBuilder, pc, branchers, traceSink);
 	}
 
 	/**

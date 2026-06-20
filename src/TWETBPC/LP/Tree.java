@@ -27,6 +27,7 @@ public class Tree {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final Pool pool;
+	private final OutsourcingPool outsourcingPool;
 	private final CutPool cutPool;
 	private final InitialColumnBuilder initialColumnBuilder;
 	private final PC pc;
@@ -35,11 +36,12 @@ public class Tree {
 	private final List<Brancher> branchers;
 	private final BPCTraceSink traceSink;
 
-	public Tree(Data data, TWETBPCConfig config, Pool pool, CutPool cutPool, InitialColumnBuilder initialColumnBuilder,
-			PC pc, List<Brancher> branchers, BPCTraceSink traceSink) {
+	public Tree(Data data, TWETBPCConfig config, Pool pool, OutsourcingPool outsourcingPool, CutPool cutPool,
+			InitialColumnBuilder initialColumnBuilder, PC pc, List<Brancher> branchers, BPCTraceSink traceSink) {
 		this.data = data;
 		this.config = config;
 		this.pool = pool;
+		this.outsourcingPool = outsourcingPool;
 		this.cutPool = cutPool;
 		this.initialColumnBuilder = initialColumnBuilder;
 		this.pc = pc;
@@ -52,6 +54,7 @@ public class Tree {
 	public TWETSolveResult solve() {
 		InitialColumnBundle initial = initialColumnBuilder.build();
 		Node root = new Node(data, initial.getInitialColumnIds(), initial.getIncumbentColumnIds(), config.pseudoCostInf);
+		seedInitialOutsourcingColumn(root, initial);
 		traceSink.onInitialColumnsReady(initial.getInitialColumnIds().size(), initial.getIncumbentColumnIds().size(),
 				incumbentCostFromInitial(initial));
 
@@ -81,7 +84,7 @@ public class Tree {
 				break;
 			}
 
-			LP lp = new LP(data, pool, cutPool);
+			LP lp = new LP(data, pool, cutPool, config, outsourcingPool);
 			lp.construct(node, node.seedColumnIds);
 			heartbeat(node, "pc.solve.start");
 			TWETMasterSolution solution = pc.solve(lp);
@@ -274,14 +277,33 @@ public class Tree {
 
 	private void prepareChildSeedColumns(Node child, LP parentLp) {
 		ArrayList<Integer> seed = new ArrayList<Integer>();
+		ArrayList<Integer> outsourcingSeed = new ArrayList<Integer>(child.seedOutsourcingColumnIds);
 		if (parentLp != null) {
 			seed.addAll(parentLp.getRestrictedColumnIds());
+			for (int id : parentLp.getRestrictedOutsourcingColumnIds()) {
+				Integer value = Integer.valueOf(id);
+				if (!outsourcingSeed.contains(value)) {
+					outsourcingSeed.add(value);
+				}
+			}
 		}
 		// 2026-05-18: 对齐旧 VRP UpdateRouteSet 的时机。child 入队时先继承父节点当前列集，
 		// 不提前按新分支状态或 reduced cost 过滤；等 child 出队后，RMP 带新分支行先求一次 LP。
 		// 若可行或通过 slack repair 修复成功，再在 LP.resetRestrictedColumnsByCurrentReducedCost()
 		// 里筛成正式子节点列集。这样保留“出队时处理”的实现方式，但逻辑上等价于旧代码。
 		child.seedColumnIds = seed;
+		child.seedOutsourcingColumnIds = outsourcingSeed;
+	}
+
+	private void seedInitialOutsourcingColumn(Node root, InitialColumnBundle initial) {
+		if (!config.useColumnizedOutsourcing() || initial.getIncumbentOutsourcedJobs().isEmpty()) {
+			return;
+		}
+		int id = outsourcingPool.addColumn(initial.getIncumbentOutsourcedJobs(), TWETBPC.Model.ColumnSource.HEURISTIC_FULL,
+				true);
+		if (id >= 0) {
+			root.seedOutsourcingColumnIds.add(Integer.valueOf(id));
+		}
 	}
 
 	private double incumbentCostFromInitial(InitialColumnBundle initial) {

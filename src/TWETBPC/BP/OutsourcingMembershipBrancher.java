@@ -35,6 +35,9 @@ public class OutsourcingMembershipBrancher implements Brancher {
 		int bestJob = -1;
 		double bestScore = Double.POSITIVE_INFINITY;
 		for (int job = 1; job <= lp.getData().n; job++) {
+			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
+				continue;
+			}
 			if (base.getOutsourcingJobState(job) != Node.OUTSOURCE_FREE) {
 				continue;
 			}

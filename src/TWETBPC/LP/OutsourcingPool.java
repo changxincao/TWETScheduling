@@ -71,9 +71,10 @@ public class OutsourcingPool {
 	private ArrayList<Integer> normalizeJobs(List<Integer> jobs) {
 		LinkedHashSet<Integer> unique = new LinkedHashSet<Integer>();
 		for (int job : jobs) {
-			if (isOutsourceable(job)) {
-				unique.add(Integer.valueOf(job));
+			if (!isOutsourceable(job)) {
+				throw new IllegalArgumentException("Non-outsourceable job " + job + " in outsourcing column");
 			}
+			unique.add(Integer.valueOf(job));
 		}
 		ArrayList<Integer> normalized = new ArrayList<Integer>(unique);
 		java.util.Collections.sort(normalized);

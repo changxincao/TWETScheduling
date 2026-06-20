@@ -71,7 +71,8 @@ public class TWETBPCContext {
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		pricingEngines.add(new HeuristicPricingEngine(data, config));
 		if (config.useColumnizedOutsourcing()) {
-			// 2026-06-20: 列化外包 pricing 通常比内部机器 pricing 轻，先补外包列再跑内部 exact。
+			// 2026-06-20: Columnized outsourcing pricing is cheap, but running it first caused severe restart churn.
+			// Keep internal heuristic first; outsourcing-first is recorded as a negative experiment.
 			pricingEngines.add(new OutsourcingPricingEngine(data, config));
 		}
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，

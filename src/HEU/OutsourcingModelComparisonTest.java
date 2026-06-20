@@ -50,7 +50,9 @@ public final class OutsourcingModelComparisonTest {
 			writer.write("case_id,n,m,outsourcing_scale,tariff_segments,model,status,incumbent,bound,root_bound,gap_percent,valid,nodes,pricing_rounds,"
 					+ "generated_columns,pool_size,solve_s,root_s,heuristic_s,heuristic_calls,exact_s,"
 					+ "exact_calls,master_lp_s,internal_columns,internal_jobs,internal_cost,outsourced_jobs,"
-					+ "outsourcing_baseline,outsourcing_cost,pricing_detail,objective_match,bound_match,root_bound_match\n");
+					+ "outsourcing_baseline,outsourcing_cost,initial_incumbent,bound_gain_after_root,incumbent_gain,"
+					+ "incumbent_updates,rmih_calls,rmih_improvements,pruned_by_incumbent,closed_without_branch,"
+					+ "branch_calls,branch_detail,pricing_detail,objective_match,bound_match,root_bound_match\n");
 			for (String token : caseTokens) {
 				int caseId = Integer.parseInt(token.trim());
 				RunRecord master = runCase(caseId, n, machines, outsourcingScale, tariffSegments, "masterVariables");
@@ -275,6 +277,16 @@ public final class OutsourcingModelComparisonTest {
 		final int outsourcedJobs;
 		final double outsourcingBaseline;
 		final double outsourcingCost;
+		final double initialIncumbent;
+		final double boundGainAfterRoot;
+		final double incumbentGain;
+		final int incumbentUpdates;
+		final int rmihCalls;
+		final int rmihImprovements;
+		final int prunedByIncumbent;
+		final int closedWithoutBranch;
+		final int branchCalls;
+		final String branchDetail;
 		final String pricingDetail;
 
 		RunRecord(int caseId, int n, int machines, double outsourcingScale, int tariffSegments, String model,
@@ -303,6 +315,17 @@ public final class OutsourcingModelComparisonTest {
 			this.exactSeconds = sumSeconds(summary.getPricingTimeNanos()) - heuristicSeconds;
 			this.exactCalls = summary.getPricingRounds() - heuristicCalls;
 			this.masterLpSeconds = sumSeconds(summary.getMasterLpTimeNanos());
+			this.initialIncumbent = summary.getInitialIncumbentCost();
+			this.boundGainAfterRoot = Double.isFinite(rootBound) && Double.isFinite(bound) ? bound - rootBound : 0.0;
+			this.incumbentGain = Double.isFinite(initialIncumbent) && Double.isFinite(incumbent)
+					? initialIncumbent - incumbent : 0.0;
+			this.incumbentUpdates = summary.getIncumbentUpdates();
+			this.rmihCalls = summary.getRestrictedIntegerHeuristicCalls();
+			this.rmihImprovements = summary.getRestrictedIntegerHeuristicImproveCount();
+			this.prunedByIncumbent = summary.getPrunedByIncumbentCount();
+			this.closedWithoutBranch = summary.getClosedWithoutBranchCount();
+			this.branchCalls = summary.getBranchCalls();
+			this.branchDetail = compactCounts(summary.getBranchSuccessCount());
 			this.pricingDetail = compactPricing(summary.getPricingCallCount(), summary.getPricingColumnCount(),
 					summary.getPricingTimeNanos());
 
@@ -366,8 +389,20 @@ public final class OutsourcingModelComparisonTest {
 					fmt(heuristicSeconds), String.valueOf(heuristicCalls), fmt(exactSeconds),
 					String.valueOf(exactCalls), fmt(masterLpSeconds), String.valueOf(internalColumns),
 					String.valueOf(internalJobs), fmt(internalCost), String.valueOf(outsourcedJobs),
-					fmt(outsourcingBaseline), fmt(outsourcingCost), quote(pricingDetail), Boolean.toString(objectiveMatch),
-					Boolean.toString(boundMatch), Boolean.toString(rootBoundMatch));
+					fmt(outsourcingBaseline), fmt(outsourcingCost), fmt(initialIncumbent), fmt(boundGainAfterRoot),
+					fmt(incumbentGain), String.valueOf(incumbentUpdates), String.valueOf(rmihCalls),
+					String.valueOf(rmihImprovements), String.valueOf(prunedByIncumbent),
+					String.valueOf(closedWithoutBranch), String.valueOf(branchCalls), quote(branchDetail),
+					quote(pricingDetail), Boolean.toString(objectiveMatch), Boolean.toString(boundMatch),
+					Boolean.toString(rootBoundMatch));
 		}
+	}
+
+	private static String compactCounts(Map<String, Integer> counts) {
+		LinkedHashMap<String, String> parts = new LinkedHashMap<String, String>();
+		for (Map.Entry<String, Integer> entry : counts.entrySet()) {
+			parts.put(entry.getKey(), String.valueOf(entry.getValue().intValue()));
+		}
+		return parts.toString();
 	}
 }

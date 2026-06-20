@@ -227,7 +227,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.endForbidden = new boolean[n + 1];
 			this.activeSignatures = collectActiveSignatures();
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
-			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, config.maxExactPricingColumns),
+			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
 			this.bestPseudoReducedCost = INF;
 			this.fingerprint = graphDualFingerprint(data, config, lp, horizon);
@@ -235,7 +235,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		ArrayList<TWETColumn> solve() {
-			if (config.maxExactPricingColumns <= 0) {
+			int maxColumns = maxReturnedColumns();
+			if (maxColumns <= 0) {
 				return new ArrayList<TWETColumn>();
 			}
 			runForwardPass();
@@ -243,10 +244,15 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			ArrayList<Candidate> candidates = new ArrayList<Candidate>(candidateBySignature.values());
 			Collections.sort(candidates, bestCandidateFirstComparator());
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
-			for (int i = 0; i < candidates.size() && columns.size() < config.maxExactPricingColumns; i++) {
+			for (int i = 0; i < candidates.size() && columns.size() < maxColumns; i++) {
 				columns.add(candidates.get(i).column);
 			}
 			return columns;
+		}
+
+		private int maxReturnedColumns() {
+			return config.timeIndexedGraphMaxExactPricingColumns > 0 ? config.timeIndexedGraphMaxExactPricingColumns
+					: config.maxExactPricingColumns;
 		}
 
 		String message(boolean improved) {
@@ -459,7 +465,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		private boolean isPotentialTopCandidate(double reducedCost) {
-			if (candidateBySignature.size() < config.maxExactPricingColumns) {
+			if (candidateBySignature.size() < maxReturnedColumns()) {
 				return true;
 			}
 			Candidate worst = currentWorstCandidate();
@@ -474,7 +480,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			Candidate candidate = new Candidate(nextCandidateId++, signature, column, reducedCost);
 			candidateBySignature.put(signature, candidate);
 			candidateHeap.add(candidate);
-			while (candidateBySignature.size() > config.maxExactPricingColumns) {
+			int maxColumns = maxReturnedColumns();
+			while (candidateBySignature.size() > maxColumns) {
 				Candidate worst = currentWorstCandidate();
 				if (worst == null) {
 					break;
@@ -738,7 +745,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
 						fixed++;
 					}
-					if (from > 0 && isEndAllowed(from, t) && !fromReachable) {
+					if (from > 0 && !isTimeIndexedArcForbidden(from, 0, t) && isEndAllowed(from, t) && !fromReachable) {
 						node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
 						fixed++;
 					}

@@ -186,6 +186,11 @@ public class TWETBPCConfig {
 	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP Configure.addin_size 的默认值。 */
 	public int maxExactPricingColumns = 150;
 	/**
+	 * 2026-06-20: no-cut time-indexed graph pricing 每轮最多返回多少条负列。
+	 * 原文 exact stage 每个 pricing subproblem 最多返回 300 条；这里单独成参，避免影响普通 exact pricing。
+	 */
+	public int timeIndexedGraphMaxExactPricingColumns = 300;
+	/**
 	 * 2026-05-18: 对应旧 VRP Configure.m_branch_col_number。这里默认调大，只作为防死循环保护，
 	 * 不作为不可行证明；正常 repair 应由 slack=0 或无新列退出。原来的 500 过小，
 	 * 可能让可修复子节点过早触发工程上限，因此先放宽到 100000。

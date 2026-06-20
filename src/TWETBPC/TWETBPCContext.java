@@ -128,12 +128,13 @@ public class TWETBPCContext {
 
 		this.branchers = new ArrayList<Brancher>();
 		if (config.useColumnizedOutsourcing()) {
-			branchers.add(new ArcBrancher(config.branchingTolerance));
-			branchers.add(new OutsourcingMembershipBrancher(config.branchingTolerance));
+			// 2026-06-20: SP1 外包集合列会产生大量 membership 分数性；先切全局机器数和机器侧结构，最后再切外包集合成员。
 			branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
 			if (config.enableUndirectedAdjacencyBranching) {
 				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
 			}
+			branchers.add(new ArcBrancher(config.branchingTolerance));
+			branchers.add(new OutsourcingMembershipBrancher(config.branchingTolerance));
 		} else {
 			branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));
 			branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));

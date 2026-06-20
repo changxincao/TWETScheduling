@@ -25,3 +25,11 @@ root 后的 time-indexed arc fixing 统计为 `candidates=1314583, fixed=2261948
 由此看，当前瓶颈不是 DAG exact pricing，而是 graph pricing 返回 pseudo-schedule 后导致 RMP/启发式循环次数和启发式补列时间明显增加，同时 time-indexed arc fixing 在若干节点也比 exact pricing 本身更重。no-cut time-indexed DAG 定价在单次 exact pricing 上很快，root bound 与最终最优值也合理；但在当前 `>=` master、启发式 pricing 仍优先运行、且 pseudo-schedule 列进入 RMP 的组合下，它没有超过现有 normal ng-DSSR。
 
 后续若继续推进，应重点看两点：第一，是否限制或重排启发式 pricing 调用频率，避免 exact graph 很快但启发式占大头；第二，是否把论文式分支和 time-indexed fixing 做得更完整，以减少 pseudo-schedule 列带来的主问题迭代波动。
+
+## 5. 关闭现有启发式 pricing 的尝试
+
+随后按同一 40-2 zero setup 配置，只把 `enableHeuristicPricing=false`，保留 ALNS seed、RMIH、time-indexed graph exact pricing 和 time-indexed arc fixing，测试“只用精确定价”的效果。运行中日志仍会打印 `HeuristicPricing.start`，但该引擎在配置关闭时立即返回空列，实际补列来自 `TimeIndexedGraphPricing`。
+
+该尝试没有继续跑到根节点闭合。原因是 root 节点列池快速膨胀：从初始 85 条 seed 列开始，time-indexed exact graph 连续多轮加列，约数分钟后仍停留在 node 1，restricted/pool 已增长到 7 万条以上，超过上一轮完整搜索最终 pool `36085` 的两倍，且根节点还没有进入 RMIH、arc fixing 或 branching。为避免继续消耗时间，手动中止该 run。
+
+这个结果说明，当前“直接关闭现有启发式 pricing”不是有效提速。现有启发式虽然耗时，但它相当于限制了每轮进入 RMP 的候选列形态；直接让 time-indexed exact graph 从 root 开始大量返回 pseudo-schedule 负列，会让 RMP 规模和重解次数膨胀。后续如果要贴近原文，更合理的方向不是完全关闭启发式，而是给 time-indexed graph 自身加原文式两阶段策略：第一阶段每个 bucket 只扩展 reduced cost 最小 label、每轮最多返回约 50 条负列；第二阶段才用完整 exact pricing 证明无负列，并限制每轮返回列数，避免 root 被 pseudo-schedule 列淹没。

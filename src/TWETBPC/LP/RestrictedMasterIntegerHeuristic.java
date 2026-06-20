@@ -210,8 +210,9 @@ public final class RestrictedMasterIntegerHeuristic {
 		for (int job = 1; job <= data.n; job++) {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
 			for (int idx = 0; idx < columnIds.size(); idx++) {
-				if (lp.getPool().getColumn(columnIds.get(idx).intValue()).containsJob(job)) {
-					expr.addTerm(1.0, x[idx]);
+				int coefficient = lp.getPool().getColumn(columnIds.get(idx).intValue()).getJobVisitCount(job);
+				if (coefficient > 0) {
+					expr.addTerm(coefficient, x[idx]);
 				}
 			}
 			expr.addTerm(1.0, y[job]);

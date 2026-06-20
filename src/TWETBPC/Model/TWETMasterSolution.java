@@ -139,8 +139,9 @@ public final class TWETMasterSolution {
 		double value = 0.0;
 		for (Map.Entry<Integer, Double> entry : columnValues.entrySet()) {
 			TWETColumn column = pool.getColumn(entry.getKey());
-			if (column.visitsArc(from, to, sinkId)) {
-				value += entry.getValue();
+			int coefficient = column.getArcVisitCount(from, to, sinkId);
+			if (coefficient > 0) {
+				value += coefficient * entry.getValue();
 			}
 		}
 		return value;

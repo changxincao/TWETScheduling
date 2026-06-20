@@ -172,10 +172,12 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						continue;
 					}
 					relaxedStates++;
-					rememberEndCandidateIfNegative(lastJob, state, base);
+					rememberEndCandidateIfNegative(lastJob, t, state, base);
 					if (t < horizon) {
 						int waitTarget = index(lastJob, t + 1);
-						relax(state, waitTarget, 0.0, 0);
+						if (!isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
+							relax(state, waitTarget, 0.0, 0);
+						}
 					}
 					for (int nextJob = 1; nextJob <= n; nextJob++) {
 						if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]) {
@@ -201,8 +203,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 		}
 
-		private void rememberEndCandidateIfNegative(int lastJob, int state, double baseReducedCost) {
-			if (lastJob == 0 || !isEndAllowed(lastJob)) {
+		private void rememberEndCandidateIfNegative(int lastJob, int time, int state, double baseReducedCost) {
+			if (lastJob == 0 || !isEndAllowed(lastJob, time)) {
 				return;
 			}
 			double reducedCost = baseReducedCost + sinkArcReducedCost(lastJob);
@@ -265,8 +267,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return -lp.getArcDual(lastJob, sink);
 		}
 
-		private boolean isEndAllowed(int lastJob) {
-			return lastJob > 0 && !endForbidden[lastJob];
+		private boolean isEndAllowed(int lastJob, int time) {
+			return lastJob > 0 && !endForbidden[lastJob] && !isTimeIndexedArcForbidden(lastJob, 0, time);
 		}
 
 		private void precomputeStaticPricingData() {
@@ -446,8 +448,12 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			long start = System.nanoTime();
 			computeForwardDistances();
 			computeBackwardDistances();
-			int candidates = 0;
-			int fixed = 0;
+			int processCandidates = 0;
+			int processFixed = 0;
+			int idleCandidates = 0;
+			int idleFixed = 0;
+			int endCandidates = 0;
+			int endFixed = 0;
 			int unavailable = 0;
 			for (int t = 0; t <= horizon; t++) {
 				for (int from = 0; from <= n; from++) {
@@ -459,7 +465,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
 							continue;
 						}
-						candidates++;
+						processCandidates++;
 						int completion = t + durationByArc[from][to];
 						if (completion > horizon || !isCompletionFeasible(to, completion)) {
 							unavailable++;
@@ -474,13 +480,37 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						double cmin = prefix + arcCost + backwardCost;
 						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
 							node.forbidTimeIndexedPricingOnlyArc(from, to, t);
-							fixed++;
+							processFixed++;
+						}
+					}
+					if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)) {
+						idleCandidates++;
+						double backwardCost = backward[index(from, t + 1)];
+						if (isFinite(backwardCost)) {
+							double cmin = prefix + backwardCost;
+							if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
+								node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+								idleFixed++;
+							}
+						} else {
+							unavailable++;
+						}
+					}
+					if (from > 0 && isEndAllowed(from, t)) {
+						endCandidates++;
+						double cmin = prefix + sinkArcReducedCost(from);
+						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
+							node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
+							endFixed++;
 						}
 					}
 				}
 			}
-			return new ArcFixingResult(true, candidates, fixed, unavailable, gap, System.nanoTime() - start,
-					"paper time-indexed reduced-cost arc fixing");
+			int cleanupFixed = cleanupGraph();
+			int candidates = processCandidates + idleCandidates + endCandidates;
+			int fixed = processFixed + idleFixed + endFixed + cleanupFixed;
+			return new ArcFixingResult(true, candidates, fixed, processFixed, idleFixed, endFixed, cleanupFixed,
+					unavailable, gap, System.nanoTime() - start, "paper time-indexed reduced-cost arc fixing");
 		}
 
 		private void computeForwardDistances() {
@@ -496,7 +526,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						continue;
 					}
 					if (t < horizon) {
-						relax(forward, index(lastJob, t + 1), base);
+						if (!isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
+							relax(forward, index(lastJob, t + 1), base);
+						}
 					}
 					for (int nextJob = 1; nextJob <= n; nextJob++) {
 						if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]
@@ -520,17 +552,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			for (int i = 0; i < backward.length; i++) {
 				backward[i] = INF;
 			}
-			for (int t = 0; t <= horizon; t++) {
-				for (int lastJob = 1; lastJob <= n; lastJob++) {
-					if (isEndAllowed(lastJob)) {
-						backward[index(lastJob, t)] = sinkArcReducedCost(lastJob);
-					}
-				}
-			}
+			backward[index(0, horizon)] = 0.0;
 			for (int t = horizon - 1; t >= 0; t--) {
 				for (int lastJob = 0; lastJob <= n; lastJob++) {
 					int state = index(lastJob, t);
-					relax(backward, state, backward[index(lastJob, t + 1)]);
+					if (!isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
+						relax(backward, state, backward[index(lastJob, t + 1)]);
+					}
 					for (int nextJob = 1; nextJob <= n; nextJob++) {
 						if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]
 								|| isTimeIndexedArcForbidden(lastJob, nextJob, t)) {
@@ -546,8 +574,64 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 							relax(backward, state, arcCost + backwardCost);
 						}
 					}
+					if (lastJob > 0 && isEndAllowed(lastJob, t)) {
+						relax(backward, state, sinkArcReducedCost(lastJob) + backward[index(0, horizon)]);
+					}
 				}
 			}
+		}
+
+		private int cleanupGraph() {
+			computeForwardDistances();
+			computeBackwardDistances();
+			int fixed = 0;
+			for (int t = 0; t <= horizon; t++) {
+				for (int from = 0; from <= n; from++) {
+					boolean fromReachable = isFinite(forward[index(from, t)]);
+					for (int to = 1; to <= n; to++) {
+						if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
+							continue;
+						}
+						int completion = t + durationByArc[from][to];
+						if (completion > horizon || !isCompletionFeasible(to, completion)
+								|| !fromReachable || !isFinite(backward[index(to, completion)])) {
+							node.forbidTimeIndexedPricingOnlyArc(from, to, t);
+							fixed++;
+						}
+					}
+					if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)
+							&& (!fromReachable || !isFinite(backward[index(from, t + 1)]))) {
+						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+						fixed++;
+					}
+					if (from > 0 && isEndAllowed(from, t) && !fromReachable) {
+						node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
+						fixed++;
+					}
+					if (from > 0 && t < horizon && isEndAllowed(from, t)
+							&& !isTimeIndexedArcForbidden(from, from, t)
+							&& !hasProcessingOutgoingAtOrAfter(from, t + 1)) {
+						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+						fixed++;
+					}
+				}
+			}
+			return fixed;
+		}
+
+		private boolean hasProcessingOutgoingAtOrAfter(int from, int startTime) {
+			for (int t = startTime; t <= horizon; t++) {
+				for (int to = 1; to <= n; to++) {
+					if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
+						continue;
+					}
+					int completion = t + durationByArc[from][to];
+					if (completion <= horizon && isCompletionFeasible(to, completion)) {
+						return true;
+					}
+				}
+			}
+			return false;
 		}
 
 		private void relax(double[] values, int index, double candidate) {
@@ -604,8 +688,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return -lp.getArcDual(lastJob, sink);
 		}
 
-		private boolean isEndAllowed(int lastJob) {
-			return lastJob > 0 && !endForbidden[lastJob];
+		private boolean isEndAllowed(int lastJob, int time) {
+			return lastJob > 0 && !endForbidden[lastJob] && !isTimeIndexedArcForbidden(lastJob, 0, time);
 		}
 
 		private boolean isProcessArcForbiddenByNode(int from, int to) {
@@ -639,16 +723,24 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final boolean available;
 		private final int candidates;
 		private final int fixed;
+		private final int processFixed;
+		private final int idleFixed;
+		private final int endFixed;
+		private final int cleanupFixed;
 		private final int unavailable;
 		private final double gap;
 		private final long totalNanos;
 		private final String message;
 
-		private ArcFixingResult(boolean available, int candidates, int fixed, int unavailable, double gap,
-				long totalNanos, String message) {
+		private ArcFixingResult(boolean available, int candidates, int fixed, int processFixed, int idleFixed,
+				int endFixed, int cleanupFixed, int unavailable, double gap, long totalNanos, String message) {
 			this.available = available;
 			this.candidates = candidates;
 			this.fixed = fixed;
+			this.processFixed = processFixed;
+			this.idleFixed = idleFixed;
+			this.endFixed = endFixed;
+			this.cleanupFixed = cleanupFixed;
 			this.unavailable = unavailable;
 			this.gap = gap;
 			this.totalNanos = totalNanos;
@@ -656,7 +748,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, Double.NaN, 0L, message);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message);
 		}
 
 		public boolean isAvailable() {
@@ -669,6 +761,22 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 		public int getFixed() {
 			return fixed;
+		}
+
+		public int getProcessFixed() {
+			return processFixed;
+		}
+
+		public int getIdleFixed() {
+			return idleFixed;
+		}
+
+		public int getEndFixed() {
+			return endFixed;
+		}
+
+		public int getCleanupFixed() {
+			return cleanupFixed;
 		}
 
 		public int getUnavailable() {
@@ -685,7 +793,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 		public String summary() {
 			return message + ", candidates=" + candidates + ", fixed=" + fixed + ", unavailable=" + unavailable
-					+ ", gap=" + gap + ", ms=" + String.format("%.3f", totalNanos / 1_000_000.0);
+					+ ", processFixed=" + processFixed + ", idleFixed=" + idleFixed + ", endFixed=" + endFixed
+					+ ", cleanupFixed=" + cleanupFixed + ", gap=" + gap + ", ms="
+					+ String.format("%.3f", totalNanos / 1_000_000.0);
 		}
 	}
 

@@ -51,3 +51,13 @@
 仍然不等同完整论文版的地方也要明确。第一，当前只实现同质机单图口径，没有按 machine type `k` 拆多张图。第二，当前 no-cut 实验不带论文的 limited-memory rank-1 cut state，因此 Algorithm 7 中两侧 label 合并时的 `S_l+S'_l>=beta_l` 修正没有实现；这和“先做无 cut 版本”的目标一致。第三，当前只 fixing 处理弧 `(from,to,t)`，没有继续删除冗余 idle arc、sink arc，也没有做图顶点压缩和 `t*` 重算。第四，论文 DWM 的列系数按路径中 job 被处理次数计数，而当前 TWETColumn 仍按 `containsJob` 的 0/1 覆盖语义进入 RMP，所以该 graph pricing 只能作为实验对照，不能直接替代当前 elementary/ng exact pricing 的正确性证明。第五，TWET 当前目标包含 setup cost 和分支 arc dual，这比论文“目标函数只定义在完工时间上、setup 主要影响时间推进”的基础公式多了问题特定项；这些项是为了和现有 TWET RMP reduced-cost 口径一致，而不是论文原式本身。
 
 因此当前结论是：no-cut graph pricing 的 DAG 最短路骨架和 Algorithm 7 的 reduced-cost fixing 核心判定已经对齐，但不是完整论文 BCP 实现。后续若要声称“和论文完全一致”，至少还需要补 machine type 多图、DWM 路径系数口径、limited-memory rank-1 cut state、idle/sink/vertex cleanup，以及与论文相同的 branching/cut 主循环。
+
+## 7. 2026-06-20 修正：DWM 访问次数系数和图清理
+
+根据论文 DWM 的列定义，路径中同一 job 被处理多次时，该列在对应覆盖行里的系数应为访问次数，而不是简单的 0/1 `containsJob`。本次已把 `TWETColumn` 增加为同时保存 job visit count 和普通 arc visit count：普通 elementary/ng 列仍自然是 0/1；time-indexed pseudo-schedule 列若重复访问 job，则 RMP 覆盖行、arc 分支行、当前解 arc value 以及 RMIH 覆盖模型都会使用访问次数系数。这样 graph pricing 返回的 pseudo-schedule 不再只是“实验对照列”，而是按论文 DWM 口径进入当前 master。需要注意的是，SRI cut 识别/系数仍按当前 cut 语义单独处理，不在这次 no-cut graph pricing 修正范围内。
+
+Algorithm 7 的 reduced-cost fixing 也补齐为三类时间弧：processing arc `(from,to,t)`、idle arc `(from,from,t)` 和 end/sink arc `(from,0,t)`。fixing 后会重算一次 forward/backward shortest distance，并做保守的图清理：删除不可达、不可共达、时间不可行的 processing/idle/end arc；对 job 顶点上的冗余 idle arc，如果该时刻以后已经没有可行 processing outgoing，且可直接走 end arc，则禁止该 idle arc。这相当于当前隐式图上的 vertex/arc compression；代码没有显式删除顶点对象，因为图本身按 DP 状态即时生成，压缩表现为把对应 time-indexed pricing-only arc 写入 node。
+
+关于 `t*`，当前实现仍是单向 full-horizon DAG shortest path，而不是论文后续带 cut 时的 bidirectional labeling 过程，因此没有一个需要重算的中间分界 `t*`。若后续实现论文式 bidirectional time-indexed graph pricing，再把 `t*` 作为该双向定价器自己的状态重算；在当前单向 DP 版本里强行加 `t*` 没有对应语义。
+
+本次 focused `javac` 已通过，编译范围包括 `TimeIndexedGraphPricingEngine`、`TWETColumn`、`LP`、`RestrictedMasterIntegerHeuristic`、`TWETMasterSolution`、`Node`、`Tree`、`TWETBPCConfig`、`TWETBPCContext`。后续如果打开 `useTimeIndexedGraphPricing=true` 做实验，要重点观察重复 job pseudo-schedule 对 master bound 的影响，以及 idle/end/time-indexed fixing 的数量是否符合预期。

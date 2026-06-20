@@ -348,8 +348,9 @@ public class LP {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
 			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
 				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
-				if (column.containsJob(job)) {
-					expr.addTerm(1.0, lambdaVars[idx]);
+				int coefficient = column.getJobVisitCount(job);
+				if (coefficient > 0) {
+					expr.addTerm(coefficient, lambdaVars[idx]);
 				}
 			}
 			expr.addTerm(1.0, outsourceVars[job]);
@@ -380,8 +381,9 @@ public class LP {
 				IloLinearNumExpr expr = cplex.linearNumExpr();
 				for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
 					TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
-					if (column.visitsArc(from, to, sink)) {
-						expr.addTerm(1.0, lambdaVars[idx]);
+					int coefficient = column.getArcVisitCount(from, to, sink);
+					if (coefficient > 0) {
+						expr.addTerm(coefficient, lambdaVars[idx]);
 					}
 				}
 				IloRange range = state == Node.ARC_REQUIRED ? cplex.addEq(expr, 1.0, "requiredArc_" + from + "_" + to)
@@ -525,15 +527,17 @@ public class LP {
 		IloColumn cplexColumn = cplex.column(objective, column.getCost());
 		cplexColumn = cplexColumn.and(cplex.column(machineRange, 1.0));
 		for (int job = 1; job <= data.n; job++) {
-			if (column.containsJob(job)) {
-				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
+			int coefficient = column.getJobVisitCount(job);
+			if (coefficient > 0) {
+				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], coefficient));
 			}
 		}
 		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
-			if (column.visitsArc(from, to, node.sinkId())) {
-				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			int coefficient = column.getArcVisitCount(from, to, node.sinkId());
+			if (coefficient > 0) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), coefficient));
 			}
 		}
 		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {

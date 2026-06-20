@@ -30,6 +30,8 @@ public final class TWETColumn {
 	private final SequenceSignature signature;
 	/** 该列覆盖的 job 集合；用于后续做覆盖判断、冲突判断等。 */
 	private final PackedBitSet jobs;
+	/** 每个 job 在该列序列中出现的次数；time-indexed pseudo-schedule 列需要该系数。 */
+	private final int[] jobVisitCounts;
 	/** 列成本，即把这条序列放在一台机器上的目标值。 */
 	private final double cost;
 	/** 列的来源类型。 */
@@ -52,6 +54,12 @@ public final class TWETColumn {
 		this.sequence = new ArrayList<Integer>(sequence);
 		this.signature = new SequenceSignature(this.sequence);
 		this.jobs = PackedBitSet.ofJobs(jobCount, this.sequence);
+		this.jobVisitCounts = new int[jobCount + 1];
+		for (int job : this.sequence) {
+			if (job >= 1 && job <= jobCount) {
+				this.jobVisitCounts[job]++;
+			}
+		}
 		this.cost = cost;
 		this.source = source;
 		this.seedColumn = seedColumn;
@@ -114,6 +122,13 @@ public final class TWETColumn {
 	}
 
 	/**
+	 * @return 该 job 在列序列中出现的次数。普通 elementary 列为 0/1；论文 DWM pseudo-schedule 列可大于 1。
+	 */
+	public int getJobVisitCount(int job) {
+		return job >= 0 && job < jobVisitCounts.length ? jobVisitCounts[job] : 0;
+	}
+
+	/**
 	 * 判断该列是否经过给定弧。
 	 * <p>
 	 * 这里的“弧”是把调度序列看成路径后得到的相邻关系：
@@ -125,18 +140,29 @@ public final class TWETColumn {
 	 * 这个接口是当前弧分支器直接依赖的基础判定逻辑。
 	 */
 	public boolean visitsArc(int from, int to, int sinkId) {
+		return getArcVisitCount(from, to, sinkId) > 0;
+	}
+
+	/**
+	 * @return 调度序列中给定普通 arc 的出现次数。对重复 job 的 pseudo-schedule，arc 系数可能大于 1。
+	 */
+	public int getArcVisitCount(int from, int to, int sinkId) {
 		if (sequence.isEmpty()) {
-			return false;
+			return 0;
 		}
+		int count = 0;
 		if (from == 0 && sequence.get(0) == to) {
-			return true;
+			count++;
 		}
 		for (int i = 1; i < sequence.size(); i++) {
 			if (sequence.get(i - 1) == from && sequence.get(i) == to) {
-				return true;
+				count++;
 			}
 		}
-		return to == sinkId && sequence.get(sequence.size() - 1) == from;
+		if (to == sinkId && sequence.get(sequence.size() - 1) == from) {
+			count++;
+		}
+		return count;
 	}
 
 	@Override

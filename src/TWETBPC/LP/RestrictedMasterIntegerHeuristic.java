@@ -111,7 +111,8 @@ public final class RestrictedMasterIntegerHeuristic {
 						expr.addTerm(1.0, w[i]);
 					}
 				}
-				cplex.addEq(expr, 1.0, "rmih_cover_" + job);
+				// 2026-06-20: 列化外包 RMIH 与 RMP 一致先按 >= 覆盖求解，重复覆盖不在这里强行排除。
+				cplex.addGe(expr, 1.0, "rmih_cover_" + job);
 			}
 			IloLinearNumExpr machine = cplex.linearNumExpr();
 			for (IloIntVar var : x) {

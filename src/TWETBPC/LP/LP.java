@@ -430,7 +430,8 @@ public class LP {
 						expr.addTerm(1.0, outsourceColumnVars[idx]);
 					}
 				}
-				coverRanges[job] = cplex.addEq(expr, 1.0, "cover_" + job);
+				// 2026-06-20: 列化外包仍沿用 set covering 口径；重复覆盖由后续上界启发式修复处理。
+				coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
 			} else {
 				expr.addTerm(1.0, outsourceVars[job]);
 				// 2026-05-24: BPC pricing 后续按 set covering 对偶语义处理任务覆盖行。

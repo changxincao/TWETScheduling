@@ -237,7 +237,7 @@ public class LP {
 		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedColumnIds);
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
-			if (!activeColumnIds.contains(value) && isColumnCompatible(pool.getColumn(id))) {
+			if (!activeColumnIds.contains(value)) {
 				restrictedColumnIds.add(value);
 				activeColumnIds.add(value);
 				added++;

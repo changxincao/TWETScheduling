@@ -73,6 +73,57 @@ public final class RestrictedMasterIntegerHeuristic {
 	}
 
 	private Result solveColumnizedOutsourcing(LP lp, long start) throws IloException {
+		long selectStart = System.nanoTime();
+		ArrayList<Integer> screenedInternal = selectCoverRepairColumns(lp);
+		ArrayList<Integer> outsourcingIds = new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds());
+		long selectNanos = System.nanoTime() - selectStart;
+
+		long coverStart = System.nanoTime();
+		Attempt covering = solveColumnizedOnce(lp, screenedInternal, outsourcingIds, false,
+				"columnized_covering");
+		long coverNanos = System.nanoTime() - coverStart;
+		long elapsed = System.nanoTime() - start;
+		if (!covering.solved) {
+			return Result.notSolved("restricted integer heuristic columnized covering not solved: "
+					+ covering.status + " internalCols=" + screenedInternal.size()
+					+ " outsourcingCols=" + outsourcingIds.size()
+					+ timingSummary(selectNanos, coverNanos, 0L, 0L), elapsed);
+		}
+		if (covering.coverage.valid()) {
+			return buildFeasibleResult(covering, "restricted integer heuristic columnized covering "
+					+ covering.status + " internalCols=" + screenedInternal.size()
+					+ " outsourcingCols=" + outsourcingIds.size()
+					+ timingSummary(selectNanos, coverNanos, 0L, 0L), elapsed);
+		}
+
+		long repairStart = System.nanoTime();
+		RepairGeneration repair = generateRepairColumns(lp, covering.selectedColumnIds,
+				covering.outsourcingValues, covering.coverage);
+		long repairNanos = System.nanoTime() - repairStart;
+		LinkedHashSet<Integer> finalInternalIds = new LinkedHashSet<Integer>(screenedInternal);
+		finalInternalIds.addAll(repair.repairColumnIds);
+
+		long partitionStart = System.nanoTime();
+		Attempt partition = solveColumnizedOnce(lp, new ArrayList<Integer>(finalInternalIds), outsourcingIds,
+				true, "columnized_partition");
+		long partitionNanos = System.nanoTime() - partitionStart;
+		elapsed = System.nanoTime() - start;
+		String prefix = "restricted integer heuristic columnized covering=" + covering.status + " "
+				+ covering.coverage.summary() + " internalCols=" + screenedInternal.size()
+				+ " outsourcingCols=" + outsourcingIds.size() + " repairCols=" + repair.repairColumnIds.size()
+				+ " repairMode=heuristic partition=" + partition.status
+				+ timingSummary(selectNanos, coverNanos, repairNanos, partitionNanos);
+		if (!partition.solved) {
+			return Result.notSolved(prefix, elapsed);
+		}
+		if (!partition.coverage.valid()) {
+			return Result.notSolved(prefix + " invalid coverage: " + partition.coverage.summary(), elapsed);
+		}
+		return buildFeasibleResult(partition, prefix, elapsed);
+	}
+
+	private Attempt solveColumnizedOnce(LP lp, List<Integer> internalIds, List<Integer> outsourcingIds,
+			boolean exactCover, String label) throws IloException {
 		IloCplex cplex = null;
 		try {
 			cplex = new IloCplex();
@@ -82,8 +133,6 @@ public final class RestrictedMasterIntegerHeuristic {
 				cplex.setParam(IloCplex.Param.TimeLimit,
 						config.restrictedMasterIntegerHeuristicTimeLimitSeconds);
 			}
-			List<Integer> internalIds = lp.getRestrictedColumnIds();
-			List<Integer> outsourcingIds = lp.getRestrictedOutsourcingColumnIds();
 			IloIntVar[] x = new IloIntVar[internalIds.size()];
 			IloIntVar[] w = new IloIntVar[outsourcingIds.size()];
 			IloLinearNumExpr obj = cplex.linearNumExpr();
@@ -111,8 +160,12 @@ public final class RestrictedMasterIntegerHeuristic {
 						expr.addTerm(1.0, w[i]);
 					}
 				}
-				// 2026-06-20: 列化外包 RMIH 与 RMP 一致先按 >= 覆盖求解，重复覆盖不在这里强行排除。
-				cplex.addGe(expr, 1.0, "rmih_cover_" + job);
+				if (exactCover) {
+					cplex.addEq(expr, 1.0, "rmih_cover_" + job);
+				} else {
+					// 2026-06-20: 第一阶段与 RMP 一致按 >= 覆盖找重复结构，之后再用删点列解 ==。
+					cplex.addGe(expr, 1.0, "rmih_cover_" + job);
+				}
 			}
 			IloLinearNumExpr machine = cplex.linearNumExpr();
 			for (IloIntVar var : x) {
@@ -125,17 +178,14 @@ public final class RestrictedMasterIntegerHeuristic {
 			}
 			cplex.addLe(outsourcingCount, 1.0, "rmih_outsourcingColumnCount");
 			if (!cplex.solve()) {
-				return Result.notSolved("restricted integer heuristic columnized outsourcing not solved: "
-						+ cplex.getStatus(), System.nanoTime() - start);
+				return Attempt.notSolved(label, cplex.getStatus().toString());
 			}
 			ArrayList<Integer> selectedInternalIds = new ArrayList<Integer>();
-			LinkedHashMap<Integer, Double> columnValues = new LinkedHashMap<Integer, Double>();
 			double[] outsourcingValues = new double[data.n + 1];
 			for (int i = 0; i < internalIds.size(); i++) {
 				if (Utility.compareGt(cplex.getValue(x[i]), INTEGER_TOLERANCE)) {
 					Integer columnId = internalIds.get(i);
 					selectedInternalIds.add(columnId);
-					columnValues.put(columnId, Double.valueOf(1.0));
 				}
 			}
 			for (int i = 0; i < outsourcingIds.size(); i++) {
@@ -146,12 +196,9 @@ public final class RestrictedMasterIntegerHeuristic {
 					}
 				}
 			}
-			TWETMasterSolution solution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues,
-					outsourcingValues, new double[0], cplex.getObjValue(), true,
-					"restricted integer heuristic columnized outsourcing " + cplex.getStatus());
-			return Result.feasible(cplex.getObjValue(), selectedInternalIds, outsourcingValues,
-					"restricted integer heuristic columnized outsourcing " + cplex.getStatus(),
-					System.nanoTime() - start, solution);
+			CoverageStats coverage = inspectCoverage(lp, selectedInternalIds, outsourcingValues);
+			return new Attempt(true, cplex.getStatus().toString(), cplex.getObjValue(), selectedInternalIds,
+					outsourcingValues, new double[0], coverage);
 		} finally {
 			if (cplex != null) {
 				cplex.end();

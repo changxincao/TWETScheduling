@@ -35,6 +35,7 @@ public class GCBBFullDomainComparisonTest {
 	private static final String NG_DSSR_GRAPH_PARTIAL_ENGINE = "GCNGBBStyleNgDssrGraphPartialDominancePricing";
 	private static final String FULL_DOMAIN_ENGINE = "GCBBStyleBidirectionalFullDomainPricing";
 	private static final String NODE_JOIN_ENGINE = "GCBBStyleBidirectionalFullDomainNodeJoinPricing";
+	private static final String TIME_INDEXED_GRAPH_ENGINE = "TimeIndexedGraphPricing";
 
 	public static void main(String[] args) throws Exception {
 		Configure.debugBPCPricingColumnCheck = Boolean.getBoolean("twet.bpc.fullDomainCompare.debugColumnCheck");
@@ -115,7 +116,8 @@ public class GCBBFullDomainComparisonTest {
 	private static RunRecord runOne(Path instance, boolean fullDomain, boolean nodeJoin, Path outputDir)
 			throws Exception {
 		resetHeuristicSeed(instance);
-		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(instance.toString(), false);
+		boolean zeroSetup = Boolean.getBoolean("twet.bpc.fullDomainCompare.zeroSetup");
+		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(instance.toString(), zeroSetup);
 		TWETBPCConfig config = buildConfig(instance, fullDomain, nodeJoin);
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);
 		TWETSolveResult result = solver.solve();
@@ -137,6 +139,9 @@ public class GCBBFullDomainComparisonTest {
 		if (!joinBestMode.isEmpty() && !"zero".equalsIgnoreCase(joinBestMode)) {
 			mode += "-" + joinBestMode;
 		}
+		if (config.useTimeIndexedGraphPricing) {
+			mode += "-timeGraph";
+		}
 		String completionBound = config.bidirectionalCompletionBoundRelaxation == null
 				? "off" : config.bidirectionalCompletionBoundRelaxation.trim();
 		if ((fullDomain || nodeJoin) && !completionBound.isEmpty() && !"off".equalsIgnoreCase(completionBound)) {
@@ -155,11 +160,12 @@ public class GCBBFullDomainComparisonTest {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		}
-		String exactEngine = nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
+		String exactEngine = config.useTimeIndexedGraphPricing ? TIME_INDEXED_GRAPH_ENGINE
+				: (nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
 				: (config.useGCNGBBStyleNgDssrPartialDominancePricing ? NG_DSSR_PARTIAL_ENGINE
 				: (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing ? NG_DSSR_GRAPH_PARTIAL_ENGINE
 						: (config.useGCNGBBStyleNgDssrPricing ? NG_DSSR_ENGINE
-						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE)))));
+						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE))))));
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		Files.write(log, summary.getEventLines());
 		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
@@ -235,6 +241,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableUndirectedAdjacencyBranching",
 				Boolean.toString(config.enableUndirectedAdjacencyBranching)));
+		config.useTimeIndexedGraphPricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedGraphPricing",
+				Boolean.toString(config.useTimeIndexedGraphPricing)));
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

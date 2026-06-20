@@ -11,10 +11,13 @@ import java.util.Locale;
 import java.util.Map;
 
 import Basic.Data;
+import Common.PiecewiseLinearFunction;
 import Output.BPCOutputFormatters;
 import Output.BPCTraceSummary;
 import Output.ValidationResult;
 import Output.BPCSolutionValidator;
+import TWETBPC.LP.Pool;
+import TWETBPC.Model.TWETColumn;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETBPCSolver;
 import TWETBPC.TWETSolveResult;
@@ -34,6 +37,8 @@ public final class OutsourcingModelComparisonTest {
 	public static void main(String[] args) throws Exception {
 		int n = Integer.getInteger("twet.bpc.outsourcingCompare.n", 12);
 		int machines = Integer.getInteger("twet.bpc.outsourcingCompare.m", 2);
+		double outsourcingScale = Double.parseDouble(
+				System.getProperty("twet.bpc.outsourcingCompare.outsourcingScale", "1.0"));
 		String[] caseTokens = System.getProperty("twet.bpc.outsourcingCompare.cases", "0,1,2,3").split(",");
 		Path output = Paths.get(System.getProperty("twet.bpc.outsourcingCompare.output",
 				"test-results/bpc/2026-06-20-outsourcing-model-comparison.csv"));
@@ -41,13 +46,14 @@ public final class OutsourcingModelComparisonTest {
 
 		ArrayList<PairRecord> pairs = new ArrayList<PairRecord>();
 		try (BufferedWriter writer = Files.newBufferedWriter(output)) {
-			writer.write("case_id,n,m,model,status,incumbent,bound,gap_percent,valid,nodes,pricing_rounds,"
+			writer.write("case_id,n,m,outsourcing_scale,model,status,incumbent,bound,gap_percent,valid,nodes,pricing_rounds,"
 					+ "generated_columns,pool_size,solve_s,root_s,heuristic_s,heuristic_calls,exact_s,"
-					+ "exact_calls,master_lp_s,pricing_detail,objective_match,bound_match\n");
+					+ "exact_calls,master_lp_s,internal_columns,internal_jobs,internal_cost,outsourced_jobs,"
+					+ "outsourcing_baseline,outsourcing_cost,pricing_detail,objective_match,bound_match\n");
 			for (String token : caseTokens) {
 				int caseId = Integer.parseInt(token.trim());
-				RunRecord master = runCase(caseId, n, machines, "masterVariables");
-				RunRecord columns = runCase(caseId, n, machines, "columns");
+				RunRecord master = runCase(caseId, n, machines, outsourcingScale, "masterVariables");
+				RunRecord columns = runCase(caseId, n, machines, outsourcingScale, "columns");
 				PairRecord pair = new PairRecord(caseId, master, columns);
 				pairs.add(pair);
 				writer.write(master.toCsvLine(pair.objectiveMatch, pair.boundMatch));
@@ -62,15 +68,38 @@ public final class OutsourcingModelComparisonTest {
 		printAggregate(pairs);
 	}
 
-	private static RunRecord runCase(int caseId, int n, int machines, String outsourcingModel) throws Exception {
+	private static RunRecord runCase(int caseId, int n, int machines, double outsourcingScale, String outsourcingModel)
+			throws Exception {
 		Data data = SmallExactHeuristicBatchTest.buildRandomCase(caseId, n, machines);
+		applyOutsourcingScale(data, caseId, outsourcingScale);
 		TWETBPCConfig config = buildConfig(caseId, n, machines, outsourcingModel);
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);
 		TWETSolveResult result = solver.solve();
 		BPCTraceSummary summary = solver.getContext().traceSummary;
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
-		return new RunRecord(caseId, n, machines, outsourcingModel, result, summary, validation,
+		return new RunRecord(caseId, n, machines, outsourcingScale, outsourcingModel, data, solver.getContext().pool,
+				result, summary, validation,
 				solver.getContext().pool.size());
+	}
+
+	private static void applyOutsourcingScale(Data data, int caseId, double outsourcingScale) {
+		if (!Double.isFinite(outsourcingScale) || outsourcingScale <= 0.0) {
+			throw new IllegalArgumentException("outsourcingScale must be positive: " + outsourcingScale);
+		}
+		if (close(outsourcingScale, 1.0)) {
+			return;
+		}
+		double totalBaseline = 0.0;
+		for (int job = 1; job <= data.n; job++) {
+			data.outsourcingCost[job] *= outsourcingScale;
+			totalBaseline += data.outsourcingCost[job];
+		}
+		double domainEnd = Math.max(1.0, totalBaseline);
+		double outsourcingRate = 0.45 + 0.08 * (caseId % 7);
+		data.outsourcingCostFunction = new PiecewiseLinearFunction(0.0, domainEnd);
+		data.outsourcingCostFunction.addSegment(0.0, domainEnd, outsourcingRate, 0.0);
+		data.setPreprocessedHardWindows();
+		data.setPenaltyFunctions();
 	}
 
 	private static TWETBPCConfig buildConfig(int caseId, int n, int machines, String outsourcingModel) {
@@ -186,10 +215,11 @@ public final class OutsourcingModelComparisonTest {
 
 		String summaryLine() {
 			return String.format(Locale.US,
-					"case=%d objectiveMatch=%s boundMatch=%s master inc/bound/time=%s/%s/%.3fs columns inc/bound/time=%s/%s/%.3fs valid=%s/%s",
+					"case=%d objectiveMatch=%s boundMatch=%s master inc/bound/time=%s/%s/%.3fs out=%d/%d intCols=%d columns inc/bound/time=%s/%s/%.3fs out=%d/%d intCols=%d valid=%s/%s",
 					caseId, Boolean.toString(objectiveMatch), Boolean.toString(boundMatch), fmt(master.incumbent),
-					fmt(master.bound), master.solveSeconds, fmt(columns.incumbent), fmt(columns.bound),
-					columns.solveSeconds, Boolean.toString(master.valid), Boolean.toString(columns.valid));
+					fmt(master.bound), master.solveSeconds, master.outsourcedJobs, master.n, master.internalColumns,
+					fmt(columns.incumbent), fmt(columns.bound), columns.solveSeconds, columns.outsourcedJobs,
+					columns.n, columns.internalColumns, Boolean.toString(master.valid), Boolean.toString(columns.valid));
 		}
 	}
 
@@ -197,6 +227,7 @@ public final class OutsourcingModelComparisonTest {
 		final int caseId;
 		final int n;
 		final int machines;
+		final double outsourcingScale;
 		final String model;
 		final String status;
 		final double incumbent;
@@ -214,13 +245,20 @@ public final class OutsourcingModelComparisonTest {
 		final double exactSeconds;
 		final int exactCalls;
 		final double masterLpSeconds;
+		final int internalColumns;
+		final int internalJobs;
+		final double internalCost;
+		final int outsourcedJobs;
+		final double outsourcingBaseline;
+		final double outsourcingCost;
 		final String pricingDetail;
 
-		RunRecord(int caseId, int n, int machines, String model, TWETSolveResult result, BPCTraceSummary summary,
-				ValidationResult validation, int poolSize) {
+		RunRecord(int caseId, int n, int machines, double outsourcingScale, String model, Data data, Pool pool,
+				TWETSolveResult result, BPCTraceSummary summary, ValidationResult validation, int poolSize) {
 			this.caseId = caseId;
 			this.n = n;
 			this.machines = machines;
+			this.outsourcingScale = outsourcingScale;
 			this.model = model;
 			this.status = result.getStatus().toString();
 			this.incumbent = result.getIncumbentCost();
@@ -240,6 +278,36 @@ public final class OutsourcingModelComparisonTest {
 			this.masterLpSeconds = sumSeconds(summary.getMasterLpTimeNanos());
 			this.pricingDetail = compactPricing(summary.getPricingCallCount(), summary.getPricingColumnCount(),
 					summary.getPricingTimeNanos());
+
+			boolean[] internallyCovered = new boolean[data.n + 1];
+			int internalJobCount = 0;
+			double selectedInternalCost = 0.0;
+			for (int columnId : result.getIncumbentColumnIds()) {
+				TWETColumn column = pool.getColumn(columnId);
+				selectedInternalCost += column.getCost();
+				for (int job : column.getSequence()) {
+					if (job >= 1 && job <= data.n && !internallyCovered[job]) {
+						internallyCovered[job] = true;
+						internalJobCount++;
+					}
+				}
+			}
+			this.internalColumns = result.getIncumbentColumnIds().size();
+			this.internalJobs = internalJobCount;
+			this.internalCost = selectedInternalCost;
+
+			int outsourcedJobCount = 0;
+			double baseline = 0.0;
+			double[] outsourcingValues = result.getIncumbentOutsourcingValues();
+			for (int job = 1; job <= data.n && job < outsourcingValues.length; job++) {
+				if (outsourcingValues[job] > VALUE_TOLERANCE) {
+					outsourcedJobCount++;
+					baseline += data.outsourcingCost[job] * outsourcingValues[job];
+				}
+			}
+			this.outsourcedJobs = outsourcedJobCount;
+			this.outsourcingBaseline = baseline;
+			this.outsourcingCost = data.evaluateOutsourcingCost(baseline);
 		}
 
 		private double pricingSeconds(BPCTraceSummary summary, String contains) {
@@ -263,12 +331,14 @@ public final class OutsourcingModelComparisonTest {
 		}
 
 		String toCsvLine(boolean objectiveMatch, boolean boundMatch) {
-			return String.join(",", String.valueOf(caseId), String.valueOf(n), String.valueOf(machines), quote(model),
-					quote(status), fmt(incumbent), fmt(bound), fmt(gap), Boolean.toString(valid),
-					String.valueOf(nodes), String.valueOf(pricingRounds), String.valueOf(generatedColumns),
-					String.valueOf(poolSize), fmt(solveSeconds), fmt(rootSeconds), fmt(heuristicSeconds),
-					String.valueOf(heuristicCalls), fmt(exactSeconds), String.valueOf(exactCalls),
-					fmt(masterLpSeconds), quote(pricingDetail), Boolean.toString(objectiveMatch),
+			return String.join(",", String.valueOf(caseId), String.valueOf(n), String.valueOf(machines),
+					fmt(outsourcingScale), quote(model), quote(status), fmt(incumbent), fmt(bound), fmt(gap),
+					Boolean.toString(valid), String.valueOf(nodes), String.valueOf(pricingRounds),
+					String.valueOf(generatedColumns), String.valueOf(poolSize), fmt(solveSeconds), fmt(rootSeconds),
+					fmt(heuristicSeconds), String.valueOf(heuristicCalls), fmt(exactSeconds),
+					String.valueOf(exactCalls), fmt(masterLpSeconds), String.valueOf(internalColumns),
+					String.valueOf(internalJobs), fmt(internalCost), String.valueOf(outsourcedJobs),
+					fmt(outsourcingBaseline), fmt(outsourcingCost), quote(pricingDetail), Boolean.toString(objectiveMatch),
 					Boolean.toString(boundMatch));
 		}
 	}

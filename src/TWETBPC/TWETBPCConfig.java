@@ -190,6 +190,8 @@ public class TWETBPCConfig {
 	public int heuristicPricingTabuTenure = 30;
 	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP Configure.addin_size 的默认值。 */
 	public int maxExactPricingColumns = 150;
+	/** 2026-06-20: Columnized outsourcing pricing has its own return cap; keep it separate from internal exact pricing. */
+	public int maxOutsourcingPricingColumns = 150;
 	/**
 	 * 2026-06-20: no-cut time-indexed graph pricing 每轮最多返回多少条负列。
 	 * 原文 exact stage 每个 pricing subproblem 最多返回 300 条；这里单独成参，避免影响普通 exact pricing。

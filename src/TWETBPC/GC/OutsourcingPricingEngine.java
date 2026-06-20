@@ -90,7 +90,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			}
 		});
 		ArrayList<TWETOutsourcingColumn> columns = new ArrayList<TWETOutsourcingColumn>();
-		int limit = Math.min(config.maxExactPricingColumns, candidates.size());
+		int limit = Math.min(config.maxOutsourcingPricingColumns, candidates.size());
 		for (int i = 0; i < limit; i++) {
 			Candidate c = candidates.get(i);
 			columns.add(new TWETOutsourcingColumn(-1, c.jobs, data.n, c.baseline, c.cost, ColumnSource.PRICING_EXACT,

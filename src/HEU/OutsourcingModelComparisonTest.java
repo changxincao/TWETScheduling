@@ -116,6 +116,8 @@ public final class OutsourcingModelComparisonTest {
 				1500);
 		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.outsourcingCompare.heuristicPoolSize", 5000);
 		config.maxExactPricingColumns = Integer.getInteger("twet.bpc.outsourcingCompare.maxExactColumns", 5000);
+		config.maxOutsourcingPricingColumns = Integer.getInteger(
+				"twet.bpc.outsourcingCompare.maxOutsourcingColumns", config.maxExactPricingColumns);
 		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.outsourcingCompare.branchSeedColumnLimit", 5000);
 		config.enableHeuristicPricing = Boolean.parseBoolean(
 				System.getProperty("twet.bpc.outsourcingCompare.enableHeuristicPricing", "true"));

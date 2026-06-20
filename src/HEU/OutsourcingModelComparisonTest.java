@@ -37,6 +37,7 @@ public final class OutsourcingModelComparisonTest {
 	public static void main(String[] args) throws Exception {
 		int n = Integer.getInteger("twet.bpc.outsourcingCompare.n", 12);
 		int machines = Integer.getInteger("twet.bpc.outsourcingCompare.m", 2);
+		int tariffSegments = Integer.getInteger("twet.bpc.outsourcingCompare.tariffSegments", 1);
 		double outsourcingScale = Double.parseDouble(
 				System.getProperty("twet.bpc.outsourcingCompare.outsourcingScale", "1.0"));
 		String[] caseTokens = System.getProperty("twet.bpc.outsourcingCompare.cases", "0,1,2,3").split(",");
@@ -46,14 +47,14 @@ public final class OutsourcingModelComparisonTest {
 
 		ArrayList<PairRecord> pairs = new ArrayList<PairRecord>();
 		try (BufferedWriter writer = Files.newBufferedWriter(output)) {
-			writer.write("case_id,n,m,outsourcing_scale,model,status,incumbent,bound,root_bound,gap_percent,valid,nodes,pricing_rounds,"
+			writer.write("case_id,n,m,outsourcing_scale,tariff_segments,model,status,incumbent,bound,root_bound,gap_percent,valid,nodes,pricing_rounds,"
 					+ "generated_columns,pool_size,solve_s,root_s,heuristic_s,heuristic_calls,exact_s,"
 					+ "exact_calls,master_lp_s,internal_columns,internal_jobs,internal_cost,outsourced_jobs,"
 					+ "outsourcing_baseline,outsourcing_cost,pricing_detail,objective_match,bound_match,root_bound_match\n");
 			for (String token : caseTokens) {
 				int caseId = Integer.parseInt(token.trim());
-				RunRecord master = runCase(caseId, n, machines, outsourcingScale, "masterVariables");
-				RunRecord columns = runCase(caseId, n, machines, outsourcingScale, "columns");
+				RunRecord master = runCase(caseId, n, machines, outsourcingScale, tariffSegments, "masterVariables");
+				RunRecord columns = runCase(caseId, n, machines, outsourcingScale, tariffSegments, "columns");
 				PairRecord pair = new PairRecord(caseId, master, columns);
 				pairs.add(pair);
 				writer.write(master.toCsvLine(pair.objectiveMatch, pair.boundMatch, pair.rootBoundMatch));
@@ -68,25 +69,27 @@ public final class OutsourcingModelComparisonTest {
 		printAggregate(pairs);
 	}
 
-	private static RunRecord runCase(int caseId, int n, int machines, double outsourcingScale, String outsourcingModel)
-			throws Exception {
+	private static RunRecord runCase(int caseId, int n, int machines, double outsourcingScale, int tariffSegments,
+			String outsourcingModel) throws Exception {
 		Data data = SmallExactHeuristicBatchTest.buildRandomCase(caseId, n, machines);
-		applyOutsourcingScale(data, caseId, outsourcingScale);
+		applyOutsourcingScale(data, caseId, outsourcingScale, tariffSegments);
 		TWETBPCConfig config = buildConfig(caseId, n, machines, outsourcingModel);
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);
 		TWETSolveResult result = solver.solve();
 		BPCTraceSummary summary = solver.getContext().traceSummary;
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
-		return new RunRecord(caseId, n, machines, outsourcingScale, outsourcingModel, data, solver.getContext().pool,
-				result, summary, validation,
-				solver.getContext().pool.size());
+		return new RunRecord(caseId, n, machines, outsourcingScale, tariffSegments, outsourcingModel, data,
+				solver.getContext().pool, result, summary, validation, solver.getContext().pool.size());
 	}
 
-	private static void applyOutsourcingScale(Data data, int caseId, double outsourcingScale) {
+	private static void applyOutsourcingScale(Data data, int caseId, double outsourcingScale, int tariffSegments) {
 		if (!Double.isFinite(outsourcingScale) || outsourcingScale <= 0.0) {
 			throw new IllegalArgumentException("outsourcingScale must be positive: " + outsourcingScale);
 		}
-		if (close(outsourcingScale, 1.0)) {
+		if (tariffSegments <= 0) {
+			throw new IllegalArgumentException("tariffSegments must be positive: " + tariffSegments);
+		}
+		if (close(outsourcingScale, 1.0) && tariffSegments == 1) {
 			return;
 		}
 		double totalBaseline = 0.0;
@@ -95,9 +98,24 @@ public final class OutsourcingModelComparisonTest {
 			totalBaseline += data.outsourcingCost[job];
 		}
 		double domainEnd = Math.max(1.0, totalBaseline);
-		double outsourcingRate = 0.45 + 0.08 * (caseId % 7);
 		data.outsourcingCostFunction = new PiecewiseLinearFunction(0.0, domainEnd);
-		data.outsourcingCostFunction.addSegment(0.0, domainEnd, outsourcingRate, 0.0);
+		if (tariffSegments == 1) {
+			double outsourcingRate = 0.45 + 0.08 * (caseId % 7);
+			data.outsourcingCostFunction.addSegment(0.0, domainEnd, outsourcingRate, 0.0);
+		} else {
+			// 2026-06-20: 用连续凹折扣 tariff 检查 SP1 外包列是否能强化 root bound。
+			double segmentWidth = domainEnd / tariffSegments;
+			double start = 0.0;
+			double valueAtStart = 0.0;
+			for (int segment = 0; segment < tariffSegments; segment++) {
+				double end = segment == tariffSegments - 1 ? domainEnd : segmentWidth * (segment + 1);
+				double slope = 1.0 / (segment + 1.0);
+				double intercept = valueAtStart - slope * start;
+				data.outsourcingCostFunction.addSegment(start, end, slope, intercept);
+				valueAtStart += slope * (end - start);
+				start = end;
+			}
+		}
 		data.setPreprocessedHardWindows();
 		data.setPenaltyFunctions();
 	}
@@ -232,6 +250,7 @@ public final class OutsourcingModelComparisonTest {
 		final int n;
 		final int machines;
 		final double outsourcingScale;
+		final int tariffSegments;
 		final String model;
 		final String status;
 		final double incumbent;
@@ -258,12 +277,14 @@ public final class OutsourcingModelComparisonTest {
 		final double outsourcingCost;
 		final String pricingDetail;
 
-		RunRecord(int caseId, int n, int machines, double outsourcingScale, String model, Data data, Pool pool,
-				TWETSolveResult result, BPCTraceSummary summary, ValidationResult validation, int poolSize) {
+		RunRecord(int caseId, int n, int machines, double outsourcingScale, int tariffSegments, String model,
+				Data data, Pool pool, TWETSolveResult result, BPCTraceSummary summary, ValidationResult validation,
+				int poolSize) {
 			this.caseId = caseId;
 			this.n = n;
 			this.machines = machines;
 			this.outsourcingScale = outsourcingScale;
+			this.tariffSegments = tariffSegments;
 			this.model = model;
 			this.status = result.getStatus().toString();
 			this.incumbent = result.getIncumbentCost();
@@ -338,7 +359,8 @@ public final class OutsourcingModelComparisonTest {
 
 		String toCsvLine(boolean objectiveMatch, boolean boundMatch, boolean rootBoundMatch) {
 			return String.join(",", String.valueOf(caseId), String.valueOf(n), String.valueOf(machines),
-					fmt(outsourcingScale), quote(model), quote(status), fmt(incumbent), fmt(bound), fmt(rootBound), fmt(gap),
+					fmt(outsourcingScale), String.valueOf(tariffSegments), quote(model), quote(status), fmt(incumbent),
+					fmt(bound), fmt(rootBound), fmt(gap),
 					Boolean.toString(valid), String.valueOf(nodes), String.valueOf(pricingRounds),
 					String.valueOf(generatedColumns), String.valueOf(poolSize), fmt(solveSeconds), fmt(rootSeconds),
 					fmt(heuristicSeconds), String.valueOf(heuristicCalls), fmt(exactSeconds),

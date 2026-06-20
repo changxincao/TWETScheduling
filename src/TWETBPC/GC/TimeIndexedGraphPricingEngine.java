@@ -21,13 +21,14 @@ import TWETBPC.Util.SequenceSignature;
  * 2026-06-20: 参考 parallel-machine time-indexed graph 论文的实验性 no-cut pricing。
  * <p>
  * 图节点为 (lastJob, t)，处理弧和等待弧都只从小时间指向大时间，因此无 cut 时可以用 DAG 最短路。
- * 该论文的 pricing 允许 pseudo-schedule，即同一 job 在同一路径中重复出现；当前 TWET RMP 的覆盖系数仍是
- * containsJob 的 0/1 语义，所以该定价器只作为实验对照开关使用，默认关闭。
+ * 该论文的 pricing 允许 pseudo-schedule，即同一 job 在同一路径中重复出现；当前 TWETColumn/RMP 已按
+ * visit count 接入这类列，但它仍是 no-cut 单向 DAG 实验定价器，默认关闭。
  */
 public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 	private static final double INF = 1e100;
 	private static final double RC_TOLERANCE = 1e-6;
+	private static LastForwardDistanceCache lastForwardDistanceCache;
 
 	private final Data data;
 	private final TWETBPCConfig config;
@@ -55,6 +56,104 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	@Override
 	public String getName() {
 		return "TimeIndexedGraphPricing";
+	}
+
+	/**
+	 * 2026-06-20: time-indexed 图定价使用的离散时间窗。
+	 * root/no-cut 时可复用主线 pi-window 思路压缩 horizon；其他节点保持静态 hard window。
+	 */
+	private static GraphWindow computeGraphWindow(Data data, LP lp) {
+		double[] start = new double[data.n + 1];
+		double[] end = new double[data.n + 1];
+		start[0] = 0.0;
+		end[0] = data.CmaxH;
+		boolean dualWindow = canUseDualProfitableWindow(lp);
+		double horizon = 0.0;
+		boolean hasFeasibleJob = false;
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			if (dualWindow) {
+				double baseline = outsourcingBaseline(data, job);
+				double jobDual = Math.max(0.0, lp.getJobDual(job));
+				if (Utility.compareLt(jobDual, baseline)) {
+					hStart = Math.max(hStart, hWindowStart(data, job, jobDual));
+					hEnd = Math.min(hEnd, hWindowEnd(data, job, jobDual));
+				}
+			}
+			start[job] = hStart;
+			end[job] = hEnd;
+			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hEnd)) {
+				horizon = Math.max(horizon, hEnd);
+				hasFeasibleJob = true;
+			}
+		}
+		if (!hasFeasibleJob) {
+			horizon = data.CmaxH;
+		}
+		horizon = Math.min(data.CmaxH, horizon);
+		int discreteHorizon = Math.max(0, (int) Math.ceil(horizon - 1e-9));
+		return new GraphWindow(discreteHorizon, start, end, dualWindow);
+	}
+
+	private static boolean canUseDualProfitableWindow(LP lp) {
+		if (lp == null || lp.getNode() == null || lp.getNode().depth != 0) {
+			return false;
+		}
+		return lp.getActiveCutIds().isEmpty();
+	}
+
+	private static double hWindowStart(Data data, int job, double gamma) {
+		if (!Utility.compareGt(data.w_e[job], 0.0)) {
+			return 0.0;
+		}
+		return Math.max(0.0, data.d_e[job] - gamma / data.w_e[job]);
+	}
+
+	private static double hWindowEnd(Data data, int job, double gamma) {
+		if (!Utility.compareGt(data.w_t[job], 0.0)) {
+			return data.CmaxH;
+		}
+		return Math.min(data.CmaxH, data.d_l[job] + gamma / data.w_t[job]);
+	}
+
+	private static double outsourcingBaseline(Data data, int job) {
+		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M
+				: Math.max(0.0, data.outsourcingCost[job]);
+	}
+
+	private static long graphDualFingerprint(Data data, TWETBPCConfig config, LP lp, int horizon) {
+		long hash = 1469598103934665603L;
+		hash = mix(hash, horizon);
+		hash = mix(hash, config.debugIgnorePricingOnlyArcsAtNode);
+		Node node = lp.getNode();
+		hash = mix(hash, node == null ? -1 : node.id);
+		hash = mix(hash, node == null ? -1 : node.depth);
+		hash = mix(hash, node == null ? 0 : node.countTimeIndexedPricingOnlyForbiddenArcs());
+		hash = mix(hash, lp.getRestrictedColumnIds().size());
+		hash = mix(hash, lp.getActiveCutIds().size());
+		hash = mix(hash, Double.doubleToLongBits(lp.getLastSolution() == null ? Double.NaN
+				: lp.getLastSolution().getObjectiveValue()));
+		hash = mix(hash, Double.doubleToLongBits(lp.getMachineDual()));
+		int sink = node == null ? data.n + 1 : node.sinkId();
+		for (int job = 1; job <= data.n; job++) {
+			hash = mix(hash, Double.doubleToLongBits(lp.getJobDual(job)));
+		}
+		for (int from = 0; from <= sink; from++) {
+			for (int to = 1; to <= sink; to++) {
+				hash = mix(hash, Double.doubleToLongBits(lp.getArcDual(from, to)));
+			}
+		}
+		return hash;
+	}
+
+	private static long mix(long hash, int value) {
+		return mix(hash, (long) value);
+	}
+
+	private static long mix(long hash, long value) {
+		hash ^= value;
+		return hash * 1099511628211L;
 	}
 
 	/**
@@ -90,6 +189,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int sink;
 		private final int horizon;
 		private final int width;
+		private final GraphWindow graphWindow;
 		private final double[] dist;
 		private final int[] predState;
 		private final int[] predAddedJob;
@@ -107,13 +207,15 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private int duplicateJobCandidates;
 		private int nextCandidateId;
 		private double bestPseudoReducedCost;
+		private final long fingerprint;
 
 		TimeIndexedGraphSolver(LP lp) {
 			this.lp = lp;
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node == null ? data.n + 1 : node.sinkId();
-			this.horizon = Math.max(0, (int) Math.ceil(data.CmaxH - 1e-9));
+			this.graphWindow = computeGraphWindow(data, lp);
+			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
 			int stateCount = (n + 1) * width;
 			this.dist = new double[stateCount];
@@ -128,6 +230,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, config.maxExactPricingColumns),
 					worstCandidateFirstComparator());
 			this.bestPseudoReducedCost = INF;
+			this.fingerprint = graphDualFingerprint(data, config, lp, horizon);
 			precomputeStaticPricingData();
 		}
 
@@ -136,6 +239,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				return new ArrayList<TWETColumn>();
 			}
 			runForwardPass();
+			lastForwardDistanceCache = new LastForwardDistanceCache(fingerprint, horizon, n, width, dist);
 			ArrayList<Candidate> candidates = new ArrayList<Candidate>(candidateBySignature.values());
 			Collections.sort(candidates, bestCandidateFirstComparator());
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
@@ -150,6 +254,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					+ " negative pseudo-schedule columns" : "found no negative pseudo-schedule")
 					+ ", bestPseudoRC=" + bestPseudoReducedCost
 					+ ", horizon=" + horizon
+					+ ", dualWindow=" + graphWindow.dualWindow
 					+ ", states=" + relaxedStates
 					+ ", arcScans=" + processArcScans
 					+ ", timeArcSkips=" + timeIndexedArcSkips
@@ -278,8 +383,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				}
 			}
 			for (int job = 1; job <= n; job++) {
-				int start = Math.max(0, (int) Math.ceil(data.hardWindowStart[job] - 1e-9));
-				int end = Math.min(horizon, (int) Math.floor(data.hardWindowEnd[job] + 1e-9));
+				int start = Math.max(0, (int) Math.ceil(graphWindow.start[job] - 1e-9));
+				int end = Math.min(horizon, (int) Math.floor(graphWindow.end[job] + 1e-9));
 				for (int t = start; t <= end; t++) {
 					double penalty = data.penaltyFunction[job].evaluate(t);
 					if (!Utility.isBigMValue(penalty)) {
@@ -416,6 +521,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int sink;
 		private final int horizon;
 		private final int width;
+		private final GraphWindow graphWindow;
 		private final double gap;
 		private final double[] forward;
 		private final double[] backward;
@@ -423,6 +529,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int[][] durationByArc;
 		private final boolean[][] processArcForbidden;
 		private final boolean[] endForbidden;
+		private final long fingerprint;
+		private boolean reusedForwardDistances;
 
 		ArcFixingSolver(Data data, TWETBPCConfig config, LP lp, double gap) {
 			this.data = data;
@@ -431,7 +539,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node.sinkId();
-			this.horizon = Math.max(0, (int) Math.ceil(data.CmaxH - 1e-9));
+			this.graphWindow = computeGraphWindow(data, lp);
+			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
 			this.gap = gap;
 			int stateCount = (n + 1) * width;
@@ -441,12 +550,16 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.durationByArc = new int[n + 1][n + 1];
 			this.processArcForbidden = new boolean[n + 1][n + 1];
 			this.endForbidden = new boolean[n + 1];
+			this.fingerprint = graphDualFingerprint(data, config, lp, horizon);
+			this.reusedForwardDistances = false;
 			precomputeStaticPricingData();
 		}
 
 		ArcFixingResult apply() {
 			long start = System.nanoTime();
-			computeForwardDistances();
+			if (!tryLoadCachedForwardDistances()) {
+				computeForwardDistances();
+			}
 			computeBackwardDistances();
 			int processCandidates = 0;
 			int processFixed = 0;
@@ -510,7 +623,19 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			int candidates = processCandidates + idleCandidates + endCandidates;
 			int fixed = processFixed + idleFixed + endFixed + cleanupFixed;
 			return new ArcFixingResult(true, candidates, fixed, processFixed, idleFixed, endFixed, cleanupFixed,
-					unavailable, gap, System.nanoTime() - start, "paper time-indexed reduced-cost arc fixing");
+					unavailable, gap, reusedForwardDistances, System.nanoTime() - start,
+					"paper time-indexed reduced-cost arc fixing");
+		}
+
+		private boolean tryLoadCachedForwardDistances() {
+			LastForwardDistanceCache cache = lastForwardDistanceCache;
+			if (cache == null || cache.fingerprint != fingerprint || cache.horizon != horizon
+					|| cache.jobCount != n || cache.width != width || cache.forward.length != forward.length) {
+				return false;
+			}
+			System.arraycopy(cache.forward, 0, forward, 0, forward.length);
+			reusedForwardDistances = true;
+			return true;
 		}
 
 		private void computeForwardDistances() {
@@ -647,8 +772,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				}
 			}
 			for (int job = 1; job <= n; job++) {
-				int start = Math.max(0, (int) Math.ceil(data.hardWindowStart[job] - 1e-9));
-				int end = Math.min(horizon, (int) Math.floor(data.hardWindowEnd[job] + 1e-9));
+				int start = Math.max(0, (int) Math.ceil(graphWindow.start[job] - 1e-9));
+				int end = Math.min(horizon, (int) Math.floor(graphWindow.end[job] + 1e-9));
 				for (int t = start; t <= end; t++) {
 					double penalty = data.penaltyFunction[job].evaluate(t);
 					if (!Utility.isBigMValue(penalty)) {
@@ -729,11 +854,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int cleanupFixed;
 		private final int unavailable;
 		private final double gap;
+		private final boolean reusedForwardDistances;
 		private final long totalNanos;
 		private final String message;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int processFixed, int idleFixed,
-				int endFixed, int cleanupFixed, int unavailable, double gap, long totalNanos, String message) {
+				int endFixed, int cleanupFixed, int unavailable, double gap, boolean reusedForwardDistances,
+				long totalNanos, String message) {
 			this.available = available;
 			this.candidates = candidates;
 			this.fixed = fixed;
@@ -743,12 +870,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.cleanupFixed = cleanupFixed;
 			this.unavailable = unavailable;
 			this.gap = gap;
+			this.reusedForwardDistances = reusedForwardDistances;
 			this.totalNanos = totalNanos;
 			this.message = message;
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, 0, Double.NaN, false, 0L, message);
 		}
 
 		public boolean isAvailable() {
@@ -787,6 +915,10 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return gap;
 		}
 
+		public boolean isReusedForwardDistances() {
+			return reusedForwardDistances;
+		}
+
 		public long getTotalNanos() {
 			return totalNanos;
 		}
@@ -794,8 +926,39 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		public String summary() {
 			return message + ", candidates=" + candidates + ", fixed=" + fixed + ", unavailable=" + unavailable
 					+ ", processFixed=" + processFixed + ", idleFixed=" + idleFixed + ", endFixed=" + endFixed
-					+ ", cleanupFixed=" + cleanupFixed + ", gap=" + gap + ", ms="
+					+ ", cleanupFixed=" + cleanupFixed + ", reusedForward=" + reusedForwardDistances
+					+ ", gap=" + gap + ", ms="
 					+ String.format("%.3f", totalNanos / 1_000_000.0);
+		}
+	}
+
+	private static final class GraphWindow {
+		final int horizon;
+		final double[] start;
+		final double[] end;
+		final boolean dualWindow;
+
+		GraphWindow(int horizon, double[] start, double[] end, boolean dualWindow) {
+			this.horizon = horizon;
+			this.start = start;
+			this.end = end;
+			this.dualWindow = dualWindow;
+		}
+	}
+
+	private static final class LastForwardDistanceCache {
+		final long fingerprint;
+		final int horizon;
+		final int jobCount;
+		final int width;
+		final double[] forward;
+
+		LastForwardDistanceCache(long fingerprint, int horizon, int jobCount, int width, double[] forward) {
+			this.fingerprint = fingerprint;
+			this.horizon = horizon;
+			this.jobCount = jobCount;
+			this.width = width;
+			this.forward = forward.clone();
 		}
 	}
 

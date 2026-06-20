@@ -71,3 +71,11 @@ Algorithm 7 的 reduced-cost fixing 也补齐为三类时间弧：processing arc
 关于 reduced-cost arc fixing，论文 Algorithm 7 在完整 labeling 框架下运行 `ForwardLabeling(T,A)` 和 `BackwardLabeling(0,A)`，再对每条弧比较 `F(i,t)` 与 `B(j,t+t(i,j))` 中 label 对的最小拼接 reduced cost；有 active limited-memory rank-1 cuts 时，还要按两侧 cut state 做 `S_l+S'_l>=beta_l` 修正。当前 no-cut graph pricing 没有 cut state，且每个 time-expanded vertex 只保留一个最短距离，因此这个 label-pair minimum 退化为 `forwardDistance + arcReducedCost + backwardDistance`。所以当前 fixing 是 Algorithm 7 的 no-cut 最短路等价形式，不是带 cut 的完整论文版本。若后续接入 limited-memory rank-1 cuts 或论文双向 labeling，就必须回到 bucket label-pair 口径，不能继续只用单一 shortest distance。
 
 当前 forward/backward distance 不跨 RMP 轮次缓存，因为每次加列后 LP dual 会变化，arc reduced cost 随之变化；arc fixing 只在当前节点 column generation 闭合后使用最后一组 dual，理论上可以复用最后一次“证明无负列”的 forward distance，再额外算 backward distance，但代码暂未做这项优化。fixing 删除弧并做图清理后，后续若还要继续在已删弧图上判断，又需要重新计算距离。
+
+## 9. 2026-06-20 优化：root dual-window horizon 与 forward distance 复用
+
+本次把 graph pricing 的离散 horizon 从固定 `data.CmaxH` 改为统一的 `GraphWindow` 计算。非根节点或已有 active cuts 时仍使用静态 hard window；root/no-cut 时复用主线 pi-window 思路，对每个 job 用 `max(hardStart, d_e - pi_j/w_e)` 和 `min(hardEnd, d_l + pi_j/w_t)` 收缩有效完工窗口，再把 graph horizon 收到所有有效右端的最大值。这样不会改最终列成本口径：DAG DP 仍只负责找负 reduced-cost pseudo-schedule，进入 RMP 前仍用 `TWETColumnEvaluator` 按完整 sequence 重算 objective cost。
+
+arc fixing 方面新增了最后一次 graph pricing forward shortest distance 的安全复用。缓存只保存 forward distance；fingerprint 包含 node id/depth、time-indexed pricing-only 禁弧数量、restricted/active cut 数量、LP objective、machine dual、所有 job dual 和 arc dual，以及 horizon/debug 配置。只有 fingerprint 完全一致时，post-CG reduced-cost fixing 才复用该 forward distance；否则自动重算。由于 fixing 删除弧和 cleanup 后图已经变化，cleanup 内部仍会重算 forward/backward distance。
+
+这两个优化不改变论文 no-cut reduced-cost 语义，只减少 root graph 状态数和最后一次 pricing 到 arc fixing 之间的重复 forward DP。

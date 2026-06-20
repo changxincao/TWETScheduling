@@ -28,7 +28,7 @@ public class TWETBPCConfig {
 	public boolean usePaperDominancePricing = true;
 	/**
 	 * 2026-06-20: 实验开关。打开后用 time-indexed DAG pseudo-schedule pricing 替换当前 exact pricing。
-	 * 该图定价允许重复 job，和当前 RMP 的 0/1 覆盖列口径不完全一致，只用于和函数占优 pricing 做对照。
+	 * 该图定价允许重复 job，TWETColumn/RMP 已按 visit count 接入；当前仍是不带 cut 的单向 DAG 对照实现。
 	 */
 	public boolean useTimeIndexedGraphPricing = false;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */

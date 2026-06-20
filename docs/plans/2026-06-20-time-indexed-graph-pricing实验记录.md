@@ -79,3 +79,9 @@ Algorithm 7 的 reduced-cost fixing 也补齐为三类时间弧：processing arc
 arc fixing 方面新增了最后一次 graph pricing forward shortest distance 的安全复用。缓存只保存 forward distance；fingerprint 包含 node id/depth、time-indexed pricing-only 禁弧数量、restricted/active cut 数量、LP objective、machine dual、所有 job dual 和 arc dual，以及 horizon/debug 配置。只有 fingerprint 完全一致时，post-CG reduced-cost fixing 才复用该 forward distance；否则自动重算。由于 fixing 删除弧和 cleanup 后图已经变化，cleanup 内部仍会重算 forward/backward distance。
 
 这两个优化不改变论文 no-cut reduced-cost 语义，只减少 root graph 状态数和最后一次 pricing 到 arc fixing 之间的重复 forward DP。
+
+## 10. 2026-06-20 补充：单向 DAG DP 的停止点和 sink 处理
+
+当前 no-cut DAG pricing 不在找到第一条负 reduced-cost 路径时停止，而是按 `t=0..horizon` 扫完整张隐式时间展开图。每个状态 `(lastJob,t)` 只保存一条最短前驱路径；当该状态可以通过 end arc 连接到 sink 时，代码直接计算 `dist(lastJob,t)+sinkArcReducedCost(lastJob)` 并把负 reduced-cost 的状态恢复成候选列。
+
+这样做等价于考虑了论文 `A3` 的 job-to-sink 弧，但没有把所有 end arc 显式 relax 到同一个 `(0,T)` 状态。原因是如果只维护一个 sink 最短距离，最后只能恢复全局最短的一条路径；而当前实现希望一次返回多条负列，所以扫描所有可结束状态，并从每个状态恢复一条最短路径。该实现仍不是完整 k-shortest path：同一个 `(lastJob,t)` 只保留一条最短路径，其他到达同一状态的负路径会被覆盖。若后续要严格模拟论文每轮多列的 labeling 生成，应改为 bucket labels 或 k-shortest/multi-predecessor，而不是单一 `dist`。

@@ -197,8 +197,8 @@ public class TWETBPCConfig {
 	public int heuristicPricingTabuIterations = 50;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_tenure，tabu 禁忌长度。 */
 	public int heuristicPricingTabuTenure = 30;
-	/** 单次 exact pricing 最多返回多少条负 reduced-cost 列；取旧 VRP Configure.addin_size 的默认值。 */
-	public int maxExactPricingColumns = 150;
+	/** 2026-06-21: 40 任务测试中列过少会增加 pricing 波动，单次 exact pricing 默认放宽到 5000。 */
+	public int maxExactPricingColumns = 5000;
 	/** 2026-06-20: Columnized outsourcing pricing has its own return cap; keep it separate from internal exact pricing. */
 	public int maxOutsourcingPricingColumns = 150;
 	/**

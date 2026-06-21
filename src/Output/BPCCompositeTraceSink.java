@@ -74,6 +74,14 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onMasterLpSolution(Node node, String phase, TWETMasterSolution solution, int restrictedColumnCount,
+			int poolSize, long elapsedNanos) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onMasterLpSolution(node, phase, solution, restrictedColumnCount, poolSize, elapsedNanos);
+		}
+	}
+
+	@Override
 	public void onRestrictedMasterIntegerHeuristic(Node node, boolean feasible, boolean improved, double objective,
 			int selectedColumns, String message, long elapsedNanos) {
 		for (BPCTraceSink sink : delegates) {

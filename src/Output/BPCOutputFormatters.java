@@ -50,6 +50,15 @@ public final class BPCOutputFormatters {
 				nanosToMillis(elapsedNanos), safeMessage(message));
 	}
 
+	public static String formatMasterLpSolution(int nodeId, String phase, TWETMasterSolution solution,
+			int restrictedColumnCount, int poolSize, long elapsedNanos) {
+		return String.format(Locale.US,
+				"MasterLP node=%d phase=%s status=%s obj=%.6f integer=%s positiveCols=%d restrictedCols=%d pool=%d time=%.3f ms %s",
+				nodeId, safeMessage(phase), solution.getStatus(), solution.getObjectiveValue(),
+				Boolean.toString(solution.isInteger()), solution.getColumnValues().size(), restrictedColumnCount,
+				poolSize, nanosToMillis(elapsedNanos), safeMessage(solution.getMessage()));
+	}
+
 	public static String formatCut(String generatorName, int nodeId, boolean separated, int addedCuts, int cutPoolSize,
 			String message) {
 		return String.format(Locale.US, "Cuts[%s] node=%d separated=%s addedCuts=%d cutPool=%d %s", generatorName,

@@ -366,7 +366,10 @@ public class PC {
 		heartbeat(lp, "master." + phase + ".start");
 		long start = System.nanoTime();
 		TWETMasterSolution solution = lp.solveRelaxation();
-		traceSink.onMasterLpSolve(lp.getNode(), phase, System.nanoTime() - start);
+		long elapsed = System.nanoTime() - start;
+		traceSink.onMasterLpSolve(lp.getNode(), phase, elapsed);
+		traceSink.onMasterLpSolution(lp.getNode(), phase, solution, lp.getRestrictedColumnIds().size(),
+				totalPoolSize(lp), elapsed);
 		return solution;
 	}
 
@@ -374,7 +377,10 @@ public class PC {
 		heartbeat(lp, "master." + phase + ".start");
 		long start = System.nanoTime();
 		TWETMasterSolution solution = lp.resolveCurrentModel();
-		traceSink.onMasterLpSolve(lp.getNode(), phase, System.nanoTime() - start);
+		long elapsed = System.nanoTime() - start;
+		traceSink.onMasterLpSolve(lp.getNode(), phase, elapsed);
+		traceSink.onMasterLpSolution(lp.getNode(), phase, solution, lp.getRestrictedColumnIds().size(),
+				totalPoolSize(lp), elapsed);
 		return solution;
 	}
 

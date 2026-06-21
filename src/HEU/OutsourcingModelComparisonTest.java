@@ -41,6 +41,9 @@ public final class OutsourcingModelComparisonTest {
 		double outsourcingScale = Double.parseDouble(
 				System.getProperty("twet.bpc.outsourcingCompare.outsourcingScale", "1.0"));
 		String[] caseTokens = System.getProperty("twet.bpc.outsourcingCompare.cases", "0,1,2,3").split(",");
+		String requestedModels = System.getProperty("twet.bpc.outsourcingCompare.models", "masterVariables,columns");
+		boolean runMasterVariables = containsModel(requestedModels, "masterVariables");
+		boolean runColumns = containsModel(requestedModels, "columns");
 		Path output = Paths.get(System.getProperty("twet.bpc.outsourcingCompare.output",
 				"test-results/bpc/2026-06-20-outsourcing-model-comparison.csv"));
 		Files.createDirectories(output.getParent());
@@ -55,20 +58,53 @@ public final class OutsourcingModelComparisonTest {
 					+ "branch_calls,branch_detail,pricing_detail,objective_match,bound_match,root_bound_match\n");
 			for (String token : caseTokens) {
 				int caseId = Integer.parseInt(token.trim());
-				RunRecord master = runCase(caseId, n, machines, outsourcingScale, tariffSegments, "masterVariables");
-				RunRecord columns = runCase(caseId, n, machines, outsourcingScale, tariffSegments, "columns");
-				PairRecord pair = new PairRecord(caseId, master, columns);
-				pairs.add(pair);
-				writer.write(master.toCsvLine(pair.objectiveMatch, pair.boundMatch, pair.rootBoundMatch));
-				writer.newLine();
-				writer.write(columns.toCsvLine(pair.objectiveMatch, pair.boundMatch, pair.rootBoundMatch));
-				writer.newLine();
-				System.out.println(pair.summaryLine());
+				RunRecord master = runMasterVariables
+						? runCase(caseId, n, machines, outsourcingScale, tariffSegments, "masterVariables") : null;
+				RunRecord columns = runColumns ? runCase(caseId, n, machines, outsourcingScale, tariffSegments,
+						"columns") : null;
+				if (master != null && columns != null) {
+					PairRecord pair = new PairRecord(caseId, master, columns);
+					pairs.add(pair);
+					writer.write(master.toCsvLine(pair.objectiveMatch, pair.boundMatch, pair.rootBoundMatch));
+					writer.newLine();
+					writer.write(columns.toCsvLine(pair.objectiveMatch, pair.boundMatch, pair.rootBoundMatch));
+					writer.newLine();
+					System.out.println(pair.summaryLine());
+				} else {
+					if (master != null) {
+						writer.write(master.toCsvLine(true, true, true));
+						writer.newLine();
+						System.out.println(summaryLine(master));
+					}
+					if (columns != null) {
+						writer.write(columns.toCsvLine(true, true, true));
+						writer.newLine();
+						System.out.println(summaryLine(columns));
+					}
+				}
 			}
 		}
 
 		System.out.println("CSV written: " + output.toAbsolutePath());
-		printAggregate(pairs);
+		if (!pairs.isEmpty()) {
+			printAggregate(pairs);
+		}
+	}
+
+	private static boolean containsModel(String models, String target) {
+		for (String token : models.split(",")) {
+			if (target.equalsIgnoreCase(token.trim())) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static String summaryLine(RunRecord record) {
+		return String.format(Locale.US,
+				"case=%d model=%s status=%s obj=%.6f bound=%.6f root=%.6f nodes=%d pricing=%d cols=%d time=%.3fs",
+				record.caseId, record.model, record.status, record.incumbent, record.bound, record.rootBound,
+				record.nodes, record.pricingRounds, record.generatedColumns, record.solveSeconds);
 	}
 
 	private static RunRecord runCase(int caseId, int n, int machines, double outsourcingScale, int tariffSegments,
@@ -203,6 +239,15 @@ public final class OutsourcingModelComparisonTest {
 		config.bidirectionalMidpointProbeReuseWithinNode = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.midpointProbeReuseWithinNode",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinNode)));
+		config.enableDualStabilization = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilization",
+				Boolean.toString(config.enableDualStabilization)));
+		config.dualStabilizationAlpha = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationAlpha",
+				Double.toString(config.dualStabilizationAlpha)));
+		config.dualStabilizationCenterMoveWeight = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationCenterMoveWeight",
+				Double.toString(config.dualStabilizationCenterMoveWeight)));
 		return config;
 	}
 

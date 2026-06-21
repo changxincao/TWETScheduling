@@ -106,6 +106,14 @@ public class PC {
 	}
 
 	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
+		lp.clearPricingDualOverride();
+		if (config.enableDualStabilization && !lp.isFeasibilityRepairMode()) {
+			return solvePricingLoopWithDualStabilization(lp, currentSolution);
+		}
+		return solvePricingLoopWithTrueDuals(lp, currentSolution);
+	}
+
+	private TWETMasterSolution solvePricingLoopWithTrueDuals(LP lp, TWETMasterSolution currentSolution) {
 		TWETMasterSolution solution = currentSolution;
 		while (true) {
 			boolean addedColumn = false;
@@ -138,6 +146,87 @@ public class PC {
 			}
 		}
 		return solution;
+	}
+
+	private TWETMasterSolution solvePricingLoopWithDualStabilization(LP lp, TWETMasterSolution currentSolution) {
+		TWETMasterSolution solution = currentSolution;
+		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals());
+		while (true) {
+			LP.PricingDualSnapshot trueDual = lp.captureTruePricingDuals();
+			lp.setPricingDualOverride(dualState.stabilizedDual(trueDual));
+			PricingPassResult stabilizedPass;
+			try {
+				stabilizedPass = runPricingPass(lp, "stabilized", false);
+			} finally {
+				lp.clearPricingDualOverride();
+			}
+			if (stabilizedPass.addedColumns > 0) {
+				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
+				dualState.observe(lp.captureTruePricingDuals());
+				continue;
+			}
+
+			PricingPassResult truePass = runPricingPass(lp, "true", true);
+			if (truePass.addedColumns > 0) {
+				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
+				dualState.observe(lp.captureTruePricingDuals());
+				continue;
+			}
+			break;
+		}
+		lp.clearPricingDualOverride();
+		return solution;
+	}
+
+	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds) {
+		for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
+			PricingEngine engine = pricingEngines.get(engineIndex);
+			HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
+			HashSet<Integer> activeOutsourcingColumnIds =
+					new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
+			GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
+					activeOutsourcingColumnIds, dualModeName, allowReusableBounds);
+			if (generated.isEmpty()) {
+				continue;
+			}
+
+			int addedColumns = lp.addColumns(generated.internalColumnIds)
+					+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
+			if (addedColumns == 0) {
+				continue;
+			}
+
+			resetFollowingPricingEngines(engineIndex + 1);
+			lastReusableSubtreeArcEliminationBounds = null;
+			return new PricingPassResult(addedColumns);
+		}
+		return PricingPassResult.EMPTY;
+	}
+
+	private final class DualStabilizationState {
+		private LP.PricingDualSnapshot center;
+
+		DualStabilizationState(LP.PricingDualSnapshot initialCenter) {
+			this.center = initialCenter.copy();
+		}
+
+		LP.PricingDualSnapshot stabilizedDual(LP.PricingDualSnapshot trueDual) {
+			return LP.PricingDualSnapshot.blend(trueDual, center, config.dualStabilizationAlpha);
+		}
+
+		void observe(LP.PricingDualSnapshot trueDual) {
+			center = LP.PricingDualSnapshot.blend(trueDual, center, config.dualStabilizationCenterMoveWeight);
+		}
+	}
+
+	private static final class PricingPassResult {
+		static final PricingPassResult EMPTY = new PricingPassResult(0);
+
+		final int addedColumns;
+
+		PricingPassResult(int addedColumns) {
+			this.addedColumns = addedColumns;
+		}
 	}
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
@@ -211,16 +300,26 @@ public class PC {
 
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
 			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds) {
+		return generateColumnsFromEngine(lp, engine, repairMode, activeColumnIds, activeOutsourcingColumnIds, "",
+				true);
+	}
+
+	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
+			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
+			boolean allowReusableBounds) {
 		GeneratedColumnIds generated = new GeneratedColumnIds();
-		heartbeat(lp, (repairMode ? "pricing.repair." : "pricing.") + engine.getName() + ".start");
+		String modeSuffix = dualModeName == null || dualModeName.length() == 0 ? "" : "." + dualModeName;
+		heartbeat(lp, (repairMode ? "pricing.repair." : "pricing.") + engine.getName() + modeSuffix + ".start");
 		long pricingStart = System.nanoTime();
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
 		long pricingNanos = System.nanoTime() - pricingStart;
 		if (!repairMode && !result.isImproved()) {
-			CompletionBoundSubtreeArcEliminator.PreparedBounds reusableBounds =
-					engine.getReusableSubtreeArcEliminationBounds();
-			if (reusableBounds != null) {
-				lastReusableSubtreeArcEliminationBounds = reusableBounds;
+			if (allowReusableBounds) {
+				CompletionBoundSubtreeArcEliminator.PreparedBounds reusableBounds =
+						engine.getReusableSubtreeArcEliminationBounds();
+				if (reusableBounds != null) {
+					lastReusableSubtreeArcEliminationBounds = reusableBounds;
+				}
 			}
 		} else if (!repairMode) {
 			lastReusableSubtreeArcEliminationBounds = null;
@@ -251,6 +350,9 @@ public class PC {
 			}
 		}
 		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
+		if (!repairMode && dualModeName != null && dualModeName.length() > 0) {
+			name += "[" + dualModeName + "]";
+		}
 		traceSink.onPricingCall(lp.getNode(), name, result.isImproved(), addedColumns, result.getMessage(),
 				totalPoolSize(lp), pricingNanos);
 		return generated;

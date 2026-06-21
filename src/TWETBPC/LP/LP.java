@@ -77,6 +77,7 @@ public class LP {
 	private double machineDual;
 	private double outsourcingColumnDual;
 	private double[][] arcDual;
+	private PricingDualSnapshot pricingDualOverride;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
 		this(data, pool, cutPool, new TWETBPCConfig(), new OutsourcingPool(data));
@@ -212,15 +213,24 @@ public class LP {
 
 	/** @return job 覆盖约束的 dual，供 pricing 计算 reduced cost。 */
 	public double getJobDual(int job) {
+		if (pricingDualOverride != null) {
+			return pricingDualOverride.jobDual[job];
+		}
 		return jobDual[job];
 	}
 
 	/** @return 机器数量约束 dual；每条内部列的系数为 1。 */
 	public double getMachineDual() {
+		if (pricingDualOverride != null) {
+			return pricingDualOverride.machineDual;
+		}
 		return machineDual;
 	}
 
 	public double getOutsourcingColumnDual() {
+		if (pricingDualOverride != null) {
+			return pricingDualOverride.outsourcingColumnDual;
+		}
 		return outsourcingColumnDual;
 	}
 
@@ -229,7 +239,30 @@ public class LP {
 		if (from < 0 || from >= arcDual.length || to < 0 || to >= arcDual[from].length) {
 			return 0.0;
 		}
+		if (pricingDualOverride != null) {
+			return pricingDualOverride.arcDual[from][to];
+		}
 		return arcDual[from][to];
+	}
+
+	/**
+	 * 2026-06-21: dual stabilization 只改变 pricing 看到的 dual，不改变主问题真实 dual。
+	 * SRI cut dual 暂不混合，保持用当前 LP 真实值，避免 cut state 与稳定化中心不同步。
+	 */
+	public PricingDualSnapshot captureTruePricingDuals() {
+		return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, arcDual);
+	}
+
+	public void setPricingDualOverride(PricingDualSnapshot snapshot) {
+		this.pricingDualOverride = snapshot == null ? null : snapshot.copy();
+	}
+
+	public void clearPricingDualOverride() {
+		this.pricingDualOverride = null;
+	}
+
+	public boolean hasPricingDualOverride() {
+		return pricingDualOverride != null;
 	}
 
 	public int addColumns(List<Integer> columnIds) {
@@ -263,6 +296,7 @@ public class LP {
 	}
 
 	public TWETMasterSolution solveRelaxation() {
+		clearPricingDualOverride();
 		if (node == null) {
 			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
 					false, "Node not constructed");
@@ -282,6 +316,7 @@ public class LP {
 	}
 
 	public TWETMasterSolution resolveCurrentModel() {
+		clearPricingDualOverride();
 		if (cplex == null) {
 			return solveRelaxation();
 		}
@@ -933,6 +968,7 @@ public class LP {
 	}
 
 	private void clearDuals() {
+		clearPricingDualOverride();
 		for (int i = 0; i < jobDual.length; i++) {
 			jobDual[i] = 0.0;
 		}
@@ -1017,6 +1053,59 @@ public class LP {
 		ColumnReducedCost(int columnId, double reducedCost) {
 			this.columnId = columnId;
 			this.reducedCost = reducedCost;
+		}
+	}
+
+	public static final class PricingDualSnapshot {
+		final double[] jobDual;
+		final double machineDual;
+		final double outsourcingColumnDual;
+		final double[][] arcDual;
+
+		PricingDualSnapshot(double[] jobDual, double machineDual, double outsourcingColumnDual, double[][] arcDual) {
+			this.jobDual = copy(jobDual);
+			this.machineDual = machineDual;
+			this.outsourcingColumnDual = outsourcingColumnDual;
+			this.arcDual = copy(arcDual);
+		}
+
+		public PricingDualSnapshot copy() {
+			return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, arcDual);
+		}
+
+		public static PricingDualSnapshot blend(PricingDualSnapshot current, PricingDualSnapshot center,
+				double currentWeight) {
+			double centerWeight = 1.0 - currentWeight;
+			double[] blendedJob = new double[current.jobDual.length];
+			for (int i = 0; i < blendedJob.length; i++) {
+				blendedJob[i] = currentWeight * current.jobDual[i] + centerWeight * center.jobDual[i];
+			}
+			double[][] blendedArc = new double[current.arcDual.length][];
+			for (int i = 0; i < current.arcDual.length; i++) {
+				blendedArc[i] = new double[current.arcDual[i].length];
+				for (int j = 0; j < current.arcDual[i].length; j++) {
+					blendedArc[i][j] =
+							currentWeight * current.arcDual[i][j] + centerWeight * center.arcDual[i][j];
+				}
+			}
+			return new PricingDualSnapshot(blendedJob,
+					currentWeight * current.machineDual + centerWeight * center.machineDual,
+					currentWeight * current.outsourcingColumnDual + centerWeight * center.outsourcingColumnDual,
+					blendedArc);
+		}
+
+		private static double[] copy(double[] values) {
+			double[] copied = new double[values.length];
+			System.arraycopy(values, 0, copied, 0, values.length);
+			return copied;
+		}
+
+		private static double[][] copy(double[][] values) {
+			double[][] copied = new double[values.length][];
+			for (int i = 0; i < values.length; i++) {
+				copied[i] = copy(values[i]);
+			}
+			return copied;
 		}
 	}
 

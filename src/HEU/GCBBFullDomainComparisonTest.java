@@ -246,6 +246,15 @@ public class GCBBFullDomainComparisonTest {
 				Boolean.toString(config.useTimeIndexedGraphPricing)));
 		config.outsourcingModel = System.getProperty("twet.bpc.fullDomainCompare.outsourcingModel",
 				config.outsourcingModel);
+		config.enableDualStabilization = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.dualStabilization",
+				Boolean.toString(config.enableDualStabilization)));
+		config.dualStabilizationAlpha = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.dualStabilizationAlpha",
+				Double.toString(config.dualStabilizationAlpha)));
+		config.dualStabilizationCenterMoveWeight = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.dualStabilizationCenterMoveWeight",
+				Double.toString(config.dualStabilizationCenterMoveWeight)));
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

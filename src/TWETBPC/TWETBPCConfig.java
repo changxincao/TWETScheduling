@@ -36,6 +36,15 @@ public class TWETBPCConfig {
 	 * columns 使用 SP1 风格，把外包集合也作为列加入主问题，并启用外包集合定价与外包 membership 分支。
 	 */
 	public String outsourcingModel = "masterVariables";
+	/**
+	 * 2026-06-21: dual stabilization 实验开关。打开后正常 pricing 先用 stabilized dual，
+	 * 若所有定价器都没有返回列，再用真实 dual 重跑所有定价器做闭合确认。
+	 */
+	public boolean enableDualStabilization = false;
+	/** 2026-06-21: stabilized dual 中当前真实 dual 的权重。 */
+	public double dualStabilizationAlpha = 0.7;
+	/** 2026-06-21: 每次重解 LP 后，稳定化中心向当前真实 dual 移动的权重。 */
+	public double dualStabilizationCenterMoveWeight = 0.3;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**

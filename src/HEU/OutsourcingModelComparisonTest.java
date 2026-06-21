@@ -148,14 +148,58 @@ public final class OutsourcingModelComparisonTest {
 				Double.toString(config.restrictedMasterIntegerHeuristicTimeLimitSeconds)));
 		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.enableUndirectedAdjacencyBranching", "false"));
+		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.useNgDssr", Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
+		config.ngDssrInitialNgSetMode = System.getProperty("twet.bpc.outsourcingCompare.ngSetMode",
+				config.ngDssrInitialNgSetMode);
+		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.outsourcingCompare.ngSetSize",
+				config.ngDssrInitialNgSetSize);
+		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
+				"twet.bpc.outsourcingCompare.ngUpdateLimit", config.ngDssrNonElementaryRouteUpdateLimit);
 		config.bidirectionalCompletionBoundRelaxation = System.getProperty(
 				"twet.bpc.outsourcingCompare.completionBound", "allCycles");
 		config.bidirectionalCompletionBoundQueueOrdering = System.getProperty(
 				"twet.bpc.outsourcingCompare.completionBoundQueue", config.bidirectionalCompletionBoundQueueOrdering);
 		config.bidirectionalCompletionBoundScalarPruning = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.completionBoundScalar", "true"));
+		config.bidirectionalCompletionBoundArcFixing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.completionBoundArcFixing",
+				Boolean.toString(config.bidirectionalCompletionBoundArcFixing)));
+		config.bidirectionalCompletionBoundSubtreeArcElimination = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.completionBoundSubtreeArcElimination",
+				Boolean.toString(config.bidirectionalCompletionBoundSubtreeArcElimination)));
+		config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.completionBoundSubtreeArcEliminationPricingOnly",
+				Boolean.toString(config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly)));
 		config.bidirectionalMidpointProbe = Boolean.parseBoolean(
 				System.getProperty("twet.bpc.outsourcingCompare.midpointProbe", "false"));
+		config.bidirectionalMidpointProbePopLimit = Integer.getInteger(
+				"twet.bpc.outsourcingCompare.midpointProbePopLimit", config.bidirectionalMidpointProbePopLimit);
+		config.bidirectionalMidpointProbeMaxCandidates = Integer.getInteger(
+				"twet.bpc.outsourcingCompare.midpointProbeMaxCandidates",
+				config.bidirectionalMidpointProbeMaxCandidates);
+		config.bidirectionalMidpointProbeReuseMaxCandidates = Integer.getInteger(
+				"twet.bpc.outsourcingCompare.midpointProbeReuseMaxCandidates",
+				config.bidirectionalMidpointProbeReuseMaxCandidates);
+		config.bidirectionalMidpointProbeMoveRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.midpointProbeMoveRatio",
+				Double.toString(config.bidirectionalMidpointProbeMoveRatio)));
+		config.bidirectionalMidpointProbeScore = System.getProperty(
+				"twet.bpc.outsourcingCompare.midpointProbeScore", config.bidirectionalMidpointProbeScore);
+		config.bidirectionalMidpointProbeTieScore = System.getProperty(
+				"twet.bpc.outsourcingCompare.midpointProbeTieScore", config.bidirectionalMidpointProbeTieScore);
+		config.bidirectionalMidpointProbeEarlyStopRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.midpointProbeEarlyStopRatio",
+				Double.toString(config.bidirectionalMidpointProbeEarlyStopRatio)));
+		config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold = Integer.getInteger(
+				"twet.bpc.outsourcingCompare.midpointProbeExtraCandidatesAfterThreshold",
+				config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold);
+		config.bidirectionalMidpointProbeBracketOnDirectionChange = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.midpointProbeBracketOnDirectionChange",
+				Boolean.toString(config.bidirectionalMidpointProbeBracketOnDirectionChange)));
+		config.bidirectionalMidpointProbeHighImbalanceRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.midpointProbeHighImbalanceRatio",
+				Double.toString(config.bidirectionalMidpointProbeHighImbalanceRatio)));
 		config.bidirectionalMidpointProbeReuseWithinNode = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.midpointProbeReuseWithinNode",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinNode)));

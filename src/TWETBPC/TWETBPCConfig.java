@@ -249,6 +249,10 @@ public class TWETBPCConfig {
 	public boolean enableRestrictedMasterIntegerHeuristic = true;
 	/** 2026-06-02: restricted integer RMP 的 CPLEX 时间限制；小于等于 0 表示不设限制。 */
 	public double restrictedMasterIntegerHeuristicTimeLimitSeconds = 4.0;
+	/** 2026-06-21: RMIH 大规模算例阈值；n 大于该值时使用更宽的 MIP 时间限制。 */
+	public int restrictedMasterIntegerHeuristicLargeInstanceThreshold = 50;
+	/** 2026-06-21: RMIH 大规模算例时间限制；只在该值大于普通限制时生效。 */
+	public double restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds = 20.0;
 	/** 2026-06-04: RMIH 模式；coverRepair=筛列 >= + 修复列 + ==，partition=全量 ==。 */
 	public String restrictedMasterIntegerHeuristicMode = "coverRepair";
 	/** 2026-06-04: coverRepair 中按 reduced cost 排序保留的列数；小于等于 0 表示全保留。 */

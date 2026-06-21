@@ -230,6 +230,12 @@ public class GCBBFullDomainComparisonTest {
 		config.restrictedMasterIntegerHeuristicTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerTimeLimit",
 				Double.toString(config.restrictedMasterIntegerHeuristicTimeLimitSeconds)));
+		config.restrictedMasterIntegerHeuristicLargeInstanceThreshold = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.restrictedMasterIntegerLargeThreshold",
+				config.restrictedMasterIntegerHeuristicLargeInstanceThreshold);
+		config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.restrictedMasterIntegerLargeTimeLimit",
+				Double.toString(config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds)));
 		config.diagnosticRestrictedIntegerMipLog = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerMipLog",
 				Boolean.toString(config.diagnosticRestrictedIntegerMipLog)));

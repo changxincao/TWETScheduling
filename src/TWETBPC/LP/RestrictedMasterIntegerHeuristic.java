@@ -129,10 +129,7 @@ public final class RestrictedMasterIntegerHeuristic {
 			cplex = new IloCplex();
 			cplex.setParam(IloCplex.Param.Threads, 1);
 			cplex.setOut(config.diagnosticRestrictedIntegerMipLog ? System.out : null);
-			if (Utility.compareGt(config.restrictedMasterIntegerHeuristicTimeLimitSeconds, 0.0)) {
-				cplex.setParam(IloCplex.Param.TimeLimit,
-						config.restrictedMasterIntegerHeuristicTimeLimitSeconds);
-			}
+			applyTimeLimit(cplex);
 			IloIntVar[] x = new IloIntVar[internalIds.size()];
 			IloIntVar[] w = new IloIntVar[outsourcingIds.size()];
 			IloLinearNumExpr obj = cplex.linearNumExpr();
@@ -276,6 +273,25 @@ public final class RestrictedMasterIntegerHeuristic {
 		return String.format(Locale.US, "%.3f", nanos / 1000000.0);
 	}
 
+	private void applyTimeLimit(IloCplex cplex) throws IloException {
+		double limit = effectiveTimeLimitSeconds();
+		if (Utility.compareGt(limit, 0.0)) {
+			cplex.setParam(IloCplex.Param.TimeLimit, limit);
+		}
+	}
+
+	private double effectiveTimeLimitSeconds() {
+		double limit = config.restrictedMasterIntegerHeuristicTimeLimitSeconds;
+		if (!Utility.compareGt(limit, 0.0)) {
+			return limit;
+		}
+		if (data.n > config.restrictedMasterIntegerHeuristicLargeInstanceThreshold
+				&& Utility.compareGt(config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds, limit)) {
+			return config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds;
+		}
+		return limit;
+	}
+
 	private Attempt solveOnce(LP lp, List<Integer> columnIds, boolean exactCover, String label)
 			throws IloException {
 		IloCplex cplex = null;
@@ -289,10 +305,7 @@ public final class RestrictedMasterIntegerHeuristic {
 			} else {
 				cplex.setOut(null);
 			}
-			if (Utility.compareGt(config.restrictedMasterIntegerHeuristicTimeLimitSeconds, 0.0)) {
-				cplex.setParam(IloCplex.Param.TimeLimit,
-						config.restrictedMasterIntegerHeuristicTimeLimitSeconds);
-			}
+			applyTimeLimit(cplex);
 			Model model = buildModel(cplex, lp, columnIds, exactCover);
 			boolean solved = cplex.solve();
 			if (!solved) {

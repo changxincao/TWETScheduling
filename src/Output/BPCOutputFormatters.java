@@ -98,6 +98,12 @@ public final class BPCOutputFormatters {
 				Boolean.toString(branched), safeMessage(message));
 	}
 
+	public static String formatStageHeartbeat(int nodeId, String phase, int poolSize, int cutPoolSize) {
+		String node = nodeId <= 0 ? "-" : Integer.toString(nodeId);
+		return String.format(Locale.US, "Heartbeat node=%s phase=%s pool=%d cutPool=%d", node,
+				safeMessage(phase), poolSize, cutPoolSize);
+	}
+
 	public static String formatFinalSummary(BPCTraceSummary summary, TWETSolveResult result) {
 		StringBuilder builder = new StringBuilder();
 		builder.append("\n=== BPC Summary ===\n");

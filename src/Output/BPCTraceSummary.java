@@ -278,6 +278,12 @@ public class BPCTraceSummary implements BPCTraceSink {
 	}
 
 	@Override
+	public void onStageHeartbeat(Node node, String phase, int poolSize, int cutPoolSize) {
+		eventLines.add(BPCOutputFormatters.formatStageHeartbeat(node == null ? -1 : node.id, phase, poolSize,
+				cutPoolSize));
+	}
+
+	@Override
 	public void onSolveFinished(TWETSolveResult result, double solveSeconds) {
 		this.solveTimeSeconds = solveSeconds;
 		eventLines.add(BPCOutputFormatters.formatFinalSummary(this, result));

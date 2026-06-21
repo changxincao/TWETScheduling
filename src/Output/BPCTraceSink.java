@@ -68,6 +68,9 @@ public interface BPCTraceSink {
 	default void onBranchRejected(Node node, String brancherName, String message) {
 	}
 
+	default void onStageHeartbeat(Node node, String phase, int poolSize, int cutPoolSize) {
+	}
+
 	default void onSolveFinished(TWETSolveResult result, double solveSeconds) {
 	}
 

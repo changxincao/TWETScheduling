@@ -85,6 +85,12 @@ public final class BPCConsoleReporter implements BPCTraceSink {
 	}
 
 	@Override
+	public void onStageHeartbeat(Node node, String phase, int poolSize, int cutPoolSize) {
+		System.out.println(BPCOutputFormatters.formatStageHeartbeat(node == null ? -1 : node.id, phase, poolSize,
+				cutPoolSize));
+	}
+
+	@Override
 	public void onSolveFinished(TWETSolveResult result, double solveSeconds) {
 	}
 

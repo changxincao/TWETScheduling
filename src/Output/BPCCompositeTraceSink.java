@@ -121,6 +121,13 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onStageHeartbeat(Node node, String phase, int poolSize, int cutPoolSize) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onStageHeartbeat(node, phase, poolSize, cutPoolSize);
+		}
+	}
+
+	@Override
 	public void onSolveFinished(TWETSolveResult result, double solveSeconds) {
 		for (BPCTraceSink sink : delegates) {
 			sink.onSolveFinished(result, solveSeconds);

@@ -52,7 +52,9 @@ public class Tree {
 	}
 
 	public TWETSolveResult solve() {
+		heartbeat(null, "initialColumnBuilder.start");
 		InitialColumnBundle initial = initialColumnBuilder.build();
+		heartbeat(null, "initialColumnBuilder.done");
 		Node root = new Node(data, initial.getInitialColumnIds(), initial.getIncumbentColumnIds(), config.pseudoCostInf);
 		seedInitialOutsourcingColumn(root, initial);
 		traceSink.onInitialColumnsReady(initial.getInitialColumnIds().size(), initial.getIncumbentColumnIds().size(),
@@ -204,13 +206,11 @@ public class Tree {
 	}
 
 	private void heartbeat(Node node, String phase) {
-		if (!config.diagnosticStageHeartbeat) {
+		if (!config.diagnosticStageHeartbeat
+				&& (config.liveTraceLogPath == null || config.liveTraceLogPath.trim().isEmpty())) {
 			return;
 		}
-		String nodeId = node == null ? "-" : Integer.toString(node.id);
-		System.out.println("[BPC heartbeat] node=" + nodeId + " phase=" + phase
-				+ " pool=" + totalPoolSize() + " cuts=" + cutPool.size());
-		System.out.flush();
+		traceSink.onStageHeartbeat(node, phase, totalPoolSize(), cutPool.size());
 	}
 
 	private void applySubtreeArcElimination(BranchResult branchResult,

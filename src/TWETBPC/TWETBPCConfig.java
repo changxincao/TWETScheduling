@@ -15,6 +15,8 @@ public class TWETBPCConfig {
 	public boolean enableBPCConsoleOutput = true;
 	/** 是否在求解结束后自动写出 BPC 结果文件。 */
 	public boolean writeBPCResultFiles = true;
+	/** 2026-06-21: 长算例诊断用。非空时 BPC 事件会边运行边追加写入该日志文件。 */
+	public String liveTraceLogPath = "";
 
 	/** 是否优先复用 data.configure.bestSolution 中已经存在的最好启发式解。 */
 	public boolean reuseConfiguredBestSolution = true;

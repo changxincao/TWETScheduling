@@ -6,6 +6,7 @@ import java.util.List;
 import Basic.Data;
 import Output.BPCCompositeTraceSink;
 import Output.BPCConsoleReporter;
+import Output.BPCStreamingTraceSink;
 import Output.BPCTraceSink;
 import Output.BPCTraceSummary;
 import TWETBPC.BP.ArcBrancher;
@@ -148,6 +149,9 @@ public class TWETBPCContext {
 		this.consoleReporter = new BPCConsoleReporter();
 		ArrayList<BPCTraceSink> sinks = new ArrayList<BPCTraceSink>();
 		sinks.add(traceSummary);
+		if (config.liveTraceLogPath != null && !config.liveTraceLogPath.trim().isEmpty()) {
+			sinks.add(new BPCStreamingTraceSink(java.nio.file.Path.of(config.liveTraceLogPath.trim())));
+		}
 		if (config.enableBPCConsoleOutput) {
 			sinks.add(consoleReporter);
 		}

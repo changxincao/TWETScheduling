@@ -119,6 +119,11 @@ public class GCBBFullDomainComparisonTest {
 		boolean zeroSetup = Boolean.getBoolean("twet.bpc.fullDomainCompare.zeroSetup");
 		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(instance.toString(), zeroSetup);
 		TWETBPCConfig config = buildConfig(instance, fullDomain, nodeJoin);
+		String mode = runModeName(config, fullDomain, nodeJoin);
+		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
+		if (Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.liveTrace", "true"))) {
+			config.liveTraceLogPath = log.toString();
+		}
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);
 		TWETSolveResult result = solver.solve();
 		BPCTraceSummary summary = solver.getContext().traceSummary;
@@ -128,6 +133,20 @@ public class GCBBFullDomainComparisonTest {
 					solver.getContext().pool, result);
 		}
 
+		Files.write(log, summary.getEventLines());
+		String exactEngine = exactEngineName(config, fullDomain, nodeJoin);
+		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
+				result.getIncumbentCost(), result.getBestBound(),
+				TanakaNoOutsourcingBPCTest.gapPercent(result.getBestBound(), result.getIncumbentCost()),
+				result.getProcessedNodes(), summary.getPricingRounds(), result.getGeneratedColumns(),
+				solver.getContext().pool.size(), summary.getSolveTimeSeconds(), summary.getRootSolveTimeSeconds(),
+				seconds(summary.getPricingTimeNanos(), HEURISTIC_ENGINE),
+				count(summary.getPricingCallCount(), HEURISTIC_ENGINE), exactEngine,
+				seconds(summary.getPricingTimeNanos(), exactEngine), count(summary.getPricingCallCount(), exactEngine),
+				totalSeconds(summary.getMasterLpTimeNanos()), validation.isFeasible(), log.toString().replace('/', '\\'));
+	}
+
+	private static String runModeName(TWETBPCConfig config, boolean fullDomain, boolean nodeJoin) {
 		String mode = nodeJoin ? "nodeJoin" : (fullDomain ? "fullDomain" : "halfDomain");
 		String crossingSide = config.fullDomainNodeJoinCrossingSide == null
 				? "both" : config.fullDomainNodeJoinCrossingSide.trim();
@@ -160,23 +179,16 @@ public class GCBBFullDomainComparisonTest {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		}
-		String exactEngine = config.useTimeIndexedGraphPricing ? TIME_INDEXED_GRAPH_ENGINE
+		return mode;
+	}
+
+	private static String exactEngineName(TWETBPCConfig config, boolean fullDomain, boolean nodeJoin) {
+		return config.useTimeIndexedGraphPricing ? TIME_INDEXED_GRAPH_ENGINE
 				: (nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
 				: (config.useGCNGBBStyleNgDssrPartialDominancePricing ? NG_DSSR_PARTIAL_ENGINE
 				: (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing ? NG_DSSR_GRAPH_PARTIAL_ENGINE
 						: (config.useGCNGBBStyleNgDssrPricing ? NG_DSSR_ENGINE
 						: (config.useGCNGBBStylePartialDominancePricing ? PARTIAL_DOMINANCE_ENGINE : NORMAL_ENGINE))))));
-		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
-		Files.write(log, summary.getEventLines());
-		return new RunRecord(stripDat(instance.getFileName().toString()), mode, result.getStatus().toString(),
-				result.getIncumbentCost(), result.getBestBound(),
-				TanakaNoOutsourcingBPCTest.gapPercent(result.getBestBound(), result.getIncumbentCost()),
-				result.getProcessedNodes(), summary.getPricingRounds(), result.getGeneratedColumns(),
-				solver.getContext().pool.size(), summary.getSolveTimeSeconds(), summary.getRootSolveTimeSeconds(),
-				seconds(summary.getPricingTimeNanos(), HEURISTIC_ENGINE),
-				count(summary.getPricingCallCount(), HEURISTIC_ENGINE), exactEngine,
-				seconds(summary.getPricingTimeNanos(), exactEngine), count(summary.getPricingCallCount(), exactEngine),
-				totalSeconds(summary.getMasterLpTimeNanos()), validation.isFeasible(), log.toString().replace('/', '\\'));
 	}
 
 	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain) {

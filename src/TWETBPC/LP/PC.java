@@ -174,7 +174,8 @@ public class PC {
 
 	private TWETMasterSolution solvePricingLoopWithDualStabilization(LP lp, TWETMasterSolution currentSolution) {
 		TWETMasterSolution solution = currentSolution;
-		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals());
+		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals(),
+				currentSolution.getObjectiveValue());
 		boolean penaltyActive = config.dualStabilizationUsePenalty;
 		if (penaltyActive) {
 			lp.setDualPenaltyProfile(dualState.penaltyProfile());
@@ -188,7 +189,7 @@ public class PC {
 			}
 			if (stabilizedPass.addedColumns > 0) {
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
-				dualState.observeAccepted(lp.captureTruePricingDuals(), stabilizedPass);
+				dualState.observeAccepted(lp.captureTruePricingDuals(), solution.getObjectiveValue(), stabilizedPass);
 				if (penaltyActive) {
 					dualState.updatePenaltyAfterMaster(lp.getDualPenaltyArtificialActivity());
 				}
@@ -211,7 +212,7 @@ public class PC {
 			}
 			if (truePass.addedColumns > 0) {
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
-				dualState.observeAccepted(lp.captureTruePricingDuals(), truePass);
+				dualState.observeAccepted(lp.captureTruePricingDuals(), solution.getObjectiveValue(), truePass);
 				if (penaltyActive) {
 					lp.setDualPenaltyProfile(dualState.penaltyProfile());
 					solution = solveRelaxationTimed(lp, "stabilized_penalty_restart");
@@ -230,13 +231,17 @@ public class PC {
 	private PricingPassResult runStabilizedPricingSequence(LP lp, DualStabilizationState dualState,
 			LP.PricingDualSnapshot outDual) {
 		double initialAlpha = dualState.alpha;
+		double outObjective = lp.getLastSolution() == null ? Double.NaN : lp.getLastSolution().getObjectiveValue();
 		int attempt = 0;
 		while (true) {
 			double alpha = attempt == 0 ? initialAlpha : Math.max(0.0, 1.0 - (attempt + 1) * (1.0 - initialAlpha));
-			lp.setPricingDualOverride(dualState.stabilizedDual(outDual, alpha, attempt == 0));
+			StabilizedDualPoint stabilizedDual = dualState.stabilizedDual(outDual, outObjective, alpha,
+					attempt == 0);
+			lp.setPricingDualOverride(stabilizedDual.dual);
 			PricingPassResult pass;
 			try {
-				pass = runPricingPass(lp, "stabilized.a" + String.format("%.3f", Double.valueOf(alpha)), false, outDual);
+				pass = runPricingPass(lp, "stabilized.a" + String.format("%.3f", Double.valueOf(alpha)), false,
+						outDual, stabilizedDual.boundObjective);
 			} finally {
 				lp.clearPricingDualOverride();
 			}
@@ -249,18 +254,24 @@ public class PC {
 	}
 
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds) {
-		return runPricingPass(lp, dualModeName, allowReusableBounds, null);
+		return runPricingPass(lp, dualModeName, allowReusableBounds, null, Double.NaN);
 	}
 
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds,
 			LP.PricingDualSnapshot acceptanceDual) {
+		return runPricingPass(lp, dualModeName, allowReusableBounds, acceptanceDual, Double.NaN);
+	}
+
+	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds,
+			LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
 		for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
 			PricingEngine engine = pricingEngines.get(engineIndex);
 			HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
 			HashSet<Integer> activeOutsourcingColumnIds =
 					new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
 			GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
-					activeOutsourcingColumnIds, dualModeName, allowReusableBounds, acceptanceDual);
+					activeOutsourcingColumnIds, dualModeName, allowReusableBounds, acceptanceDual,
+					dualBoundObjectiveOverride);
 			if (lastNodePrunedByDualBound) {
 				return PricingPassResult.dualBoundPruned();
 			}
@@ -284,6 +295,7 @@ public class PC {
 
 	private final class DualStabilizationState {
 		private LP.PricingDualSnapshot center;
+		private double centerObjective;
 		private LP.PricingDualSnapshot lastAcceptedGradient;
 		private double alpha;
 		private double penaltyDelta;
@@ -291,8 +303,9 @@ public class PC {
 		private double penaltyCurvature;
 		private int penaltyRelaxations;
 
-		DualStabilizationState(LP.PricingDualSnapshot initialCenter) {
+		DualStabilizationState(LP.PricingDualSnapshot initialCenter, double initialObjective) {
 			this.center = initialCenter.copy();
+			this.centerObjective = initialObjective;
 			this.alpha = Math.max(0.0, Math.min(0.95, config.dualStabilizationAlpha));
 			double scale = Math.max(1.0, averageAbsoluteDual(initialCenter));
 			this.penaltyDelta = scale / Math.max(1.0, config.dualStabilizationPenaltyKappa);
@@ -300,31 +313,37 @@ public class PC {
 			this.penaltyCurvature = this.penaltyDelta;
 		}
 
-		LP.PricingDualSnapshot stabilizedDual(LP.PricingDualSnapshot outDual, double attemptAlpha,
+		StabilizedDualPoint stabilizedDual(LP.PricingDualSnapshot outDual, double outObjective, double attemptAlpha,
 				boolean allowDirectional) {
 			double clippedAlpha = Math.max(0.0, Math.min(0.95, attemptAlpha));
 			LP.PricingDualSnapshot ordinary = LP.PricingDualSnapshot.blend(outDual, center, 1.0 - clippedAlpha);
+			double ordinaryObjective = blendObjective(outObjective, centerObjective, 1.0 - clippedAlpha);
 			if (!allowDirectional || !config.dualStabilizationDirectionalSmoothing || lastAcceptedGradient == null
 					|| clippedAlpha <= 0.0) {
-				return ordinary;
+				return new StabilizedDualPoint(ordinary, ordinaryObjective);
 			}
 			double distance = normDifference(outDual, center);
 			double gradientNorm = norm(lastAcceptedGradient);
 			if (distance <= 1e-9 || gradientNorm <= 1e-9) {
-				return ordinary;
+				return new StabilizedDualPoint(ordinary, ordinaryObjective);
 			}
 			double beta = Math.max(0.0, Math.min(1.0, dotDifferenceGradient(outDual, center, lastAcceptedGradient)
 					/ (distance * gradientNorm)));
 			if (beta <= 0.0) {
-				return ordinary;
+				return new StabilizedDualPoint(ordinary, ordinaryObjective);
 			}
 			LP.PricingDualSnapshot gradientPoint = addScaled(center, lastAcceptedGradient, distance / gradientNorm);
 			LP.PricingDualSnapshot rho = blendTwo(gradientPoint, outDual, beta);
 			double rhoDistance = normDifference(rho, center);
 			if (rhoDistance <= 1e-9) {
-				return ordinary;
+				return new StabilizedDualPoint(ordinary, ordinaryObjective);
 			}
-			return addScaled(center, difference(rho, center), (1.0 - clippedAlpha) * distance / rhoDistance);
+			// Directional smoothing uses a column-gradient direction, not a convex
+			// combination of known RMP dual points. It is valid for finding columns, but
+			// there is no safe objective scalar for dual-bound pruning here.
+			return new StabilizedDualPoint(
+					addScaled(center, difference(rho, center), (1.0 - clippedAlpha) * distance / rhoDistance),
+					Double.NaN);
 		}
 
 		LP.DualPenaltyProfile penaltyProfile() {
@@ -337,7 +356,7 @@ public class PC {
 			return new LP.DualPenaltyProfile(center, delta, gamma);
 		}
 
-		void observeAccepted(LP.PricingDualSnapshot trueDual, PricingPassResult pass) {
+		void observeAccepted(LP.PricingDualSnapshot trueDual, double trueObjective, PricingPassResult pass) {
 			if (pass.hasRepresentative()) {
 				lastAcceptedGradient = representativeGradient(pass.representativeColumn, pass.representativeOutsourcingColumn);
 				double signal = dotDifferenceGradient(trueDual, center, lastAcceptedGradient);
@@ -348,7 +367,9 @@ public class PC {
 				}
 				alpha = Math.max(0.0, Math.min(0.95, alpha));
 			}
-			center = LP.PricingDualSnapshot.blend(trueDual, center, config.dualStabilizationCenterMoveWeight);
+			double weight = config.dualStabilizationCenterMoveWeight;
+			center = LP.PricingDualSnapshot.blend(trueDual, center, weight);
+			centerObjective = blendObjective(trueObjective, centerObjective, weight);
 		}
 
 		void updatePenaltyAfterMaster(double artificialActivity) {
@@ -409,6 +430,16 @@ public class PC {
 		}
 	}
 
+	private static final class StabilizedDualPoint {
+		final LP.PricingDualSnapshot dual;
+		final double boundObjective;
+
+		StabilizedDualPoint(LP.PricingDualSnapshot dual, double boundObjective) {
+			this.dual = dual;
+			this.boundObjective = boundObjective;
+		}
+	}
+
 	private static final class PricingPassResult {
 		static final PricingPassResult EMPTY = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null, false);
 
@@ -455,6 +486,13 @@ public class PC {
 			}
 		}
 		return count == 0 ? 0.0 : sum / count;
+	}
+
+	private static double blendObjective(double currentObjective, double centerObjective, double currentWeight) {
+		if (!Double.isFinite(currentObjective) || !Double.isFinite(centerObjective)) {
+			return Double.NaN;
+		}
+		return currentWeight * currentObjective + (1.0 - currentWeight) * centerObjective;
 	}
 
 	private static double norm(LP.PricingDualSnapshot dual) {
@@ -605,16 +643,16 @@ public class PC {
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
 			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds) {
 		return generateColumnsFromEngine(lp, engine, repairMode, activeColumnIds, activeOutsourcingColumnIds, "",
-				true, null);
+				true, null, Double.NaN);
 	}
 
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
 			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
-			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual) {
+			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
 		GeneratedColumnIds generated = new GeneratedColumnIds();
 		boolean filterByAcceptanceDual = acceptanceDual != null;
 		LP.PricingDualSnapshot reducedCostDual = acceptanceDual;
-		boolean observeDualBound = acceptanceDual == null && shouldObserveDualBound(lp, engine, repairMode);
+		boolean observeDualBound = shouldObserveDualBound(lp, engine, repairMode, dualBoundObjectiveOverride);
 		if (reducedCostDual == null && observeDualBound) {
 			reducedCostDual = lp.captureTruePricingDuals();
 		}
@@ -692,7 +730,7 @@ public class PC {
 						activeColumnIds, activeOutsourcingColumnIds,
 						dualModeName == null || dualModeName.length() == 0 ? "pairedOutsourcing"
 								: dualModeName + ".pairedOutsourcing",
-						false, reducedCostDual);
+						false, reducedCostDual, dualBoundObjectiveOverride);
 				generated.merge(outsourcingGenerated);
 			}
 		}
@@ -702,7 +740,8 @@ public class PC {
 		}
 		String message = result.getMessage();
 		if (reducedCostDual != null) {
-			double observedDualBound = observedDualBoundEstimate(lp, generated);
+			double observedDualBound = observeDualBound ? observedDualBoundEstimate(lp, generated,
+					dualBoundObjectiveOverride) : Double.NaN;
 			if (observeDualBound && Double.isFinite(observedDualBound)) {
 				lastObservedDualBound = Math.max(lastObservedDualBound, observedDualBound);
 				if (config.enableDualBoundPruning && Double.isFinite(incumbentForDualBoundPruning)
@@ -762,8 +801,17 @@ public class PC {
 		System.out.flush();
 	}
 
-	private boolean shouldObserveDualBound(LP lp, PricingEngine engine, boolean repairMode) {
+	private boolean shouldObserveDualBound(LP lp, PricingEngine engine, boolean repairMode,
+			double dualBoundObjectiveOverride) {
 		if (repairMode || !config.enableDualBoundPruning) {
+			return false;
+		}
+		// 2026-06-22: observed dual bound 必须使用同一套 dual objective 和 rc_min 证书。
+		// penalty RMP、active SRI、directional smoothing 目前没有完整 objective 口径，先只找列不剪枝。
+		if (lp.hasDualPenaltyProfile() || !lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
+			return false;
+		}
+		if (lp.hasPricingDualOverride() && !Double.isFinite(dualBoundObjectiveOverride)) {
 			return false;
 		}
 		String name = engine.getName().toLowerCase();
@@ -786,7 +834,7 @@ public class PC {
 		return null;
 	}
 
-	private double observedDualBoundEstimate(LP lp, GeneratedColumnIds generated) {
+	private double observedDualBoundEstimate(LP lp, GeneratedColumnIds generated, double dualBoundObjectiveOverride) {
 		TWETMasterSolution solution = lp.getLastSolution();
 		if (solution == null) {
 			return Double.NaN;
@@ -797,6 +845,8 @@ public class PC {
 		if (lp.isColumnizedOutsourcing() && !Double.isFinite(generated.certifiedOutsourcingReducedCost)) {
 			return Double.NaN;
 		}
+		double baseObjective = Double.isFinite(dualBoundObjectiveOverride) ? dualBoundObjectiveOverride
+				: solution.getObjectiveValue();
 		double correction = 0.0;
 		if (generated.certifiedInternalReducedCost < 0.0) {
 			int machineCopies = lp.getNode() == null ? 1 : Math.max(1, lp.getNode().maxMachineCount);
@@ -805,7 +855,7 @@ public class PC {
 		if (lp.isColumnizedOutsourcing() && generated.certifiedOutsourcingReducedCost < 0.0) {
 			correction += generated.certifiedOutsourcingReducedCost;
 		}
-		return solution.getObjectiveValue() + correction;
+		return baseObjective + correction;
 	}
 
 	private static final class GeneratedColumnIds {

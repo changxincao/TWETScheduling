@@ -55,7 +55,7 @@ public class TWETBPCConfig {
 	/** 2026-06-22: 是否启用 directional smoothing；mispricing 序列中会自动关闭方向扭转。 */
 	public boolean dualStabilizationDirectionalSmoothing = true;
 	/** 2026-06-22: 是否叠加 3-piece penalty-stabilized RMP。 */
-	public boolean dualStabilizationUsePenalty = true;
+	public boolean dualStabilizationUsePenalty = false;
 	/** 2026-06-22: penalty 参数化方式，可选 explicit/curvature；默认 explicit 更适合与 smoothing 组合。 */
 	public String dualStabilizationPenaltyMode = "explicit";
 	/** 2026-06-22: Pessoa et al. 中 penalty 的关键参数 kappa。 */

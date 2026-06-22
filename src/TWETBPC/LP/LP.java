@@ -78,6 +78,9 @@ public class LP {
 	private double outsourcingColumnDual;
 	private double[][] arcDual;
 	private PricingDualSnapshot pricingDualOverride;
+	private DualPenaltyProfile dualPenaltyProfile;
+	private IloNumVar[] dualPenaltyCoverPlusVars;
+	private IloNumVar[] dualPenaltyCoverMinusVars;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
 		this(data, pool, cutPool, new TWETBPCConfig(), new OutsourcingPool(data));
@@ -125,6 +128,7 @@ public class LP {
 		}
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
 		this.lastSolution = null;
+		this.dualPenaltyProfile = null;
 		clearDuals();
 	}
 
@@ -265,6 +269,80 @@ public class LP {
 		return pricingDualOverride != null;
 	}
 
+	public void setDualPenaltyProfile(DualPenaltyProfile profile) {
+		this.dualPenaltyProfile = profile == null ? null : profile.copy();
+		this.lastSolution = null;
+	}
+
+	public void clearDualPenaltyProfile() {
+		this.dualPenaltyProfile = null;
+		this.lastSolution = null;
+	}
+
+	public boolean hasDualPenaltyProfile() {
+		return dualPenaltyProfile != null;
+	}
+
+	public double getDualPenaltyArtificialActivity() {
+		if (cplex == null || dualPenaltyCoverPlusVars == null || dualPenaltyCoverMinusVars == null) {
+			return 0.0;
+		}
+		double activity = 0.0;
+		try {
+			for (int job = 1; job < dualPenaltyCoverPlusVars.length; job++) {
+				if (dualPenaltyCoverPlusVars[job] != null) {
+					activity += Math.abs(cplex.getValue(dualPenaltyCoverPlusVars[job]));
+				}
+				if (dualPenaltyCoverMinusVars[job] != null) {
+					activity += Math.abs(cplex.getValue(dualPenaltyCoverMinusVars[job]));
+				}
+			}
+		} catch (IloException ex) {
+			return Double.POSITIVE_INFINITY;
+		}
+		return activity;
+	}
+
+	public double computeReducedCost(TWETColumn column, PricingDualSnapshot dual) {
+		double reducedCost = column.getCost() - dual.machineDual;
+		for (int job = 1; job <= data.n; job++) {
+			int count = column.getJobVisitCount(job);
+			if (count > 0) {
+				reducedCost -= count * dual.jobDual[job];
+			}
+		}
+		int sink = node == null ? data.n + 1 : node.sinkId();
+		for (int from = 0; from <= sink && from < dual.arcDual.length; from++) {
+			for (int to = 1; to <= sink && to < dual.arcDual[from].length; to++) {
+				double arcValue = dual.arcDual[from][to];
+				if (arcValue != 0.0) {
+					int count = column.getArcVisitCount(from, to, sink);
+					if (count > 0) {
+						reducedCost -= count * arcValue;
+					}
+				}
+			}
+		}
+		if (activeSubsetRowPricingCutIds != null && activeSubsetRowPricingDuals != null) {
+			for (int i = 0; i < activeSubsetRowPricingCutIds.size(); i++) {
+				TWETCut cut = cutPool.getCut(activeSubsetRowPricingCutIds.get(i).intValue());
+				double coefficient = subsetRowCoefficient(column, cut);
+				if (coefficient > 0.0) {
+					reducedCost -= coefficient * activeSubsetRowPricingDuals.get(i).doubleValue();
+				}
+			}
+		}
+		return reducedCost;
+	}
+
+	public double computeReducedCost(TWETOutsourcingColumn column, PricingDualSnapshot dual) {
+		double reducedCost = column.getCost() - dual.outsourcingColumnDual;
+		for (int job : column.getJobs()) {
+			reducedCost -= dual.jobDual[job];
+		}
+		return reducedCost;
+	}
+
 	public int addColumns(List<Integer> columnIds) {
 		int added = 0;
 		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedColumnIds);
@@ -368,6 +446,8 @@ public class LP {
 		subsetRowCutRanges = new HashMap<Integer, IloRange>();
 		activeSubsetRowPricingCutIds = new ArrayList<Integer>();
 		activeSubsetRowPricingDuals = new ArrayList<Double>();
+		dualPenaltyCoverPlusVars = null;
+		dualPenaltyCoverMinusVars = null;
 		outsourcingTariffSegments = isColumnizedOutsourcing() ? new ArrayList<TariffSegment>()
 				: collectOutsourcingTariffSegments();
 
@@ -449,6 +529,10 @@ public class LP {
 
 	private void buildCoverageConstraints() throws IloException {
 		coverRanges = new IloRange[data.n + 1];
+		if (dualPenaltyProfile != null) {
+			dualPenaltyCoverPlusVars = new IloNumVar[data.n + 1];
+			dualPenaltyCoverMinusVars = new IloNumVar[data.n + 1];
+		}
 		for (int job = 1; job <= data.n; job++) {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
 			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
@@ -475,7 +559,25 @@ public class LP {
 				// 覆盖行放宽为 >= 后，job dual 非负，动态 profitable window 可退化为 job-level H_j。
 				coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
 			}
+			if (dualPenaltyProfile != null) {
+				addDualPenaltyCoverageVariables(job, coverRanges[job]);
+			}
 		}
+	}
+
+	/**
+	 * 2026-06-22: penalty stabilization 只作用于 coverage 行。这里按 Pessoa/Wentges
+	 * 的三段式 L1 penalty，在当前行上加一对有界人工列；分支、机器数等自由对偶行不松弛。
+	 */
+	private void addDualPenaltyCoverageVariables(int job, IloRange range) throws IloException {
+		double gamma = Math.max(0.0, dualPenaltyProfile.gamma);
+		double upperSlope = Math.max(0.0, dualPenaltyProfile.center.jobDual[job] + dualPenaltyProfile.delta);
+		double lowerSlope = Math.max(0.0, dualPenaltyProfile.center.jobDual[job] - dualPenaltyProfile.delta);
+
+		IloColumn plusColumn = cplex.column(objective, upperSlope).and(cplex.column(range, 1.0));
+		IloColumn minusColumn = cplex.column(objective, -lowerSlope).and(cplex.column(range, -1.0));
+		dualPenaltyCoverPlusVars[job] = cplex.numVar(plusColumn, 0.0, gamma, "dualStabCoverPlus_" + job);
+		dualPenaltyCoverMinusVars[job] = cplex.numVar(minusColumn, 0.0, gamma, "dualStabCoverMinus_" + job);
 	}
 
 	private void buildMachineConstraint() throws IloException {
@@ -1053,6 +1155,22 @@ public class LP {
 		ColumnReducedCost(int columnId, double reducedCost) {
 			this.columnId = columnId;
 			this.reducedCost = reducedCost;
+		}
+	}
+
+	public static final class DualPenaltyProfile {
+		final PricingDualSnapshot center;
+		final double delta;
+		final double gamma;
+
+		public DualPenaltyProfile(PricingDualSnapshot center, double delta, double gamma) {
+			this.center = center.copy();
+			this.delta = Math.max(0.0, delta);
+			this.gamma = Math.max(0.0, gamma);
+		}
+
+		public DualPenaltyProfile copy() {
+			return new DualPenaltyProfile(center, delta, gamma);
 		}
 	}
 

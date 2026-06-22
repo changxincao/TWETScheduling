@@ -254,6 +254,35 @@ public final class OutsourcingModelComparisonTest {
 		config.dualStabilizationCenterMoveWeight = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationCenterMoveWeight",
 				Double.toString(config.dualStabilizationCenterMoveWeight)));
+		config.dualStabilizationAlphaIncreaseFraction = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationAlphaIncreaseFraction",
+				Double.toString(config.dualStabilizationAlphaIncreaseFraction)));
+		config.dualStabilizationAlphaDecreaseStep = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationAlphaDecreaseStep",
+				Double.toString(config.dualStabilizationAlphaDecreaseStep)));
+		config.dualStabilizationDirectionalSmoothing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationDirectionalSmoothing",
+				Boolean.toString(config.dualStabilizationDirectionalSmoothing)));
+		config.dualStabilizationUsePenalty = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationUsePenalty",
+				Boolean.toString(config.dualStabilizationUsePenalty)));
+		config.dualStabilizationPenaltyMode = System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyMode", config.dualStabilizationPenaltyMode);
+		config.dualStabilizationPenaltyKappa = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyKappa",
+				Double.toString(config.dualStabilizationPenaltyKappa)));
+		config.dualStabilizationPenaltyInitialGamma = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyInitialGamma",
+				Double.toString(config.dualStabilizationPenaltyInitialGamma)));
+		config.dualStabilizationPenaltyMaxRelaxations = Integer.getInteger(
+				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyMaxRelaxations",
+				config.dualStabilizationPenaltyMaxRelaxations);
+		config.dualStabilizationPenaltyArtificialTolerance = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyArtificialTolerance",
+				Double.toString(config.dualStabilizationPenaltyArtificialTolerance)));
+		config.dualStabilizationReducedCostTolerance = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualStabilizationReducedCostTolerance",
+				Double.toString(config.dualStabilizationReducedCostTolerance)));
 		return config;
 	}
 

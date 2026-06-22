@@ -39,14 +39,35 @@ public class TWETBPCConfig {
 	 */
 	public String outsourcingModel = "masterVariables";
 	/**
-	 * 2026-06-21: dual stabilization 实验开关。打开后正常 pricing 先用 stabilized dual，
-	 * 若所有定价器都没有返回列，再用真实 dual 重跑所有定价器做闭合确认。
+	 * 2026-06-22: dual stabilization 实验开关。打开后使用 Pessoa et al. 口径的
+	 * smoothing/mispricing schedule，并可叠加 coverage-row 3-piece penalty RMP；
+	 * 节点闭合前仍强制回到原始 RMP + true dual exact pricing 验证。
 	 */
 	public boolean enableDualStabilization = false;
-	/** 2026-06-21: stabilized dual 中当前真实 dual 的权重。 */
-	public double dualStabilizationAlpha = 0.7;
-	/** 2026-06-21: 每次重解 LP 后，稳定化中心向当前真实 dual 移动的权重。 */
+	/** 2026-06-22: Wentges smoothing 初始 alpha；alpha 越大越靠近稳定中心。 */
+	public double dualStabilizationAlpha = 0.5;
+	/** 2026-06-22: 非 mispricing 且方向支持加强稳定化时，alpha 向 1 增加的比例。 */
+	public double dualStabilizationAlphaIncreaseFraction = 0.1;
+	/** 2026-06-22: 非 mispricing 且方向支持靠近真实 dual 时，alpha 每次减少的步长。 */
+	public double dualStabilizationAlphaDecreaseStep = 0.1;
+	/** 2026-06-21: 每次真实 LP 改善后，稳定化中心向当前真实 dual 移动的权重。 */
 	public double dualStabilizationCenterMoveWeight = 0.3;
+	/** 2026-06-22: 是否启用 directional smoothing；mispricing 序列中会自动关闭方向扭转。 */
+	public boolean dualStabilizationDirectionalSmoothing = true;
+	/** 2026-06-22: 是否叠加 3-piece penalty-stabilized RMP。 */
+	public boolean dualStabilizationUsePenalty = true;
+	/** 2026-06-22: penalty 参数化方式，可选 explicit/curvature；默认 explicit 更适合与 smoothing 组合。 */
+	public String dualStabilizationPenaltyMode = "explicit";
+	/** 2026-06-22: Pessoa et al. 中 penalty 的关键参数 kappa。 */
+	public double dualStabilizationPenaltyKappa = 10.0;
+	/** 2026-06-22: explicit 3-piece penalty 的外侧斜率 gamma。 */
+	public double dualStabilizationPenaltyInitialGamma = 0.9;
+	/** 2026-06-22: penalty artificial 仍为正时，gamma 或 curvature 最多放松多少次。 */
+	public int dualStabilizationPenaltyMaxRelaxations = 3;
+	/** 2026-06-22: 判断 penalty artificial 是否仍为正的容差。 */
+	public double dualStabilizationPenaltyArtificialTolerance = 1e-7;
+	/** 2026-06-22: stabilized candidate 必须在当前 out dual 下达到该 reduced-cost 阈值才真正入池。 */
+	public double dualStabilizationReducedCostTolerance = 1e-7;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**

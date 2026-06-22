@@ -128,7 +128,8 @@ public class PC {
 
 	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
 		lp.clearPricingDualOverride();
-		if (config.enableDualStabilization && !lp.isFeasibilityRepairMode()) {
+		if (config.enableDualStabilization && !lp.isFeasibilityRepairMode()
+				&& lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
 			return solvePricingLoopWithDualStabilization(lp, currentSolution);
 		}
 		return solvePricingLoopWithTrueDuals(lp, currentSolution);

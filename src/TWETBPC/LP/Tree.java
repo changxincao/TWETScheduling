@@ -89,10 +89,15 @@ public class Tree {
 			LP lp = new LP(data, pool, cutPool, config, outsourcingPool);
 			lp.construct(node, node.seedColumnIds);
 			heartbeat(node, "pc.solve.start");
-			TWETMasterSolution solution = pc.solve(lp);
+			TWETMasterSolution solution = pc.solve(lp, incumbentCost);
 
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				traceSink.onNodeClosed(node, "infeasible_master", queue.size());
+				continue;
+			}
+			if (pc.wasLastNodePrunedByDualBound()) {
+				bestBound = updateReportedBound(queue, pc.getLastObservedDualBound(), incumbentCost);
+				traceSink.onNodeClosed(node, "pruned_by_dual_bound", queue.size());
 				continue;
 			}
 

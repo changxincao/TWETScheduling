@@ -26,6 +26,9 @@ public class PC {
 	private final List<CutGenerator> cutGenerators;
 	private final BPCTraceSink traceSink;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
+	private double incumbentForDualBoundPruning;
+	private double lastObservedDualBound;
+	private boolean lastNodePrunedByDualBound;
 
 	public PC(TWETBPCConfig config, List<PricingEngine> pricingEngines, List<CutGenerator> cutGenerators,
 			BPCTraceSink traceSink) {
@@ -36,7 +39,14 @@ public class PC {
 	}
 
 	public TWETMasterSolution solve(LP lp) {
+		return solve(lp, Double.POSITIVE_INFINITY);
+	}
+
+	public TWETMasterSolution solve(LP lp, double incumbentCost) {
 		lastReusableSubtreeArcEliminationBounds = null;
+		lastObservedDualBound = Double.NEGATIVE_INFINITY;
+		lastNodePrunedByDualBound = false;
+		incumbentForDualBoundPruning = incumbentCost;
 		// 2026-05-23: 以下计时只写入 trace，用于拆分 RMP、pricing 和 cut 的耗时，
 		// 不参与列选择、剪枝或对偶计算，避免改变 BPC 求解流程。
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "initial");
@@ -107,6 +117,14 @@ public class PC {
 		return lastReusableSubtreeArcEliminationBounds;
 	}
 
+	public double getLastObservedDualBound() {
+		return lastObservedDualBound;
+	}
+
+	public boolean wasLastNodePrunedByDualBound() {
+		return lastNodePrunedByDualBound;
+	}
+
 	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
 		lp.clearPricingDualOverride();
 		if (config.enableDualStabilization && !lp.isFeasibilityRepairMode()) {
@@ -125,6 +143,9 @@ public class PC {
 				HashSet<Integer> activeOutsourcingColumnIds = new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
 				GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
 						activeOutsourcingColumnIds);
+				if (lastNodePrunedByDualBound) {
+					return solution;
+				}
 				if (generated.isEmpty()) {
 					continue;
 				}
@@ -161,6 +182,9 @@ public class PC {
 		while (true) {
 			LP.PricingDualSnapshot outDual = lp.captureTruePricingDuals();
 			PricingPassResult stabilizedPass = runStabilizedPricingSequence(lp, dualState, outDual);
+			if (stabilizedPass.dualBoundPruned) {
+				return solution;
+			}
 			if (stabilizedPass.addedColumns > 0) {
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
 				dualState.observeAccepted(lp.captureTruePricingDuals(), stabilizedPass);
@@ -181,6 +205,9 @@ public class PC {
 				solution = solveRelaxationTimed(lp, "true_master_after_penalty");
 			}
 			PricingPassResult truePass = runPricingPass(lp, "true", true);
+			if (truePass.dualBoundPruned) {
+				return solution;
+			}
 			if (truePass.addedColumns > 0) {
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
 				dualState.observeAccepted(lp.captureTruePricingDuals(), truePass);
@@ -212,7 +239,7 @@ public class PC {
 			} finally {
 				lp.clearPricingDualOverride();
 			}
-			if (pass.addedColumns > 0 || alpha <= 0.0) {
+			if (pass.dualBoundPruned || pass.addedColumns > 0 || alpha <= 0.0) {
 				dualState.alpha = alpha;
 				return pass;
 			}
@@ -233,6 +260,9 @@ public class PC {
 					new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
 			GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
 					activeOutsourcingColumnIds, dualModeName, allowReusableBounds, acceptanceDual);
+			if (lastNodePrunedByDualBound) {
+				return PricingPassResult.dualBoundPruned();
+			}
 			if (generated.isEmpty()) {
 				continue;
 			}
@@ -379,19 +409,30 @@ public class PC {
 	}
 
 	private static final class PricingPassResult {
-		static final PricingPassResult EMPTY = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null);
+		static final PricingPassResult EMPTY = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null, false);
 
 		final int addedColumns;
 		final double bestAcceptedReducedCost;
 		final TWETColumn representativeColumn;
 		final TWETOutsourcingColumn representativeOutsourcingColumn;
+		final boolean dualBoundPruned;
 
 		PricingPassResult(int addedColumns, double bestAcceptedReducedCost, TWETColumn representativeColumn,
 				TWETOutsourcingColumn representativeOutsourcingColumn) {
+			this(addedColumns, bestAcceptedReducedCost, representativeColumn, representativeOutsourcingColumn, false);
+		}
+
+		PricingPassResult(int addedColumns, double bestAcceptedReducedCost, TWETColumn representativeColumn,
+				TWETOutsourcingColumn representativeOutsourcingColumn, boolean dualBoundPruned) {
 			this.addedColumns = addedColumns;
 			this.bestAcceptedReducedCost = bestAcceptedReducedCost;
 			this.representativeColumn = representativeColumn;
 			this.representativeOutsourcingColumn = representativeOutsourcingColumn;
+			this.dualBoundPruned = dualBoundPruned;
+		}
+
+		static PricingPassResult dualBoundPruned() {
+			return new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null, true);
 		}
 
 		boolean hasRepresentative() {
@@ -570,6 +611,12 @@ public class PC {
 			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
 			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual) {
 		GeneratedColumnIds generated = new GeneratedColumnIds();
+		boolean filterByAcceptanceDual = acceptanceDual != null;
+		LP.PricingDualSnapshot reducedCostDual = acceptanceDual;
+		boolean observeDualBound = shouldObserveDualBound(lp, engine, repairMode);
+		if (reducedCostDual == null && observeDualBound) {
+			reducedCostDual = lp.captureTruePricingDuals();
+		}
 		String modeSuffix = dualModeName == null || dualModeName.length() == 0 ? "" : "." + dualModeName;
 		heartbeat(lp, (repairMode ? "pricing.repair." : "pricing.") + engine.getName() + modeSuffix + ".start");
 		long pricingStart = System.nanoTime();
@@ -591,15 +638,16 @@ public class PC {
 		if (result.isImproved()) {
 			for (int i = 0; i < result.getColumns().size(); i++) {
 				TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
-				double acceptanceReducedCost = acceptanceDual == null ? Double.NEGATIVE_INFINITY
-						: lp.computeReducedCost(column, acceptanceDual);
-				if (acceptanceDual != null) {
-					generated.observeReducedCost(acceptanceReducedCost, column, null);
-					if (acceptanceReducedCost >= -config.dualStabilizationReducedCostTolerance) {
-						filteredByAcceptanceDual++;
-						continue;
-					}
-				} else if (!generated.hasRepresentative()) {
+				double reducedCost = reducedCostDual == null ? Double.NEGATIVE_INFINITY
+						: lp.computeReducedCost(column, reducedCostDual);
+				if (reducedCostDual != null) {
+					generated.observeReducedCost(reducedCost, column, null);
+				}
+				if (filterByAcceptanceDual && reducedCost >= -config.dualStabilizationReducedCostTolerance) {
+					filteredByAcceptanceDual++;
+					continue;
+				}
+				if (!generated.hasRepresentative()) {
 					generated.representativeColumn = column;
 				}
 				int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
@@ -612,15 +660,16 @@ public class PC {
 			}
 			for (int i = 0; i < result.getOutsourcingColumns().size(); i++) {
 				TWETBPC.Model.TWETOutsourcingColumn column = result.getOutsourcingColumns().get(i);
-				double acceptanceReducedCost = acceptanceDual == null ? Double.NEGATIVE_INFINITY
-						: lp.computeReducedCost(column, acceptanceDual);
-				if (acceptanceDual != null) {
-					generated.observeReducedCost(acceptanceReducedCost, null, column);
-					if (acceptanceReducedCost >= -config.dualStabilizationReducedCostTolerance) {
-						filteredByAcceptanceDual++;
-						continue;
-					}
-				} else if (!generated.hasRepresentative()) {
+				double reducedCost = reducedCostDual == null ? Double.NEGATIVE_INFINITY
+						: lp.computeReducedCost(column, reducedCostDual);
+				if (reducedCostDual != null) {
+					generated.observeReducedCost(reducedCost, null, column);
+				}
+				if (filterByAcceptanceDual && reducedCost >= -config.dualStabilizationReducedCostTolerance) {
+					filteredByAcceptanceDual++;
+					continue;
+				}
+				if (!generated.hasRepresentative()) {
 					generated.representativeOutsourcingColumn = column;
 				}
 				int id = lp.getOutsourcingPool().addColumn(column);
@@ -639,8 +688,15 @@ public class PC {
 			name += "[" + dualModeName + "]";
 		}
 		String message = result.getMessage();
-		if (acceptanceDual != null) {
+		if (reducedCostDual != null) {
 			double observedDualBound = observedDualBoundEstimate(lp, generated);
+			if (observeDualBound) {
+				lastObservedDualBound = Math.max(lastObservedDualBound, observedDualBound);
+				if (config.enableDualBoundPruning && Double.isFinite(incumbentForDualBoundPruning)
+						&& observedDualBound >= incumbentForDualBoundPruning - config.dualBoundPruningTolerance) {
+					lastNodePrunedByDualBound = true;
+				}
+			}
 			message += " acceptedBestRc=" + generated.bestAcceptedReducedCost + " observedDualBound="
 					+ observedDualBound + " filteredByOutDual=" + filteredByAcceptanceDual;
 		}
@@ -691,6 +747,14 @@ public class PC {
 				+ " restricted=" + lp.getRestrictedColumnIds().size()
 				+ " pool=" + lp.getPool().size() + " cuts=" + lp.getCutPool().size());
 		System.out.flush();
+	}
+
+	private boolean shouldObserveDualBound(LP lp, PricingEngine engine, boolean repairMode) {
+		if (repairMode || !config.enableDualBoundPruning || lp.isColumnizedOutsourcing()) {
+			return false;
+		}
+		String name = engine.getName().toLowerCase();
+		return !name.contains("heuristic");
 	}
 
 	private double observedDualBoundEstimate(LP lp, GeneratedColumnIds generated) {

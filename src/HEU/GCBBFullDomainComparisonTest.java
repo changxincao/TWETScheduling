@@ -303,6 +303,12 @@ public class GCBBFullDomainComparisonTest {
 		config.dualStabilizationReducedCostTolerance = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualStabilizationReducedCostTolerance",
 				Double.toString(config.dualStabilizationReducedCostTolerance)));
+		config.enableDualBoundPruning = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.dualBoundPruning",
+				Boolean.toString(config.enableDualBoundPruning)));
+		config.dualBoundPruningTolerance = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.dualBoundPruningTolerance",
+				Double.toString(config.dualBoundPruningTolerance)));
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

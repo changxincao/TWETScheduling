@@ -283,6 +283,12 @@ public final class OutsourcingModelComparisonTest {
 		config.dualStabilizationReducedCostTolerance = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationReducedCostTolerance",
 				Double.toString(config.dualStabilizationReducedCostTolerance)));
+		config.enableDualBoundPruning = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualBoundPruning",
+				Boolean.toString(config.enableDualBoundPruning)));
+		config.dualBoundPruningTolerance = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.dualBoundPruningTolerance",
+				Double.toString(config.dualBoundPruningTolerance)));
 		return config;
 	}
 

@@ -106,6 +106,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private CompletionBoundCalculator.Bounds completionBounds;
 	private boolean[][] completionBoundFixedArc;
 	private double bestGeneratedReducedCost;
+	private double lastRelaxedRoundBestReducedCost;
 
 	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
 	private double tMid;
@@ -491,6 +492,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ArrayList<TWETColumn> solveRelaxedRound(LP lp) {
 		long exactStartNanos = System.nanoTime();
 		Utility.resetCurUpperBound(Utility.big_M);
+		lastRelaxedRoundBestReducedCost = Double.POSITIVE_INFINITY;
 		diagnosticHeartbeat(lp, "initialize.start", true);
 		initialize(lp);
 		diagnosticHeartbeat(lp, "initialize.done", true);
@@ -537,6 +539,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public String getLastMessage() {
 		return lastMessage;
+	}
+
+	public double getLastRelaxedRoundBestReducedCost() {
+		if (Double.isInfinite(lastRelaxedRoundBestReducedCost)) {
+			return Double.NaN;
+		}
+		return lastRelaxedRoundBestReducedCost;
 	}
 
 	CompletionBoundSubtreeArcEliminator.PreparedBounds reusableSubtreeArcEliminationBounds() {
@@ -2251,6 +2260,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		forwardSinkLabelsVisited++;
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
+		observeRelaxedReducedCost(reducedCost);
 		if (isWatchedLabel(label)) {
 			traceTarget("WATCH_F_SINK_CHECK #" + labelId(label)
 					+ " seq=" + recoverForwardSequence(label)
@@ -2508,6 +2518,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			joinCost.shiftYInPlace(sriJoinShift);
 		}
 		double reducedCostBound = joinCost.findMinimal(false, true)[0];
+		observeRelaxedReducedCost(reducedCostBound);
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;
 			if (Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
@@ -3525,6 +3536,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
+		observeRelaxedReducedCost(inferredReducedCost);
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
@@ -3602,6 +3614,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			nonElementaryNegativeRoutes.set(nonElementaryNegativeRoutes.size() - 1,
 					new NonElementaryNegativeRoute(sequence, inferredReducedCost));
 			sortNonElementaryNegativeRoutes();
+		}
+	}
+
+	private void observeRelaxedReducedCost(double reducedCost) {
+		if (Utility.compareLt(reducedCost, lastRelaxedRoundBestReducedCost)) {
+			lastRelaxedRoundBestReducedCost = reducedCost;
 		}
 	}
 

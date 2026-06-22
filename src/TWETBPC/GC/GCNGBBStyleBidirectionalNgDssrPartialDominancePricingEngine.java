@@ -38,9 +38,11 @@ public class GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine impleme
 		ArrayList<TWETColumn> columns = gc.solve(lp);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
-			return PricingResult.noImprovement(gc.getLastMessage());
+			return PricingResult.noImprovement(gc.getLastMessage())
+					.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
 		}
-		return new PricingResult(columns, true, gc.getLastMessage());
+		return new PricingResult(columns, true, gc.getLastMessage())
+				.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
 	}
 
 	@Override

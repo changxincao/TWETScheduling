@@ -9,6 +9,7 @@ import TWETBPC.TWETBPCConfig;
 import TWETBPC.CUT.CutGenerationResult;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
+import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.Model.TWETColumn;
@@ -613,7 +614,7 @@ public class PC {
 		GeneratedColumnIds generated = new GeneratedColumnIds();
 		boolean filterByAcceptanceDual = acceptanceDual != null;
 		LP.PricingDualSnapshot reducedCostDual = acceptanceDual;
-		boolean observeDualBound = shouldObserveDualBound(lp, engine, repairMode);
+		boolean observeDualBound = acceptanceDual == null && shouldObserveDualBound(lp, engine, repairMode);
 		if (reducedCostDual == null && observeDualBound) {
 			reducedCostDual = lp.captureTruePricingDuals();
 		}
@@ -622,6 +623,7 @@ public class PC {
 		long pricingStart = System.nanoTime();
 		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
 		long pricingNanos = System.nanoTime() - pricingStart;
+		generated.observeCertifiedReducedCosts(result);
 		if (!repairMode && !result.isImproved()) {
 			if (allowReusableBounds) {
 				CompletionBoundSubtreeArcEliminator.PreparedBounds reusableBounds =
@@ -683,6 +685,17 @@ public class PC {
 				}
 			}
 		}
+		if (observeDualBound && shouldPairOutsourcingPricingForDualBound(lp, engine, repairMode, result)) {
+			PricingEngine outsourcingEngine = findOutsourcingPricingEngine();
+			if (outsourcingEngine != null) {
+				GeneratedColumnIds outsourcingGenerated = generateColumnsFromEngine(lp, outsourcingEngine, false,
+						activeColumnIds, activeOutsourcingColumnIds,
+						dualModeName == null || dualModeName.length() == 0 ? "pairedOutsourcing"
+								: dualModeName + ".pairedOutsourcing",
+						false, reducedCostDual);
+				generated.merge(outsourcingGenerated);
+			}
+		}
 		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
 		if (!repairMode && dualModeName != null && dualModeName.length() > 0) {
 			name += "[" + dualModeName + "]";
@@ -690,7 +703,7 @@ public class PC {
 		String message = result.getMessage();
 		if (reducedCostDual != null) {
 			double observedDualBound = observedDualBoundEstimate(lp, generated);
-			if (observeDualBound) {
+			if (observeDualBound && Double.isFinite(observedDualBound)) {
 				lastObservedDualBound = Math.max(lastObservedDualBound, observedDualBound);
 				if (config.enableDualBoundPruning && Double.isFinite(incumbentForDualBoundPruning)
 						&& observedDualBound >= incumbentForDualBoundPruning - config.dualBoundPruningTolerance) {
@@ -750,11 +763,27 @@ public class PC {
 	}
 
 	private boolean shouldObserveDualBound(LP lp, PricingEngine engine, boolean repairMode) {
-		if (repairMode || !config.enableDualBoundPruning || lp.isColumnizedOutsourcing()) {
+		if (repairMode || !config.enableDualBoundPruning) {
 			return false;
 		}
 		String name = engine.getName().toLowerCase();
 		return !name.contains("heuristic");
+	}
+
+	private boolean shouldPairOutsourcingPricingForDualBound(LP lp, PricingEngine engine, boolean repairMode,
+			PricingResult result) {
+		return !repairMode && config.enableDualBoundPruning && lp.isColumnizedOutsourcing()
+				&& !(engine instanceof OutsourcingPricingEngine)
+				&& Double.isFinite(result.getCertifiedInternalReducedCost());
+	}
+
+	private PricingEngine findOutsourcingPricingEngine() {
+		for (PricingEngine engine : pricingEngines) {
+			if (engine instanceof OutsourcingPricingEngine) {
+				return engine;
+			}
+		}
+		return null;
 	}
 
 	private double observedDualBoundEstimate(LP lp, GeneratedColumnIds generated) {
@@ -762,13 +791,19 @@ public class PC {
 		if (solution == null) {
 			return Double.NaN;
 		}
-		double correction = 0.0;
-		if (generated.bestInternalReducedCost < 0.0) {
-			int machineCopies = lp.getNode() == null ? 1 : Math.max(1, lp.getNode().maxMachineCount);
-			correction += machineCopies * generated.bestInternalReducedCost;
+		if (!Double.isFinite(generated.certifiedInternalReducedCost)) {
+			return Double.NaN;
 		}
-		if (lp.isColumnizedOutsourcing() && generated.bestOutsourcingReducedCost < 0.0) {
-			correction += generated.bestOutsourcingReducedCost;
+		if (lp.isColumnizedOutsourcing() && !Double.isFinite(generated.certifiedOutsourcingReducedCost)) {
+			return Double.NaN;
+		}
+		double correction = 0.0;
+		if (generated.certifiedInternalReducedCost < 0.0) {
+			int machineCopies = lp.getNode() == null ? 1 : Math.max(1, lp.getNode().maxMachineCount);
+			correction += machineCopies * generated.certifiedInternalReducedCost;
+		}
+		if (lp.isColumnizedOutsourcing() && generated.certifiedOutsourcingReducedCost < 0.0) {
+			correction += generated.certifiedOutsourcingReducedCost;
 		}
 		return solution.getObjectiveValue() + correction;
 	}
@@ -779,6 +814,8 @@ public class PC {
 		double bestAcceptedReducedCost = Double.POSITIVE_INFINITY;
 		double bestInternalReducedCost = Double.POSITIVE_INFINITY;
 		double bestOutsourcingReducedCost = Double.POSITIVE_INFINITY;
+		double certifiedInternalReducedCost = Double.NaN;
+		double certifiedOutsourcingReducedCost = Double.NaN;
 		TWETColumn representativeColumn;
 		TWETOutsourcingColumn representativeOutsourcingColumn;
 
@@ -801,6 +838,41 @@ public class PC {
 				bestAcceptedReducedCost = reducedCost;
 				representativeColumn = column;
 				representativeOutsourcingColumn = outsourcingColumn;
+			}
+		}
+
+		void observeCertifiedReducedCosts(PricingResult result) {
+			if (Double.isFinite(result.getCertifiedInternalReducedCost())) {
+				certifiedInternalReducedCost = result.getCertifiedInternalReducedCost();
+			}
+			if (Double.isFinite(result.getCertifiedOutsourcingReducedCost())) {
+				certifiedOutsourcingReducedCost = result.getCertifiedOutsourcingReducedCost();
+			}
+		}
+
+		void merge(GeneratedColumnIds other) {
+			internalColumnIds.addAll(other.internalColumnIds);
+			outsourcingColumnIds.addAll(other.outsourcingColumnIds);
+			if (other.bestAcceptedReducedCost < bestAcceptedReducedCost) {
+				bestAcceptedReducedCost = other.bestAcceptedReducedCost;
+			}
+			if (other.bestInternalReducedCost < bestInternalReducedCost) {
+				bestInternalReducedCost = other.bestInternalReducedCost;
+			}
+			if (other.bestOutsourcingReducedCost < bestOutsourcingReducedCost) {
+				bestOutsourcingReducedCost = other.bestOutsourcingReducedCost;
+			}
+			if (Double.isFinite(other.certifiedInternalReducedCost)) {
+				certifiedInternalReducedCost = other.certifiedInternalReducedCost;
+			}
+			if (Double.isFinite(other.certifiedOutsourcingReducedCost)) {
+				certifiedOutsourcingReducedCost = other.certifiedOutsourcingReducedCost;
+			}
+			if (representativeColumn == null) {
+				representativeColumn = other.representativeColumn;
+			}
+			if (representativeOutsourcingColumn == null) {
+				representativeOutsourcingColumn = other.representativeOutsourcingColumn;
 			}
 		}
 	}

@@ -23,6 +23,10 @@ public final class PricingResult {
 	private final boolean improved;
 	/** 调试信息或备注。 */
 	private final String message;
+	/** 可选：本次 pricing 已证明的内部机器列族最小 reduced cost；NaN 表示没有证书。 */
+	private final double certifiedInternalReducedCost;
+	/** 可选：本次 pricing 已证明的外包列族最小 reduced cost；NaN 表示没有证书。 */
+	private final double certifiedOutsourcingReducedCost;
 
 	/**
 	 * 构造一个 pricing 结果。
@@ -37,6 +41,18 @@ public final class PricingResult {
 		this.outsourcingColumns = new ArrayList<TWETOutsourcingColumn>(outsourcingColumns);
 		this.improved = improved;
 		this.message = message;
+		this.certifiedInternalReducedCost = Double.NaN;
+		this.certifiedOutsourcingReducedCost = Double.NaN;
+	}
+
+	private PricingResult(List<TWETColumn> columns, List<TWETOutsourcingColumn> outsourcingColumns, boolean improved,
+			String message, double certifiedInternalReducedCost, double certifiedOutsourcingReducedCost) {
+		this.columns = new ArrayList<TWETColumn>(columns);
+		this.outsourcingColumns = new ArrayList<TWETOutsourcingColumn>(outsourcingColumns);
+		this.improved = improved;
+		this.message = message;
+		this.certifiedInternalReducedCost = certifiedInternalReducedCost;
+		this.certifiedOutsourcingReducedCost = certifiedOutsourcingReducedCost;
 	}
 
 	/**
@@ -63,6 +79,24 @@ public final class PricingResult {
 	/** @return 附加信息 */
 	public String getMessage() {
 		return message;
+	}
+
+	public double getCertifiedInternalReducedCost() {
+		return certifiedInternalReducedCost;
+	}
+
+	public double getCertifiedOutsourcingReducedCost() {
+		return certifiedOutsourcingReducedCost;
+	}
+
+	public PricingResult withCertifiedInternalReducedCost(double reducedCost) {
+		return new PricingResult(columns, outsourcingColumns, improved, message, reducedCost,
+				certifiedOutsourcingReducedCost);
+	}
+
+	public PricingResult withCertifiedOutsourcingReducedCost(double reducedCost) {
+		return new PricingResult(columns, outsourcingColumns, improved, message, certifiedInternalReducedCost,
+				reducedCost);
 	}
 
 }

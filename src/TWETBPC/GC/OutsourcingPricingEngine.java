@@ -61,6 +61,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		}
 
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
+		double bestReducedCost = Double.POSITIVE_INFINITY;
 		for (Label label : labels) {
 			if (label.jobs.isEmpty()) {
 				continue;
@@ -70,12 +71,19 @@ public class OutsourcingPricingEngine implements PricingEngine {
 				continue;
 			}
 			double reducedCost = cost - label.profit - lp.getOutsourcingColumnDual();
+			if (Utility.compareLt(reducedCost, bestReducedCost)) {
+				bestReducedCost = reducedCost;
+			}
 			if (Utility.compareLt(reducedCost, -REDUCED_COST_TOLERANCE)) {
 				candidates.add(new Candidate(label.jobs, label.baseline, cost, reducedCost));
 			}
 		}
+		if (Double.isInfinite(bestReducedCost)) {
+			bestReducedCost = 0.0;
+		}
 		if (candidates.isEmpty()) {
-			return PricingResult.noImprovement("No negative outsourcing column");
+			return PricingResult.noImprovement("No negative outsourcing column")
+					.withCertifiedOutsourcingReducedCost(bestReducedCost);
 		}
 		Collections.sort(candidates, new Comparator<Candidate>() {
 			@Override
@@ -97,7 +105,8 @@ public class OutsourcingPricingEngine implements PricingEngine {
 					false));
 		}
 		return new PricingResult(Collections.<TWETBPC.Model.TWETColumn>emptyList(), columns, true,
-				"Generated " + columns.size() + " outsourcing columns; best rc=" + candidates.get(0).reducedCost);
+				"Generated " + columns.size() + " outsourcing columns; best rc=" + candidates.get(0).reducedCost)
+						.withCertifiedOutsourcingReducedCost(bestReducedCost);
 	}
 
 	@Override

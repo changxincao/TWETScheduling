@@ -44,15 +44,19 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 			String message = gc.getLastMessage() + runSameStateCrossCheck(lp, columns);
 			if (columns.isEmpty()) {
 				lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
-				return PricingResult.noImprovement(message);
+				return PricingResult.noImprovement(message)
+						.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
 			}
-			return new PricingResult(columns, true, message);
+			return new PricingResult(columns, true, message)
+					.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
 		}
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
-			return PricingResult.noImprovement(gc.getLastMessage());
+			return PricingResult.noImprovement(gc.getLastMessage())
+					.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
 		}
-		return new PricingResult(columns, true, gc.getLastMessage());
+		return new PricingResult(columns, true, gc.getLastMessage())
+				.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
 	}
 
 	/**

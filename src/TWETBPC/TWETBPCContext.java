@@ -71,11 +71,6 @@ public class TWETBPCContext {
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		pricingEngines.add(new HeuristicPricingEngine(data, config));
-		if (config.useColumnizedOutsourcing()) {
-			// 2026-06-20: Columnized outsourcing pricing is cheap, but running it first caused severe restart churn.
-			// Keep internal heuristic first; outsourcing-first is recorded as a negative experiment.
-			pricingEngines.add(new OutsourcingPricingEngine(data, config));
-		}
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
 		if (config.useTimeIndexedGraphPricing) {
@@ -120,6 +115,11 @@ public class TWETBPCContext {
 			pricingEngines.add(new PaperDominanceExactPricingEngine(data, config));
 		} else {
 			pricingEngines.add(new ExactPricingEngine(data, config));
+		}
+		if (config.useColumnizedOutsourcing()) {
+			// 2026-06-22: 外包集合列放在内部 exact 后；dual-bound pruning 开启时，PC 会用同一套 dual
+			// 把内部 exact 和外包 exact 绑定执行，避免只证明一个列族。
+			pricingEngines.add(new OutsourcingPricingEngine(data, config));
 		}
 		this.cutGenerators = new ArrayList<CutGenerator>();
 		cutGenerators.add(new NoOpCutGenerator());

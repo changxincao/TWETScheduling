@@ -640,8 +640,9 @@ public class PC {
 		}
 		String message = result.getMessage();
 		if (acceptanceDual != null) {
-			message += " acceptedBestRc=" + generated.bestAcceptedReducedCost + " filteredByOutDual="
-					+ filteredByAcceptanceDual;
+			double observedDualBound = observedDualBoundEstimate(lp, generated);
+			message += " acceptedBestRc=" + generated.bestAcceptedReducedCost + " observedDualBound="
+					+ observedDualBound + " filteredByOutDual=" + filteredByAcceptanceDual;
 		}
 		traceSink.onPricingCall(lp.getNode(), name, addedColumns > 0, addedColumns, message,
 				totalPoolSize(lp), pricingNanos);
@@ -692,10 +693,28 @@ public class PC {
 		System.out.flush();
 	}
 
+	private double observedDualBoundEstimate(LP lp, GeneratedColumnIds generated) {
+		TWETMasterSolution solution = lp.getLastSolution();
+		if (solution == null) {
+			return Double.NaN;
+		}
+		double correction = 0.0;
+		if (generated.bestInternalReducedCost < 0.0) {
+			int machineCopies = lp.getNode() == null ? 1 : Math.max(1, lp.getNode().maxMachineCount);
+			correction += machineCopies * generated.bestInternalReducedCost;
+		}
+		if (lp.isColumnizedOutsourcing() && generated.bestOutsourcingReducedCost < 0.0) {
+			correction += generated.bestOutsourcingReducedCost;
+		}
+		return solution.getObjectiveValue() + correction;
+	}
+
 	private static final class GeneratedColumnIds {
 		final ArrayList<Integer> internalColumnIds = new ArrayList<Integer>();
 		final ArrayList<Integer> outsourcingColumnIds = new ArrayList<Integer>();
 		double bestAcceptedReducedCost = Double.POSITIVE_INFINITY;
+		double bestInternalReducedCost = Double.POSITIVE_INFINITY;
+		double bestOutsourcingReducedCost = Double.POSITIVE_INFINITY;
 		TWETColumn representativeColumn;
 		TWETOutsourcingColumn representativeOutsourcingColumn;
 
@@ -708,6 +727,12 @@ public class PC {
 		}
 
 		void observeReducedCost(double reducedCost, TWETColumn column, TWETOutsourcingColumn outsourcingColumn) {
+			if (column != null && reducedCost < bestInternalReducedCost) {
+				bestInternalReducedCost = reducedCost;
+			}
+			if (outsourcingColumn != null && reducedCost < bestOutsourcingReducedCost) {
+				bestOutsourcingReducedCost = reducedCost;
+			}
 			if (reducedCost < bestAcceptedReducedCost) {
 				bestAcceptedReducedCost = reducedCost;
 				representativeColumn = column;

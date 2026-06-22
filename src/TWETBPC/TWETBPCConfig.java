@@ -68,8 +68,8 @@ public class TWETBPCConfig {
 	public double dualStabilizationPenaltyArtificialTolerance = 1e-7;
 	/** 2026-06-22: stabilized candidate 必须在当前 out dual 下达到该 reduced-cost 阈值才真正入池。 */
 	public double dualStabilizationReducedCostTolerance = 1e-7;
-	/** 2026-06-22: 实验开关；用当前 RMP dual bound 与 incumbent 比较，尝试提前剪节点。默认关闭。 */
-	public boolean enableDualBoundPruning = false;
+	/** 2026-06-22: 用当前 RMP dual bound 与 incumbent 比较，尝试提前剪节点；列化外包路径在 PC 中保守禁用。 */
+	public boolean enableDualBoundPruning = true;
 	/** 2026-06-22: dual-bound 剪枝容差。 */
 	public double dualBoundPruningTolerance = 1e-7;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */

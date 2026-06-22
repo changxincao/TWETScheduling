@@ -54,18 +54,6 @@ public class TWETBPCConfig {
 	public double dualStabilizationCenterMoveWeight = 0.3;
 	/** 2026-06-22: 是否启用 directional smoothing；mispricing 序列中会自动关闭方向扭转。 */
 	public boolean dualStabilizationDirectionalSmoothing = true;
-	/** 2026-06-22: 是否叠加 3-piece penalty-stabilized RMP。 */
-	public boolean dualStabilizationUsePenalty = false;
-	/** 2026-06-22: penalty 参数化方式，可选 explicit/curvature；默认 explicit 更适合与 smoothing 组合。 */
-	public String dualStabilizationPenaltyMode = "explicit";
-	/** 2026-06-22: Pessoa et al. 中 penalty 的关键参数 kappa。 */
-	public double dualStabilizationPenaltyKappa = 10.0;
-	/** 2026-06-22: explicit 3-piece penalty 的外侧斜率 gamma。 */
-	public double dualStabilizationPenaltyInitialGamma = 0.9;
-	/** 2026-06-22: penalty artificial 仍为正时，gamma 或 curvature 最多放松多少次。 */
-	public int dualStabilizationPenaltyMaxRelaxations = 3;
-	/** 2026-06-22: 判断 penalty artificial 是否仍为正的容差。 */
-	public double dualStabilizationPenaltyArtificialTolerance = 1e-7;
 	/** 2026-06-22: stabilized candidate 必须在当前 out dual 下达到该 reduced-cost 阈值才真正入池。 */
 	public double dualStabilizationReducedCostTolerance = 1e-7;
 	/** 2026-06-22: 用当前 RMP dual bound 与 incumbent 比较，尝试提前剪节点；只使用 pricing 提供的 certified rc_min。 */

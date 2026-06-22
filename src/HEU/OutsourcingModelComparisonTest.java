@@ -263,23 +263,6 @@ public final class OutsourcingModelComparisonTest {
 		config.dualStabilizationDirectionalSmoothing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationDirectionalSmoothing",
 				Boolean.toString(config.dualStabilizationDirectionalSmoothing)));
-		config.dualStabilizationUsePenalty = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.outsourcingCompare.dualStabilizationUsePenalty",
-				Boolean.toString(config.dualStabilizationUsePenalty)));
-		config.dualStabilizationPenaltyMode = System.getProperty(
-				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyMode", config.dualStabilizationPenaltyMode);
-		config.dualStabilizationPenaltyKappa = Double.parseDouble(System.getProperty(
-				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyKappa",
-				Double.toString(config.dualStabilizationPenaltyKappa)));
-		config.dualStabilizationPenaltyInitialGamma = Double.parseDouble(System.getProperty(
-				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyInitialGamma",
-				Double.toString(config.dualStabilizationPenaltyInitialGamma)));
-		config.dualStabilizationPenaltyMaxRelaxations = Integer.getInteger(
-				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyMaxRelaxations",
-				config.dualStabilizationPenaltyMaxRelaxations);
-		config.dualStabilizationPenaltyArtificialTolerance = Double.parseDouble(System.getProperty(
-				"twet.bpc.outsourcingCompare.dualStabilizationPenaltyArtificialTolerance",
-				Double.toString(config.dualStabilizationPenaltyArtificialTolerance)));
 		config.dualStabilizationReducedCostTolerance = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationReducedCostTolerance",
 				Double.toString(config.dualStabilizationReducedCostTolerance)));

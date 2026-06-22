@@ -176,11 +176,6 @@ public class PC {
 		TWETMasterSolution solution = currentSolution;
 		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals(),
 				currentSolution.getObjectiveValue());
-		boolean penaltyActive = config.dualStabilizationUsePenalty;
-		if (penaltyActive) {
-			lp.setDualPenaltyProfile(dualState.penaltyProfile());
-			solution = solveRelaxationTimed(lp, "stabilized_penalty_initial");
-		}
 		while (true) {
 			LP.PricingDualSnapshot outDual = lp.captureTruePricingDuals();
 			PricingPassResult stabilizedPass = runStabilizedPricingSequence(lp, dualState, outDual);
@@ -190,21 +185,7 @@ public class PC {
 			if (stabilizedPass.addedColumns > 0) {
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
 				dualState.observeAccepted(lp.captureTruePricingDuals(), solution.getObjectiveValue(), stabilizedPass);
-				if (penaltyActive) {
-					dualState.updatePenaltyAfterMaster(lp.getDualPenaltyArtificialActivity());
-				}
 				continue;
-			}
-			if (penaltyActive && lp.getDualPenaltyArtificialActivity() > config.dualStabilizationPenaltyArtificialTolerance
-					&& dualState.relaxPenalty()) {
-				lp.setDualPenaltyProfile(dualState.penaltyProfile());
-				solution = solveRelaxationTimed(lp, "stabilized_penalty_relaxed");
-				continue;
-			}
-
-			if (lp.hasDualPenaltyProfile()) {
-				lp.clearDualPenaltyProfile();
-				solution = solveRelaxationTimed(lp, "true_master_after_penalty");
 			}
 			PricingPassResult truePass = runPricingPass(lp, "true", true);
 			if (truePass.dualBoundPruned) {
@@ -213,18 +194,11 @@ public class PC {
 			if (truePass.addedColumns > 0) {
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
 				dualState.observeAccepted(lp.captureTruePricingDuals(), solution.getObjectiveValue(), truePass);
-				if (penaltyActive) {
-					lp.setDualPenaltyProfile(dualState.penaltyProfile());
-					solution = solveRelaxationTimed(lp, "stabilized_penalty_restart");
-				}
 				continue;
 			}
 			break;
 		}
 		lp.clearPricingDualOverride();
-		if (lp.hasDualPenaltyProfile()) {
-			lp.clearDualPenaltyProfile();
-		}
 		return solution;
 	}
 
@@ -298,19 +272,11 @@ public class PC {
 		private double centerObjective;
 		private LP.PricingDualSnapshot lastAcceptedGradient;
 		private double alpha;
-		private double penaltyDelta;
-		private double penaltyGamma;
-		private double penaltyCurvature;
-		private int penaltyRelaxations;
 
 		DualStabilizationState(LP.PricingDualSnapshot initialCenter, double initialObjective) {
 			this.center = initialCenter.copy();
 			this.centerObjective = initialObjective;
 			this.alpha = Math.max(0.0, Math.min(0.95, config.dualStabilizationAlpha));
-			double scale = Math.max(1.0, averageAbsoluteDual(initialCenter));
-			this.penaltyDelta = scale / Math.max(1.0, config.dualStabilizationPenaltyKappa);
-			this.penaltyGamma = Math.max(1e-6, config.dualStabilizationPenaltyInitialGamma);
-			this.penaltyCurvature = this.penaltyDelta;
 		}
 
 		StabilizedDualPoint stabilizedDual(LP.PricingDualSnapshot outDual, double outObjective, double attemptAlpha,
@@ -346,16 +312,6 @@ public class PC {
 					Double.NaN);
 		}
 
-		LP.DualPenaltyProfile penaltyProfile() {
-			double delta = penaltyDelta;
-			double gamma = penaltyGamma;
-			if ("curvature".equalsIgnoreCase(config.dualStabilizationPenaltyMode)) {
-				delta = Math.max(1e-6, norm(lastAcceptedGradient == null ? center : lastAcceptedGradient) / 2.0);
-				gamma = Math.max(1e-6, delta / Math.max(1e-6, penaltyCurvature));
-			}
-			return new LP.DualPenaltyProfile(center, delta, gamma);
-		}
-
 		void observeAccepted(LP.PricingDualSnapshot trueDual, double trueObjective, PricingPassResult pass) {
 			if (pass.hasRepresentative()) {
 				lastAcceptedGradient = representativeGradient(pass.representativeColumn, pass.representativeOutsourcingColumn);
@@ -370,30 +326,6 @@ public class PC {
 			double weight = config.dualStabilizationCenterMoveWeight;
 			center = LP.PricingDualSnapshot.blend(trueDual, center, weight);
 			centerObjective = blendObjective(trueObjective, centerObjective, weight);
-		}
-
-		void updatePenaltyAfterMaster(double artificialActivity) {
-			if (artificialActivity > config.dualStabilizationPenaltyArtificialTolerance) {
-				return;
-			}
-			if ("curvature".equalsIgnoreCase(config.dualStabilizationPenaltyMode)) {
-				penaltyCurvature = Math.max(1e-6, penaltyCurvature * 0.5);
-			} else {
-				penaltyDelta = Math.max(1e-6, penaltyDelta * 0.5);
-			}
-		}
-
-		boolean relaxPenalty() {
-			if (penaltyRelaxations >= config.dualStabilizationPenaltyMaxRelaxations) {
-				return false;
-			}
-			penaltyRelaxations++;
-			if ("curvature".equalsIgnoreCase(config.dualStabilizationPenaltyMode)) {
-				penaltyCurvature *= 10.0;
-			} else {
-				penaltyGamma = Math.max(1e-6, penaltyGamma / 10.0);
-			}
-			return true;
 		}
 
 		private LP.PricingDualSnapshot representativeGradient(TWETColumn column, TWETOutsourcingColumn outsourcingColumn) {
@@ -807,8 +739,8 @@ public class PC {
 			return false;
 		}
 		// 2026-06-22: observed dual bound 必须使用同一套 dual objective 和 rc_min 证书。
-		// penalty RMP、active SRI、directional smoothing 目前没有完整 objective 口径，先只找列不剪枝。
-		if (lp.hasDualPenaltyProfile() || !lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
+		// active SRI 和 directional smoothing 目前没有完整 objective 口径，先只找列不剪枝。
+		if (!lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
 			return false;
 		}
 		if (lp.hasPricingDualOverride() && !Double.isFinite(dualBoundObjectiveOverride)) {

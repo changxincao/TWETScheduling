@@ -50,8 +50,6 @@ public class TWETBPCConfig {
 	public double dualStabilizationAlphaIncreaseFraction = 0.1;
 	/** 2026-06-22: 非 mispricing 且方向支持靠近真实 dual 时，alpha 每次减少的步长。 */
 	public double dualStabilizationAlphaDecreaseStep = 0.1;
-	/** 2026-06-21: 每次真实 LP 改善后，稳定化中心向当前真实 dual 移动的权重。 */
-	public double dualStabilizationCenterMoveWeight = 0.3;
 	/** 2026-06-22: 是否启用 directional smoothing；mispricing 序列中会自动关闭方向扭转。 */
 	public boolean dualStabilizationDirectionalSmoothing = true;
 	/** 2026-06-22: stabilized candidate 必须在当前 out dual 下达到该 reduced-cost 阈值才真正入池。 */

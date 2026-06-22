@@ -183,3 +183,13 @@ PC 的 stabilized pass 现在会把这个 `boundObjective` 传给生成列流程
 现在 `enableDualStabilization=true` 的含义已经收缩为纯 smoothing：每轮以当前真实 RMP dual 为 out-point，以历史 center 为稳定中心，先用 stabilized dual 做启发式、外包和精确定价；候选列必须用真实 out-dual 重新计算 reduced cost 并通过过滤后才加入主问题。若 stabilized sequence 没有可接受列，则回到 true-dual pricing 做闭合确认。默认求解仍然是 `enableDualStabilization=false`，完全不进入该流程。
 
 dual-bound pruning 的口径也随之简化。普通 smoothing 点如果有可用的 `boundObjective` 和同一 stabilized dual 下的 certified `rc_min`，可以计算 observed dual bound；active SRI 和 directional smoothing 仍暂不使用该 bound，因为当前 snapshot 还没有完整覆盖这些状态下的 dual objective。后续若要继续增强稳定化，优先应在 PC 中把 smoothing 流程进一步模块化，而不是重新引入 penalty RMP。
+
+## 13. 2026-06-22：按 Pessoa 2018 对齐 smoothing 参数与 center 更新
+
+本次重新核对 `Pessoa_2018_Automation and Combination of Linear-Programming Based Stabilization Techniques in Column Generation.pdf` 后，确认当前 smoothing 的主要参数应按论文自动调度口径设置：初始 `alpha=0.5`；非 mispricing 且方向信息支持加强稳定化时，执行 `alpha = alpha + 0.1 * (1 - alpha)`；方向信息支持靠近真实 out-dual 时，执行 `alpha = max(0, alpha - 0.1)`；mispricing 序列中按 `1 - k * (1 - alpha)` 逐步靠近 out-dual，直到 `alpha=0` 回到真实 dual。当前代码保留这些数值作为默认配置。
+
+此前实现里还有一个工程参数 `dualStabilizationCenterMoveWeight=0.3`，每次接受列后把 center 固定比例移向真实 dual。这个参数不是 Pessoa/Wentges 的参数，也会让 center objective 的语义变得不清楚，因此本次删除。现在 `PC` 会把本轮 pricing 使用的 separation dual 和同一点上的 observed dual bound 一起带回；只有当该 bound 有 certified reduced-cost 证书时，才把这个 separation point 作为新的 center/in-point。启发式 pricing 或 directional smoothing 点如果没有安全 objective 标量，则只允许找列，不更新 center，避免用编造的 objective 参与后续 stabilized-dual bound。
+
+同时修正了 alpha 自适应判断使用的 out-point：以前在 RMP resolve 之后用新的 true dual 计算方向信号，现在改为使用本轮 pricing 前的真实 out-dual，更贴近论文中 `g_sep` 与 `pi_out - pi_in` 的判断。directional smoothing 仍保留开关和 `beta=cos(gamma)` 口径；由于当前 `PricingDualSnapshot` 没有完整保存任意 directional point 的 dual objective，它生成的点暂不用于 center 更新和 dual-bound pruning。
+
+验证：focused `javac` 编译 `Basic/Common/TWETBPC/HEU/Output` 通过；`wet020_001_2m` root-only smoke 在 `dualStabilization=true` 下分别测试普通 smoothing 和 directional smoothing，均返回 `ROOT_PROCESSED,obj=bound=6343,valid=true`。测试输出已清理。

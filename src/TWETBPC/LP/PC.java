@@ -183,17 +183,17 @@ public class PC {
 				return solution;
 			}
 			if (stabilizedPass.addedColumns > 0) {
+				dualState.observeAccepted(outDual, stabilizedPass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
-				dualState.observeAccepted(lp.captureTruePricingDuals(), solution.getObjectiveValue(), stabilizedPass);
 				continue;
 			}
-			PricingPassResult truePass = runPricingPass(lp, "true", true);
+			PricingPassResult truePass = runPricingPass(lp, "true", true, null, Double.NaN, outDual);
 			if (truePass.dualBoundPruned) {
 				return solution;
 			}
 			if (truePass.addedColumns > 0) {
+				dualState.observeAccepted(outDual, truePass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
-				dualState.observeAccepted(lp.captureTruePricingDuals(), solution.getObjectiveValue(), truePass);
 				continue;
 			}
 			break;
@@ -215,7 +215,7 @@ public class PC {
 			PricingPassResult pass;
 			try {
 				pass = runPricingPass(lp, "stabilized.a" + String.format("%.3f", Double.valueOf(alpha)), false,
-						outDual, stabilizedDual.boundObjective);
+						outDual, stabilizedDual.boundObjective, stabilizedDual.dual);
 			} finally {
 				lp.clearPricingDualOverride();
 			}
@@ -228,16 +228,17 @@ public class PC {
 	}
 
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds) {
-		return runPricingPass(lp, dualModeName, allowReusableBounds, null, Double.NaN);
+		return runPricingPass(lp, dualModeName, allowReusableBounds, null, Double.NaN, null);
 	}
 
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds,
 			LP.PricingDualSnapshot acceptanceDual) {
-		return runPricingPass(lp, dualModeName, allowReusableBounds, acceptanceDual, Double.NaN);
+		return runPricingPass(lp, dualModeName, allowReusableBounds, acceptanceDual, Double.NaN, null);
 	}
 
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds,
-			LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
+			LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride,
+			LP.PricingDualSnapshot separationDual) {
 		for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
 			PricingEngine engine = pricingEngines.get(engineIndex);
 			HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
@@ -262,7 +263,7 @@ public class PC {
 			resetFollowingPricingEngines(engineIndex + 1);
 			lastReusableSubtreeArcEliminationBounds = null;
 			return new PricingPassResult(addedColumns, generated.bestAcceptedReducedCost, generated.representativeColumn,
-					generated.representativeOutsourcingColumn);
+					generated.representativeOutsourcingColumn, false, separationDual, generated.observedDualBound);
 		}
 		return PricingPassResult.EMPTY;
 	}
@@ -312,10 +313,10 @@ public class PC {
 					Double.NaN);
 		}
 
-		void observeAccepted(LP.PricingDualSnapshot trueDual, double trueObjective, PricingPassResult pass) {
+		void observeAccepted(LP.PricingDualSnapshot outDual, PricingPassResult pass) {
 			if (pass.hasRepresentative()) {
 				lastAcceptedGradient = representativeGradient(pass.representativeColumn, pass.representativeOutsourcingColumn);
-				double signal = dotDifferenceGradient(trueDual, center, lastAcceptedGradient);
+				double signal = dotDifferenceGradient(outDual, center, lastAcceptedGradient);
 				if (signal > 0.0) {
 					alpha = alpha + config.dualStabilizationAlphaIncreaseFraction * (1.0 - alpha);
 				} else {
@@ -323,9 +324,13 @@ public class PC {
 				}
 				alpha = Math.max(0.0, Math.min(0.95, alpha));
 			}
-			double weight = config.dualStabilizationCenterMoveWeight;
-			center = LP.PricingDualSnapshot.blend(trueDual, center, weight);
-			centerObjective = blendObjective(trueObjective, centerObjective, weight);
+			if (pass.separationDual != null && Double.isFinite(pass.separationDualBound)) {
+				// 2026-06-22: Pessoa/Wentges 口径下，只有拿到该 separation point 的
+				// L(pi_sep) 证书时才把它作为新的 in-point；启发式或 directional 点
+				// 没有安全 objective 标量时保持原 center，不再使用自定义 0.3 blend。
+				center = pass.separationDual.copy();
+				centerObjective = pass.separationDualBound;
+			}
 		}
 
 		private LP.PricingDualSnapshot representativeGradient(TWETColumn column, TWETOutsourcingColumn outsourcingColumn) {
@@ -373,30 +378,37 @@ public class PC {
 	}
 
 	private static final class PricingPassResult {
-		static final PricingPassResult EMPTY = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null, false);
+		static final PricingPassResult EMPTY = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null, false,
+				null, Double.NaN);
 
 		final int addedColumns;
 		final double bestAcceptedReducedCost;
 		final TWETColumn representativeColumn;
 		final TWETOutsourcingColumn representativeOutsourcingColumn;
 		final boolean dualBoundPruned;
+		final LP.PricingDualSnapshot separationDual;
+		final double separationDualBound;
 
 		PricingPassResult(int addedColumns, double bestAcceptedReducedCost, TWETColumn representativeColumn,
 				TWETOutsourcingColumn representativeOutsourcingColumn) {
-			this(addedColumns, bestAcceptedReducedCost, representativeColumn, representativeOutsourcingColumn, false);
+			this(addedColumns, bestAcceptedReducedCost, representativeColumn, representativeOutsourcingColumn, false, null,
+					Double.NaN);
 		}
 
 		PricingPassResult(int addedColumns, double bestAcceptedReducedCost, TWETColumn representativeColumn,
-				TWETOutsourcingColumn representativeOutsourcingColumn, boolean dualBoundPruned) {
+				TWETOutsourcingColumn representativeOutsourcingColumn, boolean dualBoundPruned,
+				LP.PricingDualSnapshot separationDual, double separationDualBound) {
 			this.addedColumns = addedColumns;
 			this.bestAcceptedReducedCost = bestAcceptedReducedCost;
 			this.representativeColumn = representativeColumn;
 			this.representativeOutsourcingColumn = representativeOutsourcingColumn;
 			this.dualBoundPruned = dualBoundPruned;
+			this.separationDual = separationDual == null ? null : separationDual.copy();
+			this.separationDualBound = separationDualBound;
 		}
 
 		static PricingPassResult dualBoundPruned() {
-			return new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null, true);
+			return new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null, true, null, Double.NaN);
 		}
 
 		boolean hasRepresentative() {
@@ -674,6 +686,7 @@ public class PC {
 		if (reducedCostDual != null) {
 			double observedDualBound = observeDualBound ? observedDualBoundEstimate(lp, generated,
 					dualBoundObjectiveOverride) : Double.NaN;
+			generated.observedDualBound = observedDualBound;
 			if (observeDualBound && Double.isFinite(observedDualBound)) {
 				lastObservedDualBound = Math.max(lastObservedDualBound, observedDualBound);
 				if (config.enableDualBoundPruning && Double.isFinite(incumbentForDualBoundPruning)
@@ -798,6 +811,7 @@ public class PC {
 		double bestOutsourcingReducedCost = Double.POSITIVE_INFINITY;
 		double certifiedInternalReducedCost = Double.NaN;
 		double certifiedOutsourcingReducedCost = Double.NaN;
+		double observedDualBound = Double.NaN;
 		TWETColumn representativeColumn;
 		TWETOutsourcingColumn representativeOutsourcingColumn;
 
@@ -849,6 +863,10 @@ public class PC {
 			}
 			if (Double.isFinite(other.certifiedOutsourcingReducedCost)) {
 				certifiedOutsourcingReducedCost = other.certifiedOutsourcingReducedCost;
+			}
+			if (Double.isFinite(other.observedDualBound)
+					&& (!Double.isFinite(observedDualBound) || other.observedDualBound < observedDualBound)) {
+				observedDualBound = other.observedDualBound;
 			}
 			if (representativeColumn == null) {
 				representativeColumn = other.representativeColumn;

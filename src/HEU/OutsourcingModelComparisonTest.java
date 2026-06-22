@@ -251,9 +251,6 @@ public final class OutsourcingModelComparisonTest {
 		config.dualStabilizationAlpha = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationAlpha",
 				Double.toString(config.dualStabilizationAlpha)));
-		config.dualStabilizationCenterMoveWeight = Double.parseDouble(System.getProperty(
-				"twet.bpc.outsourcingCompare.dualStabilizationCenterMoveWeight",
-				Double.toString(config.dualStabilizationCenterMoveWeight)));
 		config.dualStabilizationAlphaIncreaseFraction = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationAlphaIncreaseFraction",
 				Double.toString(config.dualStabilizationAlphaIncreaseFraction)));

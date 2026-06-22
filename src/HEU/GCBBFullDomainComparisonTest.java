@@ -270,9 +270,6 @@ public class GCBBFullDomainComparisonTest {
 		config.dualStabilizationAlpha = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualStabilizationAlpha",
 				Double.toString(config.dualStabilizationAlpha)));
-		config.dualStabilizationCenterMoveWeight = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.dualStabilizationCenterMoveWeight",
-				Double.toString(config.dualStabilizationCenterMoveWeight)));
 		config.dualStabilizationAlphaIncreaseFraction = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualStabilizationAlphaIncreaseFraction",
 				Double.toString(config.dualStabilizationAlphaIncreaseFraction)));

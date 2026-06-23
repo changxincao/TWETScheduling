@@ -121,7 +121,9 @@ public class GCBBFullDomainComparisonTest {
 		TWETBPCConfig config = buildConfig(instance, fullDomain, nodeJoin);
 		String mode = runModeName(config, fullDomain, nodeJoin);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
-		if (Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.liveTrace", "true"))) {
+		// 2026-06-23: live trace 会在每个节点/阶段写文件，只用于诊断；
+		// 默认关闭，避免对纯性能对比实验造成 I/O 和字符串格式化开销。
+		if (Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.liveTrace", "false"))) {
 			config.liveTraceLogPath = log.toString();
 		}
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);

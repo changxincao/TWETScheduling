@@ -396,8 +396,11 @@ public class LP {
 			cplex.end();
 		}
 		cplex = new IloCplex();
-		// 2026-06-19: 为了实验可复现和评估 CPLEX 并行开销，主 RMP 固定为单线程。
-		cplex.setParam(IloCplex.Param.Threads, 1);
+		// 2026-06-23: 默认保持单线程；诊断退化 dual 差异时允许临时恢复 CPLEX 默认线程。
+		int cplexThreads = Integer.getInteger("twet.bpc.cplexThreads", 1);
+		if (cplexThreads > 0) {
+			cplex.setParam(IloCplex.Param.Threads, cplexThreads);
+		}
 		objective = null;
 		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
 		outsourceColumnById = new HashMap<Integer, IloNumVar>();

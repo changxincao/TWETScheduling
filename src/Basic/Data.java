@@ -111,7 +111,9 @@ public class Data {
 		}
 		if (Utility.compareLe(tmax, lateTime[0])) {
 			lateTime[0] = tmax;
-			System.out.println("TightTW0> Reduce the period from " + lateTime[0] + " to: " + tmax); // debug
+			if (Configure.debugAlgorithmCounters) {
+				System.out.println("TightTW0> Reduce the period from " + lateTime[0] + " to: " + tmax); // debug
+			}
 		}
 	}
 
@@ -128,7 +130,9 @@ public class Data {
 		// 不存在最后一个任务--->仓库，lateTime无法更新缩减
 		// 那可能某些极端场景下，最早开始比最晚还要大，此时该任务无法服务，可缩减本次labeling需处理任务数量
 
-		System.out.println("Reduced time windows: " + iter); // debug
+		if (Configure.debugAlgorithmCounters) {
+			System.out.println("Reduced time windows: " + iter); // debug
+		}
 	}
 
 	public void BuildReach() {
@@ -227,7 +231,9 @@ public class Data {
 		SchedulerForReleaseNoWait scheduler=new SchedulerForReleaseNoWait(this);
 		double improvedCmax=scheduler.solve(CmaxH, 2, 10);
 		if(Utility.compareLt(improvedCmax, CmaxH)) {
-			System.out.println("Cmax被进一步改进："+CmaxH+" "+improvedCmax);
+			if (Configure.debugAlgorithmCounters) {
+				System.out.println("Cmax被进一步改进："+CmaxH+" "+improvedCmax);
+			}
 			CmaxE=improvedCmax;
 			CmaxH=CmaxE*1.1;
 //			Cmax*=5;

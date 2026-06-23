@@ -1085,7 +1085,7 @@ public class Solution {
 		double cost11 = Move.testSequence(data, newSeq1, this);
 		double[] pairs12 = merge12.findMinimal(true, true);
 		double cost12 = pairs12[0];
-		if (Utility.compareGe(cost12, Utility.curUpperBound)) {
+		if (Utility.compareGe(cost12, Utility.curUpperBound) && Configure.debugAlgorithmCounters) {
 			System.out.println("M错误？");// 假设不可能
 		}
 		double s_h2 = pairs12[1];
@@ -1098,16 +1098,20 @@ public class Solution {
 		newSeq2.addAll(seq3);
 		cost11 = Move.testSequence(data, newSeq2, this);
 		double cost23 = pairs23[0];
-		if (Utility.compareGe(cost23, Utility.curUpperBound)) {
+		if (Utility.compareGe(cost23, Utility.curUpperBound) && Configure.debugAlgorithmCounters) {
 			System.out.println("M错误？");// 假设不可能
 		}
 		double s_h3 = pairs23[1];
 		if (Utility.compareGe(s_h3 - s_h2, duration2)) {
-			System.out.print("情况1");
+			if (Configure.debugAlgorithmCounters) {
+				System.out.print("情况1");
+			}
 			bestCost = f1.evaluate(s_h2 - shift1) + b2.evaluate(s_h2) + f2.evaluate(s_h3) + b3.evaluate(s_h3 + shift2)
 					- f2.tail.getValue(f2.tail.end);
 		} else {
-			System.out.print("情况2");
+			if (Configure.debugAlgorithmCounters) {
+				System.out.print("情况2");
+			}
 			PiecewiseLinearFunction ff1 = f1.shiftX(shift1);
 			PiecewiseLinearFunction ff2 = ff1.add(b2);
 			PiecewiseLinearFunction ff3 = f2.shiftX(-duration2);

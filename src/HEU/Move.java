@@ -340,7 +340,7 @@ class IOptOperator implements Move {
 		}
 		PiecewiseLinearFunction f1=rev?s.fFunctions_hgl_reverse[mid][from][to==-1?seq.size():to][len]:s.fFunctions_hgl_normal[mid][from][to==-1?seq.size():to][len];
 		PiecewiseLinearFunction b2=rev?s.bFunctions_hgl_reverse[mid][from][to==-1?seq.size():to][len]:s.bFunctions_hgl_normal[mid][from][to==-1?seq.size():to][len];
-		if(b2==null) {
+		if(b2==null && Common.Configure.debugAlgorithmCounters) {
 			System.out.println(" "+from+" "+to+" "+len);
 		}
 		double shift=0;

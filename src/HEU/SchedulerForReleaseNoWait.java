@@ -4,6 +4,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import Basic.Data;
+import Common.Configure;
 import Common.Utility;
 
 // 任务类，用于存储任务的属性
@@ -281,7 +282,9 @@ public class SchedulerForReleaseNoWait {
 
 		for (iter = 0; iter < maxIterations; iter++) {
 			if (iterationsWithoutImprovement >= noImprovementLimit) {
-				System.out.println("局部搜索：连续 " + noImprovementLimit + " 次迭代未找到改进，提前停止。");
+				if (Configure.debugAlgorithmCounters) {
+					System.out.println("局部搜索：连续 " + noImprovementLimit + " 次迭代未找到改进，提前停止。");
+				}
 				break;
 			}
 
@@ -397,7 +400,9 @@ public class SchedulerForReleaseNoWait {
 			}
 		} // 结束主迭代循环
 
-		System.out.println("局部搜索完成。总迭代次数: " + iter);
+		if (Configure.debugAlgorithmCounters) {
+			System.out.println("局部搜索完成。总迭代次数: " + iter);
+		}
 		// 为最终的最佳调度方案计算详细的作业时间
 		Map<Integer, JobTimingInfo> finalJobDetails = calculateJobTimingsForSchedule(bestScheduleFound);
 		return new ScheduleSolution(bestScheduleFound, bestMakespanFound, finalJobDetails);
@@ -470,12 +475,16 @@ public class SchedulerForReleaseNoWait {
 	public double solve(double CmaxU, int lsMaxIterations, int lsNoImprovementLimit) {
 		
 
-		System.out.println("开始执行构造性启发式算法...");
+		if (Configure.debugAlgorithmCounters) {
+			System.out.println("开始执行构造性启发式算法...");
+		}
 		long startTimeCH = System.currentTimeMillis();
 		ScheduleSolution initialSolution = constructiveHeuristic();
 		long endTimeCH = System.currentTimeMillis();
-		System.out.println("构造性启发式算法完成，耗时: " + (endTimeCH - startTimeCH) + " ms");
-		System.out.println("初始调度 Makespan: " + String.format("%.2f", initialSolution.makespan));
+		if (Configure.debugAlgorithmCounters) {
+			System.out.println("构造性启发式算法完成，耗时: " + (endTimeCH - startTimeCH) + " ms");
+			System.out.println("初始调度 Makespan: " + String.format("%.2f", initialSolution.makespan));
+		}
 		// System.out.println("初始调度方案: " + initialSolution.schedule);
 
 //		if (initialSolution.makespan > CmaxU) {

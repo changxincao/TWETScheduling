@@ -754,7 +754,7 @@ public class PC {
 
 	private boolean shouldPairOutsourcingPricingForDualBound(LP lp, PricingEngine engine, boolean repairMode,
 			PricingResult result) {
-		return !repairMode && config.enableDualBoundPruning && lp.isColumnizedOutsourcing()
+		return !repairMode && lp.isColumnizedOutsourcing()
 				&& !(engine instanceof OutsourcingPricingEngine)
 				&& Double.isFinite(result.getCertifiedInternalReducedCost());
 	}

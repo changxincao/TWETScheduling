@@ -88,11 +88,8 @@ public class InitialColumnBuilder {
 	}
 
 	private void addAcceptedHistoryColumns(Solution seed, LinkedHashSet<Integer> initialColumnIds) {
-		double bestCost = data.configure.bestSolution == null ? seed.curCost : data.configure.bestSolution.curCost;
-		double qualityRatio = Math.max(1.0, config.acceptedSolutionInitialColumnQualityRatio);
-		double qualityLimit = bestCost + Math.abs(bestCost) * (qualityRatio - 1.0);
 		for (Solution accepted : data.configure.getAcceptedSolutionHistoryCopies()) {
-			if (accepted == null || accepted.curCost > qualityLimit) {
+			if (accepted == null) {
 				continue;
 			}
 			addMachineColumns(accepted, initialColumnIds, null);

@@ -237,9 +237,6 @@ public class GCBBFullDomainComparisonTest {
 				Boolean.toString(config.useAcceptedSolutionHistoryForInitialColumns)));
 		config.acceptedSolutionHistoryLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.acceptedSolutionHistoryLimit", config.acceptedSolutionHistoryLimit);
-		config.acceptedSolutionInitialColumnQualityRatio = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.acceptedInitialColumnQualityRatio",
-				Double.toString(config.acceptedSolutionInitialColumnQualityRatio)));
 		config.enableHeuristicPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableHeuristicPricing",
 				Boolean.toString(config.enableHeuristicPricing)));

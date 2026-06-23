@@ -54,8 +54,14 @@ public class Configure {
 			return;
 		}
 		acceptedSolutionHistory.add(solution.copy());
+		Collections.sort(acceptedSolutionHistory, new java.util.Comparator<Solution>() {
+			@Override
+			public int compare(Solution a, Solution b) {
+				return Double.compare(a.curCost, b.curCost);
+			}
+		});
 		while (acceptedSolutionHistory.size() > maxHistorySize) {
-			acceptedSolutionHistory.remove(0);
+			acceptedSolutionHistory.remove(acceptedSolutionHistory.size() - 1);
 		}
 	}
 

@@ -36,7 +36,6 @@ public class TWETBPCConfig {
 	/** 2026-06-23: 是否把 ALNS 接受过的 current 解也拆成 root 初始机器列。 */
 	public boolean useAcceptedSolutionHistoryForInitialColumns = true;
 	public int acceptedSolutionHistoryLimit = 2000;
-	public int acceptedSolutionInitialColumnLimit = 1000;
 	public double acceptedSolutionInitialColumnQualityRatio = 1.10;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;

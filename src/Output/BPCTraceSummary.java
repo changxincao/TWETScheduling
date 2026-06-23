@@ -43,6 +43,7 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private long completionBoundSubtreeArcEliminationApplied;
 	private long completionBoundSubtreeArcEliminationTimeNanos;
 	private int prunedByIncumbentCount;
+	private int prunedByDualBoundCount;
 	private int closedWithoutBranchCount;
 	private int queuePeak;
 	private int remainingQueueSize;
@@ -253,6 +254,8 @@ public class BPCTraceSummary implements BPCTraceSink {
 		remainingQueueSize = queueSizeAfterClose;
 		if ("pruned_by_incumbent".equals(reason)) {
 			prunedByIncumbentCount++;
+		} else if ("pruned_by_dual_bound".equals(reason)) {
+			prunedByDualBoundCount++;
 		} else if ("closed_without_branch".equals(reason)) {
 			closedWithoutBranchCount++;
 		}
@@ -521,6 +524,10 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public int getPrunedByIncumbentCount() {
 		return prunedByIncumbentCount;
+	}
+
+	public int getPrunedByDualBoundCount() {
+		return prunedByDualBoundCount;
 	}
 
 	public int getClosedWithoutBranchCount() {

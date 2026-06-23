@@ -152,8 +152,10 @@ public final class BPCOutputFormatters {
 					summary.getCompletionBoundSubtreeArcEliminationApplied(),
 					summary.getCompletionBoundSubtreeArcEliminationTimeNanos() / 1_000_000_000.0));
 		}
-		builder.append(String.format(Locale.US, "pruned by incumbent=%d, closed without branch=%d%n",
-				summary.getPrunedByIncumbentCount(), summary.getClosedWithoutBranchCount()));
+		builder.append(String.format(Locale.US,
+				"pruned by incumbent=%d, pruned by dual bound=%d, closed without branch=%d%n",
+				summary.getPrunedByIncumbentCount(), summary.getPrunedByDualBoundCount(),
+				summary.getClosedWithoutBranchCount()));
 		builder.append(String.format(Locale.US, "peak queue=%d, peak pool=%d, peak cut pool=%d%n", summary.getQueuePeak(),
 				summary.getMaxPoolSize(), summary.getMaxCutPoolSize()));
 		builder.append(String.format(Locale.US, "remaining queue=%d%n", summary.getRemainingQueueSize()));

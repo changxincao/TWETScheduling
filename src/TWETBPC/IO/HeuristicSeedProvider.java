@@ -71,6 +71,10 @@ public class HeuristicSeedProvider {
 		EngineALNS.maxRuntimeMillis = config.alnsMaxRuntimeMillis;
 		EngineALNS.maxNoImpIterN = config.alnsMaxNoImproveIterations;
 		EngineALNS.maxAcceptedSolutionHistory = config.acceptedSolutionHistoryLimit;
+		// 2026-06-23: 初始列只会读取 accepted 或 best 其中一种历史；best 模式下不再记录 accepted，
+		// 避免 ALNS 热路径反复复制不会被使用的中间解。
+		EngineALNS.recordAcceptedSolutions = !"best".equalsIgnoreCase(config.initialHeuristicColumnHistoryMode)
+				&& config.acceptedSolutionHistoryLimit > 0;
 		EngineALNS.useSimulatedAnnealingAcceptance = config.alnsUseSimulatedAnnealingAcceptance;
 		EngineALNS.simulatedAnnealingInitialTemperatureRatio = config.alnsSimulatedAnnealingInitialTemperatureRatio;
 		EngineALNS.simulatedAnnealingCoolingRate = config.alnsSimulatedAnnealingCoolingRate;

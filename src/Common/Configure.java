@@ -2,11 +2,19 @@ package Common;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 import HEU.Solution;
 
 public class Configure {
+
+	private static final Comparator<Solution> SOLUTION_COST_ASC = new Comparator<Solution>() {
+		@Override
+		public int compare(Solution a, Solution b) {
+			return Double.compare(a.curCost, b.curCost);
+		}
+	};
 
 	public static boolean timeManage=false;//记录组件时间和次数，分析效率
 	public static boolean SegmentPool=false;
@@ -53,13 +61,12 @@ public class Configure {
 		if (solution == null || maxHistorySize <= 0) {
 			return;
 		}
-		acceptedSolutionHistory.add(solution.copy());
-		Collections.sort(acceptedSolutionHistory, new java.util.Comparator<Solution>() {
-			@Override
-			public int compare(Solution a, Solution b) {
-				return Double.compare(a.curCost, b.curCost);
-			}
-		});
+		Solution copy = solution.copy();
+		int index = Collections.binarySearch(acceptedSolutionHistory, copy, SOLUTION_COST_ASC);
+		if (index < 0) {
+			index = -index - 1;
+		}
+		acceptedSolutionHistory.add(index, copy);
 		while (acceptedSolutionHistory.size() > maxHistorySize) {
 			acceptedSolutionHistory.remove(acceptedSolutionHistory.size() - 1);
 		}

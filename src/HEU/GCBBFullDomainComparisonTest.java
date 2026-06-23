@@ -232,9 +232,9 @@ public class GCBBFullDomainComparisonTest {
 		config.alnsSimulatedAnnealingCoolingRate = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.alnsSACooling",
 				Double.toString(config.alnsSimulatedAnnealingCoolingRate)));
-		config.useAcceptedSolutionHistoryForInitialColumns = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.useAcceptedInitialColumns",
-				Boolean.toString(config.useAcceptedSolutionHistoryForInitialColumns)));
+		config.initialHeuristicColumnHistoryMode = System.getProperty(
+				"twet.bpc.fullDomainCompare.initialHeuristicColumnHistoryMode",
+				config.initialHeuristicColumnHistoryMode);
 		config.acceptedSolutionHistoryLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.acceptedSolutionHistoryLimit", config.acceptedSolutionHistoryLimit);
 		config.enableHeuristicPricing = Boolean.parseBoolean(System.getProperty(

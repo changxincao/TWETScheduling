@@ -54,15 +54,9 @@ public class InitialColumnBuilder {
 		LinkedHashSet<Integer> initialColumnIds = new LinkedHashSet<Integer>();
 		LinkedHashSet<Integer> incumbentColumnIds = new LinkedHashSet<Integer>();
 
+		addHistoryColumns(initialColumnIds);
+		// 2026-06-23: selected history normally already contains the final seed; this call mainly records incumbent ids.
 		addMachineColumns(seed, initialColumnIds, incumbentColumnIds);
-		if (config.useBestSolutionHistoryForInitialColumns && data.configure != null) {
-			for (Solution historicalBest : data.configure.getBestSolutionHistoryCopies()) {
-				addMachineColumns(historicalBest, initialColumnIds, null);
-			}
-		}
-		if (config.useAcceptedSolutionHistoryForInitialColumns && data.configure != null) {
-			addAcceptedHistoryColumns(seed, initialColumnIds);
-		}
 
 		return new InitialColumnBundle(seed, new ArrayList<Integer>(initialColumnIds),
 				new ArrayList<Integer>(incumbentColumnIds), SolutionBridge.extractOutsourcedJobs(seed),
@@ -87,7 +81,16 @@ public class InitialColumnBuilder {
 		}
 	}
 
-	private void addAcceptedHistoryColumns(Solution seed, LinkedHashSet<Integer> initialColumnIds) {
+	private void addHistoryColumns(LinkedHashSet<Integer> initialColumnIds) {
+		if (data.configure == null) {
+			return;
+		}
+		if ("best".equalsIgnoreCase(config.initialHeuristicColumnHistoryMode)) {
+			for (Solution historicalBest : data.configure.getBestSolutionHistoryCopies()) {
+				addMachineColumns(historicalBest, initialColumnIds, null);
+			}
+			return;
+		}
 		for (Solution accepted : data.configure.getAcceptedSolutionHistoryCopies()) {
 			if (accepted == null) {
 				continue;

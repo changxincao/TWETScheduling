@@ -206,22 +206,24 @@ public class PC {
 
 	private PricingPassResult runStabilizedPricingSequence(LP lp, DualStabilizationState dualState,
 			LP.PricingDualSnapshot outDual) {
-		double initialAlpha = dualState.alpha;
+		double baseAlpha = dualState.alpha;
 		double outObjective = lp.getLastSolution() == null ? Double.NaN : lp.getLastSolution().getObjectiveValue();
 		int attempt = 0;
 		while (true) {
-			double alpha = attempt == 0 ? initialAlpha : Math.max(0.0, 1.0 - (attempt + 1) * (1.0 - initialAlpha));
-			StabilizedDualPoint stabilizedDual = dualState.stabilizedDual(outDual, outObjective, alpha);
+			double trialAlpha = attempt == 0 ? baseAlpha : Math.max(0.0, 1.0 - (attempt + 1) * (1.0 - baseAlpha));
+			StabilizedDualPoint stabilizedDual = dualState.stabilizedDual(outDual, outObjective, trialAlpha);
 			lp.setPricingDualOverride(stabilizedDual.dual);
 			PricingPassResult pass;
 			try {
-				pass = runPricingPass(lp, "stabilized.a" + String.format("%.3f", Double.valueOf(alpha)), false,
+				pass = runPricingPass(lp, "stabilized.a" + String.format("%.3f", Double.valueOf(trialAlpha)), false,
 						outDual, stabilizedDual.boundObjective, stabilizedDual.dual);
 			} finally {
 				lp.clearPricingDualOverride();
 			}
-			if (pass.dualBoundPruned || pass.addedColumns > 0 || alpha <= 0.0) {
-				dualState.alpha = alpha;
+			// 2026-06-23: Pessoa Table 1 左侧的 mispricing schedule 使用局部 trial alpha。
+			// trialAlpha 可以退到 0 以回到 true dual，但不覆盖跨迭代的 base alpha；
+			// 全局 alpha 只在 observeAccepted() 中按 subgradient 信号更新。
+			if (pass.dualBoundPruned || pass.addedColumns > 0 || trialAlpha <= 0.0) {
 				return pass;
 			}
 			attempt++;

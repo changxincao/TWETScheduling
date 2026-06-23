@@ -22,6 +22,8 @@ import TWETBPC.Model.TWETOutsourcingColumn;
  */
 public class PC {
 
+	private static final double MAX_SMOOTHING_ALPHA = 1.0 - 1e-9;
+
 	private final TWETBPCConfig config;
 	private final List<PricingEngine> pricingEngines;
 	private final List<CutGenerator> cutGenerators;
@@ -297,11 +299,11 @@ public class PC {
 			// center objective 等待第一次 certified pricing bound 后再激活。
 			this.centerObjective = Double.NaN;
 			this.smoothingRule = normalizeSmoothingRule(config.dualStabilizationSmoothingRule);
-			this.alpha = Math.max(0.0, Math.min(0.95, config.dualStabilizationAlpha));
+			this.alpha = Math.max(0.0, Math.min(MAX_SMOOTHING_ALPHA, config.dualStabilizationAlpha));
 		}
 
 		StabilizedDualPoint stabilizedDual(LP.PricingDualSnapshot outDual, double outObjective, double attemptAlpha) {
-			double clippedAlpha = Math.max(0.0, Math.min(0.95, attemptAlpha));
+			double clippedAlpha = Math.max(0.0, Math.min(MAX_SMOOTHING_ALPHA, attemptAlpha));
 			LP.PricingDualSnapshot ordinary = LP.PricingDualSnapshot.blend(outDual, center, 1.0 - clippedAlpha);
 			double ordinaryObjective = blendObjective(outObjective, centerObjective, 1.0 - clippedAlpha);
 			return new StabilizedDualPoint(ordinary, ordinaryObjective);
@@ -338,7 +340,7 @@ public class PC {
 				} else {
 					alpha = Math.max(0.0, alpha - config.dualStabilizationAlphaDecreaseStep);
 				}
-				alpha = Math.max(0.0, Math.min(0.95, alpha));
+				alpha = Math.max(0.0, Math.min(MAX_SMOOTHING_ALPHA, alpha));
 			}
 		}
 

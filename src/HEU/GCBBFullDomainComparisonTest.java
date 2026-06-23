@@ -279,9 +279,6 @@ public class GCBBFullDomainComparisonTest {
 		config.dualStabilizationAlphaDecreaseStep = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualStabilizationAlphaDecreaseStep",
 				Double.toString(config.dualStabilizationAlphaDecreaseStep)));
-		config.dualStabilizationDirectionalSmoothing = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.dualStabilizationDirectionalSmoothing",
-				Boolean.toString(config.dualStabilizationDirectionalSmoothing)));
 		config.dualStabilizationReducedCostTolerance = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualStabilizationReducedCostTolerance",
 				Double.toString(config.dualStabilizationReducedCostTolerance)));

@@ -211,8 +211,7 @@ public class PC {
 		int attempt = 0;
 		while (true) {
 			double alpha = attempt == 0 ? initialAlpha : Math.max(0.0, 1.0 - (attempt + 1) * (1.0 - initialAlpha));
-			StabilizedDualPoint stabilizedDual = dualState.stabilizedDual(outDual, outObjective, alpha,
-					attempt == 0);
+			StabilizedDualPoint stabilizedDual = dualState.stabilizedDual(outDual, outObjective, alpha);
 			lp.setPricingDualOverride(stabilizedDual.dual);
 			PricingPassResult pass;
 			try {
@@ -286,7 +285,6 @@ public class PC {
 	private final class DualStabilizationState {
 		private LP.PricingDualSnapshot center;
 		private double centerObjective;
-		private LP.PricingDualSnapshot lastAcceptedGradient;
 		private double alpha;
 		private final String smoothingRule;
 
@@ -300,37 +298,11 @@ public class PC {
 			this.alpha = Math.max(0.0, Math.min(0.95, config.dualStabilizationAlpha));
 		}
 
-		StabilizedDualPoint stabilizedDual(LP.PricingDualSnapshot outDual, double outObjective, double attemptAlpha,
-				boolean allowDirectional) {
+		StabilizedDualPoint stabilizedDual(LP.PricingDualSnapshot outDual, double outObjective, double attemptAlpha) {
 			double clippedAlpha = Math.max(0.0, Math.min(0.95, attemptAlpha));
 			LP.PricingDualSnapshot ordinary = LP.PricingDualSnapshot.blend(outDual, center, 1.0 - clippedAlpha);
 			double ordinaryObjective = blendObjective(outObjective, centerObjective, 1.0 - clippedAlpha);
-			if (!allowDirectional || !config.dualStabilizationDirectionalSmoothing || lastAcceptedGradient == null
-					|| clippedAlpha <= 0.0) {
-				return new StabilizedDualPoint(ordinary, ordinaryObjective);
-			}
-			double distance = normDifference(outDual, center);
-			double gradientNorm = norm(lastAcceptedGradient);
-			if (distance <= 1e-9 || gradientNorm <= 1e-9) {
-				return new StabilizedDualPoint(ordinary, ordinaryObjective);
-			}
-			double beta = Math.max(0.0, Math.min(1.0, dotDifferenceGradient(outDual, center, lastAcceptedGradient)
-					/ (distance * gradientNorm)));
-			if (beta <= 0.0) {
-				return new StabilizedDualPoint(ordinary, ordinaryObjective);
-			}
-			LP.PricingDualSnapshot gradientPoint = addScaled(center, lastAcceptedGradient, distance / gradientNorm);
-			LP.PricingDualSnapshot rho = blendTwo(gradientPoint, outDual, beta);
-			double rhoDistance = normDifference(rho, center);
-			if (rhoDistance <= 1e-9) {
-				return new StabilizedDualPoint(ordinary, ordinaryObjective);
-			}
-			// Directional smoothing uses a column-gradient direction, not a convex
-			// combination of known RMP dual points. It is valid for finding columns, but
-			// there is no safe objective scalar for dual-bound pruning here.
-			return new StabilizedDualPoint(
-					addScaled(center, difference(rho, center), (1.0 - clippedAlpha) * distance / rhoDistance),
-					Double.NaN);
+			return new StabilizedDualPoint(ordinary, ordinaryObjective);
 		}
 
 		void observeSeparation(PricingPassResult pass) {
@@ -356,8 +328,9 @@ public class PC {
 
 		void observeAccepted(LP.PricingDualSnapshot outDual, PricingPassResult pass) {
 			if (pass.hasRepresentative()) {
-				lastAcceptedGradient = representativeGradient(pass.representativeColumn, pass.representativeOutsourcingColumn);
-				double signal = dotDifferenceGradient(outDual, center, lastAcceptedGradient);
+				LP.PricingDualSnapshot acceptedGradient = representativeGradient(pass.representativeColumn,
+						pass.representativeOutsourcingColumn);
+				double signal = dotDifferenceGradient(outDual, center, acceptedGradient);
 				if (signal > 0.0) {
 					alpha = alpha + config.dualStabilizationAlphaIncreaseFraction * (1.0 - alpha);
 				} else {
@@ -487,22 +460,6 @@ public class PC {
 		return clippedWeight * currentObjective + (1.0 - clippedWeight) * centerObjective;
 	}
 
-	private static double norm(LP.PricingDualSnapshot dual) {
-		double sum = dual.machineDual * dual.machineDual + dual.outsourcingColumnDual * dual.outsourcingColumnDual;
-		for (int i = 1; i < dual.jobDual.length; i++) {
-			sum += dual.jobDual[i] * dual.jobDual[i];
-		}
-		for (int i = 0; i < dual.arcDual.length; i++) {
-			for (int j = 0; j < dual.arcDual[i].length; j++) {
-				sum += dual.arcDual[i][j] * dual.arcDual[i][j];
-			}
-		}
-		return Math.sqrt(sum);
-	}
-
-	private static double normDifference(LP.PricingDualSnapshot a, LP.PricingDualSnapshot b) {
-		return norm(difference(a, b));
-	}
 
 	private static double dotDifferenceGradient(LP.PricingDualSnapshot out, LP.PricingDualSnapshot center,
 			LP.PricingDualSnapshot gradient) {
@@ -541,27 +498,6 @@ public class PC {
 				a.outsourcingColumnDual - b.outsourcingColumnDual, arc);
 	}
 
-	private static LP.PricingDualSnapshot addScaled(LP.PricingDualSnapshot base, LP.PricingDualSnapshot direction,
-			double scale) {
-		double[] job = new double[base.jobDual.length];
-		for (int i = 0; i < job.length; i++) {
-			job[i] = base.jobDual[i] + scale * direction.jobDual[i];
-		}
-		double[][] arc = new double[base.arcDual.length][];
-		for (int i = 0; i < base.arcDual.length; i++) {
-			arc[i] = new double[base.arcDual[i].length];
-			for (int j = 0; j < base.arcDual[i].length; j++) {
-				arc[i][j] = base.arcDual[i][j] + scale * direction.arcDual[i][j];
-			}
-		}
-		return new LP.PricingDualSnapshot(job, base.machineDual + scale * direction.machineDual,
-				base.outsourcingColumnDual + scale * direction.outsourcingColumnDual, arc);
-	}
-
-	private static LP.PricingDualSnapshot blendTwo(LP.PricingDualSnapshot first, LP.PricingDualSnapshot second,
-			double firstWeight) {
-		return LP.PricingDualSnapshot.blend(first, second, firstWeight);
-	}
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
 		// 2026-05-18: 正常 RMP 不可行时，先建立带人工 slack 的同一节点 LP；
@@ -801,7 +737,7 @@ public class PC {
 		}
 		// 2026-06-23: center 更新也需要同一 dual point 下的 L(pi) 证书，
 		// 因此即使 dual-bound pruning 关闭，也允许 exact pricing 计算 observed bound。
-		// active SRI 和 directional smoothing 目前没有完整 objective 口径，先只找列不剪枝。
+		// active SRI 当前没有完整 smoothing objective 口径，先只找列不剪枝。
 		if (!lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
 			return false;
 		}

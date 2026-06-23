@@ -260,9 +260,6 @@ public final class OutsourcingModelComparisonTest {
 		config.dualStabilizationAlphaDecreaseStep = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationAlphaDecreaseStep",
 				Double.toString(config.dualStabilizationAlphaDecreaseStep)));
-		config.dualStabilizationDirectionalSmoothing = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.outsourcingCompare.dualStabilizationDirectionalSmoothing",
-				Boolean.toString(config.dualStabilizationDirectionalSmoothing)));
 		config.dualStabilizationReducedCostTolerance = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilizationReducedCostTolerance",
 				Double.toString(config.dualStabilizationReducedCostTolerance)));

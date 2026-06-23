@@ -211,8 +211,14 @@ public class PC {
 		double baseAlpha = dualState.alpha;
 		double outObjective = lp.getLastSolution() == null ? Double.NaN : lp.getLastSolution().getObjectiveValue();
 		int attempt = 0;
+		PricingPassResult lastNoColumnPass = PricingPassResult.EMPTY;
 		while (true) {
 			double trialAlpha = attempt == 0 ? baseAlpha : Math.max(0.0, 1.0 - (attempt + 1) * (1.0 - baseAlpha));
+			if (trialAlpha <= 0.0) {
+				// 2026-06-23: alpha=0 is the true-dual pass. Do not run it here;
+				// the outer loop runs the single true pass for closure.
+				return lastNoColumnPass;
+			}
 			StabilizedDualPoint stabilizedDual = dualState.stabilizedDual(outDual, outObjective, trialAlpha);
 			lp.setPricingDualOverride(stabilizedDual.dual);
 			PricingPassResult pass;
@@ -222,12 +228,12 @@ public class PC {
 			} finally {
 				lp.clearPricingDualOverride();
 			}
-			// 2026-06-23: Pessoa Table 1 左侧的 mispricing schedule 使用局部 trial alpha。
-			// trialAlpha 可以退到 0 以回到 true dual，但不覆盖跨迭代的 base alpha；
-			// 全局 alpha 只在 observeAccepted() 中按 subgradient 信号更新。
-			if (pass.dualBoundPruned || pass.addedColumns > 0 || trialAlpha <= 0.0) {
+			// 2026-06-23: the mispricing schedule uses local trial alpha only.
+			// Global alpha is updated only after an accepted column.
+			if (pass.dualBoundPruned || pass.addedColumns > 0) {
 				return pass;
 			}
+			lastNoColumnPass = pass;
 			attempt++;
 		}
 	}

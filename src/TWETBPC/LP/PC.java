@@ -22,7 +22,7 @@ import TWETBPC.Model.TWETOutsourcingColumn;
  */
 public class PC {
 
-	private static final double MAX_SMOOTHING_ALPHA = 1.0 - 1e-9;
+	private static final double MAX_SMOOTHING_ALPHA = 0.8;
 
 	private final TWETBPCConfig config;
 	private final List<PricingEngine> pricingEngines;

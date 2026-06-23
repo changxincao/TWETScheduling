@@ -40,11 +40,12 @@ public class TWETBPCConfig {
 	public String outsourcingModel = "masterVariables";
 	/**
 	 * 2026-06-22: dual stabilization 实验开关。打开后使用 Pessoa et al. 口径的
-	 * smoothing/mispricing schedule，并可叠加 coverage-row 3-piece penalty RMP；
-	 * 节点闭合前仍强制回到原始 RMP + true dual exact pricing 验证。
+	 * smoothing/mispricing schedule；节点闭合前仍强制回到 true dual exact pricing 验证。
 	 */
 	public boolean enableDualStabilization = false;
-	/** 2026-06-22: Wentges smoothing 初始 alpha；alpha 越大越靠近稳定中心。 */
+	/** 2026-06-23: smoothing center 更新规则；wentges=best-bound incumbent，neame=latest evaluated sep-point。 */
+	public String dualStabilizationSmoothingRule = "wentges";
+	/** 2026-06-22: smoothing 初始 alpha；alpha 越大越靠近稳定中心。 */
 	public double dualStabilizationAlpha = 0.5;
 	/** 2026-06-22: 非 mispricing 且方向支持加强稳定化时，alpha 向 1 增加的比例。 */
 	public double dualStabilizationAlphaIncreaseFraction = 0.1;

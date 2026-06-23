@@ -175,14 +175,14 @@ public class PC {
 
 	private TWETMasterSolution solvePricingLoopWithDualStabilization(LP lp, TWETMasterSolution currentSolution) {
 		TWETMasterSolution solution = currentSolution;
-		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals(),
-				currentSolution.getObjectiveValue());
+		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals());
 		while (true) {
 			LP.PricingDualSnapshot outDual = lp.captureTruePricingDuals();
 			PricingPassResult stabilizedPass = runStabilizedPricingSequence(lp, dualState, outDual);
 			if (stabilizedPass.dualBoundPruned) {
 				return solution;
 			}
+			dualState.observeSeparation(stabilizedPass);
 			if (stabilizedPass.addedColumns > 0) {
 				dualState.observeAccepted(outDual, stabilizedPass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
@@ -192,6 +192,7 @@ public class PC {
 			if (truePass.dualBoundPruned) {
 				return solution;
 			}
+			dualState.observeSeparation(truePass);
 			if (truePass.addedColumns > 0) {
 				dualState.observeAccepted(outDual, truePass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
@@ -240,6 +241,7 @@ public class PC {
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds,
 			LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride,
 			LP.PricingDualSnapshot separationDual) {
+		PricingPassResult bestObservedEmptyPass = PricingPassResult.EMPTY;
 		for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
 			PricingEngine engine = pricingEngines.get(engineIndex);
 			HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
@@ -252,12 +254,24 @@ public class PC {
 				return PricingPassResult.dualBoundPruned();
 			}
 			if (generated.isEmpty()) {
+				if (separationDual != null && Double.isFinite(generated.observedDualBound)
+						&& (!Double.isFinite(bestObservedEmptyPass.separationDualBound)
+								|| generated.observedDualBound > bestObservedEmptyPass.separationDualBound)) {
+					bestObservedEmptyPass = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null,
+							false, separationDual, generated.observedDualBound);
+				}
 				continue;
 			}
 
 			int addedColumns = lp.addColumns(generated.internalColumnIds)
 					+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 			if (addedColumns == 0) {
+				if (separationDual != null && Double.isFinite(generated.observedDualBound)
+						&& (!Double.isFinite(bestObservedEmptyPass.separationDualBound)
+								|| generated.observedDualBound > bestObservedEmptyPass.separationDualBound)) {
+					bestObservedEmptyPass = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null,
+							false, separationDual, generated.observedDualBound);
+				}
 				continue;
 			}
 
@@ -266,7 +280,7 @@ public class PC {
 			return new PricingPassResult(addedColumns, generated.bestAcceptedReducedCost, generated.representativeColumn,
 					generated.representativeOutsourcingColumn, false, separationDual, generated.observedDualBound);
 		}
-		return PricingPassResult.EMPTY;
+		return bestObservedEmptyPass;
 	}
 
 	private final class DualStabilizationState {
@@ -274,10 +288,15 @@ public class PC {
 		private double centerObjective;
 		private LP.PricingDualSnapshot lastAcceptedGradient;
 		private double alpha;
+		private final String smoothingRule;
 
-		DualStabilizationState(LP.PricingDualSnapshot initialCenter, double initialObjective) {
+		DualStabilizationState(LP.PricingDualSnapshot initialCenter) {
 			this.center = initialCenter.copy();
-			this.centerObjective = initialObjective;
+			// 2026-06-23: 原文中的 center/in-point 应绑定 L(pi) 下界证书。
+			// 初始 RMP objective 不是完整列族下的 L(pi)，因此只用于 out-point，
+			// center objective 等待第一次 certified pricing bound 后再激活。
+			this.centerObjective = Double.NaN;
+			this.smoothingRule = normalizeSmoothingRule(config.dualStabilizationSmoothingRule);
 			this.alpha = Math.max(0.0, Math.min(0.95, config.dualStabilizationAlpha));
 		}
 
@@ -314,6 +333,27 @@ public class PC {
 					Double.NaN);
 		}
 
+		void observeSeparation(PricingPassResult pass) {
+			if (pass.separationDual == null || !Double.isFinite(pass.separationDualBound)) {
+				return;
+			}
+			if ("neame".equals(smoothingRule)) {
+				// Neame rule (23): the next in-point follows the latest evaluated
+				// smoothed point, with its certified L(pi_sep) value.
+				center = pass.separationDual.copy();
+				centerObjective = pass.separationDualBound;
+				return;
+			}
+			// Wentges rule (24): the center is the dual incumbent, i.e. the best
+			// certified Lagrangian bound observed so far, not simply the latest
+			// separation point that generated a column.
+			if (!Double.isFinite(centerObjective)
+					|| pass.separationDualBound > centerObjective + config.dualBoundPruningTolerance) {
+				center = pass.separationDual.copy();
+				centerObjective = pass.separationDualBound;
+			}
+		}
+
 		void observeAccepted(LP.PricingDualSnapshot outDual, PricingPassResult pass) {
 			if (pass.hasRepresentative()) {
 				lastAcceptedGradient = representativeGradient(pass.representativeColumn, pass.representativeOutsourcingColumn);
@@ -325,13 +365,13 @@ public class PC {
 				}
 				alpha = Math.max(0.0, Math.min(0.95, alpha));
 			}
-			if (pass.separationDual != null && Double.isFinite(pass.separationDualBound)) {
-				// 2026-06-22: Pessoa/Wentges 口径下，只有拿到该 separation point 的
-				// L(pi_sep) 证书时才把它作为新的 in-point；启发式或 directional 点
-				// 没有安全 objective 标量时保持原 center，不再使用自定义 0.3 blend。
-				center = pass.separationDual.copy();
-				centerObjective = pass.separationDualBound;
+		}
+
+		private String normalizeSmoothingRule(String value) {
+			if (value != null && "neame".equalsIgnoreCase(value.trim())) {
+				return "neame";
 			}
+			return "wentges";
 		}
 
 		private LP.PricingDualSnapshot representativeGradient(TWETColumn column, TWETOutsourcingColumn outsourcingColumn) {
@@ -434,10 +474,17 @@ public class PC {
 	}
 
 	private static double blendObjective(double currentObjective, double centerObjective, double currentWeight) {
+		double clippedWeight = Math.max(0.0, Math.min(1.0, currentWeight));
+		if (clippedWeight >= 1.0 - 1e-12) {
+			return currentObjective;
+		}
+		if (clippedWeight <= 1e-12) {
+			return centerObjective;
+		}
 		if (!Double.isFinite(currentObjective) || !Double.isFinite(centerObjective)) {
 			return Double.NaN;
 		}
-		return currentWeight * currentObjective + (1.0 - currentWeight) * centerObjective;
+		return clippedWeight * currentObjective + (1.0 - clippedWeight) * centerObjective;
 	}
 
 	private static double norm(LP.PricingDualSnapshot dual) {
@@ -749,10 +796,11 @@ public class PC {
 
 	private boolean shouldObserveDualBound(LP lp, PricingEngine engine, boolean repairMode,
 			double dualBoundObjectiveOverride) {
-		if (repairMode || !config.enableDualBoundPruning) {
+		if (repairMode) {
 			return false;
 		}
-		// 2026-06-22: observed dual bound 必须使用同一套 dual objective 和 rc_min 证书。
+		// 2026-06-23: center 更新也需要同一 dual point 下的 L(pi) 证书，
+		// 因此即使 dual-bound pruning 关闭，也允许 exact pricing 计算 observed bound。
 		// active SRI 和 directional smoothing 目前没有完整 objective 口径，先只找列不剪枝。
 		if (!lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
 			return false;

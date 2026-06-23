@@ -267,6 +267,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableDualStabilization = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualStabilization",
 				Boolean.toString(config.enableDualStabilization)));
+		config.dualStabilizationSmoothingRule = System.getProperty(
+				"twet.bpc.fullDomainCompare.dualStabilizationSmoothingRule",
+				config.dualStabilizationSmoothingRule);
 		config.dualStabilizationAlpha = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualStabilizationAlpha",
 				Double.toString(config.dualStabilizationAlpha)));

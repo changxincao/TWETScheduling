@@ -60,6 +60,9 @@ public class InitialColumnBuilder {
 				addMachineColumns(historicalBest, initialColumnIds, null);
 			}
 		}
+		if (config.useAcceptedSolutionHistoryForInitialColumns && data.configure != null) {
+			addAcceptedHistoryColumns(seed, initialColumnIds);
+		}
 
 		return new InitialColumnBundle(seed, new ArrayList<Integer>(initialColumnIds),
 				new ArrayList<Integer>(incumbentColumnIds), SolutionBridge.extractOutsourcedJobs(seed),
@@ -80,6 +83,28 @@ public class InitialColumnBuilder {
 			initialColumnIds.add(Integer.valueOf(id));
 			if (incumbentColumnIds != null) {
 				incumbentColumnIds.add(Integer.valueOf(id));
+			}
+		}
+	}
+
+	private void addAcceptedHistoryColumns(Solution seed, LinkedHashSet<Integer> initialColumnIds) {
+		int limit = config.acceptedSolutionInitialColumnLimit;
+		if (limit <= 0) {
+			return;
+		}
+		double bestCost = data.configure.bestSolution == null ? seed.curCost : data.configure.bestSolution.curCost;
+		double qualityRatio = Math.max(1.0, config.acceptedSolutionInitialColumnQualityRatio);
+		double qualityLimit = bestCost + Math.abs(bestCost) * (qualityRatio - 1.0);
+		int added = 0;
+		for (Solution accepted : data.configure.getAcceptedSolutionHistoryCopies()) {
+			if (accepted == null || accepted.curCost > qualityLimit) {
+				continue;
+			}
+			int before = initialColumnIds.size();
+			addMachineColumns(accepted, initialColumnIds, null);
+			added += initialColumnIds.size() - before;
+			if (added >= limit) {
+				break;
 			}
 		}
 	}

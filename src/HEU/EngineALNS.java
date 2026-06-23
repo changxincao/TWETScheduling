@@ -24,11 +24,18 @@ public class EngineALNS {
     public static Random rng = new Random(0);
     public static double defaultRemoveRatioU=0.2;//默认删除上界
     public static double defaultRemoveRatioL=0.05;//默认删除上界
-    public static int maxNoImpIterN=40;//最多无改进次数
+    public static int maxNoImpIterN=80;//最多无改进次数
+    public static long maxRuntimeMillis=600_000L;
     public static int maxremRatioChangeN=8;//最多扩大删除率次数
     public static double maxRemRatio=0.6;//最大删除率
     public static int ratioChangeNoImpIterN=15;//连续无改进次数，扩大解扰动
     public static double increaseRate=1.5;//多次无改进，扩大扰动当前解的程度，增大率
+    public static boolean recordAcceptedSolutions=true;
+    public static int maxAcceptedSolutionHistory=2000;
+    public static boolean useSimulatedAnnealingAcceptance=false;
+    public static double simulatedAnnealingInitialTemperatureRatio=0.01;
+    public static double simulatedAnnealingCoolingRate=0.995;
+    public static double simulatedAnnealingMinTemperatureRatio=1.0e-6;
     public double curRemoveRatioL;
     public double curRemoveRatioU;
 
@@ -60,7 +67,11 @@ public class EngineALNS {
     public void search() {
         int noImprove = 0;
         int remRatioChangeN=0;//这个参数其实没啥用，不起控制作用,师兄那个是因为还有一个别的共同作用的
-        while (noImprove < maxNoImpIterN&&remRatioChangeN<maxremRatioChangeN) {
+        long startNanos = System.nanoTime();
+        int iteration = 0;
+        double initialTemperature = initialTemperature();
+        while (noImprove < maxNoImpIterN&&remRatioChangeN<maxremRatioChangeN&&withinTimeLimit(startNanos)) {
+	iteration++;
 	Solution tmpSol=current.copy();
 	//此处要对这个解重新 M 刷一次，保证ALNS可以对那些差解算出精确值
 	Utility.resetCurUpperBound(Utility.big_M);
@@ -120,12 +131,47 @@ public class EngineALNS {
                 }
             }
 
-            if(Utility.compareLe(tmpCost, current.curCost)) {
+            if(acceptCandidate(tmpCost, current.curCost, iteration, initialTemperature)) {
 	current=tmpSol;//不做复制
+	if (recordAcceptedSolutions) {
+		data.configure.recordAcceptedSolution(current, maxAcceptedSolutionHistory);
+	}
             }
         }
 
     }
+	private boolean withinTimeLimit(long startNanos) {
+		if (maxRuntimeMillis <= 0) {
+			return true;
+		}
+		long elapsedMillis = (System.nanoTime() - startNanos) / 1_000_000L;
+		return elapsedMillis < maxRuntimeMillis;
+	}
+
+	private double initialTemperature() {
+		double reference = data.configure.bestSolution == null ? current.curCost : data.configure.bestSolution.curCost;
+		if (!Double.isFinite(reference)) {
+			reference = current.curCost;
+		}
+		double scale = Math.max(1.0, Math.abs(reference));
+		return Math.max(simulatedAnnealingMinTemperatureRatio * scale,
+				simulatedAnnealingInitialTemperatureRatio * scale);
+	}
+
+	private boolean acceptCandidate(double candidateCost, double currentCost, int iteration, double initialTemperature) {
+		if (Utility.compareLe(candidateCost, currentCost)) {
+			return true;
+		}
+		if (!useSimulatedAnnealingAcceptance || !Double.isFinite(candidateCost) || !Double.isFinite(currentCost)) {
+			return false;
+		}
+		double scale = Math.max(1.0, Math.abs(currentCost));
+		double minTemperature = simulatedAnnealingMinTemperatureRatio * scale;
+		double temperature = Math.max(minTemperature,
+				initialTemperature * Math.pow(simulatedAnnealingCoolingRate, Math.max(0, iteration - 1)));
+		double probability = Math.exp(-(candidateCost - currentCost) / temperature);
+		return rng.nextDouble() < probability;
+	}
 }
 
 // ===== 算子接口 =====

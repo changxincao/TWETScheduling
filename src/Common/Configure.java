@@ -22,6 +22,7 @@ public class Configure {
 	public static boolean debugAlgorithmCounters=false;
 	public Solution bestSolution;
 	private final ArrayList<Solution> bestSolutionHistory = new ArrayList<Solution>();
+	private final ArrayList<Solution> acceptedSolutionHistory = new ArrayList<Solution>();
 	
 	
 	public int tpath_number;	//the number of the two-path cuts
@@ -43,6 +44,24 @@ public class Configure {
 	public List<Solution> getBestSolutionHistoryCopies() {
 		ArrayList<Solution> copies = new ArrayList<Solution>(bestSolutionHistory.size());
 		for (Solution solution : bestSolutionHistory) {
+			copies.add(solution.copy());
+		}
+		return Collections.unmodifiableList(copies);
+	}
+
+	public void recordAcceptedSolution(Solution solution, int maxHistorySize) {
+		if (solution == null || maxHistorySize <= 0) {
+			return;
+		}
+		acceptedSolutionHistory.add(solution.copy());
+		while (acceptedSolutionHistory.size() > maxHistorySize) {
+			acceptedSolutionHistory.remove(0);
+		}
+	}
+
+	public List<Solution> getAcceptedSolutionHistoryCopies() {
+		ArrayList<Solution> copies = new ArrayList<Solution>(acceptedSolutionHistory.size());
+		for (Solution solution : acceptedSolutionHistory) {
 			copies.add(solution.copy());
 		}
 		return Collections.unmodifiableList(copies);

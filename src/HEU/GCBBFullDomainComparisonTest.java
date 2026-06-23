@@ -220,6 +220,28 @@ public class GCBBFullDomainComparisonTest {
 		config.reuseConfiguredBestSolution = false;
 		// 2026-06-02: 对照实验默认仍关闭 ALNS；需要验证完整 BPC 上界质量时可显式打开。
 		config.runALNSForSeed = Boolean.getBoolean("twet.bpc.fullDomainCompare.runALNSForSeed");
+		config.alnsMaxRuntimeMillis = Long.getLong("twet.bpc.fullDomainCompare.alnsMaxMillis",
+				config.alnsMaxRuntimeMillis);
+		config.alnsMaxNoImproveIterations = Integer.getInteger("twet.bpc.fullDomainCompare.alnsMaxNoImprove",
+				config.alnsMaxNoImproveIterations);
+		config.alnsUseSimulatedAnnealingAcceptance = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.alnsSA", Boolean.toString(config.alnsUseSimulatedAnnealingAcceptance)));
+		config.alnsSimulatedAnnealingInitialTemperatureRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.alnsSAT0Ratio",
+				Double.toString(config.alnsSimulatedAnnealingInitialTemperatureRatio)));
+		config.alnsSimulatedAnnealingCoolingRate = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.alnsSACooling",
+				Double.toString(config.alnsSimulatedAnnealingCoolingRate)));
+		config.useAcceptedSolutionHistoryForInitialColumns = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.useAcceptedInitialColumns",
+				Boolean.toString(config.useAcceptedSolutionHistoryForInitialColumns)));
+		config.acceptedSolutionHistoryLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.acceptedSolutionHistoryLimit", config.acceptedSolutionHistoryLimit);
+		config.acceptedSolutionInitialColumnLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.acceptedInitialColumnLimit", config.acceptedSolutionInitialColumnLimit);
+		config.acceptedSolutionInitialColumnQualityRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.acceptedInitialColumnQualityRatio",
+				Double.toString(config.acceptedSolutionInitialColumnQualityRatio)));
 		config.enableHeuristicPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableHeuristicPricing",
 				Boolean.toString(config.enableHeuristicPricing)));

@@ -55,6 +55,7 @@ public class HeuristicSeedProvider {
 
 		// 如果配置允许，再用 ALNS 把 seed 往前推一步。
 		if (config.runALNSForSeed) {
+			configureAlns();
 			EngineALNS alns = new EngineALNS(data, seed);
 			alns.search();
 		}
@@ -66,4 +67,13 @@ public class HeuristicSeedProvider {
 		return seed.copy();
 	}
 
+	private void configureAlns() {
+		EngineALNS.maxRuntimeMillis = config.alnsMaxRuntimeMillis;
+		EngineALNS.maxNoImpIterN = config.alnsMaxNoImproveIterations;
+		EngineALNS.maxAcceptedSolutionHistory = config.acceptedSolutionHistoryLimit;
+		EngineALNS.useSimulatedAnnealingAcceptance = config.alnsUseSimulatedAnnealingAcceptance;
+		EngineALNS.simulatedAnnealingInitialTemperatureRatio = config.alnsSimulatedAnnealingInitialTemperatureRatio;
+		EngineALNS.simulatedAnnealingCoolingRate = config.alnsSimulatedAnnealingCoolingRate;
+		EngineALNS.simulatedAnnealingMinTemperatureRatio = config.alnsSimulatedAnnealingMinTemperatureRatio;
+	}
 }

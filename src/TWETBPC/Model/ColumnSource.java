@@ -12,6 +12,8 @@ public enum ColumnSource {
 	PRICING_HEURISTIC,
 	/** 来自精确定价器的新增列。 */
 	PRICING_EXACT,
+	/** 2026-06-24: route enumeration 完整枚举后提交的证明列。 */
+	ROUTE_ENUMERATION,
 	/** 手工或测试代码直接加入的列。 */
 	MANUAL
 }

@@ -57,6 +57,12 @@ public class Pool {
 		return id;
 	}
 
+	/** 2026-06-24: route enumeration 需要先按签名判断全局池中是否已有同序列列。 */
+	public int getColumnIdBySignature(SequenceSignature signature) {
+		Integer existing = signatureToId.get(signature);
+		return existing == null ? -1 : existing.intValue();
+	}
+
 	/** @return 按 id 取列 */
 	public TWETColumn getColumn(int id) {
 		return columns.get(id);

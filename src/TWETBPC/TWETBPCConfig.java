@@ -67,6 +67,14 @@ public class TWETBPCConfig {
 	public boolean enableDualBoundPruning = true;
 	/** 2026-06-22: dual-bound 剪枝容差。 */
 	public double dualBoundPruningTolerance = 1e-7;
+	/** 2026-06-24: 节点 LP true-dual 闭合后，是否尝试枚举所有 rc < UB-LB 的列并解有限主问题。 */
+	public boolean enableRouteEnumeration = false;
+	/** 2026-06-24: 只有节点绝对 gap 小于该阈值时才触发 route enumeration。 */
+	public double routeEnumerationAbsoluteGapThreshold = 10.0;
+	/** 2026-06-24: 当前 RMP 列 + 枚举列超过该上限时中止枚举，避免证明模型失控。 */
+	public int routeEnumerationColumnLimit = 100000;
+	/** 2026-06-24: route enumeration 完整后有限整数主问题的求解时间上限。 */
+	public double routeEnumerationMipTimeLimitSeconds = 60.0;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**

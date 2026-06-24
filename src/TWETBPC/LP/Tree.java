@@ -32,6 +32,8 @@ public class Tree {
 	private final InitialColumnBuilder initialColumnBuilder;
 	private final PC pc;
 	private final RestrictedMasterIntegerHeuristic restrictedMasterIntegerHeuristic;
+	private final RouteEnumerationEngine routeEnumerationEngine;
+	private final RouteEnumerationFiniteMaster routeEnumerationFiniteMaster;
 	private final CompletionBoundSubtreeArcEliminator completionBoundSubtreeArcEliminator;
 	private final List<Brancher> branchers;
 	private final BPCTraceSink traceSink;
@@ -46,6 +48,8 @@ public class Tree {
 		this.initialColumnBuilder = initialColumnBuilder;
 		this.pc = pc;
 		this.restrictedMasterIntegerHeuristic = new RestrictedMasterIntegerHeuristic(data, config);
+		this.routeEnumerationEngine = new RouteEnumerationEngine(data, config);
+		this.routeEnumerationFiniteMaster = new RouteEnumerationFiniteMaster(data, config);
 		this.completionBoundSubtreeArcEliminator = new CompletionBoundSubtreeArcEliminator(data, config);
 		this.branchers = branchers;
 		this.traceSink = traceSink;
@@ -145,6 +149,26 @@ public class Tree {
 				continue;
 			}
 
+			RouteEnumerationFiniteMaster.Result enumerationProof =
+					tryRouteEnumeration(lp, incumbentCost, solution.getObjectiveValue());
+			if (enumerationProof != null && enumerationProof.isProven()) {
+				if (!enumerationProof.isInfeasible()
+						&& Utility.compareLt(enumerationProof.getObjective(), incumbentCost)) {
+					incumbentCost = enumerationProof.getObjective();
+					incumbentColumnIds = enumerationProof.getSelectedColumnIds();
+					incumbentOutsourcingValues = enumerationProof.getOutsourcingValues();
+					traceSink.onIncumbentUpdated(node, enumerationProof.getSolution(), incumbentCost);
+				}
+				bestBound = updateReportedBound(queue,
+						enumerationProof.isInfeasible() ? Double.POSITIVE_INFINITY : enumerationProof.getObjective(),
+						incumbentCost);
+				traceSink.onNodeClosed(node,
+						enumerationProof.isInfeasible() ? "route_enumeration_infeasible"
+								: "route_enumeration_finite_master",
+						queue.size());
+				continue;
+			}
+
 			applyTimeIndexedGraphArcFixing(lp, incumbentCost);
 			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = null;
 			if (!config.useTimeIndexedGraphPricing) {
@@ -181,6 +205,26 @@ public class Tree {
 
 	private int totalPoolSize() {
 		return pool.size() + (config.useColumnizedOutsourcing() ? outsourcingPool.size() : 0);
+	}
+
+	private RouteEnumerationFiniteMaster.Result tryRouteEnumeration(LP lp, double incumbentCost,
+			double nodeLowerBound) {
+		if (!config.enableRouteEnumeration) {
+			return null;
+		}
+		heartbeat(lp.getNode(), "routeEnumeration.start");
+		RouteEnumerationResult enumeration = routeEnumerationEngine.enumerate(lp, incumbentCost, nodeLowerBound);
+		heartbeat(lp.getNode(), "routeEnumeration.done " + enumeration.summary());
+		if (!enumeration.isAttempted() || !enumeration.isComplete()) {
+			return null;
+		}
+		heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.start");
+		RouteEnumerationFiniteMaster.Result proof =
+				routeEnumerationFiniteMaster.solve(lp, enumeration.getFiniteColumnIds());
+		heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.done proven=" + proof.isProven()
+				+ ",obj=" + proof.getObjective() + ",msg=" + proof.getMessage()
+				+ ",ms=" + String.format("%.3f", proof.getElapsedNanos() / 1_000_000.0));
+		return proof;
 	}
 
 	private CompletionBoundSubtreeArcEliminator.Result evaluateSubtreeArcElimination(LP lp, double incumbentCost,

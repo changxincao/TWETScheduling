@@ -11,6 +11,7 @@ import TWETBPC.TWETBPCConfig;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
+import TWETBPC.Model.TWETOutsourcingColumn;
 import ilog.concert.IloException;
 import ilog.concert.IloIntVar;
 import ilog.concert.IloLinearNumExpr;
@@ -34,10 +35,7 @@ public final class RouteEnumerationFiniteMaster {
 		this.config = config;
 	}
 
-	public Result solve(LP lp, List<Integer> finiteColumnIds) {
-		if (lp.isColumnizedOutsourcing()) {
-			return Result.notProven("columnized outsourcing not supported by route enumeration finite master", 0L);
-		}
+	public Result solve(LP lp, List<Integer> finiteColumnIds, List<Integer> finiteOutsourcingColumnIds) {
 		long start = System.nanoTime();
 		IloCplex cplex = null;
 		try {
@@ -47,7 +45,7 @@ public final class RouteEnumerationFiniteMaster {
 			if (config.routeEnumerationMipTimeLimitSeconds > 0.0) {
 				cplex.setParam(IloCplex.Param.TimeLimit, config.routeEnumerationMipTimeLimitSeconds);
 			}
-			Model model = buildModel(cplex, lp, finiteColumnIds);
+			Model model = buildModel(cplex, lp, finiteColumnIds, finiteOutsourcingColumnIds);
 			boolean solved = cplex.solve();
 			long elapsed = System.nanoTime() - start;
 			if (!solved) {
@@ -79,12 +77,14 @@ public final class RouteEnumerationFiniteMaster {
 		}
 	}
 
-	private Model buildModel(IloCplex cplex, LP lp, List<Integer> columnIds) throws IloException {
+	private Model buildModel(IloCplex cplex, LP lp, List<Integer> columnIds, List<Integer> outsourcingColumnIds)
+			throws IloException {
 		ArrayList<TariffSegment> segments = collectOutsourcingTariffSegments();
 		IloIntVar[] x = new IloIntVar[columnIds.size()];
-		IloIntVar[] y = new IloIntVar[data.n + 1];
-		IloIntVar[] z = new IloIntVar[segments.size()];
-		IloNumVar[] baseline = new IloNumVar[segments.size()];
+		IloIntVar[] w = new IloIntVar[outsourcingColumnIds.size()];
+		IloIntVar[] y = lp.isColumnizedOutsourcing() ? new IloIntVar[0] : new IloIntVar[data.n + 1];
+		IloIntVar[] z = lp.isColumnizedOutsourcing() ? new IloIntVar[0] : new IloIntVar[segments.size()];
+		IloNumVar[] baseline = lp.isColumnizedOutsourcing() ? new IloNumVar[0] : new IloNumVar[segments.size()];
 
 		IloLinearNumExpr obj = cplex.linearNumExpr();
 		for (int idx = 0; idx < columnIds.size(); idx++) {
@@ -92,29 +92,42 @@ public final class RouteEnumerationFiniteMaster {
 			x[idx] = cplex.boolVar("enum_lambda_" + columnId);
 			obj.addTerm(lp.getPool().getColumn(columnId).getCost(), x[idx]);
 		}
-		for (int job = 1; job <= data.n; job++) {
-			double ub = Utility.isBigMValue(data.outsourcingCost[job]) ? 0.0 : 1.0;
-			y[job] = cplex.boolVar("enum_y_" + job);
-			y[job].setUB(ub);
-		}
-		for (int segment = 0; segment < segments.size(); segment++) {
-			TariffSegment tariff = segments.get(segment);
-			z[segment] = cplex.boolVar("enum_outSegActive_" + segment);
-			baseline[segment] = cplex.numVar(0.0, tariff.end, "enum_outSegBaseline_" + segment);
-			obj.addTerm(tariff.slope, baseline[segment]);
-			obj.addTerm(tariff.intercept, z[segment]);
+		if (lp.isColumnizedOutsourcing()) {
+			for (int idx = 0; idx < outsourcingColumnIds.size(); idx++) {
+				int columnId = outsourcingColumnIds.get(idx).intValue();
+				w[idx] = cplex.boolVar("enum_omega_" + columnId);
+				obj.addTerm(lp.getOutsourcingPool().getColumn(columnId).getCost(), w[idx]);
+			}
+		} else {
+			for (int job = 1; job <= data.n; job++) {
+				double ub = Utility.isBigMValue(data.outsourcingCost[job]) ? 0.0 : 1.0;
+				y[job] = cplex.boolVar("enum_y_" + job);
+				y[job].setUB(ub);
+			}
+			for (int segment = 0; segment < segments.size(); segment++) {
+				TariffSegment tariff = segments.get(segment);
+				z[segment] = cplex.boolVar("enum_outSegActive_" + segment);
+				baseline[segment] = cplex.numVar(0.0, tariff.end, "enum_outSegBaseline_" + segment);
+				obj.addTerm(tariff.slope, baseline[segment]);
+				obj.addTerm(tariff.intercept, z[segment]);
+			}
 		}
 		cplex.addMinimize(obj);
-		buildCoverage(cplex, lp, columnIds, x, y);
+		buildCoverage(cplex, lp, columnIds, outsourcingColumnIds, x, w, y);
 		buildMachine(cplex, lp, x);
 		buildArcBranches(cplex, lp, columnIds, x);
 		buildAdjacencyBranches(cplex, lp, columnIds, x);
-		buildTariff(cplex, lp, y, z, baseline, segments);
-		return new Model(new ArrayList<Integer>(columnIds), x, y, z);
+		if (lp.isColumnizedOutsourcing()) {
+			buildOutsourcingColumnCount(cplex, w);
+		} else {
+			buildTariff(cplex, lp, y, z, baseline, segments);
+		}
+		return new Model(new ArrayList<Integer>(columnIds), new ArrayList<Integer>(outsourcingColumnIds), x, w, y, z,
+				lp.getOutsourcingPool());
 	}
 
-	private void buildCoverage(IloCplex cplex, LP lp, List<Integer> columnIds, IloIntVar[] x, IloIntVar[] y)
-			throws IloException {
+	private void buildCoverage(IloCplex cplex, LP lp, List<Integer> columnIds, List<Integer> outsourcingColumnIds,
+			IloIntVar[] x, IloIntVar[] w, IloIntVar[] y) throws IloException {
 		for (int job = 1; job <= data.n; job++) {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
 			for (int idx = 0; idx < columnIds.size(); idx++) {
@@ -123,7 +136,17 @@ public final class RouteEnumerationFiniteMaster {
 					expr.addTerm(coefficient, x[idx]);
 				}
 			}
-			expr.addTerm(1.0, y[job]);
+			if (lp.isColumnizedOutsourcing()) {
+				for (int idx = 0; idx < outsourcingColumnIds.size(); idx++) {
+					TWETOutsourcingColumn column =
+							lp.getOutsourcingPool().getColumn(outsourcingColumnIds.get(idx).intValue());
+					if (column.containsJob(job)) {
+						expr.addTerm(1.0, w[idx]);
+					}
+				}
+			} else {
+				expr.addTerm(1.0, y[job]);
+			}
 			cplex.addGe(expr, 1.0, "enum_cover_" + job);
 		}
 	}
@@ -167,6 +190,14 @@ public final class RouteEnumerationFiniteMaster {
 			throws IloException {
 		buildAdjacency(cplex, lp, columnIds, x, lp.getNode().getForbiddenAdjacencyPairs(), false);
 		buildAdjacency(cplex, lp, columnIds, x, lp.getNode().getRequiredAdjacencyPairs(), true);
+	}
+
+	private void buildOutsourcingColumnCount(IloCplex cplex, IloIntVar[] w) throws IloException {
+		IloLinearNumExpr expr = cplex.linearNumExpr();
+		for (IloIntVar var : w) {
+			expr.addTerm(1.0, var);
+		}
+		cplex.addLe(expr, 1.0, "enum_outsourcingColumnCount");
 	}
 
 	private void buildAdjacency(IloCplex cplex, LP lp, List<Integer> columnIds, IloIntVar[] x, List<int[]> pairs,
@@ -230,6 +261,18 @@ public final class RouteEnumerationFiniteMaster {
 
 	private double[] outsourcingValues(IloCplex cplex, Model model) throws IloException {
 		double[] values = new double[data.n + 1];
+		if (model.outsourceVars.length == 0) {
+			for (int idx = 0; idx < model.outsourcingColumnIds.size(); idx++) {
+				if (cplex.getValue(model.outsourceColumnVars[idx]) > INTEGER_TOLERANCE) {
+					TWETOutsourcingColumn column =
+							model.lpOutsourcingPool.getColumn(model.outsourcingColumnIds.get(idx).intValue());
+					for (int job : column.getJobs()) {
+						values[job] = 1.0;
+					}
+				}
+			}
+			return values;
+		}
 		for (int job = 1; job <= data.n; job++) {
 			values[job] = cplex.getValue(model.outsourceVars[job]) > INTEGER_TOLERANCE ? 1.0 : 0.0;
 		}
@@ -255,16 +298,23 @@ public final class RouteEnumerationFiniteMaster {
 
 	private static final class Model {
 		final ArrayList<Integer> columnIds;
+		final ArrayList<Integer> outsourcingColumnIds;
 		final IloIntVar[] columnVars;
+		final IloIntVar[] outsourceColumnVars;
 		final IloIntVar[] outsourceVars;
 		final IloIntVar[] segmentVars;
+		final OutsourcingPool lpOutsourcingPool;
 
-		Model(ArrayList<Integer> columnIds, IloIntVar[] columnVars, IloIntVar[] outsourceVars,
-				IloIntVar[] segmentVars) {
+		Model(ArrayList<Integer> columnIds, ArrayList<Integer> outsourcingColumnIds, IloIntVar[] columnVars,
+				IloIntVar[] outsourceColumnVars, IloIntVar[] outsourceVars, IloIntVar[] segmentVars,
+				OutsourcingPool lpOutsourcingPool) {
 			this.columnIds = columnIds;
+			this.outsourcingColumnIds = outsourcingColumnIds;
 			this.columnVars = columnVars;
+			this.outsourceColumnVars = outsourceColumnVars;
 			this.outsourceVars = outsourceVars;
 			this.segmentVars = segmentVars;
+			this.lpOutsourcingPool = lpOutsourcingPool;
 		}
 	}
 

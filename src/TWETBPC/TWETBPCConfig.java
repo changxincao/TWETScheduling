@@ -73,6 +73,10 @@ public class TWETBPCConfig {
 	public double routeEnumerationAbsoluteGapThreshold = 10.0;
 	/** 2026-06-24: 当前 RMP 列 + 枚举列超过该上限时中止枚举，避免证明模型失控。 */
 	public int routeEnumerationColumnLimit = 100000;
+	/** 2026-06-24: route enumeration 最多弹出多少个 label 状态；达到后只中止证明，不关闭节点。 */
+	public int routeEnumerationStateLimit = 1000000;
+	/** 2026-06-24: 复用节点闭合时 exact pricing 留下的 completion bound 做枚举扩展剪枝。 */
+	public boolean routeEnumerationUseCompletionBound = true;
 	/** 2026-06-24: route enumeration 完整后有限整数主问题的求解时间上限。 */
 	public double routeEnumerationMipTimeLimitSeconds = 60.0;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */

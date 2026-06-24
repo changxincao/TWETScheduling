@@ -1,40 +1,57 @@
 # 2026-06-24 route enumeration 实现记录
 
-## 问题
+## 1. 问题与目标
 
-本次实现的是节点 LP 完全定价闭合后的 route enumeration。它的作用不是替代 pricing，而是在已经有有限 incumbent 且当前节点 gap 很小时，枚举所有可能改进 incumbent 的机器列，然后解一个有限整数主问题。如果有限主问题被证明最优或不可行，就可以直接关闭当前节点，避免继续做分支。
+route enumeration 放在节点已经用 true dual 完整定价闭合之后使用。它不是替代 pricing，而是在当前节点 gap 很小的时候，枚举所有可能让节点优于 incumbent 的列，然后求一个有限整数主问题。如果这个有限主问题被证明最优或不可行，就可以直接关闭当前节点，避免继续分支。
 
-这里的触发必须放在 true dual 验证之后。dual smoothing 可以参与前面的找列过程，但最终仍要回到 true dual exact pricing 确认没有负列；只有这个时刻的 `LB_node` 和 reduced cost 口径才用于判断 `rc < UB - LB_node`。
+触发口径是 `rc < UB - LB_node`。因此 dual smoothing 可以参与前面的找列过程，但 route enumeration 必须等最终 true-dual exact pricing 已经确认没有负列后再做。SRI/full-SRI/lm-SRI/arc-memory SRI 当前不和 route enumeration 同时使用。
 
-## 当前实现
+## 2. 当前实现流程
 
-新增 `RouteEnumerationEngine`、`RouteEnumerationResult` 和 `RouteEnumerationFiniteMaster` 三个类。`Tree` 在 `PC.solve()` 完成、RMIH 尝试完成、incumbent bound 剪枝未触发之后调用枚举；枚举完整后再用独立 CPLEX 模型求有限整数主问题。该有限 MIP 不改当前 LP/RMP 状态，未证明时直接回到原来的 arc fixing、subtree 和 branching 流程。
+新增 `RouteEnumerationEngine`、`RouteEnumerationResult` 和 `RouteEnumerationFiniteMaster`。`Tree` 在 `PC.solve()` 完成、RMIH 尝试完成、incumbent bound 剪枝未触发之后调用枚举；枚举完整后再用独立 CPLEX 模型求有限整数主问题。该有限 MIP 不改当前 LP/RMP 状态，未证明时直接回到原来的 arc fixing、subtree 和 branching 流程。
 
-当前实现是安全保守版：
+当前触发与中止条件为：
 
-1. 默认关闭，由 `enableRouteEnumeration=false` 控制。
+1. `enableRouteEnumeration=false` 时跳过，默认关闭。
 2. 只在 `0 < incumbent - nodeLowerBound < routeEnumerationAbsoluteGapThreshold` 时尝试，默认阈值为 `10.0`。
-3. active cut 存在时跳过。也就是说 SRI/full-SRI/lm-SRI/arc-memory SRI 当前都不和 route enumeration 同时使用。
-4. 列化外包模式当前跳过，因为严格证明还需要同时枚举外包列族；masterVariables 外包模式可以使用，有限 MIP 会保留原来的 `y_j + tariff segment` 变量。
-5. 枚举内部机器列时使用 full-domain 单向 DFS，不使用 Tmid、不使用 dominance、不使用 dynamic profitable window。扩展阶段尊重当前节点的 forbidden arc、pricingOnly forbidden arc 和 required outsourcing job。
-6. 只有枚举完整跑空且有限列数不超过 `routeEnumerationColumnLimit` 时，才提交新列到全局 `Pool` 并求有限 MIP。达到上限则返回原 BPC 流程，不关闭节点。
+3. `useTimeIndexedGraphPricing=true` 时跳过，因为 time-indexed graph pricing 的列族允许重复 job，而当前枚举器只覆盖 elementary 机器序列。
+4. active cut 存在时跳过，避免 SRI 状态和有限证明口径混在一起。
+5. 当前 RMP 内部列和外包列总数超过 `routeEnumerationColumnLimit` 时中止。
+6. 枚举过程中有限列总数超过 `routeEnumerationColumnLimit` 时中止。
+7. 弹出的 label 状态数超过 `routeEnumerationStateLimit` 时中止，默认 `1000000`。
+8. 有限 MIP 超过 `routeEnumerationMipTimeLimitSeconds` 或未证明时，不关闭节点。
 
-`Pool` 增加了只读签名查询 `getColumnIdBySignature()`，用于区分当前 RMP 已有列、全局池已有但当前 RMP 未激活的列，以及本次枚举新列。新增列来源枚举 `ColumnSource.ROUTE_ENUMERATION`，便于后续统计。
+这些中止都是证明失败，不是节点不可行；一旦触发，流程会继续回到原 BPC。
 
-## 有限主问题口径
+## 3. 枚举逻辑
 
-有限 MIP 使用当前 RMP 的 set-covering 口径，而不是 RMIH 的 exact-cover 修复口径。它包含：
+内部机器列枚举使用 full-domain 单向 FIFO label queue，不使用 Tmid、不使用 dominance、不使用 dynamic profitable window。每个 label 保存当前前缀序列、visited 标记、前缀 reduced-cost 函数 `frontier` 以及其最小值；扩展时模仿现有 forward pricing 的递推方式，执行 `shiftX(setup+process) + job penalty + fixed reduced cost`，再做 `normalize(FORWARD)`。只有当当前序列可以接 sink、且基于 label reduced cost 判断可能进入 `rc < UB-LB` 的有限列集时，才调用 `TWETColumnEvaluator` 计算真实列成本并做一次 reduced-cost 复核。扩展时遵守当前节点的 forbidden arc、pricingOnly forbidden arc 和 required outsourcing job。
 
-1. 内部列二进制变量。
-2. `cover_j >= 1`，内部列按 job visit count 计数，外包变量 `y_j` 系数为 1。
-3. 机器数区间 `[node.minMachineCount, node.maxMachineCount]`。
-4. 当前节点 arc branch、adjacency branch 和 tariff segment branch。
-5. masterVariables 外包下的 piecewise tariff 变量和 baseline 约束。
+completion bound 已接入枚举 label 剪枝。`PC` 在节点闭合时留下的 reusable bounds 会传给 `RouteEnumerationEngine`；每个 child label 生成后，按现有双向 pricing 的 forward completion-bound 剪枝语义，用 `child.frontier + backwardRByJob[child.lastJob]` 判断当前前缀是否仍可能补成 `rc < UB - LB_node` 的完整列。如果 relaxed 下界已经不小于阈值，则剪掉整个 child label，而不是对下一跳弧做 forced-arc 判断。没有可复用 bound 时只是不做这类剪枝。
 
-如果有限 MIP 证明 infeasible，节点关闭；如果证明 optimal，则该节点在完整枚举列集上已闭合。若 optimal 目标优于 incumbent，则更新 incumbent；否则直接关闭节点。若 MIP 超时或没有证明，则不关闭节点。
+2026-06-24 复查时确认：这些 reusable bounds 的导出端已经要求 `pricingHorizon == data.CmaxH`、未开 dual profitable window、未排除 zero-dual job，因此不会把半域或临时裁剪窗口下的 bound 用到 full-domain 枚举证明里。此前曾短暂尝试按 `(from,to)` 使用 `forwardF + arc + backwardB` 做扩展弧剪枝，但这属于 arc fixing/forced-arc 公式，不是 pricing label 剪枝语义；当前已改回和双向 pricing 一致的 label-level completion-bound 剪枝。
 
-## 风险与后续
+每条完整内部序列恢复后，用 `TWETColumnEvaluator` 计算真实目标成本，再用 true dual 计算 reduced cost。若 `rc < gap`，则进入有限列集；已有 active 列、全局池已有列和本轮重复序列会分别统计，不重复加入。
 
-第一版没有接入 completion bound 剪枝，因此只有在小 gap、分支状态已经很强、可枚举状态有限时才可能有效。这个选择是为了先保证证明链路清楚，不把半域 bound、SRI 状态或列化外包一起混入。
+## 4. 外包处理
 
-后续如果要提高可用性，优先考虑两件事：一是把 safe completion bound 加入枚举 DFS 的前缀剪枝；二是为 columnized outsourcing 同时枚举外包列族并把两类 pricing 证书一起用于有限 MIP。SRI 场景暂不建议接入，除非先明确 cut 状态如何进入枚举 reduced cost 和有限主问题证明。
+masterVariables 外包模式保留现有 `y_j + tariff segment + baseline` 变量。有限 MIP 中 `y_j` 和 tariff segment active 是整数变量，baseline 仍是连续变量，覆盖约束仍保持当前 RMP 的 `>= 1` 口径。
+
+columnized outsourcing 模式也支持 route enumeration。外包列枚举复用 `OutsourcingPricingEngine` 的 DP 思路，但阈值从“只找负列”改为“枚举 `rc < gap` 的外包列”。枚举时遵守 outsourcing required/forbidden 分支，外包列用 `omega` 二进制变量进入有限 MIP，并保留 `sum omega <= 1` 的外包列族约束。内部列分支约束只作用于机器列，外包列不参与 arc/adjacency 分支行。
+
+## 5. 有限主问题口径
+
+有限 MIP 使用当前 RMP 的 set-covering 口径：
+
+1. 内部列变量为二进制。
+2. 覆盖约束为 `cover_j >= 1`，内部列按 job visit count 计数。
+3. 机器数量约束为 `[node.minMachineCount, node.maxMachineCount]`。
+4. 当前节点 arc branch 和 adjacency branch 只作用于内部列。
+5. masterVariables 外包下使用 `y_j + tariff segment + baseline`。
+6. columnized outsourcing 下使用外包列变量 `omega` 和 `sum omega <= 1`。
+
+如果有限 MIP 证明 infeasible，当前节点可关闭；如果证明 optimal 且目标不优于 incumbent，当前节点可关闭；如果证明 optimal 且目标更好，则更新 incumbent 后关闭当前节点。
+
+## 6. 当前风险
+
+route enumeration 仍然是小 gap 下的证明增强，不适合大 gap 或弱分支状态。它不处理 SRI active 的场景，也不尝试把枚举列增量加入当前 RMP 后继续列生成。columnized outsourcing 已经接入，但如果外包列族后续加入更复杂的 cut 状态，需要重新确认有限主问题的 cut 系数和 pricing 证书口径。

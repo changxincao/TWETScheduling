@@ -52,6 +52,12 @@ public class OutsourcingPool {
 		return addColumn(column.getJobs(), column.getSource(), column.isSeedColumn());
 	}
 
+	/** 2026-06-24: route enumeration 用于区分外包列是否已经在全局池中存在。 */
+	public int getColumnIdBySignature(SequenceSignature signature) {
+		Integer existing = signatureToId.get(signature);
+		return existing == null ? -1 : existing.intValue();
+	}
+
 	public boolean isOutsourceable(int job) {
 		return job >= 1 && job <= data.n && !Utility.isBigMValue(data.outsourcingCost[job]);
 	}

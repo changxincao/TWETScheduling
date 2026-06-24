@@ -174,6 +174,36 @@ public final class CompletionBoundSubtreeArcEliminator {
 			return bounds != null && Utility.compareEq(horizon, expectedHorizon)
 					&& relaxation == expectedRelaxation && queueOrdering == expectedQueueOrdering;
 		}
+
+		/**
+		 * 2026-06-24: route enumeration 复用定价闭合时留下的 completion bound，语义和
+		 * bidirectional pricing 中的 forward label 剪枝一致：当前前缀 label 若与 terminal job
+		 * 对应的 relaxed suffix 下界相加仍不可能低于 cutoff，则整个 label 可以被剪掉。
+		 */
+		public boolean canPruneForwardLabel(int terminalJob, PiecewiseLinearFunction frontier,
+				double minReducedCost, double cutoff, boolean scalarPruning) {
+			if (bounds == null || terminalJob <= 0 || terminalJob >= bounds.backwardRByJob.length
+					|| frontier == null || frontier.head == null) {
+				return false;
+			}
+			PiecewiseLinearFunction suffix = bounds.backwardRByJob[terminalJob];
+			if (suffix == null || suffix.head == null) {
+				return false;
+			}
+			if (scalarPruning) {
+				double suffixLowerBound = bounds.backwardRAfterFloor(terminalJob, frontier.head.start);
+				if (Utility.isBigMValue(suffixLowerBound)
+						|| !Utility.compareLt(minReducedCost + suffixLowerBound, cutoff)) {
+					return true;
+				}
+			}
+			PiecewiseLinearFunction completion = frontier.add(suffix);
+			if (completion.head == null) {
+				return false;
+			}
+			double lowerBound = completion.findMinimal(false, true)[0];
+			return !Utility.compareLt(lowerBound, cutoff);
+		}
 	}
 
 	private CompletionBoundCalculator.Relaxation parseRelaxation(String value) {

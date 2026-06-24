@@ -16,46 +16,74 @@ public final class RouteEnumerationResult {
 	private final boolean complete;
 	private final String message;
 	private final ArrayList<Integer> finiteColumnIds;
+	private final ArrayList<Integer> finiteOutsourcingColumnIds;
 	private final int enumeratedStates;
 	private final int candidateColumns;
+	private final int outsourcingCandidateColumns;
 	private final int newColumns;
+	private final int newOutsourcingColumns;
 	private final int duplicateActive;
 	private final int duplicatePool;
 	private final int duplicateRun;
+	private final int completionBoundPrunedExtensions;
 	private final long elapsedNanos;
 
 	private RouteEnumerationResult(boolean attempted, boolean complete, String message, List<Integer> finiteColumnIds,
-			int enumeratedStates, int candidateColumns, int newColumns, int duplicateActive, int duplicatePool,
-			int duplicateRun, long elapsedNanos) {
+			List<Integer> finiteOutsourcingColumnIds, int enumeratedStates, int candidateColumns,
+			int outsourcingCandidateColumns, int newColumns, int newOutsourcingColumns, int duplicateActive,
+			int duplicatePool, int duplicateRun, int completionBoundPrunedExtensions, long elapsedNanos) {
 		this.attempted = attempted;
 		this.complete = complete;
 		this.message = message;
 		this.finiteColumnIds = new ArrayList<Integer>(finiteColumnIds);
+		this.finiteOutsourcingColumnIds = new ArrayList<Integer>(finiteOutsourcingColumnIds);
 		this.enumeratedStates = enumeratedStates;
 		this.candidateColumns = candidateColumns;
+		this.outsourcingCandidateColumns = outsourcingCandidateColumns;
 		this.newColumns = newColumns;
+		this.newOutsourcingColumns = newOutsourcingColumns;
 		this.duplicateActive = duplicateActive;
 		this.duplicatePool = duplicatePool;
 		this.duplicateRun = duplicateRun;
+		this.completionBoundPrunedExtensions = completionBoundPrunedExtensions;
 		this.elapsedNanos = elapsedNanos;
 	}
 
 	public static RouteEnumerationResult skipped(String message) {
-		return new RouteEnumerationResult(false, false, message, Collections.<Integer>emptyList(), 0, 0, 0, 0, 0, 0, 0L);
+		return new RouteEnumerationResult(false, false, message, Collections.<Integer>emptyList(),
+				Collections.<Integer>emptyList(), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0L);
 	}
 
 	public static RouteEnumerationResult incomplete(String message, List<Integer> finiteColumnIds, int enumeratedStates,
 			int candidateColumns, int newColumns, int duplicateActive, int duplicatePool, int duplicateRun,
 			long elapsedNanos) {
-		return new RouteEnumerationResult(true, false, message, finiteColumnIds, enumeratedStates, candidateColumns,
-				newColumns, duplicateActive, duplicatePool, duplicateRun, elapsedNanos);
+		return incomplete(message, finiteColumnIds, Collections.<Integer>emptyList(), enumeratedStates, candidateColumns,
+				0, newColumns, 0, duplicateActive, duplicatePool, duplicateRun, 0, elapsedNanos);
+	}
+
+	public static RouteEnumerationResult incomplete(String message, List<Integer> finiteColumnIds,
+			List<Integer> finiteOutsourcingColumnIds, int enumeratedStates, int candidateColumns,
+			int outsourcingCandidateColumns, int newColumns, int newOutsourcingColumns, int duplicateActive,
+			int duplicatePool, int duplicateRun, int completionBoundPrunedExtensions, long elapsedNanos) {
+		return new RouteEnumerationResult(true, false, message, finiteColumnIds, finiteOutsourcingColumnIds,
+				enumeratedStates, candidateColumns, outsourcingCandidateColumns, newColumns, newOutsourcingColumns,
+				duplicateActive, duplicatePool, duplicateRun, completionBoundPrunedExtensions, elapsedNanos);
 	}
 
 	public static RouteEnumerationResult complete(String message, List<Integer> finiteColumnIds, int enumeratedStates,
 			int candidateColumns, int newColumns, int duplicateActive, int duplicatePool, int duplicateRun,
 			long elapsedNanos) {
-		return new RouteEnumerationResult(true, true, message, finiteColumnIds, enumeratedStates, candidateColumns,
-				newColumns, duplicateActive, duplicatePool, duplicateRun, elapsedNanos);
+		return complete(message, finiteColumnIds, Collections.<Integer>emptyList(), enumeratedStates, candidateColumns,
+				0, newColumns, 0, duplicateActive, duplicatePool, duplicateRun, 0, elapsedNanos);
+	}
+
+	public static RouteEnumerationResult complete(String message, List<Integer> finiteColumnIds,
+			List<Integer> finiteOutsourcingColumnIds, int enumeratedStates, int candidateColumns,
+			int outsourcingCandidateColumns, int newColumns, int newOutsourcingColumns, int duplicateActive,
+			int duplicatePool, int duplicateRun, int completionBoundPrunedExtensions, long elapsedNanos) {
+		return new RouteEnumerationResult(true, true, message, finiteColumnIds, finiteOutsourcingColumnIds,
+				enumeratedStates, candidateColumns, outsourcingCandidateColumns, newColumns, newOutsourcingColumns,
+				duplicateActive, duplicatePool, duplicateRun, completionBoundPrunedExtensions, elapsedNanos);
 	}
 
 	public boolean isAttempted() {
@@ -72,6 +100,10 @@ public final class RouteEnumerationResult {
 
 	public List<Integer> getFiniteColumnIds() {
 		return Collections.unmodifiableList(finiteColumnIds);
+	}
+
+	public List<Integer> getFiniteOutsourcingColumnIds() {
+		return Collections.unmodifiableList(finiteOutsourcingColumnIds);
 	}
 
 	public int getEnumeratedStates() {
@@ -92,8 +124,10 @@ public final class RouteEnumerationResult {
 
 	public String summary() {
 		return "complete=" + complete + ",states=" + enumeratedStates + ",candidates=" + candidateColumns
-				+ ",finiteCols=" + finiteColumnIds.size() + ",new=" + newColumns + ",dupActive="
-				+ duplicateActive + ",dupPool=" + duplicatePool + ",dupRun=" + duplicateRun + ",ms="
-				+ String.format("%.3f", elapsedNanos / 1_000_000.0) + ",msg=" + message;
+				+ ",outCandidates=" + outsourcingCandidateColumns + ",finiteCols=" + finiteColumnIds.size()
+				+ ",finiteOutCols=" + finiteOutsourcingColumnIds.size() + ",new=" + newColumns
+				+ ",newOut=" + newOutsourcingColumns + ",dupActive=" + duplicateActive + ",dupPool="
+				+ duplicatePool + ",dupRun=" + duplicateRun + ",cbPruned=" + completionBoundPrunedExtensions
+				+ ",ms=" + String.format("%.3f", elapsedNanos / 1_000_000.0) + ",msg=" + message;
 	}
 }

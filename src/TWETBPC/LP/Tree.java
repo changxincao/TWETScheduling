@@ -213,14 +213,16 @@ public class Tree {
 			return null;
 		}
 		heartbeat(lp.getNode(), "routeEnumeration.start");
-		RouteEnumerationResult enumeration = routeEnumerationEngine.enumerate(lp, incumbentCost, nodeLowerBound);
+		RouteEnumerationResult enumeration = routeEnumerationEngine.enumerate(lp, incumbentCost, nodeLowerBound,
+				pc.getLastReusableSubtreeArcEliminationBounds());
 		heartbeat(lp.getNode(), "routeEnumeration.done " + enumeration.summary());
 		if (!enumeration.isAttempted() || !enumeration.isComplete()) {
 			return null;
 		}
 		heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.start");
 		RouteEnumerationFiniteMaster.Result proof =
-				routeEnumerationFiniteMaster.solve(lp, enumeration.getFiniteColumnIds());
+				routeEnumerationFiniteMaster.solve(lp, enumeration.getFiniteColumnIds(),
+						enumeration.getFiniteOutsourcingColumnIds());
 		heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.done proven=" + proof.isProven()
 				+ ",obj=" + proof.getObjective() + ",msg=" + proof.getMessage()
 				+ ",ms=" + String.format("%.3f", proof.getElapsedNanos() / 1_000_000.0));

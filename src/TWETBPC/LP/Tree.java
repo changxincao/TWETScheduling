@@ -74,6 +74,7 @@ public class Tree {
 		ArrayList<Integer> incumbentColumnIds = new ArrayList<Integer>(initial.getIncumbentColumnIds());
 		double[] incumbentOutsourcingValues = initialOutsourcingValues(initial);
 		int processedNodes = 0;
+		boolean stoppedByTimeLimit = false;
 
 		while (!queue.isEmpty() && processedNodes < config.maxNodes && !isSolveTimeLimitReached(solveStartNanos)) {
 			Node node = queue.poll();
@@ -120,6 +121,13 @@ public class Tree {
 				lpIntegerIncumbentUpdated = true;
 				traceSink.onIncumbentUpdated(node, solution, incumbentCost);
 			}
+			if (!lpIntegerIncumbentUpdated && isSolveTimeLimitReached(solveStartNanos)) {
+				traceSink.onMasterSolved(node, solution, lp.getRestrictedColumnIds().size(), lp.getActiveCutIds().size(),
+						bestBound, incumbentCost, queue.size(), totalPoolSize(), cutPool.size(), incumbentUpdated);
+				traceSink.onNodeClosed(node, "time_limit", queue.size());
+				stoppedByTimeLimit = true;
+				break;
+			}
 			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic) {
 				heartbeat(node, "rmih.start");
 				RestrictedMasterIntegerHeuristic.Result integerResult = restrictedMasterIntegerHeuristic.solve(lp);
@@ -139,6 +147,11 @@ public class Tree {
 
 			traceSink.onMasterSolved(node, solution, lp.getRestrictedColumnIds().size(), lp.getActiveCutIds().size(),
 					bestBound, incumbentCost, queue.size(), totalPoolSize(), cutPool.size(), incumbentUpdated);
+			if (isSolveTimeLimitReached(solveStartNanos)) {
+				traceSink.onNodeClosed(node, "time_limit", queue.size());
+				stoppedByTimeLimit = true;
+				break;
+			}
 
 			if (lpIntegerIncumbentUpdated) {
 				traceSink.onNodeClosed(node, "integer_incumbent", queue.size());
@@ -169,12 +182,22 @@ public class Tree {
 						queue.size());
 				continue;
 			}
+			if (isSolveTimeLimitReached(solveStartNanos)) {
+				traceSink.onNodeClosed(node, "time_limit", queue.size());
+				stoppedByTimeLimit = true;
+				break;
+			}
 
 			applyTimeIndexedGraphArcFixing(lp, incumbentCost);
 			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = null;
 			if (!config.useTimeIndexedGraphPricing) {
 				heartbeat(node, "subtreeArcElimination.start");
 				subtreeArcElimination = evaluateSubtreeArcElimination(lp, incumbentCost, solution.getObjectiveValue());
+			}
+			if (isSolveTimeLimitReached(solveStartNanos)) {
+				traceSink.onNodeClosed(node, "time_limit", queue.size());
+				stoppedByTimeLimit = true;
+				break;
 			}
 
 			boolean branched = false;
@@ -197,8 +220,9 @@ public class Tree {
 			}
 		}
 
-		bestBound = finalBound(queue, incumbentCost, bestBound);
-		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), isSolveTimeLimitReached(solveStartNanos));
+		boolean timeLimitReached = isSolveTimeLimitReached(solveStartNanos);
+		bestBound = finalBound(queue, incumbentCost, bestBound, stoppedByTimeLimit || timeLimitReached);
+		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), stoppedByTimeLimit, timeLimitReached);
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, totalPoolSize(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and configured pricing engines; advanced cuts/pricing remain pending");
@@ -306,11 +330,12 @@ public class Tree {
 		return bound;
 	}
 
-	private double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound) {
+	private double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound,
+			boolean timeLimitReached) {
 		// 2026-05-19: 如果队列为空，所有节点已经关闭，最终 LB 应等于 incumbent；
 		// 如果达到节点上限仍有 open node，则用 open queue 中最小伪下界作为当前全局 LB。
 		if (queue.isEmpty()) {
-			return incumbentCost;
+			return timeLimitReached ? lastReportedBound : incumbentCost;
 		}
 		double bound = queue.peek().pseudoCost;
 		// 2026-06-25: root 尚未处理或伪下界仍是占位大数时，不能把 bound 截成 incumbent；
@@ -324,7 +349,11 @@ public class Tree {
 		return bound;
 	}
 
-	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty, boolean timeLimitReached) {
+	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty, boolean stoppedByTimeLimit,
+			boolean timeLimitReached) {
+		if (stoppedByTimeLimit) {
+			return TWETSolveStatus.TIME_LIMIT;
+		}
 		if (processedNodes == 0) {
 			return timeLimitReached ? TWETSolveStatus.TIME_LIMIT : TWETSolveStatus.INITIALIZED;
 		}

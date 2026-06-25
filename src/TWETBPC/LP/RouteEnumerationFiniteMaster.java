@@ -35,29 +35,40 @@ public final class RouteEnumerationFiniteMaster {
 		this.config = config;
 	}
 
-	public Result solve(LP lp, List<Integer> finiteColumnIds, List<Integer> finiteOutsourcingColumnIds) {
+	public Result solve(LP lp, List<Integer> finiteColumnIds, List<Integer> finiteOutsourcingColumnIds,
+			double remainingTimeSeconds) {
 		long start = System.nanoTime();
+		long buildNanos = 0L;
+		long solveNanos = 0L;
+		long extractNanos = 0L;
 		IloCplex cplex = null;
 		try {
 			cplex = new IloCplex();
 			cplex.setOut(null);
 			cplex.setParam(IloCplex.Param.Threads, 1);
-			if (config.routeEnumerationMipTimeLimitSeconds > 0.0) {
-				cplex.setParam(IloCplex.Param.TimeLimit, config.routeEnumerationMipTimeLimitSeconds);
+			if (Double.isFinite(remainingTimeSeconds) && Utility.compareGt(remainingTimeSeconds, 0.0)) {
+				cplex.setParam(IloCplex.Param.TimeLimit, remainingTimeSeconds);
 			}
+			long buildStart = System.nanoTime();
 			Model model = buildModel(cplex, lp, finiteColumnIds, finiteOutsourcingColumnIds);
+			buildNanos = System.nanoTime() - buildStart;
+			long solveStart = System.nanoTime();
 			boolean solved = cplex.solve();
+			solveNanos = System.nanoTime() - solveStart;
 			long elapsed = System.nanoTime() - start;
 			if (!solved) {
 				if (cplex.getStatus() == IloCplex.Status.Infeasible) {
-					return Result.provenInfeasible("finite master infeasible", elapsed);
+					return Result.provenInfeasible("finite master infeasible", elapsed, buildNanos, solveNanos,
+							extractNanos);
 				}
-				return Result.notProven("finite master not solved: " + cplex.getStatus(), elapsed);
+				return Result.notProven("finite master not solved: " + cplex.getStatus(), elapsed, buildNanos,
+						solveNanos, extractNanos);
 			}
 			if (cplex.getStatus() != IloCplex.Status.Optimal) {
 				return Result.notProven("finite master status " + cplex.getStatus() + " obj=" + cplex.getObjValue(),
-						elapsed);
+						elapsed, buildNanos, solveNanos, extractNanos);
 			}
+			long extractStart = System.nanoTime();
 			ArrayList<Integer> selected = selectedColumns(cplex, model);
 			double[] outsourcing = outsourcingValues(cplex, model);
 			double[] segments = segmentValues(cplex, model);
@@ -67,9 +78,12 @@ public final class RouteEnumerationFiniteMaster {
 			}
 			TWETMasterSolution solution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues,
 					outsourcing, segments, cplex.getObjValue(), true, "route enumeration finite master optimal");
-			return Result.provenOptimal(cplex.getObjValue(), selected, outsourcing, solution, elapsed);
+			extractNanos = System.nanoTime() - extractStart;
+			return Result.provenOptimal(cplex.getObjValue(), selected, outsourcing, solution,
+					System.nanoTime() - start, buildNanos, solveNanos, extractNanos);
 		} catch (IloException ex) {
-			return Result.notProven("finite master error: " + ex.getMessage(), System.nanoTime() - start);
+			return Result.notProven("finite master error: " + ex.getMessage(), System.nanoTime() - start, buildNanos,
+					solveNanos, extractNanos);
 		} finally {
 			if (cplex != null) {
 				cplex.end();
@@ -366,9 +380,13 @@ public final class RouteEnumerationFiniteMaster {
 		private final TWETMasterSolution solution;
 		private final String message;
 		private final long elapsedNanos;
+		private final long buildNanos;
+		private final long solveNanos;
+		private final long extractNanos;
 
 		private Result(boolean proven, boolean infeasible, double objective, List<Integer> selectedColumnIds,
-				double[] outsourcingValues, TWETMasterSolution solution, String message, long elapsedNanos) {
+				double[] outsourcingValues, TWETMasterSolution solution, String message, long elapsedNanos,
+				long buildNanos, long solveNanos, long extractNanos) {
 			this.proven = proven;
 			this.infeasible = infeasible;
 			this.objective = objective;
@@ -377,22 +395,26 @@ public final class RouteEnumerationFiniteMaster {
 			this.solution = solution;
 			this.message = message;
 			this.elapsedNanos = elapsedNanos;
+			this.buildNanos = buildNanos;
+			this.solveNanos = solveNanos;
+			this.extractNanos = extractNanos;
 		}
 
-		static Result provenInfeasible(String message, long elapsedNanos) {
+		static Result provenInfeasible(String message, long elapsedNanos, long buildNanos, long solveNanos,
+				long extractNanos) {
 			return new Result(true, true, Double.POSITIVE_INFINITY, new ArrayList<Integer>(), new double[0], null,
-					message, elapsedNanos);
+					message, elapsedNanos, buildNanos, solveNanos, extractNanos);
 		}
 
 		static Result provenOptimal(double objective, List<Integer> selectedColumnIds, double[] outsourcingValues,
-				TWETMasterSolution solution, long elapsedNanos) {
+				TWETMasterSolution solution, long elapsedNanos, long buildNanos, long solveNanos, long extractNanos) {
 			return new Result(true, false, objective, selectedColumnIds, outsourcingValues, solution,
-					"finite master optimal", elapsedNanos);
+					"finite master optimal", elapsedNanos, buildNanos, solveNanos, extractNanos);
 		}
 
-		static Result notProven(String message, long elapsedNanos) {
+		static Result notProven(String message, long elapsedNanos, long buildNanos, long solveNanos, long extractNanos) {
 			return new Result(false, false, Double.NaN, new ArrayList<Integer>(), new double[0], null, message,
-					elapsedNanos);
+					elapsedNanos, buildNanos, solveNanos, extractNanos);
 		}
 
 		public boolean isProven() {
@@ -425,6 +447,18 @@ public final class RouteEnumerationFiniteMaster {
 
 		public long getElapsedNanos() {
 			return elapsedNanos;
+		}
+
+		public long getBuildNanos() {
+			return buildNanos;
+		}
+
+		public long getSolveNanos() {
+			return solveNanos;
+		}
+
+		public long getExtractNanos() {
+			return extractNanos;
 		}
 	}
 }

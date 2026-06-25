@@ -36,6 +36,8 @@ public class TWETBPCConfig {
 	public int acceptedSolutionHistoryLimit = 2000;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;
+	/** 2026-06-25: BPC 全局 wall-clock 时间上限，单位秒；<=0 表示不限时。 */
+	public double solveTimeLimitSeconds = 0.0;
 	/** 是否使用按论文 dominance graph 伪代码实现的精确定价器；关闭后可回退旧的全量扫描版做效率对比。 */
 	public boolean usePaperDominancePricing = true;
 	/**
@@ -79,8 +81,8 @@ public class TWETBPCConfig {
 	public boolean routeEnumerationUseCompletionBound = true;
 	/** 2026-06-25: 外包枚举 cheap suffix bound 剪不掉时，是否继续做逐 label 的精细 suffix 扫描。 */
 	public boolean routeEnumerationUseExactOutsourcingSuffixBound = false;
-	/** 2026-06-24: route enumeration 完整后有限整数主问题的求解时间上限。 */
-	public double routeEnumerationMipTimeLimitSeconds = 60.0;
+	/** 2026-06-25: 已弃用。有限整数主问题只使用全局剩余时间；<=0 表示不单独限时。 */
+	public double routeEnumerationMipTimeLimitSeconds = 0.0;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**

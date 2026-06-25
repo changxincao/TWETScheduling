@@ -56,6 +56,7 @@ public class Tree {
 	}
 
 	public TWETSolveResult solve() {
+		long solveStartNanos = System.nanoTime();
 		heartbeat(null, "initialColumnBuilder.start");
 		InitialColumnBundle initial = initialColumnBuilder.build();
 		heartbeat(null, "initialColumnBuilder.done");
@@ -74,7 +75,7 @@ public class Tree {
 		double[] incumbentOutsourcingValues = initialOutsourcingValues(initial);
 		int processedNodes = 0;
 
-		while (!queue.isEmpty() && processedNodes < config.maxNodes) {
+		while (!queue.isEmpty() && processedNodes < config.maxNodes && !isSolveTimeLimitReached(solveStartNanos)) {
 			Node node = queue.poll();
 			node.id = ++processedNodes;
 			traceSink.onNodePicked(node, queue.size(), totalPoolSize(), cutPool.size());
@@ -150,7 +151,7 @@ public class Tree {
 			}
 
 			RouteEnumerationFiniteMaster.Result enumerationProof =
-					tryRouteEnumeration(lp, incumbentCost, solution.getObjectiveValue());
+					tryRouteEnumeration(lp, incumbentCost, solution.getObjectiveValue(), solveStartNanos);
 			if (enumerationProof != null && enumerationProof.isProven()) {
 				if (!enumerationProof.isInfeasible()
 						&& Utility.compareLt(enumerationProof.getObjective(), incumbentCost)) {
@@ -197,7 +198,7 @@ public class Tree {
 		}
 
 		bestBound = finalBound(queue, incumbentCost, bestBound);
-		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty());
+		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), isSolveTimeLimitReached(solveStartNanos));
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, totalPoolSize(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and configured pricing engines; advanced cuts/pricing remain pending");
@@ -208,8 +209,12 @@ public class Tree {
 	}
 
 	private RouteEnumerationFiniteMaster.Result tryRouteEnumeration(LP lp, double incumbentCost,
-			double nodeLowerBound) {
+			double nodeLowerBound, long solveStartNanos) {
 		if (!config.enableRouteEnumeration) {
+			return null;
+		}
+		if (isSolveTimeLimitReached(solveStartNanos)) {
+			heartbeat(lp.getNode(), "routeEnumeration.skip time limit reached");
 			return null;
 		}
 		heartbeat(lp.getNode(), "routeEnumeration.start");
@@ -219,12 +224,21 @@ public class Tree {
 		if (!enumeration.isAttempted() || !enumeration.isComplete()) {
 			return null;
 		}
-		heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.start");
+		double remainingSeconds = remainingSolveTimeSeconds(solveStartNanos);
+		if (Utility.compareLe(remainingSeconds, 0.0)) {
+			heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.skip time limit reached");
+			return null;
+		}
+		heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.start remainingSeconds="
+				+ (Double.isInfinite(remainingSeconds) ? "INF" : String.format("%.3f", remainingSeconds)));
 		RouteEnumerationFiniteMaster.Result proof =
 				routeEnumerationFiniteMaster.solve(lp, enumeration.getFiniteColumnIds(),
-						enumeration.getFiniteOutsourcingColumnIds());
+						enumeration.getFiniteOutsourcingColumnIds(), remainingSeconds);
 		heartbeat(lp.getNode(), "routeEnumerationFiniteMaster.done proven=" + proof.isProven()
 				+ ",obj=" + proof.getObjective() + ",msg=" + proof.getMessage()
+				+ ",buildMs=" + String.format("%.3f", proof.getBuildNanos() / 1_000_000.0)
+				+ ",solveMs=" + String.format("%.3f", proof.getSolveNanos() / 1_000_000.0)
+				+ ",extractMs=" + String.format("%.3f", proof.getExtractNanos() / 1_000_000.0)
 				+ ",ms=" + String.format("%.3f", proof.getElapsedNanos() / 1_000_000.0));
 		return proof;
 	}
@@ -308,9 +322,13 @@ public class Tree {
 		return lastReportedBound;
 	}
 
-	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty) {
+	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty, boolean timeLimitReached) {
 		if (processedNodes == 0) {
-			return TWETSolveStatus.INITIALIZED;
+			return timeLimitReached ? TWETSolveStatus.TIME_LIMIT : TWETSolveStatus.INITIALIZED;
+		}
+		// 2026-06-25: 全局时间上限优先于节点上限状态，避免长算例被误报为已完成。
+		if (timeLimitReached && !queueEmpty) {
+			return TWETSolveStatus.TIME_LIMIT;
 		}
 		// 2026-05-18: 显式区分达到 maxNodes 后队列仍非空的情况，避免把节点上限停止误报为完成。
 		if (!queueEmpty && processedNodes >= config.maxNodes) {
@@ -320,6 +338,19 @@ public class Tree {
 			return TWETSolveStatus.ROOT_PROCESSED;
 		}
 		return TWETSolveStatus.FINISHED;
+	}
+
+	private boolean isSolveTimeLimitReached(long solveStartNanos) {
+		return Double.isFinite(config.solveTimeLimitSeconds) && Utility.compareGt(config.solveTimeLimitSeconds, 0.0)
+				&& remainingSolveTimeSeconds(solveStartNanos) <= 0.0;
+	}
+
+	private double remainingSolveTimeSeconds(long solveStartNanos) {
+		if (!Double.isFinite(config.solveTimeLimitSeconds) || Utility.compareLe(config.solveTimeLimitSeconds, 0.0)) {
+			return Double.POSITIVE_INFINITY;
+		}
+		double elapsedSeconds = (System.nanoTime() - solveStartNanos) / 1_000_000_000.0;
+		return Math.max(0.0, config.solveTimeLimitSeconds - elapsedSeconds);
 	}
 
 	private void enqueueChild(PriorityQueue<Node> queue, Node child, LP parentLp) {

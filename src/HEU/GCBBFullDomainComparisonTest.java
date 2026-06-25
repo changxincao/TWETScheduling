@@ -269,6 +269,9 @@ public class GCBBFullDomainComparisonTest {
 				|| Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.pricingDiagnostics",
 						Boolean.toString(config.diagnosticPricingSummaryDetails)));
 		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);
+		config.solveTimeLimitSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.solveTimeLimitSeconds",
+				Double.toString(config.solveTimeLimitSeconds)));
 		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxHeuristicColumns",
 				1500);
 		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.fullDomainCompare.heuristicPoolSize",
@@ -325,9 +328,6 @@ public class GCBBFullDomainComparisonTest {
 		config.routeEnumerationUseExactOutsourcingSuffixBound = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumerationUseExactOutsourcingSuffixBound",
 				Boolean.toString(config.routeEnumerationUseExactOutsourcingSuffixBound)));
-		config.routeEnumerationMipTimeLimitSeconds = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.routeEnumerationMipTimeLimitSeconds",
-				Double.toString(config.routeEnumerationMipTimeLimitSeconds)));
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

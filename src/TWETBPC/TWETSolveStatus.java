@@ -16,6 +16,8 @@ public enum TWETSolveStatus {
 	FINISHED,
 	/** 2026-05-18: 达到节点数上限，队列中仍可能有未处理节点。 */
 	NODE_LIMIT,
+	/** 2026-06-25: 达到全局 wall-clock 时间上限，队列中仍可能有未处理节点。 */
+	TIME_LIMIT,
 	/** 流程异常结束。 */
 	FAILED
 }

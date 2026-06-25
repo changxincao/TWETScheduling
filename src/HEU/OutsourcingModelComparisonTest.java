@@ -168,6 +168,9 @@ public final class OutsourcingModelComparisonTest {
 		config.runALNSForSeed = false;
 		config.outsourcingModel = outsourcingModel;
 		config.maxNodes = Integer.getInteger("twet.bpc.outsourcingCompare.maxNodes", 5000);
+		config.solveTimeLimitSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.solveTimeLimitSeconds",
+				Double.toString(config.solveTimeLimitSeconds)));
 		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.outsourcingCompare.maxHeuristicColumns",
 				1500);
 		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.outsourcingCompare.heuristicPoolSize", 5000);

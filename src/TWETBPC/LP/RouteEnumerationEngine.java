@@ -16,6 +16,7 @@ import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETOutsourcingColumn;
+import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
@@ -65,7 +66,7 @@ public final class RouteEnumerationEngine {
 		ArrayList<TWETOutsourcingColumn> pendingOutsourcing = new ArrayList<TWETOutsourcingColumn>();
 		PiecewiseLinearFunction[] jobPenalties = buildJobPenaltyCache();
 		long nextSerial = 0L;
-		State root = buildRootState(dual, jobPenalties, nextSerial++);
+		State root = buildRootState(node, dual, jobPenalties, nextSerial++);
 		if (root == null) {
 			return RouteEnumerationResult.incomplete("empty source frontier", new ArrayList<Integer>(finiteIds),
 					new ArrayList<Integer>(finiteOutsourcingIds), 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -115,14 +116,12 @@ public final class RouteEnumerationEngine {
 				}
 			}
 
-			for (int job = 1; job <= data.n; job++) {
-				if (state.used[job] || isRequiredOutsourced(node, job)) {
-					continue;
-				}
+			for (int job = state.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
+					job = state.reachableSet.nextSetBit(job + 1)) {
 				if (!canUseArc(node, state.lastJob, job)) {
 					continue;
 				}
-				State child = extendState(state, job, nextSerial++, dual, jobPenalties);
+				State child = extendState(state, job, nextSerial++, dual, jobPenalties, node);
 				if (child == null || Utility.isBigMValue(child.minReducedCost)) {
 					continue;
 				}
@@ -271,7 +270,8 @@ public final class RouteEnumerationEngine {
 		return kept;
 	}
 
-	private State buildRootState(LP.PricingDualSnapshot dual, PiecewiseLinearFunction[] jobPenalties, long serial) {
+	private State buildRootState(Node node, LP.PricingDualSnapshot dual, PiecewiseLinearFunction[] jobPenalties,
+			long serial) {
 		PiecewiseLinearFunction frontier = jobPenalties[0].copy();
 		if (frontier.head == null) {
 			return null;
@@ -281,11 +281,13 @@ public final class RouteEnumerationEngine {
 		if (frontier.head == null) {
 			return null;
 		}
-		return State.root(data.n, frontier, forwardEndpointMin(frontier), serial);
+		boolean[] used = new boolean[data.n + 1];
+		PackedBitSet reachableSet = buildForwardReachableSet(0, used, node, frontier, jobPenalties);
+		return State.root(frontier, forwardEndpointMin(frontier), serial, used, reachableSet);
 	}
 
 	private State extendState(State state, int job, long serial, LP.PricingDualSnapshot dual,
-			PiecewiseLinearFunction[] jobPenalties) {
+			PiecewiseLinearFunction[] jobPenalties, Node node) {
 		double delay = data.getSetUp(state.lastJob, job) + data.getProcessT(job);
 		PiecewiseLinearFunction shifted = state.frontier.shiftX(delay);
 		if (shifted.head == null) {
@@ -306,7 +308,51 @@ public final class RouteEnumerationEngine {
 		if (nextFrontier.head == null) {
 			return null;
 		}
-		return state.extend(job, nextFrontier, forwardEndpointMin(nextFrontier), serial);
+		boolean[] nextUsed = state.used.clone();
+		nextUsed[job] = true;
+		PackedBitSet reachableSet = buildForwardReachableSetFromParent(state, job, nextUsed, node, nextFrontier,
+				jobPenalties);
+		return state.extend(job, nextUsed, reachableSet, nextFrontier, forwardEndpointMin(nextFrontier), serial);
+	}
+
+	private PackedBitSet buildForwardReachableSet(int fromJob, boolean[] used, Node node,
+			PiecewiseLinearFunction frontier, PiecewiseLinearFunction[] jobPenalties) {
+		PackedBitSet reachable = new PackedBitSet(data.n + 2);
+		for (int job = 1; job <= data.n; job++) {
+			if (!used[job] && !isRequiredOutsourced(node, job)
+					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job, jobPenalties)) {
+				reachable.add(job);
+			}
+		}
+		return reachable;
+	}
+
+	private PackedBitSet buildForwardReachableSetFromParent(State parent, int fromJob, boolean[] used, Node node,
+			PiecewiseLinearFunction frontier, PiecewiseLinearFunction[] jobPenalties) {
+		PackedBitSet reachable = new PackedBitSet(data.n + 2);
+		for (int job = parent.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
+				job = parent.reachableSet.nextSetBit(job + 1)) {
+			if (!used[job] && !isRequiredOutsourced(node, job)
+					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job, jobPenalties)) {
+				reachable.add(job);
+			}
+		}
+		return reachable;
+	}
+
+	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob,
+			PiecewiseLinearFunction[] jobPenalties) {
+		if (frontier == null || frontier.head == null) {
+			return false;
+		}
+		PiecewiseLinearFunction jobPenalty = jobPenalties[nextJob];
+		if (jobPenalty == null || jobPenalty.head == null || jobPenalty.tail == null) {
+			return false;
+		}
+		double earliestCompletion = Math.max(
+				frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob),
+				jobPenalty.head.start);
+		return !Utility.compareGt(earliestCompletion, jobPenalty.tail.end);
 	}
 
 	private double completeReducedCost(State state, LP.PricingDualSnapshot dual, int sink) {
@@ -391,31 +437,32 @@ public final class RouteEnumerationEngine {
 		final int lastJob;
 		final ArrayList<Integer> sequence;
 		final boolean[] used;
+		final PackedBitSet reachableSet;
 		final PiecewiseLinearFunction frontier;
 		final double minReducedCost;
 		final long serial;
 
-		static State root(int jobCount, PiecewiseLinearFunction frontier, double minReducedCost, long serial) {
-			return new State(0, new ArrayList<Integer>(), new boolean[jobCount + 1], frontier, minReducedCost,
-					serial);
+		static State root(PiecewiseLinearFunction frontier, double minReducedCost, long serial, boolean[] used,
+				PackedBitSet reachableSet) {
+			return new State(0, new ArrayList<Integer>(), used, reachableSet, frontier, minReducedCost, serial);
 		}
 
-		State(int lastJob, ArrayList<Integer> sequence, boolean[] used, PiecewiseLinearFunction frontier,
-				double minReducedCost, long serial) {
+		State(int lastJob, ArrayList<Integer> sequence, boolean[] used, PackedBitSet reachableSet,
+				PiecewiseLinearFunction frontier, double minReducedCost, long serial) {
 			this.lastJob = lastJob;
 			this.sequence = sequence;
 			this.used = used;
+			this.reachableSet = reachableSet;
 			this.frontier = frontier;
 			this.minReducedCost = minReducedCost;
 			this.serial = serial;
 		}
 
-		State extend(int job, PiecewiseLinearFunction frontier, double minReducedCost, long serial) {
+		State extend(int job, boolean[] nextUsed, PackedBitSet reachableSet, PiecewiseLinearFunction frontier,
+				double minReducedCost, long serial) {
 			ArrayList<Integer> nextSequence = new ArrayList<Integer>(sequence);
 			nextSequence.add(Integer.valueOf(job));
-			boolean[] nextUsed = used.clone();
-			nextUsed[job] = true;
-			return new State(job, nextSequence, nextUsed, frontier, minReducedCost, serial);
+			return new State(job, nextSequence, nextUsed, reachableSet, frontier, minReducedCost, serial);
 		}
 	}
 

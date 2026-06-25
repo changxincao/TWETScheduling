@@ -55,3 +55,9 @@ columnized outsourcing 模式也支持 route enumeration。外包列枚举复用
 ## 6. 当前风险
 
 route enumeration 仍然是小 gap 下的证明增强，不适合大 gap 或弱分支状态。它不处理 SRI active 的场景，也不尝试把枚举列增量加入当前 RMP 后继续列生成。columnized outsourcing 已经接入，但如果外包列族后续加入更复杂的 cut 状态，需要重新确认有限主问题的 cut 系数和 pricing 证书口径。
+
+### 2026-06-25 route enumeration 扩展口径修正
+
+按现有 labeling 的口径修正 route enumeration 的内部枚举状态：`State` 现在保存 full-domain `reachableSet`，root 和 child 生成时只根据 visited、required outsourcing 和硬时间窗/函数定义域判断 job 是否仍可达。arc forbidden、pricingOnly forbidden 和分支禁弧不进入 `reachableSet`，只在真正尝试从当前 lastJob 扩展到 nextJob 时通过 `canUseArc()` 过滤。因此“某条边当前不可扩展”和“对应 job 后续不可达”重新分离，避免把 forbidden arc 误写进可达集合语义。
+
+扩展函数仍沿用 forward pricing 的函数递推：`shiftX(setup+process) + job penalty + fixed reduced cost`，再 `normalize(FORWARD)`；completion bound 仍在 child label 生成后按 `child.frontier + backwardRByJob[child.lastJob]` 做 label-level 剪枝。本次没有修改既有 `GCNGBBStyleBidirectional`、partial dominance、ng-DSSR 等主 pricing 类，只把 route enumeration 这一路调整为和它们的 reachable/canExtend 分层一致。验证：当前 TWET 主线 `javac` 编译通过。

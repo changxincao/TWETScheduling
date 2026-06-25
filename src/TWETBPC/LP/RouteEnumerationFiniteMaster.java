@@ -46,12 +46,17 @@ public final class RouteEnumerationFiniteMaster {
 			cplex = new IloCplex();
 			cplex.setOut(null);
 			cplex.setParam(IloCplex.Param.Threads, 1);
-			if (Double.isFinite(remainingTimeSeconds) && Utility.compareGt(remainingTimeSeconds, 0.0)) {
-				cplex.setParam(IloCplex.Param.TimeLimit, remainingTimeSeconds);
-			}
 			long buildStart = System.nanoTime();
 			Model model = buildModel(cplex, lp, finiteColumnIds, finiteOutsourcingColumnIds);
 			buildNanos = System.nanoTime() - buildStart;
+			if (Double.isFinite(remainingTimeSeconds)) {
+				double remainingAfterBuild = remainingTimeSeconds - buildNanos / 1_000_000_000.0;
+				if (Utility.compareLe(remainingAfterBuild, 0.0)) {
+					return Result.notProven("finite master skipped: time limit reached after build",
+							System.nanoTime() - start, buildNanos, solveNanos, extractNanos);
+				}
+				cplex.setParam(IloCplex.Param.TimeLimit, remainingAfterBuild);
+			}
 			long solveStart = System.nanoTime();
 			boolean solved = cplex.solve();
 			solveNanos = System.nanoTime() - solveStart;

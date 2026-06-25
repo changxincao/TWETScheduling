@@ -313,13 +313,15 @@ public class Tree {
 			return incumbentCost;
 		}
 		double bound = queue.peek().pseudoCost;
+		// 2026-06-25: root 尚未处理或伪下界仍是占位大数时，不能把 bound 截成 incumbent；
+		// 否则 TIME_LIMIT / NODE_LIMIT 会被误报成 gap=0。
+		if (!Double.isFinite(bound) || Utility.isBigMValue(bound)) {
+			return lastReportedBound;
+		}
 		if (Double.isFinite(incumbentCost) && Utility.compareGt(bound, incumbentCost)) {
 			return incumbentCost;
 		}
-		if (Double.isFinite(bound)) {
-			return bound;
-		}
-		return lastReportedBound;
+		return bound;
 	}
 
 	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty, boolean timeLimitReached) {

@@ -77,6 +77,8 @@ public class TWETBPCConfig {
 	public int routeEnumerationStateLimit = 1000000;
 	/** 2026-06-24: 复用节点闭合时 exact pricing 留下的 completion bound 做枚举扩展剪枝。 */
 	public boolean routeEnumerationUseCompletionBound = true;
+	/** 2026-06-25: 外包枚举 cheap suffix bound 剪不掉时，是否继续做逐 label 的精细 suffix 扫描。 */
+	public boolean routeEnumerationUseExactOutsourcingSuffixBound = false;
 	/** 2026-06-24: route enumeration 完整后有限整数主问题的求解时间上限。 */
 	public double routeEnumerationMipTimeLimitSeconds = 60.0;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */

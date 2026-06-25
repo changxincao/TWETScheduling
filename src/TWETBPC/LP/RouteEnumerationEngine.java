@@ -224,6 +224,8 @@ public final class RouteEnumerationEngine {
 			}
 		}
 		double[] freeBaselinePrefix = buildOutsourcingFreeBaselinePrefix(freeJobs);
+		double[] cheapSuffixBound = buildOutsourcingCheapSuffixBound(requiredBaseline, freeJobs, freeBaselinePrefix,
+				dual);
 
 		ArrayList<OutsourcingLabel> labels = new ArrayList<OutsourcingLabel>();
 		labels.add(new OutsourcingLabel());
@@ -232,10 +234,10 @@ public final class RouteEnumerationEngine {
 			ArrayList<OutsourcingLabel> next = new ArrayList<OutsourcingLabel>(labels.size() * 2);
 			for (OutsourcingLabel label : labels) {
 				addOutsourcingEnumerationLabel(next, label, requiredBaseline, requiredProfit, idx + 1, freeJobs,
-						freeBaselinePrefix, dual, gap, result);
+						freeBaselinePrefix, cheapSuffixBound, dual, gap, result);
 				OutsourcingLabel included = label.include(job, data.outsourcingCost[job], dual.jobDual[job]);
 				addOutsourcingEnumerationLabel(next, included, requiredBaseline, requiredProfit, idx + 1, freeJobs,
-						freeBaselinePrefix, dual, gap, result);
+						freeBaselinePrefix, cheapSuffixBound, dual, gap, result);
 			}
 			if (next.size() > config.routeEnumerationColumnLimit) {
 				result.incomplete = true;
@@ -286,11 +288,34 @@ public final class RouteEnumerationEngine {
 		return prefix;
 	}
 
+	private double[] buildOutsourcingCheapSuffixBound(double requiredBaseline, List<Integer> freeJobs,
+			double[] freeBaselinePrefix, LP.PricingDualSnapshot dual) {
+		double[] suffix = new double[freeJobs.size() + 1];
+		for (int idx = freeJobs.size() - 1; idx >= 0; idx--) {
+			int job = freeJobs.get(idx).intValue();
+			double maxStartBeforeJob = requiredBaseline + freeBaselinePrefix[idx];
+			double before = data.evaluateOutsourcingCost(maxStartBeforeJob);
+			double after = data.evaluateOutsourcingCost(maxStartBeforeJob + data.outsourcingCost[job]);
+			double contribution = 0.0;
+			if (!Utility.isBigMValue(before) && !Utility.isBigMValue(after)) {
+				// 2026-06-25: cheap bound 对每个 job 只预处理一次。用“它前面的 free job 全已外包”
+				// 得到最靠后的加入位置；在 G 边际斜率不增时，这是该 job 最乐观的成本增量。
+				contribution = after - before - dual.jobDual[job];
+				if (Utility.compareGt(contribution, 0.0)) {
+					contribution = 0.0;
+				}
+			}
+			suffix[idx] = suffix[idx + 1] + contribution;
+		}
+		return suffix;
+	}
+
 	private void addOutsourcingEnumerationLabel(ArrayList<OutsourcingLabel> next, OutsourcingLabel label,
 			double requiredBaseline, double requiredProfit, int nextIndex, List<Integer> freeJobs,
-			double[] freeBaselinePrefix, LP.PricingDualSnapshot dual, double gap, OutsourcingEnumeration result) {
+			double[] freeBaselinePrefix, double[] cheapSuffixBound, LP.PricingDualSnapshot dual, double gap,
+			OutsourcingEnumeration result) {
 		if (canPruneOutsourcingBySuffixBound(label, requiredBaseline, requiredProfit, nextIndex, freeJobs,
-				freeBaselinePrefix, dual, gap)) {
+				freeBaselinePrefix, cheapSuffixBound, dual, gap)) {
 			result.suffixBoundPruned++;
 			return;
 		}
@@ -299,7 +324,7 @@ public final class RouteEnumerationEngine {
 
 	private boolean canPruneOutsourcingBySuffixBound(OutsourcingLabel label, double requiredBaseline,
 			double requiredProfit, int nextIndex, List<Integer> freeJobs, double[] freeBaselinePrefix,
-			LP.PricingDualSnapshot dual, double gap) {
+			double[] cheapSuffixBound, LP.PricingDualSnapshot dual, double gap) {
 		if (!config.routeEnumerationUseCompletionBound) {
 			return false;
 		}
@@ -309,7 +334,15 @@ public final class RouteEnumerationEngine {
 		if (Utility.isBigMValue(currentCost)) {
 			return false;
 		}
-		double lowerBound = currentCost - profit - dual.outsourcingColumnDual;
+		double currentReducedCost = currentCost - profit - dual.outsourcingColumnDual;
+		double cheapLowerBound = currentReducedCost + cheapSuffixBound[nextIndex];
+		if (Utility.compareGe(cheapLowerBound, gap - REDUCED_COST_TOLERANCE)) {
+			return true;
+		}
+		if (!config.routeEnumerationUseExactOutsourcingSuffixBound) {
+			return false;
+		}
+		double lowerBound = currentReducedCost;
 		for (int idx = nextIndex; idx < freeJobs.size(); idx++) {
 			int job = freeJobs.get(idx).intValue();
 			double previousFreeBaseline = freeBaselinePrefix[idx] - freeBaselinePrefix[nextIndex];

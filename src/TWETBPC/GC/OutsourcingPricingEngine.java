@@ -95,11 +95,9 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		Collections.sort(candidates, new Comparator<Candidate>() {
 			@Override
 			public int compare(Candidate a, Candidate b) {
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return 1;
+				int reducedCostOrder = Double.compare(a.reducedCost, b.reducedCost);
+				if (reducedCostOrder != 0) {
+					return reducedCostOrder;
 				}
 				return Integer.compare(a.jobs.size(), b.jobs.size());
 			}

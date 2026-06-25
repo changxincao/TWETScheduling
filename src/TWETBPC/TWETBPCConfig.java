@@ -36,8 +36,8 @@ public class TWETBPCConfig {
 	public int acceptedSolutionHistoryLimit = 2000;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;
-	/** 2026-06-25: BPC 全局 wall-clock 时间上限，单位秒；<=0 表示不限时。 */
-	public double solveTimeLimitSeconds = 0.0;
+	/** 2026-06-25: BPC 全局 wall-clock 时间上限，单位秒；<=0 表示不限时。默认 2 小时。 */
+	public double solveTimeLimitSeconds = 7200.0;
 	/** 是否使用按论文 dominance graph 伪代码实现的精确定价器；关闭后可回退旧的全量扫描版做效率对比。 */
 	public boolean usePaperDominancePricing = true;
 	/**

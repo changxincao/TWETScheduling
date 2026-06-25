@@ -162,7 +162,9 @@ public final class RouteEnumerationFiniteMaster {
 			} else {
 				expr.addTerm(1.0, y[job]);
 			}
-			cplex.addGe(expr, 1.0, "enum_cover_" + job);
+			// 2026-06-25: 枚举完整后，这里求的是当前有限列集上的真实整数排程，
+			// 覆盖口径使用 ==1；原 RMP/RMIH 的 set-covering repair 逻辑不受影响。
+			cplex.addEq(expr, 1.0, "enum_cover_" + job);
 		}
 	}
 

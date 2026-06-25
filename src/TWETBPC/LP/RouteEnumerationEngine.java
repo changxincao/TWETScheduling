@@ -201,8 +201,10 @@ public final class RouteEnumerationEngine {
 			HashSet<Integer> activeOutsourcingIds, HashSet<SequenceSignature> outsourcingRunSignatures) {
 		Node node = lp.getNode();
 		OutsourcingEnumeration result = new OutsourcingEnumeration();
-		// 2026-06-25: 外包枚举保留所有覆盖集合，但仍先把 required job 折进 root，减少无意义层。
-		OutsourcingLabel root = new OutsourcingLabel();
+		// 2026-06-25: 外包枚举保留所有覆盖集合；required job 只作为公共常数，最终合并进候选列。
+		ArrayList<Integer> requiredJobs = new ArrayList<Integer>();
+		double requiredBaseline = 0.0;
+		double requiredProfit = 0.0;
 		ArrayList<Integer> freeJobs = new ArrayList<Integer>();
 		for (int job = 1; job <= data.n; job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
@@ -213,14 +215,16 @@ public final class RouteEnumerationEngine {
 				continue;
 			}
 			if (state == Node.OUTSOURCE_REQUIRED) {
-				root = root.include(job, data.outsourcingCost[job], dual.jobDual[job]);
+				requiredJobs.add(Integer.valueOf(job));
+				requiredBaseline += data.outsourcingCost[job];
+				requiredProfit += dual.jobDual[job];
 			} else {
 				freeJobs.add(Integer.valueOf(job));
 			}
 		}
 
 		ArrayList<OutsourcingLabel> labels = new ArrayList<OutsourcingLabel>();
-		labels.add(root);
+		labels.add(new OutsourcingLabel());
 		for (int idx = 0; idx < freeJobs.size(); idx++) {
 			int job = freeJobs.get(idx).intValue();
 			ArrayList<OutsourcingLabel> next = new ArrayList<OutsourcingLabel>(labels.size() * 2);
@@ -237,19 +241,22 @@ public final class RouteEnumerationEngine {
 		}
 
 		for (OutsourcingLabel label : labels) {
-			if (label.jobs.isEmpty()) {
+			if (requiredJobs.isEmpty() && label.jobs.isEmpty()) {
 				continue;
 			}
-			double cost = data.evaluateOutsourcingCost(label.baseline);
+			double baseline = requiredBaseline + label.baseline;
+			double profit = requiredProfit + label.profit;
+			double cost = data.evaluateOutsourcingCost(baseline);
 			if (Utility.isBigMValue(cost)) {
 				continue;
 			}
-			double reducedCost = cost - label.profit - dual.outsourcingColumnDual;
+			double reducedCost = cost - profit - dual.outsourcingColumnDual;
 			if (!Utility.compareLt(reducedCost, gap - REDUCED_COST_TOLERANCE)) {
 				continue;
 			}
 			result.candidates++;
-			SequenceSignature signature = new SequenceSignature(label.jobs);
+			ArrayList<Integer> jobs = mergeOutsourcingJobs(requiredJobs, label.jobs);
+			SequenceSignature signature = new SequenceSignature(jobs);
 			int existingId = lp.getOutsourcingPool().getColumnIdBySignature(signature);
 			if (existingId >= 0) {
 				if (!activeOutsourcingIds.contains(Integer.valueOf(existingId))) {
@@ -260,10 +267,38 @@ public final class RouteEnumerationEngine {
 			if (!outsourcingRunSignatures.add(signature)) {
 				continue;
 			}
-			result.newColumns.add(new TWETOutsourcingColumn(-1, label.jobs, data.n, label.baseline, cost,
+			result.newColumns.add(new TWETOutsourcingColumn(-1, jobs, data.n, baseline, cost,
 					ColumnSource.ROUTE_ENUMERATION, false));
 		}
 		return result;
+	}
+
+	private ArrayList<Integer> mergeOutsourcingJobs(List<Integer> requiredJobs, List<Integer> freeLabelJobs) {
+		ArrayList<Integer> merged = new ArrayList<Integer>(requiredJobs.size() + freeLabelJobs.size());
+		int requiredIdx = 0;
+		int freeIdx = 0;
+		while (requiredIdx < requiredJobs.size() || freeIdx < freeLabelJobs.size()) {
+			if (freeIdx >= freeLabelJobs.size()) {
+				merged.add(requiredJobs.get(requiredIdx++));
+			} else if (requiredIdx >= requiredJobs.size()) {
+				merged.add(freeLabelJobs.get(freeIdx++));
+			} else {
+				int requiredJob = requiredJobs.get(requiredIdx).intValue();
+				int freeJob = freeLabelJobs.get(freeIdx).intValue();
+				if (requiredJob < freeJob) {
+					merged.add(Integer.valueOf(requiredJob));
+					requiredIdx++;
+				} else if (freeJob < requiredJob) {
+					merged.add(Integer.valueOf(freeJob));
+					freeIdx++;
+				} else {
+					merged.add(Integer.valueOf(requiredJob));
+					requiredIdx++;
+					freeIdx++;
+				}
+			}
+		}
+		return merged;
 	}
 
 	private State buildRootState(Node node, LP.PricingDualSnapshot dual, PiecewiseLinearFunction[] jobPenalties,

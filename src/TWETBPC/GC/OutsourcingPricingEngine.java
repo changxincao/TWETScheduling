@@ -37,8 +37,10 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("Outsourcing column pricing disabled");
 		}
 		Node node = lp.getNode();
-		// 2026-06-25: required 外包 job 对所有可行 label 都是公共常数，DP 图里只保留自由可外包 job。
-		Label root = new Label();
+		// 2026-06-25: required 外包 job 是公共常数，不进入中间 label，避免每次 include 都复制它们。
+		ArrayList<Integer> requiredJobs = new ArrayList<Integer>();
+		double requiredBaseline = 0.0;
+		double requiredProfit = 0.0;
 		ArrayList<Integer> freeJobs = new ArrayList<Integer>();
 		for (int job = 1; job <= data.n; job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
@@ -49,14 +51,16 @@ public class OutsourcingPricingEngine implements PricingEngine {
 				continue;
 			}
 			if (state == Node.OUTSOURCE_REQUIRED) {
-				root = root.include(job, data.outsourcingCost[job], lp.getJobDual(job));
+				requiredJobs.add(Integer.valueOf(job));
+				requiredBaseline += data.outsourcingCost[job];
+				requiredProfit += lp.getJobDual(job);
 			} else {
 				freeJobs.add(Integer.valueOf(job));
 			}
 		}
 
 		ArrayList<Label> labels = new ArrayList<Label>();
-		labels.add(root);
+		labels.add(new Label());
 		for (int idx = 0; idx < freeJobs.size(); idx++) {
 			int job = freeJobs.get(idx).intValue();
 			ArrayList<Label> next = new ArrayList<Label>(labels.size() * 2);
@@ -70,19 +74,21 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
 		double bestReducedCost = Double.POSITIVE_INFINITY;
 		for (Label label : labels) {
-			if (label.jobs.isEmpty()) {
+			if (requiredJobs.isEmpty() && label.jobs.isEmpty()) {
 				continue;
 			}
-			double cost = data.evaluateOutsourcingCost(label.baseline);
+			double baseline = requiredBaseline + label.baseline;
+			double profit = requiredProfit + label.profit;
+			double cost = data.evaluateOutsourcingCost(baseline);
 			if (Utility.isBigMValue(cost)) {
 				continue;
 			}
-			double reducedCost = cost - label.profit - lp.getOutsourcingColumnDual();
+			double reducedCost = cost - profit - lp.getOutsourcingColumnDual();
 			if (Utility.compareLt(reducedCost, bestReducedCost)) {
 				bestReducedCost = reducedCost;
 			}
 			if (Utility.compareLt(reducedCost, -REDUCED_COST_TOLERANCE)) {
-				candidates.add(new Candidate(label.jobs, label.baseline, cost, reducedCost));
+				candidates.add(new Candidate(mergeJobs(requiredJobs, label.jobs), baseline, cost, reducedCost));
 			}
 		}
 		if (Double.isInfinite(bestReducedCost)) {
@@ -144,6 +150,34 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			}
 		}
 		return kept;
+	}
+
+	private ArrayList<Integer> mergeJobs(List<Integer> requiredJobs, List<Integer> freeLabelJobs) {
+		ArrayList<Integer> merged = new ArrayList<Integer>(requiredJobs.size() + freeLabelJobs.size());
+		int requiredIdx = 0;
+		int freeIdx = 0;
+		while (requiredIdx < requiredJobs.size() || freeIdx < freeLabelJobs.size()) {
+			if (freeIdx >= freeLabelJobs.size()) {
+				merged.add(requiredJobs.get(requiredIdx++));
+			} else if (requiredIdx >= requiredJobs.size()) {
+				merged.add(freeLabelJobs.get(freeIdx++));
+			} else {
+				int requiredJob = requiredJobs.get(requiredIdx).intValue();
+				int freeJob = freeLabelJobs.get(freeIdx).intValue();
+				if (requiredJob < freeJob) {
+					merged.add(Integer.valueOf(requiredJob));
+					requiredIdx++;
+				} else if (freeJob < requiredJob) {
+					merged.add(Integer.valueOf(freeJob));
+					freeIdx++;
+				} else {
+					merged.add(Integer.valueOf(requiredJob));
+					requiredIdx++;
+					freeIdx++;
+				}
+			}
+		}
+		return merged;
 	}
 
 	private static final class Label {

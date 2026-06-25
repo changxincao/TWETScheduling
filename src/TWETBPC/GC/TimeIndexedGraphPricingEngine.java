@@ -286,8 +286,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				predAddedJob[i] = 0;
 			}
 			dist[index(0, 0)] = 0.0;
-			for (int t = 0; t <= horizon && !timeLimitChecker.isTimeLimitReached(); t++) {
-				for (int lastJob = 0; lastJob <= n && !timeLimitChecker.isTimeLimitReached(); lastJob++) {
+			for (int t = 0; t <= horizon; t++) {
+				for (int lastJob = 0; lastJob <= n; lastJob++) {
 					int state = index(lastJob, t);
 					double base = dist[state];
 					if (!isFinite(base)) {
@@ -301,7 +301,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 							relax(state, waitTarget, 0.0, 0);
 						}
 					}
-					for (int nextJob = 1; nextJob <= n && !timeLimitChecker.isTimeLimitReached(); nextJob++) {
+					for (int nextJob = 1; nextJob <= n; nextJob++) {
 						if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]) {
 							continue;
 						}

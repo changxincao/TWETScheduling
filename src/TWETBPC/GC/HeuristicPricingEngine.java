@@ -190,7 +190,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
 
 		if (state.sequence.size() > 1) {
-			for (int pos = 0; pos < state.sequence.size() && !timeLimitChecker.isTimeLimitReached(); pos++) {
+			for (int pos = 0; pos < state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateRemove(pos, lp);
 				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
@@ -200,11 +200,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 		}
 
-		for (int job = 1; job <= data.n && !timeLimitChecker.isTimeLimitReached(); job++) {
+		for (int job = 1; job <= data.n; job++) {
 			if (state.used[job]) {
 				continue;
 			}
-			for (int pos = 0; pos <= state.sequence.size() && !timeLimitChecker.isTimeLimitReached(); pos++) {
+			for (int pos = 0; pos <= state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateAdd(job, pos, lp);
 				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
@@ -212,7 +212,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 					bestMoveReducedCost = move.reducedCost;
 				}
 			}
-			for (int pos = 0; pos < state.sequence.size() && !timeLimitChecker.isTimeLimitReached(); pos++) {
+			for (int pos = 0; pos < state.sequence.size(); pos++) {
 				TabuMove move = state.evaluateExchange(job, pos, lp);
 				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {

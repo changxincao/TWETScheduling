@@ -83,15 +83,13 @@ public class GC {
 		Utility.resetCurUpperBound(Utility.big_M);
 		initialize(lp);
 		Node node = lp.getNode();
-		while (!UL.isEmpty() && generatedColumns.size() < config.maxExactPricingColumns
-				&& !this.timeLimitChecker.isTimeLimitReached()) {
+		while (!UL.isEmpty() && generatedColumns.size() < config.maxExactPricingColumns) {
 			Label label = UL.poll();
 			if (label.isDominated) {
 				continue;
 			}
 			tryGenerateColumn(label, lp);
-			for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n
-					&& !this.timeLimitChecker.isTimeLimitReached();
+			for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n;
 					nextJob = label.reachableSet.nextSetBit(nextJob + 1)) {
 				if (!canExtend(label, nextJob, node)) {
 					continue;

@@ -53,7 +53,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		double requiredBaseline = 0.0;
 		double requiredProfit = 0.0;
 		ArrayList<Integer> freeJobs = new ArrayList<Integer>();
-		for (int job = 1; job <= data.n && !this.timeLimitChecker.isTimeLimitReached(); job++) {
+		for (int job = 1; job <= data.n; job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
 				continue;
 			}
@@ -77,9 +77,6 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			ArrayList<Label> next = new ArrayList<Label>(labels.size() * 2);
 			next.addAll(labels);
 			for (Label label : labels) {
-				if (this.timeLimitChecker.isTimeLimitReached()) {
-					break;
-				}
 				next.add(label.include(job, data.outsourcingCost[job], lp.getJobDual(job)));
 			}
 			labels = prune(next);
@@ -88,9 +85,6 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
 		double bestReducedCost = Double.POSITIVE_INFINITY;
 		for (Label label : labels) {
-			if (this.timeLimitChecker.isTimeLimitReached()) {
-				break;
-			}
 			if (requiredJobs.isEmpty() && label.jobs.isEmpty()) {
 				continue;
 			}

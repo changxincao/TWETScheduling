@@ -283,13 +283,15 @@ public class GCNGBBStyleBidirectional {
 				forwardExtend(lp);
 			}
 			diagnosticHeartbeat(lp, "forward.done", true);
-			diagnosticHeartbeat(lp, "backward.start", true);
-			while (canContinue() && !BWUL.isEmpty()) {
-				backwardExtend(lp);
+			if (!timeLimitChecker.isTimeLimitReached()) {
+				diagnosticHeartbeat(lp, "backward.start", true);
+				while (canContinue() && !BWUL.isEmpty()) {
+					backwardExtend(lp);
+				}
+				diagnosticHeartbeat(lp, "backward.done", true);
 			}
-			diagnosticHeartbeat(lp, "backward.done", true);
 		}
-		if (canContinue()) {
+		if (canContinue() && !timeLimitChecker.isTimeLimitReached()) {
 			diagnosticHeartbeat(lp, "join.compact.start", true);
 			compactAndSortActiveLabelListsForJoin();
 			diagnosticHeartbeat(lp, "join.start", true);
@@ -299,8 +301,9 @@ public class GCNGBBStyleBidirectional {
 			diagnosticHeartbeat(lp, "finalize.done", true);
 		}
 		updateMidpointProbeReuseAfterExact(lp, System.nanoTime() - exactStartNanos);
-		String completionState = midpointProbeLabelsReadyForJoin ? "probe rank0 queues exhausted"
-				: (canContinue() ? "queues exhausted" : "column cap disabled");
+		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
+				: (midpointProbeLabelsReadyForJoin ? "probe rank0 queues exhausted"
+						: (canContinue() ? "queues exhausted" : "column cap disabled"));
 		lastMessage = "GCNGBB-style bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
@@ -1224,7 +1227,7 @@ public class GCNGBBStyleBidirectional {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0 && !timeLimitChecker.isTimeLimitReached();
+		return config.maxExactPricingColumns > 0;
 	}
 
 	private void forwardExtend(LP lp) {

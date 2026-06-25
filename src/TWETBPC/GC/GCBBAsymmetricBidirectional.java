@@ -171,12 +171,13 @@ public class GCBBAsymmetricBidirectional {
 				dynamicBackwardExtend(lp);
 			}
 		}
-		if (canContinue()) {
+		if (canContinue() && !timeLimitChecker.isTimeLimitReached()) {
 			compactAndSortActiveLabelListsForJoin();
 			joinAllForwardTerminalGroups(lp);
 			finalizeGeneratedColumns(lp);
 		}
-		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
+		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
+				: (canContinue() ? "queues exhausted" : "column cap disabled");
 		lastMessage = "GCBB asymmetric bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
@@ -476,7 +477,7 @@ public class GCBBAsymmetricBidirectional {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0 && !timeLimitChecker.isTimeLimitReached();
+		return config.maxExactPricingColumns > 0;
 	}
 
 	private void dynamicForwardExtend(LP lp) {

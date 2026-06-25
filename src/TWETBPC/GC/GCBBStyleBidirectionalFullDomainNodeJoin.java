@@ -208,19 +208,22 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 			forwardExtend(lp);
 			forwardExtensionNanos += System.nanoTime() - phaseStart;
 		}
-		while (canContinue() && !BWUL.isEmpty()) {
-			long phaseStart = System.nanoTime();
-			backwardExtend(lp);
-			backwardExtensionNanos += System.nanoTime() - phaseStart;
+		if (!timeLimitChecker.isTimeLimitReached()) {
+			while (canContinue() && !BWUL.isEmpty()) {
+				long phaseStart = System.nanoTime();
+				backwardExtend(lp);
+				backwardExtensionNanos += System.nanoTime() - phaseStart;
+			}
 		}
-		if (canContinue()) {
+		if (canContinue() && !timeLimitChecker.isTimeLimitReached()) {
 			long phaseStart = System.nanoTime();
 			compactAndSortActiveLabelListsForJoin();
 			joinAllForwardTerminalGroups(lp);
 			joinPhaseNanos += System.nanoTime() - phaseStart;
 			finalizeGeneratedColumns(lp);
 		}
-		String completionState = canContinue() ? "queues exhausted" : "column cap disabled";
+		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
+				: (canContinue() ? "queues exhausted" : "column cap disabled");
 		lastMessage = "GCBB-style full-domain node-join bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
@@ -516,7 +519,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0 && !timeLimitChecker.isTimeLimitReached();
+		return config.maxExactPricingColumns > 0;
 	}
 
 	private void forwardExtend(LP lp) {

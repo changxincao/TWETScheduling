@@ -38,7 +38,7 @@ public interface PricingEngine {
 		if (timeLimitChecker != null && timeLimitChecker.isTimeLimitReached()) {
 			return PricingResult.noImprovement("Time limit reached before repair pricing");
 		}
-		return findFeasible(lp);
+		return price(lp, timeLimitChecker);
 	}
 
 	/**

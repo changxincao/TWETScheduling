@@ -12,6 +12,8 @@ import Common.Utility;
 import HEU.SchedulerForReleaseNoWait;
 
 public class Data {
+	private static final double OUTSOURCING_TARIFF_DOMAIN_MIN_MARGIN = 1.0;
+
 	public double[][] backwardSetupCostAdvantage;// 2026-05-22: B^b_ij 缓存到 Data，避免双向 pricing 每轮重新扫前驱 h
 	public Configure configure;
 	public static int scale = 1;
@@ -568,6 +570,7 @@ public class Data {
 			}
 			line = nextNonEmptyLine(reader);
 		}
+		ensureOutsourcingTariffDomainCoverage();
 	}
 
 	private void fillSetupRow(int row, String[] tokens) {
@@ -617,12 +620,33 @@ public class Data {
 
 	private void ensureOutsourcingCostFunction() {
 		if (outsourcingCostFunction != null) {
+			ensureOutsourcingTariffDomainCoverage();
 			return;
 		}
-		double maxBaseline = Math.max(1.0, getMaxOutsourcingBaseline());
+		double maxBaseline = getRequiredOutsourcingTariffDomainEnd();
 		outsourcingCostFunction = new PiecewiseLinearFunction(0, maxBaseline);
 		// 2026-05-16: 没有给定折扣函数时使用 G(q)=q，兼容旧数据和旧逻辑。
 		outsourcingCostFunction.addSegment(0, maxBaseline, 1, 0);
+	}
+
+	private void ensureOutsourcingTariffDomainCoverage() {
+		if (outsourcingCostFunction == null || outsourcingCostFunction.tail == null) {
+			return;
+		}
+		double requiredEnd = getRequiredOutsourcingTariffDomainEnd();
+		if (Utility.compareGe(outsourcingCostFunction.tail.end, requiredEnd)) {
+			return;
+		}
+		// 2026-06-25: 算法默认 tariff 覆盖所有可能外包总量。若输入最后一段右端偏短，
+		// 直接沿用最后一段直线外推到 sum b_j 的安全余量，避免各个 pricing 热路径处理定义域兜底。
+		outsourcingCostFunction.tail.end = requiredEnd;
+		outsourcingCostFunction.domainEnd = Math.max(outsourcingCostFunction.domainEnd, requiredEnd);
+	}
+
+	private double getRequiredOutsourcingTariffDomainEnd() {
+		double maxBaseline = Math.max(1.0, getMaxOutsourcingBaseline());
+		double margin = Math.max(OUTSOURCING_TARIFF_DOMAIN_MIN_MARGIN, Math.abs(maxBaseline) * 1e-6);
+		return maxBaseline + margin;
 	}
 
 	public double getMaxOutsourcingBaseline() {
@@ -645,7 +669,10 @@ public class Data {
 		ensureOutsourcingCostFunction();
 		double q = Math.max(0, baselineTotal);
 		if (Utility.compareGt(q, outsourcingCostFunction.tail.end)) {
-			return Utility.big_M;
+			ensureOutsourcingTariffDomainCoverage();
+			if (Utility.compareGt(q, outsourcingCostFunction.tail.end)) {
+				return Utility.big_M;
+			}
 		}
 		return outsourcingCostFunction.evaluate(q);
 	}

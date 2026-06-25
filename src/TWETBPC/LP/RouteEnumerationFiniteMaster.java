@@ -117,8 +117,8 @@ public final class RouteEnumerationFiniteMaster {
 		buildMachine(cplex, lp, x);
 		buildArcBranches(cplex, lp, columnIds, x);
 		buildAdjacencyBranches(cplex, lp, columnIds, x);
-		buildOutsourcingMembershipBranches(cplex, lp, outsourcingColumnIds, w, y);
 		if (lp.isColumnizedOutsourcing()) {
+			buildOutsourcingMembershipBranches(cplex, lp, outsourcingColumnIds, w);
 			buildOutsourcingColumnCount(cplex, w);
 		} else {
 			buildTariff(cplex, lp, y, z, baseline, segments);
@@ -202,7 +202,7 @@ public final class RouteEnumerationFiniteMaster {
 	}
 
 	private void buildOutsourcingMembershipBranches(IloCplex cplex, LP lp, List<Integer> outsourcingColumnIds,
-			IloIntVar[] w, IloIntVar[] y) throws IloException {
+			IloIntVar[] w) throws IloException {
 		Node node = lp.getNode();
 		for (int job = 1; job <= data.n; job++) {
 			byte state = node.getOutsourcingJobState(job);
@@ -210,16 +210,12 @@ public final class RouteEnumerationFiniteMaster {
 				continue;
 			}
 			IloLinearNumExpr expr = cplex.linearNumExpr();
-			if (lp.isColumnizedOutsourcing()) {
-				for (int idx = 0; idx < outsourcingColumnIds.size(); idx++) {
-					TWETOutsourcingColumn column =
-							lp.getOutsourcingPool().getColumn(outsourcingColumnIds.get(idx).intValue());
-					if (column.containsJob(job)) {
-						expr.addTerm(1.0, w[idx]);
-					}
+			for (int idx = 0; idx < outsourcingColumnIds.size(); idx++) {
+				TWETOutsourcingColumn column =
+						lp.getOutsourcingPool().getColumn(outsourcingColumnIds.get(idx).intValue());
+				if (column.containsJob(job)) {
+					expr.addTerm(1.0, w[idx]);
 				}
-			} else {
-				expr.addTerm(1.0, y[job]);
 			}
 			if (state == Node.OUTSOURCE_REQUIRED) {
 				cplex.addEq(expr, 1.0, "enum_outRequired_" + job);

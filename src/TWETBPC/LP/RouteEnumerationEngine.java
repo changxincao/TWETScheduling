@@ -12,7 +12,6 @@ import Common.PiecewiseLinearFunction.Direction;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
-import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETOutsourcingColumn;
@@ -31,12 +30,10 @@ public final class RouteEnumerationEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
-	private final TWETColumnEvaluator evaluator;
 
 	public RouteEnumerationEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	public RouteEnumerationResult enumerate(LP lp, double incumbentCost, double nodeLowerBound,
@@ -393,27 +390,34 @@ public final class RouteEnumerationEngine {
 	private ColumnCheck checkColumn(LP lp, List<Integer> sequence, double reducedCost,
 			LP.PricingDualSnapshot dual, double gap, HashSet<Integer> activeIds,
 			HashSet<SequenceSignature> runSignatures) {
+		if (!Utility.compareLt(reducedCost, gap - REDUCED_COST_TOLERANCE)) {
+			return ColumnCheck.newColumn(false, Double.NaN);
+		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		int existingId = lp.getPool().getColumnIdBySignature(signature);
 		if (existingId >= 0) {
-			TWETColumn existing = lp.getPool().getColumn(existingId);
-			double existingReducedCost = lp.computeReducedCost(existing, dual);
-			boolean negativeEnough = existingReducedCost < gap - REDUCED_COST_TOLERANCE;
 			if (activeIds.contains(Integer.valueOf(existingId))) {
-				return ColumnCheck.activeDuplicate(negativeEnough);
+				return ColumnCheck.activeDuplicate(true);
 			}
-			return ColumnCheck.existing(negativeEnough, existingId);
-		}
-		if (!Utility.compareLt(reducedCost, gap - REDUCED_COST_TOLERANCE)) {
-			return ColumnCheck.newColumn(false, Double.NaN);
+			return ColumnCheck.existing(true, existingId);
 		}
 		if (!runSignatures.add(signature)) {
 			return ColumnCheck.runDuplicate();
 		}
-		double cost = evaluator.evaluate(sequence);
-		TWETColumn column = new TWETColumn(-1, sequence, data.n, cost, ColumnSource.ROUTE_ENUMERATION, false);
-		double checkedReducedCost = lp.computeReducedCost(column, dual);
-		return ColumnCheck.newColumn(checkedReducedCost < gap - REDUCED_COST_TOLERANCE, cost);
+		return ColumnCheck.newColumn(true, objectiveCostFromReducedCost(sequence, reducedCost, dual, lp.getNode()));
+	}
+
+	private double objectiveCostFromReducedCost(List<Integer> sequence, double reducedCost,
+			LP.PricingDualSnapshot dual, Node node) {
+		double cost = reducedCost + dual.machineDual;
+		int prev = 0;
+		for (int job : sequence) {
+			cost += dual.jobDual[job];
+			cost += dual.arcDual[prev][job];
+			prev = job;
+		}
+		cost += dual.arcDual[prev][node.sinkId()];
+		return cost;
 	}
 
 	private boolean canUseArc(Node node, int from, int to) {

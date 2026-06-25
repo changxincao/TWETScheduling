@@ -49,7 +49,19 @@ public class OutsourcingPool {
 	}
 
 	public int addColumn(TWETOutsourcingColumn column) {
-		return addColumn(column.getJobs(), column.getSource(), column.isSeedColumn());
+		SequenceSignature signature = column.getSignature();
+		Integer existing = signatureToId.get(signature);
+		if (existing != null) {
+			return existing.intValue();
+		}
+		int id = columns.size();
+		// 2026-06-25: pricing / route enumeration 已经按同一 jobs 集合算出 baseline 与 tariff cost，
+		// 这里只分配全局 id，不再重新扫描 job 和重算 G(baseline)。
+		TWETOutsourcingColumn stored = new TWETOutsourcingColumn(id, column.getJobs(), data.n, column.getBaseline(),
+				column.getCost(), column.getSource(), column.isSeedColumn());
+		columns.add(stored);
+		signatureToId.put(signature, Integer.valueOf(id));
+		return id;
 	}
 
 	/** 2026-06-24: route enumeration 用于区分外包列是否已经在全局池中存在。 */

@@ -307,6 +307,27 @@ public class GCBBFullDomainComparisonTest {
 		config.dualBoundPruningTolerance = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualBoundPruningTolerance",
 				Double.toString(config.dualBoundPruningTolerance)));
+		config.enableRouteEnumeration = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.routeEnumeration",
+				Boolean.toString(config.enableRouteEnumeration)));
+		config.routeEnumerationAbsoluteGapThreshold = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.routeEnumerationGapThreshold",
+				Double.toString(config.routeEnumerationAbsoluteGapThreshold)));
+		config.routeEnumerationColumnLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.routeEnumerationColumnLimit",
+				config.routeEnumerationColumnLimit);
+		config.routeEnumerationStateLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.routeEnumerationStateLimit",
+				config.routeEnumerationStateLimit);
+		config.routeEnumerationUseCompletionBound = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.routeEnumerationUseCompletionBound",
+				Boolean.toString(config.routeEnumerationUseCompletionBound)));
+		config.routeEnumerationUseExactOutsourcingSuffixBound = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.routeEnumerationUseExactOutsourcingSuffixBound",
+				Boolean.toString(config.routeEnumerationUseExactOutsourcingSuffixBound)));
+		config.routeEnumerationMipTimeLimitSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.routeEnumerationMipTimeLimitSeconds",
+				Double.toString(config.routeEnumerationMipTimeLimitSeconds)));
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

@@ -307,7 +307,7 @@ public final class RouteEnumerationEngine {
 		double profit = requiredProfit + label.profit;
 		double currentCost = data.evaluateOutsourcingCost(baseline);
 		if (Utility.isBigMValue(currentCost)) {
-			return true;
+			throw new IllegalStateException("Outsourcing tariff does not cover baseline " + baseline);
 		}
 		double lowerBound = currentCost - profit - dual.outsourcingColumnDual;
 		for (int idx = nextIndex; idx < freeJobs.size(); idx++) {
@@ -317,7 +317,8 @@ public final class RouteEnumerationEngine {
 			double before = data.evaluateOutsourcingCost(marginalStart);
 			double after = data.evaluateOutsourcingCost(marginalStart + data.outsourcingCost[job]);
 			if (Utility.isBigMValue(before) || Utility.isBigMValue(after)) {
-				return false;
+				throw new IllegalStateException("Outsourcing tariff does not cover suffix baseline "
+						+ (marginalStart + data.outsourcingCost[job]));
 			}
 			// 2026-06-25: G 单调且边际斜率不增时，把前序剩余 job 全放在 job 前面得到安全的最小边际成本。
 			double optimisticContribution = after - before - dual.jobDual[job];

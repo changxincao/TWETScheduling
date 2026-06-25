@@ -122,22 +122,31 @@ public class OutsourcingPricingEngine implements PricingEngine {
 	}
 
 	private ArrayList<Label> prune(ArrayList<Label> labels) {
-		ArrayList<Label> kept = new ArrayList<Label>();
-		for (Label label : labels) {
-			boolean dominated = false;
-			for (int i = 0; i < kept.size(); i++) {
-				Label existing = kept.get(i);
-				if (existing.dominates(label)) {
-					dominated = true;
-					break;
+		// 2026-06-25: dominance 为 baseline 越小、profit 越大越好；排序后只需保留 profit 前沿。
+		Collections.sort(labels, new Comparator<Label>() {
+			@Override
+			public int compare(Label a, Label b) {
+				if (Utility.compareLt(a.baseline, b.baseline)) {
+					return -1;
 				}
-				if (label.dominates(existing)) {
-					kept.remove(i);
-					i--;
+				if (Utility.compareGt(a.baseline, b.baseline)) {
+					return 1;
 				}
+				if (Utility.compareGt(a.profit, b.profit)) {
+					return -1;
+				}
+				if (Utility.compareLt(a.profit, b.profit)) {
+					return 1;
+				}
+				return Integer.compare(a.jobs.size(), b.jobs.size());
 			}
-			if (!dominated) {
+		});
+		ArrayList<Label> kept = new ArrayList<Label>();
+		double bestProfit = Double.NEGATIVE_INFINITY;
+		for (Label label : labels) {
+			if (Utility.compareGt(label.profit, bestProfit)) {
 				kept.add(label);
+				bestProfit = label.profit;
 			}
 		}
 		return kept;
@@ -166,9 +175,6 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			return new Label(nextJobs, baseline + baselineDelta, profit + profitDelta);
 		}
 
-		boolean dominates(Label other) {
-			return Utility.compareLe(baseline, other.baseline) && Utility.compareGe(profit, other.profit);
-		}
 	}
 
 	private static final class Candidate {

@@ -49,24 +49,20 @@ public final class RestrictedMasterIntegerHeuristic {
 	}
 
 	public Result solve(LP lp) {
-		return solve(lp, Double.POSITIVE_INFINITY);
-	}
-
-	public Result solve(LP lp, double globalRemainingTimeSeconds) {
 		if (lp == null || lp.getNode() == null || lp.getRestrictedColumnIds().isEmpty()) {
 			return Result.notSolved("restricted integer heuristic skipped: empty LP");
 		}
 		long start = System.nanoTime();
 		try {
 			if (lp.isColumnizedOutsourcing()) {
-				return solveColumnizedOutsourcing(lp, start, globalRemainingTimeSeconds);
+				return solveColumnizedOutsourcing(lp, start);
 			}
 			String mode = config.restrictedMasterIntegerHeuristicMode;
 			if (MODE_PARTITION.equalsIgnoreCase(mode)) {
-				return solvePartition(lp, lp.getRestrictedColumnIds(), "partition", start, globalRemainingTimeSeconds);
+				return solvePartition(lp, lp.getRestrictedColumnIds(), "partition", start);
 			}
 			if (MODE_COVER_REPAIR.equalsIgnoreCase(mode)) {
-				return solveCoverRepair(lp, start, globalRemainingTimeSeconds);
+				return solveCoverRepair(lp, start);
 			}
 			return Result.notSolved("restricted integer heuristic skipped: unknown mode " + mode,
 					System.nanoTime() - start);
@@ -76,7 +72,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		}
 	}
 
-	private Result solveColumnizedOutsourcing(LP lp, long start, double globalRemainingTimeSeconds) throws IloException {
+	private Result solveColumnizedOutsourcing(LP lp, long start) throws IloException {
 		long selectStart = System.nanoTime();
 		ArrayList<Integer> screenedInternal = selectCoverRepairColumns(lp);
 		ArrayList<Integer> outsourcingIds = new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds());
@@ -84,7 +80,7 @@ public final class RestrictedMasterIntegerHeuristic {
 
 		long coverStart = System.nanoTime();
 		Attempt covering = solveColumnizedOnce(lp, screenedInternal, outsourcingIds, false,
-				"columnized_covering", start, globalRemainingTimeSeconds);
+				"columnized_covering");
 		long coverNanos = System.nanoTime() - coverStart;
 		long elapsed = System.nanoTime() - start;
 		if (!covering.solved) {
@@ -109,7 +105,7 @@ public final class RestrictedMasterIntegerHeuristic {
 
 		long partitionStart = System.nanoTime();
 		Attempt partition = solveColumnizedOnce(lp, new ArrayList<Integer>(finalInternalIds), outsourcingIds,
-				true, "columnized_partition", start, globalRemainingTimeSeconds);
+				true, "columnized_partition");
 		long partitionNanos = System.nanoTime() - partitionStart;
 		elapsed = System.nanoTime() - start;
 		String prefix = "restricted integer heuristic columnized covering=" + covering.status + " "
@@ -127,16 +123,13 @@ public final class RestrictedMasterIntegerHeuristic {
 	}
 
 	private Attempt solveColumnizedOnce(LP lp, List<Integer> internalIds, List<Integer> outsourcingIds,
-			boolean exactCover, String label, long heuristicStartNanos, double globalRemainingTimeSeconds)
-			throws IloException {
+			boolean exactCover, String label) throws IloException {
 		IloCplex cplex = null;
 		try {
 			cplex = new IloCplex();
 			cplex.setParam(IloCplex.Param.Threads, 1);
 			cplex.setOut(config.diagnosticRestrictedIntegerMipLog ? System.out : null);
-			if (!applyTimeLimit(cplex, heuristicStartNanos, globalRemainingTimeSeconds)) {
-				return Attempt.notSolved(label, "TIME_LIMIT before solve");
-			}
+			applyTimeLimit(cplex);
 			IloIntVar[] x = new IloIntVar[internalIds.size()];
 			IloIntVar[] w = new IloIntVar[outsourcingIds.size()];
 			IloLinearNumExpr obj = cplex.linearNumExpr();
@@ -212,12 +205,7 @@ public final class RestrictedMasterIntegerHeuristic {
 
 	private Result solvePartition(LP lp, List<Integer> columnIds, String label, long start)
 			throws IloException {
-		return solvePartition(lp, columnIds, label, start, Double.POSITIVE_INFINITY);
-	}
-
-	private Result solvePartition(LP lp, List<Integer> columnIds, String label, long start,
-			double globalRemainingTimeSeconds) throws IloException {
-		Attempt attempt = solveOnce(lp, columnIds, true, label, start, globalRemainingTimeSeconds);
+		Attempt attempt = solveOnce(lp, columnIds, true, label);
 		long elapsed = System.nanoTime() - start;
 		if (!attempt.solved) {
 			return Result.notSolved("restricted integer heuristic " + label + " not solved: " + attempt.status,
@@ -231,12 +219,12 @@ public final class RestrictedMasterIntegerHeuristic {
 				elapsed);
 	}
 
-	private Result solveCoverRepair(LP lp, long start, double globalRemainingTimeSeconds) throws IloException {
+	private Result solveCoverRepair(LP lp, long start) throws IloException {
 		long selectStart = System.nanoTime();
 		ArrayList<Integer> screened = selectCoverRepairColumns(lp);
 		long selectNanos = System.nanoTime() - selectStart;
 		long coverStart = System.nanoTime();
-		Attempt covering = solveOnce(lp, screened, false, "coverRepair_covering", start, globalRemainingTimeSeconds);
+		Attempt covering = solveOnce(lp, screened, false, "coverRepair_covering");
 		long coverNanos = System.nanoTime() - coverStart;
 		long elapsed = System.nanoTime() - start;
 		if (!covering.solved) {
@@ -258,8 +246,7 @@ public final class RestrictedMasterIntegerHeuristic {
 		finalColumnIds.addAll(repair.repairColumnIds);
 
 		long partitionStart = System.nanoTime();
-		Attempt partition = solveOnce(lp, new ArrayList<Integer>(finalColumnIds), true, "coverRepair_partition",
-				start, globalRemainingTimeSeconds);
+		Attempt partition = solveOnce(lp, new ArrayList<Integer>(finalColumnIds), true, "coverRepair_partition");
 		long partitionNanos = System.nanoTime() - partitionStart;
 		elapsed = System.nanoTime() - start;
 		String prefix = "restricted integer heuristic coverRepair covering=" + covering.status + " "
@@ -286,21 +273,11 @@ public final class RestrictedMasterIntegerHeuristic {
 		return String.format(Locale.US, "%.3f", nanos / 1000000.0);
 	}
 
-	private boolean applyTimeLimit(IloCplex cplex, long heuristicStartNanos, double globalRemainingTimeSeconds)
-			throws IloException {
+	private void applyTimeLimit(IloCplex cplex) throws IloException {
 		double limit = effectiveTimeLimitSeconds();
-		if (Double.isFinite(globalRemainingTimeSeconds)) {
-			double elapsedSeconds = (System.nanoTime() - heuristicStartNanos) / 1_000_000_000.0;
-			double remainingSeconds = Math.max(0.0, globalRemainingTimeSeconds - elapsedSeconds);
-			if (Utility.compareLe(remainingSeconds, 0.0)) {
-				return false;
-			}
-			limit = Utility.compareGt(limit, 0.0) ? Math.min(limit, remainingSeconds) : remainingSeconds;
-		}
 		if (Utility.compareGt(limit, 0.0)) {
 			cplex.setParam(IloCplex.Param.TimeLimit, limit);
 		}
-		return true;
 	}
 
 	private double effectiveTimeLimitSeconds() {
@@ -317,12 +294,6 @@ public final class RestrictedMasterIntegerHeuristic {
 
 	private Attempt solveOnce(LP lp, List<Integer> columnIds, boolean exactCover, String label)
 			throws IloException {
-		return solveOnce(lp, columnIds, exactCover, label, System.nanoTime(), Double.POSITIVE_INFINITY);
-	}
-
-	private Attempt solveOnce(LP lp, List<Integer> columnIds, boolean exactCover, String label,
-			long heuristicStartNanos, double globalRemainingTimeSeconds)
-			throws IloException {
 		IloCplex cplex = null;
 		try {
 			cplex = new IloCplex();
@@ -334,9 +305,7 @@ public final class RestrictedMasterIntegerHeuristic {
 			} else {
 				cplex.setOut(null);
 			}
-			if (!applyTimeLimit(cplex, heuristicStartNanos, globalRemainingTimeSeconds)) {
-				return Attempt.notSolved(label, "TIME_LIMIT before solve");
-			}
+			applyTimeLimit(cplex);
 			Model model = buildModel(cplex, lp, columnIds, exactCover);
 			boolean solved = cplex.solve();
 			if (!solved) {

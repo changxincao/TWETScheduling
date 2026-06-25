@@ -24,6 +24,7 @@ import Common.PiecewiseLinearFunction.TrimResult;
 import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -77,6 +78,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
 	private final HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode;
 
@@ -454,6 +456,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
+		return solve(lp, TimeLimitChecker.NONE);
+	}
+
+	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		initializeNgNeighborhoods(lp);
 		ngDssrRoundsExecuted = 0;
 		ngDssrTotalNgSetUpdates = 0;
@@ -467,7 +474,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrReusableEarliestSourceCompletion = Double.NaN;
 		ngDssrReusableActiveColumnSignatures = null;
 
-		for (ngDssrRound = 1; ; ngDssrRound++) {
+		for (ngDssrRound = 1; !this.timeLimitChecker.isTimeLimitReached(); ngDssrRound++) {
 			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
 			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
 			ngDssrRoundsExecuted = ngDssrRound;
@@ -487,6 +494,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 						"NG-DSSR found non-elementary negative routes but ng-set did not change");
 			}
 		}
+		appendNgDssrSummary("time limit reached");
+		return new ArrayList<TWETColumn>();
 	}
 
 	private ArrayList<TWETColumn> solveRelaxedRound(LP lp) {
@@ -1823,7 +1832,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0;
+		return config.maxExactPricingColumns > 0 && !timeLimitChecker.isTimeLimitReached();
 	}
 
 	private void forwardExtend(LP lp) {

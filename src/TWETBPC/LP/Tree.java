@@ -10,6 +10,7 @@ import Output.BPCTraceSink;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETSolveResult;
 import TWETBPC.TWETSolveStatus;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.BP.BranchResult;
 import TWETBPC.BP.Brancher;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
@@ -57,6 +58,13 @@ public class Tree {
 
 	public TWETSolveResult solve() {
 		long solveStartNanos = System.nanoTime();
+		TimeLimitChecker timeLimitChecker = new TimeLimitChecker() {
+			@Override
+			public boolean isTimeLimitReached() {
+				return Tree.this.isSolveTimeLimitReached(solveStartNanos);
+			}
+		};
+		pc.setTimeLimitChecker(timeLimitChecker);
 		heartbeat(null, "initialColumnBuilder.start");
 		InitialColumnBundle initial = initialColumnBuilder.build();
 		heartbeat(null, "initialColumnBuilder.done");
@@ -97,6 +105,11 @@ public class Tree {
 			heartbeat(node, "pc.solve.start");
 			TWETMasterSolution solution = pc.solve(lp, incumbentCost);
 
+			if (isSolveTimeLimitReached(solveStartNanos)) {
+				traceSink.onNodeClosed(node, "time_limit", queue.size());
+				stoppedByTimeLimit = true;
+				break;
+			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				traceSink.onNodeClosed(node, "infeasible_master", queue.size());
 				continue;

@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import TWETBPC.LP.LP;
+import TWETBPC.TimeLimitChecker;
 
 /**
  * 定价器接口。
@@ -18,12 +19,26 @@ public interface PricingEngine {
 	 */
 	PricingResult price(LP lp);
 
+	default PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
+		if (timeLimitChecker != null && timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before pricing");
+		}
+		return price(lp);
+	}
+
 	/**
 	 * 2026-05-18: 分支子节点 RMP 暂时不可行时的补列入口。
 	 * 默认复用普通 pricing；如果后续 required arc 节点需要更强的定向搜索，可以在具体定价器中覆盖。
 	 */
 	default PricingResult findFeasible(LP lp) {
 		return price(lp);
+	}
+
+	default PricingResult findFeasible(LP lp, TimeLimitChecker timeLimitChecker) {
+		if (timeLimitChecker != null && timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before repair pricing");
+		}
+		return findFeasible(lp);
 	}
 
 	/**

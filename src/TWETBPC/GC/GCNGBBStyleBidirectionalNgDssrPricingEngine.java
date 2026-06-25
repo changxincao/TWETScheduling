@@ -5,6 +5,7 @@ import java.util.HashMap;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
@@ -29,13 +30,18 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
 		lastReusableSubtreeArcEliminationBounds = null;
 		if (!config.enableBidirectionalPricing || !config.useGCNGBBStyleNgDssrPricing) {
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR bidirectional pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
 				midpointProbeReuseByNode);
-		ArrayList<TWETColumn> columns = gc.solve(lp);
+		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
 			return PricingResult.noImprovement(gc.getLastMessage())

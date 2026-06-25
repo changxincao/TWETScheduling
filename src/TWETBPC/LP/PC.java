@@ -6,6 +6,7 @@ import java.util.List;
 
 import Output.BPCTraceSink;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.CUT.CutGenerationResult;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
@@ -32,6 +33,7 @@ public class PC {
 	private double incumbentForDualBoundPruning;
 	private double lastObservedDualBound;
 	private boolean lastNodePrunedByDualBound;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
 	public PC(TWETBPCConfig config, List<PricingEngine> pricingEngines, List<CutGenerator> cutGenerators,
 			BPCTraceSink traceSink) {
@@ -39,6 +41,10 @@ public class PC {
 		this.pricingEngines = pricingEngines;
 		this.cutGenerators = cutGenerators;
 		this.traceSink = traceSink;
+	}
+
+	public void setTimeLimitChecker(TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 	}
 
 	public TWETMasterSolution solve(LP lp) {
@@ -53,8 +59,14 @@ public class PC {
 		// 2026-05-23: 以下计时只写入 trace，用于拆分 RMP、pricing 和 cut 的耗时，
 		// 不参与列选择、剪枝或对偶计算，避免改变 BPC 求解流程。
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "initial");
+		if (isTimeLimitReached()) {
+			return solution;
+		}
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 			solution = repairInfeasibleMaster(lp);
+			if (isTimeLimitReached()) {
+				return solution;
+			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return solution;
 			}
@@ -64,8 +76,14 @@ public class PC {
 			lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 					config.branchSeedReducedCostAllowance);
 			solution = solveRelaxationTimed(lp, "after_column_filter");
+			if (isTimeLimitReached()) {
+				return solution;
+			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				solution = repairInfeasibleMaster(lp);
+				if (isTimeLimitReached()) {
+					return solution;
+				}
 				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 					return solution;
 				}
@@ -73,6 +91,9 @@ public class PC {
 		}
 
 		solution = solvePricingLoop(lp, solution);
+		if (isTimeLimitReached()) {
+			return solution;
+		}
 
 		// 2026-06-13: 对齐旧 VRP PC.Solve()：pricing 收敛后若 LP 已经整数，不再做 cut separation。
 		if (solution.isInteger()) {
@@ -80,9 +101,15 @@ public class PC {
 		}
 
 		for (int round = 0; round < config.maxCutRounds; round++) {
+			if (isTimeLimitReached()) {
+				break;
+			}
 			ArrayList<Integer> newCutIds = new ArrayList<Integer>();
 			boolean separated = false;
 			for (CutGenerator generator : cutGenerators) {
+				if (isTimeLimitReached()) {
+					break;
+				}
 				long cutStart = System.nanoTime();
 				CutGenerationResult result = generator.separate(lp);
 				long cutNanos = System.nanoTime() - cutStart;
@@ -103,11 +130,17 @@ public class PC {
 			lastReusableSubtreeArcEliminationBounds = null;
 			lp.addCuts(newCutIds);
 			solution = solveRelaxationTimed(lp, "after_cut");
+			if (isTimeLimitReached()) {
+				return solution;
+			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return solution;
 			}
 			// 2026-06-13: 新 cut 改变 dual 和 reduced cost，必须重新定价闭合；否则 SRI dual 已读出但没有进入 pricing。
 			solution = solvePricingLoop(lp, solution);
+			if (isTimeLimitReached()) {
+				return solution;
+			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE || solution.isInteger()) {
 				return solution;
 			}
@@ -128,6 +161,10 @@ public class PC {
 		return lastNodePrunedByDualBound;
 	}
 
+	private boolean isTimeLimitReached() {
+		return timeLimitChecker != null && timeLimitChecker.isTimeLimitReached();
+	}
+
 	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
 		lp.clearPricingDualOverride();
 		if (config.enableDualStabilization && !lp.isFeasibilityRepairMode()
@@ -139,9 +176,9 @@ public class PC {
 
 	private TWETMasterSolution solvePricingLoopWithTrueDuals(LP lp, TWETMasterSolution currentSolution) {
 		TWETMasterSolution solution = currentSolution;
-		while (true) {
+		while (!isTimeLimitReached()) {
 			boolean addedColumn = false;
-			for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
+			for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
 				PricingEngine engine = pricingEngines.get(engineIndex);
 				HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
 				HashSet<Integer> activeOutsourcingColumnIds = new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
@@ -165,6 +202,9 @@ public class PC {
 				resetFollowingPricingEngines(engineIndex + 1);
 				lastReusableSubtreeArcEliminationBounds = null;
 				solution = resolveCurrentModelTimed(lp, "after_pricing");
+				if (isTimeLimitReached()) {
+					return solution;
+				}
 				addedColumn = true;
 				break;
 			}
@@ -178,9 +218,12 @@ public class PC {
 	private TWETMasterSolution solvePricingLoopWithDualStabilization(LP lp, TWETMasterSolution currentSolution) {
 		TWETMasterSolution solution = currentSolution;
 		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals());
-		while (true) {
+		while (!isTimeLimitReached()) {
 			LP.PricingDualSnapshot outDual = lp.captureTruePricingDuals();
 			PricingPassResult stabilizedPass = runStabilizedPricingSequence(lp, dualState, outDual);
+			if (isTimeLimitReached()) {
+				return solution;
+			}
 			if (stabilizedPass.dualBoundPruned) {
 				return solution;
 			}
@@ -188,9 +231,15 @@ public class PC {
 			if (stabilizedPass.addedColumns > 0) {
 				dualState.observeAccepted(outDual, stabilizedPass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
+				if (isTimeLimitReached()) {
+					return solution;
+				}
 				continue;
 			}
 			PricingPassResult truePass = runPricingPass(lp, "true", true, null, Double.NaN, outDual);
+			if (isTimeLimitReached()) {
+				return solution;
+			}
 			if (truePass.dualBoundPruned) {
 				return solution;
 			}
@@ -198,6 +247,9 @@ public class PC {
 			if (truePass.addedColumns > 0) {
 				dualState.observeAccepted(outDual, truePass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
+				if (isTimeLimitReached()) {
+					return solution;
+				}
 				continue;
 			}
 			break;
@@ -212,7 +264,7 @@ public class PC {
 		double outObjective = lp.getLastSolution() == null ? Double.NaN : lp.getLastSolution().getObjectiveValue();
 		int attempt = 0;
 		PricingPassResult lastNoColumnPass = PricingPassResult.EMPTY;
-		while (true) {
+		while (!isTimeLimitReached()) {
 			double trialAlpha = attempt == 0 ? baseAlpha : Math.max(0.0, 1.0 - (attempt + 1) * (1.0 - baseAlpha));
 			if (trialAlpha <= 0.0) {
 				// 2026-06-23: alpha=0 is the true-dual pass. Do not run it here;
@@ -236,6 +288,7 @@ public class PC {
 			lastNoColumnPass = pass;
 			attempt++;
 		}
+		return lastNoColumnPass;
 	}
 
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds) {
@@ -251,7 +304,7 @@ public class PC {
 			LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride,
 			LP.PricingDualSnapshot separationDual) {
 		PricingPassResult bestObservedEmptyPass = PricingPassResult.EMPTY;
-		for (int engineIndex = 0; engineIndex < pricingEngines.size(); engineIndex++) {
+		for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
 			PricingEngine engine = pricingEngines.get(engineIndex);
 			HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
 			HashSet<Integer> activeOutsourcingColumnIds =
@@ -514,20 +567,25 @@ public class PC {
 		// slack 产生的 dual 用于引导启发式和精确定价器补列，补到 slack=0 后再回到正常 RMP。
 		lp.setFeasibilityRepairMode(true);
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "repair_slack_initial");
+		if (isTimeLimitReached()) {
+			lp.setFeasibilityRepairMode(false);
+			return solution;
+		}
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 			lp.setFeasibilityRepairMode(false);
 			return solution;
 		}
 
 		int generatedForRepair = 0;
-		while (!lp.isNoSlack() && generatedForRepair < config.maxBranchRepairColumns) {
+		while (!lp.isNoSlack() && generatedForRepair < config.maxBranchRepairColumns && !isTimeLimitReached()) {
 			boolean addedInThisPass = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size()
-					&& generatedForRepair < config.maxBranchRepairColumns; engineIndex++) {
+					&& generatedForRepair < config.maxBranchRepairColumns && !isTimeLimitReached(); engineIndex++) {
 				PricingEngine engine = pricingEngines.get(engineIndex);
 				boolean addedByThisEngine = false;
 				boolean keepCurrentEngine = true;
-				while (keepCurrentEngine && generatedForRepair < config.maxBranchRepairColumns) {
+				while (keepCurrentEngine && generatedForRepair < config.maxBranchRepairColumns
+						&& !isTimeLimitReached()) {
 					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
 					HashSet<Integer> activeOutsourcingColumnIds =
 							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
@@ -545,6 +603,10 @@ public class PC {
 					addedInThisPass = true;
 					addedByThisEngine = true;
 					solution = resolveCurrentModelTimed(lp, "repair_after_pricing");
+					if (isTimeLimitReached()) {
+						lp.setFeasibilityRepairMode(false);
+						return solution;
+					}
 					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 						lp.setFeasibilityRepairMode(false);
 						return solution;
@@ -588,6 +650,9 @@ public class PC {
 			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
 			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
 		GeneratedColumnIds generated = new GeneratedColumnIds();
+		if (isTimeLimitReached()) {
+			return generated;
+		}
 		boolean filterByAcceptanceDual = acceptanceDual != null;
 		LP.PricingDualSnapshot reducedCostDual = acceptanceDual;
 		boolean observeDualBound = shouldObserveDualBound(lp, engine, repairMode, dualBoundObjectiveOverride);
@@ -597,8 +662,17 @@ public class PC {
 		String modeSuffix = dualModeName == null || dualModeName.length() == 0 ? "" : "." + dualModeName;
 		heartbeat(lp, (repairMode ? "pricing.repair." : "pricing.") + engine.getName() + modeSuffix + ".start");
 		long pricingStart = System.nanoTime();
-		PricingResult result = repairMode ? engine.findFeasible(lp) : engine.price(lp);
+		PricingResult result = repairMode ? engine.findFeasible(lp, timeLimitChecker) : engine.price(lp, timeLimitChecker);
 		long pricingNanos = System.nanoTime() - pricingStart;
+		if (isTimeLimitReached()) {
+			String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
+			if (!repairMode && dualModeName != null && dualModeName.length() > 0) {
+				name += "[" + dualModeName + "]";
+			}
+			traceSink.onPricingCall(lp.getNode(), name, false, 0,
+					result.getMessage() + " time_limit", totalPoolSize(lp), pricingNanos);
+			return generated;
+		}
 		generated.observeCertifiedReducedCosts(result);
 		if (!repairMode && !result.isImproved()) {
 			if (allowReusableBounds) {
@@ -666,11 +740,11 @@ public class PC {
 			if (outsourcingEngine != null) {
 				GeneratedColumnIds outsourcingGenerated = generateColumnsFromEngine(lp, outsourcingEngine, false,
 						activeColumnIds, activeOutsourcingColumnIds,
-						dualModeName == null || dualModeName.length() == 0 ? "pairedOutsourcing"
-								: dualModeName + ".pairedOutsourcing",
-						false, reducedCostDual, dualBoundObjectiveOverride);
-				generated.merge(outsourcingGenerated);
-			}
+					dualModeName == null || dualModeName.length() == 0 ? "pairedOutsourcing"
+							: dualModeName + ".pairedOutsourcing",
+					false, reducedCostDual, dualBoundObjectiveOverride);
+			generated.merge(outsourcingGenerated);
+		}
 		}
 		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
 		if (!repairMode && dualModeName != null && dualModeName.length() > 0) {

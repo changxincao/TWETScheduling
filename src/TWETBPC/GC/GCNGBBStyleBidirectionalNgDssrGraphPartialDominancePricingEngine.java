@@ -8,6 +8,7 @@ import java.util.List;
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Util.SequenceSignature;
@@ -33,13 +34,18 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
 		lastReusableSubtreeArcEliminationBounds = null;
 		if (!config.enableBidirectionalPricing || !config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR graph partial-dominance pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
 				midpointProbeReuseByNode, true);
-		ArrayList<TWETColumn> columns = gc.solve(lp);
+		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (config.diagnosticCrossCheckPartialDominance && shouldRunSameStateCrossCheck(lp, !columns.isEmpty())) {
 			String message = gc.getLastMessage() + runSameStateCrossCheck(lp, columns);
 			if (columns.isEmpty()) {

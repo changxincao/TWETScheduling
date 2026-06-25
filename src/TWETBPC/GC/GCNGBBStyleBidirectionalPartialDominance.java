@@ -22,6 +22,7 @@ import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -67,6 +68,7 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
 	private final HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode;
 
@@ -253,6 +255,11 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
+		return solve(lp, TimeLimitChecker.NONE);
+	}
+
+	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		long exactStartNanos = System.nanoTime();
 		Utility.resetCurUpperBound(Utility.big_M);
 		diagnosticHeartbeat(lp, "initialize.start", true);
@@ -1217,7 +1224,7 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0;
+		return config.maxExactPricingColumns > 0 && !timeLimitChecker.isTimeLimitReached();
 	}
 
 	private void forwardExtend(LP lp) {
@@ -4008,4 +4015,3 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		}
 	}
 }
-

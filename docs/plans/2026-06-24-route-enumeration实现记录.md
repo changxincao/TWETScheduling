@@ -37,7 +37,7 @@ completion bound 已接入枚举 label 剪枝。`PC` 在节点闭合时留下的
 
 masterVariables 外包模式保留现有 `y_j + tariff segment + baseline` 变量。有限 MIP 中 `y_j` 和 tariff segment active 是整数变量，baseline 仍是连续变量，覆盖约束仍保持当前 RMP 的 `>= 1` 口径。
 
-columnized outsourcing 模式也支持 route enumeration。外包列枚举复用 `OutsourcingPricingEngine` 的 DP 思路，但阈值从“只找负列”改为“枚举 `rc < gap` 的外包列”。枚举时遵守 outsourcing required/forbidden 分支，外包列用 `omega` 二进制变量进入有限 MIP，并保留 `sum omega <= 1` 的外包列族约束。内部列分支约束只作用于机器列，外包列不参与 arc/adjacency 分支行。
+columnized outsourcing 模式也支持 route enumeration。外包列枚举按 job 顺序完整枚举 include / not include 状态，阈值从“只找负列”改为“枚举 `rc < gap` 的外包列”。这里不能使用外包 pricing 里按 baseline/profit 的 Pareto dominance，因为 route enumeration 后续有限主问题需要的是具体覆盖集合；两个外包集合即使成本/dual profit 上有支配关系，只要覆盖 job 不同，就不能删掉其中一个作为证明列集。枚举时遵守 outsourcing required/forbidden 分支；如果中间外包 label 数超过 `routeEnumerationColumnLimit`，本次枚举直接 incomplete，不关闭节点。外包列用 `omega` 二进制变量进入有限 MIP，并保留 `sum omega <= 1` 的外包列族约束。内部列分支约束只作用于机器列，外包列不参与 arc/adjacency 分支行。
 
 ## 5. 有限主问题口径
 

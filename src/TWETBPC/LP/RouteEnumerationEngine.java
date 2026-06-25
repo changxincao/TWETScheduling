@@ -141,6 +141,12 @@ public final class RouteEnumerationEngine {
 					outsourcingRunSignatures);
 			outsourcingCandidates = outsourcing.candidates;
 			newOutsourcingColumns = outsourcing.newColumns.size();
+			if (outsourcing.incomplete) {
+				return RouteEnumerationResult.incomplete(outsourcing.message,
+						new ArrayList<Integer>(finiteIds), new ArrayList<Integer>(finiteOutsourcingIds), states,
+						candidates, outsourcingCandidates, newColumns, newOutsourcingColumns, duplicateActive,
+						duplicatePool, duplicateRun, cbPruned, System.nanoTime() - start);
+			}
 			finiteOutsourcingIds.addAll(outsourcing.existingIds);
 			pendingOutsourcing.addAll(outsourcing.newColumns);
 			if (finiteIds.size() + pending.size() + finiteOutsourcingIds.size()
@@ -194,6 +200,7 @@ public final class RouteEnumerationEngine {
 	private OutsourcingEnumeration enumerateOutsourcingColumns(LP lp, LP.PricingDualSnapshot dual, double gap,
 			HashSet<Integer> activeOutsourcingIds, HashSet<SequenceSignature> outsourcingRunSignatures) {
 		Node node = lp.getNode();
+		OutsourcingEnumeration result = new OutsourcingEnumeration();
 		ArrayList<OutsourcingLabel> labels = new ArrayList<OutsourcingLabel>();
 		labels.add(new OutsourcingLabel());
 		for (int job = 1; job <= data.n; job++) {
@@ -211,10 +218,14 @@ public final class RouteEnumerationEngine {
 			for (OutsourcingLabel label : labels) {
 				next.add(label.include(job, data.outsourcingCost[job], dual.jobDual[job]));
 			}
-			labels = pruneOutsourcing(next);
+			if (next.size() > config.routeEnumerationColumnLimit) {
+				result.incomplete = true;
+				result.message = "outsourcing enumeration label limit exceeded";
+				return result;
+			}
+			labels = next;
 		}
 
-		OutsourcingEnumeration result = new OutsourcingEnumeration();
 		for (OutsourcingLabel label : labels) {
 			if (label.jobs.isEmpty()) {
 				continue;
@@ -243,28 +254,6 @@ public final class RouteEnumerationEngine {
 					ColumnSource.ROUTE_ENUMERATION, false));
 		}
 		return result;
-	}
-
-	private ArrayList<OutsourcingLabel> pruneOutsourcing(ArrayList<OutsourcingLabel> labels) {
-		ArrayList<OutsourcingLabel> kept = new ArrayList<OutsourcingLabel>();
-		for (OutsourcingLabel label : labels) {
-			boolean dominated = false;
-			for (int i = 0; i < kept.size(); i++) {
-				OutsourcingLabel existing = kept.get(i);
-				if (existing.dominates(label)) {
-					dominated = true;
-					break;
-				}
-				if (label.dominates(existing)) {
-					kept.remove(i);
-					i--;
-				}
-			}
-			if (!dominated) {
-				kept.add(label);
-			}
-		}
-		return kept;
 	}
 
 	private State buildRootState(Node node, LP.PricingDualSnapshot dual, PiecewiseLinearFunction[] jobPenalties,
@@ -474,6 +463,8 @@ public final class RouteEnumerationEngine {
 		final ArrayList<Integer> existingIds = new ArrayList<Integer>();
 		final ArrayList<TWETOutsourcingColumn> newColumns = new ArrayList<TWETOutsourcingColumn>();
 		int candidates;
+		boolean incomplete;
+		String message;
 	}
 
 	private static final class OutsourcingLabel {
@@ -499,9 +490,6 @@ public final class RouteEnumerationEngine {
 			return new OutsourcingLabel(nextJobs, baseline + baselineDelta, profit + profitDelta);
 		}
 
-		boolean dominates(OutsourcingLabel other) {
-			return Utility.compareLe(baseline, other.baseline) && Utility.compareGe(profit, other.profit);
-		}
 	}
 
 	private static final class PendingColumn {

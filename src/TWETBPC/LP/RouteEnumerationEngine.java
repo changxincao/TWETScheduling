@@ -224,8 +224,9 @@ public final class RouteEnumerationEngine {
 			}
 		}
 		double[] freeBaselinePrefix = buildOutsourcingFreeBaselinePrefix(freeJobs);
-		double[] cheapSuffixBound = buildOutsourcingCheapSuffixBound(requiredBaseline, freeJobs, freeBaselinePrefix,
-				dual);
+		double[] cheapSuffixBound = config.routeEnumerationUseCompletionBound
+				? buildOutsourcingCheapSuffixBound(requiredBaseline, freeJobs, freeBaselinePrefix, dual)
+				: null;
 
 		ArrayList<OutsourcingLabel> labels = new ArrayList<OutsourcingLabel>();
 		labels.add(new OutsourcingLabel());
@@ -326,6 +327,9 @@ public final class RouteEnumerationEngine {
 			double requiredProfit, int nextIndex, List<Integer> freeJobs, double[] freeBaselinePrefix,
 			double[] cheapSuffixBound, LP.PricingDualSnapshot dual, double gap) {
 		if (!config.routeEnumerationUseCompletionBound) {
+			return false;
+		}
+		if (cheapSuffixBound == null) {
 			return false;
 		}
 		double baseline = requiredBaseline + label.baseline;

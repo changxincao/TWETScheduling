@@ -4,6 +4,7 @@ import java.util.ArrayList;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
@@ -24,12 +25,17 @@ public class GCBBStyleBidirectionalFullDomainPricingEngine implements PricingEng
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
 		lastReusableSubtreeArcEliminationBounds = null;
 		if (!config.enableBidirectionalPricing) {
 			return PricingResult.noImprovement("GCBB-style full-domain bidirectional pricing disabled");
 		}
 		GCBBStyleBidirectionalFullDomain gc = new GCBBStyleBidirectionalFullDomain(data, config);
-		ArrayList<TWETColumn> columns = gc.solve(lp);
+		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
 			return PricingResult.noImprovement(gc.getLastMessage());

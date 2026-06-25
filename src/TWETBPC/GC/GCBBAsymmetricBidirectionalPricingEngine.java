@@ -4,6 +4,7 @@ import java.util.ArrayList;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
@@ -22,11 +23,16 @@ public class GCBBAsymmetricBidirectionalPricingEngine implements PricingEngine {
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
 		if (!config.enableBidirectionalPricing) {
 			return PricingResult.noImprovement("GCBB asymmetric bidirectional pricing disabled");
 		}
 		GCBBAsymmetricBidirectional gc = new GCBBAsymmetricBidirectional(data, config);
-		ArrayList<TWETColumn> columns = gc.solve(lp);
+		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			return PricingResult.noImprovement(gc.getLastMessage());
 		}

@@ -10,6 +10,7 @@ import java.util.PriorityQueue;
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -33,6 +34,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
 	public TimeIndexedGraphPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
@@ -42,8 +44,17 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		if (!config.useTimeIndexedGraphPricing) {
 			return PricingResult.noImprovement("Time-indexed graph pricing disabled");
+		}
+		if (this.timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before time-indexed graph pricing");
 		}
 		TimeIndexedGraphSolver solver = new TimeIndexedGraphSolver(lp);
 		ArrayList<TWETColumn> columns = solver.solve();
@@ -275,8 +286,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				predAddedJob[i] = 0;
 			}
 			dist[index(0, 0)] = 0.0;
-			for (int t = 0; t <= horizon; t++) {
-				for (int lastJob = 0; lastJob <= n; lastJob++) {
+			for (int t = 0; t <= horizon && !timeLimitChecker.isTimeLimitReached(); t++) {
+				for (int lastJob = 0; lastJob <= n && !timeLimitChecker.isTimeLimitReached(); lastJob++) {
 					int state = index(lastJob, t);
 					double base = dist[state];
 					if (!isFinite(base)) {
@@ -290,7 +301,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 							relax(state, waitTarget, 0.0, 0);
 						}
 					}
-					for (int nextJob = 1; nextJob <= n; nextJob++) {
+					for (int nextJob = 1; nextJob <= n && !timeLimitChecker.isTimeLimitReached(); nextJob++) {
 						if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]) {
 							continue;
 						}

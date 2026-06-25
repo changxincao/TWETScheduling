@@ -4,6 +4,7 @@ import java.util.ArrayList;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
@@ -30,6 +31,14 @@ public class BidirectionalPricingEngine implements PricingEngine {
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
+		if (timeLimitChecker != null && timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before bidirectional pricing");
+		}
 		if (!config.enableBidirectionalPricing) {
 			return PricingResult.noImprovement("Bidirectional pricing disabled");
 		}

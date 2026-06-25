@@ -10,6 +10,7 @@ import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -45,6 +46,7 @@ public class GC {
 	private final TWETBPCConfig config;
 	private final TWETColumnEvaluator evaluator;
 	private final boolean usePaperDominanceGraph;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private PriorityQueue<Label> UL;
 	private ArrayList<DominanceStore> TL;
 	private ArrayList<TWETColumn> generatedColumns;
@@ -73,16 +75,23 @@ public class GC {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
+		return solve(lp, TimeLimitChecker.NONE);
+	}
+
+	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		Utility.resetCurUpperBound(Utility.big_M);
 		initialize(lp);
 		Node node = lp.getNode();
-		while (!UL.isEmpty() && generatedColumns.size() < config.maxExactPricingColumns) {
+		while (!UL.isEmpty() && generatedColumns.size() < config.maxExactPricingColumns
+				&& !this.timeLimitChecker.isTimeLimitReached()) {
 			Label label = UL.poll();
 			if (label.isDominated) {
 				continue;
 			}
 			tryGenerateColumn(label, lp);
-			for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n;
+			for (int nextJob = label.reachableSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n
+					&& !this.timeLimitChecker.isTimeLimitReached();
 					nextJob = label.reachableSet.nextSetBit(nextJob + 1)) {
 				if (!canExtend(label, nextJob, node)) {
 					continue;

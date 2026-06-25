@@ -11,6 +11,7 @@ import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -34,6 +35,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final SegmentProfile[] singletonProfileCache;
 
 	public HeuristicPricingEngine(Data data, TWETBPCConfig config) {
@@ -44,8 +46,17 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		if (!config.enableHeuristicPricing || config.maxHeuristicPricingColumns <= 0) {
 			return PricingResult.noImprovement("Heuristic pricing disabled");
+		}
+		if (this.timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before heuristic pricing");
 		}
 
 		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
@@ -60,7 +71,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		ArrayList<ScoredSequence> negativeCandidates = new ArrayList<ScoredSequence>();
 
 		for (TWETColumn seed : seeds) {
-			if (isHeuristicPoolFull(negativeCandidates)) {
+			if (this.timeLimitChecker.isTimeLimitReached() || isHeuristicPoolFull(negativeCandidates)) {
 				break;
 			}
 			tabuSearch(seed.getSequence(), lp, sriContext, activeSignatures, generatedSignatures, negativeCandidates);
@@ -159,7 +170,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 				negativeCandidates);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
-		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates); iter++) {
+		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates)
+				&& !timeLimitChecker.isTimeLimitReached(); iter++) {
 			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost);
 			if (bestMove == null) {
 				break;
@@ -178,7 +190,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
 
 		if (state.sequence.size() > 1) {
-			for (int pos = 0; pos < state.sequence.size(); pos++) {
+			for (int pos = 0; pos < state.sequence.size() && !timeLimitChecker.isTimeLimitReached(); pos++) {
 				TabuMove move = state.evaluateRemove(pos, lp);
 				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
@@ -188,11 +200,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 		}
 
-		for (int job = 1; job <= data.n; job++) {
+		for (int job = 1; job <= data.n && !timeLimitChecker.isTimeLimitReached(); job++) {
 			if (state.used[job]) {
 				continue;
 			}
-			for (int pos = 0; pos <= state.sequence.size(); pos++) {
+			for (int pos = 0; pos <= state.sequence.size() && !timeLimitChecker.isTimeLimitReached(); pos++) {
 				TabuMove move = state.evaluateAdd(job, pos, lp);
 				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
@@ -200,7 +212,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 					bestMoveReducedCost = move.reducedCost;
 				}
 			}
-			for (int pos = 0; pos < state.sequence.size(); pos++) {
+			for (int pos = 0; pos < state.sequence.size() && !timeLimitChecker.isTimeLimitReached(); pos++) {
 				TabuMove move = state.evaluateExchange(job, pos, lp);
 				if (isAcceptedCandidate(move, iter, bestReducedCost)
 						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {

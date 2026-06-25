@@ -8,6 +8,7 @@ import java.util.List;
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -25,6 +26,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
 	public OutsourcingPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
@@ -33,8 +35,17 @@ public class OutsourcingPricingEngine implements PricingEngine {
 
 	@Override
 	public PricingResult price(LP lp) {
+		return price(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		if (!lp.isColumnizedOutsourcing()) {
 			return PricingResult.noImprovement("Outsourcing column pricing disabled");
+		}
+		if (this.timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before outsourcing pricing");
 		}
 		Node node = lp.getNode();
 		// 2026-06-25: required 外包 job 是公共常数，不进入中间 label，避免每次 include 都复制它们。
@@ -42,7 +53,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		double requiredBaseline = 0.0;
 		double requiredProfit = 0.0;
 		ArrayList<Integer> freeJobs = new ArrayList<Integer>();
-		for (int job = 1; job <= data.n; job++) {
+		for (int job = 1; job <= data.n && !this.timeLimitChecker.isTimeLimitReached(); job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
 				continue;
 			}
@@ -61,11 +72,14 @@ public class OutsourcingPricingEngine implements PricingEngine {
 
 		ArrayList<Label> labels = new ArrayList<Label>();
 		labels.add(new Label());
-		for (int idx = 0; idx < freeJobs.size(); idx++) {
+		for (int idx = 0; idx < freeJobs.size() && !this.timeLimitChecker.isTimeLimitReached(); idx++) {
 			int job = freeJobs.get(idx).intValue();
 			ArrayList<Label> next = new ArrayList<Label>(labels.size() * 2);
 			next.addAll(labels);
 			for (Label label : labels) {
+				if (this.timeLimitChecker.isTimeLimitReached()) {
+					break;
+				}
 				next.add(label.include(job, data.outsourcingCost[job], lp.getJobDual(job)));
 			}
 			labels = prune(next);
@@ -74,6 +88,9 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
 		double bestReducedCost = Double.POSITIVE_INFINITY;
 		for (Label label : labels) {
+			if (this.timeLimitChecker.isTimeLimitReached()) {
+				break;
+			}
 			if (requiredJobs.isEmpty() && label.jobs.isEmpty()) {
 				continue;
 			}

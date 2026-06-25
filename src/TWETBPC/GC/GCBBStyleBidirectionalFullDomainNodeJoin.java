@@ -13,6 +13,7 @@ import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -62,6 +63,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
 	// 2026-05-31: 为避免额外评估所有 inferred 负候选，evaluator 只在 K 堆固定后复核最终候选。
 
@@ -191,6 +193,11 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
+		return solve(lp, TimeLimitChecker.NONE);
+	}
+
+	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		Utility.resetCurUpperBound(Utility.big_M);
 		initialize(lp);
 		initializeBackwardSink(lp);
@@ -509,7 +516,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0;
+		return config.maxExactPricingColumns > 0 && !timeLimitChecker.isTimeLimitReached();
 	}
 
 	private void forwardExtend(LP lp) {

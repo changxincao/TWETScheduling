@@ -14,6 +14,7 @@ import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -53,6 +54,7 @@ public class GCBBAsymmetricBidirectional {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
 
 	private PriorityQueue<ForwardLabel> FWUL;
@@ -153,6 +155,11 @@ public class GCBBAsymmetricBidirectional {
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
+		return solve(lp, TimeLimitChecker.NONE);
+	}
+
+	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
+		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		Utility.resetCurUpperBound(Utility.big_M);
 		initialize(lp);
 		initializeBackwardSink(lp);
@@ -469,7 +476,7 @@ public class GCBBAsymmetricBidirectional {
 	}
 
 	private boolean canContinue() {
-		return config.maxExactPricingColumns > 0;
+		return config.maxExactPricingColumns > 0 && !timeLimitChecker.isTimeLimitReached();
 	}
 
 	private void dynamicForwardExtend(LP lp) {

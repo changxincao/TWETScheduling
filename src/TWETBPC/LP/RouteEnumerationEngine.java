@@ -139,6 +139,7 @@ public final class RouteEnumerationEngine {
 		if (lp.isColumnizedOutsourcing()) {
 			OutsourcingEnumeration outsourcing = enumerateOutsourcingColumns(lp, dual, gap, activeOutsourcingIds,
 					outsourcingRunSignatures);
+			cbPruned += outsourcing.suffixBoundPruned;
 			outsourcingCandidates = outsourcing.candidates;
 			newOutsourcingColumns = outsourcing.newColumns.size();
 			if (outsourcing.incomplete) {
@@ -222,15 +223,19 @@ public final class RouteEnumerationEngine {
 				freeJobs.add(Integer.valueOf(job));
 			}
 		}
+		double[] freeBaselinePrefix = buildOutsourcingFreeBaselinePrefix(freeJobs);
 
 		ArrayList<OutsourcingLabel> labels = new ArrayList<OutsourcingLabel>();
 		labels.add(new OutsourcingLabel());
 		for (int idx = 0; idx < freeJobs.size(); idx++) {
 			int job = freeJobs.get(idx).intValue();
 			ArrayList<OutsourcingLabel> next = new ArrayList<OutsourcingLabel>(labels.size() * 2);
-			next.addAll(labels);
 			for (OutsourcingLabel label : labels) {
-				next.add(label.include(job, data.outsourcingCost[job], dual.jobDual[job]));
+				addOutsourcingEnumerationLabel(next, label, requiredBaseline, requiredProfit, idx + 1, freeJobs,
+						freeBaselinePrefix, dual, gap, result);
+				OutsourcingLabel included = label.include(job, data.outsourcingCost[job], dual.jobDual[job]);
+				addOutsourcingEnumerationLabel(next, included, requiredBaseline, requiredProfit, idx + 1, freeJobs,
+						freeBaselinePrefix, dual, gap, result);
 			}
 			if (next.size() > config.routeEnumerationColumnLimit) {
 				result.incomplete = true;
@@ -271,6 +276,56 @@ public final class RouteEnumerationEngine {
 					ColumnSource.ROUTE_ENUMERATION, false));
 		}
 		return result;
+	}
+
+	private double[] buildOutsourcingFreeBaselinePrefix(List<Integer> freeJobs) {
+		double[] prefix = new double[freeJobs.size() + 1];
+		for (int idx = 0; idx < freeJobs.size(); idx++) {
+			prefix[idx + 1] = prefix[idx] + data.outsourcingCost[freeJobs.get(idx).intValue()];
+		}
+		return prefix;
+	}
+
+	private void addOutsourcingEnumerationLabel(ArrayList<OutsourcingLabel> next, OutsourcingLabel label,
+			double requiredBaseline, double requiredProfit, int nextIndex, List<Integer> freeJobs,
+			double[] freeBaselinePrefix, LP.PricingDualSnapshot dual, double gap, OutsourcingEnumeration result) {
+		if (canPruneOutsourcingBySuffixBound(label, requiredBaseline, requiredProfit, nextIndex, freeJobs,
+				freeBaselinePrefix, dual, gap)) {
+			result.suffixBoundPruned++;
+			return;
+		}
+		next.add(label);
+	}
+
+	private boolean canPruneOutsourcingBySuffixBound(OutsourcingLabel label, double requiredBaseline,
+			double requiredProfit, int nextIndex, List<Integer> freeJobs, double[] freeBaselinePrefix,
+			LP.PricingDualSnapshot dual, double gap) {
+		if (!config.routeEnumerationUseCompletionBound) {
+			return false;
+		}
+		double baseline = requiredBaseline + label.baseline;
+		double profit = requiredProfit + label.profit;
+		double currentCost = data.evaluateOutsourcingCost(baseline);
+		if (Utility.isBigMValue(currentCost)) {
+			return true;
+		}
+		double lowerBound = currentCost - profit - dual.outsourcingColumnDual;
+		for (int idx = nextIndex; idx < freeJobs.size(); idx++) {
+			int job = freeJobs.get(idx).intValue();
+			double previousFreeBaseline = freeBaselinePrefix[idx] - freeBaselinePrefix[nextIndex];
+			double marginalStart = baseline + previousFreeBaseline;
+			double before = data.evaluateOutsourcingCost(marginalStart);
+			double after = data.evaluateOutsourcingCost(marginalStart + data.outsourcingCost[job]);
+			if (Utility.isBigMValue(before) || Utility.isBigMValue(after)) {
+				return false;
+			}
+			// 2026-06-25: G 单调且边际斜率不增时，把前序剩余 job 全放在 job 前面得到安全的最小边际成本。
+			double optimisticContribution = after - before - dual.jobDual[job];
+			if (Utility.compareLt(optimisticContribution, 0.0)) {
+				lowerBound += optimisticContribution;
+			}
+		}
+		return Utility.compareGe(lowerBound, gap - REDUCED_COST_TOLERANCE);
 	}
 
 	private ArrayList<Integer> mergeOutsourcingJobs(List<Integer> requiredJobs, List<Integer> freeLabelJobs) {
@@ -508,6 +563,7 @@ public final class RouteEnumerationEngine {
 		final ArrayList<Integer> existingIds = new ArrayList<Integer>();
 		final ArrayList<TWETOutsourcingColumn> newColumns = new ArrayList<TWETOutsourcingColumn>();
 		int candidates;
+		int suffixBoundPruned;
 		boolean incomplete;
 		String message;
 	}

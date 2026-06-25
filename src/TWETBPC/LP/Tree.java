@@ -143,7 +143,8 @@ public class Tree {
 			}
 			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic) {
 				heartbeat(node, "rmih.start");
-				RestrictedMasterIntegerHeuristic.Result integerResult = restrictedMasterIntegerHeuristic.solve(lp);
+				RestrictedMasterIntegerHeuristic.Result integerResult =
+						restrictedMasterIntegerHeuristic.solve(lp, remainingSolveTimeSeconds(solveStartNanos));
 				boolean heuristicImproved = integerResult.isFeasible()
 						&& Utility.compareLt(integerResult.getObjective(), incumbentCost);
 				traceSink.onRestrictedMasterIntegerHeuristic(node, integerResult.isFeasible(), heuristicImproved,

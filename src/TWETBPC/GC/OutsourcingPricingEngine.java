@@ -37,23 +37,30 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("Outsourcing column pricing disabled");
 		}
 		Node node = lp.getNode();
-		ArrayList<Label> labels = new ArrayList<Label>();
-		labels.add(new Label());
+		// 2026-06-25: required 外包 job 对所有可行 label 都是公共常数，DP 图里只保留自由可外包 job。
+		Label root = new Label();
+		ArrayList<Integer> freeJobs = new ArrayList<Integer>();
 		for (int job = 1; job <= data.n; job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
-				if (node.getOutsourcingJobState(job) == Node.OUTSOURCE_REQUIRED) {
-					return PricingResult.noImprovement("Required outsourcing job " + job + " is disabled");
-				}
 				continue;
 			}
 			byte state = node.getOutsourcingJobState(job);
 			if (state == Node.OUTSOURCE_FORBIDDEN) {
 				continue;
 			}
-			ArrayList<Label> next = new ArrayList<Label>(labels.size() * 2);
-			if (state != Node.OUTSOURCE_REQUIRED) {
-				next.addAll(labels);
+			if (state == Node.OUTSOURCE_REQUIRED) {
+				root = root.include(job, data.outsourcingCost[job], lp.getJobDual(job));
+			} else {
+				freeJobs.add(Integer.valueOf(job));
 			}
+		}
+
+		ArrayList<Label> labels = new ArrayList<Label>();
+		labels.add(root);
+		for (int idx = 0; idx < freeJobs.size(); idx++) {
+			int job = freeJobs.get(idx).intValue();
+			ArrayList<Label> next = new ArrayList<Label>(labels.size() * 2);
+			next.addAll(labels);
 			for (Label label : labels) {
 				next.add(label.include(job, data.outsourcingCost[job], lp.getJobDual(job)));
 			}

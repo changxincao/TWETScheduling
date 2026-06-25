@@ -201,8 +201,9 @@ public final class RouteEnumerationEngine {
 			HashSet<Integer> activeOutsourcingIds, HashSet<SequenceSignature> outsourcingRunSignatures) {
 		Node node = lp.getNode();
 		OutsourcingEnumeration result = new OutsourcingEnumeration();
-		ArrayList<OutsourcingLabel> labels = new ArrayList<OutsourcingLabel>();
-		labels.add(new OutsourcingLabel());
+		// 2026-06-25: 外包枚举保留所有覆盖集合，但仍先把 required job 折进 root，减少无意义层。
+		OutsourcingLabel root = new OutsourcingLabel();
+		ArrayList<Integer> freeJobs = new ArrayList<Integer>();
 		for (int job = 1; job <= data.n; job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
 				continue;
@@ -211,10 +212,19 @@ public final class RouteEnumerationEngine {
 			if (state == Node.OUTSOURCE_FORBIDDEN) {
 				continue;
 			}
-			ArrayList<OutsourcingLabel> next = new ArrayList<OutsourcingLabel>(labels.size() * 2);
-			if (state != Node.OUTSOURCE_REQUIRED) {
-				next.addAll(labels);
+			if (state == Node.OUTSOURCE_REQUIRED) {
+				root = root.include(job, data.outsourcingCost[job], dual.jobDual[job]);
+			} else {
+				freeJobs.add(Integer.valueOf(job));
 			}
+		}
+
+		ArrayList<OutsourcingLabel> labels = new ArrayList<OutsourcingLabel>();
+		labels.add(root);
+		for (int idx = 0; idx < freeJobs.size(); idx++) {
+			int job = freeJobs.get(idx).intValue();
+			ArrayList<OutsourcingLabel> next = new ArrayList<OutsourcingLabel>(labels.size() * 2);
+			next.addAll(labels);
 			for (OutsourcingLabel label : labels) {
 				next.add(label.include(job, data.outsourcingCost[job], dual.jobDual[job]));
 			}

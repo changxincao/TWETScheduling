@@ -185,13 +185,23 @@ public final class RouteEnumerationEngine {
 			return "time-indexed graph pricing uses non-elementary columns";
 		}
 		double gap = incumbentCost - nodeLowerBound;
-		if (Utility.compareLe(gap, 0.0) || Utility.compareGe(gap, config.routeEnumerationAbsoluteGapThreshold)) {
-			return "gap outside trigger: " + gap;
+		double triggerGap = effectiveAbsoluteGapThreshold();
+		if (Utility.compareLe(gap, 0.0) || Utility.compareGe(gap, triggerGap)) {
+			return "gap outside trigger: " + gap + " >= " + triggerGap;
 		}
 		if (!lp.getActiveCutIds().isEmpty()) {
 			return "active cuts are incompatible";
 		}
 		return null;
+	}
+
+	private double effectiveAbsoluteGapThreshold() {
+		// 2026-06-26: 50 任务及以上实例上，gap=8~10 仍可能在 route enumeration
+		// 的 completion-bound PWLF 检查中产生百万级临时函数段，先收紧触发阈值做实验。
+		if (data.n >= 50) {
+			return Math.min(config.routeEnumerationAbsoluteGapThreshold, 5.0);
+		}
+		return config.routeEnumerationAbsoluteGapThreshold;
 	}
 
 	private OutsourcingEnumeration enumerateOutsourcingColumns(LP lp, LP.PricingDualSnapshot dual, double gap,

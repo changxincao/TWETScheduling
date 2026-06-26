@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.PriorityQueue;
 
 import Basic.Data;
@@ -230,7 +231,7 @@ public class Tree {
 				if (strongSelection != null) {
 					enqueueChild(queue, strongSelection.result.getLeftNode(), lp, true);
 					enqueueChild(queue, strongSelection.result.getRightNode(), lp, true);
-					traceSink.onBranch(node, brancher.getName(), strongSelection.result, queue.size());
+					traceSink.onBranch(node, brancher.getName(), strongSelection.traceResult(), queue.size());
 					heartbeat(node, "strongBranching.selected " + strongSelection.summary());
 					branched = true;
 					break;
@@ -355,11 +356,16 @@ public class Tree {
 		if (!config.enableTwoStageStrongBranching || config.strongBranchingCandidateLimit <= 0) {
 			return null;
 		}
-		List<StrongBranchingCandidate> candidates =
-				brancher.collectStrongBranchingCandidates(parentLp, config.strongBranchingCandidateLimit);
-		if (candidates.isEmpty()) {
+		List<StrongBranchingCandidate> allCandidates =
+				brancher.collectStrongBranchingCandidates(parentLp, Integer.MAX_VALUE);
+		if (allCandidates.isEmpty()) {
 			return null;
 		}
+		int candidateCount = allCandidates.size();
+		int testedLimit = Math.min(config.strongBranchingCandidateLimit, candidateCount);
+		List<StrongBranchingCandidate> candidates = candidateCount == testedLimit
+				? allCandidates : new ArrayList<StrongBranchingCandidate>(allCandidates.subList(0, testedLimit));
+		String candidatePreview = strongBranchingCandidatePreview(candidates, 8);
 		ArrayList<StrongBranchingSelection> phase1 = new ArrayList<StrongBranchingSelection>();
 		for (StrongBranchingCandidate candidate : candidates) {
 			BranchResult branchResult = candidate.createBranchResult(parentLp);
@@ -372,7 +378,8 @@ public class Tree {
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
 			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
-			phase1.add(new StrongBranchingSelection(branchResult, candidate, leftTrial, rightTrial, score, false));
+			phase1.add(new StrongBranchingSelection(branchResult, candidate, leftTrial, rightTrial, score, false,
+					candidateCount, candidates.size(), candidatePreview));
 		}
 		if (phase1.isEmpty()) {
 			return null;
@@ -398,7 +405,7 @@ public class Tree {
 			applyTrialSeed(selected.result.getRightNode(), rightTrial);
 			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
 			phase2.add(new StrongBranchingSelection(selected.result, selected.candidate, leftTrial, rightTrial,
-					score, true));
+					score, true, selected.candidateCount, selected.testedCandidateCount, selected.candidatePreview));
 		}
 		Collections.sort(phase2, new Comparator<StrongBranchingSelection>() {
 			@Override
@@ -407,6 +414,23 @@ public class Tree {
 			}
 		});
 		return phase2.isEmpty() ? phase1.get(0) : phase2.get(0);
+	}
+
+	private String strongBranchingCandidatePreview(List<StrongBranchingCandidate> candidates, int limit) {
+		StringBuilder builder = new StringBuilder();
+		int count = Math.min(limit, candidates.size());
+		for (int i = 0; i < count; i++) {
+			if (i > 0) {
+				builder.append(';');
+			}
+			StrongBranchingCandidate candidate = candidates.get(i);
+			builder.append(candidate.getDescription()).append('=')
+					.append(String.format(Locale.US, "%.6f", candidate.getValue()));
+		}
+		if (candidates.size() > count) {
+			builder.append(";...");
+		}
+		return builder.toString();
 	}
 
 	private StrongBranchingTrialResult solveStrongBranchingRmpTrial(Node child, LP parentLp) {
@@ -613,24 +637,40 @@ public class Tree {
 		final StrongBranchingTrialResult rightTrial;
 		final double score;
 		final boolean phase2;
+		final int candidateCount;
+		final int testedCandidateCount;
+		final String candidatePreview;
 
 		StrongBranchingSelection(BranchResult result, StrongBranchingCandidate candidate,
 				StrongBranchingTrialResult leftTrial, StrongBranchingTrialResult rightTrial, double score,
-				boolean phase2) {
+				boolean phase2, int candidateCount, int testedCandidateCount, String candidatePreview) {
 			this.result = result;
 			this.candidate = candidate;
 			this.leftTrial = leftTrial;
 			this.rightTrial = rightTrial;
 			this.score = score;
 			this.phase2 = phase2;
+			this.candidateCount = candidateCount;
+			this.testedCandidateCount = testedCandidateCount;
+			this.candidatePreview = candidatePreview;
+		}
+
+		BranchResult traceResult() {
+			return new BranchResult(true, result.getLeftNode(), result.getRightNode(),
+					result.getMessage() + " | strongBranching " + summary());
 		}
 
 		String summary() {
 			return "candidate=" + candidate.getDescription()
+					+ ",value=" + candidate.getValue()
+					+ ",distToHalf=" + candidate.getDistanceToHalf()
+					+ ",candidateCount=" + candidateCount
+					+ ",tested=" + testedCandidateCount
 					+ ",phase=" + (phase2 ? "phase2" : "phase1")
 					+ ",leftBound=" + boundText(leftTrial)
 					+ ",rightBound=" + boundText(rightTrial)
-					+ ",score=" + score;
+					+ ",score=" + score
+					+ ",top=" + candidatePreview;
 		}
 
 		private static String boundText(StrongBranchingTrialResult trial) {

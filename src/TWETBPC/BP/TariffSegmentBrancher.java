@@ -47,7 +47,11 @@ public class TariffSegmentBrancher implements Brancher {
 		}
 		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
 		double[] values = solution.getOutsourceSegmentValues();
+		Node node = lp.getNode();
 		for (int segment = 0; segment < values.length; segment++) {
+			if (node.getTariffSegmentState(segment) != Node.SEGMENT_FREE) {
+				continue;
+			}
 			double value = values[segment];
 			if (Utility.compareLe(Math.abs(value - Math.rint(value)), tolerance)) {
 				continue;

@@ -61,7 +61,8 @@ public class UndirectedAdjacencyBrancher implements Brancher {
 	private PairChoice betterPairChoice(PairChoice best, LP lp, TWETMasterSolution solution, Node node, int sink,
 			int first, int second) {
 		if (node.getAdjacencyPairState(first, second) != Node.ADJACENCY_FREE
-				|| node.isArcForbidden(first, second) || node.isArcForbidden(second, first)) {
+				|| node.isArcForbidden(first, second) || node.isArcForbidden(second, first)
+				|| node.isPricingOnlyArcForbidden(first, second) || node.isPricingOnlyArcForbidden(second, first)) {
 			return best;
 		}
 		double value = solution.getArcValue(lp.getPool(), first, second, sink)

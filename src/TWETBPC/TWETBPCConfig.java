@@ -283,8 +283,8 @@ public class TWETBPCConfig {
 	public String subsetRowCutMemoryMode = "full";
 	/** 判断是否整数时使用的容差。 */
 	public double branchingTolerance = 1e-6;
-	/** 2026-06-03: Whether to branch on undirected job adjacency before directed arc branching. */
-	public boolean enableUndirectedAdjacencyBranching = true;
+	/** 2026-06-26: 无向邻接分支默认关闭；此前测试中它容易引入异常 arc dual，削弱 pricing dominance/bounds。 */
+	public boolean enableUndirectedAdjacencyBranching = false;
 	/** 节点初始伪成本占位值。 */
 	public double pseudoCostInf = 1e18;
 	/** 2026-06-02: 每个节点 LP 松弛完成后，是否用当前 restricted columns 求一次整数 RMP 刷新启发式上界。 */

@@ -277,7 +277,7 @@ public class GCBBFullDomainComparisonTest {
 		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.fullDomainCompare.heuristicPoolSize",
 				5000);
 		config.maxExactPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxExactColumns", 5000);
-		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.fullDomainCompare.branchSeedColumnLimit", 20000);
+		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.fullDomainCompare.branchSeedColumnLimit", 5000);
 		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableUndirectedAdjacencyBranching",
 				Boolean.toString(config.enableUndirectedAdjacencyBranching)));

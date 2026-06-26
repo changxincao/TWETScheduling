@@ -253,9 +253,9 @@ public class TWETBPCConfig {
 	/**
 	 * 2026-05-18: 对应旧 VRP Configure.m_branch_col_number。这里默认调大，只作为防死循环保护，
 	 * 不作为不可行证明；正常 repair 应由 slack=0 或无新列退出。原来的 500 过小，
-	 * 可能让可修复子节点过早触发工程上限，因此先放宽到 100000。
+	 * 可能让可修复子节点过早触发工程上限，因此先放宽到 1000000。
 	 */
-	public int maxBranchRepairColumns = 100000;
+	public int maxBranchRepairColumns = 1000000;
 	/**
 	 * 2026-05-26: 单向 forward exact pricing 的 label 扩展队列排序。
 	 * 可选值：reducedCost、time、reachableSize。
@@ -299,6 +299,8 @@ public class TWETBPCConfig {
 	public String restrictedMasterIntegerHeuristicMode = "coverRepair";
 	/** 2026-06-04: coverRepair 中按 reduced cost 排序保留的列数；小于等于 0 表示全保留。 */
 	public int restrictedMasterIntegerHeuristicReducedCostColumnLimit = 2000;
+	/** 2026-06-26: RMIH 大规模算例保留更多低 reduced-cost 列，减少筛列过窄导致的上界波动。 */
+	public int restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit = 4000;
 	/** 2026-06-04: coverRepair 中每个 job 额外保留的最低 reduced cost 覆盖列数。 */
 	public int restrictedMasterIntegerHeuristicPerJobColumnLimit = 10;
 	/** 2026-06-04: 单列重复 job 不超过该数量时枚举所有删除组合生成修复列。 */

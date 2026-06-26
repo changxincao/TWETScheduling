@@ -463,7 +463,7 @@ public final class RestrictedMasterIntegerHeuristic {
 			selected.addAll(lastSolution.getActiveColumnIds());
 		}
 
-		int reducedCostLimit = config.restrictedMasterIntegerHeuristicReducedCostColumnLimit;
+		int reducedCostLimit = effectiveReducedCostColumnLimit();
 		int keepByReducedCost = reducedCostLimit <= 0 ? scores.size() : Math.min(reducedCostLimit, scores.size());
 		for (int idx = 0; idx < keepByReducedCost; idx++) {
 			selected.add(Integer.valueOf(scores.get(idx).columnId));
@@ -485,6 +485,15 @@ public final class RestrictedMasterIntegerHeuristic {
 			}
 		}
 		return new ArrayList<Integer>(selected);
+	}
+
+	private int effectiveReducedCostColumnLimit() {
+		int limit = config.restrictedMasterIntegerHeuristicReducedCostColumnLimit;
+		if (data.n > config.restrictedMasterIntegerHeuristicLargeInstanceThreshold
+				&& config.restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit > limit) {
+			return config.restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit;
+		}
+		return limit;
 	}
 
 	private RepairGeneration generateRepairColumns(LP lp, List<Integer> selectedColumnIds, double[] outsourcingValues,

@@ -66,7 +66,7 @@ public class OutsourcingMembershipBrancher implements Brancher {
 			}
 			final int candidateJob = job;
 			final double candidateValue = value;
-			candidates.add(new StrongBranchingCandidate("outsourcing", "outsourcingJob(" + job + ")", value) {
+			candidates.add(new StrongBranchingCandidate("outsourcing", "outsourcingJob(" + job + ")", value, job) {
 				@Override
 				public BranchResult createBranchResult(LP lp) {
 					return OutsourcingMembershipBrancher.this.createBranchResult(lp, candidateJob, candidateValue);
@@ -119,7 +119,8 @@ public class OutsourcingMembershipBrancher implements Brancher {
 				if (Utility.compareGt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
 					return 1;
 				}
-				return a.getDescription().compareTo(b.getDescription());
+				int orderCompare = Integer.compare(a.getOrder(), b.getOrder());
+				return orderCompare != 0 ? orderCompare : a.getDescription().compareTo(b.getDescription());
 			}
 		});
 	}

@@ -81,7 +81,8 @@ public class ArcBrancher implements Brancher {
 		if (Utility.compareLe(frac, tolerance)) {
 			return;
 		}
-		candidates.add(new StrongBranchingCandidate("arc", "arc(" + from + "," + to + ")", value) {
+		int order = from * (node.sinkId() + 1) + to;
+		candidates.add(new StrongBranchingCandidate("arc", "arc(" + from + "," + to + ")", value, order) {
 			@Override
 			public BranchResult createBranchResult(LP lp) {
 				return ArcBrancher.this.createBranchResult(lp, from, to, value);
@@ -149,7 +150,8 @@ public class ArcBrancher implements Brancher {
 				if (Utility.compareGt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
 					return 1;
 				}
-				return a.getDescription().compareTo(b.getDescription());
+				int orderCompare = Integer.compare(a.getOrder(), b.getOrder());
+				return orderCompare != 0 ? orderCompare : a.getDescription().compareTo(b.getDescription());
 			}
 		});
 	}

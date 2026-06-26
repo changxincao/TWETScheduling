@@ -54,7 +54,7 @@ public class TariffSegmentBrancher implements Brancher {
 			}
 			final int candidateSegment = segment;
 			final double candidateValue = value;
-			candidates.add(new StrongBranchingCandidate("tariff", "tariffSegment(" + segment + ")", value) {
+			candidates.add(new StrongBranchingCandidate("tariff", "tariffSegment(" + segment + ")", value, segment) {
 				@Override
 				public BranchResult createBranchResult(LP lp) {
 					return TariffSegmentBrancher.this.createBranchResult(lp, candidateSegment, candidateValue);
@@ -93,7 +93,8 @@ public class TariffSegmentBrancher implements Brancher {
 				if (Utility.compareGt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
 					return 1;
 				}
-				return a.getDescription().compareTo(b.getDescription());
+				int orderCompare = Integer.compare(a.getOrder(), b.getOrder());
+				return orderCompare != 0 ? orderCompare : a.getDescription().compareTo(b.getDescription());
 			}
 		});
 	}

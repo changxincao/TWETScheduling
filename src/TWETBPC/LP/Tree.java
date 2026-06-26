@@ -469,7 +469,8 @@ public class Tree {
 		if (Utility.compareGt(a.candidate.getDistanceToHalf(), b.candidate.getDistanceToHalf())) {
 			return 1;
 		}
-		return a.candidate.getDescription().compareTo(b.candidate.getDescription());
+		int orderCompare = Integer.compare(a.candidate.getOrder(), b.candidate.getOrder());
+		return orderCompare != 0 ? orderCompare : a.candidate.getDescription().compareTo(b.candidate.getDescription());
 	}
 
 	private double updateReportedBound(PriorityQueue<Node> queue, double currentNodeBound, double incumbentCost) {

@@ -173,7 +173,7 @@ public class TWETBPCConfig {
 	/** 2026-06-02: completion bound 是否启用离散 scalar 预筛；仅用于 full-domain 对照路径。 */
 	public boolean bidirectionalCompletionBoundScalarPruning = true;
 	/** 2026-06-03: 是否用当前 pricing 轮的 completion bound 做本地 job-job arc fixing。 */
-	public boolean bidirectionalCompletionBoundArcFixing = false;
+	public boolean bidirectionalCompletionBoundArcFixing = true;
 	/** 2026-06-03: 只诊断 completion bound 能否在当前 pricing 轮安全判掉 job-job arc，不写回 node。 */
 	public boolean bidirectionalCompletionBoundArcFixingDiagnostic = false;
 	/** 2026-06-03: node LP 最优且已有上界后，是否把 completion-bound reduced-cost fixing 继承到子节点。 */

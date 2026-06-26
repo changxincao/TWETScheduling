@@ -319,9 +319,6 @@ public class GCBBFullDomainComparisonTest {
 		config.routeEnumerationColumnLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.routeEnumerationColumnLimit",
 				config.routeEnumerationColumnLimit);
-		config.routeEnumerationStateLimit = Integer.getInteger(
-				"twet.bpc.fullDomainCompare.routeEnumerationStateLimit",
-				config.routeEnumerationStateLimit);
 		config.routeEnumerationUseCompletionBound = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumerationUseCompletionBound",
 				Boolean.toString(config.routeEnumerationUseCompletionBound)));

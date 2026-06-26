@@ -128,12 +128,6 @@ public final class RouteEnumerationEngine {
 				}
 				queue.add(child);
 			}
-			if (states > config.routeEnumerationStateLimit) {
-				return RouteEnumerationResult.incomplete("state limit exceeded", new ArrayList<Integer>(finiteIds),
-						new ArrayList<Integer>(finiteOutsourcingIds), states, candidates, outsourcingCandidates,
-						newColumns, newOutsourcingColumns, duplicateActive, duplicatePool, duplicateRun, cbPruned,
-						System.nanoTime() - start);
-			}
 		}
 
 		if (lp.isColumnizedOutsourcing()) {

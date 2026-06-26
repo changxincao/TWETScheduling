@@ -18,8 +18,7 @@ route enumeration 放在节点已经用 true dual 完整定价闭合之后使用
 4. active cut 存在时跳过，避免 SRI 状态和有限证明口径混在一起。
 5. 当前 RMP 内部列和外包列总数超过 `routeEnumerationColumnLimit` 时中止。
 6. 枚举过程中有限列总数超过 `routeEnumerationColumnLimit` 时中止。
-7. 弹出的 label 状态数超过 `routeEnumerationStateLimit` 时中止，默认 `1000000`。
-8. 全局剩余时间不足以启动有限 MIP、有限 MIP 未证明，或全局时间在后续节点检查时耗尽时，不关闭节点并返回原 BPC 流程或 `TIME_LIMIT`。
+7. 全局剩余时间不足以启动有限 MIP、有限 MIP 未证明，或全局时间在后续节点检查时耗尽时，不关闭节点并返回原 BPC 流程或 `TIME_LIMIT`。
 
 这些中止都是证明失败，不是节点不可行；一旦触发，流程会继续回到原 BPC。
 

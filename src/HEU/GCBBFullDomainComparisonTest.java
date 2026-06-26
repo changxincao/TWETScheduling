@@ -310,6 +310,21 @@ public class GCBBFullDomainComparisonTest {
 		config.dualBoundPruningTolerance = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.dualBoundPruningTolerance",
 				Double.toString(config.dualBoundPruningTolerance)));
+		config.enableTwoStageStrongBranching = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.strongBranching",
+				Boolean.toString(config.enableTwoStageStrongBranching)));
+		config.strongBranchingCandidateLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.strongBranchingCandidateLimit",
+				config.strongBranchingCandidateLimit);
+		config.strongBranchingPhase2CandidateLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.strongBranchingPhase2CandidateLimit",
+				config.strongBranchingPhase2CandidateLimit);
+		config.strongBranchingPhase2MaxHeuristicPasses = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.strongBranchingPhase2MaxHeuristicPasses",
+				config.strongBranchingPhase2MaxHeuristicPasses);
+		config.strongBranchingScoreEpsilon = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.strongBranchingScoreEpsilon",
+				Double.toString(config.strongBranchingScoreEpsilon)));
 		config.enableRouteEnumeration = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumeration",
 				Boolean.toString(config.enableRouteEnumeration)));

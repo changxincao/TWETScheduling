@@ -1,5 +1,10 @@
 package TWETBPC.BP;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+
 import Common.Utility;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -27,24 +32,44 @@ public class TariffSegmentBrancher implements Brancher {
 		if (solution == null) {
 			return BranchResult.none("No master solution");
 		}
+		List<StrongBranchingCandidate> candidates = collectStrongBranchingCandidates(lp, 1);
+		if (candidates.isEmpty()) {
+			return BranchResult.none("Tariff segment variables already integral");
+		}
+		return candidates.get(0).createBranchResult(lp);
+	}
+
+	@Override
+	public List<StrongBranchingCandidate> collectStrongBranchingCandidates(LP lp, int limit) {
+		TWETMasterSolution solution = lp.getLastSolution();
+		if (limit <= 0 || solution == null) {
+			return Collections.emptyList();
+		}
+		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
 		double[] values = solution.getOutsourceSegmentValues();
-		int bestSegment = -1;
-		double bestScore = Double.MAX_VALUE;
 		for (int segment = 0; segment < values.length; segment++) {
 			double value = values[segment];
 			if (Utility.compareLe(Math.abs(value - Math.rint(value)), tolerance)) {
 				continue;
 			}
-			double score = Math.abs(value - 0.5);
-			if (Utility.compareLt(score, bestScore)) {
-				bestScore = score;
-				bestSegment = segment;
-			}
+			final int candidateSegment = segment;
+			final double candidateValue = value;
+			candidates.add(new StrongBranchingCandidate("tariff", "tariffSegment(" + segment + ")", value) {
+				@Override
+				public BranchResult createBranchResult(LP lp) {
+					return TariffSegmentBrancher.this.createBranchResult(lp, candidateSegment, candidateValue);
+				}
+			});
 		}
-		if (bestSegment < 0) {
-			return BranchResult.none("Tariff segment variables already integral");
+		sortCandidates(candidates);
+		if (candidates.size() <= limit) {
+			return candidates;
 		}
+		return new ArrayList<StrongBranchingCandidate>(candidates.subList(0, limit));
+	}
 
+	private BranchResult createBranchResult(LP lp, int bestSegment, double value) {
+		TWETMasterSolution solution = lp.getLastSolution();
 		Node base = lp.getNode();
 		Node left = base.copy();
 		Node right = base.copy();
@@ -55,7 +80,22 @@ public class TariffSegmentBrancher implements Brancher {
 		right.requireTariffSegment(bestSegment);
 		right.markTariffRepair(bestSegment, true);
 		return new BranchResult(true, left, right,
-				"Branched on outsourcing tariff segment z_" + bestSegment + "=" + values[bestSegment]);
+				"Branched on outsourcing tariff segment z_" + bestSegment + "=" + value);
+	}
+
+	private void sortCandidates(ArrayList<StrongBranchingCandidate> candidates) {
+		Collections.sort(candidates, new Comparator<StrongBranchingCandidate>() {
+			@Override
+			public int compare(StrongBranchingCandidate a, StrongBranchingCandidate b) {
+				if (Utility.compareLt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
+					return -1;
+				}
+				if (Utility.compareGt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
+					return 1;
+				}
+				return a.getDescription().compareTo(b.getDescription());
+			}
+		});
 	}
 
 	@Override

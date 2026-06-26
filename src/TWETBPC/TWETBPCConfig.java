@@ -69,6 +69,16 @@ public class TWETBPCConfig {
 	public boolean enableDualBoundPruning = true;
 	/** 2026-06-22: dual-bound 剪枝容差。 */
 	public double dualBoundPruningTolerance = 1e-7;
+	/** 2026-06-26: two-stage strong branching 实验开关，默认关闭，关闭时完全走原分支流程。 */
+	public boolean enableTwoStageStrongBranching = false;
+	/** 2026-06-26: 第一阶段最多试探最接近 0.5 的分支候选数。 */
+	public int strongBranchingCandidateLimit = 20;
+	/** 2026-06-26: 第二阶段进入启发式 pricing 试探的候选数。 */
+	public int strongBranchingPhase2CandidateLimit = 4;
+	/** 2026-06-26: 第二阶段每个 trial 最多执行几轮启发式 pricing；0 表示直到启发式无列。 */
+	public int strongBranchingPhase2MaxHeuristicPasses = 0;
+	/** 2026-06-26: strong branching 评分里避免一侧提升为 0 导致 product 退化的极小值。 */
+	public double strongBranchingScoreEpsilon = 1.0e-6;
 	/** 2026-06-24: 节点 LP true-dual 闭合后，是否尝试枚举所有 rc < UB-LB 的列并解有限主问题。 */
 	public boolean enableRouteEnumeration = false;
 	/** 2026-06-24: 只有节点绝对 gap 小于该阈值时才触发 route enumeration。 */

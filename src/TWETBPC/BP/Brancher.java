@@ -1,25 +1,23 @@
 package TWETBPC.BP;
 
+import java.util.Collections;
+import java.util.List;
+
 import TWETBPC.LP.LP;
 
 /**
- * 分支器接口。
- * <p>
- * 它对应旧 BPC 中 BranchA / BranchB / BranchC / BranchD 这类模块的统一抽象。
- * 不同之处在于这里把“一个分支规则”显式做成接口，
- * 便于后续组合多种规则并按顺序尝试。
+ * 分支器接口。普通求解仍调用 {@link #branch(LP)}；strong branching 只额外读取候选，不改变旧语义。
  */
 public interface Brancher {
 
-	/**
-	 * 对当前 LP 解尝试执行一次分支。
-	 *
-	 * @param lp 当前节点的 LP 对象
-	 * @return 分支结果；若无法在本规则下分支，返回 not branched 的结果
-	 */
 	BranchResult branch(LP lp);
 
-	/** @return 分支器名称 */
-	String getName();
+	/**
+	 * 2026-06-26: strong branching 只需要当前层级的一批候选；默认返回空，避免影响旧分支器。
+	 */
+	default List<StrongBranchingCandidate> collectStrongBranchingCandidates(LP lp, int limit) {
+		return Collections.emptyList();
+	}
 
+	String getName();
 }

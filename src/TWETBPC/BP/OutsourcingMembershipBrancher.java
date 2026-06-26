@@ -1,6 +1,9 @@
 package TWETBPC.BP;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 
 import Common.Utility;
 import TWETBPC.LP.LP;
@@ -30,10 +33,25 @@ public class OutsourcingMembershipBrancher implements Brancher {
 		if (solution == null) {
 			return BranchResult.none("No master solution");
 		}
+		List<StrongBranchingCandidate> candidates = collectStrongBranchingCandidates(lp, 1);
+		if (candidates.isEmpty()) {
+			return BranchResult.none("No fractional outsourcing membership found");
+		}
+		return candidates.get(0).createBranchResult(lp);
+	}
+
+	@Override
+	public List<StrongBranchingCandidate> collectStrongBranchingCandidates(LP lp, int limit) {
+		if (limit <= 0 || !lp.isColumnizedOutsourcing()) {
+			return Collections.emptyList();
+		}
+		TWETMasterSolution solution = lp.getLastSolution();
+		if (solution == null) {
+			return Collections.emptyList();
+		}
 		Node base = lp.getNode();
 		double[] values = solution.getOutsourcingValues();
-		int bestJob = -1;
-		double bestScore = Double.POSITIVE_INFINITY;
+		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
 		for (int job = 1; job <= lp.getData().n; job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
 				continue;
@@ -46,16 +64,25 @@ public class OutsourcingMembershipBrancher implements Brancher {
 			if (Utility.compareLe(frac, tolerance)) {
 				continue;
 			}
-			double score = Math.abs(value - 0.5);
-			if (Utility.compareLt(score, bestScore)) {
-				bestScore = score;
-				bestJob = job;
-			}
+			final int candidateJob = job;
+			final double candidateValue = value;
+			candidates.add(new StrongBranchingCandidate("outsourcing", "outsourcingJob(" + job + ")", value) {
+				@Override
+				public BranchResult createBranchResult(LP lp) {
+					return OutsourcingMembershipBrancher.this.createBranchResult(lp, candidateJob, candidateValue);
+				}
+			});
 		}
-		if (bestJob < 0) {
-			return BranchResult.none("No fractional outsourcing membership found");
+		sortCandidates(candidates);
+		if (candidates.size() <= limit) {
+			return candidates;
 		}
+		return new ArrayList<StrongBranchingCandidate>(candidates.subList(0, limit));
+	}
 
+	private BranchResult createBranchResult(LP lp, int bestJob, double value) {
+		TWETMasterSolution solution = lp.getLastSolution();
+		Node base = lp.getNode();
 		Node left = base.copy();
 		Node right = base.copy();
 		left.depth = right.depth = base.depth + 1;
@@ -63,7 +90,7 @@ public class OutsourcingMembershipBrancher implements Brancher {
 		left.forbidOutsourcingJob(bestJob);
 		right.requireOutsourcingJob(bestJob);
 		seedRequiredOutsourcingColumn(lp, right);
-		return new BranchResult(true, left, right, "Branched on outsourcing job " + bestJob);
+		return new BranchResult(true, left, right, "Branched on outsourcing job " + bestJob + " value=" + value);
 	}
 
 	private void seedRequiredOutsourcingColumn(LP lp, Node node) {
@@ -80,5 +107,20 @@ public class OutsourcingMembershipBrancher implements Brancher {
 	@Override
 	public String getName() {
 		return "OutsourcingMembershipBrancher";
+	}
+
+	private void sortCandidates(ArrayList<StrongBranchingCandidate> candidates) {
+		Collections.sort(candidates, new Comparator<StrongBranchingCandidate>() {
+			@Override
+			public int compare(StrongBranchingCandidate a, StrongBranchingCandidate b) {
+				if (Utility.compareLt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
+					return -1;
+				}
+				if (Utility.compareGt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
+					return 1;
+				}
+				return a.getDescription().compareTo(b.getDescription());
+			}
+		});
 	}
 }

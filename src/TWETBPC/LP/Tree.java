@@ -1,6 +1,8 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
@@ -13,12 +15,14 @@ import TWETBPC.TWETSolveStatus;
 import TWETBPC.TimeLimitChecker;
 import TWETBPC.BP.BranchResult;
 import TWETBPC.BP.Brancher;
+import TWETBPC.BP.StrongBranchingCandidate;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
+import TWETBPC.LP.PC.StrongBranchingTrialResult;
 
 /**
  * 分支树主控制器。
@@ -221,6 +225,16 @@ public class Tree {
 			boolean branched = false;
 			heartbeat(node, "branch.start");
 			for (Brancher brancher : branchers) {
+				StrongBranchingSelection strongSelection =
+						tryTwoStageStrongBranching(lp, brancher, subtreeArcElimination, solution.getObjectiveValue());
+				if (strongSelection != null) {
+					enqueueChild(queue, strongSelection.result.getLeftNode(), lp, true);
+					enqueueChild(queue, strongSelection.result.getRightNode(), lp, true);
+					traceSink.onBranch(node, brancher.getName(), strongSelection.result, queue.size());
+					heartbeat(node, "strongBranching.selected " + strongSelection.summary());
+					branched = true;
+					break;
+				}
 				BranchResult result = brancher.branch(lp);
 				if (!result.isBranched()) {
 					traceSink.onBranchRejected(node, brancher.getName(), result.getMessage());
@@ -336,6 +350,128 @@ public class Tree {
 		subtreeArcElimination.applyTo(branchResult.getRightNode());
 	}
 
+	private StrongBranchingSelection tryTwoStageStrongBranching(LP parentLp, Brancher brancher,
+			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination, double parentBound) {
+		if (!config.enableTwoStageStrongBranching || config.strongBranchingCandidateLimit <= 0) {
+			return null;
+		}
+		List<StrongBranchingCandidate> candidates =
+				brancher.collectStrongBranchingCandidates(parentLp, config.strongBranchingCandidateLimit);
+		if (candidates.isEmpty()) {
+			return null;
+		}
+		ArrayList<StrongBranchingSelection> phase1 = new ArrayList<StrongBranchingSelection>();
+		for (StrongBranchingCandidate candidate : candidates) {
+			BranchResult branchResult = candidate.createBranchResult(parentLp);
+			if (!branchResult.isBranched()) {
+				continue;
+			}
+			applySubtreeArcElimination(branchResult, subtreeArcElimination);
+			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(branchResult.getLeftNode(), parentLp);
+			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp);
+			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
+			applyTrialSeed(branchResult.getRightNode(), rightTrial);
+			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
+			phase1.add(new StrongBranchingSelection(branchResult, candidate, leftTrial, rightTrial, score, false));
+		}
+		if (phase1.isEmpty()) {
+			return null;
+		}
+		Collections.sort(phase1, new Comparator<StrongBranchingSelection>() {
+			@Override
+			public int compare(StrongBranchingSelection a, StrongBranchingSelection b) {
+				return compareStrongBranchingSelection(a, b);
+			}
+		});
+		int phase2Limit = Math.min(config.strongBranchingPhase2CandidateLimit, phase1.size());
+		if (phase2Limit <= 0) {
+			return phase1.get(0);
+		}
+		ArrayList<StrongBranchingSelection> phase2 = new ArrayList<StrongBranchingSelection>();
+		for (int idx = 0; idx < phase2Limit; idx++) {
+			StrongBranchingSelection selected = phase1.get(idx);
+			StrongBranchingTrialResult leftTrial =
+					solveStrongBranchingHeuristicTrial(selected.result.getLeftNode());
+			StrongBranchingTrialResult rightTrial =
+					solveStrongBranchingHeuristicTrial(selected.result.getRightNode());
+			applyTrialSeed(selected.result.getLeftNode(), leftTrial);
+			applyTrialSeed(selected.result.getRightNode(), rightTrial);
+			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
+			phase2.add(new StrongBranchingSelection(selected.result, selected.candidate, leftTrial, rightTrial,
+					score, true));
+		}
+		Collections.sort(phase2, new Comparator<StrongBranchingSelection>() {
+			@Override
+			public int compare(StrongBranchingSelection a, StrongBranchingSelection b) {
+				return compareStrongBranchingSelection(a, b);
+			}
+		});
+		return phase2.isEmpty() ? phase1.get(0) : phase2.get(0);
+	}
+
+	private StrongBranchingTrialResult solveStrongBranchingRmpTrial(Node child, LP parentLp) {
+		prepareChildSeedColumns(child, parentLp);
+		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
+		try {
+			trial.construct(child, child.seedColumnIds);
+			return pc.solveStrongBranchingRmpTrial(trial);
+		} finally {
+			trial.closeModel();
+		}
+	}
+
+	private StrongBranchingTrialResult solveStrongBranchingHeuristicTrial(Node child) {
+		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
+		try {
+			trial.construct(child, child.seedColumnIds);
+			return pc.solveStrongBranchingHeuristicTrial(trial);
+		} finally {
+			trial.closeModel();
+		}
+	}
+
+	private void applyTrialSeed(Node child, StrongBranchingTrialResult trial) {
+		if (child == null || trial == null) {
+			return;
+		}
+		child.seedColumnIds = trial.getInternalColumnIds();
+		child.seedOutsourcingColumnIds = trial.getOutsourcingColumnIds();
+	}
+
+	private double strongBranchingScore(double parentBound, StrongBranchingTrialResult left,
+			StrongBranchingTrialResult right) {
+		double leftGain = strongBranchingGain(parentBound, left);
+		double rightGain = strongBranchingGain(parentBound, right);
+		double eps = Math.max(0.0, config.strongBranchingScoreEpsilon);
+		return Math.max(leftGain, eps) * Math.max(rightGain, eps);
+	}
+
+	private double strongBranchingGain(double parentBound, StrongBranchingTrialResult trial) {
+		if (trial == null || trial.isInfeasible()) {
+			return config.pseudoCostInf;
+		}
+		if (!Double.isFinite(parentBound) || !Double.isFinite(trial.getBound())) {
+			return 0.0;
+		}
+		return Math.max(0.0, trial.getBound() - parentBound);
+	}
+
+	private int compareStrongBranchingSelection(StrongBranchingSelection a, StrongBranchingSelection b) {
+		if (Utility.compareGt(a.score, b.score)) {
+			return -1;
+		}
+		if (Utility.compareLt(a.score, b.score)) {
+			return 1;
+		}
+		if (Utility.compareLt(a.candidate.getDistanceToHalf(), b.candidate.getDistanceToHalf())) {
+			return -1;
+		}
+		if (Utility.compareGt(a.candidate.getDistanceToHalf(), b.candidate.getDistanceToHalf())) {
+			return 1;
+		}
+		return a.candidate.getDescription().compareTo(b.candidate.getDescription());
+	}
+
 	private double updateReportedBound(PriorityQueue<Node> queue, double currentNodeBound, double incumbentCost) {
 		// 2026-05-19: 参考旧 VRP 的 sudo_cost 语义，报告当前节点 bound 与 open queue 中最小伪下界的较小值。
 		// 旧实现最后用 queue.peek().sudo_cost 修正 lower bound；这里在求解过程中也用同一语义更新输出。
@@ -404,10 +540,16 @@ public class Tree {
 	}
 
 	private void enqueueChild(PriorityQueue<Node> queue, Node child, LP parentLp) {
+		enqueueChild(queue, child, parentLp, false);
+	}
+
+	private void enqueueChild(PriorityQueue<Node> queue, Node child, LP parentLp, boolean seedPrepared) {
 		if (child == null) {
 			return;
 		}
-		prepareChildSeedColumns(child, parentLp);
+		if (!seedPrepared) {
+			prepareChildSeedColumns(child, parentLp);
+		}
 		queue.add(child);
 	}
 
@@ -461,6 +603,44 @@ public class Tree {
 			}
 		}
 		return values;
+	}
+
+	private static final class StrongBranchingSelection {
+		final BranchResult result;
+		final StrongBranchingCandidate candidate;
+		final StrongBranchingTrialResult leftTrial;
+		final StrongBranchingTrialResult rightTrial;
+		final double score;
+		final boolean phase2;
+
+		StrongBranchingSelection(BranchResult result, StrongBranchingCandidate candidate,
+				StrongBranchingTrialResult leftTrial, StrongBranchingTrialResult rightTrial, double score,
+				boolean phase2) {
+			this.result = result;
+			this.candidate = candidate;
+			this.leftTrial = leftTrial;
+			this.rightTrial = rightTrial;
+			this.score = score;
+			this.phase2 = phase2;
+		}
+
+		String summary() {
+			return "candidate=" + candidate.getDescription()
+					+ ",phase=" + (phase2 ? "phase2" : "phase1")
+					+ ",leftBound=" + boundText(leftTrial)
+					+ ",rightBound=" + boundText(rightTrial)
+					+ ",score=" + score;
+		}
+
+		private static String boundText(StrongBranchingTrialResult trial) {
+			if (trial == null) {
+				return "NA";
+			}
+			if (trial.isInfeasible()) {
+				return "INF";
+			}
+			return String.valueOf(trial.getBound());
+		}
 	}
 
 }

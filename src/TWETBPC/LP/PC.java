@@ -161,6 +161,97 @@ public class PC {
 		return lastNodePrunedByDualBound;
 	}
 
+	public StrongBranchingTrialResult solveStrongBranchingRmpTrial(LP lp) {
+		PricingControllerState savedState = saveControllerState();
+		try {
+			TWETMasterSolution solution = solveRelaxationTimed(lp, "strong_branching_rmp");
+			if (isTimeLimitReached()) {
+				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit");
+			}
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				solution = repairInfeasibleMaster(lp);
+			} else if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
+				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
+						config.branchSeedReducedCostAllowance);
+				solution = solveRelaxationTimed(lp, "strong_branching_after_column_filter");
+				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					solution = repairInfeasibleMaster(lp);
+				}
+			}
+			return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial");
+		} finally {
+			restoreControllerState(savedState);
+			resetAllPricingEngines();
+		}
+	}
+
+	public StrongBranchingTrialResult solveStrongBranchingHeuristicTrial(LP lp) {
+		PricingControllerState savedState = saveControllerState();
+		try {
+			TWETMasterSolution solution = lp.getLastSolution();
+			if (solution == null) {
+				solution = solveRelaxationTimed(lp, "strong_branching_phase2_initial");
+			}
+			if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				return StrongBranchingTrialResult.from(lp, solution, false, "heuristic_trial_initial_infeasible");
+			}
+			int passes = 0;
+			int totalAdded = 0;
+			while (!isTimeLimitReached()
+					&& (config.strongBranchingPhase2MaxHeuristicPasses <= 0
+							|| passes < config.strongBranchingPhase2MaxHeuristicPasses)) {
+				boolean addedInPass = false;
+				for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
+					PricingEngine engine = pricingEngines.get(engineIndex);
+					if (!engine.getName().toLowerCase().contains("heuristic")) {
+						continue;
+					}
+					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
+					HashSet<Integer> activeOutsourcingColumnIds =
+							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
+					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
+							activeOutsourcingColumnIds, "strongBranching", false, null, Double.NaN);
+					if (generated.isEmpty()) {
+						continue;
+					}
+					int addedColumns = lp.addColumns(generated.internalColumnIds)
+							+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
+					if (addedColumns <= 0) {
+						continue;
+					}
+					totalAdded += addedColumns;
+					addedInPass = true;
+					solution = resolveCurrentModelTimed(lp, "strong_branching_after_heuristic");
+					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+						return StrongBranchingTrialResult.from(lp, solution, totalAdded > 0,
+								"heuristic_trial infeasible_after_add passes=" + passes + " added=" + totalAdded);
+					}
+					break;
+				}
+				passes++;
+				if (!addedInPass) {
+					break;
+				}
+			}
+			return StrongBranchingTrialResult.from(lp, solution, totalAdded > 0,
+					"heuristic_trial passes=" + passes + " added=" + totalAdded);
+		} finally {
+			restoreControllerState(savedState);
+			resetAllPricingEngines();
+		}
+	}
+
+	private PricingControllerState saveControllerState() {
+		return new PricingControllerState(lastReusableSubtreeArcEliminationBounds, lastObservedDualBound,
+				lastNodePrunedByDualBound);
+	}
+
+	private void restoreControllerState(PricingControllerState state) {
+		lastReusableSubtreeArcEliminationBounds = state.reusableBounds;
+		lastObservedDualBound = state.observedDualBound;
+		lastNodePrunedByDualBound = state.nodePrunedByDualBound;
+	}
+
 	private boolean isTimeLimitReached() {
 		return timeLimitChecker != null && timeLimitChecker.isTimeLimitReached();
 	}
@@ -802,6 +893,10 @@ public class PC {
 		}
 	}
 
+	private void resetAllPricingEngines() {
+		resetFollowingPricingEngines(0);
+	}
+
 	private void heartbeat(LP lp, String phase) {
 		if (!config.diagnosticStageHeartbeat) {
 			return;
@@ -870,6 +965,78 @@ public class PC {
 			correction += generated.certifiedOutsourcingReducedCost;
 		}
 		return baseObjective + correction;
+	}
+
+	private static final class PricingControllerState {
+		final CompletionBoundSubtreeArcEliminator.PreparedBounds reusableBounds;
+		final double observedDualBound;
+		final boolean nodePrunedByDualBound;
+
+		PricingControllerState(CompletionBoundSubtreeArcEliminator.PreparedBounds reusableBounds,
+				double observedDualBound, boolean nodePrunedByDualBound) {
+			this.reusableBounds = reusableBounds;
+			this.observedDualBound = observedDualBound;
+			this.nodePrunedByDualBound = nodePrunedByDualBound;
+		}
+	}
+
+	public static final class StrongBranchingTrialResult {
+		private final TWETMasterSolution solution;
+		private final double bound;
+		private final boolean infeasible;
+		private final boolean addedColumns;
+		private final ArrayList<Integer> internalColumnIds;
+		private final ArrayList<Integer> outsourcingColumnIds;
+		private final String message;
+
+		private StrongBranchingTrialResult(TWETMasterSolution solution, double bound, boolean infeasible,
+				boolean addedColumns, ArrayList<Integer> internalColumnIds, ArrayList<Integer> outsourcingColumnIds,
+				String message) {
+			this.solution = solution;
+			this.bound = bound;
+			this.infeasible = infeasible;
+			this.addedColumns = addedColumns;
+			this.internalColumnIds = internalColumnIds;
+			this.outsourcingColumnIds = outsourcingColumnIds;
+			this.message = message;
+		}
+
+		static StrongBranchingTrialResult from(LP lp, TWETMasterSolution solution, boolean addedColumns,
+				String message) {
+			boolean infeasible = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE;
+			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
+			return new StrongBranchingTrialResult(solution, bound, infeasible, addedColumns,
+					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
+					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
+		}
+
+		public TWETMasterSolution getSolution() {
+			return solution;
+		}
+
+		public double getBound() {
+			return bound;
+		}
+
+		public boolean isInfeasible() {
+			return infeasible;
+		}
+
+		public boolean hasAddedColumns() {
+			return addedColumns;
+		}
+
+		public ArrayList<Integer> getInternalColumnIds() {
+			return new ArrayList<Integer>(internalColumnIds);
+		}
+
+		public ArrayList<Integer> getOutsourcingColumnIds() {
+			return new ArrayList<Integer>(outsourcingColumnIds);
+		}
+
+		public String getMessage() {
+			return message;
+		}
 	}
 
 	private static final class GeneratedColumnIds {

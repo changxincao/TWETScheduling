@@ -1,56 +1,124 @@
 package TWETBPC.BP;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+
+import Common.Utility;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
+import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
-import Common.Utility;
 
 /**
- * 弧分支器。
- * <p>
- * 该分支器对应旧 VRP 参考代码中的 BranchD：在当前 master 解中寻找取值为分数的相邻弧，
- * 然后生成“禁止该弧”和“要求该弧”两个子节点。
+ * arc 分支器。普通分支和 strong branching 候选共用同一套 child 构造逻辑。
  */
 public class ArcBrancher implements Brancher {
 
-	/** 判断某条弧是否为整数时使用的容差。 */
 	private final double tolerance;
 
-	/** 构造一个弧分支器。 */
 	public ArcBrancher(double tolerance) {
 		this.tolerance = tolerance;
 	}
 
 	@Override
 	public BranchResult branch(LP lp) {
-		TWETMasterSolution solution = lp.getLastSolution();
-		if (solution == null) {
-			return BranchResult.none("No master solution");
-		}
-
-		Node base = lp.getNode();
-		int sink = base.sinkId();
-		// 2026-06-02: 对齐旧 VRP BranchD 的候选优先级：先分支真实 job 之间的内部弧；
-		// 只有内部弧没有分数候选时，才用 source/sink 端点弧兜底。每一层内仍选最接近 0.5 的弧。
-		ArcChoice choice = findBestInternalArc(lp, solution, base, sink);
-		if (choice == null) {
-			choice = findBestEndpointArc(lp, solution, base, sink);
-		}
-		if (choice == null) {
+		List<StrongBranchingCandidate> candidates = collectStrongBranchingCandidates(lp, 1);
+		if (candidates.isEmpty()) {
 			return BranchResult.none("No fractional arc found");
 		}
-		int bestFrom = choice.from;
-		int bestTo = choice.to;
+		return candidates.get(0).createBranchResult(lp);
+	}
 
+	@Override
+	public List<StrongBranchingCandidate> collectStrongBranchingCandidates(LP lp, int limit) {
+		if (limit <= 0 || lp.getLastSolution() == null) {
+			return Collections.emptyList();
+		}
+		Node node = lp.getNode();
+		int sink = node.sinkId();
+		double[][] arcValues = accumulateArcValues(lp, sink);
+		ArrayList<StrongBranchingCandidate> candidates = collectInternalArcCandidates(lp, node, sink, arcValues);
+		if (candidates.isEmpty()) {
+			candidates = collectEndpointArcCandidates(lp, node, sink, arcValues);
+		}
+		sortCandidates(candidates);
+		if (candidates.size() <= limit) {
+			return candidates;
+		}
+		return new ArrayList<StrongBranchingCandidate>(candidates.subList(0, limit));
+	}
+
+	private ArrayList<StrongBranchingCandidate> collectInternalArcCandidates(LP lp, Node node, int sink,
+			double[][] arcValues) {
+		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
+		for (int from = 1; from < sink; from++) {
+			for (int to = 1; to < sink; to++) {
+				addArcCandidate(candidates, lp, node, from, to, arcValues[from][to]);
+			}
+		}
+		return candidates;
+	}
+
+	private ArrayList<StrongBranchingCandidate> collectEndpointArcCandidates(LP lp, Node node, int sink,
+			double[][] arcValues) {
+		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
+		for (int job = 1; job < sink; job++) {
+			// endpoint 分支只保留 source->job；job->sink 没有实际顺序含义，仍按当前正式分支口径跳过。
+			addArcCandidate(candidates, lp, node, 0, job, arcValues[0][job]);
+		}
+		return candidates;
+	}
+
+	private void addArcCandidate(ArrayList<StrongBranchingCandidate> candidates, LP lp, Node node,
+			final int from, final int to, final double value) {
+		if (from == to || node.getArcState(from, to) != Node.ARC_FREE || node.isArcForbidden(from, to)) {
+			return;
+		}
+		double frac = Math.abs(value - Math.rint(value));
+		if (Utility.compareLe(frac, tolerance)) {
+			return;
+		}
+		candidates.add(new StrongBranchingCandidate("arc", "arc(" + from + "," + to + ")", value) {
+			@Override
+			public BranchResult createBranchResult(LP lp) {
+				return ArcBrancher.this.createBranchResult(lp, from, to, value);
+			}
+		});
+	}
+
+	private double[][] accumulateArcValues(LP lp, int sink) {
+		double[][] values = new double[sink + 1][sink + 1];
+		TWETMasterSolution solution = lp.getLastSolution();
+		for (Map.Entry<Integer, Double> entry : solution.getColumnValues().entrySet()) {
+			double lambda = entry.getValue().doubleValue();
+			TWETColumn column = lp.getPool().getColumn(entry.getKey().intValue());
+			List<Integer> sequence = column.getSequence();
+			if (sequence.isEmpty()) {
+				continue;
+			}
+			values[0][sequence.get(0).intValue()] += lambda;
+			for (int i = 1; i < sequence.size(); i++) {
+				values[sequence.get(i - 1).intValue()][sequence.get(i).intValue()] += lambda;
+			}
+			values[sequence.get(sequence.size() - 1).intValue()][sink] += lambda;
+		}
+		return values;
+	}
+
+	private BranchResult createBranchResult(LP lp, int bestFrom, int bestTo, double value) {
+		Node base = lp.getNode();
+		int sink = base.sinkId();
 		Node left = base.copy();
 		Node right = base.copy();
 		left.depth = right.depth = base.depth + 1;
-		left.pseudoCost = right.pseudoCost = solution.getObjectiveValue();
+		left.pseudoCost = right.pseudoCost = lp.getLastSolution().getObjectiveValue();
 		left.forbidArc(bestFrom, bestTo);
 		left.markArcRepair(bestFrom, bestTo, false);
 
-		// 要求 i->j 出现时，真实 job i 不能再接其他后继，真实 job j 不能再有其他前驱。
-		// depot/sink 端点不做这种排他处理，避免误禁其他机器的起点或终点。
+		// 要求 i->j 时，同一机器路径里 i 不能再接其他后继，j 不能再有其他前驱。
 		if (bestFrom != 0 && bestFrom != sink) {
 			for (int to = 1; to <= sink; to++) {
 				if (to != bestTo) {
@@ -67,60 +135,27 @@ public class ArcBrancher implements Brancher {
 		}
 		right.requireArc(bestFrom, bestTo);
 		right.markArcRepair(bestFrom, bestTo, true);
-		return new BranchResult(true, left, right, "Branched on arc (" + bestFrom + "," + bestTo + ")");
+		return new BranchResult(true, left, right,
+				"Branched on arc (" + bestFrom + "," + bestTo + ") value=" + value);
 	}
 
-	private ArcChoice findBestInternalArc(LP lp, TWETMasterSolution solution, Node node, int sink) {
-		ArcChoice best = null;
-		for (int from = 1; from < sink; from++) {
-			for (int to = 1; to < sink; to++) {
-				best = betterArcChoice(best, lp, solution, node, sink, from, to);
+	private void sortCandidates(ArrayList<StrongBranchingCandidate> candidates) {
+		Collections.sort(candidates, new Comparator<StrongBranchingCandidate>() {
+			@Override
+			public int compare(StrongBranchingCandidate a, StrongBranchingCandidate b) {
+				if (Utility.compareLt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
+					return -1;
+				}
+				if (Utility.compareGt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
+					return 1;
+				}
+				return a.getDescription().compareTo(b.getDescription());
 			}
-		}
-		return best;
-	}
-
-	private ArcChoice findBestEndpointArc(LP lp, TWETMasterSolution solution, Node node, int sink) {
-		ArcChoice best = null;
-		for (int job = 1; job < sink; job++) {
-			// 2026-06-06: sink 是虚拟终点。endpoint 分支只保留 source->job，避免把无实际顺序含义的 job->sink
-			// 写成后续节点的硬分支约束，干扰 pricing/subtree 的弧语义分析。
-			best = betterArcChoice(best, lp, solution, node, sink, 0, job);
-		}
-		return best;
-	}
-
-	private ArcChoice betterArcChoice(ArcChoice best, LP lp, TWETMasterSolution solution, Node node, int sink,
-			int from, int to) {
-		if (from == to || node.getArcState(from, to) != Node.ARC_FREE || node.isArcForbidden(from, to)) {
-			return best;
-		}
-		double value = solution.getArcValue(lp.getPool(), from, to, sink);
-		double frac = Math.abs(value - Math.rint(value));
-		if (Utility.compareLe(frac, tolerance)) {
-			return best;
-		}
-		double score = Math.abs(value - 0.5);
-		if (best == null || Utility.compareLt(score, best.score)) {
-			return new ArcChoice(from, to, score);
-		}
-		return best;
+		});
 	}
 
 	@Override
 	public String getName() {
 		return "ArcBrancher";
-	}
-
-	private static final class ArcChoice {
-		final int from;
-		final int to;
-		final double score;
-
-		ArcChoice(int from, int to, double score) {
-			this.from = from;
-			this.to = to;
-			this.score = score;
-		}
 	}
 }

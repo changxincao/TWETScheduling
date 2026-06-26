@@ -370,6 +370,13 @@ public class LP {
 		}
 	}
 
+	public void closeModel() {
+		if (cplex != null) {
+			cplex.end();
+			cplex = null;
+		}
+	}
+
 	private TWETMasterSolution solveCurrentModel(String successMessage) throws IloException {
 		boolean solved = cplex.solve();
 		if (!solved) {

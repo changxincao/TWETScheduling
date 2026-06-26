@@ -49,14 +49,10 @@ public class OutsourcingMembershipBrancher implements Brancher {
 		if (solution == null) {
 			return Collections.emptyList();
 		}
-		Node base = lp.getNode();
 		double[] values = solution.getOutsourcingValues();
 		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
 		for (int job = 1; job <= lp.getData().n; job++) {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
-				continue;
-			}
-			if (base.getOutsourcingJobState(job) != Node.OUTSOURCE_FREE) {
 				continue;
 			}
 			double value = job < values.length ? values[job] : 0.0;

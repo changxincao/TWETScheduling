@@ -74,8 +74,7 @@ public class ArcBrancher implements Brancher {
 
 	private void addArcCandidate(ArrayList<StrongBranchingCandidate> candidates, LP lp, Node node,
 			final int from, final int to, final double value) {
-		if (from == to || node.getArcState(from, to) != Node.ARC_FREE
-				|| node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to)) {
+		if (from == to || node.isPricingOnlyArcForbidden(from, to)) {
 			return;
 		}
 		double frac = Math.abs(value - Math.rint(value));

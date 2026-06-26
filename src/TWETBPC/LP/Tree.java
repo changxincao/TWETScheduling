@@ -176,8 +176,25 @@ public class Tree {
 				continue;
 			}
 
+			applyTimeIndexedGraphArcFixing(lp, incumbentCost);
+			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = null;
+			if (!config.useTimeIndexedGraphPricing) {
+				heartbeat(node, "subtreeArcElimination.start");
+				subtreeArcElimination = evaluateSubtreeArcElimination(lp, incumbentCost, solution.getObjectiveValue());
+			}
+			if (isSolveTimeLimitReached(solveStartNanos)) {
+				traceSink.onNodeClosed(node, "time_limit", queue.size());
+				stoppedByTimeLimit = true;
+				break;
+			}
+
+			CompletionBoundSubtreeArcEliminator.Result enumerationArcElimination =
+					(config.bidirectionalCompletionBoundSubtreeArcElimination
+							|| config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly)
+									? subtreeArcElimination : null;
 			RouteEnumerationFiniteMaster.Result enumerationProof =
-					tryRouteEnumeration(lp, incumbentCost, solution.getObjectiveValue(), solveStartNanos);
+					tryRouteEnumeration(lp, incumbentCost, solution.getObjectiveValue(), solveStartNanos,
+							enumerationArcElimination);
 			if (enumerationProof != null && enumerationProof.isProven()) {
 				if (!enumerationProof.isInfeasible()
 						&& Utility.compareLt(enumerationProof.getObjective(), incumbentCost)) {
@@ -194,18 +211,6 @@ public class Tree {
 								: "route_enumeration_finite_master",
 						queue.size());
 				continue;
-			}
-			if (isSolveTimeLimitReached(solveStartNanos)) {
-				traceSink.onNodeClosed(node, "time_limit", queue.size());
-				stoppedByTimeLimit = true;
-				break;
-			}
-
-			applyTimeIndexedGraphArcFixing(lp, incumbentCost);
-			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = null;
-			if (!config.useTimeIndexedGraphPricing) {
-				heartbeat(node, "subtreeArcElimination.start");
-				subtreeArcElimination = evaluateSubtreeArcElimination(lp, incumbentCost, solution.getObjectiveValue());
 			}
 			if (isSolveTimeLimitReached(solveStartNanos)) {
 				traceSink.onNodeClosed(node, "time_limit", queue.size());
@@ -246,7 +251,8 @@ public class Tree {
 	}
 
 	private RouteEnumerationFiniteMaster.Result tryRouteEnumeration(LP lp, double incumbentCost,
-			double nodeLowerBound, long solveStartNanos) {
+			double nodeLowerBound, long solveStartNanos,
+			CompletionBoundSubtreeArcEliminator.Result currentNodeArcElimination) {
 		if (!config.enableRouteEnumeration) {
 			return null;
 		}
@@ -256,7 +262,7 @@ public class Tree {
 		}
 		heartbeat(lp.getNode(), "routeEnumeration.start");
 		RouteEnumerationResult enumeration = routeEnumerationEngine.enumerate(lp, incumbentCost, nodeLowerBound,
-				pc.getLastReusableSubtreeArcEliminationBounds());
+				pc.getLastReusableSubtreeArcEliminationBounds(), currentNodeArcElimination);
 		heartbeat(lp.getNode(), "routeEnumeration.done " + enumeration.summary());
 		if (!enumeration.isAttempted() || !enumeration.isComplete()) {
 			return null;

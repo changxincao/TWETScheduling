@@ -37,7 +37,8 @@ public final class RouteEnumerationEngine {
 	}
 
 	public RouteEnumerationResult enumerate(LP lp, double incumbentCost, double nodeLowerBound,
-			CompletionBoundSubtreeArcEliminator.PreparedBounds preparedBounds) {
+			CompletionBoundSubtreeArcEliminator.PreparedBounds preparedBounds,
+			CompletionBoundSubtreeArcEliminator.Result currentNodeArcElimination) {
 		long start = System.nanoTime();
 		String skipReason = skipReason(lp, incumbentCost, nodeLowerBound);
 		if (skipReason != null) {
@@ -46,6 +47,7 @@ public final class RouteEnumerationEngine {
 
 		double gap = incumbentCost - nodeLowerBound;
 		Node node = lp.getNode();
+		boolean[][] currentFixedArcs = buildCurrentFixedArcMask(node, currentNodeArcElimination);
 		LP.PricingDualSnapshot dual = lp.captureTruePricingDuals();
 		LinkedHashSet<Integer> finiteIds = new LinkedHashSet<Integer>(lp.getRestrictedColumnIds());
 		LinkedHashSet<Integer> finiteOutsourcingIds =
@@ -85,7 +87,7 @@ public final class RouteEnumerationEngine {
 		while (!queue.isEmpty()) {
 			State state = queue.poll();
 			states++;
-			if (!state.sequence.isEmpty() && canUseArc(node, state.lastJob, node.sinkId())) {
+			if (!state.sequence.isEmpty() && canUseArc(node, currentFixedArcs, state.lastJob, node.sinkId())) {
 				double reducedCost = completeReducedCost(state, dual, node.sinkId());
 				ColumnCheck check = checkColumn(lp, state.sequence, reducedCost, dual, gap, activeIds,
 						runSignatures);
@@ -115,7 +117,7 @@ public final class RouteEnumerationEngine {
 
 			for (int job = state.reachableSet.nextSetBit(1); job > 0 && job <= data.n;
 					job = state.reachableSet.nextSetBit(job + 1)) {
-				if (!canUseArc(node, state.lastJob, job)) {
+				if (!canUseArc(node, currentFixedArcs, state.lastJob, job)) {
 					continue;
 				}
 				State child = extendState(state, job, nextSerial++, dual, jobPenalties, node);
@@ -540,8 +542,40 @@ public final class RouteEnumerationEngine {
 		return cost;
 	}
 
-	private boolean canUseArc(Node node, int from, int to) {
-		return !node.isArcForbidden(from, to) && !node.isPricingOnlyArcForbidden(from, to);
+	private boolean canUseArc(Node node, boolean[][] currentFixedArcs, int from, int to) {
+		return !node.isArcForbidden(from, to) && !node.isPricingOnlyArcForbidden(from, to)
+				&& !isCurrentNodeFixedArc(currentFixedArcs, from, to);
+	}
+
+	private boolean[][] buildCurrentFixedArcMask(Node node,
+			CompletionBoundSubtreeArcEliminator.Result currentNodeArcElimination) {
+		if (node == null || currentNodeArcElimination == null || !currentNodeArcElimination.isAvailable()) {
+			return null;
+		}
+		List<int[]> fixedArcs = currentNodeArcElimination.getFixedArcs();
+		if (fixedArcs.isEmpty()) {
+			return null;
+		}
+		boolean[][] mask = new boolean[data.n + 2][data.n + 2];
+		for (int[] arc : fixedArcs) {
+			int from = arc[0];
+			int to = arc[1];
+			if (from < 0 || from >= mask.length || to < 0 || to >= mask[from].length) {
+				continue;
+			}
+			if (node.getArcState(from, to) == Node.ARC_REQUIRED
+					|| node.getAdjacencyPairState(from, to) == Node.ADJACENCY_REQUIRED
+					|| node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to)) {
+				continue;
+			}
+			mask[from][to] = true;
+		}
+		return mask;
+	}
+
+	private boolean isCurrentNodeFixedArc(boolean[][] currentFixedArcs, int from, int to) {
+		return currentFixedArcs != null && from >= 0 && from < currentFixedArcs.length
+				&& to >= 0 && to < currentFixedArcs[from].length && currentFixedArcs[from][to];
 	}
 
 	private boolean canPruneByCompletionBound(CompletionBoundSubtreeArcEliminator.PreparedBounds preparedBounds,

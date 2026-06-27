@@ -612,16 +612,10 @@ public class Tree {
 	}
 
 	private void enqueueChild(PriorityQueue<Node> queue, Node child, LP parentLp) {
-		enqueueChild(queue, child, parentLp, false);
-	}
-
-	private void enqueueChild(PriorityQueue<Node> queue, Node child, LP parentLp, boolean seedPrepared) {
 		if (child == null) {
 			return;
 		}
-		if (!seedPrepared) {
-			prepareChildSeedColumns(child, parentLp);
-		}
+		prepareChildSeedColumns(child, parentLp);
 		queue.add(child);
 	}
 

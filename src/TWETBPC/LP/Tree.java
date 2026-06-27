@@ -390,8 +390,12 @@ public class Tree {
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
 			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
-			phase1.add(new StrongBranchingSelection(branchResult, candidate, leftTrial, rightTrial, score, false,
-					candidateCount, candidates.size(), candidateIndex + 1, candidatePreview));
+			StrongBranchingSelection selection = new StrongBranchingSelection(branchResult, candidate, leftTrial,
+					rightTrial, score, false, candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
+			phase1.add(selection);
+			if (selection.hasTimeLimitedTrial()) {
+				return selection;
+			}
 		}
 		if (phase1.isEmpty()) {
 			return null;
@@ -416,9 +420,13 @@ public class Tree {
 			applyTrialSeed(selected.result.getLeftNode(), leftTrial);
 			applyTrialSeed(selected.result.getRightNode(), rightTrial);
 			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
-			phase2.add(new StrongBranchingSelection(selected.result, selected.candidate, leftTrial, rightTrial,
-					score, true, selected.candidateCount, selected.testedCandidateCount, selected.rankByHalf,
-					selected.candidatePreview));
+			StrongBranchingSelection selection = new StrongBranchingSelection(selected.result, selected.candidate,
+					leftTrial, rightTrial, score, true, selected.candidateCount, selected.testedCandidateCount,
+					selected.rankByHalf, selected.candidatePreview);
+			phase2.add(selection);
+			if (selection.hasTimeLimitedTrial()) {
+				return selection;
+			}
 		}
 		Collections.sort(phase2, new Comparator<StrongBranchingSelection>() {
 			@Override
@@ -471,9 +479,13 @@ public class Tree {
 		if (child == null || trial == null) {
 			return;
 		}
+		if (!trial.isReusableForQueue()) {
+			child.setStrongBranchingSeedPrepared(false);
+			return;
+		}
 		child.seedColumnIds = trial.getInternalColumnIds();
 		child.seedOutsourcingColumnIds = trial.getOutsourcingColumnIds();
-		child.setStrongBranchingSeedPrepared(trial.isReusableForQueue());
+		child.setStrongBranchingSeedPrepared(true);
 	}
 
 	private double strongBranchingScore(double parentBound, StrongBranchingTrialResult left,

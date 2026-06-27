@@ -1,0 +1,72 @@
+# node 级 local pricing horizon 优化设计记录
+
+## 问题背景
+
+当前非根节点通常不能继续使用 root 的 `pi_j` profitable window。分支、subtree 禁弧、pricingOnly 禁弧、required arc 等会改变可用后继结构，继续套用 root 的动态窗口存在误删风险。因此很多非根节点的 `pricingHorizon` 会退回全局 `CmaxH`，导致分段函数定义域、completion bound 构造和 label 扩展都偏宽。
+
+一个可尝试方向是：在每个 node 开始 pricing 前，基于该 node 已经确定的机器侧约束，构造一个当前 node 可行的内部机器调度，并用该调度的 makespan 作为局部 horizon 候选。若该值小于全局 `CmaxH`，则可作为该 node 的 `pricingHorizon` 试验入口，从而减少函数段传播和 label 扩展范围。
+
+这里要特别注意，上述 horizon 只对当前 node 状态有意义，不能简单说它对整个后续子树都有效。子节点会新增分支约束，可能让当前 node 的可行 schedule 在子节点不可行，甚至迫使最小可行 Cmax 变大。因此更稳的实现口径是：每个 node 单独计算 local horizon；父节点算出来的较小 horizon 不能无条件继承给子节点。
+
+## release/no-wait 语义
+
+当前更合理的 release 口径是用 due window 右端，而不是左端。对每个任务设 processing start release：
+
+`r_j = max(0, d_l[j] - p[j])`
+
+在给定机器顺序下，如果任务 `j` 接在 `i` 后面，则 processing start 为：
+
+`start_j = max(r_j, completion_i + s[i][j])`
+
+然后 `completion_j = start_j + p[j]`。首任务对应 `completion_i=0`、setup 为 `s[0][j]`。
+
+这个递推表达的是：setup 可以在 release 之前执行；如果 `completion_i + s[i][j] < r_j`，机器完成 setup 后等待到 `r_j` 再开始加工。当前 `SchedulerForReleaseNoWait` 的语义正是这种 processing start release，且 `Data.setImprovedCmax()` 已经用 `d_l[j]-p[j]` 做过一次全局 Cmax 改进。因此 node 级 local horizon 可以沿用这一语义，但需要把分支/禁弧状态接入。
+
+如果改成“setup start release”口径，例如用 `d_l[j] - p[j] - minSetupToJ`，就必须同步修改时间递推，不能和当前 `start=max(r_j, completion_i+s_ij)` 混用。若后续真的要用 `minSetupToJ`，该最小 setup 还必须只在当前 node 允许的 predecessor arcs 中取最小值。
+
+## 需要纳入的 node 约束
+
+local horizon 子问题只处理内部机器调度可行性，不处理 reduced cost，也不处理 SRI/cut。应纳入的约束包括：
+
+1. 当前 node 的正式 forbidden arcs。
+2. 当前 node 的 required arcs。右支 required arc 还隐含同一前驱/后继的排他禁弧，应和正式 `ArcBrancher` 口径一致。
+3. 当前 node 的 pricingOnly forbidden arcs。若这个 horizon 只用于 pricing，则 pricingOnly 禁弧也应进入子问题；它不需要解释成 master 分支行。
+4. 当前 node 的无向 adjacency 分支状态。如果该分支以后仍保留开关，forbidden/required pair 也要进入机器顺序约束；虽然当前主线基本不使用它。
+5. 机器数上限。为了最小化 Cmax，一般直接允许最多 `maxMachineCount` 台机器即可；如果需要严格证明当前 node 可行，还要检查生成 schedule 的非空机器数是否满足 `minMachineCount`。对单纯 shrink horizon 来说，重点是得到一个满足当前 node 机器列约束的完整可行调度。
+6. required outsourcing job 可以从内部机器调度子问题中删除；optional outsourcing 可以忽略，即仍把这些 job 放在机器上。这样只会让 makespan 候选偏大，不会因为少排任务而虚假收紧。
+
+active SRI cut、dual stabilization、RMP dual、外包 tariff dual 等都不改变机器路径的物理可行性，不应进入这个 Cmax 子问题。
+
+## 三种实现方式分析
+
+1. 2-index arc-flow MIP
+
+可以用 `x[i][j]` 表示任务 `i` 是否直接接到任务 `j`，再配连续时间变量 `start[j]` 和 `Cmax`。约束包括每个任务一个前驱、最多一个后继、source 后继数不超过当前 `maxMachineCount`，以及：
+
+`start[j] >= r_j`
+
+`start[j] >= start[i] + p[i] + s[i][j] - M * (1 - x[i][j])`
+
+首任务则用 `start[j] >= s[0][j]`。目标最小化 `Cmax >= start[j] + p[j]`。
+
+这种模型的优点是变量规模相对小，分支 forbidden/required arc 很容易写成 `x=0/1`。时间递推中的正处理时间也能自然排除有向环。缺点是 big-M LP 松弛弱，若要证明最优可能慢；但本用途只需要尽快拿到一个 feasible incumbent，短时间求可行解即可。
+
+2. time-indexed 模型
+
+可以类似当前 time-indexed pricing 图，把状态扩展为 `(lastJob,t)`，再用路径/流模型找满足所有任务覆盖的最小 Cmax。它对 forbidden time arcs 和图清理很直观，也可复用一部分 time-indexed graph 代码思路。
+
+主要缺点是需要先有一个离散 horizon 才能建图，存在循环依赖；如果用全局 `CmaxH` 建图，节点数可能很大。它还要求时间基本整数或可安全 scale，否则离散化会引入额外误差。当前它不适合作为第一优先级。
+
+3. CP/CP Optimizer 模型
+
+每个任务建立 interval variable，机器上用 optional intervals + alternative 表达分配，用 sequence/noOverlap 和 transition matrix 表达 sequence-dependent setup。release 写为 `startOf(job) >= r_j`，目标最小化 `max endOf(job)`。
+
+CP 的优势是这类调度可行解通常比 MIP 更容易快速找到，且我们只需要 incumbent，不一定要证明最优。难点是 required immediate arc 和 forbidden immediate arc 要用 CP sequence 相关表达清楚，例如要求两个任务在同一机器且相邻、或禁止某个 predecessor-successor 组合；Java CP Optimizer 接口是否方便表达需要单独确认。若接口支持，这可能是最值得先试的建模方式。
+
+## 当前判断
+
+总体思路是对的：它和当前全局 `setImprovedCmax()` 的 release/no-wait 思路一致，可以作为非根节点 `pricingHorizon` 过宽时的实验性收缩手段。最适合先做成一个诊断/实验开关，记录 `nodeId/depth/globalCmaxH/localHorizon/forbiddenArcCount/requiredArcCount/pricingOnlyArcCount/buildMillis/solveMillis/status`，只在成功构造当前 node 可行 schedule 且 `localHorizon < data.CmaxH` 时启用。
+
+但它不应一开始就作为严格证明机制使用。原因有两点。第一，当前 feasible makespan 只说明存在一个满足当前 node 机器约束的调度，不自动证明所有对 TWET 最优有用的列都不需要更晚完成；这和当前全局 `CmaxH=1.1*CmaxE` 一样，本质是工程 horizon 口径，需要保守 slack 和实验验证。第二，父节点的 local horizon 不能直接继承给子节点，子节点新增分支后可能需要更大的 makespan。
+
+实现优先级建议为：先尝试 CP 或 2-index arc-flow，只拿可行解，不强求最优；time-indexed 放后，因为它本身依赖较大的初始 horizon。第一版不要修改 root `piWindow` 逻辑，不做永久 arc fixing，不用 local horizon 证明 node infeasible，只观察它是否能降低非根节点 exact pricing 时间。

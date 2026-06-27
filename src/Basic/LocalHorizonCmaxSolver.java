@@ -32,7 +32,7 @@ public final class LocalHorizonCmaxSolver {
 	}
 
 	public enum Engine {
-		CPLEX_ARC_FLOW, CP_OPTIMIZER
+		CPLEX_ARC_FLOW, CP_OPTIMIZER, CPLEX_TIME_INDEXED
 	}
 
 	public static final class Problem {
@@ -261,10 +261,122 @@ public final class LocalHorizonCmaxSolver {
 		}
 	}
 
+	public static Result solveWithTimeIndexedCplex(Problem problem, int horizon, double timeLimitSeconds, int threads)
+			throws IloException {
+		long startNanos = System.nanoTime();
+		IloCplex cplex = new IloCplex();
+		try {
+			cplex.setOut(null);
+			if (timeLimitSeconds > 0) {
+				cplex.setParam(IloCplex.Param.TimeLimit, timeLimitSeconds);
+			}
+			if (threads > 0) {
+				cplex.setParam(IloCplex.Param.Threads, threads);
+			}
+			int n = problem.n;
+			@SuppressWarnings("unchecked")
+			List<IloNumVar>[][] incoming = new ArrayList[n + 1][horizon + 1];
+			@SuppressWarnings("unchecked")
+			List<IloNumVar>[][] outgoing = new ArrayList[n + 1][horizon + 1];
+			@SuppressWarnings("unchecked")
+			List<IloNumExpr>[] coverTerms = new ArrayList[n + 1];
+			@SuppressWarnings("unchecked")
+			List<IloNumExpr>[] completionTerms = new ArrayList[n + 1];
+			@SuppressWarnings("unchecked")
+			List<IloNumExpr>[][] arcGroup = new ArrayList[n + 1][n + 1];
+			for (int j = 1; j <= n; j++) {
+				coverTerms[j] = new ArrayList<>();
+				completionTerms[j] = new ArrayList<>();
+			}
+			List<IloNumExpr> sourceTerms = new ArrayList<>();
+			List<IloNumExpr> sinkTerms = new ArrayList<>();
+			int arcCount = 0;
+
+			for (int j = 1; j <= n; j++) {
+				if (problem.forbiddenArc[0][j]) {
+					continue;
+				}
+				int completion = Math.max(problem.release[j], problem.setup[0][j]) + problem.processing[j];
+				if (completion <= horizon) {
+					IloNumVar var = cplex.boolVar("a_0_" + j + "_" + completion);
+					rememberArc(incoming, j, completion, var);
+					coverTerms[j].add(var);
+					completionTerms[j].add(cplex.prod(completion, var));
+					rememberArcGroup(arcGroup, 0, j, var);
+					sourceTerms.add(var);
+					arcCount++;
+				}
+			}
+			for (int i = 1; i <= n; i++) {
+				for (int t = problem.release[i] + problem.processing[i]; t <= horizon; t++) {
+					for (int j = 1; j <= n; j++) {
+						if (i == j || problem.forbiddenArc[i][j]) {
+							continue;
+						}
+						int completion = Math.max(problem.release[j], t + problem.setup[i][j]) + problem.processing[j];
+						if (completion <= horizon) {
+							IloNumVar var = cplex.boolVar("a_" + i + "_" + t + "_" + j + "_" + completion);
+							rememberArc(outgoing, i, t, var);
+							rememberArc(incoming, j, completion, var);
+							coverTerms[j].add(var);
+							completionTerms[j].add(cplex.prod(completion, var));
+							rememberArcGroup(arcGroup, i, j, var);
+							arcCount++;
+						}
+					}
+					IloNumVar sink = cplex.boolVar("a_" + i + "_" + t + "_sink");
+					rememberArc(outgoing, i, t, sink);
+					sinkTerms.add(sink);
+					arcCount++;
+				}
+			}
+
+			for (int j = 1; j <= n; j++) {
+				if (coverTerms[j].isEmpty()) {
+					cplex.addEq(cplex.constant(0), 1, "cover_infeasible_" + j);
+				} else {
+					cplex.addEq(sumList(cplex, coverTerms[j]), 1, "cover_" + j);
+				}
+			}
+			cplex.addLe(sumList(cplex, sourceTerms), problem.machines, "machine_count");
+			cplex.addEq(sumList(cplex, sourceTerms), sumList(cplex, sinkTerms), "source_sink_balance");
+			for (int j = 1; j <= n; j++) {
+				for (int t = problem.release[j] + problem.processing[j]; t <= horizon; t++) {
+					List<IloNumVar> in = incoming[j][t];
+					List<IloNumVar> out = outgoing[j][t];
+					if (in != null || out != null) {
+						cplex.addEq(sumVarList(cplex, in), sumVarList(cplex, out), "flow_" + j + "_" + t);
+					}
+				}
+			}
+			addTimeIndexedRequiredArcConstraints(cplex, problem, arcGroup);
+			addTimeIndexedUndirectedAdjacencyConstraints(cplex, problem, arcGroup);
+			IloNumVar cmax = cplex.numVar(0, horizon, "Cmax");
+			for (int j = 1; j <= n; j++) {
+				cplex.addGe(cmax, sumList(cplex, completionTerms[j]), "cmax_" + j);
+			}
+			cplex.addMinimize(cmax);
+
+			boolean solved = cplex.solve();
+			double elapsed = elapsedSeconds(startNanos);
+			if (!solved) {
+				return new Result(Engine.CPLEX_TIME_INDEXED, false, false,
+						String.valueOf(cplex.getStatus()) + ", H=" + horizon + ", arcs=" + arcCount,
+						Double.POSITIVE_INFINITY, safeBestBound(cplex), elapsed, Collections.emptyList());
+			}
+			boolean optimal = cplex.getStatus() == IloCplex.Status.Optimal;
+			return new Result(Engine.CPLEX_TIME_INDEXED, true, optimal,
+					String.valueOf(cplex.getStatus()) + ", H=" + horizon + ", arcs=" + arcCount, cplex.getObjValue(),
+					safeBestBound(cplex), elapsed, Collections.emptyList());
+		} finally {
+			cplex.end();
+		}
+	}
+
 	public static void main(String[] args) throws Exception {
 		if (args.length < 1) {
 			System.out.println(
-					"Usage: Basic.LocalHorizonCmaxSolver <dataPath> [timeLimitSeconds] [threads] [setup] [dueDate]");
+					"Usage: Basic.LocalHorizonCmaxSolver <dataPath> [timeLimitSeconds] [threads] [setup] [dueDate] [timeIndexedHorizon]");
 			return;
 		}
 		double timeLimitSeconds = args.length >= 2 ? Double.parseDouble(args[1]) : 10.0;
@@ -276,6 +388,10 @@ public final class LocalHorizonCmaxSolver {
 				+ problem.horizonUpperBound + ", timeLimit=" + timeLimitSeconds + ", threads=" + threads);
 		System.out.println(solveWithCplex(problem, timeLimitSeconds, threads));
 		System.out.println(solveWithCpOptimizer(problem, timeLimitSeconds, threads));
+		if (args.length >= 6) {
+			int timeIndexedHorizon = Integer.parseInt(args[5]);
+			System.out.println(solveWithTimeIndexedCplex(problem, timeIndexedHorizon, timeLimitSeconds, threads));
+		}
 	}
 
 	/**
@@ -453,6 +569,63 @@ public final class LocalHorizonCmaxSolver {
 
 	private static IloIntExpr sumCpConstraints(IloCP cp, List<IloIntExpr> terms) throws IloException {
 		return cp.sum(terms.toArray(new IloIntExpr[0]));
+	}
+
+	private static void rememberArc(List<IloNumVar>[][] arcLists, int job, int time, IloNumVar var) {
+		if (arcLists[job][time] == null) {
+			arcLists[job][time] = new ArrayList<>();
+		}
+		arcLists[job][time].add(var);
+	}
+
+	private static void rememberArcGroup(List<IloNumExpr>[][] arcGroup, int fromJob, int toJob, IloNumVar var) {
+		if (arcGroup[fromJob][toJob] == null) {
+			arcGroup[fromJob][toJob] = new ArrayList<>();
+		}
+		arcGroup[fromJob][toJob].add(var);
+	}
+
+	private static IloNumExpr sumVarList(IloCplex cplex, List<IloNumVar> terms) throws IloException {
+		if (terms == null || terms.isEmpty()) {
+			return cplex.constant(0);
+		}
+		return cplex.sum(terms.toArray(new IloNumExpr[0]));
+	}
+
+	private static IloNumExpr sumList(IloCplex cplex, List<IloNumExpr> terms) throws IloException {
+		if (terms == null || terms.isEmpty()) {
+			return cplex.constant(0);
+		}
+		return cplex.sum(terms.toArray(new IloNumExpr[0]));
+	}
+
+	private static void addTimeIndexedRequiredArcConstraints(IloCplex cplex, Problem problem,
+			List<IloNumExpr>[][] arcGroup) throws IloException {
+		for (int i = 0; i <= problem.n; i++) {
+			for (int j = 1; j <= problem.n; j++) {
+				if (problem.requiredArc[i][j]) {
+					cplex.addEq(sumList(cplex, arcGroup[i][j]), 1, "ti_required_arc_" + i + "_" + j);
+				}
+			}
+		}
+	}
+
+	private static void addTimeIndexedUndirectedAdjacencyConstraints(IloCplex cplex, Problem problem,
+			List<IloNumExpr>[][] arcGroup) throws IloException {
+		for (int i = 1; i <= problem.n; i++) {
+			for (int j = i + 1; j <= problem.n; j++) {
+				if (problem.undirectedAdjacency[i][j] || problem.undirectedAdjacency[j][i]) {
+					List<IloNumExpr> terms = new ArrayList<>();
+					if (arcGroup[i][j] != null) {
+						terms.addAll(arcGroup[i][j]);
+					}
+					if (arcGroup[j][i] != null) {
+						terms.addAll(arcGroup[j][i]);
+					}
+					cplex.addEq(sumList(cplex, terms), 1, "ti_undirected_adj_" + i + "_" + j);
+				}
+			}
+		}
 	}
 
 	private static List<List<Integer>> extractCplexRoutes(Problem problem, IloCplex cplex, IloNumVar[][] x)

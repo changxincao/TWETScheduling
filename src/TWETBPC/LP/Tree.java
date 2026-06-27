@@ -229,6 +229,14 @@ public class Tree {
 				StrongBranchingSelection strongSelection =
 						tryTwoStageStrongBranching(lp, brancher, subtreeArcElimination, solution.getObjectiveValue());
 				if (strongSelection != null) {
+					if (strongSelection.hasTimeLimitedTrial()) {
+						traceSink.onBranch(node, brancher.getName(), strongSelection.traceResult(), queue.size());
+						traceSink.onNodeClosed(node, "time_limit", queue.size());
+						heartbeat(node, "strongBranching.timeLimit " + strongSelection.summary());
+						stoppedByTimeLimit = true;
+						branched = true;
+						break;
+					}
 					enqueueStrongBranchingChild(queue, strongSelection.result.getLeftNode(), strongSelection.leftTrial);
 					enqueueStrongBranchingChild(queue, strongSelection.result.getRightNode(), strongSelection.rightTrial);
 					traceSink.onBranch(node, brancher.getName(), strongSelection.traceResult(), queue.size());
@@ -246,6 +254,9 @@ public class Tree {
 				enqueueChild(queue, result.getRightNode(), lp);
 				traceSink.onBranch(node, brancher.getName(), result, queue.size());
 				branched = true;
+				break;
+			}
+			if (stoppedByTimeLimit) {
 				break;
 			}
 			if (!branched) {
@@ -474,11 +485,14 @@ public class Tree {
 	}
 
 	private double strongBranchingGain(double parentBound, StrongBranchingTrialResult trial) {
-		if (trial == null || trial.isInfeasible()) {
+		if (trial == null) {
 			return config.pseudoCostInf;
 		}
 		if (trial.isTimeLimited()) {
 			return 0.0;
+		}
+		if (trial.isInfeasible()) {
+			return config.pseudoCostInf;
 		}
 		if (!Double.isFinite(parentBound) || !Double.isFinite(trial.getBound())) {
 			return 0.0;
@@ -676,6 +690,11 @@ public class Tree {
 		BranchResult traceResult() {
 			return new BranchResult(true, result.getLeftNode(), result.getRightNode(),
 					result.getMessage() + " | strongBranching " + summary());
+		}
+
+		boolean hasTimeLimitedTrial() {
+			return (leftTrial != null && leftTrial.isTimeLimited())
+					|| (rightTrial != null && rightTrial.isTimeLimited());
 		}
 
 		String summary() {

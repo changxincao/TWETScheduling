@@ -145,6 +145,8 @@ probe 的结果继续支持这个判断。开启 probe 后，它从 `reference=4
 
 当前判断是：这个方向在正确性上可以成立，但前提比“扫 forbidden arc 后算一个 Cmax”更严格。它适合作为后续实验开关，目标是缩小非根节点 `pricingHorizon`，从而减少 PWLF 定义域、completion-bound 构造和 label 扩展；不应改变 root `piWindow` 逻辑，也不应在无法构造当前 node 可行调度时强行收缩。第一版建议只在 no-outsourcing、无 active cut、无 required outsourcing，且能构造出满足当前 node 内部机器约束的完整调度时启用，并输出 `localHorizon/globalCmaxH/forbiddenArcCount/requiredArcCount/buildMillis` 诊断，再用算例实测是否真的降低 exact pricing 时间。
 
+补充复查 due-window 口径：当前核心数据结构和目标函数是 due window。`Data` 保存 `d_e/d_l/w_e/w_t`，`buildBasePenaltyFunction()` 在 `[0,d_e]` 上加早到惩罚、在 `[d_e,d_l]` 上加零成本平台、在 `[d_l,CmaxH]` 上加迟到惩罚；模型验证器、time-indexed/arc-flow 对照和 BPC pricing 都沿用这个口径。需要区分的是当前 Tanaka 类输入多数走 `due_date=true`，`load_dd_data()` 会把 `d_e=d_l`，于是数据实例退化成 due date；而 `load_dw_data()` 目前仍是 TODO。因此后续 local horizon 的设计应按 due-window 语义写，但当前主线数据上经常是 `d_e=d_l` 的特例。
+
 ## 11. 2026-06-07 probe 计时与策略选择
 
 日志中的 `midpointColumns count/lastMinAvgMax/halfMinAvgMax` 是列 timing 样本的摘要。例如 `400/860.0/959.265/1078.0/352.0/443.3275/523.0` 表示本轮统计了 400 条候选列；这 400 条列的列末最优完工时间 `lastCompletion` 的最小、平均、最大分别是 `860.0/959.265/1078.0`；每条列中间位置任务的完工时间 `halfCompletion` 的最小、平均、最大分别是 `352.0/443.3275/523.0`。后面的 `midpointColumnTasks count/minAvgMedianMax` 则是把这些列内所有任务完成时间放在一起后的任务级分布。

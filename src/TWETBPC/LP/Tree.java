@@ -389,7 +389,8 @@ public class Tree {
 			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp);
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
-			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
+			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
+					: strongBranchingScore(parentBound, leftTrial, rightTrial);
 			StrongBranchingSelection selection = new StrongBranchingSelection(branchResult, candidate, leftTrial,
 					rightTrial, score, false, candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
 			phase1.add(selection);
@@ -419,7 +420,8 @@ public class Tree {
 					? selected.rightTrial : solveStrongBranchingHeuristicTrial(selected.result.getRightNode());
 			applyTrialSeed(selected.result.getLeftNode(), leftTrial);
 			applyTrialSeed(selected.result.getRightNode(), rightTrial);
-			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
+			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
+					: strongBranchingScore(parentBound, leftTrial, rightTrial);
 			StrongBranchingSelection selection = new StrongBranchingSelection(selected.result, selected.candidate,
 					leftTrial, rightTrial, score, true, selected.candidateCount, selected.testedCandidateCount,
 					selected.rankByHalf, selected.candidatePreview);
@@ -494,6 +496,10 @@ public class Tree {
 		double rightGain = strongBranchingGain(parentBound, right);
 		double eps = Math.max(0.0, config.strongBranchingScoreEpsilon);
 		return Math.max(leftGain, eps) * Math.max(rightGain, eps);
+	}
+
+	private boolean hasTimeLimitedTrial(StrongBranchingTrialResult left, StrongBranchingTrialResult right) {
+		return (left != null && left.isTimeLimited()) || (right != null && right.isTimeLimited());
 	}
 
 	private double strongBranchingGain(double parentBound, StrongBranchingTrialResult trial) {

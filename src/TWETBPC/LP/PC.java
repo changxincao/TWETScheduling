@@ -204,7 +204,7 @@ public class PC {
 				return StrongBranchingTrialResult.from(lp, solution, false, "heuristic_trial_initial_time_limit", true);
 			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-				return StrongBranchingTrialResult.from(lp, solution, false, "heuristic_trial_initial_infeasible");
+				throw new IllegalStateException("Strong branching phase2 child is infeasible before heuristic pricing");
 			}
 			int passes = 0;
 			int totalAdded = 0;
@@ -239,8 +239,8 @@ public class PC {
 								true);
 					}
 					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-						return StrongBranchingTrialResult.from(lp, solution, totalAdded > 0,
-								"heuristic_trial infeasible_after_add passes=" + passes + " added=" + totalAdded);
+						throw new IllegalStateException(
+								"Strong branching phase2 child became infeasible after adding heuristic columns");
 					}
 					break;
 				}

@@ -668,15 +668,14 @@ public class PC {
 		}
 
 		int generatedForRepair = 0;
-		while (!lp.isNoSlack() && generatedForRepair < config.maxBranchRepairColumns && !isTimeLimitReached()) {
+		while (!lp.isNoSlack() && !isTimeLimitReached()) {
 			boolean addedInThisPass = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size()
-					&& generatedForRepair < config.maxBranchRepairColumns && !isTimeLimitReached(); engineIndex++) {
+					&& !isTimeLimitReached(); engineIndex++) {
 				PricingEngine engine = pricingEngines.get(engineIndex);
 				boolean addedByThisEngine = false;
 				boolean keepCurrentEngine = true;
-				while (keepCurrentEngine && generatedForRepair < config.maxBranchRepairColumns
-						&& !isTimeLimitReached()) {
+				while (keepCurrentEngine && !isTimeLimitReached()) {
 					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
 					HashSet<Integer> activeOutsourcingColumnIds =
 							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());

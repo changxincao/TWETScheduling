@@ -251,12 +251,6 @@ public class TWETBPCConfig {
 	 */
 	public int timeIndexedGraphMaxExactPricingColumns = 300;
 	/**
-	 * 2026-05-18: 对应旧 VRP Configure.m_branch_col_number。这里默认调大，只作为防死循环保护，
-	 * 不作为不可行证明；正常 repair 应由 slack=0 或无新列退出。原来的 500 过小，
-	 * 可能让可修复子节点过早触发工程上限，因此先放宽到 1000000。
-	 */
-	public int maxBranchRepairColumns = 1000000;
-	/**
 	 * 2026-05-26: 单向 forward exact pricing 的 label 扩展队列排序。
 	 * 可选值：reducedCost、time、reachableSize。
 	 */

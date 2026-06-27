@@ -271,7 +271,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					+ " negative pseudo-schedule columns" : "found no negative pseudo-schedule")
 					+ ", bestPseudoRC=" + bestPseudoReducedCost
 					+ ", horizon=" + horizon
-					+ ", dualWindow=" + graphWindow.dualWindow
+					+ ", piWindow=" + (graphWindow.dualWindow ? "enabled" : "disabled")
 					+ ", states=" + relaxedStates
 					+ ", arcScans=" + processArcScans
 					+ ", timeArcSkips=" + timeIndexedArcSkips

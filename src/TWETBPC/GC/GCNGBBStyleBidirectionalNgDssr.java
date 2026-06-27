@@ -2915,7 +2915,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", midpointProbeFeedback=" + midpointProbeFeedbackSummary
 				+ targetTraceSummary()
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
-				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
+				+ ", piWindow=" + (dualProfitableWindowEnabled ? "enabled" : "disabled")
 				+ ", " + dominanceStatisticsSummary();
 	}
 

@@ -410,7 +410,7 @@ debugRcMismatch total/nodeJoin/forwardSink/bothNeg/signCritical/positiveOnly/max
 
 因此这次刷屏的直接原因不是 node join 公式会把负列算错，而是 debug 复核在安全版里对大量不会进入列池的正候选也比较了函数推导 reduced cost 和 `TWETColumnEvaluator` 复核 reduced cost。所有 mismatch 都落在 `positiveOnly`，没有 `bothNeg`，也没有 `signCritical`。换句话说，当前证据没有发现“真实负列被 inferred 算成非负”或“inferred 负列但 evaluator 非负”的情况。
 
-这些正候选为什么数值不完全一致，主要是口径差异造成的：pricing 侧启用了 root/no-cut 下的 dual profitable window，`dualWindow=enabled`，本轮有效时间域被收紧到 `dynamicHStartMin=512.9999999999998`、`pricingHorizon=1188.0000000000007`；而 `TWETColumnEvaluator` 是按恢复出的完整 sequence 在原始目标函数口径下重新求序列成本。profitable window 的作用是保证负 reduced-cost 的最优候选不会被删掉，不保证任意一个正 reduced-cost sequence 的函数值和原始 evaluator 值逐点一致。因此正候选上出现 `inferred > checked` 是预期内的诊断噪声，不应据此判断 node join 公式错误。
+这些正候选为什么数值不完全一致，主要是口径差异造成的：pricing 侧启用了 root/no-cut 下的 dual profitable window，`piWindow=enabled`，本轮有效时间域被收紧到 `dynamicHStartMin=512.9999999999998`、`pricingHorizon=1188.0000000000007`；而 `TWETColumnEvaluator` 是按恢复出的完整 sequence 在原始目标函数口径下重新求序列成本。profitable window 的作用是保证负 reduced-cost 的最优候选不会被删掉，不保证任意一个正 reduced-cost sequence 的函数值和原始 evaluator 值逐点一致。因此正候选上出现 `inferred > checked` 是预期内的诊断噪声，不应据此判断 node join 公式错误。
 
 当前结论相应修正为：`preNodeFrontier + backward.frontier` 的 node join 公式在本轮 sign 层面没有暴露错误；`exactSuffixFrontier` 仍不需要恢复。短期仍保留 evaluator 复核返回列，因为函数值和 evaluator 的全量数值口径尚未做到逐候选一致，不能直接把 inferred 用作通用列成本。但如果只讨论是否会错过负列，本次分类结果显示该问题没有在 `wet020_001_2m` root 节点复现。后续若要把 inferred 接回剪枝，需要继续在更多样例上统计 `signCritical` 是否始终为 0，而不是看正候选的绝对数值差。
 
@@ -604,7 +604,7 @@ join 后出现正 reduced cost 并不奇怪。group/pair 下界使用的是 `for
 
 2026-05-30 按“多跑几个样例”的要求，在 node join 和 full-domain arc join 上补了 root-only debug 验证。node join 侧在 `GCBBStyleBidirectionalFullDomainNodeJoin` 里恢复了一个 debug-only 的负列复核：只有当 inferred reduced cost 已经为负、并且 `Configure.debugBPCPricingColumnCheck=true` 时，才用 `TWETColumnEvaluator` 对恢复出的 sequence 重新计算原始成本和 reduced cost；该统计不改变实际加列成本，仍然保留性能分支“用 join 推导 reduced cost 反推 objective cost”的口径。`wet020/wet021/wet022` 的 node join root 结果中，`wet021` 第一轮生成了 32 条负候选并全部通过复核，`debugNegGenerated checked/mismatch/signCritical/bothNeg/maxAbs=32/0/0/0/0.0`；`wet020` 和 `wet022` 没有生成负候选。`wet025` 的 node join 运行过慢，已改用 arc join 做同类 pi-window 验证。
 
-arc join 侧复用 `GCBBStyleBidirectionalFullDomain` 既有 debug 复核路径，跑了 `wet020/wet021/wet022/wet025` 四个 root-only 样例。四个样例均 `valid=true`，运行过程中没有出现 inferred/evaluator mismatch 输出；其中 `wet021` 第一轮 exact pricing 的候选池统计为 `candidatePool kept/seen/dropped=8/15/7`，其余 `wet020/wet022/wet025` 没有生成负候选。当前证据说明：至少在这些 root/no-cut 且 `dualWindow=enabled` 的样例上，最终生成的负列在 pi-window 下的 inferred reduced cost 与原始 evaluator reduced cost 没有观察到差异。这个结论是经验验证，不是形式证明；它支持继续用 arc join 做默认方向，也支持把 node join 的 evaluator 复核收缩到 debug-only 负列统计，但不能替代对 dynamic window 安全性的数学证明。
+arc join 侧复用 `GCBBStyleBidirectionalFullDomain` 既有 debug 复核路径，跑了 `wet020/wet021/wet022/wet025` 四个 root-only 样例。四个样例均 `valid=true`，运行过程中没有出现 inferred/evaluator mismatch 输出；其中 `wet021` 第一轮 exact pricing 的候选池统计为 `candidatePool kept/seen/dropped=8/15/7`，其余 `wet020/wet022/wet025` 没有生成负候选。当前证据说明：至少在这些 root/no-cut 且 `piWindow=enabled` 的样例上，最终生成的负列在 pi-window 下的 inferred reduced cost 与原始 evaluator reduced cost 没有观察到差异。这个结论是经验验证，不是形式证明；它支持继续用 arc join 做默认方向，也支持把 node join 的 evaluator 复核收缩到 debug-only 负列统计，但不能替代对 dynamic window 安全性的数学证明。
 
 列加入主问题时的成本口径也重新按代码确认了一遍。`LP.readDuals()` 在每次 LP 求解后把 cover dual 写入 `jobDual[j]`，把机器数约束 dual 写入 `machineDual`，把分支弧约束 dual 写入 `arcDual[from][to]`。pricing 生成列时如果只有 reduced cost，就通过
 
@@ -654,7 +654,7 @@ cost = reducedCost + machineDual
 
 因此，用户担心的列池问题是实际存在的工程风险。`Pool.addColumn()` 按完整有序 `SequenceSignature` 去重；如果相同 sequence 已经存在，会直接返回已有 id，不更新 `TWETColumn.cost`。而 `TWETColumn.cost` 是主问题目标系数，`LP.addColumnToCurrentModel()` 会直接把它放入 objective。若某条 both-negative 但被 pi-window/node-join 口径高估的列先进入列池，后续即使在另一个 dual/window 下重新生成同一 sequence 的真实低成本版本，也不会自动修正旧 cost。这和外包硬时间窗不同：外包窗口是问题层面的全局有效剪枝，而 pi-window 只是当前 root/no-cut pricing 轮根据 dual 推出来的保留规则，不能作为永久列成本定义。
 
-不重新计算时，很难可靠检测某个固定 sequence 是否发生了这种 cost 偏差。能做的 cheap signal 只有“该 sequence 中存在 effective window 严格小于 hard window 的 job”“拼接最优点贴近 dynamic window 边界”“dualWindow=enabled 且 jobDual 小于 outsourcing baseline”等可疑条件，但这些只能提示风险，不能证明成本一致或不一致。真正可靠的检测仍然是对恢复出的 sequence 调用 `TWETColumnEvaluator.evaluate()`，再用当前 dual 重算 reduced cost。若后续要把 node join 分支作为 exact pricing 的加列来源，建议至少在构造 `TWETColumn` 前对 inferred 负候选做 evaluator 复核，并用 evaluator 的真实 cost 写入列池；若 checked reduced cost 已非负，则丢弃该候选。这样评估量只发生在 inferred 负候选上，远少于 millions 级别的 pair/function evaluation，也能避免同序列错误 cost 永久留在 pool 中。
+不重新计算时，很难可靠检测某个固定 sequence 是否发生了这种 cost 偏差。能做的 cheap signal 只有“该 sequence 中存在 effective window 严格小于 hard window 的 job”“拼接最优点贴近 dynamic window 边界”“piWindow=enabled 且 jobDual 小于 outsourcing baseline”等可疑条件，但这些只能提示风险，不能证明成本一致或不一致。真正可靠的检测仍然是对恢复出的 sequence 调用 `TWETColumnEvaluator.evaluate()`，再用当前 dual 重算 reduced cost。若后续要把 node join 分支作为 exact pricing 的加列来源，建议至少在构造 `TWETColumn` 前对 inferred 负候选做 evaluator 复核，并用 evaluator 的真实 cost 写入列池；若 checked reduced cost 已非负，则丢弃该候选。这样评估量只发生在 inferred 负候选上，远少于 millions 级别的 pair/function evaluation，也能避免同序列错误 cost 永久留在 pool 中。
 
 ### 6.19 用户关于 pi-window 列成本风险的原始分析
 

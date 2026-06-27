@@ -1265,7 +1265,7 @@ public class GCBBAsymmetricBidirectional {
 				+ ", earliestSourceCompletion=" + earliestSourceCompletion
 				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
-				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
+				+ ", piWindow=" + (dualProfitableWindowEnabled ? "enabled" : "disabled")
 				+ ", " + PaperDominanceGraphs.statisticsSummary();
 	}
 

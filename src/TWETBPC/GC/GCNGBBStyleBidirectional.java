@@ -2090,7 +2090,7 @@ public class GCNGBBStyleBidirectional {
 				+ ", midpointProbe=" + midpointProbeSummary
 				+ ", midpointProbeFeedback=" + midpointProbeFeedbackSummary
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
-				+ ", dualWindow=" + (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
+				+ ", piWindow=" + (dualProfitableWindowEnabled ? "enabled" : "disabled")
 				+ ", " + PaperDominanceGraphs.statisticsSummary();
 	}
 

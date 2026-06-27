@@ -103,8 +103,8 @@ public class GC {
 				}
 			}
 		}
-		lastMessage = "Exact forward labeling generated " + generatedColumns.size() + " columns; dualWindow="
-				+ (dualProfitableWindowEnabled ? "enabled" : "staticOutsourcingOnly")
+		lastMessage = "Exact forward labeling generated " + generatedColumns.size() + " columns; piWindow="
+				+ (dualProfitableWindowEnabled ? "enabled" : "disabled")
 				+ ", queueOrdering=" + queueOrdering
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ (usePaperDominanceGraph ? ", " + PaperDominanceGraphs.statisticsSummary() : "");

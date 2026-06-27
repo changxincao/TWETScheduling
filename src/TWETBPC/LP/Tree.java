@@ -401,6 +401,9 @@ public class Tree {
 			if (selection.hasTimeLimitedTrial()) {
 				return selection;
 			}
+			if (selection.bothChildrenInfeasible()) {
+				return selection;
+			}
 		}
 		if (phase1.isEmpty()) {
 			return null;
@@ -716,6 +719,11 @@ public class Tree {
 		boolean hasTimeLimitedTrial() {
 			return (leftTrial != null && leftTrial.isTimeLimited())
 					|| (rightTrial != null && rightTrial.isTimeLimited());
+		}
+
+		boolean bothChildrenInfeasible() {
+			return leftTrial != null && rightTrial != null
+					&& leftTrial.isInfeasible() && rightTrial.isInfeasible();
 		}
 
 		String summary() {

@@ -513,7 +513,7 @@ public class Tree {
 
 	private double strongBranchingGain(double parentBound, StrongBranchingTrialResult trial) {
 		if (trial == null) {
-			return config.pseudoCostInf;
+			throw new IllegalStateException("Strong branching score requested for missing trial result");
 		}
 		if (trial.isTimeLimited()) {
 			return 0.0;

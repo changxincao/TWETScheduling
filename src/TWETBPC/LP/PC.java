@@ -173,8 +173,10 @@ public class PC {
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
+			boolean repaired = false;
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				solution = repairInfeasibleMaster(lp, false);
+				repaired = true;
 			}
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
@@ -182,7 +184,7 @@ public class PC {
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible");
 			}
-			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
+			if (!repaired && lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 						config.branchSeedReducedCostAllowance);
 			}

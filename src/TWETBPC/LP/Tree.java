@@ -386,8 +386,12 @@ public class Tree {
 			}
 			applySubtreeArcElimination(branchResult, subtreeArcElimination);
 			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(branchResult.getLeftNode(), parentLp);
-			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp);
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
+			if (leftTrial != null && leftTrial.isTimeLimited()) {
+				return new StrongBranchingSelection(branchResult, candidate, leftTrial, null, 0.0, false,
+						candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
+			}
+			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
 			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
 					: strongBranchingScore(parentBound, leftTrial, rightTrial);
@@ -416,9 +420,14 @@ public class Tree {
 			StrongBranchingSelection selected = phase1.get(idx);
 			StrongBranchingTrialResult leftTrial = !selected.leftTrial.isReusableForQueue()
 					? selected.leftTrial : solveStrongBranchingHeuristicTrial(selected.result.getLeftNode());
+			applyTrialSeed(selected.result.getLeftNode(), leftTrial);
+			if (leftTrial != null && leftTrial.isTimeLimited()) {
+				return new StrongBranchingSelection(selected.result, selected.candidate, leftTrial, selected.rightTrial,
+						0.0, true, selected.candidateCount, selected.testedCandidateCount, selected.rankByHalf,
+						selected.candidatePreview);
+			}
 			StrongBranchingTrialResult rightTrial = !selected.rightTrial.isReusableForQueue()
 					? selected.rightTrial : solveStrongBranchingHeuristicTrial(selected.result.getRightNode());
-			applyTrialSeed(selected.result.getLeftNode(), leftTrial);
 			applyTrialSeed(selected.result.getRightNode(), rightTrial);
 			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
 					: strongBranchingScore(parentBound, leftTrial, rightTrial);

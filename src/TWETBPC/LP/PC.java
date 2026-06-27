@@ -65,7 +65,7 @@ public class PC {
 		boolean strongBranchingSeedPrepared = lp.getNode() != null && lp.getNode().isStrongBranchingSeedPrepared();
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 			if (strongBranchingSeedPrepared) {
-				return solution;
+				throw new IllegalStateException("Prepared strong branching child is infeasible on formal solve");
 			}
 			solution = repairInfeasibleMaster(lp);
 			if (isTimeLimitReached()) {

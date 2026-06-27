@@ -185,12 +185,17 @@ public final class OutsourcingModelComparisonTest {
 		config.restrictedMasterIntegerHeuristicTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.restrictedMasterIntegerTimeLimit",
 				Double.toString(config.restrictedMasterIntegerHeuristicTimeLimitSeconds)));
-		config.restrictedMasterIntegerHeuristicLargeInstanceThreshold = Integer.getInteger(
+		config.restrictedMasterIntegerHeuristicLargeInstanceThreshold = Integer.parseInt(System.getProperty(
 				"twet.bpc.outsourcingCompare.restrictedMasterIntegerLargeThreshold",
-				config.restrictedMasterIntegerHeuristicLargeInstanceThreshold);
+				System.getProperty("twet.bpc.outsourcingCompare.restrictedMasterIntegerLargeInstanceThreshold",
+						Integer.toString(config.restrictedMasterIntegerHeuristicLargeInstanceThreshold))));
 		config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.restrictedMasterIntegerLargeTimeLimit",
-				Double.toString(config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds)));
+				System.getProperty("twet.bpc.outsourcingCompare.restrictedMasterIntegerLargeInstanceTimeLimit",
+						Double.toString(config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds))));
+		config.restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit = Integer.parseInt(System.getProperty(
+				"twet.bpc.outsourcingCompare.restrictedMasterIntegerLargeInstanceReducedCostColumnLimit",
+				Integer.toString(config.restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit)));
 		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.enableUndirectedAdjacencyBranching", "false"));
 		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(

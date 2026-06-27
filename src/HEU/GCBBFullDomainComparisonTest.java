@@ -249,12 +249,17 @@ public class GCBBFullDomainComparisonTest {
 		config.restrictedMasterIntegerHeuristicTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerTimeLimit",
 				Double.toString(config.restrictedMasterIntegerHeuristicTimeLimitSeconds)));
-		config.restrictedMasterIntegerHeuristicLargeInstanceThreshold = Integer.getInteger(
+		config.restrictedMasterIntegerHeuristicLargeInstanceThreshold = Integer.parseInt(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerLargeThreshold",
-				config.restrictedMasterIntegerHeuristicLargeInstanceThreshold);
+				System.getProperty("twet.bpc.fullDomainCompare.restrictedMasterIntegerLargeInstanceThreshold",
+						Integer.toString(config.restrictedMasterIntegerHeuristicLargeInstanceThreshold))));
 		config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerLargeTimeLimit",
-				Double.toString(config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds)));
+				System.getProperty("twet.bpc.fullDomainCompare.restrictedMasterIntegerLargeInstanceTimeLimit",
+						Double.toString(config.restrictedMasterIntegerHeuristicLargeInstanceTimeLimitSeconds))));
+		config.restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit = Integer.parseInt(System.getProperty(
+				"twet.bpc.fullDomainCompare.restrictedMasterIntegerLargeInstanceReducedCostColumnLimit",
+				Integer.toString(config.restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit)));
 		config.diagnosticRestrictedIntegerMipLog = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.restrictedMasterIntegerMipLog",
 				Boolean.toString(config.diagnosticRestrictedIntegerMipLog)));

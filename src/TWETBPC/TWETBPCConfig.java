@@ -300,7 +300,7 @@ public class TWETBPCConfig {
 	/** 2026-06-04: coverRepair 中按 reduced cost 排序保留的列数；小于等于 0 表示全保留。 */
 	public int restrictedMasterIntegerHeuristicReducedCostColumnLimit = 2000;
 	/** 2026-06-26: RMIH 大规模算例保留更多低 reduced-cost 列，减少筛列过窄导致的上界波动。 */
-	public int restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit = 4000;
+	public int restrictedMasterIntegerHeuristicLargeInstanceReducedCostColumnLimit = 6000;
 	/** 2026-06-04: coverRepair 中每个 job 额外保留的最低 reduced cost 覆盖列数。 */
 	public int restrictedMasterIntegerHeuristicPerJobColumnLimit = 10;
 	/** 2026-06-04: 单列重复 job 不超过该数量时枚举所有删除组合生成修复列。 */

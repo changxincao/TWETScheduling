@@ -229,8 +229,8 @@ public class Tree {
 				StrongBranchingSelection strongSelection =
 						tryTwoStageStrongBranching(lp, brancher, subtreeArcElimination, solution.getObjectiveValue());
 				if (strongSelection != null) {
-					enqueueChild(queue, strongSelection.result.getLeftNode(), lp, true);
-					enqueueChild(queue, strongSelection.result.getRightNode(), lp, true);
+					enqueueStrongBranchingChild(queue, strongSelection.result.getLeftNode(), strongSelection.leftTrial);
+					enqueueStrongBranchingChild(queue, strongSelection.result.getRightNode(), strongSelection.rightTrial);
 					traceSink.onBranch(node, brancher.getName(), strongSelection.traceResult(), queue.size());
 					heartbeat(node, "strongBranching.selected " + strongSelection.summary());
 					branched = true;
@@ -398,10 +398,10 @@ public class Tree {
 		ArrayList<StrongBranchingSelection> phase2 = new ArrayList<StrongBranchingSelection>();
 		for (int idx = 0; idx < phase2Limit; idx++) {
 			StrongBranchingSelection selected = phase1.get(idx);
-			StrongBranchingTrialResult leftTrial =
-					solveStrongBranchingHeuristicTrial(selected.result.getLeftNode());
-			StrongBranchingTrialResult rightTrial =
-					solveStrongBranchingHeuristicTrial(selected.result.getRightNode());
+			StrongBranchingTrialResult leftTrial = !selected.leftTrial.isReusableForQueue()
+					? selected.leftTrial : solveStrongBranchingHeuristicTrial(selected.result.getLeftNode());
+			StrongBranchingTrialResult rightTrial = !selected.rightTrial.isReusableForQueue()
+					? selected.rightTrial : solveStrongBranchingHeuristicTrial(selected.result.getRightNode());
 			applyTrialSeed(selected.result.getLeftNode(), leftTrial);
 			applyTrialSeed(selected.result.getRightNode(), rightTrial);
 			double score = strongBranchingScore(parentBound, leftTrial, rightTrial);
@@ -462,6 +462,7 @@ public class Tree {
 		}
 		child.seedColumnIds = trial.getInternalColumnIds();
 		child.seedOutsourcingColumnIds = trial.getOutsourcingColumnIds();
+		child.setStrongBranchingSeedPrepared(trial.isReusableForQueue());
 	}
 
 	private double strongBranchingScore(double parentBound, StrongBranchingTrialResult left,
@@ -475,6 +476,9 @@ public class Tree {
 	private double strongBranchingGain(double parentBound, StrongBranchingTrialResult trial) {
 		if (trial == null || trial.isInfeasible()) {
 			return config.pseudoCostInf;
+		}
+		if (trial.isTimeLimited()) {
+			return 0.0;
 		}
 		if (!Double.isFinite(parentBound) || !Double.isFinite(trial.getBound())) {
 			return 0.0;
@@ -580,6 +584,16 @@ public class Tree {
 		queue.add(child);
 	}
 
+	private boolean enqueueStrongBranchingChild(PriorityQueue<Node> queue, Node child,
+			StrongBranchingTrialResult trial) {
+		if (child == null || trial == null || !trial.isReusableForQueue()) {
+			return false;
+		}
+		child.setStrongBranchingSeedPrepared(true);
+		queue.add(child);
+		return true;
+	}
+
 	private void prepareChildSeedColumns(Node child, LP parentLp) {
 		ArrayList<Integer> seed = new ArrayList<Integer>();
 		ArrayList<Integer> outsourcingSeed = new ArrayList<Integer>(child.seedOutsourcingColumnIds);
@@ -681,6 +695,9 @@ public class Tree {
 		private static String boundText(StrongBranchingTrialResult trial) {
 			if (trial == null) {
 				return "NA";
+			}
+			if (trial.isTimeLimited()) {
+				return "TIME_LIMIT";
 			}
 			if (trial.isInfeasible()) {
 				return "INF";

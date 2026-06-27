@@ -56,6 +56,9 @@ public class Node implements Comparable<Node> {
 	public ArrayList<Integer> seedOutsourcingColumnIds;
 	public ArrayList<Integer> incumbentColumnIds;
 	public ArrayList<Integer> activeCutIds;
+	// 2026-06-27: strong branching trial 已经对该 child 完成 RMP/repair/筛列后置处理。
+	// 正式出队时仍需解一次 LP 取得 dual，但不再重复做 child 初始 repair/筛列。
+	private boolean strongBranchingSeedPrepared;
 	private byte[][] arcState;
 	private boolean[][] pricingOnlyForbiddenArc;
 	private HashSet<Long> timeIndexedPricingOnlyForbiddenArc;
@@ -79,6 +82,7 @@ public class Node implements Comparable<Node> {
 		this.seedOutsourcingColumnIds = new ArrayList<Integer>();
 		this.incumbentColumnIds = new ArrayList<Integer>(incumbentColumnIds);
 		this.activeCutIds = new ArrayList<Integer>();
+		this.strongBranchingSeedPrepared = false;
 		this.arcState = new byte[data.n + 2][data.n + 2];
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>();
@@ -99,6 +103,7 @@ public class Node implements Comparable<Node> {
 		copy.maxMachineCount = maxMachineCount;
 		copy.seedOutsourcingColumnIds = new ArrayList<Integer>(seedOutsourcingColumnIds);
 		copy.activeCutIds = new ArrayList<Integer>(activeCutIds);
+		copy.strongBranchingSeedPrepared = false;
 		copy.arcState = new byte[arcState.length][];
 		for (int i = 0; i < arcState.length; i++) {
 			copy.arcState[i] = arcState[i].clone();
@@ -288,6 +293,14 @@ public class Node implements Comparable<Node> {
 
 	public byte getRepairType() {
 		return repairType;
+	}
+
+	public boolean isStrongBranchingSeedPrepared() {
+		return strongBranchingSeedPrepared;
+	}
+
+	public void setStrongBranchingSeedPrepared(boolean strongBranchingSeedPrepared) {
+		this.strongBranchingSeedPrepared = strongBranchingSeedPrepared;
 	}
 
 	public int getRepairFrom() {

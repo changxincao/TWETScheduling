@@ -62,7 +62,11 @@ public class PC {
 		if (isTimeLimitReached()) {
 			return solution;
 		}
+		boolean strongBranchingSeedPrepared = lp.getNode() != null && lp.getNode().isStrongBranchingSeedPrepared();
 		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			if (strongBranchingSeedPrepared) {
+				return solution;
+			}
 			solution = repairInfeasibleMaster(lp);
 			if (isTimeLimitReached()) {
 				return solution;
@@ -70,7 +74,8 @@ public class PC {
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return solution;
 			}
-		} else if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
+		} else if (!strongBranchingSeedPrepared && lp.getNode() != null && lp.getNode().depth > 0
+				&& !config.debugSkipBranchColumnFilter) {
 			// 2026-05-18: 对齐旧 VRP UpdateRouteSet。Child 第一次 LP 可行时，也先按当前 LP 的
 			// reduced cost 和分支兼容性筛出正式列集，再进入后续 pricing；repair 成功路径也会做同样筛选。
 			lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
@@ -166,17 +171,20 @@ public class PC {
 		try {
 			TWETMasterSolution solution = solveRelaxationTimed(lp, "strong_branching_rmp");
 			if (isTimeLimitReached()) {
-				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit");
+				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-				solution = repairInfeasibleMaster(lp);
-			} else if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
+				solution = repairInfeasibleMaster(lp, false);
+			}
+			if (isTimeLimitReached()) {
+				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
+			}
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible");
+			}
+			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 						config.branchSeedReducedCostAllowance);
-				solution = solveRelaxationTimed(lp, "strong_branching_after_column_filter");
-				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-					solution = repairInfeasibleMaster(lp);
-				}
 			}
 			return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial");
 		} finally {
@@ -192,7 +200,10 @@ public class PC {
 			if (solution == null) {
 				solution = solveRelaxationTimed(lp, "strong_branching_phase2_initial");
 			}
-			if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			if (isTimeLimitReached()) {
+				return StrongBranchingTrialResult.from(lp, solution, false, "heuristic_trial_initial_time_limit", true);
+			}
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "heuristic_trial_initial_infeasible");
 			}
 			int passes = 0;
@@ -222,7 +233,12 @@ public class PC {
 					totalAdded += addedColumns;
 					addedInPass = true;
 					solution = resolveCurrentModelTimed(lp, "strong_branching_after_heuristic");
-					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					if (isTimeLimitReached()) {
+						return StrongBranchingTrialResult.from(lp, solution, totalAdded > 0,
+								"heuristic_trial time_limit_after_add passes=" + passes + " added=" + totalAdded,
+								true);
+					}
+					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 						return StrongBranchingTrialResult.from(lp, solution, totalAdded > 0,
 								"heuristic_trial infeasible_after_add passes=" + passes + " added=" + totalAdded);
 					}
@@ -654,6 +670,10 @@ public class PC {
 
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
+		return repairInfeasibleMaster(lp, true);
+	}
+
+	private TWETMasterSolution repairInfeasibleMaster(LP lp, boolean resolveAfterColumnFilter) {
 		// 2026-05-18: 正常 RMP 不可行时，先建立带人工 slack 的同一节点 LP；
 		// slack 产生的 dual 用于引导启发式和精确定价器补列，补到 slack=0 后再回到正常 RMP。
 		lp.setFeasibilityRepairMode(true);
@@ -714,6 +734,10 @@ public class PC {
 			}
 		}
 
+		if (isTimeLimitReached()) {
+			lp.setFeasibilityRepairMode(false);
+			return solution;
+		}
 		if (!lp.isNoSlack()) {
 			lp.setFeasibilityRepairMode(false);
 			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
@@ -727,7 +751,7 @@ public class PC {
 		lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 				config.branchSeedReducedCostAllowance);
 		lp.setFeasibilityRepairMode(false);
-		return solveRelaxationTimed(lp, "repair_final");
+		return resolveAfterColumnFilter ? solveRelaxationTimed(lp, "repair_final") : solution;
 	}
 
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
@@ -983,17 +1007,20 @@ public class PC {
 		private final TWETMasterSolution solution;
 		private final double bound;
 		private final boolean infeasible;
+		private final boolean timeLimited;
 		private final boolean addedColumns;
 		private final ArrayList<Integer> internalColumnIds;
 		private final ArrayList<Integer> outsourcingColumnIds;
 		private final String message;
 
 		private StrongBranchingTrialResult(TWETMasterSolution solution, double bound, boolean infeasible,
+				boolean timeLimited,
 				boolean addedColumns, ArrayList<Integer> internalColumnIds, ArrayList<Integer> outsourcingColumnIds,
 				String message) {
 			this.solution = solution;
 			this.bound = bound;
 			this.infeasible = infeasible;
+			this.timeLimited = timeLimited;
 			this.addedColumns = addedColumns;
 			this.internalColumnIds = internalColumnIds;
 			this.outsourcingColumnIds = outsourcingColumnIds;
@@ -1002,9 +1029,14 @@ public class PC {
 
 		static StrongBranchingTrialResult from(LP lp, TWETMasterSolution solution, boolean addedColumns,
 				String message) {
+			return from(lp, solution, addedColumns, message, false);
+		}
+
+		static StrongBranchingTrialResult from(LP lp, TWETMasterSolution solution, boolean addedColumns,
+				String message, boolean timeLimited) {
 			boolean infeasible = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
-			return new StrongBranchingTrialResult(solution, bound, infeasible, addedColumns,
+			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
@@ -1019,6 +1051,14 @@ public class PC {
 
 		public boolean isInfeasible() {
 			return infeasible;
+		}
+
+		public boolean isTimeLimited() {
+			return timeLimited;
+		}
+
+		public boolean isReusableForQueue() {
+			return !infeasible && !timeLimited;
 		}
 
 		public boolean hasAddedColumns() {

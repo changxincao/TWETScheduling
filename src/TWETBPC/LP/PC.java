@@ -216,7 +216,7 @@ public class PC {
 				boolean addedInPass = false;
 				for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
 					PricingEngine engine = pricingEngines.get(engineIndex);
-					if (!engine.getName().toLowerCase().contains("heuristic")) {
+					if (!isStrongBranchingPhase2PricingEngine(lp, engine)) {
 						continue;
 					}
 					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
@@ -257,6 +257,15 @@ public class PC {
 			restoreControllerState(savedState);
 			resetAllPricingEngines();
 		}
+	}
+
+	private boolean isStrongBranchingPhase2PricingEngine(LP lp, PricingEngine engine) {
+		if (engine.getName().toLowerCase().contains("heuristic")) {
+			return true;
+		}
+		// 2026-06-27: Phase 2 仍不跑内部 exact pricing；但 columnized outsourcing 的集合定价较轻，
+		// 且 outsourcing membership 分支的评分需要看到外包列族的即时反应，因此允许它进入 trial。
+		return lp.isColumnizedOutsourcing() && engine instanceof OutsourcingPricingEngine;
 	}
 
 	private PricingControllerState saveControllerState() {

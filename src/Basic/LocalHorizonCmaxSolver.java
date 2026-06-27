@@ -67,6 +67,11 @@ public final class LocalHorizonCmaxSolver {
 
 		public static Problem fromData(Data data, boolean[][] forbiddenArc, boolean[][] requiredArc,
 				boolean[][] undirectedAdjacency) {
+			return fromData(data, data.m, forbiddenArc, requiredArc, undirectedAdjacency);
+		}
+
+		public static Problem fromData(Data data, int machines, boolean[][] forbiddenArc, boolean[][] requiredArc,
+				boolean[][] undirectedAdjacency) {
 			int n = data.n;
 			int[] processing = new int[n + 1];
 			int[] release = new int[n + 1];
@@ -81,7 +86,7 @@ public final class LocalHorizonCmaxSolver {
 					setup[i][j] = i == j ? 0 : toModelInt(data.s[i][j]);
 				}
 			}
-			return new Problem(n, data.m, processing, release, setup, forbiddenArc, requiredArc,
+			return new Problem(n, machines, processing, release, setup, forbiddenArc, requiredArc,
 					undirectedAdjacency, computeConservativeHorizon(n, processing, release, setup));
 		}
 	}

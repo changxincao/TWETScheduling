@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.PriorityQueue;
 
 import Basic.Data;
+import Basic.LocalHorizonCmaxSolver;
 import Common.Utility;
 import Output.BPCTraceSink;
 import TWETBPC.TWETBPCConfig;
@@ -94,6 +95,7 @@ public class Tree {
 			node.id = ++processedNodes;
 			traceSink.onNodePicked(node, queue.size(), totalPoolSize(), cutPool.size());
 			heartbeat(node, "node.pick " + node.diagnosticSummary());
+			diagnoseLocalHorizonAtNode(node);
 
 			// 2026-05-19: 对齐旧 VRP 的 sudo_cost 预剪枝。root 的 pseudoCost 是占位大数，不能用来剪；
 			// 非根节点若 pseudoCost 已不小于 incumbent，由于队列按 pseudoCost 升序，当前节点和剩余节点
@@ -345,6 +347,70 @@ public class Tree {
 			return;
 		}
 		traceSink.onStageHeartbeat(node, phase, totalPoolSize(), cutPool.size());
+	}
+
+	private void diagnoseLocalHorizonAtNode(Node node) {
+		if (!config.diagnosticLocalHorizonAtNode) {
+			return;
+		}
+		if (config.diagnosticLocalHorizonNodeId > 0 && node.id != config.diagnosticLocalHorizonNodeId) {
+			return;
+		}
+		if (node.depth <= 0) {
+			return;
+		}
+		boolean[][] forbidden = new boolean[data.n + 1][data.n + 1];
+		for (int from = 0; from <= data.n; from++) {
+			for (int to = 1; to <= data.n; to++) {
+				if (from != to && (node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to))) {
+					forbidden[from][to] = true;
+				}
+			}
+		}
+		boolean[][] required = new boolean[data.n + 1][data.n + 1];
+		for (int[] arc : node.getRequiredArcs()) {
+			int from = arc[0];
+			int to = arc[1];
+			if (from >= 0 && from <= data.n && to >= 1 && to <= data.n) {
+				required[from][to] = true;
+			}
+		}
+		LocalHorizonCmaxSolver.Problem problem =
+				LocalHorizonCmaxSolver.Problem.fromData(data, node.maxMachineCount, forbidden, required, null);
+		System.out.println(String.format(Locale.US,
+				"[LocalHorizonDiag] node=%d depth=%d maxMachine=%d forbidden=%d pricingOnly=%d required=%d horizonUB=%d timeLimit=%.3f",
+				node.id, node.depth, node.maxMachineCount, countForbidden(forbidden), node.countPricingOnlyForbiddenArcs(),
+				node.countRequiredArcStates(), problem.horizonUpperBound, config.diagnosticLocalHorizonTimeLimitSeconds));
+		if (config.diagnosticLocalHorizonUseCplex) {
+			try {
+				LocalHorizonCmaxSolver.Result result = LocalHorizonCmaxSolver.solveWithCplex(problem,
+						config.diagnosticLocalHorizonTimeLimitSeconds, 1);
+				System.out.println("[LocalHorizonDiag] node=" + node.id + " " + result);
+			} catch (Exception e) {
+				System.out.println("[LocalHorizonDiag] node=" + node.id + " CPLEX_ARC_FLOW failed: " + e.getMessage());
+			}
+		}
+		if (config.diagnosticLocalHorizonUseCp) {
+			try {
+				LocalHorizonCmaxSolver.Result result = LocalHorizonCmaxSolver.solveWithCpOptimizer(problem,
+						config.diagnosticLocalHorizonTimeLimitSeconds, 1);
+				System.out.println("[LocalHorizonDiag] node=" + node.id + " " + result);
+			} catch (Exception e) {
+				System.out.println("[LocalHorizonDiag] node=" + node.id + " CP_OPTIMIZER failed: " + e.getMessage());
+			}
+		}
+	}
+
+	private int countForbidden(boolean[][] forbidden) {
+		int count = 0;
+		for (int from = 0; from < forbidden.length; from++) {
+			for (int to = 0; to < forbidden[from].length; to++) {
+				if (forbidden[from][to]) {
+					count++;
+				}
+			}
+		}
+		return count;
 	}
 
 	private void applySubtreeArcElimination(BranchResult branchResult,

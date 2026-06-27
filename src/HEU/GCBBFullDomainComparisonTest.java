@@ -273,6 +273,18 @@ public class GCBBFullDomainComparisonTest {
 				|| config.diagnosticNodeProgressSummary
 				|| Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.pricingDiagnostics",
 						Boolean.toString(config.diagnosticPricingSummaryDetails)));
+		config.diagnosticLocalHorizonAtNode = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.localHorizonDiag", Boolean.toString(config.diagnosticLocalHorizonAtNode)));
+		config.diagnosticLocalHorizonNodeId = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.localHorizonDiagNode", config.diagnosticLocalHorizonNodeId);
+		config.diagnosticLocalHorizonTimeLimitSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.localHorizonTimeLimit",
+				Double.toString(config.diagnosticLocalHorizonTimeLimitSeconds)));
+		config.diagnosticLocalHorizonUseCplex = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.localHorizonUseCplex",
+				Boolean.toString(config.diagnosticLocalHorizonUseCplex)));
+		config.diagnosticLocalHorizonUseCp = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.localHorizonUseCp", Boolean.toString(config.diagnosticLocalHorizonUseCp)));
 		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);
 		config.solveTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.solveTimeLimitSeconds",

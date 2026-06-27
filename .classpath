@@ -12,6 +12,7 @@
 		</attributes>
 	</classpathentry>
 	<classpathentry kind="lib" path="D:/软件/cplex/ILOG/CPLEX_Studio2211/cplex/lib/cplex.jar"/>
+	<classpathentry kind="lib" path="D:/软件/cplex/ILOG/CPLEX_Studio2211/cpoptimizer/lib/ILOG.CP.jar"/>
 	<classpathentry kind="src" output="target/test-classes" path="test">
 		<attributes>
 			<attribute name="test" value="true"/>

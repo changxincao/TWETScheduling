@@ -80,3 +80,15 @@ CP 的优势是这类调度可行解通常比 MIP 更容易快速找到，且我
 一台机器上的任务按某个顺序依次执行。若任务 `j` 是该机器上的首任务，则其加工开始时刻至少为 `max(r_j, s_0j)`。若任务 `j` 紧接在任务 `i` 后面，则机器可以在任务 `i` 完成后立即执行 `i->j` 的 setup；setup 可以发生在 `j` 的释放时间之前。任务 `j` 的加工开始时刻因此为 `max(r_j, C_i + s_ij)`，其中 `C_i` 是任务 `i` 的完成时间。也就是说，释放时间只限制加工开始，不限制 setup 开始；如果 setup 提前完成，机器可以等待到 `r_j` 再加工。
 
 可行调度需要给每个任务分配一台机器并确定每台机器上的任务顺序，使所有任务恰好加工一次，同时满足可能给定的前后继可用性约束，例如某些相邻顺序 `i->j` 被禁止，或某些相邻顺序被强制要求。目标是最小化所有任务完成时间的最大值 `Cmax`。在当前应用里，该问题只用于获得一个较小的可行 horizon 候选，因此重点是快速找到满足约束的可行调度及其 `Cmax`，不一定要求证明该 Cmax 全局最优。
+
+## 2026-06-27 PDF 模型核对与第一版实现
+
+下载目录下的 `scheduling_models (1).pdf` 给出了三个模型：2-index arc-flow MIP、CP Optimizer interval/sequence 模型和 time-indexed MIP。前两个模型和上面的抽象问题是一致的，关键点都处理正确：release 约束写在加工开始时间上，首任务通过 `s_0j` 处理，普通相邻任务通过 `C_i+s_ij` 处理，因此 setup 可以在 release 前完成。2-index arc-flow 通过每个任务一个前驱、一个后继、source 后继数不超过机器数和时间递推约束排除子环；由于 `p_j>0`，不需要额外 MTZ 约束。CP 模型用 optional interval + alternative 表达机器分配，用 sequence/noOverlap transition matrix 表达 setup，也能自然表达这种 anticipatory setup。
+
+time-indexed MIP 语义也正确，但它需要先给定离散 horizon `H` 才能建图。当前目标正是尝试得到更紧的 horizon，因此 time-indexed 版本存在循环依赖，第一版不实现，只保留为后续在已有较好 `H` 时的可选对照。
+
+本次新增 `src/Basic/LocalHorizonCmaxSolver.java`。该类只作为实验工具，不接入 BPC 主流程。它包含两种求解方式：`solveWithCplex()` 实现 PDF 中的 2-index arc-flow MIP，支持 source arc、job-job arc、sink arc、release、initial setup、sequence setup、required arc、forbidden arc 和无向 adjacency pair；`solveWithCpOptimizer()` 实现 PDF 中的 CP Optimizer sequence 模型，通过 `typeOfNext` 处理 forbidden/required immediate successor 约束，通过 transition matrix 处理 setup。
+
+命令行入口没有直接调用 `new Data(...)`，而是用了类内轻量 loader，只读取 header、任务行和 SETUP 矩阵。原因是当前 `Data.debug_set()` 仍会写死 `n=60,m=3,scale=3`，用它直接读取 40-2 文件会污染实验。主流程若已有正常构造完成的 `Data` 对象，仍可使用 `Problem.fromData(data)`。
+
+短测使用 `data/40-2/wet040_001_2m.dat`，`setup=true,dueDate=true`，单线程。5 秒限制下，CPLEX arc-flow 找到 `Cmax=1881`，best bound 约 `928`；CP Optimizer 找到 `Cmax=1789`，best bound `928`。15 秒限制下，CPLEX arc-flow 找到 `Cmax=1847`，best bound 约 `928`；CP Optimizer 找到 `Cmax=1788`，best bound `928`。这个样本下 CP Optimizer 在同等时间内给出的可行 horizon 明显更好，而两者下界几乎相同，说明第一阶段比较重点应放在可行解质量和构造时间，而不是证明最优。后续若要接入 node 级 horizon，可以先优先试 CP Optimizer 版本，并只在得到的 `localHorizon` 明显小于当前 `pricingHorizon` 时启用。

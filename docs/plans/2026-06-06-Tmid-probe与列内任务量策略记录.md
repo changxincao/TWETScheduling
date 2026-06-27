@@ -129,6 +129,22 @@ probe 的结果继续支持这个判断。开启 probe 后，它从 `reference=4
 
 当前结论是：`columnTaskMedianTopLast` 可以保留为实验策略，但不适合作为默认；013 上更有效的方向不是继续筛掉短列，而是把“列内任务完成时间分布”的参考点向右侧分位数或 probe 选择靠拢。若后续还要基于列信息自动定 `Tmid`，应考虑记录更高分位数，例如 60%/65% completion quantile，或者用 probe 只在疑似 hard node 上对当前 reference 做小范围右移校准。
 
+## 2026-06-27 非根节点基于禁弧的 pricing horizon 上界设想
+
+当前非根节点不能使用 root 下的 `pi_j` profitable window，因为该窗口依赖 no-cut/no-branch 和 setup 三角不等式下的 shortcut 删除论证；一旦分支或 subtree 禁弧改变了可用后继，继续用同一套动态窗口会有误删风险。因此非根节点的 `pricingHorizon` 往往退回静态硬窗或全局 `CmaxH`，这会让 half-domain 的函数定义域、completion bound 构造和 label 扩展都偏宽。
+
+一个可尝试的方向是：在每个 node 开始时，基于当前已经永久固定的禁弧，重新构造一个该 node 及其后续子树可用的 makespan horizon 上界。这个问题不直接优化 TWET 目标，而是沿用当前全局 `CmaxH` 的思想：把每个 job 转成一个释放时间受限的 no-wait parallel-machine scheduling 子问题，忽略 due-window 成本，只最小化 `Cmax`；同时要求机器序列不能使用当前 node 已经永久 forbidden 的 arcs。只要该子问题返回的是一个满足当前 node 约束的完整可行机器调度，其 makespan 就可以作为当前 node 的局部 `pricingHorizon` 候选，再取 `min(data.CmaxH, localHorizon)`。
+
+这里必须注意“上界”语义。能安全用于 pricing horizon 的不是 relaxed/MIP 下界，而是一个真实可行调度的 makespan。若用 MIP 求解，可以不证明最优，只要拿到 incumbent feasible solution 就能给出上界；若在时间限制内没有可行解，则本次不收缩 horizon，不能静默用一个下界或未验证值。若该模型在不允许外包的口径下证明无可行解，才可能说明当前 node 不可行；但在外包可用或 columnized outsourcing 口径下不能直接据此剪掉 node，因为部分 job 可以通过外包满足覆盖。
+
+约束口径也要严格。只考虑 forbidden arcs 还不够：如果当前 node 有 required arc、机器数上下界、required outsourcing 等约束，一个忽略这些约束得到的较小 makespan 可能不是当前 node 的可行上界，从而把 horizon 压得过紧。第一版若只服务纯机器、无外包、无 required arc 的主线节点，可以明确限制触发条件；若要一般化，就必须把所有会限制内部机器列的当前 node 状态纳入调度构造。对于 `pricingOnly` subtree arcs，还要区分用途：它们不是 formal master 分支行，只约束后续 pricing 图；若用它们计算 horizon，只能解释为 pricing-only horizon，不应写成当前 node 原问题的正式上界。
+
+释放时间的定义需要在实现前再对齐。用户提出的口径是 `due window 左端 - p_j - minSetupToJ`，其中 `minSetupToJ` 应按当前可用 arcs 计算；若某个 predecessor arc 已经永久 forbidden，就不能参与最小 setup。这个口径表达的是“机器可开始为 job j 准备的最早无等待阈值”，更接近 predecessor completion 的释放界。当前 `SchedulerForReleaseNoWait` 代码中 `Job.r` 被当作 processing start 的 lower bound，且目前构造使用的是 `d_l[j] - p[j]`，并没有显式减去 min setup。因此如果实现该方案，不能简单复用旧类后只改一个数组；需要先确认 release 语义到底是 processing start release，还是 machine-available-before-setup release，并让调度器的 `max()` 公式与之匹配。
+
+构造方法上，贪心插入可以作为快速尝试，但不能作为唯一正确性来源。一个朴素 ECT 插入在存在 forbidden arcs 时可能走入死路，即前面某个选择导致剩余 job 没有可用 predecessor。若要用贪心，应在日志中明确“未找到可行调度则不收缩 horizon”，不要 fallback 掩盖失败。更稳的方式是建立一个小型 `P||r_j,s_ij,forbidden arcs||Cmax` 的可行化/MIP/CP 模型，短时间内只取 incumbent；或者在贪心里加入必要性规则，例如剩余 job 只有一次可接机会时优先安排，但这仍然是启发式，不应拿失败或下界作证明。
+
+当前判断是：这个方向在正确性上可以成立，但前提比“扫 forbidden arc 后算一个 Cmax”更严格。它适合作为后续实验开关，目标是缩小非根节点 `pricingHorizon`，从而减少 PWLF 定义域、completion-bound 构造和 label 扩展；不应改变 root `piWindow` 逻辑，也不应在无法构造当前 node 可行调度时强行收缩。第一版建议只在 no-outsourcing、无 active cut、无 required outsourcing，且能构造出满足当前 node 内部机器约束的完整调度时启用，并输出 `localHorizon/globalCmaxH/forbiddenArcCount/requiredArcCount/buildMillis` 诊断，再用算例实测是否真的降低 exact pricing 时间。
+
 ## 11. 2026-06-07 probe 计时与策略选择
 
 日志中的 `midpointColumns count/lastMinAvgMax/halfMinAvgMax` 是列 timing 样本的摘要。例如 `400/860.0/959.265/1078.0/352.0/443.3275/523.0` 表示本轮统计了 400 条候选列；这 400 条列的列末最优完工时间 `lastCompletion` 的最小、平均、最大分别是 `860.0/959.265/1078.0`；每条列中间位置任务的完工时间 `halfCompletion` 的最小、平均、最大分别是 `352.0/443.3275/523.0`。后面的 `midpointColumnTasks count/minAvgMedianMax` 则是把这些列内所有任务完成时间放在一起后的任务级分布。

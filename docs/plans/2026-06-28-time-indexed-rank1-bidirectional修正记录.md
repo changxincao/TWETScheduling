@@ -53,3 +53,9 @@ focused `javac` 已覆盖以下文件并通过：
 二次复查时进一步补齐了 `PC` 中所有使用 `GeneratedColumnIds` 的加列入口。此前普通 stabilized pricing pass 已经把 active 列成本改进计入 `addedColumns`，但 true-dual 普通 pricing、repair 和 strong-branching phase2 仍只统计新增 column id；若这些路径只发生“当前 active 列成本降低”，模型目标系数已经更新但可能不会立即重解。现已统一四个入口的口径：`addedColumns = improvedActiveInternalColumns + 新增内部列 + 新增外包列`。该修正不改变候选列生成，只保证目标系数更新后控制流会继续求解。验证：focused `javac` 通过；40-2 root-only smoke `tmp-timegraph-rank1-bidir-recheck2-20260628` 仍为 `NODE_LIMIT, valid=true`。
 
 再次复查时同步把 trace 口径改为统计 active 列成本改进，避免日志显示“0 added”但实际已经更新了当前 RMP 的目标系数。该调整只影响日志显示，不改变求解状态。验证：40-2 root-only smoke `tmp-timegraph-rank1-bidir-recheck3-20260628` 仍为 `NODE_LIMIT, valid=true`。
+
+## 8. time-indexed 实验线不再混用原启发式 pricing
+
+2026-06-28 进一步对齐实验口径：只要启用 `useTimeIndexedGraphPricing`，`TWETBPCContext` 就不再把原项目的 `HeuristicPricingEngine` 加入 pricing engine 队列。no-cut time-indexed 由 `TimeIndexedGraphPricingEngine` 自己完成 column generation；rank1 cut time-indexed 由 `TimeIndexedGraphRank1CutPricingEngine` 内部先跑 graph-native bucket heuristic，再在需要时跑 exact bucket labeling。
+
+强分支也按同一口径处理：time-indexed 模式下 two-stage strong branching 只使用 phase1 的 RMP/repair bound 评分，不再进入原机器序列启发式 pricing 的 phase2。这样 no-cut/cut time-indexed 对照不再混入当前主线的序列局部搜索启发式，后续和论文 DWM 口径对比更清楚。验证：focused `javac` 通过；40-2 no-cut time-indexed root-only smoke `tmp-timegraph-noheur-engine-check-20260628` 日志中 pricing 行均为 `TimeIndexedGraphPricing`，未出现 `HeuristicPricing`。

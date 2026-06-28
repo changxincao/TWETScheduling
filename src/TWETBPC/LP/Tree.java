@@ -485,6 +485,10 @@ public class Tree {
 				return compareStrongBranchingSelection(a, b);
 			}
 		});
+		// 2026-06-28: time-indexed pricing 不混用原机器序列启发式；强分支只用 phase1 RMP/repair 评分。
+		if (config.useTimeIndexedGraphPricing) {
+			return phase1.get(0);
+		}
 		int phase2Limit = Math.min(config.strongBranchingPhase2CandidateLimit, phase1.size());
 		if (phase2Limit <= 0) {
 			return phase1.get(0);

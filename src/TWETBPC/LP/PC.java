@@ -293,7 +293,7 @@ public class PC {
 					if (generated.isEmpty()) {
 						continue;
 					}
-					int addedColumns = lp.addColumns(generated.internalColumnIds)
+					int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
 							+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 					if (addedColumns <= 0) {
 						continue;
@@ -375,7 +375,7 @@ public class PC {
 					continue;
 				}
 
-				int addedColumns = lp.addColumns(generated.internalColumnIds)
+				int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
 						+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 				if (addedColumns == 0) {
 					continue;
@@ -781,7 +781,7 @@ public class PC {
 					if (generated.isEmpty()) {
 						break;
 					}
-					int addedColumns = lp.addColumns(generated.internalColumnIds)
+					int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
 							+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 					generatedForRepair += addedColumns;
 					if (addedColumns == 0) {

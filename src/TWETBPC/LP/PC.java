@@ -1137,6 +1137,8 @@ public class PC {
 			outsourcingColumnIds.addAll(other.outsourcingColumnIds);
 			if (other.bestAcceptedReducedCost < bestAcceptedReducedCost) {
 				bestAcceptedReducedCost = other.bestAcceptedReducedCost;
+				representativeColumn = other.representativeColumn;
+				representativeOutsourcingColumn = other.representativeOutsourcingColumn;
 			}
 			if (other.bestInternalReducedCost < bestInternalReducedCost) {
 				bestInternalReducedCost = other.bestInternalReducedCost;
@@ -1150,10 +1152,7 @@ public class PC {
 			if (Double.isFinite(other.certifiedOutsourcingReducedCost)) {
 				certifiedOutsourcingReducedCost = other.certifiedOutsourcingReducedCost;
 			}
-			if (Double.isFinite(other.observedDualBound)
-					&& (!Double.isFinite(observedDualBound) || other.observedDualBound < observedDualBound)) {
-				observedDualBound = other.observedDualBound;
-			}
+			// observedDualBound 依赖合并后的内部列/外包列证书，必须在调用处统一重算。
 			if (representativeColumn == null) {
 				representativeColumn = other.representativeColumn;
 			}

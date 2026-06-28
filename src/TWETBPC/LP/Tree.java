@@ -95,7 +95,11 @@ public class Tree {
 			node.id = ++processedNodes;
 			traceSink.onNodePicked(node, queue.size(), totalPoolSize(), cutPool.size());
 			heartbeat(node, "node.pick " + node.diagnosticSummary());
-			diagnoseLocalHorizonAtNode(node);
+			// 2026-06-28: 暂停 node-local horizon 诊断调用。分支和 pricingOnly 禁弧会让
+			// 当前 node 的可行顺序集合更强，局部 Cmax 通常不会比根节点启发式 horizon 更有用；
+			// 即使用 CP/MIP 求到一个局部可行 horizon，也只能说明当前 node 可行，不能稳定改善
+			// 后续 pricing。保留 diagnoseLocalHorizonAtNode() 方法，后续若重新评估再恢复调用。
+			// diagnoseLocalHorizonAtNode(node);
 
 			// 2026-05-19: 对齐旧 VRP 的 sudo_cost 预剪枝。root 的 pseudoCost 是占位大数，不能用来剪；
 			// 非根节点若 pseudoCost 已不小于 incumbent，由于队列按 pseudoCost 升序，当前节点和剩余节点

@@ -137,6 +137,10 @@ public class TanakaNoOutsourcingBPCTest {
 		}
 		data.CmaxH = computeSafeHorizon(data);
 		data.CmaxE = data.CmaxH;
+		// 2026-06-28: 目标 Tanaka 算例覆写完任务和 setup 后，必须重新跑一次
+		// release/no-wait 启发式收缩 CmaxH。否则只会使用 computeSafeHorizon 的粗上界，
+		// 60-2 这类算例会把 pricing horizon 放到 5700 左右，明显宽于启发式可行 Cmax。
+		data.setImprovedCmax();
 		data.outsourcingCostFunction = new PiecewiseLinearFunction(0, 1);
 		data.outsourcingCostFunction.addSegment(0, 1, 1, 0);
 		data.setPreprocessedHardWindows();

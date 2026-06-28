@@ -95,11 +95,11 @@ public class Tree {
 			node.id = ++processedNodes;
 			traceSink.onNodePicked(node, queue.size(), totalPoolSize(), cutPool.size());
 			heartbeat(node, "node.pick " + node.diagnosticSummary());
-			// 2026-06-28: 暂停 node-local horizon 诊断调用。分支和 pricingOnly 禁弧会让
-			// 当前 node 的可行顺序集合更强，局部 Cmax 通常不会比根节点启发式 horizon 更有用；
-			// 即使用 CP/MIP 求到一个局部可行 horizon，也只能说明当前 node 可行，不能稳定改善
-			// 后续 pricing。保留 diagnoseLocalHorizonAtNode() 方法，后续若重新评估再恢复调用。
-			// diagnoseLocalHorizonAtNode(node);
+			// 2026-06-28: 暂停 node-local horizon 改进调用。这个模块的本意是用当前
+			// node 的机器侧约束重新求一个更紧 pricing horizon；但 branch/pricingOnly 禁弧
+			// 会让可行顺序集合更强，局部 Cmax 通常只会变差，实测不适合接入主流程。
+			// 保留 tryImproveLocalHorizonAtNode() 方法，后续若重新评估再恢复调用。
+			// tryImproveLocalHorizonAtNode(node);
 
 			// 2026-05-19: 对齐旧 VRP 的 sudo_cost 预剪枝。root 的 pseudoCost 是占位大数，不能用来剪；
 			// 非根节点若 pseudoCost 已不小于 incumbent，由于队列按 pseudoCost 升序，当前节点和剩余节点
@@ -353,11 +353,11 @@ public class Tree {
 		traceSink.onStageHeartbeat(node, phase, totalPoolSize(), cutPool.size());
 	}
 
-	private void diagnoseLocalHorizonAtNode(Node node) {
-		if (!config.diagnosticLocalHorizonAtNode) {
+	private void tryImproveLocalHorizonAtNode(Node node) {
+		if (!config.enableNodeLocalHorizonImprovement) {
 			return;
 		}
-		if (config.diagnosticLocalHorizonNodeId > 0 && node.id != config.diagnosticLocalHorizonNodeId) {
+		if (config.nodeLocalHorizonImprovementNodeId > 0 && node.id != config.nodeLocalHorizonImprovementNodeId) {
 			return;
 		}
 		if (node.depth <= 0) {
@@ -382,25 +382,26 @@ public class Tree {
 		LocalHorizonCmaxSolver.Problem problem =
 				LocalHorizonCmaxSolver.Problem.fromData(data, node.maxMachineCount, forbidden, required, null);
 		System.out.println(String.format(Locale.US,
-				"[LocalHorizonDiag] node=%d depth=%d maxMachine=%d forbidden=%d pricingOnly=%d required=%d horizonUB=%d timeLimit=%.3f",
+				"[LocalHorizonImprove] node=%d depth=%d maxMachine=%d forbidden=%d pricingOnly=%d required=%d horizonUB=%d timeLimit=%.3f",
 				node.id, node.depth, node.maxMachineCount, countForbidden(forbidden), node.countPricingOnlyForbiddenArcs(),
-				node.countRequiredArcStates(), problem.horizonUpperBound, config.diagnosticLocalHorizonTimeLimitSeconds));
-		if (config.diagnosticLocalHorizonUseCplex) {
+				node.countRequiredArcStates(), problem.horizonUpperBound,
+				config.nodeLocalHorizonImprovementTimeLimitSeconds));
+		if (config.nodeLocalHorizonImprovementUseCplex) {
 			try {
 				LocalHorizonCmaxSolver.Result result = LocalHorizonCmaxSolver.solveWithCplex(problem,
-						config.diagnosticLocalHorizonTimeLimitSeconds, 1);
-				System.out.println("[LocalHorizonDiag] node=" + node.id + " " + result);
+						config.nodeLocalHorizonImprovementTimeLimitSeconds, 1);
+				System.out.println("[LocalHorizonImprove] node=" + node.id + " " + result);
 			} catch (Exception e) {
-				System.out.println("[LocalHorizonDiag] node=" + node.id + " CPLEX_ARC_FLOW failed: " + e.getMessage());
+				System.out.println("[LocalHorizonImprove] node=" + node.id + " CPLEX_ARC_FLOW failed: " + e.getMessage());
 			}
 		}
-		if (config.diagnosticLocalHorizonUseCp) {
+		if (config.nodeLocalHorizonImprovementUseCp) {
 			try {
 				LocalHorizonCmaxSolver.Result result = LocalHorizonCmaxSolver.solveWithCpOptimizer(problem,
-						config.diagnosticLocalHorizonTimeLimitSeconds, 1);
-				System.out.println("[LocalHorizonDiag] node=" + node.id + " " + result);
+						config.nodeLocalHorizonImprovementTimeLimitSeconds, 1);
+				System.out.println("[LocalHorizonImprove] node=" + node.id + " " + result);
 			} catch (Exception e) {
-				System.out.println("[LocalHorizonDiag] node=" + node.id + " CP_OPTIMIZER failed: " + e.getMessage());
+				System.out.println("[LocalHorizonImprove] node=" + node.id + " CP_OPTIMIZER failed: " + e.getMessage());
 			}
 		}
 	}

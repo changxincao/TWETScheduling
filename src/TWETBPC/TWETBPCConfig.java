@@ -307,12 +307,12 @@ public class TWETBPCConfig {
 	public boolean diagnosticNodeProgressSummary = false;
 	/** 2026-06-05: subtree/dual 诊断明细；默认关闭，避免每轮 pricing 扫描列池和所有 job arc。 */
 	public boolean diagnosticPricingSummaryDetails = false;
-	/** 2026-06-28: node 开始处理前诊断 local horizon，不修改 pricingHorizon。 */
-	public boolean diagnosticLocalHorizonAtNode = false;
-	public int diagnosticLocalHorizonNodeId = -1;
-	public double diagnosticLocalHorizonTimeLimitSeconds = 5.0;
-	public boolean diagnosticLocalHorizonUseCplex = true;
-	public boolean diagnosticLocalHorizonUseCp = true;
+	/** 2026-06-28: node 级 local horizon 改进实验，当前默认关闭且不接入主求解。 */
+	public boolean enableNodeLocalHorizonImprovement = false;
+	public int nodeLocalHorizonImprovementNodeId = -1;
+	public double nodeLocalHorizonImprovementTimeLimitSeconds = 5.0;
+	public boolean nodeLocalHorizonImprovementUseCplex = true;
+	public boolean nodeLocalHorizonImprovementUseCp = true;
 
 	public boolean useColumnizedOutsourcing() {
 		return "columns".equalsIgnoreCase(outsourcingModel)

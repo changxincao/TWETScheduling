@@ -273,18 +273,21 @@ public class GCBBFullDomainComparisonTest {
 				|| config.diagnosticNodeProgressSummary
 				|| Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.pricingDiagnostics",
 						Boolean.toString(config.diagnosticPricingSummaryDetails)));
-		config.diagnosticLocalHorizonAtNode = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.localHorizonDiag", Boolean.toString(config.diagnosticLocalHorizonAtNode)));
-		config.diagnosticLocalHorizonNodeId = Integer.getInteger(
-				"twet.bpc.fullDomainCompare.localHorizonDiagNode", config.diagnosticLocalHorizonNodeId);
-		config.diagnosticLocalHorizonTimeLimitSeconds = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.localHorizonTimeLimit",
-				Double.toString(config.diagnosticLocalHorizonTimeLimitSeconds)));
-		config.diagnosticLocalHorizonUseCplex = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.localHorizonUseCplex",
-				Boolean.toString(config.diagnosticLocalHorizonUseCplex)));
-		config.diagnosticLocalHorizonUseCp = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.localHorizonUseCp", Boolean.toString(config.diagnosticLocalHorizonUseCp)));
+		config.enableNodeLocalHorizonImprovement = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.nodeLocalHorizonImprove",
+				Boolean.toString(config.enableNodeLocalHorizonImprovement)));
+		config.nodeLocalHorizonImprovementNodeId = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.nodeLocalHorizonImproveNode",
+				config.nodeLocalHorizonImprovementNodeId);
+		config.nodeLocalHorizonImprovementTimeLimitSeconds = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.nodeLocalHorizonTimeLimit",
+				Double.toString(config.nodeLocalHorizonImprovementTimeLimitSeconds)));
+		config.nodeLocalHorizonImprovementUseCplex = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.nodeLocalHorizonUseCplex",
+				Boolean.toString(config.nodeLocalHorizonImprovementUseCplex)));
+		config.nodeLocalHorizonImprovementUseCp = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.nodeLocalHorizonUseCp",
+				Boolean.toString(config.nodeLocalHorizonImprovementUseCp)));
 		config.maxNodes = Integer.getInteger("twet.bpc.fullDomainCompare.maxNodes", 20000);
 		config.solveTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.solveTimeLimitSeconds",

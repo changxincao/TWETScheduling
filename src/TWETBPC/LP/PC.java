@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 
+import Common.Utility;
 import Output.BPCTraceSink;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TimeLimitChecker;
@@ -14,6 +15,8 @@ import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETCut;
+import TWETBPC.Model.TWETCutType;
 import TWETBPC.Model.TWETMasterStatus;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETOutsourcingColumn;
@@ -105,9 +108,28 @@ public class PC {
 			return solution;
 		}
 
+		double previousRank1Gap = Double.NaN;
+		double previousRank1GapDecrease = Double.NaN;
 		for (int round = 0; round < config.maxCutRounds; round++) {
 			if (isTimeLimitReached()) {
 				break;
+			}
+			if (usesPaperStyleTimeIndexedRank1Cuts()) {
+				int removed = removeInactiveSubsetRowCuts(lp);
+				if (removed > 0) {
+					traceSink.onCutCall(lp.getNode(), "SubsetRowCutInactiveRemoval", true, -removed,
+							"removed inactive rank-1 cuts with zero pricing dual", lp.getCutPool().size(), 0L);
+					solution = solveRelaxationTimed(lp, "after_inactive_cut_removal");
+					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+						return solution;
+					}
+					solution = solvePricingLoop(lp, solution);
+					if (isTimeLimitReached()
+							|| solution.getStatus() == TWETMasterStatus.INFEASIBLE
+							|| solution.isInteger()) {
+						return solution;
+					}
+				}
 			}
 			ArrayList<Integer> newCutIds = new ArrayList<Integer>();
 			boolean separated = false;
@@ -149,9 +171,53 @@ public class PC {
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE || solution.isInteger()) {
 				return solution;
 			}
+			if (usesPaperStyleTimeIndexedRank1Cuts()) {
+				double gap = currentAbsoluteGap(solution);
+				if (Double.isFinite(gap) && Double.isFinite(previousRank1Gap)
+						&& Utility.compareGt(previousRank1Gap, 0.0)) {
+					double decrease = (previousRank1Gap - gap) / previousRank1Gap;
+					if (Double.isFinite(previousRank1GapDecrease)
+							&& Utility.compareLt(previousRank1GapDecrease, 0.02)
+							&& Utility.compareLt(decrease, 0.02)) {
+						traceSink.onCutCall(lp.getNode(), "SubsetRowCutTailingOff", false, 0,
+								"rank-1 tailing-off: last decreases=" + previousRank1GapDecrease + "," + decrease,
+								lp.getCutPool().size(), 0L);
+						break;
+					}
+					previousRank1GapDecrease = decrease;
+				}
+				previousRank1Gap = gap;
+			}
 		}
 
 		return solution;
+	}
+
+	private boolean usesPaperStyleTimeIndexedRank1Cuts() {
+		return config.useTimeIndexedGraphPricing
+				&& config.useTimeIndexedGraphRank1CutPricing
+				&& config.enableSubsetRowCutsForTimeIndexedGraph;
+	}
+
+	private int removeInactiveSubsetRowCuts(LP lp) {
+		HashSet<Integer> pricingCuts = new HashSet<Integer>(lp.getActiveSubsetRowPricingCutIds());
+		ArrayList<Integer> inactive = new ArrayList<Integer>();
+		for (int cutId : lp.getActiveCutIds()) {
+			TWETCut cut = lp.getCutPool().getCut(cutId);
+			if (cut.getType() == TWETCutType.SUBSET_ROW && !pricingCuts.contains(Integer.valueOf(cutId))) {
+				inactive.add(Integer.valueOf(cutId));
+			}
+		}
+		return inactive.isEmpty() ? 0 : lp.removeCuts(inactive);
+	}
+
+	private double currentAbsoluteGap(TWETMasterSolution solution) {
+		if (!Double.isFinite(incumbentForDualBoundPruning)
+				|| solution == null
+				|| !Double.isFinite(solution.getObjectiveValue())) {
+			return Double.NaN;
+		}
+		return Math.max(0.0, incumbentForDualBoundPruning - solution.getObjectiveValue());
 	}
 
 	public CompletionBoundSubtreeArcEliminator.PreparedBounds getLastReusableSubtreeArcEliminationBounds() {

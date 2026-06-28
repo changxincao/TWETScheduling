@@ -111,6 +111,42 @@ public final class TWETCut {
 		return memoryArcSet.contains(Long.valueOf(arcKey));
 	}
 
+	/**
+	 * @return 是否是同一个 rank-1 cut 的基础 multiplier 向量和右端项。
+	 *         limited-memory 变体遇到同一基础 cut 时应合并 memory，而不是新增一条重复行。
+	 */
+	public boolean hasSameRank1Base(TWETCut other) {
+		return other != null
+				&& type == other.type
+				&& Double.compare(multiplier, other.multiplier) == 0
+				&& Double.compare(rhs, other.rhs) == 0
+				&& scopeJobs.equals(other.scopeJobs);
+	}
+
+	/**
+	 * 合并 limited-memory 描述。用于论文 Algorithm 2 的“同 multiplier cut 合并 memory”口径。
+	 */
+	public TWETCut mergedMemoryWith(TWETCut other) {
+		if (other == null || !hasSameRank1Base(other)) {
+			return this;
+		}
+		ArrayList<Integer> mergedJobs = new ArrayList<Integer>(memoryJobs);
+		for (int job : other.memoryJobs) {
+			if (!mergedJobs.contains(Integer.valueOf(job))) {
+				mergedJobs.add(Integer.valueOf(job));
+			}
+		}
+		Collections.sort(mergedJobs);
+		ArrayList<Long> mergedArcs = new ArrayList<Long>(memoryArcs);
+		for (Long arc : other.memoryArcs) {
+			if (!mergedArcs.contains(arc)) {
+				mergedArcs.add(arc);
+			}
+		}
+		Collections.sort(mergedArcs);
+		return new TWETCut(id, type, scopeJobs, mergedJobs, mergedArcs, multiplier, rhs, description);
+	}
+
 	/** @return 该 cut 是否使用任意 limited-memory SRI 口径。 */
 	public boolean hasLimitedMemory() {
 		return hasMemoryJobs() || hasMemoryArcs();

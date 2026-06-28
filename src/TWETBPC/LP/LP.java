@@ -335,6 +335,20 @@ public class LP {
 		}
 	}
 
+	public int removeCuts(List<Integer> cutIds) {
+		int removed = 0;
+		for (int id : cutIds) {
+			if (activeCutIds.remove(Integer.valueOf(id))) {
+				removed++;
+			}
+		}
+		if (removed > 0) {
+			lastSolution = null;
+			clearPricingDualOverride();
+		}
+		return removed;
+	}
+
 	public TWETMasterSolution solveRelaxation() {
 		clearPricingDualOverride();
 		if (node == null) {

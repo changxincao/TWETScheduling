@@ -55,14 +55,11 @@ public final class SubsetRowCutEvaluator {
 	}
 
 	private static int fullCoefficient(boolean[] scope, double multiplier, List<Integer> sequence) {
-		// 2026-06-14: 保持当前 classical SRI 的 distinct-visit 口径；ng relaxed route
-		// 不直接进入主问题，默认 full-SRI 不因重复访问同一 job 而改变列系数。
-		boolean[] seen = new boolean[scope.length];
+		// 2026-06-28: 论文 time-indexed pseudo-schedule 口径按访问次数累加，重复访问同一 job 也会继续贡献。
 		double state = 0.0;
 		int coefficient = 0;
 		for (int job : sequence) {
-			if (job >= 0 && job < scope.length && scope[job] && !seen[job]) {
-				seen[job] = true;
+			if (job >= 0 && job < scope.length && scope[job]) {
 				state += multiplier;
 				while (state + VALUE_TOLERANCE >= 1.0) {
 					coefficient++;

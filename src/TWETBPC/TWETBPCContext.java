@@ -71,7 +71,9 @@ public class TWETBPCContext {
 		this.initialColumnBuilder = new InitialColumnBuilder(data, config, pool, seedProvider);
 
 		this.pricingEngines = new ArrayList<PricingEngine>();
-		pricingEngines.add(new HeuristicPricingEngine(data, config));
+		if (!(config.useTimeIndexedGraphPricing && config.useTimeIndexedGraphRank1CutPricing)) {
+			pricingEngines.add(new HeuristicPricingEngine(data, config));
+		}
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
 		if (config.useTimeIndexedGraphPricing) {

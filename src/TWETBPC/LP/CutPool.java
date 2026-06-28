@@ -43,6 +43,17 @@ public class CutPool {
 		if (existing != null) {
 			return existing.intValue();
 		}
+		if (cut.hasLimitedMemory()) {
+			for (int id = 0; id < cuts.size(); id++) {
+				TWETCut old = cuts.get(id);
+				if (old.hasSameRank1Base(cut)) {
+					TWETCut merged = old.mergedMemoryWith(cut);
+					cuts.set(id, merged);
+					signatureToId.put(merged.signature(), Integer.valueOf(id));
+					return id;
+				}
+			}
+		}
 		int id = cuts.size();
 		cuts.add(cut);
 		signatureToId.put(signature, Integer.valueOf(id));

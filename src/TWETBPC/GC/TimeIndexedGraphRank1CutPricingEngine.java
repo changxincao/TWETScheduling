@@ -21,12 +21,10 @@ import TWETBPC.Model.TWETCut;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * 2026-06-28: time-indexed graph pricing 的 rank-1 cut 实验版本。
+ * 2026-06-28: 论文式 time-indexed rank-1 cut 定价器。
  * <p>
- * 该类保持当前 no-cut time-indexed engine 不变，仅在新开关下替换 exact pricing。
- * 没有 active subset-row pricing cut 时直接委托 no-cut engine；有 cut 时在同一个
- * (lastJob,time) bucket 内保存带 residual state 的 label，并使用论文式补偿支配：
- * 若 L1 成本低于 L2 加上 L1 residual 更大的 cut dual 补偿，则 L1 支配 L2。
+ * 无 active rank-1 cut 时仍委托原 no-cut DAG shortest path engine；有 active cut 时按论文
+ * Algorithm 4-6 使用 forward/backward bucket labels，并在拼接时修正两侧 residual state。
  */
 public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 
@@ -61,12 +59,17 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		if (this.timeLimitChecker.isTimeLimitReached()) {
 			return PricingResult.noImprovement("Time limit reached before time-indexed rank-1 cut pricing");
 		}
-		Rank1CutSolver solver = new Rank1CutSolver(lp);
+
+		Rank1CutSolver solver = new Rank1CutSolver(lp, true);
 		ArrayList<TWETColumn> columns = solver.solve();
+		if (columns.isEmpty() && !solver.timedOut) {
+			solver = new Rank1CutSolver(lp, false);
+			columns = solver.solve();
+		}
 		PricingResult result = columns.isEmpty()
 				? PricingResult.noImprovement(solver.message(false))
 				: new PricingResult(columns, true, solver.message(true));
-		if (!solver.timedOut) {
+		if (!solver.heuristicMode && !solver.timedOut) {
 			result = result.withCertifiedInternalReducedCost(solver.bestPseudoReducedCost);
 		}
 		return result;
@@ -85,12 +88,15 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final GraphWindow graphWindow;
 		private final int horizon;
 		private final int width;
+		private final int tStar;
+		private final boolean heuristicMode;
 		private final double[][] penaltyByJobTime;
 		private final int[][] durationByArc;
 		private final boolean[][] processArcForbidden;
 		private final boolean[] endForbidden;
 		private final CutStateData cutStateData;
-		private final ArrayList<Label>[] buckets;
+		private final ArrayList<Label>[] forwardBuckets;
+		private final ArrayList<Label>[] backwardBuckets;
 		private final HashSet<SequenceSignature> activeSignatures;
 		private final HashMap<SequenceSignature, Candidate> candidateBySignature;
 		private final PriorityQueue<Candidate> candidateHeap;
@@ -107,7 +113,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private double bestPseudoReducedCost;
 
 		@SuppressWarnings("unchecked")
-		Rank1CutSolver(LP lp) {
+		Rank1CutSolver(LP lp, boolean heuristicMode) {
 			this.lp = lp;
 			this.node = lp.getNode();
 			this.n = data.n;
@@ -115,12 +121,15 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.graphWindow = computeGraphWindow(data, lp);
 			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
+			this.tStar = computeTStar(graphWindow);
+			this.heuristicMode = heuristicMode;
 			this.penaltyByJobTime = new double[n + 1][width];
 			this.durationByArc = new int[n + 1][n + 1];
 			this.processArcForbidden = new boolean[n + 1][n + 1];
 			this.endForbidden = new boolean[n + 1];
 			this.cutStateData = new CutStateData(lp);
-			this.buckets = new ArrayList[(n + 1) * width];
+			this.forwardBuckets = new ArrayList[(n + 1) * width];
+			this.backwardBuckets = new ArrayList[(n + 1) * width];
 			this.activeSignatures = collectActiveSignatures();
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
@@ -133,9 +142,15 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (maxReturnedColumns() <= 0) {
 				return new ArrayList<TWETColumn>();
 			}
-			insertLabel(new Label(nextLabelId++, 0, 0, 0.0, cutStateData.emptyResidual(),
-					cutStateData.emptyFullSeen(), null, 0));
-			runForwardPass();
+			initializeForward();
+			runForwardLabeling();
+			if (!timedOut) {
+				initializeBackward();
+				runBackwardLabeling();
+			}
+			if (!timedOut) {
+				concatenateLabels();
+			}
 			ArrayList<Candidate> candidates = new ArrayList<Candidate>(candidateBySignature.values());
 			Collections.sort(candidates, bestCandidateFirstComparator());
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
@@ -145,14 +160,31 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			return columns;
 		}
 
-		private void runForwardPass() {
-			for (int t = 0; t <= horizon; t++) {
+		private void initializeForward() {
+			Label source = Label.forward(nextLabelId++, 0, 0, 0.0, cutStateData.emptyResidual(), null, 0);
+			insertLabel(forwardBuckets, source);
+		}
+
+		private void initializeBackward() {
+			for (int job = 1; job <= n; job++) {
+				for (int t = tStar; t <= horizon; t++) {
+					if (isCompletionFeasible(job, t) && isEndAllowed(job, t)) {
+						Label label = Label.backward(nextLabelId++, job, t, sinkArcReducedCost(job),
+								cutStateData.emptyResidual(), null, job);
+						insertLabel(backwardBuckets, label);
+					}
+				}
+			}
+		}
+
+		private void runForwardLabeling() {
+			for (int t = 0; t < tStar; t++) {
 				if (timeLimitChecker.isTimeLimitReached()) {
 					timedOut = true;
 					return;
 				}
 				for (int lastJob = 0; lastJob <= n; lastJob++) {
-					ArrayList<Label> bucket = buckets[index(lastJob, t)];
+					ArrayList<Label> bucket = forwardBuckets[index(lastJob, t)];
 					if (bucket == null || bucket.isEmpty()) {
 						continue;
 					}
@@ -161,9 +193,8 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 						relaxedLabels++;
 						rememberEndCandidateIfNegative(label);
 						if (t < horizon && !isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
-							insertLabel(label.extend(nextLabelId++, lastJob, t + 1, 0.0,
-									cutStateData.copyResidual(label.residual),
-									cutStateData.copyFullSeen(label.fullSeen), 0));
+							insertLabel(forwardBuckets, label.extend(nextLabelId++, lastJob, t + 1, 0.0,
+									cutStateData.copyResidual(label.residual), 0));
 						}
 						for (int nextJob = 1; nextJob <= n; nextJob++) {
 							if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]) {
@@ -183,22 +214,123 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 								continue;
 							}
 							byte[] residual = cutStateData.copyResidual(label.residual);
-							byte[] fullSeen = cutStateData.copyFullSeen(label.fullSeen);
-							arcCost += cutStateData.applyForwardExtension(residual, fullSeen, lastJob, nextJob);
-							insertLabel(label.extend(nextLabelId++, nextJob, completion, arcCost, residual, fullSeen,
-									nextJob));
+							arcCost += cutStateData.applyForwardExtension(residual, lastJob, nextJob);
+							insertLabel(forwardBuckets, label.extend(nextLabelId++, nextJob, completion, arcCost,
+									residual, nextJob));
+						}
+					}
+				}
+			}
+			for (int t = tStar; t <= horizon; t++) {
+				for (int lastJob = 1; lastJob <= n; lastJob++) {
+					ArrayList<Label> bucket = forwardBuckets[index(lastJob, t)];
+					if (bucket == null) {
+						continue;
+					}
+					for (Label label : bucket) {
+						rememberEndCandidateIfNegative(label);
+					}
+				}
+			}
+		}
+
+		private void runBackwardLabeling() {
+			for (int t = horizon; t > tStar; t--) {
+				if (timeLimitChecker.isTimeLimitReached()) {
+					timedOut = true;
+					return;
+				}
+				for (int currentJob = 1; currentJob <= n; currentJob++) {
+					ArrayList<Label> bucket = backwardBuckets[index(currentJob, t)];
+					if (bucket == null || bucket.isEmpty()) {
+						continue;
+					}
+					for (int labelIndex = 0; labelIndex < bucket.size(); labelIndex++) {
+						Label label = bucket.get(labelIndex);
+						relaxedLabels++;
+						if (t > tStar && !isTimeIndexedArcForbidden(currentJob, currentJob, t - 1)) {
+							insertLabel(backwardBuckets, label.extend(nextLabelId++, currentJob, t - 1, 0.0,
+									cutStateData.copyResidual(label.residual), 0));
+						}
+						for (int previousJob = 0; previousJob <= n; previousJob++) {
+							if (previousJob == currentJob || processArcForbidden[previousJob][currentJob]) {
+								continue;
+							}
+							processArcScans++;
+							int previousTime = t - durationByArc[previousJob][currentJob];
+							if (previousTime < 0) {
+								continue;
+							}
+							if (isTimeIndexedArcForbidden(previousJob, currentJob, previousTime)) {
+								timeIndexedArcSkips++;
+								continue;
+							}
+							double arcCost = processArcReducedCost(previousJob, currentJob, t);
+							if (!isFinite(arcCost)) {
+								continue;
+							}
+							byte[] residual = cutStateData.copyResidual(label.residual);
+							arcCost += cutStateData.applyBackwardPrepend(residual, previousJob, currentJob);
+							if (previousJob == 0) {
+								rememberBackwardCompleteCandidate(label, arcCost);
+							} else if (previousTime >= tStar && isCompletionFeasible(previousJob, previousTime)) {
+								insertLabel(backwardBuckets, label.extend(nextLabelId++, previousJob, previousTime,
+										arcCost, residual, previousJob));
+							}
 						}
 					}
 				}
 			}
 		}
 
-		private boolean insertLabel(Label label) {
+		private void concatenateLabels() {
+			for (int t = tStar; t <= horizon; t++) {
+				for (int job = 1; job <= n; job++) {
+					ArrayList<Label> fw = forwardBuckets[index(job, t)];
+					ArrayList<Label> bw = backwardBuckets[index(job, t)];
+					if (fw == null || bw == null || fw.isEmpty() || bw.isEmpty()) {
+						continue;
+					}
+					for (Label left : fw) {
+						for (Label right : bw) {
+							double reducedCost = left.reducedCost + right.reducedCost
+									+ cutStateData.joinShift(left.residual, right.residual);
+							if (Utility.compareLt(reducedCost, bestPseudoReducedCost)) {
+								bestPseudoReducedCost = reducedCost;
+							}
+							if (Utility.compareGe(reducedCost, -RC_TOLERANCE) || !isPotentialTopCandidate(reducedCost)) {
+								continue;
+							}
+							ArrayList<Integer> sequence = reconstructForwardSequence(left);
+							ArrayList<Integer> suffix = reconstructBackwardSequence(right);
+							for (int i = 1; i < suffix.size(); i++) {
+								sequence.add(suffix.get(i));
+							}
+							rememberSequenceCandidate(sequence, reducedCost);
+						}
+					}
+				}
+			}
+		}
+
+		private boolean insertLabel(ArrayList<Label>[] buckets, Label label) {
 			int idx = index(label.lastJob, label.time);
 			ArrayList<Label> bucket = buckets[idx];
 			if (bucket == null) {
 				bucket = new ArrayList<Label>();
 				buckets[idx] = bucket;
+			}
+			if (heuristicMode && !bucket.isEmpty()) {
+				Label existing = bucket.get(0);
+				if (Utility.compareLe(existing.reducedCost, label.reducedCost)) {
+					labelsDominated++;
+					return false;
+				}
+				bucket.clear();
+				bucket.add(label);
+				labelsDominated++;
+				labelsKept++;
+				return true;
 			}
 			for (int i = 0; i < bucket.size(); i++) {
 				Label existing = bucket.get(i);
@@ -229,11 +361,25 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (Utility.compareGe(reducedCost, -RC_TOLERANCE) || !isPotentialTopCandidate(reducedCost)) {
 				return;
 			}
-			negativeStateCandidates++;
-			ArrayList<Integer> sequence = reconstructSequence(label);
+			rememberSequenceCandidate(reconstructForwardSequence(label), reducedCost);
+		}
+
+		private void rememberBackwardCompleteCandidate(Label suffixLabel, double sourceArcCost) {
+			double reducedCost = suffixLabel.reducedCost + sourceArcCost;
+			if (Utility.compareLt(reducedCost, bestPseudoReducedCost)) {
+				bestPseudoReducedCost = reducedCost;
+			}
+			if (Utility.compareGe(reducedCost, -RC_TOLERANCE) || !isPotentialTopCandidate(reducedCost)) {
+				return;
+			}
+			rememberSequenceCandidate(reconstructBackwardSequence(suffixLabel), reducedCost);
+		}
+
+		private void rememberSequenceCandidate(ArrayList<Integer> sequence, double reducedCost) {
 			if (sequence.isEmpty()) {
 				return;
 			}
+			negativeStateCandidates++;
 			if (hasRepeatedJob(sequence)) {
 				repeatedJobCandidates++;
 			}
@@ -346,7 +492,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			return node != null && node.id != config.debugIgnorePricingOnlyArcsAtNode;
 		}
 
-		private ArrayList<Integer> reconstructSequence(Label label) {
+		private ArrayList<Integer> reconstructForwardSequence(Label label) {
 			ArrayList<Integer> reversed = new ArrayList<Integer>();
 			Label current = label;
 			while (current != null) {
@@ -357,6 +503,18 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			}
 			Collections.reverse(reversed);
 			return reversed;
+		}
+
+		private ArrayList<Integer> reconstructBackwardSequence(Label label) {
+			ArrayList<Integer> sequence = new ArrayList<Integer>();
+			Label current = label;
+			while (current != null) {
+				if (current.addedJob > 0) {
+					sequence.add(Integer.valueOf(current.addedJob));
+				}
+				current = current.previous;
+			}
+			return sequence;
 		}
 
 		private boolean hasRepeatedJob(ArrayList<Integer> sequence) {
@@ -418,16 +576,19 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private int maxReturnedColumns() {
-			return config.timeIndexedGraphMaxExactPricingColumns > 0 ? config.timeIndexedGraphMaxExactPricingColumns
+			int exactLimit = config.timeIndexedGraphMaxExactPricingColumns > 0 ? config.timeIndexedGraphMaxExactPricingColumns
 					: config.maxExactPricingColumns;
+			return heuristicMode ? Math.min(50, exactLimit) : exactLimit;
 		}
 
 		String message(boolean improved) {
-			return "Time-indexed rank-1 cut pricing " + (improved ? "generated " + candidateBySignature.size()
+			return "Time-indexed rank-1 cut " + (heuristicMode ? "heuristic" : "exact")
+					+ " bidirectional pricing " + (improved ? "generated " + candidateBySignature.size()
 					+ " negative pseudo-schedule columns" : "found no negative pseudo-schedule")
 					+ ", bestPseudoRC=" + bestPseudoReducedCost
 					+ ", cuts=" + cutStateData.cuts.size()
 					+ ", horizon=" + horizon
+					+ ", tStar=" + tStar
 					+ ", piWindow=" + (graphWindow.dualWindow ? "enabled" : "disabled")
 					+ ", labelsKept=" + labelsKept
 					+ ", labelsDominated=" + labelsDominated
@@ -448,11 +609,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final ArrayList<TWETCut> cuts;
 		private final double[] duals;
 		private final boolean[][] scopeByCut;
-		private final byte[][] scopeBitByCut;
 		private final boolean[][] memoryByCut;
 		private final boolean[][] arcMemoryByCut;
 		private final boolean[] arcMemoryCut;
-		private final boolean[] fullCut;
 		private final int arcTableSize;
 
 		CutStateData(LP lp) {
@@ -461,25 +620,17 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.cuts = new ArrayList<TWETCut>(cutIds.size());
 			this.duals = new double[cutIds.size()];
 			this.scopeByCut = new boolean[cutIds.size()][data.n + 1];
-			this.scopeBitByCut = new byte[cutIds.size()][data.n + 1];
 			this.memoryByCut = new boolean[cutIds.size()][data.n + 1];
 			this.arcTableSize = (data.n + 2) * (data.n + 2);
 			this.arcMemoryByCut = new boolean[cutIds.size()][arcTableSize];
 			this.arcMemoryCut = new boolean[cutIds.size()];
-			this.fullCut = new boolean[cutIds.size()];
 			for (int idx = 0; idx < cutIds.size(); idx++) {
 				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
 				cuts.add(cut);
 				duals[idx] = pricingDuals.get(idx).doubleValue();
-				for (int job = 0; job <= data.n; job++) {
-					scopeBitByCut[idx][job] = -1;
-				}
-				List<Integer> scope = cut.getScopeJobs();
-				for (int pos = 0; pos < scope.size() && pos < 7; pos++) {
-					int job = scope.get(pos).intValue();
+				for (int job : cut.getScopeJobs()) {
 					if (job >= 1 && job <= data.n) {
 						scopeByCut[idx][job] = true;
-						scopeBitByCut[idx][job] = (byte) pos;
 					}
 				}
 				if (cut.hasMemoryArcs()) {
@@ -499,7 +650,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 						}
 					}
 				} else {
-					fullCut[idx] = true;
 					for (int job = 1; job <= data.n; job++) {
 						memoryByCut[idx][job] = true;
 					}
@@ -511,19 +661,11 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			return new byte[cuts.size()];
 		}
 
-		byte[] emptyFullSeen() {
-			return new byte[cuts.size()];
-		}
-
 		byte[] copyResidual(byte[] source) {
 			return source.length == 0 ? source : source.clone();
 		}
 
-		byte[] copyFullSeen(byte[] source) {
-			return source.length == 0 ? source : source.clone();
-		}
-
-		double applyForwardExtension(byte[] residual, byte[] fullSeen, int from, int job) {
+		double applyForwardExtension(byte[] residual, int from, int job) {
 			double shift = 0.0;
 			for (int idx = 0; idx < cuts.size(); idx++) {
 				if (arcMemoryCut[idx]) {
@@ -537,17 +679,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				if (!scopeByCut[idx][job]) {
 					continue;
 				}
-				if (fullCut[idx]) {
-					byte bit = scopeBitByCut[idx][job];
-					if (bit < 0) {
-						continue;
-					}
-					byte mask = (byte) (1 << bit);
-					if ((fullSeen[idx] & mask) != 0) {
-						continue;
-					}
-					fullSeen[idx] = (byte) (fullSeen[idx] | mask);
-				}
 				int next = residual[idx] + 1;
 				if (next >= 2) {
 					shift -= duals[idx];
@@ -558,12 +689,42 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			return shift;
 		}
 
-		boolean dominates(Label first, Label second) {
-			for (int idx = 0; idx < fullCut.length; idx++) {
-				if (fullCut[idx] && first.fullSeen[idx] != second.fullSeen[idx]) {
-					return false;
+		double applyBackwardPrepend(byte[] residual, int previousJob, int currentJob) {
+			double shift = 0.0;
+			if (currentJob <= 0 || currentJob > data.n) {
+				return shift;
+			}
+			for (int idx = 0; idx < cuts.size(); idx++) {
+				if (scopeByCut[idx][currentJob]) {
+					int next = residual[idx] + 1;
+					if (next >= 2) {
+						shift -= duals[idx];
+						next -= 2;
+					}
+					residual[idx] = (byte) next;
+				}
+				if (arcMemoryCut[idx]) {
+					if (!arcMemoryByCut[idx][arcIndex(previousJob, currentJob)]) {
+						residual[idx] = 0;
+					}
+				} else if (previousJob > 0 && !memoryByCut[idx][currentJob]) {
+					residual[idx] = 0;
 				}
 			}
+			return shift;
+		}
+
+		double joinShift(byte[] forwardResidual, byte[] backwardResidual) {
+			double shift = 0.0;
+			for (int idx = 0; idx < cuts.size(); idx++) {
+				if (forwardResidual[idx] + backwardResidual[idx] >= 2) {
+					shift -= duals[idx];
+				}
+			}
+			return shift;
+		}
+
+		boolean dominates(Label first, Label second) {
 			double bound = second.reducedCost;
 			for (int idx = 0; idx < duals.length; idx++) {
 				if (first.residual[idx] > second.residual[idx]) {
@@ -584,26 +745,31 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		final int time;
 		final double reducedCost;
 		final byte[] residual;
-		final byte[] fullSeen;
 		final Label previous;
 		final int addedJob;
 
-		Label(int id, int lastJob, int time, double reducedCost, byte[] residual, byte[] fullSeen, Label previous,
+		static Label forward(int id, int lastJob, int time, double reducedCost, byte[] residual, Label previous,
 				int addedJob) {
+			return new Label(id, lastJob, time, reducedCost, residual, previous, addedJob);
+		}
+
+		static Label backward(int id, int lastJob, int time, double reducedCost, byte[] residual, Label previous,
+				int addedJob) {
+			return new Label(id, lastJob, time, reducedCost, residual, previous, addedJob);
+		}
+
+		Label(int id, int lastJob, int time, double reducedCost, byte[] residual, Label previous, int addedJob) {
 			this.id = id;
 			this.lastJob = lastJob;
 			this.time = time;
 			this.reducedCost = reducedCost;
 			this.residual = residual;
-			this.fullSeen = fullSeen;
 			this.previous = previous;
 			this.addedJob = addedJob;
 		}
 
-		Label extend(int id, int newLastJob, int newTime, double arcCost, byte[] newResidual, byte[] newFullSeen,
-				int newAddedJob) {
-			return new Label(id, newLastJob, newTime, reducedCost + arcCost, newResidual, newFullSeen, this,
-					newAddedJob);
+		Label extend(int id, int newLastJob, int newTime, double arcCost, byte[] newResidual, int newAddedJob) {
+			return new Label(id, newLastJob, newTime, reducedCost + arcCost, newResidual, this, newAddedJob);
 		}
 	}
 
@@ -639,6 +805,23 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		horizon = Math.min(data.CmaxH, horizon);
 		int discreteHorizon = Math.max(0, (int) Math.ceil(horizon - 1e-9));
 		return new GraphWindow(discreteHorizon, start, end, dualWindow);
+	}
+
+	private static int computeTStar(GraphWindow window) {
+		double sum = 0.0;
+		int count = 0;
+		for (int job = 1; job < window.start.length; job++) {
+			if (!Utility.compareGt(window.start[job], window.end[job])) {
+				sum += Math.ceil(window.start[job] - 1e-9);
+				sum += Math.floor(window.end[job] + 1e-9);
+				count++;
+			}
+		}
+		if (count == 0) {
+			return Math.max(0, window.horizon / 2);
+		}
+		int value = (int) Math.round(sum / (2.0 * count));
+		return Math.max(0, Math.min(window.horizon, value));
 	}
 
 	private static boolean canUseDualProfitableWindow(LP lp) {

@@ -36,11 +36,11 @@ public class SubsetRowCutGenerator implements CutGenerator {
 
 	@Override
 	public CutGenerationResult separate(LP lp) {
-		if (!config.enableSubsetRowCutsForPartialDominance) {
+		if (!config.enableSubsetRowCutsForPartialDominance && !config.enableSubsetRowCutsForTimeIndexedGraph) {
 			return CutGenerationResult.empty("subset-row disabled");
 		}
-		if (!config.useGCNGBBStyleNgDssrPartialDominancePricing) {
-			return CutGenerationResult.empty("subset-row requires partial-list ng-DSSR exact pricing");
+		if (!isSupportedPricingMode()) {
+			return CutGenerationResult.empty("subset-row requires partial-list ng-DSSR or time-indexed rank-1 cut pricing");
 		}
 		TWETMasterSolution solution = lp.getLastSolution();
 		if (solution == null || solution.getColumnValues().isEmpty()) {
@@ -146,6 +146,16 @@ public class SubsetRowCutGenerator implements CutGenerator {
 	@Override
 	public String getName() {
 		return "SubsetRowCutGenerator";
+	}
+
+	private boolean isSupportedPricingMode() {
+		if (config.enableSubsetRowCutsForPartialDominance
+				&& config.useGCNGBBStyleNgDssrPartialDominancePricing) {
+			return true;
+		}
+		return config.enableSubsetRowCutsForTimeIndexedGraph
+				&& config.useTimeIndexedGraphPricing
+				&& config.useTimeIndexedGraphRank1CutPricing;
 	}
 
 	private HashSet<String> activeSubsetRowTriples(LP lp) {

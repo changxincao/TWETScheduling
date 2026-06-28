@@ -45,6 +45,8 @@ public class TWETBPCConfig {
 	 * 该图定价允许重复 job，TWETColumn/RMP 已按 visit count 接入；当前仍是不带 cut 的单向 DAG 对照实现。
 	 */
 	public boolean useTimeIndexedGraphPricing = false;
+	/** 2026-06-28: time-indexed graph pricing 的 rank-1 cut 实验模式，默认关闭。 */
+	public boolean useTimeIndexedGraphRank1CutPricing = false;
 	/**
 	 * 2026-06-20: 外包建模方式。masterVariables 保持当前 SP2 的 y_j + tariff segment 变量；
 	 * columns 使用 SP1 风格，把外包集合也作为列加入主问题，并启用外包集合定价与外包 membership 分支。
@@ -263,6 +265,8 @@ public class TWETBPCConfig {
 	public int maxCutRounds = 8;
 	/** 2026-06-13: 是否启用三元 subset-row cut；当前只允许 partial-list ng-DSSR exact pricing 使用其 dual。 */
 	public boolean enableSubsetRowCutsForPartialDominance = false;
+	/** 2026-06-28: 允许 time-indexed rank-1 cut pricing 使用 subset-row cut。 */
+	public boolean enableSubsetRowCutsForTimeIndexedGraph = false;
 	/** 2026-06-13: 每轮 subset-row separation 最多加入多少条 cut。 */
 	public int maxSubsetRowCutsPerRound = 10;
 	/** 2026-06-14: subset-row cut 默认不限制单 node 总数，只保留每轮加入上限。 */

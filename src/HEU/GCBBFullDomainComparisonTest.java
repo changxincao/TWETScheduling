@@ -36,6 +36,7 @@ public class GCBBFullDomainComparisonTest {
 	private static final String FULL_DOMAIN_ENGINE = "GCBBStyleBidirectionalFullDomainPricing";
 	private static final String NODE_JOIN_ENGINE = "GCBBStyleBidirectionalFullDomainNodeJoinPricing";
 	private static final String TIME_INDEXED_GRAPH_ENGINE = "TimeIndexedGraphPricing";
+	private static final String TIME_INDEXED_GRAPH_RANK1_ENGINE = "TimeIndexedGraphRank1CutPricing";
 
 	public static void main(String[] args) throws Exception {
 		Configure.debugBPCPricingColumnCheck = Boolean.getBoolean("twet.bpc.fullDomainCompare.debugColumnCheck");
@@ -162,6 +163,9 @@ public class GCBBFullDomainComparisonTest {
 		}
 		if (config.useTimeIndexedGraphPricing) {
 			mode += "-timeGraph";
+			if (config.useTimeIndexedGraphRank1CutPricing) {
+				mode += "-rank1Cut";
+			}
 		}
 		String completionBound = config.bidirectionalCompletionBoundRelaxation == null
 				? "off" : config.bidirectionalCompletionBoundRelaxation.trim();
@@ -185,7 +189,9 @@ public class GCBBFullDomainComparisonTest {
 	}
 
 	private static String exactEngineName(TWETBPCConfig config, boolean fullDomain, boolean nodeJoin) {
-		return config.useTimeIndexedGraphPricing ? TIME_INDEXED_GRAPH_ENGINE
+		return config.useTimeIndexedGraphPricing
+				? (config.useTimeIndexedGraphRank1CutPricing ? TIME_INDEXED_GRAPH_RANK1_ENGINE
+						: TIME_INDEXED_GRAPH_ENGINE)
 				: (nodeJoin ? NODE_JOIN_ENGINE : (fullDomain ? FULL_DOMAIN_ENGINE
 				: (config.useGCNGBBStyleNgDssrPartialDominancePricing ? NG_DSSR_PARTIAL_ENGINE
 				: (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing ? NG_DSSR_GRAPH_PARTIAL_ENGINE
@@ -304,6 +310,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useTimeIndexedGraphPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphPricing",
 				Boolean.toString(config.useTimeIndexedGraphPricing)));
+		config.useTimeIndexedGraphRank1CutPricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedGraphRank1CutPricing",
+				Boolean.toString(config.useTimeIndexedGraphRank1CutPricing)));
 		config.outsourcingModel = System.getProperty("twet.bpc.fullDomainCompare.outsourcingModel",
 				config.outsourcingModel);
 		config.enableDualStabilization = Boolean.parseBoolean(System.getProperty(
@@ -389,6 +398,11 @@ public class GCBBFullDomainComparisonTest {
 		config.enableSubsetRowCutsForPartialDominance = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableSubsetRowCutsForPartialDominance",
 				Boolean.toString(config.enableSubsetRowCutsForPartialDominance)));
+		config.enableSubsetRowCutsForTimeIndexedGraph = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableSubsetRowCutsForTimeIndexedGraph",
+				Boolean.toString(config.enableSubsetRowCutsForTimeIndexedGraph)));
+		config.maxCutRounds = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.maxCutRounds", config.maxCutRounds);
 		config.maxSubsetRowCutsPerRound = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.maxSubsetRowCutsPerRound", config.maxSubsetRowCutsPerRound);
 		config.maxSubsetRowCutsPerNode = Integer.getInteger(

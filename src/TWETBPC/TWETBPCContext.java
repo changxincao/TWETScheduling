@@ -32,6 +32,7 @@ import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PaperDominanceExactPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
+import TWETBPC.GC.TimeIndexedGraphRank1CutPricingEngine;
 import TWETBPC.IO.HeuristicSeedProvider;
 import TWETBPC.LP.CutPool;
 import TWETBPC.LP.OutsourcingPool;
@@ -74,7 +75,11 @@ public class TWETBPCContext {
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
 		if (config.useTimeIndexedGraphPricing) {
-			pricingEngines.add(new TimeIndexedGraphPricingEngine(data, config));
+			if (config.useTimeIndexedGraphRank1CutPricing) {
+				pricingEngines.add(new TimeIndexedGraphRank1CutPricingEngine(data, config));
+			} else {
+				pricingEngines.add(new TimeIndexedGraphPricingEngine(data, config));
+			}
 		} else if (config.enableBidirectionalPricing) {
 			if (config.useGCBBAsymmetricBidirectionalPricing) {
 				pricingEngines.add(new GCBBAsymmetricBidirectionalPricingEngine(data, config));
@@ -123,7 +128,9 @@ public class TWETBPCContext {
 		}
 		this.cutGenerators = new ArrayList<CutGenerator>();
 		cutGenerators.add(new NoOpCutGenerator());
-		if (!config.useColumnizedOutsourcing()) {
+		if (!config.useColumnizedOutsourcing()
+				&& (config.enableSubsetRowCutsForPartialDominance
+						|| config.enableSubsetRowCutsForTimeIndexedGraph)) {
 			cutGenerators.add(new SubsetRowCutGenerator(config));
 		}
 

@@ -765,8 +765,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 		static SriPricingContext from(LP lp, TWETBPCConfig config, int jobCount) {
 			List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
 			List<Double> duals = lp.getActiveSubsetRowPricingDuals();
-			if (!config.enableSubsetRowCutsForPartialDominance || !config.useGCNGBBStyleNgDssrPartialDominancePricing
-					|| cutIds.isEmpty()) {
+			boolean partialNgSri = config.enableSubsetRowCutsForPartialDominance
+					&& config.useGCNGBBStyleNgDssrPartialDominancePricing;
+			boolean timeIndexedSri = config.enableSubsetRowCutsForTimeIndexedGraph
+					&& config.useTimeIndexedGraphPricing
+					&& config.useTimeIndexedGraphRank1CutPricing;
+			if ((!partialNgSri && !timeIndexedSri) || cutIds.isEmpty()) {
 				return INACTIVE;
 			}
 			double[] penalties = new double[cutIds.size()];

@@ -817,20 +817,15 @@ public class PC {
 				TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
 				double reducedCost = reducedCostDual == null ? Double.NEGATIVE_INFINITY
 						: lp.computeReducedCost(column, reducedCostDual);
-				if (reducedCostDual != null) {
-					generated.observeReducedCost(reducedCost, column, null);
-				}
 				if (filterByAcceptanceDual && reducedCost >= -config.dualStabilizationReducedCostTolerance) {
 					filteredByAcceptanceDual++;
 					continue;
-				}
-				if (!generated.hasRepresentative()) {
-					generated.representativeColumn = column;
 				}
 				int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
 						column.isSeedColumn());
 				Integer value = Integer.valueOf(id);
 				if (activeColumnIds.add(value)) {
+					generated.observeReducedCost(reducedCost, column, null);
 					generated.internalColumnIds.add(value);
 					addedColumns++;
 				}
@@ -839,15 +834,9 @@ public class PC {
 				TWETBPC.Model.TWETOutsourcingColumn column = result.getOutsourcingColumns().get(i);
 				double reducedCost = reducedCostDual == null ? Double.NEGATIVE_INFINITY
 						: lp.computeReducedCost(column, reducedCostDual);
-				if (reducedCostDual != null) {
-					generated.observeReducedCost(reducedCost, null, column);
-				}
 				if (filterByAcceptanceDual && reducedCost >= -config.dualStabilizationReducedCostTolerance) {
 					filteredByAcceptanceDual++;
 					continue;
-				}
-				if (!generated.hasRepresentative()) {
-					generated.representativeOutsourcingColumn = column;
 				}
 				int id = lp.getOutsourcingPool().addColumn(column);
 				if (id < 0) {
@@ -855,6 +844,7 @@ public class PC {
 				}
 				Integer value = Integer.valueOf(id);
 				if (activeOutsourcingColumnIds.add(value)) {
+					generated.observeReducedCost(reducedCost, null, column);
 					generated.outsourcingColumnIds.add(value);
 					addedColumns++;
 				}

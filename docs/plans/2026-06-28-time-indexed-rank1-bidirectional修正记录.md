@@ -61,3 +61,11 @@ focused `javac` 已覆盖以下文件并通过：
 强分支也按同一口径处理：time-indexed 模式下 two-stage strong branching 只使用 phase1 的 RMP/repair bound 评分，不再进入原机器序列启发式 pricing 的 phase2。这样 no-cut/cut time-indexed 对照不再混入当前主线的序列局部搜索启发式，后续和论文 DWM 口径对比更清楚。验证：focused `javac` 通过；40-2 no-cut time-indexed root-only smoke `tmp-timegraph-noheur-engine-check-20260628` 日志中 pricing 行均为 `TimeIndexedGraphPricing`，未出现 `HeuristicPricing`。
 
 2026-06-28 进一步修正 strong branching 口径：no-cut time-indexed 仍只做 phase1，因为此时没有论文 cut-state 下的 graph-native heuristic；但 time-indexed rank1 cut 模式下，phase2 仍应保留，并使用 `TimeIndexedGraphRank1CutPricingEngine` 内部的 bucket heuristic 做 trial，而不是退化为 phase1，也不是混入原 `HeuristicPricingEngine`。实现上 `Tree` 只在 `useTimeIndexedGraphPricing && !useTimeIndexedGraphRank1CutPricing` 时跳过 phase2；`PC` 在 phase2 识别 rank1 graph engine 后调用 `priceHeuristicOnly()`，该方法只运行 graph-native bucket heuristic，不 fallback 到 exact labeling。这样 no-cut 和 cut 两种 time-indexed 实验线的强分支语义被分开，且仍不影响 ng-DSSR 主线。
+
+## 9. 40-2 有 setup 的完整求解结果
+
+2026-06-28 使用当前 time-indexed rank1/cut 实验线求解 `data/40-2/wet040_001_2m.dat`，配置为 `useTimeIndexedGraphPricing=true`、`useTimeIndexedGraphRank1CutPricing=true`、`enableSubsetRowCutsForTimeIndexedGraph=true`、`subsetRowCutMemoryMode=arcMemory`、开启 strong branching 和 dual-bound pruning，关闭 route enumeration，30 分钟全局时限。结果目录为 `test-results/bpc/tmp-timegraph-rank1-40-2-setup-full-20260628c`。
+
+本次在 515.890s 内求解到最优：`incumbent=bound=22580`，处理 5 个节点，root time 为 192.804s，root bound 为 22560.226019。总 pricing 轮数 1307，新增列 103847，最终/峰值 pool 为 103727；`TimeIndexedGraphRank1CutPricing` 累计 287.149s / 1291 calls，master LP 累计 169.227s。cut 轮数 94，累计加入 cut 485 条，峰值 cut pool 为 1757。
+
+从过程看，root 前半段 no-cut time-indexed graph pricing 会快速生成大量 pseudo-schedule 列，之后 active rank1 cut 下进入 graph-native heuristic/exact bidirectional pricing。rank1 cut 明显把 root bound 推高，但列池仍会膨胀到 10 万级。该结果说明当前实现对 40-2 有 setup 算例并没有出现“root 第一次迭代就爆炸到不可接受”的情况，反而可在 9 分钟内完整闭合；但它仍显著依赖大量 pseudo-schedule 列和多轮 cut/pricing，不能直接推出 60-2 上也会接近论文表格速度。

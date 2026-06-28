@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.PriorityQueue;
 
 import Basic.Data;
@@ -205,7 +204,6 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int[][] durationByArc;
 		private final boolean[][] processArcForbidden;
 		private final boolean[] endForbidden;
-		private final HashSet<SequenceSignature> activeSignatures;
 		private final HashMap<SequenceSignature, Candidate> candidateBySignature;
 		private final PriorityQueue<Candidate> candidateHeap;
 		private int relaxedStates;
@@ -233,7 +231,6 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.durationByArc = new int[n + 1][n + 1];
 			this.processArcForbidden = new boolean[n + 1][n + 1];
 			this.endForbidden = new boolean[n + 1];
-			this.activeSignatures = collectActiveSignatures();
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
@@ -342,9 +339,6 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				duplicateJobCandidates++;
 			}
 			SequenceSignature signature = new SequenceSignature(sequence);
-			if (activeSignatures.contains(signature)) {
-				return;
-			}
 			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, ColumnSource.PRICING_EXACT, false),
 					reducedCost);
@@ -519,14 +513,6 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				candidateHeap.poll();
 			}
 			return null;
-		}
-
-		private HashSet<SequenceSignature> collectActiveSignatures() {
-			HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
-			for (int columnId : lp.getRestrictedColumnIds()) {
-				signatures.add(lp.getPool().getColumn(columnId).getSignature());
-			}
-			return signatures;
 		}
 
 		private int index(int job, int time) {

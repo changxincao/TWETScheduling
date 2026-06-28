@@ -509,7 +509,7 @@ public class PC {
 				continue;
 			}
 
-			int addedColumns = lp.addColumns(generated.internalColumnIds)
+			int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
 					+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 			if (addedColumns == 0) {
 				if (separationDual != null && Double.isFinite(generated.observedDualBound)
@@ -886,12 +886,14 @@ public class PC {
 					filteredByAcceptanceDual++;
 					continue;
 				}
-				int id = lp.getPool().addColumn(column.getSequence(), column.getCost(), column.getSource(),
-						column.isSeedColumn());
-				Integer value = Integer.valueOf(id);
+				Pool.ColumnUpdate update = lp.addOrImproveColumn(column);
+				Integer value = Integer.valueOf(update.columnId);
 				if (activeColumnIds.add(value)) {
 					generated.observeReducedCost(reducedCost, column, null);
 					generated.internalColumnIds.add(value);
+				} else if (update.improvedCost) {
+					generated.observeReducedCost(reducedCost, column, null);
+					generated.improvedActiveInternalColumns++;
 				}
 			}
 			for (int i = 0; i < result.getOutsourcingColumns().size(); i++) {
@@ -1146,6 +1148,7 @@ public class PC {
 	private static final class GeneratedColumnIds {
 		final ArrayList<Integer> internalColumnIds = new ArrayList<Integer>();
 		final ArrayList<Integer> outsourcingColumnIds = new ArrayList<Integer>();
+		int improvedActiveInternalColumns;
 		double bestAcceptedReducedCost = Double.POSITIVE_INFINITY;
 		double bestInternalReducedCost = Double.POSITIVE_INFINITY;
 		double bestOutsourcingReducedCost = Double.POSITIVE_INFINITY;
@@ -1156,7 +1159,7 @@ public class PC {
 		TWETOutsourcingColumn representativeOutsourcingColumn;
 
 		boolean isEmpty() {
-			return internalColumnIds.isEmpty() && outsourcingColumnIds.isEmpty();
+			return internalColumnIds.isEmpty() && outsourcingColumnIds.isEmpty() && improvedActiveInternalColumns == 0;
 		}
 
 		boolean hasRepresentative() {
@@ -1189,6 +1192,7 @@ public class PC {
 		void merge(GeneratedColumnIds other) {
 			internalColumnIds.addAll(other.internalColumnIds);
 			outsourcingColumnIds.addAll(other.outsourcingColumnIds);
+			improvedActiveInternalColumns += other.improvedActiveInternalColumns;
 			if (other.bestAcceptedReducedCost < bestAcceptedReducedCost) {
 				bestAcceptedReducedCost = other.bestAcceptedReducedCost;
 				representativeColumn = other.representativeColumn;

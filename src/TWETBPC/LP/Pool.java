@@ -45,16 +45,35 @@ public class Pool {
 	 * 如果同序列的列已存在，则直接复用旧 id。
 	 */
 	public int addColumn(List<Integer> sequence, double cost, ColumnSource source, boolean seedColumn) {
+		return addOrImproveColumn(sequence, cost, source, seedColumn).columnId;
+	}
+
+	/**
+	 * 加入列；如果同序列列已经存在但新成本更低，则原地更新全局列池中的列。
+	 * <p>
+	 * 2026-06-28: time-indexed pseudo-schedule 可能用不同完成时间生成同一 job sequence。
+	 * 当前主问题仍按 sequence 管理列，因此必须保证全局池中保留的是该 sequence 已知的最低成本版本。
+	 */
+	public ColumnUpdate addOrImproveColumn(List<Integer> sequence, double cost, ColumnSource source,
+			boolean seedColumn) {
 		SequenceSignature signature = new SequenceSignature(sequence);
 		Integer existing = signatureToId.get(signature);
 		if (existing != null) {
-			return existing.intValue();
+			int id = existing.intValue();
+			TWETColumn old = columns.get(id);
+			if (cost + 1e-8 < old.getCost()) {
+				TWETColumn improved = new TWETColumn(id, sequence, data.n, cost, source,
+						old.isSeedColumn() || seedColumn);
+				columns.set(id, improved);
+				return new ColumnUpdate(id, false, true);
+			}
+			return new ColumnUpdate(id, false, false);
 		}
 		int id = columns.size();
 		TWETColumn column = new TWETColumn(id, sequence, data.n, cost, source, seedColumn);
 		columns.add(column);
 		signatureToId.put(column.getSignature(), Integer.valueOf(id));
-		return id;
+		return new ColumnUpdate(id, true, false);
 	}
 
 	/** 2026-06-24: route enumeration 需要先按签名判断全局池中是否已有同序列列。 */
@@ -76,6 +95,18 @@ public class Pool {
 	/** @return 当前列池中的所有列 */
 	public List<TWETColumn> getColumns() {
 		return columns;
+	}
+
+	public static final class ColumnUpdate {
+		public final int columnId;
+		public final boolean newColumn;
+		public final boolean improvedCost;
+
+		ColumnUpdate(int columnId, boolean newColumn, boolean improvedCost) {
+			this.columnId = columnId;
+			this.newColumn = newColumn;
+			this.improvedCost = improvedCost;
+		}
 	}
 
 }

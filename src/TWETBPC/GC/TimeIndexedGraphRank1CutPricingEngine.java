@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.PriorityQueue;
 
@@ -97,7 +96,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final CutStateData cutStateData;
 		private final ArrayList<Label>[] forwardBuckets;
 		private final ArrayList<Label>[] backwardBuckets;
-		private final HashSet<SequenceSignature> activeSignatures;
 		private final HashMap<SequenceSignature, Candidate> candidateBySignature;
 		private final PriorityQueue<Candidate> candidateHeap;
 		private int nextLabelId;
@@ -130,7 +128,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.cutStateData = new CutStateData(lp);
 			this.forwardBuckets = new ArrayList[(n + 1) * width];
 			this.backwardBuckets = new ArrayList[(n + 1) * width];
-			this.activeSignatures = collectActiveSignatures();
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
@@ -384,9 +381,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				repeatedJobCandidates++;
 			}
 			SequenceSignature signature = new SequenceSignature(sequence);
-			if (activeSignatures.contains(signature)) {
-				return;
-			}
 			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, ColumnSource.PRICING_EXACT, false),
 					reducedCost);
@@ -565,14 +559,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				candidateHeap.poll();
 			}
 			return null;
-		}
-
-		private HashSet<SequenceSignature> collectActiveSignatures() {
-			HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
-			for (int columnId : lp.getRestrictedColumnIds()) {
-				signatures.add(lp.getPool().getColumn(columnId).getSignature());
-			}
-			return signatures;
 		}
 
 		private int maxReturnedColumns() {

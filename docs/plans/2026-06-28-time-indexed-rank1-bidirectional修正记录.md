@@ -41,3 +41,11 @@ focused `javac` 已覆盖以下文件并通过：
 2026-06-28 复查当前实现后，确认新逻辑已经真正接入双向 bucket pricing：active rank-1 cut 下先运行 graph-native bucket heuristic，再运行 exact bidirectional pricing；cut separation 会产生一行和三行 rank-1 cuts；limited-memory arc set 已补反向 pair 和所有正 multiplier job pair；inactive cut 删除和 tailing-off 只在 time-indexed rank1 模式下触发。40-2 root-only smoke 重新验证通过，日志显示 `SubsetRowCutGenerator` 加入 79 条 rank-1 cuts，后续 pricing 均为 `Time-indexed rank-1 cut heuristic/exact bidirectional pricing`。
 
 当前仍不能称为和论文 DWM 完全一致，原因是项目全局 `Pool` 仍用 `SequenceSignature` 去重，`TWETColumn` 也只保存 job sequence 与成本，不保存 time-indexed path identity。因此同一 sequence 的不同完成时间路径不能作为不同 DWM 列长期共存。这是当前 time-indexed 对照器的结构性边界，不是双向 labeling 或 cut-state 的局部 bug。普通 ng-DSSR、partial dominance 和非 time-indexed pricing 的入口未被改动；本次新增的 cut loop 管理也有 `useTimeIndexedGraphPricing && useTimeIndexedGraphRank1CutPricing && enableSubsetRowCutsForTimeIndexedGraph` 保护。
+
+## 7. 同 sequence 低成本版本保留
+
+继续复查后确认，当前主问题仍按 `SequenceSignature` 管理列时，必须保证同一 job sequence 只保留已知最低成本版本。time-indexed graph 中同一序列可能在不同完成时间上被恢复出来，若旧版本先进入全局 pool，后续更低成本版本不能因为 signature 已存在而被跳过，否则会使当前 RMP 使用偏高的列成本，尤其影响 no-cut/time-indexed rank1 对照。
+
+本次修正把该语义放在 `Pool/LP/PC` 层闭环处理：`Pool` 在同 signature 新成本更低时原地替换列对象并保留原 id；如果该列已经在当前 CPLEX 模型中，`LP` 同步更新对应变量的 objective coefficient；`PC` 将这类 active column cost improvement 视为本轮有效变化，触发后续 RMP 重解。两个 time-indexed pricing engine 不再预先跳过 active signature，而是把候选交给 `Pool` 判断是否能改进成本。
+
+该修正没有把主问题改成 path-time identity，也不会让同一 sequence 的多个 time-indexed path 共存；它只是保证在当前 sequence-column 模型下不会保留较差成本版本。普通 ng-DSSR、partial dominance 和其他非 time-indexed pricing 若偶然返回同 signature 更低成本列，也会受益于同一条全局池语义，但不会改变它们的扩展、占优、completion bound 或 join 逻辑。验证上，focused `javac` 已通过；40-2 root-only smoke 使用 `timeIndexedGraphPricing=true`、`timeIndexedGraphRank1CutPricing=true`、`enableSubsetRowCutsForTimeIndexedGraph=true`，结果为 `NODE_LIMIT, valid=true`，目录 `test-results/bpc/tmp-timegraph-rank1-bidir-recheck-20260628`。

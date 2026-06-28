@@ -326,6 +326,20 @@ public class LP {
 		return added;
 	}
 
+	public Pool.ColumnUpdate addOrImproveColumn(TWETColumn column) {
+		Pool.ColumnUpdate update = pool.addOrImproveColumn(column.getSequence(), column.getCost(),
+				column.getSource(), column.isSeedColumn());
+		if (update.improvedCost && cplex != null && objective != null) {
+			try {
+				updateCurrentColumnObjective(update.columnId);
+			} catch (IloException ex) {
+				throw new IllegalStateException("Failed to update improved column " + update.columnId
+						+ " objective coefficient", ex);
+			}
+		}
+		return update;
+	}
+
 	public void addCuts(List<Integer> cutIds) {
 		for (int id : cutIds) {
 			Integer value = Integer.valueOf(id);
@@ -771,6 +785,17 @@ public class LP {
 		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "lambda_" + columnId);
 		lambdaByColumnId.put(Integer.valueOf(columnId), var);
 		lambdaVars = append(lambdaVars, var);
+	}
+
+	private void updateCurrentColumnObjective(int columnId) throws IloException {
+		if (lambdaByColumnId == null || objective == null) {
+			return;
+		}
+		IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
+		if (var != null) {
+			cplex.setLinearCoef(objective, var, pool.getColumn(columnId).getCost());
+			lastSolution = null;
+		}
 	}
 
 	private void addOutsourcingColumnToCurrentModel(int columnId) throws IloException {

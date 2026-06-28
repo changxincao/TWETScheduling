@@ -424,6 +424,15 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalCompletionBoundScalarPruning = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBoundScalar",
 				Boolean.toString(config.bidirectionalCompletionBoundScalarPruning)));
+		config.timeIndexedCompletionBoundScalarEnhancement = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedCompletionBoundScalar",
+				Boolean.toString(config.timeIndexedCompletionBoundScalarEnhancement)));
+		config.timeIndexedCompletionBoundWindowTightening = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedCompletionBoundWindow",
+				Boolean.toString(config.timeIndexedCompletionBoundWindowTightening)));
+		config.timeIndexedCompletionBoundArcFixing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedCompletionBoundArcFixing",
+				Boolean.toString(config.timeIndexedCompletionBoundArcFixing)));
 		config.bidirectionalCompletionBoundArcFixing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBoundArcFixing",
 				Boolean.toString(config.bidirectionalCompletionBoundArcFixing)));

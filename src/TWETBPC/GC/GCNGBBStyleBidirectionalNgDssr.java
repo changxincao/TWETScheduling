@@ -205,6 +205,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long completionBoundScalarPruned;
 	private long completionBoundScalarFunctionFallbacks;
 	private long completionBoundScalarUnavailable;
+	private long timeIndexedScalarBuildNanos;
+	private long timeIndexedScalarImprovedChecks;
+	private long timeIndexedScalarExtraPruned;
+	private long timeIndexedScalarUnavailable;
+	private long timeIndexedWindowTightenedJobs;
+	private long timeIndexedWindowReachableJobs;
+	private TimeIndexedScalarCompletionBound timeIndexedScalarBound;
 	private long completionBoundArcFixingCandidates;
 	private long completionBoundArcFixingFixed;
 	private long completionBoundArcFixingDomainPruned;
@@ -2657,6 +2664,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundScalarPruned = 0;
 		completionBoundScalarFunctionFallbacks = 0;
 		completionBoundScalarUnavailable = 0;
+		timeIndexedScalarBuildNanos = 0;
+		timeIndexedScalarImprovedChecks = 0;
+		timeIndexedScalarExtraPruned = 0;
+		timeIndexedScalarUnavailable = 0;
+		timeIndexedWindowTightenedJobs = 0;
+		timeIndexedWindowReachableJobs = 0;
+		timeIndexedScalarBound = null;
 		completionBoundArcFixingCandidates = 0;
 		completionBoundArcFixingFixed = 0;
 		completionBoundArcFixingDomainPruned = 0;
@@ -2782,6 +2796,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundScalarPruned = 0;
 		completionBoundScalarFunctionFallbacks = 0;
 		completionBoundScalarUnavailable = 0;
+		timeIndexedScalarImprovedChecks = 0;
+		timeIndexedScalarExtraPruned = 0;
+		timeIndexedScalarUnavailable = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
 		diagnosticForwardPops = 0;
 		diagnosticBackwardPops = 0;
@@ -2858,6 +2875,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", completionBoundScalar check/pruned/fallback/unavailable=" + completionBoundScalarChecks
 				+ "/" + completionBoundScalarPruned + "/" + completionBoundScalarFunctionFallbacks
 				+ "/" + completionBoundScalarUnavailable
+				+ ", timeIndexedScalar buildMs/improved/extraPruned/unavailable/windowTightenedReachable="
+				+ formatMillis(timeIndexedScalarBuildNanos) + "/" + timeIndexedScalarImprovedChecks
+				+ "/" + timeIndexedScalarExtraPruned + "/" + timeIndexedScalarUnavailable
+				+ "/" + timeIndexedWindowTightenedJobs + "-" + timeIndexedWindowReachableJobs
 				+ ", completionBoundArcFixing candidates/fixed/domain/scalar/unavailable/funcEval/ms="
 				+ completionBoundArcFixingCandidates + "/" + completionBoundArcFixingFixed
 				+ "/" + completionBoundArcFixingDomainPruned + "/" + completionBoundArcFixingScalarPruned
@@ -3454,9 +3475,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			completionBoundScalarPruned++;
 			return true;
 		}
+		double originalScalarLowerBound = label.noSriMinReducedCost + suffixLowerBound;
+		double timeIndexedSuffix = timeIndexedScalarBound == null ? Utility.big_M
+				: timeIndexedScalarBound.suffixLowerBoundAfterFloor(label.jid, label.noSriFrontier.head.start);
+		if (!Utility.isBigMValue(timeIndexedSuffix) && Utility.compareGt(timeIndexedSuffix, suffixLowerBound)) {
+			suffixLowerBound = timeIndexedSuffix;
+			timeIndexedScalarImprovedChecks++;
+		} else if (timeIndexedScalarBound != null && Utility.isBigMValue(timeIndexedSuffix)) {
+			timeIndexedScalarUnavailable++;
+		}
 		double scalarLowerBound = label.noSriMinReducedCost + suffixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
 			completionBoundScalarPruned++;
+			if (Utility.compareLt(originalScalarLowerBound, cutoff)) {
+				timeIndexedScalarExtraPruned++;
+			}
 			return true;
 		}
 		completionBoundScalarFunctionFallbacks++;
@@ -3473,9 +3506,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			completionBoundScalarPruned++;
 			return true;
 		}
+		double originalScalarLowerBound = label.noSriMinReducedCost + prefixLowerBound;
+		double timeIndexedPrefix = timeIndexedScalarBound == null ? Utility.big_M
+				: timeIndexedScalarBound.prefixLowerBoundBeforeCeil(label.jid, label.noSriFrontier.tail.end);
+		if (!Utility.isBigMValue(timeIndexedPrefix) && Utility.compareGt(timeIndexedPrefix, prefixLowerBound)) {
+			prefixLowerBound = timeIndexedPrefix;
+			timeIndexedScalarImprovedChecks++;
+		} else if (timeIndexedScalarBound != null && Utility.isBigMValue(timeIndexedPrefix)) {
+			timeIndexedScalarUnavailable++;
+		}
 		double scalarLowerBound = label.noSriMinReducedCost + prefixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
 			completionBoundScalarPruned++;
+			if (Utility.compareLt(originalScalarLowerBound, cutoff)) {
+				timeIndexedScalarExtraPruned++;
+			}
 			return true;
 		}
 		completionBoundScalarFunctionFallbacks++;
@@ -3906,6 +3951,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		zeroDualExcludedJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		precomputeEffectivePricingWindows(lp);
+		buildTimeIndexedScalarBoundAndTightenWindows(lp);
 		precomputeZeroDualExcludedJobs(lp);
 		precomputeCompletionBoundPricingWindows();
 	}
@@ -3923,6 +3969,38 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		dynamicMinHStart = ngDssrReusableDynamicMinHStart;
 		dynamicMaxHEnd = ngDssrReusableDynamicMaxHEnd;
 		earliestSourceCompletion = ngDssrReusableEarliestSourceCompletion;
+	}
+
+	private void buildTimeIndexedScalarBoundAndTightenWindows(LP lp) {
+		timeIndexedScalarBound = TimeIndexedScalarCompletionBound.build(data, config, lp, pricingHorizon,
+				effectiveJobHStart, effectiveJobHEnd);
+		if (timeIndexedScalarBound == null) {
+			return;
+		}
+		timeIndexedScalarBuildNanos += timeIndexedScalarBound.getBuildNanos();
+		TimeIndexedScalarCompletionBound.WindowTightening tightened =
+				timeIndexedScalarBound.tightenWindows(effectiveJobHStart, effectiveJobHEnd);
+		timeIndexedWindowTightenedJobs += tightened.tightenedJobs;
+		timeIndexedWindowReachableJobs += tightened.reachableJobs;
+		if (tightened.tightenedJobs > 0) {
+			recomputeEffectiveWindowScalars();
+		}
+	}
+
+	private void recomputeEffectiveWindowScalars() {
+		dynamicMinHStart = Utility.big_M;
+		dynamicMaxHEnd = 0.0;
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = effectiveJobHStart[job];
+			double hEnd = effectiveJobHEnd[job];
+			if (!Utility.compareGt(hStart, hEnd)) {
+				if (Double.isFinite(hStart)) {
+					dynamicMinHStart = Math.min(dynamicMinHStart, hStart);
+				}
+				dynamicMaxHEnd = Math.max(dynamicMaxHEnd, hEnd);
+			}
+		}
+		pricingHorizon = Math.min(data.CmaxH, dynamicMaxHEnd);
 	}
 
 	private void rebuildHalfDomainForCurrentMidpoint() {

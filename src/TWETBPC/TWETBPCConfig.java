@@ -174,6 +174,12 @@ public class TWETBPCConfig {
 	public String bidirectionalCompletionBoundQueueOrdering = "fifo";
 	/** 2026-06-02: completion bound 是否启用离散 scalar 预筛；仅用于 full-domain 对照路径。 */
 	public boolean bidirectionalCompletionBoundScalarPruning = true;
+	/** 2026-06-28: ng-DSSR 主线可选用独立 time-indexed relaxed graph 强化 scalar completion bound。 */
+	public boolean timeIndexedCompletionBoundScalarEnhancement = false;
+	/** 2026-06-28: 整数时间实例上，使用 time-indexed 剩余可达时间收紧当前 node 内部 pricing window。 */
+	public boolean timeIndexedCompletionBoundWindowTightening = true;
+	/** 2026-06-28: node 闭合后，用 time-indexed relaxed graph 做时空弧 pricingOnly fixing。 */
+	public boolean timeIndexedCompletionBoundArcFixing = true;
 	/** 2026-06-03: 是否用当前 pricing 轮的 completion bound 做本地 job-job arc fixing。 */
 	public boolean bidirectionalCompletionBoundArcFixing = true;
 	/** 2026-06-03: 只诊断 completion bound 能否在当前 pricing 轮安全判掉 job-job arc，不写回 node。 */

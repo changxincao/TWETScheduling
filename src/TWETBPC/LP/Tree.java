@@ -22,6 +22,7 @@ import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
+import TWETBPC.GC.TimeIndexedScalarCompletionBound;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 import TWETBPC.LP.PC.StrongBranchingTrialResult;
@@ -190,6 +191,7 @@ public class Tree {
 			applyTimeIndexedGraphArcFixing(lp, incumbentCost);
 			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = null;
 			if (!config.useTimeIndexedGraphPricing) {
+				applyTimeIndexedScalarCompletionArcFixing(lp, incumbentCost);
 				heartbeat(node, "subtreeArcElimination.start");
 				subtreeArcElimination = evaluateSubtreeArcElimination(lp, incumbentCost, solution.getObjectiveValue());
 			}
@@ -343,6 +345,25 @@ public class Tree {
 		if (result.isAvailable()) {
 			heartbeat(lp.getNode(), "timeIndexedArcFixing.done " + result.summary());
 		}
+	}
+
+	private void applyTimeIndexedScalarCompletionArcFixing(LP lp, double incumbentCost) {
+		if (!config.timeIndexedCompletionBoundScalarEnhancement || !isNgDssrPricingActive()
+				|| lp == null || lp.getNode() == null || lp.getNode().depth <= 0) {
+			return;
+		}
+		heartbeat(lp.getNode(), "timeIndexedScalarArcFixing.start");
+		TimeIndexedScalarCompletionBound.ArcFixingResult result =
+				TimeIndexedScalarCompletionBound.applyArcFixing(data, config, lp, incumbentCost);
+		if (result.isAvailable()) {
+			heartbeat(lp.getNode(), "timeIndexedScalarArcFixing.done " + result.summary());
+		}
+	}
+
+	private boolean isNgDssrPricingActive() {
+		return config.useGCNGBBStyleNgDssrPricing
+				|| config.useGCNGBBStyleNgDssrPartialDominancePricing
+				|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing;
 	}
 
 	private void heartbeat(Node node, String phase) {

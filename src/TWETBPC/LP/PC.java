@@ -810,7 +810,6 @@ public class PC {
 		} else if (!repairMode) {
 			lastReusableSubtreeArcEliminationBounds = null;
 		}
-		int addedColumns = 0;
 		int filteredByAcceptanceDual = 0;
 		if (result.isImproved()) {
 			for (int i = 0; i < result.getColumns().size(); i++) {
@@ -827,7 +826,6 @@ public class PC {
 				if (activeColumnIds.add(value)) {
 					generated.observeReducedCost(reducedCost, column, null);
 					generated.internalColumnIds.add(value);
-					addedColumns++;
 				}
 			}
 			for (int i = 0; i < result.getOutsourcingColumns().size(); i++) {
@@ -846,7 +844,6 @@ public class PC {
 				if (activeOutsourcingColumnIds.add(value)) {
 					generated.observeReducedCost(reducedCost, null, column);
 					generated.outsourcingColumnIds.add(value);
-					addedColumns++;
 				}
 			}
 		}
@@ -880,7 +877,8 @@ public class PC {
 			message += " acceptedBestRc=" + generated.bestAcceptedReducedCost + " observedDualBound="
 					+ observedDualBound + " filteredByOutDual=" + filteredByAcceptanceDual;
 		}
-		traceSink.onPricingCall(lp.getNode(), name, addedColumns > 0, addedColumns, message,
+		int reportedAddedColumns = generated.internalColumnIds.size() + generated.outsourcingColumnIds.size();
+		traceSink.onPricingCall(lp.getNode(), name, reportedAddedColumns > 0, reportedAddedColumns, message,
 				totalPoolSize(lp), pricingNanos);
 		return generated;
 	}

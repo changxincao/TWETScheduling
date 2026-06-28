@@ -485,8 +485,8 @@ public class Tree {
 				return compareStrongBranchingSelection(a, b);
 			}
 		});
-		// 2026-06-28: time-indexed pricing 不混用原机器序列启发式；强分支只用 phase1 RMP/repair 评分。
-		if (config.useTimeIndexedGraphPricing) {
+		// 2026-06-28: no-cut time-indexed 不混用原机器序列启发式；rank1 cut 模式的 phase2 使用图定价器内部 bucket heuristic。
+		if (config.useTimeIndexedGraphPricing && !config.useTimeIndexedGraphRank1CutPricing) {
 			return phase1.get(0);
 		}
 		int phase2Limit = Math.min(config.strongBranchingPhase2CandidateLimit, phase1.size());

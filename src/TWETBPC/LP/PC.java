@@ -14,6 +14,7 @@ import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingResult;
+import TWETBPC.GC.TimeIndexedGraphRank1CutPricingEngine;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
@@ -289,7 +290,7 @@ public class PC {
 					HashSet<Integer> activeOutsourcingColumnIds =
 							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
 					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
-							activeOutsourcingColumnIds, "strongBranching", false, null, Double.NaN);
+							activeOutsourcingColumnIds, "strongBranching", false, null, Double.NaN, true);
 					if (generated.isEmpty()) {
 						continue;
 					}
@@ -331,6 +332,10 @@ public class PC {
 		}
 		// 2026-06-27: Phase 2 仍不跑内部 exact pricing；但 columnized outsourcing 的集合定价较轻，
 		// 且 outsourcing membership 分支的评分需要看到外包列族的即时反应，因此允许它进入 trial。
+		if (config.useTimeIndexedGraphPricing && config.useTimeIndexedGraphRank1CutPricing
+				&& engine instanceof TimeIndexedGraphRank1CutPricingEngine) {
+			return true;
+		}
 		return lp.isColumnizedOutsourcing() && engine instanceof OutsourcingPricingEngine;
 	}
 
@@ -840,6 +845,14 @@ public class PC {
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
 			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
 			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
+		return generateColumnsFromEngine(lp, engine, repairMode, activeColumnIds, activeOutsourcingColumnIds,
+				dualModeName, allowReusableBounds, acceptanceDual, dualBoundObjectiveOverride, false);
+	}
+
+	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
+			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
+			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride,
+			boolean strongBranchingPhase2) {
 		GeneratedColumnIds generated = new GeneratedColumnIds();
 		if (isTimeLimitReached()) {
 			return generated;
@@ -853,7 +866,12 @@ public class PC {
 		String modeSuffix = dualModeName == null || dualModeName.length() == 0 ? "" : "." + dualModeName;
 		heartbeat(lp, (repairMode ? "pricing.repair." : "pricing.") + engine.getName() + modeSuffix + ".start");
 		long pricingStart = System.nanoTime();
-		PricingResult result = repairMode ? engine.findFeasible(lp, timeLimitChecker) : engine.price(lp, timeLimitChecker);
+		PricingResult result;
+		if (strongBranchingPhase2 && engine instanceof TimeIndexedGraphRank1CutPricingEngine) {
+			result = ((TimeIndexedGraphRank1CutPricingEngine) engine).priceHeuristicOnly(lp, timeLimitChecker);
+		} else {
+			result = repairMode ? engine.findFeasible(lp, timeLimitChecker) : engine.price(lp, timeLimitChecker);
+		}
 		long pricingNanos = System.nanoTime() - pricingStart;
 		if (isTimeLimitReached()) {
 			String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();

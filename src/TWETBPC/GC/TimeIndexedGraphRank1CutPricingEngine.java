@@ -74,6 +74,28 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		return result;
 	}
 
+	/**
+	 * 2026-06-28: strong branching phase2 只跑论文里的 graph-native bucket heuristic。
+	 * 如果 heuristic 找不到列，不在试探阶段 fallback 到 exact labeling。
+	 */
+	public PricingResult priceHeuristicOnly(LP lp, TimeLimitChecker checker) {
+		this.timeLimitChecker = checker == null ? TimeLimitChecker.NONE : checker;
+		if (!config.useTimeIndexedGraphPricing || !config.useTimeIndexedGraphRank1CutPricing) {
+			return PricingResult.noImprovement("Time-indexed rank-1 cut pricing disabled");
+		}
+		if (lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
+			return PricingResult.noImprovement("Time-indexed rank-1 cut heuristic skipped: no active cuts");
+		}
+		if (this.timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before time-indexed rank-1 cut heuristic pricing");
+		}
+		Rank1CutSolver solver = new Rank1CutSolver(lp, true);
+		ArrayList<TWETColumn> columns = solver.solve();
+		return columns.isEmpty()
+				? PricingResult.noImprovement(solver.message(false))
+				: new PricingResult(columns, true, solver.message(true));
+	}
+
 	@Override
 	public String getName() {
 		return "TimeIndexedGraphRank1CutPricing";

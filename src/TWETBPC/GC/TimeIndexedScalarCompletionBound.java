@@ -40,9 +40,11 @@ public final class TimeIndexedScalarCompletionBound {
 		final double gap;
 		final long totalNanos;
 		final String message;
+		final WindowReachabilityStats windowStats;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int unavailable,
-				int processFixed, int idleFixed, int endFixed, double gap, long totalNanos, String message) {
+				int processFixed, int idleFixed, int endFixed, double gap, long totalNanos, String message,
+				WindowReachabilityStats windowStats) {
 			this.available = available;
 			this.candidates = candidates;
 			this.fixed = fixed;
@@ -53,10 +55,11 @@ public final class TimeIndexedScalarCompletionBound {
 			this.gap = gap;
 			this.totalNanos = totalNanos;
 			this.message = message;
+			this.windowStats = windowStats;
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null);
 		}
 
 		public boolean isAvailable() {
@@ -67,7 +70,48 @@ public final class TimeIndexedScalarCompletionBound {
 			return message + ", candidates=" + candidates + ", fixed=" + fixed
 					+ ", unavailable=" + unavailable + ", process/idle/end=" + processFixed
 					+ "/" + idleFixed + "/" + endFixed + ", gap=" + gap
-					+ ", ms=" + String.format("%.3f", totalNanos / 1_000_000.0);
+					+ ", ms=" + String.format("%.3f", totalNanos / 1_000_000.0)
+					+ (windowStats == null ? "" : ", " + windowStats.summary());
+		}
+	}
+
+	private static final class WindowReachabilityStats {
+		final boolean exactIntegerTime;
+		final int reachableJobs;
+		final int tightenedJobs;
+		final int unreachableJobs;
+		final double avgOriginalPoints;
+		final double avgHullPoints;
+		final double avgReachablePoints;
+		final int maxHullShrink;
+		final String topShrinkSample;
+
+		WindowReachabilityStats(boolean exactIntegerTime, int reachableJobs, int tightenedJobs, int unreachableJobs,
+				double avgOriginalPoints, double avgHullPoints, double avgReachablePoints, int maxHullShrink,
+				String topShrinkSample) {
+			this.exactIntegerTime = exactIntegerTime;
+			this.reachableJobs = reachableJobs;
+			this.tightenedJobs = tightenedJobs;
+			this.unreachableJobs = unreachableJobs;
+			this.avgOriginalPoints = avgOriginalPoints;
+			this.avgHullPoints = avgHullPoints;
+			this.avgReachablePoints = avgReachablePoints;
+			this.maxHullShrink = maxHullShrink;
+			this.topShrinkSample = topShrinkSample;
+		}
+
+		String summary() {
+			return "windowMode=" + (exactIntegerTime ? "integer" : "relaxed")
+					+ ", windows reachable/tightened/unreachable=" + reachableJobs + "/" + tightenedJobs
+					+ "/" + unreachableJobs
+					+ ", avgOrigPts/hullPts/reachablePts=" + format(avgOriginalPoints) + "/"
+					+ format(avgHullPoints) + "/" + format(avgReachablePoints)
+					+ ", maxHullShrink=" + maxHullShrink
+					+ ", topWindowShrink=[" + topShrinkSample + "]";
+		}
+
+		private static String format(double value) {
+			return String.format("%.1f", value);
 		}
 	}
 
@@ -85,6 +129,8 @@ public final class TimeIndexedScalarCompletionBound {
 	private final double[][] prefixBeforeByJob;
 	private final double[][] suffixAfterByJob;
 	private final double[][] penaltyByJobTime;
+	private final double[] originalWindowStartByJob;
+	private final double[] originalWindowEndByJob;
 	private final int[][] durationByArc;
 	private final boolean[][] processArcForbidden;
 	private final boolean[] endForbidden;
@@ -143,6 +189,8 @@ public final class TimeIndexedScalarCompletionBound {
 		this.exactIntegerTime = isIntegerTimeInstance(data, pricingHorizon, hStartByJob, hEndByJob);
 		this.horizon = Math.max(0, (int) Math.ceil(pricingHorizon - 1e-9));
 		this.width = horizon + 1;
+		this.originalWindowStartByJob = Arrays.copyOf(hStartByJob, n + 1);
+		this.originalWindowEndByJob = Arrays.copyOf(hEndByJob, n + 1);
 		if (!hasPositiveDiscreteDurations(data, exactIntegerTime)) {
 			this.forward = null;
 			this.backward = null;
@@ -291,8 +339,128 @@ public final class TimeIndexedScalarCompletionBound {
 				}
 			}
 		}
+		if (fixed > 0) {
+			computeForwardDistances();
+			computeBackwardDistances();
+			buildScalarCaches();
+		}
+		WindowReachabilityStats windowStats = summarizeReachableWindows();
 		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, gap,
-				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing");
+				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing", windowStats);
+	}
+
+	private WindowReachabilityStats summarizeReachableWindows() {
+		int reachable = 0;
+		int tightened = 0;
+		int unreachable = 0;
+		double originalPointSum = 0.0;
+		double hullPointSum = 0.0;
+		double reachablePointSum = 0.0;
+		int maxShrink = 0;
+		final int sampleSize = 8;
+		int[] topJob = new int[sampleSize];
+		int[] topShrink = new int[sampleSize];
+		int[] topMin = new int[sampleSize];
+		int[] topMax = new int[sampleSize];
+		int[] topCount = new int[sampleSize];
+		int[] topOldStart = new int[sampleSize];
+		int[] topOldEnd = new int[sampleSize];
+		Arrays.fill(topJob, -1);
+		for (int job = 1; job <= n; job++) {
+			int originalStart = discreteWindowStart(job);
+			int originalEnd = discreteWindowEnd(job);
+			int originalPoints = originalEnd >= originalStart ? originalEnd - originalStart + 1 : 0;
+			int min = -1;
+			int max = -1;
+			int count = 0;
+			for (int t = 0; t <= horizon; t++) {
+				if (isFinite(forward[index(job, t)]) && isFinite(backward[index(job, t)])) {
+					if (min < 0) {
+						min = t;
+					}
+					max = t;
+					count++;
+				}
+			}
+			if (count == 0) {
+				unreachable++;
+				continue;
+			}
+			reachable++;
+			int hullPoints = max - min + 1;
+			int shrink = Math.max(0, originalPoints - hullPoints);
+			originalPointSum += originalPoints;
+			hullPointSum += hullPoints;
+			reachablePointSum += count;
+			maxShrink = Math.max(maxShrink, shrink);
+			if (min > originalStart || max < originalEnd) {
+				tightened++;
+			}
+			recordTopWindowShrink(topJob, topShrink, topMin, topMax, topCount, topOldStart, topOldEnd,
+					job, shrink, min, max, count, originalStart, originalEnd);
+		}
+		double divisor = Math.max(1, reachable);
+		return new WindowReachabilityStats(exactIntegerTime, reachable, tightened, unreachable,
+				originalPointSum / divisor, hullPointSum / divisor, reachablePointSum / divisor,
+				maxShrink, formatTopWindowShrink(topJob, topShrink, topMin, topMax, topCount,
+						topOldStart, topOldEnd));
+	}
+
+	private int discreteWindowStart(int job) {
+		double value = originalWindowStartByJob[job];
+		return Math.max(0, exactIntegerTime ? (int) Math.ceil(value - 1e-9)
+				: (int) Math.floor(value + 1e-9));
+	}
+
+	private int discreteWindowEnd(int job) {
+		double value = originalWindowEndByJob[job];
+		return Math.min(horizon, exactIntegerTime ? (int) Math.floor(value + 1e-9)
+				: (int) Math.ceil(value - 1e-9));
+	}
+
+	private static void recordTopWindowShrink(int[] topJob, int[] topShrink, int[] topMin, int[] topMax,
+			int[] topCount, int[] topOldStart, int[] topOldEnd, int job, int shrink, int min, int max,
+			int count, int oldStart, int oldEnd) {
+		for (int pos = 0; pos < topJob.length; pos++) {
+			if (shrink > topShrink[pos]) {
+				for (int move = topJob.length - 1; move > pos; move--) {
+					topJob[move] = topJob[move - 1];
+					topShrink[move] = topShrink[move - 1];
+					topMin[move] = topMin[move - 1];
+					topMax[move] = topMax[move - 1];
+					topCount[move] = topCount[move - 1];
+					topOldStart[move] = topOldStart[move - 1];
+					topOldEnd[move] = topOldEnd[move - 1];
+				}
+				topJob[pos] = job;
+				topShrink[pos] = shrink;
+				topMin[pos] = min;
+				topMax[pos] = max;
+				topCount[pos] = count;
+				topOldStart[pos] = oldStart;
+				topOldEnd[pos] = oldEnd;
+				return;
+			}
+		}
+	}
+
+	private static String formatTopWindowShrink(int[] topJob, int[] topShrink, int[] topMin, int[] topMax,
+			int[] topCount, int[] topOldStart, int[] topOldEnd) {
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < topJob.length; i++) {
+			if (topJob[i] < 0 || topShrink[i] <= 0) {
+				continue;
+			}
+			if (builder.length() > 0) {
+				builder.append("; ");
+			}
+			builder.append("j").append(topJob[i]).append(":")
+					.append(topMin[i]).append("-").append(topMax[i])
+					.append("/old").append(topOldStart[i]).append("-").append(topOldEnd[i])
+					.append(",pts=").append(topCount[i])
+					.append(",shrink=").append(topShrink[i]);
+		}
+		return builder.length() == 0 ? "none" : builder.toString();
 	}
 
 	private void precomputeStaticData(double[] hStartByJob, double[] hEndByJob) {
@@ -479,9 +647,8 @@ public final class TimeIndexedScalarCompletionBound {
 
 	private static boolean isIntegerTimeInstance(Data data, double pricingHorizon, double[] hStartByJob,
 			double[] hEndByJob) {
-		if (!isInteger(pricingHorizon)) {
-			return false;
-		}
+		// pricingHorizon 是当前 node 的安全上界，可以来自 LP/启发式计算而带小数；
+		// 只要任务时间、setup 和窗口本身是整数，ceil(horizon) 的 time-indexed 图仍是精确整数时间图。
 		for (int job = 1; job <= data.n; job++) {
 			if (!isInteger(data.getProcessT(job)) || !isInteger(hStartByJob[job]) || !isInteger(hEndByJob[job])) {
 				return false;

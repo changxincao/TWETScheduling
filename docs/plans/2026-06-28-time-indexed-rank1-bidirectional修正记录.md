@@ -35,3 +35,9 @@ focused `javac` 已覆盖以下文件并通过：
 ## 5. 仍需注意
 
 论文 DWM 的列严格是 time-indexed path，而当前项目全局 `Pool` 仍按 `SequenceSignature` 管理 `TWETColumn`。本轮没有把主问题列对象重构为 path-time identity。同一轮 pricing 内，同一 sequence 会保留 reduced cost 更低的候选；但若全局 pool 已有同一 sequence，仍按现有 sequence 口径去重。这是当前 time-indexed 对照器的工程边界。若后续要完全复现论文 DWM，需要把 time-indexed path identity 也纳入列对象、pool 去重和 master 建模。
+
+## 6. 复查结论
+
+2026-06-28 复查当前实现后，确认新逻辑已经真正接入双向 bucket pricing：active rank-1 cut 下先运行 graph-native bucket heuristic，再运行 exact bidirectional pricing；cut separation 会产生一行和三行 rank-1 cuts；limited-memory arc set 已补反向 pair 和所有正 multiplier job pair；inactive cut 删除和 tailing-off 只在 time-indexed rank1 模式下触发。40-2 root-only smoke 重新验证通过，日志显示 `SubsetRowCutGenerator` 加入 79 条 rank-1 cuts，后续 pricing 均为 `Time-indexed rank-1 cut heuristic/exact bidirectional pricing`。
+
+当前仍不能称为和论文 DWM 完全一致，原因是项目全局 `Pool` 仍用 `SequenceSignature` 去重，`TWETColumn` 也只保存 job sequence 与成本，不保存 time-indexed path identity。因此同一 sequence 的不同完成时间路径不能作为不同 DWM 列长期共存。这是当前 time-indexed 对照器的结构性边界，不是双向 labeling 或 cut-state 的局部 bug。普通 ng-DSSR、partial dominance 和非 time-indexed pricing 的入口未被改动；本次新增的 cut loop 管理也有 `useTimeIndexedGraphPricing && useTimeIndexedGraphRank1CutPricing && enableSubsetRowCutsForTimeIndexedGraph` 保护。

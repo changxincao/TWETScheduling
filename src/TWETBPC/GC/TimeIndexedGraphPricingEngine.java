@@ -11,7 +11,6 @@ import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TimeLimitChecker;
-import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -33,13 +32,11 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
-	private final TWETColumnEvaluator evaluator;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
 	public TimeIndexedGraphPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	@Override
@@ -348,12 +345,21 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (activeSignatures.contains(signature)) {
 				return;
 			}
-			double cost = evaluator.evaluate(sequence);
-			if (Utility.isBigMValue(cost)) {
-				return;
-			}
+			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, ColumnSource.PRICING_EXACT, false),
 					reducedCost);
+		}
+
+		private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost) {
+			double cost = reducedCost + lp.getMachineDual();
+			int prev = 0;
+			for (int job : sequence) {
+				cost += lp.getJobDual(job);
+				cost += lp.getArcDual(prev, job);
+				prev = job;
+			}
+			cost += lp.getArcDual(prev, sink);
+			return cost;
 		}
 
 		private void relax(int fromState, int toState, double arcCost, int addedJob) {

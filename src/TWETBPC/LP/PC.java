@@ -920,11 +920,11 @@ public class PC {
 			if (outsourcingEngine != null) {
 				GeneratedColumnIds outsourcingGenerated = generateColumnsFromEngine(lp, outsourcingEngine, false,
 						activeColumnIds, activeOutsourcingColumnIds,
-					dualModeName == null || dualModeName.length() == 0 ? "pairedOutsourcing"
-							: dualModeName + ".pairedOutsourcing",
-					false, reducedCostDual, dualBoundObjectiveOverride);
-			generated.merge(outsourcingGenerated);
-		}
+						dualModeName == null || dualModeName.length() == 0 ? "pairedOutsourcing"
+								: dualModeName + ".pairedOutsourcing",
+						false, reducedCostDual, dualBoundObjectiveOverride);
+				generated.merge(outsourcingGenerated);
+			}
 		}
 		String name = repairMode ? engine.getName() + "[FindFeasible]" : engine.getName();
 		if (!repairMode && dualModeName != null && dualModeName.length() > 0) {
@@ -945,7 +945,8 @@ public class PC {
 			message += " acceptedBestRc=" + generated.bestAcceptedReducedCost + " observedDualBound="
 					+ observedDualBound + " filteredByOutDual=" + filteredByAcceptanceDual;
 		}
-		int reportedAddedColumns = generated.internalColumnIds.size() + generated.outsourcingColumnIds.size();
+		int reportedAddedColumns = generated.improvedActiveInternalColumns + generated.internalColumnIds.size()
+				+ generated.outsourcingColumnIds.size();
 		traceSink.onPricingCall(lp.getNode(), name, reportedAddedColumns > 0, reportedAddedColumns, message,
 				totalPoolSize(lp), pricingNanos);
 		return generated;

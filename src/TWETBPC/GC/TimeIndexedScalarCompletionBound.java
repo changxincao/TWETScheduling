@@ -1,13 +1,16 @@
 package TWETBPC.GC;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.List;
 
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
+import TWETBPC.Model.TWETCut;
 
 /**
  * 2026-06-28: 给 ng-DSSR 主线单独使用的 time-indexed relaxed scalar bound。
@@ -152,7 +155,8 @@ public final class TimeIndexedScalarCompletionBound {
 				|| lp.getNode().depth <= 0) {
 			return null;
 		}
-		if (hasActiveSriPricingCuts(lp) && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts) {
+		if (hasActiveSriPricingCuts(lp) && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts
+				&& !config.timeIndexedCompletionBoundSriAwareArcFixing) {
 			return null;
 		}
 		TimeIndexedScalarCompletionBound bound =
@@ -167,8 +171,10 @@ public final class TimeIndexedScalarCompletionBound {
 		if (lp == null || lp.getNode() == null || lp.getLastSolution() == null) {
 			return ArcFixingResult.skipped("missing node or LP solution");
 		}
-		if (hasActiveSriPricingCuts(lp) && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts) {
-			return ArcFixingResult.skipped("active SRI cuts require explicit no-SRI time-indexed helper");
+		boolean activeSri = hasActiveSriPricingCuts(lp);
+		if (activeSri && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts
+				&& !config.timeIndexedCompletionBoundSriAwareArcFixing) {
+			return ArcFixingResult.skipped("active SRI cuts require explicit time-indexed SRI-aware helper");
 		}
 		double nodeLowerBound = lp.getLastSolution().getObjectiveValue();
 		if (!Double.isFinite(incumbentCost) || !Double.isFinite(nodeLowerBound)) {
@@ -193,6 +199,9 @@ public final class TimeIndexedScalarCompletionBound {
 				new TimeIndexedScalarCompletionBound(data, config, lp, data.CmaxH, hStart, hEnd);
 		if (!bound.available) {
 			return ArcFixingResult.skipped(bound.message);
+		}
+		if (activeSri && config.timeIndexedCompletionBoundSriAwareArcFixing) {
+			return bound.applySriAwareArcFixing(gap);
 		}
 		return bound.applyArcFixing(gap);
 	}
@@ -305,6 +314,514 @@ public final class TimeIndexedScalarCompletionBound {
 		return new WindowTightening(tightened, reachable);
 	}
 
+	WindowTightening tightenWindowsAfterZeroReducedCostArcFixing(double[] hStartByJob, double[] hEndByJob) {
+		if (!available || !exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
+			return new WindowTightening(0, 0);
+		}
+		int fixed = applyLocalArcFixing(0.0);
+		if (fixed > 0) {
+			computeForwardDistances();
+			computeBackwardDistances();
+			buildScalarCaches();
+		}
+		return tightenWindows(hStartByJob, hEndByJob);
+	}
+
+	WindowTightening tightenWindowsAfterSriAwareZeroReducedCostArcFixing(double[] hStartByJob,
+			double[] hEndByJob) {
+		if (!available || !exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
+			return new WindowTightening(0, 0);
+		}
+		SriStateData sri = new SriStateData(lp);
+		if (sri.size() == 0) {
+			return tightenWindowsAfterZeroReducedCostArcFixing(hStartByJob, hEndByJob);
+		}
+		ArrayList<SriLabel>[] forwardLabels = buildSriForwardLabels(sri);
+		ArrayList<SriLabel>[] backwardLabels = buildSriBackwardLabels(sri);
+		int fixed = applySriAwareLocalArcFixing(sri, forwardLabels, backwardLabels, 0.0, null);
+		if (fixed > 0) {
+			forwardLabels = buildSriForwardLabels(sri);
+			backwardLabels = buildSriBackwardLabels(sri);
+		}
+		return tightenWindowsFromSriLabels(hStartByJob, hEndByJob, forwardLabels, backwardLabels, sri);
+	}
+
+	private int applySriAwareLocalArcFixing(SriStateData sri, ArrayList<SriLabel>[] forwardLabels,
+			ArrayList<SriLabel>[] backwardLabels, double cutoff, int[] stats) {
+		if (localFixedTimeIndexedArc == null) {
+			localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
+		}
+		int fixed = 0;
+		for (int t = 0; t <= horizon; t++) {
+			for (int from = 0; from <= n; from++) {
+				ArrayList<SriLabel> prefixLabels = forwardLabels[index(from, t)];
+				if (prefixLabels == null || prefixLabels.isEmpty()) {
+					continue;
+				}
+				for (int to = 1; to <= n; to++) {
+					if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
+						continue;
+					}
+					if (stats != null) {
+						stats[0]++;
+					}
+					int completion = t + durationByArc[from][to];
+					if (completion > horizon || !isCompletionFeasible(to, completion)) {
+						if (stats != null) {
+							stats[1]++;
+						}
+						continue;
+					}
+					ArrayList<SriLabel> suffixLabels = backwardLabels[index(to, completion)];
+					if (suffixLabels == null || suffixLabels.isEmpty()) {
+						if (stats != null) {
+							stats[1]++;
+						}
+						continue;
+					}
+					if (Utility.compareGe(minSriProcessArcCost(sri, prefixLabels, suffixLabels, from, to, completion),
+							cutoff - RC_TOLERANCE)) {
+						forbidLocalTimeIndexedArc(from, to, t);
+						if (stats != null) {
+							stats[2]++;
+						}
+						fixed++;
+					}
+				}
+				if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)) {
+					if (stats != null) {
+						stats[0]++;
+					}
+					ArrayList<SriLabel> suffixLabels = backwardLabels[index(from, t + 1)];
+					if (suffixLabels == null || suffixLabels.isEmpty()) {
+						if (stats != null) {
+							stats[1]++;
+						}
+					} else if (Utility.compareGe(minSriJoinCost(sri, prefixLabels, suffixLabels), cutoff - RC_TOLERANCE)) {
+						forbidLocalTimeIndexedArc(from, from, t);
+						if (stats != null) {
+							stats[3]++;
+						}
+						fixed++;
+					}
+				}
+				if (from > 0 && isEndAllowed(from, t)) {
+					if (stats != null) {
+						stats[0]++;
+					}
+					if (Utility.compareGe(minSriEndCost(prefixLabels, from), cutoff - RC_TOLERANCE)) {
+						forbidLocalTimeIndexedArc(from, 0, t);
+						if (stats != null) {
+							stats[4]++;
+						}
+						fixed++;
+					}
+				}
+			}
+		}
+		return fixed;
+	}
+
+	private int applyLocalArcFixing(double cutoff) {
+		if (localFixedTimeIndexedArc == null) {
+			localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
+		}
+		int fixed = 0;
+		for (int t = 0; t <= horizon; t++) {
+			for (int from = 0; from <= n; from++) {
+				double prefix = forward[index(from, t)];
+				if (!isFinite(prefix)) {
+					continue;
+				}
+				for (int to = 1; to <= n; to++) {
+					if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
+						continue;
+					}
+					int completion = t + durationByArc[from][to];
+					if (completion > horizon || !isCompletionFeasible(to, completion)) {
+						continue;
+					}
+					double suffix = backward[index(to, completion)];
+					double arcCost = processArcReducedCost(from, to, completion);
+					if (isFinite(suffix) && isFinite(arcCost)
+							&& Utility.compareGe(prefix + arcCost + suffix, cutoff - RC_TOLERANCE)) {
+						forbidLocalTimeIndexedArc(from, to, t);
+						fixed++;
+					}
+				}
+				if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)) {
+					double suffix = backward[index(from, t + 1)];
+					if (isFinite(suffix) && Utility.compareGe(prefix + suffix, cutoff - RC_TOLERANCE)) {
+						forbidLocalTimeIndexedArc(from, from, t);
+						fixed++;
+					}
+				}
+				if (from > 0 && isEndAllowed(from, t)) {
+					if (Utility.compareGe(prefix + sinkArcReducedCost(from), cutoff - RC_TOLERANCE)) {
+						forbidLocalTimeIndexedArc(from, 0, t);
+						fixed++;
+					}
+				}
+			}
+		}
+		return fixed;
+	}
+
+	@SuppressWarnings("unchecked")
+	private ArrayList<SriLabel>[] buildSriForwardLabels(SriStateData sri) {
+		ArrayList<SriLabel>[] buckets = new ArrayList[(n + 1) * width];
+		insertSriLabel(buckets, sri, new SriLabel(0, 0, 0.0, sri.emptyResidual()));
+		for (int t = 0; t <= horizon; t++) {
+			for (int from = 0; from <= n; from++) {
+				ArrayList<SriLabel> labels = buckets[index(from, t)];
+				if (labels == null || labels.isEmpty()) {
+					continue;
+				}
+				for (int labelIndex = 0; labelIndex < labels.size(); labelIndex++) {
+					SriLabel label = labels.get(labelIndex);
+					if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)) {
+						insertSriLabel(buckets, sri, new SriLabel(from, t + 1, label.reducedCost,
+								sri.copyResidual(label.residual)));
+					}
+					for (int to = 1; to <= n; to++) {
+						if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
+							continue;
+						}
+						int completion = t + durationByArc[from][to];
+						if (completion > horizon || !isCompletionFeasible(to, completion)) {
+							continue;
+						}
+						double arcCost = processArcReducedCost(from, to, completion);
+						if (!isFinite(arcCost)) {
+							continue;
+						}
+						byte[] residual = sri.copyResidual(label.residual);
+						arcCost += sri.applyForwardExtension(residual, from, to);
+						insertSriLabel(buckets, sri, new SriLabel(to, completion, label.reducedCost + arcCost,
+								residual));
+					}
+				}
+			}
+		}
+		return buckets;
+	}
+
+	@SuppressWarnings("unchecked")
+	private ArrayList<SriLabel>[] buildSriBackwardLabels(SriStateData sri) {
+		ArrayList<SriLabel>[] buckets = new ArrayList[(n + 1) * width];
+		for (int job = 1; job <= n; job++) {
+			if (endForbidden[job]) {
+				continue;
+			}
+			double endCost = sinkArcReducedCost(job);
+			for (int t = 0; t <= horizon; t++) {
+				if (isCompletionFeasible(job, t) && !isTimeIndexedArcForbidden(job, 0, t)) {
+					insertSriLabel(buckets, sri, new SriLabel(job, t, endCost, sri.emptyResidual()));
+				}
+			}
+		}
+		for (int t = horizon; t >= 0; t--) {
+			for (int current = 1; current <= n; current++) {
+				ArrayList<SriLabel> labels = buckets[index(current, t)];
+				if (labels == null || labels.isEmpty()) {
+					continue;
+				}
+				for (int labelIndex = 0; labelIndex < labels.size(); labelIndex++) {
+					SriLabel label = labels.get(labelIndex);
+					if (t > 0 && !isTimeIndexedArcForbidden(current, current, t - 1)) {
+						insertSriLabel(buckets, sri, new SriLabel(current, t - 1, label.reducedCost,
+								sri.copyResidual(label.residual)));
+					}
+					for (int previous = 0; previous <= n; previous++) {
+						if (previous == current || processArcForbidden[previous][current]) {
+							continue;
+						}
+						int previousTime = t - durationByArc[previous][current];
+						if (previousTime < 0 || isTimeIndexedArcForbidden(previous, current, previousTime)) {
+							continue;
+						}
+						double arcCost = processArcReducedCost(previous, current, t);
+						if (!isFinite(arcCost)) {
+							continue;
+						}
+						byte[] residual = sri.copyResidual(label.residual);
+						arcCost += sri.applyBackwardPrepend(residual, previous, current);
+						if (previous > 0 && isCompletionFeasible(previous, previousTime)) {
+							insertSriLabel(buckets, sri, new SriLabel(previous, previousTime,
+									label.reducedCost + arcCost, residual));
+						}
+					}
+				}
+			}
+		}
+		return buckets;
+	}
+
+	private void insertSriLabel(ArrayList<SriLabel>[] buckets, SriStateData sri, SriLabel label) {
+		int idx = index(label.job, label.time);
+		ArrayList<SriLabel> bucket = buckets[idx];
+		if (bucket == null) {
+			bucket = new ArrayList<SriLabel>();
+			buckets[idx] = bucket;
+		}
+		for (SriLabel existing : bucket) {
+			if (labelDominates(sri, existing, label)) {
+				return;
+			}
+		}
+		for (int i = bucket.size() - 1; i >= 0; i--) {
+			if (labelDominates(sri, label, bucket.get(i))) {
+				bucket.remove(i);
+			}
+		}
+		bucket.add(label);
+	}
+
+	private boolean labelDominates(SriStateData sri, SriLabel first, SriLabel second) {
+		double bound = second.reducedCost;
+		for (int idx = 0; idx < first.residual.length; idx++) {
+			if (first.residual[idx] > second.residual[idx]) {
+				bound += sri.duals[idx];
+			}
+		}
+		return Utility.compareLe(first.reducedCost, bound + RC_TOLERANCE);
+	}
+
+	private double minSriProcessArcCost(SriStateData sri, ArrayList<SriLabel> prefixLabels,
+			ArrayList<SriLabel> suffixLabels, int from, int to, int completion) {
+		double baseArcCost = processArcReducedCost(from, to, completion);
+		if (!isFinite(baseArcCost)) {
+			return INF;
+		}
+		double best = INF;
+		for (SriLabel prefix : prefixLabels) {
+			byte[] residual = sri.copyResidual(prefix.residual);
+			double arcCost = baseArcCost + sri.applyForwardExtension(residual, from, to);
+			for (SriLabel suffix : suffixLabels) {
+				best = Math.min(best, prefix.reducedCost + arcCost + suffix.reducedCost
+						+ sri.joinShift(residual, suffix.residual));
+			}
+		}
+		return best;
+	}
+
+	private double minSriJoinCost(SriStateData sri, ArrayList<SriLabel> prefixLabels,
+			ArrayList<SriLabel> suffixLabels) {
+		double best = INF;
+		for (SriLabel prefix : prefixLabels) {
+			for (SriLabel suffix : suffixLabels) {
+				best = Math.min(best, prefix.reducedCost + suffix.reducedCost
+						+ sri.joinShift(prefix.residual, suffix.residual));
+			}
+		}
+		return best;
+	}
+
+	private double minSriEndCost(ArrayList<SriLabel> prefixLabels, int job) {
+		double endCost = sinkArcReducedCost(job);
+		double best = INF;
+		for (SriLabel prefix : prefixLabels) {
+			best = Math.min(best, prefix.reducedCost + endCost);
+		}
+		return best;
+	}
+
+	private WindowTightening tightenWindowsFromSriLabels(double[] hStartByJob, double[] hEndByJob,
+			ArrayList<SriLabel>[] forwardLabels, ArrayList<SriLabel>[] backwardLabels, SriStateData sri) {
+		int tightened = 0;
+		int reachable = 0;
+		for (int job = 1; job <= n; job++) {
+			int min = -1;
+			int max = -1;
+			for (int t = 0; t <= horizon; t++) {
+				ArrayList<SriLabel> fw = forwardLabels[index(job, t)];
+				ArrayList<SriLabel> bw = backwardLabels[index(job, t)];
+				if (fw == null || fw.isEmpty() || bw == null || bw.isEmpty()
+						|| !isFinite(minSriJoinCost(sri, fw, bw))) {
+					continue;
+				}
+				if (min < 0) {
+					min = t;
+				}
+				max = t;
+			}
+			if (min < 0) {
+				continue;
+			}
+			reachable++;
+			double newStart = Math.max(hStartByJob[job], min);
+			double newEnd = Math.min(hEndByJob[job], max);
+			if (Utility.compareGt(newStart, hStartByJob[job]) || Utility.compareLt(newEnd, hEndByJob[job])) {
+				hStartByJob[job] = newStart;
+				hEndByJob[job] = newEnd;
+				tightened++;
+			}
+		}
+		return new WindowTightening(tightened, reachable);
+	}
+
+	private static final class SriLabel {
+		final int job;
+		final int time;
+		final double reducedCost;
+		final byte[] residual;
+
+		SriLabel(int job, int time, double reducedCost, byte[] residual) {
+			this.job = job;
+			this.time = time;
+			this.reducedCost = reducedCost;
+			this.residual = residual;
+		}
+	}
+
+	private final class SriStateData {
+		final ArrayList<TWETCut> cuts;
+		final double[] duals;
+		final boolean[][] scopeByCut;
+		final boolean[][] memoryByCut;
+		final boolean[][] arcMemoryByCut;
+		final boolean[] arcMemoryCut;
+		final int arcTableSize;
+
+		SriStateData(LP lp) {
+			List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
+			List<Double> activeDuals = lp.getActiveSubsetRowPricingDuals();
+			this.cuts = new ArrayList<TWETCut>(cutIds.size());
+			this.duals = new double[cutIds.size()];
+			this.scopeByCut = new boolean[cutIds.size()][n + 1];
+			this.memoryByCut = new boolean[cutIds.size()][n + 1];
+			this.arcTableSize = (n + 2) * (n + 2);
+			this.arcMemoryByCut = new boolean[cutIds.size()][arcTableSize];
+			this.arcMemoryCut = new boolean[cutIds.size()];
+			for (int idx = 0; idx < cutIds.size(); idx++) {
+				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
+				cuts.add(cut);
+				duals[idx] = activeDuals.get(idx).doubleValue();
+				for (int job : cut.getScopeJobs()) {
+					if (job >= 1 && job <= n) {
+						scopeByCut[idx][job] = true;
+					}
+				}
+				if (cut.hasMemoryArcs()) {
+					arcMemoryCut[idx] = true;
+					for (Long encoded : cut.getMemoryArcs()) {
+						long value = encoded.longValue();
+						int from = (int) (value >>> 32);
+						int to = (int) value;
+						if (from >= 0 && from <= n && to >= 1 && to <= n) {
+							arcMemoryByCut[idx][arcIndex(from, to)] = true;
+						}
+					}
+				} else if (cut.hasMemoryJobs()) {
+					for (int job : cut.getMemoryJobs()) {
+						if (job >= 1 && job <= n) {
+							memoryByCut[idx][job] = true;
+						}
+					}
+				} else {
+					for (int job = 1; job <= n; job++) {
+						memoryByCut[idx][job] = true;
+					}
+				}
+			}
+		}
+
+		int size() {
+			return cuts.size();
+		}
+
+		byte[] emptyResidual() {
+			return new byte[cuts.size()];
+		}
+
+		byte[] copyResidual(byte[] residual) {
+			return residual.clone();
+		}
+
+		double applyForwardExtension(byte[] residual, int from, int job) {
+			double shift = 0.0;
+			for (int idx = 0; idx < cuts.size(); idx++) {
+				if (arcMemoryCut[idx]) {
+					if (!arcMemoryByCut[idx][arcIndex(from, job)]) {
+						residual[idx] = 0;
+					}
+				} else if (!memoryByCut[idx][job]) {
+					residual[idx] = 0;
+					continue;
+				}
+				if (!scopeByCut[idx][job]) {
+					continue;
+				}
+				int next = residual[idx] + 1;
+				if (next >= 2) {
+					shift -= duals[idx];
+					next -= 2;
+				}
+				residual[idx] = (byte) next;
+			}
+			return shift;
+		}
+
+		double applyBackwardPrepend(byte[] residual, int previousJob, int currentJob) {
+			double shift = 0.0;
+			for (int idx = 0; idx < cuts.size(); idx++) {
+				if (scopeByCut[idx][currentJob]) {
+					int next = residual[idx] + 1;
+					if (next >= 2) {
+						shift -= duals[idx];
+						next -= 2;
+					}
+					residual[idx] = (byte) next;
+				}
+				if (arcMemoryCut[idx]) {
+					if (!arcMemoryByCut[idx][arcIndex(previousJob, currentJob)]) {
+						residual[idx] = 0;
+					}
+				} else if (previousJob > 0 && !memoryByCut[idx][currentJob]) {
+					residual[idx] = 0;
+				}
+			}
+			return shift;
+		}
+
+		double joinShift(byte[] forwardResidual, byte[] backwardResidual) {
+			double shift = 0.0;
+			for (int idx = 0; idx < cuts.size(); idx++) {
+				if (forwardResidual[idx] + backwardResidual[idx] >= 2) {
+					shift -= duals[idx];
+				}
+			}
+			return shift;
+		}
+
+		int arcIndex(int from, int to) {
+			return from * (n + 2) + to;
+		}
+	}
+
+	private ArcFixingResult applySriAwareArcFixing(double gap) {
+		long start = System.nanoTime();
+		SriStateData sri = new SriStateData(lp);
+		if (sri.size() == 0) {
+			return applyArcFixing(gap);
+		}
+		localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
+		ArrayList<SriLabel>[] forwardLabels = buildSriForwardLabels(sri);
+		ArrayList<SriLabel>[] backwardLabels = buildSriBackwardLabels(sri);
+		int[] stats = new int[5];
+		int fixed = applySriAwareLocalArcFixing(sri, forwardLabels, backwardLabels, gap, stats);
+		if (fixed > 0) {
+			forwardLabels = buildSriForwardLabels(sri);
+			backwardLabels = buildSriBackwardLabels(sri);
+		}
+		WindowReachabilityStats windowStats = summarizeReachableWindowsFromSriLabels(forwardLabels, backwardLabels, sri);
+		int nodeWindowTightened = applySriReachableWindowsToNode(forwardLabels, backwardLabels, sri);
+		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
+		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], gap,
+				System.nanoTime() - start, "ng-DSSR time-indexed SRI-aware helper arc fixing", windowStats,
+				nodeWindowTightened, nodeTimeArcFixed);
+	}
+
 	private ArcFixingResult applyArcFixing(double gap) {
 		long start = System.nanoTime();
 		localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
@@ -397,6 +914,100 @@ public final class TimeIndexedScalarCompletionBound {
 			}
 		}
 		return node.replaceTimeIndexedPricingOnlyArcSet(combined, pairWidth, horizon);
+	}
+
+	private int applySriReachableWindowsToNode(ArrayList<SriLabel>[] forwardLabels,
+			ArrayList<SriLabel>[] backwardLabels, SriStateData sri) {
+		if (!exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
+			return 0;
+		}
+		int tightened = 0;
+		for (int job = 1; job <= n; job++) {
+			int min = -1;
+			int max = -1;
+			for (int t = 0; t <= horizon; t++) {
+				ArrayList<SriLabel> fw = forwardLabels[index(job, t)];
+				ArrayList<SriLabel> bw = backwardLabels[index(job, t)];
+				if (fw == null || fw.isEmpty() || bw == null || bw.isEmpty()
+						|| !isFinite(minSriJoinCost(sri, fw, bw))) {
+					continue;
+				}
+				if (min < 0) {
+					min = t;
+				}
+				max = t;
+			}
+			if (min < 0) {
+				if (node.tightenTimeIndexedPricingWindow(job, 1, 0)) {
+					tightened++;
+				}
+			} else if (node.tightenTimeIndexedPricingWindow(job, min, max)) {
+				tightened++;
+			}
+		}
+		return tightened;
+	}
+
+	private WindowReachabilityStats summarizeReachableWindowsFromSriLabels(ArrayList<SriLabel>[] forwardLabels,
+			ArrayList<SriLabel>[] backwardLabels, SriStateData sri) {
+		int reachable = 0;
+		int tightened = 0;
+		int unreachable = 0;
+		double originalPointSum = 0.0;
+		double hullPointSum = 0.0;
+		double reachablePointSum = 0.0;
+		int maxShrink = 0;
+		final int sampleSize = 8;
+		int[] topJob = new int[sampleSize];
+		int[] topShrink = new int[sampleSize];
+		int[] topMin = new int[sampleSize];
+		int[] topMax = new int[sampleSize];
+		int[] topCount = new int[sampleSize];
+		int[] topOldStart = new int[sampleSize];
+		int[] topOldEnd = new int[sampleSize];
+		Arrays.fill(topJob, -1);
+		for (int job = 1; job <= n; job++) {
+			int originalStart = discreteWindowStart(job);
+			int originalEnd = discreteWindowEnd(job);
+			int originalPoints = originalEnd >= originalStart ? originalEnd - originalStart + 1 : 0;
+			int min = -1;
+			int max = -1;
+			int count = 0;
+			for (int t = 0; t <= horizon; t++) {
+				ArrayList<SriLabel> fw = forwardLabels[index(job, t)];
+				ArrayList<SriLabel> bw = backwardLabels[index(job, t)];
+				if (fw == null || fw.isEmpty() || bw == null || bw.isEmpty()
+						|| !isFinite(minSriJoinCost(sri, fw, bw))) {
+					continue;
+				}
+				if (min < 0) {
+					min = t;
+				}
+				max = t;
+				count++;
+			}
+			if (count == 0) {
+				unreachable++;
+				continue;
+			}
+			reachable++;
+			int hullPoints = max - min + 1;
+			int shrink = Math.max(0, originalPoints - hullPoints);
+			originalPointSum += originalPoints;
+			hullPointSum += hullPoints;
+			reachablePointSum += count;
+			maxShrink = Math.max(maxShrink, shrink);
+			if (min > originalStart || max < originalEnd) {
+				tightened++;
+			}
+			recordTopWindowShrink(topJob, topShrink, topMin, topMax, topCount, topOldStart, topOldEnd,
+					job, shrink, min, max, count, originalStart, originalEnd);
+		}
+		double divisor = Math.max(1, reachable);
+		return new WindowReachabilityStats(exactIntegerTime, reachable, tightened, unreachable,
+				originalPointSum / divisor, hullPointSum / divisor, reachablePointSum / divisor,
+				maxShrink, formatTopWindowShrink(topJob, topShrink, topMin, topMax, topCount,
+						topOldStart, topOldEnd));
 	}
 
 	private int applyReachableWindowsToNode() {

@@ -3978,8 +3978,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		timeIndexedScalarBuildNanos += timeIndexedScalarBound.getBuildNanos();
-		TimeIndexedScalarCompletionBound.WindowTightening tightened =
-				timeIndexedScalarBound.tightenWindows(effectiveJobHStart, effectiveJobHEnd);
+		boolean activeSriCuts = lp != null && !lp.getActiveSubsetRowPricingCutIds().isEmpty();
+		TimeIndexedScalarCompletionBound.WindowTightening tightened;
+		if (activeSriCuts && config.timeIndexedCompletionBoundSriAwareArcFixing) {
+			tightened = timeIndexedScalarBound.tightenWindowsAfterSriAwareZeroReducedCostArcFixing(
+					effectiveJobHStart, effectiveJobHEnd);
+		} else if (config.timeIndexedCompletionBoundInRoundArcFixing) {
+			tightened = timeIndexedScalarBound.tightenWindowsAfterZeroReducedCostArcFixing(
+					effectiveJobHStart, effectiveJobHEnd);
+		} else {
+			tightened = timeIndexedScalarBound.tightenWindows(effectiveJobHStart, effectiveJobHEnd);
+		}
 		timeIndexedWindowTightenedJobs += tightened.tightenedJobs;
 		timeIndexedWindowReachableJobs += tightened.reachableJobs;
 		if (tightened.tightenedJobs > 0) {

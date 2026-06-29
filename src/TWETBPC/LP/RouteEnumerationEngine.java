@@ -559,7 +559,7 @@ public final class RouteEnumerationEngine {
 			return ColumnCheck.runDuplicate();
 		}
 		double cost = objectiveCostFromReducedCost(sequence, reducedCost, dual, lp.getNode());
-		if (windowedEnumeration && config.routeEnumerationRecheckWindowedColumnCost) {
+		if (windowedEnumeration) {
 			cost = evaluator.evaluate(sequence);
 			if (Utility.isBigMValue(cost)) {
 				return ColumnCheck.newColumn(false, Double.NaN);

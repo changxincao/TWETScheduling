@@ -433,6 +433,12 @@ public class GCBBFullDomainComparisonTest {
 		config.timeIndexedCompletionBoundArcFixing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedCompletionBoundArcFixing",
 				Boolean.toString(config.timeIndexedCompletionBoundArcFixing)));
+		config.timeIndexedCompletionBoundInRoundArcFixing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedCompletionBoundInRoundArcFixing",
+				Boolean.toString(config.timeIndexedCompletionBoundInRoundArcFixing)));
+		config.timeIndexedCompletionBoundSriAwareArcFixing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedCompletionBoundSriAwareArcFixing",
+				Boolean.toString(config.timeIndexedCompletionBoundSriAwareArcFixing)));
 		config.bidirectionalCompletionBoundArcFixing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBoundArcFixing",
 				Boolean.toString(config.bidirectionalCompletionBoundArcFixing)));

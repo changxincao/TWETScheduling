@@ -5,6 +5,7 @@ import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import Basic.Data;
@@ -334,6 +335,42 @@ public class Node implements Comparable<Node> {
 		return count;
 	}
 
+	public double averageTimeIndexedPricingWindowLength() {
+		if (timeIndexedPricingWindowStartByJob == null) {
+			return Double.NaN;
+		}
+		double total = 0.0;
+		int count = 0;
+		for (int job = 1; job <= data.n; job++) {
+			if (hasTimeIndexedPricingWindow(job)) {
+				total += Math.max(0, timeIndexedPricingWindowEndByJob[job] - timeIndexedPricingWindowStartByJob[job]);
+				count++;
+			}
+		}
+		return count == 0 ? Double.NaN : total / count;
+	}
+
+	public double averageTimeIndexedPricingWindowShrinkRatio() {
+		if (timeIndexedPricingWindowStartByJob == null) {
+			return Double.NaN;
+		}
+		double total = 0.0;
+		int count = 0;
+		for (int job = 1; job <= data.n; job++) {
+			if (!hasTimeIndexedPricingWindow(job)) {
+				continue;
+			}
+			double original = Math.max(0.0, data.hardWindowEnd[job] - data.hardWindowStart[job]);
+			if (!Double.isFinite(original) || !Utility.compareGt(original, 0.0)) {
+				continue;
+			}
+			double current = Math.max(0, timeIndexedPricingWindowEndByJob[job] - timeIndexedPricingWindowStartByJob[job]);
+			total += Math.max(0.0, original - current) / original;
+			count++;
+		}
+		return count == 0 ? Double.NaN : total / count;
+	}
+
 	private void ensureTimeIndexedPricingWindows() {
 		if (timeIndexedPricingWindowStartByJob != null) {
 			return;
@@ -389,11 +426,17 @@ public class Node implements Comparable<Node> {
 				+ ",pricingOnlyArc=" + countPricingOnlyForbiddenArcs()
 				+ ",timePricingOnlyArc=" + countTimeIndexedPricingOnlyForbiddenArcs()
 				+ ",timeWindowJobs=" + countTimeIndexedPricingWindowTightenedJobs()
+				+ ",timeWindowAvgLen=" + formatOptionalDouble(averageTimeIndexedPricingWindowLength())
+				+ ",timeWindowAvgShrinkRatio=" + formatOptionalDouble(averageTimeIndexedPricingWindowShrinkRatio())
 				+ ",adjReq=" + countRequiredAdjacencyPairs() + ",adjForbid=" + countForbiddenAdjacencyPairs()
 				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
 				+ ",outReq=" + countOutsourcingJobStates(OUTSOURCE_REQUIRED)
 				+ ",outForbid=" + countOutsourcingJobStates(OUTSOURCE_FORBIDDEN)
 				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment;
+	}
+
+	private String formatOptionalDouble(double value) {
+		return Double.isFinite(value) ? String.format(Locale.US, "%.3f", Double.valueOf(value)) : "NA";
 	}
 
 	public void requireArc(int from, int to) {

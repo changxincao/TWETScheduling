@@ -12,6 +12,7 @@ import Common.PiecewiseLinearFunction.Direction;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETOutsourcingColumn;
@@ -30,10 +31,12 @@ public final class RouteEnumerationEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private final TWETColumnEvaluator evaluator;
 
 	public RouteEnumerationEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
+		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	public RouteEnumerationResult enumerate(LP lp, double incumbentCost, double nodeLowerBound,
@@ -63,7 +66,9 @@ public final class RouteEnumerationEngine {
 		HashSet<SequenceSignature> outsourcingRunSignatures = new HashSet<SequenceSignature>();
 		ArrayList<PendingColumn> pending = new ArrayList<PendingColumn>();
 		ArrayList<TWETOutsourcingColumn> pendingOutsourcing = new ArrayList<TWETOutsourcingColumn>();
-		PiecewiseLinearFunction[] jobPenalties = buildJobPenaltyCache();
+		boolean useCompactWindow = config.routeEnumerationUseTimeIndexedWindow
+				&& node.countTimeIndexedPricingWindowTightenedJobs() > 0;
+		PiecewiseLinearFunction[] jobPenalties = buildJobPenaltyCache(node, useCompactWindow);
 		long nextSerial = 0L;
 		State root = buildRootState(node, dual, jobPenalties, nextSerial++);
 		if (root == null) {
@@ -90,7 +95,7 @@ public final class RouteEnumerationEngine {
 			if (!state.sequence.isEmpty() && canUseArc(node, currentFixedArcs, state.lastJob, node.sinkId())) {
 				double reducedCost = completeReducedCost(state, dual, node.sinkId());
 				ColumnCheck check = checkColumn(lp, state.sequence, reducedCost, dual, gap, activeIds,
-						runSignatures);
+						runSignatures, useCompactWindow);
 				if (check.negativeEnough) {
 					candidates++;
 					if (check.activeDuplicate) {
@@ -488,12 +493,29 @@ public final class RouteEnumerationEngine {
 		return state.minReducedCost - dual.arcDual[state.lastJob][sink];
 	}
 
-	private PiecewiseLinearFunction[] buildJobPenaltyCache() {
+	private PiecewiseLinearFunction[] buildJobPenaltyCache(Node node, boolean useCompactWindow) {
 		PiecewiseLinearFunction[] penalties = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 0; job <= data.n; job++) {
-			penalties[job] = cropToHorizon(data.penaltyFunction[job]);
+			penalties[job] = buildEnumerationPenalty(job, node, useCompactWindow);
 		}
 		return penalties;
+	}
+
+	private PiecewiseLinearFunction buildEnumerationPenalty(int job, Node node, boolean useCompactWindow) {
+		PiecewiseLinearFunction base = data.penaltyFunction[job];
+		if (!useCompactWindow || job == 0 || node == null || !node.hasTimeIndexedPricingWindow(job)) {
+			return cropToHorizon(base);
+		}
+		double hStart = Math.max(data.hardWindowStart[job], node.getTimeIndexedPricingWindowStart(job));
+		double hEnd = Math.min(data.hardWindowEnd[job], node.getTimeIndexedPricingWindowEnd(job));
+		// 2026-06-29: 只把 node 继承的 compact window 用作枚举剪枝窗口。
+		// 新列入池前仍按真实 objective 重算成本，避免把窗口内受限成本写成全局列成本。
+		if (Utility.compareGt(hStart, hEnd)) {
+			PiecewiseLinearFunction empty = new PiecewiseLinearFunction();
+			empty.resetDomain(0.0, data.CmaxH);
+			return empty;
+		}
+		return cropToHorizon(base.setDomain(hStart, hEnd, true));
 	}
 
 	private PiecewiseLinearFunction cropToHorizon(PiecewiseLinearFunction function) {
@@ -521,7 +543,7 @@ public final class RouteEnumerationEngine {
 
 	private ColumnCheck checkColumn(LP lp, List<Integer> sequence, double reducedCost,
 			LP.PricingDualSnapshot dual, double gap, HashSet<Integer> activeIds,
-			HashSet<SequenceSignature> runSignatures) {
+			HashSet<SequenceSignature> runSignatures, boolean windowedEnumeration) {
 		if (!Utility.compareLt(reducedCost, gap - REDUCED_COST_TOLERANCE)) {
 			return ColumnCheck.newColumn(false, Double.NaN);
 		}
@@ -536,7 +558,14 @@ public final class RouteEnumerationEngine {
 		if (!runSignatures.add(signature)) {
 			return ColumnCheck.runDuplicate();
 		}
-		return ColumnCheck.newColumn(true, objectiveCostFromReducedCost(sequence, reducedCost, dual, lp.getNode()));
+		double cost = objectiveCostFromReducedCost(sequence, reducedCost, dual, lp.getNode());
+		if (windowedEnumeration && config.routeEnumerationRecheckWindowedColumnCost) {
+			cost = evaluator.evaluate(sequence);
+			if (Utility.isBigMValue(cost)) {
+				return ColumnCheck.newColumn(false, Double.NaN);
+			}
+		}
+		return ColumnCheck.newColumn(true, cost);
 	}
 
 	private double objectiveCostFromReducedCost(List<Integer> sequence, double reducedCost,

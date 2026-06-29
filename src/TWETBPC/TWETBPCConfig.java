@@ -91,6 +91,10 @@ public class TWETBPCConfig {
 	public boolean routeEnumerationUseCompletionBound = true;
 	/** 2026-06-25: 外包枚举 cheap suffix bound 剪不掉时，是否继续做逐 label 的精细 suffix 扫描。 */
 	public boolean routeEnumerationUseExactOutsourcingSuffixBound = false;
+	/** 2026-06-29: route enumeration 是否使用 node 继承的 time-indexed compact window 裁剪机器列枚举函数域。 */
+	public boolean routeEnumerationUseTimeIndexedWindow = false;
+	/** 2026-06-29: 使用 compact window 枚举时，新增机器列入池前是否按真实 objective 重算成本。 */
+	public boolean routeEnumerationRecheckWindowedColumnCost = true;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
 	/**

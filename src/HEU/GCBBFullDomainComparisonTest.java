@@ -369,6 +369,12 @@ public class GCBBFullDomainComparisonTest {
 		config.routeEnumerationUseExactOutsourcingSuffixBound = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumerationUseExactOutsourcingSuffixBound",
 				Boolean.toString(config.routeEnumerationUseExactOutsourcingSuffixBound)));
+		config.routeEnumerationUseTimeIndexedWindow = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.routeEnumerationUseTimeIndexedWindow",
+				Boolean.toString(config.routeEnumerationUseTimeIndexedWindow)));
+		config.routeEnumerationRecheckWindowedColumnCost = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.routeEnumerationRecheckWindowedColumnCost",
+				Boolean.toString(config.routeEnumerationRecheckWindowedColumnCost)));
 		config.enableBidirectionalPricing = true;
 		config.useGCNGBBStyleBidirectionalPricing = true;
 		config.useGCBBFullDomainBidirectionalPricing = fullDomain;

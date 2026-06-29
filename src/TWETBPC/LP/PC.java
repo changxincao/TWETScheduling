@@ -234,15 +234,14 @@ public class PC {
 					lp.getPool().size(), lp.getCutPool().size());
 			return;
 		}
-		if (activeSri && config.timeIndexedCompletionBoundSriAwareArcFixing
-				&& config.timeIndexedCompletionBoundScalarEnhancement) {
-			applyCutLoopNgDssrTimeIndexedFixing(lp);
-			return;
-		}
 		if (activeSri && config.timeIndexedCompletionBoundSriAwareArcFixing) {
-			traceSink.onStageHeartbeat(lp.getNode(),
-					"cutLoopTimeIndexedArcFixing.skip SRI-aware graph fixing requires scalar helper",
-					lp.getPool().size(), lp.getCutPool().size());
+			TimeIndexedScalarCompletionBound.ArcFixingResult result =
+					TimeIndexedScalarCompletionBound.applySriAwareArcFixing(lp.getData(), config, lp,
+							incumbentForDualBoundPruning);
+			if (result.isAvailable()) {
+				traceSink.onStageHeartbeat(lp.getNode(), "cutLoopTimeIndexedSriArcFixing.done " + result.summary(),
+						lp.getPool().size(), lp.getCutPool().size());
+			}
 			return;
 		}
 		Data data = lp.getData();

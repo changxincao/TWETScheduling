@@ -206,6 +206,45 @@ public final class TimeIndexedScalarCompletionBound {
 		return bound.applyArcFixing(gap);
 	}
 
+	public static ArcFixingResult applySriAwareArcFixing(Data data, TWETBPCConfig config, LP lp,
+			double incumbentCost) {
+		if (!config.timeIndexedCompletionBoundArcFixing
+				|| !config.timeIndexedCompletionBoundSriAwareArcFixing) {
+			return ArcFixingResult.skipped("time-indexed SRI-aware helper disabled");
+		}
+		if (lp == null || lp.getNode() == null || lp.getLastSolution() == null) {
+			return ArcFixingResult.skipped("missing node or LP solution");
+		}
+		if (!hasActiveSriPricingCuts(lp)) {
+			return ArcFixingResult.skipped("no active SRI pricing cuts");
+		}
+		double nodeLowerBound = lp.getLastSolution().getObjectiveValue();
+		if (!Double.isFinite(incumbentCost) || !Double.isFinite(nodeLowerBound)) {
+			return ArcFixingResult.skipped("missing finite UB/LB");
+		}
+		double gap = incumbentCost - nodeLowerBound;
+		if (Utility.compareLe(gap, RC_TOLERANCE)) {
+			return ArcFixingResult.skipped("closed gap");
+		}
+		double[] hStart = new double[data.n + 1];
+		double[] hEnd = new double[data.n + 1];
+		Node node = lp.getNode();
+		for (int job = 1; job <= data.n; job++) {
+			hStart[job] = data.hardWindowStart[job];
+			hEnd[job] = data.hardWindowEnd[job];
+			if (node.hasTimeIndexedPricingWindow(job)) {
+				hStart[job] = Math.max(hStart[job], node.getTimeIndexedPricingWindowStart(job));
+				hEnd[job] = Math.min(hEnd[job], node.getTimeIndexedPricingWindowEnd(job));
+			}
+		}
+		TimeIndexedScalarCompletionBound bound =
+				new TimeIndexedScalarCompletionBound(data, config, lp, data.CmaxH, hStart, hEnd);
+		if (!bound.available) {
+			return ArcFixingResult.skipped(bound.message);
+		}
+		return bound.applySriAwareArcFixing(gap);
+	}
+
 	private static boolean hasActiveSriPricingCuts(LP lp) {
 		return lp != null && !lp.getActiveSubsetRowPricingCutIds().isEmpty();
 	}

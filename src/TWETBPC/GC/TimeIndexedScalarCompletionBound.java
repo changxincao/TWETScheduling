@@ -152,6 +152,9 @@ public final class TimeIndexedScalarCompletionBound {
 				|| lp.getNode().depth <= 0) {
 			return null;
 		}
+		if (hasActiveSriPricingCuts(lp) && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts) {
+			return null;
+		}
 		TimeIndexedScalarCompletionBound bound =
 				new TimeIndexedScalarCompletionBound(data, config, lp, pricingHorizon, hStartByJob, hEndByJob);
 		return bound.available ? bound : null;
@@ -163,6 +166,9 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 		if (lp == null || lp.getNode() == null || lp.getLastSolution() == null) {
 			return ArcFixingResult.skipped("missing node or LP solution");
+		}
+		if (hasActiveSriPricingCuts(lp) && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts) {
+			return ArcFixingResult.skipped("active SRI cuts require explicit no-SRI time-indexed helper");
 		}
 		double nodeLowerBound = lp.getLastSolution().getObjectiveValue();
 		if (!Double.isFinite(incumbentCost) || !Double.isFinite(nodeLowerBound)) {
@@ -189,6 +195,10 @@ public final class TimeIndexedScalarCompletionBound {
 			return ArcFixingResult.skipped(bound.message);
 		}
 		return bound.applyArcFixing(gap);
+	}
+
+	private static boolean hasActiveSriPricingCuts(LP lp) {
+		return lp != null && !lp.getActiveSubsetRowPricingCutIds().isEmpty();
 	}
 
 	private TimeIndexedScalarCompletionBound(Data data, TWETBPCConfig config, LP lp, double pricingHorizon,

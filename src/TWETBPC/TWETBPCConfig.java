@@ -176,6 +176,8 @@ public class TWETBPCConfig {
 	public boolean bidirectionalCompletionBoundScalarPruning = true;
 	/** 2026-06-28: ng-DSSR 主线可选用独立 time-indexed relaxed graph 强化 scalar completion bound。 */
 	public boolean timeIndexedCompletionBoundScalarEnhancement = false;
+	/** 2026-06-29: active SRI cut 存在时是否仍使用 no-SRI 的 time-indexed 松弛 helper。默认关闭，避免误读为 SRI-aware fixing。 */
+	public boolean timeIndexedCompletionBoundAllowNoSriWithActiveCuts = false;
 	/** 2026-06-28: 整数时间实例上，使用 time-indexed 剩余可达时间收紧当前 node 内部 pricing window。 */
 	public boolean timeIndexedCompletionBoundWindowTightening = true;
 	/** 2026-06-28: node 闭合后，用 time-indexed relaxed graph 做时空弧 pricingOnly fixing。 */

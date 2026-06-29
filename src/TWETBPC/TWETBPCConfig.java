@@ -184,6 +184,11 @@ public class TWETBPCConfig {
 	public boolean timeIndexedCompletionBoundInRoundArcFixing = false;
 	/** 2026-06-29: active SRI cut 下使用带 SRI state 的 time-indexed labeling 做本轮窗口强化。 */
 	public boolean timeIndexedCompletionBoundSriAwareArcFixing = false;
+	/**
+	 * 2026-06-29: cut loop 内每次 pricing 收敛后，用 UB-LB 做 pricing-only arc fixing/window tightening。
+	 * 不删除当前 RMP 旧列，只让同一 node 后续 cut/pricing 和子节点继承更强的 pricing-only 状态。
+	 */
+	public boolean timeIndexedCompletionBoundCutLoopArcFixing = false;
 	/** 2026-06-28: 整数时间实例上，使用 time-indexed 剩余可达时间收紧当前 node 内部 pricing window。 */
 	public boolean timeIndexedCompletionBoundWindowTightening = true;
 	/** 2026-06-28: node 闭合后，用 time-indexed relaxed graph 做时空弧 pricingOnly fixing。 */

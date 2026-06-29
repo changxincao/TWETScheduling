@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 
+import Basic.Data;
 import Common.Utility;
 import Output.BPCTraceSink;
 import TWETBPC.TWETBPCConfig;
@@ -15,6 +16,8 @@ import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.GC.TimeIndexedGraphRank1CutPricingEngine;
+import TWETBPC.GC.TimeIndexedGraphPricingEngine;
+import TWETBPC.GC.TimeIndexedScalarCompletionBound;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
@@ -105,6 +108,10 @@ public class PC {
 		}
 
 		// 2026-06-13: 对齐旧 VRP PC.Solve()：pricing 收敛后若 LP 已经整数，不再做 cut separation。
+		applyCutLoopPricingOnlyArcFixing(lp, solution);
+		if (isTimeLimitReached()) {
+			return solution;
+		}
 		if (solution.isInteger()) {
 			return solution;
 		}
@@ -125,9 +132,11 @@ public class PC {
 						return solution;
 					}
 					solution = solvePricingLoop(lp, solution);
-					if (isTimeLimitReached()
-							|| solution.getStatus() == TWETMasterStatus.INFEASIBLE
-							|| solution.isInteger()) {
+					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+						return solution;
+					}
+					applyCutLoopPricingOnlyArcFixing(lp, solution);
+					if (isTimeLimitReached() || solution.isInteger()) {
 						return solution;
 					}
 				}
@@ -169,7 +178,11 @@ public class PC {
 			if (isTimeLimitReached()) {
 				return solution;
 			}
-			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE || solution.isInteger()) {
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				return solution;
+			}
+			applyCutLoopPricingOnlyArcFixing(lp, solution);
+			if (isTimeLimitReached() || solution.isInteger()) {
 				return solution;
 			}
 			if (usesPaperStyleTimeIndexedRank1Cuts()) {
@@ -192,6 +205,70 @@ public class PC {
 		}
 
 		return solution;
+	}
+
+	private void applyCutLoopPricingOnlyArcFixing(LP lp, TWETMasterSolution solution) {
+		if (!config.timeIndexedCompletionBoundCutLoopArcFixing
+				|| config.maxCutRounds <= 0
+				|| cutGenerators.size() <= 1
+				|| lp == null || lp.getNode() == null || solution == null
+				|| solution.getStatus() != TWETMasterStatus.LP_RELAXATION
+				|| solution.isInteger()
+				|| !Double.isFinite(incumbentForDualBoundPruning)) {
+			return;
+		}
+		if (config.useTimeIndexedGraphPricing) {
+			applyCutLoopTimeIndexedGraphFixing(lp);
+			return;
+		}
+		if (isNgDssrPricingActive()) {
+			applyCutLoopNgDssrTimeIndexedFixing(lp);
+		}
+	}
+
+	private void applyCutLoopTimeIndexedGraphFixing(LP lp) {
+		boolean activeSri = !lp.getActiveSubsetRowPricingCutIds().isEmpty();
+		if (activeSri && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts
+				&& !config.timeIndexedCompletionBoundSriAwareArcFixing) {
+			traceSink.onStageHeartbeat(lp.getNode(), "cutLoopTimeIndexedArcFixing.skip active SRI cuts",
+					lp.getPool().size(), lp.getCutPool().size());
+			return;
+		}
+		if (activeSri && config.timeIndexedCompletionBoundSriAwareArcFixing
+				&& config.timeIndexedCompletionBoundScalarEnhancement) {
+			applyCutLoopNgDssrTimeIndexedFixing(lp);
+			return;
+		}
+		if (activeSri && config.timeIndexedCompletionBoundSriAwareArcFixing) {
+			traceSink.onStageHeartbeat(lp.getNode(),
+					"cutLoopTimeIndexedArcFixing.skip SRI-aware graph fixing requires scalar helper",
+					lp.getPool().size(), lp.getCutPool().size());
+			return;
+		}
+		Data data = lp.getData();
+		TimeIndexedGraphPricingEngine.ArcFixingResult result =
+				TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, config, lp,
+						incumbentForDualBoundPruning);
+		if (result.isAvailable()) {
+			traceSink.onStageHeartbeat(lp.getNode(), "cutLoopTimeIndexedArcFixing.done " + result.summary(),
+					lp.getPool().size(), lp.getCutPool().size());
+		}
+	}
+
+	private void applyCutLoopNgDssrTimeIndexedFixing(LP lp) {
+		TimeIndexedScalarCompletionBound.ArcFixingResult result =
+				TimeIndexedScalarCompletionBound.applyArcFixing(lp.getData(), config, lp,
+						incumbentForDualBoundPruning);
+		if (result.isAvailable()) {
+			traceSink.onStageHeartbeat(lp.getNode(), "cutLoopScalarArcFixing.done " + result.summary(),
+					lp.getPool().size(), lp.getCutPool().size());
+		}
+	}
+
+	private boolean isNgDssrPricingActive() {
+		return config.useGCNGBBStyleNgDssrPricing
+				|| config.useGCNGBBStyleNgDssrPartialDominancePricing
+				|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing;
 	}
 
 	private boolean usesPaperStyleTimeIndexedRank1Cuts() {

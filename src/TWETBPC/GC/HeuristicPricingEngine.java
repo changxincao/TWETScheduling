@@ -60,6 +60,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
+		HeuristicWindowContext windowContext = buildHeuristicWindowContext(lp.getNode());
 		ArrayList<TWETColumn> seeds = collectSeedColumnsBySortedPrefix(lp, sriContext);
 		if (seeds.isEmpty()) {
 			return PricingResult.noImprovement("No active seed column for heuristic pricing");
@@ -74,7 +75,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (this.timeLimitChecker.isTimeLimitReached() || isHeuristicPoolFull(negativeCandidates)) {
 				break;
 			}
-			tabuSearch(seed.getSequence(), lp, sriContext, activeSignatures, generatedSignatures, negativeCandidates);
+			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, activeSignatures, generatedSignatures,
+					negativeCandidates);
 		}
 
 		if (negativeCandidates.isEmpty()) {
@@ -159,14 +161,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
+			HeuristicWindowContext windowContext,
 			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
 			ArrayList<ScoredSequence> negativeCandidates) {
-		TabuRouteState state = new TabuRouteState(seed, sriContext);
+		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext);
 		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence)) {
 			return;
 		}
 		double bestReducedCost = state.reducedCost(lp);
-		tryAddNegative(state.sequence, state.cost, bestReducedCost, activeSignatures, generatedSignatures,
+		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, activeSignatures,
+				generatedSignatures,
 				negativeCandidates);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
@@ -180,8 +184,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (Utility.compareLt(state.currentReducedCost, bestReducedCost)) {
 				bestReducedCost = state.currentReducedCost;
 			}
-			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, activeSignatures, generatedSignatures,
-					negativeCandidates);
+			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, activeSignatures,
+					generatedSignatures, negativeCandidates);
 		}
 	}
 
@@ -232,21 +236,31 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return !move.isTabu(iter) || Utility.compareLt(move.reducedCost, bestReducedCost);
 	}
 
-	private void tryAddNegative(List<Integer> sequence, double cost, double reducedCost,
+	private void tryAddNegative(List<Integer> sequence, double restrictedCost, double restrictedReducedCost, LP lp,
+			SriPricingContext sriContext,
 			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
 			ArrayList<ScoredSequence> negativeCandidates) {
 		if (isHeuristicPoolFull(negativeCandidates)) {
 			return;
 		}
-		if (sequence.isEmpty() || Utility.isBigMValue(cost)) {
+		if (sequence.isEmpty() || Utility.isBigMValue(restrictedCost)
+				|| Utility.compareGe(restrictedReducedCost, REDUCED_COST_TOLERANCE)) {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
-		if (activeSignatures.contains(signature) || !generatedSignatures.add(signature)) {
+		if (activeSignatures.contains(signature) || generatedSignatures.contains(signature)) {
 			return;
 		}
-		if (Utility.compareLt(reducedCost, REDUCED_COST_TOLERANCE)) {
-			negativeCandidates.add(new ScoredSequence(sequence, cost, reducedCost));
+		// 2026-06-29: tabu 搜索可以使用 node 继承的硬时间窗缩小函数定义域；但列池按 sequence
+		// 全局复用，永久写入的 TWETColumn.cost 必须回到原始 TWET 目标口径，避免把节点局部窗口成本带出本节点。
+		double trueCost = trueSequenceCost(sequence);
+		if (Utility.isBigMValue(trueCost)) {
+			return;
+		}
+		double trueReducedCost = reducedCost(sequence, trueCost, lp, sriContext.penalty(sequence));
+		if (Utility.compareLt(trueReducedCost, REDUCED_COST_TOLERANCE)) {
+			generatedSignatures.add(signature);
+			negativeCandidates.add(new ScoredSequence(sequence, trueCost, trueReducedCost));
 		}
 	}
 
@@ -260,6 +274,63 @@ public class HeuristicPricingEngine implements PricingEngine {
 			signatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
 		return signatures;
+	}
+
+	private double trueSequenceCost(List<Integer> sequence) {
+		PiecewiseLinearFunction[] forwardProfile = buildForwardProfile(sequence, true, unrestrictedWindowContext());
+		if (forwardProfile.length == 0 || forwardProfile[forwardProfile.length - 1] == null
+				|| forwardProfile[forwardProfile.length - 1].isEmpty()) {
+			return Utility.big_M;
+		}
+		PiecewiseLinearFunction last = forwardProfile[forwardProfile.length - 1];
+		return last.tail.getValue(last.tail.end);
+	}
+
+	private HeuristicWindowContext unrestrictedWindowContext() {
+		return new HeuristicWindowContext(null, data.penaltyFunction[0], data.CmaxH, singletonProfileCache);
+	}
+
+	/**
+	 * 2026-06-29: 启发式 pricing 只使用可继承的硬时间窗缩小搜索空间。
+	 * 基础 hard window 已在 data.penaltyFunction 中；这里额外叠加 time-indexed arc fixing
+	 * 传给子树的 compact window。root dual profitable window 依赖当前 dual，不写入该上下文。
+	 */
+	private HeuristicWindowContext buildHeuristicWindowContext(Node node) {
+		if (node == null || node.countTimeIndexedPricingWindowTightenedJobs() == 0) {
+			return unrestrictedWindowContext();
+		}
+		PiecewiseLinearFunction[] penalties = new PiecewiseLinearFunction[data.n + 1];
+		double horizon = 0.0;
+		boolean restricted = false;
+		for (int job = 1; job <= data.n; job++) {
+			double hStart = data.hardWindowStart[job];
+			double hEnd = data.hardWindowEnd[job];
+			if (node.hasTimeIndexedPricingWindow(job)) {
+				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
+				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
+			}
+			if (Utility.compareGt(hStart, data.hardWindowStart[job])
+					|| Utility.compareLt(hEnd, data.hardWindowEnd[job])) {
+				restricted = true;
+				penalties[job] = Utility.compareGt(hStart, hEnd) ? null
+						: data.penaltyFunction[job].setDomain(hStart, hEnd, true);
+			} else {
+				penalties[job] = data.penaltyFunction[job];
+			}
+			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hEnd)) {
+				horizon = Math.max(horizon, hEnd);
+			}
+		}
+		if (!restricted) {
+			return unrestrictedWindowContext();
+		}
+		if (!Utility.compareGt(horizon, 0.0)) {
+			horizon = data.CmaxH;
+		}
+		horizon = Math.min(horizon, data.CmaxH);
+		PiecewiseLinearFunction sourcePenalty = data.penaltyFunction[0].setDomain(0.0, horizon);
+		SegmentProfile[] localSingletonProfiles = buildSingletonProfileCache(penalties);
+		return new HeuristicWindowContext(penalties, sourcePenalty, horizon, localSingletonProfiles);
 	}
 
 	private boolean isSequenceCompatible(Node node, List<Integer> sequence) {
@@ -318,6 +389,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double cost;
 		private double currentReducedCost;
 		private final SriPricingContext sriContext;
+		private final HeuristicWindowContext windowContext;
 		private int[] sriCounts;
 		private byte[][] sriPrefixStates;
 		private byte[][] sriSuffixStates;
@@ -325,11 +397,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double[] sriSuffixPenalty;
 		private double sriPenalty;
 
-		TabuRouteState(List<Integer> seed, SriPricingContext sriContext) {
+		TabuRouteState(List<Integer> seed, SriPricingContext sriContext, HeuristicWindowContext windowContext) {
 			this.sequence = new ArrayList<Integer>(seed);
 			this.used = new boolean[data.n + 1];
 			this.tabuTenure = new int[data.n + 1];
 			this.sriContext = sriContext;
+			this.windowContext = windowContext;
 			rebuild();
 		}
 
@@ -476,7 +549,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 				return 0.0;
 			}
 			int end = pos;
-			PiecewiseLinearFunction f1 = pos == 0 ? data.penaltyFunction[0] : forward[pos - 1];
+			PiecewiseLinearFunction f1 = pos == 0 ? windowContext.sourcePenalty : forward[pos - 1];
 			if (end == sequence.size() - 1) {
 				return f1.tail.getValue(f1.tail.end);
 			}
@@ -490,9 +563,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double insertOrReplaceCost(int pos, int job, boolean replace) {
 			int prefixEnd = pos - 1;
 			int suffixStart = replace ? pos + 1 : pos;
-			PiecewiseLinearFunction f1 = prefixEnd < 0 ? data.penaltyFunction[0] : forward[prefixEnd];
-			PiecewiseLinearFunction b3 = suffixStart >= sequence.size() ? data.penaltyFunction[0] : backward[suffixStart];
-			SegmentProfile single = singletonProfile(job);
+			PiecewiseLinearFunction f1 = prefixEnd < 0 ? windowContext.sourcePenalty : forward[prefixEnd];
+			PiecewiseLinearFunction b3 = suffixStart >= sequence.size() ? windowContext.sourcePenalty
+					: backward[suffixStart];
+			SegmentProfile single = windowContext.singletonProfile(job);
 			int bridgeFrom1 = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
 			double shift1 = data.s[bridgeFrom1][job] + data.p[job];
 			int bridgeTo2 = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
@@ -585,8 +659,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 					used[job] = true;
 				}
 			}
-			this.forward = buildForwardProfile(sequence, true);
-			this.backward = buildBackwardProfile(sequence);
+			this.forward = buildForwardProfile(sequence, true, windowContext);
+			this.backward = buildBackwardProfile(sequence, windowContext);
 			if (sriContext.isSequenceBased()) {
 				rebuildSriProfiles();
 			} else {
@@ -631,12 +705,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 				int job = sequence.get(i).intValue();
 				PiecewiseLinearFunction cur;
 				if (i == 0) {
-					cur = data.penaltyFunction[job].copy();
-					cur = cur.setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+					PiecewiseLinearFunction penalty = windowContext.penalty(job);
+					cur = penalty == null ? emptyFunction() : penalty.copy();
+					cur = cur.setDomain(data.p[job] + data.s[0][job], windowContext.horizon);
 					cur.shiftYInPlace(data.getSetupCost(0, job));
 				} else {
 					int prev = sequence.get(i - 1).intValue();
-					cur = forward[i - 1].shiftX(data.s[prev][job] + data.p[job]).add(data.penaltyFunction[job]);
+					PiecewiseLinearFunction penalty = windowContext.penalty(job);
+					cur = penalty == null ? emptyFunction()
+							: forward[i - 1].shiftX(data.s[prev][job] + data.p[job]).add(penalty);
 					cur.shiftYInPlace(data.getSetupCost(prev, job));
 				}
 				cur.minimizePrefixInPlace();
@@ -652,10 +729,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 				int job = sequence.get(i).intValue();
 				PiecewiseLinearFunction cur;
 				if (i == sequence.size() - 1) {
-					cur = data.penaltyFunction[job].copy();
+					PiecewiseLinearFunction penalty = windowContext.penalty(job);
+					cur = penalty == null ? emptyFunction() : penalty.copy();
 				} else {
 					int next = sequence.get(i + 1).intValue();
-					cur = backward[i + 1].shiftX(-data.s[job][next] - data.p[next]).add(data.penaltyFunction[job]);
+					PiecewiseLinearFunction penalty = windowContext.penalty(job);
+					cur = penalty == null ? emptyFunction()
+							: backward[i + 1].shiftX(-data.s[job][next] - data.p[next]).add(penalty);
 					cur.shiftYInPlace(data.getSetupCost(job, next));
 				}
 				cur.minimizeSuffixInPlace();
@@ -670,20 +750,24 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 	}
 
-	private PiecewiseLinearFunction[] buildForwardProfile(List<Integer> jobs, boolean includeDepotStart) {
+	private PiecewiseLinearFunction[] buildForwardProfile(List<Integer> jobs, boolean includeDepotStart,
+			HeuristicWindowContext windowContext) {
 		PiecewiseLinearFunction[] result = new PiecewiseLinearFunction[jobs.size()];
 		for (int i = 0; i < jobs.size(); i++) {
 			int job = jobs.get(i).intValue();
 			PiecewiseLinearFunction cur;
 			if (i == 0) {
-				cur = data.penaltyFunction[job].copy();
+				PiecewiseLinearFunction penalty = windowContext.penalty(job);
+				cur = penalty == null ? emptyFunction() : penalty.copy();
 				if (includeDepotStart) {
-					cur = cur.setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+					cur = cur.setDomain(data.p[job] + data.s[0][job], windowContext.horizon);
 					cur.shiftYInPlace(data.getSetupCost(0, job));
 				}
 			} else {
 				int prev = jobs.get(i - 1).intValue();
-				cur = result[i - 1].shiftX(data.s[prev][job] + data.p[job]).add(data.penaltyFunction[job]);
+				PiecewiseLinearFunction penalty = windowContext.penalty(job);
+				cur = penalty == null ? emptyFunction()
+						: result[i - 1].shiftX(data.s[prev][job] + data.p[job]).add(penalty);
 				cur.shiftYInPlace(data.getSetupCost(prev, job));
 			}
 			cur.minimizePrefixInPlace();
@@ -692,16 +776,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return result;
 	}
 
-	private PiecewiseLinearFunction[] buildBackwardProfile(List<Integer> jobs) {
+	private PiecewiseLinearFunction[] buildBackwardProfile(List<Integer> jobs, HeuristicWindowContext windowContext) {
 		PiecewiseLinearFunction[] result = new PiecewiseLinearFunction[jobs.size()];
 		for (int i = jobs.size() - 1; i >= 0; i--) {
 			int job = jobs.get(i).intValue();
 			PiecewiseLinearFunction cur;
 			if (i == jobs.size() - 1) {
-				cur = data.penaltyFunction[job].copy();
+				PiecewiseLinearFunction penalty = windowContext.penalty(job);
+				cur = penalty == null ? emptyFunction() : penalty.copy();
 			} else {
 				int next = jobs.get(i + 1).intValue();
-				cur = result[i + 1].shiftX(-data.s[job][next] - data.p[next]).add(data.penaltyFunction[job]);
+				PiecewiseLinearFunction penalty = windowContext.penalty(job);
+				cur = penalty == null ? emptyFunction()
+						: result[i + 1].shiftX(-data.s[job][next] - data.p[next]).add(penalty);
 				cur.shiftYInPlace(data.getSetupCost(job, next));
 			}
 			cur.minimizeSuffixInPlace();
@@ -711,31 +798,57 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private SegmentProfile[] buildSingletonProfileCache() {
+		return buildSingletonProfileCache(null);
+	}
+
+	private SegmentProfile[] buildSingletonProfileCache(PiecewiseLinearFunction[] penalties) {
 		SegmentProfile[] cache = new SegmentProfile[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			cache[job] = buildSingletonProfile(job);
+			cache[job] = buildSingletonProfile(job, penalties);
 		}
 		return cache;
 	}
 
-	private SegmentProfile buildSingletonProfile(int job) {
-		PiecewiseLinearFunction forward = data.penaltyFunction[job].copy();
+	private SegmentProfile buildSingletonProfile(int job, PiecewiseLinearFunction[] penalties) {
+		PiecewiseLinearFunction penalty = penalties == null ? data.penaltyFunction[job] : penalties[job];
+		PiecewiseLinearFunction forward = penalty == null ? emptyFunction() : penalty.copy();
 		forward.minimizePrefixInPlace();
-		PiecewiseLinearFunction backward = data.penaltyFunction[job].copy();
+		PiecewiseLinearFunction backward = penalty == null ? emptyFunction() : penalty.copy();
 		backward.minimizeSuffixInPlace();
 		return new SegmentProfile(forward, backward);
 	}
 
-	private SegmentProfile singletonProfile(int job) {
-		SegmentProfile cached = singletonProfileCache[job];
-		// 2026-05-21: 单 job 的 normalize 结果只和 job 自身有关，先缓存模板。
-		// merge3Segments 当前只会改中间 forward 函数；backward 只读复用即可，避免每次多复制一份。
-		return new SegmentProfile(cached.forward.copy(), cached.backward);
+	private PiecewiseLinearFunction emptyFunction() {
+		return new PiecewiseLinearFunction();
+	}
+
+	private final class HeuristicWindowContext {
+		private final PiecewiseLinearFunction[] penalties;
+		private final PiecewiseLinearFunction sourcePenalty;
+		private final double horizon;
+		private final SegmentProfile[] singletonProfiles;
+
+		HeuristicWindowContext(PiecewiseLinearFunction[] penalties, PiecewiseLinearFunction sourcePenalty,
+				double horizon, SegmentProfile[] singletonProfiles) {
+			this.penalties = penalties;
+			this.sourcePenalty = sourcePenalty;
+			this.horizon = horizon;
+			this.singletonProfiles = singletonProfiles;
+		}
+
+		PiecewiseLinearFunction penalty(int job) {
+			return penalties == null ? data.penaltyFunction[job] : penalties[job];
+		}
+
+		SegmentProfile singletonProfile(int job) {
+			SegmentProfile cached = singletonProfiles[job];
+			return new SegmentProfile(cached.forward.copy(), cached.backward);
+		}
 	}
 
 	/**
 	 * 2026-06-13: 启发式 pricing 的 SRI reduced-cost 上下文。
-	 * 只在 partial-list ng-DSSR + subset-row cut active 时启用；否则所有 delta 为 0，保持旧启发式口径。
+	 * 只在对应 cut pricing 模式启用；否则所有 SRI delta 为 0，保持旧启发式入口。
 	 */
 	private static final class SriPricingContext {
 		private static final int[] EMPTY_INDICES = new int[0];

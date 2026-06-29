@@ -246,6 +246,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableHeuristicPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableHeuristicPricing",
 				Boolean.toString(config.enableHeuristicPricing)));
+		config.enableHeuristicDualProfitableWindow = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableHeuristicDualProfitableWindow",
+				Boolean.toString(config.enableHeuristicDualProfitableWindow)));
 		config.enableBPCConsoleOutput = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableConsoleOutput",
 				Boolean.toString(config.enableBPCConsoleOutput)));

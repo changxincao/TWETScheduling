@@ -345,6 +345,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
+		if (!config.enableHeuristicDualProfitableWindow) {
+			return false;
+		}
 		if (lp == null || lp.getNode() == null || lp.getNode().depth != 0) {
 			return false;
 		}

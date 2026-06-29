@@ -95,6 +95,9 @@ public class TWETBPCConfig {
 	public boolean routeEnumerationUseTimeIndexedWindow = false;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
+	// 2026-06-29: Keep root dual profitable window out of heuristic pricing by default.
+	// Sparse initial RMP duals can make this window too narrow and kill all tabu seeds.
+	public boolean enableHeuristicDualProfitableWindow = false;
 	/**
 	 * 2026-05-20: exact pricing 层是否使用双向 no-cut labeling。
 	 * 为 true 时，启发式定价之后只接双向定价；为 false 时，才按 usePaperDominancePricing

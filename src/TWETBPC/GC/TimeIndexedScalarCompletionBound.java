@@ -380,19 +380,23 @@ public final class TimeIndexedScalarCompletionBound {
 		if (!exactIntegerTime || localFixedTimeIndexedArc == null || localFixedTimeIndexedArc.isEmpty()) {
 			return 0;
 		}
-		int written = 0;
 		int pairWidth = n + 1;
+		if (node.countTimeIndexedPricingOnlyForbiddenArcs() == 0) {
+			return node.replaceTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc, pairWidth, horizon);
+		}
 		int pairCount = pairWidth * pairWidth;
-		for (int index = localFixedTimeIndexedArc.nextSetBit(0); index >= 0;
-				index = localFixedTimeIndexedArc.nextSetBit(index + 1)) {
+		int total = pairCount * (horizon + 1);
+		BitSet combined = new BitSet(total);
+		for (int index = 0; index < total; index++) {
 			int time = index / pairCount;
 			int remainder = index % pairCount;
 			int from = remainder / pairWidth;
 			int to = remainder % pairWidth;
-			node.forbidTimeIndexedPricingOnlyArc(from, to, time);
-			written++;
+			if (localFixedTimeIndexedArc.get(index) || node.isTimeIndexedPricingOnlyArcForbidden(from, to, time)) {
+				combined.set(index);
+			}
 		}
-		return written;
+		return node.replaceTimeIndexedPricingOnlyArcSet(combined, pairWidth, horizon);
 	}
 
 	private int applyReachableWindowsToNode() {

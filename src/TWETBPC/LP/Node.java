@@ -66,6 +66,8 @@ public class Node implements Comparable<Node> {
 	private boolean[][] pricingOnlyForbiddenArc;
 	private HashMap<Integer, BitSet> timeIndexedPricingOnlyForbiddenArcTimesByPair;
 	private int timeIndexedPricingOnlyForbiddenArcCount;
+	private boolean timeIndexedPricingOnlyArcStoreAllowed;
+	private int timeIndexedPricingOnlyArcStoreHorizon;
 	private int[] timeIndexedPricingWindowStartByJob;
 	private int[] timeIndexedPricingWindowEndByJob;
 	private byte[][] adjacencyPairState;
@@ -93,6 +95,8 @@ public class Node implements Comparable<Node> {
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.timeIndexedPricingOnlyForbiddenArcTimesByPair = new HashMap<Integer, BitSet>();
 		this.timeIndexedPricingOnlyForbiddenArcCount = 0;
+		this.timeIndexedPricingOnlyArcStoreAllowed = false;
+		this.timeIndexedPricingOnlyArcStoreHorizon = -1;
 		this.timeIndexedPricingWindowStartByJob = null;
 		this.timeIndexedPricingWindowEndByJob = null;
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
@@ -126,6 +130,8 @@ public class Node implements Comparable<Node> {
 			copy.timeIndexedPricingOnlyForbiddenArcTimesByPair.put(entry.getKey(), (BitSet) entry.getValue().clone());
 		}
 		copy.timeIndexedPricingOnlyForbiddenArcCount = timeIndexedPricingOnlyForbiddenArcCount;
+		copy.timeIndexedPricingOnlyArcStoreAllowed = timeIndexedPricingOnlyArcStoreAllowed;
+		copy.timeIndexedPricingOnlyArcStoreHorizon = timeIndexedPricingOnlyArcStoreHorizon;
 		copy.timeIndexedPricingWindowStartByJob = timeIndexedPricingWindowStartByJob == null ? null
 				: timeIndexedPricingWindowStartByJob.clone();
 		copy.timeIndexedPricingWindowEndByJob = timeIndexedPricingWindowEndByJob == null ? null
@@ -203,15 +209,23 @@ public class Node implements Comparable<Node> {
 		if (from < 0 || to < 0 || from >= data.n + 2 || to >= data.n + 2 || time < 0) {
 			return;
 		}
-		int pairKey = timeIndexedArcPairKey(from, to);
-		BitSet times = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
-		if (times == null) {
-			times = new BitSet();
-			timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, times);
-		}
-		if (!times.get(time)) {
-			times.set(time);
-			timeIndexedPricingOnlyForbiddenArcCount++;
+		if (timeIndexedPricingOnlyArcStoreAllowed && time <= timeIndexedPricingOnlyArcStoreHorizon) {
+			BitSet allowedTimes = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(timeIndexedArcPairKey(from, to));
+			if (allowedTimes != null && allowedTimes.get(time)) {
+				allowedTimes.clear(time);
+				timeIndexedPricingOnlyForbiddenArcCount++;
+			}
+		} else {
+			int pairKey = timeIndexedArcPairKey(from, to);
+			BitSet times = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
+			if (times == null) {
+				times = new BitSet();
+				timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, times);
+			}
+			if (!times.get(time)) {
+				times.set(time);
+				timeIndexedPricingOnlyForbiddenArcCount++;
+			}
 		}
 	}
 
@@ -220,11 +234,59 @@ public class Node implements Comparable<Node> {
 			return false;
 		}
 		BitSet times = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(timeIndexedArcPairKey(from, to));
+		if (timeIndexedPricingOnlyArcStoreAllowed) {
+			return time <= timeIndexedPricingOnlyArcStoreHorizon && (times == null || !times.get(time));
+		}
 		return times != null && times.get(time);
 	}
 
 	public int countTimeIndexedPricingOnlyForbiddenArcs() {
 		return timeIndexedPricingOnlyForbiddenArcCount;
+	}
+
+	/**
+	 * 2026-06-29: 用完整 time-indexed fixing 结果替换当前节点继承的时空禁弧。
+	 * 如果被删弧更多，则存 allowed complement；如果被删弧更少，则存 forbidden set。
+	 * 对外查询语义保持不变，仍然回答某条 (from,to,time) 是否被禁用。
+	 */
+	public int replaceTimeIndexedPricingOnlyArcSet(BitSet forbiddenArcIndices, int pairWidth, int horizon) {
+		timeIndexedPricingOnlyForbiddenArcTimesByPair.clear();
+		timeIndexedPricingOnlyForbiddenArcCount = forbiddenArcIndices == null ? 0 : forbiddenArcIndices.cardinality();
+		timeIndexedPricingOnlyArcStoreHorizon = horizon;
+		int total = pairWidth * pairWidth * (horizon + 1);
+		timeIndexedPricingOnlyArcStoreAllowed = forbiddenArcIndices != null
+				&& timeIndexedPricingOnlyForbiddenArcCount > total / 2;
+		if (forbiddenArcIndices == null || total <= 0) {
+			timeIndexedPricingOnlyArcStoreAllowed = false;
+			return timeIndexedPricingOnlyForbiddenArcCount;
+		}
+		if (timeIndexedPricingOnlyArcStoreAllowed) {
+			for (int index = forbiddenArcIndices.nextClearBit(0); index >= 0 && index < total;
+					index = forbiddenArcIndices.nextClearBit(index + 1)) {
+				addStoredTimeIndexedArc(index, pairWidth);
+			}
+		} else {
+			for (int index = forbiddenArcIndices.nextSetBit(0); index >= 0 && index < total;
+					index = forbiddenArcIndices.nextSetBit(index + 1)) {
+				addStoredTimeIndexedArc(index, pairWidth);
+			}
+		}
+		return timeIndexedPricingOnlyForbiddenArcCount;
+	}
+
+	private void addStoredTimeIndexedArc(int index, int pairWidth) {
+		int pairCount = pairWidth * pairWidth;
+		int time = index / pairCount;
+		int remainder = index % pairCount;
+		int from = remainder / pairWidth;
+		int to = remainder % pairWidth;
+		int pairKey = timeIndexedArcPairKey(from, to);
+		BitSet times = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
+		if (times == null) {
+			times = new BitSet();
+			timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, times);
+		}
+		times.set(time);
 	}
 
 	/**

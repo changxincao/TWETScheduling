@@ -60,7 +60,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
-		HeuristicWindowContext windowContext = buildHeuristicWindowContext(lp.getNode());
+		HeuristicWindowContext windowContext = buildHeuristicWindowContext(lp);
 		ArrayList<TWETColumn> seeds = collectSeedColumnsBySortedPrefix(lp, sriContext);
 		if (seeds.isEmpty()) {
 			return PricingResult.noImprovement("No active seed column for heuristic pricing");
@@ -291,12 +291,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	/**
-	 * 2026-06-29: 启发式 pricing 只使用可继承的硬时间窗缩小搜索空间。
-	 * 基础 hard window 已在 data.penaltyFunction 中；这里额外叠加 time-indexed arc fixing
-	 * 传给子树的 compact window。root dual profitable window 依赖当前 dual，不写入该上下文。
+	 * 2026-06-29: 启发式 pricing 使用当前 node 可用的硬时间窗缩小搜索空间。
+	 * 基础 hard window 已在 data.penaltyFunction 中；这里额外叠加 root/no-cut 的 dual profitable
+	 * window 和 time-indexed arc fixing 传给子树的 compact window。dual window 只用于本次搜索，
+	 * 不写入 node，也不进入返回列的永久成本。
 	 */
-	private HeuristicWindowContext buildHeuristicWindowContext(Node node) {
-		if (node == null || node.countTimeIndexedPricingWindowTightenedJobs() == 0) {
+	private HeuristicWindowContext buildHeuristicWindowContext(LP lp) {
+		Node node = lp == null ? null : lp.getNode();
+		boolean useDualWindow = canUseDualProfitableWindow(lp);
+		if (!useDualWindow && (node == null || node.countTimeIndexedPricingWindowTightenedJobs() == 0)) {
 			return unrestrictedWindowContext();
 		}
 		PiecewiseLinearFunction[] penalties = new PiecewiseLinearFunction[data.n + 1];
@@ -305,6 +308,14 @@ public class HeuristicPricingEngine implements PricingEngine {
 		for (int job = 1; job <= data.n; job++) {
 			double hStart = data.hardWindowStart[job];
 			double hEnd = data.hardWindowEnd[job];
+			if (useDualWindow) {
+				double baseline = outsourcingBaseline(job);
+				double jobDual = Math.max(0.0, lp.getJobDual(job));
+				if (Utility.compareLt(jobDual, baseline)) {
+					hStart = Math.max(hStart, hWindowStart(job, jobDual));
+					hEnd = Math.min(hEnd, hWindowEnd(job, jobDual));
+				}
+			}
 			if (node.hasTimeIndexedPricingWindow(job)) {
 				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
 				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
@@ -331,6 +342,32 @@ public class HeuristicPricingEngine implements PricingEngine {
 		PiecewiseLinearFunction sourcePenalty = data.penaltyFunction[0].setDomain(0.0, horizon);
 		SegmentProfile[] localSingletonProfiles = buildSingletonProfileCache(penalties);
 		return new HeuristicWindowContext(penalties, sourcePenalty, horizon, localSingletonProfiles);
+	}
+
+	private boolean canUseDualProfitableWindow(LP lp) {
+		if (lp == null || lp.getNode() == null || lp.getNode().depth != 0) {
+			return false;
+		}
+		return lp.getActiveCutIds().isEmpty();
+	}
+
+	private double hWindowStart(int job, double gamma) {
+		if (!Utility.compareGt(data.w_e[job], 0.0)) {
+			return 0.0;
+		}
+		return Math.max(0.0, data.d_e[job] - gamma / data.w_e[job]);
+	}
+
+	private double hWindowEnd(int job, double gamma) {
+		if (!Utility.compareGt(data.w_t[job], 0.0)) {
+			return data.CmaxH;
+		}
+		return Math.min(data.CmaxH, data.d_l[job] + gamma / data.w_t[job]);
+	}
+
+	private double outsourcingBaseline(int job) {
+		return Utility.isBigMValue(data.outsourcingCost[job]) ? Utility.big_M
+				: Math.max(0.0, data.outsourcingCost[job]);
 	}
 
 	private boolean isSequenceCompatible(Node node, List<Integer> sequence) {

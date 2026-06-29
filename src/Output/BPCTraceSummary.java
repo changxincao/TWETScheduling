@@ -54,6 +54,7 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private double solveTimeSeconds;
 	private final ArrayList<BPCNodeRecord> nodeRecords = new ArrayList<BPCNodeRecord>();
 	private final ArrayList<String> eventLines = new ArrayList<String>();
+	private final ArrayList<String> runConfigurationLines = new ArrayList<String>();
 	private final LinkedHashMap<String, Integer> pricingCallCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> pricingSuccessCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> pricingColumnCount = new LinkedHashMap<String, Integer>();
@@ -82,6 +83,16 @@ public class BPCTraceSummary implements BPCTraceSink {
 		this.instanceName = instanceName;
 		this.solveStartNano = System.nanoTime();
 		eventLines.add("Start instance: " + instanceName);
+	}
+
+	@Override
+	public void onRunConfiguration(List<String> lines) {
+		runConfigurationLines.clear();
+		runConfigurationLines.addAll(lines);
+		eventLines.add("Run configuration:");
+		for (String line : lines) {
+			eventLines.add("  " + line);
+		}
 	}
 
 	@Override
@@ -568,6 +579,10 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public List<String> getEventLines() {
 		return Collections.unmodifiableList(eventLines);
+	}
+
+	public List<String> getRunConfigurationLines() {
+		return Collections.unmodifiableList(runConfigurationLines);
 	}
 
 	public Map<String, Integer> getPricingCallCount() {

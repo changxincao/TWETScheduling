@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.List;
 
 import TWETBPC.TWETSolveResult;
 import TWETBPC.BP.BranchResult;
@@ -37,6 +38,14 @@ public final class BPCStreamingTraceSink implements BPCTraceSink, AutoCloseable 
 	@Override
 	public void onSolveStarted(String instanceName) {
 		write("Start instance: " + instanceName);
+	}
+
+	@Override
+	public void onRunConfiguration(List<String> lines) {
+		write("Run configuration:");
+		for (String line : lines) {
+			write("  " + line);
+		}
 	}
 
 	@Override

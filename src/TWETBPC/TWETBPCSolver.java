@@ -29,6 +29,7 @@ public class TWETBPCSolver {
 	public TWETSolveResult solve() {
 		long startNano = System.nanoTime();
 		context.traceSink.onSolveStarted(context.resolveInstanceName());
+		context.traceSink.onRunConfiguration(context.runConfigurationLines());
 		TWETSolveResult result = context.tree.solve();
 		double solveSeconds = (System.nanoTime() - startNano) / 1_000_000_000.0;
 		context.traceSink.onSolveFinished(result, solveSeconds);

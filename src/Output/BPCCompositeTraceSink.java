@@ -27,6 +27,13 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onRunConfiguration(List<String> lines) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onRunConfiguration(lines);
+		}
+	}
+
+	@Override
 	public void onInitialColumnsReady(int initialColumnCount, int incumbentColumnCount, double initialIncumbentCost) {
 		for (BPCTraceSink sink : delegates) {
 			sink.onInitialColumnsReady(initialColumnCount, incumbentColumnCount, initialIncumbentCost);

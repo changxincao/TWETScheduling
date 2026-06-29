@@ -1,5 +1,7 @@
 package Output;
 
+import java.util.List;
+
 import TWETBPC.TWETSolveResult;
 import TWETBPC.BP.BranchResult;
 import TWETBPC.LP.Node;
@@ -13,6 +15,14 @@ public final class BPCConsoleReporter implements BPCTraceSink {
 	@Override
 	public void onSolveStarted(String instanceName) {
 		System.out.println("\n=== Start TWET-BPC on instance: " + instanceName);
+	}
+
+	@Override
+	public void onRunConfiguration(List<String> lines) {
+		System.out.println("Run configuration:");
+		for (String line : lines) {
+			System.out.println("  " + line);
+		}
 	}
 
 	@Override

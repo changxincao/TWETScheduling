@@ -1,5 +1,12 @@
 package TWETBPC;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+
 /**
  * TWET-BPC 框架的可调参数集合。
  */
@@ -344,6 +351,34 @@ public class TWETBPCConfig {
 		return "columns".equalsIgnoreCase(outsourcingModel)
 				|| "columnized".equalsIgnoreCase(outsourcingModel)
 				|| "sp1".equalsIgnoreCase(outsourcingModel);
+	}
+
+	/**
+	 * 返回本次求解使用的配置快照。日志里记录最终 config 对象，而不是只记录命令行参数，方便追溯 runner 默认值与覆盖值。
+	 */
+	public List<String> snapshotLines() {
+		ArrayList<Field> fields = new ArrayList<Field>();
+		for (Field field : TWETBPCConfig.class.getFields()) {
+			if (!Modifier.isStatic(field.getModifiers())) {
+				fields.add(field);
+			}
+		}
+		Collections.sort(fields, new Comparator<Field>() {
+			@Override
+			public int compare(Field a, Field b) {
+				return a.getName().compareTo(b.getName());
+			}
+		});
+		ArrayList<String> lines = new ArrayList<String>();
+		for (Field field : fields) {
+			try {
+				lines.add("config." + field.getName() + "=" + String.valueOf(field.get(this)));
+			} catch (IllegalAccessException ex) {
+				throw new IllegalStateException("Failed to read BPC config field: " + field.getName(), ex);
+			}
+		}
+		lines.add("config.derived.useColumnizedOutsourcing=" + Boolean.toString(useColumnizedOutsourcing()));
+		return lines;
 	}
 
 }

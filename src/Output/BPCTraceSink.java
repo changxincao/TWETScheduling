@@ -1,5 +1,7 @@
 package Output;
 
+import java.util.List;
+
 import TWETBPC.TWETSolveResult;
 import TWETBPC.BP.BranchResult;
 import TWETBPC.LP.Node;
@@ -13,6 +15,9 @@ import TWETBPC.Model.TWETMasterSolution;
 public interface BPCTraceSink {
 
 	default void onSolveStarted(String instanceName) {
+	}
+
+	default void onRunConfiguration(List<String> lines) {
 	}
 
 	default void onInitialColumnsReady(int initialColumnCount, int incumbentColumnCount, double initialIncumbentCost) {

@@ -30,6 +30,7 @@ public final class BPCResultWriter {
 		Path columns = dir.resolve(stem + ".columns.csv");
 		Path outsourcing = dir.resolve(stem + ".outsourcing.csv");
 		Path cuts = dir.resolve(stem + ".cuts.csv");
+		Path configFile = dir.resolve(stem + ".config.properties");
 
 		try (BufferedWriter writer = Files.newBufferedWriter(summary)) {
 			writer.write("# " + methodName + " 求解结果\n\n");
@@ -94,6 +95,7 @@ public final class BPCResultWriter {
 			writer.write("- `.nodes.csv`：节点级摘要\n");
 			writer.write("- `.columns.csv`：最终 incumbent 列\n");
 			writer.write("- `.cuts.csv`：当前 cut 池\n\n");
+			writer.write("- `.config.properties`：本次求解配置快照\n\n");
 			if (trace.getNote() != null && !trace.getNote().isEmpty()) {
 				writer.write("备注：" + trace.getNote() + "\n\n");
 			}
@@ -157,6 +159,12 @@ public final class BPCResultWriter {
 				writer.write(String.format(Locale.US, "%d,%s,%.6f,\"%s\",\"%s\"\n", cut.getId(), cut.getType(),
 						cut.getRhs(), cut.getScopeJobs().toString(),
 						(cut.getDescription() == null ? "" : cut.getDescription()).replace("\"", "'")));
+			}
+		}
+		try (BufferedWriter writer = Files.newBufferedWriter(configFile)) {
+			for (String line : trace.getRunConfigurationLines()) {
+				writer.write(line);
+				writer.write("\n");
 			}
 		}
 		return summary;

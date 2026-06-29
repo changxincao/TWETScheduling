@@ -1,7 +1,10 @@
 package TWETBPC;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Properties;
 
 import Basic.Data;
 import Output.BPCCompositeTraceSink;
@@ -169,6 +172,51 @@ public class TWETBPCContext {
 
 		this.pc = new PC(config, pricingEngines, cutGenerators, traceSink);
 		this.tree = new Tree(data, config, pool, outsourcingPool, cutPool, initialColumnBuilder, pc, branchers, traceSink);
+	}
+
+	/**
+	 * 汇总本次 run 的实际配置。这里同时记录最终装配出的组件和 JVM 属性覆盖项，避免只看结果时无法复原实验口径。
+	 */
+	public List<String> runConfigurationLines() {
+		ArrayList<String> lines = new ArrayList<String>();
+		lines.add("run.instance=" + resolveInstanceName());
+		lines.add("run.data.n=" + data.n);
+		lines.add("run.data.m=" + data.m);
+		lines.add("run.data.CmaxH=" + data.CmaxH);
+		lines.add("run.components.pricingEngines=" + classNames(pricingEngines));
+		lines.add("run.components.cutGenerators=" + classNames(cutGenerators));
+		lines.add("run.components.branchers=" + classNames(branchers));
+		lines.add("run.system.javaVersion=" + System.getProperty("java.version"));
+		lines.add("run.system.availableProcessors=" + Runtime.getRuntime().availableProcessors());
+		lines.addAll(config.snapshotLines());
+		lines.addAll(twetSystemPropertyLines());
+		return lines;
+	}
+
+	private static List<String> twetSystemPropertyLines() {
+		ArrayList<String> lines = new ArrayList<String>();
+		Properties properties = System.getProperties();
+		for (String name : properties.stringPropertyNames()) {
+			if (name.startsWith("twet.bpc.")) {
+				lines.add("systemProperty." + name + "=" + properties.getProperty(name));
+			}
+		}
+		Collections.sort(lines);
+		return lines;
+	}
+
+	private static String classNames(List<?> objects) {
+		ArrayList<String> names = new ArrayList<String>();
+		for (Object object : objects) {
+			names.add(object.getClass().getSimpleName());
+		}
+		Collections.sort(names, new Comparator<String>() {
+			@Override
+			public int compare(String a, String b) {
+				return a.compareTo(b);
+			}
+		});
+		return names.toString();
 	}
 
 	/**

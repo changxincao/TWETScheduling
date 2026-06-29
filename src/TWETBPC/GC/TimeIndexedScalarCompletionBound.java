@@ -327,25 +327,6 @@ public final class TimeIndexedScalarCompletionBound {
 		return tightenWindows(hStartByJob, hEndByJob);
 	}
 
-	WindowTightening tightenWindowsAfterSriAwareZeroReducedCostArcFixing(double[] hStartByJob,
-			double[] hEndByJob) {
-		if (!available || !exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
-			return new WindowTightening(0, 0);
-		}
-		SriStateData sri = new SriStateData(lp);
-		if (sri.size() == 0) {
-			return tightenWindowsAfterZeroReducedCostArcFixing(hStartByJob, hEndByJob);
-		}
-		ArrayList<SriLabel>[] forwardLabels = buildSriForwardLabels(sri);
-		ArrayList<SriLabel>[] backwardLabels = buildSriBackwardLabels(sri);
-		int fixed = applySriAwareLocalArcFixing(sri, forwardLabels, backwardLabels, 0.0, null);
-		if (fixed > 0) {
-			forwardLabels = buildSriForwardLabels(sri);
-			backwardLabels = buildSriBackwardLabels(sri);
-		}
-		return tightenWindowsFromSriLabels(hStartByJob, hEndByJob, forwardLabels, backwardLabels, sri);
-	}
-
 	private int applySriAwareLocalArcFixing(SriStateData sri, ArrayList<SriLabel>[] forwardLabels,
 			ArrayList<SriLabel>[] backwardLabels, double cutoff, int[] stats) {
 		if (localFixedTimeIndexedArc == null) {

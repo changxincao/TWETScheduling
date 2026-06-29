@@ -3978,12 +3978,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		timeIndexedScalarBuildNanos += timeIndexedScalarBound.getBuildNanos();
-		boolean activeSriCuts = lp != null && !lp.getActiveSubsetRowPricingCutIds().isEmpty();
 		TimeIndexedScalarCompletionBound.WindowTightening tightened;
-		if (activeSriCuts && config.timeIndexedCompletionBoundSriAwareArcFixing) {
-			tightened = timeIndexedScalarBound.tightenWindowsAfterSriAwareZeroReducedCostArcFixing(
-					effectiveJobHStart, effectiveJobHEnd);
-		} else if (config.timeIndexedCompletionBoundInRoundArcFixing) {
+		if (config.timeIndexedCompletionBoundInRoundArcFixing) {
+			// 2026-06-29: pricing 中间迭代只使用 no-SRI 的轻量 relaxed fixing。
+			// SRI-aware fixing 只保留在 node 闭合后的可继承 reduced-cost fixing 中，避免每轮 DSSR 迭代维护多状态 bucket。
 			tightened = timeIndexedScalarBound.tightenWindowsAfterZeroReducedCostArcFixing(
 					effectiveJobHStart, effectiveJobHEnd);
 		} else {

@@ -191,7 +191,7 @@ public final class TimeIndexedScalarCompletionBound {
 		this.node = lp.getNode();
 		this.n = data.n;
 		this.sink = node.sinkId();
-		this.exactIntegerTime = isIntegerTimeInstance(data, pricingHorizon, hStartByJob, hEndByJob);
+		this.exactIntegerTime = isIntegerTimeInstance(data);
 		this.horizon = Math.max(0, (int) Math.ceil(pricingHorizon - 1e-9));
 		this.width = horizon + 1;
 		this.originalWindowStartByJob = Arrays.copyOf(hStartByJob, n + 1);
@@ -693,13 +693,12 @@ public final class TimeIndexedScalarCompletionBound {
 		return Utility.compareEq(value, rounded) ? rounded : value;
 	}
 
-	private static boolean isIntegerTimeInstance(Data data, double pricingHorizon, double[] hStartByJob,
-			double[] hEndByJob) {
-		// 2026-06-29: pricingHorizon 和有效窗口可能来自 dual window，端点允许是小数。
-		// 只要原始处理时间、setup 和硬时间窗是整数，label 可达完成时刻仍落在整数桶上。
+	private static boolean isIntegerTimeInstance(Data data) {
+		// 2026-06-29: 只看原始离散时间数据。pricingHorizon、预处理 hard window
+		// 和 dual/time-indexed effective window 都是派生窗口，端点为小数时可通过
+		// ceil/floor 映射到整数完成时刻，不应导致 time-indexed 窗口收缩退化为 relaxed 模式。
 		for (int job = 1; job <= data.n; job++) {
-			if (!isInteger(data.getProcessT(job)) || !isInteger(data.hardWindowStart[job])
-					|| !isInteger(data.hardWindowEnd[job])) {
+			if (!isInteger(data.getProcessT(job)) || !isInteger(data.d_e[job]) || !isInteger(data.d_l[job])) {
 				return false;
 			}
 		}

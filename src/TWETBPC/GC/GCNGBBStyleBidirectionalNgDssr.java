@@ -4017,30 +4017,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		dynamicMaxHEnd = 0.0;
 		earliestSourceCompletion = computeEarliestSourceCompletion();
 
-		if (!dualProfitableWindowEnabled) {
-			pricingHorizon = data.CmaxH;
-			for (int job = 1; job <= data.n; job++) {
-				recordEffectiveWindow(job, data.hardWindowStart[job], data.hardWindowEnd[job]);
-			}
-			finalizeEffectiveWindowStatistics(false, data.CmaxH);
-			return;
-		}
-
 		double localHorizon = 0.0;
 		boolean foundFiniteWindow = false;
+		Node node = lp == null ? null : lp.getNode();
 		for (int job = 1; job <= data.n; job++) {
 			double hStart = data.hardWindowStart[job];
 			double hEnd = data.hardWindowEnd[job];
-			double baseline = outsourcingBaseline(job);
-			double jobDual = Math.max(0.0, lp.getJobDual(job));
-			if (Utility.compareLt(jobDual, baseline)) {
-				double dynamicStart = hWindowStart(job, jobDual);
-				double dynamicEnd = hWindowEnd(job, jobDual);
-				if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
-						|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
-					hStart = dynamicStart;
-					hEnd = dynamicEnd;
+			if (dualProfitableWindowEnabled) {
+				double baseline = outsourcingBaseline(job);
+				double jobDual = Math.max(0.0, lp.getJobDual(job));
+				if (Utility.compareLt(jobDual, baseline)) {
+					double dynamicStart = hWindowStart(job, jobDual);
+					double dynamicEnd = hWindowEnd(job, jobDual);
+					if (Utility.compareGt(dynamicStart, data.hardWindowStart[job])
+							|| Utility.compareLt(dynamicEnd, data.hardWindowEnd[job])) {
+						hStart = dynamicStart;
+						hEnd = dynamicEnd;
+					}
 				}
+			}
+			if (node != null && node.hasTimeIndexedPricingWindow(job)) {
+				// 2026-06-29: time-indexed fixing 得到的是可继承的硬窗口；和 dual window 取交集即可。
+				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
+				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
 			}
 			recordEffectiveWindow(job, hStart, hEnd);
 			if (!Utility.compareGt(hStart, hEnd) && Double.isFinite(hEnd)) {

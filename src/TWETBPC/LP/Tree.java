@@ -349,7 +349,7 @@ public class Tree {
 
 	private void applyTimeIndexedScalarCompletionArcFixing(LP lp, double incumbentCost) {
 		if (!config.timeIndexedCompletionBoundScalarEnhancement || !isNgDssrPricingActive()
-				|| lp == null || lp.getNode() == null || lp.getNode().depth <= 0) {
+				|| lp == null || lp.getNode() == null) {
 			return;
 		}
 		heartbeat(lp.getNode(), "timeIndexedScalarArcFixing.start");

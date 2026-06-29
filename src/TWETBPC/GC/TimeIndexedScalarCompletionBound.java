@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.Arrays;
+import java.util.BitSet;
 
 import Basic.Data;
 import Common.Utility;
@@ -41,10 +42,11 @@ public final class TimeIndexedScalarCompletionBound {
 		final long totalNanos;
 		final String message;
 		final WindowReachabilityStats windowStats;
+		final int nodeWindowTightenedJobs;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int unavailable,
 				int processFixed, int idleFixed, int endFixed, double gap, long totalNanos, String message,
-				WindowReachabilityStats windowStats) {
+				WindowReachabilityStats windowStats, int nodeWindowTightenedJobs) {
 			this.available = available;
 			this.candidates = candidates;
 			this.fixed = fixed;
@@ -56,10 +58,11 @@ public final class TimeIndexedScalarCompletionBound {
 			this.totalNanos = totalNanos;
 			this.message = message;
 			this.windowStats = windowStats;
+			this.nodeWindowTightenedJobs = nodeWindowTightenedJobs;
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null, 0);
 		}
 
 		public boolean isAvailable() {
@@ -71,6 +74,7 @@ public final class TimeIndexedScalarCompletionBound {
 					+ ", unavailable=" + unavailable + ", process/idle/end=" + processFixed
 					+ "/" + idleFixed + "/" + endFixed + ", gap=" + gap
 					+ ", ms=" + String.format("%.3f", totalNanos / 1_000_000.0)
+					+ ", nodeWindowTightened=" + nodeWindowTightenedJobs
 					+ (windowStats == null ? "" : ", " + windowStats.summary());
 		}
 	}
@@ -136,6 +140,7 @@ public final class TimeIndexedScalarCompletionBound {
 	private final boolean[] endForbidden;
 	private final boolean available;
 	private final String message;
+	private BitSet localFixedTimeIndexedArc;
 	private long buildNanos;
 
 	static TimeIndexedScalarCompletionBound build(Data data, TWETBPCConfig config, LP lp, double pricingHorizon,
@@ -153,8 +158,8 @@ public final class TimeIndexedScalarCompletionBound {
 		if (!config.timeIndexedCompletionBoundScalarEnhancement || !config.timeIndexedCompletionBoundArcFixing) {
 			return ArcFixingResult.skipped("time-indexed scalar helper disabled");
 		}
-		if (lp == null || lp.getNode() == null || lp.getNode().depth <= 0 || lp.getLastSolution() == null) {
-			return ArcFixingResult.skipped("root or missing LP solution");
+		if (lp == null || lp.getNode() == null || lp.getLastSolution() == null) {
+			return ArcFixingResult.skipped("missing node or LP solution");
 		}
 		double nodeLowerBound = lp.getLastSolution().getObjectiveValue();
 		if (!Double.isFinite(incumbentCost) || !Double.isFinite(nodeLowerBound)) {
@@ -284,6 +289,7 @@ public final class TimeIndexedScalarCompletionBound {
 
 	private ArcFixingResult applyArcFixing(double gap) {
 		long start = System.nanoTime();
+		localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
 		int candidates = 0;
 		int fixed = 0;
 		int unavailable = 0;
@@ -313,7 +319,7 @@ public final class TimeIndexedScalarCompletionBound {
 						continue;
 					}
 					if (Utility.compareGe(prefix + arcCost + suffix, gap - RC_TOLERANCE)) {
-						node.forbidTimeIndexedPricingOnlyArc(from, to, t);
+						forbidLocalTimeIndexedArc(from, to, t);
 						processFixed++;
 						fixed++;
 					}
@@ -324,7 +330,7 @@ public final class TimeIndexedScalarCompletionBound {
 					if (!isFinite(suffix)) {
 						unavailable++;
 					} else if (Utility.compareGe(prefix + suffix, gap - RC_TOLERANCE)) {
-						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+						forbidLocalTimeIndexedArc(from, from, t);
 						idleFixed++;
 						fixed++;
 					}
@@ -332,7 +338,7 @@ public final class TimeIndexedScalarCompletionBound {
 				if (from > 0 && isEndAllowed(from, t)) {
 					candidates++;
 					if (Utility.compareGe(prefix + sinkArcReducedCost(from), gap - RC_TOLERANCE)) {
-						node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
+						forbidLocalTimeIndexedArc(from, 0, t);
 						endFixed++;
 						fixed++;
 					}
@@ -345,8 +351,37 @@ public final class TimeIndexedScalarCompletionBound {
 			buildScalarCaches();
 		}
 		WindowReachabilityStats windowStats = summarizeReachableWindows();
+		int nodeWindowTightened = applyReachableWindowsToNode();
 		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, gap,
-				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing", windowStats);
+				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing", windowStats,
+				nodeWindowTightened);
+	}
+
+	private int applyReachableWindowsToNode() {
+		if (!exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
+			return 0;
+		}
+		int tightened = 0;
+		for (int job = 1; job <= n; job++) {
+			int min = -1;
+			int max = -1;
+			for (int t = 0; t <= horizon; t++) {
+				if (isFinite(forward[index(job, t)]) && isFinite(backward[index(job, t)])) {
+					if (min < 0) {
+						min = t;
+					}
+					max = t;
+				}
+			}
+			if (min < 0) {
+				if (node.tightenTimeIndexedPricingWindow(job, 1, 0)) {
+					tightened++;
+				}
+			} else if (node.tightenTimeIndexedPricingWindow(job, min, max)) {
+				tightened++;
+			}
+		}
+		return tightened;
 	}
 
 	private WindowReachabilityStats summarizeReachableWindows() {
@@ -600,7 +635,20 @@ public final class TimeIndexedScalarCompletionBound {
 	}
 
 	private boolean isTimeIndexedArcForbidden(int from, int to, int time) {
-		return node.isTimeIndexedPricingOnlyArcForbidden(from, to, time);
+		return node.isTimeIndexedPricingOnlyArcForbidden(from, to, time)
+				|| (localFixedTimeIndexedArc != null && localFixedTimeIndexedArc.get(timeIndexedArcIndex(from, to, time)));
+	}
+
+	private void forbidLocalTimeIndexedArc(int from, int to, int time) {
+		localFixedTimeIndexedArc.set(timeIndexedArcIndex(from, to, time));
+	}
+
+	private int timeIndexedArcIndex(int from, int to, int time) {
+		return (time * (n + 1) + from) * (n + 1) + to;
+	}
+
+	private int timeIndexedArcCount() {
+		return (horizon + 1) * (n + 1) * (n + 1);
 	}
 
 	private double relaxedBucketPenalty(int job, int time, double hStart, double hEnd) {
@@ -647,10 +695,11 @@ public final class TimeIndexedScalarCompletionBound {
 
 	private static boolean isIntegerTimeInstance(Data data, double pricingHorizon, double[] hStartByJob,
 			double[] hEndByJob) {
-		// pricingHorizon 是当前 node 的安全上界，可以来自 LP/启发式计算而带小数；
-		// 只要任务时间、setup 和窗口本身是整数，ceil(horizon) 的 time-indexed 图仍是精确整数时间图。
+		// 2026-06-29: pricingHorizon 和有效窗口可能来自 dual window，端点允许是小数。
+		// 只要原始处理时间、setup 和硬时间窗是整数，label 可达完成时刻仍落在整数桶上。
 		for (int job = 1; job <= data.n; job++) {
-			if (!isInteger(data.getProcessT(job)) || !isInteger(hStartByJob[job]) || !isInteger(hEndByJob[job])) {
+			if (!isInteger(data.getProcessT(job)) || !isInteger(data.hardWindowStart[job])
+					|| !isInteger(data.hardWindowEnd[job])) {
 				return false;
 			}
 		}

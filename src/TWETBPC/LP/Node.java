@@ -1,6 +1,7 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 
@@ -62,6 +63,8 @@ public class Node implements Comparable<Node> {
 	private byte[][] arcState;
 	private boolean[][] pricingOnlyForbiddenArc;
 	private HashSet<Long> timeIndexedPricingOnlyForbiddenArc;
+	private int[] timeIndexedPricingWindowStartByJob;
+	private int[] timeIndexedPricingWindowEndByJob;
 	private byte[][] adjacencyPairState;
 	private byte[] tariffSegmentState;
 	private byte[] outsourcingJobState;
@@ -86,6 +89,8 @@ public class Node implements Comparable<Node> {
 		this.arcState = new byte[data.n + 2][data.n + 2];
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>();
+		this.timeIndexedPricingWindowStartByJob = null;
+		this.timeIndexedPricingWindowEndByJob = null;
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.outsourcingJobState = new byte[data.n + 1];
@@ -113,6 +118,10 @@ public class Node implements Comparable<Node> {
 			copy.pricingOnlyForbiddenArc[i] = pricingOnlyForbiddenArc[i].clone();
 		}
 		copy.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>(timeIndexedPricingOnlyForbiddenArc);
+		copy.timeIndexedPricingWindowStartByJob = timeIndexedPricingWindowStartByJob == null ? null
+				: timeIndexedPricingWindowStartByJob.clone();
+		copy.timeIndexedPricingWindowEndByJob = timeIndexedPricingWindowEndByJob == null ? null
+				: timeIndexedPricingWindowEndByJob.clone();
 		copy.adjacencyPairState = new byte[adjacencyPairState.length][];
 		for (int i = 0; i < adjacencyPairState.length; i++) {
 			copy.adjacencyPairState[i] = adjacencyPairState[i].clone();
@@ -197,6 +206,60 @@ public class Node implements Comparable<Node> {
 		return timeIndexedPricingOnlyForbiddenArc.size();
 	}
 
+	/**
+	 * 2026-06-29: ng-DSSR 主线只继承 time-indexed fixing 提取出的 job 时间窗，
+	 * 避免把数百万条 (from,to,t) 时空弧复制到子节点。
+	 */
+	public boolean tightenTimeIndexedPricingWindow(int job, int start, int end) {
+		if (job < 1 || job > data.n) {
+			return false;
+		}
+		ensureTimeIndexedPricingWindows();
+		int oldStart = timeIndexedPricingWindowStartByJob[job];
+		int oldEnd = timeIndexedPricingWindowEndByJob[job];
+		int newStart = Math.max(oldStart, Math.max(0, start));
+		int newEnd = Math.min(oldEnd, Math.max(0, end));
+		timeIndexedPricingWindowStartByJob[job] = newStart;
+		timeIndexedPricingWindowEndByJob[job] = newEnd;
+		return newStart != oldStart || newEnd != oldEnd;
+	}
+
+	public boolean hasTimeIndexedPricingWindow(int job) {
+		return job >= 1 && job <= data.n && timeIndexedPricingWindowStartByJob != null
+				&& (timeIndexedPricingWindowStartByJob[job] > 0
+						|| timeIndexedPricingWindowEndByJob[job] < Integer.MAX_VALUE);
+	}
+
+	public int getTimeIndexedPricingWindowStart(int job) {
+		return timeIndexedPricingWindowStartByJob == null ? 0 : timeIndexedPricingWindowStartByJob[job];
+	}
+
+	public int getTimeIndexedPricingWindowEnd(int job) {
+		return timeIndexedPricingWindowEndByJob == null ? Integer.MAX_VALUE : timeIndexedPricingWindowEndByJob[job];
+	}
+
+	public int countTimeIndexedPricingWindowTightenedJobs() {
+		if (timeIndexedPricingWindowStartByJob == null) {
+			return 0;
+		}
+		int count = 0;
+		for (int job = 1; job <= data.n; job++) {
+			if (hasTimeIndexedPricingWindow(job)) {
+				count++;
+			}
+		}
+		return count;
+	}
+
+	private void ensureTimeIndexedPricingWindows() {
+		if (timeIndexedPricingWindowStartByJob != null) {
+			return;
+		}
+		timeIndexedPricingWindowStartByJob = new int[data.n + 1];
+		timeIndexedPricingWindowEndByJob = new int[data.n + 1];
+		Arrays.fill(timeIndexedPricingWindowEndByJob, Integer.MAX_VALUE);
+	}
+
 	public int countRequiredArcStates() {
 		return countArcStates(ARC_REQUIRED);
 	}
@@ -242,6 +305,7 @@ public class Node implements Comparable<Node> {
 				+ ",arcReq=" + countRequiredArcStates() + ",arcForbid=" + countForbiddenArcStates()
 				+ ",pricingOnlyArc=" + countPricingOnlyForbiddenArcs()
 				+ ",timePricingOnlyArc=" + countTimeIndexedPricingOnlyForbiddenArcs()
+				+ ",timeWindowJobs=" + countTimeIndexedPricingWindowTightenedJobs()
 				+ ",adjReq=" + countRequiredAdjacencyPairs() + ",adjForbid=" + countForbiddenAdjacencyPairs()
 				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
 				+ ",outReq=" + countOutsourcingJobStates(OUTSOURCE_REQUIRED)

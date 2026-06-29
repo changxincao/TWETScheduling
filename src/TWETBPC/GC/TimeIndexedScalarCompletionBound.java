@@ -43,10 +43,11 @@ public final class TimeIndexedScalarCompletionBound {
 		final String message;
 		final WindowReachabilityStats windowStats;
 		final int nodeWindowTightenedJobs;
+		final int nodeTimeIndexedArcFixed;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int unavailable,
 				int processFixed, int idleFixed, int endFixed, double gap, long totalNanos, String message,
-				WindowReachabilityStats windowStats, int nodeWindowTightenedJobs) {
+				WindowReachabilityStats windowStats, int nodeWindowTightenedJobs, int nodeTimeIndexedArcFixed) {
 			this.available = available;
 			this.candidates = candidates;
 			this.fixed = fixed;
@@ -59,10 +60,11 @@ public final class TimeIndexedScalarCompletionBound {
 			this.message = message;
 			this.windowStats = windowStats;
 			this.nodeWindowTightenedJobs = nodeWindowTightenedJobs;
+			this.nodeTimeIndexedArcFixed = nodeTimeIndexedArcFixed;
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null, 0);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null, 0, 0);
 		}
 
 		public boolean isAvailable() {
@@ -75,6 +77,7 @@ public final class TimeIndexedScalarCompletionBound {
 					+ "/" + idleFixed + "/" + endFixed + ", gap=" + gap
 					+ ", ms=" + String.format("%.3f", totalNanos / 1_000_000.0)
 					+ ", nodeWindowTightened=" + nodeWindowTightenedJobs
+					+ ", nodeTimeArcFixed=" + nodeTimeIndexedArcFixed
 					+ (windowStats == null ? "" : ", " + windowStats.summary());
 		}
 	}
@@ -171,9 +174,14 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 		double[] hStart = new double[data.n + 1];
 		double[] hEnd = new double[data.n + 1];
+		Node node = lp.getNode();
 		for (int job = 1; job <= data.n; job++) {
 			hStart[job] = data.hardWindowStart[job];
 			hEnd[job] = data.hardWindowEnd[job];
+			if (node.hasTimeIndexedPricingWindow(job)) {
+				hStart[job] = Math.max(hStart[job], node.getTimeIndexedPricingWindowStart(job));
+				hEnd[job] = Math.min(hEnd[job], node.getTimeIndexedPricingWindowEnd(job));
+			}
 		}
 		TimeIndexedScalarCompletionBound bound =
 				new TimeIndexedScalarCompletionBound(data, config, lp, data.CmaxH, hStart, hEnd);
@@ -352,9 +360,29 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 		WindowReachabilityStats windowStats = summarizeReachableWindows();
 		int nodeWindowTightened = applyReachableWindowsToNode();
+		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
 		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, gap,
 				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing", windowStats,
-				nodeWindowTightened);
+				nodeWindowTightened, nodeTimeArcFixed);
+	}
+
+	private int writeLocalFixedArcsToNode() {
+		if (!exactIntegerTime || localFixedTimeIndexedArc == null || localFixedTimeIndexedArc.isEmpty()) {
+			return 0;
+		}
+		int written = 0;
+		int pairWidth = n + 1;
+		int pairCount = pairWidth * pairWidth;
+		for (int index = localFixedTimeIndexedArc.nextSetBit(0); index >= 0;
+				index = localFixedTimeIndexedArc.nextSetBit(index + 1)) {
+			int time = index / pairCount;
+			int remainder = index % pairCount;
+			int from = remainder / pairWidth;
+			int to = remainder % pairWidth;
+			node.forbidTimeIndexedPricingOnlyArc(from, to, time);
+			written++;
+		}
+		return written;
 	}
 
 	private int applyReachableWindowsToNode() {

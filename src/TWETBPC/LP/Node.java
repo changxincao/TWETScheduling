@@ -2,8 +2,10 @@ package TWETBPC.LP;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.BitSet;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -62,7 +64,8 @@ public class Node implements Comparable<Node> {
 	private boolean strongBranchingSeedPrepared;
 	private byte[][] arcState;
 	private boolean[][] pricingOnlyForbiddenArc;
-	private HashSet<Long> timeIndexedPricingOnlyForbiddenArc;
+	private HashMap<Integer, BitSet> timeIndexedPricingOnlyForbiddenArcTimesByPair;
+	private int timeIndexedPricingOnlyForbiddenArcCount;
 	private int[] timeIndexedPricingWindowStartByJob;
 	private int[] timeIndexedPricingWindowEndByJob;
 	private byte[][] adjacencyPairState;
@@ -88,7 +91,8 @@ public class Node implements Comparable<Node> {
 		this.strongBranchingSeedPrepared = false;
 		this.arcState = new byte[data.n + 2][data.n + 2];
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
-		this.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>();
+		this.timeIndexedPricingOnlyForbiddenArcTimesByPair = new HashMap<Integer, BitSet>();
+		this.timeIndexedPricingOnlyForbiddenArcCount = 0;
 		this.timeIndexedPricingWindowStartByJob = null;
 		this.timeIndexedPricingWindowEndByJob = null;
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
@@ -117,7 +121,11 @@ public class Node implements Comparable<Node> {
 		for (int i = 0; i < pricingOnlyForbiddenArc.length; i++) {
 			copy.pricingOnlyForbiddenArc[i] = pricingOnlyForbiddenArc[i].clone();
 		}
-		copy.timeIndexedPricingOnlyForbiddenArc = new HashSet<Long>(timeIndexedPricingOnlyForbiddenArc);
+		copy.timeIndexedPricingOnlyForbiddenArcTimesByPair = new HashMap<Integer, BitSet>();
+		for (Map.Entry<Integer, BitSet> entry : timeIndexedPricingOnlyForbiddenArcTimesByPair.entrySet()) {
+			copy.timeIndexedPricingOnlyForbiddenArcTimesByPair.put(entry.getKey(), (BitSet) entry.getValue().clone());
+		}
+		copy.timeIndexedPricingOnlyForbiddenArcCount = timeIndexedPricingOnlyForbiddenArcCount;
 		copy.timeIndexedPricingWindowStartByJob = timeIndexedPricingWindowStartByJob == null ? null
 				: timeIndexedPricingWindowStartByJob.clone();
 		copy.timeIndexedPricingWindowEndByJob = timeIndexedPricingWindowEndByJob == null ? null
@@ -189,21 +197,34 @@ public class Node implements Comparable<Node> {
 	 * <p>
 	 * 论文 arc fixing 删除的是具体时间弧 (from,to,t)，不是普通 job-job arc。这里不写入 master
 	 * 分支状态，只让后续 graph pricing 避开这些 time-expanded arcs。
+	 * 2026-06-29: 按 (from,to) 分组保存 time 的 BitSet，避免百万级时空弧以 boxed Long 形式复制。
 	 */
 	public void forbidTimeIndexedPricingOnlyArc(int from, int to, int time) {
 		if (from < 0 || to < 0 || from >= data.n + 2 || to >= data.n + 2 || time < 0) {
 			return;
 		}
-		timeIndexedPricingOnlyForbiddenArc.add(Long.valueOf(timeIndexedArcKey(from, to, time)));
+		int pairKey = timeIndexedArcPairKey(from, to);
+		BitSet times = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
+		if (times == null) {
+			times = new BitSet();
+			timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, times);
+		}
+		if (!times.get(time)) {
+			times.set(time);
+			timeIndexedPricingOnlyForbiddenArcCount++;
+		}
 	}
 
 	public boolean isTimeIndexedPricingOnlyArcForbidden(int from, int to, int time) {
-		return from >= 0 && to >= 0 && from < data.n + 2 && to < data.n + 2 && time >= 0
-				&& timeIndexedPricingOnlyForbiddenArc.contains(Long.valueOf(timeIndexedArcKey(from, to, time)));
+		if (from < 0 || to < 0 || from >= data.n + 2 || to >= data.n + 2 || time < 0) {
+			return false;
+		}
+		BitSet times = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(timeIndexedArcPairKey(from, to));
+		return times != null && times.get(time);
 	}
 
 	public int countTimeIndexedPricingOnlyForbiddenArcs() {
-		return timeIndexedPricingOnlyForbiddenArc.size();
+		return timeIndexedPricingOnlyForbiddenArcCount;
 	}
 
 	/**
@@ -608,8 +629,8 @@ public class Node implements Comparable<Node> {
 		return Math.max(firstJob, secondJob);
 	}
 
-	private long timeIndexedArcKey(int from, int to, int time) {
-		return (((long) from) << 48) ^ (((long) to) << 32) ^ (time & 0xffffffffL);
+	private int timeIndexedArcPairKey(int from, int to) {
+		return from * (data.n + 2) + to;
 	}
 
 	private int countTariffSegments(Data data) {

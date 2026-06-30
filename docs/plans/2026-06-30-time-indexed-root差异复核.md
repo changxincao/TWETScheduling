@@ -30,14 +30,14 @@
 
 第一类是流程口径不同。6/20 的完整 timegraph run `tmp-timegraph-40-2-current-20260620-163616` 不是 pure graph pricing，它还混入了现有 `HeuristicPricingEngine`。该 run 完整结果为 `FINISHED, obj=22580, nodes=29, solve=628.307s`，其中总 `heuristic_s=461.353s/791 calls`，而 `TimeIndexedGraphPricing` 只有 `20.950s/231 calls`。所以这类慢主要是外层启发式和 RMP 循环成本，不是 time-indexed shortest path 本身慢。
 
-第二类才是 `heurOff-1642b` 与当前 pure graph root 差距的核心。旧版 time-indexed engine 从 DAG 上找到的是一条具体的时空路径，也就是带有离散完成时间的 pseudo-schedule column；但旧版在恢复候选后调用 `TWETColumnEvaluator.evaluate(sequence)`，把它重新变成“只按 job sequence 评估”的 TWET 列成本。这样会丢掉图上那条路径的具体完成时间口径，同一个 sequence 在不同 end state / 不同完成时间下的 graph objective 也被折叠掉。结果是：pricing 证明为负 reduced cost 的那条图路径，进入 RMP 时可能已经不是同一个成本口径的列，很多列对当前 RMP 的收敛贡献变弱，root 就会表现为不断加 pseudo-schedule 列但下界长尾不闭合。
+第二类才是 `heurOff-1642b` 与当前 pure graph root 差距的核心。需要校正此前“列质量差”的说法：旧版调用 `TWETColumnEvaluator.evaluate(sequence)` 后，得到的是该 job sequence 在连续 TWET 口径下的最好成本，不能简单说旧版最终列质量更差。旧版真正的问题是热路径位置不对：它在候选列形成之前，对大量负 reduced-cost end state 逐个恢复 sequence 并调用 evaluator，而不是只对最终要返回的少量列做一次成本确认。
 
-6/28 的 `3ae94b26 Fix time-indexed pseudo column cost recovery` 改的是这个核心口径：不再用 evaluator 重算 sequence 成本，而是从 graph reduced cost 加回 machine/job/arc dual，反推出该时空路径本身的 objective cost。这样 RMP 里加入的列就是 pricing 刚刚证明为负 reduced cost 的那条图列，列成本和 graph pricing 口径一致。专题记录里的 commit 对照显示：旧版同口径 root-only 测试中第一轮 `TimeIndexedGraphPricing` 约 `31.668s` 且只返回 `173` 列，当前版本第一轮约 `0.18s`；状态量和 arc scan 没有拉开到这个数量级，慢点主要在候选恢复、真实成本重算和对象管理，而不是 DAG shortest path。
+2026-06-30 对旧 commit `98522aa7` 临时加 profiling 后，证据很直接。`wet040_001_2m`、no heuristic、root-only 的第一轮 `TimeIndexedGraphPricing` 中，`negativeStates=119753`，最终只保留 `173` 个 candidate signature，但 `TWETColumnEvaluator.evaluate(sequence)` 被调用 `119753` 次，累计 `34262.869ms`；整轮 `forward=35370.673ms`，因此绝大多数时间都在 evaluator。第二轮同样明显：`negativeStates=66299`，最终保留 `300` 个 candidate signature，`evaluate` 调用 `66299` 次，累计 `81944.725ms`，整轮 `forward=82663.916ms`。这说明旧版慢的主因是“对海量候选 end state 过早做完整 sequence evaluator”，不是 DAG shortest path 本身慢，也不是最终列一定质量差。
 
-还需要校正一个旧说法：`negativeStates` 只是负 reduced-cost end state 数，不等于 `TWETColumnEvaluator.evaluate(sequence)` 调用次数。旧版确实比当前慢在候选恢复和成本处理，但不能直接说旧版做了十几万次 evaluator 调用，除非在旧版单独加计数器验证。
+6/28 的 `3ae94b26 Fix time-indexed pseudo column cost recovery` 主要消除了这条热路径：不再对每个候选 sequence 调用 evaluator，而是从 graph reduced cost 加回 machine/job/arc dual，直接反推出该图路径对应的 objective cost。这样每轮 pricing 的耗时从“候选数 × evaluator”降到主要由 DAG DP、候选去重和少量返回列管理决定。当前版本第一轮约 `0.18s` 的数量级，与旧版第一轮 `35s`、第二轮 `82s` 的差距，主要就是这个 evaluator 热路径差异。
 
 ## 当前结论
 
-如果只讨论 no-cut pure time-indexed root，当前证据支持的结论是：6/20 `heurOff-1642b` 的确说明旧版 pure graph root 会长时间不闭合；6/28 之后变快的核心不是 CPLEX、分支或启发式，而是 time-indexed graph column 的成本恢复口径被修正，并顺带去掉了 evaluator 重算的热路径开销。root bound 本身没有变，`22487.647059` 是一致的；变化主要是旧版加入了大量“由图路径发现、但进入 RMP 时被 sequence evaluator 换了成本口径”的低效列，而当前版加入的是与 graph reduced cost 对齐的列。
+如果只讨论 no-cut pure time-indexed root，当前证据支持的结论是：6/20 `heurOff-1642b` 的确说明旧版 pure graph root 会长时间不闭合；6/28 之后变快的核心不是 CPLEX、分支或启发式，而是 time-indexed graph column 的候选成本恢复路径被改掉。更准确地说，旧版不是“最终列质量差”，而是每轮 pricing 在最终保留列之前对数万到十几万个候选 end state 做了完整 `TWETColumnEvaluator.evaluate(sequence)`，热路径过重；当前版用 reduced-cost 反推 objective，避免了这部分重复评估。root bound 本身没有变，`22487.647059` 是一致的。
 
 因此后续再比较论文 time-indexed 方法时，应使用 6/28 之后的 pure graph 口径作为 no-cut baseline，不要再拿 6/20 `heurOff` 目录名直接判断。若要继续追问“旧 engine 具体 evaluator 调用了多少次”，需要回到旧 commit 加计数器重跑；现有日志不足以精确量化。

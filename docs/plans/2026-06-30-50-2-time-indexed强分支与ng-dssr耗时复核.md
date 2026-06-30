@@ -39,3 +39,15 @@
 这能解释为什么 pseudo-schedule/time-indexed 松弛列并没有把 gap 明显拉大：重复任务或非基本路径虽然理论上更松，但如果 setup time 平滑、三角化、且没有弧成本惩罚，那么松弛图里的很多低 reduced-cost 路径和真实可行机器路径在成本结构上差异不大。相反，ng-DSSR 为了保持 elementary/ng 语义要承担连续时间函数、dominance、completion bound 和 join 的完整成本，在这种实例上反而显得过重。
 
 后续如果要验证这一点，建议构造几类更有区分度的 setup 数据：第一，保留三角不等式但增加空间/簇结构，模拟 C/R/RC 三类；第二，提高 setup/p 比例，例如均值到 `0.5p` 或更高；第三，加入非零 `SETUP_COST`，让弧选择直接影响 objective；第四，在保证算法安全前提下单独测试闭包前/闭包后差异。当前结论不是“time-indexed 方法一定更强”，而是“当前 Tanaka 派生 setup 口径可能偏向 time-indexed 松弛，不能直接代表更难的 sequence-dependent routing-like 算例”。
+
+## setup cost 系数实验入口
+
+继续复核后确认：当前正式数据没有 `SETUP_COST` 块时，setup time 只影响时间递推，不直接影响目标成本。代码中的 pricing、启发式、time-indexed 图、RMP 和校验器已经统一读取 `data.getSetupCost(i,j)`，因此只要数据层给出非零 setup cost，后续组件会自然使用。
+
+为先测试“setup 直接进入目标”这一因素，新增系统属性 `twet.data.setupCostFromTimeCoefficient`。默认值为 `0.0`，保持旧行为；若实例没有显式 `SETUP_COST` 块且该系数大于 0，则读入数据后自动令 `setupCost[i][j] = coefficient * setupTime[i][j]`，对角线仍为 0。显式输入的 `SETUP_COST` 永远优先，不被该系数覆盖。常用测试方式例如：
+
+`-Dtwet.data.setupCostFromTimeCoefficient=1.0`
+
+表示 setup time 的每一个时间单位同步作为 1 个固定弧成本进入 objective。若想更强，可以试 `2.0` 或更高。这个入口只改变数据层的弧成本，不改变 setup time 矩阵、三角闭包、分支逻辑和 pricing 结构，适合先做敏感性实验。
+
+本次只做了最小验证：在默认系数下 `data/60-2/wet060_001_2m.dat` 的 `s[0][1]=7.0`、`setupCost[0][1]=0.0`；设置 `-Dtwet.data.setupCostFromTimeCoefficient=1.0` 后，`setupCost[0][1]=7.0`。后续若比较 time-indexed 与 ng-DSSR，应在结果配置快照中检查 `systemProperty.twet.data.setupCostFromTimeCoefficient`，避免把不同成本口径的结果混在一起。

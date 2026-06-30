@@ -197,7 +197,7 @@ public class TWETBPCContext {
 		ArrayList<String> lines = new ArrayList<String>();
 		Properties properties = System.getProperties();
 		for (String name : properties.stringPropertyNames()) {
-			if (name.startsWith("twet.bpc.")) {
+			if (name.startsWith("twet.bpc.") || name.startsWith("twet.data.")) {
 				lines.add("systemProperty." + name + "=" + properties.getProperty(name));
 			}
 		}

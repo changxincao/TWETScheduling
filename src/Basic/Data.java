@@ -25,6 +25,7 @@ public class Data {
 	public double[][] setupCostAdvantage;// B_ij：删除 j 后可能获得的 setup-cost advantage，供粗窗和后续 pricing 复用
 	public boolean setupCostTriangleInequalitySatisfied;// 2026-05-20: 若所有 B_ij 都为 0，则 pricing 动态硬窗可退化为 job 级缓存
 	public double[][] setupCost;// sequence dependent setup cost，和 s[i][j] 使用同一条弧 i->j
+	private boolean setupCostProvidedByInput;
 	public double min_s[];// 每个任务的最小setup
 	public double[] outsourcingCost;// 每个任务的 baseline outsourcing cost；默认 big_M 表示暂不收缩预处理粗硬窗
 	public PiecewiseLinearFunction outsourcingCostFunction;// 2026-05-16: 总外包成本函数 G(B(O))，输入为 baseline 总量
@@ -76,6 +77,7 @@ public class Data {
 		} else {
 			load_dw_data(setup, reader);
 		}
+		applyDefaultSetupCostFromSetupTime();
 
 		setCmax();
 		setImprovedCmax();
@@ -558,6 +560,7 @@ public class Data {
 		while (line != null) {
 			String blockName = line.trim();
 			if ("SETUP_COST".equalsIgnoreCase(blockName)) {
+				setupCostProvidedByInput = true;
 				for (int i = 0; i <= n; i++) {
 					fillSetupCostRow(i, splitTokens(reader.readLine()));
 				}
@@ -571,6 +574,26 @@ public class Data {
 			line = nextNonEmptyLine(reader);
 		}
 		ensureOutsourcingTariffDomainCoverage();
+	}
+
+	/**
+	 * 2026-06-30: 旧 Tanaka 派生数据通常只有 setup time，没有 SETUP_COST 块。
+	 * 为了测试“setup 直接进入目标成本”对松弛强度的影响，允许用系统属性按比例生成默认弧成本。
+	 * 默认系数为 0，且显式输入的 SETUP_COST 永远优先，不覆盖真实数据。
+	 */
+	private void applyDefaultSetupCostFromSetupTime() {
+		if (setupCostProvidedByInput) {
+			return;
+		}
+		double coefficient = Double.parseDouble(System.getProperty("twet.data.setupCostFromTimeCoefficient", "0.0"));
+		if (Utility.compareLe(coefficient, 0.0)) {
+			return;
+		}
+		for (int i = 0; i <= n; i++) {
+			for (int j = 0; j <= n; j++) {
+				setupCost[i][j] = i == j ? 0.0 : coefficient * s[i][j];
+			}
+		}
 	}
 
 	private void fillSetupRow(int row, String[] tokens) {

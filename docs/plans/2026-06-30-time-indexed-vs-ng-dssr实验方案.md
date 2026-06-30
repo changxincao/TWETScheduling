@@ -91,3 +91,5 @@
 2026-06-30 进一步补充 SRI/rank-1 cut 的适用性判断。当前观察更倾向于：SRI 也和 time-indexed 图方法一样，可能更适合整体时间尺度较小、离散图状态规模可控的场景。原文实验中 rank-1 cut 在更大规模下相对 no-SRI 的改善更明显，这个现象可能确实存在，因为规模变大后 set-partitioning / pseudo-schedule 松弛带来的 bound 弱化会更突出，cut 更容易提升 root bound。
 
 但这并不意味着在当前 TWET 放大时间尺度算例上也一定有效。本项目的 40-2 非均匀 10 倍时间扰动实验显示，time-indexed rank1/SRI 版本在 900s 内仍停留在 root，加入 79 条 cut 后仍未闭合；相比之下，ng-DSSR 结合 post-node time-indexed window tightening 可以在 394.459s 收敛。这说明 SRI 的收益很可能受到时间尺度和 pricing 状态空间的强烈影响：在小 horizon 下，cut 的 root-bound 收益可能大于额外状态成本；但当 horizon 放大后，带 cut 的 time-indexed 双向 pricing 本身会变重，收益可能被状态膨胀抵消。后续写实验结论时，应把“SRI 在原文较大规模下有用”与“在大时间尺度下相对 ng-DSSR 未必有用”分开表述，不能直接外推。
+
+2026-06-30 补充查看 `wet040_001_2m_timeJitterX10` 的 ng-DSSR + time-indexed window tightening 日志。该算例原始 pricing horizon 约 `19248.9`；root 不继承 compact window。从 node 2 开始，40 个 job 全部有继承窗口，平均每 job 窗口长度约 `3582`，相当于只剩原 horizon 的 `18.6%`，缩减约 `81.4%`。更深节点中平均窗口长度继续下降，典型值为 `2122.55`、`2011.475`、`1893.075`、`1818.775`，最小记录约 `1806.3`，相当于只剩 `9.4%` 左右，缩减约 `90.6%`。这解释了为什么只开 scalar/arc-fixing 收益不明显，而打开 window tightening 后列数和 exact pricing 时间明显下降。

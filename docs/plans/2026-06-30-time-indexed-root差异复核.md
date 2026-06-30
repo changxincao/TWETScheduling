@@ -49,3 +49,19 @@
 如果只讨论 no-cut pure time-indexed root，当前证据支持的结论是：6/20 `heurOff-1642b` 的确说明旧版 pure graph root 会长时间不闭合；6/28 之后变快的核心不是 CPLEX、分支或启发式，而是 time-indexed graph column 的候选成本恢复路径被改掉。更准确地说，旧版不是“最终列质量差”，而是每轮 pricing 在最终保留列之前对数万到十几万个候选 end state 做了完整 `TWETColumnEvaluator.evaluate(sequence)`，热路径过重；当前版用 reduced-cost 反推 objective，避免了这部分重复评估。root bound 本身没有变，`22487.647059` 是一致的。
 
 因此后续再比较论文 time-indexed 方法时，应使用 6/28 之后的 pure graph 口径作为 no-cut baseline，不要再拿 6/20 `heurOff` 目录名直接判断。若要继续追问“旧 engine 具体 evaluator 调用了多少次”，需要回到旧 commit 加计数器重跑；现有日志不足以精确量化。
+
+## 非均匀时间扰动测试
+
+2026-06-30 进一步检查“时间尺度放大”对 time-indexed 图的影响。均匀放大 processing、due 和 setup 会主要按比例增加离散时间层，但不改变相对结构、紧张程度和各 job/arc 的波动，因此它更像是在测试图层数变多，而不是测试算例结构变难。为避免这个问题，构造了一个非均匀约 10 倍扰动版本：
+
+`test-results/bpc/tmp-wet040-001-2m-time-jitter-x10-input-20260630/wet040_001_2m_timeJitterX10.dat`。
+
+构造规则为：`p_j` 乘以 6 到 14 之间的 job 相关因子，`d_j` 乘以 7 到 13 之间的另一组 job 相关因子，`setup_ij` 乘以 5 到 15 之间的 arc 相关因子；随后对 setup 矩阵做 Floyd 闭包以保持三角不等式。该构造不会引入 setup cost，只改变时间结构。
+
+用 no-cut time-indexed graph pricing、关闭旧 HeuristicPricing、打开 strong branching、30 分钟限制求解该扰动算例，结果为：
+
+`FINISHED, obj=bound=104836, solve=1003.950s, root=242.385s, nodes=26, pricing=1509, exact=662.163s/1386, master_lp=193.277s, pool=157317, valid=true`。
+
+这个结果和原始 40-2 setup 的几十秒量级形成明显对比。root 结束前 pool 已超过 7.6 万，后续强分支和 repair 持续把 pool 推到 15.7 万；node 15 时 gap 约 `0.5646%`，node 20 时 gap 约 `0.2697%`，最后 node 25/26 才闭合。因此非均匀扰动确实会显著削弱 time-indexed 的“很快”表现，慢化来源不是单个 shortest path 极慢，而是扰动后负列和候选序列明显增多，RMP/strong branching/repair 的累计成本随之上升。
+
+当前结论是：time-indexed 图对均匀尺度放大不一定敏感，因为结构相对关系没有变；但对非均匀时间波动更敏感，尤其会放大 pseudo-schedule 列数量和强分支 trial 成本。后续如果要比较 ng-DSSR 与 time-indexed 的鲁棒性，应优先使用这种非均匀扰动实例，而不是简单整体乘同一个倍数。

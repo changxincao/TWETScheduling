@@ -327,9 +327,17 @@ public class PC {
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible");
 			}
-			if (!repaired && lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
+			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 						config.branchSeedReducedCostAllowance);
+				solution = solveRelaxationTimed(lp, repaired ? "strong_branching_repair_after_column_filter"
+						: "strong_branching_after_column_filter");
+				if (isTimeLimitReached()) {
+					return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
+				}
+				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible_after_filter");
+				}
 			}
 			return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial");
 		} finally {

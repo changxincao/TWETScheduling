@@ -85,3 +85,9 @@
 5. time-indexed graph rank-1/SRI pricing，关闭 strong branching：`TIME_LIMIT`，900s 内仍停留在 root，cut rounds `2`，加入 `79` 条 cut，pricing `373` 轮，加列 `60825`，peak pool `60794`，但 root 未闭合，日志中最终是 time limit。该组每轮 rank-1 cut 双向 pricing 的平均时间明显高于 no-SRI time-indexed，说明在该放大算例上 SRI/rank-1 cut 并没有改善整体收敛，反而把 root pricing 压力放大了。
 
 因此，本轮对用户前面判断做了一个补充验证：在时间尺度被非均匀放大后，time-indexed 的优势快速下降；ng-DSSR 如果结合 post-node 的 time-indexed window tightening，反而能显著减少列数和 exact pricing 时间。更细的结论是，time-indexed helper 里真正有价值的是可继承的 job time-window tightening；单独的 scalar/arc-fixing 不足以稳定带来收益。带 SRI/rank-1 cut 的 time-indexed 版本在这个放大算例上没有看到优势，至少当前实现和配置下不适合作为大 horizon 场景的主线。
+
+## 7. SRI 与时间尺度的初步判断补充
+
+2026-06-30 进一步补充 SRI/rank-1 cut 的适用性判断。当前观察更倾向于：SRI 也和 time-indexed 图方法一样，可能更适合整体时间尺度较小、离散图状态规模可控的场景。原文实验中 rank-1 cut 在更大规模下相对 no-SRI 的改善更明显，这个现象可能确实存在，因为规模变大后 set-partitioning / pseudo-schedule 松弛带来的 bound 弱化会更突出，cut 更容易提升 root bound。
+
+但这并不意味着在当前 TWET 放大时间尺度算例上也一定有效。本项目的 40-2 非均匀 10 倍时间扰动实验显示，time-indexed rank1/SRI 版本在 900s 内仍停留在 root，加入 79 条 cut 后仍未闭合；相比之下，ng-DSSR 结合 post-node time-indexed window tightening 可以在 394.459s 收敛。这说明 SRI 的收益很可能受到时间尺度和 pricing 状态空间的强烈影响：在小 horizon 下，cut 的 root-bound 收益可能大于额外状态成本；但当 horizon 放大后，带 cut 的 time-indexed 双向 pricing 本身会变重，收益可能被状态膨胀抵消。后续写实验结论时，应把“SRI 在原文较大规模下有用”与“在大时间尺度下相对 ng-DSSR 未必有用”分开表述，不能直接外推。

@@ -81,3 +81,21 @@
 本次日志没有输出单独的 `timeWindowAvgLen/timeWindowAvgShrinkRatio` 字段，因此暂时无法给出“每个 node 时间窗平均收缩多少”的直接统计。能间接看到的是各节点 `pricingHorizon` 仍多次保持在 `19247.0`，说明当前记录的 horizon 字段并未充分反映 post-node compact window 的有效收缩；如果后续要系统判断 time-indexed helper 的窗口贡献，需要补一条专门统计，至少在 node summary 中输出继承 compact window 后的平均窗口长度、收缩比例和 job 数。
 
 当前结论是：在这个非均匀扰动实例上，ng-DSSR 明显比 no-cut time-indexed graph pricing 更抗时间层数放大，且找到更好的解；但由于目标值不一致，下一步不能只比较速度，应优先复核 time-indexed 对照的正确性。
+
+## 104721 incumbent 可行性与 time-indexed 强分支误剪
+
+2026-06-30 继续复核 `wet040_001_2m_timeJitterX10` 上 ng-DSSR 的 `104721` incumbent 是否真实可行。开启 `twet.bpc.fullDomainCompare.incumbentColumnAudit=true` 重跑 ng-DSSR 后，最终 incumbent 由两条机器列组成：
+
+第一条为 `[17, 11, 39, 21, 7, 35, 14, 3, 34, 6, 37, 2, 24, 9, 33, 22, 40, 15, 1, 29, 8, 13]`，stored cost 为 `42134.999999999960`，evaluator 复算为 `42135.000000000000`。第二条为 `[26, 25, 10, 28, 4, 32, 18, 38, 31, 20, 27, 23, 19, 36, 5, 12, 30, 16]`，stored cost 与 evaluator 复算均为 `62586.000000000000`。两列合计覆盖 1 到 40 的所有任务，缺失集和重复集均为空，总成本为 `104721`。因此该 incumbent 是原问题下可行解，不是 ng-DSSR 生成了非法上界。
+
+随后对照 no-cut time-indexed strong branching 的日志定位错误路径。root 到 node 7 前的连续左支禁弧为 `(3,27),(20,2),(3,37),(22,30),(15,30)`，这些弧均不在 `104721` 的两条序列中，因此该可行解仍在当前子树内。node 7 对 `(32,18)` 分支，而 `104721` 的第二条序列明确包含 `32 -> 18`，所以它应该进入右支。但 time-indexed 日志中该候选的右支为 `rightBound=INF`，没有入队，后续搜索只能在不含该可行解的剩余子树里证明 `104836`。
+
+代码层面的直接原因在 strong branching phase1 trial。右支的竞争弧现在通过 `branchImpliedForbiddenArc` 进入列兼容性和后续 pricing 过滤，不再建立 master 分支行。`solveStrongBranchingRmpTrial()` 先用父节点 seed 建 trial LP，然后调用 `resetRestrictedColumnsByCurrentReducedCost()` 筛掉不兼容列并重解；如果筛列后 LP 不可行，当前直接返回 `rmp_trial_infeasible_after_filter`，没有再通过完整 repair/pricing 重新补兼容列。这样得到的 `INF` 只能说明“当前筛后 restricted RMP 暂时缺列”，不能证明该分支子树不可行。node 7 的 `(32,18)` 右支正是这个 false infeasible 的实例。
+
+当前结论为：`104721` 更优解可行，time-indexed no-cut strong run 的 `104836` 不是可信最优值；问题不在 time-indexed 图无法表示该列，而在 strong branching trial 将筛列后的 restricted RMP 不可行误当作子树不可行，并据此跳过了包含更优解的右支。后续修复应避免把 phase1/phase2 trial infeasible 直接用于剪掉 child，或在筛列后不可行时执行能够覆盖 coverage 与分支行的完整 repair，再把成功后的 seed/bound 作为可复用 trial 结果。
+
+进一步查看旧 run 的 node summary 后，可以解释为什么 node 7 误剪后整体会很快收敛。旧 run 中从 node 2 开始，几乎每次 strong branching 选中的分支都有一侧 `rightBound=INF`，队列长期保持 `queue=2`，实际搜索更接近沿着一条单链往下走，而不是保留完整左右子树。node 7 的 `(32,18)` 右支被误判 `INF` 后，`104721` 所在子树被直接跳过；剩余人工缩小后的树里，LP bound 随深度从 `103299.142857` 很快抬到 node 23 的 `104771.583333`、node 24 的 `104831.375000`，最后 node 25 被 incumbent 剪掉、node 26 整数闭合到 `104836`。因此“快”主要来自错误剪掉大量分支，尤其是包含更优解的右支，而不是 time-indexed pricing 已经正确证明其它候选子树都差。
+
+只修改 `resetRestrictedColumnsByCurrentReducedCost()` 使正值列无条件保留后，复跑同一配置时队列不再维持在 2，而是很快增长到 10 以上，并且 pool 超过 14 万仍未闭合。这说明旧 run 的快速收敛确实高度依赖强分支 trial 的错误 infeasible 传播；该最小修复能改变搜索树，但是否完全修好还需要继续看最终 objective 和是否仍存在筛列后 false infeasible。
+
+最小修复后的复跑在 1800s 时间限制下没有闭合：`TIME_LIMIT,obj=104836,bound=103915.233333,exact=1288.937s/1929,pool=225006,valid=true`。与旧 run `1003.950s` 直接证明 `104836` 相比，新 run 的 queue 一度增长到 20 以上，且下界只到 `103915.233333`。这进一步确认旧 run 的快速闭合不是正常强分支证明，而是 trial infeasible 被当作真实子树 infeasible 后错误压缩了搜索树。当前“正值列无条件保留”只能修复一部分筛列问题，仍不足以让 time-indexed strong branching 可靠闭合；后续要么不要用 trial infeasible 剪子树，要么对筛列后 infeasible 的 child 做完整 repair 后再允许复用和入队判断。

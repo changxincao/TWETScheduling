@@ -845,10 +845,6 @@ public class LP {
 		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
 		for (int columnId : restrictedColumnIds) {
 			TWETColumn column = pool.getColumn(columnId);
-			if (!isColumnCompatible(column)) {
-				continue;
-			}
-			double reducedCost = getColumnReducedCost(columnId);
 			if (isPositiveCurrentColumn(columnId)) {
 				// 2026-05-19: child LP 已经可行时，正值列构成当前可行解的一部分。
 				// 理论上这些基列的 reduced cost 通常为 0；这里先无条件保留它们，
@@ -856,6 +852,10 @@ public class LP {
 				selected.add(Integer.valueOf(columnId));
 				continue;
 			}
+			if (!isColumnCompatible(column)) {
+				continue;
+			}
+			double reducedCost = getColumnReducedCost(columnId);
 			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
 				candidates.add(new ColumnReducedCost(columnId, reducedCost));
 			}

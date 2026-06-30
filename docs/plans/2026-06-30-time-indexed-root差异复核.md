@@ -34,6 +34,8 @@
 
 2026-06-30 对旧 commit `98522aa7` 临时加 profiling 后，证据很直接。`wet040_001_2m`、no heuristic、root-only 的第一轮 `TimeIndexedGraphPricing` 中，`negativeStates=119753`，最终只保留 `173` 个 candidate signature，但 `TWETColumnEvaluator.evaluate(sequence)` 被调用 `119753` 次，累计 `34262.869ms`；整轮 `forward=35370.673ms`，因此绝大多数时间都在 evaluator。第二轮同样明显：`negativeStates=66299`，最终保留 `300` 个 candidate signature，`evaluate` 调用 `66299` 次，累计 `81944.725ms`，整轮 `forward=82663.916ms`。这说明旧版慢的主因是“对海量候选 end state 过早做完整 sequence evaluator”，不是 DAG shortest path 本身慢，也不是最终列一定质量差。
 
+这里的关键不是“完全没有 topK 粗筛”，而是 topK 粗筛放错了层级。旧版确实先用 `isPotentialTopCandidate(reducedCost)` 挡掉一部分 end state，但这个阈值依赖已经进入 candidate heap 的 signature 数量。第一轮最终 unique signature 只有 173 个，小于每轮返回上限 300，因此 heap 始终没有填满，`isPotentialTopCandidate` 基本挡不住任何负 end state，119753 个负 end state 都进入 evaluator。第二轮虽然最终保留 300 个 signature，但旧版是在 `rememberCandidate()` 里才处理同 signature 替换，位置在 evaluator 之后；同一个 sequence 的多个不同 end state 仍会先重复 evaluate，再被去重或替换。因此旧版不是“最终 topK 列 evaluate”，而是“end-state 层面粗筛后、unique topK 形成前 evaluate”。
+
 6/28 的 `3ae94b26 Fix time-indexed pseudo column cost recovery` 主要消除了这条热路径：不再对每个候选 sequence 调用 evaluator，而是从 graph reduced cost 加回 machine/job/arc dual，直接反推出该图路径对应的 objective cost。这样每轮 pricing 的耗时从“候选数 × evaluator”降到主要由 DAG DP、候选去重和少量返回列管理决定。当前版本第一轮约 `0.18s` 的数量级，与旧版第一轮 `35s`、第二轮 `82s` 的差距，主要就是这个 evaluator 热路径差异。
 
 ## 当前结论

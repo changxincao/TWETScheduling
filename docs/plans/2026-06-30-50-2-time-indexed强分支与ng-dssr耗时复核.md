@@ -29,3 +29,13 @@
 第二个方向是减少 PWLF fallback。当前 scalar bound 在一些轮次只能剪很少一部分，绝大多数 completion-bound 判断仍要做函数 shift/add/findMinimal；后续可以考虑更强 scalar cache 或 time-indexed relaxed scalar 作为前置过滤。第三个方向是启发式 pricing 的尾部控制：如果连续多轮加列为 0 或很少，应更早切到 exact 或降低启发式调用强度。midpoint probe 则可以继续依赖复用，但不应在已有稳定历史时反复花大成本试探。
 
 当前没有修改 ng-DSSR 代码；本次只是用 50-2 结果和日志定位瓶颈。结论是 time-indexed 强分支在当前 50-2 setup 算例上已经是明显更快的 baseline，而 ng-DSSR 如果不改变 exact pricing 的返回策略，很难只靠局部小优化追上。
+
+## 算例结构与 setup 口径复核
+
+继续对照 VRPTW/Solomon 的 C/R/RC 经验后，当前怀疑“算例本身让 time-indexed 松弛列过于好用”是合理的。VRPTW 里 C 表示 clustered，R 表示 random，RC 表示 random-clustered 混合；R/RC 通常更容易产生分散路由和组合选择压力。我们当前 TWET 数据没有真实二维坐标和欧氏 routing 几何，setup time 只是从单机 Tanaka 实例派生出的随机矩阵，再通过 Floyd 闭包强制满足有向三角不等式。这会让 setup 更像一个平滑的转移时间扰动，而不是 VRP R/RC 里由空间结构自然诱导的长短边差异。
+
+本次对 `data/50-2/wet050_001_2m.dat` 做了数值检查：加工时间均值 `55.5`，setup time 均值 `14.6812`，setup 约为加工时间的 `26.45%`，setup 最大值 `27`。对整个 `data/50-2` 目录 125 个实例检查，平均加工时间约 `50.385`，平均 setup 约 `9.969`，setup/p 均值约 `19.80%`，最小约 `11.03%`，最大约 `26.45%`。因此 setup 并非完全可忽略，但强度偏温和，而且经过闭包后矩阵更满足“绕路不吃亏”的性质。由于当前数据没有 `SETUP_COST` 块，setup 只改变时间递推，不直接进入目标弧成本，这也会削弱 sequence-dependent arc 对 master LP bound 的破坏力。
+
+这能解释为什么 pseudo-schedule/time-indexed 松弛列并没有把 gap 明显拉大：重复任务或非基本路径虽然理论上更松，但如果 setup time 平滑、三角化、且没有弧成本惩罚，那么松弛图里的很多低 reduced-cost 路径和真实可行机器路径在成本结构上差异不大。相反，ng-DSSR 为了保持 elementary/ng 语义要承担连续时间函数、dominance、completion bound 和 join 的完整成本，在这种实例上反而显得过重。
+
+后续如果要验证这一点，建议构造几类更有区分度的 setup 数据：第一，保留三角不等式但增加空间/簇结构，模拟 C/R/RC 三类；第二，提高 setup/p 比例，例如均值到 `0.5p` 或更高；第三，加入非零 `SETUP_COST`，让弧选择直接影响 objective；第四，在保证算法安全前提下单独测试闭包前/闭包后差异。当前结论不是“time-indexed 方法一定更强”，而是“当前 Tanaka 派生 setup 口径可能偏向 time-indexed 松弛，不能直接代表更难的 sequence-dependent routing-like 算例”。

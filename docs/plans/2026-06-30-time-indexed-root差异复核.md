@@ -40,6 +40,8 @@
 
 顺带全局检查当前 `TWETColumnEvaluator.evaluate(...)` 的调用位置后，暂未发现第二处同类“先 evaluate 海量候选、再 topK/去重”的问题。当前 time-indexed no-cut 与 rank-1 cut pricing 都用 reduced-cost 反推 objective；GCNGBB/GCBB 系列先用 inferred cost 进候选堆，只在最终候选出堆后、且确实需要恢复真实成本时调用 `PricingColumnCostRechecker.evaluate(...)`，例如 root pi-window、SRI active 或 partial dominance。启发式 pricing 使用 profile 和局部增量，不走 evaluator 热路径。仍有两类较小的重算点需要记住：`RouteEnumerationEngine` 在显式启用 time-indexed window 枚举时会对通过 gap/duplicate 过滤的新列重算真实成本，这是为了不把窗口内受限成本写进 Pool；`RestrictedMasterIntegerHeuristic` 的 duplicate repair fallback 会对删点前后 sequence 调 evaluator 估算 cost reduction，若重复 job 很多可后续加缓存，但它只在 RMIH 修复阶段触发，不是 pricing end-state 扫描。
 
+从 40-2 setup 当前结果看，修正后的 no-cut time-indexed pricing 明显快于 ng-DSSR 主线，这个现象本身是合理的。time-indexed 图的单轮 pricing 是离散 DAG 上的动态规划，状态和弧虽然多，但没有 PWLF 函数包络、双向 label join、ng-memory/DSSR 多轮加强、dominance graph 维护等连续时间 labeling 成本；修掉 evaluator 热路径后，pricing 本体就会非常轻。代价是它生成的是 pseudo-schedule / relaxed 图列，列数和 RMP 压力可能更大，且正确性更依赖后续分支、cut、arc fixing 与列成本口径对齐。因此这个结果不能直接推出 time-indexed 在所有规模和所有配置下都优于 ng-DSSR，但至少说明在 `wet040_001_2m` 这类实例上，当前 ng-DSSR 的瓶颈主要在连续时间函数 labeling 和收敛过程，而不是 master 本身；后续如果继续比较，应把 time-indexed no-cut 的当前版本作为有效 baseline，而不是再参考旧 evaluator 热路径版本。
+
 ## 当前结论
 
 如果只讨论 no-cut pure time-indexed root，当前证据支持的结论是：6/20 `heurOff-1642b` 的确说明旧版 pure graph root 会长时间不闭合；6/28 之后变快的核心不是 CPLEX、分支或启发式，而是 time-indexed graph column 的候选成本恢复路径被改掉。更准确地说，旧版不是“最终列质量差”，而是每轮 pricing 在最终保留列之前对数万到十几万个候选 end state 做了完整 `TWETColumnEvaluator.evaluate(sequence)`，热路径过重；当前版用 reduced-cost 反推 objective，避免了这部分重复评估。root bound 本身没有变，`22487.647059` 是一致的。

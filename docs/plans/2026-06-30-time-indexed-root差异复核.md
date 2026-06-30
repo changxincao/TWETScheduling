@@ -42,6 +42,8 @@
 
 从 40-2 setup 当前结果看，修正后的 no-cut time-indexed pricing 明显快于 ng-DSSR 主线，这个现象本身是合理的。time-indexed 图的单轮 pricing 是离散 DAG 上的动态规划，状态和弧虽然多，但没有 PWLF 函数包络、双向 label join、ng-memory/DSSR 多轮加强、dominance graph 维护等连续时间 labeling 成本；修掉 evaluator 热路径后，pricing 本体就会非常轻。代价是它生成的是 pseudo-schedule / relaxed 图列，列数和 RMP 压力可能更大，且正确性更依赖后续分支、cut、arc fixing 与列成本口径对齐。因此这个结果不能直接推出 time-indexed 在所有规模和所有配置下都优于 ng-DSSR，但至少说明在 `wet040_001_2m` 这类实例上，当前 ng-DSSR 的瓶颈主要在连续时间函数 labeling 和收敛过程，而不是 master 本身；后续如果继续比较，应把 time-indexed no-cut 的当前版本作为有效 baseline，而不是再参考旧 evaluator 热路径版本。
 
+随后按同一 no-cut time-indexed、关闭旧启发式 pricing、关闭 strong branching 的干净口径测试 `wet040_001_4m`，并构造 3/4/5 倍时间放大副本。放大规则为 processing time、due time 和 setup time 同乘对应倍数，权重不变。结果都能很快收敛：原始 40-4 为 `obj=11460, solve=29.186s, root=21.972s, exact=4.293s/143, pool=11405, nodes=7`；3 倍为 `obj=34380, solve=18.055s, root=10.582s, exact=6.486s/155, pool=9769, nodes=7`；4 倍为 `obj=45840, solve=40.387s, root=28.123s, exact=15.846s/142, pool=13408, nodes=7`；5 倍为 `obj=57300, solve=26.595s, root=13.835s, exact=14.035s/185, pool=14932, nodes=7`。总时间不随倍数单调增加，主要是 ALNS 初始列数量、incumbent 和分支路径随缩放发生变化；但 exact pricing 时间相对原始版本确实上升。当前结论是：time-indexed 图对时间层数放大有可见成本，但在 40-4 这个例子上没有出现 horizon 放大后的爆炸，pricing 仍然很轻。
+
 ## 当前结论
 
 如果只讨论 no-cut pure time-indexed root，当前证据支持的结论是：6/20 `heurOff-1642b` 的确说明旧版 pure graph root 会长时间不闭合；6/28 之后变快的核心不是 CPLEX、分支或启发式，而是 time-indexed graph column 的候选成本恢复路径被改掉。更准确地说，旧版不是“最终列质量差”，而是每轮 pricing 在最终保留列之前对数万到十几万个候选 end state 做了完整 `TWETColumnEvaluator.evaluate(sequence)`，热路径过重；当前版用 reduced-cost 反推 objective，避免了这部分重复评估。root bound 本身没有变，`22487.647059` 是一致的。

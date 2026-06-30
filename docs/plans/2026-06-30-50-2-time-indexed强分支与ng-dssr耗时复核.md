@@ -1,0 +1,31 @@
+# 50-2 time-indexed 强分支与 ng-DSSR 耗时复核
+
+## 问题
+
+本次复核的目标有两个。第一，使用当前 no-cut time-indexed pricing 加强分支求解 `data/50-2/wet050_001_2m.dat`，只改变强分支开关，其余保持同口径配置，确认它在 50-2 setup 算例上的表现。第二，检查当前 ng-DSSR 主线中哪些地方还存在明显的无效耗时，解释为什么它在同类算例上比 time-indexed 路线慢很多。
+
+## 50-2 time-indexed 强分支结果
+
+本次有效运行目录为 `test-results/bpc/tmp-timegraph-nocut-50-2-setup-strong-sa-20260630`，CSV 为 `test-results/bpc/tmp-timegraph-nocut-50-2-setup-strong-sa-20260630.csv`。配置为 no-cut time-indexed graph pricing、关闭旧 `HeuristicPricingEngine`、开启 ALNS seed、开启 strong branching、时间限制 1800 秒。结果为 `FINISHED`，`obj=bound=44383`，总时间 `378.979s`，root 时间 `195.295s`，节点数 `10`，pricing 调用 `795` 次，列池 `129438`，exact engine 为 `TimeIndexedGraphPricing`，exact pricing 累计 `32.927s/755 calls`，master LP 累计 `282.624s`，validator 为 `valid=true`。
+
+同口径不开强分支的记录为 `test-results/bpc/tmp-timegraph-nocut-50-2-setup-nostrong-20260630.csv`，结果同样闭合到 `44383`，但总时间 `683.052s`，root 时间 `343.866s`，节点数 `47`，exact pricing `205.645s/1917 calls`，master LP `373.846s`，列池 `225101`。因此在这个 50-2 setup 算例上，time-indexed 强分支明显有效，主要收益不是 root bound 更强，而是后续节点数、pricing 调用和列池规模都降了。
+
+与 ng-DSSR 主线相比，差距更明显。`tmp-wet050-001-dualstab-compare-nostab-20260623` 的 normal ng-DSSR no-stab 记录为总时间 `2154.215s`、节点数 `19`、exact `1588.909s/471 calls`、heuristic `496.832s/1246 calls`、master LP `21.971s`、列池 `55581`。`tmp-wet050-001-m2-setup-best-strongbranch-20260626` 的 ng-DSSR 强分支记录为总时间 `1280.392s`、节点数 `5`、exact `633.335s/138 calls`、heuristic `354.657s/447 calls`、master LP `127.994s`、列池 `70889`。time-indexed 强分支虽然列更多、master LP 更重，但 exact pricing 极轻，所以总时间反而低很多。
+
+## ng-DSSR 当前主要无效耗时
+
+从 `GCNGBBStyleBidirectionalNgDssr` 代码和 50-2 日志看，当前 ng-DSSR exact pricing 的核心特点是：一轮 exact 即使已经找到负列，也会继续把 forward 队列、backward 队列和 join 基本跑完，直到形成接近 certificate 的结果。`solveRelaxedRound()` 中 forward 和 backward 都以 `canContinue() && !queue.isEmpty()` 为主循环，`canContinue()` 实际只检查 exact 列开关，没有根据“已经找到足够多负列”提前停。因此在中前期只是想给 RMP 补一批列时，它仍然按接近证明无负列的强度工作。
+
+50-2 no-stab 的 root 第一次 ng-DSSR exact pricing 是一个典型例子：只加入 `163` 条列，却用时 `6626ms`。其中 completion bound 构造 `2530ms`，join groups scanned `89320`，join candidates visited `140236`，join function evaluations `136917`，completion-bound eval `84443`。scalar completion bound 做了 `86658` 次检查，但只剪掉 `2215` 次，剩下 `84443` 次落到 PWLF fallback。也就是说大量时间花在函数下界、join 函数求值和队列完整展开上，而不是最终真正保留下来的候选列上。
+
+后续轮次也有同样现象。日志里多次出现只加入个位数到几十条列，却仍然扫描数万到十几万 join/function/completion-bound 候选的情况。completion bound cutoff 当前保持 near-zero 口径，以保证最终证书安全；这对“无负列证明”是必要的，但对“已经有负列、只需要先返回一批列”的轮次偏重。midpoint probe 也会在 root 或初次 exact 中消耗几百毫秒到数秒，虽然复用后会降低，但它仍是 exact 启动成本的一部分。外层 `HeuristicPricingEngine` 在 ng-DSSR 主线中也很重，50-2 no-stab 记录里累计 `496.832s/1246 calls`，强分支记录里也有 `354.657s/447 calls`，后期常出现加列少或加列为零的长尾。
+
+当前判断是：ng-DSSR 慢的主因不是某个单独 bug，而是 exact pricing 的工作口径太强，持续做连续时间 PWLF labeling、dominance graph、completion bound、双向 join 和 DSSR 轮次；time-indexed route 则把 exact pricing 简化成离散 DAG shortest path，虽然列弱且 master 更大，但定价本体成本低很多。
+
+## 后续优化目标
+
+如果继续优化 ng-DSSR，最明确的方向是增加“非证书 batch exact”模式：当一轮已经找到足够数量或足够负的 elementary 列时，先返回给 RMP；只有当一轮返回 0 列时，才必须耗尽队列、使用 near-zero cutoff，并允许 dual-bound pruning。这个模式要明确区分“有列返回但未证明无负列”和“无列且有证书”，否则会破坏正确性。
+
+第二个方向是减少 PWLF fallback。当前 scalar bound 在一些轮次只能剪很少一部分，绝大多数 completion-bound 判断仍要做函数 shift/add/findMinimal；后续可以考虑更强 scalar cache 或 time-indexed relaxed scalar 作为前置过滤。第三个方向是启发式 pricing 的尾部控制：如果连续多轮加列为 0 或很少，应更早切到 exact 或降低启发式调用强度。midpoint probe 则可以继续依赖复用，但不应在已有稳定历史时反复花大成本试探。
+
+当前没有修改 ng-DSSR 代码；本次只是用 50-2 结果和日志定位瓶颈。结论是 time-indexed 强分支在当前 50-2 setup 算例上已经是明显更快的 baseline，而 ng-DSSR 如果不改变 exact pricing 的返回策略，很难只靠局部小优化追上。

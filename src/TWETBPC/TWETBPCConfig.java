@@ -142,6 +142,11 @@ public class TWETBPCConfig {
 	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
 	public int ngDssrNonElementaryRouteUpdateLimit = 1;
 	/**
+	 * 2026-06-30: 仅用于诊断对照。打开后，ng-DSSR 的负 non-elementary route 直接作为
+	 * ng-relaxed 列进入 RMP，不再只用于 DSSR 收紧 ng-set；默认关闭，保持主线 elementary 列口径。
+	 */
+	public boolean ngDssrReturnRelaxedColumns = false;
+	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。
 	 */

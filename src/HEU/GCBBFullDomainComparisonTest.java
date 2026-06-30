@@ -185,6 +185,9 @@ public class GCBBFullDomainComparisonTest {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		}
+		if (config.ngDssrReturnRelaxedColumns) {
+			mode += "-ngRelaxedColumns";
+		}
 		return mode;
 	}
 
@@ -401,6 +404,9 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
 				config.ngDssrNonElementaryRouteUpdateLimit);
+		config.ngDssrReturnRelaxedColumns = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrReturnRelaxedColumns",
+				Boolean.toString(config.ngDssrReturnRelaxedColumns)));
 		config.enableSubsetRowCutsForPartialDominance = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableSubsetRowCutsForPartialDominance",
 				Boolean.toString(config.enableSubsetRowCutsForPartialDominance)));

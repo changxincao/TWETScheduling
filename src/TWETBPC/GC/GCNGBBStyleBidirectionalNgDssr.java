@@ -45,8 +45,9 @@ import TWETBPC.Util.SequenceSignature;
  * 类名中的 GCNGBB 保留早期命名；当前版本在 label 中维护 ng-memory，并用 DSSR 逐轮收紧
  * ng-neighborhood。相对 {@link GCBidirectional}，本类先完整生成 forward/backward 两侧 label
  * table，再统一做 crossing-arc final join；forward->sink 收尾也并入 final join 流程。join
- * 后先按 ng-memory 检查拼接兼容性，再恢复真实序列判断 elementary/non-elementary，负的
- * elementary 列进入本地 top-K 候选池，负的 non-elementary 序列用于更新 ng-set。
+ * 后先按 ng-memory 检查拼接兼容性，再恢复真实序列判断 elementary/non-elementary。默认只让负的
+ * elementary 列进入本地 top-K 候选池，负的 non-elementary 序列用于更新 ng-set；诊断开关打开时，
+ * non-elementary ng-relaxed 列也会直接进入候选池。
  * <p>
  * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
  * 1. forward label 存储在 [ell, Tmid]；
@@ -487,7 +488,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrRoundsExecuted = ngDssrRound;
 			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeRoutes.size();
 			if (!columns.isEmpty()) {
-				appendNgDssrSummary("elementary negative columns returned");
+				appendNgDssrSummary(config.ngDssrReturnRelaxedColumns
+						? "ng-relaxed negative columns returned"
+						: "elementary negative columns returned");
 				return columns;
 			}
 			if (nonElementaryNegativeRoutes.isEmpty()) {
@@ -3598,12 +3601,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		boolean targetSequence = isTargetSequence(sequence);
-		if (!isElementarySequence(sequence)) {
+		boolean elementary = isElementarySequence(sequence);
+		if (!elementary && !config.ngDssrReturnRelaxedColumns) {
 			if (targetSequence) {
 				traceTarget("COLUMN_REJECT nonElementary inferredRC=" + inferredReducedCost);
 			}
 			recordNonElementaryNegativeSequence(sequence, inferredReducedCost);
 			return;
+		}
+		if (!elementary && targetSequence) {
+			traceTarget("COLUMN_CANDIDATE ngRelaxed inferredRC=" + inferredReducedCost);
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
 		if (activeColumnSignatures.contains(signature)) {

@@ -65,3 +65,19 @@
 这个结果和原始 40-2 setup 的几十秒量级形成明显对比。root 结束前 pool 已超过 7.6 万，后续强分支和 repair 持续把 pool 推到 15.7 万；node 15 时 gap 约 `0.5646%`，node 20 时 gap 约 `0.2697%`，最后 node 25/26 才闭合。因此非均匀扰动确实会显著削弱 time-indexed 的“很快”表现，慢化来源不是单个 shortest path 极慢，而是扰动后负列和候选序列明显增多，RMP/strong branching/repair 的累计成本随之上升。
 
 当前结论是：time-indexed 图对均匀尺度放大不一定敏感，因为结构相对关系没有变；但对非均匀时间波动更敏感，尤其会放大 pseudo-schedule 列数量和强分支 trial 成本。后续如果要比较 ng-DSSR 与 time-indexed 的鲁棒性，应优先使用这种非均匀扰动实例，而不是简单整体乘同一个倍数。
+
+## 非均匀扰动下的 ng-DSSR 对照
+
+2026-06-30 用同一个 `wet040_001_2m_timeJitterX10` 扰动实例继续测试 ng-DSSR 主线。配置为 half-domain ng-DSSR、nearestK8/top10、ALNS、RMIH、completion bound、pricingOnly subtree、midpoint probe/reuse、dual bound pruning 和 strong branching；关闭 time-indexed graph pricing，打开 time-indexed helper 的 post-node scalar/window/arc-fixing 加强，但关闭每次 pricing 内的 in-round/cut-loop 临时 fixing。
+
+结果目录为 `test-results/bpc/tmp-ngdssr-40-2-timeJitterX10-tihelper-postnode-strong-20260630`。CSV 结果为：
+
+`FINISHED, obj=bound=104721, solve=439.190s, root=46.830s, nodes=40, pricing=2473, cols=237760, pool=237760, heuristic=52.336s/602, exact=82.016s/310, master_lp=138.296s, valid=true`。
+
+和同一扰动实例的 no-cut time-indexed graph pricing 对比，ng-DSSR 总时间从 `1003.950s` 降到 `439.190s`，root 从 `242.385s` 降到 `46.830s`。这说明非均匀时间放大后，ng-DSSR 确实不直接受到离散时间层数膨胀的支配；它的 exact pricing 主要仍是连续时间函数 labeling、completion bound 和 join，而不是扫描整个 time-expanded graph。
+
+但这次结果也暴露两个需要继续核对的问题。第一，ng-DSSR 找到的目标为 `104721`，低于前面 time-indexed graph pricing 的 `104836`。在同一实例和同一目标口径下，这意味着前面的 time-indexed 对照不能直接当作可靠最优值；后续要么检查 time-indexed 分支/arc fixing/列成本口径是否仍有漏列，要么用已知 `104721` 解反向审计 time-indexed 路径是否被剪掉。第二，ng-DSSR 虽然更快，但节点数更多、列池更大，最终 pool 达到 `237760`。从日志看，root 后的普通节点每个 node 多数只需几秒到十几秒，主要耗时来自 strong branching trial、repair 和启发式/精确 pricing 的反复补列；例如 node 19 的 repair 中 exact ng-DSSR 曾一次生成 1253 列，后续 pool 很快超过 15 万。
+
+本次日志没有输出单独的 `timeWindowAvgLen/timeWindowAvgShrinkRatio` 字段，因此暂时无法给出“每个 node 时间窗平均收缩多少”的直接统计。能间接看到的是各节点 `pricingHorizon` 仍多次保持在 `19247.0`，说明当前记录的 horizon 字段并未充分反映 post-node compact window 的有效收缩；如果后续要系统判断 time-indexed helper 的窗口贡献，需要补一条专门统计，至少在 node summary 中输出继承 compact window 后的平均窗口长度、收缩比例和 job 数。
+
+当前结论是：在这个非均匀扰动实例上，ng-DSSR 明显比 no-cut time-indexed graph pricing 更抗时间层数放大，且找到更好的解；但由于目标值不一致，下一步不能只比较速度，应优先复核 time-indexed 对照的正确性。

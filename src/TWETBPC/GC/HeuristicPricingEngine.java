@@ -70,17 +70,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 		HashSet<SequenceSignature> activeSignatures = activeSignatures(lp);
 		HashSet<SequenceSignature> generatedSignatures = new HashSet<SequenceSignature>();
 		ArrayList<ScoredSequence> negativeCandidates = new ArrayList<ScoredSequence>();
+		HeuristicCostAudit costAudit = new HeuristicCostAudit();
 
 		for (TWETColumn seed : seeds) {
 			if (this.timeLimitChecker.isTimeLimitReached() || isHeuristicPoolFull(negativeCandidates)) {
 				break;
 			}
 			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, activeSignatures, generatedSignatures,
-					negativeCandidates);
+					negativeCandidates, costAudit);
 		}
 
 		if (negativeCandidates.isEmpty()) {
-			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column");
+			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column"
+					+ costAudit.summary());
 		}
 
 		Collections.sort(negativeCandidates, new Comparator<ScoredSequence>() {
@@ -105,7 +107,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 		return new PricingResult(columns, true,
 				"Tabu heuristic pricing generated " + columns.size() + " columns from local pool "
-						+ negativeCandidates.size());
+						+ negativeCandidates.size() + costAudit.summary());
 	}
 
 	@Override
@@ -163,7 +165,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
 			HeuristicWindowContext windowContext,
 			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
-			ArrayList<ScoredSequence> negativeCandidates) {
+			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit) {
 		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext);
 		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence)) {
 			return;
@@ -171,7 +173,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		double bestReducedCost = state.reducedCost(lp);
 		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, activeSignatures,
 				generatedSignatures,
-				negativeCandidates);
+				negativeCandidates, costAudit);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
 		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates)
@@ -185,7 +187,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 				bestReducedCost = state.currentReducedCost;
 			}
 			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, activeSignatures,
-					generatedSignatures, negativeCandidates);
+					generatedSignatures, negativeCandidates, costAudit);
 		}
 	}
 
@@ -239,7 +241,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private void tryAddNegative(List<Integer> sequence, double restrictedCost, double restrictedReducedCost, LP lp,
 			SriPricingContext sriContext,
 			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
-			ArrayList<ScoredSequence> negativeCandidates) {
+			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit) {
 		if (isHeuristicPoolFull(negativeCandidates)) {
 			return;
 		}
@@ -258,6 +260,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return;
 		}
 		double trueReducedCost = reducedCost(sequence, trueCost, lp, sriContext.penalty(sequence));
+		costAudit.observe(restrictedCost, restrictedReducedCost, trueCost, trueReducedCost);
 		if (Utility.compareLt(trueReducedCost, REDUCED_COST_TOLERANCE)) {
 			generatedSignatures.add(signature);
 			negativeCandidates.add(new ScoredSequence(sequence, trueCost, trueReducedCost));
@@ -1252,6 +1255,44 @@ public class HeuristicPricingEngine implements PricingEngine {
 				return iter < primaryTenure || iter < secondaryTenure;
 			}
 			return iter < primaryTenure;
+		}
+	}
+
+	/**
+	 * 2026-06-30: 诊断启发式窗口口径和真实列成本的差异。
+	 * 启发式搜索可以用 node 局部窗口缩小函数定义域，但写入列池前必须回到原始目标口径；
+	 * 这里不额外触发 evaluator，只复用 tryAddNegative() 已经计算出的 trueCost。
+	 */
+	private static final class HeuristicCostAudit {
+		private int checked;
+		private int changedCost;
+		private int filteredByTrueReducedCost;
+		private double signedDeltaSum;
+		private double absDeltaMax;
+
+		void observe(double restrictedCost, double restrictedReducedCost, double trueCost, double trueReducedCost) {
+			checked++;
+			double delta = trueCost - restrictedCost;
+			if (Math.abs(delta) > 1e-7) {
+				changedCost++;
+				signedDeltaSum += delta;
+				absDeltaMax = Math.max(absDeltaMax, Math.abs(delta));
+			}
+			if (Utility.compareLt(restrictedReducedCost, REDUCED_COST_TOLERANCE)
+					&& Utility.compareGe(trueReducedCost, REDUCED_COST_TOLERANCE)) {
+				filteredByTrueReducedCost++;
+			}
+		}
+
+		String summary() {
+			if (checked == 0) {
+				return ", heuristicCostAudit checked=0";
+			}
+			return ", heuristicCostAudit checked=" + checked
+					+ ", changed=" + changedCost
+					+ ", filteredByTrueRc=" + filteredByTrueReducedCost
+					+ ", avgDelta=" + (signedDeltaSum / checked)
+					+ ", maxAbsDelta=" + absDeltaMax;
 		}
 	}
 

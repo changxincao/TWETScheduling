@@ -67,3 +67,21 @@
 > （带有SRI的还没测试，目前只测试了不带有SRI的，待测试）
 >
 > 因此，当前这个文章的话，感觉主要还是说我们做一个带外包的问题。但初步的实验可以说，我们实现了他们的算法。。。然后可以公平比较，即某些情况他们好，某些情况我们的好，然后这个实验是纯做不外包的。然后在做外包的相关的分析。最后做一个灵敏度的分析，感觉就差不多了。
+
+## 6. 40-2 非均匀 10 倍时间扰动的 5 组补充对比
+
+2026-06-30 对 `wet040_001_2m_timeJitterX10` 做了一轮更明确的 5 组对比。为了避免“每次 pricing 内部临时求 time-indexed 图”带来的额外干扰，本轮 ng-DSSR 三组都显式设置 `timeIndexedCompletionBoundInRoundArcFixing=false` 和 `timeIndexedCompletionBoundCutLoopArcFixing=false`。也就是说，time-indexed helper 只作为 node 收敛后的 post-node 加强使用，用于后续子节点的 scalar/window/arc-fixing 信息；不是每一轮 pricing 都临时重建 time-indexed 图。5 组实验均统一使用 `cplexThreads=1`，时间限制为 900s，因此绝对时间和历史 `cplexThreads=0` 的 run 不能直接逐秒对齐，但同一轮内的相对比较是可用的。
+
+本轮结果如下。
+
+1. ng-DSSR，完全关闭 time-indexed helper：`FINISHED`，目标和下界均为 `104113`，总时间 `510.258s`，root `84.324s`，处理 `18` 个节点，pricing `1038` 轮，加列 `125295`，peak pool `123244`。
+
+2. ng-DSSR，只开 time-indexed scalar/arc-fixing，关闭 window tightening：`FINISHED`，目标和下界均为 `104113`，总时间 `528.547s`，root `84.308s`，处理 `18` 个节点，pricing `987` 轮，加列 `118614`，peak pool `116534`。这一组列数少了一些，但总时间没有改善，说明只靠 scalar/arc-fixing 的收益不稳定，甚至可能被构造 time-indexed helper 的额外成本抵消。
+
+3. ng-DSSR，同时打开 time-indexed scalar/arc-fixing 和 window tightening：`FINISHED`，目标和下界均为 `104113`，总时间 `394.459s`，root `83.384s`，处理 `16` 个节点，pricing `869` 轮，加列 `67471`，peak pool `66016`。这是本轮最好结果。关键差异是 window tightening 明显压缩了后续节点的有效时间域，使 exact ng-DSSR pricing 时间从 off 组的 `138.805s` 降到 `81.108s`，加列数量也几乎减半。
+
+4. time-indexed graph pricing，不加 SRI/rank-1 cut，关闭 strong branching：`TIME_LIMIT`，900s 内未收敛，root bound `102869.043478`，最终 incumbent `104836`，最终 lower bound `103195.700000`，gap `1.5646%`，处理 `15` 个节点，pricing `908` 轮，加列 `78037`，peak pool `77963`。这说明在非均匀 10 倍时间扰动后，纯 time-indexed no-SRI 路线已经明显吃力。
+
+5. time-indexed graph rank-1/SRI pricing，关闭 strong branching：`TIME_LIMIT`，900s 内仍停留在 root，cut rounds `2`，加入 `79` 条 cut，pricing `373` 轮，加列 `60825`，peak pool `60794`，但 root 未闭合，日志中最终是 time limit。该组每轮 rank-1 cut 双向 pricing 的平均时间明显高于 no-SRI time-indexed，说明在该放大算例上 SRI/rank-1 cut 并没有改善整体收敛，反而把 root pricing 压力放大了。
+
+因此，本轮对用户前面判断做了一个补充验证：在时间尺度被非均匀放大后，time-indexed 的优势快速下降；ng-DSSR 如果结合 post-node 的 time-indexed window tightening，反而能显著减少列数和 exact pricing 时间。更细的结论是，time-indexed helper 里真正有价值的是可继承的 job time-window tightening；单独的 scalar/arc-fixing 不足以稳定带来收益。带 SRI/rank-1 cut 的 time-indexed 版本在这个放大算例上没有看到优势，至少当前实现和配置下不适合作为大 horizon 场景的主线。

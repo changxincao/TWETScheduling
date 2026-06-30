@@ -99,3 +99,13 @@
 只修改 `resetRestrictedColumnsByCurrentReducedCost()` 使正值列无条件保留后，复跑同一配置时队列不再维持在 2，而是很快增长到 10 以上，并且 pool 超过 14 万仍未闭合。这说明旧 run 的快速收敛确实高度依赖强分支 trial 的错误 infeasible 传播；该最小修复能改变搜索树，但是否完全修好还需要继续看最终 objective 和是否仍存在筛列后 false infeasible。
 
 最小修复后的复跑在 1800s 时间限制下没有闭合：`TIME_LIMIT,obj=104836,bound=103915.233333,exact=1288.937s/1929,pool=225006,valid=true`。与旧 run `1003.950s` 直接证明 `104836` 相比，新 run 的 queue 一度增长到 20 以上，且下界只到 `103915.233333`。这进一步确认旧 run 的快速闭合不是正常强分支证明，而是 trial infeasible 被当作真实子树 infeasible 后错误压缩了搜索树。当前“正值列无条件保留”只能修复一部分筛列问题，仍不足以让 time-indexed strong branching 可靠闭合；后续要么不要用 trial infeasible 剪子树，要么对筛列后 infeasible 的 child 做完整 repair 后再允许复用和入队判断。
+
+## 原始 40-2 time-indexed 结果是否受 strong branching 影响
+
+2026-06-30 继续区分原始 `wet040_001_2m` 的 time-indexed 对照组。这里不能简单说“40-2 没放大所以没影响”，因为原始 40-2 的 time-indexed 记录里同时存在 no-strong 和 strong 两类口径。
+
+no-strong 口径 `test-results/bpc/tmp-timegraph-nocut-40-2-setup-nostrong-20260630` 的结果为 `FINISHED,obj=bound=22580,solve=46.737s,nodes=35,pool=68359`。这组不走 strong trial 的 child 构造、筛列、repair 和复用 seed 逻辑，因此不受本次 strong branching false infeasible 问题影响。
+
+strong 口径则已经出现可疑信号：`test-results/bpc/tmp-timegraph-nocut-40-2-setup-strong-20260630` 得到 `obj=bound=22582`，`strong-noarcfix` 也是 `22582`，`strong-noarcfix-fixedswitch` 为 `22581`。这些值都高于 no-strong 的 `22580`，说明原始 40-2 的 time-indexed strong 结果也不能再当作可靠最优证明，只是误差幅度比 `timeJitterX10` 上的 `104836` 对 `104721` 小得多，更容易被忽略。`valid=true` 只能说明最终 incumbent 列自身可行并且成本复算通过，不能证明强分支没有误剪更优子树。
+
+当前结论为：原始 40-2 的 pure time-indexed no-strong 结果仍可作为无强分支 baseline；所有开启 strong branching 的 time-indexed 结果，包括原始未放大实例，都需要按修复后的 trial 逻辑重新验证，不能直接引用为最终最优性证据。

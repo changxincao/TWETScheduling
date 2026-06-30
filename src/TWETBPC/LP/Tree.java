@@ -336,7 +336,7 @@ public class Tree {
 	}
 
 	private void applyTimeIndexedGraphArcFixing(LP lp, double incumbentCost) {
-		if (!config.useTimeIndexedGraphPricing) {
+		if (!config.useTimeIndexedGraphPricing || !config.timeIndexedCompletionBoundArcFixing) {
 			return;
 		}
 		heartbeat(lp.getNode(), "timeIndexedArcFixing.start");

@@ -123,14 +123,14 @@ public class ArcBrancher implements Brancher {
 		if (bestFrom != 0 && bestFrom != sink) {
 			for (int to = 1; to <= sink; to++) {
 				if (to != bestTo) {
-					right.forbidArc(bestFrom, to);
+					right.forbidBranchImpliedArc(bestFrom, to);
 				}
 			}
 		}
 		if (bestTo != sink) {
 			for (int from = 0; from <= sink; from++) {
 				if (from != bestFrom) {
-					right.forbidArc(from, bestTo);
+					right.forbidBranchImpliedArc(from, bestTo);
 				}
 			}
 		}

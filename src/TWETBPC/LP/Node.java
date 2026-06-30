@@ -64,6 +64,7 @@ public class Node implements Comparable<Node> {
 	// 正式出队时仍需解一次 LP 取得 dual，但不再重复做 child 初始 repair/筛列。
 	private boolean strongBranchingSeedPrepared;
 	private byte[][] arcState;
+	private boolean[][] branchImpliedForbiddenArc;
 	private boolean[][] pricingOnlyForbiddenArc;
 	private HashMap<Integer, BitSet> timeIndexedPricingOnlyForbiddenArcTimesByPair;
 	private int timeIndexedPricingOnlyForbiddenArcCount;
@@ -93,6 +94,7 @@ public class Node implements Comparable<Node> {
 		this.activeCutIds = new ArrayList<Integer>();
 		this.strongBranchingSeedPrepared = false;
 		this.arcState = new byte[data.n + 2][data.n + 2];
+		this.branchImpliedForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.pricingOnlyForbiddenArc = new boolean[data.n + 2][data.n + 2];
 		this.timeIndexedPricingOnlyForbiddenArcTimesByPair = new HashMap<Integer, BitSet>();
 		this.timeIndexedPricingOnlyForbiddenArcCount = 0;
@@ -121,6 +123,10 @@ public class Node implements Comparable<Node> {
 		copy.arcState = new byte[arcState.length][];
 		for (int i = 0; i < arcState.length; i++) {
 			copy.arcState[i] = arcState[i].clone();
+		}
+		copy.branchImpliedForbiddenArc = new boolean[branchImpliedForbiddenArc.length][];
+		for (int i = 0; i < branchImpliedForbiddenArc.length; i++) {
+			copy.branchImpliedForbiddenArc[i] = branchImpliedForbiddenArc[i].clone();
 		}
 		copy.pricingOnlyForbiddenArc = new boolean[pricingOnlyForbiddenArc.length][];
 		for (int i = 0; i < pricingOnlyForbiddenArc.length; i++) {
@@ -175,11 +181,32 @@ public class Node implements Comparable<Node> {
 	 */
 	public boolean isArcForbidden(int from, int to) {
 		return data.isPreprocessedArcForbidden(from, to) || getArcState(from, to) == ARC_FORBIDDEN
-				|| isAdjacencyPairForbiddenArc(from, to);
+				|| isBranchImpliedArcForbidden(from, to) || isAdjacencyPairForbiddenArc(from, to);
 	}
 
 	public void forbidArc(int from, int to) {
 		arcState[from][to] = ARC_FORBIDDEN;
+	}
+
+	/**
+	 * 2026-06-30: 右支要求 i->j 时，机器路径上 i 不能再接其他后继，j 不能再有其他前驱。
+	 * 这些推导禁弧只用于过滤历史列和 pricing 扩展，不进入 master 分支行；master 里只保留选中的
+	 * required arc 行，和旧 VRP 的 branch2rng / feasible_arc 分工一致。
+	 */
+	public void forbidBranchImpliedArc(int from, int to) {
+		if (from < 0 || to < 0 || from >= branchImpliedForbiddenArc.length
+				|| to >= branchImpliedForbiddenArc[from].length) {
+			return;
+		}
+		if (arcState[from][to] == ARC_REQUIRED) {
+			return;
+		}
+		branchImpliedForbiddenArc[from][to] = true;
+	}
+
+	private boolean isBranchImpliedArcForbidden(int from, int to) {
+		return from >= 0 && to >= 0 && from < branchImpliedForbiddenArc.length
+				&& to < branchImpliedForbiddenArc[from].length && branchImpliedForbiddenArc[from][to];
 	}
 
 	/**
@@ -388,6 +415,18 @@ public class Node implements Comparable<Node> {
 		return countArcStates(ARC_FORBIDDEN);
 	}
 
+	public int countBranchImpliedForbiddenArcs() {
+		int count = 0;
+		for (int from = 0; from < branchImpliedForbiddenArc.length; from++) {
+			for (int to = 0; to < branchImpliedForbiddenArc[from].length; to++) {
+				if (branchImpliedForbiddenArc[from][to]) {
+					count++;
+				}
+			}
+		}
+		return count;
+	}
+
 	public int countPricingOnlyForbiddenArcs() {
 		int count = 0;
 		for (int from = 0; from < pricingOnlyForbiddenArc.length; from++) {
@@ -423,6 +462,7 @@ public class Node implements Comparable<Node> {
 		return "id=" + id + ",depth=" + depth + ",pseudo=" + pseudoCost + ",machine=[" + minMachineCount + ","
 				+ maxMachineCount + "],seed=" + seedColumnIds.size() + ",cuts=" + activeCutIds.size()
 				+ ",arcReq=" + countRequiredArcStates() + ",arcForbid=" + countForbiddenArcStates()
+				+ ",arcBranchImpliedForbid=" + countBranchImpliedForbiddenArcs()
 				+ ",pricingOnlyArc=" + countPricingOnlyForbiddenArcs()
 				+ ",timePricingOnlyArc=" + countTimeIndexedPricingOnlyForbiddenArcs()
 				+ ",timeWindowJobs=" + countTimeIndexedPricingWindowTightenedJobs()
@@ -440,6 +480,10 @@ public class Node implements Comparable<Node> {
 	}
 
 	public void requireArc(int from, int to) {
+		if (from >= 0 && to >= 0 && from < branchImpliedForbiddenArc.length
+				&& to < branchImpliedForbiddenArc[from].length) {
+			branchImpliedForbiddenArc[from][to] = false;
+		}
 		arcState[from][to] = ARC_REQUIRED;
 	}
 

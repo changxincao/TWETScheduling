@@ -119,3 +119,12 @@
 边界需要记录清楚：dual profitable window 是当前 dual 下的临时窗口，不能继承到全局列成本，因此仍必须回到原始 TWET 目标口径重刷；compact window 口径下跳过重刷后，同一个 sequence 在不同 node/window 下可能存在不同成本口径，后续如果出现列池复用导致异常，需要优先回到这里排查。实现上没有删除 true-cost recheck，只是在 `HeuristicWindowContext.requiresTrueCostRecheck()` 为 false 时提前返回，并在日志中记录 `skippedTrueRecheck`。
 
 验证：`tmp-compact-no-recheck-40-20260701` 短测 120 秒，`wet040_001_2m`、ng-DSSR nearestK8/top10、关闭 heuristic dual window、打开 time-indexed compact window。日志显示启发式 pricing 行为变为 `heuristicCostAudit checked=0, skippedTrueRecheck=...`，说明 compact-only 候选不再重刷；dual-window 分支代码仍保留重刷路径。本次短测只验证行为和编译，不作为速度结论。
+## 8. 小 horizon 与大 horizon 下的当前最好判断，以及 root time-indexed + 子节点 ng-DSSR 的设想
+
+当前更合适的表述是：ng-DSSR 的目标不是在所有算例上都压过 time-indexed，而是在 time-indexed 最擅长的小整数 horizon 场景下，尽量做到同一数量级、差距不要失控；当时间尺度变大、存在小数 scale 风险、或者 time-indexed 图状态明显膨胀时，ng-DSSR 应该能够反过来占优。换句话说，最好的结果不是“ng-DSSR 永远更快”，而是“time-indexed 小时间场景下有优势但 ng-DSSR 不差太多；大 horizon 或更一般场景下 ng-DSSR 更稳，甚至更快”。这个判断和当前 40-2 非均匀 10 倍时间扰动实验是一致的：time-indexed 在小 horizon 下很快，但放大后明显吃力；ng-DSSR 结合 post-node compact window tightening 后可以收敛，并且列数、exact pricing 时间都明显下降。
+
+由此产生一个可能的混合策略：root node 先用 time-indexed pricing 收敛，利用它在小 horizon 或根节点无分支时的快速最短路能力，尽快得到 root LP bound、负列和 time-indexed arc fixing/window tightening 信息；之后在子节点切换到 ng-DSSR，利用 root 产生的 compact window、pricing-only fixed arcs 和后续分支信息缩小连续时间函数定价空间。这个方向理论上是可行的，因为 root 收敛后得到的 time-indexed reduced-cost arc fixing 和 compact window 本来就是给子树继承使用的；子节点换成 ng-DSSR 只是换 pricing oracle，不改变 master 的列语义和分支语义。尤其是当 time-indexed root 容易闭合，而 ng-DSSR root 需要很多 exact pricing 轮次时，这个混合策略可能减少 root 长尾。
+
+但这个方案不能直接当作已经安全的主线，需要注意几个边界。第一，root time-indexed 生成的是 pseudo-schedule / relaxed 图列，和 ng-DSSR 的 elementary/ng 列族不同；如果 master 采用 >= 覆盖，这些列作为 LP 下界列是允许的，但后续整数上界和列池解释要继续区分。第二，root 的 time-indexed compact window 必须来自可以继承的 fixing/window tightening，不能把 root dual profitable window 这类临时 dual 口径继承下去。第三，如果 root 使用 rank-1/SRI cut，则 time-indexed fixing 是否带 SRI 状态、以及 ng-DSSR 后续是否使用同一套 cut dual 口径，需要单独检查；当前 no-cut 的混合策略最容易先做。第四，root 切换 pricing oracle 后，列池会混有 time-indexed relaxed 列和 ng-DSSR 列，需要确保 duplicate sequence 成本、active column 改进和 RMP 成本口径一致，否则会出现“root 快但后续列解释不一致”的风险。
+
+当前建议是把这个作为后续实验分支，而不是马上替代主线。实验上可以先做 no-cut、无外包或显式外包变量口径：同一算例比较三组，分别是纯 time-indexed、纯 ng-DSSR、root time-indexed 收敛后子节点 ng-DSSR。重点记录 root time、root pool、root bound、继承 compact window 的平均长度、子节点 exact pricing 次数、总列池规模、总时间和最终目标是否一致。如果 root time-indexed 的确能显著缩短 root，且子节点 ng-DSSR 能避免 time-indexed 在大 horizon 下继续膨胀，那么这会是一个很有价值的 hybrid pricing 策略。

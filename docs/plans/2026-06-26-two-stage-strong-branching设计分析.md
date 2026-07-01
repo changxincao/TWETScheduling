@@ -256,6 +256,8 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 
 新的判断是，domain-filtered all-row slack repair 暂停后，仍可以考虑一个更轻的变体：子节点 trial 初始列不再完整继承父节点 restricted 列，而是先删掉明显违反 child 域的非正值列，同时无条件保留父节点当前 LP 的正值列。这样做的目的，是让“父节点正值列 + 不加新分支行”仍然提供一个覆盖/机器数可行的支撑；随后带新分支行求 trial LP，如果不可行，理论上主要就是新增分支行导致的问题，仍可走旧 repair，只给当前新增分支行挂 slack，而不需要 all-row slack。
 
-这个思路总体是成立的，但有两个边界必须保留。第一，右支 `require(i,j)` 不能理解成每条机器列都必须包含 `i->j`。正式约束是所有被选列对该弧的访问和等于 1；其它机器列不含 `i->j` 是正常的。因此可提前删除的是违反 forbidden / branch-implied forbidden 域的列，例如左支中包含 forbidden arc 的非正值列，右支中包含 `i->k(k!=j)` 或 `h->j(h!=i)` 的非正值列，而不是所有不含 `i->j` 的列。第二，父节点正值列可以为了 repair 可行性临时保留，即使它违反 child implied forbidden；但 strong branching trial 若要把 child seed 复用到正式队列，最终 seed 不能长期保留这些违反 child 域的列。否则正式出队时 `strongBranchingSeedPrepared=true` 会跳过初始筛列，历史不兼容列可能继续留在 RMP 中。
+这个思路总体是成立的，但有一个边界必须保留：右支 `require(i,j)` 不能理解成每条机器列都必须包含 `i->j`。正式约束是所有被选列对该弧的访问和等于 1；其它机器列不含 `i->j` 是正常的。因此可提前删除的是违反 forbidden / branch-implied forbidden 域的列，例如左支中包含 forbidden arc 的非正值列，右支中包含 `i->k(k!=j)` 或 `h->j(h!=i)` 的非正值列，而不是所有不含 `i->j` 的列。
 
-因此若后续实现，最小改动方向不是恢复 all-row repair，而是在 strong branching trial 中新增一种“正值列保留 + 非正值域过滤”的 seed 准备方式：Phase 1 初始 trial 用它来降低列数并保持旧 repair 可行；repair/筛列完成后，若要复用 child，则要确保复用 seed 只包含当前 child 兼容列，或者不要把该 trial 标成 `strongBranchingSeedPrepared`。这个方案比全行 slack repair 更贴近旧流程，预计改动也更小，但需要谨慎处理可复用 seed 的语义。
+更准确地说，这个方案本质上就是改变 repair 的初始列准备方式。Phase 1 初始 trial 可以保留父节点正值列，即使其中有违反 child implied forbidden 的列，用它们保证“父节点可行解 + 新分支行”这个 repair 起点仍然容易建立；随后旧 repair 只给当前新增分支行挂 slack。等 repair 成功并进入筛列阶段时，再按 child 域删除违反约束的列，最终复用到正式队列的 seed 仍然是 child-compatible 的。这样不需要 all-row slack，也不需要额外设计“不可复用 child”的分支逻辑；关键只是把“repair 起点列”和“repair 后正式 seed”分清楚。
+
+因此若后续实现，最小改动方向不是恢复 all-row repair，而是在 strong branching trial 中新增一种“正值列保留 + 非正值域过滤”的 seed 准备方式：Phase 1 初始 trial 用它来降低列数并保持旧 repair 可行；repair/筛列完成后，复用 child 时使用筛选后的 child-compatible seed。这个方案比全行 slack repair 更贴近旧流程，预计改动也更小。

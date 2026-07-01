@@ -136,3 +136,21 @@
 修复后按当前较稳的 time-indexed no-cut 口径重新跑 `data/40-2/wet040_001_2m.dat`。配置为 `timeIndexedGraphPricing=true`、关闭 rank-1/SRI、关闭旧 HeuristicPricing、关闭 strong branching、打开 dual-bound pruning 和 post-node time-indexed helper，`cplexThreads=1`，时间限制 900s。setup cost 系数为 0 时，`tmp-timegraph-best-40-2-setupcost0-20260701` 结果为 `obj=bound=22580`，总时间 `160.752s`，root `124.298s`，节点 `67`，pricing `1443` 轮，列池 `131418`，TimeIndexedGraphPricing `21.745s/1352 calls`。setup cost 系数为 1 时，`tmp-timegraph-best-40-2-setupcost1-20260701` 结果为 `obj=bound=22874`，总时间 `74.305s`，root `60.765s`，节点 `30`，pricing `786` 轮，列池 `108727`，TimeIndexedGraphPricing `10.536s/770 calls`。
 
 当前结论为：在这个 40-2 原始时间尺度算例上，加入 setup cost 后目标值确实变化，说明修复后的成本口径已经生效；但它没有让 time-indexed pricing 更难收敛，反而减少了节点、pricing 轮次和列池规模。直观原因可能是 setup cost 使一部分重复/绕行 pseudo-schedule 的吸引力下降，LP 尾部负列数量减少。这个结论只适用于当前原始小 horizon 算例，不代表放大时间尺度或更复杂 setup 结构下 setup cost 仍会加速；后续若要判断“setup cost 是否让 pseudo-schedule bound 变差”，需要继续在 timeJitterX10 或 cluster/random setup 上做同口径对照。
+
+### 2026-07-01 setup time / setup cost 比例与文献口径复核
+
+本次讨论的核心不是单纯把 `setupCost = coefficient * setupTime` 的系数调大，而是先确认当前 setup time 本身是否已经偏小。当前代码生成 setup 的原始设定是 `eta=0.5`，即随机生成前的平均 setup 约为平均加工时间的 50%；但随后会对包含虚拟起点 0 的完整 setup 图做 Floyd 三角闭包。这个闭包会把很多直接 setup 降成经其他点中转后的较短值，因此最终数据里的实际 setup/p 比例明显低于生成时的 eta。以 `wet040_001_2m` 为例，平均加工时间约 `51.63`，闭包后的平均 setup time 约 `9.03`，实际 `avgSetup/avgP` 只有约 `17.5%`，低于 Kramer/Cicirello 口径中的 small setup 水平。
+
+文献口径上，`On the exact solution of a large class of parallel machine scheduling problems` 使用的 Kramer 2015 setup 实例来自 Şen-Bülbül 数据，并额外加入 small / large 两档 sequence-dependent setup。Kramer 的说明中，setup 生成参考 Cicirello and Smith (2005)，设 `\bar{s}=eta*\bar{p}`，并在 `[0,2\bar{s}]` 的截断正态范围内生成，使用的 severity 为 `eta=0.25` 和 `eta=0.75`。因此文献中的 small / large 大致对应平均 setup 为平均加工时间的 25% / 75%。如果当前数据闭包后只有 17%-25% 左右，那更接近 small setup，甚至低于 small；不能用 `eta=0.5` 的生成参数直接说明当前数据处于中等 setup 强度。
+
+对 setup cost 的判断也要分开看。若 `setupCost` 与 `setupTime` 成正比，它主要是在目标函数中进一步强化“少走长 setup 弧”的倾向；因为 setup time 本身已经会推迟完工时间并影响 TWET penalty，所以二者并不是完全独立的权衡。真正强的冲突来自两类情形：一是 setup cost 和 setup time 不成比例，存在时间短但成本高、时间长但成本低的弧；二是 setup 结构有明显 cluster/family 差异，短 setup 弧可能导致 due-window penalty 变差。当前 `coefficient=1` 在 `wet040_001_2m` 上带来的目标增加约 `294`，相对 2.3 万量级目标只是一两个百分点，比例偏小，不足以显著改变列结构。若要做灵敏度实验，更合理的是同时调 setup time 结构和 setup cost 系数，例如先构造闭包后仍能达到 small/large 两档的 setup/p 比例，再测试 cost 系数 0/1/5/10。
+
+和 VRP 的差异也需要写清楚。VRP 中 travel/setup 时间常常可以和 service time 同量级甚至更大，尤其客户间距离远、服务时间固定较短时，travel 会主导路径成本；调度中的 setup 更多表示机器换型、清洗、模具/刀具切换，很多场景下 setup 短于加工时间。但也存在反例，例如短作业、频繁换型、涂装/印刷颜色切换、食品/制药清洗、半导体批次切换等，setup 可以接近或超过单个作业加工时间。Kramer 的 `eta=0.75` large setup 就属于“setup 已经接近加工时间”的调度口径。
+
+### 2026-07-01 setup ratio 变体生成工具
+
+为避免直接覆盖现有 `data/40-2` 数据，本次新增 `Common.SetupRatioVariantGenerator`，用于从已有 `.dat` 生成不同 setup severity 的实验变体。工具不改任务行和机器数，只重建 `SETUP` 块；目标不是生成前的 `eta`，而是 Floyd 三角闭包后的真实 `job-to-job 平均 setup / 平均 processing`。这样可以直接得到文献意义上的弱/中/强 setup time 变体，而不会被闭包压低后还误以为强度足够。
+
+使用方式示例为：先执行 javac -encoding UTF-8 -cp src -sourcepath src src/Common/SetupRatioVariantGenerator.java，再执行 java -cp src Common.SetupRatioVariantGenerator data/40-2/wet040_001_2m.dat data/setup-variants/40-2 0.25,0.50,0.75。本次对 `wet040_001_2m` 试生成三档，结果为：目标 `0.25` 需要生成前 `eta≈0.733133`，闭包后实际 `0.249469`；目标 `0.50` 需要 `eta≈1.429247`，闭包后实际 `0.500292`；目标 `0.75` 需要 `eta≈2.150611`，闭包后实际 `0.749587`。这进一步说明原始 `eta=0.5` 经过闭包后确实偏弱，不能直接拿生成前 eta 和 Kramer/Cicirello 的 small/large 口径比较。
+
+setup cost 系数暂时不写入实例文件，仍使用运行时属性 `twet.data.setupCostFromTimeCoefficient` 控制。推荐后续实验组合为：先用 `setupR25/setupR50/setupR75` 三类 setup time 变体，再分别跑 cost 系数 `0/1/5/10`。其中 `0` 对应只让 setup time 影响完成时间；`1` 是当前“同单位成本”弱成本口径；`5/10` 用来测试 setup cost 在目标函数中达到可见比例后，time-indexed pseudo-schedule 和 ng-DSSR 的差异是否扩大。

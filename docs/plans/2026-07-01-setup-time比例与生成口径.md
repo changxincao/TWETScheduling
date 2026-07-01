@@ -55,3 +55,13 @@ Kramer 使用的并行机 ET/T 问题是在 Şen-Bülbül 数据上补充 sequen
 日志中 dual-bound pruning 的使用也不对称：time-indexed 两组均为 `pruned by dual bound=0`，原始组和 `setupR75` 分别主要靠 incumbent 剪掉 `15/16` 个节点；ng-DSSR 两组均为 `pruned by dual bound=12`，说明 dual bound pruning 对 ng-DSSR 分支树已有实际作用。
 
 为避免后续默认实验再次漏开主线组件，`GCBBFullDomainComparisonTest` 不再把 `runALNSForSeed` 默认覆盖为 `false`，而是沿用全局配置默认值并允许系统属性显式覆盖；`TWETBPCConfig.enableTwoStageStrongBranching` 也改为默认开启。后续如果要做消融，应显式传参关闭，而不是依赖默认值。
+
+## 2026-07-01 strong branching + ALNS 默认开启后的复跑
+
+按新的默认口径重新跑 40-2 原始算例和 setup-ratio 变体，均使用 setup cost 系数 `20`、strong branching 开启、ALNS seed 开启、route enumeration 关闭、dual-bound pruning 开启。time-indexed 组仍只使用 `TimeIndexedGraphPricingEngine`，不使用启发式 pricing；ng-DSSR 组使用 nearestK8/top10、`BEST_UB`、`allCycles` completion bound、subtree pricingOnly、midpoint probe/reuse 和 post-node time-indexed helper。
+
+原始 `wet040_001_2m` 上，time-indexed 结果为 `obj=28110,solve=408.675s,root=139.079s,nodes=22,pool=164539,exact=72.960s/1178,masterLP=265.614s`；ng-DSSR 结果为 `obj=28110,solve=521.157s,root=114.462s,nodes=8,pool=49887,heuristic=89.404s/199,exact=39.309s/64,masterLP=241.836s`。相比无 strong branching/ALNS 的旧对照，节点数明显下降，但强分支与更大的 seed/RMP 使 master LP 时间显著上升，原始组总时间反而变长。
+
+setup-ratio 变体目录这次由于 case filter 命中了 `wet040_001_2m_setupR25/R50/R75` 三个文件，三组都被跑完。time-indexed 结果分别为：`R25 obj=31893,solve=214.180s,root=111.845s,nodes=6,pool=84998`；`R50 obj=43625,solve=334.596s,root=60.035s,nodes=40,pool=160765`；`R75 obj=55007,solve=261.224s,root=88.995s,nodes=23,pool=136927`。ng-DSSR 结果分别为：`R25 ROOT_PROCESSED,obj=bound=31893,solve=131.461s,root=131.459s,nodes=1,pool=11717`；`R50 FINISHED,obj=43625,solve=258.703s,root=81.499s,nodes=5,pool=22961`；`R75 FINISHED,obj=55007,solve=386.189s,root=92.692s,nodes=11,pool=43074`。
+
+这轮更接近“主线默认增强”口径后，结论变得更细：ng-DSSR 的列池和节点数仍明显更小，R25/R50 上总时间也优于 time-indexed；但 R75 与原始组上，ng-DSSR 的启发式和 master LP 时间抵消了 exact pricing 较少的优势。time-indexed 在小整数 horizon 下仍能靠快速 DAG pricing 处理大量 pseudo-schedule 列，但 strong branching 后 master LP 成为主要耗时之一，不能只看 exact pricing 时间。

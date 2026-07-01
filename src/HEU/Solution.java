@@ -1015,12 +1015,18 @@ public class Solution {
 
 		double bestCost = 0;
 		// 计算s_h2*
-		PiecewiseLinearFunction merge12 = f1.shiftX(shift1).add(b2);
+		PiecewiseLinearFunction shiftedF1 = f1.shiftX(shift1);
+		PiecewiseLinearFunction merge12 = shiftedF1.add(b2);
+		shiftedF1.release();
 		// 此处b2可行域应该不需要特殊处理，f1移动以后的可行域就是b2的
-		if (merge12.isEmpty())
+		if (merge12.isEmpty()) {
+			merge12.release();
 			return Utility.curUpperBound;
+		}
 		double[] pairs12 = merge12.findMinimal(true, true);
 		double cost12 = pairs12[0];
+		double s_h2 = pairs12[1];
+		merge12.release();
 		if (Utility.compareGe(cost12 + b3_LB + bridgeCost, Utility.curUpperBound)) {
 			//这>=先不管，影响不大应该？
 //			Utility.debugNumPlus();
@@ -1029,14 +1035,19 @@ public class Solution {
 			
 			return Utility.curUpperBound;// 应该就可以直接返回了，不需要往后做了
 		}
-		double s_h2 = pairs12[1];
 
 		// 计算s_h3*
-		PiecewiseLinearFunction merge23 = f2.add(b3.shiftX(-shift2));
-		if (merge23.isEmpty())
+		PiecewiseLinearFunction shiftedB3 = b3.shiftX(-shift2);
+		PiecewiseLinearFunction merge23 = f2.add(shiftedB3);
+		shiftedB3.release();
+		if (merge23.isEmpty()) {
+			merge23.release();
 			return Utility.curUpperBound;
+		}
 		double[] pairs23 = merge23.findMinimal(true, false);
 		double cost23 = pairs23[0];
+		double s_h3 = pairs23[1];
+		merge23.release();
 		if (Utility.compareGe(cost23 + bridgeCost, Utility.curUpperBound)) {
 //			Utility.debugNumPlus();
 //			System.out.println("M错误？");// 假设不可能
@@ -1044,7 +1055,6 @@ public class Solution {
 			return Utility.curUpperBound;// 应该就可以直接返回了，不需要往后做了
 
 		}
-		double s_h3 = pairs23[1];
 		if (Utility.compareGe(s_h3 - s_h2, duration2)) {
 //			System.out.println("情况1");
 			bestCost = f1.evaluate(s_h2 - shift1) + b2.evaluate(s_h2) + f2.evaluate(s_h3) + b3.evaluate(s_h3 + shift2)
@@ -1053,15 +1063,22 @@ public class Solution {
 //			System.out.println("情况2");
 			double SplitBestCost = f2.findMinimal(true, true)[0];
 			f2.resetDomain(0, data.CmaxH);
-			PiecewiseLinearFunction newF = f1.shiftX(shift1).add(b2).add(f2.shiftX(-duration2))
-					.add(b3.shiftX(-shift2 - duration2));
+			PiecewiseLinearFunction shiftedF1ForAll = f1.shiftX(shift1);
+			PiecewiseLinearFunction merge12ForAll = shiftedF1ForAll.add(b2);
+			shiftedF1ForAll.release();
+			PiecewiseLinearFunction shiftedF2 = f2.shiftX(-duration2);
+			PiecewiseLinearFunction merge123ForAll = merge12ForAll.add(shiftedF2);
+			merge12ForAll.release();
+			shiftedF2.release();
+			PiecewiseLinearFunction shiftedB3ForAll = b3.shiftX(-shift2 - duration2);
+			PiecewiseLinearFunction newF = merge123ForAll.add(shiftedB3ForAll);
+			merge123ForAll.release();
+			shiftedB3ForAll.release();
 
 			double cost = newF.findMinimal(true, true)[0];
 			newF.release();
 			bestCost = cost - SplitBestCost;
 		}
-		merge12.release();
-		merge23.release();
 //		System.out.println("M3S:"+f1_LB+" "+f2_LB+" "+b3_LB+" "+bestCost);
 		return bestCost + bridgeCost;
 
@@ -1168,9 +1185,13 @@ public class Solution {
 			return f1_LB + b2_LB + bridgeCost;
 		}
 		double bestCost = 0;
-		PiecewiseLinearFunction newF = f1.add(b2.shiftX(-shift));
-		if (newF.isEmpty())
+		PiecewiseLinearFunction shiftedB2 = b2.shiftX(-shift);
+		PiecewiseLinearFunction newF = f1.add(shiftedB2);
+		shiftedB2.release();
+		if (newF.isEmpty()) {
+			newF.release();
 			return Utility.curUpperBound;
+		}
 		bestCost = newF.findMinimal(true, true)[0] + bridgeCost;
 		newF.release();
 //		System.out.println("M2S:"+f1_LB+" "+b2_LB+" "+bestCost);

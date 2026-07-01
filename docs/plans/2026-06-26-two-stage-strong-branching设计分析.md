@@ -214,3 +214,10 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 新 repair 和旧 repair 并存。旧 repair 仍只给当前新分支行加 slack，继续用于普通子节点和不适合 domain-filter 的分支。新 all-row repair 只在上述 strong branching trial 中使用，它给覆盖、机器数、外包列数量、arc/adjaency 分支行、SRI cut 行、tariff active/branch 行等已有核心约束的有限上下界加人工 slack。这里没有做纯“只最小化 slack 总量”的 Phase-I 模型，而是保留真实列成本并给 slack 一个 `big_M` 惩罚。原因是当前 pricing engine 的 reduced-cost 计算都基于真实列目标和原始 dual 分解；如果把真实列目标统一改成 0，需要给所有 pricing engine 额外实现 Phase-I objective 口径，改动面更大。当前版本等价于一个 big-M 人工变量 repair，语义更接近现有代码，也便于局部验证。后续如果需要严格纯 Phase-I，可以在这个入口上继续扩展。
 
 验证方面，排除历史 `src/BPC` 旧 VRP 包后，当前主线 Java 源码 `javac -encoding UTF-8` 编译通过；`git diff --check` 对本次修改文件通过。用 `wet040_001_2m` 的 time-indexed strong branching smoke 打开 `strongBranchingDomainRepair=true` 后，日志确认进入 `strong_branching_domain_rmp_build` 和 `strong_branching_domain_rmp`，120 秒限制下结果为 `status=TIME_LIMIT, obj=22582, bound=22487.647059, valid=true`。该 smoke 没触发 all-row slack repair，说明本次试探中筛后 LP 多数已可行；早先一次同口径 smoke 曾触发 domain repair phase，说明入口可达。当前结论是：新实现提供了可对比的实验分支，旧 repair 路径未被移除，默认关闭时不改变原流程。
+
+
+### 2026-07-01 domain-filtered repair smoke 对照结果
+
+补跑 `wet040_001_2m`、time-indexed graph pricing、strong branching、`maxNodes=2`、`solveTimeLimitSeconds=120` 的开关对照。关闭 domain repair 时，run 为 `tmp-domain-repair-timeindexed-smoke-off`，结果 `TIME_LIMIT, obj=22582, bound=22487.647059, exact=14.593s/349, valid=true`；打开 domain repair 时，run 为 `tmp-domain-repair-timeindexed-smoke-rerun`，结果 `TIME_LIMIT, obj=22582, bound=22487.647059, exact=8.375s/349, valid=true`。
+
+这个 smoke 不能证明整体求解已经变快，因为两次都在 120 秒限制附近被截断，且强分支试探路径不同。更可靠的局部信号是 strong trial LP 的单次成本下降：关闭时 `strong_branching_rmp=6.310s/4 calls`，平均约 `1.577s`，`strong_branching_after_column_filter=0.365s/3 calls`；打开时 `strong_branching_domain_rmp=21.760s/33 calls`，平均约 `0.659s`，`strong_branching_domain_after_column_filter=2.235s/32 calls`，平均约 `0.070s`。建模时间也从关闭时 `0.101s/4 calls`、平均 `25.219ms`，变为打开时 `0.215s/33 calls`、平均 `6.518ms`。因此当前结论是：预筛列确实降低了单个 trial RMP 的列规模和单次 LP 成本，但是否减少总时间要在完整 ng-DSSR 强分支场景下继续 A/B；本次 smoke 只能说明局部方向有效，不能直接说总求解已经变快。

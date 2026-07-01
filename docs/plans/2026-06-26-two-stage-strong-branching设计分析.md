@@ -261,3 +261,11 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 更准确地说，这个方案本质上就是改变 repair 的初始列准备方式。Phase 1 初始 trial 可以保留父节点正值列，即使其中有违反 child implied forbidden 的列，用它们保证“父节点可行解 + 新分支行”这个 repair 起点仍然容易建立；随后旧 repair 只给当前新增分支行挂 slack。等 repair 成功并进入筛列阶段时，再按 child 域删除违反约束的列，最终复用到正式队列的 seed 仍然是 child-compatible 的。这样不需要 all-row slack，也不需要额外设计“不可复用 child”的分支逻辑；关键只是把“repair 起点列”和“repair 后正式 seed”分清楚。
 
 因此若后续实现，最小改动方向不是恢复 all-row repair，而是在 strong branching trial 中新增一种“正值列保留 + 非正值域过滤”的 seed 准备方式：Phase 1 初始 trial 用它来降低列数并保持旧 repair 可行；repair/筛列完成后，复用 child 时使用筛选后的 child-compatible seed。这个方案比全行 slack repair 更贴近旧流程，预计改动也更小。
+
+### 2026-07-01 轻量 repair seed 实现与初步结果
+
+按上面的轻量方案新增 `enableStrongBranchingLightweightRepair`，默认关闭。常用 full-domain runner 通过 `twet.bpc.fullDomainCompare.strongBranchingLightweightRepair` 显式打开。实现只改变 strong branching Phase 1 的初始 seed：父节点当前 LP 正值机器列无条件保留，其它机器列按 child 兼容性过滤；列化外包列当前仍按 child 兼容性过滤，因为现有 `TWETMasterSolution` 只保存外包 job 聚合值，不直接保存正值外包列 id。后续 trial 仍调用旧 repair，即只给当前新增分支行挂 slack，不进入 all-row slack repair。
+
+在 `wet040_001_2m`、time-indexed graph pricing、strong branching、route enumeration 关闭、1800 秒限制的同口径配置下，结果如下。普通 strong repair 关闭轻量/全行方案时为 `219.165s, 11 nodes, pricing=694, pool=101464, exact=15.686s/613, masterLP=161.453s`。all-row domain repair 为 `272.984s, 9 nodes, pricing=1153, pool=111792, exact=12.964s/547, masterLP=134.166s`，虽然节点少但 repair/pricing 过多而变慢。轻量 repair seed 修正最终筛列口径后为 `172.349s, 9 nodes, pricing=1041, pool=109465, exact=15.068s/510, masterLP=116.871s, valid=true`，得到同一最优值 `22580`。
+
+从日志看，轻量方案没有引入 all-row repair phase，只出现旧的 `repair_slack_initial/repair_after_pricing`；strong trial 构造阶段记录为 `strong_branching_light_repair_rmp_build=0.499s/280 calls`，正式 master LP 中 `strong_branching_light_repair_rmp=52.784s/280`、`strong_branching_light_after_column_filter=19.138s/246`，FindFeasible 为 `2.716s/531`。因此当前初步结论是：这个变体确实比 all-row repair 更贴近旧流程，也比普通 strong repair 更快；但目前只在一个 time-indexed 40-2 算例上验证，仍应保持默认关闭，后续再在 ng-DSSR 和更大实例上复测。

@@ -314,10 +314,16 @@ public class PC {
 	}
 
 	public StrongBranchingTrialResult solveStrongBranchingRmpTrial(LP lp, boolean domainRepair) {
+		return solveStrongBranchingRmpTrial(lp, domainRepair, false);
+	}
+
+	public StrongBranchingTrialResult solveStrongBranchingRmpTrial(LP lp, boolean domainRepair,
+			boolean lightweightRepair) {
 		PricingControllerState savedState = saveControllerState();
 		try {
-			TWETMasterSolution solution = solveRelaxationTimed(lp,
-					domainRepair ? "strong_branching_domain_rmp" : "strong_branching_rmp");
+			String initialPhase = domainRepair ? "strong_branching_domain_rmp"
+					: (lightweightRepair ? "strong_branching_light_repair_rmp" : "strong_branching_rmp");
+			TWETMasterSolution solution = solveRelaxationTimed(lp, initialPhase);
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
@@ -335,12 +341,18 @@ public class PC {
 			}
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
-						config.branchSeedReducedCostAllowance);
-				solution = solveRelaxationTimed(lp,
-						repaired ? (domainRepair ? "strong_branching_domain_repair_after_column_filter"
-								: "strong_branching_repair_after_column_filter")
-								: (domainRepair ? "strong_branching_domain_after_column_filter"
-										: "strong_branching_after_column_filter"));
+						config.branchSeedReducedCostAllowance, !lightweightRepair);
+				String filterPhase;
+				if (repaired) {
+					filterPhase = domainRepair ? "strong_branching_domain_repair_after_column_filter"
+							: (lightweightRepair ? "strong_branching_light_repair_after_column_filter"
+									: "strong_branching_repair_after_column_filter");
+				} else {
+					filterPhase = domainRepair ? "strong_branching_domain_after_column_filter"
+							: (lightweightRepair ? "strong_branching_light_after_column_filter"
+									: "strong_branching_after_column_filter");
+				}
+				solution = solveRelaxationTimed(lp, filterPhase);
 				if (isTimeLimitReached()) {
 					return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 				}
@@ -349,7 +361,7 @@ public class PC {
 				}
 			}
 			return StrongBranchingTrialResult.from(lp, solution, false,
-					domainRepair ? "domain_rmp_trial" : "rmp_trial");
+					domainRepair ? "domain_rmp_trial" : (lightweightRepair ? "lightweight_rmp_trial" : "rmp_trial"));
 		} finally {
 			restoreControllerState(savedState);
 			resetAllPricingEngines();

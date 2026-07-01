@@ -3,9 +3,11 @@ package TWETBPC.LP;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.PriorityQueue;
+import java.util.Set;
 
 import Basic.Data;
 import Basic.LocalHorizonCmaxSolver;
@@ -480,15 +482,16 @@ public class Tree {
 			}
 			applySubtreeArcElimination(branchResult, subtreeArcElimination);
 			boolean domainRepair = useDomainFilteredStrongBranchingRepair(candidate, parentLp);
+			boolean lightweightRepair = !domainRepair && useLightweightStrongBranchingRepair(candidate, parentLp);
 			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(branchResult.getLeftNode(), parentLp,
-					domainRepair);
+					domainRepair, lightweightRepair);
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
 			if (leftTrial != null && leftTrial.isTimeLimited()) {
 				return new StrongBranchingSelection(branchResult, candidate, leftTrial, null, 0.0, false,
 						candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
 			}
 			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp,
-					domainRepair);
+					domainRepair, lightweightRepair);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
 			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
 					: strongBranchingScore(parentBound, leftTrial, rightTrial);
@@ -570,17 +573,21 @@ public class Tree {
 	}
 
 	private StrongBranchingTrialResult solveStrongBranchingRmpTrial(Node child, LP parentLp,
-			boolean domainRepair) {
+			boolean domainRepair, boolean lightweightRepair) {
 		if (domainRepair) {
 			prepareDomainFilteredChildSeedColumns(child, parentLp);
+		} else if (lightweightRepair) {
+			prepareLightweightRepairChildSeedColumns(child, parentLp);
 		} else {
 			prepareChildSeedColumns(child, parentLp);
 		}
 		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
 		try {
-			constructStrongBranchingTrialTimed(trial, child,
-					domainRepair ? "strong_branching_domain_rmp_build" : "strong_branching_rmp_build");
-			return pc.solveStrongBranchingRmpTrial(trial, domainRepair);
+			String phase = domainRepair ? "strong_branching_domain_rmp_build"
+					: (lightweightRepair ? "strong_branching_light_repair_rmp_build"
+							: "strong_branching_rmp_build");
+			constructStrongBranchingTrialTimed(trial, child, phase);
+			return pc.solveStrongBranchingRmpTrial(trial, domainRepair, lightweightRepair);
 		} finally {
 			trial.closeModel();
 		}
@@ -595,6 +602,49 @@ public class Tree {
 			return true;
 		}
 		return "outsourcing".equals(type) && parentLp != null && parentLp.isColumnizedOutsourcing();
+	}
+
+	private boolean useLightweightStrongBranchingRepair(StrongBranchingCandidate candidate, LP parentLp) {
+		if (!config.enableStrongBranchingLightweightRepair || candidate == null || parentLp == null) {
+			return false;
+		}
+		String type = candidate.getType();
+		if ("arc".equals(type)) {
+			return true;
+		}
+		return "outsourcing".equals(type) && parentLp.isColumnizedOutsourcing();
+	}
+
+	/**
+	 * 2026-07-01: strong branching 轻量 repair seed。父 LP 正值机器列先保留，用来维持旧 repair
+	 * 的可行起点；其它机器列按 child 域过滤，降低 trial RMP 规模。repair 成功后的正式筛列仍由
+	 * PC/LP 旧流程完成，本方法不引入 all-row slack。
+	 */
+	private void prepareLightweightRepairChildSeedColumns(Node child, LP parentLp) {
+		LinkedHashSet<Integer> seed = new LinkedHashSet<Integer>();
+		LinkedHashSet<Integer> outsourcingSeed = new LinkedHashSet<Integer>(child.seedOutsourcingColumnIds);
+		Set<Integer> positiveParentColumns = parentLp.getLastSolution() == null ? Collections.<Integer>emptySet()
+				: parentLp.getLastSolution().getColumnValues().keySet();
+		for (int id : child.seedColumnIds) {
+			TWETColumn column = pool.getColumn(id);
+			if (child.isColumnCompatible(column)) {
+				seed.add(Integer.valueOf(id));
+			}
+		}
+		for (int id : parentLp.getRestrictedColumnIds()) {
+			TWETColumn column = pool.getColumn(id);
+			if (positiveParentColumns.contains(Integer.valueOf(id)) || child.isColumnCompatible(column)) {
+				seed.add(Integer.valueOf(id));
+			}
+		}
+		for (int id : parentLp.getRestrictedOutsourcingColumnIds()) {
+			TWETOutsourcingColumn column = outsourcingPool.getColumn(id);
+			if (child.isOutsourcingColumnCompatible(column)) {
+				outsourcingSeed.add(Integer.valueOf(id));
+			}
+		}
+		child.seedColumnIds = new ArrayList<Integer>(seed);
+		child.seedOutsourcingColumnIds = new ArrayList<Integer>(outsourcingSeed);
 	}
 
 	private void prepareDomainFilteredChildSeedColumns(Node child, LP parentLp) {

@@ -909,6 +909,15 @@ public class LP {
 	 * repair 成功后，按当前 LP 的 reduced cost 筛出正式子节点列集。
 	 */
 	public void resetRestrictedColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance) {
+		resetRestrictedColumnsByCurrentReducedCost(maxColumns, reducedCostAllowance, true);
+	}
+
+	/**
+	 * 2026-07-01: strong branching 轻量 repair 需要把“正值列保留”限定在 repair 起点。
+	 * 当 keepPositiveIncompatible=false 时，筛列后的正式 seed 只保留 child-compatible 正值列。
+	 */
+	public void resetRestrictedColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance,
+			boolean keepPositiveIncompatible) {
 		if (cplex == null || lambdaByColumnId == null) {
 			return;
 		}
@@ -916,14 +925,18 @@ public class LP {
 		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
 		for (int columnId : restrictedColumnIds) {
 			TWETColumn column = pool.getColumn(columnId);
+			boolean compatible = isColumnCompatible(column);
 			if (isPositiveCurrentColumn(columnId)) {
-				// 2026-05-19: child LP 已经可行时，正值列构成当前可行解的一部分。
-				// 理论上这些基列的 reduced cost 通常为 0；这里先无条件保留它们，
-				// 再用低 reduced-cost 列补足，避免大量 0 reduced-cost 退化列按 id 截断时误删当前可行基。
-				selected.add(Integer.valueOf(columnId));
+				// 2026-05-19: child LP 已经可行时，正值列构成当前可行解的一部分；
+				// 默认保留它们，避免 reduced-cost 截断误删当前基。
+				// 2026-07-01: 轻量 repair trial 的最终 seed 不能长期保留违反 child 域的正值列，
+				// 因此允许调用方关闭这条兼容性豁免。
+				if (keepPositiveIncompatible || compatible) {
+					selected.add(Integer.valueOf(columnId));
+				}
 				continue;
 			}
-			if (!isColumnCompatible(column)) {
+			if (!compatible) {
 				continue;
 			}
 			double reducedCost = getColumnReducedCost(columnId);

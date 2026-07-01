@@ -95,6 +95,11 @@ public class TWETBPCConfig {
 	 * 当前暂停作为默认/常用入口方案，保持 false，继续使用旧 repair 流程。
 	 */
 	public boolean enableStrongBranchingDomainRepair = false;
+	/**
+	 * 2026-07-01: strong branching 轻量 repair 试验。Phase 1 初始 seed 保留父 LP 正值机器列，
+	 * 其它机器列按 child 域过滤；repair 仍走旧流程，只给当前新增分支行挂 slack。
+	 */
+	public boolean enableStrongBranchingLightweightRepair = false;
 	/** 2026-06-24: 节点 LP true-dual 闭合后，是否尝试枚举所有 rc < UB-LB 的列并解有限主问题。 */
 	public boolean enableRouteEnumeration = false;
 	/** 2026-06-24: 只有节点绝对 gap 小于该阈值时才触发 route enumeration。 */

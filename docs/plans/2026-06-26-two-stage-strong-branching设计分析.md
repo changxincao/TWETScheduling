@@ -269,3 +269,13 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 在 `wet040_001_2m`、time-indexed graph pricing、strong branching、route enumeration 关闭、1800 秒限制的同口径配置下，结果如下。普通 strong repair 关闭轻量/全行方案时为 `219.165s, 11 nodes, pricing=694, pool=101464, exact=15.686s/613, masterLP=161.453s`。all-row domain repair 为 `272.984s, 9 nodes, pricing=1153, pool=111792, exact=12.964s/547, masterLP=134.166s`，虽然节点少但 repair/pricing 过多而变慢。轻量 repair seed 修正最终筛列口径后为 `172.349s, 9 nodes, pricing=1041, pool=109465, exact=15.068s/510, masterLP=116.871s, valid=true`，得到同一最优值 `22580`。
 
 从日志看，轻量方案没有引入 all-row repair phase，只出现旧的 `repair_slack_initial/repair_after_pricing`；strong trial 构造阶段记录为 `strong_branching_light_repair_rmp_build=0.499s/280 calls`，正式 master LP 中 `strong_branching_light_repair_rmp=52.784s/280`、`strong_branching_light_after_column_filter=19.138s/246`，FindFeasible 为 `2.716s/531`。因此当前初步结论是：这个变体确实比 all-row repair 更贴近旧流程，也比普通 strong repair 更快；但目前只在一个 time-indexed 40-2 算例上验证，仍应保持默认关闭，后续再在 ng-DSSR 和更大实例上复测。
+
+### 2026-07-02 ng-DSSR top10 + bestUB 轻量 repair 对照
+
+为了避免前一次黑盒运行被 ALNS 初始阶段干扰，本次显式把 ALNS 限制为 30 秒，并打开 live trace。两组均使用 `wet040_001_2m` 原始 setup，`ng-DSSR nearestK8/top10`、`joinBest=bestUB`、two-stage strong branching、`completionBound=allCycles`、time-indexed 硬时间窗/标量加强、dual bound pruning、pricingOnly subtree arc elimination，route enumeration 关闭。两组唯一差异是 `enableStrongBranchingLightweightRepair`。
+
+普通 strong repair 结果为 `200.662s, 16 nodes, pricing=959, pool=79562, heuristic=44.484s/250, exact=30.309s/101, masterLP=59.561s, valid=true`。其中 strong branching 相关 LP 时间为 `strong_branching_rmp=32.267s/320`、`strong_branching_after_column_filter=18.099s/318`，phase2 heuristic 为 `34.191s/595`。
+
+轻量 repair seed 结果为 `189.187s, 15 nodes, pricing=887, pool=78569, heuristic=47.604s/223, exact=30.453s/95, masterLP=47.359s, valid=true`。其中 `strong_branching_light_repair_rmp=21.212s/320`，相比普通 repair 的 phase1 初始 LP 降低约 11 秒；筛列后 LP 基本相近，`17.652s/315`。最终总时间降低约 11.5 秒，约 5.7%。
+
+当前判断是：轻量 repair 在 ng-DSSR 下也有效，但收益主要来自 phase1 初始 trial LP 变小；整体收益会被启发式 pricing、exact ng-DSSR 和 phase2 heuristic 覆盖，因此没有 time-indexed 对照中那么明显。这个结果支持保留该开关继续测试，但还不足以直接默认开启，需要在 50/60 规模和放大时间算例上复测。

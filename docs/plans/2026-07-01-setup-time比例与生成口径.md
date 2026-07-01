@@ -29,3 +29,13 @@ Kramer 使用的并行机 ET/T 问题是在 Şen-Bülbül 数据上补充 sequen
 若只是对齐 Kramer/Cicirello，可以先使用 `setupR25/setupR50/setupR75` 三档，再叠加 setup cost 系数 `0/1/5/10`。若要覆盖更广的 SDST benchmark 口径，应再加入 `setupR10/setupR100/setupR125`，对应 SSD 系列中的 10%、100%、125% 场景。
 
 如果目标是构造更困难、更贴近生产族切换的 setup 结构，纯随机 setup 再三角闭包可能不够。更合理的下一步是增加 family/cluster setup 生成模式：同族 setup 很小或为 0，跨族 setup 较大，并在族间矩阵上保证三角不等式。这样能更稳定地保留长 setup 弧，而不是被随机中转路径大量压低。
+
+## 2026-07-01 setup cost 20 初步对照
+
+按 time-indexed no-cut、关闭旧启发式 pricing、关闭 strong branching、关闭 SRI/rank-1 cut 的口径，对原始 40-2 和 `setupR75` 做了 setup cost 系数 `20` 的短对照。两组均使用 `twet.data.setupCostFromTimeCoefficient=20`，不修改 `.dat` 文件。
+
+原始 `wet040_001_2m.dat` 的结果目录为 `test-results/bpc/tmp-timegraph-40-2-setupcost20-20260701`，结果为 `FINISHED,obj=bound=28110,solve=252.012s,root=15.027s,nodes=64,pool=240599`，time-indexed exact pricing 为 `185.421s/3002 calls`，总 pricing 轮数 `3016`，加入列 `240599`。
+
+`setupR75` 的结果目录为 `test-results/bpc/tmp-timegraph-40-2-setupR75-cost20-20260701`，结果为 `FINISHED,obj=bound=55007,solve=176.524s,root=17.174s,nodes=68,pool=143414`，time-indexed exact pricing 为 `131.691s/1731 calls`，总 pricing 轮数 `1750`，加入列 `143414`。
+
+这个结果不是“setup 更强一定更慢”。在当前 time-indexed pseudo-schedule 定价口径下，`setupR75 + cost20` 虽然 horizon 更大，单次 pricing 平均时间也略高，但它显著减少了负列数量、pricing 轮数和列池规模，因此总时间反而低于原始 setup + cost20。直观解释是：较强 setup time 与较高 setup cost 会抑制重复绕行和不自然 pseudo-schedule 的吸引力，使 LP 尾部可生成的负列减少。后续如果要判断 setup 对 time-indexed 和 ng-DSSR 的相对影响，应继续比较 `setupR25/R50/R75` 与 cost 系数 `0/1/5/10/20` 的矩阵，而不能只看单一强度。

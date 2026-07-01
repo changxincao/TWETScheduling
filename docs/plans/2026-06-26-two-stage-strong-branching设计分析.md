@@ -239,3 +239,9 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 总时间变慢的直接原因不是 root，而是后续 strong branching trial 的 repair 代价和额外未归类开销。打开后节点数从 `11` 降到 `9`，正式 exact pricing 从 `15.686s/613` 降到 `12.964s/547`，master LP 汇总也从 `161.453s` 降到 `134.166s`，这些局部指标看起来更好。但打开后新增了 `strong_branching_domain_repair_slack_initial=2.112s/46`、`strong_branching_domain_repair_after_pricing=2.190s/585`、`strong_branching_domain_repair_final=1.690s/25`、`strong_branching_domain_repair_after_column_filter=1.194s/25`，同时 `FindFeasible` 从 `0.262s/81` 增加到 `3.404s/606`，总 pricing 轮次从 `694` 增到 `1153`，列池从 `101464` 增到 `111792`。
 
 此外，总时间与已汇总的 master/pricing 时间之间的差额明显扩大：关闭时约 `219.165 - 161.453 - 15.686 - 0.262 = 41.764s`，打开时约 `272.984 - 134.166 - 12.964 - 3.404 = 122.450s`。这说明新模式还有大量时间没有落在 master LP / pricing summary 里。结合代码路径，主要嫌疑是 strong branching trial 前的 `prepareDomainFilteredChildSeedColumns()` 兼容性筛选：每个 candidate 的左右 child 都要扫描父节点 restricted columns，并对每条机器列调用 `child.isColumnCompatible()` 检查完整序列；pool/restricted 很大时，这部分是纯 Java 侧开销，不在 `LP.construct` 计时内，也不在 pricing 计时内。因此当前结论是：domain-filtered repair 确实能降低单个 trial RMP 的 LP 求解压力，但引入了更多 repair/pricing 和大量 Java 侧筛列扫描，在该实例上净效果为变慢。
+
+### 2026-07-01 domain-filtered repair 暂停结论
+
+结合完整 A/B 和后续原因复盘，当前 domain-filtered strong branching repair 暂停作为常用方案。核心原因不是单个 trial LP 是否能变小，而是筛列后不可行时引入了全行 slack repair：slack 变量数量明显增加，dual 会同时受覆盖、机器数、分支行等多类人工变量影响，pricing 在找可修复列时更容易来回跳动；目标中也会出现大量 `big_M` 惩罚项，使 LP 和定价的数值口径更重。当前实现采用“原始目标 + big-M slack”的形式，是为了兼容现有 pricing engine 的 reduced-cost 口径，但这本身会增加求解难度。若改成纯 slack Phase-I，理论上可行，但需要在 repair 期间切换目标、随后删除 slack 或重建模型，并为各 pricing engine 明确 Phase-I reduced-cost 口径，中间操作成本和复杂度都不小，预期收益不明确。
+
+因此当前决定是：底层实验代码保留，方便以后复查；`enableStrongBranchingDomainRepair` 继续保持 `false`；常用 full-domain runner 不再读取 `twet.bpc.fullDomainCompare.strongBranchingDomainRepair` 系统属性，避免历史命令残留参数误开。主线强分支仍使用之前的 repair 流程。

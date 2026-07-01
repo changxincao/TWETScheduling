@@ -361,9 +361,9 @@ public class GCBBFullDomainComparisonTest {
 		config.strongBranchingScoreEpsilon = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.strongBranchingScoreEpsilon",
 				Double.toString(config.strongBranchingScoreEpsilon)));
-		config.enableStrongBranchingDomainRepair = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.strongBranchingDomainRepair",
-				Boolean.toString(config.enableStrongBranchingDomainRepair)));
+		// 2026-07-01: domain-filtered all-row slack repair 已通过实验确认净效果变慢，
+		// 暂停 common runner 的系统属性入口，避免历史命令残留参数误开；底层代码保留供后续复核。
+		config.enableStrongBranchingDomainRepair = false;
 		config.enableRouteEnumeration = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumeration",
 				Boolean.toString(config.enableRouteEnumeration)));

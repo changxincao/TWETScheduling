@@ -90,7 +90,9 @@ public class TWETBPCConfig {
 	public double strongBranchingScoreEpsilon = 1.0e-6;
 	/**
 	 * 2026-07-01: 强分支试探的实验 repair 口径。只对 arc 分支和列化外包 membership 分支
-	 * 先按 child 域筛列，不可行时再用全行 slack repair。默认关闭，避免改变既有强分支路径。
+	 * 先按 child 域筛列，不可行时再用全行 slack repair。
+	 * 2026-07-01: 完整对照显示该方案会引入过多 slack/big-M repair 和 FindFeasible 调用，
+	 * 当前暂停作为默认/常用入口方案，保持 false，继续使用旧 repair 流程。
 	 */
 	public boolean enableStrongBranchingDomainRepair = false;
 	/** 2026-06-24: 节点 LP true-dual 闭合后，是否尝试枚举所有 rc < UB-LB 的列并解有限主问题。 */

@@ -52,6 +52,9 @@ public interface BPCTraceSink {
 	default void onMasterLpSolve(Node node, String phase, long elapsedNanos) {
 	}
 
+	default void onMasterLpBuild(Node node, String phase, int restrictedColumnCount, int poolSize, long elapsedNanos) {
+	}
+
 	default void onMasterLpSolution(Node node, String phase, TWETMasterSolution solution, int restrictedColumnCount,
 			int poolSize, long elapsedNanos) {
 	}

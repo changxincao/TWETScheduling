@@ -568,7 +568,7 @@ public class Tree {
 		prepareChildSeedColumns(child, parentLp);
 		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
 		try {
-			trial.construct(child, child.seedColumnIds);
+			constructStrongBranchingTrialTimed(trial, child, "strong_branching_rmp_build");
 			return pc.solveStrongBranchingRmpTrial(trial);
 		} finally {
 			trial.closeModel();
@@ -578,11 +578,19 @@ public class Tree {
 	private StrongBranchingTrialResult solveStrongBranchingHeuristicTrial(Node child) {
 		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
 		try {
-			trial.construct(child, child.seedColumnIds);
+			constructStrongBranchingTrialTimed(trial, child, "strong_branching_phase2_build");
 			return pc.solveStrongBranchingHeuristicTrial(trial);
 		} finally {
 			trial.closeModel();
 		}
+	}
+
+	private void constructStrongBranchingTrialTimed(LP trial, Node child, String phase) {
+		long start = System.nanoTime();
+		trial.construct(child, child.seedColumnIds);
+		long elapsed = System.nanoTime() - start;
+		int poolSize = pool.size() + (config.useColumnizedOutsourcing() ? outsourcingPool.size() : 0);
+		traceSink.onMasterLpBuild(child, phase, trial.getRestrictedColumnIds().size(), poolSize, elapsed);
 	}
 
 	private void applyTrialSeed(Node child, StrongBranchingTrialResult trial) {

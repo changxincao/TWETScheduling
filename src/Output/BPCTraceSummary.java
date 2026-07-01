@@ -61,6 +61,8 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private final LinkedHashMap<String, Long> pricingTimeNanos = new LinkedHashMap<String, Long>();
 	private final LinkedHashMap<String, Integer> masterLpCallCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Long> masterLpTimeNanos = new LinkedHashMap<String, Long>();
+	private final LinkedHashMap<String, Integer> masterLpBuildCallCount = new LinkedHashMap<String, Integer>();
+	private final LinkedHashMap<String, Long> masterLpBuildTimeNanos = new LinkedHashMap<String, Long>();
 	private final LinkedHashMap<String, Integer> cutCallCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> cutSuccessCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> cutCountByGenerator = new LinkedHashMap<String, Integer>();
@@ -207,6 +209,14 @@ public class BPCTraceSummary implements BPCTraceSink {
 			currentNodeProgress.masterLpCalls++;
 			currentNodeProgress.masterLpTimeNanos += elapsedNanos;
 		}
+	}
+
+	@Override
+	public void onMasterLpBuild(Node node, String phase, int restrictedColumnCount, int poolSize, long elapsedNanos) {
+		increment(masterLpBuildCallCount, phase, 1);
+		increment(masterLpBuildTimeNanos, phase, elapsedNanos);
+		eventLines.add(BPCOutputFormatters.formatMasterLpBuild(node == null ? -1 : node.id, phase,
+				restrictedColumnCount, poolSize, elapsedNanos));
 	}
 
 	@Override
@@ -607,6 +617,14 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public Map<String, Integer> getMasterLpCallCount() {
 		return Collections.unmodifiableMap(masterLpCallCount);
+	}
+
+	public Map<String, Long> getMasterLpBuildTimeNanos() {
+		return Collections.unmodifiableMap(masterLpBuildTimeNanos);
+	}
+
+	public Map<String, Integer> getMasterLpBuildCallCount() {
+		return Collections.unmodifiableMap(masterLpBuildCallCount);
 	}
 
 	public Map<String, Integer> getCutCallCount() {

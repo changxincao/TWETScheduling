@@ -74,6 +74,12 @@ public final class BPCStreamingTraceSink implements BPCTraceSink, AutoCloseable 
 	}
 
 	@Override
+	public void onMasterLpBuild(Node node, String phase, int restrictedColumnCount, int poolSize, long elapsedNanos) {
+		write(BPCOutputFormatters.formatMasterLpBuild(node == null ? -1 : node.id, phase, restrictedColumnCount,
+				poolSize, elapsedNanos));
+	}
+
+	@Override
 	public void onPricingCall(Node node, String engineName, boolean improved, int addedColumns, String message,
 			int poolSize, long elapsedNanos) {
 		write(BPCOutputFormatters.formatPricing(engineName, node.id, improved, addedColumns, poolSize, message,

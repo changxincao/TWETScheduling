@@ -59,6 +59,13 @@ public final class BPCOutputFormatters {
 				poolSize, nanosToMillis(elapsedNanos), safeMessage(solution.getMessage()));
 	}
 
+	public static String formatMasterLpBuild(int nodeId, String phase, int restrictedColumnCount, int poolSize,
+			long elapsedNanos) {
+		return String.format(Locale.US,
+				"MasterLPBuild node=%d phase=%s restrictedCols=%d pool=%d time=%.3f ms",
+				nodeId, safeMessage(phase), restrictedColumnCount, poolSize, nanosToMillis(elapsedNanos));
+	}
+
 	public static String formatCut(String generatorName, int nodeId, boolean separated, int addedCuts, int cutPoolSize,
 			String message) {
 		return String.format(Locale.US, "Cuts[%s] node=%d separated=%s addedCuts=%d cutPool=%d %s", generatorName,
@@ -128,6 +135,8 @@ public final class BPCOutputFormatters {
 				summary.getIntegerNodeCount()));
 		builder.append(String.format(Locale.US, "pricing rounds=%d, added columns=%d%n", summary.getPricingRounds(),
 				summary.getGeneratedColumns()));
+		appendTimingSection(builder, "master LP build time", summary.getMasterLpBuildTimeNanos(),
+				summary.getMasterLpBuildCallCount());
 		appendTimingSection(builder, "master LP time", summary.getMasterLpTimeNanos(),
 				summary.getMasterLpCallCount());
 		appendTimingSection(builder, "pricing time", summary.getPricingTimeNanos(), summary.getPricingCallCount());

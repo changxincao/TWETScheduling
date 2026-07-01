@@ -251,3 +251,11 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 结合完整 A/B 和后续原因复盘，当前 domain-filtered strong branching repair 暂停作为常用方案。核心原因不是单个 trial LP 是否能变小，而是筛列后不可行时引入了全行 slack repair：slack 变量数量明显增加，dual 会同时受覆盖、机器数、分支行等多类人工变量影响，pricing 在找可修复列时更容易来回跳动；目标中也会出现大量 `big_M` 惩罚项，使 LP 和定价的数值口径更重。当前实现采用“原始目标 + big-M slack”的形式，是为了兼容现有 pricing engine 的 reduced-cost 口径，但这本身会增加求解难度。若改成纯 slack Phase-I，理论上可行，但需要在 repair 期间切换目标、随后删除 slack 或重建模型，并为各 pricing engine 明确 Phase-I reduced-cost 口径，中间操作成本和复杂度都不小，预期收益不明确。
 
 因此当前决定是：底层实验代码保留，方便以后复查；`enableStrongBranchingDomainRepair` 继续保持 `false`；常用 full-domain runner 不再读取 `twet.bpc.fullDomainCompare.strongBranchingDomainRepair` 系统属性，避免历史命令残留参数误开。主线强分支仍使用之前的 repair 流程。
+
+### 2026-07-01 基于父节点正值列保留的轻量筛列 repair 思路
+
+新的判断是，domain-filtered all-row slack repair 暂停后，仍可以考虑一个更轻的变体：子节点 trial 初始列不再完整继承父节点 restricted 列，而是先删掉明显违反 child 域的非正值列，同时无条件保留父节点当前 LP 的正值列。这样做的目的，是让“父节点正值列 + 不加新分支行”仍然提供一个覆盖/机器数可行的支撑；随后带新分支行求 trial LP，如果不可行，理论上主要就是新增分支行导致的问题，仍可走旧 repair，只给当前新增分支行挂 slack，而不需要 all-row slack。
+
+这个思路总体是成立的，但有两个边界必须保留。第一，右支 `require(i,j)` 不能理解成每条机器列都必须包含 `i->j`。正式约束是所有被选列对该弧的访问和等于 1；其它机器列不含 `i->j` 是正常的。因此可提前删除的是违反 forbidden / branch-implied forbidden 域的列，例如左支中包含 forbidden arc 的非正值列，右支中包含 `i->k(k!=j)` 或 `h->j(h!=i)` 的非正值列，而不是所有不含 `i->j` 的列。第二，父节点正值列可以为了 repair 可行性临时保留，即使它违反 child implied forbidden；但 strong branching trial 若要把 child seed 复用到正式队列，最终 seed 不能长期保留这些违反 child 域的列。否则正式出队时 `strongBranchingSeedPrepared=true` 会跳过初始筛列，历史不兼容列可能继续留在 RMP 中。
+
+因此若后续实现，最小改动方向不是恢复 all-row repair，而是在 strong branching trial 中新增一种“正值列保留 + 非正值域过滤”的 seed 准备方式：Phase 1 初始 trial 用它来降低列数并保持旧 repair 可行；repair/筛列完成后，若要复用 child，则要确保复用 seed 只包含当前 child 兼容列，或者不要把该 trial 标成 `strongBranchingSeedPrepared`。这个方案比全行 slack repair 更贴近旧流程，预计改动也更小，但需要谨慎处理可复用 seed 的语义。

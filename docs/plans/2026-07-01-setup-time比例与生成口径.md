@@ -49,3 +49,9 @@ Kramer 使用的并行机 ET/T 问题是在 Şen-Bülbül 数据上补充 sequen
 `setupR75 + cost20` 结果目录为 `test-results/bpc/tmp-ngdssr-40-2-setupR75-cost20-20260701`，结果为 `FINISHED,obj=bound=55007,solve=220.409s,root=83.847s,nodes=28,pool=38617`。其中 heuristic pricing 为 `86.969s/543 calls`，ng-DSSR exact pricing 为 `65.160s/184 calls`，总 pricing 轮数 `731`，加入列约 `38617`。
 
 与同组 time-indexed no-cut 对照相比，ng-DSSR 在这两个小 horizon 算例上仍然更慢：原始 cost20 为 `325.217s` 对 `252.012s`，`setupR75 + cost20` 为 `220.409s` 对 `176.524s`。但是 ng-DSSR 的列池明显更小，原始组 `60066` 对 time-indexed 的 `240599`，`setupR75` 组 `38617` 对 time-indexed 的 `143414`。这说明 time-indexed 在小整数 horizon 下仍靠很快的离散 DAG 定价和大量 pseudo-schedule 列取胜；ng-DSSR 列更强、更少，但单次定价和启发式搜索更重。强 setup + 高 setup cost 在两种 pricing 下都减少了列数和 pricing 轮数，因此当前不能把 setup 强度简单等同于求解更难。
+
+配置复核时发现，这次 time-indexed 与 ng-DSSR 对照不是严格“只换 exact pricing”的口径。time-indexed 组使用纯 `TimeIndexedGraphPricingEngine`，启发式 pricing、ALNS seed、completion bound、probe、time-indexed helper 和 strong branching 均关闭；ng-DSSR 组则使用主线增强配置，包含启发式 pricing、ALNS seed、`allCycles` completion bound、subtree pricingOnly、midpoint probe/reuse、`BEST_UB` join、ng-set nearestK8/top10 以及 post-node time-indexed scalar/window/arc-fixing helper。因此这次结果只能说明小 horizon 下纯 time-indexed no-cut 仍很快，不能作为严格单因素 pricing engine 对照。
+
+日志中 dual-bound pruning 的使用也不对称：time-indexed 两组均为 `pruned by dual bound=0`，原始组和 `setupR75` 分别主要靠 incumbent 剪掉 `15/16` 个节点；ng-DSSR 两组均为 `pruned by dual bound=12`，说明 dual bound pruning 对 ng-DSSR 分支树已有实际作用。
+
+为避免后续默认实验再次漏开主线组件，`GCBBFullDomainComparisonTest` 不再把 `runALNSForSeed` 默认覆盖为 `false`，而是沿用全局配置默认值并允许系统属性显式覆盖；`TWETBPCConfig.enableTwoStageStrongBranching` 也改为默认开启。后续如果要做消融，应显式传参关闭，而不是依赖默认值。

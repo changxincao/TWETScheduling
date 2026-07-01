@@ -227,8 +227,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableBPCConsoleOutput = false;
 		config.writeBPCResultFiles = false;
 		config.reuseConfiguredBestSolution = false;
-		// 2026-06-02: 对照实验默认仍关闭 ALNS；需要验证完整 BPC 上界质量时可显式打开。
-		config.runALNSForSeed = Boolean.getBoolean("twet.bpc.fullDomainCompare.runALNSForSeed");
+		// 2026-07-01: full-domain 主线默认沿用全局 ALNS seed 设置；系统属性只做显式覆盖。
+		config.runALNSForSeed = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.runALNSForSeed", Boolean.toString(config.runALNSForSeed)));
 		config.alnsMaxRuntimeMillis = Long.getLong("twet.bpc.fullDomainCompare.alnsMaxMillis",
 				config.alnsMaxRuntimeMillis);
 		config.alnsMaxNoImproveIterations = Integer.getInteger("twet.bpc.fullDomainCompare.alnsMaxNoImprove",

@@ -78,8 +78,8 @@ public class TWETBPCConfig {
 	public boolean enableDualBoundPruning = true;
 	/** 2026-06-22: dual-bound 剪枝容差。 */
 	public double dualBoundPruningTolerance = 1e-7;
-	/** 2026-06-26: two-stage strong branching 实验开关，默认关闭，关闭时完全走原分支流程。 */
-	public boolean enableTwoStageStrongBranching = false;
+	/** 2026-07-01: two-stage strong branching 作为主线默认分支选择；可用配置显式关闭做消融。 */
+	public boolean enableTwoStageStrongBranching = true;
 	/** 2026-06-26: 第一阶段最多试探最接近 0.5 的分支候选数。 */
 	public int strongBranchingCandidateLimit = 20;
 	/** 2026-06-26: 第二阶段进入启发式 pricing 试探的候选数。 */

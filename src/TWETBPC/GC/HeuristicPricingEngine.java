@@ -171,9 +171,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return;
 		}
 		double bestReducedCost = state.reducedCost(lp);
-		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, activeSignatures,
-				generatedSignatures,
-				negativeCandidates, costAudit);
+		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, windowContext,
+				activeSignatures, generatedSignatures, negativeCandidates, costAudit);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
 		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates)
@@ -186,8 +185,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (Utility.compareLt(state.currentReducedCost, bestReducedCost)) {
 				bestReducedCost = state.currentReducedCost;
 			}
-			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, activeSignatures,
-					generatedSignatures, negativeCandidates, costAudit);
+			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, windowContext,
+					activeSignatures, generatedSignatures, negativeCandidates, costAudit);
 		}
 	}
 
@@ -239,7 +238,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private void tryAddNegative(List<Integer> sequence, double restrictedCost, double restrictedReducedCost, LP lp,
-			SriPricingContext sriContext,
+			SriPricingContext sriContext, HeuristicWindowContext windowContext,
 			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
 			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit) {
 		if (isHeuristicPoolFull(negativeCandidates)) {
@@ -253,8 +252,17 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (activeSignatures.contains(signature) || generatedSignatures.contains(signature)) {
 			return;
 		}
-		// 2026-06-29: tabu 搜索可以使用 node 继承的硬时间窗缩小函数定义域；但列池按 sequence
-		// 全局复用，永久写入的 TWETColumn.cost 必须回到原始 TWET 目标口径，避免把节点局部窗口成本带出本节点。
+		if (!windowContext.requiresTrueCostRecheck()) {
+			// 2026-07-01: compact window 是继承到当前子树的硬时间窗加强，先按窗口口径入 heuristic 列。
+			// dual profitable window 不是永久窗口，仍必须走下面的 true-cost recheck。
+			costAudit.observeSkippedTrueRecheck();
+			generatedSignatures.add(signature);
+			negativeCandidates.add(new ScoredSequence(sequence, restrictedCost, restrictedReducedCost));
+			return;
+		}
+
+		// 2026-06-29: dual window 是当前 dual 下的临时搜索窗口，返回列前必须回到原始 TWET 目标口径。
+		// compact window 的实验口径已经在上方提前返回，保留这段 true-cost recheck 便于后续恢复。
 		double trueCost = trueSequenceCost(sequence);
 		if (Utility.isBigMValue(trueCost)) {
 			return;
@@ -290,7 +298,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private HeuristicWindowContext unrestrictedWindowContext() {
-		return new HeuristicWindowContext(null, data.penaltyFunction[0], data.CmaxH, singletonProfileCache);
+		return new HeuristicWindowContext(null, data.penaltyFunction[0], data.CmaxH, singletonProfileCache, false);
 	}
 
 	/**
@@ -344,7 +352,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		horizon = Math.min(horizon, data.CmaxH);
 		PiecewiseLinearFunction sourcePenalty = data.penaltyFunction[0].setDomain(0.0, horizon);
 		SegmentProfile[] localSingletonProfiles = buildSingletonProfileCache(penalties);
-		return new HeuristicWindowContext(penalties, sourcePenalty, horizon, localSingletonProfiles);
+		return new HeuristicWindowContext(penalties, sourcePenalty, horizon, localSingletonProfiles, useDualWindow);
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
@@ -870,13 +878,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private final PiecewiseLinearFunction sourcePenalty;
 		private final double horizon;
 		private final SegmentProfile[] singletonProfiles;
+		private final boolean requiresTrueCostRecheck;
 
 		HeuristicWindowContext(PiecewiseLinearFunction[] penalties, PiecewiseLinearFunction sourcePenalty,
-				double horizon, SegmentProfile[] singletonProfiles) {
+				double horizon, SegmentProfile[] singletonProfiles, boolean requiresTrueCostRecheck) {
 			this.penalties = penalties;
 			this.sourcePenalty = sourcePenalty;
 			this.horizon = horizon;
 			this.singletonProfiles = singletonProfiles;
+			this.requiresTrueCostRecheck = requiresTrueCostRecheck;
 		}
 
 		PiecewiseLinearFunction penalty(int job) {
@@ -886,6 +896,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		SegmentProfile singletonProfile(int job) {
 			SegmentProfile cached = singletonProfiles[job];
 			return new SegmentProfile(cached.forward.copy(), cached.backward);
+		}
+
+		boolean requiresTrueCostRecheck() {
+			return requiresTrueCostRecheck;
 		}
 	}
 
@@ -1260,13 +1274,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	/**
 	 * 2026-06-30: 诊断启发式窗口口径和真实列成本的差异。
-	 * 启发式搜索可以用 node 局部窗口缩小函数定义域，但写入列池前必须回到原始目标口径；
-	 * 这里不额外触发 evaluator，只复用 tryAddNegative() 已经计算出的 trueCost。
+	 * 2026-07-01: compact-only 口径暂时跳过 true-cost recheck，这里记录跳过次数；dual window 仍记录真实差异。
 	 */
 	private static final class HeuristicCostAudit {
 		private int checked;
 		private int changedCost;
 		private int filteredByTrueReducedCost;
+		private int skippedTrueRecheck;
 		private double signedDeltaSum;
 		private double absDeltaMax;
 
@@ -1284,13 +1298,18 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 		}
 
+		void observeSkippedTrueRecheck() {
+			skippedTrueRecheck++;
+		}
+
 		String summary() {
 			if (checked == 0) {
-				return ", heuristicCostAudit checked=0";
+				return ", heuristicCostAudit checked=0, skippedTrueRecheck=" + skippedTrueRecheck;
 			}
 			return ", heuristicCostAudit checked=" + checked
 					+ ", changed=" + changedCost
 					+ ", filteredByTrueRc=" + filteredByTrueReducedCost
+					+ ", skippedTrueRecheck=" + skippedTrueRecheck
 					+ ", avgDelta=" + (signedDeltaSum / checked)
 					+ ", maxAbsDelta=" + absDeltaMax;
 		}

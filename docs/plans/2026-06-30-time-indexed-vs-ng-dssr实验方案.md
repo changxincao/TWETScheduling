@@ -111,3 +111,11 @@
 2026-07-01 继续复核启发式 pricing 只使用 compact window、不开 heuristic dual window 时是否需要重刷真实列成本。代码层面确认 `HeuristicPricingEngine.trueSequenceCost()` 使用 `unrestrictedWindowContext()`，即原始 `data.penaltyFunction` 和 `data.CmaxH`；`TWETColumnEvaluator` 也通过原始 `Data` 构造 scratch `Solution` 计算列成本，不会使用 compact/dual 裁剪后的惩罚函数。实验层面新增 `tmp-compact-only-audit-40-20260701`，配置关闭 `enableHeuristicDualProfitableWindow`、打开 time-indexed compact window 继承，处理到 4 个节点。结果显示 108 条启发式 pricing 记录、16433 个被检查候选中，63 个候选的窗口成本与 true cost 不一致，全部发生在子节点：node 2 为 3/1175，node 3 为 60/2190，最大差值 120；但 `filteredByTrueRc=0`，即没有候选因为 true reduced cost 重刷后变成非负而被过滤。此前 `tmp-heuristic-compact-cost-audit-20260630` 的 40-2 短样本为 14524/14524 全部不变；50-2 root 短样本 `tmp-compact-only-audit-50-20260701` 在 300 秒内只停留于 root heuristic 阶段，16582 个候选也全部不变，但该样本尚未进入继承 compact window 的子节点。
 
 由此当前判断为：compact window 的确比较“干净”，绝大多数启发式候选的窗口成本和真实成本一致，且已有样本中没有发现 true-cost 重刷会改变是否入池的结论；但它不是严格等价于原始成本，子节点上已经观察到少量候选成本变化。因此暂时不建议为了省这点成本而跳过 true-cost recheck。更稳妥的实现仍是“compact window 用于缩小启发式搜索空间，最终返回列前按原始目标重算成本”。如果后续要优化，可单独做一个 compact-only fast path，但需要先证明 compact window 是当前子树永久有效窗口，并且 Pool 中同一 sequence 的全局成本口径不会被其它节点复用语义破坏。
+
+### 2026-07-01 compact window 启发式列成本口径调整
+
+当前按实验口径暂时关闭启发式 pricing 在 compact window 下的 true-cost recheck，但保留 dual profitable window 下的重刷逻辑。理由是 compact window 来自当前子树可继承的硬时间窗加强，如果该窗口确实有效，则最优列不会依赖窗口外的完成时间；因此启发式在窗口内得到的较高成本可以作为当前子树口径的列成本使用，可能还会略微抬高 LP bound。这个判断不是全局序列最小成本等价证明，而是基于“compact window 已排除窗口外最优时间”的实验假设。
+
+边界需要记录清楚：dual profitable window 是当前 dual 下的临时窗口，不能继承到全局列成本，因此仍必须回到原始 TWET 目标口径重刷；compact window 口径下跳过重刷后，同一个 sequence 在不同 node/window 下可能存在不同成本口径，后续如果出现列池复用导致异常，需要优先回到这里排查。实现上没有删除 true-cost recheck，只是在 `HeuristicWindowContext.requiresTrueCostRecheck()` 为 false 时提前返回，并在日志中记录 `skippedTrueRecheck`。
+
+验证：`tmp-compact-no-recheck-40-20260701` 短测 120 秒，`wet040_001_2m`、ng-DSSR nearestK8/top10、关闭 heuristic dual window、打开 time-indexed compact window。日志显示启发式 pricing 行为变为 `heuristicCostAudit checked=0, skippedTrueRecheck=...`，说明 compact-only 候选不再重刷；dual-window 分支代码仍保留重刷路径。本次短测只验证行为和编译，不作为速度结论。

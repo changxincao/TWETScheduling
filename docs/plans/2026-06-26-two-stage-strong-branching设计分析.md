@@ -242,6 +242,12 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 
 ### 2026-07-01 domain-filtered repair 暂停结论
 
+用户原始原因记录如下，保留原口径，作为当前暂停该方案的直接依据：
+
+1、加入的slack变量过多，可能会导致找列的时候来回跳动？不像之前那样只在一个约束里边加入有针对性
+2、同样的，过多的slack会导致目标里边过多的M，这显然不利于求解，不管是什么
+3、现在用的是原始目标+M的方式，这确实可能导致求解更难，以及就算按之前说的只考虑目标里边保留slack，方案上可行，但需要来回变换模型目标，删除slack变量等等。估计效果也不会好，可能中间的操作也会吃掉时间。
+
 结合完整 A/B 和后续原因复盘，当前 domain-filtered strong branching repair 暂停作为常用方案。核心原因不是单个 trial LP 是否能变小，而是筛列后不可行时引入了全行 slack repair：slack 变量数量明显增加，dual 会同时受覆盖、机器数、分支行等多类人工变量影响，pricing 在找可修复列时更容易来回跳动；目标中也会出现大量 `big_M` 惩罚项，使 LP 和定价的数值口径更重。当前实现采用“原始目标 + big-M slack”的形式，是为了兼容现有 pricing engine 的 reduced-cost 口径，但这本身会增加求解难度。若改成纯 slack Phase-I，理论上可行，但需要在 repair 期间切换目标、随后删除 slack 或重建模型，并为各 pricing engine 明确 Phase-I reduced-cost 口径，中间操作成本和复杂度都不小，预期收益不明确。
 
 因此当前决定是：底层实验代码保留，方便以后复查；`enableStrongBranchingDomainRepair` 继续保持 `false`；常用 full-domain runner 不再读取 `twet.bpc.fullDomainCompare.strongBranchingDomainRepair` 系统属性，避免历史命令残留参数误开。主线强分支仍使用之前的 repair 流程。

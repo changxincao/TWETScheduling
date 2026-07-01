@@ -25,6 +25,8 @@ import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.GC.TimeIndexedScalarCompletionBound;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
+import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETOutsourcingColumn;
 import TWETBPC.LP.PC.StrongBranchingTrialResult;
 
 /**
@@ -477,13 +479,16 @@ public class Tree {
 				continue;
 			}
 			applySubtreeArcElimination(branchResult, subtreeArcElimination);
-			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(branchResult.getLeftNode(), parentLp);
+			boolean domainRepair = useDomainFilteredStrongBranchingRepair(candidate, parentLp);
+			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(branchResult.getLeftNode(), parentLp,
+					domainRepair);
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
 			if (leftTrial != null && leftTrial.isTimeLimited()) {
 				return new StrongBranchingSelection(branchResult, candidate, leftTrial, null, 0.0, false,
 						candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
 			}
-			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp);
+			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp,
+					domainRepair);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
 			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
 					: strongBranchingScore(parentBound, leftTrial, rightTrial);
@@ -564,15 +569,77 @@ public class Tree {
 		return builder.toString();
 	}
 
-	private StrongBranchingTrialResult solveStrongBranchingRmpTrial(Node child, LP parentLp) {
-		prepareChildSeedColumns(child, parentLp);
+	private StrongBranchingTrialResult solveStrongBranchingRmpTrial(Node child, LP parentLp,
+			boolean domainRepair) {
+		if (domainRepair) {
+			prepareDomainFilteredChildSeedColumns(child, parentLp);
+		} else {
+			prepareChildSeedColumns(child, parentLp);
+		}
 		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
 		try {
-			constructStrongBranchingTrialTimed(trial, child, "strong_branching_rmp_build");
-			return pc.solveStrongBranchingRmpTrial(trial);
+			constructStrongBranchingTrialTimed(trial, child,
+					domainRepair ? "strong_branching_domain_rmp_build" : "strong_branching_rmp_build");
+			return pc.solveStrongBranchingRmpTrial(trial, domainRepair);
 		} finally {
 			trial.closeModel();
 		}
+	}
+
+	private boolean useDomainFilteredStrongBranchingRepair(StrongBranchingCandidate candidate, LP parentLp) {
+		if (!config.enableStrongBranchingDomainRepair || candidate == null) {
+			return false;
+		}
+		String type = candidate.getType();
+		if ("arc".equals(type)) {
+			return true;
+		}
+		return "outsourcing".equals(type) && parentLp != null && parentLp.isColumnizedOutsourcing();
+	}
+
+	private void prepareDomainFilteredChildSeedColumns(Node child, LP parentLp) {
+		ArrayList<Integer> seed = new ArrayList<Integer>();
+		ArrayList<Integer> outsourcingSeed = new ArrayList<Integer>();
+		for (int id : child.seedColumnIds) {
+			TWETColumn column = pool.getColumn(id);
+			if (child.isColumnCompatible(column)) {
+				Integer value = Integer.valueOf(id);
+				if (!seed.contains(value)) {
+					seed.add(value);
+				}
+			}
+		}
+		if (parentLp != null) {
+			for (int id : parentLp.getRestrictedColumnIds()) {
+				TWETColumn column = pool.getColumn(id);
+				if (child.isColumnCompatible(column)) {
+					Integer value = Integer.valueOf(id);
+					if (!seed.contains(value)) {
+						seed.add(value);
+					}
+				}
+			}
+			for (int id : parentLp.getRestrictedOutsourcingColumnIds()) {
+				TWETOutsourcingColumn column = outsourcingPool.getColumn(id);
+				if (child.isOutsourcingColumnCompatible(column)) {
+					Integer value = Integer.valueOf(id);
+					if (!outsourcingSeed.contains(value)) {
+						outsourcingSeed.add(value);
+					}
+				}
+			}
+		}
+		for (int id : child.seedOutsourcingColumnIds) {
+			TWETOutsourcingColumn column = outsourcingPool.getColumn(id);
+			if (child.isOutsourcingColumnCompatible(column)) {
+				Integer value = Integer.valueOf(id);
+				if (!outsourcingSeed.contains(value)) {
+					outsourcingSeed.add(value);
+				}
+			}
+		}
+		child.seedColumnIds = seed;
+		child.seedOutsourcingColumnIds = outsourcingSeed;
 	}
 
 	private StrongBranchingTrialResult solveStrongBranchingHeuristicTrial(Node child) {

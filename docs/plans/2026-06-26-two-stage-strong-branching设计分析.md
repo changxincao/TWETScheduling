@@ -203,3 +203,14 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 在 `wet040_001_2m_setupR50`、setup cost 系数 20、ng-DSSR nearestK8、strong branching、ALNS seed、dual-bound pruning、completion bound 与 time-indexed helper 均按当前主线配置开启的验证 run 中，结果为：`master LP build time = 0.204s / 96 calls`，其中 phase1 build `0.187s / 80 calls`，phase2 build `0.017s / 16 calls`；对应的 strong branching LP solve time 为 `113.304s`，其中 phase1 初始 RMP `78.366s / 80 calls`，phase1 筛列后重解 `28.482s / 80 calls`，phase2 initial `5.663s / 16 calls`，phase2 heuristic 后重解 `0.793s / 104 calls`。同次 run 的 strong branching 启发式 pricing 为 `15.523s / 120 calls`。
 
 因此当前证据很明确：强分支慢的主要原因不是建模，而是 trial LP 求解，尤其是 phase1 的初始 RMP 和筛列后重解。建模耗时只占 strong branching LP 求解时间约 `0.18%`，即使继续优化 `LP.construct`，对总耗时的帮助也很小；后续若要加速，应优先减少 phase1 试探次数、降低 trial RMP 列规模、减少筛列后重解次数，或者把部分 trial 改成更粗的评分口径。
+
+
+## 2026-07-01 domain-filtered strong branching repair 实现记录
+
+本次按前面讨论的“先按 child 域筛列，再 repair”的思路，新增了一个默认关闭的实验开关 `enableStrongBranchingDomainRepair`。它只作用于 arc 分支和列化外包 membership 分支；机器数量、tariff segment、无向 adjacency 等分支仍走原来的 strong branching trial 和旧 repair。这样做的目的不是替换现有 repair，而是在那些可以明确用列域表达的分支上，先删除明显不兼容的继承列，降低 trial RMP 的规模，再看是否需要补列修复。
+
+具体流程为：strong branching Phase 1 为某个候选构造左右 child 后，如果开关打开且分支类型适用，就先从父节点当前 restricted internal columns 中保留 `child.isColumnCompatible()` 为真的列；列化外包时，也从父节点当前 restricted outsourcing columns 和 child 自带的 required outsourcing seed 中保留 `child.isOutsourcingColumnCompatible()` 为真的外包列。随后用这批筛后的 seed 构造 trial LP。若筛后 LP 可行，就继续按原 strong branching 逻辑做 reduced-cost 筛列和重解；若不可行，则进入新 all-row feasibility repair。
+
+新 repair 和旧 repair 并存。旧 repair 仍只给当前新分支行加 slack，继续用于普通子节点和不适合 domain-filter 的分支。新 all-row repair 只在上述 strong branching trial 中使用，它给覆盖、机器数、外包列数量、arc/adjaency 分支行、SRI cut 行、tariff active/branch 行等已有核心约束的有限上下界加人工 slack。这里没有做纯“只最小化 slack 总量”的 Phase-I 模型，而是保留真实列成本并给 slack 一个 `big_M` 惩罚。原因是当前 pricing engine 的 reduced-cost 计算都基于真实列目标和原始 dual 分解；如果把真实列目标统一改成 0，需要给所有 pricing engine 额外实现 Phase-I objective 口径，改动面更大。当前版本等价于一个 big-M 人工变量 repair，语义更接近现有代码，也便于局部验证。后续如果需要严格纯 Phase-I，可以在这个入口上继续扩展。
+
+验证方面，排除历史 `src/BPC` 旧 VRP 包后，当前主线 Java 源码 `javac -encoding UTF-8` 编译通过；`git diff --check` 对本次修改文件通过。用 `wet040_001_2m` 的 time-indexed strong branching smoke 打开 `strongBranchingDomainRepair=true` 后，日志确认进入 `strong_branching_domain_rmp_build` 和 `strong_branching_domain_rmp`，120 秒限制下结果为 `status=TIME_LIMIT, obj=22582, bound=22487.647059, valid=true`。该 smoke 没触发 all-row slack repair，说明本次试探中筛后 LP 多数已可行；早先一次同口径 smoke 曾触发 domain repair phase，说明入口可达。当前结论是：新实现提供了可对比的实验分支，旧 repair 路径未被移除，默认关闭时不改变原流程。

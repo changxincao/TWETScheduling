@@ -361,6 +361,9 @@ public class GCBBFullDomainComparisonTest {
 		config.strongBranchingScoreEpsilon = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.strongBranchingScoreEpsilon",
 				Double.toString(config.strongBranchingScoreEpsilon)));
+		config.enableStrongBranchingDomainRepair = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.strongBranchingDomainRepair",
+				Boolean.toString(config.enableStrongBranchingDomainRepair)));
 		config.enableRouteEnumeration = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumeration",
 				Boolean.toString(config.enableRouteEnumeration)));

@@ -72,6 +72,7 @@ public class LP {
 	private IloRange[] tariffBranchRanges;
 	private ArrayList<TariffSegment> outsourcingTariffSegments;
 	private boolean feasibilityRepairMode;
+	private boolean allRowFeasibilityRepairMode;
 
 	private double[] jobDual;
 	private double machineDual;
@@ -95,6 +96,7 @@ public class LP {
 		this.jobDual = new double[data.n + 1];
 		this.arcDual = new double[data.n + 2][data.n + 2];
 		this.feasibilityRepairMode = false;
+		this.allRowFeasibilityRepairMode = false;
 	}
 
 	public void construct(Node node, List<Integer> columnIds) {
@@ -186,6 +188,18 @@ public class LP {
 
 	public void setFeasibilityRepairMode(boolean enabled) {
 		this.feasibilityRepairMode = enabled;
+		if (!enabled) {
+			this.allRowFeasibilityRepairMode = false;
+		}
+		this.lastSolution = null;
+	}
+
+	/** 2026-07-01: strong branching 域筛列 repair 使用全行 slack，而旧 repair 仍只 slack 当前分支行。 */
+	public void setAllRowFeasibilityRepairMode(boolean enabled) {
+		this.allRowFeasibilityRepairMode = enabled;
+		if (enabled) {
+			this.feasibilityRepairMode = true;
+		}
 		this.lastSolution = null;
 	}
 
@@ -460,7 +474,11 @@ public class LP {
 			buildOutsourcingTariffConstraints();
 		}
 		if (feasibilityRepairMode) {
-			addFeasibilitySlacks();
+			if (allRowFeasibilityRepairMode) {
+				addAllRowFeasibilitySlacks();
+			} else {
+				addFeasibilitySlacks();
+			}
 		}
 	}
 
@@ -707,6 +725,59 @@ public class LP {
 		}
 		cplex.addEq(baselineFromJobs, baselineFromSegments, "outsourceBaseline");
 		cplex.addEq(active, 1.0, "outsourceOneSegment");
+	}
+
+	/**
+	 * 2026-07-01: 强分支实验 repair。先按 child 域筛列后，当前 RMP 可能已经不满足覆盖、机器数或分支行，
+	 * 因此这里给所有已保存的核心约束行按有限上下界加 slack。目标仍保留真实列成本并给 slack 大惩罚，
+	 * 这样和现有 pricing engine 的 reduced-cost 口径一致；旧 repair 仍只 slack 当前新分支行。
+	 */
+	private void addAllRowFeasibilitySlacks() throws IloException {
+		double penalty = Utility.big_M;
+		if (coverRanges != null) {
+			for (int job = 1; job < coverRanges.length; job++) {
+				addRangeRepairSlacks(coverRanges[job], "coverSlack_" + job, penalty);
+			}
+		}
+		addRangeRepairSlacks(machineRange, "machineSlack", penalty);
+		addRangeRepairSlacks(outsourcingColumnCountRange, "outsourcingColumnCountSlack", penalty);
+		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
+			addRangeRepairSlacks(entry.getValue(), "arcSlack_" + entry.getKey(), penalty);
+		}
+		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
+			addRangeRepairSlacks(entry.getValue(), "adjacencySlack_" + entry.getKey(), penalty);
+		}
+		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
+			addRangeRepairSlacks(entry.getValue(), "subsetRowSlack_" + entry.getKey(), penalty);
+		}
+		if (tariffActiveBounds != null) {
+			for (int i = 0; i < tariffActiveBounds.length; i++) {
+				addRangeRepairSlacks(tariffActiveBounds[i], "tariffActiveSlack_" + i, penalty);
+			}
+		}
+		if (tariffBranchRanges != null) {
+			for (int i = 0; i < tariffBranchRanges.length; i++) {
+				addRangeRepairSlacks(tariffBranchRanges[i], "tariffBranchSlack_" + i, penalty);
+			}
+		}
+	}
+
+	private void addRangeRepairSlacks(IloRange range, String name, double penalty) throws IloException {
+		if (range == null) {
+			return;
+		}
+		double lb = range.getLB();
+		double ub = range.getUB();
+		if (isFiniteRangeBound(lb)) {
+			addRepairSlack(range, 1.0, name + "_lb", penalty);
+		}
+		if (isFiniteRangeBound(ub)) {
+			addRepairSlack(range, -1.0, name + "_ub", penalty);
+		}
+	}
+
+	private boolean isFiniteRangeBound(double value) {
+		return Double.isFinite(value) && Math.abs(value) < 1.0e20;
 	}
 
 	/**

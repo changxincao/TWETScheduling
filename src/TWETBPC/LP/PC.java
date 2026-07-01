@@ -310,15 +310,21 @@ public class PC {
 	}
 
 	public StrongBranchingTrialResult solveStrongBranchingRmpTrial(LP lp) {
+		return solveStrongBranchingRmpTrial(lp, false);
+	}
+
+	public StrongBranchingTrialResult solveStrongBranchingRmpTrial(LP lp, boolean domainRepair) {
 		PricingControllerState savedState = saveControllerState();
 		try {
-			TWETMasterSolution solution = solveRelaxationTimed(lp, "strong_branching_rmp");
+			TWETMasterSolution solution = solveRelaxationTimed(lp,
+					domainRepair ? "strong_branching_domain_rmp" : "strong_branching_rmp");
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
 			boolean repaired = false;
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-				solution = repairInfeasibleMaster(lp, false);
+				solution = domainRepair ? repairDomainFilteredStrongBranchingMaster(lp)
+						: repairInfeasibleMaster(lp, false);
 				repaired = true;
 			}
 			if (isTimeLimitReached()) {
@@ -330,8 +336,11 @@ public class PC {
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 						config.branchSeedReducedCostAllowance);
-				solution = solveRelaxationTimed(lp, repaired ? "strong_branching_repair_after_column_filter"
-						: "strong_branching_after_column_filter");
+				solution = solveRelaxationTimed(lp,
+						repaired ? (domainRepair ? "strong_branching_domain_repair_after_column_filter"
+								: "strong_branching_repair_after_column_filter")
+								: (domainRepair ? "strong_branching_domain_after_column_filter"
+										: "strong_branching_after_column_filter"));
 				if (isTimeLimitReached()) {
 					return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 				}
@@ -339,7 +348,8 @@ public class PC {
 					return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible_after_filter");
 				}
 			}
-			return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial");
+			return StrongBranchingTrialResult.from(lp, solution, false,
+					domainRepair ? "domain_rmp_trial" : "rmp_trial");
 		} finally {
 			restoreControllerState(savedState);
 			resetAllPricingEngines();
@@ -834,6 +844,72 @@ public class PC {
 				a.outsourcingColumnDual - b.outsourcingColumnDual, arc);
 	}
 
+
+	private TWETMasterSolution repairDomainFilteredStrongBranchingMaster(LP lp) {
+		// 2026-07-01: strong branching 的实验修复路径。这里的 child seed 已经先按分支域筛过，
+		// 若 RMP 不可行，就给所有核心行加 slack 以找回覆盖/机器数/分支行可行性；旧 repair 不受影响。
+		lp.setAllRowFeasibilityRepairMode(true);
+		TWETMasterSolution solution = solveRelaxationTimed(lp, "strong_branching_domain_repair_slack_initial");
+		if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			lp.setFeasibilityRepairMode(false);
+			return solution;
+		}
+
+		int generatedForRepair = 0;
+		while (!lp.isNoSlack() && !isTimeLimitReached()) {
+			boolean addedInThisPass = false;
+			for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
+				PricingEngine engine = pricingEngines.get(engineIndex);
+				boolean addedByThisEngine = false;
+				boolean keepCurrentEngine = true;
+				while (keepCurrentEngine && !isTimeLimitReached()) {
+					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
+					HashSet<Integer> activeOutsourcingColumnIds =
+							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
+					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, activeColumnIds,
+							activeOutsourcingColumnIds, "strongBranchingDomainRepair", true, null, Double.NaN);
+					if (generated.isEmpty()) {
+						break;
+					}
+					int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
+							+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
+					generatedForRepair += addedColumns;
+					if (addedColumns == 0) {
+						break;
+					}
+					addedInThisPass = true;
+					addedByThisEngine = true;
+					solution = resolveCurrentModelTimed(lp, "strong_branching_domain_repair_after_pricing");
+					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+						lp.setFeasibilityRepairMode(false);
+						return solution;
+					}
+					keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted() && !lp.isNoSlack();
+				}
+				if (addedByThisEngine) {
+					resetFollowingPricingEngines(engineIndex + 1);
+				}
+			}
+			if (!addedInThisPass) {
+				break;
+			}
+		}
+
+		if (isTimeLimitReached()) {
+			lp.setFeasibilityRepairMode(false);
+			return solution;
+		}
+		if (!lp.isNoSlack()) {
+			lp.setFeasibilityRepairMode(false);
+			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
+					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
+					"Domain-filtered strong branching repair still has positive artificial slack after generating "
+							+ generatedForRepair + " columns");
+		}
+
+		lp.setFeasibilityRepairMode(false);
+		return solveRelaxationTimed(lp, "strong_branching_domain_repair_final");
+	}
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
 		return repairInfeasibleMaster(lp, true);

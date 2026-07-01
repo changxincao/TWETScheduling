@@ -88,6 +88,11 @@ public class TWETBPCConfig {
 	public int strongBranchingPhase2MaxHeuristicPasses = 0;
 	/** 2026-06-26: strong branching 评分里避免一侧提升为 0 导致 product 退化的极小值。 */
 	public double strongBranchingScoreEpsilon = 1.0e-6;
+	/**
+	 * 2026-07-01: 强分支试探的实验 repair 口径。只对 arc 分支和列化外包 membership 分支
+	 * 先按 child 域筛列，不可行时再用全行 slack repair。默认关闭，避免改变既有强分支路径。
+	 */
+	public boolean enableStrongBranchingDomainRepair = false;
 	/** 2026-06-24: 节点 LP true-dual 闭合后，是否尝试枚举所有 rc < UB-LB 的列并解有限主问题。 */
 	public boolean enableRouteEnumeration = false;
 	/** 2026-06-24: 只有节点绝对 gap 小于该阈值时才触发 route enumeration。 */

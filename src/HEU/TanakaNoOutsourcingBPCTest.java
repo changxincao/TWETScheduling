@@ -135,6 +135,7 @@ public class TanakaNoOutsourcingBPCTest {
 				Arrays.fill(data.s[i], 0, data.n + 1, 0);
 			}
 		}
+		applyDefaultSetupCostFromTime(data);
 		data.CmaxH = computeSafeHorizon(data);
 		data.CmaxE = data.CmaxH;
 		// 2026-06-28: 目标 Tanaka 算例覆写完任务和 setup 后，必须重新跑一次
@@ -155,6 +156,20 @@ public class TanakaNoOutsourcingBPCTest {
 		}
 		data.precomputeSetupCostAdvantages();
 		return data;
+	}
+
+	private static void applyDefaultSetupCostFromTime(Data data) {
+		double coefficient = Double.parseDouble(System.getProperty("twet.data.setupCostFromTimeCoefficient", "0.0"));
+		if (Utility.compareLe(coefficient, 0.0)) {
+			return;
+		}
+		// 2026-07-01: Tanaka loader 会在 Data 构造后重新覆盖 setup time，
+		// 因此 Data 构造器中的同名默认 setup-cost 逻辑会被清零，需要按最终 setup 重建。
+		for (int i = 0; i <= data.n; i++) {
+			for (int j = 0; j <= data.n; j++) {
+				data.setupCost[i][j] = i == j ? 0.0 : coefficient * data.s[i][j];
+			}
+		}
 	}
 
 	private static Data loadBaseDataQuietly() throws IOException {

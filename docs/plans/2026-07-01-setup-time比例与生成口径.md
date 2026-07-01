@@ -39,3 +39,13 @@ Kramer 使用的并行机 ET/T 问题是在 Şen-Bülbül 数据上补充 sequen
 `setupR75` 的结果目录为 `test-results/bpc/tmp-timegraph-40-2-setupR75-cost20-20260701`，结果为 `FINISHED,obj=bound=55007,solve=176.524s,root=17.174s,nodes=68,pool=143414`，time-indexed exact pricing 为 `131.691s/1731 calls`，总 pricing 轮数 `1750`，加入列 `143414`。
 
 这个结果不是“setup 更强一定更慢”。在当前 time-indexed pseudo-schedule 定价口径下，`setupR75 + cost20` 虽然 horizon 更大，单次 pricing 平均时间也略高，但它显著减少了负列数量、pricing 轮数和列池规模，因此总时间反而低于原始 setup + cost20。直观解释是：较强 setup time 与较高 setup cost 会抑制重复绕行和不自然 pseudo-schedule 的吸引力，使 LP 尾部可生成的负列减少。后续如果要判断 setup 对 time-indexed 和 ng-DSSR 的相对影响，应继续比较 `setupR25/R50/R75` 与 cost 系数 `0/1/5/10/20` 的矩阵，而不能只看单一强度。
+
+## 2026-07-01 ng-DSSR + setup cost 20 对照
+
+随后用主线 ng-DSSR 口径复跑同样两组，配置为 nearestK8/top10、BEST_UB、ALNS seed、启发式 pricing、allCycles completion bound、completion-bound arc fixing、pricingOnly subtree、midpoint probe/reuse、dual-bound pruning，并打开 post-node time-indexed scalar/window/arc-fixing helper；不使用 time-indexed graph pricing、SRI/rank-1 cut、partial dominance、route enumeration 和 strong branching。
+
+原始 `wet040_001_2m.dat + cost20` 结果目录为 `test-results/bpc/tmp-ngdssr-40-2-setupcost20-20260701`，结果为 `FINISHED,obj=bound=28110,solve=325.217s,root=81.676s,nodes=34,pool=60066`。其中 heuristic pricing 为 `157.608s/868 calls`，ng-DSSR exact pricing 为 `81.739s/249 calls`，总 pricing 轮数 `1121`，加入列约 `60066`。
+
+`setupR75 + cost20` 结果目录为 `test-results/bpc/tmp-ngdssr-40-2-setupR75-cost20-20260701`，结果为 `FINISHED,obj=bound=55007,solve=220.409s,root=83.847s,nodes=28,pool=38617`。其中 heuristic pricing 为 `86.969s/543 calls`，ng-DSSR exact pricing 为 `65.160s/184 calls`，总 pricing 轮数 `731`，加入列约 `38617`。
+
+与同组 time-indexed no-cut 对照相比，ng-DSSR 在这两个小 horizon 算例上仍然更慢：原始 cost20 为 `325.217s` 对 `252.012s`，`setupR75 + cost20` 为 `220.409s` 对 `176.524s`。但是 ng-DSSR 的列池明显更小，原始组 `60066` 对 time-indexed 的 `240599`，`setupR75` 组 `38617` 对 time-indexed 的 `143414`。这说明 time-indexed 在小整数 horizon 下仍靠很快的离散 DAG 定价和大量 pseudo-schedule 列取胜；ng-DSSR 列更强、更少，但单次定价和启发式搜索更重。强 setup + 高 setup cost 在两种 pricing 下都减少了列数和 pricing 轮数，因此当前不能把 setup 强度简单等同于求解更难。

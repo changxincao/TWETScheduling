@@ -398,6 +398,27 @@ public class Node implements Comparable<Node> {
 		return count == 0 ? Double.NaN : total / count;
 	}
 
+	/**
+	 * 2026-07-02: root time-indexed 预处理只把图上的禁弧和 compact window 证据传给主线 node。
+	 * 这里不复制 seed 列、cut、分支状态或 pseudo cost，避免临时 graph root 污染正式 ng-DSSR root。
+	 */
+	public void copyTimeIndexedPricingStateFrom(Node source) {
+		if (source == null) {
+			return;
+		}
+		timeIndexedPricingOnlyForbiddenArcTimesByPair = new HashMap<Integer, BitSet>();
+		for (Map.Entry<Integer, BitSet> entry : source.timeIndexedPricingOnlyForbiddenArcTimesByPair.entrySet()) {
+			timeIndexedPricingOnlyForbiddenArcTimesByPair.put(entry.getKey(), (BitSet) entry.getValue().clone());
+		}
+		timeIndexedPricingOnlyForbiddenArcCount = source.timeIndexedPricingOnlyForbiddenArcCount;
+		timeIndexedPricingOnlyArcStoreAllowed = source.timeIndexedPricingOnlyArcStoreAllowed;
+		timeIndexedPricingOnlyArcStoreHorizon = source.timeIndexedPricingOnlyArcStoreHorizon;
+		timeIndexedPricingWindowStartByJob = source.timeIndexedPricingWindowStartByJob == null ? null
+				: source.timeIndexedPricingWindowStartByJob.clone();
+		timeIndexedPricingWindowEndByJob = source.timeIndexedPricingWindowEndByJob == null ? null
+				: source.timeIndexedPricingWindowEndByJob.clone();
+	}
+
 	private void ensureTimeIndexedPricingWindows() {
 		if (timeIndexedPricingWindowStartByJob != null) {
 			return;

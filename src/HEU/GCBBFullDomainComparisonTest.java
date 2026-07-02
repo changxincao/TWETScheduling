@@ -320,6 +320,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useTimeIndexedGraphRank1CutPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphRank1CutPricing",
 				Boolean.toString(config.useTimeIndexedGraphRank1CutPricing)));
+		config.enableTimeIndexedRootPreprocessingForNgDssr = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedRootPreprocessingForNgDssr",
+				Boolean.toString(config.enableTimeIndexedRootPreprocessingForNgDssr)));
 		config.outsourcingModel = System.getProperty("twet.bpc.fullDomainCompare.outsourcingModel",
 				config.outsourcingModel);
 		config.enableDualStabilization = Boolean.parseBoolean(System.getProperty(

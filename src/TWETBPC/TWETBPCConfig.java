@@ -299,6 +299,12 @@ public class TWETBPCConfig {
 	 */
 	public int timeIndexedGraphMaxExactPricingColumns = 300;
 	/**
+	 * 2026-07-02: ng-DSSR 主线可选的 root 预处理实验。
+	 * 先用独立 no-cut time-indexed root 完整闭合，再只把其 arc fixing / compact window
+	 * 证据转给真正的 ng-DSSR root；临时 graph 列不进入主线列池。
+	 */
+	public boolean enableTimeIndexedRootPreprocessingForNgDssr = false;
+	/**
 	 * 2026-05-26: 单向 forward exact pricing 的 label 扩展队列排序。
 	 * 可选值：reducedCost、time、reachableSize。
 	 */

@@ -97,6 +97,13 @@ public class Tree {
 		int processedNodes = 0;
 		boolean stoppedByTimeLimit = false;
 
+		if (config.enableTimeIndexedRootPreprocessingForNgDssr) {
+			heartbeat(root, "timeIndexedRootPreprocess.start");
+			TimeIndexedRootPreprocessor.Result preprocessResult = TimeIndexedRootPreprocessor.run(data, config, pool,
+					root, incumbentCost, traceSink, timeLimitChecker);
+			heartbeat(root, preprocessResult.summary());
+		}
+
 		while (!queue.isEmpty() && processedNodes < config.maxNodes && !isSolveTimeLimitReached(solveStartNanos)) {
 			Node node = queue.poll();
 			node.id = ++processedNodes;

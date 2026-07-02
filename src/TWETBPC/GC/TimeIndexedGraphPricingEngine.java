@@ -103,6 +103,79 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		return new GraphWindow(discreteHorizon, start, end, dualWindow);
 	}
 
+	/**
+	 * 2026-07-02: Aggregate time-expanded fixing back to ordinary pricing-only arcs.
+	 * A normal arc is disabled only when no feasible time copy remains in the same
+	 * time-indexed graph window used by the preprocessing LP.
+	 */
+	public static int promoteFullyForbiddenTimeIndexedArcsToPricingOnly(Data data, LP graphLp, Node targetNode) {
+		if (data == null || graphLp == null || targetNode == null) {
+			return 0;
+		}
+		GraphWindow window = computeGraphWindow(data, graphLp);
+		int promoted = 0;
+		for (int from = 0; from <= data.n; from++) {
+			for (int to = 1; to <= data.n; to++) {
+				if (from == to || targetNode.isArcForbidden(from, to) || targetNode.isPricingOnlyArcForbidden(from, to)) {
+					continue;
+				}
+				if (!hasAvailableTimeIndexedProcessCopy(data, targetNode, window, from, to)) {
+					targetNode.forbidPricingOnlyArc(from, to);
+					promoted++;
+				}
+			}
+		}
+		int sink = targetNode.sinkId();
+		for (int job = 1; job <= data.n; job++) {
+			if (targetNode.isArcForbidden(job, sink) || targetNode.isPricingOnlyArcForbidden(job, sink)) {
+				continue;
+			}
+			if (!hasAvailableTimeIndexedEndCopy(data, targetNode, window, job)) {
+				targetNode.forbidPricingOnlyArc(job, sink);
+				promoted++;
+			}
+		}
+		return promoted;
+	}
+
+	private static boolean hasAvailableTimeIndexedProcessCopy(Data data, Node node, GraphWindow window, int from, int to) {
+		int duration = (int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
+		if (duration < 0) {
+			return false;
+		}
+		int start = Math.max(0, (int) Math.ceil(window.start[to] - duration - 1e-9));
+		int end = Math.min(window.horizon - duration, (int) Math.floor(window.end[to] - duration + 1e-9));
+		for (int time = start; time <= end; time++) {
+			int completion = time + duration;
+			if (isGraphCompletionFeasible(data, window, to, completion)
+					&& !node.isTimeIndexedPricingOnlyArcForbidden(from, to, time)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean hasAvailableTimeIndexedEndCopy(Data data, Node node, GraphWindow window, int job) {
+		int start = Math.max(0, (int) Math.ceil(window.start[job] - 1e-9));
+		int end = Math.min(window.horizon, (int) Math.floor(window.end[job] + 1e-9));
+		for (int time = start; time <= end; time++) {
+			if (isGraphCompletionFeasible(data, window, job, time)
+					&& !node.isTimeIndexedPricingOnlyArcForbidden(job, 0, time)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean isGraphCompletionFeasible(Data data, GraphWindow window, int job, int completion) {
+		if (completion < 0 || completion > window.horizon
+				|| Utility.compareLt(completion, window.start[job])
+				|| Utility.compareGt(completion, window.end[job])) {
+			return false;
+		}
+		double penalty = data.penaltyFunction[job].evaluate(completion);
+		return !Utility.isBigMValue(penalty);
+	}
 	private static boolean canUseDualProfitableWindow(LP lp) {
 		if (lp == null || lp.getNode() == null || lp.getNode().depth != 0) {
 			return false;

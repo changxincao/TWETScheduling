@@ -75,7 +75,9 @@ final class TimeIndexedRootPreprocessor {
 			TimeIndexedScalarCompletionBound.ArcFixingResult scalarFix =
 					TimeIndexedScalarCompletionBound.applyArcFixing(data, preConfig, preLp, incumbentCost);
 			root.copyTimeIndexedPricingStateFrom(preRoot);
-			return Result.applied(prePool.size(), preRoot.countTimeIndexedPricingOnlyForbiddenArcs(),
+			int promotedOrdinaryArcs =
+					TimeIndexedGraphPricingEngine.promoteFullyForbiddenTimeIndexedArcsToPricingOnly(data, preLp, root);
+			return Result.applied(prePool.size(), preRoot.countTimeIndexedPricingOnlyForbiddenArcs(), promotedOrdinaryArcs,
 					preRoot.countTimeIndexedPricingWindowTightenedJobs(), preRoot.averageTimeIndexedPricingWindowLength(),
 					preRoot.averageTimeIndexedPricingWindowShrinkRatio(), graphFix.summary(), scalarFix.summary(),
 					System.nanoTime() - start);
@@ -157,10 +159,11 @@ final class TimeIndexedRootPreprocessor {
 			return new Result(false, message, 0L);
 		}
 
-		static Result applied(int tempPoolSize, int timeArcCount, int tightenedJobs, double avgWindowLength,
-				double avgShrinkRatio, String graphSummary, String scalarSummary, long elapsedNanos) {
+		static Result applied(int tempPoolSize, int timeArcCount, int promotedOrdinaryArcs, int tightenedJobs,
+				double avgWindowLength, double avgShrinkRatio, String graphSummary, String scalarSummary, long elapsedNanos) {
 			String message = "applied tempPool=" + tempPoolSize
 					+ ", timeArcs=" + timeArcCount
+					+ ", promotedOrdinaryArcs=" + promotedOrdinaryArcs
 					+ ", windowJobs=" + tightenedJobs
 					+ ", avgWindowLen=" + format(avgWindowLength)
 					+ ", avgShrinkRatio=" + format(avgShrinkRatio)

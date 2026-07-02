@@ -278,6 +278,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrRoundsExecuted;
 	private int ngDssrTotalNgSetUpdates;
 	private int ngDssrTotalNonElementaryRoutes;
+	private int ngDssrTotalNonElementaryNegativeSeen;
+	private int ngDssrTotalElementaryColumnsReturned;
+	private int ngDssrRoundNonElementaryNegativeSeen;
+	private int ngDssrRoundElementaryColumnsReturned;
 	private boolean ngDssrTraceNgSetStats;
 	private StringBuilder ngDssrNgSetStatsByRound;
 	private boolean sriPricingEnabled;
@@ -461,7 +465,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void appendNgDssrSummary(String reason) {
 		lastMessage = lastMessage + " | ng-DSSR reason=" + reason
 				+ ", rounds=" + ngDssrRoundsExecuted
-				+ ", totalNonElementaryRoutes=" + ngDssrTotalNonElementaryRoutes
+				+ ", totalNonElementarySeen=" + ngDssrTotalNonElementaryNegativeSeen
+				+ ", totalNonElementaryStored=" + ngDssrTotalNonElementaryRoutes
+				+ ", totalElementaryReturned=" + ngDssrTotalElementaryColumnsReturned
 				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
 				+ ngSetStatsSummary();
 	}
@@ -476,6 +482,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrRoundsExecuted = 0;
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
+		ngDssrTotalNonElementaryNegativeSeen = 0;
+		ngDssrTotalElementaryColumnsReturned = 0;
 		ngDssrTraceNgSetStats = Boolean.getBoolean("twet.bpc.ngDssrSetStats")
 				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetStats");
 		ngDssrNgSetStatsByRound = ngDssrTraceNgSetStats ? new StringBuilder() : null;
@@ -490,8 +498,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		for (ngDssrRound = 1; !this.timeLimitChecker.isTimeLimitReached(); ngDssrRound++) {
 			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
+			ngDssrRoundNonElementaryNegativeSeen = 0;
+			ngDssrRoundElementaryColumnsReturned = 0;
 			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
 			ngDssrRoundsExecuted = ngDssrRound;
+			ngDssrRoundElementaryColumnsReturned = columns.size();
+			ngDssrTotalElementaryColumnsReturned += ngDssrRoundElementaryColumnsReturned;
+			ngDssrTotalNonElementaryNegativeSeen += ngDssrRoundNonElementaryNegativeSeen;
 			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeRoutes.size();
 			if (!columns.isEmpty()) {
 				appendNgSetStatsForRound(0);
@@ -538,7 +551,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append('=').append(String.format("%.3f", avg))
 				.append('/').append(min == Integer.MAX_VALUE ? 0 : min)
 				.append('/').append(max)
-				.append("/u").append(changed);
+				.append("/u").append(changed)
+				.append("/neSeen").append(ngDssrRoundNonElementaryNegativeSeen)
+				.append("/neStored").append(nonElementaryNegativeRoutes == null ? 0 : nonElementaryNegativeRoutes.size())
+				.append("/elem").append(ngDssrRoundElementaryColumnsReturned);
 	}
 
 	private String ngSetStatsSummary() {
@@ -3697,6 +3713,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| nonElementaryNegativeRoutes == null) {
 			return;
 		}
+		ngDssrRoundNonElementaryNegativeSeen++;
 		int limit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
 		for (int i = 0; i < nonElementaryNegativeRoutes.size(); i++) {
 			NonElementaryNegativeRoute route = nonElementaryNegativeRoutes.get(i);

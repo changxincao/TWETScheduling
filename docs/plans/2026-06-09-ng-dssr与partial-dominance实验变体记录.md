@@ -1339,3 +1339,23 @@ ng-set 统计显示，该口径把平均 ng-set 控制在很小范围但收紧�
 差异的主要原因不是非根节点列更少这么简单，而是分支、pricing-only/subtree arc fixing、time-indexed compact window 和 dual-bound pruning 共同缩小了后续 label 空间。root 的典型 exact pricing 中，completion bound 构造约 `0.66s-0.82s`，forward/backward bound 内部合并常在数万次 merge 量级，forward extend candidates 可到 `2万-3.5万`，join groups 也在数千到一万级。非根节点例如 node45，单次 exact pricing 约 `20ms-22ms`，completion bound 构造约 `9ms-10ms`，forward extend candidates 降到约 `5900-6900`，join groups 约 `250-400`，time-indexed scalar 还能额外剪掉约 `193-234` 个状态，forward reachable 平均也从 root 的约 `33-34` 降到约 `16-17`。
 
 此外，这次 run 中有 22 个节点以 `pruned_by_dual_bound` 关闭，说明非根节点不一定都需要完全靠反复加列把 LP 闭合到很深。分支后的可行弧、时间窗和已有 incumbent 共同让 dual bound 更容易直接证明当前节点不可能改进。因此当前观察支持一个判断：ng-DSSR 在 root 上仍然承担最大 closure 压力；非根节点如果能继承足够强的 arc/window 缩减和 dual-bound pruning，单个节点 exact pricing 成本可以非常低。
+
+138. 2026-07-02 DSSR ng-set 更新统计后续方向
+
+后续可以在 ng-DSSR 里继续补一类统计：每轮 DSSR 更新后平均/最小/最大 ng-set 大小、非基本负 route 数量、最终 elementary 负列数量。这个内容属于 ng-DSSR 更新策略本身，不属于 time-indexed root preprocessing，因此记录在本专题下。当前判断是：若初始 ng-set 很小也能快速收敛，说明 ng 更新不需要一次加入很多点；若大量非基本负 route 最后没有转化为 elementary 负列，则说明激进更新可能放大 label 状态、削弱 dominance 或增加 DSSR 轮次。
+
+这类统计可以服务于后续三个参数判断：nearestK/topK 应该取多大、`ngDssrRouteUpdateLimit` 是否需要随实例动态调整、以及是否应优先使用 reduced cost 最好的非基本 route 更新 ng-set。前面 40-2 的 `empty1/top1` 和 `nearestK3/top3` 对照已经说明，过慢更新会显著增加 DSSR 轮次和 exact calls；因此后续更值得试的是“初始小、更新不太慢”的折中口径，而不是单纯把 ng-set 压到最小。
+
+139. 2026-07-02 setupR25/R50/R75 empty1/top1 ng-set 统计实验
+
+按用户要求继续观察最小 ng-set 更新口径在 setupR 系列上的行为。本轮只打开诊断统计，不改变定价逻辑：`ngDssrInitialMode=empty`、`ngDssrInitialSize=1`，即每个任务初始 ng-set 只包含自己；`ngDssrRouteUpdateLimit=1`，即每轮没有 elementary 负列时只用当前 reduced cost 最好的 1 条 non-elementary negative route 更新。其余配置沿用当前 no-SRI/no-partial 的 ng-DSSR 主线加速口径：ALNS seed、启发式 pricing、`joinBest=BEST_UB`、allCycles completion bound、scalar/arc fixing/subtree/pricingOnly、midpoint probe/reuse、dual-bound pruning 和 setup cost 系数 20；强分支和 route enumeration 关闭。本轮结果目录为 `test-results/bpc/tmp-ngdssr-40-2-setupR-empty1-top1-ngstats-20260702/`。
+
+本次同时扩展了 `twet.bpc.fullDomainCompare.ngDssrSetStats` 的输出字段。原来只记录每轮 ng-set 的 `avg/min/max/u` 和被存下来的 non-elementary route 数；现在每个 DSSR round 还会记录本轮观察到的 raw non-elementary negative route 数 `neSeen`、进入 top-K 更新池的数量 `neStored`、以及本轮最终返回的 elementary 列数 `elem`。summary 里同步给出 `totalNonElementarySeen`、`totalNonElementaryStored`、`totalElementaryReturned` 和 `totalNgSetUpdates`。这些字段只用于日志统计，不参与 dominance、join、更新或入列判断。
+
+三组求解结果均通过 validator。R25 为 `ROOT_PROCESSED, obj=bound=31893, solve=171.158s, exact=41.654s/29 calls`；R50 为 `FINISHED, obj=bound=43625, solve=134.185s, exact=42.293s/96 calls`；R75 为 `FINISHED, obj=bound=55007, solve=274.880s, exact=116.621s/296 calls`。和之前同系列 `nearestK8/top10` 当前基线相比，R50 明显变快，R75 基本接近，R25 反而更慢；由于初始 ng-set 和更新策略都不同，这里主要用于观察 DSSR 收紧形态，不把它当成最终默认配置结论。
+
+统计口径只看“本次 exact pricing 最终返回 elementary 负列”的 DSSR 调用。R25 中共有 28 次返回 elementary 列，DSSR round 数平均 `3.893`，最少 `2`，最多 `12`；返回 elementary 时最终 ng-set 平均大小的均值为 `1.588`，最小平均 `1.450`，最大平均 `2.075`，各 job 的最小 size 始终为 `1`，最大 size 在 `3-4`。这些调用平均每次看到 `3115.1` 条 non-elementary negative route，总计 `87223` 条；平均返回 elementary 列 `8.14` 条，总计 `228` 条。
+
+R50 中共有 90 次返回 elementary 列，DSSR round 数平均 `3.544`，最少 `1`，最多 `14`；最终 ng-set 平均大小的均值为 `1.646`，范围 `1.000-2.875`，各 job 最大 size 可到 `8`。这些调用平均每次看到 `6838.5` 条 non-elementary negative route，总计 `615469` 条；平均返回 elementary 列 `11.72` 条，总计 `1055` 条。R75 中共有 277 次返回 elementary 列，DSSR round 数平均 `3.162`，最少 `1`，最多 `16`；最终 ng-set 平均大小的均值为 `1.674`，范围 `1.000-3.875`，各 job 最大 size 可到 `10`。这些调用平均每次看到 `9262.9` 条 non-elementary negative route，总计 `2565834` 条；平均返回 elementary 列 `14.64` 条，总计 `4055` 条。
+
+当前判断是：`empty1/top1` 确实能把最终 ng-set 保持得非常小，R25/R50/R75 中返回 elementary 列时平均 size 大多仍在 `1.6-1.7` 附近，说明很多情况下只需要极小 memory 就能得到基本列。但 raw non-elementary negative route 数量非常大，R75 总计超过 256 万条，且尾部仍会出现 12/14/16 轮 DSSR 才返回 elementary 列的调用。这说明 top1 更新在部分节点上收紧太慢。后续更值得测试的是动态更新口径：例如前期 top1，若连续多轮无 elementary 且 `neSeen` 很高，则临时切到 top3/top5；或者采用 `nearestK3/top3` 这类“初始小、更新不太慢”的折中，而不是单纯追求最小 ng-set。

@@ -1322,3 +1322,13 @@ ng-set size 统计显示，最小口径确实保持得很小。全 run 中共解
 更激进但仍可能正确的改法是 hybrid：即使本轮有 elementary 负列，也顺手用本轮记录到的 top-M non-elementary 负 route 更新 ng-set，然后仍返回 elementary 列给 RMP。因为扩大 ng-set 只是收紧 ng relaxation，理论上不会删除任何 elementary 可行列；它只会减少后续 non-elementary 重复路径。风险在效率而非正确性：ng-set 变大后 memory state 更重，dominance 可能变弱、label 数可能上升；同时当前 dual 下观察到的 non-elementary route 在 RMP 重解后未必仍是最关键伪负路。因此该策略适合作为实验开关，而不应直接替换当前默认。
 
 如果后续要试，建议先做两个小口径：第一，只在本轮 elementary 返回列数很少、且 non-elementary route reduced cost 明显更负时才顺手更新；第二，保留当前默认逻辑，只新增 `updateNgSetEvenWhenElementaryFound` 诊断开关，对比 40-2、50-2 以及放大时间算例的 exact calls、label 数、pool、root time 和总时间。若 exact calls 明显下降且 label 数不上升，再考虑是否作为默认策略。
+
+136. 2026-07-02 40-2 ng-DSSR nearestK3/top3 诊断
+
+继续按用户要求测试更温和的小 ng-set 口径：`ngDssrInitialMode=nearestK`、`ngDssrInitialSize=3`，即每个任务初始保留自己和最近邻直到 size 为 3；`ngDssrRouteUpdateLimit=3`，即没有 elementary 负列时用最好的 3 条 non-elementary route 更新 ng-set。其余配置沿用第 134 节同一套 no-strong ng-DSSR 好配置。
+
+完整结果为 `FINISHED, obj=bound=22580, solve=121.924s, root=64.010s, nodes=45, pricing=1067, pool=58052, heuristic=47.207s/805 calls, exact=35.010s/262 calls, master_lp=6.215s, valid=true`，日志为 `test-results/bpc/tmp-ngdssr-40-2-nearest3-top3-20260702/wet040_001_2m-halfDomain-BEST_UB-ng-nearestK3-top3.log`。这比 `nearestK8/top10` 的 `148.524s, root=57.374s, nodes=51, pool=52478, exact=39.138s/263, heuristic=59.412s/815` 更快；也显著优于 `empty1/top1` 的 `252.638s, root=131.192s, nodes=52, exact=82.249s/368, heuristic=107.470s/998`。
+
+ng-set 统计显示，该口径把平均 ng-set 控制在很小范围但收紧速度明显好于 `empty1/top1`。全 run 共解析 498 个 DSSR round 记录，整体平均 ng-set size 为 `3.106`，最小值始终 `3`，全局最大 `6`。按 round 聚合，第一轮平均 `3.029`，第二轮 `3.113`，第三轮 `3.175`，第六轮 `3.382`，最多到第八轮，平均 `3.375`。相比 `empty1/top1` 的 841 个 round 记录和 368 次 exact calls，`nearestK3/top3` 明显减少了 DSSR 收紧轮次和 exact calls，同时没有把 ng-set 扩大到 nearestK8 的水平。
+
+当前初步结论是：在 `wet040_001_2m` 上，`nearestK3/top3` 是比 `nearestK8/top10` 和 `empty1/top1` 更好的折中。它保留了小 ng-set 带来的轻量 memory，同时避免 top1 更新太慢。后续值得在 50-2、放大时间算例和 setupR 系列上复测；如果仍稳定，`nearestK3/top3` 可以作为新的候选默认配置，而不是继续使用 `nearestK8/top10`。

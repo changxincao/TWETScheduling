@@ -1332,3 +1332,10 @@ ng-set size 统计显示，最小口径确实保持得很小。全 run 中共解
 ng-set 统计显示，该口径把平均 ng-set 控制在很小范围但收紧速度明显好于 `empty1/top1`。全 run 共解析 498 个 DSSR round 记录，整体平均 ng-set size 为 `3.106`，最小值始终 `3`，全局最大 `6`。按 round 聚合，第一轮平均 `3.029`，第二轮 `3.113`，第三轮 `3.175`，第六轮 `3.382`，最多到第八轮，平均 `3.375`。相比 `empty1/top1` 的 841 个 round 记录和 368 次 exact calls，`nearestK3/top3` 明显减少了 DSSR 收紧轮次和 exact calls，同时没有把 ng-set 扩大到 nearestK8 的水平。
 
 当前初步结论是：在 `wet040_001_2m` 上，`nearestK3/top3` 是比 `nearestK8/top10` 和 `empty1/top1` 更好的折中。它保留了小 ng-set 带来的轻量 memory，同时避免 top1 更新太慢。后续值得在 50-2、放大时间算例和 setupR 系列上复测；如果仍稳定，`nearestK3/top3` 可以作为新的候选默认配置，而不是继续使用 `nearestK8/top10`。
+137. 2026-07-02 40-2 nearestK3/top3 根节点与非根节点 exact pricing 差异
+
+继续拆解第 136 节的 `nearestK3/top3` 日志后，可以看到 root 和非根节点的 exact pricing 难度差别很明显。root 上 `GCNGBBStyleNgDssrPricing` 共调用 29 次，耗时约 `22.944s`，生成 274 条 exact 列；同时启发式 pricing 调用 72 次，耗时约 `25.974s`，生成 12704 条列。44 个非根节点合计 exact pricing 调用 233 次，耗时约 `12.066s`，生成 15497 条 exact 列；平均到每个非根节点约 `0.274s` exact 时间，平均每次 exact call 约 `0.052s`。因此非根节点确实普遍很快，root 是 exact pricing 的主要重节点。
+
+差异的主要原因不是非根节点列更少这么简单，而是分支、pricing-only/subtree arc fixing、time-indexed compact window 和 dual-bound pruning 共同缩小了后续 label 空间。root 的典型 exact pricing 中，completion bound 构造约 `0.66s-0.82s`，forward/backward bound 内部合并常在数万次 merge 量级，forward extend candidates 可到 `2万-3.5万`，join groups 也在数千到一万级。非根节点例如 node45，单次 exact pricing 约 `20ms-22ms`，completion bound 构造约 `9ms-10ms`，forward extend candidates 降到约 `5900-6900`，join groups 约 `250-400`，time-indexed scalar 还能额外剪掉约 `193-234` 个状态，forward reachable 平均也从 root 的约 `33-34` 降到约 `16-17`。
+
+此外，这次 run 中有 22 个节点以 `pruned_by_dual_bound` 关闭，说明非根节点不一定都需要完全靠反复加列把 LP 闭合到很深。分支后的可行弧、时间窗和已有 incumbent 共同让 dual bound 更容易直接证明当前节点不可能改进。因此当前观察支持一个判断：ng-DSSR 在 root 上仍然承担最大 closure 压力；非根节点如果能继承足够强的 arc/window 缩减和 dual-bound pruning，单个节点 exact pricing 成本可以非常低。

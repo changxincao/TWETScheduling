@@ -1370,3 +1370,16 @@ R50 中共有 90 次返回 elementary 列，DSSR round 数平均 `3.544`，最�
 R50 有 74 次返回 elementary 列，平均需要 `2.649` 轮，最多 `6` 轮；返回时最终 ng-set 平均大小均值为 `1.906`，各 job 最大 size 全局到 `7`。这些调用平均累计看到 `4213.0` 条 non-elementary negative route，总计 `311765` 条，平均累计存入 `13.2` 条，最终共返回 elementary 列 `1597` 条。R75 有 246 次返回 elementary 列，平均需要 `2.703` 轮，最多 `10` 轮；返回时最终 ng-set 平均大小均值为 `1.959`，各 job 最大 size 全局到 `10`。这些调用平均累计看到 `4611.3` 条 non-elementary negative route，总计 `1134376` 条，平均累计存入 `13.4` 条，最终共返回 elementary 列 `3026` 条。
 
 和 top1 的统计对比可以得到更清楚的判断。top5 把 DSSR 平均轮数从约 `3.2-3.9` 降到约 `2.5-2.7`，最大轮数也从 `12/14/16` 降到 `4/6/10`，说明“只更新 1 条”确实偏慢。但 top5 的最终 ng-set 也更大，R50/R75 平均接近 `1.9-2.0`，而且列集改变后分支树未必更好。当前更合理的方向不是直接把 top5 设为默认，而是做条件更新：只有当连续多轮没有 elementary、或者 `neSeen` 特别高时临时提高更新条数；普通轮次仍保持较小更新，避免过早扩大 ng-memory 并扰动列生成路径。
+141. 2026-07-02 final ng-set 成员相似度诊断
+
+为了判断“能否按某种规则预置初始 ng-set，从而减少 DSSR 迭代次数”，本轮在第 140 节统计基础上新增默认关闭的成员级诊断开关 `twet.bpc.fullDomainCompare.ngDssrSetMembers`。打开后，每次 ng-DSSR exact pricing 结束时会在 summary 里输出每个 job 的最终 ng-set 成员；该输出只服务于离线相似度分析，不参与求解逻辑。当前普通日志只记录 size，无法判断集合成员是否相同，因此必须补这个诊断后才能回答“最终集合差距大不大”。focused `javac` 已通过。
+
+用 `wet040_001_2m_setupR50`、`empty1/top5`、no-strong 的同一口径跑了一次成员诊断，结果仍为 `FINISHED, obj=bound=43625, solve=248.136s, exact=63.734s/81 calls, valid=true`，与第 140 节 R50 路径基本一致。日志目录为 `test-results/bpc/tmp-ngdssr-40-2-r50-empty1-top5-members-20260702/`。这次共解析 74 个最终返回 elementary 负列的 ng-DSSR call，分布在 9 个 node 上。
+
+同一 node 内，相邻 exact pricing call 的最终 ng-set 按 job 平均 Jaccard 相似度为 `0.878`，最小 `0.6675`，最大 `1.0`；按 job 完全相同的比例平均为 `0.7377`。若比较同一 node 内所有 pair，平均 Jaccard 仍有 `0.8031`。这说明同一个 node 的不同 DSSR call 里，最终学到的 ng-set 成员高度相似，不只是 size 相近。当前每次 pricing 都重新从 self-only 初始化，因此反复重新学习这些相似集合，确实存在冗余。
+
+不同 node 之间，用每个 node 最后一次 elementary-return call 的最终 ng-set 对比，平均 Jaccard 为 `0.6421`，范围 `0.4542-0.9021`，按 job 完全相同的比例平均为 `0.3521`。这说明跨 node 的最终集合也不是随机的，但差异明显大于同一 node 内。由此更稳妥的优先级是：先尝试“同一 node 内复用上一轮最终 ng-set 作为下一次 exact pricing 初始 ng-set”；再考虑“child 继承 parent 的 final ng-set”或“实例级 learned seed”。
+
+按 job 看，部分邻居出现频率非常稳定。例如 R50 这次中，job 39 的最终 ng-set 里 member 12 出现频率 `0.95`、member 1 为 `0.81`、member 21 为 `0.41`；job 21 中 member 12 为 `0.93`、member 28 为 `0.64`、member 39 为 `0.57`；job 12 中 member 39 为 `0.91`、member 21 为 `0.82`、member 1 为 `0.81`。如果按成员出现频率做 learned initial ng-set，阈值 `0.5` 时平均 size 约 `1.55`、最大 `4`；阈值 `0.4` 时平均 size 约 `1.775`、最大 `5`；阈值 `0.3` 时平均 size 约 `1.975`、最大 `5`。这说明很小的 learned seed 就可能覆盖大量最终会被 DSSR 学到的成员。
+
+当前结论是：可以通过“最终 ng-set 成员稳定性”来指导初始 ng-set，而不是只看 nearestK 或 topK。最优先值得实现的实验方案是 node-local warm start：同一个 node 内，每次 exact pricing 结束后保存 final ng-set，下次 exact pricing 初始化时从这份集合开始，再叠加 self/nearest/dualPair 规则。正确性上这是安全的，因为扩大 ng-set 只会收紧 ng relaxation，不会删掉 elementary 可行列；风险是 ng-set 过大可能削弱 dominance、增加 label 状态。但本次 R50 的最终平均 size 仍小于 2，这个风险较小。跨 node/child 继承也有潜力，但相似度只有中等，应作为第二阶段实验，最好加上 size 上限或只继承高频成员。

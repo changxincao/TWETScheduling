@@ -283,6 +283,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrRoundNonElementaryNegativeSeen;
 	private int ngDssrRoundElementaryColumnsReturned;
 	private boolean ngDssrTraceNgSetStats;
+	private boolean ngDssrTraceNgSetMembers;
 	private StringBuilder ngDssrNgSetStatsByRound;
 	private boolean sriPricingEnabled;
 	private ArrayList<Integer> sriCutIds;
@@ -469,7 +470,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", totalNonElementaryStored=" + ngDssrTotalNonElementaryRoutes
 				+ ", totalElementaryReturned=" + ngDssrTotalElementaryColumnsReturned
 				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
-				+ ngSetStatsSummary();
+				+ ngSetStatsSummary()
+				+ ngSetMembersSummary();
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -486,6 +488,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalElementaryColumnsReturned = 0;
 		ngDssrTraceNgSetStats = Boolean.getBoolean("twet.bpc.ngDssrSetStats")
 				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetStats");
+		ngDssrTraceNgSetMembers = Boolean.getBoolean("twet.bpc.ngDssrSetMembers")
+				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetMembers");
 		ngDssrNgSetStatsByRound = ngDssrTraceNgSetStats ? new StringBuilder() : null;
 		ngDssrReusableCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
@@ -563,6 +567,32 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return "";
 		}
 		return ", ngSetSize avg/min/max/updateByRound=" + ngDssrNgSetStatsByRound.toString();
+	}
+
+	private String ngSetMembersSummary() {
+		if (!ngDssrTraceNgSetMembers || ngNeighborhoodByJob == null) {
+			return "";
+		}
+		StringBuilder builder = new StringBuilder(", ngSetMembers=");
+		for (int job = 1; job <= data.n; job++) {
+			if (job > 1) {
+				builder.append('|');
+			}
+			builder.append(job).append(':');
+			PackedBitSet set = ngNeighborhoodByJob[job];
+			if (set == null) {
+				continue;
+			}
+			boolean first = true;
+			for (int member = set.nextSetBit(1); member >= 1 && member <= data.n; member = set.nextSetBit(member + 1)) {
+				if (!first) {
+					builder.append('.');
+				}
+				builder.append(member);
+				first = false;
+			}
+		}
+		return builder.toString();
 	}
 
 	private ArrayList<TWETColumn> solveRelaxedRound(LP lp) {

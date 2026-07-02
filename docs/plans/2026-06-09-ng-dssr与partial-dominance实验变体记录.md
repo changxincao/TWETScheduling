@@ -1312,3 +1312,13 @@ subtree/pricingOnly arc elimination 是另一层。`Tree/PC` 在 node 处理后�
 ng-set size 统计显示，最小口径确实保持得很小。全 run 中共解析到 841 个 DSSR round 记录，所有记录的平均 ng-set size 为 `1.155`，最小值始终为 `1`，最大值总体平均 `2.258`，全局最大只到 `6`。按 round 序号聚合看，第一轮平均 size 约 `1.040`，第二轮约 `1.120`，第三轮约 `1.211`，第八轮约 `1.498`，最多有一次 pricing call 走到第 12 轮，平均 size 约 `1.625`、max 为 `4`。这说明 top1 更新会让 ng-set 增长非常慢，DSSR 多轮收紧带来的额外 exact calls 抵消了初始 relaxation 更松可能带来的单轮标签减少。
 
 当前结论是：在这个 40-2 原始 setup 算例上，`empty1/top1` 不是更好的默认选择。它能保持 ng-set 极小，但 root closure 和总求解都更慢；相比 `nearestK8/top10`，其主要问题是每次 DSSR 收紧过慢，导致更多 exact pricing 和更多启发式轮次，而不是最终节点数变少。后续若要继续试最小 ng-set，应更可能测试 `empty1/topK` 或 `nearestK1/topK` 这类“初始小、更新快”的折中口径，而不是 `top1`。
+
+135. 2026-07-02 ng-DSSR 在已有 elementary 负列时是否仍更新 ng-set
+
+当前实现采用标准偏保守口径：一轮 relaxed pricing 如果已经找到负 reduced-cost elementary 列，就直接把这些列返回 RMP；只有当没有 elementary 负列、但存在 non-elementary 负 route 时，才用这些 non-elementary route 更新 ng-set。这保证了列生成节奏简单：只要有真实负列，就先加入 master 重解；ng-set 更新只用于排除“当前 relaxed pricing 仍有负 route 但没有真实 elementary 负列”的伪负路，从而完成 exact pricing 证明。
+
+这个口径正确且稳健，但不一定总是效率最优。它的好处是避免过早扩大 ng-set，dominance 和 label 状态不会因为无必要的 memory 增长而变重；同时每次发现真实负列都尽快交给 RMP，dual 可以及时更新。缺点是同一轮已经观察到的高质量 non-elementary 负 route 会被丢掉，下一次 RMP 重解后可能又反复遇到类似伪负路，导致 DSSR 收紧滞后。尤其当每轮只返回少量 elementary 列、而 non-elementary 负 route 很多时，当前策略可能增加 pricing call 数。
+
+更激进但仍可能正确的改法是 hybrid：即使本轮有 elementary 负列，也顺手用本轮记录到的 top-M non-elementary 负 route 更新 ng-set，然后仍返回 elementary 列给 RMP。因为扩大 ng-set 只是收紧 ng relaxation，理论上不会删除任何 elementary 可行列；它只会减少后续 non-elementary 重复路径。风险在效率而非正确性：ng-set 变大后 memory state 更重，dominance 可能变弱、label 数可能上升；同时当前 dual 下观察到的 non-elementary route 在 RMP 重解后未必仍是最关键伪负路。因此该策略适合作为实验开关，而不应直接替换当前默认。
+
+如果后续要试，建议先做两个小口径：第一，只在本轮 elementary 返回列数很少、且 non-elementary route reduced cost 明显更负时才顺手更新；第二，保留当前默认逻辑，只新增 `updateNgSetEvenWhenElementaryFound` 诊断开关，对比 40-2、50-2 以及放大时间算例的 exact calls、label 数、pool、root time 和总时间。若 exact calls 明显下降且 label 数不上升，再考虑是否作为默认策略。

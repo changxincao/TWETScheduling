@@ -278,6 +278,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrRoundsExecuted;
 	private int ngDssrTotalNgSetUpdates;
 	private int ngDssrTotalNonElementaryRoutes;
+	private boolean ngDssrTraceNgSetStats;
+	private StringBuilder ngDssrNgSetStatsByRound;
 	private boolean sriPricingEnabled;
 	private ArrayList<Integer> sriCutIds;
 	private ArrayList<TWETCut> sriCuts;
@@ -460,7 +462,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		lastMessage = lastMessage + " | ng-DSSR reason=" + reason
 				+ ", rounds=" + ngDssrRoundsExecuted
 				+ ", totalNonElementaryRoutes=" + ngDssrTotalNonElementaryRoutes
-				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates;
+				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
+				+ ngSetStatsSummary();
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -473,6 +476,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrRoundsExecuted = 0;
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
+		ngDssrTraceNgSetStats = Boolean.getBoolean("twet.bpc.ngDssrSetStats")
+				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetStats");
+		ngDssrNgSetStatsByRound = ngDssrTraceNgSetStats ? new StringBuilder() : null;
 		ngDssrReusableCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
 		ngDssrReusablePricingWindowPrecomputeReady = false;
@@ -488,17 +494,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrRoundsExecuted = ngDssrRound;
 			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeRoutes.size();
 			if (!columns.isEmpty()) {
+				appendNgSetStatsForRound(0);
 				appendNgDssrSummary(config.ngDssrReturnRelaxedColumns
 						? "ng-relaxed negative columns returned"
 						: "elementary negative columns returned");
 				return columns;
 			}
 			if (nonElementaryNegativeRoutes.isEmpty()) {
+				appendNgSetStatsForRound(0);
 				appendNgDssrSummary("relaxed pricing found no negative route");
 				return columns;
 			}
 			int changed = updateNgNeighborhoodsFromNonElementaryRoutes();
 			ngDssrTotalNgSetUpdates += changed;
+			appendNgSetStatsForRound(changed);
 			if (changed == 0) {
 				throw new IllegalStateException(
 						"NG-DSSR found non-elementary negative routes but ng-set did not change");
@@ -506,6 +515,38 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		appendNgDssrSummary("time limit reached");
 		return new ArrayList<TWETColumn>();
+	}
+
+	private void appendNgSetStatsForRound(int changed) {
+		if (!ngDssrTraceNgSetStats || ngDssrNgSetStatsByRound == null || ngNeighborhoodByJob == null) {
+			return;
+		}
+		int min = Integer.MAX_VALUE;
+		int max = 0;
+		int total = 0;
+		for (int job = 1; job <= data.n; job++) {
+			int size = ngNeighborhoodByJob[job] == null ? 0 : ngNeighborhoodByJob[job].cardinality();
+			min = Math.min(min, size);
+			max = Math.max(max, size);
+			total += size;
+		}
+		double avg = data.n == 0 ? 0.0 : ((double) total) / data.n;
+		if (ngDssrNgSetStatsByRound.length() > 0) {
+			ngDssrNgSetStatsByRound.append(';');
+		}
+		ngDssrNgSetStatsByRound.append('r').append(ngDssrRound)
+				.append('=').append(String.format("%.3f", avg))
+				.append('/').append(min == Integer.MAX_VALUE ? 0 : min)
+				.append('/').append(max)
+				.append("/u").append(changed);
+	}
+
+	private String ngSetStatsSummary() {
+		if (!ngDssrTraceNgSetStats || ngDssrNgSetStatsByRound == null
+				|| ngDssrNgSetStatsByRound.length() == 0) {
+			return "";
+		}
+		return ", ngSetSize avg/min/max/updateByRound=" + ngDssrNgSetStatsByRound.toString();
 	}
 
 	private ArrayList<TWETColumn> solveRelaxedRound(LP lp) {

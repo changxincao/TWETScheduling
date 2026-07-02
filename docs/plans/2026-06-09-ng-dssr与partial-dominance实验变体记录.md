@@ -1300,3 +1300,15 @@ subtree/pricingOnly arc elimination 是另一层。`Tree/PC` 在 node 处理后�
 关闭 route enumeration 后，同一配置完成求解：`FINISHED, obj=bound=22580, solve=271.053s, root=75.348s, nodes=14, pricing=651, pool=61292, heuristic=40.891s/158, exact=22.268s/59, master_lp=120.623s, valid=true`，日志位于 `test-results/bpc/tmp-wet040-m2-ngrelaxed-columns-noenum-20260630/`。可比的当前 elementary ng-DSSR + time-indexed helper 记录为 `solve=148.524s, root=57.374s, nodes=51, pool=52478, heuristic=59.412s/815, exact=39.138s/263, master_lp=9.369s, valid=true`。
 
 因此这个实验的结论比较明确：直接返回 ng-relaxed 列确实减少了 exact pricing call 和节点数，也降低了 exact pricing 总耗时；但它显著增加了 RMP/strong branching 的 LP 负担，master LP 时间从约 `9.37s` 增到约 `120.62s`，总时间反而更慢。再加上 route enumeration 打开时会触发内存问题，当前不适合作为主线。该开关保留为默认关闭的诊断选项，后续若要继续试，应该单独考虑 relaxed 列导致的列池膨胀、重复覆盖系数和枚举兼容性，而不是直接替换 elementary ng-DSSR。
+
+134. 2026-07-02 40-2 ng-DSSR empty1/top1 诊断
+
+按用户要求测试 `wet040_001_2m` 上最小 ng-set 口径：初始 `ngDssrInitialMode=empty`，即每个任务的 ng-set 只含自身；`ngDssrInitialSize=1`；每次 DSSR 只用 1 条最负 non-elementary route 更新 `ngDssrRouteUpdateLimit=1`。其余口径沿用当前 no-strong ng-DSSR 好配置：ALNS seed、启发式 pricing、dual-bound pruning、allCycles completion bound、scalar pruning、completion-bound arc fixing、pricingOnly subtree、midpoint probe/reuse、`joinBest=BEST_UB`、关闭 SRI/cut 和 time-indexed graph pricing。
+
+本次为 ng-DSSR 增加了默认关闭的诊断属性 `twet.bpc.fullDomainCompare.ngDssrSetStats`。打开后，每个 DSSR round 结束会在 pricing summary 中记录当前 ng-set 的 `avg/min/max` 和本轮更新数，用于观察 DSSR 收紧速度。该诊断只读当前 `ngNeighborhoodByJob` 的 cardinality，不改变 labeling、dominance、join 或更新逻辑；默认关闭，避免正常日志膨胀。
+
+完整求解结果为 `FINISHED, obj=bound=22580, solve=252.638s, root=131.192s, nodes=52, pricing=1370, pool=56070, heuristic=107.470s/998 calls, exact=82.249s/368 calls, master_lp=11.385s, valid=true`，日志为 `test-results/bpc/tmp-ngdssr-40-2-empty1-top1-20260702/wet040_001_2m-halfDomain-BEST_UB-ng-empty1-top1.log`。对比同算例 no-strong `nearestK8/top10` 记录 `148.524s, root=57.374s, nodes=51, pool=52478, heuristic=59.412s/815, exact=39.138s/263`，最小 ng-set 并没有减少节点，反而明显增加 root、heuristic 和 exact pricing 时间。
+
+ng-set size 统计显示，最小口径确实保持得很小。全 run 中共解析到 841 个 DSSR round 记录，所有记录的平均 ng-set size 为 `1.155`，最小值始终为 `1`，最大值总体平均 `2.258`，全局最大只到 `6`。按 round 序号聚合看，第一轮平均 size 约 `1.040`，第二轮约 `1.120`，第三轮约 `1.211`，第八轮约 `1.498`，最多有一次 pricing call 走到第 12 轮，平均 size 约 `1.625`、max 为 `4`。这说明 top1 更新会让 ng-set 增长非常慢，DSSR 多轮收紧带来的额外 exact calls 抵消了初始 relaxation 更松可能带来的单轮标签减少。
+
+当前结论是：在这个 40-2 原始 setup 算例上，`empty1/top1` 不是更好的默认选择。它能保持 ng-set 极小，但 root closure 和总求解都更慢；相比 `nearestK8/top10`，其主要问题是每次 DSSR 收紧过慢，导致更多 exact pricing 和更多启发式轮次，而不是最终节点数变少。后续若要继续试最小 ng-set，应更可能测试 `empty1/topK` 或 `nearestK1/topK` 这类“初始小、更新快”的折中口径，而不是 `top1`。

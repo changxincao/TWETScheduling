@@ -1401,3 +1401,17 @@ R50 有 74 次返回 elementary 列，平均需要 `2.649` 轮，最多 `6` 轮�
 实现层面还要注意生命周期。`PricingEngine.reset()` 在 PC 中会因 LP、cut、pricing engine 切换等被频繁调用，它只能清临时缓存，不能作为“新 node / 新树”的边界。如果把 warm-start 历史存在 pricing engine 内部并在 reset 中清掉，同一 node 或父子 node 的继承就会失效。更合适的做法是把 learned ng-set 统计放在 node/tree 层，或由独立的 warm-start manager 按 solve 生命周期管理；只在新实例或新整棵树开始时清空。
 
 当前结论是：先不实现 node 内动态继承。后续最值得先做的是 node-to-node 的父节点统计继承，默认关闭，并记录继承前后 DSSR 轮数、final ng-set size、non-elementary negative route 数、exact pricing 时间和最终搜索树是否变化。node 内策略等 pair-level evidence 统计清楚后再做，否则容易因为 ng-set 变大导致 dominance 变弱，抵消减少 DSSR 轮数的收益。
+
+143. 2026-07-02 基于全历史或滑动历史的动态 ng-set 初始化设想
+
+在第 142 节父子节点继承和 node-local warm start 之外，还讨论了一种更统一的做法：不显式区分 node 之间或 node 内部，而是在每次 ng-DSSR exact pricing 开始前，查看当前已经累计的历史 final ng-set 统计。对每个 job，先根据历史 final ng-set 的平均 size 决定本次初始 ng-set 的目标大小，再从历史成员频率最高的 job 中选择对应数量的成员作为初始集合。历史统计可以有几种口径：全局所有 pricing 的累计统计；当前 node 及其父链上的统计；或者最近若干次 ng-pricing 的滑动窗口统计。全局累计相当于滑动窗口长度无穷大，最稳定但最容易带入旧分支域的信息；滑动窗口更能适应当前 dual、branch 和 compact window，但样本少时波动更大。
+
+这个方向在正确性上没有问题。初始 ng-set 只改变 ng relaxation 的强弱，不会删掉 elementary 可行列；即使 learned seed 选得不好，DSSR 仍可以继续通过 non-elementary route 更新集合。真正的问题是性能：如果历史集合把很多当前 node 不需要的成员带进来，ng-set 变大后 dominance 会变弱、label 状态变多，可能抵消减少 DSSR 轮数的收益。因此动态 size 不能简单按历史均值无上限增长，必须有上限、阈值和衰减。
+
+按 job 平均 size 决定目标大小有一定合理性，因为前面的成员诊断显示不同 job 的最终 ng-set 需求不同，例如部分 job 经常只需要自身，部分 job 稳定需要 2-4 个高频邻居。但平均值口径也有两个风险：第一，少量困难 pricing 会把均值抬高，导致后续大量普通 pricing 初始集合过大；第二，历史 final ng-set 里不一定每个成员都是真正必要的，可能包含早期 DSSR 更新留下的“残留成员”。因此如果做，建议目标 size 不直接用普通均值，而是用带上限的稳健统计，例如 `targetSize_j = min(K, ceil(trimmedMeanSize_j))` 或 `min(K, ceil(EWMA_j))`，K 仍沿用 `ngDssrInitialNgSetSize` 或单独的 learned cap。成员选择也不应只按出现次数填满到 target size，而应设置频率阈值，例如频率大于 `0.5` 的成员才可进入；如果不足 target size，就保持不足，不用 nearest 强行补满。
+
+三种历史口径的优先级判断如下。全局所有历史最简单，样本最多，适合先做统计诊断，但最可能混入与当前分支域无关的成员。当前 node 父链统计更贴近当前子树，理论上更干净，但实现上需要在 node 生命周期里维护和传递统计，且父链样本可能少。最近若干次 ng-pricing 的滑动窗口是折中方案，能自动适应近期 dual 和分支变化，也不依赖 node 层级，但需要选择窗口大小；窗口太小则不稳定，窗口太大又接近全局累计。基于前面的相似度结果，当前更值得优先试的是“滑动窗口 + 频率阈值 + 小 cap”，而不是无穷累计历史。
+
+一个可测试的默认关闭实验方案是：维护最近 `W` 次返回 elementary 负列或完成 DSSR 收敛的 final ng-set 统计；每次 exact pricing 初始化时，对每个 job 计算历史 size 的 EWMA 或截尾均值，并取 `ceil` 得到目标 size，但不超过 K；成员按出现频率排序，过滤掉频率低于 `0.5` 的候选。root 前若没有历史，则退回当前初始化。该方案同时覆盖 node 内部和 node 之间，不需要显式判断来源；但日志必须记录本轮 learned seed 的平均 size、最大 size、命中成员数、DSSR 轮数、non-elementary route 数和 label 数，否则无法判断是减少迭代还是只是放大 label 空间。
+
+当前结论是：这个全历史/滑动历史策略比“直接继承上一轮 final ng-set”更稳，也比严格父子继承更容易统一实现。但它仍然是性能实验，不是确定改进。最需要防止的是 learned seed 过大，因此应采用小 cap、频率阈值和滑动窗口/衰减，而不是把所有历史高频成员永久累计进每个 job 的初始 ng-set。

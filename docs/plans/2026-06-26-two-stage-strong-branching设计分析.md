@@ -284,3 +284,10 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 前面的 light repair 实验本质上验证的是一种 child 初始列准备方式，而不是 strong branching 专属的求解机制。因此本次把它最小范围接入普通分支入队：当 `enableStrongBranchingLightweightRepair=true`，且当前分支是 arc 分支，或列化外包模式下的 outsourcing membership 分支时，child seed 不再简单继承父节点全部 restricted columns，而是保留父 LP 正值机器列作为 repair 起点，其它机器列按 child compatibility 预筛；外包列仍按 child compatibility 过滤。机器数、tariff/segment、无向 adjacency 等分支保持旧逻辑，其中无向 adjacency 理论上也可类似处理，但当前主线暂不使用，先不扩大改动范围。
 
 这个修改只影响普通 child 初始 RMP 的列集，不改变 pricing 可生成列集合，也不改变 repair 流程。child 出队后仍先解初始 LP；若可行，继续走原来的 reduced-cost/compatibility 筛列并重解；若不可行，仍走旧 repair。关闭 `enableStrongBranchingLightweightRepair` 时普通分支路径完全回到旧的全继承 seed 逻辑。
+### 2026-07-02 普通 child 轻量 seed 正确性检查
+
+本次复查确认该修改只改变普通 child 入队时的初始 seed，不改变 pricing 可生成列集合，也不跳过 PC 的正式 repair/filter 流程。`enableStrongBranchingLightweightRepair=false` 时，`useLightweightChildSeedForBrancher()` 直接返回 false，普通分支仍走旧的全继承父 restricted 列逻辑。打开时只覆盖 `ArcBrancher` 和列化外包下的 `OutsourcingMembershipBrancher`；机器数、tariff/segment、无向 adjacency 等保持旧逻辑。
+
+需要注意的是，columnized outsourcing 模式下 `LP.construct()` 对内部机器列使用 `node.isColumnCompatible()`，因此即使 light seed 试图保留父 LP 正值机器列，违反 child 域的机器列也会在建模入口被过滤。这和 strong trial 现有行为一致，不影响正确性，但说明“父正值列保留作为 repair 起点”的收益主要发生在非 columnized 的机器列 arc 分支。
+
+验证上，focused `javac` 编译通过；另外用 time-indexed no-strong smoke 覆盖普通分支入队路径，`wet040_001_2m` 在 `maxNodes=2`、`enableStrongBranchingLightweightRepair=true` 下正常运行到 `NODE_LIMIT`，日志中 root 和 node2 均通过 `ArcBrancher` 分支，结果 `valid=true`。另一个 ng-DSSR 60 秒 smoke 正常到 `TIME_LIMIT/valid=true`，但停在 root，没有覆盖普通分支路径，只作为运行稳定性检查。

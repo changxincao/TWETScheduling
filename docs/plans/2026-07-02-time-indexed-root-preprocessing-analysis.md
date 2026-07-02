@@ -43,3 +43,9 @@ arc fixing 通常在文献或代码里表现为“当前 node 收敛后，把固
 兼容边界也先收窄：该预处理只在主线是 ng-DSSR 或其 partial/graph partial 变体、且没有启用 time-indexed graph 主 pricing、没有启用列化外包时运行。active SRI/root cut 不参与该预处理，因为当前目标是 no-cut root 先闭合再提供松弛证据；若后续要在 SRI 状态下做同等强度 fixing，需要把 SRI state 放进 time-indexed helper 或单独做 SRI-aware graph preprocessing。
 
 验证方面，相关源码已通过带 CPLEX/CP Optimizer jar 的 focused javac 编译。`wet020_001_2m` smoke 中，日志先出现 `Pricing[TimeIndexedGraphPricing] node=0`，随后进入 `Pricing[GCNGBBStyleNgDssrPricing] node=1`，最终 `ROOT_PROCESSED` 且 `valid=true`，说明两阶段顺序和临时列池隔离是通的。`wet040_001_2m` 在 60 秒限时 smoke 中已进入 time-indexed root preprocessing，但预处理未在限时内闭合，因此没有进入 copying/fixing 完整路径；这说明 40 任务以上是否划算还需要正式对比实验，而不能仅凭小算例判断。
+
+## 40-2 smoke 结果误读修正
+
+2026-07-02 复核后确认，`wet040_001_2m` 的 60 秒 smoke 不能解读为“time-indexed root 求解不动”。该 smoke 使用的是 ng-DSSR 主线入口，并显式设置 `runALNSForSeed=false`、`ngDssrInitialSize=3/top3`，初始列只有 2 条、初始 incumbent 为 62989。预处理阶段先进入 `TimeIndexedGraphPricing`，但全局 60 秒到达后没有得到完整 `timeIndexedRootPreprocess.done` 证据，随后主线仍有 `HeuristicPricing` 和 `GCNGBBStyleNgDssrPricing` 计时，因此该 smoke 的 csv 汇总不是纯 time-indexed root closure 结果。
+
+历史可比的 no-cut time-indexed 记录是 `tmp-timegraph-nocut-40-2-setup-nostrong-20260630`：同一 `wet040_001_2m` 在 timeGraph 模式下 `FINISHED`，总时间 46.737s，root time 18.750s，root node 1 已分支，最终 pool 68359，`TimeIndexedGraphPricing=10.607s/670 calls`，无 HeuristicPricing。由此修正当前判断：如果要评估“time-indexed root 先闭合再给 ng-DSSR 预处理”的收益，必须用和历史 timeGraph root 等价的配置做专门实验；60 秒 smoke 只能证明新开关和两阶段路径能启动，不能证明 40-2 time-indexed root 本身慢。

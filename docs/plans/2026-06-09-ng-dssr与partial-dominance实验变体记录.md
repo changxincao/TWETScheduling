@@ -1359,3 +1359,14 @@ ng-set 统计显示，该口径把平均 ng-set 控制在很小范围但收紧�
 R50 中共有 90 次返回 elementary 列，DSSR round 数平均 `3.544`，最少 `1`，最多 `14`；最终 ng-set 平均大小的均值为 `1.646`，范围 `1.000-2.875`，各 job 最大 size 可到 `8`。这些调用平均每次看到 `6838.5` 条 non-elementary negative route，总计 `615469` 条；平均返回 elementary 列 `11.72` 条，总计 `1055` 条。R75 中共有 277 次返回 elementary 列，DSSR round 数平均 `3.162`，最少 `1`，最多 `16`；最终 ng-set 平均大小的均值为 `1.674`，范围 `1.000-3.875`，各 job 最大 size 可到 `10`。这些调用平均每次看到 `9262.9` 条 non-elementary negative route，总计 `2565834` 条；平均返回 elementary 列 `14.64` 条，总计 `4055` 条。
 
 当前判断是：`empty1/top1` 确实能把最终 ng-set 保持得非常小，R25/R50/R75 中返回 elementary 列时平均 size 大多仍在 `1.6-1.7` 附近，说明很多情况下只需要极小 memory 就能得到基本列。但 raw non-elementary negative route 数量非常大，R75 总计超过 256 万条，且尾部仍会出现 12/14/16 轮 DSSR 才返回 elementary 列的调用。这说明 top1 更新在部分节点上收紧太慢。后续更值得测试的是动态更新口径：例如前期 top1，若连续多轮无 elementary 且 `neSeen` 很高，则临时切到 top3/top5；或者采用 `nearestK3/top3` 这类“初始小、更新不太慢”的折中，而不是单纯追求最小 ng-set。
+140. 2026-07-02 setupR25/R50/R75 empty1/top5 ng-set 统计实验
+
+在第 139 节 `empty1/top1` 的基础上，本轮只把 `ngDssrRouteUpdateLimit` 从 1 改成 5，初始 ng-set 仍保持 `empty/self-only`，即每个任务初始只包含自身。其余求解配置保持同一组 setupR 诊断口径：setup cost 系数 20、ALNS seed、启发式 pricing、`joinBest=BEST_UB`、allCycles completion bound、scalar/arc fixing/subtree/pricingOnly、midpoint probe/reuse、dual-bound pruning，关闭 SRI、partial dominance、strong branching 和 route enumeration。结果目录为 `test-results/bpc/tmp-ngdssr-40-2-setupR-empty1-top5-ngstats-20260702/`。
+
+完整求解结果为：R25 `ROOT_PROCESSED, obj=bound=31893, solve=112.231s, exact=14.503s/15 calls`；R50 `FINISHED, obj=bound=43625, solve=244.691s, exact=65.380s/81 calls`；R75 `FINISHED, obj=bound=55007, solve=663.633s, exact=200.589s/269 calls`。和 top1 相比，R25 明显变快，R50/R75 反而变慢。也就是说，把每轮更新从 1 条增大到 5 条，确实减少了 root 和部分 exact pricing 的 DSSR 轮数，但会改变列集和分支路径；在 R50/R75 上，后续节点数量、启发式调用和总 pricing 时间把早期收益抵消掉了。
+
+只看最终返回 elementary 负列的 exact pricing 调用，R25 有 14 次，平均需要 `2.500` 轮 DSSR，最多 `4` 轮；返回时最终 ng-set 平均大小均值为 `1.595`，各 job 最大 size 全局只到 `3`。这些调用平均每次累计看到 `3061.8` 条 non-elementary negative route，总计 `42865` 条，平均每次累计存入更新池 `12.5` 条，最终共返回 elementary 列 `281` 条。
+
+R50 有 74 次返回 elementary 列，平均需要 `2.649` 轮，最多 `6` 轮；返回时最终 ng-set 平均大小均值为 `1.906`，各 job 最大 size 全局到 `7`。这些调用平均累计看到 `4213.0` 条 non-elementary negative route，总计 `311765` 条，平均累计存入 `13.2` 条，最终共返回 elementary 列 `1597` 条。R75 有 246 次返回 elementary 列，平均需要 `2.703` 轮，最多 `10` 轮；返回时最终 ng-set 平均大小均值为 `1.959`，各 job 最大 size 全局到 `10`。这些调用平均累计看到 `4611.3` 条 non-elementary negative route，总计 `1134376` 条，平均累计存入 `13.4` 条，最终共返回 elementary 列 `3026` 条。
+
+和 top1 的统计对比可以得到更清楚的判断。top5 把 DSSR 平均轮数从约 `3.2-3.9` 降到约 `2.5-2.7`，最大轮数也从 `12/14/16` 降到 `4/6/10`，说明“只更新 1 条”确实偏慢。但 top5 的最终 ng-set 也更大，R50/R75 平均接近 `1.9-2.0`，而且列集改变后分支树未必更好。当前更合理的方向不是直接把 top5 设为默认，而是做条件更新：只有当连续多轮没有 elementary、或者 `neSeen` 特别高时临时提高更新条数；普通轮次仍保持较小更新，避免过早扩大 ng-memory 并扰动列生成路径。

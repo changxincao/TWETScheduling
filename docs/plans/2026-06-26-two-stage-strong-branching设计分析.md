@@ -279,3 +279,8 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 轻量 repair seed 结果为 `189.187s, 15 nodes, pricing=887, pool=78569, heuristic=47.604s/223, exact=30.453s/95, masterLP=47.359s, valid=true`。其中 `strong_branching_light_repair_rmp=21.212s/320`，相比普通 repair 的 phase1 初始 LP 降低约 11 秒；筛列后 LP 基本相近，`17.652s/315`。最终总时间降低约 11.5 秒，约 5.7%。
 
 当前判断是：轻量 repair 在 ng-DSSR 下也有效，但收益主要来自 phase1 初始 trial LP 变小；整体收益会被启发式 pricing、exact ng-DSSR 和 phase2 heuristic 覆盖，因此没有 time-indexed 对照中那么明显。这个结果支持保留该开关继续测试，但还不足以直接默认开启，需要在 50/60 规模和放大时间算例上复测。
+### 2026-07-02 普通 child 入队复用轻量 seed
+
+前面的 light repair 实验本质上验证的是一种 child 初始列准备方式，而不是 strong branching 专属的求解机制。因此本次把它最小范围接入普通分支入队：当 `enableStrongBranchingLightweightRepair=true`，且当前分支是 arc 分支，或列化外包模式下的 outsourcing membership 分支时，child seed 不再简单继承父节点全部 restricted columns，而是保留父 LP 正值机器列作为 repair 起点，其它机器列按 child compatibility 预筛；外包列仍按 child compatibility 过滤。机器数、tariff/segment、无向 adjacency 等分支保持旧逻辑，其中无向 adjacency 理论上也可类似处理，但当前主线暂不使用，先不扩大改动范围。
+
+这个修改只影响普通 child 初始 RMP 的列集，不改变 pricing 可生成列集合，也不改变 repair 流程。child 出队后仍先解初始 LP；若可行，继续走原来的 reduced-cost/compatibility 筛列并重解；若不可行，仍走旧 repair。关闭 `enableStrongBranchingLightweightRepair` 时普通分支路径完全回到旧的全继承 seed 逻辑。

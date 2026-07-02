@@ -17,8 +17,10 @@ import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETSolveResult;
 import TWETBPC.TWETSolveStatus;
 import TWETBPC.TimeLimitChecker;
+import TWETBPC.BP.ArcBrancher;
 import TWETBPC.BP.BranchResult;
 import TWETBPC.BP.Brancher;
+import TWETBPC.BP.OutsourcingMembershipBrancher;
 import TWETBPC.BP.StrongBranchingCandidate;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.InitialColumnBuilder;
@@ -262,8 +264,8 @@ public class Tree {
 					continue;
 				}
 				applySubtreeArcElimination(result, subtreeArcElimination);
-				enqueueChild(queue, result.getLeftNode(), lp);
-				enqueueChild(queue, result.getRightNode(), lp);
+				enqueueChild(queue, result.getLeftNode(), lp, brancher);
+				enqueueChild(queue, result.getRightNode(), lp, brancher);
 				traceSink.onBranch(node, brancher.getName(), result, queue.size());
 				branched = true;
 				break;
@@ -647,6 +649,24 @@ public class Tree {
 		child.seedOutsourcingColumnIds = new ArrayList<Integer>(outsourcingSeed);
 	}
 
+	private void prepareChildSeedColumns(Node child, LP parentLp, Brancher brancher) {
+		if (useLightweightChildSeedForBrancher(brancher, parentLp)) {
+			prepareLightweightRepairChildSeedColumns(child, parentLp);
+			return;
+		}
+		prepareChildSeedColumns(child, parentLp);
+	}
+
+	private boolean useLightweightChildSeedForBrancher(Brancher brancher, LP parentLp) {
+		if (!config.enableStrongBranchingLightweightRepair || brancher == null || parentLp == null) {
+			return false;
+		}
+		if (brancher instanceof ArcBrancher) {
+			return true;
+		}
+		return brancher instanceof OutsourcingMembershipBrancher && parentLp.isColumnizedOutsourcing();
+	}
+
 	private void prepareDomainFilteredChildSeedColumns(Node child, LP parentLp) {
 		ArrayList<Integer> seed = new ArrayList<Integer>();
 		ArrayList<Integer> outsourcingSeed = new ArrayList<Integer>();
@@ -835,11 +855,11 @@ public class Tree {
 		return Math.max(0.0, config.solveTimeLimitSeconds - elapsedSeconds);
 	}
 
-	private void enqueueChild(PriorityQueue<Node> queue, Node child, LP parentLp) {
+	private void enqueueChild(PriorityQueue<Node> queue, Node child, LP parentLp, Brancher brancher) {
 		if (child == null) {
 			return;
 		}
-		prepareChildSeedColumns(child, parentLp);
+		prepareChildSeedColumns(child, parentLp, brancher);
 		queue.add(child);
 	}
 

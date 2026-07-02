@@ -340,15 +340,29 @@ public class BPCTraceSummary implements BPCTraceSink {
 		eventLines.add(line);
 	}
 
+	private static String formatFinite(double value) {
+		if (!Double.isFinite(value)) {
+			return "-";
+		}
+		return String.format(Locale.US, "%.6f", value);
+	}
+
+	private static String formatPercent(double value) {
+		if (!Double.isFinite(value)) {
+			return "-";
+		}
+		return String.format(Locale.US, "%.4f%%", value);
+	}
+
 	private String formatNodeProgress(NodeProgress progress, String outcome) {
 		double nodeSeconds = (System.nanoTime() - progress.startNanos) / 1_000_000_000.0;
 		double totalSeconds = (System.nanoTime() - solveStartNano) / 1_000_000_000.0;
 		StringBuilder builder = new StringBuilder();
 		builder.append(String.format(Locale.US,
-				"[BPC node summary] node=%d depth=%d outcome=%s nodeTime=%.3fs total=%.3fs lpObj=%.6f status=%s integer=%s inc=%.6f bound=%.6f gap=%.4f%% queue=%d pool=%d cutPool=%d restricted=%d cuts=%d",
-				progress.nodeId, progress.depth, outcome, nodeSeconds, totalSeconds, progress.lpObjective,
-				progress.masterStatus, Boolean.toString(progress.integerSolution), progress.incumbentCost,
-				progress.bestBound, progress.gapPercent, progress.queueSize, progress.poolSize,
+				"[BPC node summary] node=%d depth=%d outcome=%s nodeTime=%.3fs total=%.3fs lpObj=%s status=%s integer=%s inc=%s bound=%s gap=%s queue=%d pool=%d cutPool=%d restricted=%d cuts=%d",
+				progress.nodeId, progress.depth, outcome, nodeSeconds, totalSeconds, formatFinite(progress.lpObjective),
+				progress.masterStatus, Boolean.toString(progress.integerSolution), formatFinite(progress.incumbentCost),
+				formatFinite(progress.bestBound), formatPercent(progress.gapPercent), progress.queueSize, progress.poolSize,
 				progress.cutPoolSize, progress.restrictedColumns, progress.activeCuts));
 		builder.append(String.format(Locale.US,
 				" lp=%.3fs/%d pricing=%.3fs/%d/add%d heur=%.3fs/%d/add%d exact=%.3fs/%d/add%d",

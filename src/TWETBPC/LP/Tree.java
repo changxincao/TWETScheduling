@@ -98,10 +98,10 @@ public class Tree {
 		boolean stoppedByTimeLimit = false;
 
 		if (config.enableTimeIndexedRootPreprocessingForNgDssr) {
-			heartbeat(root, "timeIndexedRootPreprocess.start");
+			traceSink.onStageHeartbeat(root, "timeIndexedRootPreprocess.start", totalPoolSize(), cutPool.size());
 			TimeIndexedRootPreprocessor.Result preprocessResult = TimeIndexedRootPreprocessor.run(data, config, pool,
 					root, incumbentCost, traceSink, timeLimitChecker);
-			heartbeat(root, preprocessResult.summary());
+			traceSink.onStageHeartbeat(root, preprocessResult.summary(), totalPoolSize(), cutPool.size());
 		}
 
 		while (!queue.isEmpty() && processedNodes < config.maxNodes && !isSolveTimeLimitReached(solveStartNanos)) {

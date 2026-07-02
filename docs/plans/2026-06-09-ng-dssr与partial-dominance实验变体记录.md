@@ -1383,3 +1383,21 @@ R50 有 74 次返回 elementary 列，平均需要 `2.649` 轮，最多 `6` 轮�
 按 job 看，部分邻居出现频率非常稳定。例如 R50 这次中，job 39 的最终 ng-set 里 member 12 出现频率 `0.95`、member 1 为 `0.81`、member 21 为 `0.41`；job 21 中 member 12 为 `0.93`、member 28 为 `0.64`、member 39 为 `0.57`；job 12 中 member 39 为 `0.91`、member 21 为 `0.82`、member 1 为 `0.81`。如果按成员出现频率做 learned initial ng-set，阈值 `0.5` 时平均 size 约 `1.55`、最大 `4`；阈值 `0.4` 时平均 size 约 `1.775`、最大 `5`；阈值 `0.3` 时平均 size 约 `1.975`、最大 `5`。这说明很小的 learned seed 就可能覆盖大量最终会被 DSSR 学到的成员。
 
 当前结论是：可以通过“最终 ng-set 成员稳定性”来指导初始 ng-set，而不是只看 nearestK 或 topK。最优先值得实现的实验方案是 node-local warm start：同一个 node 内，每次 exact pricing 结束后保存 final ng-set，下次 exact pricing 初始化时从这份集合开始，再叠加 self/nearest/dualPair 规则。正确性上这是安全的，因为扩大 ng-set 只会收紧 ng relaxation，不会删掉 elementary 可行列；风险是 ng-set 过大可能削弱 dominance、增加 label 状态。但本次 R50 的最终平均 size 仍小于 2，这个风险较小。跨 node/child 继承也有潜力，但相似度只有中等，应作为第二阶段实验，最好加上 size 上限或只继承高频成员。
+
+142. 2026-07-02 动态 ng-set 初始化与历史统计继承方案讨论
+
+基于第 139-141 节的诊断结果，当前可以确认一个事实：ng-DSSR 每次 exact pricing 都从很小的初始 ng-set 重新开始，会反复学习高度相似的记忆集合。`setupR50`、`empty1/top5` 成员诊断中，同一 node 内相邻 exact call 的按 job 平均 Jaccard 相似度约为 `0.878`，完全相同 job 集合比例约为 `0.738`；同一 node 内所有 pair 的平均 Jaccard 也有 `0.803`。跨 node 使用每个 node 最后一次 elementary-return call 的 final ng-set 对比，平均 Jaccard 约为 `0.642`，说明跨节点也有一定稳定性，但明显弱于同一 node 内。部分 job 的高频邻居非常稳定，例如 job 39 经常需要 `{12, 1, 21}`，job 21 经常需要 `{12, 28, 39}`，job 12 经常需要 `{39, 21, 1}`。按成员出现频率过滤时，阈值 `0.5` 附近得到的 learned seed 平均 size 约 `1.55`、最大 `4`；阈值 `0.4` 时平均约 `1.775`、最大 `5`；阈值 `0.3` 时平均约 `1.975`、最大 `5`。这说明 learned seed 并不需要很大，就可能覆盖多数重复学习到的成员。
+
+因此，动态设置 ng-set 的基本方向是成立的：不改变 ng relaxation 的正确性，只改变每次 DSSR exact pricing 的初始记忆集合，让它少走几轮重复的 non-elementary 学习过程。这个策略和 time-indexed/compact window 强化是互补的：compact window 主要缩小时间域、弧域和函数定义域；learned ng-set 主要减少 DSSR 内部对相似 memory set 的重复学习。前者减少扩展空间，后者减少 DSSR 迭代次数和无效 non-elementary route 数量。
+
+当前更清晰、风险更低的是 node 之间继承。root 的第一次 exact pricing 仍保持现有初始化，不引入历史偏置；非 root node 的第一次 exact pricing 可以只从直接父节点继承统计信息，不使用全祖先或全局历史。具体思路是：父节点处理结束后保存每个 job 的 final ng-set 成员频率；子节点初始化时，对每个 job 取频率大于 `0.5` 的成员，按频率排序取前 K 个，K 直接使用 `ngDssrInitialNgSetSize` 的口径，成员不足 K 时不强行用 nearest 补满。这样可以避免 ng-set 无控制膨胀，也避免跨很远节点继承过多已经不适合当前分支域的成员。该方案默认应做成关闭开关，先用于统计和对比。
+
+同一 node 内继承更有潜力，但当前还没有一个足够干净的策略。最直接的“上一轮 final ng-set 全量作为下一轮初始 ng-set”不推荐，因为 final set 可能随 DSSR 迭代不断累积，容易单调变大，导致 dominance 变弱、label 数变多。用前 20 次 exact pricing 统计高频成员再启用也不理想：一方面早期样本少时频率不稳定，另一方面等到 20 次以后，很多重复学习的成本已经付出，而且这些 exact call 之间 dual、列池、cut 状态可能已经变化，统计含义不一定一致。
+
+相对合理的 node 内候选方案是“first-exact anchor”。即同一 node 的第一次 exact pricing 仍按常规初始化；结束后，把这次 DSSR 更新过程中真正触发过的 memory evidence 统计成一个截断 anchor；后续同一 node 的 exact pricing 都从这个固定 anchor 初始化，而不是滚动继承上一轮 final set。anchor 的成员最好不是简单取 final ng-set，而是记录每次 non-elementary route 触发更新时的 `(middleJob, repeatedJob)` 证据次数，再按次数取前 K，tie-break 可以用 ng 距离或 job id。这样更接近“哪些成员确实解决了重复访问问题”，而不是把最终集合里的历史残留全部继承下来。问题是当前代码还没有维护这种 pair-level evidence，因此该方案需要额外实现和验证；在此之前不建议直接做 node 内继承。
+
+关于 `ngDssrRouteUpdateLimit`，前面的 `empty1/top1` 与 `empty1/top5` 对比说明，更新更多 route 可以显著减少 elementary 返回前的 DSSR 轮数和尾部 non-elementary 数量，但求解时间并非单调变好。R25 上 top5 明显改善，R50/R75 反而变慢，原因是更快扩大 ng-set 会改变列集合、LP 退化路径和后续分支结构。也就是说，update 数量本身不是正确性风险，但它不是简单“越大越快”。后续如果继续做，应考虑把 update 数量也做成诊断驱动或节点状态驱动，而不是固定全局加大。
+
+实现层面还要注意生命周期。`PricingEngine.reset()` 在 PC 中会因 LP、cut、pricing engine 切换等被频繁调用，它只能清临时缓存，不能作为“新 node / 新树”的边界。如果把 warm-start 历史存在 pricing engine 内部并在 reset 中清掉，同一 node 或父子 node 的继承就会失效。更合适的做法是把 learned ng-set 统计放在 node/tree 层，或由独立的 warm-start manager 按 solve 生命周期管理；只在新实例或新整棵树开始时清空。
+
+当前结论是：先不实现 node 内动态继承。后续最值得先做的是 node-to-node 的父节点统计继承，默认关闭，并记录继承前后 DSSR 轮数、final ng-set size、non-elementary negative route 数、exact pricing 时间和最终搜索树是否变化。node 内策略等 pair-level evidence 统计清楚后再做，否则容易因为 ng-set 变大导致 dominance 变弱，抵消减少 DSSR 轮数的收益。

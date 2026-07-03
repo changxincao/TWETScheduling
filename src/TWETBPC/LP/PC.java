@@ -337,7 +337,8 @@ public class PC {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-				return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible");
+				return StrongBranchingTrialResult.from(lp, solution, false,
+						withSolutionMessage("rmp_trial_infeasible", solution));
 			}
 			if (lightweightRepair) {
 				int penalized = lp.penalizeBranchImpliedIncompatibleColumns(Utility.big_M);
@@ -347,12 +348,13 @@ public class PC {
 						return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 					}
 					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-						return StrongBranchingTrialResult.unusable(lp, solution,
-								"branch_implied_penalty_infeasible");
+						return StrongBranchingTrialResult.infeasible(lp, solution,
+								withSolutionMessage("branch_implied_penalty_infeasible", solution));
 					}
 					if (!lp.isNoSlack() || lp.hasPositiveBranchImpliedPenaltyColumn()) {
-						return StrongBranchingTrialResult.unusable(lp, solution,
-								"branch_implied_penalty_positive value=" + lp.branchImpliedPenaltyValue());
+						return StrongBranchingTrialResult.infeasible(lp, solution,
+								"branch_implied_penalty_positive slack=" + !lp.isNoSlack()
+										+ ",mValue=" + lp.branchImpliedPenaltyValue());
 					}
 				}
 			}
@@ -374,11 +376,8 @@ public class PC {
 					return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 				}
 				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-					if (lightweightRepair) {
-						return StrongBranchingTrialResult.unusable(lp, solution,
-								"rmp_trial_infeasible_after_filter");
-					}
-					return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible_after_filter");
+					return StrongBranchingTrialResult.from(lp, solution, false,
+							withSolutionMessage("rmp_trial_infeasible_after_filter", solution));
 				}
 			}
 			return StrongBranchingTrialResult.from(lp, solution, false,
@@ -387,6 +386,13 @@ public class PC {
 			restoreControllerState(savedState);
 			resetAllPricingEngines();
 		}
+	}
+
+	private static String withSolutionMessage(String prefix, TWETMasterSolution solution) {
+		if (solution == null || solution.getMessage() == null || solution.getMessage().isEmpty()) {
+			return prefix;
+		}
+		return prefix + ":" + solution.getMessage();
 	}
 
 	public StrongBranchingTrialResult solveStrongBranchingHeuristicTrial(LP lp) {
@@ -1287,21 +1293,18 @@ public class PC {
 		private final double bound;
 		private final boolean infeasible;
 		private final boolean timeLimited;
-		private final boolean reusableForQueue;
 		private final boolean addedColumns;
 		private final ArrayList<Integer> internalColumnIds;
 		private final ArrayList<Integer> outsourcingColumnIds;
 		private final String message;
 
 		private StrongBranchingTrialResult(TWETMasterSolution solution, double bound, boolean infeasible,
-				boolean timeLimited,
-				boolean reusableForQueue, boolean addedColumns, ArrayList<Integer> internalColumnIds,
+				boolean timeLimited, boolean addedColumns, ArrayList<Integer> internalColumnIds,
 				ArrayList<Integer> outsourcingColumnIds, String message) {
 			this.solution = solution;
 			this.bound = bound;
 			this.infeasible = infeasible;
 			this.timeLimited = timeLimited;
-			this.reusableForQueue = reusableForQueue;
 			this.addedColumns = addedColumns;
 			this.internalColumnIds = internalColumnIds;
 			this.outsourcingColumnIds = outsourcingColumnIds;
@@ -1317,16 +1320,13 @@ public class PC {
 				String message, boolean timeLimited) {
 			boolean infeasible = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
-			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, !infeasible && !timeLimited,
-					addedColumns,
+			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
 
-		static StrongBranchingTrialResult unusable(LP lp, TWETMasterSolution solution, String message) {
-			double bound = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE ? 0.0
-					: solution.getObjectiveValue();
-			return new StrongBranchingTrialResult(solution, bound, false, false, false, false,
+		static StrongBranchingTrialResult infeasible(LP lp, TWETMasterSolution solution, String message) {
+			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
@@ -1348,7 +1348,7 @@ public class PC {
 		}
 
 		public boolean isReusableForQueue() {
-			return reusableForQueue;
+			return !infeasible && !timeLimited;
 		}
 
 		public boolean hasAddedColumns() {

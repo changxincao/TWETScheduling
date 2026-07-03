@@ -494,15 +494,15 @@ public class Tree {
 			applySubtreeArcElimination(branchResult, subtreeArcElimination);
 			boolean domainRepair = useDomainFilteredStrongBranchingRepair(candidate, parentLp);
 			boolean lightweightRepair = !domainRepair && useLightweightStrongBranchingRepair(candidate, parentLp);
-			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(branchResult.getLeftNode(), parentLp,
-					domainRepair, lightweightRepair);
+			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrialWithCertification(
+					branchResult.getLeftNode(), parentLp, domainRepair, lightweightRepair);
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
 			if (leftTrial != null && leftTrial.isTimeLimited()) {
 				return new StrongBranchingSelection(branchResult, candidate, leftTrial, null, 0.0, false,
 						candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
 			}
-			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp,
-					domainRepair, lightweightRepair);
+			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrialWithCertification(
+					branchResult.getRightNode(), parentLp, domainRepair, lightweightRepair);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
 			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
 					: strongBranchingScore(parentBound, leftTrial, rightTrial);
@@ -602,6 +602,28 @@ public class Tree {
 		} finally {
 			trial.closeModel();
 		}
+	}
+
+	/**
+	 * 2026-07-04: lightweight strong-branching seed 只是一种加速试探。若它在普通 repair 阶段报告
+	 * RMP infeasible，先用完整父列集复验一次，再把该 side 当作 INF；但 M 惩罚列或 slack 为正时，
+	 * 说明当前分支语义本身没有被满足，直接按不可行处理，不回退。
+	 */
+	private StrongBranchingTrialResult solveStrongBranchingRmpTrialWithCertification(Node child, LP parentLp,
+			boolean domainRepair, boolean lightweightRepair) {
+		StrongBranchingTrialResult trial = solveStrongBranchingRmpTrial(child, parentLp, domainRepair,
+				lightweightRepair);
+		if (lightweightRepair && shouldRetryFullStrongBranchingTrial(trial)) {
+			return solveStrongBranchingRmpTrial(child, parentLp, false, false);
+		}
+		return trial;
+	}
+
+	private boolean shouldRetryFullStrongBranchingTrial(StrongBranchingTrialResult trial) {
+		if (trial == null || !trial.isInfeasible() || trial.getMessage() == null) {
+			return false;
+		}
+		return trial.getMessage().startsWith("rmp_trial_infeasible");
 	}
 
 	private boolean useDomainFilteredStrongBranchingRepair(StrongBranchingCandidate candidate, LP parentLp) {
@@ -771,9 +793,6 @@ public class Tree {
 		if (trial.isTimeLimited()) {
 			return 0.0;
 		}
-		if (!trial.isReusableForQueue() && !trial.isInfeasible()) {
-			return 0.0;
-		}
 		if (trial.isInfeasible()) {
 			return config.pseudoCostInf;
 		}
@@ -881,11 +900,6 @@ public class Tree {
 			return false;
 		}
 		if (!trial.isReusableForQueue()) {
-			if (!trial.isInfeasible() && !trial.isTimeLimited()) {
-				prepareChildSeedColumns(child, parentLp, brancher);
-				queue.add(child);
-				return true;
-			}
 			return false;
 		}
 		child.setStrongBranchingSeedPrepared(true);
@@ -1009,9 +1023,6 @@ public class Tree {
 			}
 			if (trial.isTimeLimited()) {
 				return "TIME_LIMIT";
-			}
-			if (!trial.isReusableForQueue() && !trial.isInfeasible()) {
-				return "UNUSABLE";
 			}
 			if (trial.isInfeasible()) {
 				return "INF";

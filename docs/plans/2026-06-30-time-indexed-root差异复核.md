@@ -151,3 +151,11 @@ strong 口径则已经出现可疑信号：`test-results/bpc/tmp-timegraph-nocut
 实现上新增了 `Node.usesBranchImpliedForbiddenArc(column)` 来识别包含右支竞争弧的列；`LP.penalizeBranchImpliedIncompatibleColumns(big_M)` 只在 strong trial LP 内临时改这些列的目标系数。`PC.solveStrongBranchingRmpTrial()` 在 lightweight repair 路径中加入该 M 惩罚重解；如果后续二次筛列仍导致 LP infeasible，也同样返回 `UNUSABLE` 而不是 `INF`。`Tree` 对 `UNUSABLE` trial 不再给伪无穷得分，也不复用该 trial 的 seed，而是按普通分支逻辑重新准备 child seed 入队。strong branching summary 现在额外打印 `leftMsg/rightMsg`，用于区分 `rmp_trial_infeasible`、`rmp_trial_infeasible_after_filter`、`branch_implied_penalty_positive` 等来源。
 
 验证使用 `test-results/bpc/tmp-strong-mpenalty-verify4-20260704`，同样是 `wet040_001_2m`、partial/no-SRI、time-indexed root preprocessing、strong branching 开启的短时限配置。该 run `valid=true`，153.814s 内收敛到 `22581`；日志中 M 惩罚阶段执行 102 次，master LP 统计为 `strong_branching_light_after_branch_implied_penalty=2.880s/102 calls`。strong branching summary 未再出现 `rmp_trial_infeasible_after_filter` 被选中为 `rightBound=INF` 的情况；后续仍出现的 `INF` 来源为 `rmp_trial_infeasible`，即初始 trial/repair 层面的不可行，和这次修复的“二次筛列后 false INF”不是同一条路径。该结果说明本次修复命中了已证实的问题，但若后续还要进一步收紧 strong trial 的不可行证书，需要单独分析 `rmp_trial_infeasible` 是否也可能来自受限 repair 口径。
+
+### 2026-07-04 strong branching M/slack 语义更正
+
+前一版把 lightweight strong trial 中 `branch-implied` 竞争弧列被临时改成 `big_M` 后仍为正、或 repair slack 仍为正的情况标成 `UNUSABLE`，让正式 child 回到普通 seed/repair 流程。这个口径已经被更正：在当前设计下，M 惩罚重解后如果 slack 或 M 列仍然为正，说明该 trial 在当前分支语义下仍依赖违反右支竞争弧的列，直接按该 side 不可行处理，不再回退成正式 child。
+
+同时，`22581` 的错误结果说明仍有另一条假 INF 风险：lightweight seed 的普通 `rmp_trial_infeasible` 可能只是筛出来的 seed 不够，而不是完整父列空间不可行。因此当前修复把两类情况区分开。若是 M/slack 正值，直接作为 INF；若是 lightweight trial 在普通 repair 阶段报告 `rmp_trial_infeasible`，则先用完整父节点 restricted columns 重新构造一次 trial 并复验，只有完整 seed 仍 infeasible 时才把它作为 INF 参与强分支评分和入队判断。
+
+验证使用 `test-results/bpc/tmp-strong-mpenalty-certify-20260704`，配置为 `wet040_001_2m`、`halfDomain-ngPartial-nearestK4-top10`、no-SRI、partial dominance、time-indexed root preprocessing、strong branching 与 lightweight repair 开启。结果为 `FINISHED, obj=bound=22580, solve=208.150s, nodes=18, pool=125886, exact=4.002s/109, valid=true`。这与此前 `tmp-strong-mpenalty-verify4-20260704` 的错误 `22581` 相比，说明原来的 conservative fallback 和未复验的 lightweight INF 口径都不够清楚；当前口径恢复了已知正确最优值，但代价是不能再利用那条假 INF 快速闭合。

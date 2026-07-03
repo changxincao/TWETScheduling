@@ -135,3 +135,9 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 旧 fast 与 old slow 的核心差异也不是搜索树或列集合。以 R75 为例，两组都是 `nodes=30`、`pricing rounds=760`、`added columns=33586`、root 的 `pool=15109/restricted=15109`，node1 的 label、join、completion bound 和 subtree fixing 统计也逐项一致。差异主要体现在同样调用和同样计数下的耗时几乎整体减半：R75 中 HeuristicPricing 从 `93.272s/548` 降到 `46.436s/548`，GCNGBBStyleNgDssrPricing 从 `102.330s/212` 降到 `51.644s/212`，master LP 汇总从 `27.555s` 降到 `13.456s`，RMIH 从 `21.889s` 降到 `11.373s`，subtree arc elimination 从 `5.593s` 降到 `2.768s`。R25 也类似，pricing rounds 和 added columns 完全一致，但 heuristic/exact 耗时约为 old slow 的一半。
 
 因此这次“旧 fast 为何很快”的证据结论是：它不是某个 BPC 组件多剪了，也不是 root preprocessing 缩了窗口，而是同一算法工作量下的执行吞吐显著更高。日志没有记录足够的 JVM/CPU/系统负载/CPLEX 内部状态来继续唯一定位原因；当前可确认的是它不能作为 root preprocessing 的收益证据。后续做 off/on 对比必须使用新日志中同时出现 `config.enableTimeIndexedRootPreprocessingForNgDssr=true`、`timeIndexedRootPreprocess.start/done` 和临时 `TimeIndexedGraphPricing node=0` 的 run，且最好同一批次重复跑两次，避免把单次吞吐波动当作算法效果。
+
+## 2026-07-03：time-indexed root preprocessing 的适用性补充
+
+当前判断是：time-indexed root preprocessing 在一部分算例上有效，主要是因为它能较快闭合 root，并把普通 arc fixing 与 compact window 传给后续 ng-DSSR，使后续节点的扩展域明显缩小。但它不是无条件收益。若 pricing horizon 或离散时空弧规模过大，或者 pseudo-schedule root tail 很长，临时 time-indexed RMP 和最短路扫描本身会变成额外成本。
+
+因此更合理的使用条件不是“总是开”，而是当估计的 `n^2 * pricingHorizon`、dual-window 后的有效 horizon、以及前几轮 time-indexed pricing 的列生成规模处于可控范围时再使用。另一种后续可试方案是 capped pilot：先跑少量 time-indexed root pricing 轮次，观察 arc scan、候选列、LP 时间，如果预处理明显失控则中止，回到直接 ng-DSSR。这个方向先记录，不立即修改主线。

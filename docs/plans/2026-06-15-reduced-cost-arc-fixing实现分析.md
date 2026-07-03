@@ -15,3 +15,9 @@
 安全条件是：dual bound 必须来自 exact pricing 证书，不能来自 heuristic pricing；repair/slack pricing 不能使用；active SRI cut 下当前代码还没有完整 SRI-aware observed-bound 口径，因此不应默认使用；columnized outsourcing 时必须同时有内部机器列和外包列的 certified reduced cost，否则只证明了一个列族。ng-DSSR 若使用 relaxed rc_min 形成 observed bound，得到的是更保守的下界，安全但可能偏弱。
 
 后续若实现，推荐只做局部小改：在 post-node 或 cut-loop pricing-only arc fixing 前取 `effectiveLB = max(lpObj, pc.lastObservedDualBound)`，把 `gap = UB - effectiveLB` 传给 `TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing`、`TimeIndexedScalarCompletionBound.applyArcFixing` 以及 completion-bound subtree fixing 的相应入口，并在日志中输出 `lpObj / observedDualBound / gapBefore / gapAfter / fixed`。如果 `effectiveLB >= UB`，节点本身已经可由 dual-bound pruning 关闭，不需要再做 fixing。
+
+### 当前 node 口径补充
+
+上面的 `observed dual bound` 不能按全局值使用。用于 arc fixing 时，它应来自当前 node 当前 LP dual 下的一次 exact pricing 证书，并且只服务当前 node 的 pricing-only fixing、cut-loop 间 fixing 或 node 结束后的 subtree fixing。父节点或兄弟节点的 observed bound 不应直接作为当前 node 的 fixing gap 依据；父节点下界虽然通常也是子节点目标的弱下界，但它和当前 node 的 dual、分支约束、cut 集以及 reduced-cost arc test 不是同一个证书口径，默认使用会让日志和判定语义混乱，收益也弱。
+
+因此若后续实现，应在每个 node 的 `PC.solve()` 生命周期内维护本 node 的 `bestObservedDualBound`，node 切换时重置。arc fixing 入口只读取当前 node 已经产生的 finite observed bound，并取 `max(lpObj, currentNodeObservedDualBound)`；如果当前 node 尚未经过能给证书的 exact pricing，则仍退回 `lpObj`。

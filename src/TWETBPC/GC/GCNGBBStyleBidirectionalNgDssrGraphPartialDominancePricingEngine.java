@@ -25,11 +25,13 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
 	private final HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse> midpointProbeReuseByNode;
+	private final NgDssrHistoryWarmStart historyWarmStart;
 
 	public GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
 		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse>();
+		this.historyWarmStart = new NgDssrHistoryWarmStart(data.n);
 	}
 
 	@Override
@@ -44,7 +46,8 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR graph partial-dominance pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				midpointProbeReuseByNode, true);
+				midpointProbeReuseByNode, GCNGBBStyleBidirectionalNgDssr.DominanceBackend.GRAPH_PARTIAL,
+				historyWarmStart);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (config.diagnosticCrossCheckPartialDominance && shouldRunSameStateCrossCheck(lp, !columns.isEmpty())) {
 			String message = gc.getLastMessage() + runSameStateCrossCheck(lp, columns);
@@ -186,6 +189,31 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 		return reducedCost;
 	}
 
+	@Override
+	public PricingResult findFeasible(LP lp) {
+		return findFeasible(lp, TimeLimitChecker.NONE);
+	}
+
+	@Override
+	public PricingResult findFeasible(LP lp, TimeLimitChecker timeLimitChecker) {
+		lastReusableSubtreeArcEliminationBounds = null;
+		if (timeLimitChecker != null && timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before repair pricing");
+		}
+		if (!config.enableBidirectionalPricing || !config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
+			return PricingResult.noImprovement("GCNGBB-style ng-DSSR graph partial-dominance pricing disabled");
+		}
+		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
+				midpointProbeReuseByNode, true);
+		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
+		if (columns.isEmpty()) {
+			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
+			return PricingResult.noImprovement(gc.getLastMessage())
+					.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
+		}
+		return new PricingResult(columns, true, gc.getLastMessage())
+				.withCertifiedInternalReducedCost(gc.getLastRelaxedRoundBestReducedCost());
+	}
 	@Override
 	public CompletionBoundSubtreeArcEliminator.PreparedBounds getReusableSubtreeArcEliminationBounds() {
 		return lastReusableSubtreeArcEliminationBounds;

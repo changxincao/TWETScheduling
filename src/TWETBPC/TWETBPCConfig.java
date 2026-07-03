@@ -153,6 +153,16 @@ public class TWETBPCConfig {
 	public int ngDssrInitialNgSetSize = 8;
 	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
 	public int ngDssrNonElementaryRouteUpdateLimit = 1;
+	/** 2026-07-03: 实验开关；按最近若干次正式 ng-DSSR final ng-set 统计初始化下一次 ng-set。 */
+	public boolean enableNgDssrHistoryWarmStart = false;
+	/** 2026-07-03: ng-set 历史窗口大小；越大越接近全局历史。 */
+	public int ngDssrHistoryWarmStartWindowSize = 50;
+	/** 2026-07-03: 成员进入 learned seed 的最低出现频率阈值。 */
+	public double ngDssrHistoryWarmStartFrequencyThreshold = 0.5;
+	/** 2026-07-03: 高频成员数量超过 floor 平均 size 时，允许本 job 使用 ceil 平均 size。 */
+	public double ngDssrHistoryWarmStartHighConfidenceThreshold = 0.8;
+	/** 2026-07-03: root 第一次无历史仍走老逻辑；该开关控制 root 后续 pricing 是否可用历史。 */
+	public boolean ngDssrHistoryWarmStartUseRoot = false;
 	/**
 	 * 2026-06-30: 仅用于诊断对照。打开后，ng-DSSR 的负 non-elementary route 直接作为
 	 * ng-relaxed 列进入 RMP，不再只用于 DSSR 收紧 ng-set；默认关闭，保持主线 elementary 列口径。

@@ -185,6 +185,9 @@ public class GCBBFullDomainComparisonTest {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		}
+		if (config.enableNgDssrHistoryWarmStart) {
+			mode += "-ngHistW" + config.ngDssrHistoryWarmStartWindowSize;
+		}
 		if (config.ngDssrReturnRelaxedColumns) {
 			mode += "-ngRelaxedColumns";
 		}
@@ -414,6 +417,20 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
 				config.ngDssrNonElementaryRouteUpdateLimit);
+		config.enableNgDssrHistoryWarmStart = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrHistoryWarmStart",
+				Boolean.toString(config.enableNgDssrHistoryWarmStart)));
+		config.ngDssrHistoryWarmStartWindowSize = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrHistoryWindow", config.ngDssrHistoryWarmStartWindowSize);
+		config.ngDssrHistoryWarmStartFrequencyThreshold = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrHistoryFrequencyThreshold",
+				Double.toString(config.ngDssrHistoryWarmStartFrequencyThreshold)));
+		config.ngDssrHistoryWarmStartHighConfidenceThreshold = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrHistoryHighConfidenceThreshold",
+				Double.toString(config.ngDssrHistoryWarmStartHighConfidenceThreshold)));
+		config.ngDssrHistoryWarmStartUseRoot = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrHistoryUseRoot",
+				Boolean.toString(config.ngDssrHistoryWarmStartUseRoot)));
 		config.ngDssrReturnRelaxedColumns = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrReturnRelaxedColumns",
 				Boolean.toString(config.ngDssrReturnRelaxedColumns)));

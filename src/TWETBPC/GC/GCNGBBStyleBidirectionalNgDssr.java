@@ -82,6 +82,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
 	private final HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode;
+	private final NgDssrHistoryWarmStart historyWarmStart;
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -284,6 +285,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrRoundElementaryColumnsReturned;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
+	private boolean ngDssrHistoryWarmStartApplied;
 	private StringBuilder ngDssrNgSetStatsByRound;
 	private boolean sriPricingEnabled;
 	private ArrayList<Integer> sriCutIds;
@@ -329,11 +331,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, DominanceBackend dominanceBackend) {
+		this(data, config, midpointProbeReuseByNode, dominanceBackend, null);
+	}
+
+	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
+			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, DominanceBackend dominanceBackend,
+			NgDssrHistoryWarmStart historyWarmStart) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
 		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
 		this.dominanceBackend = dominanceBackend == null ? DominanceBackend.PAPER : dominanceBackend;
+		this.historyWarmStart = historyWarmStart;
 	}
 
 	private void initializeNgNeighborhoods(LP lp) {
@@ -341,6 +350,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		for (int job = 1; job <= data.n; job++) {
 			ngNeighborhoodByJob[job] = new PackedBitSet(data.n + 2);
 			ngNeighborhoodByJob[job].add(job);
+		}
+		ngDssrHistoryWarmStartApplied = false;
+		if (historyWarmStart != null && historyWarmStart.apply(ngNeighborhoodByJob, config, isRootNode(lp))) {
+			ngDssrHistoryWarmStartApplied = true;
+			return;
 		}
 		String mode = config.ngDssrInitialNgSetMode == null ? "nearestK" : config.ngDssrInitialNgSetMode;
 		int targetSize = Math.max(1, config.ngDssrInitialNgSetSize);
@@ -366,6 +380,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		throw new IllegalArgumentException("Unsupported ngDssrInitialNgSetMode: " + mode);
+	}
+
+	private boolean isRootNode(LP lp) {
+		return lp == null || lp.getNode() == null || lp.getNode().depth == 0;
 	}
 
 	private void addNearestJobsToNgNeighborhood(final int centerJob, int targetSize) {
@@ -464,7 +482,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void appendNgDssrSummary(String reason) {
-		lastMessage = lastMessage + " | ng-DSSR reason=" + reason
+		lastMessage = lastMessage + " | ng-DSSR reason=" + reason + ngSetWarmStartSummary()
 				+ ", rounds=" + ngDssrRoundsExecuted
 				+ ", totalNonElementarySeen=" + ngDssrTotalNonElementaryNegativeSeen
 				+ ", totalNonElementaryStored=" + ngDssrTotalNonElementaryRoutes
@@ -472,6 +490,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
 				+ ngSetStatsSummary()
 				+ ngSetMembersSummary();
+	}
+
+	private String ngSetWarmStartSummary() {
+		if (!config.enableNgDssrHistoryWarmStart) {
+			return "";
+		}
+		String source = ngDssrHistoryWarmStartApplied ? "learned" : "base";
+		String history = historyWarmStart == null ? "historyWarmStart=none" : historyWarmStart.summary();
+		return ", ngWarmStart=" + source + "/" + history;
+	}
+
+	private void recordNgSetHistory() {
+		if (historyWarmStart != null && config.enableNgDssrHistoryWarmStart) {
+			historyWarmStart.record(ngNeighborhoodByJob, config);
+		}
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -515,11 +548,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				appendNgDssrSummary(config.ngDssrReturnRelaxedColumns
 						? "ng-relaxed negative columns returned"
 						: "elementary negative columns returned");
+				recordNgSetHistory();
 				return columns;
 			}
 			if (nonElementaryNegativeRoutes.isEmpty()) {
 				appendNgSetStatsForRound(0);
 				appendNgDssrSummary("relaxed pricing found no negative route");
+				recordNgSetHistory();
 				return columns;
 			}
 			int changed = updateNgNeighborhoodsFromNonElementaryRoutes();

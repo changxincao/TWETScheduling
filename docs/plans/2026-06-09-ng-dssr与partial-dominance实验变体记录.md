@@ -1427,3 +1427,15 @@ R50 有 74 次返回 elementary 列，平均需要 `2.649` 轮，最多 `6` 轮�
 root 的处理也应分开。root 第一次 exact pricing 没有历史，仍按当前老办法初始化；root 内后续 exact pricing 是否使用已经积累的历史可以作为开关试一下。保守口径是 root 整体都不用 learned seed，因为 root 的 dual 和列池还在剧烈变化；激进口径是 root 第一次以后也允许使用最近历史，理由是前面统计显示同一 node 内 final ng-set 相似度较高，信息少时也可能帮助减少重复 DSSR 轮数。两种都可以实现，但默认建议先让 root 第一次保持老办法，后续是否启用通过单独开关控制。
 
 当前更推荐的实验版本是：维护最近 `W` 次正式 ng-DSSR exact pricing 的 final ng-set 统计，排除 strong branching trial、repair、time-indexed 预处理等非正式求解；每次正式 exact pricing 开始时，如果历史样本数不足最小阈值，就退回老办法；样本足够后，对每个 job 用平均 size 决定目标数量，用 `>0.5` 频率过滤成员，并用 `>0.8` 的高置信成员数量决定 floor/ceil。该策略仍然只影响初始化，不改变 DSSR 正确性。必须同步记录 learned seed 的平均/最大 size、实际使用成员数、DSSR 轮数、non-elementary route 数、label 数和 exact 时间，判断它到底是在减少迭代，还是把 label 空间放大。
+
+145. 2026-07-03 动态 ng-set 历史窗口 warm-start 实现
+
+本次按第 144 节口径实现了默认关闭的动态 ng-set 历史窗口实验功能。实现没有改变 DSSR 的收敛逻辑，只改变每次正式 ng-DSSR exact pricing 初始化 `ngNeighborhoodByJob` 的方式：如果开关关闭、没有历史样本，或者当前是 root 且未允许 root 使用历史，则仍走原来的 `empty/full/dualPair/nearestK` 初始化；如果开关打开且历史可用，则按最近 `W` 次 final ng-set 统计生成 learned seed。
+
+历史状态由独立的 `NgDssrHistoryWarmStart` 管理，保存在具体 ng-DSSR pricing engine 生命周期内。它只记录正式 exact pricing 结束后的 final ng-set，且三个 ng-DSSR engine 都单独覆盖了 repair 用的 `findFeasible()`，repair 阶段不向历史窗口写入；strong branching phase2 当前只走启发式 trial，诊断 cross-check 也使用独立 solver，因此不会污染主线历史。这样做的目标是避免把临时修复节点、强分支试探或诊断求解里的 ng-set 当成主线统计。
+
+learned seed 的构造规则为：对每个 job 计算历史 final ng-set size 的平均值，默认取 floor 作为目标大小；如果频率超过高置信阈值的非自身成员数量已经超过 floor 目标，则允许取 ceil。成员选择只考虑出现频率大于 `ngDssrHistoryWarmStartFrequencyThreshold` 的 job，默认阈值为 `0.5`；候选按频率降序、job id 升序取到目标大小为止，不用 nearest 补满。高置信阈值默认 `0.8`。窗口大小 `ngDssrHistoryWarmStartWindowSize` 默认 `50`，设置很大时近似全局历史，设置较小时就是滑动窗口。root 后续 pricing 是否可用历史由 `ngDssrHistoryWarmStartUseRoot` 控制，默认关闭。
+
+full-domain runner 暴露了对应参数：`twet.bpc.fullDomainCompare.ngDssrHistoryWarmStart`、`ngDssrHistoryWindow`、`ngDssrHistoryFrequencyThreshold`、`ngDssrHistoryHighConfidenceThreshold` 和 `ngDssrHistoryUseRoot`。打开后 mode 名会追加 `ngHistW...`，DSSR summary 中会输出 `ngWarmStart=base/learned` 和当前历史样本数，方便对比本轮是否真正用了 learned seed。
+
+正确性判断仍是：该功能只修改初始 ng-set，不会删除 elementary 可行列；如果 learned seed 不合适，DSSR 仍可通过 non-elementary negative route 继续更新 ng-set。因此它是性能实验开关，不改变主问题语义。主要风险是 learned seed 过大导致 dominance 变弱、label 数上升；所以默认关闭，并保留频率阈值和窗口大小供后续对比。验证方面，本次 focused `javac` 已覆盖新增类、三个 ng-DSSR engine、主体 solver、配置和 runner；短 smoke 确认 full-domain runner 能解析 `ngHistW` 配置并启动到 TIME_LIMIT，但由于 20 秒限制内尚未进入 exact pricing，性能效果仍需后续正式实验判断。

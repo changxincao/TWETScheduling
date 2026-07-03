@@ -149,11 +149,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private static int compareScoredSeed(ScoredSeed a, ScoredSeed b) {
-		if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-			return -1;
-		}
-		if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-			return 1;
+		// 2026-07-03: Keep the Comparator strictly transitive; epsilon compare can break TimSort.
+		int rcCompare = Double.compare(a.reducedCost, b.reducedCost);
+		if (rcCompare != 0) {
+			return rcCompare;
 		}
 		int sizeCompare = Integer.compare(a.column.size(), b.column.size());
 		if (sizeCompare != 0) {

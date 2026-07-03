@@ -1444,3 +1444,38 @@ full-domain runner 暴露了对应参数：`twet.bpc.fullDomainCompare.ngDssrHis
 本次对第 145 节实现做了一个小修正：root 初始迭代仍默认不用历史 warm-start，但 root 上一旦已经有 active cut，就允许使用历史统计初始化 ng-set。原因是加 cut 后属于同一个 root node 内的后续 price-and-cut 迭代，已经不是最初那次完全无 cut 的 pricing；这时继续从 `nearestK/empty` 等基础口径重新学相似 ng-set，会重复付出 DSSR 收紧成本。该修正只影响 `canUseHistoryWarmStart()` 的判定，不改变历史记录来源，也不让 repair、strong trial 或 cross-check 写入历史。
 
 同时把默认历史窗口从 `50` 调整为 `100`。前面讨论认为 50 对这种频率统计偏短，容易因为近期少量节点波动导致 learned seed 频率不稳定；100 仍然足够轻量，但能更接近“最近一段搜索状态”的稳定统计。功能仍默认关闭，只有显式打开 `enableNgDssrHistoryWarmStart` 才生效。
+147. 2026-07-03 nearestK4/top10 history warm-start 无效实验记录
+
+本轮原本用于比较 `nearestK4/top10` 下 history warm-start 开关效果，测试对象为 `wet040_001_2m_setupR25/R50/R75`，setup cost 系数为 20。复核后确认，这组结果不能作为 warm-start 生效实验结论，原先写入的 baseline/warm-start 时间、DSSR size 对照和“没有收益”的判断都已经撤销。
+
+问题的核心不是 warm-start 策略本身无效，而是该组日志没有证明新实现被实际加载。`tmp-nghist-cost20-k4-stats-warm-corrected-20260703` 的三组日志只显示 `systemProperty.twet.bpc.fullDomainCompare.ngDssrHistoryWarmStart=true`，但没有出现 `config.enableNgDssrHistoryWarmStart=true`。同时，只要源码中的 `enableNgDssrHistoryWarmStart` 真正打开，ng-DSSR pricing summary 应该输出 `ngWarmStart=base/...` 或 `ngWarmStart=learned/...`，而该组日志完全没有这个字段。因此该实验只能说明命令行属性被 JVM 枚举到了，不能说明它进入了实际配置和当前 pricing class。
+
+进一步检查 class 文件后，风险更明确：`bin/TWETBPC/...` 仍是旧 class，而 `target/classes` 才包含新的 warm-start 字段和 `ngWarmStart` summary 字符串。若实验 classpath 走了旧 `bin` 或旧 class 目录，就会出现“systemProperty 有开关，但 config 快照和 pricing 行为仍是旧版”的现象。第 147 节之前记录的 baseline 与 warm-corrected size 完全一致，不应解释为 warm-start 生效但没有收益，而应解释为本轮没有有效验证 warm-start。
+
+另一个需要修正的执行细节是 runner 参数名。full-domain runner 的总开关是 `twet.bpc.fullDomainCompare.ngDssrHistoryWarmStart`，但窗口、阈值和 root 口径分别是 `ngDssrHistoryWindow`、`ngDssrHistoryFrequencyThreshold`、`ngDssrHistoryHighConfidenceThreshold` 和 `ngDssrHistoryUseRoot`，不是带完整 `WarmStart` 的长名字。后续重跑必须使用当前编译后的 `target/classes`，并在日志中同时看到 `config.enableNgDssrHistoryWarmStart=true`、mode 名包含 `ngHistW...`、pricing summary 中包含 `ngWarmStart=...`，否则不能把结果当作 warm-start 对照。
+
+当前保留这段记录的目的只是防止后续误用这组数据。`test-results/bpc/tmp-nghist-cost20-k4-stats-baseline-20260703/` 和 `test-results/bpc/tmp-nghist-cost20-k4-stats-warm-corrected-20260703/` 只能作为“无效运行/旧 classpath 风险”的证据，不再作为性能结论。下一次重跑前先做短 smoke：只跑到第一次正式 ng-DSSR exact pricing，确认 `config.enableNgDssrHistoryWarmStart=true` 和 `ngWarmStart=base/historyWarmStart=...` 或 `learned/historyWarmStart=...` 出现在同一份日志里，再做 R25/R50/R75 完整对照。
+148. 2026-07-03 nearestK4/top10 history warm-start 有效重跑对比
+
+按照第 147 节修正后的检查口径，本轮重新编译当前 `target/classes` 后重跑 `setupR25/R50/R75`，并明确要求日志里同时出现 `config.enableNgDssrHistoryWarmStart=true` 和 pricing summary 的 `ngWarmStart=...` 字段。测试仍使用 setup cost 系数 20、`nearestK4/top10`、ALNS 60s、no-SRI/no-partial、强分支关闭、time-indexed root preprocessing 打开、route enumeration 关闭；本轮额外打开 `ngDssrSetStats=true`，用于读取每次 ng-DSSR 的轮数、non-elementary route 数量和 final ng-set size。baseline 目录为 `test-results/bpc/tmp-nghist-cost20-k4-baseline-redo-stats-20260703/`，warm-start 目录为 `test-results/bpc/tmp-nghist-cost20-k4-warm-redo-stats-20260703/`。
+
+baseline 结果为：R25 `ROOT_PROCESSED, obj=bound=31893, solve=97.010s, exact=4.902s/12, master=36.275s, pool=12198`；R50 `FINISHED, obj=bound=43625, solve=110.908s, nodes=9, exact=22.630s/69, master=19.962s, pool=17794`；R75 `FINISHED, obj=bound=55007, solve=186.945s, nodes=30, exact=45.746s/222, master=46.107s, pool=27143`。warm-start 结果为：R25 `ROOT_PROCESSED, solve=105.534s, exact=5.178s/12, pool=12198`；R50 `FINISHED, solve=123.947s, nodes=13, exact=30.722s/115, pool=22418`；R75 `FINISHED, solve=206.377s, nodes=30, exact=47.499s/207, pool=25782`。三组目标值和 valid 均一致。
+
+这次日志确认 warm-start 确实生效。R25 是 root-only，且当前配置 `ngDssrHistoryUseRoot=false`，所以所有 12 次 ng-DSSR 都是 `ngWarmStart=base`，final size、DSSR 轮数和 baseline 完全一致，这不是 bug，而是配置语义决定的。R50 中 117 次 ng-DSSR 里有 103 次 `learned`、14 次 `base`；R75 中 209 次里有 199 次 `learned`、10 次 `base`。这说明第 147 节指出的“旧实验没有真正触发 warm-start”已经被排除，本轮是有效对比。
+
+从 ng-DSSR 学习过程看，warm-start 确实减少了重复学习。R50 的平均 DSSR 轮数从 `2.729` 降到 `1.897`，最大轮数从 `8` 降到 `5`，平均 non-elementary route 数从 `3815.0` 降到 `2181.6`，平均更新次数从 `36.9` 降到 `12.7`；R75 的平均 DSSR 轮数从 `2.300` 降到 `1.871`，最大轮数从 `7` 降到 `6`，平均 non-elementary route 数从 `3031.0` 降到 `578.9`，平均更新次数从 `40.4` 降到 `20.9`。final ng-set size 并没有单调变小：R50 从 `4.922` 到 `4.867`，基本相当；R75 从 `5.010` 到 `5.784`，反而更大，说明 learned seed 会改变后续 DSSR 和列生成路径。
+
+总体性能并未稳定变好。R50 warm-start 反而从 `110.908s` 变成 `123.947s`，主要因为节点数从 9 增到 13、pricing 调用从 482 增到 638、pool 从 17794 增到 22418；R75 从 `186.945s` 变成 `206.377s`，虽然 exact calls 从 222 降到 207、pool 也略小，但 heuristic 和 master LP 时间均上升，抵消了 DSSR 学习轮数减少的收益。当前结论是：历史 warm-start 确实命中了原本想优化的现象，即减少 DSSR 轮数和 non-elementary route；但它会改变列集和分支树，整体求解时间不稳定，不能作为默认策略。后续若继续做，应优先加更保守的触发条件，例如只在连续多轮 DSSR 才找到 elementary、或 non-elementary route 数特别高时启用 learned seed，而不是对所有非 root pricing 全量启用。
+补充决策：该功能先保留，不删除、不改成默认启用。当前实验只能说明它在这组三个 setupR cost20 算例上整体不稳定，不能证明策略本身无用；它确实降低了 R50/R75 的 DSSR 轮数和 non-elementary route 数，说明机制命中了一个真实现象。后续如果在更大规模、不同 setup/时间尺度、带 cut 或不同分支结构下再次出现 DSSR 重复学习严重的问题，可以继续用这个开关做对照；在找到更清楚的触发条件前，主线仍保持关闭。
+
+149. 2026-07-03 partial dominance + time-indexed root preprocessing 下 SRI 对比
+
+本轮按当前 40-2 原始算例 `wet040_001_2m` 测试 partial dominance，并打开 time-indexed root preprocessing。先检查 SRI 下 arc fixing 的兼容性：`TimeIndexedRootPreprocessor` 自身仍按 no-cut/no-SRI 临时 root 求解，只把 time-indexed forbidden 状态、compact window 和可提升的普通 pricing-only arc 传回正式 root，不把临时 pseudo-schedule 列带入主线；这一步不依赖 active SRI cut。正式 ng-DSSR/partial 的 cut-loop fixing 在 active SRI 存在时，如果显式打开 `timeIndexedCompletionBoundSriAwareArcFixing=true`，会走 `TimeIndexedScalarCompletionBound.applySriAwareArcFixing()`；否则可通过关闭 cut-loop fixing 避免使用不完整的 active-cut fixing 证书。由此当前结论是：接口上兼容，但 SRI-aware time-indexed arc fixing 成本很高，不适合直接放在每轮 cut-loop 后默认运行。
+
+为了先排除强分支干扰，本轮 SRI/no-SRI 对比均关闭 strong branching，其他主线配置保持一致：partial dominance、nearestK4/top10、ALNS 60s、BEST_UB join、allCycles completion bound、scalar/arc fixing/subtree/pricingOnly、midpoint probe/reuse、dual-bound pruning、time-indexed root preprocessing 打开，route enumeration 关闭。no-SRI 结果为 `FINISHED, obj=bound=22580, solve=224.782s, root=105.673s, nodes=45, pool=49506, exact=30.081s/350, heuristic=63.698s/1182, master=60.413s, valid=true`，结果目录为 `test-results/bpc/tmp-partial-tiroot-40-2-nosri-nostrong-fix-20260703/`。这条 run 也修正了一个启发式 seed 排序 bug：原来 seed comparator 使用 epsilon 比较，可能违反 Java Comparator 传递性并触发 TimSort 异常；现在改为严格 `Double.compare`，只影响排序稳定性，不改变 reduced-cost 筛选口径。
+
+直接打开 SRI-aware cut-loop time-indexed arc fixing 的一次测试没有得到有效对比：`tmp-partial-tiroot-40-2-sri-nostrong-fix-20260703` 在 root 的 cut-loop 中触发 SRI-aware helper，单次 `cutLoopScalarArcFixing.done ng-DSSR time-indexed SRI-aware helper arc fixing` 耗时约 `753s`，最终 `TIME_LIMIT, obj=22582, bound=INF, solve=1153.573s, cut rounds=16, added cuts=80`。这说明 SRI-aware fixing 逻辑能被调用，但当前实现太重，会把小算例直接拖到超时；该结果不能作为 SRI 求解效果结论，只能作为“该 helper 需要默认关闭或重新优化”的证据。
+
+关闭 cut-loop 的 time-indexed SRI-aware fixing 后，SRI run 能正确闭合：`tmp-partial-tiroot-40-2-sri-nostrong-no-cutloopfix-20260703` 结果为 `FINISHED, obj=bound=22580, solve=762.854s, root=189.848s, nodes=17, pool=25750, exact=362.993s/985, heuristic=202.509s/2258, master=112.056s, cut rounds=256, added cuts=1280, peak cut pool=902, valid=true`。和 no-SRI 相比，SRI 明显减少了节点数和最终 pool，但 cut-and-price 轮次、exact pricing 次数和启发式调用大幅增加，总时间从约 `225s` 增加到约 `763s`。因此在该 40-2 partial dominance 口径下，SRI 有收紧搜索树的效果，但总体不划算；当前主要瓶颈不是单次 label 爆炸，而是 cut-loop 反复加 cut、反复定价导致的长尾。
+
+本轮还暴露一个强分支相关风险：在相同 partial + time-indexed root preprocessing 下，开启 strong branching 的 no-SRI run 曾得到 `obj=bound=22582`，而关闭 strong branching 后回到已知最优 `22580`。因此本轮 SRI 对比不使用 strong branching；后续若要把 strong branching 和 partial/root preprocessing 组合使用，必须单独复查强分支 child seed/compatibility/repair 逻辑，不能把它混入 SRI 结论。

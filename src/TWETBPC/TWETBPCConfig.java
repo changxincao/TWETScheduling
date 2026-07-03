@@ -30,7 +30,7 @@ public class TWETBPCConfig {
 	/** 如果没有现成最好解，是否额外跑一遍 ALNS 生成更好的 seed。 */
 	public boolean runALNSForSeed = true;
 	/** 2026-06-23: seed ALNS 的时间上限；避免大算例初始化阶段无限拉长。 */
-	public long alnsMaxRuntimeMillis = 600_000L;
+	public long alnsMaxRuntimeMillis = 60_000L;
 	/** 2026-06-23: seed ALNS 连续未刷新全局 best 的停止阈值。 */
 	public int alnsMaxNoImproveIterations = 80;
 	/** 2026-06-23: 是否用模拟退火接受较差 current；默认关闭，保持原 greedy 接受逻辑。 */

@@ -1,4 +1,4 @@
-﻿# time-indexed root 预处理辅助 ng-DSSR 的可行性分析
+# time-indexed root 预处理辅助 ng-DSSR 的可行性分析
 
 ## 问题
 
@@ -97,3 +97,33 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 强分支方面，trial 调用会保存并恢复 PC 的节点级缓存和 pricing engine 状态；可复用 child 只在 trial 成功后写回 seed 并标记 strongBranchingSeedPrepared，正式出队时跳过重复 repair/筛列。普通 child 仍沿用旧流程：先继承父节点 restricted columns，出队后带新分支行求一次 LP，必要时 repair，再筛列。因此当前没有发现 strong trial 状态污染正式节点的路径。
 
 仍需保留两个边界判断。第一，active SRI cut 下的 time-indexed helper 默认仍是 no-SRI 松弛口径，只有打开 SRI-aware 开关时才尝试带 SRI state 的 fixing；该部分成本更高，当前不作为默认主线证明。第二，启发式 pricing 对 compact window 默认不再 true-cost recheck，这是基于“compact window 是当前子树安全硬窗”的实验口径；dual profitable window 默认关闭，若显式打开则仍会强制 true-cost recheck。focused javac 已覆盖 TWETBPCConfig、Node、LP、PC、Tree、TimeIndexedRootPreprocessor、TimeIndexedGraphPricingEngine、TimeIndexedScalarCompletionBound 和 HeuristicPricingEngine 并通过；git diff --check 仅报告已有 test-results 文本换行警告，没有代码 whitespace error。
+
+## 后续混合策略和默认开关判断
+
+2026-07-02 继续梳理 time-indexed 与 ng-DSSR 的组合方式。当前已经实现的是“先用 time-indexed root preprocessing 生成普通 pricing-only arc 和 compact window，再进入 ng-DSSR root”。后续还可以考虑另一种方向：当 horizon 很大但 root 阶段 ng-DSSR 仍能处理时，先用 ng-DSSR 做 root；进入后续子节点后，由于分支、subtree fixing 和 pricing-only arc 已经删掉大量普通弧，此时 time-indexed 图规模可能显著下降，可以在子节点改用 time-indexed pricing 或更强的 time-indexed helper。这个方向暂不实现，只作为后续实验方案保留。
+
+之所以把 time-indexed 嵌入 ng-DSSR 做增强，核心不是它的列更强，而是它的 arc fixing 是带时间的 `(i,j,t)`。这比普通 completion bound 直接删 `(i,j)` 更细：即使某条普通弧不能完全删除，也可能删除其中大量完成时间副本，从而压缩每个 job 的 compact window。这个窗口再反过来缩小 ng-DSSR 的函数定义域、pricing horizon 和扩展空间。因此 time-indexed helper 的主要价值是“更细粒度地缩时间”，而不是替代 ng-DSSR 的 elementary/ng 定价。
+
+当前后续 node 建 time-indexed 图时，会考虑 node 上已经写回的普通禁弧和 pricing-only 禁弧，包括 completion-bound subtree arc elimination 写入的 `Node.forbidPricingOnlyArc()`。也就是说，如果 ng-DSSR 在 node 闭合后通过 subtree/pricing-only 方式把某个 `(i,j)` 写进 node，后续 time-indexed 图会跳过它。相反，ng-DSSR 某一轮 pricing 内部只用于本轮剪枝、没有写回 node 的 local completion-bound skip，不会被 time-indexed helper 继承；这是刻意分层，避免把没有形成 node 证书的临时剪枝当成子树状态。
+
+当前默认开关口径为：route enumeration 总开关 `enableRouteEnumeration=false`，先保持关闭；two-stage strong branching 默认打开；`timeIndexedCompletionBoundInRoundArcFixing=false`，不在每轮 pricing 内部反复跑昂贵的 time-indexed tightening；`timeIndexedCompletionBoundCutLoopArcFixing=false`，cut-loop 间 fixing 也默认关闭，后续只在 SRI/time-indexed cut 对照里显式打开。强分支 trial 和正式 pricing 都通过 child node 的禁弧状态构造 LP/定价器，启发式 pricing 也通过 `isPricingArcForbidden()` 检查普通 forbidden 和 pricing-only arc，因此会考虑当前 node 上已有的禁弧。
+
+## setupR cost20 旧日志误读修正
+
+2026-07-03 重新核对 `tmp-ngdssr-40-2-setupR-all-cost20-nostrong-alns-currentbase-20260702` 和 `tmp-ngdssr-40-2-setupR-all-cost20-nostrong-alns-tirootpre-20260702b` 后，确认上一节把旧 `tirootpre` 组解释为“root preprocessing 生效后加速”是不严谨的。证据很直接：两组 `config.*` 行除了 `liveTraceLogPath` 外完全一致；`tirootpre` 组虽然打印了 `systemProperty.twet.bpc.fullDomainCompare.timeIndexedRootPreprocessingForNgDssr=true`，但日志里没有 `config.enableTimeIndexedRootPreprocessingForNgDssr=true`，也没有 `timeIndexedRootPreprocess.start/done`，更没有任何 `Pricing[TimeIndexedGraphPricing] node=0`。这说明该次运行时这个 JVM property 只是被配置快照打印出来，没有被当时的配置对象消费，也没有真正执行 `TimeIndexedRootPreprocessor`。
+
+因此，`99.101/189.443/277.038s` 对比 `48.015/73.986/140.813s` 这组旧结果不能作为 root preprocessing 加速证据。它只能说明在当时两次看似同配置运行中，第二组的单次 LP / pricing 耗时显著更低。例如 R50 的第一轮 ng-DSSR 统计结构几乎相同，但 exact line 从约 `1020.849ms` 降到 `610.120ms`；master LP 汇总也从 `initial=7.373s, after_pricing=11.625s, after_column_filter=5.461s` 降到 `initial=2.814s, after_pricing=2.737s, after_column_filter=1.369s`。这个差异不能归因于 `timeIndexedRootPreprocessingForNgDssr`，因为当时它没有生效。
+
+当前代码下真正执行 root preprocessing 的日志应同时满足三点：`config.enableTimeIndexedRootPreprocessingForNgDssr=true`、出现 `timeIndexedRootPreprocess.start/done`、并且在正式 node 之前出现临时 `Pricing[TimeIndexedGraphPricing] node=0`。后续比较 root preprocessing off/on 必须用这种带完整 trace 的新日志，不能再用旧 `tirootpre-20260702b` 作为该功能的效果依据。
+
+补充代码证据：git grep 检查 `bd3d9bc3^` 时，src 下不存在 `timeIndexedRootPreprocessingForNgDssr` / `enableTimeIndexedRootPreprocessingForNgDssr`；该字段和 `TimeIndexedRootPreprocessor` 是 `bd3d9bc3 Add time-indexed root preprocessing for ng-DSSR` 才加入的。因此旧 `tirootpre-20260702b` 日志中只有 `systemProperty...=true` 而没有 `config.enable...`，不是简单的 trace 缺失，而是当时运行代码没有消费这个 property。
+
+## 2026-07-03 当前代码默认 ALNS 60s 下的 off/on 复跑
+
+为排除此前 ALNS 初始阶段耗时过长和旧日志误读的干扰，当前代码把 `TWETBPCConfig.alnsMaxRuntimeMillis` 默认值改为 `60000ms`，默认接受准则仍为非 SA（`alnsUseSimulatedAnnealingAcceptance=false`）。本轮没有显式传入 `twet.bpc.fullDomainCompare.alnsMaxMillis`，因此实际使用默认 60 秒上限；其他配置保持 setup cost 系数 20、`nearestK8/top10`、no-strong、ALNS seed、completion bound/scalar/arc fixing/subtree、midpoint probe/reuse、dual-bound pruning、route enumeration 关闭，只切换 `timeIndexedRootPreprocessingForNgDssr`。
+
+当前代码 off 组结果为：R25 `81.227s/root 81.226s/exact 6.756s/heuristic 43.946s/master 2.160s/pool 9334`；R50 `74.457s/root 41.417s/exact 15.470s/heuristic 32.480s/master 7.519s/pool 19762/nodes 9`；R75 `205.720s/root 87.613s/exact 69.800s/heuristic 74.907s/master 21.035s/pool 33295/nodes 30`。三组目标分别为 `31893/43625/55007`，均 valid。
+
+当前代码 on 组确认真正执行了临时 time-indexed root：日志中有大量 `Pricing[TimeIndexedGraphPricing] node=0`，R25 临时 pool 到约 `81900` 后再进入正式 ng-DSSR。on 组结果为：R25 `105.020s/root 105.019s/exact 4.694s/heuristic 11.670s/master 60.168s/pool 9753`；R50 `84.615s/root 66.195s/exact 10.536s/heuristic 9.355s/master 35.369s/pool 16049/nodes 9`；R75 `139.062s/root 83.010s/exact 28.198s/heuristic 14.621s/master 54.318s/pool 24127/nodes 28`。目标和 valid 与 off 组一致。
+
+这轮结论比旧日志更清楚：root preprocessing 确实能显著减轻后续 ng-DSSR 的 pricing，尤其 heuristic/exact 时间都明显下降，R75 的总时间从 `205.720s` 降到 `139.062s`。但它也会引入很重的临时 time-indexed RMP / master LP 成本，R25/R50 上总时间反而从 `81.227/74.457s` 增加到 `105.020/84.615s`。因此该开关不是默认必开项，更适合作为 horizon/列生成尾部较重实例的实验增强；小实例或 root 本身已经很轻时，预处理 master 开销可能超过后续收益。

@@ -1439,3 +1439,8 @@ learned seed 的构造规则为：对每个 job 计算历史 final ng-set size �
 full-domain runner 暴露了对应参数：`twet.bpc.fullDomainCompare.ngDssrHistoryWarmStart`、`ngDssrHistoryWindow`、`ngDssrHistoryFrequencyThreshold`、`ngDssrHistoryHighConfidenceThreshold` 和 `ngDssrHistoryUseRoot`。打开后 mode 名会追加 `ngHistW...`，DSSR summary 中会输出 `ngWarmStart=base/learned` 和当前历史样本数，方便对比本轮是否真正用了 learned seed。
 
 正确性判断仍是：该功能只修改初始 ng-set，不会删除 elementary 可行列；如果 learned seed 不合适，DSSR 仍可通过 non-elementary negative route 继续更新 ng-set。因此它是性能实验开关，不改变主问题语义。主要风险是 learned seed 过大导致 dominance 变弱、label 数上升；所以默认关闭，并保留频率阈值和窗口大小供后续对比。验证方面，本次 focused `javac` 已覆盖新增类、三个 ng-DSSR engine、主体 solver、配置和 runner；短 smoke 确认 full-domain runner 能解析 `ngHistW` 配置并启动到 TIME_LIMIT，但由于 20 秒限制内尚未进入 exact pricing，性能效果仍需后续正式实验判断。
+146. 2026-07-03 root 加 cut 后的历史 warm-start 口径修正
+
+本次对第 145 节实现做了一个小修正：root 初始迭代仍默认不用历史 warm-start，但 root 上一旦已经有 active cut，就允许使用历史统计初始化 ng-set。原因是加 cut 后属于同一个 root node 内的后续 price-and-cut 迭代，已经不是最初那次完全无 cut 的 pricing；这时继续从 `nearestK/empty` 等基础口径重新学相似 ng-set，会重复付出 DSSR 收紧成本。该修正只影响 `canUseHistoryWarmStart()` 的判定，不改变历史记录来源，也不让 repair、strong trial 或 cross-check 写入历史。
+
+同时把默认历史窗口从 `50` 调整为 `100`。前面讨论认为 50 对这种频率统计偏短，容易因为近期少量节点波动导致 learned seed 频率不稳定；100 仍然足够轻量，但能更接近“最近一段搜索状态”的稳定统计。功能仍默认关闭，只有显式打开 `enableNgDssrHistoryWarmStart` 才生效。

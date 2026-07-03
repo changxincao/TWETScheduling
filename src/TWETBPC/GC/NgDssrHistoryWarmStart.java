@@ -44,11 +44,11 @@ final class NgDssrHistoryWarmStart {
 		}
 	}
 
-	boolean apply(PackedBitSet[] target, TWETBPCConfig config, boolean rootNode) {
+	boolean apply(PackedBitSet[] target, TWETBPCConfig config, boolean allowRootWarmStart) {
 		if (!config.enableNgDssrHistoryWarmStart || target == null || snapshots.isEmpty()) {
 			return false;
 		}
-		if (rootNode && !config.ngDssrHistoryWarmStartUseRoot) {
+		if (!allowRootWarmStart) {
 			return false;
 		}
 		ensureCounters();

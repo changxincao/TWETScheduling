@@ -155,8 +155,8 @@ public class TWETBPCConfig {
 	public int ngDssrNonElementaryRouteUpdateLimit = 1;
 	/** 2026-07-03: 实验开关；按最近若干次正式 ng-DSSR final ng-set 统计初始化下一次 ng-set。 */
 	public boolean enableNgDssrHistoryWarmStart = false;
-	/** 2026-07-03: ng-set 历史窗口大小；越大越接近全局历史。 */
-	public int ngDssrHistoryWarmStartWindowSize = 50;
+	/** 2026-07-03: ng-set 历史窗口大小；越大越接近全局历史。默认 100，避免窗口过短导致频率波动。 */
+	public int ngDssrHistoryWarmStartWindowSize = 100;
 	/** 2026-07-03: 成员进入 learned seed 的最低出现频率阈值。 */
 	public double ngDssrHistoryWarmStartFrequencyThreshold = 0.5;
 	/** 2026-07-03: 高频成员数量超过 floor 平均 size 时，允许本 job 使用 ceil 平均 size。 */

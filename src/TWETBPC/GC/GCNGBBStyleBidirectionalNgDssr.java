@@ -352,7 +352,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngNeighborhoodByJob[job].add(job);
 		}
 		ngDssrHistoryWarmStartApplied = false;
-		if (historyWarmStart != null && historyWarmStart.apply(ngNeighborhoodByJob, config, isRootNode(lp))) {
+		if (historyWarmStart != null && historyWarmStart.apply(ngNeighborhoodByJob, config, canUseHistoryWarmStart(lp))) {
 			ngDssrHistoryWarmStartApplied = true;
 			return;
 		}
@@ -380,6 +380,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		throw new IllegalArgumentException("Unsupported ngDssrInitialNgSetMode: " + mode);
+	}
+
+	private boolean canUseHistoryWarmStart(LP lp) {
+		if (!isRootNode(lp)) {
+			return true;
+		}
+		// 2026-07-03: root 初始迭代默认不用历史；加 cut 后的 root 迭代允许复用，避免重复学习相似 ng-set。
+		return config.ngDssrHistoryWarmStartUseRoot || (lp != null && !lp.getActiveCutIds().isEmpty());
 	}
 
 	private boolean isRootNode(LP lp) {

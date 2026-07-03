@@ -1415,3 +1415,15 @@ R50 有 74 次返回 elementary 列，平均需要 `2.649` 轮，最多 `6` 轮�
 一个可测试的默认关闭实验方案是：维护最近 `W` 次返回 elementary 负列或完成 DSSR 收敛的 final ng-set 统计；每次 exact pricing 初始化时，对每个 job 计算历史 size 的 EWMA 或截尾均值，并取 `ceil` 得到目标 size，但不超过 K；成员按出现频率排序，过滤掉频率低于 `0.5` 的候选。root 前若没有历史，则退回当前初始化。该方案同时覆盖 node 内部和 node 之间，不需要显式判断来源；但日志必须记录本轮 learned seed 的平均 size、最大 size、命中成员数、DSSR 轮数、non-elementary route 数和 label 数，否则无法判断是减少迭代还是只是放大 label 空间。
 
 当前结论是：这个全历史/滑动历史策略比“直接继承上一轮 final ng-set”更稳，也比严格父子继承更容易统一实现。但它仍然是性能实验，不是确定改进。最需要防止的是 learned seed 过大，因此应采用小 cap、频率阈值和滑动窗口/衰减，而不是把所有历史高频成员永久累计进每个 job 的初始 ng-set。
+
+144. 2026-07-03 动态 ng-set 历史窗口实验口径修正
+
+在第 143 节的基础上，本次进一步明确一个更直接的实验口径：先不区分 node 内、父子 node 或跨 node 继承，也不维护复杂父链统计；只维护当前按 node 搜索顺序产生的最近 `W` 次 ng-DSSR final ng-set 记录。`W` 很大时就近似全局历史，`W` 较小时就是滑动窗口。这样可以先验证“最近历史是否能减少 DSSR 重复学习”，不把实现复杂度放到 node 生命周期和父链管理上。
+
+目标 size 暂时不设额外 cap，而是对每个 job 直接使用历史 final ng-set size 的平均值来决定。本轮讨论认为，已有统计里 final ng-set 平均 size 本身不大，过早设置 cap 可能会把真正稳定需要的成员截掉，反而看不出 warm-start 的潜力。为了避免平均值不断偏大，初始实验可以比较两种取整规则：默认用向下取整，更保守；如果某个 job 中频率大于 `0.8` 的成员数量较多，说明高置信成员确实稳定存在，则允许对该 job 的目标 size 向上取整。也就是说，size 主要由历史平均决定，高置信频率决定是否放宽到 ceil。
+
+成员选择仍然要用频率阈值，不能为填满 size 强行塞低频成员。当前建议是先过滤频率大于 `0.5` 的成员，再按频率排序取目标数量；如果过滤后成员不足目标数量，就保持不足，不用 nearest 补齐。这样可以在“不设 cap”的同时保留一个防止噪声进入的约束：低频成员即使历史平均 size 较大，也不会被硬塞进初始 ng-set。
+
+root 的处理也应分开。root 第一次 exact pricing 没有历史，仍按当前老办法初始化；root 内后续 exact pricing 是否使用已经积累的历史可以作为开关试一下。保守口径是 root 整体都不用 learned seed，因为 root 的 dual 和列池还在剧烈变化；激进口径是 root 第一次以后也允许使用最近历史，理由是前面统计显示同一 node 内 final ng-set 相似度较高，信息少时也可能帮助减少重复 DSSR 轮数。两种都可以实现，但默认建议先让 root 第一次保持老办法，后续是否启用通过单独开关控制。
+
+当前更推荐的实验版本是：维护最近 `W` 次正式 ng-DSSR exact pricing 的 final ng-set 统计，排除 strong branching trial、repair、time-indexed 预处理等非正式求解；每次正式 exact pricing 开始时，如果历史样本数不足最小阈值，就退回老办法；样本足够后，对每个 job 用平均 size 决定目标数量，用 `>0.5` 频率过滤成员，并用 `>0.8` 的高置信成员数量决定 floor/ceil。该策略仍然只影响初始化，不改变 DSSR 正确性。必须同步记录 learned seed 的平均/最大 size、实际使用成员数、DSSR 轮数、non-elementary route 数、label 数和 exact 时间，判断它到底是在减少迭代，还是把 label 空间放大。

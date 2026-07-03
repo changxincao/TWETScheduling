@@ -339,6 +339,23 @@ public class PC {
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible");
 			}
+			if (lightweightRepair) {
+				int penalized = lp.penalizeBranchImpliedIncompatibleColumns(Utility.big_M);
+				if (penalized > 0) {
+					solution = solveRelaxationTimed(lp, "strong_branching_light_after_branch_implied_penalty");
+					if (isTimeLimitReached()) {
+						return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
+					}
+					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+						return StrongBranchingTrialResult.unusable(lp, solution,
+								"branch_implied_penalty_infeasible");
+					}
+					if (!lp.isNoSlack() || lp.hasPositiveBranchImpliedPenaltyColumn()) {
+						return StrongBranchingTrialResult.unusable(lp, solution,
+								"branch_implied_penalty_positive value=" + lp.branchImpliedPenaltyValue());
+					}
+				}
+			}
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 						config.branchSeedReducedCostAllowance, !lightweightRepair);
@@ -357,6 +374,10 @@ public class PC {
 					return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 				}
 				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					if (lightweightRepair) {
+						return StrongBranchingTrialResult.unusable(lp, solution,
+								"rmp_trial_infeasible_after_filter");
+					}
 					return StrongBranchingTrialResult.from(lp, solution, false, "rmp_trial_infeasible_after_filter");
 				}
 			}
@@ -1266,6 +1287,7 @@ public class PC {
 		private final double bound;
 		private final boolean infeasible;
 		private final boolean timeLimited;
+		private final boolean reusableForQueue;
 		private final boolean addedColumns;
 		private final ArrayList<Integer> internalColumnIds;
 		private final ArrayList<Integer> outsourcingColumnIds;
@@ -1273,12 +1295,13 @@ public class PC {
 
 		private StrongBranchingTrialResult(TWETMasterSolution solution, double bound, boolean infeasible,
 				boolean timeLimited,
-				boolean addedColumns, ArrayList<Integer> internalColumnIds, ArrayList<Integer> outsourcingColumnIds,
-				String message) {
+				boolean reusableForQueue, boolean addedColumns, ArrayList<Integer> internalColumnIds,
+				ArrayList<Integer> outsourcingColumnIds, String message) {
 			this.solution = solution;
 			this.bound = bound;
 			this.infeasible = infeasible;
 			this.timeLimited = timeLimited;
+			this.reusableForQueue = reusableForQueue;
 			this.addedColumns = addedColumns;
 			this.internalColumnIds = internalColumnIds;
 			this.outsourcingColumnIds = outsourcingColumnIds;
@@ -1294,7 +1317,16 @@ public class PC {
 				String message, boolean timeLimited) {
 			boolean infeasible = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
-			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
+			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, !infeasible && !timeLimited,
+					addedColumns,
+					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
+					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
+		}
+
+		static StrongBranchingTrialResult unusable(LP lp, TWETMasterSolution solution, String message) {
+			double bound = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE ? 0.0
+					: solution.getObjectiveValue();
+			return new StrongBranchingTrialResult(solution, bound, false, false, false, false,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
@@ -1316,7 +1348,7 @@ public class PC {
 		}
 
 		public boolean isReusableForQueue() {
-			return !infeasible && !timeLimited;
+			return reusableForQueue;
 		}
 
 		public boolean hasAddedColumns() {

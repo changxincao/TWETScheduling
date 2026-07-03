@@ -210,6 +210,27 @@ public class Node implements Comparable<Node> {
 	}
 
 	/**
+	 * 2026-07-04: strong branching 右支试探中，required arc 只进入 master 分支行，
+	 * 竞争入/出弧则作为 branch-implied 禁弧用于 pricing 和列兼容性过滤。这里单独识别这类列，
+	 * 让 trial LP 可以把它们作为人工大成本列临时保留，而不是筛掉后误判 restricted RMP 不可行。
+	 */
+	public boolean usesBranchImpliedForbiddenArc(TWETColumn column) {
+		List<Integer> seq = column.getSequence();
+		if (seq.isEmpty()) {
+			return false;
+		}
+		if (isBranchImpliedArcForbidden(0, seq.get(0).intValue())) {
+			return true;
+		}
+		for (int i = 1; i < seq.size(); i++) {
+			if (isBranchImpliedArcForbidden(seq.get(i - 1).intValue(), seq.get(i).intValue())) {
+				return true;
+			}
+		}
+		return isBranchImpliedArcForbidden(seq.get(seq.size() - 1).intValue(), sinkId());
+	}
+
+	/**
 	 * 2026-06-03: 仅用于 subtree arc elimination 的隔离实验。该状态只给 pricing 图禁弧，
 	 * 不进入 master 分支行，也不参与历史列兼容性过滤，用来排除 RMP/dual 变化的影响。
 	 */

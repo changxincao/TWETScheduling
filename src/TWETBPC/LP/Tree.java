@@ -258,8 +258,10 @@ public class Tree {
 						branched = true;
 						break;
 					}
-					enqueueStrongBranchingChild(queue, strongSelection.result.getLeftNode(), strongSelection.leftTrial);
-					enqueueStrongBranchingChild(queue, strongSelection.result.getRightNode(), strongSelection.rightTrial);
+					enqueueStrongBranchingChild(queue, strongSelection.result.getLeftNode(), strongSelection.leftTrial,
+							lp, brancher);
+					enqueueStrongBranchingChild(queue, strongSelection.result.getRightNode(), strongSelection.rightTrial,
+							lp, brancher);
 					traceSink.onBranch(node, brancher.getName(), strongSelection.traceResult(), queue.size());
 					heartbeat(node, "strongBranching.selected " + strongSelection.summary());
 					branched = true;
@@ -769,6 +771,9 @@ public class Tree {
 		if (trial.isTimeLimited()) {
 			return 0.0;
 		}
+		if (!trial.isReusableForQueue() && !trial.isInfeasible()) {
+			return 0.0;
+		}
 		if (trial.isInfeasible()) {
 			return config.pseudoCostInf;
 		}
@@ -871,8 +876,16 @@ public class Tree {
 	}
 
 	private boolean enqueueStrongBranchingChild(PriorityQueue<Node> queue, Node child,
-			StrongBranchingTrialResult trial) {
-		if (child == null || trial == null || !trial.isReusableForQueue()) {
+			StrongBranchingTrialResult trial, LP parentLp, Brancher brancher) {
+		if (child == null || trial == null) {
+			return false;
+		}
+		if (!trial.isReusableForQueue()) {
+			if (!trial.isInfeasible() && !trial.isTimeLimited()) {
+				prepareChildSeedColumns(child, parentLp, brancher);
+				queue.add(child);
+				return true;
+			}
 			return false;
 		}
 		child.setStrongBranchingSeedPrepared(true);
@@ -983,7 +996,9 @@ public class Tree {
 					+ ",tested=" + testedCandidateCount
 					+ ",phase=" + (phase2 ? "phase2" : "phase1")
 					+ ",leftBound=" + boundText(leftTrial)
+					+ ",leftMsg=" + messageText(leftTrial)
 					+ ",rightBound=" + boundText(rightTrial)
+					+ ",rightMsg=" + messageText(rightTrial)
 					+ ",score=" + score
 					+ ",top=" + candidatePreview;
 		}
@@ -995,10 +1010,17 @@ public class Tree {
 			if (trial.isTimeLimited()) {
 				return "TIME_LIMIT";
 			}
+			if (!trial.isReusableForQueue() && !trial.isInfeasible()) {
+				return "UNUSABLE";
+			}
 			if (trial.isInfeasible()) {
 				return "INF";
 			}
 			return String.valueOf(trial.getBound());
+		}
+
+		private static String messageText(StrongBranchingTrialResult trial) {
+			return trial == null ? "NA" : trial.getMessage();
 		}
 	}
 

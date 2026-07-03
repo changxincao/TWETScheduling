@@ -109,3 +109,45 @@ no-strong 口径 `test-results/bpc/tmp-timegraph-nocut-40-2-setup-nostrong-20260
 strong 口径则已经出现可疑信号：`test-results/bpc/tmp-timegraph-nocut-40-2-setup-strong-20260630` 得到 `obj=bound=22582`，`strong-noarcfix` 也是 `22582`，`strong-noarcfix-fixedswitch` 为 `22581`。这些值都高于 no-strong 的 `22580`，说明原始 40-2 的 time-indexed strong 结果也不能再当作可靠最优证明，只是误差幅度比 `timeJitterX10` 上的 `104836` 对 `104721` 小得多，更容易被忽略。`valid=true` 只能说明最终 incumbent 列自身可行并且成本复算通过，不能证明强分支没有误剪更优子树。
 
 当前结论为：原始 40-2 的 pure time-indexed no-strong 结果仍可作为无强分支 baseline；所有开启 strong branching 的 time-indexed 结果，包括原始未放大实例，都需要按修复后的 trial 逻辑重新验证，不能直接引用为最终最优性证据。
+
+## 旧 VRP BranchD 分支流程复核
+
+2026-07-03 进一步对照旧 VRP 源码 `BPC/BP/BranchD.java`、`BPC/LP/LP.java`、`BPC/LP/Tree.java` 和 `BPC/LP/PC.java`。旧代码里的 `range.setBounds(1,1)` 不是新建一条右支约束，而是复用左支时由 `ForceArcValue(i,j,0,0)` 建好的同一条 branch row。该 row 的表达式是当前 LP 中所有包含弧 `(i,j)` 的 route 变量之和，左支先把上下界设成 `[0,0]`，测试“不走该弧”；随后右支把同一个 `IloRange` 的上下界改成 `[1,1]`，测试“必须走该弧”。这是旧代码为了在同一个父 LP 对象上原地试探左右支而采用的工程写法。
+
+旧 VRP 的完整流程是：`Tree` 弹出节点后，用该节点保存的 `route_set` 建 `Pool/LP`，调用 `PC.Solve()` 做列生成和 cut；若需要分支，`BranchD` 选择最接近 0.5 的分数弧。左支直接在当前 `lp.node` 上禁掉该弧并添加 branch row `[0,0]`，然后调用 `UpdateRouteSet()`；右支先复制父节点，再把同一起点的其它出弧和同一终点的其它入弧在 `right_node.feasible_arc` 中标成不可行，把目标弧标成 required，接着把刚才那条 branch row 改成 `[1,1]`，再调用 `UpdateRouteSet()`。`UpdateRouteSet()` 先解当前 LP 并检查 slack；若不可行，则只给当前 branch row 加一个大 M slack，然后调用启发式和 `GCNGBB.FindFeasible()` 补列；若成功，则从当前 LP route 中按 reduced cost 和 `feasible_arc` 兼容性筛选最多 `m_initial_col_number` 条 route 作为 child 的初始 `route_set`。后续 child 入队，真正弹出时再用这个 `route_set` 重建 LP 并重新列生成。
+
+因此，旧代码能说明“正式 child 在入队前会尝试 repair 并筛一批可用列”，但不能把它理解成严格数学证明。原因有三点。第一，`UpdateRouteSet()` 有 `m_branch_col_number` 和 `m_initial_col_number` 这类工程上限，repair 或筛列失败并不等价于子树真实不可行。第二，旧代码筛 route 时并没有显式无条件保留正值列，虽然实践中 reduced cost 和已有解通常会保留足够列。第三，右支 repair 调用里传给 `FindFeasible()` 的仍是 `lp.node`，而 `lp.node` 已经在左支中被原地改过；过滤时用的是 `right_node`，这说明旧实现本身就是较强的原地复用工程写法，而不是两个完全干净独立的 child LP。结论是：分支语义本身是有效的，左支 `x_ij=0`、右支 `x_ij=1` 并配合竞争弧过滤可以划分解空间；但旧实现不能作为“当前 strong trial 的 restricted RMP 一旦 infeasible 就可以直接剪掉 child”的严格依据。当前 TWET 强分支若要用 trial infeasible 剪子树，必须确认它来自完整 exact repair/phase-I 证书，而不是筛列后的临时 restricted RMP 缺列。
+
+这里还需要明确区分 branch row 和 cut。旧 VRP 的 `branch2rng` 只是当前 `LP` 对象里保存的 CPLEX row 引用，用来在同一个父 LP 上从左支 `[0,0]` 原地切到右支 `[1,1]`；它不会像 cut pool 那样作为全局 cut 持久保存到整棵树。真正传给 child 的主要是 `Node.feasible_arc`、bid bound 和筛出来的 `route_set`。因此旧实现和当前 strong trial 的共同风险在于：如果某个 side 的 trial/repair/screening 因为临时 restricted RMP 缺列或工程上限返回 infeasible/null，却被上层当成真实子树 infeasible，就会出现和当前 `INF` 误用类似的问题。旧代码在实践上靠较宽的 repair 与 route screening 缓解，但不是严格证书。
+
+当前 TWET 的右支口径已经和旧 VRP 的分工基本一致：`ArcBrancher` 对右支调用 `requireArc(i,j)`，因此 `LP.buildArcBranchConstraints()` 只为被选中的 `(i,j)` 建一条 `sum lambda * a_ij = 1` 的 master row；同起点其它出弧、同终点其它入弧通过 `forbidBranchImpliedArc()` 进入 `branchImpliedForbiddenArc`，不会建成额外 master row，只通过 `Node.isArcForbidden()` 被 pricing、列兼容性过滤和后续筛列消费。左支则是显式 `forbidArc(i,j)`，会建 `sum lambda * a_ij = 0` 的 master row。旧 VRP 也是同样思路：真正建 row 的只有选中的 `(i,j)`，右支的竞争弧只写入 `right_node.feasible_arc=-1`，随后在 `UpdateRouteSet()` 和后续 pricing 中过滤。
+
+## 2026-07-04 当前 strong branching 复核补充
+
+这次复核首先尝试在当前代码上加一个默认关闭的 `strongBranchFilterAudit` 临时诊断，用来查看 strong trial 二次筛列前，LP 正值列中是否存在违反右支 `branchImpliedForbiddenArc` 的竞争弧。该诊断在当前代码下确实抓到了这种现象：例如某些 trial 中 required arc 行的 LP 值已经等于 1，但仍有若干正值列包含同起点其它出弧或同终点其它入弧，二次筛列会把这些列删掉。这说明“required 行满足 1 并不自动排除其它竞争弧列”这一点在 set-covering 主问题下确实成立。
+
+需要纠正的是，本次真正需要解释的是当前求解中出现的 strong branching 误剪，而不是把重点放到 2026-06-30 历史版本。今天的关键证据是：当前代码里右支只对选中弧建立 `requiredArc(i,j)=1` master row，竞争弧通过 `branchImpliedForbiddenArc` 作为 compatibility / pricing 过滤存在；但在 phase1 trial 的初始 LP 中，旧列仍可能以正值使用这些竞争弧。随后二次筛列会删掉这些正值列，如果筛后 restricted RMP 不可行，当前不能把它解释成“右支子树真实不可行”。它只能说明这批筛后的 seed 列不够，或者 trial 结果不能复用，必须重新 repair 或放弃用该 trial infeasible 剪枝。
+
+换句话说，今天的问题不是“required arc 的 slack 没修掉其它显式 forbidden rows”。当前代码里竞争弧已经不再建成 master row，因此那条历史解释不能作为当前结论。今天的问题是筛列口径：`requiredArc(i,j)=1` 在 `>=` 覆盖主问题下并不排斥同一组列里还同时覆盖 `i->k` 或 `h->j`，这些列可能只是被二次筛列删掉；删掉后模型不可行，不等价于原 child 不可行。这个机制和前面 `timeJitterX10` 上 node 7 的 `(32,18)` 右支 false infeasible 是同一类风险。
+
+因此当前结论应改为：strong branching trial 的 `INF` 只有在经过完整、同口径的 repair/pricing 证明后，才可以当成真实不可行；二次筛列后的 restricted RMP infeasible 不能直接剪掉 child。当前代码应避免把这类 trial infeasible 写成可复用 child 的不可行证书；如果要保留 strong branching 的加速，只能把它作为候选评分失败、重新 repair 或继续按普通分支处理。旧版本 explicit forbidden row 的问题只作为背景保留，不能再作为今天这次错误的主解释。
+
+### 2026-07-04 当天问题配置的直接验证
+
+随后按今天出问题的 `wet040_001_2m`、partial dominance、no-SRI、time-indexed root preprocessing、strong branching 开启的同一配置，增加临时诊断 `strongBranchFilterAudit` 复跑。诊断只记录 strong trial 二次筛列前后的 LP 正值列是否违反当前 node 的 `isArcForbidden()` 或 `branchImpliedForbiddenArc`，不改变求解逻辑。复跑目录为 `test-results/bpc/tmp-verify-current-strongfilter-20260704`，对应原始问题记录为 `test-results/bpc/tmp-partial-tiroot-40-2-nosri-20260703`。
+
+这次复跑抓到了确定证据。node 3 的某个 trial 在二次筛列前有 `positive=34,value=2.0`，其中 `incompatible=3,branchImplied=3,incompatibleValue=0.370240870`。具体正值列包括 `col=3,val=0.265734,arc=6->23`，`col=5912,val=0.002331,arc=6->23`，以及 `col=41616,val=0.102176,arc=23->38`，这些 arc 都是 branch-implied forbidden，而不是显式 master row。紧接着二次筛列后，该 trial 的状态变成 `status=INFEASIBLE`。同一个 node 后续 strong branching 选择 `arc(6,38)` 时给出 `rightBound=INF`，并把该 INF 用进候选评分。
+
+这说明今天配置下确实存在如下机制：初始 trial LP 仍可用父节点遗留列满足覆盖和机器数等约束，同时 required arc 行也可以满足；但由于主问题是 set-covering 口径，`sum a_ij lambda = 1` 并不排除其它正值列里还出现同起点其它出弧或同终点其它入弧。二次筛列把这些 branch-implied incompatible 的正值列删掉后，restricted RMP 可能立刻不可行。这个不可行不是子树不可行证明，而是“筛后的 seed 列不足”。因此，今天的错误不是历史版本里“竞争弧作为显式 forbidden row 且没有 slack”的问题，而是当前版本里“branch-implied forbidden 只作为兼容性过滤存在，二次筛列后 infeasible 被误当成 trial 证书”的问题。
+
+由此当前结论更精确为：strong trial 的二次筛列可以用于准备更干净的 child seed，但筛后 infeasible 不能直接作为 `INF` 参与剪枝或最终入队判断；至少应标记为 trial seed 不可用，回退到普通 child repair，或者执行完整 Phase-I/repair 后再判断。否则 strong branching 会因为临时 restricted RMP 缺列而错误跳过可行子树。
+
+### 2026-07-04 M 惩罚修复口径
+
+按照这次讨论，右支 strong trial 的处理改为：第一次筛选列仍保持现有轻量筛选口径，不直接删除父节点遗留正值列中的 branch-implied 竞争弧列；但在 lightweight strong branching trial 中，对仍使用 branch-implied 禁弧的内部列临时把目标系数改成 `big_M` 并重解一次 LP。若重解后 slack 为 0 且这些 `big_M` 列的正值总量为 0，说明当前 trial seed 已经能在不依赖竞争弧列的情况下满足该分支，随后再做二次筛列。若 slack 或 `big_M` 列仍为正，则该 trial 结果不再作为可复用 child，也不作为 `INF` 证明，而是标记为 `UNUSABLE`，正式入队时回到普通 child seed/repair 流程。
+
+这里没有把 “M 列为正” 直接解释为整个子树 infeasible。原因是 strong trial 只是在当前受限列集上做快速试探；`big_M` 列为正只能说明这批 seed 不足以干净支撑该分支，不能证明完整 pricing 空间中不存在可行列。这个口径比“直接判不可行”保守，但能避免再次把 trial seed 缺列误当作子树不可行。
+
+实现上新增了 `Node.usesBranchImpliedForbiddenArc(column)` 来识别包含右支竞争弧的列；`LP.penalizeBranchImpliedIncompatibleColumns(big_M)` 只在 strong trial LP 内临时改这些列的目标系数。`PC.solveStrongBranchingRmpTrial()` 在 lightweight repair 路径中加入该 M 惩罚重解；如果后续二次筛列仍导致 LP infeasible，也同样返回 `UNUSABLE` 而不是 `INF`。`Tree` 对 `UNUSABLE` trial 不再给伪无穷得分，也不复用该 trial 的 seed，而是按普通分支逻辑重新准备 child seed 入队。strong branching summary 现在额外打印 `leftMsg/rightMsg`，用于区分 `rmp_trial_infeasible`、`rmp_trial_infeasible_after_filter`、`branch_implied_penalty_positive` 等来源。
+
+验证使用 `test-results/bpc/tmp-strong-mpenalty-verify4-20260704`，同样是 `wet040_001_2m`、partial/no-SRI、time-indexed root preprocessing、strong branching 开启的短时限配置。该 run `valid=true`，153.814s 内收敛到 `22581`；日志中 M 惩罚阶段执行 102 次，master LP 统计为 `strong_branching_light_after_branch_implied_penalty=2.880s/102 calls`。strong branching summary 未再出现 `rmp_trial_infeasible_after_filter` 被选中为 `rightBound=INF` 的情况；后续仍出现的 `INF` 来源为 `rmp_trial_infeasible`，即初始 trial/repair 层面的不可行，和这次修复的“二次筛列后 false INF”不是同一条路径。该结果说明本次修复命中了已证实的问题，但若后续还要进一步收紧 strong trial 的不可行证书，需要单独分析 `rmp_trial_infeasible` 是否也可能来自受限 repair 口径。

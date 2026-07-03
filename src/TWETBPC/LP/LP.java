@@ -54,6 +54,7 @@ public class LP {
 	private IloObjective objective;
 	private IloNumVar[] lambdaVars;
 	private HashMap<Integer, IloNumVar> lambdaByColumnId;
+	private HashSet<Integer> branchImpliedPenaltyColumnIds;
 	private IloNumVar[] outsourceColumnVars;
 	private HashMap<Integer, IloNumVar> outsourceColumnById;
 	private IloNumVar[] outsourceVars;
@@ -452,6 +453,7 @@ public class LP {
 		}
 		objective = null;
 		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
+		branchImpliedPenaltyColumnIds = new HashSet<Integer>();
 		outsourceColumnById = new HashMap<Integer, IloNumVar>();
 		repairSlackVars = new ArrayList<IloNumVar>();
 		arcBranchRanges = new HashMap<Long, IloRange>();
@@ -864,9 +866,74 @@ public class LP {
 		}
 		IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
 		if (var != null) {
-			cplex.setLinearCoef(objective, var, pool.getColumn(columnId).getCost());
+			double cost = branchImpliedPenaltyColumnIds != null
+					&& branchImpliedPenaltyColumnIds.contains(Integer.valueOf(columnId)) ? Utility.big_M
+							: pool.getColumn(columnId).getCost();
+			cplex.setLinearCoef(objective, var, cost);
 			lastSolution = null;
 		}
+	}
+
+	/**
+	 * 2026-07-04: strong branching 轻量 trial 专用。右支 required arc 的竞争弧不建额外 master row，
+	 * 因而父节点遗留列可能暂时正值使用 branch-implied 禁弧。这里不删这些列，而是把它们的
+	 * 目标系数临时改成 big-M；若重解后仍使用它们，说明当前 trial seed 不干净，不能把结果作为
+	 * 子树不可行证书。trial LP 会关闭重建，所以不需要恢复原目标。
+	 */
+	public int penalizeBranchImpliedIncompatibleColumns(double penalty) {
+		if (cplex == null || lambdaByColumnId == null || objective == null || node == null) {
+			return 0;
+		}
+		int penalized = 0;
+		for (int columnId : restrictedColumnIds) {
+			TWETColumn column = pool.getColumn(columnId);
+			if (!node.usesBranchImpliedForbiddenArc(column)) {
+				continue;
+			}
+			IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
+			if (var == null) {
+				continue;
+			}
+			try {
+				cplex.setLinearCoef(objective, var, penalty);
+			} catch (IloException ex) {
+				throw new IllegalStateException("Failed to penalize branch-implied incompatible column " + columnId,
+						ex);
+			}
+			branchImpliedPenaltyColumnIds.add(Integer.valueOf(columnId));
+			penalized++;
+		}
+		if (penalized > 0) {
+			lastSolution = null;
+		}
+		return penalized;
+	}
+
+	public boolean hasPositiveBranchImpliedPenaltyColumn() {
+		return branchImpliedPenaltyValue() > VALUE_TOLERANCE;
+	}
+
+	public double branchImpliedPenaltyValue() {
+		if (cplex == null || lambdaByColumnId == null || branchImpliedPenaltyColumnIds == null
+				|| branchImpliedPenaltyColumnIds.isEmpty()) {
+			return 0.0;
+		}
+		double total = 0.0;
+		for (Integer columnId : branchImpliedPenaltyColumnIds) {
+			IloNumVar var = lambdaByColumnId.get(columnId);
+			if (var == null) {
+				continue;
+			}
+			try {
+				double value = cplex.getValue(var);
+				if (Utility.compareGt(value, VALUE_TOLERANCE)) {
+					total += value;
+				}
+			} catch (IloException ex) {
+				return Utility.big_M;
+			}
+		}
+		return total;
 	}
 
 	private void addOutsourcingColumnToCurrentModel(int columnId) throws IloException {

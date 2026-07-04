@@ -184,3 +184,13 @@ M 开关现在明确区分两种口径。`enableStrongBranchingBranchImpliedPena
 light seed 也同步改成同一语义：父节点正值内部列和正值外包列先保留，非正值列再按 child 域筛。repair 成功后筛 seed 时仍优先保留当前正值列，避免为了 reduced-cost 截断把当前可行基删坏。外包 pricing、route enumeration 外包枚举、dual snapshot 和 smoothing 梯度均补入 outsourcing membership branch dual，保证列化外包分支下 reduced cost 口径一致。
 
 当前仍保持：M 只用于 strong trial / repair 评分和 seed 准备，不写入正式列成本；正式 BPC 主问题中的列成本仍是真实 TWET/outsourcing objective。机器数量和 tariff segment 分支不依赖列兼容性筛选表达分支，本次不改。验证方式为 focused `javac` 编译通过；尚未重新跑完整外包列算例。
+
+### 2026-07-04 分支筛列可行性与 M 开关口径复核
+
+本次进一步复核 `resetRestrictedColumnsByCurrentReducedCost()` 的实际语义。当前筛列不是“把所有不兼容列都删掉”，而是先无条件保留当前 LP 中正值的内部机器列；列化外包模式下，正值外包列也同样先保留。之后才对非正值列按当前 child 域兼容性和 reduced cost allowance 做筛选。因此，只要筛列前的 child LP 已经可行，按当前实现筛列后理论上仍应可行，因为原可行解的正值支撑列没有被删掉。正式 `PC.solve()` 中 `after_column_filter` 后如果又进入 infeasible repair，应理解为历史防御分支或数值/异常状态兜底，不是正常预期路径。
+
+strong branching phase 1 的 seed 筛选也按同一口径处理：repair 或初始 trial 得到可行 LP 后，筛列只用于减少后续 child seed 规模，不应破坏当前正值支撑。当前 strong trial 已不再为了 seed 筛选额外重解一次 LP；phase 2 或正式 child 出队时会基于筛后的 seed 自己建模求解。
+
+M 开关打开或关闭时，整体流程保持一致：都是先用父节点列集或 light seed 建 trial LP，不可行则进入 repair，repair 后再筛 seed。差别只在不可行/可用性的判断口径。关闭 M 时，只看 artificial slack 和显式分支行可行性；arc required 右支的竞争列、外包 required job 下仍含该 job 的内部列可以临时留在 trial LP 中，因此评分偏弱但流程简单。打开 M 时，这些 branch-implied 脏列从第一次建模开始就按 big-M objective 处理；如果初始 LP 可行但正值解仍使用 M 列，等价于 trial 还没修干净，需要进入 repair。repair 最终必须同时满足 slack 为 0 且正值 M 列为 0，否则该 side 在 strong trial 口径下判为不可用/不可行。
+
+无向 adjacency 分支原则上也可以套用 arc 分支的 light seed、正值列保留和 M 惩罚思路，因为它同样是对机器序列域的限制。但之前实验中无向分支会明显恶化 dual/pricing 质量，当前主线也不使用该分支，因此只记录可行处理方向，不继续扩展实现。

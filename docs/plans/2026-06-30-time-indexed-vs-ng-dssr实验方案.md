@@ -214,3 +214,15 @@ strong branching phase 1 路径也复查了一遍。普通 trial 和 lightweight
 这轮真正发现并清理的实现冗余只有一个：`PC.solveStrongBranchingRmpTrial()` 里的局部变量 `repaired` 只赋值、不读取，已经删除。它不影响求解结果，但保留会误导后续阅读者以为 repair 后还有单独分支逻辑。
 
 仍建议暂时保留的“兜底/防线”包括：正式 repair 后的 `repair_final`，因为正式节点需要回到无 slack RMP；strong trial 中的 M 正值检查，因为它是判断 trial 是否仍依赖脏竞争列的核心条件；phase 2 infeasible 的显式异常，因为 phase 1 可复用 seed 理应能建出可行 LP；`debugSkipBranchColumnFilter` 和诊断开关默认关闭，不参与常用求解。当前未处理但可后续观察的局部效率点仍是 RMIH duplicate repair fallback 中的序列 evaluator 重算，是否值得缓存应结合 RMIH 日志再判断。
+
+### 2026-07-04 50-2 有 setup 的 time-indexed / SRI / ng-DSSR 对比
+
+本次按 `wet050_001_2m` 有 setup 算例补做三组对比：time-indexed no-cut + strong branching、time-indexed rank-1/SRI + strong branching，以及当前 ng-DSSR 好配置 + time-indexed root preprocessing。三组是并行运行的，因此 wall time 有一定 CPU 竞争噪声；但结果都 `valid=true`，目标一致为 `44383`，可以用于判断量级和主要耗时结构。
+
+time-indexed no-SRI strong branching 结果为 `solve=409.170s, root=187.036s, nodes=10, pool=141680, exact=30.584s/667, master_lp=254.557s`。这比此前同口径最好记录 `378.979s` 略慢，但仍处在同一量级，说明当前改动没有破坏 no-SRI time-indexed 的主要优势。该配置仍是这三组中总时间最短的一组。
+
+time-indexed rank-1/SRI strong branching 结果为 `ROOT_PROCESSED, solve=558.132s, root=558.128s, nodes=1, pool=90688, exact=101.550s/721, master_lp=353.785s`。虽然 CSV 状态写成 `ROOT_PROCESSED`，但 incumbent 与 bound 都是 `44383`，gap 为 0，且 root 直接闭合，因此可以视为根节点收敛求最优。SRI/cut 明显强化了根节点，下界直接闭合且列池小于 no-SRI；但 cut 迭代和 master LP 开销更大，导致总时间反而慢于 no-SRI。
+
+ng-DSSR nearestK8/top10 + time-indexed root preprocessing + strong branching 结果为 `solve=527.970s, root=364.706s, nodes=5, pool=77804, heuristic=72.639s/454, exact=43.677s/145, master_lp=238.487s`。相比此前 ng-DSSR 有 setup 最好记录 `1280.392s, nodes=5, exact=633.335s/138`，本次 root preprocessing 后 exact pricing 时间大幅下降；但预处理本身和 master LP 仍占比较大，因此总时间仍慢于纯 no-SRI time-indexed。
+
+当前结论是：在这个 `50-2` 有 setup 实例上，time-indexed no-SRI + strong branching 仍然最快；SRI/rank-1 cut 能显著加强根节点，但额外 cut/LP 开销没有被完全抵消；ng-DSSR 接 time-indexed root preprocessing 后已经从“明显慢很多”变成“同一量级但仍偏慢”。后续如果要更公平地做论文实验时间，应该单线程串行重跑这些配置，避免并行实验导致的 wall time 波动。

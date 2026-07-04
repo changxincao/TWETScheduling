@@ -255,3 +255,9 @@ time-indexed pricing 也重新确认了一次：当前不再对所有 negative e
 本次只修改排序口径，不修改阈值口径。也就是说，候选是否进入、reduced cost 是否为负、LP 值是否为正、arc fixing 是否触发仍然使用 `Utility.compare*`；但凡是排序、优先队列、候选排名、`compareTo`，统一改为 `Double.compare`，再用 job id、column id、描述字符串等稳定字段打破平局。受影响的路径包括强分支候选排序、Tree 的强分支选择排序、RMP seed reduced-cost 排序、RMIH 列评分排序、subset-row cut 候选排序、time-indexed top 候选排序、ng-DSSR/GCBB label priority queue、completion-bound priority queue，以及通用 `Label`/`Node` 的 `compareTo`。
 
 这个修改不会改变算法的数值接受条件，只改变同一批候选内部的确定排序和队列弹出顺序。收益是避免排序 contract 崩溃，并让强分支、label 队列和 top-k 候选在浮点接近时有稳定 tie-break。验证上，针对本次改到的源文件做了 focused `javac`，编译通过。
+
+#### 复核结论
+
+随后按排序方向、tie-break 和阈值语义重新复核了一遍。结论是当前处理正确：time-indexed 的 `worstCandidateFirstComparator()` 仍然把 reduced cost 较大的候选放在堆顶，用于 top-k 淘汰；`bestCandidateFirstComparator()` 仍然按 reduced cost 从小到大返回最终列；strong branching selection 仍是 score 降序、距离 0.5 升序；cut candidate 仍是 violation/value 降序。`Utility.compare*` 的残留只出现在阈值判断、窗口 clamp、bound 截断、是否正值列等数值语义位置，没有继续用于 Java 排序比较器。
+
+需要区分的是，个别 label comparator 在 reduced cost、job 等优先级字段完全相同的时候可能返回 0。这不会造成 comparator contract 问题，因为它表示两个元素在队列优先级上等价；此前真正危险的是 epsilon 比较可能造成非传递关系。当前版本已经把这类非传递风险去掉，同时没有把 reduced-cost 负性判断、LP 正值判断、arc fixing 边界等算法阈值误改成严格比较。focused `javac` 再次通过，未发现需要继续修改源码的问题。

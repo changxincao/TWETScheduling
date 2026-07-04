@@ -147,3 +147,13 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 这次重新核对 `wet050_001_2m` 上 direct time-indexed root 和 ng-DSSR root preprocessing 的差异后，确认初始列差异的直接来源不是 time-indexed pricing 算法，而是 ALNS 初始列历史口径。direct time-indexed 那次显式使用 `alnsMaxRuntimeMillis=600000` 和 `alnsUseSimulatedAnnealingAcceptance=true`，`InitialColumnBuilder` 在 `accepted` 模式下从 ALNS accepted history 加入了更多机器列，初始列为 53；ng-DSSR preprocessing 那次使用默认 60 秒、SA 关闭，初始列为 8。`TimeIndexedRootPreprocessor` 只是复制正式 root 的 `seedColumnIds` 到临时 pool，因此进入临时 time-indexed root 的第一轮 RMP dual 会随这些 seed 差异改变。后续比较应统一默认口径：SA 关闭、ALNS 60 秒；如需更长 ALNS 或 SA，只作为显式实验变量。
 
 在 `ng-DSSR partial + SRI + time-indexed root preprocessing` 中，cut-loop 之间的 fixing 现在分两层处理。第一层复用刚闭合 exact pricing 留下的 ng-DSSR completion bound，按当前 `incumbent - LP bound` 做普通 `(i,j)` arc 判断，并以 pricing-only 方式写入当前 node；没有 reusable completion bound 时不额外重建 PWLF bound，避免 cut-loop 过重。第二层继续执行已有的 time-indexed scalar helper fixing，用时空图证据更新 pricing-only arc 和 compact window。active SRI cut 下默认仍使用 no-SRI relaxed fixing：这不是完整 SRI-aware 证书，但作为松弛下界是安全偏弱的；SRI-aware helper 仍保留为显式开关，不作为默认路径。
+
+## 2026-07-04：time-indexed root 预处理后的 elementary seed 转移开关
+
+本次在 `TimeIndexedRootPreprocessor` 上补了一个默认关闭的实验开关：`timeIndexedRootPreprocessingSeedElementaryColumns`。原来的 root preprocessing 只把 time-indexed root 闭合后得到的 pricing-only arc、time-indexed arc 状态和 compact window 证据传给正式 ng-DSSR root，不复制临时 graph 列。这个口径最干净，但也会丢掉 time-indexed root 已经发现的一些 elementary 序列信息。新的开关用于测试一个折中方案：临时 time-indexed root 收敛以后，从其最终 restricted RMP 里筛出 job 不重复的 elementary 列，按当前临时 root 最终真实 dual 下的 reduced cost 从小到大排序，最多复制 `timeIndexedRootPreprocessingSeedColumnLimit` 条到正式 ng-DSSR root 的 seed 列里，默认上限为 200。
+
+这个处理只复制真实列对象需要的 sequence 和 cost，不复制临时 LP basis、dual、cut、pseudo-schedule 非基本列，也不改变 root preprocessing 的 arc/window 证据生成流程。选择 restricted RMP 而不是整个临时 Pool，是为了让“来自 time-indexed 收敛结果”的口径更接近最终根节点列集。由于临时 root 已经闭合，候选列不要求 reduced cost 为负；排序只表示这些 elementary 列在临时 root dual 下更接近有用。日志里的 `timeIndexedRootPreprocess.done` 现在会额外输出 `seedElementaryCols`，方便判断本次实际转移了多少条新 seed。
+
+该功能仍应作为实验开关使用。它可能改善正式 ng-DSSR root 的初始列质量，减少前几轮 pricing 波动；也可能增加初始 RMP 规模，使 master LP 变重。因此默认保持关闭，后续需要在相同 ALNS、强分支、time-indexed preprocessing 配置下做 A/B 对比。
+
+2026-07-04 检查补充：seed 转移顺序调整到 graph/scalar fixing 和 ordinary arc promote 之后执行，并跳过已经包含 root pricing-only 禁弧的候选列。这样开关打开时不会主动把刚由 time-indexed 预处理聚合禁止的普通弧列重新塞进 ng-DSSR root seed；仍然只按 sequence 过滤普通弧，不尝试用 time-specific arc 判断 sequence，因为同一 sequence 可能有多个完成时间版本。

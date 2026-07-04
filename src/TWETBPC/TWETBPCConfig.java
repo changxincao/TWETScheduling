@@ -321,6 +321,13 @@ public class TWETBPCConfig {
 	 */
 	public boolean enableTimeIndexedRootPreprocessingForNgDssr = false;
 	/**
+	 * 2026-07-04: time-indexed root 预处理闭合后，可选把临时 root RMP 里的 elementary
+	 * 列按 reduced cost 排序复制到 ng-DSSR root seed。默认关闭，保持预处理只传 fixing/window 证据的旧口径。
+	 */
+	public boolean timeIndexedRootPreprocessingSeedElementaryColumns = false;
+	/** 2026-07-04: 预处理后最多转入 ng-DSSR root seed 的 elementary 列数。 */
+	public int timeIndexedRootPreprocessingSeedColumnLimit = 200;
+	/**
 	 * 2026-05-26: 单向 forward exact pricing 的 label 扩展队列排序。
 	 * 可选值：reducedCost、time、reachableSize。
 	 */

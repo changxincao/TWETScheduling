@@ -326,6 +326,12 @@ public class GCBBFullDomainComparisonTest {
 		config.enableTimeIndexedRootPreprocessingForNgDssr = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedRootPreprocessingForNgDssr",
 				Boolean.toString(config.enableTimeIndexedRootPreprocessingForNgDssr)));
+		config.timeIndexedRootPreprocessingSeedElementaryColumns = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedRootPreprocessingSeedElementaryColumns",
+				Boolean.toString(config.timeIndexedRootPreprocessingSeedElementaryColumns)));
+		config.timeIndexedRootPreprocessingSeedColumnLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.timeIndexedRootPreprocessingSeedColumnLimit",
+				config.timeIndexedRootPreprocessingSeedColumnLimit);
 		config.outsourcingModel = System.getProperty("twet.bpc.fullDomainCompare.outsourcingModel",
 				config.outsourcingModel);
 		config.enableDualStabilization = Boolean.parseBoolean(System.getProperty(

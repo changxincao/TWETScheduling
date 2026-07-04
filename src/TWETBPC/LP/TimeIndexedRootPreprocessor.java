@@ -3,6 +3,8 @@ package TWETBPC.LP;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 
 import Basic.Data;
@@ -77,9 +79,10 @@ final class TimeIndexedRootPreprocessor {
 			root.copyTimeIndexedPricingStateFrom(preRoot);
 			int promotedOrdinaryArcs =
 					TimeIndexedGraphPricingEngine.promoteFullyForbiddenTimeIndexedArcsToPricingOnly(data, preLp, root);
+			int seedColumnsCopied = copyBestElementaryColumnsToMainRoot(data, config, prePool, preLp, mainPool, root);
 			return Result.applied(prePool.size(), preRoot.countTimeIndexedPricingOnlyForbiddenArcs(), promotedOrdinaryArcs,
 					preRoot.countTimeIndexedPricingWindowTightenedJobs(), preRoot.averageTimeIndexedPricingWindowLength(),
-					preRoot.averageTimeIndexedPricingWindowShrinkRatio(), graphFix.summary(), scalarFix.summary(),
+					preRoot.averageTimeIndexedPricingWindowShrinkRatio(), seedColumnsCopied, graphFix.summary(), scalarFix.summary(),
 					System.nanoTime() - start);
 		} finally {
 			preLp.closeModel();
@@ -140,6 +143,81 @@ final class TimeIndexedRootPreprocessor {
 		return copied;
 	}
 
+	private static int copyBestElementaryColumnsToMainRoot(Data data, TWETBPCConfig config, Pool prePool, LP preLp,
+			Pool mainPool, Node root) {
+		if (!config.timeIndexedRootPreprocessingSeedElementaryColumns
+				|| config.timeIndexedRootPreprocessingSeedColumnLimit <= 0) {
+			return 0;
+		}
+		LP.PricingDualSnapshot dual = preLp.captureTruePricingDuals();
+		ArrayList<ScoredColumn> candidates = new ArrayList<ScoredColumn>();
+		for (int columnId : preLp.getRestrictedColumnIds()) {
+			TWETColumn column = prePool.getColumn(columnId);
+			if (!isElementary(column, data.n)) {
+				continue;
+			}
+			if (usesPricingOnlyForbiddenArc(column, root)) {
+				continue;
+			}
+			candidates.add(new ScoredColumn(columnId, column, preLp.computeReducedCost(column, dual)));
+		}
+		candidates.sort(new Comparator<ScoredColumn>() {
+			@Override
+			public int compare(ScoredColumn a, ScoredColumn b) {
+				int rc = Double.compare(a.reducedCost, b.reducedCost);
+				if (rc != 0) {
+					return rc;
+				}
+				return Integer.compare(a.sourceColumnId, b.sourceColumnId);
+			}
+		});
+		HashSet<Integer> existingSeedIds = new HashSet<Integer>(root.seedColumnIds);
+		int copied = 0;
+		for (ScoredColumn candidate : candidates) {
+			if (copied >= config.timeIndexedRootPreprocessingSeedColumnLimit) {
+				break;
+			}
+			TWETColumn column = candidate.column;
+			Pool.ColumnUpdate update = mainPool.addOrImproveColumn(column.getSequence(), column.getCost(),
+					column.getSource(), true);
+			if (existingSeedIds.add(Integer.valueOf(update.columnId))) {
+				root.seedColumnIds.add(Integer.valueOf(update.columnId));
+				copied++;
+			}
+		}
+		return copied;
+	}
+
+	private static boolean isElementary(TWETColumn column, int jobCount) {
+		if (column.size() == 0) {
+			return false;
+		}
+		boolean[] seen = new boolean[jobCount + 1];
+		for (int job : column.getSequence()) {
+			if (job < 1 || job > jobCount || seen[job]) {
+				return false;
+			}
+			seen[job] = true;
+		}
+		return true;
+	}
+
+	private static boolean usesPricingOnlyForbiddenArc(TWETColumn column, Node root) {
+		if (root == null || column.size() == 0) {
+			return false;
+		}
+		List<Integer> sequence = column.getSequence();
+		if (root.isPricingOnlyArcForbidden(0, sequence.get(0).intValue())) {
+			return true;
+		}
+		for (int i = 1; i < sequence.size(); i++) {
+			if (root.isPricingOnlyArcForbidden(sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
+				return true;
+			}
+		}
+		return root.isPricingOnlyArcForbidden(sequence.get(sequence.size() - 1).intValue(), root.sinkId());
+	}
+
 	private static boolean isTimeLimitReached(TimeLimitChecker checker) {
 		return checker != null && checker.isTimeLimitReached();
 	}
@@ -160,13 +238,15 @@ final class TimeIndexedRootPreprocessor {
 		}
 
 		static Result applied(int tempPoolSize, int timeArcCount, int promotedOrdinaryArcs, int tightenedJobs,
-				double avgWindowLength, double avgShrinkRatio, String graphSummary, String scalarSummary, long elapsedNanos) {
+				double avgWindowLength, double avgShrinkRatio, int seedColumnsCopied, String graphSummary,
+				String scalarSummary, long elapsedNanos) {
 			String message = "applied tempPool=" + tempPoolSize
 					+ ", timeArcs=" + timeArcCount
 					+ ", promotedOrdinaryArcs=" + promotedOrdinaryArcs
 					+ ", windowJobs=" + tightenedJobs
 					+ ", avgWindowLen=" + format(avgWindowLength)
 					+ ", avgShrinkRatio=" + format(avgShrinkRatio)
+					+ ", seedElementaryCols=" + seedColumnsCopied
 					+ ", graphFix={" + graphSummary + "}"
 					+ ", scalarFix={" + scalarSummary + "}";
 			return new Result(true, message, elapsedNanos);
@@ -179,6 +259,18 @@ final class TimeIndexedRootPreprocessor {
 
 		private static String format(double value) {
 			return Double.isFinite(value) ? String.format("%.3f", value) : "NA";
+		}
+	}
+
+	private static final class ScoredColumn {
+		final int sourceColumnId;
+		final TWETColumn column;
+		final double reducedCost;
+
+		ScoredColumn(int sourceColumnId, TWETColumn column, double reducedCost) {
+			this.sourceColumnId = sourceColumnId;
+			this.column = column;
+			this.reducedCost = reducedCost;
 		}
 	}
 }

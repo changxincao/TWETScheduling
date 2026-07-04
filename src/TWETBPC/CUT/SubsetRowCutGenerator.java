@@ -434,11 +434,9 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		Collections.sort(candidates, new Comparator<Candidate>() {
 			@Override
 			public int compare(Candidate a, Candidate b) {
-				if (Utility.compareGt(a.value, b.value)) {
-					return -1;
-				}
-				if (Utility.compareLt(a.value, b.value)) {
-					return 1;
+				int valueCompare = Double.compare(b.value, a.value);
+				if (valueCompare != 0) {
+					return valueCompare;
 				}
 				if (a.scope.length != b.scope.length) {
 					return Integer.compare(a.scope.length, b.scope.length);

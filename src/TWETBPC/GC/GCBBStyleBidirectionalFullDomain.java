@@ -366,13 +366,7 @@ public class GCBBStyleBidirectionalFullDomain {
 	}
 
 	private static int compareDoubleAsc(double left, double right) {
-		if (Utility.compareLt(left, right)) {
-			return -1;
-		}
-		if (Utility.compareGt(left, right)) {
-			return 1;
-		}
-		return 0;
+		return Double.compare(left, right);
 	}
 
 	private static int compareDoubleDesc(double left, double right) {
@@ -2105,11 +2099,9 @@ public class GCBBStyleBidirectionalFullDomain {
 			if (other instanceof FunctionLabel) {
 				return compareReducedCost(this, (FunctionLabel) other);
 			}
-			if (Utility.compareLt(minReducedCost, other.minReducedCost)) {
-				return -1;
-			}
-			if (Utility.compareGt(minReducedCost, other.minReducedCost)) {
-				return 1;
+			int reducedCostCompare = Double.compare(minReducedCost, other.minReducedCost);
+			if (reducedCostCompare != 0) {
+				return reducedCostCompare;
 			}
 			return Integer.compare(jid, other.jid);
 		}

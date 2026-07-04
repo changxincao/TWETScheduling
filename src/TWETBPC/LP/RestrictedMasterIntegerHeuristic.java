@@ -447,11 +447,9 @@ public final class RestrictedMasterIntegerHeuristic {
 		Collections.sort(scores, new Comparator<ColumnScore>() {
 			@Override
 			public int compare(ColumnScore a, ColumnScore b) {
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return 1;
+				int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
+				if (reducedCostCompare != 0) {
+					return reducedCostCompare;
 				}
 				return Integer.compare(a.columnId, b.columnId);
 			}

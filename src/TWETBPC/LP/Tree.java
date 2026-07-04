@@ -783,17 +783,13 @@ public class Tree {
 	}
 
 	private int compareStrongBranchingSelection(StrongBranchingSelection a, StrongBranchingSelection b) {
-		if (Utility.compareGt(a.score, b.score)) {
-			return -1;
+		int scoreCompare = Double.compare(b.score, a.score);
+		if (scoreCompare != 0) {
+			return scoreCompare;
 		}
-		if (Utility.compareLt(a.score, b.score)) {
-			return 1;
-		}
-		if (Utility.compareLt(a.candidate.getDistanceToHalf(), b.candidate.getDistanceToHalf())) {
-			return -1;
-		}
-		if (Utility.compareGt(a.candidate.getDistanceToHalf(), b.candidate.getDistanceToHalf())) {
-			return 1;
+		int distanceCompare = Double.compare(a.candidate.getDistanceToHalf(), b.candidate.getDistanceToHalf());
+		if (distanceCompare != 0) {
+			return distanceCompare;
 		}
 		int orderCompare = Integer.compare(a.candidate.getOrder(), b.candidate.getOrder());
 		return orderCompare != 0 ? orderCompare : a.candidate.getDescription().compareTo(b.candidate.getDescription());

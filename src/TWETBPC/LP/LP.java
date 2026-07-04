@@ -1060,11 +1060,9 @@ public class LP {
 		Collections.sort(candidates, new Comparator<ColumnReducedCost>() {
 			@Override
 			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return 1;
+				int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
+				if (reducedCostCompare != 0) {
+					return reducedCostCompare;
 				}
 				return Integer.compare(a.columnId, b.columnId);
 			}
@@ -1105,11 +1103,9 @@ public class LP {
 		Collections.sort(candidates, new Comparator<ColumnReducedCost>() {
 			@Override
 			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return 1;
+				int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
+				if (reducedCostCompare != 0) {
+					return reducedCostCompare;
 				}
 				return Integer.compare(a.columnId, b.columnId);
 			}

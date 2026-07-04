@@ -112,11 +112,9 @@ public class OutsourcingMembershipBrancher implements Brancher {
 		Collections.sort(candidates, new Comparator<StrongBranchingCandidate>() {
 			@Override
 			public int compare(StrongBranchingCandidate a, StrongBranchingCandidate b) {
-				if (Utility.compareLt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
-					return -1;
-				}
-				if (Utility.compareGt(a.getDistanceToHalf(), b.getDistanceToHalf())) {
-					return 1;
+				int distanceCompare = Double.compare(a.getDistanceToHalf(), b.getDistanceToHalf());
+				if (distanceCompare != 0) {
+					return distanceCompare;
 				}
 				int orderCompare = Integer.compare(a.getOrder(), b.getOrder());
 				return orderCompare != 0 ? orderCompare : a.getDescription().compareTo(b.getDescription());

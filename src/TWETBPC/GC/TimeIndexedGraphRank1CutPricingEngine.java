@@ -866,11 +866,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		return new Comparator<Candidate>() {
 			@Override
 			public int compare(Candidate a, Candidate b) {
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return 1;
+				int reducedCostCompare = Double.compare(b.reducedCost, a.reducedCost);
+				if (reducedCostCompare != 0) {
+					return reducedCostCompare;
 				}
 				return Integer.compare(b.id, a.id);
 			}
@@ -881,11 +879,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		return new Comparator<Candidate>() {
 			@Override
 			public int compare(Candidate a, Candidate b) {
-				if (Utility.compareLt(a.reducedCost, b.reducedCost)) {
-					return -1;
-				}
-				if (Utility.compareGt(a.reducedCost, b.reducedCost)) {
-					return 1;
+				int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
+				if (reducedCostCompare != 0) {
+					return reducedCostCompare;
 				}
 				return Integer.compare(a.id, b.id);
 			}

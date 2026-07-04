@@ -247,3 +247,11 @@ lightweight trial 只用于 arc 分支和列化外包 membership 分支。它准
 time-indexed pricing 也重新确认了一次：当前不再对所有 negative end state 做 `TWETColumnEvaluator.evaluate()`，而是先按 graph reduced cost 判断是否可能进入 top 候选，再恢复 sequence 并用 reduced cost 反推出 objective cost。启发式 pricing 的 true-cost recheck 只在 dual window 等需要回到原始目标口径时触发；compact window 跳过 recheck 是当前明确实验口径。route enumeration 的 evaluator 重算只在 `routeEnumerationUseTimeIndexedWindow=true` 时用于保护枚举列真实成本，默认不在主线。
 
 因此当前真正还像冗余的仍然只有 RMIH duplicate repair fallback 中对相邻删除序列的局部重复评价。这个点以后如果日志显示 RMIH repair 时间占比升高，可以考虑在该 fallback 内部加小范围 sequence-cost cache；在没有这个证据前不改，因为它会增加签名/key 管理复杂度，而且不解决当前 pricing 或 LP 主耗时。
+
+### 2026-07-04 排序比较器全序修正
+
+继续检查“冗余/高效性/正确性”时发现一类确定的正确性风险：部分排序、优先队列和 `compareTo` 使用 `Utility.compareLt/compareGt` 这种带 epsilon 的浮点比较。epsilon 判断适合 reduced cost 阈值、是否为正值列、剪枝边界等数值语义，但不适合 Java `Comparator` 或 `Comparable`。排序比较器需要严格全序；如果出现 A 与 B 近似相等、B 与 C 近似相等、但 A 与 C 又被判为有序，就可能违反 comparator contract。此前 `HeuristicPricingEngine.collectSeedColumnsBySortedPrefix()` 已经暴露过 TimSort contract 异常，因此这不是风格问题，而是可达的稳定性问题。
+
+本次只修改排序口径，不修改阈值口径。也就是说，候选是否进入、reduced cost 是否为负、LP 值是否为正、arc fixing 是否触发仍然使用 `Utility.compare*`；但凡是排序、优先队列、候选排名、`compareTo`，统一改为 `Double.compare`，再用 job id、column id、描述字符串等稳定字段打破平局。受影响的路径包括强分支候选排序、Tree 的强分支选择排序、RMP seed reduced-cost 排序、RMIH 列评分排序、subset-row cut 候选排序、time-indexed top 候选排序、ng-DSSR/GCBB label priority queue、completion-bound priority queue，以及通用 `Label`/`Node` 的 `compareTo`。
+
+这个修改不会改变算法的数值接受条件，只改变同一批候选内部的确定排序和队列弹出顺序。收益是避免排序 contract 崩溃，并让强分支、label 队列和 top-k 候选在浮点接近时有稳定 tie-break。验证上，针对本次改到的源文件做了 focused `javac`，编译通过。

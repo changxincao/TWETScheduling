@@ -159,13 +159,7 @@ public class GC {
 	}
 
 	private static int compareDoubleAsc(double left, double right) {
-		if (Utility.compareLt(left, right)) {
-			return -1;
-		}
-		if (Utility.compareGt(left, right)) {
-			return 1;
-		}
-		return 0;
+		return Double.compare(left, right);
 	}
 
 	private static double earliestCompletion(Label label) {

@@ -226,3 +226,11 @@ time-indexed rank-1/SRI strong branching 结果为 `ROOT_PROCESSED, solve=558.13
 ng-DSSR nearestK8/top10 + time-indexed root preprocessing + strong branching 结果为 `solve=527.970s, root=364.706s, nodes=5, pool=77804, heuristic=72.639s/454, exact=43.677s/145, master_lp=238.487s`。相比此前 ng-DSSR 有 setup 最好记录 `1280.392s, nodes=5, exact=633.335s/138`，本次 root preprocessing 后 exact pricing 时间大幅下降；但预处理本身和 master LP 仍占比较大，因此总时间仍慢于纯 no-SRI time-indexed。
 
 当前结论是：在这个 `50-2` 有 setup 实例上，time-indexed no-SRI + strong branching 仍然最快；SRI/rank-1 cut 能显著加强根节点，但额外 cut/LP 开销没有被完全抵消；ng-DSSR 接 time-indexed root preprocessing 后已经从“明显慢很多”变成“同一量级但仍偏慢”。后续如果要更公平地做论文实验时间，应该单线程串行重跑这些配置，避免并行实验导致的 wall time 波动。
+
+补充拆分时间后，三个配置的瓶颈并不一样。no-SRI time-indexed 总时间 `409.170s`，其中 master LP 合计 `254.557s`，占比约 62%；真正的 graph pricing 只有 `30.584s/667`，repair find-feasible pricing 另有 `8.514s/742`。强分支相关 RMP LP 是最大项，`strong_branching_rmp=151.154s/280`，比 graph pricing 本身大很多。root 的 CSV `root_s=187.036s`，而 node1 summary 的 `nodeTime=206.233s`，差异主要来自 root 上分支/RMIH 等 node 内附加操作；node1 结束时 total 已到 `290.548s`，说明初始列构造/ALNS 等前置约有 80 秒量级。
+
+SRI/rank-1 time-indexed 总时间 `558.132s`，root 直接闭合。这里没有后续分支成本，主要瓶颈变成 cut 迭代下的 master LP：`after_pricing=287.716s/707`，`after_cut=47.884s/7`，`after_inactive_cut_removal=17.934s/6`，合计 master LP `353.785s`，占比约 63%。rank-1 exact pricing 本身为 `101.550s/721`，占比约 18%；cut separation 只有 `0.837s/7`，不是瓶颈。也就是说 SRI 的慢主要不是“找 cut 慢”，而是 cut 之后反复解更大的 RMP 慢。
+
+ng-DSSR + time-indexed root preprocessing 总时间 `527.970s`。预处理本身 `243.169s`，其中 graph fixing `1.934s`、scalar fixing `1.032s` 都很小，主要成本仍是临时 time-indexed root column generation/RMP。预处理后得到 `promotedOrdinaryArcs=2138`、`avgWindowLen=283.180`、`avgShrinkRatio=0.902`，说明它确实明显压缩了后续 ng-DSSR 的扩展域。正式 root node `nodeTime=114.921s`，root CSV 时间为 `364.706s`，基本可以理解为预处理加正式 root 求解；node1 结束 total 为 `419.212s`，差额包含初始列/ALNS 等前置成本。全局 master LP 为 `238.487s`，其中 `after_pricing=195.530s`；ng-DSSR exact pricing 只有 `43.677s/145`，启发式 pricing 为 `72.639s/454`，strong branching 中启发式试探另有 `43.697s/288`。因此这组里 ng-DSSR exact 已经不是主要瓶颈，主要时间在预处理临时 root、RMP LP 和启发式/strong-branching 试探。
+
+由此得到的判断是：time-indexed no-SRI 快，不是因为 LP 小，而是因为 graph pricing 极便宜，即使列池很大，整体仍能靠快速 pricing 和强分支推进；SRI 更强但把成本转移到 cut 后的大 RMP；ng-DSSR 经 root preprocessing 后 exact 成本已经降到可接受，剩下主要是前置预处理和 RMP/启发式成本。

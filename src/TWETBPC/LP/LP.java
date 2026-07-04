@@ -877,8 +877,8 @@ public class LP {
 	/**
 	 * 2026-07-04: strong branching 轻量 trial 专用。右支 required arc 的竞争弧不建额外 master row，
 	 * 因而父节点遗留列可能暂时正值使用 branch-implied 禁弧。这里不删这些列，而是把它们的
-	 * 目标系数临时改成 big-M；若重解后仍使用它们，说明当前 trial seed 不干净，不能把结果作为
-	 * 子树不可行证书。trial LP 会关闭重建，所以不需要恢复原目标。
+	 * 目标系数临时改成 big-M；若重解后仍使用它们，说明当前 child 在该 trial 口径下需要这些
+	 * branch-implied 竞争列，不能继续把这批 seed 作为干净的可复用子节点。
 	 */
 	public int penalizeBranchImpliedIncompatibleColumns(double penalty) {
 		if (cplex == null || lambdaByColumnId == null || objective == null || node == null) {

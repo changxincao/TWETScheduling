@@ -330,7 +330,9 @@ public class PC {
 			boolean repaired = false;
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				solution = domainRepair ? repairDomainFilteredStrongBranchingMaster(lp)
-						: repairInfeasibleMaster(lp, false);
+						// 2026-07-04: strong trial 后续还要做 M 惩罚和二次筛列，必须让 repair 返回筛后、
+						// 无 slack 的正式 RMP 解；不能沿用 repair slack 模型下的旧 solution。
+						: repairInfeasibleMaster(lp, true);
 				repaired = true;
 			}
 			if (isTimeLimitReached()) {
@@ -343,7 +345,9 @@ public class PC {
 			if (lightweightRepair) {
 				int penalized = lp.penalizeBranchImpliedIncompatibleColumns(Utility.big_M);
 				if (penalized > 0) {
-					solution = solveRelaxationTimed(lp, "strong_branching_light_after_branch_implied_penalty");
+					// 2026-07-04: M 惩罚直接修改当前 CPLEX 模型的 objective coefficient；
+					// 这里必须 resolve 当前模型，不能重建 RMP，否则 buildModel() 会把临时 M 系数重置回原始列成本。
+					solution = resolveCurrentModelTimed(lp, "strong_branching_light_after_branch_implied_penalty");
 					if (isTimeLimitReached()) {
 						return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 					}

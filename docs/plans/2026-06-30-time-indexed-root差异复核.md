@@ -167,3 +167,13 @@ strong 口径则已经出现可疑信号：`test-results/bpc/tmp-timegraph-nocut
 因此当前实现改为：strong trial 的二次筛列一律保留当前正值列，包括 lightweight repair 口径下的正值列。M 惩罚重解后若 slack 或 branch-implied M 列仍为正，仍按该 side 不可行处理；但二次筛列本身只负责减小 seed，不再承担不可行证明。原先的“完整父列复验”辅助函数已经删除，避免把筛列问题解释成另一套 fallback 流程。
 
 验证使用 `test-results/bpc/tmp-strong-mpenalty-keep-positive-filter-20260704`，同样配置下 240s 得到 `TIME_LIMIT, obj=22582, bound=22579, valid=true`。日志中 `rmp_trial_infeasible_after_filter` 不再出现，node 2 的右支从此前的 `rightBound=INF` 变为有限 `rightBound=22947.0`；剩余唯一 INF 来源为 `rmp_trial_infeasible:Repair RMP still has positive artificial slack after generating 4907 columns`，这属于 repair/exact pricing 仍未消除 slack 的另一类证书，和本次修复的“二次筛列后假 infeasible”不同。
+
+### 2026-07-04 M 惩罚未生效与 repair 返回旧模型的最终定位
+
+继续按同一 `wet040_001_2m`、`halfDomain-ngPartial-nearestK4-top10`、time-indexed root preprocessing、strong branching/lightweight repair 配置加临时审计后，最终确认前面关于 M 惩罚的解释还少了两个代码层面的事实。
+
+第一，`LP.penalizeBranchImpliedIncompatibleColumns(big_M)` 确实会在当前 CPLEX 模型里把 branch-implied 竞争弧列的 objective coefficient 改成 `big_M`，但 `PC.solveStrongBranchingRmpTrial()` 随后调用的是 `solveRelaxationTimed()`。`LP.solveRelaxation()` 每次都会调用 `buildModel()`，而 `buildModel()` 会重新创建 `branchImpliedPenaltyColumnIds`，并按 `pool.getColumn(columnId).getCost()` 重建 objective。因此原来的 M 惩罚在下一次求解前就被模型重建冲掉了。直接证据是临时审计中出现 `node=2 penalized=11` 后，二次筛列前仍有 `col=3968` 以正值使用 branch-implied 禁弧。修复方式是 M 惩罚后改用 `resolveCurrentModelTimed()`，只重解当前模型，不重建 RMP。
+
+第二，`repairInfeasibleMaster(lp, false)` 在 repair slack 归零后会先按 reduced cost 调用 `resetRestrictedColumnsByCurrentReducedCost()` 改写 `restrictedColumnIds`，再关闭 `feasibilityRepairMode`，但因为参数为 `false`，它不会求解这个“筛后、无 slack”的正式 RMP，而是把 repair slack 模型下的旧 solution 返回给 strong trial。后续 M 惩罚和二次筛列就可能基于已经和 `restrictedColumnIds` 错位的旧 CPLEX 模型继续操作。临时审计显示，修复 M resolve 后仍有一次 `rmp_trial_infeasible_after_filter`；把 strong trial 的普通 repair 改为 `repairInfeasibleMaster(lp, true)` 后，该类 after-filter infeasible 消失，原 node 4 右支改为明确的 `branch_implied_penalty_positive,mValue=0.08070089067270195`。
+
+当前最终修复为两点：M 惩罚后只 `resolve` 当前模型；strong trial 中普通 repair 成功后必须返回筛后、无 slack 的正式 RMP 解。验证 run `test-results/bpc/tmp-strong-repair-final-fix-audit-20260704` 得到 `FINISHED,obj=bound=22580,valid=true,solve=186.389s,nodes=15`。关键日志计数为：`rmp_trial_infeasible_after_filter count=0`，`branch_implied_penalty_positive count=3`，其中 node 4 右支从此前的 after-filter infeasible 变成了 M 惩罚正值证书。由此可以确定，今天“不对”的核心不是 required arc slack 覆盖不了竞争弧，也不是正值列保留策略本身，而是 M 惩罚被重建模型冲掉，以及 repair 返回了旧 slack 模型 solution。

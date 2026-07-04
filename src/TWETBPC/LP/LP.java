@@ -55,6 +55,7 @@ public class LP {
 	private IloNumVar[] lambdaVars;
 	private HashMap<Integer, IloNumVar> lambdaByColumnId;
 	private HashSet<Integer> branchImpliedPenaltyColumnIds;
+	private boolean branchImpliedPenaltyObjectiveMode;
 	private IloNumVar[] outsourceColumnVars;
 	private HashMap<Integer, IloNumVar> outsourceColumnById;
 	private IloNumVar[] outsourceVars;
@@ -98,6 +99,7 @@ public class LP {
 		this.arcDual = new double[data.n + 2][data.n + 2];
 		this.feasibilityRepairMode = false;
 		this.allRowFeasibilityRepairMode = false;
+		this.branchImpliedPenaltyObjectiveMode = false;
 	}
 
 	public void construct(Node node, List<Integer> columnIds) {
@@ -129,6 +131,13 @@ public class LP {
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
 		this.lastSolution = null;
 		clearDuals();
+	}
+
+	public void setBranchImpliedPenaltyObjectiveMode(boolean enabled) {
+		if (branchImpliedPenaltyObjectiveMode != enabled) {
+			branchImpliedPenaltyObjectiveMode = enabled;
+			lastSolution = null;
+		}
 	}
 
 	public Node getNode() {
@@ -525,8 +534,8 @@ public class LP {
 	private void buildObjective() throws IloException {
 		IloLinearNumExpr obj = cplex.linearNumExpr();
 		for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
-			TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
-			obj.addTerm(column.getCost(), lambdaVars[idx]);
+			int columnId = restrictedColumnIds.get(idx).intValue();
+			obj.addTerm(internalColumnObjectiveCost(columnId), lambdaVars[idx]);
 		}
 		if (isColumnizedOutsourcing()) {
 			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
@@ -825,7 +834,7 @@ public class LP {
 
 	private void addColumnToCurrentModel(int columnId) throws IloException {
 		TWETColumn column = pool.getColumn(columnId);
-		IloColumn cplexColumn = cplex.column(objective, column.getCost());
+		IloColumn cplexColumn = cplex.column(objective, internalColumnObjectiveCost(columnId));
 		cplexColumn = cplexColumn.and(cplex.column(machineRange, 1.0));
 		for (int job = 1; job <= data.n; job++) {
 			int coefficient = column.getJobVisitCount(job);
@@ -866,47 +875,21 @@ public class LP {
 		}
 		IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
 		if (var != null) {
-			double cost = branchImpliedPenaltyColumnIds != null
-					&& branchImpliedPenaltyColumnIds.contains(Integer.valueOf(columnId)) ? Utility.big_M
-							: pool.getColumn(columnId).getCost();
-			cplex.setLinearCoef(objective, var, cost);
+			cplex.setLinearCoef(objective, var, internalColumnObjectiveCost(columnId));
 			lastSolution = null;
 		}
 	}
 
-	/**
-	 * 2026-07-04: strong branching 轻量 trial 专用。右支 required arc 的竞争弧不建额外 master row，
-	 * 因而父节点遗留列可能暂时正值使用 branch-implied 禁弧。这里不删这些列，而是把它们的
-	 * 目标系数临时改成 big-M；若重解后仍使用它们，说明当前 child 在该 trial 口径下需要这些
-	 * branch-implied 竞争列，不能继续把这批 seed 作为干净的可复用子节点。
-	 */
-	public int penalizeBranchImpliedIncompatibleColumns(double penalty) {
-		if (cplex == null || lambdaByColumnId == null || objective == null || node == null) {
-			return 0;
-		}
-		int penalized = 0;
-		for (int columnId : restrictedColumnIds) {
-			TWETColumn column = pool.getColumn(columnId);
-			if (!node.usesBranchImpliedForbiddenArc(column)) {
-				continue;
+	/** strong branching lightweight trial 中，branch-implied 竞争列从建模开始就按 big-M 成本处理。 */
+	private double internalColumnObjectiveCost(int columnId) {
+		TWETColumn column = pool.getColumn(columnId);
+		if (branchImpliedPenaltyObjectiveMode && node != null && node.usesBranchImpliedForbiddenArc(column)) {
+			if (branchImpliedPenaltyColumnIds != null) {
+				branchImpliedPenaltyColumnIds.add(Integer.valueOf(columnId));
 			}
-			IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
-			if (var == null) {
-				continue;
-			}
-			try {
-				cplex.setLinearCoef(objective, var, penalty);
-			} catch (IloException ex) {
-				throw new IllegalStateException("Failed to penalize branch-implied incompatible column " + columnId,
-						ex);
-			}
-			branchImpliedPenaltyColumnIds.add(Integer.valueOf(columnId));
-			penalized++;
+			return Utility.big_M;
 		}
-		if (penalized > 0) {
-			lastSolution = null;
-		}
-		return penalized;
+		return column.getCost();
 	}
 
 	public boolean hasPositiveBranchImpliedPenaltyColumn() {

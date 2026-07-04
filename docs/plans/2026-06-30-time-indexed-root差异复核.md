@@ -195,3 +195,13 @@ Phase 1 的普通 trial 用于不启用 lightweight repair 的候选。它先让
 lightweight trial 只用于 arc 分支和列化外包 membership 分支。它准备 seed 时先过滤明显不兼容的列，但父节点当前正值内部列会临时保留，用来保证 repair 有连续起点。以 arc 右支 required `i->j` 为例，`i` 的其它后继、`j` 的其它前驱被记录为 branch-implied forbidden，但这些 implied 禁弧不建额外 master row。trial RMP 可行或 repair 成功后，会把仍违反 branch-implied forbidden 的遗留列临时改成 `big_M` 成本，并只 resolve 当前 CPLEX 模型。如果 M 列或 slack 仍为正，说明这个 side 在当前 trial 口径下还依赖这些竞争列，直接按 infeasible 评分；如果 M/slack 都为 0，才继续二次筛列。二次筛列只是减小 seed，必须保留当前正值列，不能把筛列后的 infeasible 当作子树不可行证书。
 
 前面修复的两个 bug 都在这段 phase 1 流程里。第一，M 惩罚后不能调用会重建模型的 `solveRelaxationTimed()`，否则 `buildModel()` 会把临时 M 系数恢复成原始列成本；必须用 `resolveCurrentModelTimed()`。第二，普通 repair 成功后不能返回 repair slack 模型下的旧 solution；strong trial 后面还要做 M 惩罚和筛列，因此 repair 必须返回筛后、无 slack 的正式 RMP 解。
+
+进一步讨论后，当前实现虽然已经修正状态一致性，但 phase 1 lightweight 仍偏绕：它先按原目标求/repair，再对 branch-implied 竞争列加 M 后 resolve。更清晰的实现应把 M 作为 trial RMP 的初始 objective 口径：lightweight seed 保留父节点正值列和 child-compatible 列，构造 trial RMP 时直接把使用 branch-implied forbidden arc 的遗留列设为 `big_M`，repair 也在同一 objective 口径下进行；修复结束时只需检查 artificial slack 是否为 0、M 列是否为 0。这样普通 trial 和 lightweight trial 的后续流程可以统一，区别只在 seed 准备方式和是否启用 M 清洗。二次筛列只负责减小 seed，并保留当前正值列；若已经确认 M 列为 0，保留正值列不会再把 branch-implied 竞争列带入可复用 seed。
+
+### 2026-07-04 一段式 M 口径优化
+
+按上述思路，lightweight trial 不再先按原目标 repair、再额外调用 `penalizeBranchImpliedIncompatibleColumns()` 和 `resolve`。现在 `LP` 增加 trial-only 的 `branchImpliedPenaltyObjectiveMode`，`buildObjective()`、增量加列和 objective 更新统一通过 `internalColumnObjectiveCost()` 取内部机器列目标系数；当该模式开启且列使用 branch-implied forbidden arc 时，从建模开始直接按 `big_M` 成本处理。这样初始 trial RMP、repair slack RMP、repair 后正式 RMP 和二次筛列重解都处在同一个 M objective 口径下，不再存在“原目标 repair 后再切 M”的额外状态切换。
+
+`PC.solveStrongBranchingRmpTrial()` 现在只在 lightweight trial 入口打开该 objective 模式，后续流程仍是求 trial LP、必要时 repair、检查 M 列是否仍为正、二次筛列并保留当前正值列。旧的事后 M 惩罚方法已删除，避免未来再次误用两段式流程。普通 trial 仍保留弱口径：不启用 M，只做普通 RMP/repair/筛列；这意味着普通 trial 的评分可能偏松，但不会影响最终 BPC 正确性。
+
+验证使用 `test-results/bpc/tmp-strong-onestep-mpenalty-20260704`，配置为 `wet040_001_2m`、`halfDomain-ngPartial-nearestK4-top10`、time-indexed root preprocessing、strong branching 和 lightweight repair。结果 `FINISHED,obj=bound=22580,valid=true,solve=223.855s,nodes=16`；日志计数为 `rmp_trial_infeasible_after_filter=0`、`strong_branching_light_after_branch_implied_penalty=0`、`branch_implied_penalty_positive=2`。这说明一段式 M 后不再出现二次筛列假 infeasible，也没有旧的额外 M resolve 阶段。

@@ -323,6 +323,7 @@ public class PC {
 		try {
 			String initialPhase = domainRepair ? "strong_branching_domain_rmp"
 					: (lightweightRepair ? "strong_branching_light_repair_rmp" : "strong_branching_rmp");
+			lp.setBranchImpliedPenaltyObjectiveMode(lightweightRepair);
 			TWETMasterSolution solution = solveRelaxationTimed(lp, initialPhase);
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
@@ -342,25 +343,9 @@ public class PC {
 				return StrongBranchingTrialResult.from(lp, solution, false,
 						withSolutionMessage("rmp_trial_infeasible", solution));
 			}
-			if (lightweightRepair) {
-				int penalized = lp.penalizeBranchImpliedIncompatibleColumns(Utility.big_M);
-				if (penalized > 0) {
-					// 2026-07-04: M 惩罚直接修改当前 CPLEX 模型的 objective coefficient；
-					// 这里必须 resolve 当前模型，不能重建 RMP，否则 buildModel() 会把临时 M 系数重置回原始列成本。
-					solution = resolveCurrentModelTimed(lp, "strong_branching_light_after_branch_implied_penalty");
-					if (isTimeLimitReached()) {
-						return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
-					}
-					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-						return StrongBranchingTrialResult.infeasible(lp, solution,
-								withSolutionMessage("branch_implied_penalty_infeasible", solution));
-					}
-					if (!lp.isNoSlack() || lp.hasPositiveBranchImpliedPenaltyColumn()) {
-						return StrongBranchingTrialResult.infeasible(lp, solution,
-								"branch_implied_penalty_positive slack=" + !lp.isNoSlack()
-										+ ",mValue=" + lp.branchImpliedPenaltyValue());
-					}
-				}
+			if (lightweightRepair && lp.hasPositiveBranchImpliedPenaltyColumn()) {
+				return StrongBranchingTrialResult.infeasible(lp, solution,
+						"branch_implied_penalty_positive mValue=" + lp.branchImpliedPenaltyValue());
 			}
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				// 2026-07-04: 这里的筛列只用于减小后续 child seed，不能作为不可行证明。
@@ -386,6 +371,11 @@ public class PC {
 				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 					return StrongBranchingTrialResult.from(lp, solution, false,
 							withSolutionMessage("rmp_trial_infeasible_after_filter", solution));
+				}
+				if (lightweightRepair && lp.hasPositiveBranchImpliedPenaltyColumn()) {
+					return StrongBranchingTrialResult.infeasible(lp, solution,
+							"branch_implied_penalty_positive_after_filter mValue="
+									+ lp.branchImpliedPenaltyValue());
 				}
 			}
 			return StrongBranchingTrialResult.from(lp, solution, false,

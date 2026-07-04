@@ -359,8 +359,12 @@ public class PC {
 				}
 			}
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
+				// 2026-07-04: 这里的筛列只用于减小后续 child seed，不能作为不可行证明。
+				// lightweight repair 的初始阶段可临时保留正值不兼容列以保证 repair 连续性；
+				// 筛列后也必须保留当前正值列，否则 filtered RMP infeasible 只说明 seed 被筛坏，
+				// 不能说明分支子树不可行。
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
-						config.branchSeedReducedCostAllowance, !lightweightRepair);
+						config.branchSeedReducedCostAllowance, true);
 				String filterPhase;
 				if (repaired) {
 					filterPhase = domainRepair ? "strong_branching_domain_repair_after_column_filter"

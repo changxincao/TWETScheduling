@@ -159,3 +159,11 @@ strong 口径则已经出现可疑信号：`test-results/bpc/tmp-timegraph-nocut
 同时，`22581` 的错误结果说明仍有另一条假 INF 风险：lightweight seed 的普通 `rmp_trial_infeasible` 可能只是筛出来的 seed 不够，而不是完整父列空间不可行。因此当前修复把两类情况区分开。若是 M/slack 正值，直接作为 INF；若是 lightweight trial 在普通 repair 阶段报告 `rmp_trial_infeasible`，则先用完整父节点 restricted columns 重新构造一次 trial 并复验，只有完整 seed 仍 infeasible 时才把它作为 INF 参与强分支评分和入队判断。
 
 验证使用 `test-results/bpc/tmp-strong-mpenalty-certify-20260704`，配置为 `wet040_001_2m`、`halfDomain-ngPartial-nearestK4-top10`、no-SRI、partial dominance、time-indexed root preprocessing、strong branching 与 lightweight repair 开启。结果为 `FINISHED, obj=bound=22580, solve=208.150s, nodes=18, pool=125886, exact=4.002s/109, valid=true`。这与此前 `tmp-strong-mpenalty-verify4-20260704` 的错误 `22581` 相比，说明原来的 conservative fallback 和未复验的 lightweight INF 口径都不够清楚；当前口径恢复了已知正确最优值，但代价是不能再利用那条假 INF 快速闭合。
+
+### 2026-07-04 strong branching 二次筛列口径再修正
+
+继续复核后确认，“lightweight `rmp_trial_infeasible` 一律用完整父列复验”的处理过度扩大了问题范围。当前已经坐实的错误点更具体：strong trial 在 repair/M 惩罚阶段得到可行 LP 后，又调用 reduced-cost 二次筛列准备 child seed；如果这一步删除了当前 LP 正值列，筛后的 restricted RMP 可能变成 infeasible。这个 infeasible 只说明二次筛列破坏了当前可行支撑，不能作为子树不可行证明，也不应进入 strong branching 的 `INF` 评分。
+
+因此当前实现改为：strong trial 的二次筛列一律保留当前正值列，包括 lightweight repair 口径下的正值列。M 惩罚重解后若 slack 或 branch-implied M 列仍为正，仍按该 side 不可行处理；但二次筛列本身只负责减小 seed，不再承担不可行证明。原先的“完整父列复验”辅助函数已经删除，避免把筛列问题解释成另一套 fallback 流程。
+
+验证使用 `test-results/bpc/tmp-strong-mpenalty-keep-positive-filter-20260704`，同样配置下 240s 得到 `TIME_LIMIT, obj=22582, bound=22579, valid=true`。日志中 `rmp_trial_infeasible_after_filter` 不再出现，node 2 的右支从此前的 `rightBound=INF` 变为有限 `rightBound=22947.0`；剩余唯一 INF 来源为 `rmp_trial_infeasible:Repair RMP still has positive artificial slack after generating 4907 columns`，这属于 repair/exact pricing 仍未消除 slack 的另一类证书，和本次修复的“二次筛列后假 infeasible”不同。

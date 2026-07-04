@@ -177,3 +177,13 @@ strong 口径则已经出现可疑信号：`test-results/bpc/tmp-timegraph-nocut
 第二，`repairInfeasibleMaster(lp, false)` 在 repair slack 归零后会先按 reduced cost 调用 `resetRestrictedColumnsByCurrentReducedCost()` 改写 `restrictedColumnIds`，再关闭 `feasibilityRepairMode`，但因为参数为 `false`，它不会求解这个“筛后、无 slack”的正式 RMP，而是把 repair slack 模型下的旧 solution 返回给 strong trial。后续 M 惩罚和二次筛列就可能基于已经和 `restrictedColumnIds` 错位的旧 CPLEX 模型继续操作。临时审计显示，修复 M resolve 后仍有一次 `rmp_trial_infeasible_after_filter`；把 strong trial 的普通 repair 改为 `repairInfeasibleMaster(lp, true)` 后，该类 after-filter infeasible 消失，原 node 4 右支改为明确的 `branch_implied_penalty_positive,mValue=0.08070089067270195`。
 
 当前最终修复为两点：M 惩罚后只 `resolve` 当前模型；strong trial 中普通 repair 成功后必须返回筛后、无 slack 的正式 RMP 解。验证 run `test-results/bpc/tmp-strong-repair-final-fix-audit-20260704` 得到 `FINISHED,obj=bound=22580,valid=true,solve=186.389s,nodes=15`。关键日志计数为：`rmp_trial_infeasible_after_filter count=0`，`branch_implied_penalty_positive count=3`，其中 node 4 右支从此前的 after-filter infeasible 变成了 M 惩罚正值证书。由此可以确定，今天“不对”的核心不是 required arc slack 覆盖不了竞争弧，也不是正值列保留策略本身，而是 M 惩罚被重建模型冲掉，以及 repair 返回了旧 slack 模型 solution。
+
+### 2026-07-04 当前 strong branching 与正式 child 流程说明
+
+当前普通分支和 strong branching 共用同一套 `BranchResult` child 构造。以 arc 分支为例，左支在 node 上记录 `forbidArc(i,j)`，右支记录 `requireArc(i,j)`，同时把 `i` 的其它后继和 `j` 的其它前驱记录为 `branchImpliedForbiddenArc`。这些 implied 禁弧不作为单独 master branch row，只通过 child 兼容性、pricing 禁弧和 lightweight trial 的 M 惩罚发挥作用。
+
+普通 child 入队时不立即求解 LP，只准备 seed columns 后进入优先队列。出队正式求解时，`PC.solve()` 先构造 child RMP 并求一次 LP；若 infeasible 则走 repair；若 feasible 且不是 strong trial 已准备好的 child，则按当前 dual/reduced cost 和 child 兼容性筛列，再重解，之后进入完整 pricing/cut/枚举流程。因此普通 child 的真正修复和筛列发生在出队正式处理阶段。
+
+strong branching 则在父节点分支前先试探多个候选。第一阶段对候选左右支分别构造 trial LP，先准备 seed，再求 trial RMP；若 infeasible 则 repair。arc/columnized outsourcing 在 lightweight 模式下会临时保留父节点正值列以维持 repair 起点，同时把违反 branch-implied 禁弧的列目标系数改为 `big_M` 后只 resolve 当前模型。如果 M 列或 slack 仍为正，则该 side 按 infeasible 评分；否则再做二次筛列并保留当前正值列，得到可复用 seed。第一阶段按左右 bound gain 的乘积排序。
+
+第二阶段只对第一阶段排名靠前的候选做更深试探：如果 side 在第一阶段不可复用，则不再对它跑二阶段；可复用 side 用已准备好的 seed 重建 trial LP，然后只跑 strong-branching 允许的轻量 pricing（普通启发式、rank1 time-indexed 的内部 bucket heuristic、列化外包 pricing 等），不跑完整 exact pricing。最终选中的左右 child 如果 trial 可复用，会把 trial 后的 restricted columns 写回 child 并标记 `strongBranchingSeedPrepared=true`，正式入队后跳过初始 repair/筛列，直接基于这批 seed 求正式 LP 并进入后续完整 pricing。

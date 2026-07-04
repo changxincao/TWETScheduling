@@ -324,7 +324,6 @@ public class PC {
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
-			boolean repaired = false;
 			boolean needsRepair = solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			if (!needsRepair && branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
 				needsRepair = true;
@@ -334,7 +333,6 @@ public class PC {
 				// slack=0 且 M=0 时，repair 模型的 primal objective 才可作为当前列集的 trial bound。
 				solution = domainRepair ? repairDomainFilteredStrongBranchingMaster(lp)
 						: repairInfeasibleMaster(lp, false);
-				repaired = true;
 			}
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);

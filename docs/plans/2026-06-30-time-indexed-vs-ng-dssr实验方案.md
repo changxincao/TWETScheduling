@@ -202,3 +202,15 @@ M 开关打开或关闭时，整体流程保持一致：都是先用父节点列
 本次已将该路径改成显式异常：正式 child `after_column_filter` infeasible 时直接抛出错误，不再进入 repair。同类地，repair 已经确认 artificial slack 和 branch-implied M 列清零后，再切回无 slack 正式 RMP 求 `repair_final`；如果此时仍 infeasible，也直接抛出错误。默认关闭的 domain-filtered strong repair 最后切回正式 RMP 时也做同样检查。这样以后若再出现“筛列保留正值列但模型不可行”，会直接暴露具体 node 摘要和 LP 消息，而不是被当成普通不可行节点或继续修复。
 
 同时重新检查了其它类似路径。strong branching phase 1 的 seed filter 当前不再重解，只返回筛后的 seed 给 phase 2 或正式 child；phase 2 初始不可行和加启发式列后不可行本来就是显式异常，不属于静默兜底。cut 删除或新 cut 后的 infeasible 不是筛列问题，仍按原控制流返回。domain-filtered repair 是默认关闭的实验路径，它本身就是“先按域筛再 all-row slack repair”的独立口径，这次只补最终正式 RMP 可行性断言，不改变其默认关闭状态。
+
+### 2026-07-04 当前主线冗余与兜底复查
+
+本次按当前常用主线再次走了一遍 `Tree -> PC -> LP -> pricing` 的分支、strong branching、repair 和筛列流程。确认 `LP.construct()` 现在只按调用方传入的 seed 建 restricted RMP，不再隐式按当前 node 的 outsourcing membership、branch-implied arc 或全局预处理弧删除列；这点是必要的，因为初始 LP/repair 的不可行性必须来自新增分支行或后续 pricing 补不出列，不能被建模入口提前筛列污染。
+
+正式 child 路径目前是：先继承父节点 restricted columns 建 LP；若初始 LP 不可行，则走旧 repair，只给当前新增分支行加 artificial slack，并通过 pricing 补列直到 slack 清零；repair 成功后筛 seed 并切回无 slack 正式 RMP 求解。若初始 LP 可行，则先按 reduced cost 和 node 域筛 seed，但筛列函数会无条件保留当前正值内部列，列化外包时也保留当前正值外包列。因此筛后不可行不再是正常分支流程，当前已改为显式异常而不是继续 repair。
+
+strong branching phase 1 路径也复查了一遍。普通 trial 和 lightweight trial 现在共享同一个 branch-implied M 开关口径：开启时，required arc 右支的竞争弧列、以及列化外包 required job 下仍包含该 job 的内部机器列，从第一次建 trial RMP 开始就按 big-M objective 处理；初始 LP 可行但正值 M 列仍存在时，和初始 LP 不可行一样进入 repair。repair 停止条件是 artificial slack 和正值 M 列同时清零。phase 1 结束后的筛列只用于生成后续 child seed，不再为了 seed 重解一次 LP；phase 2 或正式 child 出队时会基于这个 seed 自己建模求解。默认关闭的 `enableStrongBranchingDomainRepair` 仍保留为历史实验口径，不纳入当前主线冗余处理。
+
+这轮真正发现并清理的实现冗余只有一个：`PC.solveStrongBranchingRmpTrial()` 里的局部变量 `repaired` 只赋值、不读取，已经删除。它不影响求解结果，但保留会误导后续阅读者以为 repair 后还有单独分支逻辑。
+
+仍建议暂时保留的“兜底/防线”包括：正式 repair 后的 `repair_final`，因为正式节点需要回到无 slack RMP；strong trial 中的 M 正值检查，因为它是判断 trial 是否仍依赖脏竞争列的核心条件；phase 2 infeasible 的显式异常，因为 phase 1 可复用 seed 理应能建出可行 LP；`debugSkipBranchColumnFilter` 和诊断开关默认关闭，不参与常用求解。当前未处理但可后续观察的局部效率点仍是 RMIH duplicate repair fallback 中的序列 evaluator 重算，是否值得缓存应结合 RMIH 日志再判断。

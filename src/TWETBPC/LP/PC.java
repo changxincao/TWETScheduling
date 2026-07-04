@@ -92,13 +92,8 @@ public class PC {
 				return solution;
 			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-				solution = repairInfeasibleMaster(lp);
-				if (isTimeLimitReached()) {
-					return solution;
-				}
-				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-					return solution;
-				}
+				throw new IllegalStateException("after_column_filter became infeasible after keeping positive columns: "
+						+ lp.getNode().diagnosticSummary() + ", message=" + solution.getMessage());
 			}
 		}
 
@@ -959,7 +954,12 @@ public class PC {
 		}
 
 		lp.setFeasibilityRepairMode(false);
-		return solveRelaxationTimed(lp, "strong_branching_domain_repair_final");
+		TWETMasterSolution finalSolution = solveRelaxationTimed(lp, "strong_branching_domain_repair_final");
+		if (!isTimeLimitReached() && finalSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			throw new IllegalStateException("strong_branching_domain_repair_final became infeasible after slack/M "
+					+ "cleared: " + lp.getNode().diagnosticSummary() + ", message=" + finalSolution.getMessage());
+		}
+		return finalSolution;
 	}
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
@@ -1052,7 +1052,15 @@ public class PC {
 		lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 				config.branchSeedReducedCostAllowance);
 		lp.setFeasibilityRepairMode(false);
-		return resolveAfterColumnFilter ? solveRelaxationTimed(lp, "repair_final") : solution;
+		if (!resolveAfterColumnFilter) {
+			return solution;
+		}
+		TWETMasterSolution finalSolution = solveRelaxationTimed(lp, "repair_final");
+		if (!isTimeLimitReached() && finalSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			throw new IllegalStateException("repair_final became infeasible after keeping positive columns: "
+					+ lp.getNode().diagnosticSummary() + ", message=" + finalSolution.getMessage());
+		}
+		return finalSolution;
 	}
 
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,

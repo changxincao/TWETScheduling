@@ -194,3 +194,11 @@ strong branching phase 1 的 seed 筛选也按同一口径处理：repair 或初
 M 开关打开或关闭时，整体流程保持一致：都是先用父节点列集或 light seed 建 trial LP，不可行则进入 repair，repair 后再筛 seed。差别只在不可行/可用性的判断口径。关闭 M 时，只看 artificial slack 和显式分支行可行性；arc required 右支的竞争列、外包 required job 下仍含该 job 的内部列可以临时留在 trial LP 中，因此评分偏弱但流程简单。打开 M 时，这些 branch-implied 脏列从第一次建模开始就按 big-M objective 处理；如果初始 LP 可行但正值解仍使用 M 列，等价于 trial 还没修干净，需要进入 repair。repair 最终必须同时满足 slack 为 0 且正值 M 列为 0，否则该 side 在 strong trial 口径下判为不可用/不可行。
 
 无向 adjacency 分支原则上也可以套用 arc 分支的 light seed、正值列保留和 M 惩罚思路，因为它同样是对机器序列域的限制。但之前实验中无向分支会明显恶化 dual/pricing 质量，当前主线也不使用该分支，因此只记录可行处理方向，不继续扩展实现。
+
+### 2026-07-04 筛列后不可行兜底清理
+
+上面复核后继续检查实现，确认正式 child 的 `after_column_filter` 仍保留了“筛后 infeasible 再 repair”的旧兜底。这个兜底和当前筛列实现已经不一致：`resetRestrictedColumnsByCurrentReducedCost()` 会先保留当前正值内部列，列化外包时也先保留当前正值外包列，因此筛列只应减少非正值候选列，不应破坏已有可行 LP。若筛后正式 RMP 变为 infeasible，说明正值列读取、筛列状态或模型重建存在真实错误，继续 repair 只会掩盖问题。
+
+本次已将该路径改成显式异常：正式 child `after_column_filter` infeasible 时直接抛出错误，不再进入 repair。同类地，repair 已经确认 artificial slack 和 branch-implied M 列清零后，再切回无 slack 正式 RMP 求 `repair_final`；如果此时仍 infeasible，也直接抛出错误。默认关闭的 domain-filtered strong repair 最后切回正式 RMP 时也做同样检查。这样以后若再出现“筛列保留正值列但模型不可行”，会直接暴露具体 node 摘要和 LP 消息，而不是被当成普通不可行节点或继续修复。
+
+同时重新检查了其它类似路径。strong branching phase 1 的 seed filter 当前不再重解，只返回筛后的 seed 给 phase 2 或正式 child；phase 2 初始不可行和加启发式列后不可行本来就是显式异常，不属于静默兜底。cut 删除或新 cut 后的 infeasible 不是筛列问题，仍按原控制流返回。domain-filtered repair 是默认关闭的实验路径，它本身就是“先按域筛再 all-row slack repair”的独立口径，这次只补最终正式 RMP 可行性断言，不改变其默认关闭状态。

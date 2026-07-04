@@ -217,7 +217,11 @@ public class TWETBPCConfig {
 	public boolean bidirectionalCompletionBoundScalarPruning = true;
 	/** 2026-06-28: ng-DSSR 主线可选用独立 time-indexed relaxed graph 强化 scalar completion bound。 */
 	public boolean timeIndexedCompletionBoundScalarEnhancement = false;
-	/** 2026-06-30: active SRI cut 存在时默认仍使用 no-SRI 的 time-indexed 松弛 helper；完整 SRI-aware fixing 另由开关控制。 */
+	/**
+	 * 2026-06-30: active SRI cut 存在时默认仍使用 no-SRI 的 time-indexed 松弛 helper。
+	 * 这里故意不把 SRI state 接入 arc fixing：按当前 cut 对偶符号，忽略 SRI 对偶只会得到更弱的 reduced-cost
+	 * fixing 证书，安全但不如完整 SRI-aware pricing 强；完整 SRI-aware fixing 另由开关控制，默认关闭以避免过重。
+	 */
 	public boolean timeIndexedCompletionBoundAllowNoSriWithActiveCuts = true;
 	/** 2026-06-29: 每轮 pricing 内部先按 0 reduced-cost 做本地 time-indexed arc fixing，再据此收缩本轮窗口。 */
 	public boolean timeIndexedCompletionBoundInRoundArcFixing = false;

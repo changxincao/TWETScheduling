@@ -3190,9 +3190,6 @@ public class GCNGBBStyleBidirectional {
 			}
 			TWETColumn column = lp.getPool().getColumn(candidate.columnId);
 			ArrayList<Integer> sequence = new ArrayList<Integer>(column.getSequence());
-			if (!isSequenceCompatible(sequence, lp.getNode())) {
-				continue;
-			}
 			TWETColumnEvaluator.Timing timing = evaluator.evaluateTiming(sequence);
 			if (Double.isFinite(timing.lastCompletion) && Double.isFinite(timing.halfCompletion)) {
 				stats.accept(timing);
@@ -3217,9 +3214,6 @@ public class GCNGBBStyleBidirectional {
 			}
 			TWETColumn column = lp.getPool().getColumn(candidate.columnId);
 			ArrayList<Integer> sequence = new ArrayList<Integer>(column.getSequence());
-			if (!isSequenceCompatible(sequence, lp.getNode())) {
-				continue;
-			}
 			TWETColumnEvaluator.Timing timing = evaluator.evaluateTiming(sequence);
 			if (Double.isFinite(timing.lastCompletion) && Double.isFinite(timing.halfCompletion)) {
 				timedCandidates.add(new ColumnMidpointTimingCandidate(candidate.columnId, timing));

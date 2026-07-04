@@ -221,3 +221,11 @@ lightweight trial 只用于 arc 分支和列化外包 membership 分支。它准
 第二，`resetRestrictedColumnsByCurrentReducedCost()` 保留了一个已经没有实际调用意义的 `keepPositiveIncompatible` 分支，表面上像是 strong trial 可以选择删除当前正值不兼容列。结合前面的 branch-implied M 讨论，这个口径容易造成误解：筛 seed 的目的只是减小后续 RMP 规模，不能删掉当前可行 LP 的正值列；需要排斥的竞争列应通过 strong trial 的 M 目标处理。因此该方法现在只有一个口径：正值内部列无条件保留，非正值内部列才按当前 node 兼容性和 reduced cost 筛选；外包列也保持相同思想，正值列保留，非正值列按 membership 兼容性和 reduced cost 筛选。
 
 仍然存在但默认关闭的实验路径包括 `enableStrongBranchingDomainRepair` 对应的 all-row slack/domain-filtered seed，以及若干 `diagnostic*`、completion-bound audit、paper graph timing、partial-list cardinality stats 等诊断开关。这些默认不会参与主线求解，不是当前运行时拖慢的主要来源；后续若不再需要 domain repair 这条实验分支，可以单独删配置和对应方法，但这次不混入主线过滤清理。
+
+### 2026-07-04 主线冗余复查补充
+
+继续按主线流程检查 seed 过滤、repair、pricing 候选和诊断统计后，本次只清理了一处确定冗余：`GCNGBBStyleBidirectional`、`GCNGBBStyleBidirectionalNgDssr` 和 `GCNGBBStyleBidirectionalPartialDominance` 的 midpoint timing 计算里，`selectMidpointColumnCandidates()` 已经按 `isSequenceCompatible(sequence, node)` 过滤过候选，后续 `evaluateMidpointColumnTiming()` 和 `evaluateTopLastMidpointColumnTiming()` 再检查同一条件只是重复扫描。现在只保留候选入口过滤，timing 阶段直接做 `evaluateTiming()`。这不改变候选集合和 midpoint 统计语义，只减少重复兼容性判断。
+
+同时复查了几类看起来像冗余、但当前不应直接删除的路径。第一，普通 child 的 `after_column_filter` 重解不是单纯重复求解；筛列会改变 restricted RMP 的列集合，后续 pricing 需要新模型下的 dual，因此仍要重新解一次。第二，repair 路径里的 slack 模型和正式 RMP 不是同一个口径；repair 成功后是否需要重解取决于调用方是否要求筛后正式解，不能把 repair slack 模型的旧解直接当作所有场景的正式 bound。第三，启发式 pricing 的最终兼容性和 true-cost recheck 仍有必要：tabu 的 add/exchange/remove 会产生新序列，dual window 下的搜索成本不能直接写入 Pool。compact window 当前允许跳过 true recheck 是一个明确的实验口径，不属于遗漏的重复计算。第四，time-indexed pricing 当前已经避免旧版“每个 negative end state 都调用 evaluator”的问题，候选先按 graph reduced cost 进入 top 集合，再由 reduced cost 反推 objective cost，因此没有再发现同类大头冗余。
+
+仍需保留讨论的点是 strong branching / repair 的实验分支。`enableStrongBranchingDomainRepair` 对应的 all-row slack 方案默认关闭，代码上仍有一套独立流程；它不是当前主线运行成本，但如果后续确认不会再用，可以单独删除。`resetRestrictedColumnsByCurrentReducedCost()` 保留正值列、非正值列才按兼容性和 reduced cost 筛选，这一点和前面 branch-implied M 的修复一致，不能再简化成“统一删不兼容列”。总体结论是：当前主线里已知危险的兜底过滤已经清掉，剩下的大部分检查属于不同语义层的保护或默认关闭诊断，不应在没有新证据时继续硬删。

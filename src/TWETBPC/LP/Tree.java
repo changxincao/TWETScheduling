@@ -878,6 +878,11 @@ public class Tree {
 			return false;
 		}
 		if (!trial.isReusableForQueue()) {
+			if (!trial.isInfeasible() && !trial.isTimeLimited()) {
+				prepareChildSeedColumns(child, parentLp, brancher);
+				queue.add(child);
+				return true;
+			}
 			return false;
 		}
 		child.setStrongBranchingSeedPrepared(true);
@@ -1004,6 +1009,9 @@ public class Tree {
 			}
 			if (trial.isInfeasible()) {
 				return "INF";
+			}
+			if (!trial.isReusableForQueue()) {
+				return "UNUSABLE";
 			}
 			return String.valueOf(trial.getBound());
 		}

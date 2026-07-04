@@ -128,6 +128,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(lp.getRestrictedColumnIds().size());
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
+			if (!isSequenceCompatible(lp.getNode(), column.getSequence())) {
+				continue;
+			}
 			double sriPenalty = sriContext.isActive() ? sriContext.penalty(column.getSequence()) : 0.0;
 			candidates.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty)));
 		}
@@ -140,10 +143,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(Math.min(limit, candidates.size()));
 		for (int i = 0; i < candidates.size() && seeds.size() < limit; i++) {
-			TWETColumn column = candidates.get(i).column;
-			if (isSequenceCompatible(lp.getNode(), column.getSequence())) {
-				seeds.add(column);
-			}
+			seeds.add(candidates.get(i).column);
 		}
 		return seeds;
 	}

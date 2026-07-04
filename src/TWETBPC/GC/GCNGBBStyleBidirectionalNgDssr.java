@@ -3919,7 +3919,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return dualProfitableWindowEnabled || sriPricingEnabled || dominanceBackend != DominanceBackend.PAPER;
 	}
 
-	private boolean isSequenceCompatible(ArrayList<Integer> sequence, Node node) {
+	private boolean isSequenceCompatible(List<Integer> sequence, Node node) {
 		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
 			return false;
 		}
@@ -4435,6 +4435,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
 			if (column.getSequence().isEmpty()) {
+				continue;
+			}
+			if (!isSequenceCompatible(column.getSequence(), lp.getNode())) {
 				continue;
 			}
 			candidates.add(new ColumnMidpointCandidate(columnId, lp.getColumnReducedCost(columnId)));

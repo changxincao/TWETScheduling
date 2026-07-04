@@ -1535,7 +1535,7 @@ pricingOnly 的慢节点集中在 node 7 和 node 9。node 7 用时 `111.912s`�
 
 heuristic 返回列的数量也已复核。每条 seed 会通过 tabu 搜索产生负 reduced-cost 序列，`tryAddNegative()` 会过滤空序列、Big-M 成本、已经 active 的列、同一轮重复 signature，并只保留 reduced cost 小于 `-1e-6` 的候选；候选池大小最多为 `heuristicPricingPoolSize`。搜索结束后按 reduced cost 从小到大排序，只返回前 `maxHeuristicPricingColumns` 条。PC 收到这些列后全部尝试加入全局 pool；pool 按 sequence signature 去重，随后 `LP.addColumns()` 再按当前 active id 和节点兼容性决定是否加入 RMP。因此不是“找到的所有局部候选都无条件加入”，而是经过负 reduced cost、去重、候选池上限和返回上限四层控制。
 
-继续复核后需要补充一点：对正式 forbidden arc，正常 child 节点在首次 LP 可行或 repair 成功后会通过 `resetRestrictedColumnsByCurrentReducedCost()` 按 `node.isColumnCompatible()` 过滤，因此 active seed 理论上不应含有正式 forbidden arc；`LP.addColumns()` 对后续新列也会再次过滤正式禁弧。seed 开始前的整序列兼容性检查不是为了替代这些正式分支过滤，而是一个防御口和 pricingOnly 口径对齐：child 首次继承父列、repair 阶段、`debugSkipBranchColumnFilter`、外部 seed 或旧调试列都可能让 active 列暂时不干净；更重要的是 pricingOnly arc 本来不参与 RMP 兼容过滤，所以 active seed 可以包含 pricingOnly 禁弧。当前 heuristic 对这类 seed 的处理是直接跳过整条 seed，保证 tabu 搜索从一开始就满足“当前序列在 pricing 图上合法”的不变量。
+继续复核后需要补充一点：对正式 forbidden arc，正常 child 节点在首次 LP 可行或 repair 成功后会通过 `resetRestrictedColumnsByCurrentReducedCost()` 按 `node.isColumnCompatible()` 过滤，因此 active seed 理论上不应含有正式 forbidden arc；后续由 pricing 生成的新列应在源头满足当前 node 口径，`LP.addColumns()` 只负责去重和加入 RMP，不再做静默兼容过滤。seed 开始前的整序列兼容性检查不是为了替代 LP 加列过滤，而是一个防御口和 pricingOnly 口径对齐：child 首次继承父列、repair 阶段、`debugSkipBranchColumnFilter`、外部 seed 或旧调试列都可能让 active 列暂时不干净；更重要的是 pricingOnly arc 本来不参与 RMP 兼容过滤，所以 active seed 可以包含 pricingOnly 禁弧。当前 heuristic 对这类 seed 的处理是直接跳过整条 seed，保证 tabu 搜索从一开始就满足“当前序列在 pricing 图上合法”的不变量。
 
 这个做法是正确但偏保守的。它会少搜索一些“原 seed 含 pricingOnly 禁弧，但通过删除/换点后也许能修成合法负列”的邻域；如果以后想增强 heuristic，可以专门设计一个 seed repair 入口，允许从不兼容 seed 出发，但那时必须在每次 `tryAddNegative()` 前重新检查整条序列，并处理不兼容状态下 reduced cost 和 move 评价的语义。当前没有这样做，原因是保持简单可靠：只从兼容 seed 出发，remove/add/exchange 的局部禁弧检查就足以保证后续候选始终兼容，不需要每轮全序列扫描。exact pricing 仍在同一 pricing 图上完整搜索，因此这不会影响算法正确性，只影响 heuristic 可能补到的列数量。
 
@@ -1548,6 +1548,14 @@ heuristic 返回列的数量也已复核。每条 seed 会通过 tabu 搜索产�
 旧版对照结果为 `NODE_LIMIT, incumbent=13453, bound=13259.557377, solve=20.581s, valid=true`。node1/node2 的 heuristic pricing 分别为 `3.592s/19/add4925` 和 `3.778s/17/add235`，exact pricing 分别为 `2.293s/3/add126` 和 `4.276s/4/add9155`。当前版重跑结果为 `NODE_LIMIT, incumbent=13453, bound=13259.557377, solve=24.169s, valid=true`。node1/node2 的 heuristic pricing 分别为 `4.017s/19/add4925` 和 `5.152s/17/add235`，exact pricing 分别为 `3.240s/3/add126` 和 `5.026s/4/add9155`。两组的搜索结构、上界、列池规模和 heuristic 新增列数一致，说明这个算例前两个节点中，前移过滤没有改变实际补列结果。
 
 当前观察是：这次修改在 012 的前两个节点主要体现为小到中等的额外耗时，而不是解质量变化。原因也比较直接：旧版虽然会先把不兼容 seed 纳入 top-K 的可能性保留到 `tabuSearch()` 入口才跳过，但本例里没有因此改变最终返回列；新版则对每次 heuristic 调用都要扫描 active restricted columns 的完整序列兼容性，restricted 到 node2 已有 `13797` 条，因而会增加 seed 选择阶段的常数开销。这个开销换来的好处是 seed top-K 的语义更干净：入池的就是 pricing 图兼容列，不会被 pricingOnly 禁弧列占位。
+
+### 41.45 2026-07-04 冗余过滤与贵计算顺序复核
+
+继续复核“检查和过滤是否重复”的问题时，发现当前代码与上一节记录不完全一致：`HeuristicPricingEngine.collectSeedColumnsBySortedPrefix()` 实际仍是先对所有 restricted columns 计算 SRI penalty 和 reduced cost、整体排序，最后才过滤当前 pricing 图不兼容的 seed。这样不会破坏正确性，但如果 child 继承了很多含 forbidden/pricingOnly arc 的旧列，就会对这些本来不会进入 tabu 搜索的列白算 reduced cost，并让它们参与排序。现在已改回上一节记录的口径：先用 `isSequenceCompatible()` 过滤 active restricted columns，再计算 reduced cost 和排序；排序后的前 K 条可直接作为 seed，不再二次检查。
+
+同类问题还出现在 GCNGBB 系列的 midpoint reference column 选择上。`selectMidpointColumnCandidates()` 原先先对所有非空 restricted columns 调 `lp.getColumnReducedCost()`，后续 `evaluateMidpointColumnTiming()` / `evaluateTopLastMidpointColumnTiming()` 再过滤不兼容 sequence 并做 `evaluateTiming()`。这会让明显不可能作为当前 pricing 图参考列的旧列仍然参与 CPLEX reduced-cost 读取和排序。现在普通 GCNGBB、ng-DSSR 和 partial-dominance 复制版都统一为：空列先跳过，当前 sequence 不兼容则直接跳过，只有可用于当前 pricing 图的列才读取 reduced cost 并进入 midpoint 候选排序。为避免额外分配，相关私有 `isSequenceCompatible()` 参数从 `ArrayList<Integer>` 放宽为 `List<Integer>`。
+
+这两处修改只前移过滤，不改变过滤条件，也不改变最终可被启发式或 midpoint 接受的列集合。它们的意义是减少“先算贵指标、后发现不能用”的冗余，尤其针对 pricingOnly arc、time-indexed/root preprocessing 后 inherited 旧列较多的子节点。
 
 因此当前结论不是“该改动一定加速”，而是“语义更一致，但短测未显示解质量收益，并带来一定筛选开销”。如果后续要继续压速度，可以把 seed 兼容性结果缓存到 active column id 或 sequence signature 上，只在 node 的 pricingOnly 禁弧集合变化后失效；或者先保留当前语义，等更多节点/更多算例确认不兼容 seed 确实会污染 top-K 时再做缓存优化。当前无需回退，因为 exact pricing 仍保证正确性，且该改动主要影响 heuristic 候选入口。
 

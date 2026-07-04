@@ -1540,3 +1540,9 @@ full-domain 的优势主要体现在 dominance graph 搜索路径上。由于函
 本次先只调整 `ArcBrancher` 的候选选择顺序，不改变左右子节点语义。旧 VRP `BranchD` 的选择逻辑是：先在真实 customer-customer 内部弧中找最接近 0.5 的分数弧；如果内部弧没有候选，再扫描 depot/source 与 sink 端点弧。当前 TWET 之前是在同一个循环里统一扫描 `0/job/sink` 相关弧，可能优先选到端点弧。现在改为两阶段扫描：第一阶段只看真实 job 之间的 `i -> j`；第二阶段兜底看 `0 -> j` 和 `j -> sink`。每一阶段内部仍跳过已分支/预处理禁止/整数弧，并按 `abs(value - 0.5)` 选最接近 0.5 的候选。这样更贴近旧 VRP 的 BranchD 经验，也更优先固定序列内部相邻关系。
 
 旧 VRP 没有实现通常意义上的 strong branching。`Tree` 的流程是按 `BranchA -> BranchB -> BranchC -> BranchD` 顺序调用，第一个能分支的规则直接生成左右子节点；`BranchB/BranchC/BranchD` 内部先用 `FranCost` 选一个最接近 0.5 的对象，而不是拿多个候选分别做左右试探。各 `Branch*.UpdateRouteSet()` 里确实会在选定对象后修改当前 LP 分支行并调用 `cplex.solve()`，必要时再加 branch slack 和调用 heuristic/exact column generator 来修复可行列集；但这一步是为了给已选定的左右子节点准备初始 route set 和检查可行性，不会把不同候选的 probe bound 拿来比较，也不会更新候选级 pseudo-cost。子节点的 `sudo_cost` 在分支创建时直接设为父节点当前 `lp.solution_cost`，进一步说明它不是 strong branching 的子节点 bound 评分。
+
+## 2026-07-04 construct 预处理禁弧过滤更正
+
+2026-05-20 曾在 `LP.construct()` 里补过 `Node.isColumnPreprocessingCompatible()`，用于兜底过滤包含 `Data.preprocessedArcForbidden` 的历史列。后续强分支和 repair 语义复核后确认，这个兜底放在建模入口会混淆 seed 语义：`construct(node, seedColumnIds)` 应只按调用方给定 seed 建 restricted RMP，不应静默删列。正常 pricing、初始列和 repair 入口都应已经避开静态预处理禁弧；若某个实验入口或旧 pool 把这类列塞进 seed，应在上游暴露并修正，而不是由 RMP 建模入口吞掉。
+
+因此当前代码已经删除 `LP.construct()` 中的 `isColumnPreprocessingCompatible()` 检查，并删除 `Node.isColumnPreprocessingCompatible()`。旧记录中关于“construct 只过滤全局静态 preprocessing forbidden arc”的描述是历史实现，不再代表当前主线。当前主线的分工为：`construct()` 只装 seed；分支行、repair slack、branch-implied M、外包 membership row 等语义都在 `buildModel()` 和 `PC.solve()` 中处理。

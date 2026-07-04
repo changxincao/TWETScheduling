@@ -205,3 +205,9 @@ lightweight trial 只用于 arc 分支和列化外包 membership 分支。它准
 `PC.solveStrongBranchingRmpTrial()` 现在通过 `enableStrongBranchingBranchImpliedPenalty` 统一控制该 objective 模式。开关打开时，普通 trial 和 lightweight trial 都按同一个 M 口径评分；开关关闭时，二者都只使用显式分支行，属于偏松的弱口径。旧的事后 M 惩罚方法已删除，避免未来再次误用两段式流程。正式 BPC 节点仍使用真实列成本，不把 strong-trial 的人工 big-M objective 带进最终主问题；strong trial 只负责分支评分和可复用 seed 准备。
 
 验证使用 `test-results/bpc/tmp-strong-unified-mpenalty-20260704`，配置为 `wet040_001_2m`、`halfDomain-ngPartial-nearestK4-top10`、time-indexed root preprocessing、strong branching、lightweight repair 和统一 M 开关开启。结果 `FINISHED,obj=bound=22580,valid=true,solve=232.971s,nodes=16`；日志计数为 `rmp_trial_infeasible_after_filter=0`、`strong_branching_light_after_branch_implied_penalty=0`、`branch_implied_penalty_positive=2`。这说明统一 M 口径后不再出现二次筛列假 infeasible，也没有旧的额外 M resolve 阶段。
+
+### 2026-07-04 construct 入口预处理过滤清理
+
+继续检查 child RMP 建模入口时，确认 `LP.construct(node, seedColumnIds)` 不应该承担任何当前分支或全局预处理过滤语义。正常流程下，列生成、初始列和 repair 入口都已经避开 `Data.preprocessedArcForbidden`；如果某个列池或实验入口把包含静态预处理禁弧的列塞进 seed，那属于上游列生成或数据重刷问题，不应在 `construct()` 里静默吞掉，否则会把“传入 seed 是什么”和“最终建模用的 seed 是什么”混在一起，干扰 strong branching/repair 的可行性判断。
+
+因此删除 `LP.construct()` 中对 `node.isColumnPreprocessingCompatible(column)` 的兜底过滤，并同步删除已无调用点的 `Node.isColumnPreprocessingCompatible()`。现在 `construct()` 只负责按调用方给定的 seed 建 restricted RMP，分支行、repair slack、branch-implied M、外包 membership row 等语义都留在后续 `buildModel()` 和 `PC.solve()` 流程里处理。这个改动不改变 pricing 的禁弧逻辑，只清理建模入口的隐式筛列。

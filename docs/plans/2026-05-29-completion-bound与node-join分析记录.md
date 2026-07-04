@@ -1157,6 +1157,8 @@ child 生成时，`Tree.prepareChildSeedColumns()` 直接把父节点当前 `par
 
 但它仍有防御性意义。`LP.construct()` 是 RMP 建模入口，不只表达父子继承语义；历史列池、调试运行、配置切换、初始 incumbent/外部 seed 或未来新增的列来源，都可能把旧口径下生成的列传进来。全局 preprocessing forbidden arc 是所有节点都应遵守的硬不可行信息，放在入口再过滤一次，可以避免这些 stale columns 被重新放回 RMP。当前这一步不检查普通 branch/subtree forbidden arc，因此不会破坏 child “先继承父列集带新分支行试可行性”的设计；它只兜底全局静态预处理禁弧。若后续追求极致效率，可以加诊断统计确认该过滤长期命中为 0，再考虑删除或改成断言。
 
+2026-07-04 更正：上述 `LP.construct()` 入口兜底过滤已经删除。继续复核 strong branching 与 repair 后确认，`construct(node, seedColumnIds)` 不应静默吞掉任何 seed 列，否则会干扰“传入 seed”和“建模 seed”的一致性判断。当前主线要求静态预处理禁弧由列生成、初始列和 repair 上游保证；如果脏列进入 seed，应作为上游问题暴露，而不是由 RMP 建模入口过滤。当前 child 时序因此变为：child 仍先继承父节点 seed 并带新分支行求解，`construct()` 本身不做全局预处理禁弧过滤。
+
 关于 formal subtree-on 日志里的 `nodeDiag columns=2003`，需要更正一个容易误读的点：这个数不是 `resetRestrictedColumnsByCurrentReducedCost()` 刚筛完后的列数，而是 Node 2 第一轮 exact pricing 入口的 restricted columns 数。Node 2 在进入 exact 前，heuristic pricing 已经连续加了 `343+202+133+93+30+12=813` 条列。因此刚经过 child column filter 后的列数应约为 `2003-813=1190`，而不是 2003。这个 1190 仍然超过默认 `branchSeedColumnLimit=1000`，原因应是筛选逻辑会先无条件保留当前 LP 正值列，只有在正值列不足 `maxColumns` 时才用低 reduced-cost 候选补足。当前日志没有单独输出 positive/candidate/selected 计数，因此还不能确认 1190 中正值列的精确数量；若后续要彻底验证，应在 `resetRestrictedColumnsByCurrentReducedCost()` 增加一次性统计。
 
 ### 41.16 2026-06-04 扩充 30-job 子样例的 subtree 开关对照

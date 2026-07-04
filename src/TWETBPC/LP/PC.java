@@ -323,7 +323,8 @@ public class PC {
 		try {
 			String initialPhase = domainRepair ? "strong_branching_domain_rmp"
 					: (lightweightRepair ? "strong_branching_light_repair_rmp" : "strong_branching_rmp");
-			lp.setBranchImpliedPenaltyObjectiveMode(lightweightRepair);
+			boolean branchImpliedPenalty = config.enableStrongBranchingBranchImpliedPenalty;
+			lp.setBranchImpliedPenaltyObjectiveMode(branchImpliedPenalty);
 			TWETMasterSolution solution = solveRelaxationTimed(lp, initialPhase);
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
@@ -343,7 +344,7 @@ public class PC {
 				return StrongBranchingTrialResult.from(lp, solution, false,
 						withSolutionMessage("rmp_trial_infeasible", solution));
 			}
-			if (lightweightRepair && lp.hasPositiveBranchImpliedPenaltyColumn()) {
+			if (branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
 				return StrongBranchingTrialResult.infeasible(lp, solution,
 						"branch_implied_penalty_positive mValue=" + lp.branchImpliedPenaltyValue());
 			}
@@ -372,7 +373,7 @@ public class PC {
 					return StrongBranchingTrialResult.from(lp, solution, false,
 							withSolutionMessage("rmp_trial_infeasible_after_filter", solution));
 				}
-				if (lightweightRepair && lp.hasPositiveBranchImpliedPenaltyColumn()) {
+				if (branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
 					return StrongBranchingTrialResult.infeasible(lp, solution,
 							"branch_implied_penalty_positive_after_filter mValue="
 									+ lp.branchImpliedPenaltyValue());

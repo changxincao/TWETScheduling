@@ -100,6 +100,8 @@ public class TWETBPCConfig {
 	 * 其它机器列按 child 域过滤；repair 仍走旧流程，只给当前新增分支行挂 slack。
 	 */
 	public boolean enableStrongBranchingLightweightRepair = false;
+	/** 2026-07-04: strong branching phase-1 是否用 big-M 统一惩罚 branch-implied 竞争弧列。 */
+	public boolean enableStrongBranchingBranchImpliedPenalty = true;
 	/** 2026-06-24: 节点 LP true-dual 闭合后，是否尝试枚举所有 rc < UB-LB 的列并解有限主问题。 */
 	public boolean enableRouteEnumeration = false;
 	/** 2026-06-24: 只有节点绝对 gap 小于该阈值时才触发 route enumeration。 */

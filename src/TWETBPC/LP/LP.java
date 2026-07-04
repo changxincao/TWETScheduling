@@ -880,7 +880,7 @@ public class LP {
 		}
 	}
 
-	/** strong branching lightweight trial 中，branch-implied 竞争列从建模开始就按 big-M 成本处理。 */
+	/** strong branching phase-1 中，按配置把 branch-implied 竞争列从建模开始按 big-M 成本处理。 */
 	private double internalColumnObjectiveCost(int columnId) {
 		TWETColumn column = pool.getColumn(columnId);
 		if (branchImpliedPenaltyObjectiveMode && node != null && node.usesBranchImpliedForbiddenArc(column)) {

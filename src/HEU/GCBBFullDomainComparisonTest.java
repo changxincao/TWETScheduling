@@ -373,6 +373,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableStrongBranchingLightweightRepair = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.strongBranchingLightweightRepair",
 				Boolean.toString(config.enableStrongBranchingLightweightRepair)));
+		config.enableStrongBranchingBranchImpliedPenalty = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.strongBranchingBranchImpliedPenalty",
+				Boolean.toString(config.enableStrongBranchingBranchImpliedPenalty)));
 		config.enableRouteEnumeration = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumeration",
 				Boolean.toString(config.enableRouteEnumeration)));

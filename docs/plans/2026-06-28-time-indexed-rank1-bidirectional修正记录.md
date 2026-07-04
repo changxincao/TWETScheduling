@@ -69,3 +69,11 @@ focused `javac` 已覆盖以下文件并通过：
 本次在 515.890s 内求解到最优：`incumbent=bound=22580`，处理 5 个节点，root time 为 192.804s，root bound 为 22560.226019。总 pricing 轮数 1307，新增列 103847，最终/峰值 pool 为 103727；`TimeIndexedGraphRank1CutPricing` 累计 287.149s / 1291 calls，master LP 累计 169.227s。cut 轮数 94，累计加入 cut 485 条，峰值 cut pool 为 1757。
 
 从过程看，root 前半段 no-cut time-indexed graph pricing 会快速生成大量 pseudo-schedule 列，之后 active rank1 cut 下进入 graph-native heuristic/exact bidirectional pricing。rank1 cut 明显把 root bound 推高，但列池仍会膨胀到 10 万级。该结果说明当前实现对 40-2 有 setup 算例并没有出现“root 第一次迭代就爆炸到不可接受”的情况，反而可在 9 分钟内完整闭合；但它仍显著依赖大量 pseudo-schedule 列和多轮 cut/pricing，不能直接推出 60-2 上也会接近论文表格速度。
+
+## 10. exact rank1 pricing 的 SRI-aware completion 剪枝
+
+2026-07-04 对 active rank1 cut 下的 exact bucket pricing 增加了类似 completion bound 的正反向剪枝。原流程是先生成 forward labels，再生成 backward labels，最后统一 join；这样 forward 跨过 `t*` 的 label 即使后续不可能和任何 suffix 或 sink arc 形成负 reduced-cost route，也会先入桶，之后再在 join/end 阶段被发现无用。
+
+当前 exact 模式改为先构造 backward suffix labels，再构造 forward labels。forward 扩展产生 `time >= t*` 的 child label 时，立即用同一 `(job,time)` bucket 上的 backward suffix labels 计算最小可完成 reduced cost，并同时考虑 rank1 residual 的 `joinShift`；如果该 child 与 sink 或任何 suffix 拼接后都不可能低于 0，就不再插入 forward bucket。等待弧跨到 `t*` 时也使用同一逻辑。该剪枝只在 exact 模式启用，graph-native heuristic 仍保持原顺序，因为 heuristic bucket 每个状态只保留一个 label，不能作为完整 suffix 证书。
+
+这个改动不改变候选列成本、cut residual 更新或最终 join 口径，只减少 exact pricing 中确定无用的跨中点 forward labels。验证上，`TimeIndexedGraphRank1CutPricingEngine.java` focused `javac` 通过；`data/40-2/wet040_001_2m.dat` 的 `maxNodes=1` rank1 smoke 正常到 `NODE_LIMIT` 且 `valid=true`。日志中 active cut 后的 exact pricing 出现 `cbPruned` 统计，典型值约为 `9.8e4` 到 `1.01e5`，例如最终无负列轮为 `cbPruned=101011`。该 smoke 说明剪枝路径已触发并保持正确性口径，但不能单独证明总时间一定下降，后续仍需用同配置 A/B 比较。

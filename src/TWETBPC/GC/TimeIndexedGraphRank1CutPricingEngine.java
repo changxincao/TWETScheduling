@@ -127,6 +127,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private int relaxedLabels;
 		private int processArcScans;
 		private int timeIndexedArcSkips;
+		private int completionBoundPruned;
 		private int negativeStateCandidates;
 		private int repeatedJobCandidates;
 		private boolean timedOut;
@@ -161,11 +162,22 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (maxReturnedColumns() <= 0) {
 				return new ArrayList<TWETColumn>();
 			}
-			initializeForward();
-			runForwardLabeling();
-			if (!timedOut) {
+			if (heuristicMode) {
+				initializeForward();
+				runForwardLabeling();
+				if (!timedOut) {
+					initializeBackward();
+					runBackwardLabeling();
+				}
+			} else {
+				// 2026-07-04: exact rank-1 pricing 先建 suffix labels，供 forward 跨中点扩展做
+				// SRI-aware completion 剪枝；heuristic 模式的 bucket labels 不完整，不能当证书。
 				initializeBackward();
 				runBackwardLabeling();
+				if (!timedOut) {
+					initializeForward();
+					runForwardLabeling();
+				}
 			}
 			if (!timedOut) {
 				concatenateLabels();
@@ -212,8 +224,11 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 						relaxedLabels++;
 						rememberEndCandidateIfNegative(label);
 						if (t < horizon && !isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
-							insertLabel(forwardBuckets, label.extend(nextLabelId++, lastJob, t + 1, 0.0,
-									cutStateData.copyResidual(label.residual), 0));
+							Label child = label.extend(nextLabelId++, lastJob, t + 1, 0.0,
+									cutStateData.copyResidual(label.residual), 0);
+							if (!isPrunedByBackwardCompletion(child)) {
+								insertLabel(forwardBuckets, child);
+							}
 						}
 						for (int nextJob = 1; nextJob <= n; nextJob++) {
 							if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]) {
@@ -234,8 +249,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 							}
 							byte[] residual = cutStateData.copyResidual(label.residual);
 							arcCost += cutStateData.applyForwardExtension(residual, lastJob, nextJob);
-							insertLabel(forwardBuckets, label.extend(nextLabelId++, nextJob, completion, arcCost,
-									residual, nextJob));
+							Label child = label.extend(nextLabelId++, nextJob, completion, arcCost, residual, nextJob);
+							if (!isPrunedByBackwardCompletion(child)) {
+								insertLabel(forwardBuckets, child);
+							}
 						}
 					}
 				}
@@ -603,6 +620,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					+ ", relaxedLabels=" + relaxedLabels
 					+ ", arcScans=" + processArcScans
 					+ ", timeArcSkips=" + timeIndexedArcSkips
+					+ ", cbPruned=" + completionBoundPruned
 					+ ", negativeStates=" + negativeStateCandidates
 					+ ", repeatedJobCandidates=" + repeatedJobCandidates
 					+ (timedOut ? ", timeLimit=true" : "");
@@ -610,6 +628,34 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 
 		private int index(int job, int time) {
 			return job * width + time;
+		}
+
+		private boolean isPrunedByBackwardCompletion(Label label) {
+			if (heuristicMode || label.lastJob <= 0 || label.time < tStar) {
+				return false;
+			}
+			double bestCompletion = INF;
+			if (isEndAllowed(label.lastJob, label.time)) {
+				bestCompletion = label.reducedCost + sinkArcReducedCost(label.lastJob);
+			}
+			ArrayList<Label> suffixLabels = backwardBuckets[index(label.lastJob, label.time)];
+			if (suffixLabels != null && !suffixLabels.isEmpty()) {
+				for (Label suffix : suffixLabels) {
+					double reducedCost = label.reducedCost + suffix.reducedCost
+							+ cutStateData.joinShift(label.residual, suffix.residual);
+					if (Utility.compareLt(reducedCost, bestCompletion)) {
+						bestCompletion = reducedCost;
+					}
+				}
+			}
+			if (Utility.compareLt(bestCompletion, bestPseudoReducedCost)) {
+				bestPseudoReducedCost = bestCompletion;
+			}
+			if (Utility.compareGe(bestCompletion, -RC_TOLERANCE)) {
+				completionBoundPruned++;
+				return true;
+			}
+			return false;
 		}
 	}
 

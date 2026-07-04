@@ -239,3 +239,11 @@ lightweight trial 只用于 arc 分支和列化外包 membership 分支。它准
 旧 `GCBidirectional` 路径中关于“普通路径不会在最终加列前用 evaluator 修正成本、只在 debug 下复核”的注释，属于 dormant legacy path 记录。当前 ng-DSSR 主线和 time-indexed 主线不走该路径，后续也大概率不会再启用；这里只记录该历史口径，不作为当前冗余或 bug 处理。
 
 按这个口径重新看，当前仍可能算“冗余但未处理”的主要只有 RMIH duplicate repair 里的局部 evaluator 重算：删除重复 job 时会对相近 sequence 多次调用 `TWETColumnEvaluator.evaluate()`。不过它只在 RMIH repair fallback 中触发，不是 pricing 主线热点；是否缓存需要看实际 RMIH 日志，不宜现在为了形式清理而增加 key/cache 复杂度。其它如 child 筛列后重解、repair slack 与正式 RMP 切换、source 层 forbidden/required 过滤，都属于不同语义层，不按冗余处理。
+
+### 2026-07-04 主线冗余复查继续
+
+继续沿着 PC 生成列、LP 加列、RMIH fallback、time-indexed 候选和强分支 trial 路径检查后，当前没有发现新的、可以直接删除的主线重复工作。一个容易误判的点是 `PC.generateColumnsFromEngine()` 和 `LP.addColumns()/addOutsourcingColumns()` 都维护 active id 集合。这里不是同一层语义重复：PC 层的 active set 用来在同一轮 pricing 里避免重复返回、统计 active 列成本改进；LP 层的 active set 是 `addColumns` 这个公共入口的去重边界，防止其它调用方直接把已 restricted 的列再次加入当前 RMP。若为了省一次 `HashSet` 构造把 LP 层去掉，会让公共入口不再自保，收益也很小，因此不处理。
+
+time-indexed pricing 也重新确认了一次：当前不再对所有 negative end state 做 `TWETColumnEvaluator.evaluate()`，而是先按 graph reduced cost 判断是否可能进入 top 候选，再恢复 sequence 并用 reduced cost 反推出 objective cost。启发式 pricing 的 true-cost recheck 只在 dual window 等需要回到原始目标口径时触发；compact window 跳过 recheck 是当前明确实验口径。route enumeration 的 evaluator 重算只在 `routeEnumerationUseTimeIndexedWindow=true` 时用于保护枚举列真实成本，默认不在主线。
+
+因此当前真正还像冗余的仍然只有 RMIH duplicate repair fallback 中对相邻删除序列的局部重复评价。这个点以后如果日志显示 RMIH repair 时间占比升高，可以考虑在该 fallback 内部加小范围 sequence-cost cache；在没有这个证据前不改，因为它会增加签名/key 管理复杂度，而且不解决当前 pricing 或 LP 主耗时。

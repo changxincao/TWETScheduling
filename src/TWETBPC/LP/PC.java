@@ -370,8 +370,9 @@ public class PC {
 					return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 				}
 				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-					return StrongBranchingTrialResult.unusable(lp,
-							withSolutionMessage("rmp_trial_infeasible_after_filter", solution));
+					throw new IllegalStateException(withSolutionMessage(
+							"Strong branching filtered RMP became infeasible after preserving positive columns",
+							solution));
 				}
 				if (branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
 					return StrongBranchingTrialResult.infeasible(lp, solution,
@@ -1292,20 +1293,18 @@ public class PC {
 		private final double bound;
 		private final boolean infeasible;
 		private final boolean timeLimited;
-		private final boolean reusable;
 		private final boolean addedColumns;
 		private final ArrayList<Integer> internalColumnIds;
 		private final ArrayList<Integer> outsourcingColumnIds;
 		private final String message;
 
 		private StrongBranchingTrialResult(TWETMasterSolution solution, double bound, boolean infeasible,
-				boolean timeLimited, boolean reusable, boolean addedColumns, ArrayList<Integer> internalColumnIds,
+				boolean timeLimited, boolean addedColumns, ArrayList<Integer> internalColumnIds,
 				ArrayList<Integer> outsourcingColumnIds, String message) {
 			this.solution = solution;
 			this.bound = bound;
 			this.infeasible = infeasible;
 			this.timeLimited = timeLimited;
-			this.reusable = reusable;
 			this.addedColumns = addedColumns;
 			this.internalColumnIds = internalColumnIds;
 			this.outsourcingColumnIds = outsourcingColumnIds;
@@ -1321,22 +1320,13 @@ public class PC {
 				String message, boolean timeLimited) {
 			boolean infeasible = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
-			boolean reusable = !infeasible && !timeLimited;
-			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, reusable, addedColumns,
+			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
 
 		static StrongBranchingTrialResult infeasible(LP lp, TWETMasterSolution solution, String message) {
-			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false, false,
-					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
-					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
-		}
-
-		static StrongBranchingTrialResult unusable(LP lp, String message) {
-			// 2026-07-04: 二次筛列后的 infeasible 只说明试探 seed 被筛坏，不能当作子树不可行证明。
-			// 该结果仍可用于日志，但正式入队必须回到普通 child seed/repair 流程。
-			return new StrongBranchingTrialResult(null, Double.NaN, false, false, false, false,
+			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
@@ -1358,7 +1348,7 @@ public class PC {
 		}
 
 		public boolean isReusableForQueue() {
-			return reusable;
+			return !infeasible && !timeLimited;
 		}
 
 		public boolean hasAddedColumns() {

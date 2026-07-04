@@ -159,8 +159,8 @@ setup cost 系数暂时不写入实例文件，仍使用运行时属性 `twet.da
 
 本次重新检查了当前分支处理，重点是 arc branch 右支的 `branch-implied forbidden arc`、外包 membership 列分支，以及 strong branching 试探过程中的筛列和 repair。当前语义仍保持：显式 forbidden/required arc 进入 master branch row；右支 required arc 推导出的竞争入弧/出弧只用于 pricing 和列兼容性，不额外建立 master row。这样做的原因是 master 中真正分支变量仍是选中的 `x_ij`，竞争弧属于定价域收缩和历史列过滤语义。
 
-检查发现一个需要修正的状态解释问题：strong trial 在初始 LP 或 repair 成功后会进行二次 reduced-cost/兼容性筛列，用于准备可复用 child seed。如果这一步筛列后的临时 RMP 变成 infeasible，它只能说明“这批试探 seed 被筛坏或不够”，不能证明完整子树不可行。此前代码通过通用 `from(...)` 路径把这个结果标成 `infeasible=true`，会在 strong branching 评分中被当成 `INF` 好候选，甚至可能触发 both-children-infeasible 的错误提前选择。
+检查发现一个需要澄清的状态解释问题：strong trial 在初始 LP 或 repair 成功后会进行二次 reduced-cost/兼容性筛列，用于准备可复用 child seed。由于当前筛列会保留当前正值机器列，且在筛列前已经检查过 branch-implied M 列是否为正，二次筛列后 RMP 理论上应继续可行。如果这里变成 infeasible，不应把它当成正常分支结果或静默 fallback，而应暴露为内部状态错误，说明“保留正值列仍保持可行”的实现假设被破坏。
 
-修复后的口径是：`rmp_trial_infeasible_after_filter` 记为 `UNUSABLE`，即不作为不可行证明、不复用该 trial seed；如果该分支最终被选中，正式入队时回到普通 child seed/repair 流程。真正仍可作为不可行试探结果的是初始/repair 后仍 infeasible，或者开启 branch-implied M 惩罚时仍有正值 M 列。这两类表示当前试探在分支行和 M 口径下没有得到可用 child LP。
+修复后的口径是：`rmp_trial_infeasible_after_filter` 直接抛出异常，便于定位筛列、正值列保留或 M 惩罚口径中的真实问题。真正仍可作为不可行试探结果的是初始 LP 不可行且 repair 后仍 infeasible，或者开启 branch-implied M 惩罚时仍有正值 M 列。这两类表示当前试探在分支行和 M 口径下没有得到可用 child LP。
 
-机器数量分支和 tariff segment 分支只改变 master 行，不依赖列兼容性筛选表达分支，因此没有这类筛列误判问题。外包 membership 在列化模式下会筛外包列，也受上述 `UNUSABLE` 口径保护。当前 focused `javac` 已通过；尚未重新跑完整算例，本次结论主要来自静态路径检查和编译验证。
+机器数量分支和 tariff segment 分支只改变 master 行，不依赖列兼容性筛选表达分支，因此没有这类筛列误判问题。外包 membership 在列化模式下会筛外包列，但其正值外包列同样会被保留；如果筛列后仍不可行，也应按异常路径暴露。当前 focused `javac` 已通过；尚未重新跑完整算例，本次结论主要来自静态路径检查和编译验证。

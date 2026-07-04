@@ -64,7 +64,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			if (state == Node.OUTSOURCE_REQUIRED) {
 				requiredJobs.add(Integer.valueOf(job));
 				requiredBaseline += data.outsourcingCost[job];
-				requiredProfit += lp.getJobDual(job);
+				requiredProfit += lp.getJobDual(job) + lp.getOutsourcingMembershipDual(job);
 			} else {
 				freeJobs.add(Integer.valueOf(job));
 			}
@@ -77,7 +77,8 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			ArrayList<Label> next = new ArrayList<Label>(labels.size() * 2);
 			next.addAll(labels);
 			for (Label label : labels) {
-				next.add(label.include(job, data.outsourcingCost[job], lp.getJobDual(job)));
+				next.add(label.include(job, data.outsourcingCost[job],
+						lp.getJobDual(job) + lp.getOutsourcingMembershipDual(job)));
 			}
 			labels = prune(next);
 		}

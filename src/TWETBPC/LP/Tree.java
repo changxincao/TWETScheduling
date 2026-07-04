@@ -636,6 +636,7 @@ public class Tree {
 		LinkedHashSet<Integer> outsourcingSeed = new LinkedHashSet<Integer>(child.seedOutsourcingColumnIds);
 		Set<Integer> positiveParentColumns = parentLp.getLastSolution() == null ? Collections.<Integer>emptySet()
 				: parentLp.getLastSolution().getColumnValues().keySet();
+		Set<Integer> positiveParentOutsourcingColumns = parentLp.getPositiveOutsourcingColumnIds();
 		for (int id : child.seedColumnIds) {
 			TWETColumn column = pool.getColumn(id);
 			if (child.isColumnCompatible(column)) {
@@ -650,7 +651,8 @@ public class Tree {
 		}
 		for (int id : parentLp.getRestrictedOutsourcingColumnIds()) {
 			TWETOutsourcingColumn column = outsourcingPool.getColumn(id);
-			if (child.isOutsourcingColumnCompatible(column)) {
+			if (positiveParentOutsourcingColumns.contains(Integer.valueOf(id))
+					|| child.isOutsourcingColumnCompatible(column)) {
 				outsourcingSeed.add(Integer.valueOf(id));
 			}
 		}

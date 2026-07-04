@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -65,6 +66,7 @@ public class LP {
 	private IloRange[] coverRanges;
 	private IloRange machineRange;
 	private IloRange outsourcingColumnCountRange;
+	private HashMap<Integer, IloRange> outsourcingMembershipBranchRanges;
 	private HashMap<Long, IloRange> arcBranchRanges;
 	private HashMap<Long, IloRange> adjacencyBranchRanges;
 	private HashMap<Integer, IloRange> subsetRowCutRanges;
@@ -79,6 +81,7 @@ public class LP {
 	private double[] jobDual;
 	private double machineDual;
 	private double outsourcingColumnDual;
+	private double[] outsourcingMembershipDual;
 	private double[][] arcDual;
 	private PricingDualSnapshot pricingDualOverride;
 
@@ -96,6 +99,7 @@ public class LP {
 		this.restrictedOutsourcingColumnIds = new ArrayList<Integer>();
 		this.activeCutIds = new ArrayList<Integer>();
 		this.jobDual = new double[data.n + 1];
+		this.outsourcingMembershipDual = new double[data.n + 1];
 		this.arcDual = new double[data.n + 2][data.n + 2];
 		this.feasibilityRepairMode = false;
 		this.allRowFeasibilityRepairMode = false;
@@ -113,8 +117,7 @@ public class LP {
 			// 2026-06-04: 正常父子继承路径下父节点列通常已经满足该条件；这里主要是防御性兜底，
 			// 防止外部 seed、旧配置列或调试列绕过 pricing 后把全局预处理禁弧带回模型。
 			TWETColumn column = pool.getColumn(columnId);
-			boolean compatible = node == null || (isColumnizedOutsourcing() ? node.isColumnCompatible(column)
-					: node.isColumnPreprocessingCompatible(column));
+			boolean compatible = node == null || node.isColumnPreprocessingCompatible(column);
 			if (compatible) {
 				this.restrictedColumnIds.add(Integer.valueOf(columnId));
 			}
@@ -122,10 +125,7 @@ public class LP {
 		this.restrictedOutsourcingColumnIds = new ArrayList<Integer>();
 		if (isColumnizedOutsourcing()) {
 			for (int columnId : node.seedOutsourcingColumnIds) {
-				TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
-				if (node.isOutsourcingColumnCompatible(column)) {
-					this.restrictedOutsourcingColumnIds.add(Integer.valueOf(columnId));
-				}
+				this.restrictedOutsourcingColumnIds.add(Integer.valueOf(columnId));
 			}
 		}
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
@@ -166,6 +166,19 @@ public class LP {
 
 	public List<Integer> getRestrictedOutsourcingColumnIds() {
 		return restrictedOutsourcingColumnIds;
+	}
+
+	public Set<Integer> getPositiveOutsourcingColumnIds() {
+		if (!isColumnizedOutsourcing() || outsourceColumnById == null) {
+			return Collections.emptySet();
+		}
+		HashSet<Integer> positive = new HashSet<Integer>();
+		for (int columnId : restrictedOutsourcingColumnIds) {
+			if (isPositiveCurrentOutsourcingColumn(columnId)) {
+				positive.add(Integer.valueOf(columnId));
+			}
+		}
+		return positive;
 	}
 
 	public boolean isColumnizedOutsourcing() {
@@ -258,6 +271,16 @@ public class LP {
 		return outsourcingColumnDual;
 	}
 
+	public double getOutsourcingMembershipDual(int job) {
+		if (job < 1 || job >= outsourcingMembershipDual.length) {
+			return 0.0;
+		}
+		if (pricingDualOverride != null && job < pricingDualOverride.outsourcingMembershipDual.length) {
+			return pricingDualOverride.outsourcingMembershipDual[job];
+		}
+		return outsourcingMembershipDual[job];
+	}
+
 	/** @return arc 分支约束 dual；没有对应约束时为 0。 */
 	public double getArcDual(int from, int to) {
 		if (from < 0 || from >= arcDual.length || to < 0 || to >= arcDual[from].length) {
@@ -274,7 +297,7 @@ public class LP {
 	 * SRI cut dual 暂不混合，保持用当前 LP 真实值，避免 cut state 与稳定化中心不同步。
 	 */
 	public PricingDualSnapshot captureTruePricingDuals() {
-		return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, arcDual);
+		return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, outsourcingMembershipDual, arcDual);
 	}
 
 	public void setPricingDualOverride(PricingDualSnapshot snapshot) {
@@ -325,6 +348,9 @@ public class LP {
 		double reducedCost = column.getCost() - dual.outsourcingColumnDual;
 		for (int job : column.getJobs()) {
 			reducedCost -= dual.jobDual[job];
+			if (job < dual.outsourcingMembershipDual.length) {
+				reducedCost -= dual.outsourcingMembershipDual[job];
+			}
 		}
 		return reducedCost;
 	}
@@ -466,6 +492,7 @@ public class LP {
 		outsourceColumnById = new HashMap<Integer, IloNumVar>();
 		repairSlackVars = new ArrayList<IloNumVar>();
 		arcBranchRanges = new HashMap<Long, IloRange>();
+		outsourcingMembershipBranchRanges = new HashMap<Integer, IloRange>();
 		adjacencyBranchRanges = new HashMap<Long, IloRange>();
 		outsourcingColumnCountRange = null;
 		subsetRowCutRanges = new HashMap<Integer, IloRange>();
@@ -478,6 +505,7 @@ public class LP {
 		buildObjective();
 		buildCoverageConstraints();
 		buildMachineConstraint();
+		buildOutsourcingMembershipBranchConstraints();
 		buildArcBranchConstraints();
 		buildAdjacencyBranchConstraints();
 		if (!isColumnizedOutsourcing()) {
@@ -598,6 +626,33 @@ public class LP {
 				outsourceExpr.addTerm(1.0, var);
 			}
 			outsourcingColumnCountRange = cplex.addLe(outsourceExpr, 1.0, "outsourcingColumnCount");
+		}
+	}
+
+	/**
+	 * 2026-07-04: 列化外包 membership 分支用显式 master row 表达，而不是在构造 LP 前删父节点正值列。
+	 * 这样初始 LP/repair 的不可行性只来自新增分支行或后续 pricing 不能补列，不会被 seed 预筛污染。
+	 */
+	private void buildOutsourcingMembershipBranchConstraints() throws IloException {
+		if (!isColumnizedOutsourcing()) {
+			return;
+		}
+		for (int job = 1; job <= data.n; job++) {
+			byte state = node.getOutsourcingJobState(job);
+			if (state == Node.OUTSOURCE_FREE) {
+				continue;
+			}
+			IloLinearNumExpr expr = cplex.linearNumExpr();
+			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
+				TWETOutsourcingColumn column = outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx)
+						.intValue());
+				if (column.containsJob(job)) {
+					expr.addTerm(1.0, outsourceColumnVars[idx]);
+				}
+			}
+			IloRange range = state == Node.OUTSOURCE_REQUIRED ? cplex.addGe(expr, 1.0, "requiredOutsource_" + job)
+					: cplex.addLe(expr, 0.0, "forbiddenOutsource_" + job);
+			outsourcingMembershipBranchRanges.put(Integer.valueOf(job), range);
 		}
 	}
 
@@ -755,6 +810,9 @@ public class LP {
 		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			addRangeRepairSlacks(entry.getValue(), "arcSlack_" + entry.getKey(), penalty);
 		}
+		for (Map.Entry<Integer, IloRange> entry : outsourcingMembershipBranchRanges.entrySet()) {
+			addRangeRepairSlacks(entry.getValue(), "outsourcingMembershipSlack_" + entry.getKey(), penalty);
+		}
 		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
 			addRangeRepairSlacks(entry.getValue(), "adjacencySlack_" + entry.getKey(), penalty);
 		}
@@ -815,6 +873,12 @@ public class LP {
 				double coeff = type == Node.REPAIR_ADJACENCY_REQUIRED ? 1.0 : -1.0;
 				addRepairSlack(range, coeff,
 						"adjacencyBranchSlack_" + node.getRepairFrom() + "_" + node.getRepairTo(), penalty);
+			}
+		} else if (type == Node.REPAIR_OUTSOURCING_FORBIDDEN || type == Node.REPAIR_OUTSOURCING_REQUIRED) {
+			IloRange range = outsourcingMembershipBranchRanges.get(Integer.valueOf(node.getRepairFrom()));
+			if (range != null) {
+				double coeff = type == Node.REPAIR_OUTSOURCING_REQUIRED ? 1.0 : -1.0;
+				addRepairSlack(range, coeff, "outsourcingMembershipSlack_" + node.getRepairFrom(), penalty);
 			}
 		} else if (type == Node.REPAIR_TARIFF_FORBIDDEN || type == Node.REPAIR_TARIFF_REQUIRED) {
 			int segment = node.getRepairSegment();
@@ -883,13 +947,31 @@ public class LP {
 	/** strong branching phase-1 中，按配置把 branch-implied 竞争列从建模开始按 big-M 成本处理。 */
 	private double internalColumnObjectiveCost(int columnId) {
 		TWETColumn column = pool.getColumn(columnId);
-		if (branchImpliedPenaltyObjectiveMode && node != null && node.usesBranchImpliedForbiddenArc(column)) {
+		if (isBranchImpliedPenaltyColumn(column)) {
 			if (branchImpliedPenaltyColumnIds != null) {
 				branchImpliedPenaltyColumnIds.add(Integer.valueOf(columnId));
 			}
 			return Utility.big_M;
 		}
 		return column.getCost();
+	}
+
+	private boolean isBranchImpliedPenaltyColumn(TWETColumn column) {
+		if (!branchImpliedPenaltyObjectiveMode || node == null) {
+			return false;
+		}
+		if (node.usesBranchImpliedForbiddenArc(column)) {
+			return true;
+		}
+		if (!isColumnizedOutsourcing()) {
+			return false;
+		}
+		for (int job = 1; job <= data.n; job++) {
+			if (node.getOutsourcingJobState(job) == Node.OUTSOURCE_REQUIRED && column.containsJob(job)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public boolean hasPositiveBranchImpliedPenaltyColumn() {
@@ -926,6 +1008,11 @@ public class LP {
 		for (int job = 1; job <= data.n; job++) {
 			if (column.containsJob(job)) {
 				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
+			}
+		}
+		for (Map.Entry<Integer, IloRange> entry : outsourcingMembershipBranchRanges.entrySet()) {
+			if (column.containsJob(entry.getKey().intValue())) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
 			}
 		}
 		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "omega_" + columnId);
@@ -1027,14 +1114,14 @@ public class LP {
 		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
 		for (int columnId : restrictedOutsourcingColumnIds) {
 			TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
-			if (!node.isOutsourcingColumnCompatible(column)) {
-				continue;
-			}
-			double reducedCost = getOutsourcingColumnReducedCost(columnId);
 			if (isPositiveCurrentOutsourcingColumn(columnId)) {
 				selected.add(Integer.valueOf(columnId));
 				continue;
 			}
+			if (!node.isOutsourcingColumnCompatible(column)) {
+				continue;
+			}
+			double reducedCost = getOutsourcingColumnReducedCost(columnId);
 			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
 				candidates.add(new ColumnReducedCost(columnId, reducedCost));
 			}
@@ -1091,6 +1178,9 @@ public class LP {
 		machineDual = cplex.getDual(machineRange);
 		outsourcingColumnDual = isColumnizedOutsourcing() && outsourcingColumnCountRange != null
 				? cplex.getDual(outsourcingColumnCountRange) : 0.0;
+		for (Map.Entry<Integer, IloRange> entry : outsourcingMembershipBranchRanges.entrySet()) {
+			outsourcingMembershipDual[entry.getKey().intValue()] = cplex.getDual(entry.getValue());
+		}
 		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
@@ -1197,6 +1287,9 @@ public class LP {
 		}
 		machineDual = 0.0;
 		outsourcingColumnDual = 0.0;
+		for (int i = 0; i < outsourcingMembershipDual.length; i++) {
+			outsourcingMembershipDual[i] = 0.0;
+		}
 		for (int i = 0; i < arcDual.length; i++) {
 			for (int j = 0; j < arcDual[i].length; j++) {
 				arcDual[i][j] = 0.0;
@@ -1283,17 +1376,21 @@ public class LP {
 		final double[] jobDual;
 		final double machineDual;
 		final double outsourcingColumnDual;
+		final double[] outsourcingMembershipDual;
 		final double[][] arcDual;
 
-		PricingDualSnapshot(double[] jobDual, double machineDual, double outsourcingColumnDual, double[][] arcDual) {
+		PricingDualSnapshot(double[] jobDual, double machineDual, double outsourcingColumnDual,
+				double[] outsourcingMembershipDual, double[][] arcDual) {
 			this.jobDual = copy(jobDual);
 			this.machineDual = machineDual;
 			this.outsourcingColumnDual = outsourcingColumnDual;
+			this.outsourcingMembershipDual = copy(outsourcingMembershipDual);
 			this.arcDual = copy(arcDual);
 		}
 
 		public PricingDualSnapshot copy() {
-			return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, arcDual);
+			return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, outsourcingMembershipDual,
+					arcDual);
 		}
 
 		public static PricingDualSnapshot blend(PricingDualSnapshot current, PricingDualSnapshot center,
@@ -1302,6 +1399,11 @@ public class LP {
 			double[] blendedJob = new double[current.jobDual.length];
 			for (int i = 0; i < blendedJob.length; i++) {
 				blendedJob[i] = currentWeight * current.jobDual[i] + centerWeight * center.jobDual[i];
+			}
+			double[] blendedOutsourcingMembership = new double[current.outsourcingMembershipDual.length];
+			for (int i = 0; i < blendedOutsourcingMembership.length; i++) {
+				blendedOutsourcingMembership[i] = currentWeight * current.outsourcingMembershipDual[i]
+						+ centerWeight * center.outsourcingMembershipDual[i];
 			}
 			double[][] blendedArc = new double[current.arcDual.length][];
 			for (int i = 0; i < current.arcDual.length; i++) {
@@ -1314,7 +1416,7 @@ public class LP {
 			return new PricingDualSnapshot(blendedJob,
 					currentWeight * current.machineDual + centerWeight * center.machineDual,
 					currentWeight * current.outsourcingColumnDual + centerWeight * center.outsourcingColumnDual,
-					blendedArc);
+					blendedOutsourcingMembership, blendedArc);
 		}
 
 		private static double[] copy(double[] values) {

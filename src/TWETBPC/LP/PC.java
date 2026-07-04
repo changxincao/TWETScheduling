@@ -719,6 +719,7 @@ public class PC {
 			double[] job = new double[center.jobDual.length];
 			double machine = 0.0;
 			double outsource = 0.0;
+			double[] outsourcingMembership = new double[center.outsourcingMembershipDual.length];
 			double[][] arc = new double[center.arcDual.length][];
 			for (int i = 0; i < arc.length; i++) {
 				arc[i] = new double[center.arcDual[i].length];
@@ -743,9 +744,12 @@ public class PC {
 					if (j >= 0 && j < job.length) {
 						job[j] = -1.0;
 					}
+					if (j >= 0 && j < outsourcingMembership.length) {
+						outsourcingMembership[j] = -1.0;
+					}
 				}
 			}
-			return new LP.PricingDualSnapshot(job, machine, outsource, arc);
+			return new LP.PricingDualSnapshot(job, machine, outsource, outsourcingMembership, arc);
 		}
 	}
 
@@ -805,6 +809,10 @@ public class PC {
 			sum += Math.abs(dual.jobDual[i]);
 			count++;
 		}
+		for (int i = 1; i < dual.outsourcingMembershipDual.length; i++) {
+			sum += Math.abs(dual.outsourcingMembershipDual[i]);
+			count++;
+		}
 		for (int i = 0; i < dual.arcDual.length; i++) {
 			for (int j = 0; j < dual.arcDual[i].length; j++) {
 				sum += Math.abs(dual.arcDual[i][j]);
@@ -840,6 +848,11 @@ public class PC {
 		for (int i = 1; i < jobLimit; i++) {
 			sum += a.jobDual[i] * b.jobDual[i];
 		}
+		int outsourcingMembershipLimit = Math.min(a.outsourcingMembershipDual.length,
+				b.outsourcingMembershipDual.length);
+		for (int i = 1; i < outsourcingMembershipLimit; i++) {
+			sum += a.outsourcingMembershipDual[i] * b.outsourcingMembershipDual[i];
+		}
 		int arcLimit = Math.min(a.arcDual.length, b.arcDual.length);
 		for (int i = 0; i < arcLimit; i++) {
 			int innerLimit = Math.min(a.arcDual[i].length, b.arcDual[i].length);
@@ -855,6 +868,10 @@ public class PC {
 		for (int i = 0; i < job.length; i++) {
 			job[i] = a.jobDual[i] - b.jobDual[i];
 		}
+		double[] outsourcingMembership = new double[a.outsourcingMembershipDual.length];
+		for (int i = 0; i < outsourcingMembership.length; i++) {
+			outsourcingMembership[i] = a.outsourcingMembershipDual[i] - b.outsourcingMembershipDual[i];
+		}
 		double[][] arc = new double[a.arcDual.length][];
 		for (int i = 0; i < a.arcDual.length; i++) {
 			arc[i] = new double[a.arcDual[i].length];
@@ -863,7 +880,7 @@ public class PC {
 			}
 		}
 		return new LP.PricingDualSnapshot(job, a.machineDual - b.machineDual,
-				a.outsourcingColumnDual - b.outsourcingColumnDual, arc);
+				a.outsourcingColumnDual - b.outsourcingColumnDual, outsourcingMembership, arc);
 	}
 
 

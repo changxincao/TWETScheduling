@@ -49,6 +49,8 @@ public class Node implements Comparable<Node> {
 	public static final byte REPAIR_TARIFF_REQUIRED = 6;
 	public static final byte REPAIR_ADJACENCY_FORBIDDEN = 7;
 	public static final byte REPAIR_ADJACENCY_REQUIRED = 8;
+	public static final byte REPAIR_OUTSOURCING_FORBIDDEN = 9;
+	public static final byte REPAIR_OUTSOURCING_REQUIRED = 10;
 
 	private final Data data;
 	public int id;
@@ -617,14 +619,28 @@ public class Node implements Comparable<Node> {
 
 	public void forbidOutsourcingJob(int job) {
 		if (job >= 1 && job < outsourcingJobState.length) {
+			if (outsourcingJobState[job] == OUTSOURCE_REQUIRED) {
+				throw new IllegalStateException("Cannot forbid already required outsourced job " + job);
+			}
 			outsourcingJobState[job] = OUTSOURCE_FORBIDDEN;
+			markOutsourcingRepair(job, false);
 		}
 	}
 
 	public void requireOutsourcingJob(int job) {
 		if (job >= 1 && job < outsourcingJobState.length) {
+			if (outsourcingJobState[job] == OUTSOURCE_FORBIDDEN) {
+				throw new IllegalStateException("Cannot require already forbidden outsourced job " + job);
+			}
 			outsourcingJobState[job] = OUTSOURCE_REQUIRED;
+			markOutsourcingRepair(job, true);
 		}
+	}
+
+	private void markOutsourcingRepair(int job, boolean required) {
+		repairType = required ? REPAIR_OUTSOURCING_REQUIRED : REPAIR_OUTSOURCING_FORBIDDEN;
+		repairFrom = job;
+		repairTo = repairSegment = -1;
 	}
 
 	public List<Integer> getRequiredOutsourcingJobs() {

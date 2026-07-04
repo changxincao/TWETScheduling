@@ -55,6 +55,9 @@ public class OutsourcingMembershipBrancher implements Brancher {
 			if (!lp.getOutsourcingPool().isOutsourceable(job)) {
 				continue;
 			}
+			if (lp.getNode().getOutsourcingJobState(job) != Node.OUTSOURCE_FREE) {
+				continue;
+			}
 			double value = job < values.length ? values[job] : 0.0;
 			double frac = Math.abs(value - Math.rint(value));
 			if (Utility.compareLe(frac, tolerance)) {

@@ -172,3 +172,15 @@ setup cost 系数暂时不写入实例文件，仍使用运行时属性 `twet.da
 后续 seed 也不要求正式模型 dual 才能选。当前实现是在 repair slack 归零后，用 repair 模型已有 reduced cost 筛出 seed，然后关闭 repair mode；phase2 或正式 child 出队时会基于这个 seed 重新建 LP 并求解。因此 strong phase1 现在不再求 `repair_final`。同理，在普通机器列口径下，phase1 最后的 `after_column_filter` 也不再重解；列化外包模式暂时保留一次筛后重解，因为它同时筛内部列和外包列，组合口径更复杂，后续如需优化再单独处理。
 
 继续修正 M 惩罚语义：初始 trial LP 可行但存在正值 branch-implied M 列时，不能直接把该 side 判失败；这和初始 LP infeasible 一样，说明当前 restricted seed 还没有修干净，应进入 repair。repair 循环现在以“artificial slack 归零且正值 M 列归零”为停止条件；只要 slack 或 M 仍为正，就继续按 repair pricing 补列。只有当 pricing 补不出列后 slack 或 M 仍为正，才把该 side 判为不可用。
+
+### 2026-07-04 列化外包 membership 分支 repair 修正
+
+本次按最新复核结论修正列化外包 membership 分支在 strong trial / child repair 中的列继承口径。核心问题是：如果在构造 child RMP 前就按 `required outsourced job j` 删除所有包含 `j` 的内部机器列，父节点原来的正值列可能被提前删掉，导致初始 LP infeasible 不再只由新分支行造成，repair 判断会被 seed 预筛污染。
+
+修正后的流程是：`LP.construct()` 只过滤全局预处理禁弧，不再按当前 node 的外包 membership 状态提前删除内部列或外包列。列化外包分支改为显式 master row：`required j` 对“包含 j 的外包列之和”加下界，`forbidden j` 对同一表达式加上界。这样初始 LP / repair 看到的是“父节点列集 + 新分支行”的真实状态。
+
+M 开关现在明确区分两种口径。`enableStrongBranchingBranchImpliedPenalty=false` 时，不惩罚父节点正值脏列，required 外包右支中旧内部列如果仍含有 `j`，可以临时留在 LP 中；这只是弱 trial 口径，不会生成新的违规内部列。`enableStrongBranchingBranchImpliedPenalty=true` 时，strong trial 从第一次建模开始就把两类 branch-implied 脏内部列目标系数设为 big-M：arc required 右支推导出的竞争弧列，以及列化外包 required job 下仍包含该 job 的内部机器列。初始 LP 可行但存在正值 M 列时，不直接丢弃 side，而是和初始 LP infeasible 一样进入 repair；repair 循环要求 artificial slack 和正值 M 列同时归零，否则补不出列后判该 side infeasible。
+
+light seed 也同步改成同一语义：父节点正值内部列和正值外包列先保留，非正值列再按 child 域筛。repair 成功后筛 seed 时仍优先保留当前正值列，避免为了 reduced-cost 截断把当前可行基删坏。外包 pricing、route enumeration 外包枚举、dual snapshot 和 smoothing 梯度均补入 outsourcing membership branch dual，保证列化外包分支下 reduced cost 口径一致。
+
+当前仍保持：M 只用于 strong trial / repair 评分和 seed 准备，不写入正式列成本；正式 BPC 主问题中的列成本仍是真实 TWET/outsourcing objective。机器数量和 tariff segment 分支不依赖列兼容性筛选表达分支，本次不改。验证方式为 focused `javac` 编译通过；尚未重新跑完整外包列算例。

@@ -229,7 +229,7 @@ public final class RouteEnumerationEngine {
 			if (state == Node.OUTSOURCE_REQUIRED) {
 				requiredJobs.add(Integer.valueOf(job));
 				requiredBaseline += data.outsourcingCost[job];
-				requiredProfit += dual.jobDual[job];
+				requiredProfit += dual.jobDual[job] + dual.outsourcingMembershipDual[job];
 			} else {
 				freeJobs.add(Integer.valueOf(job));
 			}
@@ -247,7 +247,8 @@ public final class RouteEnumerationEngine {
 			for (OutsourcingLabel label : labels) {
 				addOutsourcingEnumerationLabel(next, label, requiredBaseline, requiredProfit, idx + 1, freeJobs,
 						freeBaselinePrefix, cheapSuffixBound, dual, gap, result);
-				OutsourcingLabel included = label.include(job, data.outsourcingCost[job], dual.jobDual[job]);
+				OutsourcingLabel included = label.include(job, data.outsourcingCost[job],
+						dual.jobDual[job] + dual.outsourcingMembershipDual[job]);
 				addOutsourcingEnumerationLabel(next, included, requiredBaseline, requiredProfit, idx + 1, freeJobs,
 						freeBaselinePrefix, cheapSuffixBound, dual, gap, result);
 			}

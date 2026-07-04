@@ -187,3 +187,11 @@ strong 口径则已经出现可疑信号：`test-results/bpc/tmp-timegraph-nocut
 strong branching 则在父节点分支前先试探多个候选。第一阶段对候选左右支分别构造 trial LP，先准备 seed，再求 trial RMP；若 infeasible 则 repair。arc/columnized outsourcing 在 lightweight 模式下会临时保留父节点正值列以维持 repair 起点，同时把违反 branch-implied 禁弧的列目标系数改为 `big_M` 后只 resolve 当前模型。如果 M 列或 slack 仍为正，则该 side 按 infeasible 评分；否则再做二次筛列并保留当前正值列，得到可复用 seed。第一阶段按左右 bound gain 的乘积排序。
 
 第二阶段只对第一阶段排名靠前的候选做更深试探：如果 side 在第一阶段不可复用，则不再对它跑二阶段；可复用 side 用已准备好的 seed 重建 trial LP，然后只跑 strong-branching 允许的轻量 pricing（普通启发式、rank1 time-indexed 的内部 bucket heuristic、列化外包 pricing 等），不跑完整 exact pricing。最终选中的左右 child 如果 trial 可复用，会把 trial 后的 restricted columns 写回 child 并标记 `strongBranchingSeedPrepared=true`，正式入队后跳过初始 repair/筛列，直接基于这批 seed 求正式 LP 并进入后续完整 pricing。
+
+#### Phase 1 trial 的普通口径和 lightweight 口径
+
+Phase 1 的普通 trial 用于不启用 lightweight repair 的候选。它先让 child 继承父节点当前 restricted columns 作为 seed，再按 child 的分支状态构造临时 RMP 并求一次 LP。如果 LP infeasible，就调用普通 repair：加 repair slack、用完整 pricing 补列，直到 slack 为 0 或确认修不动。repair 成功后必须回到“筛列后、无 slack 的正式 RMP”再求一次 LP。之后再按当前 reduced cost 与 child 兼容性做二次筛列，并保留当前正值列，重解得到 phase 1 bound。这个 trial 的结果如果可复用，就把筛后的列集作为 child 后续入队 seed。
+
+lightweight trial 只用于 arc 分支和列化外包 membership 分支。它准备 seed 时先过滤明显不兼容的列，但父节点当前正值内部列会临时保留，用来保证 repair 有连续起点。以 arc 右支 required `i->j` 为例，`i` 的其它后继、`j` 的其它前驱被记录为 branch-implied forbidden，但这些 implied 禁弧不建额外 master row。trial RMP 可行或 repair 成功后，会把仍违反 branch-implied forbidden 的遗留列临时改成 `big_M` 成本，并只 resolve 当前 CPLEX 模型。如果 M 列或 slack 仍为正，说明这个 side 在当前 trial 口径下还依赖这些竞争列，直接按 infeasible 评分；如果 M/slack 都为 0，才继续二次筛列。二次筛列只是减小 seed，必须保留当前正值列，不能把筛列后的 infeasible 当作子树不可行证书。
+
+前面修复的两个 bug 都在这段 phase 1 流程里。第一，M 惩罚后不能调用会重建模型的 `solveRelaxationTimed()`，否则 `buildModel()` 会把临时 M 系数恢复成原始列成本；必须用 `resolveCurrentModelTimed()`。第二，普通 repair 成功后不能返回 repair slack 模型下的旧 solution；strong trial 后面还要做 M 惩罚和筛列，因此 repair 必须返回筛后、无 slack 的正式 RMP 解。

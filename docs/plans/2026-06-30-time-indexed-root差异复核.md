@@ -211,3 +211,13 @@ lightweight trial 只用于 arc 分支和列化外包 membership 分支。它准
 继续检查 child RMP 建模入口时，确认 `LP.construct(node, seedColumnIds)` 不应该承担任何当前分支或全局预处理过滤语义。正常流程下，列生成、初始列和 repair 入口都已经避开 `Data.preprocessedArcForbidden`；如果某个列池或实验入口把包含静态预处理禁弧的列塞进 seed，那属于上游列生成或数据重刷问题，不应在 `construct()` 里静默吞掉，否则会把“传入 seed 是什么”和“最终建模用的 seed 是什么”混在一起，干扰 strong branching/repair 的可行性判断。
 
 因此删除 `LP.construct()` 中对 `node.isColumnPreprocessingCompatible(column)` 的兜底过滤，并同步删除已无调用点的 `Node.isColumnPreprocessingCompatible()`。现在 `construct()` 只负责按调用方给定的 seed 建 restricted RMP，分支行、repair slack、branch-implied M、外包 membership row 等语义都留在后续 `buildModel()` 和 `PC.solve()` 流程里处理。这个改动不改变 pricing 的禁弧逻辑，只清理建模入口的隐式筛列。
+
+### 2026-07-04 冗余过滤路径复核
+
+继续全局检查“同一列兼容性在多个层级反复过滤”的问题。当前保留的原则是：source 层的剪枝保留，例如 ng-DSSR、启发式 pricing、time-indexed pricing 在扩展或候选恢复前就避开 forbidden arc、pricing-only arc 和 required outsourcing job；这些检查能少生成无效列，不属于冗余。LP 建模和加列入口则不再承担兜底过滤职责，否则会把上游错误静默吞掉，并干扰 repair/strong branching 判断。
+
+本次确认并清理两处运行路径上的冗余。第一，`LP.addOutsourcingColumns()` 原来在外包 pricing 已经按 required/forbidden job 生成列后，又用 `node.isOutsourcingColumnCompatible()` 过滤一次。这个过滤如果触发，只会让 pricing 返回的列被静默丢掉，导致 repair 或 pricing 日志变成“生成了但没加入”，不利于定位错误。现在外包列和内部列一样：Pool 写入后，LP 只负责去重和加入 restricted RMP，列是否合法由 `OutsourcingPricingEngine`、route enumeration 等源头保证。
+
+第二，`resetRestrictedColumnsByCurrentReducedCost()` 保留了一个已经没有实际调用意义的 `keepPositiveIncompatible` 分支，表面上像是 strong trial 可以选择删除当前正值不兼容列。结合前面的 branch-implied M 讨论，这个口径容易造成误解：筛 seed 的目的只是减小后续 RMP 规模，不能删掉当前可行 LP 的正值列；需要排斥的竞争列应通过 strong trial 的 M 目标处理。因此该方法现在只有一个口径：正值内部列无条件保留，非正值内部列才按当前 node 兼容性和 reduced cost 筛选；外包列也保持相同思想，正值列保留，非正值列按 membership 兼容性和 reduced cost 筛选。
+
+仍然存在但默认关闭的实验路径包括 `enableStrongBranchingDomainRepair` 对应的 all-row slack/domain-filtered seed，以及若干 `diagnostic*`、completion-bound audit、paper graph timing、partial-list cardinality stats 等诊断开关。这些默认不会参与主线求解，不是当前运行时拖慢的主要来源；后续若不再需要 domain repair 这条实验分支，可以单独删配置和对应方法，但这次不混入主线过滤清理。

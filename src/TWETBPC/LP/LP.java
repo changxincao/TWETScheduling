@@ -682,8 +682,7 @@ public class LP {
 		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedOutsourcingColumnIds);
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
-			if (!activeColumnIds.contains(value)
-					&& node.isOutsourcingColumnCompatible(outsourcingPool.getColumn(id))) {
+			if (!activeColumnIds.contains(value)) {
 				restrictedOutsourcingColumnIds.add(value);
 				activeColumnIds.add(value);
 				added++;
@@ -1036,15 +1035,6 @@ public class LP {
 	 * repair 成功后，按当前 LP 的 reduced cost 筛出正式子节点列集。
 	 */
 	public void resetRestrictedColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance) {
-		resetRestrictedColumnsByCurrentReducedCost(maxColumns, reducedCostAllowance, true);
-	}
-
-	/**
-	 * 2026-07-01: strong branching 轻量 repair 需要把“正值列保留”限定在 repair 起点。
-	 * 当 keepPositiveIncompatible=false 时，筛列后的正式 seed 只保留 child-compatible 正值列。
-	 */
-	public void resetRestrictedColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance,
-			boolean keepPositiveIncompatible) {
 		if (cplex == null || lambdaByColumnId == null) {
 			return;
 		}
@@ -1054,13 +1044,9 @@ public class LP {
 			TWETColumn column = pool.getColumn(columnId);
 			boolean compatible = isColumnCompatible(column);
 			if (isPositiveCurrentColumn(columnId)) {
-				// 2026-05-19: child LP 已经可行时，正值列构成当前可行解的一部分；
-				// 默认保留它们，避免 reduced-cost 截断误删当前基。
-				// 2026-07-01: 轻量 repair trial 的最终 seed 不能长期保留违反 child 域的正值列，
-				// 因此允许调用方关闭这条兼容性豁免。
-				if (keepPositiveIncompatible || compatible) {
-					selected.add(Integer.valueOf(columnId));
-				}
+				// 2026-07-04: seed 筛选只做规模控制，不能删掉当前可行 LP 的正值列。
+				// 分支隐含竞争列若需要排斥，由 strong-trial 的 M 目标处理。
+				selected.add(Integer.valueOf(columnId));
 				continue;
 			}
 			if (!compatible) {

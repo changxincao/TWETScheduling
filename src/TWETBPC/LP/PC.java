@@ -354,10 +354,10 @@ public class PC {
 			}
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
 				// 2026-07-04: 这里的筛列只用于减小后续 child seed。
-				// 内部列和外包列都会保留当前正值且兼容的列；repair 已确认 slack/M 清零，
+				// 内部列和外包列都会保留当前正值列；repair 已确认 slack/M 清零，
 				// 因此不再为了 seed 重解一次 LP，后续 phase2/正式 child 会基于 seed 自己建模求解。
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
-						config.branchSeedReducedCostAllowance, true);
+						config.branchSeedReducedCostAllowance);
 				return StrongBranchingTrialResult.from(lp, solution, false,
 						(domainRepair ? "domain_rmp_trial"
 								: (lightweightRepair ? "lightweight_rmp_trial" : "rmp_trial"))

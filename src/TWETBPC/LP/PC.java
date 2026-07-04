@@ -330,11 +330,15 @@ public class PC {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
 			boolean repaired = false;
-			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			boolean needsRepair = solution.getStatus() == TWETMasterStatus.INFEASIBLE;
+			if (!needsRepair && branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
+				needsRepair = true;
+			}
+			if (needsRepair) {
+				// 2026-07-04: strong trial repair 要同时清掉 artificial slack 和正值 M 列。
+				// slack=0 且 M=0 时，repair 模型的 primal objective 才可作为当前列集的 trial bound。
 				solution = domainRepair ? repairDomainFilteredStrongBranchingMaster(lp)
-						// 2026-07-04: strong trial 后续还要做 M 惩罚和二次筛列，必须让 repair 返回筛后、
-						// 无 slack 的正式 RMP 解；不能沿用 repair slack 模型下的旧 solution。
-						: repairInfeasibleMaster(lp, true);
+						: repairInfeasibleMaster(lp, false);
 				repaired = true;
 			}
 			if (isTimeLimitReached()) {
@@ -349,36 +353,15 @@ public class PC {
 						"branch_implied_penalty_positive mValue=" + lp.branchImpliedPenaltyValue());
 			}
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
-				// 2026-07-04: 这里的筛列只用于减小后续 child seed，不能作为不可行证明。
-				// lightweight repair 的初始阶段可临时保留正值不兼容列以保证 repair 连续性；
-				// 筛列后也必须保留当前正值列，否则 filtered RMP infeasible 只说明 seed 被筛坏，
-				// 不能说明分支子树不可行。
+				// 2026-07-04: 这里的筛列只用于减小后续 child seed。
+				// 内部列和外包列都会保留当前正值且兼容的列；repair 已确认 slack/M 清零，
+				// 因此不再为了 seed 重解一次 LP，后续 phase2/正式 child 会基于 seed 自己建模求解。
 				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 						config.branchSeedReducedCostAllowance, true);
-				String filterPhase;
-				if (repaired) {
-					filterPhase = domainRepair ? "strong_branching_domain_repair_after_column_filter"
-							: (lightweightRepair ? "strong_branching_light_repair_after_column_filter"
-									: "strong_branching_repair_after_column_filter");
-				} else {
-					filterPhase = domainRepair ? "strong_branching_domain_after_column_filter"
-							: (lightweightRepair ? "strong_branching_light_after_column_filter"
-									: "strong_branching_after_column_filter");
-				}
-				solution = solveRelaxationTimed(lp, filterPhase);
-				if (isTimeLimitReached()) {
-					return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
-				}
-				if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-					throw new IllegalStateException(withSolutionMessage(
-							"Strong branching filtered RMP became infeasible after preserving positive columns",
-							solution));
-				}
-				if (branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
-					return StrongBranchingTrialResult.infeasible(lp, solution,
-							"branch_implied_penalty_positive_after_filter mValue="
-									+ lp.branchImpliedPenaltyValue());
-				}
+				return StrongBranchingTrialResult.from(lp, solution, false,
+						(domainRepair ? "domain_rmp_trial"
+								: (lightweightRepair ? "lightweight_rmp_trial" : "rmp_trial"))
+								+ "_seed_filtered_no_resolve");
 			}
 			return StrongBranchingTrialResult.from(lp, solution, false,
 					domainRepair ? "domain_rmp_trial" : (lightweightRepair ? "lightweight_rmp_trial" : "rmp_trial"));
@@ -884,6 +867,10 @@ public class PC {
 	}
 
 
+	private boolean needsStrongRepair(LP lp) {
+		return !lp.isNoSlack() || lp.hasPositiveBranchImpliedPenaltyColumn();
+	}
+
 	private TWETMasterSolution repairDomainFilteredStrongBranchingMaster(LP lp) {
 		// 2026-07-01: strong branching 的实验修复路径。这里的 child seed 已经先按分支域筛过，
 		// 若 RMP 不可行，就给所有核心行加 slack 以找回覆盖/机器数/分支行可行性；旧 repair 不受影响。
@@ -895,7 +882,7 @@ public class PC {
 		}
 
 		int generatedForRepair = 0;
-		while (!lp.isNoSlack() && !isTimeLimitReached()) {
+		while (needsStrongRepair(lp) && !isTimeLimitReached()) {
 			boolean addedInThisPass = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
 				PricingEngine engine = pricingEngines.get(engineIndex);
@@ -923,7 +910,7 @@ public class PC {
 						lp.setFeasibilityRepairMode(false);
 						return solution;
 					}
-					keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted() && !lp.isNoSlack();
+					keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted() && needsStrongRepair(lp);
 				}
 				if (addedByThisEngine) {
 					resetFollowingPricingEngines(engineIndex + 1);
@@ -944,6 +931,14 @@ public class PC {
 					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
 					"Domain-filtered strong branching repair still has positive artificial slack after generating "
 							+ generatedForRepair + " columns");
+		}
+		if (lp.hasPositiveBranchImpliedPenaltyColumn()) {
+			double mValue = lp.branchImpliedPenaltyValue();
+			lp.setFeasibilityRepairMode(false);
+			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
+					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
+					"Domain-filtered strong branching repair still uses branch-implied M columns after generating "
+							+ generatedForRepair + " columns, mValue=" + mValue);
 		}
 
 		lp.setFeasibilityRepairMode(false);
@@ -969,7 +964,7 @@ public class PC {
 		}
 
 		int generatedForRepair = 0;
-		while (!lp.isNoSlack() && !isTimeLimitReached()) {
+		while (needsStrongRepair(lp) && !isTimeLimitReached()) {
 			boolean addedInThisPass = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size()
 					&& !isTimeLimitReached(); engineIndex++) {
@@ -1004,7 +999,7 @@ public class PC {
 					}
 					// 2026-05-18: 旧 GCTabu.FindFeasible 会在启发式仍能补列且 slack 未归零时继续用启发式；
 					// exact 定价不反复占用这一层，执行一次后把控制权交回外层 repair pass。
-					keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted() && !lp.isNoSlack();
+					keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted() && needsStrongRepair(lp);
 				}
 				if (addedByThisEngine) {
 					resetFollowingPricingEngines(engineIndex + 1);
@@ -1025,6 +1020,14 @@ public class PC {
 					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
 					"Repair RMP still has positive artificial slack after generating " + generatedForRepair
 							+ " columns");
+		}
+		if (lp.hasPositiveBranchImpliedPenaltyColumn()) {
+			double mValue = lp.branchImpliedPenaltyValue();
+			lp.setFeasibilityRepairMode(false);
+			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
+					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
+					"Repair RMP still uses branch-implied M columns after generating " + generatedForRepair
+							+ " columns, mValue=" + mValue);
 		}
 
 		// 2026-05-18: 旧 VRP UpdateRouteSet 在 FindFeasible 成功后会按当前子节点 LP 的

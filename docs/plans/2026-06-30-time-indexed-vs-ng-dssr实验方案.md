@@ -164,3 +164,11 @@ setup cost 系数暂时不写入实例文件，仍使用运行时属性 `twet.da
 修复后的口径是：`rmp_trial_infeasible_after_filter` 直接抛出异常，便于定位筛列、正值列保留或 M 惩罚口径中的真实问题。真正仍可作为不可行试探结果的是初始 LP 不可行且 repair 后仍 infeasible，或者开启 branch-implied M 惩罚时仍有正值 M 列。这两类表示当前试探在分支行和 M 口径下没有得到可用 child LP。
 
 机器数量分支和 tariff segment 分支只改变 master 行，不依赖列兼容性筛选表达分支，因此没有这类筛列误判问题。外包 membership 在列化模式下会筛外包列，但其正值外包列同样会被保留；如果筛列后仍不可行，也应按异常路径暴露。当前 focused `javac` 已通过；尚未重新跑完整算例，本次结论主要来自静态路径检查和编译验证。
+
+### 2026-07-04 strong branching phase1 筛列后重解精简
+
+继续复核 phase1 trial 后确认，strong branching 里不需要把 repair 成功后的 LP 再转回正式 RMP 求一次 `repair_final`。repair mode 的作用是给不可行 RMP 加 artificial slack，从而得到一个可求解的临时 LP 和 repair dual；当 repair 结束时 slack 已经归零，当前 repair 模型的 primal objective 就等于当前列集下的正式 RMP objective。因此对 phase1 评分来说，可以直接使用这个 bound。
+
+后续 seed 也不要求正式模型 dual 才能选。当前实现是在 repair slack 归零后，用 repair 模型已有 reduced cost 筛出 seed，然后关闭 repair mode；phase2 或正式 child 出队时会基于这个 seed 重新建 LP 并求解。因此 strong phase1 现在不再求 `repair_final`。同理，在普通机器列口径下，phase1 最后的 `after_column_filter` 也不再重解；列化外包模式暂时保留一次筛后重解，因为它同时筛内部列和外包列，组合口径更复杂，后续如需优化再单独处理。
+
+继续修正 M 惩罚语义：初始 trial LP 可行但存在正值 branch-implied M 列时，不能直接把该 side 判失败；这和初始 LP infeasible 一样，说明当前 restricted seed 还没有修干净，应进入 repair。repair 循环现在以“artificial slack 归零且正值 M 列归零”为停止条件；只要 slack 或 M 仍为正，就继续按 repair pricing 补列。只有当 pricing 补不出列后 slack 或 M 仍为正，才把该 side 判为不可用。

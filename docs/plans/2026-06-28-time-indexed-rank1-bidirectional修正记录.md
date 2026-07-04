@@ -77,3 +77,9 @@ focused `javac` 已覆盖以下文件并通过：
 当前 exact 模式改为先构造 backward suffix labels，再构造 forward labels。forward 扩展产生 `time >= t*` 的 child label 时，立即用同一 `(job,time)` bucket 上的 backward suffix labels 计算最小可完成 reduced cost，并同时考虑 rank1 residual 的 `joinShift`；如果该 child 与 sink 或任何 suffix 拼接后都不可能低于 0，就不再插入 forward bucket。等待弧跨到 `t*` 时也使用同一逻辑。该剪枝只在 exact 模式启用，graph-native heuristic 仍保持原顺序，因为 heuristic bucket 每个状态只保留一个 label，不能作为完整 suffix 证书。
 
 这个改动不改变候选列成本、cut residual 更新或最终 join 口径，只减少 exact pricing 中确定无用的跨中点 forward labels。验证上，`TimeIndexedGraphRank1CutPricingEngine.java` focused `javac` 通过；`data/40-2/wet040_001_2m.dat` 的 `maxNodes=1` rank1 smoke 正常到 `NODE_LIMIT` 且 `valid=true`。日志中 active cut 后的 exact pricing 出现 `cbPruned` 统计，典型值约为 `9.8e4` 到 `1.01e5`，例如最终无负列轮为 `cbPruned=101011`。该 smoke 说明剪枝路径已触发并保持正确性口径，但不能单独证明总时间一定下降，后续仍需用同配置 A/B 比较。
+
+## 11. 40-2 完整求解复验
+
+2026-07-04 在 `data/40-2/wet040_001_2m.dat` 上使用 time-indexed rank1 cut、strong branching、dual-bound pruning、关闭 ALNS seed 和 route enumeration，重新求解到最优。结果目录为 `test-results/bpc/tmp-rank1-cbprune-full-20260704-rerun2`，最终 `FINISHED, obj=bound=22580, valid=true, solve=207.994s`，处理 7 个节点。root 用时 116.343s，root bound 为 22523.619048，root 后 RMIH 找到 incumbent 22582；node 2 将 incumbent 改进到 22581，node 7 最终得到 22580。
+
+本次 full run 没有打开 `timeIndexedCompletionBoundCutLoopArcFixing`，因此 cut 迭代之间没有执行 pricing-only arc fixing/window tightening。日志中出现的 `cbPruned` 来自 rank1 exact pricing 内部的 SRI-aware completion 剪枝；node 1 闭合后的 `timeIndexedArcFixing.done` 是节点结束阶段的 paper time-indexed reduced-cost arc fixing，用于后续分支和子树，不是 cut-loop 中间迭代 fixing。

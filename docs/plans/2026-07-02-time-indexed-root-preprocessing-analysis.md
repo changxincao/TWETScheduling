@@ -141,3 +141,9 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 当前判断是：time-indexed root preprocessing 在一部分算例上有效，主要是因为它能较快闭合 root，并把普通 arc fixing 与 compact window 传给后续 ng-DSSR，使后续节点的扩展域明显缩小。但它不是无条件收益。若 pricing horizon 或离散时空弧规模过大，或者 pseudo-schedule root tail 很长，临时 time-indexed RMP 和最短路扫描本身会变成额外成本。
 
 因此更合理的使用条件不是“总是开”，而是当估计的 `n^2 * pricingHorizon`、dual-window 后的有效 horizon、以及前几轮 time-indexed pricing 的列生成规模处于可控范围时再使用。另一种后续可试方案是 capped pilot：先跑少量 time-indexed root pricing 轮次，观察 arc scan、候选列、LP 时间，如果预处理明显失控则中止，回到直接 ng-DSSR。这个方向先记录，不立即修改主线。
+
+## 2026-07-04：cut-loop fixing 与初始 time-indexed 预处理口径
+
+这次重新核对 `wet050_001_2m` 上 direct time-indexed root 和 ng-DSSR root preprocessing 的差异后，确认初始列差异的直接来源不是 time-indexed pricing 算法，而是 ALNS 初始列历史口径。direct time-indexed 那次显式使用 `alnsMaxRuntimeMillis=600000` 和 `alnsUseSimulatedAnnealingAcceptance=true`，`InitialColumnBuilder` 在 `accepted` 模式下从 ALNS accepted history 加入了更多机器列，初始列为 53；ng-DSSR preprocessing 那次使用默认 60 秒、SA 关闭，初始列为 8。`TimeIndexedRootPreprocessor` 只是复制正式 root 的 `seedColumnIds` 到临时 pool，因此进入临时 time-indexed root 的第一轮 RMP dual 会随这些 seed 差异改变。后续比较应统一默认口径：SA 关闭、ALNS 60 秒；如需更长 ALNS 或 SA，只作为显式实验变量。
+
+在 `ng-DSSR partial + SRI + time-indexed root preprocessing` 中，cut-loop 之间的 fixing 现在分两层处理。第一层复用刚闭合 exact pricing 留下的 ng-DSSR completion bound，按当前 `incumbent - LP bound` 做普通 `(i,j)` arc 判断，并以 pricing-only 方式写入当前 node；没有 reusable completion bound 时不额外重建 PWLF bound，避免 cut-loop 过重。第二层继续执行已有的 time-indexed scalar helper fixing，用时空图证据更新 pricing-only arc 和 compact window。active SRI cut 下默认仍使用 no-SRI relaxed fixing：这不是完整 SRI-aware 证书，但作为松弛下界是安全偏弱的；SRI-aware helper 仍保留为显式开关，不作为默认路径。

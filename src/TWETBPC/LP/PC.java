@@ -217,8 +217,32 @@ public class PC {
 			return;
 		}
 		if (isNgDssrPricingActive()) {
+			applyCutLoopNgDssrCompletionBoundFixing(lp, solution);
 			applyCutLoopNgDssrTimeIndexedFixing(lp);
 		}
+	}
+
+	private void applyCutLoopNgDssrCompletionBoundFixing(LP lp, TWETMasterSolution solution) {
+		if (lastReusableSubtreeArcEliminationBounds == null
+				|| (!config.bidirectionalCompletionBoundSubtreeArcElimination
+						&& !config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly)
+				|| solution == null || !Double.isFinite(solution.getObjectiveValue())) {
+			return;
+		}
+		CompletionBoundSubtreeArcEliminator eliminator =
+				new CompletionBoundSubtreeArcEliminator(lp.getData(), config);
+		CompletionBoundSubtreeArcEliminator.Result result = eliminator.evaluate(lp,
+				incumbentForDualBoundPruning, solution.getObjectiveValue(),
+				lastReusableSubtreeArcEliminationBounds);
+		if (!result.isAvailable()) {
+			return;
+		}
+		int applied = result.applyToPricingOnly(lp.getNode());
+		traceSink.onCompletionBoundSubtreeArcElimination(lp.getNode(), applied > 0,
+				result.getCandidates(), result.getFixed(), result.getDomainFixed(), result.getScalarFixed(),
+				result.getUnavailable(), result.getFunctionEvaluations(), result.getGap(),
+				"cut-loop pricing-only applied=" + applied + ", " + result.summary(),
+				result.getTotalNanos());
 	}
 
 	private void applyCutLoopTimeIndexedGraphFixing(LP lp) {

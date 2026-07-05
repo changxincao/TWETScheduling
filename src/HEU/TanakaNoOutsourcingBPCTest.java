@@ -95,7 +95,7 @@ public class TanakaNoOutsourcingBPCTest {
 		return Math.max(0.0, (incumbent - bound) / Math.abs(incumbent) * 100.0);
 	}
 
-	static Data loadTanakaMultiMachine(String instance, boolean zeroSetup) throws IOException {
+	public static Data loadTanakaMultiMachine(String instance, boolean zeroSetup) throws IOException {
 		Data data = loadBaseDataQuietly();
 		try (BufferedReader reader = Files.newBufferedReader(Path.of(instance))) {
 			String[] header = split(reader.readLine());
@@ -135,6 +135,7 @@ public class TanakaNoOutsourcingBPCTest {
 				Arrays.fill(data.s[i], 0, data.n + 1, 0);
 			}
 		}
+		applyDueWindowHalfWidth(data);
 		applyDefaultSetupCostFromTime(data);
 		data.CmaxH = computeSafeHorizon(data);
 		data.CmaxE = data.CmaxH;
@@ -156,6 +157,19 @@ public class TanakaNoOutsourcingBPCTest {
 		}
 		data.precomputeSetupCostAdvantages();
 		return data;
+	}
+
+	private static void applyDueWindowHalfWidth(Data data) {
+		double halfWidth = Double.parseDouble(System.getProperty("twet.data.dueWindowHalfWidth", "0.0"));
+		if (Utility.compareLe(halfWidth, 0.0)) {
+			return;
+		}
+		// 2026-07-05: 仅用于派生宽 due-window 实验；原始 .dat 仍按 due date 读取。
+		for (int j = 1; j <= data.n; j++) {
+			double center = 0.5 * (data.d_e[j] + data.d_l[j]);
+			data.d_e[j] = Math.max(0.0, center - halfWidth);
+			data.d_l[j] = center + halfWidth;
+		}
 	}
 
 	private static void applyDefaultSetupCostFromTime(Data data) {

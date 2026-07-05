@@ -242,3 +242,66 @@ ng-DSSR + time-indexed root preprocessing 总时间 `527.970s`。预处理本身
 关于 preprocessing 时间，需要修正前面“约 300s”的粗略说法。旧 ng-DSSR run 中 `timeIndexedRootPreprocess.done ms=243169`，不是 300s；加上正式 root node `114.921s` 后，CSV root 才到 `364.706s`。纯 no-SRI time-indexed 的 root 为 `187.036s`，node1 summary 为 `206.233s`。两者是同一量级，但不应认为必然相等：预处理临时 root 用的是最小 seed 口径并要额外提取 fixing/window 证据，旧 run 的 tempPool 到 `124512`，而纯 no-SRI time-indexed root 当时 node1 pool 到 `86679`。本次 partial+SRI run 的预处理为 `131.631s`，说明该时间对初始 seed、dual 路径和运行时负载很敏感，只能看作“接近一次 time-indexed root 级别的额外成本”，不能固定估成 300s。
 
 当前新的判断是：如果 partial-list + SRI 能在 root 闭合，且 time-indexed preprocessing 能把窗口压到 10% 左右，那么该组合可能比纯 time-indexed rank1/SRI 更划算。原因是它没有 time-indexed rank1 那种大 RMP cut-loop LP 压力，正式 root 的 master LP 只有 `113.142s`，远低于 time-indexed rank1/SRI 的 `353.785s`；代价是 partial-list exact 本身更慢，`108.507s/204`，但仍被 root 闭合和较小列池抵消。
+### 2026-07-04 time-indexed relaxed gap 何时会和 ng-DSSR 拉开
+
+结合前面 40-2 原始算例、setup cost 变体、setupR25/R50/R75 以及 timeJitter/放大时间实验，当前判断是：time-indexed pseudo-schedule 和 ng-DSSR elementary/ng 列之间的 gap 差距，不一定会因为“只加入 setup cost”立刻变大。更可靠的放大因素是整数时间 horizon 变大、setup 结构变得更强且更不均匀、以及重复访问 job 的 pseudo-schedule 更容易在 LP 中被利用。
+
+40-2 原始时间尺度下，time-indexed 的表现很强，主要因为 horizon 还不大，DAG 最短路很便宜，虽然列是 relaxed/pseudo-schedule，但 root gap 和最终搜索并没有明显吃亏。加入 `setupCost = coefficient * setupTime` 后，至少在原始 40-2 和较温和的 setup 矩阵上，并没有观察到 time-indexed bound 明显变差；相反，setup cost 会惩罚一部分绕行和重复访问，可能减少尾部负列。也就是说，setup cost 本身不是单调“让 time-indexed 更差”的因素，尤其当 setup cost 和 setup time 成比例、setup 矩阵满足三角不等式、且 setup/p 比例不高时，它更多只是改变目标权重，不一定显著扩大 relaxed gap。
+
+真正更容易拉开差距的是时间尺度和 setup 结构。前面放大时间、尤其是非均匀 jitter 放大的实验显示，time-indexed 的计算复杂度和离散时间点数直接相关，horizon 一大，图规模、end state 数、同一序列不同完成时间的候选都会膨胀；同时 pseudo-schedule 列虽然生成快，但会带来更多弱列和更长的 RMP 尾部。ng-DSSR 的函数式 pricing 对时间尺度更稳定，不会因为所有时间都乘大或变成更细的 scale 就同比例膨胀。因此在“大 horizon / 小数需要 scale / 时间离散粒度细”的场景下，time-indexed 和 ng-DSSR 的差距最容易变明显。
+
+setup 相关的差距更可能出现在两类情况下。第一，setup time 本身接近或超过 processing time，且不是简单平滑三角闭包矩阵，而是有明显 cluster/family、长短弧差异和顺序选择冲突；这时 elementary 序列结构更重要，pseudo-schedule 的重复 job 和非基本路径更容易制造不真实的 LP 支撑。第二，setup cost 与 setup time 不完全成比例，例如时间短但成本高、时间长但成本低，或者有 family-change penalty；这种情况下目标不再只是“晚一点完工”的替代成本，而是直接对弧选择施加结构性惩罚，更可能让 relaxed 列与真实 elementary 列的质量分离。
+
+因此后续判断 gap 差距是否明显，建议不要只看 `setupCost` 开关，而是同时看几个指标：root 下 positive pseudo-schedule 列里重复 job 的比例、time-indexed pool 规模、同一 sequence 的多完成时间候选数量、root bound 与 ng-DSSR root bound 的差值、以及最终搜索节点数是否靠 relaxed 列堆出来。实验矩阵上可以继续用 40-2/50-2/60-2，组合原始时间、3-5 倍非均匀放大、10 倍非均匀放大，再叠加 setupR25/R50/R75 和 setup cost 系数 0/1/5/20。当前最明确的经验结论是：小 horizon 下 time-indexed 很可能占优；horizon 变大或小数 scale 后，ng-DSSR 的相对优势更容易显现；setup cost 只有在比例足够大且结构足够不平滑时，才可能明显放大二者 root gap。
+
+更具体地看 40-2 证据，`setupCost` 本身目前不是最强解释。原始 `wet040_001_2m` 在修复 setup cost 口径后，`setupCost=0` 的 time-indexed no-cut 记录为 `obj=22580, solve=160.752s, root=124.298s, nodes=67, pool=131418`；`setupCost=1` 反而是 `obj=22874, solve=74.305s, root=60.765s, nodes=30, pool=108727`。这说明至少在原始 40-2 的小 horizon、平滑三角 setup 矩阵上，加入和 setup time 成比例的弱 setup cost 没有把 time-indexed relaxed gap 放大，反而可能减少了绕行/重复访问伪列的吸引力，使尾部更轻。
+
+真正能把差距打出来的是 `wet040_001_2m_timeJitterX10`。同一轮 900s 对照里，ng-DSSR 关闭 time-indexed helper 时 `510.258s` 收敛到 `104113`；打开 post-node window tightening 后进一步降到 `394.459s`，列池从 `123244` 降到 `66016`。而 time-indexed no-SRI 在 900s 内没有收敛，root bound 只有 `102869.043478`，最终 lower bound `103195.700000`，incumbent `104836`，gap `1.5646%`；time-indexed SRI/rank-1 甚至仍停在 root。这个对照说明：当时间尺度被非均匀放大以后，time-indexed 的劣势不只是“慢”，而是 root bound / 收敛证明也明显变差；ng-DSSR 则可以借助函数式时间表示和继承 compact window 保持稳定。
+
+因此基于 40-2 当前证据，最可信的排序是：第一，非均匀放大时间尺度或需要整数 scale 会最明显拉开 gap；第二，强 setup time 结构可能会拉开，但需要 setupR50/R75、cluster/family 或非比例 setup cost 进一步验证；第三，单纯 `setupCost = c * setupTime` 且 c 不大，不但不能证明 gap 会变大，原始 40-2 反而显示它可能让 time-indexed 更容易收敛。
+
+### 2026-07-04 root gap 口径修正
+
+前面关于 gap 的讨论需要明确区分“最终收敛 gap / 时间限制 gap”和“root LP gap”。如果只看 root bound 与最终最优值之间的 gap，40-2 变体给出的结论更细：timeJitterX10 的总求解和闭合能力差距最大，但 root gap 差距不一定最大；setupR50/R75 + cost20 反而在 root bound 上更能看出 ng-DSSR 比 time-indexed 强。
+
+按 `(opt - rootBound) / opt` 计算，当前有证据的 40-2 root gap 如下。原始 setup cost0 中，time-indexed root bound 为 `22487.647059`，ng-DSSR root bound 为 `22490.000000`，对应 root gap 约 `0.409%` 对 `0.398%`，差距只有约 `0.010` 个百分点，基本可以认为 root bound 强度接近。zeroSetup 中二者 root bound 都是 `17866.666667`，对最优 `17881` 的 root gap 约 `0.080%`，没有 relaxed gap 差异。
+
+setup cost20 原始 40-2 中，time-indexed root bound 为 `27996.083333`，ng-DSSR 为 `28035.113636`，对最优 `28110` 的 root gap 分别约 `0.405%` 和 `0.266%`，ng-DSSR 强约 `0.139` 个百分点。setupR25 + cost20 中，time-indexed root bound 为 `31869.600000`，ng-DSSR root 直接到 `31893.000000`，root gap 分别约 `0.073%` 和 `0`。setupR50 + cost20 中，time-indexed root bound 为 `43426.375000`，ng-DSSR 为 `43573.571429`，对最优 `43625` 的 root gap 分别约 `0.455%` 和 `0.118%`，差距约 `0.337` 个百分点。setupR75 + cost20 中，time-indexed root bound 为 `54655.816092`，ng-DSSR 为 `54808.500000`，对最优 `55007` 的 root gap 分别约 `0.638%` 和 `0.361%`，差距约 `0.278` 个百分点。
+
+timeJitterX10 中，time-indexed root bound 为 `102869.043478`，ng-DSSR root bound 为 `103000.421053`，如果按最终已知最优 `104113` 算，root gap 分别约 `1.195%` 和 `1.069%`，差距约 `0.126` 个百分点。也就是说，timeJitterX10 的绝对 root gap 都明显变大，但二者 root gap 差距没有 setupR50/R75 那么大；它更大的问题是 time-indexed 后续 900s 无法闭合，而 ng-DSSR 能收敛。
+
+因此如果问题问的是“root gap 差距什么时候明显”，根据 40-2 证据，答案应是：`setupR50/R75 + 高 setup cost` 这类强 setup 结构下，ng-DSSR 的 elementary/函数式定价 root bound 明显强于 time-indexed pseudo-schedule；如果问题问的是“整体求解什么时候明显拉开”，则 `timeJitterX10` 这类大 horizon / 非均匀放大最明显。两者不能混为一个 gap 结论。
+
+同时也要承认另一个重要事实：这些 40-2 变体里，time-indexed 的 root gap 大多数本身并不大。zeroSetup 是 `0.080%`，原始 setup 是 `0.409%`，setupR25 + cost20 是 `0.073%`，setupR50/R75 + cost20 也只是 `0.455%/0.638%`，只有 timeJitterX10 到 `1.195%`。这说明在当前数据结构下，pseudo-schedule 松弛虽然理论上弱于 elementary/ng 列，但 root RMP 已经很强，不能把 time-indexed 方法简单描述成“bound 很差”。更准确的表述是：小整数 horizon 和当前平滑 setup 数据下，time-indexed root bound 足够强，优势主要来自定价便宜；ng-DSSR 的 root bound 更强但提升幅度通常只有零点几个百分点，未必足以抵消连续时间函数 pricing 的成本。
+
+因此后续论文实验如果要体现 ng-DSSR 的价值，不能只盯 40-2 小 horizon 的 root gap。更应该强调两类场景：一是 horizon 放大、小数时间 scale、外包/分段成本等 time-indexed 图会膨胀或离散化困难的场景；二是 setup 结构更复杂、pseudo-schedule 重复访问比例明显升高、或者 time-indexed 需要大量列才能维持小 root gap 的场景。当前 40-2 结果反而说明，原文 time-indexed 类方法在小整数时间实例上作为 baseline 是很强的，不能低估。
+
+进一步形成一个待验证猜想：当前 40-2 里 time-indexed root gap 很小，可能和 due date 仍然是单点有关。即使考虑 setup time，任务完成时间被单点 due date 周围的 earliness/tardiness penalty 紧紧约束，重复访问某个 job 通常会推迟后续任务、增加时间代价，因此 pseudo-schedule 里重复 job 的收益不明显。换句话说，当前数据虽然允许 time-indexed pricing 生成非 elementary 路径，但目标函数本身已经把很多重复访问压掉了。
+
+如果后续改成更宽的 due window，情况可能不同。due window 较宽时，一个 job 在较大时间区间内完成都没有或只有很小惩罚，pseudo-schedule 就更可能通过重复访问、绕行或同一序列多时间点来制造低 reduced-cost 列；此时 time-indexed relaxed root bound 与 ng-DSSR elementary/ng root bound 的差距可能会更明显。类似地，总体时间尺度更大、due window 更宽、时间惩罚斜率更平缓时，重复访问的时间代价下降，也更可能暴露 relaxed 图的松弛问题。setup 暂时不作为主要解释变量：在当前平滑三角 setup 和比例 setup cost 实验里，它没有稳定放大 root gap；真正需要观察的是宽 due window 和大 horizon 是否会提高 pseudo-schedule 正值列中重复 job 的比例。
+### 2026-07-04 60-2 四组对比中 ng-DSSR 慢在哪里
+
+对 `wet060_001_2m` 的四组对比中，两个 time-indexed 版本已经完成，两个 ng 版本被手动停止。已完成结果为：time-indexed no-SRI `FINISHED, obj=bound=36817, solve=1567.649s, root=527.299s, nodes=34`；time-indexed rank1/SRI `FINISHED, obj=bound=36817, solve=1692.235s, root=1362.981s, nodes=3`。
+
+两个 ng 版本的主要慢点不是强分支。`ng-DSSR + time-indexed root preprocessing + seed200` 停止时已经出 root，卡在 node 2 的 pricing tail。累计统计为：临时 time-indexed root preprocessing 中 `TimeIndexedGraphPricing=102.973s/728`，对应 node0 master LP `333.490s/727`，预处理总计约 `460.746s`；正式 ng-DSSR exact pricing `2918.197s/166`，其中 node1 `1447.745s/82`、node2 `1470.452s/84`；启发式 pricing `515.666s/365`；强分支相关 master LP 只有约 `29.894s`，不是主瓶颈。node 2 后期 LP objective 长时间停在 `36752.000000`，每轮 exact pricing 常花十几到二十多秒但只返回 1 到几条列，说明主要问题是 ng exact pricing 的长尾退化。
+
+`ng partial + SRI + time-indexed root preprocessing + seed200` 停止时仍在 root。累计统计为：同样的临时 time-indexed root preprocessing 约 `460.929s`；partial dominance exact pricing `3092.422s/253`，全部发生在 node1/root；启发式 pricing `728.682s/502`；root 的 after-pricing master LP 只有 `10.569s/498`，after-cut 约 `2.865s/3`。因此这个版本当前还没真正体现出 SRI cut 的整体收益，主要时间已经被 root 上大量 partial exact pricing 和启发式 pricing 消耗掉。
+
+由此得到的判断是：在 60-2 上，ng-DSSR 的瓶颈不是 LP 也不是 strong branching，而是反复完整跑 ng exact pricing，但每次只产生很少有效列，LP bound 改善很慢。time-indexed root preprocessing 本身也不便宜，约等于一次临时 time-indexed root 的量级，其中大头是临时 RMP 反复求解而不是图最短路。后续若继续优化 ng 路线，应优先处理 root/node pricing tail、列返回策略、DSSR 更新/初始 ng-set、以及是否用 time-indexed root 结果切换后续定价器，而不是继续调整 strong branching。
+
+进一步对比单次 pricing 成本后，问题更直接：time-indexed 图 pricing 在本次预处理中约为 `102.973s/728`，平均每次 `0.141s`；标准 ng-DSSR exact pricing 为 `2918.197s/166`，平均每次约 `17.6s`；partial+SRI root 上 partial exact pricing 为 `3092.422s/253`，平均每次约 `12.2s`。也就是说，time-indexed 一次 pricing 是 0.1 秒量级，而 ng-DSSR 一次 pricing 是十几到二十秒量级。ng-DSSR 的理论列更强，但如果一次 exact pricing 只返回少量列，且后续 LP bound 几乎不动，这个强度优势就会被单次 pricing 成本完全吃掉。
+
+这也解释了为什么 time-indexed 即使列弱、列多，仍可能整体更快：它的 DAG 最短路/候选恢复很便宜，可以高频快速补列；ng-DSSR 则要做双向标签、函数包络、completion bound、DSSR 多轮更新和大量 join 检查，单次求解成本高很多。后续优化 ng-DSSR 时，真正要盯的是“每次 exact pricing 的平均耗时”和“每次 exact pricing 带来的 LP bound 改善/新增有效列数”，而不是只看总列数或 root gap。
+### 2026-07-05 due window 宽度对 time-indexed root 的影响
+
+本次按 `wet040_001_2m` 原始数据派生宽 due-window 实验，没有复制或修改原始 `.dat` 文件，而是在 Tanaka loader 里新增实验属性 `twet.data.dueWindowHalfWidth`。该属性只用于实验：原始文件仍按 due date 读取，若设置 `W>0`，则把每个 job 的 due window 改成 `[max(0,d_j-W), d_j+W]`，随后重新计算 `CmaxH`、静态 hard window 和 penalty function。这样 setup、processing、权重等都保持不变，只观察 due-window 宽度本身的影响。
+
+为避免 ALNS 和启发式 pricing 干扰，本轮使用纯 time-indexed no-cut root-only 配置：`timeIndexedGraphPricing=true`、`enableHeuristicPricing=false`、`runALNSForSeed=false`、`strongBranching=false`、`maxNodes=1`、`maxExactColumns=5000`，并关闭 time-indexed completion-bound/window/arc-fixing 增强，只看 time-expanded graph pricing 自身把 root LP 收敛到无负列后的状态。状态为 `NODE_LIMIT` 是因为只允许处理 root 一个节点；root 本身已经完成 pricing 收敛。
+
+结果如下。`W=0` 时 root bound 为 `22487.647059`，root gap 为 `64.299%`，pool 为 `46555`，exact pricing `5.347s/226`，root 正值列 `18` 条，其中 elementary 正值列 `15` 条，非 elementary 正值列 `3` 条，正值列总权重为 `2.0`。`W=100` 时 bound 降到 `11207.448276`，gap 为 `74.424%`，pool `39879`，exact `5.062s/203`，正值列 `22` 条，其中 elementary `12` 条、非 elementary `10` 条。`W=300` 时 bound 进一步降到 `1355.727273`，gap 为 `90.953%`，pool `33907`，exact `6.043s/211`，正值列 `22` 条，其中 elementary `8` 条、非 elementary `14` 条。`W=600` 时 bound 基本为 `0`，gap 为 `100%`，pool `12302`，exact `4.282s/42`，正值列 `24` 条，elementary 正值列为 `0`，全部 `24` 条正值列都是非 elementary，最大正值序列长度达到 `89`。
+
+这组结果支持前面猜想：当前原始 due-date 算例里 time-indexed root bound 很强，很大程度上是因为单点 due date 和 dual/window 共同压制了重复访问 job 的收益；当 due window 被放宽后，pseudo-schedule 的非 elementary 列开始明显进入 root LP 正值解，root bound 迅速变弱。尤其 `W=600` 时，正值列已经全部是非 elementary，说明 relaxed time-indexed RMP 确实在利用重复 job 的伪路径结构。
+
+需要注意，本轮关闭了 ALNS，因此 CSV 中的 incumbent 只代表该 root-only 诊断配置下的当前上界，不用于和完整 BPC 最终时间直接比较。这里真正需要看的指标是 root LP bound、正值列中 elementary/非 elementary 的比例、以及 pool/pricing 规模。后续如果要做完整求解对比，应在同一宽窗设置下分别跑 time-indexed 与 ng-DSSR 的完整配置，并重新打开一致的 ALNS/强分支策略。
+
+同时补充了两类统计日志。直接跑 time-indexed pricing 时，root 收敛后会输出 `timeIndexedRootSolutionColumns positiveCols=... elementaryPositiveCols=... nonElementaryPositiveCols=...`。ng-DSSR 开启 time-indexed root preprocessing 时，`timeIndexedRootPreprocess.done` 也会带上临时 time-indexed root 的 `rootSolution={...}` 统计。这里的 elementary/basic 口径指 job sequence 中没有重复 job，不是 CPLEX basis 里的 basic variable。

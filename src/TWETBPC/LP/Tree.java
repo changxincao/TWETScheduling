@@ -185,6 +185,11 @@ public class Tree {
 
 			traceSink.onMasterSolved(node, solution, lp.getRestrictedColumnIds().size(), lp.getActiveCutIds().size(),
 					bestBound, incumbentCost, queue.size(), totalPoolSize(), cutPool.size(), incumbentUpdated);
+			if (node.depth == 0 && config.useTimeIndexedGraphPricing) {
+				traceSink.onStageHeartbeat(node,
+						"timeIndexedRootSolutionColumns " + ColumnSolutionStats.from(solution, pool, data.n).summary(),
+						totalPoolSize(), cutPool.size());
+			}
 			if (isSolveTimeLimitReached(solveStartNanos)) {
 				traceSink.onNodeClosed(node, "time_limit", queue.size());
 				stoppedByTimeLimit = true;

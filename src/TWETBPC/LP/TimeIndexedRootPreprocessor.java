@@ -72,6 +72,7 @@ final class TimeIndexedRootPreprocessor {
 			if (solution.getStatus() != TWETMasterStatus.LP_RELAXATION && !solution.isInteger()) {
 				return Result.skipped("time-indexed preprocessing root not solved");
 			}
+			ColumnSolutionStats rootStats = ColumnSolutionStats.from(solution, prePool, data.n);
 			TimeIndexedGraphPricingEngine.ArcFixingResult graphFix =
 					TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, preConfig, preLp, incumbentCost);
 			TimeIndexedScalarCompletionBound.ArcFixingResult scalarFix =
@@ -82,8 +83,8 @@ final class TimeIndexedRootPreprocessor {
 			int seedColumnsCopied = copyBestElementaryColumnsToMainRoot(data, config, prePool, preLp, mainPool, root);
 			return Result.applied(prePool.size(), preRoot.countTimeIndexedPricingOnlyForbiddenArcs(), promotedOrdinaryArcs,
 					preRoot.countTimeIndexedPricingWindowTightenedJobs(), preRoot.averageTimeIndexedPricingWindowLength(),
-					preRoot.averageTimeIndexedPricingWindowShrinkRatio(), seedColumnsCopied, graphFix.summary(), scalarFix.summary(),
-					System.nanoTime() - start);
+					preRoot.averageTimeIndexedPricingWindowShrinkRatio(), seedColumnsCopied, rootStats.summary(),
+					graphFix.summary(), scalarFix.summary(), System.nanoTime() - start);
 		} finally {
 			preLp.closeModel();
 		}
@@ -238,8 +239,8 @@ final class TimeIndexedRootPreprocessor {
 		}
 
 		static Result applied(int tempPoolSize, int timeArcCount, int promotedOrdinaryArcs, int tightenedJobs,
-				double avgWindowLength, double avgShrinkRatio, int seedColumnsCopied, String graphSummary,
-				String scalarSummary, long elapsedNanos) {
+				double avgWindowLength, double avgShrinkRatio, int seedColumnsCopied, String rootColumnStats,
+				String graphSummary, String scalarSummary, long elapsedNanos) {
 			String message = "applied tempPool=" + tempPoolSize
 					+ ", timeArcs=" + timeArcCount
 					+ ", promotedOrdinaryArcs=" + promotedOrdinaryArcs
@@ -247,6 +248,7 @@ final class TimeIndexedRootPreprocessor {
 					+ ", avgWindowLen=" + format(avgWindowLength)
 					+ ", avgShrinkRatio=" + format(avgShrinkRatio)
 					+ ", seedElementaryCols=" + seedColumnsCopied
+					+ ", rootSolution={" + rootColumnStats + "}"
 					+ ", graphFix={" + graphSummary + "}"
 					+ ", scalarFix={" + scalarSummary + "}";
 			return new Result(true, message, elapsedNanos);

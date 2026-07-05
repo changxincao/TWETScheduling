@@ -304,4 +304,8 @@ timeJitterX10 中，time-indexed root bound 为 `102869.043478`，ng-DSSR root b
 
 需要注意，本轮关闭了 ALNS，因此 CSV 中的 incumbent 只代表该 root-only 诊断配置下的当前上界，不用于和完整 BPC 最终时间直接比较。这里真正需要看的指标是 root LP bound、正值列中 elementary/非 elementary 的比例、以及 pool/pricing 规模。后续如果要做完整求解对比，应在同一宽窗设置下分别跑 time-indexed 与 ng-DSSR 的完整配置，并重新打开一致的 ALNS/强分支策略。
 
+随后按同一派生宽窗口径重跑了带 ALNS 的 root-only 对比，修正上面的 gap 口径。配置保持 `timeIndexedGraphPricing=true`、`enableHeuristicPricing=false`、`strongBranching=false`、`maxNodes=1`，但打开 `runALNSForSeed=true` 且 `alnsMaxMillis=60000`。因此 root gap 使用 ALNS 得到的 incumbent 计算；正值列统计仍来自 root LP 收敛后的解。新结果为：`W=0` 时 incumbent `22582`、bound `22487.647059`、gap `0.417824%`，正值列 `17` 条，其中 elementary `14` 条、非 elementary `3` 条；`W=100` 时 incumbent `11221`、bound `11207.448276`、gap `0.120771%`，正值列 `22` 条，其中 elementary `12` 条、非 elementary `10` 条；`W=300` 时 incumbent `1378`、bound `1355.727273`、gap `1.616308%`，正值列 `22` 条，其中 elementary `7` 条、非 elementary `15` 条；`W=600` 时 ALNS 已找到 `0` 成本解且 root bound 也是 `0`，问题在该宽度下基本退化，正值列只有 `2` 条且均为 elementary。
+
+由此修正结论为：无 ALNS 的 root gap 不能引用为正式 bound 质量指标，只能说明诊断 run 的临时上界很差；正式比较应使用带 ALNS 的 gap。即使如此，宽 due window 对 time-indexed relaxed 列结构的影响仍然存在：从 `W=0` 到 `W=300`，root LP 正值列中的非 elementary 数量从 `3/17` 增加到 `15/22`，说明 pseudo-schedule 重复 job 确实更容易成为 LP 正值支撑。`W=600` 过宽导致目标退化为 0，不适合作为“gap 变差”的证据，后续更合适的宽窗测试区间应放在 `W=100` 到 `W=300` 一类仍有非零目标且重复列比例明显上升的范围。
+
 同时补充了两类统计日志。直接跑 time-indexed pricing 时，root 收敛后会输出 `timeIndexedRootSolutionColumns positiveCols=... elementaryPositiveCols=... nonElementaryPositiveCols=...`。ng-DSSR 开启 time-indexed root preprocessing 时，`timeIndexedRootPreprocess.done` 也会带上临时 time-indexed root 的 `rootSolution={...}` 统计。这里的 elementary/basic 口径指 job sequence 中没有重复 job，不是 CPLEX basis 里的 basic variable。

@@ -325,3 +325,5 @@ fixed `W=300` 下，x4 root 结果为 `NODE_LIMIT, incumbent=23178, bound=22953.
 x5 root 结果为 `NODE_LIMIT, incumbent=30289, bound=30082.283697, root gap=0.682480%, root=324.796s, pool=119548`，其中 exact pricing `128.582s/502`，master LP `156.042s/502`。root LP 正值列 `35` 条，其中 elementary `16` 条、非 elementary `19` 条。
 
 这组结果比简单宽 due-window 实验更接近前面 timeJitterX10 的现象：非均匀放大以后，time-indexed root 仍能闭合，但 root 列数和时间明显上升，且正值解中非 elementary 列比例接近或超过一半。x4/x5 的 root gap 仍没有变得特别大，说明当前 40-2 数据即便放大到 4/5 倍，time-indexed pseudo-schedule 的 root bound 仍不算很差；真正明显的问题是 root 收敛需要的列数和 RMP/pricing 轮数持续增加。若继续沿这个方向验证，下一步应比较 x4/x5 的完整 time-indexed 与 ng-DSSR，而不是只看 root gap。
+
+这里还需要明确一个口径：x4/x5 的 fixed `W=300` 不是相对时间尺度更宽的 due window。相反，processing 和 due date 已经放大到约 4/5 倍，而窗口半宽仍保持 300，因此相对宽度比原始 `W=300` 更窄，会继续压制一部分重复访问收益。同比放大到 `W=1200/1500` 又直接零罚退化，所以如果要继续找“更宽窗口下 relaxed gap 变大”的证据，应该在 x4/x5 上扫描介于 fixed 300 和退化阈值之间的窗口，例如先试 x4 的 `W=500/700/900` 或 x5 的 `W=600/800/1000`，而不是只看当前 fixed 300。

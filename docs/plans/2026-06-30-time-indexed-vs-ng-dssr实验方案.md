@@ -311,3 +311,17 @@ timeJitterX10 中，time-indexed root bound 为 `102869.043478`，ng-DSSR root b
 进一步对 `W=300` 做完整 time-indexed no-cut 求解，打开 ALNS 60s 和 strong branching，仍关闭旧 HeuristicPricing。结果为 `FINISHED, obj=bound=1362, solve=115.133s, root=54.373s, nodes=6, pool=70265, valid=true`。root bound 为 `1355.727273`，root gap 为 `1.616308%`。总 exact graph pricing 为 `20.497s/699`，master LP 为 `70.864s`，其中 after-pricing LP `28.261s/694`，strong-branching RMP `41.823s/160`。这说明 `W=300` 确实让 time-indexed root 松弛变弱、正值解中非 elementary 列明显增多，但在 40-2 这个规模和当前整数 horizon 下，完整求解仍很快；真正的大头已经转向 RMP/strong branching，而不是 time-indexed shortest path 本身。
 
 同时补充了两类统计日志。直接跑 time-indexed pricing 时，root 收敛后会输出 `timeIndexedRootSolutionColumns positiveCols=... elementaryPositiveCols=... nonElementaryPositiveCols=...`。ng-DSSR 开启 time-indexed root preprocessing 时，`timeIndexedRootPreprocess.done` 也会带上临时 time-indexed root 的 `rootSolution={...}` 统计。这里的 elementary/basic 口径指 job sequence 中没有重复 job，不是 CPLEX basis 里的 basic variable。
+
+### 2026-07-05 非均匀 timeJitter 放大与 fixed due window 复核
+
+前面一度用 `twet.data.timeScaleFactor` 对 processing、due 和 setup 做了统一乘 4/5 的实验，这个口径不适合回答“类似之前 timeJitterX10 的放大”问题。统一乘法本质上只是把时间轴整体缩放，如果 due window 半宽也同比例缩放，模型几乎是同构的，root gap 保持不变；如果 window 放得过宽，又会直接退化为零罚实例。因此该钩子已撤回，不再作为本轮诊断依据。
+
+本轮改为沿已有 `wet040_001_2m_timeJitterX10.dat` 的扰动方向生成 x4/x5。具体做法是对原始文件和 x10 文件逐项插值：`new = original + (x10 - original) * (target - 1) / 9`，只作用于 processing、due date 和 setup time，权重保持原样。这样 target=1 回到原始实例，target=10 回到已有 timeJitterX10，target=4/5 则保留 x10 的非均匀扰动模式。生成目录为 `test-results/bpc/tmp-wet040-001-2m-time-jitter-x4x5-input-20260705`。统计上，x4 的平均 processing/due/setup 比例约为 `4.066/4.011/2.823`，x5 为 `5.089/5.015/3.432`；setup 比例低于 processing 是因为原 x10 中 setup 平均只放大约 `6.471` 倍。
+
+先尝试把 due window 半宽也按 300 同比放大到 x4 的 `1200` 和 x5 的 `1500`，结果两个 root 都直接得到 `obj=bound=0`，说明窗口过宽后目标退化，没有 gap 诊断意义。更合理的对照是保持 fixed due window 半宽 `W=300`，只把时间数据做非均匀放大。该配置为：纯 time-indexed no-cut root-only，`enableHeuristicPricing=false`、`runALNSForSeed=true`、`alnsMaxMillis=60000`、`strongBranching=false`、`maxNodes=1`，并关闭 completion-bound/window/arc-fixing 增强。
+
+fixed `W=300` 下，x4 root 结果为 `NODE_LIMIT, incumbent=23178, bound=22953.886157, root gap=0.966925%, root=167.343s, pool=76365`，其中 time-indexed exact pricing `58.133s/333`，master LP `68.010s/333`。root LP 正值列 `32` 条，其中 elementary `16` 条、非 elementary `16` 条，正值列总权重为 `2.0`。
+
+x5 root 结果为 `NODE_LIMIT, incumbent=30289, bound=30082.283697, root gap=0.682480%, root=324.796s, pool=119548`，其中 exact pricing `128.582s/502`，master LP `156.042s/502`。root LP 正值列 `35` 条，其中 elementary `16` 条、非 elementary `19` 条。
+
+这组结果比简单宽 due-window 实验更接近前面 timeJitterX10 的现象：非均匀放大以后，time-indexed root 仍能闭合，但 root 列数和时间明显上升，且正值解中非 elementary 列比例接近或超过一半。x4/x5 的 root gap 仍没有变得特别大，说明当前 40-2 数据即便放大到 4/5 倍，time-indexed pseudo-schedule 的 root bound 仍不算很差；真正明显的问题是 root 收敛需要的列数和 RMP/pricing 轮数持续增加。若继续沿这个方向验证，下一步应比较 x4/x5 的完整 time-indexed 与 ng-DSSR，而不是只看 root gap。

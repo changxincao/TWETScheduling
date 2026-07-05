@@ -308,4 +308,6 @@ timeJitterX10 中，time-indexed root bound 为 `102869.043478`，ng-DSSR root b
 
 由此修正结论为：无 ALNS 的 root gap 不能引用为正式 bound 质量指标，只能说明诊断 run 的临时上界很差；正式比较应使用带 ALNS 的 gap。即使如此，宽 due window 对 time-indexed relaxed 列结构的影响仍然存在：从 `W=0` 到 `W=300`，root LP 正值列中的非 elementary 数量从 `3/17` 增加到 `15/22`，说明 pseudo-schedule 重复 job 确实更容易成为 LP 正值支撑。`W=600` 过宽导致目标退化为 0，不适合作为“gap 变差”的证据，后续更合适的宽窗测试区间应放在 `W=100` 到 `W=300` 一类仍有非零目标且重复列比例明显上升的范围。
 
+进一步对 `W=300` 做完整 time-indexed no-cut 求解，打开 ALNS 60s 和 strong branching，仍关闭旧 HeuristicPricing。结果为 `FINISHED, obj=bound=1362, solve=115.133s, root=54.373s, nodes=6, pool=70265, valid=true`。root bound 为 `1355.727273`，root gap 为 `1.616308%`。总 exact graph pricing 为 `20.497s/699`，master LP 为 `70.864s`，其中 after-pricing LP `28.261s/694`，strong-branching RMP `41.823s/160`。这说明 `W=300` 确实让 time-indexed root 松弛变弱、正值解中非 elementary 列明显增多，但在 40-2 这个规模和当前整数 horizon 下，完整求解仍很快；真正的大头已经转向 RMP/strong branching，而不是 time-indexed shortest path 本身。
+
 同时补充了两类统计日志。直接跑 time-indexed pricing 时，root 收敛后会输出 `timeIndexedRootSolutionColumns positiveCols=... elementaryPositiveCols=... nonElementaryPositiveCols=...`。ng-DSSR 开启 time-indexed root preprocessing 时，`timeIndexedRootPreprocess.done` 也会带上临时 time-indexed root 的 `rootSolution={...}` 统计。这里的 elementary/basic 口径指 job sequence 中没有重复 job，不是 CPLEX basis 里的 basic variable。

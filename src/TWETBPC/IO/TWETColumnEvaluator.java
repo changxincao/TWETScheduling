@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import Basic.Data;
+import Common.PiecewiseLinearFunction;
+import Common.Utility;
 import HEU.Solution;
 
 /**
@@ -44,9 +46,45 @@ public class TWETColumnEvaluator {
 		if (sequence.isEmpty()) {
 			return 0.0;
 		}
-		Solution scratch = buildScratch(sequence);
-		scratch.updateInformationM(0);
-		return scratch.calCost(0);
+		PiecewiseLinearFunction current = null;
+		try {
+			int prev = 0;
+			for (int idx = 0; idx < sequence.size(); idx++) {
+				int job = sequence.get(idx);
+				PiecewiseLinearFunction next;
+				if (idx == 0) {
+					// 2026-07-06: evaluate() is called heavily by pricing checks. Build
+					// the fixed-sequence forward function directly instead of allocating a
+					// scratch Solution and updating unrelated local-search structures.
+					next = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+				} else {
+					PiecewiseLinearFunction previous = current;
+					PiecewiseLinearFunction shifted =
+							previous.shiftX(data.s[prev][job] + data.p[job]);
+					next = shifted.add(data.penaltyFunction[job]);
+					shifted.release();
+					previous.release();
+					current = null;
+				}
+				next.shiftYInPlace(data.getSetupCost(prev, job));
+				next.minimizePrefixInPlace();
+				if (next.isEmpty()) {
+					next.release();
+					current = null;
+					return Utility.big_M;
+				}
+				current = next;
+				prev = job;
+			}
+			if (current == null || current.tail == null) {
+				return Utility.big_M;
+			}
+			return current.tail.end * current.tail.slope + current.tail.intercept;
+		} finally {
+			if (current != null) {
+				current.release();
+			}
+		}
 	}
 
 	/**

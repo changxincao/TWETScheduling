@@ -400,12 +400,6 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (!graphWindow.dualWindow) {
 				return column;
 			}
-			if (!preHeuristicMode && hasRepeatedJob(column.getSequence())) {
-				// 2026-07-06: Exact time-indexed pricing may return pseudo-schedules
-				// with repeated jobs. TWETColumnEvaluator is defined for ordinary
-				// single-machine sequences, so only elementary candidates are rechecked.
-				return column;
-			}
 			double trueCost = evaluator.evaluate(column.getSequence());
 			if (Utility.isBigMValue(trueCost)) {
 				return null;

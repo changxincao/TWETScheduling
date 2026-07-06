@@ -222,3 +222,12 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 修正后的口径是：dual-window 下，只有 elementary/basic sequence 才用 `TWETColumnEvaluator` 回刷真实 objective 和 reduced cost；time-indexed exact pricing 返回的 repeated pseudo-schedule 保留图上路径成本，不再调用普通序列 evaluator。rank-1 time-indexed pricing 的 dual-window 回刷也采用同一边界。这个修改不改变普通基本列的成本回刷，也不把 dual-window 产生的受限成本写入需要真实 objective 的基本列。
 
 验证上，focused `javac` 已通过。随后用 `wet040_001_2m` 跑 direct time-indexed exact dual-window smoke，配置为 `timeIndexedGraphPricing=true`、`timeIndexedGraphDualWindow=true`、关闭启发式、单节点 120 秒限制，结果正常完成到 `NODE_LIMIT`，`valid=true`，`exact=14.950505s/227 calls`，`bound=22487.647059`，未再触发 evaluator NPE。该 smoke 只验证 dual-window exact pricing 路径已经不崩溃，不证明完整 ng-DSSR + root preprocessing 配置已经恢复到最优闭合。
+## 2026-07-06：列成本 evaluator 直接函数拼接
+
+后续复查确认，上一段“repeated pseudo-schedule 不回刷”的口径只是为了绕开旧 evaluator 的实现限制，不是算法上必须如此。非基本列本质上仍然是一条恢复出来的 job 序列，成本可以按固定序列的前向分段线性函数递推来计算：首任务使用 `penaltyFunction[j].setDomain(s_0j+p_j,T)`，后续任务做 `shiftX(s_ij+p_j)+penaltyFunction[j]`，再加 setup cost 并做 prefix-minimize。这个过程不要求 job 不重复；若重复访问导致可行域为空，则返回 `big_M`，候选列自然被丢弃。
+
+因此本次把 `TWETColumnEvaluator.evaluate()` 从 scratch `Solution` 口径改为直接 PWLF 拼接。旧实现会新建 `Solution`、初始化所有机器函数、调用 `updateInformationM(0)`，而该函数内部已经会计算一次 `calCost(0)` 并更新局部搜索相关辅助结构，随后 `evaluate()` 又再次调用 `calCost(0)`。这些工作对“只求一条列的成本”都是冗余的。新实现只保留固定序列成本所需的 forward function 递推，并在中间函数用完后释放，避免大量 evaluator 调用时反复构造无关对象。
+
+基于这个修改，time-indexed exact pricing 和 rank-1 time-indexed pricing 在 dual-window 下选中候选后，不再因为 sequence 中有重复 job 而跳过 true-cost recheck。只要图使用了 dual window，最终候选都会用新的 evaluator 回刷真实全域 objective，并按当前 dual/cut dual 重算 reduced cost；若不再为负或成本为 `big_M`，就不进入 Pool/RMP。这样既保留 dual window 缩图的收益，也避免把受限窗口成本写成永久列成本。
+
+验证上，相关类 focused `javac` 通过。临时对拍 200 条随机普通序列，新的 `evaluate()` 与仍走 `Solution.calCost()` 的 `evaluateTiming().cost` 一致。临时 micro benchmark 使用 5000 条随机序列，直接 evaluator 约 47.7ms，旧 `evaluateTiming().cost` 约 482.7ms，说明该路径在大量回刷、枚举和 repair 场景下能显著降低常数成本。更宽的 RMIH 编译检查因为当前命令 classpath 未包含 CPLEX jar 而失败，属于验证环境限制，不是本次 evaluator 改动的编译错误。

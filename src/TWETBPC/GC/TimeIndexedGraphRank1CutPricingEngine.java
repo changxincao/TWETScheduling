@@ -424,7 +424,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			}
 			SequenceSignature signature = new SequenceSignature(sequence);
 			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
-			if (graphWindow.dualWindow) {
+			if (graphWindow.dualWindow && !hasRepeatedJob(sequence)) {
 				cost = evaluator.evaluate(sequence);
 				if (Utility.isBigMValue(cost)) {
 					return;

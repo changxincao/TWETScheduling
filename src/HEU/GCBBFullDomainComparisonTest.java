@@ -326,6 +326,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useTimeIndexedGraphRank1CutPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphRank1CutPricing",
 				Boolean.toString(config.useTimeIndexedGraphRank1CutPricing)));
+		config.enableTimeIndexedGraphDualWindow = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedGraphDualWindow",
+				Boolean.toString(config.enableTimeIndexedGraphDualWindow)));
 		config.enableTimeIndexedPreHeuristicPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedPreHeuristicPricing",
 				Boolean.toString(config.enableTimeIndexedPreHeuristicPricing)));

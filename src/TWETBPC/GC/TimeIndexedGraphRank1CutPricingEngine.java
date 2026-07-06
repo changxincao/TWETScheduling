@@ -12,6 +12,7 @@ import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TimeLimitChecker;
 import TWETBPC.CUT.SubsetRowCutEvaluator;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -33,12 +34,14 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final TimeIndexedGraphPricingEngine noCutDelegate;
+	private final TWETColumnEvaluator evaluator;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
 	public TimeIndexedGraphRank1CutPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
 		this.noCutDelegate = new TimeIndexedGraphPricingEngine(data, config);
+		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	@Override
@@ -421,6 +424,16 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			}
 			SequenceSignature signature = new SequenceSignature(sequence);
 			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
+			if (graphWindow.dualWindow) {
+				cost = evaluator.evaluate(sequence);
+				if (Utility.isBigMValue(cost)) {
+					return;
+				}
+				reducedCost = reducedCost(sequence, cost);
+				if (Utility.compareGe(reducedCost, -RC_TOLERANCE)) {
+					return;
+				}
+			}
 			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, ColumnSource.PRICING_EXACT, false),
 					reducedCost);
 		}
@@ -441,6 +454,24 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				}
 			}
 			return cost;
+		}
+
+		private double reducedCost(List<Integer> sequence, double cost) {
+			double reducedCost = cost - lp.getMachineDual();
+			int prev = 0;
+			for (int job : sequence) {
+				reducedCost -= lp.getJobDual(job);
+				reducedCost -= lp.getArcDual(prev, job);
+				prev = job;
+			}
+			reducedCost -= lp.getArcDual(prev, sink);
+			for (int idx = 0; idx < cutStateData.cuts.size(); idx++) {
+				int coefficient = SubsetRowCutEvaluator.coefficient(cutStateData.cuts.get(idx), sequence, n);
+				if (coefficient > 0) {
+					reducedCost -= coefficient * cutStateData.duals[idx];
+				}
+			}
+			return reducedCost;
 		}
 
 		private double processArcReducedCost(int from, int to, int completion) {
@@ -827,12 +858,12 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 	}
 
-	private static GraphWindow computeGraphWindow(Data data, LP lp) {
+	private GraphWindow computeGraphWindow(Data data, LP lp) {
 		double[] start = new double[data.n + 1];
 		double[] end = new double[data.n + 1];
 		start[0] = 0.0;
 		end[0] = data.CmaxH;
-		boolean dualWindow = canUseDualProfitableWindow(lp);
+		boolean dualWindow = config.enableTimeIndexedGraphDualWindow && canUseDualProfitableWindow(lp);
 		double horizon = 0.0;
 		boolean hasFeasibleJob = false;
 		for (int job = 1; job <= data.n; job++) {

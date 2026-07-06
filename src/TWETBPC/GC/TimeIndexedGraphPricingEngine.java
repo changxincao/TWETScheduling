@@ -45,7 +45,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		this.data = data;
 		this.config = config;
 		this.preHeuristicMode = preHeuristicMode;
-		this.evaluator = preHeuristicMode ? new TWETColumnEvaluator(data) : null;
+		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
 	public static TimeIndexedGraphPricingEngine preHeuristic(Data data, TWETBPCConfig config) {
@@ -111,8 +111,10 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	 * 2026-06-20: time-indexed 图定价使用的离散时间窗。
 	 * root/no-cut 时可复用主线 pi-window 思路压缩 horizon；其他节点保持静态 hard window。
 	 */
-	private static GraphWindow computeGraphWindow(Data data, LP lp) {
-		return computeGraphWindow(data, lp, false, true);
+	private static GraphWindow computeSafeFixingGraphWindow(Data data, LP lp) {
+		// Arc fixing/promotion is UB-LB evidence written back to the node; the
+		// current-dual profitable window is only a pricing accelerator.
+		return computeGraphWindow(data, lp, true, false);
 	}
 
 	private static GraphWindow computeGraphWindow(Data data, LP lp, boolean useCompactWindow, boolean useDualWindow) {
@@ -163,7 +165,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		if (data == null || graphLp == null || targetNode == null) {
 			return 0;
 		}
-		GraphWindow window = computeGraphWindow(data, graphLp);
+		GraphWindow window = computeSafeFixingGraphWindow(data, graphLp);
 		int promoted = 0;
 		for (int from = 0; from <= data.n; from++) {
 			for (int to = 1; to <= data.n; to++) {
@@ -345,7 +347,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node == null ? data.n + 1 : node.sinkId();
-			this.graphWindow = computeGraphWindow(data, lp, preHeuristicMode, true);
+			this.graphWindow = computeGraphWindow(data, lp, preHeuristicMode,
+					config.enableTimeIndexedGraphDualWindow);
 			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
 			int stateCount = (n + 1) * width;
@@ -394,7 +397,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		private TWETColumn maybeRecheckSelectedCandidate(TWETColumn column) {
-			if (!preHeuristicMode || !graphWindow.dualWindow) {
+			if (!graphWindow.dualWindow) {
 				return column;
 			}
 			double trueCost = evaluator.evaluate(column.getSequence());
@@ -405,7 +408,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (Utility.compareGe(trueReducedCost, -RC_TOLERANCE)) {
 				return null;
 			}
-			return new TWETColumn(-1, column.getSequence(), n, trueCost, ColumnSource.PRICING_HEURISTIC, false);
+			return new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
 		}
 
 		boolean certifiesNoNegativeInternalColumn() {
@@ -724,7 +727,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node.sinkId();
-			this.graphWindow = computeGraphWindow(data, lp);
+			this.graphWindow = computeSafeFixingGraphWindow(data, lp);
 			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
 			this.gap = gap;

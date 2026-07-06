@@ -445,6 +445,109 @@ public class PiecewiseLinearFunction {
 
 	}
 
+	public double findMinimalInRange(double start, double end) {
+		if (head == null) {
+			return Utility.big_M;
+		}
+		double lo = Math.max(start, head.start);
+		double hi = Math.min(end, tail.end);
+		if (Utility.compareLt(hi, lo)) {
+			return Utility.big_M;
+		}
+		double min = Utility.big_M;
+		for (Segment seg = head; seg != null; seg = seg.next) {
+			if (Utility.compareLt(seg.end, lo)) {
+				continue;
+			}
+			if (Utility.compareLt(hi, seg.start)) {
+				break;
+			}
+			double segLo = Math.max(lo, seg.start);
+			double segHi = Math.min(hi, seg.end);
+			if (Utility.compareLt(segHi, segLo)) {
+				continue;
+			}
+			double leftValue = seg.getValue(segLo);
+			if (Utility.compareLt(leftValue, min)) {
+				min = leftValue;
+			}
+			double rightValue = seg.getValue(segHi);
+			if (Utility.compareLt(rightValue, min)) {
+				min = rightValue;
+			}
+		}
+		return min;
+	}
+
+	public static double findMinimalShiftedSumValue(PiecewiseLinearFunction f, double delta,
+			PiecewiseLinearFunction g, double yShift) {
+		return findMinimalShiftedSumValue(f, delta, g, yShift, true);
+	}
+
+	public static double findMinimalSumValue(PiecewiseLinearFunction f, PiecewiseLinearFunction g, double yShift) {
+		return findMinimalShiftedSumValue(f, 0.0, g, yShift, false);
+	}
+
+	private static double findMinimalShiftedSumValue(PiecewiseLinearFunction f, double delta,
+			PiecewiseLinearFunction g, double yShift, boolean trimShiftedToDomain) {
+		if (f == null || g == null || f.head == null || g.head == null) {
+			return Utility.big_M;
+		}
+		// shiftX(delta) 平移 segment 后会按 f 的原始 domain 再 trimToDomain()。
+		// 这里直接求最小值时，带 shift 的旧路径必须保留同样裁剪；纯 add 旧路径则只按物理 head/tail 交集计算。
+		double shiftedStart = f.head.start + delta;
+		double shiftedEnd = f.tail.end + delta;
+		if (trimShiftedToDomain) {
+			shiftedStart = Math.max(shiftedStart, f.domainStart);
+			shiftedEnd = Math.min(shiftedEnd, f.domainEnd);
+		}
+		double start = Math.max(shiftedStart, g.head.start);
+		double end = Math.min(shiftedEnd, g.tail.end);
+		if (Utility.compareLt(end, start)) {
+			return Utility.big_M;
+		}
+		double min = Utility.big_M;
+		Segment p = f.head;
+		Segment q = g.head;
+		while (p != null && Utility.compareLt(p.end + delta, start)) {
+			p = p.next;
+		}
+		while (q != null && Utility.compareLt(q.end, start)) {
+			q = q.next;
+		}
+		while (p != null && q != null) {
+			double pStart = p.start + delta;
+			double pEnd = p.end + delta;
+			double lo = Math.max(Math.max(pStart, q.start), start);
+			double hi = Math.min(Math.min(pEnd, q.end), end);
+			if (Utility.compareLe(lo, hi)) {
+				double slope = p.slope + q.slope;
+				double intercept = p.intercept - p.slope * delta + q.intercept + yShift;
+				double leftValue = slope * lo + intercept;
+				if (Utility.compareLt(leftValue, min)) {
+					min = leftValue;
+				}
+				double rightValue = slope * hi + intercept;
+				if (Utility.compareLt(rightValue, min)) {
+					min = rightValue;
+				}
+			}
+			if (Utility.compareLe(pEnd, q.end)) {
+				p = p.next;
+				if (Utility.compareEq(pEnd, q.end)) {
+					q = q.next;
+				}
+			} else {
+				q = q.next;
+			}
+			if (Utility.compareLt(end, Math.max(p == null ? Double.POSITIVE_INFINITY : p.start + delta,
+					q == null ? Double.POSITIVE_INFINITY : q.start))) {
+				break;
+			}
+		}
+		return min;
+	}
+
 //	private double slopeAt(double t) {
 //		if (head == null)
 //			return Utility.big_M;

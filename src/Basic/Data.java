@@ -35,7 +35,8 @@ public class Data {
 	public PiecewiseLinearFunction[] penaltyFunction;
 	public double CmaxH = 1e6;// 问题下的全局上界，用于启发式，设置不能过紧，否则可能某些差解搜不到就跳不出去
 	public double CmaxE = 1e6;// 问题下的全局上界，用于精确，越紧越好
-	
+	private boolean exactIntegerTimeInstance;
+
 	public long[] mask;
 	public long full_mask;
 	public int m_BigNumber = 100000000;
@@ -281,6 +282,7 @@ public class Data {
 	
 
 	public void setPenaltyFunctions() {
+		refreshExactIntegerTimeInstance();
 		preprocessInfeasibleArcsByHardWindows();
 		penaltyFunction = new PiecewiseLinearFunction[n + 1];
 		penaltyFunction[0] = new PiecewiseLinearFunction(0, CmaxH);
@@ -718,6 +720,39 @@ public class Data {
 		n = 60;
 		m = 3;
 		scale = 3;
+	}
+
+	public boolean isExactIntegerTimeInstance() {
+		return exactIntegerTimeInstance;
+	}
+
+	/**
+	 * 2026-07-05: time-indexed 相关增强需要知道原始时间数据能否精确落在整数网格上。
+	 * 这里只检查 processing/setup/due-window 端点；派生 hard window、dual window 和
+	 * compact window 是后续收缩结果，不参与这个静态实例属性。
+	 */
+	private void refreshExactIntegerTimeInstance() {
+		exactIntegerTimeInstance = computeExactIntegerTimeInstance();
+	}
+
+	private boolean computeExactIntegerTimeInstance() {
+		for (int job = 1; job <= n; job++) {
+			if (!isIntegerTimeValue(p[job]) || !isIntegerTimeValue(d_e[job]) || !isIntegerTimeValue(d_l[job])) {
+				return false;
+			}
+		}
+		for (int from = 0; from <= n; from++) {
+			for (int to = 1; to <= n; to++) {
+				if (!isIntegerTimeValue(s[from][to])) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	private boolean isIntegerTimeValue(double value) {
+		return Double.isFinite(value) && Utility.compareEq(value, Math.rint(value));
 	}
 
 	public double cost(int j, int C) {

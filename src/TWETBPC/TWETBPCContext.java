@@ -76,6 +76,9 @@ public class TWETBPCContext {
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		// 2026-06-28: time-indexed 实验线只使用图定价器本身；rank1 cut 时由图定价器内部先跑 bucket heuristic。
 		if (!config.useTimeIndexedGraphPricing) {
+			if (shouldAddTimeIndexedPreHeuristic()) {
+				pricingEngines.add(TimeIndexedGraphPricingEngine.preHeuristic(data, config));
+			}
 			pricingEngines.add(new HeuristicPricingEngine(data, config));
 		}
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
@@ -174,6 +177,15 @@ public class TWETBPCContext {
 		this.tree = new Tree(data, config, pool, outsourcingPool, cutPool, initialColumnBuilder, pc, branchers, traceSink);
 	}
 
+	private boolean shouldAddTimeIndexedPreHeuristic() {
+		return config.enableTimeIndexedPreHeuristicPricing
+				&& data.isExactIntegerTimeInstance()
+				&& config.enableBidirectionalPricing
+				&& (config.useGCNGBBStyleNgDssrPricing
+						|| config.useGCNGBBStyleNgDssrPartialDominancePricing
+						|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing);
+	}
+
 	/**
 	 * 汇总本次 run 的实际配置。这里同时记录最终装配出的组件和 JVM 属性覆盖项，避免只看结果时无法复原实验口径。
 	 */
@@ -208,7 +220,8 @@ public class TWETBPCContext {
 	private static String classNames(List<?> objects) {
 		ArrayList<String> names = new ArrayList<String>();
 		for (Object object : objects) {
-			names.add(object.getClass().getSimpleName());
+			names.add(object instanceof PricingEngine ? ((PricingEngine) object).getName()
+					: object.getClass().getSimpleName());
 		}
 		Collections.sort(names, new Comparator<String>() {
 			@Override

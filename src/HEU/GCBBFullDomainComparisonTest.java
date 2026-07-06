@@ -188,6 +188,9 @@ public class GCBBFullDomainComparisonTest {
 		if (config.enableNgDssrHistoryWarmStart) {
 			mode += "-ngHistW" + config.ngDssrHistoryWarmStartWindowSize;
 		}
+		if (config.enableNgDssrWindowRepeatabilityInitialFilter) {
+			mode += "-ngWinRep";
+		}
 		if (config.ngDssrReturnRelaxedColumns) {
 			mode += "-ngRelaxedColumns";
 		}
@@ -323,6 +326,12 @@ public class GCBBFullDomainComparisonTest {
 		config.useTimeIndexedGraphRank1CutPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphRank1CutPricing",
 				Boolean.toString(config.useTimeIndexedGraphRank1CutPricing)));
+		config.enableTimeIndexedPreHeuristicPricing = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedPreHeuristicPricing",
+				Boolean.toString(config.enableTimeIndexedPreHeuristicPricing)));
+		config.timeIndexedPreHeuristicColumnLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.timeIndexedPreHeuristicColumnLimit",
+				config.timeIndexedPreHeuristicColumnLimit);
 		config.enableTimeIndexedRootPreprocessingForNgDssr = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedRootPreprocessingForNgDssr",
 				Boolean.toString(config.enableTimeIndexedRootPreprocessingForNgDssr)));
@@ -440,6 +449,9 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrHistoryWarmStartUseRoot = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrHistoryUseRoot",
 				Boolean.toString(config.ngDssrHistoryWarmStartUseRoot)));
+		config.enableNgDssrWindowRepeatabilityInitialFilter = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrWindowRepeatabilityFilter",
+				Boolean.toString(config.enableNgDssrWindowRepeatabilityInitialFilter)));
 		config.ngDssrReturnRelaxedColumns = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrReturnRelaxedColumns",
 				Boolean.toString(config.ngDssrReturnRelaxedColumns)));
@@ -464,6 +476,9 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalLabelQueueOrdering = "time";
 		config.bidirectionalJoinBestThresholdMode = System.getProperty(
 				"twet.bpc.fullDomainCompare.joinBestMode", config.bidirectionalJoinBestThresholdMode);
+		config.bidirectionalJoinRangeRestrictedLowerBound = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.joinRangeLB",
+				Boolean.toString(config.bidirectionalJoinRangeRestrictedLowerBound)));
 		config.bidirectionalCompletionBoundRelaxation = System.getProperty(
 				"twet.bpc.fullDomainCompare.completionBound", config.bidirectionalCompletionBoundRelaxation);
 		config.bidirectionalCompletionBoundQueueOrdering = System.getProperty(

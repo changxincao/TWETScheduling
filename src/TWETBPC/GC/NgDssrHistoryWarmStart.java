@@ -57,11 +57,10 @@ final class NgDssrHistoryWarmStart {
 		int sampleCount = snapshots.size();
 		for (int job = 1; job <= n; job++) {
 			target[job] = new PackedBitSet(n + 2);
-			target[job].add(job);
 			double avgSize = ((double) sizeSums[job]) / sampleCount;
-			int targetSize = Math.max(1, (int) Math.floor(avgSize + 1.0e-9));
-			if (targetSize < n && highConfidenceNonSelfCount(job, sampleCount, highThreshold) + 1 > targetSize) {
-				targetSize = Math.min(n, (int) Math.ceil(avgSize - 1.0e-9));
+			int targetSize = Math.max(0, (int) Math.floor(avgSize + 1.0e-9));
+			if (targetSize < n - 1 && highConfidenceNonSelfCount(job, sampleCount, highThreshold) > targetSize) {
+				targetSize = Math.min(n - 1, (int) Math.ceil(avgSize - 1.0e-9));
 			}
 			ArrayList<MemberFrequency> candidates = frequentMembers(job, sampleCount, memberThreshold);
 			for (int i = 0; i < candidates.size() && target[job].cardinality() < targetSize; i++) {
@@ -91,14 +90,12 @@ final class NgDssrHistoryWarmStart {
 			copy[job] = new PackedBitSet(n + 2);
 			PackedBitSet source = neighborhoods[job];
 			if (source == null) {
-				copy[job].add(job);
 				continue;
 			}
 			for (int member = source.nextSetBit(1); member >= 1 && member <= n; member = source.nextSetBit(member + 1)) {
-				copy[job].add(member);
-			}
-			if (!copy[job].contains(job)) {
-				copy[job].add(job);
+				if (member != job) {
+					copy[job].add(member);
+				}
 			}
 		}
 		return copy;

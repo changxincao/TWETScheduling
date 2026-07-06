@@ -509,13 +509,26 @@ public class PC {
 				if (lastNodePrunedByDualBound) {
 					return solution;
 				}
+				boolean internalCertificateClosed = shouldCloseInternalPricingAfterCertificate(engine, generated);
+				if (internalCertificateClosed && !Double.isFinite(generated.certifiedOutsourcingReducedCost)) {
+					GeneratedColumnIds outsourcingGenerated = generateOutsourcingAfterInternalCertificate(lp,
+							activeColumnIds, activeOutsourcingColumnIds, "", true, null, Double.NaN);
+					generated.merge(outsourcingGenerated);
+				}
+				boolean pricingFamilyClosed = shouldClosePricingFamilyAfterCertificate(lp, engine, generated);
 				if (generated.isEmpty()) {
+					if (pricingFamilyClosed) {
+						break;
+					}
 					continue;
 				}
 
 				int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
 						+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
 				if (addedColumns == 0) {
+					if (pricingFamilyClosed) {
+						break;
+					}
 					continue;
 				}
 
@@ -637,12 +650,23 @@ public class PC {
 			if (lastNodePrunedByDualBound) {
 				return PricingPassResult.dualBoundPruned();
 			}
+			boolean internalCertificateClosed = shouldCloseInternalPricingAfterCertificate(engine, generated);
+			if (internalCertificateClosed && !Double.isFinite(generated.certifiedOutsourcingReducedCost)) {
+				GeneratedColumnIds outsourcingGenerated = generateOutsourcingAfterInternalCertificate(lp,
+						activeColumnIds, activeOutsourcingColumnIds, dualModeName, allowReusableBounds,
+						acceptanceDual, dualBoundObjectiveOverride);
+				generated.merge(outsourcingGenerated);
+			}
+			boolean pricingFamilyClosed = shouldClosePricingFamilyAfterCertificate(lp, engine, generated);
 			if (generated.isEmpty()) {
 				if (separationDual != null && Double.isFinite(generated.observedDualBound)
 						&& (!Double.isFinite(bestObservedEmptyPass.separationDualBound)
 								|| generated.observedDualBound > bestObservedEmptyPass.separationDualBound)) {
 					bestObservedEmptyPass = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null,
 							false, separationDual, generated.observedDualBound);
+				}
+				if (pricingFamilyClosed) {
+					return bestObservedEmptyPass;
 				}
 				continue;
 			}
@@ -655,6 +679,9 @@ public class PC {
 								|| generated.observedDualBound > bestObservedEmptyPass.separationDualBound)) {
 					bestObservedEmptyPass = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null,
 							false, separationDual, generated.observedDualBound);
+				}
+				if (pricingFamilyClosed) {
+					return bestObservedEmptyPass;
 				}
 				continue;
 			}
@@ -1272,12 +1299,9 @@ public class PC {
 		if (repairMode) {
 			return false;
 		}
-		// 2026-06-23: center 更新也需要同一 dual point 下的 L(pi) 证书，
-		// 因此即使 dual-bound pruning 关闭，也允许 exact pricing 计算 observed bound。
-		// active SRI 当前没有完整 smoothing objective 口径，先只找列不剪枝。
-		if (!lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
-			return false;
-		}
+		// 2026-07-06: observed dual bound 只要求同一个 dual point 下的目标值和 pricing 证书。
+		// active SRI 下 exact SRI-aware pricing 返回的是包含 SRI cut dual 的 rc_min，可以用于同一公式；
+		// 只有 stabilized/override dual 缺少有限 dual objective 时才不能观察 bound。
 		if (lp.hasPricingDualOverride() && !Double.isFinite(dualBoundObjectiveOverride)) {
 			return false;
 		}
@@ -1290,6 +1314,35 @@ public class PC {
 		return !repairMode && lp.isColumnizedOutsourcing()
 				&& !(engine instanceof OutsourcingPricingEngine)
 				&& Double.isFinite(result.getCertifiedInternalReducedCost());
+	}
+
+	private boolean shouldCloseInternalPricingAfterCertificate(PricingEngine engine, GeneratedColumnIds generated) {
+		return !(engine instanceof OutsourcingPricingEngine)
+				&& Double.isFinite(generated.certifiedInternalReducedCost)
+				&& Utility.compareGe(generated.certifiedInternalReducedCost, -Utility.EPS);
+	}
+
+	private boolean shouldClosePricingFamilyAfterCertificate(LP lp, PricingEngine engine, GeneratedColumnIds generated) {
+		if (!shouldCloseInternalPricingAfterCertificate(engine, generated)) {
+			return false;
+		}
+		return !lp.isColumnizedOutsourcing() || Double.isFinite(generated.certifiedOutsourcingReducedCost);
+	}
+
+	private GeneratedColumnIds generateOutsourcingAfterInternalCertificate(LP lp,
+			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
+			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
+		if (!lp.isColumnizedOutsourcing()) {
+			return new GeneratedColumnIds();
+		}
+		PricingEngine outsourcingEngine = findOutsourcingPricingEngine();
+		if (outsourcingEngine == null) {
+			return new GeneratedColumnIds();
+		}
+		String suffix = dualModeName == null || dualModeName.length() == 0
+				? "outsourcingAfterInternalCertificate" : dualModeName + ".outsourcingAfterInternalCertificate";
+		return generateColumnsFromEngine(lp, outsourcingEngine, false, activeColumnIds, activeOutsourcingColumnIds,
+				suffix, allowReusableBounds, acceptanceDual, dualBoundObjectiveOverride);
 	}
 
 	private PricingEngine findOutsourcingPricingEngine() {

@@ -109,19 +109,9 @@ public final class CompletionBoundSubtreeArcEliminator {
 					result.remember(fromJob, toJob, false, true);
 					continue;
 				}
-				PiecewiseLinearFunction shiftedPrefix = prefix.shiftX(delay);
-				if (shiftedPrefix.head == null) {
-					result.remember(fromJob, toJob, true, false);
-					continue;
-				}
-				PiecewiseLinearFunction arcUseBound = shiftedPrefix.add(suffix);
-				if (arcUseBound.head == null) {
-					result.remember(fromJob, toJob, true, false);
-					continue;
-				}
 				result.functionEvaluations++;
-				arcUseBound.shiftYInPlace(fixedReducedCost);
-				double lowerBound = arcUseBound.findMinimal(false, true)[0];
+				double lowerBound = PiecewiseLinearFunction.findMinimalShiftedSumValue(prefix, delay, suffix,
+						fixedReducedCost);
 				if (!Utility.compareLt(lowerBound, cutoff)) {
 					result.remember(fromJob, toJob, false, false);
 				}
@@ -131,7 +121,11 @@ public final class CompletionBoundSubtreeArcEliminator {
 	}
 
 	private boolean isTimeDisjoint(PiecewiseLinearFunction prefix, PiecewiseLinearFunction suffix, double delay) {
-		return Utility.compareGt(prefix.head.start + delay, suffix.tail.end);
+		double shiftedStart = Math.max(prefix.head.start + delay, prefix.domainStart);
+		double shiftedEnd = Math.min(prefix.tail.end + delay, prefix.domainEnd);
+		double start = Math.max(shiftedStart, suffix.head.start);
+		double end = Math.min(shiftedEnd, suffix.tail.end);
+		return Utility.compareLt(end, start);
 	}
 
 	private boolean isScalarEliminated(CompletionBoundCalculator.Bounds bounds, int fromJob, int toJob,
@@ -197,12 +191,17 @@ public final class CompletionBoundSubtreeArcEliminator {
 					return true;
 				}
 			}
-			PiecewiseLinearFunction completion = frontier.add(suffix);
-			if (completion.head == null) {
+			if (!hasCommonDomain(frontier, suffix)) {
 				return false;
 			}
-			double lowerBound = completion.findMinimal(false, true)[0];
+			double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(frontier, suffix, 0.0);
 			return !Utility.compareLt(lowerBound, cutoff);
+		}
+
+		private boolean hasCommonDomain(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
+			double start = Math.max(left.head.start, right.head.start);
+			double end = Math.min(left.tail.end, right.tail.end);
+			return !Utility.compareLt(end, start);
 		}
 	}
 

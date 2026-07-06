@@ -60,6 +60,7 @@ class PaperDominanceGraph implements DominanceStore {
 	private static long timingStartNanos;
 	private static long nextTimingHeartbeatNanos;
 	private static String diagnosticContext = "";
+	private static final ArrayList<PaperDominanceGraph> diagnosticGraphs = new ArrayList<PaperDominanceGraph>();
 
 	private final ArrayList<PaperDominanceNode> nodes = new ArrayList<PaperDominanceNode>();
 	private final LinkedHashSet<PaperDominanceNode> roots = new LinkedHashSet<PaperDominanceNode>();
@@ -78,9 +79,11 @@ class PaperDominanceGraph implements DominanceStore {
 	PaperDominanceGraph(Direction direction, boolean partialDominance) {
 		this.direction = direction;
 		this.partialDominance = partialDominance;
+		diagnosticGraphs.add(this);
 	}
 
 	static void resetStatistics() {
+		diagnosticGraphs.clear();
 		labelsInserted = 0;
 		labelsRejected = 0;
 		nodesCreated = 0;
@@ -113,6 +116,7 @@ class PaperDominanceGraph implements DominanceStore {
 	static String statisticsSummary() {
 		return "paperGraph labels kept/rejected=" + labelsInserted + "/" + labelsRejected
 				+ ", nodes created/deleted=" + nodesCreated + "/" + nodesDeleted
+				+ ", activeLabelPerNode=" + activeLabelPerNodeSummary()
 				+ ", labelsDeleted=" + labelsDeletedByPropagation
 				+ ", superset calls/visited=" + supersetSearchCalls + "/" + supersetNodesVisited
 				+ ", subset calls/visited=" + subsetSearchCalls + "/" + subsetNodesVisited
@@ -122,6 +126,44 @@ class PaperDominanceGraph implements DominanceStore {
 				+ ", dominanceChecks=" + dominanceChecks
 				+ ", partialTrim checks/partial/full=" + partialTrimChecks + "/" + partialTrims + "/"
 				+ partialFullTrims;
+	}
+
+	private static String activeLabelPerNodeSummary() {
+		long activeNodes = 0L;
+		long activeLabels = 0L;
+		long multiLabelNodes = 0L;
+		int minLabels = Integer.MAX_VALUE;
+		int maxLabels = 0;
+		for (PaperDominanceGraph graph : diagnosticGraphs) {
+			for (PaperDominanceNode node : graph.nodes) {
+				if (!node.active) {
+					continue;
+				}
+				int liveLabels = 0;
+				for (Label label : node.labels) {
+					if (!label.isDominated) {
+						liveLabels++;
+					}
+				}
+				if (liveLabels <= 0) {
+					continue;
+				}
+				activeNodes++;
+				activeLabels += liveLabels;
+				minLabels = Math.min(minLabels, liveLabels);
+				maxLabels = Math.max(maxLabels, liveLabels);
+				if (liveLabels > 1) {
+					multiLabelNodes++;
+				}
+			}
+		}
+		if (activeNodes == 0L) {
+			return "nodes/labels/avg/min/max/multi=0/0/0.000/0/0/0";
+		}
+		double average = ((double) activeLabels) / activeNodes;
+		return "nodes/labels/avg/min/max/multi=" + activeNodes + "/" + activeLabels + "/"
+				+ String.format(java.util.Locale.US, "%.3f", average) + "/" + minLabels + "/" + maxLabels
+				+ "/" + multiLabelNodes;
 	}
 
 	@Override

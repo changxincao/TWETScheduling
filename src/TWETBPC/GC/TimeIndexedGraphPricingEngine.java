@@ -4,12 +4,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.List;
 import java.util.PriorityQueue;
 
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TimeLimitChecker;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -31,11 +33,23 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private final boolean preHeuristicMode;
+	private final TWETColumnEvaluator evaluator;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
 	public TimeIndexedGraphPricingEngine(Data data, TWETBPCConfig config) {
+		this(data, config, false);
+	}
+
+	private TimeIndexedGraphPricingEngine(Data data, TWETBPCConfig config, boolean preHeuristicMode) {
 		this.data = data;
 		this.config = config;
+		this.preHeuristicMode = preHeuristicMode;
+		this.evaluator = preHeuristicMode ? new TWETColumnEvaluator(data) : null;
+	}
+
+	public static TimeIndexedGraphPricingEngine preHeuristic(Data data, TWETBPCConfig config) {
+		return new TimeIndexedGraphPricingEngine(data, config, true);
 	}
 
 	@Override
@@ -46,6 +60,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	@Override
 	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
+		if (preHeuristicMode) {
+			return pricePreHeuristic(lp);
+		}
 		if (!config.useTimeIndexedGraphPricing) {
 			return PricingResult.noImprovement("Time-indexed graph pricing disabled");
 		}
@@ -60,9 +77,34 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		return new PricingResult(columns, true, solver.message(true));
 	}
 
+	private PricingResult pricePreHeuristic(LP lp) {
+		if (!config.enableTimeIndexedPreHeuristicPricing) {
+			return PricingResult.noImprovement("Time-indexed pre-heuristic pricing disabled");
+		}
+		if (!data.isExactIntegerTimeInstance()) {
+			return PricingResult.noImprovement("Time-indexed pre-heuristic skipped: non-integer time instance");
+		}
+		if (lp != null && !lp.getActiveCutIds().isEmpty()) {
+			return PricingResult.noImprovement("Time-indexed pre-heuristic skipped: active cuts");
+		}
+		if (this.timeLimitChecker.isTimeLimitReached()) {
+			return PricingResult.noImprovement("Time limit reached before time-indexed pre-heuristic pricing");
+		}
+		TimeIndexedGraphSolver solver = new TimeIndexedGraphSolver(lp);
+		ArrayList<TWETColumn> columns = solver.solve();
+		if (columns.isEmpty()) {
+			PricingResult result = PricingResult.noImprovement(solver.message(false));
+			if (solver.certifiesNoNegativeInternalColumn()) {
+				result = result.withCertifiedInternalReducedCost(solver.certifiedInternalReducedCost());
+			}
+			return result;
+		}
+		return new PricingResult(columns, true, solver.message(true));
+	}
+
 	@Override
 	public String getName() {
-		return "TimeIndexedGraphPricing";
+		return preHeuristicMode ? "TimeIndexedPreHeuristicPricing" : "TimeIndexedGraphPricing";
 	}
 
 	/**
@@ -70,16 +112,25 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	 * root/no-cut 时可复用主线 pi-window 思路压缩 horizon；其他节点保持静态 hard window。
 	 */
 	private static GraphWindow computeGraphWindow(Data data, LP lp) {
+		return computeGraphWindow(data, lp, false, true);
+	}
+
+	private static GraphWindow computeGraphWindow(Data data, LP lp, boolean useCompactWindow, boolean useDualWindow) {
 		double[] start = new double[data.n + 1];
 		double[] end = new double[data.n + 1];
 		start[0] = 0.0;
 		end[0] = data.CmaxH;
-		boolean dualWindow = canUseDualProfitableWindow(lp);
+		boolean dualWindow = useDualWindow && canUseDualProfitableWindow(lp);
+		Node node = lp == null ? null : lp.getNode();
 		double horizon = 0.0;
 		boolean hasFeasibleJob = false;
 		for (int job = 1; job <= data.n; job++) {
 			double hStart = data.hardWindowStart[job];
 			double hEnd = data.hardWindowEnd[job];
+			if (useCompactWindow && node != null && node.hasTimeIndexedPricingWindow(job)) {
+				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
+				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
+			}
 			if (dualWindow) {
 				double baseline = outsourcingBaseline(data, job);
 				double jobDual = Math.max(0.0, lp.getJobDual(job));
@@ -286,6 +337,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private int duplicateJobCandidates;
 		private int nextCandidateId;
 		private double bestPseudoReducedCost;
+		private boolean forwardPassCompleted;
 		private final long fingerprint;
 
 		TimeIndexedGraphSolver(LP lp) {
@@ -293,7 +345,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node == null ? data.n + 1 : node.sinkId();
-			this.graphWindow = computeGraphWindow(data, lp);
+			this.graphWindow = computeGraphWindow(data, lp, preHeuristicMode, true);
 			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
 			int stateCount = (n + 1) * width;
@@ -308,6 +360,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
 			this.bestPseudoReducedCost = INF;
+			this.forwardPassCompleted = false;
 			this.fingerprint = graphDualFingerprint(data, config, lp, horizon);
 			precomputeStaticPricingData();
 		}
@@ -318,24 +371,67 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				return new ArrayList<TWETColumn>();
 			}
 			runForwardPass();
+			forwardPassCompleted = true;
 			lastForwardDistanceCache = new LastForwardDistanceCache(fingerprint, horizon, n, width, dist);
 			ArrayList<Candidate> candidates = new ArrayList<Candidate>(candidateBySignature.values());
 			Collections.sort(candidates, bestCandidateFirstComparator());
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 			for (int i = 0; i < candidates.size() && columns.size() < maxColumns; i++) {
-				columns.add(candidates.get(i).column);
+				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i).column);
+				if (column != null) {
+					columns.add(column);
+				}
 			}
 			return columns;
 		}
 
 		private int maxReturnedColumns() {
+			if (preHeuristicMode) {
+				return config.timeIndexedPreHeuristicColumnLimit;
+			}
 			return config.timeIndexedGraphMaxExactPricingColumns > 0 ? config.timeIndexedGraphMaxExactPricingColumns
 					: config.maxExactPricingColumns;
 		}
 
+		private TWETColumn maybeRecheckSelectedCandidate(TWETColumn column) {
+			if (!preHeuristicMode || !graphWindow.dualWindow) {
+				return column;
+			}
+			double trueCost = evaluator.evaluate(column.getSequence());
+			if (Utility.isBigMValue(trueCost)) {
+				return null;
+			}
+			double trueReducedCost = reducedCost(column.getSequence(), trueCost);
+			if (Utility.compareGe(trueReducedCost, -RC_TOLERANCE)) {
+				return null;
+			}
+			return new TWETColumn(-1, column.getSequence(), n, trueCost, ColumnSource.PRICING_HEURISTIC, false);
+		}
+
+		boolean certifiesNoNegativeInternalColumn() {
+			return forwardPassCompleted && Utility.compareGe(certifiedInternalReducedCost(), -RC_TOLERANCE);
+		}
+
+		double certifiedInternalReducedCost() {
+			return Double.isFinite(bestPseudoReducedCost) ? bestPseudoReducedCost : 0.0;
+		}
+
+		private double reducedCost(List<Integer> sequence, double cost) {
+			double reducedCost = cost - lp.getMachineDual();
+			int prev = 0;
+			for (int job : sequence) {
+				reducedCost -= lp.getJobDual(job);
+				reducedCost -= lp.getArcDual(prev, job);
+				prev = job;
+			}
+			reducedCost -= lp.getArcDual(prev, sink);
+			return reducedCost;
+		}
+
 		String message(boolean improved) {
-			return "Time-indexed graph pricing " + (improved ? "generated " + candidateBySignature.size()
-					+ " negative pseudo-schedule columns" : "found no negative pseudo-schedule")
+			String columnKind = preHeuristicMode ? "elementary columns" : "pseudo-schedule columns";
+			return getName() + " " + (improved ? "generated " + candidateBySignature.size()
+					+ " negative " + columnKind : "found no negative " + columnKind)
 					+ ", bestPseudoRC=" + bestPseudoReducedCost
 					+ ", horizon=" + horizon
 					+ ", piWindow=" + (graphWindow.dualWindow ? "enabled" : "disabled")
@@ -410,10 +506,14 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 			if (hasRepeatedJob(sequence)) {
 				duplicateJobCandidates++;
+				if (preHeuristicMode) {
+					return;
+				}
 			}
 			SequenceSignature signature = new SequenceSignature(sequence);
 			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
-			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, ColumnSource.PRICING_EXACT, false),
+			ColumnSource source = preHeuristicMode ? ColumnSource.PRICING_HEURISTIC : ColumnSource.PRICING_EXACT;
+			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, source, false),
 					reducedCost);
 		}
 

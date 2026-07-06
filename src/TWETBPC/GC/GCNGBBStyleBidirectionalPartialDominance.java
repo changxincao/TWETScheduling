@@ -167,6 +167,8 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 	private long joinFunctionEvaluations;
 	private long joinFunctionPruned;
 	private long joinFunctionBestRecordPruned;
+	private long joinRangeLowerBoundChecks;
+	private long joinRangeLowerBoundPruned;
 	private long forwardSinglePointKept;
 	private long forwardSinglePointDominatedByStore;
 	private long forwardSinglePointDominatedByGraph;
@@ -1770,10 +1772,8 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 			return;
 		}
 
-		joinFunctionEvaluations++;
 		PiecewiseLinearFunction forwardFull = getForwardJoinExtension(forward);
-		PiecewiseLinearFunction shiftedForward = forwardFull.shiftX(delta);
-		if (shiftedForward.head == null) {
+		if (forwardFull.head == null) {
 			joinFunctionPruned++;
 			return;
 		}
@@ -1782,15 +1782,33 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 			joinFunctionPruned++;
 			return;
 		}
-		PiecewiseLinearFunction joinCost = shiftedForward.add(backwardFull);
-		if (joinCost.head == null) {
+		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
+		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
+		double shiftedForwardStart = Math.max(forwardFull.head.start + delta, forwardFull.domainStart);
+		double shiftedForwardEnd = Math.min(forwardFull.tail.end + delta, forwardFull.domainEnd);
+		double overlapStart = Math.max(shiftedForwardStart, backwardFull.head.start);
+		double overlapEnd = Math.min(shiftedForwardEnd, backwardFull.tail.end);
+		if (Utility.compareLt(overlapEnd, overlapStart)) {
 			joinFunctionPruned++;
 			return;
 		}
-		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
-		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
-		joinCost.shiftYInPlace(joinFixedReducedCost);
-		double reducedCostBound = joinCost.findMinimal(false, true)[0];
+		if (config.bidirectionalJoinRangeRestrictedLowerBound) {
+			joinRangeLowerBoundChecks++;
+			double forwardRangeMin = forwardFull.findMinimalInRange(overlapStart - delta, overlapEnd - delta);
+			double backwardRangeMin = backwardFull.findMinimalInRange(overlapStart, overlapEnd);
+			double rangeLowerBound = forwardRangeMin + backwardRangeMin + joinFixedReducedCost;
+			double threshold = joinLowerBoundThreshold();
+			if (!Utility.compareLt(rangeLowerBound, threshold)) {
+				joinRangeLowerBoundPruned++;
+				if (Utility.compareLt(threshold, REDUCED_COST_TOLERANCE)) {
+					joinPairsBestBoundPruned++;
+				}
+				return;
+			}
+		}
+		joinFunctionEvaluations++;
+		double reducedCostBound = PiecewiseLinearFunction.findMinimalShiftedSumValue(forwardFull, delta,
+				backwardFull, joinFixedReducedCost);
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;
 			if (Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
@@ -1822,6 +1840,8 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		joinFunctionEvaluations = 0;
 		joinFunctionPruned = 0;
 		joinFunctionBestRecordPruned = 0;
+		joinRangeLowerBoundChecks = 0;
+		joinRangeLowerBoundPruned = 0;
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -2025,6 +2045,8 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", joinRangeLB check/pruned=" + joinRangeLowerBoundChecks
+				+ "/" + joinRangeLowerBoundPruned
 				+ ", joinBest mode/bestRC/lbPruned/recordPruned=" + joinBestThresholdMode
 				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
 				+ "/" + joinFunctionBestRecordPruned
@@ -2454,19 +2476,9 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 					completionBoundArcFixingScalarPruned++;
 					continue;
 				}
-				PiecewiseLinearFunction shiftedPrefix = prefix.shiftX(delay);
-				if (shiftedPrefix.head == null) {
-					rememberCompletionBoundFixedArc(fromJob, toJob, true);
-					continue;
-				}
-				PiecewiseLinearFunction arcBound = shiftedPrefix.add(suffix);
-				if (arcBound.head == null) {
-					rememberCompletionBoundFixedArc(fromJob, toJob, true);
-					continue;
-				}
-				arcBound.shiftYInPlace(fixedReducedCost);
 				completionBoundArcFixingFunctionEvaluations++;
-				double lowerBound = arcBound.findMinimal(false, true)[0];
+				double lowerBound = PiecewiseLinearFunction.findMinimalShiftedSumValue(prefix, delay, suffix,
+						fixedReducedCost);
 				if (!Utility.compareLt(lowerBound, cutoff)) {
 					rememberCompletionBoundFixedArc(fromJob, toJob, false);
 				}
@@ -2477,7 +2489,11 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 
 	private boolean isCompletionBoundArcTimeDisjoint(PiecewiseLinearFunction prefix, PiecewiseLinearFunction suffix,
 			double delay) {
-		return Utility.compareGt(prefix.head.start + delay, suffix.tail.end);
+		double shiftedStart = Math.max(prefix.head.start + delay, prefix.domainStart);
+		double shiftedEnd = Math.min(prefix.tail.end + delay, prefix.domainEnd);
+		double start = Math.max(shiftedStart, suffix.head.start);
+		double end = Math.min(shiftedEnd, suffix.tail.end);
+		return Utility.compareLt(end, start);
 	}
 
 	private boolean isCompletionBoundArcScalarPruned(int fromJob, int toJob, double fixedReducedCost, double cutoff) {
@@ -2548,11 +2564,10 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
-		PiecewiseLinearFunction completion = label.frontier.add(suffix);
-		if (completion.head == null) {
+		if (!hasCommonCompletionDomain(label.frontier, suffix)) {
 			return false;
 		}
-		double lowerBound = completion.findMinimal(false, true)[0];
+		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(label.frontier, suffix, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
@@ -2572,12 +2587,17 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
-		PiecewiseLinearFunction completion = prefix.add(label.frontier);
-		if (completion.head == null) {
+		if (!hasCommonCompletionDomain(prefix, label.frontier)) {
 			return false;
 		}
-		double lowerBound = completion.findMinimal(false, true)[0];
+		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(prefix, label.frontier, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
+	}
+
+	private boolean hasCommonCompletionDomain(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
+		double start = Math.max(left.head.start, right.head.start);
+		double end = Math.min(left.tail.end, right.tail.end);
+		return !Utility.compareLt(end, start);
 	}
 
 	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {

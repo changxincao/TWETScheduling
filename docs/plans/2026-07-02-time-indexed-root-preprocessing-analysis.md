@@ -157,3 +157,43 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 该功能仍应作为实验开关使用。它可能改善正式 ng-DSSR root 的初始列质量，减少前几轮 pricing 波动；也可能增加初始 RMP 规模，使 master LP 变重。因此默认保持关闭，后续需要在相同 ALNS、强分支、time-indexed preprocessing 配置下做 A/B 对比。
 
 2026-07-04 检查补充：seed 转移顺序调整到 graph/scalar fixing 和 ordinary arc promote 之后执行，并跳过已经包含 root pricing-only 禁弧的候选列。这样开关打开时不会主动把刚由 time-indexed 预处理聚合禁止的普通弧列重新塞进 ng-DSSR root seed；仍然只按 sequence 过滤普通弧，不尝试用 time-specific arc 判断 sequence，因为同一 sequence 可能有多个完成时间版本。
+
+## 2026-07-05：40-2 time-indexed 窗口下重复访问诊断
+本次新增 `TWETBPC.LP.RepeatVisitWindowDiagnostic`，用于检查 time-indexed pricing 在给定完成时间窗口下是否仍可能重复访问同一个 job。诊断逻辑是：对每个 job j 枚举第一次完成时间 t，再枚举中间任务 k，检查 `j -> k -> j` 在当前窗口和已继承的普通弧、时空弧禁用状态下是否仍可行。这个检查不是看一个粗略的 `窗口长度 >= 最短回路时间`，而是显式检查第一次 j、k、第二次 j 的完成时间都落在当前窗口内。
+
+在 `data/40-2/wet040_001_2m.dat` 上，若不运行 ALNS，只用很少初始列，base hard window 下 40/40 个 job 都可重复；初始 root dual window 下只有 2/40 个 job 可重复；time-indexed root compact window 单独使用时仍有 40/40 个 job 可重复；dual window 与 compact window 取交集后仍只有 2/40 个 job 可重复。若使用默认 60 秒 ALNS，base hard window 下仍是 40/40；初始 root dual window 下为 6/40；root compact window 单独使用时为 30/40；dual window 与 compact window 取交集后为 4/40。
+
+由此当前判断是：40-2 原始算例并不是静态 hard window 本身让 time-indexed pseudo-schedule 接近 elementary；compact window 单独也不足以完全阻止重复访问。真正强的是 root dual window 与 compact window 的交集，尤其在当前 ALNS incumbent 和 root dual 下，大多数 job 已经没有足够时间完成 `j -> k -> j` 的二次访问。因此该算例中 time-indexed 的 relaxed 列和 elementary/ng 列 gap 很小，有一部分原因可能是有效窗口已经让重复访问空间极窄。这个结论只针对当前 `wet040_001_2m` 与当前 seed/dual 口径；宽 due window、放大时间尺度或不同 incumbent 下仍需要重新诊断。
+
+实现时还确认了一点：直接用 `new Data("data/40-2/wet040_001_2m.dat", true, true)` 会触发 `Data.debug_set()` 的固定 60-3 调试口径，因此诊断复用 `TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine()` 读取 40-2 数据。为此仅把该 loader 从包内可见改为 public，不改变求解主线。
+
+2026-07-05 补充判断：这解释了为什么该算例上 time-indexed root bound 会显得很强。time-indexed pricing 理论上允许 pseudo-schedule 和重复访问，但在当前 root dual window 与 compact window 共同作用下，绝大多数 job 已经无法完成 `j -> k -> j` 的二次访问。因此实际参与定价的负列空间接近 elementary，非基本列松弛带来的 gap 被显著压小。需要注意这不是 time-indexed 方法本身强，而是该算例、当前 incumbent/dual 和窗口收缩共同造成的局部现象；在宽 due window、时间尺度放大或窗口不够紧的算例上，这个性质可能消失。
+
+2026-07-05 进一步推论：40-2 上 time-indexed bound 强，不只是算例窗口紧，也说明当前 ng-DSSR 的初始 ng-set 可能偏大。若在当前 dual window 与 compact window 交集下，绝大多数 job 已经无法完成二次访问，那么这些 job 的 ng memory 对防止重复访问几乎没有贡献，只会增加 label 状态、削弱占优、提高 exact pricing 成本。尤其 `nearestK=8` 这类较大的初始 ng-set，在这种窗口口径下很可能是过度加强。更合理的方向是：按当前 effective window 判断哪些 job 仍可能重复访问，只对这些 job 初始化较小 ng memory；其余 job 只保留自身，依赖时间窗不可达性天然禁止二次访问。该策略需要注意 dual window 是当前 LP dual 下的临时窗口，因此只能作为本轮 pricing 的初始化依据，不能作为跨 node 永久结论。后续可做 A/B：root 与子节点分别比较 `self-only`、小 `nearestK`、以及基于 repeatability 的动态 ng-set 初始化，观察 DSSR 迭代次数、平均 final ng-set 大小和 exact pricing 时间。
+
+## 2026-07-05：按 effective window 过滤初始 ng-set 的试验
+本次实现了实验开关 `enableNgDssrWindowRepeatabilityInitialFilter`，常用 runner 通过 `twet.bpc.fullDomainCompare.ngDssrWindowRepeatabilityFilter=true` 打开。逻辑是在 ng-DSSR 每轮 relaxed pricing 初始化后、正式扩展 label 前，根据本轮 effective window 判断某个 job 是否仍存在 `j -> k -> j` 的二次访问时间区间。如果某个 job 在当前窗口下无法重复访问，则把它从所有初始 ng-set 的被记忆成员里删除，但不清空其他 job 的整个 ng-set，因为其他 job 仍可能需要记住那些仍可重复的任务。
+
+这个判断采用区间交集而不是逐点枚举：对 `j -> k -> j`，第一次完成 j 的时间 t 必须同时落在 j 的第一次窗口、k 的反推窗口、第二次 j 的反推窗口中。若所有 k 都没有交集，则 j 在当前窗口下视为不可重复。该判断只使用普通弧禁用和当前 effective window，不依赖时空弧逐点禁用，因此是安全偏弱、计算很轻的 O(n^2) 过滤。
+
+在 `wet040_001_2m` 上做了两个 smoke。未开启 time-indexed root preprocessing 时，虽然 ng-DSSR 日志显示 `piWindow=enabled`，但当前 exact pricing 的 effective window 仍判断为 `repeatable40/nonRepeatable0/removedMembers0`，说明仅靠这次 LP dual window 没有删掉初始 ng memory。开启 time-indexed root preprocessing 后，root preprocessing 把平均窗口缩到约 211，正式 ng-DSSR root 中出现 `repeatable30/nonRepeatable10/removedMembers53`，repair 阶段可到 `repeatable27/nonRepeatable13`，说明 compact window 参与后过滤确实生效。
+
+但同配置 node-limit 对照下，过滤没有明显加速 ng exact：开启过滤为 `solve=127.288s, root=104.456s, exact=1.484s/6 calls, pool=20131`；关闭过滤为 `solve=141.477s, root≈120s, exact=1.307s/6 calls, pool=20184`。两者 bound 相同，为 22490.571429。由于 root preprocessing 和 master LP 时间波动较大，且 ng exact 本身已经很轻，当前只能说明该过滤正确生效，但不能证明它在这个 40-2 root 上带来稳定收益。后续若要继续验证，应放到更大或未被 compact window 强烈压缩的节点上，并同时观察 DSSR 轮数、non-elementary route 数量和 label kept/dominated。
+
+2026-07-05 补充：这也解释了此前 2-cycle completion bound 和当前 repeatability 过滤效果接近的原因。二者本质上都围绕 `j -> k -> j` 这种最短二次访问结构判断“一个 job 是否还有形成重复访问/短环的空间”。在当前 40-2 有效窗口下，大多数 job 已经很难形成这类环，因此无论从 2-cycle bound 还是从 initial ng-set repeatability 过滤角度看，新增信息都有限；但 2-cycle bound 需要在更多状态和函数/窗口上反复计算，成本明显更高。当前判断是：这些技术在“环本来就很少”的算例上不会成为主要加速来源，后续更应关注窗口是否足够紧、ng exact 单次 pricing 成本，以及哪些实例会真的产生大量可行重复访问。
+
+2026-07-05 具体证据：在同一个 40-2 root preprocessing 后的 node 上，增强后的 `RepeatVisitWindowDiagnostic` 同时输出 hull 判定和 time-indexed 逐点判定。`rootCompactWindow` 下 time-indexed 逐点判断为 30/40 个 job 可重复，而 hull 判断为 32/40，其中两个 hull-only 例子都不是窗口交集错误，而是具体时空弧已被 pricing-only fixing 删光。例一：`job=15, via=9`，hull 给出第一次完成 `j15` 的可行区间 `[794,826]`，33 个整数时点都满足三次 completion window，但所有 33 个 `(15,9,t)` 时空弧都被禁掉。例二：`job=36, via=20`，hull 区间 `[594,599]` 有 6 个整数时点，第一段可走，但所有 6 个 `(20,36,t)` 回程时空弧被禁掉。`initialDualAndRootCompactWindow` 下也有类似例子：`job=8, via=7`，hull 区间 `[1227,1231]` 有 5 个整数时点，但 5 个 `(8,7,t)` 时空弧全被禁掉。由此可以确认：ng 当前的 hull 过滤偏宽，主要差距来自未消费 time-indexed 时空弧禁用信息，而不是区间交集公式本身。
+
+2026-07-05 代码口径更新：初始 ng-set 默认不再存储任务自身。原因是当前 ng-DSSR 的 memory 更新本身会执行 `memory.add(currentJob)`，因此访问到 `j` 后 `j` 一定进入 label memory，下一步 `j -> j` 会被 extension set 构造自然排除；`j ∈ ngSet[j]` 对这个实现是冗余项。真正影响重复访问的是 `i ∈ ngSet[j], i != j`，即访问 `j` 后是否继续记住之前访问过的其他 job。同步调整后，`ngDssrInitialNgSetSize` 的语义改为“不含 self 的邻居数量”，`full` 模式也只加入其他 job，history warm-start 记录和恢复时都会忽略 self。这个修改不会放开直接重复访问，因为 `memory.add(currentJob)` 保持不变；它只减少冗余 memory 成员和统计口径中的自环项。
+
+2026-07-05 修正：repeatability 过滤应发生在初始 ng-set 选择之前，而不是先按 nearestK/dualPair 选完再删除。原先“先选后删”会导致最近的不可重复 job 被删掉后，没有用更远但仍可重复的 job 补齐，等价于无意中把初始 ng-set 变得更小。现在 `initialize(lp)` 先计算 effective window，再首次构造 ng-set：`full`、`nearestK` 和 `dualPair` 都只把可重复 job 作为候选成员。history warm-start 当前不与 repeatability filter 混用；只要本轮 repeatability filter 生效，就跳过 history warm-start。后续 DSSR 轮不重建初始 ng-set，仍沿用上一轮根据 non-elementary route 更新后的集合。
+
+2026-07-05 进一步调整 repeatability 判定口径。之前 ng-DSSR 只用 hull 交集判断 `j -> k -> j` 是否可能存在，这个口径只看普通 arc 和 effective window，不消费 time-indexed root preprocessing / scalar helper 留下的 `(i,j,t)` 时空禁弧，因此在 `rootCompactWindow` 下会把部分已经被时空弧完全删光的回路仍判为可重复。现在流程改成：如果实例的加工时间、setup 时间和 due window 两端都是整数，并且当前 exact pricing 有 dual profitable window，或者当前 node 已经继承了 time-indexed compact window / 时空禁弧，则使用逐整数完成时间的 time-indexed 判定；该判定先用窗口反推收窄第一段完成时间区间，再检查 `node.isTimeIndexedPricingOnlyArcForbidden(from,to,t)`，所以能识别“窗口看起来可行，但所有时空副本已被删掉”的情况。若不满足整数时间条件，或当前没有 dual/compact/time-indexed 证据，则退回原 hull 判定。日志里的 ng-DSSR summary 会输出 `ngWindowRepeatability=timeIndexed` 或 `hull`，用于区分本轮过滤口径。
+
+这个处理对应前面的分析：dual window 是当前 LP dual 下的临时信息，所以 exact pricing 每次重新算 effective window 时可以顺手做一次精确 repeatability 判断；compact window 是 node 继承状态，在没有开启每轮 time-indexed tightening 时，同一 node 内通常不会频繁变化，因此理论上可以缓存，但当前先不引入 node 级缓存，避免把状态版本管理复杂化。对于非整数实例，当前不把 relaxed bucket 图反写为硬窗口，也不使用 `(i,j,t)` 逐点判定；这时 hull window 往往就是原始定义域，过滤自然较弱或无效。若未来要让小数实例也吃到这种精确过滤，需要先把实例统一 scale 到整数时间，而不是用向下/向外取整后的放松图直接删真实时间点。
+
+2026-07-05 进一步把“是否为精确整数时间实例”的判断从 ng-DSSR 和 `TimeIndexedScalarCompletionBound` 内部移到 `Data`。现在 `Data.setPenaltyFunctions()` 会统一刷新 `exactIntegerTimeInstance`，判断只检查原始 processing、setup 以及 due-window 两端是否为整数；派生 hard window、dual window 和 compact window 不参与这个静态实例属性。`TimeIndexedScalarCompletionBound` 与 ng-DSSR repeatability filter 都只读取 `data.isExactIntegerTimeInstance()`，不再各自扫描一遍 `p/s/d`。这样做的原因是 Tanaka loader 和若干小测试会在 `Data` 构造后覆写 `p/s/d/s` 并重新调用 `setPenaltyFunctions()`，把刷新放在这个数据重建入口更不容易 stale，也避免在 pricing 模块里嵌套重复判断。复杂度仍是一次 `O(n^2)` 扫描，但发生在数据/成本函数重建阶段，不进入每轮 exact pricing。
+
+2026-07-05 继续收紧 ng-DSSR repeatability filter 与 history warm-start 的关系。当前决定是：如果本轮 repeatability filter 已经基于当前 effective window 生成了可重复访问 mask，则本轮不再应用 history warm-start，也不把本轮 final ng-set 写回 history。原因是 repeatability filter 是当前 node/window/dual 口径下的初始化剪裁，而 history warm-start 是跨 pricing 的经验集合；两者如何加权、是否应该记录 filtered 口径下的 final set 还没想清楚。为避免历史样本和当前窗口剪裁语义混在一起，先在日志中标记 `ngWarmStart=skippedRepeatability`，后续如果要联用再单独设计。
+
+2026-07-05 再次检查补充：repeatability filter 的 hull 口径必须使用原始 `setup+p` double 持续时间，不能对持续时间取 `ceil`；否则在小数实例或非 time-indexed 精确模式下会把可行二次访问误判为不可重复。当前实现已经只在整数逐点 time-indexed 判定中使用整数 duration。另一个文档口径修正是：早前“history warm-start 恢复后清理不可重复成员”的描述已不再是当前实现；当前实现是只要本轮 repeatability filter 生效，就完全跳过 history warm-start，并且不记录该轮 final ng-set。

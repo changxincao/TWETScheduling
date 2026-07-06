@@ -54,6 +54,10 @@ public class TWETBPCConfig {
 	public boolean useTimeIndexedGraphPricing = false;
 	/** 2026-06-28: time-indexed graph pricing 的 rank-1 cut 实验模式，默认关闭。 */
 	public boolean useTimeIndexedGraphRank1CutPricing = false;
+	/** 2026-07-06: 在 ng-DSSR/heuristic 前插入 no-cut time-indexed 快速找列器；不替代 exact pricing。 */
+	public boolean enableTimeIndexedPreHeuristicPricing = false;
+	/** 2026-07-06: 前置 time-indexed 启发式每轮最多返回多少条 elementary 负列。 */
+	public int timeIndexedPreHeuristicColumnLimit = 300;
 	/**
 	 * 2026-06-20: 外包建模方式。masterVariables 保持当前 SP2 的 y_j + tariff segment 变量；
 	 * columns 使用 SP1 风格，把外包集合也作为列加入主问题，并启用外包集合定价与外包 membership 分支。
@@ -151,7 +155,7 @@ public class TWETBPCConfig {
 	public boolean useGCNGBBStyleNgDssrGraphPartialDominancePricing = false;
 	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK。 */
 	public String ngDssrInitialNgSetMode = "nearestK";
-	/** 2026-06-09: nearestK 初始 ng-set 的目标大小，包含任务自身。 */
+	/** 2026-07-05: 初始 ng-set 的目标大小，不含任务自身；当前 job 会在 label memory 更新时单独加入。 */
 	public int ngDssrInitialNgSetSize = 8;
 	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
 	public int ngDssrNonElementaryRouteUpdateLimit = 1;
@@ -170,6 +174,8 @@ public class TWETBPCConfig {
 	 * ng-relaxed 列进入 RMP，不再只用于 DSSR 收紧 ng-set；默认关闭，保持主线 elementary 列口径。
 	 */
 	public boolean ngDssrReturnRelaxedColumns = false;
+	/** 2026-07-05: 实验开关；按本轮 effective window 从初始 ng-set 里删掉不可能重复访问的 job。 */
+	public boolean enableNgDssrWindowRepeatabilityInitialFilter = false;
 	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。
@@ -206,6 +212,8 @@ public class TWETBPCConfig {
 	 * bestRecord 是激进的 record-only 对照模式，会显著减少每轮加列数，默认不作为后续正式路径使用。
 	 */
 	public String bidirectionalJoinBestThresholdMode = "zero";
+	/** 2026-07-05: 在最终函数拼接前，先用重叠时间域上的区间最小值下界剪掉一部分 join pair；实测剪枝弱，默认关闭，仅作诊断开关。 */
+	public boolean bidirectionalJoinRangeRestrictedLowerBound = false;
 	/**
 	 * 2026-05-31: full-domain node-join 实验分支的 completion bound 松弛模式。
 	 * 可选值：off、allCycles、twoCycle。默认关闭，避免改变现有对照实验语义。

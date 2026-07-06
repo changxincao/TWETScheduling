@@ -35,26 +35,26 @@ import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * no-cut 双向 pricing 的正式 half-domain GCBB-style 基准版。
+ * no-cut 闁告瑥鑻幃?pricing 闁汇劌瀚婊冾嚕?half-domain GCBB-style 闁糕晛鎼崳顖炴偋閸稈鍋?
  * <p>
- * 只有在列数上限未截断、且 forward/backward 队列都被完整耗尽时，本轮结果才可作为 exact pricing
- * certificate；若达到 {@link TWETBPCConfig#maxExactPricingColumns}，这里只表示“最多生成 K 条负列”。
+ * 闁告瑯浜濆﹢渚€宕烽妸銉ョ仚闁轰線顣︾粭鍌炴⒔閹邦厽寮撻柟鎼簼閺屽洭濡存担椋庣懍 forward/backward 闂傚啰鍠庨崹顏堟焾閸婄噥娼堕悗鐟版湰閺嗭綁鎳撳Δ鈧弫鏍籍鐠佸湱绀夐柡鍫墲閻ゅ棛绱掗幘瀵镐函闁归潧绉磋ぐ鍙夋媴濠娾偓鐠?exact pricing
+ * certificate闁挎稒绋栫€氥垺娼忛幆褍鐓?{@link TWETBPCConfig#maxExactPricingColumns}闁挎稑鐭佺换鏍煂鐏炶棄娑ч悶娑栧妿閵囨岸鍨惧鍕粯濠㈣埖姘ㄩ弫鎾诲箣?K 闁哄銈囶槹闁告帗銇涢埀顒佺缚閳?
  * <p>
- * 2026-05-22: 这里不再沿用旧实现的“同一个中间点 join”标量标签，而是改成和论文一致的
- * “forward 前缀 + crossing arc (i,r) + backward 后缀”的弧拼接。
- * 类名中的 GCNGBB 保留早期命名；当前版本在 label 中维护 ng-memory，并用 DSSR 逐轮收紧
- * ng-neighborhood。相对 {@link GCBidirectional}，本类先完整生成 forward/backward 两侧 label
- * table，再统一做 crossing-arc final join；forward->sink 收尾也并入 final join 流程。join
- * 后先按 ng-memory 检查拼接兼容性，再恢复真实序列判断 elementary/non-elementary。默认只让负的
- * elementary 列进入本地 top-K 候选池，负的 non-elementary 序列用于更新 ng-set；诊断开关打开时，
- * non-elementary ng-relaxed 列也会直接进入候选池。
+ * 2026-05-22: 閺夆晜鐟╅崳閿嬬▔瀹ュ懎鏅欐繛宀冩硶閺併倝寮閻ゅ嫰鎮抽幍顔界暠闁炽儲绮岄幃鎾寸▔閳ь剚绋夐鍐幀闂傚倸顕崑?join闁炽儲绻冮悥锝夋煂韫囨梻鍨肩紒娑欐嫕缁辨繈鎳撶仦鐐﹂柡鈧憴鍕亣闁告粌鐭侀鎴﹀棘閸ワ妇顏遍柤宄邦嚟濞?
+ * 闁炽儲绔緊rward 闁告挸绉剁槐?+ crossing arc (i,r) + backward 闁告艾娴风槐鎴﹀灳濠靛牊鐣辩€殿啫鍕伝闁规亽鍎埀?
+ * 缂侇偉顕ч幃鏇熺▔椤撶姵鐣?GCNGBB 濞ｅ洦绻勯弳鈧柡鍐ｆ櫆濠€锟犲川閽樺鍊抽柨娑欑☉缂嶅宕滃鍥ь暭闁哄牜鍓欏﹢?label 濞戞搩鍘惧ǎ顕€骞?ng-memory闁挎稑鑻懟鐔兼偨?DSSR 闂侇偅鍔橀悿鍡涘绩閸撲焦褰?
+ * ng-neighborhood闁靛棗鍊诲ù澶屸偓?{@link GCBidirectional}闁挎稑鏈﹢鎵尵鐠囨彃甯ラ悗鐟版湰閺嗭綁鎮介悢绋跨亣 forward/backward 濞戞挶鍊撻弲?label
+ * table闁挎稑鑻崯鈧紓浣哄枍缁旀挳宕?crossing-arc final join闁挎稒鐭rward->sink 闁衡偓鐠鸿櫣鍟插☉鏃傚枎閼荤喖宕?final join 婵炵繝鑳堕埢濂稿Υ娣囩灒in
+ * 闁告艾楠搁崢娑㈠箰?ng-memory 婵☆偀鍋撻柡灞诲劜鐎氶箖骞掗妷銉ユ倯閻庣顫夐埀顑秶绀夐柛鎰У娴狀喗寰勫鍥ㄥ焸閻庡湱鍋涚花顓㈠礆濡も偓閸ㄤ粙寮?elementary/non-elementary闁靛棗鍊跨划顖滄媼閵堝懎娑ч悹浣叉櫈缁€瀣儍?
+ * elementary 闁告帗顨夌换姗€宕楅妷锔芥嫳闁?top-K 闁稿﹥鐟╅埀顒€顦伴惈婊堟晬瀹€鍐槹闁?non-elementary 閹兼潙绻愰崹顏堟偨閵娿倗鑹鹃柡鍥х摠閺?ng-set闁挎稒绋栭惁鏍棘椤撶偟纾婚柛蹇氭珪婢э箑顕ｉ埀顒勫籍鐠佸湱绀?
+ * non-elementary ng-relaxed 闁告帗銇炵弧鍐╁濮樿鲸绾柟鎭掑劥缁绘﹢宕楅妷銉㈠亾濞嗘挴鍋撴径瀣建闁?
  * <p>
- * 当前版本先保证 elementary 双向函数递推和 T^mid 半域语义正确：
- * 1. forward label 存储在 [ell, Tmid]；
- * 2. backward label 存储在 [Tmid, rho]；
- * 3. join 时用论文里的常数延拓，临时补齐 forward 右半域和 backward 左半域，然后按 crossing arc 对齐相加；
- * 4. 默认直接使用 label/join 推导出的 reduced cost 反推出列成本；如需完整序列复核，可打开
- * {@link Configure#debugBPCPricingColumnCheck}。
+ * 鐟滅増鎸告晶鐘绘偋閸喐鎷遍柛蹇撶墔缁绘氨鎷?elementary 闁告瑥鑻幃婊堝礄閼恒儲娈堕梺顐ｅ笚鐢綊宕?T^mid 闁告锕ら悡娆戞嫚椤撴繄鐤呮慨婵撶悼閳ユ﹢鏁?
+ * 1. forward label 閻庢稒锚閸嬪秹宕?[ell, Tmid]闁?
+ * 2. backward label 閻庢稒锚閸嬪秹宕?[Tmid, rho]闁?
+ * 3. join 闁哄啫澧庨弫銈囨媼閻戞ɑ鐎梺鎻掔灱濞堟垹鏁崨濠冩鐎点倛鍩栫€氬洭鏁嶇仦鐓庮槻闁哄啯鍎艰棢濮?forward 闁告瑥鍟垮畷鎰板春閻旈攱瀚?backward 鐎归潻绠戝畷鎰板春閻曞倻绀夐柣鎺曟硾閹骞?crossing arc 閻庨潧缍婄紞鍫ユ儎缁嬪灝顫ｉ柨?
+ * 4. 濮掓稒顭堥濠氭儎鐎涙ê澶嶅ù锝堟硶閺?label/join 闁规亽鍔岄閬嶅礄閾忚鐣?reduced cost 闁告瑥绉电敮褰掑礄閸濆嫬鐏欓柟瀛樺姈濠€浼存晬濞戞﹩娲ら梻鍥ｅ亾閻庣懓鏈弳锝嗘償韫囨挸鐏欏璺虹У閻楁娊鏁嶇仦钘夎闁瑰灚鎸哥槐?
+ * {@link Configure#debugBPCPricingColumnCheck}闁?
  */
 public class GCNGBBStyleBidirectionalNgDssr {
 
@@ -67,7 +67,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private enum JoinBestThresholdMode {
 		ZERO,
 		BEST_UB,
-		// 2026-05-31: 激进 record-only 对照模式；会减少每轮返回列数，默认不作为后续正式路径使用。
+		// 2026-05-31: 婵犵鍋撻弶?record-only 閻庨潧婀遍崣搴∥熼垾宕囩闁挎稒绋愮槐浼村礄韫囨挾姣屾慨锝呯箺閻ゅ棙娼婚弬鎸庣闁告帗顨嗛弳鐔兼晬瀹€鍕笡閻犱降鍊撶粭澶嬫媴濠娾偓鐠愮喖宕ユ惔锝囨暰婵繐绲界槐锛勬崉椤栨氨绐炲ù锝堟硶閺併倝濡?
 		BEST_RECORD
 	}
 
@@ -112,11 +112,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double bestGeneratedReducedCost;
 	private double lastRelaxedRoundBestReducedCost;
 
-	// 2026-05-22: 双向 midpoint，只对当前 pricing 轮有效。
+	// 2026-05-22: 闁告瑥鑻幃?midpoint闁挎稑鑻ぐ褏鈧數鎳撶紞瀣礈?pricing 閺夌儐鍠楀﹢渚€寮崼娑掑亾?
 	private double tMid;
-	// 2026-05-24: 本轮 bidirectional pricing 实际使用的右侧 horizon。
-	// 若当前任务右端窗明显小于全局 CmaxH，就用它压住 midpoint 的右移，
-	// 避免 backward sink root 因 Tmid 过右而完全长不出真实标签。
+	// 2026-05-24: 闁哄牜鍓濋悿?bidirectional pricing 閻庡湱鍋ゅ顖涙媴鐠恒劍鏆忛柣銊ュ瑜板憡绗?horizon闁?
+	// 闁兼眹鍎辩紞瀣礈瀹ュ嫭宕查柛鏂衡偓鍐茬缂佹棏鍨抽悰銉╁及鎼淬垺鈻旈悘蹇撶箣缁剟宕楅妸銉ф拱 CmaxH闁挎稑鑻銊╂偨閵娿儳鏆婇柛妯侯儎缂?midpoint 闁汇劌瀚ぐ鍝ョ矓娴兼瑧绀?
+	// 闂侇剙鐏濋崢?backward sink root 闁?Tmid 閺夆晛娲よぐ鎼佹嚀鐏炵晫鏆氶柛蹇嬪姂閺嗚鲸绋夊鍛瘔闁活亞鍠庨悿鍕冀閸モ晩鍔柕?
 	private double pricingHorizon;
 	private String midpointStrategyUsed = "default";
 	private double midpointReferenceTime = Double.NaN;
@@ -137,7 +137,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private String midpointProbeFeedbackSummary = "off";
 	private boolean midpointProbeLabelsReadyForJoin;
 	private long midpointStrategyNanos;
-	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
+	// 2026-05-22: 鐟滅増鎸告晶鐘碘偓瑙勭煯閻滎垱娼鐐暠 job-level 闁告柣鍔嶉埀?H_j 缂傚倹鎸搁悺銊╁Υ?
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
@@ -159,7 +159,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
 	private double baseHalfPenaltyCacheHorizon = Double.NaN;
-	// 2026-05-24: 只有根节点且没有 cut dual 时，pi_j profitable window 才保留三角不等式依据。
+	// 2026-05-24: 闁告瑯浜濆﹢渚€寮界涵鍛濋柣鎰扳偓娑氱懍婵炲备鍓濆﹢?cut dual 闁哄啳顔愮槐婕癷_j profitable window 闁归潧绉崇换姘舵偩濞嗗海鐟忛悷娆愬笂缁楀绮垫径濠勭濞撴碍绻冨畵渚€濡?
 	private boolean dualProfitableWindowEnabled;
 
 	private long forwardLabelsKept;
@@ -180,6 +180,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinFunctionEvaluations;
 	private long joinFunctionPruned;
 	private long joinFunctionBestRecordPruned;
+	private long joinRangeLowerBoundChecks;
+	private long joinRangeLowerBoundPruned;
 	private long forwardSinglePointKept;
 	private long forwardSinglePointDominatedByStore;
 	private long forwardSinglePointDominatedByGraph;
@@ -247,6 +249,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int completionBoundBackwardMaxCandidateSegments;
 	private int completionBoundBackwardMaxAfterSegments;
 	private double completionBoundLastEvaluationCutoff;
+	private boolean completionBoundPreCertificateClosed;
 	private int diagnosticForbiddenJobArcCount;
 	private int diagnosticPricingOnlyJobArcCount;
 	private int diagnosticJobDualPositiveCount;
@@ -286,6 +289,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
 	private boolean ngDssrHistoryWarmStartApplied;
+	private boolean ngDssrHistoryWarmStartSkippedForRepeatability;
+	private boolean ngDssrWindowRepeatabilityFilterApplied;
+	private int ngDssrWindowRepeatableJobCount;
+	private int ngDssrWindowNonRepeatableJobCount;
+	private String ngDssrWindowRepeatabilityMode;
+	private boolean[] ngDssrInitialRepeatableMember;
 	private StringBuilder ngDssrNgSetStatsByRound;
 	private boolean sriPricingEnabled;
 	private ArrayList<Integer> sriCutIds;
@@ -349,22 +358,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngNeighborhoodByJob = new PackedBitSet[data.n + 2];
 		for (int job = 1; job <= data.n; job++) {
 			ngNeighborhoodByJob[job] = new PackedBitSet(data.n + 2);
-			ngNeighborhoodByJob[job].add(job);
 		}
+		prepareInitialRepeatabilityFilter(lp);
 		ngDssrHistoryWarmStartApplied = false;
-		if (historyWarmStart != null && historyWarmStart.apply(ngNeighborhoodByJob, config, canUseHistoryWarmStart(lp))) {
+		ngDssrHistoryWarmStartSkippedForRepeatability = ngDssrWindowRepeatabilityFilterApplied;
+		// 2026-07-05: repeatability filter uses the current window, while
+		// history warm-start is learned across pricing calls. Keep them separate.
+		if (!ngDssrHistoryWarmStartSkippedForRepeatability
+				&& historyWarmStart != null
+				&& historyWarmStart.apply(ngNeighborhoodByJob, config, canUseHistoryWarmStart(lp))) {
 			ngDssrHistoryWarmStartApplied = true;
 			return;
 		}
 		String mode = config.ngDssrInitialNgSetMode == null ? "nearestK" : config.ngDssrInitialNgSetMode;
-		int targetSize = Math.max(1, config.ngDssrInitialNgSetSize);
+		int targetSize = Math.max(0, config.ngDssrInitialNgSetSize);
 		if ("empty".equalsIgnoreCase(mode)) {
 			return;
 		}
 		if ("full".equalsIgnoreCase(mode)) {
 			for (int job = 1; job <= data.n; job++) {
 				for (int other = 1; other <= data.n; other++) {
-					ngNeighborhoodByJob[job].add(other);
+					if (other != job && isInitialNgMemberAllowed(other)) {
+						ngNeighborhoodByJob[job].add(other);
+					}
 				}
 			}
 			return;
@@ -386,7 +402,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!isRootNode(lp)) {
 			return true;
 		}
-		// 2026-07-03: root 初始迭代默认不用历史；加 cut 后的 root 迭代允许复用，避免重复学习相似 ng-set。
+		// 2026-07-03: root 闁告帗绻傞～鎰交椤撴繂鏁╁娑欘焾椤撶粯绋夊鍥ㄦ殢闁告ê妫楄ぐ鍫曟晬濞戞ê顫?cut 闁告艾娴峰▓?root 閺夆晩鍘洪崬顒勫礂娴ｇ瓔鍟呭璺虹Ф閺併倝鏁嶅畝鍕級闁稿繐绉归崳鍛婂緞瀹ュ拋鍔呭☉鏃傚Х濞村瀵?ng-set闁?
 		return config.ngDssrHistoryWarmStartUseRoot || (lp != null && !lp.getActiveCutIds().isEmpty());
 	}
 
@@ -397,7 +413,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void addNearestJobsToNgNeighborhood(final int centerJob, int targetSize) {
 		ArrayList<Integer> jobs = new ArrayList<Integer>();
 		for (int job = 1; job <= data.n; job++) {
-			if (job != centerJob) {
+			if (job != centerJob && isInitialNgMemberAllowed(job)) {
 				jobs.add(Integer.valueOf(job));
 			}
 		}
@@ -423,7 +439,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void addDualPairNgNeighborhoods(LP lp, int targetSize) {
-		if (targetSize <= 1) {
+		if (targetSize <= 0) {
 			return;
 		}
 		ArrayList<NgPair> pairs = new ArrayList<NgPair>();
@@ -452,13 +468,164 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		});
 		for (int i = 0; i < pairs.size(); i++) {
 			NgPair pair = pairs.get(i);
-			if (ngNeighborhoodByJob[pair.first].cardinality() >= targetSize
-					|| ngNeighborhoodByJob[pair.second].cardinality() >= targetSize) {
+			if (isInitialNgMemberAllowed(pair.second)
+					&& ngNeighborhoodByJob[pair.first].cardinality() < targetSize) {
+				ngNeighborhoodByJob[pair.first].add(pair.second);
+			}
+			if (isInitialNgMemberAllowed(pair.first)
+					&& ngNeighborhoodByJob[pair.second].cardinality() < targetSize) {
+				ngNeighborhoodByJob[pair.second].add(pair.first);
+			}
+		}
+	}
+
+	private void prepareInitialRepeatabilityFilter(LP lp) {
+		ngDssrInitialRepeatableMember = null;
+		ngDssrWindowRepeatabilityMode = null;
+		if (!config.enableNgDssrWindowRepeatabilityInitialFilter
+				|| effectiveJobHStart == null || effectiveJobHEnd == null) {
+			return;
+		}
+		Node node = lp == null ? null : lp.getNode();
+		boolean useExactTimeIndexedRepeatability = useExactTimeIndexedRepeatability(node);
+		ngDssrWindowRepeatabilityMode = useExactTimeIndexedRepeatability ? "timeIndexed" : "hull";
+		ngDssrInitialRepeatableMember = new boolean[data.n + 1];
+		int repeatableJobs = 0;
+		for (int job = 1; job <= data.n; job++) {
+			ngDssrInitialRepeatableMember[job] = canRepeatJobInCurrentEffectiveWindow(
+					node, job, useExactTimeIndexedRepeatability);
+			if (ngDssrInitialRepeatableMember[job]) {
+				repeatableJobs++;
+			}
+		}
+		ngDssrWindowRepeatabilityFilterApplied = true;
+		ngDssrWindowRepeatableJobCount = repeatableJobs;
+		ngDssrWindowNonRepeatableJobCount = data.n - repeatableJobs;
+	}
+
+	private boolean isInitialNgMemberAllowed(int member) {
+		return ngDssrInitialRepeatableMember == null
+				|| (member >= 1 && member <= data.n && ngDssrInitialRepeatableMember[member]);
+	}
+
+	private boolean useExactTimeIndexedRepeatability(Node node) {
+		if (!data.isExactIntegerTimeInstance()) {
+			return false;
+		}
+		if (dualProfitableWindowEnabled) {
+			return true;
+		}
+		return node != null && (node.countTimeIndexedPricingWindowTightenedJobs() > 0
+				|| node.countTimeIndexedPricingOnlyForbiddenArcs() > 0);
+	}
+
+	private boolean canRepeatJobInCurrentEffectiveWindow(Node node, int job,
+			boolean useExactTimeIndexedRepeatability) {
+		if (PricingCompatibility.isRequiredOutsourcedJob(node, job)) {
+			return false;
+		}
+		double jobStart = effectiveJobHStart[job];
+		double jobEnd = effectiveJobHEnd[job];
+		if (Utility.compareGt(jobStart, jobEnd)) {
+			return false;
+		}
+		if (useExactTimeIndexedRepeatability) {
+			return canRepeatJobByTimeIndexedPoints(node, job, jobStart, jobEnd);
+		}
+		for (int via = 1; via <= data.n; via++) {
+			if (via == job || PricingCompatibility.isRequiredOutsourcedJob(node, via)
+					|| isOrdinaryArcUnavailableForRepeatability(node, job, via)
+					|| isOrdinaryArcUnavailableForRepeatability(node, via, job)) {
 				continue;
 			}
-			ngNeighborhoodByJob[pair.first].add(pair.second);
-			ngNeighborhoodByJob[pair.second].add(pair.first);
+			if (canRepeatJobVia(job, via, jobStart, jobEnd)) {
+				return true;
+			}
 		}
+		return false;
+	}
+
+	private boolean canRepeatJobByTimeIndexedPoints(Node node, int job, double jobStart, double jobEnd) {
+		int start = discreteRepeatabilityStart(jobStart);
+		int end = discreteRepeatabilityEnd(jobEnd);
+		if (start > end) {
+			return false;
+		}
+		for (int via = 1; via <= data.n; via++) {
+			if (via == job || PricingCompatibility.isRequiredOutsourcedJob(node, via)
+					|| isOrdinaryArcUnavailableForRepeatability(node, job, via)
+					|| isOrdinaryArcUnavailableForRepeatability(node, via, job)) {
+				continue;
+			}
+			int firstLeg = discreteRepeatabilityDuration(job, via);
+			int secondLeg = discreteRepeatabilityDuration(via, job);
+			int firstStart = Math.max(start, Math.max(discreteRepeatabilityStart(effectiveJobHStart[via]) - firstLeg,
+					discreteRepeatabilityStart(effectiveJobHStart[job]) - firstLeg - secondLeg));
+			int firstEnd = Math.min(end, Math.min(discreteRepeatabilityEnd(effectiveJobHEnd[via]) - firstLeg,
+					discreteRepeatabilityEnd(effectiveJobHEnd[job]) - firstLeg - secondLeg));
+			for (int firstCompletion = firstStart; firstCompletion <= firstEnd; firstCompletion++) {
+				if (!isTimeIndexedRepeatabilityCompletionFeasible(job, firstCompletion)
+						|| isTimeIndexedRepeatabilityArcForbidden(node, job, via, firstCompletion)) {
+					continue;
+				}
+				int viaCompletion = firstCompletion + firstLeg;
+				if (!isTimeIndexedRepeatabilityCompletionFeasible(via, viaCompletion)
+						|| isTimeIndexedRepeatabilityArcForbidden(node, via, job, viaCompletion)) {
+					continue;
+				}
+				int secondCompletion = viaCompletion + secondLeg;
+				if (isTimeIndexedRepeatabilityCompletionFeasible(job, secondCompletion)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private boolean canRepeatJobVia(int job, int via, double jobStart, double jobEnd) {
+		double viaStart = effectiveJobHStart[via];
+		double viaEnd = effectiveJobHEnd[via];
+		if (Utility.compareGt(viaStart, viaEnd)) {
+			return false;
+		}
+		double firstLeg = repeatabilityDuration(job, via);
+		double secondLeg = repeatabilityDuration(via, job);
+		double lower = Math.max(jobStart, Math.max(viaStart - firstLeg, jobStart - firstLeg - secondLeg));
+		double upper = Math.min(jobEnd, Math.min(viaEnd - firstLeg, jobEnd - firstLeg - secondLeg));
+		return !Utility.compareGt(lower, upper);
+	}
+
+	private double repeatabilityDuration(int from, int to) {
+		return data.getSetUp(from, to) + data.getProcessT(to);
+	}
+
+	private int discreteRepeatabilityDuration(int from, int to) {
+		return (int) Math.rint(data.getSetUp(from, to) + data.getProcessT(to));
+	}
+
+	private int discreteRepeatabilityStart(double value) {
+		return Math.max(0, (int) Math.ceil(value - 1e-9));
+	}
+
+	private int discreteRepeatabilityEnd(double value) {
+		return Math.min((int) Math.floor(pricingHorizon + 1e-9), (int) Math.floor(value + 1e-9));
+	}
+
+	private boolean isTimeIndexedRepeatabilityCompletionFeasible(int job, int completion) {
+		if (completion < 0 || completion > pricingHorizon + 1e-9
+				|| completion < discreteRepeatabilityStart(effectiveJobHStart[job])
+				|| completion > discreteRepeatabilityEnd(effectiveJobHEnd[job])) {
+			return false;
+		}
+		return !Utility.isBigMValue(data.penaltyFunction[job].evaluate(completion));
+	}
+
+	private boolean isTimeIndexedRepeatabilityArcForbidden(Node node, int from, int to, int time) {
+		return node != null && node.isTimeIndexedPricingOnlyArcForbidden(from, to, time);
+	}
+
+	private boolean isOrdinaryArcUnavailableForRepeatability(Node node, int from, int to) {
+		return node != null && (node.isArcForbidden(from, to) || node.isPricingOnlyArcForbidden(from, to));
 	}
 
 	private int updateNgNeighborhoodsFromNonElementaryRoutes() {
@@ -491,6 +658,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void appendNgDssrSummary(String reason) {
 		lastMessage = lastMessage + " | ng-DSSR reason=" + reason + ngSetWarmStartSummary()
+				+ ngSetWindowRepeatabilitySummary()
 				+ ", rounds=" + ngDssrRoundsExecuted
 				+ ", totalNonElementarySeen=" + ngDssrTotalNonElementaryNegativeSeen
 				+ ", totalNonElementaryStored=" + ngDssrTotalNonElementaryRoutes
@@ -504,12 +672,30 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!config.enableNgDssrHistoryWarmStart) {
 			return "";
 		}
-		String source = ngDssrHistoryWarmStartApplied ? "learned" : "base";
+		String source = ngDssrHistoryWarmStartSkippedForRepeatability
+				? "skippedRepeatability"
+				: (ngDssrHistoryWarmStartApplied ? "learned" : "base");
 		String history = historyWarmStart == null ? "historyWarmStart=none" : historyWarmStart.summary();
 		return ", ngWarmStart=" + source + "/" + history;
 	}
 
+	private String ngSetWindowRepeatabilitySummary() {
+		if (!config.enableNgDssrWindowRepeatabilityInitialFilter) {
+			return "";
+		}
+		if (!ngDssrWindowRepeatabilityFilterApplied) {
+			return ", ngWindowRepeatability=skipped";
+		}
+		String mode = ngDssrWindowRepeatabilityMode == null ? "unknown" : ngDssrWindowRepeatabilityMode;
+		return ", ngWindowRepeatability=" + mode
+				+ "/repeatable" + ngDssrWindowRepeatableJobCount
+				+ "/nonRepeatable" + ngDssrWindowNonRepeatableJobCount;
+	}
+
 	private void recordNgSetHistory() {
+		if (ngDssrHistoryWarmStartSkippedForRepeatability) {
+			return;
+		}
 		if (historyWarmStart != null && config.enableNgDssrHistoryWarmStart) {
 			historyWarmStart.record(ngNeighborhoodByJob, config);
 		}
@@ -521,12 +707,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
-		initializeNgNeighborhoods(lp);
+		ngNeighborhoodByJob = null;
+		ngDssrInitialRepeatableMember = null;
 		ngDssrRoundsExecuted = 0;
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
 		ngDssrTotalNonElementaryNegativeSeen = 0;
 		ngDssrTotalElementaryColumnsReturned = 0;
+		ngDssrHistoryWarmStartSkippedForRepeatability = false;
+		ngDssrWindowRepeatabilityFilterApplied = false;
+		ngDssrWindowRepeatableJobCount = 0;
+		ngDssrWindowNonRepeatableJobCount = 0;
 		ngDssrTraceNgSetStats = Boolean.getBoolean("twet.bpc.ngDssrSetStats")
 				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetStats");
 		ngDssrTraceNgSetMembers = Boolean.getBoolean("twet.bpc.ngDssrSetMembers")
@@ -645,6 +836,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		diagnosticHeartbeat(lp, "initialize.start", true);
 		initialize(lp);
 		diagnosticHeartbeat(lp, "initialize.done", true);
+		if (completionBoundPreCertificateClosed) {
+			return generatedColumns;
+		}
 		if (fullMidpointDiagnosticRan && Boolean.getBoolean("twet.bpc.midpointFullDiagnosticStopAfter")) {
 			generatedColumns.clear();
 			lastMessage = "GCNGBB-style ng-DSSR bidirectional midpoint full diagnostic executed; exact pricing skipped";
@@ -656,7 +850,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		} else {
 			diagnosticHeartbeat(lp, "probe.rank0.reuse", true);
 		}
-		// 2026-05-26: GCNGBB-style 外层流程。先分别耗尽两侧队列，最后统一扫描 backward labels 做 crossing-arc join。
+		// 2026-05-26: GCNGBB-style 濠㈣埖鐗曢惇鏉棵规担琛℃煠闁靛棗鍊搁崢娑㈠礆閸℃鐒奸柤鐗堫殔閺佹牗绋夐妶鍕珷闂傚啰鍠庨崹顏堟晬鐏炵偓浠橀柛姘捣缁儤绋夐埀顒勫箥椤愶絽浼?backward labels 闁?crossing-arc join闁?
 		if (!midpointProbeLabelsReadyForJoin) {
 			diagnosticHeartbeat(lp, "forward.start", true);
 			while (canContinue() && !FWUL.isEmpty()) {
@@ -769,8 +963,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-26: 支持不同 label 出队策略，便于比较“低 reduced cost 优先”与“更可能被后续支配的
-	 * label 推后扩展”之间的取舍。
+	 * 2026-05-26: 闁衡偓椤栨稑鐦☉鎾崇Т閹?label 闁告垶妞藉Σ锔剧驳閺嶎偅娈ｉ柨娑樺缁岃埖绂嶆惔銏㈡Х閺夊牆鍟犻埀顒佺矆缂?reduced cost 濞村吋锚閸樻盯鍨惧┑鍛憿闁炽儲绮嶅ú鍧楀矗椤栨繂鍘撮悶姘煎亜閹绱掗鐔告殰闂佹澘绉跺▓?
+	 * label 闁规亽鍔岄幃妤呭箥閳轰胶娼旈柍銉︾箑缁狅綁姊荤€靛憡鐣遍柛娆愮墳閸ㄦ濡?
 	 */
 	private Comparator<ForwardLabel> forwardQueueComparator(LabelQueueOrdering ordering) {
 		return new Comparator<ForwardLabel>() {
@@ -892,6 +1086,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		maybeDumpPricingSnapshot(lp);
 		precomputeSriPricing(lp);
 		precomputeDynamicPricingWindows(lp);
+		if (ngNeighborhoodByJob == null) {
+			initializeNgNeighborhoods(lp);
+		}
 		if (completionBounds == null) {
 			buildCompletionBounds(lp);
 		}
@@ -899,10 +1096,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrReusableCompletionBounds = completionBounds;
 			ngDssrReusableCompletionBoundFixedArc = completionBoundFixedArc;
 		}
+		if (tryApplyCompletionBoundPreCertificate(lp)) {
+			return;
+		}
 		runMidpointProbeIfEnabled(lp);
 		if (midpointProbeLabelsReadyForJoin) {
-			// 2026-06-08: 被选中的 rank0 probe 已经耗尽两侧 label 队列，可以直接进入 join。
-			// 这里只补正式候选列去重/堆状态，避免同一个 Tmid 再跑一遍 labeling。
+			// 2026-06-08: 閻炴凹鍋婇埀顒€顦懙鎴︽儍?rank0 probe 鐎规瓕灏欑划锟犳嚀濡も偓閺佹牗绋夐妶鍕珷 label 闂傚啰鍠庨崹顏堟晬鐏炶棄璁插ù鐘劤濞插潡骞掗妷銊х闁?join闁?
+			// 閺夆晜鐟╅崳鐑藉矗椤忓泚澶婎潰閿濆懐纭€闁稿﹥鐟╅埀顒€顦崹顏堝储婵犳艾娅?闁割偄妫涙慨鎼佸箑娓氬﹦绀夐梺顒€鐏濋崢銈夊触鐏炶偐顏卞☉?Tmid 闁告劕绉风粣鍥ㄧ▔閳ь剟鏌?labeling闁?
 			initializeCandidateState(lp);
 		} else {
 			initializeSearchState(lp);
@@ -912,8 +1112,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-12: 仅用于定位同状态 partial 漏列。目标序列通过系统属性传入，默认关闭；
-	 * trace 只写入 lastMessage，不改变 label、dominance 或候选列逻辑。
+	 * 2026-06-12: 濞寸姴鎳愰弫銈嗙鎼达紕鏆板ù锝呯Т閹捇鎮╅懜纰樺亾?partial 婵犳洖绻愰崹顏堝Υ閸屾粍绐楅柡宥呮搐缁參宕氬Δ鍛亾濮樺磭绠栫紒顖濆吹缁櫣浠﹂悙绮瑰亾瑜岀槐鍫曞礂閵夘垳绀夊娑欘焾椤撳宕楅幎鑺ワ紨闁?
+	 * trace 闁告瑯浜滈崯鎾诲礂?lastMessage闁挎稑濂旂粭澶愬绩閻熸澘缍?label闁靛棔榫歰minance 闁瑰瓨鐗曢埀顒佺懇閳ь剙顦崹顏堟焻閺勫繒甯嗛柕?
 	 */
 	private void initializeTargetTrace(LP lp) {
 		targetTraceSequence = null;
@@ -1186,9 +1386,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * limited-memory SRI 中 forward label 的 state 表示从 source 扫到当前点后的剩余 half-state。
-	 * node-memory 的非 memory job 会清零且不计入；arc-memory 的非 memory arc 只清零，
-	 * 当前 head job 若属于 scope 仍作为新段起点计入。
+	 * limited-memory SRI 濞?forward label 闁?state 閻炴稏鍔庨妵姘?source 闁规鍋勯崺宀冦亹閹惧啿顤呴柣鎰嚀閹鎯冮崟顐⑩挅濞?half-state闁?
+	 * node-memory 闁汇劌瀚板?memory job 濞村吋纰嶇粩濠氭⒖閺堢數鐟☉鎾崇Х椤撴悂宕楅妷顖滃耿arc-memory 闁汇劌瀚板?memory arc 闁告瑯浜濈粩濠氭⒖鐠佸湱绀?
+	 * 鐟滅増鎸告晶?head job 闁兼眹鍎遍惈妯荤?scope 濞寸姴绉崇紞鏃€绋夐悜妯荤厐婵炲牅绲婚幑锝夋倷绾拋鍚€闁稿繈鍎埀?
 	 */
 	private double applySriForwardExtensionShift(byte[] states, PackedBitSet visitedBeforeExtension, int from, int job) {
 		if (!sriPricingEnabled || job <= 0 || job > data.n) {
@@ -1234,9 +1434,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * limited-memory SRI 中 backward label 的 state 表示按反向扩展顺序扫描 suffix 后的剩余 half-state。
-	 * prepend 一个 job 时，node-memory 按新 job 判断；arc-memory 按新扩展弧 (job,to) 判断是否延续旧 state。
-	 * arc 不在 memory 中只断开旧 state，不跳过当前 job 的新段贡献。
+	 * limited-memory SRI 濞?backward label 闁?state 閻炴稏鍔庨妵姘跺箰婢跺﹤鍐€闁告碍鍨舵晶璺ㄤ沪閺囶潿鈧孩鎯旇箛鏂款棁闁?suffix 闁告艾娴峰▓鎴﹀礈閳衡偓缂?half-state闁?
+	 * prepend 濞戞挴鍋撳☉?job 闁哄啳顔愮槐婕琽de-memory 闁圭顦伴弻?job 闁告帇鍊栭弻鍥晬濞屾Μc-memory 闁圭顦伴弻濠囧箥閳轰胶娼旂€?(job,to) 闁告帇鍊栭弻鍥及椤栨碍鍎婄€点倕澧庨悽濠氬籍?state闁?
+	 * arc 濞戞挸绉村﹢?memory 濞戞搩鍘艰ぐ褔寮鐐电；闁?state闁挎稑濂旂粭澶屾崉鐎圭姷绠栫憸鐗堟尭婢?job 闁汇劌瀚弻濠傗枔娴ｅ啰顢呴柣姘煎枔閳?
 	 */
 	private double applySriBackwardPrependShift(byte[] states, PackedBitSet visitedBeforeExtension, int job, int to) {
 		if (!sriPricingEnabled || job <= 0 || job > data.n) {
@@ -1554,7 +1754,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!"remaining".equals(tieMode)) {
 			return true;
 		}
-		// remaining 只比较两个未耗尽候选的剩余队列压力；任一侧已经耗尽时，0 队列会破坏可比性。
+		// remaining 闁告瑯浜濋惁顔芥綇閸愌嗏拡濞戞搩浜濆﹢顓㈡嚀濡も偓閺佹牠宕愬▎鎾亾婢跺本鐣遍柛鎾櫃缂嶆垿姊奸悢宄扮仚闁告ê顑呮慨蹇涙晬濞戞宕插☉鎾亾濞撴皜鍐ㄥ殥缂備礁绻楅埀顒侇殔閺佹牠寮拋鍦0 闂傚啰鍠庨崹顏呭濮樿京澹冮柛褍绻愯ぐ鎻捫掗弮鈧埀顑讲鍋?
 		return !a.forwardExhausted && !a.backwardExhausted && !b.forwardExhausted && !b.backwardExhausted;
 	}
 
@@ -1576,8 +1776,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int backwardLimit = popLimit / 2;
 		int forwardPops = 0;
 		int backwardPops = 0;
-		// 2026-06-07: probe 是为了比较两侧压力，不按当前队列大小抢占预算。
-		// 否则容易出现 sidePop=N:0，只测到 forward 爆炸而没有 backward 样本。
+		// 2026-06-07: probe 闁哄嫷鍨拹鐔哥閸℃妲烽弶鍫濆暕鐞氳鲸绗熻鐢洭宕濆☉宕囩濞戞挸绉电€垫粏銇愰幘鍐差枀闂傚啰鍠庨崹顏呭緞瑜嶉惃顒勫箮閵忕姴绐楀Λ鏉垮閻ｅ濡?
+		// 闁告熬绠戦崹顖溾偓纭咁潐濡叉宕欓搹鐟扮疀 sidePop=N:0闁挎稑鑻ぐ褍霉鐎ｎ亜鐓?forward 闁绘牕妫涢崑銏ゆ嚀鐏炲墽姊鹃柡?backward 闁哄秹鏀卞﹢浼村Υ?
 		while (forwardPops < forwardLimit && !FWUL.isEmpty()) {
 			forwardExtend(lp);
 			forwardPops++;
@@ -1738,8 +1938,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return ngDssrReusableActiveColumnSignatures;
 		}
 		HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
-		// 2026-06-12: 同一次 ng-DSSR pricing 的 DSSR 多轮只改变 ng-set，RMP active 列集不变。
-		// active signature 只需第一轮扫描 restricted columns，后续 round 复用这个只读集合。
+		// 2026-06-12: 闁告艾濂旂粩鏉戔枎?ng-DSSR pricing 闁?DSSR 濠㈣埖淇洪悿鍡涘矗椤忓懏鏆柛?ng-set闁挎稑顒∕P active 闁告帗顨婂▔锔界▔瀹ュ懎缍侀柕?
+		// active signature 闁告瑯浜〒鍓佺箔椤戣法顏遍弶鐑嗗枟婢瑰倿骞?restricted columns闁挎稑鑻幃妤冪磼?round 濠㈣泛绉堕弫銈嗘交濞嗗酣鍤嬮柛娆樹海椤曚即姊块崱妤佸€ら柕?
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			signatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
@@ -1753,8 +1953,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-05: 按指定节点落盘当前 exact pricing 输入，便于复盘禁弧很多但 label 仍爆炸的结构原因。
-	 * 默认关闭；设置 twet.bpc.pricingSnapshot=true 或 twet.bpc.pricingSnapshotNodeId=<nodeId> 后启用。
+	 * 2026-06-05: 闁圭顦扮€垫氨鈧淇烘俊顓㈡倷绾懏鍎伴柣鈺偯紞瀣礈?exact pricing 閺夊牊鎸搁崣鍡涙晬鐏炶偐鈹掑ù婊冮椤︽煡鎯勫Ο纰辨矗鐎殿啫鍐彂濠㈣埖鐭徊?label 濞寸姴绉堕崹搴ㄦ倷閸濄儲鐣辩紓浣规尰閻庮垶宕㈤悢閿嬬闁?
+	 * 濮掓稒顭堥濠氬礂閹惰姤锛旈柨娑欑椤旀洜绱?twet.bpc.pricingSnapshot=true 闁?twet.bpc.pricingSnapshotNodeId=<nodeId> 闁告艾楠搁幆搴ㄦ偨閵婏絺鍋?
 	 */
 	private void maybeDumpPricingSnapshot(LP lp) {
 		Node node = lp == null ? null : lp.getNode();
@@ -1803,37 +2003,37 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		}
 		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-			out.write("node\t" + node.diagnosticSummary());
+			out.write("node	" + node.diagnosticSummary());
 			out.newLine();
-			out.write("n\t" + data.n);
+			out.write("n	" + data.n);
 			out.newLine();
-			out.write("m\t" + data.m);
+			out.write("m	" + data.m);
 			out.newLine();
-			out.write("CmaxH\t" + data.CmaxH);
+			out.write("CmaxH	" + data.CmaxH);
 			out.newLine();
-			out.write("restrictedColumns\t" + lp.getRestrictedColumnIds().size());
+			out.write("restrictedColumns	" + lp.getRestrictedColumnIds().size());
 			out.newLine();
-			out.write("machineDual\t" + lp.getMachineDual());
+			out.write("machineDual	" + lp.getMachineDual());
 			out.newLine();
-			out.write("jobJobPricingForbidden\t" + jobArcForbidden);
+			out.write("jobJobPricingForbidden	" + jobArcForbidden);
 			out.newLine();
-			out.write("jobJobPricingAllowed\t" + jobArcAllowed);
+			out.write("jobJobPricingAllowed	" + jobArcAllowed);
 			out.newLine();
-			out.write("jobJobPricingOnlyForbidden\t" + pricingOnlyForbidden);
+			out.write("jobJobPricingOnlyForbidden	" + pricingOnlyForbidden);
 			out.newLine();
-			out.write("requiredAdjacencyPairs\t" + formatPairs(node.getRequiredAdjacencyPairs()));
+			out.write("requiredAdjacencyPairs	" + formatPairs(node.getRequiredAdjacencyPairs()));
 			out.newLine();
-			out.write("forbiddenAdjacencyPairs\t" + formatPairs(node.getForbiddenAdjacencyPairs()));
+			out.write("forbiddenAdjacencyPairs	" + formatPairs(node.getForbiddenAdjacencyPairs()));
 			out.newLine();
 		}
 	}
 
 	private void writePricingSnapshotJobDuals(LP lp, Path file) throws IOException {
 		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-			out.write("job\tdual");
+			out.write("job	dual");
 			out.newLine();
 			for (int job = 1; job <= data.n; job++) {
-				out.write(job + "\t" + lp.getJobDual(job));
+				out.write(job + "	" + lp.getJobDual(job));
 				out.newLine();
 			}
 		}
@@ -1843,7 +2043,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Node node = lp.getNode();
 		int sink = node.sinkId();
 		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-			out.write("from\tto\trealForbidden\tpricingOnlyForbidden\tpricingForbidden\tarcDual");
+			out.write("from	to	realForbidden	pricingOnlyForbidden	pricingForbidden	arcDual");
 			out.newLine();
 			for (int from = 0; from <= sink; from++) {
 				for (int to = 1; to <= sink; to++) {
@@ -1853,8 +2053,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					boolean realForbidden = node.isArcForbidden(from, to);
 					boolean pricingOnly = node.isPricingOnlyArcForbidden(from, to);
 					boolean pricingForbidden = isPricingArcForbidden(node, from, to);
-					out.write(from + "\t" + to + "\t" + realForbidden + "\t" + pricingOnly + "\t"
-							+ pricingForbidden + "\t" + lp.getArcDual(from, to));
+					out.write(from + "	" + to + "	" + realForbidden + "	" + pricingOnly + "	"
+							+ pricingForbidden + "	" + lp.getArcDual(from, to));
 					out.newLine();
 				}
 			}
@@ -1864,7 +2064,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void writePricingSnapshotColumns(LP lp, Path file) throws IOException {
 		Node node = lp.getNode();
 		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-			out.write("columnId\tcost\tlength\trealForbidden\tpricingOnlyForbidden\tpricingForbidden\tsequence");
+			out.write("columnId	cost	length	realForbidden	pricingOnlyForbidden	pricingForbidden	sequence");
 			out.newLine();
 			for (int columnId : lp.getRestrictedColumnIds()) {
 				TWETColumn column = lp.getPool().getColumn(columnId);
@@ -1872,8 +2072,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				boolean realForbidden = sequenceUsesRealForbiddenArc(node, sequence);
 				boolean pricingOnly = sequenceUsesPricingOnlyForbiddenArc(node, sequence);
 				boolean pricingForbidden = sequenceUsesPricingForbiddenArc(node, sequence);
-				out.write(columnId + "\t" + column.getCost() + "\t" + sequence.size() + "\t" + realForbidden
-						+ "\t" + pricingOnly + "\t" + pricingForbidden + "\t" + formatSequence(sequence));
+				out.write(columnId + "	" + column.getCost() + "	" + sequence.size() + "	" + realForbidden
+						+ "	" + pricingOnly + "	" + pricingForbidden + "	" + formatSequence(sequence));
 				out.newLine();
 			}
 		}
@@ -1947,8 +2147,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sinkVisited.add(lp.getNode().sinkId());
 		addZeroDualExcludedJobs(sinkVisited);
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
-		// 2026-05-23: backward 虚拟终点本身也要带 [Tmid,pricingHorizon] 元数据。
-		// 这样后续若发生 shiftX，trimToDomain 的边界和物理半域一致。
+		// 2026-05-23: backward 闁惧繑纰嶇€氭瑧绱掗崼銏犱化闁哄牜鍓濋棅鈺傜▕閻旀椿娲ｉ悽?[Tmid,pricingHorizon] 闁稿繐鍟弳鐔煎箲椤旇　鍋?
+		// 閺夆晜鐟﹂悧閬嶅触鎼达絿鏁鹃柤姹囧劚瑜板倿鎮?shiftX闁挎稑顔搑imToDomain 闁汇劌瀚粩鐔兼偩鐏炶姤瀚查柣妞绘櫇閹﹪宕℃繝鍌滃幍濞戞挴鍋撻柤閿嬬暘閳?
 		sinkFrontier.resetDomain(tMid, pricingHorizon);
 		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
 		PackedBitSet sinkNgMemory = new PackedBitSet(data.n + 2);
@@ -2044,16 +2244,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		// 2026-06-10: 调用方只枚举 extensionSet；它已经排除 ng-memory 和时间半域不可达点。
-		// 真实 visited 不用于 ng-relaxation 扩展过滤，重复任务在恢复 route 后交给 DSSR 处理。
-		// 直连禁弧依赖当前 node/pricingOnly 状态，仍在扩展点即时检查。
+		// 2026-06-10: 閻犲鍟伴弫銈夊棘閻熸澘娑ч柡瀣煯婵?extensionSet闁挎稒绋戦悾鐘差啅閼碱剛鐥呴柟鐑樺浮濞?ng-memory 闁告粌鏈鍌炴⒒閺夋垵纾归柛鈺冨枍缁楀宕ｉ婵囧涧闁绘劕绠嶉埀?
+		// 闁活亞鍠庨悿?visited 濞戞挸绉堕弫銈嗙?ng-relaxation 闁圭鏅涢惈宥嗘交閸ャ劍濮㈤柨娑樼焸閸ｅ憡寰勫鍕床闁告柡鈧櫕韬柟顓滃灩椤?route 闁告艾绨煎锔剧磼?DSSR 濠㈣泛瀚幃濠囧Υ?
+		// 闁烩晝顥愮换娑氱矉娴ｇ袣濞撴碍绻嗙粋鍡氥亹閹惧啿顤?node/pricingOnly 闁绘鍩栭埀顑跨筏缁辨繃绂掑鍛含闁圭鏅涢惈宥夋倷閻熸澘绁柡鍐煐椤ュ懘寮婚妷锝傚亾?
 		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		// 2026-06-10: backward 同样只枚举 extensionSet；真实重复由 DSSR route 恢复后处理。
-		// 这里即时检查 prevJob -> successor 直连弧，避免 pricingOnly/分支禁弧绕过扩展过滤。
+		// 2026-06-10: backward 闁告艾鏈悧閬嶅矗椤忓懐浜ｅ☉?extensionSet闁挎稒绋撳﹢锛勨偓鍦仱閸ｅ憡寰勫鍥ㄦ殸 DSSR route 闁诡厹鍨归ˇ鏌ュ触鎼粹槅妲遍柣鐐叉閳?
+		// 閺夆晜鐟╅崳鐑藉础閾忣偅顦ф俊顐熷亾闁?prevJob -> successor 闁烩晝顥愮换娑橆嚕瑜濈槐婵嬫焼閸喖甯?pricingOnly/闁告帒妫欓弫顔剧矉娴ｇ袣缂備焦娲濈换鍐箥閳轰胶娼旈弶鈺佹处閹躲倝濡?
 		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
@@ -2134,8 +2334,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (jobPenalty == null) {
 				return null;
 			}
-			// 2026-05-22: backward 从虚拟终点出发时，第一次加入真实任务不需要按 setup/processing 平移；
-			// 当前变量已经是 prevJob 自己的完成时间，这里只扣 job/arc dual。
+			// 2026-05-22: backward 濞寸姴姘﹀▍鍕箯閻旇櫣鐭掗柣鎰嚀閸ゎ參宕ｉ幋鐐搭槯闁挎稑鐬奸鍥ㄧ▔閳ь剙鈻庨垾鍐差潱闁稿繈鍎冲﹢锛勨偓鍦仒閹广垽宕濋垾鑼憹闂傚洠鍋撻悷鏇氱劍鐎?setup/processing 妤犵偛纾簺闁?
+			// 鐟滅増鎸告晶鐘诲矗濮椻偓閸ｅ搫顔忛懠顒傜梾闁?prevJob 闁煎浜滅换渚€鎯冮崟顐ゆ殮闁瑰瓨鍔栧鍌炴⒒鏉堝墽绀夐弶鈺傜懇閸ｇ兘宕ｉ鍛拸 job/arc dual闁?
 			nextFrontier = jobPenalty.copy();
 			nextNoSriFrontier = jobPenalty.copy();
 			double fixedReducedCost = -lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId());
@@ -2230,8 +2430,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-25: Tmid 单点 forward label 不再进入普通 dominance graph，也不再入扩展队列；
-	 * 但仍要保留给 sink 收尾和后续 backward join。
+	 * 2026-05-25: Tmid 闁告娲滈崑?forward label 濞戞挸绉撮崯鈧弶鈺傜☉閸欏棝寮查鈧埀?dominance graph闁挎稑濂旂弧鍐╃▔瀹ュ懎鏅欓柛蹇嬪劜婢ц法浠﹂弴銏⌒曢柛鎺擃殣缁?
+	 * 濞达絽妫旂划娑氭啺娴ｉ绠介柣锝嗙懅缁?sink 闁衡偓鐠鸿櫣鍟查柛婊冭嫰閹绱?backward join闁?
 	 */
 	private InsertStatus insertForwardSinglePoint(ForwardLabel label, LP lp) {
 		SinglePointStore<ForwardLabel> store = forwardSinglePointByLastJob.get(label.jid);
@@ -2260,8 +2460,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-25: Tmid 单点 backward label 只保留给 single-point store；
-	 * 2026-05-26: 在 GCNGBB-style 流程下不立即 join，而是在最后统一扫描 join。
+	 * 2026-05-25: Tmid 闁告娲滈崑?backward label 闁告瑯浜欑换姘舵偩濞嗘垹鑸?single-point store闁?
+	 * 2026-05-26: 闁?GCNGBB-style 婵炵繝鑳堕埢鍏肩▔鐎ｂ晝鐟濈紒鏂款儏瀹?join闁挎稑鐭侀埀顒€鏈Σ鎼佸捶閵婏附浠橀柛姘捣缁儤绋夐埀顒勫箥椤愶絽浼?join闁?
 	 */
 	private InsertStatus insertBackwardSinglePoint(BackwardLabel label, LP lp) {
 		SinglePointStore<BackwardLabel> store = backwardSinglePointByFirstJob.get(label.jid);
@@ -2418,8 +2618,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-28: final join 前统一清掉已被后续 label 支配的旧条目，再排序。
-	 * 这样完整列只从最终仍存活的 label table 里生成，不受早期出队顺序影响。
+	 * 2026-05-28: final join 闁告挸绉剁划鐑樼▔閳ь剙銆掗崨顔肩鐎规瓕灏～锕傚触鎼达絿鏁?label 闁衡偓椤栫偛甯抽柣銊ュ濡偊寮堕敍鍕獥闁挎稑鑻崯鈧柟鐑樺笒缁參濡?
+	 * 閺夆晜鐟﹂悧杈┾偓鐟版湰閺嗭綁宕氬Δ鈧ぐ褎绂掓惔銏′粯缂備礁鐗呯划娑氣偓娑櫳戝鍧楁儍?label table 闂佹彃鐬奸弫鎾诲箣閹板墎绀夊☉鎾崇Т瑜板牓寮埡鍌涘焸闁告垶妞藉Σ锔姐亜閸濆嫮纰嶇憸鏉垮船閹肩兘濡?
 	 */
 	private void compactAndSortActiveLabelListsForJoin() {
 		for (int job = 1; job <= data.n; job++) {
@@ -2478,8 +2678,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-28: 统一收尾 join。两侧 label table 都生成完以后，以 forward terminal group 为外层，
-	 * 同时处理 crossing-arc join 和 forward->sink 收尾，避免 sink 列绕过统一候选筛选。
+	 * 2026-05-28: 缂備胶鍠嶇粩鎾绩鐠鸿櫣鍟?join闁靛棗鍊风悮杈ㄧ瑹?label table 闂侇喚鏅弫鎾诲箣閹邦剛鏆氬ù鐘劚閹鏁嶇仦闂寸鞍 forward terminal group 濞戞挸鎼ˇ鑽や沪閸岋妇绀?
+	 * 闁告艾鏈鍌涘緞閸曨厽鍊?crossing-arc join 闁?forward->sink 闁衡偓鐠鸿櫣鍟查柨娑樼焸娴尖晠宕?sink 闁告帗顨堢划顐ｆ交閸モ晝鍩犲☉鎾亾闁稿﹥鐟╅埀顒€顦遍悺顐︽焻婢跺牃鍋?
 	 */
 	private void joinAllForwardTerminalGroups(LP lp) {
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
@@ -2537,8 +2737,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void joinForwardGroupWithBackward(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward,
 			LP lp) {
 		Node node = lp.getNode();
-		// 2026-05-23: 和 joinFromForward 对称，不能用 backward.reachableSet 反推所有可拼接前缀。
-		// 该集合是 backward 继续向左扩展的候选，不等价于所有可与当前后缀拼接的 forward terminal。
+		// 2026-05-23: 闁?joinFromForward 閻庨潧婀辫ⅷ闁挎稑濂旂粭澶愭嚄閻ｅ本鏆?backward.reachableSet 闁告瑥绉电敮褰掑箥閳ь剟寮垫径濠傝闁瑰嘲鍚嬬敮鎾礈瀹ュ洨纾婚柕?
+		// 閻犲洢鍎靛▔锕傚触閸喐笑 backward 缂備綀鍛暰闁告碍鍨垫稊蹇涘箥閳轰胶娼旈柣銊ュ閳ь剚鐟╅埀顒€顧€缁辨繃绋夊鍥╂惣濞寸姾娓圭花顒勫箥閳ь剟寮垫径濠傝濞戞挸楠哥紞瀣礈瀹ュ懏鍊电紓鍌楀亾闁瑰嘲鍚嬬敮鎾儍?forward terminal闁?
 		joinTerminalGroupsScanned++;
 		if (backward.ngMemorySet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
 			joinTerminalGroupsArcOrVisitPruned++;
@@ -2598,8 +2798,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		if (bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
-			// 2026-06-09: ng-DSSR 只用 ng-memory 判断拼接是否违反当前记忆；
-			// 真实重复必须等负 reduced-cost route 恢复后再记录 cycle，用于后续更新 ng-set。
+			// 2026-06-09: ng-DSSR 闁告瑯浜為弫?ng-memory 闁告帇鍊栭弻鍥箯閸忕厧澶嶉柡鍕靛灠閹焦娼诲┑鍡楀唨鐟滅増鎸告晶鐘垫媼閺夎法绠撻柨?
+			// 闁活亞鍠庨悿鍕煂瀹ュ拋妲婚煫鍥ф嚇閵嗗繒绮垫径搴ｎ槹 reduced-cost route 闁诡厹鍨归ˇ鏌ュ触鎼粹€虫櫃閻犱焦婢樼紞?cycle闁挎稑鐬奸弫銈嗙鎼粹剝鍊电紓渚囧幗濞插潡寮?ng-set闁?
 			joinPairsSetPruned++;
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED ngMemoryIntersect fMem=" + forward.ngMemorySet
@@ -2618,13 +2818,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 
-		joinFunctionEvaluations++;
 		PiecewiseLinearFunction forwardFull = getForwardJoinExtension(forward);
-		PiecewiseLinearFunction shiftedForward = forwardFull.shiftX(delta);
-		if (shiftedForward.head == null) {
+		if (forwardFull.head == null) {
 			joinFunctionPruned++;
 			if (targetJoinPair) {
-				traceTarget("JOIN_PRUNED shiftedForwardEmpty");
+				traceTarget("JOIN_PRUNED forwardFullEmpty");
 			}
 			return;
 		}
@@ -2636,17 +2834,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
-		PiecewiseLinearFunction joinCost = shiftedForward.add(backwardFull);
-		if (joinCost.head == null) {
-			joinFunctionPruned++;
-			if (targetJoinPair) {
-				traceTarget("JOIN_PRUNED joinCostEmpty");
-			}
-			return;
-		}
-		// 2026-05-22: crossing arc (i,r) 的固定 reduced-cost 项不仅有 setup cost，
-		// 还必须扣掉该弧在 RMP 中的聚合 arc dual；否则 join 下界会偏高，极端时会漏掉真负列。
-		joinCost.shiftYInPlace(joinFixedReducedCost);
+		// 2026-05-22: crossing arc (i,r) 闁汇劌瀚ù鎰偓?reduced-cost 濡炪倝鈧稓鐟濆ù鐘叉噺濠€?setup cost闁?
+		// 閺夆晜锚缁烩偓濡炪倗绮晶鎼佸箳婢跺寒鍤夌€殿啫鍐╄含 RMP 濞戞搩鍘惧▓鎴︽嚂濮橆剚鍊?arc dual闁挎稒绋戦幆渚€宕?join 濞戞挸顑囬弲顐ｅ濮橆兛鐒婂Δ鍌涳公缁辨繈寮告担渚紓闁哄啯婀圭槐鏉款煶韫囨柨绔撮柣顏嗗枙缁€瀣礆濡炲皷鍋?
 		ArrayList<Integer> sequence = null;
 		double sriJoinShift;
 		if (limitedMemorySriPricing) {
@@ -2654,10 +2843,38 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		} else {
 			sriJoinShift = sriJoinShift(forward, backward);
 		}
-		if (!Utility.compareEq(sriJoinShift, 0.0)) {
-			joinCost.shiftYInPlace(sriJoinShift);
+		double fixedJoinShift = joinFixedReducedCost + sriJoinShift;
+		double shiftedForwardStart = Math.max(forwardFull.head.start + delta, forwardFull.domainStart);
+		double shiftedForwardEnd = Math.min(forwardFull.tail.end + delta, forwardFull.domainEnd);
+		double overlapStart = Math.max(shiftedForwardStart, backwardFull.head.start);
+		double overlapEnd = Math.min(shiftedForwardEnd, backwardFull.tail.end);
+		if (Utility.compareLt(overlapEnd, overlapStart)) {
+			joinFunctionPruned++;
+			if (targetJoinPair) {
+				traceTarget("JOIN_PRUNED joinDomainEmpty");
+			}
+			return;
 		}
-		double reducedCostBound = joinCost.findMinimal(false, true)[0];
+		if (config.bidirectionalJoinRangeRestrictedLowerBound) {
+			joinRangeLowerBoundChecks++;
+			double forwardRangeMin = forwardFull.findMinimalInRange(overlapStart - delta, overlapEnd - delta);
+			double backwardRangeMin = backwardFull.findMinimalInRange(overlapStart, overlapEnd);
+			double rangeLowerBound = forwardRangeMin + backwardRangeMin + fixedJoinShift;
+			double threshold = joinLowerBoundThreshold();
+			if (!Utility.compareLt(rangeLowerBound, threshold)) {
+				joinRangeLowerBoundPruned++;
+				if (Utility.compareLt(threshold, REDUCED_COST_TOLERANCE)) {
+					joinPairsBestBoundPruned++;
+				}
+				if (targetJoinPair) {
+					traceTarget("JOIN_PRUNED rangeLB=" + rangeLowerBound);
+				}
+				return;
+			}
+		}
+		joinFunctionEvaluations++;
+		double reducedCostBound = PiecewiseLinearFunction.findMinimalShiftedSumValue(forwardFull, delta,
+				backwardFull, fixedJoinShift);
 		observeRelaxedReducedCost(reducedCostBound);
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
 			joinFunctionPruned++;
@@ -2680,8 +2897,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-13: full-SRI 状态在单侧扩展时只知道该半路径内部是否已经触发。
-	 * 拼接时如果左右半路径各贡献一个不同 scope job，完整 route 才触发一次 SRI，需要在这里补回。
+	 * 2026-06-13: full-SRI 闁绘鍩栭埀顑跨濠€顏堝础閺囨碍娅犻柟纰樻櫅閻秹寮捄鍝勬锭闁活厹鍎垫禍鍓ф嫚閵夈儱纾归悹渚灠缁剁偤宕橀崨鏉戝姤闁哄嫷鍨伴幆浣割啅閼碱剛鐥呴悷娆欑畱瑜板倿濡?
+	 * 闁瑰嘲鍚嬬敮鎾籍鐠轰警娲ら柡瀣矊娑斿繘宕ｉ崘鎻掔９閻犱警鍨扮欢鐐哄触閸曨喚顢呴柣姘煎枙缁斿瓨绋夐鍐憹闁?scope job闁挎稑鑻悾顒勫极?route 闁归潧绉疯闁告瑦鍨崇粩鏉戔枎?SRI闁挎稑鐭傚〒鍓佹啺娴ｅ憡韬弶鈺傜懇閸ｉ鎮伴妷銉︾闁?
 	 */
 	private double sriJoinShift(ForwardLabel forward, BackwardLabel backward) {
 		if (!sriPricingEnabled) {
@@ -2693,7 +2910,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			int backwardCount = backward.sriCounts[sriIndex];
 			double dual = sriDuals.get(sriIndex).doubleValue();
 			if (forwardCount > 1 && backwardCount > 1) {
-				// 两半各自已经扣过一次，同一条完整 route 只应扣一次。
+				// 濞戞挶鍊曞畷鎰板触閸曨喖娈扮€规瓕灏欑划锟犲箥閿濆牏绠栧☉鎾亾婵炲棌妲勭槐婵嬪触鐏炶偐顏遍柡澶嗏偓宕囨殮闁?route 闁告瑯浜滅花鏌ュ箥閿濆嫮顏辨繛鍠℃壋鍋?
 				shift += dual;
 			} else if (forwardCount == 1 && backwardCount == 1
 					&& sriHalvesContainDifferentScopeJobs(forward, backward, sriScopes.get(sriIndex))) {
@@ -2704,8 +2921,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * limited-memory join 只检查 crossing arc 两侧是否把同一 cut 的 residual half-state 拼成一次触发。
-	 * node-memory 的连续性由 backward 首节点是否在 memory 中体现；arc-memory 还必须要求 crossing arc 在该 cut 的 memory arcs 中。
+	 * limited-memory join 闁告瑯浜濋ˉ鍛村蓟?crossing arc 濞戞挶鍊撻弲鍫曞及椤栨碍鍎婇柟璺猴工閹挻绋夐埀?cut 闁?residual half-state 闁瑰嘲鍚嬮崹姘▔閳ь剙鈻庨檱琚濋柛娆愬灟閳?
+	 * node-memory 闁汇劌瀚换娑氱磼椤撶啿鍋撹閺?backward 濡絾鐗炴俊顓㈡倷鐟欏嫭笑闁告熬绠戝﹢?memory 濞戞搩鍘虹紞瀣偝鐢喚骞rc-memory 閺夆晜锚缁烩偓濡炪倖妲掗々锕€效?crossing arc 闁革负鍔忛?cut 闁?memory arcs 濞戞搩鍘归埀?
 	 */
 	private double limitedMemorySriJoinShift(ForwardLabel forward, BackwardLabel backward) {
 		if (!sriPricingEnabled) {
@@ -2758,6 +2975,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinFunctionEvaluations = 0;
 		joinFunctionPruned = 0;
 		joinFunctionBestRecordPruned = 0;
+		joinRangeLowerBoundChecks = 0;
+		joinRangeLowerBoundPruned = 0;
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -2825,6 +3044,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundBackwardMaxCandidateSegments = 0;
 		completionBoundBackwardMaxAfterSegments = 0;
 		completionBoundLastEvaluationCutoff = Double.NaN;
+		completionBoundPreCertificateClosed = false;
 		midpointStrategyUsed = "default";
 		midpointReferenceTime = Double.NaN;
 		midpointColumnSelectedCount = 0;
@@ -2985,6 +3205,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
 				+ joinPairsTimePruned + "/"
 				+ joinFunctionEvaluations + "/" + joinFunctionPruned
+				+ ", joinRangeLB check/pruned=" + joinRangeLowerBoundChecks
+				+ "/" + joinRangeLowerBoundPruned
 				+ ", joinBest mode/bestRC/lbPruned/recordPruned=" + joinBestThresholdMode
 				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
 				+ "/" + joinFunctionBestRecordPruned
@@ -3316,8 +3538,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private double completionBoundCutoff() {
-		// 2026-06-01: completion bound 只判断 label 是否还能补成负列；
-		// 不使用当前 best reduced cost，避免变成 record-only 剪枝并丢掉 top-K 负列。
+		// 2026-06-01: completion bound 闁告瑯浜滈崹浠嬪棘?label 闁哄嫷鍨伴幆浣规交濡灝鍘撮悶娑栧劜閸ㄦ氨鎷归悢宄扮仚闁?
+		// 濞戞挸绉虫繛鍥偨閵娿儳绉奸柛?best reduced cost闁挎稑鐭傛导鈺呭礂瀹ュ懎缍侀柟?record-only 闁告搩浜濋悘濠囩嵁閺堝灚涓㈤柟?top-K 閻犳劗鍠庨崹顏堝Υ?
 		return REDUCED_COST_TOLERANCE;
 	}
 
@@ -3347,9 +3569,58 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		evaluateCompletionBoundArcFixing(lp);
 	}
 
+	private boolean tryApplyCompletionBoundPreCertificate(LP lp) {
+		if (completionBounds == null || completionBoundRelaxation == null
+				|| shouldSkipCompletionBoundPreCertificateBecauseTimeIndexedPreHeuristicCoversIt(lp)) {
+			return false;
+		}
+		double lowerBound = completionBoundForwardSinkLowerBound(lp);
+		if (!Double.isFinite(lowerBound) || Utility.isBigMValue(lowerBound)
+				|| Utility.compareLt(lowerBound, REDUCED_COST_TOLERANCE)) {
+			return false;
+		}
+		completionBoundPreCertificateClosed = true;
+		lastRelaxedRoundBestReducedCost = lowerBound;
+		lastMessage = "GCNGBB-style ng-DSSR bidirectional completion-bound pre-certificate closed internal pricing"
+				+ " bound=" + lowerBound;
+		return true;
+	}
+
+	private boolean shouldSkipCompletionBoundPreCertificateBecauseTimeIndexedPreHeuristicCoversIt(LP lp) {
+		if (!data.isExactIntegerTimeInstance()) {
+			return false;
+		}
+		// 2026-07-06: integer instances can also use this completion-bound certificate,
+		// but when time-indexed pre-heuristic is active on a no-cut pass it already provides
+		// the corresponding discrete graph certificate, so this O(n) check would be duplicate work.
+		return config.enableTimeIndexedPreHeuristicPricing
+				&& lp != null
+				&& lp.getActiveCutIds().isEmpty();
+	}
+
+	private double completionBoundForwardSinkLowerBound(LP lp) {
+		Node node = lp == null ? null : lp.getNode();
+		int sink = node == null ? data.n + 1 : node.sinkId();
+		double best = Utility.big_M;
+		for (int job = 1; job <= data.n; job++) {
+			if (node != null && isPricingArcForbidden(node, job, sink)) {
+				continue;
+			}
+			double prefixLowerBound = completionBounds.forwardFMin(job);
+			if (!Double.isFinite(prefixLowerBound) || Utility.isBigMValue(prefixLowerBound)) {
+				continue;
+			}
+			double lowerBound = prefixLowerBound - lp.getArcDual(job, sink);
+			if (Utility.compareLt(lowerBound, best)) {
+				best = lowerBound;
+			}
+		}
+		return Utility.isBigMValue(best) ? 0.0 : best;
+	}
+
 	/**
-	 * 2026-06-09: 诊断 required adjacency dual 是否把 relaxed suffix 下界压得过低。
-	 * 只按系统属性显式指定节点时输出，不影响正式 pricing 语义。
+	 * 2026-06-09: 閻犲洤锕ラ弻?required adjacency dual 闁哄嫷鍨伴幆渚€骞?relaxed suffix 濞戞挸顑囬弲顐﹀储鐎ｎ亞绻侀弶鈺佹矗缂嶅棝濡?
+	 * 闁告瑯浜濈€垫粎鍖栭懡銈囧煚閻忕偟鍋為埀顑嫭鈻旂€殿喖绻戠€垫氨鈧淇烘俊顓㈡倷鐟欏嫭顦ч弶鍫熸尭閸ゎ參鏁嶇仦鑲╃憹鐟滄澘宕幖宄邦潰閿濆懐纭€ pricing 閻犲浂鍘虹粻鐔煎Υ?
 	 */
 	private void maybeDumpCompletionBoundMinDiagnostic(LP lp) {
 		Node currentNode = lp == null ? null : lp.getNode();
@@ -3440,19 +3711,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					completionBoundArcFixingScalarPruned++;
 					continue;
 				}
-				PiecewiseLinearFunction shiftedPrefix = prefix.shiftX(delay);
-				if (shiftedPrefix.head == null) {
-					rememberCompletionBoundFixedArc(fromJob, toJob, true);
-					continue;
-				}
-				PiecewiseLinearFunction arcBound = shiftedPrefix.add(suffix);
-				if (arcBound.head == null) {
-					rememberCompletionBoundFixedArc(fromJob, toJob, true);
-					continue;
-				}
-				arcBound.shiftYInPlace(fixedReducedCost);
 				completionBoundArcFixingFunctionEvaluations++;
-				double lowerBound = arcBound.findMinimal(false, true)[0];
+				double lowerBound = PiecewiseLinearFunction.findMinimalShiftedSumValue(prefix, delay, suffix,
+						fixedReducedCost);
 				if (!Utility.compareLt(lowerBound, cutoff)) {
 					rememberCompletionBoundFixedArc(fromJob, toJob, false);
 				}
@@ -3463,7 +3724,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean isCompletionBoundArcTimeDisjoint(PiecewiseLinearFunction prefix, PiecewiseLinearFunction suffix,
 			double delay) {
-		return Utility.compareGt(prefix.head.start + delay, suffix.tail.end);
+		double shiftedStart = Math.max(prefix.head.start + delay, prefix.domainStart);
+		double shiftedEnd = Math.min(prefix.tail.end + delay, prefix.domainEnd);
+		double start = Math.max(shiftedStart, suffix.head.start);
+		double end = Math.min(shiftedEnd, suffix.tail.end);
+		return Utility.compareLt(end, start);
 	}
 
 	private boolean isCompletionBoundArcScalarPruned(int fromJob, int toJob, double fixedReducedCost, double cutoff) {
@@ -3554,12 +3819,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
-		// 2026-06-13: SRI active 时不维护旧 VRP 那种 m_*sr_bound，completion bound 只用不含 SRI 的松弛成本。
-		PiecewiseLinearFunction completion = label.noSriFrontier.add(suffix);
-		if (completion.head == null) {
+		// 2026-06-13: under active SRI, this completion-bound pruning uses no-SRI frontier.
+		if (!hasCommonCompletionDomain(label.noSriFrontier, suffix)) {
 			return false;
 		}
-		double lowerBound = completion.findMinimal(false, true)[0];
+		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(label.noSriFrontier, suffix, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
@@ -3579,13 +3843,19 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
-		// 2026-06-13: 与 forward 一致，completion-bound 剪枝不使用已计入 SRI penalty 的 frontier。
-		PiecewiseLinearFunction completion = prefix.add(label.noSriFrontier);
-		if (completion.head == null) {
+		// 2026-06-13: symmetric to forward pruning, use no-SRI frontier here.
+		if (!hasCommonCompletionDomain(prefix, label.noSriFrontier)) {
 			return false;
 		}
-		double lowerBound = completion.findMinimal(false, true)[0];
+		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(prefix, label.noSriFrontier, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
+	}
+
+
+	private boolean hasCommonCompletionDomain(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
+		double start = Math.max(left.head.start, right.head.start);
+		double end = Math.min(left.tail.end, right.tail.end);
+		return !Utility.compareLt(end, start);
 	}
 
 	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {
@@ -3659,8 +3929,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-23: join 前临时把 forward 半域右侧延拓为 f(Tmid)。
-	 * 这是论文实现里的 join 辅助函数，不写回 label。
+	 * 2026-05-23: join 闁告挸绉虫径宥夊籍閼搁潧惟 forward 闁告锕ら悡娆撳矗閸忓懏娅犵€点倛鍩栫€氬洦绋?f(Tmid)闁?
+	 * 閺夆晜鐟﹀Σ鍝ユ媼閻戞ɑ鐎悗鍦仧楠炲洭鏌屽畝鈧▓?join 閺夊牆鎳庢慨顏堝礄閼恒儲娈堕柨娑樺缁楀宕樺▎蹇旂 label闁?
 	 */
 	private PiecewiseLinearFunction getForwardJoinExtension(ForwardLabel label) {
 		if (label.joinExtendedFrontier == null) {
@@ -3680,8 +3950,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-23: join 前临时把 backward 半域左侧延拓为 f_b(Tmid)。
-	 * 这是论文实现里的 join 辅助函数，不写回 label。
+	 * 2026-05-23: join 闁告挸绉虫径宥夊籍閼搁潧惟 backward 闁告锕ら悡娆忣啅閿旀寧娅犵€点倛鍩栫€氬洦绋?f_b(Tmid)闁?
+	 * 閺夆晜鐟﹀Σ鍝ユ媼閻戞ɑ鐎悗鍦仧楠炲洭鏌屽畝鈧▓?join 閺夊牆鎳庢慨顏堝礄閼恒儲娈堕柨娑樺缁楀宕樺▎蹇旂 label闁?
 	 */
 	private PiecewiseLinearFunction getBackwardJoinExtension(BackwardLabel label) {
 		if (label.joinExtendedFrontier == null) {
@@ -3857,7 +4127,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void pruneGeneratedCandidatePool() {
-		// 2026-06-16: 同一 sequence 可由多个 split 生成；旧候选留在堆中，map 只保留当前最优候选。
+		// 2026-06-16: 闁告艾濂旂粩?sequence 闁告瑯鍨抽弫杈ㄥ緞濮橆偊鍤?split 闁汇垻鍠愰崹姘舵晬濞戞瑦锛嬮柛濠冪懇閳ь剙顦遍弳鈧柛锔哄妼閻栥垺绋夐銊хmap 闁告瑯浜欑换姘舵偩濞嗗繒绉奸柛鎾崇У濞撹埖瀵煎Ο琛″亾濞嗘挴鍋撴径鍫氬亾?
 		while (generatedCandidateBySignature.size() > config.maxExactPricingColumns) {
 			PricingColumnCandidate worstKept = pollCurrentWorstGeneratedCandidate();
 			if (worstKept == null) {
@@ -3889,12 +4159,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				generatedColumns.add(candidate.column);
 				continue;
 			}
-			// 2026-05-31: 只有根节点 no-cut pi-window 会让 K 堆候选成本口径偏紧。
-			// pi-window 是原 hard window 的子区间，因此 inferred 成本不低于真实列成本；
-			// inferred reduced cost 已为负时，真实 reduced cost 只会更小，这里只修正列成本。
-			// 2026-06-13: SRI active 时 inferred reduced cost 含 cut dual，不能只按 machine/job/arc dual 反推 objective cost。
-			// 2026-06-15: partial dominance 会原地裁剪搜索 frontier，活 label 的 minReducedCost
-			// 不再一定等于 recovered sequence 的完整列成本；只有 partial backend 需要在入池前恢复真实成本。
+			// 2026-05-31: 闁告瑯浜濆﹢渚€寮界涵鍛濋柣?no-cut pi-window 濞村吋淇洪鈧?K 闁割偄妫楅埀顒佺懇閳ь剙顦伴崹姘跺嫉椤掆偓瑜版稑顕ラ崟顐＄剨缂佹瘱浣插亾?
+			// pi-window 闁哄嫷鍨扮敮?hard window 闁汇劌瀚悺娆撳礌濞差亝锛熼柨娑樿嫰濞叉粌顫?inferred 闁瑰瓨鍔栧﹢鐗堢▔瀹ュ嫮绉靛ù婊冩捣濠€锛勨偓鍦仜閸亪骞嬮幇顓熸嫳闁?
+			// inferred reduced cost 鐎规瓕寮撶拹鐔烘嫻閻斿憡顦ч柨娑樼灱濠€锛勨偓?reduced cost 闁告瑯浜欑槐浼村即閺夋垹姣堥柨娑樼焷缁绘牠鏌岀仦钘夋锭濞ｅ浂鍠楅婊堝礆濡や礁鐏囬柡鍫厵閳?
+			// 2026-06-13: SRI active 闁?inferred reduced cost 闁?cut dual闁挎稑濂旂粭澶愭嚄閽樺娑ч柟?machine/job/arc dual 闁告瑥绉电敮?objective cost闁?
+			// 2026-06-15: partial dominance 濞村吋鑹剧敮顐﹀捶閹峰矈姊块柛鎿冧簼閹磭妲?frontier闁挎稑鏈?label 闁?minReducedCost
+			// 濞戞挸绉撮崯鈧☉鎾亾閻庤姘ㄩ悺鎴炵?recovered sequence 闁汇劌瀚悾顒勫极閺夋垵鐏欓柟瀛樺姈濠€浼存晬濞戞ê娑ч柡?partial backend 闂傚洠鍋撻悷鏇氱濠€顏堝礂閵夛妇娼ㄩ柛鎾崇У娴狀喗寰勫鍥ㄥ焸閻庡湱鍋為崹姘跺嫉椤戦敮鍋?
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column, data,
 					evaluator);
 			if (checked != null) {
@@ -3949,8 +4219,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-22: backward 侧和论文一致，先用本轮预计算的 H^b_{ir} 做 O(1) 交集过滤；
-	 * 真正的 reduced-cost 函数仍在 extendBackward 里通过 shift/add/normalize 递推。
+	 * 2026-05-22: backward 濞撴皜鍐╁閻犱胶鍎ら弸鍐╃▔閳ь剟鎳涙潏鍓х闁稿繐鐗忛弫銈夊嫉椤掑啰鏋傚Λ鏉垮椤撳摜绮诲Δ鍐╃暠 H^b_{ir} 闁?O(1) 濞存嚎鍊濆▔锔芥交閸ャ劍濮㈤柨?
+	 * 闁活亞鍠愰婊堟儍?reduced-cost 闁告垼濮ら弳鐔哥瀹ュ懏韬?extendBackward 闂佹彃鐭傞埀顒佷亢缁?shift/add/normalize 闂侇偅甯楃敮褰掑Υ?
 	 */
 	private boolean isDirectBackwardExtensionTimeFeasible(BackwardLabel label, int prevJob) {
 		return isDirectBackwardExtensionTimeFeasible(label.jid, label.isSinkRoot, label.frontier, prevJob);
@@ -4083,7 +4353,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void cacheDssrReusablePricingWindowScalars() {
-		// 2026-06-12: initialize() 每轮会先重置 pricingHorizon；复用 window 数组时必须同步恢复这些标量。
+		// 2026-06-12: initialize() 婵絽绻楅悿鍡樺濮橆剙甯ラ梺鎻掔Ф閻?pricingHorizon闁挎稒绋戦ˇ鏌ユ偨?window 闁轰焦澹嗙划宥夊籍鐠鸿櫣绠戝銈堫嚙閹挸顫㈤妷锔垮垝濠㈣泛绉风换鏍ㄧ濞戞瑧鍨奸梺鎻掔箞閳?
 		ngDssrReusablePricingHorizon = pricingHorizon;
 		ngDssrReusableDynamicMinHStart = dynamicMinHStart;
 		ngDssrReusableDynamicMaxHEnd = dynamicMaxHEnd;
@@ -4106,8 +4376,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		timeIndexedScalarBuildNanos += timeIndexedScalarBound.getBuildNanos();
 		TimeIndexedScalarCompletionBound.WindowTightening tightened;
 		if (config.timeIndexedCompletionBoundInRoundArcFixing) {
-			// 2026-06-29: pricing 中间迭代只使用 no-SRI 的轻量 relaxed fixing。
-			// SRI-aware fixing 只保留在 node 闭合后的可继承 reduced-cost fixing 中，避免每轮 DSSR 迭代维护多状态 bucket。
+			// 2026-06-29: pricing 濞戞搩鍙冨Λ鎸庢交椤撴繂鏁╅柛娆樹簷婵炲洭鎮?no-SRI 闁汇劌瀚禍銈夋煂?relaxed fixing闁?
+			// SRI-aware fixing 闁告瑯浜欑换姘舵偩濞嗗繑韬?node 闂傚偆鍘奸幃搴ㄥ触鎼达絾鐣遍柛娆樺灣閹寸兘骞?reduced-cost fixing 濞戞搩鍙忕槐婵嬫焼閸喖甯虫慨锝呯箺閻?DSSR 閺夆晩鍘洪崬顒傜磼鐎涙ê袘濠㈣埖姘ㄦ慨鎼佸箑?bucket闁?
 			tightened = timeIndexedScalarBound.tightenWindowsAfterZeroReducedCostArcFixing(
 					effectiveJobHStart, effectiveJobHEnd);
 		} else {
@@ -4170,7 +4440,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				}
 			}
 			if (node != null && node.hasTimeIndexedPricingWindow(job)) {
-				// 2026-06-29: time-indexed fixing 得到的是可继承的硬窗口；和 dual window 取交集即可。
+				// 2026-06-29: time-indexed fixing 鐎电増顨呴崺宀勬儍閸曨剚笑闁告瑯鍨抽幋鐑藉箥鐠恒劍鐣辩痪顓у墰閻涖儵宕ｉ敐蹇曞耿闁?dual window 闁告瑦鐗斿锕傛⒖閸℃绁柛娆樺灛閳?
 				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
 				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
 			}
@@ -4285,7 +4555,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (Double.isFinite(left) && Utility.compareLt(left, pricingHorizon)) {
 			candidate = (left + pricingHorizon) * 0.5;
 		} else {
-			// 2026-05-26: 当局部窗口已经贴到 pricingHorizon 时，回退到右偏切分，避免后向半区间长度为 0。
+			// 2026-05-26: 鐟滅増鎸搁惇顒勬焾閵娧呭炊闁告瑱绲介崙锛勭磼韫囨艾鍨遍柛?pricingHorizon 闁哄啳顔愮槐婵嬪炊閻愯　鍋撻埀顒勫礆閺夊灝绀侀柛瀣箰閸ㄥ繘宕氶崱顓犵闂侇剙鐏濋崢銈夊触鎼粹剝鍊婚柛妤€锕ょ亸顖炴⒒閹绢喗姣愰幖杈剧細鐠?0闁?
 			candidate = pricingHorizon * 0.75;
 		}
 		return clampCurrentMidpoint(candidate);
@@ -4375,8 +4645,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-07: 先从 low reduced-cost 列中评价 2K 条，再按列末完工时间取最晚 K 条。
-	 * 这样保留任务量 median 的语义，同时减少短列或早完工列把 Tmid 拉得过左。
+	 * 2026-06-07: 闁稿繐鐗呯划?low reduced-cost 闁告帗銇為懙鎴犳嫚閸曨亞骞?2K 闁哄妲勭槐婵嬪礃瀹ュ棗鐦婚柛鎺擃殕濠€顖溾偓鐟拌嫰娴兼劙寮崼鏇燂紵闁告瑦鐗楀〒鍫曞疾?K 闁哄鎵冲亾?
+	 * 閺夆晜鐟﹂悧杈ㄧ┍濠靛牊娈屽ù鐘侯嚙婵喖鏌?median 闁汇劌瀚銏＄▕婢舵稓绀夐柛姘湰濡炲倿宕欒箛鎾舵瘜闁活収鍘奸崹顏堝箣閺嶃劍锛嶉悗鐟拌嫰娴兼劙宕氬Δ浣肝?Tmid 闁瑰嘲顦欢杈ㄦ交閸パ傜闁?
 	 */
 	private MidpointColumnTimingStats evaluateTopLastMidpointColumnTiming(LP lp) {
 		List<ColumnMidpointCandidate> candidates = selectMidpointColumnCandidates(lp);
@@ -4438,7 +4708,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!Double.isFinite(pricingHorizon) || !Utility.compareGt(pricingHorizon, 0.0)) {
 			return 0.0;
 		}
-		// 正常 midpoint 公式应已落在 (0, pricingHorizon) 内；这里仅防御极小 horizon 或后续改公式造成贴边。
+		// 婵繐绲介悥?midpoint 闁稿浚鍓欑槐鈩冩償閺傚灝鍤掗柦鈧挊澶嬭含 (0, pricingHorizon) 闁告劕鎷戠槐杈ㄦ交濞嗘挸娅″ù鐘叉嚇濡茶顕ラ埄鍐偓顒備焊?horizon 闁瑰瓨鐗曢幃妤冪磼椤撶喐鏆柛蹇ｅ墮缁憋繝鏌呴悩鍐茬亣閻犳劗顥愮粩鐔煎Υ?
 		double minWidth = Math.max(Utility.EPS * 10.0, pricingHorizon * 1e-9);
 		if (!Utility.compareGt(pricingHorizon, 2.0 * minWidth)) {
 			return pricingHorizon * 0.5;
@@ -4518,9 +4788,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-25: 只抽取“和前驱/后继无关、单看 job 自己就落不到对应 half-domain”的信息。
-	 * forward 若整段硬窗都在 Tmid 右侧，则任何 forward prefix 都不需要再尝试它；
-	 * backward 对称地看整段硬窗是否已完全落在 Tmid 左侧。
+	 * 2026-05-25: 闁告瑯浜濇繛濠囧矗閺嶃倐鍋撳鍐╁闁告挸绉归埞?闁告艾娴烽幋鐑藉籍閻樻彃褰犻柕鍡曠瀹曠喖鎯?job 闁煎浜滅换浣轰焊鏉堫偅鍎板☉鎾崇Т閸╁瞼鈧數鎳撶花?half-domain闁炽儲绻勫▓鎴炵┍閳╁啩绱栭柕?
+	 * forward 闁兼眹鍎查弳锝呪枔閻㈢鈧牜绮ｅΔ鍛幋闁?Tmid 闁告瑥鍘栭弲鍫曟晬鐏炶棄鐏熷ù鐘侯唺缂?forward prefix 闂侇喗鍨濈粭澶愭閳ь剛鎲版担绋挎櫃閻忓繑绻嗛惁顖溾偓鐟板枦缁?
+	 * backward 閻庨潧婀辫ⅷ闁革附澹嗗﹢鍛村极鐎涙﹩鍞界痪顓у墰閻涖儵寮伴姘剨鐎瑰憡褰冮悾顒勫礂閵娿劍鍎伴柛?Tmid 鐎归潻缂氶弲鍫曞Υ?
 	 */
 	private void precomputeHalfDomainEligibility() {
 		forwardHalfEligibleByJob = new boolean[data.n + 1];
@@ -4551,8 +4821,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		baseForwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		baseBackwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			// 2026-05-24: data.penaltyFunction[job] 已经包含基于 b_j 的静态粗硬窗。
-			// dual 不能进一步收紧时，双向 pricing 直接复用这两个半域缓存，避免每轮重复 setDomain/crop。
+			// 2026-05-24: data.penaltyFunction[job] 鐎规瓕灏欑划锟犲礌閸涱厽鍎撻柛鈺勬〃缁?b_j 闁汇劌瀚板銈夊箑娴ｈ櫣鐓愮痪顓у墰閻涖儵濡?
+			// dual 濞戞挸绉烽崗妯绘交濞戞顏辨慨婵勫劜閺佸湱妲愯濡炲倿鏁嶇仦钘夎摕闁?pricing 闁烩晛鐡ㄧ敮瀛樺緞瀹ュ洦鏆忛弶鈺傜懁鐞氳鲸绋夐鍕９闁糕晝鍠撶槐锔锯偓娑欙公缁辨繈鏌嗛崹顔煎赋婵絽绻楅悿鍡涙煂瀹ュ拋妲?setDomain/crop闁?
 			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, tMid);
 			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, pricingHorizon);
 		}
@@ -4565,14 +4835,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (node == null || node.depth != 0) {
 			return false;
 		}
-		// cut dual 或分支 dual 都可能让 reduced arc cost 不再满足原始 setup cost 的三角不等式。
-		// 当前只在根节点、且没有 active cuts 时使用 pi_j 进一步收紧静态外包窗。
+		// cut dual 闁瑰瓨鐗曢崹搴ㄥ绩?dual 闂侇喛妫勮ぐ鏌ユ嚄閸婄噥鍞?reduced arc cost 濞戞挸绉撮崯鈧繝濞愩倕鍠曢柛妯煎枎椤?setup cost 闁汇劌瀚粭浣烘喆閹哄秶鐟濈紒娑橆槸缁憋繝濡?
+		// 鐟滅増鎸告晶鐘诲矗椤忓嫭韬柡宥囶攰婵☆參鎮欓獮搴撳亾娴ｉ鐟繛灞稿墲濠€?active cuts 闁哄啯婀规繛鍥偨?pi_j 閺夆晜绋愮粩鏉戭潰閵夛附鏆紒姣栧洦楗柟顑跨椤﹀宕犻崨顖滃炊闁?
 		return lp.getActiveCutIds().isEmpty();
 	}
 
 	/**
-	 * 2026-05-28: 根节点 no-cut pricing 中，pi_j=0 的任务不进入 pricing 扩展。
-	 * 在当前无 cut/branch dual 的三角不等式语义下，这类 job 不可能改善负 reduced-cost 列。
+	 * 2026-05-28: 闁哄秶顢婃俊顓㈡倷?no-cut pricing 濞戞搩鍙忕槐婕癷_j=0 闁汇劌瀚幑銏ゅ礉閳ヨ尙鐟濋弶鈺傜☉閸?pricing 闁圭鏅涢惈宥夊Υ?
+	 * 闁革负鍔岀紞瀣礈瀹ュ棙锟?cut/branch dual 闁汇劌瀚粭浣烘喆閹哄秶鐟濈紒娑橆槸缁憋紕鎷犻婵堢枀濞戞挸顑戠槐婵囨交濞嗘垼顫?job 濞戞挸绉磋ぐ鏌ユ嚄閼恒儲鏆柛鐘插缁€?reduced-cost 闁告帗銇滈埀?
 	 */
 	private void precomputeZeroDualExcludedJobs(LP lp) {
 		if (!dualProfitableWindowEnabled) {
@@ -4589,20 +4859,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
-		// 2026-05-23: 半域边界直接写入动态 job penalty。
-		// forward 的新增 job 函数只在 [0,Tmid] 上参与 add，公共定义域会自然把右端卡在 Tmid。
+		// 2026-05-23: 闁告锕ら悡娆愭綇閸︻厽娅曢柣鈺佺摠鐢挳宕樺▎蹇撳汲闁告柣鍔嶉埀?job penalty闁?
+		// forward 闁汇劌瀚弻濠冩櫠?job 闁告垼濮ら弳鐔煎矗椤忓嫭韬?[0,Tmid] 濞戞挸锕ゅ顒佺▔?add闁挎稑鑻崣鏇㈠礂閸楃偟鏆板☉鏂款槸閻撴瑦瀵煎鍐叉闁绘帟鍩栨俊鎼佸矗瀹曞浂浼傞柛妞烩偓铏含 Tmid闁?
 		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, tMid);
 	}
 
 	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
-		// 2026-05-23: backward 对称使用 [Tmid,pricingHorizon] 上的新增 job 函数。
-		// 若窗口左侧为 big_M，后续 normalize(BACKWARD) 会通过 suffix-min 表达“可以等到窗口内完成”。
+		// 2026-05-23: backward 閻庨潧婀辫ⅷ濞达綀娉曢弫?[Tmid,pricingHorizon] 濞戞挸锕﹀▓鎴﹀棘閺夋鏉?job 闁告垼濮ら弳鐔煎Υ?
+		// 闁兼眹鍎抽悰銉╁矗閿濆懍绠〒姘€鍌濈 big_M闁挎稑鑻幃妤冪磼?normalize(BACKWARD) 濞村吋宀搁埀顒佷亢缁?suffix-min 閻炴稏鍔忛幓顏堝灳濠婂啫璁插ù鐘劤閻℃垿宕氶幍顔惧炊闁告瑱绲介崬瀵糕偓鐟版湰閸ㄦ岸鍨惧┑鍕ㄥ亾?
 		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction buildCompletionBoundPenalty(int job, double hStart, double hEnd) {
-		// 2026-06-01: Tmid pricing 的正式 label 仍使用左右半域函数；completion bound
-		// 需要判断半域 label 是否还能补成完整负列，因此单独使用完整 [0, pricingHorizon] 定义域。
+		// 2026-06-01: Tmid pricing 闁汇劌瀚婊冾嚕?label 濞寸姴绉虫繛鍥偨閵娿儰绠柛娆忓暱瀹曟劙宕洪悢宄版瘣闁轰礁搴滅槐鐪俹mpletion bound
+		// 闂傚洠鍋撻悷鏇氱閸ㄤ粙寮鐐茬９闁?label 闁哄嫷鍨伴幆浣规交濡灝鍘撮悶娑栧劜閸ㄦ氨鈧懓鏈弳锝囨嫻閻斿嘲鐏欓柨娑樿嫰濞叉粌顫㈤妶鍛闁绘瑯鍏涙繛鍥偨閵娿儳鏆氶柡?[0, pricingHorizon] 閻庤鐭粻鐔煎春閻旂补鍋?
 		if (isEffectiveWindowTighterThanHard(job)) {
 			return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, pricingHorizon);
 		}
@@ -4985,8 +5255,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-24: normal forward label 经 prefix-min normalize 后整体非增，
-	 * 最小 reduced cost 直接落在最右端，不必每次再全段 findMinimal。
+	 * 2026-05-24: normal forward label 缂?prefix-min normalize 闁告艾瀛╅弳锝嗘媴閹剧粯濮滃褏鍎戠槐?
+	 * 闁哄牃鍋撻悘?reduced cost 闁烩晛鐡ㄧ敮鎾媰閽樺韬柡鍫氬亾闁告瑥纾顒勬晬鐏炶偐鐟濋煫鍥ф噺閻︹€斥枎閳ュ啿鏅欓柛蹇嬪妽椤?findMinimal闁?
 	 */
 	private static double forwardEndpointMin(PiecewiseLinearFunction frontier) {
 		if (frontier == null || frontier.tail == null) {
@@ -4996,8 +5266,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-24: normal backward label 经 suffix-min normalize 后整体非减，
-	 * 最小 reduced cost 直接落在最左端；只有 joinCost 那种未再方向化的函数才需要 findMinimal。
+	 * 2026-05-24: normal backward label 缂?suffix-min normalize 闁告艾瀛╅弳锝嗘媴閹剧粯濮滈柛鎴濋獜缁?
+	 * 闁哄牃鍋撻悘?reduced cost 闁烩晛鐡ㄧ敮鎾媰閽樺韬柡鍫氬亾鐎归潻濡囬顒勬晬濞戞ê娑ч柡?joinCost 闂侇叏绲块～鎺楀嫉椤忓嫬鏅欓柡鍌滄嚀閹粓宕犻弽顐ｇ暠闁告垼濮ら弳鐔煎箥瀹ュ浠橀悷?findMinimal闁?
 	 */
 	private static double backwardEndpointMin(PiecewiseLinearFunction frontier) {
 		if (frontier == null || frontier.head == null) {
@@ -5008,15 +5278,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {
 		PiecewiseLinearFunction cropped = new PiecewiseLinearFunction();
-		// 2026-05-23: crop 不只裁物理 segment，也要同步函数元数据。
-		// shiftX() 的 trimToDomain 只看 domainStart/domainEnd；如果这里不重设，
-		// 后续半域 label 会只能靠 add 的公共物理定义域兜底，不能自然按 Tmid 裁剪。
+		// 2026-05-23: crop 濞戞挸绉磋ぐ褏鎲楁担鍝勨挅闁?segment闁挎稑濂旂弧鍐啺娴ｅ憡鍊辨慨婵勫劚閸ら亶寮弶鍨笚闁轰胶澧楀畵渚€濡?
+		// shiftX() 闁?trimToDomain 闁告瑯浜炲﹢?domainStart/domainEnd闁挎稒绋戦々褔寮稿鍡欑闂佹彃濂旂粭澶愭煂瀹ュ牜鍟庨柨?
+		// 闁告艾娴烽悽濠氬础婵犲倻鍘?label 濞村吋鑹捐ぐ褔鎳楁禒瀣祮 add 闁汇劌瀚崣鏇㈠礂鏉堚晛鈷栭柣鐐叉閻ｇ偓绋婃径濠勫幍闁稿繑绮岀花鎶芥晬鐏炶偐鐟濋柤鍐测偓鐔锋闁绘帟鍩栫€?Tmid 閻熶椒绀佹竟鈧柕?
 		cropped.resetDomain(start, end);
 		if (function == null || function.head == null || Utility.compareGt(start, end)) {
 			return cropped;
 		}
-		// 2026-05-22: 双向半域可能刚好退化到 Tmid 单点。这个点不参与继续扩展，
-		// 但 join 时要能用 Tmid 处常数延拓评价，因此这里保留零长度常数段。
+		// 2026-05-22: 闁告瑥鑻幃婊堝础婵犲倻鍘甸柛娆樺灥閸忔﹢宕氬顑惧仺闂侇偀鍋撻柛鏍ㄧ墪閸?Tmid 闁告娲滈崑锝夊Υ閸屾繄绠瑰☉鎿冧簽閸嬶絾绋夊鍛濞戞挸娴烽幋椋庣磼椤撶喎鈷栭悘鐐存穿缁?
+		// 濞?join 闁哄啯鍎奸々锕傛嚄閻ｅ本鏆?Tmid 濠㈣泛瀚悥鍫曞极閺夋寧顐介柟閿嬫崄閻﹀孩绂掗崙銈囩闁搞儳濮甸婵囨交濞嗘挸娅″ǎ鍥ㄧ箘閺嗏偓闂傚棗鐖奸弳杈ㄦ償閿曗偓閻栧爼寮悧鍫斀闁?
 		if (Utility.compareEq(start, end)) {
 			if (!Utility.compareLt(start, function.head.start) && !Utility.compareGt(start, function.tail.end)) {
 				addConstantSegmentOrPoint(cropped, start, end, function.evaluate(start));
@@ -5414,7 +5684,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private static final class SinglePointStore<L extends FunctionLabel> {
-		// 2026-06-13: ng-DSSR 的 dominance key 使用 full-domain dominanceSet；extensionSet 只控制当前半域扩展。
+		// 2026-06-13: ng-DSSR 闁?dominance key 濞达綀娉曢弫?full-domain dominanceSet闁挎稒鐭爔tensionSet 闁告瑯浜濈敮鍫曞礆鐠鸿櫣绉奸柛鎾崇Т瀹曟劙宕洪悢绋库挅閻忕偞娲忛埀?
 		final HashMap<PackedBitSet, L> bestByDominanceKey = new HashMap<PackedBitSet, L>();
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}
@@ -5429,7 +5699,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final byte[] sriCounts;
 		final double sriPenalty;
 		final String sriStateKey;
-		/** join 阶段临时常数延拓后的函数缓存；label frontier 创建后不再修改，可以安全复用。 */
+		/** join 闂傚啳鍩栭灞剧▔鐎涙ɑ顦ч悽顖氭啞閺嗙喎顕欓懜闈涚彇闁告艾娴峰▓鎴﹀礄閼恒儲娈剁紓鍌涙尭閻°劑鏁嶅▽纰糱el frontier 闁告帗绋戠紓鎾诲触鎼存繄鐟濋柛鎰С閹便劑寮ㄩ惂鍝ョ闁告瑯鍨禍鎺斺偓鐟邦槸閸欏繑寰勫鍥ㄦ殢闁?*/
 		PiecewiseLinearFunction joinExtendedFrontier;
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet dominanceSet,

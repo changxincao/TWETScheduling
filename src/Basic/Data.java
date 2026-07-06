@@ -717,9 +717,8 @@ public class Data {
 	}
 
 	public void debug_set() {
-		n = 60;
-		m = 3;
-		scale = 3;
+		// 2026-07-06: 旧调试入口不能在正式读取数据时覆盖文件头里的 n/m/scale。
+		// 构造函数仍保留调用以减少改动面，但这里保持 no-op。
 	}
 
 	public boolean isExactIntegerTimeInstance() {

@@ -1492,7 +1492,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet sourceDominanceSet = buildForwardDominanceSet(0, sourceNgMemory, lp.getNode(), sourceFrontier);
 		PackedBitSet sourceExtensionSet = buildForwardExtensionSet(sourceDominanceSet, 0, sourceFrontier);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
-				sourceDominanceSet, sourceExtensionSet, sourceNgMemory, sourceFrontier, sourceFrontier.copy(),
+				sourceDominanceSet, sourceExtensionSet, sourceNgMemory, sourceFrontier,
+				sriPricingEnabled ? sourceFrontier.copy() : null,
 				emptySriCounts(), 0.0);
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
@@ -2157,7 +2158,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet sinkExtensionSet = buildBackwardExtensionSet(sinkDominanceSet, lp.getNode().sinkId(), true,
 				sinkFrontier);
 		BackwardLabel sink = new BackwardLabel(nextLabelId++, lp.getNode().sinkId(), null, sinkVisited,
-				sinkDominanceSet, sinkExtensionSet, sinkNgMemory, sinkFrontier, sinkFrontier.copy(), emptySriCounts(),
+				sinkDominanceSet, sinkExtensionSet, sinkNgMemory, sinkFrontier,
+				sriPricingEnabled ? sinkFrontier.copy() : null, emptySriCounts(),
 				0.0, true);
 		BWUL.add(sink);
 	}
@@ -2270,9 +2272,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
 		double delay = data.getSetUp(label.jid, nextJob) + data.getProcessT(nextJob);
+		if (!hasForwardExtensionWindowOverlap(label, nextJob, delay)) {
+			return null;
+		}
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
-		PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(delay);
-		if (shifted.head == null || shiftedNoSri.head == null) {
+		if (shifted.head == null) {
 			return null;
 		}
 
@@ -2281,14 +2285,26 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return null;
 		}
 		PiecewiseLinearFunction nextFrontier = shifted.add(jobPenalty);
-		PiecewiseLinearFunction nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
-		if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
+		if (nextFrontier.head == null) {
 			return null;
+		}
+		PiecewiseLinearFunction nextNoSriFrontier = null;
+		if (sriPricingEnabled) {
+			PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(delay);
+			if (shiftedNoSri.head == null) {
+				return null;
+			}
+			nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
+			if (nextNoSriFrontier.head == null) {
+				return null;
+			}
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
 				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
-		nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+		if (nextNoSriFrontier != null) {
+			nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+		}
 		byte[] childSriCounts;
 		double childSriPenalty;
 		double sriShift;
@@ -2305,8 +2321,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			nextFrontier.shiftYInPlace(sriShift);
 		}
 		nextFrontier.normalize(Direction.FORWARD);
-		nextNoSriFrontier.normalize(Direction.FORWARD);
-		if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
+		if (nextNoSriFrontier != null) {
+			nextNoSriFrontier.normalize(Direction.FORWARD);
+		}
+		if (nextFrontier.head == null || (nextNoSriFrontier != null && nextNoSriFrontier.head == null)) {
 			return null;
 		}
 
@@ -2337,19 +2355,23 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			// 2026-05-22: backward 濞寸姴姘﹀▍鍕箯閻旇櫣鐭掗柣鎰嚀閸ゎ參宕ｉ幋鐐搭槯闁挎稑鐬奸鍥ㄧ▔閳ь剙鈻庨垾鍐差潱闁稿繈鍎冲﹢锛勨偓鍦仒閹广垽宕濋垾鑼憹闂傚洠鍋撻悷鏇氱劍鐎?setup/processing 妤犵偛纾簺闁?
 			// 鐟滅増鎸告晶鐘诲矗濮椻偓閸ｅ搫顔忛懠顒傜梾闁?prevJob 闁煎浜滅换渚€鎯冮崟顐ゆ殮闁瑰瓨鍔栧鍌炴⒒鏉堝墽绀夐弶鈺傜懇閸ｇ兘宕ｉ鍛拸 job/arc dual闁?
 			nextFrontier = jobPenalty.copy();
-			nextNoSriFrontier = jobPenalty.copy();
+			nextNoSriFrontier = sriPricingEnabled ? jobPenalty.copy() : null;
 			double fixedReducedCost = -lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId());
 			nextFrontier.shiftYInPlace(fixedReducedCost);
-			nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+			if (nextNoSriFrontier != null) {
+				nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+			}
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
+			if (!hasBackwardExtensionWindowOverlap(label, prevJob, delay)) {
+				return null;
+			}
 			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
 			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				return null;
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
-			PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(-delay);
-			if (shifted.head == null || shiftedNoSri.head == null) {
+			if (shifted.head == null) {
 				return null;
 			}
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, label.jid);
@@ -2357,14 +2379,26 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return null;
 			}
 			nextFrontier = shifted.add(jobPenalty);
-			nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
-			if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
+			if (nextFrontier.head == null) {
 				return null;
+			}
+			nextNoSriFrontier = null;
+			if (sriPricingEnabled) {
+				PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(-delay);
+				if (shiftedNoSri.head == null) {
+					return null;
+				}
+				nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
+				if (nextNoSriFrontier.head == null) {
+					return null;
+				}
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
 					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
-			nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+			if (nextNoSriFrontier != null) {
+				nextNoSriFrontier.shiftYInPlace(fixedReducedCost);
+			}
 		}
 		byte[] childSriCounts;
 		double childSriPenalty;
@@ -2383,8 +2417,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			nextFrontier.shiftYInPlace(sriShift);
 		}
 		nextFrontier.normalize(Direction.BACKWARD);
-		nextNoSriFrontier.normalize(Direction.BACKWARD);
-		if (nextFrontier.head == null || nextNoSriFrontier.head == null) {
+		if (nextNoSriFrontier != null) {
+			nextNoSriFrontier.normalize(Direction.BACKWARD);
+		}
+		if (nextFrontier.head == null || (nextNoSriFrontier != null && nextNoSriFrontier.head == null)) {
 			return null;
 		}
 
@@ -2396,6 +2432,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet childExtensionSet = buildBackwardExtensionSet(childDominanceSet, prevJob, false, nextFrontier);
 		return new BackwardLabel(nextLabelId++, prevJob, label, visited, childDominanceSet, childExtensionSet,
 				childNgMemory, nextFrontier, nextNoSriFrontier, childSriCounts, childSriPenalty, false);
+	}
+
+	/** 提前判断 forward 扩展后的完成时间区间是否可能与任务有效窗口相交，避免构造必为空的 PWLF。 */
+	private boolean hasForwardExtensionWindowOverlap(ForwardLabel label, int nextJob, double delay) {
+		if (label.frontier == null || label.frontier.head == null) {
+			return false;
+		}
+		double shiftedStart = Math.max(label.frontier.head.start + delay, label.frontier.domainStart);
+		double shiftedEnd = Math.min(label.frontier.tail.end + delay, label.frontier.domainEnd);
+		double windowStart = Math.max(getDynamicForwardHStart(label.jid, nextJob), 0.0);
+		double windowEnd = Math.min(getDynamicForwardHEnd(label.jid, nextJob), tMid);
+		double overlapStart = Math.max(shiftedStart, windowStart);
+		double overlapEnd = Math.min(shiftedEnd, windowEnd);
+		return !Utility.compareLt(overlapEnd, overlapStart);
+	}
+
+	/** 提前判断 backward 扩展后的完成时间区间是否可能与任务有效窗口相交，避免构造必为空的 PWLF。 */
+	private boolean hasBackwardExtensionWindowOverlap(BackwardLabel label, int prevJob, double delay) {
+		if (label.frontier == null || label.frontier.head == null) {
+			return false;
+		}
+		double shiftedStart = Math.max(label.frontier.head.start - delay, label.frontier.domainStart);
+		double shiftedEnd = Math.min(label.frontier.tail.end - delay, label.frontier.domainEnd);
+		double windowStart = Math.max(getDynamicBackwardHStart(prevJob, label.jid), tMid);
+		double windowEnd = Math.min(getDynamicBackwardHEnd(prevJob, label.jid), pricingHorizon);
+		double overlapStart = Math.max(shiftedStart, windowStart);
+		double overlapEnd = Math.min(shiftedEnd, windowEnd);
+		return !Utility.compareLt(overlapEnd, overlapStart);
 	}
 
 	private InsertStatus insertForward(ForwardLabel label, LP lp) {

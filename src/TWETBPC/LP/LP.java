@@ -304,23 +304,19 @@ public class LP {
 
 	public double computeReducedCost(TWETColumn column, PricingDualSnapshot dual) {
 		double reducedCost = column.getCost() - dual.machineDual;
-		for (int job = 1; job <= data.n; job++) {
+		for (int job = column.getJobs().nextSetBit(1); job > 0 && job <= data.n;
+				job = column.getJobs().nextSetBit(job + 1)) {
 			int count = column.getJobVisitCount(job);
-			if (count > 0) {
-				reducedCost -= count * dual.jobDual[job];
-			}
+			reducedCost -= count * dual.jobDual[job];
 		}
 		int sink = node == null ? data.n + 1 : node.sinkId();
-		for (int from = 0; from <= sink && from < dual.arcDual.length; from++) {
-			for (int to = 1; to <= sink && to < dual.arcDual[from].length; to++) {
-				double arcValue = dual.arcDual[from][to];
-				if (arcValue != 0.0) {
-					int count = column.getArcVisitCount(from, to, sink);
-					if (count > 0) {
-						reducedCost -= count * arcValue;
-					}
-				}
+		if (!column.getSequence().isEmpty()) {
+			int prev = 0;
+			for (int job : column.getSequence()) {
+				reducedCost -= arcDualValue(dual, prev, job);
+				prev = job;
 			}
+			reducedCost -= arcDualValue(dual, prev, sink);
 		}
 		if (activeSubsetRowPricingCutIds != null && activeSubsetRowPricingDuals != null) {
 			for (int i = 0; i < activeSubsetRowPricingCutIds.size(); i++) {
@@ -332,6 +328,13 @@ public class LP {
 			}
 		}
 		return reducedCost;
+	}
+
+	private double arcDualValue(PricingDualSnapshot dual, int from, int to) {
+		if (from < 0 || from >= dual.arcDual.length || to < 0 || to >= dual.arcDual[from].length) {
+			return 0.0;
+		}
+		return dual.arcDual[from][to];
 	}
 
 	public double computeReducedCost(TWETOutsourcingColumn column, PricingDualSnapshot dual) {
@@ -889,11 +892,10 @@ public class LP {
 		TWETColumn column = pool.getColumn(columnId);
 		IloColumn cplexColumn = cplex.column(objective, internalColumnObjectiveCost(columnId));
 		cplexColumn = cplexColumn.and(cplex.column(machineRange, 1.0));
-		for (int job = 1; job <= data.n; job++) {
+		for (int job = column.getJobs().nextSetBit(1); job > 0 && job <= data.n;
+				job = column.getJobs().nextSetBit(job + 1)) {
 			int coefficient = column.getJobVisitCount(job);
-			if (coefficient > 0) {
-				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], coefficient));
-			}
+			cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], coefficient));
 		}
 		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
@@ -955,8 +957,9 @@ public class LP {
 		if (!isColumnizedOutsourcing()) {
 			return false;
 		}
-		for (int job = 1; job <= data.n; job++) {
-			if (node.getOutsourcingJobState(job) == Node.OUTSOURCE_REQUIRED && column.containsJob(job)) {
+		for (int job = column.getJobs().nextSetBit(1); job > 0 && job <= data.n;
+				job = column.getJobs().nextSetBit(job + 1)) {
+			if (node.getOutsourcingJobState(job) == Node.OUTSOURCE_REQUIRED) {
 				return true;
 			}
 		}
@@ -994,10 +997,9 @@ public class LP {
 		TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
 		IloColumn cplexColumn = cplex.column(objective, column.getCost());
 		cplexColumn = cplexColumn.and(cplex.column(outsourcingColumnCountRange, 1.0));
-		for (int job = 1; job <= data.n; job++) {
-			if (column.containsJob(job)) {
-				cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
-			}
+		for (int job = column.getJobSet().nextSetBit(1); job > 0 && job <= data.n;
+				job = column.getJobSet().nextSetBit(job + 1)) {
+			cplexColumn = cplexColumn.and(cplex.column(coverRanges[job], 1.0));
 		}
 		for (Map.Entry<Integer, IloRange> entry : outsourcingMembershipBranchRanges.entrySet()) {
 			if (column.containsJob(entry.getKey().intValue())) {

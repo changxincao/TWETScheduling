@@ -11,6 +11,7 @@ import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.TimeLimitChecker;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -36,11 +37,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
+	private final TWETColumnEvaluator evaluator;
 	private final SegmentProfile[] singletonProfileCache;
 
 	public HeuristicPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
+		this.evaluator = new TWETColumnEvaluator(data);
 		this.singletonProfileCache = buildSingletonProfileCache();
 	}
 
@@ -285,13 +288,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private double trueSequenceCost(List<Integer> sequence) {
-		PiecewiseLinearFunction[] forwardProfile = buildForwardProfile(sequence, true, unrestrictedWindowContext());
-		if (forwardProfile.length == 0 || forwardProfile[forwardProfile.length - 1] == null
-				|| forwardProfile[forwardProfile.length - 1].isEmpty()) {
-			return Utility.big_M;
-		}
-		PiecewiseLinearFunction last = forwardProfile[forwardProfile.length - 1];
-		return last.tail.getValue(last.tail.end);
+		return evaluator.evaluate(sequence);
 	}
 
 	private HeuristicWindowContext unrestrictedWindowContext() {

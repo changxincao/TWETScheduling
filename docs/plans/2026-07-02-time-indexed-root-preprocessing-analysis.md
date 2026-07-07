@@ -242,3 +242,17 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 2026-07-06 进一步实现了两个低风险常数优化。第一，ng-DSSR 在 SRI 未开启时不再为每个 label 单独构造 `noSriFrontier`。原逻辑中 `frontier` 和 `noSriFrontier` 会分别走一套 `shiftX + add + shiftY + normalize`，但无 SRI 时二者语义相同；现在仅在 `sriPricingEnabled=true` 时构造独立 no-SRI 函数，无 SRI 时传 `null`，由 `FunctionLabel` 构造器把 `noSriFrontier` 映射到 `frontier`，因此 completion-bound pruning 读取仍然非空。第二，在 `extendForward/extendBackward` 进入 `shiftX/add` 前增加时间窗交集检查：先用父 label 的当前函数区间、setup/processing delay、下一任务的 dynamic effective window 和当前半域 `[0,Tmid]` / `[Tmid,H]` 判断是否必然无交集，若无交集直接返回。这只是提前识别原本 `shiftX/add` 后会变成空函数的扩展，不改变 reduced cost、dominance 或生成列语义。
 
 2026-07-06 复查上述两个优化、due window 口径和列成本 evaluator。`noSriFrontier` 优化只在无 SRI 时复用 `frontier`，SRI 开启时仍保留独立 no-SRI 函数，completion-bound pruning 读取的函数非空且语义不变。扩展前的窗口交集检查与 `shiftX()` 后按原 domain trim 的语义一致，并使用本轮 dynamic effective window 与半域窗口，只会跳过原本 `shiftX/add` 后为空的扩展。`TWETColumnEvaluator.evaluate()` 与 `evaluateTiming().cost` 在普通 40-2、setupR75 变体和 setup-cost 系数 20 三组各 500 条随机序列上对拍，最大差异均为 0，说明当前直接 PWLF 拼接没有破坏 due date/window、硬窗、setup time 和 setup cost 的成本口径。复查时还发现 `Data.debug_set()` 仍会覆盖文件头的 `n/m/scale`，导致重新编译后直接读取 40-2 数据可能按 60 任务解析并在 `SETUP` 行报错；已将该旧调试入口改为 no-op，避免正式数据读取被调试值污染。
+
+## 2026-07-07：主线高频函数冗余复查
+
+本次继续按当前主线从 pricing、LP 列筛选和增量建模路径复查冗余。当前没有发现新的正确性问题；主要可安全处理的是若干“明明只需要看当前列，却扫描所有 job 或所有 arc dual”的常数级低效点。
+
+首先，`LP.computeReducedCost(TWETColumn, PricingDualSnapshot)` 原来对 job dual 扫描 `1..n`，对 arc dual 则扫描整个 dual 矩阵，并对每个非零 arc dual 调用 `column.getArcVisitCount(from,to)`。这在 branch seed 筛选、strong trial seed 筛选和新增列 reduced cost 排序中会被大量调用，且 arc 部分实际复杂度接近“列数 × arc 数 × 序列长度”。现在改为按列自身的访问 job bitset 扫 job dual，并沿非空 column sequence 顺序直接减去 `0 -> first`、内部相邻弧和 `last -> sink` 的 arc dual；空序列仍按旧 `getArcVisitCount()` 口径不计 `0 -> sink`。重复 job 或重复 arc 会在 sequence 中自然重复出现，语义等价于原来的 arc visit count 口径，但避免了整张矩阵扫描。
+
+其次，`LP.addColumnToCurrentModel()` 和 `addOutsourcingColumnToCurrentModel()` 在增量加列到当前 CPLEX 模型时，原来覆盖行部分也按 `1..n` 扫描。现在内部机器列用 `TWETColumn.getJobs().nextSetBit()` 只遍历实际访问任务，仍用 `getJobVisitCount(job)` 写覆盖系数；外包列用 `TWETOutsourcingColumn.getJobSet().nextSetBit()` 遍历集合任务，避免如果 jobs 列表存在重复时重复加系数。strong branching M 判定里的列化外包 required job 检查也改成遍历当前列实际访问任务。
+
+再次，`HeuristicPricingEngine` 在启用 dual-window true-cost recheck 时，原来为了得到一条候选序列的真实成本会重新构造完整 forward profile。由于 `TWETColumnEvaluator.evaluate()` 已经改成直接 PWLF 拼接并支持重复序列，本次将该路径改为直接调用 evaluator。这个改动只影响需要 true-cost recheck 的启发式窗口口径；默认不开 heuristic dual window 时不改变主线行为。
+
+本次复查也确认了一些暂不处理的点。`buildCoverageConstraints()` 属于整模型重建，当前按覆盖行建模，若要改成列式构造需要重写较多结构，暂不动。`computeReducedCost()` 中 subset-row cut 系数仍需要按 cut 语义计算，不能简单稀疏化。PC 里稳定化 dual point 的列贡献构造仍有扫描 arc 矩阵的写法，但它不是当前大量 seed 筛选的主热点，后续若稳定化重新启用再单独处理。ng-DSSR 的主要剩余瓶颈仍是 label 扩展、dominance graph 内同 key 多 label、join pair 数量和 completion-bound 函数传播；这些属于算法结构问题，不适合用小的冗余清理来硬改。
+
+验证上，本次无法使用 `mvn`，因为当前命令环境没有 Maven；改用项目 Eclipse classpath 中的 CPLEX/CP Optimizer jar 做 focused `javac`，覆盖 `LP.java` 与 `HeuristicPricingEngine.java`，编译通过。后续如果要量化收益，应优先观察 branch seed 筛选、strong trial phase1、动态加列时的 master/LP 时间，而不是期待 exact labeling 的 label 数量直接下降。

@@ -1317,15 +1317,19 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		double delay = data.getSetUp(label.jid, nextJob) + data.getProcessT(nextJob);
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
 		if (shifted.head == null) {
+			shifted.release();
 			return null;
 		}
 
 		PiecewiseLinearFunction jobPenalty = getDynamicForwardJobPenalty(label.jid, nextJob);
 		if (jobPenalty == null) {
+			shifted.release();
 			return null;
 		}
 		PiecewiseLinearFunction nextFrontier = shifted.add(jobPenalty);
+		shifted.release();
 		if (nextFrontier.head == null) {
+			nextFrontier.release();
 			return null;
 		}
 		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
@@ -1333,6 +1337,7 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		nextFrontier.shiftYInPlace(fixedReducedCost);
 		nextFrontier.normalize(Direction.FORWARD);
 		if (nextFrontier.head == null) {
+			nextFrontier.release();
 			return null;
 		}
 
@@ -1370,14 +1375,18 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
 			if (shifted.head == null) {
+				shifted.release();
 				return null;
 			}
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, label.jid);
 			if (jobPenalty == null) {
+				shifted.release();
 				return null;
 			}
 			nextFrontier = shifted.add(jobPenalty);
+			shifted.release();
 			if (nextFrontier.head == null) {
+				nextFrontier.release();
 				return null;
 			}
 			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
@@ -1386,6 +1395,7 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		}
 		nextFrontier.normalize(Direction.BACKWARD);
 		if (nextFrontier.head == null) {
+			nextFrontier.release();
 			return null;
 		}
 

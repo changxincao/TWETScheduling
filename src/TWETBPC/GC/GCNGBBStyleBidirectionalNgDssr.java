@@ -2277,25 +2277,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
 		if (shifted.head == null) {
+			shifted.release();
 			return null;
 		}
 
 		PiecewiseLinearFunction jobPenalty = getDynamicForwardJobPenalty(label.jid, nextJob);
 		if (jobPenalty == null) {
+			shifted.release();
 			return null;
 		}
 		PiecewiseLinearFunction nextFrontier = shifted.add(jobPenalty);
+		shifted.release();
 		if (nextFrontier.head == null) {
+			nextFrontier.release();
 			return null;
 		}
 		PiecewiseLinearFunction nextNoSriFrontier = null;
 		if (sriPricingEnabled) {
 			PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(delay);
 			if (shiftedNoSri.head == null) {
+				shiftedNoSri.release();
+				nextFrontier.release();
 				return null;
 			}
 			nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
+			shiftedNoSri.release();
 			if (nextNoSriFrontier.head == null) {
+				nextNoSriFrontier.release();
+				nextFrontier.release();
 				return null;
 			}
 		}
@@ -2325,6 +2334,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			nextNoSriFrontier.normalize(Direction.FORWARD);
 		}
 		if (nextFrontier.head == null || (nextNoSriFrontier != null && nextNoSriFrontier.head == null)) {
+			nextFrontier.release();
+			if (nextNoSriFrontier != null) {
+				nextNoSriFrontier.release();
+			}
 			return null;
 		}
 
@@ -2372,24 +2385,33 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
 			if (shifted.head == null) {
+				shifted.release();
 				return null;
 			}
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, label.jid);
 			if (jobPenalty == null) {
+				shifted.release();
 				return null;
 			}
 			nextFrontier = shifted.add(jobPenalty);
+			shifted.release();
 			if (nextFrontier.head == null) {
+				nextFrontier.release();
 				return null;
 			}
 			nextNoSriFrontier = null;
 			if (sriPricingEnabled) {
 				PiecewiseLinearFunction shiftedNoSri = label.noSriFrontier.shiftX(-delay);
 				if (shiftedNoSri.head == null) {
+					shiftedNoSri.release();
+					nextFrontier.release();
 					return null;
 				}
 				nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
+				shiftedNoSri.release();
 				if (nextNoSriFrontier.head == null) {
+					nextNoSriFrontier.release();
+					nextFrontier.release();
 					return null;
 				}
 			}
@@ -2421,6 +2443,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			nextNoSriFrontier.normalize(Direction.BACKWARD);
 		}
 		if (nextFrontier.head == null || (nextNoSriFrontier != null && nextNoSriFrontier.head == null)) {
+			nextFrontier.release();
+			if (nextNoSriFrontier != null) {
+				nextNoSriFrontier.release();
+			}
 			return null;
 		}
 

@@ -549,3 +549,128 @@ best-first join 顺序也有一定价值。当前外层主要按 terminal job �
 该处理和 dual-bound pruning 不是同一个概念。dual-bound pruning 需要内部列和外包列的完整 reduced-cost 证书并结合当前 RMP 目标计算节点下界；这里新增的是 pricing 控制流优化：某个前置 engine 已经证明内部列族无负列时，不再浪费时间跑更重的内部定价器。稳定化 pass 中也只对当前 pass 生效；如果外层还需要 true-dual pass，仍由原流程继续保证最终正确性。
 
 同时补了一个非整数时间实例下的 completion-bound pre-certificate。该入口只在 completion bound 已构建、实例不是精确整数时间、没有 active SRI cut 时启用。它使用现有 completion-bound 语义中的 forward prefix 下界做闭合检查：对每个 job j 取已缓存的 `min_t F_j(t)`，再加上直接闭合到 sink 的 reduced-cost 项 `-arcDual(j,sink)`；若所有可用 sink 收尾弧上的该值都不小于 0，则 ng-DSSR 本轮直接返回空列并携带非负内部列证书。该功能主要用于非整数连续时间口径；整数时间下优先依赖 time-indexed pre-heuristic 的图证书。
+### 2026-07-07 40-2 normal ng-DSSR 好配置复跑
+
+本次重新复核 `wet040_001_2m` 的 normal ng-DSSR 配置时，先排除了两个容易误用的口径。第一，`GCBBFullDomainComparisonTest` 的 `mode=full` 会优先进入 `GCBBStyleBidirectionalFullDomainPricingEngine`，即使同时设置 `ngDssr=true` 也不会进入 ng-DSSR；真正 ng-DSSR 应使用 `mode=normal` 或 `halfDomain`。第二，completion bound 的系统属性名是 `twet.bpc.fullDomainCompare.completionBound`，不是旧口径的 `bidirectionalCompletionBound`；subtree pricing-only 也需要显式设置 `completionBoundSubtreeArcEliminationPricingOnly=true`。
+
+按当前确认的快配置复跑：`mode=normal`、`ngDssr=true`、`nearestK3/top3`、ALNS 30s、SA 关闭、accepted history 初始列、启发式 pricing、RMIH、dual-bound pruning、`completionBound=allCycles`、completion-bound arc fixing、subtree pricing-only、midpoint probe、`joinBestMode=bestUB`、关闭 strong branching、route enumeration、time-indexed graph pricing、time-indexed pre-heuristic 和 time-indexed root preprocessing。结果为 `FINISHED, obj=bound=22580, solve=392.265s, root=55.977s, nodes=139, pool=311255, exact=128.639s/769, heuristic=134.445s/3123, masterLP=52.117s, valid=true`，结果目录为 `test-results/bpc/tmp-ngdssr-normal-k3top3-bestUB-alns30-40-2-20260707-2228`。
+
+该结果说明当前代码下 root 仍是正常量级，root summary 为 `nodeTime=40.092s, lpObj=22490, inc=22582, exact=11.333s/15, heuristic=26.745s/61, subtree fixed=1199/1560`；慢点主要来自后续搜索树没有像历史 `121.924s/nodes=45/pool=58052` 那样快速闭合。本次在 node 23 找到整数最优值 22580，随后继续处理到 139 个节点才完全闭合，最终列池增至 31 万。当前判断是：配置已经对齐到真正 ng-DSSR 口径，但搜索树和列池轨迹与历史快记录明显不同，需要后续再对比分支路径、dual-bound 剪枝和近期分支/repair 正确性修复是否改变了树。
+
+进一步澄清“当前好配置”的 time-indexed 开关口径。`timeIndexedRootPreprocessingForNgDssr=true` 表示正式 ng-DSSR 前先跑一次 time-indexed root 预处理，复制 pricing-only arc、compact window 和最多 200 条 elementary seed。`timeIndexedPreHeuristicPricing=true` 表示每轮内部列 pricing 前先用 time-indexed DAG 快速找 elementary 负列。`timeIndexedCompletionBoundScalar=true`、`timeIndexedCompletionBoundWindow=true`、`timeIndexedCompletionBoundArcFixing=true` 表示在 ng-DSSR 中启用 time-indexed scalar/window 辅助，并允许 node/cut-loop 层面的 time-indexed arc/window 加强；这不等于每次 exact pricing 内部都额外做临时 zero-reduced-cost fixing。真正控制每轮 exact pricing 内部临时 fixing 的是 `timeIndexedCompletionBoundInRoundArcFixing`，当前好配置应设为 `false`，避免每次 pricing 都额外跑 time-indexed 临时 arc fixing。
+
+因此当前用于“组件全开但不做每轮 time-indexed 临时 fixing”的口径为：`mode=normal`、`ngDssr=true`、`nearestK3`、`ngDssrRouteUpdateLimit=3`、ALNS/RMIH/启发式 pricing、`completionBound=allCycles`、completion-bound scalar/arc fixing/subtree pricing-only、midpoint probe、dual-bound pruning、strong branching、time-indexed root preprocessing、time-indexed pre-heuristic、root preprocessing seed 200、repeatability ng-set filter 均打开；`timeIndexedCompletionBoundInRoundArcFixing=false`，SRI/partial/route enumeration/dual stabilization 仍按普通 no-SRI 主线关闭。下一轮按用户要求先保持 `timeIndexedPreHeuristicInStrongBranchingPhase2=true`，即 strong branching phase2 也允许使用 time-indexed pre-heuristic。
+
+按上述口径重新运行 `wet040_001_2m`，目录为 `test-results/bpc/tmp-wet040-001-ng-goodcfg-strong-tiroot-tipre-inroundoff-20260707`。结果为 `FINISHED, obj=bound=22580, solve=139.843s, root=57.124s, nodes=17, pool=114938, pricing=3068, exact=6.940s/85, heuristic=12.244s/267, masterLP=44.064s, valid=true`。本次 run 里 `TimeIndexedGraphPricing=7.115s/337`，对应 root preprocessing；正式 pricing 链包含 `TimeIndexedPreHeuristicPricing -> HeuristicPricing -> GCNGBBStyleNgDssrPricing`，并且 strong branching phase2 中也确实调用了 `TimeIndexedPreHeuristicPricing[strongBranching]`，该项耗时 `1.745s/1131`。主要剩余耗时不在 ng-DSSR exact，而在 master LP 与 strong branching 相关流程：`after_pricing=25.972s/600`、`strong_branching_light_repair_rmp=11.413s/348`、`strong_branching_phase2_initial=2.315s/69`、`strong_branching_after_heuristic=3.023s/1062`，此外 `HeuristicPricing[strongBranching]=34.908s/842`。因此该口径已经明显快于此前 360s/507s 的错误或压力测试口径，但在 40-2 上仍不一定优于历史 no-strong `121.924s`，主要差别来自 strong branching 和大量 heuristic trial 的成本。
+
+### 2026-07-07 50-3 生成与 time-indexed / ng-DSSR 对照
+
+本次按当前 `ETConverter.convertFile()` 逻辑从 `data/50-1/wet050_003.dat` 生成 `data/50-3/wet050_003_3m.dat`。该文件头为 `50 3`，即 50 个任务、3 台机器；due date 使用当前 ET 转换逻辑按 3 倍缩放，setup 由 3 台机器口径重新生成并做闭包。此前一次带 `outputDir` 的 PowerShell 启动因为 JVM 参数被拆错，实际没有进入求解，后续结果均使用 runner 默认输出目录。
+
+pure time-indexed 口径使用 `timeIndexedGraphPricing=true`，关闭 ng-DSSR、旧启发式 pricing、rank-1 cut、root preprocessing 和 pre-heuristic。结果目录为 `test-results/bpc/tmp-wet050-003-3m-timeindexed-pure-20260707b`，结果为 `FINISHED, obj=bound=26527, solve=182.204s, root=109.917s, nodes=12, pool=77628, exact=17.184s/495, masterLP=76.059s, valid=true`。其中 time-indexed 定价本身仍然很快，主要时间在 master LP 和 strong branching 相关 LP。
+
+当前 ng-DSSR 好配置口径使用 `mode=normal`、`nearestK3/top3`、ALNS 60s 且 SA 关闭、RMIH、启发式 pricing、allCycles completion bound、subtree pricing-only、midpoint、dual-bound pruning、strong branching、time-indexed root preprocessing、time-indexed pre-heuristic、root seed 200、repeatability filter，并关闭每轮 exact pricing 内部的 time-indexed 临时 fixing。结果目录为 `test-results/bpc/tmp-wet050-003-3m-ng-goodcfg-20260707b`，结果为 `FINISHED, obj=bound=26527, solve=381.350s, root=121.431s, nodes=10, pool=67368, exact=16.728s/44, heuristic=40.275s/122, masterLP=47.050s, valid=true`。
+
+这次对比的主要结论是：50-3 上 ng-DSSR exact 本身并不是瓶颈，`GCNGBBStyleNgDssrPricing=16.728s/44` 和 pure time-indexed 的 `17.184s/495` 量级接近。ng-DSSR 总时间更长，主要来自 strong branching phase2 中的启发式 trial：`HeuristicPricing[strongBranching]=153.195s/529`，再加上额外的 pre-heuristic/repair/LP 流程成本。因此本算例上 time-indexed 仍然更快；ng-DSSR 的节点数略少、列池略小，但没有抵消 strong branching 与启发式 trial 的成本。
+
+进一步拆解 `HeuristicPricing[strongBranching]` 后确认，它主要是 strong branching phase2 的 Tabu heuristic，而不是 phase1 repair。phase1 更接近 `strong_branching_light_repair_rmp=13.002s/228`、`HeuristicPricing[FindFeasible]=0.943s/4` 和 `GCNGBBStyleNgDssrPricing[FindFeasible]=6.594s/4`。phase2 中 `TimeIndexedPreHeuristicPricing[strongBranching]` 已开启，但只耗时 `5.722s/688`，且加列 `1613` 条；真正重的是 `HeuristicPricing[strongBranching]`，按节点聚合为 node1 `28.344s/76 calls/add17659`、node2 `30.381s/85/add6659`、node3 `29.696s/84/add11178`、node4 `29.691s/113/add7623`、node5 `32.319s/87/add6247`、node6 `2.763s/84/add4230`。这说明慢因更偏向 phase2 无限 pass 与 Tabu 参数偏重，而不是 pre-heuristic 或 ng-DSSR exact 本身。
+
+### 2026-07-08 旧 VRP 启发式参数与 strong branching phase2 对照
+
+旧 VRP 代码中 tabu column generation 的默认参数为 `m_tabu_cg_iteration_number=50`、`m_tabu_cg_tenure=30`、`m_tabu_cg_size=30`，同时 `m_gen_size=1000`、`addin_size=150`、`min_addin_size=30`、`m_branch_Iter=300`、`m_branch_col_number=500`、`m_col_coef=0.08`、`m_initial_col_number=1000`。在 `BPCTest` 的特殊实例设置里，`rc203/rc204/rc207` 会把 `addin_size` 设为 200、tabu iteration 按 `50*scale/25` 调整、tabu seed size 设为 50；`r203` 类似，但 iteration 为 `max(50,40*scale/25)`；`c*` 则仍是 iteration 50、size 30。因此当前 TWET `HeuristicPricingEngine` 的默认 `iterations=50`、`tenure=30`、`seed size=30` 与旧 VRP 默认是一致的。差别不在单次 tabu 参数，而在当前 two-stage strong branching 的 phase2 会对多个候选 child 反复运行 Tabu heuristic，这在旧 VRP 默认流程里不是同一种调用频率。
+
+代码口径上，纯 no-cut time-indexed pricing 已经不做 phase2：`Tree` 在 `useTimeIndexedGraphPricing=true` 且 `useTimeIndexedGraphRank1CutPricing=false` 时直接返回 phase1 排名第一的候选。ng-DSSR 则默认 `strongBranchingPhase2CandidateLimit=4`，会对 phase1 选出的前 4 个候选继续做 phase2 heuristic pricing 评估。为了判断 phase2 是否值得，在 50-3 同一好配置下只把 `strongBranchingPhase2CandidateLimit` 从 4 改为 0，其他配置保持：normal ng-DSSR、nearestK3/top3、ALNS 60s 且 SA 关闭、RMIH、启发式 pricing、allCycles completion bound、subtree pricing-only、midpoint、dual-bound pruning、strong branching、time-indexed root preprocessing、time-indexed pre-heuristic、root seed 200、repeatability filter、关闭 in-round time-indexed fixing。
+
+phase2=0 的结果目录为 `test-results/bpc/tmp-wet050-003-3m-ng-goodcfg-phase1only-20260708`，结果为 `FINISHED,obj=bound=26527,solve=352.319s,root=156.572s,nodes=14,pricingRounds=967,addedColumns=99973,exact=33.172s/58,heuristic=124.906s/270,valid=true`。对比 phase2=4 的旧结果 `solve=381.350s,root=121.431s,nodes=10,exact=16.728s/44,heuristic=40.275s/122,HeuristicPricing[strongBranching]=153.195s/529`，可以看到 phase2 确实改善了分支质量，节点数从 14 降到 10，正式 exact/heuristic pricing 也更少；但 phase2 自己的 Tabu trial 过重，抵消了这部分收益，导致总时间反而比 phase1-only 慢约 29 秒。
+
+当前结论是：在 50-3 这类配置下，phase2 不是数学上无用，它确实选出了更好的分支路径；问题是二阶段使用无限 pass 的 Tabu heuristic 成本过高。若后续继续优化 strong branching，优先方向不是完全否定 phase2，而是限制 phase2 的 heuristic pass、只保留 time-indexed pre-heuristic 或更轻的 trial 评估，或者按实例规模/列池规模自适应关闭 phase2。当前 pure time-indexed no-cut 已经 phase1-only，不需要额外改。
+### 2026-07-08 HeuristicPricingEngine 热点复查与低风险优化
+
+在 phase2=0 的 50-3 对照中，`TimeIndexedPreHeuristicPricing=3.948s/317`，并不是瓶颈；正式求解里更重的是 `HeuristicPricing=124.906s/270`。逐项检查 `HeuristicPricingEngine` 后，确认当前流程仍是从当前 RMP 选 reduced-cost seed，然后每条 seed 做 50 轮 remove/add/exchange Tabu 搜索。每轮 add/exchange 会枚举所有未用 job 和插入/替换位置，真正重成本在 `Solution.merge3Segments()` 的 PWLF 拼接；remove 走 `merge2Segments()`。前面已经有兼容性过滤、compact/dual window 上下文和默认跳过 true-cost recheck，因此当前剩余优化空间主要是减少无效 move 进入 PWLF 拼接，以及降低两段拼接的临时对象成本。
+
+本次只做低风险改动。第一，`TabuMove.invalid()` 改为返回单例，避免大量不可行候选反复分配无效对象。第二，`Solution.merge2Segments()` 改为使用 `PiecewiseLinearFunction.findMinimalShiftedSumValue()` 直接双指针扫描两个函数的重叠段，替代原来的 `shiftX + add + findMinimal + release`，语义仍是求同一个 shifted-sum 的最小值。第三，启发式 remove/add/exchange 在调用 `merge2Segments/merge3Segments` 之前先做便宜的函数定义域交集判断：若 shifted prefix/suffix 与对应单任务 profile 没有重叠，直接返回不可行，不再构造临时 PWLF。
+
+没有改 `merge3Segments()` 的核心公式。原因是三段拼接不仅需要最小值，还需要 `s_h2/s_h3` 两个 argmin 决定进入哪种情形；直接替换成只返回最小值的 helper 容易改变语义。后续如果继续优化，应先给 `merge3Segments()` 增加“返回最小值和 argmin”的无临时函数版本，并做专门对拍，而不是直接删掉现有逻辑。
+
+验证上，focused `javac` 已通过：`javac -encoding UTF-8 -cp target/classes;... -d target/classes src/HEU/Solution.java src/TWETBPC/GC/HeuristicPricingEngine.java`。同时运行 `HEU.OutsourcingMoveConsistencyTest`，结果为 `passed, checked=14168`，覆盖了大量 insert/exchange 快速评价场景，未发现 `merge2` 快路径改变 move 成本口径。
+
+随后用临时 benchmark 做了高频拼接测试：构造 256 组、每组约 20 个 segment 的 PWLF，对 `merge2` 旧路径 `shiftX + add + findMinimal` 和新路径 `findMinimalShiftedSumValue` 各执行 200 万次。正确性对拍最大误差为 `9.09e-13`；耗时从 `1.384s` 降到 `0.630s`，约 `2.20x`。这说明两段拼接的局部常数收益明确，但整体求解收益仍取决于启发式中 `merge2/merge3` 的实际调用占比。
+
+`merge3Segments()` 暂时不直接改。它不仅需要最小值，还依赖 `merge12/merge23` 的 argmin `s_h2/s_h3` 判断两种情形，并且当前实现会在第二种情形里临时 `f2.resetDomain(0, data.CmaxH)`。因此不能简单替换成只返回最小值的扫描 helper。若后续继续优化，应先做一个 side-effect-free 的三段拼接版本，至少返回最小值和对应时间点，并专门对拍 `merge3SegmentsTest`/move consistency；否则容易改变 add/exchange 的成本口径。
+
+进一步测试了“add/exchange 是否可以改成两次 merge2”的想法。朴素做法是先把 prefix 和 middle-backward 拼成一个中间函数，再接 suffix；该口径 5 万次随机 PWLF 对拍中有 31835 次和当前 `merge3Segments()` 不一致，且会把成本算得过低，最大低估约 `4944.72`，不能使用。更接近当前公式的做法是把 middle 的 forward/backward 都纳入同一个连接函数，再减去 middle 自身 best cost；该口径在同一测试中和当前 `merge3Segments()` 完全一致，30 万次 benchmark 中当前 `merge3` 为 `0.313s`，该链式版本为 `0.273s`，约 `1.15x`。因此它理论上可以作为后续优化方向，但收益明显小于 `merge2`，且需要把当前 `f2.resetDomain()` 副作用改成局部无副作用实现后再接入正式代码。
+
+进一步按“先构造 `prefix+job` 的 forward 函数，再和 suffix 做一次 merge2”的口径单独测试。该口径更接近普通动态规划递推，但仍不等价于当前 `merge3Segments()`：5 万次随机 PWLF 对拍中有 13677 次不一致，且均为 forward-first 版本高估当前 `merge3`，最大高估约 `3135.92`；50 万次 benchmark 中当前 `merge3` 为 `0.457s`，forward-first 为 `0.356s`，约 `1.28x`。原因是当前 `merge3` 允许中间 job 在 prefix 可接入时间和 suffix 可接入时间之间选择对自身最优的完成时间，而 forward-first 再 merge2 会把前半段函数压成一个单向 profile 后再接后缀，时间自由度被提前收缩。该版本不会低估，但会改变启发式 move 评价，不适合作为等价替换。
+
+上面这条随机 PWLF 结论不能直接用于当前启发式单 job 插入热路径。按真实 `HeuristicPricingEngine.insertOrReplaceCost()` 调用口径重新对拍后，`shift1/shift2` 已经包含 setup time 和被插入 job / 后继 job 的加工时间，`merge3Segments()` 的 `duration2` 实际传入为 `0.0`。在这个口径下，用 `wet040_001_2m` 构造 512 组由 `Solution.updateFFunctions1ForMachine()` 和 `updatebFunctions1ForMachine()` 生成的真实前后缀函数，比较现有 `merge3(f1, jobForward, jobBackward, b3, duration2=0)` 与“用原始 job penalty 接到 shifted prefix 上、整体 `minimizePrefix` 后，再 `merge2(prefixWithJob,b3)`”，5 万次对拍 `mismatches=0`，最大误差为 0。若错误地用已经 `minimizePrefix` 的 job 函数再接前缀，会提前放松 job 自身时点并产生大量 mismatch，因此主线必须使用原始 job penalty。50 万次局部极限 benchmark 中，若复用预构造好的 `prefixWithJob`，现有 `merge3` 为 `0.274s`，forward-chain 为 `0.033s`，局部约 `8.37x`；更接近实际调用、每次都重新构造 `prefixWithJob` 的 5 万次 benchmark 中，`merge3=0.032655s`，forward-chain `0.011907s`，约 `2.74x`。因此当前已将启发式 ADD/EXCHANGE 的单 job 插入评价改为该等价 forward-chain 口径，同时在代码中保留原 `merge3` reference 实现用于后续对拍或回退；前面的随机 PWLF 记录只说明该等价性不能泛化到任意三段函数或多 job 片段。
+
+随后又把 `f1.shiftX(shift1).add(jobPenalty)` 合并为 `PiecewiseLinearFunction.addShifted(f1, shift1, jobPenalty)`，直接在 shifted segment 上双指针相加，省掉一整条 `shiftedF1` 临时函数。该 helper 与旧的 `shiftX().add()` 口径对拍 5 万次 `mismatches=0`，整条 fast path 与 `merge3` reference 仍为 `mismatches=0`。更接近实际调用的 5 万次 benchmark 更新为 `merge3=0.056588s`，forward-chain `0.018230s`，约 `3.10x`。因此当前低风险常数优化已经基本集中在“少构造临时 PWLF”这一层；若继续提速，需要考虑把 `addShifted + minimizePrefix + merge2` 进一步融合为只求最小值的专用扫描器，但那会涉及 prefix-min envelope 的在线维护，正确性风险明显高于本次改动。
+
+### 2026-07-08 40-2 ng-DSSR 好配置复跑与瓶颈复核
+
+为验证单 job ADD/EXCHANGE fast path 对完整求解的影响，重新跑了 `wet040_001_2m` 的当前 ng-DSSR 好配置。第一次手动命令漏掉旧 run 中的 `joinBestMode=BEST_UB`、`midpointProbeScore=queue`，并把 `maxHeuristicColumns` 显式设成 2000；该组结果为 `solve=177.261s`，但不作为严格 A/B，只用于发现配置未对齐。随后按旧日志完整对齐配置：normal ng-DSSR、`nearestK3/top3`、ALNS 60s 且 SA 关闭、RMIH、启发式 pricing、`completionBound=allCycles`、subtree pricing-only、midpoint probe 且 `midpointProbeScore=queue`、dual-bound pruning、strong branching、light repair、branch-implied penalty、time-indexed root preprocessing、time-indexed pre-heuristic、seed 200、repeatability filter、`timeIndexedCompletionBoundScalar/Window/ArcFixing=true`、`timeIndexedCompletionBoundInRoundArcFixing=false`、`joinBestMode=BEST_UB`、`maxHeuristicColumns=1500`。
+
+严格配置结果目录为 `test-results/bpc/tmp-wet040-001-ng-goodcfg-strong-tiroot-tipre-inroundoff-fastheur-exactcfg-20260708`。结果为 `FINISHED,obj=bound=22580,solve=182.129s,root=91.965s,nodes=17,pool=114938,pricing=3068,exact=8.926s/85,heuristic=11.500s/267,masterLP=67.497s,valid=true`。和旧的 `tmp-wet040-001-ng-goodcfg-strong-tiroot-tipre-inroundoff-20260707` 对比，搜索结构完全一致：`nodes=17`、`pricingRounds=3068`、`addedColumns=199223`、`peakPool=114938`、`root bound=22490` 都相同。这说明本次 fast path 没有改变分支路径、列池规模或最终证明结构。
+
+时间变慢主要来自同一搜索结构上的 LP 和 time-indexed root preprocessing 耗时波动/膨胀，而不是 ng-DSSR exact 或启发式 fast path 变差。旧 run 的 root preprocessing summary 为 `ms=36680.071`，本次为 `58138.971`；旧 run 的 `master LP time=44.064s`，本次为 `67.497s`，其中 `after_pricing` 从 `25.972s/600` 增到 `42.147s/600`，`strong_branching_light_repair_rmp` 从 `11.413s/348` 增到 `16.314s/348`。对应地，root time 从 `57.124s` 增到 `91.965s`。这类差异发生在同样的调用次数和同样的列池轨迹上，主要应理解为 LP/预处理实现常数和运行环境/JIT/CPLEX 状态层面的时间变化，而不是数学搜索变差。
+
+fast path 对启发式本身是正向的。普通 `HeuristicPricing` 从旧的 `12.244s/267` 降到 `11.500s/267`，`HeuristicPricing[strongBranching]` 从旧的 `34.908s/842` 降到 `31.693s/842`，`HeuristicPricing[FindFeasible]` 也从 `2.677s/83` 降到 `2.559s/83`。但这个收益只有几秒，被 `master LP` 增加约 23.4 秒、`TimeIndexedGraphPricing` 从 `7.115s/337` 增到 `11.754s/337`、ng-DSSR exact 从 `6.940s/85` 增到 `8.926s/85` 抵消。因此当前完整求解瓶颈仍然不是 HeuristicPricing 的单次 ADD/EXCHANGE 计算，而是 master LP 重解和 strong branching trial 相关 LP；fast path 属于低风险常数优化，但不能单独改变 40-2 好配置的总时间排序。
+
+### 2026-07-08 50-3 单 job fast path 严格对齐复测
+
+按用户要求，重新回到 `wet050_003_3m`，和前一条 50-3 好配置记录做同配置对比。历史基线为 `test-results/bpc/tmp-wet050-003-3m-ng-goodcfg-20260707b`，配置是 normal ng-DSSR、`nearestK3/top3`、ALNS 60s 且 SA 关闭、RMIH、启发式 pricing、`completionBound=allCycles`、subtree pricing-only、midpoint probe、dual-bound pruning、strong branching、light repair、branch-implied penalty、time-indexed root preprocessing、time-indexed pre-heuristic、root seed 200、repeatability filter、`timeIndexedCompletionBoundScalar/Window/ArcFixing=true`、`timeIndexedCompletionBoundInRoundArcFixing=false`，SRI/partial/route enumeration/dual stabilization 关闭。
+
+本次 fast path 版本结果目录为 `test-results/bpc/tmp-wet050-003-3m-ng-goodcfg-fastheur-20260708`。结果为 `FINISHED, obj=bound=26527, solve=273.030s, root=77.547s, nodes=10, pool=75976, pricing=1930, exact=18.848s/45, heuristic=22.750s/124, masterLP=43.872s, valid=true`。历史基线为 `FINISHED, obj=bound=26527, solve=381.350s, root=121.431s, nodes=10, pool=67368, pricing=1772, exact=16.728s/44, heuristic=40.275s/122, masterLP=47.050s, valid=true`。
+
+这次对比说明 fast path 在 50-3 上有明确收益，而且不是靠改变最优值或减少节点数。节点数同为 10，最终目标一致，exact ng-DSSR 时间反而略增 `16.728s -> 18.848s`，master LP 略降 `47.050s -> 43.872s`。主要收益来自启发式定价，尤其 strong branching phase2 的 Tabu heuristic：`HeuristicPricing[strongBranching]` 从 `153.195s/529 calls, avg 289.593ms` 降到 `93.274s/595 calls, avg 156.764ms`。普通 `HeuristicPricing` 也从 `40.275s/122, avg 330.126ms` 降到 `22.750s/124, avg 183.467ms`。这和单 job ADD/EXCHANGE fast path 的预期一致：调用次数相近甚至更多，但单次 move 评价常数显著下降。
+
+需要注意的是，本次 pool 从 `67368` 增到 `75976`、pricing round 从 `1772` 增到 `1930`，说明列轨迹并非完全相同；但分支规模和证明结果一致，且耗时改善主要集中在同类启发式组件上。因此当前结论是：单 job fast path 是有效的低风险常数优化，特别能降低 strong branching phase2 中反复 Tabu trial 的成本；剩余大头仍包括 phase2 调用频率、master LP 重解和部分 repair/exact 流程，而不是 ADD/EXCHANGE 单次拼接本身。
+
+### 2026-07-08 启发式 single-job fast path 与旧 merge3 no-prune 诊断
+
+针对 `HeuristicPricingEngine` 中 single-job ADD/EXCHANGE fast path 和旧 `merge3Segments` reference 的 mismatch，又增加了一次只在 `heuristicPricingValidateFastMerge=true` 下触发的诊断：当旧 merge3 因 `cost23Skip` 返回 BigM、而 fast path 为有限值时，额外计算一个去掉 `cost23 + bridgeCost >= curUpperBound` 剪枝后的旧 merge3 结果 `merge3NoCost23Prune`。
+
+在 `wet050_003_3m` 的诊断 run `tmp-wet050-003-3m-ng-merge3-noprune-audit-20260708` 中，日志共捕获 129 条带 no-prune 结果的 mismatch，`merge3NoCost23Prune` 全部仍为 `>= 9e7` 的 BigM 量级；例如第一条为 `reference=1.0E8, fast=20986.0, trueCost=20986.0, merge3NoCost23Prune=9.999976E7`。因此当前结论是：mismatch 不是单纯由旧 `cost23Skip` 早剪枝造成的；旧 merge3 把单 job 当成中间段 forward/backward 去拼，在 compact window 场景下和“先把 prefix+job 压成 envelope，再与 suffix 做 merge2”的真实单 job 插入语义不等价。fast path 和 `TWETColumnEvaluator.evaluate(sequence)` 对拍一致，后续应以 fast/evaluator 口径为准，旧 merge3 只保留作诊断，不再作为该场景的正确 reference。
+#### merge3 mismatch 的进一步原因
+
+进一步看代码后，原因不是 `merge3Segments()` 里某一个 early return 单独写错，而是旧三段拼接和当前 single-job 插入 fast path 在 compact window 下不是同一个对象。
+
+当前 fast path 对 ADD/EXCHANGE 的单 job 插入做的是：先把 `prefix + job` 直接拼成一个前向 envelope，即 `prefixWithJob(t)` 表示“前缀加该 job 可以在不晚于 t 的某个时刻完成，之后允许等待”；然后再用 `merge2(prefixWithJob, suffix)` 接后缀。这个对象和 `TWETColumnEvaluator.evaluate(sequence)` 的固定序列递推一致。
+
+旧 `merge3Segments(f1, single.forward, single.backward, b3, ...)` 把这个单 job 当作一个中间段，分别使用该 job 的 forward closure `F_j(t)=min_{u<=t} p_j(u)` 和 backward closure `B_j(t)=min_{u>=t} p_j(u)`。这套公式适合原来“中间是一整段 sequence”的三段拼接推导，但在 single job 且窗口外用 BigM 填充时，`F_j` 和 `B_j` 已经是两个独立的闭包对象。特别是 fallback 分支会同时把 `B_j(t)`、`F_j(t)` 和后缀函数放在同一个 t 上组合，再减去中间段的全局最小值。这样会隐含要求中间 job 在同一个边界 t 上同时满足“可不早于 t 调度”和“可不晚于 t 调度”。而真实 single-job 插入只需要 job 在某个 u<=t 完成，然后可以等到 t 再接后缀。
+
+因此当 compact window 让 `B_j` 在较晚 t 上为 BigM、但 `prefixWithJob(t)` 仍然可以通过“job 早完成、等待到 t”保持有限时，旧 merge3 会返回 BigM，fast path 和 evaluator 仍返回有限值。诊断里常见 `sH2 > sH3` 后进入 fallback，且去掉 `cost23Skip` 后仍为 BigM，正是这个语义差异的表现。没有 compact window 的短诊断里 mismatch 为 0，也说明问题是 BigM 硬窗/compact window 与旧三段 reference 假设叠加后触发的，不是普通无窗局部搜索公式突然失效。
+
+因此后续口径为：单 job ADD/EXCHANGE 使用 `prefix + job -> merge2 suffix` 的 fast path，并用 evaluator 对拍；旧 `merge3Segments` 仍可保留给真正的三段 sequence 拼接或诊断，但不能再作为 single-job + compact window 场景的正确 reference。
+
+### 2026-07-08 启发式 merge3 中间段口径复核
+
+进一步回看 `HEU.Solution.merge3Segments()`、`Solution.updateFunctions2ForMachine()` 和 `HEU.Move` 的调用后，确认旧启发式三段拼接里的中间段不是原始 job penalty，也不是未最小化的原始段成本。`f2` 是中间段的 forward envelope，构造时会做 `minimizePrefixInPlace()`；`b2` 是同一中间段的 backward envelope，构造时会做 `minimizeSuffixInPlace()`。对于单任务中间段，`HeuristicPricingEngine` 的旧 reference 也是先把该 job 的 penalty 分别复制成 singleton forward/backward，再分别做 prefix/suffix minimize 后传给 `merge3Segments()`。
+
+因此，当前 single-job fast path 和旧 merge3 reference 的差异，不是“旧实现用原始成本、新实现用最小化成本”导致的。旧实现本来就用最小化后的中间段 envelope。真正差异在于：旧 merge3 把单 job 当成一个通用中间段，同时使用该 job 的 forward/backward closure；而 fast path 是先按固定序列递推把 `prefix + job` 合成新的 prefix envelope，再和 suffix 做 merge2。后者更贴近 `TWETColumnEvaluator.evaluate(sequence)` 的固定序列口径。在 compact window/BigM 硬窗场景下，旧 merge3 的单 job 中间段口径可能过强地要求中间段左右 closure 在同一边界口径下有效，从而返回 BigM；fast path 和 evaluator 仍能给出有限真实序列成本。
+
+补充精确根因：compact window 下 `setDomain(..., true)` 是窗口外填 BigM，不是物理删除。`minimizePrefixInPlace()` 只把窗口右侧 BigM 转成“已在窗口内完成后等待”的有限值，窗口左侧仍为 BigM；`minimizeSuffixInPlace()` 对称地只把窗口左侧 BigM 转成有限值，窗口右侧仍为 BigM。因此 single-job 的 `forward` 和 `backward` closure 并不会让 BigM 在全域消失，它们只在相反方向表达等待。
+
+旧 `merge3Segments()` 用单 job 作为中间段时，fallback 分支会在同一个边界时间 t 上同时使用该 job 的 `B_j(t)` 和 `F_j(t)`，即要求这个单 job 的 suffix-closure 和 prefix-closure 在同一个 t 上都有限。若真实固定序列语义是 job 在 compact window 内较早完成，然后等待到较晚 t 再接 suffix，则 `F_j(t)` 有限但 `B_j(t)` 可能已经是 BigM。于是旧 merge3 返回 BigM；而 `prefix + job -> prefix envelope -> merge2 suffix` 能表达“完成后等待”，并和 `TWETColumnEvaluator.evaluate(sequence)` 一致。
+
+进一步分析旧 `merge3Segments` 在 compact window 下怎样才能正确。旧三段公式成立依赖一个隐含前提：中间段用两个一维 envelope `f2/b2` 足以表达和前后段的拼接，并且定义域主要只是传播时的辅助裁剪。代码注释里也写到该定理依赖函数已经 minimize，且原先基本不考虑 `f2/b2` 定义域。compact window 改变了这一点：窗口外 BigM 不再是普通大成本，而是在表达“这个完成时间不允许”。prefix-min 和 suffix-min 只分别表达单方向等待，不能把同一个中间段在两个边界上的可行性相关性压缩成两个独立一维函数后再任意相加。
+
+因此，旧 `merge3Segments` 在 compact window 下要保持正确，不能仅靠“minimize 后 BigM 消失”。正确选择只有几类：其一，不让旧 merge3 使用 compact-window 后的 BigM 函数，继续用全域原始 penalty，这样旧公式仍处在原来的较弱口径，但失去 compact window 对启发式 move 的剪枝。其二，对单 job 中间段使用固定序列递推口径，只让该 job penalty 出现一次，而不是同时使用 `F_j` 和 `B_j`。其三，对一般多 job 中间段，需要保存或临时计算一个真正的二边界 segment transfer，即给定左边界和右边界时中间段的最优成本；仅靠 `f2(t)` 和 `b2(t)` 两个一维闭包不够。否则旧 merge3 在 fallback 中会把 `B_j(t)`、`F_j(t)` 和后缀函数放到同一边界时间上组合，可能要求一个任务既能“在 t 之后调度”又能“在 t 之前调度”，从而把真实可行的等待方案误判为 BigM。
+
+### 2026-07-08 single-job merge3 compact window 对照诊断
+
+按“同一路径但去掉 compact window”重新做了 single-job fast path 与旧 `merge3Segments()` 的对照。诊断只在 `heuristicPricingValidateFastMerge=true` 的 mismatch 日志里增加一个 `unrestrictedMerge3` 字段：它使用同一个候选位置、同一个插入/替换 job 和同一个旧 `merge3Segments()`，但 prefix、singleton 和 suffix 函数全部用原始 `data.penaltyFunction` 重建，不使用 node compact window 裁剪。
+
+结果目录为 `test-results/bpc/tmp-wet050-003-3m-ng-merge3-unrestricted-audit-20260708`。该 run 后续进入 ng-DSSR 统计输出时触发已有的 `statisticsSummary` 字符串拼接过长异常，但在崩溃前已经产生 12 条带 `unrestrictedMerge3` 的 firstMismatch 记录。统计结果为：`matches=12`，`finiteUnrestricted=12`，`diffTrueBad=0`，`maxDiffFast=0`，`maxDiffTrue=0`；同时原来的 `merge3NoCost23Prune` 没有一条低于 `9e7`。典型记录为：`reference=1.0E8, fast=20986.0, trueCost=20986.0, merge3NoCost23Prune=9.999976E7, unrestrictedMerge3=20986.0`。
+
+这个结果把问题进一步收窄：旧 `merge3Segments()` 本身在未受 compact window 限制的函数上可以回到 fast/evaluator 一致；一旦传入 compact-window 后的 singleton forward/backward，旧三段公式就会把真实可行的“job 在窗口内完成后等待到后缀可接时间”的方案误判为 BigM。也就是说，触发条件确实是 compact window 改变了旧 merge3 公式的输入语义，而不是 fast path 算错，也不是单纯删除 `cost23Skip` 就能解决。
+
+### 2026-07-08 清理 single-job merge3 诊断代码并固定 fast path
+
+在确认无 compact window 的旧 `merge3Segments()` 与 fast/evaluator 完全一致、而 compact-window 口径下旧 merge3 会返回 BigM 后，生产代码不再保留旧 merge3 reference 作为启发式 ADD/EXCHANGE 的可选路径。`HeuristicPricingEngine.insertOrReplaceCost()` 现在直接使用 single-job fast path：先把 `prefix + job` 按固定序列递推压成 prefix envelope，再用 `merge2` 接 suffix。这个口径和 `TWETColumnEvaluator.evaluate(sequence)` 对齐，也是当前 compact window 下正确的单 job 插入语义。
+
+本次同步清理了临时诊断开关和运行时审计字段，包括 `heuristicPricingUseMerge3Reference`、`heuristicPricingValidateFastMerge`、`heuristicMergeAudit`、`merge3NoCost23Prune`、`unrestrictedMerge3` 相关 helper。旧命令里即使继续传 `twet.bpc.fullDomainCompare.heuristicUseMerge3Reference` 或 `twet.bpc.fullDomainCompare.heuristicValidateFastMerge`，runner 也不再读取这两个属性。
+
+`Solution.merge3Segments()` 本身不删除，也不影响 ALNS。ALNS/旧启发式路径没有 node compact window 这种 BigM 硬窗裁剪语义，旧 merge3 在那里仍是原有三段拼接工具；本次问题只发生在 `HeuristicPricingEngine` 把 node compact window 后的 singleton forward/backward 作为 single-job 中间段传入旧 merge3 的场景。
+
+验证：focused `javac` 编译 `TWETBPCConfig.java`、`GCBBFullDomainComparisonTest.java`、`HeuristicPricingEngine.java` 通过；`HEU.OutsourcingMoveConsistencyTest passed, checked=14168`。

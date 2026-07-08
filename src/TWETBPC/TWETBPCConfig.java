@@ -56,8 +56,12 @@ public class TWETBPCConfig {
 	public boolean useTimeIndexedGraphRank1CutPricing = false;
 	/** 2026-07-06: time-indexed pricing 是否使用 root/no-cut dual profitable window 缩图；arc fixing 始终不用该窗口。 */
 	public boolean enableTimeIndexedGraphDualWindow = true;
+	/** 2026-07-07: dual-window graph 候选回刷诊断；默认关闭，不改变求解路径。 */
+	public boolean timeIndexedDualWindowRecheckDiagnostics = false;
 	/** 2026-07-06: 在 ng-DSSR/heuristic 前插入 no-cut time-indexed 快速找列器；不替代 exact pricing。 */
 	public boolean enableTimeIndexedPreHeuristicPricing = false;
+	/** 2026-07-07: strong branching phase2 是否使用 time-indexed pre-heuristic；默认保持原口径。 */
+	public boolean enableTimeIndexedPreHeuristicInStrongBranchingPhase2 = true;
 	/** 2026-07-06: 前置 time-indexed 启发式每轮最多返回多少条 elementary 负列。 */
 	public int timeIndexedPreHeuristicColumnLimit = 300;
 	/**

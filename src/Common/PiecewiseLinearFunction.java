@@ -232,6 +232,68 @@ public class PiecewiseLinearFunction {
 		TimerManager.end("分段线性函数复制");
 		return res;
 	}
+
+	public static PiecewiseLinearFunction addShifted(PiecewiseLinearFunction f, double delta,
+			PiecewiseLinearFunction g) {
+		Utility.debugCheckPWLFRightBoundPair("addShifted.input", f, g);
+		if (f == null || g == null) {
+			return new PiecewiseLinearFunction();
+		}
+		PiecewiseLinearFunction res = new PiecewiseLinearFunction(f.domainStart, f.domainEnd);
+		if (f.head == null || g.head == null) {
+			return res;
+		}
+		// 2026-07-08: 等价于 f.shiftX(delta).add(g)，但直接在 shifted segment
+		// 上做双指针相加，避免单 job 插入热路径额外构造一整条 shiftedF。
+		double fStart = Math.max(f.head.start + delta, f.domainStart);
+		double fEnd = Math.min(f.tail.end + delta, f.domainEnd);
+		double start = Math.max(fStart, g.head.start);
+		double end = Math.min(fEnd, g.tail.end);
+		if (Utility.compareLt(end, start)) {
+			return res;
+		}
+		TimerManager.start("分段线性函数shift后相加");
+		Segment p = f.head;
+		Segment q = g.head;
+		while (p != null && Utility.compareLt(p.end + delta, start)) {
+			p = p.next;
+		}
+		while (q != null && Utility.compareLt(q.end, start)) {
+			q = q.next;
+		}
+		double cur = start;
+		while (p != null && q != null && Utility.compareLe(cur, end)) {
+			double pStart = Math.max(p.start + delta, f.domainStart);
+			double pEnd = Math.min(p.end + delta, f.domainEnd);
+			double qStart = q.start;
+			double qEnd = q.end;
+			cur = Math.max(cur, Math.max(pStart, qStart));
+			double nxt = Math.min(Math.min(pEnd, qEnd), end);
+			if (Utility.compareLe(cur, nxt)) {
+				double slope = p.slope + q.slope;
+				double intercept = p.intercept - p.slope * delta + q.intercept;
+				res.addSegment(cur, nxt, slope, intercept);
+				cur = nxt;
+			}
+			if (Utility.compareEq(nxt, pEnd)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(nxt, qEnd)) {
+				q = q.next;
+			}
+			if (p == null || q == null) {
+				break;
+			}
+			double nextStart = Math.max(p.start + delta, q.start);
+			if (Utility.compareLt(end, nextStart)) {
+				break;
+			}
+		}
+		TimerManager.end("分段线性函数shift后相加");
+		res.recordSegmentNumIfEnabled();
+		Utility.debugCheckPWLFRightBound("addShifted.output", res);
+		return res;
+	}
 	
 
 	// 设置定义域

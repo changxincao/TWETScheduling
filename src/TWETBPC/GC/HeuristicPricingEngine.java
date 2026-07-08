@@ -353,10 +353,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (!config.enableHeuristicDualProfitableWindow) {
 			return false;
 		}
-		if (lp == null || lp.getNode() == null || lp.getNode().depth != 0) {
-			return false;
-		}
-		return lp.getActiveCutIds().isEmpty();
+		return PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	private double hWindowStart(int job, double gamma) {
@@ -606,19 +603,57 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		private double insertOrReplaceCost(int pos, int job, boolean replace) {
+			return insertOrReplaceCostSingleJobFast(pos, job, replace);
+		}
+
+		private double insertOrReplaceCostSingleJobFast(int pos, int job, boolean replace) {
 			int prefixEnd = pos - 1;
 			int suffixStart = replace ? pos + 1 : pos;
 			PiecewiseLinearFunction f1 = prefixEnd < 0 ? windowContext.sourcePenalty : forward[prefixEnd];
 			PiecewiseLinearFunction b3 = suffixStart >= sequence.size() ? windowContext.sourcePenalty
 					: backward[suffixStart];
-			SegmentProfile single = windowContext.singletonProfile(job);
 			int bridgeFrom1 = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
 			double shift1 = data.s[bridgeFrom1][job] + data.p[job];
 			int bridgeTo2 = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
 			double shift2 = suffixStart >= sequence.size() ? 0.0 : data.s[job][bridgeTo2] + data.p[bridgeTo2];
-			return mergeHelper.merge3Segments(f1, single.forward, single.backward, b3, shift1, shift2, 0.0,
-					data.getSetupCost(bridgeFrom1, job),
+			PiecewiseLinearFunction jobPenalty = windowContext.penalty(job);
+			if (!shiftedOverlaps(f1, shift1, jobPenalty, true)) {
+				return Utility.big_M;
+			}
+			PiecewiseLinearFunction prefixWithJob = PiecewiseLinearFunction.addShifted(f1, shift1, jobPenalty);
+			if (prefixWithJob.isEmpty()) {
+				prefixWithJob.release();
+				return Utility.big_M;
+			}
+			// 2026-07-08: 这里是 ADD/EXCHANGE 的单 job 插入。先按固定序列递推把
+			// prefix + job 压成 prefix envelope，再与 suffix 做 merge2；该口径和
+			// TWETColumnEvaluator.evaluate(sequence) 对齐。旧 merge3 适合一般三段拼接，
+			// 但在 compact window/BigM 硬窗下会把可等待的 single-job 插入误判为 BigM。
+			// ALNS 仍可继续使用 Solution.merge3Segments，因为那边没有 node compact window。
+			prefixWithJob.shiftYInPlace(data.getSetupCost(bridgeFrom1, job));
+			prefixWithJob.minimizePrefixInPlace();
+			if (!shiftedOverlaps(b3, -shift2, prefixWithJob, true)) {
+				prefixWithJob.release();
+				return Utility.big_M;
+			}
+			double cost = mergeHelper.merge2Segments(prefixWithJob, b3, shift2,
 					suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo2));
+			prefixWithJob.release();
+			return cost;
+		}
+
+		private boolean shiftedOverlaps(PiecewiseLinearFunction shifted, double delta, PiecewiseLinearFunction other,
+				boolean trimShiftedToDomain) {
+			if (shifted == null || other == null || shifted.isEmpty() || other.isEmpty()) {
+				return false;
+			}
+			double shiftedStart = shifted.head.start + delta;
+			double shiftedEnd = shifted.tail.end + delta;
+			if (trimShiftedToDomain) {
+				shiftedStart = Math.max(shiftedStart, shifted.domainStart);
+				shiftedEnd = Math.min(shiftedEnd, shifted.domainEnd);
+			}
+			return Utility.compareLe(Math.max(shiftedStart, other.head.start), Math.min(shiftedEnd, other.tail.end));
 		}
 
 		private double reducedCostAfterRemove(int pos, int removedJob, double candidateCost, LP lp) {
@@ -1219,6 +1254,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private static final class TabuMove {
+		private static final TabuMove INVALID = new TabuMove();
 		final boolean valid;
 		final double cost;
 		final double reducedCost;
@@ -1255,7 +1291,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		static TabuMove invalid() {
-			return new TabuMove();
+			return INVALID;
 		}
 
 		boolean isTabu(int iter) {

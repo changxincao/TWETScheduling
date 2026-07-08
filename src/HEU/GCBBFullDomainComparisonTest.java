@@ -329,9 +329,15 @@ public class GCBBFullDomainComparisonTest {
 		config.enableTimeIndexedGraphDualWindow = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphDualWindow",
 				Boolean.toString(config.enableTimeIndexedGraphDualWindow)));
+		config.timeIndexedDualWindowRecheckDiagnostics = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedDualWindowRecheckDiagnostics",
+				Boolean.toString(config.timeIndexedDualWindowRecheckDiagnostics)));
 		config.enableTimeIndexedPreHeuristicPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedPreHeuristicPricing",
 				Boolean.toString(config.enableTimeIndexedPreHeuristicPricing)));
+		config.enableTimeIndexedPreHeuristicInStrongBranchingPhase2 = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedPreHeuristicInStrongBranchingPhase2",
+				Boolean.toString(config.enableTimeIndexedPreHeuristicInStrongBranchingPhase2)));
 		config.timeIndexedPreHeuristicColumnLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.timeIndexedPreHeuristicColumnLimit",
 				config.timeIndexedPreHeuristicColumnLimit);
@@ -388,9 +394,10 @@ public class GCBBFullDomainComparisonTest {
 		// 2026-07-01: domain-filtered all-row slack repair 已通过实验确认净效果变慢，
 		// 暂停 common runner 的系统属性入口，避免历史命令残留参数误开；底层代码保留供后续复核。
 		config.enableStrongBranchingDomainRepair = false;
+		boolean defaultStrongBranchingLightweightRepair = config.enableTwoStageStrongBranching;
 		config.enableStrongBranchingLightweightRepair = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.strongBranchingLightweightRepair",
-				Boolean.toString(config.enableStrongBranchingLightweightRepair)));
+				Boolean.toString(defaultStrongBranchingLightweightRepair)));
 		config.enableStrongBranchingBranchImpliedPenalty = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.strongBranchingBranchImpliedPenalty",
 				Boolean.toString(config.enableStrongBranchingBranchImpliedPenalty)));

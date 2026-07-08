@@ -1185,15 +1185,10 @@ public class Solution {
 			return f1_LB + b2_LB + bridgeCost;
 		}
 		double bestCost = 0;
-		PiecewiseLinearFunction shiftedB2 = b2.shiftX(-shift);
-		PiecewiseLinearFunction newF = f1.add(shiftedB2);
-		shiftedB2.release();
-		if (newF.isEmpty()) {
-			newF.release();
+		bestCost = PiecewiseLinearFunction.findMinimalShiftedSumValue(b2, -shift, f1, bridgeCost);
+		if (Utility.isBigMValue(bestCost)) {
 			return Utility.curUpperBound;
 		}
-		bestCost = newF.findMinimal(true, true)[0] + bridgeCost;
-		newF.release();
 //		System.out.println("M2S:"+f1_LB+" "+b2_LB+" "+bestCost);
 		return bestCost;
 

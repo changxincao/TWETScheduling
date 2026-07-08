@@ -411,3 +411,11 @@ pricing 侧目前只接入 partial-list ng-DSSR 这条 SRI-aware 主路径，并
 当前结论是：机器数增加后，SRI 的“减少搜索树、提高下界”的作用更清楚，符合直觉；但在当前实现中，SRI active 后 label 携带 cut state、cut/pricing 循环和启发式定价都会显著变慢。对这个 40/4 算例，node-memory SRI 是更强的 bound 工具，但不是更快的默认求解配置。后续如果继续用 SRI，更合理的方向仍是选择性使用，例如 root-only、gap 很小时触发、限制 cut rounds，或者继续做 SRI-aware bound/probe，而不是全节点全开。
 
 这里保留一个后续需要继续验证的判断：从 SRI 的表达式看，机器数越多时，RMP 中可以同时选中的路径列越多，set covering 放松下由多条列共同造成的奇数集合/局部覆盖分数结构也可能更常见，因此 SRI 对下界和搜索树的改善空间可能比 `m=2` 更大。40/4 的结果支持这个方向，因为节点数和列池都明显下降；但这还不是“机器越多 SRI 越快”的结论。当前瓶颈在于 SRI 进入 labeling 后，每个 label 需要携带 cut state，cut/pricing 循环也会增加 root 的定价次数和启发式代价。因此更准确的结论是：`m` 增大可能提高 SRI 的 bound 价值，但是否能转化为总时间收益，取决于 SRI-aware pricing 的常数开销、cut 数量控制和 ng-set/dominance 是否足够有效。
+
+### 2026-07-08 默认 SRI memory 口径改为 arcMemory
+
+根据 50-3 setupR25/R50 的 SRI 对比和后续核查，time-indexed rank1/SRI 已经天然使用 limited arc-memory，而 ng-DSSR partial+SRI 之前在未显式传参时仍会沿用 `subsetRowCutMemoryMode=full`。这会导致后续默认实验里 time-indexed SRI 与 ng-DSSR SRI 的 memory 口径不一致。
+
+本次将 `TWETBPCConfig.subsetRowCutMemoryMode` 的默认值从 `full` 改为 `arcMemory`。因此后续只要打开 ng-DSSR partial+SRI，而没有额外传 `twet.bpc.fullDomainCompare.subsetRowCutMemoryMode`，默认就会走 limited arc-memory SRI。旧 full-SRI 仍保留为显式对照口径，可通过 `-Dtwet.bpc.fullDomainCompare.subsetRowCutMemoryMode=full` 恢复。
+
+验证上，只修改默认配置值，不改变 cut generator 和 pricing 的算法逻辑。focused `javac` 编译 `TWETBPCConfig`、`SubsetRowCutGenerator` 和 `GCBBFullDomainComparisonTest` 通过。

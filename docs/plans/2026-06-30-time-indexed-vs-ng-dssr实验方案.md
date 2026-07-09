@@ -753,7 +753,7 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 
 前面讨论过一种可能：当前 ng-DSSR 的 forward/backward 函数按 Tmid 做半域裁剪，因此同一 sequence 的不同 split 在理论上可能出现局部成本口径差异；如果把标签函数改成完整 `[0, pricingHorizon]`，则一条路径只要被某个 split 拼出来，成本更接近全域最优口径，也可能更适合后续参考 VRP halfway join 的“一条路径只生成一次”思路。
 
-本次没有改默认主线，只新增诊断开关 `enableNgDssrFullDomainLabelFunctions`，runner 属性为 `twet.bpc.fullDomainCompare.ngDssrFullDomainLabelFunctions`。该开关只在 no-SRI / no-limited-SRI 的 normal ng-DSSR 主线上生效：source、sink、job penalty、扩展可行性检查都从半域 `[0,Tmid]` / `[Tmid,H]` 改为完整 `[0,H]`；Tmid 仍用于搜索方向和 crossing-arc join。为了避免把诊断口径的局部成本写入 RMP，开关打开时返回列会走真实成本回刷。同时加入 `splitDup/mismatch/maxAbsDiff` 统计，检查同一 sequence 多个 split 的 reduced cost 是否一致。
+本次曾短暂实现诊断开关 `enableNgDssrFullDomainLabelFunctions`，runner 属性为 `twet.bpc.fullDomainCompare.ngDssrFullDomainLabelFunctions`。该开关只在 no-SRI / no-limited-SRI 的 normal ng-DSSR 主线上生效：source、sink、job penalty、扩展可行性检查都从半域 `[0,Tmid]` / `[Tmid,H]` 改为完整 `[0,H]`；Tmid 仍用于搜索方向和 crossing-arc join。为了避免把诊断口径的局部成本写入 RMP，开关打开时返回列会走真实成本回刷。同时加入 `splitDup/mismatch/maxAbsDiff` 统计，检查同一 sequence 多个 split 的 reduced cost 是否一致。后续实验确认该方向计算代价过高，因此该代码开关和统计字段已取消，文档仅保留否定结果。
 
 在 `wet040_001_2m` 的 root-only exact 诊断中，baseline 口径为 normal ng-DSSR、`nearestK3/top3`、join-envelope 开、ALNS/启发式/time-indexed 预处理/强分支均关，`maxNodes=1`。半域版本在 `101.849s` 内完成 root pricing 并到 `NODE_LIMIT`，exact 为 `69.278s/20 calls`，root bound 为 `22490`。全域标签函数版本在 `320.041s` 时间限制内没有闭合 root，exact 为 `304.611s/12 calls`，最后一次 pricing 在 forward 扩展阶段耗尽时间。
 

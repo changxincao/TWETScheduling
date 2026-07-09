@@ -188,12 +188,6 @@ public class TWETBPCConfig {
 	 */
 	public boolean enableNgDssrJoinEnvelopeCompression = false;
 	/**
-	 * 2026-07-09: 诊断开关；仅在当前 ng-DSSR 主线里把 forward/backward 标签函数
-	 * 定义域放到完整 [0, pricingHorizon]，Tmid 仍用于搜索方向和 crossing-arc join。
-	 * 用于验证同一 sequence 不同 split 的成本是否更一致，默认关闭。
-	 */
-	public boolean enableNgDssrFullDomainLabelFunctions = false;
-	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。
 	 */

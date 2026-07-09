@@ -159,7 +159,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
 	private double baseHalfPenaltyCacheHorizon = Double.NaN;
-	private boolean baseHalfPenaltyCacheFullDomain = false;
 	// 2026-05-24: 闂佸憡鐟禍婵嗭耿娓氣偓瀵晫娑甸崨顓囨繈鏌ｉ幇鎵冲亾濞戞氨鎳嶅┑鐐插閸撴繂锕?cut dual 闂佸搫鍟抽鎰濠曠櫡_j profitable window 闂佸綊娼х粔宕囨崲濮樿埖鍋╂繛鍡楁捣閻熷繘鎮峰▎鎰瑐缂佹顦辩划鍨緞婵犲嫮顢呮繛鎾寸缁诲啫鐣垫笟鈧俊?
 	private boolean dualProfitableWindowEnabled;
 
@@ -193,10 +192,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinEnvelopeFunctionEvaluations;
 	private long joinEnvelopeBuildNanos;
 	private long joinEnvelopeJoinNanos;
-	private HashMap<SequenceSignature, Double> splitCostBySignature;
-	private long splitCostDuplicateCount;
-	private long splitCostMismatchCount;
-	private double splitCostMaxAbsDiff;
 	private long exactTotalNanos;
 	private long exactInitializeNanos;
 	private long exactBackwardSinkNanos;
@@ -1530,8 +1525,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
 		sourceVisited.add(0);
 		addZeroDualExcludedJobs(sourceVisited);
-		double sourceEnd = useFullDomainLabelFunctions() ? pricingHorizon : tMid;
-		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, sourceEnd);
+		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
 		PackedBitSet sourceNgMemory = new PackedBitSet(data.n + 2);
@@ -1976,7 +1970,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
 				Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
 		generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
-		splitCostBySignature = useFullDomainLabelFunctions() ? new HashMap<SequenceSignature, Double>() : null;
 		activeColumnSignatures = activeColumnSignaturesForCurrentDssrSolve(lp);
 		nextCandidateId = 0;
 	}
@@ -2212,9 +2205,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
 		// 2026-05-23: backward 闂佹儳绻戠喊宥団偓姘懅缁辨帡宕奸姀鐘卞寲闂佸搫鐗滈崜婵嬫閳哄倻鈻曢柣鏃€妞垮ú锝夋偨?[Tmid,pricingHorizon] 闂佺绻愰崯顖炲汲閻旂厧绠叉い鏃囥€€閸?
 		// 闁哄鏅滈悷锕傛偋闁秴瑙﹂幖杈剧悼閺侀箖鏌ゅЧ鍥у姎鐟滄澘鍊块幃?shiftX闂佹寧绋戦鎼慽mToDomain 闂佹眹鍔岀€氼垳绮╅悢鍏煎仼閻忕偠濮ょ€氭煡鏌ｅ缁樻珖闁诡喖锕畷鈩冪節閸屾粌骞嶆繛鎴炴尨閸嬫捇鏌ら柨瀣殬闁?
-		double sinkStart = useFullDomainLabelFunctions() ? 0.0 : tMid;
-		sinkFrontier.resetDomain(sinkStart, pricingHorizon);
-		sinkFrontier.addSegment(sinkStart, pricingHorizon, 0.0, 0.0);
+		sinkFrontier.resetDomain(tMid, pricingHorizon);
+		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
 		PackedBitSet sinkNgMemory = new PackedBitSet(data.n + 2);
 		PackedBitSet sinkDominanceSet = buildBackwardDominanceSet(lp.getNode().sinkId(), sinkNgMemory, lp.getNode(),
 				sinkFrontier);
@@ -2422,8 +2414,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double rhoPrime;
 		if (label.isSinkRoot) {
 			rhoPrime = getDynamicBackwardHEnd(prevJob, node.sinkId());
-			double lower = useFullDomainLabelFunctions() ? successorHStart : Math.max(tMid, successorHStart);
-			if (Utility.compareLt(rhoPrime, lower)) {
+			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				return null;
 			}
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, node.sinkId());
@@ -2445,8 +2436,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return null;
 			}
 			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
-			double lower = useFullDomainLabelFunctions() ? successorHStart : Math.max(tMid, successorHStart);
-			if (Utility.compareLt(rhoPrime, lower)) {
+			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				return null;
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
@@ -2534,8 +2524,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double shiftedStart = Math.max(label.frontier.head.start + delay, label.frontier.domainStart);
 		double shiftedEnd = Math.min(label.frontier.tail.end + delay, label.frontier.domainEnd);
 		double windowStart = Math.max(getDynamicForwardHStart(label.jid, nextJob), 0.0);
-		double windowEnd = Math.min(getDynamicForwardHEnd(label.jid, nextJob),
-				useFullDomainLabelFunctions() ? pricingHorizon : tMid);
+		double windowEnd = Math.min(getDynamicForwardHEnd(label.jid, nextJob), tMid);
 		double overlapStart = Math.max(shiftedStart, windowStart);
 		double overlapEnd = Math.min(shiftedEnd, windowEnd);
 		return !Utility.compareLt(overlapEnd, overlapStart);
@@ -2548,8 +2537,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		double shiftedStart = Math.max(label.frontier.head.start - delay, label.frontier.domainStart);
 		double shiftedEnd = Math.min(label.frontier.tail.end - delay, label.frontier.domainEnd);
-		double windowStart = Math.max(getDynamicBackwardHStart(prevJob, label.jid),
-				useFullDomainLabelFunctions() ? 0.0 : tMid);
+		double windowStart = Math.max(getDynamicBackwardHStart(prevJob, label.jid), tMid);
 		double windowEnd = Math.min(getDynamicBackwardHEnd(prevJob, label.jid), pricingHorizon);
 		double overlapStart = Math.max(shiftedStart, windowStart);
 		double overlapEnd = Math.min(shiftedEnd, windowEnd);
@@ -2859,10 +2847,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean useJoinEnvelopeCompression() {
 		return config.enableNgDssrJoinEnvelopeCompression && !sriPricingEnabled && !limitedMemorySriPricing;
-	}
-
-	private boolean useFullDomainLabelFunctions() {
-		return config.enableNgDssrFullDomainLabelFunctions && !sriPricingEnabled && !limitedMemorySriPricing;
 	}
 
 	private void joinAllForwardTerminalGroupsByEnvelope(LP lp) {
@@ -3374,9 +3358,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		backwardSinglePointDominatedByGraph = 0;
 		generatedCandidateCount = 0;
 		generatedCandidateDroppedByHeap = 0;
-		splitCostDuplicateCount = 0;
-		splitCostMismatchCount = 0;
-		splitCostMaxAbsDiff = 0.0;
 		forwardSinkLabelsVisited = 0;
 		forwardSinkNegativeCandidates = 0;
 		forwardExtensionCandidates = 0;
@@ -3520,9 +3501,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		backwardSinglePointDominatedByGraph = 0;
 		generatedCandidateCount = 0;
 		generatedCandidateDroppedByHeap = 0;
-		splitCostDuplicateCount = 0;
-		splitCostMismatchCount = 0;
-		splitCostMaxAbsDiff = 0.0;
 		forwardSinkLabelsVisited = 0;
 		forwardSinkNegativeCandidates = 0;
 		forwardExtensionCandidates = 0;
@@ -3713,13 +3691,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(completionBoundBackwardMaxAfterSegments);
 		builder.append(", candidatePool kept/seen/dropped=").append(generatedCandidateBySignature.size()).append("/")
                 .append(generatedCandidateCount).append("/").append(generatedCandidateDroppedByHeap);
-		if (config.enableNgDssrFullDomainLabelFunctions) {
-			builder.append(", fullDomainLabel active=").append(useFullDomainLabelFunctions())
-					.append(", splitDup/mismatch/maxAbsDiff=")
-					.append(splitCostDuplicateCount).append("/")
-					.append(splitCostMismatchCount).append("/")
-					.append(splitCostMaxAbsDiff);
-		}
 		builder.append(", queueOrdering=").append(queueOrdering);
 		builder.append(", dynamicHStartMin=").append(dynamicMinHStart).append(", dynamicHEndMax=")
 				.append(dynamicMaxHEnd);
@@ -4467,7 +4438,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			traceTarget("COLUMN_CANDIDATE ngRelaxed inferredRC=" + inferredReducedCost);
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
-		recordSplitCostConsistency(signature, inferredReducedCost);
 		if (activeColumnSignatures.contains(signature)) {
 			if (targetSequence) {
 				traceTarget("COLUMN_REJECT alreadyActive inferredRC=" + inferredReducedCost);
@@ -4506,25 +4476,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 						inferredReducedCost, lp, data, ColumnSource.PRICING_EXACT);
 			}
 			rememberGeneratedCandidate(signature, candidateColumn, candidateReducedCost);
-		}
-	}
-
-	private void recordSplitCostConsistency(SequenceSignature signature, double inferredReducedCost) {
-		if (splitCostBySignature == null || !Double.isFinite(inferredReducedCost)) {
-			return;
-		}
-		Double first = splitCostBySignature.get(signature);
-		if (first == null) {
-			splitCostBySignature.put(signature, Double.valueOf(inferredReducedCost));
-			return;
-		}
-		splitCostDuplicateCount++;
-		double diff = Math.abs(inferredReducedCost - first.doubleValue());
-		if (Utility.compareGt(diff, splitCostMaxAbsDiff)) {
-			splitCostMaxAbsDiff = diff;
-		}
-		if (Utility.compareGt(diff, 1.0e-6)) {
-			splitCostMismatchCount++;
 		}
 	}
 
@@ -4687,13 +4638,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PriorityQueue<PricingColumnCandidate> savedGeneratedColumnCandidates = generatedColumnCandidates;
 		HashMap<SequenceSignature, PricingColumnCandidate> savedGeneratedCandidateBySignature =
 				generatedCandidateBySignature;
-		HashMap<SequenceSignature, Double> savedSplitCostBySignature = splitCostBySignature;
 		int savedNextCandidateId = nextCandidateId;
 		long savedGeneratedCandidateCount = generatedCandidateCount;
 		long savedGeneratedCandidateDroppedByHeap = generatedCandidateDroppedByHeap;
-		long savedSplitCostDuplicateCount = splitCostDuplicateCount;
-		long savedSplitCostMismatchCount = splitCostMismatchCount;
-		double savedSplitCostMaxAbsDiff = splitCostMaxAbsDiff;
 		double savedBestGeneratedReducedCost = bestGeneratedReducedCost;
 		double savedLastRelaxedRoundBestReducedCost = lastRelaxedRoundBestReducedCost;
 		ArrayList<NonElementaryNegativeRoute> savedNonElementaryNegativeRoutes = nonElementaryNegativeRoutes;
@@ -4703,13 +4650,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
 					Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
 			generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
-			splitCostBySignature = useFullDomainLabelFunctions() ? new HashMap<SequenceSignature, Double>() : null;
 			nextCandidateId = 0;
 			generatedCandidateCount = 0;
 			generatedCandidateDroppedByHeap = 0;
-			splitCostDuplicateCount = 0;
-			splitCostMismatchCount = 0;
-			splitCostMaxAbsDiff = 0.0;
 			bestGeneratedReducedCost = Utility.big_M;
 			lastRelaxedRoundBestReducedCost = Double.POSITIVE_INFINITY;
 			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
@@ -4736,13 +4679,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			generatedColumns = savedGeneratedColumns;
 			generatedColumnCandidates = savedGeneratedColumnCandidates;
 			generatedCandidateBySignature = savedGeneratedCandidateBySignature;
-			splitCostBySignature = savedSplitCostBySignature;
 			nextCandidateId = savedNextCandidateId;
 			generatedCandidateCount = savedGeneratedCandidateCount;
 			generatedCandidateDroppedByHeap = savedGeneratedCandidateDroppedByHeap;
-			splitCostDuplicateCount = savedSplitCostDuplicateCount;
-			splitCostMismatchCount = savedSplitCostMismatchCount;
-			splitCostMaxAbsDiff = savedSplitCostMaxAbsDiff;
 			bestGeneratedReducedCost = savedBestGeneratedReducedCost;
 			lastRelaxedRoundBestReducedCost = savedLastRelaxedRoundBestReducedCost;
 			nonElementaryNegativeRoutes = savedNonElementaryNegativeRoutes;
@@ -4828,8 +4767,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 
 	private boolean requiresExactColumnCostRecovery() {
-		return dualProfitableWindowEnabled || sriPricingEnabled || dominanceBackend != DominanceBackend.PAPER
-				|| useFullDomainLabelFunctions();
+		return dualProfitableWindowEnabled || sriPricingEnabled || dominanceBackend != DominanceBackend.PAPER;
 	}
 	private boolean isSequenceCompatible(List<Integer> sequence, Node node) {
 		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
@@ -4930,8 +4868,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
 		for (int job = dominanceSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = dominanceSet.nextSetBit(job + 1)) {
-			if ((useFullDomainLabelFunctions() || isForwardHalfEligibleJob(job))
-					&& isDirectForwardExtensionTimeFeasible(frontier, fromJob, job, !useFullDomainLabelFunctions())) {
+			if (isForwardHalfEligibleJob(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
 				extensionSet.add(job);
 			}
 		}
@@ -4958,9 +4895,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
 		for (int job = dominanceSet.nextSetBit(1); job > 0 && job <= data.n;
 				job = dominanceSet.nextSetBit(job + 1)) {
-			if ((useFullDomainLabelFunctions() || isBackwardHalfEligibleJob(job))
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job,
-							!useFullDomainLabelFunctions())) {
+			if (isBackwardHalfEligibleJob(job)
+					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
 				extensionSet.add(job);
 			}
 		}
@@ -5470,10 +5406,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void ensureBaseHalfPenaltyCache() {
-		boolean fullDomain = useFullDomainLabelFunctions();
 		if (baseForwardHalfPenaltyByJob != null && Utility.compareEq(baseHalfPenaltyCacheTMid, tMid)
-				&& Utility.compareEq(baseHalfPenaltyCacheHorizon, pricingHorizon)
-				&& baseHalfPenaltyCacheFullDomain == fullDomain) {
+				&& Utility.compareEq(baseHalfPenaltyCacheHorizon, pricingHorizon)) {
 			return;
 		}
 		baseForwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
@@ -5481,17 +5415,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		for (int job = 1; job <= data.n; job++) {
 			// 2026-05-24: data.penaltyFunction[job] 閻庤鐡曠亸娆戝垝閿熺姴绀岄柛娑卞幗閸庢捇鏌涢埡鍕€冪紒?b_j 闂佹眹鍔岀€氭澘顭囬妶澶婄畱濞达綀娅ｉ悡鎰棯椤撗冨闁绘稏鍎垫俊?
 			// dual 婵炴垶鎸哥粔鐑藉礂濡粯浜ゆ繛鎴烆殘椤忚鲸鎱ㄥ┑鍕姕闁轰礁婀卞Σ鎰槼婵＄偛鍊块弫宥囦沪閽樺鎽曢梺?pricing 闂佺儵鏅涢悺銊ф暜鐎涙ê绶炵€广儱娲﹂弳蹇涘级閳哄倻鎳侀悶姘抽哺缁嬪顢旈崟顐わ紮闂佺硶鏅濋崰鎾舵閿旈敮鍋撳☉娆欏叕缂佽鲸绻堥弻鍡涘垂椤旂厧璧嬪┑顕嗙到缁绘鎮块崱娑欑厒鐎广儱鎷嬪Σ?setDomain/crop闂?
-			if (fullDomain) {
-				baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, pricingHorizon);
-				baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, pricingHorizon);
-			} else {
-				baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, tMid);
-				baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, pricingHorizon);
-			}
+			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, tMid);
+			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, pricingHorizon);
 		}
 		baseHalfPenaltyCacheTMid = tMid;
 		baseHalfPenaltyCacheHorizon = pricingHorizon;
-		baseHalfPenaltyCacheFullDomain = fullDomain;
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
@@ -5519,15 +5447,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
 		// 2026-05-23: 闂佸憡顨呴敃銈夋偂濞嗘劖缍囬柛锔诲幗濞呮洟鏌ｉ埡浣烘憼閻㈩垱鎸冲畷妯衡枎韫囨挸姹查梺鍛婃煟閸斿秹鍩€?job penalty闂?
 		// forward 闂佹眹鍔岀€氼參寮绘繝鍐╂珷?job 闂佸憡鍨兼慨銈夊汲閻旂厧鐭楁い蹇撳闊?[0,Tmid] 婵炴垶鎸搁敃銈咁嚕椤掍胶鈻?add闂佹寧绋戦懟顖炲矗閺囥垹绀傞柛妤冨仧閺嗘澘鈽夐弬娆炬Ц闁绘挻鐟︾€电厧顫濋崘鍙夘唶闂佺粯甯熼崺鏍ㄤ繆閹间礁鐭楃€规洖娴傛导鍌炴煕濡炵儵鍋撻搹顐ュ惈 Tmid闂?
-		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0,
-				useFullDomainLabelFunctions() ? pricingHorizon : tMid);
+		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, tMid);
 	}
 
 	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
 		// 2026-05-23: backward 闁诲酣娼у﹢杈叿婵炶揪缍€濞夋洟寮?[Tmid,pricingHorizon] 婵炴垶鎸搁敃锕€鈻撻幋锕€妫橀柡澶嬵儥閺?job 闂佸憡鍨兼慨銈夊汲閻旂厧违?
 		// 闂佸吋鐪归崕鎶芥偘閵夆晛鐭楅柨婵嗘噸缁狀垰銆掑鈧崒婵堫槹 big_M闂佹寧绋戦懟顖炲箖濡ゅ啰纾?normalize(BACKWARD) 婵炴潙鍚嬪畝鎼佸焵椤掍椒浜㈢紒?suffix-min 闁荤偞绋忛崝蹇涘箵椤忓牆鐏虫繝濠傚暙鐠佹彃霉閻橆喖鍔ら柣鈩冨灴瀹曟岸骞嶉鎯х倞闂佸憡鐟辩徊浠嬪船鐎电硶鍋撻悷鐗堟拱闁搞劍宀搁崹鎯р攽閸曘劌浜?
-		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true),
-				useFullDomainLabelFunctions() ? 0.0 : tMid, pricingHorizon);
+		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction buildCompletionBoundPenalty(int job, double hStart, double hEnd) {

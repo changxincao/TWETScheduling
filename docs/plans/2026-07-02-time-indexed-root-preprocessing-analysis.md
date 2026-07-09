@@ -448,3 +448,13 @@ join-envelope 不同。它在每个 `(terminal job, true ngMemorySet)` group 内
 按前面结论做了最小补丁：`joinForwardEnvelopeGroupWithBackward()` 恢复出的 concrete sequence 不再直接用 group-envelope 的 inferred reduced cost 反推列成本，而是在进入候选堆前调用 `TWETColumnEvaluator.evaluate(sequence)` 计算真实 objective，再按当前 pricing dual 重新计算 reduced cost。普通 label-level join 仍沿用原来的 inferred-cost 路径，避免扩大影响面。
 
 这个补丁只解决“join-envelope 已经返回的 sequence 不能带着某个代表 split 的 inferred cost 污染 Pool/RMP”的问题。例如此前 `301.8` vs `300.0` 这类 stored cost 偏高会被回刷到真实成本。它不改变第一版 join-envelope 的结构限制：每个 group-pair 仍只返回一个代表 source pair，因此仍可能少返回标准 join 能找到的其它负列。换言之，当前开关仍应视为默认关闭的实验加速路径；若以后要做完整替代，仍需要在负 group 内返回多个 source pair 或回退 label-level scan。
+
+### 2026-07-09：halfway join 去重思路与 half-domain 口径
+
+阅读 `C:\Users\Changxin\Downloads\halfway_join_vrp_pricing_cn.pdf` 后，核心思路可以概括为：同一条完整 route 可能由多个 forward/backward split 生成，halfway 规则用一个沿路径单调的 critical resource 选择唯一 split，从而避免同一路径重复 join。工程口径上，它不是拿理论上所有 split 做比较，而是在最终实际保留的 label pool 上补 parent/child 或 prepend-child 映射，然后 join 时只和实际存在的相邻 split 比较；若 critical resource 单调且实际 split 不断裂，局部相邻比较就能选出实际 pool 中最接近 halfway 的 split。
+
+这个思路在当前 TWET half-domain/PWLF pricing 中不能直接作为“跳过 join funcEval”的 exact 替代。原因是我们的 label 不是一个固定资源点，而是一段关于完成时间的分段线性函数；同一条 sequence 的不同 split 可能因为 half-domain、Tmid、compact window、dynamic hard window、single-point label 和 dominance 保留状态不同，在某个 split 下函数拼接为负，而相邻 split 虽然 label 存在，却可能在对应时间域为空、非负或只暴露另一个 timing。也就是说，`childF(j)` 和 `parent(B)` 存在并不等于右移 split 一定会生成同一条负列；若在 funcEval 之前只按 `crit(F)` 与 `crit(B)` 做 halfway 判定，可能把当前唯一能生成负列的 split 提前跳过。前面 join-envelope 中 `301.8` vs `300.0` 的问题本质上也是类似提醒：压缩 split 以后，需要非常小心“代表 split”和“真实 sequence 最优成本”之间的差异。
+
+因此当前判断是：若要求完整 exact pricing 证书，不能简单用 halfway 规则替代“全部实际 label pair join”。安全的弱版本有三类。第一类是在候选列已经生成后按 `SequenceSignature` 去重，这已经由当前候选堆完成，但它不减少主要的函数拼接成本。第二类是在 join 前只跳过已经由其它 split 明确生成过同一 signature 的候选，这需要先恢复 sequence，收益取决于顺序，且只能避免后续重复，不能作为无负列证明。第三类是把 halfway 作为非证书轮次或启发式 join 的加速：找到足够负列后提前返回可以用，但最后证明无负列的 certificate 轮仍要完整扫描，或者必须证明被跳过 split 的相邻 canonical split 在当前 PWLF/time-window 口径下确实会被处理并给出不差的真实 reduced cost。
+
+如果后续真要尝试 halfway 版本，较稳的实现路线不是直接全局替换 join，而是新增一个默认关闭的 experimental join filter：扩展完成后扫描 active forward/backward labels，按 parent 建 `childByNextJob`，按 backward parent 建 `prependByPrevJob`；在标准 join feasibility 和 cheap bound 之后、昂贵 PWLF funcEval 之前，尝试做 conservative halfway 判定。只有当相邻 split 已经存在、兼容、并且能证明它会在当前轮被处理时才跳过当前 split；否则必须保留当前 split。这样能保证不因理论 canonical split 缺失或半域截断而漏列，但第一版收益可能有限。若要更激进，只能放在非证书加列轮或作为启发式，不应影响 final no-negative certificate。

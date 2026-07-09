@@ -458,3 +458,13 @@ join-envelope 不同。它在每个 `(terminal job, true ngMemorySet)` group 内
 因此当前判断是：若要求完整 exact pricing 证书，不能简单用 halfway 规则替代“全部实际 label pair join”。安全的弱版本有三类。第一类是在候选列已经生成后按 `SequenceSignature` 去重，这已经由当前候选堆完成，但它不减少主要的函数拼接成本。第二类是在 join 前只跳过已经由其它 split 明确生成过同一 signature 的候选，这需要先恢复 sequence，收益取决于顺序，且只能避免后续重复，不能作为无负列证明。第三类是把 halfway 作为非证书轮次或启发式 join 的加速：找到足够负列后提前返回可以用，但最后证明无负列的 certificate 轮仍要完整扫描，或者必须证明被跳过 split 的相邻 canonical split 在当前 PWLF/time-window 口径下确实会被处理并给出不差的真实 reduced cost。
 
 如果后续真要尝试 halfway 版本，较稳的实现路线不是直接全局替换 join，而是新增一个默认关闭的 experimental join filter：扩展完成后扫描 active forward/backward labels，按 parent 建 `childByNextJob`，按 backward parent 建 `prependByPrevJob`；在标准 join feasibility 和 cheap bound 之后、昂贵 PWLF funcEval 之前，尝试做 conservative halfway 判定。只有当相邻 split 已经存在、兼容、并且能证明它会在当前轮被处理时才跳过当前 split；否则必须保留当前 split。这样能保证不因理论 canonical split 缺失或半域截断而漏列，但第一版收益可能有限。若要更激进，只能放在非证书加列轮或作为启发式，不应影响 final no-negative certificate。
+
+### 2026-07-09：full-domain 函数配合 half-domain arc join 的可行性
+
+本次继续分析一个折中思路：保留当前 half-domain 的结构，即 forward/backward 仍按 Tmid 控制扩展方向和 crossing arc join，但正反向 label 的 PWLF 不再按 `[0,Tmid]` / `[Tmid,H]` 裁剪，而是使用 full-domain 的 job penalty，只把基础 hard window、node compact window、pricing-only arc 等真正属于当前 node 的限制写入函数。这样做的直接好处是，同一条 sequence 如果由不同 split 拼接出来，理论上都应回到同一个完整序列的最小成本，不再因为 Tmid 半域截断导致某个 split 的函数没有露出真实最优时间点。
+
+这个方向和当前实现不是完全等价的简单开关。现在 `GCNGBBStyleBidirectionalNgDssr` 和 partial dominance 里都有 `baseForwardHalfPenaltyByJob = cropToInterval(..., 0, Tmid)`、`baseBackwardHalfPenaltyByJob = cropToInterval(..., Tmid, H)`，动态窗口也会在 `buildForwardHalfPenalty()` / `buildBackwardHalfPenalty()` 里先 `setDomain(hStart,hEnd,true)` 再裁到半域。若改成 full-domain 函数，应当只去掉 Tmid 裁剪，保留 effective hard window；同时仍保持 half-domain 的可扩展性判定和 crossing arc 枚举，否则会变成另一套 full-domain bidirectional pricing，状态和证明口径都变了。
+
+如果只考虑 no-SRI、无 dual-window 污染、且函数只包含真实 hard/compact window，那么 full-domain 函数下同一 sequence 的多个 split 成本应当一致，至少比当前半域函数更接近 `TWETColumnEvaluator.evaluate(sequence)` 的固定序列语义。这会让“同一路径只做一次 join”或 group-envelope/halfway 去重更有理论基础。但仍有几个限制：第一，compact window 虽然用于当前 node 的安全剪枝，列进入 RMP/Pool 时 objective 仍最好按原始 evaluator 回刷，避免把受限窗口成本作为永久列成本；第二，SRI 尤其 limited-memory SRI 会引入 cut state 和 memory arc 口径，不宜作为第一版一起启用；第三，full-domain 函数会扩大 label 函数定义域，可能削弱 dominance、增加 segment 和扩展成本，未必一定更快。
+
+因此建议的实验顺序是：先新增一个默认关闭的 no-SRI/ng-DSSR normal 诊断开关，保留 half-domain 扩展和 join 结构，只把 job penalty 函数改为 full-domain effective-window 版本；返回列仍做真实成本回刷或至少做 debug 对拍。验证指标不是先看整树总时间，而是看单轮 exact pricing 中同一 sequence 多 split 的 inferred cost 是否一致、join funcEval 是否能通过 signature/halfway 去重减少、DSSR 轮数是否上升，以及 active label/segment 数是否因 full-domain 函数变大而恶化。只有这组验证通过后，才考虑把“同一路径只 join 一次”的策略接上；SRI、partial dominance、dual-window 场景暂时不作为第一版目标。

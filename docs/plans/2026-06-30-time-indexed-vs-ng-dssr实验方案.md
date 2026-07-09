@@ -674,3 +674,77 @@ fast path 对启发式本身是正向的。普通 `HeuristicPricing` 从旧的 `
 `Solution.merge3Segments()` 本身不删除，也不影响 ALNS。ALNS/旧启发式路径没有 node compact window 这种 BigM 硬窗裁剪语义，旧 merge3 在那里仍是原有三段拼接工具；本次问题只发生在 `HeuristicPricingEngine` 把 node compact window 后的 singleton forward/backward 作为 single-job 中间段传入旧 merge3 的场景。
 
 验证：focused `javac` 编译 `TWETBPCConfig.java`、`GCBBFullDomainComparisonTest.java`、`HeuristicPricingEngine.java` 通过；`HEU.OutsourcingMoveConsistencyTest passed, checked=14168`。
+
+### 2026-07-08 50-3 setupR25/R50 的 time-indexed 与 ng-DSSR 对比
+
+本次在 `wet050_003_3m` 上按 `SetupRatioVariantGenerator` 生成两组 setup time 变体，目标是闭包后平均 job-to-job setup / 平均 processing time 分别接近 0.25 和 0.50。生成结果为：`setupR25` 的 `avgP=50.140000, avgSetup=12.527755, postRatio=0.249856`；`setupR50` 的 `avgP=50.140000, avgSetup=25.068571, postRatio=0.499972`。两组都使用当前 50-3 对比口径：单线程、ALNS 60s 且 SA 关闭、RMIH、强分支、pricing-only subtree、completion bound、dual-bound pruning 等保持一致。time-indexed 组使用纯 `TimeIndexedGraphPricing`；ng-DSSR 组使用 normal ng-DSSR nearestK3/top3，并打开 time-indexed root preprocessing、root seed 200、time-indexed pre-heuristic、compact window/arc fixing 辅助。中途发现 ng-DSSR 的 `statisticsSummary()` 一次性字符串拼接超过 JDK 22 的 concat slot 上限，已只把该日志汇总函数改成 `StringBuilder`，不改变定价逻辑；单文件 `javac` 已通过。
+
+结果如下：
+
+| instance | 方法 | obj=bound | solve(s) | root(s) | nodes | pool | exact(s/calls) | heuristic(s/calls) | masterLP(s) |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| setupR25 | time-indexed | 26964 | 180.738 | 107.162 | 11 | 65727 | 12.056 / 405 | 0 / 0 | 88.954 |
+| setupR25 | ng-DSSR goodcfg | 26964 | 131.850 | 92.492 | 9 | 26972 | 5.123 / 41 | 5.185 / 112 | 36.863 |
+| setupR50 | time-indexed | 32237 | 82.447 | 56.011 | 5 | 41091 | 6.246 / 231 | 0 / 0 | 28.167 |
+| setupR50 | ng-DSSR goodcfg | 32237 | 91.825 | 69.320 | 3 | 16372 | 7.781 / 31 | 6.284 / 128 | 11.295 |
+
+当前观察是：在 0.25 setup ratio 下，ng-DSSR 仍然更快，主要是列池和 master LP 明显更小，exact ng-DSSR 本身只花 5.1s；在 0.50 setup ratio 下，纯 time-indexed 反而略快，虽然列池更大，但节点很少、pricing 很快，master LP 也没有膨胀到抵消优势。两组都没有表现出“setup time 增大以后 time-indexed 明显变差”的现象；至少在这个 50-3 due-window 结构下，pseudo-schedule gap 仍然很小，time-indexed 的弱列没有造成明显搜索困难。这个结果和前面猜测一致的一部分是：time-indexed 在时间域不太大、due window 较紧时很有竞争力；但仅靠 setup ratio 从 0.25 增到 0.50，暂时还不足以制造 ng-DSSR 明显优势。
+
+### 2026-07-08 50-3 setupR25/R50 补充 SRI 对比
+
+在上一组 no-SRI 对比基础上，继续补跑两类 SRI：time-indexed 使用 `TimeIndexedGraphRank1CutPricing` + `enableSubsetRowCutsForTimeIndexedGraph=true`，即论文 rank-1 cut 口径；ng-DSSR 使用 partial-list dominance + `enableSubsetRowCutsForPartialDominance=true`，因为当前普通 normal backend 不接 SRI state。其余配置保持当前好配置：ALNS 60s 且 SA 关闭、强分支、RMIH、pricing-only subtree、completion bound、dual-bound pruning、time-indexed root preprocessing / seed 200 / pre-heuristic 等保持一致。四组结果均 `valid=true`。
+
+| instance | 方法 | obj=bound | status | solve(s) | nodes | pool | exact(s/calls) | heuristic(s/calls) | masterLP(s) |
+|---|---|---:|---|---:|---:|---:|---:|---:|---:|
+| setupR25 | time-indexed no-SRI | 26964 | FINISHED | 180.738 | 11 | 65727 | 12.056 / 405 | 0 / 0 | 88.954 |
+| setupR25 | time-indexed rank1/SRI | 26964 | ROOT_PROCESSED | 143.362 | 1 | 62811 | 10.962 / 384 | 0 / 0 | 83.263 |
+| setupR25 | ng-DSSR no-SRI | 26964 | FINISHED | 131.850 | 9 | 26972 | 5.123 / 41 | 5.185 / 112 | 36.863 |
+| setupR25 | ng partial + SRI | 26964 | FINISHED | 147.318 | 3 | 7492 | 23.383 / 121 | 13.607 / 285 | 31.549 |
+| setupR50 | time-indexed no-SRI | 32237 | FINISHED | 82.447 | 5 | 41091 | 6.246 / 231 | 0 / 0 | 28.167 |
+| setupR50 | time-indexed rank1/SRI | 32237 | ROOT_PROCESSED | 96.386 | 1 | 40462 | 8.905 / 222 | 0 / 0 | 23.662 |
+| setupR50 | ng-DSSR no-SRI | 32237 | FINISHED | 91.825 | 3 | 16372 | 7.781 / 31 | 6.284 / 128 | 11.295 |
+| setupR50 | ng partial + SRI | 32237 | ROOT_PROCESSED | 71.742 | 1 | 3622 | 6.400 / 22 | 3.797 / 67 | 10.317 |
+
+当前结论是：SRI 在这两个变体上的作用不一致。`setupR25` 中 time-indexed rank1/SRI 能把 root 直接闭合并从 180.7s 降到 143.4s，但仍慢于 no-SRI ng-DSSR 的 131.9s；ng partial + SRI 的列池明显更小、节点更少，但 exact/heuristic 变重，最终 147.3s，也没有超过 no-SRI ng-DSSR。`setupR50` 中 SRI 的作用更明显：time-indexed rank1/SRI 直接闭合 root，但总时间略慢于 no-SRI time-indexed；ng partial + SRI 只保留 3622 列、10 条 cut，root 直接闭合，总时间 71.7s，是这两组里最快的。由此看，setup 更强时，SRI 对 ng partial 的 root bound/列池压缩收益可能更容易抵消状态成本；但 time-indexed rank1/SRI 仍会受到 cut 后 master LP 成本影响，不一定比 no-SRI time-indexed 更快。
+### 2026-07-08 SRI memory 口径、compact window 与 dual-bound 剪枝核查
+
+本次针对 50-3 setupR25/R50 的 SRI 对比结果做了代码和日志核查。结论是：time-indexed rank1/SRI 使用的是论文式 limited arc-memory 口径，`SubsetRowCutGenerator` 在 `useTimeIndexedGraphRank1CutPricing=true` 时会走 `buildLimitedMemoryArcSet()`；但 ng-DSSR partial+SRI 本次 run 没有显式设置 `subsetRowCutMemoryMode`，因此沿用配置默认值 `full`，不是 limited-memory SRI。后续如果要让 ng partial+SRI 也按 limited 口径比较，需要显式设置 `subsetRowCutMemoryMode=arcMemory` 或 `nodeMemory/lm` 后重跑。
+
+ng-DSSR+SRI 能使用 time-indexed root preprocessing 写回的 compact window 和 pricing-only/time-indexed arc 信息。R25 日志中 preprocessing 写回 `windowJobs=50, avgWindowLen=192.540, avgShrinkRatio=0.891, seedElementaryCols=200, promotedOrdinaryArcs=2138`；R50 写回 `windowJobs=50, avgWindowLen=311.700, avgShrinkRatio=0.836, seedElementaryCols=200, promotedOrdinaryArcs=1996`。正式 ng-DSSR pricing 日志里也能看到 `timeWindowJobs=50`、`timeWindowAvgLen`、`timePricingOnlyArc` 和 `ngWindowRepeatability=timeIndexed`，说明这些信息确实进入了后续 partial+SRI pricing。需要注意的是 root preprocessing 本身按 no-cut/no-SRI 临时 time-indexed root 执行，只复制 fixing/window/seed 证据，不复制 SRI cut 状态。
+
+R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合。最后一轮 exact pricing 日志显示 `observedDualBound=26963.999999999996`，incumbent 为 `26964`；PC 中 dual-bound pruning 判定为 `observedDualBound >= incumbent - dualBoundPruningTolerance`，因此该 root 是下界在容差内达到当前上界后被剪掉。日志中的 node summary 因 close-only 节点没有常规 master solution 填充而显示 `lpObj=-/bound=-`，但 final lower bound 打印为 `26964.000000`。
+
+### 2026-07-08 50-3 宽 due window 对 time-indexed root 松弛的影响
+
+本次继续用 `wet050_003_3m` 检查“due window 放宽是否会让 time-indexed pseudo-schedule 松弛显著变弱”。实验没有改原始 `.dat` 的 job 行，而是使用 loader 里的 `twet.data.dueWindowHalfWidth=W`，把每个 due date 扩成 `[max(0,d_j-W), d_j+W]` 后重新计算 horizon、硬时间窗和 penalty function。所有 root-only 实验均使用纯 `TimeIndexedGraphPricing`，关闭 rank-1 cut 和旧 HeuristicPricing，`maxNodes=1`，ALNS 30s 且 SA 关闭。
+
+原始 setup 的 50-3 上，`W=0/100/300/800/1500` 的 root-only 结果如下。`W=0` 时 root gap 为 `1.145%`，正值列中 non-elementary 为 `13/44`；`W=100` 时 root gap 升到 `2.651%`，non-elementary 为 `23/40`；`W=300` 时 root gap 升到 `15.226%`，non-elementary 为 `26/46`。继续放到 `W=800/1500` 时，目标直接变成 `0`，root 一轮闭合，正值列全部 elementary。这说明 due window 放宽不是单调制造难例：中等宽度会让 pseudo-schedule 更容易进入 LP 并削弱 root bound，但过宽会把惩罚基本抹掉，使实例退化成零罚或近零罚问题。
+
+随后用 `SetupRatioVariantGenerator` 基于同一 50-3 生成 `setupR50/setupR75`，闭包后平均 job-to-job setup / 平均 processing 分别为 `0.499972/0.750022`。在这两个强 setup 变体上再叠加 `W=300`，time-indexed root gap 分别为 `12.209%` 和 `14.173%`；对应正值列 non-elementary 比例分别为 `29/45` 和 `31/45`，且 elementary 正值和只剩 `1.282572/3` 和 `1.223769/3`。这比原始 `W=0` 明显更偏向 pseudo-schedule 支撑 root LP，说明“强 setup + 中等宽 due window”确实能造出 time-indexed root 松弛明显变弱的实例。
+
+为确认这不是单纯 incumbent 变差造成的，也跑了 `setupR50/setupR75, W=300` 的纯 ng-DSSR root-only 对照，关闭 time-indexed root preprocessing 和 time-indexed pre-heuristic，只保留 ng-DSSR nearestK3/top3、completion bound、dual-bound pruning、midpoint probe 与 repeatability ng-set filter。结果为：`setupR50` 的 ng-DSSR root bound `1726.014329`，time-indexed 为 `1702.274302`；`setupR75` 的 ng-DSSR root bound `3326.995658`，time-indexed 为 `3272.566507`。ng-DSSR root bound 确实更强，但提升只有几十个目标值单位；代价是 exact pricing 从 time-indexed 的 `6.606s/150`、`4.684s/93` 上升到 ng-DSSR 的 `196.055s/12`、`139.235s/8`。也就是说，这类变体已经暴露了 time-indexed pseudo-schedule 的弱 bound，但在 50 任务、整数 horizon 仍不太大的口径下，time-indexed 的便宜定价仍然很有竞争力。
+
+当前结论可以收紧为：只放宽 due window 会先让 time-indexed root LP 更依赖 non-elementary pseudo-schedule，root bound 变弱；但窗口过宽会让目标退化为零，不是有意义难例。更有代表性的压力组合是“较强 setup time + 中等宽 due window + 仍保持非零惩罚”。如果再叠加更大的 horizon、非均匀时间放大或小数时间 scale，time-indexed 的图规模和 pseudo-schedule 尾部问题才更可能同时暴露。ng-DSSR 的 repeatability ng-set filter 在本次 ng-DSSR 日志中已生效，日志显示 `ngWindowRepeatability=timeIndexed/repeatable50/nonRepeatable0`；在该 W=300 场景下所有 job 仍可能重复访问，所以过滤没有减少初始 ng-set 成员，这也解释了为什么 ng-DSSR 没有明显因此加速。
+
+### 2026-07-08 W300 下 time-indexed arc fixing 强弱复核
+
+为避免把 direct time-indexed pricing 中的 `timeArcSkips=0` 误解为 arc fixing 本身无效，本次单独用 `setupR50 + dueWindowHalfWidth=300` 跑了一次 `TimeIndexedRootPreprocessor`，只看 root 预处理给后续 ng-DSSR 能留下多少 fixing/window 证据。该 run 的关键结果为：`tempPool=31039`，`graphFix candidates=5584245, fixed=4454019, unavailable=191096`，`promotedOrdinaryArcs=150`，`windowJobs=50`，`avgWindowLen=748.120`，`avgOrigPts/hullPts/reachablePts=2230.0/749.1/733.3`，`scalarFix fixed=0`。root positive columns 中 non-elementary 为 `29/45`，说明 W300 下 pseudo-schedule 对 LP 的支撑已经比较明显。
+
+因此这里要区分两层结论。若看时空弧 `(i,j,t)`，time-indexed graph fixing 并不弱，本次约固定了 `4454019 / 5584245 = 79.8%` 的候选时空弧，并把每个 job 的可达时间 hull 从平均 2230 个点压到约 749 个点。但若看能够推广给 ng-DSSR 直接跳过的普通弧 `(i,j)`，它确实明显变弱：只有 150 条普通弧能被完全推广。对比此前较窄窗口/原始口径下 root preprocessing 里常见的 `promotedOrdinaryArcs` 约 2000 条、平均窗口长度约 200 到 300，本次 W300 的普通弧推广和 compact window 都弱了很多。
+
+原因是 W300 给每个 job 留下了较宽的可行完成时间区间。很多普通弧虽然在大多数时间点上已经不可能或不值得用，但只要还存在少数时间点可用，就不能把整条 `(i,j)` 普通弧推广成 pricing-only 禁弧。因此，time-indexed 的细粒度 fixing 仍然强，但它的效果更多停留在时空图内部和 per-job 时间窗收缩上；传递给连续时间 ng-DSSR 的普通弧证据会明显减少。这也解释了为什么 W300 下 ng-DSSR 的 repeatability filter 日志为 `repeatable50/nonRepeatable0`：所有 job 仍可能重复访问，窗口证据不足以把初始 ng-set 大幅缩小。
+
+当前判断为：放大 due window 后，time-indexed arc fixing 不是整体失效，而是“时空弧层面仍强、普通弧推广层面变弱”。如果后续想让 ng-DSSR 更充分利用这类证据，需要更细粒度地把 `(i,j,t)` 或 per-job 可达时间集合接入连续函数 pricing；只依赖普通弧推广和 hull window 时，W300 这类实例上的收益会被明显削弱。
+### 2026-07-09：ng-DSSR 相对 time-indexed 的后续证明与优化方向
+
+当前实验说明，不能指望 ng-DSSR 在所有当前小整数 due-date 算例上自然压过 time-indexed。time-indexed 图虽然是 pseudo-schedule/非 elementary 松弛，但在原始 40-2、50-2/50-3 这类小整数 horizon、due date 较硬的算例上，重复访问 job 的收益很小，很多正值列接近 elementary，因此 root gap 很小、图上 shortest path 又极快。此时 ng-DSSR 的强度优势只体现在零点几个百分点的 root bound 改善，而 exact pricing 需要付出大量 PWLF label、completion bound 和 join 证书成本，整体很容易输给 time-indexed。
+
+要证明 ng-DSSR 的价值，实验口径应从“所有算例都更快”改成“识别 time-indexed 适用区间，并证明在不适合 time-indexed 的区间 ng-DSSR 更稳”。当前已有证据支持这个方向：原始和 zero-setup 40-2 中两者 root gap 接近；setupR50/R75 + setupCost20 下 root gap 差距开始扩大；timeJitterX10 这类整体时间放大后，time-indexed no-SRI 900s 未闭合而 ng-DSSR + window tightening 能闭合；W300 宽窗口和强 setup 会显著增加 time-indexed 的 non-elementary 正值列比例，但也会让 ng-DSSR exact pricing 的 join/label 证书成本暴涨。后续实验应重点报告 root gap、positive non-elementary 比例、time-indexed graph state/arc 数、ng-DSSR active label per bucket、funcEval 数和 exact/certificate 时间，而不是只看总 solve time。
+
+算法优化上，当前最有希望降低 ng-DSSR exact 成本的方向不是 halfway 去重，而是“join-envelope 只做安全 group 下界筛选，负 group 内回退 label-level scan 或返回多个 source pair”。第一版 join-envelope 已经证明能把单轮 join funcEval 从千万级压到万级，但因为每个 group-pair 只返回一个代表列，削弱了批量加列能力，导致 DSSR 轮数增加。更合理的第二版是：先用 traced envelope 判断一个 group-pair 的最小下界；若非负，直接跳过整个 group-pair；若为负，则在该 group-pair 内执行原 label-level scan，或至少返回多个 source pair，直到达到原 join 的加列/证书口径。这样可以保留 exact certificate，同时把明显无用的 group-pair 大块剪掉。
+
+第二个方向是减少扩展阶段的 PWLF 构造。当前 `extendForward/Backward` 已有时间窗 overlap 检查、无 SRI 时避免重复 no-SRI frontier、join 已使用直接 min-sum，低级常数优化空间有限。更有价值的是在 `shiftX + add + normalize` 之前加入保守 scalar lower bound：用 label 当前 min、transition/job cheap lower bound 和 suffix completion bound 先判断该扩展是否可能导致负完整列；若连松弛下界都不可能为负，就不构造 child PWLF。这个方向要非常保守，不能用受 dual/window 限制后会污染真实列成本的值。
+
+第三个方向是实验层面的 hybrid。若 horizon 小且 time-indexed root 很快，应承认 time-indexed 作为主算法或 root 预处理更合适；若 horizon 大、存在小数 scale、宽 due window 或复杂 setup/外包结构，则用 time-indexed 先做 root/局部 preprocessing 可能不划算，ng-DSSR 应直接利用 completion bound、compact window 和 pricing-only fixing。后续可以设计一个规则：按 `n*T`、time-indexed graph state 数、root pseudo non-elementary 比例和 root gap 判断采用 time-indexed 主算法、time-indexed root preprocessing + ng-DSSR，还是直接 ng-DSSR。
+
+当前论文/实验叙事可以写成：time-indexed 方法在小整数时间、紧 due-window 的实例上非常强，原因是 relaxed pseudo 列接近 elementary 且 shortest path 极快；但它对 horizon scale、宽窗口、小数时间 scale 和外包/复杂 branching 的可扩展性较差。ng-DSSR 的定位不是无条件替代 time-indexed，而是在 time-indexed 图规模或松弛 gap 变差时提供更强的 elementary pricing 和更稳定的分支定价框架。后续关键工作是降低 ng-DSSR 的 exact certificate 成本，尤其是 join group 剪枝和扩展前保守下界剪枝。

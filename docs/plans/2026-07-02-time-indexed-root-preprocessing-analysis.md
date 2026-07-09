@@ -468,3 +468,11 @@ join-envelope 不同。它在每个 `(terminal job, true ngMemorySet)` group 内
 如果只考虑 no-SRI、无 dual-window 污染、且函数只包含真实 hard/compact window，那么 full-domain 函数下同一 sequence 的多个 split 成本应当一致，至少比当前半域函数更接近 `TWETColumnEvaluator.evaluate(sequence)` 的固定序列语义。这会让“同一路径只做一次 join”或 group-envelope/halfway 去重更有理论基础。但仍有几个限制：第一，compact window 虽然用于当前 node 的安全剪枝，列进入 RMP/Pool 时 objective 仍最好按原始 evaluator 回刷，避免把受限窗口成本作为永久列成本；第二，SRI 尤其 limited-memory SRI 会引入 cut state 和 memory arc 口径，不宜作为第一版一起启用；第三，full-domain 函数会扩大 label 函数定义域，可能削弱 dominance、增加 segment 和扩展成本，未必一定更快。
 
 因此建议的实验顺序是：先新增一个默认关闭的 no-SRI/ng-DSSR normal 诊断开关，保留 half-domain 扩展和 join 结构，只把 job penalty 函数改为 full-domain effective-window 版本；返回列仍做真实成本回刷或至少做 debug 对拍。验证指标不是先看整树总时间，而是看单轮 exact pricing 中同一 sequence 多 split 的 inferred cost 是否一致、join funcEval 是否能通过 signature/halfway 去重减少、DSSR 轮数是否上升，以及 active label/segment 数是否因 full-domain 函数变大而恶化。只有这组验证通过后，才考虑把“同一路径只 join 一次”的策略接上；SRI、partial dominance、dual-window 场景暂时不作为第一版目标。
+
+### 2026-07-09：现有 full-domain pricing 代码口径复核
+
+继续复核现有 `GCBBStyleBidirectionalFullDomain` 后，确认它不是当前 ng-DSSR 主线里的一个局部开关，而是 2026-05-28 为比较 half-domain 与 full-domain 函数定义域单独复制出来的 no-cut GCBB-style pricing engine。类注释里已经写明：它保留 GCBB-style final join、forward->sink 收尾和 top-K 候选流程，但 forward/backward 标签函数都直接定义在 `[0, pricingHorizon]`，主要用于诊断“半域裁剪”和“完整定义域标签”的差异，不作为默认正式入口。
+
+具体实现上，它确实采用了前面讨论的核心思想：`ensureBaseHalfPenaltyCache()` 中 forward/backward 的基础 job penalty 都是 `cropToInterval(data.penaltyFunction[job], 0, pricingHorizon)`；`buildForwardHalfPenalty()` / `buildBackwardHalfPenalty()` 在 effective window 收紧时也只做 `setDomain(hStart,hEnd,true)` 后裁到 `[0, pricingHorizon]`，不再按 Tmid 裁成 `[0,Tmid]` 或 `[Tmid,H]`。同时，扩展和终端保存仍保留 Tmid 语义：label 是否继续入队、是否作为 terminal/single-point 保存，仍会看是否跨过 Tmid；final join 仍是 crossing arc join，而不是 node join。
+
+因此它和本次想试的“full-domain 函数 + half-domain arc join”很接近，但不能直接拿来当当前主线 ng-DSSR 的实现。主要差别是：第一，它没有 DSSR 轮次、ngMemory 更新和 non-elementary 负列只更新 ng-set 的逻辑；第二，它是普通 GCBB/elementary pricing，对当前 normal ng-DSSR 的 repeatability filter、history warm-start、ng-set 动态初始化、join-envelope 实验路径都没有接入；第三，它虽然近期补过 pricing-only arc、completion-bound subtree bounds 等兼容性，但仍是历史实验分支，不应直接替代主线。若要试当前想法，最小风险做法不是启用 `mode=full`，而是在 `GCNGBBStyleBidirectionalNgDssr` 内新增一个默认关闭的“full-domain penalty”口径，仅复用这套 penalty 构造思想，保留 ng-DSSR 其它流程不变。

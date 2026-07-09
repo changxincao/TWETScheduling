@@ -35,26 +35,26 @@ import TWETBPC.Util.PackedBitSet;
 import TWETBPC.Util.SequenceSignature;
 
 /**
- * no-cut 闁告瑥鑻幃?pricing 闁汇劌瀚婊冾嚕?half-domain GCBB-style 闁糕晛鎼崳顖炴偋閸稈鍋?
+ * no-cut 闂佸憡鐟ラ懟顖炲箖?pricing 闂佹眹鍔岀€氼參顢楀鍐惧殨?half-domain GCBB-style 闂佺硶鏅涢幖顐﹀闯椤栫偞鍋嬮柛顐ｇ▓閸?
  * <p>
- * 闁告瑯浜濆﹢渚€宕烽妸銉ョ仚闁轰線顣︾粭鍌炴⒔閹邦厽寮撻柟鎼簼閺屽洭濡存担椋庣懍 forward/backward 闂傚啰鍠庨崹顏堟焾閸婄噥娼堕悗鐟版湰閺嗭綁鎳撳Δ鈧弫鏍籍鐠佸湱绀夐柡鍫墲閻ゅ棛绱掗幘瀵镐函闁归潧绉磋ぐ鍙夋媴濠娾偓鐠?exact pricing
- * certificate闁挎稒绋栫€氥垺娼忛幆褍鐓?{@link TWETBPCConfig#maxExactPricingColumns}闁挎稑鐭佺换鏍煂鐏炶棄娑ч悶娑栧妿閵囨岸鍨惧鍕粯濠㈣埖姘ㄩ弫鎾诲箣?K 闁哄銈囶槹闁告帗銇涢埀顒佺缚閳?
+ * 闂佸憡鐟禍婵嗭耿娓氣偓瀹曠兘濡搁妷銉т粴闂佽桨绶氶。锔剧箔閸岀偞鈷旈柟閭﹀幗瀵捇鏌熼幖顓濈凹闁哄苯娲俊瀛樻媴妞嬪海鎳?forward/backward 闂傚倸鍟伴崰搴ㄥ垂椤忓牊鐒鹃柛濠勫櫏濞煎爼鎮楅悷鐗堟拱闁哄棴缍侀幊鎾澄旈埀顒勫极閺嶎厼绫嶉悹浣告贡缁€澶愭煛閸偄澧查柣銈呮缁辨帡骞樼€甸晲鍑介梺褰掓涧缁夌銇愰崣澶嬪婵犲ň鍋撻悹?exact pricing
+ * certificate闂佹寧绋掔粙鏍偓姘ュ灪濞煎繘骞嗚閻?{@link TWETBPCConfig#maxExactPricingColumns}闂佹寧绋戦惌浣烘崲閺嶎厽鐓傞悘鐐舵濞懷囨偠濞戞牕濡块柕鍥ㄥ哺閸ㄦ儳顭ㄩ崟顑跨帛婵犮垼鍩栧銊╁极閹捐绠?K 闂佸搫顥￠妶鍥舵Ч闂佸憡甯楅妵娑㈠焵椤掍胶缂氶柍?
  * <p>
- * 2026-05-22: 閺夆晜鐟╅崳閿嬬▔瀹ュ懎鏅欐繛宀冩硶閺併倝寮閻ゅ嫰鎮抽幍顔界暠闁炽儲绮岄幃鎾寸▔閳ь剚绋夐鍐幀闂傚倸顕崑?join闁炽儲绻冮悥锝夋煂韫囨梻鍨肩紒娑欐嫕缁辨繈鎳撶仦鐐﹂柡鈧憴鍕亣闁告粌鐭侀鎴﹀棘閸ワ妇顏遍柤宄邦嚟濞?
- * 闁炽儲绔緊rward 闁告挸绉剁槐?+ crossing arc (i,r) + backward 闁告艾娴风槐鎴﹀灳濠靛牊鐣辩€殿啫鍕伝闁规亽鍎埀?
- * 缂侇偉顕ч幃鏇熺▔椤撶姵鐣?GCNGBB 濞ｅ洦绻勯弳鈧柡鍐ｆ櫆濠€锟犲川閽樺鍊抽柨娑欑☉缂嶅宕滃鍥ь暭闁哄牜鍓欏﹢?label 濞戞搩鍘惧ǎ顕€骞?ng-memory闁挎稑鑻懟鐔兼偨?DSSR 闂侇偅鍔橀悿鍡涘绩閸撲焦褰?
- * ng-neighborhood闁靛棗鍊诲ù澶屸偓?{@link GCBidirectional}闁挎稑鏈﹢鎵尵鐠囨彃甯ラ悗鐟版湰閺嗭綁鎮介悢绋跨亣 forward/backward 濞戞挶鍊撻弲?label
- * table闁挎稑鑻崯鈧紓浣哄枍缁旀挳宕?crossing-arc final join闁挎稒鐭rward->sink 闁衡偓鐠鸿櫣鍟插☉鏃傚枎閼荤喖宕?final join 婵炵繝鑳堕埢濂稿Υ娣囩灒in
- * 闁告艾楠搁崢娑㈠箰?ng-memory 婵☆偀鍋撻柡灞诲劜鐎氶箖骞掗妷銉ユ倯閻庣顫夐埀顑秶绀夐柛鎰У娴狀喗寰勫鍥ㄥ焸閻庡湱鍋涚花顓㈠礆濡も偓閸ㄤ粙寮?elementary/non-elementary闁靛棗鍊跨划顖滄媼閵堝懎娑ч悹浣叉櫈缁€瀣儍?
- * elementary 闁告帗顨夌换姗€宕楅妷锔芥嫳闁?top-K 闁稿﹥鐟╅埀顒€顦伴惈婊堟晬瀹€鍐槹闁?non-elementary 閹兼潙绻愰崹顏堟偨閵娿倗鑹鹃柡鍥х摠閺?ng-set闁挎稒绋栭惁鏍棘椤撶偟纾婚柛蹇氭珪婢э箑顕ｉ埀顒勫籍鐠佸湱绀?
- * non-elementary ng-relaxed 闁告帗銇炵弧鍐╁濮樿鲸绾柟鎭掑劥缁绘﹢宕楅妷銉㈠亾濞嗘挴鍋撴径瀣建闁?
+ * 2026-05-22: 闁哄鏅滈悷鈺呭闯闁垮鈻旂€广儱鎳庨弲娆愮箾瀹€鍐╃《闁轰降鍊濆顔款槻闁汇倕瀚伴幃鎶藉箥椤旂晫鏆犻梺鐐藉劜缁矂骞冮幘瀵糕枖闁逞屽墯缁嬪顢旈崘顓炲箑闂傚倸鍊搁顓㈠磻?join闂佺偨鍎茬换鍐偉閿濆鐓傞煫鍥ㄦ⒒閸ㄨ偐绱掑☉娆愬珪缂佽鲸绻堥幊鎾朵沪閻愵儷锕傛煛閳ь剛鎲撮崟顐や海闂佸憡绮岄惌渚€顢欓幋锕€妫橀柛銉椤忛亶鏌ゅ畡閭﹀殶婵?
+ * 闂佺偨鍎茬粩绶妑ward 闂佸憡鎸哥粔鍓佹?+ crossing arc (i,r) + backward 闂佸憡鑹惧ù椋庢閹达箑鐏虫繝闈涚墛閻ｈ京鈧鍟崟顐紳闂佽浜介崕顖炲焵?
+ * 缂備緡鍋夐褔骞冮弴鐔衡枖妞ゆ挾濮甸悾?GCNGBB 婵烇絽娲︾换鍕汲閳ь剟鏌￠崘锝嗘珕婵犫偓閿熺姴宸濋柦妯侯槹閸婃娊鏌ㄥ☉娆戔槈缂傚秴顑夊畷婊冾吋閸パ屾毉闂佸搫鐗滈崜娆忥耿?label 婵炴垶鎼╅崢鎯庨鈧獮?ng-memory闂佹寧绋戦懟顖炴嚐閻斿吋鍋?DSSR 闂備緡鍋呴崝姗€鎮块崱娑樼哗闁告挷鐒﹁ぐ?
+ * ng-neighborhood闂侀潧妫楅崐璇裁规径灞稿亾?{@link GCBidirectional}闂佹寧绋戦張顒€锕㈤幍顔惧暗閻犲洦褰冪敮銉╂倵閻熺増婀伴柡鍡秮閹粙鎮㈢粙璺ㄤ海 forward/backward 婵炴垶鎸堕崐鎾诲疾?label
+ * table闂佹寧绋戦懟顖炲疮閳ь剛绱撴担鍝勬瀺缂佹梹鎸冲畷?crossing-arc final join闂佹寧绋掗惌顦時ward->sink 闂佽　鍋撻悹楦挎閸熸彃鈽夐弮鍌氭瀻闁艰崵鍠栧畷?final join 濠电偟绻濋懗鍫曞煝婵傜违濞ｅ洨鐏抜n
+ * 闂佸憡鑹炬鎼佸储濞戙垹绠?ng-memory 濠碘槅鍋€閸嬫捇鏌＄仦璇插姕閻庢岸绠栭獮鎺楀Ψ閵夈儲鍊柣搴ｎ攰椤鍩€椤戭剙绉剁粈澶愭煕閹邦剛校濞寸媭鍠楀鍕吋閸ャ劌鐒搁柣搴℃贡閸嬫稓鑺遍銏犵婵°倐鍋撻柛銊ょ矙瀵?elementary/non-elementary闂侀潧妫楅崐璺ㄥ垝椤栨粍濯奸柕鍫濇噹濞懷囨偣娴ｅ弶娅堢紒鈧€ｎ喗鍎?
+ * elementary 闂佸憡甯楅〃澶屾崲濮椻偓瀹曟濡烽敂鑺ュ闂?top-K 闂佺锕ラ悷鈺呭焵椤掆偓椤︿即鎯堝鍫熸櫖鐎光偓閸愵亶妲归梺?non-elementary 闁瑰吋娼欑换鎰板垂椤忓牊鍋ㄩ柕濞垮€楅懝楣冩煛閸パ呮憼闁?ng-set闂佹寧绋掔粙鏍儊閺嶎厼妫樻い鎾跺仧绾惧鏌涜箛姘彧濠⒀嶇畱椤曪綁鍩€椤掑嫬绫嶉悹浣告贡缁€?
+ * non-elementary ng-relaxed 闂佸憡甯楅妵鐐靛姬閸愨晛顕辨慨妯块哺缁绢垶鏌熼幁鎺戝姤缂佺粯锕㈠畷妤呭Ψ閵夈垹浜炬繛鍡樻尨閸嬫挻寰勭€ｎ剚寤洪梺?
  * <p>
- * 鐟滅増鎸告晶鐘绘偋閸喐鎷遍柛蹇撶墔缁绘氨鎷?elementary 闁告瑥鑻幃婊堝礄閼恒儲娈堕梺顐ｅ笚鐢綊宕?T^mid 闁告锕ら悡娆戞嫚椤撴繄鐤呮慨婵撶悼閳ユ﹢鏁?
- * 1. forward label 閻庢稒锚閸嬪秹宕?[ell, Tmid]闁?
- * 2. backward label 閻庢稒锚閸嬪秹宕?[Tmid, rho]闁?
- * 3. join 闁哄啫澧庨弫銈囨媼閻戞ɑ鐎梺鎻掔灱濞堟垹鏁崨濠冩鐎点倛鍩栫€氬洭鏁嶇仦鐓庮槻闁哄啯鍎艰棢濮?forward 闁告瑥鍟垮畷鎰板春閻旈攱瀚?backward 鐎归潻绠戝畷鎰板春閻曞倻绀夐柣鎺曟硾閹骞?crossing arc 閻庨潧缍婄紞鍫ユ儎缁嬪灝顫ｉ柨?
- * 4. 濮掓稒顭堥濠氭儎鐎涙ê澶嶅ù锝堟硶閺?label/join 闁规亽鍔岄閬嶅礄閾忚鐣?reduced cost 闁告瑥绉电敮褰掑礄閸濆嫬鐏欓柟瀛樺姈濠€浼存晬濞戞﹩娲ら梻鍥ｅ亾閻庣懓鏈弳锝嗘償韫囨挸鐏欏璺虹У閻楁娊鏁嶇仦钘夎闁瑰灚鎸哥槐?
- * {@link Configure#debugBPCPricingColumnCheck}闁?
+ * 閻熸粎澧楅幐鍛婃櫠閻樼粯鍋嬮柛顐ゅ枑閹烽亶鏌涜箛鎾跺缂佺粯姘ㄩ幏?elementary 闂佸憡鐟ラ懟顖炲箖濠婂牆绀勯柤鎭掑劜濞堝爼姊洪锝呯瑲閻㈩垰缍婂畷?T^mid 闂佸憡顨呴敃銈夋偂濞嗘垶瀚氭い鎾寸箘閻ゅ懏鎱ㄥ┑鎾舵偧闁炽儲锕㈤弫?
+ * 1. forward label 闁诲孩绋掗敋闁稿绉瑰畷?[ell, Tmid]闂?
+ * 2. backward label 闁诲孩绋掗敋闁稿绉瑰畷?[Tmid, rho]闂?
+ * 3. join 闂佸搫鍟晶搴ㄥ极閵堝洦濯奸柣鎴炆戦悗顕€姊洪幓鎺旂伇婵炲牊鍨归弫顕€宕ㄦ繝鍐╊啀閻庣偣鍊涢崺鏍偓姘喘閺佸秶浠﹂悡搴Щ闂佸搫鍟崕鑹版＂婵?forward 闂佸憡鐟ラ崯鍨暦閹版澘鏄ラ柣鏃堟敱鐎?backward 閻庡綊娼荤粻鎴濈暦閹版澘鏄ラ柣鏇炲€荤粈澶愭煟閹烘洘纭鹃柟顔筋殜楠?crossing arc 闁诲酣娼х紞濠勭礊閸儲鍎庣紒瀣仢椤綁鏌?
+ * 4. 婵帗绋掗…鍫ヮ敇婵犳碍鍎庨悗娑櫭径宥吤归敐鍫熺《闁?label/join 闂佽浜介崝宀勵敋闁秴绀勯柧蹇氼潐閻?reduced cost 闂佸憡鐟ョ粔鐢垫暜瑜版帒绀勯柛婵嗗閻忔瑩鏌熺€涙ê濮堟繝鈧导瀛樻櫖婵炴垶锕╁ú銈夋⒒閸ワ絽浜鹃柣搴ｆ嚀閺堫剟寮抽敐鍡樺劅闊洦鎸搁悘娆忣熆鐠鸿櫣校闁绘濞婇弫宥囦沪閽樺顔夐梺鐟扮仛閹稿摜妲?
+ * {@link Configure#debugBPCPricingColumnCheck}闂?
  */
 public class GCNGBBStyleBidirectionalNgDssr {
 
@@ -67,7 +67,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private enum JoinBestThresholdMode {
 		ZERO,
 		BEST_UB,
-		// 2026-05-31: 婵犵鍋撻弶?record-only 閻庨潧婀遍崣搴∥熼垾宕囩闁挎稒绋愮槐浼村礄韫囨挾姣屾慨锝呯箺閻ゅ棙娼婚弬鎸庣闁告帗顨嗛弳鐔兼晬瀹€鍕笡閻犱降鍊撶粭澶嬫媴濠娾偓鐠愮喖宕ユ惔锝囨暰婵繐绲界槐锛勬崉椤栨氨绐炲ù锝堟硶閺併倝濡?
+		// 2026-05-31: 濠电姷顣介崑鎾诲级?record-only 闁诲酣娼у﹢閬嶅矗鎼粹垾鐔煎灳瀹曞洨顢呴梺鎸庣⊕缁嬫劗妲愭导鏉戠闊洦鎸惧В灞炬叏閿濆懐绠洪柣銈呮濞煎寮幐搴ｎ槬闂佸憡甯楅〃鍡涘汲閻斿吋鏅€光偓閸曨厼绗￠柣鐘遍檷閸婃挾绮径瀣婵犲ň鍋撻悹鎰枛瀹曘儲鎯旈敐鍥ㄦ毎濠殿喗绻愮徊鐣屾閿涘嫭宕夋い鏍ㄦ皑缁愮偛霉閿濆牊纭堕柡浣靛€濇俊?
 		BEST_RECORD
 	}
 
@@ -112,11 +112,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double bestGeneratedReducedCost;
 	private double lastRelaxedRoundBestReducedCost;
 
-	// 2026-05-22: 闁告瑥鑻幃?midpoint闁挎稑鑻ぐ褏鈧數鎳撶紞瀣礈?pricing 閺夌儐鍠楀﹢渚€寮崼娑掑亾?
+	// 2026-05-22: 闂佸憡鐟ラ懟顖炲箖?midpoint闂佹寧绋戦懟顖濄亹瑜忛埀顒傛暩閹虫挾绱炵€ｎ喖绀?pricing 闁哄鍎愰崰妤€锕㈡笟鈧顐﹀醇濞戞帒浜?
 	private double tMid;
-	// 2026-05-24: 闁哄牜鍓濋悿?bidirectional pricing 閻庡湱鍋ゅ顖涙媴鐠恒劍鏆忛柣銊ュ瑜板憡绗?horizon闁?
-	// 闁兼眹鍎辩紞瀣礈瀹ュ嫭宕查柛鏂衡偓鍐茬缂佹棏鍨抽悰銉╁及鎼淬垺鈻旈悘蹇撶箣缁剟宕楅妸銉ф拱 CmaxH闁挎稑鑻銊╂偨閵娿儳鏆婇柛妯侯儎缂?midpoint 闁汇劌瀚ぐ鍝ョ矓娴兼瑧绀?
-	// 闂侇剙鐏濋崢?backward sink root 闁?Tmid 閺夆晛娲よぐ鎼佹嚀鐏炵晫鏆氶柛蹇嬪姂閺嗚鲸绋夊鍛瘔闁活亞鍠庨悿鍕冀閸モ晩鍔柕?
+	// 2026-05-24: 闂佸搫鐗滈崜婵嬫偪?bidirectional pricing 闁诲骸婀遍崑銈咁瀶椤栨稒濯撮悹鎭掑妽閺嗗繘鏌ｉ妸銉ヮ仼鐟滄澘鎲＄粭?horizon闂?
+	// 闂佸吋鐪归崕杈╃礊鐎ｎ喖绀堢€广儱瀚畷鏌ユ煕閺傝　鍋撻崘鑼槮缂備焦妫忛崹鎶芥偘閵夆晛鍙婇幖娣灪閳绘棃鎮樿箛鎾剁缂侇煈鍓熷畷妤呭Ω閵壯勬嫳 CmaxH闂佹寧绋戦懟顖氼潩閵娾晜鍋ㄩ柕濞垮劤閺嗗﹪鏌涘Ο渚剮缂?midpoint 闂佹眹鍔岀€氼剝銇愰崫銉х煋濞村吋鐟х粈?
+	// 闂備緡鍓欓悘婵嬪储?backward sink root 闂?Tmid 闁哄鏅涘ú銈堛亹閹间焦鍤€閻忕偟鏅弳姘舵煕韫囧濮傞柡鍡氶哺缁嬪顓奸崨顓熺様闂佹椿浜為崰搴ㄦ偪閸曨垰鍐€闁搞儮鏅╅崝顕€鏌?
 	private double pricingHorizon;
 	private String midpointStrategyUsed = "default";
 	private double midpointReferenceTime = Double.NaN;
@@ -137,7 +137,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private String midpointProbeFeedbackSummary = "off";
 	private boolean midpointProbeLabelsReadyForJoin;
 	private long midpointStrategyNanos;
-	// 2026-05-22: 鐟滅増鎸告晶鐘碘偓瑙勭煯閻滎垱娼鐐暠 job-level 闁告柣鍔嶉埀?H_j 缂傚倹鎸搁悺銊╁Υ?
+	// 2026-05-22: 閻熸粎澧楅幐鍛婃櫠閻樼鍋撶憴鍕叝闁绘粠鍨卞顏堫敊閻愵剛鏆?job-level 闂佸憡鏌ｉ崝宥夊焵?H_j 缂傚倸鍊归幐鎼佹偤閵娾晛违?
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHStart;
 	private double[] dynamicJobHEnd;
@@ -159,7 +159,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private PiecewiseLinearFunction[] baseBackwardHalfPenaltyByJob;
 	private double baseHalfPenaltyCacheTMid = Double.NaN;
 	private double baseHalfPenaltyCacheHorizon = Double.NaN;
-	// 2026-05-24: 闁告瑯浜濆﹢渚€寮界涵鍛濋柣鎰扳偓娑氱懍婵炲备鍓濆﹢?cut dual 闁哄啳顔愮槐婕癷_j profitable window 闁归潧绉崇换姘舵偩濞嗗海鐟忛悷娆愬笂缁楀绮垫径濠勭濞撴碍绻冨畵渚€濡?
+	// 2026-05-24: 闂佸憡鐟禍婵嗭耿娓氣偓瀵晫娑甸崨顓囨繈鏌ｉ幇鎵冲亾濞戞氨鎳嶅┑鐐插閸撴繂锕?cut dual 闂佸搫鍟抽鎰濠曠櫡_j profitable window 闂佸綊娼х粔宕囨崲濮樿埖鍋╂繛鍡楁捣閻熷繘鎮峰▎鎰瑐缂佹顦辩划鍨緞婵犲嫮顢呮繛鎾寸缁诲啫鐣垫笟鈧俊?
 	private boolean dualProfitableWindowEnabled;
 
 	private long forwardLabelsKept;
@@ -182,6 +182,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinFunctionBestRecordPruned;
 	private long joinRangeLowerBoundChecks;
 	private long joinRangeLowerBoundPruned;
+	private long joinEnvelopeForwardGroups;
+	private long joinEnvelopeBackwardGroups;
+	private long joinEnvelopeForwardLabels;
+	private long joinEnvelopeBackwardLabels;
+	private long joinEnvelopeSegments;
+	private long joinEnvelopeGroupPairs;
+	private long joinEnvelopeGroupPairsPruned;
+	private long joinEnvelopeFunctionEvaluations;
+	private long joinEnvelopeBuildNanos;
+	private long joinEnvelopeJoinNanos;
+	private long exactTotalNanos;
+	private long exactInitializeNanos;
+	private long exactBackwardSinkNanos;
+	private long exactForwardExpandNanos;
+	private long exactBackwardExpandNanos;
+	private long exactJoinCompactNanos;
+	private long exactJoinNanos;
+	private long exactFinalizeNanos;
 	private long forwardSinglePointKept;
 	private long forwardSinglePointDominatedByStore;
 	private long forwardSinglePointDominatedByGraph;
@@ -402,7 +420,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!isRootNode(lp)) {
 			return true;
 		}
-		// 2026-07-03: root 闁告帗绻傞～鎰交椤撴繂鏁╁娑欘焾椤撶粯绋夊鍥ㄦ殢闁告ê妫楄ぐ鍫曟晬濞戞ê顫?cut 闁告艾娴峰▓?root 閺夆晩鍘洪崬顒勫礂娴ｇ瓔鍟呭璺虹Ф閺併倝鏁嶅畝鍕級闁稿繐绉归崳鍛婂緞瀹ュ拋鍔呭☉鏃傚Х濞村瀵?ng-set闁?
+		// 2026-07-03: root 闂佸憡甯楃换鍌烇綖閹邦厽浜ゆい鎾寸箓閺佲晛顫楀☉娆樼劸妞ゆ挾绮粙澶婎吋閸ャ劍娈㈤梺鍛娒Λ妤勩亹閸洘鏅繛鎴灻～?cut 闂佸憡鑹惧ù宄扳枔?root 闁哄鏅╅崢娲船椤掑嫬绀傚ù锝囩摂閸熷懎顭跨捄铏剐ら柡浣靛€濋弫宥呯暆閸曨亞绱氶梺绋跨箰缁夊綊宕抽崨濠傜窞鐎广儱鎷嬮崝鍛槈閺冨倸啸婵炴潙顦扮€?ng-set闂?
 		return config.ngDssrHistoryWarmStartUseRoot || (lp != null && !lp.getActiveCutIds().isEmpty());
 	}
 
@@ -714,6 +732,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalNonElementaryRoutes = 0;
 		ngDssrTotalNonElementaryNegativeSeen = 0;
 		ngDssrTotalElementaryColumnsReturned = 0;
+		resetExactPhaseTiming();
 		ngDssrHistoryWarmStartSkippedForRepeatability = false;
 		ngDssrWindowRepeatabilityFilterApplied = false;
 		ngDssrWindowRepeatableJobCount = 0;
@@ -834,47 +853,67 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Utility.resetCurUpperBound(Utility.big_M);
 		lastRelaxedRoundBestReducedCost = Double.POSITIVE_INFINITY;
 		diagnosticHeartbeat(lp, "initialize.start", true);
+		long phaseStart = System.nanoTime();
 		initialize(lp);
+		exactInitializeNanos += System.nanoTime() - phaseStart;
 		diagnosticHeartbeat(lp, "initialize.done", true);
 		if (completionBoundPreCertificateClosed) {
+			exactTotalNanos += System.nanoTime() - exactStartNanos;
 			return generatedColumns;
 		}
 		if (fullMidpointDiagnosticRan && Boolean.getBoolean("twet.bpc.midpointFullDiagnosticStopAfter")) {
 			generatedColumns.clear();
 			lastMessage = "GCNGBB-style ng-DSSR bidirectional midpoint full diagnostic executed; exact pricing skipped";
+			exactTotalNanos += System.nanoTime() - exactStartNanos;
 			return generatedColumns;
 		}
 		if (!midpointProbeLabelsReadyForJoin) {
+			phaseStart = System.nanoTime();
 			initializeBackwardSink(lp);
+			exactBackwardSinkNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "backwardSink.done", true);
 		} else {
 			diagnosticHeartbeat(lp, "probe.rank0.reuse", true);
 		}
-		// 2026-05-26: GCNGBB-style 濠㈣埖鐗曢惇鏉棵规担琛℃煠闁靛棗鍊搁崢娑㈠礆閸℃鐒奸柤鐗堫殔閺佹牗绋夐妶鍕珷闂傚啰鍠庨崹顏堟晬鐏炵偓浠橀柛姘捣缁儤绋夐埀顒勫箥椤愶絽浼?backward labels 闁?crossing-arc join闁?
+		// 2026-05-26: GCNGBB-style 婵犮垼鍩栭悧鏇㈡儑閺夋５瑙勬媴鐞涒剝鐓犻梺闈涙閸婃悂宕㈠☉銏犵闁糕剝顨呴悞濂告煠閻楀牜娈旈柡浣圭墬缁嬪濡堕崟顒佺彿闂傚倸鍟伴崰搴ㄥ垂椤忓牊鏅悘鐐靛亾娴犳﹢鏌涘顒佹崳缂侇喚鍎ょ粙澶愬焵椤掑嫬绠ユい鎰剁到娴?backward labels 闂?crossing-arc join闂?
 		if (!midpointProbeLabelsReadyForJoin) {
 			diagnosticHeartbeat(lp, "forward.start", true);
+			phaseStart = System.nanoTime();
 			while (canContinue() && !FWUL.isEmpty()) {
 				forwardExtend(lp);
 			}
+			exactForwardExpandNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "forward.done", true);
 			if (!timeLimitChecker.isTimeLimitReached()) {
 				diagnosticHeartbeat(lp, "backward.start", true);
+				phaseStart = System.nanoTime();
 				while (canContinue() && !BWUL.isEmpty()) {
 					backwardExtend(lp);
 				}
+				exactBackwardExpandNanos += System.nanoTime() - phaseStart;
 				diagnosticHeartbeat(lp, "backward.done", true);
 			}
 		}
 		if (canContinue() && !timeLimitChecker.isTimeLimitReached()) {
 			diagnosticHeartbeat(lp, "join.compact.start", true);
+			phaseStart = System.nanoTime();
 			compactAndSortActiveLabelListsForJoin();
+			exactJoinCompactNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "join.start", true);
+			phaseStart = System.nanoTime();
 			joinAllForwardTerminalGroups(lp);
+			exactJoinNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "finalize.start", true);
+			phaseStart = System.nanoTime();
 			finalizeGeneratedColumns(lp);
+			if (generatedColumns.isEmpty()) {
+				maybeAuditAlternativeJoin(lp);
+			}
+			exactFinalizeNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "finalize.done", true);
 		}
-		updateMidpointProbeReuseAfterExact(lp, System.nanoTime() - exactStartNanos);
+		exactTotalNanos += System.nanoTime() - exactStartNanos;
+		updateMidpointProbeReuseAfterExact(lp, exactTotalNanos);
 		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
 				: (midpointProbeLabelsReadyForJoin ? "probe rank0 queues exhausted"
 						: (canContinue() ? "queues exhausted" : "column cap disabled"));
@@ -893,6 +932,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		return lastRelaxedRoundBestReducedCost;
 	}
+
 
 	CompletionBoundSubtreeArcEliminator.PreparedBounds reusableSubtreeArcEliminationBounds() {
 		if (completionBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
@@ -963,8 +1003,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-26: 闁衡偓椤栨稑鐦☉鎾崇Т閹?label 闁告垶妞藉Σ锔剧驳閺嶎偅娈ｉ柨娑樺缁岃埖绂嶆惔銏㈡Х閺夊牆鍟犻埀顒佺矆缂?reduced cost 濞村吋锚閸樻盯鍨惧┑鍛憿闁炽儲绮嶅ú鍧楀矗椤栨繂鍘撮悶姘煎亜閹绱掗鐔告殰闂佹澘绉跺▓?
-	 * label 闁规亽鍔岄幃妤呭箥閳轰胶娼旈柍銉︾箑缁狅綁姊荤€靛憡鐣遍柛娆愮墳閸ㄦ濡?
+	 * 2026-05-26: 闂佽　鍋撴い鏍ㄧ☉閻︻喖鈽夐幘宕囆㈤柟?label 闂佸憡鍨跺钘壩ｉ敂鍓ч┏闁哄稁鍋呭▓锝夋煥濞戞ê顨欑紒宀冨煐缁傚秵鎯旈姀銏⌒ラ柡澶婄墕閸熺娀鍩€椤掍胶鐭嗙紓?reduced cost 婵炴潙鍚嬮敋闁告ɑ鐩崹鎯р攽閸涱垳鎲块梺鐐藉劜缁秴煤閸ф鐭楁い鏍ㄧ箓閸樻挳鎮跺鐓庝簻闁诡喗顨堢槐鎺楊敇閻斿憡娈伴梻浣规緲缁夎泛鈻?
+	 * label 闂佽浜介崝宀勫箖濡ゅ懎绠ラ柍杞拌兌濞兼棃鏌嶉妷锔剧畱缂佺媴缍佸鑽も偓闈涙啞閻ｉ亶鏌涘▎鎰⒊闁搞劍顨婃俊?
 	 */
 	private Comparator<ForwardLabel> forwardQueueComparator(LabelQueueOrdering ordering) {
 		return new Comparator<ForwardLabel>() {
@@ -1101,8 +1141,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		runMidpointProbeIfEnabled(lp);
 		if (midpointProbeLabelsReadyForJoin) {
-			// 2026-06-08: 閻炴凹鍋婇埀顒€顦懙鎴︽儍?rank0 probe 鐎规瓕灏欑划锟犳嚀濡も偓閺佹牗绋夐妶鍕珷 label 闂傚啰鍠庨崹顏堟晬鐏炶棄璁插ù鐘劤濞插潡骞掗妷銊х闁?join闁?
-			// 閺夆晜鐟╅崳鐑藉矗椤忓泚澶婎潰閿濆懐纭€闁稿﹥鐟╅埀顒€顦崹顏堝储婵犳艾娅?闁割偄妫涙慨鎼佸箑娓氬﹦绀夐梺顒€鐏濋崢銈夊触鐏炶偐顏卞☉?Tmid 闁告劕绉风粣鍥ㄧ▔閳ь剟鏌?labeling闁?
+			// 2026-06-08: 闁荤偞鍑归崑濠囧焵椤掆偓椤︻噣鎳欓幋锔藉剭?rank0 probe 閻庤鐡曠亸娆戝垝閿熺姵鍤€婵°倐鍋撻柡浣圭墬缁嬪濡堕崟顒佺彿 label 闂傚倸鍟伴崰搴ㄥ垂椤忓牊鏅悘鐐舵鐠佹彃霉閻橆喖鍔ゆ繛鎻掓健楠炴帡濡烽妸褏顔掗梺?join闂?
+			// 闁哄鏅滈悷鈺呭闯閻戣棄鐭楁い蹇撴硽婢跺娼伴柨婵嗘噽绾偓闂佺锕ラ悷鈺呭焵椤掆偓椤︻垶宕归鍫濆偍濠电姵鑹惧▍?闂佸壊鍋勫Λ娑欐叏閹间礁绠戝〒姘功缁€澶愭⒑椤掆偓閻忔繈宕㈤妶澶婅Е閻忕偠鍋愰鍗炩槈?Tmid 闂佸憡鍔曠粔椋庣玻閸ャ劎鈻旈柍褜鍓熼弻?labeling闂?
 			initializeCandidateState(lp);
 		} else {
 			initializeSearchState(lp);
@@ -1112,8 +1152,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-12: 濞寸姴鎳愰弫銈嗙鎼达紕鏆板ù锝呯Т閹捇鎮╅懜纰樺亾?partial 婵犳洖绻愰崹顏堝Υ閸屾粍绐楅柡宥呮搐缁參宕氬Δ鍛亾濮樺磭绠栫紒顖濆吹缁櫣浠﹂悙绮瑰亾瑜岀槐鍫曞礂閵夘垳绀夊娑欘焾椤撳宕楅幎鑺ワ紨闁?
-	 * trace 闁告瑯浜滈崯鎾诲礂?lastMessage闁挎稑濂旂粭澶愬绩閻熸澘缍?label闁靛棔榫歰minance 闁瑰瓨鐗曢埀顒佺懇閳ь剙顦崹顏堟焻閺勫繒甯嗛柕?
+	 * 2026-06-12: 婵炲濮撮幊鎰板极閵堝棛顩查幖杈剧磿閺嗘澘霉閿濆懐孝闁诡喗鎹囬幃鈺呮嚋绾版ê浜?partial 濠电姵娲栫换鎰板垂椤忓牆违闁稿本绮嶇粣妤呮煛瀹ュ懏鎼愮紒顭戝弮瀹曟艾螖閸涱亜浜炬慨妯虹－缁犳牜绱掗婵嗗惞缂侇喛娅ｆ禒锕傛倷缁懓浜剧憸宀€妲愰崼鏇炵闁靛鍨崇粈澶婎潡濞戞瑯鐒炬い鎾愁煼瀹曟骞庨懞銉川闂?
+	 * trace 闂佸憡鐟禍婊堝疮閹捐绀?lastMessage闂佹寧绋戞總鏃傜箔婢舵劕缁╅柣鐔告緲缂?label闂侀潧妫旀Λ姝癿inance 闂佺懓鐡ㄩ悧鏇㈠焵椤掍胶鎳囬柍褜鍓欓ˇ顖炲垂椤忓牊鐒婚柡鍕箳鐢棝鏌?
 	 */
 	private void initializeTargetTrace(LP lp) {
 		targetTraceSequence = null;
@@ -1386,9 +1426,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * limited-memory SRI 濞?forward label 闁?state 閻炴稏鍔庨妵姘?source 闁规鍋勯崺宀冦亹閹惧啿顤呴柣鎰嚀閹鎯冮崟顐⑩挅濞?half-state闁?
-	 * node-memory 闁汇劌瀚板?memory job 濞村吋纰嶇粩濠氭⒖閺堢數鐟☉鎾崇Х椤撴悂宕楅妷顖滃耿arc-memory 闁汇劌瀚板?memory arc 闁告瑯浜濈粩濠氭⒖鐠佸湱绀?
-	 * 鐟滅増鎸告晶?head job 闁兼眹鍎遍惈妯荤?scope 濞寸姴绉崇紞鏃€绋夐悜妯荤厐婵炲牅绲婚幑锝夋倷绾拋鍚€闁稿繈鍎埀?
+	 * limited-memory SRI 婵?forward label 闂?state 闁荤偞绋忛崝搴ㄥΦ濮橆厾顩?source 闂佽顔栭崑鍕春瀹€鍐︿汗闁规儳鍟块·鍛存煟閹邦喗鍤€闁诡喗顨婇幆鍐礋椤愨懇鎸呮繛?half-state闂?
+	 * node-memory 闂佹眹鍔岀€氭澘顭?memory job 婵炴潙鍚嬬喊宥囩博婵犳碍鈷栭柡鍫㈡暩閻燁剙鈽夐幘宕囆ユい鎾存倐瀹曟濡烽婊冭€縜rc-memory 闂佹眹鍔岀€氭澘顭?memory arc 闂佸憡鐟禍婵堢博婵犳碍鈷栭悹浣告贡缁€?
+	 * 閻熸粎澧楅幐鍛婃櫠?head job 闂佸吋鐪归崕閬嶆儓濡崵顩?scope 婵炲濮寸粔宕囩礊閺冣偓缁嬪鎮滃Ο鑽ゅ帎濠电偛鐗呯徊濠氬箲閿濆鍊风痪顓炴媼閸氣偓闂佺绻堥崕顖炲焵?
 	 */
 	private double applySriForwardExtensionShift(byte[] states, PackedBitSet visitedBeforeExtension, int from, int job) {
 		if (!sriPricingEnabled || job <= 0 || job > data.n) {
@@ -1434,9 +1474,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * limited-memory SRI 濞?backward label 闁?state 閻炴稏鍔庨妵姘跺箰婢跺﹤鍐€闁告碍鍨舵晶璺ㄤ沪閺囶潿鈧孩鎯旇箛鏂款棁闁?suffix 闁告艾娴峰▓鎴﹀礈閳衡偓缂?half-state闁?
-	 * prepend 濞戞挴鍋撳☉?job 闁哄啳顔愮槐婕琽de-memory 闁圭顦伴弻?job 闁告帇鍊栭弻鍥晬濞屾Μc-memory 闁圭顦伴弻濠囧箥閳轰胶娼旂€?(job,to) 闁告帇鍊栭弻鍥及椤栨碍鍎婄€点倕澧庨悽濠氬籍?state闁?
-	 * arc 濞戞挸绉村﹢?memory 濞戞搩鍘艰ぐ褔寮鐐电；闁?state闁挎稑濂旂粭澶屾崉鐎圭姷绠栫憸鐗堟尭婢?job 闁汇劌瀚弻濠傗枔娴ｅ啰顢呴柣姘煎枔閳?
+	 * limited-memory SRI 婵?backward label 闂?state 闁荤偞绋忛崝搴ㄥΦ濮樿泛绠板璺猴工閸愨偓闂佸憡纰嶉崹鑸垫櫠鐠恒劋娌柡鍥舵娇閳ь剙瀛╅幆鏃囩疀閺傛妫侀梺?suffix 闂佸憡鑹惧ù宄扳枔閹达箑绀堥柍琛″亾缂?half-state闂?
+	 * prepend 婵炴垶鎸撮崑鎾斥槈?job 闂佸搫鍟抽鎰濠曠惤de-memory 闂佸湱顭堥ˇ浼村蓟?job 闂佸憡甯囬崐鏍蓟閸ヮ剚鏅繛灞疚渃-memory 闂佸湱顭堥ˇ浼村蓟婵犲洤绠ラ柍杞拌兌濞兼梻鈧?(job,to) 闂佸憡甯囬崐鏍蓟閸ヮ剙鍙婃い鏍ㄧ閸庡﹦鈧偣鍊曟晶搴ㄦ偨婵犳艾绫?state闂?
+	 * arc 婵炴垶鎸哥粔鏉戯耿?memory 婵炴垶鎼╅崢鑹般亹瑜斿顒勵敇閻愮數锛涢梺?state闂佹寧绋戞總鏃傜箔婢跺本宕夐悗鍦Х缁犳牜鎲搁悧鍫熷碍濠?job 闂佹眹鍔岀€氼參寮绘繝鍌楁灁濞达絽鍟伴、鍛存煟濮樼厧鏋旈柍?
 	 */
 	private double applySriBackwardPrependShift(byte[] states, PackedBitSet visitedBeforeExtension, int job, int to) {
 		if (!sriPricingEnabled || job <= 0 || job > data.n) {
@@ -1755,7 +1795,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!"remaining".equals(tieMode)) {
 			return true;
 		}
-		// remaining 闁告瑯浜濋惁顔芥綇閸愌嗏拡濞戞搩浜濆﹢顓㈡嚀濡も偓閺佹牠宕愬▎鎾亾婢跺本鐣遍柛鎾櫃缂嶆垿姊奸悢宄扮仚闁告ê顑呮慨蹇涙晬濞戞宕插☉鎾亾濞撴皜鍐ㄥ殥缂備礁绻楅埀顒侇殔閺佹牠寮拋鍦0 闂傚啰鍠庨崹顏呭濮樿京澹冮柛褍绻愯ぐ鎻捫掗弮鈧埀顑讲鍋?
+		// remaining 闂佸憡鐟禍婵嬫儊椤旇姤缍囬柛鎰屽棌鎷℃繛鎴炴惄娴滄繂锕㈤銏″殌婵°倐鍋撻柡浣圭墵瀹曟劕鈻庨幘顖氫壕濠㈣泛鏈悾閬嶆煕閹绢垱娅冪紓宥嗗灴濮婂ジ鎮㈠畡鎵粴闂佸憡锚椤戝懏鎱ㄨ箛娑欐櫖婵炴垶顨嗗畷鎻掆槈閹绢垰浜炬繛鎾寸殰閸愩劌娈ョ紓鍌欑缁绘鍩€椤掍緡娈旈柡浣圭墵瀵喚鎷嬮崷顓狀槷0 闂傚倸鍟伴崰搴ㄥ垂椤忓懎顕辨慨妯夸含婢瑰啴鏌涜缁绘劘銇愰幓鎹帡寮埀顒勫焵椤戭兛璁查崑?
 		return !a.forwardExhausted && !a.backwardExhausted && !b.forwardExhausted && !b.backwardExhausted;
 	}
 
@@ -1777,8 +1817,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int backwardLimit = popLimit / 2;
 		int forwardPops = 0;
 		int backwardPops = 0;
-		// 2026-06-07: probe 闁哄嫷鍨拹鐔哥閸℃妲烽弶鍫濆暕鐞氳鲸绗熻鐢洭宕濆☉宕囩濞戞挸绉电€垫粏銇愰幘鍐差枀闂傚啰鍠庨崹顏呭緞瑜嶉惃顒勫箮閵忕姴绐楀Λ鏉垮閻ｅ濡?
-		// 闁告熬绠戦崹顖溾偓纭咁潐濡叉宕欓搹鐟扮疀 sidePop=N:0闁挎稑鑻ぐ褍霉鐎ｎ亜鐓?forward 闁绘牕妫涢崑銏ゆ嚀鐏炲墽姊鹃柡?backward 闁哄秹鏀卞﹢浼村Υ?
+		// 2026-06-07: probe 闂佸搫瀚烽崹顖滄嫻閻斿摜顩查柛鈩冾焽濡茬兘寮堕崼婵嗘殨閻炴俺椴哥粭鐔活槻閻㈩垰娲畷婵嗏槈瀹曞洨顦繛鎴炴尭缁夌數鈧灚绮忛妵鎰板箻閸愬樊鏋€闂傚倸鍟伴崰搴ㄥ垂椤忓懎绶炵憸宥夋儍椤掑嫬绠柕蹇曞Т缁愭螞閺夊灝顏柣锝咁煼婵?
+		// 闂佸憡鐔粻鎴﹀垂椤栨壕鍋撶涵鍜佹綈婵″弶顨婂畷娆撴惞閻熸壆鐤€ sidePop=N:0闂佹寧绋戦懟顖濄亹瑜嶉湁閻庯綆浜滈悡?forward 闂佺粯鐗曞Λ娑㈠磻閵忋倖鍤€閻忕偛澧藉楣冩煛?backward 闂佸搫绉归弨鍗烇耿娴兼潙违?
 		while (forwardPops < forwardLimit && !FWUL.isEmpty()) {
 			forwardExtend(lp);
 			forwardPops++;
@@ -1939,8 +1979,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return ngDssrReusableActiveColumnSignatures;
 		}
 		HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
-		// 2026-06-12: 闁告艾濂旂粩鏉戔枎?ng-DSSR pricing 闁?DSSR 濠㈣埖淇洪悿鍡涘矗椤忓懏鏆柛?ng-set闁挎稑顒∕P active 闁告帗顨婂▔锔界▔瀹ュ懎缍侀柕?
-		// active signature 闁告瑯浜〒鍓佺箔椤戣法顏遍弶鐑嗗枟婢瑰倿骞?restricted columns闁挎稑鑻幃妤冪磼?round 濠㈣泛绉堕弫銈嗘交濞嗗酣鍤嬮柛娆樹海椤曚即姊块崱妤佸€ら柕?
+		// 2026-06-12: 闂佸憡鑹炬總鏃傜博閺夋垟鏋?ng-DSSR pricing 闂?DSSR 婵犮垼鍩栨穱娲偪閸℃稑鐭楁い蹇撴噺閺嗩參鏌?ng-set闂佹寧绋戦鈭昉 active 闂佸憡甯楅〃濠傗枖閿旂晫鈻旂€广儱鎳庣紞渚€鏌?
+		// active signature 闂佸憡鐟禍顏勩€掗崜浣虹當妞ゆ垼娉曢閬嶅级閻戝棗鏋熷鐟板€块獮?restricted columns闂佹寧绋戦懟顖炲箖濡ゅ啰纾?round 婵犮垼娉涚粔鍫曞极閵堝棙浜ゆ繛鍡楅叄閸ゅ鏌涘▎妯规捣妞ゆ洑鍗冲鍧楀幢濡や礁鈧倝鏌?
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			signatures.add(lp.getPool().getColumn(columnId).getSignature());
 		}
@@ -1954,8 +1994,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-05: 闁圭顦扮€垫氨鈧淇烘俊顓㈡倷绾懏鍎伴柣鈺偯紞瀣礈?exact pricing 閺夊牊鎸搁崣鍡涙晬鐏炶偐鈹掑ù婊冮椤︽煡鎯勫Ο纰辨矗鐎殿啫鍐彂濠㈣埖鐭徊?label 濞寸姴绉堕崹搴ㄦ倷閸濄儲鐣辩紓浣规尰閻庮垶宕㈤悢閿嬬闁?
-	 * 濮掓稒顭堥濠氬礂閹惰姤锛旈柨娑欑椤旀洜绱?twet.bpc.pricingSnapshot=true 闁?twet.bpc.pricingSnapshotNodeId=<nodeId> 闁告艾楠搁幆搴ㄦ偨閵婏絺鍋?
+	 * 2026-06-05: 闂佸湱顭堥ˇ鎵偓鍨皑閳ь剝顫夋穱鐑樹繆椤撱垺鍊风痪顓炴噺閸庝即鏌ｉ埡鍋亞绱炵€ｎ喖绀?exact pricing 闁哄鐗婇幐鎼佸矗閸℃稒鏅悘鐐跺亹閳规帒霉濠婂啴顎楁い锔界叀閹嫬螣绾拌鲸鐭楅悗娈垮暙閸愵亜褰傛繝銏ｅ煐閻喚寰?label 婵炲濮寸粔鍫曞垂鎼淬劍鍊烽柛婵勫劜閻ｈ京绱撴担瑙勫鞍闁诲寒鍨跺畷銏ゆ偄闁垮顦梺?
+	 * 婵帗绋掗…鍫ヮ敇婵犳艾绀傞柟鎯板Г閿涙棃鏌ㄥ☉娆戭灱妞ゆ梹娲滅槐?twet.bpc.pricingSnapshot=true 闂?twet.bpc.pricingSnapshotNodeId=<nodeId> 闂佸憡鑹炬鎼佸箚鎼淬劍鍋ㄩ柕濠忕岛閸?
 	 */
 	private void maybeDumpPricingSnapshot(LP lp) {
 		Node node = lp == null ? null : lp.getNode();
@@ -2102,6 +2142,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return builder.toString();
 	}
 
+	private boolean hasRepeatedJob(List<Integer> sequence) {
+		boolean[] seen = new boolean[data.n + 1];
+		for (int i = 0; i < sequence.size(); i++) {
+			int job = sequence.get(i).intValue();
+			if (job < 1 || job > data.n) {
+				continue;
+			}
+			if (seen[job]) {
+				return true;
+			}
+			seen[job] = true;
+		}
+		return false;
+	}
+
 	private boolean sequenceUsesRealForbiddenArc(Node node, List<Integer> sequence) {
 		return sequenceUsesForbiddenArc(node, sequence, ForbiddenArcMode.REAL);
 	}
@@ -2148,8 +2203,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sinkVisited.add(lp.getNode().sinkId());
 		addZeroDualExcludedJobs(sinkVisited);
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
-		// 2026-05-23: backward 闁惧繑纰嶇€氭瑧绱掗崼銏犱化闁哄牜鍓濋棅鈺傜▕閻旀椿娲ｉ悽?[Tmid,pricingHorizon] 闁稿繐鍟弳鐔煎箲椤旇　鍋?
-		// 閺夆晜鐟﹂悧閬嶅触鎼达絿鏁鹃柤姹囧劚瑜板倿鎮?shiftX闁挎稑顔搑imToDomain 闁汇劌瀚粩鐔兼偩鐏炶姤瀚查柣妞绘櫇閹﹪宕℃繝鍌滃幍濞戞挴鍋撻柤閿嬬暘閳?
+		// 2026-05-23: backward 闂佹儳绻戠喊宥団偓姘懅缁辨帡宕奸姀鐘卞寲闂佸搫鐗滈崜婵嬫閳哄倻鈻曢柣鏃€妞垮ú锝夋偨?[Tmid,pricingHorizon] 闂佺绻愰崯顖炲汲閻旂厧绠叉い鏃囥€€閸?
+		// 闁哄鏅滈悷锕傛偋闁秴瑙﹂幖杈剧悼閺侀箖鏌ゅЧ鍥у姎鐟滄澘鍊块幃?shiftX闂佹寧绋戦鎼慽mToDomain 闂佹眹鍔岀€氼垳绮╅悢鍏煎仼閻忕偠濮ょ€氭煡鏌ｅ缁樻珖闁诡喖锕畷鈩冪節閸屾粌骞嶆繛鎴炴尨閸嬫捇鏌ら柨瀣殬闁?
 		sinkFrontier.resetDomain(tMid, pricingHorizon);
 		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
 		PackedBitSet sinkNgMemory = new PackedBitSet(data.n + 2);
@@ -2167,6 +2222,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private boolean canContinue() {
 		return config.maxExactPricingColumns > 0;
 	}
+
 
 	private void forwardExtend(LP lp) {
 		ForwardLabel label = FWUL.poll();
@@ -2246,16 +2302,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		// 2026-06-10: 閻犲鍟伴弫銈夊棘閻熸澘娑ч柡瀣煯婵?extensionSet闁挎稒绋戦悾鐘差啅閼碱剛鐥呴柟鐑樺浮濞?ng-memory 闁告粌鏈鍌炴⒒閺夋垵纾归柛鈺冨枍缁楀宕ｉ婵囧涧闁绘劕绠嶉埀?
-		// 闁活亞鍠庨悿?visited 濞戞挸绉堕弫銈嗙?ng-relaxation 闁圭鏅涢惈宥嗘交閸ャ劍濮㈤柨娑樼焸閸ｅ憡寰勫鍕床闁告柡鈧櫕韬柟顓滃灩椤?route 闁告艾绨煎锔剧磼?DSSR 濠㈣泛瀚幃濠囧Υ?
-		// 闁烩晝顥愮换娑氱矉娴ｇ袣濞撴碍绻嗙粋鍡氥亹閹惧啿顤?node/pricingOnly 闁绘鍩栭埀顑跨筏缁辨繃绂掑鍛含闁圭鏅涢惈宥夋倷閻熸澘绁柡鍐煐椤ュ懘寮婚妷锝傚亾?
+		// 2026-06-10: 闁荤姴顑呴崯浼村极閵堝妫橀柣鐔告緲濞懷囨煛鐎ｎ偆鐓┑?extensionSet闂佹寧绋掔粙鎴︽偩閻樺樊鍟呴柤纰卞墰閻ュ懘鏌熼悜妯烘诞婵?ng-memory 闂佸憡绮岄張顒€顪冮崒鐐粹拻闁哄鍨电壕褰掓煕閳哄啫鏋嶇紒妤€顦靛畷锝夘敍濠靛洤娑ч梺缁樺姇缁犲秹鍩€?
+		// 闂佹椿浜為崰搴ㄦ偪?visited 婵炴垶鎸哥粔鍫曞极閵堝棛顩?ng-relaxation 闂佸湱顣介弲娑㈡儓瀹ュ棙浜ら柛銉ｅ妽婵垽鏌ㄥ☉妯肩劯闁革絽鎲″鍕吋閸曨剙搴婇梺鍛婃煛閳ь剝娅曢煬顒勬煙椤撴粌鐏╂い?route 闂佸憡鑹剧花鐓庮潩閿斿墽纾?DSSR 婵犮垼娉涚€氼噣骞冩繝鍥?
+		// 闂佺儵鏅濋ˉ鎰崲濞戞氨鐭夊ù锝囶焾琚ｆ繛鎾寸缁诲棛绮嬮崱姘ヤ汗闁规儳鍟块·?node/pricingOnly 闂佺粯顭堥崺鏍焵椤戣法绛忕紒杈ㄧ箖缁傛帒顓奸崨顔垮惈闂佸湱顣介弲娑㈡儓瀹ュ鍊烽柣鐔告緲缁侇噣鏌￠崘顓炵厫妞ゃ儱鎳樺濠氬Ψ閿濆倸浜?
 		return !isPricingArcForbidden(node, label.jid, nextJob);
 	}
 
 	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
 		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		// 2026-06-10: backward 闁告艾鏈悧閬嶅矗椤忓懐浜ｅ☉?extensionSet闁挎稒绋撳﹢锛勨偓鍦仱閸ｅ憡寰勫鍥ㄦ殸 DSSR route 闁诡厹鍨归ˇ鏌ュ触鎼粹槅妲遍柣鐐叉閳?
-		// 閺夆晜鐟╅崳鐑藉础閾忣偅顦ф俊顐熷亾闁?prevJob -> successor 闁烩晝顥愮换娑橆嚕瑜濈槐婵嬫焼閸喖甯?pricingOnly/闁告帒妫欓弫顔剧矉娴ｇ袣缂備焦娲濈换鍐箥閳轰胶娼旈弶鈺佹处閹躲倝濡?
+		// 2026-06-10: backward 闂佸憡鑹鹃張顒勬偋闁秴鐭楁い蹇撴噽娴滐絽鈽?extensionSet闂佹寧绋掔粙鎾筹耿閿涘嫧鍋撻崷顓炰槐闁革絽鎲″鍕吋閸ャ劍娈?DSSR route 闂佽鍘归崹褰捤囬弻銉ヨЕ閹肩补妲呭Σ閬嶆煟閻愬弶顥撻柍?
+		// 闁哄鏅滈悷鈺呭闯閻戣棄纭€闁惧浚鍋呴ˇ褎淇婇鐔蜂壕闂?prevJob -> successor 闂佺儵鏅濋ˉ鎰崲濞戞﹩鍤曠憸婵堟濠靛鐒奸柛顭戝枛鐢?pricingOnly/闂佸憡甯掑Λ娆撳极椤斿墽鐭夊ù锝囶焾琚ｇ紓鍌欑劍濞叉繄鎹㈤崘顔肩闁宠桨鑳跺鏃堝级閳轰焦澶勯柟韬插€濇俊?
 		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
@@ -2365,8 +2421,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (jobPenalty == null) {
 				return null;
 			}
-			// 2026-05-22: backward 濞寸姴姘﹀▍鍕箯閻旇櫣鐭掗柣鎰嚀閸ゎ參宕ｉ幋鐐搭槯闁挎稑鐬奸鍥ㄧ▔閳ь剙鈻庨垾鍐差潱闁稿繈鍎冲﹢锛勨偓鍦仒閹广垽宕濋垾鑼憹闂傚洠鍋撻悷鏇氱劍鐎?setup/processing 妤犵偛纾簺闁?
-			// 鐟滅増鎸告晶鐘诲矗濮椻偓閸ｅ搫顔忛懠顒傜梾闁?prevJob 闁煎浜滅换渚€鎯冮崟顐ゆ殮闁瑰瓨鍔栧鍌炴⒒鏉堝墽绀夐弶鈺傜懇閸ｇ兘宕ｉ鍛拸 job/arc dual闁?
+			// 2026-05-22: backward 婵炲濮村锕€鈻嶉崟顖氱闁绘棁娅ｉ惌鎺楁煟閹邦喗鍤€闁搞値鍙冨畷锝夊箣閻愭惌妲梺鎸庣☉閻ジ顢栭崶銊р枖闁逞屽墮閳诲酣鍨鹃崘宸奖闂佺绻堥崕鍐诧耿閿涘嫧鍋撻崷顓炰粧闁瑰箍鍨藉畷婵嬪灳閼碱剛鎲归梻鍌氭礌閸嬫捇鎮烽弴姘卞妽閻?setup/processing 濡ょ姷鍋涚壕顓濈昂闂?
+			// 閻熸粎澧楅幐鍛婃櫠閻樿鐭楁慨妞诲亾闁革絽鎼蹇涙嚑椤掑倻姊鹃梺?prevJob 闂佺厧顨庢禍婊呮崲娓氣偓閹啴宕熼銈嗘闂佺懓鐡ㄩ崝鏍ь渻閸岀偞鈷掗弶鍫濆⒔缁€澶愬级閳哄倻鎳囬柛锝囧厴瀹曪綁顢旈崨顓涙嫺 job/arc dual闂?
 			nextFrontier = jobPenalty.copy();
 			nextNoSriFrontier = sriPricingEnabled ? jobPenalty.copy() : null;
 			double fixedReducedCost = -lp.getJobDual(prevJob) - lp.getArcDual(prevJob, node.sinkId());
@@ -2460,7 +2516,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				childNgMemory, nextFrontier, nextNoSriFrontier, childSriCounts, childSriPenalty, false);
 	}
 
-	/** 提前判断 forward 扩展后的完成时间区间是否可能与任务有效窗口相交，避免构造必为空的 PWLF。 */
+	/** 鎻愬墠鍒ゆ柇 forward 鎵╁睍鍚庣殑瀹屾垚鏃堕棿鍖洪棿鏄惁鍙兘涓庝换鍔℃湁鏁堢獥鍙ｇ浉浜わ紝閬垮厤鏋勯€犲繀涓虹┖鐨?PWLF銆?*/
 	private boolean hasForwardExtensionWindowOverlap(ForwardLabel label, int nextJob, double delay) {
 		if (label.frontier == null || label.frontier.head == null) {
 			return false;
@@ -2474,7 +2530,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return !Utility.compareLt(overlapEnd, overlapStart);
 	}
 
-	/** 提前判断 backward 扩展后的完成时间区间是否可能与任务有效窗口相交，避免构造必为空的 PWLF。 */
+	/** 鎻愬墠鍒ゆ柇 backward 鎵╁睍鍚庣殑瀹屾垚鏃堕棿鍖洪棿鏄惁鍙兘涓庝换鍔℃湁鏁堢獥鍙ｇ浉浜わ紝閬垮厤鏋勯€犲繀涓虹┖鐨?PWLF銆?*/
 	private boolean hasBackwardExtensionWindowOverlap(BackwardLabel label, int prevJob, double delay) {
 		if (label.frontier == null || label.frontier.head == null) {
 			return false;
@@ -2520,8 +2576,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-25: Tmid 闁告娲滈崑?forward label 濞戞挸绉撮崯鈧弶鈺傜☉閸欏棝寮查鈧埀?dominance graph闁挎稑濂旂弧鍐╃▔瀹ュ懎鏅欓柛蹇嬪劜婢ц法浠﹂弴銏⌒曢柛鎺擃殣缁?
-	 * 濞达絽妫旂划娑氭啺娴ｉ绠介柣锝嗙懅缁?sink 闁衡偓鐠鸿櫣鍟查柛婊冭嫰閹绱?backward join闁?
+	 * 2026-05-25: Tmid 闂佸憡顨嗗ú婊堝磻?forward label 婵炴垶鎸哥粔鎾疮閳ь剟寮堕埡鍌溾槈闁告瑥妫濆鏌ヮ敋閳ь剟鍩€?dominance graph闂佹寧绋戞總鏃傚姬閸愨晝鈻旂€广儱鎳庨弲娆撴煕韫囧鍔滃褑娉曟禒锕傚即閵忊寬鏇㈡煕閹烘搩娈ｇ紒?
+	 * 婵炶揪绲藉Λ鏃傚垝濞戞碍鍟哄ù锝夘棑缁犱粙鏌ｉ敐鍡欐噮缂?sink 闂佽　鍋撻悹楦挎閸熸煡鏌涘鍐闁诡喗顨堢槐?backward join闂?
 	 */
 	private InsertStatus insertForwardSinglePoint(ForwardLabel label, LP lp) {
 		SinglePointStore<ForwardLabel> store = forwardSinglePointByLastJob.get(label.jid);
@@ -2550,8 +2606,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-25: Tmid 闁告娲滈崑?backward label 闁告瑯浜欑换姘舵偩濞嗘垹鑸?single-point store闁?
-	 * 2026-05-26: 闁?GCNGBB-style 婵炵繝鑳堕埢鍏肩▔鐎ｂ晝鐟濈紒鏂款儏瀹?join闁挎稑鐭侀埀顒€鏈Σ鎼佸捶閵婏附浠橀柛姘捣缁儤绋夐埀顒勫箥椤愶絽浼?join闁?
+	 * 2026-05-25: Tmid 闂佸憡顨嗗ú婊堝磻?backward label 闂佸憡鐟禍娆戞崲濮樿埖鍋╂繛鍡樺灩閼?single-point store闂?
+	 * 2026-05-26: 闂?GCNGBB-style 濠电偟绻濋懗鍫曞煝閸忚偐鈻旈悗锝傛櫇閻熸繄绱掗弬娆惧剰鐎?join闂佹寧绋戦惌渚€鍩€椤掆偓閺堫剙危閹间礁鎹堕柕濠忛檮娴犳﹢鏌涘顒佹崳缂侇喚鍎ょ粙澶愬焵椤掑嫬绠ユい鎰剁到娴?join闂?
 	 */
 	private InsertStatus insertBackwardSinglePoint(BackwardLabel label, LP lp) {
 		SinglePointStore<BackwardLabel> store = backwardSinglePointByFirstJob.get(label.jid);
@@ -2708,8 +2764,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-28: final join 闁告挸绉剁划鐑樼▔閳ь剙銆掗崨顔肩鐎规瓕灏～锕傚触鎼达絿鏁?label 闁衡偓椤栫偛甯抽柣銊ュ濡偊寮堕敍鍕獥闁挎稑鑻崯鈧柟鐑樺笒缁參濡?
-	 * 閺夆晜鐟﹂悧杈┾偓鐟版湰閺嗭綁宕氬Δ鈧ぐ褎绂掓惔銏′粯缂備礁鐗呯划娑氣偓娑櫳戝鍧楁儍?label table 闂佹彃鐬奸弫鎾诲箣閹板墎绀夊☉鎾崇Т瑜板牓寮埡鍌涘焸闁告垶妞藉Σ锔姐亜閸濆嫮纰嶇憸鏉垮船閹肩兘濡?
+	 * 2026-05-28: final join 闂佸憡鎸哥粔鍓佸垝閻戞鈻旈柍褜鍓欓妴鎺楀川椤旇偐顏遍悗瑙勭摃鐏忣亪锝為敃鍌氳Е閹艰揪绲块弫?label 闂佽　鍋撴い鏍仜鐢娊鏌ｉ妸銉ヮ仾婵☆偒鍋婂鍫曟晬閸曨剛鐛ラ梺鎸庣☉閼活垶宕埀顒勬煙閻戞ê绗掔紒顭戝弮婵?
+	 * 闁哄鏅滈悷锕傛偋鏉堚斁鍋撻悷鐗堟拱闁哄棴缍佸畷姘旈埀顒冦亹瑜庣粋鎺撴償閵忊€茬帛缂傚倷绀侀悧鍛垝濞戞埃鍋撳☉娅虫垵顪冮崸妤佸剭?label table 闂備焦褰冮惉濂稿极閹捐绠ｉ柟鏉垮缁€澶娾槈閹惧磭孝鐟滄澘鐗撳顕€鍩￠崒娑樼劯闂佸憡鍨跺钘壩ｉ敂濮愪簻闁告繂瀚喊宥囨喐閺夊灝鑸归柟鑲╁厴婵?
 	 */
 	private void compactAndSortActiveLabelListsForJoin() {
 		for (int job = 1; job <= data.n; job++) {
@@ -2768,10 +2824,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-28: 缂備胶鍠嶇粩鎾绩鐠鸿櫣鍟?join闁靛棗鍊风悮杈ㄧ瑹?label table 闂侇喚鏅弫鎾诲箣閹邦剛鏆氬ù鐘劚閹鏁嶇仦闂寸鞍 forward terminal group 濞戞挸鎼ˇ鑽や沪閸岋妇绀?
-	 * 闁告艾鏈鍌涘緞閸曨厽鍊?crossing-arc join 闁?forward->sink 闁衡偓鐠鸿櫣鍟查柨娑樼焸娴尖晠宕?sink 闁告帗顨堢划顐ｆ交閸モ晝鍩犲☉鎾亾闁稿﹥鐟╅埀顒€顦遍悺顐︽焻婢跺牃鍋?
+	 * 2026-05-28: 缂傚倷鑳堕崰宥囩博閹绢喖缁╅悹楦挎閸?join闂侀潧妫楅崐椋庢偖鏉堛劎鐟?label table 闂備緡鍠氶弲顐﹀极閹捐绠ｉ柟閭﹀墰閺嗘艾霉閻橆喖鍔氶柟顔筋殜閺佸秶浠﹂梻瀵搁瀺 forward terminal group 婵炴垶鎸搁幖顐λ囬懡銈勬勃闁稿矉濡囩粈?
+	 * 闂佸憡鑹鹃張顒€顪冮崒娑樼窞闁告洦鍘介崐?crossing-arc join 闂?forward->sink 闂佽　鍋撻悹楦挎閸熸煡鏌ㄥ☉妯肩劯濞村皷鏅犲畷?sink 闂佸憡甯楅〃鍫㈠垝椤愶絾浜ら柛銉㈡櫇閸╃姴鈽夐幘顖氫壕闂佺锕ラ悷鈺呭焵椤掆偓椤﹂亶鎮洪锔界劵濠㈣泛鐗冮崑?
 	 */
 	private void joinAllForwardTerminalGroups(LP lp) {
+		if (useJoinEnvelopeCompression()) {
+			joinAllForwardTerminalGroupsByEnvelope(lp);
+			return;
+		}
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
 				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
 			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
@@ -2779,8 +2839,36 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				continue;
 			}
 			joinForwardGroupToBackwardLabels(lastJob, candidates, lp);
-			joinForwardGroupToSink(candidates, lp);
+			if (canContinue()) {
+				joinForwardGroupToSink(candidates, lp);
+			}
 		}
+	}
+
+	private boolean useJoinEnvelopeCompression() {
+		return config.enableNgDssrJoinEnvelopeCompression && !sriPricingEnabled && !limitedMemorySriPricing;
+	}
+
+	private void joinAllForwardTerminalGroupsByEnvelope(LP lp) {
+		long buildStart = System.nanoTime();
+		JoinEnvelopeIndex index = buildJoinEnvelopeIndex();
+		joinEnvelopeBuildNanos += System.nanoTime() - buildStart;
+		long joinStart = System.nanoTime();
+		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
+				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
+			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
+			if (candidates.isEmpty()) {
+				continue;
+			}
+			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups = index.forwardByTerminal.get(lastJob);
+			if (forwardGroups != null && !forwardGroups.isEmpty()) {
+				joinForwardEnvelopeGroupsToBackward(lastJob, forwardGroups, index, lp);
+			}
+			if (canContinue()) {
+				joinForwardGroupToSink(candidates, lp);
+			}
+		}
+		joinEnvelopeJoinNanos += System.nanoTime() - joinStart;
 	}
 
 	private void joinForwardGroupToBackwardLabels(int lastJob, ArrayList<ForwardLabel> candidates, LP lp) {
@@ -2815,6 +2903,191 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 	}
 
+	private JoinEnvelopeIndex buildJoinEnvelopeIndex() {
+		JoinEnvelopeIndex index = new JoinEnvelopeIndex(data.n + 1);
+		for (int job = 1; job <= data.n; job++) {
+			HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>> forwardMap =
+					new HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>>();
+			ArrayList<ForwardLabel> forwardLabels = activeForwardByLastJob.get(job);
+			for (int i = 0; i < forwardLabels.size(); i++) {
+				ForwardLabel label = forwardLabels.get(i);
+				if (!label.isDominated) {
+					addForwardJoinEnvelopeGroup(forwardMap, job, label);
+				}
+			}
+			if (!forwardMap.isEmpty()) {
+				ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups =
+						new ArrayList<JoinEnvelopeGroup<ForwardLabel>>(forwardMap.values());
+				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups);
+				Collections.sort(groups);
+				index.forwardByTerminal.set(job, groups);
+				joinEnvelopeForwardGroups += groups.size();
+			}
+
+			HashMap<PackedBitSet, JoinEnvelopeGroup<BackwardLabel>> backwardMap =
+					new HashMap<PackedBitSet, JoinEnvelopeGroup<BackwardLabel>>();
+			ArrayList<BackwardLabel> backwardLabels = activeBackwardByFirstJob.get(job);
+			for (int i = 0; i < backwardLabels.size(); i++) {
+				BackwardLabel label = backwardLabels.get(i);
+				if (!label.isDominated && !label.isSinkRoot) {
+					addBackwardJoinEnvelopeGroup(backwardMap, job, label);
+				}
+			}
+			addBackwardSinglePointJoinEnvelopeGroups(backwardMap, job, backwardSinglePointByFirstJob.get(job));
+			if (!backwardMap.isEmpty()) {
+				ArrayList<JoinEnvelopeGroup<BackwardLabel>> groups =
+						new ArrayList<JoinEnvelopeGroup<BackwardLabel>>(backwardMap.values());
+				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups);
+				Collections.sort(groups);
+				index.backwardByTerminal.set(job, groups);
+				joinEnvelopeBackwardGroups += groups.size();
+			}
+		}
+		return index;
+	}
+
+	private <L extends FunctionLabel> long finalizeJoinEnvelopeGroups(ArrayList<JoinEnvelopeGroup<L>> groups) {
+		long count = 0;
+		for (int i = 0; i < groups.size(); i++) {
+			JoinEnvelopeGroup<L> group = groups.get(i);
+			group.minReducedCost = group.envelope.minValue();
+			count += group.envelope.segmentCount();
+		}
+		return count;
+	}
+
+	private void addForwardJoinEnvelopeGroup(HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>> map,
+			int terminalJob, ForwardLabel label) {
+		PiecewiseLinearFunction function = getForwardJoinExtension(label);
+		if (function == null || function.head == null) {
+			return;
+		}
+		JoinEnvelopeGroup<ForwardLabel> group = joinEnvelopeGroup(map, terminalJob, label.ngMemorySet);
+		group.envelope.merge(function, label);
+		joinEnvelopeForwardLabels++;
+	}
+
+	private void addBackwardJoinEnvelopeGroup(HashMap<PackedBitSet, JoinEnvelopeGroup<BackwardLabel>> map,
+			int terminalJob, BackwardLabel label) {
+		PiecewiseLinearFunction function = getBackwardJoinExtension(label);
+		if (function == null || function.head == null) {
+			return;
+		}
+		JoinEnvelopeGroup<BackwardLabel> group = joinEnvelopeGroup(map, terminalJob, label.ngMemorySet);
+		group.envelope.merge(function, label);
+		joinEnvelopeBackwardLabels++;
+	}
+
+	private void addBackwardSinglePointJoinEnvelopeGroups(HashMap<PackedBitSet, JoinEnvelopeGroup<BackwardLabel>> map,
+			int terminalJob, SinglePointStore<BackwardLabel> store) {
+		for (int cardinality = 0; cardinality < store.liveLabelsByCardinality.size(); cardinality++) {
+			ArrayList<BackwardLabel> bucket = store.liveLabelsByCardinality.get(cardinality);
+			if (bucket == null || bucket.isEmpty()) {
+				continue;
+			}
+			for (int i = 0; i < bucket.size(); i++) {
+				BackwardLabel label = bucket.get(i);
+				if (!label.isDominated && !label.isSinkRoot) {
+					addBackwardJoinEnvelopeGroup(map, terminalJob, label);
+				}
+			}
+		}
+	}
+
+	private <L extends FunctionLabel> JoinEnvelopeGroup<L> joinEnvelopeGroup(
+			HashMap<PackedBitSet, JoinEnvelopeGroup<L>> map, int terminalJob, PackedBitSet ngMemorySet) {
+		JoinEnvelopeGroup<L> group = map.get(ngMemorySet);
+		if (group != null) {
+			return group;
+		}
+		PackedBitSet key = ngMemorySet.copy();
+		group = new JoinEnvelopeGroup<L>(terminalJob, key);
+		map.put(key, group);
+		return group;
+	}
+
+	private void joinForwardEnvelopeGroupsToBackward(int lastJob,
+			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups, JoinEnvelopeIndex index, LP lp) {
+		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
+			ArrayList<JoinEnvelopeGroup<BackwardLabel>> backwardGroups = index.backwardByTerminal.get(firstJob);
+			if (backwardGroups == null || backwardGroups.isEmpty()) {
+				continue;
+			}
+			for (int b = 0; b < backwardGroups.size() && canContinue(); b++) {
+				JoinEnvelopeGroup<BackwardLabel> backward = backwardGroups.get(b);
+				for (int f = 0; f < forwardGroups.size() && canContinue(); f++) {
+					joinForwardEnvelopeGroupWithBackward(lastJob, forwardGroups.get(f), backward, lp);
+				}
+			}
+		}
+	}
+
+	private void joinForwardEnvelopeGroupWithBackward(int lastJob, JoinEnvelopeGroup<ForwardLabel> forward,
+			JoinEnvelopeGroup<BackwardLabel> backward, LP lp) {
+		if (config.maxExactPricingColumns <= 0) {
+			return;
+		}
+		Node node = lp.getNode();
+		joinTerminalGroupsScanned++;
+		joinEnvelopeGroupPairs++;
+		if (backward.ngMemorySet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.terminalJob)) {
+			joinTerminalGroupsArcOrVisitPruned++;
+			joinEnvelopeGroupPairsPruned++;
+			return;
+		}
+		if (forward.terminalJob == backward.terminalJob) {
+			joinPairsSetPruned++;
+			joinEnvelopeGroupPairsPruned++;
+			return;
+		}
+		if (bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
+			joinPairsSetPruned++;
+			joinEnvelopeGroupPairsPruned++;
+			return;
+		}
+		double delay = data.getSetUp(lastJob, backward.terminalJob) + data.getProcessT(backward.terminalJob);
+		if (Utility.compareGt(forward.envelope.start() + delay, backward.envelope.end())) {
+			joinTerminalGroupsTimePruned++;
+			joinEnvelopeGroupPairsPruned++;
+			return;
+		}
+		double joinFixedReducedCost = data.getSetupCost(lastJob, backward.terminalJob)
+				- lp.getArcDual(lastJob, backward.terminalJob);
+		double joinThreshold = joinLowerBoundThreshold();
+		double groupLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
+		if (!Utility.compareLt(groupLB, joinThreshold)) {
+			joinTerminalGroupsCostPruned++;
+			joinPairsLowerBoundPruned++;
+			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
+				joinPairsBestBoundPruned++;
+			}
+			joinEnvelopeGroupPairsPruned++;
+			return;
+		}
+		joinPairsTried++;
+		joinFunctionEvaluations++;
+		joinEnvelopeFunctionEvaluations++;
+		JoinEnvelopeMinResult result = findMinimalShiftedTracedSum(forward.envelope, delay, backward.envelope,
+				joinFixedReducedCost);
+		double reducedCostBound = result.reducedCost;
+		observeRelaxedReducedCost(reducedCostBound);
+		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
+			joinFunctionPruned++;
+			if (Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
+				joinFunctionBestRecordPruned++;
+			}
+			return;
+		}
+		if (result.forwardLabel == null || result.backwardLabel == null) {
+			joinFunctionPruned++;
+			return;
+		}
+		// 2026-07-09: envelope join 每个 group-pair 只返回一个代表 split；同一 sequence 的更优 split
+		// 可能来自其它 group-pair。入候选堆前用真实 sequence cost 回刷，避免把代表 split 的
+		// inferred cost 写进 RMP。普通 label-pair join 仍保持原路径。
+		tryGenerateColumn(recoverJoinSequence(result.forwardLabel, result.backwardLabel), lp, reducedCostBound, true);
+	}
+
 	private void joinForwardGroupToSink(ArrayList<ForwardLabel> candidates, LP lp) {
 		for (int i = 0; i < candidates.size() && canContinue(); i++) {
 			ForwardLabel label = candidates.get(i);
@@ -2827,8 +3100,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void joinForwardGroupWithBackward(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward,
 			LP lp) {
 		Node node = lp.getNode();
-		// 2026-05-23: 闁?joinFromForward 閻庨潧婀辫ⅷ闁挎稑濂旂粭澶愭嚄閻ｅ本鏆?backward.reachableSet 闁告瑥绉电敮褰掑箥閳ь剟寮垫径濠傝闁瑰嘲鍚嬬敮鎾礈瀹ュ洨纾婚柕?
-		// 閻犲洢鍎靛▔锕傚触閸喐笑 backward 缂備綀鍛暰闁告碍鍨垫稊蹇涘箥閳轰胶娼旈柣銊ュ閳ь剚鐟╅埀顒€顧€缁辨繃绋夊鍥╂惣濞寸姾娓圭花顒勫箥閳ь剟寮垫径濠傝濞戞挸楠哥紞瀣礈瀹ュ懏鍊电紓鍌楀亾闁瑰嘲鍚嬬敮鎾儍?forward terminal闁?
+		// 2026-05-23: 闂?joinFromForward 闁诲酣娼у﹢杈叿闂佹寧绋戞總鏃傜箔婢舵劖鍤勯柣锝呮湰閺?backward.reachableSet 闂佸憡鐟ョ粔鐢垫暜瑜版帒绠ラ柍褜鍓熷鍨緞婵犲倽顔夐梺鐟板槻閸氬鏁幘顔肩鐎广儱娲ㄧ壕濠氭煏?
+		// 闁荤姴娲㈤崕闈涒枖閿曞倸瑙﹂柛顐ゅ枑绗?backward 缂傚倷缍€閸涱垱鏆伴梺鍛婄閸ㄥ灚绋婅箛娑樼闁宠桨鑳跺鏃堟煟閵娿儱顏╅柍褜鍓氶悷鈺呭焵椤掆偓椤р偓缂佽鲸绻冪粙澶婎吋閸モ晜鎯ｆ繛瀵稿Ь濞撳湱鑺遍鍕闁逞屽墴瀵灚寰勬繝鍌濐唹婵炴垶鎸告鍝ョ礊鐎ｎ喖绀堢€广儱鎳忛崐鐢电磽閸屾浜鹃梺鐟板槻閸氬鏁幘顔藉剭?forward terminal闂?
 		joinTerminalGroupsScanned++;
 		if (backward.ngMemorySet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
 			joinTerminalGroupsArcOrVisitPruned++;
@@ -2850,7 +3123,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
-		for (int i = 0; i < candidates.size(); i++) {
+		for (int i = 0; i < candidates.size() && canContinue(); i++) {
 			ForwardLabel forward = candidates.get(i);
 			joinCandidateLabelsVisited++;
 			if (forward.isDominated) {
@@ -2888,8 +3161,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		if (bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
-			// 2026-06-09: ng-DSSR 闁告瑯浜為弫?ng-memory 闁告帇鍊栭弻鍥箯閸忕厧澶嶉柡鍕靛灠閹焦娼诲┑鍡楀唨鐟滅増鎸告晶鐘垫媼閺夎法绠撻柨?
-			// 闁活亞鍠庨悿鍕煂瀹ュ拋妲婚煫鍥ф嚇閵嗗繒绮垫径搴ｎ槹 reduced-cost route 闁诡厹鍨归ˇ鏌ュ触鎼粹€虫櫃閻犱焦婢樼紞?cycle闁挎稑鐬奸弫銈嗙鎼粹剝鍊电紓渚囧幗濞插潡寮?ng-set闁?
+			// 2026-06-09: ng-DSSR 闂佸憡鐟禍鐐哄极?ng-memory 闂佸憡甯囬崐鏍蓟閸ヮ剙绠柛蹇曞帶婢跺秹鏌￠崟闈涚仩闁诡垯鐒﹀璇测攽閸℃鍞ㄩ悷婊呭閹稿憡鏅堕悩鍨闁哄娉曠粻鎾绘煥?
+			// 闂佹椿浜為崰搴ㄦ偪閸曨垱鐓傜€广儱鎷嬪Σ濠氱叓閸パ勫殗闁靛棗绻掔划鍨緞鎼达綆妲?reduced-cost route 闂佽鍘归崹褰捤囬弻銉ヨЕ閹肩补鈧櫕娅冮柣鐘辩劍濠㈡绱?cycle闂佹寧绋戦惉濂稿极閵堝棛顩查幖绮瑰墲閸婄數绱撴笟鍥у箺婵炴彃娼″?ng-set闂?
 			joinPairsSetPruned++;
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED ngMemoryIntersect fMem=" + forward.ngMemorySet
@@ -2924,8 +3197,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
-		// 2026-05-22: crossing arc (i,r) 闁汇劌瀚ù鎰偓?reduced-cost 濡炪倝鈧稓鐟濆ù鐘叉噺濠€?setup cost闁?
-		// 閺夆晜锚缁烩偓濡炪倗绮晶鎼佸箳婢跺寒鍤夌€殿啫鍐╄含 RMP 濞戞搩鍘惧▓鎴︽嚂濮橆剚鍊?arc dual闁挎稒绋戦幆渚€宕?join 濞戞挸顑囬弲顐ｅ濮橆兛鐒婂Δ鍌涳公缁辨繈寮告担渚紓闁哄啯婀圭槐鏉款煶韫囨柨绔撮柣顏嗗枙缁€瀣礆濡炲皷鍋?
+		// 2026-05-22: crossing arc (i,r) 闂佹眹鍔岀€氼剙霉閹邦喒鍋?reduced-cost 婵＄偑鍊濋埀顒佺〒閻熸繂霉閻樺弶鍣烘繝鈧?setup cost闂?
+		// 闁哄鏅滈敋缂佺儵鍋撴俊鐐€楃划顖涙櫠閹间礁绠冲璺哄瘨閸ゅ鈧鍟崘鈺勫惈 RMP 婵炴垶鎼╅崢鎯р枔閹达附鍤傛慨姗嗗墯閸?arc dual闂佹寧绋掔粙鎴﹀箚娓氣偓瀹?join 婵炴垶鎸搁鍥疾椤愶絽顕辨慨姗嗗厸閻掑﹤螖閸屾冻鍏紒杈ㄧ箞瀵憡鎷呮笟顖欑磽闂佸搫鍟﹢鍦閺夋鐓堕煫鍥ㄦ煥缁旀挳鏌ｉ鍡楁灆缂佲偓鐎ｎ喖绀嗘俊鐐茬毞閸?
 		ArrayList<Integer> sequence = null;
 		double sriJoinShift;
 		if (limitedMemorySriPricing) {
@@ -2987,8 +3260,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-13: full-SRI 闁绘鍩栭埀顑跨濠€顏堝础閺囨碍娅犻柟纰樻櫅閻秹寮捄鍝勬锭闁活厹鍎垫禍鍓ф嫚閵夈儱纾归悹渚灠缁剁偤宕橀崨鏉戝姤闁哄嫷鍨伴幆浣割啅閼碱剛鐥呴悷娆欑畱瑜板倿濡?
-	 * 闁瑰嘲鍚嬬敮鎾籍鐠轰警娲ら柡瀣矊娑斿繘宕ｉ崘鎻掔９閻犱警鍨扮欢鐐哄触閸曨喚顢呴柣姘煎枙缁斿瓨绋夐鍐憹闁?scope job闁挎稑鑻悾顒勫极?route 闁归潧绉疯闁告瑦鍨崇粩鏉戔枎?SRI闁挎稑鐭傚〒鍓佹啺娴ｅ憡韬弶鈺傜懇閸ｉ鎮伴妷銉︾闁?
+	 * 2026-06-13: full-SRI 闂佺粯顭堥崺鏍焵椤戣法顦︽繝鈧鍫濈闁哄洦纰嶅▍鐘绘煙绾版ɑ娅呴柣顐㈢Ч瀵喚鎹勯崫鍕敪闂佹椿鍘归崕鍨閸撗勫珰闁靛鍎辩壕褰掓偣娓氼垰鐏犵紒鍓佸仱瀹曟﹢宕ㄩ弶鎴濆Г闂佸搫瀚烽崹浼村箚娴ｅ壊鍟呴柤纰卞墰閻ュ懘鎮峰▎娆戠暠鐟滄澘鍊挎俊?
+	 * 闂佺懓鍢查崥瀣暜閹绢喖绫嶉悹杞拌濞层倝鏌＄€ｎ偆鐭婂☉鏂跨箻瀹曪綁宕橀幓鎺旓紮闁荤姳璀﹂崹鎵閻愬搫瑙﹂柛鏇ㄥ枤椤㈠懘鏌ｅ鐓庢灆缂佹柨鐡ㄧ粙澶愵敂閸愵亞鎲归梺?scope job闂佹寧绋戦懟顖炴偩椤掑嫬鏋?route 闂佸綊娼х粔鐤杺闂佸憡鐟﹂崹宕囩博閺夋垟鏋?SRI闂佹寧绋戦惌鍌氥€掗崜浣瑰暫濞达絽鎲￠煬顒勫级閳哄倻鎳囬柛锝夘棑閹即濡烽妷锔绢槬闂?
 	 */
 	private double sriJoinShift(ForwardLabel forward, BackwardLabel backward) {
 		if (!sriPricingEnabled) {
@@ -3000,7 +3273,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			int backwardCount = backward.sriCounts[sriIndex];
 			double dual = sriDuals.get(sriIndex).doubleValue();
 			if (forwardCount > 1 && backwardCount > 1) {
-				// 濞戞挶鍊曞畷鎰板触閸曨喖娈扮€规瓕灏欑划锟犲箥閿濆牏绠栧☉鎾亾婵炲棌妲勭槐婵嬪触鐏炶偐顏遍柡澶嗏偓宕囨殮闁?route 闁告瑯浜滅花鏌ュ箥閿濆嫮顏辨繛鍠℃壋鍋?
+				// 婵炴垶鎸堕崐鏇炵暦閹版澘瑙﹂柛鏇ㄥ枛濞堟壆鈧鐡曠亸娆戝垝閿熺姴绠ラ柨婵嗙墢缁犳牕鈽夐幘顖氫壕濠电偛妫屽Σ鍕濠靛瑙﹂悘鐐跺亹椤忛亶鏌℃径鍡忓亾瀹曞洦娈梺?route 闂佸憡鐟禍婊呰姳閺屻儱绠ラ柨婵嗗椤忚鲸绻涢崰鈩冨閸?
 				shift += dual;
 			} else if (forwardCount == 1 && backwardCount == 1
 					&& sriHalvesContainDifferentScopeJobs(forward, backward, sriScopes.get(sriIndex))) {
@@ -3011,8 +3284,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * limited-memory join 闁告瑯浜濋ˉ鍛村蓟?crossing arc 濞戞挶鍊撻弲鍫曞及椤栨碍鍎婇柟璺猴工閹挻绋夐埀?cut 闁?residual half-state 闁瑰嘲鍚嬮崹姘▔閳ь剙鈻庨檱琚濋柛娆愬灟閳?
-	 * node-memory 闁汇劌瀚换娑氱磼椤撶啿鍋撹閺?backward 濡絾鐗炴俊顓㈡倷鐟欏嫭笑闁告熬绠戝﹢?memory 濞戞搩鍘虹紞瀣偝鐢喚骞rc-memory 閺夆晜锚缁烩偓濡炪倖妲掗々锕€效?crossing arc 闁革负鍔忛?cut 闁?memory arcs 濞戞搩鍘归埀?
+	 * limited-memory join 闂佸憡鐟禍婵嬎夐崨鏉戣摕?crossing arc 婵炴垶鎸堕崐鎾诲疾閸洖鍙婃い鏍ㄧ閸庡﹪鏌熺捄鐚村伐闁诡喗鎸荤粙澶愬焵?cut 闂?residual half-state 闂佺懓鍢查崥瀣垂濮橆厾鈻旈柍褜鍓欓埢搴ㄦ鐞氭繈鏌涘▎鎰仧闁?
+	 * node-memory 闂佹眹鍔岀€氼垳鎹㈠☉姘辩＜妞ゆ挾鍟块崑鎾诡槾闁?backward 婵☆偓绲鹃悧鐐翠繆椤撱垺鍊烽悷娆忓绗戦梺鍛婄啲缁犳垵锕?memory 婵炴垶鎼╅崢铏圭礊鐎ｎ喗鍋濋悽顖ｅ枤楠烆晣rc-memory 闁哄鏅滈敋缂佺儵鍋撴俊鐐€栧Σ鎺椼€呴敃鈧晥?crossing arc 闂侀潻璐熼崝蹇涱敋?cut 闂?memory arcs 婵炴垶鎼╅崢褰掑焵?
 	 */
 	private double limitedMemorySriJoinShift(ForwardLabel forward, BackwardLabel backward) {
 		if (!sriPricingEnabled) {
@@ -3067,6 +3340,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinFunctionBestRecordPruned = 0;
 		joinRangeLowerBoundChecks = 0;
 		joinRangeLowerBoundPruned = 0;
+		joinEnvelopeForwardGroups = 0;
+		joinEnvelopeBackwardGroups = 0;
+		joinEnvelopeForwardLabels = 0;
+		joinEnvelopeBackwardLabels = 0;
+		joinEnvelopeSegments = 0;
+		joinEnvelopeGroupPairs = 0;
+		joinEnvelopeGroupPairsPruned = 0;
+		joinEnvelopeFunctionEvaluations = 0;
+		joinEnvelopeBuildNanos = 0;
+		joinEnvelopeJoinNanos = 0;
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -3200,6 +3483,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinFunctionEvaluations = 0;
 		joinFunctionPruned = 0;
 		joinFunctionBestRecordPruned = 0;
+		joinEnvelopeForwardGroups = 0;
+		joinEnvelopeBackwardGroups = 0;
+		joinEnvelopeForwardLabels = 0;
+		joinEnvelopeBackwardLabels = 0;
+		joinEnvelopeSegments = 0;
+		joinEnvelopeGroupPairs = 0;
+		joinEnvelopeGroupPairsPruned = 0;
+		joinEnvelopeFunctionEvaluations = 0;
+		joinEnvelopeBuildNanos = 0;
+		joinEnvelopeJoinNanos = 0;
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -3234,6 +3527,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		diagnosticForwardPops = 0;
 		diagnosticBackwardPops = 0;
 		fullMidpointDiagnosticRan = false;
+	}
+
+	private void resetExactPhaseTiming() {
+		exactTotalNanos = 0;
+		exactInitializeNanos = 0;
+		exactBackwardSinkNanos = 0;
+		exactForwardExpandNanos = 0;
+		exactBackwardExpandNanos = 0;
+		exactJoinCompactNanos = 0;
+		exactJoinNanos = 0;
+		exactFinalizeNanos = 0;
 	}
 
 	private void diagnosticHeartbeat(LP lp, String phase, boolean force) {
@@ -3278,99 +3582,137 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private String statisticsSummary() {
-		return "labels fw kept/dominated=" + forwardLabelsKept + "/" + forwardLabelsDominated
-				+ ", bw kept/dominated=" + backwardLabelsKept + "/" + backwardLabelsDominated
-				+ ", halfWindowIneligible fw/bw=" + forwardHalfIneligibleJobCount + "/"
-				+ backwardHalfIneligibleJobCount
-				+ ", singlePoint fw kept/storeDom/graphDom=" + forwardSinglePointKept + "/"
-				+ forwardSinglePointDominatedByStore + "/" + forwardSinglePointDominatedByGraph
-				+ ", bw kept/storeDom/graphDom=" + backwardSinglePointKept + "/"
-				+ backwardSinglePointDominatedByStore + "/" + backwardSinglePointDominatedByGraph
-				+ ", join groups scanned/arcOrVisit/timeLB/costLB=" + joinTerminalGroupsScanned
-				+ "/" + joinTerminalGroupsArcOrVisitPruned
-				+ "/" + joinTerminalGroupsTimePruned + "/" + joinTerminalGroupsCostPruned
-				+ ", join candidates visited/dominated=" + joinCandidateLabelsVisited + "/"
-				+ joinCandidateLabelsDominated
-				+ ", join pairs tried/set/lb/time/funcEval/funcPruned=" + joinPairsTried
-				+ "/" + joinPairsSetPruned + "/" + joinPairsLowerBoundPruned + "/"
-				+ joinPairsTimePruned + "/"
-				+ joinFunctionEvaluations + "/" + joinFunctionPruned
-				+ ", joinRangeLB check/pruned=" + joinRangeLowerBoundChecks
-				+ "/" + joinRangeLowerBoundPruned
-				+ ", joinBest mode/bestRC/lbPruned/recordPruned=" + joinBestThresholdMode
-				+ "/" + bestGeneratedReducedCost + "/" + joinPairsBestBoundPruned
-				+ "/" + joinFunctionBestRecordPruned
-				+ ", completionBound mode/cutoff/buildMs/eval/fwPruned/bwPruned="
-				+ completionBoundRelaxationForSummary()
-				+ "/" + completionBoundCutoffForSummary() + "/" + formatMillis(completionBoundBuildNanos)
-				+ "/" + completionBoundFunctionEvaluations + "/" + completionForwardLabelsPruned
-				+ "/" + completionBackwardLabelsPruned
-				+ ", completionBoundScalar check/pruned/fallback/unavailable=" + completionBoundScalarChecks
-				+ "/" + completionBoundScalarPruned + "/" + completionBoundScalarFunctionFallbacks
-				+ "/" + completionBoundScalarUnavailable
-				+ ", timeIndexedScalar buildMs/improved/extraPruned/unavailable/windowTightenedReachable="
-				+ formatMillis(timeIndexedScalarBuildNanos) + "/" + timeIndexedScalarImprovedChecks
-				+ "/" + timeIndexedScalarExtraPruned + "/" + timeIndexedScalarUnavailable
-				+ "/" + timeIndexedWindowTightenedJobs + "-" + timeIndexedWindowReachableJobs
-				+ ", completionBoundArcFixing candidates/fixed/domain/scalar/unavailable/funcEval/ms="
-				+ completionBoundArcFixingCandidates + "/" + completionBoundArcFixingFixed
-				+ "/" + completionBoundArcFixingDomainPruned + "/" + completionBoundArcFixingScalarPruned
-				+ "/" + completionBoundArcFixingUnavailable + "/" + completionBoundArcFixingFunctionEvaluations
-				+ "/" + formatMillis(completionBoundArcFixingNanos)
-				+ ", forwardSink visited/negative=" + forwardSinkLabelsVisited
-				+ "/" + forwardSinkNegativeCandidates
-				+ ", forwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors="
-				+ forwardExtensionCandidates + "/" + forwardExtensionArcPruned
-				+ "/" + forwardExtensionInfeasible + "/" + forwardExtensionConstructed
-				+ "/" + forwardExtensionBoundSurvivors
-				+ ", forwardDepth kept/negSink=" + formatDepthHistogram(forwardLabelsKeptByDepth)
-				+ "/" + formatDepthHistogram(forwardSinkNegativeByDepth)
-				+ ", forwardReach kept avg/min/max=" + formatAverage(forwardLabelsKeptReachableSum,
-						forwardLabelsKept) + "/" + formatReachableMin() + "/" + forwardLabelsKeptReachableMax
-				+ nodeDiagnosticsSummary()
-				+ ", completionBoundQueue=" + completionBoundQueueOrdering
-				+ ", completionBoundInternal timingMs fw/bw/agg=" + formatMillis(completionBoundForwardBuildNanos)
-				+ "/" + formatMillis(completionBoundBackwardBuildNanos) + "/"
-				+ formatMillis(completionBoundAggregateNanos)
-				+ ", completionBoundInternal counts fCand/bCand/fPop/bPop/stale/merge/changed="
-				+ completionBoundForwardCandidateAttempts + "/" + completionBoundBackwardCandidateAttempts
-				+ "/" + completionBoundForwardQueuePops + "/" + completionBoundBackwardQueuePops
-				+ "/" + completionBoundPriorityQueueStalePops
-				+ "/" + completionBoundMergeCalls + "/" + completionBoundMergeChanged
-				+ ", completionBoundSegments fwSamples/targetAvg/candAvg/afterAvg/maxTCA="
-				+ completionBoundForwardSegmentSamples
-				+ "/" + formatAverage(completionBoundForwardTargetSegments, completionBoundForwardSegmentSamples)
-				+ "/" + formatAverage(completionBoundForwardCandidateSegments, completionBoundForwardSegmentSamples)
-				+ "/" + formatAverage(completionBoundForwardAfterSegments, completionBoundForwardSegmentSamples)
-				+ "/" + completionBoundForwardMaxTargetSegments + "-" + completionBoundForwardMaxCandidateSegments
-				+ "-" + completionBoundForwardMaxAfterSegments
-				+ ", completionBoundSegments bwSamples/targetAvg/candAvg/afterAvg/maxTCA="
-				+ completionBoundBackwardSegmentSamples
-				+ "/" + formatAverage(completionBoundBackwardTargetSegments, completionBoundBackwardSegmentSamples)
-				+ "/" + formatAverage(completionBoundBackwardCandidateSegments, completionBoundBackwardSegmentSamples)
-				+ "/" + formatAverage(completionBoundBackwardAfterSegments, completionBoundBackwardSegmentSamples)
-				+ "/" + completionBoundBackwardMaxTargetSegments + "-" + completionBoundBackwardMaxCandidateSegments
-				+ "-" + completionBoundBackwardMaxAfterSegments
-				+ ", candidatePool kept/seen/dropped=" + generatedCandidateBySignature.size() + "/"
-				+ generatedCandidateCount + "/" + generatedCandidateDroppedByHeap
-				+ ", queueOrdering=" + queueOrdering
-				+ ", dynamicHStartMin=" + dynamicMinHStart + ", dynamicHEndMax=" + dynamicMaxHEnd
-				+ ", earliestSourceCompletion=" + earliestSourceCompletion
-				+ ", pricingHorizon=" + pricingHorizon + ", tMid=" + tMid
-				+ ", midpointStrategy/ref/ms=" + midpointStrategyUsed + "/" + midpointReferenceTime + "/"
-				+ formatMillis(midpointStrategyNanos)
-				+ ", midpointColumns count/lastMinAvgMax/halfMinAvgMax=" + midpointColumnSelectedCount
-				+ "/" + midpointColumnLastMin + "/" + midpointColumnLastAvg + "/" + midpointColumnLastMax
-				+ "/" + midpointColumnHalfMin + "/" + midpointColumnHalfAvg + "/" + midpointColumnHalfMax
-				+ ", midpointColumnTasks count/minAvgMedianMax=" + midpointColumnTaskSampleCount
-				+ "/" + midpointColumnTaskMin + "/" + midpointColumnTaskAvg + "/" + midpointColumnTaskMedian
-				+ "/" + midpointColumnTaskMax
-				+ ", midpointProbe=" + midpointProbeSummary
-				+ ", midpointProbeFeedback=" + midpointProbeFeedbackSummary
-				+ targetTraceSummary()
-				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
-				+ ", piWindow=" + (dualProfitableWindowEnabled ? "enabled" : "disabled")
-				+ ", " + dominanceStatisticsSummary();
+		StringBuilder builder = new StringBuilder(2048);
+		builder.append("labels fw kept/dominated=").append(forwardLabelsKept).append("/")
+				.append(forwardLabelsDominated);
+		builder.append(", bw kept/dominated=").append(backwardLabelsKept).append("/")
+				.append(backwardLabelsDominated);
+		builder.append(", exactPhaseMs total/init/sink/fw/bw/compact/join/finalize=")
+				.append(formatMillis(exactTotalNanos)).append("/")
+				.append(formatMillis(exactInitializeNanos)).append("/")
+				.append(formatMillis(exactBackwardSinkNanos)).append("/")
+				.append(formatMillis(exactForwardExpandNanos)).append("/")
+				.append(formatMillis(exactBackwardExpandNanos)).append("/")
+				.append(formatMillis(exactJoinCompactNanos)).append("/")
+				.append(formatMillis(exactJoinNanos)).append("/")
+				.append(formatMillis(exactFinalizeNanos));
+		builder.append(", halfWindowIneligible fw/bw=").append(forwardHalfIneligibleJobCount).append("/")
+				.append(backwardHalfIneligibleJobCount);
+		builder.append(", singlePoint fw kept/storeDom/graphDom=").append(forwardSinglePointKept).append("/")
+				.append(forwardSinglePointDominatedByStore).append("/").append(forwardSinglePointDominatedByGraph);
+		builder.append(", bw kept/storeDom/graphDom=").append(backwardSinglePointKept).append("/")
+				.append(backwardSinglePointDominatedByStore).append("/").append(backwardSinglePointDominatedByGraph);
+		builder.append(", join groups scanned/arcOrVisit/timeLB/costLB=").append(joinTerminalGroupsScanned)
+				.append("/").append(joinTerminalGroupsArcOrVisitPruned).append("/")
+				.append(joinTerminalGroupsTimePruned).append("/").append(joinTerminalGroupsCostPruned);
+		builder.append(", join candidates visited/dominated=").append(joinCandidateLabelsVisited).append("/")
+				.append(joinCandidateLabelsDominated);
+		builder.append(", join pairs tried/set/lb/time/funcEval/funcPruned=").append(joinPairsTried).append("/")
+				.append(joinPairsSetPruned).append("/").append(joinPairsLowerBoundPruned).append("/")
+				.append(joinPairsTimePruned).append("/").append(joinFunctionEvaluations).append("/")
+				.append(joinFunctionPruned);
+		builder.append(", joinRangeLB check/pruned=").append(joinRangeLowerBoundChecks).append("/")
+				.append(joinRangeLowerBoundPruned);
+		if (config.enableNgDssrJoinEnvelopeCompression) {
+			builder.append(", joinEnvelope fGrp/bGrp/fLbl/bLbl/seg/gPair/pruned/funcEval=")
+					.append(joinEnvelopeForwardGroups).append("/").append(joinEnvelopeBackwardGroups).append("/")
+					.append(joinEnvelopeForwardLabels).append("/").append(joinEnvelopeBackwardLabels).append("/")
+					.append(joinEnvelopeSegments).append("/").append(joinEnvelopeGroupPairs).append("/")
+					.append(joinEnvelopeGroupPairsPruned).append("/").append(joinEnvelopeFunctionEvaluations);
+			builder.append(", joinEnvelopeMs build/join=")
+					.append(String.format("%.3f", joinEnvelopeBuildNanos / 1_000_000.0)).append("/")
+					.append(String.format("%.3f", joinEnvelopeJoinNanos / 1_000_000.0));
+		}
+		builder.append(", joinBest mode/bestRC/lbPruned/recordPruned=").append(joinBestThresholdMode).append("/")
+				.append(bestGeneratedReducedCost).append("/").append(joinPairsBestBoundPruned).append("/")
+				.append(joinFunctionBestRecordPruned);
+		builder.append(", completionBound mode/cutoff/buildMs/eval/fwPruned/bwPruned=")
+				.append(completionBoundRelaxationForSummary()).append("/").append(completionBoundCutoffForSummary())
+				.append("/").append(formatMillis(completionBoundBuildNanos)).append("/")
+				.append(completionBoundFunctionEvaluations).append("/").append(completionForwardLabelsPruned)
+				.append("/").append(completionBackwardLabelsPruned);
+		builder.append(", completionBoundScalar check/pruned/fallback/unavailable=")
+				.append(completionBoundScalarChecks).append("/").append(completionBoundScalarPruned).append("/")
+				.append(completionBoundScalarFunctionFallbacks).append("/").append(completionBoundScalarUnavailable);
+		builder.append(", timeIndexedScalar buildMs/improved/extraPruned/unavailable/windowTightenedReachable=")
+				.append(formatMillis(timeIndexedScalarBuildNanos)).append("/")
+				.append(timeIndexedScalarImprovedChecks).append("/").append(timeIndexedScalarExtraPruned).append("/")
+				.append(timeIndexedScalarUnavailable).append("/").append(timeIndexedWindowTightenedJobs).append("-")
+				.append(timeIndexedWindowReachableJobs);
+		builder.append(", completionBoundArcFixing candidates/fixed/domain/scalar/unavailable/funcEval/ms=")
+				.append(completionBoundArcFixingCandidates).append("/").append(completionBoundArcFixingFixed)
+				.append("/").append(completionBoundArcFixingDomainPruned).append("/")
+				.append(completionBoundArcFixingScalarPruned).append("/")
+				.append(completionBoundArcFixingUnavailable).append("/")
+				.append(completionBoundArcFixingFunctionEvaluations).append("/")
+				.append(formatMillis(completionBoundArcFixingNanos));
+		builder.append(", forwardSink visited/negative=").append(forwardSinkLabelsVisited).append("/")
+				.append(forwardSinkNegativeCandidates);
+		builder.append(", forwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=")
+				.append(forwardExtensionCandidates).append("/").append(forwardExtensionArcPruned).append("/")
+				.append(forwardExtensionInfeasible).append("/").append(forwardExtensionConstructed).append("/")
+				.append(forwardExtensionBoundSurvivors);
+		builder.append(", forwardDepth kept/negSink=").append(formatDepthHistogram(forwardLabelsKeptByDepth))
+				.append("/").append(formatDepthHistogram(forwardSinkNegativeByDepth));
+		builder.append(", forwardReach kept avg/min/max=")
+				.append(formatAverage(forwardLabelsKeptReachableSum, forwardLabelsKept)).append("/")
+				.append(formatReachableMin()).append("/").append(forwardLabelsKeptReachableMax);
+		builder.append(nodeDiagnosticsSummary());
+		builder.append(", completionBoundQueue=").append(completionBoundQueueOrdering);
+		builder.append(", completionBoundInternal timingMs fw/bw/agg=")
+				.append(formatMillis(completionBoundForwardBuildNanos)).append("/")
+				.append(formatMillis(completionBoundBackwardBuildNanos)).append("/")
+				.append(formatMillis(completionBoundAggregateNanos));
+		builder.append(", completionBoundInternal counts fCand/bCand/fPop/bPop/stale/merge/changed=")
+				.append(completionBoundForwardCandidateAttempts).append("/")
+				.append(completionBoundBackwardCandidateAttempts).append("/").append(completionBoundForwardQueuePops)
+				.append("/").append(completionBoundBackwardQueuePops).append("/")
+				.append(completionBoundPriorityQueueStalePops).append("/").append(completionBoundMergeCalls)
+				.append("/").append(completionBoundMergeChanged);
+		builder.append(", completionBoundSegments fwSamples/targetAvg/candAvg/afterAvg/maxTCA=")
+				.append(completionBoundForwardSegmentSamples).append("/")
+				.append(formatAverage(completionBoundForwardTargetSegments, completionBoundForwardSegmentSamples))
+				.append("/")
+				.append(formatAverage(completionBoundForwardCandidateSegments, completionBoundForwardSegmentSamples))
+				.append("/")
+				.append(formatAverage(completionBoundForwardAfterSegments, completionBoundForwardSegmentSamples))
+				.append("/").append(completionBoundForwardMaxTargetSegments).append("-")
+				.append(completionBoundForwardMaxCandidateSegments).append("-")
+				.append(completionBoundForwardMaxAfterSegments);
+		builder.append(", completionBoundSegments bwSamples/targetAvg/candAvg/afterAvg/maxTCA=")
+				.append(completionBoundBackwardSegmentSamples).append("/")
+				.append(formatAverage(completionBoundBackwardTargetSegments, completionBoundBackwardSegmentSamples))
+				.append("/")
+				.append(formatAverage(completionBoundBackwardCandidateSegments, completionBoundBackwardSegmentSamples))
+				.append("/")
+				.append(formatAverage(completionBoundBackwardAfterSegments, completionBoundBackwardSegmentSamples))
+				.append("/").append(completionBoundBackwardMaxTargetSegments).append("-")
+				.append(completionBoundBackwardMaxCandidateSegments).append("-")
+				.append(completionBoundBackwardMaxAfterSegments);
+		builder.append(", candidatePool kept/seen/dropped=").append(generatedCandidateBySignature.size()).append("/")
+                .append(generatedCandidateCount).append("/").append(generatedCandidateDroppedByHeap);
+		builder.append(", queueOrdering=").append(queueOrdering);
+		builder.append(", dynamicHStartMin=").append(dynamicMinHStart).append(", dynamicHEndMax=")
+				.append(dynamicMaxHEnd);
+		builder.append(", earliestSourceCompletion=").append(earliestSourceCompletion);
+		builder.append(", pricingHorizon=").append(pricingHorizon).append(", tMid=").append(tMid);
+		builder.append(", midpointStrategy/ref/ms=").append(midpointStrategyUsed).append("/")
+				.append(midpointReferenceTime).append("/").append(formatMillis(midpointStrategyNanos));
+		builder.append(", midpointColumns count/lastMinAvgMax/halfMinAvgMax=")
+				.append(midpointColumnSelectedCount).append("/").append(midpointColumnLastMin).append("/")
+				.append(midpointColumnLastAvg).append("/").append(midpointColumnLastMax).append("/")
+				.append(midpointColumnHalfMin).append("/").append(midpointColumnHalfAvg).append("/")
+				.append(midpointColumnHalfMax);
+		builder.append(", midpointColumnTasks count/minAvgMedianMax=").append(midpointColumnTaskSampleCount)
+				.append("/").append(midpointColumnTaskMin).append("/").append(midpointColumnTaskAvg).append("/")
+				.append(midpointColumnTaskMedian).append("/").append(midpointColumnTaskMax);
+		builder.append(", midpointProbe=").append(midpointProbeSummary);
+		builder.append(", midpointProbeFeedback=").append(midpointProbeFeedbackSummary);
+		builder.append(targetTraceSummary());
+		builder.append(", zeroDualExcludedJobs=").append(zeroDualExcludedJobCount);
+		builder.append(", piWindow=").append(dualProfitableWindowEnabled ? "enabled" : "disabled");
+		builder.append(", ").append(dominanceStatisticsSummary());
+		return builder.toString();
 	}
 
 	private String targetTraceSummary() {
@@ -3628,8 +3970,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private double completionBoundCutoff() {
-		// 2026-06-01: completion bound 闁告瑯浜滈崹浠嬪棘?label 闁哄嫷鍨伴幆浣规交濡灝鍘撮悶娑栧劜閸ㄦ氨鎷归悢宄扮仚闁?
-		// 濞戞挸绉虫繛鍥偨閵娿儳绉奸柛?best reduced cost闁挎稑鐭傛导鈺呭礂瀹ュ懎缍侀柟?record-only 闁告搩浜濋悘濠囩嵁閺堝灚涓㈤柟?top-K 閻犳劗鍠庨崹顏堝Υ?
+		// 2026-06-01: completion bound 闂佸憡鐟禍婊堝垂娴犲妫?label 闂佸搫瀚烽崹浼村箚娴ｈ浜ゆ俊顖氱仢閸樻挳鎮跺☉鏍у姕闁搞劍姘ㄩ幏褰掓偄瀹勬壆浠氶梺?
+		// 婵炴垶鎸哥粔铏箾閸ヮ剚鍋ㄩ柕濞垮劤缁夊ジ鏌?best reduced cost闂佹寧绋戦惌鍌涘閳哄懎绀傜€广儱鎳庣紞渚€鏌?record-only 闂佸憡鎼╂禍婵嬫倶婵犲洨宓侀柡鍫濈仛娑撱垽鏌?top-K 闁荤姵鍔楅崰搴ㄥ垂椤忓牆违?
 		return REDUCED_COST_TOLERANCE;
 	}
 
@@ -3709,8 +4051,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-09: 閻犲洤锕ラ弻?required adjacency dual 闁哄嫷鍨伴幆渚€骞?relaxed suffix 濞戞挸顑囬弲顐﹀储鐎ｎ亞绻侀弶鈺佹矗缂嶅棝濡?
-	 * 闁告瑯浜濈€垫粎鍖栭懡銈囧煚閻忕偟鍋為埀顑嫭鈻旂€殿喖绻戠€垫氨鈧淇烘俊顓㈡倷鐟欏嫭顦ч弶鍫熸尭閸ゎ參鏁嶇仦鑲╃憹鐟滄澘宕幖宄邦潰閿濆懐纭€ pricing 閻犲浂鍘虹粻鐔煎Υ?
+	 * 2026-06-09: 闁荤姴娲ら敃銉╁蓟?required adjacency dual 闂佸搫瀚烽崹浼村箚娓氣偓楠?relaxed suffix 婵炴垶鎸搁鍥疾椤愶箑鍌ㄩ悗锝庝簽缁讳線寮堕埡浣圭煑缂傚秴妫濇俊?
+	 * 闂佸憡鐟禍婵堚偓鍨矌閸栨牠鎳￠妶鍥х厷闁诲繒鍋熼崑鐐哄焵椤戭剙瀚埢鏃傗偓娈垮枛缁绘垹鈧灚姘ㄩ埀顒冾潐娣囩儤淇婇銏″€烽悷娆忓椤ρ囧级閸喐灏柛銈庡弮閺佸秶浠﹂懖鈺冩喒閻熸粍婢樺畷顒勫箹瀹勯偊娼伴柨婵嗘噽绾偓 pricing 闁荤姴娴傞崢铏圭不閻旂厧违?
 	 */
 	private void maybeDumpCompletionBoundMinDiagnostic(LP lp) {
 		Node currentNode = lp == null ? null : lp.getNode();
@@ -4019,8 +4361,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-23: join 闁告挸绉虫径宥夊籍閼搁潧惟 forward 闁告锕ら悡娆撳矗閸忓懏娅犵€点倛鍩栫€氬洦绋?f(Tmid)闁?
-	 * 閺夆晜鐟﹀Σ鍝ユ媼閻戞ɑ鐎悗鍦仧楠炲洭鏌屽畝鈧▓?join 閺夊牆鎳庢慨顏堝礄閼恒儲娈堕柨娑樺缁楀宕樺▎蹇旂 label闁?
+	 * 2026-05-23: join 闂佸憡鎸哥粔铏緞瀹ュ绫嶉柤鎼佹涧鎯?forward 闂佸憡顨呴敃銈夋偂濞嗘挸鐭楅柛蹇撴噺濞呯姷鈧偣鍊涢崺鏍偓姘处缁?f(Tmid)闂?
+	 * 闁哄鏅滈悷锕€危閸濄儲濯奸柣鎴炆戦悗顕€鎮楅崷顓炰户妤犵偛娲弻灞界暆閳ь剙鈻?join 闁哄鐗嗛幊搴㈡叏椤忓牆绀勯柤鎭掑劜濞堝爼鏌ㄥ☉妯侯殭缂佹顦靛畷妯衡枎韫囨梻顦?label闂?
 	 */
 	private PiecewiseLinearFunction getForwardJoinExtension(ForwardLabel label) {
 		if (label.joinExtendedFrontier == null) {
@@ -4040,8 +4382,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-23: join 闁告挸绉虫径宥夊籍閼搁潧惟 backward 闁告锕ら悡娆忣啅閿旀寧娅犵€点倛鍩栫€氬洦绋?f_b(Tmid)闁?
-	 * 閺夆晜鐟﹀Σ鍝ユ媼閻戞ɑ鐎悗鍦仧楠炲洭鏌屽畝鈧▓?join 閺夊牆鎳庢慨顏堝礄閼恒儲娈堕柨娑樺缁楀宕樺▎蹇旂 label闁?
+	 * 2026-05-23: join 闂佸憡鎸哥粔铏緞瀹ュ绫嶉柤鎼佹涧鎯?backward 闂佸憡顨呴敃銈夋偂濞嗗浚鍟呴柨鏃€瀵у▍鐘碘偓鐐瑰€涢崺鏍偓姘处缁?f_b(Tmid)闂?
+	 * 闁哄鏅滈悷锕€危閸濄儲濯奸柣鎴炆戦悗顕€鎮楅崷顓炰户妤犵偛娲弻灞界暆閳ь剙鈻?join 闁哄鐗嗛幊搴㈡叏椤忓牆绀勯柤鎭掑劜濞堝爼鏌ㄥ☉妯侯殭缂佹顦靛畷妯衡枎韫囨梻顦?label闂?
 	 */
 	private PiecewiseLinearFunction getBackwardJoinExtension(BackwardLabel label) {
 		if (label.joinExtendedFrontier == null) {
@@ -4074,6 +4416,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
+		tryGenerateColumn(sequence, lp, inferredReducedCost, false);
+	}
+
+	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost,
+			boolean forceTrueCost) {
 		observeRelaxedReducedCost(inferredReducedCost);
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
@@ -4097,21 +4444,51 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
-		if (Utility.compareLt(inferredReducedCost, REDUCED_COST_TOLERANCE)) {
+		double candidateReducedCost = inferredReducedCost;
+		TWETColumn candidateColumn = null;
+		if (forceTrueCost) {
+			double checkedCost = evaluator.evaluate(sequence);
+			if (Utility.isBigMValue(checkedCost)) {
+				if (targetSequence) {
+					traceTarget("COLUMN_REJECT trueCostBigM inferredRC=" + inferredReducedCost);
+				}
+				return;
+			}
+			candidateColumn = new TWETColumn(-1, sequence, data.n, checkedCost, ColumnSource.PRICING_EXACT, false);
+			candidateReducedCost = computeCurrentPricingReducedCost(candidateColumn, lp);
+		}
+		if (Utility.compareLt(candidateReducedCost, REDUCED_COST_TOLERANCE)) {
 			if (joinBestThresholdMode == JoinBestThresholdMode.BEST_RECORD
-					&& !Utility.compareLt(inferredReducedCost, joinLowerBoundThreshold())) {
+					&& !Utility.compareLt(candidateReducedCost, joinLowerBoundThreshold())) {
 				generatedCandidateDroppedByHeap++;
 				if (targetSequence) {
-					traceTarget("COLUMN_REJECT bestRecordThreshold inferredRC=" + inferredReducedCost);
+					traceTarget("COLUMN_REJECT bestRecordThreshold inferredRC=" + inferredReducedCost
+							+ " candidateRC=" + candidateReducedCost);
 				}
 				return;
 			}
 			if (targetSequence) {
-				traceTarget("COLUMN_CANDIDATE inferredRC=" + inferredReducedCost);
+				traceTarget("COLUMN_CANDIDATE inferredRC=" + inferredReducedCost + " candidateRC="
+						+ candidateReducedCost);
 			}
-			rememberGeneratedCandidate(signature, PricingColumnCostRechecker.buildInferredColumn(sequence,
-					inferredReducedCost, lp, data, ColumnSource.PRICING_EXACT), inferredReducedCost);
+			if (candidateColumn == null) {
+				candidateColumn = PricingColumnCostRechecker.buildInferredColumn(sequence,
+						inferredReducedCost, lp, data, ColumnSource.PRICING_EXACT);
+			}
+			rememberGeneratedCandidate(signature, candidateColumn, candidateReducedCost);
 		}
+	}
+
+	private double computeCurrentPricingReducedCost(TWETColumn column, LP lp) {
+		double reducedCost = column.getCost() - lp.getMachineDual();
+		int prev = 0;
+		for (int job : column.getSequence()) {
+			reducedCost -= lp.getJobDual(job);
+			reducedCost -= lp.getArcDual(prev, job);
+			prev = job;
+		}
+		reducedCost -= lp.getArcDual(prev, lp.getNode().sinkId());
+		return reducedCost;
 	}
 
 	private boolean isElementarySequence(ArrayList<Integer> sequence) {
@@ -4217,7 +4594,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void pruneGeneratedCandidatePool() {
-		// 2026-06-16: 闁告艾濂旂粩?sequence 闁告瑯鍨抽弫杈ㄥ緞濮橆偊鍤?split 闁汇垻鍠愰崹姘舵晬濞戞瑦锛嬮柛濠冪懇閳ь剙顦遍弳鈧柛锔哄妼閻栥垺绋夐銊хmap 闁告瑯浜欑换姘舵偩濞嗗繒绉奸柛鎾崇У濞撹埖瀵煎Ο琛″亾濞嗘挴鍋撴径鍫氬亾?
+		// 2026-06-16: 闂佸憡鑹炬總鏃傜博?sequence 闂佸憡鐟崹鎶藉极鏉堛劌绶炴慨姗嗗亰閸?split 闂佹眹鍨婚崰鎰板垂濮樿埖鏅繛鎴炵懄閿涘鏌涙繝鍐噰闁逞屽墮椤﹂亶寮抽埀顒勬煕閿斿搫濡奸柣鏍ュ灪缁嬪顢橀妸褏顦甿ap 闂佸憡鐟禍娆戞崲濮樿埖鍋╂繛鍡楃箳缁夊ジ鏌涢幘宕囆ｆ繛鎾瑰煐鐎电厧螣鐞涒€充壕婵炲棙鎸撮崑鎾村緞閸艾浜?
 		while (generatedCandidateBySignature.size() > config.maxExactPricingColumns) {
 			PricingColumnCandidate worstKept = pollCurrentWorstGeneratedCandidate();
 			if (worstKept == null) {
@@ -4238,6 +4615,131 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return null;
 	}
 
+	private void maybeAuditAlternativeJoin(LP lp) {
+		boolean auditEnvelope = Boolean.getBoolean("twet.bpc.ngDssrAuditEnvelopeAfterStandard")
+				&& !useJoinEnvelopeCompression();
+		boolean auditStandard = Boolean.getBoolean("twet.bpc.ngDssrAuditStandardAfterEnvelope")
+				&& useJoinEnvelopeCompression();
+		if (!auditEnvelope && !auditStandard) {
+			return;
+		}
+		Node node = lp == null ? null : lp.getNode();
+		int targetNodeId = Integer.getInteger("twet.bpc.ngDssrJoinAuditNodeId", -1);
+		if (node == null || (targetNodeId >= 0 && node.id != targetNodeId)) {
+			return;
+		}
+		String mode = auditEnvelope ? "envelope-after-standard" : "standard-after-envelope";
+		ArrayList<TWETColumn> auditColumns = runAlternativeJoinAudit(lp, auditEnvelope);
+		writeAlternativeJoinAudit(lp, mode, auditColumns);
+	}
+
+	private ArrayList<TWETColumn> runAlternativeJoinAudit(LP lp, boolean useEnvelopeJoin) {
+		ArrayList<TWETColumn> savedGeneratedColumns = generatedColumns;
+		PriorityQueue<PricingColumnCandidate> savedGeneratedColumnCandidates = generatedColumnCandidates;
+		HashMap<SequenceSignature, PricingColumnCandidate> savedGeneratedCandidateBySignature =
+				generatedCandidateBySignature;
+		int savedNextCandidateId = nextCandidateId;
+		long savedGeneratedCandidateCount = generatedCandidateCount;
+		long savedGeneratedCandidateDroppedByHeap = generatedCandidateDroppedByHeap;
+		double savedBestGeneratedReducedCost = bestGeneratedReducedCost;
+		double savedLastRelaxedRoundBestReducedCost = lastRelaxedRoundBestReducedCost;
+		ArrayList<NonElementaryNegativeRoute> savedNonElementaryNegativeRoutes = nonElementaryNegativeRoutes;
+		int savedNgDssrRoundNonElementaryNegativeSeen = ngDssrRoundNonElementaryNegativeSeen;
+		try {
+			generatedColumns = new ArrayList<TWETColumn>();
+			generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
+					Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
+			generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();
+			nextCandidateId = 0;
+			generatedCandidateCount = 0;
+			generatedCandidateDroppedByHeap = 0;
+			bestGeneratedReducedCost = Utility.big_M;
+			lastRelaxedRoundBestReducedCost = Double.POSITIVE_INFINITY;
+			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
+			ngDssrRoundNonElementaryNegativeSeen = 0;
+			if (useEnvelopeJoin) {
+				joinAllForwardTerminalGroupsByEnvelope(lp);
+			} else {
+				for (int lastJob = activeForwardTerminalJobs.nextSetBit(0);
+						lastJob >= 0 && lastJob <= data.n && canContinue();
+						lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
+					ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
+					if (candidates.isEmpty()) {
+						continue;
+					}
+					joinForwardGroupToBackwardLabels(lastJob, candidates, lp);
+					if (canContinue()) {
+						joinForwardGroupToSink(candidates, lp);
+					}
+				}
+			}
+			finalizeGeneratedColumns(lp);
+			return new ArrayList<TWETColumn>(generatedColumns);
+		} finally {
+			generatedColumns = savedGeneratedColumns;
+			generatedColumnCandidates = savedGeneratedColumnCandidates;
+			generatedCandidateBySignature = savedGeneratedCandidateBySignature;
+			nextCandidateId = savedNextCandidateId;
+			generatedCandidateCount = savedGeneratedCandidateCount;
+			generatedCandidateDroppedByHeap = savedGeneratedCandidateDroppedByHeap;
+			bestGeneratedReducedCost = savedBestGeneratedReducedCost;
+			lastRelaxedRoundBestReducedCost = savedLastRelaxedRoundBestReducedCost;
+			nonElementaryNegativeRoutes = savedNonElementaryNegativeRoutes;
+			ngDssrRoundNonElementaryNegativeSeen = savedNgDssrRoundNonElementaryNegativeSeen;
+		}
+	}
+
+	private void writeAlternativeJoinAudit(LP lp, String mode, ArrayList<TWETColumn> columns) {
+		Path dir = Paths.get(System.getProperty("twet.bpc.ngDssrJoinAuditDir",
+				"test-results/bpc/ng-dssr-join-audit"));
+		Node node = lp.getNode();
+		String fileName = "node-" + node.id + "-round-" + ngDssrRound + "-" + mode + "-"
+				+ System.currentTimeMillis() + ".tsv";
+		try {
+			Files.createDirectories(dir);
+			Path file = dir.resolve(fileName);
+			LP.PricingDualSnapshot dual = lp.captureTruePricingDuals();
+			try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+				out.write("mode\tcolumnIndex\tstoredCost\tevalCost\tcostDiff\tstoredReducedCost\tevalReducedCost"
+						+ "\tsource\tlength\trepeated\tsequence");
+				out.newLine();
+				for (int i = 0; i < columns.size(); i++) {
+					TWETColumn column = columns.get(i);
+					double evalCost = evaluator.evaluate(column.getSequence());
+					double storedReducedCost = lp.computeReducedCost(column, dual);
+					double evalReducedCost = storedReducedCost + evalCost - column.getCost();
+					out.write(mode);
+					out.write('\t');
+					out.write(Integer.toString(i));
+					out.write('\t');
+					out.write(Double.toString(column.getCost()));
+					out.write('\t');
+					out.write(Double.toString(evalCost));
+					out.write('\t');
+					out.write(Double.toString(column.getCost() - evalCost));
+					out.write('\t');
+					out.write(Double.toString(storedReducedCost));
+					out.write('\t');
+					out.write(Double.toString(evalReducedCost));
+					out.write('\t');
+					out.write(String.valueOf(column.getSource()));
+					out.write('\t');
+					out.write(Integer.toString(column.size()));
+					out.write('\t');
+					out.write(Boolean.toString(hasRepeatedJob(column.getSequence())));
+					out.write('\t');
+					out.write(formatSequence(column.getSequence()));
+					out.newLine();
+				}
+			}
+			System.out.println("[ngDssrJoinAudit] node=" + node.id + " round=" + ngDssrRound
+					+ " mode=" + mode + " columns=" + columns.size() + " file=" + file.toAbsolutePath());
+		} catch (IOException ex) {
+			System.err.println("[ngDssrJoinAudit] failed node=" + node.id + " mode=" + mode + ": "
+					+ ex.getMessage());
+		}
+	}
+
 	private void finalizeGeneratedColumns(LP lp) {
 		generatedColumns.clear();
 		ArrayList<PricingColumnCandidate> candidates = new ArrayList<PricingColumnCandidate>(
@@ -4249,12 +4751,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				generatedColumns.add(candidate.column);
 				continue;
 			}
-			// 2026-05-31: 闁告瑯浜濆﹢渚€寮界涵鍛濋柣?no-cut pi-window 濞村吋淇洪鈧?K 闁割偄妫楅埀顒佺懇閳ь剙顦伴崹姘跺嫉椤掆偓瑜版稑顕ラ崟顐＄剨缂佹瘱浣插亾?
-			// pi-window 闁哄嫷鍨扮敮?hard window 闁汇劌瀚悺娆撳礌濞差亝锛熼柨娑樿嫰濞叉粌顫?inferred 闁瑰瓨鍔栧﹢鐗堢▔瀹ュ嫮绉靛ù婊冩捣濠€锛勨偓鍦仜閸亪骞嬮幇顓熸嫳闁?
-			// inferred reduced cost 鐎规瓕寮撶拹鐔烘嫻閻斿憡顦ч柨娑樼灱濠€锛勨偓?reduced cost 闁告瑯浜欑槐浼村即閺夋垹姣堥柨娑樼焷缁绘牠鏌岀仦钘夋锭濞ｅ浂鍠楅婊堝礆濡や礁鐏囬柡鍫厵閳?
-			// 2026-06-13: SRI active 闁?inferred reduced cost 闁?cut dual闁挎稑濂旂粭澶愭嚄閽樺娑ч柟?machine/job/arc dual 闁告瑥绉电敮?objective cost闁?
-			// 2026-06-15: partial dominance 濞村吋鑹剧敮顐﹀捶閹峰矈姊块柛鎿冧簼閹磭妲?frontier闁挎稑鏈?label 闁?minReducedCost
-			// 濞戞挸绉撮崯鈧☉鎾亾閻庤姘ㄩ悺鎴炵?recovered sequence 闁汇劌瀚悾顒勫极閺夋垵鐏欓柟瀛樺姈濠€浼存晬濞戞ê娑ч柡?partial backend 闂傚洠鍋撻悷鏇氱濠€顏堝礂閵夛妇娼ㄩ柛鎾崇У娴狀喗寰勫鍥ㄥ焸閻庡湱鍋為崹姘跺嫉椤戦敮鍋?
+			// 2026-05-31: 闂佸憡鐟禍婵嗭耿娓氣偓瀵晫娑甸崨顓囨繈鏌?no-cut pi-window 婵炴潙鍚嬫穱娲敊閳?K 闂佸壊鍋勫Λ妤呭焵椤掍胶鎳囬柍褜鍓欓ˇ浼村垂濮樿泛瀚夋い鎺嗗亾鐟滅増绋戦銉╁礋椤愶紕鍓ㄧ紓浣圭槺娴ｆ彃浜?
+			// pi-window 闂佸搫瀚烽崹鎵暜?hard window 闂佹眹鍔岀€氼剟鎮哄▎鎾崇婵炲樊浜濋敍鐔兼煥濞戞瀚版繛鍙夌矊椤?inferred 闂佺懓鐡ㄩ崝鏍э耿閻楀牏鈻旂€广儱瀚粔闈浢瑰鍐╂崳婵犫偓閿涘嫧鍋撻崷顓炰粶闁割煈浜獮瀣箛椤撶喐瀚抽梺?
+			// inferred reduced cost 閻庤鐡曞鎾舵嫻閻旂儤瀚婚柣鏂挎啞椤ρ囨煥濞戞鐏辨繝鈧敍鍕ㄥ亾?reduced cost 闂佸憡鐟禍娆戞娴兼潙鍗抽柡澶嬪灩濮ｅ牓鏌ㄥ☉妯肩劮缂佺粯鐗犻弻宀€浠﹂挊澶嬮敪婵烇絽娴傞崰妤咁敆濠婂牆绀嗘俊銈勭閻忓洭鏌￠崼顐㈠幍闁?
+			// 2026-06-13: SRI active 闂?inferred reduced cost 闂?cut dual闂佹寧绋戞總鏃傜箔婢舵劖鍤勯柦妯侯槸濞懷囨煙?machine/job/arc dual 闂佸憡鐟ョ粔鐢垫暜?objective cost闂?
+			// 2026-06-15: partial dominance 婵炴潙鍚嬮懝鍓ф暜椤愶箑鎹堕柟宄扮焾濮婂潡鏌涢幙鍐х凹闁诡喖纾Σ?frontier闂佹寧绋戦張顒€顪?label 闂?minReducedCost
+			// 婵炴垶鎸哥粔鎾疮閳ь剙鈽夐幘顖氫壕闁诲氦顫夊銊╂偤閹寸偟顩?recovered sequence 闂佹眹鍔岀€氼剟鎮鹃鍕瀬闁哄鍨甸悘娆撴煙鐎涙ê濮堟繝鈧导瀛樻櫖婵炴垶锚濞懷囨煛?partial backend 闂傚倸娲犻崑鎾绘偡閺囨氨顦︽繝鈧鍫濈闁靛濡囧銊╂煕閹惧磭校濞寸媭鍠楀鍕吋閸ャ劌鐒搁柣搴℃贡閸嬬偤宕瑰璺哄珘妞ゆ垿鏁崑?
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column, data,
 					evaluator);
 			if (checked != null) {
@@ -4263,10 +4765,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 	}
 
+
 	private boolean requiresExactColumnCostRecovery() {
 		return dualProfitableWindowEnabled || sriPricingEnabled || dominanceBackend != DominanceBackend.PAPER;
 	}
-
 	private boolean isSequenceCompatible(List<Integer> sequence, Node node) {
 		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
 			return false;
@@ -4309,8 +4811,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-22: backward 濞撴皜鍐╁閻犱胶鍎ら弸鍐╃▔閳ь剟鎳涙潏鍓х闁稿繐鐗忛弫銈夊嫉椤掑啰鏋傚Λ鏉垮椤撳摜绮诲Δ鍐╃暠 H^b_{ir} 闁?O(1) 濞存嚎鍊濆▔锔芥交閸ャ劍濮㈤柨?
-	 * 闁活亞鍠愰婊堟儍?reduced-cost 闁告垼濮ら弳鐔哥瀹ュ懏韬?extendBackward 闂佹彃鐭傞埀顒佷亢缁?shift/add/normalize 闂侇偅甯楃敮褰掑Υ?
+	 * 2026-05-22: backward 婵炴挻鐨滈崘鈺侇伅闁荤姳鑳堕崕銈夊几閸愨晝鈻旈柍褜鍓熼幊娑欐綇閸撗咁槷闂佺绻愰悧蹇涘极閵堝瀚夋い鎺戝暟閺嬪倸螞閺夊灝顏い鎾虫憸缁螖閸愨晝鏆?H^b_{ir} 闂?O(1) 婵炲瓨鍤庨崐婵嗏枖閿旇姤浜ら柛銉ｅ妽婵垽鏌?
+	 * 闂佹椿浜為崰鎰邦敆濠婂牊鍎?reduced-cost 闂佸憡鍨兼慨銈夊汲閻斿摜顩风€广儱鎳忛煬?extendBackward 闂備焦褰冮惌鍌炲焵椤掍椒浜㈢紒?shift/add/normalize 闂備緡鍋呯敮妤冩暜瑜版帒违?
 	 */
 	private boolean isDirectBackwardExtensionTimeFeasible(BackwardLabel label, int prevJob) {
 		return isDirectBackwardExtensionTimeFeasible(label.jid, label.isSinkRoot, label.frontier, prevJob);
@@ -4443,7 +4945,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void cacheDssrReusablePricingWindowScalars() {
-		// 2026-06-12: initialize() 婵絽绻楅悿鍡樺濮橆剙甯ラ梺鎻掔Ф閻?pricingHorizon闁挎稒绋戦ˇ鏌ユ偨?window 闁轰焦澹嗙划宥夊籍鐠鸿櫣绠戝銈堫嚙閹挸顫㈤妷锔垮垝濠㈣泛绉风换鏍ㄧ濞戞瑧鍨奸梺鎻掔箞閳?
+		// 2026-06-12: initialize() 濠殿噯绲界换妤呮偪閸℃ê顕辨慨姗嗗墮鐢儵姊洪幓鎺斝ら柣?pricingHorizon闂佹寧绋掔粙鎴λ囬弻銉﹀仺?window 闂佽桨鐒︽竟鍡欏垝瀹ュ绫嶉悹楦挎缁犳垵顪冮妶鍫殭闁诡喗鎸搁～銏ゅΨ閿斿灝鍨濇繝銏ｆ硾缁夐鎹㈤弽銊ь洸婵炴垶鐟ч崹濂告⒑閹绘帞绠為柍?
 		ngDssrReusablePricingHorizon = pricingHorizon;
 		ngDssrReusableDynamicMinHStart = dynamicMinHStart;
 		ngDssrReusableDynamicMaxHEnd = dynamicMaxHEnd;
@@ -4466,8 +4968,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		timeIndexedScalarBuildNanos += timeIndexedScalarBound.getBuildNanos();
 		TimeIndexedScalarCompletionBound.WindowTightening tightened;
 		if (config.timeIndexedCompletionBoundInRoundArcFixing) {
-			// 2026-06-29: pricing 濞戞搩鍙冨Λ鎸庢交椤撴繂鏁╅柛娆樹簷婵炲洭鎮?no-SRI 闁汇劌瀚禍銈夋煂?relaxed fixing闁?
-			// SRI-aware fixing 闁告瑯浜欑换姘舵偩濞嗗繑韬?node 闂傚偆鍘奸幃搴ㄥ触鎼达絾鐣遍柛娆樺灣閹寸兘骞?reduced-cost fixing 濞戞搩鍙忕槐婵嬫焼閸喖甯虫慨锝呯箺閻?DSSR 閺夆晩鍘洪崬顒傜磼鐎涙ê袘濠㈣埖姘ㄦ慨鎼佸箑?bucket闁?
+			// 2026-06-29: pricing 婵炴垶鎼╅崣鍐ㄎ涢幐搴氦妞ゆ挻绻傞弫鈺呮煕濞嗘ü绨峰┑鐐叉喘閹?no-SRI 闂佹眹鍔岀€氼垱绂嶉妶澶嬬厒?relaxed fixing闂?
+			// SRI-aware fixing 闂佸憡鐟禍娆戞崲濮樿埖鍋╂繛鍡楃箲闊?node 闂傚倸鍋嗛崢濂稿箖鎼淬劌瑙﹂幖杈剧稻閻ｉ亶鏌涘▎妯虹仯闁瑰鍏橀獮?reduced-cost fixing 婵炴垶鎼╅崣蹇曟濠靛鐒奸柛顭戝枛鐢櫕鎱ㄩ敐鍛闁?DSSR 闁哄鏅╅崢娲船椤掑倻纾奸悗娑櫭婵犮垼鍩栧銊︽叏閹间礁绠?bucket闂?
 			tightened = timeIndexedScalarBound.tightenWindowsAfterZeroReducedCostArcFixing(
 					effectiveJobHStart, effectiveJobHEnd);
 		} else {
@@ -4530,7 +5032,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				}
 			}
 			if (node != null && node.hasTimeIndexedPricingWindow(job)) {
-				// 2026-06-29: time-indexed fixing 鐎电増顨呴崺宀勬儍閸曨剚笑闁告瑯鍨抽幋鐑藉箥鐠恒劍鐣辩痪顓у墰閻涖儵宕ｉ敐蹇曞耿闁?dual window 闁告瑦鐗斿锕傛⒖閸℃绁柛娆樺灛閳?
+				// 2026-06-29: time-indexed fixing 閻庣數澧楅〃鍛村春瀹€鍕剭闁告洦鍓氱瑧闂佸憡鐟崹鎶藉箣閻戣棄绠ラ悹鎭掑妽閻ｈ京鐥褍澧伴柣娑栧劦瀹曪綁鏁愯箛鏇炶€块梺?dual window 闂佸憡鐟﹂悧鏂款潩閿曞倹鈷栭柛鈩冾殔缁侇噣鏌涘▎妯虹仜闁?
 				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
 				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
 			}
@@ -4645,7 +5147,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (Double.isFinite(left) && Utility.compareLt(left, pricingHorizon)) {
 			candidate = (left + pricingHorizon) * 0.5;
 		} else {
-			// 2026-05-26: 鐟滅増鎸搁惇顒勬焾閵娧呭炊闁告瑱绲介崙锛勭磼韫囨艾鍨遍柛?pricingHorizon 闁哄啳顔愮槐婵嬪炊閻愯　鍋撻埀顒勫礆閺夊灝绀侀柛瀣箰閸ㄥ繘宕氶崱顓犵闂侇剙鐏濋崢銈夊触鎼粹剝鍊婚柛妤€锕ょ亸顖炴⒒閹绢喗姣愰幖杈剧細鐠?0闁?
+			// 2026-05-26: 閻熸粎澧楅幐鎼佹儑椤掑嫭鐒鹃柕濞у懎鐐婇梺鍛婄懕缁蹭粙宕欓敍鍕＜闊洦鑹鹃崹閬嶆煕?pricingHorizon 闂佸搫鍟抽鎰濠靛鐐婇柣鎰€€閸嬫捇鍩€椤掑嫬绀嗛柡澶婄仢缁€渚€鏌涚€ｎ亞绠伴柛銊ョ箻瀹曟岸宕遍鐘殿槷闂備緡鍓欓悘婵嬪储閵堝瑙﹂幖绮瑰墲閸婂鏌涘Δ鈧敃銈囦焊椤栫偞鈷掗柟缁㈠枟濮ｆ劙骞栨潏鍓х窗閻?0闂?
 			candidate = pricingHorizon * 0.75;
 		}
 		return clampCurrentMidpoint(candidate);
@@ -4735,8 +5237,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-06-07: 闁稿繐鐗呯划?low reduced-cost 闁告帗銇為懙鎴犳嫚閸曨亞骞?2K 闁哄妲勭槐婵嬪礃瀹ュ棗鐦婚柛鎺擃殕濠€顖溾偓鐟拌嫰娴兼劙寮崼鏇燂紵闁告瑦鐗楀〒鍫曞疾?K 闁哄鎵冲亾?
-	 * 閺夆晜鐟﹂悧杈ㄧ┍濠靛牊娈屽ù鐘侯嚙婵喖鏌?median 闁汇劌瀚銏＄▕婢舵稓绀夐柛姘湰濡炲倿宕欒箛鎾舵瘜闁活収鍘奸崹顏堝箣閺嶃劍锛嶉悗鐟拌嫰娴兼劙宕氬Δ浣肝?Tmid 闁瑰嘲顦欢杈ㄦ交閸パ傜闁?
+	 * 2026-06-07: 闂佺绻愰悧鍛垝?low reduced-cost 闂佸憡甯楅妵鐐烘嚈閹寸姵瀚氶柛鏇ㄤ簽楠?2K 闂佸搫顦Σ鍕濠靛绀冪€广儱妫楅惁濠氭煕閹烘搩娈曟繝鈧婧惧亾閻熸媽瀚板ù鍏煎姍瀵噣宕奸弴鐕傜吹闂佸憡鐟﹂悧妤€銆掗崼鏇炵柧?K 闂佸搫顥￠幍鍐蹭壕?
+	 * 闁哄鏅滈悷锕傛偋鏉堛劎鈹嶆繝闈涚墛濞堝苯霉閻樹警鍤欏┑顔惧枛閺?median 闂佹眹鍔岀€氼垶顢氶姀锛勨枙濠㈣埖绋撶粈澶愭煕濮橆剚婀版俊鐐插€垮畷娆掔疀閹捐埖鐦滈梺娲诲弾閸樺ジ宕归鍫濈闁哄秲鍔嶉敍宥夋倵閻熸媽瀚板ù鍏煎姍瀹曟艾螖娴ｈ倽?Tmid 闂佺懓鍢查ˇ顖滄鏉堛劍浜ら柛銉戝倻顔嗛梺?
 	 */
 	private MidpointColumnTimingStats evaluateTopLastMidpointColumnTiming(LP lp) {
 		List<ColumnMidpointCandidate> candidates = selectMidpointColumnCandidates(lp);
@@ -4798,7 +5300,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!Double.isFinite(pricingHorizon) || !Utility.compareGt(pricingHorizon, 0.0)) {
 			return 0.0;
 		}
-		// 婵繐绲介悥?midpoint 闁稿浚鍓欑槐鈩冩償閺傚灝鍤掗柦鈧挊澶嬭含 (0, pricingHorizon) 闁告劕鎷戠槐杈ㄦ交濞嗘挸娅″ù鐘叉嚇濡茶顕ラ埄鍐偓顒備焊?horizon 闁瑰瓨鐗曢幃妤冪磼椤撶喐鏆柛蹇ｅ墮缁憋繝鏌呴悩鍐茬亣閻犳劗顥愮粩鐔煎Υ?
+		// 濠殿喗绻愮徊浠嬫偉?midpoint 闂佺娴氶崜娆戞閳╁啯鍎熼柡鍌氱仢閸ゆ帡鏌﹂埀顒勬寠婢跺鍚?(0, pricingHorizon) 闂佸憡鍔曢幏鎴犳鏉堛劍浜ゆ繛鍡樻尭濞呪€趁归悩鍙夊殗婵¤尪顕ч銉╁焺閸愵亖鍋撻鍌欑剨?horizon 闂佺懓鐡ㄩ悧鏇㈠箖濡ゅ啰纾兼い鎾跺枑閺嗩參鏌涜箛锝呭缂佹唻绻濋弻鍛存偐閸愯尙浜ｉ柣鐘冲姉椤ユ劗绮╅悢鐓幬?
 		double minWidth = Math.max(Utility.EPS * 10.0, pricingHorizon * 1e-9);
 		if (!Utility.compareGt(pricingHorizon, 2.0 * minWidth)) {
 			return pricingHorizon * 0.5;
@@ -4878,9 +5380,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-25: 闁告瑯浜濇繛濠囧矗閺嶃倐鍋撳鍐╁闁告挸绉归埞?闁告艾娴烽幋鐑藉籍閻樻彃褰犻柕鍡曠瀹曠喖鎯?job 闁煎浜滅换浣轰焊鏉堫偅鍎板☉鎾崇Т閸╁瞼鈧數鎳撶花?half-domain闁炽儲绻勫▓鎴炵┍閳╁啩绱栭柕?
-	 * forward 闁兼眹鍎查弳锝呪枔閻㈢鈧牜绮ｅΔ鍛幋闁?Tmid 闁告瑥鍘栭弲鍫曟晬鐏炶棄鐏熷ù鐘侯唺缂?forward prefix 闂侇喗鍨濈粭澶愭閳ь剛鎲版担绋挎櫃閻忓繑绻嗛惁顖溾偓鐟板枦缁?
-	 * backward 閻庨潧婀辫ⅷ闁革附澹嗗﹢鍛村极鐎涙﹩鍞界痪顓у墰閻涖儵寮伴姘剨鐎瑰憡褰冮悾顒勫礂閵娿劍鍎伴柛?Tmid 鐎归潻缂氶弲鍫曞Υ?
+	 * 2026-05-25: 闂佸憡鐟禍婵囩箾婵犲洤鐭楅柡宥冨€愰崑鎾愁煥閸愨晛顏梺鍛婃尭缁夊綊鍩?闂佸憡鑹惧ù鐑藉箣閻戣棄绫嶉柣妯诲絻瑜扮娀鏌曢崱鏇狀槮鐎规洜鍠栭幆?job 闂佺厧顨庢禍婊呮崲娴ｈ桨鐒婇弶鍫亝閸庢澘鈽夐幘宕囆㈤柛鈺佺灱閳ь剛鏁搁幊鎾惰姳?half-domain闂佺偨鍎茬换鍕枔閹寸偟鈹嶉柍鈺佸暕缁辨牠鏌?
+	 * forward 闂佸吋鐪归崕鏌ュ汲閿濆應鏋旈柣銏㈩暯閳ь剚鐗滅划锝呂旈崨顓炲箣闂?Tmid 闂佸憡鐟ラ崢鏍疾閸洘鏅悘鐐舵閻忕喎霉閻樹警鍞虹紓?forward prefix 闂備緡鍠楅崹婵堢箔婢舵劖顥嗛柍褜鍓涢幉鐗堟媴缁嬫寧娅冮柣蹇撶箲缁诲棝鎯侀婧惧亾閻熸澘鏋︾紒?
+	 * backward 闁诲酣娼у﹢杈叿闂侀潻闄勬竟鍡楋耿閸涙潙鏋侀悗娑欙供閸炵晫鐥褍澧伴柣娑栧劦瀵即顢涘顓炲墾閻庣懓鎲¤ぐ鍐偩椤掑嫬绀傞柕濞垮妽閸庝即鏌?Tmid 閻庡綊娼荤紓姘跺疾閸洖违?
 	 */
 	private void precomputeHalfDomainEligibility() {
 		forwardHalfEligibleByJob = new boolean[data.n + 1];
@@ -4911,8 +5413,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		baseForwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		baseBackwardHalfPenaltyByJob = new PiecewiseLinearFunction[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
-			// 2026-05-24: data.penaltyFunction[job] 鐎规瓕灏欑划锟犲礌閸涱厽鍎撻柛鈺勬〃缁?b_j 闁汇劌瀚板銈夊箑娴ｈ櫣鐓愮痪顓у墰閻涖儵濡?
-			// dual 濞戞挸绉烽崗妯绘交濞戞顏辨慨婵勫劜閺佸湱妲愯濡炲倿鏁嶇仦钘夎摕闁?pricing 闁烩晛鐡ㄧ敮瀛樺緞瀹ュ洦鏆忛弶鈺傜懁鐞氳鲸绋夐鍕９闁糕晝鍠撶槐锔锯偓娑欙公缁辨繈鏌嗛崹顔煎赋婵絽绻楅悿鍡涙煂瀹ュ拋妲?setDomain/crop闁?
+			// 2026-05-24: data.penaltyFunction[job] 閻庤鐡曠亸娆戝垝閿熺姴绀岄柛娑卞幗閸庢捇鏌涢埡鍕€冪紒?b_j 闂佹眹鍔岀€氭澘顭囬妶澶婄畱濞达綀娅ｉ悡鎰棯椤撗冨闁绘稏鍎垫俊?
+			// dual 婵炴垶鎸哥粔鐑藉礂濡粯浜ゆ繛鎴烆殘椤忚鲸鎱ㄥ┑鍕姕闁轰礁婀卞Σ鎰槼婵＄偛鍊块弫宥囦沪閽樺鎽曢梺?pricing 闂佺儵鏅涢悺銊ф暜鐎涙ê绶炵€广儱娲﹂弳蹇涘级閳哄倻鎳侀悶姘抽哺缁嬪顢旈崟顐わ紮闂佺硶鏅濋崰鎾舵閿旈敮鍋撳☉娆欏叕缂佽鲸绻堥弻鍡涘垂椤旂厧璧嬪┑顕嗙到缁绘鎮块崱娑欑厒鐎广儱鎷嬪Σ?setDomain/crop闂?
 			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, tMid);
 			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, pricingHorizon);
 		}
@@ -4921,18 +5423,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
-		Node node = lp.getNode();
-		if (node == null || node.depth != 0) {
-			return false;
-		}
-		// cut dual 闁瑰瓨鐗曢崹搴ㄥ绩?dual 闂侇喛妫勮ぐ鏌ユ嚄閸婄噥鍞?reduced arc cost 濞戞挸绉撮崯鈧繝濞愩倕鍠曢柛妯煎枎椤?setup cost 闁汇劌瀚粭浣烘喆閹哄秶鐟濈紒娑橆槸缁憋繝濡?
-		// 鐟滅増鎸告晶鐘诲矗椤忓嫭韬柡宥囶攰婵☆參鎮欓獮搴撳亾娴ｉ鐟繛灞稿墲濠€?active cuts 闁哄啯婀规繛鍥偨?pi_j 閺夆晜绋愮粩鏉戭潰閵夛附鏆紒姣栧洦楗柟顑跨椤﹀宕犻崨顖滃炊闁?
-		return lp.getActiveCutIds().isEmpty();
+		return PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	/**
-	 * 2026-05-28: 闁哄秶顢婃俊顓㈡倷?no-cut pricing 濞戞搩鍙忕槐婕癷_j=0 闁汇劌瀚幑銏ゅ礉閳ヨ尙鐟濋弶鈺傜☉閸?pricing 闁圭鏅涢惈宥夊Υ?
-	 * 闁革负鍔岀紞瀣礈瀹ュ棙锟?cut/branch dual 闁汇劌瀚粭浣烘喆閹哄秶鐟濈紒娑橆槸缁憋紕鎷犻婵堢枀濞戞挸顑戠槐婵囨交濞嗘垼顫?job 濞戞挸绉磋ぐ鏌ユ嚄閼恒儲鏆柛鐘插缁€?reduced-cost 闁告帗銇滈埀?
+	 * 2026-05-28: 闂佸搫绉堕、濠冧繆椤撱垺鍊?no-cut pricing 婵炴垶鎼╅崣蹇曟濠曠櫡_j=0 闂佹眹鍔岀€氼亪骞戦姀銈呯闁炽儴灏欓悷婵嬪级閳哄倻鈽夐柛?pricing 闂佸湱顣介弲娑㈡儓瀹ュ违?
+	 * 闂侀潻璐熼崝宀€绱炵€ｎ喖绀堢€广儱妫欓敓?cut/branch dual 闂佹眹鍔岀€氼亞绮担鐑樺枂闁瑰搫绉堕悷婵堢磼濞戞﹩妲哥紒鎲嬬磿閹风娀顢樺┑鍫㈡瀫婵炴垶鎸搁鎴犳濠靛洦浜ゆ繛鍡樺灱椤?job 婵炴垶鎸哥粔纾嬨亹閺屻儲鍤勯柤鎭掑劜閺嗩參鏌涢悩鎻掝伂缂佲偓?reduced-cost 闂佸憡甯楅妵婊堝焵?
 	 */
 	private void precomputeZeroDualExcludedJobs(LP lp) {
 		if (!dualProfitableWindowEnabled) {
@@ -4949,20 +5445,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
-		// 2026-05-23: 闁告锕ら悡娆愭綇閸︻厽娅曢柣鈺佺摠鐢挳宕樺▎蹇撳汲闁告柣鍔嶉埀?job penalty闁?
-		// forward 闁汇劌瀚弻濠冩櫠?job 闁告垼濮ら弳鐔煎矗椤忓嫭韬?[0,Tmid] 濞戞挸锕ゅ顒佺▔?add闁挎稑鑻崣鏇㈠礂閸楃偟鏆板☉鏂款槸閻撴瑦瀵煎鍐叉闁绘帟鍩栨俊鎼佸矗瀹曞浂浼傞柛妞烩偓铏含 Tmid闁?
+		// 2026-05-23: 闂佸憡顨呴敃銈夋偂濞嗘劖缍囬柛锔诲幗濞呮洟鏌ｉ埡浣烘憼閻㈩垱鎸冲畷妯衡枎韫囨挸姹查梺鍛婃煟閸斿秹鍩€?job penalty闂?
+		// forward 闂佹眹鍔岀€氼參寮绘繝鍐╂珷?job 闂佸憡鍨兼慨銈夊汲閻旂厧鐭楁い蹇撳闊?[0,Tmid] 婵炴垶鎸搁敃銈咁嚕椤掍胶鈻?add闂佹寧绋戦懟顖炲矗閺囥垹绀傞柛妤冨仧閺嗘澘鈽夐弬娆炬Ц闁绘挻鐟︾€电厧顫濋崘鍙夘唶闂佺粯甯熼崺鏍ㄤ繆閹间礁鐭楃€规洖娴傛导鍌炴煕濡炵儵鍋撻搹顐ュ惈 Tmid闂?
 		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, tMid);
 	}
 
 	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
-		// 2026-05-23: backward 閻庨潧婀辫ⅷ濞达綀娉曢弫?[Tmid,pricingHorizon] 濞戞挸锕﹀▓鎴﹀棘閺夋鏉?job 闁告垼濮ら弳鐔煎Υ?
-		// 闁兼眹鍎抽悰銉╁矗閿濆懍绠〒姘€鍌濈 big_M闁挎稑鑻幃妤冪磼?normalize(BACKWARD) 濞村吋宀搁埀顒佷亢缁?suffix-min 閻炴稏鍔忛幓顏堝灳濠婂啫璁插ù鐘劤閻℃垿宕氶幍顔惧炊闁告瑱绲介崬瀵糕偓鐟版湰閸ㄦ岸鍨惧┑鍕ㄥ亾?
+		// 2026-05-23: backward 闁诲酣娼у﹢杈叿婵炶揪缍€濞夋洟寮?[Tmid,pricingHorizon] 婵炴垶鎸搁敃锕€鈻撻幋锕€妫橀柡澶嬵儥閺?job 闂佸憡鍨兼慨銈夊汲閻旂厧违?
+		// 闂佸吋鐪归崕鎶芥偘閵夆晛鐭楅柨婵嗘噸缁狀垰銆掑鈧崒婵堫槹 big_M闂佹寧绋戦懟顖炲箖濡ゅ啰纾?normalize(BACKWARD) 婵炴潙鍚嬪畝鎼佸焵椤掍椒浜㈢紒?suffix-min 闁荤偞绋忛崝蹇涘箵椤忓牆鐏虫繝濠傚暙鐠佹彃霉閻橆喖鍔ら柣鈩冨灴瀹曟岸骞嶉鎯х倞闂佸憡鐟辩徊浠嬪船鐎电硶鍋撻悷鐗堟拱闁搞劍宀搁崹鎯р攽閸曘劌浜?
 		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction buildCompletionBoundPenalty(int job, double hStart, double hEnd) {
-		// 2026-06-01: Tmid pricing 闁汇劌瀚婊冾嚕?label 濞寸姴绉虫繛鍥偨閵娿儰绠柛娆忓暱瀹曟劙宕洪悢宄版瘣闁轰礁搴滅槐鐪俹mpletion bound
-		// 闂傚洠鍋撻悷鏇氱閸ㄤ粙寮鐐茬９闁?label 闁哄嫷鍨伴幆浣规交濡灝鍘撮悶娑栧劜閸ㄦ氨鈧懓鏈弳锝囨嫻閻斿嘲鐏欓柨娑樿嫰濞叉粌顫㈤妶鍛闁绘瑯鍏涙繛鍥偨閵娿儳鏆氶柡?[0, pricingHorizon] 閻庤鐭粻鐔煎春閻旂补鍋?
+		// 2026-06-01: Tmid pricing 闂佹眹鍔岀€氼參顢楀鍐惧殨?label 婵炲濮寸粔铏箾閸ヮ剚鍋ㄩ柕濞垮劙缁狀垶鏌涘▎蹇撴毐鐎规洘鍔欏畷娲偄瀹勭増鐦ｉ梺杞扮鎼存粎妲愰惇淇筸pletion bound
+		// 闂傚倸娲犻崑鎾绘偡閺囨氨顦﹂柛銊ょ矙瀵剟顢橀悙鑼紮闂?label 闂佸搫瀚烽崹浼村箚娴ｈ浜ゆ俊顖氱仢閸樻挳鎮跺☉鏍у姕闁搞劍姘ㄩ埀顒傛嚀閺堫剟寮抽敐鍥ㄥ闁绘柨鍢查悘娆撴煥濞戞瀚版繛鍙夌矊椤垽濡堕崨顓狀槹闂佺粯鐟崗娑欑箾閸ヮ剚鍋ㄩ柕濞垮劤閺嗘岸鏌?[0, pricingHorizon] 闁诲氦顫夐惌顔剧不閻旂厧鏄ラ柣鏃傝ˉ閸?
 		if (isEffectiveWindowTighterThanHard(job)) {
 			return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, pricingHorizon);
 		}
@@ -5345,8 +5841,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-24: normal forward label 缂?prefix-min normalize 闁告艾瀛╅弳锝嗘媴閹剧粯濮滃褏鍎戠槐?
-	 * 闁哄牃鍋撻悘?reduced cost 闁烩晛鐡ㄧ敮鎾媰閽樺韬柡鍫氬亾闁告瑥纾顒勬晬鐏炶偐鐟濋煫鍥ф噺閻︹€斥枎閳ュ啿鏅欓柛蹇嬪妽椤?findMinimal闁?
+	 * 2026-05-24: normal forward label 缂?prefix-min normalize 闂佸憡鑹剧€涒晠寮抽敐鍡樺闁瑰墽绮慨婊冾熆瑜忛崕鎴犳?
+	 * 闂佸搫鐗冮崑鎾绘倶?reduced cost 闂佺儵鏅涢悺銊ф暜閹绢喗濯伴柦妯侯槹闊剟鏌￠崼姘壕闂佸憡鐟ョ壕顓㈩敂椤掑嫭鏅悘鐐跺亹閻熸繈鐓崶褎鍣洪柣锔光偓鏂ユ瀻闁炽儱鍟块弲娆撴煕韫囧濡芥い?findMinimal闂?
 	 */
 	private static double forwardEndpointMin(PiecewiseLinearFunction frontier) {
 		if (frontier == null || frontier.tail == null) {
@@ -5356,8 +5852,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/**
-	 * 2026-05-24: normal backward label 缂?suffix-min normalize 闁告艾瀛╅弳锝嗘媴閹剧粯濮滈柛鎴濋獜缁?
-	 * 闁哄牃鍋撻悘?reduced cost 闁烩晛鐡ㄧ敮鎾媰閽樺韬柡鍫氬亾鐎归潻濡囬顒勬晬濞戞ê娑ч柡?joinCost 闂侇叏绲块～鎺楀嫉椤忓嫬鏅欓柡鍌滄嚀閹粓宕犻弽顐ｇ暠闁告垼濮ら弳鐔煎箥瀹ュ浠橀悷?findMinimal闁?
+	 * 2026-05-24: normal backward label 缂?suffix-min normalize 闂佸憡鑹剧€涒晠寮抽敐鍡樺闁瑰墽绮慨婊堟煕閹存繈鐛滅紒?
+	 * 闂佸搫鐗冮崑鎾绘倶?reduced cost 闂佺儵鏅涢悺銊ф暜閹绢喗濯伴柦妯侯槹闊剟鏌￠崼姘壕閻庡綊娼绘俊鍥敂椤掑嫭鏅繛鎴灻☉褔鏌?joinCost 闂備緡鍙忕徊鍧楋綖閹烘瀚夋い蹇撳閺呮瑩鏌￠崒婊勫殌闁诡喗绮撳畷鐘诲冀椤愶絿鏆犻梺鍛婂灱婵倝寮抽悢鐓庣鐎广儱顦版禒姗€鎮?findMinimal闂?
 	 */
 	private static double backwardEndpointMin(PiecewiseLinearFunction frontier) {
 		if (frontier == null || frontier.head == null) {
@@ -5368,15 +5864,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {
 		PiecewiseLinearFunction cropped = new PiecewiseLinearFunction();
-		// 2026-05-23: crop 濞戞挸绉磋ぐ褏鎲楁担鍝勨挅闁?segment闁挎稑濂旂弧鍐啺娴ｅ憡鍊辨慨婵勫劚閸ら亶寮弶鍨笚闁轰胶澧楀畵渚€濡?
-		// shiftX() 闁?trimToDomain 闁告瑯浜炲﹢?domainStart/domainEnd闁挎稒绋戦々褔寮稿鍡欑闂佹彃濂旂粭澶愭煂瀹ュ牜鍟庨柨?
-		// 闁告艾娴烽悽濠氬础婵犲倻鍘?label 濞村吋鑹捐ぐ褔鎳楁禒瀣祮 add 闁汇劌瀚崣鏇㈠礂鏉堚晛鈷栭柣鐐叉閻ｇ偓绋婃径濠勫幍闁稿繑绮岀花鎶芥晬鐏炶偐鐟濋柤鍐测偓鐔锋闁绘帟鍩栫€?Tmid 閻熶椒绀佹竟鈧柕?
+		// 2026-05-23: crop 婵炴垶鎸哥粔纾嬨亹瑜忛幉妤佹媴閸濆嫧鎸呴梺?segment闂佹寧绋戞總鏃傚姬閸愵亝鍟哄ù锝呮啞閸婅鲸鎱ㄥ┑鍕姎闁搞倝浜跺顐﹀级閸喖绗氶梺杞拌兌婢ф鐣垫笟鈧俊?
+		// shiftX() 闂?trimToDomain 闂佸憡鐟禍鐐诧耿?domainStart/domainEnd闂佹寧绋掔粙鎴︺€呰瀵顭ㄩ崱娆戭啇闂備焦褰冩總鏃傜箔婢舵劖鐓傜€广儱鐗滈崯搴ㄦ煥?
+		// 闂佸憡鑹惧ù鐑芥偨婵犳艾纭€濠电姴鍊婚崢?label 婵炴潙鍚嬮懝鎹愩亹瑜旈幊妤佺鐎ｎ偅绁?add 闂佹眹鍔岀€氼剟宕ｉ弴銏犵閺夊牃鏅涢埛鏍煟閻愬弶顥滈柣锝囧亾缁嬪﹥寰勬繝鍕箥闂佺绻戠划宀€鑺遍幎鑺ユ櫖閻忕偠鍋愰悷婵嬫煠閸愭祴鍋撻悢閿嬵唶闂佺粯甯熼崺鏍偓?Tmid 闁荤喍妞掔粈浣圭珶閳ь剟鏌?
 		cropped.resetDomain(start, end);
 		if (function == null || function.head == null || Utility.compareGt(start, end)) {
 			return cropped;
 		}
-		// 2026-05-22: 闁告瑥鑻幃婊堝础婵犲倻鍘甸柛娆樺灥閸忔﹢宕氬顑惧仺闂侇偀鍋撻柛鏍ㄧ墪閸?Tmid 闁告娲滈崑锝夊Υ閸屾繄绠瑰☉鎿冧簽閸嬶絾绋夊鍛濞戞挸娴烽幋椋庣磼椤撶喎鈷栭悘鐐存穿缁?
-		// 濞?join 闁哄啯鍎奸々锕傛嚄閻ｅ本鏆?Tmid 濠㈣泛瀚悥鍫曞极閺夋寧顐介柟閿嬫崄閻﹀孩绂掗崙銈囩闁搞儳濮甸婵囨交濞嗘挸娅″ǎ鍥ㄧ箘閺嗏偓闂傚棗鐖奸弳杈ㄦ償閿曗偓閻栧爼寮悧鍫斀闁?
+		// 2026-05-22: 闂佸憡鐟ラ懟顖炲箖濠婂牆纭€濠电姴鍊婚崢鐢告煕濞嗘ê鐏ラ柛蹇旓耿瀹曟艾顫濋鎯т缓闂備緡鍋€閸嬫捇鏌涢弽銊уⅹ闁?Tmid 闂佸憡顨嗗ú婊堝磻閿濆违闁稿本绻勭粻鐟扳槈閹垮啩绨介柛瀣剁稻缁嬪顓奸崨顓燁棟婵炴垶鎸稿ù鐑藉箣妞嬪海纾兼い鎾跺枎閳锋牠鎮橀悙瀛樼┛缂?
+		// 婵?join 闂佸搫鍟崕濂搞€呴敃鍌涘殑闁伙絽鏈弳?Tmid 婵犮垼娉涚€氼剟鎮ラ崼鏇炴瀬闁哄瀵ч浠嬫煙闁垮宕勯柣锕€瀛╃粋鎺楀礄閵堝洨顦梺鎼炲劤婵敻顢楀┑鍥ㄤ氦婵炲棙鎸稿▍鈥城庨崶銊х畼闁哄棌鍋撻梻鍌氭閻栧ジ寮虫潏銊﹀劅闁挎洍鍋撻柣鏍х埣瀵偊鎮ч崼顐㈡杸闂?
 		if (Utility.compareEq(start, end)) {
 			if (!Utility.compareLt(start, function.head.start) && !Utility.compareGt(start, function.tail.end)) {
 				addConstantSegmentOrPoint(cropped, start, end, function.evaluate(start));
@@ -5428,6 +5924,50 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		}
 		function.tail = cur;
+	}
+
+	private JoinEnvelopeMinResult findMinimalShiftedTracedSum(TracedJoinEnvelope<ForwardLabel> forwardEnvelope,
+			double delta, TracedJoinEnvelope<BackwardLabel> backwardEnvelope, double yShift) {
+		JoinEnvelopeMinResult result = new JoinEnvelopeMinResult();
+		if (forwardEnvelope == null || backwardEnvelope == null
+				|| forwardEnvelope.segments.isEmpty() || backwardEnvelope.segments.isEmpty()) {
+			return result;
+		}
+		int fIndex = 0;
+		int bIndex = 0;
+		while (fIndex < forwardEnvelope.segments.size() && bIndex < backwardEnvelope.segments.size()) {
+			TraceSegment<ForwardLabel> f = forwardEnvelope.segments.get(fIndex);
+			TraceSegment<BackwardLabel> b = backwardEnvelope.segments.get(bIndex);
+			double fStart = f.start + delta;
+			double fEnd = f.end + delta;
+			double lo = Math.max(fStart, b.start);
+			double hi = Math.min(fEnd, b.end);
+			if (Utility.compareLe(lo, hi)) {
+				double slope = f.slope + b.slope;
+				double intercept = f.intercept - f.slope * delta + b.intercept + yShift;
+				double left = slope * lo + intercept;
+				if (Utility.compareLt(left, result.reducedCost)) {
+					result.reducedCost = left;
+					result.forwardLabel = f.source;
+					result.backwardLabel = b.source;
+				}
+				double right = slope * hi + intercept;
+				if (Utility.compareLt(right, result.reducedCost)) {
+					result.reducedCost = right;
+					result.forwardLabel = f.source;
+					result.backwardLabel = b.source;
+				}
+			}
+			if (Utility.compareLe(fEnd, b.end)) {
+				fIndex++;
+				if (Utility.compareEq(fEnd, b.end)) {
+					bIndex++;
+				}
+			} else {
+				bIndex++;
+			}
+		}
+		return result;
 	}
 
 	private enum InsertStatus {
@@ -5773,8 +6313,257 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 	}
 
+	private static final class JoinEnvelopeIndex {
+		final ArrayList<ArrayList<JoinEnvelopeGroup<ForwardLabel>>> forwardByTerminal;
+		final ArrayList<ArrayList<JoinEnvelopeGroup<BackwardLabel>>> backwardByTerminal;
+
+		JoinEnvelopeIndex(int size) {
+			forwardByTerminal = new ArrayList<ArrayList<JoinEnvelopeGroup<ForwardLabel>>>(size);
+			backwardByTerminal = new ArrayList<ArrayList<JoinEnvelopeGroup<BackwardLabel>>>(size);
+			for (int i = 0; i < size; i++) {
+				forwardByTerminal.add(null);
+				backwardByTerminal.add(null);
+			}
+		}
+	}
+
+	private static final class JoinEnvelopeGroup<L extends FunctionLabel>
+			implements Comparable<JoinEnvelopeGroup<L>> {
+		final int terminalJob;
+		final PackedBitSet ngMemorySet;
+		final TracedJoinEnvelope<L> envelope = new TracedJoinEnvelope<L>();
+		double minReducedCost = Utility.big_M;
+
+		JoinEnvelopeGroup(int terminalJob, PackedBitSet ngMemorySet) {
+			this.terminalJob = terminalJob;
+			this.ngMemorySet = ngMemorySet;
+		}
+
+		@Override
+		public int compareTo(JoinEnvelopeGroup<L> other) {
+			int byCost = Double.compare(minReducedCost, other.minReducedCost);
+			if (byCost != 0) {
+				return byCost;
+			}
+			return Integer.compare(terminalJob, other.terminalJob);
+		}
+	}
+
+	private static final class JoinEnvelopeMinResult {
+		double reducedCost = Utility.big_M;
+		ForwardLabel forwardLabel;
+		BackwardLabel backwardLabel;
+	}
+
+	private static final class TracedJoinEnvelope<L extends FunctionLabel> {
+		final ArrayList<TraceSegment<L>> segments = new ArrayList<TraceSegment<L>>();
+
+		void merge(PiecewiseLinearFunction function, L source) {
+			if (function == null || function.head == null || source == null) {
+				return;
+			}
+			if (segments.isEmpty()) {
+				for (Segment seg = function.head; seg != null; seg = seg.next) {
+					add(seg.start, seg.end, seg.slope, seg.intercept, source);
+				}
+				return;
+			}
+			ArrayList<TraceSegment<L>> merged = new ArrayList<TraceSegment<L>>(segments.size() + 8);
+			int oldIndex = 0;
+			Segment fresh = function.head;
+			double oldCursor = segments.get(0).start;
+			double freshCursor = fresh.start;
+			while (oldIndex < segments.size() || fresh != null) {
+				if (oldIndex >= segments.size()) {
+					addFreshRemainder(merged, fresh, freshCursor, source);
+					break;
+				}
+				if (fresh == null) {
+					addOldRemainder(merged, oldIndex, oldCursor);
+					break;
+				}
+				TraceSegment<L> old = segments.get(oldIndex);
+				double oldStart = Math.max(old.start, oldCursor);
+				double freshStart = Math.max(fresh.start, freshCursor);
+				if (Utility.compareLe(old.end, oldStart)) {
+					oldIndex++;
+					if (oldIndex < segments.size()) {
+						oldCursor = segments.get(oldIndex).start;
+					}
+					continue;
+				}
+				if (Utility.compareLe(fresh.end, freshStart)) {
+					fresh = fresh.next;
+					if (fresh != null) {
+						freshCursor = fresh.start;
+					}
+					continue;
+				}
+				if (Utility.compareLt(oldStart, freshStart)) {
+					double end = Math.min(old.end, freshStart);
+					addTrace(merged, old, oldStart, end);
+					oldCursor = end;
+					continue;
+				}
+				if (Utility.compareLt(freshStart, oldStart)) {
+					double end = Math.min(fresh.end, oldStart);
+					add(merged, freshStart, end, fresh.slope, fresh.intercept, source);
+					freshCursor = end;
+					continue;
+				}
+				double start = oldStart;
+				double end = Math.min(old.end, fresh.end);
+				addLower(merged, start, end, old, fresh, source);
+				oldCursor = end;
+				freshCursor = end;
+				if (Utility.compareEq(end, old.end)) {
+					oldIndex++;
+					if (oldIndex < segments.size()) {
+						oldCursor = segments.get(oldIndex).start;
+					}
+				}
+				if (Utility.compareEq(end, fresh.end)) {
+					fresh = fresh.next;
+					if (fresh != null) {
+						freshCursor = fresh.start;
+					}
+				}
+			}
+			segments.clear();
+			segments.addAll(merged);
+		}
+
+		double minValue() {
+			double min = Utility.big_M;
+			for (int i = 0; i < segments.size(); i++) {
+				TraceSegment<L> seg = segments.get(i);
+				double left = seg.value(seg.start);
+				if (Utility.compareLt(left, min)) {
+					min = left;
+				}
+				double right = seg.value(seg.end);
+				if (Utility.compareLt(right, min)) {
+					min = right;
+				}
+			}
+			return min;
+		}
+
+		int segmentCount() {
+			return segments.size();
+		}
+
+		double start() {
+			return segments.isEmpty() ? Utility.big_M : segments.get(0).start;
+		}
+
+		double end() {
+			return segments.isEmpty() ? -Utility.big_M : segments.get(segments.size() - 1).end;
+		}
+
+		private void addFreshRemainder(ArrayList<TraceSegment<L>> target, Segment fresh, double cursor, L source) {
+			Segment cur = fresh;
+			double curStart = cursor;
+			while (cur != null) {
+				double start = Math.max(cur.start, curStart);
+				add(target, start, cur.end, cur.slope, cur.intercept, source);
+				cur = cur.next;
+				if (cur != null) {
+					curStart = cur.start;
+				}
+			}
+		}
+
+		private void addOldRemainder(ArrayList<TraceSegment<L>> target, int oldIndex, double cursor) {
+			for (int i = oldIndex; i < segments.size(); i++) {
+				TraceSegment<L> seg = segments.get(i);
+				double start = i == oldIndex ? Math.max(seg.start, cursor) : seg.start;
+				addTrace(target, seg, start, seg.end);
+			}
+		}
+
+		private void addLower(ArrayList<TraceSegment<L>> target, double start, double end, TraceSegment<L> old,
+				Segment fresh, L source) {
+			if (!Utility.compareLt(start, end) && !Utility.compareEq(start, end)) {
+				return;
+			}
+			double slopeDiff = old.slope - fresh.slope;
+			double interceptDiff = old.intercept - fresh.intercept;
+			if (Utility.compareEq(slopeDiff, 0.0)) {
+				if (Utility.compareLe(interceptDiff, 0.0)) {
+					addTrace(target, old, start, end);
+				} else {
+					add(target, start, end, fresh.slope, fresh.intercept, source);
+				}
+				return;
+			}
+			double crossing = -interceptDiff / slopeDiff;
+			if (!Utility.compareLt(start, crossing) || !Utility.compareLt(crossing, end)) {
+				double mid = 0.5 * (start + end);
+				if (Utility.compareLe(old.value(mid), fresh.getValue(mid))) {
+					addTrace(target, old, start, end);
+				} else {
+					add(target, start, end, fresh.slope, fresh.intercept, source);
+				}
+				return;
+			}
+			double leftMid = 0.5 * (start + crossing);
+			if (Utility.compareLe(old.value(leftMid), fresh.getValue(leftMid))) {
+				addTrace(target, old, start, crossing);
+				add(target, crossing, end, fresh.slope, fresh.intercept, source);
+			} else {
+				add(target, start, crossing, fresh.slope, fresh.intercept, source);
+				addTrace(target, old, crossing, end);
+			}
+		}
+
+		private void addTrace(ArrayList<TraceSegment<L>> target, TraceSegment<L> seg, double start, double end) {
+			add(target, start, end, seg.slope, seg.intercept, seg.source);
+		}
+
+		private void add(double start, double end, double slope, double intercept, L source) {
+			add(segments, start, end, slope, intercept, source);
+		}
+
+		private void add(ArrayList<TraceSegment<L>> target, double start, double end, double slope, double intercept,
+				L source) {
+			if (Utility.compareGt(start, end)) {
+				return;
+			}
+			if (!target.isEmpty()) {
+				TraceSegment<L> tail = target.get(target.size() - 1);
+				if (tail.source == source && Utility.compareEq(tail.end, start)
+						&& Utility.compareEq(tail.slope, slope) && Utility.compareEq(tail.intercept, intercept)) {
+					tail.end = end;
+					return;
+				}
+			}
+			target.add(new TraceSegment<L>(start, end, slope, intercept, source));
+		}
+	}
+
+	private static final class TraceSegment<L extends FunctionLabel> {
+		final double start;
+		double end;
+		final double slope;
+		final double intercept;
+		final L source;
+
+		TraceSegment(double start, double end, double slope, double intercept, L source) {
+			this.start = start;
+			this.end = end;
+			this.slope = slope;
+			this.intercept = intercept;
+			this.source = source;
+		}
+
+		double value(double time) {
+			return slope * time + intercept;
+		}
+	}
+
 	private static final class SinglePointStore<L extends FunctionLabel> {
-		// 2026-06-13: ng-DSSR 闁?dominance key 濞达綀娉曢弫?full-domain dominanceSet闁挎稒鐭爔tensionSet 闁告瑯浜濈敮鍫曞礆鐠鸿櫣绉奸柛鎾崇Т瀹曟劙宕洪悢绋库挅閻忕偞娲忛埀?
+		// 2026-06-13: ng-DSSR 闂?dominance key 婵炶揪缍€濞夋洟寮?full-domain dominanceSet闂佹寧绋掗惌鐖攖ensionSet 闂佸憡鐟禍婵堟暜閸洖绀嗛悹楦挎缁夊ジ鏌涢幘宕囆㈢€规洘鍔欏畷娲偄缁嬪簱鎸呴柣蹇曞仦濞插繘鍩€?
 		final HashMap<PackedBitSet, L> bestByDominanceKey = new HashMap<PackedBitSet, L>();
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}
@@ -5789,7 +6578,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final byte[] sriCounts;
 		final double sriPenalty;
 		final String sriStateKey;
-		/** join 闂傚啳鍩栭灞剧▔鐎涙ɑ顦ч悽顖氭啞閺嗙喎顕欓懜闈涚彇闁告艾娴峰▓鎴﹀礄閼恒儲娈剁紓鍌涙尭閻°劑鏁嶅▽纰糱el frontier 闁告帗绋戠紓鎾诲触鎼存繄鐟濋柛鎰С閹便劑寮ㄩ惂鍝ョ闁告瑯鍨禍鎺斺偓鐟邦槸閸欏繑寰勫鍥ㄦ殢闁?*/
+		/** join 闂傚倸鍟抽崺鏍敊鐏炲墽鈻旈悗娑櫳戦ˇ褔鎮介姘暈闁哄棛鍠庨娆撴嚋闂堟稓褰囬梺鍛婅壘濞村嘲鈻撻幋锕€绀勯柤鎭掑劜濞堝墎绱撻崒娑欏碍闁宦板姂閺佸秴鈻界喊绯眅l frontier 闂佸憡甯楃粙鎴犵磽閹捐瑙﹂幖瀛樼箘閻熸繈鏌涢幇顒傂￠柟渚垮姂瀵劑鎯傞崫銉ь槷闂佸憡鐟崹顖涚閹烘柡鍋撻悷閭︽Ц闁告瑥绻戝鍕吋閸ャ劍娈㈤梺?*/
 		PiecewiseLinearFunction joinExtendedFrontier;
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet dominanceSet,

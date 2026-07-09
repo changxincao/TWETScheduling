@@ -258,3 +258,193 @@ root 预处理复制回来的普通弧仍按 pricing-only 口径使用。ng-DSSR
 验证上，本次无法使用 `mvn`，因为当前命令环境没有 Maven；改用项目 Eclipse classpath 中的 CPLEX/CP Optimizer jar 做 focused `javac`，覆盖 `LP.java` 与 `HeuristicPricingEngine.java`，编译通过。后续如果要量化收益，应优先观察 branch seed 筛选、strong trial phase1、动态加列时的 master/LP 时间，而不是期待 exact labeling 的 label 数量直接下降。
 
 2026-07-07 继续检查 ng-DSSR/partial dominance 的扩展热路径时，发现 `extendForward/extendBackward` 中 `shiftX()` 产生的临时 PWLF 在 `add()` 后没有释放。`add()` 会构造新函数，不接管输入函数；`TWETColumnEvaluator.evaluate()` 的直接 PWLF 口径也已经采用“add 后释放 shifted”的写法。因此本次只释放 `shifted/shiftedNoSri` 这类临时对象，并在 normalize 后发现新 frontier 为空时释放未进入 label 的结果函数。dynamic job penalty 来自缓存数组，不能释放；进入 label 的 `nextFrontier/nextNoSriFrontier` 也不释放。该改动不改变 reduced cost、dominance key、ng memory 或生成列，只降低高频扩展里的临时 segment/对象池压力。focused `javac` 覆盖 ng-DSSR、partial dominance、LP、HeuristicPricingEngine 和 PWLF，编译通过。
+
+## 2026-07-07：time-indexed 内部列与外包模式、以及 dual window 的 arc fixing 边界
+
+当前需要区分两种外包建模方式。若外包仍是 `masterVariables` 显式变量，内部机器列族可以正常使用 time-indexed 相关组件：直接 time-indexed pricing、ng-DSSR 前的 time-indexed pre-heuristic、以及 ng-DSSR 的 time-indexed root preprocessing 都只作用于内部机器列，不和显式外包变量冲突。若外包是 `columns/columnized/sp1` 列化外包，当前普通 pricing engine 顺序仍可包含内部 time-indexed pre-heuristic、ng-DSSR exact 和最后的外包列 pricing；但 `TimeIndexedRootPreprocessor.shouldRun()` 明确要求 `!useColumnizedOutsourcing()`，因此 root preprocessing 暂不支持列化外包。这是为了避免临时 no-cut/no-SRI time-indexed root 只复制内部列证据，却没有同步复制外包列族、外包 membership 分支和外包列 reduced-cost 证书，导致预处理证据和正式 root 的列族不一致。后续若要支持列化外包，应把它作为独立扩展：内部 time-indexed root 只生成内部列证据，同时正式 root 仍必须单独保留/修复外包列族，不能把“内部列族闭合”误当作整个 pricing 闭合。
+
+本次 `wet040_001_2m` 全开测试还说明了 time-indexed root preprocessing 与 ng-DSSR completion-bound fixing 的作用层次不同。preprocessing 在时空图上固定了 `1,754,589` 条时空弧，但聚合到普通 `(i,j)` pricing-only arc 时只有 `3` 条，因为普通弧只有在所有可用时间副本都被删光时才能提升为普通禁弧；只要某条普通弧还剩一个可用时间副本，就不能全局禁止。相比之下，ng-DSSR root 收敛后的 completion-bound subtree fixing 是在当前真实 ng-DSSR dual/bound 口径下直接扫描普通弧，root summary 为 `cand=1560,fixed=1207`，所以普通弧层面明显更强。两者并不矛盾：time-indexed fixing 更细粒度，主要贡献可能是缩 time window；ng-DSSR subtree fixing 更粗粒度，但在 node 闭合后用 `UB-LB` 口径能直接固定大量普通弧。
+
+dual profitable window 的边界也进一步明确。pricing 内部可以用 dual window 缩小搜索图，因为它只需要保证“本次当前 dual 下的最优负 reduced-cost 列不丢”；但会写回 node、传给子树、用于 route enumeration 或后续 ng-DSSR 的 arc fixing / compact window 不能使用 dual window。原因是 arc fixing 判断的是“经过某个弧或某个时间点的最好完整列是否仍可能改善 incumbent”，阈值是 `UB-LB`，而 dual window 只围绕当前 dual 下的负列搜索等价，不能证明窗口外的正 reduced-cost 列不会组合出更好的整数 incumbent。40-2 的 22582/22580 诊断已经给过具体证据：真实最优改进列在某次 time-indexed preprocessing dual 下并非负 reduced-cost 列，但两条列合起来仍足以把 incumbent 从 22582 改到 22580。因此当前安全口径是：dual window 只用于本次 pricing；所有永久 fixing、ordinary arc promotion、compact window 继承都必须使用 no-dual safe window。
+
+## 2026-07-07：time-indexed root preprocessing gap 异常定位
+
+本次 `wet040_001_2m` 的 ng-DSSR 全开压力测试中，time-indexed root preprocessing 日志显示 `tempPool=26507`、`graphFix gap=3067.4958`，按 incumbent 22582 反推临时 time-indexed LB 约为 19514.5。这个数值本身不是日志计算错误，但它和旧 direct time-indexed root 的口径不一致：旧 direct run 的 root pool 约 82806/84133，root LB 为 22487.647 左右。
+
+对比日志后，关键差异在列成本口径。旧 direct time-indexed root 中，`acceptedBestRc` 与 `bestPseudoRC` 基本一致，说明 time-indexed exact graph 返回的是图上 pseudo-schedule cost。当前 preprocessing 中，dual-window exact graph 会对选中的候选调用 `TWETColumnEvaluator` 回刷 sequence 成本，第一轮已经出现 `bestPseudoRC=-167420.5`、`acceptedBestRc=-280321.5` 的明显差异。这个回刷对 pre-heuristic 的 elementary 列是合理的，因为最终进入 Pool/RMP 的是真实机器列；但对 exact time-indexed relaxation 中允许重复任务的 pseudo-schedule 列，会改变原本的松弛模型口径，导致临时 LP bound 异常偏弱、列数减少，并使 ordinary arc promotion 只剩 3 条。
+
+因此当前判断是：这次 preprocessing 的大 gap 不是 ALNS 或 seed=200 本身造成的，而是 exact time-indexed pseudo 列在 dual window 下被按真实 sequence evaluator 回刷，破坏了和旧 direct time-indexed root 可比的 relaxation 语义。后续修正方向应保持简单：time-indexed pre-heuristic/elementary 候选在使用 dual window 时继续回刷真实成本；exact time-indexed graph pricing 和 root preprocessing 的 pseudo-schedule 列应保留图上 pseudo cost，或者直接关闭 exact graph 的 dual-window 回刷。永久 arc fixing / compact window 写回仍然继续使用 no-dual safe window，不把 dual window 证据写回 node。
+
+随后用同一 `wet040_001_2m` 配置只把 `timeIndexedGraphDualWindow=false`，并把 `maxNodes=1` 作为 root-only 验证，结果直接确认上述判断。no-dual preprocessing 中 `piWindow=disabled`，`acceptedBestRc` 与 `bestPseudoRC` 基本一致；临时 time-indexed root 闭合时 `tempPool=77858`，`graphFix gap=94.3529411765`，反推临时 LB 为 `22582 - 94.3529411765 = 22487.6470588235`，与此前 direct time-indexed root 的 `22487.647059` 对齐。该次还固定了 `3,541,282` 条时空弧，普通弧提升 `1310` 条，平均 compact window 长度降到 `216.275`，明显不同于 dual-window preprocessing 的 `tempPool=26507`、`gap=3067.5`、普通弧提升 `3` 条。因此当前结论进一步收紧为：root preprocessing 若要复制 time-indexed root 的 relaxation 证据，应禁用 dual window，或者至少不能在 exact pseudo-schedule 列上做 dual-window true-cost 回刷。
+
+## 2026-07-07：dual-window 候选列成本与最终正值列对拍
+
+按“dual-window 每轮最优候选列是否与 evaluator 一致、dual/no-dual 收敛后正值列序列是否一致”这个口径做了针对性诊断。诊断只增加日志，不改变定价和主问题逻辑。`wet040_001_2m`、time-indexed root preprocessing、`maxNodes=0` 下，dual-window run 的最终正值列全部满足 `storedCost` 与 `TWETColumnEvaluator.evaluate(sequence)` 一致，差异只有数值误差；no-dual run 也是如此。因此不是“最终进入 RMP 的正值列成本没有刷新”这个问题。
+
+真正的差异出现在 dual-window pricing 的候选阶段。dual-window 下每轮图上 reduced-cost 最好的候选列，经 evaluator 回算后经常不是同一个成本口径：第一轮出现 `graphCost=135483`、`trueCost=22582`、`costDiff=112901` 的重复 pseudo-schedule；后续也出现 `graphCost=100989`、`trueCost=1.0E8` 这种 BigM 级差异。接近闭合时差异会缩小，但前中期已经足以改变加入 LP 的列集合和 root 轨迹。
+
+dual/no-dual 收敛后的正值列序列也完全不同。dual-window run 有 39 条正值列，no-dual run 有 18 条正值列，按 sequence 字符串比较 `common=0`。对应的预处理结果也完全不同：dual-window 为 `tempPool=26507`、`promotedOrdinaryArcs=3`、`avgWindowLen=1881.475`、`graphFix gap=3067.50`、正值列目标和约 `19514.50`；no-dual 为 `tempPool=77858`、`promotedOrdinaryArcs=1310`、`avgWindowLen=216.275`、`graphFix gap=94.35`、正值列目标和约 `22487.65`。
+
+当前结论是：dual-window 不是单纯加速同一个 time-indexed root preprocessing 过程，而是在 exact graph pseudo-schedule 列与 sequence evaluator 之间引入了成本语义差异，导致 root LP 走到另一套列集合和更弱的 fixing/window 证据。pre-heuristic 只返回 elementary 列时可以用 dual-window 后再按真实成本筛选；但 exact time-indexed root preprocessing 如果要复制 graph relaxation 的证据，不能把 dual-window 产生的 pseudo-schedule 列按 sequence evaluator 当作同一列族处理。后续安全口径仍是：永久 arc fixing 和 compact window 写回使用 no-dual 证据；dual-window 只作为本次 pricing 搜索加速，不能直接作为 root preprocessing 证据源。
+
+### 2026-07-07 复核：dual-window recheck 的真实根因
+
+进一步按同一条日志中的 repeated sequence 做了最小 Java 对拍，结论比前一版更明确：`evalCost=1.0E8` 不是数值溢出，而是 `TWETColumnEvaluator` 在固定序列 PWLF 递推中返回的 BigM/不可行标记；更关键的是，`evaluate(sequence)` 会受到静态 `Utility.curUpperBound` 影响。`PiecewiseLinearFunction.minimizePrefixInPlace()` 使用 `Utility.curUpperBound` 作为前缀最小初值，因此如果 ALNS/incumbent 阶段把该值留在 22582，pricing recheck 里很多真实成本高于 22582 的序列会被截成 22582。
+
+对日志第一轮 best graph candidate 的 sequence `[5,2,5,2,...,34,20,34]`，实验结果为：`Utility.curUpperBound=22582` 时 evaluator 返回 `22582.0`；`Utility.curUpperBound=Utility.big_M` 时 evaluator 返回 `135483.0`，正好对应日志里的 `graphCost=135483.0`。对另一条日志中 `trueCost=1.0E8` 的 sequence `[32,24,32,24,...]`，实验结果为：`curUpperBound=22582` 时 evaluator 返回 `1.0E8`，而重置为 `big_M` 后返回 `100989.0`，正好对应日志里的 `graphCost=100989.0`。
+
+因此当前根因不是 time-indexed 图和 evaluator 本质上算了不同对象，也不是 repeated sequence 必然无法 evaluate，而是 `TimeIndexedGraphPricingEngine` 在 dual-window recheck 前没有像 `HeuristicPricingEngine`、`GCNGBBStyleBidirectionalNgDssr` 那样调用 `Utility.resetCurUpperBound(Utility.big_M)`。这会把 dual-window recheck 的真实成本回刷污染成 incumbent 截断口径，导致 pseudo 列成本被低估，root LP bound 异常偏弱，后续 arc fixing / compact window 证据也随之变差。
+
+后续修正应保持很小：在 time-indexed graph pricing 进入求解或至少进入 `maybeRecheckSelectedCandidate()` 前，临时把 `Utility.curUpperBound` 设为 `Utility.big_M`，并在 pricing 结束后恢复原值；rank-1 time-indexed graph 中使用 evaluator 的 dual-window/cut recheck 也应采用同一保护。这样可以保留 dual-window 缩图，同时避免 evaluator 使用 incumbent 截断成本。
+
+## 2026-07-07 dual-window preprocessing LP 差异复核
+
+本次重新复核 `wet040_001_2m` 上 time-indexed root preprocessing 的 dual-window / no-dual 差异。旧 dual-window 诊断中，第一轮 best graph candidate 为 repeated pseudo sequence，`graphCost=135483.0`，但 `TWETColumnEvaluator` 回刷得到 `trueCost=22582.0`；随后大量 repeated pseudo 列以类似方式被压成 incumbent 附近成本，导致临时 LP bound 被人为压低，`graphFix gap=3067.4957`，只推广普通 arc `3` 条，compact window 也很弱。这不是 dual-window arc fixing 写回错误，而是列成本评估被 `Utility.curUpperBound` 污染。
+
+修正 ALNS/VND 退出时清理 `Utility.curUpperBound` 后，用同一 dual-window preprocessing 配置重跑。新的日志中同一首个候选变为 `graphCost=135483.0, trueCost=135483.0, costDiff=0.0`，不再出现 `22582` 截断。最终 dual-window preprocessing 得到 `tempPool=80407`、`graphFix gap=94.352941`、`promotedOrdinaryArcs=1301`、`avgWindowLen=232.150`；对应 no-dual 对照为 `tempPool=77858`、`graphFix gap=94.352941`、`promotedOrdinaryArcs=1310`、`avgWindowLen=216.275`。两者 bound 和 fixing 强度已经基本一致，dual-window 只改变搜索路径和列数，不再造成异常弱 LP。
+
+当前结论：原先 “dual-window 下 LP 差很多” 的直接原因是 evaluator 使用了启发式阶段遗留的 `curUpperBound`，不是 dual-window 缩图证明本身失效。dual-window 下 exact graph 的 selected candidate 仍会做 sequence recheck，这可能使某些 sequence 成本比 graph path 成本更低，但修正后该差异是正常的完整序列重定时差异，不再是 incumbent 截断。后续若继续对比 dual-window/no-dual，应以修正后的 `tmp-dualwindow-after-curub-fix-20260707` 和 `tmp-nodual-positive-dump-20260707` 为基准。
+
+## 2026-07-07：dual-window / no-dual-window 预处理并行对比
+
+在修正 `Utility.curUpperBound` 污染后，又按同一当前代码和同一 `wet040_001_2m` 配置做了一次并行 A/B。两组都设置 `maxNodes=0`，因此不进入正式 ng-DSSR root，只比较 `TimeIndexedRootPreprocessor` 自身；两个 JVM 各限制 CPLEX 为 1 线程。共同配置包括 ALNS 60s、ng-DSSR `nearest3/top10`、repeatability filter、strong branching 开关保持一致、time-indexed root preprocessing 开启、复制 elementary seed 200 条。唯一差别是 `timeIndexedGraphDualWindow=true/false`。
+
+结果为：dual-window 组 `timeIndexedRootPreprocess.done ms=70601.785`，总 `solve_s=96.232`，`tempPool=80407`，`promotedOrdinaryArcs=1301`，`avgWindowLen=232.150`，`graphFix gap=94.352941`；no-dual 组 `timeIndexedRootPreprocess.done ms=78299.386`，总 `solve_s=103.983`，`tempPool=77858`，`promotedOrdinaryArcs=1310`，`avgWindowLen=216.275`，`graphFix gap=94.352941`。两组 fixing/bound 强度已经基本一致，说明前一轮大 gap 异常确实已经被修掉。本次并行口径下 dual-window 预处理快约 7.7 秒，但它产生更多临时列、窗口略宽；no-dual 预处理略慢但普通 arc promotion 和 compact window 稍强。当前结论是：dual-window 可以作为预处理内部定价加速手段继续比较，但写回 node 的 arc fixing / compact window 仍必须保持 no-dual safe 口径。
+
+## 2026-07-07：预处理后 root 自动禁用 dual window
+
+继续排查 40-2 中 time-indexed root preprocessing 后，正式 ng-DSSR root 被 `TimeIndexedPreHeuristicPricing` 直接闭合到 22582 的问题。新的诊断确认，预处理写回的 ordinary pricing-only arc、time-indexed arc fixing 和 compact window 本身没有排除已知 22580 最优两条机器列；真正导致 pre-heuristic 图过窄的是正式 root 在已经继承这些缩域证据后仍继续启用 dual profitable window。此时 dual window 不再是“无禁弧 root 图”上的临时搜索加速，而是在一个已经被 fixing/window 缩过的图上再次缩域，会让 pre-heuristic 只能证明错误的局部图闭合。
+
+本次把 `dual profitable window` 的启用条件统一收口到 `PricingCompatibility.canUseDualProfitableWindow()`：只有 depth=0、无 active cuts、且 node 没有 required/forbidden arc、branch-implied forbidden arc、pricing-only arc、time-indexed forbidden arc、time-indexed compact window、adjacency branch 时才允许启用。time-indexed graph pricing、rank-1 graph pricing、启发式 pricing，以及 ng-DSSR/full-domain 等内部 pricing 类都走同一判断。这样 root preprocessing 自身仍可在无禁弧 root 上用 dual window 做本轮 pricing 加速，但一旦 preprocessing 把 fixing/window 写回正式 root，后续 ng-DSSR 或 pre-heuristic 会自动关掉 dual window。
+
+验证上，用 `TimeIndexedTargetColumnAudit` 对 `wet040_001_2m` 复查：预处理后 node 状态为 `pricingOnlyArc=1310`、`timePricingOnlyArc=3542132`、`timeWindowJobs=40`，已知 22580 两条目标列均通过 compact/time-indexed arc 检查；正式 root seed LP 为 22580。随后 pre-heuristic summary 显示 `piWindow=disabled`，`bestPseudoRC=-8737`，`certified=false`，不再错误返回闭合证书。因此后续会继续进入 ng-DSSR exact pricing，而不是直接把 22582 当成最优。
+## 2026-07-08：ng-DSSR join 前 dominance-node envelope 压缩思路
+
+本次讨论的是另一个降低 join 数量的方向：不在 label 扩展过程中合并同一个 dominance node 内的 label，而是在正反向扩展全部完成、进入 join 之前，对同一个 `(direction, terminal job, dominanceSet)` 下的 label 做临时 envelope 压缩。当前 `DominanceNode` 已经维护 `labelEnvelope`，因此如果只为了计算某个 dominance node 与另一侧 label 的最小 reduced cost，理论上可以用该 node 的下包络代替逐个 label 做函数拼接；为了恢复真实列，需要在 envelope 每一段记录来源 label，最终从取到最小值的 segment 回到原始 label/father chain。
+
+这个方案和“过程内合并 label”不同。过程内合并后还要继续扩展，必须处理每一段对应的 ng memory、visited/SRI 状态和后继扩展语义，改动很大；join 前临时压缩发生在所有扩展结束后，不需要让合并对象继续扩展，所以 trace 只需要能恢复 join 产生的真实路径，复杂度明显低一些。
+
+但它不能简单做成“同一个 dominanceSet 无条件只保留一个 envelope”。当前 join 仍会检查 `forward.ngMemorySet` 与 `backward.ngMemorySet` 是否相交；SRI 开启时还会根据两侧 SRI counts 计算 join shift。同一个 dominance node 内的 label 虽然 `jid` 和 `dominanceSet` 相同，但 `ngMemorySet`、SRI counts、father path 可能不同。如果直接用未过滤的 aggregate envelope，最小段可能来自一个与另一侧 label 不兼容的来源 label，此时真正可行的最优段可能来自另一条成本稍高的 label。
+
+因此当前更稳的判断是：这个方向可行，但需要把“兼容性过滤”放进 join-envelope 的构造中。低风险版本可以先把 dominance-node envelope 当作更强的 join lower bound，用于提前剪掉整个 node；若要真正减少 funcEval，则应对固定另一侧 label 过滤兼容的 label 后再构造 traced envelope，或者把 `ngMemorySet` / SRI 状态纳入更细的 join-envelope key。收益可能很大，因为 W300 诊断中同一个 active dominance bucket 平均有上百个 live label；风险主要在 traced envelope 的来源记录和兼容性缓存，而不是 PWLF 下包络本身。
+
+## 2026-07-08：dominance key 补集与 ng-memory 的关系
+
+进一步讨论 join 前 dominance-node envelope 压缩时，`dominanceSet` 的补集能不能直接当作 ng memory 使用。剥掉 zero-dual excluded、required outsourced 等所有 label 共同项后，当前 key 的补集本质上是 `ngMemorySet ∪ 当前 frontier 下直连时间不可达 job`。因此它是实际 `ngMemorySet` 的上界，而不是等价集合。同一个 dominance node 内，某个 job 落在补集里，可能是因为它真的在某条 label 的 ng memory 里，也可能只是这条 label 从当前 frontier 再直连该 job 已经时间不可行；不同 label 对同一个 job 的原因还可能不同。
+
+由此得到的结论是：可以把这个补集当作“有效阻塞集合”的保守上界，用于快速充分判断。若 forward node 和 backward node 的补集不相交，则两边所有真实 label 的 ngMemorySet 必然也不相交，此时 node-envelope 到 node-envelope 的拼接在 ng 兼容性上是安全的；但若两个补集相交，不能据此判定所有 label pair 都冲突，因为交集可能只是不可达项与不可达项，或者一侧 ng memory 与另一侧时间不可达项。这个情况下必须回退到更细粒度：按真实 ngMemorySet 分组构造 traced envelope，或直接走原来的 label-level join。换言之，`complement(dominanceSet)` 可作为 fast-path 的充分条件，不能作为替代 `ngMemorySet` 的精确 join key，更不能因为两个补集相交就剪掉整个 group。
+
+### 2026-07-08：如何利用 dominance key 补集做 join 加速
+
+当前可用的思路可以分三层推进。第一层是最低风险的 node-envelope lower bound。对一个 forward dominance node 和一个 backward dominance node，先不恢复具体 label，只用两边 `labelEnvelope` 做一次 relaxed join 下界。如果这个下界已经不可能小于当前 join threshold，就可以跳过整个 node-node 组合。这个判断不依赖真实 ngMemorySet，因为它只做下界剪枝；即使 envelope 的最优段来自互相不兼容的 label，下界只会偏低，不会把本该保留的组合误删。它的收益取决于 node-envelope 下界能剪掉多少 group，适合作为第一步加统计验证。
+
+第二层是 dominance-key 补集不相交的 fast path。令 `blockedKey = complement(dominanceSet)`，即实际 ng memory 加上当前直连时间不可达项。如果 forward 和 backward 的 `blockedKey` 不相交，那么真实 `ngMemorySet` 必然不相交，可以直接把两个 node 的 traced envelope 拼接。这里需要 envelope segment 记录来源 label；最终最小 reduced cost 落在哪个 segment，就用对应的 forward source label 和 backward source label 恢复真实序列。这个 fast path 是安全的，但只覆盖 `blockedKey` 不相交的 node pair。
+
+第三层是 `blockedKey` 相交时的精确压缩。此时不能直接判冲突，因为交集可能来自直连时间不可达项。更合理的做法是在每个 dominance node 内按真实 `ngMemorySet` 再分组，每组构造一个 traced envelope。group-group join 时检查真实 ngMemorySet 是否相交；不相交就拼 envelope，相交就跳过。这样仍保持当前 ng-DSSR 的 join 语义，但能把“同一个 dominance key 下几十个 label”压成若干个 ngMemory group。若同一个 dominance node 内真实 ngMemorySet 种类远少于 label 数，这个方案会直接减少 funcEval；若种类接近 label 数，收益有限但不改变正确性。
+
+因此当前建议的实现优先级是：先加统计，记录每个 active dominance node 内 label 数、真实 ngMemorySet distinct 数，以及 node-node `blockedKey` 不相交比例；再做第一层 lower-bound filter；如果统计显示 distinct ngMemorySet 明显少于 label 数，再做第三层 traced envelope group。这个路径比过程内合并 label 风险小，因为它只发生在 join 前，不需要让合并后的对象继续扩展；难点集中在 traced envelope 的来源记录和缓存失效，而不是 dominance key 本身。
+
+### 2026-07-08：两个“只用下包络 join”的实现方案
+
+进一步讨论后，明确目标不是只做较弱的 lower-bound 过滤，而是希望最终 join 尽量直接使用下包络，并能从最优段追溯到真实 label 恢复列。围绕这个目标，目前有两个可行方案。
+
+方案一是把 ng-DSSR 的 dominance key 改成真实 `ngMemorySet`，不再把当前 frontier 下直连时间不可达 job 写进 key。这样同一个 dominance node 内所有 label 的真实 ng 状态一致，node 的 traced `labelEnvelope` 可以直接用于 join：两个 node 的 `ngMemorySet` 不相交就拼接 traced envelope，最优 segment 回到 source label 恢复路径。这个方案语义最统一，join key 和 dominance key 是同一套真实 ng 状态；缺点是会削弱或改变当前 dominance graph 拓扑，因为原来 key 里利用了直连时间不可达信息。它可能减少 join，也可能增加扩展/占优压力，实验结果不容易区分是 key 变化还是 traced envelope join 带来的收益。
+
+方案二是保持当前 dominance key 不变，但在每个 dominance node 内额外按真实 `ngMemorySet` 维护一组 traced 下包络。当前 node 的普通 `labelEnvelope/dominanceEnvelope` 仍服务于现有 dominance 流程；新增的 join envelope 只服务于 join。join 时遍历 forward/backward 的真实 ngMemory group，只有 group 的 `ngMemorySet` 不相交时才拼接 traced envelope，最优 segment 再回到 source label。这个方案不改变当前 dominance 语义，只替换 join 的执行方式，更适合作为第一版验证。需要注意的是，label 被 predecessor envelope 删除、被 partial trim 或同 node trim 后，对应真实 ngMemory group 的 traced envelope 必须同步重建，不能保留 stale source label 或旧 frontier。
+
+当前判断是：两个方案在理论上都合理。方案一结构更简单，但会同时改变 dominance 强度和 join 方式，风险较大；方案二工程上多一层 group envelope，但能保持当前 labeling/dominance 行为不变，更适合先用于验证“同 key 多 label 的 join 压缩”是否真的带来数量级收益。后续若方案二验证有效，再考虑方案一作为对照实验。
+
+### 2026-07-08：方案二的第一版实现口径
+
+进一步讨论后，第一版不在 label 迭代过程中维护 join envelope。原因是迭代维护虽然看起来少一次全量扫描，但 label 后续可能被 dominance/trim 删除，已经写进某个 `ngMemorySet` key 的 envelope 就需要同步删除或重建，否则会留下 stale source label；为了解决这个问题，过程内维护反而会把 envelope 生命周期绑到 dominance graph 的增删逻辑上，改动面更大。
+
+当前更清晰的口径是：保持现有扩展、占优和 active label 维护完全不变。等正反向 label 全部扩展完成、进入 join 之前，再扫描当前仍然 active 的 label，按 `(terminal job, true ngMemorySet)` 重新分组，为每组构造一个只用于 join 的 traced 下包络。构造下包络时使用现有 join 口径下的前向/后向函数，而不是 `dominanceEnvelope`；每个 envelope segment 记录来源 label，最终 `forward group envelope + crossing arc + backward group envelope` 取得最小值后，可以直接回到对应的 forward/backward source label 恢复真实序列。
+
+这个版本新增的逻辑集中在 join 前后。第一，增加一个临时的 join-envelope 构造步骤，从 active forward/backward label 表扫描生成 `terminal job -> ngMemorySet -> traced envelope group`。第二，新增 traced envelope 的 lower-envelope merge 逻辑，segment 需要带 source label，不改核心 `PiecewiseLinearFunction.Segment`。第三，join 时由“forward label × backward label”改为“forward ngMemory group × backward ngMemory group”：先检查 terminal、crossing arc、真实 ngMemorySet 是否相交；不相交再拼 traced envelope；取到负 reduced cost 后用 segment source label 恢复列，并继续走原来的 elementary/non-elementary 判定和 DSSR 更新。第四，保留旧 label-level join 作为对照/回退口径，便于先做 A/B 和统计压缩率。
+
+这个口径的核心收益点是把同一个 terminal job 下大量相同真实 `ngMemorySet` 的 label 合成一个函数包络，减少 join funcEval 次数；它不会改变前面的 dominance 过程，也不会把“直连时间不可达项”误当作 ngMemory。当前主要待验证的是：每个 terminal job 下真实 `ngMemorySet` 的 distinct 数是否显著小于 active label 数，以及 traced envelope merge 的常数成本是否低于节省掉的 join pair 成本。
+
+### 2026-07-09：join-envelope 第一版实现与 smoke 结果
+
+本次按方案二实现了一个默认关闭的实验开关 `enableNgDssrJoinEnvelopeCompression`，运行参数为 `twet.bpc.fullDomainCompare.ngDssrJoinEnvelopeCompression`。实现上不改现有扩展、占优、active label 维护和旧 join；只有在进入 join 前，如果该开关打开且当前没有 SRI pricing，才扫描 active forward/backward label，按 `(terminal job, true ngMemorySet)` 构造临时 traced envelope group。SRI/full-SRI/limited-memory SRI 下仍回退原 label-level join，因为 group key 尚未包含 SRI counts 和 join shift 状态。
+
+新路径使用 `getForwardJoinExtension()` / `getBackwardJoinExtension()` 的现有 join 口径函数，不直接复用 dominance graph 的 `labelEnvelope`。`TracedJoinEnvelope` 在 merge-min 时保留每个 envelope segment 的来源 label；group-group join 时先检查 crossing arc、terminal job、真实 `ngMemorySet` 相交，再用 traced envelope 直接求最小 shifted sum。若得到负 reduced cost，就回到对应 forward/backward source label，用原来的 `recoverJoinSequence()` 和 `tryGenerateColumn()` 继续处理 elementary/non-elementary 列、DSSR 更新和入池逻辑。
+
+这个版本和旧 join 的列生成节奏不同：旧路径会在一个 backward label 下扫描多个 forward label，并可能返回多个负列；新路径对一个 forward/backward ng-memory group pair 只返回该 pair 的最优拼接列。因此它不保证每轮返回的列数和旧路径一致，但在“证明无负列”时仍是完整的，因为 group envelope 的最小值等价于该 group pair 内所有 label pair 的最小拼接值。若所有 group pair 的 envelope min 都不为负，则该轮没有被 group 压缩漏掉的负拼接列。
+
+初步 smoke 用 `wet040_001_2m`、no ALNS、no heuristic、no strong branching、`maxNodes=1`、`timeLimit=60` 做了 A/B。关闭压缩时为 `NODE_LIMIT, obj=22659, bound=22490, solve=47.501s, exact=34.881s/15`；打开压缩后为 `NODE_LIMIT, obj=22659, bound=22490, solve=60.915s, exact=46.240s/20`。日志显示新路径确实生效，`join candidates visited/dominated=0/0`，并记录了 `joinEnvelope fGrp/bGrp/fLbl/bLbl/seg/gPair/pruned/funcEval`。但这个小 smoke 上没有加速，原因是 traced envelope 构造和 group pair 扫描成本没有被减少的 label-level candidate 扫描抵消，同时每个 group pair 只返一个最优列导致后续 pricing 调用次数增加。当前结论是：该功能只作为实验开关保留，默认不开；后续应在 W300 这类千万级 join 的重实例上再判断是否有收益。
+
+随后进一步复查实现，确认第一版的正确性口径是“完整证书安全，但中前期列生成偏弱”。具体来说，若某个 group-pair 的 traced envelope 最小值已经非负，则这个 group-pair 内所有 label pair 的拼接 reduced cost 都非负，因此不会漏掉负列证书；若最小值为负，则当前实现只返回该 group-pair 的一个全局最优 source-label 拼接。这个最优拼接可能是 non-elementary，旧 label-level join 仍可能继续找到同一 group-pair 内其他负 elementary 列，而第一版会先把 non-elementary 记入 DSSR 更新，导致每轮返回列数偏少、DSSR rounds 或 pricing calls 变多。这不是最优性错误，但会削弱“作为加列器”的效率。
+
+本轮还把 `group.minReducedCost` 改成在 group envelope 完成后统一计算，避免每 merge 一个 label 就扫描一次 envelope；并增加 `joinEnvelopeMs build/join` 统计。新统计显示，在 40-2 smoke 中每轮 envelope 构造和 group join 本身通常只有几十毫秒，例如最后一轮 `build/join=17.667/15.367ms`，而整轮 ng-DSSR 仍为数秒级。这说明该小实例的主要时间仍在 label 扩展、dominance graph 和 DSSR 轮次本身，join funcEval 被压缩两个数量级后也不是总瓶颈。后续若继续优化，应优先在 W300 这类 `funcEval` 千万级且 join 确认为主瓶颈的实例上测试；若要让该路径在中前期也有效，应改成“group envelope 先做证书/预剪枝，负 group 内再返回多个 source pair 列”或在 group 最优为 non-elementary 时回退扫描该 group 内 label pair。
+
+为便于后续判断 exact pricing 的真实耗时结构，本次又在 ng-DSSR summary 中加入 `exactPhaseMs total/init/sink/fw/bw/compact/join/finalize`。其中 `init` 覆盖 SRI/窗口/completion bound/midpoint probe 等初始化，`fw/bw` 是正反向 label 扩展，`compact` 是 join 前 active label 压缩排序，`join` 是 crossing-arc join，`finalize` 是候选列整理入队。该统计只在大阶段外层计时，不进入每个 label 扩展内层循环，避免诊断本身影响 W300 这类重实例。
+### 2026-07-09：join-envelope merge/trace 正确性复核
+
+本次重新对照代码复核了 join-envelope 的合并和追踪语义。当前实现没有把 dominance key 或其补集当作 join key 使用，而是在 join 前扫描仍然 active 的 forward/backward label，按 `(terminal job, true ngMemorySet)` 分组。每个分组里的 traced envelope 使用现有 `getForwardJoinExtension()` / `getBackwardJoinExtension()` 得到的 join 口径函数，并在 merge-min 时为每个 segment 记录 source label。group join 时先检查 crossing arc、terminal job 和真实 `ngMemorySet` 相交；通过后再对 forward envelope shift 后与 backward envelope 做最小和扫描，最小值落在哪两个 segment，就回到对应的 forward/backward source label，用原来的 father chain 恢复 sequence，并继续走原来的 elementary/non-elementary 判断、DSSR 更新和入池逻辑。
+
+因此，从正确性上看，当前合并和追踪本身是闭合的：lower envelope 的几何合并只是在函数层面取 min，segment source 始终指向产生该段函数值的原 label；由于 group 内真实 `ngMemorySet` 完全一致，group 级 ng-memory 兼容性判断适用于组内所有 source label pair；SRI 或 limited-memory SRI 开启时该路径自动回退旧 join，避免遗漏 SRI counts / join shift 状态。当前实现不会把 envelope 对象继续扩展，因此也没有过程内合并 label 时的后续扩展状态问题。
+
+仍需保留的限制是效率而不是最优性：一个 forward/backward group-pair 当前只返回其 traced envelope 全局最小的一个 source pair。如果该 pair 是 non-elementary，旧 label-level join 可能还能在同一 group-pair 内继续找到其他负 elementary pair，而当前第一版会先记录 non-elementary route 触发 DSSR 更新，导致本轮返回列偏少、DSSR rounds 增加。这解释了目前 A/B 中 join 时间显著下降但扩展时间可能上升的现象。后续如果继续优化，应考虑在 group 最优为 non-elementary 时回退扫描该 group-pair 内更多 source pair，或让一个 group-pair 返回多个候选，而不是修改 merge/trace 的基本语义。
+
+### 2026-07-09：扩展与占优侧的后续优化判断
+
+进一步检查 ng-DSSR 的扩展和占优热路径后，当前较明确的结论是：低级冗余已经不多，后续收益更可能来自减少 label 数量和减少 dominance/join 触发量，而不是再重写单个 evaluator。`extendForward/extendBackward` 已经在构造 PWLF 前做了时间窗 overlap 检查，无 SRI 时也不再构造第二套 `noSriFrontier`；动态 hard window、compact window 和 pricing horizon 已经进入半域函数和扩展可行性判断。因此扩展侧若继续优化，优先方向应是更强的构造前剪枝，例如用当前 label scalar lower bound 加 transition/job 的便宜下界和 suffix bound，先跳过明显不可能产生负列的扩展，避免进入 `shiftX + add + normalize`。但该下界必须保持保守，不能以当前局部窗口外的受限成本当真实列成本。
+
+占优侧当前 normal graph 插入仍会合并 predecessor envelope，并在插入后通过 `propagateAndTrim()` 向后扫描 successor；partial-list 则按 cardinality bucket 扫 label 并修剪 frontier。两者都正确，但在 W300 这种 active bucket 很大的实例上，瓶颈会体现为扩展后仍保留大量 live label，随后 join 爆炸。后续更有价值的尝试包括：一是统计每个 reachable/dominance bucket 中 distinct `ngMemorySet` 数量与 live label 数量的比例，决定是否在 join 前返回多个 traced source pair；二是用更强的 time-indexed/compact-window repeatability 信息减少初始 ng-set 或 extensionSet，而不是简单调大 ng-set；三是继续改善 completion-bound 的构造前 pruning，但不要在每轮 pricing 内开启太重的 time-indexed tightening。当前不建议优先改 dominance graph 的语义或过程内合并 label，因为这会牵涉 ng memory、father chain、SRI 状态和后续扩展，风险明显高于 join 前临时压缩。
+### 2026-07-09 50-3 setupR50 + W300 的 join-envelope A/B
+
+继续用昨天讨论的 `wet050_003_3m_setupR50`、`dueWindowHalfWidth=300` 做单节点 root 对比，目的是看 join-envelope compression 在真正 join-heavy 的场景里能否加速。配置保持为 normal ng-DSSR、nearestK3/top3、ALNS 30s 且关闭 SA、time-indexed root preprocessing、root seed 200、time-indexed pre-heuristic、completion bound、pricing-only subtree、midpoint probe 和 repeatability filter，关闭 strong branching，并设置 `maxNodes=1` 只看 root/node1 的收敛代价。两组只切换 `ngDssrJoinEnvelopeCompression`。
+
+结果如下。关闭 join-envelope 时，`NODE_LIMIT`，总时间 `299.212s`，root `294.935s`，node1 bound `1726.118711`，gap `10.0042%`，pool `8180`，pricing `227` 次，ng-DSSR exact `229.771s / 11` 次，heuristic `13.093s / 34` 次。打开 join-envelope 后，`NODE_LIMIT`，总时间 `417.910s`，root `413.443s`，node1 bound `1726.014329`，gap `10.0097%`，pool 只有 `2854`，pricing `304` 次，ng-DSSR exact `340.522s / 26` 次，heuristic `20.330s / 65` 次。
+
+这个结果说明第一版 join-envelope 的瓶颈不在单轮 join。打开后第一轮 exact 的 join 从传统口径的 `6.262s` 降到 `0.235s`，`funcEval` 从约 `4160.8 万` 降到 `19166`；最后无负列证明轮里，传统口径 join 约 `5.144s`、`funcEval=2045446`，join-envelope 约 `1.186s`、`funcEval=108718`。单轮 join 压缩是有效的。
+
+但整体变慢的核心原因也很明确：当前 group-envelope join 每个 group-pair 只返回全局最优的一个 source label pair。如果这个 pair 对应非基本列，或只产生少量基本负列，本轮返回的基本列会显著减少。关闭 join-envelope 的第一轮 exact 直接返回 `5000` 条列，打开后第一轮只返回 `118` 条；关闭版本总共 `11` 次 exact，打开版本变成 `26` 次 exact。虽然每轮 join 便宜很多，但每轮仍要重新做初始化、completion bound、正反向扩展、dominance/envelope merge 和 master resolve，轮次数增加后抵消并超过了 join 节省。
+
+当前判断是：join-envelope compression 作为“减少 funcEval”的方向是对的，但第一版“每个 group-pair 只取一个 source pair”的列返回口径太窄，容易把中前期批量加列能力打掉。后续若继续做，应优先改成在每个 group-pair 内返回多个候选 source pair，或在 envelope 最优 pair 非基本/不足量时回退到该 group-pair 的 label-level 扫描；否则它更适合最后无负列证明轮，而不适合中前期需要大量加列的轮次。当前开关继续保持默认关闭。
+### 2026-07-09: join-envelope OFF/ON 根节点列审计
+
+按要求重新做了 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root 对照，并在 root 收敛后分别导出 restricted/pool 列，对每条列用 `TWETColumnEvaluator.evaluate(sequence)` 重新评估真实成本。OFF 版本目录为 `test-results/bpc/tmp-w300-50-3-r50-joinenv-off-dump-20260709b`，ON 版本目录为 `test-results/bpc/tmp-w300-50-3-r50-joinenv-on-dump-20260709b`。OFF restricted 共 5966 条列，正值列 41 条；ON restricted 共 3100 条列，正值列 41 条。两边所有正值列的 stored cost 与 evaluator cost 差异都在数值误差范围内，ON/OFF 公共正值列 35 条，OFF-only 6 条，ON-only 6 条，公共列目标系数也一致。因此这次没有证据支持“列成本刷新错了”或“最终正值列目标错了”。
+
+进一步用正值列直接重算 RMP 目标，OFF 和 ON 都是 `1726.0143289049`，与各自本次日志里的 root bound `1726.014329` 一致。此前把 `1726.118711` 与本次 dump 结果并列比较是不准确的，该数值来自更早的 A/B 记录，不是这次 `*-dump-20260709b` 的 root 目标。ON-only 正值列中 5 条其实已经存在于 OFF restricted/pool，只是在 OFF 解中取值为 0，且在 OFF dual 下 reduced cost 为数值 0；OFF-only 正值列中 4 条也同样存在于 ON 中取值为 0。这说明本次 ON/OFF 的最终 LP 目标没有矛盾，正值基差异主要是退化和替代列导致。
+
+同时做了交叉审计：OFF 收敛后额外跑一次 envelope join，没有生成额外列；ON 收敛后额外跑标准 label-level join，共生成 520 条负 reduced cost 的 elementary 列，且这些列的 stored cost 与 evaluator cost 全部一致，最小 eval reduced cost 约为 -11.77167。这个证据说明当前第一版 join-envelope 不是等价 exact join：它在每个 `(forward ngMemory group, backward ngMemory group)` 上只取 traced envelope 的一个全局最优 source label pair。如果该 pair 已经被去重、或者不足以返回同一 group-pair 内其它负 elementary 列，当前轮就会少加列；而标准 join 在同一状态下仍能找到其它有效负列。
+
+因此当前结论需要修正为：join-envelope 的 merge/trace 成本口径本身可以对上 evaluator，但第一版“每个 group-pair 只返回一个 source pair”的列生成口径不能作为完整 exact pricing 替代。它可以继续保留为默认关闭的实验开关；后续若要继续做，应改成只把 envelope 作为 group 下界筛选，负 group 内回退到 label-level scan，或者在一个 group-pair 内返回多个 source pair，直到达到和旧 join 等价的加列/证书口径。
+
+对更早的 `tmp-w300-50-3-r50-joinenv-off-clean-20260709` 与 `tmp-w300-50-3-r50-joinenv-on-clean-20260709` 需要单独解释。该组确实出现 OFF `1726.118711`、ON `1726.014329`，并且两边初始 incumbent 都是 `1918`，time-indexed root preprocessing 输出也一致。因此如果 ON 的列都属于同一个 master/同一个 pricing 域，那么把 ON 的最终正值列加入 OFF 的最终 RMP 后，OFF 的 LP 目标应当不高于 `1726.014329`；按 LP 对偶互补性，OFF 最终 dual 下至少应存在一个 ON 列为负 reduced cost。也就是说，这组旧 clean 结果不能简单解释为“ON 少列但路径不同”，它意味着旧 OFF 的 no-negative certificate 不是同一完整列族下的闭合，或者 ON/ OFF 在后续 pricing-only 过滤、列成本或列兼容性口径上已经不完全相同。当前带 dump 的复跑没有复现这个 bound 差异，OFF/ON 都为 `1726.014329`，所以旧 clean 结果只能作为“需要审计当时闭合口径”的证据，不能再作为 join-envelope 正确性的正面或负面定论。
+### 2026-07-09：30-3 宽窗口 join-envelope 小规模复现筛查
+
+为避免继续在 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 这种 root 很重的实例上反复等待，本次临时从已有 50-job/60-job 数据中抽取多个 30-job/3-machine 子集，专门检查 `ngDssrJoinEnvelopeCompression` 打开和关闭时 root LP bound 是否会再次出现不一致。测试只看 root，关闭 `TimeIndexedPreHeuristicPricing` 以强制进入 ng-DSSR exact join，其他仍保留 time-indexed root preprocessing、root seed 200、completion bound、pricing-only subtree、midpoint probe、repeatability filter、ALNS 5s 等主线设置。测试目录集中在 `test-results/bpc/tmp-w300-30-3-*`、`tmp-setupcost20-30-3-*` 和 `tmp-audit-30-3-*`。
+
+从 50-3 setupR50 抽取的 first30、mid30、last30、alt30 以及默认 first30 子集，在 `dueWindowHalfWidth=100/150/300` 下均未复现 ON/OFF root bound 差异。其中 W300 无 setup cost 时多数退化为零目标，不具诊断性；加入 `setupCostFromTimeCoefficient=20` 后，五个子集的 ON/OFF root bound 仍全部一致，例如 first30 为 `7730.250000`，alt30 为 `7678.631579`，last30 为 `6798.103448`，mid30 为 `6977.548387`。
+
+随后又从 60-3 数据抽取 first30、mid30、last30、alt30 子集。W300 无 setup cost 仍基本退化为零目标；加入 `setupCostFromTimeCoefficient=20` 后，四个子集 ON/OFF 也全部一致，例如 alt30 为 `2058.032787`，first30 为 `2340`，last30 为 `2459.854015`，mid30 为 `2086.000000`。其中 `wet030_60alt30_3m + W300 + setupCost20` 做了交叉审计：OFF 收敛后额外跑 envelope join 得到 0 条额外列；ON 收敛后额外跑 standard join 也得到 0 条额外列，二者 root bound、pool 规模和 exact 次数均一致。
+
+当前结论是：在这一轮较小但覆盖不同 job 子集、不同窗口宽度和 setup cost 的复现筛查中，当前 join-envelope 实现没有表现出通用的正确性问题。旧的 50-3 clean 记录里 `1726.118711` 与 `1726.014329` 的差异仍应视为特定旧状态下的闭合口径异常或写回状态差异，而不是当前代码下 envelope merge/trace 的普遍数学错误。若后续还要定位旧 50-3 差异，应回到那个具体大实例，重点审计当时 inherited pricing-only/time-indexed writeback、root preprocessing 证据和标准 join 的 no-negative certificate，而不是继续用小实例盲造。
+### 2026-07-09：join-envelope 成本口径问题复核
+
+进一步复查 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 ON/OFF dump 后，前面对 join-envelope 第一版“证书安全”的判断需要收紧。具体证据是 ON rerun 目录 `tmp-w300-50-3-r50-joinenv-on-rerun-dump-20260709d` 中，序列 `25 17 36 40 29 37 2 49 48 14 33 31 18 23 1 50` 被 `PRICING_EXACT` 加入后，stored cost 为 `301.79999999999893`，但 `TWETColumnEvaluator.evaluate(sequence)` 的真实成本为 `300.0`。同一序列在 OFF rerun 中以 `300.00000000000335` 的成本出现，并且 eval cost 同样为 `300.0`。这说明问题不是 evaluator 或原始目标函数，而是 join-envelope 路径把 group-envelope join 得到的 inferred reduced cost 直接反推成了恢复序列的列成本。
+
+这里的关键区别是：标准 label-level join 的 `reducedCostBound` 来自一个具体 forward label 与一个具体 backward label 的拼接，因此在当前 no-SRI、no-dual-window、PAPER dominance 口径下通常可以直接用它反推 objective cost。join-envelope 路径则不同，它先把同一 `(terminal job, true ngMemorySet)` 下的多个 label 函数取下包络，再对两个 group envelope 求最小和。这个 envelope min 是 group 层面的下界/筛选值，并不天然等于最终通过 segment source 恢复出来的那条 concrete sequence 的全域最小 objective。当前 `tryGenerateColumn()` 沿用 `PricingColumnCostRechecker.buildInferredColumn()`，而 `requiresExactColumnCostRecovery()` 在 no-SRI、no-dual-window、PAPER dominance 下返回 false，因此坏列没有被 evaluator 回刷，最终污染了 RMP 列成本。
+
+因此，之前“若所有 group-pair 的 envelope min 都不为负，则该轮没有被 group 压缩漏掉的负拼接列”的说法也不能直接成立。它只对 group envelope 的函数下界成立，但当前代码还要把这个下界映射回具体 sequence 并进入列池；如果不对恢复出来的 sequence 做真实成本复核，就可能出现 stored reduced cost 接近 0、但真实 eval reduced cost 仍为负的情况。本轮结论是：join-envelope 第一版可以继续作为默认关闭的实验方向，但若要再启用，至少必须对 envelope 产生的候选列统一使用 `TWETColumnEvaluator` 回刷真实 objective，并重新用当前 dual 判断 reduced cost；更完整的版本还需要把 envelope 作为 group 下界筛选，负 group 内返回多个 source pair 或回退 label-level scan，不能只返回一个代表列并把它当作完整 exact pricing 证书。
+
+补充更正：上面说“至少必须回刷”不能理解为根因。根因不是 evaluator 是否调用，而是 join-envelope 用 group 下包络替代了 label-pair 枚举以后，丢掉了“同一 sequence 由多个 split / 多个 label pair 生成并取最低 reduced cost”的机制。标准 join 对每个具体 forward/backward label pair 都做拼接；如果同一 sequence 被多个 split 生成，`rememberGeneratedCandidate()` 会按 signature 保留 reduced cost 更小的那个。因此标准 join 可以不默认回刷，也能通过枚举所有 split 找到该 sequence 的最低成本。
+
+join-envelope 不同。它在每个 `(terminal job, true ngMemorySet)` group 内只保留下包络上可见 segment 的 source label。某条 sequence 的最佳 timing/split 可能对应的 label 在该时间点被 group 内另一个 label 的函数压住，于是这个最佳来源不会作为 envelope segment source 暴露出来。后续 group-pair join 只能从 envelope argmin 的可见 source label 恢复一条代表 sequence；即使恢复出来的是同一条 sequence，也可能只是该 sequence 的一个非最佳 split/timing。`301.8` vs `300.0` 的例子正是这种现象：真实 evaluator 给出的最优成本为 300，但 envelope 路径入池时使用的是某个可见 envelope split 推导出的 301.8。
+
+因此更准确的结论是：回刷只能修正“已经被 envelope 路径恢复出来”的 sequence 成本；它不能解决 envelope 没有枚举到同一 group-pair 内其它负 elementary sequence 的问题。若要让该方向正确且接近旧 join，应该把 envelope 用作 group-level lower-bound 筛选；一旦 group-pair 的 envelope min 为负，就需要在该 group-pair 内继续 label-level scan，或至少返回多个 source pair / split，并继续按 signature 保留最低 reduced cost。单纯“每个 group-pair 只取一个 envelope argmin source pair”不能作为完整 exact join 替代。
+
+继续修正 split/group-pair 口径。更准确地说，同一条完整 sequence 的不同 split 通常对应不同 crossing arc，因此大多落在不同 `(forward terminal job, forward ngMemorySet) × (backward terminal job, backward ngMemorySet)` group-pair 中，而不是同一个 group-pair 内部。标准 label-level join 会枚举这些不同 split；如果多个 split 恢复出同一个 `SequenceSignature`，`rememberGeneratedCandidate()` 会保留 reduced cost 最低的版本。join-envelope 第一版则对每个 group-pair 只返回 envelope argmin 对应的一条代表列，因此可能出现：某个 group-pair 中该 sequence 的最好 split 不是该 group-pair 的 envelope argmin，所以没有被返回；另一个 group-pair 返回了同一 sequence 的较差 split，于是该 sequence 以较高 inferred cost 入池。`301.8` vs `300.0` 的例子更符合这个解释。
+
+在这个口径下，返回列后用 `TWETColumnEvaluator` 重刷真实 objective 是必要的局部修复：只要 envelope 路径已经恢复出某条 concrete sequence，真实 evaluator 会给出该 sequence 在原始目标下的最优成本，从而避免把某个较差 split 的 inferred cost 永久写入 Pool/RMP。这个修复可以消除“同一 sequence 被返回但成本不是它真实最低成本”的错误，例如把 `301.8` 修正为 `300.0`。但它仍不能让 envelope 路径自动返回所有被标准 join 可能发现的负列；若某个 group-pair 的 argmin 代表列是另一条 sequence，当前第一版仍不会返回该 group-pair 内其它负 elementary sequence。因此回刷能保证已返回列的成本正确，但不能把“每 group-pair 一个代表列”变成和标准 join 完全等价的加列器。
+
+当前可接受的工程判断是：若只把 join-envelope 作为默认关闭的实验加速，并且开启时对返回列做真实成本回刷，它不会因为 stored cost 错误污染 RMP；但它仍可能减少每轮加列数量，导致 pricing 轮次增加，不能作为默认 exact join 替代。若以后要把它做成完整替代，需要在 envelope min 为负的 group-pair 内继续枚举多个 source pair，或在代表列不足/非基本/重复时回退到 label-level scan。
+
+### 2026-07-09：join-envelope 返回列成本回刷补丁
+
+按前面结论做了最小补丁：`joinForwardEnvelopeGroupWithBackward()` 恢复出的 concrete sequence 不再直接用 group-envelope 的 inferred reduced cost 反推列成本，而是在进入候选堆前调用 `TWETColumnEvaluator.evaluate(sequence)` 计算真实 objective，再按当前 pricing dual 重新计算 reduced cost。普通 label-level join 仍沿用原来的 inferred-cost 路径，避免扩大影响面。
+
+这个补丁只解决“join-envelope 已经返回的 sequence 不能带着某个代表 split 的 inferred cost 污染 Pool/RMP”的问题。例如此前 `301.8` vs `300.0` 这类 stored cost 偏高会被回刷到真实成本。它不改变第一版 join-envelope 的结构限制：每个 group-pair 仍只返回一个代表 source pair，因此仍可能少返回标准 join 能找到的其它负列。换言之，当前开关仍应视为默认关闭的实验加速路径；若以后要做完整替代，仍需要在负 group 内返回多个 source pair 或回退 label-level scan。

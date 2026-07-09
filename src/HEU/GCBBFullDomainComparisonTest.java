@@ -191,6 +191,9 @@ public class GCBBFullDomainComparisonTest {
 		if (config.enableNgDssrWindowRepeatabilityInitialFilter) {
 			mode += "-ngWinRep";
 		}
+		if (config.enableNgDssrFullDomainLabelFunctions) {
+			mode += "-ngFullLabel";
+		}
 		if (config.ngDssrReturnRelaxedColumns) {
 			mode += "-ngRelaxedColumns";
 		}
@@ -462,6 +465,12 @@ public class GCBBFullDomainComparisonTest {
 		config.enableNgDssrWindowRepeatabilityInitialFilter = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrWindowRepeatabilityFilter",
 				Boolean.toString(config.enableNgDssrWindowRepeatabilityInitialFilter)));
+		config.enableNgDssrJoinEnvelopeCompression = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrJoinEnvelopeCompression",
+				Boolean.toString(config.enableNgDssrJoinEnvelopeCompression)));
+		config.enableNgDssrFullDomainLabelFunctions = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrFullDomainLabelFunctions",
+				Boolean.toString(config.enableNgDssrFullDomainLabelFunctions)));
 		config.ngDssrReturnRelaxedColumns = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrReturnRelaxedColumns",
 				Boolean.toString(config.ngDssrReturnRelaxedColumns)));

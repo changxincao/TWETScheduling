@@ -748,3 +748,15 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 第三个方向是实验层面的 hybrid。若 horizon 小且 time-indexed root 很快，应承认 time-indexed 作为主算法或 root 预处理更合适；若 horizon 大、存在小数 scale、宽 due window 或复杂 setup/外包结构，则用 time-indexed 先做 root/局部 preprocessing 可能不划算，ng-DSSR 应直接利用 completion bound、compact window 和 pricing-only fixing。后续可以设计一个规则：按 `n*T`、time-indexed graph state 数、root pseudo non-elementary 比例和 root gap 判断采用 time-indexed 主算法、time-indexed root preprocessing + ng-DSSR，还是直接 ng-DSSR。
 
 当前论文/实验叙事可以写成：time-indexed 方法在小整数时间、紧 due-window 的实例上非常强，原因是 relaxed pseudo 列接近 elementary 且 shortest path 极快；但它对 horizon scale、宽窗口、小数时间 scale 和外包/复杂 branching 的可扩展性较差。ng-DSSR 的定位不是无条件替代 time-indexed，而是在 time-indexed 图规模或松弛 gap 变差时提供更强的 elementary pricing 和更稳定的分支定价框架。后续关键工作是降低 ng-DSSR 的 exact certificate 成本，尤其是 join group 剪枝和扩展前保守下界剪枝。
+
+### 2026-07-09：ng-DSSR 全域标签函数诊断
+
+前面讨论过一种可能：当前 ng-DSSR 的 forward/backward 函数按 Tmid 做半域裁剪，因此同一 sequence 的不同 split 在理论上可能出现局部成本口径差异；如果把标签函数改成完整 `[0, pricingHorizon]`，则一条路径只要被某个 split 拼出来，成本更接近全域最优口径，也可能更适合后续参考 VRP halfway join 的“一条路径只生成一次”思路。
+
+本次没有改默认主线，只新增诊断开关 `enableNgDssrFullDomainLabelFunctions`，runner 属性为 `twet.bpc.fullDomainCompare.ngDssrFullDomainLabelFunctions`。该开关只在 no-SRI / no-limited-SRI 的 normal ng-DSSR 主线上生效：source、sink、job penalty、扩展可行性检查都从半域 `[0,Tmid]` / `[Tmid,H]` 改为完整 `[0,H]`；Tmid 仍用于搜索方向和 crossing-arc join。为了避免把诊断口径的局部成本写入 RMP，开关打开时返回列会走真实成本回刷。同时加入 `splitDup/mismatch/maxAbsDiff` 统计，检查同一 sequence 多个 split 的 reduced cost 是否一致。
+
+在 `wet040_001_2m` 的 root-only exact 诊断中，baseline 口径为 normal ng-DSSR、`nearestK3/top3`、join-envelope 开、ALNS/启发式/time-indexed 预处理/强分支均关，`maxNodes=1`。半域版本在 `101.849s` 内完成 root pricing 并到 `NODE_LIMIT`，exact 为 `69.278s/20 calls`，root bound 为 `22490`。全域标签函数版本在 `320.041s` 时间限制内没有闭合 root，exact 为 `304.611s/12 calls`，最后一次 pricing 在 forward 扩展阶段耗尽时间。
+
+日志显示，full-domain 后 split 一致性本身没有暴露错误：多轮统计中 `splitDup` 有重复 split，但 `mismatch=0, maxAbsDiff=0`。问题主要是标签数量和扩展规模显著增加。典型首轮中，半域版本 forward/bw kept 约 `1.3万/0.6万`，full-domain 变为 `8.9万/6.7万`；forward extension candidates 从约 `42万` 增到 `238万`，`paperGraph labels kept` 从约 `1.9万` 增到 `15.5万`，`envelopeMerges` 从约 `58万` 增到 `413万`。因此耗时大头不是 join 本身，而是全域函数削弱半域裁剪后带来的扩展、dominance 和 envelope 维护成本。首轮 full-domain 的 `joinEnvelopeMs build/join=1035.895/86.870ms`，而 forward/backward 扩展分别为 `11825/8799ms`。
+
+当前结论是：全域标签函数可以作为诊断工具，用来验证同一 sequence 多 split 的成本一致性；但直接把半域函数改成全域函数不适合作为当前 ng-DSSR 主线优化，至少在 40-2 root 上成本远大于收益。后续如果继续探索 PDF/VRP 式“一条路径只生成一次”的 join，更合理的方向不是先全域化整个 labeling，而是保留半域 labeling 的扩展剪枝优势，在 join 前做更安全的 group 下界筛选，或只对少量候选 group 做回刷/复核。

@@ -2180,3 +2180,11 @@ active SRI cut 下的处理也补了明确口径。默认情况下，只要 LP �
 性能 A/B 使用 `wet040_001_2m`、ng-DSSR、dualPair `0.08`、top1、ALNS 10 秒、关闭 midpoint probe/strong branching/time-indexed pre-heuristic/root preprocessing、`maxNodes=1`。旧 FIFO 为 `solve=60.477s`、exact pricing `23.674s/20`；multi-delta + 时间优先为 `solve=42.683s`、exact pricing `7.171s/20`，两者均为 `obj=22584`、`bound=22490`。对 9 次实际重新构建 completion bound 的轮次统计平均值，build 从 `1207.847ms` 降到 `309.892ms`，约减少 `74.3%`；forward/backward candidate 从 `14101.7/15738.7` 降到 `10072.7/11973.0`，queue pop 从 `360.6/403.6` 降到 `216.2/267.0`，merge 从 `59494.9` 降到 `18298.3`，约减少 `69.2%`。代表性首轮传播区间数为 `1736/1475`，区间长度合计 `104320.769/187562.196`，queue pop `211/276`，candidate `9869/12324`。
 
 multi-delta FIFO 也明显快于旧 FIFO，但时间优先继续降低了传播量。代表性首轮中，multi-delta FIFO 的 pop 为 `282/343`、candidate 为 `12638/14937`、内部 forward/backward build 为约 `175/229ms`；时间优先进一步降到 pop `211/276`、candidate `9869/12324`。当前结论是该方向在本算例上有明确收益，但仍保持默认关闭，先避免单一算例直接改变主线默认配置。后续若扩大验证，应优先测试 W300/50-3 这类 completion-bound 更重的实例，以及 branch/pricing-only arc 较多的深层节点。
+
+### 41.101 2026-07-10 multi-delta 正确性与效率复核
+
+本轮重新按 fixed-point 语义检查了 multi-delta。设某个 job 上次已传播的函数为 `P`，当前完整 envelope 为 `F`，只在严格改善区间保留 `F`、其余位置填 BigM 得到 `D`，则当前函数可写成 `F=min(P,D)`。completion-bound 的时间平移、固定成本相加、job penalty 相加、forward prefix-min/backward suffix-min 和下包络合并都对 pointwise minimum 保持单调并可分配，因此目标节点已经包含旧贡献 `T(P)` 时，只补传播 `T(D)` 与重新传播完整 `T(F)` 等价。队列时间仅决定 correcting 顺序：forward 取 pending 变化的最早开始时间，backward 取最晚结束时间；同一 job 已在优先队列中时采用新版本重新入堆、旧版本懒删除，不改变最终 fixed point。`U/R` 不参与递推，只是最终 `F/B` 经一跳 transition 得到的辅助下界，因此在 `F/B` 收敛后按全部有效前驱/后继完整重建，与迭代中反复累计等价。现有 43 次非零 setup 逐 job、四组完整 PWLF 对拍继续支持这一结论，未发现需要修改的正确性问题。
+
+数值上，sparse delta 仍用有限 `Utility.big_M` 表示空洞。后续平移和相加会把它变成 `M+a`，但 `Utility.isBigMValue()` 按 `M/2` 判定不可行状态；当前 dual/目标量级只有万级，距离 `5e7` 阈值很远，因此当前算例下不会把空洞误当有限成本。该实现仍依赖全项目已有的不变量：任意合法 reduced-cost 累积绝对值必须显著小于 `M/2`。
+
+当前剩余效率余量主要有三处。第一，每个 state 出队时先逐段比较当前函数与快照，再完整复制当前函数作为新快照，存在两次链表扫描；后续可把差分识别和快照复制合并成一次扫描，但预计只是小幅常数优化。第二，sparse delta 在数据结构上仍是一条带 BigM 空洞的连续 PWLF，`shift/add/normalize/mergeMinimum` 仍会扫描空洞 segment；若要完全消除，需要让高频 PWLF 操作原生支持非连续 interval list，改动和对象数量都较大，暂不建议。第三，优先队列采用版本号懒删除，可能保留少量 stale entry，但 state 数只有 job 数量，当前不是瓶颈。另有一个独立工程风险：单次 completion-bound 构建不响应 Tree 的全局 time limit；补做 zero-setup 和 setupR75 compare 时，旧 FIFO 对拍路径单次构建长时间不返回，实验已人工停止，不能计为新增对拍通过。若处理该问题，安全口径应是超时后放弃本次 completion bound，而不是返回未收敛函数用于证书或 arc fixing。

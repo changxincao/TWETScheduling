@@ -52,6 +52,12 @@ class PaperDominanceGraph implements DominanceStore {
 	private static long propagationCalls;
 	private static long propagationNodesVisited;
 	private static long envelopeMergeCalls;
+	private static long sameKeyHits;
+	private static long sameKeyRejected;
+	private static long sameKeyAccepted;
+	private static long sameKeyCheckNanos;
+	private static long sameKeyUpdateNanos;
+	private static long sameKeyPropagationNanos;
 	private static long dominanceChecks;
 	private static long partialTrimChecks;
 	private static long partialTrims;
@@ -103,6 +109,12 @@ class PaperDominanceGraph implements DominanceStore {
 		propagationCalls = 0;
 		propagationNodesVisited = 0;
 		envelopeMergeCalls = 0;
+		sameKeyHits = 0;
+		sameKeyRejected = 0;
+		sameKeyAccepted = 0;
+		sameKeyCheckNanos = 0;
+		sameKeyUpdateNanos = 0;
+		sameKeyPropagationNanos = 0;
 		dominanceChecks = 0;
 		partialTrimChecks = 0;
 		partialTrims = 0;
@@ -123,6 +135,7 @@ class PaperDominanceGraph implements DominanceStore {
 				+ timingSummary()
 				+ ", propagate calls/visited=" + propagationCalls + "/" + propagationNodesVisited
 				+ ", envelopeMerges=" + envelopeMergeCalls
+				+ ", sameKey hit/reject/accept=" + sameKeyHits + "/" + sameKeyRejected + "/" + sameKeyAccepted
 				+ ", dominanceChecks=" + dominanceChecks
 				+ ", partialTrim checks/partial/full=" + partialTrimChecks + "/" + partialTrims + "/"
 				+ partialFullTrims;
@@ -169,33 +182,57 @@ class PaperDominanceGraph implements DominanceStore {
 	@Override
 	public boolean insertOrDominate(Label label) {
 		PaperDominanceNode sameNode = nodeByReachableSet.get(label.reachableSet);
-		ArrayList<PaperDominanceNode> candidates = new ArrayList<PaperDominanceNode>();
-		if (sameNode != null && sameNode.active) {
-			candidates.add(sameNode);
+		boolean sameKey = sameNode != null && sameNode.active;
+		ArrayList<PaperDominanceNode> candidates = null;
+		PiecewiseLinearFunction dominanceEnvelope;
+		if (sameKey) {
+			// 2026-07-10: 单元素 mergeGEnvelopes() 只会复制当前 g_u。占优检查不会修改
+			// envelope，因此直接只读复用，保持原判断和后续包络更新顺序不变。
+			sameKeyHits++;
+			dominanceEnvelope = sameNode.dominanceEnvelope;
 		} else {
-			candidates.addAll(findTerminalSupersetNodes(label.reachableSet));
+			candidates = findTerminalSupersetNodes(label.reachableSet);
+			dominanceEnvelope = mergeGEnvelopes(candidates);
 		}
 
-		PiecewiseLinearFunction dominanceEnvelope = mergeGEnvelopes(candidates);
+		long sameKeyCheckStart = sameKey && TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
 		dominanceChecks++;
 		if (dominatesOrTrimsToEmpty(dominanceEnvelope, label)) {
+			if (sameKey) {
+				sameKeyRejected++;
+				if (TIMING_DIAGNOSTIC) {
+					sameKeyCheckNanos += System.nanoTime() - sameKeyCheckStart;
+				}
+			}
 			label.isDominated = true;
 			labelsRejected++;
 			return true;
 		}
+		if (sameKey && TIMING_DIAGNOSTIC) {
+			sameKeyCheckNanos += System.nanoTime() - sameKeyCheckStart;
+		}
 
 		PaperDominanceNode inserted;
-		if (sameNode != null && sameNode.active) {
+		if (sameKey) {
+			long sameKeyUpdateStart = TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
 			if (partialDominance) {
 				sameNode.trimLabelsBy(label.frontier);
 			}
 			sameNode.addLabel(label);
+			sameKeyAccepted++;
+			if (TIMING_DIAGNOSTIC) {
+				sameKeyUpdateNanos += System.nanoTime() - sameKeyUpdateStart;
+			}
 			inserted = sameNode;
 		} else {
 			inserted = insertNewNode(label, candidates, dominanceEnvelope);
 		}
 		labelsInserted++;
+		long sameKeyPropagationStart = sameKey && TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
 		propagateAndTrim(inserted);
+		if (sameKey && TIMING_DIAGNOSTIC) {
+			sameKeyPropagationNanos += System.nanoTime() - sameKeyPropagationStart;
+		}
 		return false;
 	}
 
@@ -648,7 +685,9 @@ class PaperDominanceGraph implements DominanceStore {
 		return ", superset ms/max=" + formatMillis(supersetSearchNanos) + "/"
 				+ formatMillis(maxSupersetSearchNanos)
 				+ ", subset ms/max=" + formatMillis(subsetSearchNanos) + "/"
-				+ formatMillis(maxSubsetSearchNanos);
+				+ formatMillis(maxSubsetSearchNanos)
+				+ ", sameKey check/update/prop ms=" + formatMillis(sameKeyCheckNanos) + "/"
+				+ formatMillis(sameKeyUpdateNanos) + "/" + formatMillis(sameKeyPropagationNanos);
 	}
 
 	private static void maybePrintTimingHeartbeat(String phase) {
@@ -670,6 +709,7 @@ class PaperDominanceGraph implements DominanceStore {
 				+ "/" + formatMillis(maxSubsetSearchNanos)
 				+ " propagateCallsVisited=" + propagationCalls + "/" + propagationNodesVisited
 				+ " envelopeMerges=" + envelopeMergeCalls
+				+ " sameKeyHitRejectAccept=" + sameKeyHits + "/" + sameKeyRejected + "/" + sameKeyAccepted
 				+ " dominanceChecks=" + dominanceChecks);
 	}
 

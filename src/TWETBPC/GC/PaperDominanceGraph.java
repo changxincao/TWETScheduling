@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
 
@@ -51,6 +50,7 @@ class PaperDominanceGraph implements DominanceStore {
 	private static long maxSubsetSearchNanos;
 	private static long propagationCalls;
 	private static long propagationNodesVisited;
+	private static long propagationNoSuccessorSkips;
 	private static long envelopeMergeCalls;
 	private static long sameKeyHits;
 	private static long sameKeyRejected;
@@ -108,6 +108,7 @@ class PaperDominanceGraph implements DominanceStore {
 				? timingStartNanos + TIMING_HEARTBEAT_INTERVAL_NANOS : 0L;
 		propagationCalls = 0;
 		propagationNodesVisited = 0;
+		propagationNoSuccessorSkips = 0;
 		envelopeMergeCalls = 0;
 		sameKeyHits = 0;
 		sameKeyRejected = 0;
@@ -133,7 +134,8 @@ class PaperDominanceGraph implements DominanceStore {
 				+ ", superset calls/visited=" + supersetSearchCalls + "/" + supersetNodesVisited
 				+ ", subset calls/visited=" + subsetSearchCalls + "/" + subsetNodesVisited
 				+ timingSummary()
-				+ ", propagate calls/visited=" + propagationCalls + "/" + propagationNodesVisited
+				+ ", propagate calls/visited/noSuccessor=" + propagationCalls + "/" + propagationNodesVisited + "/"
+				+ propagationNoSuccessorSkips
 				+ ", envelopeMerges=" + envelopeMergeCalls
 				+ ", sameKey hit/reject/accept=" + sameKeyHits + "/" + sameKeyRejected + "/" + sameKeyAccepted
 				+ ", dominanceChecks=" + dominanceChecks
@@ -422,12 +424,14 @@ class PaperDominanceGraph implements DominanceStore {
 
 	private void propagateAndTrim(PaperDominanceNode changedNode) {
 		propagationCalls++;
+		if (changedNode.successors.isEmpty()) {
+			propagationNoSuccessorSkips++;
+			return;
+		}
+		long queueMark = nextMark();
 		ArrayDeque<PaperDominanceNode> queue = new ArrayDeque<PaperDominanceNode>();
-		HashSet<PaperDominanceNode> queued = new HashSet<PaperDominanceNode>();
 		for (PaperDominanceNode successor : changedNode.successors) {
-			if (successor.active && queued.add(successor)) {
-				queue.add(successor);
-			}
+			enqueueForPropagation(queue, successor, queueMark);
 		}
 		while (!queue.isEmpty()) {
 			PaperDominanceNode node = queue.poll();
@@ -441,9 +445,7 @@ class PaperDominanceGraph implements DominanceStore {
 					&& node.predecessorEnvelope.dominates(node.labelEnvelope)) {
 				ArrayList<PaperDominanceNode> affected = deleteNode(node);
 				for (PaperDominanceNode successor : affected) {
-					if (successor.active && queued.add(successor)) {
-						queue.add(successor);
-					}
+					enqueueForPropagation(queue, successor, queueMark);
 				}
 				continue;
 			}
@@ -451,20 +453,25 @@ class PaperDominanceGraph implements DominanceStore {
 				if (node.labels.isEmpty()) {
 					ArrayList<PaperDominanceNode> affected = deleteNode(node);
 					for (PaperDominanceNode successor : affected) {
-						if (successor.active && queued.add(successor)) {
-							queue.add(successor);
-						}
+						enqueueForPropagation(queue, successor, queueMark);
 					}
 					continue;
 				}
 			}
 			node.recomputeDominanceEnvelope();
 			for (PaperDominanceNode successor : node.successors) {
-				if (successor.active && queued.add(successor)) {
-					queue.add(successor);
-				}
+				enqueueForPropagation(queue, successor, queueMark);
 			}
 		}
+	}
+
+	private static void enqueueForPropagation(ArrayDeque<PaperDominanceNode> queue, PaperDominanceNode node,
+			long queueMark) {
+		if (!node.active || node.propagationQueueMark == queueMark) {
+			return;
+		}
+		node.propagationQueueMark = queueMark;
+		queue.add(node);
 	}
 
 	private ArrayList<PaperDominanceNode> deleteNode(PaperDominanceNode node) {
@@ -707,7 +714,8 @@ class PaperDominanceGraph implements DominanceStore {
 				+ " subsetCallsVisitedMsMax=" + subsetSearchCalls + "/"
 				+ subsetNodesVisited + "/" + formatMillis(subsetSearchNanos)
 				+ "/" + formatMillis(maxSubsetSearchNanos)
-				+ " propagateCallsVisited=" + propagationCalls + "/" + propagationNodesVisited
+				+ " propagateCallsVisitedNoSuccessor=" + propagationCalls + "/" + propagationNodesVisited + "/"
+				+ propagationNoSuccessorSkips
 				+ " envelopeMerges=" + envelopeMergeCalls
 				+ " sameKeyHitRejectAccept=" + sameKeyHits + "/" + sameKeyRejected + "/" + sameKeyAccepted
 				+ " dominanceChecks=" + dominanceChecks);
@@ -726,6 +734,7 @@ class PaperDominanceGraph implements DominanceStore {
 		boolean active = true;
 		long startMark;
 		long visitMark;
+		long propagationQueueMark;
 
 		PaperDominanceNode(PackedBitSet reachableKey, Direction direction) {
 			this.reachableKey = reachableKey.copy();

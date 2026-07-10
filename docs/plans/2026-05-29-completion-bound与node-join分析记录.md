@@ -2133,3 +2133,50 @@ active SRI cut 下的处理也补了明确口径。默认情况下，只要 LP �
 根据后续实验需要，`timeIndexedCompletionBoundAllowNoSriWithActiveCuts` 已从默认关闭改为默认打开。也就是说，当 active SRI cut 存在但没有打开完整 `timeIndexedCompletionBoundSriAwareArcFixing` 时，time-indexed helper 默认不再完全跳过，而是使用 no-SRI 松弛图做 scalar/window/arc-fixing 辅助。这个口径的含义是：忽略 SRI 状态只会得到偏松的 reduced-cost 下界，剪枝强度弱于完整 SRI-aware 版本，但可以避免 active SRI 时所有 time-indexed 加强都失效。
 
 需要区分的是，默认打开 no-SRI 松弛 helper 并不表示它是完整 SRI-aware fixing。若要让时空弧 fixing 精确考虑 SRI residual count/memory，仍需显式打开 `timeIndexedCompletionBoundSriAwareArcFixing`。当前默认组合更适合先保证主线能继续获得 time-indexed helper 的弱加强；完整 SRI-aware 版本保留为更贵的对照开关。
+### 41.97 2026-07-09 W100/50-3 ng-DSSR 中 completion bound 构造耗时再分析
+
+本次基于 `wet050_003_3m + dueWindowHalfWidth=100` 的 ng-DSSR root 诊断重新拆分 `initialize(lp)` 耗时。5 次 exact pricing 的 `exactInitDetailMs` 显示，初始化累计约 `18.879s`，其中 completion bound 约 `11.792s`，midpoint probe 约 `7.043s`，setup/window/ng/state 等其余项都很小。因此在暂时不处理 midpoint probe 的前提下，completion bound 是当前 init 里最明确的优化对象。
+
+从每轮 `completionBoundInternal` 看，单次 completion-bound build 约 `2.1-2.6s`，forward 约 `0.7-1.0s`，backward 约 `1.3-1.7s`，backward 明显更重。每轮候选尝试约 `6.0-6.6` 万，队列 pop 只有约 `1200-1360`，但 `mergeMinimum` 调用约 `12.4-13.4` 万次，说明瓶颈不是队列规模，而是大量 PWLF 候选传播、`shift/add/normalize/mergeMinimum` 和 backward suffix-min 方向的函数处理。arc fixing 本身每轮只有十几到二十几毫秒，不是瓶颈。
+
+结合 2026-06-16 的旧诊断，之前已经确认 `completionBoundMergeTiming=true` 下 backward merge 的主要耗时在 `normalize`，进一步拆分后又集中在 `minimizeSuffixInPlace()`，copy 只占很小比例。因此后续不应优先做 no-copy merge；更有价值的是优化 `minimizeSuffixInPlace()` 的数组装载、segment 重建和相邻段压缩，或者在 `CompletionBoundCalculator` 里加入更细的 candidate 构造计时，区分 `shiftX`、`add(jobCost)`、候选 normalize 和 envelope merge 的实际占比。
+
+当前不建议直接默认启用已有的 `completionBoundDeltaPropagation`。历史实验里“单 hull + 从完整函数反复 crop”的第一版虽然减少了部分 merge 次数，但在 40 任务 zero setup root 上反而变慢，原因是 hull 过宽、`cropToInterval()` 和子函数重建成本抵消了收益。若后续继续做 delta，应改成多区间 delta 或直接传播 delta 子函数，而不是用单个 hull 从完整 envelope 反复裁剪。
+
+可尝试的低风险顺序为：第一，补充默认关闭的细粒度计时，把 completion-bound candidate 构造和 merge/normalize 分开统计；第二，针对 `minimizeSuffixInPlace()` 做局部实现优化，并用现有 PWLF 回归和 root smoke 对拍；第三，再评估更弱的 scalar-first/lazy full bound 策略，即前中期只用 scalar 或 time-indexed pre-heuristic，只有需要 exact certificate 或 subtree fixing 时才构造完整 PWLF completion bound。第三类会改变剪枝强度但不应改变正确性，因为它只会弱化 pruning，需要做 A/B 判断是否会被 label/join 增量抵消。
+
+### 41.98 2026-07-09 completion-bound candidate 细分计时与一次负优化验证
+
+本次按上一节结论补了默认关闭的 candidate 细分计时，开关为 `twet.bpc.completionBoundCandidateTiming=true`。它只在显式诊断时统计 `buildForwardCandidate()` / `buildBackwardCandidate()` 中的 `shiftX`、第一次 `normalize`、`add(jobCost)`、第二次 `normalize` 时间；默认关闭时不输出，也不改变主线求解逻辑。诊断命令仍使用 `wet050_003_3m + W100`、root-only、ng-DSSR、`completionBound=allCycles`、关闭 ALNS/strong/time-indexed pre-heuristic/root preprocessing 的口径。
+
+诊断结果进一步确认，completion bound 的难点主要在 envelope merge，而不是 candidate 构造本身。代表性轮次中，每轮 forward/backward candidate attempts 约 `2.3-2.6` 万；candidate 构造的四段合计大约 `300-390ms`。同一轮 `completionBoundMergeTiming` 显示 skip scan、full merge body 和 normalize 合计仍接近或超过 `800-1200ms`，其中 backward 侧 skip scan 和 suffix-min normalize 明显更重。也就是说，`shiftX/add/normalize` 的候选构造确实有成本，但不是当前最优先的单点瓶颈；真正的大头仍是大量 `mergeMinimum()` 调用中的只读 skip 判断、完整 lower-envelope merge，以及 backward `minimizeSuffixInPlace()`。
+
+同时尝试过一个很小的 endpoint shortcut：在 `canSkipMergeMinimum()` 里，如果已规范化函数的候选最优端点仍不低于当前 envelope 的最差端点，则直接跳过完整扫描。这个想法在数学上只是充分条件，不改变结果；但实测是负优化。相同口径下，旧 run 为 `solve=59.870s, exact=13.403s/11`，加入该 shortcut 后变为 `solve=74.012s, exact=14.915s/11`。前两轮 completion-bound build 分别从约 `1325/1203ms` 变成 `1767/1985ms`。原因是这个 shortcut 命中不够多，却给高频 skip 判断额外增加了端点取值和分支判断成本。因此该优化已经撤回，不保留在主线。
+
+当前结论是：completion-bound 优化不应继续从“再给 skip scan 加一个便宜判断”入手，除非能证明命中率极高。后续更合理的方向有两个。第一，针对 backward `minimizeSuffixInPlace()` 做有性质测试支撑的局部优化，减少数组装载、segment 重建和相邻段压缩的成本；这块牵涉 hard-window BigM 与 backward 左端保留语义，不能裸改。第二，在算法层面减少完整 PWLF completion bound 的构造频率，例如前中期先靠 time-indexed pre-heuristic/scalar bound 找列，只有需要 no-negative certificate、dual bound 或 subtree fixing 时才构造完整函数 bound。第二类会弱化剪枝，必须用完整 BPC A/B 判断 label/join 增量是否抵消节省的 bound 构造时间。
+
+### 41.99 2026-07-10 completion-bound 迭代流程的后续加速方向
+
+当前 `allCycles` completion bound 是按 job 聚合的 label-correcting 迭代：某个 job 的 PWLF 下包络被候选函数改小后，该 job 重新入队，出队时再把完整函数传播到全部可用后继或前驱。FIFO 已经能合并“仍在队列中时发生的多次更新”，但一个 job 出队后再次被改小，仍会重新扫描全部邻接弧并构造、合并完整候选函数。由于每条调度扩展都会让完成时间严格增加，底层 `(job,time)` 状态图正向按时间、反向逆时间实际上是无环的；当前反复纠正主要来自把时间维压成一个 job 级 PWLF 后再做整函数传播。
+
+更值得尝试的第一条路线是多区间 delta propagation。队列元素应记录 `(job, changedIntervals)`，只传播本轮真正变小的若干时间区间；同一 job 尚未出队时，只合并重叠或相邻的变化区间，不把离散变化粗暴包成一个大 hull。传播时直接使用这些 delta 子函数，不再从完整 envelope 反复 `cropToInterval()`。现有 `completionBoundDeltaPropagation` 的负结果并没有否定 delta 思路，它否定的是“单个 change hull + 从完整函数裁剪”的第一版：hull 会包含大量没有变化的中间区域，且 crop/子函数重建抵消了 merge 次数下降。
+
+第二条路线是利用时间单调性改成 event/time sweep。整数实例可以直接在 `(job,t)` DAG 上按 `t` 递增计算 forward、按 `t` 递减计算 backward，再根据调用方需要保留数组或压缩为函数；复杂度更接近 `O(T|A|)`，没有 job 反复入队。该路线适合 horizon 较小的整数实例，本质上会靠近现有 time-indexed helper；horizon 很大或小数 scale 后会失去优势。连续实例若要保持精确 PWLF，需要做 segment-event sweep，按函数断点和由弧平移产生的事件推进，改动和验证成本明显更高。
+
+队列优先级本身不是当前优先方向。历史 `REDUCED_COST` 对照显著增加 candidate/merge 次数，说明“先处理当前看起来更小的函数”不等于减少最终纠正。若只做局部实验，可以测试 deque/SLF 一类轻量顺序，但收益上限预计低于多区间 delta。SCC 分解则只在 branch/pricing-only fixing 后图被切成多个强连通分量时有用：分量间按拓扑顺序一次传播，分量内继续 correcting；root 若仍是一个大 SCC，基本没有收益。
+
+因此当前建议的实验顺序是：先实现独立、默认关闭的多区间 delta 版本，并同时统计传播区间总长度、区间数、candidate/merge 次数和完整 build 时间；要求与旧 FIFO 逐 job 对拍整条 PWLF，而不只是对拍 scalar min。若多区间仍不能降低 build 时间，再考虑整数实例的 time-sweep 自适应替代。单纯调整 FIFO 顺序或增加 merge 前 cheap check 暂不继续。
+
+从现有实现看，实验原型可以复用 `buildAllCyclesDelta()`、`MergeResult` 和 `DeltaQueue`，调用方与正常 FIFO 路径都不需要修改；真正需要补的是精确变化区间列表、每个 state 的有序不相交 pending intervals，以及按这些区间从当前 envelope 构造稀疏 delta 函数。这里不能简单把每个变化区间独立 `crop` 后传播，因为 forward 的 prefix-min 会让某个局部改善继续影响右侧，backward 的 suffix-min 会让它继续影响左侧。正确的 delta 输入应在变化区间保留当前真实函数值、在未变化区间使用 BigM，再执行现有方向化 normalize，使这次新改善该产生的单侧闭包仍然完整传播。由此判断，这项工作属于中等规模、局部可隔离的实现：代码入口清楚，但正确性重点在 delta 函数构造和方向化闭包，不是队列容器本身。
+
+队列执行方式也可以进一步优化，但不建议继续按 reduced cost 排 job。更匹配问题结构的是按 delta 的时间边界调度：forward 优先处理 `changedStart` 更早的变化，backward 优先处理 `changedEnd` 更晚的变化。每条扩展都带来严格正的时间增量，因此这种顺序更接近底层 `(job,time)` DAG 的拓扑序；它与历史 `REDUCED_COST` 模式不同，后者使用整个 frontier 的 `head.start` 和端点成本，无法区分本轮真正变化发生在哪里。整数实例可以用时间 bucket queue 避免堆开销，连续实例可先用小根/大根堆实验。另一个可对照方案是双队列 wave batching：本轮每个 job 最多扩展一次，本轮产生的更新进入下一轮，从而最大化合并更新；但它会失去当前 FIFO 的 Gauss-Seidel 即时传播，可能增加轮数，只适合作为 A/B。深层节点若普通弧图已经被 fixing 切成多个 SCC，还可以先按 SCC DAG 拓扑顺序处理，SCC 内继续使用时间 delta 队列；root 仍是单个大 SCC 时基本无收益。
+
+### 41.100 2026-07-10 multi-delta 与时间优先队列实验结果
+
+本次实现了默认关闭的独立实验路径 `twet.bpc.completionBoundMultiDeltaPropagation=true`。该路径为每个 job 保存上一次已经传播的最终 envelope；job 出队时，把当前 envelope 与该快照逐段比较，得到真正变小的多个不相交时间区间。构造传播函数时，只在这些区间保留当前函数值，其余位置填 BigM，再通过原有 forward prefix-min / backward suffix-min 恢复本次改善应产生的单侧等待闭包。这样传播的是实际 delta，不再因为单 hull 把中间未变化区域一起重新计算。`twet.bpc.completionBoundMultiDeltaTimePriority=true` 时，forward 按 pending delta 的最早开始时间优先，backward 按最晚结束时间优先；关闭时仍使用 multi-delta FIFO。旧 `buildAllCycles()` 与旧单-hull delta 路径均未修改。
+
+正确性验证不是只比较 scalar min。`twet.bpc.completionBoundMultiDeltaCompare=true` 会在同一 LP 状态额外运行旧 FIFO，并逐 job 比较 `forwardF/backwardB/forwardU/backwardR` 的元数据定义域、物理定义域和整条 PWLF。实现过程中第一次对拍发现 `F/B` 已一致但 `U/R` 不一致，原因是 `U/R` 本身不参与 correcting，直接按 `F/B` 的更新区间增量维护会漏掉被 job penalty 闭包掩盖的辅助函数改善。最终处理为：迭代期间只收敛并传播 `F/B`，收敛后用最终 `F/B` 和完整有效 candidate 统一重建 `U/R`。曾尝试仅计算 transition 前半段以加速重建，但它会纳入无法形成有效 `F/B` candidate 的 `U/R`，对拍立即失败，已撤回。最终版本在 `wet040_001_2m` 的 20 次 completion-bound 构造和 `wet040_002_2m` 的 23 次构造中均逐函数对拍一致。
+
+性能 A/B 使用 `wet040_001_2m`、ng-DSSR、dualPair `0.08`、top1、ALNS 10 秒、关闭 midpoint probe/strong branching/time-indexed pre-heuristic/root preprocessing、`maxNodes=1`。旧 FIFO 为 `solve=60.477s`、exact pricing `23.674s/20`；multi-delta + 时间优先为 `solve=42.683s`、exact pricing `7.171s/20`，两者均为 `obj=22584`、`bound=22490`。对 9 次实际重新构建 completion bound 的轮次统计平均值，build 从 `1207.847ms` 降到 `309.892ms`，约减少 `74.3%`；forward/backward candidate 从 `14101.7/15738.7` 降到 `10072.7/11973.0`，queue pop 从 `360.6/403.6` 降到 `216.2/267.0`，merge 从 `59494.9` 降到 `18298.3`，约减少 `69.2%`。代表性首轮传播区间数为 `1736/1475`，区间长度合计 `104320.769/187562.196`，queue pop `211/276`，candidate `9869/12324`。
+
+multi-delta FIFO 也明显快于旧 FIFO，但时间优先继续降低了传播量。代表性首轮中，multi-delta FIFO 的 pop 为 `282/343`、candidate 为 `12638/14937`、内部 forward/backward build 为约 `175/229ms`；时间优先进一步降到 pop `211/276`、candidate `9869/12324`。当前结论是该方向在本算例上有明确收益，但仍保持默认关闭，先避免单一算例直接改变主线默认配置。后续若扩大验证，应优先测试 W300/50-3 这类 completion-bound 更重的实例，以及 branch/pricing-only arc 较多的深层节点。

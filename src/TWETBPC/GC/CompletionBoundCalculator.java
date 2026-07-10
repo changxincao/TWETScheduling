@@ -163,6 +163,18 @@ final class CompletionBoundCalculator {
 		long backwardNormalizePreCompactNanos;
 		long backwardNormalizeDirectionalMinNanos;
 		long backwardNormalizePostCompactNanos;
+		long forwardCandidateShiftNanos;
+		long forwardCandidateFirstNormalizeNanos;
+		long forwardCandidateAddNanos;
+		long forwardCandidateSecondNormalizeNanos;
+		long backwardCandidateShiftNanos;
+		long backwardCandidateFirstNormalizeNanos;
+		long backwardCandidateAddNanos;
+		long backwardCandidateSecondNormalizeNanos;
+		long forwardDeltaIntervalsPropagated;
+		long backwardDeltaIntervalsPropagated;
+		double forwardDeltaLengthPropagated;
+		double backwardDeltaLengthPropagated;
 		long forwardSegmentSamples;
 		long forwardTargetSegments;
 		long forwardCandidateSegments;
@@ -215,12 +227,17 @@ final class CompletionBoundCalculator {
 	private final boolean diagnosticChangeSource;
 	private final int diagnosticChangeSourceDumpLimit;
 	private final boolean deltaPropagation;
+	private final boolean multiDeltaPropagation;
+	private final boolean multiDeltaTimePriority;
+	private final boolean multiDeltaCompare;
+	private final boolean diagnosticMultiDeltaStats;
 	private long diagnosticChangedStrictValue;
 	private long diagnosticChangedDomainOnly;
 	private long diagnosticChangedNoVisible;
 	private int diagnosticChangedNoVisibleDumps;
 	private final boolean diagnosticSegments;
 	private final boolean diagnosticMergeTiming;
+	private final boolean diagnosticCandidateTiming;
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
@@ -264,8 +281,13 @@ final class CompletionBoundCalculator {
 		this.diagnosticChangeSourceDumpLimit = Math.max(0,
 				Integer.getInteger("twet.bpc.completionBoundChangeSourceDumpLimit", 0));
 		this.deltaPropagation = Boolean.getBoolean("twet.bpc.completionBoundDeltaPropagation");
+		this.multiDeltaPropagation = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaPropagation");
+		this.multiDeltaTimePriority = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaTimePriority");
+		this.multiDeltaCompare = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaCompare");
+		this.diagnosticMultiDeltaStats = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaStats");
 		this.diagnosticSegments = Boolean.getBoolean("twet.bpc.completionBoundSegments");
 		this.diagnosticMergeTiming = Boolean.getBoolean("twet.bpc.completionBoundMergeTiming");
+		this.diagnosticCandidateTiming = Boolean.getBoolean("twet.bpc.completionBoundCandidateTiming");
 	}
 
 	Result build(Relaxation relaxation) {
@@ -291,8 +313,18 @@ final class CompletionBoundCalculator {
 		}
 		try {
 			diagnosticHeartbeat("build.start." + relaxation, 0, 0, 0, true);
-			Bounds bounds = relaxation == Relaxation.TWO_CYCLE ? buildTwoCycle()
-					: (deltaPropagation ? buildAllCyclesDelta() : buildAllCycles());
+			Bounds bounds;
+			if (relaxation == Relaxation.TWO_CYCLE) {
+				bounds = buildTwoCycle();
+			} else if (multiDeltaPropagation) {
+				bounds = buildAllCyclesMultiDelta();
+				if (multiDeltaCompare) {
+					compareBoundsByJob(bounds, buildAllCycles());
+					System.out.println("[completionBoundMultiDeltaCompare] result=equal");
+				}
+			} else {
+				bounds = deltaPropagation ? buildAllCyclesDelta() : buildAllCycles();
+			}
 			diagnosticHeartbeat("build.after_relaxation." + relaxation, 0, 0, 0, true);
 			buildCompletionFunctionMins(bounds);
 			diagnosticHeartbeat("build.after_mins." + relaxation, 0, 0, 0, true);
@@ -302,6 +334,12 @@ final class CompletionBoundCalculator {
 			}
 			if (diagnosticMergeTiming) {
 				printMergeTiming(relaxation);
+			}
+			if (diagnosticCandidateTiming) {
+				printCandidateTiming(relaxation);
+			}
+			if (multiDeltaPropagation && diagnosticMultiDeltaStats) {
+				printMultiDeltaStats(relaxation);
 			}
 			return new Result(bounds, stats);
 		} finally {
@@ -582,6 +620,113 @@ final class CompletionBoundCalculator {
 		return bounds;
 	}
 
+	/**
+	 * 2026-07-10: 只传播本轮真正改小的时间区间。旧 FIFO 与单 hull delta 路径保持不变，
+	 * 该实验路径通过系统属性单独开启，用于判断稀疏 delta 是否能减少完整 PWLF 的重复传播。
+	 */
+	private Bounds buildAllCyclesMultiDelta() {
+		Bounds bounds = new Bounds(data.n, pricingHorizon);
+		PiecewiseLinearFunction[] forwardF = new PiecewiseLinearFunction[data.n + 1];
+		PiecewiseLinearFunction[] backwardB = new PiecewiseLinearFunction[data.n + 1];
+		PiecewiseLinearFunction[] propagatedForwardF = new PiecewiseLinearFunction[data.n + 1];
+		PiecewiseLinearFunction[] propagatedBackwardB = new PiecewiseLinearFunction[data.n + 1];
+		MultiDeltaQueue forwardQueue = new MultiDeltaQueue(data.n + 1, Direction.FORWARD,
+				multiDeltaTimePriority);
+		MultiDeltaQueue backwardQueue = new MultiDeltaQueue(data.n + 1, Direction.BACKWARD,
+				multiDeltaTimePriority);
+
+		long phaseStart = System.nanoTime();
+		PiecewiseLinearFunction source = sourcePropagationFunction();
+		for (int idx = 0; idx < forwardSuccessorsByJob[0].length; idx++) {
+			int job = forwardSuccessorsByJob[0][idx];
+			FunctionPair candidate = buildForwardCandidate(source, 0, job);
+			if (candidate == null) {
+				continue;
+			}
+			MergeResult changed = mergeForwardWithChangeHull(forwardF, job, candidate.f);
+			forwardQueue.enqueue(job, changed.changedStart, changed.changedEnd);
+		}
+		diagnosticHeartbeat("allCyclesMultiDelta.forward.seed.done", forwardQueue.size(), 0, 0, true);
+		while (!forwardQueue.isEmpty()) {
+			stats.forwardQueuePops++;
+			int state = forwardQueue.poll();
+			DeltaBatch batch = buildActualImprovementBatch(state, forwardF[state], propagatedForwardF[state]);
+			propagatedForwardF[state] = forwardF[state].copy();
+			if (batch.intervalCount == 0) {
+				continue;
+			}
+			recordPropagatedDelta(Direction.FORWARD, batch);
+			diagnosticHeartbeat("allCyclesMultiDelta.forward.loop", forwardQueue.size(), batch.state, 0, false);
+			PiecewiseLinearFunction deltaF = buildSparseDeltaFunction(forwardF[batch.state], batch,
+					Direction.FORWARD);
+			if (!hasPositiveDomain(deltaF)) {
+				continue;
+			}
+			int[] successors = forwardSuccessorsByJob[batch.state];
+			for (int idx = 0; idx < successors.length; idx++) {
+				int job = successors[idx];
+				FunctionPair candidate = buildForwardCandidate(deltaF, batch.state, job);
+				if (candidate == null) {
+					continue;
+				}
+				MergeResult changed = mergeForwardWithChangeHull(forwardF, job, candidate.f);
+				forwardQueue.enqueue(job, changed.changedStart, changed.changedEnd);
+			}
+		}
+		diagnosticHeartbeat("allCyclesMultiDelta.forward.done", forwardQueue.size(), 0, 0, true);
+		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
+		copyCompletionFunctions(bounds.forwardFByJob, forwardF);
+		long auxiliaryStart = System.nanoTime();
+		rebuildForwardAuxiliaryBounds(bounds.forwardUByJob, forwardF, source);
+		stats.forwardBuildNanos += System.nanoTime() - auxiliaryStart;
+
+		phaseStart = System.nanoTime();
+		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
+		for (int idx = 0; idx < sinkPredecessors.length; idx++) {
+			int job = sinkPredecessors[idx];
+			FunctionPair candidate = buildBackwardSinkCandidate(job);
+			if (candidate == null) {
+				continue;
+			}
+			MergeResult changed = mergeBackwardWithChangeHull(backwardB, job, candidate.f);
+			backwardQueue.enqueue(job, changed.changedStart, changed.changedEnd);
+		}
+		diagnosticHeartbeat("allCyclesMultiDelta.backward.seed.done", backwardQueue.size(), 0, 0, true);
+		while (!backwardQueue.isEmpty()) {
+			stats.backwardQueuePops++;
+			int state = backwardQueue.poll();
+			DeltaBatch batch = buildActualImprovementBatch(state, backwardB[state], propagatedBackwardB[state]);
+			propagatedBackwardB[state] = backwardB[state].copy();
+			if (batch.intervalCount == 0) {
+				continue;
+			}
+			recordPropagatedDelta(Direction.BACKWARD, batch);
+			diagnosticHeartbeat("allCyclesMultiDelta.backward.loop", backwardQueue.size(), batch.state, 0, false);
+			PiecewiseLinearFunction deltaB = buildSparseDeltaFunction(backwardB[batch.state], batch,
+					Direction.BACKWARD);
+			if (!hasPositiveDomain(deltaB)) {
+				continue;
+			}
+			int[] predecessors = backwardPredecessorsByJob[batch.state];
+			for (int idx = 0; idx < predecessors.length; idx++) {
+				int prev = predecessors[idx];
+				FunctionPair candidate = buildBackwardCandidate(deltaB, prev, batch.state);
+				if (candidate == null) {
+					continue;
+				}
+				MergeResult changed = mergeBackwardWithChangeHull(backwardB, prev, candidate.f);
+				backwardQueue.enqueue(prev, changed.changedStart, changed.changedEnd);
+			}
+		}
+		diagnosticHeartbeat("allCyclesMultiDelta.backward.done", backwardQueue.size(), 0, 0, true);
+		stats.backwardBuildNanos += System.nanoTime() - phaseStart;
+		copyCompletionFunctions(bounds.backwardBByJob, backwardB);
+		auxiliaryStart = System.nanoTime();
+		rebuildBackwardAuxiliaryBounds(bounds.backwardRByJob, backwardB);
+		stats.backwardBuildNanos += System.nanoTime() - auxiliaryStart;
+		return bounds;
+	}
+
 	private Bounds buildTwoCycle() {
 		Bounds bounds = new Bounds(data.n, pricingHorizon);
 		PiecewiseLinearFunction[][] forwardU = new PiecewiseLinearFunction[data.n + 1][data.n + 1];
@@ -776,21 +921,37 @@ final class CompletionBoundCalculator {
 			return null;
 		}
 		double delay = data.getSetUp(prevJob, job) + data.getProcessT(job);
+		long start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		PiecewiseLinearFunction u = parentF.shiftX(delay);
+		if (diagnosticCandidateTiming) {
+			stats.forwardCandidateShiftNanos += System.nanoTime() - start;
+		}
 		if (!hasPositiveDomain(u)) {
 			return null;
 		}
 		u.shiftYInPlace(data.getSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		u.normalize(Direction.FORWARD);
+		if (diagnosticCandidateTiming) {
+			stats.forwardCandidateFirstNormalizeNanos += System.nanoTime() - start;
+		}
 		PiecewiseLinearFunction jobCost = forwardJobReducedPenalty(job);
 		if (jobCost == null) {
 			return null;
 		}
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		PiecewiseLinearFunction f = u.add(jobCost);
+		if (diagnosticCandidateTiming) {
+			stats.forwardCandidateAddNanos += System.nanoTime() - start;
+		}
 		if (!hasPositiveDomain(f)) {
 			return null;
 		}
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		f.normalize(Direction.FORWARD);
+		if (diagnosticCandidateTiming) {
+			stats.forwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
+		}
 		return hasPositiveDomain(f) ? new FunctionPair(u, f) : null;
 	}
 
@@ -814,22 +975,89 @@ final class CompletionBoundCalculator {
 			return null;
 		}
 		double delay = data.getSetUp(job, successor) + data.getProcessT(successor);
+		long start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		PiecewiseLinearFunction r = successorB.shiftX(-delay);
+		if (diagnosticCandidateTiming) {
+			stats.backwardCandidateShiftNanos += System.nanoTime() - start;
+		}
 		if (!hasPositiveDomain(r)) {
 			return null;
 		}
 		r.shiftYInPlace(data.getSetupCost(job, successor) - lp.getArcDual(job, successor));
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		r.normalize(Direction.BACKWARD);
+		if (diagnosticCandidateTiming) {
+			stats.backwardCandidateFirstNormalizeNanos += System.nanoTime() - start;
+		}
 		PiecewiseLinearFunction jobCost = backwardJobReducedPenalty(job);
 		if (jobCost == null) {
 			return null;
 		}
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		PiecewiseLinearFunction b = r.add(jobCost);
+		if (diagnosticCandidateTiming) {
+			stats.backwardCandidateAddNanos += System.nanoTime() - start;
+		}
 		if (!hasPositiveDomain(b)) {
 			return null;
 		}
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		b.normalize(Direction.BACKWARD);
+		if (diagnosticCandidateTiming) {
+			stats.backwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
+		}
 		return hasPositiveDomain(b) ? new FunctionPair(r, b) : null;
+	}
+
+	private void rebuildForwardAuxiliaryBounds(PiecewiseLinearFunction[] forwardU,
+			PiecewiseLinearFunction[] finalForwardF, PiecewiseLinearFunction source) {
+		for (int idx = 0; idx < forwardSuccessorsByJob[0].length; idx++) {
+			int job = forwardSuccessorsByJob[0][idx];
+			FunctionPair candidate = buildForwardCandidate(source, 0, job);
+			if (candidate != null) {
+				mergeForward(forwardU, job, candidate.u);
+			}
+		}
+		for (int prev = 1; prev <= data.n; prev++) {
+			PiecewiseLinearFunction parent = finalForwardF[prev];
+			if (!hasPositiveDomain(parent)) {
+				continue;
+			}
+			int[] successors = forwardSuccessorsByJob[prev];
+			for (int idx = 0; idx < successors.length; idx++) {
+				int job = successors[idx];
+				FunctionPair candidate = buildForwardCandidate(parent, prev, job);
+				if (candidate != null) {
+					mergeForward(forwardU, job, candidate.u);
+				}
+			}
+		}
+	}
+
+	private void rebuildBackwardAuxiliaryBounds(PiecewiseLinearFunction[] backwardR,
+			PiecewiseLinearFunction[] finalBackwardB) {
+		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
+		for (int idx = 0; idx < sinkPredecessors.length; idx++) {
+			int job = sinkPredecessors[idx];
+			FunctionPair candidate = buildBackwardSinkCandidate(job);
+			if (candidate != null) {
+				mergeBackward(backwardR, job, candidate.u);
+			}
+		}
+		for (int successor = 1; successor <= data.n; successor++) {
+			PiecewiseLinearFunction suffix = finalBackwardB[successor];
+			if (!hasPositiveDomain(suffix)) {
+				continue;
+			}
+			int[] predecessors = backwardPredecessorsByJob[successor];
+			for (int idx = 0; idx < predecessors.length; idx++) {
+				int prev = predecessors[idx];
+				FunctionPair candidate = buildBackwardCandidate(suffix, prev, successor);
+				if (candidate != null) {
+					mergeBackward(backwardR, prev, candidate.u);
+				}
+			}
+		}
 	}
 
 	private PiecewiseLinearFunction sourcePropagationFunction() {
@@ -1051,6 +1279,35 @@ final class CompletionBoundCalculator {
 		System.out.flush();
 	}
 
+	private void printCandidateTiming(Relaxation relaxation) {
+		System.out.println("[completionBoundCandidateTiming] relaxation=" + relaxation
+				+ " attempts fw/bw=" + stats.forwardCandidateAttempts + "/" + stats.backwardCandidateAttempts
+				+ " fwMs shift/norm1/add/norm2=" + formatNanos(stats.forwardCandidateShiftNanos)
+				+ "/" + formatNanos(stats.forwardCandidateFirstNormalizeNanos)
+				+ "/" + formatNanos(stats.forwardCandidateAddNanos)
+				+ "/" + formatNanos(stats.forwardCandidateSecondNormalizeNanos)
+				+ " bwMs shift/norm1/add/norm2=" + formatNanos(stats.backwardCandidateShiftNanos)
+				+ "/" + formatNanos(stats.backwardCandidateFirstNormalizeNanos)
+				+ "/" + formatNanos(stats.backwardCandidateAddNanos)
+				+ "/" + formatNanos(stats.backwardCandidateSecondNormalizeNanos));
+		System.out.flush();
+	}
+
+	private void printMultiDeltaStats(Relaxation relaxation) {
+		System.out.println("[completionBoundMultiDelta] relaxation=" + relaxation
+				+ " queue=" + (multiDeltaTimePriority ? "timePriority" : "fifo")
+				+ " intervals fw/bw=" + stats.forwardDeltaIntervalsPropagated
+				+ "/" + stats.backwardDeltaIntervalsPropagated
+				+ " length fw/bw=" + formatMillis(stats.forwardDeltaLengthPropagated)
+				+ "/" + formatMillis(stats.backwardDeltaLengthPropagated)
+				+ " pops fw/bw=" + stats.forwardQueuePops + "/" + stats.backwardQueuePops
+				+ " candidates fw/bw=" + stats.forwardCandidateAttempts + "/" + stats.backwardCandidateAttempts
+				+ " merge/changed=" + stats.mergeCalls + "/" + stats.mergeChanged
+				+ " buildMs fw/bw=" + formatNanos(stats.forwardBuildNanos)
+				+ "/" + formatNanos(stats.backwardBuildNanos));
+		System.out.flush();
+	}
+
 	private int countSegments(PiecewiseLinearFunction function) {
 		if (!diagnosticSegments || function == null || function.head == null) {
 			return 0;
@@ -1070,6 +1327,213 @@ final class CompletionBoundCalculator {
 		// 直接纳入 mergeMinimum 还会破坏 PWLF 当前“正长度 overlap”的合并契约。
 		return function != null && function.head != null && function.tail != null
 				&& Utility.compareLt(function.head.start, function.tail.end);
+	}
+
+	private DeltaBatch buildActualImprovementBatch(int state, PiecewiseLinearFunction current,
+			PiecewiseLinearFunction propagated) {
+		PendingIntervals improved = new PendingIntervals();
+		if (current == null || current.head == null) {
+			return improved.drain(state);
+		}
+		if (propagated == null || propagated.head == null) {
+			improved.add(current.head.start, current.tail.end);
+			return improved.drain(state);
+		}
+
+		if (Utility.compareLt(current.head.start, propagated.head.start)) {
+			improved.add(current.head.start, Math.min(current.tail.end, propagated.head.start));
+		}
+		Segment currentSegment = current.head;
+		Segment propagatedSegment = propagated.head;
+		double cursor = Math.max(current.head.start, propagated.head.start);
+		double overlapEnd = Math.min(current.tail.end, propagated.tail.end);
+		while (currentSegment != null && !Utility.compareGt(currentSegment.end, cursor)) {
+			currentSegment = currentSegment.next;
+		}
+		while (propagatedSegment != null && !Utility.compareGt(propagatedSegment.end, cursor)) {
+			propagatedSegment = propagatedSegment.next;
+		}
+		while (currentSegment != null && propagatedSegment != null && Utility.compareLt(cursor, overlapEnd)) {
+			double next = Math.min(Math.min(currentSegment.end, propagatedSegment.end), overlapEnd);
+			addStrictImprovementInterval(improved, currentSegment, propagatedSegment, cursor, next);
+			cursor = next;
+			if (Utility.compareEq(currentSegment.end, next)) {
+				currentSegment = currentSegment.next;
+			}
+			if (Utility.compareEq(propagatedSegment.end, next)) {
+				propagatedSegment = propagatedSegment.next;
+			}
+		}
+		if (Utility.compareGt(current.tail.end, propagated.tail.end)) {
+			improved.add(Math.max(current.head.start, propagated.tail.end), current.tail.end);
+		}
+		return improved.drain(state);
+	}
+
+	private void addStrictImprovementInterval(PendingIntervals improved, Segment current, Segment propagated,
+			double start, double end) {
+		if (!Utility.compareLt(start, end)) {
+			return;
+		}
+		boolean lowerAtStart = Utility.compareLt(current.getValue(start), propagated.getValue(start));
+		boolean lowerAtEnd = Utility.compareLt(current.getValue(end), propagated.getValue(end));
+		if (lowerAtStart == lowerAtEnd) {
+			if (lowerAtStart) {
+				improved.add(start, end);
+			}
+			return;
+		}
+		double slopeDifference = current.slope - propagated.slope;
+		if (Utility.compareEq(slopeDifference, 0.0)) {
+			improved.add(start, end);
+			return;
+		}
+		double crossing = (propagated.intercept - current.intercept) / slopeDifference;
+		crossing = Math.max(start, Math.min(end, crossing));
+		if (lowerAtStart) {
+			improved.add(start, crossing);
+		} else {
+			improved.add(crossing, end);
+		}
+	}
+
+	/**
+	 * 只保留本轮真正更新的区间；其余位置填 BigM，再交给现有 prefix/suffix normalize
+	 * 恢复该次改善应产生的单侧等待闭包。这样不会把旧 envelope 的未变化部分重复传播。
+	 */
+	private PiecewiseLinearFunction buildSparseDeltaFunction(PiecewiseLinearFunction function, DeltaBatch batch,
+			Direction direction) {
+		PiecewiseLinearFunction delta = new PiecewiseLinearFunction();
+		if (function == null || function.head == null || batch == null || batch.intervalCount == 0) {
+			return delta;
+		}
+		double start = direction == Direction.FORWARD
+				? Math.max(function.head.start, batch.starts[0]) : function.head.start;
+		double end = direction == Direction.FORWARD
+				? function.tail.end : Math.min(function.tail.end, batch.ends[batch.intervalCount - 1]);
+		delta.resetDomain(start, end);
+		if (!Utility.compareLt(start, end)) {
+			return delta;
+		}
+
+		Segment segment = function.head;
+		double cursor = start;
+		for (int i = 0; i < batch.intervalCount; i++) {
+			double intervalStart = Math.max(start, batch.starts[i]);
+			double intervalEnd = Math.min(end, batch.ends[i]);
+			if (!Utility.compareLt(intervalStart, intervalEnd)) {
+				continue;
+			}
+			if (Utility.compareLt(cursor, intervalStart)) {
+				delta.addSegment(cursor, intervalStart, 0.0, Utility.big_M);
+			}
+			while (segment != null && !Utility.compareGt(segment.end, intervalStart)) {
+				segment = segment.next;
+			}
+			double local = intervalStart;
+			Segment scan = segment;
+			while (scan != null && Utility.compareLt(scan.start, intervalEnd)) {
+				double pieceStart = Math.max(local, Math.max(scan.start, intervalStart));
+				double pieceEnd = Math.min(scan.end, intervalEnd);
+				if (Utility.compareLt(local, pieceStart)) {
+					delta.addSegment(local, pieceStart, 0.0, Utility.big_M);
+				}
+				if (Utility.compareLt(pieceStart, pieceEnd)) {
+					delta.addSegment(pieceStart, pieceEnd, scan.slope, scan.intercept);
+					local = pieceEnd;
+				}
+				if (!Utility.compareLt(scan.end, intervalEnd)) {
+					break;
+				}
+				scan = scan.next;
+			}
+			if (Utility.compareLt(local, intervalEnd)) {
+				delta.addSegment(local, intervalEnd, 0.0, Utility.big_M);
+			}
+			cursor = intervalEnd;
+		}
+		if (Utility.compareLt(cursor, end)) {
+			delta.addSegment(cursor, end, 0.0, Utility.big_M);
+		}
+		mergeAdjacentEqualSegments(delta);
+		return delta;
+	}
+
+	private void recordPropagatedDelta(Direction direction, DeltaBatch batch) {
+		for (int i = 0; i < batch.intervalCount; i++) {
+			double length = Math.max(0.0, batch.ends[i] - batch.starts[i]);
+			if (direction == Direction.FORWARD) {
+				stats.forwardDeltaIntervalsPropagated++;
+				stats.forwardDeltaLengthPropagated += length;
+			} else {
+				stats.backwardDeltaIntervalsPropagated++;
+				stats.backwardDeltaLengthPropagated += length;
+			}
+		}
+	}
+
+	private void compareBoundsByJob(Bounds actual, Bounds expected) {
+		compareFunctionArrays("forwardF", actual.forwardFByJob, expected.forwardFByJob);
+		compareFunctionArrays("backwardB", actual.backwardBByJob, expected.backwardBByJob);
+		compareFunctionArrays("forwardU", actual.forwardUByJob, expected.forwardUByJob);
+		compareFunctionArrays("backwardR", actual.backwardRByJob, expected.backwardRByJob);
+	}
+
+	private void compareFunctionArrays(String name, PiecewiseLinearFunction[] actual,
+			PiecewiseLinearFunction[] expected) {
+		for (int job = 1; job <= data.n; job++) {
+			String difference = firstFunctionDifference(actual[job], expected[job]);
+			if (difference != null) {
+				throw new IllegalStateException("completion-bound multi-delta mismatch " + name
+						+ " job=" + job + " " + difference);
+			}
+		}
+	}
+
+	private String firstFunctionDifference(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
+		if (left == null || left.head == null) {
+			return right == null || right.head == null ? null : "left=empty right=nonempty";
+		}
+		if (right == null || right.head == null) {
+			return "left=nonempty right=empty";
+		}
+		if (!Utility.compareEq(left.domainStart, right.domainStart)
+				|| !Utility.compareEq(left.domainEnd, right.domainEnd)) {
+			return "metadataDomain=" + left.domainStart + ":" + left.domainEnd + " vs "
+					+ right.domainStart + ":" + right.domainEnd;
+		}
+		if (!Utility.compareEq(left.head.start, right.head.start)
+				|| !Utility.compareEq(left.tail.end, right.tail.end)) {
+			return "domain=" + left.head.start + ":" + left.tail.end + " vs "
+					+ right.head.start + ":" + right.tail.end;
+		}
+		Segment p = left.head;
+		Segment q = right.head;
+		double cursor = left.head.start;
+		while (p != null && q != null) {
+			double next = Math.min(p.end, q.end);
+			if (Utility.compareLt(cursor, next)) {
+				double midpoint = 0.5 * (cursor + next);
+				if (!sameFunctionValue(p.getValue(cursor), q.getValue(cursor))
+						|| !sameFunctionValue(p.getValue(midpoint), q.getValue(midpoint))
+						|| !sameFunctionValue(p.getValue(next), q.getValue(next))) {
+					return "interval=" + cursor + ":" + next + " values="
+							+ p.getValue(midpoint) + " vs " + q.getValue(midpoint);
+				}
+			}
+			cursor = next;
+			if (Utility.compareEq(p.end, next)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(q.end, next)) {
+				q = q.next;
+			}
+		}
+		return p == null && q == null ? null : "segment-chain-length";
+	}
+
+	private boolean sameFunctionValue(double left, double right) {
+		return (Utility.isBigMValue(left) && Utility.isBigMValue(right)) || Utility.compareEq(left, right);
 	}
 
 	private PiecewiseLinearFunction cropToInterval(PiecewiseLinearFunction function, double start, double end) {
@@ -1130,6 +1594,185 @@ final class CompletionBoundCalculator {
 			return Utility.big_M;
 		}
 		return frontier.head.start;
+	}
+
+	private static final class DeltaBatch {
+		final int state;
+		final double[] starts;
+		final double[] ends;
+		final int intervalCount;
+
+		DeltaBatch(int state, double[] starts, double[] ends, int intervalCount) {
+			this.state = state;
+			this.starts = starts;
+			this.ends = ends;
+			this.intervalCount = intervalCount;
+		}
+	}
+
+	private static final class PendingIntervals {
+		private double[] starts = new double[4];
+		private double[] ends = new double[4];
+		private int count;
+
+		void add(double start, double end) {
+			if (!Utility.compareLt(start, end)) {
+				return;
+			}
+			int first = 0;
+			while (first < count && Utility.compareLt(ends[first], start)) {
+				first++;
+			}
+			double mergedStart = start;
+			double mergedEnd = end;
+			int after = first;
+			while (after < count && !Utility.compareLt(mergedEnd, starts[after])) {
+				mergedStart = Math.min(mergedStart, starts[after]);
+				mergedEnd = Math.max(mergedEnd, ends[after]);
+				after++;
+			}
+			int removed = after - first;
+			ensureCapacity(count - removed + 1);
+			if (removed == 0) {
+				System.arraycopy(starts, first, starts, first + 1, count - first);
+				System.arraycopy(ends, first, ends, first + 1, count - first);
+				count++;
+			} else if (removed > 1) {
+				System.arraycopy(starts, after, starts, first + 1, count - after);
+				System.arraycopy(ends, after, ends, first + 1, count - after);
+				count -= removed - 1;
+			}
+			starts[first] = mergedStart;
+			ends[first] = mergedEnd;
+		}
+
+		DeltaBatch drain(int state) {
+			DeltaBatch batch = new DeltaBatch(state, Arrays.copyOf(starts, count), Arrays.copyOf(ends, count), count);
+			count = 0;
+			return batch;
+		}
+
+		private void ensureCapacity(int required) {
+			if (starts.length >= required) {
+				return;
+			}
+			int capacity = starts.length * 2;
+			while (capacity < required) {
+				capacity *= 2;
+			}
+			starts = Arrays.copyOf(starts, capacity);
+			ends = Arrays.copyOf(ends, capacity);
+		}
+	}
+
+	private static final class MultiDeltaQueueEntry {
+		final int state;
+		final double priority;
+		final long version;
+		final long sequence;
+
+		MultiDeltaQueueEntry(int state, double priority, long version, long sequence) {
+			this.state = state;
+			this.priority = priority;
+			this.version = version;
+			this.sequence = sequence;
+		}
+	}
+
+	private static final class MultiDeltaQueue {
+		private final Direction direction;
+		private final boolean timePriority;
+		private final ArrayDeque<Integer> fifo;
+		private final PriorityQueue<MultiDeltaQueueEntry> priorityQueue;
+		private final boolean[] inQueue;
+		private final long[] versions;
+		private final double[] priorityByState;
+		private int activeCount;
+		private long nextSequence;
+
+		MultiDeltaQueue(int stateCount, final Direction direction, boolean timePriority) {
+			this.direction = direction;
+			this.timePriority = timePriority;
+			this.inQueue = new boolean[stateCount];
+			this.versions = new long[stateCount];
+			this.priorityByState = new double[stateCount];
+			if (timePriority) {
+				this.fifo = null;
+				this.priorityQueue = new PriorityQueue<MultiDeltaQueueEntry>(
+						new Comparator<MultiDeltaQueueEntry>() {
+							@Override
+							public int compare(MultiDeltaQueueEntry left, MultiDeltaQueueEntry right) {
+								int byTime = direction == Direction.FORWARD
+										? Double.compare(left.priority, right.priority)
+										: Double.compare(right.priority, left.priority);
+								if (byTime != 0) {
+									return byTime;
+								}
+								int byState = Integer.compare(left.state, right.state);
+								return byState != 0 ? byState : Long.compare(left.sequence, right.sequence);
+							}
+						});
+			} else {
+				this.fifo = new ArrayDeque<Integer>();
+				this.priorityQueue = null;
+			}
+		}
+
+		void enqueue(int state, double changedStart, double changedEnd) {
+			if (!Utility.compareLt(changedStart, changedEnd)) {
+				return;
+			}
+			double oldPriority = inQueue[state] ? priorityByState[state]
+					: (direction == Direction.FORWARD ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY);
+			double newPriority = direction == Direction.FORWARD
+					? Math.min(oldPriority, changedStart) : Math.max(oldPriority, changedEnd);
+			priorityByState[state] = newPriority;
+			if (!inQueue[state]) {
+				inQueue[state] = true;
+				activeCount++;
+				versions[state]++;
+				if (timePriority) {
+					priorityQueue.add(new MultiDeltaQueueEntry(state, newPriority, versions[state], ++nextSequence));
+				} else {
+					fifo.add(Integer.valueOf(state));
+				}
+			} else if (timePriority && isPriorityImproved(newPriority, oldPriority)) {
+				versions[state]++;
+				priorityQueue.add(new MultiDeltaQueueEntry(state, newPriority, versions[state], ++nextSequence));
+			}
+		}
+
+		boolean isEmpty() {
+			return activeCount == 0;
+		}
+
+		int size() {
+			return activeCount;
+		}
+
+		int poll() {
+			int state;
+			if (timePriority) {
+				MultiDeltaQueueEntry entry;
+				do {
+					entry = priorityQueue.poll();
+				} while (entry != null && (!inQueue[entry.state] || entry.version != versions[entry.state]));
+				if (entry == null) {
+					throw new IllegalStateException("multi-delta queue lost active state");
+				}
+				state = entry.state;
+			} else {
+				state = fifo.poll().intValue();
+			}
+			inQueue[state] = false;
+			activeCount--;
+			return state;
+		}
+
+		private boolean isPriorityImproved(double current, double previous) {
+			return direction == Direction.FORWARD ? Utility.compareLt(current, previous)
+					: Utility.compareGt(current, previous);
+		}
 	}
 
 	private static final class DeltaQueue {

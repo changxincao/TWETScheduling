@@ -281,8 +281,12 @@ final class CompletionBoundCalculator {
 		this.diagnosticChangeSourceDumpLimit = Math.max(0,
 				Integer.getInteger("twet.bpc.completionBoundChangeSourceDumpLimit", 0));
 		this.deltaPropagation = Boolean.getBoolean("twet.bpc.completionBoundDeltaPropagation");
-		this.multiDeltaPropagation = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaPropagation");
-		this.multiDeltaTimePriority = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaTimePriority");
+		// 2026-07-10: multi-delta 与时间优先队列已完成旧 FIFO 的逐函数对拍，并在 completion-bound
+		// 重算较重的算例上明显减少重复传播；默认启用，仍允许实验通过系统属性显式关闭并回退旧路径。
+		this.multiDeltaPropagation = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.completionBoundMultiDeltaPropagation", "true"));
+		this.multiDeltaTimePriority = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.completionBoundMultiDeltaTimePriority", "true"));
 		this.multiDeltaCompare = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaCompare");
 		this.diagnosticMultiDeltaStats = Boolean.getBoolean("twet.bpc.completionBoundMultiDeltaStats");
 		this.diagnosticSegments = Boolean.getBoolean("twet.bpc.completionBoundSegments");

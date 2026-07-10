@@ -2188,3 +2188,7 @@ multi-delta FIFO 也明显快于旧 FIFO，但时间优先继续降低了传播�
 数值上，sparse delta 仍用有限 `Utility.big_M` 表示空洞。后续平移和相加会把它变成 `M+a`，但 `Utility.isBigMValue()` 按 `M/2` 判定不可行状态；当前 dual/目标量级只有万级，距离 `5e7` 阈值很远，因此当前算例下不会把空洞误当有限成本。该实现仍依赖全项目已有的不变量：任意合法 reduced-cost 累积绝对值必须显著小于 `M/2`。
 
 当前剩余效率余量主要有三处。第一，每个 state 出队时先逐段比较当前函数与快照，再完整复制当前函数作为新快照，存在两次链表扫描；后续可把差分识别和快照复制合并成一次扫描，但预计只是小幅常数优化。第二，sparse delta 在数据结构上仍是一条带 BigM 空洞的连续 PWLF，`shift/add/normalize/mergeMinimum` 仍会扫描空洞 segment；若要完全消除，需要让高频 PWLF 操作原生支持非连续 interval list，改动和对象数量都较大，暂不建议。第三，优先队列采用版本号懒删除，可能保留少量 stale entry，但 state 数只有 job 数量，当前不是瓶颈。另有一个独立工程风险：单次 completion-bound 构建不响应 Tree 的全局 time limit；补做 zero-setup 和 setupR75 compare 时，旧 FIFO 对拍路径单次构建长时间不返回，实验已人工停止，不能计为新增对拍通过。若处理该问题，安全口径应是超时后放弃本次 completion bound，而不是返回未收敛函数用于证书或 arc fixing。
+
+### 41.102 2026-07-10 multi-delta 改为默认路径
+
+基于第 41.100-41.101 节的完整 PWLF 对拍和性能结果，`completionBoundMultiDeltaPropagation` 与 `completionBoundMultiDeltaTimePriority` 改为默认开启。当前所有使用 `ALL_CYCLES` completion bound 的入口在未显式设置系统属性时都会走 multi-delta + 时间优先队列；`TWO_CYCLE` 仍走原有专用递推。实验或回归时可通过 `-Dtwet.bpc.completionBoundMultiDeltaPropagation=false` 回退旧 FIFO；也可只把 `completionBoundMultiDeltaTimePriority=false`，保留 multi-delta 但恢复 FIFO 顺序。compare 与详细统计仍默认关闭，不影响正常求解。

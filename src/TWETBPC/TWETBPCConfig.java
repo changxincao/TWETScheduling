@@ -159,10 +159,12 @@ public class TWETBPCConfig {
 	public boolean useGCNGBBStyleNgDssrPartialDominancePricing = false;
 	/** 2026-06-11: 实验开关；复用 ng-DSSR 主体，仅把 dominance store 切到 graph partial dominance。 */
 	public boolean useGCNGBBStyleNgDssrGraphPartialDominancePricing = false;
-	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK。 */
-	public String ngDssrInitialNgSetMode = "nearestK";
+	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/dualPair/reducedCostPair。 */
+	public String ngDssrInitialNgSetMode = "dualPair";
 	/** 2026-07-05: 初始 ng-set 的目标大小，不含任务自身；当前 job 会在 label memory 更新时单独加入。 */
 	public int ngDssrInitialNgSetSize = 8;
+	/** 2026-07-09: 旧 VRP 风格的初始 ng-set 系数；dualPair/reducedCostPair 模式按 floor(n * coef) 全局选负 pair。 */
+	public double ngDssrInitialNgPairCoefficient = 0.08;
 	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
 	public int ngDssrNonElementaryRouteUpdateLimit = 1;
 	/** 2026-07-03: 实验开关；按最近若干次正式 ng-DSSR final ng-set 统计初始化下一次 ng-set。 */
@@ -304,7 +306,11 @@ public class TWETBPCConfig {
 	/** 2026-06-14: probe 到达基础候选数后，如果不均衡仍超过该倍数，则允许继续同方向试探。 */
 	public double bidirectionalMidpointProbeHighImbalanceRatio = 10.0;
 	/** 2026-06-07: 同一 BPC node 后续 pricing round 是否以上一轮选中的 Tmid 作为 probe reference。 */
-	public boolean bidirectionalMidpointProbeReuseWithinNode = false;
+	public boolean bidirectionalMidpointProbeReuseWithinNode = true;
+	/** 2026-07-09: 同一次 ng-DSSR exact pricing 内，第 2 轮及以后是否复用第一轮 probe 选出的 Tmid。 */
+	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;
+	/** 2026-07-09: ng-DSSR 扩展热路径细分计时诊断；默认关闭，避免高频 nanoTime 影响批量实验。 */
+	public boolean ngDssrExtensionTimingDiagnostics = false;
 	/**
 	 * 2026-06-07: 保留的实验开关。当前主线改为复用同一 node 内历史 exact 表现最好的 Tmid，
 	 * 不再默认用上一轮 forward/backward 压力做方向乘法修正。

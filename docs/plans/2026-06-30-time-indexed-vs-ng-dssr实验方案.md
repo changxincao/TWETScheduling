@@ -749,6 +749,20 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 
 当前论文/实验叙事可以写成：time-indexed 方法在小整数时间、紧 due-window 的实例上非常强，原因是 relaxed pseudo 列接近 elementary 且 shortest path 极快；但它对 horizon scale、宽窗口、小数时间 scale 和外包/复杂 branching 的可扩展性较差。ng-DSSR 的定位不是无条件替代 time-indexed，而是在 time-indexed 图规模或松弛 gap 变差时提供更强的 elementary pricing 和更稳定的分支定价框架。后续关键工作是降低 ng-DSSR 的 exact certificate 成本，尤其是 join group 剪枝和扩展前保守下界剪枝。
 
+### 2026-07-09：ng-DSSR 可能赢过 time-indexed 的条件判断
+
+当前更准确的判断是：ng-DSSR 只有在 time-indexed 的两个优势至少有一个被削弱时，才有较大机会赢。time-indexed 的优势一是图上的最短路极快，二是当前很多 due-date/小整数算例里 pseudo-schedule 和 elementary route 很接近，root gap 很小。如果这两点都成立，ng-DSSR 即使列更强，也会被 PWLF label、DSSR 多轮、completion bound 和 join 证书成本拖慢。
+
+第一类有利于 ng-DSSR 的情况是时间尺度变大或存在小数时间。time-indexed 的复杂度直接随离散时间点数放大，整数时间整体放大、非均匀扰动放大、或者小数时间需要 scale 成整数时，图规模会迅速变大；ng-DSSR 的连续时间 PWLF 虽然也会变复杂，但不按每个离散时间点建状态，因此相对更稳定。这也是目前最清晰、最容易证明 ng-DSSR 相对优势的方向。
+
+第二类是 pseudo-schedule 明显变弱的实例。典型特征包括中等宽度 due window、较强 setup time、较强 setup cost 或者其他会让重复访问 job 变得有吸引力的结构。前面的 50-3 W300/R50/R75 结果已经说明，正值列中 non-elementary 比例上升后，time-indexed root gap 会明显变大；但同时 ng-DSSR exact pricing 也会变重。因此这一类不能只看 root gap，还要看 gap 改善是否足以抵消 ng-DSSR 的证书成本。
+
+第三类是 branching、外包和子树约束逐渐变复杂的场景。time-indexed 在 root 上可能很强，但一旦带大量 branch/pricing-only arc、outsourcing membership、subtree fixing 和 compact window，直接 time-indexed 图的构建和证书维护会更重；ng-DSSR 更容易在连续时间标签和 completion bound 框架里继承这些约束。反过来，如果这些约束能把 time-indexed 图大量缩小，那么 time-indexed 仍可能继续占优，所以这里需要按节点深度和约束密度分段比较。
+
+第四类是 time-indexed 的列很多但 master bound 改善慢的情况。time-indexed relaxed 列便宜，但可能给 RMP 加入大量弱 pseudo 列；如果这些列导致列池膨胀、LP 反复重解、bound 改善小，ng-DSSR 的强列可能用更少列达到类似或更好的下界。这里应重点比较 pool size、positive non-elementary ratio、root bound、LP time 和 node 数，而不是只看单次 pricing time。
+
+因此后续实验应避免只在原始 40/50 小整数 due-date 算例上比较“谁更快”。更合理的矩阵是：小 horizon/紧 due-date 作为 time-indexed 优势区；时间放大、小数 scale、中等宽 due window、强 setup、setup cost、外包/复杂分支作为 ng-DSSR 潜在优势区。最终叙述应是方法适用区间的比较：time-indexed 在小整数紧窗口上很强，ng-DSSR 在离散时间规模变大或 pseudo-schedule 松弛明显变弱时更有价值。
+
 ### 2026-07-09：ng-DSSR 全域标签函数诊断
 
 前面讨论过一种可能：当前 ng-DSSR 的 forward/backward 函数按 Tmid 做半域裁剪，因此同一 sequence 的不同 split 在理论上可能出现局部成本口径差异；如果把标签函数改成完整 `[0, pricingHorizon]`，则一条路径只要被某个 split 拼出来，成本更接近全域最优口径，也可能更适合后续参考 VRP halfway join 的“一条路径只生成一次”思路。
@@ -760,3 +774,27 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 日志显示，full-domain 后 split 一致性本身没有暴露错误：多轮统计中 `splitDup` 有重复 split，但 `mismatch=0, maxAbsDiff=0`。问题主要是标签数量和扩展规模显著增加。典型首轮中，半域版本 forward/bw kept 约 `1.3万/0.6万`，full-domain 变为 `8.9万/6.7万`；forward extension candidates 从约 `42万` 增到 `238万`，`paperGraph labels kept` 从约 `1.9万` 增到 `15.5万`，`envelopeMerges` 从约 `58万` 增到 `413万`。因此耗时大头不是 join 本身，而是全域函数削弱半域裁剪后带来的扩展、dominance 和 envelope 维护成本。首轮 full-domain 的 `joinEnvelopeMs build/join=1035.895/86.870ms`，而 forward/backward 扩展分别为 `11825/8799ms`。
 
 当前结论是：全域标签函数可以作为诊断工具，用来验证同一 sequence 多 split 的成本一致性；但直接把半域函数改成全域函数不适合作为当前 ng-DSSR 主线优化，至少在 40-2 root 上成本远大于收益。后续如果继续探索 PDF/VRP 式“一条路径只生成一次”的 join，更合理的方向不是先全域化整个 labeling，而是保留半域 labeling 的扩展剪枝优势，在 join 前做更安全的 group 下界筛选，或只对少量候选 group 做回刷/复核。
+### 2026-07-09：50-3 W100 的 time-indexed root-only 复核
+
+在前一轮 `wet050_003_3m + dueWindowHalfWidth=100` 对比中，ng-DSSR 已经完整求解到 `obj=bound=11555`，总时间约 `737.703s`，而完整 time-indexed run 长时间未结束且没有正常写出 CSV。为判断 time-indexed 的问题是否发生在 root，本次单独跑纯 `TimeIndexedGraphPricing` 的 root-only：`maxNodes=1`，关闭 strong branching，保留 ALNS 30s 和 live trace。
+
+结果为 `NODE_LIMIT`，即 root 已处理完后因节点上限停止。root incumbent 为 `11782`，root bound 为 `11469.712548`，root gap 为 `2.6505%`；root solving time 为 `68.111s`，总 `solve=69.110s`。time-indexed exact pricing 合计 `9.227s / 231 calls`，共加入 `51576` 条列，最终 pool 为 `51592`；master LP 合计 `25.184s`，其中 after-pricing LP `230` 次、平均约 `108.719ms`。root 结束时正值列 `40` 条，其中 elementary `16` 条、non-elementary `24` 条。root 后的 time-indexed arc fixing 候选 `4665429`，固定 `4452907`，gap 约 `312.287`。
+
+因此，本算例 W100 下 time-indexed 的 root 本身并不慢，约 69s 即闭合 root；完整 time-indexed run 长时间不结束的主要风险更可能来自 root 之后的大列池 LP、分支/强分支试探和后续节点处理，而不是 root pricing 闭合阶段。这个结果也说明 W100 确实已经让 time-indexed root bound 明显弱于 incumbent，但 root 闭合仍然很快；ng-DSSR 能完整求解更快或更慢，需要继续分清 root bound 改善、节点数和后续 LP 成本三部分。
+
+随后用同一配置跑完整 time-indexed，并打开 live trace 持续监测。结果并没有复现“长时间不结束”，而是 `FINISHED`：`obj=bound=11555`，总时间 `217.432s`，处理 `36` 个节点，加入 `82799` 条列，最终 pool `82506`。root bound 仍为 `11469.712548`，root time `62.336s`。对比前面的 ng-DSSR W100 完整结果 `737.703s / 9 nodes / pool=27647`，本次纯 time-indexed 明显更快，但依赖更多 relaxed/pseudo 列和更多节点。
+
+耗时拆分显示，完整 time-indexed 的主要成本不是最短路 pricing。`TimeIndexedGraphPricing=23.231s / 974 calls`，repair 中 `FindFeasible=1.059s / 54 calls`；master LP 中 after-pricing 为 `23.811s / 939 calls`，而 strong branching phase-1 的 `strong_branching_light_repair_rmp=96.848s / 760 calls`，平均约 `127ms`，是最大单项。RMIH 约 `18.170s`。root 阶段 strong branching 最重，部分 trial LP 在 `5` 万列左右求解，单次约 `0.5-1.2s`；后续节点因 child seed 被筛到几千列，trial LP 通常降到几十毫秒。由此可见，之前完整 time-indexed 没写结果那次更可能是运行被中断或监测口径问题，不应作为 time-indexed 在该 W100 算例上失败的证据。
+### 2026-07-09：50-3 W100 ng-DSSR 完整耗时拆分
+
+在 `wet050_003_3m + dueWindowHalfWidth=100` 上，当前 ng-DSSR 好配置完整求解结果为 `FINISHED,obj=bound=11555,solve=737.703s,root=216.209s,nodes=9,pool=27647`。对比同一算例的纯 time-indexed 完整 run `217.432s,nodes=36,pool=82506`，ng-DSSR 的主要问题不是节点数，而是单次 exact pricing 和强分支启发式/LP 的证书成本太重。
+
+汇总日志中 89 次 `GCNGBBStyleNgDssrPricing` 可见，ng-DSSR exact 合计约 `330.0s`。其中 `init=195.2s` 是最大项，`fw=39.2s`、`bw=48.8s`、`join=46.4s`。`init` 不是简单对象初始化，而是 `initialize(lp)` 的完整准备阶段，包含 dynamic/compact window、completion bound、midpoint probe、label store/queue/candidate state 初始化等。需要注意的是，当前日志里的 `completionBound buildMs` 不是跨 DSSR 轮累计口径：`exactPhaseMs init` 会累计同一次 exact pricing 内多轮 DSSR 的初始化时间，但 `completionBoundBuildNanos` 会在每轮 `resetStatistics()` 时清零。因此不能把最终日志里可见的 `completionBound buildMs≈58.9s` 与 `init=195.2s` 直接相减来解释“剩余 init”。复核 `rounds>1` 的日志后，很多多轮 exact pricing 的最终行显示 `completionBound buildMs=0`，但 `init` 仍然很大，说明隐藏在 init 里的主要仍可能是前面 DSSR 轮次的 completion bound、midpoint probe、window/state 初始化等，只是当前 summary 没有累计暴露。所有 exact 调用累计 `funcEval=60412832`，正反向构造 label 分别约 `370.3万/410.7万`，DSSR 内部总轮数 `312`。
+
+完整 BPC summary 的大头为：`GCNGBBStyleNgDssrPricing=330.230s/89`，普通 `HeuristicPricing=137.035s/274`，`HeuristicPricing[strongBranching]=145.262s/311`，`master LP=49.630s`，`RMIH=9.267s`，`TimeIndexedGraphPricing=6.391s/217`。因此当前 W100 下 ng-DSSR 的瓶颈不是单一 join，而是 `init/completion-bound/midpoint-probe`、正反向扩展、join 以及强分支启发式共同叠加；继续只优化 join 很可能不够，后续更应优先补充 `initialize(lp)` 内部累计子计时，分清 completion bound、midpoint probe、dynamic window 和 label/candidate state 初始化的真实占比，再决定是否做跨轮或跨 pricing 的复用。
+
+同一 time-indexed 完整 run 中，RMIH 可以运行，但效果较弱。time-indexed exact pricing 全程 `974` 次调用，加入约 `75544` 条列；日志累计 `negativeStates=2418223`，其中 `repeatedJobCandidates=2246968`，约 `92.9%` 的负候选状态对应重复 job 的 pseudo-schedule。root 结束时正值列 `40` 条，其中 `24` 条非 elementary，说明列池和 LP 解都明显受 pseudo 列影响。当前 RMIH 的 `coverRepair` 口径不是先过滤掉所有重复列，而是先用筛出的列做 `>=` covering MIP，再检查重复覆盖并对选中的重复列做删点 repair，最后跑 `==` partition。这个口径在 time-indexed 下数学上可以用，但这次 33 次 RMIH 中只有 2 次 feasible、0 次 improved，总时间 `18.170s`，其中 `select=0.153s`、`coverSolve=18.016s`、`repair=0`、`partition=0`。也就是说它主要卡在第一阶段 2000 条候选列的 covering MIP 求解/不可行证明，绝大多数调用还没进入 repeated-column repair。后续如果继续在 time-indexed 上开 RMIH，应考虑只把 elementary 列送入 RMIH、或给 time-indexed 单独降低 RMIH 频率/候选规模，否则很容易用较多时间换不到 incumbent 改进。
+
+随后按这个判断对代码做了最小处理：当 `useTimeIndexedGraphPricing=true` 时，`Tree` 不再调用 RMIH，只保留 heartbeat 说明跳过。理由是 time-indexed 主线列池大量包含 pseudo/repeated 列，当前 RMIH 的 covering MIP 在这种列池上收益很弱且会额外消耗节点时间；ng-DSSR 和其他 elementary 列主线仍保持原 RMIH 逻辑。
+
+为定位 ng-DSSR `init` 细分，又在 `GCNGBBStyleBidirectionalNgDssr.initialize(lp)` 中补了累计口径的 `exactInitDetailMs setup/diag/sri/window/ng/cb/preCert/probe/state/fullProbe`。一次 `wet050_003_3m + W100` 短诊断使用 `maxNodes=1`、`solveTimeLimitSeconds=120`、关闭 ALNS 和强分支，仅用于拆分 root exact pricing 的初始化成本。该 run 拿到 5 次 ng-DSSR exact pricing，`exact=24.820s`，其中 `init=18.879s`；细分为 `completion bound=11.792s`、`midpoint probe=7.043s`、`state=0.032s`、`ng=0.004s`、`window=0.001s`、`setup/diag/sri/preCert/fullProbe` 合计不足 `0.01s` 量级。这个诊断说明当前 W100 下所谓 init 慢，核心不是对象创建、ng-set 初始化或动态窗口，而是 completion bound 构建和 midpoint probe 两项。

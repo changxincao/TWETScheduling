@@ -14,17 +14,20 @@ import TWETBPC.TimeLimitChecker;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.CUT.NoOpCutGenerator;
 import TWETBPC.GC.PricingEngine;
+import TWETBPC.GC.PricingResult;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.GC.TimeIndexedScalarCompletionBound;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 
 /**
- * 2026-07-02: ng-DSSR root 的可选 time-indexed 预处理器。
+ * 2026-07-02: ng-DSSR root 前置 time-indexed 预处理。
  * <p>
- * 它使用独立列池求解一个 no-cut/no-SRI time-indexed root，只把 root 闭合后得到的
- * time-indexed 禁弧与 compact window 证据复制回正式 root；临时 graph 列不会进入主线 Pool。
+ * 该预处理在正式 root 前临时求解一个 no-cut/no-SRI 的 time-indexed root，
+ * 只把可证明安全的 pricing-only arc、time-indexed arc 状态和 compact window
+ * 证据复制回正式 root；临时 graph 列不会进入主线 Pool。
  */
 final class TimeIndexedRootPreprocessor {
 
@@ -72,7 +75,23 @@ final class TimeIndexedRootPreprocessor {
 			if (solution.getStatus() != TWETMasterStatus.LP_RELAXATION && !solution.isInteger()) {
 				return Result.skipped("time-indexed preprocessing root not solved");
 			}
+			if (config.timeIndexedDualWindowRecheckDiagnostics && preConfig.enableTimeIndexedGraphDualWindow) {
+				TWETBPCConfig noDualCheckConfig = copyConfig(preConfig);
+				noDualCheckConfig.enableTimeIndexedGraphDualWindow = false;
+				noDualCheckConfig.timeIndexedGraphMaxExactPricingColumns =
+						Math.max(1, Math.min(10, noDualCheckConfig.timeIndexedGraphMaxExactPricingColumns));
+				PricingResult noDualCheck =
+						new TimeIndexedGraphPricingEngine(data, noDualCheckConfig).price(preLp, timeLimitChecker);
+				traceSink.onStageHeartbeat(root,
+						"timeIndexedRootPreprocess.noDualClosureCheck cols=" + noDualCheck.getColumns().size()
+								+ ", improved=" + noDualCheck.isImproved()
+								+ ", msg=" + noDualCheck.getMessage(),
+						prePool.size(), preCutPool.size());
+			}
 			ColumnSolutionStats rootStats = ColumnSolutionStats.from(solution, prePool, data.n);
+			if (config.timeIndexedDualWindowRecheckDiagnostics) {
+				dumpPositiveColumnDiagnostics(data, solution, prePool, preRoot, traceSink, prePool.size(), preCutPool.size());
+			}
 			TimeIndexedGraphPricingEngine.ArcFixingResult graphFix =
 					TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, preConfig, preLp, incumbentCost);
 			TimeIndexedScalarCompletionBound.ArcFixingResult scalarFix =
@@ -87,6 +106,43 @@ final class TimeIndexedRootPreprocessor {
 					graphFix.summary(), scalarFix.summary(), System.nanoTime() - start);
 		} finally {
 			preLp.closeModel();
+		}
+	}
+
+	private static void dumpPositiveColumnDiagnostics(Data data, TWETMasterSolution solution, Pool pool, Node node,
+			BPCTraceSink traceSink, int poolSize, int cutPoolSize) {
+		TWETColumnEvaluator evaluator = new TWETColumnEvaluator(data);
+		ArrayList<java.util.Map.Entry<Integer, Double>> positive =
+				new ArrayList<java.util.Map.Entry<Integer, Double>>(solution.getColumnValues().entrySet());
+		positive.sort(new Comparator<java.util.Map.Entry<Integer, Double>>() {
+			@Override
+			public int compare(java.util.Map.Entry<Integer, Double> a, java.util.Map.Entry<Integer, Double> b) {
+				int valueCompare = Double.compare(b.getValue().doubleValue(), a.getValue().doubleValue());
+				if (valueCompare != 0) {
+					return valueCompare;
+				}
+				return Integer.compare(a.getKey().intValue(), b.getKey().intValue());
+			}
+		});
+		int index = 0;
+		for (java.util.Map.Entry<Integer, Double> entry : positive) {
+			double value = entry.getValue().doubleValue();
+			if (value <= 1e-8) {
+				continue;
+			}
+			TWETColumn column = pool.getColumn(entry.getKey().intValue());
+			double trueCost = evaluator.evaluate(column.getSequence());
+			traceSink.onStageHeartbeat(node, "timeIndexedRootPreprocess.positiveColumn idx=" + index
+					+ ", id=" + entry.getKey()
+					+ ", value=" + value
+					+ ", elementary=" + isElementary(column, data.n)
+					+ ", len=" + column.size()
+					+ ", storedCost=" + column.getCost()
+					+ ", evalCost=" + trueCost
+					+ ", costDiff=" + (column.getCost() - trueCost)
+					+ ", seq=" + column.getSequence(),
+					poolSize, cutPoolSize);
+			index++;
 		}
 	}
 

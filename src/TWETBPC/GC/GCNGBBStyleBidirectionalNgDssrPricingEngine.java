@@ -10,10 +10,10 @@ import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
 /**
- * ng-relaxation + DSSR 实验版半域双向定价入口。
+ * ng-relaxation + DSSR 瀹為獙鐗堝崐鍩熷弻鍚戝畾浠峰叆鍙ｃ€?
  * <p>
- * 2026-06-09: 该入口只用于验证 ng/DSSR 对当前 GCNGBB-style 半域 pricing 的影响，默认关闭。
- * 主 elementary pricing、partial dominance 实验和本入口互相独立，便于定位性能和正确性差异。
+ * 2026-06-09: 璇ュ叆鍙ｅ彧鐢ㄤ簬楠岃瘉 ng/DSSR 瀵瑰綋鍓?GCNGBB-style 鍗婂煙 pricing 鐨勫奖鍝嶏紝榛樿鍏抽棴銆?
+ * 涓?elementary pricing銆乸artial dominance 瀹為獙鍜屾湰鍏ュ彛浜掔浉鐙珛锛屼究浜庡畾浣嶆€ц兘鍜屾纭€у樊寮傘€?
  */
 public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngine {
 

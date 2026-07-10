@@ -1,11 +1,18 @@
 package TWETBPC.LP;
 
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 
@@ -27,6 +34,7 @@ import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.GC.TimeIndexedScalarCompletionBound;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 import TWETBPC.Model.TWETColumn;
@@ -166,7 +174,8 @@ public class Tree {
 				stoppedByTimeLimit = true;
 				break;
 			}
-			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic) {
+			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic
+					&& !config.useTimeIndexedGraphPricing) {
 				heartbeat(node, "rmih.start");
 				RestrictedMasterIntegerHeuristic.Result integerResult = restrictedMasterIntegerHeuristic.solve(lp);
 				boolean heuristicImproved = integerResult.isFeasible()
@@ -181,10 +190,14 @@ public class Tree {
 					incumbentUpdated = true;
 					traceSink.onIncumbentUpdated(node, integerResult.getSolution(), incumbentCost);
 				}
+			} else if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic
+					&& config.useTimeIndexedGraphPricing) {
+				heartbeat(node, "rmih.skipped timeIndexedGraphPricing");
 			}
 
 			traceSink.onMasterSolved(node, solution, lp.getRestrictedColumnIds().size(), lp.getActiveCutIds().size(),
 					bestBound, incumbentCost, queue.size(), totalPoolSize(), cutPool.size(), incumbentUpdated);
+			maybeDumpRootColumnDiagnostics(lp, solution);
 			if (node.depth == 0 && config.useTimeIndexedGraphPricing) {
 				traceSink.onStageHeartbeat(node,
 						"timeIndexedRootSolutionColumns " + ColumnSolutionStats.from(solution, pool, data.n).summary(),
@@ -392,6 +405,97 @@ public class Tree {
 			return;
 		}
 		traceSink.onStageHeartbeat(node, phase, totalPoolSize(), cutPool.size());
+	}
+
+	private void maybeDumpRootColumnDiagnostics(LP lp, TWETMasterSolution solution) {
+		if (!Boolean.getBoolean("twet.bpc.debugRootColumnDump")
+				|| lp == null || solution == null || lp.getNode() == null || lp.getNode().depth != 0) {
+			return;
+		}
+		String tag = System.getProperty("twet.bpc.debugRootColumnDumpTag", "root");
+		Path dir = Paths.get(System.getProperty("twet.bpc.debugRootColumnDumpDir",
+				"test-results/bpc/root-column-dump"));
+		try {
+			Files.createDirectories(dir);
+			String prefix = "root-node-" + lp.getNode().id + "-" + tag;
+			dumpRootColumns(lp, solution, lp.getRestrictedColumnIds(), dir.resolve(prefix + "-restricted.tsv"),
+					"restricted");
+			ArrayList<Integer> allPoolIds = new ArrayList<Integer>(lp.getPool().size());
+			for (int id = 0; id < lp.getPool().size(); id++) {
+				allPoolIds.add(Integer.valueOf(id));
+			}
+			dumpRootColumns(lp, solution, allPoolIds, dir.resolve(prefix + "-pool.tsv"), "pool");
+			heartbeat(lp.getNode(), "debugRootColumnDump.done dir=" + dir.toAbsolutePath()
+					+ " tag=" + tag + " restricted=" + lp.getRestrictedColumnIds().size()
+					+ " pool=" + lp.getPool().size());
+		} catch (IOException ex) {
+			heartbeat(lp.getNode(), "debugRootColumnDump.failed " + ex.getMessage());
+		}
+	}
+
+	private void dumpRootColumns(LP lp, TWETMasterSolution solution, List<Integer> columnIds, Path file, String scope)
+			throws IOException {
+		TWETColumnEvaluator evaluator = new TWETColumnEvaluator(data);
+		LP.PricingDualSnapshot dual = lp.captureTruePricingDuals();
+		Map<Integer, Double> values = solution.getColumnValues();
+		try (BufferedWriter out = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+			out.write("scope\tcolumnId\tvalue\tstoredCost\tevalCost\tcostDiff\tstoredReducedCost\tevalReducedCost"
+					+ "\tsource\tlength\trepeated\tsequence");
+			out.newLine();
+			for (int columnId : columnIds) {
+				TWETColumn column = lp.getPool().getColumn(columnId);
+				Double solutionValue = values.get(Integer.valueOf(columnId));
+				double value = solutionValue == null ? 0.0 : solutionValue.doubleValue();
+				double storedCost = column.getCost();
+				double evalCost = evaluator.evaluate(column.getSequence());
+				double storedReducedCost = lp.computeReducedCost(column, dual);
+				double evalReducedCost = storedReducedCost + evalCost - storedCost;
+				out.write(scope);
+				out.write('\t');
+				out.write(Integer.toString(columnId));
+				out.write('\t');
+				out.write(Double.toString(value));
+				out.write('\t');
+				out.write(Double.toString(storedCost));
+				out.write('\t');
+				out.write(Double.toString(evalCost));
+				out.write('\t');
+				out.write(Double.toString(storedCost - evalCost));
+				out.write('\t');
+				out.write(Double.toString(storedReducedCost));
+				out.write('\t');
+				out.write(Double.toString(evalReducedCost));
+				out.write('\t');
+				out.write(String.valueOf(column.getSource()));
+				out.write('\t');
+				out.write(Integer.toString(column.size()));
+				out.write('\t');
+				out.write(Boolean.toString(hasRepeatedJob(column)));
+				out.write('\t');
+				out.write(formatSequence(column.getSequence()));
+				out.newLine();
+			}
+		}
+	}
+
+	private boolean hasRepeatedJob(TWETColumn column) {
+		for (int job = 1; job <= data.n; job++) {
+			if (column.getJobVisitCount(job) > 1) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private String formatSequence(List<Integer> sequence) {
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < sequence.size(); i++) {
+			if (i > 0) {
+				builder.append(' ');
+			}
+			builder.append(sequence.get(i).intValue());
+		}
+		return builder.toString();
 	}
 
 	private void tryImproveLocalHorizonAtNode(Node node) {

@@ -194,6 +194,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinEnvelopeJoinNanos;
 	private long exactTotalNanos;
 	private long exactInitializeNanos;
+	private long exactInitializeSetupNanos;
+	private long exactInitializeDiagnosticsNanos;
+	private long exactInitializeSriNanos;
+	private long exactInitializeWindowNanos;
+	private long exactInitializeNgNeighborhoodNanos;
+	private long exactInitializeCompletionBoundNanos;
+	private long exactInitializePreCertificateNanos;
+	private long exactInitializeMidpointProbeNanos;
+	private long exactInitializeStateNanos;
+	private long exactInitializeFullMidpointDiagnosticNanos;
 	private long exactBackwardSinkNanos;
 	private long exactForwardExpandNanos;
 	private long exactBackwardExpandNanos;
@@ -215,6 +225,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long forwardExtensionInfeasible;
 	private long forwardExtensionConstructed;
 	private long forwardExtensionBoundSurvivors;
+	private long backwardExtensionCandidates;
+	private long backwardExtensionArcPruned;
+	private long backwardExtensionInfeasible;
+	private long backwardExtensionConstructed;
+	private long backwardExtensionBoundSurvivors;
+	private long forwardExtensionArcCheckNanos;
+	private long forwardExtensionBuildNanos;
+	private long forwardExtensionWindowCheckNanos;
+	private long forwardExtensionFunctionNanos;
+	private long forwardExtensionStateNanos;
+	private long forwardExtensionBoundCheckNanos;
+	private long forwardExtensionInsertNanos;
+	private long forwardDominanceGraphInsertNanos;
+	private long forwardExtensionQueueNanos;
+	private long backwardExtensionArcCheckNanos;
+	private long backwardExtensionBuildNanos;
+	private long backwardExtensionWindowCheckNanos;
+	private long backwardExtensionFunctionNanos;
+	private long backwardExtensionStateNanos;
+	private long backwardExtensionBoundCheckNanos;
+	private long backwardExtensionInsertNanos;
+	private long backwardDominanceGraphInsertNanos;
+	private long backwardExtensionQueueNanos;
 	private long[] forwardLabelsKeptByDepth;
 	private long[] forwardSinkNegativeByDepth;
 	private long forwardLabelsKeptReachableSum;
@@ -304,6 +337,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrTotalElementaryColumnsReturned;
 	private int ngDssrRoundNonElementaryNegativeSeen;
 	private int ngDssrRoundElementaryColumnsReturned;
+	private boolean ngDssrFirstRoundTmidAvailable;
+	private double ngDssrFirstRoundTmid;
+	private String ngDssrFirstRoundMidpointSummary;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
 	private boolean ngDssrHistoryWarmStartApplied;
@@ -388,7 +424,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrHistoryWarmStartApplied = true;
 			return;
 		}
-		String mode = config.ngDssrInitialNgSetMode == null ? "nearestK" : config.ngDssrInitialNgSetMode;
+		String mode = config.ngDssrInitialNgSetMode == null ? "dualPair" : config.ngDssrInitialNgSetMode;
 		int targetSize = Math.max(0, config.ngDssrInitialNgSetSize);
 		if ("empty".equalsIgnoreCase(mode)) {
 			return;
@@ -404,7 +440,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		if ("dualPair".equalsIgnoreCase(mode) || "reducedCostPair".equalsIgnoreCase(mode)) {
-			addDualPairNgNeighborhoods(lp, targetSize);
+			addDualPairNgNeighborhoods(lp);
 			return;
 		}
 		if ("nearestK".equalsIgnoreCase(mode)) {
@@ -456,8 +492,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ data.getSetupCost(from, to) + data.getSetupCost(to, from);
 	}
 
-	private void addDualPairNgNeighborhoods(LP lp, int targetSize) {
-		if (targetSize <= 0) {
+	private void addDualPairNgNeighborhoods(LP lp) {
+		int targetPairCount = Math.max(0, (int) (data.n * Math.max(0.0, config.ngDssrInitialNgPairCoefficient)));
+		if (targetPairCount <= 0) {
 			return;
 		}
 		ArrayList<NgPair> pairs = new ArrayList<NgPair>();
@@ -484,15 +521,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return Integer.compare(left.second, right.second);
 			}
 		});
-		for (int i = 0; i < pairs.size(); i++) {
+		int selectedPairCount = 0;
+		for (int i = 0; i < pairs.size() && selectedPairCount < targetPairCount; i++) {
 			NgPair pair = pairs.get(i);
-			if (isInitialNgMemberAllowed(pair.second)
-					&& ngNeighborhoodByJob[pair.first].cardinality() < targetSize) {
+			boolean added = false;
+			if (isInitialNgMemberAllowed(pair.second)) {
 				ngNeighborhoodByJob[pair.first].add(pair.second);
+				added = true;
 			}
-			if (isInitialNgMemberAllowed(pair.first)
-					&& ngNeighborhoodByJob[pair.second].cardinality() < targetSize) {
+			if (isInitialNgMemberAllowed(pair.first)) {
 				ngNeighborhoodByJob[pair.second].add(pair.first);
+				added = true;
+			}
+			if (added) {
+				selectedPairCount++;
 			}
 		}
 	}
@@ -732,6 +774,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalNonElementaryRoutes = 0;
 		ngDssrTotalNonElementaryNegativeSeen = 0;
 		ngDssrTotalElementaryColumnsReturned = 0;
+		ngDssrFirstRoundTmidAvailable = false;
+		ngDssrFirstRoundTmid = Double.NaN;
+		ngDssrFirstRoundMidpointSummary = null;
 		resetExactPhaseTiming();
 		ngDssrHistoryWarmStartSkippedForRepeatability = false;
 		ngDssrWindowRepeatabilityFilterApplied = false;
@@ -1104,6 +1149,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void initialize(LP lp) {
+		long sectionStart = System.nanoTime();
 		resetStatistics();
 		initializeTargetTrace(lp);
 		installPartialListTrimTrace();
@@ -1120,15 +1166,25 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundFixedArc = ngDssrReusableCompletionBoundFixedArc;
 		bestGeneratedReducedCost = Utility.big_M;
 		generatedColumns = new ArrayList<TWETColumn>();
+		exactInitializeSetupNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		if (config.diagnosticPricingSummaryDetails) {
 			recordPricingDiagnostics(lp);
 		}
 		maybeDumpPricingSnapshot(lp);
+		exactInitializeDiagnosticsNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		precomputeSriPricing(lp);
+		exactInitializeSriNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		precomputeDynamicPricingWindows(lp);
+		exactInitializeWindowNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		if (ngNeighborhoodByJob == null) {
 			initializeNgNeighborhoods(lp);
 		}
+		exactInitializeNgNeighborhoodNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		if (completionBounds == null) {
 			buildCompletionBounds(lp);
 		}
@@ -1136,10 +1192,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrReusableCompletionBounds = completionBounds;
 			ngDssrReusableCompletionBoundFixedArc = completionBoundFixedArc;
 		}
+		exactInitializeCompletionBoundNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		if (tryApplyCompletionBoundPreCertificate(lp)) {
+			exactInitializePreCertificateNanos += System.nanoTime() - sectionStart;
 			return;
 		}
-		runMidpointProbeIfEnabled(lp);
+		exactInitializePreCertificateNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
+		if (!tryReuseFirstRoundMidpointWithinDssr()) {
+			runMidpointProbeIfEnabled(lp);
+			rememberFirstRoundMidpointWithinDssr();
+		}
+		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		if (midpointProbeLabelsReadyForJoin) {
 			// 2026-06-08: 闁荤偞鍑归崑濠囧焵椤掆偓椤︻噣鎳欓幋锔藉剭?rank0 probe 閻庤鐡曠亸娆戝垝閿熺姵鍤€婵°倐鍋撻柡浣圭墬缁嬪濡堕崟顒佺彿 label 闂傚倸鍟伴崰搴ㄥ垂椤忓牊鏅悘鐐舵鐠佹彃霉閻橆喖鍔ゆ繛鎻掓健楠炴帡濡烽妸褏顔掗梺?join闂?
 			// 闁哄鏅滈悷鈺呭闯閻戣棄鐭楁い蹇撴硽婢跺娼伴柨婵嗘噽绾偓闂佺锕ラ悷鈺呭焵椤掆偓椤︻垶宕归鍫濆偍濠电姵鑹惧▍?闂佸壊鍋勫Λ娑欐叏閹间礁绠戝〒姘功缁€澶愭⒑椤掆偓閻忔繈宕㈤妶澶婅Е閻忕偠鍋愰鍗炩槈?Tmid 闂佸憡鍔曠粔椋庣玻閸ャ劎鈻旈柍褜鍓熼弻?labeling闂?
@@ -1148,7 +1214,39 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			initializeSearchState(lp);
 			initializeForwardSource(lp);
 		}
+		exactInitializeStateNanos += System.nanoTime() - sectionStart;
+		sectionStart = System.nanoTime();
 		runFullMidpointDiagnosticIfEnabled(lp);
+		exactInitializeFullMidpointDiagnosticNanos += System.nanoTime() - sectionStart;
+	}
+
+	private boolean tryReuseFirstRoundMidpointWithinDssr() {
+		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinDssr
+				|| ngDssrRound <= 1 || !ngDssrFirstRoundTmidAvailable
+				|| !Double.isFinite(ngDssrFirstRoundTmid)) {
+			return false;
+		}
+		tMid = clampCurrentMidpoint(ngDssrFirstRoundTmid);
+		rebuildHalfDomainForCurrentMidpoint();
+		resetProbeAffectedStatistics();
+		midpointProbeLabelsReadyForJoin = false;
+		midpointProbeReferenceSource = "dssrFirstRound";
+		midpointProbeSummary = "dssrReuseFirstRound, selected=" + tMid
+				+ ", firstRound={" + (ngDssrFirstRoundMidpointSummary == null
+						? "unknown" : ngDssrFirstRoundMidpointSummary) + "}";
+		return true;
+	}
+
+	private void rememberFirstRoundMidpointWithinDssr() {
+		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinDssr
+				|| ngDssrRound != 1 || !Double.isFinite(tMid)) {
+			return;
+		}
+		// 2026-07-09: Reuse only the first round Tmid; probe labels are stale after ng-set updates.
+
+		ngDssrFirstRoundTmidAvailable = true;
+		ngDssrFirstRoundTmid = tMid;
+		ngDssrFirstRoundMidpointSummary = midpointProbeSummary;
 	}
 
 	/**
@@ -2236,30 +2334,48 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		for (int nextJob = label.extensionSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
 				nextJob = label.extensionSet.nextSetBit(nextJob + 1)) {
 			forwardExtensionCandidates++;
-			if (!canExtendForward(label, nextJob, node)) {
+			long timingStart = extensionTimingStart();
+			boolean canExtend = canExtendForward(label, nextJob, node);
+			recordForwardArcCheckNanos(timingStart);
+			if (!canExtend) {
 				forwardExtensionArcPruned++;
 				continue;
 			}
-			ForwardLabel child = extendForward(label, nextJob, lp);
-			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
+			timingStart = extensionTimingStart();
+			ExtensionFrontier candidate = buildForwardExtensionFrontier(label, nextJob, lp);
+			recordForwardBuildNanos(timingStart);
+			if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.FORWARD))) {
+				if (candidate != null) {
+					candidate.release();
+				}
 				forwardExtensionInfeasible++;
 				continue;
 			}
 			forwardExtensionConstructed++;
-			traceTargetForward("F_CONSTRUCT", child, lp);
-			traceWatchedChild("WATCH_F_CHILD", label, child, nextJob);
-			if (isForwardCompletionBoundPruned(child)) {
+			timingStart = extensionTimingStart();
+			boolean boundPruned = isForwardCompletionBoundPruned(nextJob, candidate.noSriFrontier(),
+					candidate.noSriMinReducedCost(Direction.FORWARD));
+			recordForwardBoundCheckNanos(timingStart);
+			if (boundPruned) {
 				completionForwardLabelsPruned++;
-				traceTargetForward("F_CB_PRUNED", child, lp);
-				traceWatchedLabel("WATCH_F_CB_PRUNED", child);
+				candidate.release();
 				continue;
 			}
 			forwardExtensionBoundSurvivors++;
+			timingStart = extensionTimingStart();
+			ForwardLabel child = materializeForwardLabel(label, nextJob, candidate, lp);
+			recordForwardBuildNanos(timingStart);
+			traceTargetForward("F_CONSTRUCT", child, lp);
+			traceWatchedChild("WATCH_F_CHILD", label, child, nextJob);
+			timingStart = extensionTimingStart();
 			InsertStatus status = insertForward(child, lp);
+			recordForwardInsertNanos(timingStart);
 			traceTargetForward("F_INSERT_" + status, child, lp);
 			traceWatchedLabel("WATCH_F_INSERT_" + status, child);
 			if (status == InsertStatus.STORED_AND_ENQUEUE) {
+				timingStart = extensionTimingStart();
 				FWUL.add(child);
+				recordForwardQueueNanos(timingStart);
 			}
 		}
 		diagnosticHeartbeat(lp, "forward.progress", false);
@@ -2276,26 +2392,49 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Node node = lp.getNode();
 		for (int prevJob = label.extensionSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
 				prevJob = label.extensionSet.nextSetBit(prevJob + 1)) {
-			if (!canExtendBackward(label, prevJob, node)) {
+			backwardExtensionCandidates++;
+			long timingStart = extensionTimingStart();
+			boolean canExtend = canExtendBackward(label, prevJob, node);
+			recordBackwardArcCheckNanos(timingStart);
+			if (!canExtend) {
+				backwardExtensionArcPruned++;
 				continue;
 			}
-			BackwardLabel child = extendBackward(label, prevJob, lp);
-			if (child == null || Utility.isBigMValue(child.minReducedCost)) {
+			timingStart = extensionTimingStart();
+			ExtensionFrontier candidate = buildBackwardExtensionFrontier(label, prevJob, lp);
+			recordBackwardBuildNanos(timingStart);
+			if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.BACKWARD))) {
+				if (candidate != null) {
+					candidate.release();
+				}
+				backwardExtensionInfeasible++;
 				continue;
 			}
+			backwardExtensionConstructed++;
+			timingStart = extensionTimingStart();
+			boolean boundPruned = isBackwardCompletionBoundPruned(prevJob, false, candidate.noSriFrontier(),
+					candidate.noSriMinReducedCost(Direction.BACKWARD));
+			recordBackwardBoundCheckNanos(timingStart);
+			if (boundPruned) {
+				completionBackwardLabelsPruned++;
+				candidate.release();
+				continue;
+			}
+			backwardExtensionBoundSurvivors++;
+			timingStart = extensionTimingStart();
+			BackwardLabel child = materializeBackwardLabel(label, prevJob, candidate, lp);
+			recordBackwardBuildNanos(timingStart);
 			traceTargetBackward("B_CONSTRUCT", child);
 			traceWatchedChild("WATCH_B_CHILD", label, child, prevJob);
-			if (isBackwardCompletionBoundPruned(child)) {
-				completionBackwardLabelsPruned++;
-				traceTargetBackward("B_CB_PRUNED", child);
-				traceWatchedLabel("WATCH_B_CB_PRUNED", child);
-				continue;
-			}
+			timingStart = extensionTimingStart();
 			InsertStatus status = insertBackward(child, lp);
+			recordBackwardInsertNanos(timingStart);
 			traceTargetBackward("B_INSERT_" + status, child);
 			traceWatchedLabel("WATCH_B_INSERT_" + status, child);
 			if (status == InsertStatus.STORED_AND_ENQUEUE) {
+				timingStart = extensionTimingStart();
 				BWUL.add(child);
+				recordBackwardQueueNanos(timingStart);
 			}
 		}
 		diagnosticHeartbeat(lp, "backward.progress", false);
@@ -2315,6 +2454,118 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return !isPricingArcForbidden(node, prevJob, successor);
 	}
 
+	private long extensionTimingStart() {
+		return config.ngDssrExtensionTimingDiagnostics ? System.nanoTime() : 0L;
+	}
+
+	private void recordForwardArcCheckNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionArcCheckNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardArcCheckNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionArcCheckNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardBuildNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionBuildNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardBuildNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionBuildNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardBoundCheckNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionBoundCheckNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardBoundCheckNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionBoundCheckNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardInsertNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionInsertNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardInsertNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionInsertNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardQueueNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionQueueNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardQueueNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionQueueNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardWindowCheckNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionWindowCheckNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardWindowCheckNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionWindowCheckNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardFunctionNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionFunctionNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardFunctionNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionFunctionNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardStateNanos(long start) {
+		if (start != 0L) {
+			forwardExtensionStateNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardStateNanos(long start) {
+		if (start != 0L) {
+			backwardExtensionStateNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordForwardDominanceGraphNanos(long start) {
+		if (start != 0L) {
+			forwardDominanceGraphInsertNanos += System.nanoTime() - start;
+		}
+	}
+
+	private void recordBackwardDominanceGraphNanos(long start) {
+		if (start != 0L) {
+			backwardDominanceGraphInsertNanos += System.nanoTime() - start;
+		}
+	}
+
 	private int previousForwardJob(ForwardLabel label) {
 		return label != null && label.father != null ? label.father.jid : 0;
 	}
@@ -2326,26 +2577,33 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return label.father.jid;
 	}
 
-	private ForwardLabel extendForward(ForwardLabel label, int nextJob, LP lp) {
+	private ExtensionFrontier buildForwardExtensionFrontier(ForwardLabel label, int nextJob, LP lp) {
 		double delay = data.getSetUp(label.jid, nextJob) + data.getProcessT(nextJob);
-		if (!hasForwardExtensionWindowOverlap(label, nextJob, delay)) {
+		long timingStart = extensionTimingStart();
+		boolean hasWindowOverlap = hasForwardExtensionWindowOverlap(label, nextJob, delay);
+		recordForwardWindowCheckNanos(timingStart);
+		if (!hasWindowOverlap) {
 			return null;
 		}
+		timingStart = extensionTimingStart();
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
 		if (shifted.head == null) {
 			shifted.release();
+			recordForwardFunctionNanos(timingStart);
 			return null;
 		}
 
 		PiecewiseLinearFunction jobPenalty = getDynamicForwardJobPenalty(label.jid, nextJob);
 		if (jobPenalty == null) {
 			shifted.release();
+			recordForwardFunctionNanos(timingStart);
 			return null;
 		}
 		PiecewiseLinearFunction nextFrontier = shifted.add(jobPenalty);
 		shifted.release();
 		if (nextFrontier.head == null) {
 			nextFrontier.release();
+			recordForwardFunctionNanos(timingStart);
 			return null;
 		}
 		PiecewiseLinearFunction nextNoSriFrontier = null;
@@ -2354,6 +2612,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (shiftedNoSri.head == null) {
 				shiftedNoSri.release();
 				nextFrontier.release();
+				recordForwardFunctionNanos(timingStart);
 				return null;
 			}
 			nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
@@ -2361,6 +2620,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (nextNoSriFrontier.head == null) {
 				nextNoSriFrontier.release();
 				nextFrontier.release();
+				recordForwardFunctionNanos(timingStart);
 				return null;
 			}
 		}
@@ -2394,31 +2654,31 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (nextNoSriFrontier != null) {
 				nextNoSriFrontier.release();
 			}
+			recordForwardFunctionNanos(timingStart);
 			return null;
 		}
+		recordForwardFunctionNanos(timingStart);
 
-		PackedBitSet visited = label.visitedSet.copy();
-		visited.add(nextJob);
-		PackedBitSet childNgMemory = updateNgMemory(label.ngMemorySet, nextJob);
-		PackedBitSet childDominanceSet = buildForwardDominanceSet(nextJob, childNgMemory, lp.getNode(), nextFrontier);
-		PackedBitSet childExtensionSet = buildForwardExtensionSet(childDominanceSet, nextJob, nextFrontier);
-		return new ForwardLabel(nextLabelId++, nextJob, label, visited, childDominanceSet, childExtensionSet,
-				childNgMemory, nextFrontier, nextNoSriFrontier, childSriCounts, childSriPenalty);
+		return new ExtensionFrontier(nextFrontier, nextNoSriFrontier, childSriCounts, childSriPenalty);
 	}
 
-	private BackwardLabel extendBackward(BackwardLabel label, int prevJob, LP lp) {
+	private ExtensionFrontier buildBackwardExtensionFrontier(BackwardLabel label, int prevJob, LP lp) {
 		Node node = lp.getNode();
 		PiecewiseLinearFunction nextFrontier;
 		PiecewiseLinearFunction nextNoSriFrontier;
+		long timingStart = extensionTimingStart();
 		double successorHStart = getDynamicBackwardHStart(prevJob, label.isSinkRoot ? node.sinkId() : label.jid);
 		double rhoPrime;
 		if (label.isSinkRoot) {
 			rhoPrime = getDynamicBackwardHEnd(prevJob, node.sinkId());
+			recordBackwardWindowCheckNanos(timingStart);
 			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				return null;
 			}
+			timingStart = extensionTimingStart();
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, node.sinkId());
 			if (jobPenalty == null) {
+				recordBackwardFunctionNanos(timingStart);
 				return null;
 			}
 			// 2026-05-22: backward 婵炲濮村锕€鈻嶉崟顖氱闁绘棁娅ｉ惌鎺楁煟閹邦喗鍤€闁搞値鍙冨畷锝夊箣閻愭惌妲梺鎸庣☉閻ジ顢栭崶銊р枖闁逞屽墮閳诲酣鍨鹃崘宸奖闂佺绻堥崕鍐诧耿閿涘嫧鍋撻崷顓炰粧闁瑰箍鍨藉畷婵嬪灳閼碱剛鎲归梻鍌氭礌閸嬫捇鎮烽弴姘卞妽閻?setup/processing 濡ょ姷鍋涚壕顓濈昂闂?
@@ -2432,27 +2692,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
-			if (!hasBackwardExtensionWindowOverlap(label, prevJob, delay)) {
+			boolean hasWindowOverlap = hasBackwardExtensionWindowOverlap(label, prevJob, delay);
+			recordBackwardWindowCheckNanos(timingStart);
+			if (!hasWindowOverlap) {
 				return null;
 			}
+			timingStart = extensionTimingStart();
 			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
 			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
+				recordBackwardFunctionNanos(timingStart);
 				return null;
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
 			if (shifted.head == null) {
 				shifted.release();
+				recordBackwardFunctionNanos(timingStart);
 				return null;
 			}
 			PiecewiseLinearFunction jobPenalty = getDynamicBackwardJobPenalty(prevJob, label.jid);
 			if (jobPenalty == null) {
 				shifted.release();
+				recordBackwardFunctionNanos(timingStart);
 				return null;
 			}
 			nextFrontier = shifted.add(jobPenalty);
 			shifted.release();
 			if (nextFrontier.head == null) {
 				nextFrontier.release();
+				recordBackwardFunctionNanos(timingStart);
 				return null;
 			}
 			nextNoSriFrontier = null;
@@ -2461,6 +2728,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				if (shiftedNoSri.head == null) {
 					shiftedNoSri.release();
 					nextFrontier.release();
+					recordBackwardFunctionNanos(timingStart);
 					return null;
 				}
 				nextNoSriFrontier = shiftedNoSri.add(jobPenalty);
@@ -2468,6 +2736,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				if (nextNoSriFrontier.head == null) {
 					nextNoSriFrontier.release();
 					nextFrontier.release();
+					recordBackwardFunctionNanos(timingStart);
 					return null;
 				}
 			}
@@ -2503,17 +2772,42 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (nextNoSriFrontier != null) {
 				nextNoSriFrontier.release();
 			}
+			recordBackwardFunctionNanos(timingStart);
 			return null;
 		}
+		recordBackwardFunctionNanos(timingStart);
 
-		PackedBitSet visited = label.visitedSet.copy();
+		return new ExtensionFrontier(nextFrontier, nextNoSriFrontier, childSriCounts, childSriPenalty);
+	}
+
+	private ForwardLabel materializeForwardLabel(ForwardLabel parent, int nextJob, ExtensionFrontier candidate,
+			LP lp) {
+		long timingStart = extensionTimingStart();
+		PackedBitSet visited = parent.visitedSet.copy();
+		visited.add(nextJob);
+		PackedBitSet childNgMemory = updateNgMemory(parent.ngMemorySet, nextJob);
+		ChildReachability childSets = buildForwardChildReachability(nextJob, childNgMemory, lp.getNode(),
+				candidate.frontier);
+		ForwardLabel child = new ForwardLabel(nextLabelId++, nextJob, parent, visited, childSets.dominanceSet,
+				childSets.extensionSet, childNgMemory, candidate.frontier, candidate.noSriFrontier,
+				candidate.sriCounts, candidate.sriPenalty);
+		recordForwardStateNanos(timingStart);
+		return child;
+	}
+
+	private BackwardLabel materializeBackwardLabel(BackwardLabel parent, int prevJob, ExtensionFrontier candidate,
+			LP lp) {
+		long timingStart = extensionTimingStart();
+		PackedBitSet visited = parent.visitedSet.copy();
 		visited.add(prevJob);
-		PackedBitSet childNgMemory = updateNgMemory(label.ngMemorySet, prevJob);
-		PackedBitSet childDominanceSet = buildBackwardDominanceSet(prevJob, childNgMemory, lp.getNode(),
-				nextFrontier);
-		PackedBitSet childExtensionSet = buildBackwardExtensionSet(childDominanceSet, prevJob, false, nextFrontier);
-		return new BackwardLabel(nextLabelId++, prevJob, label, visited, childDominanceSet, childExtensionSet,
-				childNgMemory, nextFrontier, nextNoSriFrontier, childSriCounts, childSriPenalty, false);
+		PackedBitSet childNgMemory = updateNgMemory(parent.ngMemorySet, prevJob);
+		ChildReachability childSets = buildBackwardChildReachability(prevJob, childNgMemory, lp.getNode(),
+				candidate.frontier);
+		BackwardLabel child = new BackwardLabel(nextLabelId++, prevJob, parent, visited, childSets.dominanceSet,
+				childSets.extensionSet, childNgMemory, candidate.frontier, candidate.noSriFrontier,
+				candidate.sriCounts, candidate.sriPenalty, false);
+		recordBackwardStateNanos(timingStart);
+		return child;
 	}
 
 	/** 鎻愬墠鍒ゆ柇 forward 鎵╁睍鍚庣殑瀹屾垚鏃堕棿鍖洪棿鏄惁鍙兘涓庝换鍔℃湁鏁堢獥鍙ｇ浉浜わ紝閬垮厤鏋勯€犲繀涓虹┖鐨?PWLF銆?*/
@@ -2548,7 +2842,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (isSinglePointFrontier(label.frontier)) {
 			return insertForwardSinglePoint(label, lp);
 		}
+		long timingStart = extensionTimingStart();
 		boolean dominated = FWTL.get(label.jid).insertOrDominate(label);
+		recordForwardDominanceGraphNanos(timingStart);
 		if (!dominated) {
 			forwardLabelsKept++;
 			activeForwardByLastJob.get(label.jid).add(label);
@@ -2565,7 +2861,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (isSinglePointFrontier(label.frontier)) {
 			return insertBackwardSinglePoint(label, lp);
 		}
+		long timingStart = extensionTimingStart();
 		boolean dominated = BWTL.get(label.jid).insertOrDominate(label);
+		recordBackwardDominanceGraphNanos(timingStart);
 		if (dominated) {
 			backwardLabelsDominated++;
 			return InsertStatus.DOMINATED;
@@ -3360,11 +3658,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		generatedCandidateDroppedByHeap = 0;
 		forwardSinkLabelsVisited = 0;
 		forwardSinkNegativeCandidates = 0;
-		forwardExtensionCandidates = 0;
-		forwardExtensionArcPruned = 0;
-		forwardExtensionInfeasible = 0;
-		forwardExtensionConstructed = 0;
-		forwardExtensionBoundSurvivors = 0;
+		resetExtensionStatistics();
 		forwardLabelsKeptByDepth = new long[data.n + 1];
 		forwardSinkNegativeByDepth = new long[data.n + 1];
 		forwardLabelsKeptReachableSum = 0;
@@ -3503,11 +3797,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		generatedCandidateDroppedByHeap = 0;
 		forwardSinkLabelsVisited = 0;
 		forwardSinkNegativeCandidates = 0;
-		forwardExtensionCandidates = 0;
-		forwardExtensionArcPruned = 0;
-		forwardExtensionInfeasible = 0;
-		forwardExtensionConstructed = 0;
-		forwardExtensionBoundSurvivors = 0;
+		resetExtensionStatistics();
 		forwardLabelsKeptByDepth = new long[data.n + 1];
 		forwardSinkNegativeByDepth = new long[data.n + 1];
 		forwardLabelsKeptReachableSum = 0;
@@ -3529,9 +3819,50 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		fullMidpointDiagnosticRan = false;
 	}
 
+	private void resetExtensionStatistics() {
+		forwardExtensionCandidates = 0;
+		forwardExtensionArcPruned = 0;
+		forwardExtensionInfeasible = 0;
+		forwardExtensionConstructed = 0;
+		forwardExtensionBoundSurvivors = 0;
+		backwardExtensionCandidates = 0;
+		backwardExtensionArcPruned = 0;
+		backwardExtensionInfeasible = 0;
+		backwardExtensionConstructed = 0;
+		backwardExtensionBoundSurvivors = 0;
+		forwardExtensionArcCheckNanos = 0;
+		forwardExtensionBuildNanos = 0;
+		forwardExtensionWindowCheckNanos = 0;
+		forwardExtensionFunctionNanos = 0;
+		forwardExtensionStateNanos = 0;
+		forwardExtensionBoundCheckNanos = 0;
+		forwardExtensionInsertNanos = 0;
+		forwardDominanceGraphInsertNanos = 0;
+		forwardExtensionQueueNanos = 0;
+		backwardExtensionArcCheckNanos = 0;
+		backwardExtensionBuildNanos = 0;
+		backwardExtensionWindowCheckNanos = 0;
+		backwardExtensionFunctionNanos = 0;
+		backwardExtensionStateNanos = 0;
+		backwardExtensionBoundCheckNanos = 0;
+		backwardExtensionInsertNanos = 0;
+		backwardDominanceGraphInsertNanos = 0;
+		backwardExtensionQueueNanos = 0;
+	}
+
 	private void resetExactPhaseTiming() {
 		exactTotalNanos = 0;
 		exactInitializeNanos = 0;
+		exactInitializeSetupNanos = 0;
+		exactInitializeDiagnosticsNanos = 0;
+		exactInitializeSriNanos = 0;
+		exactInitializeWindowNanos = 0;
+		exactInitializeNgNeighborhoodNanos = 0;
+		exactInitializeCompletionBoundNanos = 0;
+		exactInitializePreCertificateNanos = 0;
+		exactInitializeMidpointProbeNanos = 0;
+		exactInitializeStateNanos = 0;
+		exactInitializeFullMidpointDiagnosticNanos = 0;
 		exactBackwardSinkNanos = 0;
 		exactForwardExpandNanos = 0;
 		exactBackwardExpandNanos = 0;
@@ -3596,6 +3927,39 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(formatMillis(exactJoinCompactNanos)).append("/")
 				.append(formatMillis(exactJoinNanos)).append("/")
 				.append(formatMillis(exactFinalizeNanos));
+		builder.append(", exactInitDetailMs setup/diag/sri/window/ng/cb/preCert/probe/state/fullProbe=")
+				.append(formatMillis(exactInitializeSetupNanos)).append("/")
+				.append(formatMillis(exactInitializeDiagnosticsNanos)).append("/")
+				.append(formatMillis(exactInitializeSriNanos)).append("/")
+				.append(formatMillis(exactInitializeWindowNanos)).append("/")
+				.append(formatMillis(exactInitializeNgNeighborhoodNanos)).append("/")
+				.append(formatMillis(exactInitializeCompletionBoundNanos)).append("/")
+				.append(formatMillis(exactInitializePreCertificateNanos)).append("/")
+				.append(formatMillis(exactInitializeMidpointProbeNanos)).append("/")
+				.append(formatMillis(exactInitializeStateNanos)).append("/")
+				.append(formatMillis(exactInitializeFullMidpointDiagnosticNanos));
+		if (config.ngDssrExtensionTimingDiagnostics) {
+			builder.append(", extensionTimingMs fw arc/build/window/function/state/cb/insert/domGraph/queue=")
+					.append(formatMillis(forwardExtensionArcCheckNanos)).append("/")
+					.append(formatMillis(forwardExtensionBuildNanos)).append("/")
+					.append(formatMillis(forwardExtensionWindowCheckNanos)).append("/")
+					.append(formatMillis(forwardExtensionFunctionNanos)).append("/")
+					.append(formatMillis(forwardExtensionStateNanos)).append("/")
+					.append(formatMillis(forwardExtensionBoundCheckNanos)).append("/")
+					.append(formatMillis(forwardExtensionInsertNanos)).append("/")
+					.append(formatMillis(forwardDominanceGraphInsertNanos)).append("/")
+					.append(formatMillis(forwardExtensionQueueNanos));
+			builder.append(", extensionTimingMs bw arc/build/window/function/state/cb/insert/domGraph/queue=")
+					.append(formatMillis(backwardExtensionArcCheckNanos)).append("/")
+					.append(formatMillis(backwardExtensionBuildNanos)).append("/")
+					.append(formatMillis(backwardExtensionWindowCheckNanos)).append("/")
+					.append(formatMillis(backwardExtensionFunctionNanos)).append("/")
+					.append(formatMillis(backwardExtensionStateNanos)).append("/")
+					.append(formatMillis(backwardExtensionBoundCheckNanos)).append("/")
+					.append(formatMillis(backwardExtensionInsertNanos)).append("/")
+					.append(formatMillis(backwardDominanceGraphInsertNanos)).append("/")
+					.append(formatMillis(backwardExtensionQueueNanos));
+		}
 		builder.append(", halfWindowIneligible fw/bw=").append(forwardHalfIneligibleJobCount).append("/")
 				.append(backwardHalfIneligibleJobCount);
 		builder.append(", singlePoint fw kept/storeDom/graphDom=").append(forwardSinglePointKept).append("/")
@@ -3652,6 +4016,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(forwardExtensionCandidates).append("/").append(forwardExtensionArcPruned).append("/")
 				.append(forwardExtensionInfeasible).append("/").append(forwardExtensionConstructed).append("/")
 				.append(forwardExtensionBoundSurvivors);
+		builder.append(", backwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=")
+				.append(backwardExtensionCandidates).append("/").append(backwardExtensionArcPruned).append("/")
+				.append(backwardExtensionInfeasible).append("/").append(backwardExtensionConstructed).append("/")
+				.append(backwardExtensionBoundSurvivors);
 		builder.append(", forwardDepth kept/negSink=").append(formatDepthHistogram(forwardLabelsKeptByDepth))
 				.append("/").append(formatDepthHistogram(forwardSinkNegativeByDepth));
 		builder.append(", forwardReach kept avg/min/max=")
@@ -4235,51 +4603,53 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				stats.backwardMaxAfterSegments);
 	}
 
-	private boolean isForwardCompletionBoundPruned(ForwardLabel label) {
-		if (completionBounds == null || label.jid <= 0 || label.jid > data.n || label.noSriFrontier == null
-				|| label.noSriFrontier.head == null) {
+	private boolean isForwardCompletionBoundPruned(int job, PiecewiseLinearFunction noSriFrontier,
+			double noSriMinReducedCost) {
+		if (completionBounds == null || job <= 0 || job > data.n || noSriFrontier == null
+				|| noSriFrontier.head == null) {
 			return false;
 		}
-		PiecewiseLinearFunction suffix = completionBounds.backwardRByJob[label.jid];
+		PiecewiseLinearFunction suffix = completionBounds.backwardRByJob[job];
 		if (suffix == null || suffix.head == null) {
 			return false;
 		}
 		double cutoff = completionBoundCutoff();
 		completionBoundLastEvaluationCutoff = cutoff;
 		if (config.bidirectionalCompletionBoundScalarPruning
-				&& isForwardCompletionBoundScalarPruned(label, cutoff)) {
+				&& isForwardCompletionBoundScalarPruned(job, noSriFrontier, noSriMinReducedCost, cutoff)) {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
 		// 2026-06-13: under active SRI, this completion-bound pruning uses no-SRI frontier.
-		if (!hasCommonCompletionDomain(label.noSriFrontier, suffix)) {
+		if (!hasCommonCompletionDomain(noSriFrontier, suffix)) {
 			return false;
 		}
-		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(label.noSriFrontier, suffix, 0.0);
+		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(noSriFrontier, suffix, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
-	private boolean isBackwardCompletionBoundPruned(BackwardLabel label) {
-		if (completionBounds == null || label.isSinkRoot || label.jid <= 0 || label.jid > data.n
-				|| label.noSriFrontier == null || label.noSriFrontier.head == null) {
+	private boolean isBackwardCompletionBoundPruned(int job, boolean isSinkRoot,
+			PiecewiseLinearFunction noSriFrontier, double noSriMinReducedCost) {
+		if (completionBounds == null || isSinkRoot || job <= 0 || job > data.n
+				|| noSriFrontier == null || noSriFrontier.head == null) {
 			return false;
 		}
-		PiecewiseLinearFunction prefix = completionBounds.forwardUByJob[label.jid];
+		PiecewiseLinearFunction prefix = completionBounds.forwardUByJob[job];
 		if (prefix == null || prefix.head == null) {
 			return false;
 		}
 		double cutoff = completionBoundCutoff();
 		completionBoundLastEvaluationCutoff = cutoff;
 		if (config.bidirectionalCompletionBoundScalarPruning
-				&& isBackwardCompletionBoundScalarPruned(label, cutoff)) {
+				&& isBackwardCompletionBoundScalarPruned(job, noSriFrontier, noSriMinReducedCost, cutoff)) {
 			return true;
 		}
 		completionBoundFunctionEvaluations++;
 		// 2026-06-13: symmetric to forward pruning, use no-SRI frontier here.
-		if (!hasCommonCompletionDomain(prefix, label.noSriFrontier)) {
+		if (!hasCommonCompletionDomain(prefix, noSriFrontier)) {
 			return false;
 		}
-		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(prefix, label.noSriFrontier, 0.0);
+		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(prefix, noSriFrontier, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
@@ -4290,24 +4660,25 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return !Utility.compareLt(end, start);
 	}
 
-	private boolean isForwardCompletionBoundScalarPruned(ForwardLabel label, double cutoff) {
+	private boolean isForwardCompletionBoundScalarPruned(int job, PiecewiseLinearFunction noSriFrontier,
+			double noSriMinReducedCost, double cutoff) {
 		completionBoundScalarChecks++;
-		double suffixLowerBound = completionBounds.backwardRAfterFloor(label.jid, label.noSriFrontier.head.start);
+		double suffixLowerBound = completionBounds.backwardRAfterFloor(job, noSriFrontier.head.start);
 		if (Utility.isBigMValue(suffixLowerBound)) {
 			completionBoundScalarUnavailable++;
 			completionBoundScalarPruned++;
 			return true;
 		}
-		double originalScalarLowerBound = label.noSriMinReducedCost + suffixLowerBound;
+		double originalScalarLowerBound = noSriMinReducedCost + suffixLowerBound;
 		double timeIndexedSuffix = timeIndexedScalarBound == null ? Utility.big_M
-				: timeIndexedScalarBound.suffixLowerBoundAfterFloor(label.jid, label.noSriFrontier.head.start);
+				: timeIndexedScalarBound.suffixLowerBoundAfterFloor(job, noSriFrontier.head.start);
 		if (!Utility.isBigMValue(timeIndexedSuffix) && Utility.compareGt(timeIndexedSuffix, suffixLowerBound)) {
 			suffixLowerBound = timeIndexedSuffix;
 			timeIndexedScalarImprovedChecks++;
 		} else if (timeIndexedScalarBound != null && Utility.isBigMValue(timeIndexedSuffix)) {
 			timeIndexedScalarUnavailable++;
 		}
-		double scalarLowerBound = label.noSriMinReducedCost + suffixLowerBound;
+		double scalarLowerBound = noSriMinReducedCost + suffixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
 			completionBoundScalarPruned++;
 			if (Utility.compareLt(originalScalarLowerBound, cutoff)) {
@@ -4319,26 +4690,27 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return false;
 	}
 
-	private boolean isBackwardCompletionBoundScalarPruned(BackwardLabel label, double cutoff) {
+	private boolean isBackwardCompletionBoundScalarPruned(int job, PiecewiseLinearFunction noSriFrontier,
+			double noSriMinReducedCost, double cutoff) {
 		completionBoundScalarChecks++;
-		double prefixLowerBound = isAtPricingHorizon(label.noSriFrontier.tail.end)
-				? completionBounds.forwardUMin(label.jid)
-				: completionBounds.forwardUBeforeCeil(label.jid, label.noSriFrontier.tail.end);
+		double prefixLowerBound = isAtPricingHorizon(noSriFrontier.tail.end)
+				? completionBounds.forwardUMin(job)
+				: completionBounds.forwardUBeforeCeil(job, noSriFrontier.tail.end);
 		if (Utility.isBigMValue(prefixLowerBound)) {
 			completionBoundScalarUnavailable++;
 			completionBoundScalarPruned++;
 			return true;
 		}
-		double originalScalarLowerBound = label.noSriMinReducedCost + prefixLowerBound;
+		double originalScalarLowerBound = noSriMinReducedCost + prefixLowerBound;
 		double timeIndexedPrefix = timeIndexedScalarBound == null ? Utility.big_M
-				: timeIndexedScalarBound.prefixLowerBoundBeforeCeil(label.jid, label.noSriFrontier.tail.end);
+				: timeIndexedScalarBound.prefixLowerBoundBeforeCeil(job, noSriFrontier.tail.end);
 		if (!Utility.isBigMValue(timeIndexedPrefix) && Utility.compareGt(timeIndexedPrefix, prefixLowerBound)) {
 			prefixLowerBound = timeIndexedPrefix;
 			timeIndexedScalarImprovedChecks++;
 		} else if (timeIndexedScalarBound != null && Utility.isBigMValue(timeIndexedPrefix)) {
 			timeIndexedScalarUnavailable++;
 		}
-		double scalarLowerBound = label.noSriMinReducedCost + prefixLowerBound;
+		double scalarLowerBound = noSriMinReducedCost + prefixLowerBound;
 		if (!Utility.compareLt(scalarLowerBound, cutoff)) {
 			completionBoundScalarPruned++;
 			if (Utility.compareLt(originalScalarLowerBound, cutoff)) {
@@ -4847,6 +5219,50 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet memory = parentNgMemory.and(ngNeighborhoodByJob[currentJob]);
 		memory.add(currentJob);
 		return memory;
+	}
+
+	/**
+	 * 扩展候选通过 completion bound 后，再一次性建立 dominance 与实际扩展集合。
+	 * 两者共享 full-domain 可达性判断，避免 survivor 对全部 job 做两轮扫描。
+	 */
+	private ChildReachability buildForwardChildReachability(int fromJob, PackedBitSet ngMemory, Node node,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
+		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
+		for (int job = 1; job <= data.n; job++) {
+			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					|| ngMemory.contains(job)
+					|| !isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job);
+			if (unavailable) {
+				continue;
+			}
+			dominanceSet.add(job);
+			if (isForwardHalfEligibleJob(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+				extensionSet.add(job);
+			}
+		}
+		return new ChildReachability(dominanceSet, extensionSet);
+	}
+
+	private ChildReachability buildBackwardChildReachability(int firstJob, PackedBitSet ngMemory, Node node,
+			PiecewiseLinearFunction frontier) {
+		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
+		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
+		boolean isSinkRoot = firstJob == node.sinkId();
+		for (int job = 1; job <= data.n; job++) {
+			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
+					|| ngMemory.contains(job)
+					|| !isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job);
+			if (unavailable) {
+				continue;
+			}
+			dominanceSet.add(job);
+			if (isBackwardHalfEligibleJob(job)
+					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+				extensionSet.add(job);
+			}
+		}
+		return new ChildReachability(dominanceSet, extensionSet);
 	}
 
 	private PackedBitSet buildForwardDominanceSet(int fromJob, PackedBitSet ngMemory, Node node,
@@ -6566,6 +6982,55 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-06-13: ng-DSSR 闂?dominance key 婵炶揪缍€濞夋洟寮?full-domain dominanceSet闂佹寧绋掗惌鐖攖ensionSet 闂佸憡鐟禍婵堟暜閸洖绀嗛悹楦挎缁夊ジ鏌涢幘宕囆㈢€规洘鍔欏畷娲偄缁嬪簱鎸呴柣蹇曞仦濞插繘鍩€?
 		final HashMap<PackedBitSet, L> bestByDominanceKey = new HashMap<PackedBitSet, L>();
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
+	}
+
+	/**
+	 * 已完成函数扩展、但尚未复制路径状态的轻量候选。
+	 * completion bound 先在这里判定；只有 survivor 才实体化为完整 label。
+	 */
+	private static final class ExtensionFrontier {
+		final PiecewiseLinearFunction frontier;
+		final PiecewiseLinearFunction noSriFrontier;
+		final byte[] sriCounts;
+		final double sriPenalty;
+
+		ExtensionFrontier(PiecewiseLinearFunction frontier, PiecewiseLinearFunction noSriFrontier,
+				byte[] sriCounts, double sriPenalty) {
+			this.frontier = frontier;
+			this.noSriFrontier = noSriFrontier;
+			this.sriCounts = sriCounts;
+			this.sriPenalty = sriPenalty;
+		}
+
+		PiecewiseLinearFunction noSriFrontier() {
+			return noSriFrontier == null ? frontier : noSriFrontier;
+		}
+
+		double minReducedCost(Direction direction) {
+			return direction == Direction.FORWARD ? forwardEndpointMin(frontier) : backwardEndpointMin(frontier);
+		}
+
+		double noSriMinReducedCost(Direction direction) {
+			PiecewiseLinearFunction function = noSriFrontier();
+			return direction == Direction.FORWARD ? forwardEndpointMin(function) : backwardEndpointMin(function);
+		}
+
+		void release() {
+			frontier.release();
+			if (noSriFrontier != null) {
+				noSriFrontier.release();
+			}
+		}
+	}
+
+	private static final class ChildReachability {
+		final PackedBitSet dominanceSet;
+		final PackedBitSet extensionSet;
+
+		ChildReachability(PackedBitSet dominanceSet, PackedBitSet extensionSet) {
+			this.dominanceSet = dominanceSet;
+			this.extensionSet = extensionSet;
+		}
 	}
 
 	private abstract static class FunctionLabel extends Label implements Comparable<Label>, SriStateLabel {

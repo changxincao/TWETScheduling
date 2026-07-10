@@ -70,6 +70,7 @@ public class EngineALNS {
         long startNanos = System.nanoTime();
         int iteration = 0;
         double initialTemperature = initialTemperature();
+        try {
         while (noImprove < maxNoImpIterN&&remRatioChangeN<maxremRatioChangeN&&withinTimeLimit(startNanos)) {
 	iteration++;
 	Solution tmpSol=current.copy();
@@ -139,6 +140,10 @@ public class EngineALNS {
             }
         }
 
+        } finally {
+            // 2026-07-07：ALNS/VND 会把 curUpperBound 当作局部搜索剪枝上界；返回 BPC 前必须清回 BigM。
+            Utility.resetCurUpperBound(Utility.big_M);
+        }
     }
 	private boolean withinTimeLimit(long startNanos) {
 		if (maxRuntimeMillis <= 0) {

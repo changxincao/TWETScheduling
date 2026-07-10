@@ -3402,13 +3402,7 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
-		Node node = lp.getNode();
-		if (node == null || node.depth != 0) {
-			return false;
-		}
-		// cut dual 或分支 dual 都可能让 reduced arc cost 不再满足原始 setup cost 的三角不等式。
-		// 当前只在根节点、且没有 active cuts 时使用 pi_j 进一步收紧静态外包窗。
-		return lp.getActiveCutIds().isEmpty();
+		return PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	/**

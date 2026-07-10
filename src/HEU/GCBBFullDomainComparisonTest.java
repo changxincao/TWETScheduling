@@ -176,13 +176,13 @@ public class GCBBFullDomainComparisonTest {
 			}
 		}
 		if (config.useGCNGBBStyleNgDssrPartialDominancePricing) {
-			mode += "-ngPartial-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
+			mode += "-ngPartial-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		} else if (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
-			mode += "-ngGraphPartial-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
+			mode += "-ngGraphPartial-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		} else if (config.useGCNGBBStyleNgDssrPricing) {
-			mode += "-ng-" + config.ngDssrInitialNgSetMode + config.ngDssrInitialNgSetSize
+			mode += "-ng-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		}
 		if (config.enableNgDssrHistoryWarmStart) {
@@ -195,6 +195,14 @@ public class GCBBFullDomainComparisonTest {
 			mode += "-ngRelaxedColumns";
 		}
 		return mode;
+	}
+
+	private static String ngDssrInitialModeSuffix(TWETBPCConfig config) {
+		String mode = config.ngDssrInitialNgSetMode == null ? "" : config.ngDssrInitialNgSetMode.trim();
+		if ("dualPair".equalsIgnoreCase(mode) || "reducedCostPair".equalsIgnoreCase(mode)) {
+			return "Coef" + config.ngDssrInitialNgPairCoefficient;
+		}
+		return Integer.toString(config.ngDssrInitialNgSetSize);
 	}
 
 	private static String exactEngineName(TWETBPCConfig config, boolean fullDomain, boolean nodeJoin) {
@@ -442,6 +450,9 @@ public class GCBBFullDomainComparisonTest {
 				config.ngDssrInitialNgSetMode);
 		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrInitialSize",
 				config.ngDssrInitialNgSetSize);
+		config.ngDssrInitialNgPairCoefficient = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrInitialPairCoefficient",
+				Double.toString(config.ngDssrInitialNgPairCoefficient)));
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
 				config.ngDssrNonElementaryRouteUpdateLimit);
@@ -583,6 +594,12 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeReuseWithinNode = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinNode",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinNode)));
+		config.bidirectionalMidpointProbeReuseWithinDssr = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinDssr",
+				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinDssr)));
+		config.ngDssrExtensionTimingDiagnostics = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrExtensionTimingDiagnostics",
+				Boolean.toString(config.ngDssrExtensionTimingDiagnostics)));
 		config.bidirectionalMidpointProbeExactFeedback = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeExactFeedback",
 				Boolean.toString(config.bidirectionalMidpointProbeExactFeedback)));

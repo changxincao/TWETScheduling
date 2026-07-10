@@ -910,10 +910,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	}
 
 	private static boolean canUseDualProfitableWindow(LP lp) {
-		if (lp == null || lp.getNode() == null || lp.getNode().depth != 0) {
-			return false;
-		}
-		return lp.getActiveCutIds().isEmpty();
+		return PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	private static double hWindowStart(Data data, int job, double gamma) {

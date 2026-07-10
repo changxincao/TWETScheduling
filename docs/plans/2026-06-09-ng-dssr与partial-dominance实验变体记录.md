@@ -1479,3 +1479,314 @@ baseline 结果为：R25 `ROOT_PROCESSED, obj=bound=31893, solve=97.010s, exact=
 关闭 cut-loop 的 time-indexed SRI-aware fixing 后，SRI run 能正确闭合：`tmp-partial-tiroot-40-2-sri-nostrong-no-cutloopfix-20260703` 结果为 `FINISHED, obj=bound=22580, solve=762.854s, root=189.848s, nodes=17, pool=25750, exact=362.993s/985, heuristic=202.509s/2258, master=112.056s, cut rounds=256, added cuts=1280, peak cut pool=902, valid=true`。和 no-SRI 相比，SRI 明显减少了节点数和最终 pool，但 cut-and-price 轮次、exact pricing 次数和启发式调用大幅增加，总时间从约 `225s` 增加到约 `763s`。因此在该 40-2 partial dominance 口径下，SRI 有收紧搜索树的效果，但总体不划算；当前主要瓶颈不是单次 label 爆炸，而是 cut-loop 反复加 cut、反复定价导致的长尾。
 
 本轮还暴露一个强分支相关风险：在相同 partial + time-indexed root preprocessing 下，开启 strong branching 的 no-SRI run 曾得到 `obj=bound=22582`，而关闭 strong branching 后回到已知最优 `22580`。因此本轮 SRI 对比不使用 strong branching；后续若要把 strong branching 和 partial/root preprocessing 组合使用，必须单独复查强分支 child seed/compatibility/repair 逻辑，不能把它混入 SRI 结论。
+150. 2026-07-07 wet040_001_2m 指定 k3/top10 strong 配置的组件耗时归因
+
+本次按用户指定口径复跑 `wet040_001_2m`：`nearestK3/top10`、`ngDssrWindowRepeatabilityFilter=true`、strong branching、time-indexed root preprocessing、time-indexed pre-heuristic、`ngDssrHistoryWarmStart=false`、completion-bound subtree pricing-only、`midpointProbeScore=queue`。结果为 `FINISHED, obj=bound=22580, solve=360.471s, root=206.213s, nodes=19, pricing=1636, pool=106273, exact=5.880s/86, heuristic=22.500s/272, masterLP=194.276s, valid=true`，日志目录为 `test-results/bpc/tmp-wet040-001-m2-ng-k3-top10-strong-tirootpre-tipre-20260707-run/`。
+
+从组件耗时看，本次瓶颈不是 ng-DSSR exact pricing。`GCNGBBStyleNgDssrPricing` 只有 `5.880s/86`，加上 find-feasible exact `0.168s/8` 也很小。最大项是 master LP，总计 `194.276s`，其中 `after_pricing=145.128s/642`，strong-branching 相关 LP 小计约 `46.698s`。pricing 侧总计约 `113.781s`，其中 `HeuristicPricing[strongBranching]=68.973s/868`、普通 `HeuristicPricing=22.500s/272`、`TimeIndexedGraphPricing=15.270s/390`。RMIH 只有 `3.170s`，cut 基本为 0。也就是说，本次 360s 的主因是强分支和大列池带来的 RMP/LP 重解压力，其次是 strong-branching trial 中的启发式 pricing，而不是 exact ng-DSSR 本身。
+
+和历史相近配置相比，`nearestK3/top3` no-strong 好配置为 `121.924s/root 64.010s/nodes 45/pool 58052/masterLP 6.215s/exact 35.010s/heuristic 47.207s`；`nearestK8/top10` time-indexed helper on 的可比记录为 `148.524s/root 57.374s/nodes 51/pool 52478/masterLP 9.369s/exact 39.138s/heuristic 59.412s`。这两组虽然节点更多，但没有 strong-branching trial 的大规模 RMP 压力，master LP 只有 6-10s 量级，因此总时间明显更低。本次节点数降到 19，但 master LP 从个位数秒膨胀到 `194.276s`，完全抵消了节点减少和 exact 调用减少的收益。
+
+还需要注意，本次指定命令只设置了 `midpointProbeScore=queue`，没有显式打开 `midpointProbe=true`，也没有显式设置 `completionBound=allCycles` 和 `joinBest=BEST_UB`；日志中的 actual pricing 行显示 `completionBound mode=OFF`、`midpointProbe=off`、`joinBest mode=ZERO`。因此它不能和历史最快 normal ng-DSSR 口径直接解释为“ng-DSSR 变慢”；实际是换成了 strong + preprocessing + 不完整旧加速旋钮的组合。7 月 7 日更早的“有用配置全开”压力测试为 `507.058s/root 105.153s/nodes 17/pool 198265/masterLP 213.664s`，比本次更慢，主要因为池和 pricing round 更大；但二者共同说明 strong/full-open 方向在 40-2 上不是最快配置。
+
+当前结论保持：40-2 原始 setup 上，最快可信 normal ng-DSSR 仍是 `nearestK3/top3`、no-strong、ALNS/RMIH、allCycles completion bound、pricingOnly subtree、midpoint probe/reuse、dual-bound pruning 的 121.924s 记录。本次 k3/top10 strong 配置可作为压力和组件归因样本；若目标是求解时间，应优先回到 no-strong 快速口径，或只做单因素对照测试 strong、root preprocessing、time-indexed pre-heuristic 对 RMP/列池的影响。
+
+151. 2026-07-07 指定 k3/top10 strong run 中 time-indexed pricing 与 strong branching 的实际关系
+
+继续复查第 150 节的 360s run 后确认：该 run 的 `TimeIndexedGraphPricing=15.270s/390` 不是 strong branching phase2 中的前置启发式，也不是主 pricing engine 列表的一部分。日志开头显示 `run.components.pricingEngines=[GCNGBBStyleNgDssrPricing, HeuristicPricing]`，且 `config.enableTimeIndexedPreHeuristicPricing=false`；命令行传入的是 `twet.bpc.fullDomainCompare.timeIndexedPreHeuristicForNgDssr=true`，但当前 runner 读取的正式属性名是 `twet.bpc.fullDomainCompare.timeIndexedPreHeuristicPricing`，因此该开关没有进入实际配置。第 150 节 run 中记录到的 `TimeIndexedGraphPricing` 主要来自 time-indexed root preprocessing 的临时图定价过程。
+
+strong branching 方面，light repair 确实启用了：`config.enableStrongBranchingLightweightRepair=true`，summary 中也有 `strong_branching_light_repair_rmp_build=360 calls` 和 `strong_branching_light_repair_rmp=24.194s/360`。这 360 次对应约 9 个分支节点、每个节点 phase1 测 20 个候选、左右 child 各一次。phase2 也确实运行了，`strong_branching_phase2_build=72 calls`、`strong_branching_phase2_initial=4.498s/72`，对应每个分支节点取 phase1 前 4 个候选、左右 child 重评。phase2 的主要耗时不是建模，而是 heuristic trial：本次只有 `HeuristicPricing[strongBranching]=68.973s/868`，并在 trial 中多次出现单侧加入上千列，例如 root 左右 child 分别 `passes=12/add1467` 和 `passes=16/add1087`。
+
+代码口径上，phase2 只允许 `engine.getName().toLowerCase().contains("heuristic")` 的 pricing engine，以及少数 time-indexed rank1 / outsourcing 特例；普通 `TimeIndexedGraphPricing` 不会进入 phase2。若 `TimeIndexedPreHeuristicPricing` 被正确加入 engine 列表，因为名字包含 `heuristic`，会进入 phase2。7 月 7 日更早的全开压力测试正是这种情况，日志显示 `run.components.pricingEngines=[GCNGBBStyleNgDssrPricing, HeuristicPricing, TimeIndexedPreHeuristicPricing]`，summary 中有 `TimeIndexedPreHeuristicPricing[strongBranching]=17.644s/1378`。但该 run 总体更慢，`pool=198265`、`masterLP=213.664s`、`solve=507.058s`，说明 pre-heuristic 在 strong trial 中虽然能补列，但没有把 Tabu heuristic / RMP 长尾消掉，反而容易扩大列池和 LP 压力。
+
+当前判断：第 150 节的 360s run 不能用来评价 time-indexed pre-heuristic 的列质量，因为它实际没启用 pre-heuristic；它反映的是 light phase1 + Tabu-only phase2 在 k3/top10 strong 下的成本。结合全开压力测试，pre-heuristic 若进入 phase2，直接耗时不大，但会额外产列并扩大 pool，是否值得需要单独做严格 A/B：只改 `timeIndexedPreHeuristicPricing=true/false`，保持 completionBound、midpointProbe、joinBest、strong/light 等完全一致，否则不能归因。
+
+152. 2026-07-07 507s 全开 run 慢因细化：pre-heuristic 与 strong trial 的关系
+
+继续复查 `tmp-ngdssr-40-2-allgood-20260707-105900` 后确认，507s 慢不是单纯因为 `TimeIndexedPreHeuristicPricing` 直接耗时高。该 run 中 pre-heuristic 实际启用，engine 列表含 `TimeIndexedPreHeuristicPricing`，summary 为 `TimeIndexedPreHeuristicPricing=4.676s/247`、`TimeIndexedPreHeuristicPricing[FindFeasible]=0.728s/53`、`TimeIndexedPreHeuristicPricing[strongBranching]=17.644s/1378`。它自身直接耗时约 23s，不是 507s 的主项。
+
+强分支 phase2 中，pre-heuristic 共 `1378` 次调用，其中 `444` 次加列，合计加 `5555` 列；而 `HeuristicPricing[strongBranching]` 共 `934` 次调用，`860` 次加列，合计加 `93886` 列，耗时 `87.551s`。普通节点 pricing 中也类似：pre-heuristic 只加 `252` 列，而 Tabu heuristic 加 `13993` 列。由此可见，pre-heuristic 不能替代 Tabu；它能快速补少量 elementary 列，但大量 child trial 仍要靠 Tabu 继续加列，且 phase2 当前 `strongBranchingPhase2MaxHeuristicPasses=0` 表示直到无列为止，不设 pass 上限。
+
+507s 的最大慢点仍在 master LP / repair trial：`strong_branching_light_repair_rmp=145.394s/400`，平均每次 `363ms`；`strong_branching_phase2_initial=29.459s/74`，平均每次 `398ms`。light repair 确实打开，但它只改变 phase1 seed/RMP，不阻止后续 repair/M/slack 退化。日志中多个被选中分支的另一侧 child 在 repair 后仍不可行或仍含 M/slack，例如 node2 右侧 `Repair RMP still uses branch-implied M columns after generating 6415 columns`，node7/node11/node12 右侧分别在生成 `3262/2936/2071` 列后仍有 positive artificial slack。这类 trial 一边大量补列，一边最终给 INF 评分，是 507s 中强分支代价高的主要现象。
+
+因此对 pre-heuristic 的判断应更细：它不是主要直接耗时，也不是明显“烂列太多”本身拖慢；更准确是召回率/闭合能力不够，很多轮即使 `bestPseudoRC` 很负也只能找到很少 elementary 列或没有 elementary 列，无法让 phase2 提前停下，Tabu 仍继续生成大批列。它额外贡献了 `17.6s` 和约 `5.5k` strong trial 列，并可能扩大 pool，但和 Tabu 的 `93.9k` strong trial 列、repair RMP 的 `145s` 相比不是主因。
+
+当前建议是不要把 507s 简化归因成 pre-heuristic 列质量差。更值得测试的单因素是：限制 strong phase2 pass 数、限制 phase2 中 Tabu 总加列数、或者让 phase2 只做轻量评分而不追求 child heuristic pricing 闭合；如果继续测试 pre-heuristic，应保持 strong/pass/repair 完全一致，只切 `timeIndexedPreHeuristicPricing=true/false`，并重点比较 strong trial 中 Tabu 加列数、repair INF 次数、pool 增长和 master LP 时间，而不是只看 pre-heuristic 自身耗时。
+
+153. 2026-07-07 strong branching phase2 单独关闭 time-indexed pre-heuristic 的无效对照
+
+为复核 507s 全开 run 中 `TimeIndexedPreHeuristicPricing[strongBranching]` 的影响，本次新增了一个窄开关：`timeIndexedPreHeuristicInStrongBranchingPhase2=false`。该开关只在 strong branching phase2 的 pricing engine 选择处过滤 `TimeIndexedPreHeuristicPricing`；普通节点 pricing、find-feasible、repair 和 root preprocessing 仍保留全局 `timeIndexedPreHeuristicPricing=true`。代码层面只改 `TWETBPCConfig`、`GCBBFullDomainComparisonTest` 和 `PC.isStrongBranchingPhase2PricingEngine()`，并通过 focused `javac` 编译。
+
+实际运行目录为 `test-results/bpc/tmp-ngdssr-40-2-allgood-no-phase2-preheur-20260707-compare/`。启动日志确认 engine list 仍为 `[GCNGBBStyleNgDssrPricing, HeuristicPricing, TimeIndexedPreHeuristicPricing]`，且 `config.enableTimeIndexedPreHeuristicInStrongBranchingPhase2=false`、`config.enableTimeIndexedPreHeuristicPricing=true`。但是该 run 没有进入 strong branching：root preprocessing 后根节点直接以 `ROOT_PROCESSED, obj=bound=22582, solve=125.201s, nodes=1` 结束，branch calls 为 0，summary 中也没有 `TimeIndexedPreHeuristicPricing[strongBranching]` 或 `HeuristicPricing[strongBranching]`。
+
+因此这次不能作为“只关闭 phase2 pre-heuristic”的有效 A/B。关键污染在 root preprocessing：本次 `tempPool=82806, avgWindowLen=229.225, timeArcs fixed=3541653, graphFix gap=94.352941`；而 507s baseline 为 `tempPool=26507, avgWindowLen=1881.475, timeArcs fixed=1754589, graphFix gap=3067.496`。根部前几轮 `TimeIndexedGraphPricing` 从第 2 轮开始 added columns / accepted cost 路径已经不同，导致根 LP、窗口收缩和是否进入分支全部改变。本次 125s 结果虽然更快，但最终 incumbent 为 22582，和历史 507s run 在 node 15 找到的 22580 冲突，不能视为更优配置。
+
+当前结论是：phase2 过滤开关本身已经生效，但这次实验没有测到它的作用。若要得到干净结论，需要先固定或复现 root preprocessing 轨迹，再比较 phase2 中 `TimeIndexedPreHeuristicPricing[strongBranching]` 是否会影响 Tabu 加列数、repair INF/M/slack 次数、pool 增长和 master LP 时间；否则结果会被 root 预处理窗口和初始列路径淹没。
+## 2026-07-08 启发式 pricing 单 job fast merge 与旧 merge3 对拍
+
+本次针对 50-3 ng-DSSR 配置中启发式 fast path 导致列路径变化的问题做了诊断。做法是让 ADD/EXCHANGE 实际仍走旧 `merge3Segments`，同时用新版单 job fast path 和 `TWETColumnEvaluator.evaluate()` 对第一条不一致候选重算真实列成本。
+
+结论是：不一致不是 fast path 把不可行列误算为可行，而是旧 `merge3Segments` 在 time-indexed root preprocessing 产生的 compact window 口径下会误返回 `curUpperBound=1.0E8`。典型证据为：`reference=1.0E8, fast=11230.0, trueCost=11230.0`，序列 `[25, 35, 40, 31, 21, 9, 10, 19, 23, 46, 8, 4, 30, 49, 28, 1, 14, 41]`。进一步的内部诊断显示旧 merge3 走到 `cost23Skip cost23=1.0E8, bridge=0.0, curUB=1.0E8, sH2=121.0, sH3=0.0`，即问题集中在 `merge23 = single.forward + shiftedB3` 的后向拼接/`findMinimal(true,false)` 口径，而不是候选序列真实不可行。
+
+因此默认保留新版 fast path；旧 merge3 只作为诊断开关保留。之前给 removeCost 增加的额外 overlap 预判断也已去掉，避免同类保守剪枝把有效候选提前剪掉。
+进一步复查旧 `merge3Segments` 的出错位置后，当前判断收紧为：问题不是 fast path 没有使用 time window，也不是候选列真实不可行。`TWETColumnEvaluator.evaluate(sequence)` 直接使用原始 `data.penaltyFunction` 和 `data.CmaxH`，不读取 node compact window；新版 single-job fast path 与旧 merge3 reference 都使用同一个 `HeuristicWindowContext`，其中 `windowContext.penalty(job)` 会合并当前启发式可用的 dual/compact window。两者输入口径一致，差异在旧 merge3 的三段通用公式。
+
+旧 merge3 会先独立求 `merge12 = shiftedF1 + b2` 的最优点，再求 `merge23 = f2 + shiftedB3` 的最优点，并用 `cost23 + bridgeCost >= curUpperBound` 直接剪枝。单 job 插入时 `f2/b2` 只是同一个任务的 singleton forward/backward envelope；在 time-indexed root preprocessing 产生 compact window 后，这两个 envelope 带有窄定义域和 BigM 边界。此时 `merge23.findMinimal(true,false)` 可能返回 `1.0E8`，但完整“前缀 + 当前 job + 后缀”的可行 timing 仍然存在。典型证据是同一候选 `fast=11230.0`、真实 evaluator `trueCost=11230.0`，而旧 merge3 在 `merge23` 分支返回 `cost23=1.0E8`。因此旧 merge3 的问题是中间 envelope 剪枝对单 job + compact window 过强，不是窗口本身把该列正确排除。
+
+154. 2026-07-08 ng-DSSR final join 候选列上限提前返回已回退
+
+本节记录一次已撤销的尝试。此前曾尝试在 ng-DSSR final join 中，当 elementary negative candidate 达到列上限后提前停止扫描，并配套调整 dual-bound 证书口径。W300 difficult run 里该策略没有触发有效收益，且会让 pricing 证书、dual-bound 剪枝和 DSSR non-elementary 证据之间的语义变复杂。
+
+当前代码已经回退这组修改：不再提供 final join 候选列上限提前停止开关；summary 也恢复为 `candidatePool kept/seen/dropped`；ng-DSSR pricing engine 重新按完整 pricing 结果返回 certified reduced cost，不再保留额外的证书完成状态判断。后续如果重新考虑 join 层提前返回，需要把“返回负列”和“证明无负列”两类状态分开设计，并单独验证 DSSR 更新证据不会被截断。
+155. 2026-07-09 启发式 pricing 与旧 VRP GCTabu 的对齐复查
+
+本次针对“ng-DSSR join 太重时，当前 Tabu 启发式 pricing 是否因为实现错误导致找不到负列”做了代码和日志复查。旧 VRP `GCTabu` 的核心流程是从当前 RMP 低 reduced cost route 中选 30 条 seed，每条 seed 做 50 轮 remove/add/exchange tabu search，过程中遇到负 reduced cost route 放入本地 pool，最后排序并加入前若干列。当前 `HeuristicPricingEngine` 的主体框架与此一致：`heuristicPricingSeedColumns=30`、`heuristicPricingTabuIterations=50`、`heuristicPricingTabuTenure=30`，move 类型也是 remove/add/exchange；它没有 relocate，这一点也与旧 `GCTabu` 一致。
+
+当前实现相对旧 VRP 多了 TWET 必需的几层语义：PWLF 前后向 profile 评价、branch/pricing-only arc 兼容性检查、SRI penalty 增量、time-indexed compact window/dual window 的搜索窗口，以及必要时的真实成本回刷。默认 `enableHeuristicDualProfitableWindow=false`，所以一般配置下启发式找不到列不能直接归因到 dual window 裁剪。compact window 下当前仍按窗口口径直接入池，不逐条 evaluator 回刷，这是此前为了效率和“compact window 是子树硬时间窗证据”的语义所做的选择；如果后续怀疑 compact window 口径，需要单独打开 audit 做成本对拍，而不是把它和旧 VRP 对齐问题混在一起。
+
+以 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的代表性日志为例，启发式并不是完全失效：`tmp-w300-50-3-r50-joinenv-off-rerun-dump-20260709c` 中 `HeuristicPricing` 调用 34 次，其中 22 次加列、12 次无列，共加入 2589 条列，总耗时约 19.678s；同一 run 的 ng-DSSR exact 为 12 次、415.772s。因此该例的主要瓶颈仍是 exact/join，而不是启发式本身。但日志也显示后期经常出现“Tabu 找不到列，随后 exact 仍能找到少量负列”的情况，例如尾部多次 `HeuristicPricing improved=false` 后，ng-DSSR exact 仍返回 168、32、25、4、1 条列。这说明当前启发式在 tail 阶段确实漏掉了一些孤立或需要较大结构变化的负列。
+
+当前判断是：没有看到明显的实现错误导致启发式系统性找不到负列；更合理的解释是旧 `GCTabu` 类型的 seed-local tabu search 本来就只能作为加速层，不能替代 exact pricing。W300 这类宽窗口/大 label 案例里，exact 负列常常来自较复杂的正反向拼接和特定 timing，未必能由当前 RMP seed 经过 50 轮单点 add/remove/exchange 稳定到达。并且如果 time-indexed pre-heuristic 已经开启，它会先吃掉一批容易的 elementary 负列，留给 Tabu 的 residual 更难。后续若继续优化启发式，应优先考虑诊断每次无列时 exact 返回列与 seed 的编辑距离、是否需要更多/更分散 seed，或引入面向 exact 返回列结构的复合 move；不应先假设当前实现与旧 VRP 不一致。
+
+156. 2026-07-09 ng-DSSR join 优化方向的当前判断
+
+继续复盘 W300/50-3 和 40-2 上的 join 优化尝试后，当前判断是：ng-DSSR 的 join 不是单纯某个 `funcEval` 常数太大，而是“label 数量、group 数量、DSSR 轮次、返回列批量”之间的结构性瓶颈。传统 label-level join 虽然一次扫描很重，但它能在同一轮里返回较多 elementary 负列，并且完整保留 no-negative certificate；此前直接把 join 改成 group envelope 后，`funcEval` 能从千万/亿级压到很低，但每个 group-pair 只返回一个代表 source pair，导致本轮返回负列变少、DSSR 轮次和扩展时间显著增加，最后总时间不一定下降，甚至会变慢。
+
+因此，当前已经试过但不适合作为默认的方向包括：final join 达到候选上限就提前停止、直接用 traced group envelope 替代 label-level join、以及把 half-domain 函数改成 full-domain 后再做路径去重。前者会破坏“返回负列”和“证明无负列”的证书区分；第二个会漏掉同一 group-pair 内非 envelope 代表但能产生有效 elementary 负列的 source pair；第三个会使扩展和函数维护成本显著上升，抵消 join 侧收益。
+
+更可行的后续方向不是“彻底替换 join”，而是把 group/envelope 当作安全筛选或局部加速层：先用 group envelope 做乐观下界，能剪掉的 group-pair 直接剪；不能剪掉的仍回退到 label-level join，或者在负 group 内返回多个 source pair 而不是一个代表。这样能保留 exact certificate 和批量加列能力，同时减少明显不可能产生负列的拼接。另一个方向是扩展前的保守 scalar lower bound 剪枝，减少进入 join 的 label 数，但这需要证明不会误剪，并且收益取决于 bound 是否足够强。
+
+当前最重要的实验结论是：在小整数、紧 due-date 或 time-indexed pseudo-schedule 接近 elementary 的算例上，time-indexed shortest path 天然很占优，ng-DSSR 不应强行在这些场景上追求更快；ng-DSSR 更适合作为时间尺度大、小数 scale、宽 due window、外包/复杂分支或 pseudo-schedule 明显变弱时的对照方法。后续若要证明 ng-DSSR 的优势，应优先构造或筛选这些场景，而不是继续只在当前 W300 root join 上硬抠常数。
+
+157. 2026-07-09 W300/50-3 ng-DSSR root 配置与耗时复查
+
+本次复查对象是 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root 诊断 run：`test-results/bpc/tmp-w300-50-3-r50-joinenv-off-rerun-dump-20260709c`，模式名为 `halfDomain-ng-nearestK3-top3-ngWinRep`。CSV 结果为 `NODE_LIMIT`，`nodes=1`，`incumbent=1992.000000`，`bound=1726.014329`，`gap=13.352694%`，`solve=501.969s`，`root=495.939s`，`pool=8501`。该 run 是 root-only 诊断，不是完整 BPC：`maxNodes=1`，且 `enableTwoStageStrongBranching=false`，所以不能用它评价强分支后续树搜索。
+
+配置复查显示，主线增强基本都已打开：ALNS seed 打开且限制 30s，SA 关闭；`GCNGBBStyleNgDssrPricing`、`HeuristicPricing`、`TimeIndexedPreHeuristicPricing` 都在 pricing engine 列表中；启发式 pricing、RMIH、dual-bound pruning、midpoint probe、`allCycles` completion bound、scalar pruning、subtree arc elimination、pricing-only subtree arc elimination、time-indexed root preprocessing、time-indexed pre-heuristic、root preprocessing seed 200、repeatability ng-set filter 都已打开。SRI、partial、route enumeration、dual stabilization 关闭；外包模式为 `masterVariables`。需要注意的两个点是：`bidirectionalJoinBestThresholdMode=zero`，不是 BEST_UB；`bidirectionalJoinRangeRestrictedLowerBound=false`，range-restricted join LB 没有启用。也就是说，本次不是“关键配置漏开”导致慢，而是在当前 root-only 口径下，少数尚未启用的实验性 join 剪枝没有参与。
+
+time-indexed root preprocessing 确实运行并生效：临时 pool 到 `32640`，写回 `seedElementaryCols=200`，固定时空弧 `4316469`，推广普通 arc `121`，所有 50 个 job 都得到 compact window，平均窗口长度 `822.440`，平均收缩比 `0.631`。但这组 W300 下 `ngWindowRepeatability=timeIndexed/repeatable50/nonRepeatable0`，说明 repeatability 过滤虽然开启，却没有排除任何 job；也就是说，W300 下所有 job 仍被判定可能重复访问，`nearestK3/top3` 的 ng 初始化并没有因为 repeatability 大幅变小。
+
+总耗时拆分为：`exact=415.772s/12`，`heuristic=19.678s/34`，`masterLP=8.780s`。因此瓶颈非常明确：不是 master LP，也不是启发式；主要是 ng-DSSR exact pricing。启发式 34 次中 22 次加列，共加 2589 列，说明它不是完全失效，但 tail 阶段经常无列，而 exact 仍能找到少量列。
+
+exact pricing 内部不是始终只慢在 join。第一轮 exact 用 `40.481s`，其中 `init=10.369s`、`fw=9.128s`、`bw=6.137s`、`join=14.685s`，join 是大头之一；这一轮 join 尝试约 `5193` 万 pair、`5135` 万次 funcEval，返回 5000 列。中后期返回列变少后，DSSR 多轮更新成为更严重的问题：例如返回 1 列的两轮分别用 `57.065s` 和 `81.708s`，其中第二轮 `init=24.365s`、`fw=12.183s`、`bw=36.003s`、`join=8.993s`，join 已不是最大项；最终 no-negative certificate 轮用 `135.595s`，`rounds=17`，其中 `init=36.417s`、`fw=22.010s`、`bw=62.430s`、`join=14.499s`。这说明尾部耗时主要来自多轮 DSSR 下的反复初始化、正反向扩展和 dominance/envelope 维护，join 仍重但不是唯一瓶颈。
+
+completion bound 在早中期也有明显成本，但不是总耗时主因。早期几轮 buildMs 在 `3.6s-5.8s`，并且能做大量 scalar pruning；后期复用后 buildMs 为 0，但 exact 仍能到几十秒甚至 135s，说明后期主要不是 completion bound 构造，而是 DSSR 多轮扩展和最终证书轮。`completionBoundArcFixing` 在 root 内逐步固定普通 arc，但它更多影响后续 pricing 空间，不能单独解决当前 W300 root 的尾部收敛。
+
+当前结论是：这组 50-3 W300 的慢，不是因为“好配置没打开”，而是由于宽 due window + setupR50 让 time-indexed preprocessing 虽然压缩了窗口和大量时空弧，但仍无法让 ng-DSSR 的 repeatability/label 空间变小；root exact pricing 后期需要很多 DSSR 轮才能证明无负列。后续优化如果继续针对这类算例，应优先看两条路：一是减少尾部 DSSR 轮和每轮扩展成本，例如更有效的 ng-set 更新或更保守但安全的扩展前 lower-bound 剪枝；二是把 group/envelope 用作安全筛选或负 group 局部多 source-pair 扫描，而不是完全替代 label-level join。
+
+补充复查 `exactPhaseMs init` 的含义后确认，该字段对应 `GCNGBBStyleBidirectionalNgDssr.initialize(lp)` 的累计时间，不是简单对象初始化。它包含 reset 统计、trace/diagnostic 上下文、SRI 预计算、dynamic pricing window、ng-set 初始化或继承、completion bound 构造/复用、pre-certificate、midpoint probe、label store/queue/candidate state 和 forward source 初始化等。更重要的是，该时间在一次 exact pricing 的多轮 DSSR 内累计；最终 no-negative certificate 的 `init=36.417s` 是 `rounds=17` 的累计值，平均每轮约 `2.14s`。同一条 summary 里的很多计数和 `completionBound buildMs` 则更接近最后一轮口径，因此不能把 `buildMs=0` 解读为 17 轮完全没有 completion-bound 准备成本。
+
+该 run 没有打开 `twet.bpc.fullDomainCompare.ngDssrSetStats`，所以日志没有逐轮 `ngSetSize avg/min/max/updateByRound`。能从现有日志确定的是：该次 final certificate 使用 `nearestK3` 初始化，repeatability 过滤结果为 `repeatable50/nonRepeatable0`，因此初始通常为每个 job 3 个 ng 成员；最后一轮 `totalNgSetUpdates=258`，若按 50 个 job 均初始 3 个成员计算，最终平均 ng-set 大小约为 `(50*3+258)/50 = 8.16`。但最小值和最大值在该日志中不可恢复，需要用同配置加 `ngDssrSetStats=true` 重跑到该 pricing 轮才能精确得到。
+
+从优化角度看，`initialize()` 里最值得先动的不是 parse 参数或创建队列这类小开销，而是 midpoint probe 和多轮 DSSR 下的重复准备。该日志 final certificate 的最后一轮 probe summary 中两个 candidate 分别约 `792ms` 和 `744ms`，本身就接近每轮 `init` 平均值的大头；如果 17 轮都做类似 probe，量级可到二十多秒。此前配置 `bidirectionalMidpointProbeReuseWithinNode=false`，已有的 reuse 逻辑没有启用；后续已改为默认打开，但需要注意该机制只是用同 node 历史最佳 `tMid` 作为下一次 exact pricing 的 probe reference，仍会运行 probe，不是完全跳过。更激进的优化是同一次 exact pricing 内 DSSR 后续轮复用上一轮 `tMid` 或减少 probe 候选，但这会改变半域平衡质量，需要单独对比 exact 时间、返回列数和 DSSR 轮数。
+
+进一步讨论后，当前更直接的判断是：同一次 ng-DSSR exact pricing 的多个 DSSR round 之间，LP dual、node 分支状态、pricing-only arc、compact window 和 completion bound 口径都不变，变化的主要是 ng-set 变紧。因此每一轮都完整跑 midpoint probe 的边际价值可能不高。理论上任意合法 `tMid` 都不改变 exact pricing 的可行列族和最优性，只影响正反向扩展平衡和 join 成本；所以在同一次 exact pricing 内复用第一轮或上一轮选出的 `tMid` 是正确性上可接受的性能策略。风险在于 ng-set 更新后正反向 label 空间可能不再平衡，如果完全不 re-probe，可能省下 probe 时间但增加 forward/backward/join 时间。较稳的实验方案是：第一轮完整 probe；后续 DSSR round 默认复用 `tMid`，只在上一轮正反向 kept/queue 比例严重失衡或每隔若干轮时再做一次轻量 probe。这样比当前跨 exact call 的 `bidirectionalMidpointProbeReuseWithinNode` 更贴近问题来源，也更可能降低 W300 tail certificate 的 `init` 成本。
+
+本轮按上述判断先落地最小实现：新增 `bidirectionalMidpointProbeReuseWithinDssr`，默认开启；full-domain runner 属性名为 `twet.bpc.fullDomainCompare.midpointProbeReuseWithinDssr`。同一次 `GCNGBBStyleBidirectionalNgDssr.solve()` 内，第 1 轮 DSSR 仍完整执行当前 midpoint probe，且如果 `bidirectionalMidpointProbeReuseWithinNode=true`，第一轮的 probe reference 仍可来自同 BPC node 的历史 best exact `tMid`。第 2 轮及以后不再重新跑 probe，而是复用第 1 轮最终选中的 `tMid`，随后重建 half-domain 派生缓存并重置 probe 影响的统计。这里刻意不复用第 1 轮 probe 生成的 rank0 label，因为 DSSR 更新 ng-set 后旧 label 的可扩展状态已经不再适用。
+
+该实现和已有 node 级复用的边界是：node 级复用跨 exact pricing 调用，只给下一次 exact pricing 的第一轮 probe 提供 reference；DSSR 内复用只在同一次 exact pricing 的多轮 DSSR 之间跳过重复 probe。两者可以叠加，但不共享 label，也不改变 completion bound、ng-set 更新或 final join 的证书语义。正确性上，`tMid` 只是半域分割点，任意合法 `tMid` 都不改变可生成列族；风险只在效率，即第一轮 `tMid` 在后续 ng-set 变紧后可能不再是最平衡的点，需通过 W300/50-3 这类 tail certificate 场景 A/B 观察 `init` 下降是否被 `fw/bw/join` 上升抵消。focused `javac` 已通过。
+
+补充验证：用 `wet020_001_2m` 做 30s root-only smoke，显式传入 `twet.bpc.fullDomainCompare.midpointProbeReuseWithinDssr=true`、`midpointProbe=true`、`ngDssr=true`、`runALNSForSeed=false`、`maxNodes=1`。该小例 root 一次 ng-DSSR pricing 即闭合，`rounds=1`，所以没有触发第 2 轮复用分支；但日志确认系统属性被读取，求解 `valid=true`，说明新增开关入口和原单轮 probe 路径没有破坏。后续仍需要在 W300/50-3 这类多轮 DSSR tail case 上做真正 A/B。
+
+复查实现时发现一处具体问题：第一版补丁中 `ngDssrFirstRoundTmidAvailable=true` 被乱码注释吞入注释行，导致第 1 轮虽然记录了 `tMid`，但 available 标记没有真正置位，第 2 轮及以后不会实际走复用分支。本轮已修正为显式赋值，并清理该文件因局部替换产生的异常行尾。focused `javac` 与 Java diff check 已通过。
+158. 2026-07-09 W300/50-3 exact pricing 热点与 ng-set 更新策略复查
+
+继续复查 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 ng-DSSR root-only 日志后，当前可以把 exact pricing 的慢因拆得更清楚。传统 label-level join 口径下，代表日志 `tmp-w300-50-3-r50-joinenv-off-rerun-dump-20260709c` 聚合 12 次 ng-DSSR exact pricing，总 exact 约 `415.6s`，其中 `init=151.7s`、`fw=58.5s`、`bw=151.5s`、`join=53.2s`，completion-bound build 约 `42.8s`，funcEval 约 `8968` 万次。也就是说 join 确实重，但它不是唯一瓶颈；尾部 certificate 轮次里，反向扩展和每轮初始化/准备同样很重。
+
+join-envelope 实验口径 `tmp-w300-50-3-r50-joinenv-on-rerun-dump-20260709d` 把 join 本身从约 `53.2s` 压到约 `7.5s`，funcEval 从约 `8968` 万次降到约 `71` 万次，但 exact 总时间反而到约 `599.9s`，主要因为 exact 调用和 DSSR 轮数增加，`init=281.1s`、`bw=233.6s`。这再次说明第一版 envelope 不能直接替代 label-level join：它可以大幅减少拼接计算，但每个 group-pair 只返回少量 source pair，会削弱批量加列能力，增加后续 DSSR 轮次和扩展时间。当前更合理的方向仍是把 envelope 当作安全下界筛选或局部回退工具，而不是默认替代完整 join。
+
+从当前 `updateNgNeighborhoodsFromNonElementaryRoutes()` 实现看，ng-set 更新确实偏粗放。代码对保留下来的 top 非基本负序列逐条扫描；只要某个 job 重复出现，就把该 repeated job 加入两次出现之间所有 middle job 的 ng-set。这个做法能消掉当前非基本序列，但没有判断后面的非基本序列是否已经会被前面选中的更新挡掉，也没有为每条非基本序列选择“最小必要更新”。在 W300 日志中，虽然 `ngDssrNonElementaryRouteUpdateLimit` 很小，但累计仍出现大量 DSSR rounds 和 ng-set updates，说明这条路径值得继续优化。
+
+更稳的改法不是简单地说“第二好列里有同一个 i<-j 更新就跳过”，因为只加一个 middle job 通常不足以阻止重复访问；一个 repeated job 要被阻止，通常需要该 repeated job 在两次出现之间的整段 middle jobs 中都被保留在 ng memory 中。更准确的 selective update 口径是：按 reduced cost 从好到差处理已保留的非基本负序列，维护一份“本轮计划新增 ng pair”的 overlay；处理某条序列前，先检查它是否已经有某个重复段被当前 ng-set 加 overlay 完整阻断。如果已经阻断，则这条序列下一轮不会原样再出现，可以跳过它的其它更新。若尚未阻断，则在它的多个重复段中选择 missing pair 最少的一段，只加入足以阻断该序列的那组 pair，而不是把所有重复段的所有 middle pair 都加入。
+
+这个策略的正确性来自它仍保证被处理且未被已有更新阻断的非基本负序列会被新增 ng-set 消掉；它只是避免对已经会消失的序列继续加无用 pair，并把“消掉一条序列”从全量更新改成最小阻断更新。风险是更新更保守后，可能需要更多 DSSR 轮才能消掉其它非基本序列；收益是 ng-set 增长更慢、label 空间可能更小，尤其适合 W300 这种尾部多轮 DSSR、扩展和初始化很重的场景。后续如果实现，应作为独立开关保留旧策略，并记录每轮 stored route、skipped-as-already-blocked、selected block missing pair 数、实际 updates、后续 rounds/labels 的变化。
+159. 2026-07-09 W300/50-3 init/backward 热点与 ng-set pair 更新口径补充
+
+继续复查 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root-only 日志后，确认 `exactPhaseMs init` 不是单纯对象初始化，而是 `GCNGBBStyleBidirectionalNgDssr.initialize(lp)` 在同一次 ng-DSSR exact pricing 的多轮 DSSR 内累计的准备时间。它包含 dynamic pricing window、completion bound 构造或复用、ng-set 初始化、midpoint probe、半域函数重建、label store/queue/candidate state 初始化等。尾部 no-negative certificate 里的 `init=36.417s, rounds=17` 应理解为 17 轮 DSSR 的累计，平均约 2.14s/轮；其中 midpoint probe candidate 在日志里常见 0.7-0.8s/个，是 init 里最值得优先压缩的部分。当前新增的 `bidirectionalMidpointProbeReuseWithinDssr` 正是针对同一次 exact pricing 内多轮 DSSR 重复 probe 的成本，语义上只复用第一轮选出的 `tMid`，不复用 probe labels。
+
+backward 重的原因不是一个单独 bug，而是 W300 下 compact window 后所有 job 仍被判定为 repeatable，ng-set 初始仍有较多可重复空间；同时当前 midpoint probe 只按候选队列/remaining 比例平衡正反向，不保证真实后向扩展成本最小。尾部证书轮中 `bw=62.430s` 明显高于 `fw=22.010s`，说明后向 label 扩展和 dominance/envelope 维护仍是主要成本之一。若复用第一轮 `tMid` 后 init 下降但 bw/join 上升，需要再判断是否增加轻量 re-probe 条件。
+
+ng-set 更新口径需要补充澄清。当前 `updateNgNeighborhoodsFromNonElementaryRoutes()` 已经不会把同一个 `middleJob <- repeatedJob` pair 重复加入两次，因为加入前会检查当前 ng-set 是否已经包含该 pair。真正的冗余不是“同一个 pair 被重复写入”，而是后一条非基本路径可能已经被前面路径新增的一组 pair 完整阻断，但代码仍然继续扫描它，并可能再加入其它 pair。只因为第二条路径里含有某个已经新增过的 `i <- j` pair 就整条跳过并不严谨；对 repeated job 的一次重复访问，通常要让 repeated job 在两次出现之间的必要 middle jobs 中都被保留，才能保证该非基本路径不会原样再出现。更稳的 selective update 应按 repeated segment 判断：当前 ng-set 加本轮 overlay 是否已经完整阻断该 segment；完整阻断则跳过该路径，否则选择缺口最小的 segment 补齐 missing pairs。这样既符合用户提出的“前面更新已经能挡住后面路径就不要再更新”的方向，也避免因单个 pair 重复而过早跳过导致 DSSR 后续仍反复生成同一类非基本路径。
+
+补充配置决定：`bidirectionalMidpointProbeReuseWithinNode` 也改为默认打开。它和 `bidirectionalMidpointProbeReuseWithinDssr` 不冲突，前者只影响同一个 BPC node 内下一次 exact pricing 的第 1 轮 probe reference，后者只影响同一次 ng-DSSR exact pricing 内第 2 轮及以后是否跳过重复 probe。两者都只改变半域平衡选择，不改变 exact pricing 的列族和最优性；风险只在效率上，即历史 `tMid` 或第一轮 `tMid` 在后续 dual/ng-set 下可能不再最平衡。
+160. 2026-07-09 W300/50-3 正反向扩展细分计时
+
+为进一步确认 ng-DSSR exact pricing 慢在正反向扩展的哪个环节，本次在 `GCNGBBStyleBidirectionalNgDssr` 中新增了诊断开关 `ngDssrExtensionTimingDiagnostics`。该开关默认关闭，只在打开时输出正反向扩展内部的细分时间，包括 arc 检查、label 函数构造、window 检查、state/ng-memory 构造、completion-bound 检查、dominance graph 插入和队列操作。它不改变求解逻辑，只用于定位耗时。
+
+复查时发现第一版统计 reset 不完整：`extensionTimingMs` 的纳秒字段和 backward extension counters 没有在每次 exact pricing / probe reset 后完整清零，导致多次 pricing 汇总时可能重复计入旧轮次。已改为统一调用 `resetExtensionStatistics()`，同时清理 forward/backward 候选计数和所有 extension timing 字段。需要注意，日志里的 `build` 是 `extendForward/extendBackward` 外层总耗时，已经包含 `window/function/state` 三类内部子项；这些子项只能用于拆解 build，不能和 build 再相加。
+
+修正后用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 做 root-only 诊断，3 次 ng-DSSR exact pricing 总计约 `56.4s`，其中 `init=27.7s`、`fw=6.3s`、`bw=13.7s`、`join=8.6s`。因此这组慢因仍不是单纯 join，而是 init、backward 扩展和 join 共同构成，其中 init 是最大项。completion bound 构建累计约 `15.4s`，解释了 init 的主要部分；它同时完成约 `255.9` 万次 bound eval，剪掉 forward `78.5` 万、backward `133.7` 万扩展。
+
+正反向扩展内部的差异也比较明显。3 次 pricing 中，forward 一共检查约 `130.0` 万个候选，实际构造约 `115.6` 万个 label，completion-bound 后保留约 `37.1` 万；backward 一共检查约 `203.1` 万个候选，实际构造约 `168.3` 万个 label，bound 后保留约 `34.6` 万。forward 的 build 总耗时约 `1.85s`，其中函数操作约 `0.36s`、状态/ng-memory/dominance-set 构造约 `1.12s`；completion-bound 检查约 `2.03s`，insert 约 `1.86s`，其中 dominance graph insert 约 `1.82s`。backward 的 build 总耗时约 `3.97s`，其中函数操作约 `0.79s`、状态/ng-memory/dominance-set 构造约 `2.61s`；completion-bound 检查约 `3.58s`，insert 约 `5.35s`，其中 dominance graph insert 约 `5.29s`。
+
+当前判断是：dominance graph 操作确实是 backward 扩展的大头之一，但不是唯一瓶颈。backward 的候选数和构造 label 数远高于 forward，导致函数构造、completion-bound 检查和 dominance graph 插入同时变重；init 里的 completion-bound 构建也很重。后续如果继续优化，优先级应是：先减少 backward 候选和构造 label 数，其次优化 completion-bound 构建/查询，再考虑 dominance graph 插入常数项。单纯优化 join 或单纯优化 dominance graph，都不能覆盖这组 W300 case 的主要耗时。
+
+161. 2026-07-09 当前 ng-DSSR 初始化和旧 VRP GCNGBB 的差异
+
+本次代码口径已按旧 VRP 风格切换：默认 `ngDssrInitialNgSetMode=dualPair`，新增 `ngDssrInitialNgPairCoefficient=0.08`，在 `dualPair/reducedCostPair` 模式下按 `floor(n * coef)` 全局选择 reduced pair cost 最小且为负的 pair，并把两个方向互相加入 ng-set。这样默认行为不再按每个 job 固定填满 K 个 nearest 邻居；`ngDssrInitialNgSetSize` 只保留给 `nearestK/full/history` 等旧实验入口或显式覆盖使用。当前 pair reduced cost 沿用已有 TWET 口径：`setupCost(i,j)-arcDual(i,j)-jobDual(j) + setupCost(j,i)-arcDual(j,i)-jobDual(i)`，本次只对齐旧 VRP 的“全局少量负 pair”数量控制，不额外引入时间函数或 setup time 距离项。
+
+复查旧 VRP `GCNGBB.java` 后确认，旧 GCNGBB 的 `Reset()` 会把 `m_low_ng_set/m_high_ng_set` 全部清空，默认初始 ng-set 是空的。只有 `data.m_type == 2` 时，`Extend()` 开始会调用 `ChooseNeighbor()`，按 `customer_number * m_col_coef` 选择一批双向 reduced-cost pair，默认 `m_col_coef=0.08`，并且选完后把 `m_col_coef` 置 0，表示这种预加只做一次。旧实现的 pair 指标是 `dist(i,j)-arcDual(i,j)-mu[j] + dist(j,i)-arcDual(j,i)-mu[i]`，只选择负 pair，并把两个方向互相加入 ng-set。
+
+旧 VRP 的 DSSR 更新也比较保守：join 阶段只记录本轮 reduced cost 最好的非 elementary route，即 `m_best_cycle`。如果这个 route 中某个 customer 重复出现，就把该 repeated customer 加入两次出现之间所有中间 customer 的 ng-set。也就是说旧 VRP 每轮只用一个最好的非基本负路径更新，不是 topK 更新。
+
+当前 TWET 主线默认差异较大。`TWETBPCConfig` 默认 `ngDssrInitialNgSetMode=nearestK`、`ngDssrInitialNgSetSize=8`、`ngDssrNonElementaryRouteUpdateLimit=1`。初始化时每个 job 会按 `setup(i,j)+setup(j,i)+setupCost(i,j)+setupCost(j,i)` 选最近的 K 个成员；这比旧 VRP 的默认空集强很多，也和旧 VRP type-2 的 reduced-cost pair 预加不是一个口径。当前也提供 `empty` 模式，以及 `dualPair/reducedCostPair` 模式，后者更接近旧 VRP 的 pair 预加思想，但当前实现是给每个 job 填到 target size，而旧 VRP 是全局选约 `0.08n` 对负 pair，数量和触发条件都更保守。
+
+因此，如果问“当前默认和旧 VRP 区别大不大”，答案是大：当前默认 nearestK8 明显更大、更静态；旧 VRP 默认空，只在 type-2 上按负 reduced-cost pair 少量预加一次。若要做接近旧 VRP 的对照，应优先测试 `ngDssrInitialMode=empty, ngDssrRouteUpdateLimit=1`，或者单独做一个旧 VRP 风格的 `dualPairGlobal` 初始化：全局只选约 `0.08n` 对最负 pair，而不是每个 job 填满 target size。
+
+补充解释：旧 VRP 区分不同类型是否预加初始 ng-set，本质是因为不同算例类型的“非 elementary 松弛风险”和“labeling 单轮成本”不一样。type-1 类算例通常资源约束更紧，时间窗或容量会自然限制路径长度和重复访问，空 ng-set 下 DSSR 往往也能较快收敛；此时预加较大 ng-set 会削弱 dominance、增加 label 数，可能得不偿失。type-2 类算例通常时间窗/容量更宽、单条 route 更长，可行弧更多，ng-relaxed pricing 更容易出现靠重复访问吃 dual 的非 elementary 负列；若从空 ng-set 开始，可能要多轮 DSSR 才能把关键重复段禁掉。因此旧 VRP 只对 type-2 做一次很小的 reduced-cost pair 预加，目的是提前挡住最可疑的双向负环或近似 2-cycle，而不是一开始就把 ng-set 做大。这个设计体现的是“按算例结构平衡松弛强度和 dominance 效率”，不是简单地认为初始集合越大越好。
+
+162. 2026-07-10 ng-DSSR exact pricing 后续优化优先级复查
+
+本次继续沿 `GCNGBBStyleBidirectionalNgDssr` 的真实主线复查 `initialize -> forward/backward expansion -> dominance graph -> final join`。代表证据仍采用 W300/50-3 root-only 日志 `tmp-w300-50-3-r50-joinenv-off-rerun-dump-20260709c`：12 次 exact pricing 合计约 `415.6s`，其中 `init=151.7s`、`fw=58.5s`、`bw=151.5s`、`join=53.2s`。第一轮约 `5223` 万个 join candidate 中有 `5135` 万次进入函数拼接，现有 arc/time/scalar 前置判断只挡掉约 `1.7%`；尾部 no-negative certificate 又需要 17 轮 DSSR，说明当前瓶颈既有早期 join 的笛卡尔积，也有尾部多轮扩展和 dominance 维护，不能只优化某一个 `funcEval` 常数。
+
+`init` 方面，最近完成的 completion-bound multi-delta + time-priority 已经是当前 `ALL_CYCLES` 默认路径。40-2 对拍中非零 build 平均由约 `1207.8ms` 降到 `309.9ms`，但 W300 尚未按新默认正式重跑，因此不能直接把同样倍数套到 W300。代码层面 `dynamic window`、ng-set 初始化、active signature 和 completion bound 已在同一次 DSSR solve 内复用；同一次 exact pricing 的后续 DSSR round 也已复用第一轮 `tMid`。在这些改动之后，`init` 剩余值得关注的主要是每个 exact call 第一轮仍要做的 midpoint probe，以及带 SRI 时每轮重复建立 cut/state 辅助结构。跨 exact call 直接复用 completion bound 不成立，因为 LP dual 已变化；更合理的实验是让 midpoint probe 使用真实的正反向单位成本，而不是只平衡 label/queue 数量。W300 诊断中 backward 每个 survivor 的 dominance/state 成本明显高于 forward，因此 probe 应允许把 `tMid` 向减少 backward 工作量的方向偏移，并把预估 join 乘积纳入 score。该调整不影响列族和正确性，只改变性能轨迹。
+
+扩展阶段最明确的低风险优化是把 completion-bound 判断前移到完整 child state 构造之前。当前顺序是先完成 PWLF、复制 visited/ng-memory、构造 dominanceSet 和 extensionSet、分配 child label，再做 completion-bound。3 次 W300 诊断中 forward 构造约 `115.6` 万个 child，bound 后只剩 `37.1` 万；backward 构造约 `168.3` 万，bound 后只剩 `34.6` 万。也就是说约四分之三的 child 在被 bound 删除前已经支付了 bitset copy、两个可达集合扫描和 label 分配。completion-bound 实际只需要 child job、no-SRI frontier/no-SRI min 和相应 prefix/suffix bound；无 SRI 时 `FunctionLabel` 构造器会把 `noSriFrontier` alias 到 `frontier`，并不存在前面一度怀疑的 null 失效问题。因此可以先构造函数并做 bound，只有 survivor 才建立 visited/ng/dominance/extension state。该改法不改变任何 bound 或 dominance 语义，预计首先改善 backward。
+
+同一位置还有两个次级优化。第一，`buildDominanceSet` 和 `buildExtensionSet` 目前先后扫描 job，并重复做一部分时间可行性判断，可以在 survivor 上用一次 job 扫描同时填两个 bitset；dominance key 仍保持 full-domain 口径，extension set 再叠加 half-domain 条件，语义不变。第二，无 SRI 时每个 child 仍会通过 `copySriCounts()` 创建空数组，可以改为共享空状态；extensionSet 为空的 label 仍要保留供 join/回溯，但无需进入扩展队列。把当前 node 的 pricing-forbidden arc 直接过滤进 extensionSet 也可减少后续无意义 pop，不过只应影响 extensionSet，不能随意改变 dominance key。更激进的“PWLF 构造前 scalar bound”只有在能便宜取得合法区间下界时才值得做，建议先加命中统计，避免像此前 completion-bound endpoint shortcut 一样因低命中率反而变慢。
+
+dominance graph 的最高价值候选是同 key 快路径，而不是重新启用已证明端到端不稳定的 indexed backend。第一轮日志中 `paperGraph labels kept/rejected=49839/873447`，只创建 `631` 个 graph node；最终 active graph 又只有 `347` 个 node、`43463` 个 label，平均每个 active node `125.254` 个 label。这证明同一 reachable key 下保留多 label 是普遍现象，但不能仅由 `nodesCreated` 反推出所有 rejected insert 都命中了同 key，因为一部分新 key candidate 也可能被非相等的 superset node 直接支配。实现前应先增加 `sameKey hit/miss` 计数。当前一旦命中同一 node，仍会创建 candidate list、复制该 node 的 dominance envelope 做一次 dominance check；保留 label 后还会重建 `dominanceEnvelope=min(labelEnvelope, predecessorEnvelope)`，并无条件调用 `propagateAndTrim()`。这里可以直接用同 node 的现有 dominanceEnvelope 做只读判断，省掉候选列表和 envelope copy。新增 label 时用增量 `mergeMinimum(..., reportChanged=true)` 更新 labelEnvelope 和 dominanceEnvelope；只有 dominanceEnvelope 真正变化时才向 successors 传播。label 本身仍需保留用于 join/路径恢复，即使它不贡献 envelope，也只是跳过无效传播。这个 fast path 与当前数学语义一致，实际收益取决于待补的 same-key 命中率，但从每个 active node 的 label 密度看值得优先验证。
+
+join 方面，`findMinimalShiftedSumValue()` 已经是直接双指针扫描，不再构造 `shiftX + add` 临时 PWLF；`getForward/BackwardJoinExtension()` 也按 label 缓存。因此当前问题主要是 pair 数量，不是单次函数拼接还有明显冗余。此前完整 group-envelope 替代虽然把 join 从约 `53.2s` 降到 `7.5s`，却因为每个 group-pair 只返回一个代表 source pair 而减少批量加列，最终 exact 反而从约 `415.6s` 增至 `599.9s`。后续应改成只作过滤：按 `(terminal job, exact ngMemorySet)` 建正反向 envelope；若某个 group-pair 的 envelope 拼接最小值已经非负，则该组内所有真实 label-pair 都不可能为负，可以整组安全删除；若 group bound 为负，则回退扫描原始 labels，保持原来的列集合、批量和 certificate。现有 envelope 诊断第一轮只有 `173/173` 个正反 group，build 约 `0.221s`，`29929` 个 group-pair 中 `13433` 个可直接剪掉，说明 group 层有现实命中率；但这些 group 各自覆盖多少原始 label-pair 尚未统计，不能直接把 `44.9%` group prune 当作同等比例的 funcEval 节省。实现时应同步统计 pruned group 对应的 label cross-product。还可做 group-group -> group-label -> label-label 的分层门控，但每一层通过后都必须回到真实 label，不能再只返回 envelope contributor。
+
+另一个可与 group filter 叠加的安全 join 优化是 top-K worst threshold。当前 W300 使用 `joinBest=ZERO`，为了批量返回负列会扫描所有负 pair；`BEST_UB` 虽剪得更狠，但只围绕当前最优 reduced cost，容易少返回大量仍有用的负列。更合适的口径是：candidate heap 未满时阈值仍为 0；达到 `maxExactPricingColumns` 后，用当前 heap 中最差的 retained reduced cost 作为阈值。若某 pair 的合法 lower bound 已不优于该阈值，它不可能进入最终 top-K，可安全跳过；在无 dual-window/SRI/partial 真成本回刷的 normal 路径下，这应返回与完整 ZERO 扫描相同的 top-K signature/cost，同时仍保留全局最优 reduced cost。需要真成本回刷的路径不能直接使用 inferred heap threshold。group 按 lower bound best-first 只有和这种会逐步收紧的阈值结合才有意义；在固定 ZERO 阈值下单独排序不会减少最终扫描量。
+
+不建议近期优先做的方向包括：恢复 full-domain join、按 canonical split 让每条 sequence 只拼一次、直接用 group envelope 替代 labels、提前达到列数就终止 exact，以及在 linked-list PWLF 上继续增加一次同量级 range scan。这些方向要么已经实测增加扩展/DSSR 轮数，要么破坏当前 dual-bound/certificate 口径，要么只是把一次 funcEval 换成另一次近似同成本扫描。若 group filter 后 pair 数仍然很大，再考虑把 active join frontier 转成只读 primitive-array 表示，减少 linked-list 指针追踪；这属于第二阶段常数优化，不应排在减少 pair 数之前。
+
+综合优先级建议为：第一，先按新 completion-bound 默认重跑 W300，得到新的 init 基线；第二，实现并对拍 dominance same-key fast path；第三，把 completion-bound 前移到 state 构造前，并合并 survivor 的 dominance/extension set 扫描；第四，实现只过滤不替代的分层 join envelope；第五再测试 top-K worst threshold 和 cost-aware midpoint。前三项应以“相同每轮列 signature/cost、相同 relaxed best reduced cost、相同 DSSR rounds”为验收标准；后两项允许执行顺序不同，但必须保持最终 LP bound、no-negative certificate 和完整求解目标一致。任何局部优化都要同时记录 `init/fw/bw/join`、constructed/survivor、dominance copy/propagate、group pruned/fallback pair 和 returned columns，不能只看某个局部计时。
+
+163. 2026-07-10 后续代码修改按预期收益排序
+
+按“端到端预期收益优先，同时避免改变批量返回列和证书语义”的口径，实施顺序调整为：第一，扩展阶段把 completion-bound 检查前移到 visited/ng/dominance/extension state 构造之前，并合并 survivor 的 dominanceSet/extensionSet 扫描；现有日志显示约四分之三的 child 会在 bound 处淘汰，这是证据最充分、风险最低的直接收益。第二，实现 dominance graph 的 exact-same-key 快路径，但先补 same-key 命中率、envelope unchanged 和 propagation 次数统计；命中时避免 candidate list、envelope copy 和无变化传播。第三，实现 group envelope 只作 join 过滤，group bound 为负时仍回退原 label-pair join；该项对数千万 pair 的理论收益最大，但需要严格验证返回列批次和 DSSR 轮数不变。第四，在 normal、无需真成本回刷的路径上增加 top-K worst threshold，并与 group lower-bound 顺序结合。第五，做 cost-aware midpoint，让评分考虑 forward/backward 单位 survivor 成本和预估 join 乘积。第六才考虑 primitive-array join frontier、空 SRI 状态共享、空 extensionSet 不入队等常数级优化。
+
+实施前必须先用当前默认 multi-delta completion bound 重跑 W300，避免拿旧 `init=151.7s` 基线误判新版瓶颈。每项修改单独 A/B，不叠加后再归因；验收不仅比较总时间，还要比较 exact 调用数、DSSR 轮数、每轮返回列 signature/cost、best reduced cost、最终 root bound 和 no-negative certificate。若某项局部时间下降但增加 DSSR 轮数或减少批量负列，应按端到端退化撤回，不能只凭局部计时保留。
+
+164. 2026-07-10 completion-bound 前移实现与后续三项语义复核
+
+本次先实现第 163 节的第一项，不同时改 dominance、join 或 midpoint。`GCNGBBStyleBidirectionalNgDssr` 的正反向扩展被拆成两步：先只建立已经完成 shift/add/normalize 的 `ExtensionFrontier`，直接用其 no-SRI frontier 和 endpoint min 做原有 completion-bound 检查；只有 survivor 才复制 visited/ng-memory、建立 dominanceSet/extensionSet 并创建完整 label。正反向 survivor 的 dominanceSet 与 extensionSet 也改为一次 job 扫描同时构造，仍分别保持 full-domain dominance key 和 half-domain extension 条件。SRI 口径未改变：真实 frontier 继续包含 SRI shift，completion bound 继续读取不含 SRI penalty 的 no-SRI frontier。
+
+两组 A/B 均使用修改前单独编译的 ng-DSSR 主类和修改后主类，其余当前 classpath、runner 配置完全相同。40-2 root-only 中，两侧均为 `obj=22582, bound=22490, exact calls=16`；16 次 exact 的每轮 addedColumns、DSSR rounds、accepted best reduced cost、forward/backward candidate/constructed/survivor 逐项一致。exact pricing 从 `9.737s` 降到 `6.665s`，下降 `31.5%`；总 solve 从 `72.139s` 降到 `59.131s`，下降 `18.0%`。W300/50-3 setupR50 root-only 中，两侧均为 `obj=1939, bound=1726.014329, exact calls=20`，20 次 exact 的上述轨迹字段也完全一致。exact 从 `251.685s` 降到 `207.330s`，下降 `17.6%`；总 solve 从 `330.902s` 降到 `281.146s`，下降 `15.0%`。W300 累计 forward state 从 `2.357s` 降到 `0.363s`，backward state 从 `8.477s` 降到 `0.725s`；forward 总扩展从 `25.618s` 降到 `18.930s`，backward 从 `137.505s` 降到 `111.611s`。join 基本不变，符合本次只减少 bound-pruned child 状态构造的预期。focused `javac` 和 `PaperDominanceGraphConsistencyTest(cases=200, insertions=16000)` 通过。
+
+第 2 项 dominance same-key 快路径针对的不是正确性错误，而是重复工作。当前 `insertOrDominate()` 即使命中完全相同 reachable key，仍创建 candidate list，并通过 `mergeGEnvelopes()` 复制当前 node 的 dominance envelope；label 被保留后，`addLabel()` 又更新 labelEnvelope、完整重建 dominanceEnvelope，外层随后无条件调用 `propagateAndTrim()`。如果新 label 没有改变 dominance envelope，这些复制、重建和 successor propagation 都没有效果。后续应先统计 exact-same-key hit、envelope unchanged 和真实 propagation，再只对同 key 命中增加快路径；不能把同 key 下的多个 label 合并删除，因为 join 和路径恢复仍需要真实 labels。
+
+第 3 项 group envelope 在 half-domain 下仍只能作为乐观 lower bound 过滤器，不能直接生成或替代真实 label pair。用户提出的四个 group/split 例子是成立的：同一 sequence 可能在 AB split 下取得真实最好成本，而 CD 的 group-envelope 最小值来自另一组 contributor，CD 恢复出的该 sequence 不是最好 timing。但用于过滤时只判断 `groupEnvelopeLB >= threshold`。group envelope 是组内所有 label frontier 的逐点最小值，因此其两侧拼接结果不会高于任何真实 label-pair；只要这个更乐观的下界都达不到阈值，AB、CD 等所有真实 pair 更不可能达到阈值，整组剪枝安全。反过来，group LB 低于阈值时不能只取 contributor 生成一列，必须回退原 label-level join，才能保留最好 split、批量负列和 DSSR 证据。compact window 不改变这个结论；half-domain 只会让不同 split 的 inferred timing/cost 不同，因此更要求 envelope 仅过滤、不替代。
+
+第 4 项 top-K worst threshold 不是“找到 K 条就停止”。当前候选堆最多保留 K 条列：堆未满时仍以 0 为过滤阈值，所有可能为负的 pair 都有机会进入；堆满后，以堆中当前最差的第 K 条 reduced cost 为动态阈值。若某个 pair 的合法 lower bound 已经不优于该阈值，它即使完整拼接也不可能进入最终 top-K，可以跳过；更好的新候选进入后，阈值会继续收紧。完整扫描仍要结束，才能保留 no-negative/best reduced-cost 证书。该方案第一版只能用于 inferred reduced cost 就是最终排序成本的 normal 路径；需要 evaluator 回刷的 dual-window、SRI 或 traced-envelope 路径不能直接用回刷前阈值剪枝。
+
+165. 2026-07-10 dominance same-key 修正判断与 BEST_UB 对照
+
+继续检查 `PaperDominanceGraph.insertOrDominate()` 后，需要修正第 162 至 164 节对 same-key 快路径收益的乐观估计。normal dominance 下，如果同 key 的现有 dominanceEnvelope 能完整覆盖且不高于新 label，新 label 会在插入前直接被拒绝；一个真正保留下来的同-key label通常必然扩展 envelope 定义域或在某段降低 envelope，因此后继传播并非普遍无效。partial dominance 下，新 label 被旧 envelope 裁剪后仍能保留，也意味着剩余区间没有被旧 envelope 覆盖，通常同样会改变 envelope。当前确定存在的冗余主要是 same-key 命中后仍建立单元素 candidate list、调用 `mergeGEnvelopes()` 复制 dominanceEnvelope，以及 `addLabel()` 从 labelEnvelope copy 后再合并 predecessorEnvelope；这部分可以做快路径，但预期收益应下调，必须先统计 same-key 次数和对应 copy/merge 时间，不能假设大量 propagation 可以跳过。
+
+group-envelope filter 建议分两步。第一步只做诊断：现有 traced envelope group 增加原始 label 列表，按 `(terminalJob, exact ngMemorySet)` 构造 group，统计每个可剪 group-pair 实际覆盖的 `forwardLabels * backwardLabels` 数量，但仍执行原标准 join。第二步才启用安全过滤：group envelope lower bound 达不到阈值时跳过整个 cross-product；能达到时完整回退到原 label-pair join。若第一层通过率仍高，可以增加 group-label 层：优先选 label 数较少的一侧，用一侧 group envelope 与另一侧每个真实 label 做 lower bound，再决定哪些子集进入 pair join。所有层都只做 lower bound，不从 envelope contributor 直接生成列。该层级策略保持 half-domain 下所有真实 split，并允许与后续 top-K threshold 叠加。
+
+BEST_UB 的名称不是 BPC incumbent upper bound，而是当前已找到最小 reduced-cost 列对 pricing 最优 reduced cost 的上界。当前代码中 `BEST_UB` 只把这个 best RC 用在 join 前的 group/pair lower-bound 剪枝，函数拼接完成后的 `shouldKeepJoinedReducedCost()` 仍使用 0；但被前置 lower bound 跳过的 pair 可能仍是负列，只是不会优于当前 best，因此 BEST_UB 仍会减少本轮返回列批次。`BEST_RECORD` 更激进，连已经完成函数拼接、为负但不刷新 best record 的候选也拒绝。
+
+为排除 30 秒 ALNS 时间截断导致初始列数量波动，本次关闭 ALNS 后对 W300/50-3 setupR50 做 ZERO/BEST_UB root-only A/B。两侧初始列均为 3，time-indexed root preprocessing 均为 `tempPool=27435, seedElementaryCols=200, bound=1726.014329`。ZERO 为 `solve=261.251s, exact=211.800s/8 calls`；BEST_UB 为 `solve=240.280s, exact=190.455s/9 calls`，总时间下降 `8.0%`，exact 下降 `10.1%`。ZERO 共返回 `3573` 列、扫描 `69.157m` pair、执行 `68.207m` funcEval、join `28.289s`；BEST_UB 返回 `2696` 列、扫描 `52.703m` pair、执行 `51.988m` funcEval、join `24.192s`，pair/funcEval 减少约 `23.8%`，join 时间减少 `14.5%`，但返回列减少 `24.5%` 并多触发 1 次 exact pricing。日志中的 `bestLbPruned=2.541m` 只统计显式 best-threshold 判断，group 级提前退出和有序列表 break 后未访问的 label-pair 不逐一计数，因此不能用该字段单独代表总剪枝量。
+
+本例说明 BEST_UB 有实际作用，但不适合仅凭一次结果改成默认：它通过牺牲批量负列换取 join 减负，当前 W300 净收益约 8%，其它实例可能因为新增 master/pricing 轮而退化。top-K worst threshold 应设计成独立的 `TOP_K` 口径，而不是修改 BEST_UB：候选不足 K 时等同 ZERO；满 K 后使用第 K 好 reduced cost。三者强度关系为 ZERO 阈值 0、TOP_K 阈值为当前最差保留列、BEST_UB 阈值为当前最好列。TOP_K 预期剪枝弱于 BEST_UB，但应保留与 ZERO 相同的最终 top-K 列集合，减少新增 pricing 轮的风险。
+
+进一步核对 dominance 包络语义后确认，每个 dominance node 同时维护三层函数：`labelEnvelope=f_u` 是该 exact reachable key 下全部现存 label frontier 的逐点最小值；`predecessorEnvelope=h_u` 是直接前驱 node 的 `dominanceEnvelope` 逐点最小值；`dominanceEnvelope=g_u=min(f_u,h_u)` 同时包含当前 node label 和所有前驱链传下来的支配信息。新 label 命中同 key 时，插入前直接使用该 node 的旧 `dominanceEnvelope` 检查，因此现有同-key labels 确实参与占优，而不是只看前驱。若没有同-key node，则合并 terminal superset candidate 的 `dominanceEnvelope`，其内部已经递归包含各自前驱。需要单独区分的是反向清理：normal dominance 只会拒绝被旧包络支配的新 label，不会用保留下来的新 label 反扫删除同 node 的旧 labels；新 label 只更新 `labelEnvelope/dominanceEnvelope` 并向 successors 传播。partial dominance 才会在 `addLabel()` 前调用 `trimLabelsBy(newFrontier)`，对同 node 旧 labels 做部分裁剪或删除。因此当前多 label 的效率问题来自 normal 模式缺少同-node 反向清理，而不是 dominanceEnvelope 漏掉当前 node labels。
+
+166. 2026-07-10 dominance same-key 增量更新与来源包络方案
+
+same-key 插入可以先做一组完全不改变 label 保留语义的快路径。命中同 key 后不再建立单元素 candidate list，也不再通过 `mergeGEnvelopes()` 复制当前 `dominanceEnvelope`，而是直接用 `sameNode.dominanceEnvelope` 做只读占优检查。新 label 保留时，当前前驱包络没有变化，因此有 `f'_u=min(f_u,F_new)`、`g'_u=min(g_u,F_new)`；可以分别对 `labelEnvelope` 和 `dominanceEnvelope` 做一次增量 `mergeMinimum(F_new)`，不再执行“copy 新 labelEnvelope，再与 predecessorEnvelope 全量 merge”的重建。该路径应先统计 same-key hit/reject/accept、两次 merge 时间和后继传播时间，确认它在 W300 热点中的占比。
+
+不希望逐个旧 label 再做反向函数扫描时，可以把 `labelEnvelope` 改成带来源的下包络：每个输出区间除几何函数外记录当前来源 label，并维护来源 label 的区间引用数或 contributor 集合。新 frontier 与现有包络仍只做一次 min-merge；merge 过程中记录被覆盖的旧来源。某个旧 label 的来源计数降为 0，说明其它同-key labels 的集体下包络已经在其整个定义域上不高于它，可以直接把它标成 dominated 并从 node 的 active labels 中移除，不需要再把新 frontier 与所有旧 frontier 逐对比较。这不是新增更强的 dominance 条件：如果该旧 label 此刻才到达，现有 `insertOrDominate()` 本来就会用同一集体包络拒绝它，因此该处理只是把现有规则改成与到达顺序无关。
+
+来源包络仍有两个效率口径需要实验确认。第一，被删除 label 可能对应不同真实 sequence；虽然它不再影响 pricing 最小值和证书，但可能原本能额外生成较差但仍为负的 elementary 列，或提供另一条 non-elementary DSSR 更新见证，因此可能减少 join/扩展，也可能增加 DSSR 或 master 轮次。第二，现有 `TracedJoinEnvelope` 面向一次性 join index，每次 merge 会重建 segment list，不能未经测量直接搬到高频 dominance 插入；更合适的是在 `PaperDominanceNode` 内做专用 source-aware min-merge，并只追踪本次被覆盖的 source。第一版只应作用于 normal/no-SRI paper graph，partial dominance 已有 `trimLabelsBy()`，不应同时叠加两套旧-label 裁剪。
+
+当前后继传播流程为：同-node 新 label 更新 `f_u/g_u` 后，`propagateAndTrim(u)` 从直接 successor 开始。每个 successor `v` 先由全部直接 predecessor 的 `g` 重建 `h_v`；若 `h_v` 完整支配 `f_v`，删除整个 node 并重连图；否则 normal 模式逐 label 删除被 `h_v` 完整支配的 label，partial 模式裁剪其被支配区间，必要时重建 `f_v`，最后计算 `g_v=min(f_v,h_v)` 并继续入队 successors。来源计数为 0 的同-node label 删除不会进一步改变 `f_u/g_u`，因为它本来已不贡献下包络，所以不需要额外触发第二次传播；传播仍只由新 frontier 对 `f_u/g_u` 的实际降低驱动。
+
+本次先只实现严格保持旧执行顺序的 same-key 快路径。命中同 key 时直接只读使用 `sameNode.dominanceEnvelope` 做占优判断，不再构造单元素 candidate list，也不再经 `mergeGEnvelopes()` 复制整条包络；`dominates()` 不修改包络，partial 路径也只裁剪新 label 自身，因此与旧“复制后只读”严格等价。新 label 保留后的 `addLabel()`、`labelEnvelope` merge、`dominanceEnvelope` 重建和 successor propagation 完全未改。没有采用 `g'_u=min(g_u,F_new)` 的直接增量更新：它数学上等价，但会改变当前带容差和 normalize 的 `mergeMinimum` 结合顺序，不符合本轮优先保证旧数值路径不变的要求。新增 same-key hit/reject/accept，以及诊断模式下 check/update/propagation 时间统计。focused `javac` 通过；`PaperDominanceGraphConsistencyTest` 对朴素全扫描、当前 paper graph 和旧 indexed graph 做 200 组、16,000 次随机插入，对拍结果一致。
+
+167. 2026-07-10 same-key 诊断与空传播优化
+
+使用 `wet040_001_2m`、no-ALNS、root-only、normal ng-DSSR、dualPairCoef0.08/top3 做诊断。12 次 exact pricing 的单轮 same-key 命中约 `978-2091` 次，其中接受约 `668-1195` 次；但 `sameKey check/update/prop` 通常合计只有约 `1-6ms`，最后 no-negative 轮为 `0.190/0.677/0.672ms`。相对该轮 exact `703.554ms` 和 completion-bound 约 `476.931ms`，same-key 包络操作已经不是主要瓶颈。每轮 `propagateAndTrim()` 调用约 `779-1274` 次，但 successor 实际访问经常只有 `0-254` 次，说明大量保留 label 所在 dominance node 没有 successors。
+
+据此只补一项严格等价的小优化：`changedNode.successors` 为空时直接返回，不再为每次空传播创建 `ArrayDeque + HashSet`；非空传播使用 node 上的本轮 queue mark 去重，替代临时 `HashSet`，保持原 FIFO 入队顺序和每 node 最多处理一次的语义。相同配置重跑后，单轮 `noSuccessor` 为 propagation calls 的约 `79%-100%`，12 次 exact 的 addedColumns 与 acceptedBestRc 序列逐项一致，最终 bound 均为 `22490`。新 run exact `5.846s`、旧 run `8.209s`，但两次串行运行受 JVM/JIT 与文件缓存影响，且局部 propagation 计时本身只有毫秒级，因此不把该总时间差归因于本修改。
+
+当前 dominance graph 内其它严格等价小优化收益已经很有限：每轮 no-same-key `envelopeMerges` 仅约 `84-131` 次，superset/subset 搜索通常低于 `1ms`，剩余 propagation 也只有毫秒级。直接增量更新 `dominanceEnvelope` 会改变 PWLF merge 结合顺序，不值得为这一级耗时承担数值路径风险；new-key 单候选延迟复制最多再省十几次 copy，同样不是主矛盾。若后续还要显著减少 dominance 成本，需要回到 source-aware labelEnvelope 删除不再贡献下包络的旧 label，但该方案会改变批量列和 DSSR 更新路径，按前述决定暂不实现。
+
+168. 2026-07-10 same-key 与传播 queue mark 的逻辑复核
+
+本次不只比较运行时间，而是重新核对两项修改的语义。same-key 路径原来对单个 `sameNode.dominanceEnvelope` 做 copy 后只读检查；normal 路径的 `dominates()` 不修改任一输入，partial 路径也只通过 `label.frontier.updateDominatedIntervalsDetailed(envelope)` 修改新 label 自身，不修改作为右参数的 node envelope。因此直接只读复用原包络不存在别名写入，后续 `addLabel()`、包络重建与传播顺序仍与旧实现一致。
+
+传播去重方面，旧 `HashSet<PaperDominanceNode>` 使用对象 identity，语义是同一次 `propagateAndTrim()` 中“只要曾经入队，就不能再次入队”；node 上的 `propagationQueueMark` 完全复现该语义，并保持 `LinkedHashSet successors` 的 FIFO 加入顺序。空 successor 早退也等价于旧实现建立空队列后立即退出。删除的 node 保留旧 mark 不影响后续，因为同 key 重新建立的是新 node 对象；当前 Java pricing 主线为串行调用，静态 `nextMark()` 不引入新的并发口径。
+
+额外检查了包含图并非等层 DAG 的情形，例如 `S-A-C` 与 `S-B-D-C`。这里一次入队仍然成立，原因是传播量只有 lower-envelope 的 `min`，插入造成的变化单调变小；长路径晚到达时新增的上游包络已经经短路径传到共同后继，中间 node 自身的 labelEnvelope 原本就在旧 predecessor envelope 中。节点被删除时还会把其有效前驱直接重连到后继，仍不会丢失更小包络。为验证实现，`PaperDominanceGraphConsistencyTest` 现在同时覆盖 forward/backward、逐次比较所有历史 label 的 `isDominated` 和 active count，并加入菱形共享后继及 2,000 组非平衡路径随机对拍。总计 32,000 次普通随机插入、2 个菱形 case 和 2,000 个非平衡 case 均与朴素 fixed-point、indexed 实现一致。
+
+169. 2026-07-10 同 dominance node 旧 label 反向清理的可行范围
+
+重新沿 ng-DSSR 主线检查后，需要收紧第 166 节“来源计数归零即可删除整个同-node label”的结论。当前 Paper dominance node 的 key 是 `Label.reachableSet`，在 ng-DSSR 中实际传入的是 `dominanceSet`。它把三类原因统一表现为“不可继续访问”：ng-memory 已禁止、当前 frontier 下 full-domain 时间不可达，以及全局 zero-dual/required-outsourcing 排除。因此两个 label 位于同一个 dominance node，只能说明它们的 `dominanceSet` 相同，不保证真实 `ngMemorySet`、`visitedSet`、`extensionSet` 或 SRI count 状态相同。final join 又明确用 forward/backward 的真实 `ngMemorySet` 交集判断兼容性。因此只按整个 node 的 `labelEnvelope` 删除零贡献 label，可能删除一条函数值较高、但具有不同 join 兼容性的路径。
+
+从当前 dominance 规则自身看，whole-node collective envelope 已经用于拒绝后到的新 label；把旧 label 反向清理只是让该规则与到达顺序无关，并不是引入新的数学支配条件。但它会更频繁地使用“dominanceSet 足以代表后续状态”这一现有假设，而且会改变 join 候选、elementary 列批次和 non-elementary DSSR witness。考虑到当前主要目标是降低 join，而不是重写 dominance 语义，第一版不应直接在 graph 内物理删除或标记这些 label。
+
+更稳的实现顺序是先做 join-only contributor filter。正反向扩展全部完成后，在每个 terminal job 内按 `(reachableSet, ngMemorySet)` 精确分组；第一版只允许 normal、no-SRI 路径。每组对实际 join extension function 建立带来源的 pointwise minimum envelope，保留至少贡献一个区间的 label，其余 label 只从本轮 join 输入中排除，原 dominance graph、扩展队列、father trace 和 DSSR 记录均不修改。相同 terminal、reachableSet、ngMemorySet 下，转移成本和 join 兼容性一致；若旧 label 在所有时间都不低于组内其它 label，则与任意兼容的另一侧函数相加后仍不可能给出更小 join 值。因此该过滤保持本轮 relaxed minimum 和 no-negative certificate，但可能减少较差但仍为负的 elementary 列以及不同 non-elementary witness，端到端轮数仍需 A/B。
+
+现有 `TracedJoinEnvelope` 已经具备“分段函数 + 来源 label”的合并能力，但它当前服务于整组 envelope join，且每次 merge 会重建 segment list。第一步应只增加诊断：每个 dominance node 的 label 数、不同 ngMemory group 数、每组 contributor 数、过滤前后潜在 pair 数和 envelope build 时间。只有确认 `(reachableSet,ngMemorySet)` 组内仍存在大量非贡献 label，才保留 join-only filter；若多数 label 的 ngMemory 都不同，则该方向不能解决当前 join 数量问题。验证通过后，才考虑把同样的 exact-state subgroup envelope 前移到插入阶段，以减少出队扩展；SRI 模式必须把完整 SRI state 加入 subgroup key，不能直接复用 no-SRI 规则。
+
+170. 2026-07-10 修正：whole-node 反向清理与现有 dominance 语义
+
+继续讨论后，第 169 节把真实 `ngMemorySet` 不同直接解释成“whole-node 反向清理可能影响最优性”仍然过于保守。当前 normal Paper graph 在新 label 到达时，本来就用同 node 的集体 `dominanceEnvelope` 检查并拒绝它；该检查不额外区分真实 ngMemory。若某个早到旧 label 后来完全退出 node 的 `labelEnvelope` 下包络，那么把它放到当前时刻重新插入，现有规则必然会拒绝它。反向清理只是让既有 dominance 规则与到达顺序无关，不是新增一条更强的支配条件。若这种清理会丢最优解，那么当前“同样的 label 只是晚到就被拒绝”的逻辑已经具有同一问题。因此在接受当前 dominanceSet 语义正确的前提下，normal/no-SRI 下 whole-node 零贡献 label 清理不应影响全局最优性。
+
+单向扩展也不存在“被删 label 能扩展、包络来源 label 不能扩展”的问题。same node 表示当前算法认定两者具有相同后续 dominance state；对旧 label frontier `F`，若其它同-node labels 的集体包络 `G` 在 `F` 整个定义域上满足 `G(t)<=F(t)`，那么对任一下一任务的相同 shift/add 转移算子 `E_j`，都有 `E_j(G)<=E_j(F)`。集体包络可在不同时间由不同 label 提供，但旧 label 某个扩展的最优出发时间 `t` 上必然存在一个具体 contributor，其成本不高于旧 label，且相同 terminal 下使用同一 setup/process/penalty 转移。half-domain `extensionSet` 只是该函数可扩展性的缓存，不会推翻这个逐点替代关系。
+
+真实 ngMemory 不同主要说明不能保证“同一个 backward label、同一个 split 下由某一个固定 dominator 一对一替换”；但 label dominance 保证的是完整 continuation 的最优值，而不是固定 split 的候选集合完全相同。替代路径可能通过另一 contributor 或另一 split 出现。因此清理会改变 join 返回的负列批次、elementary 列多样性和 non-elementary DSSR witness，却不应改变 relaxed 最小 reduced cost 和最终 no-negative certificate。这里的风险是计算效率和 DSSR/master 轮数，而不是 no-SRI 下新增最优性风险。
+
+据此可以直接做 whole-node source-aware `labelEnvelope` 实验，但应限定为 normal/no-SRI，并用开关隔离。每个 envelope segment 记录来源 label；新 frontier merge 后重新统计 contributor，来源完全消失的旧 label 标记 `isDominated` 并从 node active labels 移除，但对象本身不能释放，因为已有 child 的 father chain 仍可能引用它。为避免端点或 tie 的来源选择造成误删，第一版应保守保留仅在边界有贡献的 source，或在删除前确认“由其它 source 构成的 envelope”完整覆盖并不高于旧 frontier。随后按现有路径重建 `dominanceEnvelope` 并传播。验证不能要求每轮返回列完全一致，而应检查每轮 relaxed best RC、无负列证书、最终 root/节点 bound、完整最优目标和 DSSR 轮数变化。
+
+第 169 节提出的 join-only exact-ng-memory filter 仍可作为风险更低的对照版本，但它不再是 correctness 必需条件，而是用于区分“只减少 join”和“同时减少扩展 + join”的实验基线。实现前最有价值的统计也应改成 whole-node label 数、最终 contributor 数、被清理 label 是否已出队、扩展候选减少量、join pair 减少量，以及 DSSR witness/rounds 变化。
+
+171. 2026-07-10 dominance envelope 传播的全量刷新与增量化
+
+当前 Paper graph 的 successor 传播仍是全量刷新。node `u` 的 `f_u=labelEnvelope`、`h_u=predecessorEnvelope`、`g_u=min(f_u,h_u)` 更新后，`propagateAndTrim(u)` 对每个直接 successor `v` 调用 `recomputePredecessorEnvelope()`，从 `v.predecessors` 的全部 `g_p` 重新 copy/merge 得到 `h_v`。随后如果 predecessor envelope 删除或裁剪了 `v` 的 label，`removeLabelsDominatedByPredecessors()` 会重建 `f_v` 并在方法内部重算一次 `g_v`；返回外层后又无条件调用一次 `recomputeDominanceEnvelope()`。因此当前至少存在一次明确的重复 `g_v` 重算。
+
+数学上该传播和 completion-bound multi-delta 同属单调 lower-envelope fixed point，但这里更简单：一次 graph 构建期间只插入 label，`f/h/g` 只会逐点变小。简单插入中只有当前 predecessor `u` 的 `g_u` 变化，所以 successor 可直接做 `h_v <- min(h_v,g_u_new)`，不必重新扫描所有 predecessors；更进一步可以用现有 `mergeMinimum(..., reportChanged)` 或 change-hull 只在确实下降时入队。注意传播对象应是更新后的 `g_u` 或其下降 delta，不应只传原始新 label frontier，因为 `g_u` 同时包含当前 node 其它 labels 和上游 predecessor envelope。
+
+删点重连不要求 envelope 回升。一个 node 只有在 `h_u<=f_u` 时才整 node 删除，此时 `g_u=h_u`；删除后把其 predecessors 直接连到 successors，重连前驱的集体 envelope 正好就是原 `h_u/g_u`，因此不会丢失原贡献，也不需要因为移除旧 predecessor 而把 successor 的 `h` 向上重算。被 `h_v` 删除的完整 label 或 partial 区间同样已经由 `h_v` 以不更高值覆盖：虽然精确的本地 `f_v` 需要从剩余 active labels 重建，但用于继续传播的 `g_v=min(f_v,h_v)` 不会因为这些删除而变大。source-aware whole-node 清理中，删除的是本来就不贡献 `f_v` 的 label，则连 `f_v` 都不变化。
+
+可按风险从低到高分三步优化。第一步只去掉 `removeLabelsDominatedByPredecessors()` 内外重复的 `g_v` 重算，仍完整重建 `f_v`，数值路径最容易对拍。第二步让 `recomputeDominanceEnvelope()` 或增量 merge 返回 `g` 是否实际下降，只有下降才传播 successors；这会直接跳过“删除 label 但 `g` 已由 `h` 覆盖”的无效传播。第三步再把 `h_v` 改为由变化 predecessor 增量 merge，并使用可重复入队的 monotone worklist 或 multi-delta；不能继续沿用“本轮曾入队即永久禁止再入队”的 mark 语义，否则真正独立的多个 predecessor delta 在非等层 DAG 中可能需要第二次处理。当前 40-2 诊断里 dominance propagation 只有毫秒级，第一、二步收益可能较小；若 source-aware 清理显著增加 node 内删除，或 W300 上重新统计显示 predecessor merge/rebuild 成为热点，再实施第三步更合理。
+
+172. 2026-07-10 修正：新 label frontier 就是唯一传播增量
+
+进一步化简后，第 171 节“传播更新后的 `g_u`”仍保守了一层。same-key 插入时 `h_u` 不变，故 `f'_u=min(f_u,F_new)`、`g'_u=min(f'_u,h_u)=min(g_u,F_new)`；旧 `g_u` 已经在此前传播完成，本轮唯一新增信息就是 `F_new` 中低于旧 `g_u` 的区间。新建 dominance node 时，插入前其 terminal superset predecessors 已直接连接到后继，它们的集体 envelope 已存在于后继 `h` 中；新 node 插入并替换拓扑边后，`g_new=min(h_new,F_new)` 相对旧 predecessor contribution 新增的也只有 `F_new`。因此传播可以从新 label frontier 本身开始，每经过一个 successor，只保留真正改小该 successor `g` 的局部 delta。
+
+当前 `PaperDominanceGraph` 的主要方法成本可分为四段。插入检查中，same-key 已取消单候选列表和 envelope copy；new-key 仍需 `findTerminalSupersetNodes()` 搜索 terminal predecessor，并由 `mergeGEnvelopes()` 建一次候选集体包络用于占优检查和新 node 初始 `h`，这部分语义必要且日志占比很低。拓扑插入中，`findImmediateSubsetNodes()` 搜索直接 successors，`removeRedundantSubsetCandidates()` 排序并做包含去重，然后断开 predecessor-successor 旧边并插入新 node；这是维护 Hasse 图所需，只有候选很多时二次去重才可能成为问题。
+
+真正冗余集中在 `propagateAndTrim()` 和 `PaperDominanceNode` 包络维护。当前每访问 successor 都执行 `recomputePredecessorEnvelope()`，从全部 predecessors copy/merge 重建 `h`；随后整 node dominance 检查、逐 label dominance/partial trim；发生删除时 `removeLabelsDominatedByPredecessors()` 重建 `f` 并在内部重算 `g`，外层又重算一次 `g`；最后无论 `g` 是否变化都把全部 successors 入队。`addLabel()` 也先 merge `f`，再 copy 完整 `f` 与 `h` 重建 `g`，没有使用 `g'=min(g,F_new)`。因此当前 graph 虽然查询拓扑较轻，但 envelope 传播仍是全量刷新实现。
+
+更直接的增量流程应为：新 label 先按旧 `g_u` 做 dominance；保留后将 `F_new` merge 进本地 source-aware `f_u`，同时做 `delta_u = F_new` 真正改善旧 `g_u` 的区间并更新 `g_u`。对 successor `v`，分别执行 `h_v<-min(h_v,delta_u)` 和 `g_v<-min(g_v,delta_u)`；若 `h_v` 没变化则该分支结束，若 `g_v` 没变化则可以做本地 label 清理但不再向下传播，只有 `g_v` 的真实下降区间继续入队。由于 predecessor 导致的 label 删除或 partial trim 都发生在已被 `h_v` 覆盖的区间，删除不会让 `g_v` 回升；whole-node source-aware 删除零贡献 label 时连 `f_v` 都不变化。删 graph node 时 `g=h`，重连只恢复原有 predecessor contribution，也不产生新的数值 delta。
+
+第一版不必立即复制 completion-bound 的完整 sparse multi-delta。可以先传播整个 `F_new` 并用 `mergeMinimum(..., reportChanged=true)` 决定是否继续，已经能去掉全部 predecessor 重扫、重复 `g` 重建和无变化 successor 传播；确认收益后再把 change hull 升级为多离散区间。与此同时，source-aware envelope 可以进一步把“逐 label 扫描是否被集体 `h` 占优”改成来源消失判断，但这一层需要保留 endpoint/tie witness，并与 no-SRI whole-node 清理一起实现。验收应对拍每次插入返回、所有 active label 状态、每轮 relaxed best RC、DSSR rounds、返回列、最终 bound 和最优目标。
+
+171. 2026-07-10 新 label 对 successor dominance nodes 的传播流程
+
+Paper dominance graph 中，新 label 不会直接逐条扫描所有后代 label。`insertOrDominate()` 先检查当前已有 eligible envelope；保留下来后，若命中同一个 reachable key，就通过 `addLabel()` 把新 frontier 合入当前 node 的 `labelEnvelope`，再重建 `dominanceEnvelope=min(labelEnvelope,predecessorEnvelope)`。若是新 reachable key，则先在包含关系图中建立新 node，只连接 immediate predecessor/successor，并移除被新 node 替代的跨层边；新 node 的 predecessor envelope 直接复用插入前 dominance 检查所合并的 candidate envelope。
+
+随后 `propagateAndTrim(changedNode)` 从当前 node 的直接 successors 开始 FIFO 向下传播。每个 successor 先重新计算 `predecessorEnvelope=min(所有直接前驱的 dominanceEnvelope)`，因此真正用于占优的不是“这一条新 label 的 frontier”，而是包含新 label 影响在内的全部前驱综合下包络。若该 predecessor envelope 覆盖 successor 的 `labelEnvelope` 整个定义域并不高于它，则 successor 整个 dominance node 被删除，其中全部 labels 标记 dominated；删除后原前驱会与仍兼容的原 successors 直接重连，并继续传播。
+
+若综合前驱包络不能一次覆盖并占优整个 successor node，则进入逐 label 处理。normal 模式对 successor 中每条 label 检查完整函数占优，满足时标记并移除；graph-partial 模式则把被占优区间从 label frontier 裁掉，只有裁空才删除 label。若 node 的 labels 最终为空，删除 node 并重连图；否则在 labels 有变化时重建 `labelEnvelope`，再重建 `dominanceEnvelope`，然后将变化继续传给下一层 successors。same-node 旧 labels 是例外：normal 模式当前只把新 label 加入包络，不反向清理当前 node 的旧 labels；partial 模式会在 add 前调用 `trimLabelsBy(newFrontier)`。第 170 节讨论的 source-aware 清理，目标正是补 normal 模式这一处到达顺序不对称，而不改变现有 successor 传播规则。
+
+173. 2026-07-10 完整 frontier 增量、局部 delta 与 labelEnvelope 的职责
+
+这里需要区分两级优化。第一级是直接传播整个新 label frontier `F_new`：successor 不再扫描全部 predecessors 重建 `h`，而只执行 `h<-min(h,F_new)`；`g` 也只执行 `g<-min(g,F_new)`，并用 changed flag 截断没有数值变化的传播。这一步仍会扫描 `F_new` 与目标包络的完整 segment list，但已经去掉当前实现中的全 predecessor 重扫、`f/h` copy、重复 `g` 重建和无变化后继遍历，是预期收益最大的部分。第二级才是局部 delta：只保留 `F_new` 真正低于旧 `g` 的若干变化区间，后续 merge 只扫描这些区间。它与完整 frontier 增量得到相同结果，只在 frontier 很长而真实改善区间很窄时进一步降低 segment 扫描；若变化覆盖大部分定义域，构造 sparse delta 的成本可能抵消收益，因此不应和第一级混为一谈。
+
+`labelEnvelope=f_u` 是 exact-key node 内现存 labels 的逐点最小值。它不是独立于 labels 的必要数学状态：只保留 labels 时，随时可以全量重建 `f_u`。但它是重要缓存和语义分层，一方面把当前 node 的本地贡献 `f_u` 与 predecessors 贡献 `h_u` 分开，使 `g_u=min(f_u,h_u)`、整 node 被 predecessor 占优检查和同-key collective dominance 可以直接完成；另一方面为后续 source-aware 清理提供“哪些 labels 仍贡献本地下包络”的依据。如果删除 `labelEnvelope`，每次需要本地包络或判断全部本地 labels 是否被 `h` 支配时都要重新扫描 node 内所有 labels。因此当前应保留 `labelEnvelope`，优化目标是避免无意义地反复重建它，而不是删除它。
+
+174. 2026-07-10 predecessor 删除 label 后可保留滞后本地包络
+
+进一步逐点推导表明，predecessor envelope 更新后删除或裁剪本 node labels 时，不必为了维持综合 dominance 值立即重建本地 `labelEnvelope`。设删除前 `f=min(f_R,f_D)`，其中 `f_R` 来自保留 labels，`f_D` 来自被删 labels；删除条件保证更新后的 `h'<=f_D` 且覆盖对应定义域。因此 `min(f,h')=min(f_R,f_D,h')=min(f_R,h')`，即继续保留被删 label 的旧本地贡献也不会改变 `g=min(f,h')`。partial trim 同样逐区间成立：被裁区间已由 `h'` 覆盖，未裁区间的 label 函数不变。当前 graph 的 envelope 更新只会单调变小；被整体删除的 graph node 满足 `g=h`，重连 predecessors 也不会使 successor 的 `h` 回升，因此该旧贡献以后仍被覆盖。
+
+这种 lazy 做法保持 relaxed best value、后续 dominance 和传播正确性，但会改变 `labelEnvelope` 的表面语义：它不再严格等于 active labels 的包络，而是包含已被 predecessor 永久覆盖的历史本地贡献。进一步修正后，使用它检查整 node 删除也不是更保守。设 `f_stale=min(f_active,f_deleted)`，删除条件和后续单调性保证当前及以后始终有 `h<=f_deleted`，所以 `h<=f_stale` 当且仅当 `h<=f_active`；历史贡献不会阻止也不会错误触发 node 删除。真正不再可靠的只有 source-aware contributor 统计，因为 stale segments 的来源可能已经不是 active label。因此有两条实现路线：若只追求当前 graph 的数值传播效率，可以保留 stale `labelEnvelope`、直接维护精确 `g` 并跳过 label 删除后的 rebuild；若要实现来源包络和零贡献 label 清理，则仍需精确维护 active-label envelope，或者单独维护带来源的有效本地包络。该优化依赖“predecessor contribution 不会回升”的当前插入式生命周期，不能无条件推广到允许撤销约束或删除非支配 predecessor 的动态图。
+
+175. 2026-07-10 completion-bound multi-delta 的直接执行差异
+
+multi-delta 加速 fixed-point 的直接原因可以用一次局部更新说明。若某个 job 的 envelope 已经把完整 `[0,T]` 传播给全部后继，随后仅 `[a,b]` 上被新 candidate 改小，旧流程仍会把更新后的整条 `[0,T]` 函数再次经过每条后继弧执行 `shiftX/add/normalize/mergeMinimum`；其中 `[0,a)` 和 `(b,T]` 只是重复传播旧信息。multi-delta 保存上次已传播快照，识别只有 `[a,b]` 严格改小，构造区间外为 BigM 的 delta，然后只让该新增信息经过后继弧。BigM 只是让原 PWLF 运算把未变化区间视为“本轮无候选”，真正减少的是每次局部更新后沿所有邻接弧重复构造和合并整条旧 envelope。等待闭包可能让 `[a,b]` 的影响沿正向或反向继续扩散，因此 delta 构造仍要按方向 normalize；它不是简单地只复制一条水平线。
+
+completion-bound 的 multi-delta 有效并不只是因为 BigM 段是简单水平线，而是因为 fixed-point 传播中同一个 job envelope 会多次更新，旧实现每次把已经传播过的完整 PWLF 再对所有邻接弧做 `shift/add/normalize/merge`。新实现逐点比较当前函数与上次已传播快照，只取严格改善的多个区间；区间外填 BigM 是为了继续复用现有 PWLF 的 shift/add/单侧等待闭包语义，而不是主要加速来源。真正收益来自避免旧区间反复生成候选和沿全部后继传播。dominance graph 也可复用同一原理，但当前每次插入只有一个 `F_new` 信号，第一步应先用完整 `F_new` 增量消除 predecessor 全量重建；只有实测真实改善区间明显窄于 frontier 定义域时，sparse multi-delta 才可能在此基础上继续获益。
+
+176. 2026-07-10 partial trim 后 surviving label 不保证仍贡献本地包络
+
+partial 模式下，“label 没有被 predecessor `h` 完全占优”不能推出它仍出现在 active-label 下包络中。两区间反例为：`L1=5`，`L2` 在左区间为 `4`、右区间较高；初始 `h` 较高时，`L1` 在右区间贡献本地包络，`L2` 在左区间贡献。后来 `h` 只在右区间降到 `4`，于是 `L1` 的右区间被 trim，但它在左区间不受 `h` 支配，仍然 active；然而左区间又始终由 `L2=4` 压住，因此 `L1` 已不贡献任何本地或综合包络。若 stale `labelEnvelope` 的右区间仍记录 `L1`，单看 `L1.isDominated=false` 会把它误认为 contributor。
+
+这不推翻 lazy envelope 的数值正确性：右区间的 stale `L1` 已由 `h` 覆盖，综合 `g` 仍准确。它只说明 partial source-aware 不能只按 label 级 dominated 标记判断来源。可行做法是统计综合 `g=min(f_stale,h)` 的来源：stale segment 被 `h` 压住时直接记为 predecessor-covered；只有未被 `h` 覆盖且仍落在 label 当前未裁 frontier 上的 segment 才计入该 active label。另一种做法是 trim 后重建精确 active-label envelope。normal 模式整条 label 删除时，`isDominated` 已足够识别历史来源；partial 模式必须额外做区间级有效性判断。

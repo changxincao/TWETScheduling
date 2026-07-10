@@ -460,6 +460,11 @@ public class PC {
 	}
 
 	private boolean isStrongBranchingPhase2PricingEngine(LP lp, PricingEngine engine) {
+		if (!config.enableTimeIndexedPreHeuristicInStrongBranchingPhase2
+				&& engine instanceof TimeIndexedGraphPricingEngine
+				&& "TimeIndexedPreHeuristicPricing".equals(engine.getName())) {
+			return false;
+		}
 		if (engine.getName().toLowerCase().contains("heuristic")) {
 			return true;
 		}

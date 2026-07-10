@@ -204,6 +204,9 @@ public final class OutsourcingModelComparisonTest {
 				config.ngDssrInitialNgSetMode);
 		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.outsourcingCompare.ngSetSize",
 				config.ngDssrInitialNgSetSize);
+		config.ngDssrInitialNgPairCoefficient = Double.parseDouble(System.getProperty(
+				"twet.bpc.outsourcingCompare.ngPairCoefficient",
+				Double.toString(config.ngDssrInitialNgPairCoefficient)));
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.outsourcingCompare.ngUpdateLimit", config.ngDssrNonElementaryRouteUpdateLimit);
 		config.bidirectionalCompletionBoundRelaxation = System.getProperty(

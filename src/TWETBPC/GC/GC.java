@@ -318,13 +318,7 @@ public class GC {
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
-		Node node = lp.getNode();
-		if (node == null || node.depth != 0) {
-			return false;
-		}
-		// 非根节点可能有 forbidden arc，root 加 cut 后也可能产生 arc-level dual。
-		// 这两类情形都不能保证 reduced arc cost 仍满足原始三角不等式，只保留 b_j 静态窗。
-		return lp.getActiveCutIds().isEmpty();
+		return PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	/**

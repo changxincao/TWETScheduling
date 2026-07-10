@@ -10,10 +10,10 @@ import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 
 /**
- * ng-relaxation + DSSR 主体上的 partial-list dominance 实验入口。
+ * ng-relaxation + DSSR 涓讳綋涓婄殑 partial-list dominance 瀹為獙鍏ュ彛銆?
  *
- * 2026-06-12: 不复制 ng-DSSR labeling 主流程，只把 dominance store 切换为
- * {@link PartialListDominanceStore}，用于观察 bucket partial-list 在 ng-set 语义下的表现。
+ * 2026-06-12: 涓嶅鍒?ng-DSSR labeling 涓绘祦绋嬶紝鍙妸 dominance store 鍒囨崲涓?
+ * {@link PartialListDominanceStore}锛岀敤浜庤瀵?bucket partial-list 鍦?ng-set 璇箟涓嬬殑琛ㄧ幇銆?
  */
 public class GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine implements PricingEngine {
 

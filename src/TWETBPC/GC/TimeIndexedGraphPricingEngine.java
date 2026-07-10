@@ -230,10 +230,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		return !Utility.isBigMValue(penalty);
 	}
 	private static boolean canUseDualProfitableWindow(LP lp) {
-		if (lp == null || lp.getNode() == null || lp.getNode().depth != 0) {
-			return false;
-		}
-		return lp.getActiveCutIds().isEmpty();
+		return PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	private static double hWindowStart(Data data, int job, double gamma) {
@@ -339,6 +336,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private int duplicateJobCandidates;
 		private int nextCandidateId;
 		private double bestPseudoReducedCost;
+		private int dualWindowRecheckCount;
+		private int dualWindowRecheckAccepted;
+		private int dualWindowRecheckFiltered;
+		private int dualWindowRecheckOutsideWindow;
+		private int dualWindowRecheckOutsideCompletions;
+		private double dualWindowRecheckMaxRcImprovement;
+		private String dualWindowBestCandidateDiagnostic;
 		private boolean forwardPassCompleted;
 		private final long fingerprint;
 
@@ -363,6 +367,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
 			this.bestPseudoReducedCost = INF;
+			this.dualWindowRecheckCount = 0;
+			this.dualWindowRecheckAccepted = 0;
+			this.dualWindowRecheckFiltered = 0;
+			this.dualWindowRecheckOutsideWindow = 0;
+			this.dualWindowRecheckOutsideCompletions = 0;
+			this.dualWindowRecheckMaxRcImprovement = 0.0;
+			this.dualWindowBestCandidateDiagnostic = "";
 			this.forwardPassCompleted = false;
 			this.fingerprint = graphDualFingerprint(data, config, lp, horizon);
 			precomputeStaticPricingData();
@@ -378,6 +389,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			lastForwardDistanceCache = new LastForwardDistanceCache(fingerprint, horizon, n, width, dist);
 			ArrayList<Candidate> candidates = new ArrayList<Candidate>(candidateBySignature.values());
 			Collections.sort(candidates, bestCandidateFirstComparator());
+			observeDualWindowBestCandidate(candidates.isEmpty() ? null : candidates.get(0));
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 			for (int i = 0; i < candidates.size() && columns.size() < maxColumns; i++) {
 				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i).column);
@@ -400,15 +412,54 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (!graphWindow.dualWindow) {
 				return column;
 			}
+			double graphReducedCost = reducedCost(column.getSequence(), column.getCost());
 			double trueCost = evaluator.evaluate(column.getSequence());
+			if (config.timeIndexedDualWindowRecheckDiagnostics) {
+				observeDualWindowRecheckDelta(graphReducedCost, reducedCost(column.getSequence(), trueCost));
+			}
 			if (Utility.isBigMValue(trueCost)) {
+				dualWindowRecheckFiltered++;
 				return null;
 			}
 			double trueReducedCost = reducedCost(column.getSequence(), trueCost);
+			if (!config.timeIndexedDualWindowRecheckDiagnostics) {
+				observeDualWindowRecheckDelta(graphReducedCost, trueReducedCost);
+			}
 			if (Utility.compareGe(trueReducedCost, -RC_TOLERANCE)) {
+				dualWindowRecheckFiltered++;
 				return null;
 			}
+			dualWindowRecheckAccepted++;
 			return new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+		}
+
+		private void observeDualWindowRecheckDiagnostics(List<Integer> sequence, double[] completions,
+				double graphReducedCost, double trueReducedCost) {
+			observeDualWindowRecheckDelta(graphReducedCost, trueReducedCost);
+			boolean outside = false;
+			int outsideCount = 0;
+			int limit = Math.min(sequence.size(), completions.length);
+			for (int i = 0; i < limit; i++) {
+				int job = sequence.get(i).intValue();
+				double completion = completions[i];
+				if (Utility.compareLt(completion, graphWindow.start[job] - 1e-7)
+						|| Utility.compareGt(completion, graphWindow.end[job] + 1e-7)) {
+					outside = true;
+					outsideCount++;
+				}
+			}
+			if (outside) {
+				dualWindowRecheckOutsideWindow++;
+				dualWindowRecheckOutsideCompletions += outsideCount;
+			}
+		}
+
+		private void observeDualWindowRecheckDelta(double graphReducedCost, double trueReducedCost) {
+			dualWindowRecheckCount++;
+			double improvement = graphReducedCost - trueReducedCost;
+			if (improvement > dualWindowRecheckMaxRcImprovement) {
+				dualWindowRecheckMaxRcImprovement = improvement;
+			}
 		}
 
 		boolean certifiesNoNegativeInternalColumn() {
@@ -442,7 +493,46 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					+ ", arcScans=" + processArcScans
 					+ ", timeArcSkips=" + timeIndexedArcSkips
 					+ ", negativeStates=" + negativeStateCandidates
-					+ ", repeatedJobCandidates=" + duplicateJobCandidates;
+					+ ", repeatedJobCandidates=" + duplicateJobCandidates
+					+ dualWindowRecheckDiagnosticMessage();
+		}
+
+		private String dualWindowRecheckDiagnosticMessage() {
+			if (!graphWindow.dualWindow || !config.timeIndexedDualWindowRecheckDiagnostics) {
+				return "";
+			}
+			return ", dualWindowRecheck count/accepted/filtered/outside/outsideCompletions/maxRcImprove="
+					+ dualWindowRecheckCount
+					+ "/" + dualWindowRecheckAccepted
+					+ "/" + dualWindowRecheckFiltered
+					+ "/" + dualWindowRecheckOutsideWindow
+					+ "/" + dualWindowRecheckOutsideCompletions
+					+ "/" + dualWindowRecheckMaxRcImprovement
+					+ dualWindowBestCandidateDiagnostic;
+		}
+
+		private void observeDualWindowBestCandidate(Candidate candidate) {
+			if (!graphWindow.dualWindow || !config.timeIndexedDualWindowRecheckDiagnostics) {
+				return;
+			}
+			if (candidate == null) {
+				dualWindowBestCandidateDiagnostic = ", bestGraphCandidate=none";
+				return;
+			}
+			TWETColumn column = candidate.column;
+			double graphCost = column.getCost();
+			double graphReducedCost = reducedCost(column.getSequence(), graphCost);
+			double trueCost = evaluator.evaluate(column.getSequence());
+			double trueReducedCost = reducedCost(column.getSequence(), trueCost);
+			dualWindowBestCandidateDiagnostic = ", bestGraphCandidate={graphRc=" + graphReducedCost
+					+ ", trueRc=" + trueReducedCost
+					+ ", graphCost=" + graphCost
+					+ ", trueCost=" + trueCost
+					+ ", costDiff=" + (graphCost - trueCost)
+					+ ", repeated=" + hasRepeatedJob(column.getSequence())
+					+ ", len=" + column.size()
+					+ ", seq=" + column.getSequence()
+					+ "}";
 		}
 
 		private void runForwardPass() {

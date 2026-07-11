@@ -1987,3 +1987,13 @@ partial 重建后的 minimum 刷新也做了严格等价优化。旧代码调用
 source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label)` 和 `EXTERNAL`；external delta 覆盖本地 source 后，merge outcome 可直接识别归零 label。新 key 第一次出现时仍需把直接 predecessors 的 `g` 临时取小，但可直接把该临时 external envelope 作为新 node 的初始 `g`，随后 merge 本地 label，无需复制出第二个包络。node 的本地 source 归零时，其 `g` 已只含 external geometry，等于原定义的 h；删除 node 并重连 predecessor/successor 不需要提高任何包络。插入中间 Hasse node 时，successor 原有 external 值已经存在，只需传播新 node 相对 predecessors 真正降低的 local delta。
 
 因此当前正确性流程与原讨论已经对齐，但还不能称为完全没有低效：传播路径目前每个 node 仍执行一次无返回 delta 的 h merge 和一次正式 g merge，前者仍会扫描旧 h、扫描 delta 并构造新 segment list。删除持久 h 后可把传播包络 merge 数直接从两次减为一次，同时每个 graph node 少保存一条 PWLF。该等价性依赖当前“包络只单调下降、不撤销 predecessor 贡献”的设计；若未来支持删除仍有本地 source 的 predecessor、回滚 label 或令包络上升，则必须重新引入 h 或从所有直接 predecessors 重建。active SRI 当前不使用该新图，不在本结论范围内。
+
+196. 2026-07-11 no-h 实现与 A/B 结果
+
+本轮按第 195 节结论实现 no-h 路径，并保留 `twet.bpc.incrementalSourcedGraphKeepPredecessorEnvelope=true` 作为旧 h 路径的严格 A/B 开关。默认新 key 将直接 predecessors 的综合包络临时取小后，把该 external envelope 直接作为初始 g，再 merge 本地 label；不再复制并持久保存第二条 h。传播时只执行 `g<-min(g,delta)`，不再先执行 `h<-min(h,delta)`。用于向 successors 传播真正下降区间的 sparse delta 仍然保留；删除 h 不等于传播完整 g，后者会放大工作量。
+
+正确性首先在 no-h/keep-h 与 SegmentPool 关/开四种组合下运行同一套 forward/backward 随机、拓扑、partial eager/lazy 和端点 minimum 对拍。每组均完成 96,000 次随机插入，`paperPointQueryMismatches=1`、`paperRetainedDominatedStateObservations=46502`、最终 active `164/143` 完全一致。说明删除 h 不改变插入返回、综合包络、source 归零、partial 裁剪或池化生命周期。
+
+真实 A/B 使用 `wet040_001_2m`，ALNS 关闭、启发式 pricing 开启、`maxNodes=1`、normal ng-DSSR、dualPair 0.08、top1 和 bestUB join。no-h/keep-h 均得到 `bound=22490`、`pool=22420`、`pricing=192`、exact 18 次、`valid=true`，列和搜索轨迹一致。累计 graph 统计中，两边 propagated nodes 均为 18,803；no-h 的 merge 数为 247,835，keep-h 为 266,638，正好每个 propagated node 少一次 h merge。propagation 计时由 `50.368ms` 降为 `35.922ms`，约下降 28.7%。但 insert+propagate 总计分别为 `666.824/658.506ms`，受 JVM/GC 计时波动影响没有稳定总优势；exact 为 `6.114/5.981s`，总求解为 `61.914/61.412s`，同样不能解释为 no-h 变慢或变快。结论是 no-h 明确减少传播计算和每 node 一条包络内存，但 dominance 本身已不是整体瓶颈，单独删除 h 不会显著缩短完整求解。
+
+另一次试图关闭启发式 pricing 以隔离 exact 的实验从极弱 seed 进入长尾，超过预期 120 秒且没有形成可比较 root，已终止，不纳入性能结论。该现象来自实验配置改变列生成轨迹，不是 no-h 语义异常。

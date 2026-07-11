@@ -32,6 +32,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
 	private static final boolean TIMING_DIAGNOSTIC = Boolean.getBoolean(
 			"twet.bpc.incrementalSourcedGraphTiming");
+	/** 仅用于 A/B：默认直接维护 g；设为 true 可恢复旧的持久化 h + g 双包络路径。 */
+	private static final boolean KEEP_PREDECESSOR_ENVELOPE = Boolean.getBoolean(
+			"twet.bpc.incrementalSourcedGraphKeepPredecessorEnvelope");
 	private static final ArrayList<IncrementalSourcedDominanceGraph> DIAGNOSTIC_GRAPHS =
 			new ArrayList<IncrementalSourcedDominanceGraph>();
 
@@ -129,7 +132,8 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		String timing = TIMING_DIAGNOSTIC
 				? ", insert/propagateMs=" + formatMillis(insertNanos) + "/" + formatMillis(propagationNanos)
 				: "";
-		return "incrementalSourcedGraph partial=" + partial + ", context=" + diagnosticContext
+		return "incrementalSourcedGraph partial=" + partial + ", keepH=" + KEEP_PREDECESSOR_ENVELOPE
+				+ ", context=" + diagnosticContext
 				+ ", labels kept/rejected/removed=" + labelsKept + "/" + labelsRejected + "/" + labelsRemoved
 				+ ", nodes created/deleted/active=" + nodesCreated + "/" + nodesDeleted + "/" + activeNodes
 				+ ", activeLabel avg/max=" + format(avgLabels) + "/" + maxLabels
@@ -196,7 +200,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			labelsRejected++;
 			return true;
 		}
-		SourcedEnvelope envelope = predecessorEnvelope.copyAsExternal();
+		// g=min(h,f)。默认直接把临时 predecessor 下包络作为初始 g；旧 A/B 路径才保留独立 h。
+		SourcedEnvelope envelope = KEEP_PREDECESSOR_ENVELOPE
+				? predecessorEnvelope.copyAsExternal() : predecessorEnvelope;
 		MergeOutcome outcome = envelope.mergeLocal(label.frontier, label);
 		if (!outcome.candidateContributes) {
 			label.isDominated = true;
@@ -205,7 +211,8 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		}
 		queuePartialLocalSources(outcome);
 
-		IncrementalNode node = new IncrementalNode(label.reachableSet, predecessorEnvelope, envelope);
+		IncrementalNode node = new IncrementalNode(label.reachableSet,
+				KEEP_PREDECESSOR_ENVELOPE ? predecessorEnvelope : null, envelope);
 		node.activeLocalLabels = 1;
 		nodes.add(node);
 		nodesCreated++;
@@ -251,7 +258,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 			propagatedNodes++;
 			deltaInputSegments += item.delta.segmentCount();
-			node.predecessorEnvelope.mergeExternalNoDelta(item.delta);
+			if (node.predecessorEnvelope != null) {
+				node.predecessorEnvelope.mergeExternalNoDelta(item.delta);
+			}
 			MergeOutcome outcome = node.envelope.mergeExternal(item.delta);
 			removeDisplacedLocalSources(node, outcome);
 			queuePartialLocalSources(outcome);
@@ -659,6 +668,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		final int reachableCardinality;
 		final LinkedHashSet<IncrementalNode> predecessors = new LinkedHashSet<IncrementalNode>();
 		final LinkedHashSet<IncrementalNode> successors = new LinkedHashSet<IncrementalNode>();
+		/** 旧 A/B 路径的持久化 h；默认 no-h 路径为 null。 */
 		final SourcedEnvelope predecessorEnvelope;
 		final SourcedEnvelope envelope;
 		int activeLocalLabels;

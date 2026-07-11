@@ -162,7 +162,7 @@ public class TWETBPCConfig {
 	/**
 	 * 2026-07-10: normal/no-SRI ng-DSSR 是否使用来源感知的增量 dominance graph。
 	 * 关闭时完整回退到 PaperDominanceGraph；partial dominance 和 active SRI 始终保留原 backend。
-	 * 新 backend 保留旧图的 label 存活语义，只增量维护 h/g 和传播稀疏下降区间。
+	 * 新 backend 增量维护 h/g、传播稀疏下降区间，并按包络 source 归零删除已被集体支配的本地 label。
 	 */
 	public boolean useIncrementalSourcedDominanceGraph = true;
 	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/dualPair/reducedCostPair。 */

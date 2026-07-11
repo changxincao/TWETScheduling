@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 
@@ -22,10 +23,10 @@ import TWETBPC.Util.PackedBitSet;
  * 包络 h 和综合包络 g，并把 g 的每段来源区分为本地 label 或外部 predecessor。新 label 只传播真正降低
  * 包络的离散区间；没有数值变化的分支立即停止。
  * <p>
- * 2026-07-10: 同一个 dominance key 下的 label 仍可能有不同真实 ng-memory，final join 兼容性不同。
- * 因此来源只用于一次 merge 内判断新 label 是否贡献，不按“离开综合包络”反向删除同 node 旧 label；
- * 旧 label 仍只在 predecessor h 完整占优它时删除。这一边界与旧 Paper graph 严格一致。partial dominance
- * 会原地裁剪 label frontier，仍使用原 backend。
+ * 2026-07-11: 每个综合包络段记录本地 label source；某个 source 的最后一个有效段消失时，
+ * 说明该 label 已在完整定义域上被其余同-key labels 或 predecessor 集体覆盖，可直接标记 dominated。
+ * 清理成本与包络 segment 数成正比，不再扫描 node 的全部历史 labels。partial dominance 会原地裁剪
+ * label frontier，仍使用原 backend；本实现只服务 normal/no-SRI pricing。
  */
 final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
@@ -148,6 +149,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			labelsRejected++;
 			return true;
 		}
+		removeDisplacedLocalSources(node, outcome);
 		node.labels.add(label);
 		node.activeLocalLabels++;
 		labelsKept++;
@@ -223,11 +225,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 			propagatedNodes++;
 			deltaInputSegments += item.delta.segmentCount();
-			MergeOutcome predecessorOutcome = node.predecessorEnvelope.mergeExternal(item.delta);
+			node.predecessorEnvelope.mergeExternal(item.delta);
 			MergeOutcome outcome = node.envelope.mergeExternal(item.delta);
-			if (!predecessorOutcome.delta.isEmpty()) {
-				removeLabelsDominatedByPredecessors(node);
-			}
+			removeDisplacedLocalSources(node, outcome);
 
 			ArrayList<IncrementalNode> successors;
 			if (node.activeLocalLabels == 0) {
@@ -263,9 +263,17 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		queue.add(new PropagationItem(node, delta));
 	}
 
-	private void removeLabelsDominatedByPredecessors(IncrementalNode node) {
-		for (Label label : node.labels) {
-			if (label.isDominated || !node.predecessorEnvelope.coversAndDominates(label.frontier, direction)) {
+	/**
+	 * source-aware merge 已经知道哪些本地 label 的最后一个有效包络段消失。
+	 * 这些 label 此时在完整定义域上都由其余同-key label 或 predecessor 集体覆盖，
+	 * 无需再扫描 node 的全部历史 label 并逐条做 PWLF dominance。
+	 */
+	private static void removeDisplacedLocalSources(IncrementalNode node, MergeOutcome outcome) {
+		if (outcome.displacedLocalSources == null) {
+			return;
+		}
+		for (Label label : outcome.displacedLocalSources) {
+			if (label.isDominated) {
 				continue;
 			}
 			label.isDominated = true;
@@ -316,6 +324,21 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 		}
 		return best;
+	}
+
+	/** 测试入口：source-aware 清理后，每条 active 本地 label 都必须仍贡献至少一个包络段。 */
+	boolean debugActiveLabelsHaveEnvelopeSource() {
+		for (IncrementalNode node : nodes) {
+			if (!node.active) {
+				continue;
+			}
+			for (Label label : node.labels) {
+				if (!label.isDominated && !node.envelope.hasLocalSource(label)) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	private ArrayList<IncrementalNode> findTerminalSupersetNodes(PackedBitSet target) {
@@ -526,6 +549,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
 	private static final class MergeOutcome {
 		final SparseDelta delta = new SparseDelta();
+		ArrayList<Label> displacedLocalSources;
 		boolean candidateContributes;
 		boolean sourceChanged;
 	}
@@ -535,6 +559,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	 */
 	private static final class SourcedEnvelope {
 		private ArrayList<SourcedSegment> segments = new ArrayList<SourcedSegment>();
+		private IdentityHashMap<Label, Boolean> localSources;
 
 		MergeOutcome mergeLocal(PiecewiseLinearFunction function, Label source) {
 			return merge(new PwlfCursor(function), source, false);
@@ -634,12 +659,37 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 				return outcome;
 			}
 			if (!outcome.delta.isEmpty() || outcome.sourceChanged || segments.isEmpty()) {
-				segments = merged;
+				installMergedSegments(merged, outcome);
 				if (outcome.delta.isEmpty() && outcome.sourceChanged) {
 					sourceOnlyChanges++;
 				}
 			}
 			return outcome;
+		}
+
+		/** merge 已遍历过 segment；这里按 segment source 做 O(segment) 的归零识别。 */
+		private void installMergedSegments(ArrayList<SourcedSegment> merged, MergeOutcome outcome) {
+			IdentityHashMap<Label, Boolean> mergedSources = null;
+			for (SourcedSegment segment : merged) {
+				if (segment.source != null) {
+					if (mergedSources == null) {
+						mergedSources = new IdentityHashMap<Label, Boolean>();
+					}
+					mergedSources.put(segment.source, Boolean.TRUE);
+				}
+			}
+			if (localSources != null) {
+				for (Label oldSource : localSources.keySet()) {
+					if (mergedSources == null || !mergedSources.containsKey(oldSource)) {
+						if (outcome.displacedLocalSources == null) {
+							outcome.displacedLocalSources = new ArrayList<Label>();
+						}
+						outcome.displacedLocalSources.add(oldSource);
+					}
+				}
+			}
+			segments = merged;
+			localSources = mergedSources;
 		}
 
 		private static void appendLower(ArrayList<SourcedSegment> target, double start, double end,
@@ -837,6 +887,10 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
 		int segmentCount() {
 			return segments.size();
+		}
+
+		boolean hasLocalSource(Label label) {
+			return localSources != null && localSources.containsKey(label);
 		}
 	}
 

@@ -13,7 +13,8 @@ import TWETBPC.Util.PackedBitSet;
  * 来源感知增量 dominance graph 的随机、拓扑和性能对拍。
  * <p>
  * 接收结果与旧 Paper graph 对拍；数值包络和点值查询直接与全部历史 label 的 brute-force 下包络对拍。
- * 旧图若少删 label，只在存在严格超集 reachable-set 且函数完整支配的独立证据时接受该差异。
+ * 新图若比旧 Paper 图少保留 label，必须由其余同-key/superset labels 的集体下包络完整支配该 label；
+ * 同时逐次验证每条 active label 仍至少贡献一个本地 source segment。
  */
 public final class IncrementalSourcedDominanceGraphConsistencyTest {
 
@@ -32,8 +33,8 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 	public static void main(String[] args) {
 		Configure.SegmentPool = false;
 		Utility.resetCurUpperBound(Utility.big_M);
-		verifyLabelRetentionSemantics(Direction.FORWARD);
-		verifyLabelRetentionSemantics(Direction.BACKWARD);
+		verifySourceAwareCollectiveDominance(Direction.FORWARD);
+		verifySourceAwareCollectiveDominance(Direction.BACKWARD);
 		verifyDiamond(Direction.FORWARD);
 		verifyDiamond(Direction.BACKWARD);
 		verifySparseDiamondPropagation(Direction.FORWARD);
@@ -48,7 +49,7 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 				+ ", " + performance);
 	}
 
-	private static void verifyLabelRetentionSemantics(Direction direction) {
+	private static void verifySourceAwareCollectiveDominance(Direction direction) {
 		PaperDominanceGraph paper = new PaperDominanceGraph(direction);
 		IncrementalSourcedDominanceGraph incremental = new IncrementalSourcedDominanceGraph(direction);
 		Label paperOld = constantLabel(direction, 100.0, 1, 2);
@@ -59,8 +60,8 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		assertSame(false, incremental.insertOrDominate(incrementalOld), "incremental first label");
 		assertSame(false, paper.insertOrDominate(paperNew), "paper improving label");
 		assertSame(false, incremental.insertOrDominate(incrementalNew), "incremental improving label");
-		if (incrementalOld.isDominated || paperOld.isDominated) {
-			throw new AssertionError("same-key old label must remain join-active: direction=" + direction);
+		if (!incrementalOld.isDominated || paperOld.isDominated) {
+			throw new AssertionError("source-aware same-key cleanup mismatch: direction=" + direction);
 		}
 
 		PaperDominanceGraph tiePaper = new PaperDominanceGraph(direction);
@@ -145,6 +146,7 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 					}
 					assertLabelStates(direction, history, paperLabels, incrementalLabels, globalCaseId, labelId);
 					assertPointEnvelopes(direction, history, paper, incremental, globalCaseId, labelId);
+					assertSourceInvariant(incremental, direction, globalCaseId, labelId);
 					insertions++;
 				}
 			}
@@ -172,6 +174,15 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 			}
 			assertLabelStates(direction, history, paperLabels, incrementalLabels, -1, i);
 			assertPointEnvelopes(direction, history, paper, incremental, -1, i);
+			assertSourceInvariant(incremental, direction, -1, i);
+		}
+	}
+
+	private static void assertSourceInvariant(IncrementalSourcedDominanceGraph incremental, Direction direction,
+			int caseId, int labelId) {
+		if (!incremental.debugActiveLabelsHaveEnvelopeSource()) {
+			throw new AssertionError("active label lost envelope source: direction=" + direction + ", case="
+					+ caseId + ", label=" + labelId);
 		}
 	}
 
@@ -180,7 +191,7 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		for (int i = 0; i < paperLabels.size(); i++) {
 			if (paperLabels.get(i).isDominated != incrementalLabels.get(i).isDominated) {
 				if (!paperLabels.get(i).isDominated && incrementalLabels.get(i).isDominated
-						&& hasStrictSupersetDominator(history, i, direction)) {
+						&& hasCollectiveDominator(history, i, direction)) {
 					paperRetainedDominatedStateObservations++;
 					continue;
 				}
@@ -192,26 +203,31 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		}
 	}
 
-	private static boolean hasStrictSupersetDominator(ArrayList<LabelSpec> history, int targetIndex,
+	private static boolean hasCollectiveDominator(ArrayList<LabelSpec> history, int targetIndex,
 			Direction direction) {
 		LabelSpec target = history.get(targetIndex);
+		PiecewiseLinearFunction envelope = null;
 		for (int i = 0; i < history.size(); i++) {
 			if (i == targetIndex) {
 				continue;
 			}
 			LabelSpec candidate = history.get(i);
-			if (candidate.reachableSet.equals(target.reachableSet)
-					|| !candidate.reachableSet.isSupersetOf(target.reachableSet)) {
+			if (!candidate.reachableSet.isSupersetOf(target.reachableSet)) {
 				continue;
 			}
-			boolean covers = direction == Direction.FORWARD
-					? !Utility.compareGt(candidate.frontier.head.start, target.frontier.head.start)
-					: !Utility.compareLt(candidate.frontier.tail.end, target.frontier.tail.end);
-			if (covers && candidate.frontier.dominates(target.frontier)) {
-				return true;
+			if (envelope == null) {
+				envelope = candidate.frontier.copy();
+			} else {
+				envelope.mergeMinimum(candidate.frontier, direction);
 			}
 		}
-		return false;
+		if (envelope == null || envelope.head == null) {
+			return false;
+		}
+		boolean covers = direction == Direction.FORWARD
+				? !Utility.compareGt(envelope.head.start, target.frontier.head.start)
+				: !Utility.compareLt(envelope.tail.end, target.frontier.tail.end);
+		return covers && envelope.dominates(target.frontier);
 	}
 
 	private static void assertPointEnvelopes(Direction direction, ArrayList<LabelSpec> history,

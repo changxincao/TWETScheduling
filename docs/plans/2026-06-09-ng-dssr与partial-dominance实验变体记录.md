@@ -1841,3 +1841,11 @@ Hasse 拓扑维护是另一类低频成本。每个 terminal job 的 dominance s
 正确性测试从“必须保留旧 Paper active 状态”改为直接验证集体包络支配：96,000 次随机插入中，新图相对旧 Paper 多清理 46,502 个可由其余 eligible labels 集体支配的历史状态；每次插入后数值包络继续与 brute-force 一致，且每条 active label 都仍贡献至少一个 source segment。性能 smoke 的最终 active labels 为 Paper/new `164/143`。40-2 同配置 root A/B 均得到 `bound=22490, valid=true`：旧 Paper 为 `root=55.921s, exact=42.387s, exact calls=15`，source-aware 新图为 `root=18.487s, exact=5.251s, exact calls=18`。最后一轮 no-negative certificate 中，active label/node 平均/最大由 `58.978/466` 降至 `7.831/30`，join pairs 由约 `5.79m` 降至 `0.20m`。列池和 exact 轮数因更强的集体 dominance 改变，但最终 root bound 一致，最终候选仍统一经过 sequence evaluator 和完整 dual 回刷。
 
 Hasse 拓扑本轮不改。当前同-key 由 hash map 直接命中，只有首次出现的新 reachable key 才沿包含 DAG 搜索 immediate supersets/subsets；遍历有 cardinality 和 bitset 包含剪枝，并在命中第一个 subset 后停止向下。可选的进一步优化是按 cardinality 建 node bucket，或用在线 maximal-subset 维护替代候选排序，但前者可能把窄 DAG 遍历变成宽 bucket bitset 扫描，后者仍有 pairwise 包含检查。现阶段 source-aware 清理已经把 active label 和 join 输入大幅压缩，Hasse 没有表现为新的主瓶颈，因此不为它增加额外索引状态。
+
+182. 2026-07-11 source-aware 提速来源与 Hasse 可选优化
+
+40-2 的大幅提速不是单纯省掉 `removeLabelsDominatedByPredecessors()` 扫描本身，而是 source 归零让 same-key 集体 dominance 真正删除旧 labels，形成后续乘数效应。最后一轮中 forward extension candidates 从 `485,545` 降至 `55,618`，backward 从 `150,045` 降至 `22,831`；被删除 label 不再扩展，因而进一步少生成子 labels、少触发 dominance merge，最终 join pairs 从 `5,793,255` 降至 `200,154`。新图 exact calls 反而从 15 增至 18、最终 pool 从 24,587 变为 25,460，说明它不是通过少做 pricing 或少加列取巧，而是每轮 labeling/join 显著变轻；两边 root bound 均为 22490。
+
+Hasse 的 cardinality bucket 方案是为每个 reachable-set 大小维护 node 列表。插入大小为 k 的新 key 时，只在相关 cardinality bucket 中做 bitset superset/subset 判断，再保留包含关系下最接近新 key 的 antichain，避免从 roots 沿 DAG 遍历无关分支。它在 Hasse 图很宽、包含边剪枝差时可能有效，但若 bucket 很宽，会把当前窄路径遍历变成对大量同 cardinality nodes 的 bitset 扫描，并增加 node 删除/重建时的索引维护。
+
+在线 maximal-subset 方案只替换当前 `candidates -> cardinality sort -> pairwise 去冗余`：候选 c 到达时，若已有 kept node 是 c 的 superset，则直接丢弃 c；否则删除所有被 c 包含的 kept nodes，再加入 c。这样不需要排序，并可提前压缩候选列表，但最坏仍为 pairwise bitset checks，收益只来自候选到达顺序较好和中间列表更短。当前 Hasse 搜索已经利用拓扑在首次命中 subset 后停止向下，source-aware 后每个 store 的 active graph 更小，因此上述两种方案都不是当前优先项。

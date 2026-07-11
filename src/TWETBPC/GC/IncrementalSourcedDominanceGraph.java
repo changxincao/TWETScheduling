@@ -445,12 +445,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	private ArrayList<IncrementalNode> deleteNode(IncrementalNode node) {
 		node.active = false;
 		nodesDeleted++;
-		for (Label label : node.labels) {
-			if (!label.isDominated) {
-				label.isDominated = true;
-				labelsRemoved++;
-			}
-		}
+		// activeLocalLabels 为 0 时，source-aware merge 已逐个标记全部本地 label。
+		// 删除节点时不再扫描历史列表，只释放 dead node 对这些 label 的引用。
+		node.labels = null;
 		node.activeLocalLabels = 0;
 		nodeByReachableSet.remove(node.reachableKey);
 		roots.remove(node);
@@ -517,7 +514,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	private static final class IncrementalNode {
 		final PackedBitSet reachableKey;
 		final int reachableCardinality;
-		final ArrayList<Label> labels = new ArrayList<Label>();
+		ArrayList<Label> labels = new ArrayList<Label>();
 		final LinkedHashSet<IncrementalNode> predecessors = new LinkedHashSet<IncrementalNode>();
 		final LinkedHashSet<IncrementalNode> successors = new LinkedHashSet<IncrementalNode>();
 		final SourcedEnvelope predecessorEnvelope;

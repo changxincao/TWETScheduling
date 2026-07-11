@@ -1865,3 +1865,9 @@ normal/no-SRI 当前流程已与最终讨论方案对齐：label 的 `reachableS
 source-aware normal 已覆盖 partial 的 whole-label 删除能力：每条 active label 必须至少贡献一个综合包络 segment，最后一个 source segment 消失时立即删除。因此它不会像旧 normal 那样长期保留完全不贡献下包络的同-key label。但这不等于 partial 已完全无用。一个保留 label 可能只在很窄区间贡献，原始 frontier 的其余区间已经由 predecessor 或其它同-key labels 支配；source-aware normal 只记录哪些 segment 仍由它贡献，不修改该 label 自己的 frontier。该 label 出队扩展时仍对完整 frontier 做 shift/add/normalize，join 也仍携带完整函数。partial dominance 的额外能力正是把被支配区间从 label frontier 原地裁掉，只保留未被支配子域，从而减少函数 segment、扩展和后续子 label。
 
 因此当前判断为：source-aware normal 使 partial 的主要优势从“删除整条零贡献 label”缩小为“裁剪仍有局部贡献 label 的被支配区间”，两者差距应明显缩小，但不能仅据 active label 都有 source 就断言 partial 没有额外收益。另一个现实区别是 active SRI 目前只接在 list-partial backend；如果需要 SRI，partial 仍是现有正式入口。normal 中新 label 每次插入仍会做当前 `g` 的支配检查，已保留 label 后续每次 envelope merge 也会重新经历 source 集合更新；它不是保留后便永久不再判断，只是不再逐 label 扫描。
+
+185. 2026-07-11 删除 dead dominance node 的最后一处历史 label 扫描
+
+继续沿生产路径复查后，确认 predecessor propagation、same-key merge 和 source 归零清理都已不再遍历 `node.labels`，但 `deleteNode()` 仍残留一段历史防御扫描：`activeLocalLabels` 已经降为 0 后，又遍历整份历史 label 列表逐个设置 dominated。该扫描没有新增语义，因为 source-aware merge 在每个本地 source 最后一个包络段消失时已经当场设置 `isDominated`、更新 `labelsRemoved` 并递减 `activeLocalLabels`；`deleteNode()` 只会在该计数为 0 时调用。
+
+现已移除这段重复扫描，并在 dead node 删除时释放其历史 label 列表引用。正式 dominance 插入、传播和节点删除路径因此不再全扫某 node 的历史 labels。仍保留两类必要遍历：min-merge 会扫描实际 envelope segments/source 以构造下降区间和来源差；join 前会 compact 独立的 terminal active-label lists，清掉其中懒保留的 dominated 引用。`collectActiveLabels()` 和 source invariant 检查仍可扫描 active node 的 label 列表，但它们只用于一致性测试/诊断，不在 ng-DSSR 正式定价主线调用。96,000 次增量图随机/定向一致性测试和 32,000 次旧 Paper 图测试均通过。

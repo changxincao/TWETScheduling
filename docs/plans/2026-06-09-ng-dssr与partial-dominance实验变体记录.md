@@ -1827,3 +1827,9 @@ same-key 新 label 可把“先 `dominates()`、再 merge”合成一次 source-
 三条路径最终都汇合到 `finalizeGeneratedColumns()`：恢复出的 basic sequence 用 `TWETColumnEvaluator` 计算全域真实成本，再用同一份完整 pricing dual（包含 active SRI cut dual）重算 reduced cost，只有真实负列进入 Master。Subset-row generator 也在 `separate()` 入口检查支持模式，normal 和 graph-partial 即使误开 cut 配置也不会实际添加 SRI cut，不存在 master 带 cut 而 pricing 漏算 cut dual 的组合。
 
 验证方面，重新编译并运行 `IncrementalSourcedDominanceGraphConsistencyTest`，96,000 次随机插入及定向菱形、删除重连用例通过，新图 active labels 与 brute-force 一致；20-2 normal root 实际日志确认 exact engine 为 `GCNGBBStyleNgDssrPricing` 且统计标签为 `incrementalSourcedGraph`。当前 SRI smoke 仍为 list-partial、添加 40 条 cuts、`valid=true`。未发现新的正确性问题。剩余效率点主要是：predecessor envelope 真正下降时仍需逐条扫描该 node 的全部历史 labels；`collectActiveLabels()` 会扫描历史 nodes/labels 并跳过 inactive 项；新 reachable key 的 Hasse 拓扑维护仍包含候选排序和包含去重。这些都属于真实但次级成本，现有 W300 日志中 dominance insert/propagate 已明显低于扩展和 join，不建议在没有新热点证据时继续增加索引或复杂状态。
+
+180. 2026-07-11 predecessor label 扫描与 Hasse 拓扑成本口径修正
+
+第 179 节把三项都称为“次级成本”不够准确。若看完整 exact pricing，dominance 时间通常低于扩展和 join；但若只看 dominance graph 内部，`removeLabelsDominatedByPredecessors()` 的全 node label 扫描是当前最主要的剩余低效点。传播到某 node 后，代码先把 sparse delta 分别 merge 到 `predecessorEnvelope=h` 和综合 `envelope=g`；只要 `h` 有真实下降，就遍历 `node.labels`，对每条尚未 dominated 的 label 做一次完整 `h.coversAndDominates(label.frontier)`。`node.labels` 当前不压缩，历史 dominated label 也留在列表里，只靠布尔标记快速跳过。新图已经消除了全 predecessor 重扫和完整 `g` 重建，但尚未实现最初讨论的“依据来源包络直接识别并删除全部失效 label”。来源消失清理的第一版曾因 W300 bound 分歧撤回；该分歧后来定位为最终 sequence 成本未回刷，不能继续当作来源清理理论错误的证据，但当前生产实现仍保持安全的逐 label 扫描语义，尚未重新实现和验证无扫描版本。
+
+Hasse 拓扑维护是另一类低频成本。每个 terminal job 的 dominance store 按 reachable-set key 建包含关系 DAG；只有 `nodeByReachableSet` 没有当前 key 时，才搜索最深的已有 superset 作为直接 predecessors，再从其下方搜索应成为直接 successors 的 subset nodes。候选按 cardinality 从大到小排序，并删除已经被更近 superset 覆盖的候选，随后断开被新 node 替代的跨层边并重连。same-key label 插入不执行这些搜索和排序。W300 第一轮约 78,086 个 kept labels 只创建 886 个 graph nodes，因此它通常比逐 label predecessor 清理低频；但仍应在需要时单独计时，而不能仅凭频率断言绝对耗时很小。

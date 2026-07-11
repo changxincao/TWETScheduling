@@ -340,7 +340,8 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	/** 用仍由该 label 贡献的多个离散区间重建 frontier，区间外置 BigM 后恢复方向闭包。 */
 	private void trimLabelToSourceIntervals(Label label, ArrayList<SourcedSegment> retained) {
 		PiecewiseLinearFunction old = label.frontier;
-		int before = segmentCount(old);
+		// 2026-07-11: segment 数只用于性能诊断；正式求解不为统计额外遍历裁剪前后的 PWLF。
+		int before = TIMING_DIAGNOSTIC ? segmentCount(old) : 0;
 		double start = old.head.start;
 		double end = old.tail.end;
 		PiecewiseLinearFunction trimmed = new PiecewiseLinearFunction(old.domainStart, old.domainEnd);
@@ -366,8 +367,10 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		label.refreshMinReducedCost();
 		partialLabelsTrimmed++;
 		localPartialLabelsTrimmed++;
-		partialSegmentsBefore += before;
-		partialSegmentsAfter += segmentCount(trimmed);
+		if (TIMING_DIAGNOSTIC) {
+			partialSegmentsBefore += before;
+			partialSegmentsAfter += segmentCount(trimmed);
+		}
 	}
 
 	private static int segmentCount(PiecewiseLinearFunction function) {

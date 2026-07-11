@@ -1931,3 +1931,5 @@ partial 的当前重建过程是：按该 label 在新综合包络中仍贡献�
 label 同时存在于三类容器。被接受后，它进入 graph node 的 `labels` 历史列表、forward/backward priority queue 和按 terminal job 保存的 active list。后续被 source-aware dominance 完全覆盖时，只设置 `isDominated=true` 并减少 active 计数；不会从 priority queue 或 node 历史列表中间删除。priority queue poll 时会跳过 dominated label，因此它不再扩展；join 前 active list 会 compact，dominated label 不参与 join。`node.labels` 当前不会逐条删除，只有整 node 删除时置空；正式 dominance 逻辑不扫描它，主要服务测试和诊断，因此属于引用内存冗余而非 CPU 热点。
 
 当前队列顺序仍是时间优先：forward 按最早完成时间升序，backward 按最晚完成时间降序，并以 reachable cardinality 和 reduced cost 作后续比较。partial 可能在 label 已入堆后修改其 frontier/minimum，但完整 exact round 会耗尽队列，不依赖队首键形成提前证书，所以堆序陈旧只改变处理顺序和超时前进度，不改变完整轮次结果。已经出队扩展过的 parent 后来被裁剪或删除时，已生成 children 不回收；这些 children 仍是合法但可能冗余的状态，在线 dominance 只能避免后续新工作，不能回溯撤销已完成扩展。
+
+本轮先处理一项确定冗余：partial 裁剪前后 segment 数的两次 PWLF 遍历改为只在 `twet.bpc.incrementalSourcedGraphTiming=true` 时执行；正式求解仍保留 O(1) 的裁剪次数统计，不再为 summary 扫描每条被裁函数。same-key 只读预检查继续保留，后续若实现延迟分配的单遍 merge 才重新评估；其预期空间已小于 partial 重建频率优化。已经扩展的 children 不撤销只会保留合法冗余状态，当前也不是优先处理项。

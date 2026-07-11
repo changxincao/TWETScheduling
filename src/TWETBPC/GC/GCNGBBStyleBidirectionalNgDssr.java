@@ -2052,7 +2052,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 2026-07-11: normal 和 no-SRI partial 统一使用增量 source-aware 图；partial 只增加
 		// source 区间裁剪，不恢复旧 graph/list backend 的逐 label 扫描。
 		// SRI state 尚未进入 source envelope 的可比条件，active cuts 下暂留 SRI-aware list store。
-		return !sriPricingEnabled;
+		return !sriPricingEnabled && config.useIncrementalSourcedDominanceGraph;
 	}
 
 	private boolean useIncrementalSourcedPartialDominance() {

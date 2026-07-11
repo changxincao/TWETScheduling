@@ -183,7 +183,8 @@ public class GCBBFullDomainComparisonTest {
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
 		} else if (config.useGCNGBBStyleNgDssrPricing) {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
-					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit + "-srcDom";
+					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit
+					+ (config.useIncrementalSourcedDominanceGraph ? "-srcDom" : "-paperDom");
 		}
 		if (config.enableNgDssrHistoryWarmStart) {
 			mode += "-ngHistW" + config.ngDssrHistoryWarmStartWindowSize;
@@ -440,6 +441,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssr",
 				Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
+		config.useIncrementalSourcedDominanceGraph = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.incrementalSourcedDominance",
+				Boolean.toString(config.useIncrementalSourcedDominanceGraph)));
 		config.useGCNGBBStyleNgDssrPartialDominancePricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrPartialDominance",
 				Boolean.toString(config.useGCNGBBStyleNgDssrPartialDominancePricing)));

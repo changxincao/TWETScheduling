@@ -499,3 +499,13 @@ join-envelope 不同。它在每个 `(terminal job, true ngMemorySet)` group 内
 一致性测试新增正反向的交叉分段菱形传播、节点删除后同 key 重建，并把随机覆盖从 24,000 次扩大到 96,000 次。每次插入都检查新图数值包络与全部历史 label 的 brute-force 下包络；没有发现误拒绝、误保留或漏传播。扩大样本后发现旧 `PaperDominanceGraph` 有 1 次 point query 漏剪，以及 5 次重复状态观察中旧图保留了已被严格超集 reachable-set 且完整函数支配的 label；新图对应值与 brute-force 一致。这说明此前“所有 active 状态逐项完全等同旧图”的表述过强，更准确的口径是：same-key active-label 语义保持不变，predecessor dominance 的数学条件保持不变，但新图的增量包络传播会修复旧图少量滞后导致的保守少剪。
 
 最终列出口也重新核对。evaluator 使用原始 `data.penaltyFunction` 和 `data.CmaxH`，不读取 dual/compact window；固定 sequence 经逐任务 shift/add、setup cost 和 prefix minimization 后得到全域最小真实成本。最终只对候选堆中准备返回 Master 的列回刷，不进入 label 扩展或千万级 join 内层；随后用一次捕获的完整 true dual snapshot 重算 reduced cost，`LP.computeReducedCost()` 同时覆盖 job visit count、machine dual、arc/branch dual 和 active SRI cut dual。W300 已有 dump 再次逐行读取，Pool 与 restricted 各 7854 条列的 `storedCost-evalCost` 和 `storedRC-evalRC` 均为 0。第一轮 1864 条候选 finalize 为 `14.286ms`，相对于该轮 `30.894s` exact pricing 可忽略。当前未发现需要修改生产代码的正确性或热点问题；微型 4000-label benchmark 受 JIT/GC 影响波动较大，端到端效率仍以此前 W300 同 bound 对照为准：总时间 `211.187s -> 180.760s`，exact `171.098s -> 138.478s`。
+
+### 2026-07-11：完整 source-aware dominance 的 W300 A/B
+
+本轮重新使用最新完整版本测试 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300`，修正此前把早期增量版本结果当作完整 source-aware 结果的口径。两组均为 root-only normal ng-DSSR，使用 `nearestK3/top3`、`BEST_UB` join、all-cycles completion bound、midpoint probe 及 node/DSSR 内复用、time-indexed root preprocessing、200 条 elementary seed、time-indexed pre-heuristic、启发式 pricing 和 repeatability filter；strong branching、SRI、RMIH 均关闭。ALNS 开启，时间上限 60 秒、SA 关闭；runner 对同一算例重置相同随机种子。两组只切换 `incrementalSourcedDominance=true/false`。
+
+前置状态完全一致：两组初始列均为 17，ALNS incumbent 均为 1902；time-indexed 预处理均得到 `tempPool=29042`、`promotedOrdinaryArcs=212`、`avgWindowLen=735.020`、`seedElementaryCols=200`，因此差异不是 ALNS 或预处理造成的。两组最终也都得到 `bound=1726.014329`、gap `9.252664%`、`valid=true`。
+
+最新 source-aware 图的 root/solve 时间为 `93.948/95.036s`，ng-DSSR exact 为 `47.010s / 10 calls`，最终 Pool 5209。旧 Paper 图的 root/solve 时间为 `189.424/190.405s`，ng-DSSR exact 为 `122.905s / 12 calls`，最终 Pool 7224。按本次单次顺序 A/B，完整求解时间减少 `50.1%`，exact pricing 时间减少 `61.8%`。exact 分阶段累计由 `init/fw/bw/join = 27.554/11.863/70.040/13.216s` 降为 `18.587/6.478/16.601/5.200s`；其中 backward 减少 `76.3%`，是最大收益来源。join pairs 从 `44.280m` 降为 `12.025m`，funcEval 从 `43.051m` 降为 `11.155m`，分别减少约 `72.8%/74.1%`。最终证书轮的 active labels/node 平均值和最大值由 `15.796/282` 降为 `9.999/102`。
+
+因此当前完整实现的收益不只是省掉 predecessor label 扫描。source-zero 清理使已退出集体下包络的 label 不再继续扩展和 join，直接压低 backward 扩展、join pair 和 funcEval；同时列生成轨迹更短，exact calls 由 12 降到 10。由于两组列池和 pricing 轨迹不同，`50.1%/61.8%` 是当前完整算法的端到端净收益，不应解释为单次 dominance 操作的纯常数加速。该结果仍是单算例单次顺序 A/B，但前置状态、最终 bound 和有效性已对齐，可作为当前 W300 的有效代表结果。

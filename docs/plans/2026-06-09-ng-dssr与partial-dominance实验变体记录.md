@@ -2009,3 +2009,11 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 再次检查 no-h 后，生产算法未发现新问题，但原测试把菱形传播和 node 删除/重建分成了两个用例，没有直接覆盖最敏感的组合拓扑。本轮新增定向序列：先建立 superset 根、两个不可比中间 node 和共同 subset successor；随后让根包络下降，连续清除中间和底部本地 sources；再重建不同中间分支与底部 node；最后让旧根再次下降，验证重连后的新 successors 全部收到传播。forward/backward 均逐次与 Paper graph、历史 label brute-force 包络和 source invariant 对拍。
 
 该组合用例在 SegmentPool 关闭和开启时均通过；连同原随机测试，每种池化口径仍完成 96,000 次随机插入，最终 active 均为 `164/143`。生产代码只修正了三处已经过时的 h 注释，没有修改计算路径。复核后确认：新 node 的 predecessor 聚合只产生 external source；local source 只由本地 label merge 引入；node 归零时 g 已纯 external；删除重连后未来 delta 可沿新的 Hasse 边继续传播。当前未发现其他有实际影响的高频冗余；新 key 的 external 聚合仍复用统一 merge 并创建小 outcome，但该路径低频且统一交点/tie 语义的价值高于拆分收益。
+
+199. 2026-07-11 no-h 正确性与高效性最终复核
+
+本轮进一步复核了传播 worklist 的单次入队规则。一次 label 插入只产生同一候选函数 F 的下降区间；若 F 在共同 successor `v` 的时刻 t 能降低旧 `g_v`，则 `F(t)<g_v(t)`。由于旧 `g_v` 已包含所有直接 predecessor 包络的 external minimum，有 `g_v(t)<=g_p(t)`，因此 F 在该时刻也必然降低每个能够把它传到 v 的 predecessor。也就是说 v 真正可能下降的区间包含在任意第一条到达父路径的 delta 中；同轮后续父路径不会补充新的下降区间。删除持久 h 不改变该不等式，当前“一轮 node 最多入队一次”仍然正确，不需要改成重复入队或维护 pending-delta 并集。
+
+再次检查正式热路径后，已不存在 h 字段、h merge、回退开关或相关空判断。每个传播 node 只做一次 source-aware `g<-min(g,delta)`；空 delta 立即停止；dominated label 在 partial prepare 前跳过；partial retained intervals 只保存最新版并在出队/join 前消费；dead node 立即移出 active Hasse 集合。剩余 same-key 只读预检查面向大量 rejected labels，new-key external 聚合与 Hasse 搜索低频，统一 merge outcome 保证交点和 tie 语义，均没有明确的净收益证据支持继续拆分。O(1) 统计计数仍保留实验价值，完整 segment/timing 扫描只在显式诊断开关下执行。
+
+验证使用实际 classpath 完成 `javac -Xlint:all`，没有源码 warning；诊断计时开启时，SegmentPool 关闭和开启各 96,000 次随机/拓扑/partial 对拍继续通过，active 均为 `164/143`，incremental performance smoke 分别约为 `12.501ms/11.766ms`。该微基准只用于确认没有新的高频退化，不作为完整求解加速比例。

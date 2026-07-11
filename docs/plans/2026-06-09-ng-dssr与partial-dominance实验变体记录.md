@@ -1887,3 +1887,17 @@ partial dominance 的思想仍可保留，但应改成 source-aware partial，�
 进一步按当前 ng-DSSR 队列控制复核后，不需要为了 partial 裁剪额外引入 queue entry/version。正式 forward/backward exact round 的退出条件是队列为空、全局 time limit 或 pricing 整体关闭；代码不读取 `queue.peek()` 的最小值来提前闭合，也不因已经找到若干列而停止扩展。因而 label 入队后原地裁剪 frontier，并刷新真实 `minReducedCost`，虽然会使 Java `PriorityQueue` 的内部顺序不再严格对应新键，但不会丢失元素；无 time limit 的 certificate 轮仍会 poll 并处理全部未 dominated labels，最终最优性不受影响。time limit 下处理进度和 midpoint probe 的有限 pop 顺序可能变化，但这些路径本来不提供队列未耗尽时的 no-negative certificate，只影响效率。实现时可以按最小方案只修改 label frontier、执行方向 normalize 并刷新 minimum，不改队列结构。由 terminal job 维护的历史 scalar minimum 即使暂时偏低，也只是更弱的安全 lower bound；join 前 compact 会基于裁剪后的 labels 重新汇总。
 
 SRI 是迁移边界，不是继续保留旧 partial 框架的性能理由。当前 SRI-aware list partial 还通过 frontier adjuster/cut state 处理不同 label 的可比性，而现有 source-aware key 和 envelope 没有包含该状态。因此第一步只应实现 normal/no-SRI 的 source-aware partial，并与当前 source-aware normal 做开关 A/B；SRI 必须等 source merge 的可比条件显式纳入 cut state 后再迁移。验证至少包括逐次 merge 后综合 envelope 数值不变、裁剪 frontier 不低于原 frontier、每条 active label 仍有 source、forward/backward 定向多区间案例，以及 40-2/W300 的 root bound、最终列真实成本、extension candidates、frontier segments 和总 exact 时间对拍。
+
+187. 2026-07-11 source-aware partial 实现与首轮效果
+
+现已在 `IncrementalSourcedDominanceGraph` 内实现 partial 模式，没有新增或复用旧 dominance backend。normal 和 no-SRI partial 都统一进入新图；`PAPER` backend 使用 source-aware whole-label 清理，`GRAPH_PARTIAL` 和 no-SRI `LIST_PARTIAL` 在同一逻辑上额外裁剪 label frontier。旧 `useIncrementalSourcedDominanceGraph` 配置字段保留为 deprecated 配置兼容项，但 no-SRI 主线不再允许回退旧 Paper/partial 图。active SRI 因 cut-state 可比性尚未进入 source envelope，暂时仍使用原 SRI-aware list store，这是当前唯一保留旧 dominance store 的正式路径。
+
+partial merge 不扫描 `node.labels`。每次 min-merge 在原本生成 merged source segments 的同时，只记录两类受影响来源：新加入的候选 label，以及本轮被新 label/predecessor 替换掉部分 source 区间的旧 labels。若来源全部消失，沿用 whole-label dominated 删除；若仍有来源，则直接按该 label 在 merged envelope 中保留的多个 source 区间重建 frontier，区间外填 `BigM`，执行 forward prefix normalize 或 backward suffix normalize，并刷新 `minReducedCost`。frontier、队列、active terminal list 和后续扩展之外的结构均不改变。PriorityQueue 不重建：正式 exact round 不按队首值提前闭合，完整轮次仍耗尽队列，所以 heap 顺序变化只影响处理次序。
+
+函数级验证新增 normal/partial 双图随机对拍。正反向各插入 2,000 个随机 PWLF labels，逐次确认两种模式的 dominated 接收结果一致、partial 图综合 envelope 与全部原始历史 labels 的 brute-force 下包络一致、每条 active label 仍贡献 source，且裁剪后的单条 frontier 从不优于原 frontier；测试同时要求实际发生 partial trim。原有 96,000 次增量图随机/定向结构测试和 32,000 次旧 Paper 图测试继续通过。
+
+另做 40-2 五秒主线 routing smoke，日志明确显示 `GCNGBBStyleNgDssrGraphPartialDominancePricing` 内部使用 `incrementalSourcedGraph partial=true`，累计 `trims=2918, segments=9371->7515`；全局时间到达后返回 `TIME_LIMIT, valid=true`，没有把未耗尽队列误作闭合证书。
+
+40-2 首轮压力 A/B 使用同一极少 seed 口径：关闭 ALNS、启发式 pricing、time-indexed 预处理和 strong branching，只跑 root，时限 300 秒。normal 为 `302.665s/44 exact calls/pool 10369`，partial 为 `300.280s/42 exact calls/pool 15854`，两者都在 root 未闭合，因此不能比较最终 bound。累计统计中，partial 实际裁剪 556,874 次，涉及 segments `1,363,473 -> 1,305,391`，只减少约 4.26%；forward candidates 从 normal 的 992,056 降到 930,553，约减 6.2%，backward 从 993,827 降到 918,243，约减 7.6%。但两边很快进入不同列/dual 路径，partial 累计 join pairs 为 432,671,164，高于 normal 的 367,758,663，约增 17.7%，因此总体没有显示稳定加速。
+
+前几轮局部上 partial 有明显收益，例如第 7 次 exact 的时间约 `682ms -> 355ms`，forward candidates `4158 -> 2213`，join pairs `1.174m -> 0.712m`；但后续 dual 路径分叉后该优势没有维持。当前结论是：source-aware partial 已正确、低耦合地接入，并确实减少一部分扩展；但由于方向 normalize 会从保留区间恢复等待/后缀闭包，实际 segment 缩减只有约 4%，尚不足以稳定压低 join 总量。该模式保留用于后续在 W300/宽窗口等 frontier 更厚实例上测试，当前不能据此替代 source-aware normal 作为默认最快模式。

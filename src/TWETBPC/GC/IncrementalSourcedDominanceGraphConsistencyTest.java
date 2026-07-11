@@ -41,12 +41,68 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		verifySparseDiamondPropagation(Direction.BACKWARD);
 		verifyDeleteAndReinsert(Direction.FORWARD);
 		verifyDeleteAndReinsert(Direction.BACKWARD);
+		verifyPartialMode(Direction.FORWARD);
+		verifyPartialMode(Direction.BACKWARD);
 		int insertions = verifyRandom(Direction.FORWARD) + verifyRandom(Direction.BACKWARD);
 		String performance = performanceSmoke();
 		System.out.println("IncrementalSourcedDominanceGraphConsistencyTest passed: insertions=" + insertions
 				+ ", paperPointQueryMismatches=" + paperPointQueryMismatches
 				+ ", paperRetainedDominatedStateObservations=" + paperRetainedDominatedStateObservations
 				+ ", " + performance);
+	}
+
+	/** partial 只能抬高单条 label frontier，不能改变 graph 的综合数值包络。 */
+	private static void verifyPartialMode(Direction direction) {
+		IncrementalSourcedDominanceGraph normal = new IncrementalSourcedDominanceGraph(direction, false);
+		IncrementalSourcedDominanceGraph partial = new IncrementalSourcedDominanceGraph(direction, true);
+		ArrayList<LabelSpec> history = new ArrayList<LabelSpec>();
+		ArrayList<Label> partialLabels = new ArrayList<Label>();
+		RANDOM.setSeed(20260711L + direction.ordinal());
+		for (int labelId = 0; labelId < 2000; labelId++) {
+			LabelSpec spec = randomSpec(direction, labelId);
+			history.add(spec);
+			Label normalLabel = spec.newLabel();
+			Label partialLabel = spec.newLabel();
+			partialLabels.add(partialLabel);
+			boolean normalDominated = normal.insertOrDominate(normalLabel);
+			boolean partialDominated = partial.insertOrDominate(partialLabel);
+			if (normalDominated != partialDominated) {
+				throw new AssertionError("partial insertion mismatch: direction=" + direction + ", label=" + labelId);
+			}
+			for (int query = 0; query < 8; query++) {
+				PackedBitSet target = randomReachableSet();
+				double time = RANDOM.nextDouble() * T;
+				double expected = bruteBest(history, target, time);
+				assertClose(expected, partial.debugBestValue(target, target.cardinality(), time),
+						"partial envelope direction=" + direction + ", label=" + labelId);
+			}
+			assertPartialFrontiersDoNotImprove(history, partialLabels, direction, labelId);
+			assertSourceInvariant(partial, direction, -2, labelId);
+		}
+		if (partial.debugPartialLabelsTrimmed() == 0L) {
+			throw new AssertionError("partial mode did not trim any frontier: direction=" + direction);
+		}
+	}
+
+	private static void assertPartialFrontiersDoNotImprove(ArrayList<LabelSpec> history,
+			ArrayList<Label> partialLabels, Direction direction, int labelId) {
+		for (int i = 0; i < partialLabels.size(); i++) {
+			Label partial = partialLabels.get(i);
+			if (partial.isDominated || partial.frontier == null || partial.frontier.head == null) {
+				continue;
+			}
+			PiecewiseLinearFunction original = history.get(i).frontier;
+			for (int query = 0; query < 4; query++) {
+				double time = RANDOM.nextDouble() * T;
+				double originalValue = original.evaluate(time);
+				double partialValue = partial.frontier.evaluate(time);
+				if (Utility.compareLt(partialValue, originalValue)) {
+					throw new AssertionError("partial frontier improved original: direction=" + direction
+							+ ", inserted=" + labelId + ", history=" + i + ", time=" + time
+							+ ", original=" + originalValue + ", partial=" + partialValue);
+				}
+			}
+		}
 	}
 
 	private static void verifySourceAwareCollectiveDominance(Direction direction) {

@@ -8,8 +8,8 @@ final class IncrementalSourcedDominanceGraphs {
 	private IncrementalSourcedDominanceGraphs() {
 	}
 
-	static DominanceStore create(Direction direction) {
-		return new IncrementalSourcedDominanceGraph(direction);
+	static DominanceStore create(Direction direction, boolean partialDominance) {
+		return new IncrementalSourcedDominanceGraph(direction, partialDominance);
 	}
 
 	static void resetStatistics() {

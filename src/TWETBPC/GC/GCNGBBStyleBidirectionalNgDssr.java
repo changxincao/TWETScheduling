@@ -2020,7 +2020,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private DominanceStore createDominanceStore(Direction direction) {
 		if (useIncrementalSourcedDominanceGraph()) {
-			return IncrementalSourcedDominanceGraphs.create(direction);
+			return IncrementalSourcedDominanceGraphs.create(direction,
+					dominanceBackend != DominanceBackend.PAPER);
 		}
 		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
 			return PaperPartialDominanceGraphs.create(direction);
@@ -2048,11 +2049,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean useIncrementalSourcedDominanceGraph() {
-		// SRI state 目前不属于 Paper graph 的 reachable-set key；active cuts 下继续使用原实现。
-		// graph/list partial 也保留各自的区间裁剪与状态语义。
-		return config.useIncrementalSourcedDominanceGraph
-				&& dominanceBackend == DominanceBackend.PAPER
-				&& !sriPricingEnabled;
+		// 2026-07-11: normal 和 no-SRI partial 统一使用增量 source-aware 图；partial 只增加
+		// source 区间裁剪，不恢复旧 graph/list backend 的逐 label 扫描。
+		// SRI state 尚未进入 source envelope 的可比条件，active cuts 下暂留 SRI-aware list store。
+		return !sriPricingEnabled;
 	}
 
 	private void initializeLabelSearchState() {

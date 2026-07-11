@@ -25,8 +25,8 @@ import TWETBPC.Util.PackedBitSet;
  * <p>
  * 2026-07-11: 每个综合包络段记录本地 label source；某个 source 的最后一个有效段消失时，
  * 说明该 label 已在完整定义域上被其余同-key labels 或 predecessor 集体覆盖，可直接标记 dominated。
- * 清理成本与包络 segment 数成正比，不再扫描 node 的全部历史 labels。partial dominance 会原地裁剪
- * label frontier，仍使用原 backend；本实现只服务 normal/no-SRI pricing。
+	 * 清理成本与包络 segment 数成正比，不再扫描 node 的全部历史 labels。partial 模式在同一次 source
+	 * merge 后只裁剪来源区间发生变化的 label frontier，不恢复旧 backend 的逐 label 扫描。
  */
 final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
@@ -46,6 +46,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	private static long deltaInputSegments;
 	private static long deltaOutputSegments;
 	private static long sourceOnlyChanges;
+	private static long partialLabelsTrimmed;
+	private static long partialSegmentsBefore;
+	private static long partialSegmentsAfter;
 	private static long insertNanos;
 	private static long propagationNanos;
 	private static long markSeed;
@@ -56,9 +59,16 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	private final Map<PackedBitSet, IncrementalNode> nodeByReachableSet =
 			new HashMap<PackedBitSet, IncrementalNode>();
 	private final Direction direction;
+	private final boolean partialDominance;
+	private long localPartialLabelsTrimmed;
 
 	IncrementalSourcedDominanceGraph(Direction direction) {
+		this(direction, false);
+	}
+
+	IncrementalSourcedDominanceGraph(Direction direction, boolean partialDominance) {
 		this.direction = direction;
+		this.partialDominance = partialDominance;
 		DIAGNOSTIC_GRAPHS.add(this);
 	}
 
@@ -75,6 +85,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		deltaInputSegments = 0L;
 		deltaOutputSegments = 0L;
 		sourceOnlyChanges = 0L;
+		partialLabelsTrimmed = 0L;
+		partialSegmentsBefore = 0L;
+		partialSegmentsAfter = 0L;
 		insertNanos = 0L;
 		propagationNanos = 0L;
 	}
@@ -87,9 +100,11 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		long activeNodes = 0L;
 		long activeLabels = 0L;
 		long envelopeSegments = 0L;
+		boolean partial = false;
 		int maxLabels = 0;
 		int maxSegments = 0;
 		for (IncrementalSourcedDominanceGraph graph : DIAGNOSTIC_GRAPHS) {
+			partial |= graph.partialDominance;
 			for (IncrementalNode node : graph.nodes) {
 				if (!node.active) {
 					continue;
@@ -106,7 +121,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		String timing = TIMING_DIAGNOSTIC
 				? ", insert/propagateMs=" + formatMillis(insertNanos) + "/" + formatMillis(propagationNanos)
 				: "";
-		return "incrementalSourcedGraph context=" + diagnosticContext
+		return "incrementalSourcedGraph partial=" + partial + ", context=" + diagnosticContext
 				+ ", labels kept/rejected/removed=" + labelsKept + "/" + labelsRejected + "/" + labelsRemoved
 				+ ", nodes created/deleted/active=" + nodesCreated + "/" + nodesDeleted + "/" + activeNodes
 				+ ", activeLabel avg/max=" + format(avgLabels) + "/" + maxLabels
@@ -114,7 +129,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 				+ ", merges=" + sourceAwareMerges
 				+ ", propagated/stopped=" + propagatedNodes + "/" + propagationStops
 				+ ", delta in/out segments=" + deltaInputSegments + "/" + deltaOutputSegments
-				+ ", sourceOnlyChanges=" + sourceOnlyChanges + timing;
+				+ ", sourceOnlyChanges=" + sourceOnlyChanges
+				+ ", partial trims/segments=" + partialLabelsTrimmed + "/"
+				+ partialSegmentsBefore + "->" + partialSegmentsAfter + timing;
 	}
 
 	@Override
@@ -150,6 +167,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			return true;
 		}
 		removeDisplacedLocalSources(node, outcome);
+		trimPartialLocalSources(outcome);
 		node.labels.add(label);
 		node.activeLocalLabels++;
 		labelsKept++;
@@ -159,7 +177,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
 	private boolean insertNewNode(Label label) {
 		ArrayList<IncrementalNode> predecessors = findTerminalSupersetNodes(label.reachableSet);
-		SourcedEnvelope predecessorEnvelope = new SourcedEnvelope();
+		SourcedEnvelope predecessorEnvelope = new SourcedEnvelope(partialDominance);
 		for (IncrementalNode predecessor : predecessors) {
 			if (predecessor.active) {
 				predecessorEnvelope.mergeExternalEnvelope(predecessor.envelope);
@@ -177,6 +195,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			labelsRejected++;
 			return true;
 		}
+		trimPartialLocalSources(outcome);
 
 		IncrementalNode node = new IncrementalNode(label.reachableSet, predecessorEnvelope, envelope);
 		node.labels.add(label);
@@ -228,6 +247,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			node.predecessorEnvelope.mergeExternal(item.delta);
 			MergeOutcome outcome = node.envelope.mergeExternal(item.delta);
 			removeDisplacedLocalSources(node, outcome);
+			trimPartialLocalSources(outcome);
 
 			ArrayList<IncrementalNode> successors;
 			if (node.activeLocalLabels == 0) {
@@ -280,6 +300,82 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			node.activeLocalLabels--;
 			labelsRemoved++;
 		}
+	}
+
+	/** partial 模式只裁剪本轮 source 区间缩短的 labels，不扫描 node 的历史 label 列表。 */
+	private void trimPartialLocalSources(MergeOutcome outcome) {
+		if (!partialDominance || outcome.partialSources == null) {
+			return;
+		}
+		for (Label label : outcome.partialSources.keySet()) {
+			if (label.isDominated) {
+				continue;
+			}
+			ArrayList<SourcedSegment> retained = outcome.retainedSegmentsBySource == null
+					? null : outcome.retainedSegmentsBySource.get(label);
+			if (retained == null || retained.isEmpty() || sourceIntervalsCoverFrontier(retained, label.frontier)) {
+				continue;
+			}
+			trimLabelToSourceIntervals(label, retained);
+		}
+	}
+
+	private static boolean sourceIntervalsCoverFrontier(ArrayList<SourcedSegment> retained,
+			PiecewiseLinearFunction frontier) {
+		if (frontier == null || frontier.head == null || retained.isEmpty()
+				|| !Utility.compareEq(retained.get(0).start, frontier.head.start)
+				|| !Utility.compareEq(retained.get(retained.size() - 1).end, frontier.tail.end)) {
+			return false;
+		}
+		double cursor = retained.get(0).start;
+		for (SourcedSegment segment : retained) {
+			if (!Utility.compareEq(cursor, segment.start)) {
+				return false;
+			}
+			cursor = segment.end;
+		}
+		return Utility.compareEq(cursor, frontier.tail.end);
+	}
+
+	/** 用仍由该 label 贡献的多个离散区间重建 frontier，区间外置 BigM 后恢复方向闭包。 */
+	private void trimLabelToSourceIntervals(Label label, ArrayList<SourcedSegment> retained) {
+		PiecewiseLinearFunction old = label.frontier;
+		int before = segmentCount(old);
+		double start = old.head.start;
+		double end = old.tail.end;
+		PiecewiseLinearFunction trimmed = new PiecewiseLinearFunction(old.domainStart, old.domainEnd);
+		double cursor = start;
+		for (SourcedSegment segment : retained) {
+			double keepStart = Math.max(start, segment.start);
+			double keepEnd = Math.min(end, segment.end);
+			if (!Utility.compareLt(keepStart, keepEnd)) {
+				continue;
+			}
+			if (Utility.compareLt(cursor, keepStart)) {
+				trimmed.addSegment(cursor, keepStart, 0.0, Utility.big_M);
+			}
+			trimmed.addSegment(keepStart, keepEnd, segment.slope, segment.intercept);
+			cursor = keepEnd;
+		}
+		if (Utility.compareLt(cursor, end)) {
+			trimmed.addSegment(cursor, end, 0.0, Utility.big_M);
+		}
+		trimmed.normalize(direction);
+		old.release();
+		label.frontier = trimmed;
+		label.refreshMinReducedCost();
+		partialLabelsTrimmed++;
+		localPartialLabelsTrimmed++;
+		partialSegmentsBefore += before;
+		partialSegmentsAfter += segmentCount(trimmed);
+	}
+
+	private static int segmentCount(PiecewiseLinearFunction function) {
+		int count = 0;
+		for (Segment segment = function == null ? null : function.head; segment != null; segment = segment.next) {
+			count++;
+		}
+		return count;
 	}
 
 	@Override
@@ -339,6 +435,10 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 		}
 		return true;
+	}
+
+	long debugPartialLabelsTrimmed() {
+		return localPartialLabelsTrimmed;
 	}
 
 	private ArrayList<IncrementalNode> findTerminalSupersetNodes(PackedBitSet target) {
@@ -547,8 +647,25 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	private static final class MergeOutcome {
 		final SparseDelta delta = new SparseDelta();
 		ArrayList<Label> displacedLocalSources;
+		IdentityHashMap<Label, Boolean> partialSources;
+		IdentityHashMap<Label, ArrayList<SourcedSegment>> retainedSegmentsBySource;
 		boolean candidateContributes;
 		boolean sourceChanged;
+		final boolean trackPartialSources;
+
+		MergeOutcome(boolean trackPartialSources) {
+			this.trackPartialSources = trackPartialSources;
+		}
+
+		void markPartialSource(Label source) {
+			if (!trackPartialSources || source == null) {
+				return;
+			}
+			if (partialSources == null) {
+				partialSources = new IdentityHashMap<Label, Boolean>();
+			}
+			partialSources.put(source, Boolean.TRUE);
+		}
 	}
 
 	/**
@@ -557,6 +674,11 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	private static final class SourcedEnvelope {
 		private ArrayList<SourcedSegment> segments = new ArrayList<SourcedSegment>();
 		private IdentityHashMap<Label, Boolean> localSources;
+		private final boolean partialDominance;
+
+		SourcedEnvelope(boolean partialDominance) {
+			this.partialDominance = partialDominance;
+		}
 
 		MergeOutcome mergeLocal(PiecewiseLinearFunction function, Label source) {
 			return merge(new PwlfCursor(function), source, false);
@@ -568,13 +690,13 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
 		MergeOutcome mergeExternalEnvelope(SourcedEnvelope other) {
 			if (other == null || other.segments.isEmpty()) {
-				return new MergeOutcome();
+				return new MergeOutcome(partialDominance);
 			}
 			return merge(new SourcedCursor(other.segments), null, true);
 		}
 
 		SourcedEnvelope copyAsExternal() {
-			SourcedEnvelope copy = new SourcedEnvelope();
+			SourcedEnvelope copy = new SourcedEnvelope(partialDominance);
 			for (SourcedSegment segment : segments) {
 				append(copy.segments, segment.start, segment.end, segment.slope, segment.intercept, null);
 			}
@@ -583,7 +705,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
 		private MergeOutcome merge(CandidateCursor fresh, Label source, boolean externalWinsTies) {
 			sourceAwareMerges++;
-			MergeOutcome outcome = new MergeOutcome();
+			MergeOutcome outcome = new MergeOutcome(partialDominance);
 			if (!fresh.hasCurrent()) {
 				return outcome;
 			}
@@ -655,6 +777,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 				// 本地候选在 tie 时不替换旧来源；没有正长度贡献就等价于被旧综合包络完整占优。
 				return outcome;
 			}
+			if (source != null) {
+				outcome.markPartialSource(source);
+			}
 			if (!outcome.delta.isEmpty() || outcome.sourceChanged || segments.isEmpty()) {
 				installMergedSegments(merged, outcome);
 				if (outcome.delta.isEmpty() && outcome.sourceChanged) {
@@ -673,6 +798,18 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 						mergedSources = new IdentityHashMap<Label, Boolean>();
 					}
 					mergedSources.put(segment.source, Boolean.TRUE);
+					if (outcome.partialSources != null && outcome.partialSources.containsKey(segment.source)) {
+						if (outcome.retainedSegmentsBySource == null) {
+							outcome.retainedSegmentsBySource =
+									new IdentityHashMap<Label, ArrayList<SourcedSegment>>();
+						}
+						ArrayList<SourcedSegment> retained = outcome.retainedSegmentsBySource.get(segment.source);
+						if (retained == null) {
+							retained = new ArrayList<SourcedSegment>();
+							outcome.retainedSegmentsBySource.put(segment.source, retained);
+						}
+						retained.add(segment);
+					}
 				}
 			}
 			if (localSources != null) {
@@ -704,6 +841,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			boolean oldNoWorse = Utility.compareLe(oldStart, freshStart)
 					&& Utility.compareLe(oldEnd, freshEnd);
 			if (freshNoWorse && !oldNoWorse) {
+				outcome.markPartialSource(old.source);
 				appendCandidate(target, start, end, freshSlope, freshIntercept, freshSource, outcome, true);
 				return;
 			}
@@ -713,6 +851,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 			if (freshNoWorse && oldNoWorse) {
 				if (externalWinsTies && old.source != null) {
+					outcome.markPartialSource(old.source);
 					// 数值仍保留旧几何，只把来源改成 predecessor，避免容差内近似相等造成数值漂移。
 					append(target, start, end, old.slope, old.intercept, null);
 					outcome.sourceChanged = true;
@@ -737,10 +876,12 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			double oldMid = old.value(mid);
 			double freshMid = freshSlope * mid + freshIntercept;
 			if (Utility.compareLt(freshMid, oldMid)) {
+				outcome.markPartialSource(old.source);
 				appendCandidate(target, start, end, freshSlope, freshIntercept, freshSource, outcome, true);
 			} else if (Utility.compareLt(oldMid, freshMid)) {
 				append(target, start, end, old.slope, old.intercept, old.source);
 			} else if (externalWinsTies && old.source != null) {
+				outcome.markPartialSource(old.source);
 				append(target, start, end, old.slope, old.intercept, null);
 				outcome.sourceChanged = true;
 			} else {

@@ -131,6 +131,17 @@ final class CompletionBoundCalculator {
 	}
 
 	static final class Stats {
+		long constructorNanos;
+		long totalBuildNanos;
+		long forwardPropagationNanos;
+		long backwardPropagationNanos;
+		long forwardAuxiliaryNanos;
+		long backwardAuxiliaryNanos;
+		long snapshotCompareNanos;
+		long snapshotCopyNanos;
+		long resultCopyNanos;
+		long functionMinsNanos;
+		long discreteCacheNanos;
 		long forwardBuildNanos;
 		long backwardBuildNanos;
 		long aggregateNanos;
@@ -238,6 +249,7 @@ final class CompletionBoundCalculator {
 	private final boolean diagnosticSegments;
 	private final boolean diagnosticMergeTiming;
 	private final boolean diagnosticCandidateTiming;
+	private final boolean diagnosticPhaseTiming;
 
 	CompletionBoundCalculator(Data data, LP lp, double pricingHorizon,
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
@@ -257,6 +269,8 @@ final class CompletionBoundCalculator {
 			PiecewiseLinearFunction[] forwardPenaltyByJob, PiecewiseLinearFunction[] backwardPenaltyByJob,
 			boolean[] zeroDualExcludedJobs, QueueOrdering queueOrdering, boolean buildDiscreteCaches,
 			boolean ignorePricingOnlyArcs) {
+		this.diagnosticPhaseTiming = Boolean.getBoolean("twet.bpc.completionBoundPhaseTiming");
+		long constructorStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
 		this.data = data;
 		this.lp = lp;
 		this.node = lp.getNode();
@@ -292,6 +306,9 @@ final class CompletionBoundCalculator {
 		this.diagnosticSegments = Boolean.getBoolean("twet.bpc.completionBoundSegments");
 		this.diagnosticMergeTiming = Boolean.getBoolean("twet.bpc.completionBoundMergeTiming");
 		this.diagnosticCandidateTiming = Boolean.getBoolean("twet.bpc.completionBoundCandidateTiming");
+		if (diagnosticPhaseTiming) {
+			stats.constructorNanos = System.nanoTime() - constructorStart;
+		}
 	}
 
 	Result build(Relaxation relaxation) {
@@ -330,11 +347,23 @@ final class CompletionBoundCalculator {
 				bounds = deltaPropagation ? buildAllCyclesDelta() : buildAllCycles();
 			}
 			diagnosticHeartbeat("build.after_relaxation." + relaxation, 0, 0, 0, true);
+			long phaseStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
 			buildCompletionFunctionMins(bounds);
+			if (diagnosticPhaseTiming) {
+				stats.functionMinsNanos += System.nanoTime() - phaseStart;
+			}
 			diagnosticHeartbeat("build.after_mins." + relaxation, 0, 0, 0, true);
 			if (buildDiscreteCaches) {
+				phaseStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
 				buildDiscreteCaches(bounds);
+				if (diagnosticPhaseTiming) {
+					stats.discreteCacheNanos += System.nanoTime() - phaseStart;
+				}
 				diagnosticHeartbeat("build.after_discrete." + relaxation, 0, 0, 0, true);
+			}
+			if (diagnosticPhaseTiming) {
+				stats.totalBuildNanos = System.nanoTime() - diagnosticBuildStartNanos;
+				printPhaseTiming(relaxation);
 			}
 			if (diagnosticMergeTiming) {
 				printMergeTiming(relaxation);
@@ -654,8 +683,16 @@ final class CompletionBoundCalculator {
 		while (!forwardQueue.isEmpty()) {
 			stats.forwardQueuePops++;
 			int state = forwardQueue.poll();
+			long snapshotStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
 			DeltaBatch batch = buildActualImprovementBatch(state, forwardF[state], propagatedForwardF[state]);
+			if (diagnosticPhaseTiming) {
+				stats.snapshotCompareNanos += System.nanoTime() - snapshotStart;
+				snapshotStart = System.nanoTime();
+			}
 			propagatedForwardF[state] = forwardF[state].copy();
+			if (diagnosticPhaseTiming) {
+				stats.snapshotCopyNanos += System.nanoTime() - snapshotStart;
+			}
 			if (batch.intervalCount == 0) {
 				continue;
 			}
@@ -678,11 +715,23 @@ final class CompletionBoundCalculator {
 			}
 		}
 		diagnosticHeartbeat("allCyclesMultiDelta.forward.done", forwardQueue.size(), 0, 0, true);
-		stats.forwardBuildNanos += System.nanoTime() - phaseStart;
+		long elapsed = System.nanoTime() - phaseStart;
+		stats.forwardBuildNanos += elapsed;
+		if (diagnosticPhaseTiming) {
+			stats.forwardPropagationNanos += elapsed;
+		}
+		long resultCopyStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
 		copyCompletionFunctions(bounds.forwardFByJob, forwardF);
+		if (diagnosticPhaseTiming) {
+			stats.resultCopyNanos += System.nanoTime() - resultCopyStart;
+		}
 		long auxiliaryStart = System.nanoTime();
 		rebuildForwardAuxiliaryBounds(bounds.forwardUByJob, forwardF, source);
-		stats.forwardBuildNanos += System.nanoTime() - auxiliaryStart;
+		elapsed = System.nanoTime() - auxiliaryStart;
+		stats.forwardBuildNanos += elapsed;
+		if (diagnosticPhaseTiming) {
+			stats.forwardAuxiliaryNanos += elapsed;
+		}
 
 		phaseStart = System.nanoTime();
 		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
@@ -699,8 +748,16 @@ final class CompletionBoundCalculator {
 		while (!backwardQueue.isEmpty()) {
 			stats.backwardQueuePops++;
 			int state = backwardQueue.poll();
+			long snapshotStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
 			DeltaBatch batch = buildActualImprovementBatch(state, backwardB[state], propagatedBackwardB[state]);
+			if (diagnosticPhaseTiming) {
+				stats.snapshotCompareNanos += System.nanoTime() - snapshotStart;
+				snapshotStart = System.nanoTime();
+			}
 			propagatedBackwardB[state] = backwardB[state].copy();
+			if (diagnosticPhaseTiming) {
+				stats.snapshotCopyNanos += System.nanoTime() - snapshotStart;
+			}
 			if (batch.intervalCount == 0) {
 				continue;
 			}
@@ -723,12 +780,40 @@ final class CompletionBoundCalculator {
 			}
 		}
 		diagnosticHeartbeat("allCyclesMultiDelta.backward.done", backwardQueue.size(), 0, 0, true);
-		stats.backwardBuildNanos += System.nanoTime() - phaseStart;
+		elapsed = System.nanoTime() - phaseStart;
+		stats.backwardBuildNanos += elapsed;
+		if (diagnosticPhaseTiming) {
+			stats.backwardPropagationNanos += elapsed;
+		}
+		resultCopyStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
 		copyCompletionFunctions(bounds.backwardBByJob, backwardB);
+		if (diagnosticPhaseTiming) {
+			stats.resultCopyNanos += System.nanoTime() - resultCopyStart;
+		}
 		auxiliaryStart = System.nanoTime();
 		rebuildBackwardAuxiliaryBounds(bounds.backwardRByJob, backwardB);
-		stats.backwardBuildNanos += System.nanoTime() - auxiliaryStart;
+		elapsed = System.nanoTime() - auxiliaryStart;
+		stats.backwardBuildNanos += elapsed;
+		if (diagnosticPhaseTiming) {
+			stats.backwardAuxiliaryNanos += elapsed;
+		}
 		return bounds;
+	}
+
+	private void printPhaseTiming(Relaxation relaxation) {
+		System.out.println("[completionBoundPhaseTiming] relaxation=" + relaxation
+				+ " constructor=" + formatNanos(stats.constructorNanos)
+				+ " build=" + formatNanos(stats.totalBuildNanos)
+				+ " propagateF/B=" + formatNanos(stats.forwardPropagationNanos)
+				+ "/" + formatNanos(stats.backwardPropagationNanos)
+				+ " rebuildU/R=" + formatNanos(stats.forwardAuxiliaryNanos)
+				+ "/" + formatNanos(stats.backwardAuxiliaryNanos)
+				+ " snapshotCompare/copy=" + formatNanos(stats.snapshotCompareNanos)
+				+ "/" + formatNanos(stats.snapshotCopyNanos)
+				+ " resultCopy=" + formatNanos(stats.resultCopyNanos)
+				+ " mins=" + formatNanos(stats.functionMinsNanos)
+				+ " discrete=" + formatNanos(stats.discreteCacheNanos));
+		System.out.flush();
 	}
 
 	private Bounds buildTwoCycle() {

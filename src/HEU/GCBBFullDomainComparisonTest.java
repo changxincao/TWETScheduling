@@ -480,6 +480,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableNgDssrJoinEnvelopeCompression = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrJoinEnvelopeCompression",
 				Boolean.toString(config.enableNgDssrJoinEnvelopeCompression)));
+		config.enableNgDssrJoinEnvelopePrefilter = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrJoinEnvelopePrefilter",
+				Boolean.toString(config.enableNgDssrJoinEnvelopePrefilter)));
 		config.ngDssrReturnRelaxedColumns = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrReturnRelaxedColumns",
 				Boolean.toString(config.ngDssrReturnRelaxedColumns)));

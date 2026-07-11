@@ -8,10 +8,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.PriorityQueue;
 
@@ -190,6 +192,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinEnvelopeGroupPairs;
 	private long joinEnvelopeGroupPairsPruned;
 	private long joinEnvelopeFunctionEvaluations;
+	private long joinEnvelopePrefilterGroupPairs;
+	private long joinEnvelopePrefilterGroupPairsPruned;
+	private long joinEnvelopePrefilterPotentialPairsPruned;
+	private long joinEnvelopePrefilterFunctionEvaluations;
 	private long joinEnvelopeBuildNanos;
 	private long joinEnvelopeJoinNanos;
 	private long exactTotalNanos;
@@ -3168,6 +3174,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			joinAllForwardTerminalGroupsByEnvelope(lp);
 			return;
 		}
+		if (useJoinEnvelopePrefilter()) {
+			joinAllForwardTerminalGroupsWithEnvelopePrefilter(lp);
+			return;
+		}
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
 				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
 			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
@@ -3183,6 +3193,60 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean useJoinEnvelopeCompression() {
 		return config.enableNgDssrJoinEnvelopeCompression && !sriPricingEnabled && !limitedMemorySriPricing;
+	}
+
+	private boolean useJoinEnvelopePrefilter() {
+		return config.enableNgDssrJoinEnvelopePrefilter && !sriPricingEnabled && !limitedMemorySriPricing;
+	}
+
+	/**
+	 * 2026-07-11: envelope 只证明整组 label pair 不可能形成负 reduced-cost 列。
+	 * 未被证明可剪的 group 仍完整执行标准 label-level join，保持批量加列和证书口径。
+	 */
+	private void joinAllForwardTerminalGroupsWithEnvelopePrefilter(LP lp) {
+		long buildStart = System.nanoTime();
+		JoinEnvelopeIndex index = buildJoinEnvelopeIndex();
+		joinEnvelopeBuildNanos += System.nanoTime() - buildStart;
+		long joinStart = System.nanoTime();
+		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0);
+				lastJob >= 0 && lastJob <= data.n && canContinue();
+				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
+			ArrayList<ForwardLabel> candidates = activeForwardByLastJob.get(lastJob);
+			if (candidates.isEmpty()) {
+				continue;
+			}
+			joinForwardGroupToBackwardLabels(lastJob, candidates, index, lp);
+			if (canContinue()) {
+				joinForwardGroupToSink(candidates, lp);
+			}
+		}
+		joinEnvelopeJoinNanos += System.nanoTime() - joinStart;
+	}
+
+	private boolean canPruneJoinEnvelopeGroupPair(int lastJob, JoinEnvelopeGroup<ForwardLabel> forward,
+			JoinEnvelopeGroup<BackwardLabel> backward, LP lp) {
+		Node node = lp.getNode();
+		if (backward.ngMemorySet.contains(lastJob)
+				|| isPricingArcForbidden(node, lastJob, backward.terminalJob)
+				|| forward.terminalJob == backward.terminalJob
+				|| bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
+			return true;
+		}
+		double delay = data.getSetUp(lastJob, backward.terminalJob) + data.getProcessT(backward.terminalJob);
+		if (Utility.compareGt(forward.envelope.start() + delay, backward.envelope.end())) {
+			return true;
+		}
+		double fixedReducedCost = data.getSetupCost(lastJob, backward.terminalJob)
+				- lp.getArcDual(lastJob, backward.terminalJob);
+		double threshold = REDUCED_COST_TOLERANCE;
+		if (!Utility.compareLt(forward.minReducedCost + backward.minReducedCost + fixedReducedCost, threshold)) {
+			return true;
+		}
+		joinEnvelopePrefilterFunctionEvaluations++;
+		double reducedCostBound = findMinimalShiftedTracedSum(forward.envelope, delay, backward.envelope,
+				fixedReducedCost).reducedCost;
+		observeRelaxedReducedCost(reducedCostBound);
+		return !Utility.compareLt(reducedCostBound, threshold);
 	}
 
 	private void joinAllForwardTerminalGroupsByEnvelope(LP lp) {
@@ -3208,23 +3272,33 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void joinForwardGroupToBackwardLabels(int lastJob, ArrayList<ForwardLabel> candidates, LP lp) {
+		joinForwardGroupToBackwardLabels(lastJob, candidates, null, lp);
+	}
+
+	private void joinForwardGroupToBackwardLabels(int lastJob, ArrayList<ForwardLabel> candidates,
+			JoinEnvelopeIndex prefilterIndex, LP lp) {
 		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
 			ArrayList<BackwardLabel> labels = activeBackwardByFirstJob.get(firstJob);
 			for (int i = 0; i < labels.size() && canContinue(); i++) {
 				BackwardLabel backward = labels.get(i);
 				if (!backward.isDominated && !backward.isSinkRoot) {
-					joinForwardGroupWithBackward(lastJob, candidates, backward, lp);
+					joinForwardGroupWithBackward(lastJob, candidates, backward, prefilterIndex, lp);
 				}
 			}
 		}
 		for (int firstJob = 1; firstJob <= data.n && canContinue(); firstJob++) {
 			joinForwardGroupWithBackwardSinglePoints(lastJob, candidates, backwardSinglePointByFirstJob.get(firstJob),
-					lp);
+					prefilterIndex, lp);
 		}
 	}
 
 	private void joinForwardGroupWithBackwardSinglePoints(int lastJob, ArrayList<ForwardLabel> candidates,
 			SinglePointStore<BackwardLabel> store, LP lp) {
+		joinForwardGroupWithBackwardSinglePoints(lastJob, candidates, store, null, lp);
+	}
+
+	private void joinForwardGroupWithBackwardSinglePoints(int lastJob, ArrayList<ForwardLabel> candidates,
+			SinglePointStore<BackwardLabel> store, JoinEnvelopeIndex prefilterIndex, LP lp) {
 		for (int cardinality = 0; cardinality < store.liveLabelsByCardinality.size() && canContinue(); cardinality++) {
 			ArrayList<BackwardLabel> bucket = store.liveLabelsByCardinality.get(cardinality);
 			if (bucket == null || bucket.isEmpty()) {
@@ -3233,7 +3307,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			for (int i = 0; i < bucket.size() && canContinue(); i++) {
 				BackwardLabel backward = bucket.get(i);
 				if (!backward.isDominated && !backward.isSinkRoot) {
-					joinForwardGroupWithBackward(lastJob, candidates, backward, lp);
+					joinForwardGroupWithBackward(lastJob, candidates, backward, prefilterIndex, lp);
 				}
 			}
 		}
@@ -3255,6 +3329,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups =
 						new ArrayList<JoinEnvelopeGroup<ForwardLabel>>(forwardMap.values());
 				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups);
+				indexForwardJoinEnvelopeLabels(index, groups);
 				Collections.sort(groups);
 				index.forwardByTerminal.set(job, groups);
 				joinEnvelopeForwardGroups += groups.size();
@@ -3274,12 +3349,33 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				ArrayList<JoinEnvelopeGroup<BackwardLabel>> groups =
 						new ArrayList<JoinEnvelopeGroup<BackwardLabel>>(backwardMap.values());
 				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups);
+				indexBackwardJoinEnvelopeLabels(index, groups);
 				Collections.sort(groups);
 				index.backwardByTerminal.set(job, groups);
 				joinEnvelopeBackwardGroups += groups.size();
 			}
 		}
 		return index;
+	}
+
+	private void indexForwardJoinEnvelopeLabels(JoinEnvelopeIndex index,
+			ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups) {
+		for (int i = 0; i < groups.size(); i++) {
+			JoinEnvelopeGroup<ForwardLabel> group = groups.get(i);
+			for (int j = 0; j < group.labels.size(); j++) {
+				index.forwardGroupByLabel.put(group.labels.get(j), group);
+			}
+		}
+	}
+
+	private void indexBackwardJoinEnvelopeLabels(JoinEnvelopeIndex index,
+			ArrayList<JoinEnvelopeGroup<BackwardLabel>> groups) {
+		for (int i = 0; i < groups.size(); i++) {
+			JoinEnvelopeGroup<BackwardLabel> group = groups.get(i);
+			for (int j = 0; j < group.labels.size(); j++) {
+				index.backwardGroupByLabel.put(group.labels.get(j), group);
+			}
+		}
 	}
 
 	private <L extends FunctionLabel> long finalizeJoinEnvelopeGroups(ArrayList<JoinEnvelopeGroup<L>> groups) {
@@ -3299,6 +3395,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		JoinEnvelopeGroup<ForwardLabel> group = joinEnvelopeGroup(map, terminalJob, label.ngMemorySet);
+		group.labels.add(label);
 		group.envelope.merge(function, label);
 		joinEnvelopeForwardLabels++;
 	}
@@ -3310,6 +3407,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		JoinEnvelopeGroup<BackwardLabel> group = joinEnvelopeGroup(map, terminalJob, label.ngMemorySet);
+		group.labels.add(label);
 		group.envelope.merge(function, label);
 		joinEnvelopeBackwardLabels++;
 	}
@@ -3435,6 +3533,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void joinForwardGroupWithBackward(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward,
 			LP lp) {
+		joinForwardGroupWithBackward(lastJob, candidates, backward, null, lp);
+	}
+
+	private void joinForwardGroupWithBackward(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward,
+			JoinEnvelopeIndex prefilterIndex, LP lp) {
 		Node node = lp.getNode();
 		// 2026-05-23: 闂?joinFromForward 闁诲酣娼у﹢杈叿闂佹寧绋戞總鏃傜箔婢舵劖鍤勯柣锝呮湰閺?backward.reachableSet 闂佸憡鐟ョ粔鐢垫暜瑜版帒绠ラ柍褜鍓熷鍨緞婵犲倽顔夐梺鐟板槻閸氬鏁幘顔肩鐎广儱娲ㄧ壕濠氭煏?
 		// 闁荤姴娲㈤崕闈涒枖閿曞倸瑙﹂柛顐ゅ枑绗?backward 缂傚倷缍€閸涱垱鏆伴梺鍛婄閸ㄥ灚绋婅箛娑樼闁宠桨鑳跺鏃堟煟閵娿儱顏╅柍褜鍓氶悷鈺呭焵椤掆偓椤р偓缂佽鲸绻冪粙澶婎吋閸モ晜鎯ｆ繛瀵稿Ь濞撳湱鑺遍鍕闁逞屽墴瀵灚寰勬繝鍌濐唹婵炴垶鎸告鍝ョ礊鐎ｎ喖绀堢€广儱鎳忛崐鐢电磽閸屾浜鹃梺鐟板槻閸氬鏁幘顔藉剭?forward terminal闂?
@@ -3459,6 +3562,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
+		BitSet prefilteredForwardIndices = prefilterIndex == null ? null
+				: prefilterIndex.prunedForwardIndices(lastJob, candidates, backward, lp, this);
 		for (int i = 0; i < candidates.size() && canContinue(); i++) {
 			ForwardLabel forward = candidates.get(i);
 			joinCandidateLabelsVisited++;
@@ -3473,6 +3578,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					joinPairsBestBoundPruned++;
 				}
 				break;
+			}
+			if (prefilteredForwardIndices != null && prefilteredForwardIndices.get(i)) {
+				joinEnvelopePrefilterPotentialPairsPruned++;
+				continue;
 			}
 			tryJoin(forward, backward, lp, joinFixedReducedCost);
 		}
@@ -3684,6 +3793,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinEnvelopeGroupPairs = 0;
 		joinEnvelopeGroupPairsPruned = 0;
 		joinEnvelopeFunctionEvaluations = 0;
+		joinEnvelopePrefilterGroupPairs = 0;
+		joinEnvelopePrefilterGroupPairsPruned = 0;
+		joinEnvelopePrefilterPotentialPairsPruned = 0;
+		joinEnvelopePrefilterFunctionEvaluations = 0;
 		joinEnvelopeBuildNanos = 0;
 		joinEnvelopeJoinNanos = 0;
 		forwardSinglePointKept = 0;
@@ -4022,6 +4135,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					.append(joinEnvelopeSegments).append("/").append(joinEnvelopeGroupPairs).append("/")
 					.append(joinEnvelopeGroupPairsPruned).append("/").append(joinEnvelopeFunctionEvaluations);
 			builder.append(", joinEnvelopeMs build/join=")
+					.append(String.format("%.3f", joinEnvelopeBuildNanos / 1_000_000.0)).append("/")
+					.append(String.format("%.3f", joinEnvelopeJoinNanos / 1_000_000.0));
+		}
+		if (useJoinEnvelopePrefilter()) {
+			builder.append(", joinEnvelopePrefilter groups/pruned/skippedPairs/funcEval/buildMs/joinMs=")
+					.append(joinEnvelopePrefilterGroupPairs).append("/")
+					.append(joinEnvelopePrefilterGroupPairsPruned).append("/")
+					.append(joinEnvelopePrefilterPotentialPairsPruned).append("/")
+					.append(joinEnvelopePrefilterFunctionEvaluations).append("/")
 					.append(String.format("%.3f", joinEnvelopeBuildNanos / 1_000_000.0)).append("/")
 					.append(String.format("%.3f", joinEnvelopeJoinNanos / 1_000_000.0));
 		}
@@ -6767,14 +6889,73 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final class JoinEnvelopeIndex {
 		final ArrayList<ArrayList<JoinEnvelopeGroup<ForwardLabel>>> forwardByTerminal;
 		final ArrayList<ArrayList<JoinEnvelopeGroup<BackwardLabel>>> backwardByTerminal;
+		final IdentityHashMap<ForwardLabel, JoinEnvelopeGroup<ForwardLabel>> forwardGroupByLabel =
+				new IdentityHashMap<ForwardLabel, JoinEnvelopeGroup<ForwardLabel>>();
+		final IdentityHashMap<BackwardLabel, JoinEnvelopeGroup<BackwardLabel>> backwardGroupByLabel =
+				new IdentityHashMap<BackwardLabel, JoinEnvelopeGroup<BackwardLabel>>();
+		final IdentityHashMap<JoinEnvelopeGroup<ForwardLabel>,
+				IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean>> pruneByGroup =
+				new IdentityHashMap<JoinEnvelopeGroup<ForwardLabel>,
+						IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean>>();
+		final IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, BitSet[]> prunedIndicesByBackwardGroup =
+				new IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, BitSet[]>();
+		final int terminalCount;
 
 		JoinEnvelopeIndex(int size) {
+			terminalCount = size;
 			forwardByTerminal = new ArrayList<ArrayList<JoinEnvelopeGroup<ForwardLabel>>>(size);
 			backwardByTerminal = new ArrayList<ArrayList<JoinEnvelopeGroup<BackwardLabel>>>(size);
 			for (int i = 0; i < size; i++) {
 				forwardByTerminal.add(null);
 				backwardByTerminal.add(null);
 			}
+		}
+
+		BitSet prunedForwardIndices(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward, LP lp,
+				GCNGBBStyleBidirectionalNgDssr owner) {
+			JoinEnvelopeGroup<BackwardLabel> backwardGroup = backwardGroupByLabel.get(backward);
+			if (backwardGroup == null) {
+				return new BitSet();
+			}
+			BitSet[] byTerminal = prunedIndicesByBackwardGroup.get(backwardGroup);
+			if (byTerminal == null) {
+				byTerminal = new BitSet[terminalCount];
+				prunedIndicesByBackwardGroup.put(backwardGroup, byTerminal);
+			}
+			BitSet cachedIndices = byTerminal[lastJob];
+			if (cachedIndices != null) {
+				return cachedIndices;
+			}
+			BitSet pruned = new BitSet(candidates.size());
+			for (int i = 0; i < candidates.size(); i++) {
+				JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroupByLabel.get(candidates.get(i));
+				if (forwardGroup != null && canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
+					pruned.set(i);
+				}
+			}
+			byTerminal[lastJob] = pruned;
+			return pruned;
+		}
+
+		private boolean canPruneGroup(int lastJob, JoinEnvelopeGroup<ForwardLabel> forwardGroup,
+				JoinEnvelopeGroup<BackwardLabel> backwardGroup, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
+			IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean> byBackward =
+					pruneByGroup.get(forwardGroup);
+			if (byBackward == null) {
+				byBackward = new IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean>();
+				pruneByGroup.put(forwardGroup, byBackward);
+			}
+			Boolean cached = byBackward.get(backwardGroup);
+			if (cached != null) {
+				return cached.booleanValue();
+			}
+			owner.joinEnvelopePrefilterGroupPairs++;
+			boolean prune = owner.canPruneJoinEnvelopeGroupPair(lastJob, forwardGroup, backwardGroup, lp);
+			if (prune) {
+				owner.joinEnvelopePrefilterGroupPairsPruned++;
+			}
+			byBackward.put(backwardGroup, Boolean.valueOf(prune));
+			return prune;
 		}
 	}
 
@@ -6783,6 +6964,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final int terminalJob;
 		final PackedBitSet ngMemorySet;
 		final TracedJoinEnvelope<L> envelope = new TracedJoinEnvelope<L>();
+		final ArrayList<L> labels = new ArrayList<L>();
 		double minReducedCost = Utility.big_M;
 
 		JoinEnvelopeGroup(int terminalJob, PackedBitSet ngMemorySet) {
@@ -7056,6 +7238,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				noSriFrontier.release();
 			}
 		}
+
 	}
 
 	private static final class ChildReachability {

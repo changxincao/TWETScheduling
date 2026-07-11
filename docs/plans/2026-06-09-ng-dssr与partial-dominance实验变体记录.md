@@ -1997,3 +1997,9 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 真实 A/B 使用 `wet040_001_2m`，ALNS 关闭、启发式 pricing 开启、`maxNodes=1`、normal ng-DSSR、dualPair 0.08、top1 和 bestUB join。no-h/keep-h 均得到 `bound=22490`、`pool=22420`、`pricing=192`、exact 18 次、`valid=true`，列和搜索轨迹一致。累计 graph 统计中，两边 propagated nodes 均为 18,803；no-h 的 merge 数为 247,835，keep-h 为 266,638，正好每个 propagated node 少一次 h merge。propagation 计时由 `50.368ms` 降为 `35.922ms`，约下降 28.7%。但 insert+propagate 总计分别为 `666.824/658.506ms`，受 JVM/GC 计时波动影响没有稳定总优势；exact 为 `6.114/5.981s`，总求解为 `61.914/61.412s`，同样不能解释为 no-h 变慢或变快。结论是 no-h 明确减少传播计算和每 node 一条包络内存，但 dominance 本身已不是整体瓶颈，单独删除 h 不会显著缩短完整求解。
 
 另一次试图关闭启发式 pricing 以隔离 exact 的实验从极弱 seed 进入长尾，超过预期 120 秒且没有形成可比较 root，已终止，不纳入性能结论。该现象来自实验配置改变列生成轨迹，不是 no-h 语义异常。
+
+197. 2026-07-11 no-h 正式路径清理
+
+第 196 节 A/B 已完成后，旧 h 回退路径不再具有正式运行价值。本轮删除 `incrementalSourcedGraphKeepPredecessorEnvelope` 实验属性、每个 node 中恒为 null 的 predecessor envelope 字段、传播热路径中的空判断，以及只供旧路径使用的 `mergeExternalNoDelta(SparseDelta)` 和 `copyAsExternal()`。新 key 现在只建立一条 external envelope，直接作为综合 g 并 merge 本地 label；每个传播节点无条件只执行一次 `g<-min(g,delta)`。
+
+该清理没有改变第 196 节已经验证的 no-h 语句，只去掉不可达的旧分支和对象字段。focused 编译通过；SegmentPool 关闭和开启时各 96,000 次随机、拓扑、partial eager/lazy 对拍均通过，两组最终 active 均为 `164/143`。当前正式图中已不存在持久化 h、相关 merge 方法或运行期开关。剩余传播 delta 是 g 的真实下降区间，不能与已删除的 h 混淆，也不应改成传播完整 g。

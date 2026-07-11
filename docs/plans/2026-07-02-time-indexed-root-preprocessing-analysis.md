@@ -509,3 +509,15 @@ join-envelope 不同。它在每个 `(terminal job, true ngMemorySet)` group 内
 最新 source-aware 图的 root/solve 时间为 `93.948/95.036s`，ng-DSSR exact 为 `47.010s / 10 calls`，最终 Pool 5209。旧 Paper 图的 root/solve 时间为 `189.424/190.405s`，ng-DSSR exact 为 `122.905s / 12 calls`，最终 Pool 7224。按本次单次顺序 A/B，完整求解时间减少 `50.1%`，exact pricing 时间减少 `61.8%`。exact 分阶段累计由 `init/fw/bw/join = 27.554/11.863/70.040/13.216s` 降为 `18.587/6.478/16.601/5.200s`；其中 backward 减少 `76.3%`，是最大收益来源。join pairs 从 `44.280m` 降为 `12.025m`，funcEval 从 `43.051m` 降为 `11.155m`，分别减少约 `72.8%/74.1%`。最终证书轮的 active labels/node 平均值和最大值由 `15.796/282` 降为 `9.999/102`。
 
 因此当前完整实现的收益不只是省掉 predecessor label 扫描。source-zero 清理使已退出集体下包络的 label 不再继续扩展和 join，直接压低 backward 扩展、join pair 和 funcEval；同时列生成轨迹更短，exact calls 由 12 降到 10。由于两组列池和 pricing 轨迹不同，`50.1%/61.8%` 是当前完整算法的端到端净收益，不应解释为单次 dominance 操作的纯常数加速。该结果仍是单算例单次顺序 A/B，但前置状态、最终 bound 和有效性已对齐，可作为当前 W300 的有效代表结果。
+
+### 2026-07-11：最新 W300 热点与 compact-window 列成本讨论
+
+最新 source-aware 运行的 `95.036s` 中，ng-DSSR exact 为 `47.010s`，仍是最大单项。exact 内部累计 `init/fw/bw/join/finalize=18.587/6.478/16.601/5.200/0.009s`；init 又几乎全部由 completion bound 和 midpoint probe 构成，分别约 `8.785s/9.763s`。因此当前 exact 的主要瓶颈已经从旧图下的 dominance/join 爆炸转为 backward 扩展、midpoint probe 和 completion-bound 构造三项；join 只占 exact 约 11.1%，最终 evaluator 回刷仅约 9.1ms，已经不是性能问题。最后两次 pricing 分别跑 7/13 轮 DSSR，合计约 24.25s，占 exact 约 51.6%，说明尾部少量负列和最终无负列证书仍是主要重阶段。
+
+完整 BPC 的其它显式时间为：启发式 pricing `9.553s`，time-indexed root preprocessing `8.800s`，master LP `3.195s`，time-indexed pre-heuristic `1.186s`，subtree arc elimination `1.073s`。预处理总时间已包含其中约 `4.287s` 的 time-indexed graph pricing，不能重复相加。其余约 24s 是 initial-column/ALNS、模型和列池组织、分支准备、GC 以及未单独计时的外层流程；当前日志没有把 ALNS 单独拆开，不能把该残差全部算成 ALNS。
+
+关于让最终 evaluator 使用 compact window，需要区分搜索剪枝和永久列成本。compact window 来自当前 node/subtree 的 reduced-cost arc fixing，可安全用于该子树后续 pricing 的函数定义域，因而 ng-DSSR labeling 当前已经使用它。但 `TWETColumn` 只保存 sequence 和一个全局 cost，`Pool` 按 `SequenceSignature` 全局去重，`LP` 直接以 `column.getCost()` 建目标；它不记录列成本属于哪个 node/window。若只把最终重刷改成 compact-window penalty，同一 sequence 会在不同 node 得到不同成本，新列、继承列和兄弟节点也可能混用不同 objective，不能保持当前主问题口径。
+
+compact-window evaluator 的确会得到不小于真实 sequence cost 的受限成本，因此可能抬高当前 restricted master bound；但这不是免费加强，而是把当前 node 的时域 fixing 写进列定义。要严谨实现，至少需要 node-local column objective：全局 Pool 继续保存真实成本；每个 node 按其持久 compact window 为 restricted columns 缓存受限成本；RMP 中已有列和新 pricing 列必须统一使用该成本；窗口进一步收紧时要刷新相应 objective；兄弟节点不能共享该缓存。还必须只使用 no-dual、整数时间下可继承的 compact window，不能混入 dual profitable window 或本轮临时 tightening。此时加强的是经过安全时域 fixing 后的子树松弛，正确性证明也应按“保留所有可能优于 incumbent 的整数解”表述，而不能继续把它等同于原始全局 sequence-column LP。
+
+从性能上看，单纯修改 evaluator 没有价值：当前全部最终回刷只有 9.1ms，即使 compact 裁剪让它快一倍也无法影响 95s 总时间；反而每个 job 多一次 `setDomain/crop` 可能增加短 PWLF 的分配成本。若要评估 bound 收益，合理顺序是先做默认关闭的诊断，只对最终 candidates 和当前 restricted positive columns 同时计算 true cost 与 compact cost，统计成本抬升、正值列命中率和假想 RMP objective 差异，但仍只把 true cost 写入 Pool。确认 bound 增益足以覆盖 node-local 重算和缓存成本后，再决定是否实现完整 node-local objective；不应先直接修改现有 evaluator。

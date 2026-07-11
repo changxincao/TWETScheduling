@@ -1901,3 +1901,21 @@ partial merge 不扫描 `node.labels`。每次 min-merge 在原本生成 merged 
 40-2 首轮压力 A/B 使用同一极少 seed 口径：关闭 ALNS、启发式 pricing、time-indexed 预处理和 strong branching，只跑 root，时限 300 秒。normal 为 `302.665s/44 exact calls/pool 10369`，partial 为 `300.280s/42 exact calls/pool 15854`，两者都在 root 未闭合，因此不能比较最终 bound。累计统计中，partial 实际裁剪 556,874 次，涉及 segments `1,363,473 -> 1,305,391`，只减少约 4.26%；forward candidates 从 normal 的 992,056 降到 930,553，约减 6.2%，backward 从 993,827 降到 918,243，约减 7.6%。但两边很快进入不同列/dual 路径，partial 累计 join pairs 为 432,671,164，高于 normal 的 367,758,663，约增 17.7%，因此总体没有显示稳定加速。
 
 前几轮局部上 partial 有明显收益，例如第 7 次 exact 的时间约 `682ms -> 355ms`，forward candidates `4158 -> 2213`，join pairs `1.174m -> 0.712m`；但后续 dual 路径分叉后该优势没有维持。当前结论是：source-aware partial 已正确、低耦合地接入，并确实减少一部分扩展；但由于方向 normalize 会从保留区间恢复等待/后缀闭包，实际 segment 缩减只有约 4%，尚不足以稳定压低 join 总量。该模式保留用于后续在 W300/宽窗口等 frontier 更厚实例上测试，当前不能据此替代 source-aware normal 作为默认最快模式。
+
+188. 2026-07-11 新 dominance 图完整流程与剩余冗余复核
+
+当前 no-SRI normal/partial 的核心流程与讨论方案一致。每个 terminal job 下按 `dominanceSet/reachableSet` 建 Hasse node；同 key label 先用当前综合包络 `g` 做只读支配判断，大量立即失败候选不分配 merged envelope。候选未被支配时执行 `g <- min(g, frontier)`，每段保留 local label source 或 external predecessor source。新 key 先沿 Hasse 图找到 immediate superset predecessors，将其 `g` 合并为 predecessor envelope `h`；若 `h` 不完全支配候选，则建立 `g=min(h,frontier)`，接入 immediate predecessor/successor 边，并只传播本次真正下降的 sparse delta。
+
+successor 收到 delta 后执行 `h <- min(h,delta)` 和 `g <- min(g,delta)`。source 最后一个 segment 消失时直接标记对应 label dominated，计数归零的 node 删除并重连 Hasse 边；没有数值下降则停止向后传播。传播队列对一次 label 插入的同一下降函数，每个 graph node 最多入队一次。被删除 label 若仍在 expansion queue，poll 时按 `isDominated` 跳过；active terminal list 在 join 前 compact。正式 dominance 传播、whole-label 删除和 partial 裁剪均不扫描 `node.labels`。
+
+partial 只比 normal 多一层 source 区间裁剪。每次 merge 只记录新 label 和本轮丢失部分 source 的旧 labels；完整失源直接删除，部分失源按剩余多个离散 source 区间重建 label frontier，外部置 `BigM` 后做方向 normalize 并刷新 minimum。新 label 在入队前已经按最终 source 区间裁剪；尚未出队的旧 label 会使用更新后的 frontier 扩展。已经出队并生成的 children 不会回收，因此这是在线增量裁剪，不是对历史搜索树的回溯压缩。normalize 还会恢复等待/prefix 或 suffix closure，所以最终 frontier 是“source 区间产生的合法方向闭包”，不是只含裸 source segments；这与前述 BigM 后 normalize 的语义一致。
+
+两个边界需要继续保留。第一，active SRI 的 cut-state/compensation 尚未进入 source envelope 的可比条件，因此有 active cuts 时仍切换到旧 `SriAwarePartialListDominanceStore`；无 active cut 的 partial 已使用新图。第二，旧 `PaperDominanceGraph`、graph partial 和 no-SRI list partial 虽然仍保留源码用于回归，但 no-SRI 主线已无法通过旧配置开关退回，`GRAPH_PARTIAL` 与 no-SRI `LIST_PARTIAL` 当前实际都表示同一个 source-aware partial 行为。
+
+剩余效率问题按优先级如下。第一，partial 当前对每次 source 小变化都立即重建 PWLF、填 BigM、normalize、find minimum。40-2 压力 run 累计发生 556,874 次裁剪，但 segments 总量只从 1,363,473 降到 1,305,391，约 4.26%；这说明大量重复裁剪的收益较小，可能抵消扩展减少。更合理的后续方向是合并同一 label 的连续 source 更新，或对尚未扩展 label 在 poll 前应用最新裁剪、对已扩展 label 在 join 前只应用一次最终裁剪；这需要保存最新 source interval/version，但不应恢复 node 全 label 扫描。
+
+第二，更新 `predecessorEnvelope h` 时仍调用完整 merge，并生成一份调用方完全不使用的 `MergeOutcome.delta`；新 node 聚合多个 predecessor envelope 时也有同样问题。应增加 no-delta/no-source-output 的 in-place min merge，只更新 `h` 几何，避免构造并丢弃 sparse delta。第三，partial 的 segment before/after 统计当前每次裁剪都各扫描一遍 PWLF，即使没有打开 timing diagnostics 也执行；正式性能模式应关闭这两次统计扫描或只在诊断开关下启用。
+
+第四，传播中对未删除 node 会在检查 `outcome.delta.isEmpty()` 前复制整个 successor set；无数值下降时该副本立即丢弃，可以把复制移动到 delta 非空之后。第五，node 仍把所有历史 accepted labels 记录在 `node.labels`，但正式主线不读取，只供一致性接口/诊断；inactive node 也保留在 `nodes` 统计列表直到本轮 pricing 结束。这主要是引用内存和 summary 扫描开销，不是扩展热路径，可后续让诊断直接从 envelope local sources 收集 active labels，再移除历史列表。第六，accepted label 会先做一次只读 `coversAndDominates`，随后 merge 再扫描一次 envelope；但 rejected labels 通常占多数，该 fast reject 避免了 merged list/source map 分配，目前属于合理的时间换内存策略，不建议优先改。
+
+Hasse 的 superset/subset 搜索、候选排序和 node 删除重连仍有 pairwise bitset/集合操作，但只在新 key 建立或 node 删除时发生；same-key 热插入不走这些逻辑，当前统计也没有显示它是瓶颈。因此不应先做 cardinality bucket 等额外索引。更重要的是，整体 exact pricing 的最大耗时仍常在 join：本次 partial 压力 run 即使减少正反扩展，累计 join pairs 仍达到 4.33 亿。新图后续优化应优先减少重复 partial rebuild，并观察它能否进一步减少 active labels/join pairs；只缩短 dominance 自身的常数无法单独解决整体 pricing 时间。

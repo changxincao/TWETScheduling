@@ -2342,6 +2342,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void forwardExtend(LP lp) {
 		ForwardLabel label = FWUL.poll();
+		IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(label.jid), label);
 		if (label.isDominated) {
 			return;
 		}
@@ -2401,6 +2402,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void backwardExtend(LP lp) {
 		BackwardLabel label = BWUL.poll();
+		// 虚拟 sink 的 jid=n+1 不进入按真实 terminal job 建立的 dominance store。
+		if (label.jid >= 0 && label.jid < BWTL.size()) {
+			IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(label.jid), label);
+		}
 		if (label.isDominated) {
 			return;
 		}
@@ -3097,6 +3102,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double liveMinEll = Utility.big_M;
 		for (int i = 0; i < labels.size(); i++) {
 			ForwardLabel label = labels.get(i);
+			IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(job), label);
 			if (label.isDominated) {
 				continue;
 			}
@@ -3129,6 +3135,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int liveCount = 0;
 		for (int i = 0; i < labels.size(); i++) {
 			BackwardLabel label = labels.get(i);
+			IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(job), label);
 			if (!label.isDominated) {
 				labels.set(liveCount++, label);
 			}

@@ -1933,3 +1933,15 @@ label 同时存在于三类容器。被接受后，它进入 graph node 的 `lab
 当前队列顺序仍是时间优先：forward 按最早完成时间升序，backward 按最晚完成时间降序，并以 reachable cardinality 和 reduced cost 作后续比较。partial 可能在 label 已入堆后修改其 frontier/minimum，但完整 exact round 会耗尽队列，不依赖队首键形成提前证书，所以堆序陈旧只改变处理顺序和超时前进度，不改变完整轮次结果。已经出队扩展过的 parent 后来被裁剪或删除时，已生成 children 不回收；这些 children 仍是合法但可能冗余的状态，在线 dominance 只能避免后续新工作，不能回溯撤销已完成扩展。
 
 本轮先处理一项确定冗余：partial 裁剪前后 segment 数的两次 PWLF 遍历改为只在 `twet.bpc.incrementalSourcedGraphTiming=true` 时执行；正式求解仍保留 O(1) 的裁剪次数统计，不再为 summary 扫描每条被裁函数。same-key 只读预检查继续保留，后续若实现延迟分配的单遍 merge 才重新评估；其预期空间已小于 partial 重建频率优化。已经扩展的 children 不撤销只会保留合法冗余状态，当前也不是优先处理项。
+
+190. 2026-07-11 source-aware partial 惰性裁剪与无效状态清理
+
+本轮将 partial 从“每次 source 区间变化立即重建 label PWLF”改为惰性合并。source-aware envelope merge 仍立即更新正确的综合包络，并立即删除完全失去 source 的 label；对仍有贡献但区间缩短的 label，只在 graph 内按 identity 保存最新 retained segments。后续更新直接覆盖同一 label 的旧 pending 状态，不扫描 node labels，也不累计已经过时的区间。label 从 forward/backward priority queue 出队并准备扩展前应用一次 pending trim；已经扩展过、之后又被 predecessor/source 更新继续收窄的 label，则在 join compact 前应用一次。这样扩展和 join 始终读取最新 frontier，而同一阶段内的多次 source 变化只触发一次 PWLF 重建。
+
+惰性处理不改变队列和 dominance 语义。pending label 在真正使用前可以暂时保留偏松的旧 frontier 和旧 minimum；当前 exact round 不依赖 priority queue 队首提前形成证书，出队前会刷新，因此只可能改变处理次序。综合 dominance 判断始终使用已经更新的 source-aware envelope，不读取 pending label 的旧 frontier。forward terminal 的 scalar min/earliest completion 也会在 join compact 时基于刷新后的 live labels 统一重算。虚拟 backward sink 不进入按 terminal job 建立的 dominance store，因此 prepare hook 明确跳过 `jid=n+1`。
+
+同时将 predecessor envelope `h` 的更新切换为 no-delta merge。`h <- min(h,input)` 仍完整更新几何包络，但不再构造调用方不会使用的 `SparseDelta`、partial source map 和 retained-source 结果；只有综合包络 `g <- min(g,input)` 记录数值下降 delta 并继续向 successors 传播。新 reachable key 聚合多个 predecessor envelope 时同样使用 no-delta 路径。当前实现仍复用统一 merge 主体并创建一个很小的 outcome 控制对象，以保持同一数值/tie 逻辑；主要去掉的是每个下降区间的 delta 对象与相关来源跟踪。
+
+新图中的 `node.labels` 历史列表已经删除。正式 join 原本就使用 ng-DSSR 按 terminal job 维护的 active lists；graph 的 active label 集合可直接由 envelope 的 `localSources` 得到。`getActiveLabels()` 和一致性诊断已改为读取 local sources，并在返回前应用 pending trim。dominated label 仍采用 priority queue 和 terminal active list 的惰性删除，但不再被 graph node 额外长期引用。
+
+验证包括 focused `javac`、开关关闭/打开下各 96,000 次随机结构一致性测试，以及新增 deferred-partial 测试。后者连续插入期间不执行 trim，最后统一 prepare，并核对综合包络、active source 和裁后 frontier。40-2 no-ALNS/no-heuristic/no-strong、单节点 partial root smoke 运行到时间限制但 `valid=true`，未出现列或 bound 语义错误。日志确认惰性合并实际发生：较重一轮有 `75,945` 次 partial source 更新，其中 `31,344` 次覆盖已有 pending 状态，最终实际重建 `19,138` 次；其余 pending 状态还可能在完全失源、后续恢复为覆盖当前 frontier或时间限制时被清除/未消费，不能把差值全部解释成节省的重建次数。该 smoke 的主要时间仍在千万级 join，不在 dominance。

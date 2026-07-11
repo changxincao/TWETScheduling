@@ -43,12 +43,41 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		verifyDeleteAndReinsert(Direction.BACKWARD);
 		verifyPartialMode(Direction.FORWARD);
 		verifyPartialMode(Direction.BACKWARD);
+		verifyDeferredPartialMode(Direction.FORWARD);
+		verifyDeferredPartialMode(Direction.BACKWARD);
 		int insertions = verifyRandom(Direction.FORWARD) + verifyRandom(Direction.BACKWARD);
 		String performance = performanceSmoke();
 		System.out.println("IncrementalSourcedDominanceGraphConsistencyTest passed: insertions=" + insertions
 				+ ", paperPointQueryMismatches=" + paperPointQueryMismatches
 				+ ", paperRetainedDominatedStateObservations=" + paperRetainedDominatedStateObservations
 				+ ", " + performance);
+	}
+
+	/** 连续 source 更新先累计，最后统一 prepare，验证惰性裁剪不改变 graph 包络和 active 状态。 */
+	private static void verifyDeferredPartialMode(Direction direction) {
+		IncrementalSourcedDominanceGraph partial = new IncrementalSourcedDominanceGraph(direction, true);
+		ArrayList<LabelSpec> history = new ArrayList<LabelSpec>();
+		ArrayList<Label> labels = new ArrayList<Label>();
+		RANDOM.setSeed(20260712L + direction.ordinal());
+		for (int labelId = 0; labelId < 2000; labelId++) {
+			LabelSpec spec = randomSpec(direction, labelId);
+			history.add(spec);
+			Label label = spec.newLabel();
+			labels.add(label);
+			partial.insertOrDominate(label);
+			for (int query = 0; query < 4; query++) {
+				PackedBitSet target = randomReachableSet();
+				double time = RANDOM.nextDouble() * T;
+				assertClose(bruteBest(history, target, time),
+						partial.debugBestValue(target, target.cardinality(), time),
+						"deferred partial envelope direction=" + direction + ", label=" + labelId);
+			}
+		}
+		ArrayList<Label> active = partial.getActiveLabels();
+		if (active.isEmpty() || !partial.debugActiveLabelsHaveEnvelopeSource()) {
+			throw new AssertionError("deferred partial active-source mismatch: direction=" + direction);
+		}
+		assertPartialFrontiersDoNotImprove(history, labels, direction, 2000);
 	}
 
 	/** partial 只能抬高单条 label frontier，不能改变 graph 的综合数值包络。 */

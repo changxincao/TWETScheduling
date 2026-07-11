@@ -12,8 +12,8 @@ import TWETBPC.Util.PackedBitSet;
 /**
  * 来源感知增量 dominance graph 的随机、拓扑和性能对拍。
  * <p>
- * 对拍目标是每次新 label 的接收结果、每个历史 label 的存活状态、任意 reachable-set 点值包络
- * 和最终查询语义都与旧实现一致。
+ * 接收结果与旧 Paper graph 对拍；数值包络和点值查询直接与全部历史 label 的 brute-force 下包络对拍。
+ * 旧图若少删 label，只在存在严格超集 reachable-set 且函数完整支配的独立证据时接受该差异。
  */
 public final class IncrementalSourcedDominanceGraphConsistencyTest {
 
@@ -21,7 +21,10 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 	private static final double T = 100.0;
 	private static final int RANDOM_CASES = 120;
 	private static final int LABELS_PER_CASE = 100;
+	private static final int RANDOM_SEEDS = 4;
 	private static final Random RANDOM = new Random(20260710L);
+	private static int paperPointQueryMismatches;
+	private static int paperRetainedDominatedStateObservations;
 
 	private IncrementalSourcedDominanceGraphConsistencyTest() {
 	}
@@ -33,9 +36,15 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		verifyLabelRetentionSemantics(Direction.BACKWARD);
 		verifyDiamond(Direction.FORWARD);
 		verifyDiamond(Direction.BACKWARD);
+		verifySparseDiamondPropagation(Direction.FORWARD);
+		verifySparseDiamondPropagation(Direction.BACKWARD);
+		verifyDeleteAndReinsert(Direction.FORWARD);
+		verifyDeleteAndReinsert(Direction.BACKWARD);
 		int insertions = verifyRandom(Direction.FORWARD) + verifyRandom(Direction.BACKWARD);
 		String performance = performanceSmoke();
 		System.out.println("IncrementalSourcedDominanceGraphConsistencyTest passed: insertions=" + insertions
+				+ ", paperPointQueryMismatches=" + paperPointQueryMismatches
+				+ ", paperRetainedDominatedStateObservations=" + paperRetainedDominatedStateObservations
 				+ ", " + performance);
 	}
 
@@ -88,38 +97,56 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		compareSequence(direction, unbalanced, "unbalanced");
 	}
 
+	/** 验证菱形两条父路径只传播一次时，真正降低后继包络的交集区间不会丢失。 */
+	private static void verifySparseDiamondPropagation(Direction direction) {
+		ArrayList<LabelSpec> specs = new ArrayList<LabelSpec>();
+		specs.add(constantSpec(direction, 200.0, 1));
+		specs.add(linearSpec(direction, 1.0, 0.0, 1, 2));
+		specs.add(linearSpec(direction, -1.0, 100.0, 1, 3));
+		specs.add(constantSpec(direction, 200.0, 1, 2, 3));
+		specs.add(constantSpec(direction, 30.0, 1, 2, 3));
+		compareSequence(direction, specs, "sparse-diamond");
+	}
+
+	/** 验证节点被 predecessor 删除后，相同 reachable key 可以重新建立并再次参与传播。 */
+	private static void verifyDeleteAndReinsert(Direction direction) {
+		ArrayList<LabelSpec> specs = new ArrayList<LabelSpec>();
+		specs.add(constantSpec(direction, 100.0, 1));
+		specs.add(constantSpec(direction, 50.0, 1, 2));
+		specs.add(constantSpec(direction, 40.0, 1));
+		specs.add(constantSpec(direction, 30.0, 1, 2));
+		compareSequence(direction, specs, "delete-reinsert");
+	}
+
 	private static int verifyRandom(Direction direction) {
-		RANDOM.setSeed(20260710L + direction.ordinal());
 		int insertions = 0;
-		for (int caseId = 0; caseId < RANDOM_CASES; caseId++) {
-			PaperDominanceGraph paper = new PaperDominanceGraph(direction);
-			IncrementalSourcedDominanceGraph incremental = new IncrementalSourcedDominanceGraph(direction);
-			ArrayList<LabelSpec> history = new ArrayList<LabelSpec>();
-			ArrayList<Label> paperLabels = new ArrayList<Label>();
-			ArrayList<Label> incrementalLabels = new ArrayList<Label>();
-			for (int labelId = 0; labelId < LABELS_PER_CASE; labelId++) {
-				LabelSpec spec = randomSpec(direction, labelId);
-				history.add(spec);
-				Label paperLabel = spec.newLabel();
-				Label incrementalLabel = spec.newLabel();
-				paperLabels.add(paperLabel);
-				incrementalLabels.add(incrementalLabel);
-				boolean paperDominated = paper.insertOrDominate(paperLabel);
-				boolean incrementalDominated = incremental.insertOrDominate(incrementalLabel);
-				if (paperDominated != incrementalDominated) {
-					throw new AssertionError("insert mismatch: direction=" + direction + ", case=" + caseId
-							+ ", label=" + labelId + ", paper=" + paperDominated
-							+ ", incremental=" + incrementalDominated);
+		for (int seedId = 0; seedId < RANDOM_SEEDS; seedId++) {
+			RANDOM.setSeed(20260710L + 1000L * direction.ordinal() + seedId);
+			for (int caseId = 0; caseId < RANDOM_CASES; caseId++) {
+				int globalCaseId = seedId * RANDOM_CASES + caseId;
+				PaperDominanceGraph paper = new PaperDominanceGraph(direction);
+				IncrementalSourcedDominanceGraph incremental = new IncrementalSourcedDominanceGraph(direction);
+				ArrayList<LabelSpec> history = new ArrayList<LabelSpec>();
+				ArrayList<Label> paperLabels = new ArrayList<Label>();
+				ArrayList<Label> incrementalLabels = new ArrayList<Label>();
+				for (int labelId = 0; labelId < LABELS_PER_CASE; labelId++) {
+					LabelSpec spec = randomSpec(direction, labelId);
+					history.add(spec);
+					Label paperLabel = spec.newLabel();
+					Label incrementalLabel = spec.newLabel();
+					paperLabels.add(paperLabel);
+					incrementalLabels.add(incrementalLabel);
+					boolean paperDominated = paper.insertOrDominate(paperLabel);
+					boolean incrementalDominated = incremental.insertOrDominate(incrementalLabel);
+					if (paperDominated != incrementalDominated) {
+						throw new AssertionError("insert mismatch: direction=" + direction + ", case="
+								+ globalCaseId + ", label=" + labelId + ", paper=" + paperDominated
+								+ ", incremental=" + incrementalDominated);
+					}
+					assertLabelStates(direction, history, paperLabels, incrementalLabels, globalCaseId, labelId);
+					assertPointEnvelopes(direction, history, paper, incremental, globalCaseId, labelId);
+					insertions++;
 				}
-				assertLabelStates(direction, paperLabels, incrementalLabels, caseId, labelId);
-				assertPointEnvelopes(direction, history, paper, incremental, caseId, labelId);
-				if (incremental.getActiveLabels().size() != paper.getActiveLabels().size()) {
-					throw new AssertionError("active-label count mismatch: direction=" + direction
-							+ ", case=" + caseId + ", label=" + labelId + ", paper="
-							+ paper.getActiveLabels().size() + ", incremental="
-							+ incremental.getActiveLabels().size());
-				}
-				insertions++;
 			}
 		}
 		return insertions;
@@ -143,21 +170,48 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 			if (paperDominated != incrementalDominated) {
 				throw new AssertionError(name + " insertion mismatch: direction=" + direction + ", label=" + i);
 			}
-			assertLabelStates(direction, paperLabels, incrementalLabels, -1, i);
+			assertLabelStates(direction, history, paperLabels, incrementalLabels, -1, i);
 			assertPointEnvelopes(direction, history, paper, incremental, -1, i);
 		}
 	}
 
-	private static void assertLabelStates(Direction direction, ArrayList<Label> paperLabels,
-			ArrayList<Label> incrementalLabels, int caseId, int labelId) {
+	private static void assertLabelStates(Direction direction, ArrayList<LabelSpec> history,
+			ArrayList<Label> paperLabels, ArrayList<Label> incrementalLabels, int caseId, int labelId) {
 		for (int i = 0; i < paperLabels.size(); i++) {
 			if (paperLabels.get(i).isDominated != incrementalLabels.get(i).isDominated) {
+				if (!paperLabels.get(i).isDominated && incrementalLabels.get(i).isDominated
+						&& hasStrictSupersetDominator(history, i, direction)) {
+					paperRetainedDominatedStateObservations++;
+					continue;
+				}
 				throw new AssertionError("label-state mismatch: direction=" + direction + ", case=" + caseId
 						+ ", inserted=" + labelId + ", history=" + i + ", paper="
 						+ paperLabels.get(i).isDominated + ", incremental="
 						+ incrementalLabels.get(i).isDominated);
 			}
 		}
+	}
+
+	private static boolean hasStrictSupersetDominator(ArrayList<LabelSpec> history, int targetIndex,
+			Direction direction) {
+		LabelSpec target = history.get(targetIndex);
+		for (int i = 0; i < history.size(); i++) {
+			if (i == targetIndex) {
+				continue;
+			}
+			LabelSpec candidate = history.get(i);
+			if (candidate.reachableSet.equals(target.reachableSet)
+					|| !candidate.reachableSet.isSupersetOf(target.reachableSet)) {
+				continue;
+			}
+			boolean covers = direction == Direction.FORWARD
+					? !Utility.compareGt(candidate.frontier.head.start, target.frontier.head.start)
+					: !Utility.compareLt(candidate.frontier.tail.end, target.frontier.tail.end);
+			if (covers && candidate.frontier.dominates(target.frontier)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static void assertPointEnvelopes(Direction direction, ArrayList<LabelSpec> history,
@@ -181,15 +235,22 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 				boolean paperAt = paper.dominatesSinglePoint(target, target.cardinality(), time, expected + epsilon);
 				boolean incrementalAt = incremental.dominatesSinglePoint(target, target.cardinality(), time,
 						expected + epsilon);
-				if (!paperAt || !incrementalAt) {
+				if (!paperAt) {
+					paperPointQueryMismatches++;
+				}
+				if (!incrementalAt) {
 					throw new AssertionError("point dominance upper check failed: direction=" + direction
-							+ ", expected=" + expected + ", actual=" + actual);
+							+ ", case=" + caseId + ", label=" + labelId + ", query=" + query + ", time=" + time
+							+ ", expected=" + expected + ", actual=" + actual + ", target=" + target);
 				}
 				boolean paperBelow = paper.dominatesSinglePoint(target, target.cardinality(), time,
 						expected - epsilon);
 				boolean incrementalBelow = incremental.dominatesSinglePoint(target, target.cardinality(), time,
 						expected - epsilon);
-				if (paperBelow || incrementalBelow) {
+				if (paperBelow) {
+					paperPointQueryMismatches++;
+				}
+				if (incrementalBelow) {
 					throw new AssertionError("point dominance lower check failed: direction=" + direction
 							+ ", expected=" + expected + ", actual=" + actual);
 				}
@@ -245,6 +306,14 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		PackedBitSet reachable = setOf(jobs);
 		PiecewiseLinearFunction frontier = new PiecewiseLinearFunction(0.0, T);
 		frontier.addSegment(0.0, T, 0.0, value);
+		frontier.normalize(direction);
+		return new LabelSpec(1, reachable, frontier);
+	}
+
+	private static LabelSpec linearSpec(Direction direction, double slope, double intercept, int... jobs) {
+		PackedBitSet reachable = setOf(jobs);
+		PiecewiseLinearFunction frontier = new PiecewiseLinearFunction(0.0, T);
+		frontier.addSegment(0.0, T, slope, intercept);
 		frontier.normalize(direction);
 		return new LabelSpec(1, reachable, frontier);
 	}

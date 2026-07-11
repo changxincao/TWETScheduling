@@ -1979,3 +1979,11 @@ partial 重建后的 minimum 刷新也做了严格等价优化。旧代码调用
 前述随机一致性测试原先固定关闭 `Configure.SegmentPool`，无法主动覆盖真实求解中“旧 frontier 释放后 segment 立即被复用”的路径。本轮仅扩展测试入口，使同一套随机、拓扑、partial eager/lazy 和端点 minimum 对拍可分别在池化关闭与开启时执行。两种模式均完成 forward/backward 共 96,000 次随机插入，active labels 均为 `164/143`，旧 Paper 点查询差异和保守保留计数也完全一致。
 
 该结果直接覆盖了 partial trim 中 `old.release()` 后的对象生命周期：sourced envelope 和 pending retained intervals 保存独立几何值，不引用 PWLF Segment；no-SRI label 不再保存旧主 frontier 别名；新 frontier 的 head/tail 和 minimum 均来自重新构建后的 segment 链。池化开启后没有出现函数值、支配状态或 active source 偏差，因此当前没有释放后悬挂引用。生产算法未修改，测试默认仍关闭池化，使用 `-Dtwet.test.segmentPool=true` 时才执行池化口径。
+
+195. 2026-07-11 持久化 predecessor envelope 的冗余分析
+
+再次沿图内全部引用检查后，当前每个 node 持久保存的 `predecessorEnvelope=h` 是明确重复状态。设本地 label 下包络为 `f`，当前综合包络为 `g=min(h,f)`。某个 predecessor 的综合包络只会单调下降，并以 sparse delta `d` 传播；更新后 `h'=min(h,d)`，因此 `g'=min(h',f)=min(g,d)`。也就是说 successor 直接执行一次 `g<-min(g,d)` 与当前“先更新 h、再用相同 delta 更新 g”严格等价，不需要持久保存 h。
+
+source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label)` 和 `EXTERNAL`；external delta 覆盖本地 source 后，merge outcome 可直接识别归零 label。新 key 第一次出现时仍需把直接 predecessors 的 `g` 临时取小，但可直接把该临时 external envelope 作为新 node 的初始 `g`，随后 merge 本地 label，无需复制出第二个包络。node 的本地 source 归零时，其 `g` 已只含 external geometry，等于原定义的 h；删除 node 并重连 predecessor/successor 不需要提高任何包络。插入中间 Hasse node 时，successor 原有 external 值已经存在，只需传播新 node 相对 predecessors 真正降低的 local delta。
+
+因此当前正确性流程与原讨论已经对齐，但还不能称为完全没有低效：传播路径目前每个 node 仍执行一次无返回 delta 的 h merge 和一次正式 g merge，前者仍会扫描旧 h、扫描 delta 并构造新 segment list。删除持久 h 后可把传播包络 merge 数直接从两次减为一次，同时每个 graph node 少保存一条 PWLF。该等价性依赖当前“包络只单调下降、不撤销 predecessor 贡献”的设计；若未来支持删除仍有本地 source 的 predecessor、回滚 label 或令包络上升，则必须重新引入 h 或从所有直接 predecessors 重建。active SRI 当前不使用该新图，不在本结论范围内。

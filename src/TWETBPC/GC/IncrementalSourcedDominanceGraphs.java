@@ -12,11 +12,9 @@ final class IncrementalSourcedDominanceGraphs {
 		return new IncrementalSourcedDominanceGraph(direction, partialDominance);
 	}
 
-	/** 新图 partial 模式在 label 真正参与扩展或 join 前应用累计裁剪；其他 store 保持原样。 */
+	/** 调用方确认使用新图 partial 后，在 label 真正参与扩展或 join 前应用累计裁剪。 */
 	static void prepareLabelForUse(DominanceStore store, Label label) {
-		if (store instanceof IncrementalSourcedDominanceGraph) {
-			((IncrementalSourcedDominanceGraph) store).prepareLabelForUse(label);
-		}
+		((IncrementalSourcedDominanceGraph) store).prepareLabelForUse(label);
 	}
 
 	static void resetStatistics() {

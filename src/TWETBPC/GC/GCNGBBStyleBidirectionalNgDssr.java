@@ -2055,6 +2055,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return !sriPricingEnabled;
 	}
 
+	private boolean useIncrementalSourcedPartialDominance() {
+		return useIncrementalSourcedDominanceGraph() && dominanceBackend != DominanceBackend.PAPER;
+	}
+
 	private void initializeLabelSearchState() {
 		resetDominanceStatistics();
 		FWUL = new PriorityQueue<ForwardLabel>(forwardQueueComparator(queueOrdering));
@@ -2342,7 +2346,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void forwardExtend(LP lp) {
 		ForwardLabel label = FWUL.poll();
-		IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(label.jid), label);
+		if (useIncrementalSourcedPartialDominance()) {
+			IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(label.jid), label);
+		}
 		if (label.isDominated) {
 			return;
 		}
@@ -2403,7 +2409,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void backwardExtend(LP lp) {
 		BackwardLabel label = BWUL.poll();
 		// 虚拟 sink 的 jid=n+1 不进入按真实 terminal job 建立的 dominance store。
-		if (label.jid >= 0 && label.jid < BWTL.size()) {
+		if (useIncrementalSourcedPartialDominance() && label.jid >= 0 && label.jid < BWTL.size()) {
 			IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(label.jid), label);
 		}
 		if (label.isDominated) {
@@ -3097,12 +3103,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void compactForwardLabelsForJoin(int job) {
 		ArrayList<ForwardLabel> labels = activeForwardByLastJob.get(job);
+		boolean preparePartial = useIncrementalSourcedPartialDominance();
 		int liveCount = 0;
 		double liveMinReducedCost = Utility.big_M;
 		double liveMinEll = Utility.big_M;
 		for (int i = 0; i < labels.size(); i++) {
 			ForwardLabel label = labels.get(i);
-			IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(job), label);
+			if (preparePartial) {
+				IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(job), label);
+			}
 			if (label.isDominated) {
 				continue;
 			}
@@ -3132,10 +3141,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void compactBackwardLabelsForJoin(int job) {
 		ArrayList<BackwardLabel> labels = activeBackwardByFirstJob.get(job);
+		boolean preparePartial = useIncrementalSourcedPartialDominance();
 		int liveCount = 0;
 		for (int i = 0; i < labels.size(); i++) {
 			BackwardLabel label = labels.get(i);
-			IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(job), label);
+			if (preparePartial) {
+				IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(job), label);
+			}
 			if (!label.isDominated) {
 				labels.set(liveCount++, label);
 			}

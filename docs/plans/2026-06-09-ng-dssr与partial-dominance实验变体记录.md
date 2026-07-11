@@ -1945,3 +1945,13 @@ label 同时存在于三类容器。被接受后，它进入 graph node 的 `lab
 新图中的 `node.labels` 历史列表已经删除。正式 join 原本就使用 ng-DSSR 按 terminal job 维护的 active lists；graph 的 active label 集合可直接由 envelope 的 `localSources` 得到。`getActiveLabels()` 和一致性诊断已改为读取 local sources，并在返回前应用 pending trim。dominated label 仍采用 priority queue 和 terminal active list 的惰性删除，但不再被 graph node 额外长期引用。
 
 验证包括 focused `javac`、开关关闭/打开下各 96,000 次随机结构一致性测试，以及新增 deferred-partial 测试。后者连续插入期间不执行 trim，最后统一 prepare，并核对综合包络、active source 和裁后 frontier。40-2 no-ALNS/no-heuristic/no-strong、单节点 partial root smoke 运行到时间限制但 `valid=true`，未出现列或 bound 语义错误。日志确认惰性合并实际发生：较重一轮有 `75,945` 次 partial source 更新，其中 `31,344` 次覆盖已有 pending 状态，最终实际重建 `19,138` 次；其余 pending 状态还可能在完全失源、后续恢复为覆盖当前 frontier或时间限制时被清除/未消费，不能把差值全部解释成节省的重建次数。该 smoke 的主要时间仍在千万级 join，不在 dominance。
+
+191. 2026-07-11 dominance graph 最终冗余复核
+
+再次沿 same-key 插入、new-key Hasse 接入、delta 传播、source 删除、pending partial、出队刷新和 join compact 检查后，处理了四处仍可严格等价删除的工作。第一，active successor 原来在确认输出 delta 非空前复制 successor set；现在空 delta 直接停止，只有需要继续传播时才复制。第二，normal 和 SRI 路径原来仍进入 partial prepare 的包装调用；现在只在 no-SRI source-aware partial 模式调用，normal 与 SRI 不再执行 cast/map 检查。第三，pending retained intervals 入 map 时已经证明不能覆盖当前 frontier，而 frontier 在 prepare 前不会由其他入口修改，因此 prepare 不再重复做第二次区间覆盖扫描。第四，predecessor envelope `h` 永远只有 external geometry；no-delta merge 安装新几何时直接替换 segment list，不再扫描 merged segments 重建必为空的 local-source map。
+
+同时清理了 dead Hasse node 的生命周期。原实现虽然已断开 dead node 的所有拓扑边，但仍把它保留在 `nodes` 历史数组，导致其 predecessor/dominance envelope 和 segment 数组一直存活到本轮 pricing 结束。日志曾出现 `created/deleted/active=404/339/65`，说明该引用保留并非极端情况。现在 active nodes 使用 `LinkedHashSet`，delete/reconnect 完成后 O(1) 从集合移除；轮末统计仍由 created/deleted 计数给出累计值，active summary 只扫描实际存活节点。
+
+保留的成本均有明确作用。same-key `coversAndDominates` 会让 accepted label 多扫描一次，但避免数量更多的 rejected labels 分配完整 merge/source/delta 结果；只有以后实现延迟分配的单遍 merge 才值得替换。new-key 的 superset/subset 搜索、排序和重连是维护 Hasse 拓扑所需，且不是 same-key 热路径。no-delta 仍复用统一 merge 主体并创建一个小 outcome 对象，以共享数值交点、tie 和 segment 合并语义；完全拆成第二套几何 merge 会增加重复代码和对拍面，当前收益不足。统计计数均为 O(1)，完整 node summary 每轮只执行一次并保留实验价值。
+
+验证重新执行 focused 编译、诊断开关开/关下各 96,000 次随机一致性测试，以及 40-2 no-ALNS/no-heuristic/no-strong 的 45 秒 partial root smoke。随机测试通过；真实 smoke 为 `TIME_LIMIT, valid=true, exact calls=23`，没有结构、列或 bound 异常。该配置只用于运行期接入验证，不作为性能基准；日志中已完成轮次的主要耗时仍是百万级函数 join。

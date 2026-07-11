@@ -1005,6 +1005,36 @@ final class CompletionBoundCalculator {
 	}
 
 	private FunctionPair buildForwardCandidate(PiecewiseLinearFunction parentF, int prevJob, int job) {
+		PiecewiseLinearFunction u = buildForwardTransitionCandidate(parentF, prevJob, job);
+		if (u == null) {
+			return null;
+		}
+		PiecewiseLinearFunction jobCost = forwardJobReducedPenalty(job);
+		if (jobCost == null) {
+			return null;
+		}
+		long start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
+		PiecewiseLinearFunction f = u.add(jobCost);
+		if (diagnosticCandidateTiming) {
+			stats.forwardCandidateAddNanos += System.nanoTime() - start;
+		}
+		if (!hasPositiveDomain(f)) {
+			return null;
+		}
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
+		f.normalize(Direction.FORWARD);
+		if (diagnosticCandidateTiming) {
+			stats.forwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
+		}
+		return hasPositiveDomain(f) ? new FunctionPair(u, f) : null;
+	}
+
+	/**
+	 * 最终重建 U 时只需要父前缀经过转移弧后的函数，不再构造随后才会使用的 job-cost/F。
+	 * 该结果与 {@link #buildForwardCandidate(PiecewiseLinearFunction, int, int)} 返回的 u 完全一致。
+	 */
+	private PiecewiseLinearFunction buildForwardTransitionCandidate(PiecewiseLinearFunction parentF,
+			int prevJob, int job) {
 		stats.forwardCandidateAttempts++;
 		if (parentF == null || parentF.head == null) {
 			return null;
@@ -1024,24 +1054,7 @@ final class CompletionBoundCalculator {
 		if (diagnosticCandidateTiming) {
 			stats.forwardCandidateFirstNormalizeNanos += System.nanoTime() - start;
 		}
-		PiecewiseLinearFunction jobCost = forwardJobReducedPenalty(job);
-		if (jobCost == null) {
-			return null;
-		}
-		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
-		PiecewiseLinearFunction f = u.add(jobCost);
-		if (diagnosticCandidateTiming) {
-			stats.forwardCandidateAddNanos += System.nanoTime() - start;
-		}
-		if (!hasPositiveDomain(f)) {
-			return null;
-		}
-		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
-		f.normalize(Direction.FORWARD);
-		if (diagnosticCandidateTiming) {
-			stats.forwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
-		}
-		return hasPositiveDomain(f) ? new FunctionPair(u, f) : null;
+		return hasPositiveDomain(u) ? u : null;
 	}
 
 	private FunctionPair buildBackwardSinkCandidate(int job) {
@@ -1059,6 +1072,35 @@ final class CompletionBoundCalculator {
 	}
 
 	private FunctionPair buildBackwardCandidate(PiecewiseLinearFunction successorB, int job, int successor) {
+		PiecewiseLinearFunction r = buildBackwardTransitionCandidate(successorB, job, successor);
+		if (r == null) {
+			return null;
+		}
+		PiecewiseLinearFunction jobCost = backwardJobReducedPenalty(job);
+		if (jobCost == null) {
+			return null;
+		}
+		long start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
+		PiecewiseLinearFunction b = r.add(jobCost);
+		if (diagnosticCandidateTiming) {
+			stats.backwardCandidateAddNanos += System.nanoTime() - start;
+		}
+		if (!hasPositiveDomain(b)) {
+			return null;
+		}
+		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
+		b.normalize(Direction.BACKWARD);
+		if (diagnosticCandidateTiming) {
+			stats.backwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
+		}
+		return hasPositiveDomain(b) ? new FunctionPair(r, b) : null;
+	}
+
+	/**
+	 * 最终重建 R 时只保留后缀经过转移弧后的函数，避免构造不会被使用的 job-cost/B。
+	 */
+	private PiecewiseLinearFunction buildBackwardTransitionCandidate(PiecewiseLinearFunction successorB,
+			int job, int successor) {
 		stats.backwardCandidateAttempts++;
 		if (successorB == null || successorB.head == null) {
 			return null;
@@ -1078,33 +1120,19 @@ final class CompletionBoundCalculator {
 		if (diagnosticCandidateTiming) {
 			stats.backwardCandidateFirstNormalizeNanos += System.nanoTime() - start;
 		}
-		PiecewiseLinearFunction jobCost = backwardJobReducedPenalty(job);
-		if (jobCost == null) {
-			return null;
-		}
-		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
-		PiecewiseLinearFunction b = r.add(jobCost);
-		if (diagnosticCandidateTiming) {
-			stats.backwardCandidateAddNanos += System.nanoTime() - start;
-		}
-		if (!hasPositiveDomain(b)) {
-			return null;
-		}
-		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
-		b.normalize(Direction.BACKWARD);
-		if (diagnosticCandidateTiming) {
-			stats.backwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
-		}
-		return hasPositiveDomain(b) ? new FunctionPair(r, b) : null;
+		return hasPositiveDomain(r) ? r : null;
 	}
 
 	private void rebuildForwardAuxiliaryBounds(PiecewiseLinearFunction[] forwardU,
 			PiecewiseLinearFunction[] finalForwardF, PiecewiseLinearFunction source) {
 		for (int idx = 0; idx < forwardSuccessorsByJob[0].length; idx++) {
 			int job = forwardSuccessorsByJob[0][idx];
-			FunctionPair candidate = buildForwardCandidate(source, 0, job);
+			if (forwardJobReducedPenalty(job) == null) {
+				continue;
+			}
+			PiecewiseLinearFunction candidate = buildForwardTransitionCandidate(source, 0, job);
 			if (candidate != null) {
-				mergeForward(forwardU, job, candidate.u);
+				mergeForward(forwardU, job, candidate);
 			}
 		}
 		for (int prev = 1; prev <= data.n; prev++) {
@@ -1115,9 +1143,12 @@ final class CompletionBoundCalculator {
 			int[] successors = forwardSuccessorsByJob[prev];
 			for (int idx = 0; idx < successors.length; idx++) {
 				int job = successors[idx];
-				FunctionPair candidate = buildForwardCandidate(parent, prev, job);
+				if (forwardJobReducedPenalty(job) == null) {
+					continue;
+				}
+				PiecewiseLinearFunction candidate = buildForwardTransitionCandidate(parent, prev, job);
 				if (candidate != null) {
-					mergeForward(forwardU, job, candidate.u);
+					mergeForward(forwardU, job, candidate);
 				}
 			}
 		}
@@ -1128,9 +1159,8 @@ final class CompletionBoundCalculator {
 		int[] sinkPredecessors = backwardPredecessorsByJob[sink];
 		for (int idx = 0; idx < sinkPredecessors.length; idx++) {
 			int job = sinkPredecessors[idx];
-			FunctionPair candidate = buildBackwardSinkCandidate(job);
-			if (candidate != null) {
-				mergeBackward(backwardR, job, candidate.u);
+			if (backwardJobReducedPenalty(job) != null) {
+				mergeBackward(backwardR, job, constantFunction(-lp.getArcDual(job, sink)));
 			}
 		}
 		for (int successor = 1; successor <= data.n; successor++) {
@@ -1141,9 +1171,12 @@ final class CompletionBoundCalculator {
 			int[] predecessors = backwardPredecessorsByJob[successor];
 			for (int idx = 0; idx < predecessors.length; idx++) {
 				int prev = predecessors[idx];
-				FunctionPair candidate = buildBackwardCandidate(suffix, prev, successor);
+				if (backwardJobReducedPenalty(prev) == null) {
+					continue;
+				}
+				PiecewiseLinearFunction candidate = buildBackwardTransitionCandidate(suffix, prev, successor);
 				if (candidate != null) {
-					mergeBackward(backwardR, prev, candidate.u);
+					mergeBackward(backwardR, prev, candidate);
 				}
 			}
 		}

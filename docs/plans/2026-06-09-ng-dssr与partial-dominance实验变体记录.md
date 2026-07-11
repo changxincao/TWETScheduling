@@ -1973,3 +1973,9 @@ partial 重建后的 minimum 刷新也做了严格等价优化。旧代码调用
 同时补充端点 minimum 的独立验证。每条 active partial frontier 在 trim 和方向 normalize 后，既按现有 O(1) 规则读取 forward tail/backward head，也用通用 `findMinimal()` 完整扫描；两者与 label 缓存的 `minReducedCost` 全部一致。因此第 192 节将 minimum 刷新从整函数扫描改为端点读取不是仅靠单调性推断，已经由随机 PWLF 对拍覆盖。
 
 再次沿正式调用链核对后，惰性 pending 只保存最新 retained intervals，综合 dominance 始终读取已经更新的 sourced envelope；label 出队扩展和 join compact 前均会消费 pending。queue key 的暂时滞后只改变耗尽式 exact round 的处理顺序；`extensionSet/reachableSet` 未随局部 trim 重算只会保守多尝试扩展，后续窗口检查仍会拒绝无效 child；join 缓存只在 compact 完成后首次建立。当前没有发现新的正确性缺口。高频冗余也已基本清理：dominated label 不再 prepare，no-SRI 不保留旧 frontier 别名，partial minimum 不再全函数扫描，诊断 segment 扫描只在显式统计开关下执行。剩余 same-key 只读预检查、new-key Hasse 搜索和统一 merge 小对象均有明确的拒绝快路径、拓扑维护或数值一致性价值，不建议为了少量常数继续拆分实现。
+
+194. 2026-07-11 SegmentPool 生命周期复核
+
+前述随机一致性测试原先固定关闭 `Configure.SegmentPool`，无法主动覆盖真实求解中“旧 frontier 释放后 segment 立即被复用”的路径。本轮仅扩展测试入口，使同一套随机、拓扑、partial eager/lazy 和端点 minimum 对拍可分别在池化关闭与开启时执行。两种模式均完成 forward/backward 共 96,000 次随机插入，active labels 均为 `164/143`，旧 Paper 点查询差异和保守保留计数也完全一致。
+
+该结果直接覆盖了 partial trim 中 `old.release()` 后的对象生命周期：sourced envelope 和 pending retained intervals 保存独立几何值，不引用 PWLF Segment；no-SRI label 不再保存旧主 frontier 别名；新 frontier 的 head/tail 和 minimum 均来自重新构建后的 segment 链。池化开启后没有出现函数值、支配状态或 active source 偏差，因此当前没有释放后悬挂引用。生产算法未修改，测试默认仍关闭池化，使用 `-Dtwet.test.segmentPool=true` 时才执行池化口径。

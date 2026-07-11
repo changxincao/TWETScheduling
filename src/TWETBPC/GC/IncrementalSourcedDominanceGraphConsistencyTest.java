@@ -31,7 +31,7 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 	}
 
 	public static void main(String[] args) {
-		Configure.SegmentPool = false;
+		Configure.SegmentPool = Boolean.getBoolean("twet.test.segmentPool");
 		Utility.resetCurUpperBound(Utility.big_M);
 		verifySourceAwareCollectiveDominance(Direction.FORWARD);
 		verifySourceAwareCollectiveDominance(Direction.BACKWARD);
@@ -48,6 +48,7 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		int insertions = verifyRandom(Direction.FORWARD) + verifyRandom(Direction.BACKWARD);
 		String performance = performanceSmoke();
 		System.out.println("IncrementalSourcedDominanceGraphConsistencyTest passed: insertions=" + insertions
+				+ ", segmentPool=" + Configure.SegmentPool
 				+ ", paperPointQueryMismatches=" + paperPointQueryMismatches
 				+ ", paperRetainedDominatedStateObservations=" + paperRetainedDominatedStateObservations
 				+ ", " + performance);

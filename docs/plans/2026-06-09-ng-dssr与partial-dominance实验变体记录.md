@@ -2003,3 +2003,9 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 第 196 节 A/B 已完成后，旧 h 回退路径不再具有正式运行价值。本轮删除 `incrementalSourcedGraphKeepPredecessorEnvelope` 实验属性、每个 node 中恒为 null 的 predecessor envelope 字段、传播热路径中的空判断，以及只供旧路径使用的 `mergeExternalNoDelta(SparseDelta)` 和 `copyAsExternal()`。新 key 现在只建立一条 external envelope，直接作为综合 g 并 merge 本地 label；每个传播节点无条件只执行一次 `g<-min(g,delta)`。
 
 该清理没有改变第 196 节已经验证的 no-h 语句，只去掉不可达的旧分支和对象字段。focused 编译通过；SegmentPool 关闭和开启时各 96,000 次随机、拓扑、partial eager/lazy 对拍均通过，两组最终 active 均为 `164/143`。当前正式图中已不存在持久化 h、相关 merge 方法或运行期开关。剩余传播 delta 是 g 的真实下降区间，不能与已删除的 h 混淆，也不应改成传播完整 g。
+
+198. 2026-07-11 no-h 删除重连传播边界复核
+
+再次检查 no-h 后，生产算法未发现新问题，但原测试把菱形传播和 node 删除/重建分成了两个用例，没有直接覆盖最敏感的组合拓扑。本轮新增定向序列：先建立 superset 根、两个不可比中间 node 和共同 subset successor；随后让根包络下降，连续清除中间和底部本地 sources；再重建不同中间分支与底部 node；最后让旧根再次下降，验证重连后的新 successors 全部收到传播。forward/backward 均逐次与 Paper graph、历史 label brute-force 包络和 source invariant 对拍。
+
+该组合用例在 SegmentPool 关闭和开启时均通过；连同原随机测试，每种池化口径仍完成 96,000 次随机插入，最终 active 均为 `164/143`。生产代码只修正了三处已经过时的 h 注释，没有修改计算路径。复核后确认：新 node 的 predecessor 聚合只产生 external source；local source 只由本地 label merge 引入；node 归零时 g 已纯 external；删除重连后未来 delta 可沿新的 Hasse 边继续传播。当前未发现其他有实际影响的高频冗余；新 key 的 external 聚合仍复用统一 merge 并创建小 outcome，但该路径低频且统一交点/tie 语义的价值高于拆分收益。

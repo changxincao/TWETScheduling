@@ -41,6 +41,8 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		verifySparseDiamondPropagation(Direction.BACKWARD);
 		verifyDeleteAndReinsert(Direction.FORWARD);
 		verifyDeleteAndReinsert(Direction.BACKWARD);
+		verifyDeleteReconnectAndPropagate(Direction.FORWARD);
+		verifyDeleteReconnectAndPropagate(Direction.BACKWARD);
 		verifyPartialMode(Direction.FORWARD);
 		verifyPartialMode(Direction.BACKWARD);
 		verifyDeferredPartialMode(Direction.FORWARD);
@@ -244,6 +246,23 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 		specs.add(constantSpec(direction, 40.0, 1));
 		specs.add(constantSpec(direction, 30.0, 1, 2));
 		compareSequence(direction, specs, "delete-reinsert");
+	}
+
+	/** 验证菱形中间节点被连续删除、重连和重建后，祖先后续下降仍能传到所有新 successor。 */
+	private static void verifyDeleteReconnectAndPropagate(Direction direction) {
+		ArrayList<LabelSpec> specs = new ArrayList<LabelSpec>();
+		specs.add(constantSpec(direction, 100.0, 1, 2, 3));
+		specs.add(constantSpec(direction, 90.0, 1, 2));
+		specs.add(constantSpec(direction, 80.0, 1, 3));
+		specs.add(constantSpec(direction, 70.0, 1));
+		specs.add(constantSpec(direction, 60.0, 1, 2, 3));
+		specs.add(constantSpec(direction, 50.0, 1, 2));
+		specs.add(constantSpec(direction, 40.0, 1));
+		specs.add(constantSpec(direction, 30.0, 1, 2, 3));
+		specs.add(constantSpec(direction, 20.0, 1, 3));
+		specs.add(constantSpec(direction, 10.0, 1));
+		specs.add(constantSpec(direction, 0.0, 1, 2, 3));
+		compareSequence(direction, specs, "delete-reconnect-propagate");
 	}
 
 	private static int verifyRandom(Direction direction) {

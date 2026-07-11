@@ -19,9 +19,9 @@ import TWETBPC.Util.PackedBitSet;
  * normal/no-SRI pricing 使用的来源感知增量 dominance graph。
  * <p>
  * 2026-07-10: 旧 {@link PaperDominanceGraph} 在后继节点上会重新扫描全部直接前驱，随后重建
- * label/predecessor/dominance 三层包络。本实现保持同一 reachable-set Hasse 拓扑，增量维护 predecessor
- * 包络 h 和综合包络 g，并把 g 的每段来源区分为本地 label 或外部 predecessor。新 label 只传播真正降低
- * 包络的离散区间；没有数值变化的分支立即停止。
+ * label/predecessor/dominance 三层包络。本实现保持同一 reachable-set Hasse 拓扑，只维护综合包络 g，
+ * 并把 g 的每段来源区分为本地 label 或外部 predecessor。新 label 只传播真正降低包络的离散区间；
+ * 没有数值变化的分支立即停止。
  * <p>
  * 2026-07-11: 每个综合包络段记录本地 label source；某个 source 的最后一个有效段消失时，
  * 说明该 label 已在完整定义域上被其余同-key labels 或 predecessor 集体覆盖，可直接标记 dominated。
@@ -619,7 +619,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 				roots.add(successor);
 			}
 		}
-		// dead node 已完全断开，不再为轮末诊断保留其 h/g envelope 和 segment 数组。
+		// dead node 已完全断开，不再为轮末诊断保留其 g envelope 和 segment 数组。
 		nodes.remove(node);
 		return successors;
 	}
@@ -815,7 +815,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 			if (outcome.numericChange || outcome.sourceChanged || segments.isEmpty()) {
 				if (!recordDelta && !trackPartialSources && source == null && localSources == null) {
-					// predecessor envelope h 只含 external geometry，无需再扫描 merged 重建空 source map。
+					// 新 node 聚合 predecessor 时只有 external geometry，无需再扫描 merged 重建空 source map。
 					segments = merged;
 				} else {
 					installMergedSegments(merged, outcome);

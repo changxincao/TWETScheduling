@@ -1790,3 +1790,29 @@ completion-bound 的 multi-delta 有效并不只是因为 BigM 段是简单水�
 partial 模式下，“label 没有被 predecessor `h` 完全占优”不能推出它仍出现在 active-label 下包络中。两区间反例为：`L1=5`，`L2` 在左区间为 `4`、右区间较高；初始 `h` 较高时，`L1` 在右区间贡献本地包络，`L2` 在左区间贡献。后来 `h` 只在右区间降到 `4`，于是 `L1` 的右区间被 trim，但它在左区间不受 `h` 支配，仍然 active；然而左区间又始终由 `L2=4` 压住，因此 `L1` 已不贡献任何本地或综合包络。若 stale `labelEnvelope` 的右区间仍记录 `L1`，单看 `L1.isDominated=false` 会把它误认为 contributor。
 
 这不推翻 lazy envelope 的数值正确性：右区间的 stale `L1` 已由 `h` 覆盖，综合 `g` 仍准确。它只说明 partial source-aware 不能只按 label 级 dominated 标记判断来源。可行做法是统计综合 `g=min(f_stale,h)` 的来源：stale segment 被 `h` 压住时直接记为 predecessor-covered；只有未被 `h` 覆盖且仍落在 label 当前未裁 frontier 上的 segment 才计入该 active label。另一种做法是 trim 后重建精确 active-label envelope。normal 模式整条 label 删除时，`isDominated` 已足够识别历史来源；partial 模式必须额外做区间级有效性判断。
+
+177. 2026-07-10 仅保留 predecessor envelope 与带来源 dominance envelope 的重构方案
+
+继续推导后，当前插入式 Paper dominance graph 在数值上可以不再保存独立 `labelEnvelope=f`。每个 node 只需保存本地 active labels、`h` 和 `g`，其中 `h` 是全部直接 predecessor 贡献的数值下包络，`g` 是 `min(h,所有本地 label frontier)`，并在 `g` 的每个 segment 上记录来源类型。对当前 node 的清理只需区分 `LOCAL(label)` 与 `EXTERNAL_PREDECESSOR`，不必把祖先的具体 label 一路带下来；祖先 node 删除和重连时其数值贡献仍由更上层 predecessor 保持，具体祖先对象不是当前 node 判断本地 label 是否有贡献所必需的状态。
+
+same-key 新 label 可把“先 `dominates()`、再 merge”合成一次 source-aware min-merge。若新 label 没有在任何正长度区间严格改善旧 `g`，按现有 `<=` collective dominance 语义直接拒绝；若有改善，则 normal 模式保留新 label 的完整 frontier 用于后续扩展，partial 模式只保留未被旧 `g` 占优的有效区间。merge 同时更新 `g` 的 segment 来源和本地 contributor 集合；某个旧本地 label 在新 `g` 中不再贡献任何区间时，如果此刻重新插入也会被同一 collective envelope 拒绝，因此可以标记 dominated 并删除。这是现有规则的到达顺序无关化，不引入新的 dominance 条件。节点 `g` 全部来自 predecessor 时，等价于 `h` 已支配所有本地 labels，可以删除该 graph node 并按现有方式重连拓扑。
+
+向 successor 传播时不再执行 `recomputePredecessorEnvelope()`。same-key 插入有 `g'=min(g,F_new)`；new-key 插入前旧 terminal predecessors 的贡献已存在于 successors，故两种情况唯一新增信号均来自 `F_new`。successor 直接做 `h<-min(h,delta)`；若 `h` 不变立即停止，若变化则做 `g<-min(g,delta)` 并把新来源标为 external。`g` 中失去全部贡献的本地 labels 可以删除，删除或 partial trim 后不需要重建任何包络，因为这些旧贡献已由当前 `g` 的其他来源覆盖。若 `g` 不变且始终维护“只保留 contributor labels”的不变量，该 node 也没有新的本地 label 可清理，不再访问 successors。
+
+拓扑搜索、new-key 插点和 dominated-node 删除重连仍需保留。`findTerminalSupersetNodes()` 与 `findImmediateSubsetNodes()` 维护 reachable-set Hasse 图，现有统计也未显示它们是热点，不应和包络重构一起改。传播队列经进一步推导后不需要因为稀疏 delta 改成可重复入队：当前 `insertOrDominate()` 一次只传播同一个新 label frontier `F_new`。若 successor `v` 在时间 `t` 被 `F_new` 严格改进，则 `F_new(t)<g_v^{old}(t)<=g_p^{old}(t)` 对每个直接 predecessor `p` 都成立，所以该时间点必然包含在每个 predecessor 的变化区间中；`v` 的真实 delta 是所有上游 delta 的子集，而不是不同路径 delta 的并集。任意一条变化 predecessor 路径第一次把对应 signal 送到 `v` 时，已经足以计算 `v` 的全部可能变化，当前每轮最多处理一次仍成立。只有未来把多个彼此独立的新 label 更新批量并发到同一传播轮次时，才需要 completion-bound 式 pending-interval worklist。
+
+这里的“稀疏 delta”具体指：对当前 node 的旧 `g` 与 `min(g,F_new)` 逐段比较，只保留 `F_new` 严格降低旧 `g` 的一个或多个不连续时间区间。dominance graph 的边上没有 completion-bound 的 `shift/add/normalize`，因此不需要构造区间外为 BigM 的完整 PWLF；直接传 `(start,end,对应 F_new 片段)` 的区间列表，并只在这些范围更新 successor `h/g` 更直接。若真实变化覆盖大部分 frontier，提取 sparse delta 可能没有收益，第一版也可先传播完整 `F_new` 并用 changed flag 截断。
+
+实现上不建议给全局 `PiecewiseLinearFunction.Segment` 直接加 label 字段，也不需要给 `h/f/g` 三套函数全部维护具体 label 来源。更小的边界是新增 dominance 专用 sourced envelope：几何仍复用 PWLF 语义，来源只记录 `LOCAL(label)` 或 `EXTERNAL`，merge 返回 changed intervals 与失去贡献的 local sources。normal/no-SRI 与 graph-partial/no-SRI 可分别保持当前 frontier 语义；SRI 状态若未进入 dominance key，不能直接复用该清理。single-point store 继续走独立路径。验收必须逐次对拍插入返回、active labels、每个 node 的 `g`、relaxed best RC、DSSR witness/rounds、返回列、bound 与最优目标。
+
+178. 2026-07-11 增量 sourced dominance graph 实现、错误清理口径撤回与最终结果
+
+本次没有修改原 `PaperDominanceGraph`，而是新增独立的 `IncrementalSourcedDominanceGraph` 和创建/统计入口。新图保留原 reachable-set Hasse 拓扑，只把数值维护改为增量方式：每个 node 保存 predecessor 包络 `h` 和综合包络 `g`；新 label 先用当前 `g` 做只读完整占优判断，只有真正改善时才构造 merged envelope；merge 同时返回 `g` 真正下降的多个离散区间，successor 只在这些 sparse delta 上执行 `h<-min(h,delta)` 和 `g<-min(g,delta)`。若 `g` 没有下降则停止后续传播。稀疏区间直接保存真实直线片段，区间外不构造 BigM PWLF，因为 dominance 边没有 completion-bound 中的 shift/add/normalize。
+
+第一版曾按来源删除“不再贡献综合 `g`”的同-key 旧 label。随机点值包络对拍全部通过，W300/50-3 的总时间也从约 `211s` 降到约 `113s`，但 root bound 从旧图的 `1726.014329` 变成 `1726.256114`。这给出了确定反例：即使 node 的数值 `g` 完全一致，同一 dominance key 下不同 label 的真实 `ngMemorySet` 和 final join 兼容性仍可能不同；只保留 envelope contributor 会丢失当前 join 需要的路径。由此撤回第 170/177 节中“whole-node 零贡献 label 可直接物理删除”的结论。最终版本不反向删除同-key 旧 labels；label 仍只在 predecessor `h` 完整占优其 frontier 时删除，与旧 Paper graph 的 active-label 语义严格一致。来源字段仅服务于本次 merge 的贡献判断和后续诊断，不再作为清理依据。
+
+传播队列保持一次插入、每 node 最多入队一次。这里传播的是同一个 `F_new`，图边只有 min merge。若下游 node 在时刻 `t` 被改善，则 `F_new(t)<g_v^{old}(t)<=g_p^{old}(t)` 对每个直接 predecessor 都成立，所以任意首条变化父路径已包含该 node 的全部可能下降区间。实测把逐父边事件改回单次入队后，W300 累计 propagated events 从 `791010` 降到 `632479`，source-aware merge 从 `1908459` 降到 `1591397`。只有未来一次 worklist 同时传播多个独立 label 时才需要 pending-delta 合并。
+
+正确性测试覆盖 forward/backward、同-key 保留、predecessor tie 删除、菱形和非平衡包含拓扑，并对 24000 次随机插入逐次比较插入返回、每个历史 label 的 `isDominated`、active-label 数量以及随机 reachable-set/time 点值包络；连续多轮均与旧 `PaperDominanceGraph` 一致。真实主线中，40-2 两侧均为 `bound=22490, exact calls=12, pool=10323`，旧图 `solve=18.189s, exact=4.037s`，新图一次同环境结果为 `solve=17.562s, exact=4.002s`。W300/50-3 setupR50 两次旧图结果为 `solve=211.187/245.986s, exact=171.098/206.208s`；最终新图在相同 `bound=1726.014329, pricing=219, pool=7600, exact calls=9` 下取得 `solve=180.760s, exact=138.478s`。另一次机器整体降频的新图结果仍保持相同轨迹和 bound。20-2 完整 root 闭合为 `obj=bound=6343, exact calls=1, valid=true`。
+
+配置 `useIncrementalSourcedDominanceGraph` 默认开启；full-domain runner 属性为 `twet.bpc.fullDomainCompare.incrementalSourcedDominance`，outsourcing runner 属性为 `twet.bpc.outsourcingCompare.incrementalSourcedDominance`。显式设为 `false` 可完整回退旧 Paper graph。新 backend 只用于 normal Paper dominance 且当前无 active SRI；partial/list backend 和 active SRI 保持原实现，避免混入区间 trim 或不完整 cut state 语义。

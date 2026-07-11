@@ -1995,7 +1995,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void setDominanceDiagnosticContext(String context) {
-		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
+		if (useIncrementalSourcedDominanceGraph()) {
+			IncrementalSourcedDominanceGraphs.setDiagnosticContext(context);
+		} else if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
 			PaperPartialDominanceGraphs.setDiagnosticContext(context);
 		} else if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
 			PartialListDominanceStore.setDiagnosticContext(context);
@@ -2005,7 +2007,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void resetDominanceStatistics() {
-		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
+		if (useIncrementalSourcedDominanceGraph()) {
+			IncrementalSourcedDominanceGraphs.resetStatistics();
+		} else if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
 			PaperPartialDominanceGraphs.resetStatistics();
 		} else if (dominanceBackend == DominanceBackend.LIST_PARTIAL) {
 			PartialListDominanceStore.resetStatistics();
@@ -2015,6 +2019,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private DominanceStore createDominanceStore(Direction direction) {
+		if (useIncrementalSourcedDominanceGraph()) {
+			return IncrementalSourcedDominanceGraphs.create(direction);
+		}
 		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
 			return PaperPartialDominanceGraphs.create(direction);
 		}
@@ -2028,6 +2035,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private String dominanceStatisticsSummary() {
+		if (useIncrementalSourcedDominanceGraph()) {
+			return IncrementalSourcedDominanceGraphs.statisticsSummary();
+		}
 		if (dominanceBackend == DominanceBackend.GRAPH_PARTIAL) {
 			return PaperPartialDominanceGraphs.statisticsSummary();
 		}
@@ -2035,6 +2045,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return PartialListDominanceStore.statisticsSummary();
 		}
 		return PaperDominanceGraphs.statisticsSummary();
+	}
+
+	private boolean useIncrementalSourcedDominanceGraph() {
+		// SRI state 目前不属于 Paper graph 的 reachable-set key；active cuts 下继续使用原实现。
+		// graph/list partial 也保留各自的区间裁剪与状态语义。
+		return config.useIncrementalSourcedDominanceGraph
+				&& dominanceBackend == DominanceBackend.PAPER
+				&& !sriPricingEnabled;
 	}
 
 	private void initializeLabelSearchState() {

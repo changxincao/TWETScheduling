@@ -159,6 +159,12 @@ public class TWETBPCConfig {
 	public boolean useGCNGBBStyleNgDssrPartialDominancePricing = false;
 	/** 2026-06-11: 实验开关；复用 ng-DSSR 主体，仅把 dominance store 切到 graph partial dominance。 */
 	public boolean useGCNGBBStyleNgDssrGraphPartialDominancePricing = false;
+	/**
+	 * 2026-07-10: normal/no-SRI ng-DSSR 是否使用来源感知的增量 dominance graph。
+	 * 关闭时完整回退到 PaperDominanceGraph；partial dominance 和 active SRI 始终保留原 backend。
+	 * 新 backend 保留旧图的 label 存活语义，只增量维护 h/g 和传播稀疏下降区间。
+	 */
+	public boolean useIncrementalSourcedDominanceGraph = true;
 	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/dualPair/reducedCostPair。 */
 	public String ngDssrInitialNgSetMode = "dualPair";
 	/** 2026-07-05: 初始 ng-set 的目标大小，不含任务自身；当前 job 会在 label memory 更新时单独加入。 */

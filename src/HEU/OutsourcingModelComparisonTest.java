@@ -200,6 +200,9 @@ public final class OutsourcingModelComparisonTest {
 				"twet.bpc.outsourcingCompare.enableUndirectedAdjacencyBranching", "false"));
 		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.useNgDssr", Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
+		config.useIncrementalSourcedDominanceGraph = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.outsourcingCompare.incrementalSourcedDominance",
+				Boolean.toString(config.useIncrementalSourcedDominanceGraph)));
 		config.ngDssrInitialNgSetMode = System.getProperty("twet.bpc.outsourcingCompare.ngSetMode",
 				config.ngDssrInitialNgSetMode);
 		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.outsourcingCompare.ngSetSize",

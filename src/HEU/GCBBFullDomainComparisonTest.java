@@ -184,6 +184,9 @@ public class GCBBFullDomainComparisonTest {
 		} else if (config.useGCNGBBStyleNgDssrPricing) {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
+			if (config.useIncrementalSourcedDominanceGraph) {
+				mode += "-incDom";
+			}
 		}
 		if (config.enableNgDssrHistoryWarmStart) {
 			mode += "-ngHistW" + config.ngDssrHistoryWarmStartWindowSize;
@@ -446,6 +449,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCNGBBStyleNgDssrGraphPartialDominancePricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrGraphPartialDominance",
 				Boolean.toString(config.useGCNGBBStyleNgDssrGraphPartialDominancePricing)));
+		config.useIncrementalSourcedDominanceGraph = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.incrementalSourcedDominance",
+				Boolean.toString(config.useIncrementalSourcedDominanceGraph)));
 		config.ngDssrInitialNgSetMode = System.getProperty("twet.bpc.fullDomainCompare.ngDssrInitialMode",
 				config.ngDssrInitialNgSetMode);
 		config.ngDssrInitialNgSetSize = Integer.getInteger("twet.bpc.fullDomainCompare.ngDssrInitialSize",

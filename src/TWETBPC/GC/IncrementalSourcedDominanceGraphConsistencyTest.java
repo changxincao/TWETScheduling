@@ -131,6 +131,11 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 							+ ", original=" + originalValue + ", partial=" + partialValue);
 				}
 			}
+			double endpointMin = direction == Direction.FORWARD
+					? partial.frontier.tail.getValue(partial.frontier.tail.end)
+					: partial.frontier.head.getValue(partial.frontier.head.start);
+			assertClose(endpointMin, partial.minReducedCost,
+					"partial endpoint minimum direction=" + direction + ", label=" + labelId + ", history=" + i);
 		}
 	}
 

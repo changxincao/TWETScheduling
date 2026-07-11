@@ -1955,3 +1955,13 @@ label 同时存在于三类容器。被接受后，它进入 graph node 的 `lab
 保留的成本均有明确作用。same-key `coversAndDominates` 会让 accepted label 多扫描一次，但避免数量更多的 rejected labels 分配完整 merge/source/delta 结果；只有以后实现延迟分配的单遍 merge 才值得替换。new-key 的 superset/subset 搜索、排序和重连是维护 Hasse 拓扑所需，且不是 same-key 热路径。no-delta 仍复用统一 merge 主体并创建一个小 outcome 对象，以共享数值交点、tie 和 segment 合并语义；完全拆成第二套几何 merge 会增加重复代码和对拍面，当前收益不足。统计计数均为 O(1)，完整 node summary 每轮只执行一次并保留实验价值。
 
 验证重新执行 focused 编译、诊断开关开/关下各 96,000 次随机一致性测试，以及 40-2 no-ALNS/no-heuristic/no-strong 的 45 秒 partial root smoke。随机测试通过；真实 smoke 为 `TIME_LIMIT, valid=true, exact calls=23`，没有结构、列或 bound 异常。该配置只用于运行期接入验证，不作为性能基准；日志中已完成轮次的主要耗时仍是百万级函数 join。
+
+192. 2026-07-11 dominance graph 逐调用链正确性复核
+
+继续沿真实 label 字段生命周期检查后发现，no-SRI `FunctionLabel` 仍把 `noSriFrontier` 别名为主 `frontier`。source-aware partial 重建时会释放旧主 frontier 并替换为新对象，使该字段残留指向已经交回 SegmentPool 的旧 PWLF。当前扩展代码只有在 `sriPricingEnabled=true` 时直接读取 `label.noSriFrontier`，而 active SRI 又不走新 partial 图，因此该旧引用尚未进入当前 no-SRI 正式计算；但它既是无用引用，也是未来增加通用读取时的确定风险。现已按既定语义改为：无 SRI 时字段保持 `null`，需要 no-SRI 口径的候选计算通过现有 accessor 回落到主 frontier；有 SRI 时 source/sink 和每个 child 仍传入独立副本。同步删除从未被读取的 `FunctionLabel.noSriMinReducedCost` 字段和构造参数。
+
+partial 重建后的 minimum 刷新也做了严格等价优化。旧代码调用 `Label.refreshMinReducedCost()`，内部用通用 `findMinimal()` 扫描整条新 PWLF。当前 trim 完成后已经执行方向 normalize：forward 是 prefix closure，全局最小值位于 `tail.end`；backward 是 suffix closure，全局最小值位于 `head.start`。因此现在直接 O(1) 读取对应端点，不再为每次实际 trim 扫描全部 segments。随机测试增加了每条 active partial label 的端点值与 `minReducedCost` 对拍。
+
+同时把 dominated 检查移动到 partial prepare 之前。已经标记 dominated 的 queue label 和 terminal active-list label 不再调用 prepare；prepare 只会收缩 active frontier，不会反向把 label 标记 dominated，因此调整严格等价。再次核对所有并行缓存：`joinExtendedFrontier` 只在全部扩展和 join compact 完成后首次构建，之后没有 dominance 更新；`extensionSet/reachableSet` 在 trim 后保持原值只会保守多尝试扩展，真实窗口检查会拒绝不可行 child；queue key 可能滞后但完整 exact round 耗尽队列，不使用队首形成证书。没有发现其他因 frontier 替换而失效的正式计算字段。
+
+验证包括 focused 编译、诊断开关开/关下各 96,000 次随机一致性测试，以及 40-2 no-SRI partial 30 秒主线 smoke。随机测试和端点 minimum 对拍通过；真实 smoke 为 `TIME_LIMIT, valid=true, exact calls=17`，确认 `noSriFrontier=null` 后现有 no-SRI 调用均正确使用主 frontier。该短 smoke 仍只用于运行期语义验证。

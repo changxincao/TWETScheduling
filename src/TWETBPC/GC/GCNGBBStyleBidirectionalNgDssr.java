@@ -2346,11 +2346,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void forwardExtend(LP lp) {
 		ForwardLabel label = FWUL.poll();
-		if (useIncrementalSourcedPartialDominance()) {
-			IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(label.jid), label);
-		}
 		if (label.isDominated) {
 			return;
+		}
+		if (useIncrementalSourcedPartialDominance()) {
+			IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(label.jid), label);
 		}
 		diagnosticForwardPops++;
 		traceWatchedLabel("WATCH_F_POP", label);
@@ -2408,12 +2408,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void backwardExtend(LP lp) {
 		BackwardLabel label = BWUL.poll();
+		if (label.isDominated) {
+			return;
+		}
 		// 虚拟 sink 的 jid=n+1 不进入按真实 terminal job 建立的 dominance store。
 		if (useIncrementalSourcedPartialDominance() && label.jid >= 0 && label.jid < BWTL.size()) {
 			IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(label.jid), label);
-		}
-		if (label.isDominated) {
-			return;
 		}
 		diagnosticBackwardPops++;
 		traceWatchedLabel("WATCH_B_POP", label);
@@ -3109,11 +3109,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double liveMinEll = Utility.big_M;
 		for (int i = 0; i < labels.size(); i++) {
 			ForwardLabel label = labels.get(i);
-			if (preparePartial) {
-				IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(job), label);
-			}
 			if (label.isDominated) {
 				continue;
+			}
+			if (preparePartial) {
+				IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(job), label);
 			}
 			labels.set(liveCount++, label);
 			if (Utility.compareLt(label.minReducedCost, liveMinReducedCost)) {
@@ -3145,12 +3145,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int liveCount = 0;
 		for (int i = 0; i < labels.size(); i++) {
 			BackwardLabel label = labels.get(i);
+			if (label.isDominated) {
+				continue;
+			}
 			if (preparePartial) {
 				IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(job), label);
 			}
-			if (!label.isDominated) {
-				labels.set(liveCount++, label);
-			}
+			labels.set(liveCount++, label);
 		}
 		if (liveCount < labels.size()) {
 			labels.subList(liveCount, labels.size()).clear();
@@ -7073,7 +7074,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final PackedBitSet extensionSet;
 		final int extensionCardinality;
 		final PiecewiseLinearFunction noSriFrontier;
-		final double noSriMinReducedCost;
 		final byte[] sriCounts;
 		final double sriPenalty;
 		final String sriStateKey;
@@ -7082,15 +7082,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		FunctionLabel(int labelId, int jid, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
-				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double minReducedCost,
-				double noSriMinReducedCost, double sriPenalty) {
+				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double minReducedCost, double sriPenalty) {
 			super(jid, null, visitedSet, dominanceSet, frontier, minReducedCost);
 			this.labelId = labelId;
 			this.extensionSet = extensionSet;
 			this.extensionCardinality = extensionSet == null ? 0 : extensionSet.cardinality();
 			this.ngMemorySet = ngMemorySet;
-			this.noSriFrontier = noSriFrontier == null ? frontier : noSriFrontier;
-			this.noSriMinReducedCost = noSriMinReducedCost;
+			// 无 SRI 时保持 null；主 frontier 就是 no-SRI 口径，避免 partial 替换后残留旧 PWLF 别名。
+			this.noSriFrontier = noSriFrontier;
 			this.sriCounts = sriCounts == null ? new byte[0] : sriCounts;
 			this.sriPenalty = sriPenalty;
 			this.sriStateKey = buildSriStateKey(this.sriCounts);
@@ -7141,8 +7140,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
 				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double sriPenalty) {
 			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
-					forwardEndpointMin(frontier), forwardEndpointMin(noSriFrontier == null ? frontier : noSriFrontier),
-					sriPenalty);
+					forwardEndpointMin(frontier), sriPenalty);
 			this.father = father;
 			this.depth = father == null ? 0 : father.depth + 1;
 		}
@@ -7156,8 +7154,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
 				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double sriPenalty, boolean isSinkRoot) {
 			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
-					backwardEndpointMin(frontier), backwardEndpointMin(noSriFrontier == null ? frontier : noSriFrontier),
-					sriPenalty);
+					backwardEndpointMin(frontier), sriPenalty);
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
 		}

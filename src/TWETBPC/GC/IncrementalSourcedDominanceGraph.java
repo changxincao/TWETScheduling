@@ -395,7 +395,10 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		trimmed.normalize(direction);
 		old.release();
 		label.frontier = trimmed;
-		label.refreshMinReducedCost();
+		// normalize 后 forward/backward 的全局最小值分别位于 tail/head，无需再扫描整条 PWLF。
+		label.minReducedCost = direction == Direction.FORWARD
+				? trimmed.tail.getValue(trimmed.tail.end)
+				: trimmed.head.getValue(trimmed.head.start);
 		partialLabelsTrimmed++;
 		localPartialLabelsTrimmed++;
 		if (TIMING_DIAGNOSTIC) {

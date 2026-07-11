@@ -2025,3 +2025,11 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 对子 node 的数学占优关系没有新增，但物理清理也不完全相同。旧传播只用 predecessor envelope h 逐条检查本地 label，只有 h 单独完整支配该 label 时才删除；新图把 external predecessor delta 直接 merge 到综合 g，并根据 g 的 LOCAL source 是否归零清理 label。因此存在“h 单独不支配、某个同-key label 单独也不支配，但 `min(h,其他本地 labels)` 集体支配”的情况，旧 normal 会保留，新图会删除。换言之，跨 key 的可比规则未变，但 successor 内结合 predecessor 与同-key labels 的集体清理更强且不需要逐 label 扫描。
 
 所以 40-2 的 `root 55.921s->18.487s`、`exact 42.387s->5.251s` 和 join pairs `5.79m->0.20m` 不能解释为 g 的下界变强；最终 root bound 仍相同。它来自更准确地维护“哪些 labels 仍实际贡献 g”，使失效 labels 不再扩展、生成 children 或参与 join，并形成乘数级工作量下降。
+
+201. 2026-07-11 W300 历史结果版本口径修正
+
+此前引用的 W300/50-3 `solve 211.187s->180.760s`、`exact 171.098s->138.478s` 不是当前完整 source-aware 图的结果。`180.760s` 对应提交 `b456e49c` 和第 178 节阶段：该版本已经使用增量 g/sparse-delta 传播，避免全 predecessor 重建，但第一版 source 归零物理清理由于当时的 bound 分歧已经撤回。传播到 child node 后仍调用 `removeLabelsDominatedByPredecessors()`，扫描该 node 的全部历史 labels，并且只在 predecessor h 单独完整支配某条 label 时删除；同-key 新 label 也不会反向清理已经退出集体下包络的旧 labels。
+
+完整 source-aware source 归零清理在后续提交 `0d7502c7` 和第 181 节才正式接入，随后又继续删除 dead-node 历史扫描、实现 partial 惰性裁剪并最终移除持久 h。当前完整版本只做过 40-2 的严格 Paper/new A/B，尚未重新完成 W300 端到端对比；第 1861 行原记录也已明确这一点。因此 W300 的 14.4%/19.1% 只能说明“早期增量传播版本”相对旧 Paper 有一定收益，不能用于评价当前 source-aware 清理的幅度。
+
+第一版未修正版本曾在 W300 上出现约 `211s->113s`，但同时 root bound 从 `1726.014329` 变为 `1726.256114`，后来定位到 active sequence 成本未统一回刷等口径问题。该时间不能作为有效性能结果。当前版本理论上会通过 source 归零减少 W300 labels、扩展和 join，但实际幅度必须重新跑 current-vs-Paper 同配置 A/B 后才能下结论。

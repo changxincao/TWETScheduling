@@ -192,7 +192,7 @@ public class TWETBPCConfig {
 	 */
 	public boolean enableNgDssrJoinEnvelopeCompression = false;
 	/** 2026-07-11: 仅用精确 ng-memory group envelope 过滤整组不可能改进的 label pair；通过后仍走标准 join。 */
-	public boolean enableNgDssrJoinEnvelopePrefilter = false;
+	public boolean enableNgDssrJoinEnvelopePrefilter = true;
 	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。

@@ -1032,6 +1032,8 @@ final class CompletionBoundCalculator {
 	/**
 	 * 最终重建 U 时只需要父前缀经过转移弧后的函数，不再构造随后才会使用的 job-cost/F。
 	 * 该结果与 {@link #buildForwardCandidate(PiecewiseLinearFunction, int, int)} 返回的 u 完全一致。
+	 * 等价性依赖 completion-bound job penalty 覆盖完整 [0,T]（硬窗外写 BigM，而不是物理裁域）；
+	 * 调用方仍须先排除 null penalty，避免把当前不可用 job 的 transition 纳入 U。
 	 */
 	private PiecewiseLinearFunction buildForwardTransitionCandidate(PiecewiseLinearFunction parentF,
 			int prevJob, int job) {
@@ -1098,6 +1100,7 @@ final class CompletionBoundCalculator {
 
 	/**
 	 * 最终重建 R 时只保留后缀经过转移弧后的函数，避免构造不会被使用的 job-cost/B。
+	 * 与前向相同，这里依赖 full-domain completion penalty，并由调用方先排除 null penalty。
 	 */
 	private PiecewiseLinearFunction buildBackwardTransitionCandidate(PiecewiseLinearFunction successorB,
 			int job, int successor) {

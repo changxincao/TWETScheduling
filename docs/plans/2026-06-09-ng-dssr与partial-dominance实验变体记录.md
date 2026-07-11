@@ -1965,3 +1965,11 @@ partial 重建后的 minimum 刷新也做了严格等价优化。旧代码调用
 同时把 dominated 检查移动到 partial prepare 之前。已经标记 dominated 的 queue label 和 terminal active-list label 不再调用 prepare；prepare 只会收缩 active frontier，不会反向把 label 标记 dominated，因此调整严格等价。再次核对所有并行缓存：`joinExtendedFrontier` 只在全部扩展和 join compact 完成后首次构建，之后没有 dominance 更新；`extensionSet/reachableSet` 在 trim 后保持原值只会保守多尝试扩展，真实窗口检查会拒绝不可行 child；queue key 可能滞后但完整 exact round 耗尽队列，不使用队首形成证书。没有发现其他因 frontier 替换而失效的正式计算字段。
 
 验证包括 focused 编译、诊断开关开/关下各 96,000 次随机一致性测试，以及 40-2 no-SRI partial 30 秒主线 smoke。随机测试和端点 minimum 对拍通过；真实 smoke 为 `TIME_LIMIT, valid=true, exact calls=17`，确认 `noSriFrontier=null` 后现有 no-SRI 调用均正确使用主 frontier。该短 smoke 仍只用于运行期语义验证。
+
+193. 2026-07-11 partial 惰性裁剪严格等价性复核
+
+本轮没有继续修改生产算法，而是加强惰性裁剪的对拍口径。测试同时建立 eager 和 lazy 两套 source-aware partial 图：两者接收完全相同的随机 label；eager 在每次插入后立即消费全部 pending trim，lazy 保留到最终使用点再统一消费。测试逐次比较插入是否被支配以及随机 reachable-set/time 点的综合包络，最终再逐 label 比较 `isDominated`、缓存 minimum 和 101 个时间点的裁后 frontier。forward/backward 共 96,000 次随机插入全部一致，说明连续 source 更新被覆盖合并后不会改变 label 状态或函数几何。
+
+同时补充端点 minimum 的独立验证。每条 active partial frontier 在 trim 和方向 normalize 后，既按现有 O(1) 规则读取 forward tail/backward head，也用通用 `findMinimal()` 完整扫描；两者与 label 缓存的 `minReducedCost` 全部一致。因此第 192 节将 minimum 刷新从整函数扫描改为端点读取不是仅靠单调性推断，已经由随机 PWLF 对拍覆盖。
+
+再次沿正式调用链核对后，惰性 pending 只保存最新 retained intervals，综合 dominance 始终读取已经更新的 sourced envelope；label 出队扩展和 join compact 前均会消费 pending。queue key 的暂时滞后只改变耗尽式 exact round 的处理顺序；`extensionSet/reachableSet` 未随局部 trim 重算只会保守多尝试扩展，后续窗口检查仍会拒绝无效 child；join 缓存只在 compact 完成后首次建立。当前没有发现新的正确性缺口。高频冗余也已基本清理：dominated label 不再 prepare，no-SRI 不保留旧 frontier 别名，partial minimum 不再全函数扫描，诊断 segment 扫描只在显式统计开关下执行。剩余 same-key 只读预检查、new-key Hasse 搜索和统一 merge 小对象均有明确的拒绝快路径、拓扑维护或数值一致性价值，不建议为了少量常数继续拆分实现。

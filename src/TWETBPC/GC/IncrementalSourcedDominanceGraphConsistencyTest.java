@@ -55,29 +55,61 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 
 	/** 连续 source 更新先累计，最后统一 prepare，验证惰性裁剪不改变 graph 包络和 active 状态。 */
 	private static void verifyDeferredPartialMode(Direction direction) {
-		IncrementalSourcedDominanceGraph partial = new IncrementalSourcedDominanceGraph(direction, true);
+		IncrementalSourcedDominanceGraph eager = new IncrementalSourcedDominanceGraph(direction, true);
+		IncrementalSourcedDominanceGraph lazy = new IncrementalSourcedDominanceGraph(direction, true);
 		ArrayList<LabelSpec> history = new ArrayList<LabelSpec>();
-		ArrayList<Label> labels = new ArrayList<Label>();
+		ArrayList<Label> eagerLabels = new ArrayList<Label>();
+		ArrayList<Label> lazyLabels = new ArrayList<Label>();
 		RANDOM.setSeed(20260712L + direction.ordinal());
 		for (int labelId = 0; labelId < 2000; labelId++) {
 			LabelSpec spec = randomSpec(direction, labelId);
 			history.add(spec);
-			Label label = spec.newLabel();
-			labels.add(label);
-			partial.insertOrDominate(label);
+			Label eagerLabel = spec.newLabel();
+			Label lazyLabel = spec.newLabel();
+			eagerLabels.add(eagerLabel);
+			lazyLabels.add(lazyLabel);
+			boolean eagerDominated = eager.insertOrDominate(eagerLabel);
+			boolean lazyDominated = lazy.insertOrDominate(lazyLabel);
+			if (eagerDominated != lazyDominated) {
+				throw new AssertionError("deferred partial insertion mismatch: direction=" + direction
+						+ ", label=" + labelId);
+			}
+			// eager 每次插入后立即应用全部 pending trim；lazy 保持累计到最终消费点。
+			eager.getActiveLabels();
 			for (int query = 0; query < 4; query++) {
 				PackedBitSet target = randomReachableSet();
 				double time = RANDOM.nextDouble() * T;
-				assertClose(bruteBest(history, target, time),
-						partial.debugBestValue(target, target.cardinality(), time),
+				double expected = bruteBest(history, target, time);
+				assertClose(expected, eager.debugBestValue(target, target.cardinality(), time),
+						"eager partial envelope direction=" + direction + ", label=" + labelId);
+				assertClose(expected, lazy.debugBestValue(target, target.cardinality(), time),
 						"deferred partial envelope direction=" + direction + ", label=" + labelId);
 			}
 		}
-		ArrayList<Label> active = partial.getActiveLabels();
-		if (active.isEmpty() || !partial.debugActiveLabelsHaveEnvelopeSource()) {
+		ArrayList<Label> active = lazy.getActiveLabels();
+		if (active.isEmpty() || !eager.debugActiveLabelsHaveEnvelopeSource()
+				|| !lazy.debugActiveLabelsHaveEnvelopeSource()) {
 			throw new AssertionError("deferred partial active-source mismatch: direction=" + direction);
 		}
-		assertPartialFrontiersDoNotImprove(history, labels, direction, 2000);
+		for (int i = 0; i < eagerLabels.size(); i++) {
+			Label eagerLabel = eagerLabels.get(i);
+			Label lazyLabel = lazyLabels.get(i);
+			if (eagerLabel.isDominated != lazyLabel.isDominated) {
+				throw new AssertionError("deferred partial final state mismatch: direction=" + direction
+						+ ", label=" + i);
+			}
+			if (eagerLabel.isDominated) {
+				continue;
+			}
+			assertClose(eagerLabel.minReducedCost, lazyLabel.minReducedCost,
+					"deferred partial minimum direction=" + direction + ", label=" + i);
+			for (int query = 0; query <= 100; query++) {
+				double time = T * query / 100.0;
+				assertClose(eagerLabel.frontier.evaluate(time), lazyLabel.frontier.evaluate(time),
+						"deferred partial frontier direction=" + direction + ", label=" + i + ", time=" + time);
+			}
+		}
+		assertPartialFrontiersDoNotImprove(history, lazyLabels, direction, 2000);
 	}
 
 	/** partial 只能抬高单条 label frontier，不能改变 graph 的综合数值包络。 */
@@ -134,6 +166,10 @@ public final class IncrementalSourcedDominanceGraphConsistencyTest {
 			double endpointMin = direction == Direction.FORWARD
 					? partial.frontier.tail.getValue(partial.frontier.tail.end)
 					: partial.frontier.head.getValue(partial.frontier.head.start);
+			double scannedMin = partial.frontier.findMinimal(false, true)[0];
+			assertClose(scannedMin, endpointMin,
+					"partial endpoint/scanned minimum direction=" + direction + ", label=" + labelId
+							+ ", history=" + i);
 			assertClose(endpointMin, partial.minReducedCost,
 					"partial endpoint minimum direction=" + direction + ", label=" + labelId + ", history=" + i);
 		}

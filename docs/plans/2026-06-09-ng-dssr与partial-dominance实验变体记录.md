@@ -1859,3 +1859,9 @@ normal/no-SRI 当前流程已与最终讨论方案对齐：label 的 `reachableS
 被 source-aware 删除的 label 若仍在 expansion queue，出队时由 `isDominated` 直接跳过；若已写入按 terminal job 保存的 join list，则 join 前 compact 会删除。final join 仍按真实 `ngMemorySet` 交集和 branch/pricing-only arc 检查兼容性；恢复出的 sequence 在进入 Master 前统一用 evaluator 回刷全域真实成本并按完整 dual 重算 reduced cost。raw ng-memory 不同但 dominanceSet 相同不构成独立反例：差异任务若不是由 memory 禁止，就必须已经在另一 label 上由 full-domain 永久不可达或全局排除覆盖；这依赖当前 full-domain 可达性判断的单调安全语义。
 
 两个边界保持不变。第一，source-aware 新图只用于 normal/no-SRI；list-partial、graph-partial 和 SRI 仍使用原 backend，因此“partial 兼容”是隔离兼容，不是已经获得同样优化。第二，当前验证包括 96,000 次逐插入数值/来源不变量测试和 40-2 root A/B，但最终 source-aware 版本尚未重新完成 W300 端到端复验；因此目前理论流程和已有测试对齐，W300 仍是建议补做的高压力回归，而不是已完成证据。
+
+184. 2026-07-11 source-aware normal 与 partial dominance 的剩余区别
+
+source-aware normal 已覆盖 partial 的 whole-label 删除能力：每条 active label 必须至少贡献一个综合包络 segment，最后一个 source segment 消失时立即删除。因此它不会像旧 normal 那样长期保留完全不贡献下包络的同-key label。但这不等于 partial 已完全无用。一个保留 label 可能只在很窄区间贡献，原始 frontier 的其余区间已经由 predecessor 或其它同-key labels 支配；source-aware normal 只记录哪些 segment 仍由它贡献，不修改该 label 自己的 frontier。该 label 出队扩展时仍对完整 frontier 做 shift/add/normalize，join 也仍携带完整函数。partial dominance 的额外能力正是把被支配区间从 label frontier 原地裁掉，只保留未被支配子域，从而减少函数 segment、扩展和后续子 label。
+
+因此当前判断为：source-aware normal 使 partial 的主要优势从“删除整条零贡献 label”缩小为“裁剪仍有局部贡献 label 的被支配区间”，两者差距应明显缩小，但不能仅据 active label 都有 source 就断言 partial 没有额外收益。另一个现实区别是 active SRI 目前只接在 list-partial backend；如果需要 SRI，partial 仍是现有正式入口。normal 中新 label 每次插入仍会做当前 `g` 的支配检查，已保留 label 后续每次 envelope merge 也会重新经历 source 集合更新；它不是保留后便永久不再判断，只是不再逐 label 扫描。

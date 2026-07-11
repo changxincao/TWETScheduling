@@ -523,3 +523,13 @@ compact-window evaluator 的确会得到不小于真实 sequence cost 的受限�
 从性能上看，单纯修改 evaluator 没有价值：当前全部最终回刷只有 9.1ms，即使 compact 裁剪让它快一倍也无法影响 95s 总时间；反而每个 job 多一次 `setDomain/crop` 可能增加短 PWLF 的分配成本。若要评估 bound 收益，合理顺序是先做默认关闭的诊断，只对最终 candidates 和当前 restricted positive columns 同时计算 true cost 与 compact cost，统计成本抬升、正值列命中率和假想 RMP objective 差异，但仍只把 true cost 写入 Pool。确认 bound 增益足以覆盖 node-local 重算和缓存成本后，再决定是否实现完整 node-local objective；不应先直接修改现有 evaluator。
 
 当前决定是暂不实现 node-local objective。compact window 继续只用于 pricing 的函数定义域、扩展可行性、pricing horizon、completion bound 和相关剪枝；最终候选仍用全域 evaluator 恢复真实 sequence cost，保持全局 Pool 成本口径不变。以后若需要进一步强化 bound，可以重新评估 compact-window restricted master，但它属于独立的 node-local 成本方案，而不是 evaluator 的局部替换。
+
+### 2026-07-11：midpoint probe、completion bound 与 join 剩余热点
+
+最新 W300 的 10 次 ng-DSSR exact pricing 共包含 29 轮 DSSR。`bidirectionalMidpointProbeReuseWithinDssr=true` 已保证同一次 exact 内只在第一轮做 probe，后续 DSSR 轮直接复用第一轮 Tmid；因此实际 probe 执行 10 次，而不是 29 次。10 次共测试 29 个候选 Tmid，单次 2--3 个，累计 `9.763s`，约占 exact 20.8%。`ReuseWithinNode` 当前只把上一次 exact 的最佳 Tmid 作为下一次 probe 的参考点，仍会重新测试候选，不等于跳过 probe。后续最值得做的实验是 node 内自适应冻结：连续若干次最佳 Tmid/正反向比例稳定后直接复用，只有上一轮 exact 正反向明显失衡或耗时恶化时才恢复 probe。理论最多可省接近 8--9s，但必须 A/B 检查固定 Tmid 是否会放大后续 forward/backward label 数。
+
+Completion bound 在该 run 中累计约 `8.785s`。当前 `ALL_CYCLES` 已默认使用 multi-delta 和时间优先队列，并在同一次 exact 的 DSSR 轮之间复用；日志中的 `completionBoundQueue=FIFO` 只是旧配置枚举值，不代表 multi-delta 内部仍按 FIFO。跨 exact pricing 不能直接复用数值函数，因为 RMP dual 已变化。剩余低风险优化主要是把 state 出队时的“与旧快照比较 + 完整复制新快照”合并为一次 segment 扫描，以及缓存 node 内不变的普通弧邻接表；预计都是常数级。更大的优化需要让 sparse delta 原生保存非连续 interval，避免 BigM 空洞 segment 参与 `shift/add/merge`，但会改动 PWLF 热路径。下一步应先把 `F/B` delta 传播、最终 `U/R` 重建、discrete cache 和快照复制分别计时，再决定是否值得继续改。
+
+当前 join 是标准 label-pair crossing-arc join。累计先扫描约 `2.971m` 个 terminal group，其中普通弧/visit 和 group scalar LB 分别剪掉 `1.203m/1.363m`；随后访问 `12.431m` 个 forward candidates，形成 `12.025m` 个 pair。set/LB/time 检查分别剪掉约 `0.466m/0.406m/0.404m`，仍有 `11.155m` 次进入 PWLF funcEval，其中 `11.066m` 最终被函数值剪掉。单次 funcEval 已使用双指针 `findMinimalShiftedSumValue()`，不再构造 `shiftX+add` 临时函数；join extension 也按 label 缓存。历史扫描版 range-LB 检查数千万 pair 却剪枝为 0，group-envelope 虽减少单轮 join 但会少返回列、增加 exact 次数，均不应恢复为默认。可继续尝试的低风险方向只剩整数实例下利用 `(i,j,t)` 禁弧 BitSet 做 crossing-arc 时间存在性预过滤，以及按 optimistic group LB 做 best-first；前者需要先统计命中率，后者只帮助有负列轮次，对最终 certificate 无效。当前 join 仅 `5.200s`，即使大幅优化，对 95s 总时间的上限收益也有限。
+
+ng-DSSR 的真实成本 evaluate 发生在 pricing engine 出口，而不是 label 扩展或每次 join 时。labeling/join 先按 inferred reduced cost 维护候选；`finalizeGeneratedColumns()` 只对最终候选调用 `TWETColumnEvaluator`，按 true dual 重算 reduced cost，之后才把返回列交给 `PC.generateColumnsFromEngine()`，再由 `LP.addColumns()` 加入 Pool/RMP。因而准确说法是“加入 Master 之前的最终候选回刷”。本次全部 finalize 仅约 `9.1ms`。

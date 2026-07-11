@@ -1871,3 +1871,19 @@ source-aware normal 已覆盖 partial 的 whole-label 删除能力：每条 acti
 继续沿生产路径复查后，确认 predecessor propagation、same-key merge 和 source 归零清理都已不再遍历 `node.labels`，但 `deleteNode()` 仍残留一段历史防御扫描：`activeLocalLabels` 已经降为 0 后，又遍历整份历史 label 列表逐个设置 dominated。该扫描没有新增语义，因为 source-aware merge 在每个本地 source 最后一个包络段消失时已经当场设置 `isDominated`、更新 `labelsRemoved` 并递减 `activeLocalLabels`；`deleteNode()` 只会在该计数为 0 时调用。
 
 现已移除这段重复扫描，并在 dead node 删除时释放其历史 label 列表引用。正式 dominance 插入、传播和节点删除路径因此不再全扫某 node 的历史 labels。仍保留两类必要遍历：min-merge 会扫描实际 envelope segments/source 以构造下降区间和来源差；join 前会 compact 独立的 terminal active-label lists，清掉其中懒保留的 dominated 引用。`collectActiveLabels()` 和 source invariant 检查仍可扫描 active node 的 label 列表，但它们只用于一致性测试/诊断，不在 ng-DSSR 正式定价主线调用。96,000 次增量图随机/定向一致性测试和 32,000 次旧 Paper 图测试均通过。
+
+186. 2026-07-11 弃用旧 dominance 框架并在 source-aware 图上重做 partial 的方向
+
+结合前述代码复查和 40-2 A/B，后续不再继续优化旧 `PaperDominanceGraph`、`PaperPartialDominanceGraph` 和 `PartialListDominanceStore` 的主体框架。旧 normal graph 在 predecessor 包络变化后需要扫描 node 下全部历史 labels，并在发生删除时重新合并本地 label 包络和 dominance 包络；旧 graph-partial 在此基础上还要逐 label 做 PWLF 区间比较和裁剪；list-partial 则在每次插入时按 cardinality 两遍扫描所有可能支配新 label、或被新 label 支配的 buckets。即使继续优化单次函数比较，这些框架的工作量仍随 node/bucket 中保留的历史 label 数增长。规模越大、同 key label 越多，扫描、PWLF 比较、裁剪和重建会共同放大，无法获得当前 source-aware 方案的复杂度结构。
+
+当前增量 source-aware 图的核心差异不是一个常数级 fast path，而是把维护对象从“node 下所有历史 labels”换成了“当前数值包络 segments 及其来源”。same-key 插入和 predecessor 传播都只做 min-merge；包络 segment 来源消失时直接定位并删除对应 label，没有 node 全量扫描，也不重建本地包络。40-2 同一 root bound 下，root/exact 从 `55.921s/42.387s` 降到 `18.487s/5.251s`，最后一轮 active label/node 平均/最大从 `58.978/466` 降到 `7.831/30`，join pairs 从约 `5.79m` 降到 `0.20m`。因此旧 normal 和旧 partial backend 在算法方向上标记为 deprecated：保留代码只用于回归对拍、历史实验和当前尚未迁移的 SRI 状态，不再作为无 SRI 主线，也不再投入局部性能优化。后续 dominance 加强统一基于 `IncrementalSourcedDominanceGraph` 实现。
+
+partial dominance 的思想仍可保留，但应改成 source-aware partial，而不是恢复旧框架。当前每个综合包络 segment 已记录本地来源 label；一次 merge 完成后，可以在扫描 merged segments 的同时得到每个 local source 当前仍贡献的时间区间并集。若某个 label 的来源区间完全消失，继续按现逻辑整条删除。若来源仍存在但区间缩短，则只处理这个发生变化的 label：把其 frontier 限制到仍由它贡献的多个区间，其他区间置为 `BigM`，再按方向执行 forward prefix closure 或 backward suffix closure，并刷新有效函数。这里不能只取 `[minStart,maxEnd]`，因为一个 label 可能在多个不连续区间贡献下包络；取 hull 会把中间已经被其它来源支配的区域重新保留，基本失去 partial 的作用。
+
+该裁剪在逻辑上是安全的。综合包络只会随新 label 或 predecessor delta 单调下降；某个 label 一旦在区间上失去 source，后续不可能因为其它来源变差而重新成为最优来源。并且同一个 dominance node 的 terminal job 和后续扩展规则一致，predecessor node 的 dominanceSet 又提供不弱于当前 node 的可扩展集合，因此在某个时间点压低该 label 的来源可以替代它执行相同后续扩展。置 `BigM` 后的方向 normalize 可能按等待/反向闭包语义重新得到部分有限区间，但这些值只来自仍保留区间的合法闭包，不会优于原 frontier，也不会抬高综合包络；它们可以保守保留，不需要反向重建 envelope。
+
+实现时只应处理本轮 source 区间发生变化的 labels，不能重新扫描 `node.labels`。`SourcedEnvelope.installMergedSegments()` 已经遍历 merged segments 并构造 local-source 集合，可在同一次遍历中形成 `Label -> interval list`，再比较受影响来源的旧/新区间。整条删除沿用现有 `displacedLocalSources`；部分缩短新增 `trimmedLocalSources`，只对这些 labels 做 mask、normalize 和最小值更新。label 的 `extensionSet` 即使不重算也只会保守多枚举 job，不影响正确性；active terminal list 持有同一 label 对象，会自然读取裁剪后的 frontier。
+
+需要单独处理优先队列语义。label 入队后若原地裁剪 frontier，其真实最小 reduced cost 只会升高；直接修改当前作为 `PriorityQueue` comparator 键的 `minReducedCost` 会破坏 Java heap 的内部顺序。新实现不能照搬旧 partial 的“裁剪后直接 refresh key”。可选的干净方案是给 queue entry 保存不可变 priority/version，裁剪后递增 label version 并压入新 entry，出队时跳过旧 version；若为了最小改动保留原入队 lower bound，则必须把它明确拆成不可变 queue key，并另存裁剪后真实 frontier minimum，所有 join、收尾和剪枝读取后者。不能让一个可变字段同时承担 heap key 和真实函数最小值两种语义。
+
+SRI 是迁移边界，不是继续保留旧 partial 框架的性能理由。当前 SRI-aware list partial 还通过 frontier adjuster/cut state 处理不同 label 的可比性，而现有 source-aware key 和 envelope 没有包含该状态。因此第一步只应实现 normal/no-SRI 的 source-aware partial，并与当前 source-aware normal 做开关 A/B；SRI 必须等 source merge 的可比条件显式纳入 cut state 后再迁移。验证至少包括逐次 merge 后综合 envelope 数值不变、裁剪 frontier 不低于原 frontier、每条 active label 仍有 source、forward/backward 定向多区间案例，以及 40-2/W300 的 root bound、最终列真实成本、extension candidates、frontier segments 和总 exact 时间对拍。

@@ -1849,3 +1849,13 @@ Hasse 拓扑本轮不改。当前同-key 由 hash map 直接命中，只有首�
 Hasse 的 cardinality bucket 方案是为每个 reachable-set 大小维护 node 列表。插入大小为 k 的新 key 时，只在相关 cardinality bucket 中做 bitset superset/subset 判断，再保留包含关系下最接近新 key 的 antichain，避免从 roots 沿 DAG 遍历无关分支。它在 Hasse 图很宽、包含边剪枝差时可能有效，但若 bucket 很宽，会把当前窄路径遍历变成对大量同 cardinality nodes 的 bitset 扫描，并增加 node 删除/重建时的索引维护。
 
 在线 maximal-subset 方案只替换当前 `candidates -> cardinality sort -> pairwise 去冗余`：候选 c 到达时，若已有 kept node 是 c 的 superset，则直接丢弃 c；否则删除所有被 c 包含的 kept nodes，再加入 c。这样不需要排序，并可提前压缩候选列表，但最坏仍为 pairwise bitset checks，收益只来自候选到达顺序较好和中间列表更短。当前 Hasse 搜索已经利用拓扑在首次命中 subset 后停止向下，source-aware 后每个 store 的 active graph 更小，因此上述两种方案都不是当前优先项。
+
+183. 2026-07-11 source-aware 当前流程与原讨论逐项对齐
+
+normal/no-SRI 当前流程已与最终讨论方案对齐：label 的 `reachableSet` 实际是 `dominanceSet`，表示 raw ng-memory、当前 full-domain 下永久不可达任务和全局排除任务之并集的可用补集；同 terminal job 下按该 key 建 Hasse node。same-key 新 label 先用当前综合包络 `g` 做只读完整支配检查，未被拒绝时才执行带 source 的 min-merge；这与“直接 merge 后看新 source 是否存在”语义等价，但能避免为大量立即被拒绝的 label 构造临时 merged segments。merge 后旧 source 归零即删除对应 label，新 source 保留并入队。
+
+新 key 流程先搜索 immediate superset predecessors，合并其 `g` 得到 external `h`，若 `h` 已支配候选则拒绝；否则建立 `g=min(h,new frontier)`、插入 Hasse 并传播新 label 真正降低 `g` 的 sparse delta。successor 收到 delta 后分别执行 `h<-min(h,delta)` 和 `g<-min(g,delta)`；按新旧 segment source 集合差删除归零本地 labels。`g` 无数值下降则停止向下；本地 source 全部消失则删除 graph node并重连原 predecessors/successors。当前不再维护独立本地 `labelEnvelope`，也不再重扫全部 predecessors、重建完整 `g` 或逐 label 扫描 predecessor dominance。
+
+被 source-aware 删除的 label 若仍在 expansion queue，出队时由 `isDominated` 直接跳过；若已写入按 terminal job 保存的 join list，则 join 前 compact 会删除。final join 仍按真实 `ngMemorySet` 交集和 branch/pricing-only arc 检查兼容性；恢复出的 sequence 在进入 Master 前统一用 evaluator 回刷全域真实成本并按完整 dual 重算 reduced cost。raw ng-memory 不同但 dominanceSet 相同不构成独立反例：差异任务若不是由 memory 禁止，就必须已经在另一 label 上由 full-domain 永久不可达或全局排除覆盖；这依赖当前 full-domain 可达性判断的单调安全语义。
+
+两个边界保持不变。第一，source-aware 新图只用于 normal/no-SRI；list-partial、graph-partial 和 SRI 仍使用原 backend，因此“partial 兼容”是隔离兼容，不是已经获得同样优化。第二，当前验证包括 96,000 次逐插入数值/来源不变量测试和 40-2 root A/B，但最终 source-aware 版本尚未重新完成 W300 端到端复验；因此目前理论流程和已有测试对齐，W300 仍是建议补做的高压力回归，而不是已完成证据。

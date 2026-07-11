@@ -2017,3 +2017,11 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 再次检查正式热路径后，已不存在 h 字段、h merge、回退开关或相关空判断。每个传播 node 只做一次 source-aware `g<-min(g,delta)`；空 delta 立即停止；dominated label 在 partial prepare 前跳过；partial retained intervals 只保存最新版并在出队/join 前消费；dead node 立即移出 active Hasse 集合。剩余 same-key 只读预检查面向大量 rejected labels，new-key external 聚合与 Hasse 搜索低频，统一 merge outcome 保证交点和 tie 语义，均没有明确的净收益证据支持继续拆分。O(1) 统计计数仍保留实验价值，完整 segment/timing 扫描只在显式诊断开关下执行。
 
 验证使用实际 classpath 完成 `javac -Xlint:all`，没有源码 warning；诊断计时开启时，SegmentPool 关闭和开启各 96,000 次随机/拓扑/partial 对拍继续通过，active 均为 `164/143`，incremental performance smoke 分别约为 `12.501ms/11.766ms`。该微基准只用于确认没有新的高频退化，不作为完整求解加速比例。
+
+200. 2026-07-11 source-aware 大幅提速的具体来源
+
+旧 Paper 图和新图在数值上维护的综合包络本质相同，都是 `g=min(f,h)`；reachable-set key、superset/subset Hasse 关系和跨 node 可比条件也没有加强。大幅提速来自新图能够把综合包络的每段反向映射到具体 LOCAL label source，并在某条 label 的最后一个贡献区间消失时立即删除它。旧 normal Paper 图在同 key 接受新 label 后只更新 `labelEnvelope` 和 `dominanceEnvelope`，不会反向清理原有同-key labels；因此大量曾经贡献过、后来已完全退出集体下包络的历史 labels 仍会扩展和 join。这是最主要的差异。
+
+对子 node 的数学占优关系没有新增，但物理清理也不完全相同。旧传播只用 predecessor envelope h 逐条检查本地 label，只有 h 单独完整支配该 label 时才删除；新图把 external predecessor delta 直接 merge 到综合 g，并根据 g 的 LOCAL source 是否归零清理 label。因此存在“h 单独不支配、某个同-key label 单独也不支配，但 `min(h,其他本地 labels)` 集体支配”的情况，旧 normal 会保留，新图会删除。换言之，跨 key 的可比规则未变，但 successor 内结合 predecessor 与同-key labels 的集体清理更强且不需要逐 label 扫描。
+
+所以 40-2 的 `root 55.921s->18.487s`、`exact 42.387s->5.251s` 和 join pairs `5.79m->0.20m` 不能解释为 g 的下界变强；最终 root bound 仍相同。它来自更准确地维护“哪些 labels 仍实际贡献 g”，使失效 labels 不再扩展、生成 children 或参与 join，并形成乘数级工作量下降。

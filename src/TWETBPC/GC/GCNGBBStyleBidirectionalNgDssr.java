@@ -5135,29 +5135,26 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ArrayList<PricingColumnCandidate> candidates = new ArrayList<PricingColumnCandidate>(
 				generatedCandidateBySignature.values());
 		Collections.sort(candidates, candidateBestFirstComparator());
+		LP.PricingDualSnapshot pricingDuals = lp.captureTruePricingDuals();
 		for (int i = 0; i < candidates.size(); i++) {
 			PricingColumnCandidate candidate = candidates.get(i);
-			if (!requiresExactColumnCostRecovery()) {
-				generatedColumns.add(candidate.column);
-				continue;
-			}
 			// 2026-05-31: 闂佸憡鐟禍婵嗭耿娓氣偓瀵晫娑甸崨顓囨繈鏌?no-cut pi-window 婵炴潙鍚嬫穱娲敊閳?K 闂佸壊鍋勫Λ妤呭焵椤掍胶鎳囬柍褜鍓欓ˇ浼村垂濮樿泛瀚夋い鎺嗗亾鐟滅増绋戦銉╁礋椤愶紕鍓ㄧ紓浣圭槺娴ｆ彃浜?
 			// pi-window 闂佸搫瀚烽崹鎵暜?hard window 闂佹眹鍔岀€氼剟鎮哄▎鎾崇婵炲樊浜濋敍鐔兼煥濞戞瀚版繛鍙夌矊椤?inferred 闂佺懓鐡ㄩ崝鏍э耿閻楀牏鈻旂€广儱瀚粔闈浢瑰鍐╂崳婵犫偓閿涘嫧鍋撻崷顓炰粶闁割煈浜獮瀣箛椤撶喐瀚抽梺?
 			// inferred reduced cost 閻庤鐡曞鎾舵嫻閻旂儤瀚婚柣鏂挎啞椤ρ囨煥濞戞鐏辨繝鈧敍鍕ㄥ亾?reduced cost 闂佸憡鐟禍娆戞娴兼潙鍗抽柡澶嬪灩濮ｅ牓鏌ㄥ☉妯肩劮缂佺粯鐗犻弻宀€浠﹂挊澶嬮敪婵烇絽娴傞崰妤咁敆濠婂牆绀嗘俊銈勭閻忓洭鏌￠崼顐㈠幍闁?
 			// 2026-06-13: SRI active 闂?inferred reduced cost 闂?cut dual闂佹寧绋戞總鏃傜箔婢舵劖鍤勯柦妯侯槸濞懷囨煙?machine/job/arc dual 闂佸憡鐟ョ粔鐢垫暜?objective cost闂?
 			// 2026-06-15: partial dominance 婵炴潙鍚嬮懝鍓ф暜椤愶箑鎹堕柟宄扮焾濮婂潡鏌涢幙鍐х凹闁诡喖纾Σ?frontier闂佹寧绋戦張顒€顪?label 闂?minReducedCost
 			// 婵炴垶鎸哥粔鎾疮閳ь剙鈽夐幘顖氫壕闁诲氦顫夊銊╂偤閹寸偟顩?recovered sequence 闂佹眹鍔岀€氼剟鎮鹃鍕瀬闁哄鍨甸悘娆撴煙鐎涙ê濮堟繝鈧导瀛樻櫖婵炴垶锚濞懷囨煛?partial backend 闂傚倸娲犻崑鎾绘偡閺囨氨顦︽繝鈧鍫濈闁靛濡囧銊╂煕閹惧磭校濞寸媭鍠楀鍕吋閸ャ劌鐒搁柣搴℃贡閸嬬偤宕瑰璺哄珘妞ゆ垿鏁崑?
+			// 2026-07-11: 半域 join 的 inferred cost 依赖 split/Tmid，只用于候选排序。
+			// 最终返回 Master 的 sequence 统一恢复全域最小成本，再按真实 reduced cost 过滤。
 			PricingColumnCostRechecker.Result checked = PricingColumnCostRechecker.evaluate(candidate.column, data,
 					evaluator);
 			if (checked != null) {
-				generatedColumns.add(checked.checkedColumn(data));
+				TWETColumn checkedColumn = checked.checkedColumn(data);
+				if (Utility.compareLt(lp.computeReducedCost(checkedColumn, pricingDuals), REDUCED_COST_TOLERANCE)) {
+					generatedColumns.add(checkedColumn);
+				}
 			}
 		}
-	}
-
-
-	private boolean requiresExactColumnCostRecovery() {
-		return dualProfitableWindowEnabled || sriPricingEnabled || dominanceBackend != DominanceBackend.PAPER;
 	}
 	private boolean isSequenceCompatible(List<Integer> sequence, Node node) {
 		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {

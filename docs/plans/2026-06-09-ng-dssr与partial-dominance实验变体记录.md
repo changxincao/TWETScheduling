@@ -1919,3 +1919,15 @@ partial 只比 normal 多一层 source 区间裁剪。每次 merge 只记录新 
 第四，传播中对未删除 node 会在检查 `outcome.delta.isEmpty()` 前复制整个 successor set；无数值下降时该副本立即丢弃，可以把复制移动到 delta 非空之后。第五，node 仍把所有历史 accepted labels 记录在 `node.labels`，但正式主线不读取，只供一致性接口/诊断；inactive node 也保留在 `nodes` 统计列表直到本轮 pricing 结束。这主要是引用内存和 summary 扫描开销，不是扩展热路径，可后续让诊断直接从 envelope local sources 收集 active labels，再移除历史列表。第六，accepted label 会先做一次只读 `coversAndDominates`，随后 merge 再扫描一次 envelope；但 rejected labels 通常占多数，该 fast reject 避免了 merged list/source map 分配，目前属于合理的时间换内存策略，不建议优先改。
 
 Hasse 的 superset/subset 搜索、候选排序和 node 删除重连仍有 pairwise bitset/集合操作，但只在新 key 建立或 node 删除时发生；same-key 热插入不走这些逻辑，当前统计也没有显示它是瓶颈。因此不应先做 cardinality bucket 等额外索引。更重要的是，整体 exact pricing 的最大耗时仍常在 join：本次 partial 压力 run 即使减少正反扩展，累计 join pairs 仍达到 4.33 亿。新图后续优化应优先减少重复 partial rebuild，并观察它能否进一步减少 active labels/join pairs；只缩短 dominance 自身的常数无法单独解决整体 pricing 时间。
+
+189. 2026-07-11 dominance 插入、partial 重建与 label 生命周期补充
+
+`dominanceSet/reachableSet` 的构造没有随新图改变：仍由 ng-memory、完整定义域下的直接不可达任务和全局排除任务共同决定；半域限制只影响 extension set，不进入 dominance key。新图改变的是同一套 key 上的包络维护和传播方式，不是状态语义。
+
+同 key 插入前的 `coversAndDominates()` 不是正确性所必需。理论上可以直接执行一次 source-aware min-merge，并以候选 source 是否贡献任何区间判断接受或拒绝。当前保留预检查是性能 fast path：被拒绝的 label 只扫描旧包络，不构造 merged segment list、source map 和 sparse delta；被接受的 label 才会发生第二次扫描。由于压力实验中 rejected label 明显多于 accepted label，直接删除预检查未必更快。若后续优化，应把 merge 改成“扫描到第一处真实改进后才延迟分配”的单遍实现，而不是让所有 rejected label 都完整构造 merge 结果。
+
+partial 的当前重建过程是：按该 label 在新综合包络中仍贡献的离散 source segments，重建一条 PWLF；非贡献区间填 `BigM`；随后执行方向 normalize 和 minimum 刷新。forward normalize 恢复 prefix/waiting closure，backward normalize 恢复 suffix closure，因此 retained source 区间外仍可能出现由合法等待传播得到的有限函数值。这不是把已删区间重新放回，而是维持现有 frontier 的方向语义。当前主要冗余来自每次小范围 source 变化都立即完整重建；更有效的方向是记录最新 retained intervals/version，在 label 出队前或 join 前合并应用，而不是修改单次 normalize 的数学口径。
+
+label 同时存在于三类容器。被接受后，它进入 graph node 的 `labels` 历史列表、forward/backward priority queue 和按 terminal job 保存的 active list。后续被 source-aware dominance 完全覆盖时，只设置 `isDominated=true` 并减少 active 计数；不会从 priority queue 或 node 历史列表中间删除。priority queue poll 时会跳过 dominated label，因此它不再扩展；join 前 active list 会 compact，dominated label 不参与 join。`node.labels` 当前不会逐条删除，只有整 node 删除时置空；正式 dominance 逻辑不扫描它，主要服务测试和诊断，因此属于引用内存冗余而非 CPU 热点。
+
+当前队列顺序仍是时间优先：forward 按最早完成时间升序，backward 按最晚完成时间降序，并以 reachable cardinality 和 reduced cost 作后续比较。partial 可能在 label 已入堆后修改其 frontier/minimum，但完整 exact round 会耗尽队列，不依赖队首键形成提前证书，所以堆序陈旧只改变处理顺序和超时前进度，不改变完整轮次结果。已经出队扩展过的 parent 后来被裁剪或删除时，已生成 children 不回收；这些 children 仍是合法但可能冗余的状态，在线 dominance 只能避免后续新工作，不能回溯撤销已完成扩展。

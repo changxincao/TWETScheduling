@@ -2049,3 +2049,7 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 5. RMIH、普通 heuristic pricing 和 master re-solve 不是统一意义上的冗余。RMIH 当前在每个 fractional ng-DSSR node 调用，普通规模最多 4 秒、大规模最多 20 秒；已有日志存在多次 infeasible/不改进，因此可以考虑“root 必跑，连续失败后降频，只在 pool 明显增长或 incumbent 长时间未更新时再跑”的调度策略。普通 heuristic pricing 在 W300 为 `6.830s/31`，但历史上关闭后会让 exact 和列池显著膨胀，不能直接去掉。PC 在正常 column generation 中只在初始时 `solveRelaxation()` 建模，后续加列使用 `resolveCurrentModel()`，不存在每轮 pricing 都重建 CPLEX 模型的问题；真正重复建模集中在 strong branching 的独立 trial，这是评分成本而不是普通 PC 冗余。
 
 当前优先顺序为：先做 strong branching phase-2 限轮/候选数完整 A/B；其次验证 compact-window completion bound 能否安全复用于 node 后处理；再评估 ALNS 专用 PWLF/CrossExchange 优化和 RMIH 自适应调用。initial history 去重、每个 pricing engine 构造 active-id HashSet、诊断 summary 等属于小项，现有数据不支持优先修改。route enumeration 默认关闭，也不构成当前主线耗时。
+
+进一步按代码调用链澄清 completion-bound 重建口径。pricing 内部的 `evaluateCompletionBoundArcFixing()` 直接使用本轮已经构造的 completion bounds，以 0 为 cutoff 做本轮局部剪枝，本身不会额外重建。真正的第二次构造发生在节点闭合后的 subtree fixing：ng-DSSR 只有在无 dual profitable window、无 zero-dual 排除且 `pricingHorizon == data.CmaxH` 时才导出 reusable bounds。因此不仅 dual window 会阻止复用，纯 compact window 只要缩短 horizon 也会阻止复用；W300 的 `1230 < 2230` 正是此次重建原因。time-indexed 永久 arc fixing 已经单独使用 `computeSafeFixingGraphWindow(... useCompact=true, useDual=false)`，所以它会保留 compact window、排除 dual window。当前只记录 ng-DSSR prepared-bound 复用条件可能过宽，暂不修改其安全边界。
+
+按本轮决定，将 `enableRestrictedMasterIntegerHeuristic` 全局默认值改为 `false`。常用 runner 仍读取该默认值并允许通过 `twet.bpc.fullDomainCompare.enableRestrictedMasterIntegerHeuristic=true` 显式开启，因此只改变未传参时的默认配置，不删除 RMIH 实现或实验入口。

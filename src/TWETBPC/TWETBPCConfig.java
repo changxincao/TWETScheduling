@@ -394,8 +394,8 @@ public class TWETBPCConfig {
 	public boolean enableUndirectedAdjacencyBranching = false;
 	/** 节点初始伪成本占位值。 */
 	public double pseudoCostInf = 1e18;
-	/** 2026-06-02: 每个节点 LP 松弛完成后，是否用当前 restricted columns 求一次整数 RMP 刷新启发式上界。 */
-	public boolean enableRestrictedMasterIntegerHeuristic = true;
+	/** 2026-07-12: 是否用 restricted columns 求整数 RMP 刷新上界；连续失败会重复消耗 MIP，默认关闭。 */
+	public boolean enableRestrictedMasterIntegerHeuristic = false;
 	/** 2026-06-02: restricted integer RMP 的 CPLEX 时间限制；小于等于 0 表示不设限制。 */
 	public double restrictedMasterIntegerHeuristicTimeLimitSeconds = 4.0;
 	/** 2026-06-21: RMIH 大规模算例阈值；n 大于该值时使用更宽的 MIP 时间限制。 */

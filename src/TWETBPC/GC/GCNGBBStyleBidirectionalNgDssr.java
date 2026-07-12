@@ -137,6 +137,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private String midpointProbeSummary = "off";
 	private String midpointProbeReferenceSource = "strategy";
 	private String midpointProbeFeedbackSummary = "off";
+	/** 2026-07-12: 仅记录有限 probe 与完整 exact 的有方向工作量，不参与 Tmid 选择。 */
+	private int midpointProbeReferenceDirection;
+	private int midpointProbeSelectedDirection;
+	private double midpointProbeSelectedForwardMillis = Double.NaN;
+	private double midpointProbeSelectedBackwardMillis = Double.NaN;
 	private boolean midpointProbeLabelsReadyForJoin;
 	private long midpointStrategyNanos;
 	// 2026-05-22: 閻熸粎澧楅幐鍛婃櫠閻樼鍋撶憴鍕叝闁绘粠鍨卞顏堫敊閻愵剛鏆?job-level 闂佸憡鏌ｉ崝宥夊焵?H_j 缂傚倸鍊归幐鎼佹偤閵娾晛违?
@@ -346,6 +351,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private boolean ngDssrFirstRoundTmidAvailable;
 	private double ngDssrFirstRoundTmid;
 	private String ngDssrFirstRoundMidpointSummary;
+	private int ngDssrFirstRoundReferenceDirection;
+	private int ngDssrFirstRoundSelectedDirection;
+	private double ngDssrFirstRoundSelectedForwardMillis = Double.NaN;
+	private double ngDssrFirstRoundSelectedBackwardMillis = Double.NaN;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
 	private boolean ngDssrHistoryWarmStartApplied;
@@ -783,6 +792,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrFirstRoundTmidAvailable = false;
 		ngDssrFirstRoundTmid = Double.NaN;
 		ngDssrFirstRoundMidpointSummary = null;
+		ngDssrFirstRoundReferenceDirection = 0;
+		ngDssrFirstRoundSelectedDirection = 0;
+		ngDssrFirstRoundSelectedForwardMillis = Double.NaN;
+		ngDssrFirstRoundSelectedBackwardMillis = Double.NaN;
 		resetExactPhaseTiming();
 		ngDssrHistoryWarmStartSkippedForRepeatability = false;
 		ngDssrWindowRepeatabilityFilterApplied = false;
@@ -1237,6 +1250,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		resetProbeAffectedStatistics();
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbeReferenceSource = "dssrFirstRound";
+		midpointProbeReferenceDirection = ngDssrFirstRoundReferenceDirection;
+		midpointProbeSelectedDirection = ngDssrFirstRoundSelectedDirection;
+		midpointProbeSelectedForwardMillis = ngDssrFirstRoundSelectedForwardMillis;
+		midpointProbeSelectedBackwardMillis = ngDssrFirstRoundSelectedBackwardMillis;
 		midpointProbeSummary = "dssrReuseFirstRound, selected=" + tMid
 				+ ", firstRound={" + (ngDssrFirstRoundMidpointSummary == null
 						? "unknown" : ngDssrFirstRoundMidpointSummary) + "}";
@@ -1253,6 +1270,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrFirstRoundTmidAvailable = true;
 		ngDssrFirstRoundTmid = tMid;
 		ngDssrFirstRoundMidpointSummary = midpointProbeSummary;
+		ngDssrFirstRoundReferenceDirection = midpointProbeReferenceDirection;
+		ngDssrFirstRoundSelectedDirection = midpointProbeSelectedDirection;
+		ngDssrFirstRoundSelectedForwardMillis = midpointProbeSelectedForwardMillis;
+		ngDssrFirstRoundSelectedBackwardMillis = midpointProbeSelectedBackwardMillis;
 	}
 
 	/**
@@ -1729,6 +1750,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		tMid = best.tMid;
+		midpointProbeReferenceDirection = results.isEmpty() ? 0 : results.get(0).pressureDirection(scoreMode);
+		midpointProbeSelectedDirection = best.pressureDirection(scoreMode);
+		midpointProbeSelectedForwardMillis = best.forwardElapsedMillis;
+		midpointProbeSelectedBackwardMillis = best.backwardElapsedMillis;
 		midpointProbeLabelsReadyForJoin = best == currentStateResult
 				&& best.reliabilityRank(scoreMode) == 0;
 		if (!midpointProbeLabelsReadyForJoin) {
@@ -1775,14 +1800,36 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
 		}
 		double exactMillis = exactNanos / 1_000_000.0;
+		double forwardExactMillis = exactForwardExpandNanos / 1_000_000.0;
+		double backwardExactMillis = exactBackwardExpandNanos / 1_000_000.0;
 		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
 		long labelTotal = forwardLabelsKept + backwardLabelsKept;
 		String action = reuse.considerExact(tMid, exactMillis, ratio, labelTotal,
+				forwardExactMillis, backwardExactMillis, forwardLabelsKept, backwardLabelsKept,
 				config.bidirectionalMidpointProbeExactTimeTieTolerance, normalizedExactBalanceImprovementTolerance());
+		int exactTimeDirection = direction(forwardExactMillis, backwardExactMillis);
+		int exactLabelDirection = direction(forwardLabelsKept, backwardLabelsKept);
 		midpointProbeFeedbackSummary = "exactReuse=" + action + ", exactMs=" + exactMillis + ", ratio=" + ratio
 				+ ", labels=" + labelTotal + ", bestT=" + reuse.bestExactTmid + ", bestMs="
 				+ reuse.bestExactMillis + ", bestRatio=" + reuse.bestExactRatio + ", bestLabels="
-				+ reuse.bestExactLabelTotal;
+				+ reuse.bestExactLabelTotal
+				+ ", directionAudit ref/selected/exactTime/exactLabels=" + midpointProbeReferenceDirection + ":"
+				+ midpointProbeSelectedDirection + ":" + exactTimeDirection + ":" + exactLabelDirection
+				+ ", selectedSideMs=" + midpointProbeSelectedForwardMillis + ":"
+				+ midpointProbeSelectedBackwardMillis
+				+ ", exactSideMs=" + forwardExactMillis + ":" + backwardExactMillis
+				+ ", bestExactSideMs=" + reuse.bestExactForwardMillis + ":" + reuse.bestExactBackwardMillis
+				+ ", bestExactSideLabels=" + reuse.bestExactForwardLabels + ":" + reuse.bestExactBackwardLabels;
+	}
+
+	private int direction(double forward, double backward) {
+		if (Utility.compareGt(forward, backward)) {
+			return 1;
+		}
+		if (Utility.compareLt(forward, backward)) {
+			return -1;
+		}
+		return 0;
 	}
 
 	private double normalizedProbeMoveRatio() {
@@ -1923,21 +1970,26 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int backwardPops = 0;
 		// 2026-06-07: probe 闂佸搫瀚烽崹顖滄嫻閻斿摜顩查柛鈩冾焽濡茬兘寮堕崼婵嗘殨閻炴俺椴哥粭鐔活槻閻㈩垰娲畷婵嗏槈瀹曞洨顦繛鎴炴尭缁夌數鈧灚绮忛妵鎰板箻閸愬樊鏋€闂傚倸鍟伴崰搴ㄥ垂椤忓懎绶炵憸宥夋儍椤掑嫬绠柕蹇曞Т缁愭螞閺夊灝顏柣锝咁煼婵?
 		// 闂佸憡鐔粻鎴﹀垂椤栨壕鍋撶涵鍜佹綈婵″弶顨婂畷娆撴惞閻熸壆鐤€ sidePop=N:0闂佹寧绋戦懟顖濄亹瑜嶉湁閻庯綆浜滈悡?forward 闂佺粯鐗曞Λ娑㈠磻閵忋倖鍤€閻忕偛澧藉楣冩煛?backward 闂佸搫绉归弨鍗烇耿娴兼潙违?
+		long forwardStart = System.nanoTime();
 		while (forwardPops < forwardLimit && !FWUL.isEmpty()) {
 			forwardExtend(lp);
 			forwardPops++;
 			fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
 		}
+		double forwardElapsedMillis = (System.nanoTime() - forwardStart) / 1_000_000.0;
+		long backwardStart = System.nanoTime();
 		while (backwardPops < backwardLimit && !BWUL.isEmpty()) {
 			backwardExtend(lp);
 			backwardPops++;
 			bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
 		}
+		double backwardElapsedMillis = (System.nanoTime() - backwardStart) / 1_000_000.0;
 		int pops = forwardPops + backwardPops;
 		fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
 		bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
 		double elapsedMillis = (System.nanoTime() - start) / 1_000_000.0;
-		return new MidpointProbeResult(candidateTMid, elapsedMillis, pops, FWUL.isEmpty(), BWUL.isEmpty(),
+		return new MidpointProbeResult(candidateTMid, elapsedMillis, forwardElapsedMillis, backwardElapsedMillis,
+				pops, FWUL.isEmpty(), BWUL.isEmpty(),
 				forwardPops, backwardPops, forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,
 				completionForwardLabelsPruned, completionBackwardLabelsPruned, queueSize(FWUL), queueSize(BWUL),
 				fwQueuePeak, bwQueuePeak);
@@ -3879,6 +3931,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointColumnTaskMax = Double.NaN;
 		midpointProbeSummary = "off";
 		midpointProbeFeedbackSummary = "off";
+		midpointProbeReferenceDirection = 0;
+		midpointProbeSelectedDirection = 0;
+		midpointProbeSelectedForwardMillis = Double.NaN;
+		midpointProbeSelectedBackwardMillis = Double.NaN;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
@@ -6642,6 +6698,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double bestExactMillis = Double.POSITIVE_INFINITY;
 		double bestExactRatio = Double.POSITIVE_INFINITY;
 		long bestExactLabelTotal = Long.MAX_VALUE;
+		double bestExactForwardMillis = Double.NaN;
+		double bestExactBackwardMillis = Double.NaN;
+		long bestExactForwardLabels;
+		long bestExactBackwardLabels;
 		double lastExactTmid = Double.NaN;
 		double lastExactMillis = Double.NaN;
 		double lastExactRatio = Double.NaN;
@@ -6653,32 +6713,41 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 
 		String considerExact(double tMid, double exactMillis, double ratio, long labelTotal,
+				double forwardMillis, double backwardMillis, long forwardLabels, long backwardLabels,
 				double timeTieTolerance, double balanceImprovementTolerance) {
 			lastExactTmid = tMid;
 			lastExactMillis = exactMillis;
 			lastExactRatio = ratio;
 			lastExactLabelTotal = labelTotal;
 			if (!hasBestExact()) {
-				updateBest(tMid, exactMillis, ratio, labelTotal);
+				updateBest(tMid, exactMillis, ratio, labelTotal,
+						forwardMillis, backwardMillis, forwardLabels, backwardLabels);
 				return "init";
 			}
 			boolean timeClose = isTimeClose(exactMillis, bestExactMillis, timeTieTolerance);
 			if (timeClose && isBalanceMeaningfullyBetter(ratio, bestExactRatio, balanceImprovementTolerance)) {
-				updateBest(tMid, exactMillis, ratio, labelTotal);
+				updateBest(tMid, exactMillis, ratio, labelTotal,
+						forwardMillis, backwardMillis, forwardLabels, backwardLabels);
 				return "balance";
 			}
 			if (!timeClose && Utility.compareLt(exactMillis, bestExactMillis)) {
-				updateBest(tMid, exactMillis, ratio, labelTotal);
+				updateBest(tMid, exactMillis, ratio, labelTotal,
+						forwardMillis, backwardMillis, forwardLabels, backwardLabels);
 				return "time";
 			}
 			return "keep";
 		}
 
-		private void updateBest(double tMid, double exactMillis, double ratio, long labelTotal) {
+		private void updateBest(double tMid, double exactMillis, double ratio, long labelTotal,
+				double forwardMillis, double backwardMillis, long forwardLabels, long backwardLabels) {
 			bestExactTmid = tMid;
 			bestExactMillis = exactMillis;
 			bestExactRatio = ratio;
 			bestExactLabelTotal = labelTotal;
+			bestExactForwardMillis = forwardMillis;
+			bestExactBackwardMillis = backwardMillis;
+			bestExactForwardLabels = forwardLabels;
+			bestExactBackwardLabels = backwardLabels;
 		}
 
 		private boolean isTimeClose(double currentMillis, double incumbentMillis, double tolerance) {
@@ -6699,6 +6768,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final class MidpointProbeResult {
 		final double tMid;
 		final double elapsedMillis;
+		final double forwardElapsedMillis;
+		final double backwardElapsedMillis;
 		final int pops;
 		final int forwardPops;
 		final int backwardPops;
@@ -6719,13 +6790,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final double peakScore;
 		final double remainingScore;
 
-		MidpointProbeResult(double tMid, double elapsedMillis, int pops, boolean forwardExhausted, boolean backwardExhausted,
+		MidpointProbeResult(double tMid, double elapsedMillis, double forwardElapsedMillis,
+				double backwardElapsedMillis, int pops, boolean forwardExhausted, boolean backwardExhausted,
 				int forwardPops, int backwardPops,
 				long forwardKept, long backwardKept, long forwardBoundSurvivors,
 				long forwardBoundPruned, long backwardBoundPruned, long forwardQueueRemaining, long backwardQueueRemaining,
 				long forwardQueuePeak, long backwardQueuePeak) {
 			this.tMid = tMid;
 			this.elapsedMillis = elapsedMillis;
+			this.forwardElapsedMillis = forwardElapsedMillis;
+			this.backwardElapsedMillis = backwardElapsedMillis;
 			this.pops = pops;
 			this.forwardPops = forwardPops;
 			this.backwardPops = backwardPops;
@@ -6813,6 +6887,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			String normalized = normalizeProbeScoreMode(mode);
 			return "t=" + tMid
 					+ ",ms=" + elapsedMillis
+					+ ",sideMs=" + forwardElapsedMillis + ":" + backwardElapsedMillis
 					+ ",pop=" + pops
 					+ ",sidePop=" + forwardPops + ":" + backwardPops
 					+ ",ex=" + (forwardExhausted ? "F" : "f") + (backwardExhausted ? "B" : "b")

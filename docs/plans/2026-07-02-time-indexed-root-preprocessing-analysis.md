@@ -591,3 +591,29 @@ ng-DSSR 的真实成本 evaluate 发生在 pricing engine 出口，而不是 lab
 同一份 W300 日志还验证了 Tmid 局部 probe 的方向风险。对 10 次 exact，逐次取历史 reference 上第一个有限 probe 的 `direction`，再与该次完整 exact 的 `forwardExactTime/backwardExactTime` 比较，结果是 **10/10 方向相反**。例如第二次从历史 `681.55` 出发，局部队列认为 backward 压力更大，继续向右移并选到 `732.66625`；完整 exact 却为 forward `648.1ms`、backward `244.3ms`，实际应向左。后续 reference 稳定在 `576.05884` 时，局部 probe 一直判 forward 更重而建议左移，但完整 exact 的 backward 从 `306.7ms` 增至 `6182.8ms`，始终显著更重。
 
 当前历史 best 的选择指标也由此明确：`MidpointProbeNodeReuse` 只记录 `(Tmid, exactTotalTime, abs label ratio, total labels)`；优先选总 exact 时间更小的点，时间在 10% 内时才要求无方向 label ratio 至少改善 30%。它不记录 forward/backward 分项时间，也不保存失衡方向。下一步若调整 Tmid，应先增加只读统计 `(Tmid, forwardExactTime, backwardExactTime, forwardLabels, backwardLabels)`，区分“局部有限 pop 方向”和“完整 exact 方向”；在确认跨轮方向稳定性前，不直接用当前局部 probe 的移动方向覆盖历史 best。本轮未修改 Tmid 逻辑。
+
+### 2026-07-12：Tmid 同 dual 完整曲线与可实施优化
+
+按前述建议补充了只读统计，不改变候选、评分、移动和历史复用逻辑。每个有限 probe 候选现在记录 `sideMs=forward:backward`；完整 exact 结束后记录 reference/selected 的局部 queue 方向、完整 F/B 时间方向、完整 F/B label 方向，以及历史 best 对应的正反向时间和 label。一次 exact 内若进入后续 DSSR round，这些字段与第一轮 Tmid 一起保存和恢复，避免字符串显示已复用但结构化字段退化为 `0/NaN`。同日未加诊断的基线与新增诊断版本逐轮加列均为 `1987,298,36,2,1,1,2,3,1,0`，最终 `bound=1726.014329`、pool `4381`，确认统计未改变求解轨迹。
+
+W300 当前 run 的 10 次 exact 共执行 29 个 probe 候选，probe 初始化累计 `6.557s`，占 exact `35.427s` 的约 `18.5%`。选中 Tmid 依次为 `686.925,686.925,583.886,583.886,...`，第三次以后已经稳定。第 5--10 次仍重复 probe，候选侧计时合计约 `3.209s`；若连续两次选择同一 Tmid 后冻结，本例可直接省掉这一部分，而不改变最终 Tmid。
+
+为了排除不同 dual 和不同 DSSR 难度的干扰，又利用现有 full midpoint diagnostic，在同一个 node1 LP 状态下完整跑完多个 Tmid 的正反向队列。结果如下：
+
+| Tmid | Forward ms | Backward ms | F+B ms | Forward kept | Backward kept |
+|---:|---:|---:|---:|---:|---:|
+| 496 | 110.1 | 1345.7 | 1455.8 | 3861 | 25797 |
+| 540 | 188.2 | 1045.1 | 1233.4 | 6051 | 22773 |
+| 584 | 311.9 | 858.8 | **1170.8** | 8577 | 19800 |
+| 628 | 538.4 | 700.7 | 1239.1 | 11484 | 16658 |
+| 687 | 901.0 | 446.6 | 1347.6 | 16046 | 12010 |
+| 735 | 1305.7 | 292.8 | 1598.5 | 20404 | 8498 |
+| 790 | 1777.5 | 161.1 | 1938.6 | 25190 | 5198 |
+
+这组曲线说明目标不是让 F/B 相等，而是最小化 `F+B`。最优附近约为 `Tmid=584`，此时 backward 时间仍约为 forward 的 `2.75` 倍；若仅因为 backward 更重就把 Tmid 上移到 628，总扩展反而增加约 `5.8%`。因此“记录完整 exact 的方向后直接向较重一侧反向移动”也不够严谨，必须知道总工作量对 Tmid 的边际变化。
+
+局部 probe 的纯计数方向确实较差：10 次 exact 中，reference/selected 的 queue 方向只有 1 次与完整 exact 时间方向一致。新增的 `sideMs` 在前三次能够识别方向，但尾部 probe 两侧都固定只弹 2500 个 label，sideMs 接近，而完整 backward 随后还会扩展到数倍规模，因此尾部同样无法预测完整工作量。把 popLimit 放大到足以看到尾部可以提高可靠性，但会使 probe 本身接近完整 labeling，净收益有限。
+
+当前最值得实施的第一步是 **稳定后冻结，而不是继续改移动公式**：同 node、同 cut/branch/window 结构下，连续两次 selected Tmid 的差不超过 pricing horizon 的 1% 时，后续直接复用；每隔 5 次 exact 做一次校验 probe，或者在 active cut、compact window、pricing-only arc 结构发生变化时立即解冻。不要用 F/B 不平衡单独解冻，因为本例最优点本来就不平衡。历史 `bestExactMillis` 继续保留作诊断，但不宜把不同 dual 下最小总时间永久当作唯一 reference。
+
+第二步才是实验性的移动改进：首轮没有稳定历史时，可用 probe 的正反向 sideMs 而不是 queue 数决定第一步方向，并要求 sideMs ratio 至少超过 1.25 才移动；候选选择应优先比较 `forwardSideMs + backwardSideMs`，而不是只比较不平衡比例。该策略可能让本例从初始 639 向 584 一侧搜索，但 sideMs 在尾部不可靠，必须保持默认关闭并做同 dual full-curve 对照。当前不建议增加 full calibration 到生产求解：虽然它能准确找到曲线最低点，但多个候选完整扩展的成本通常高于可节省的后续 probe 时间。

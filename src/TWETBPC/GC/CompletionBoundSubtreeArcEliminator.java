@@ -153,19 +153,30 @@ public final class CompletionBoundSubtreeArcEliminator {
 		private final double horizon;
 		private final CompletionBoundCalculator.Relaxation relaxation;
 		private final CompletionBoundCalculator.QueueOrdering queueOrdering;
+		private final boolean narrowHorizonSafeForSubtree;
 
 		PreparedBounds(CompletionBoundCalculator.Bounds bounds, double horizon,
 				CompletionBoundCalculator.Relaxation relaxation,
 				CompletionBoundCalculator.QueueOrdering queueOrdering) {
+			this(bounds, horizon, relaxation, queueOrdering, false);
+		}
+
+		PreparedBounds(CompletionBoundCalculator.Bounds bounds, double horizon,
+				CompletionBoundCalculator.Relaxation relaxation,
+				CompletionBoundCalculator.QueueOrdering queueOrdering,
+				boolean narrowHorizonSafeForSubtree) {
 			this.bounds = bounds;
 			this.horizon = horizon;
 			this.relaxation = relaxation;
 			this.queueOrdering = queueOrdering;
+			this.narrowHorizonSafeForSubtree = narrowHorizonSafeForSubtree;
 		}
 
-		private boolean isCompatible(double expectedHorizon, CompletionBoundCalculator.Relaxation expectedRelaxation,
+		boolean isCompatible(double expectedHorizon, CompletionBoundCalculator.Relaxation expectedRelaxation,
 				CompletionBoundCalculator.QueueOrdering expectedQueueOrdering) {
-			return bounds != null && Utility.compareEq(horizon, expectedHorizon)
+			boolean compatibleHorizon = Utility.compareEq(horizon, expectedHorizon)
+					|| (narrowHorizonSafeForSubtree && !Utility.compareGt(horizon, expectedHorizon));
+			return bounds != null && compatibleHorizon
 					&& relaxation == expectedRelaxation && queueOrdering == expectedQueueOrdering;
 		}
 

@@ -1006,11 +1006,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	CompletionBoundSubtreeArcEliminator.PreparedBounds reusableSubtreeArcEliminationBounds() {
 		if (completionBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
-				|| zeroDualExcludedJobs != null || !Utility.compareEq(pricingHorizon, data.CmaxH)) {
+				|| zeroDualExcludedJobs != null || config.timeIndexedCompletionBoundInRoundArcFixing) {
 			return null;
 		}
+		// 2026-07-12: 基础 hard window、node 继承的 compact window 和持久 pricing-only arc
+		// 都是当前子树的有效域，基于它们缩短的 horizon 可以直接复用。dual window、zero-dual
+		// 排除及本轮 0-cutoff 时空弧固定只服务当前 pricing，不能作为永久 arc fixing 的证据。
 		return new CompletionBoundSubtreeArcEliminator.PreparedBounds(completionBounds, pricingHorizon,
-				completionBoundRelaxation, completionBoundQueueOrdering);
+				completionBoundRelaxation, completionBoundQueueOrdering, true);
 	}
 
 	private LabelQueueOrdering parseQueueOrdering(String value) {

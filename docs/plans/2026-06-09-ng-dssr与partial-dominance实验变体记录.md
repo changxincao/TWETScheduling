@@ -2059,3 +2059,9 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 compact window 在 2026-06-29 的提交 `4820ff93` 才接入 ng-DSSR。该提交把 node 闭合后、基于 `UB-LB` 固定时空弧后剩余的 job 可达时间 hull 写入 node，并明确作为“可继承硬窗口”供子节点 pricing 使用；但没有同步修改 6 月 9 日的 reusable-bound guard。因此当前只要 compact window 将 horizon 缩短，即使 dual window 关闭，也会被旧条件一并拒绝。这是历史条件过宽，不是 compact window 不能用于 subtree arc fixing。
 
 正确修改不能简单无条件删除 horizon 判断，因为本轮 `timeIndexedCompletionBoundInRoundArcFixing=true` 时还可能先按 0 cutoff 固定局部时空弧，再由该局部图收紧 effective window；这种窗口只属于当前 pricing，不能用于 `UB-LB` 永久 fixing。安全复用条件应改为显式记录窗口来源：无 dual profitable window、无 zero-dual 排除、没有基于 0 的 in-round 临时 fixing；此时由基础 hard window、node 继承 compact window，以及只基于持久 branch/pricing-only 图的可达性收紧得到的 completion bounds，可以按其 compact horizon 直接用于 subtree arc fixing。`PreparedBounds` 的兼容检查也应接受该安全 compact horizon，而不是继续要求全局 `CmaxH`。这一修改还能让 subtree fixing 使用更强的 compact-window bound，而不是重建一套更宽的全局 hard-window bound。当前先完成分析记录，代码待单独实现和逐函数、逐 arc A/B。
+
+203. 2026-07-12 compact horizon completion bound 正式复用
+
+本次已按第 202 节的边界完成实现。当前 ng-DSSR 只有在 completion bound 不含 dual profitable window、zero-dual job 排除和本轮 `0` cutoff time-indexed 临时 arc fixing 时，才把它标记为可供 subtree 使用；由基础 hard window、node 继承 compact window和持久 branch/pricing-only 图得到的紧 horizon 不再因为 `pricingHorizon < data.CmaxH` 被拒绝。`PreparedBounds` 增加显式的窄 horizon 安全标志，旧 pricing 类仍沿用原先的全 `CmaxH` 兼容规则，没有被一并放宽。
+
+验证分三层。首先 focused `javac` 编译通过；新增兼容性测试覆盖旧调用拒绝紧 horizon、显式安全紧 horizon 允许复用，以及 relaxation、queue ordering 和 horizon 超界仍拒绝。随后 30-job smoke 得到 `obj=bound=14318`、`valid=true`，主线未回归。最后复跑此前明确发生重建的 W300/50-3 root-only 口径：结果仍为 `incumbent=1902`、`bound=1726.014329`、`valid=true`；节点闭合后的 `SubtreeArcElim` 从历史 `bounds=rebuilt, buildMs=685.552, total=701.476ms` 改为 `bounds=reused, buildMs=0.000, total=20.288ms`。两次 run 的 ALNS/root preprocessing 随机轨迹使候选普通弧数量有 4 条差异，但最终 root bound 完全一致。当前结论是原 guard 确属历史性过度保守，紧 compact bound 可以直接复用；dual、zero-dual 和 in-round 临时 fixing 的隔离仍保留。

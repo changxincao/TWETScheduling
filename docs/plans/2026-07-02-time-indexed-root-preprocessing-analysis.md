@@ -627,3 +627,30 @@ W300 当前 run 的 10 次 exact 共执行 29 个 probe 候选，probe 初始化
 状态级测试复现了 W300 的 `686.925,686.925,583.886,583.886,583.886` 序列，确认第 5 个样本后冻结、恰好跳过 5 次、第 6 次校验，并确认 active cut ID 变化后全部归零。随后用与方向诊断基线相同的 `wet050_003_3m_setupR50 + W300` root-only `BEST_UB` 配置做端到端对照。逐次加列仍为 `1987,298,36,2,1,1,2,3,1,0`，pricing rounds 204、Pool 4381、10 次 exact、`bound=1726.014329`、`valid=true` 均不变；probe 候选由 29 个降为前 5 次的 14 个，后 5 次直接冻结复用。ng-DSSR exact 从 `35.476s` 降到 `31.696s`，约减少 `10.7%`；总 solve 从 `81.012s` 降到 `76.931s`，约减少 `5.0%`。本次结果符合此前根据候选侧计时估计的约 3.2 秒可节省量。
 
 实现后再次按调用链复核。稳定样本只在 `ngDssrRound==1` 且本轮确实执行出有效 probe 结果时累计；同一次 exact 的后续 DSSR round 只复用第一轮 Tmid，不会重复计数。冻结路径与原 DSSR 内复用路径执行相同的 `clamp + rebuildHalfDomain + resetProbeAffectedStatistics`，并强制 `midpointProbeLabelsReadyForJoin=false`，因此不会复用旧 probe labels，后续 forward/backward labeling、join 和证书仍完整执行。cut loop 中新增 cut 会在下一次 pricing 前先写入 `LP.activeCutIds`，inactive cut 删除也先修改该集合，所以两种变化都会在读取冻结状态时触发清空；node 之间由 node id 分开存储。关闭 `bidirectionalMidpointProbeStableFreeze` 后不会进入新增状态读取或更新分支，原 probe 与 node/DSSR 复用流程保持不变。当前未发现漏列、错误证书、跨 node/cut 污染或高频额外扫描。
+
+### 2026-07-12：主线全流程效率复核
+
+本次按当前源码和两组最新 root-only 日志重新过了一遍 `initial/ALNS -> time-indexed root preprocessing -> PC/RMP pricing loop -> heuristic/ng-DSSR exact -> node closing`。结论不是所有算例都由同一组件主导。40-2 的主要问题是完整 time-indexed root preprocessing 过重；W300/50-3 的主要问题才是 ng-DSSR exact 的 completion bound、midpoint probe 和 backward 扩展。新 source-aware dominance、group-envelope prefilter、direct min-sum join 以及 compact completion bound 复用均已生效，dominance、join 和 node closing 已不是当前第一优先级。
+
+| 口径 | 总时间 | root preprocessing | 正式 ng exact | 正式 heuristic | 正式 TI pre-heuristic | 关键观察 |
+|---|---:|---:|---:|---:|---:|---|
+| 40-2 | 78.151s | 51.180s | 0.611s / 7 calls | 1.922s / 33 | 0.124s / 34 | 临时 root 生成 80,407 列，337 次 pricing/LP 往返 |
+| W300/50-3 | 95.950s | 12.789s | 41.445s / 10 calls | 11.236s / 35 | 1.545s / 35 | 临时 root 生成 29,042 列；正式 exact 才是主项 |
+
+40-2 全 run 的 `after_pricing` LP 为 `35.901s/369 calls`，其中 337 轮来自临时 time-indexed root；time-indexed graph pricing 自身合计约 `11.041s`。因此 51.180s 预处理的最大项是不断增大的临时 RMP 重解，而不是最短路。W300 对应为 `after_pricing=4.838s/170 calls`，临时 root 占 137 轮，graph pricing 约 `5.649s`。40-2 临时 restricted master 最终达到 8 万列，单次 LP 平均约 97ms；W300 只有 2.9 万列，单次约 28ms。这说明当前预处理是否划算，首先取决于临时列池增长和 LP 闭合轮数，而不只是 `n*horizon`。
+
+预处理内部还有一项确定的实现冗余。`PC` 在每次调用每个 pricing engine 前，都从完整 `restrictedColumnIds` 构造一次 `HashSet<Integer>`；engine 返回后，`LP.addColumns()` 又从同一列表构造第二个 HashSet。40-2 的 8 万列、337 轮会产生千万级装箱和哈希插入，这部分不在 pricing engine 计时内，和 Pool/trace/最终 fixing 一起构成预处理总时间减去 graph pricing、LP 和 fixing 后的残差。更合理的实现是由 `LP` 同步维护 restricted ID set，列表重筛时一次重建，普通增列时增量更新；`PC` 与 `LP.addColumns()` 共享该集合，不在每轮复制。该优化不改变列选择和 LP 语义，是当前最明确的实现级低风险项。
+
+预处理的算法级优化应优先处理临时 RMP，而不是继续压最短路常数。可实验预处理专用的 restricted-column cleanup：周期性保留正值列和较好 reduced-cost 列，其余列只从临时 RMP 移除、仍留在 Pool，后续 pricing 若再次变负可以重新激活。还可比较前期扩大单轮返回列数、尾部缩小批量的动态 batch，减少 337 次 LP 往返。需要注意，若预处理提前终止，尚未闭合的 restricted RMP 不能提供当前 `UB-LB` 永久 arc/window fixing 证书；安全做法是丢弃未闭合 fixing，只把已找到并按真实 objective 保存的 elementary 列作为 ng-DSSR seed。因而自适应预算可以做成“预计不划算则尽早退出并退化为 seed generator”，不能直接把半程图删弧写回 root。
+
+W300 的 10 次 ng-DSSR exact 共 `41.377s`，阶段为 `init/fw/bw/join=14.354/6.797/16.382/3.736s`。init 中 completion bound `8.509s`、midpoint probe `5.750s`，其它初始化合计不足 0.1s。正反向候选分别约 `1.360m/2.804m`，构造 frontier `1.016m/1.788m`，通过 completion bound 后只剩 `0.329m/0.333m`；backward 仍是最大 exact 热点。此前无分配 completion prefilter 虽提前剪掉约 198 万候选，却使 exact 慢约 16.1%，已证明“再扫描一遍后避免构造”在当前短 PWLF/SegmentPool 下不划算，不应重复实现。completion bound 当前已使用 multi-delta/time-priority 并在同一次 DSSR 内复用；下一步只有原生 interval delta 这类较大改动仍有明显潜力。
+
+midpoint stable-freeze 已减少稳定后的重复 probe，当前剩余问题不是简单增加复用。full-curve 结果表明总 `F+B` 最小时两侧耗时本来就不平衡，按“哪边更慢就移动 Tmid”会变差。若继续优化，只适合让 hard node 在已有历史点附近做低频校验，不能再用局部 capped probe 的方向直接驱动移动。W300 后两次 exact 分别执行 7/13 轮 DSSR，是尾部耗时放大的另一个逻辑来源。当前每条选中的 non-elementary route 会把重复 job 加入两个重复位置之间所有缺失的 ng neighborhoods；这些 pair 不是冗余，因为只加一个中间 pair 不能保证 repeated job 的 memory 穿过整段。可优化的是 route 选择：在 reduced cost 之外考虑“新增 pair 数”和与前面 route 的 pair 重叠，尽量用较少新增 pair 消掉更多 witness，而不是删减单条 route 必需的 pair。
+
+pricing engine 调度也有可量化但次一级的浪费。W300 的 `TimeIndexedPreHeuristicPricing` 35 次全部返回 0 elementary columns，累计 1.545s；图中一直存在负 pseudo route，但最短路径均非基本列，所以它既不能加列也不能给 elementary family 证书。可按 node 记录连续零产出，在 2--3 次失败后退避若干 LP 轮，node/cut/compact/pricing-only 图变化时恢复；exact ng-DSSR 仍在后面，因此不影响正确性。普通 heuristic 35 次中 25 次有效、10 次为零，累计 11.236s，仍有明显价值，不宜直接关闭；更稳妥的是只在连续失败后降低调用频率，而不是每次 exact 加列、LP 重解后都立即从第一个 heuristic 重新开始。
+
+完整树上还要单独看 strong branching。当前默认 phase1 最多测试 20 个候选的左右两侧，phase2 再取 4 个候选，`strongBranchingPhase2MaxHeuristicPasses=0` 表示不限 heuristic pass。历史 50-3 日志中仅 `HeuristicPricing[strongBranching]` 就约 `153.2s/529 calls`，phase1/light repair 又会产生大量 trial LP；这通常会超过正式 ng-DSSR exact。实现语义目前已经通过 lightweight seed 和 M/slack repair 收紧，剩余主要是预算问题：phase2 候选数和 pass 应设有限上限，并在 phase1 第一名与后续候选分数已明显分离时跳过 phase2。上述 restricted-ID set 复用也会同步减少每个 strong trial 的 Java 侧列集复制。
+
+当前不建议继续投入的部分也已明确。W300 join 只有 3.736s，group-envelope 已跳过约 1116 万潜在 pair；source-aware dominance 的 compact 阶段只有约 0.097s；node closing 的 subtree arc elimination 在复用 prepared bound 后为 20.288ms，40-2 仅 1.782ms；最终 evaluator 回刷约毫秒级。这些部分继续增加索引或复杂剪枝，端到端上限很低。ALNS/initial-column 在两组总时间中仍留下约 24--29s 的外层残差，但当前日志没有独立 ALNS 计时，不能把残差全算给 ALNS；若目标转为压总 wall time，应先补 ALNS 单独计时，再决定预算，不应从残差直接下结论。
+
+因此当前后续优先级为：`1)` 预处理临时 RMP 列集控制和是否值得运行的自适应判定；`2)` `LP/PC` restricted ID set 增量维护，删除双重 HashSet 全量复制；`3)` time-indexed pre-heuristic 与普通 heuristic 的连续失败退避；`4)` strong branching phase2 候选/pass 预算；`5)` 基于新增 ng-pair 覆盖效率选择 DSSR witness。completion-bound 原生 interval delta 和更深的 backward 状态压缩保留为高风险研究项，join、dominance、subtree fixing 暂不再动。

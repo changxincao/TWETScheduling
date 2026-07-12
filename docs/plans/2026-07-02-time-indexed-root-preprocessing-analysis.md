@@ -569,3 +569,11 @@ ng-DSSR 的真实成本 evaluate 发生在 pricing engine 出口，而不是 lab
 但“已实现”不等于“新建 `TWETBPCConfig` 会全部开启”。当前默认保守关闭 ng-DSSR 本身、`allCycles` completion bound、midpoint probe、window repeatability ng-set 过滤、time-indexed root preprocessing 和 time-indexed pre-heuristic；实验运行必须通过 runner 属性显式打开。只有 source-aware dominance、group-envelope prefilter、completion-bound multi-delta/time-priority 和 midpoint 的两个 reuse 开关默认为 true，其中 reuse 只在 midpoint probe 本身开启后才生效。active SRI 时，source-aware graph 和 group-envelope prefilter 会自动回退到 SRI-aware list/standard join，因此 no-SRI 主线的全部优化不能解读为 SRI 路径也全部使用。time-indexed root preprocessing 仍是可选实验组件，当前不支持列化外包；整数时间实例才能完整利用精确时点禁弧和硬时间窗继承。该预处理的实例间净收益不稳定，不应并入无条件默认。
 
 本次按当前源码用 CPLEX/CP Optimizer jar 完成 focused `javac`，并运行 `IncrementalSourcedDominanceGraphConsistencyTest`；96,000 次插入一致性测试通过，`git diff --check` 通过。当前可以认为 no-SRI exact pricing 的明确低风险冗余已基本清理完；剩余改进点已是 adaptive Tmid、原生 interval delta 或 SRI-aware source graph 这类会改变算法路径的方案，不再是简单开关或小范围常数优化。
+
+### 2026-07-12：排除 init 后的扩展瓶颈
+
+按开启 source-aware dominance 和 group-envelope prefilter 的 W300 日志重新汇总，10 次 exact 共计 `33.351s`，其中 init `13.673s`；排除 init 后，forward/backward 扩展分别为 `5.186/11.950s`，join `2.449s`。扩展占非 init exact 时间约 `87.1%`，backward 又占扩展约 `69.7%`，已是当前最明确的主瓶颈。候选数也对应这一不对称：forward `1.360m`，backward `2.804m`。最后无负列证书轮单次就是 forward `2.452s`、backward `7.643s`，说明当前 `Tmid` 在完整 labeling 下明显偏向 forward，probe 的有限 pop 平衡没有完全反映最终扩展量。
+
+更重要的是，forward/backward 合计构造了 `2.804m` 个 extension frontier，但通过 completion bound 后只剩 `0.662m`，约 `76.4%` 的候选在已经执行 `shiftX + add + normalize` 后才被删除。当前 scalar completion check 共剪掉 `0.249m`，其余大量剪枝来自 `2.555m` 次完整 PWLF completion 拼接判断。因此下一个最值得验证的扩展优化，不是继续修 dominance graph，而是新增 no-SRI 专用的无分配 completion prefilter：直接扫描 parent frontier、shifted job penalty 和 completion suffix/prefix，计算与“构造 candidate、方向 normalize、再与 completion function 取最小”严格等价的下界；能剪时不构造 candidate，只有 survivor 才走现有路径。该 helper 必须对 forward/backward normalize 语义分别实现，并用随机 PWLF 逐例对拍，不能简单把三个函数的独立 minimum 相加当成等价值。
+
+剩余扩展改进按潜力排序为：第一，用完整 exact 的 forward/backward 耗时和 label 量反馈下一次 `Tmid`，将当前偏重的 backward 区间缩小；第二，减少尾部 DSSR 轮数，当前最后两次 exact 需要 7/13 轮，任何单轮加速都会被重复执行；第三，在 child reachability 构造时把当前 terminal 的 forbidden/pricing-only arc 直接排除，或按预计算 allowed-neighbor BitSet 迭代，避免约四分之一候选到出队后才被 arc check 删除。第三项风险低但收益预计小于前两项。当前 source-aware graph 的 insert/propagate 合计约 `2.492s`，queue 操作在旧细分计时中仅为毫秒级，已不应再作为优先优化对象。

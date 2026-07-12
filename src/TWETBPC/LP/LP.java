@@ -47,7 +47,9 @@ public class LP {
 	private final OutsourcingPool outsourcingPool;
 	private Node node;
 	private ArrayList<Integer> restrictedColumnIds;
+	private HashSet<Integer> restrictedColumnIdSet;
 	private ArrayList<Integer> restrictedOutsourcingColumnIds;
+	private HashSet<Integer> restrictedOutsourcingColumnIdSet;
 	private ArrayList<Integer> activeCutIds;
 	private TWETMasterSolution lastSolution;
 
@@ -95,8 +97,8 @@ public class LP {
 		this.cutPool = cutPool;
 		this.config = config;
 		this.outsourcingPool = outsourcingPool;
-		this.restrictedColumnIds = new ArrayList<Integer>();
-		this.restrictedOutsourcingColumnIds = new ArrayList<Integer>();
+		replaceRestrictedColumnIds(Collections.<Integer>emptyList());
+		replaceRestrictedOutsourcingColumnIds(Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>();
 		this.jobDual = new double[data.n + 1];
 		this.outsourcingMembershipDual = new double[data.n + 1];
@@ -108,16 +110,9 @@ public class LP {
 
 	public void construct(Node node, List<Integer> columnIds) {
 		this.node = node;
-		this.restrictedColumnIds = new ArrayList<Integer>();
-		for (int columnId : columnIds) {
-			this.restrictedColumnIds.add(Integer.valueOf(columnId));
-		}
-		this.restrictedOutsourcingColumnIds = new ArrayList<Integer>();
-		if (isColumnizedOutsourcing()) {
-			for (int columnId : node.seedOutsourcingColumnIds) {
-				this.restrictedOutsourcingColumnIds.add(Integer.valueOf(columnId));
-			}
-		}
+		replaceRestrictedColumnIds(columnIds);
+		replaceRestrictedOutsourcingColumnIds(isColumnizedOutsourcing()
+				? node.seedOutsourcingColumnIds : Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
 		this.lastSolution = null;
 		clearDuals();
@@ -156,6 +151,26 @@ public class LP {
 
 	public List<Integer> getRestrictedOutsourcingColumnIds() {
 		return restrictedOutsourcingColumnIds;
+	}
+
+	/** 当前内部机器列是否已经进入 restricted master。 */
+	public boolean isRestrictedColumnActive(int columnId) {
+		return restrictedColumnIdSet.contains(Integer.valueOf(columnId));
+	}
+
+	/** 当前外包列是否已经进入 restricted master。 */
+	public boolean isRestrictedOutsourcingColumnActive(int columnId) {
+		return restrictedOutsourcingColumnIdSet.contains(Integer.valueOf(columnId));
+	}
+
+	private void replaceRestrictedColumnIds(List<Integer> columnIds) {
+		restrictedColumnIds = new ArrayList<Integer>(columnIds);
+		restrictedColumnIdSet = new HashSet<Integer>(columnIds);
+	}
+
+	private void replaceRestrictedOutsourcingColumnIds(List<Integer> columnIds) {
+		restrictedOutsourcingColumnIds = new ArrayList<Integer>(columnIds);
+		restrictedOutsourcingColumnIdSet = new HashSet<Integer>(columnIds);
 	}
 
 	public Set<Integer> getPositiveOutsourcingColumnIds() {
@@ -350,12 +365,10 @@ public class LP {
 
 	public int addColumns(List<Integer> columnIds) {
 		int added = 0;
-		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedColumnIds);
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
-			if (!activeColumnIds.contains(value)) {
+			if (restrictedColumnIdSet.add(value)) {
 				restrictedColumnIds.add(value);
-				activeColumnIds.add(value);
 				added++;
 				if (cplex != null && objective != null) {
 					try {
@@ -682,12 +695,10 @@ public class LP {
 			return 0;
 		}
 		int added = 0;
-		HashSet<Integer> activeColumnIds = new HashSet<Integer>(restrictedOutsourcingColumnIds);
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
-			if (!activeColumnIds.contains(value)) {
+			if (restrictedOutsourcingColumnIdSet.add(value)) {
 				restrictedOutsourcingColumnIds.add(value);
-				activeColumnIds.add(value);
 				added++;
 				if (cplex != null && objective != null) {
 					try {
@@ -1074,7 +1085,7 @@ public class LP {
 			selected.add(Integer.valueOf(candidates.get(i).columnId));
 		}
 		if (!selected.isEmpty()) {
-			restrictedColumnIds = selected;
+			replaceRestrictedColumnIds(selected);
 			lastSolution = null;
 		}
 		if (isColumnizedOutsourcing()) {
@@ -1116,7 +1127,7 @@ public class LP {
 			selected.add(Integer.valueOf(candidates.get(i).columnId));
 		}
 		if (!selected.isEmpty()) {
-			restrictedOutsourcingColumnIds = selected;
+			replaceRestrictedOutsourcingColumnIds(selected);
 			lastSolution = null;
 		}
 	}

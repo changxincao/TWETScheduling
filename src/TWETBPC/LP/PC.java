@@ -419,11 +419,10 @@ public class PC {
 					if (!isStrongBranchingPhase2PricingEngine(lp, engine)) {
 						continue;
 					}
-					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-					HashSet<Integer> activeOutsourcingColumnIds =
-							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
-					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
-							activeOutsourcingColumnIds, "strongBranching", false, null, Double.NaN, true);
+					HashSet<Integer> seenColumnIds = new HashSet<Integer>();
+					HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
+					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, seenColumnIds,
+							seenOutsourcingColumnIds, "strongBranching", false, null, Double.NaN, true);
 					if (generated.isEmpty()) {
 						continue;
 					}
@@ -507,17 +506,17 @@ public class PC {
 			boolean addedColumn = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
 				PricingEngine engine = pricingEngines.get(engineIndex);
-				HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-				HashSet<Integer> activeOutsourcingColumnIds = new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
-				GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
-						activeOutsourcingColumnIds);
+				HashSet<Integer> seenColumnIds = new HashSet<Integer>();
+				HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
+				GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, seenColumnIds,
+						seenOutsourcingColumnIds);
 				if (lastNodePrunedByDualBound) {
 					return solution;
 				}
 				boolean internalCertificateClosed = shouldCloseInternalPricingAfterCertificate(engine, generated);
 				if (internalCertificateClosed && !Double.isFinite(generated.certifiedOutsourcingReducedCost)) {
 					GeneratedColumnIds outsourcingGenerated = generateOutsourcingAfterInternalCertificate(lp,
-							activeColumnIds, activeOutsourcingColumnIds, "", true, null, Double.NaN);
+							seenColumnIds, seenOutsourcingColumnIds, "", true, null, Double.NaN);
 					generated.merge(outsourcingGenerated);
 				}
 				boolean pricingFamilyClosed = shouldClosePricingFamilyAfterCertificate(lp, engine, generated);
@@ -646,11 +645,10 @@ public class PC {
 		PricingPassResult bestObservedEmptyPass = PricingPassResult.EMPTY;
 		for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
 			PricingEngine engine = pricingEngines.get(engineIndex);
-			HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-			HashSet<Integer> activeOutsourcingColumnIds =
-					new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
-			GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, activeColumnIds,
-					activeOutsourcingColumnIds, dualModeName, allowReusableBounds, acceptanceDual,
+			HashSet<Integer> seenColumnIds = new HashSet<Integer>();
+			HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
+			GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, false, seenColumnIds,
+					seenOutsourcingColumnIds, dualModeName, allowReusableBounds, acceptanceDual,
 					dualBoundObjectiveOverride);
 			if (lastNodePrunedByDualBound) {
 				return PricingPassResult.dualBoundPruned();
@@ -658,7 +656,7 @@ public class PC {
 			boolean internalCertificateClosed = shouldCloseInternalPricingAfterCertificate(engine, generated);
 			if (internalCertificateClosed && !Double.isFinite(generated.certifiedOutsourcingReducedCost)) {
 				GeneratedColumnIds outsourcingGenerated = generateOutsourcingAfterInternalCertificate(lp,
-						activeColumnIds, activeOutsourcingColumnIds, dualModeName, allowReusableBounds,
+						seenColumnIds, seenOutsourcingColumnIds, dualModeName, allowReusableBounds,
 						acceptanceDual, dualBoundObjectiveOverride);
 				generated.merge(outsourcingGenerated);
 			}
@@ -955,11 +953,10 @@ public class PC {
 				boolean addedByThisEngine = false;
 				boolean keepCurrentEngine = true;
 				while (keepCurrentEngine && !isTimeLimitReached()) {
-					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-					HashSet<Integer> activeOutsourcingColumnIds =
-							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
-					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, activeColumnIds,
-							activeOutsourcingColumnIds, "strongBranchingDomainRepair", true, null, Double.NaN);
+					HashSet<Integer> seenColumnIds = new HashSet<Integer>();
+					HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
+					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, seenColumnIds,
+							seenOutsourcingColumnIds, "strongBranchingDomainRepair", true, null, Double.NaN);
 					if (generated.isEmpty()) {
 						break;
 					}
@@ -1043,11 +1040,10 @@ public class PC {
 				boolean addedByThisEngine = false;
 				boolean keepCurrentEngine = true;
 				while (keepCurrentEngine && !isTimeLimitReached()) {
-					HashSet<Integer> activeColumnIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-					HashSet<Integer> activeOutsourcingColumnIds =
-							new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
-					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, activeColumnIds,
-							activeOutsourcingColumnIds);
+					HashSet<Integer> seenColumnIds = new HashSet<Integer>();
+					HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
+					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, seenColumnIds,
+							seenOutsourcingColumnIds);
 					if (generated.isEmpty()) {
 						break;
 					}
@@ -1118,22 +1114,24 @@ public class PC {
 	}
 
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
-			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds) {
-		return generateColumnsFromEngine(lp, engine, repairMode, activeColumnIds, activeOutsourcingColumnIds, "",
+			HashSet<Integer> seenColumnIds, HashSet<Integer> seenOutsourcingColumnIds) {
+		return generateColumnsFromEngine(lp, engine, repairMode, seenColumnIds, seenOutsourcingColumnIds, "",
 				true, null, Double.NaN);
 	}
 
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
-			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
+			HashSet<Integer> seenColumnIds, HashSet<Integer> seenOutsourcingColumnIds, String dualModeName,
 			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
-		return generateColumnsFromEngine(lp, engine, repairMode, activeColumnIds, activeOutsourcingColumnIds,
+		return generateColumnsFromEngine(lp, engine, repairMode, seenColumnIds, seenOutsourcingColumnIds,
 				dualModeName, allowReusableBounds, acceptanceDual, dualBoundObjectiveOverride, false);
 	}
 
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
-			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
+			HashSet<Integer> seenColumnIds, HashSet<Integer> seenOutsourcingColumnIds, String dualModeName,
 			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride,
 			boolean strongBranchingPhase2) {
+		// 2026-07-12: 这里只记录本次 engine 返回批次中已经出现的 ID。当前 RMP 的持久
+		// membership 由 LP 增量维护；不能提前把新 ID 写入 LP，否则 addColumns() 会误判为已激活。
 		GeneratedColumnIds generated = new GeneratedColumnIds();
 		if (isTimeLimitReached()) {
 			return generated;
@@ -1187,7 +1185,8 @@ public class PC {
 				}
 				Pool.ColumnUpdate update = lp.addOrImproveColumn(column);
 				Integer value = Integer.valueOf(update.columnId);
-				if (activeColumnIds.add(value)) {
+				boolean firstSeenInBatch = seenColumnIds.add(value);
+				if (!lp.isRestrictedColumnActive(update.columnId) && firstSeenInBatch) {
 					generated.observeReducedCost(reducedCost, column, null);
 					generated.internalColumnIds.add(value);
 				} else if (update.improvedCost) {
@@ -1208,7 +1207,7 @@ public class PC {
 					continue;
 				}
 				Integer value = Integer.valueOf(id);
-				if (activeOutsourcingColumnIds.add(value)) {
+				if (!lp.isRestrictedOutsourcingColumnActive(id) && seenOutsourcingColumnIds.add(value)) {
 					generated.observeReducedCost(reducedCost, null, column);
 					generated.outsourcingColumnIds.add(value);
 				}
@@ -1218,7 +1217,7 @@ public class PC {
 			PricingEngine outsourcingEngine = findOutsourcingPricingEngine();
 			if (outsourcingEngine != null) {
 				GeneratedColumnIds outsourcingGenerated = generateColumnsFromEngine(lp, outsourcingEngine, false,
-						activeColumnIds, activeOutsourcingColumnIds,
+						seenColumnIds, seenOutsourcingColumnIds,
 						dualModeName == null || dualModeName.length() == 0 ? "pairedOutsourcing"
 								: dualModeName + ".pairedOutsourcing",
 						false, reducedCostDual, dualBoundObjectiveOverride);
@@ -1335,7 +1334,7 @@ public class PC {
 	}
 
 	private GeneratedColumnIds generateOutsourcingAfterInternalCertificate(LP lp,
-			HashSet<Integer> activeColumnIds, HashSet<Integer> activeOutsourcingColumnIds, String dualModeName,
+			HashSet<Integer> seenColumnIds, HashSet<Integer> seenOutsourcingColumnIds, String dualModeName,
 			boolean allowReusableBounds, LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride) {
 		if (!lp.isColumnizedOutsourcing()) {
 			return new GeneratedColumnIds();
@@ -1346,7 +1345,7 @@ public class PC {
 		}
 		String suffix = dualModeName == null || dualModeName.length() == 0
 				? "outsourcingAfterInternalCertificate" : dualModeName + ".outsourcingAfterInternalCertificate";
-		return generateColumnsFromEngine(lp, outsourcingEngine, false, activeColumnIds, activeOutsourcingColumnIds,
+		return generateColumnsFromEngine(lp, outsourcingEngine, false, seenColumnIds, seenOutsourcingColumnIds,
 				suffix, allowReusableBounds, acceptanceDual, dualBoundObjectiveOverride);
 	}
 

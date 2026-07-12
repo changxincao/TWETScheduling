@@ -654,3 +654,11 @@ pricing engine 调度也有可量化但次一级的浪费。W300 的 `TimeIndexe
 当前不建议继续投入的部分也已明确。W300 join 只有 3.736s，group-envelope 已跳过约 1116 万潜在 pair；source-aware dominance 的 compact 阶段只有约 0.097s；node closing 的 subtree arc elimination 在复用 prepared bound 后为 20.288ms，40-2 仅 1.782ms；最终 evaluator 回刷约毫秒级。这些部分继续增加索引或复杂剪枝，端到端上限很低。ALNS/initial-column 在两组总时间中仍留下约 24--29s 的外层残差，但当前日志没有独立 ALNS 计时，不能把残差全算给 ALNS；若目标转为压总 wall time，应先补 ALNS 单独计时，再决定预算，不应从残差直接下结论。
 
 因此当前后续优先级为：`1)` 预处理临时 RMP 列集控制和是否值得运行的自适应判定；`2)` `LP/PC` restricted ID set 增量维护，删除双重 HashSet 全量复制；`3)` time-indexed pre-heuristic 与普通 heuristic 的连续失败退避；`4)` strong branching phase2 候选/pass 预算；`5)` 基于新增 ng-pair 覆盖效率选择 DSSR witness。completion-bound 原生 interval delta 和更深的 backward 状态压缩保留为高风险研究项，join、dominance、subtree fixing 暂不再动。
+
+### 2026-07-12：restricted active ID set 增量维护
+
+已实现上一节确认的 HashSet 重建优化。`LP` 现在同时维护 restricted column 的有序列表和 membership set，内部机器列与列化外包列各一套；`construct()` 和 reduced-cost 筛列替换完整列表时统一重建 set，普通 `addColumns()/addOutsourcingColumns()` 只做增量 `Set.add()`。列表仍负责稳定建模顺序，set 只负责 active membership，不改变现有 RMP 列顺序和目标系数更新语义。
+
+`PC` 不能直接把 LP 的持久 set 当作原来的临时 active set，因为 engine 返回列尚未真正加入 RMP 时，旧逻辑已经需要在同一返回批次中去重。当前改为每次 engine 调用只创建空的 batch-seen set；处理返回列时先查询 `LP.isRestrictedColumnActive()`，再用 batch-seen 区分本批第一次出现和同一 signature 的后续成本改进。这样保持了原来的三种结果：active 列成本改进触发重解，新列第一次进入 generated IDs，同批重复新列不重复加入；列化外包采用同样口径。普通 pricing、dual stabilization、strong phase2、普通 repair 和 domain repair 五条入口均已切换，不再复制完整 restricted IDs。默认关闭的 route enumeration 原来在 finite ordered set 之外又复制一份 active HashSet，本次也改为直接查询 LP membership；枚举结果所需的 `LinkedHashSet` 仍保留。
+
+验证新增 `LPRestrictedColumnMembershipTest`，覆盖初始 seed、active membership、同批重复内部列、新内部列、列化外包 seed 和重复外包列，测试通过。随后运行 40-2 纯 time-indexed root smoke，关闭 ALNS、启发式、RMIH 和强分支；200 次 pricing 调用后正常以 `NODE_LIMIT` 结束，`bound=22487.647059`、`valid=true`，未发现 Pool/RMP 去重或动态加列回归。focused `javac`、`git diff --check` 通过。该修改消除了每轮两次与 restricted 列数成正比的 HashSet 构造；剩余 batch-seen set 的大小只和单次 engine 返回列数相关。

@@ -60,8 +60,6 @@ public final class RouteEnumerationEngine {
 					new ArrayList<Integer>(finiteIds), new ArrayList<Integer>(finiteOutsourcingIds), 0, 0, 0, 0, 0,
 					0, 0, 0, 0, System.nanoTime() - start);
 		}
-		HashSet<Integer> activeIds = new HashSet<Integer>(lp.getRestrictedColumnIds());
-		HashSet<Integer> activeOutsourcingIds = new HashSet<Integer>(lp.getRestrictedOutsourcingColumnIds());
 		HashSet<SequenceSignature> runSignatures = new HashSet<SequenceSignature>();
 		HashSet<SequenceSignature> outsourcingRunSignatures = new HashSet<SequenceSignature>();
 		ArrayList<PendingColumn> pending = new ArrayList<PendingColumn>();
@@ -94,7 +92,7 @@ public final class RouteEnumerationEngine {
 			states++;
 			if (!state.sequence.isEmpty() && canUseArc(node, currentFixedArcs, state.lastJob, node.sinkId())) {
 				double reducedCost = completeReducedCost(state, dual, node.sinkId());
-				ColumnCheck check = checkColumn(lp, state.sequence, reducedCost, dual, gap, activeIds,
+				ColumnCheck check = checkColumn(lp, state.sequence, reducedCost, dual, gap,
 						runSignatures, useCompactWindow);
 				if (check.negativeEnough) {
 					candidates++;
@@ -138,7 +136,7 @@ public final class RouteEnumerationEngine {
 		}
 
 		if (lp.isColumnizedOutsourcing()) {
-			OutsourcingEnumeration outsourcing = enumerateOutsourcingColumns(lp, dual, gap, activeOutsourcingIds,
+			OutsourcingEnumeration outsourcing = enumerateOutsourcingColumns(lp, dual, gap,
 					outsourcingRunSignatures);
 			cbPruned += outsourcing.suffixBoundPruned;
 			outsourcingCandidates = outsourcing.candidates;
@@ -210,7 +208,7 @@ public final class RouteEnumerationEngine {
 	}
 
 	private OutsourcingEnumeration enumerateOutsourcingColumns(LP lp, LP.PricingDualSnapshot dual, double gap,
-			HashSet<Integer> activeOutsourcingIds, HashSet<SequenceSignature> outsourcingRunSignatures) {
+			HashSet<SequenceSignature> outsourcingRunSignatures) {
 		Node node = lp.getNode();
 		OutsourcingEnumeration result = new OutsourcingEnumeration();
 		// 2026-06-25: 外包枚举保留所有覆盖集合；required job 只作为公共常数，最终合并进候选列。
@@ -279,7 +277,7 @@ public final class RouteEnumerationEngine {
 			SequenceSignature signature = new SequenceSignature(jobs);
 			int existingId = lp.getOutsourcingPool().getColumnIdBySignature(signature);
 			if (existingId >= 0) {
-				if (!activeOutsourcingIds.contains(Integer.valueOf(existingId))) {
+				if (!lp.isRestrictedOutsourcingColumnActive(existingId)) {
 					result.existingIds.add(Integer.valueOf(existingId));
 				}
 				continue;
@@ -543,7 +541,7 @@ public final class RouteEnumerationEngine {
 	}
 
 	private ColumnCheck checkColumn(LP lp, List<Integer> sequence, double reducedCost,
-			LP.PricingDualSnapshot dual, double gap, HashSet<Integer> activeIds,
+			LP.PricingDualSnapshot dual, double gap,
 			HashSet<SequenceSignature> runSignatures, boolean windowedEnumeration) {
 		if (!Utility.compareLt(reducedCost, gap - REDUCED_COST_TOLERANCE)) {
 			return ColumnCheck.newColumn(false, Double.NaN);
@@ -551,7 +549,7 @@ public final class RouteEnumerationEngine {
 		SequenceSignature signature = new SequenceSignature(sequence);
 		int existingId = lp.getPool().getColumnIdBySignature(signature);
 		if (existingId >= 0) {
-			if (activeIds.contains(Integer.valueOf(existingId))) {
+			if (lp.isRestrictedColumnActive(existingId)) {
 				return ColumnCheck.activeDuplicate(true);
 			}
 			return ColumnCheck.existing(true, existingId);

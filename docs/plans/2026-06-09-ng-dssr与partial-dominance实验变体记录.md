@@ -2108,3 +2108,12 @@ ng-set 轨迹解释了差异。warm 前 13 次 exact 的 final ng-set 平均一�
 据此建议下一版采用“短窗口、有界、困难触发”的同 node warm-start，而不是完整继承。每个 node 第一次 exact 仍使用现有基础策略；之后只维护最近 3 次 final set。候选成员必须至少在最近 3 次中的 2 次出现，并与当前 repeatability admissibility 取交集；每 job 最多保留 2--3 个，同时再设全局 directed-pair 预算，例如 15--25，按出现次数、最近出现时间和当前 dual pair score排序。若最近 exact 均为 1 轮，继续使用基础小集合或空集，不启用历史；只有最近一次达到例如 3 轮以上，或最近 3 次累计 DSSR round 超过阈值，才启用 bounded history seed。这样早期大量 0/6 pair 状态不会被无谓放大，接近闭合时又能提前复用稳定核心；无论运行多久，初始 ng-set 都受 per-job 和全局预算双重限制，绝不会单调增长。
 
 建议先做三组当前 50-3 root A/B：`nearestK3/top3` 基线；最近 3 次、2/3 频率、per-job cap2/global cap15；同样策略 cap3/global cap25。比较 exact calls、DSSR rounds、每轮 label/join 和总 exact 时间。若 cap15 已明显减少 tail 且不增加单轮成本，再考虑作为默认；否则保留 nearestK3，不应仅凭 Jaccard 把 warm 接入主线。
+211. 2026-07-12 nearestK3 上的固定预算同 node warm-start A/B
+
+根据第 210 节的 50-3 empty 诊断，先实现了“最近 3 次、频率大于 0.5、固定大小替换 nearestK3”的版本。该版本每个 node 第一次 exact 与 baseline 完全一致，后续只在最近一次达到 3 个 DSSR round 时触发；每 job 和全局均有限制，且基础 cardinality 不增加。公平 root 和 3-node 对拍显示它几乎没有改变实际 seed：node 1 两次触发均为 `selected25/replaced0`，node 3 三次只替换 `1/1/5` 个，所有 exact 的 rounds、added columns 和 labels 与 baseline 基本逐项一致。3-node 总时间 `212.866s -> 218.008s`，exact `151.643s -> 156.116s`，无收益。原因不是预算，而是历史高频核心本来就已属于 nearestK3；用它替换 nearest 成员没有增加 DSSR 所缺的信息。
+
+随后改为“保留完整 nearestK3，再从最近一次困难 exact 的 final set 固定追加少量成员”。候选必须出现在最近一次 final set 中，并按最近 3 次出现次数排序；最近一次不足 3 round 不触发。每次 exact 都从头构造 `nearestK3 + bounded extras`，不会继承累计集合；per-job cap 和 global cap 构成硬上限，因此调用次数增加时 seed 也不会增长。node 或 active-cut 集变化会清空窗口，repair/cross-check 不记录。
+
+正确 repeatability 配置下的 fresh baseline root 为 `solve=88.835s, exact=37.691s/10`。固定追加 15 个 directed pair 后为 `solve=85.345s, exact=35.066s/10`，两次触发均实际添加 15 个，最后证书轮从 14 round 降到 13。3-node baseline 为 `solve=212.866s, exact=151.643s/27`；cap15 为 `200.823s, exact=140.777s/27`。其中 node 3 的累计 round 从 63 降到 58，序列由 `1,1,1,1,1,1,2,2,8,9,10,2,24` 变为 `1,1,1,1,1,1,2,2,8,5,9,2,24`，labels 从 348,163 降到 344,856。说明固定少量追加能够减少中后期重复 DSSR 学习，但最终 24-round certificate 尚未改善。
+
+cap25 的 3-node结果为 `solve=179.689s, exact=128.061s/27`，表面时间最好；node 1 最后证书轮为 12，node 3 累计 round 为 61。但其 node 3 labels 为 348,297，接近 baseline，结构性改善反而弱于 cap15，因此约 21 秒额外时间优势包含明显运行波动，不能据一次结果认定 cap25 稳定优于 cap15。当前实现保留 `window/perJob/global/triggerRounds` 实验参数并继续默认关闭。后续完整树优先比较 cap15 与 cap25 的重复运行；若只按稳定工作量指标，cap15 是更保守的候选。

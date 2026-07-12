@@ -469,6 +469,18 @@ public class GCBBFullDomainComparisonTest {
 		config.enableNgDssrSameNodeWarmStart = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrSameNodeWarmStart",
 				Boolean.toString(config.enableNgDssrSameNodeWarmStart)));
+		config.ngDssrSameNodeWarmStartWindowSize = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrSameNodeWarmStartWindow",
+				config.ngDssrSameNodeWarmStartWindowSize);
+		config.ngDssrSameNodeWarmStartPerJobLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrSameNodeWarmStartPerJobLimit",
+				config.ngDssrSameNodeWarmStartPerJobLimit);
+		config.ngDssrSameNodeWarmStartGlobalPairLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrSameNodeWarmStartGlobalPairLimit",
+				config.ngDssrSameNodeWarmStartGlobalPairLimit);
+		config.ngDssrSameNodeWarmStartTriggerRounds = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrSameNodeWarmStartTriggerRounds",
+				config.ngDssrSameNodeWarmStartTriggerRounds);
 		config.ngDssrHistoryWarmStartWindowSize = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrHistoryWindow", config.ngDssrHistoryWarmStartWindowSize);
 		config.ngDssrHistoryWarmStartFrequencyThreshold = Double.parseDouble(System.getProperty(

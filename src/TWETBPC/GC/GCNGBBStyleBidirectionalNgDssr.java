@@ -439,12 +439,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrHistoryWarmStartApplied = false;
 		ngDssrSameNodeWarmStartApplied = false;
 		ngDssrHistoryWarmStartSkippedForRepeatability = ngDssrWindowRepeatabilityFilterApplied;
-		if (historyWarmStart != null && historyWarmStart.applySameNode(ngNeighborhoodByJob,
-				currentNodeId(lp), currentActiveCutIds(lp), config)) {
-			filterInitialNgMembers();
-			ngDssrSameNodeWarmStartApplied = true;
-			return;
-		}
 		// 2026-07-05: repeatability filter uses the current window, while
 		// history warm-start is learned across pricing calls. Keep them separate.
 		if (!ngDssrHistoryWarmStartSkippedForRepeatability
@@ -476,6 +470,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			for (int job = 1; job <= data.n; job++) {
 				addNearestJobsToNgNeighborhood(job, targetSize);
 			}
+			applyBoundedSameNodeWarmStart(lp);
 			return;
 		}
 		throw new IllegalArgumentException("Unsupported ngDssrInitialNgSetMode: " + mode);
@@ -491,6 +486,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean isRootNode(LP lp) {
 		return lp == null || lp.getNode() == null || lp.getNode().depth == 0;
+	}
+
+	private void applyBoundedSameNodeWarmStart(LP lp) {
+		if (historyWarmStart != null && historyWarmStart.applySameNode(ngNeighborhoodByJob,
+				currentNodeId(lp), currentActiveCutIds(lp), config)) {
+			filterInitialNgMembers();
+			ngDssrSameNodeWarmStartApplied = true;
+		}
 	}
 
 	private int currentNodeId(LP lp) {
@@ -786,7 +789,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return "";
 		}
 		if (ngDssrSameNodeWarmStartApplied) {
-			return ", ngWarmStart=sameNodeLast";
+			return ", ngWarmStart=sameNodeBounded/" + historyWarmStart.sameNodeSummary();
 		}
 		String source = ngDssrHistoryWarmStartSkippedForRepeatability
 				? "skippedRepeatability"
@@ -810,7 +813,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void recordNgSetHistory(LP lp) {
 		if (historyWarmStart != null) {
-			historyWarmStart.recordSameNode(ngNeighborhoodByJob, currentNodeId(lp), currentActiveCutIds(lp), config);
+			historyWarmStart.recordSameNode(ngNeighborhoodByJob, currentNodeId(lp), currentActiveCutIds(lp),
+					ngDssrRoundsExecuted, config);
 		}
 		if (ngDssrHistoryWarmStartSkippedForRepeatability) {
 			return;

@@ -22,7 +22,9 @@ final class NgDssrHistoryWarmStart {
 	private int[] sizeSums;
 	private int sameNodeId = Integer.MIN_VALUE;
 	private ArrayList<Integer> sameNodeActiveCutIds;
-	private PackedBitSet[] sameNodeNeighborhoods;
+	private final ArrayDeque<SameNodeSnapshot> sameNodeSnapshots = new ArrayDeque<SameNodeSnapshot>();
+	private int sameNodeLastSelected;
+	private int sameNodeLastAdded;
 
 	NgDssrHistoryWarmStart(int n) {
 		this.n = n;
@@ -33,28 +35,87 @@ final class NgDssrHistoryWarmStart {
 		return !snapshots.isEmpty();
 	}
 
-	/** 同一 node 连续 exact pricing 只复用最近一次 final ng-set；cut 集变化后自动失效。 */
+	/**
+	 * 同一 node 内只把最近困难 exact 的成员有界追加到基础 seed；每 job 和全局数量均受限，
+	 * 因而不会随 exact 次数单调增大。
+	 */
 	boolean applySameNode(PackedBitSet[] target, int nodeId, List<Integer> activeCutIds,
 			TWETBPCConfig config) {
-		if (!config.enableNgDssrSameNodeWarmStart || target == null || sameNodeNeighborhoods == null
-				|| sameNodeId != nodeId || !sameActiveCutIds(activeCutIds)) {
+		sameNodeLastSelected = 0;
+		sameNodeLastAdded = 0;
+		if (!config.enableNgDssrSameNodeWarmStart || target == null || sameNodeId != nodeId
+				|| !sameActiveCutIds(activeCutIds) || sameNodeSnapshots.isEmpty()
+				|| sameNodeSnapshots.peekLast().rounds < config.ngDssrSameNodeWarmStartTriggerRounds) {
 			return false;
 		}
+		ArrayList<BoundedMember> candidates = new ArrayList<BoundedMember>();
 		for (int job = 1; job <= n; job++) {
-			target[job] = sameNodeNeighborhoods[job] == null
-					? new PackedBitSet(n + 2) : sameNodeNeighborhoods[job].copy();
+			int[] counts = new int[n + 1];
+			for (SameNodeSnapshot snapshot : sameNodeSnapshots) {
+				PackedBitSet set = snapshot.neighborhoods[job];
+				for (int member = set.nextSetBit(1); member >= 1 && member <= n;
+						member = set.nextSetBit(member + 1)) {
+					counts[member]++;
+				}
+			}
+			PackedBitSet latest = sameNodeSnapshots.peekLast().neighborhoods[job];
+			for (int member = latest.nextSetBit(1); member >= 1 && member <= n;
+					member = latest.nextSetBit(member + 1)) {
+				if (member == job) {
+					continue;
+				}
+				candidates.add(new BoundedMember(job, member, counts[member]));
+			}
+		}
+		Collections.sort(candidates, new Comparator<BoundedMember>() {
+			@Override
+			public int compare(BoundedMember left, BoundedMember right) {
+				int byCount = Integer.compare(right.count, left.count);
+				if (byCount != 0) {
+					return byCount;
+				}
+				int byJob = Integer.compare(left.job, right.job);
+				return byJob != 0 ? byJob : Integer.compare(left.member, right.member);
+			}
+		});
+		int[] learnedByJob = new int[n + 1];
+		int globalLimit = Math.max(0, config.ngDssrSameNodeWarmStartGlobalPairLimit);
+		int perJobLimit = Math.max(0, config.ngDssrSameNodeWarmStartPerJobLimit);
+		int used = 0;
+		for (BoundedMember candidate : candidates) {
+			if (used >= globalLimit || learnedByJob[candidate.job] >= perJobLimit
+					|| target[candidate.job].contains(candidate.member)) {
+				continue;
+			}
+			target[candidate.job].add(candidate.member);
+			learnedByJob[candidate.job]++;
+			sameNodeLastSelected++;
+			sameNodeLastAdded++;
+			used++;
 		}
 		return true;
 	}
 
-	void recordSameNode(PackedBitSet[] neighborhoods, int nodeId, List<Integer> activeCutIds,
+	String sameNodeSummary() {
+		return "selected" + sameNodeLastSelected + "/added" + sameNodeLastAdded;
+	}
+
+	void recordSameNode(PackedBitSet[] neighborhoods, int nodeId, List<Integer> activeCutIds, int rounds,
 			TWETBPCConfig config) {
 		if (!config.enableNgDssrSameNodeWarmStart || neighborhoods == null) {
 			return;
 		}
-		sameNodeId = nodeId;
-		sameNodeActiveCutIds = sortedCutIds(activeCutIds);
-		sameNodeNeighborhoods = copyNeighborhoods(neighborhoods);
+		ArrayList<Integer> cutIds = sortedCutIds(activeCutIds);
+		if (sameNodeId != nodeId || sameNodeActiveCutIds == null || !sameNodeActiveCutIds.equals(cutIds)) {
+			sameNodeSnapshots.clear();
+			sameNodeId = nodeId;
+			sameNodeActiveCutIds = cutIds;
+		}
+		sameNodeSnapshots.addLast(new SameNodeSnapshot(copyNeighborhoods(neighborhoods), rounds));
+		int window = Math.max(2, config.ngDssrSameNodeWarmStartWindowSize);
+		while (sameNodeSnapshots.size() > window) {
+			sameNodeSnapshots.removeFirst();
+		}
 	}
 
 	private boolean sameActiveCutIds(List<Integer> activeCutIds) {
@@ -199,6 +260,28 @@ final class NgDssrHistoryWarmStart {
 		MemberFrequency(int member, double frequency) {
 			this.member = member;
 			this.frequency = frequency;
+		}
+	}
+
+	private static final class SameNodeSnapshot {
+		final PackedBitSet[] neighborhoods;
+		final int rounds;
+
+		SameNodeSnapshot(PackedBitSet[] neighborhoods, int rounds) {
+			this.neighborhoods = neighborhoods;
+			this.rounds = rounds;
+		}
+	}
+
+	private static final class BoundedMember {
+		final int job;
+		final int member;
+		final int count;
+
+		BoundedMember(int job, int member, int count) {
+			this.job = job;
+			this.member = member;
+			this.count = count;
 		}
 	}
 }

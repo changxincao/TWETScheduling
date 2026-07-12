@@ -2065,3 +2065,13 @@ compact window 在 2026-06-29 的提交 `4820ff93` 才接入 ng-DSSR。该提交
 本次已按第 202 节的边界完成实现。当前 ng-DSSR 只有在 completion bound 不含 dual profitable window、zero-dual job 排除和本轮 `0` cutoff time-indexed 临时 arc fixing 时，才把它标记为可供 subtree 使用；由基础 hard window、node 继承 compact window和持久 branch/pricing-only 图得到的紧 horizon 不再因为 `pricingHorizon < data.CmaxH` 被拒绝。`PreparedBounds` 增加显式的窄 horizon 安全标志，旧 pricing 类仍沿用原先的全 `CmaxH` 兼容规则，没有被一并放宽。
 
 验证分三层。首先 focused `javac` 编译通过；新增兼容性测试覆盖旧调用拒绝紧 horizon、显式安全紧 horizon 允许复用，以及 relaxation、queue ordering 和 horizon 超界仍拒绝。随后 30-job smoke 得到 `obj=bound=14318`、`valid=true`，主线未回归。最后复跑此前明确发生重建的 W300/50-3 root-only 口径：结果仍为 `incumbent=1902`、`bound=1726.014329`、`valid=true`；节点闭合后的 `SubtreeArcElim` 从历史 `bounds=rebuilt, buildMs=685.552, total=701.476ms` 改为 `bounds=reused, buildMs=0.000, total=20.288ms`。两次 run 的 ALNS/root preprocessing 随机轨迹使候选普通弧数量有 4 条差异，但最终 root bound 完全一致。当前结论是原 guard 确属历史性过度保守，紧 compact bound 可以直接复用；dual、zero-dual 和 in-round 临时 fixing 的隔离仍保留。
+
+204. 2026-07-12 compact bound 复用实现后正确性复核
+
+本次沿完整调用链复核了 prepared bound 的产生、保存和消费。ng-DSSR 每次 `solve()` 都会重新清空 DSSR 内 completion-bound/window 缓存；pricing engine 每次 `price()` 和 `reset()` 也会清空上次导出的 prepared bound。PC 只在某个 exact engine 返回 0 列时接收该对象，加列、加入 cut 或开始新 node 求解都会清空。因此 compact bound 不会跨 dual、cut 集合或 node 错用。normal、graph-partial 和 list-partial 三条 ng-DSSR engine 都经过同一个 `reusableSubtreeArcEliminationBounds()`，边界一致；旧 full-domain 类仍使用四参数构造器，只接受全 `CmaxH`。
+
+窗口来源也重新核对。`precomputeEffectivePricingWindows()` 先交基础 hard window、node 继承 compact window和可选 dual window，随后普通 `tightenWindows()` 只根据当前持久 branch/pricing-only 图的前后向可达性继续收紧；这些结果对当前子树有效。dual profitable window 和 zero-dual 排除由导出条件明确拒绝；`timeIndexedCompletionBoundInRoundArcFixing=true` 时也整体拒绝，避免把当前 pricing 基于 0 cutoff 的临时时空弧固定写成 `UB-LB` 永久证据。active SRI 下 completion bound 仍采用既有 no-SRI 松弛口径，忽略非负 SRI penalty 只会使下界偏弱；本次没有改变这一边界。
+
+消费端有两处。`CompletionBoundSubtreeArcEliminator` 用同一 node、同一 LP dual 和 `UB-LB` gap 扫描普通弧；紧窗口排除的是已经由父节点或当前节点 fixing 证明不可能属于更优解的完成时间，因此可以用更强的 compact bound。route enumeration 默认关闭；显式开启时 prepared suffix 也只用于 gap 内列剪枝，而 compact window 的证明口径正是当前子树中优于 incumbent 的解不能使用窗外完成时间，所以不要求 enumeration 自身必须同时打开窗口化 job penalty。
+
+补充的 40-2 root-only 审查 run 实际覆盖了非零固定：root preprocessing 后 `pricingHorizon=1521 < CmaxH=2132`，最终 `SubtreeArcElim candidates/fixed=326/5`、`bounds=reused`、`buildMs=0`，求解结果为 `incumbent=22582`、`root bound=22490`、`valid=true`。`22490` 与此前多组使用旧重建口径的 40-2 root 日志一致。结合 W300 的完全相同 root bound、专项兼容性测试和 focused 编译，当前未发现误固定、错误复用或求解结果回归。

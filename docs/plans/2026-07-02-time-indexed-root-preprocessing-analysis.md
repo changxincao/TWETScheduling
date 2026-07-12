@@ -684,3 +684,7 @@ pricing engine 调度也有可量化但次一级的浪费。W300 的 `TimeIndexe
 现有 history warm-start 不能通过简单打开开关用于这次运行。`initializeNgNeighborhoods()` 在 repeatability filter 生效时把 `ngDssrHistoryWarmStartSkippedForRepeatability` 设为 true，既不应用历史，也不记录本次 final ng-set。当前日志几乎每次都是 `ngWindowRepeatability=timeIndexed`，所以把 `enableNgDssrHistoryWarmStart=true` 单独打开仍会被全部跳过。这个互斥是此前为避免历史成员绕过当前 window/time-arc repeatability 限制而加的保守边界，不是 warm-start 本身没有潜力。
 
 从本轮数据看，history warm-start 有明确实验价值，但正确接法应是“历史频率选成员，再与当前 repeatable-job admissibility 做交集”，而不是关闭 repeatability filter或直接全量继承 final set。历史候选 `(job,member)` 只有在 member 当前仍允许作为 repeatable ng member 时才能加入；目标大小仍按最近窗口的 final ng-set 平均值和频率阈值决定。这样可能减少 20--24 轮重尾，但也会增大第一轮 ng-set、增加单轮 label 数，净收益必须做同配置 A/B。当前运行保持原配置不动，先保留为下一轮独立实验。
+
+进一步按“同一 node 的多次 exact pricing”检查已有成员级日志。当前 W300 完整运行没有打开 `ngDssrSetMembers`，只能看到轮数和更新量，不能从本轮日志恢复成员级 Jaccard；因此没有用更新次数代替相似性。可用的历史 `40-2 setupR50 empty1/top5` 日志包含 9 个 node、81 次 exact 的最终成员集合。去掉每个 job 自身后，同一 node 相邻 exact 共 72 对，Jaccard 平均 `0.670`、中位数 `0.740`。每个 node 的第一次跳变平均只有 `0.263`，主要反映初始空/很小集合第一次学到大量 witness；排除这次跳变后，后续 63 对相邻 exact 的平均 Jaccard 为 `0.728`、中位数 `0.771`。逐 node 后续表现并不完全一致，平均约 `0.409--0.860`，说明信号明显但不能假设集合恒定。
+
+这个结果更支持“同 node 最近一次 final ng-set”而不是全局无限历史。相邻 LP dual 只经过一次加列重解，final ng-set 的相关性通常高于跨 node 旧样本；第一场 exact 仍应沿用当前初始化，第二次开始可把上一场 final set 作为候选来源。是否全量继承仍需谨慎：更大的初始 ng-set 会减少 DSSR 轮数，但会削弱 dominance、增加每轮 label。下一步 A/B 应同时统计 exact 轮数、初始/final pair 数、forward/backward labels 和总 exact 时间，不能只以轮数下降判断成功。W300 需要在下一次运行显式开启成员 trace，才能得到本算例自己的相似性证据。

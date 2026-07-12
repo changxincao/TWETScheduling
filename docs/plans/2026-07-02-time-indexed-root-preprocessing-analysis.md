@@ -581,3 +581,13 @@ ng-DSSR 的真实成本 evaluate 发生在 pricing engine 出口，而不是 lab
 上述 completion prefilter 不是再增加一个独立 scalar bound。当前 forward 候选先构造 `q(t)=parent(t-delay)+jobPenalty(t)+fixedCost`，再做 forward prefix-min 闭包得到 `Nf(q)`，最后计算 `min_t[Nf(q)(t)+R_j(t)]`；backward 则对称地做 suffix-min 闭包并与 `U_j` 拼接。新 helper 的目标是用三个 segment cursor 在一次扫描中边生成 raw sum、边维护方向运行 minimum、边与 completion function 求最小，只返回数值而不分配 candidate segments。若数值已不小于 cutoff，它与现有完整函数检查得到同一剪枝结论；若仍可能为负，再回到现有路径构造真正 candidate。因为 survivor 只约占 `23.6%`，即使 survivor 需要二次扫描，也可能低于当前对所有候选都构造 PWLF 的成本。实现应先限 no-SRI，用随机函数、BigM 窗口、空重叠和正反方向分别对拍旧“构造+检查”结果。
 
 当前 midpoint 逻辑已经会把同 node 历史 exact 中的最佳 `Tmid` 作为下一次有限 probe 的 reference，但它的 exact 反馈只保存 `max(fw/bw,bw/fw)` 这个无方向比值，并根据 exact 总时间选历史最好点；它不知道当前究竟是 forward 还是 backward 更重，也不会用完整扩展结果主动预测移动方向。`bidirectionalMidpointProbeExactFeedback` 目前只在 runner 中赋值，源码没有消费该开关。更合理的策略是为每个 node 保存带方向的 `(Tmid, fwMs, bwMs, fwLabels, bwLabels)` 观测；若 `bw/fw>1`，下次将 reference 上移以缩小 backward 半域，反之下移。已有正反两个方向观测时在两个 `Tmid` 之间二分；尚未形成 bracket 时每次最多移动 pricing horizon 的 `5%--10%`。第一版不直接冻结预测值，而是把它作为现有 2--3 个有限 probe 的中心，保留当前 probe 作为局部校验。同一次 DSSR 内仍复用第一轮 `Tmid`，不在 ng-set 更新之间重做 probe。
+
+### 2026-07-12：扩展前 completion 扫描 A/B 与 Tmid 方向复核
+
+按上述方案实现了一个完全独立、默认关闭的 no-SRI 扩展前 completion prefilter。实验版本没有构造临时 Segment/PWLF，而是在复用的 primitive scratch 中严格复现 `shiftX + add + forward/backward normalize`，再与 completion function 扫描最小和；2000 组含 BigM 窗口、正反方向和正负 shift 的随机输入与旧“构造后检查”逐例一致。随后在 `wet050_003_3m_setupR50 + W300` 上做同环境 root-only A/B。两组均得到 `bound=1726.014329`、`pool=4381`、10 次 exact，列轨迹和最终有效性一致。
+
+效果为明确负收益。关闭时真正构造 extension frontier `2,592,652` 次，forward/backward 扩展合计 `27.441s`，exact `59.518s`；打开后预检查 `2,592,402` 次、提前剪掉 `1,983,862` 次，真正构造数降至 `608,790`，但扩展反而升至 `36.203s`，exact 升至 `69.090s`，约慢 `16.1%`。这说明当前短 PWLF、SegmentPool 和已有 scalar-first 检查下，逐候选重新扫描 raw sum、方向闭包与 completion 的成本，高于省掉候选对象构造的收益。该实验代码、开关和热路径统计已全部撤回，生产主线保持原来的“构造 candidate 后做 completion check”，只保留本段负面结果，避免以后重复尝试同一路径。
+
+同一份 W300 日志还验证了 Tmid 局部 probe 的方向风险。对 10 次 exact，逐次取历史 reference 上第一个有限 probe 的 `direction`，再与该次完整 exact 的 `forwardExactTime/backwardExactTime` 比较，结果是 **10/10 方向相反**。例如第二次从历史 `681.55` 出发，局部队列认为 backward 压力更大，继续向右移并选到 `732.66625`；完整 exact 却为 forward `648.1ms`、backward `244.3ms`，实际应向左。后续 reference 稳定在 `576.05884` 时，局部 probe 一直判 forward 更重而建议左移，但完整 exact 的 backward 从 `306.7ms` 增至 `6182.8ms`，始终显著更重。
+
+当前历史 best 的选择指标也由此明确：`MidpointProbeNodeReuse` 只记录 `(Tmid, exactTotalTime, abs label ratio, total labels)`；优先选总 exact 时间更小的点，时间在 10% 内时才要求无方向 label ratio 至少改善 30%。它不记录 forward/backward 分项时间，也不保存失衡方向。下一步若调整 Tmid，应先增加只读统计 `(Tmid, forwardExactTime, backwardExactTime, forwardLabels, backwardLabels)`，区分“局部有限 pop 方向”和“完整 exact 方向”；在确认跨轮方向稳定性前，不直接用当前局部 probe 的移动方向覆盖历史 best。本轮未修改 Tmid 逻辑。

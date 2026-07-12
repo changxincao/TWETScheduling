@@ -674,3 +674,13 @@ pricing engine 调度也有可量化但次一级的浪费。W300 的 `TimeIndexe
 剩余可见全量操作暂不删除。midpoint 的 column-based 策略会扫描并排序 restricted columns，但默认 `bidirectionalMidpointStrategy=default` 不走该路径；route enumeration 的 `LinkedHashSet` 同时承担枚举结果顺序和 membership，不能由 LP active set 代替；可复用 strong trial 的 seed 复制用于 child 所有权隔离。列化外包 child seed 合并仍有线性 `contains`，但外包 seed 通常很小且不在当前无外包主线热点。当前没有发现新的高频、无语义价值的全量扫描。
 
 提交后再次从逻辑层和代码调用链复核。top-K 堆以原严格全序比较器的逆序作为堆序，堆顶始终是当前最差 seed，替换条件与全排序取前 K 严格一致；`Pool.addOrImproveColumn()` 对同 signature 只原地替换原 ID，因此 signature-to-ID 加 LP membership 不会漏掉 active 旧版本。普通 pricing、稳定化、strong phase2、普通 repair 和 domain repair 均在每次 engine 返回后才把 generated IDs 加入 LP，本批 `seen` 恰好覆盖加入前的去重窗口。route enumeration 仍由 run-signature/finite-ID 集合处理本轮重复，直接查询 LP membership 只替换旧 active-ID 副本，不改变枚举结果。strong trial 的 time-limit 路径会立即停止整棵树，infeasible 路径不会入队，phase2 和正式 child 读取 seed 前都检查 `isReusableForQueue()`，所以空 seed 不会进入可复用 child。再次 focused 编译并运行 membership 与 14,168 项 outsourcing move 对拍，全部通过；未发现需要修改生产代码的新问题。
+
+### 2026-07-12：W300 完整树 DSSR 轮数与 history warm-start 机会
+
+当前 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 完整树运行继续使用 normal ng-DSSR、repeatability filter、source-aware dominance、time-indexed root preprocessing 和 strong branching。截取前 258 次 exact pricing，累计 exact `1093.56s`；其中 162 次只执行 1 轮 DSSR，耗时 `286.76s`，其余 96 次执行多轮，累计 795 轮、耗时 `806.80s`，占该截面 exact 时间约 73.8%。重尾已经很明确：多次 certificate/尾部调用需要 20--24 轮，单次最高约 90s；多轮调用中 32 次最终证明 relaxed pricing 无负列，64 次最终返回 elementary 负列，说明多轮 DSSR 不是只出现在最终证书轮。
+
+当前“最优 relaxed reduced cost 已非负后不再更新 ng-set”的控制流是正确的。每轮只记录 reduced cost 严格为负的 non-elementary route；若完整 relaxed pricing 后既没有 elementary 负列，也没有 non-elementary 负列，`nonElementaryNegativeRoutes` 为空，直接以 `relaxed pricing found no negative route` 返回，不调用 ng-set update。只有确实存在负的 non-elementary witness 且没有 elementary 返回列时，才根据 witness 更新 ng-set 并进入下一轮。因此当前大量 DSSR 轮不是在正 reduced cost 后继续无效更新，而是每轮仍能找到新的负 non-elementary witness。
+
+现有 history warm-start 不能通过简单打开开关用于这次运行。`initializeNgNeighborhoods()` 在 repeatability filter 生效时把 `ngDssrHistoryWarmStartSkippedForRepeatability` 设为 true，既不应用历史，也不记录本次 final ng-set。当前日志几乎每次都是 `ngWindowRepeatability=timeIndexed`，所以把 `enableNgDssrHistoryWarmStart=true` 单独打开仍会被全部跳过。这个互斥是此前为避免历史成员绕过当前 window/time-arc repeatability 限制而加的保守边界，不是 warm-start 本身没有潜力。
+
+从本轮数据看，history warm-start 有明确实验价值，但正确接法应是“历史频率选成员，再与当前 repeatable-job admissibility 做交集”，而不是关闭 repeatability filter或直接全量继承 final set。历史候选 `(job,member)` 只有在 member 当前仍允许作为 repeatable ng member 时才能加入；目标大小仍按最近窗口的 final ng-set 平均值和频率阈值决定。这样可能减少 20--24 轮重尾，但也会增大第一轮 ng-set、增加单轮 label 数，净收益必须做同配置 A/B。当前运行保持原配置不动，先保留为下一轮独立实验。

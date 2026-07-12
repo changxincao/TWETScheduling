@@ -688,3 +688,9 @@ pricing engine 调度也有可量化但次一级的浪费。W300 的 `TimeIndexe
 进一步按“同一 node 的多次 exact pricing”检查已有成员级日志。当前 W300 完整运行没有打开 `ngDssrSetMembers`，只能看到轮数和更新量，不能从本轮日志恢复成员级 Jaccard；因此没有用更新次数代替相似性。可用的历史 `40-2 setupR50 empty1/top5` 日志包含 9 个 node、81 次 exact 的最终成员集合。去掉每个 job 自身后，同一 node 相邻 exact 共 72 对，Jaccard 平均 `0.670`、中位数 `0.740`。每个 node 的第一次跳变平均只有 `0.263`，主要反映初始空/很小集合第一次学到大量 witness；排除这次跳变后，后续 63 对相邻 exact 的平均 Jaccard 为 `0.728`、中位数 `0.771`。逐 node 后续表现并不完全一致，平均约 `0.409--0.860`，说明信号明显但不能假设集合恒定。
 
 这个结果更支持“同 node 最近一次 final ng-set”而不是全局无限历史。相邻 LP dual 只经过一次加列重解，final ng-set 的相关性通常高于跨 node 旧样本；第一场 exact 仍应沿用当前初始化，第二次开始可把上一场 final set 作为候选来源。是否全量继承仍需谨慎：更大的初始 ng-set 会减少 DSSR 轮数，但会削弱 dominance、增加每轮 label。下一步 A/B 应同时统计 exact 轮数、初始/final pair 数、forward/backward labels 和总 exact 时间，不能只以轮数下降判断成功。W300 需要在下一次运行显式开启成员 trace，才能得到本算例自己的相似性证据。
+
+### 2026-07-12：W300 历史纯 time-indexed 完整树记录复核
+
+重新筛选所有明确记录 `twet.data.dueWindowHalfWidth=300` 的历史日志后，确认该 50-3/setupR50 算例曾运行过纯 `TimeIndexedGraphPricing` 完整树：`tmp-wet050-003-setupR50-W300-timeindexed-14400-20260708b`。该 run 的 root bound 为 `1702.274302`，弱于当前 ng-DSSR 的 `1726.014329`；运行到 node 607、处理 408 次分支、Pool 约 320k，队列仍有 176 个 node，随后日志中断且没有 CSV，因此没有求解完成。另一次同配置 run 只到 node 34，也没有结果文件。
+
+该历史日志后期显示 incumbent `1771`、表面全局 gap 约 `0.09%`，但这个值来自 node 386 的 `RestrictedInteger ... coverRepair`。当时 time-indexed 主线仍允许 RMIH 在包含 repeated pseudo-schedule 的列池上工作；后续已经明确禁用该组合，因为 RMIH 的覆盖/分拆结果不能自动证明这些 pseudo columns 对应 elementary 机器序列。因而 `1771` 不能直接作为当前 elementary 原问题的可信 incumbent，更不能据此认为 time-indexed 已接近证明最优。若统一使用当前 ALNS 的可信 incumbent `1902`，历史 time-indexed root 松弛比 ng-DSSR 弱约 24，完整树日志也没有留下最终有效 bound/CSV。该 run 只能说明 time-indexed 单次 pricing 快、在约 19 分钟内处理了大量节点，不能作为已求最优记录。

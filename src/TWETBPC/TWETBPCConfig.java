@@ -313,6 +313,11 @@ public class TWETBPCConfig {
 	public boolean bidirectionalMidpointProbeReuseWithinNode = true;
 	/** 2026-07-09: 同一次 ng-DSSR exact pricing 内，第 2 轮及以后是否复用第一轮 probe 选出的 Tmid。 */
 	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;
+	/**
+	 * 2026-07-12: 同一 node、同一 active-cut 迭代内，Tmid 连续稳定后冻结并周期校验。
+	 * 固定规则为至少观察 5 次、最近 3 次偏差不超过 horizon 的 1%，冻结后跳过 5 次再正常 probe 一次。
+	 */
+	public boolean bidirectionalMidpointProbeStableFreeze = true;
 	/** 2026-07-09: ng-DSSR 扩展热路径细分计时诊断；默认关闭，避免高频 nanoTime 影响批量实验。 */
 	public boolean ngDssrExtensionTimingDiagnostics = false;
 	/**

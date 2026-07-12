@@ -143,7 +143,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double midpointProbeSelectedForwardMillis = Double.NaN;
 	private double midpointProbeSelectedBackwardMillis = Double.NaN;
 	private boolean midpointProbeLabelsReadyForJoin;
+	private boolean midpointProbePerformed;
+	private boolean midpointProbeStableFreezeUsed;
 	private long midpointStrategyNanos;
+	private static final int MIDPOINT_FREEZE_MIN_EXACT_CALLS = 5;
+	private static final int MIDPOINT_FREEZE_STABLE_SELECTIONS = 3;
+	private static final int MIDPOINT_FREEZE_SKIPPED_CALLS = 5;
+	private static final double MIDPOINT_FREEZE_HORIZON_TOLERANCE = 0.01;
 	// 2026-05-22: 閻熸粎澧楅幐鍛婃櫠閻樼鍋撶憴鍕叝闁绘粠鍨卞顏堫敊閻愵剛鏆?job-level 闂佸憡鏌ｉ崝宥夊焵?H_j 缂傚倸鍊归幐鎼佹偤閵娾晛违?
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHStart;
@@ -1220,7 +1226,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		exactInitializePreCertificateNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
 		if (!tryReuseFirstRoundMidpointWithinDssr()) {
-			runMidpointProbeIfEnabled(lp);
+			if (!tryUseStableFrozenMidpoint(lp)) {
+				runMidpointProbeIfEnabled(lp);
+			}
 			rememberFirstRoundMidpointWithinDssr();
 		}
 		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;
@@ -1274,6 +1282,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrFirstRoundSelectedDirection = midpointProbeSelectedDirection;
 		ngDssrFirstRoundSelectedForwardMillis = midpointProbeSelectedForwardMillis;
 		ngDssrFirstRoundSelectedBackwardMillis = midpointProbeSelectedBackwardMillis;
+	}
+
+	/** 2026-07-12: 稳定冻结只跳过 probe；每次仍按冻结后的 Tmid 完整执行 exact labeling。 */
+	private boolean tryUseStableFrozenMidpoint(LP lp) {
+		midpointProbeStableFreezeUsed = false;
+		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinNode
+				|| !config.bidirectionalMidpointProbeStableFreeze || ngDssrRound != 1
+				|| midpointProbeReuseByNode == null || lp == null || lp.getNode() == null) {
+			return false;
+		}
+		MidpointProbeNodeReuse reuse = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
+		if (reuse == null) {
+			reuse = new MidpointProbeNodeReuse();
+			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
+		}
+		reuse.ensureFreezeCutEpoch(lp.getActiveCutIds());
+		if (!reuse.tryAcquireFrozenMidpoint()) {
+			return false;
+		}
+		tMid = clampCurrentMidpoint(reuse.frozenTmid);
+		rebuildHalfDomainForCurrentMidpoint();
+		resetProbeAffectedStatistics();
+		midpointProbeLabelsReadyForJoin = false;
+		midpointProbePerformed = false;
+		midpointProbeStableFreezeUsed = true;
+		midpointProbeReferenceSource = "stableFreeze";
+		midpointProbeSummary = "stableFreeze, selected=" + tMid + ", " + reuse.freezeSummary();
+		return true;
 	}
 
 	/**
@@ -1667,6 +1703,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void runMidpointProbeIfEnabled(LP lp) {
 		midpointProbeLabelsReadyForJoin = false;
+		midpointProbePerformed = false;
 		if (!config.bidirectionalMidpointProbe) {
 			midpointProbeSummary = "off";
 			return;
@@ -1754,6 +1791,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointProbeSelectedDirection = best.pressureDirection(scoreMode);
 		midpointProbeSelectedForwardMillis = best.forwardElapsedMillis;
 		midpointProbeSelectedBackwardMillis = best.backwardElapsedMillis;
+		midpointProbePerformed = true;
 		midpointProbeLabelsReadyForJoin = best == currentStateResult
 				&& best.reliabilityRank(scoreMode) == 0;
 		if (!midpointProbeLabelsReadyForJoin) {
@@ -1807,6 +1845,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		String action = reuse.considerExact(tMid, exactMillis, ratio, labelTotal,
 				forwardExactMillis, backwardExactMillis, forwardLabelsKept, backwardLabelsKept,
 				config.bidirectionalMidpointProbeExactTimeTieTolerance, normalizedExactBalanceImprovementTolerance());
+		String freezeAction = "off";
+		if (config.bidirectionalMidpointProbeStableFreeze && ngDssrRound == 1) {
+			reuse.ensureFreezeCutEpoch(lp.getActiveCutIds());
+			if (midpointProbePerformed) {
+				freezeAction = reuse.considerFreezeSelection(tMid, pricingHorizon);
+			} else if (midpointProbeStableFreezeUsed) {
+				freezeAction = "reuse";
+			}
+		}
 		int exactTimeDirection = direction(forwardExactMillis, backwardExactMillis);
 		int exactLabelDirection = direction(forwardLabelsKept, backwardLabelsKept);
 		midpointProbeFeedbackSummary = "exactReuse=" + action + ", exactMs=" + exactMillis + ", ratio=" + ratio
@@ -1819,7 +1866,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ midpointProbeSelectedBackwardMillis
 				+ ", exactSideMs=" + forwardExactMillis + ":" + backwardExactMillis
 				+ ", bestExactSideMs=" + reuse.bestExactForwardMillis + ":" + reuse.bestExactBackwardMillis
-				+ ", bestExactSideLabels=" + reuse.bestExactForwardLabels + ":" + reuse.bestExactBackwardLabels;
+				+ ", bestExactSideLabels=" + reuse.bestExactForwardLabels + ":" + reuse.bestExactBackwardLabels
+				+ ", stableFreeze=" + freezeAction + "/" + reuse.freezeSummary();
 	}
 
 	private int direction(double forward, double backward) {
@@ -3936,6 +3984,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointProbeSelectedForwardMillis = Double.NaN;
 		midpointProbeSelectedBackwardMillis = Double.NaN;
 		midpointProbeLabelsReadyForJoin = false;
+		midpointProbePerformed = false;
+		midpointProbeStableFreezeUsed = false;
 		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
 		diagnosticPricingOnlyJobArcCount = 0;
@@ -6706,6 +6756,80 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double lastExactMillis = Double.NaN;
 		double lastExactRatio = Double.NaN;
 		long lastExactLabelTotal;
+		private ArrayList<Integer> freezeActiveCutIds;
+		private int freezeExactCalls;
+		private double freezeLastSelectedTmid = Double.NaN;
+		private int freezeStableSelections;
+		private boolean frozen;
+		private double frozenTmid = Double.NaN;
+		private int frozenSkippedCalls;
+		private boolean freezeValidationPending;
+
+		void ensureFreezeCutEpoch(List<Integer> activeCutIds) {
+			List<Integer> current = activeCutIds == null ? Collections.<Integer>emptyList() : activeCutIds;
+			if (freezeActiveCutIds != null && freezeActiveCutIds.equals(current)) {
+				return;
+			}
+			freezeActiveCutIds = new ArrayList<Integer>(current);
+			freezeExactCalls = 0;
+			freezeLastSelectedTmid = Double.NaN;
+			freezeStableSelections = 0;
+			frozen = false;
+			frozenTmid = Double.NaN;
+			frozenSkippedCalls = 0;
+			freezeValidationPending = false;
+		}
+
+		boolean tryAcquireFrozenMidpoint() {
+			if (!frozen || !Double.isFinite(frozenTmid)) {
+				return false;
+			}
+			if (frozenSkippedCalls >= MIDPOINT_FREEZE_SKIPPED_CALLS) {
+				freezeValidationPending = true;
+				return false;
+			}
+			frozenSkippedCalls++;
+			return true;
+		}
+
+		String considerFreezeSelection(double selectedTmid, double horizon) {
+			freezeExactCalls++;
+			double tolerance = Math.max(Utility.EPS,
+					Math.abs(horizon) * MIDPOINT_FREEZE_HORIZON_TOLERANCE);
+			double reference = freezeValidationPending ? frozenTmid : freezeLastSelectedTmid;
+			boolean stable = Double.isFinite(reference)
+					&& Utility.compareLe(Math.abs(selectedTmid - reference), tolerance);
+			freezeLastSelectedTmid = selectedTmid;
+			if (freezeValidationPending) {
+				freezeValidationPending = false;
+				frozenSkippedCalls = 0;
+				if (stable) {
+					frozenTmid = selectedTmid;
+					freezeStableSelections = Math.max(freezeStableSelections,
+							MIDPOINT_FREEZE_STABLE_SELECTIONS);
+					return "validated";
+				}
+				frozen = false;
+				frozenTmid = Double.NaN;
+				freezeStableSelections = 1;
+				return "validationChanged";
+			}
+			freezeStableSelections = stable ? freezeStableSelections + 1 : 1;
+			if (!frozen && freezeExactCalls >= MIDPOINT_FREEZE_MIN_EXACT_CALLS
+					&& freezeStableSelections >= MIDPOINT_FREEZE_STABLE_SELECTIONS) {
+				frozen = true;
+				frozenTmid = selectedTmid;
+				frozenSkippedCalls = 0;
+				return "frozen";
+			}
+			return stable ? "stable" : "reset";
+		}
+
+		String freezeSummary() {
+			return "active=" + frozen + ", exact=" + freezeExactCalls + ", stable="
+					+ freezeStableSelections + ", skipped=" + frozenSkippedCalls + "/"
+					+ MIDPOINT_FREEZE_SKIPPED_CALLS + ", t=" + frozenTmid;
+		}
 
 		boolean hasBestExact() {
 			return Double.isFinite(bestExactTmid) && Double.isFinite(bestExactMillis)

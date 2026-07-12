@@ -604,6 +604,9 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeReuseWithinDssr = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinDssr",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinDssr)));
+		config.bidirectionalMidpointProbeStableFreeze = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeStableFreeze",
+				Boolean.toString(config.bidirectionalMidpointProbeStableFreeze)));
 		config.ngDssrExtensionTimingDiagnostics = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrExtensionTimingDiagnostics",
 				Boolean.toString(config.ngDssrExtensionTimingDiagnostics)));

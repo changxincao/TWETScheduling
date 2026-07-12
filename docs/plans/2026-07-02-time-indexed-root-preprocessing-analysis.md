@@ -617,3 +617,11 @@ W300 当前 run 的 10 次 exact 共执行 29 个 probe 候选，probe 初始化
 当前最值得实施的第一步是 **稳定后冻结，而不是继续改移动公式**：同 node、同 cut/branch/window 结构下，连续两次 selected Tmid 的差不超过 pricing horizon 的 1% 时，后续直接复用；每隔 5 次 exact 做一次校验 probe，或者在 active cut、compact window、pricing-only arc 结构发生变化时立即解冻。不要用 F/B 不平衡单独解冻，因为本例最优点本来就不平衡。历史 `bestExactMillis` 继续保留作诊断，但不宜把不同 dual 下最小总时间永久当作唯一 reference。
 
 第二步才是实验性的移动改进：首轮没有稳定历史时，可用 probe 的正反向 sideMs 而不是 queue 数决定第一步方向，并要求 sideMs ratio 至少超过 1.25 才移动；候选选择应优先比较 `forwardSideMs + backwardSideMs`，而不是只比较不平衡比例。该策略可能让本例从初始 639 向 584 一侧搜索，但 sideMs 在尾部不可靠，必须保持默认关闭并做同 dual full-curve 对照。当前不建议增加 full calibration 到生产求解：虽然它能准确找到曲线最低点，但多个候选完整扩展的成本通常高于可节省的后续 probe 时间。
+
+### 2026-07-12：同 node、同 cut 迭代的稳定 Tmid 冻结
+
+已按上述结论实现 `bidirectionalMidpointProbeStableFreeze`，默认开启。冻结只作用于当前 ng-DSSR 的 midpoint probe，不复用 probe labels，也不跳过 exact labeling；active SRI 下仍按同样规则运行，并由 active cut 集合变化触发重置。状态按 BPC node 分开保存，并复制当前 `activeCutIds` 作为 cut 迭代标识；active cut 集合变化时立即清空该 node 的冻结样本。一次 ng-DSSR 内后续 DSSR round 仍沿用原有“复用第一轮 Tmid”逻辑，不重复计入稳定样本。
+
+当前规则固定为：同一 cut 迭代至少完成 5 次第一轮 probe，最近连续 3 次 selected Tmid 的差异不超过 `pricingHorizon` 的 1% 后冻结；冻结后连续 5 次 exact 直接使用该 Tmid，第 6 次恢复正常 probe 校验。校验仍落在容差内则继续冻结并重新开始 5 次跳过周期；校验变化则立即解冻，从新 Tmid 重新累计稳定次数。这里没有使用 F/B 平衡、局部 sideMs 或不同 dual 下的 exact 耗时作解冻条件，避免把前述方向不一致重新带入控制逻辑。
+
+状态级测试复现了 W300 的 `686.925,686.925,583.886,583.886,583.886` 序列，确认第 5 个样本后冻结、恰好跳过 5 次、第 6 次校验，并确认 active cut ID 变化后全部归零。随后用与方向诊断基线相同的 `wet050_003_3m_setupR50 + W300` root-only `BEST_UB` 配置做端到端对照。逐次加列仍为 `1987,298,36,2,1,1,2,3,1,0`，pricing rounds 204、Pool 4381、10 次 exact、`bound=1726.014329`、`valid=true` 均不变；probe 候选由 29 个降为前 5 次的 14 个，后 5 次直接冻结复用。ng-DSSR exact 从 `35.476s` 降到 `31.696s`，约减少 `10.7%`；总 solve 从 `81.012s` 降到 `76.931s`，约减少 `5.0%`。本次结果符合此前根据候选侧计时估计的约 3.2 秒可节省量。

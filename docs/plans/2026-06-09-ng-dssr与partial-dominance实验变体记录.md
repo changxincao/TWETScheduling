@@ -2033,3 +2033,19 @@ source-aware 删除也不依赖独立 h。`g` 的每段已经区分 `LOCAL(label
 完整 source-aware source 归零清理在后续提交 `0d7502c7` 和第 181 节才正式接入，随后又继续删除 dead-node 历史扫描、实现 partial 惰性裁剪并最终移除持久 h。当前完整版本只做过 40-2 的严格 Paper/new A/B，尚未重新完成 W300 端到端对比；第 1861 行原记录也已明确这一点。因此 W300 的 14.4%/19.1% 只能说明“早期增量传播版本”相对旧 Paper 有一定收益，不能用于评价当前 source-aware 清理的幅度。
 
 第一版未修正版本曾在 W300 上出现约 `211s->113s`，但同时 root bound 从 `1726.014329` 变为 `1726.256114`，后来定位到 active sequence 成本未统一回刷等口径问题。该时间不能作为有效性能结果。当前版本理论上会通过 source 归零减少 W300 labels、扩展和 join，但实际幅度必须重新跑 current-vs-Paper 同配置 A/B 后才能下结论。
+
+202. 2026-07-12 主线端到端冗余与重耗时复核
+
+当前 ng-DSSR 内部的 source-aware dominance、completion bound、Tmid 冻结和 join 预过滤已经基本完成一轮优化，但端到端求解仍有几块明显成本不在 exact labeling 内。以最新 `wet050_003_3m_setupR50 + W300` root-only 日志为例，总时间 `76.931s`，其中 ng-DSSR exact 为 `31.696s/10`，初始 ALNS 单独隔离后约 `28.3--29.1s`，time-indexed root preprocessing 为 `8.099s`，普通启发式 pricing 为 `6.830s/31`，正式 root 的 master LP 约 `2.628s`。因此该算例剩余最大项首先是初始 ALNS，其次才是已经优化过的 exact pricing；不能再把约 28 秒未归因时间算到 ng-DSSR 初始化或 dominance 上。
+
+1. 当前完整树上最值得优先控制的是 two-stage strong branching。默认 `strongBranchingCandidateLimit=20`，意味着每次分支最多做 40 个左右 child phase-1 trial；随后前 4 个候选的左右 child 进入 phase 2。`strongBranchingPhase2MaxHeuristicPasses=0` 的实际语义不是关闭，而是每个 trial 一直运行到允许的 heuristic pricing 全部无列。历史 40-2 日志中，phase-1 trial LP 为 `63.750s/280`，phase-2 strong heuristic 为 `36.270s/543`；当前较好配置下仍有 `HeuristicPricing[strongBranching]=34.908s/842`。50-3 对照中，phase2=4 为 `381.350s/10 nodes`，关闭 phase 2 为 `352.319s/14 nodes`，说明 phase 2 确实改善分支质量，但节省的节点没有抵消重复 trial heuristic。最小风险的下一步不是改分支语义，而是对 `phase2CandidateLimit` 和正数 `MaxHeuristicPasses=1/2` 做完整求解 A/B。更进一步可做 reliability/pseudocost branching：仅在某条 arc 缺少可靠历史时执行完整 trial，避免每个节点固定测试 20 个候选。
+
+2. 初始 ALNS 的主要成本不是 accepted/best history 入池。隔离测试中 history limit 为 2000、0 或 best 的总时间分别约 `29.07s/28.77s/28.30s`，差异不足 1 秒。JFR 显示真正热点是 `PiecewiseLinearFunction.add` 约 `40.6%`、`Solution.merge3Segments` 约 `8.9%`、`CrossExchangeOperator.evalDelta` 约 `7.8%`、`copy/shiftX` 约 `14.7%`，分段对象获取占主要分配压力。`InitialColumnBuilder` 确实会在 Pool 去重前评估历史重复 sequence，这是明确但次要的局部冗余。ALNS `noImprove=20/40/60/80` 的隔离时间约为 `9.0/16.4/22.9/29.1s`，对应 incumbent `2002/2002/1918/1902`，说明直接缩短 ALNS 会损失上界并影响后续 fixing，必须比较完整 BPC，而不能只看 seed 时间。若继续优化，应针对 ALNS 专用的 PWLF 拼接和 cross-exchange 候选评价做融合操作，不应贸然改通用 `PWLF.add()`。
+
+3. time-indexed root preprocessing 不应无条件视为“好配置”。W300 本轮耗时 `8.099s`，包含 132 次 time-indexed pricing/LP 迭代，最终只把 200 条 elementary seed 交给正式 root；它的主要价值是 216 条普通 pricing-only arc、约 454 万条时空禁弧和 compact window，而不是复用临时 master。本项目已有 setupR 对照显示它在困难 R75 上明显有利，但在 R25/R50 上可能变慢。因此更合理的方向是按预计时空图规模、horizon 和历史收益决定是否预处理，而不是默认全开或全关。
+
+4. 发现一处可以进一步验证的 completion-bound 重算。W300 最后一次 no-negative exact 在初始化中构造 completion bound 约 `598.5ms`；节点闭合后 subtree arc elimination 又重建同一 dual 下的 bounds 约 `685.6ms`，最终固定 0 条普通弧。原因已定位：ng-DSSR 只有在 `pricingHorizon == data.CmaxH` 时才导出 reusable bounds；root preprocessing 的 compact window 把 horizon 缩到 1230，而全局 `CmaxH` 为 2230，所以即使 dual window 已关闭，结果仍被判为不可复用。该 guard 对 dual profitable window 必须保留，但对已经证明安全、可继承的 compact window 可能过于保守。后续可给 prepared bounds 增加 effective-window/horizon 口径并做逐函数、逐 arc A/B；若证明安全，可省去每个闭合节点一次 completion-bound rebuild，并且复用的 bound 还保留 compact window 强度。当前不能直接删除 guard，因为 subtree scanner 现按 `data.CmaxH` 判兼容。
+
+5. RMIH、普通 heuristic pricing 和 master re-solve 不是统一意义上的冗余。RMIH 当前在每个 fractional ng-DSSR node 调用，普通规模最多 4 秒、大规模最多 20 秒；已有日志存在多次 infeasible/不改进，因此可以考虑“root 必跑，连续失败后降频，只在 pool 明显增长或 incumbent 长时间未更新时再跑”的调度策略。普通 heuristic pricing 在 W300 为 `6.830s/31`，但历史上关闭后会让 exact 和列池显著膨胀，不能直接去掉。PC 在正常 column generation 中只在初始时 `solveRelaxation()` 建模，后续加列使用 `resolveCurrentModel()`，不存在每轮 pricing 都重建 CPLEX 模型的问题；真正重复建模集中在 strong branching 的独立 trial，这是评分成本而不是普通 PC 冗余。
+
+当前优先顺序为：先做 strong branching phase-2 限轮/候选数完整 A/B；其次验证 compact-window completion bound 能否安全复用于 node 后处理；再评估 ALNS 专用 PWLF/CrossExchange 优化和 RMIH 自适应调用。initial history 去重、每个 pricing engine 构造 active-id HashSet、诊断 summary 等属于小项，现有数据不支持优先修改。route enumeration 默认关闭，也不构成当前主线耗时。

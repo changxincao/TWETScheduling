@@ -2097,3 +2097,14 @@ ng-set 轨迹解释了差异。warm 前 13 次 exact 的 final ng-set 平均一�
 成员级观察同样显示稳定核心。例如 node 1 的 job 1 在 8 次中通常为 `{12,39}`，job 12 通常为 `{1,21,39}`，job 21 通常为 `{12,28}`，job 24 通常为 `{1,12}`，job 39 通常为 `{1,12}`；只有个别 pricing 引入 13、24、27、30 等临时成员。node 7 更稳定：job 2 基本恒为 `{21,23}`，job 21 恒为 `{12,28}`，job 24 恒为 `{12}`，job 33 恒为 `{2,21,23}`。因此同 node 历史的主要价值是识别高频核心成员，而不是继承完整 final set。
 
 当前更合理的候选策略为有界频率 warm-start。每个 node 独立维护最近若干次 final ng-set 的 pair 出现次数；第一次仍按原基础策略初始化，不跨 node 使用历史。样本不足时不学习；至少积累 2--3 次后，只选择频率严格高于 0.5 的成员，并按频率、当前 dual pair score 排序。每个 job 的初始成员数必须有上限，优先使用基础 `nearestK` 的 K，而不是历史 final size；候选不足时用基础 nearest/pair 初始化补齐，候选过多时只取前 K。这样利用 node 7/2 的稳定核心，同时不会把 node 8 的偶然大集合或后期 99 个 pair 原样带入下一次。下一步若实现，应先做离线逐次回放，比较 seed 对下一次 final set 的 precision/recall、DSSR 轮数和单轮 label 数，再决定频率阈值与最小样本数。
+210. 2026-07-12 50-3 W300 空集冷启动的同 node 频率复核
+
+按要求不再沿用 40-2，重新在 `wet050_003_3m_setupR50 + W300` 当前代码上运行诊断。配置为每个 node、每次 ng-DSSR exact 都从 empty ng-set 开始，关闭 same-node/global history warm-start，保留 top3 非基本列更新，打开完整 `ngDssrSetStats/ngDssrSetMembers`；time-indexed root preprocessing、compact window、source-aware dominance、completion bound、Tmid 复用和 join prefilter 均正常开启。获取 node 1--3 共 53 次 exact 后主动停止，避免用 empty 模式继续消耗完整树资源。
+
+当前 50-3 的结构与旧 40-2 明显不同。node 1 有 27 次 exact，去除自身后的 final directed-pair 数为 `6,6,0,0,0,6,0,6,6,6,0,6,18,18,18,28,6,28,38,6,47,28,70,6,94,176,281`，相邻 Jaccard 平均 0.450、中位数 0.400；node 2 的 10 次为 `0,0,6,6,0,6,0,33,39,219`，平均 0.336；node 3 的 16 次为 `6,6,6,6,6,6,8,6,6,44,46,6,54,42,64,200`，平均 0.706、中位数 0.778。多数早中期 exact 从空集即可直接返回 elementary 负列，或只经 top3 route 更新形成 6 个 directed pair；接近节点闭合时才出现几十到数百 pair 的困难证书轮。完整继承会把 `176/281/219/200` 这类尾部集合带入下一次，显然不可接受；全历史无界频率也会逐渐受尾部大集合污染。
+
+对 53 次记录做了逐次离线回放。使用最近 2 次 final set、频率严格大于 0.5、每 job 最多 3 个成员时，预测下一次 final set 的初始 directed-pair 平均为 9.09，平均逐调用 precision 0.871、recall 0.480；最近 3 次时初始平均 14.28，precision 0.820、recall 0.633；最近 5 次时初始平均 11.21，precision 0.866、recall 0.565；全历史时初始平均仅 4.47、precision 0.936、recall 0.480。最近 3 次在覆盖率和规模之间最好，但这些 recall 会受最后一次 200--281 pair 证书集合拉低；warm 的目标不是复现完整 final set，而是提前放入少量稳定 pair，减少前几轮重复学习。
+
+据此建议下一版采用“短窗口、有界、困难触发”的同 node warm-start，而不是完整继承。每个 node 第一次 exact 仍使用现有基础策略；之后只维护最近 3 次 final set。候选成员必须至少在最近 3 次中的 2 次出现，并与当前 repeatability admissibility 取交集；每 job 最多保留 2--3 个，同时再设全局 directed-pair 预算，例如 15--25，按出现次数、最近出现时间和当前 dual pair score排序。若最近 exact 均为 1 轮，继续使用基础小集合或空集，不启用历史；只有最近一次达到例如 3 轮以上，或最近 3 次累计 DSSR round 超过阈值，才启用 bounded history seed。这样早期大量 0/6 pair 状态不会被无谓放大，接近闭合时又能提前复用稳定核心；无论运行多久，初始 ng-set 都受 per-job 和全局预算双重限制，绝不会单调增长。
+
+建议先做三组当前 50-3 root A/B：`nearestK3/top3` 基线；最近 3 次、2/3 频率、per-job cap2/global cap15；同样策略 cap3/global cap25。比较 exact calls、DSSR rounds、每轮 label/join 和总 exact 时间。若 cap15 已明显减少 tail 且不增加单轮成本，再考虑作为默认；否则保留 nearestK3，不应仅凭 Jaccard 把 warm 接入主线。

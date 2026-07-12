@@ -364,6 +364,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
 	private boolean ngDssrHistoryWarmStartApplied;
+	private boolean ngDssrSameNodeWarmStartApplied;
 	private boolean ngDssrHistoryWarmStartSkippedForRepeatability;
 	private boolean ngDssrWindowRepeatabilityFilterApplied;
 	private int ngDssrWindowRepeatableJobCount;
@@ -436,7 +437,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		prepareInitialRepeatabilityFilter(lp);
 		ngDssrHistoryWarmStartApplied = false;
+		ngDssrSameNodeWarmStartApplied = false;
 		ngDssrHistoryWarmStartSkippedForRepeatability = ngDssrWindowRepeatabilityFilterApplied;
+		if (historyWarmStart != null && historyWarmStart.applySameNode(ngNeighborhoodByJob,
+				currentNodeId(lp), currentActiveCutIds(lp), config)) {
+			filterInitialNgMembers();
+			ngDssrSameNodeWarmStartApplied = true;
+			return;
+		}
 		// 2026-07-05: repeatability filter uses the current window, while
 		// history warm-start is learned across pricing calls. Keep them separate.
 		if (!ngDssrHistoryWarmStartSkippedForRepeatability
@@ -483,6 +491,30 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private boolean isRootNode(LP lp) {
 		return lp == null || lp.getNode() == null || lp.getNode().depth == 0;
+	}
+
+	private int currentNodeId(LP lp) {
+		return lp == null || lp.getNode() == null ? Integer.MIN_VALUE : lp.getNode().id;
+	}
+
+	private List<Integer> currentActiveCutIds(LP lp) {
+		return lp == null ? Collections.<Integer>emptyList() : lp.getActiveCutIds();
+	}
+
+	private void filterInitialNgMembers() {
+		if (ngDssrInitialRepeatableMember == null) {
+			return;
+		}
+		for (int job = 1; job <= data.n; job++) {
+			PackedBitSet set = ngNeighborhoodByJob[job];
+			for (int member = set.nextSetBit(1); member >= 1 && member <= data.n;) {
+				int next = set.nextSetBit(member + 1);
+				if (!isInitialNgMemberAllowed(member)) {
+					set.remove(member);
+				}
+				member = next;
+			}
+		}
 	}
 
 	private void addNearestJobsToNgNeighborhood(final int centerJob, int targetSize) {
@@ -750,8 +782,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private String ngSetWarmStartSummary() {
-		if (!config.enableNgDssrHistoryWarmStart) {
+		if (!config.enableNgDssrHistoryWarmStart && !config.enableNgDssrSameNodeWarmStart) {
 			return "";
+		}
+		if (ngDssrSameNodeWarmStartApplied) {
+			return ", ngWarmStart=sameNodeLast";
 		}
 		String source = ngDssrHistoryWarmStartSkippedForRepeatability
 				? "skippedRepeatability"
@@ -773,7 +808,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ "/nonRepeatable" + ngDssrWindowNonRepeatableJobCount;
 	}
 
-	private void recordNgSetHistory() {
+	private void recordNgSetHistory(LP lp) {
+		if (historyWarmStart != null) {
+			historyWarmStart.recordSameNode(ngNeighborhoodByJob, currentNodeId(lp), currentActiveCutIds(lp), config);
+		}
 		if (ngDssrHistoryWarmStartSkippedForRepeatability) {
 			return;
 		}
@@ -836,13 +874,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				appendNgDssrSummary(config.ngDssrReturnRelaxedColumns
 						? "ng-relaxed negative columns returned"
 						: "elementary negative columns returned");
-				recordNgSetHistory();
+				recordNgSetHistory(lp);
 				return columns;
 			}
 			if (nonElementaryNegativeRoutes.isEmpty()) {
 				appendNgSetStatsForRound(0);
 				appendNgDssrSummary("relaxed pricing found no negative route");
-				recordNgSetHistory();
+				recordNgSetHistory(lp);
 				return columns;
 			}
 			int changed = updateNgNeighborhoodsFromNonElementaryRoutes();

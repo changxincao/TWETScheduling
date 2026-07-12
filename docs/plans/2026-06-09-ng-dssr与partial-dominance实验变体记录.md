@@ -2075,3 +2075,10 @@ compact window 在 2026-06-29 的提交 `4820ff93` 才接入 ng-DSSR。该提交
 消费端有两处。`CompletionBoundSubtreeArcEliminator` 用同一 node、同一 LP dual 和 `UB-LB` gap 扫描普通弧；紧窗口排除的是已经由父节点或当前节点 fixing 证明不可能属于更优解的完成时间，因此可以用更强的 compact bound。route enumeration 默认关闭；显式开启时 prepared suffix 也只用于 gap 内列剪枝，而 compact window 的证明口径正是当前子树中优于 incumbent 的解不能使用窗外完成时间，所以不要求 enumeration 自身必须同时打开窗口化 job penalty。
 
 补充的 40-2 root-only 审查 run 实际覆盖了非零固定：root preprocessing 后 `pricingHorizon=1521 < CmaxH=2132`，最终 `SubtreeArcElim candidates/fixed=326/5`、`bounds=reused`、`buildMs=0`，求解结果为 `incumbent=22582`、`root bound=22490`、`valid=true`。`22490` 与此前多组使用旧重建口径的 40-2 root 日志一致。结合 W300 的完全相同 root bound、专项兼容性测试和 focused 编译，当前未发现误固定、错误复用或求解结果回归。
+208. 2026-07-12 DSSR 轮次分布与同节点 warm-start 实验
+
+对 W300/50-3 setupR50 完整树中已记录的 407 次 ng-DSSR exact pricing 重新统计。DSSR 轮次分位数为 P25=1、P50=1、P75=3、P90=13、P95=17、P99=22，最大 24。1 轮调用占 60.0%，但只占 exact 时间 24.4%；15 轮及以上只占调用数 8.4%，却占 exact 时间 48.2%。其中 20 轮及以上仅 2.7% 的调用便占 23.6% 时间。慢尾不仅来自轮数增加，单轮本身也更重：多数 2--14 轮调用约为 0.47--1.0 秒/轮，而 17--24 轮调用约为 1.27--2.68 秒/轮。原因是困难 dual 状态不仅需要更多 DSSR 更新，后期扩大后的 ng-set 还会增加每轮 label、扩展和 join 工作量。因此 warm-start 的评价指标必须同时看总轮数和 exact 总时间，不能只看是否减少迭代。
+
+基于上述结果新增默认关闭的同节点最近 final ng-set warm-start。状态只保存一个 `(nodeId, activeCutIds, finalNgSets)`，node 或 active-cut 集变化即不命中；repair 和 diagnostic cross-check 不记录。首次 exact 仍使用基础初始化，后续同 node、同 cut 的 exact 直接复制上一次 final ng-set，并与当前 repeatability admissibility 取交集。该设计不使用全局无限历史，不跨 node 污染，也避免了原 history warm-start 与 repeatability filter 互斥的问题。常用初始化恢复为 `dualPair coefficient=0.08`、每轮只用最佳非基本列更新，即 50-job 初始只选 `floor(50*0.08)=4` 个全局 pair，不再使用实验性的 nearestK3/top3。
+
+W300 root-only A/B 中，baseline 使用 `dualPair/top1` 且关闭同节点 warm-start，在 900 秒预算内仍未完成 root；已完成的 32 次 exact 共 149.391 秒、累计 175 个 DSSR round，P50=2、P75=4、P90=12、P95=25、最大 43。warm 组只打开同节点 warm-start，31 次 exact 中后 30 次命中，224.755 秒完成 root，得到 `incumbent=1902`、`bound=1726.014329`、`valid=true`；exact 共 91.716 秒、累计 73 round，P50=1、P75=2、P90=2、P95=14、最大 18。频率为 1 轮 22 次、2 轮 6 次、7/14/18 轮各 1 次。该结果坐实同 node 后续 exact 的 final ng-set 具有直接复用价值：它显著压低 20--43 轮长尾，同时没有改变已知 root bound。开关暂时保持默认关闭，待完整树和含 cut 场景继续验证后再决定是否作为主线默认。

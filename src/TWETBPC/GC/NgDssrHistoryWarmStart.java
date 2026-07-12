@@ -4,6 +4,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.List;
 
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.Util.PackedBitSet;
@@ -19,6 +20,9 @@ final class NgDssrHistoryWarmStart {
 	private final ArrayDeque<PackedBitSet[]> snapshots;
 	private int[][] memberCounts;
 	private int[] sizeSums;
+	private int sameNodeId = Integer.MIN_VALUE;
+	private ArrayList<Integer> sameNodeActiveCutIds;
+	private PackedBitSet[] sameNodeNeighborhoods;
 
 	NgDssrHistoryWarmStart(int n) {
 		this.n = n;
@@ -27,6 +31,43 @@ final class NgDssrHistoryWarmStart {
 
 	boolean hasHistory() {
 		return !snapshots.isEmpty();
+	}
+
+	/** 同一 node 连续 exact pricing 只复用最近一次 final ng-set；cut 集变化后自动失效。 */
+	boolean applySameNode(PackedBitSet[] target, int nodeId, List<Integer> activeCutIds,
+			TWETBPCConfig config) {
+		if (!config.enableNgDssrSameNodeWarmStart || target == null || sameNodeNeighborhoods == null
+				|| sameNodeId != nodeId || !sameActiveCutIds(activeCutIds)) {
+			return false;
+		}
+		for (int job = 1; job <= n; job++) {
+			target[job] = sameNodeNeighborhoods[job] == null
+					? new PackedBitSet(n + 2) : sameNodeNeighborhoods[job].copy();
+		}
+		return true;
+	}
+
+	void recordSameNode(PackedBitSet[] neighborhoods, int nodeId, List<Integer> activeCutIds,
+			TWETBPCConfig config) {
+		if (!config.enableNgDssrSameNodeWarmStart || neighborhoods == null) {
+			return;
+		}
+		sameNodeId = nodeId;
+		sameNodeActiveCutIds = sortedCutIds(activeCutIds);
+		sameNodeNeighborhoods = copyNeighborhoods(neighborhoods);
+	}
+
+	private boolean sameActiveCutIds(List<Integer> activeCutIds) {
+		return sameNodeActiveCutIds != null && sameNodeActiveCutIds.equals(sortedCutIds(activeCutIds));
+	}
+
+	private ArrayList<Integer> sortedCutIds(List<Integer> activeCutIds) {
+		ArrayList<Integer> copy = new ArrayList<Integer>();
+		if (activeCutIds != null) {
+			copy.addAll(activeCutIds);
+		}
+		Collections.sort(copy);
+		return copy;
 	}
 
 	void record(PackedBitSet[] neighborhoods, TWETBPCConfig config) {

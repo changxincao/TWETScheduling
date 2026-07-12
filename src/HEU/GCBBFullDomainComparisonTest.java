@@ -189,6 +189,9 @@ public class GCBBFullDomainComparisonTest {
 		if (config.enableNgDssrHistoryWarmStart) {
 			mode += "-ngHistW" + config.ngDssrHistoryWarmStartWindowSize;
 		}
+		if (config.enableNgDssrSameNodeWarmStart) {
+			mode += "-ngNodeWarm";
+		}
 		if (config.enableNgDssrWindowRepeatabilityInitialFilter) {
 			mode += "-ngWinRep";
 		}
@@ -463,6 +466,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableNgDssrHistoryWarmStart = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrHistoryWarmStart",
 				Boolean.toString(config.enableNgDssrHistoryWarmStart)));
+		config.enableNgDssrSameNodeWarmStart = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrSameNodeWarmStart",
+				Boolean.toString(config.enableNgDssrSameNodeWarmStart)));
 		config.ngDssrHistoryWarmStartWindowSize = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrHistoryWindow", config.ngDssrHistoryWarmStartWindowSize);
 		config.ngDssrHistoryWarmStartFrequencyThreshold = Double.parseDouble(System.getProperty(

@@ -39,6 +39,13 @@ public final class LPRestrictedColumnMembershipTest {
 		assertActiveState(lp.isRestrictedOutsourcingColumnActive(8),
 				"new outsourcing column missing from membership set");
 
+		PC.StrongBranchingTrialResult unusable = PC.StrongBranchingTrialResult.from(null, null, false,
+				"test_time_limit", true);
+		assertActiveState(!unusable.isReusableForQueue(), "time-limited trial unexpectedly reusable");
+		assertActiveState(unusable.getInternalColumnIds().isEmpty()
+				&& unusable.getOutsourcingColumnIds().isEmpty(),
+				"non-reusable trial retained redundant seed columns");
+
 		System.out.println("LPRestrictedColumnMembershipTest passed");
 	}
 

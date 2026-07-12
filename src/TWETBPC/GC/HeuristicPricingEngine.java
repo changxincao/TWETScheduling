@@ -5,6 +5,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.PriorityQueue;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
@@ -64,13 +65,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
 		HeuristicWindowContext windowContext = buildHeuristicWindowContext(lp);
-		ArrayList<TWETColumn> seeds = collectSeedColumnsBySortedPrefix(lp, sriContext);
+		ArrayList<TWETColumn> seeds = collectBestSeedColumns(lp, sriContext);
 		if (seeds.isEmpty()) {
 			return PricingResult.noImprovement("No active seed column for heuristic pricing");
 		}
 
 		Utility.resetCurUpperBound(Utility.big_M);
-		HashSet<SequenceSignature> activeSignatures = activeSignatures(lp);
 		HashSet<SequenceSignature> generatedSignatures = new HashSet<SequenceSignature>();
 		ArrayList<ScoredSequence> negativeCandidates = new ArrayList<ScoredSequence>();
 		HeuristicCostAudit costAudit = new HeuristicCostAudit();
@@ -79,7 +79,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (this.timeLimitChecker.isTimeLimitReached() || isHeuristicPoolFull(negativeCandidates)) {
 				break;
 			}
-			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, activeSignatures, generatedSignatures,
+			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, generatedSignatures,
 					negativeCandidates, costAudit);
 		}
 
@@ -121,29 +121,40 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return true;
 	}
 
-	private ArrayList<TWETColumn> collectSeedColumnsBySortedPrefix(final LP lp, SriPricingContext sriContext) {
+	private ArrayList<TWETColumn> collectBestSeedColumns(final LP lp, SriPricingContext sriContext) {
 		int limit = Math.max(0, config.heuristicPricingSeedColumns);
 		if (limit == 0) {
 			return new ArrayList<TWETColumn>();
 		}
-		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(lp.getRestrictedColumnIds().size());
+		Comparator<ScoredSeed> bestFirst = new Comparator<ScoredSeed>() {
+			@Override
+			public int compare(ScoredSeed a, ScoredSeed b) {
+				return compareScoredSeed(a, b);
+			}
+		};
+		// 2026-07-12: 只保留最优 K 个 seed，避免为固定小 K 排序并保存全部 active columns。
+		PriorityQueue<ScoredSeed> bestSeeds = new PriorityQueue<ScoredSeed>(limit,
+				Collections.reverseOrder(bestFirst));
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			TWETColumn column = lp.getPool().getColumn(columnId);
 			if (!isSequenceCompatible(lp.getNode(), column.getSequence())) {
 				continue;
 			}
 			double sriPenalty = sriContext.isActive() ? sriContext.penalty(column.getSequence()) : 0.0;
-			candidates.add(new ScoredSeed(column, reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty)));
-		}
-		Collections.sort(candidates, new Comparator<ScoredSeed>() {
-			@Override
-			public int compare(ScoredSeed a, ScoredSeed b) {
-				return compareScoredSeed(a, b);
+			ScoredSeed candidate = new ScoredSeed(column,
+					reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty));
+			if (bestSeeds.size() < limit) {
+				bestSeeds.add(candidate);
+			} else if (compareScoredSeed(candidate, bestSeeds.peek()) < 0) {
+				bestSeeds.poll();
+				bestSeeds.add(candidate);
 			}
-		});
+		}
+		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(bestSeeds);
+		Collections.sort(candidates, bestFirst);
 
-		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(Math.min(limit, candidates.size()));
-		for (int i = 0; i < candidates.size() && seeds.size() < limit; i++) {
+		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(candidates.size());
+		for (int i = 0; i < candidates.size(); i++) {
 			seeds.add(candidates.get(i).column);
 		}
 		return seeds;
@@ -164,7 +175,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
 			HeuristicWindowContext windowContext,
-			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
+			HashSet<SequenceSignature> generatedSignatures,
 			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit) {
 		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext);
 		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence)) {
@@ -172,7 +183,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 		double bestReducedCost = state.reducedCost(lp);
 		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, windowContext,
-				activeSignatures, generatedSignatures, negativeCandidates, costAudit);
+				generatedSignatures, negativeCandidates, costAudit);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
 		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates)
@@ -186,7 +197,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 				bestReducedCost = state.currentReducedCost;
 			}
 			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, windowContext,
-					activeSignatures, generatedSignatures, negativeCandidates, costAudit);
+					generatedSignatures, negativeCandidates, costAudit);
 		}
 	}
 
@@ -239,7 +250,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private void tryAddNegative(List<Integer> sequence, double restrictedCost, double restrictedReducedCost, LP lp,
 			SriPricingContext sriContext, HeuristicWindowContext windowContext,
-			HashSet<SequenceSignature> activeSignatures, HashSet<SequenceSignature> generatedSignatures,
+			HashSet<SequenceSignature> generatedSignatures,
 			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit) {
 		if (isHeuristicPoolFull(negativeCandidates)) {
 			return;
@@ -249,7 +260,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
-		if (activeSignatures.contains(signature) || generatedSignatures.contains(signature)) {
+		// Pool 对同 signature 原 ID 原地改进，可直接复用 LP 的增量 membership，避免再次扫描全部 active 列。
+		int existingColumnId = lp.getPool().getColumnIdBySignature(signature);
+		if ((existingColumnId >= 0 && lp.isRestrictedColumnActive(existingColumnId))
+				|| generatedSignatures.contains(signature)) {
 			return;
 		}
 		if (!windowContext.requiresTrueCostRecheck()) {
@@ -277,14 +291,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private boolean isHeuristicPoolFull(ArrayList<ScoredSequence> negativeCandidates) {
 		return negativeCandidates.size() >= config.heuristicPricingPoolSize;
-	}
-
-	private HashSet<SequenceSignature> activeSignatures(LP lp) {
-		HashSet<SequenceSignature> signatures = new HashSet<SequenceSignature>();
-		for (int columnId : lp.getRestrictedColumnIds()) {
-			signatures.add(lp.getPool().getColumn(columnId).getSignature());
-		}
-		return signatures;
 	}
 
 	private double trueSequenceCost(List<Integer> sequence) {

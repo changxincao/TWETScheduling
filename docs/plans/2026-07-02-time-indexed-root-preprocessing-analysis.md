@@ -662,3 +662,13 @@ pricing engine 调度也有可量化但次一级的浪费。W300 的 `TimeIndexe
 `PC` 不能直接把 LP 的持久 set 当作原来的临时 active set，因为 engine 返回列尚未真正加入 RMP 时，旧逻辑已经需要在同一返回批次中去重。当前改为每次 engine 调用只创建空的 batch-seen set；处理返回列时先查询 `LP.isRestrictedColumnActive()`，再用 batch-seen 区分本批第一次出现和同一 signature 的后续成本改进。这样保持了原来的三种结果：active 列成本改进触发重解，新列第一次进入 generated IDs，同批重复新列不重复加入；列化外包采用同样口径。普通 pricing、dual stabilization、strong phase2、普通 repair 和 domain repair 五条入口均已切换，不再复制完整 restricted IDs。默认关闭的 route enumeration 原来在 finite ordered set 之外又复制一份 active HashSet，本次也改为直接查询 LP membership；枚举结果所需的 `LinkedHashSet` 仍保留。
 
 验证新增 `LPRestrictedColumnMembershipTest`，覆盖初始 seed、active membership、同批重复内部列、新内部列、列化外包 seed 和重复外包列，测试通过。随后运行 40-2 纯 time-indexed root smoke，关闭 ALNS、启发式、RMIH 和强分支；200 次 pricing 调用后正常以 `NODE_LIMIT` 结束，`bound=22487.647059`、`valid=true`，未发现 Pool/RMP 去重或动态加列回归。focused `javac`、`git diff --check` 通过。该修改消除了每轮两次与 restricted 列数成正比的 HashSet 构造；剩余 batch-seen set 的大小只和单次 engine 返回列数相关。
+
+### 2026-07-12：active ID set 修改复核与后续冗余清理
+
+本次再次逐调用链检查 restricted list/set 的一致性。内部列和列化外包列只有 `construct()`、reduced-cost 筛列替换以及增量加列三类修改入口；完整替换统一重建 membership set，增量入口同时更新 list 和 set，仓库内不存在通过 getter 直接修改 restricted list 的代码。普通 pricing、稳定化、strong phase2、普通 repair 和 domain repair 的 batch-seen 不能直接替换成 LP 的持久 active set：engine 返回的新列在 `LP.addColumns()` 前尚未激活，同批去重仍需独立的小集合。ng-DSSR 的 active-signature set 也不是同类冗余，它每次 exact solve 只扫描一次并跨 DSSR 轮复用，而候选恢复阶段会高频查询，保留预建集合更合适。
+
+启发式 pricing 原来先完整排序全部 active columns 取前 K 个 seed，随后又完整扫描一次构造 active signature set。本次改为容量 K 的最差优先堆，只对最终 K 个 seed 排序；candidate 判重直接通过 Pool 的 signature-to-ID 映射和 LP membership set 完成。Pool 对同一 sequence 的成本改进保持原 ID 原地替换，因此该判重与旧 active-signature 集合严格等价。旧版与新版在同一 40-2 root 配置下逐轮对拍，53 次 heuristic 的加列数量序列和 14 次 exact 的加列数量序列逐项一致，最终均为 `bound=22490`、`valid=true`。heuristic 累计时间为旧版 `13.347s`、新版 `13.612s`，没有可测的 wall-time 提升，说明当前主要成本仍在 Tabu move 搜索；本次收益是删除第二次全量扫描、把全排序和 O(N) 临时对象降为 O(N log K) 与 O(K)，不应夸大为端到端提速。
+
+另外清理了 strong trial 的一处确定冗余：infeasible 或 time-limit trial 的 seed 从调用链上不会复用，原实现仍复制完整内部列和外包列列表。现在这两类结果保存空 seed；正常可复用 trial 仍复制列表，避免 child 后续修改 seed 时产生别名。测试覆盖 active membership、批内重复列、列化外包 membership 和不可复用 trial 空 seed；focused 编译、`LPRestrictedColumnMembershipTest`、`OutsourcingMoveConsistencyTest` 均通过。
+
+剩余可见全量操作暂不删除。midpoint 的 column-based 策略会扫描并排序 restricted columns，但默认 `bidirectionalMidpointStrategy=default` 不走该路径；route enumeration 的 `LinkedHashSet` 同时承担枚举结果顺序和 membership，不能由 LP active set 代替；可复用 strong trial 的 seed 复制用于 child 所有权隔离。列化外包 child seed 合并仍有线性 `contains`，但外包 seed 通常很小且不在当前无外包主线热点。当前没有发现新的高频、无语义价值的全量扫描。

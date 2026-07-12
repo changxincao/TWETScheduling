@@ -366,7 +366,7 @@ public class PC {
 						withSolutionMessage("rmp_trial_infeasible", solution));
 			}
 			if (branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
-				return StrongBranchingTrialResult.infeasible(lp, solution,
+				return StrongBranchingTrialResult.infeasible(solution,
 						"branch_implied_penalty_positive mValue=" + lp.branchImpliedPenaltyValue());
 			}
 			if (lp.getNode() != null && lp.getNode().depth > 0 && !config.debugSkipBranchColumnFilter) {
@@ -1427,15 +1427,19 @@ public class PC {
 				String message, boolean timeLimited) {
 			boolean infeasible = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
+			// 2026-07-12: infeasible/time-limit trial 不会作为正式 child seed 复用，避免无意义复制大列集。
+			if (infeasible || timeLimited) {
+				return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
+						new ArrayList<Integer>(), new ArrayList<Integer>(), message);
+			}
 			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
 
-		static StrongBranchingTrialResult infeasible(LP lp, TWETMasterSolution solution, String message) {
+		static StrongBranchingTrialResult infeasible(TWETMasterSolution solution, String message) {
 			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false,
-					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
-					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
+					new ArrayList<Integer>(), new ArrayList<Integer>(), message);
 		}
 
 		public TWETMasterSolution getSolution() {

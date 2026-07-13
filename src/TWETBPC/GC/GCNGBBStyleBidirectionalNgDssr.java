@@ -363,6 +363,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double ngDssrFirstRoundSelectedBackwardMillis = Double.NaN;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
+	/** 诊断每轮最优负非基本序列与上一轮候选集合的关系，不参与正式 DSSR 更新。 */
+	private boolean ngDssrTraceRoundRouteRelation;
+	private HashMap<SequenceSignature, NonElementaryNegativeRoute> ngDssrPreviousRoundNegativeRoutes;
+	private HashMap<SequenceSignature, NonElementaryNegativeRoute> ngDssrCurrentRoundNegativeRoutes;
+	private ArrayList<String> ngDssrRoundAddedPairs;
+	private StringBuilder ngDssrRoundRouteRelation;
 	private boolean ngDssrHistoryWarmStartApplied;
 	private boolean ngDssrSameNodeWarmStartApplied;
 	private boolean ngDssrHistoryWarmStartSkippedForRepeatability;
@@ -763,6 +769,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 								&& !ngNeighborhoodByJob[middleJob].contains(repeatedJob)) {
 							ngNeighborhoodByJob[middleJob].add(repeatedJob);
 							changed++;
+							if (ngDssrRoundAddedPairs != null) {
+								ngDssrRoundAddedPairs.add(middleJob + "<-" + repeatedJob);
+							}
 						}
 					}
 				}
@@ -781,7 +790,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", totalElementaryReturned=" + ngDssrTotalElementaryColumnsReturned
 				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
 				+ ngSetStatsSummary()
-				+ ngSetMembersSummary();
+				+ ngSetMembersSummary()
+				+ roundRouteRelationSummary();
 	}
 
 	private String ngSetWarmStartSummary() {
@@ -853,7 +863,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetStats");
 		ngDssrTraceNgSetMembers = Boolean.getBoolean("twet.bpc.ngDssrSetMembers")
 				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetMembers");
+		ngDssrTraceRoundRouteRelation = Boolean.getBoolean("twet.bpc.ngDssrRoundRouteRelation")
+				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrRoundRouteRelation");
 		ngDssrNgSetStatsByRound = ngDssrTraceNgSetStats ? new StringBuilder() : null;
+		ngDssrPreviousRoundNegativeRoutes = null;
+		ngDssrCurrentRoundNegativeRoutes = null;
+		ngDssrRoundAddedPairs = null;
+		ngDssrRoundRouteRelation = ngDssrTraceRoundRouteRelation ? new StringBuilder() : null;
 		ngDssrReusableCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
 		ngDssrReusablePricingWindowPrecomputeReady = false;
@@ -865,6 +881,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		for (ngDssrRound = 1; !this.timeLimitChecker.isTimeLimitReached(); ngDssrRound++) {
 			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
+			ngDssrCurrentRoundNegativeRoutes = ngDssrTraceRoundRouteRelation
+					? new HashMap<SequenceSignature, NonElementaryNegativeRoute>() : null;
+			ngDssrRoundAddedPairs = ngDssrTraceRoundRouteRelation ? new ArrayList<String>() : null;
 			ngDssrRoundNonElementaryNegativeSeen = 0;
 			ngDssrRoundElementaryColumnsReturned = 0;
 			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
@@ -875,6 +894,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeRoutes.size();
 			if (!columns.isEmpty()) {
 				appendNgSetStatsForRound(0);
+				appendRoundRouteRelation(0);
 				appendNgDssrSummary(config.ngDssrReturnRelaxedColumns
 						? "ng-relaxed negative columns returned"
 						: "elementary negative columns returned");
@@ -883,6 +903,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			if (nonElementaryNegativeRoutes.isEmpty()) {
 				appendNgSetStatsForRound(0);
+				appendRoundRouteRelation(0);
 				appendNgDssrSummary("relaxed pricing found no negative route");
 				recordNgSetHistory(lp);
 				return columns;
@@ -890,6 +911,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			int changed = updateNgNeighborhoodsFromNonElementaryRoutes();
 			ngDssrTotalNgSetUpdates += changed;
 			appendNgSetStatsForRound(changed);
+			appendRoundRouteRelation(changed);
 			if (changed == 0) {
 				throw new IllegalStateException(
 						"NG-DSSR found non-elementary negative routes but ng-set did not change");
@@ -1056,6 +1078,88 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 排除及本轮 0-cutoff 时空弧固定只服务当前 pricing，不能作为永久 arc fixing 的证据。
 		return new CompletionBoundSubtreeArcEliminator.PreparedBounds(completionBounds, pricingHorizon,
 				completionBoundRelaxation, completionBoundQueueOrdering, true);
+	}
+
+	private void appendRoundRouteRelation(int changed) {
+		if (!ngDssrTraceRoundRouteRelation || ngDssrRoundRouteRelation == null) {
+			return;
+		}
+		NonElementaryNegativeRoute observedBest = bestRoundNegativeRoute(ngDssrCurrentRoundNegativeRoutes);
+		// 用户关心的是本轮真正送入 DSSR 更新的 top1 witness，而不是所有 join 观察值的事后最小者。
+		NonElementaryNegativeRoute selected = nonElementaryNegativeRoutes == null
+				|| nonElementaryNegativeRoutes.isEmpty() ? null : nonElementaryNegativeRoutes.get(0);
+		NonElementaryNegativeRoute previousMatch = selected == null || ngDssrPreviousRoundNegativeRoutes == null
+				? null : ngDssrPreviousRoundNegativeRoutes.get(new SequenceSignature(selected.sequence));
+		int previousRank = previousMatch == null ? -1
+				: rankInRound(previousMatch, ngDssrPreviousRoundNegativeRoutes);
+		if (ngDssrRoundRouteRelation.length() > 0) {
+			ngDssrRoundRouteRelation.append(';');
+		}
+		ngDssrRoundRouteRelation.append('r').append(ngDssrRound)
+				.append("={unique=").append(roundRouteCount(ngDssrCurrentRoundNegativeRoutes))
+				.append(",selectedRc=").append(selected == null ? "NA" : Double.toString(selected.reducedCost))
+				.append(",selectedSeq=").append(selected == null ? "NA" : compactSequence(selected.sequence))
+				.append(",observedBestRc=").append(observedBest == null ? "NA"
+						: Double.toString(observedBest.reducedCost))
+				.append(",selectedIsObservedBest=").append(selected != null && observedBest != null
+						&& selected.sequence.equals(observedBest.sequence)
+						&& Double.compare(selected.reducedCost, observedBest.reducedCost) == 0)
+				.append(",prevUnique=").append(roundRouteCount(ngDssrPreviousRoundNegativeRoutes))
+				.append(",prevRank=").append(previousRank < 0 ? "NA" : Integer.toString(previousRank))
+				.append(",prevRc=").append(previousMatch == null ? "NA"
+						: Double.toString(previousMatch.reducedCost))
+				.append(",added=").append(changed)
+				.append(",pairs=").append(ngDssrRoundAddedPairs == null || ngDssrRoundAddedPairs.isEmpty()
+						? "-" : String.join(".", ngDssrRoundAddedPairs))
+				.append('}');
+		ngDssrPreviousRoundNegativeRoutes = ngDssrCurrentRoundNegativeRoutes;
+	}
+
+	private int roundRouteCount(HashMap<SequenceSignature, NonElementaryNegativeRoute> routes) {
+		return routes == null ? 0 : routes.size();
+	}
+
+	private NonElementaryNegativeRoute bestRoundNegativeRoute(
+			HashMap<SequenceSignature, NonElementaryNegativeRoute> routes) {
+		NonElementaryNegativeRoute best = null;
+		if (routes != null) {
+			for (NonElementaryNegativeRoute route : routes.values()) {
+				if (best == null || compareNonElementaryNegativeRoutes(route, best) < 0) {
+					best = route;
+				}
+			}
+		}
+		return best;
+	}
+
+	private int rankInRound(NonElementaryNegativeRoute target,
+			HashMap<SequenceSignature, NonElementaryNegativeRoute> routes) {
+		int rank = 1;
+		for (NonElementaryNegativeRoute route : routes.values()) {
+			if (compareNonElementaryNegativeRoutes(route, target) < 0) {
+				rank++;
+			}
+		}
+		return rank;
+	}
+
+	private String compactSequence(ArrayList<Integer> sequence) {
+		StringBuilder builder = new StringBuilder();
+		for (int i = 0; i < sequence.size(); i++) {
+			if (i > 0) {
+				builder.append('.');
+			}
+			builder.append(sequence.get(i).intValue());
+		}
+		return builder.toString();
+	}
+
+	private String roundRouteRelationSummary() {
+		if (!ngDssrTraceRoundRouteRelation || ngDssrRoundRouteRelation == null
+				|| ngDssrRoundRouteRelation.length() == 0) {
+			return "";
+		}
+		return ", ngDssrRoundRouteRelation=" + ngDssrRoundRouteRelation.toString();
 	}
 
 	private LabelQueueOrdering parseQueueOrdering(String value) {
@@ -5194,6 +5298,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| nonElementaryNegativeRoutes == null) {
 			return;
 		}
+		recordRoundNegativeRoute(sequence, inferredReducedCost);
 		ngDssrRoundNonElementaryNegativeSeen++;
 		int limit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
 		for (int i = 0; i < nonElementaryNegativeRoutes.size(); i++) {
@@ -5230,17 +5335,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Collections.sort(nonElementaryNegativeRoutes, new Comparator<NonElementaryNegativeRoute>() {
 			@Override
 			public int compare(NonElementaryNegativeRoute left, NonElementaryNegativeRoute right) {
-				int byCost = compareDoubleAsc(left.reducedCost, right.reducedCost);
-				if (byCost != 0) {
-					return byCost;
-				}
-				int bySize = Integer.compare(left.sequence.size(), right.sequence.size());
-				if (bySize != 0) {
-					return bySize;
-				}
-				return compareSequence(left.sequence, right.sequence);
+				return compareNonElementaryNegativeRoutes(left, right);
 			}
 		});
+	}
+
+	private void recordRoundNegativeRoute(ArrayList<Integer> sequence, double reducedCost) {
+		if (ngDssrCurrentRoundNegativeRoutes == null) {
+			return;
+		}
+		SequenceSignature signature = new SequenceSignature(sequence);
+		NonElementaryNegativeRoute previous = ngDssrCurrentRoundNegativeRoutes.get(signature);
+		if (previous == null || Utility.compareLt(reducedCost, previous.reducedCost)) {
+			ngDssrCurrentRoundNegativeRoutes.put(signature,
+					new NonElementaryNegativeRoute(sequence, reducedCost));
+		}
+	}
+
+	private int compareNonElementaryNegativeRoutes(NonElementaryNegativeRoute left,
+			NonElementaryNegativeRoute right) {
+		int byCost = compareDoubleAsc(left.reducedCost, right.reducedCost);
+		if (byCost != 0) {
+			return byCost;
+		}
+		int bySize = Integer.compare(left.sequence.size(), right.sequence.size());
+		if (bySize != 0) {
+			return bySize;
+		}
+		return compareSequence(left.sequence, right.sequence);
 	}
 
 	private int compareSequence(ArrayList<Integer> left, ArrayList<Integer> right) {

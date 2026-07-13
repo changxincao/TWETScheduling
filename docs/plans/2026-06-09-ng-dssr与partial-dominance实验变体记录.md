@@ -2117,3 +2117,52 @@ ng-set 轨迹解释了差异。warm 前 13 次 exact 的 final ng-set 平均一�
 正确 repeatability 配置下的 fresh baseline root 为 `solve=88.835s, exact=37.691s/10`。固定追加 15 个 directed pair 后为 `solve=85.345s, exact=35.066s/10`，两次触发均实际添加 15 个，最后证书轮从 14 round 降到 13。3-node baseline 为 `solve=212.866s, exact=151.643s/27`；cap15 为 `200.823s, exact=140.777s/27`。其中 node 3 的累计 round 从 63 降到 58，序列由 `1,1,1,1,1,1,2,2,8,9,10,2,24` 变为 `1,1,1,1,1,1,2,2,8,5,9,2,24`，labels 从 348,163 降到 344,856。说明固定少量追加能够减少中后期重复 DSSR 学习，但最终 24-round certificate 尚未改善。
 
 cap25 的 3-node结果为 `solve=179.689s, exact=128.061s/27`，表面时间最好；node 1 最后证书轮为 12，node 3 累计 round 为 61。但其 node 3 labels 为 348,297，接近 baseline，结构性改善反而弱于 cap15，因此约 21 秒额外时间优势包含明显运行波动，不能据一次结果认定 cap25 稳定优于 cap15。当前实现保留 `window/perJob/global/triggerRounds` 实验参数并继续默认关闭。后续完整树优先比较 cap15 与 cap25 的重复运行；若只按稳定工作量指标，cap15 是更保守的候选。
+
+212. 2026-07-13 W300 完整树 DSSR 长尾与 ng-set 增长复核
+
+继续分析 `tmp-w300-ng-best-full-rerun-20260712` 中已经完成的 407 次 ng-DSSR exact。配置为 `nearestK3/top3`、repeatability 初始过滤、time-indexed root preprocessing、source-aware dominance、completion bound、Tmid 复用和 join envelope prefilter；history 与 same-node warm-start 均关闭。407 次 exact 累计执行 1,532 个 DSSR round，exact 总时间 1,679.458 秒，累计加入 18,280 个 directed ng pair。357 次“返回 elementary 负列”的调用耗时 872.113 秒、平均 2.06 round；50 次“relaxed pricing 无负路径”的闭合调用耗时 807.345 秒、平均 15.9 round。也就是说，仅 12.3% 的 no-negative 证明调用消耗了 48.1% 的 exact 时间，困难尾部主要是闭合证明，不是正常加列轮。
+
+按轮数分组后，1 轮调用 244 次、409.792 秒；2--3 轮 68 次、144.334 秒；4--9 轮 34 次、120.625 秒；10--14 轮 27 次、194.877 秒；15--19 轮 23 次、413.876 秒；20 轮及以上仅 11 次，却耗时 395.953 秒。最重的 node 3 调用执行 24 轮、更新 332 个 pair、耗时 90.029 秒，其中 forward/backward/join 分别为 44.166/27.114/16.946 秒；node 47 的 23 轮调用为 44.385 秒，node 7/10/21 的 21--24 轮调用均约 38--39 秒。这些 no-negative 调用中 initialization 只占约 5.1%，forward/backward/join 合计约 94.7%；因此最后闭合慢的核心已经从 completion bound 和 Tmid 转为扩大 ng-set 后的完整前后向状态穷尽和 join 证明。
+
+本 run 初始 `nearestK3` 使每个 job 从 3 个成员开始。困难调用累计更新 245--382 个 pair，因此最终平均 ng-set 大约升至 7.9--10.64；当前长日志未打开逐轮成员统计，不能直接给出每个调用的精确最大值，但总量已经保证最重调用的最大值至少为 11。相同实例的 root 逐轮统计中，14-round 证书调用从 `avg/min/max=3/3/3` 增长到 `7.34/3/14`，说明实际最大值通常已到十几。随 ng-set 增长，单个 dominance node 的 active-label 平均数从约 21 降到约 6--7，但这是标签被拆入更多 memory/reachable key，而不是状态减少；20 轮以上调用最后一轮平均仍保留约 20,664 个 forward label 和 15,964 个 backward label，显著高于 1 轮调用的约 6,065/6,117。
+
+当前更新逻辑每轮保留 reduced cost 最好的 3 条 non-elementary route。对某条重复段 `j ... k1 ... kr ... j`，要让 ng-memory 在第二次访问 `j` 时仍记住第一次 `j`，必须将 `j` 加入该段所有中间任务 `k1...kr` 的 ng-set；只加其中一个 pair 不能阻止该重复路径，因为记忆会在其他中间任务处丢失。因此一条 route 一轮产生十几个更新是 ng-route 语义本身，不是简单的重复更新。但是当前实现会处理一条 route 中发现的所有重复段；从排除该 route 的角度，只需选择其中一个重复段并补齐该段全部缺失 pair。后续若优化更新策略，安全方向是为每条 stored route 选择新增 pair 最少的一个重复段，或在最多 3 条 route 之间联合选择使新增 pair 并集最小的重复段组合；不能改成“每条 route 随便加一个 pair”。
+
+同节点 bounded warm-start 仍有明显试验价值。按当前实现的触发口径，若上一同 node、同 active-cut exact 至少执行 3 轮，则后续 exact 可在 nearestK3 上追加历史成员。该完整 run 中有 63 次调用满足这一条件，合计耗时 741.327 秒、执行 624 round，其中除首轮外的重复学习为 561 round；这部分约占 exact 总时间 44%。因此优化优先级应为：先在当前 `nearestK3/top3` 完整树上对照 bounded warm cap15/cap25，而不是退回已经证明过弱的 `dualPair/top1`；随后再比较“每条 route 只选择一个最短重复段”的更新策略。评价必须同时记录 DSSR round、final avg/max ng-set、forward/backward labels 和 exact 时间，不能只看轮数，因为更大的初始集合可能减少 round，却增加每轮状态量。
+
+213. 2026-07-13 ng-DSSR 更新策略的文献与旧 VRP 对照
+
+Martinelli、Pecin 和 Poggi 的标准 ng-DSSR 描述与旧 VRP 实现一致。算法每轮从动态规划结果中选择 reduced cost 最小的单条路径 `R*`；若该路径不是目标 ng-route，则检查其中所有 forbidden cycles。对每个重复段 `H=(v,...,v)`，将重复任务 `v` 加入该段所有中间任务 `l∈C(H)` 的临时 ng-set。论文 Algorithm 2 的 `selectBestRoute` 和 `updateNGSets` 明确是单条最优路径，并在 `updateNGSets` 中遍历该路径的全部 forbidden cycles。论文在 elementarity 扩展中也再次说明：每轮识别 best solution 的所有 cycles，并把每个 cycle 的 repeated customer 加入该 cycle 内所有中间集合；它同时指出，将重复客户直接加入所有任务集合的更激进 Righini--Salani 口径容易使标签量失控，其实现中最大临时 ng-set 即使在 200-customer 实例上通常也不超过 20。来源为 2013 技术报告及 2014 EJOR 论文 `Efficient Elementary and Restricted Non-Elementary Route Pricing`，DOI `10.1016/j.ejor.2014.05.005`。
+
+旧 VRP 的 `GCNGBB` 每轮只维护一个 `m_best_cycle`。forward、backward 和 join 中发现更低成本的 cyclic route 时覆盖该变量；本轮扩展结束后只调用一次 `UpdateNGSet()`。该方法用 `place[cid]` 查找每个任务的连续两次出现，并把重复任务 `cid` 加入二者之间所有任务的 ng-set，因此也是“单条最优非基本路径 + 该路径全部连续重复段”。旧代码没有保存 top-K 非基本路径，也没有在一轮内用多条 route 同时更新。其 `m_col_coef=0.08` 是初始预加 pair 的独立策略，不改变后续每轮只用一条 best cycle 的规则。
+
+当前 TWET 主线与上述口径的差异只在 route 数量。`recordNonElementaryNegativeSequence()` 按 reduced cost 保存最多 `ngDssrNonElementaryRouteUpdateLimit` 条路径；W300 配置为 3。`updateNgNeighborhoodsFromNonElementaryRoutes()` 随后对这三条路径逐条执行与旧 VRP 相同的全部连续重复段更新。因此当前 `top3` 正确，但相当于把标准 best-route 更新并行放大到最多三条路径；它可能减少 DSSR round，也可能过快扩大 ng-set，使后续单轮状态数量上升。文献中也存在使用当前多个最优路径的应用型变体，例如有工作将参数设为 3，但这不是 Martinelli/Pecin 标准算法，也没有形成统一最优选择。
+
+因此最应优先做的更新策略 A/B 不是新设计“每条 route 只选一个重复段”，而是先把当前 `nearestK3/top3` 与 `nearestK3/top1` 公平比较。`top1` 与论文及旧 VRP 完全对齐，代码已有参数，不需要修改算法。若 top1 round 增加但 exact 总时间下降，说明 W300 当前瓶颈确实来自 top3 过快膨胀；若 top1 更慢，再进一步测试 top2 或按当前 ng-set 大小自适应选择 route 数。只选择一条 route 中新增 pair 最少的单个重复段在正确性上可以排除该固定 route，但不是主参考算法，优先级应低于 top1/top3 直接对照。
+
+214. 2026-07-13 多轮 DSSR 的逐轮时间与 reduced-cost 口径
+
+现有 W300 长日志没有记录单个 DSSR round 的 wall time 或该轮最优 reduced cost 数值。`exactPhaseMs` 在一次 `solve()` 开头清零，随后跨所有 DSSR round 累加，因此 14/24-round 调用只能得到整次 exact 的累计 init/forward/backward/join 时间；`ngSetSize ... updateByRound` 只记录每轮 ng-set 平均/最小/最大、更新数、negative non-elementary seen/stored 和 elementary 返回数。不能把整次 exact 时间直接解释为最后一轮时间，也不能从 `acceptedBestRc=Infinity` 反推前面各轮的最优值。
+
+但 reduced-cost 符号可以由控制流严格确定。每轮 `solveRelaxedRound()` 后，若找到 elementary 负列则立即返回；若没有 elementary 负列且 `nonElementaryNegativeRoutes` 为空，则以“relaxed pricing found no negative route”闭合；只有在至少存在一条 reduced cost 小于容差的 non-elementary route 时，才更新 ng-set 并进入下一轮。因此对 root 的 14-round 闭合调用，r1--r13 的 `neStored=3` 证明每轮至少有三条负 non-elementary route，r14 的 `neSeen=0/neStored=0/elem=0` 才第一次证明不存在负 relaxed route。node 3 的 24-round no-negative 调用同理：前 23 轮一定仍有负 non-elementary route，第 24 轮才闭合。由于每轮只增加 ng-memory 约束、dual 不变，松弛可行路径集合单调缩小，理论最小 reduced cost 单调不降，但现有日志没有保存其具体轨迹。
+
+完整树按轮数组合并后的平均时间只能作为粗粒度参考：1 轮调用约 1.679 秒/round，2--3 轮为 0.937 秒/round，4--9 轮为 0.659 秒/round，10--14 轮为 0.605 秒/round，15--19 轮上升至 1.069 秒/round，20 轮以上为 1.636 秒/round。前期 1-round 调用较重是因为 column generation 早期 dual 下候选和标签很多；中间轮次可复用 completion bound/Tmid 后较轻；15 轮以后 ng-set 扩大导致状态拆分和标签增长，单轮成本再次上升。具体 root 14-round 闭合调用累计 12.999 秒，平均 0.929 秒/round；最重 node 3 的 24 轮累计 90.029 秒，平均 3.751 秒/round。最后一轮使用最大的 ng-set 且必须穷尽，但其单独耗时目前无法从日志中分离。
+
+若要精确回答逐轮曲线，下一次诊断应在现有 `appendNgSetStatsForRound()` 中追加本轮 wall time、`lastRelaxedRoundBestReducedCost` 以及本轮 forward/backward/join 增量，而不是重新增加大段 debug 输出。这样可以直接判断 reduced cost 是平稳接近 0、少数轮跳变，还是长期保持强负值后突然闭合，并可验证 top1/top3 的轮数与单轮成本权衡。
+215. 2026-07-13 24 轮 DSSR 调用的逐轮可追溯信息边界
+
+进一步核对 W300 完整树日志中 node 3 的 24 轮 no-negative 调用。该次调用总耗时 90.029 秒，累计发现 4343 条负 reduced-cost 非基本路径候选，按每轮更新上限累计保留 67 条用于 DSSR 更新，累计新增 332 个 ng-memory pair，最终没有返回基本负列。由控制流可以确定第 1--23 轮每轮都至少存在一条负非基本路径，第 24 轮首次既无基本负列也无非基本负路径，从而完成无负列证明。
+
+该 run 没有开启 `twet.bpc.ngDssrSetStats`，所以日志没有保存 24 轮各自的 `u/neSeen/neStored/elem`，无法从累计量反推出每一轮的新增数量。即使开启现有逐轮统计，也只会记录每轮更新 pair 数、负非基本候选 seen/stored 数以及 ng-set 的平均/最小/最大大小；`twet.bpc.ngDssrSetMembers` 只输出该次 exact 结束时的最终成员集合，并不记录每轮具体新增了哪些 `(job,member)` pair。当前同样没有保存逐轮 wall time 和逐轮最小 reduced cost。因此，若要分析 24 轮的精确增长轨迹，需要后续诊断 run 逐轮追加耗时、best reduced cost、具体新增 pair 以及现有 size/seen/stored 统计，不能把现有累计 summary 拆成伪逐轮数据。
+
+216. 2026-07-13 现有 43 轮逐轮统计的含义与轨迹
+
+另一个开启 `ngDssrSetStats` 的 W300 root 调用采用 `dualPairCoef0.08 + top1 + nodewarm-off`，共执行 43 轮并最终证明无负松弛路径。这里 `neSeen` 是 join 恢复出负 reduced-cost 非基本序列后、序列去重和 top-K 保留前的原始发现次数，同一 sequence 可能因不同 split 重复计数；它不是唯一负列数，也不是加入 Master 的列数。该配置每轮只保留 reduced cost 最好的 1 条非基本路径，所以第 1--42 轮均为 `neStored=1`，第 43 轮为 0。逐轮 `neSeen` 从 `16352` 快速降到 `637/490/366`，之后缓慢降到第 40--42 轮的 `3/2/1`，第 43 轮变为 0；平均 ng-set size 同时从 `0.28` 单调增长到 `6.78`，最大值从 4 增长到 13。累计新增 331 个 pair。该轨迹说明 top1 每轮只用一条 witness 更新，但一条 witness 可一次补入多个 pair；例如第 12 轮和第 41 轮分别只保留 1 条路径，却新增 24 和 11 个 pair。现有日志仍未记录这些 pair 的具体身份、逐轮 best reduced cost 或逐轮耗时。
+
+217. 2026-07-13 相邻 DSSR 轮次最优 sequence 关系实验
+
+新增默认关闭的 `twet.bpc.ngDssrRoundRouteRelation` 诊断。每轮对所有已观察到的负非基本 sequence 去重，同一 sequence 的不同 split 按现有 DSSR 数值容差保留最好 inferred reduced cost；同时单独记录本轮真正送入 ng-set 更新的 top1 witness、它在上一轮唯一负 sequence 集合中的 reduced-cost 名次、上一轮成本、本轮具体新增 pair。该结构完全独立于正式 top1 容器，开关关闭时不分配逐轮 map 或 pair 列表，不改变 pricing、排序和更新流程。
+
+按历史 `dualPairCoef0.08 + top1 + nodewarm-off`、W300/50-3、root-only 配置重跑，得到 `bound=1726.014329`、`valid=true`，与历史口径一致；总时间 189.479 秒，33 次 exact 共 92.323 秒。最终 no-negative exact 共 43 轮、耗时 25.953 秒，前 42 轮均有负非基本 witness，第 43 轮无负路径。第 2 轮 top1 未在第 1 轮显式生成的 15305 条唯一负 sequence 中出现；第 3--42 轮的 40 个 top1 全部已在上一轮出现，因此除首轮外的可比较命中率为 `40/41=97.56%`。上一轮名次分布为：第 1 名 1 次、第 2 名 22 次、第 3 名 10 次、第 4 名 3 次、第 5 名 2 次、第 6/7 名各 1 次；前 3 名覆盖 `33/40=82.5%`，前 7 名覆盖全部命中。所有命中 sequence 的上一轮与本轮 reduced cost 差异均小于 `1e-7`。实际 top1 与事后观察最小值的最大差仅 `1.82e-12`，小于 `1e-6` 容差，少量 sequence 不同属于数值并列，不是 top1 选择错误。
+
+该结果说明，相邻 DSSR 轮次并不是重新出现完全无关的最优路径。通常上一轮第 1 名被新增 ng-pair 排除后，第 2--3 名直接上升为下一轮最优，因此上一轮候选排序具有很强的预测价值。但第 2 轮仍出现了上一轮未显式生成的新 top1，说明不能只重放上一轮候选并据此给出无负列证书；可行的加速只能把上一轮前若干候选作为快速 warm candidates，先按新 ng-set 验证，未找到时仍回到完整 labeling。完整逐轮 sequence、名次和新增 pair 已写入 `test-results/bpc/tmp-w300-dualpair-top1-roundrelation2-20260713/final-no-negative-43-round-relation.csv`。

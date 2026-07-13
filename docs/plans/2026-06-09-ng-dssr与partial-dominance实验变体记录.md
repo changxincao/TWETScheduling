@@ -2302,3 +2302,23 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 当前可以认为 no-SRI ng-DSSR exact pricing 的实现层面已经完成一轮系统优化，没有继续确认到类似旧 dominance graph 全历史扫描、重复函数构造或单元素数组分配这种低风险且明显的冗余。source-aware incremental graph 和 join group-envelope prefilter 默认开启，completion bound 默认走 multi-delta 与时间优先传播，单 word `PackedBitSet` 也已成为固定后端；Tmid 的 node/DSSR 复用和稳定冻结只在外部启用 midpoint probe 时生效，基础配置中的 probe 本身仍默认关闭。
 
 这不等于整个 BPC 主线不存在低效。最新完整 W300 统计中，exact 内部仍主要消耗在前后向 PWLF 扩展，其次是 completion bound、midpoint probe 和 join；这些成本目前主要来自 survivor/segment/label 数量，而不是已经定位到的重复实现。completion bound 的原生 interval delta、父子节点 Tmid warm-start和 DSSR 更新策略仍有算法级优化空间，但都需要新的 A/B，不能作为无条件修改。active SRI 仍回退旧 list dominance，明确不属于当前已经优化完成的 no-SRI 结论；完整求解中的 ALNS、启发式 pricing、strong branching trial LP 和 master LP 也可能超过 exact pricing，必须按具体日志分别判断。因此后续应按新算例的阶段计时触发优化，而不是继续无证据地改 no-SRI exact 热路径。
+
+231. 2026-07-13 W300 静态 ng-set 初始化、DSSR 更新强度与固定 ng-relaxation 对照
+
+本轮只比较静态策略，不启用 history/same-node warm-start。算例为 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300`，关闭 ALNS 和 strong branching，只求 root；其余 source-aware dominance、join envelope prefilter、completion bound、midpoint probe 复用、time-indexed root preprocessing/seed 和 repeatability filter 保持一致。为避免旧日志中 preprocessing 列池不同造成干扰，五组均在当前代码上顺序重跑，time-indexed 预处理均得到 `tempPool=27321`、`410606` 条时空禁弧和 200 条 elementary seed。
+
+| 策略 | root 总时间 | exact 时间/调用 | DSSR 总轮数/单次最大 | ng pair 更新 | pool | root bound |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `K3 + top3` | 95.686s | 58.125s / 10 | 29 / 14 | 337 | 6815 | 1726.014329 |
+| `K5 + top3` | 111.078s | 63.313s / 6 | 20 / 15 | 229 | 6907 | 1726.014329 |
+| `K3 + top5` | 99.158s | 54.013s / 10 | 26 / 12 | 337 | 6815 | 1726.014329 |
+| `K3 + top10` | 97.719s | 50.296s / 10 | 19 / 7 | 337 | 6815 | 1726.014329 |
+| 固定 `K5`，允许 ng-relaxed 列 | 56.546s | 21.885s / 6 | 6 / 1 | 0 | 11099 | 1721.469181 |
+
+结果首先说明，统一增强初始化不如增强困难 DSSR 轮次的更新。`K5 + top3` 虽把 exact 调用从 10 次降到 6 次，但最后一次无负列证明仍需要 15 轮，exact 和总时间都比 `K3 + top3` 更慢。原因不是 K5 不够强，而是它把所有 pricing 一开始的状态都扩大了；大量本来一轮就返回 elementary 负列的调用也承担了更大的 label 状态，而真正困难的 certificate 调用没有因此消失。相比之下，`K3 + top10` 只在已经观察到负 non-elementary witness 时更快加入约束，DSSR 总轮数由 29 降到 19、单次最大由 14 降到 7，exact 比 top3 降低约 13.5%。`K3 + top3/top5/top10` 最终都增加 337 个 pair、得到完全相同的 pool 和 root bound，说明 top10 在本 root 中主要是把最终必需的 pair 提前加入，并没有扩大最终 ng-set。当前 W300 的静态 elementary 策略应优先采用较小初始化配合较强更新，即 `K3 + top10`；是否修改全局默认，还需在另一组窗口宽度和完整 BPC 树上复核。总时间受 preprocessing 和 heuristic 波动影响，因此这次判断主要看 exact 时间和 DSSR 轮数，不用约 2s 的 wall-time 差异判断 top5/top10 优劣。
+
+文献中的固定 ng-neighborhood 通常是较小常数邻域，例如每个客户取 8 或 10 个近邻；也有从空集合启动、再用 DSSR 动态扩张的实现。因此“每个 job 使用 n/10”不是通用规则，只能视为本例 `n=50` 时 `K=5` 的一个静态候选。当前实验已经直接否定了“W300 上把所有 job 从 K3 统一改为 K5 就会更快”，但没有否定固定 K5/K8/K10 作为纯 ng-route relaxation 的用途。
+
+固定 `K5` 并打开 `ngDssrReturnRelaxedColumns` 属于另一种算法口径。它允许 elementary 和 non-elementary 的负 ng-feasible route 一起进入 RMP，不再通过 DSSR 把列族收紧到 elementary，因此每次 exact 只有一轮，exact 比 `K3 + top3` 降低约 62.3%，root 总时间降低约 40.9%。代价是 root bound 从 `1726.014329` 降到 `1721.469181`，弱 `4.545148`，约为 elementary bound 的 0.2633%，列池则从 6815 增至 11099。该模式不是“只加入非基本列、丢掉基本负列”；基本负列仍必须保留，非基本列是额外放松。当前 evaluator 会在返回前按固定 sequence 重算真实目标，LP 覆盖系数按实际访问次数进入，因此这是可解释的 ng-route relaxed master 下界，不是错误列成本。
+
+由此更合理的后续实验分成两条。若目标仍是 elementary exact pricing，保持 warm-start 关闭，先比较 `K3 + top10` 在 W100/W300 和完整树上的稳定性，再决定是否采用；不建议继续统一放大初始化。若目标是更快的 root 下界，则单独比较固定 K3/K5/K8/K10 的速度、bound 和 pool 曲线，并研究“先用独立 relaxed root 得到下界、dual、arc/window 证据，再切回 elementary ng-DSSR”的两阶段方案，不能把 relaxed root bound 直接写成 elementary root bound。此前 40-2 完整树实验已经显示 relaxed 列虽减少 exact 调用和节点，却会显著放大 master/strong branching 成本，因此固定 ng-relaxation 暂不作为全树默认。用户最后提出的“只去找那些不存在这种……”条件尚未完整，具体受限列族的定义需补全后再判断其下界和完备性。

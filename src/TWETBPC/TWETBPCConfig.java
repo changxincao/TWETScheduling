@@ -162,9 +162,12 @@ public class TWETBPCConfig {
 	/** 2026-07-11: no-SRI ng-DSSR 默认使用增量 source-aware graph；false 仅用于旧 Paper 图回归 A/B。 */
 	public boolean useIncrementalSourcedDominanceGraph = true;
 	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/dualPair/reducedCostPair。 */
-	public String ngDssrInitialNgSetMode = "dualPair";
-	/** 2026-07-05: 初始 ng-set 的目标大小，不含任务自身；当前 job 会在 label memory 更新时单独加入。 */
-	public int ngDssrInitialNgSetSize = 8;
+	public String ngDssrInitialNgSetMode = "nearestK";
+	/**
+	 * 2026-07-13: nearestK 的目标大小，不含任务自身。负数表示自动取 floor(n/10)；
+	 * 非负值仍作为实验用固定 K，当前 job 会在 label memory 更新时单独加入。
+	 */
+	public int ngDssrInitialNgSetSize = -1;
 	/** 2026-07-09: 旧 VRP 风格的初始 ng-set 系数；dualPair/reducedCostPair 模式按 floor(n * coef) 全局选负 pair。 */
 	public double ngDssrInitialNgPairCoefficient = 0.08;
 	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
@@ -436,6 +439,11 @@ public class TWETBPCConfig {
 	public double nodeLocalHorizonImprovementTimeLimitSeconds = 5.0;
 	public boolean nodeLocalHorizonImprovementUseCplex = true;
 	public boolean nodeLocalHorizonImprovementUseCp = true;
+
+	/** 解析 nearestK 的实际 K；显式固定值优先于默认的任务规模比例。 */
+	public int resolveNgDssrInitialNgSetSize(int jobCount) {
+		return ngDssrInitialNgSetSize >= 0 ? ngDssrInitialNgSetSize : Math.max(0, jobCount) / 10;
+	}
 
 	public boolean useColumnizedOutsourcing() {
 		return "columns".equalsIgnoreCase(outsourcingModel)

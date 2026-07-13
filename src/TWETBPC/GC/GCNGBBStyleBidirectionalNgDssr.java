@@ -475,8 +475,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrHistoryWarmStartApplied = true;
 			return;
 		}
-		String mode = config.ngDssrInitialNgSetMode == null ? "dualPair" : config.ngDssrInitialNgSetMode;
-		int targetSize = Math.max(0, config.ngDssrInitialNgSetSize);
+		String mode = config.ngDssrInitialNgSetMode == null ? "nearestK" : config.ngDssrInitialNgSetMode;
+		int targetSize = config.resolveNgDssrInitialNgSetSize(data.n);
 		if ("empty".equalsIgnoreCase(mode)) {
 			return;
 		}
@@ -491,6 +491,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		if ("dualPair".equalsIgnoreCase(mode) || "reducedCostPair".equalsIgnoreCase(mode)) {
+			// 2026-07-13: 两个历史名称当前都按本轮 dual 的 pair reduced cost 排序，保留别名仅为兼容旧命令。
 			addDualPairNgNeighborhoods(lp);
 			return;
 		}

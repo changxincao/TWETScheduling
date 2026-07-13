@@ -2351,3 +2351,25 @@ K1 下 top10 虽把 DSSR 轮数从 71 降到 49，但每轮 exact 平均时间�
 update 强度的结构性结果比单次 wall time更稳定。对 K3/K5/K10/K20，top3 到 top5 再到 top10 都单调减少 DSSR 轮数，而且同一 K 的最终 pool 和列序列不变，说明较强 update 主要是提前加入最终需要的 pair。wall time 存在明显机器波动：K5/top5 两次完全相同的列序列和 15 轮 DSSR，exact 分别为 38.697s 和 56.913s；K5/top10 两次同为 12 轮，exact 分别为 49.965s 和 35.397s。其 mandatory completion-bound 构造时间也同步变化，证明不能仅按单次最小时间选择 top5。两次均值为 top5 约 47.805s、top10 约 42.681s，加上 top10 稳定减少轮数，当前仍优先 top10。K20 下 top10 虽轮数最少，但状态过重，任何 update 都无法挽救过大的初始 K。
 
 最后用相邻机器状态复跑 K3/top10 与 K5/top10：K3 为 `solve=82.161s, exact=39.872s/10 calls, 19 rounds`；K5 为 `solve=75.735s, exact=35.397s/6 calls, 12 rounds`。K5 通过更强的初始 neighborhood 返回更多 elementary 列，减少了 4 次 exact/RMP 往返，同时没有像 K10/K20 那样显著放大状态。当前 W300 的静态候选因此从 K3/top10 调整为 `K5 + top10`，但优势只有约 4.5s exact，仍需在 W100、另一组 W300 实例和完整 BPC 树上验证后才能修改全局默认；warm-start 继续关闭。
+
+233. 2026-07-13 nearest n/10 与 dual-pair 初始化对比
+
+根据第 232 节中 K3/K5 明显优于 K1/K10/K20 的结果，默认 nearest 初始化改为按任务规模动态取 `K=floor(n/10)`。配置中 `ngDssrInitialNgSetSize=-1` 表示该自动口径，显式设置非负 K 仍保持原有固定值语义；默认模式同时由 `dualPair` 改为 `nearestK`。因此 40/50/60 任务分别得到 K4/K5/K6，后续可以直接按规模批量运行，不再为每组实例手工设置 K。
+
+随后在同一个 `wet050_003_3m_setupR50 + W300` root-only 口径下，统一采用 top10、time-indexed root preprocessing、200 条 elementary seed、time-indexed pre-heuristic、source-aware dominance、all-cycles completion bound、Tmid 复用、repeatability filter，关闭 ALNS、strong branching、RMIH 和 warm-start，对 nearest 与 dual-pair 做当前代码同批次比较。所有结果均为 `bound=1726.014329, valid=true`。
+
+| 初始化 | 名义初始规模 | solve | exact 时间/调用 | DSSR 总轮数/最大 | 更新 pair | 首次/累计基本列 | pool |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| nearest auto | 每 job K5 | 105.440s | 58.071s / 11 | 19 / 6 | 334 | 2834 / 5064 | 9993 |
+| dualPair 0.08 | 最多 4 个无向 pair | 192.925s | 114.275s / 22 | 56 / 10 | 815 | 189 / 909 | 5884 |
+| dualPair 0.5 | 最多 25 个无向 pair | 121.031s | 63.893s / 16 | 42 / 10 | 706 | 189 / 752 | 5738 |
+| dualPair 1.0 | 最多 50 个无向 pair | 135.028s | 80.114s / 22 | 53 / 10 | 741 | 194 / 1992 | 6926 |
+| dualPair 2.5 | 最多 125 个无向 pair | 183.544s | 100.194s / 23 | 53 / 9 | 528 | 67 / 729 | 5766 |
+
+旧式 `coef=0.08` 对 50 个任务只选 4 个全局 pair，平均初始成员远小于 1，明显过松。把系数提高到 0.5 后有所改善，但仍比 nearest 多 5 次 exact 和 23 个 DSSR 轮次。`coef=2.5` 的名义有向成员总数与 nearest K5 接近，但 pair 会集中在当前 dual 下最负的少数任务组合，并在每次 exact 随 dual 重选，无法提供 nearest 对每个 job 的均匀基础 memory；其首次 exact 只返回 67 条基本列，随后仍有大量小批量加列。由此本例的差异不只是 pair 总数量，而是初始化覆盖结构。
+
+分阶段数据进一步说明 nearest 不是让单次 labeling 无条件变轻。nearest 平均每次 exact 约 5.28s，dualPair 0.5 约 3.99s；后者单次较轻，但需要 16 次 exact，而 nearest 只需 11 次。nearest 累计返回 5064 条基本列、pool 为 9993；dualPair 0.5 只返回 752 条、pool 为 5738。root-only 下 nearest 通过更大的基本列批次减少 pricing/RMP 往返而获胜；完整树中较小 pool 可能降低 master LP 和 strong branching 成本，因此 dualPair 0.5 仍值得作为批量完整树对照，不能由本次 root 结果断言全局淘汰。
+
+代码复核还确认 `dualPair` 与 `reducedCostPair` 当前都调用同一个“按本轮 pair reduced cost 排序”的实现，只是为了兼容旧命令保留两个名称；重复运行 `reducedCostPair` 不会形成独立证据。当前 pair 分数只使用 setup cost、arc dual 和 job dual，不使用 setup time、处理时间以及具体的 `j -> k -> j` 时间可行性。若继续设计 pair 初始化，更合理的下一步是按每个中心 job 分别选 K 个 pair-score 最好的、且在 effective window 下可构成重复访问的邻居，而不是继续调全局 coefficient。
+
+当前实验优先采用 `nearest floor(n/10) + top10` 作为静态候选，其中代码只把 nearest 与动态 n/10 改为默认，top10 仍由实验配置显式打开；pair 模式保留为实验开关。`empty` 比已明显偏弱的 K1 和 dualPair 0.08 更松，本轮不再消耗一次完整 root 实验。上述结论目前只覆盖单个 W300 root，动态 n/10 是否适合作为全局默认仍需在 40/60 任务、较窄窗口和完整 BPC 树上批量复核。

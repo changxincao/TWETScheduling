@@ -2166,3 +2166,15 @@ Martinelli、Pecin 和 Poggi 的标准 ng-DSSR 描述与旧 VRP 实现一致。�
 按历史 `dualPairCoef0.08 + top1 + nodewarm-off`、W300/50-3、root-only 配置重跑，得到 `bound=1726.014329`、`valid=true`，与历史口径一致；总时间 189.479 秒，33 次 exact 共 92.323 秒。最终 no-negative exact 共 43 轮、耗时 25.953 秒，前 42 轮均有负非基本 witness，第 43 轮无负路径。第 2 轮 top1 未在第 1 轮显式生成的 15305 条唯一负 sequence 中出现；第 3--42 轮的 40 个 top1 全部已在上一轮出现，因此除首轮外的可比较命中率为 `40/41=97.56%`。上一轮名次分布为：第 1 名 1 次、第 2 名 22 次、第 3 名 10 次、第 4 名 3 次、第 5 名 2 次、第 6/7 名各 1 次；前 3 名覆盖 `33/40=82.5%`，前 7 名覆盖全部命中。所有命中 sequence 的上一轮与本轮 reduced cost 差异均小于 `1e-7`。实际 top1 与事后观察最小值的最大差仅 `1.82e-12`，小于 `1e-6` 容差，少量 sequence 不同属于数值并列，不是 top1 选择错误。
 
 该结果说明，相邻 DSSR 轮次并不是重新出现完全无关的最优路径。通常上一轮第 1 名被新增 ng-pair 排除后，第 2--3 名直接上升为下一轮最优，因此上一轮候选排序具有很强的预测价值。但第 2 轮仍出现了上一轮未显式生成的新 top1，说明不能只重放上一轮候选并据此给出无负列证书；可行的加速只能把上一轮前若干候选作为快速 warm candidates，先按新 ng-set 验证，未找到时仍回到完整 labeling。完整逐轮 sequence、名次和新增 pair 已写入 `test-results/bpc/tmp-w300-dualpair-top1-roundrelation2-20260713/final-no-negative-43-round-relation.csv`。
+
+218. 2026-07-13 基本列名次与自适应 DSSR 更新分析
+
+继续解析同一 W300 root 日志中 32 次以 `elementary negative columns returned` 结束的 exact 调用。每次调用的最终 DSSR 轮同时记录了实际返回基本列的 `acceptedBestRc` 和本轮最优负非基本 witness 的 `selectedRc`。32 次中基本列成为本轮所有已观察负路径最优者的次数为 `0`；32 次均仍存在 reduced cost 更低的非基本路径。两者 reduced-cost 差值约为 `2.73--234.55`。其中 23 次调用执行了多于一轮 DSSR，这 23 次也全部是非基本路径更负。该结果说明当前 exact 在发现可加入 RMP 的基本负列后立即返回，并不要求 relaxed 最优路径已经基本化；因此不能用“本轮出现基本列”判断 ng-set 已接近充分，也不应为了找到本轮 relaxed 最优基本列继续无意义地收紧 ng-set。
+
+相比跨 exact 的 warm-start，更直接的更新优化应发生在同一 DSSR 轮已经生成的候选集合内。当前固定 top-K 会在更新前选定 K 条路径，其中后续路径可能已被前一条路径新增的 ng-pair 一并排除。更合理的低风险策略是按 reduced cost 排序扫描候选：先更新当前最优路径，在临时 ng-set overlay 上重新判断剩余候选；若原 top2/top3 已不再满足新的 ng-route 条件，则不再为它们增加 pair；若仍有强负候选可行，再选择当前最优存活者继续更新，直到达到 route 上限。这样简单轮次通常只更新一条，候选结构彼此独立的困难轮次才自动更新多条。第 217 节中下一轮 top1 有 82.5% 来自上一轮前 3 名，说明这种“更新最优存活候选”的方向比跨轮 warm 更直接，但仍需保留完整 labeling 作为最终无负列证书。
+
+若目标是进一步控制 ng-set 大小，可以试验 pair-budget cycle cover。对一条存在多个重复段的路径，排除该固定路径只需要完整禁止其中一个重复段，即把该段的重复 job 加入所有中间 job 的 ng-set；不需要同时更新该路径的全部重复段。可以把标准 top1 更新全部重复段所需的新增 pair 数作为本轮预算，先为最优路径选择“新增 pair 少且能覆盖更多高排名候选”的一个重复段，再用剩余预算处理当前最优存活候选。该方案能保证本轮 pair 增长不超过标准 top1，同时可能排除多条高排名路径，但它改变了标准 DSSR 的更新轨迹，可能损失当前未显式生成路径上的泛化效果，应作为独立实验策略而不是直接替换主线。
+
+将非基本 sequence 删除重复访问后重新评价，是另一类基本列修复启发式，不是 ng-set 更新本身。新增 pair 只会让原重复 sequence 在下一轮不可行，并不会自动把它变成删点后的基本 sequence；若要利用该思路，必须显式选择保留哪个重复 occurrence，生成删点 sequence，再用 `TWETColumnEvaluator` 计算真实成本和当前 reduced cost。若修复后仍为负，可立即把它作为基本列返回 RMP，从而跳过本次后续 DSSR 收紧；但它不能证明不存在其他负列，后续 dual 状态仍需 exact pricing。建议先做默认关闭的诊断：对每轮前 3--10 条非基本路径执行贪心删重复 repair，统计修复成功率、负列率、reduced-cost 损失和 evaluator 耗时，再决定是否接入。
+
+下一步最有解释力的 A/B 为：固定 top1、固定 top3、更新后存活候选自适应 top3，以及 pair-budget cycle cover。每组同时记录 DSSR round、每轮新增 pair、最终 avg/max ng-set、label/join 数量、exact 时间和基本列 repair 命中率。只减少轮数但显著放大后续单轮状态量，不应视为改进。

@@ -2280,3 +2280,13 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 其余候选的优先级较低。父子节点可继承父节点最终 Tmid 的 horizon 比例，clamp 后先做一次完整两侧校验，失衡才回退现有 probe；它不改变列族，风险较低，但理论可处理范围最多约为当前 9.5% 的 probe 时间。同 node bounded warm-start 已有约 7% 的局部收益证据，但会在“减少 DSSR 轮数”和“放大每轮状态”之间权衡，默认仍不应打开。backward `minimizeSuffixInPlace()` 每次用临时 `ArrayList<Segment>` 反向访问函数，可尝试复用引用缓冲区以减少分配，但不会消除 O(segment) 扫描，收益可信度低于单 word 位集；给 Segment 增加双向链或恢复 SegmentPool 都会扩大风险，现有证据不支持。
 
 本轮同时排除了几类看似直接但已经证伪或收益不足的方向：`shiftX+add` 融合在严格对拍相等时仍慢 9%--29%；逐 segment 的 no-allocation completion prefilter 虽剪掉大量候选，却使 exact 变慢约 16.1%；继续改 group 排序、sequence 去重或 Hasse 索引的收益上限受当前 11.5% join 占比限制；原生 interval delta completion bound 仍有潜力，但属于需要逐 job、逐 PWLF 对拍的大改。后续建议顺序为：先试单 word `PackedBitSet`；若研究 SRI，则单独处理 SRI dominance 与无用 state 字符串；再评估父子 Tmid warm-start；最后才考虑 interval delta 或 backward 函数结构改写。本轮只完成代码审计和记录，没有修改生产算法。
+
+228. 2026-07-13 单 word PackedBitSet 内联后端与 A/B
+
+本轮在 `PackedBitSet` 内实现单 word 内联存储：当旧口径计算出的 word 数为 1 时，集合值直接保存在对象的 `long` 字段中，不再额外创建单元素 `long[]`；超过一个 word 时继续使用原数组后端。调用层 API、固定 universe 的截断规则、不同 word 长度之间的 `and/or/andNot`、迭代顺序以及 `equals/hashCode` 均保持旧数组语义。该实现只减少 50/60-job no-SRI 热路径中的小数组分配，不修改 ng-memory、dominanceSet、extensionSet 的数学含义。
+
+固定 128 MB 堆、500 万次 survivor 模拟中，每次创建 child ng-memory、dominanceSet 和 extensionSet 三套单 word 集合。旧数组版三次平均约 `166.885 ms`，新内联版约 `62.422 ms`，即 `33.38 ns -> 12.48 ns/次`，吞吐约提高 `2.67x`；三次 Young GC 均从 `13` 次降至 `8` 次。该基准只说明位集分配热点本身明显改善，不能直接外推为完整 exact 的倍数提升。
+
+进一步在 `wet050_003_3m_setupR50 + W300` 做关闭 ALNS、关闭 strong branching 的确定性 root A/B，两组均得到 `bound=1726.014329`、`8870` 列、`7` 次 exact、`valid=true`；累计 forward/backward survivor 也完全相同，分别为 `487765/229234`。旧版 exact 为 `64.509s`，内联版为 `62.743s`，降低约 `2.74%`。分阶段日志中 forward 为 `23.620s -> 22.857s`，backward 为 `20.576s -> 18.045s`，join 为 `5.053s -> 4.491s`，但 initialization 存在反向波动；完整 solve 因启发式计时从 `21.135s` 波动到 `32.635s`，反而为 `111.545s -> 124.901s`，因此不能声称端到端稳定加速。当前结论是：该修改对目标分配热点有明确作用，对完整 no-SRI exact 是小幅正收益，保留实现合理，但收益远小于微基准倍数。
+
+正确性验证新增 100,000 组逐操作随机对拍，覆盖单 word、多 word、不同 universe 长度、边界 bit、容量异常、copy、集合运算、迭代、subset、equals/hashCode 和原地修改；原有 200,000 组相交测试、96,000 次 source-aware dominance 一致性、completion-bound prepared bounds 兼容性和 same-node warm-start 测试均通过。active SRI 仍回退旧 list dominance，本轮按要求不优化、不改动；其状态分组与 dominance 图接入以后单独研究，不能与本次 no-SRI 存储优化混在一起评价。

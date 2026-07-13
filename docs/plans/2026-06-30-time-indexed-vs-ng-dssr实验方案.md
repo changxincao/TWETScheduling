@@ -798,3 +798,9 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 随后按这个判断对代码做了最小处理：当 `useTimeIndexedGraphPricing=true` 时，`Tree` 不再调用 RMIH，只保留 heartbeat 说明跳过。理由是 time-indexed 主线列池大量包含 pseudo/repeated 列，当前 RMIH 的 covering MIP 在这种列池上收益很弱且会额外消耗节点时间；ng-DSSR 和其他 elementary 列主线仍保持原 RMIH 逻辑。
 
 为定位 ng-DSSR `init` 细分，又在 `GCNGBBStyleBidirectionalNgDssr.initialize(lp)` 中补了累计口径的 `exactInitDetailMs setup/diag/sri/window/ng/cb/preCert/probe/state/fullProbe`。一次 `wet050_003_3m + W100` 短诊断使用 `maxNodes=1`、`solveTimeLimitSeconds=120`、关闭 ALNS 和强分支，仅用于拆分 root exact pricing 的初始化成本。该 run 拿到 5 次 ng-DSSR exact pricing，`exact=24.820s`，其中 `init=18.879s`；细分为 `completion bound=11.792s`、`midpoint probe=7.043s`、`state=0.032s`、`ng=0.004s`、`window=0.001s`、`setup/diag/sri/preCert/fullProbe` 合计不足 `0.01s` 量级。这个诊断说明当前 W100 下所谓 init 慢，核心不是对象创建、ng-set 初始化或动态窗口，而是 completion bound 构建和 midpoint probe 两项。
+
+### 2026-07-13：timeJitterX10 历史 time-indexed 版本口径复核
+
+重新对照 2026-06-30 的代码提交与 `tmp-compare-40x10-timegraph-nosri-900s-20260630` 日志后确认，该 run 已经包含 6 月 28 日完成的 top-candidate 过滤、按 sequence signature 去重和固定 top-K heap；它不会像 6 月 20 日早期版本那样，对大量通过筛选的 end state 逐条调用 `TWETColumnEvaluator`。当时 engine 从 graph reduced cost 反推路径对应的 objective cost，time-indexed exact 共 `816.875s/908` 次、平均约 `0.900s`，日志每轮典型为 `20--76` 万 states 和 `800--3000` 万 arc scans。因此该 run 的主要慢因确实是 horizon 约 `19249` 下反复扫描大离散图、经历 908 轮 pricing 并维护大列池，不是旧 evaluator 重算热点。
+
+该历史版本仍不与当前实现完全相同。其 root 多轮日志显示 `piWindow=enabled`，但当时尚未对最终选中的 dual-window 候选统一执行真实 sequence cost 回刷；当前版本只对最终 top-K 候选做 evaluator 回刷，并在 7 月 6 日优化了 evaluator，同时修正了 dual-window pseudo-schedule 与 certificate 边界。因此旧绝对时间不能直接当作当前版本基准，正式论文对比仍应重跑；但“大 horizon 使 time-indexed 图扫描和 pricing 轮数膨胀”的原因判断不依赖早期 evaluator 问题，仍然成立。

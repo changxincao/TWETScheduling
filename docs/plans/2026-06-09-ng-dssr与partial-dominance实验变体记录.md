@@ -2266,3 +2266,17 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 同时试验了把 extension 的 `shiftX + add` 替换为已有 `PiecewiseLinearFunction.addShifted()`。随机 forward/backward、正负 shift 和 BigM 分段逐点对拍全部相等，但 20-segment、500,000 次操作的 microbenchmark 中，融合实现反而慢约 `9%--29%`；原因是它把原来两个较简单的线性扫描合并成了分支更多的同步区间遍历，减少临时函数没有抵消复杂控制流。该生产修改和临时测试已经完全撤回，不作为后续方向。
 
 当前没有发现第二个可以直接合入、与本次位集判断同等级的严格等价热点。下一项结构性潜力最大的是 50/60-job 场景的单 word 状态后端：`PackedBitSet` 目前即使只有一个 word，也会为每个集合分配一个对象和一个单元素 `long[]`；每个 label 又同时持有 ng-memory、dominance/extension 等多个集合。可以单独试验在 `n+2<=64` 时把首个 word 内联到对象，或实现专用 long-mask label/store，减少小数组、hash 和 GC；该改动会影响全部集合操作和 dominance key，必须独立随机对拍与端到端 A/B。group-first join 可以进一步减少当前 envelope prefilter 的 label-to-group identity lookup 和候选二次遍历，但会改变 pair 顺序以及达到列上限时的批次，属于实验策略而非无条件优化。completion bound 的原生 interval delta 仍可能处理 W300 的 initialization 成本，但历史 shortcut 已出现退化，继续修改必须逐 job、逐 PWLF 验证。
+
+227. 2026-07-13 ng-DSSR 全主线低效点复核
+
+本轮沿一次 `solve()` 的完整控制流重新检查：初始化 ng-set 后，每个 DSSR round 依次构造或复用 effective window、completion bound 和 Tmid，建立正反向状态，耗尽两侧队列，压缩 active labels 后 join；若只得到负非基本路径，则更新 ng-set 并重新开始下一轮。ng-set 改变了 memory 转移和 dominance key，因此跨 DSSR round 直接复用旧 label 图并不安全。当前复用 completion bound、窗口标量、普通禁弧 mask 和首轮 Tmid 的边界是合理的，搜索容器重建本身在历史计时中接近零，不是 initialization 的实际瓶颈。
+
+最新完整 W300/50-3 口径仍应作为优化优先级依据：forward/backward expansion 合计约占 exact 的 63.1%，completion bound 约占 15.6%，midpoint probe 约占 9.5%，join 约占 11.5%。当前无 SRI 扩展已经做到先检查窗口、构造 PWLF、用 completion bound 剪枝，只有 survivor 才创建 ng-memory、dominanceSet、extensionSet 和 label；full/half 时间判定、普通禁弧 mask、source-aware dominance、group-envelope prefilter 和直接 min-sum 均已接入。没有再发现旧 dominance graph 那种反复扫描全部历史 label 的明显冗余，join 也已不是第一瓶颈。
+
+当前 no-SRI 路径最明确的剩余实现成本是单 word 位集分配。50/60-job 实例的 `n+2<=64`，但 `PackedBitSet` 仍为每个集合创建一个包装对象和一个单元素 `long[]`；每个 completion-bound survivor 至少形成 child ng-memory、dominanceSet 和 extensionSet 三套位集。重轮中 survivor 达到数万时，这会形成大量短命小数组、hash 和 GC。优先方案是在 `PackedBitSet` 内增加单 word 内联后端并保留多 word fallback，而不是在 ng-DSSR 中另写一套不兼容的 mask API。该项会影响 copy、集合运算、迭代、equals/hashCode 及 dominance map key，必须先做随机逐操作对拍，再比较 W300 的 allocation、GC、extension state 时间和 exact wall time；预期收益是降低分配与 GC，不能预先声称固定倍数。
+
+带 active SRI 时存在一项更明确的结构性差距。当前 source-aware incremental graph 只服务 no-SRI；SRI 会退回 `SriAwarePartialListDominanceStore`，按 cardinality bucket 先扫描“旧 label 支配新 label”，再扫描“新 label 裁剪旧 label”，且发生 SRI compensation 时会复制并平移支配函数。规模变大后这会重新出现 list dominance 的二次扫描成本。较稳的下一版不是立即实现完整跨 SRI 状态包络，而是先按完全相同的 SRI count state 分组，每组使用 source-aware graph；跨 state dominance 暂时不做，正确但偏弱，再用实际 label 增量判断是否值得继续。代码中 `FunctionLabel.sriStateKey` 当前还为每个 SRI label 构造逗号分隔字符串，但除接口 getter 外没有生产消费者，属于可以先删除的确定性 SRI 分配冗余。
+
+其余候选的优先级较低。父子节点可继承父节点最终 Tmid 的 horizon 比例，clamp 后先做一次完整两侧校验，失衡才回退现有 probe；它不改变列族，风险较低，但理论可处理范围最多约为当前 9.5% 的 probe 时间。同 node bounded warm-start 已有约 7% 的局部收益证据，但会在“减少 DSSR 轮数”和“放大每轮状态”之间权衡，默认仍不应打开。backward `minimizeSuffixInPlace()` 每次用临时 `ArrayList<Segment>` 反向访问函数，可尝试复用引用缓冲区以减少分配，但不会消除 O(segment) 扫描，收益可信度低于单 word 位集；给 Segment 增加双向链或恢复 SegmentPool 都会扩大风险，现有证据不支持。
+
+本轮同时排除了几类看似直接但已经证伪或收益不足的方向：`shiftX+add` 融合在严格对拍相等时仍慢 9%--29%；逐 segment 的 no-allocation completion prefilter 虽剪掉大量候选，却使 exact 变慢约 16.1%；继续改 group 排序、sequence 去重或 Hasse 索引的收益上限受当前 11.5% join 占比限制；原生 interval delta completion bound 仍有潜力，但属于需要逐 job、逐 PWLF 对拍的大改。后续建议顺序为：先试单 word `PackedBitSet`；若研究 SRI，则单独处理 SRI dominance 与无用 state 字符串；再评估父子 Tmid warm-start；最后才考虑 interval delta 或 backward 函数结构改写。本轮只完成代码审计和记录，没有修改生产算法。

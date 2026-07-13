@@ -2296,3 +2296,9 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 本轮按旧数组后端的逐方法语义重新检查单 word、多 word和混合后端路径，重点覆盖固定 universe 截断、63/64 位边界、不同 word 长度的集合运算、迭代、subset、copy 及 `equals/hashCode`。当前 `wordCount()` 未改，因此 63 仍为单 word、64 仍按旧口径分配两个 word；混合后端运算也只在左侧集合已有容量内更新，与旧实现一致。进一步检查 dominance graph、single-point store 和 join envelope 的 `HashMap<PackedBitSet,...>` 调用，持久 key 均使用独立副本，未发现把后续会原地修改的 label 位集直接作为 map key 的情况。
 
 重新执行 focused Java 21 编译、200,000 组相交对拍、100,000 组全操作对拍、96,000 次 source-aware dominance 一致性、completion-bound prepared-bounds 兼容性和 same-node warm-start 测试，全部通过。当前未发现需要修正的 correctness finding；剩余风险只在于尚未运行 Maven 全项目测试，因为本机没有 `mvn`，不影响本次已覆盖的生产调用链结论。
+
+230. 2026-07-13 当前主线效率结论边界
+
+当前可以认为 no-SRI ng-DSSR exact pricing 的实现层面已经完成一轮系统优化，没有继续确认到类似旧 dominance graph 全历史扫描、重复函数构造或单元素数组分配这种低风险且明显的冗余。source-aware incremental graph 和 join group-envelope prefilter 默认开启，completion bound 默认走 multi-delta 与时间优先传播，单 word `PackedBitSet` 也已成为固定后端；Tmid 的 node/DSSR 复用和稳定冻结只在外部启用 midpoint probe 时生效，基础配置中的 probe 本身仍默认关闭。
+
+这不等于整个 BPC 主线不存在低效。最新完整 W300 统计中，exact 内部仍主要消耗在前后向 PWLF 扩展，其次是 completion bound、midpoint probe 和 join；这些成本目前主要来自 survivor/segment/label 数量，而不是已经定位到的重复实现。completion bound 的原生 interval delta、父子节点 Tmid warm-start和 DSSR 更新策略仍有算法级优化空间，但都需要新的 A/B，不能作为无条件修改。active SRI 仍回退旧 list dominance，明确不属于当前已经优化完成的 no-SRI 结论；完整求解中的 ALNS、启发式 pricing、strong branching trial LP 和 master LP 也可能超过 exact pricing，必须按具体日志分别判断。因此后续应按新算例的阶段计时触发优化，而不是继续无证据地改 no-SRI exact 热路径。

@@ -2192,3 +2192,9 @@ multi-delta FIFO 也明显快于旧 FIFO，但时间优先继续降低了传播�
 ### 41.102 2026-07-10 multi-delta 改为默认路径
 
 基于第 41.100-41.101 节的完整 PWLF 对拍和性能结果，`completionBoundMultiDeltaPropagation` 与 `completionBoundMultiDeltaTimePriority` 改为默认开启。当前所有使用 `ALL_CYCLES` completion bound 的入口在未显式设置系统属性时都会走 multi-delta + 时间优先队列；`TWO_CYCLE` 仍走原有专用递推。实验或回归时可通过 `-Dtwet.bpc.completionBoundMultiDeltaPropagation=false` 回退旧 FIFO；也可只把 `completionBoundMultiDeltaTimePriority=false`，保留 multi-delta 但恢复 FIFO 顺序。compare 与详细统计仍默认关闭，不影响正常求解。
+
+### 41.103 2026-07-13 completion bound 与空 ng-set pricing 的关系
+
+当前 `ALL_CYCLES` completion bound 在状态松弛层面可以理解为“把所有 ng-neighborhood 设为空后的 pricing”。其动态规划状态只保留当前末任务和连续完成时间函数，不保存 `ngMemorySet`、真实 visited set 或 elementary 状态；转移只排除自环，并继续考虑 effective hard window、当前 dual、branch arc 和 pricing-only arc。因此任务离开以后可以再次访问，也允许形成二环及更长重复环。ng-DSSR 中若所有 `N_j` 为空，转移公式仍会把当前任务临时加入 memory，但到达下一个不同任务后该记忆就被清掉；由于自环本来已经禁止，这与 `ALL_CYCLES` completion bound 的可生成路径松弛等价。
+
+这里的“等价”只指允许的重复路径集合和 reduced-cost DP 松弛，不表示两段代码是同一个 pricing 实现。completion bound 只计算按 job 聚合的前缀/后缀 PWLF 下界，供扩展剪枝、拼接下界和 arc fixing 使用，不恢复列、不执行 DSSR、不做 elementary 校验，也不维护 ng-memory dominance。`TWO_CYCLE` completion bound 则额外保留上一条弧的二维状态并禁止立即回跳，等价于在空 ng-set 松弛上再加二环消除，不能再称为“所有 ng-set 为空”的原始 pricing。连续时间的 `ALL_CYCLES` completion bound 也可以看成 time-indexed `(lastJob,t)` 松弛最短路的 PWLF 版本。

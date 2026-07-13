@@ -2417,3 +2417,9 @@ W300/50-3 的同口径 root-only 结果如下，全部得到 `bound=1726.014329,
 | perJobRepeatCost K6 | 49.873s | 9.014s / 11 | 27 / 5 | 132 | 71 / 158 | 7900 |
 
 单点 due date 下 hybrid K6 比 nearest K6 少 4 次 exact，总时间降低约 8.6%，说明在时间惩罚有区分度时，用一个 repeat-cost 槽位替换 nearest 可能有价值。但纯 repeat-cost 仍明显偏弱，nearest 提供的局部结构不能被 pair 排序取代。当前结论是保留 nearest 作为默认主体，两个新模式继续默认关闭；50-job 的两组结果都支持继续批量验证 K6，但不足以据此把全局自动公式从 `floor(n/10)` 改成 `round(n/8)`。下一轮应在 40/60-job 和不同 setup/window 上统一比较 nearest `floor(n/10)`、nearest `round(n/8)` 与 hybrid `round(n/8)`。
+
+236. 2026-07-13 zero-setup 下 nearest 初始化的退化边界
+
+当前 `nearestK` 的距离是双向 setup time 与双向 setup cost 之和，再按 job 编号打破并列。因此“nearest 当前最好”的结论只覆盖 setup 距离有区分度的实验口径。若 setup time 全为 0、setup cost 仍非零，当前策略实际按双向 setup cost 排序；若 setup time 和 setup cost 都为 0，所有候选距离完全相同，经过全局不可重复任务过滤后只按 job 编号选前 K 个，已经不再具有邻近含义。现有 repeatability filter 只判断某个 member 是否能通过任意任务重复，并不保证该 member 与当前 center 能构成具体重复环，所以也不能消除这个退化。
+
+zero-setup 下更合理的静态回退不是继续使用任意编号，也不宜直接采用易随 dual 波动的纯 pair reduced cost。候选应先按当前 effective window、普通/pricing-only arc 和整数时空禁弧检查具体 `member -> center -> member` 是否可行，再按时间结构排序。优先候选是重复环持续时间 `p_center + p_member`；因为对固定 center 而言 `p_center` 为常数，本质上会优先记住处理时间短、最容易形成重复环的 member。可再用重复环首个完成时间的可行区间宽度、真实时间惩罚下界作次级排序。该方向可单独实现为 `temporalNearestK`，或者在检测到 setup 距离无差异时作为 nearest 的自动回退；在 zero-setup 算例完成 A/B 前不修改当前默认。

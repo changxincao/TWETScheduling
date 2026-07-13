@@ -2196,3 +2196,17 @@ Martinelli、Pecin 和 Poggi 的标准 ng-DSSR 描述与旧 VRP 实现一致。�
 现有 43 轮 top1 关系实验不能给出“top1 同时使 top2 和 top3 失效”的完整比例，因为日志没有保存每轮前 3 条 sequence；但它已经能否定“top1 基本都会干掉 top2/top3”。40 次能在上一轮找到的下一轮 top1 中，22 次来自上一轮第 2 名，10 次来自第 3 名。这些路径能在 top1 更新后的下一轮成为最优，严格说明对应 top2/top3 没有被上一轮 top1 连带排除。因此至少 `32/40=80%` 的匹配转移中，上一轮第 2 或第 3 名里存在一条存活候选。固定 top3 的主要作用正是把这些未来最优路径提前更新，有充分依据；自适应策略的潜在收益不是进一步减少大量轮次，而是跳过另一条可能已被覆盖的候选，控制无效 pair 膨胀。
 
 因此实现前应先加只读统计，而不是直接替换固定 top3。每轮保留 top10，模拟 top1 全量更新后记录 top2/top3 的存活状态、前10中首个存活名次、依次最多选择3条后的实际选择数、增加 pair 数，以及与固定 top3 的 pair 并集差。若 top2/top3 大多都存活，自适应与固定 top3 基本相同，没有修改价值；若经常只存活一条但固定 top3 仍增加大量额外 pair，则自适应有望保持轮数优势并减小后续单轮状态。删重复 repair 在 W300 上已经明确无效，不再作为该更新策略的组成部分。
+
+221. 2026-07-13 当前 ng-DSSR exact 瓶颈与后续优化优先级
+
+重新解析最新完整 W300/50-3 求解日志，共得到 409 次 exact、1535 个 DSSR round，exact 各阶段累计约 1681.948 秒。其中 initialization 为 424.000 秒，占 25.2%；forward expansion 为 449.149 秒，占 26.7%；backward expansion 为 611.771 秒，占 36.4%；join 为 193.875 秒，占 11.5%。初始化进一步拆分后，completion bound 为 261.787 秒，占 exact 总时间 15.6%；midpoint probe 为 160.181 秒，占 9.5%，其余初始化工作接近可忽略。由此可见，当前 source-aware dominance、直接 min-sum 和 group-envelope prefilter 已经把 join 从历史主瓶颈降为次要部分，当前大头是前后向扩展，其次是 completion bound 和跨节点反复进行的 midpoint probe。
+
+当前最明确的低风险实现优化位于无 SRI 扩展热路径。代码在 SRI 未启用时仍会为大量候选创建零长度 `byte[]`，并在 materialize label 时复制 `visitedSet`。无 SRI 的正式 join 使用 `ngMemorySet`，序列恢复使用 father 链；`visitedSet` 的生产用途主要集中在 SRI extension 和 SRI halves 检查。因此可先把空 SRI count 改为共享不可变对象，并严格审计后在无 SRI 路径取消每个存活 label 的 visited bitset 复制。这类修改不改变 labeling、dominance 或列语义，直接减少高频分配和 GC，是下一步最适合先做的代码级优化；实际收益必须用当前 root/W300 A/B 测量，不能预估为固定比例。
+
+第二个方向是 midpoint probe 的父子节点 warm-start。当前同 node 稳定 Tmid 已能冻结复用，但切换 child 或 cut context 后仍重新 probe，完整树累计耗时 160.181 秒。可以把父节点最终 exact Tmid 按 pricing horizon 比例传给 child，clamp 到 child compact horizon 后作为首个候选，只做一次完整前后向计时校验；校验失衡再回退现有 probe。Tmid 只影响双向分解效率，不改变完整扩展和 join 的列族，因此该策略正确性风险较低，理论最大可处理范围约为当前 exact 的 9.5%，但真实节省取决于父子节点 Tmid 稳定性。历史局部 probe 指标曾多次与完整 exact 的正反耗时方向不一致，因此不应再设计只依赖局部 label 数的新移动规则。
+
+第三个方向是在构造 PWLF candidate 前增加真正 O(1) 的粗下界诊断。可使用 parent scalar minimum、当前 arc/job 固定 reduced cost、目标 job 在有效窗口内的 penalty minimum，以及预计算的 completion suffix/prefix scalar minimum求和；不同项的最优时间可以不一致，所以该值是安全但较弱的下界。第一步只统计它能在 `shiftX + add + normalize` 前排除多少扩展，不立即改变正式流程；只有命中率足以覆盖几次浮点运算和数组访问时才接入。此前已经试过逐 segment 扫描的精确 no-allocation prefilter，虽然剪掉约 198 万/259 万候选，却让 exact 变慢约 16.1%，因此不能重复采用“先做一次接近 PWLF 构造成本的预判”。
+
+completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断中 F/B 约占单次构造的 76.4%，U/R 重建约占 23.2%，snapshot 和 discrete cache 很小；同一 DSSR 内复用、多区间 delta 和时间优先队列均已启用。当前 sparse delta 仍以 BigM 填充未变化区间并构造完整 PWLF，下一项可能有明显收益的改造是原生 interval-list delta，只传播真实变化区间，避免 BigM 空洞 segment 的构造和 merge。但这是较大改动，必须逐 job、逐 PWLF 与现实现对拍，不能只比较最终 scalar minimum。此前 transition-only U/R 和 endpoint shortcut 均出现语义或端到端退化，说明 completion bound 不适合再做未经完整对拍的小捷径。
+
+其余方向暂不列为高优先级。bounded same-node warm 在 3-node 对比中把 exact 从 151.529 秒降到 140.672 秒，属于约 7% 的中等收益，但不能消除最终 no-negative certificate；固定 top3 与更新后存活 top3 在现有证据下大部分候选仍会存活，主要只能减少少量冗余 pair；join 当前只占 11.5%，继续做 sequence 去重、group 排序或改变阈值容易受半域 split 和列批次轨迹影响；Hasse 拓扑和 dominance insert 在最新代码下没有当前细分计时，若要继续优化扩展，应先开一次 `ngDssrExtensionTimingDiagnostics`，把 PWLF 构造、状态复制、dominance insert 和 queue 分开，再决定是否动图结构。当前建议顺序为：无 SRI 分配清理，父子 Tmid warm-start，O(1) extension pre-bound 只读统计，最后才考虑原生 interval delta completion bound。

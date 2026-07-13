@@ -2178,3 +2178,13 @@ Martinelli、Pecin 和 Poggi 的标准 ng-DSSR 描述与旧 VRP 实现一致。�
 将非基本 sequence 删除重复访问后重新评价，是另一类基本列修复启发式，不是 ng-set 更新本身。新增 pair 只会让原重复 sequence 在下一轮不可行，并不会自动把它变成删点后的基本 sequence；若要利用该思路，必须显式选择保留哪个重复 occurrence，生成删点 sequence，再用 `TWETColumnEvaluator` 计算真实成本和当前 reduced cost。若修复后仍为负，可立即把它作为基本列返回 RMP，从而跳过本次后续 DSSR 收紧；但它不能证明不存在其他负列，后续 dual 状态仍需 exact pricing。建议先做默认关闭的诊断：对每轮前 3--10 条非基本路径执行贪心删重复 repair，统计修复成功率、负列率、reduced-cost 损失和 evaluator 耗时，再决定是否接入。
 
 下一步最有解释力的 A/B 为：固定 top1、固定 top3、更新后存活候选自适应 top3，以及 pair-budget cycle cover。每组同时记录 DSSR round、每轮新增 pair、最终 avg/max ng-set、label/join 数量、exact 时间和基本列 repair 命中率。只减少轮数但显著放大后续单轮状态量，不应视为改进。
+
+219. 2026-07-13 同轮存活候选与删重复 repair 诊断
+
+第 217 节所说的“提前处理上一轮 top2/top3”不是跨 exact 直接继承，也不是跳过下一轮 labeling。更准确的实现位置是当前 DSSR 轮内部：先保留例如前 10 条互异负非基本候选，选择当前最优存活路径并按现有规则全量更新它的所有重复段；更新写入临时 ng-set overlay 后，立即用新集合重新判断剩余候选是否仍满足 ng-route。已经被第一条路径新增 pair 连带排除的候选不再重复更新；仍存活的候选中再选择 reduced cost 最低者，继续执行同样的全量更新，直到达到 route 上限。该策略不缩小单条路径的更新集合，也不改变最终 exact certificate，只把固定 top3 改成最多选择 3 条“更新发生后仍存活”的路径。82.5% 的含义是下一轮最优路径经常已经位于上一轮前 3 名，因此提前检查这些高排名候选有机会在一轮内处理多个独立障碍；但若 top1 已经同时排除 top2/top3，就应避免为它们继续扩大 ng-set。正式修改前仍应先统计 top1 更新后前 10 名失效数量、首个存活名次和自适应选择后的 pair 增量。
+
+本轮先按要求只实现默认关闭的删重复 repair 诊断，不修改小 ng-set 或 DSSR 更新策略。每轮保存 reduced cost 最低的 10 条互异负非基本 sequence；对每条路径逐步删除重复 job 的一个 occurrence，每一步枚举所有可删位置，用 `TWETColumnEvaluator` 计算真实全域成本，并按当前 LP 的完整真实 dual 选择 reduced cost 最低的删法，直到 sequence 基本化。修复后的 sequence 还必须满足当前 node 的分支、外包和 pricing-only 禁弧；reduced cost 统一通过 `LP.computeReducedCost()` 计算，因此 active SRI cut dual 也不会遗漏。诊断结果不进入 Pool/RMP、不更新 ng-set、不改变证书。top-10 容器使用固定小数组线性替换，只在轮末排序，开关关闭时不分配候选容器或执行 evaluator。
+
+在 `wet050_003_3m_setupR50 + W300`、`dualPairCoef0.08 + top1`、root-only 的 43 轮关系实验同口径下，33 次 exact 共 152 个 DSSR round，尝试修复 1479 条 top-route。1479 条都能删除重复得到一个时间可行的基本 sequence，但真实重算后负列为 `0`，额外可加入列同样为 `0`；共调用 evaluator 117492 次，repair 主体计时 377.047 ms。151 个存在候选的 round 中，round 内最好修复 reduced cost 的最小值仍为 `+16.0746`，P10 为 `+60.0103`，中位数为 `+177.8419`，P90 为 `+1208.2698`。这说明 W300 的负松弛路径依赖重复任务带来的多次 job dual 和原路径连接结构，简单删重复会同时损失 dual 收益并改变重连 arc，无法替代后续 DSSR。该 run 仍得到历史一致的 `bound=1726.014329`、`valid=true`；诊断 run 为 `solve=201.042s, exact=101.748s/33`，但 377 ms 只统计 repair 主体，不包含热路径候选收集，且单次 wall time 存在波动，不能据此声称诊断零成本。
+
+小例补测说明该启发式并非数学上永远无效。`wet021_001_2m` 的一次返回基本负列 round 中，10 条 repair 有 3 条重算后仍为负，其中 2 条 signature 尚未由正式候选生成；另一次 5-round 闭合调用中 16 条 repair 均不为负。因而它可以保留为默认关闭的研究诊断，后续若在其他实例上持续命中，可考虑只对极少数 top route 运行并把负基本列作为提前返回候选；但对当前 W300 重尾没有价值，不应优先接入生产主线。下一步更值得做的是“全量更新规则不变、只选择更新后仍存活的 top 候选”的纯诊断与 A/B。

@@ -15,6 +15,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.PriorityQueue;
 
 import Basic.Data;
@@ -61,6 +62,7 @@ import TWETBPC.Util.SequenceSignature;
 public class GCNGBBStyleBidirectionalNgDssr {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
+	private static final int DUPLICATE_REPAIR_DIAGNOSTIC_ROUTE_LIMIT = 10;
 	private static final HashSet<Integer> FULL_MIDPOINT_DIAGNOSTIC_DONE = new HashSet<Integer>();
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
@@ -369,6 +371,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private HashMap<SequenceSignature, NonElementaryNegativeRoute> ngDssrCurrentRoundNegativeRoutes;
 	private ArrayList<String> ngDssrRoundAddedPairs;
 	private StringBuilder ngDssrRoundRouteRelation;
+	/** 只读诊断：尝试把每轮最优非基本路径删重复修复为基本列，不改变正式 DSSR。 */
+	private boolean ngDssrDuplicateRepairDiagnostic;
+	private ArrayList<NonElementaryNegativeRoute> ngDssrDuplicateRepairCandidates;
+	private StringBuilder ngDssrDuplicateRepairSummary;
+	private long ngDssrDuplicateRepairEvaluatorCalls;
+	private long ngDssrDuplicateRepairNanos;
+	private int ngDssrDuplicateRepairAttempted;
+	private int ngDssrDuplicateRepairFeasible;
+	private int ngDssrDuplicateRepairNegative;
+	private int ngDssrDuplicateRepairAdditional;
 	private boolean ngDssrHistoryWarmStartApplied;
 	private boolean ngDssrSameNodeWarmStartApplied;
 	private boolean ngDssrHistoryWarmStartSkippedForRepeatability;
@@ -791,7 +803,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
 				+ ngSetStatsSummary()
 				+ ngSetMembersSummary()
-				+ roundRouteRelationSummary();
+				+ roundRouteRelationSummary()
+				+ duplicateRepairSummary();
 	}
 
 	private String ngSetWarmStartSummary() {
@@ -865,11 +878,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrSetMembers");
 		ngDssrTraceRoundRouteRelation = Boolean.getBoolean("twet.bpc.ngDssrRoundRouteRelation")
 				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrRoundRouteRelation");
+		ngDssrDuplicateRepairDiagnostic = Boolean.getBoolean("twet.bpc.ngDssrDuplicateRepairDiagnostic")
+				|| Boolean.getBoolean("twet.bpc.fullDomainCompare.ngDssrDuplicateRepairDiagnostic");
 		ngDssrNgSetStatsByRound = ngDssrTraceNgSetStats ? new StringBuilder() : null;
 		ngDssrPreviousRoundNegativeRoutes = null;
 		ngDssrCurrentRoundNegativeRoutes = null;
 		ngDssrRoundAddedPairs = null;
 		ngDssrRoundRouteRelation = ngDssrTraceRoundRouteRelation ? new StringBuilder() : null;
+		ngDssrDuplicateRepairCandidates = null;
+		ngDssrDuplicateRepairSummary = ngDssrDuplicateRepairDiagnostic ? new StringBuilder() : null;
+		ngDssrDuplicateRepairEvaluatorCalls = 0L;
+		ngDssrDuplicateRepairNanos = 0L;
+		ngDssrDuplicateRepairAttempted = 0;
+		ngDssrDuplicateRepairFeasible = 0;
+		ngDssrDuplicateRepairNegative = 0;
+		ngDssrDuplicateRepairAdditional = 0;
 		ngDssrReusableCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
 		ngDssrReusablePricingWindowPrecomputeReady = false;
@@ -881,12 +904,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		for (ngDssrRound = 1; !this.timeLimitChecker.isTimeLimitReached(); ngDssrRound++) {
 			nonElementaryNegativeRoutes = new ArrayList<NonElementaryNegativeRoute>();
+			ngDssrDuplicateRepairCandidates = ngDssrDuplicateRepairDiagnostic
+					? new ArrayList<NonElementaryNegativeRoute>() : null;
 			ngDssrCurrentRoundNegativeRoutes = ngDssrTraceRoundRouteRelation
 					? new HashMap<SequenceSignature, NonElementaryNegativeRoute>() : null;
 			ngDssrRoundAddedPairs = ngDssrTraceRoundRouteRelation ? new ArrayList<String>() : null;
 			ngDssrRoundNonElementaryNegativeSeen = 0;
 			ngDssrRoundElementaryColumnsReturned = 0;
 			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
+			diagnoseDuplicateRepairs(lp);
 			ngDssrRoundsExecuted = ngDssrRound;
 			ngDssrRoundElementaryColumnsReturned = columns.size();
 			ngDssrTotalElementaryColumnsReturned += ngDssrRoundElementaryColumnsReturned;
@@ -1160,6 +1186,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return "";
 		}
 		return ", ngDssrRoundRouteRelation=" + ngDssrRoundRouteRelation.toString();
+	}
+
+	private String duplicateRepairSummary() {
+		if (!ngDssrDuplicateRepairDiagnostic || ngDssrDuplicateRepairSummary == null) {
+			return "";
+		}
+		return ", ngDssrDuplicateRepair attempted/feasible/negative/additional/evalCalls/ms="
+				+ ngDssrDuplicateRepairAttempted + "/" + ngDssrDuplicateRepairFeasible + "/"
+				+ ngDssrDuplicateRepairNegative + "/" + ngDssrDuplicateRepairAdditional + "/"
+				+ ngDssrDuplicateRepairEvaluatorCalls + "/"
+				+ String.format(Locale.US, "%.3f", ngDssrDuplicateRepairNanos / 1_000_000.0)
+				+ ", byRound=" + ngDssrDuplicateRepairSummary.toString();
 	}
 
 	private LabelQueueOrdering parseQueueOrdering(String value) {
@@ -5299,6 +5337,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		recordRoundNegativeRoute(sequence, inferredReducedCost);
+		rememberDuplicateRepairCandidate(sequence, inferredReducedCost);
 		ngDssrRoundNonElementaryNegativeSeen++;
 		int limit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
 		for (int i = 0; i < nonElementaryNegativeRoutes.size(); i++) {
@@ -5350,6 +5389,154 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrCurrentRoundNegativeRoutes.put(signature,
 					new NonElementaryNegativeRoute(sequence, reducedCost));
 		}
+	}
+
+	private void rememberDuplicateRepairCandidate(ArrayList<Integer> sequence, double reducedCost) {
+		if (ngDssrDuplicateRepairCandidates == null) {
+			return;
+		}
+		for (int i = 0; i < ngDssrDuplicateRepairCandidates.size(); i++) {
+			NonElementaryNegativeRoute existing = ngDssrDuplicateRepairCandidates.get(i);
+			if (existing.sequence.equals(sequence)) {
+				if (Utility.compareLt(reducedCost, existing.reducedCost)) {
+					ngDssrDuplicateRepairCandidates.set(i, new NonElementaryNegativeRoute(sequence, reducedCost));
+				}
+				return;
+			}
+		}
+		if (ngDssrDuplicateRepairCandidates.size() < DUPLICATE_REPAIR_DIAGNOSTIC_ROUTE_LIMIT) {
+			ngDssrDuplicateRepairCandidates.add(new NonElementaryNegativeRoute(sequence, reducedCost));
+			return;
+		}
+		int worstIndex = 0;
+		for (int i = 1; i < ngDssrDuplicateRepairCandidates.size(); i++) {
+			if (compareNonElementaryNegativeRoutes(ngDssrDuplicateRepairCandidates.get(worstIndex),
+					ngDssrDuplicateRepairCandidates.get(i)) < 0) {
+				worstIndex = i;
+			}
+		}
+		NonElementaryNegativeRoute worst = ngDssrDuplicateRepairCandidates.get(worstIndex);
+		if (compareDoubleAsc(reducedCost, worst.reducedCost) > 0) {
+			return;
+		}
+		NonElementaryNegativeRoute candidate = new NonElementaryNegativeRoute(sequence, reducedCost);
+		if (compareNonElementaryNegativeRoutes(candidate, worst) < 0) {
+			ngDssrDuplicateRepairCandidates.set(worstIndex, candidate);
+		}
+	}
+
+	/**
+	 * 2026-07-13: 只诊断“删除重复访问后能否得到负基本列”。每一步枚举可删除的重复 occurrence，
+	 * 用真实 evaluator 选择 reduced cost 最低的删法；结果不进入候选池，也不改变 ng-set。
+	 */
+	private void diagnoseDuplicateRepairs(LP lp) {
+		if (!ngDssrDuplicateRepairDiagnostic || ngDssrDuplicateRepairCandidates == null
+				|| ngDssrDuplicateRepairSummary == null) {
+			return;
+		}
+		long start = System.nanoTime();
+		Collections.sort(ngDssrDuplicateRepairCandidates, this::compareNonElementaryNegativeRoutes);
+		LP.PricingDualSnapshot trueDuals = lp.captureTruePricingDuals();
+		long callsBefore = ngDssrDuplicateRepairEvaluatorCalls;
+		int attempted = ngDssrDuplicateRepairCandidates.size();
+		int feasible = 0;
+		int negative = 0;
+		int additional = 0;
+		double bestOriginalRc = Double.POSITIVE_INFINITY;
+		double bestRepairRc = Double.POSITIVE_INFINITY;
+		HashSet<SequenceSignature> additionalSignatures = new HashSet<SequenceSignature>();
+		for (NonElementaryNegativeRoute route : ngDssrDuplicateRepairCandidates) {
+			bestOriginalRc = Math.min(bestOriginalRc, route.reducedCost);
+			DuplicateRepairResult repaired = greedilyRepairDuplicateVisits(route.sequence, lp, trueDuals);
+			if (repaired == null) {
+				continue;
+			}
+			feasible++;
+			bestRepairRc = Math.min(bestRepairRc, repaired.reducedCost);
+			if (!Utility.compareLt(repaired.reducedCost, REDUCED_COST_TOLERANCE)) {
+				continue;
+			}
+			negative++;
+			SequenceSignature signature = new SequenceSignature(repaired.sequence);
+			boolean alreadyGenerated = generatedCandidateBySignature != null
+					&& generatedCandidateBySignature.containsKey(signature);
+			if (!activeColumnSignatures.contains(signature) && !alreadyGenerated
+					&& additionalSignatures.add(signature)) {
+				additional++;
+			}
+		}
+		long elapsed = System.nanoTime() - start;
+		ngDssrDuplicateRepairNanos += elapsed;
+		ngDssrDuplicateRepairAttempted += attempted;
+		ngDssrDuplicateRepairFeasible += feasible;
+		ngDssrDuplicateRepairNegative += negative;
+		ngDssrDuplicateRepairAdditional += additional;
+		if (ngDssrDuplicateRepairSummary.length() > 0) {
+			ngDssrDuplicateRepairSummary.append(';');
+		}
+		ngDssrDuplicateRepairSummary.append('r').append(ngDssrRound)
+				.append("={try").append(attempted)
+				.append("/feas").append(feasible)
+				.append("/neg").append(negative)
+				.append("/add").append(additional)
+				.append("/eval").append(ngDssrDuplicateRepairEvaluatorCalls - callsBefore)
+				.append("/origRc").append(finiteOrNa(bestOriginalRc))
+				.append("/repairRc").append(finiteOrNa(bestRepairRc))
+				.append("/ms").append(String.format(Locale.US, "%.3f", elapsed / 1_000_000.0))
+				.append('}');
+	}
+
+	private DuplicateRepairResult greedilyRepairDuplicateVisits(ArrayList<Integer> sequence, LP lp,
+			LP.PricingDualSnapshot trueDuals) {
+		ArrayList<Integer> current = new ArrayList<Integer>(sequence);
+		double currentReducedCost = Double.POSITIVE_INFINITY;
+		while (!isElementarySequence(current)) {
+			int[] occurrences = new int[data.n + 1];
+			for (int job : current) {
+				if (job > 0 && job <= data.n) {
+					occurrences[job]++;
+				}
+			}
+			ArrayList<Integer> bestSequence = null;
+			double bestReducedCost = Double.POSITIVE_INFINITY;
+			for (int position = 0; position < current.size(); position++) {
+				int job = current.get(position).intValue();
+				if (job <= 0 || job > data.n || occurrences[job] <= 1) {
+					continue;
+				}
+				ArrayList<Integer> trial = new ArrayList<Integer>(current);
+				trial.remove(position);
+				if (!isSequenceCompatible(trial, lp.getNode())) {
+					continue;
+				}
+				double cost = evaluator.evaluate(trial);
+				ngDssrDuplicateRepairEvaluatorCalls++;
+				if (Utility.isBigMValue(cost)) {
+					continue;
+				}
+				double reducedCost = computeDiagnosticSequenceReducedCost(trial, cost, lp, trueDuals);
+				if (bestSequence == null || Utility.compareLt(reducedCost, bestReducedCost)) {
+					bestSequence = trial;
+					bestReducedCost = reducedCost;
+				}
+			}
+			if (bestSequence == null) {
+				return null;
+			}
+			current = bestSequence;
+			currentReducedCost = bestReducedCost;
+		}
+		return new DuplicateRepairResult(current, currentReducedCost);
+	}
+
+	private double computeDiagnosticSequenceReducedCost(ArrayList<Integer> sequence, double cost, LP lp,
+			LP.PricingDualSnapshot trueDuals) {
+		TWETColumn column = new TWETColumn(-1, sequence, data.n, cost, ColumnSource.PRICING_EXACT, false);
+		return lp.computeReducedCost(column, trueDuals);
+	}
+
+	private String finiteOrNa(double value) {
+		return Double.isFinite(value) ? Double.toString(value) : "NA";
 	}
 
 	private int compareNonElementaryNegativeRoutes(NonElementaryNegativeRoute left,
@@ -7248,6 +7435,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		NonElementaryNegativeRoute(ArrayList<Integer> sequence, double reducedCost) {
 			this.sequence = new ArrayList<Integer>(sequence);
+			this.reducedCost = reducedCost;
+		}
+	}
+
+	private static final class DuplicateRepairResult {
+		final ArrayList<Integer> sequence;
+		final double reducedCost;
+
+		DuplicateRepairResult(ArrayList<Integer> sequence, double reducedCost) {
+			this.sequence = sequence;
 			this.reducedCost = reducedCost;
 		}
 	}

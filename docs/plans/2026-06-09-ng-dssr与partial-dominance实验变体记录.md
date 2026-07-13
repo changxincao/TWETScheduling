@@ -2244,3 +2244,13 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 `wet021_001_2m` root A/B 在 completion bound 关闭时，旧/新均为 `obj=bound=6829`、`valid=true`，labels、DSSR rounds、join 和返回列统计逐项一致，exact 时间为 `0.209s -> 0.197s`。开启 `allCycles + scalar + arc fixing` 后，旧路径 forward/backward 分别枚举 `467/282` 个候选，再在出队阶段删除 `403/231` 个禁弧候选；新路径直接只枚举 `64/51` 个，最终 constructed、bound survivors、labels、3 轮 DSSR 和 `obj=bound=6829` 均一致。该小例单次 wall time 受 JVM/JIT 波动影响，不能据此宣称稳定端到端提速；确定减少的是每个被固定弧挡住的 label-job 组合上的循环、方法调用与集合查询。
 
 验证包括 focused Java 21 编译、`IncrementalSourcedDominanceGraphConsistencyTest`、`CompletionBoundPreparedBoundsCompatibilityTest`、`NgDssrSameNodeWarmStartTest`、no-SRI root A/B、completion-bound arc fixing root A/B 和最终 `git diff --check`，均通过。raw `(from,to,t)` 时空禁弧尚未接入本次掩码，仍按第 223 节作为独立优化处理，避免把整数时间区间查询与本次普通弧优化混在一起。
+
+225. 2026-07-13 child reachability 再次正确性复核
+
+本轮从控制流和数据生命周期重新审计第 224 节实现，未发现新的误剪或状态污染。普通弧掩码只与 `extensionSet` 取交集，不写入 `dominanceSet`；因此被禁止的当前 direct transition 不会被扩展，但该任务经过其它 terminal 后仍可重新进入 child 的 full-domain 可达集合。`PackedBitSet.andInPlace()` 只修改左侧新建的 child 集合，不会反向污染复用掩码。forward 的 earliest completion 和 backward 的 `rhoPrime` 与修改前 full/half 两次判断逐条件相同，区别仅是同一标量只计算一次。
+
+掩码生命周期也与 DSSR 一致：每次 `solve()` 开始清空，在 completion bound、effective window、zero-dual 排除和本轮 time-indexed window tightening 完成后才建立；同一 LP dual 下的后续 DSSR 轮只更新 ng-set，不改变 node branch/pricing-only 普通弧或 completion-bound fixed arc，因此可以复用。in-round time-indexed helper 写回的是 compact window 和 raw `(from,to,t)` 证据，不会在掩码建立后新增普通 `(i,j)` 禁弧。raw 时空弧本来就不属于旧 `canExtendForward/Backward()` 的检查口径，本轮没有遗漏旧语义。
+
+`extensionSet` 的其它生产消费者只有正反向扩展，`extensionCardinality` 只参与队列排序和统计，不进入 dominance key。提前删去旧流程最终必然由 `canExtend` 拒绝的弧，可能在 `TIME/REACHABLE_SIZE` 排序下改变等价 label 的处理先后，但队列仍完整耗尽，不能改变 exact certificate；达到外部 time limit 时列批次可能不同，属于中断搜索顺序差异，不是错误闭合。日志中的 `forward/backward candidates` 现在是 arc-mask 后候选，`arcPruned` 为 0 是预检查已经前移的结果，后续比较新旧日志时不能把两项直接按原口径相加。
+
+再次运行 focused Java 21 编译及 `IncrementalSourcedDominanceGraphConsistencyTest`（96,000 次插入）、`CompletionBoundPreparedBoundsCompatibilityTest`、`NgDssrSameNodeWarmStartTest`，全部通过。结合第 224 节 no-bound 与 completion-bound A/B，当前实现可以保留，不需要增加运行时防御检查。

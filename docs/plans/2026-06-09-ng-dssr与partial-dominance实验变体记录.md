@@ -2210,3 +2210,15 @@ Martinelli、Pecin 和 Poggi 的标准 ng-DSSR 描述与旧 VRP 实现一致。�
 completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断中 F/B 约占单次构造的 76.4%，U/R 重建约占 23.2%，snapshot 和 discrete cache 很小；同一 DSSR 内复用、多区间 delta 和时间优先队列均已启用。当前 sparse delta 仍以 BigM 填充未变化区间并构造完整 PWLF，下一项可能有明显收益的改造是原生 interval-list delta，只传播真实变化区间，避免 BigM 空洞 segment 的构造和 merge。但这是较大改动，必须逐 job、逐 PWLF 与现实现对拍，不能只比较最终 scalar minimum。此前 transition-only U/R 和 endpoint shortcut 均出现语义或端到端退化，说明 completion bound 不适合再做未经完整对拍的小捷径。
 
 其余方向暂不列为高优先级。bounded same-node warm 在 3-node 对比中把 exact 从 151.529 秒降到 140.672 秒，属于约 7% 的中等收益，但不能消除最终 no-negative certificate；固定 top3 与更新后存活 top3 在现有证据下大部分候选仍会存活，主要只能减少少量冗余 pair；join 当前只占 11.5%，继续做 sequence 去重、group 排序或改变阈值容易受半域 split 和列批次轨迹影响；Hasse 拓扑和 dominance insert 在最新代码下没有当前细分计时，若要继续优化扩展，应先开一次 `ngDssrExtensionTimingDiagnostics`，把 PWLF 构造、状态复制、dominance insert 和 queue 分开，再决定是否动图结构。当前建议顺序为：无 SRI 分配清理，父子 Tmid warm-start，O(1) extension pre-bound 只读统计，最后才考虑原生 interval delta completion bound。
+
+222. 2026-07-13 无 SRI 扩展状态分配清理与扩展路径复核
+
+本次先处理第 221 节中风险最低的无 SRI 高频分配。`GCNGBBStyleBidirectionalNgDssr` 原来在每次正反向扩展时都会为无 SRI 状态创建新的空 `byte[]`，并在 completion-bound survivor 物化成 label 时复制父 label 的 `visitedSet`。代码审计确认，当前 ng-DSSR 无 SRI join 的兼容性只读取 `ngMemorySet`，序列恢复只沿 father 链；`visitedSet` 的实际消费者是 SRI 扩展计数、SRI join 补偿及 SRI 诊断。因而无 SRI 下不再构造 `visitedSet`，所有空 SRI count 改为共享只读零长度数组；active SRI 下仍保留原来的逐 label visited copy 和 count clone，SRI 语义没有变化。
+
+该修改直接减少的是高频对象数，而不是改变 labeling 数学流程。历史 W300 细分日志的一次重 pricing 中，正反向共构造约 51.2 万个 extension candidate、约 6.64 万个 completion-bound survivor；旧实现对应会创建约 51.2 万个空 count 数组，并为约 6.64 万个 survivor 复制 visited bitset。小例 `wet021_001_2m` 在相同主线 smoke 下继续得到 `obj=bound=6829`、`valid=true`，总时间 1.104 秒，exact 0.232 秒/2 次。该小例对象量较少，不能用来宣称稳定 wall-time 提升，但证明 no-SRI 实际 pricing 链路可运行且结果口径不变。
+
+继续检查扩展实现后，剩余最明确的状态构造冗余位于 `buildForwardChildReachability()` 和 `buildBackwardChildReachability()`：每个存活 child 仍扫描全部 job，同时先调用 full-domain direct-feasibility，再对通过者调用 half-domain direct-feasibility；两次调用重复读取动态窗口并重复计算同一个 earliest completion 或 `rhoPrime`。这可以在后续独立改成每个 job 只算一次 full-domain 标量，再额外比较 `Tmid` 得到 extension bit，严格保持 dominanceSet/extensionSet 不变。当前没有合入该项，原因是它应单独 A/B；同时不能简单改成只遍历父 `dominanceSet`，因为 ng-memory 在转移时会遗忘不属于新 terminal 邻域的成员，父状态中被 memory 阻止的 job 可能在 child 重新可用。
+
+本轮还确认了几个不应误删的步骤。`ngMemory = parentMemory ∩ N(current) + current` 至少需要产生一个 child 独立 bitset；dominanceSet 与 extensionSet 分别服务 full-domain dominance key 和半域实际扩展，不能合并为同一集合；arc/pricing-only 检查只约束当前 direct transition，不能写入永久不可达 key。最新 source-aware dominance graph 的插入仍是扩展的重要成本，但已不再采用旧图的全历史 label 反复扫描口径，当前没有发现与本次 allocation cleanup 同等级的无条件冗余。
+
+验证包括 focused `javac`、`IncrementalSourcedDominanceGraphConsistencyTest`、`NgDssrSameNodeWarmStartTest`、`CompletionBoundPreparedBoundsCompatibilityTest`，以及上述 no-SRI root pricing smoke，均通过。一次误开 completion-bound 重诊断的长 smoke 已主动停止，未作为性能证据。

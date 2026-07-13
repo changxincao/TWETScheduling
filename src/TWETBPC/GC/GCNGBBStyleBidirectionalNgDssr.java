@@ -63,6 +63,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
 	private static final int DUPLICATE_REPAIR_DIAGNOSTIC_ROUTE_LIMIT = 10;
+	/** 无 SRI 时所有 label 共享空状态；该数组只读，避免每次扩展分配零长度数组。 */
+	private static final byte[] EMPTY_SRI_COUNTS = new byte[0];
 	private static final HashSet<Integer> FULL_MIDPOINT_DIAGNOSTIC_DONE = new HashSet<Integer>();
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
@@ -1766,11 +1768,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private byte[] emptySriCounts() {
-		return sriPricingEnabled ? new byte[sriCutIds.size()] : new byte[0];
+		return sriPricingEnabled ? new byte[sriCutIds.size()] : EMPTY_SRI_COUNTS;
 	}
 
 	private byte[] copySriCounts(byte[] counts) {
-		return counts == null || counts.length == 0 ? new byte[0] : counts.clone();
+		return counts == null || counts.length == 0 ? EMPTY_SRI_COUNTS : counts.clone();
 	}
 
 	/**
@@ -1870,9 +1872,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void initializeForwardSource(LP lp) {
-		PackedBitSet sourceVisited = new PackedBitSet(data.n + 2);
-		sourceVisited.add(0);
-		addZeroDualExcludedJobs(sourceVisited);
+		PackedBitSet sourceVisited = null;
+		if (sriPricingEnabled) {
+			sourceVisited = new PackedBitSet(data.n + 2);
+			sourceVisited.add(0);
+			addZeroDualExcludedJobs(sourceVisited);
+		}
 		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
@@ -2612,9 +2617,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void initializeBackwardSink(LP lp) {
-		PackedBitSet sinkVisited = new PackedBitSet(data.n + 2);
-		sinkVisited.add(lp.getNode().sinkId());
-		addZeroDualExcludedJobs(sinkVisited);
+		PackedBitSet sinkVisited = null;
+		if (sriPricingEnabled) {
+			sinkVisited = new PackedBitSet(data.n + 2);
+			sinkVisited.add(lp.getNode().sinkId());
+			addZeroDualExcludedJobs(sinkVisited);
+		}
 		PiecewiseLinearFunction sinkFrontier = new PiecewiseLinearFunction();
 		// 2026-05-23: backward 闂佹儳绻戠喊宥団偓姘懅缁辨帡宕奸姀鐘卞寲闂佸搫鐗滈崜婵嬫閳哄倻鈻曢柣鏃€妞垮ú锝夋偨?[Tmid,pricingHorizon] 闂佺绻愰崯顖炲汲閻旂厧绠叉い鏃囥€€閸?
 		// 闁哄鏅滈悷锕傛偋闁秴瑙﹂幖杈剧悼閺侀箖鏌ゅЧ鍥у姎鐟滄澘鍊块幃?shiftX闂佹寧绋戦鎼慽mToDomain 闂佹眹鍔岀€氼垳绮╅悢鍏煎仼閻忕偠濮ょ€氭煡鏌ｅ缁樻珖闁诡喖锕畷鈩冪節閸屾粌骞嶆繛鎴炴尨閸嬫捇鏌ら柨瀣殬闁?
@@ -2960,7 +2968,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			sriShift = applySriForwardExtensionShift(childSriCounts, label.visitedSet, label.jid, nextJob);
 			childSriPenalty = label.sriPenalty + sriShift;
 		} else {
-			childSriCounts = copySriCounts(label.sriCounts);
+			childSriCounts = EMPTY_SRI_COUNTS;
 			sriShift = 0.0;
 			childSriPenalty = label.sriPenalty;
 		}
@@ -3078,7 +3086,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					label.isSinkRoot ? node.sinkId() : label.jid);
 			childSriPenalty = label.sriPenalty + sriShift;
 		} else {
-			childSriCounts = copySriCounts(label.sriCounts);
+			childSriCounts = EMPTY_SRI_COUNTS;
 			sriShift = 0.0;
 			childSriPenalty = label.sriPenalty;
 		}
@@ -3105,8 +3113,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private ForwardLabel materializeForwardLabel(ForwardLabel parent, int nextJob, ExtensionFrontier candidate,
 			LP lp) {
 		long timingStart = extensionTimingStart();
-		PackedBitSet visited = parent.visitedSet.copy();
-		visited.add(nextJob);
+		PackedBitSet visited = null;
+		if (sriPricingEnabled) {
+			visited = parent.visitedSet.copy();
+			visited.add(nextJob);
+		}
 		PackedBitSet childNgMemory = updateNgMemory(parent.ngMemorySet, nextJob);
 		ChildReachability childSets = buildForwardChildReachability(nextJob, childNgMemory, lp.getNode(),
 				candidate.frontier);
@@ -3120,8 +3131,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private BackwardLabel materializeBackwardLabel(BackwardLabel parent, int prevJob, ExtensionFrontier candidate,
 			LP lp) {
 		long timingStart = extensionTimingStart();
-		PackedBitSet visited = parent.visitedSet.copy();
-		visited.add(prevJob);
+		PackedBitSet visited = null;
+		if (sriPricingEnabled) {
+			visited = parent.visitedSet.copy();
+			visited.add(prevJob);
+		}
 		PackedBitSet childNgMemory = updateNgMemory(parent.ngMemorySet, prevJob);
 		ChildReachability childSets = buildBackwardChildReachability(prevJob, childNgMemory, lp.getNode(),
 				candidate.frontier);
@@ -7836,7 +7850,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			this.ngMemorySet = ngMemorySet;
 			// 无 SRI 时保持 null；主 frontier 就是 no-SRI 口径，避免 partial 替换后残留旧 PWLF 别名。
 			this.noSriFrontier = noSriFrontier;
-			this.sriCounts = sriCounts == null ? new byte[0] : sriCounts;
+			this.sriCounts = sriCounts == null ? EMPTY_SRI_COUNTS : sriCounts;
 			this.sriPenalty = sriPenalty;
 			this.sriStateKey = buildSriStateKey(this.sriCounts);
 		}

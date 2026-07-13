@@ -500,6 +500,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			applyBoundedSameNodeWarmStart(lp);
 			return;
 		}
+		if ("perJobRepeatCost".equalsIgnoreCase(mode)) {
+			addPerJobRepeatCostNgNeighborhoods(lp, targetSize);
+			applyBoundedSameNodeWarmStart(lp);
+			return;
+		}
+		if ("nearestRepeatHybrid".equalsIgnoreCase(mode)) {
+			int nearestSize = Math.max(0, targetSize - 1);
+			for (int job = 1; job <= data.n; job++) {
+				addNearestJobsToNgNeighborhood(job, nearestSize);
+			}
+			addPerJobRepeatCostNgNeighborhoods(lp, targetSize);
+			applyBoundedSameNodeWarmStart(lp);
+			return;
+		}
 		if ("nearestK".equalsIgnoreCase(mode)) {
 			for (int job = 1; job <= data.n; job++) {
 				addNearestJobsToNgNeighborhood(job, targetSize);
@@ -616,6 +630,111 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				}
 			}
 		}
+	}
+
+	/**
+	 * 2026-07-13: 按 member -> center -> member 重复段的最小增量 reduced cost 选择每行成员。
+	 * 与只判断可行性的 pair 模式相比，这里同时计入重复段上的真实时间惩罚，避免优先选择
+	 * dual 较大但时间代价很高的长重复环。该分数只决定初始 ng-set，不参与定价证书。
+	 */
+	private void addPerJobRepeatCostNgNeighborhoods(final LP lp, int targetSize) {
+		if (targetSize <= 0) {
+			return;
+		}
+		Node node = lp == null ? null : lp.getNode();
+		boolean useExactTimeIndexedRepeatability = useExactTimeIndexedRepeatability(node);
+		for (int center = 1; center <= data.n; center++) {
+			ArrayList<NgPair> candidates = new ArrayList<NgPair>();
+			for (int member = 1; member <= data.n; member++) {
+				if (member == center || !isInitialNgMemberAllowed(member)) {
+					continue;
+				}
+				double repeatCost = repeatCycleReducedCost(lp, node, member, center,
+						useExactTimeIndexedRepeatability);
+				if (!Utility.isBigMValue(repeatCost)) {
+					candidates.add(new NgPair(center, member, repeatCost));
+				}
+			}
+			Collections.sort(candidates, new Comparator<NgPair>() {
+				@Override
+				public int compare(NgPair left, NgPair right) {
+					int byCost = compareDoubleAsc(left.reducedPairCost, right.reducedPairCost);
+					return byCost != 0 ? byCost : Integer.compare(left.second, right.second);
+				}
+			});
+			for (int i = 0; i < candidates.size()
+					&& ngNeighborhoodByJob[center].cardinality() < targetSize; i++) {
+				ngNeighborhoodByJob[center].add(candidates.get(i).second);
+			}
+		}
+	}
+
+	private double repeatCycleReducedCost(LP lp, Node node, int member, int center,
+			boolean useExactTimeIndexedRepeatability) {
+		if (PricingCompatibility.isRequiredOutsourcedJob(node, member)
+				|| PricingCompatibility.isRequiredOutsourcedJob(node, center)
+				|| isOrdinaryArcUnavailableForRepeatability(node, member, center)
+				|| isOrdinaryArcUnavailableForRepeatability(node, center, member)) {
+			return Utility.big_M;
+		}
+		double memberStart = effectiveJobHStart[member];
+		double memberEnd = effectiveJobHEnd[member];
+		if (Utility.compareGt(memberStart, memberEnd)) {
+			return Utility.big_M;
+		}
+		double fixedReducedCost = ngPairReducedCost(lp, member, center);
+		if (!useExactTimeIndexedRepeatability) {
+			double firstLeg = repeatabilityDuration(member, center);
+			double secondLeg = repeatabilityDuration(center, member);
+			double lower = Math.max(memberStart,
+					Math.max(effectiveJobHStart[center] - firstLeg,
+							memberStart - firstLeg - secondLeg));
+			double upper = Math.min(memberEnd,
+					Math.min(effectiveJobHEnd[center] - firstLeg,
+							memberEnd - firstLeg - secondLeg));
+			if (Utility.compareGt(lower, upper)) {
+				return Utility.big_M;
+			}
+			// 非整数实例只用于排序：分别取两个受限区间的最小惩罚，保持计算轻量。
+			double centerPenalty = data.penaltyFunction[center]
+					.findMinimalInRange(lower + firstLeg, upper + firstLeg);
+			double memberPenalty = data.penaltyFunction[member]
+					.findMinimalInRange(lower + firstLeg + secondLeg, upper + firstLeg + secondLeg);
+			return fixedReducedCost + centerPenalty + memberPenalty;
+		}
+
+		int start = discreteRepeatabilityStart(memberStart);
+		int end = discreteRepeatabilityEnd(memberEnd);
+		int firstLeg = discreteRepeatabilityDuration(member, center);
+		int secondLeg = discreteRepeatabilityDuration(center, member);
+		int firstStart = Math.max(start,
+				Math.max(discreteRepeatabilityStart(effectiveJobHStart[center]) - firstLeg,
+						discreteRepeatabilityStart(effectiveJobHStart[member]) - firstLeg - secondLeg));
+		int firstEnd = Math.min(end,
+				Math.min(discreteRepeatabilityEnd(effectiveJobHEnd[center]) - firstLeg,
+						discreteRepeatabilityEnd(effectiveJobHEnd[member]) - firstLeg - secondLeg));
+		double best = Utility.big_M;
+		for (int firstCompletion = firstStart; firstCompletion <= firstEnd; firstCompletion++) {
+			if (!isTimeIndexedRepeatabilityCompletionFeasible(member, firstCompletion)
+					|| isTimeIndexedRepeatabilityArcForbidden(node, member, center, firstCompletion)) {
+				continue;
+			}
+			int centerCompletion = firstCompletion + firstLeg;
+			if (!isTimeIndexedRepeatabilityCompletionFeasible(center, centerCompletion)
+					|| isTimeIndexedRepeatabilityArcForbidden(node, center, member, centerCompletion)) {
+				continue;
+			}
+			int secondMemberCompletion = centerCompletion + secondLeg;
+			if (!isTimeIndexedRepeatabilityCompletionFeasible(member, secondMemberCompletion)) {
+				continue;
+			}
+			double value = fixedReducedCost + data.penaltyFunction[center].evaluate(centerCompletion)
+					+ data.penaltyFunction[member].evaluate(secondMemberCompletion);
+			if (Utility.compareLt(value, best)) {
+				best = value;
+			}
+		}
+		return best;
 	}
 
 	private void addDualPairNgNeighborhoods(LP lp) {

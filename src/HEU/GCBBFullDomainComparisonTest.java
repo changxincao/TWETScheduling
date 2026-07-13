@@ -206,7 +206,9 @@ public class GCBBFullDomainComparisonTest {
 		if ("dualPair".equalsIgnoreCase(mode) || "reducedCostPair".equalsIgnoreCase(mode)) {
 			return "Coef" + config.ngDssrInitialNgPairCoefficient;
 		}
-		if (("nearestK".equalsIgnoreCase(mode) || "perJobFeasiblePair".equalsIgnoreCase(mode))
+		if (("nearestK".equalsIgnoreCase(mode) || "nearestRepeatHybrid".equalsIgnoreCase(mode)
+				|| "perJobFeasiblePair".equalsIgnoreCase(mode)
+				|| "perJobRepeatCost".equalsIgnoreCase(mode))
 				&& config.ngDssrInitialNgSetSize < 0) {
 			return "AutoN10";
 		}

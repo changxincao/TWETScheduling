@@ -2389,3 +2389,31 @@ update 强度的结构性结果比单次 wall time更稳定。对 K3/K5/K10/K20�
 负结果不是 pair-specific 检查本身太慢。21 次 exact 中 ng-set 初始化累计只有约 0.017s，远低于 labeling 时间。真正差异出现在 relaxed route 结构：新模式第一次 exact 看到约 108.9 万条 non-elementary negative witness，而 nearest 只有约 13.2 万条；新模式因此需要 2 轮 DSSR 才只返回 73 条基本列，nearest 第一轮直接返回 2834 条。后续新模式又出现大量每次只返回 1--16 条基本列的小批次，增加了 exact/RMP 往返。
 
 原因是当前 pair score 只使用 setup cost、job dual 和 arc dual；root 无 arc dual 时，它主要偏向高 job-dual 成员。pair-specific feasibility 只回答某个重复环是否存在，不衡量 setup time、processing time、时间惩罚以及该环实际有多容易产生负 reduced cost。结果是它可能选择“理论上可重复但时间很长”的高-dual pair，却漏掉 nearest 能直接覆盖的大量短重复环。由此当前不应把 per-job pair score 取代 nearest，也不值得继续只调 K。新模式保留为默认关闭的实验入口；若继续研究，需要构造具体 `member -> center -> member` 的时间相关盈利下界或把 setup duration 明确纳入 score，而不是继续使用二元可行性过滤。
+
+235. 2026-07-13 repeat-cost 与 nearest 混合初始化实验
+
+在 `perJobFeasiblePair` 的负结果基础上，新增两个默认关闭的实验模式。`perJobRepeatCost` 对每个 center 分别扫描可行的 `member -> center -> member`，把两条 setup cost、arc/job dual 与 center、第二次 member 的时间惩罚一起计入排序；整数实例逐时间点精确计算，非整数实例只用安全的区间最小值作排序，不参与定价证书。`nearestRepeatHybrid` 保留 nearest 作为主体，先选 `K-1` 个 nearest，再按上述 repeat-cost 补到 K；候选若已在 nearest 中会继续向后选，因此实际目标大小不减少。
+
+W300/50-3 的同口径 root-only 结果如下，全部得到 `bound=1726.014329, valid=true`。
+
+| 初始化 | solve | exact 时间/调用 | DSSR 总轮数/最大 | 更新 pair | 首次/累计基本列 | pool |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| nearest K5 | 105.440s | 58.071s / 11 | 19 / 6 | 334 | 2834 / 5064 | 9993 |
+| hybrid K4 | 72.120s | 40.563s / 9 | 20 / 8 | 436 | 961 / 2097 | 6958 |
+| hybrid K5 | 72.497s | 41.328s / 8 | 16 / 6 | 366 | 1512 / 4426 | 9296 |
+| hybrid K6 | 60.521s | 31.975s / 6 | 13 / 6 | 314 | 2953 / 3866 | 8733 |
+| nearest K6 | 62.070s | 31.667s / 6 | 11 / 6 | 186 | 3132 / 5583 | 10441 |
+| nearest K7 | 71.194s | 41.773s / 8 | 15 / 6 | 260 | 4349 / 8085 | 12991 |
+
+纯 `perJobRepeatCost K5` 的首轮 exact 与 `perJobFeasiblePair K5` 完全相同：都只产生 73 条基本列并看到 1,089,360 条 non-elementary witness，因此确认行为后停止了冗余完整运行。原因是 W300 的宽零惩罚区允许 center 和第二次 member 的惩罚同时取 0，repeat-cost 退化为原 pair reduced cost。K6 的 hybrid 和 nearest 都只需 6 次 exact，时间也几乎相同；主要收益来自总 K 从 5 增至 6，而不是 repeat 信号。K7 又开始退化，说明该实例的静态合适规模在 K6 附近。
+
+为确认时间惩罚真正参与排序时的表现，又在相同 setupR50 数据上使用原始单点 due date。全部结果为 `bound=32229, valid=true`。
+
+| 初始化 | solve | exact 时间/调用 | DSSR 总轮数/最大 | 更新 pair | 首次/累计基本列 | pool |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| nearest K6 | 28.239s | 4.364s / 10 | 18 / 5 | 38 | 204 / 508 | 8206 |
+| hybrid K6 | 25.798s | 3.684s / 6 | 12 / 5 | 27 | 219 / 424 | 8112 |
+| hybrid K5 | 49.339s | 9.395s / 11 | 18 / 4 | 50 | 60 / 366 | 8087 |
+| perJobRepeatCost K6 | 49.873s | 9.014s / 11 | 27 / 5 | 132 | 71 / 158 | 7900 |
+
+单点 due date 下 hybrid K6 比 nearest K6 少 4 次 exact，总时间降低约 8.6%，说明在时间惩罚有区分度时，用一个 repeat-cost 槽位替换 nearest 可能有价值。但纯 repeat-cost 仍明显偏弱，nearest 提供的局部结构不能被 pair 排序取代。当前结论是保留 nearest 作为默认主体，两个新模式继续默认关闭；50-job 的两组结果都支持继续批量验证 K6，但不足以据此把全局自动公式从 `floor(n/10)` 改成 `round(n/8)`。下一轮应在 40/60-job 和不同 setup/window 上统一比较 nearest `floor(n/10)`、nearest `round(n/8)` 与 hybrid `round(n/8)`。

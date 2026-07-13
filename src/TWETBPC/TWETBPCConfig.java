@@ -161,7 +161,7 @@ public class TWETBPCConfig {
 	public boolean useGCNGBBStyleNgDssrGraphPartialDominancePricing = false;
 	/** 2026-07-11: no-SRI ng-DSSR 默认使用增量 source-aware graph；false 仅用于旧 Paper 图回归 A/B。 */
 	public boolean useIncrementalSourcedDominanceGraph = true;
-	/** 2026-07-13: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/perJobFeasiblePair/dualPair/reducedCostPair。 */
+	/** 2026-07-13: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/nearestRepeatHybrid/perJobFeasiblePair/perJobRepeatCost/dualPair/reducedCostPair。 */
 	public String ngDssrInitialNgSetMode = "nearestK";
 	/**
 	 * 2026-07-13: nearestK 的目标大小，不含任务自身。负数表示自动取 floor(n/10)；
@@ -440,7 +440,7 @@ public class TWETBPCConfig {
 	public boolean nodeLocalHorizonImprovementUseCplex = true;
 	public boolean nodeLocalHorizonImprovementUseCp = true;
 
-	/** 解析 nearestK 的实际 K；显式固定值优先于默认的任务规模比例。 */
+	/** 解析按 job 初始化模式的实际 K；显式固定值优先于默认的任务规模比例。 */
 	public int resolveNgDssrInitialNgSetSize(int jobCount) {
 		return ngDssrInitialNgSetSize >= 0 ? ngDssrInitialNgSetSize : Math.max(0, jobCount) / 10;
 	}

@@ -2254,3 +2254,15 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 `extensionSet` 的其它生产消费者只有正反向扩展，`extensionCardinality` 只参与队列排序和统计，不进入 dominance key。提前删去旧流程最终必然由 `canExtend` 拒绝的弧，可能在 `TIME/REACHABLE_SIZE` 排序下改变等价 label 的处理先后，但队列仍完整耗尽，不能改变 exact certificate；达到外部 time limit 时列批次可能不同，属于中断搜索顺序差异，不是错误闭合。日志中的 `forward/backward candidates` 现在是 arc-mask 后候选，`arcPruned` 为 0 是预检查已经前移的结果，后续比较新旧日志时不能把两项直接按原口径相加。
 
 再次运行 focused Java 21 编译及 `IncrementalSourcedDominanceGraphConsistencyTest`（96,000 次插入）、`CompletionBoundPreparedBoundsCompatibilityTest`、`NgDssrSameNodeWarmStartTest`，全部通过。结合第 224 节 no-bound 与 completion-bound A/B，当前实现可以保留，不需要增加运行时防御检查。
+
+226. 2026-07-13 ng-DSSR pricing 再次热点审计与 join 位集相交优化
+
+本轮继续沿 initialization、forward/backward extension、source-aware dominance、DSSR 更新和 join 的正式调用链检查。当前 extension 的 dual、setup 和 processing-time 查询均为直接数组读取，JIT 可以内联；completion-bound survivor 之后才物化 label 和构造 child reachability，full/half 时间判定、普通禁弧 mask 以及 effective window 也已合并到一次扫描。对这些位置再增加 dense cache 或重复预判，没有明确收益。join 已有 terminal/group scalar bound、group envelope prefilter、label scalar break 和直接 min-sum，剩余最明确的无条件高频操作是每个候选 label pair 的 ng-memory 相交判断。
+
+旧实现从左侧 `PackedBitSet` 枚举每个 set bit，逐 job 检查 zero-dual 排除数组并调用右侧 `contains()`。现在改为在 exact 初始化时建立一次 join 排除 mask，其中固定包含 source bit 0，并在 dual profitable window 生效时加入全部 zero-dual job；每次 join 直接按 long word 计算 `left & right & ~ignored`。这与旧循环从 job 1 开始、忽略 zero-dual job 的语义逐项一致，不改变 ng-route 兼容性、group prefilter 或列恢复。60-job、两侧各约 6 个 memory 成员、2000 万次判断的 microbenchmark 中，旧逐 bit 实现约为 `421--502 ms`，新 word-mask 实现约为 `56--67 ms`，局部加速约 `6.3x--8.6x`。完整 exact 收益仍取决于进入集合检查的 pair 数，不能把局部倍数直接解释为总求解倍数。
+
+验证新增 `PackedBitSetIntersectionTest`，覆盖 bit 0、63/64、129、多 word、不同 universe 长度和排除 mask，并用固定随机种子对 200,000 组位集与旧逐 bit 参考实现对拍。focused 编译、source-aware dominance 96,000 次随机一致性测试、completion-bound prepared-bounds 兼容性测试和 same-node warm-start 测试均通过。
+
+同时试验了把 extension 的 `shiftX + add` 替换为已有 `PiecewiseLinearFunction.addShifted()`。随机 forward/backward、正负 shift 和 BigM 分段逐点对拍全部相等，但 20-segment、500,000 次操作的 microbenchmark 中，融合实现反而慢约 `9%--29%`；原因是它把原来两个较简单的线性扫描合并成了分支更多的同步区间遍历，减少临时函数没有抵消复杂控制流。该生产修改和临时测试已经完全撤回，不作为后续方向。
+
+当前没有发现第二个可以直接合入、与本次位集判断同等级的严格等价热点。下一项结构性潜力最大的是 50/60-job 场景的单 word 状态后端：`PackedBitSet` 目前即使只有一个 word，也会为每个集合分配一个对象和一个单元素 `long[]`；每个 label 又同时持有 ng-memory、dominance/extension 等多个集合。可以单独试验在 `n+2<=64` 时把首个 word 内联到对象，或实现专用 long-mask label/store，减少小数组、hash 和 GC；该改动会影响全部集合操作和 dominance key，必须独立随机对拍与端到端 A/B。group-first join 可以进一步减少当前 envelope prefilter 的 label-to-group identity lookup 和候选二次遍历，但会改变 pair 顺序以及达到列上限时的批次，属于实验策略而非无条件优化。completion bound 的原生 interval delta 仍可能处理 W300 的 initialization 成本，但历史 shortcut 已出现退化，继续修改必须逐 job、逐 PWLF 验证。

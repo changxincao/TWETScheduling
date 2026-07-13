@@ -116,6 +116,27 @@ public final class PackedBitSet {
 	}
 
 	/**
+	 * 判断两个位集在排除指定元素后是否仍有交集。
+	 * <p>
+	 * 2026-07-13: ng-DSSR join 需要忽略 source bit 和 dual window 人工写入 memory 的零 dual job。
+	 * 这里直接按 long word 做 {@code left & right & ~excluded}，避免每个 label pair
+	 * 逐 bit 枚举和重复 contains 查询。
+	 */
+	public boolean intersectsExcluding(PackedBitSet other, PackedBitSet excluded) {
+		int len = Math.min(words.length, other.words.length);
+		for (int i = 0; i < len; i++) {
+			long intersection = words[i] & other.words[i];
+			if (i < excluded.words.length) {
+				intersection &= ~excluded.words[i];
+			}
+			if (intersection != 0L) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * 原地取交集。
 	 * <p>
 	 * 主要用于后续把“时间可达集合”和“未访问集合”相交，得到当前 label 真正候选扩展点。

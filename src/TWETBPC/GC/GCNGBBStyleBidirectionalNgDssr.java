@@ -106,6 +106,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private HashMap<SequenceSignature, PricingColumnCandidate> generatedCandidateBySignature;
 	private HashSet<SequenceSignature> activeColumnSignatures;
 	private boolean[] zeroDualExcludedJobs;
+	/** join 时不计入 ng-memory 冲突的 source 与 zero-dual job。 */
+	private PackedBitSet joinMemoryIgnoredJobs;
 	private int zeroDualExcludedJobCount;
 	private int nextLabelId;
 	private int nextCandidateId;
@@ -5936,6 +5938,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionForwardPenaltyByJob = null;
 		completionBackwardPenaltyByJob = null;
 		zeroDualExcludedJobs = null;
+		joinMemoryIgnoredJobs = new PackedBitSet(data.n + 2);
+		joinMemoryIgnoredJobs.add(0);
 		zeroDualExcludedJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		precomputeEffectivePricingWindows(lp);
@@ -6439,6 +6443,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			double jobDual = Math.max(0.0, lp.getJobDual(job));
 			if (Utility.compareEq(jobDual, 0.0)) {
 				zeroDualExcludedJobs[job] = true;
+				joinMemoryIgnoredJobs.add(job);
 				zeroDualExcludedJobCount++;
 			}
 		}
@@ -6524,12 +6529,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean bitSetsIntersectForJoin(PackedBitSet left, PackedBitSet right) {
-		for (int job = left.nextSetBit(1); job >= 0; job = left.nextSetBit(job + 1)) {
-			if (!isZeroDualExcludedJob(job) && right.contains(job)) {
-				return true;
-			}
-		}
-		return false;
+		return left.intersectsExcluding(right, joinMemoryIgnoredJobs);
 	}
 
 	private boolean isForwardHalfEligibleJob(int job) {

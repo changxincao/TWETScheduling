@@ -2198,3 +2198,11 @@ multi-delta FIFO 也明显快于旧 FIFO，但时间优先继续降低了传播�
 当前 `ALL_CYCLES` completion bound 在状态松弛层面可以理解为“把所有 ng-neighborhood 设为空后的 pricing”。其动态规划状态只保留当前末任务和连续完成时间函数，不保存 `ngMemorySet`、真实 visited set 或 elementary 状态；转移只排除自环，并继续考虑 effective hard window、当前 dual、branch arc 和 pricing-only arc。因此任务离开以后可以再次访问，也允许形成二环及更长重复环。ng-DSSR 中若所有 `N_j` 为空，转移公式仍会把当前任务临时加入 memory，但到达下一个不同任务后该记忆就被清掉；由于自环本来已经禁止，这与 `ALL_CYCLES` completion bound 的可生成路径松弛等价。
 
 这里的“等价”只指允许的重复路径集合和 reduced-cost DP 松弛，不表示两段代码是同一个 pricing 实现。completion bound 只计算按 job 聚合的前缀/后缀 PWLF 下界，供扩展剪枝、拼接下界和 arc fixing 使用，不恢复列、不执行 DSSR、不做 elementary 校验，也不维护 ng-memory dominance。`TWO_CYCLE` completion bound 则额外保留上一条弧的二维状态并禁止立即回跳，等价于在空 ng-set 松弛上再加二环消除，不能再称为“所有 ng-set 为空”的原始 pricing。连续时间的 `ALL_CYCLES` completion bound 也可以看成 time-indexed `(lastJob,t)` 松弛最短路的 PWLF 版本。
+
+### 41.104 2026-07-13 是否用空 ng-set 单向 dominance pricing 构造 completion bound
+
+理论上可以这样得到同一个 `ALL_CYCLES` bound：关闭 ng-memory 和 DSSR，把单向 labeling 扩展到完整时间域并运行到队列完全闭合，然后对每个末任务上的全部存活 label frontier 取逐点下包络。前向结果对应包含当前任务成本的传播函数 `F_j`；反向再运行一次才能得到后缀侧 `B_j`。若消费者还需要当前实现用于拼接和 arc fixing 的 `U_j/R_j` 口径，还要按现有“不重复计算当前任务成本”的约定另外构造，不能只把一个 label envelope 直接当成完整 `Bounds`。
+
+该方案预计不会比当前 calculator 快。空 ng-set 并不保证每个 job 只有一个 dominance key：当前 `dominanceSet/reachableSet` 还取决于 label frontier 的时间定义域和由此可达的后续任务，越靠近 horizon 越容易形成不同子集。若保留这些 key，算法会生成 path label、位集、队列项和 dominance node，最后再把多个 envelope 合并，状态比当前按 job 立即聚合的 DP 更细；若在传播过程中直接把同一 job 的所有历史压成一个 PWLF 并只传播改善区间，则已经回到当前 `CompletionBoundCalculator` 的 `F_j <- min(F_j,candidate)` fixed-point 和 multi-delta 实现。对于没有历史记忆的 all-cycles 松弛，未来可行性只由当前 job、完成时间、窗口和 arc 决定，完整 PWLF 已经是充分状态，额外 dominance key 没有提供新的安全信息。
+
+当前一轮 ng-DSSR 看起来较快也不能直接作为该方案会更快的证据。正式 ng-DSSR 使用半域正反向扩展和 join，且其 ng-set 通常不为空；空 ng-set 的 full-domain 单向版本会重新允许大量循环，并且为了产生合法 completion certificate 必须覆盖所有 job/time、运行到 fixed point，不能在找到负列或 DSSR witness 后结束。若先完整生成 labels、最后才聚合，绝大部分成本已经发生；若提前聚合，则等价于现有 calculator。唯一值得单独实验的方向不是复用整套 dominance pricing，而是从 dominance 的实现中借用便宜的“候选无改善”预判，前提是该预判不扫描完整 PWLF；当前 multi-delta 已经在做更贴合该状态空间的局部改善传播，因此预期额外收益有限。

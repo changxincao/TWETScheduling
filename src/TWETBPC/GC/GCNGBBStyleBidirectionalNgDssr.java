@@ -495,6 +495,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			addDualPairNgNeighborhoods(lp);
 			return;
 		}
+		if ("perJobFeasiblePair".equalsIgnoreCase(mode)) {
+			addPerJobFeasiblePairNgNeighborhoods(lp, targetSize);
+			applyBoundedSameNodeWarmStart(lp);
+			return;
+		}
 		if ("nearestK".equalsIgnoreCase(mode)) {
 			for (int job = 1; job <= data.n; job++) {
 				addNearestJobsToNgNeighborhood(job, targetSize);
@@ -577,6 +582,42 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ data.getSetupCost(from, to) + data.getSetupCost(to, from);
 	}
 
+	/**
+	 * 每个 ng-set 行独立选择 K 个 pair reduced cost 最小的可行成员。
+	 * N_center 中的 member 用于阻止 member -> center -> member，因此时间可行性必须按这个方向检查。
+	 */
+	private void addPerJobFeasiblePairNgNeighborhoods(final LP lp, int targetSize) {
+		if (targetSize <= 0) {
+			return;
+		}
+		Node node = lp == null ? null : lp.getNode();
+		boolean useExactTimeIndexedRepeatability = useExactTimeIndexedRepeatability(node);
+		for (int center = 1; center <= data.n; center++) {
+			final int centerJob = center;
+			ArrayList<NgPair> candidates = new ArrayList<NgPair>();
+			for (int member = 1; member <= data.n; member++) {
+				if (member != centerJob && isInitialNgMemberAllowed(member)) {
+					candidates.add(new NgPair(centerJob, member, ngPairReducedCost(lp, centerJob, member)));
+				}
+			}
+			Collections.sort(candidates, new Comparator<NgPair>() {
+				@Override
+				public int compare(NgPair left, NgPair right) {
+					int byCost = compareDoubleAsc(left.reducedPairCost, right.reducedPairCost);
+					return byCost != 0 ? byCost : Integer.compare(left.second, right.second);
+				}
+			});
+			for (int i = 0; i < candidates.size()
+					&& ngNeighborhoodByJob[centerJob].cardinality() < targetSize; i++) {
+				int member = candidates.get(i).second;
+				if (canRepeatJobViaCurrentEffectiveWindow(node, member, centerJob,
+						useExactTimeIndexedRepeatability)) {
+					ngNeighborhoodByJob[centerJob].add(member);
+				}
+			}
+		}
+	}
+
 	private void addDualPairNgNeighborhoods(LP lp) {
 		int targetPairCount = Math.max(0, (int) (data.n * Math.max(0.0, config.ngDssrInitialNgPairCoefficient)));
 		if (targetPairCount <= 0) {
@@ -585,9 +626,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ArrayList<NgPair> pairs = new ArrayList<NgPair>();
 		for (int first = 1; first <= data.n; first++) {
 			for (int second = first + 1; second <= data.n; second++) {
-				double reducedPairCost = data.getSetupCost(first, second) - lp.getArcDual(first, second)
-						- lp.getJobDual(second)
-						+ data.getSetupCost(second, first) - lp.getArcDual(second, first) - lp.getJobDual(first);
+				double reducedPairCost = ngPairReducedCost(lp, first, second);
 				if (Utility.compareLt(reducedPairCost, REDUCED_COST_TOLERANCE)) {
 					pairs.add(new NgPair(first, second, reducedPairCost));
 				}
@@ -622,6 +661,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				selectedPairCount++;
 			}
 		}
+	}
+
+	private double ngPairReducedCost(LP lp, int first, int second) {
+		return data.getSetupCost(first, second) - lp.getArcDual(first, second) - lp.getJobDual(second)
+				+ data.getSetupCost(second, first) - lp.getArcDual(second, first) - lp.getJobDual(first);
 	}
 
 	private void prepareInitialRepeatabilityFilter(LP lp) {
@@ -674,54 +718,54 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (Utility.compareGt(jobStart, jobEnd)) {
 			return false;
 		}
-		if (useExactTimeIndexedRepeatability) {
-			return canRepeatJobByTimeIndexedPoints(node, job, jobStart, jobEnd);
-		}
 		for (int via = 1; via <= data.n; via++) {
-			if (via == job || PricingCompatibility.isRequiredOutsourcedJob(node, via)
-					|| isOrdinaryArcUnavailableForRepeatability(node, job, via)
-					|| isOrdinaryArcUnavailableForRepeatability(node, via, job)) {
-				continue;
-			}
-			if (canRepeatJobVia(job, via, jobStart, jobEnd)) {
+			if (canRepeatJobViaCurrentEffectiveWindow(node, job, via, useExactTimeIndexedRepeatability)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private boolean canRepeatJobByTimeIndexedPoints(Node node, int job, double jobStart, double jobEnd) {
+	private boolean canRepeatJobViaCurrentEffectiveWindow(Node node, int job, int via,
+			boolean useExactTimeIndexedRepeatability) {
+		if (via == job || PricingCompatibility.isRequiredOutsourcedJob(node, job)
+				|| PricingCompatibility.isRequiredOutsourcedJob(node, via)
+				|| isOrdinaryArcUnavailableForRepeatability(node, job, via)
+				|| isOrdinaryArcUnavailableForRepeatability(node, via, job)) {
+			return false;
+		}
+		double jobStart = effectiveJobHStart[job];
+		double jobEnd = effectiveJobHEnd[job];
+		if (Utility.compareGt(jobStart, jobEnd)) {
+			return false;
+		}
+		if (!useExactTimeIndexedRepeatability) {
+			return canRepeatJobVia(job, via, jobStart, jobEnd);
+		}
 		int start = discreteRepeatabilityStart(jobStart);
 		int end = discreteRepeatabilityEnd(jobEnd);
 		if (start > end) {
 			return false;
 		}
-		for (int via = 1; via <= data.n; via++) {
-			if (via == job || PricingCompatibility.isRequiredOutsourcedJob(node, via)
-					|| isOrdinaryArcUnavailableForRepeatability(node, job, via)
-					|| isOrdinaryArcUnavailableForRepeatability(node, via, job)) {
+		int firstLeg = discreteRepeatabilityDuration(job, via);
+		int secondLeg = discreteRepeatabilityDuration(via, job);
+		int firstStart = Math.max(start, Math.max(discreteRepeatabilityStart(effectiveJobHStart[via]) - firstLeg,
+				discreteRepeatabilityStart(effectiveJobHStart[job]) - firstLeg - secondLeg));
+		int firstEnd = Math.min(end, Math.min(discreteRepeatabilityEnd(effectiveJobHEnd[via]) - firstLeg,
+				discreteRepeatabilityEnd(effectiveJobHEnd[job]) - firstLeg - secondLeg));
+		for (int firstCompletion = firstStart; firstCompletion <= firstEnd; firstCompletion++) {
+			if (!isTimeIndexedRepeatabilityCompletionFeasible(job, firstCompletion)
+					|| isTimeIndexedRepeatabilityArcForbidden(node, job, via, firstCompletion)) {
 				continue;
 			}
-			int firstLeg = discreteRepeatabilityDuration(job, via);
-			int secondLeg = discreteRepeatabilityDuration(via, job);
-			int firstStart = Math.max(start, Math.max(discreteRepeatabilityStart(effectiveJobHStart[via]) - firstLeg,
-					discreteRepeatabilityStart(effectiveJobHStart[job]) - firstLeg - secondLeg));
-			int firstEnd = Math.min(end, Math.min(discreteRepeatabilityEnd(effectiveJobHEnd[via]) - firstLeg,
-					discreteRepeatabilityEnd(effectiveJobHEnd[job]) - firstLeg - secondLeg));
-			for (int firstCompletion = firstStart; firstCompletion <= firstEnd; firstCompletion++) {
-				if (!isTimeIndexedRepeatabilityCompletionFeasible(job, firstCompletion)
-						|| isTimeIndexedRepeatabilityArcForbidden(node, job, via, firstCompletion)) {
-					continue;
-				}
-				int viaCompletion = firstCompletion + firstLeg;
-				if (!isTimeIndexedRepeatabilityCompletionFeasible(via, viaCompletion)
-						|| isTimeIndexedRepeatabilityArcForbidden(node, via, job, viaCompletion)) {
-					continue;
-				}
-				int secondCompletion = viaCompletion + secondLeg;
-				if (isTimeIndexedRepeatabilityCompletionFeasible(job, secondCompletion)) {
-					return true;
-				}
+			int viaCompletion = firstCompletion + firstLeg;
+			if (!isTimeIndexedRepeatabilityCompletionFeasible(via, viaCompletion)
+					|| isTimeIndexedRepeatabilityArcForbidden(node, via, job, viaCompletion)) {
+				continue;
+			}
+			int secondCompletion = viaCompletion + secondLeg;
+			if (isTimeIndexedRepeatabilityCompletionFeasible(job, secondCompletion)) {
+				return true;
 			}
 		}
 		return false;

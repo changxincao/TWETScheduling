@@ -161,7 +161,7 @@ public class TWETBPCConfig {
 	public boolean useGCNGBBStyleNgDssrGraphPartialDominancePricing = false;
 	/** 2026-07-11: no-SRI ng-DSSR 默认使用增量 source-aware graph；false 仅用于旧 Paper 图回归 A/B。 */
 	public boolean useIncrementalSourcedDominanceGraph = true;
-	/** 2026-06-09: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/dualPair/reducedCostPair。 */
+	/** 2026-07-13: ng/DSSR 初始 ng-set 模式；可选 empty/nearestK/perJobFeasiblePair/dualPair/reducedCostPair。 */
 	public String ngDssrInitialNgSetMode = "nearestK";
 	/**
 	 * 2026-07-13: nearestK 的目标大小，不含任务自身。负数表示自动取 floor(n/10)；

@@ -2373,3 +2373,19 @@ update 强度的结构性结果比单次 wall time更稳定。对 K3/K5/K10/K20�
 代码复核还确认 `dualPair` 与 `reducedCostPair` 当前都调用同一个“按本轮 pair reduced cost 排序”的实现，只是为了兼容旧命令保留两个名称；重复运行 `reducedCostPair` 不会形成独立证据。当前 pair 分数只使用 setup cost、arc dual 和 job dual，不使用 setup time、处理时间以及具体的 `j -> k -> j` 时间可行性。若继续设计 pair 初始化，更合理的下一步是按每个中心 job 分别选 K 个 pair-score 最好的、且在 effective window 下可构成重复访问的邻居，而不是继续调全局 coefficient。
 
 当前实验优先采用 `nearest floor(n/10) + top10` 作为静态候选，其中代码只把 nearest 与动态 n/10 改为默认，top10 仍由实验配置显式打开；pair 模式保留为实验开关。`empty` 比已明显偏弱的 K1 和 dualPair 0.08 更松，本轮不再消耗一次完整 root 实验。上述结论目前只覆盖单个 W300 root，动态 n/10 是否适合作为全局默认仍需在 40/60 任务、较窄窗口和完整 BPC 树上批量复核。
+
+234. 2026-07-13 per-job feasible pair 初始化实验
+
+针对第 233 节提出的改进方向，新增独立实验模式 `perJobFeasiblePair`，不替换 nearest 和全局 dualPair。该模式对每个 ng-set 行独立选择最多 K 个成员，按当前 dual 下的 pair reduced cost 从小到大处理，并要求具体重复结构在当前 effective window、普通禁弧和 time-indexed 时空禁弧下可行。这里必须按真实 ng-memory 语义检查：`N_center` 中的成员 `member` 用于在到达 `center` 时记住旧的 `member`，因此对应的是 `member -> center -> member`，而不是反方向。整数实例使用逐时间点检查，其他实例使用连续 hull 检查。候选只做排序后按需检查，选满 K 即停止。
+
+在第 233 节完全相同的 W300/50-3 root-only 配置下，使用 `K=floor(50/10)=5` 和 top10 得到 `bound=1726.014329, valid=true`，说明该初始化仍保持 ng-DSSR 的正确闭合口径。但性能没有改善：`solve=193.778s`，exact 为 `124.510s/21 calls`，DSSR 共 53 轮、单次最多 9 轮，累计更新 640 个 pair；首次 exact 只返回 73 条基本列，累计返回 665 条，最终 pool 为 5629。对照结果如下。
+
+| 初始化 | solve | exact 时间/调用 | DSSR 总轮数/最大 | 更新 pair | 首次/累计基本列 | pool |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| nearest auto K5 | 105.440s | 58.071s / 11 | 19 / 6 | 334 | 2834 / 5064 | 9993 |
+| dualPair 0.5 | 121.031s | 63.893s / 16 | 42 / 10 | 706 | 189 / 752 | 5738 |
+| perJobFeasiblePair K5 | 193.778s | 124.510s / 21 | 53 / 9 | 640 | 73 / 665 | 5629 |
+
+负结果不是 pair-specific 检查本身太慢。21 次 exact 中 ng-set 初始化累计只有约 0.017s，远低于 labeling 时间。真正差异出现在 relaxed route 结构：新模式第一次 exact 看到约 108.9 万条 non-elementary negative witness，而 nearest 只有约 13.2 万条；新模式因此需要 2 轮 DSSR 才只返回 73 条基本列，nearest 第一轮直接返回 2834 条。后续新模式又出现大量每次只返回 1--16 条基本列的小批次，增加了 exact/RMP 往返。
+
+原因是当前 pair score 只使用 setup cost、job dual 和 arc dual；root 无 arc dual 时，它主要偏向高 job-dual 成员。pair-specific feasibility 只回答某个重复环是否存在，不衡量 setup time、processing time、时间惩罚以及该环实际有多容易产生负 reduced cost。结果是它可能选择“理论上可重复但时间很长”的高-dual pair，却漏掉 nearest 能直接覆盖的大量短重复环。由此当前不应把 per-job pair score 取代 nearest，也不值得继续只调 K。新模式保留为默认关闭的实验入口；若继续研究，需要构造具体 `member -> center -> member` 的时间相关盈利下界或把 setup duration 明确纳入 score，而不是继续使用二元可行性过滤。

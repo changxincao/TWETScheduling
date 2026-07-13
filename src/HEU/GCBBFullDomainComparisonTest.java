@@ -206,7 +206,8 @@ public class GCBBFullDomainComparisonTest {
 		if ("dualPair".equalsIgnoreCase(mode) || "reducedCostPair".equalsIgnoreCase(mode)) {
 			return "Coef" + config.ngDssrInitialNgPairCoefficient;
 		}
-		if ("nearestK".equalsIgnoreCase(mode) && config.ngDssrInitialNgSetSize < 0) {
+		if (("nearestK".equalsIgnoreCase(mode) || "perJobFeasiblePair".equalsIgnoreCase(mode))
+				&& config.ngDssrInitialNgSetSize < 0) {
 			return "AutoN10";
 		}
 		return Integer.toString(config.ngDssrInitialNgSetSize);

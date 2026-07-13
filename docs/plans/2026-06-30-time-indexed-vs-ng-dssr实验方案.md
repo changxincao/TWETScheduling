@@ -804,3 +804,34 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 重新对照 2026-06-30 的代码提交与 `tmp-compare-40x10-timegraph-nosri-900s-20260630` 日志后确认，该 run 已经包含 6 月 28 日完成的 top-candidate 过滤、按 sequence signature 去重和固定 top-K heap；它不会像 6 月 20 日早期版本那样，对大量通过筛选的 end state 逐条调用 `TWETColumnEvaluator`。当时 engine 从 graph reduced cost 反推路径对应的 objective cost，time-indexed exact 共 `816.875s/908` 次、平均约 `0.900s`，日志每轮典型为 `20--76` 万 states 和 `800--3000` 万 arc scans。因此该 run 的主要慢因确实是 horizon 约 `19249` 下反复扫描大离散图、经历 908 轮 pricing 并维护大列池，不是旧 evaluator 重算热点。
 
 该历史版本仍不与当前实现完全相同。其 root 多轮日志显示 `piWindow=enabled`，但当时尚未对最终选中的 dual-window 候选统一执行真实 sequence cost 回刷；当前版本只对最终 top-K 候选做 evaluator 回刷，并在 7 月 6 日优化了 evaluator，同时修正了 dual-window pseudo-schedule 与 certificate 边界。因此旧绝对时间不能直接当作当前版本基准，正式论文对比仍应重跑；但“大 horizon 使 time-indexed 图扫描和 pricing 轮数膨胀”的原因判断不依赖早期 evaluator 问题，仍然成立。
+
+### 2026-07-14：40-3 原尺度与直接十倍时间缩放对比
+
+1. 数据与实验口径
+
+本次从 `data/40-1/wet040_001.dat` 转换得到三机器实例 `data/40-3/wet040_001_3m.dat`，再将 processing time、due date 和完整 setup time 矩阵直接乘以 10，得到 `wet040_001_3m_timeX10.dat`；权重、机器数和 setup cost 口径不变，也没有加入随机扰动。因所有时间量同步放大，原实例任意固定 sequence 的目标值应严格放大 10 倍。
+
+实验中发现当前 strong branching 路径存在确定性正确性问题：原尺度最优三条 sequence 的成本为 `5373+5948+4337=15658`，用同一 evaluator 在十倍实例上重算得到 `53730+59480+43370=156580`，但 strong branching 开启时曾错误闭合到 `156590`。关闭 strong branching 后，同一 ng-DSSR 配置能够闭合到 `obj=bound=156580`。因此下表正式比较统一采用 `strong branching=false`；先前 strong-on 结果只保留作问题证据，不能混入方法性能比较。该 strong branching 丢失最优子树的问题尚未在本轮修复。
+
+还需注意，当前 runner 的 ALNS seed 由文件名参与哈希。原文件与 `_timeX10` 文件名不同，导致原尺度和十倍尺度的初始启发式列不完全一致，例如 time-indexed 初始 pool 分别为 `13` 和 `5`。因此节点轨迹和 incumbent 不能视为严格同随机种子；不过 root LP 下界仍从 `15611.75` 精确放大为 `156117.5`，time-indexed 图规模与定价耗时的变化仍可用于判断 horizon 敏感性。后续正式对比应将两个实例放在不同目录但使用相同文件名，或给 runner 增加显式固定 seed。
+
+2. 已完成和中止结果
+
+| 时间尺度 | 方法 | 状态 | obj/incumbent | bound | gap | solve/elapsed | nodes | pool | exact pricing |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 原尺度 | ng-DSSR，无 SRI | FINISHED | 15658 | 15658 | 0 | 107.928s | 169 | 68460 | 6.432s / 458 |
+| 原尺度 | time-indexed，无 SRI | FINISHED | 15658 | 15658 | 0 | 94.767s | 128 | 161935 | 53.050s / 2774 |
+| 原尺度 | time-indexed + SRI | FINISHED | 15658 | 15658 | 0 | 111.351s | 12 | 53006 | 10.484s / 832 |
+| 原尺度 | ng-DSSR + SRI | 主动中止 | 15658 | 15652.666667 | 0.0341% | 约 264.7s | 处理到 node 29 | 21459 | 未形成最终汇总 |
+| 十倍尺度 | ng-DSSR，无 SRI | FINISHED | 156580 | 156580 | 0 | 140.565s | 113 | 61867 | 26.353s / 289 |
+| 十倍尺度 | time-indexed，无 SRI | 主动中止 | 156580 | 156303.333333 | 0.1767% | 446.342s | 处理到 node 40 | 90433 | 未形成最终汇总 |
+
+原尺度 time-indexed 无 SRI 的 root bound 为 `15611.75`，root gap 为 `0.4035%`，root 约 `29.618s`，pool 为 `48641`，root 正值列 `16` 条，其中 `15` 条 elementary、`1` 条 non-elementary。加入 SRI 后 root bound 提高到 `15639.301208`，root gap 降到 `0.2277%`，节点数由 `128` 降到 `12`；但 root 时间增至 `61.506s`，cut/master LP 成本使总时间仍从 `94.767s` 增到 `111.351s`。
+
+十倍尺度 time-indexed 无 SRI 的 root bound 为 `156117.5`，root gap 为 `0.4734%`，root pool 增至 `63923`，正值列为 `20` 条，其中 `18` 条 elementary、`2` 条 non-elementary。图的 horizon 约为 `13849`，单轮 pricing 约扫描 `1700万--2100万` 条时空弧，常见单次耗时为 `0.25--1s`，部分节点累计 pricing 达 `5--27s`。它在 node 38、约 `433.964s` 时才找到正确 incumbent `156580`；运行到 `446.342s` 仍有 `31` 个排队节点和 `0.1767%` gap。相较原尺度在 `94.767s` 完整闭合，十倍尺度已超过 `4.7` 倍时间仍未完成，趋势已经足够明确，因此按讨论主动停止，没有继续运行十倍尺度的 time-indexed + SRI。
+
+3. 当前结论
+
+本次结果进一步支持已有判断：较小离散时间范围下，time-indexed 即使使用 relaxed/pseudo 列，也能依靠很便宜的图定价快速闭合；当 processing、due date 和 setup time 同步放大时，root gap 本身没有显著恶化，但状态数、时空弧扫描和后续节点的重复定价成本快速增长，整体性能明显退化。ng-DSSR 的 exact pricing 也由 `6.432s` 增到 `26.353s`，但总时间只从 `107.928s` 增到 `140.565s`，对时间尺度的敏感性明显低于 time-indexed。
+
+本轮不足也需要保留：ng-DSSR + SRI 原尺度未闭合，十倍尺度的两组 SRI 未运行；不同文件名造成 ALNS seed 不同；strong branching 仍存在可复现的错误剪枝。因此当前证据足以支持 horizon 敏感性结论，但还不能作为四种方法在严格统一随机口径下的最终论文表格。

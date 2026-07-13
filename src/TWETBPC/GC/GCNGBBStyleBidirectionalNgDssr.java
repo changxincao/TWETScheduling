@@ -115,6 +115,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
 	private CompletionBoundCalculator.Bounds completionBounds;
 	private boolean[][] completionBoundFixedArc;
+	/** 当前 exact solve 内可参与内部机器定价的 job。 */
+	private PackedBitSet reachabilityCandidateJobs;
+	/** 当前 exact solve 内固定的 forward 直接扩展弧掩码，避免每个 label 重复查询禁弧。 */
+	private PackedBitSet[] forwardExtensionArcMaskByFrom;
+	/** 当前 exact solve 内固定的 backward 直接扩展弧掩码，索引是 suffix 的第一个节点。 */
+	private PackedBitSet[] backwardExtensionArcMaskBySuccessor;
 	private double bestGeneratedReducedCost;
 	private double lastRelaxedRoundBestReducedCost;
 
@@ -897,6 +903,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrDuplicateRepairAdditional = 0;
 		ngDssrReusableCompletionBounds = null;
 		ngDssrReusableCompletionBoundFixedArc = null;
+		reachabilityCandidateJobs = null;
+		forwardExtensionArcMaskByFrom = null;
+		backwardExtensionArcMaskBySuccessor = null;
 		ngDssrReusablePricingWindowPrecomputeReady = false;
 		ngDssrReusablePricingHorizon = Double.NaN;
 		ngDssrReusableDynamicMinHStart = Double.NaN;
@@ -1414,6 +1423,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		exactInitializePreCertificateNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
+		ensureExtensionArcMasks(lp.getNode());
 		if (!tryReuseFirstRoundMidpointWithinDssr()) {
 			if (!tryUseStableFrozenMidpoint(lp)) {
 				runMidpointProbeIfEnabled(lp);
@@ -1882,10 +1892,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
 		PackedBitSet sourceNgMemory = new PackedBitSet(data.n + 2);
-		PackedBitSet sourceDominanceSet = buildForwardDominanceSet(0, sourceNgMemory, lp.getNode(), sourceFrontier);
-		PackedBitSet sourceExtensionSet = buildForwardExtensionSet(sourceDominanceSet, 0, sourceFrontier);
+		ChildReachability sourceSets = buildForwardChildReachability(0, sourceNgMemory, lp.getNode(), sourceFrontier);
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
-				sourceDominanceSet, sourceExtensionSet, sourceNgMemory, sourceFrontier,
+				sourceSets.dominanceSet, sourceSets.extensionSet, sourceNgMemory, sourceFrontier,
 				sriPricingEnabled ? sourceFrontier.copy() : null,
 				emptySriCounts(), 0.0);
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
@@ -2629,12 +2638,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sinkFrontier.resetDomain(tMid, pricingHorizon);
 		sinkFrontier.addSegment(tMid, pricingHorizon, 0.0, 0.0);
 		PackedBitSet sinkNgMemory = new PackedBitSet(data.n + 2);
-		PackedBitSet sinkDominanceSet = buildBackwardDominanceSet(lp.getNode().sinkId(), sinkNgMemory, lp.getNode(),
-				sinkFrontier);
-		PackedBitSet sinkExtensionSet = buildBackwardExtensionSet(sinkDominanceSet, lp.getNode().sinkId(), true,
-				sinkFrontier);
+		ChildReachability sinkSets = buildBackwardChildReachability(lp.getNode().sinkId(), sinkNgMemory,
+				lp.getNode(), sinkFrontier);
 		BackwardLabel sink = new BackwardLabel(nextLabelId++, lp.getNode().sinkId(), null, sinkVisited,
-				sinkDominanceSet, sinkExtensionSet, sinkNgMemory, sinkFrontier,
+				sinkSets.dominanceSet, sinkSets.extensionSet, sinkNgMemory, sinkFrontier,
 				sriPricingEnabled ? sinkFrontier.copy() : null, emptySriCounts(),
 				0.0, true);
 		BWUL.add(sink);
@@ -2656,18 +2663,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		diagnosticForwardPops++;
 		traceWatchedLabel("WATCH_F_POP", label);
 
-		Node node = lp.getNode();
 		for (int nextJob = label.extensionSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
 				nextJob = label.extensionSet.nextSetBit(nextJob + 1)) {
 			forwardExtensionCandidates++;
 			long timingStart = extensionTimingStart();
-			boolean canExtend = canExtendForward(label, nextJob, node);
-			recordForwardArcCheckNanos(timingStart);
-			if (!canExtend) {
-				forwardExtensionArcPruned++;
-				continue;
-			}
-			timingStart = extensionTimingStart();
 			ExtensionFrontier candidate = buildForwardExtensionFrontier(label, nextJob, lp);
 			recordForwardBuildNanos(timingStart);
 			if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.FORWARD))) {
@@ -2719,18 +2718,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		diagnosticBackwardPops++;
 		traceWatchedLabel("WATCH_B_POP", label);
 
-		Node node = lp.getNode();
 		for (int prevJob = label.extensionSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
 				prevJob = label.extensionSet.nextSetBit(prevJob + 1)) {
 			backwardExtensionCandidates++;
 			long timingStart = extensionTimingStart();
-			boolean canExtend = canExtendBackward(label, prevJob, node);
-			recordBackwardArcCheckNanos(timingStart);
-			if (!canExtend) {
-				backwardExtensionArcPruned++;
-				continue;
-			}
-			timingStart = extensionTimingStart();
 			ExtensionFrontier candidate = buildBackwardExtensionFrontier(label, prevJob, lp);
 			recordBackwardBuildNanos(timingStart);
 			if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.BACKWARD))) {
@@ -2770,34 +2761,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		diagnosticHeartbeat(lp, "backward.progress", false);
 	}
 
-	private boolean canExtendForward(ForwardLabel label, int nextJob, Node node) {
-		// 2026-06-10: 闁荤姴顑呴崯浼村极閵堝妫橀柣鐔告緲濞懷囨煛鐎ｎ偆鐓┑?extensionSet闂佹寧绋掔粙鎴︽偩閻樺樊鍟呴柤纰卞墰閻ュ懘鏌熼悜妯烘诞婵?ng-memory 闂佸憡绮岄張顒€顪冮崒鐐粹拻闁哄鍨电壕褰掓煕閳哄啫鏋嶇紒妤€顦靛畷锝夘敍濠靛洤娑ч梺缁樺姇缁犲秹鍩€?
-		// 闂佹椿浜為崰搴ㄦ偪?visited 婵炴垶鎸哥粔鍫曞极閵堝棛顩?ng-relaxation 闂佸湱顣介弲娑㈡儓瀹ュ棙浜ら柛銉ｅ妽婵垽鏌ㄥ☉妯肩劯闁革絽鎲″鍕吋閸曨剙搴婇梺鍛婃煛閳ь剝娅曢煬顒勬煙椤撴粌鐏╂い?route 闂佸憡鑹剧花鐓庮潩閿斿墽纾?DSSR 婵犮垼娉涚€氼噣骞冩繝鍥?
-		// 闂佺儵鏅濋ˉ鎰崲濞戞氨鐭夊ù锝囶焾琚ｆ繛鎾寸缁诲棛绮嬮崱姘ヤ汗闁规儳鍟块·?node/pricingOnly 闂佺粯顭堥崺鏍焵椤戣法绛忕紒杈ㄧ箖缁傛帒顓奸崨顔垮惈闂佸湱顣介弲娑㈡儓瀹ュ鍊烽柣鐔告緲缁侇噣鏌￠崘顓炵厫妞ゃ儱鎳樺濠氬Ψ閿濆倸浜?
-		return !isPricingArcForbidden(node, label.jid, nextJob);
-	}
-
-	private boolean canExtendBackward(BackwardLabel label, int prevJob, Node node) {
-		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
-		// 2026-06-10: backward 闂佸憡鑹鹃張顒勬偋闁秴鐭楁い蹇撴噽娴滐絽鈽?extensionSet闂佹寧绋掔粙鎾筹耿閿涘嫧鍋撻崷顓炰槐闁革絽鎲″鍕吋閸ャ劍娈?DSSR route 闂佽鍘归崹褰捤囬弻銉ヨЕ閹肩补妲呭Σ閬嶆煟閻愬弶顥撻柍?
-		// 闁哄鏅滈悷鈺呭闯閻戣棄纭€闁惧浚鍋呴ˇ褎淇婇鐔蜂壕闂?prevJob -> successor 闂佺儵鏅濋ˉ鎰崲濞戞﹩鍤曠憸婵堟濠靛鐒奸柛顭戝枛鐢?pricingOnly/闂佸憡甯掑Λ娆撳极椤斿墽鐭夊ù锝囶焾琚ｇ紓鍌欑劍濞叉繄鎹㈤崘顔肩闁宠桨鑳跺鏃堝级閳轰焦澶勯柟韬插€濇俊?
-		return !isPricingArcForbidden(node, prevJob, successor);
-	}
-
 	private long extensionTimingStart() {
 		return config.ngDssrExtensionTimingDiagnostics ? System.nanoTime() : 0L;
-	}
-
-	private void recordForwardArcCheckNanos(long start) {
-		if (start != 0L) {
-			forwardExtensionArcCheckNanos += System.nanoTime() - start;
-		}
-	}
-
-	private void recordBackwardArcCheckNanos(long start) {
-		if (start != 0L) {
-			backwardExtensionArcCheckNanos += System.nanoTime() - start;
-		}
 	}
 
 	private void recordForwardBuildNanos(long start) {
@@ -5029,6 +4994,46 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| isCompletionBoundArcFixed(fromJob, toJob);
 	}
 
+	/**
+	 * 2026-07-13: 一个 DSSR solve 内 node、pricing-only 禁弧和 completion-bound 固定弧保持不变，
+	 * 因而一次性编译成 BitSet。后续每个 label 只做一次按 word 取交集，不再逐弧查询多层集合。
+	 */
+	private void ensureExtensionArcMasks(Node node) {
+		if (forwardExtensionArcMaskByFrom != null && backwardExtensionArcMaskBySuccessor != null) {
+			return;
+		}
+		int universeSize = data.n + 2;
+		reachabilityCandidateJobs = new PackedBitSet(universeSize);
+		for (int job = 1; job <= data.n; job++) {
+			if (!isZeroDualExcludedJob(job) && !PricingCompatibility.isRequiredOutsourcedJob(node, job)) {
+				reachabilityCandidateJobs.add(job);
+			}
+		}
+		forwardExtensionArcMaskByFrom = new PackedBitSet[universeSize];
+		for (int fromJob = 0; fromJob <= data.n; fromJob++) {
+			PackedBitSet allowed = new PackedBitSet(universeSize);
+			for (int toJob = reachabilityCandidateJobs.nextSetBit(1); toJob > 0 && toJob <= data.n;
+					toJob = reachabilityCandidateJobs.nextSetBit(toJob + 1)) {
+				if (!isPricingArcForbidden(node, fromJob, toJob)) {
+					allowed.add(toJob);
+				}
+			}
+			forwardExtensionArcMaskByFrom[fromJob] = allowed;
+		}
+
+		backwardExtensionArcMaskBySuccessor = new PackedBitSet[universeSize];
+		for (int successor = 1; successor <= node.sinkId(); successor++) {
+			PackedBitSet allowed = new PackedBitSet(universeSize);
+			for (int fromJob = reachabilityCandidateJobs.nextSetBit(1); fromJob > 0 && fromJob <= data.n;
+					fromJob = reachabilityCandidateJobs.nextSetBit(fromJob + 1)) {
+				if (!isPricingArcForbidden(node, fromJob, successor)) {
+					allowed.add(fromJob);
+				}
+			}
+			backwardExtensionArcMaskBySuccessor[successor] = allowed;
+		}
+	}
+
 	private boolean ignorePricingOnlyArcsForNode(Node node) {
 		return node != null && config.debugIgnorePricingOnlyArcsAtNode >= 0
 				&& node.id == config.debugIgnorePricingOnlyArcsAtNode;
@@ -5791,26 +5796,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, true);
 	}
 
-	private boolean isDirectForwardExtensionTimeFeasibleFullDomain(PiecewiseLinearFunction frontier, int prevJob,
-			int nextJob) {
-		return isDirectForwardExtensionTimeFeasible(frontier, prevJob, nextJob, false);
-	}
-
 	private boolean isDirectForwardExtensionTimeFeasible(PiecewiseLinearFunction frontier, int prevJob, int nextJob,
 			boolean requireTmid) {
-		if (frontier == null || frontier.head == null) {
-			return false;
-		}
-		PiecewiseLinearFunction jobPenalty = getDynamicForwardJobPenalty(prevJob, nextJob);
-		if (jobPenalty == null) {
-			return false;
-		}
-		double hStart = getDynamicForwardHStart(prevJob, nextJob);
 		double hEnd = getDynamicForwardHEnd(prevJob, nextJob);
-		double earliestCompletion = Math.max(
-				frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob), hStart);
+		double earliestCompletion = earliestForwardExtensionCompletion(frontier, prevJob, nextJob);
 		return !Utility.compareGt(earliestCompletion, hEnd)
 				&& (!requireTmid || !Utility.compareGt(earliestCompletion, tMid));
+	}
+
+	/** 计算 forward 直接扩展的最早完工时间；full/half 可达性共用这一结果。 */
+	private double earliestForwardExtensionCompletion(PiecewiseLinearFunction frontier, int prevJob, int nextJob) {
+		if (frontier == null || frontier.head == null || getDynamicForwardJobPenalty(prevJob, nextJob) == null) {
+			return Double.POSITIVE_INFINITY;
+		}
+		double hStart = getDynamicForwardHStart(prevJob, nextJob);
+		return Math.max(frontier.head.start + data.getSetUp(prevJob, nextJob) + data.getProcessT(nextJob), hStart);
 	}
 
 	/**
@@ -5826,24 +5826,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, true);
 	}
 
-	private boolean isDirectBackwardExtensionTimeFeasibleFullDomain(int firstJob, boolean isSinkRoot,
-			PiecewiseLinearFunction frontier, int prevJob) {
-		return isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, prevJob, false);
-	}
-
 	private boolean isDirectBackwardExtensionTimeFeasible(int firstJob, boolean isSinkRoot,
 			PiecewiseLinearFunction frontier, int prevJob, boolean requireTmid) {
 		int successor = isSinkRoot ? data.n + 1 : firstJob;
-		double rhoPrime;
-		if (isSinkRoot) {
-			rhoPrime = getDynamicBackwardHEnd(prevJob, successor);
-		} else {
-			double delay = data.getSetUp(prevJob, firstJob) + data.getProcessT(firstJob);
-			rhoPrime = Math.min(frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
-		}
+		double rhoPrime = latestBackwardExtensionCompletion(firstJob, isSinkRoot, frontier, prevJob);
 		double hStart = getDynamicBackwardHStart(prevJob, successor);
 		double lower = requireTmid ? Math.max(tMid, hStart) : hStart;
 		return !Utility.compareLt(rhoPrime, lower);
+	}
+
+	/** 计算 backward 直接扩展可容纳的最晚完工时间；full/half 可达性共用这一结果。 */
+	private double latestBackwardExtensionCompletion(int firstJob, boolean isSinkRoot,
+			PiecewiseLinearFunction frontier, int prevJob) {
+		int successor = isSinkRoot ? data.n + 1 : firstJob;
+		if (isSinkRoot) {
+			return getDynamicBackwardHEnd(prevJob, successor);
+		}
+		double delay = data.getSetUp(prevJob, firstJob) + data.getProcessT(firstJob);
+		return Math.min(frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, successor));
 	}
 
 	private PackedBitSet updateNgMemory(PackedBitSet parentNgMemory, int currentJob) {
@@ -5860,18 +5860,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			PiecewiseLinearFunction frontier) {
 		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
-		for (int job = 1; job <= data.n; job++) {
-			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
-					|| ngMemory.contains(job)
-					|| !isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job);
-			if (unavailable) {
+		for (int job = reachabilityCandidateJobs.nextSetBit(1); job > 0 && job <= data.n;
+				job = reachabilityCandidateJobs.nextSetBit(job + 1)) {
+			if (ngMemory.contains(job)) {
+				continue;
+			}
+			double earliestCompletion = earliestForwardExtensionCompletion(frontier, fromJob, job);
+			if (Utility.compareGt(earliestCompletion, getDynamicForwardHEnd(fromJob, job))) {
 				continue;
 			}
 			dominanceSet.add(job);
-			if (isForwardHalfEligibleJob(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
+			if (isForwardHalfEligibleJob(job) && !Utility.compareGt(earliestCompletion, tMid)) {
 				extensionSet.add(job);
 			}
 		}
+		extensionSet.andInPlace(forwardExtensionArcMaskByFrom[fromJob]);
 		return new ChildReachability(dominanceSet, extensionSet);
 	}
 
@@ -5880,74 +5883,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
 		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
 		boolean isSinkRoot = firstJob == node.sinkId();
-		for (int job = 1; job <= data.n; job++) {
-			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
-					|| ngMemory.contains(job)
-					|| !isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job);
-			if (unavailable) {
+		int successor = isSinkRoot ? node.sinkId() : firstJob;
+		for (int job = reachabilityCandidateJobs.nextSetBit(1); job > 0 && job <= data.n;
+				job = reachabilityCandidateJobs.nextSetBit(job + 1)) {
+			if (ngMemory.contains(job)) {
+				continue;
+			}
+			double rhoPrime = latestBackwardExtensionCompletion(firstJob, isSinkRoot, frontier, job);
+			double hStart = getDynamicBackwardHStart(job, successor);
+			if (Utility.compareLt(rhoPrime, hStart)) {
 				continue;
 			}
 			dominanceSet.add(job);
-			if (isBackwardHalfEligibleJob(job)
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
+			if (isBackwardHalfEligibleJob(job) && !Utility.compareLt(rhoPrime, Math.max(tMid, hStart))) {
 				extensionSet.add(job);
 			}
 		}
+		extensionSet.andInPlace(backwardExtensionArcMaskBySuccessor[successor]);
 		return new ChildReachability(dominanceSet, extensionSet);
-	}
-
-	private PackedBitSet buildForwardDominanceSet(int fromJob, PackedBitSet ngMemory, Node node,
-			PiecewiseLinearFunction frontier) {
-		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
-		for (int job = 1; job <= data.n; job++) {
-			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
-					|| ngMemory.contains(job)
-					|| !isDirectForwardExtensionTimeFeasibleFullDomain(frontier, fromJob, job);
-			if (!unavailable) {
-				dominanceSet.add(job);
-			}
-		}
-		return dominanceSet;
-	}
-
-	private PackedBitSet buildForwardExtensionSet(PackedBitSet dominanceSet, int fromJob,
-			PiecewiseLinearFunction frontier) {
-		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
-		for (int job = dominanceSet.nextSetBit(1); job > 0 && job <= data.n;
-				job = dominanceSet.nextSetBit(job + 1)) {
-			if (isForwardHalfEligibleJob(job) && isDirectForwardExtensionTimeFeasible(frontier, fromJob, job)) {
-				extensionSet.add(job);
-			}
-		}
-		return extensionSet;
-	}
-
-	private PackedBitSet buildBackwardDominanceSet(int firstJob, PackedBitSet ngMemory, Node node,
-			PiecewiseLinearFunction frontier) {
-		PackedBitSet dominanceSet = new PackedBitSet(data.n + 2);
-		boolean isSinkRoot = firstJob == node.sinkId();
-		for (int job = 1; job <= data.n; job++) {
-			boolean unavailable = isZeroDualExcludedJob(job) || PricingCompatibility.isRequiredOutsourcedJob(node, job)
-					|| ngMemory.contains(job)
-					|| !isDirectBackwardExtensionTimeFeasibleFullDomain(firstJob, isSinkRoot, frontier, job);
-			if (!unavailable) {
-				dominanceSet.add(job);
-			}
-		}
-		return dominanceSet;
-	}
-
-	private PackedBitSet buildBackwardExtensionSet(PackedBitSet dominanceSet, int firstJob, boolean isSinkRoot,
-			PiecewiseLinearFunction frontier) {
-		PackedBitSet extensionSet = new PackedBitSet(data.n + 2);
-		for (int job = dominanceSet.nextSetBit(1); job > 0 && job <= data.n;
-				job = dominanceSet.nextSetBit(job + 1)) {
-			if (isBackwardHalfEligibleJob(job)
-					&& isDirectBackwardExtensionTimeFeasible(firstJob, isSinkRoot, frontier, job)) {
-				extensionSet.add(job);
-			}
-		}
-		return extensionSet;
 	}
 
 	private void precomputeDynamicPricingWindows(LP lp) {

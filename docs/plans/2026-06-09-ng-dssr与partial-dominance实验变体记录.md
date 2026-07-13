@@ -2222,3 +2222,25 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 本轮还确认了几个不应误删的步骤。`ngMemory = parentMemory ∩ N(current) + current` 至少需要产生一个 child 独立 bitset；dominanceSet 与 extensionSet 分别服务 full-domain dominance key 和半域实际扩展，不能合并为同一集合；arc/pricing-only 检查只约束当前 direct transition，不能写入永久不可达 key。最新 source-aware dominance graph 的插入仍是扩展的重要成本，但已不再采用旧图的全历史 label 反复扫描口径，当前没有发现与本次 allocation cleanup 同等级的无条件冗余。
 
 验证包括 focused `javac`、`IncrementalSourcedDominanceGraphConsistencyTest`、`NgDssrSameNodeWarmStartTest`、`CompletionBoundPreparedBoundsCompatibilityTest`，以及上述 no-SRI root pricing smoke，均通过。一次误开 completion-bound 重诊断的长 smoke 已主动停止，未作为性能证据。
+
+223. 2026-07-13 ng-DSSR label 集合更新逻辑复核
+
+当前 child label 的集合更新逻辑是正确的。先计算 `childNgMemory = parentNgMemory ∩ N(currentJob) + currentJob`，再扫描任务构造两个不同口径的集合：`dominanceSet` 表示完整定义域下当前可直接到达的任务，用作 dominance key；`extensionSet` 是其中同时满足当前半域条件的任务，真正用于后续扩展。两者都使用基础 hard window、当前允许的 dual window、node 继承的 time-indexed compact window以及本轮 helper 收紧后的 effective window；`pricingHorizon` 也已按 effective window 的最大右端点缩短。不存在单独的 `unreachableSet`，任务不在 `dominanceSet` 中即隐式表示当前状态下不可用，但其原因可能是 ng-memory、时间不可达、zero-dual 排除或 required outsourcing，不能把该补集当成永久不可达任务集。
+
+剩余最明确的严格等价优化仍是合并 full-domain 与 half-domain 时间判定。当前 forward 对同一任务重复计算 earliest completion，backward 重复计算 `rhoPrime`；可以每个任务只计算一次，再分别比较完整窗口边界和 `Tmid`，同时决定两个 bit。第二项低风险优化是预计算当前 pricing 的全局可用任务 mask 和普通 allowed-arc mask，并在构造 `extensionSet` 时直接排除 branch、pricing-only 与 completion-bound fixed arc，避免 label 出队后再由 `canExtendForward/Backward()` 做同一检查。普通禁弧不建议直接改变 `dominanceSet` 语义：它只禁止当前 direct transition，任务经过其它 terminal 后仍可能重新可达；即使同 terminal 下删去常量 bit 可能不改变偏序，也没有足够收益支持修改已经对拍过的 dominance key。
+
+不能用父 `dominanceSet` 增量生成 child。除了 ng-memory 会遗忘任务外，setup time 不保证三角不等式，父 terminal 直达某任务时间不可行，并不能推出经过另一个任务后仍不可行。因此 child 扫描候选任务的主体需要保留；可以只遍历预计算的全局 admissible mask，但不能只遍历父集合。`ngMemorySet` 当前通过一次 bitset copy-and-intersect 构造，在 50/60-job 实例上通常只有一个 machine word，已不是值得改写的数据结构热点。
+
+逻辑上还能更强的一项是整数实例下把 node 保存的 raw `(from,to,t)` time-indexed fixing 证据接入 `extensionSet`。安全做法不是逐时间调用 `contains`，而是在 `Node` 增加区间查询，依据当前存储的是 forbidden set 还是 allowed complement，用 `BitSet.nextSetBit/nextClearBit` 判断 label 的有限出发时间区间内是否至少存在一个允许时空弧；完全不存在时才删除该 direct extension。第一版应只收紧 `extensionSet`，不改变 `dominanceSet`，并仅用于精确整数时间实例。逐 segment 扫描 frontier 来做更精确的时间可行性预判暂不建议：此前类似 no-allocation prefilter 虽剪掉约 198 万/259 万候选，却使 exact 变慢约 16.1%，说明接近 PWLF 构造成本的预判没有端到端价值。
+
+按当前证据，实施优先级应为：先合并 full/half 标量计算；再预计算全局任务与普通 arc mask并收紧 `extensionSet`；最后单独 A/B raw time-indexed 区间查询。验收需要逐轮比较 `dominanceSet`、`extensionSet`、扩展候选数、返回列 signature/cost、DSSR rounds 和最终 bound，不能只看集合构造局部耗时。
+
+224. 2026-07-13 child reachability 与直接扩展禁弧预计算
+
+按第 223 节的前两项完成了严格等价优化。forward child 对每个候选任务只计算一次 earliest completion，再分别比较完整有效窗口右端点和 `Tmid`，同时决定 `dominanceSet` 与 `extensionSet`；backward 同理只计算一次 `rhoPrime`。source 与 sink 初始化也统一走同一套 child reachability 构造，不再分别扫描 dominance 与 extension 两遍。`ngMemory = parentMemory ∩ N(current) + current`、dominance key、PWLF 和 join 均未改变。
+
+当前 exact solve 内还会一次性预计算三类 BitSet：可参与内部机器定价的 job、每个 forward terminal 的允许后继、每个 backward successor 的允许前驱。弧掩码严格复用原 `isPricingArcForbidden()` 口径，包含 branch forbidden、pricing-only forbidden 和本次 completion-bound fixed arc；它只与 `extensionSet` 做按 word 交集，不修改 `dominanceSet`。这样保留了“当前 direct arc 被禁，但任务经过其它 terminal 后可能重新可达”的 dominance 语义，同时删除 label 出队后逐弧重复查询多层集合的操作。掩码在一次 DSSR solve 开始时清空、第一次需要 labeling 时建立，同一 dual 下的后续 DSSR 轮复用；若 completion-bound pre-certificate 已直接证明闭合，则不会建立无用掩码。
+
+`wet021_001_2m` root A/B 在 completion bound 关闭时，旧/新均为 `obj=bound=6829`、`valid=true`，labels、DSSR rounds、join 和返回列统计逐项一致，exact 时间为 `0.209s -> 0.197s`。开启 `allCycles + scalar + arc fixing` 后，旧路径 forward/backward 分别枚举 `467/282` 个候选，再在出队阶段删除 `403/231` 个禁弧候选；新路径直接只枚举 `64/51` 个，最终 constructed、bound survivors、labels、3 轮 DSSR 和 `obj=bound=6829` 均一致。该小例单次 wall time 受 JVM/JIT 波动影响，不能据此宣称稳定端到端提速；确定减少的是每个被固定弧挡住的 label-job 组合上的循环、方法调用与集合查询。
+
+验证包括 focused Java 21 编译、`IncrementalSourcedDominanceGraphConsistencyTest`、`CompletionBoundPreparedBoundsCompatibilityTest`、`NgDssrSameNodeWarmStartTest`、no-SRI root A/B、completion-bound arc fixing root A/B 和最终 `git diff --check`，均通过。raw `(from,to,t)` 时空禁弧尚未接入本次掩码，仍按第 223 节作为独立优化处理，避免把整数时间区间查询与本次普通弧优化混在一起。

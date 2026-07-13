@@ -2290,3 +2290,9 @@ completion bound 的剩余主要成本在 F/B sparse-delta 传播。已有诊断
 进一步在 `wet050_003_3m_setupR50 + W300` 做关闭 ALNS、关闭 strong branching 的确定性 root A/B，两组均得到 `bound=1726.014329`、`8870` 列、`7` 次 exact、`valid=true`；累计 forward/backward survivor 也完全相同，分别为 `487765/229234`。旧版 exact 为 `64.509s`，内联版为 `62.743s`，降低约 `2.74%`。分阶段日志中 forward 为 `23.620s -> 22.857s`，backward 为 `20.576s -> 18.045s`，join 为 `5.053s -> 4.491s`，但 initialization 存在反向波动；完整 solve 因启发式计时从 `21.135s` 波动到 `32.635s`，反而为 `111.545s -> 124.901s`，因此不能声称端到端稳定加速。当前结论是：该修改对目标分配热点有明确作用，对完整 no-SRI exact 是小幅正收益，保留实现合理，但收益远小于微基准倍数。
 
 正确性验证新增 100,000 组逐操作随机对拍，覆盖单 word、多 word、不同 universe 长度、边界 bit、容量异常、copy、集合运算、迭代、subset、equals/hashCode 和原地修改；原有 200,000 组相交测试、96,000 次 source-aware dominance 一致性、completion-bound prepared bounds 兼容性和 same-node warm-start 测试均通过。active SRI 仍回退旧 list dominance，本轮按要求不优化、不改动；其状态分组与 dominance 图接入以后单独研究，不能与本次 no-SRI 存储优化混在一起评价。
+
+229. 2026-07-13 单 word PackedBitSet 再次正确性审计
+
+本轮按旧数组后端的逐方法语义重新检查单 word、多 word和混合后端路径，重点覆盖固定 universe 截断、63/64 位边界、不同 word 长度的集合运算、迭代、subset、copy 及 `equals/hashCode`。当前 `wordCount()` 未改，因此 63 仍为单 word、64 仍按旧口径分配两个 word；混合后端运算也只在左侧集合已有容量内更新，与旧实现一致。进一步检查 dominance graph、single-point store 和 join envelope 的 `HashMap<PackedBitSet,...>` 调用，持久 key 均使用独立副本，未发现把后续会原地修改的 label 位集直接作为 map key 的情况。
+
+重新执行 focused Java 21 编译、200,000 组相交对拍、100,000 组全操作对拍、96,000 次 source-aware dominance 一致性、completion-bound prepared-bounds 兼容性和 same-node warm-start 测试，全部通过。当前未发现需要修正的 correctness finding；剩余风险只在于尚未运行 Maven 全项目测试，因为本机没有 `mvn`，不影响本次已覆盖的生产调用链结论。

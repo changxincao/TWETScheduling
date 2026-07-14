@@ -249,3 +249,13 @@ rank-1/SRI 路径还有更重的对象开销：每次 heuristic/exact solver 都
 本次复查补了两个边界。第一，节点没有时空 pricing-only 禁弧时，no-cut 和 rank-1 solver 现在直接令 lookup 为 `null`，热循环不再调用空 lookup；存在禁弧时仍使用只读 `BitSet[]` pair-index。第二，rank-1 反向处理弧显式检查当前 graph window。静态 penalty 表只按基础 hard window 缓存，不能依赖它代替本轮窗口判断；当前 active cut 会关闭 dual window，因此该遗漏通常不改变现有结果，但显式检查可保证以后 compact/dual window 接入时不会越界扩展。
 
 正确性复查还确认：等待 residual 只共享不修改，所有 processing/prepend 扩展仍先复制再更新；fixing cleanup 的倒序 suffix 标志在处理当前时刻前判断“严格更晚时间”，与旧二维 future-use 表口径一致；safe fixing 独立重算 forward/backward，没有复用口径不完整的 pricing 距离。focused `javac` 及 `TimeIndexedGraphOptimizationTest` 通过。当前未继续改动的性能点是每轮完整 state workspace 分配、rank-1 全时域 bucket 分配和候选堆失效条目积累，需先增加针对性统计后再决定是否实现。
+
+## 24. 2026-07-14 第二轮正确性与高效性复查
+
+本轮继续沿 no-cut、rank-1、root preprocessing 和时空禁弧写回四条实际路径复查。首先补齐整数网格边界：纯 time-indexed exact、rank-1 exact、paper reduced-cost arc fixing、普通弧 promotion 和 root preprocessing 现在都要求 `Data.isExactIntegerTimeInstance()`。非整数数据上的向外扩窗、processing/setup 向下离散只能构造放松图，不能用于 exact 闭合或永久 fixing/window 写回；ng-DSSR 内部原有的 relaxed scalar helper 仍保留其“只做下界、不写回”的独立口径。测试新增非整数 processing time 反例，确认两个 exact engine 均会明确拒绝。
+
+rank-1 backward labeling 还发现一个既有语义问题。反向 processing 弧 `previousJob -> currentJob` 中，`t` 是 `currentJob` 的真实完成时刻，因此必须检查 `currentJob` 在 `t` 可完成；但反推得到的 `previousTime=t-duration` 是离开 `previousJob`、开始 setup/processing 的当前时刻，不一定是 `previousJob` 的真实完成时刻。任务可以先完成、等待，再从该状态出发。旧代码对 `previousTime` 套用完整完成窗，可能误删需要等待的合法后缀。现在只要求该状态时刻不早于 `previousJob` 的最早可完成时间，不再套用完成窗上界；反向等待也在低于最早可完成时间前停止，避免把修复后的状态继续传播到正向绝不可能到达的时间。
+
+同时把 `currentJob` 的完成可行性从 `previousJob` 循环内提到 bucket 外，每个 `(currentJob,t)` 只计算一次。静态 duration/penalty 缓存测试由 1000 个随机点改为完整遍历全部普通弧和全部 job-time 点，窗口内值、窗口外 INF 语义均逐项对拍。等待回溯、稀疏/allowed-complement 时空禁弧查询、静态缓存和非整数拒绝测试全部通过。
+
+完整 root smoke 中，no-cut 得到 `bound=22487.647059`、`exact=3.303s/213 calls`、`valid=true`。rank-1 修复前后均为 `bound=22524.931818`、307 次 pricing、47715 条新增列、92 条 cut；exact 为 `39.300s` 和 `36.526s`。列数、cut 数和 bound 完全一致，说明本算例没有触发旧等待边界的结果差异；约 7% 时间差只能视为单次波动或小幅收益，不能据此声称稳定加速。当前剩余结构成本主要是每轮完整 state/bucket workspace 分配、rank-1 label/dominance 数量和 `O(n^2H)` processing arc 扫描；候选堆失效项在现有日志中规模很小，暂不增加重建逻辑。

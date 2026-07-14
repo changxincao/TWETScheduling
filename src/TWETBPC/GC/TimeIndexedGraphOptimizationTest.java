@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Random;
 
 import Basic.Data;
+import Common.Utility;
+import TWETBPC.TWETBPCConfig;
 import TWETBPC.LP.Node;
 
 /**
@@ -21,6 +23,7 @@ public final class TimeIndexedGraphOptimizationTest {
 		testCompressedPredecessorMatchesFullWaitingChain();
 		testTimeIndexedArcLookupMatchesNode();
 		testStaticPricingDataMatchesInstance();
+		testExactPricingRejectsNonIntegerGrid();
 		System.out.println("TimeIndexedGraphOptimizationTest passed");
 	}
 
@@ -93,23 +96,52 @@ public final class TimeIndexedGraphOptimizationTest {
 		Data data = loadData();
 		TimeIndexedGraphPricingEngine.StaticPricingData pricingData =
 				new TimeIndexedGraphPricingEngine.StaticPricingData(data);
-		Random random = new Random(42L);
 		int horizon = pricingData.penaltyByJobTime[0].length - 1;
-		for (int sample = 0; sample < 1000; sample++) {
-			int from = random.nextInt(data.n + 1);
-			int to = 1 + random.nextInt(data.n);
-			int expectedDuration = (int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
-			if (pricingData.durationByArc[from][to] != expectedDuration) {
-				throw new AssertionError("duration cache mismatch");
+		for (int from = 0; from <= data.n; from++) {
+			for (int to = 1; to <= data.n; to++) {
+				int expectedDuration =
+						(int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
+				if (pricingData.durationByArc[from][to] != expectedDuration) {
+					throw new AssertionError("duration cache mismatch");
+				}
 			}
-			int time = random.nextInt(horizon + 1);
-			if (time >= data.hardWindowStart[to] && time <= data.hardWindowEnd[to]) {
-				double expected = data.penaltyFunction[to].evaluate(time);
-				double actual = pricingData.penaltyByJobTime[to][time];
-				if (Math.abs(expected - actual) > 1e-8 * Math.max(1.0, Math.abs(expected))) {
+		}
+		for (int job = 1; job <= data.n; job++) {
+			for (int time = 0; time <= horizon; time++) {
+				double expected = data.penaltyFunction[job].evaluate(time);
+				double actual = pricingData.penaltyByJobTime[job][time];
+				boolean feasible = time >= data.hardWindowStart[job] && time <= data.hardWindowEnd[job]
+						&& !Utility.isBigMValue(expected);
+				if (!feasible) {
+					if (actual < 5e99) {
+						throw new AssertionError("penalty cache accepted an infeasible completion");
+					}
+				} else if (Math.abs(expected - actual) > 1e-8 * Math.max(1.0, Math.abs(expected))) {
 					throw new AssertionError("penalty cache mismatch");
 				}
 			}
+		}
+	}
+
+	private static void testExactPricingRejectsNonIntegerGrid() throws Exception {
+		Data data = loadData();
+		data.p[1] += 0.5;
+		data.setPenaltyFunctions();
+		if (data.isExactIntegerTimeInstance()) {
+			throw new AssertionError("fractional processing time was not detected");
+		}
+		TWETBPCConfig config = new TWETBPCConfig();
+		try {
+			new TimeIndexedGraphPricingEngine(data, config);
+			throw new AssertionError("no-cut exact pricing accepted a non-integer grid");
+		} catch (IllegalArgumentException expected) {
+			// expected
+		}
+		try {
+			new TimeIndexedGraphRank1CutPricingEngine(data, config);
+			throw new AssertionError("rank-1 exact pricing accepted a non-integer grid");
+		} catch (IllegalArgumentException expected) {
+			// expected
 		}
 	}
 

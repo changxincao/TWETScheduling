@@ -41,6 +41,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	public TimeIndexedGraphRank1CutPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
+		if (!data.isExactIntegerTimeInstance()) {
+			throw new IllegalArgumentException("Time-indexed rank-1 pricing requires an integer-time instance");
+		}
 		this.staticPricingData = new TimeIndexedGraphPricingEngine.StaticPricingData(data);
 		this.noCutDelegate = new TimeIndexedGraphPricingEngine(data, config, false, staticPricingData);
 		this.evaluator = new TWETColumnEvaluator(data);
@@ -294,12 +297,18 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					if (bucket == null || bucket.isEmpty()) {
 						continue;
 					}
+					// penalty 表按基础 hard window 缓存；处理弧仍需显式遵守本轮 graph window。
+					boolean currentCompletionFeasible = isCompletionFeasible(currentJob, t);
 					for (int labelIndex = 0; labelIndex < bucket.size(); labelIndex++) {
 						Label label = bucket.get(labelIndex);
 						relaxedLabels++;
-						if (t > tStar && !isTimeIndexedArcForbidden(currentJob, currentJob, t - 1)) {
+						if (t > tStar && canReachBackwardState(currentJob, t - 1)
+								&& !isTimeIndexedArcForbidden(currentJob, currentJob, t - 1)) {
 							insertLabel(backwardBuckets, label.extend(nextLabelId++, currentJob, t - 1, 0.0,
 									label.residual, 0));
+						}
+						if (!currentCompletionFeasible) {
+							continue;
 						}
 						for (int previousJob = 0; previousJob <= n; previousJob++) {
 							if (previousJob == currentJob || processArcForbidden[previousJob][currentJob]) {
@@ -314,10 +323,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 								timeIndexedArcSkips++;
 								continue;
 							}
-							// 2026-07-14: penalty 表按基础 hard window 缓存；反向扩展仍需显式遵守本轮 graph window。
-							if (!isCompletionFeasible(currentJob, t)) {
-								continue;
-							}
 							double arcCost = processArcReducedCost(previousJob, currentJob, t);
 							if (!isFinite(arcCost)) {
 								continue;
@@ -326,7 +331,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 							arcCost += cutStateData.applyBackwardPrepend(residual, previousJob, currentJob);
 							if (previousJob == 0) {
 								rememberBackwardCompleteCandidate(label, arcCost);
-							} else if (previousTime >= tStar && isCompletionFeasible(previousJob, previousTime)) {
+							} else if (previousTime >= tStar && canReachBackwardState(previousJob, previousTime)) {
 								insertLabel(backwardBuckets, label.extend(nextLabelId++, previousJob, previousTime,
 										arcCost, residual, previousJob));
 							}
@@ -518,6 +523,14 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					&& !Utility.compareLt(completion, graphWindow.start[job])
 					&& !Utility.compareGt(completion, graphWindow.end[job])
 					&& isFinite(penaltyByJobTime[job][completion]);
+		}
+
+		/**
+		 * 反向状态的 time 是当前时刻，不一定是 lastJob 的完成时刻。任务可以先完成后等待，
+		 * 因此这里只能用最早完成时间排除从正向绝不可能到达的状态，不能套用完成窗上界。
+		 */
+		private boolean canReachBackwardState(int job, int time) {
+			return time >= 0 && time <= horizon && !Utility.compareLt(time, graphWindow.start[job]);
 		}
 
 		private boolean isEndAllowed(int lastJob, int time) {

@@ -40,6 +40,10 @@ final class TimeIndexedRootPreprocessor {
 		if (!shouldRun(config)) {
 			return Result.skipped("disabled or incompatible main pricing");
 		}
+		// 非整数时间图是放松网格，不能作为 exact root 或永久 fixing/window 写回依据。
+		if (!data.isExactIntegerTimeInstance()) {
+			return Result.skipped("non-integer time instance");
+		}
 		if (root == null || root.depth != 0) {
 			return Result.skipped("missing root node");
 		}

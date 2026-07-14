@@ -38,6 +38,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 	public TimeIndexedGraphPricingEngine(Data data, TWETBPCConfig config) {
 		this(data, config, false, new StaticPricingData(data));
+		if (!data.isExactIntegerTimeInstance()) {
+			throw new IllegalArgumentException("Time-indexed exact pricing requires an integer-time instance");
+		}
 	}
 
 	TimeIndexedGraphPricingEngine(Data data, TWETBPCConfig config, boolean preHeuristicMode,
@@ -163,7 +166,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	 * time-indexed graph window used by the preprocessing LP.
 	 */
 	public static int promoteFullyForbiddenTimeIndexedArcsToPricingOnly(Data data, LP graphLp, Node targetNode) {
-		if (data == null || graphLp == null || targetNode == null) {
+		if (data == null || graphLp == null || targetNode == null || !data.isExactIntegerTimeInstance()) {
 			return 0;
 		}
 		GraphWindow window = computeSafeFixingGraphWindow(data, graphLp);
@@ -264,6 +267,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			double incumbentCost) {
 		if (!config.useTimeIndexedGraphPricing) {
 			return ArcFixingResult.skipped("time-indexed graph pricing disabled");
+		}
+		if (!data.isExactIntegerTimeInstance()) {
+			return ArcFixingResult.skipped("non-integer time instance");
 		}
 		if (lp == null || lp.getNode() == null || lp.getLastSolution() == null) {
 			return ArcFixingResult.skipped("missing LP solution");

@@ -1,5 +1,7 @@
 package TWETBPC.GC;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
@@ -9,7 +11,11 @@ import java.util.Random;
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.LP.CutPool;
+import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
+import TWETBPC.LP.OutsourcingPool;
+import TWETBPC.LP.Pool;
 
 /**
  * 2026-07-14: time-indexed 热路径等价性回归测试，不依赖求解器。
@@ -24,6 +30,7 @@ public final class TimeIndexedGraphOptimizationTest {
 		testTimeIndexedArcLookupMatchesNode();
 		testStaticPricingDataMatchesInstance();
 		testExactPricingRejectsNonIntegerGrid();
+		testCompactWindowConsumptionBoundaries();
 		System.out.println("TimeIndexedGraphOptimizationTest passed");
 	}
 
@@ -152,6 +159,60 @@ public final class TimeIndexedGraphOptimizationTest {
 			throw new AssertionError("rank-1 exact pricing accepted a non-integer grid");
 		} catch (IllegalArgumentException expected) {
 			// expected
+		}
+	}
+
+	/**
+	 * 2026-07-14: compact hull 只供 pre-heuristic/fixing 等受限入口使用；正式 exact 图
+	 * 必须继续按 hard window 和精确时空禁弧构造，不能再次把 job hull 套到 exact horizon 上。
+	 */
+	private static void testCompactWindowConsumptionBoundaries() throws Exception {
+		Data data = loadData();
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.enableTimeIndexedGraphDualWindow = false;
+		config.useTimeIndexedGraphPricing = true;
+		config.enableTimeIndexedPreHeuristicPricing = true;
+		config.maxExactPricingColumns = 0;
+		config.timeIndexedGraphMaxExactPricingColumns = 0;
+		config.timeIndexedPreHeuristicColumnLimit = 0;
+
+		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		int compactHorizon = 0;
+		int hardHorizon = 0;
+		for (int job = 1; job <= data.n; job++) {
+			int compactTime = Math.max(0, (int) Math.ceil(data.hardWindowStart[job] - 1e-9));
+			node.tightenTimeIndexedPricingWindow(job, compactTime, compactTime);
+			compactHorizon = Math.max(compactHorizon, compactTime);
+			hardHorizon = Math.max(hardHorizon,
+					(int) Math.ceil(Math.min(data.CmaxH, data.hardWindowEnd[job]) - 1e-9));
+		}
+		if (compactHorizon >= hardHorizon) {
+			throw new AssertionError("test instance does not distinguish compact and hard horizons");
+		}
+
+		LP lp = new LP(data, new Pool(data), new CutPool(), config, new OutsourcingPool(data));
+		lp.construct(node, node.seedColumnIds);
+		String exactMessage = new TimeIndexedGraphPricingEngine(data, config).price(lp).getMessage();
+		String preHeuristicMessage = TimeIndexedGraphPricingEngine.preHeuristic(data, config).price(lp).getMessage();
+		assertMessageHorizon("formal no-cut exact", exactMessage, hardHorizon);
+		assertMessageHorizon("time-indexed pre-heuristic", preHeuristicMessage, compactHorizon);
+
+		TimeIndexedGraphRank1CutPricingEngine rank1 = new TimeIndexedGraphRank1CutPricingEngine(data, config);
+		Method computeGraphWindow = TimeIndexedGraphRank1CutPricingEngine.class
+				.getDeclaredMethod("computeGraphWindow", Data.class, LP.class);
+		computeGraphWindow.setAccessible(true);
+		Object rank1Window = computeGraphWindow.invoke(rank1, data, lp);
+		Field horizon = rank1Window.getClass().getDeclaredField("horizon");
+		horizon.setAccessible(true);
+		if (horizon.getInt(rank1Window) != hardHorizon) {
+			throw new AssertionError("rank-1 exact consumed compact horizon: " + horizon.getInt(rank1Window)
+					+ " != " + hardHorizon);
+		}
+	}
+
+	private static void assertMessageHorizon(String label, String message, int expectedHorizon) {
+		if (message == null || !message.contains("horizon=" + expectedHorizon + ",")) {
+			throw new AssertionError(label + " used unexpected graph window: " + message);
 		}
 	}
 

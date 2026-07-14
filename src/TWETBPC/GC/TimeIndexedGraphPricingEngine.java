@@ -336,7 +336,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.processArcForbidden = new boolean[n + 1][n + 1];
 			this.endForbidden = new boolean[n + 1];
 			this.timeIndexedArcLookup = shouldUsePricingOnlyArcs()
-					? node.createTimeIndexedPricingOnlyArcLookup() : null;
+					&& node.countTimeIndexedPricingOnlyForbiddenArcs() > 0
+							? node.createTimeIndexedPricingOnlyArcLookup() : null;
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());

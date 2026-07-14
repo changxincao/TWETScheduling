@@ -241,3 +241,11 @@ rank-1/SRI 路径还有更重的对象开销：每次 heuristic/exact solver 都
 新旧源码使用同一 runner、同一实例和同一配置做 root-only A/B。no-cut 下两版均得到 `bound=22487.647059`、`pool=41876`、200 次 exact；exact 从 `5.986632s` 降到 `3.235468s`，约减少 `46.0%`，总时间从 `16.059715s` 降到 `12.461871s`，约减少 `22.4%`。active rank-1 cut 下两版均得到 `bound=22498.300000`、`pool=42405`、234 次 exact；exact 从 `26.143850s` 降到 `20.912776s`，约减少 `20.0%`，总时间从 `48.384326s` 降到 `41.451140s`，约减少 `14.3%`。
 
 两轮 graph fixing 的新旧固定数量完全一致。第一轮均为 `candidates=3,484,221`、`fixed=200,594`、`unavailable=98,686`，fixing 时间由约 `846ms` 降到 `685ms`；第二轮均只新增固定 40 条弧，新版单次时间受小样本波动反而由约 `994ms` 增至 `1212ms`，因此不能声称 cleanup 在每个小轮次都更快。当前可靠结论是：列、bound、fixed arc 数均未变化，主要收益来自等待回溯压缩、空禁弧查询快路径、静态表复用和取消 forward clone；大 horizon 下固有的 `O(n^2H)` 图扫描仍然存在。
+
+## 23. 2026-07-14 等待回溯压缩复查与边界收紧
+
+旧实现中，每个 `(lastJob,t)` 状态都记录上一时空状态；等待弧的 `addedJob=0`，恢复序列时仍要逐个经过等待状态再跳过。新实现没有删除等待状态，也没有改变 `dist`、处理弧、完工时间或 reduced cost，只把等待目标的回溯记录设为来源状态最近一次真正加入任务的记录。对处理弧仍记录当前来源状态和新增任务。因此任意状态恢复出的 job sequence 与旧实现相同，区别只是等待链不再出现在父链中。20,000 个随机状态逐状态对拍和约 20,000 层长等待链测试均通过；长等待链的恢复步数由约 20,000 降为 2。rank-1 正反向 label 使用相同语义：等待不改变任务序列或 residual，处理/prepend 才增加父链层级。
+
+本次复查补了两个边界。第一，节点没有时空 pricing-only 禁弧时，no-cut 和 rank-1 solver 现在直接令 lookup 为 `null`，热循环不再调用空 lookup；存在禁弧时仍使用只读 `BitSet[]` pair-index。第二，rank-1 反向处理弧显式检查当前 graph window。静态 penalty 表只按基础 hard window 缓存，不能依赖它代替本轮窗口判断；当前 active cut 会关闭 dual window，因此该遗漏通常不改变现有结果，但显式检查可保证以后 compact/dual window 接入时不会越界扩展。
+
+正确性复查还确认：等待 residual 只共享不修改，所有 processing/prepend 扩展仍先复制再更新；fixing cleanup 的倒序 suffix 标志在处理当前时刻前判断“严格更晚时间”，与旧二维 future-use 表口径一致；safe fixing 独立重算 forward/backward，没有复用口径不完整的 pricing 距离。focused `javac` 及 `TimeIndexedGraphOptimizationTest` 通过。当前未继续改动的性能点是每轮完整 state workspace 分配、rank-1 全时域 bucket 分配和候选堆失效条目积累，需先增加针对性统计后再决定是否实现。

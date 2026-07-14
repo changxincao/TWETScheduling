@@ -159,7 +159,8 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.processArcForbidden = new boolean[n + 1][n + 1];
 			this.endForbidden = new boolean[n + 1];
 			this.timeIndexedArcLookup = shouldUsePricingOnlyArcs()
-					? node.createTimeIndexedPricingOnlyArcLookup() : null;
+					&& node.countTimeIndexedPricingOnlyForbiddenArcs() > 0
+							? node.createTimeIndexedPricingOnlyArcLookup() : null;
 			this.cutStateData = new CutStateData(lp);
 			this.forwardBuckets = new ArrayList[(n + 1) * width];
 			this.backwardBuckets = new ArrayList[(n + 1) * width];
@@ -311,6 +312,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 							}
 							if (isTimeIndexedArcForbidden(previousJob, currentJob, previousTime)) {
 								timeIndexedArcSkips++;
+								continue;
+							}
+							// 2026-07-14: penalty 表按基础 hard window 缓存；反向扩展仍需显式遵守本轮 graph window。
+							if (!isCompletionFeasible(currentJob, t)) {
 								continue;
 							}
 							double arcCost = processArcReducedCost(previousJob, currentJob, t);

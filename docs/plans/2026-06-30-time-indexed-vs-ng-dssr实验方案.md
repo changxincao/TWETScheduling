@@ -861,3 +861,7 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 | time-indexed + SRI | 315.723s | 7 | 156354.545455 | 0.3222% | 241.782s | 91.183s / 395 | 109.537s / 355 | 68188 | 130.772s / 616 |
 
 SRI 的作用是明确的：root gap 降低约 `0.1512` 个百分点，节点由 `25` 降到 `7`，最终列池也减少约 `14.6%`。但它没有降低 root 的 time-indexed pricing 总时间，反而使 root LP 时间由 `45.426s` 增至 `91.183s`，root 总时间增加约 `64.3s`；最终总时间增加 `76.917s`，即慢约 `32.2%`。因此在该十倍 horizon 的 40-3 实例上，rank-1 cuts 能明显强化搜索树，但当前 cut-loop 和带 cut RMP 的额外成本仍大于节点缩减收益。实验日志分别为 `tmp-40m3-x10-ti-goodcfg-nosri-20260714` 和 `tmp-40m3-x10-ti-goodcfg-sri-20260714`。
+
+当前无 SRI 的 `238.806s` 不能直接与前述 `446.342s` 中止记录解释为“同配置自然波动”。旧 run 同时关闭了 strong branching、lightweight repair，并误将永久 `timeIndexedCompletionBoundArcFixing` 关闭；其子节点日志一直是 `timeWindowJobs=0`，运行到 node 40 仍有 31 个排队节点。当前 run 修复 strong repair 后使用 strong branching，并在 root 闭合后把时空 arc fixing/compact window 传给子节点，最终只处理 25 个节点。因此提速来自搜索树和子节点图同时缩小，现有数据不能把收益单独分摊给 strong branching 或永久 fixing。
+
+同一十倍实例已有两条有效 ng-DSSR 结果。关闭 strong branching 时为 `140.565s/113 nodes`，是目前最快的有效记录；strong repair 修复后开启 strong branching为 `173.493s/17 nodes`，`exact=11.827s/57`、`heuristic=29.250s/183`、`master LP=24.064s`、`pool=50145`，同样得到 `obj=bound=156580, valid=true`。强分支虽然把节点压到 17 个，但 trial 成本没有被节点缩减抵消。因此按总时间，本例 ng-DSSR 仍快于当前 time-indexed：无 strong 的最好记录快约 `41.1%`，strong-on 的同口径记录快约 `27.3%`。

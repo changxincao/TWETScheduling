@@ -849,4 +849,15 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 
 本次结果进一步支持已有判断：较小离散时间范围下，time-indexed 即使使用 relaxed/pseudo 列，也能依靠很便宜的图定价快速闭合；当 processing、due date 和 setup time 同步放大时，root gap 本身没有显著恶化，但状态数、时空弧扫描和后续节点的重复定价成本快速增长，整体性能明显退化。ng-DSSR 的 exact pricing 也由 `6.432s` 增到 `26.353s`，但总时间只从 `107.928s` 增到 `140.565s`，对时间尺度的敏感性明显低于 time-indexed。
 
-本轮不足也需要保留：ng-DSSR + SRI 原尺度未闭合，十倍尺度的两组 SRI 未运行；不同文件名造成 ALNS seed 不同；strong branching 仍存在可复现的错误剪枝。因此当前证据足以支持 horizon 敏感性结论，但还不能作为四种方法在严格统一随机口径下的最终论文表格。
+上述原始实验轮次的不足也需要保留：ng-DSSR + SRI 原尺度未闭合，十倍尺度的两组 SRI 未运行；不同文件名造成 ALNS seed 不同；当时 strong branching 仍存在可复现的错误剪枝。因此该轮证据足以支持 horizon 敏感性结论，但不能直接作为四种方法在严格统一随机口径下的最终论文表格。strong repair 后续已修复，修复后的十倍 time-indexed 对照见下节。
+
+#### Strong repair 修复后的十倍 time-indexed ±SRI 对照
+
+前述 strong branching 错误修复后，重新按当前有效配置完整求解十倍实例。两组都开启 ALNS seed、two-stage strong branching、lightweight repair、dual-bound pruning、永久 time-indexed arc fixing 和 cut-loop fixing，关闭旧 HeuristicPricing、RMIH、route enumeration、每轮 scalar/window helper 及 in-round fixing；SRI 组仅额外开启 `TimeIndexedGraphRank1CutPricing` 和 time-indexed subset-row cuts。两组均得到 `obj=bound=156580`、`valid=true`。
+
+| 方法 | solve | nodes | root bound | root gap | root total | root LP | root pricing | final pool | final exact |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| time-indexed，无 SRI | 238.806s | 25 | 156117.500000 | 0.4734% | 177.498s | 45.426s / 297 | 109.417s / 257 | 79885 | 126.175s / 639 |
+| time-indexed + SRI | 315.723s | 7 | 156354.545455 | 0.3222% | 241.782s | 91.183s / 395 | 109.537s / 355 | 68188 | 130.772s / 616 |
+
+SRI 的作用是明确的：root gap 降低约 `0.1512` 个百分点，节点由 `25` 降到 `7`，最终列池也减少约 `14.6%`。但它没有降低 root 的 time-indexed pricing 总时间，反而使 root LP 时间由 `45.426s` 增至 `91.183s`，root 总时间增加约 `64.3s`；最终总时间增加 `76.917s`，即慢约 `32.2%`。因此在该十倍 horizon 的 40-3 实例上，rank-1 cuts 能明显强化搜索树，但当前 cut-loop 和带 cut RMP 的额外成本仍大于节点缩减收益。实验日志分别为 `tmp-40m3-x10-ti-goodcfg-nosri-20260714` 和 `tmp-40m3-x10-ti-goodcfg-sri-20260714`。

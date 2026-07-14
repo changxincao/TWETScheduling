@@ -548,9 +548,15 @@ public final class TimeIndexedScalarCompletionBound {
 				}
 				for (int labelIndex = 0; labelIndex < labels.size(); labelIndex++) {
 					SriLabel label = labels.get(labelIndex);
-					if (t > 0 && !isTimeIndexedArcForbidden(current, current, t - 1)) {
+					if (t > 0 && canReachBackwardState(current, t - 1)
+							&& !isTimeIndexedArcForbidden(current, current, t - 1)) {
 						insertSriLabel(buckets, sri, new SriLabel(current, t - 1, label.reducedCost,
 								sri.copyResidual(label.residual)));
+					}
+					// 反向状态 time 可以表示任务完成后的等待时刻；只有真正通过入弧把 current
+					// 接到 previous 后面时，time 才必须是 current 的合法完工时刻。
+					if (!isCompletionFeasible(current, t)) {
+						continue;
 					}
 					for (int previous = 0; previous <= n; previous++) {
 						if (previous == current || processArcForbidden[previous][current]) {
@@ -566,7 +572,7 @@ public final class TimeIndexedScalarCompletionBound {
 						}
 						byte[] residual = sri.copyResidual(label.residual);
 						arcCost += sri.applyBackwardPrepend(residual, previous, current);
-						if (previous > 0 && isCompletionFeasible(previous, previousTime)) {
+						if (previous > 0 && canReachBackwardState(previous, previousTime)) {
 							insertSriLabel(buckets, sri, new SriLabel(previous, previousTime,
 									label.reducedCost + arcCost, residual));
 						}
@@ -1237,9 +1243,10 @@ public final class TimeIndexedScalarCompletionBound {
 	private void computeBackwardDistances() {
 		Arrays.fill(backward, INF);
 		backward[index(0, horizon)] = 0.0;
-		for (int t = horizon - 1; t >= 0; t--) {
+		// horizon 端点必须纳入反向递推，否则恰好在 horizon 完工并结束的路径没有 suffix。
+		for (int t = horizon; t >= 0; t--) {
 			for (int last = 0; last <= n; last++) {
-				if (!isTimeIndexedArcForbidden(last, last, t)) {
+				if (t < horizon && !isTimeIndexedArcForbidden(last, last, t)) {
 					relax(backward, index(last, t), backward[index(last, t + 1)]);
 				}
 				for (int next = 1; next <= n; next++) {
@@ -1285,6 +1292,13 @@ public final class TimeIndexedScalarCompletionBound {
 
 	private boolean isCompletionFeasible(int job, int completion) {
 		return completion >= 0 && completion <= horizon && isFinite(penaltyByJobTime[job][completion]);
+	}
+
+	/**
+	 * 反向状态的 time 是当前可从任务出发的时刻，任务允许先完成再等待，因此只受最早完工边界约束。
+	 */
+	private boolean canReachBackwardState(int job, int time) {
+		return time >= discreteWindowStart(job) && time <= horizon;
 	}
 
 	private double processArcReducedCost(int from, int to, int completion) {

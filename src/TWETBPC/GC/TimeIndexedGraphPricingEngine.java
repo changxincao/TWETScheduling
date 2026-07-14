@@ -917,10 +917,12 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				backward[i] = INF;
 			}
 			backward[index(0, horizon)] = 0.0;
-			for (int t = horizon - 1; t >= 0; t--) {
+			// 2026-07-14: 必须处理 horizon 本身；任务恰好在 horizon 完工后可以立即接 sink。
+			// 从 horizon - 1 开始会让 backward(job,horizon) 保持 INF，cleanup 随后会误删合法处理弧。
+			for (int t = horizon; t >= 0; t--) {
 				for (int lastJob = 0; lastJob <= n; lastJob++) {
 					int state = index(lastJob, t);
-					if (!isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
+					if (t < horizon && !isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
 						relax(backward, state, backward[index(lastJob, t + 1)]);
 					}
 					for (int nextJob = 1; nextJob <= n; nextJob++) {

@@ -259,3 +259,11 @@ rank-1 backward labeling 还发现一个既有语义问题。反向 processing �
 同时把 `currentJob` 的完成可行性从 `previousJob` 循环内提到 bucket 外，每个 `(currentJob,t)` 只计算一次。静态 duration/penalty 缓存测试由 1000 个随机点改为完整遍历全部普通弧和全部 job-time 点，窗口内值、窗口外 INF 语义均逐项对拍。等待回溯、稀疏/allowed-complement 时空禁弧查询、静态缓存和非整数拒绝测试全部通过。
 
 完整 root smoke 中，no-cut 得到 `bound=22487.647059`、`exact=3.303s/213 calls`、`valid=true`。rank-1 修复前后均为 `bound=22524.931818`、307 次 pricing、47715 条新增列、92 条 cut；exact 为 `39.300s` 和 `36.526s`。列数、cut 数和 bound 完全一致，说明本算例没有触发旧等待边界的结果差异；约 7% 时间差只能视为单次波动或小幅收益，不能据此声称稳定加速。当前剩余结构成本主要是每轮完整 state/bucket workspace 分配、rank-1 label/dominance 数量和 `O(n^2H)` processing arc 扫描；候选堆失效项在现有日志中规模很小，暂不增加重建逻辑。
+
+## 25. 2026-07-14 反向 horizon 端点与 SRI helper 再复核
+
+本轮发现并修正两个会造成过强剪枝的反向状态边界。第一，no-cut 永久 graph fixing 与 scalar completion bound 的反向递推虽然初始化了 `backward(0,horizon)=0`，循环却从 `horizon-1` 开始，导致 `backward(job,horizon)` 永远不能通过结束弧更新。任务恰好在 horizon 完工时，本应可以立即结束，旧逻辑却可能把相应处理弧判为没有可行后缀，并在 cleanup 中永久禁用。现已从 horizon 本身开始递推，并只在 `t<horizon` 时访问下一时刻的等待状态。
+
+第二，SRI-aware scalar helper 的反向 label 把状态时刻和完工时刻混在了一起。反向等待后的 `(job,t)` 表示任务已经完成、当前可以在时刻 `t` 离开；它只需不早于该任务的最早可完工时刻，不应再次受完成窗上界限制。现在只有通过入弧连接当前任务时才检查当前任务在 `t` 的完成可行性；反推到前驱任务后，使用“最早可完成至 horizon”的状态边界。该修改保留整数图和小数放松图原有的向外取整口径。
+
+验证方面，focused 编译及 `TimeIndexedGraphOptimizationTest` 通过。40-2 no-cut root smoke 得到 `bound=22487.647059`、`exact=3.555s/213 calls`、`valid=true`；rank-1 root smoke 得到 `bound=22500.718750`、247 次 pricing、`pool=46715`、`valid=true`。显式开启 SRI-aware scalar helper 后结果完全一致，且日志确认 helper 实际执行并收紧 40 个 job window。此次修正只为每次反向递推增加一个时间切片，相对于 `O(n^2H)` 主扫描开销可忽略；SRI helper 会保留原先被误删的等待状态，label 数可能略增，但这是正确性所必需。

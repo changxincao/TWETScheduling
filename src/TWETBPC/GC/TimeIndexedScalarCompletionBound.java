@@ -125,6 +125,18 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 	}
 
+	/** SRI reachability 的统计与写回窗口共享同一次昂贵 label-pair 扫描。 */
+	private static final class SriWindowReachability {
+		final WindowReachabilityStats stats;
+		final int[] minByJob;
+		final int[] maxByJob;
+
+		SriWindowReachability(WindowReachabilityStats stats, int[] minByJob, int[] maxByJob) {
+			this.stats = stats;
+			this.minByJob = minByJob;
+			this.maxByJob = maxByJob;
+		}
+	}
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final LP lp;
@@ -501,7 +513,7 @@ public final class TimeIndexedScalarCompletionBound {
 					SriLabel label = labels.get(labelIndex);
 					if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)) {
 						insertSriLabel(buckets, sri, new SriLabel(from, t + 1, label.reducedCost,
-								sri.copyResidual(label.residual)));
+								label.residual));
 					}
 					for (int to = 1; to <= n; to++) {
 						if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
@@ -551,7 +563,7 @@ public final class TimeIndexedScalarCompletionBound {
 					if (t > 0 && canReachBackwardState(current, t - 1)
 							&& !isTimeIndexedArcForbidden(current, current, t - 1)) {
 						insertSriLabel(buckets, sri, new SriLabel(current, t - 1, label.reducedCost,
-								sri.copyResidual(label.residual)));
+								label.residual));
 					}
 					// 反向状态 time 可以表示任务完成后的等待时刻；只有真正通过入弧把 current
 					// 接到 previous 后面时，time 才必须是 current 的合法完工时刻。
@@ -652,40 +664,6 @@ public final class TimeIndexedScalarCompletionBound {
 		return best;
 	}
 
-	private WindowTightening tightenWindowsFromSriLabels(double[] hStartByJob, double[] hEndByJob,
-			ArrayList<SriLabel>[] forwardLabels, ArrayList<SriLabel>[] backwardLabels, SriStateData sri) {
-		int tightened = 0;
-		int reachable = 0;
-		for (int job = 1; job <= n; job++) {
-			int min = -1;
-			int max = -1;
-			for (int t = 0; t <= horizon; t++) {
-				ArrayList<SriLabel> fw = forwardLabels[index(job, t)];
-				ArrayList<SriLabel> bw = backwardLabels[index(job, t)];
-				if (fw == null || fw.isEmpty() || bw == null || bw.isEmpty()
-						|| !isFinite(minSriJoinCost(sri, fw, bw))) {
-					continue;
-				}
-				if (min < 0) {
-					min = t;
-				}
-				max = t;
-			}
-			if (min < 0) {
-				continue;
-			}
-			reachable++;
-			double newStart = Math.max(hStartByJob[job], min);
-			double newEnd = Math.min(hEndByJob[job], max);
-			if (Utility.compareGt(newStart, hStartByJob[job]) || Utility.compareLt(newEnd, hEndByJob[job])) {
-				hStartByJob[job] = newStart;
-				hEndByJob[job] = newEnd;
-				tightened++;
-			}
-		}
-		return new WindowTightening(tightened, reachable);
-	}
-
 	private static final class SriLabel {
 		final int job;
 		final int time;
@@ -708,6 +686,7 @@ public final class TimeIndexedScalarCompletionBound {
 		final boolean[][] arcMemoryByCut;
 		final boolean[] arcMemoryCut;
 		final int arcTableSize;
+		final byte[] zeroResidual;
 
 		SriStateData(LP lp) {
 			List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
@@ -719,6 +698,7 @@ public final class TimeIndexedScalarCompletionBound {
 			this.arcTableSize = (n + 2) * (n + 2);
 			this.arcMemoryByCut = new boolean[cutIds.size()][arcTableSize];
 			this.arcMemoryCut = new boolean[cutIds.size()];
+			this.zeroResidual = new byte[cutIds.size()];
 			for (int idx = 0; idx < cutIds.size(); idx++) {
 				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
 				cuts.add(cut);
@@ -757,11 +737,11 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 
 		byte[] emptyResidual() {
-			return new byte[cuts.size()];
+			return zeroResidual;
 		}
 
 		byte[] copyResidual(byte[] residual) {
-			return residual.clone();
+			return residual.length == 0 ? residual : residual.clone();
 		}
 
 		double applyForwardExtension(byte[] residual, int from, int job) {
@@ -840,8 +820,9 @@ public final class TimeIndexedScalarCompletionBound {
 			forwardLabels = buildSriForwardLabels(sri);
 			backwardLabels = buildSriBackwardLabels(sri);
 		}
-		WindowReachabilityStats windowStats = summarizeReachableWindowsFromSriLabels(forwardLabels, backwardLabels, sri);
-		int nodeWindowTightened = applySriReachableWindowsToNode(forwardLabels, backwardLabels, sri);
+		SriWindowReachability reachability = analyzeSriReachableWindows(forwardLabels, backwardLabels, sri);
+		WindowReachabilityStats windowStats = reachability.stats;
+		int nodeWindowTightened = applySriReachableWindowsToNode(reachability);
 		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
 		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], gap,
 				System.nanoTime() - start, "ng-DSSR time-indexed SRI-aware helper arc fixing", windowStats,
@@ -942,27 +923,14 @@ public final class TimeIndexedScalarCompletionBound {
 		return node.replaceTimeIndexedPricingOnlyArcSet(combined, pairWidth, horizon);
 	}
 
-	private int applySriReachableWindowsToNode(ArrayList<SriLabel>[] forwardLabels,
-			ArrayList<SriLabel>[] backwardLabels, SriStateData sri) {
+	private int applySriReachableWindowsToNode(SriWindowReachability reachability) {
 		if (!exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
 			return 0;
 		}
 		int tightened = 0;
 		for (int job = 1; job <= n; job++) {
-			int min = -1;
-			int max = -1;
-			for (int t = 0; t <= horizon; t++) {
-				ArrayList<SriLabel> fw = forwardLabels[index(job, t)];
-				ArrayList<SriLabel> bw = backwardLabels[index(job, t)];
-				if (fw == null || fw.isEmpty() || bw == null || bw.isEmpty()
-						|| !isFinite(minSriJoinCost(sri, fw, bw))) {
-					continue;
-				}
-				if (min < 0) {
-					min = t;
-				}
-				max = t;
-			}
+			int min = reachability.minByJob[job];
+			int max = reachability.maxByJob[job];
 			if (min < 0) {
 				if (node.tightenTimeIndexedPricingWindow(job, 1, 0)) {
 					tightened++;
@@ -974,7 +942,7 @@ public final class TimeIndexedScalarCompletionBound {
 		return tightened;
 	}
 
-	private WindowReachabilityStats summarizeReachableWindowsFromSriLabels(ArrayList<SriLabel>[] forwardLabels,
+	private SriWindowReachability analyzeSriReachableWindows(ArrayList<SriLabel>[] forwardLabels,
 			ArrayList<SriLabel>[] backwardLabels, SriStateData sri) {
 		int reachable = 0;
 		int tightened = 0;
@@ -983,6 +951,10 @@ public final class TimeIndexedScalarCompletionBound {
 		double hullPointSum = 0.0;
 		double reachablePointSum = 0.0;
 		int maxShrink = 0;
+		int[] minByJob = new int[n + 1];
+		int[] maxByJob = new int[n + 1];
+		Arrays.fill(minByJob, -1);
+		Arrays.fill(maxByJob, -1);
 		final int sampleSize = 8;
 		int[] topJob = new int[sampleSize];
 		int[] topShrink = new int[sampleSize];
@@ -1012,6 +984,8 @@ public final class TimeIndexedScalarCompletionBound {
 				max = t;
 				count++;
 			}
+			minByJob[job] = min;
+			maxByJob[job] = max;
 			if (count == 0) {
 				unreachable++;
 				continue;
@@ -1030,12 +1004,12 @@ public final class TimeIndexedScalarCompletionBound {
 					job, shrink, min, max, count, originalStart, originalEnd);
 		}
 		double divisor = Math.max(1, reachable);
-		return new WindowReachabilityStats(exactIntegerTime, reachable, tightened, unreachable,
-				originalPointSum / divisor, hullPointSum / divisor, reachablePointSum / divisor,
+		WindowReachabilityStats stats = new WindowReachabilityStats(exactIntegerTime, reachable, tightened,
+				unreachable, originalPointSum / divisor, hullPointSum / divisor, reachablePointSum / divisor,
 				maxShrink, formatTopWindowShrink(topJob, topShrink, topMin, topMax, topCount,
 						topOldStart, topOldEnd));
+		return new SriWindowReachability(stats, minByJob, maxByJob);
 	}
-
 	private int applyReachableWindowsToNode() {
 		if (!exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
 			return 0;

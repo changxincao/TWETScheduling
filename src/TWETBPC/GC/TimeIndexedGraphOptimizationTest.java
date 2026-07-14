@@ -90,6 +90,16 @@ public final class TimeIndexedGraphOptimizationTest {
 		forbidden.clear(timeArcIndex(pairWidth, 4, 0, 5));
 		node.replaceTimeIndexedPricingOnlyArcSet(forbidden, pairWidth, horizon);
 		assertLookupMatches(node, node.createTimeIndexedPricingOnlyArcLookup(), pairWidth, horizon);
+
+		// allowed-complement 可以来自较小的父节点 horizon；子节点在更大时间上追加的
+		// forbidden overlay 必须同时被直接查询和热循环 lookup 看见。
+		node.forbidTimeIndexedPricingOnlyArc(1, 2, horizon + 2);
+		Node.TimeIndexedArcLookup expandedLookup = node.createTimeIndexedPricingOnlyArcLookup();
+		if (!node.isTimeIndexedPricingOnlyArcForbidden(1, 2, horizon + 2)
+				|| !expandedLookup.isForbidden(1, 2, horizon + 2)) {
+			throw new AssertionError("allowed-complement ignored an arc forbidden above its stored horizon");
+		}
+		assertLookupMatches(node, expandedLookup, pairWidth, horizon + 3);
 	}
 
 	private static void testStaticPricingDataMatchesInstance() throws Exception {

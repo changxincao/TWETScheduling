@@ -214,6 +214,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 
 		private void initializeBackward() {
 			for (int job = 1; job <= n; job++) {
+				if (timeLimitChecker.isTimeLimitReached()) {
+					timedOut = true;
+					return;
+				}
 				for (int t = tStar; t <= horizon; t++) {
 					if (isCompletionFeasible(job, t) && isEndAllowed(job, t)) {
 						Label label = Label.backward(nextLabelId++, job, t, sinkArcReducedCost(job),
@@ -274,6 +278,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				}
 			}
 			for (int t = tStar; t <= horizon; t++) {
+				if (timeLimitChecker.isTimeLimitReached()) {
+					timedOut = true;
+					return;
+				}
 				for (int lastJob = 1; lastJob <= n; lastJob++) {
 					ArrayList<Label> bucket = forwardBuckets[index(lastJob, t)];
 					if (bucket == null) {
@@ -342,7 +350,12 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private void concatenateLabels() {
+			int pairChecks = 0;
 			for (int t = tStar; t <= horizon; t++) {
+				if (timeLimitChecker.isTimeLimitReached()) {
+					timedOut = true;
+					return;
+				}
 				for (int job = 1; job <= n; job++) {
 					ArrayList<Label> fw = forwardBuckets[index(job, t)];
 					ArrayList<Label> bw = backwardBuckets[index(job, t)];
@@ -351,6 +364,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					}
 					for (Label left : fw) {
 						for (Label right : bw) {
+							if ((++pairChecks & 1023) == 0 && timeLimitChecker.isTimeLimitReached()) {
+								timedOut = true;
+								return;
+							}
 							double reducedCost = left.reducedCost + right.reducedCost
 									+ cutStateData.joinShift(left.residual, right.residual);
 							if (Utility.compareLt(reducedCost, bestPseudoReducedCost)) {
@@ -707,6 +724,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final boolean[][] arcMemoryByCut;
 		private final boolean[] arcMemoryCut;
 		private final int arcTableSize;
+		private final byte[] zeroResidual;
 
 		CutStateData(LP lp) {
 			List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
@@ -718,6 +736,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.arcTableSize = (data.n + 2) * (data.n + 2);
 			this.arcMemoryByCut = new boolean[cutIds.size()][arcTableSize];
 			this.arcMemoryCut = new boolean[cutIds.size()];
+			this.zeroResidual = new byte[cutIds.size()];
 			for (int idx = 0; idx < cutIds.size(); idx++) {
 				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
 				cuts.add(cut);
@@ -752,7 +771,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		byte[] emptyResidual() {
-			return new byte[cuts.size()];
+			return zeroResidual;
 		}
 
 		byte[] copyResidual(byte[] source) {

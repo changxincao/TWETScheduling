@@ -267,3 +267,13 @@ rank-1 backward labeling 还发现一个既有语义问题。反向 processing �
 第二，SRI-aware scalar helper 的反向 label 把状态时刻和完工时刻混在了一起。反向等待后的 `(job,t)` 表示任务已经完成、当前可以在时刻 `t` 离开；它只需不早于该任务的最早可完工时刻，不应再次受完成窗上界限制。现在只有通过入弧连接当前任务时才检查当前任务在 `t` 的完成可行性；反推到前驱任务后，使用“最早可完成至 horizon”的状态边界。该修改保留整数图和小数放松图原有的向外取整口径。
 
 验证方面，focused 编译及 `TimeIndexedGraphOptimizationTest` 通过。40-2 no-cut root smoke 得到 `bound=22487.647059`、`exact=3.555s/213 calls`、`valid=true`；rank-1 root smoke 得到 `bound=22500.718750`、247 次 pricing、`pool=46715`、`valid=true`。显式开启 SRI-aware scalar helper 后结果完全一致，且日志确认 helper 实际执行并收紧 40 个 job window。此次修正只为每次反向递推增加一个时间切片，相对于 `O(n^2H)` 主扫描开销可忽略；SRI helper 会保留原先被误删的等待状态，label 数可能略增，但这是正确性所必需。
+
+## 26. 2026-07-14 第三轮正确性与高效性复查
+
+本轮沿 node 时空禁弧存储、no-cut exact、rank-1 cut exact 和 SRI-aware scalar helper 再次复查，修正了一处会漏掉继承禁弧的确定性问题。节点在时空禁弧较稠密时使用 allowed-complement：保存 horizon 内的可用时间点。子节点或后续 fixing 仍可能在更大的 horizon 上追加显式 forbidden overlay。原写入逻辑会保存并计数这些超 horizon 禁弧，但直接查询和 pricing 热循环 lookup 都只读取旧 horizon 内的 complement，导致新增禁弧实际未生效。现在 horizon 内仍按 allowed-complement 查询，horizon 外改为读取显式 forbidden overlay；新增回归覆盖“较小 horizon 的 complement + 较大时间追加禁弧”，直接查询和 `BitSet[]` lookup 逐点一致。
+
+no-cut exact 原先只在进入 engine 前检查全局时限，一旦进入 `O(n^2H)` 前向扫描就必须整轮结束。现在在外层时间切片检查时限；中断后 `forwardPassCompleted=false`，因此 partial scan 可以保留已找到的候选，但绝不会发出“内部列族已闭合”的 certificate。rank-1 路径同时补齐 backward 初始化、forward 尾部扫描和 concatenate 的时限检查；label-pair 热循环每 1024 对检查一次，避免单个大 bucket 长时间不响应。40-2 一秒时限 smoke 在 `1.045s` 返回 `TIME_LIMIT, valid=true`。
+
+SRI residual 的生命周期也重新逐项核对。residual 挂入 label 后只读，processing/prepend 扩展始终先 clone 再修改，等待弧不修改状态。因此 rank-1 和 scalar helper 的全零 residual 改为共享单个数组，scalar helper 的正反向等待也直接共享父 residual，删除大量短命 `byte[]`，而 processing/prepend 与 join/dominance 语义不变。SRI fixing 最终 label 构建后，原代码为统计窗口和写回 node 分别执行一次 `(job,t)` label-pair join；现合并成一次 reachability 分析，同一组 `min/max/count` 同时用于日志和写回，删除一半该阶段的 pair 扫描。未使用的旧 SRI window-tightening 私有方法一并删除。
+
+验证包括 focused `javac`、`TimeIndexedGraphOptimizationTest`、no-cut root-only、rank-1 active-cut root-only。no-cut 仍得到 `bound=22487.647059`、213 次 pricing、`valid=true`；rank-1 仍得到 `bound=22500.718750`、247 次 pricing、`valid=true`，与修改前基线完全一致。当前剩余边界有两项：exact graph 尚未统一消费 node compact window；显式 SRI-aware scalar helper 没有接收全局 `TimeLimitChecker`，极重 helper 调用仍可能越过总时限。这两项需要单独统一接口和图口径，本轮未改。

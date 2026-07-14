@@ -321,6 +321,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private double dualWindowRecheckMaxRcImprovement;
 		private String dualWindowBestCandidateDiagnostic;
 		private boolean forwardPassCompleted;
+		private boolean timedOut;
 
 		TimeIndexedGraphSolver(LP lp) {
 			this.lp = lp;
@@ -356,6 +357,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.dualWindowRecheckMaxRcImprovement = 0.0;
 			this.dualWindowBestCandidateDiagnostic = "";
 			this.forwardPassCompleted = false;
+			this.timedOut = false;
 			precomputePricingData();
 		}
 
@@ -365,7 +367,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				return new ArrayList<TWETColumn>();
 			}
 			runForwardPass();
-			forwardPassCompleted = true;
+			forwardPassCompleted = !timedOut;
 			ArrayList<Candidate> candidates = new ArrayList<Candidate>(candidateBySignature.values());
 			Collections.sort(candidates, bestCandidateFirstComparator());
 			observeDualWindowBestCandidate(candidates.isEmpty() ? null : candidates.get(0));
@@ -473,6 +475,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					+ ", timeArcSkips=" + timeIndexedArcSkips
 					+ ", negativeStates=" + negativeStateCandidates
 					+ ", repeatedJobCandidates=" + duplicateJobCandidates
+					+ ", timeLimit=" + timedOut
 					+ dualWindowRecheckDiagnosticMessage();
 		}
 
@@ -522,6 +525,12 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 			dist[index(0, 0)] = 0.0;
 			for (int t = 0; t <= horizon; t++) {
+				// 单轮复杂度为 O(n^2 H)。只在外层时间点检查，既能及时响应全局时限，
+				// 又不把高频 checker 调用放进普通弧热循环。
+				if (timeLimitChecker.isTimeLimitReached()) {
+					timedOut = true;
+					return;
+				}
 				for (int lastJob = 0; lastJob <= n; lastJob++) {
 					int state = index(lastJob, t);
 					double base = dist[state];

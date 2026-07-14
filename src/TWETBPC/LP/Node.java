@@ -286,7 +286,11 @@ public class Node implements Comparable<Node> {
 		}
 		BitSet times = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(timeIndexedArcPairKey(from, to));
 		if (timeIndexedPricingOnlyArcStoreAllowed) {
-			return time <= timeIndexedPricingOnlyArcStoreHorizon && (times == null || !times.get(time));
+			// allowed-complement 只覆盖生成它时的 horizon；之后在更大 horizon 上追加的禁弧
+			// 仍以 forbidden overlay 写入同一 BitSet，查询时不能把这部分丢掉。
+			return time <= timeIndexedPricingOnlyArcStoreHorizon
+					? times == null || !times.get(time)
+					: times != null && times.get(time);
 		}
 		return times != null && times.get(time);
 	}
@@ -334,7 +338,9 @@ public class Node implements Comparable<Node> {
 			}
 			BitSet times = timesByPair[from * pairWidth + to];
 			if (storeAllowed) {
-				return time <= storeHorizon && (times == null || !times.get(time));
+				return time <= storeHorizon
+						? times == null || !times.get(time)
+						: times != null && times.get(time);
 			}
 			return times != null && times.get(time);
 		}

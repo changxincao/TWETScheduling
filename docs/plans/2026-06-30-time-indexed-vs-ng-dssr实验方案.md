@@ -815,6 +815,21 @@ R25 time-indexed rank1 的 `pruned_by_dual_bound` 不是 LP 本身整数闭合�
 
 还需注意，当前 runner 的 ALNS seed 由文件名参与哈希。原文件与 `_timeX10` 文件名不同，导致原尺度和十倍尺度的初始启发式列不完全一致，例如 time-indexed 初始 pool 分别为 `13` 和 `5`。因此节点轨迹和 incumbent 不能视为严格同随机种子；不过 root LP 下界仍从 `15611.75` 精确放大为 `156117.5`，time-indexed 图规模与定价耗时的变化仍可用于判断 horizon 敏感性。后续正式对比应将两个实例放在不同目录但使用相同文件名，或给 runner 增加显式固定 seed。
 
+#### Root time-indexed arc fixing 比例复核
+
+前一组 `scale-safe` 命令误将 `timeIndexedCompletionBoundArcFixing=false` 显式传给 runner，因此没有留下十倍实例的 root 永久时空弧固定统计。本次重新把原尺度和十倍数据放在不同临时目录，并统一命名为 `wet040_001_3m.dat`，从而保证初始解和 ALNS 使用相同随机种子。两组均采用纯 `TimeIndexedGraphPricing`、无 SRI、无 strong branching、无旧启发式 pricing、dual window 仅用于 pricing、永久 arc fixing 开启，并设置 `maxNodes=1`，只处理第一个 root。
+
+| 尺度 | fixing horizon | candidates | process fixed `(i,j,t)` | idle fixed | end fixed | direct fixed | cleanup fixed | total fixed | 全部结构弧槽位 | 总固定比例 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 原尺度 | 1,385 | 2,228,678 | 2,000,556 | 43,841 | 48,016 | 2,092,413 | 203,984 | 2,296,397 | 2,329,825 | 98.5652% |
+| 时间乘 10 | 13,849 | 22,270,339 | 20,013,248 | 437,569 | 479,899 | 20,930,716 | 2,025,075 | 22,955,791 | 23,281,809 | 98.5997% |
+
+这里的全部结构弧槽位按 root fixing 实际图结构计算。40 个任务下，process 弧为 `1600(H+1)`，idle 弧为 `41H`，end 弧为 `40(H+1)`。`candidates` 只统计 reduced-cost fixing 主循环实际检查的可达候选；`cleanupFixed` 还会删除主循环后变成不可达或不能到达终点的弧，因此日志中的 `total fixed` 可以大于 `candidates`，不能直接用二者相除作为固定比例。root 初始没有继承时空禁弧，而且 cleanup 会跳过已经固定的弧，所以 `total fixed / 全部结构弧槽位` 可作为本次 root 最终固定比例。
+
+十倍实例并不是精确固定十倍数量。全部结构弧槽位为原来的 `9.9929` 倍，process 固定弧为 `10.0038` 倍，总固定弧为 `9.9964` 倍。差异来自离散 horizon 的端点取整，以及两组 root 的列生成轮数仍有少量差异；但 root incumbent、LP bound 和绝对 gap 均严格放大十倍，比较口径是对齐的。比例上，process 弧固定率从 `90.2127%` 升到 `90.3125%`，cleanup 后总固定率从 `98.5652%` 升到 `98.5997%`，没有因为时间放大而变弱，反而分别小幅增加约 `0.10` 和 `0.0345` 个百分点。
+
+真正的问题仍是绝对规模。cleanup 后剩余时空弧从 `33,428` 增到 `326,018`，约为 `9.75` 倍；root exact pricing 也从 `4.445s/213` 增到 `75.915s/205`。因此 time-indexed arc fixing 在两种尺度下都能删除约 98.6% 的结构弧，但固定比例近似不变，无法抵消离散时间轴扩大十倍造成的剩余图规模膨胀。这比单看固定比例更能解释十倍时间实例的求解退化。
+
 2. 已完成和中止结果
 
 | 时间尺度 | 方法 | 状态 | obj/incumbent | bound | gap | solve/elapsed | nodes | pool | exact pricing |

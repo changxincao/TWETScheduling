@@ -306,3 +306,7 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 随后 `completionBoundForwardSinkLowerBound()` 在没有有限 prefix 时返回 `0.0`，`tryApplyCompletionBoundPreCertificate()` 把它解释为“内部列族最小 reduced cost 非负”，直接跳过真正的 ng-DSSR labeling。repair 因此得不到补列，人工 slack 保持正值，`repairInfeasibleMaster()` 返回 infeasible；Tree 再把这个 trial 结果转换为 `pseudoCostInf`，最终丢掉一个真实可行的 child。根因是同一个有限常数 `1e8` 同时承担了两种不兼容语义：repair 的人工目标尺度，以及 PWLF 的不可行哨兵。它不是启发式没找到列，也不是 lightweight seed 本身不足，而是 exact repair pricing 在 M 量级对偶下被错误截断并给出了假证书。
 
 下一步修复不能只关闭 completion-bound pre-certificate。ng-DSSR 的正式 frontier 也使用同一套 PWLF normalize，M 量级 dual 仍可能把有限函数误当不可行。更稳妥的最小方向是把 repair 改为数值尺度独立的 Phase-I：只最小化人工 slack/脏列质量，人工系数使用正常量级，不再把真实列目标与 `1e8` 惩罚混在一起；Phase-I 可行后再恢复真实目标。修复前，strong trial 中基于当前 M-scale repair pricing 得到的 `INF` 不能作为子树不可行证明。临时诊断代码已移除，本节只记录已经复现和确认的原因。
+
+进一步核对确认，`5e7` 来自 `Utility.big_M=1e8` 与 `BIG_M_STATE_RATIO=0.5`。该判断在 2026-05-16 引入，原意是让 PWLF 的不可行 M 段经过普通固定成本或 dual 平移成为 `M+a`、`M-a` 后仍能被识别。它依赖的隐含前提是所有真实函数值始终远小于 `M/2`；strong repair 的 M 量级 dual 直接破坏了这一前提。单纯把比例从 `0.5` 调成 `0.9`、放大 `big_M` 或改成“接近 M”判断都不能保证正确：repair dual 会随同一个 M 一起缩放，合法值可以是数个 M，而真正的 M 段经过 dual 平移后也可能远离 M。
+
+修复应分两层。第一层是立即保证 BPC 正确性：strong trial 一旦进入当前 M-scale repair，其失败结果只能标记为不可复用，不能作为真实子树 `INF`；仅关闭 completion-bound pre-certificate 仍不充分，因为正式 label frontier 也会经过相同 PWLF normalize。第二层是根治 repair 数值语义，建议改成独立 Phase-I：兼容真实列目标为 0，人工 slack 和保留下来的 branch-implied 脏列目标为 1，pricing 同步按 Phase-I reduced cost 找列；Phase-I 目标达到 0 后关闭 repair mode，再恢复真实列成本求正式 RMP。这样既不依赖任意大 M，也不会让 repair dual 与 PWLF 的不可行哨兵相撞。另一条更彻底但改动更大的路线是给 PWLF 增加独立的不可达表示，并把它与 `Utility.big_M`、外包禁用成本、启发式无效值完全拆开。

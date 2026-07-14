@@ -227,3 +227,17 @@ rank-1/SRI 路径还有更重的对象开销：每次 heuristic/exact solver 都
 当前 no-cut exact 和 rank-1 exact 也没有读取 node compact window；no-cut 只有 pre-heuristic 会读取。纯 time-indexed 当前主要继承 raw 时空禁弧，因此这未必是已有所有 run 的主耗时，但节点已经有安全 compact window 时，exact 仍按更大 horizon 分配和扫描，明显没有利用现有证据。接入时必须同时统一 exact pricing、safe fixing 和 forward-cache 的窗口口径。
 
 优化优先级建议为：先做等待 predecessor 压缩和空时空禁弧快路径；再取消无条件 forward clone并严格限定 cache；随后 A/B arc reduced-cost base 和静态 penalty/duration；最后处理 fixing cleanup、rank-1 residual/bucket 和 compact window 接入。前两项最可能直接改善大 horizon exact，且不改变 shortest-path、列集合或 reduced-cost 语义。
+
+## 22. 2026-07-14 time-indexed 热路径优化与新旧版本对照
+
+本次按第 21 节确认的低风险热点完成实现，没有改变 compact window、dual window、候选返回和 arc-fixing 判定口径。no-cut 与 rank-1 的等待状态不再逐时间格串联 predecessor：等待弧直接继承最近一次 processing 弧的回溯记录，只有真正加入任务时才增加一层，因此 sequence 恢复从最坏 `O(H)` 降为 `O(sequence length)`。20,000 状态的随机新旧回溯逐状态对拍完全一致；单任务长等待链的回溯步数由约 20,000 降为 2。
+
+时空禁弧查询增加了 solver 生命周期内的只读 `BitSet[]` pair-index 视图。节点没有 raw 时空禁弧时直接走空表快路径；存在禁弧时不再在每条 `(from,to,t)` 上做 `HashMap<Integer,BitSet>` 查询和装箱。该视图只用于不修改节点的 pricing；arc fixing 会在扫描中继续写回禁弧，因此仍使用 `Node` 的动态查询。稀疏 forbidden-set 和稠密 allowed-complement 两种存储口径均已逐弧逐时间对拍。
+
+同一 engine 内不依赖 dual/node 的 penalty table 和 duration matrix 现在只构造一次；每次 LP pricing 只重建 job/arc/machine dual 相关的普通弧 base reduced cost，热循环退化为 base 与 completion penalty 相加。rank-1 engine 的 no-cut delegate 与 cut-aware solver 共享这份静态数据。等待扩展不修改 SRI residual，因此共享原数组；所有 processing/prepend 扩展仍在修改前克隆，避免可变状态串扰。
+
+原先每轮 no-cut pricing 都会无条件克隆完整 forward distance，等待后续 fixing 尝试复用，但 fingerprint 没有覆盖完整 graph-window 和禁弧口径。本次删除该静态缓存和无条件 clone；safe fixing 独立重算 forward/backward，避免错误复用和数 GB 级累计内存复制。fixing cleanup 也由“先完整构造二维 future-use 表，再扫描 cleanup”改为单次倒序扫描，用每个 job 的 suffix 标志维护严格晚于当前时刻的有用 processing arc，固定结果保持不变。
+
+新旧源码使用同一 runner、同一实例和同一配置做 root-only A/B。no-cut 下两版均得到 `bound=22487.647059`、`pool=41876`、200 次 exact；exact 从 `5.986632s` 降到 `3.235468s`，约减少 `46.0%`，总时间从 `16.059715s` 降到 `12.461871s`，约减少 `22.4%`。active rank-1 cut 下两版均得到 `bound=22498.300000`、`pool=42405`、234 次 exact；exact 从 `26.143850s` 降到 `20.912776s`，约减少 `20.0%`，总时间从 `48.384326s` 降到 `41.451140s`，约减少 `14.3%`。
+
+两轮 graph fixing 的新旧固定数量完全一致。第一轮均为 `candidates=3,484,221`、`fixed=200,594`、`unavailable=98,686`，fixing 时间由约 `846ms` 降到 `685ms`；第二轮均只新增固定 40 条弧，新版单次时间受小样本波动反而由约 `994ms` 增至 `1212ms`，因此不能声称 cleanup 在每个小轮次都更快。当前可靠结论是：列、bound、fixed arc 数均未变化，主要收益来自等待回溯压缩、空禁弧查询快路径、静态表复用和取消 forward clone；大 horizon 下固有的 `O(n^2H)` 图扫描仍然存在。

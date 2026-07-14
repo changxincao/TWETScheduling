@@ -33,6 +33,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private final TimeIndexedGraphPricingEngine.StaticPricingData staticPricingData;
 	private final TimeIndexedGraphPricingEngine noCutDelegate;
 	private final TWETColumnEvaluator evaluator;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
@@ -40,7 +41,8 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	public TimeIndexedGraphRank1CutPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.noCutDelegate = new TimeIndexedGraphPricingEngine(data, config);
+		this.staticPricingData = new TimeIndexedGraphPricingEngine.StaticPricingData(data);
+		this.noCutDelegate = new TimeIndexedGraphPricingEngine(data, config, false, staticPricingData);
 		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
@@ -116,8 +118,11 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final boolean heuristicMode;
 		private final double[][] penaltyByJobTime;
 		private final int[][] durationByArc;
+		private final double[][] processArcBaseReducedCost;
+		private final double[] sinkArcBaseReducedCost;
 		private final boolean[][] processArcForbidden;
 		private final boolean[] endForbidden;
+		private final Node.TimeIndexedArcLookup timeIndexedArcLookup;
 		private final CutStateData cutStateData;
 		private final ArrayList<Label>[] forwardBuckets;
 		private final ArrayList<Label>[] backwardBuckets;
@@ -147,10 +152,14 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.width = horizon + 1;
 			this.tStar = computeTStar(graphWindow);
 			this.heuristicMode = heuristicMode;
-			this.penaltyByJobTime = new double[n + 1][width];
-			this.durationByArc = new int[n + 1][n + 1];
+			this.penaltyByJobTime = staticPricingData.penaltyByJobTime;
+			this.durationByArc = staticPricingData.durationByArc;
+			this.processArcBaseReducedCost = new double[n + 1][n + 1];
+			this.sinkArcBaseReducedCost = new double[n + 1];
 			this.processArcForbidden = new boolean[n + 1][n + 1];
 			this.endForbidden = new boolean[n + 1];
+			this.timeIndexedArcLookup = shouldUsePricingOnlyArcs()
+					? node.createTimeIndexedPricingOnlyArcLookup() : null;
 			this.cutStateData = new CutStateData(lp);
 			this.forwardBuckets = new ArrayList[(n + 1) * width];
 			this.backwardBuckets = new ArrayList[(n + 1) * width];
@@ -158,7 +167,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
 			this.bestPseudoReducedCost = INF;
-			precomputeStaticPricingData();
+			precomputePricingData();
 		}
 
 		ArrayList<TWETColumn> solve() {
@@ -228,7 +237,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 						rememberEndCandidateIfNegative(label);
 						if (t < horizon && !isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
 							Label child = label.extend(nextLabelId++, lastJob, t + 1, 0.0,
-									cutStateData.copyResidual(label.residual), 0);
+									label.residual, 0);
 							if (!isPrunedByBackwardCompletion(child)) {
 								insertLabel(forwardBuckets, child);
 							}
@@ -289,7 +298,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 						relaxedLabels++;
 						if (t > tStar && !isTimeIndexedArcForbidden(currentJob, currentJob, t - 1)) {
 							insertLabel(backwardBuckets, label.extend(nextLabelId++, currentJob, t - 1, 0.0,
-									cutStateData.copyResidual(label.residual), 0));
+									label.residual, 0));
 						}
 						for (int previousJob = 0; previousJob <= n; previousJob++) {
 							if (previousJob == currentJob || processArcForbidden[previousJob][currentJob]) {
@@ -476,52 +485,34 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 
 		private double processArcReducedCost(int from, int to, int completion) {
 			double penalty = penaltyByJobTime[to][completion];
-			if (!isFinite(penalty)) {
-				return INF;
-			}
-			double cost = data.getSetupCost(from, to) + penalty - lp.getJobDual(to) - lp.getArcDual(from, to);
-			if (from == 0) {
-				cost -= lp.getMachineDual();
-			}
-			return cost;
+			return isFinite(penalty) ? processArcBaseReducedCost[from][to] + penalty : INF;
 		}
 
 		private double sinkArcReducedCost(int lastJob) {
-			return -lp.getArcDual(lastJob, sink);
+			return sinkArcBaseReducedCost[lastJob];
 		}
 
-		private void precomputeStaticPricingData() {
-			for (int job = 0; job <= n; job++) {
-				for (int t = 0; t <= horizon; t++) {
-					penaltyByJobTime[job][t] = INF;
-				}
-			}
-			for (int job = 1; job <= n; job++) {
-				int start = Math.max(0, (int) Math.ceil(graphWindow.start[job] - 1e-9));
-				int end = Math.min(horizon, (int) Math.floor(graphWindow.end[job] + 1e-9));
-				for (int t = start; t <= end; t++) {
-					double penalty = data.penaltyFunction[job].evaluate(t);
-					if (!Utility.isBigMValue(penalty)) {
-						penaltyByJobTime[job][t] = penalty;
-					}
-				}
-			}
+		private void precomputePricingData() {
 			for (int from = 0; from <= n; from++) {
 				for (int to = 1; to <= n; to++) {
-					durationByArc[from][to] =
-							(int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
 					processArcForbidden[from][to] = from == to
 							|| PricingCompatibility.isRequiredOutsourcedJob(node, to)
 							|| isProcessArcForbiddenByNode(from, to);
+					processArcBaseReducedCost[from][to] = data.getSetupCost(from, to)
+							- lp.getJobDual(to) - lp.getArcDual(from, to)
+							- (from == 0 ? lp.getMachineDual() : 0.0);
 				}
 			}
 			for (int job = 1; job <= n; job++) {
 				endForbidden[job] = isEndArcForbiddenByNode(job);
+				sinkArcBaseReducedCost[job] = -lp.getArcDual(job, sink);
 			}
 		}
-
 		private boolean isCompletionFeasible(int job, int completion) {
-			return completion >= 0 && completion <= horizon && isFinite(penaltyByJobTime[job][completion]);
+			return completion >= 0 && completion <= horizon
+					&& !Utility.compareLt(completion, graphWindow.start[job])
+					&& !Utility.compareGt(completion, graphWindow.end[job])
+					&& isFinite(penaltyByJobTime[job][completion]);
 		}
 
 		private boolean isEndAllowed(int lastJob, int time) {
@@ -549,7 +540,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private boolean isTimeIndexedArcForbidden(int from, int to, int time) {
-			return shouldUsePricingOnlyArcs() && node.isTimeIndexedPricingOnlyArcForbidden(from, to, time);
+			return timeIndexedArcLookup != null && timeIndexedArcLookup.isForbidden(from, to, time);
 		}
 
 		private boolean shouldUsePricingOnlyArcs() {
@@ -854,6 +845,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		Label extend(int id, int newLastJob, int newTime, double arcCost, byte[] newResidual, int newAddedJob) {
+			// 等待只改变时间，不改变 cut residual 或任务序列；跳过等待链可把恢复复杂度降到任务数级别。
+			if (newAddedJob == 0) {
+				return new Label(id, newLastJob, newTime, reducedCost + arcCost, newResidual, previous, addedJob);
+			}
 			return new Label(id, newLastJob, newTime, reducedCost + arcCost, newResidual, this, newAddedJob);
 		}
 	}

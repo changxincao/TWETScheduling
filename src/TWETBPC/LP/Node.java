@@ -291,6 +291,54 @@ public class Node implements Comparable<Node> {
 		return times != null && times.get(time);
 	}
 
+	/**
+	 * 2026-07-14: 为只读 time-indexed pricing 构造按普通弧编号展开的查询视图。
+	 * <p>
+	 * pricing 内层循环不再为每条 (from,to,time) 做 Integer 装箱和 HashMap 查询；BitSet 仍由本节点持有，
+	 * 因此该视图只允许在节点时空禁弧集合不再修改的一次 pricing 调用内使用。arc fixing 会边扫描边写回禁弧，不能复用该视图。
+	 */
+	public TimeIndexedArcLookup createTimeIndexedPricingOnlyArcLookup() {
+		if (timeIndexedPricingOnlyForbiddenArcCount == 0) {
+			return TimeIndexedArcLookup.EMPTY;
+		}
+		int pairWidth = data.n + 2;
+		BitSet[] timesByPair = new BitSet[pairWidth * pairWidth];
+		for (Map.Entry<Integer, BitSet> entry : timeIndexedPricingOnlyForbiddenArcTimesByPair.entrySet()) {
+			int pairKey = entry.getKey().intValue();
+			if (pairKey >= 0 && pairKey < timesByPair.length) {
+				timesByPair[pairKey] = entry.getValue();
+			}
+		}
+		return new TimeIndexedArcLookup(timesByPair, pairWidth, timeIndexedPricingOnlyArcStoreAllowed,
+				timeIndexedPricingOnlyArcStoreHorizon);
+	}
+
+	/** 只读定价热循环使用的时空禁弧查询器。 */
+	public static final class TimeIndexedArcLookup {
+		private static final TimeIndexedArcLookup EMPTY = new TimeIndexedArcLookup(null, 0, false, -1);
+		private final BitSet[] timesByPair;
+		private final int pairWidth;
+		private final boolean storeAllowed;
+		private final int storeHorizon;
+
+		private TimeIndexedArcLookup(BitSet[] timesByPair, int pairWidth, boolean storeAllowed, int storeHorizon) {
+			this.timesByPair = timesByPair;
+			this.pairWidth = pairWidth;
+			this.storeAllowed = storeAllowed;
+			this.storeHorizon = storeHorizon;
+		}
+
+		public boolean isForbidden(int from, int to, int time) {
+			if (timesByPair == null || from < 0 || to < 0 || from >= pairWidth || to >= pairWidth || time < 0) {
+				return false;
+			}
+			BitSet times = timesByPair[from * pairWidth + to];
+			if (storeAllowed) {
+				return time <= storeHorizon && (times == null || !times.get(time));
+			}
+			return times != null && times.get(time);
+		}
+	}
 	public int countTimeIndexedPricingOnlyForbiddenArcs() {
 		return timeIndexedPricingOnlyForbiddenArcCount;
 	}

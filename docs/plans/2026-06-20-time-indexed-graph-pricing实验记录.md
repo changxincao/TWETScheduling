@@ -276,12 +276,22 @@ no-cut exact 原先只在进入 engine 前检查全局时限，一旦进入 `O(n
 
 SRI residual 的生命周期也重新逐项核对。residual 挂入 label 后只读，processing/prepend 扩展始终先 clone 再修改，等待弧不修改状态。因此 rank-1 和 scalar helper 的全零 residual 改为共享单个数组，scalar helper 的正反向等待也直接共享父 residual，删除大量短命 `byte[]`，而 processing/prepend 与 join/dominance 语义不变。SRI fixing 最终 label 构建后，原代码为统计窗口和写回 node 分别执行一次 `(job,t)` label-pair join；现合并成一次 reachability 分析，同一组 `min/max/count` 同时用于日志和写回，删除一半该阶段的 pair 扫描。未使用的旧 SRI window-tightening 私有方法一并删除。
 
-验证包括 focused `javac`、`TimeIndexedGraphOptimizationTest`、no-cut root-only、rank-1 active-cut root-only。no-cut 仍得到 `bound=22487.647059`、213 次 pricing、`valid=true`；rank-1 仍得到 `bound=22500.718750`、247 次 pricing、`valid=true`，与修改前基线完全一致。当前剩余边界有两项：exact graph 尚未统一消费 node compact window；显式 SRI-aware scalar helper 没有接收全局 `TimeLimitChecker`，极重 helper 调用仍可能越过总时限。这两项需要单独统一接口和图口径，本轮未改。
+验证包括 focused `javac`、`TimeIndexedGraphOptimizationTest`、no-cut root-only、rank-1 active-cut root-only。no-cut 仍得到 `bound=22487.647059`、213 次 pricing、`valid=true`；rank-1 仍得到 `bound=22500.718750`、247 次 pricing、`valid=true`，与修改前基线完全一致。这里当时把“exact graph 未消费 node compact window”误记成了待统一边界；第 27、28 节已纠正：正式 exact 应直接消费精确时空禁弧，不需要再套 job hull。当前真实的剩余边界是显式 SRI-aware scalar helper 没有接收全局 `TimeLimitChecker`，极重 helper 调用仍可能越过总时限。
 
 ## 27. 2026-07-14 第四轮复查纠正：exact graph 不消费 compact window
 
 上一轮把“给非时空图组件使用的 job compact hull”和“time-indexed exact 图继承的精确时空禁弧”混为一谈，错误地让 no-cut exact 和 rank-1 exact 再读取 compact window。该改动及对应测试已经撤销。
 
-当前口径恢复为：time-indexed exact 图直接使用基础 hard window、当次允许的临时 dual window，以及 node 继承的精确 (from,to,time) pricing-only 禁弧。compact window 是把时空可达集合压成每个 job 的区间 hull，主要供 ng-DSSR、启发式等不直接保存完整时空图的组件使用；再把这个较粗 hull 反向施加给 time-indexed exact 图没有必要。此前关于 paper graph fixing 是否增量覆盖父节点禁弧的检查与这个问题无关，不应作为 exact 使用 compact window 的理由。
+当前口径恢复为：time-indexed exact 图直接使用基础 hard window、当次允许的临时 dual window，以及 node 继承的精确 (from,to,time) pricing-only 禁弧。compact window 是把时空可达集合压成每个 job 的区间 hull，正式 exact pricing 不再额外读取它。paper graph fixing 和 scalar helper 仍可在永久 safe compact domain 上继续推导新的 fixing；这是 fixing 自己的缩图口径，不是 exact pricing 的口径，也与 paper fixing 是否增量覆盖父节点禁弧无关。
 
 撤销后重新运行 focused javac 和 TimeIndexedGraphOptimizationTest，均通过。第 26 节记录的剩余边界恢复不变：exact graph 不消费 compact window；显式 SRI-aware scalar helper 仍未接入全局 TimeLimitChecker。
+
+## 28. 2026-07-14 逐组件复核：compact、raw 时空禁弧与 dual window
+
+本轮不沿用上一轮结论，直接按实际构造入口重新核对。正式 no-cut exact 的 `TimeIndexedGraphSolver` 在 `preHeuristicMode=false` 时从基础 hard window 构图，可在 `PricingCompatibility` 允许时使用本轮 dual profitable window，但不读取 node compact window；普通 branch/pricing-only arc 和精确 `(from,to,time)` 禁弧均在弧扩展时检查。rank-1 exact 独立构图，同样不读取 compact；active SRI cut 会使 dual window 兼容检查失败，因此实际使用 hard window、普通禁弧和 raw 时空禁弧。无 active cut 时 rank-1 直接委托 no-cut exact。
+
+time-indexed pre-heuristic 是不同入口。它读取 hard、永久 compact 和 raw 时空禁弧；只有 node 不含 branch、ordinary pricing-only、raw time arc、compact 或 active cut 时才允许再叠加 dual window。它完成整张 relaxed 图且最小 pseudo reduced cost 非负时可以给内部列族证书；由于 compact/raw 都是当前 subtree 的永久 pricing-only 域，该证书针对的正是后续允许生成的内部列族。若存在负 pseudo path 但没有可返回的基本列，则不发闭合证书，后续 ng-DSSR 仍会执行。
+
+永久 fixing 入口与 exact pricing 分开。paper reduced-cost arc fixing 使用 `hard ∩ compact` 的 no-dual 图，同时读取已有普通禁弧和 raw 时空禁弧，并通过 `forbidTimeIndexedPricingOnlyArc()` 增量追加新禁弧；它不会替换父节点 raw 集合。这里使用 compact 只是把本次 fixing 限制在已经永久证明安全的 domain 内，减少图规模并允许继续加强，不是为了防止禁弧覆盖，也不意味着正式 exact pricing 要读取 compact。scalar helper 同样使用 `hard ∩ compact`、当前 LP dual 和已有 raw 禁弧；整数时间下把本轮 local fixing 与旧 raw 集合合并后写回，并收紧 job compact hull。root preprocessing 先用临时 no-cut exact 闭合 root，随后 paper/scalar 两种永久 fixing 都走 no-dual 口径，再把 raw 与 compact 复制给正式 root，最后仅将“安全域内所有时空副本均不可用”的普通弧提升为 ordinary pricing-only arc。
+
+ng-DSSR 继续使用 hard、可用的本轮 dual window 与 compact 的交集构造连续 PWLF 并收缩 pricing horizon；普通 pricing-only arc 直接参与扩展过滤，raw `(i,j,t)` 只用于整数 repeatability 判断和 time-indexed helper，不会被误当成连续 PWLF 的普通禁弧。由此确认，撤销提交 `106d1108` 后没有把正式 exact、pre-heuristic、永久 fixing 和 ng-DSSR 四种窗口口径再次混在一起。

@@ -78,6 +78,8 @@ public class LP {
 	private IloRange[] tariffBranchRanges;
 	private ArrayList<TariffSegment> outsourcingTariffSegments;
 	private boolean feasibilityRepairMode;
+	/** repair slack 与 branch-implied 竞争列共用的有限目标惩罚，不再复用 PWLF big_M。 */
+	private double repairObjectivePenalty;
 	private boolean allRowFeasibilityRepairMode;
 
 	private double[] jobDual;
@@ -104,6 +106,7 @@ public class LP {
 		this.outsourcingMembershipDual = new double[data.n + 1];
 		this.arcDual = new double[data.n + 2][data.n + 2];
 		this.feasibilityRepairMode = false;
+		this.repairObjectivePenalty = Utility.big_M;
 		this.allRowFeasibilityRepairMode = false;
 		this.branchImpliedPenaltyObjectiveMode = false;
 	}
@@ -233,6 +236,12 @@ public class LP {
 
 	public boolean isFeasibilityRepairMode() {
 		return feasibilityRepairMode;
+	}
+
+	/** 2026-07-14: 在建模前由 PC 按当前 incumbent 设置，避免 repair dual 进入 PWLF BigM 区间。 */
+	public void setRepairObjectivePenalty(double penalty) {
+		this.repairObjectivePenalty = penalty;
+		this.lastSolution = null;
 	}
 
 	public boolean isNoSlack() {
@@ -802,7 +811,7 @@ public class LP {
 	 * 这样和现有 pricing engine 的 reduced-cost 口径一致；旧 repair 仍只 slack 当前新分支行。
 	 */
 	private void addAllRowFeasibilitySlacks() throws IloException {
-		double penalty = Utility.big_M;
+		double penalty = repairObjectivePenalty;
 		if (coverRanges != null) {
 			for (int job = 1; job < coverRanges.length; job++) {
 				addRangeRepairSlacks(coverRanges[job], "coverSlack_" + job, penalty);
@@ -857,7 +866,7 @@ public class LP {
 	 * coverage 如果不可行，应由 pricing/外包列修复；repair slack 只用于产生当前分支行的引导 dual。
 	 */
 	private void addFeasibilitySlacks() throws IloException {
-		double penalty = Utility.big_M;
+		double penalty = repairObjectivePenalty;
 		byte type = node.getRepairType();
 		if (type == Node.REPAIR_MACHINE_UPPER) {
 			addRepairSlack(machineRange, -1.0, "machineUpperSlack", penalty);
@@ -946,14 +955,14 @@ public class LP {
 		}
 	}
 
-	/** strong branching phase-1 中，按配置把 branch-implied 竞争列从建模开始按 big-M 成本处理。 */
+	/** strong branching phase-1 中，按配置把 branch-implied 竞争列从建模开始按有限 repair penalty 处理。 */
 	private double internalColumnObjectiveCost(int columnId) {
 		TWETColumn column = pool.getColumn(columnId);
 		if (isBranchImpliedPenaltyColumn(column)) {
 			if (branchImpliedPenaltyColumnIds != null) {
 				branchImpliedPenaltyColumnIds.add(Integer.valueOf(columnId));
 			}
-			return Utility.big_M;
+			return repairObjectivePenalty;
 		}
 		return column.getCost();
 	}

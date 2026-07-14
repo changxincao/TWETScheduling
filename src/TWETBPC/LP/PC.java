@@ -29,6 +29,7 @@ import TWETBPC.Model.TWETOutsourcingColumn;
  * 节点内部的 price-and-cut 控制器。
  */
 public class PC {
+	private static final double REPAIR_PENALTY_INCUMBENT_MULTIPLIER = 50.0;
 
 	private static final double MAX_SMOOTHING_ALPHA = 0.8;
 
@@ -63,6 +64,7 @@ public class PC {
 		lastObservedDualBound = Double.NEGATIVE_INFINITY;
 		lastNodePrunedByDualBound = false;
 		incumbentForDualBoundPruning = incumbentCost;
+		lp.setRepairObjectivePenalty(repairObjectivePenalty(incumbentCost));
 		// 2026-05-23: 以下计时只写入 trace，用于拆分 RMP、pricing 和 cut 的耗时，
 		// 不参与列选择、剪枝或对偶计算，避免改变 BPC 求解流程。
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "initial");
@@ -340,6 +342,7 @@ public class PC {
 			boolean lightweightRepair) {
 		PricingControllerState savedState = saveControllerState();
 		try {
+			lp.setRepairObjectivePenalty(repairObjectivePenalty(incumbentForDualBoundPruning));
 			String initialPhase = domainRepair ? "strong_branching_domain_rmp"
 					: (lightweightRepair ? "strong_branching_light_repair_rmp" : "strong_branching_rmp");
 			boolean branchImpliedPenalty = config.enableStrongBranchingBranchImpliedPenalty;
@@ -353,8 +356,8 @@ public class PC {
 				needsRepair = true;
 			}
 			if (needsRepair) {
-				// 2026-07-04: strong trial repair 要同时清掉 artificial slack 和正值 M 列。
-				// slack=0 且 M=0 时，repair 模型的 primal objective 才可作为当前列集的 trial bound。
+				// 2026-07-14: strong trial repair 要同时清掉 artificial slack 和正值 penalty 列。
+				// 两者都归零时，repair 模型的 primal objective 才可作为当前列集的 trial bound。
 				solution = domainRepair ? repairDomainFilteredStrongBranchingMaster(lp)
 						: repairInfeasibleMaster(lp, false);
 			}
@@ -386,6 +389,17 @@ public class PC {
 			restoreControllerState(savedState);
 			resetAllPricingEngines();
 		}
+	}
+
+	/**
+	 * 2026-07-14: repair 只需要把 slack/竞争列显著压过当前可改进目标，不应把 PWLF 的不可行
+	 * big_M 带入 RMP 并制造同量级 dual。当前采用约定的 50 倍 incumbent 作为有限惩罚。
+	 */
+	private double repairObjectivePenalty(double incumbentCost) {
+		if (!Double.isFinite(incumbentCost)) {
+			return Utility.big_M;
+		}
+		return Math.max(1.0, REPAIR_PENALTY_INCUMBENT_MULTIPLIER * Math.max(0.0, incumbentCost));
 	}
 
 	private static String withSolutionMessage(String prefix, TWETMasterSolution solution) {

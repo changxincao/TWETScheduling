@@ -17,7 +17,9 @@ public class Utility {
 	public static HashMap<String, Integer> debugMap=new HashMap<String, Integer>();//记录各类元素执行次数
 	public static int debugNum=0;
 	public static double EPS=1e-6;
-	public static double big_M=1e8;
+	// 2026-07-14: PWLF 的不可行状态与普通目标值需要保持足够数量级间隔。
+	// strong repair 不再直接使用该值作为人工目标系数，而是使用基于 incumbent 的独立 penalty。
+	public static double big_M=1e10;
 	private static final double BIG_M_STATE_RATIO = 0.5;
 	public static double curUpperBound=big_M;//记录当前算例下的最优成本，过程中动态更新,注意这里由于定义为了静态的，每次迭代算例需更新
 	//由于这个东西主要用于截断PiecewiseLinearFunction，不能直接在PWLF中使用data截断，在PWLF中传入一个data对象不合适

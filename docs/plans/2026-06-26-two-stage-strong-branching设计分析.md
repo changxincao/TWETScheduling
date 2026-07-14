@@ -312,3 +312,11 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 修复应分两层。第一层是立即保证 BPC 正确性：strong trial 一旦进入当前 M-scale repair，其失败结果只能标记为不可复用，不能作为真实子树 `INF`；仅关闭 completion-bound pre-certificate 仍不充分，因为正式 label frontier 也会经过相同 PWLF normalize。第二层是根治 repair 数值语义，建议改成独立 Phase-I：兼容真实列目标为 0，人工 slack 和保留下来的 branch-implied 脏列目标为 1，pricing 同步按 Phase-I reduced cost 找列；Phase-I 目标达到 0 后关闭 repair mode，再恢复真实列成本求正式 RMP。这样既不依赖任意大 M，也不会让 repair dual 与 PWLF 的不可行哨兵相撞。另一条更彻底但改动更大的路线是给 PWLF 增加独立的不可达表示，并把它与 `Utility.big_M`、外包禁用成本、启发式无效值完全拆开。
 
 讨论过一个更小的工程修补：保持 PWLF BigM 语义不动，把 repair 中 branch-implied 列和 artificial slack 的目标系数都从 `1e8` 改成 `incumbent+1` 或 `2*incumbent`，从而让 repair dual 回到普通目标量级。这个办法对当前实例大概率能消除数值碰撞，但不能单独作为严格不可行证明，因为 RMP 中 slack 和脏列取值可以是任意小的分数，有限 penalty 未必强制它们归零。若采用该方案，positive slack/M 只能使 strong trial 返回 `UNUSABLE`，不能返回 `INF`；它适合作为最小安全止血和 A/B 实验，不替代严格 Phase-I。另一个细节是本次诊断中的极端 dual 已由 required-arc artificial slack 直接产生，因此只改竞争列成本仍不够，二者必须同时修改。全局 `Utility.big_M` 也不需要从 `1e8` 放大到 `1e9`，否则会影响数百处无效成本和 PWLF 判断；应新增独立 repair penalty，限制改动范围。
+
+### 2026-07-14 有限 repair penalty 修复与回归
+
+按当前实验口径实施最小修复：`Utility.big_M` 从 `1e8` 放大为 `1e10`，同时新增独立 `repairObjectivePenalty=50*incumbent`。该有限 penalty 同时用于 required/forbidden 分支 repair 的 artificial slack、all-row 实验 repair slack，以及 branch-implied 竞争列，避免只改其中一侧后仍产生 M 量级 dual。普通列的真实目标不变；strong trial 与正式节点 PC 都在首次建模前按各自当前 incumbent 写入 penalty。没有有限 incumbent 时才退回 `Utility.big_M`。
+
+针对原错误实例 `wet040_001_3m_timeX10` 重新运行相同的 ng-DSSR strong branching 主线。修复后得到 `obj=bound=156580`、`valid=true`，共 17 个节点、总时间 `173.493s`、exact pricing `11.827s/57`；日志中 `positive artificial slack` 和 `rmp_trial_infeasible` 均为 0 次。该结果恢复了关闭 strong branching 时已经验证的最优值，并消除了此前错误闭合到 `156590` 的现象。focused 编译和 `LPRestrictedColumnMembershipTest` 同时通过。
+
+当前实现保留既有的 residual 判定语义：repair 结束后若 artificial slack 或 branch-implied penalty 列仍为正，仍按该侧不可行处理。本次回归证明 `50*incumbent` 已解决已复现的数值碰撞；有限 penalty 对任意分数 LP 的严格词典序保证仍不等同于独立 Phase-I，这一理论边界保留在记录中，后续若再出现 residual 误判应直接转独立 Phase-I，而不是继续放大 penalty。

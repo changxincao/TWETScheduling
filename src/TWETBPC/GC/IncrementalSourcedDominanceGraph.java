@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
+import java.util.Iterator;
 import java.util.Map;
 
 import Common.PiecewiseLinearFunction;
@@ -32,6 +33,8 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 
 	private static final boolean TIMING_DIAGNOSTIC = Boolean.getBoolean(
 			"twet.bpc.incrementalSourcedGraphTiming");
+	private static final boolean SOURCE_MARK_INSTALL = Boolean.parseBoolean(
+			System.getProperty("twet.bpc.incrementalSourcedGraphSourceMarkInstall", "true"));
 	private static final ArrayList<IncrementalSourcedDominanceGraph> DIAGNOSTIC_GRAPHS =
 			new ArrayList<IncrementalSourcedDominanceGraph>();
 
@@ -54,6 +57,10 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 	private static long insertNanos;
 	private static long propagationNanos;
 	private static long markSeed;
+	private static long installMergedNanos;
+	private static long sourceMarkSeed;
+	private static long installMergedCalls;
+	private static long installMergedSegments;
 	private static String diagnosticContext = "";
 
 	private final LinkedHashSet<IncrementalNode> nodes = new LinkedHashSet<IncrementalNode>();
@@ -95,6 +102,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		partialTrimUpdatesCoalesced = 0L;
 		partialSegmentsBefore = 0L;
 		partialSegmentsAfter = 0L;
+		installMergedNanos = 0L;
+		installMergedCalls = 0L;
+		installMergedSegments = 0L;
 		insertNanos = 0L;
 		propagationNanos = 0L;
 	}
@@ -127,7 +137,9 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		double avgLabels = activeNodes == 0L ? 0.0 : ((double) activeLabels) / activeNodes;
 		double avgSegments = activeNodes == 0L ? 0.0 : ((double) envelopeSegments) / activeNodes;
 		String timing = TIMING_DIAGNOSTIC
-				? ", insert/propagateMs=" + formatMillis(insertNanos) + "/" + formatMillis(propagationNanos)
+				? ", insert/propagate/installMs=" + formatMillis(insertNanos) + "/"
+						+ formatMillis(propagationNanos) + "/" + formatMillis(installMergedNanos)
+						+ ", install calls/segments=" + installMergedCalls + "/" + installMergedSegments
 				: "";
 		return "incrementalSourcedGraph partial=" + partial + ", context=" + diagnosticContext
 				+ ", labels kept/rejected/removed=" + labelsKept + "/" + labelsRejected + "/" + labelsRemoved
@@ -688,11 +700,15 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		IdentityHashMap<Label, Boolean> partialSources;
 		IdentityHashMap<Label, ArrayList<SourcedSegment>> retainedSegmentsBySource;
 		boolean candidateContributes;
+		final Label localCandidateSource;
+		final long sourceMark;
 		boolean sourceChanged;
 		boolean numericChange;
 		final boolean trackPartialSources;
 
-		MergeOutcome(boolean trackPartialSources, boolean recordDelta) {
+		MergeOutcome(boolean trackPartialSources, boolean recordDelta, Label localCandidateSource) {
+			this.localCandidateSource = localCandidateSource;
+			this.sourceMark = SOURCE_MARK_INSTALL && !trackPartialSources ? ++sourceMarkSeed : 0L;
 			this.trackPartialSources = trackPartialSources;
 			this.delta = recordDelta ? new SparseDelta() : null;
 		}
@@ -738,7 +754,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		private MergeOutcome merge(CandidateCursor fresh, Label source, boolean externalWinsTies,
 				boolean trackPartialSources, boolean recordDelta) {
 			sourceAwareMerges++;
-			MergeOutcome outcome = new MergeOutcome(trackPartialSources, recordDelta);
+			MergeOutcome outcome = new MergeOutcome(trackPartialSources, recordDelta, source);
 			if (!fresh.hasCurrent()) {
 				return outcome;
 			}
@@ -752,7 +768,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 					break;
 				}
 				if (!fresh.hasCurrent()) {
-					appendOldRemainder(merged, oldIndex, oldCursor);
+					appendOldRemainder(merged, oldIndex, oldCursor, outcome);
 					break;
 				}
 				SourcedSegment old = segments.get(oldIndex);
@@ -774,7 +790,7 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 				}
 				if (Utility.compareLt(oldStart, freshStart)) {
 					double end = Math.min(old.end, freshStart);
-					append(merged, oldStart, end, old.slope, old.intercept, old.source);
+					append(merged, oldStart, end, old.slope, old.intercept, old.source, outcome);
 					oldCursor = end;
 					continue;
 				}
@@ -830,6 +846,19 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		/** merge 已遍历过 segment；这里按 segment source 做 O(segment) 的归零识别。 */
 		private void installMergedSegments(ArrayList<SourcedSegment> merged, MergeOutcome outcome) {
 			IdentityHashMap<Label, Boolean> mergedSources = null;
+			long begin = TIMING_DIAGNOSTIC ? System.nanoTime() : 0L;
+			if (TIMING_DIAGNOSTIC) {
+				installMergedCalls++;
+				installMergedSegments += merged.size();
+			}
+			if (outcome.sourceMark != 0L) {
+				installMergedSegmentsFromMarks(merged, outcome);
+				if (TIMING_DIAGNOSTIC) {
+					installMergedNanos += System.nanoTime() - begin;
+				}
+				return;
+			}
+
 			for (SourcedSegment segment : merged) {
 				if (segment.source != null) {
 					if (mergedSources == null) {
@@ -862,7 +891,41 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 			segments = merged;
 			localSources = mergedSources;
+			if (TIMING_DIAGNOSTIC) {
+				installMergedNanos += System.nanoTime() - begin;
+			}
 		}
+		/**
+		 * normal no-SRI 不再二次扫描 merged segments。append 第一遍已经给仍存活的 source 写入本轮 mark；
+		 * 这里只遍历 node 的少量 source 集合，并补入本轮新 label。
+		 */
+		private void installMergedSegmentsFromMarks(ArrayList<SourcedSegment> merged, MergeOutcome outcome) {
+			if (localSources != null) {
+				Iterator<Label> iterator = localSources.keySet().iterator();
+				while (iterator.hasNext()) {
+					Label oldSource = iterator.next();
+					if (oldSource.sourcedEnvelopeMark == outcome.sourceMark) {
+						continue;
+					}
+					if (outcome.displacedLocalSources == null) {
+						outcome.displacedLocalSources = new ArrayList<Label>();
+					}
+					outcome.displacedLocalSources.add(oldSource);
+					iterator.remove();
+				}
+			}
+			if (outcome.localCandidateSource != null && outcome.candidateContributes) {
+				if (localSources == null) {
+					localSources = new IdentityHashMap<Label, Boolean>();
+				}
+				localSources.put(outcome.localCandidateSource, Boolean.TRUE);
+			}
+			if (localSources != null && localSources.isEmpty()) {
+				localSources = null;
+			}
+			segments = merged;
+		}
+
 
 		private static void appendLower(ArrayList<SourcedSegment> target, double start, double end,
 				SourcedSegment old, double freshSlope, double freshIntercept, Label freshSource,
@@ -884,17 +947,17 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 				return;
 			}
 			if (oldNoWorse && !freshNoWorse) {
-				append(target, start, end, old.slope, old.intercept, old.source);
+				append(target, start, end, old.slope, old.intercept, old.source, outcome);
 				return;
 			}
 			if (freshNoWorse && oldNoWorse) {
 				if (externalWinsTies && old.source != null) {
 					outcome.markPartialSource(old.source);
 					// 数值仍保留旧几何，只把来源改成 predecessor，避免容差内近似相等造成数值漂移。
-					append(target, start, end, old.slope, old.intercept, null);
+					append(target, start, end, old.slope, old.intercept, null, outcome);
 					outcome.sourceChanged = true;
 				} else {
-					append(target, start, end, old.slope, old.intercept, old.source);
+					append(target, start, end, old.slope, old.intercept, old.source, outcome);
 				}
 				return;
 			}
@@ -917,13 +980,13 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 				outcome.markPartialSource(old.source);
 				appendCandidate(target, start, end, freshSlope, freshIntercept, freshSource, outcome, true);
 			} else if (Utility.compareLt(oldMid, freshMid)) {
-				append(target, start, end, old.slope, old.intercept, old.source);
+				append(target, start, end, old.slope, old.intercept, old.source, outcome);
 			} else if (externalWinsTies && old.source != null) {
 				outcome.markPartialSource(old.source);
-				append(target, start, end, old.slope, old.intercept, null);
+				append(target, start, end, old.slope, old.intercept, null, outcome);
 				outcome.sourceChanged = true;
 			} else {
-				append(target, start, end, old.slope, old.intercept, old.source);
+				append(target, start, end, old.slope, old.intercept, old.source, outcome);
 			}
 		}
 
@@ -941,17 +1004,18 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 			}
 		}
 
-		private void appendOldRemainder(ArrayList<SourcedSegment> target, int oldIndex, double cursor) {
+		private void appendOldRemainder(ArrayList<SourcedSegment> target, int oldIndex, double cursor,
+				MergeOutcome outcome) {
 			for (int i = oldIndex; i < segments.size(); i++) {
 				SourcedSegment old = segments.get(i);
 				double start = i == oldIndex ? Math.max(old.start, cursor) : old.start;
-				append(target, start, old.end, old.slope, old.intercept, old.source);
+				append(target, start, old.end, old.slope, old.intercept, old.source, outcome);
 			}
 		}
 
 		private static void appendCandidate(ArrayList<SourcedSegment> target, double start, double end,
 				double slope, double intercept, Label source, MergeOutcome outcome, boolean numericChange) {
-			append(target, start, end, slope, intercept, source);
+			append(target, start, end, slope, intercept, source, outcome);
 			if (source != null && Utility.compareLt(start, end)
 					&& !Utility.isBigMValue(slope * (0.5 * (start + end)) + intercept)) {
 				outcome.candidateContributes = true;
@@ -971,9 +1035,12 @@ final class IncrementalSourcedDominanceGraph implements DominanceStore {
 		}
 
 		private static void append(ArrayList<SourcedSegment> target, double start, double end, double slope,
-				double intercept, Label source) {
+				double intercept, Label source, MergeOutcome outcome) {
 			if (!Utility.compareLt(start, end)) {
 				return;
+			}
+			if (source != null && outcome.sourceMark != 0L) {
+				source.sourcedEnvelopeMark = outcome.sourceMark;
 			}
 			if (!target.isEmpty()) {
 				SourcedSegment tail = target.get(target.size() - 1);

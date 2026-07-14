@@ -2559,7 +2559,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void initializeCandidateState(LP lp) {
-		generatedColumns = new ArrayList<TWETColumn>();
+		generatedColumns.clear();
 		generatedColumnCandidates = new PriorityQueue<PricingColumnCandidate>(
 				Math.max(1, config.maxExactPricingColumns), candidateWorstFirstComparator());
 		generatedCandidateBySignature = new HashMap<SequenceSignature, PricingColumnCandidate>();

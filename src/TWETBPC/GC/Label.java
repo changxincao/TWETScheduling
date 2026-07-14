@@ -29,6 +29,8 @@ public class Label implements Comparable<Label> {
 	public double minReducedCost;
 	/** 传播占优后只做标记，出队时跳过，避免在 PriorityQueue 中删除对象。 */
 	public boolean isDominated;
+	/** source-aware dominance merge 的临时世代标记；仅在同一 merge 内读取。 */
+	long sourcedEnvelopeMark;
 
 	public Label(int jid, Label father, PackedBitSet visitedSet, PackedBitSet reachableSet,
 			PiecewiseLinearFunction frontier) {

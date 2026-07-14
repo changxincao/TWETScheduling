@@ -2435,3 +2435,15 @@ zero-setup 下更合理的静态回退不是继续使用任意编号，也不宜
 第二个结构候选是 source-aware envelope merge。当前每次 accepted local merge 或向后传播都会新建完整 `ArrayList<SourcedSegment>`，未变化的旧段也会重新创建对象；merge 完成后又扫描一次全部 merged segments，重建 `IdentityHashMap<Label,...>` 并找出消失 source。最新 W300 首轮可出现约 38 万次 merge，envelope 平均上百段，因此这里可能形成明显的对象分配和 GC 压力。可行方向是让 append 阶段同时维护新 source registry 和 displaced source count，消除 merge 后第二次扫描；更进一步只复制变化边界、复用不变 segment 区间，但这会碰到相邻段合并和 mutable `end`，风险明显高于 reachability mask。应先增加 JFR/分配统计或局部计时，再决定是否修改。
 
 当前结论不是“no-SRI 已无优化空间”，而是剩余大头主要来自 survivor、segment 和 label 数量，不再是明显错误的重复流程。建议顺序为：先清理三处确定的小冗余；再做 threshold-mask child reachability 的严格集合对拍和 W300 A/B；只有前两项仍不足时，才动 source-aware envelope 的存储结构。completion bound、group-envelope join、candidate pool、active-label 压缩和 DSSR round 更新暂未发现新的可直接删除工作，不应在没有新证据时继续改写。
+
+238. 2026-07-14 no-SRI 高频实现逐项 A/B
+
+本轮继续沿 no-SRI 实际主线逐项检查实现成本，不修改 ng-DSSR 的数学状态、占优关系和返回列口径。测试统一采用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的确定性 root-only 配置：关闭 ALNS、strong branching、RMIH 和 SRI，保留启发式 pricing、time-indexed root preprocessing、200 条 elementary seed、nearestK5/top10、source-aware dominance、join envelope prefilter、all-cycles completion bound 和 Tmid 复用。此前尝试关闭启发式后 root 路径和列池发生大幅变化，运行超过 8 分钟仍未结束，不能作为实现级 A/B，已中止并从结论中排除。
+
+第一项尝试针对 50/60-job 单 word 位集，把 child reachability 的逐 job 扫描预编译为按最早/最晚时间查询的 threshold mask。40-2 和 W300 的逐 label 对拍均严格一致；W300 中原扫描约 `264--268ms`，mask 查询约 `99ms`，另有约 `17ms` 建索引，覆盖 898,939 次查询。但放到完整 exact 中只稳定节省约 `0.15s`，约占 exact 的 `0.34%`，wall time 波动远大于收益。该实现增加了四套索引、配置和单 word 专用 API，收益不足以抵消复杂度，已完整撤回。
+
+第二项针对 `IncrementalSourcedDominanceGraph` 的 envelope install。旧流程在 merge 已经逐 segment 构造新包络后，还会再次扫描全部 merged segments，以重建 source 集合并识别不再贡献的本地 label。W300 诊断中该二次扫描累计处理 `61,361,126` 个 segment，耗时 `1.442s/665,978 calls`，约占图计时的 29.7%。新流程在第一次 append segment 时给仍存活的 label source 写入本轮 generation mark；install 阶段只遍历 node 原有的少量 source，删除没有本轮 mark 的来源，并补入确实贡献区间的新 label。数值包络、tie 规则、delta 和 displaced-source 语义不变。partial 模式需要 retained interval，仍完整保留旧扫描路径。
+
+随机一致性测试分别在新 mark 路径和旧扫描路径下完成 96,000 次插入，active 状态均为 `164/143`；微测时间约为 `19.521ms/34.239ms`。W300 旧扫描与新路径得到完全相同的 `bound=1726.029855`、`pool=9574`、7 次 exact 和 `valid=true`。带图诊断时 install 由 `1.443s` 降至 `0.396s`，约减少 72.6%；关闭诊断后的最终 run 为 `solve=81.730s, exact=41.024s/7`。两次旧扫描无诊断基线为 `exact=43.854s` 和 `45.153s`，平均约 `44.504s`，因此 exact 平均降低约 7.8%，总时间相对基线均值约降低 3.8%。该优化默认启用，同时保留系统属性 `twet.bpc.incrementalSourcedGraphSourceMarkInstall=false` 作为旧路径对拍入口。
+
+此外保留一处小清理：同一次 exact pricing 的 DSSR 轮次间清空并复用 `generatedColumns`。该项不作为主要提速来源。当前结论是 source install 的二次 segment 扫描属于已确认、可稳定消除的实现冗余；threshold mask 虽正确但净收益不足，不应进入生产主线。

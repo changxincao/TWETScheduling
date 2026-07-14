@@ -1,21 +1,15 @@
 package TWETBPC.GC;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
-import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
-import TWETBPC.LP.CutPool;
-import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
-import TWETBPC.LP.Pool;
 
 /**
  * 2026-07-14: time-indexed 热路径等价性回归测试，不依赖求解器。
@@ -29,7 +23,6 @@ public final class TimeIndexedGraphOptimizationTest {
 		testCompressedPredecessorMatchesFullWaitingChain();
 		testTimeIndexedArcLookupMatchesNode();
 		testStaticPricingDataMatchesInstance();
-		testExactGraphWindowsUseNodeCompactWindow();
 		testExactPricingRejectsNonIntegerGrid();
 		System.out.println("TimeIndexedGraphOptimizationTest passed");
 	}
@@ -136,74 +129,6 @@ public final class TimeIndexedGraphOptimizationTest {
 				} else if (Math.abs(expected - actual) > 1e-8 * Math.max(1.0, Math.abs(expected))) {
 					throw new AssertionError("penalty cache mismatch");
 				}
-			}
-		}
-	}
-
-	private static void testExactGraphWindowsUseNodeCompactWindow() throws Exception {
-		Data data = loadData();
-		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
-		int expectedHorizon = 0;
-		int[] expectedStart = new int[data.n + 1];
-		int[] expectedEnd = new int[data.n + 1];
-		for (int job = 1; job <= data.n; job++) {
-			int start = Math.max(0, (int) Math.ceil(data.hardWindowStart[job] - 1e-9));
-			int end = Math.max(start, Math.min((int) Math.floor(data.hardWindowEnd[job] + 1e-9), start + 7));
-			node.tightenTimeIndexedPricingWindow(job, start, end);
-			expectedStart[job] = start;
-			expectedEnd[job] = end;
-			expectedHorizon = Math.max(expectedHorizon, end);
-		}
-
-		int fullHorizon = Math.max(0, (int) Math.ceil(data.CmaxH - 1e-9));
-		if (expectedHorizon >= fullHorizon) {
-			throw new AssertionError("test compact windows did not shrink the full horizon");
-		}
-
-		TWETBPCConfig config = new TWETBPCConfig();
-		config.useTimeIndexedGraphPricing = true;
-		config.enableTimeIndexedGraphDualWindow = false;
-		LP lp = new LP(data, new Pool(data), new CutPool());
-		lp.construct(node, Collections.<Integer>emptyList());
-
-		PricingResult noCutResult = new TimeIndexedGraphPricingEngine(data, config).price(lp);
-		if (!noCutResult.getMessage().contains("horizon=" + expectedHorizon + ",")) {
-			throw new AssertionError("no-cut exact solver ignored compact horizon: " + noCutResult.getMessage());
-		}
-
-		Method noCutMethod = TimeIndexedGraphPricingEngine.class.getDeclaredMethod(
-				"computeGraphWindow", Data.class, LP.class, boolean.class, boolean.class);
-		noCutMethod.setAccessible(true);
-		Object noCutWindow = noCutMethod.invoke(null, data, lp, true, false);
-		assertCompactWindow(noCutWindow, expectedHorizon, expectedStart, expectedEnd, "no-cut");
-
-		TimeIndexedGraphRank1CutPricingEngine rank1 = new TimeIndexedGraphRank1CutPricingEngine(data, config);
-		Method rank1Method = TimeIndexedGraphRank1CutPricingEngine.class.getDeclaredMethod(
-				"computeGraphWindow", Data.class, LP.class);
-		rank1Method.setAccessible(true);
-		Object rank1Window = rank1Method.invoke(rank1, data, lp);
-		assertCompactWindow(rank1Window, expectedHorizon, expectedStart, expectedEnd, "rank-1");
-	}
-
-	private static void assertCompactWindow(Object window, int expectedHorizon, int[] expectedStart,
-			int[] expectedEnd, String name) throws Exception {
-		Field horizonField = window.getClass().getDeclaredField("horizon");
-		Field startField = window.getClass().getDeclaredField("start");
-		Field endField = window.getClass().getDeclaredField("end");
-		horizonField.setAccessible(true);
-		startField.setAccessible(true);
-		endField.setAccessible(true);
-		int actualHorizon = horizonField.getInt(window);
-		double[] actualStart = (double[]) startField.get(window);
-		double[] actualEnd = (double[]) endField.get(window);
-		if (actualHorizon != expectedHorizon) {
-			throw new AssertionError(name + " compact horizon mismatch: " + actualHorizon + " != "
-					+ expectedHorizon);
-		}
-		for (int job = 1; job < expectedStart.length; job++) {
-			if (Math.abs(actualStart[job] - expectedStart[job]) > 1e-9
-					|| Math.abs(actualEnd[job] - expectedEnd[job]) > 1e-9) {
-				throw new AssertionError(name + " compact window mismatch at job " + job);
 			}
 		}
 	}

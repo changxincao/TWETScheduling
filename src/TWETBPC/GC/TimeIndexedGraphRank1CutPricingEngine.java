@@ -898,16 +898,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		boolean dualWindow = config.enableTimeIndexedGraphDualWindow && canUseDualProfitableWindow(lp);
 		double horizon = 0.0;
 		boolean hasFeasibleJob = false;
-		Node node = lp == null ? null : lp.getNode();
 		for (int job = 1; job <= data.n; job++) {
 			double hStart = data.hardWindowStart[job];
 			double hEnd = data.hardWindowEnd[job];
-			// 2026-07-14: compact window 是 no-dual 永久证据，active SRI 下也可作为
-			// 更松图的安全缩域；SRI dual 只进入 label reduced cost，不参与窗口写回。
-			if (node != null && node.hasTimeIndexedPricingWindow(job)) {
-				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
-				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
-			}
 			if (dualWindow) {
 				double baseline = outsourcingBaseline(data, job);
 				double jobDual = Math.max(0.0, lp.getJobDual(job));

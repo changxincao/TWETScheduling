@@ -284,6 +284,7 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 前面的 light repair 实验本质上验证的是一种 child 初始列准备方式，而不是 strong branching 专属的求解机制。因此本次把它最小范围接入普通分支入队：当 `enableStrongBranchingLightweightRepair=true`，且当前分支是 arc 分支，或列化外包模式下的 outsourcing membership 分支时，child seed 不再简单继承父节点全部 restricted columns，而是保留父 LP 正值机器列作为 repair 起点，其它机器列按 child compatibility 预筛；外包列仍按 child compatibility 过滤。机器数、tariff/segment、无向 adjacency 等分支保持旧逻辑，其中无向 adjacency 理论上也可类似处理，但当前主线暂不使用，先不扩大改动范围。
 
 这个修改只影响普通 child 初始 RMP 的列集，不改变 pricing 可生成列集合，也不改变 repair 流程。child 出队后仍先解初始 LP；若可行，继续走原来的 reduced-cost/compatibility 筛列并重解；若不可行，仍走旧 repair。关闭 `enableStrongBranchingLightweightRepair` 时普通分支路径完全回到旧的全继承 seed 逻辑。
+
 ### 2026-07-02 普通 child 轻量 seed 正确性检查
 
 本次复查确认该修改只改变普通 child 入队时的初始 seed，不改变 pricing 可生成列集合，也不跳过 PC 的正式 repair/filter 流程。`enableStrongBranchingLightweightRepair=false` 时，`useLightweightChildSeedForBrancher()` 直接返回 false，普通分支仍走旧的全继承父 restricted 列逻辑。打开时只覆盖 `ArcBrancher` 和列化外包下的 `OutsourcingMembershipBrancher`；机器数、tariff/segment、无向 adjacency 等保持旧逻辑。
@@ -295,3 +296,13 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 2026-07-07 复核 time-indexed strong branching 与 lightweight seed 的关系。lightweight 不是某个 pricing engine 的内部能力，而是 strong branching trial 建 child seed columns 的方式，因此 pure time-indexed、ng-DSSR 以及列化外包 membership 分支都可以共用这条入口；它只在 `enableStrongBranchingLightweightRepair=true` 时对 `ArcBrancher` 和列化外包下的 `OutsourcingMembershipBrancher` 生效，不作用于机器数、tariff segment 等分支。本次 `wet060_001_3m` pure time-indexed run 虽然开启了 two-stage strong branching，但日志显示 `enableStrongBranchingLightweightRepair=false`，因此 phase-1 trial 直接在 root 闭合后的 `159180` 条 restricted columns 上求 LP，单次 trial 约 5-9 秒。这不能说明 lightweight 对 60-3 无效，只说明该组配置没有启用 lightweight。后续对 time-indexed 大列池做 strong branching 对比时，应显式记录是否打开 `twet.bpc.fullDomainCompare.strongBranchingLightweightRepair=true`，并优先与 `strongBranchingBranchImpliedPenalty=true` 搭配。
 
 2026-07-07 调整常用 full-domain runner 的 strong branching light 默认口径。前面 `wet060_001_3m` pure time-indexed root 闭合后停在 strong branching，日志显示 strong 开启但 `enableStrongBranchingLightweightRepair=false`，导致 phase-1 trial 直接在 `159180` 条 restricted columns 上求 LP，单次 5-9 秒。结合此前 40-2 time-indexed 和 ng-DSSR 对照中 light seed 均有正收益，本次只修改 `GCBBFullDomainComparisonTest` 的默认覆盖值：当 `enableTwoStageStrongBranching=true` 时，`strongBranchingLightweightRepair` 默认也为 true；仍可通过 `twet.bpc.fullDomainCompare.strongBranchingLightweightRepair=false` 显式关闭做消融。底层 `TWETBPCConfig` 默认值不变，避免影响其它 runner。该修改只改变 arc 分支和列化外包 membership 分支的 child seed 准备方式，不改变 pricing 可生成列集合和正式 repair 语义。
+
+### 2026-07-14 strong branching 误判不可行的确定根因
+
+40-3 时间直接放大十倍后，strong branching 版本错误闭合到 `156590`，而关闭 strong branching 后得到并验证了可行最优值 `156580`。这不是左右分支语义或 dual window 的问题。错误发生在 node 10 对 arc `(9,29)` 的右支 `require(9,29)`：strong trial 报告 `Repair RMP still has positive artificial slack after generating 308 columns`，随后把该侧记为 `INF` 并丢弃。已验证的 `156580` 最优解同时满足该节点的全部祖先分支：包含 `27->2`、不包含 `38->35`、不包含 `31->9`，并包含 `9->29`，因此该右子树实际可行，且包含全局最优解。
+
+针对同一配置增加临时诊断后，node 4 的 `require(6,22)` 复现了完全相同的错误链条。repair LP 中人工 slack 和 branch-implied 竞争列的目标系数使用 `Utility.big_M=1e8`，由此得到 `machineDual=-2.99981125e8`、`requiredArcDual=1e8`，部分 job dual 也接近 `1e8`。completion bound 的 source 函数会加上 `-machineDual`，因此一个仍然有限、后续还能被 `-arcDual` 降低的前缀暂时达到约 `3e8`。但 PWLF 同时把 `value >= 0.5*big_M` 当成不可行 BigM；`normalizeForward()` 因而提前删除了这些有限前缀，诊断结果为 `finitePrefixCount=0, rawBest=1e8`。
+
+随后 `completionBoundForwardSinkLowerBound()` 在没有有限 prefix 时返回 `0.0`，`tryApplyCompletionBoundPreCertificate()` 把它解释为“内部列族最小 reduced cost 非负”，直接跳过真正的 ng-DSSR labeling。repair 因此得不到补列，人工 slack 保持正值，`repairInfeasibleMaster()` 返回 infeasible；Tree 再把这个 trial 结果转换为 `pseudoCostInf`，最终丢掉一个真实可行的 child。根因是同一个有限常数 `1e8` 同时承担了两种不兼容语义：repair 的人工目标尺度，以及 PWLF 的不可行哨兵。它不是启发式没找到列，也不是 lightweight seed 本身不足，而是 exact repair pricing 在 M 量级对偶下被错误截断并给出了假证书。
+
+下一步修复不能只关闭 completion-bound pre-certificate。ng-DSSR 的正式 frontier 也使用同一套 PWLF normalize，M 量级 dual 仍可能把有限函数误当不可行。更稳妥的最小方向是把 repair 改为数值尺度独立的 Phase-I：只最小化人工 slack/脏列质量，人工系数使用正常量级，不再把真实列目标与 `1e8` 惩罚混在一起；Phase-I 可行后再恢复真实目标。修复前，strong trial 中基于当前 M-scale repair pricing 得到的 `INF` 不能作为子树不可行证明。临时诊断代码已移除，本节只记录已经复现和确认的原因。

@@ -207,3 +207,23 @@ zero setup 上的结论与原 setup 一致：现有启发式看起来耗时高�
 更准确的结论是：旧版第一轮 time-indexed pricing 在同口径测试中耗时约 `31.668s`，当前版本第一轮约 `0.181s`；两者 states/arcScans 只差约 2 倍量级，说明主要慢化不在 shortest path DP 本身，而在候选恢复后的 sequence 成本处理、对象构造和重复候选管理。旧版会对通过 top-candidate 过滤且未命中 active signature 的候选调用 `TWETColumnEvaluator.evaluate(sequence)`；这个调用比当前从 graph reduced cost 反推 objective cost 重得多。当前全局 Pool/LP 的同 signature 成本改进机制主要是为了处理 graph-derived objective 和同一 sequence 不同时间路径的成本差异；如果旧版 evaluator 已经给出该 sequence 的真实最优 objective，那么“active signature 不刷新旧列”不是旧版慢化的核心原因。
 
 因此，当前可靠判断是：旧版慢来自候选恢复和真实成本重算路径过重，但没有证据支持“十几万次 evaluator 调用”。后续若要精确量化，应在旧版中单独加计数器统计进入 `TWETColumnEvaluator.evaluate(sequence)` 的次数，而不是用 `negativeStates` 替代。
+
+## 21. 2026-07-14 当前 time-indexed 实现低效点复查
+
+本次只复查当前实际接线的 no-cut shortest-path、rank-1/SRI、node 时空禁弧和 post-node graph fixing，没有修改生产代码。主要结论是：no-cut 动态规划的 `O(n^2H)` 扫描是大 horizon 下的结构性成本，但当前还叠加了几项可消除的高频开销。
+
+最明确的问题是候选 sequence 恢复。等待弧当前把 predecessor 逐时间点串起来，`reconstructSequence()` 会穿过所有等待状态，而不是只沿真正加入 job 的状态回溯。一条只有十几个 job 的路径在 horizon 约 1.9 万时也可能回溯上万步。历史放大时间日志中，一轮约扫描 1200 万至 2200 万条 processing arc，却可能触发十几万至三十多万次候选恢复；单轮耗时也随恢复量从约 0.5 秒上升到 7 秒以上。可严格等价地压缩等待 predecessor，让等待状态直接继承父状态的 sequence 链，只让 processing arc 增加一层，恢复复杂度由时间跨度降为序列长度。
+
+第二个问题是时空禁弧查询。`Node` 用 `(from,to) -> BitSet(time)` 存储是合理的，但热循环每次仍经过 `HashMap<Integer,BitSet>.get()` 和 boxed pair key。即使节点没有 raw 时空禁弧，每条 processing/idle/end arc 也会查询。历史日志常见单轮 `arcScans` 约 2000 万且 `timeArcSkips=0`，说明这些查询没有产生剪枝。应先增加“禁弧数为 0”快路径；有禁弧时可由 solver 使用按 pair 下标访问的 `BitSet[]` 只读视图，避免 HashMap 和装箱。
+
+第三个问题是 forward-distance fixing 缓存。每轮 no-cut pricing 后都会无条件克隆完整 `dist[(n+1)(H+1)]` 到静态缓存，不论之后是否立即 fixing。40-job、horizon 约 1.9 万时单次约复制 6 MB，数百轮会形成数 GB 的内存复制。现有 fingerprint 未包含逐 job graph window、dual-window 标记和普通 pricing-only arc 状态，因此该缓存既经常无法复用，也不应跨不同图口径复用。后续应只在明确即将 fixing 且 pricing 图与 safe-fixing 图完全一致时转移距离表，并把缓存限制在当前 engine/node 生命周期。
+
+第四类是每轮重复预计算。`penaltyByJobTime` 和 `durationByArc` 每轮重新分配构造，但它们对同一实例是静态的；可以在 engine 层缓存基础表。内层 `processArcReducedCost()` 还会重复读取 setup、job dual、arc dual 和 machine dual，可先按 `(from,to)` 预计算不含 completion penalty 的 base reduced cost，热循环只做一次 penalty 加法。候选 top-K 的 priority queue 还会保留未到堆顶的 stale Candidate，堆大小没有严格上界；可定期从 live map 重建。`hasRepeatedJob()` 的临时 boolean 数组属于更低优先级分配。
+
+post-node graph fixing 在重新计算 forward/backward 后，先额外构造 `usefulProcessingOutgoingAtOrAfter[n+1][H+2]` 并完整扫描一次 processing arc，cleanup 随后又扫描同一批弧。可以在倒序 cleanup 中维护 suffix 标志，消除一轮 `O(n^2H)` 扫描和二维 boolean 分配。它只在节点闭合后触发，不是每轮热点。
+
+rank-1/SRI 路径还有更重的对象开销：每次 heuristic/exact solver 都重新分配 bucket 引用和静态表；heuristic 失败后 exact 会重复准备。等待扩展在 residual 不变化时仍复制 `byte[]`，而 processing 扩展本来会在修改前复制，因此等待 label 可以共享 immutable residual。backward 为每个可结束 `(job,t)` 建初始 label 后，等待传播还会生成大量很快被 dominance 拒绝的候选，需单独统计后再决定 direct-end fast path。
+
+当前 no-cut exact 和 rank-1 exact 也没有读取 node compact window；no-cut 只有 pre-heuristic 会读取。纯 time-indexed 当前主要继承 raw 时空禁弧，因此这未必是已有所有 run 的主耗时，但节点已经有安全 compact window 时，exact 仍按更大 horizon 分配和扫描，明显没有利用现有证据。接入时必须同时统一 exact pricing、safe fixing 和 forward-cache 的窗口口径。
+
+优化优先级建议为：先做等待 predecessor 压缩和空时空禁弧快路径；再取消无条件 forward clone并严格限定 cache；随后 A/B arc reduced-cost base 和静态 penalty/duration；最后处理 fixing cleanup、rank-1 residual/bucket 和 compact window 接入。前两项最可能直接改善大 horizon exact，且不改变 shortest-path、列集合或 reduced-cost 语义。

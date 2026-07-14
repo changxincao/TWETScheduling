@@ -113,7 +113,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 	/**
 	 * 2026-06-20: time-indexed 图定价使用的离散时间窗。
-	 * root/no-cut 时可复用主线 pi-window 思路压缩 horizon；其他节点保持静态 hard window。
+	 * node compact window 是 no-dual 永久证据，exact/pre-heuristic 都可继承；当前 dual profitable window
+	 * 仅在兼容的 pricing 轮次内临时压缩图。
 	 */
 	private static GraphWindow computeSafeFixingGraphWindow(Data data, LP lp) {
 		// Arc fixing/promotion is UB-LB evidence written back to the node; the
@@ -328,7 +329,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node == null ? data.n + 1 : node.sinkId();
-			this.graphWindow = computeGraphWindow(data, lp, preHeuristicMode,
+			// 2026-07-14: node compact window 来自 no-dual 永久 fixing/reachability，
+			// 对 exact 与 pre-heuristic 都是同一安全缩域；不能只让启发式消费它。
+			this.graphWindow = computeGraphWindow(data, lp, true,
 					config.enableTimeIndexedGraphDualWindow);
 			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;

@@ -277,3 +277,13 @@ no-cut exact 原先只在进入 engine 前检查全局时限，一旦进入 `O(n
 SRI residual 的生命周期也重新逐项核对。residual 挂入 label 后只读，processing/prepend 扩展始终先 clone 再修改，等待弧不修改状态。因此 rank-1 和 scalar helper 的全零 residual 改为共享单个数组，scalar helper 的正反向等待也直接共享父 residual，删除大量短命 `byte[]`，而 processing/prepend 与 join/dominance 语义不变。SRI fixing 最终 label 构建后，原代码为统计窗口和写回 node 分别执行一次 `(job,t)` label-pair join；现合并成一次 reachability 分析，同一组 `min/max/count` 同时用于日志和写回，删除一半该阶段的 pair 扫描。未使用的旧 SRI window-tightening 私有方法一并删除。
 
 验证包括 focused `javac`、`TimeIndexedGraphOptimizationTest`、no-cut root-only、rank-1 active-cut root-only。no-cut 仍得到 `bound=22487.647059`、213 次 pricing、`valid=true`；rank-1 仍得到 `bound=22500.718750`、247 次 pricing、`valid=true`，与修改前基线完全一致。当前剩余边界有两项：exact graph 尚未统一消费 node compact window；显式 SRI-aware scalar helper 没有接收全局 `TimeLimitChecker`，极重 helper 调用仍可能越过总时限。这两项需要单独统一接口和图口径，本轮未改。
+
+## 27. 2026-07-14 第四轮复查：exact graph 统一消费 compact window
+
+本轮继续沿 no-cut exact、rank-1 exact、paper graph fixing、scalar/SRI helper 和 PC 证书入口复查。确认一处纯性能遗漏：此前只有 no-cut pre-heuristic 使用 node 已继承的 compact window，no-cut exact 和 rank-1 exact 仍按基础 hard window 构图。因此即使永久 fixing 已把每个 job 的有效完工区间压窄，exact 仍按较大的 horizon 分配状态并扫描无效时间。
+
+现已让 no-cut exact、no-cut pre-heuristic 和 rank-1 exact 统一使用“基础 hard window 与 node compact window 的交集”。compact window 来自 no-dual 的永久 fixing/reachability 证据，属于当前 node 及其后代可继承的安全缩域；active SRI 下也只是在更松的 no-SRI 图上继承该缩域，SRI dual 仍只进入 label reduced cost。当前 dual profitable window 仍只在兼容的 pricing 轮次内临时使用，不参与永久 arc/window 写回。paper graph fixing 本身是对 node 时空禁弧做增量追加，不会因为 compact horizon 变短而替换或丢失父节点在更大时间上的禁弧。
+
+新增无求解器定向回归：构造所有 job 都带 compact window 的 node，实际调用 no-cut exact price() 检查 solver 使用缩短后的 horizon；同时逐 job 对拍 no-cut 和 rank-1 的 start/end/horizon 交集。focused javac 与 TimeIndexedGraphOptimizationTest 均通过。另一个两节点 pure time-indexed smoke 得到 bound=22487.647059、valid=true；该 runner 的 scalar helper 只接在 ng-DSSR 主线，因此日志中 timeWindowJobs=0，不能拿它验证 compact 接入，本轮以定向回归为准。
+
+其余路径未发现新错误。等待 predecessor 压缩仍与完整等待链逐状态等价；SRI residual 只在 processing/prepend 前复制并修改，等待共享只读数组；no-cut/rank-1 超时后，PC 会在读取 certificate 和加入 Pool 前丢弃该次结果。现有 compact-only 列成本策略保持不变：它依赖“compact 是当前子树的永久安全缩域”这一既有实验口径；dual window 候选仍按原始目标重算。若以后要求全局 Pool 中每条列在所有兄弟节点都严格保存全域真实成本，则 exact compact 候选也要增加最终 evaluator 回刷，并单独评估其时间代价。另一项未改边界仍是显式 SRI-aware scalar helper 未接收全局 TimeLimitChecker，极重的节点闭合后 helper 调用可能延迟总时限响应。

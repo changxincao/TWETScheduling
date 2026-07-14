@@ -328,3 +328,9 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 全局 `big_M` 放大也做了交叉检查。当前 TWET 主线中没有继续硬编码 `1e8` 作为外包/PWLF 不可行值；`Data.outsourcingCost` 默认直接读取 `Utility.big_M`。相同 PWLF property test 分别在运行时设置 `big_M=1e8` 和 `1e10`，结果均为 `passed=27, warnings=2, failed=7`，说明本次放大没有新增该测试中的行为差异；这 7 项是当前测试源本身已有的报告项，不作为本次修复通过项。`OutsourcingMoveConsistencyTest` 完成 `14168` 次检查，source-aware dominance 与 PackedBitSet 随机测试也通过。
 
 仍有两个明确边界。第一，有限 penalty 不是严格 Phase-I：列变量和 artificial slack 都是连续变量，正 residual 可以小于任意固定经验阈值；当前代码仍会把 pricing 结束后的正 residual 转成 `INFEASIBLE`，所以 `50*incumbent` 是当前数据尺度下通过完整回归的工程修复，而不是任意实例上的不可行性定理。第二，strong trial 使用的是本次 `PC.solve()` 开始时保存的 incumbent；若同一节点随后由 RMIH 改进上界，trial penalty 仍按旧的较大 incumbent 计算。它不改变这次 `156580` 结果，但严格说不是“分支瞬间最新 incumbent”。此外必须维持 `50*incumbent < 0.5*Utility.big_M`；当前回归中 penalty 约 `7.83e6`，远低于 `5e9`，不会再次进入 PWLF BigM 区间。
+
+### 2026-07-14 strong-on 回归耗时拆分
+
+`173.493s/17 nodes` 的 CSV 字段容易低估 strong branching 成本：其中 `HeuristicPricing=29.250s/183` 只统计正式节点启发式，不含 `HeuristicPricing[strongBranching]=84.191s/529`。强分支 master LP 另占 `22.509s`，包括 lightweight phase-1 RMP `18.303s/320`、phase-2 initial LP `2.701s/64` 和 phase-2 heuristic 后重解 `1.505s/465`。因此可直接归属于 strong branching 的时间至少为 `106.700s`，占总时间约 `61.5%`；全部启发式 pricing 合计 `113.441s`，占约 `65.4%`。CSV 的 `master LP=24.064s` 中约 `93.5%` 也来自 strong trial，正式节点普通 master LP 仅约 `1.56s`。
+
+ng-DSSR exact 不是本次瓶颈：正式 exact 为 `11.827s/57`，约占总时间 `6.8%`。其中 56 次带详细统计的调用共 `11.471s`，initialization 为 `11.008s`，completion bound 构造为 `10.729s`；也就是说 completion bound 占 exact 约九成，但只占整次求解约 `6.2%`。总时间扣除全部 pricing 和 master LP 后约剩 `23.7s`，与 root summary 中求解前后约 `24.4s` 的差值一致，主要是 ALNS seed、初始列及框架准备成本。当前实例若继续优化总时间，首要对象应是 strong phase-2 启发式调用次数/候选数，而不是 ng-DSSR exact 或普通 master LP。

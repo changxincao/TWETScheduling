@@ -320,3 +320,11 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 针对原错误实例 `wet040_001_3m_timeX10` 重新运行相同的 ng-DSSR strong branching 主线。修复后得到 `obj=bound=156580`、`valid=true`，共 17 个节点、总时间 `173.493s`、exact pricing `11.827s/57`；日志中 `positive artificial slack` 和 `rmp_trial_infeasible` 均为 0 次。该结果恢复了关闭 strong branching 时已经验证的最优值，并消除了此前错误闭合到 `156590` 的现象。focused 编译和 `LPRestrictedColumnMembershipTest` 同时通过。
 
 当前实现保留既有的 residual 判定语义：repair 结束后若 artificial slack 或 branch-implied penalty 列仍为正，仍按该侧不可行处理。本次回归证明 `50*incumbent` 已解决已复现的数值碰撞；有限 penalty 对任意分数 LP 的严格词典序保证仍不等同于独立 Phase-I，这一理论边界保留在记录中，后续若再出现 residual 误判应直接转独立 Phase-I，而不是继续放大 penalty。
+
+### 2026-07-14 修复后正确性复核
+
+本次按生产控制流重新检查了 penalty 的设置、模型重建和新增列路径。正式节点在 `PC.solve()` 首次 LP 前写入 penalty；strong phase-1 在首次 trial LP 前写入。`solveRelaxation()` 每次重建 CPLEX 模型时会继续读取 LP 对象中的同一 penalty，repair 过程中 `resolveCurrentModel()` 新增的内部列也通过 `internalColumnObjectiveCost()` 使用同一口径。required/forbidden 分支 slack、all-row 实验 slack 和 branch-implied 竞争列均已覆盖，普通列成本及 strong phase-2 的正式 seed 成本没有被替换。生产 `Tree` 在 root 前必经 `HeuristicSeedProvider`，后者会建立并写入 `bestSolution`，因此正常 BPC 路径不会走“incumbent 非有限时退回 `Utility.big_M`”的 fallback。
+
+全局 `big_M` 放大也做了交叉检查。当前 TWET 主线中没有继续硬编码 `1e8` 作为外包/PWLF 不可行值；`Data.outsourcingCost` 默认直接读取 `Utility.big_M`。相同 PWLF property test 分别在运行时设置 `big_M=1e8` 和 `1e10`，结果均为 `passed=27, warnings=2, failed=7`，说明本次放大没有新增该测试中的行为差异；这 7 项是当前测试源本身已有的报告项，不作为本次修复通过项。`OutsourcingMoveConsistencyTest` 完成 `14168` 次检查，source-aware dominance 与 PackedBitSet 随机测试也通过。
+
+仍有两个明确边界。第一，有限 penalty 不是严格 Phase-I：列变量和 artificial slack 都是连续变量，正 residual 可以小于任意固定经验阈值；当前代码仍会把 pricing 结束后的正 residual 转成 `INFEASIBLE`，所以 `50*incumbent` 是当前数据尺度下通过完整回归的工程修复，而不是任意实例上的不可行性定理。第二，strong trial 使用的是本次 `PC.solve()` 开始时保存的 incumbent；若同一节点随后由 RMIH 改进上界，trial penalty 仍按旧的较大 incumbent 计算。它不改变这次 `156580` 结果，但严格说不是“分支瞬间最新 incumbent”。此外必须维持 `50*incumbent < 0.5*Utility.big_M`；当前回归中 penalty 约 `7.83e6`，远低于 `5e9`，不会再次进入 PWLF BigM 区间。

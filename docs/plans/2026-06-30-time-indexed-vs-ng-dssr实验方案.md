@@ -865,3 +865,80 @@ SRI 的作用是明确的：root gap 降低约 `0.1512` 个百分点，节点由
 当前无 SRI 的 `238.806s` 不能直接与前述 `446.342s` 中止记录解释为“同配置自然波动”。旧 run 同时关闭了 strong branching、lightweight repair，并误将永久 `timeIndexedCompletionBoundArcFixing` 关闭；其子节点日志一直是 `timeWindowJobs=0`，运行到 node 40 仍有 31 个排队节点。当前 run 修复 strong repair 后使用 strong branching，并在 root 闭合后把时空 arc fixing/compact window 传给子节点，最终只处理 25 个节点。因此提速来自搜索树和子节点图同时缩小，现有数据不能把收益单独分摊给 strong branching 或永久 fixing。
 
 同一十倍实例已有两条有效 ng-DSSR 结果。关闭 strong branching 时为 `140.565s/113 nodes`，是目前最快的有效记录；strong repair 修复后开启 strong branching为 `173.493s/17 nodes`，`exact=11.827s/57`、`heuristic=29.250s/183`、`master LP=24.064s`、`pool=50145`，同样得到 `obj=bound=156580, valid=true`。强分支虽然把节点压到 17 个，但 trial 成本没有被节点缩减抵消。因此按总时间，本例 ng-DSSR 仍快于当前 time-indexed：无 strong 的最好记录快约 `41.1%`，strong-on 的同口径记录快约 `27.3%`。
+
+### 2026-07-14：60-2 ng-DSSR node3 长尾与可选处理
+
+60-2 最新对比中，纯 time-indexed 已闭合到 `obj=bound=36803`，总时间约 `1568.207s`，而 ng-DSSR 在 root 和 node2 后进入 node3 长尾。当前 node3 的 LP 值长期停在 `36752.000000` 附近，exact pricing 仍反复找到很小的负 elementary 列，例如 `-3.74`、`-0.418`、`-0.057`、`-0.025`、`-1.0` 等；单次 exact 多为数秒，后期可到 10 秒级，主要耗时在 forward/backward label expansion，而不是 master LP 或 join。这个现象不是明显 correctness 问题，而是 exact certificate tail：RMP 已接近闭合，但仍需要很多轮加入很小影响的负列才能严格证明无负列。
+
+当前最直接的处理方向有三类。第一类是精确口径下的低风险调参：提高每次 exact pricing 返回的负列数量，避免数秒级 exact 只返回 1--2 条弱负列；同时在同一 node 上连续多次 heuristic pricing 失败或只产生极弱列时，临时跳过普通 heuristic pricing，让 exact pricing 承担闭合证明。第二类是近似/实验口径：当 LP objective 长时间不变且 best reduced cost 只剩很小负值时，引入 `eps` 级 early-stop 或 tail tolerance，但这只能用于启发式实验或候选配置筛选，正式精确结果必须最后用 `eps=0` 重新验证。第三类是混合策略：整数小 horizon 下 time-indexed 本身很强时，可以把 time-indexed 作为主算法或先用于给 ng-DSSR 提供 incumbent / root 信息；但 time-indexed relaxed 不能直接替代 elementary exact pricing 证书，除非明确改变算法口径。
+
+因此，当前建议不是继续在 node3 上盲目等待，而是先做一个小的 A/B：保持当前所有正确性增强不变，只比较“exact 每轮多返回列 + node 内 heuristic tail skip”是否能减少 node3 的 pricing 轮数；若只是为了实验结论，当前已经能说明 60-2 这类实例上 time-indexed 在小整数时间下更适合，ng-DSSR 的瓶颈变成严格 elementary 证书的尾部收敛成本。
+
+### 2026-07-14：50-3 原始算例 ng-DSSR 与 time-indexed 最新配置对比
+
+本次用原始 `data/50-3/wet050_003_3m.dat`，分别按当前 no-SRI ng-DSSR 最好配置和纯 time-indexed 最好配置求解。第一次 `20260714a` 启动失败，原因是 `run.cmd` 被写成 ASCII 后中文路径变成 `D:\??\...`，该目录只作为失败启动证据，不作为实验结果。有效结果来自 `20260714b`，该轮使用 PowerShell 直接 `Start-Process java.exe` 传 Unicode 参数和重定向，避免 cmd 文件编码问题。
+
+| 方法 | status | obj | bound | nodes | pricing | pool | solve | root | exact | heuristic | master LP | valid |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| time-indexed | FINISHED | 26527 | 26527 | 16 | 644 | 90156 | 187.528s | 97.255s | 16.139s / 627 | 0 | 98.060s | true |
+| ng-DSSR | FINISHED | 26527 | 26527 | 10 | 1130 | 70399 | 318.659s | 107.562s | 9.601s / 53 | 30.164s / 151 | 67.971s | true |
+
+结论是，在这个 50-3 原始小整数时间算例上，time-indexed 明显更快，虽然列池更大、master LP 时间更高，但它的图定价很便宜，整体仍只用约 187.5s。ng-DSSR 的 exact pricing 本身不重，只有约 9.6s；主要差距来自启发式、强分支和较多 pricing/LP 循环。这个结果继续支持前面的判断：对原始紧窗口、小整数时间实例，time-indexed 的 relaxed 图方法更适合；ng-DSSR 的优势更可能出现在 horizon 放大、小数 scale、宽 due window 或 pseudo-schedule gap 变差的场景。
+### 2026-07-14：50-3 原始算例 ng-DSSR 耗时拆解
+
+针对 `test-results/bpc/exp-50-3-ng-best-latest-001-20260714b`，ng-DSSR 在原始 `wet050_003_3m` 上最终 `318.659s` 闭合，`obj=bound=26527`，处理 `10` 个节点，root 用时 `107.562s`。这次耗时分布说明，当前瓶颈并不在 ng-DSSR exact pricing 本身，而主要在 strong branching 的启发式试探和 trial LP。
+
+显式统计中，`GCNGBBStyleNgDssrPricing` 主 exact pricing 只有 `9.601s / 53` 次，约占总时间 `3.0%`；即使把 repair 中的 `GCNGBBStyleNgDssrPricing[FindFeasible]=4.259s / 5` 算上，exact 也不是主因。相反，`HeuristicPricing[strongBranching]=101.065s / 669` 是最大单项，约占总时间 `31.7%`。strong branching 相关 LP 也很重：`strong_branching_light_repair_rmp=28.684s`、`strong_branching_phase2_initial=5.721s`、`strong_branching_after_heuristic=3.201s`，合计约 `37.6s`。因此 strong branching 显式成本约 `138.7s`，约占总时间 `43.5%`。
+
+其余主要耗时为 master LP 总计 `67.971s`，普通 `HeuristicPricing=30.164s / 151`，RMIH `22.285s / 7`。`TimeIndexedGraphPricing=5.552s / 247`，只占较小部分。显式统计合计约 `241.8s`，剩余约 `76.9s` 主要来自 ALNS seed（本配置允许最多 60s）以及 BPC 框架、列池、强分支调度等未细分开销。
+
+从节点看，较重节点如 node5、node7 的时间主要仍是启发式和 LP：node5 `27.389s` 中 pricing `13.583s`、heuristic `12.429s`、exact `1.154s`、LP `7.515s`、RMIH `4.021s`；node7 `22.759s` 中 pricing `13.398s`、heuristic `12.531s`、exact `0.867s`、LP `3.704s`、RMIH `4.020s`。这些数字进一步说明，在该算例上继续抠 ng-DSSR exact 内部常数收益有限；更有价值的 A/B 是降低或关闭 strong branching phase2 heuristic、减少 strong trial 数量、评估 RMIH 是否值得保留，以及把 ALNS 上限从 60s 降到更小值做对照。
+
+补充修正：上述耗时拆解中的“剩余约 76.9s”不能笼统归为 ALNS。按 node summary 的时间线反推，node1 结束时 total=150.306s、node1 自身 nodeTime=51.713s，因此进入 root 节点求解前已有约 98.593s。这里包含 time-indexed root preprocessing 的整体 `ms=39449.734`，而 summary 中的 `TimeIndexedGraphPricing=5.552s` 只统计了其中图 pricing engine 的调用时间，不覆盖预处理内的 LP 循环、图 fixing、窗口写回和 orchestration。扣除这约 39.45s 后，剩余约 59s 才主要对应 ALNS seed、initial column builder 以及未细分的启动/构造成本。节点阶段从 node1 到 node10 的 nodeTime 合计约 220.06s，二者相加与 `318.659s` 总时间吻合。因此当前 run 的完整粗拆应为：node 前初始化/预处理约 98.6s，节点求解约 220.1s；节点求解中显式最大项仍是 strong branching phase2 启发式和 strong trial LP。
+
+### 2026-07-14：50-3 关闭 time-indexed root preprocessing 与 strong phase2 的 ng-DSSR A/B
+
+按讨论在 `wet050_003_3m` 上做了一组最小变量 A/B。基线为 `exp-50-3-ng-best-latest-001-20260714b`：开启 time-indexed root preprocessing，并开启 two-stage strong branching 的 phase2 heuristic。新 run 为 `exp-50-3-ng-no-tiroot-phase1only-001-20260714`：仅关闭 `timeIndexedRootPreprocessingForNgDssr`，并设置 `strongBranchingPhase2CandidateLimit=0`，即 strong branching 只采用 phase1 的 trial RMP 信息，不再进入 phase2 heuristic。其余主要配置保持一致，包括 ng-DSSR、启发式 pricing、RMIH、completion bound、time-indexed scalar/window helper、midpoint probe、dual-bound pruning 和 ALNS seed。
+
+结果如下：
+
+| 配置 | solve | root | nodes | pricing rounds | pool | exact | heuristic | master LP | RMIH | valid |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| baseline：ti-rootpre + phase2 | 318.659s | 107.562s | 10 | 1130 | 70399 | 9.601s / 53 | 30.164s + SB heuristic 101.065s | 67.971s | 22.285s | true |
+| no ti-rootpre + phase1 only | 307.572s | 103.374s | 10 | 326 | 22083 | 11.537s / 59 | 75.009s | 128.823s | 24.983s | true |
+
+新配置确实去掉了 strong phase2 heuristic：summary 中不再出现 `HeuristicPricing[strongBranching]`，branch 日志显示 `phase=phase1`。但是一阶段 trial RMP 变得很重，`strong_branching_light_repair_rmp` 从 baseline 的 `28.684s / 268` 上升到 `123.271s / 256`，平均每次从约 `107ms` 上升到约 `482ms`。原因是关闭 root preprocessing 后，root 不再继承 compact window 和 200 条 elementary seed，虽然省掉了约 `39.45s` 的预处理，但 root 初始从 8 条列开始，普通启发式和 phase1 trial 都在更弱的窗口/列池口径下运行。root 收敛后仍能通过 node 内 time-indexed scalar arc fixing 获得时窗，但第一个 root 分支前的 trial LP 已经付出了较高成本。
+
+因此这组 A/B 的结论不是“phase2 一定没用”，而是：在该 50-3 原始算例上，关闭 phase2 heuristic 能消除约 `101s` 的 strong heuristic 显式成本，但关闭 root preprocessing 会显著加重 phase1 trial LP 和普通 heuristic，二者抵消后只从 `318.659s` 降到 `307.572s`，约快 `3.5%`。如果要继续拆清楚，应再跑一个只关闭 phase2、保留 time-indexed root preprocessing 的 A/B；这能单独判断 phase2 heuristic 是否值得保留。
+
+补充解释：no ti-rootpre 版本在 node1 收敛后 `avg reachablePts=604.4`，明显弱于 baseline 预处理阶段的 `392.5`，并不是因为 root LP bound 更弱。no ti-rootpre 的 node1 LP bound 实际同为 `26485.625`，且用于 fixing 的 gap 为 `300.375`，比预处理 graphFix 的 `306.651` 还略小。差异来自 fixing 口径：baseline 的 root preprocessing 先跑完整 time-indexed root，再做 paper time-indexed reduced-cost arc fixing，固定 `4,334,271` 条 raw 时空弧；随后 scalarFix 虽然 `fixed=0`，但它是在这些 raw 禁弧已经生效后的图上统计 reachable 点，因此平均 reachable 点只有 `392.5`。no ti-rootpre 版本没有这一步 paper graphFix，只在 ng-DSSR root 收敛后做 `ng-DSSR time-indexed scalar helper arc fixing`，固定 `3,969,198` 条时空弧。全局 lower bound 略强不代表每条 `(i,j,t)` 的 conditional lower bound 更强；arc fixing 需要的是“经过该时空弧”的条件下界，paper time-indexed graphFix 比 scalar helper 更细，所以能额外固定约 `365k` 条时空弧，最终窗口更窄。
+
+strong phase1 LP 暴涨也来自同一个原因。baseline 有 root preprocessing 后，root branching 前的 restricted 列只有 `2633`，root phase1 trial 的 `restrictedCols` 常见为 `1380--2540`；no ti-rootpre 版本 root branching 前 restricted 列为 `15053`，phase1 trial 的 `restrictedCols` 常见为 `4991--12598`。因此即使关闭 phase2 heuristic，phase1 的 lightweight trial RMP 也变成大模型，`strong_branching_light_repair_rmp` 从 `28.684s/268` 上升到 `123.271s/256`。这说明 root preprocessing 的收益不只是 seed 列和预处理时间窗，还显著压低了 strong branching trial RMP 的列规模。
+
+### 2026-07-14：补充说明 ng-DSSR root bound 与 time-indexed arc fixing 数量的关系
+
+进一步修正一个容易误读的点：不能只用“ng-DSSR root 下界更强”推断它的 time-indexed arc fixing 一定更多。当前这组 A/B 中，baseline 预处理阶段调用的是 `TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing()`，即 paper time-indexed reduced-cost graph fixing；no ti-rootpre 版本在 ng-DSSR root 收敛后调用的是 `TimeIndexedScalarCompletionBound.applyArcFixing()`，即 scalar helper。两者不是同一个 fixing 程序。前者在完整 time-indexed relaxed graph 上用正反向最短路直接判断每条 `(i,j,t)`，后者是 ng-DSSR 主线的辅助缩窗/时空禁弧写回路径，强度和输入图口径都不同。因此这组数字更准确的解释是：time-indexed 预处理中的 graphFix 本身比后续 scalar helper 更细，先固定了大量 raw 时空弧；随后 scalarFix 是在已删图上统计 reachable 点，而不是靠 scalarFix 自己额外固定。
+
+即使未来把两边统一成完全同一个 graph fixing，也仍然不能只看全局 LP bound 单调判断固定数量。arc fixing 判断的是“经过某条时空弧”的条件下界，形式上取决于 `forward(i,t) + arc(i,j,t) + backward(j,t')` 与当前 gap 的比较。全局 root bound 更高只说明当前 LP 对偶目标更好，不说明每条 arc 的条件 reduced-cost 下界都更高；不同 root 列族会给出不同 job dual、arc dual 和 machine dual，可能使部分局部弧的条件下界变弱。这里 no ti-rootpre 的 gap 确实更小（`300.375` 对 `306.651`），但只改善约 `6.28`，不足以抵消 dual 分布和 fixing 口径差异。后续若要验证“同一 graphFix + ng-DSSR dual 是否能固定更多”，需要新增一组明确实验：在 ng-DSSR root 收敛后也调用 paper graphFix，而不是拿当前 scalar helper 的结果和 root preprocessing 的 graphFix 直接比较。
+
+### 2026-07-14：ng-DSSR 的 time-indexed scalar helper 与后接 paper graphFix 的可行性
+
+`ng-DSSR time-indexed scalar helper arc fixing` 不是 paper graphFix 的别名。它在普通 ng-DSSR 节点收敛后由 `Tree.applyTimeIndexedScalarCompletionArcFixing()` 调用，入口为 `TimeIndexedScalarCompletionBound.applyArcFixing()`。该流程用当前 LP 解作为 node lower bound、当前 incumbent 作为 upper bound 得到 `gap=UB-LB`，再用原始 hard window 与 node 已继承的 compact window 取交集，按当前 LP 的 job/machine/arc dual 构造一个 time-indexed relaxed DP。它先计算 forward/backward reduced-cost 距离，再逐条检查 process/wait/end `(from,to,t)`，若 `forward + arc + backward >= gap`，则把该时空弧写入本 node 的 pricing-only forbidden set；之后重新计算可达点并把每个 job 的 reachable hull 写回 compact window。整数时间实例下会写回 raw time-indexed forbidden arc 和 compact window；非整数口径不能安全写回硬窗/时空弧。
+
+paper graphFix 的入口是 `TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing()`，当前主要用于 time-indexed exact pricing 或 root preprocessing。它同样用当前 LP dual 和 `gap=UB-LB`，但口径是论文式 time-expanded graph fixing，并带有 cleanup 和普通弧 promotion 的后续使用方式。若要验证“ng-DSSR root dual 下 paper graphFix 是否比 time-indexed root preprocessing 更强”，技术上可以做：在 ng-DSSR root 收敛后、普通 scalar helper 前后，临时用 copied config 打开 `useTimeIndexedGraphPricing=true` 调用 paper graphFix，输入仍为当前 ng-DSSR 的 `LP` 和 incumbent。该实验应先限制在 no-SRI/no-cut root；有 active SRI cut 时 paper graphFix 当前不含 cut 状态，不能直接当完整 SRI-aware fixing 使用。这样得到的结果才与 root preprocessing 的 graphFix 同口径，能判断差异来自 dual 还是来自 fixing 程序本身。
+
+### 2026-07-14：paper graphFix 的 cleanup 为什么会进一步缩小窗口
+
+进一步拆分 50-3 A/B 后，确认 paper graphFix 与 scalar helper 的第一轮 reduced-cost arc fixing 其实非常接近。baseline preprocessing 的 graphFix 分项为 `processFixed=3,871,165`、`idleFixed=56,476`、`endFixed=71,175`、`cleanupFixed=335,455`；no ti-rootpre 的 scalar helper 分项为 `processFixed=3,845,475`、`idleFixed=54,259`、`endFixed=69,464`。因此直接 reduced-cost 条件固定的差距约 `29,618` 条，而总差距约 `365,073` 条，其中绝大部分来自 graphFix 的 `cleanupGraph()`。
+
+这个 cleanup 不是只做统计或 cosmetic 后处理。它会在第一轮删弧后重新计算 forward/backward 可达性，然后删除已经没有可达 prefix/suffix 的 process arc、无 suffix 的 wait arc、不可达状态的 end arc，以及“当前已经可以结束且后续没有任何有用处理弧”的等待弧。等待弧一旦被删除，`(job,t)` 到更晚时间的可达链会断开，所以后续根据可达状态统计 compact window 时，窗口确实会进一步变窄。换句话说，paper graphFix 多出来的 cleanup 会改变后续 reachable graph；这正是 preprocessing 后 `avg reachablePts=392.5` 明显小于 no-ti-rootpre scalar helper `604.4` 的主要原因。
+
+由此看，如果目标是在 ng-DSSR root dual 下获得同口径加强，有两个实现方向：一是 root 收敛后直接临时调用 paper graphFix，再用 scalar helper 更新 compact window；二是把 cleanupGraph 等价逻辑移植到 scalar helper。前者更利于 A/B 验证，后者更像主线代码整理。无论哪种，都应先限制在 no-SRI/no-cut root 做验证。
+
+### 2026-07-15：scalar helper 接入 graphFix cleanup 后的验证
+
+按前面 A/B 的判断，`TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing()` 与 `TimeIndexedScalarCompletionBound.applyArcFixing()` 的主要差异不是第一轮 reduced-cost arc fixing，而是 paper graphFix 后续的 `cleanupGraph()`。本次已把等价 cleanup 逻辑移植到 no-SRI scalar helper：第一轮 process / wait / end 时空弧固定后，重新计算 forward/backward，然后删除已经没有可达 prefix/suffix 的处理弧、等待弧、结束弧，以及“当前已经可以结束且后续没有有用处理弧”的等待弧。该 cleanup 仍写入 helper 的 local fixed bitset，最后统一通过原有 `writeLocalFixedArcsToNode()` 写回 node，因此不改变 node 存储口径；SRI-aware helper 暂不改动，只在统计中显示 `cleanup=0`。
+
+烟测使用 `test-results/bpc/tmp-scalar-cleanup-smoke-50-3-20260714b`。在 `wet050_003_3m` 的 no-ti-rootpre 口径下，node 1 的 scalar helper 现在输出 `fixed=4305198`、`cleanup=336000`、`avg reachablePts=427.1`。修改前同一口径约为 `fixed=3969198`、`avg reachablePts=604.4`；而 root preprocessing 的 paper graphFix 口径约为 `cleanupFixed=335455`、`avg reachablePts=392.5`。因此，本次修改基本补上了 scalar helper 与 paper graphFix 之间最主要的 cleanup 差异，reachable window 已明显接近 preprocessing 口径。剩余 `427.1` 与 `392.5` 的差距仍可能来自 root preprocessing 与 ng-DSSR root 的 dual / graph 口径差异，而不是 cleanup 缺失本身。
+
+验证方面，focused `javac` 已通过，`TimeIndexedGraphOptimizationTest` 已通过；烟测日志显示后续 node 也会继续输出 `cleanup=...`，例如 node 2 `cleanup=11033`、node 3 `cleanup=10694`。这说明 cleanup 不只是 root 的一次性统计，而是已经进入 ng-DSSR 后续 node 的 scalar helper 写回流程。

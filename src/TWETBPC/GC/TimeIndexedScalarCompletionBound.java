@@ -41,6 +41,7 @@ public final class TimeIndexedScalarCompletionBound {
 		final int processFixed;
 		final int idleFixed;
 		final int endFixed;
+		final int cleanupFixed;
 		final double gap;
 		final long totalNanos;
 		final String message;
@@ -49,7 +50,7 @@ public final class TimeIndexedScalarCompletionBound {
 		final int nodeTimeIndexedArcFixed;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int unavailable,
-				int processFixed, int idleFixed, int endFixed, double gap, long totalNanos, String message,
+				int processFixed, int idleFixed, int endFixed, int cleanupFixed, double gap, long totalNanos, String message,
 				WindowReachabilityStats windowStats, int nodeWindowTightenedJobs, int nodeTimeIndexedArcFixed) {
 			this.available = available;
 			this.candidates = candidates;
@@ -58,6 +59,7 @@ public final class TimeIndexedScalarCompletionBound {
 			this.processFixed = processFixed;
 			this.idleFixed = idleFixed;
 			this.endFixed = endFixed;
+			this.cleanupFixed = cleanupFixed;
 			this.gap = gap;
 			this.totalNanos = totalNanos;
 			this.message = message;
@@ -67,7 +69,7 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null, 0, 0);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null, 0, 0);
 		}
 
 		public boolean isAvailable() {
@@ -77,7 +79,7 @@ public final class TimeIndexedScalarCompletionBound {
 		public String summary() {
 			return message + ", candidates=" + candidates + ", fixed=" + fixed
 					+ ", unavailable=" + unavailable + ", process/idle/end=" + processFixed
-					+ "/" + idleFixed + "/" + endFixed + ", gap=" + gap
+					+ "/" + idleFixed + "/" + endFixed + ", cleanup=" + cleanupFixed + ", gap=" + gap
 					+ ", ms=" + String.format("%.3f", totalNanos / 1_000_000.0)
 					+ ", nodeWindowTightened=" + nodeWindowTightenedJobs
 					+ ", nodeTimeArcFixed=" + nodeTimeIndexedArcFixed
@@ -824,7 +826,7 @@ public final class TimeIndexedScalarCompletionBound {
 		WindowReachabilityStats windowStats = reachability.stats;
 		int nodeWindowTightened = applySriReachableWindowsToNode(reachability);
 		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
-		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], gap,
+		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], 0, gap,
 				System.nanoTime() - start, "ng-DSSR time-indexed SRI-aware helper arc fixing", windowStats,
 				nodeWindowTightened, nodeTimeArcFixed);
 	}
@@ -838,6 +840,7 @@ public final class TimeIndexedScalarCompletionBound {
 		int processFixed = 0;
 		int idleFixed = 0;
 		int endFixed = 0;
+		int cleanupFixed = 0;
 		for (int t = 0; t <= horizon; t++) {
 			for (int from = 0; from <= n; from++) {
 				double prefix = forward[index(from, t)];
@@ -890,14 +893,72 @@ public final class TimeIndexedScalarCompletionBound {
 		if (fixed > 0) {
 			computeForwardDistances();
 			computeBackwardDistances();
+		}
+		// Align scalar helper with paper graphFix cleanup after reduced-cost fixing.
+		cleanupFixed = cleanupGraph();
+		if (cleanupFixed > 0) {
+			fixed += cleanupFixed;
+			computeForwardDistances();
+			computeBackwardDistances();
+		}
+		if (fixed > 0) {
 			buildScalarCaches();
 		}
 		WindowReachabilityStats windowStats = summarizeReachableWindows();
 		int nodeWindowTightened = applyReachableWindowsToNode();
 		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
-		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, gap,
+		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, cleanupFixed, gap,
 				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing", windowStats,
 				nodeWindowTightened, nodeTimeArcFixed);
+	}
+
+	private int cleanupGraph() {
+		if (localFixedTimeIndexedArc == null) {
+			return 0;
+		}
+		int fixed = 0;
+		boolean[] usefulProcessingAtLaterTime = new boolean[n + 1];
+		for (int t = horizon; t >= 0; t--) {
+			for (int from = 0; from <= n; from++) {
+				boolean fromReachable = isFinite(forward[index(from, t)]);
+				boolean usefulProcessingAtCurrentTime = false;
+				for (int to = 1; to <= n; to++) {
+					if (to == from || processArcForbidden[from][to] || isTimeIndexedArcForbidden(from, to, t)) {
+						continue;
+					}
+					int completion = t + durationByArc[from][to];
+					boolean completionUseful = completion <= horizon && isCompletionFeasible(to, completion)
+							&& fromReachable && isFinite(backward[index(to, completion)]);
+					if (completionUseful && isFinite(processArcReducedCost(from, to, completion))) {
+						usefulProcessingAtCurrentTime = true;
+					}
+					if (!completionUseful) {
+						forbidLocalTimeIndexedArc(from, to, t);
+						fixed++;
+					}
+				}
+				if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)
+						&& (!fromReachable || !isFinite(backward[index(from, t + 1)]))) {
+					forbidLocalTimeIndexedArc(from, from, t);
+					fixed++;
+				}
+				if (from > 0 && t < horizon && isEndAllowed(from, t)
+						&& !isTimeIndexedArcForbidden(from, from, t)
+						&& !usefulProcessingAtLaterTime[from]) {
+					forbidLocalTimeIndexedArc(from, from, t);
+					fixed++;
+				}
+				if (from > 0 && isEndAllowed(from, t) && !fromReachable
+						&& !isTimeIndexedArcForbidden(from, 0, t)) {
+					forbidLocalTimeIndexedArc(from, 0, t);
+					fixed++;
+				}
+				if (usefulProcessingAtCurrentTime) {
+					usefulProcessingAtLaterTime[from] = true;
+				}
+			}
+		}
+		return fixed;
 	}
 
 	private int writeLocalFixedArcsToNode() {

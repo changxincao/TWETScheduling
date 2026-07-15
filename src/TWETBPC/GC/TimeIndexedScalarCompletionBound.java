@@ -822,6 +822,28 @@ public final class TimeIndexedScalarCompletionBound {
 		ArrayList<SriLabel>[] backwardLabels = buildSriBackwardLabels(sri);
 		int[] stats = new int[5];
 		int fixed = applySriAwareLocalArcFixing(sri, forwardLabels, backwardLabels, gap, stats);
+		int cleanupFixed = 0;
+		StringBuilder cleanupRoundTrace = new StringBuilder();
+		if (fixed > 0) {
+			computeForwardDistances();
+			computeBackwardDistances();
+		}
+		// SRI-aware reduced-cost fixing is handled above. Cleanup is only structural reachability
+		// on the no-SRI relaxed graph, so it is safe under active cuts but weaker than full SRI-state cleanup.
+		for (int cleanupRound = 0; cleanupRound < 8; cleanupRound++) {
+			int roundFixed = cleanupGraph();
+			if (cleanupRoundTrace.length() > 0) {
+				cleanupRoundTrace.append('/');
+			}
+			cleanupRoundTrace.append(roundFixed);
+			if (roundFixed <= 0) {
+				break;
+			}
+			cleanupFixed += roundFixed;
+			fixed += roundFixed;
+			computeForwardDistances();
+			computeBackwardDistances();
+		}
 		if (fixed > 0) {
 			forwardLabels = buildSriForwardLabels(sri);
 			backwardLabels = buildSriBackwardLabels(sri);
@@ -830,8 +852,9 @@ public final class TimeIndexedScalarCompletionBound {
 		WindowReachabilityStats windowStats = reachability.stats;
 		int nodeWindowTightened = applySriReachableWindowsToNode(reachability);
 		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
-		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], 0, null, gap,
-				System.nanoTime() - start, "ng-DSSR time-indexed SRI-aware helper arc fixing", windowStats,
+		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], cleanupFixed,
+				cleanupRoundTrace.toString(), gap, System.nanoTime() - start,
+				"ng-DSSR time-indexed SRI-aware helper arc fixing", windowStats,
 				nodeWindowTightened, nodeTimeArcFixed);
 	}
 

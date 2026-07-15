@@ -954,3 +954,9 @@ paper graphFix 的入口是 `TimeIndexedGraphPricingEngine.applyPaperReducedCost
 在前述 `cleanupRounds=336000/8868/0` 的测试基础上，当前主线保留多轮 cleanup。实现上仍只作用于 no-SRI scalar helper：第一轮 reduced-cost fixing 后先重算 forward/backward，然后最多执行 8 轮 cleanup；每轮若有新增删除，就把新增时空弧写入 local fixed bitset 并重算 forward/backward；某轮为 0 时立即停止。summary 中保留 `cleanupRounds`，便于后续判断各 node 是否确实需要多轮传播。
 
 当前选择保留的原因是第二轮确实存在传播收益，且在 50-3 smoke 中额外成本约几十毫秒量级，不会成为主要瓶颈。需要注意的是，这仍是 no-SRI relaxed 图口径的结构清理；SRI-aware helper 未接入该 cleanup，相关统计中 `cleanupRounds` 为空。
+
+#### paper graphFix 多轮 cleanup 对齐
+
+随后将 `TimeIndexedGraphPricingEngine` 中 paper graphFix 的 cleanup 也改为同样的多轮传播。这样 no-SRI 口径下，ng-DSSR node 收敛后调用的 scalar helper 和 time-indexed paper graphFix 在 reduced-cost arc fixing 之后都会执行最多 8 轮 cleanup，并在某轮新增删除为 0 时停止，summary 输出 `cleanupRounds`。
+
+这个修改只影响 node 收敛后或 graphFix 阶段写回 node 的 time-indexed arc fixing/window 证据，不改变 time-indexed pricing 搜索本身，也不改变 ng-DSSR labeling、heuristic pricing 或 strong branching 的 pricing 逻辑。当前两边本质差异不再是 cleanup 强弱，而主要是调用时机、使用的 LP dual/bound 口径以及是否处在 SRI-aware 路径。

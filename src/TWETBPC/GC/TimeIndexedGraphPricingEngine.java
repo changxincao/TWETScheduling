@@ -878,11 +878,23 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					}
 				}
 			}
-			int cleanupFixed = cleanupGraph();
+			int cleanupFixed = 0;
+			StringBuilder cleanupRoundTrace = new StringBuilder();
+			for (int cleanupRound = 0; cleanupRound < 8; cleanupRound++) {
+				int roundFixed = cleanupGraph();
+				if (cleanupRoundTrace.length() > 0) {
+					cleanupRoundTrace.append('/');
+				}
+				cleanupRoundTrace.append(roundFixed);
+				if (roundFixed <= 0) {
+					break;
+				}
+				cleanupFixed += roundFixed;
+			}
 			int candidates = processCandidates + idleCandidates + endCandidates;
 			int fixed = processFixed + idleFixed + endFixed + cleanupFixed;
 			return new ArcFixingResult(true, candidates, fixed, processFixed, idleFixed, endFixed, cleanupFixed,
-					unavailable, gap, false, System.nanoTime() - start,
+					cleanupRoundTrace.toString(), unavailable, gap, false, System.nanoTime() - start,
 					"paper time-indexed reduced-cost arc fixing");
 		}
 
@@ -1098,6 +1110,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int idleFixed;
 		private final int endFixed;
 		private final int cleanupFixed;
+		private final String cleanupRounds;
 		private final int unavailable;
 		private final double gap;
 		private final boolean reusedForwardDistances;
@@ -1105,8 +1118,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final String message;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int processFixed, int idleFixed,
-				int endFixed, int cleanupFixed, int unavailable, double gap, boolean reusedForwardDistances,
-				long totalNanos, String message) {
+				int endFixed, int cleanupFixed, String cleanupRounds, int unavailable, double gap,
+				boolean reusedForwardDistances, long totalNanos, String message) {
 			this.available = available;
 			this.candidates = candidates;
 			this.fixed = fixed;
@@ -1114,6 +1127,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.idleFixed = idleFixed;
 			this.endFixed = endFixed;
 			this.cleanupFixed = cleanupFixed;
+			this.cleanupRounds = cleanupRounds;
 			this.unavailable = unavailable;
 			this.gap = gap;
 			this.reusedForwardDistances = reusedForwardDistances;
@@ -1122,7 +1136,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, 0, Double.NaN, false, 0L, message);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, null, 0, Double.NaN, false, 0L, message);
 		}
 
 		public boolean isAvailable() {
@@ -1172,7 +1186,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		public String summary() {
 			return message + ", candidates=" + candidates + ", fixed=" + fixed + ", unavailable=" + unavailable
 					+ ", processFixed=" + processFixed + ", idleFixed=" + idleFixed + ", endFixed=" + endFixed
-					+ ", cleanupFixed=" + cleanupFixed + ", reusedForward=" + reusedForwardDistances
+					+ ", cleanupFixed=" + cleanupFixed
+					+ (cleanupRounds == null ? "" : ", cleanupRounds=" + cleanupRounds)
+					+ ", reusedForward=" + reusedForwardDistances
 					+ ", gap=" + gap + ", ms="
 					+ String.format("%.3f", totalNanos / 1_000_000.0);
 		}

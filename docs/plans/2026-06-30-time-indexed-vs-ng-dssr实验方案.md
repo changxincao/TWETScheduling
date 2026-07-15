@@ -942,3 +942,9 @@ paper graphFix 的入口是 `TimeIndexedGraphPricingEngine.applyPaperReducedCost
 烟测使用 `test-results/bpc/tmp-scalar-cleanup-smoke-50-3-20260714b`。在 `wet050_003_3m` 的 no-ti-rootpre 口径下，node 1 的 scalar helper 现在输出 `fixed=4305198`、`cleanup=336000`、`avg reachablePts=427.1`。修改前同一口径约为 `fixed=3969198`、`avg reachablePts=604.4`；而 root preprocessing 的 paper graphFix 口径约为 `cleanupFixed=335455`、`avg reachablePts=392.5`。因此，本次修改基本补上了 scalar helper 与 paper graphFix 之间最主要的 cleanup 差异，reachable window 已明显接近 preprocessing 口径。剩余 `427.1` 与 `392.5` 的差距仍可能来自 root preprocessing 与 ng-DSSR root 的 dual / graph 口径差异，而不是 cleanup 缺失本身。
 
 验证方面，focused `javac` 已通过，`TimeIndexedGraphOptimizationTest` 已通过；烟测日志显示后续 node 也会继续输出 `cleanup=...`，例如 node 2 `cleanup=11033`、node 3 `cleanup=10694`。这说明 cleanup 不只是 root 的一次性统计，而是已经进入 ng-DSSR 后续 node 的 scalar helper 写回流程。
+
+#### 多轮 cleanup 的补充测试
+
+为确认 cleanup 是否还存在进一步传播，本次临时把 no-SRI scalar helper 改为最多 8 轮 cleanup，并在日志中输出 `cleanupRounds`，随后用同一 `wet050_003_3m` no-ti-rootpre smoke 口径测试。node 1 输出为：`cleanup=344868, cleanupRounds=336000/8868/0, fixed=4314066, avg reachablePts=427.1`。这说明第一轮 cleanup 后重新计算 forward/backward，第二轮确实还能额外删除 `8868` 条时空弧，第三轮归零。
+
+不过这 `8868` 条只占 node 1 总时空 fixing 的很小比例，且 `avg reachablePts` 与单轮 cleanup 的 `427.1` 相同，没有进一步缩小 compact window；耗时则从单轮 smoke 的约 `365ms` 增至本次约 `450ms`。因此当前判断是：多轮 cleanup 在图结构上确实更闭合，但在该算例 root 上主要带来少量额外 raw arc 删除，对硬时间窗没有可见增益。主线暂时恢复并保留单轮 cleanup；后续如果要启用 fixed-point cleanup，建议先做成开关或最多两轮，并只在第二轮删除量足够大时继续。

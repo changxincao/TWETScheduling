@@ -63,11 +63,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return PricingResult.noImprovement("Time limit reached before heuristic pricing");
 		}
 
+		HeuristicPricingStats stats = new HeuristicPricingStats(config.diagnosticHeuristicPricingDetails);
+		long phaseStart = stats.start();
 		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
+		stats.addSriContextNanos(phaseStart);
+		phaseStart = stats.start();
 		HeuristicWindowContext windowContext = buildHeuristicWindowContext(lp);
-		ArrayList<TWETColumn> seeds = collectBestSeedColumns(lp, sriContext);
+		stats.addWindowContextNanos(phaseStart);
+		phaseStart = stats.start();
+		ArrayList<TWETColumn> seeds = collectBestSeedColumns(lp, sriContext, stats);
+		stats.addSeedCollectNanos(phaseStart);
+		stats.seedColumns = seeds.size();
 		if (seeds.isEmpty()) {
-			return PricingResult.noImprovement("No active seed column for heuristic pricing");
+			return PricingResult.noImprovement("No active seed column for heuristic pricing" + stats.summary());
 		}
 
 		Utility.resetCurUpperBound(Utility.big_M);
@@ -75,19 +83,26 @@ public class HeuristicPricingEngine implements PricingEngine {
 		ArrayList<ScoredSequence> negativeCandidates = new ArrayList<ScoredSequence>();
 		HeuristicCostAudit costAudit = new HeuristicCostAudit();
 
+		phaseStart = stats.start();
+		int seedOrdinal = 0;
 		for (TWETColumn seed : seeds) {
 			if (this.timeLimitChecker.isTimeLimitReached() || isHeuristicPoolFull(negativeCandidates)) {
 				break;
 			}
+			long seedStart = stats.start();
+			int candidatesBeforeSeed = negativeCandidates.size();
 			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, generatedSignatures,
-					negativeCandidates, costAudit);
+					negativeCandidates, costAudit, stats);
+			stats.observeSeed(seedOrdinal++, seedStart, negativeCandidates.size() - candidatesBeforeSeed);
 		}
+		stats.addSearchNanos(phaseStart);
 
 		if (negativeCandidates.isEmpty()) {
 			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column"
-					+ costAudit.summary());
+					+ costAudit.summary() + stats.summary());
 		}
 
+		phaseStart = stats.start();
 		Collections.sort(negativeCandidates, new Comparator<ScoredSequence>() {
 			@Override
 			public int compare(ScoredSequence a, ScoredSequence b) {
@@ -98,7 +113,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 				return Integer.compare(a.sequence.size(), b.sequence.size());
 			}
 		});
+		stats.addSortNanos(phaseStart);
 
+		phaseStart = stats.start();
 		ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 		int limit = Math.min(config.maxHeuristicPricingColumns, negativeCandidates.size());
 		for (int i = 0; i < limit; i++) {
@@ -106,9 +123,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 			columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost, ColumnSource.PRICING_HEURISTIC,
 					false));
 		}
+		stats.addBuildColumnsNanos(phaseStart);
+		stats.returnedColumns = columns.size();
+		stats.negativeCandidates = negativeCandidates.size();
 		return new PricingResult(columns, true,
 				"Tabu heuristic pricing generated " + columns.size() + " columns from local pool "
-						+ negativeCandidates.size() + costAudit.summary());
+						+ negativeCandidates.size() + costAudit.summary() + stats.summary());
 	}
 
 	@Override
@@ -121,7 +141,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return true;
 	}
 
-	private ArrayList<TWETColumn> collectBestSeedColumns(final LP lp, SriPricingContext sriContext) {
+	private ArrayList<TWETColumn> collectBestSeedColumns(final LP lp, SriPricingContext sriContext,
+			HeuristicPricingStats stats) {
 		int limit = Math.max(0, config.heuristicPricingSeedColumns);
 		if (limit == 0) {
 			return new ArrayList<TWETColumn>();
@@ -136,10 +157,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 		PriorityQueue<ScoredSeed> bestSeeds = new PriorityQueue<ScoredSeed>(limit,
 				Collections.reverseOrder(bestFirst));
 		for (int columnId : lp.getRestrictedColumnIds()) {
+			if (stats.enabled) { stats.seedScanned++; }
 			TWETColumn column = lp.getPool().getColumn(columnId);
 			if (!isSequenceCompatible(lp.getNode(), column.getSequence())) {
+				if (stats.enabled) { stats.seedIncompatible++; }
 				continue;
 			}
+			if (stats.enabled) { stats.seedCompatible++; }
 			double sriPenalty = sriContext.isActive() ? sriContext.penalty(column.getSequence()) : 0.0;
 			ScoredSeed candidate = new ScoredSeed(column,
 					reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty));
@@ -150,12 +174,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 				bestSeeds.add(candidate);
 			}
 		}
+		stats.seedHeapSize = bestSeeds.size();
 		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(bestSeeds);
 		Collections.sort(candidates, bestFirst);
-
 		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(candidates.size());
-		for (int i = 0; i < candidates.size(); i++) {
-			seeds.add(candidates.get(i).column);
+		for (ScoredSeed candidate : candidates) {
+			seeds.add(candidate.column);
 		}
 		return seeds;
 	}
@@ -174,64 +198,77 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
-			HeuristicWindowContext windowContext,
-			HashSet<SequenceSignature> generatedSignatures,
-			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit) {
-		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext);
+			HeuristicWindowContext windowContext, HashSet<SequenceSignature> generatedSignatures,
+			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit,
+			HeuristicPricingStats stats) {
+		if (stats.enabled) { stats.tabuSearchCalls++; }
+		long stateStart = stats.start();
+		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext, stats);
+		stats.addStateBuildNanos(stateStart);
 		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence)) {
+			if (stats.enabled) { stats.invalidSeeds++; }
 			return;
 		}
+		if (stats.enabled) { stats.validSeeds++; }
 		double bestReducedCost = state.reducedCost(lp);
 		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, windowContext,
-				generatedSignatures, negativeCandidates, costAudit);
+				generatedSignatures, negativeCandidates, costAudit, stats);
 
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
 		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates)
 				&& !timeLimitChecker.isTimeLimitReached(); iter++) {
-			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost);
+			if (stats.enabled) { stats.tabuIterations++; }
+			long iterationStart = stats.start();
+			long acceptedBeforeIteration = stats.tryAddAccepted;
+			long findStart = stats.start();
+			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost, stats);
+			stats.addFindBestMoveNanos(findStart);
 			if (bestMove == null) {
+				if (stats.enabled) { stats.noMoveBreaks++; }
+				stats.observeTabuIteration(iter, iterationStart, 0L);
 				break;
 			}
+			long applyStart = stats.start();
 			state.apply(bestMove, iter + config.heuristicPricingTabuTenure);
+			stats.addApplyMoveNanos(applyStart);
 			if (Utility.compareLt(state.currentReducedCost, bestReducedCost)) {
 				bestReducedCost = state.currentReducedCost;
 			}
 			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, windowContext,
-					generatedSignatures, negativeCandidates, costAudit);
+					generatedSignatures, negativeCandidates, costAudit, stats);
+			stats.observeTabuIteration(iter, iterationStart, stats.tryAddAccepted - acceptedBeforeIteration);
 		}
 	}
 
-	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost) {
+	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost,
+			HeuristicPricingStats stats) {
+		if (stats.enabled) { stats.findBestMoveCalls++; }
 		TabuMove bestMove = null;
 		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
-
 		if (state.sequence.size() > 1) {
 			for (int pos = 0; pos < state.sequence.size(); pos++) {
-				TabuMove move = state.evaluateRemove(pos, lp);
-				if (isAcceptedCandidate(move, iter, bestReducedCost)
-						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
+				TabuMove move = state.evaluateRemove(pos, lp, iter, bestReducedCost, bestMoveReducedCost);
+				if (move != null) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
 				}
 			}
 		}
-
 		for (int job = 1; job <= data.n; job++) {
 			if (state.used[job]) {
 				continue;
 			}
 			for (int pos = 0; pos <= state.sequence.size(); pos++) {
-				TabuMove move = state.evaluateAdd(job, pos, lp);
-				if (isAcceptedCandidate(move, iter, bestReducedCost)
-						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
+				TabuMove move = state.evaluateAdd(job, pos, lp, iter, bestReducedCost, bestMoveReducedCost);
+				if (move != null) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
 				}
 			}
 			for (int pos = 0; pos < state.sequence.size(); pos++) {
-				TabuMove move = state.evaluateExchange(job, pos, lp);
-				if (isAcceptedCandidate(move, iter, bestReducedCost)
-						&& Utility.compareLt(move.reducedCost, bestMoveReducedCost)) {
+				TabuMove move = state.evaluateExchange(job, pos, lp, iter, bestReducedCost,
+						bestMoveReducedCost);
+				if (move != null) {
 					bestMove = move;
 					bestMoveReducedCost = move.reducedCost;
 				}
@@ -239,24 +276,28 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 		return bestMove;
 	}
-
-	private boolean isAcceptedCandidate(TabuMove move, int iter, double bestReducedCost) {
-		if (move == null || !move.valid) {
-			return false;
-		}
+	private boolean isAcceptedCandidate(double reducedCost, MoveType type, int primaryJob, int secondaryJob,
+			int[] tabuTenure, int iter, double bestReducedCost) {
+		boolean tabu = type == MoveType.EXCHANGE
+				? iter < tabuTenure[primaryJob] || iter < tabuTenure[secondaryJob]
+				: iter < tabuTenure[primaryJob];
 		// 旧 GCTabu 的 aspiration：如果候选优于历史最好 reduced cost，即使 tabu 也允许。
-		return !move.isTabu(iter) || Utility.compareLt(move.reducedCost, bestReducedCost);
+		return !tabu || Utility.compareLt(reducedCost, bestReducedCost);
 	}
 
 	private void tryAddNegative(List<Integer> sequence, double restrictedCost, double restrictedReducedCost, LP lp,
 			SriPricingContext sriContext, HeuristicWindowContext windowContext,
 			HashSet<SequenceSignature> generatedSignatures,
-			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit) {
+			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit,
+			HeuristicPricingStats stats) {
+		if (stats.enabled) { stats.tryAddCalls++; }
 		if (isHeuristicPoolFull(negativeCandidates)) {
+			if (stats.enabled) { stats.tryAddPoolFull++; }
 			return;
 		}
 		if (sequence.isEmpty() || Utility.isBigMValue(restrictedCost)
 				|| Utility.compareGe(restrictedReducedCost, REDUCED_COST_TOLERANCE)) {
+			if (stats.enabled) { stats.tryAddRejectedByReducedCost++; }
 			return;
 		}
 		SequenceSignature signature = new SequenceSignature(sequence);
@@ -264,28 +305,36 @@ public class HeuristicPricingEngine implements PricingEngine {
 		int existingColumnId = lp.getPool().getColumnIdBySignature(signature);
 		if ((existingColumnId >= 0 && lp.isRestrictedColumnActive(existingColumnId))
 				|| generatedSignatures.contains(signature)) {
+			if (stats.enabled) { stats.tryAddDuplicate++; }
 			return;
 		}
 		if (!windowContext.requiresTrueCostRecheck()) {
-			// 2026-07-01: compact window 是继承到当前子树的硬时间窗加强，先按窗口口径入 heuristic 列。
-			// dual profitable window 不是永久窗口，仍必须走下面的 true-cost recheck。
+			// compact window 是当前子树的硬窗口；dual profitable window 仍必须走下面的真实成本回刷。
 			costAudit.observeSkippedTrueRecheck();
+			if (stats.enabled) { stats.tryAddSkippedTrueRecheck++; }
+			if (stats.enabled) { stats.tryAddAccepted++; }
 			generatedSignatures.add(signature);
 			negativeCandidates.add(new ScoredSequence(sequence, restrictedCost, restrictedReducedCost));
 			return;
 		}
 
-		// 2026-06-29: dual window 是当前 dual 下的临时搜索窗口，返回列前必须回到原始 TWET 目标口径。
-		// compact window 的实验口径已经在上方提前返回，保留这段 true-cost recheck 便于后续恢复。
+		// dual window 只约束本轮搜索，最终返回列必须回到原始 TWET 目标口径。
+		long recheckStart = stats.start();
 		double trueCost = trueSequenceCost(sequence);
+		stats.addTrueRecheckNanos(recheckStart);
+		if (stats.enabled) { stats.trueRecheckCalls++; }
 		if (Utility.isBigMValue(trueCost)) {
+			if (stats.enabled) { stats.trueRecheckBigM++; }
 			return;
 		}
 		double trueReducedCost = reducedCost(sequence, trueCost, lp, sriContext.penalty(sequence));
 		costAudit.observe(restrictedCost, restrictedReducedCost, trueCost, trueReducedCost);
 		if (Utility.compareLt(trueReducedCost, REDUCED_COST_TOLERANCE)) {
+			if (stats.enabled) { stats.tryAddAccepted++; }
 			generatedSignatures.add(signature);
 			negativeCandidates.add(new ScoredSequence(sequence, trueCost, trueReducedCost));
+		} else {
+			if (stats.enabled) { stats.trueRecheckFiltered++; }
 		}
 	}
 
@@ -444,13 +493,17 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double[] sriPrefixPenalty;
 		private double[] sriSuffixPenalty;
 		private double sriPenalty;
+		private double lastMoveLowerBound = Double.NEGATIVE_INFINITY;
+		private final HeuristicPricingStats stats;
 
-		TabuRouteState(List<Integer> seed, SriPricingContext sriContext, HeuristicWindowContext windowContext) {
+		TabuRouteState(List<Integer> seed, SriPricingContext sriContext, HeuristicWindowContext windowContext,
+				HeuristicPricingStats stats) {
 			this.sequence = new ArrayList<Integer>(seed);
 			this.used = new boolean[data.n + 1];
 			this.tabuTenure = new int[data.n + 1];
 			this.sriContext = sriContext;
 			this.windowContext = windowContext;
+			this.stats = stats;
 			rebuild();
 		}
 
@@ -463,49 +516,148 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return currentReducedCost;
 		}
 
-		TabuMove evaluateRemove(int pos, LP lp) {
+		TabuMove evaluateRemove(int pos, LP lp, int iter, double bestReducedCost, double bestMoveReducedCost) {
+			if (stats.enabled) { stats.removeAttempts++; }
+			long totalStart = stats.start();
 			if (sequence.size() <= 1) {
-				return TabuMove.invalid();
+				if (stats.enabled) { stats.removeBigM++; }
+				stats.addRemoveTotalNanos(totalStart);
+				return null;
 			}
-			// 2026-05-24: 分支禁弧检查是 O(1) 的便宜剪枝，先做，避免无效候选先走 merge2 评估。
+			// 分支禁弧检查是 O(1) 的便宜剪枝，先做，避免无效候选进入函数拼接。
 			if (!isRemoveCompatible(pos, lp.getNode())) {
-				return TabuMove.invalid();
+				if (stats.enabled) { stats.removeIncompatible++; }
+				stats.addRemoveTotalNanos(totalStart);
+				return null;
 			}
+			long costStart = stats.start();
 			double candidateCost = removeCost(pos);
+			stats.addRemoveCostNanos(costStart);
 			int removedJob = sequence.get(pos).intValue();
 			if (Utility.isBigMValue(candidateCost)) {
-				return TabuMove.invalid();
+				if (stats.enabled) { stats.removeBigM++; }
+				stats.addRemoveTotalNanos(totalStart);
+				return null;
 			}
+			long rcStart = stats.start();
 			double rc = reducedCostAfterRemove(pos, removedJob, candidateCost, lp);
-			return new TabuMove(candidateCost, rc, MoveType.REMOVE, pos, removedJob, -1, tabuTenure);
+			stats.addMoveReducedCostNanos(rcStart);
+			if (stats.enabled) { stats.removeValid++; }
+			if (!isAcceptedCandidate(rc, MoveType.REMOVE, removedJob, -1, tabuTenure, iter, bestReducedCost)
+					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
+				if (stats.enabled) { stats.removeNotSelected++; }
+				stats.addRemoveTotalNanos(totalStart);
+				return null;
+			}
+			if (stats.enabled) { stats.removeSelected++; }
+			stats.addRemoveTotalNanos(totalStart);
+			return new TabuMove(candidateCost, rc, MoveType.REMOVE, pos, removedJob, -1);
 		}
 
-		TabuMove evaluateAdd(int job, int pos, LP lp) {
-			// 2026-05-24: add/exchange 的真正代价在 merge3Segments，先用兼容性判断挡掉禁弧候选。
+		TabuMove evaluateAdd(int job, int pos, LP lp, int iter, double bestReducedCost,
+				double bestMoveReducedCost) {
+			if (stats.enabled) { stats.addAttempts++; }
+			long totalStart = stats.start();
+			// add/exchange 的主要代价在 PWLF 构造，先用兼容性判断挡掉禁弧候选。
 			if (!isInsertCompatible(pos, job, false, lp.getNode())) {
-				return TabuMove.invalid();
+				if (stats.enabled) { stats.addIncompatible++; }
+				stats.addAddTotalNanos(totalStart);
+				return null;
 			}
+			double threshold = acceptedMoveThreshold(MoveType.ADD, job, -1, iter, bestReducedCost,
+					bestMoveReducedCost);
+			if (shouldPruneByMoveLowerBound(pos, job, false, lp, threshold)) {
+				if (stats.enabled) { stats.addLowerBoundPruned++; }
+				stats.addAddTotalNanos(totalStart);
+				return null;
+			}
+			long costStart = stats.start();
 			double candidateCost = insertOrReplaceCost(pos, job, false);
+			stats.addAddCostNanos(costStart);
 			if (Utility.isBigMValue(candidateCost)) {
-				return TabuMove.invalid();
+				if (stats.enabled) { stats.addBigM++; }
+				stats.addAddTotalNanos(totalStart);
+				return null;
 			}
+			long rcStart = stats.start();
 			double rc = reducedCostAfterAdd(pos, job, candidateCost, lp);
-			return new TabuMove(candidateCost, rc, MoveType.ADD, pos, job, -1, tabuTenure);
+			stats.addMoveReducedCostNanos(rcStart);
+			stats.observeLowerBound(lastMoveLowerBound, rc);
+			if (stats.enabled) { stats.addValid++; }
+			if (!isAcceptedCandidate(rc, MoveType.ADD, job, -1, tabuTenure, iter, bestReducedCost)
+					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
+				if (stats.enabled) { stats.addNotSelected++; }
+				stats.addAddTotalNanos(totalStart);
+				return null;
+			}
+			if (stats.enabled) { stats.addSelected++; }
+			stats.addAddTotalNanos(totalStart);
+			return new TabuMove(candidateCost, rc, MoveType.ADD, pos, job, -1);
 		}
 
-		TabuMove evaluateExchange(int job, int pos, LP lp) {
+		TabuMove evaluateExchange(int job, int pos, LP lp, int iter, double bestReducedCost,
+				double bestMoveReducedCost) {
+			if (stats.enabled) { stats.exchangeAttempts++; }
+			long totalStart = stats.start();
 			if (!isInsertCompatible(pos, job, true, lp.getNode())) {
-				return TabuMove.invalid();
+				if (stats.enabled) { stats.exchangeIncompatible++; }
+				stats.addExchangeTotalNanos(totalStart);
+				return null;
 			}
-			double candidateCost = insertOrReplaceCost(pos, job, true);
 			int removedJob = sequence.get(pos).intValue();
-			if (Utility.isBigMValue(candidateCost)) {
-				return TabuMove.invalid();
+			double threshold = acceptedMoveThreshold(MoveType.EXCHANGE, job, removedJob, iter, bestReducedCost,
+					bestMoveReducedCost);
+			if (shouldPruneByMoveLowerBound(pos, job, true, lp, threshold)) {
+				if (stats.enabled) { stats.exchangeLowerBoundPruned++; }
+				stats.addExchangeTotalNanos(totalStart);
+				return null;
 			}
+			long costStart = stats.start();
+			double candidateCost = insertOrReplaceCost(pos, job, true);
+			stats.addExchangeCostNanos(costStart);
+			if (Utility.isBigMValue(candidateCost)) {
+				if (stats.enabled) { stats.exchangeBigM++; }
+				stats.addExchangeTotalNanos(totalStart);
+				return null;
+			}
+			long rcStart = stats.start();
 			double rc = reducedCostAfterExchange(pos, job, removedJob, candidateCost, lp);
-			return new TabuMove(candidateCost, rc, MoveType.EXCHANGE, pos, job, removedJob, tabuTenure);
+			stats.addMoveReducedCostNanos(rcStart);
+			stats.observeLowerBound(lastMoveLowerBound, rc);
+			if (stats.enabled) { stats.exchangeValid++; }
+			if (!isAcceptedCandidate(rc, MoveType.EXCHANGE, job, removedJob, tabuTenure, iter, bestReducedCost)
+					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
+				if (stats.enabled) { stats.exchangeNotSelected++; }
+				stats.addExchangeTotalNanos(totalStart);
+				return null;
+			}
+			if (stats.enabled) { stats.exchangeSelected++; }
+			stats.addExchangeTotalNanos(totalStart);
+			return new TabuMove(candidateCost, rc, MoveType.EXCHANGE, pos, job, removedJob);
+		}
+		private double acceptedMoveThreshold(MoveType type, int primaryJob, int secondaryJob, int iter,
+				double bestReducedCost, double bestMoveReducedCost) {
+			boolean tabu = type == MoveType.EXCHANGE
+					? iter < tabuTenure[primaryJob] || iter < tabuTenure[secondaryJob]
+					: iter < tabuTenure[primaryJob];
+			return tabu ? Math.min(bestReducedCost, bestMoveReducedCost) : bestMoveReducedCost;
 		}
 
+		private boolean shouldPruneByMoveLowerBound(int pos, int job, boolean replace, LP lp, double threshold) {
+			if (sriContext.isActive()) {
+				lastMoveLowerBound = Double.NEGATIVE_INFINITY;
+				return false;
+			}
+			long start = stats.start();
+			double costLowerBound = insertOrReplaceCostLowerBound(pos, job, replace);
+			double reducedCostLowerBound = replace
+					? reducedCostAfterExchange(pos, job, sequence.get(pos).intValue(), costLowerBound, lp)
+					: reducedCostAfterAdd(pos, job, costLowerBound, lp);
+			lastMoveLowerBound = reducedCostLowerBound;
+			if (stats.enabled) { stats.moveLowerBoundChecks++; }
+			stats.addMoveLowerBoundNanos(start);
+			return Utility.compareGt(reducedCostLowerBound, threshold);
+		}
 		void apply(TabuMove move, int tenureUntil) {
 			if (move.type == MoveType.REMOVE) {
 				applyRemove(move.position, move.primaryJob);
@@ -609,43 +761,62 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 
 		private double insertOrReplaceCost(int pos, int job, boolean replace) {
-			return insertOrReplaceCostSingleJobFast(pos, job, replace);
-		}
-
-		private double insertOrReplaceCostSingleJobFast(int pos, int job, boolean replace) {
 			int prefixEnd = pos - 1;
 			int suffixStart = replace ? pos + 1 : pos;
-			PiecewiseLinearFunction f1 = prefixEnd < 0 ? windowContext.sourcePenalty : forward[prefixEnd];
-			PiecewiseLinearFunction b3 = suffixStart >= sequence.size() ? windowContext.sourcePenalty
+			PiecewiseLinearFunction prefix = prefixEnd < 0 ? windowContext.sourcePenalty : forward[prefixEnd];
+			PiecewiseLinearFunction suffix = suffixStart >= sequence.size() ? windowContext.sourcePenalty
 					: backward[suffixStart];
-			int bridgeFrom1 = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
-			double shift1 = data.s[bridgeFrom1][job] + data.p[job];
-			int bridgeTo2 = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
-			double shift2 = suffixStart >= sequence.size() ? 0.0 : data.s[job][bridgeTo2] + data.p[bridgeTo2];
+			int bridgeFrom = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
+			double prefixShift = data.s[bridgeFrom][job] + data.p[job];
+			int bridgeTo = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
+			double suffixShift = suffixStart >= sequence.size() ? 0.0
+					: data.s[job][bridgeTo] + data.p[bridgeTo];
 			PiecewiseLinearFunction jobPenalty = windowContext.penalty(job);
-			if (!shiftedOverlaps(f1, shift1, jobPenalty, true)) {
+			if (!shiftedOverlaps(prefix, prefixShift, jobPenalty, true)) {
+				if (stats.enabled) { stats.insertFirstOverlapRejected++; }
 				return Utility.big_M;
 			}
-			PiecewiseLinearFunction prefixWithJob = PiecewiseLinearFunction.addShifted(f1, shift1, jobPenalty);
+
+			// 单 job 插入按固定序列递推：先构造 prefix + job 的前缀包络，再与 suffix 做 merge2。
+			// 该口径与 TWETColumnEvaluator 一致；通用 merge3 在 compact-window BigM 边界下不适用。
+			double firstBridgeCost = data.getSetupCost(bridgeFrom, job);
+			double secondBridgeCost = suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo);
+			PiecewiseLinearFunction prefixWithJob = PiecewiseLinearFunction.addShifted(prefix, prefixShift,
+					jobPenalty);
+			prefixWithJob.minimizePrefixInPlace();
 			if (prefixWithJob.isEmpty()) {
 				prefixWithJob.release();
 				return Utility.big_M;
 			}
-			// 2026-07-08: 这里是 ADD/EXCHANGE 的单 job 插入。先按固定序列递推把
-			// prefix + job 压成 prefix envelope，再与 suffix 做 merge2；该口径和
-			// TWETColumnEvaluator.evaluate(sequence) 对齐。旧 merge3 适合一般三段拼接，
-			// 但在 compact window/BigM 硬窗下会把可等待的 single-job 插入误判为 BigM。
-			// ALNS 仍可继续使用 Solution.merge3Segments，因为那边没有 node compact window。
-			prefixWithJob.shiftYInPlace(data.getSetupCost(bridgeFrom1, job));
-			prefixWithJob.minimizePrefixInPlace();
-			if (!shiftedOverlaps(b3, -shift2, prefixWithJob, true)) {
-				prefixWithJob.release();
-				return Utility.big_M;
-			}
-			double cost = mergeHelper.merge2Segments(prefixWithJob, b3, shift2,
-					suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo2));
+			// 2026-07-15: prefixWithJob 只用于下面这次标量 merge，不再复用。两个 setup 常数直接
+			// 合并进最终 yShift，避免为每个 add/exchange 候选再扫描整条临时 PWLF。
+			double cost = mergeHelper.merge2Segments(prefixWithJob, suffix, suffixShift,
+					firstBridgeCost + secondBridgeCost);
 			prefixWithJob.release();
 			return cost;
+		}
+		/**
+		 * 三段全局最小值之和是单任务插入成本的安全下界，只用于证明候选不可能改进当前 best move。
+		 */
+		private double insertOrReplaceCostLowerBound(int pos, int job, boolean replace) {
+			int prefixEnd = pos - 1;
+			int suffixStart = replace ? pos + 1 : pos;
+			PiecewiseLinearFunction prefix = prefixEnd < 0 ? windowContext.sourcePenalty : forward[prefixEnd];
+			PiecewiseLinearFunction suffix = suffixStart >= sequence.size() ? windowContext.sourcePenalty
+					: backward[suffixStart];
+			PiecewiseLinearFunction single = windowContext.singletonProfiles[job].forward;
+			if (prefix == null || prefix.isEmpty() || suffix == null || suffix.isEmpty()
+					|| single == null || single.isEmpty()) {
+				return Double.NEGATIVE_INFINITY;
+			}
+			int bridgeFrom = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
+			int bridgeTo = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
+			double prefixMin = prefix.tail.getValue(prefix.tail.end);
+			double jobMin = single.tail.getValue(single.tail.end);
+			double suffixMin = suffix.head.getValue(suffix.head.start);
+			double bridgeCost = data.getSetupCost(bridgeFrom, job)
+					+ (suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo));
+			return prefixMin + jobMin + suffixMin + bridgeCost;
 		}
 
 		private boolean shiftedOverlaps(PiecewiseLinearFunction shifted, double delta, PiecewiseLinearFunction other,
@@ -942,6 +1113,215 @@ public class HeuristicPricingEngine implements PricingEngine {
 	 * 2026-06-13: 启发式 pricing 的 SRI reduced-cost 上下文。
 	 * 只在对应 cut pricing 模式启用；否则所有 SRI delta 为 0，保持旧启发式入口。
 	 */
+	private static final class HeuristicPricingStats {
+
+		final boolean enabled;
+		int seedScanned;
+		int seedCompatible;
+		int seedIncompatible;
+		int seedHeapSize;
+		int seedColumns;
+		int tabuSearchCalls;
+		int validSeeds;
+		int invalidSeeds;
+		int tabuIterations;
+		int noMoveBreaks;
+		int findBestMoveCalls;
+		int appliedMoves;
+		int returnedColumns;
+		int negativeCandidates;
+		long sriContextNanos;
+		long windowContextNanos;
+		long seedCollectNanos;
+		long searchNanos;
+		long sortNanos;
+		long buildColumnsNanos;
+		long stateBuildNanos;
+		long findBestMoveNanos;
+		long applyMoveNanos;
+		long removeTotalNanos;
+		long addTotalNanos;
+		long exchangeTotalNanos;
+		long removeCostNanos;
+		long addCostNanos;
+		long exchangeCostNanos;
+		long moveReducedCostNanos;
+		long moveLowerBoundNanos;
+		long trueRecheckNanos;
+		long removeAttempts;
+		long addAttempts;
+		long exchangeAttempts;
+		long removeIncompatible;
+		long addIncompatible;
+		long exchangeIncompatible;
+		long removeBigM;
+		long addBigM;
+		long exchangeBigM;
+		long removeValid;
+		long addValid;
+		long exchangeValid;
+		long removeNotSelected;
+		long addNotSelected;
+		long exchangeNotSelected;
+		long removeSelected;
+		long addSelected;
+		long exchangeSelected;
+		long moveLowerBoundChecks;
+		long addLowerBoundPruned;
+		long exchangeLowerBoundPruned;
+		long moveLowerBoundViolations;
+		double maxMoveLowerBoundViolation;
+		long insertFirstOverlapRejected;
+		long tryAddCalls;
+		long tryAddPoolFull;
+		long tryAddRejectedByReducedCost;
+		long tryAddDuplicate;
+		long tryAddAccepted;
+		long tryAddSkippedTrueRecheck;
+		long trueRecheckCalls;
+		long trueRecheckBigM;
+		long trueRecheckFiltered;
+		final long[] seedBinCalls = new long[6];
+		final long[] seedBinAdded = new long[6];
+		final long[] seedBinNanos = new long[6];
+		final long[] iterationBinCalls = new long[5];
+		final long[] iterationBinAdded = new long[5];
+		final long[] iterationBinNanos = new long[5];
+
+		HeuristicPricingStats(boolean enabled) {
+			this.enabled = enabled;
+		}
+
+		long start() {
+			return enabled ? System.nanoTime() : 0L;
+		}
+
+		private long elapsed(long start) {
+			return enabled && start != 0L ? System.nanoTime() - start : 0L;
+		}
+
+		void addSriContextNanos(long start) { if (enabled) sriContextNanos += elapsed(start); }
+		void addWindowContextNanos(long start) { if (enabled) windowContextNanos += elapsed(start); }
+		void addSeedCollectNanos(long start) { if (enabled) seedCollectNanos += elapsed(start); }
+		void addSearchNanos(long start) { if (enabled) searchNanos += elapsed(start); }
+		void addSortNanos(long start) { if (enabled) sortNanos += elapsed(start); }
+		void addBuildColumnsNanos(long start) { if (enabled) buildColumnsNanos += elapsed(start); }
+		void addStateBuildNanos(long start) { if (enabled) stateBuildNanos += elapsed(start); }
+		void addFindBestMoveNanos(long start) { if (enabled) findBestMoveNanos += elapsed(start); }
+		void addApplyMoveNanos(long start) {
+			if (enabled) {
+				appliedMoves++;
+				applyMoveNanos += elapsed(start);
+			}
+		}
+		void addRemoveTotalNanos(long start) { if (enabled) removeTotalNanos += elapsed(start); }
+		void addAddTotalNanos(long start) { if (enabled) addTotalNanos += elapsed(start); }
+		void addExchangeTotalNanos(long start) { if (enabled) exchangeTotalNanos += elapsed(start); }
+		void addRemoveCostNanos(long start) { if (enabled) removeCostNanos += elapsed(start); }
+		void addAddCostNanos(long start) { if (enabled) addCostNanos += elapsed(start); }
+		void addExchangeCostNanos(long start) { if (enabled) exchangeCostNanos += elapsed(start); }
+		void addMoveReducedCostNanos(long start) { if (enabled) moveReducedCostNanos += elapsed(start); }
+		void addMoveLowerBoundNanos(long start) { if (enabled) moveLowerBoundNanos += elapsed(start); }
+		void addTrueRecheckNanos(long start) { if (enabled) trueRecheckNanos += elapsed(start); }
+
+		void observeSeed(int seedOrdinal, long start, long added) {
+			if (!enabled) {
+				return;
+			}
+			int bin = Math.min(seedOrdinal / 5, seedBinCalls.length - 1);
+			seedBinCalls[bin]++;
+			seedBinAdded[bin] += added;
+			seedBinNanos[bin] += elapsed(start);
+		}
+
+		void observeTabuIteration(int iteration, long start, long added) {
+			if (!enabled) {
+				return;
+			}
+			int bin = Math.min(iteration / 10, iterationBinCalls.length - 1);
+			iterationBinCalls[bin]++;
+			iterationBinAdded[bin] += added;
+			iterationBinNanos[bin] += elapsed(start);
+		}
+
+		void observeLowerBound(double lowerBound, double exactValue) {
+			if (!enabled || !Double.isFinite(lowerBound) || !Double.isFinite(exactValue)) {
+				return;
+			}
+			double violation = lowerBound - exactValue;
+			if (Utility.compareGt(violation, 0.0)) {
+				moveLowerBoundViolations++;
+				maxMoveLowerBoundViolation = Math.max(maxMoveLowerBoundViolation, violation);
+			}
+		}
+
+		String summary() {
+			if (!enabled) {
+				return "";
+			}
+			return ", heuristicStats phaseMs sri/window/seed/search/sort/buildCols="
+					+ ms(sriContextNanos) + "/" + ms(windowContextNanos) + "/" + ms(seedCollectNanos)
+					+ "/" + ms(searchNanos) + "/" + ms(sortNanos) + "/" + ms(buildColumnsNanos)
+					+ ", seed scan/compatible/incompat/heap/used=" + seedScanned + "/" + seedCompatible
+					+ "/" + seedIncompatible + "/" + seedHeapSize + "/" + seedColumns
+					+ ", tabu calls/valid/invalid/iters/noMove/apply=" + tabuSearchCalls + "/" + validSeeds
+					+ "/" + invalidSeeds + "/" + tabuIterations + "/" + noMoveBreaks + "/" + appliedMoves
+
+					+ ", seedBins5 calls=" + vector(seedBinCalls) + ", added=" + vector(seedBinAdded)
+					+ ", ms=" + millisVector(seedBinNanos)
+					+ ", iterBins10 calls=" + vector(iterationBinCalls) + ", added=" + vector(iterationBinAdded)
+					+ ", ms=" + millisVector(iterationBinNanos)
+					+ ", coreMs state/find/apply/rc=" + ms(stateBuildNanos) + "/" + ms(findBestMoveNanos)
+					+ "/" + ms(applyMoveNanos) + "/" + ms(moveReducedCostNanos)
+					+ ", moveAttempts rem/add/ex=" + removeAttempts + "/" + addAttempts + "/" + exchangeAttempts
+					+ ", moveCompatReject rem/add/ex=" + removeIncompatible + "/" + addIncompatible + "/"
+					+ exchangeIncompatible
+					+ ", moveBigM rem/add/ex=" + removeBigM + "/" + addBigM + "/" + exchangeBigM
+					+ ", moveValid rem/add/ex=" + removeValid + "/" + addValid + "/" + exchangeValid
+					+ ", moveNotSelected rem/add/ex=" + removeNotSelected + "/" + addNotSelected + "/"
+					+ exchangeNotSelected
+					+ ", moveSelected rem/add/ex=" + removeSelected + "/" + addSelected + "/" + exchangeSelected
+					+ ", moveLB checks/prunedAdd/prunedEx/ms/viol/max=" + moveLowerBoundChecks + "/"
+					+ addLowerBoundPruned + "/" + exchangeLowerBoundPruned + "/" + ms(moveLowerBoundNanos) + "/"
+					+ moveLowerBoundViolations + "/" + String.format("%.9f", maxMoveLowerBoundViolation)
+					+ ", moveMs total rem/add/ex=" + ms(removeTotalNanos) + "/" + ms(addTotalNanos)
+					+ "/" + ms(exchangeTotalNanos)
+					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)
+					+ "/" + ms(exchangeCostNanos)
+					+ ", insertOverlapReject=" + insertFirstOverlapRejected
+					+ ", tryAdd calls/accepted/dup/rcSkip/poolFull=" + tryAddCalls + "/" + tryAddAccepted
+					+ "/" + tryAddDuplicate + "/" + tryAddRejectedByReducedCost + "/" + tryAddPoolFull
+					+ ", trueRecheck calls/ms/bigM/filtered/skipped=" + trueRecheckCalls + "/" + ms(trueRecheckNanos)
+					+ "/" + trueRecheckBigM + "/" + trueRecheckFiltered + "/" + tryAddSkippedTrueRecheck
+					+ ", output candidates/returned=" + negativeCandidates + "/" + returnedColumns;
+		}
+
+		private static String ms(long nanos) {
+			return String.format("%.3f", nanos / 1_000_000.0);
+		}
+
+		private static String vector(long[] values) {
+			StringBuilder result = new StringBuilder();
+			for (int i = 0; i < values.length; i++) {
+				if (i > 0) {
+					result.append('/');
+				}
+				result.append(values[i]);
+			}
+			return result.toString();
+		}
+
+		private static String millisVector(long[] nanos) {
+			StringBuilder result = new StringBuilder();
+			for (int i = 0; i < nanos.length; i++) {
+				if (i > 0) {
+					result.append('/');
+				}
+				result.append(ms(nanos[i]));
+			}
+			return result.toString();
+		}
+	}
 	private static final class SriPricingContext {
 		private static final int[] EMPTY_INDICES = new int[0];
 		private static final int[] EMPTY_COUNTS = new int[0];
@@ -1260,51 +1640,20 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private static final class TabuMove {
-		private static final TabuMove INVALID = new TabuMove();
-		final boolean valid;
 		final double cost;
 		final double reducedCost;
 		final MoveType type;
 		final int position;
 		final int primaryJob;
 		final int secondaryJob;
-		final int primaryTenure;
-		final int secondaryTenure;
-
 		TabuMove(double cost, double reducedCost, MoveType type, int position, int primaryJob,
-				int secondaryJob, int[] tabuTenure) {
-			this.valid = true;
+				int secondaryJob) {
 			this.cost = cost;
 			this.reducedCost = reducedCost;
 			this.type = type;
 			this.position = position;
 			this.primaryJob = primaryJob;
 			this.secondaryJob = secondaryJob;
-			this.primaryTenure = primaryJob >= 0 && primaryJob < tabuTenure.length ? tabuTenure[primaryJob] : 0;
-			this.secondaryTenure = secondaryJob >= 0 && secondaryJob < tabuTenure.length ? tabuTenure[secondaryJob] : 0;
-		}
-
-		private TabuMove() {
-			this.valid = false;
-			this.cost = Utility.big_M;
-			this.reducedCost = Utility.big_M;
-			this.type = MoveType.ADD;
-			this.position = -1;
-			this.primaryJob = -1;
-			this.secondaryJob = -1;
-			this.primaryTenure = 0;
-			this.secondaryTenure = 0;
-		}
-
-		static TabuMove invalid() {
-			return INVALID;
-		}
-
-		boolean isTabu(int iter) {
-			if (type == MoveType.EXCHANGE) {
-				return iter < primaryTenure || iter < secondaryTenure;
-			}
-			return iter < primaryTenure;
 		}
 	}
 

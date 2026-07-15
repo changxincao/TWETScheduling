@@ -350,6 +350,7 @@ public class TWETBPCConfig {
 	public int heuristicPricingPoolSize = 5000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_iteration_number，每条 seed 的 tabu 搜索轮数。 */
 	public int heuristicPricingTabuIterations = 50;
+
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_tenure，tabu 禁忌长度。 */
 	public int heuristicPricingTabuTenure = 30;
 	/** 2026-06-21: 40 任务测试中列过少会增加 pricing 波动，单次 exact pricing 默认放宽到 5000。 */
@@ -433,6 +434,8 @@ public class TWETBPCConfig {
 	public boolean diagnosticNodeProgressSummary = false;
 	/** 2026-06-05: subtree/dual 诊断明细；默认关闭，避免每轮 pricing 扫描列池和所有 job arc。 */
 	public boolean diagnosticPricingSummaryDetails = false;
+	/** 2026-07-15: 启发式 pricing 热点拆分统计；默认关闭，避免高频 nanoTime 影响批量实验。 */
+	public boolean diagnosticHeuristicPricingDetails = false;
 	/** 2026-06-28: node 级 local horizon 改进实验，当前默认关闭且不接入主求解。 */
 	public boolean enableNodeLocalHorizonImprovement = false;
 	public int nodeLocalHorizonImprovementNodeId = -1;

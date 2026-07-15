@@ -310,6 +310,10 @@ public class GCBBFullDomainComparisonTest {
 				|| config.diagnosticNodeProgressSummary
 				|| Boolean.parseBoolean(System.getProperty("twet.bpc.fullDomainCompare.pricingDiagnostics",
 						Boolean.toString(config.diagnosticPricingSummaryDetails)));
+		config.diagnosticHeuristicPricingDetails = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.heuristicPricingDiagnostics",
+				Boolean.toString(config.diagnosticHeuristicPricingDetails)));
+
 		config.enableNodeLocalHorizonImprovement = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.nodeLocalHorizonImprove",
 				Boolean.toString(config.enableNodeLocalHorizonImprovement)));

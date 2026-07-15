@@ -965,3 +965,108 @@ paper graphFix 的入口是 `TimeIndexedGraphPricingEngine.applyPaperReducedCost
 SRI-aware time-indexed helper 现在也在 SRI-aware reduced-cost arc fixing 后执行同样的多轮 cleanup，但这一步只作为 no-SRI relaxed graph 上的结构性 reachability cleanup 使用。也就是说，process/wait/end 弧是否因 SRI reduced cost 被固定，仍由前面的 SRI label 拼接判断；cleanup 只删除在忽略 SRI 状态的松弛图上已经没有 prefix/suffix 或没有后续有用处理机会的时空弧。
 
 这个口径是安全偏弱的：no-SRI relaxed graph 比 SRI-state graph 更容易可达，因此它判定不可达或无后续有用弧时，不会比完整 SRI-state cleanup 更激进。cleanup 后会重新构造 SRI forward/backward labels，再做窗口统计和写回，避免窗口分析使用旧图。
+
+### 2026-07-15：50-2 直接十倍时间放大下的最新 no-SRI 对比
+
+本轮重新生成 `data/time-scale/50-2/wet050_002_2m_timeX10.dat`，处理时间、due date 和 setup time 均按原始 50-2 直接乘 10，setup cost 不额外放大。对比时使用最新 `target/classes`，纯 time-indexed 采用 `TimeIndexedGraphPricing`、dual window、strong branching；ng-DSSR 采用当前 no-SRI 主线优化，包括 incremental sourced dominance graph、join envelope prefilter、completion bound、time-indexed scalar/window helper、midpoint reuse/freeze、ALNS 60s 和强分支 phase1。由于十倍 horizon 下完整 time-indexed root preprocessing 会先重复跑一遍很重的 time-indexed root，本轮 ng-DSSR 的有效口径关闭 `timeIndexedRootPreprocessingForNgDssr` 和 `timeIndexedPreHeuristicPricing`，只在节点收敛后使用 time-indexed helper 写回 hard window / time-arc fixing。
+
+结果如下：
+
+| 方法 | 配置 | obj | bound | nodes | pricing | pool | solve | root | exact | heuristic | master LP | valid |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| ng-DSSR | nearestK5, update5, phase1 SB, no rootpre | 393980 | 393980 | 5 | 629 | 52942 | 658.306s | 307.622s | 91.955s / 102 | 247.312s / 519 | 227.918s | true |
+| time-indexed | timeGraph, dual window, SB | 393980 | 393980 | 5 | 1131 | 177128 | 904.922s | 408.363s | 505.312s / 1122 | 0 | 294.028s | true |
+
+这一组是目前 50 规模上最清楚的“时间数值放大后 ng-DSSR 稳定性更好”的证据。两者节点数相同，最优值也相同，但 time-indexed 的图定价次数更多、列池达到 `177128`，exact pricing 总时间 `505.312s`；ng-DSSR 列池只有 `52942`，exact pricing 为 `91.955s`，即使启发式 pricing 和 master LP 仍较重，总时间仍从 `904.922s` 降到 `658.306s`，约快 `27.3%`。这说明在 horizon 直接放大时，time-indexed 的 `O(n^2H)` 图扫描和 pseudo-column 长尾会明显放大，而 ng-DSSR 主要受 label / completion-bound / strong trial 影响，随数值尺度增长更平稳。
+
+本轮还暴露了一个配置口径问题：`strongBranchingPhase2MaxHeuristicPasses=0` 在当前代码里不是关闭 phase2，而是因为条件写成 `max <= 0 || passes < max`，实际等价于不限制 phase2 heuristic passes。误用该参数的中间 run 会在 root strong branching phase2 里反复调用 `HeuristicPricing[strongBranching]`，不作为有效实验结果。后续若要关闭 strong phase2，应设置 `strongBranchingPhase2CandidateLimit=0`，或显式关闭 two-stage strong branching。
+
+当前结论是：50 规模下，如果只是原始小整数时间，time-indexed 仍可能更快；但当处理时间、setup time 和 due date 同比例放大，time-indexed 的图规模直接放大，ng-DSSR 可以在不依赖 root preprocessing 的情况下稳定胜出。后续应继续在 50-3、setupR50、setup cost 和 due-window 宽度上找更系统的边界，而不是只用一个十倍时间例子支撑结论。
+
+### 2026-07-15：50-3 setupR50 timeX10 与 setup cost 的最新 no-SRI 对比
+
+在 50 规模上继续寻找 ng-DSSR 相对 time-indexed 稳定占优的边界。本轮使用最新 `target/classes`，并确认运行路径包含 `joinEnvelopePrefilter` 与 `IncrementalSourcedDominanceGraph`。50-3 变体为 `data/time-scale/setup-variants/50-3/wet050_003_3m_setupR50_timeX10.dat`，其中 processing time、due date 和 setup time 均直接放大 10 倍，setup time 强度为闭包后 setup / processing 约 0.5。ng-DSSR 使用当前 no-SRI 主线好配置：incremental sourced dominance graph、join envelope prefilter、nearestK5/update5、completion bound、time-indexed scalar/window helper、midpoint reuse/freeze、ALNS 60s、strong branching phase1；由于该 horizon 下完整 time-indexed root preprocessing 会重复跑一遍较重的 time-indexed root，本轮关闭 `timeIndexedRootPreprocessingForNgDssr` 和 `timeIndexedPreHeuristicPricing`，只在 node 收敛后用 time-indexed helper 写回 hard window / time-arc fixing。time-indexed 组使用纯 `TimeIndexedGraphPricing`、dual window、strong branching，不启发式、不 ng-DSSR。
+
+无 setup cost 时，两者都正常闭合到 `obj=bound=322370`。ng-DSSR 为 `216.607s / 3 nodes / pool=19169`，其中 root `81.799s`、exact `38.519s / 33`、heuristic `82.046s / 162`、master LP `50.405s`；time-indexed 为 `255.929s / 8 nodes / pool=75477`，其中 root `108.210s`、exact `139.304s / 390`、master LP `53.497s`。因此在 setupR50 + timeX10 但无 setup cost 时，ng-DSSR 约快 `15.4%`，优势存在但不算很大；主要来自列池和 exact graph pricing 次数更少。
+
+当加入 `twet.data.setupCostFromTimeCoefficient=20` 后，差异明显放大。ng-DSSR 在 `317.697s` 内闭合到 `obj=bound=472570`，处理 `13` 个节点，pricing `584` 轮，pool `37097`，root `91.918s`，exact `81.994s / 147`，heuristic `82.710s / 433`，master LP `74.524s`，valid=true。相同配置的 pure time-indexed 在运行超过 20 分钟后仍未闭合，手动停止前已经到 node 38、pool 约 `305052`，单次 exact graph pricing 仍在反复返回 `300` 条列，状态规模约 `923998`、arc scans 约 `40073526`，best pseudo reduced cost 仍有数万负值。该组是目前 50 规模下最强证据：setup cost 与 timeX10 叠加后，time-indexed 的 relaxed pseudo-column 长尾和列池膨胀非常明显，而 ng-DSSR 虽然 exact/heuristic 仍有成本，但整体更稳定。
+
+结合此前 50-2 timeX10 结果，当前可以形成一个更清楚的实验判断：单纯原始小整数时间下，time-indexed 往往更快；直接放大时间尺度后，time-indexed 的 `O(n^2H)` 图扫描和 pseudo-column tail 会显著放大，ng-DSSR 开始稳定占优；如果再引入与 setup time 成比例的 setup cost，time-indexed 的列池长尾会进一步恶化，ng-DSSR 的优势更明显。下一步应继续在同一 50-3 setupR50 timeX10 口径下改变 due-window half width，判断“宽 due window”是单独削弱 time-indexed，还是必须和 timeX10/setupCost 共同作用。
+
+#### 50-3 setupR50 timeX10 + W300 due window
+
+继续在同一 `wet050_003_3m_setupR50_timeX10` 上设置 `twet.data.dueWindowHalfWidth=300`，setup cost 系数仍为 0。该窗口相对 timeX10 后的 due date 并不算极宽，但已经把单点 due date 改成中等宽 due window。结果为：ng-DSSR `ROOT_PROCESSED`，`obj=bound=262640`，`solve=172.503s`，node1 被 dual bound 剪掉，pool `18257`，pricing `129` 轮，heuristic `100.231s / 112`，ng-DSSR exact `8.413s / 17`，master LP `2.802s`，valid=true；pure time-indexed `FINISHED`，同样 `obj=bound=262640`，`solve=262.671s`，处理 3 个节点，pool `79661`，pricing `430` 轮，exact `107.129s / 430`，valid=true。
+
+这组说明，在 setupR50 + timeX10 的基础上加入 W300 due window 后，ng-DSSR 仍然稳定赢，并且优势从无 W 时的约 `15.4%` 扩大到约 `34.3%`。主要原因不是 ng-DSSR exact 很强地加速了；相反 ng exact 只有 `8.4s`，root 大头是启发式 pricing。time-indexed 的问题仍是列池和图定价轮数：root/子节点累计需要 430 次图定价，pool 接近 8 万。由此看，due window 放宽会进一步削弱 time-indexed 的闭合效率，但在 timeX10 口径下 ng-DSSR 并没有同步爆炸，至少 W300 这一档对 ng-DSSR 是有利的。
+
+#### 50-3 setupR50 timeX10 + W1000 due window
+
+继续扩大同一算例的 due window，设置 `twet.data.dueWindowHalfWidth=1000`，setup cost 系数仍为 0。该组用于观察 due window 过宽时，time-indexed 的 pseudo-column 长尾是否继续恶化，以及 ng-DSSR 是否仍能闭合。ng-DSSR 使用同前 no-SRI 好配置：nearestK5/update5、incremental sourced dominance graph、join envelope prefilter、completion bound、time-indexed scalar/window helper、midpoint reuse/freeze、ALNS 60s、strong branching phase1；不使用完整 time-indexed root preprocessing，也不启用 time-indexed pre-heuristic。time-indexed 组使用纯 `TimeIndexedGraphPricing`、dual window 和 strong branching。
+
+ng-DSSR 已完整闭合：`obj=bound=161300`，`solve=863.005s`，root `172.865s`，处理 `14` 个节点，pricing `595` 轮，pool `21480`，valid=true。耗时拆分中，`HeuristicPricing=304.620s / 441`，`GCNGBBStyleNgDssrPricing=287.800s / 154`，`strong_branching_light_repair_rmp=118.334s / 280`，master initial/after-pricing 约 `6.86s`。这说明 W1000 已经显著加重 ng-DSSR：启发式和 exact 都变重，部分节点的 node 后 time-indexed scalar arc fixing 也能到 9s 级，但列池仍保持在 2.1 万量级，最终能稳定闭合。
+
+time-indexed 未等到闭合，手动停止时 CPU 已超过 `1114s`，日志已推进到 node 34，pool 约 `176476`，仍有 18 个左右排队节点。停止前 node 33 的 LP 为 `161345.000000`，incumbent 为 `161340.000000`，显示剩余 gap 仍约 `0.1416%`；node 32/33 中仍反复执行 graph pricing，每次扫描约 `4.25e7` 到 `4.80e7` 条时空弧，单次约 `0.5--0.7s`，并不断加入少量负列。该 run 没有最终 CSV，因此只作为“超过 ng-DSSR 完成时间后仍未闭合”的长尾证据使用。
+
+这组结果比 W300 更清楚地说明：due window 很宽时，time-indexed 的 relaxed 图仍能给出接近的 bound，但闭合需要大量 pseudo 列和节点内长尾，列池膨胀到 17 万以上仍未完成；ng-DSSR 也会变慢，但 exact elementary 口径、completion bound 和节点后时空 arc fixing 仍能把列池控制在较小规模并最终闭合。因此当前 50 规模上较稳定支持 ng-DSSR 的条件为：时间尺度放大后，再叠加中到宽 due window；若再加入 setup cost，time-indexed 的长尾会更明显。
+
+#### 40-2 原始时间 setupR + cost20 当前代码复跑
+
+为确认 setup cost 的影响是否只来自 `timeX10`，本轮又用当前 `target/classes` 在原始小时间 40-2 setup 变体上复跑两个点。配置与 50-3 timeX10 cost20 尽量保持一致：ng-DSSR 使用 no-SRI 主线、nearestK5/update5、source-aware dominance、join-envelope prefilter、completion bound、time-indexed scalar/window helper、ALNS 60s、strong branching phase1，不使用完整 time-indexed root preprocessing，也不使用 time-indexed pre-heuristic；time-indexed 组使用纯 `TimeIndexedGraphPricing`、dual window、strong branching、不启发式。setup cost 均为 `twet.data.setupCostFromTimeCoefficient=20`。
+
+`wet040_001_2m_setupR50` 的当前结果为：ng-DSSR `127.443s / 6 nodes / pool=14696`，root `51.347s`，heuristic `35.813s / 158`，exact `14.536s / 49`，master LP `45.733s`；time-indexed `210.584s / 40 nodes / pool=222584`，root `58.605s`，exact `52.600s / 1850`，master LP `100.062s`。两者均 `obj=bound=43625, valid=true`。这组说明在原始小 horizon 下，setupR50 + cost20 也足以让 time-indexed 出现大量 pseudo 列和节点长尾；优势不完全依赖 `timeX10`。
+
+`wet040_001_2m_setupR75` 的当前结果为：ng-DSSR `187.318s / 14 nodes / pool=36028`，root `46.832s`，heuristic `43.869s / 426`，exact `32.475s / 123`，master LP `77.976s`；time-indexed `199.126s / 28 nodes / pool=191494`，root `60.738s`，exact `42.482s / 1136`，master LP `107.624s`。两者均 `obj=bound=55007, valid=true`。R75 下 time-indexed 仍明显产生更多列和 pricing 调用，但总时间只略慢于 ng-DSSR，说明 setup 强度本身不是单调让 time-indexed 更差：较强 setup time / setup cost 也会抑制部分不自然 pseudo-schedule，使 tail 反而比 R50 稍轻。
+
+结合旧 40-2 setupR25/R50/R75 矩阵和新的 R50/R75 当前复跑，当前判断需要从“setup cost 一定削弱 time-indexed”改成更精确的表述：setup cost 会改变 pseudo-schedule 的吸引力和列池尾部，R50 这类中等 setup 强度在当前数据上最容易暴露 time-indexed 的弱点；R75 虽然列池仍大，但强 setup 本身会减少一部分可重复绕行的价值，因此相对差距缩小。`timeX10` 的作用是把这种列池尾部和图扫描成本进一步放大；宽 due window 则会放松重复绕行的时间可行性，进一步扩大 time-indexed 的闭合压力。后续若要写成实验结论，应按“时间尺度 / due-window 宽度 / setup 强度 / setup cost 系数”四个维度分层，而不是把 setup cost 单独当成充分条件。
+
+#### 50-3 setupR50 原始时间 + W300 due window 中止观察
+
+为检查“宽 due window 削弱 time-indexed”是否必须依赖 `timeX10`，本轮在原始时间 `data/setup-variants/50-3/wet050_003_3m_setupR50.dat` 上设置 `twet.data.dueWindowHalfWidth=300`，setup cost 系数为 0。ng-DSSR 仍使用 no-SRI 主线、nearestK5/update5、source-aware dominance、join-envelope prefilter、completion bound、time-indexed scalar/window helper、ALNS 60s、strong branching phase1，不使用完整 time-indexed root preprocessing 和 time-indexed pre-heuristic；time-indexed 组使用纯 `TimeIndexedGraphPricing`、dual window、strong branching、不启发式。
+
+该组没有跑到闭合，而是在约 10 分钟后手动停止。停止前 ng-DSSR 已处理到 node5，`total=577.365s`，incumbent `1902`，bound `1739.007753`，gap `8.5695%`，queue `6`，pool `24569`。root node1 用时 `198.438s`，root bound `1726.014329`，root gap `9.2527%`；node2 单个节点 exact pricing 就达到 `150.546s / 12 calls`，说明宽窗下 ng-DSSR 的 backward/labeling 也会明显变重。
+
+同一时间点，time-indexed 已推进到 node191，`total=580.539s`，incumbent `1902`，bound `1753.635576`，gap `7.8004%`，queue `192`，pool `188718`，exact `TimeIndexedGraphPricing` 仍在不断补列。也就是说，原始时间 W300 不像普通小 horizon 那样快速闭合；即使不做 `timeX10`，宽 due window 本身也能触发明显的 pseudo-column / branch tail。区别是：ng-DSSR 的每个 hard node 可能很重，但 pool 和队列还较小；time-indexed 单次 pricing 仍便宜，但树和列池膨胀更明显。
+
+因此上一节“宽 due window 主要和 horizon 一起放大”的表述需要修正：`timeX10` 是放大器，但不是必要条件。原始时间 W300 已经足以显著削弱 time-indexed，只是两种算法都会变难，完整闭合可能需要更长预算。W1000 未继续启动，因为 W300 已经在 10 分钟内显示出长尾，直接跑 W1000 很可能只会消耗更多时间；若后续需要论文表格中的完整数值，应单独设置更长时间上限并记录中间 gap 曲线。
+
+#### 50 规模原始时间 + W50 due window 与 setup cost 影响
+
+继续缩小 due window 到 `twet.data.dueWindowHalfWidth=50`，用于判断“原始时间下较窄 due window 是否仍让 time-indexed 占优”。配置保持 no-SRI 当前好配置：ng-DSSR 使用 nearestK5/update5、source-aware dominance、join-envelope prefilter、completion bound、time-indexed scalar/window helper、ALNS 60s、strong branching phase1，不使用完整 time-indexed root preprocessing 和 time-indexed pre-heuristic；time-indexed 使用纯 `TimeIndexedGraphPricing`、dual window、strong branching、不启发式。
+
+在 `wet050_003_3m_setupR50` 上，setup cost 系数为 0 时，两者都闭合到 `obj=bound=23295`。time-indexed 为 `343.208s / 84 nodes / pool=200830`，exact `72.394s / 1936 calls`；ng-DSSR 为 `679.368s / 28 nodes / pool=40891`，exact `111.545s / 231 calls`。这说明 W50 原始时间仍不是 ng-DSSR 的优势区：ng-DSSR 的列池小得多、节点少得多，但每轮定价、启发式和 LP 成本更高，最终总时间约为 time-indexed 的两倍。
+
+同一算例加入 `twet.data.setupCostFromTimeCoefficient=20` 后，两者目标变为 `obj=bound=38059`，且都变快。time-indexed 为 `194.950s / 33 nodes / pool=75679`，exact `25.179s / 583 calls`；ng-DSSR 为 `392.417s / 10 nodes / pool=20583`，exact `43.505s / 78 calls`。setup cost 在这个 W50 原始时间口径下没有削弱 time-indexed，反而明显减少了 time-indexed 的 pseudo-column tail，使其 calls 从 `1936` 降到 `583`、pool 从 `200830` 降到 `75679`。因此 setup cost 的影响不是单调的：在较窄 due window 和较小 horizon 下，它更像是在惩罚绕行/重复 pseudo-schedule；在 `timeX10` 或更宽 due window 下，它才可能和大 horizon、宽窗共同放大 time-indexed 的长尾。
+
+为多试一个实例，又在原始 `wet050_001_2m` 上设置 W50、setup cost 系数 0。time-indexed 正常闭合到 `obj=bound=35670`，用时 `463.464s`，处理 `11` 个节点，pool `252672`，exact `82.858s / 1699 calls`。ng-DSSR 运行到 `721s CPU` 后手动停止，root node1 已花 `487.469s`，root gap `0.7274%`，node2 又花 `156.697s`，整体 gap 仍为 `0.7274%`，队列还在增长。该观察进一步说明，原始时间 W50 并不能稳定构成 ng-DSSR 优势区；time-indexed 仍可能因为单次图定价便宜而更快，哪怕列池显著膨胀。
+
+当前 W50 结论是：较窄 due window 下，time-indexed 的 relaxed 列虽然多，但图定价仍足够便宜；ng-DSSR 的优势主要体现在更大 horizon、更宽 due window、或 setup/time 结构造成 time-indexed pseudo-column tail 难以闭合的区域。setup cost 单独不能作为“削弱 time-indexed”的充分条件，需要和窗口宽度、时间尺度、setup 强度一起分层判断。
+
+补充检查 root gap 后，结论更明确。`wet050_001_2m + W50` 中，time-indexed root bound 为 `35587.195122`，相对最终最优 `35670` 的真实 root gap 约 `0.232%`；ng-DSSR root bound 为 `35620.000000`，相对同一最优值约 `0.140%`。如果按当时 incumbent 口径，日志分别显示 `0.8188%` 和 `0.7274%`。也就是说 ng-DSSR root 确实更强，但只强约 `0.09` 个百分点，幅度不足以覆盖额外计算成本。
+
+该算例 ng-DSSR 慢的主因不是 exact pricing 本身，而是 root 阶段启发式加列和 master LP。root node1 用时 `487.469s`，其中 pricing `306.012s`，HeuristicPricing `264.842s / 167 calls / add27745`，ng-DSSR exact 只有 `41.169s / 37 calls / add1422`，master LP `114.760s / 197`。配置上并非新 dominance graph、join prefilter、completion bound 等关键开关没开；命令中这些都已开启，同时关闭了完整 time-indexed root preprocessing 和 time-indexed pre-heuristic。真正的问题是 W50 原始时间属于小 horizon / time-indexed 图便宜的区域，ng-DSSR 的启发式列生成和 LP 维护成本很重，而 bound 提升有限。后续若还想在该类小 horizon 算例上改善 ng-DSSR，应优先 A/B 限制或关闭 root HeuristicPricing、减少启发式每轮返回列，或单独测试 time-indexed root preprocessing 是否能用前置固定弧抵消自身成本；继续优化 ng exact 常数不会解决主耗时。
+
+这里需要特别区分两种 gap 口径。`wet050_001_2m + W50` 的 ng-DSSR root bound 为 `35620`，若事后用 time-indexed 已证明的最终最优 `35670` 回算，root gap 约为 `0.140%`。但 ng-DSSR 自己运行到 node1/node2 时的 incumbent 仍是 `35881`，所以日志里的 live BPC gap 是 `(35881-35620)/35881 = 0.7274%`。node2 结束时 global bound 仍未超过 `35620`，incumbent 也仍未更新，因此日志 gap 仍为 `0.7274%`；这不是 root bound 比剩余 bound 更强的矛盾，而是“事后最优值口径”和“求解过程中当前 incumbent 口径”混用了。之后 node3 找到 integer incumbent `35744`，global bound 提升到 `35649.333333`，live gap 才降到 `0.2648%`，但仍未达到 time-indexed 已知最优 `35670`。
+
+#### 2026-07-15：50-2 W50 cost0 下 ng-DSSR 启发式 pricing 慢因诊断
+
+本次针对 `test-results/bpc/exp-50-2-wet001-W50-cost0-original-20260715a/ng/stdout.log` 检查了 HeuristicPricing 的调用和代码路径。当前慢点不是单次启发式搜索卡死，也不是 evaluator 重刷或 seed 全量排序复发，而是启发式 pricing 在 root 和后续节点尾部反复运行：前期每次能加入大量负列，后期每次只加入很少列，但仍按默认 `30` 个 seed、每个 seed 最多 `50` 轮 tabu 迭代扫描 remove/add/exchange 候选。
+
+具体证据为：node1 的 nodeTime 为 `426.264s`，其中 `pricing=306.012s/204/add29167`，`HeuristicPricing=264.842s/167/add27745`，exact 只有 `41.169s/37/add1422`。按 heartbeat 计算，node1 有 `165` 次启发式调用，累计加入 `26379` 列，平均 `159.87` 列/次，但其中 `71` 次每次最多只加 `5` 列，`113` 次每次最多只加 `20` 列。node2/node3 也有相同尾部现象：node2 `110` 次启发式调用、平均 `26.19` 列/次、`48` 次不超过 `5` 列；node3 `122` 次调用、平均 `49.71` 列/次、`52` 次不超过 `5` 列。
+
+代码检查显示，`HeuristicPricingEngine` 的 seed 选择已经使用 top-K priority queue，不是全量排序；compact window 口径下 `tryAddNegative()` 不会对每个候选调用 `TWETColumnEvaluator` 重刷，只有 dual window 才需要 true-cost recheck。因此当前主要问题是 tabu move 枚举量和调用次数，而不是成本评估函数错误。`findBestMove()` 对每个 seed 每轮扫描 remove、所有未用 job 的 add 和 exchange；默认参数 `heuristicPricingSeedColumns=30`、`heuristicPricingTabuIterations=50`、`heuristicPricingPoolSize=5000`、`maxHeuristicPricingColumns=1500` 在该算例上偏重。
+
+当前判断为：启发式 pricing 在 root 前期是有效的，但尾部收益衰减明显，导致大量时间花在“继续找很少量负列”。不过不采用按近期产列量自适应停止、降频或动态修改 seed/iteration 的方案。这类规则依赖算例和节点阶段，可能在另一类实例上把压力转移给 exact pricing，难以形成统一可靠配置。后续只优化固定搜索流程内部的实现效率，保持 seed 数、tabu 轮数和停止语义不变。
+
+## 2026-07-15 启发式 pricing 热点拆分诊断
+
+本次在 `HeuristicPricingEngine` 中加入了默认关闭的诊断开关 `diagnosticHeuristicPricingDetails`，runner 入口为 `twet.bpc.fullDomainCompare.heuristicPricingDiagnostics`。该统计只在开关打开时记录高频 `nanoTime`，拆分 `sri/window/seed/search/sort/buildCols`，以及 tabu 搜索内部的 `state/find/apply/reducedCost`、remove/add/exchange 候选数量、兼容性拒绝、BigM、成本拼接耗时、true-cost recheck 和最终返回列数。默认关闭时不输出明细，避免影响批量实验。
+
+40-2 短 smoke 已确认日志能输出 `heuristicStats`。典型轮次显示启发式 pricing 的主要耗时不是 seed 选择、窗口构造或排序，而是 `findBestMove` 中的大量 add/exchange 候选评价。短 smoke 中第二轮约 462 ms，其中 `findBestMove` 约 432 ms，add/exchange cost 分别约 145 ms / 133 ms；compatibility reject 和 BigM 基本为 0，说明当前 root 阶段主要是在完整扫描大量可行 move，而不是被分支/窗口剪枝挡掉。
+
+结合此前 50-2 诊断口径，48 次 HeuristicPricing 中总耗时约 86.5s，`findBestMove` 约 84.1s；add/exchange 候选分别约 4452 万 / 4278 万，add/exchange cost 约 34.3s / 31.8s。这个结论说明启发式 pricing 加列虽然很多时候后期变少，但不能简单关闭；否则可能把压力转移给 exact pricing。seed/iteration 分箱只用于说明不同阶段的产列量，不据此改变正式搜索预算。后续只分析 add/exchange 的固定候选生成与成本拼接实现，不做自适应降频、动态候选预算或动态停止。
+
+进一步用 25 秒 JFR allocation profile 检查固定流程，结果把实现热点定位到了临时 PWLF 分配，而不是搜索控制。该次运行完成 16 次 HeuristicPricing、返回 16870 条列，期间发生 73 次 G1 young GC。JFR 的对象分配采样权重中，`PiecewiseLinearFunction.Segment` 约为 20.88 GB；其中 add 候选的 `addShifted` 与 `minimizePrefixInPlace` 分别约 6.18 GB 和 5.16 GB，exchange 候选分别约 4.30 GB 和 4.46 GB，四项合计约 20.10 GB，占全部 Segment 分配约 96.3%。对应流程是先由 `addShifted(prefix, shift, jobPenalty)` 构造一整条临时函数，再由 `minimizePrefixInPlace()` 重新构造一整条前缀最小包络；旧链随后成为垃圾。GC pause 本身只有毫秒级，但分配速率接近每秒 0.9 GB，持续消耗分配、清零、链表写入和回收带宽。
+
+因此当前剩余的首要实现优化是：为这种“调用方独占的临时 PWLF”增加严格等价的 segment-reuse 前缀最小化，在第二遍扫描时复用输入链节点，而不是再次为每个输出段 `new Segment`。这不改变候选集合、搜索轮数、tabu 规则或 reduced cost，只减少临时对象。由于 `minimizePrefixInPlace()` 还包含 `curUpperBound` 人工边界、段内交点、单点尾段和不连续函数语义，不能直接在生产方法里粗改；应保留旧实现作为 reference，先做随机 PWLF 与真实启发式候选逐点对拍，再单独 A/B。此前尝试的融合式 `addShifted+minimize` 虽数学对拍通过但 wall time 更慢，已经撤回；全局 `SegmentPool` 也曾测试更慢，不能把对象池当成替代方案。
+
+其他实现成本均为次级。seed top-K 扫描在重轮通常只有数毫秒；`TabuMove` 已改为只对最终入选候选构造，并删除不再读取的 tenure 快照字段；move reduced-cost 增量计算只占很小比例；root 中 compatibility reject 与 overlap reject 基本为 0，但这些检查在分支节点可能有效，不应为当前一个算例删除。诊断关闭时，所有候选级计数器写入和计时累加现在都会直接跳过，避免为了默认关闭的统计在数千万候选上产生生产开销。setup bridge 常数已经从单独 `shiftYInPlace` 扫描折叠进最终 merge 的 y-shift，该变化严格等价；cost0 算例中原操作本来就是 no-op，因此不能用该算例宣称加速。

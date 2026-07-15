@@ -69,14 +69,18 @@ public class HeuristicPricingEngine implements PricingEngine {
 		stats.addSriContextNanos(phaseStart);
 		phaseStart = stats.start();
 		HeuristicWindowContext windowContext = buildHeuristicWindowContext(lp);
+		HeuristicArcCompatibility arcCompatibility = config.heuristicPricingPrecomputeArcCompatibility
+				? buildHeuristicArcCompatibility(lp.getNode()) : null;
 		stats.addWindowContextNanos(phaseStart);
 		phaseStart = stats.start();
-		ArrayList<TWETColumn> seeds = collectBestSeedColumns(lp, sriContext, stats);
+		ArrayList<TWETColumn> seeds = collectBestSeedColumns(lp, sriContext, arcCompatibility, stats);
 		stats.addSeedCollectNanos(phaseStart);
 		stats.seedColumns = seeds.size();
 		if (seeds.isEmpty()) {
 			return PricingResult.noImprovement("No active seed column for heuristic pricing" + stats.summary());
 		}
+		HeuristicMoveDuals moveDuals = config.heuristicPricingPrecomputeMoveDuals
+				? buildHeuristicMoveDuals(lp) : null;
 
 		Utility.resetCurUpperBound(Utility.big_M);
 		HashSet<SequenceSignature> generatedSignatures = new HashSet<SequenceSignature>();
@@ -91,8 +95,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			long seedStart = stats.start();
 			int candidatesBeforeSeed = negativeCandidates.size();
-			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, generatedSignatures,
-					negativeCandidates, costAudit, stats);
+			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, arcCompatibility, moveDuals,
+					generatedSignatures, negativeCandidates, costAudit, stats);
 			stats.observeSeed(seedOrdinal++, seedStart, negativeCandidates.size() - candidatesBeforeSeed);
 		}
 		stats.addSearchNanos(phaseStart);
@@ -142,7 +146,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private ArrayList<TWETColumn> collectBestSeedColumns(final LP lp, SriPricingContext sriContext,
-			HeuristicPricingStats stats) {
+			HeuristicArcCompatibility arcCompatibility, HeuristicPricingStats stats) {
 		int limit = Math.max(0, config.heuristicPricingSeedColumns);
 		if (limit == 0) {
 			return new ArrayList<TWETColumn>();
@@ -159,7 +163,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			if (stats.enabled) { stats.seedScanned++; }
 			TWETColumn column = lp.getPool().getColumn(columnId);
-			if (!isSequenceCompatible(lp.getNode(), column.getSequence())) {
+			if (!isSequenceCompatible(lp.getNode(), column.getSequence(), arcCompatibility)) {
 				if (stats.enabled) { stats.seedIncompatible++; }
 				continue;
 			}
@@ -198,14 +202,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
-			HeuristicWindowContext windowContext, HashSet<SequenceSignature> generatedSignatures,
+			HeuristicWindowContext windowContext, HeuristicArcCompatibility arcCompatibility,
+			HeuristicMoveDuals moveDuals, HashSet<SequenceSignature> generatedSignatures,
 			ArrayList<ScoredSequence> negativeCandidates, HeuristicCostAudit costAudit,
 			HeuristicPricingStats stats) {
 		if (stats.enabled) { stats.tabuSearchCalls++; }
 		long stateStart = stats.start();
-		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext, stats);
+		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext, arcCompatibility, moveDuals,
+				stats);
 		stats.addStateBuildNanos(stateStart);
-		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence)) {
+		if (!state.isValid() || !isSequenceCompatible(lp.getNode(), state.sequence, arcCompatibility)) {
 			if (stats.enabled) { stats.invalidSeeds++; }
 			return;
 		}
@@ -430,7 +436,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 				: Math.max(0.0, data.outsourcingCost[job]);
 	}
 
-	private boolean isSequenceCompatible(Node node, List<Integer> sequence) {
+	private boolean isSequenceCompatible(Node node, List<Integer> sequence,
+			HeuristicArcCompatibility arcCompatibility) {
 		if (sequence.isEmpty()) {
 			return false;
 		}
@@ -440,15 +447,52 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (PricingCompatibility.containsRequiredOutsourcedJob(node, sequence)) {
 			return false;
 		}
-		if (isPricingArcForbidden(node, 0, sequence.get(0).intValue())) {
+		if (isPricingArcForbidden(node, arcCompatibility, 0, sequence.get(0).intValue())) {
 			return false;
 		}
 		for (int i = 1; i < sequence.size(); i++) {
-			if (isPricingArcForbidden(node, sequence.get(i - 1).intValue(), sequence.get(i).intValue())) {
+			if (isPricingArcForbidden(node, arcCompatibility, sequence.get(i - 1).intValue(),
+					sequence.get(i).intValue())) {
 				return false;
 			}
 		}
-		return !isPricingArcForbidden(node, sequence.get(sequence.size() - 1).intValue(), node.sinkId());
+		return !isPricingArcForbidden(node, arcCompatibility,
+				sequence.get(sequence.size() - 1).intValue(), node.sinkId());
+	}
+
+	private HeuristicArcCompatibility buildHeuristicArcCompatibility(Node node) {
+		if (node == null) {
+			return null;
+		}
+		int width = data.n + 2;
+		boolean[] forbidden = new boolean[width * width];
+		for (int from = 0; from < width; from++) {
+			int row = from * width;
+			for (int to = 0; to < width; to++) {
+				forbidden[row + to] = isPricingArcForbidden(node, from, to);
+			}
+		}
+		return new HeuristicArcCompatibility(forbidden, width);
+	}
+
+	private HeuristicMoveDuals buildHeuristicMoveDuals(LP lp) {
+		int width = data.n + 2;
+		double[] jobDuals = new double[width];
+		double[] arcDuals = new double[width * width];
+		for (int job = 1; job <= data.n; job++) {
+			jobDuals[job] = lp.getJobDual(job);
+		}
+		for (int from = 0; from < width; from++) {
+			int row = from * width;
+			for (int to = 0; to < width; to++) {
+				arcDuals[row + to] = lp.getArcDual(from, to);
+			}
+		}
+		return new HeuristicMoveDuals(jobDuals, arcDuals, width);
+	}
+
+	private boolean isPricingArcForbidden(Node node, HeuristicArcCompatibility compatibility, int from, int to) {
+		return compatibility == null ? isPricingArcForbidden(node, from, to) : compatibility.isForbidden(from, to);
 	}
 
 	private boolean isPricingArcForbidden(Node node, int from, int to) {
@@ -494,15 +538,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double[] sriSuffixPenalty;
 		private double sriPenalty;
 		private double lastMoveLowerBound = Double.NEGATIVE_INFINITY;
+		private final HeuristicArcCompatibility arcCompatibility;
+		private final HeuristicMoveDuals moveDuals;
 		private final HeuristicPricingStats stats;
-
 		TabuRouteState(List<Integer> seed, SriPricingContext sriContext, HeuristicWindowContext windowContext,
+				HeuristicArcCompatibility arcCompatibility, HeuristicMoveDuals moveDuals,
 				HeuristicPricingStats stats) {
 			this.sequence = new ArrayList<Integer>(seed);
 			this.used = new boolean[data.n + 1];
 			this.tabuTenure = new int[data.n + 1];
 			this.sriContext = sriContext;
 			this.windowContext = windowContext;
+			this.arcCompatibility = arcCompatibility;
+			this.moveDuals = moveDuals;
 			this.stats = stats;
 			rebuild();
 		}
@@ -839,23 +887,31 @@ public class HeuristicPricingEngine implements PricingEngine {
 			// 2026-05-21: 对齐旧 VRP GCTabu，候选 move 的 reduced cost 只做局部增量更新。
 			// 机器真实成本变化由分段函数拼接给出；dual 部分只需要替换受影响的 job 和两三条弧。
 			return currentReducedCost + candidateCost - cost + sriRemoveDelta(pos)
-					+ lp.getJobDual(removedJob) + lp.getArcDual(prev, removedJob)
-					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, next);
+					+ moveJobDual(lp, removedJob) + moveArcDual(lp, prev, removedJob)
+					+ moveArcDual(lp, removedJob, next) - moveArcDual(lp, prev, next);
 		}
 
 		private double reducedCostAfterAdd(int pos, int job, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() ? lp.getNode().sinkId() : sequence.get(pos).intValue();
-			return currentReducedCost + candidateCost - cost + sriAddDelta(pos, job) - lp.getJobDual(job)
-					- lp.getArcDual(prev, job) - lp.getArcDual(job, next) + lp.getArcDual(prev, next);
+			return currentReducedCost + candidateCost - cost + sriAddDelta(pos, job) - moveJobDual(lp, job)
+					- moveArcDual(lp, prev, job) - moveArcDual(lp, job, next) + moveArcDual(lp, prev, next);
 		}
 
 		private double reducedCostAfterExchange(int pos, int job, int removedJob, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
 			return currentReducedCost + candidateCost - cost + sriExchangeDelta(pos, removedJob, job)
-					+ lp.getJobDual(removedJob) - lp.getJobDual(job) + lp.getArcDual(prev, removedJob)
-					+ lp.getArcDual(removedJob, next) - lp.getArcDual(prev, job) - lp.getArcDual(job, next);
+					+ moveJobDual(lp, removedJob) - moveJobDual(lp, job) + moveArcDual(lp, prev, removedJob)
+					+ moveArcDual(lp, removedJob, next) - moveArcDual(lp, prev, job) - moveArcDual(lp, job, next);
+		}
+
+		private double moveJobDual(LP lp, int job) {
+			return moveDuals == null ? lp.getJobDual(job) : moveDuals.jobDual(job);
+		}
+
+		private double moveArcDual(LP lp, int from, int to) {
+			return moveDuals == null ? lp.getArcDual(from, to) : moveDuals.arcDual(from, to);
 		}
 
 		private double sriRemoveDelta(int pos) {
@@ -898,7 +954,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private boolean isRemoveCompatible(int pos, Node node) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? node.sinkId() : sequence.get(pos + 1).intValue();
-			return !isPricingArcForbidden(node, prev, next);
+			return !isPricingArcForbidden(node, arcCompatibility, prev, next);
 		}
 
 		private boolean isInsertCompatible(int pos, int job, boolean replace, Node node) {
@@ -906,7 +962,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int suffixStart = replace ? pos + 1 : pos;
 			int prev = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
 			int next = suffixStart >= sequence.size() ? node.sinkId() : sequence.get(suffixStart).intValue();
-			return !isPricingArcForbidden(node, prev, job) && !isPricingArcForbidden(node, job, next);
+			return !isPricingArcForbidden(node, arcCompatibility, prev, job)
+					&& !isPricingArcForbidden(node, arcCompatibility, job, next);
 		}
 
 		private void rebuild() {
@@ -1109,10 +1166,42 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 	}
 
-	/**
-	 * 2026-06-13: 启发式 pricing 的 SRI reduced-cost 上下文。
-	 * 只在对应 cut pricing 模式启用；否则所有 SRI delta 为 0，保持旧启发式入口。
-	 */
+	/** 当前启发式调用内不变的普通弧兼容性快照。 */
+	private static final class HeuristicArcCompatibility {
+		private final boolean[] forbidden;
+		private final int width;
+
+		HeuristicArcCompatibility(boolean[] forbidden, int width) {
+			this.forbidden = forbidden;
+			this.width = width;
+		}
+
+		boolean isForbidden(int from, int to) {
+			return forbidden[from * width + to];
+		}
+	}
+
+	/** 当前启发式调用内不变的 job/arc dual 快照。 */
+	private static final class HeuristicMoveDuals {
+		private final double[] jobDuals;
+		private final double[] arcDuals;
+		private final int width;
+
+		HeuristicMoveDuals(double[] jobDuals, double[] arcDuals, int width) {
+			this.jobDuals = jobDuals;
+			this.arcDuals = arcDuals;
+			this.width = width;
+		}
+
+		double jobDual(int job) {
+			return jobDuals[job];
+		}
+
+		double arcDual(int from, int to) {
+			return arcDuals[from * width + to];
+		}
+	}
+
 	private static final class HeuristicPricingStats {
 
 		final boolean enabled;
@@ -1284,6 +1373,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ ", moveLB checks/prunedAdd/prunedEx/ms/viol/max=" + moveLowerBoundChecks + "/"
 					+ addLowerBoundPruned + "/" + exchangeLowerBoundPruned + "/" + ms(moveLowerBoundNanos) + "/"
 					+ moveLowerBoundViolations + "/" + String.format("%.9f", maxMoveLowerBoundViolation)
+
 					+ ", moveMs total rem/add/ex=" + ms(removeTotalNanos) + "/" + ms(addTotalNanos)
 					+ "/" + ms(exchangeTotalNanos)
 					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)
@@ -1322,6 +1412,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return result.toString();
 		}
 	}
+	/**
+	 * 2026-06-13: 启发式 pricing 的 SRI reduced-cost 上下文。
+	 * 只在对应 cut pricing 模式启用；否则所有 SRI delta 为 0，保持旧启发式入口。
+	 */
 	private static final class SriPricingContext {
 		private static final int[] EMPTY_INDICES = new int[0];
 		private static final int[] EMPTY_COUNTS = new int[0];

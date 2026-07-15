@@ -1070,3 +1070,10 @@ time-indexed 未等到闭合，手动停止时 CPU 已超过 `1114s`，日志已
 因此当前剩余的首要实现优化是：为这种“调用方独占的临时 PWLF”增加严格等价的 segment-reuse 前缀最小化，在第二遍扫描时复用输入链节点，而不是再次为每个输出段 `new Segment`。这不改变候选集合、搜索轮数、tabu 规则或 reduced cost，只减少临时对象。由于 `minimizePrefixInPlace()` 还包含 `curUpperBound` 人工边界、段内交点、单点尾段和不连续函数语义，不能直接在生产方法里粗改；应保留旧实现作为 reference，先做随机 PWLF 与真实启发式候选逐点对拍，再单独 A/B。此前尝试的融合式 `addShifted+minimize` 虽数学对拍通过但 wall time 更慢，已经撤回；全局 `SegmentPool` 也曾测试更慢，不能把对象池当成替代方案。
 
 其他实现成本均为次级。seed top-K 扫描在重轮通常只有数毫秒；`TabuMove` 已改为只对最终入选候选构造，并删除不再读取的 tenure 快照字段；move reduced-cost 增量计算只占很小比例；root 中 compatibility reject 与 overlap reject 基本为 0，但这些检查在分支节点可能有效，不应为当前一个算例删除。诊断关闭时，所有候选级计数器写入和计时累加现在都会直接跳过，避免为了默认关闭的统计在数千万候选上产生生产开销。setup bridge 常数已经从单独 `shiftYInPlace` 扫描折叠进最终 merge 的 y-shift，该变化严格等价；cost0 算例中原操作本来就是 no-op，因此不能用该算例宣称加速。
+
+### 2026-07-15：启发式 pricing 固定热路径优化复验
+
+本轮继续只优化固定搜索流程，不采用按算例表现自适应改变 seed 数、tabu 轮数、调用频率或停止条件。首先验证了两种减少 PWLF 临时 segment 的方案。segment-reuse 版本通过 20 万组随机函数逐段对拍，但 200 万次、每条约 20 个 segment 的 benchmark 中与旧实现相当或略慢；融合 `addShifted + prefix-min` 的版本通过 30 万组随机 PWLF 的逐段几何对拍，但真实 50-2 启发式 A/B 中，前 32 次搜索轨迹完全一致时总耗时反而约增加 9%。两种方案都已完整撤回。结论是当前 GC pause 不是主瓶颈，额外的状态维护和分支抵消了减少分配的收益，不能仅凭 JFR 分配量判断优化有效。
+
+保留了两个严格等价的扁平快照优化。第一，启发式每次 `price()` 开始时按当前 node 预计算 `(from,to)` 普通弧兼容性，seed 检查和 remove/add/exchange 热循环改为数组查询。50-2 的前 31 次调用中，开关前后逐次加入列数和三类 move 尝试次数完全一致，均加入 20573 条列；启发式耗时由 56.218s 降到 49.005s，约快 12.8%。第二，同一调用内复制当前 job dual 和 arc dual，局部 reduced-cost 更新不再重复经过 LP getter；复验前 17 次轨迹完全一致，局部 reduced-cost 计算由 964.4ms 降到 903.8ms，整段启发式由 27.142s 降到 26.530s，约快 2.3%。两个快照都只在单次 pricing 调用内有效，每次 LP/strong trial 都重建，不跨 dual 状态复用；默认开启，并保留独立关闭开关用于回退。
+随后测试了第三个严格等价候选：在 `addShifted` 后先只读判断临时函数是否已经满足 prefix-min 闭包，命中时跳过 `minimizePrefixInPlace()`。50-2 同口径 A/B 中，打开后累计检查约 2874 万个 add/exchange 候选，命中数为 0；前 18 次完整调用的搜索轨迹仍一致，但预检没有任何可省重建。该实验代码、配置和统计均已撤回。原因不是实现错误，而是当前单任务插入函数普遍包含上升段或向上跳跃，prefix-min 本身就是必要操作。至此，在不改变固定搜索预算和候选语义的前提下，剩余大头仍是不可避免的 PWLF 构造；继续做链表预扫或对象池化没有证据支持。

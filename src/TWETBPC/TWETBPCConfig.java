@@ -436,6 +436,10 @@ public class TWETBPCConfig {
 	public boolean diagnosticPricingSummaryDetails = false;
 	/** 2026-07-15: 启发式 pricing 热点拆分统计；默认关闭，避免高频 nanoTime 影响批量实验。 */
 	public boolean diagnosticHeuristicPricingDetails = false;
+	/** 2026-07-15: 启发式候选使用每轮预计算的扁平禁弧表；关闭可回退逐次 Node 查询。 */
+	public boolean heuristicPricingPrecomputeArcCompatibility = true;
+	/** 2026-07-15: 启发式局部 move 复用当前 LP dual 的扁平快照；关闭可回退 getter 路径。 */
+	public boolean heuristicPricingPrecomputeMoveDuals = true;
 	/** 2026-06-28: node 级 local horizon 改进实验，当前默认关闭且不接入主求解。 */
 	public boolean enableNodeLocalHorizonImprovement = false;
 	public int nodeLocalHorizonImprovementNodeId = -1;

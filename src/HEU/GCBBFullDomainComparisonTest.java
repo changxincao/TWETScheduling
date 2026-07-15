@@ -313,6 +313,12 @@ public class GCBBFullDomainComparisonTest {
 		config.diagnosticHeuristicPricingDetails = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.heuristicPricingDiagnostics",
 				Boolean.toString(config.diagnosticHeuristicPricingDetails)));
+		config.heuristicPricingPrecomputeArcCompatibility = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.heuristicPrecomputeArcCompatibility",
+				Boolean.toString(config.heuristicPricingPrecomputeArcCompatibility)));
+		config.heuristicPricingPrecomputeMoveDuals = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.heuristicPrecomputeMoveDuals",
+				Boolean.toString(config.heuristicPricingPrecomputeMoveDuals)));
 
 		config.enableNodeLocalHorizonImprovement = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.nodeLocalHorizonImprove",

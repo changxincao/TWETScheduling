@@ -42,6 +42,7 @@ public final class TimeIndexedScalarCompletionBound {
 		final int idleFixed;
 		final int endFixed;
 		final int cleanupFixed;
+		final String cleanupRounds;
 		final double gap;
 		final long totalNanos;
 		final String message;
@@ -50,7 +51,8 @@ public final class TimeIndexedScalarCompletionBound {
 		final int nodeTimeIndexedArcFixed;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int unavailable,
-				int processFixed, int idleFixed, int endFixed, int cleanupFixed, double gap, long totalNanos, String message,
+				int processFixed, int idleFixed, int endFixed, int cleanupFixed, String cleanupRounds,
+				double gap, long totalNanos, String message,
 				WindowReachabilityStats windowStats, int nodeWindowTightenedJobs, int nodeTimeIndexedArcFixed) {
 			this.available = available;
 			this.candidates = candidates;
@@ -60,6 +62,7 @@ public final class TimeIndexedScalarCompletionBound {
 			this.idleFixed = idleFixed;
 			this.endFixed = endFixed;
 			this.cleanupFixed = cleanupFixed;
+			this.cleanupRounds = cleanupRounds;
 			this.gap = gap;
 			this.totalNanos = totalNanos;
 			this.message = message;
@@ -69,7 +72,7 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, 0, Double.NaN, 0L, message, null, 0, 0);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, 0, null, Double.NaN, 0L, message, null, 0, 0);
 		}
 
 		public boolean isAvailable() {
@@ -79,7 +82,8 @@ public final class TimeIndexedScalarCompletionBound {
 		public String summary() {
 			return message + ", candidates=" + candidates + ", fixed=" + fixed
 					+ ", unavailable=" + unavailable + ", process/idle/end=" + processFixed
-					+ "/" + idleFixed + "/" + endFixed + ", cleanup=" + cleanupFixed + ", gap=" + gap
+					+ "/" + idleFixed + "/" + endFixed + ", cleanup=" + cleanupFixed
+					+ (cleanupRounds == null ? "" : ", cleanupRounds=" + cleanupRounds) + ", gap=" + gap
 					+ ", ms=" + String.format("%.3f", totalNanos / 1_000_000.0)
 					+ ", nodeWindowTightened=" + nodeWindowTightenedJobs
 					+ ", nodeTimeArcFixed=" + nodeTimeIndexedArcFixed
@@ -826,7 +830,7 @@ public final class TimeIndexedScalarCompletionBound {
 		WindowReachabilityStats windowStats = reachability.stats;
 		int nodeWindowTightened = applySriReachableWindowsToNode(reachability);
 		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
-		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], 0, gap,
+		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], 0, null, gap,
 				System.nanoTime() - start, "ng-DSSR time-indexed SRI-aware helper arc fixing", windowStats,
 				nodeWindowTightened, nodeTimeArcFixed);
 	}
@@ -895,9 +899,18 @@ public final class TimeIndexedScalarCompletionBound {
 			computeBackwardDistances();
 		}
 		// Align scalar helper with paper graphFix cleanup after reduced-cost fixing.
-		cleanupFixed = cleanupGraph();
-		if (cleanupFixed > 0) {
-			fixed += cleanupFixed;
+		StringBuilder cleanupRoundTrace = new StringBuilder();
+		for (int cleanupRound = 0; cleanupRound < 8; cleanupRound++) {
+			int roundFixed = cleanupGraph();
+			if (cleanupRoundTrace.length() > 0) {
+				cleanupRoundTrace.append('/');
+			}
+			cleanupRoundTrace.append(roundFixed);
+			if (roundFixed <= 0) {
+				break;
+			}
+			cleanupFixed += roundFixed;
+			fixed += roundFixed;
 			computeForwardDistances();
 			computeBackwardDistances();
 		}
@@ -907,7 +920,7 @@ public final class TimeIndexedScalarCompletionBound {
 		WindowReachabilityStats windowStats = summarizeReachableWindows();
 		int nodeWindowTightened = applyReachableWindowsToNode();
 		int nodeTimeArcFixed = writeLocalFixedArcsToNode();
-		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, cleanupFixed, gap,
+		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, cleanupFixed, cleanupRoundTrace.toString(), gap,
 				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing", windowStats,
 				nodeWindowTightened, nodeTimeArcFixed);
 	}

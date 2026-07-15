@@ -948,3 +948,9 @@ paper graphFix 的入口是 `TimeIndexedGraphPricingEngine.applyPaperReducedCost
 为确认 cleanup 是否还存在进一步传播，本次临时把 no-SRI scalar helper 改为最多 8 轮 cleanup，并在日志中输出 `cleanupRounds`，随后用同一 `wet050_003_3m` no-ti-rootpre smoke 口径测试。node 1 输出为：`cleanup=344868, cleanupRounds=336000/8868/0, fixed=4314066, avg reachablePts=427.1`。这说明第一轮 cleanup 后重新计算 forward/backward，第二轮确实还能额外删除 `8868` 条时空弧，第三轮归零。
 
 不过这 `8868` 条只占 node 1 总时空 fixing 的很小比例，且 `avg reachablePts` 与单轮 cleanup 的 `427.1` 相同，没有进一步缩小 compact window；耗时则从单轮 smoke 的约 `365ms` 增至本次约 `450ms`。因此当前判断是：多轮 cleanup 在图结构上确实更闭合，但在该算例 root 上主要带来少量额外 raw arc 删除，对硬时间窗没有可见增益。主线暂时恢复并保留单轮 cleanup；后续如果要启用 fixed-point cleanup，建议先做成开关或最多两轮，并只在第二轮删除量足够大时继续。
+
+#### 多轮 cleanup 保留到主线
+
+在前述 `cleanupRounds=336000/8868/0` 的测试基础上，当前主线保留多轮 cleanup。实现上仍只作用于 no-SRI scalar helper：第一轮 reduced-cost fixing 后先重算 forward/backward，然后最多执行 8 轮 cleanup；每轮若有新增删除，就把新增时空弧写入 local fixed bitset 并重算 forward/backward；某轮为 0 时立即停止。summary 中保留 `cleanupRounds`，便于后续判断各 node 是否确实需要多轮传播。
+
+当前选择保留的原因是第二轮确实存在传播收益，且在 50-3 smoke 中额外成本约几十毫秒量级，不会成为主要瓶颈。需要注意的是，这仍是 no-SRI relaxed 图口径的结构清理；SRI-aware helper 未接入该 cleanup，相关统计中 `cleanupRounds` 为空。

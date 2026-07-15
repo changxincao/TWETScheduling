@@ -1089,3 +1089,11 @@ ng-DSSR exact 的口径不同。50-3 timeX10+W300 的早期调用约 0.827s，�
 当前 `HeuristicPricingEngine` 在 ADD/EXCHANGE 构造 `prefixWithJob` 前会调用 `shiftedOverlaps()`，但该检查只比较 PWLF 的物理 `head/tail` 定义域。compact/dual hard window 使用 `setDomain(..., true)` 把窗外写成 BigM，并没有删除窗外物理区间，因此该 overlap 检查通常不能识别真实硬窗不可行；代表性统计中 `insertFirstOverlapReject` 基本为 0。当前硬窗仍会在完整成本拼接中生效：job penalty 窗外为 BigM，prefix 与 suffix 拼接后若不存在可行完成时间则返回 BigM，只是这时已经付出了 `addShifted + minimizePrefix + merge2` 的主要成本。
 
 后续可增加严格等价的显式硬窗预检查。对候选 `prev -> job -> next`，维护 prefix 能到达 `job` 的最早完工下界和 suffix 允许 `job` 的最晚完工上界，再与当前有效 `hStart[job]/hEnd[job]` 取交集；交集为空时可在构造临时 PWLF 前直接拒绝。该检查只能作为必要可行性条件：普通 pricing-only 禁弧仍单独检查，非凸的逐时点禁弧或完整成本关系仍由 PWLF 拼接判断。实现前应先保留有效窗口端点和 prefix/suffix 时间摘要，并以只统计不剪枝的方式测量额外命中率；当前全域最小值下界只剪掉约 0.3%-0.5% 候选，不能据此假设新检查一定有显著收益。
+
+### 2026-07-15 启发式 ADD/EXCHANGE 硬时间窗可行性预判实验
+
+在 `HeuristicPricingEngine` 中增加了一个独立实验开关 `heuristicPricingHardWindowFeasibilityPrefilter`。该预判只在两类静态安全硬窗证据存在时工作：一类是外包 baseline 预处理写入 `data.hardWindowStart/End` 的任务硬窗，另一类是当前 `Node` 至少继承了一个 time-indexed compact window。dual profitable window 只对当前 pricing 最优列有效，不进入该预判。对当前 route 维护各位置最早完成时间和最晚完成时间后，ADD/EXCHANGE 候选可在构造临时 PWLF 前用常数时间判断 prefix-job-suffix 的连续窗口是否相交；接受 move 后再按路线长度重建两组摘要。该判断只使用硬窗 hull，不使用 raw `(i,j,t)` 空洞，因此只会删除连放松 hull 都不可行的候选。
+
+在 `wet040_001_2m`、root-only、time-indexed root preprocessing 开启的同轨迹 A/B 中，预处理给 40 个任务都写入 compact window，但平均窗口仅缩短约 `2.9%`。ON 共检查 `16,929,803` 个 ADD/EXCHANGE 候选，只拒绝 `316` 个，命中率为 `0.00187%`；启发式耗时为 `12.925s/21 calls`。完全关闭且不构造最早/最晚摘要时，启发式耗时为 `9.930s/21 calls`。两组的 root bound 均为 `22490`，pool 均为 `6025`，启发式加列均为 `5734`，exact 加列均为 `89`，说明判断语义与原搜索轨迹一致，但在弱 compact window 上额外检查明显得不偿失。因此该开关保留用于外包硬窗或更强 compact window 的定向实验，默认关闭，不作为当前通用加速项。
+
+该结果也进一步确认，启发式主热点仍是 ADD/EXCHANGE 的 PWLF 成本构造，而不是普通时间可行性。当前每个候选会先构造 `prefix + shifted job penalty`，再做 prefix-min 闭包，最后与 suffix 求最小；此前 JFR 已显示这些临时 `Segment` 分配占主要内存和 CPU。下一步若继续优化，应优先尝试只返回 scalar minimum 的 primitive-array 扫描内核，并保留旧链表实现逐候选对拍。更强的区间 reduced-cost 下界也可继续诊断，但如果仍需扫描完整链表，其成本可能接近正式候选计算，不能仅凭数学上更强就默认接入。

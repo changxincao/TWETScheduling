@@ -1077,3 +1077,9 @@ time-indexed 未等到闭合，手动停止时 CPU 已超过 `1114s`，日志已
 
 保留了两个严格等价的扁平快照优化。第一，启发式每次 `price()` 开始时按当前 node 预计算 `(from,to)` 普通弧兼容性，seed 检查和 remove/add/exchange 热循环改为数组查询。50-2 的前 31 次调用中，开关前后逐次加入列数和三类 move 尝试次数完全一致，均加入 20573 条列；启发式耗时由 56.218s 降到 49.005s，约快 12.8%。第二，同一调用内复制当前 job dual 和 arc dual，局部 reduced-cost 更新不再重复经过 LP getter；复验前 17 次轨迹完全一致，局部 reduced-cost 计算由 964.4ms 降到 903.8ms，整段启发式由 27.142s 降到 26.530s，约快 2.3%。两个快照都只在单次 pricing 调用内有效，每次 LP/strong trial 都重建，不跨 dual 状态复用；默认开启，并保留独立关闭开关用于回退。
 随后测试了第三个严格等价候选：在 `addShifted` 后先只读判断临时函数是否已经满足 prefix-min 闭包，命中时跳过 `minimizePrefixInPlace()`。50-2 同口径 A/B 中，打开后累计检查约 2874 万个 add/exchange 候选，命中数为 0；前 18 次完整调用的搜索轨迹仍一致，但预检没有任何可省重建。该实验代码、配置和统计均已撤回。原因不是实现错误，而是当前单任务插入函数普遍包含上升段或向上跳跃，prefix-min 本身就是必要操作。至此，在不改变固定搜索预算和候选语义的前提下，剩余大头仍是不可避免的 PWLF 构造；继续做链表预扫或对象池化没有证据支持。
+
+### 2026-07-15：当前 ng-DSSR pricing 剩余热点判断
+
+当前不能笼统地说“全部时间都在 join”，但可以确认 pricing 内的大头已经集中到 PWLF 相关运算。HeuristicPricing 的代表性 50-2 调用中，单次约 2.032s，search 为 2.024s，findBestMove 为 1.985s；remove/add/exchange 的候选成本计算合计约 1.479s，占整次调用约 72.8%。JFR 中 add/exchange 的 `addShifted + minimizePrefixInPlace` 占 Segment 分配约 96.3%。因此启发式剩余瓶颈是大量 add/exchange 候选反复构造和最小化 PWLF，而不是 seed、窗口、排序、列回刷或 dual/禁弧查询。
+
+ng-DSSR exact 的口径不同。50-3 timeX10+W300 的早期调用约 0.827s，其中 init 0.753s，completion bound 0.514s，midpoint probe 0.192s，join 仅 0.047s；最终无负列证明轮约 0.755s，其中 completion bound 0.329s、正式 forward/backward 扩展合计 0.261s、join 0.025s。completion bound、probe、label 扩展、dominance envelope 和 join 内部本质上仍大量执行 PWLF shift/add/minimum/merge，但当前最大项是 completion-bound 的函数传播，其次是启发式候选 PWLF 和 certificate 轮的双向扩展，join 已被 group-envelope prefilter 压到次级。整个 BPC 仍可能受 master LP、strong branching 或 RMIH 影响，不能把端到端时间全部归为 PWLF。

@@ -1083,3 +1083,9 @@ time-indexed 未等到闭合，手动停止时 CPU 已超过 `1114s`，日志已
 当前不能笼统地说“全部时间都在 join”，但可以确认 pricing 内的大头已经集中到 PWLF 相关运算。HeuristicPricing 的代表性 50-2 调用中，单次约 2.032s，search 为 2.024s，findBestMove 为 1.985s；remove/add/exchange 的候选成本计算合计约 1.479s，占整次调用约 72.8%。JFR 中 add/exchange 的 `addShifted + minimizePrefixInPlace` 占 Segment 分配约 96.3%。因此启发式剩余瓶颈是大量 add/exchange 候选反复构造和最小化 PWLF，而不是 seed、窗口、排序、列回刷或 dual/禁弧查询。
 
 ng-DSSR exact 的口径不同。50-3 timeX10+W300 的早期调用约 0.827s，其中 init 0.753s，completion bound 0.514s，midpoint probe 0.192s，join 仅 0.047s；最终无负列证明轮约 0.755s，其中 completion bound 0.329s、正式 forward/backward 扩展合计 0.261s、join 0.025s。completion bound、probe、label 扩展、dominance envelope 和 join 内部本质上仍大量执行 PWLF shift/add/minimum/merge，但当前最大项是 completion-bound 的函数传播，其次是启发式候选 PWLF 和 certificate 轮的双向扩展，join 已被 group-envelope prefilter 压到次级。整个 BPC 仍可能受 master LP、strong branching 或 RMIH 影响，不能把端到端时间全部归为 PWLF。
+
+### 2026-07-15：启发式两段拼接前的硬时间窗检查
+
+当前 `HeuristicPricingEngine` 在 ADD/EXCHANGE 构造 `prefixWithJob` 前会调用 `shiftedOverlaps()`，但该检查只比较 PWLF 的物理 `head/tail` 定义域。compact/dual hard window 使用 `setDomain(..., true)` 把窗外写成 BigM，并没有删除窗外物理区间，因此该 overlap 检查通常不能识别真实硬窗不可行；代表性统计中 `insertFirstOverlapReject` 基本为 0。当前硬窗仍会在完整成本拼接中生效：job penalty 窗外为 BigM，prefix 与 suffix 拼接后若不存在可行完成时间则返回 BigM，只是这时已经付出了 `addShifted + minimizePrefix + merge2` 的主要成本。
+
+后续可增加严格等价的显式硬窗预检查。对候选 `prev -> job -> next`，维护 prefix 能到达 `job` 的最早完工下界和 suffix 允许 `job` 的最晚完工上界，再与当前有效 `hStart[job]/hEnd[job]` 取交集；交集为空时可在构造临时 PWLF 前直接拒绝。该检查只能作为必要可行性条件：普通 pricing-only 禁弧仍单独检查，非凸的逐时点禁弧或完整成本关系仍由 PWLF 拼接判断。实现前应先保留有效窗口端点和 prefix/suffix 时间摘要，并以只统计不剪枝的方式测量额外命中率；当前全域最小值下界只剪掉约 0.3%-0.5% 候选，不能据此假设新检查一定有显著收益。

@@ -1097,3 +1097,13 @@ ng-DSSR exact 的口径不同。50-3 timeX10+W300 的早期调用约 0.827s，�
 在 `wet040_001_2m`、root-only、time-indexed root preprocessing 开启的同轨迹 A/B 中，预处理给 40 个任务都写入 compact window，但平均窗口仅缩短约 `2.9%`。ON 共检查 `16,929,803` 个 ADD/EXCHANGE 候选，只拒绝 `316` 个，命中率为 `0.00187%`；启发式耗时为 `12.925s/21 calls`。完全关闭且不构造最早/最晚摘要时，启发式耗时为 `9.930s/21 calls`。两组的 root bound 均为 `22490`，pool 均为 `6025`，启发式加列均为 `5734`，exact 加列均为 `89`，说明判断语义与原搜索轨迹一致，但在弱 compact window 上额外检查明显得不偿失。因此该开关保留用于外包硬窗或更强 compact window 的定向实验，默认关闭，不作为当前通用加速项。
 
 该结果也进一步确认，启发式主热点仍是 ADD/EXCHANGE 的 PWLF 成本构造，而不是普通时间可行性。当前每个候选会先构造 `prefix + shifted job penalty`，再做 prefix-min 闭包，最后与 suffix 求最小；此前 JFR 已显示这些临时 `Segment` 分配占主要内存和 CPU。下一步若继续优化，应优先尝试只返回 scalar minimum 的 primitive-array 扫描内核，并保留旧链表实现逐候选对拍。更强的区间 reduced-cost 下界也可继续诊断，但如果仍需扫描完整链表，其成本可能接近正式候选计算，不能仅凭数学上更强就默认接入。
+
+### 2026-07-15：PWLF 底层剩余优化空间复核
+
+启发式硬时间窗预判默认保持关闭。继续沿真实热路径检查 PWLF 底层后，当前已经不能把“减少一个临时函数”视为确定收益。`addShifted()` 已经消除了启发式单任务插入中的独立 `shiftX` 临时函数，`merge2Segments()` 也已经改成 `findMinimalShiftedSumValue()` 双指针直接求最小值，不再构造 join PWLF。此前 segment-reuse 版本通过 20 万组逐段对拍，但 200 万次局部 benchmark 与旧实现相当或略慢；融合 `addShifted + prefix-min` 版本虽通过 30 万组逐段对拍，真实 50-2 A/B 却慢约 9%。exact ng-DSSR 扩展把 `shiftX + add` 换成 `addShifted` 也已验证慢约 9%--29%。这些方向均已撤回，原因是减少分配没有抵消更复杂的同步区间分支和状态维护。
+
+当前仍有较明确上限的方向只剩启发式专用的“最终标量扫描内核”。ADD/EXCHANGE 对候选只需要最终 move cost，并不需要保留 `prefixWithJob` 函数。因此可以直接同时扫描 shifted prefix、原始 job penalty 和 suffix：前两者按重叠区间产生原始和函数值，在线维护 prefix minimum，再立即与 suffix 的当前区间计算最小和。这样既不构造 `addShifted` 输出链，也不构造 prefix-min 输出链，和前面“融合后仍生成完整 PWLF”的失败版本本质不同。该实现必须完整复现 `Utility.curUpperBound`、BigM 窗口、断点左右值、单点尾段和等待闭包语义；验收应先做随机 PWLF 逐候选 cost 对拍，再做真实启发式每个候选对拍和同轨迹 BPC A/B。JFR 中 add/exchange 的 `addShifted + minimizePrefixInPlace` 占 Segment 分配约 96.3%，因此这是剩余唯一可能带来明显启发式收益的 PWLF 方向，但在完成对拍前不能直接替换主线。
+
+completion bound 不能采用上述标量内核，因为后续传播、arc fixing 和离散 cache 都需要完整的逐时点下包络。它当前已有 no-change merge、精确相邻段压缩和 multi-delta/time-priority 传播；历史数据还显示 `mergeMinimum` 的右参数 copy 只占 backward merge 约 0.4%，不值得继续做 no-copy。底层尚可尝试的严格等价小改动是给 `minimizeSuffixInPlace()` 复用反向遍历引用缓冲区，避免每次新建 `ArrayList` 和内部 `Object[]`，但它不会消除 O(segment) 扫描，预期收益有限。原生 interval delta 或 packed primitive-array PWLF 可能进一步改善缓存局部性和 BigM 空洞传播，但都会改动完整函数语义和大量调用方，属于结构性实验，不是当前可直接合入的小优化。
+
+其余底层点不作为优先项。`TimerManager` 关闭时只有一个静态布尔判断，字符串不会动态分配；`SegmentPool` 默认关闭且历史测试更慢；现有 `PiecewiseLinearFunctionArray` 只是未接主线的旧 `ArrayList<Segment>` 实验实现，并非 primitive packed storage，不能直接替换链表版。`addSegment()` 可以定向测试在线合并相邻同斜率同截距段，但 normalize 后已经有同口径压缩，当前没有命中率证据，必须先统计“避免了多少 Segment 创建”再决定是否保留。

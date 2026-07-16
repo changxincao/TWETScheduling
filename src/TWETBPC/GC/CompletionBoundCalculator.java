@@ -687,14 +687,14 @@ final class CompletionBoundCalculator {
 			DeltaBatch batch = buildActualImprovementBatch(state, forwardF[state], propagatedForwardF[state]);
 			if (diagnosticPhaseTiming) {
 				stats.snapshotCompareNanos += System.nanoTime() - snapshotStart;
-				snapshotStart = System.nanoTime();
-			}
-			propagatedForwardF[state] = forwardF[state].copy();
-			if (diagnosticPhaseTiming) {
-				stats.snapshotCopyNanos += System.nanoTime() - snapshotStart;
 			}
 			if (batch.intervalCount == 0) {
 				continue;
+			}
+			snapshotStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
+			propagatedForwardF[state] = forwardF[state].copy();
+			if (diagnosticPhaseTiming) {
+				stats.snapshotCopyNanos += System.nanoTime() - snapshotStart;
 			}
 			recordPropagatedDelta(Direction.FORWARD, batch);
 			diagnosticHeartbeat("allCyclesMultiDelta.forward.loop", forwardQueue.size(), batch.state, 0, false);
@@ -752,14 +752,14 @@ final class CompletionBoundCalculator {
 			DeltaBatch batch = buildActualImprovementBatch(state, backwardB[state], propagatedBackwardB[state]);
 			if (diagnosticPhaseTiming) {
 				stats.snapshotCompareNanos += System.nanoTime() - snapshotStart;
-				snapshotStart = System.nanoTime();
-			}
-			propagatedBackwardB[state] = backwardB[state].copy();
-			if (diagnosticPhaseTiming) {
-				stats.snapshotCopyNanos += System.nanoTime() - snapshotStart;
 			}
 			if (batch.intervalCount == 0) {
 				continue;
+			}
+			snapshotStart = diagnosticPhaseTiming ? System.nanoTime() : 0L;
+			propagatedBackwardB[state] = backwardB[state].copy();
+			if (diagnosticPhaseTiming) {
+				stats.snapshotCopyNanos += System.nanoTime() - snapshotStart;
 			}
 			recordPropagatedDelta(Direction.BACKWARD, batch);
 			diagnosticHeartbeat("allCyclesMultiDelta.backward.loop", backwardQueue.size(), batch.state, 0, false);

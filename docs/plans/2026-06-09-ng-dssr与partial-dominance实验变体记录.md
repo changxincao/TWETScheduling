@@ -2449,3 +2449,15 @@ zero-setup 下更合理的静态回退不是继续使用任意编号，也不宜
 此外保留一处小清理：同一次 exact pricing 的 DSSR 轮次间清空并复用 `generatedColumns`。该项不作为主要提速来源。当前结论是 source install 的二次 segment 扫描属于已确认、可稳定消除的实现冗余；threshold mask 虽正确但净收益不足，不应进入生产主线。
 
 提交后再次按控制流审计 generation mark。每次 merge 使用新的 mark；首遍 append 只给新包络中仍存在的本地 source 写 mark，external predecessor 获胜或 tie 时旧 source 不写 mark，因此 install 对旧 `localSources` 的删除结果与原先扫描 merged segments 重建 source map 严格相同。candidate 未贡献时不会安装临时 merged 包络；partial 需要 retained intervals，`sourceMark=0` 后仍走旧完整扫描。`generatedColumns.clear()` 的两个调用入口都位于 `initialize()` 已创建容器之后，alternative join audit 会保存、替换并恢复独立容器，不存在空引用或误清主候选。新增 `SegmentPool=true` 的新旧路径测试，各完成 96,000 次随机插入并覆盖 forward/backward、partial、延迟 partial、菱形传播、删除重连和 source invariant，全部通过。当前 pricing engine 没有并行执行入口；若未来引入同 JVM 并行 pricing，需要把静态 mark seed 改成 graph-local 或线程安全计数。
+
+239. 2026-07-16 当前主线正确性与热点再审计
+
+本轮按当前真实接线重新检查 no-SRI 主线，并复核 latest 40-2 诊断日志。12 次 ng-DSSR exact 累计约 `6.488s`，其中初始化 `6.065s`；初始化内部 completion bound 为 `5.472s`，约占 exact 总时间 `84.3%`。forward/backward 扩展合计约 `0.316s`，join 约 `0.088s`。同一个 root 的整轮求解中，HeuristicPricing 为 `26.026s/50`，ng-DSSR exact 为 `6.641s/12`。因此当前 40-2 的第一热点是启发式固定邻域扫描，exact 内第一热点是 completion bound；source-aware dominance 和 group-envelope join 已把 join 压到次要量级，不应继续优先修改。
+
+困难 W300/W1000 的 no-negative certificate 是另一种口径。已有 409 次 exact、1535 个 DSSR round 的统计中，initialization/forward/backward/join 分别占约 `25.2%/26.7%/36.4%/11.5%`；15 轮以上的闭合调用在 ng-set 扩大后由前后向状态穷尽主导。这里继续缩小 DSSR 轮数比常数级 join 优化更重要，已有静态实验支持小到中等 nearest 初始化配合 top10 更新，但该结论仍需跨实例验证，不能把单个 W300 的 K 值写死为全局最优。
+
+代码层面修正两处严格边界。第一，time-indexed paper graph fixing 的增量 local bitset 必须继续服从 `debugIgnorePricingOnlyArcsAtNode`：诊断节点关闭 pricing-only arc 时，本轮刚生成的 fixing 也不得参与传播，只在结束时写回给后续节点；生产默认路径不受影响。第二，completion-bound multi-delta 队列弹出后，只有确实存在新下降区间才复制“已传播快照”；空 delta 直接跳过，避免创建一份立即丢弃的完整 PWLF。该调整不改变 current/propagated 的函数值、队列状态或 fixed point。
+
+剩余优化优先级已经比较清楚。启发式 `findBestMove` 的 ADD/EXCHANGE 仍是整轮主热点，但现有无临时 PWLF 标量内核、primitive 只读视图、普通弧扁平表和 dual 快照已经去掉明确实现冗余；再降低时间需要改变 seed、iteration 或邻域扫描语义，必须做完整求解 A/B。completion bound 的 F/B sparse-delta 传播仍是 exact 初始化热点，真正可能有量级收益的下一步是原生 interval delta，避免用含 BigM 空洞的临时 PWLF 复用通用 shift/add/normalize；这是数据结构级修改，必须逐 job 对拍完整 F/B/U/R，不能作为小补丁。无 SRI 的容器初始化、重复统计清零、诊断开启时的全列扫描等仍有少量冗余，但默认关闭或仅为微秒/毫秒级，不值得增加主线分支。join、candidate pool、active-label 压缩和 source-aware dominance 暂未发现新的高收益等价删除项。
+
+验证使用当前全部 `Basic/Common/HEU/Output/TWETBPC` 源码和 CPLEX/CP Optimizer jar 完整编译；`TimeIndexedGraphOptimizationTest`、`CompletionBoundPreparedBoundsCompatibilityTest`、新旧 dominance graph consistency、`NgDssrSameNodeWarmStartTest` 均通过。`SmallBPCBatchTest` 的 8/8 小规模算例与 ArcFlow 完全一致，tariff 分支例也 `valid=true`。

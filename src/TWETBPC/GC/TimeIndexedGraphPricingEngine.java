@@ -1104,6 +1104,11 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		private boolean isTimeIndexedArcForbidden(int from, int to, int time) {
+			// debugIgnorePricingOnlyArcsAtNode 必须保持优化前语义：指定节点连本轮刚生成的
+			// pricing-only fixing 也不参与传播，只在结束时照常写回供后续节点使用。
+			if (!shouldUsePricingOnlyArcs()) {
+				return false;
+			}
 			return localFixedTimeIndexedArc.get(timeIndexedArcIndex(from, to, time))
 					|| (inheritedTimeIndexedArcLookup != null
 							&& inheritedTimeIndexedArcLookup.isForbidden(from, to, time));

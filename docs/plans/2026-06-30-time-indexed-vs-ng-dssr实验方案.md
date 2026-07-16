@@ -1237,3 +1237,7 @@ strong candidate 构造仍存在可见分配冗余：7 次分支、每次 20 个
 验证覆盖 sparse forbidden-set、dense allowed-complement、重复追加、超出旧 horizon 的 overlay、n+1/n+2 两种 pair width、60 轮随机增量和 Node.copy()。一个 40-job、horizon 20000 的合成写回对拍中，旧全域 union 为 445.708ms，新增量合并为 38.662ms，约 11.53x，10 万次随机查询完全一致。SmallBPCBatchTest 8/8 与 ArcFlow 一致；同一 30-job root smoke 中，paper graph fixing 与 ng-DSSR scalar fixing 均固定 152473 条时空弧，cleanup 分解均为 152443/30/0，两边最终结果均 valid=true，说明新增写回没有改变 fixing 集合和传播结果。
 
 该修改只作用于 node/cut-loop 闭合后的永久 fixing，不会重新开启已由 timeIndexedCompletionBoundInRoundArcFixing=false 关闭的逐 exact 临时 helper。当前 11.53x 是写回热点的独立 A/B，不等于完整 W1000 求解等比例加速；完整端到端收益仍需后续正式 run 验证。
+
+### 2026-07-16 增量 fixing 诊断边界补充
+
+继续复核上一轮 time-indexed 增量写回后，发现生产语义保持一致，但 `debugIgnorePricingOnlyArcsAtNode` 的诊断边界需要显式恢复。该开关用于让指定节点完全忽略 pricing-only arc；因此 paper graph fixing 在该节点传播时不仅不能读取继承禁弧，也不能读取本轮 local fixed bitset。本轮已在统一查询入口恢复这一 guard，本轮证据仍会在结束时写回供后续节点使用。该修改不影响默认生产配置，只保证对照实验仍与优化前口径一致。

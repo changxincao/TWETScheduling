@@ -12,7 +12,7 @@ import Common.PiecewiseLinearFunction.SegmentPool;
 import Common.Utility;
 
 /**
- * 对生产流式下包络、suffix-min workspace 和 backward normalize 做随机对拍与微基准。
+ * 独立验证流式下包络和 backward suffix-min workspace，不接入生产调用链。
  */
 public final class PiecewiseLinearFunctionStreamingMergeExperiment {
 
@@ -28,7 +28,6 @@ public final class PiecewiseLinearFunctionStreamingMergeExperiment {
 	public static void main(String[] args) {
 		int randomCases = args.length > 0 ? Integer.parseInt(args[0]) : DEFAULT_RANDOM_CASES;
 		int benchmarkIterations = args.length > 1 ? Integer.parseInt(args[1]) : DEFAULT_BENCHMARK_ITERATIONS;
-		boolean originalStreamingMerge = Configure.useStreamingPwlfMinimumMerge;
 		Utility.resetCurUpperBound(Utility.big_M);
 		Configure.timeManage = false;
 		Configure.debugPWLFDomainCheck = false;
@@ -54,7 +53,6 @@ public final class PiecewiseLinearFunctionStreamingMergeExperiment {
 		benchmarkBackwardNormalize(5, benchmarkIterations);
 		benchmarkBackwardNormalize(20, benchmarkIterations);
 		benchmarkBackwardNormalize(50, Math.max(50_000, benchmarkIterations / 2));
-		Configure.useStreamingPwlfMinimumMerge = originalStreamingMerge;
 		System.out.printf("[pwlfStreamingExperiment.done] blackhole=%.9f%n", blackhole);
 	}
 
@@ -75,27 +73,10 @@ public final class PiecewiseLinearFunctionStreamingMergeExperiment {
 		PiecewiseLinearFunction rightSnapshot = right.copy();
 
 		PiecewiseLinearFunction expected = left.copy();
-		Configure.useStreamingPwlfMinimumMerge = false;
 		MergeResult expectedChange = expected.mergeMinimumWithChangeHull(right, direction);
 		StreamingOutcome actual = workspace.merge(left, right);
-		PiecewiseLinearFunction production = left.copy();
-		Configure.useStreamingPwlfMinimumMerge = true;
-		MergeResult productionChange = production.mergeMinimumWithChangeHull(right, direction);
-		Configure.useStreamingPwlfMinimumMerge = false;
-
 		assertEquivalent("stream-merge " + direction + " case=" + caseIndex, expected, actual.function);
-		assertEquivalent("production-stream-merge " + direction + " case=" + caseIndex, expected, production);
 		assertEquivalent("stream-right-input " + direction + " case=" + caseIndex, rightSnapshot, right);
-		if (expectedChange.changed != productionChange.changed) {
-			throw new AssertionError("production changed mismatch direction=" + direction + " case=" + caseIndex
-					+ " expected=" + expectedChange.changed + " actual=" + productionChange.changed);
-		}
-		if (expectedChange.changed) {
-			assertClose("production changedStart " + direction + " case=" + caseIndex,
-					expectedChange.changedStart, productionChange.changedStart);
-			assertClose("production changedEnd " + direction + " case=" + caseIndex,
-					expectedChange.changedEnd, productionChange.changedEnd);
-		}
 		if (expectedChange.changed != actual.changed) {
 			throw new AssertionError("changed mismatch direction=" + direction + " case=" + caseIndex
 					+ " expected=" + expectedChange.changed + " actual=" + actual.changed);
@@ -177,9 +158,9 @@ public final class PiecewiseLinearFunctionStreamingMergeExperiment {
 	}
 
 	private static MergeTiming timeMerge(FunctionPair[] pairs, int iterations) {
+		StreamingMinimumWorkspace workspace = new StreamingMinimumWorkspace();
 		long oldNanos = 0L;
 		long streamingNanos = 0L;
-		Configure.useStreamingPwlfMinimumMerge = false;
 		for (int iteration = 0; iteration < iterations; iteration++) {
 			FunctionPair pair = pairs[iteration & (pairs.length - 1)];
 			PiecewiseLinearFunction oldInput = pair.left.copy();
@@ -187,17 +168,13 @@ public final class PiecewiseLinearFunctionStreamingMergeExperiment {
 			oldInput.mergeMinimumWithChangeHull(pair.right, pair.direction);
 			oldNanos += System.nanoTime() - start;
 			blackhole += endpointChecksum(oldInput);
-		}
-		Configure.useStreamingPwlfMinimumMerge = true;
-		for (int iteration = 0; iteration < iterations; iteration++) {
-			FunctionPair pair = pairs[iteration & (pairs.length - 1)];
+
 			PiecewiseLinearFunction streamingInput = pair.left.copy();
-			long start = System.nanoTime();
-			streamingInput.mergeMinimumWithChangeHull(pair.right, pair.direction);
+			start = System.nanoTime();
+			StreamingOutcome outcome = workspace.merge(streamingInput, pair.right);
 			streamingNanos += System.nanoTime() - start;
-			blackhole += endpointChecksum(streamingInput);
+			blackhole += endpointChecksum(outcome.function);
 		}
-		Configure.useStreamingPwlfMinimumMerge = false;
 		return new MergeTiming(oldNanos, streamingNanos);
 	}
 	private static void benchmarkSuffix(int segments, int iterations) {

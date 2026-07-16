@@ -1175,3 +1175,11 @@ backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackwa
 验证分三层完成。10 万组随机函数对拍覆盖 forward/backward 共 20 万次 merge、10 万次 suffix 以及 trailing/all-BigM backward normalize，生产实现、旧 merge 路径和独立参考实现逐点一致，changed 标记及变化区间也一致。10 万次微基准中，真正发生 envelope 更新的流式 merge 在 5/20/50 段上约快 `1.15x-1.48x`；此前独立实验测得 suffix workspace 约快 `1.2x-1.5x`、完整 backward normalize 约快 `1.23x-1.29x`。整树 `SmallBPCBatchTest` A/B 中，开关两侧 8/8 随机例和 tariff 分支例均与 ArcFlow 精确值一致，目标、bound、节点和 pricing 轮数完全一致，小例平均 BPC 时间为 `60.25ms -> 59.13ms`；该时间只作为无退化 smoke，不用于外推大算例收益。`IncrementalSourcedDominanceGraphConsistencyTest`、`PaperDominanceGraphConsistencyTest` 和 `CompletionBoundPreparedBoundsCompatibilityTest` 也全部通过。
 
 当前结论是保留上述四项优化并默认启用流式 merge，同时保留配置开关和旧 merge fallback。没有把 packed-array PWLF、全局数据结构迁移或更宽松的定义域假设合入主线；这些改动范围大，当前证据不足。
+
+### 2026-07-16：PWLF streaming merge 生产接入复核与撤回
+
+本轮重新从语义和端到端性能两方面检查 7 月 16 日接入的 PWLF 优化。没有发现 suffix-min workspace、backward normalize 单次扫描和 backward 动态窗口缓存的正确性问题。suffix-min 额外使用数学 oracle 覆盖 `SegmentPool=false/true`，并分别测试 `big_M、-150、-50、0、50、150` 六种 `curUpperBound`；两种 pool 口径各随机 50000 个函数、每个函数检查 30 个时间点，全部一致。融合后的 backward normalize 仍按“压缩相邻等值段、找到最后有限段、删除连续 BigM 尾部、执行 suffix-min、再压缩新生成水平段”的原顺序工作，只是把前两次链表扫描合并；动态 `HStart/HEnd` 缓存也只复用同一 successor 的只读边界，不改变扩展判定。
+
+真正需要撤回的是生产 streaming `mergeMinimum`。该实现增加约 180 行生产代码，包括独立 scratch、方向归一化预扫描、共享闭包端点 guard、配置开关和旧路径回退。微基准中发生 envelope 更新的调用可快约 1.4--1.7 倍，但真实 40-2 ng-DSSR root-only 正反顺序 A/B 没有形成端到端收益。四次运行的目标、bound、节点、exact 调用数和搜索轨迹一致：旧路径两次为 `solve=19.132/21.504s，exact=2.271/3.035s`，streaming 两次为 `solve=20.438/24.970s，exact=2.455/2.769s`。平均 exact 仅由 `2.653s` 降到 `2.612s`，约快 1.5%，总时间却由 `20.318s` 增到 `22.704s`，约慢 11.7%。这说明 changed-merge 微基准没有代表真实调用构成，额外方向检查和系统噪声已经足以抵消局部收益。
+
+因此生产 streaming 分支已完整删除，`mergeMinimum()` 恢复为单一旧实现；独立实验类仍保留，用于记录该否定结果，不进入求解主线。其余三项保留：suffix workspace 用较短的复用数组逻辑替换了更长的 `ArrayList` 版本，并非双实现；backward normalize 和动态窗口缓存都减少了重复读取，代码量和分支数反而下降。清理后 focused 编译通过；随机 PWLF 对拍完成 100000 组；source-aware、paper dominance 和 completion-bound compatibility 测试通过；SmallBPC 8/8 及 tariff 分支与 ArcFlow 一致；同一 40-2 主线再次得到 `bound=22490、exact=7 calls、valid=true`。通用 PWLF property suite 仍为既有 `passed=26，warnings=2，failed=7`，没有新增失败。

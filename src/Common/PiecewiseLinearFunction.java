@@ -246,8 +246,6 @@ public class PiecewiseLinearFunction {
 			new ThreadLocal<Boolean>();
 	private static final ThreadLocal<SuffixMinimumWorkspace> SUFFIX_MINIMUM_WORKSPACE =
 			ThreadLocal.withInitial(SuffixMinimumWorkspace::new);
-	private static final ThreadLocal<StreamingMinimumWorkspace> STREAMING_MINIMUM_WORKSPACE =
-			ThreadLocal.withInitial(StreamingMinimumWorkspace::new);
 
 	public static MergeMinimumObserver setMergeMinimumObserver(MergeMinimumObserver observer) {
 		MergeMinimumObserver previous = MERGE_MINIMUM_OBSERVER.get();
@@ -368,138 +366,6 @@ public class PiecewiseLinearFunction {
 		}
 	}
 
-
-	/**
-	 * 已按同一方向闭包的两条 PWLF 的流式下包络。只在确认严格改善后物化新链表。
-	 */
-	private static final class StreamingMinimumWorkspace {
-		private double[] segments = new double[64];
-		private int size;
-		private boolean changed;
-		private double changedStart;
-		private double changedEnd;
-
-		private boolean mergeInto(PiecewiseLinearFunction left, PiecewiseLinearFunction right,
-				boolean reportChanged, MergeResult changeHull) {
-			size = 0;
-			changed = false;
-			changedStart = Double.POSITIVE_INFINITY;
-			changedEnd = Double.NEGATIVE_INFINITY;
-			Segment leftSegment = left.head;
-			Segment rightSegment = right.head;
-			double cursor = Math.min(leftSegment.start, rightSegment.start);
-			double unionEnd = Math.max(left.tail.end, right.tail.end);
-			while (Utility.compareLt(cursor, unionEnd)) {
-				while (leftSegment != null && !Utility.compareGt(leftSegment.end, cursor)) {
-					leftSegment = leftSegment.next;
-				}
-				while (rightSegment != null && !Utility.compareGt(rightSegment.end, cursor)) {
-					rightSegment = rightSegment.next;
-				}
-				boolean leftActive = leftSegment != null && !Utility.compareGt(leftSegment.start, cursor);
-				boolean rightActive = rightSegment != null && !Utility.compareGt(rightSegment.start, cursor);
-				double leftEvent = leftSegment == null ? Double.POSITIVE_INFINITY
-						: leftActive ? leftSegment.end : leftSegment.start;
-				double rightEvent = rightSegment == null ? Double.POSITIVE_INFINITY
-						: rightActive ? rightSegment.end : rightSegment.start;
-				double next = Math.min(unionEnd, Math.min(leftEvent, rightEvent));
-				if (!Utility.compareLt(cursor, next)) {
-					throw new IllegalStateException("Non-positive streaming PWLF interval at " + cursor);
-				}
-				if (leftActive && rightActive) {
-					appendMinimum(cursor, next, leftSegment, rightSegment);
-				} else if (leftActive) {
-					append(cursor, next, leftSegment.slope, leftSegment.intercept);
-				} else if (rightActive) {
-					append(cursor, next, rightSegment.slope, rightSegment.intercept);
-					markChanged(cursor, next);
-				} else {
-					throw new IllegalArgumentException("Gap in streaming PWLF minimum at " + cursor);
-				}
-				cursor = next;
-			}
-			if (!changed) {
-				return false;
-			}
-			Segment oldHead = left.head;
-			left.head = left.tail = null;
-			for (int index = 0; index < size; index++) {
-				int offset = index << 2;
-				left.addSegment(segments[offset], segments[offset + 1], segments[offset + 2], segments[offset + 3]);
-			}
-			SegmentPool.release(oldHead);
-			left.resetMinimum();
-			if (reportChanged && changeHull != null) {
-				changeHull.markChanged(changedStart, changedEnd);
-			}
-			return true;
-		}
-
-		private void appendMinimum(double start, double end, Segment left, Segment right) {
-			double leftStart = left.getValue(start);
-			double leftEnd = left.getValue(end);
-			double rightStart = right.getValue(start);
-			double rightEnd = right.getValue(end);
-			if (Utility.compareLe(leftStart, rightStart) && Utility.compareLe(leftEnd, rightEnd)) {
-				append(start, end, left.slope, left.intercept);
-				return;
-			}
-			if (Utility.compareLe(rightStart, leftStart) && Utility.compareLe(rightEnd, leftEnd)) {
-				append(start, end, right.slope, right.intercept);
-				markChanged(start, end);
-				return;
-			}
-			double crossing = (right.intercept - left.intercept) / (left.slope - right.slope);
-			crossing = Math.max(start, Math.min(end, crossing));
-			if (Utility.compareLt(leftStart, rightStart)) {
-				append(start, crossing, left.slope, left.intercept);
-				append(crossing, end, right.slope, right.intercept);
-				markChanged(crossing, end);
-			} else {
-				append(start, crossing, right.slope, right.intercept);
-				markChanged(start, crossing);
-				append(crossing, end, left.slope, left.intercept);
-			}
-		}
-
-		private void append(double start, double end, double slope, double intercept) {
-			if (!Utility.compareLt(start, end)) {
-				return;
-			}
-			if (size > 0) {
-				int previous = (size - 1) << 2;
-				if (Utility.compareEq(segments[previous + 1], start)
-						&& Utility.compareEq(segments[previous + 2], slope)
-						&& Utility.compareEq(segments[previous + 3], intercept)) {
-					segments[previous + 1] = end;
-					return;
-				}
-			}
-			ensureCapacity(size + 1);
-			int offset = size << 2;
-			segments[offset] = start;
-			segments[offset + 1] = end;
-			segments[offset + 2] = slope;
-			segments[offset + 3] = intercept;
-			size++;
-		}
-
-		private void markChanged(double start, double end) {
-			if (!Utility.compareLt(start, end)) {
-				return;
-			}
-			changed = true;
-			changedStart = Math.min(changedStart, start);
-			changedEnd = Math.max(changedEnd, end);
-		}
-
-		private void ensureCapacity(int requiredSegments) {
-			int required = requiredSegments << 2;
-			if (required > segments.length) {
-				segments = Arrays.copyOf(segments, Math.max(required, segments.length << 1));
-			}
-		}
-	}
 
 
 	/**
@@ -2176,30 +2042,6 @@ public class PiecewiseLinearFunction {
 		return result;
 	}
 
-	private boolean isDirectionNormalized(Direction direction) {
-		if (head == null) {
-			return true;
-		}
-		Segment previous = null;
-		for (Segment segment = head; segment != null; segment = segment.next) {
-			if (previous != null && !Utility.compareEq(previous.end, segment.start)) {
-				return false;
-			}
-			if (direction == Direction.FORWARD) {
-				if (Utility.compareGt(segment.slope, 0.0)
-						|| previous != null && Utility.compareGt(
-								segment.getValue(segment.start), previous.getValue(previous.end))) {
-					return false;
-				}
-			} else if (Utility.compareLt(segment.slope, 0.0)
-					|| previous != null && Utility.compareLt(
-							segment.getValue(segment.start), previous.getValue(previous.end))) {
-				return false;
-			}
-			previous = segment;
-		}
-		return true;
-	}
 	private boolean canSkipMergeMinimum(PiecewiseLinearFunction g) {
 		if (this.head == null || g == null || g.head == null) {
 			return false;
@@ -2280,30 +2122,6 @@ public class PiecewiseLinearFunction {
 				observer.record(direction, true, false, skipNanos, 0L, 0L, 0L);
 			}
 			return false;
-		}
-		double streamingOverlapStart = Math.max(this.head.start, g.head.start);
-		double streamingOverlapEnd = Math.min(this.tail.end, g.tail.end);
-		boolean hasCommonClosureAnchor = direction == Direction.FORWARD
-				? Utility.compareEq(this.tail.end, g.tail.end)
-				: Utility.compareEq(this.head.start, g.head.start);
-		if (Configure.useStreamingPwlfMinimumMerge
-				&& hasCommonClosureAnchor
-				&& Utility.compareLt(streamingOverlapStart, streamingOverlapEnd)
-				&& this.isDirectionNormalized(direction) && g.isDirectionNormalized(direction)) {
-			long bodyStart = observer == null ? 0L : System.nanoTime();
-			boolean actualChanged = STREAMING_MINIMUM_WORKSPACE.get().mergeInto(this, g,
-					reportChanged, changeHull);
-			long bodyNanos = observer == null ? 0L : System.nanoTime() - bodyStart;
-			boolean reportedChanged = reportChanged && actualChanged;
-			if (observer != null) {
-				observer.record(direction, false, reportedChanged, skipNanos, 0L, bodyNanos, 0L);
-			}
-			if (direction == Direction.BACKWARD) {
-				Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
-			} else {
-				Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
-			}
-			return reportedChanged;
 		}
 		boolean changed = false;
 		double originalHeadStart = this.head.start;

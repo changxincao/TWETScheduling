@@ -116,6 +116,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private CompletionBoundCalculator.Relaxation completionBoundRelaxation;
 	private CompletionBoundCalculator.QueueOrdering completionBoundQueueOrdering;
 	private CompletionBoundCalculator.Bounds completionBounds;
+	private final boolean completionBoundFlatFunctionQuery;
 	private boolean[][] completionBoundFixedArc;
 	/** 当前 exact solve 内可参与内部机器定价的 job。 */
 	private PackedBitSet reachabilityCandidateJobs;
@@ -456,6 +457,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
 		this.dominanceBackend = dominanceBackend == null ? DominanceBackend.PAPER : dominanceBackend;
 		this.historyWarmStart = historyWarmStart;
+		this.completionBoundFlatFunctionQuery = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.completionBoundFlatFunctionQuery", "true"));
 	}
 
 	private void initializeNgNeighborhoods(LP lp) {
@@ -5291,7 +5294,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!hasCommonCompletionDomain(noSriFrontier, suffix)) {
 			return false;
 		}
-		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(noSriFrontier, suffix, 0.0);
+		double lowerBound = completionBoundFlatFunctionQuery
+				? PiecewiseLinearFunction.findMinimalSumValue(noSriFrontier,
+						completionBounds.backwardRView(job), 0.0)
+				: PiecewiseLinearFunction.findMinimalSumValue(noSriFrontier, suffix, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
@@ -5316,7 +5322,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!hasCommonCompletionDomain(prefix, noSriFrontier)) {
 			return false;
 		}
-		double lowerBound = PiecewiseLinearFunction.findMinimalSumValue(prefix, noSriFrontier, 0.0);
+		// 纯函数求和可交换；动态 label 保持链表，固定 prefix 复用数组视图。
+		double lowerBound = completionBoundFlatFunctionQuery
+				? PiecewiseLinearFunction.findMinimalSumValue(noSriFrontier,
+						completionBounds.forwardUView(job), 0.0)
+				: PiecewiseLinearFunction.findMinimalSumValue(prefix, noSriFrontier, 0.0);
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 

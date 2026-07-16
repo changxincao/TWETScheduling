@@ -807,6 +807,74 @@ public class PiecewiseLinearFunction {
 		return findMinimalShiftedSumValue(f, 0.0, g, yShift, false);
 	}
 
+	/**
+	 * 与链表版本等价，但固定侧函数使用可复用的 primitive 快照。completion bound 会对同一个
+	 * U/R 函数执行大量查询；这里二分定位首个重叠段，避免每个 label 都从固定函数链表头开始扫描。
+	 */
+	public static double findMinimalSumValue(PiecewiseLinearFunction dynamic,
+			ReadOnlySegmentView fixed, double yShift) {
+		if (dynamic == null || fixed == null || dynamic.head == null || fixed.size() == 0) {
+			return Utility.big_M;
+		}
+		double start = Math.max(dynamic.head.start, fixed.starts[0]);
+		double end = Math.min(dynamic.tail.end, fixed.ends[fixed.size() - 1]);
+		if (Utility.compareLt(end, start)) {
+			return Utility.big_M;
+		}
+		Segment dynamicSegment = dynamic.head;
+		while (dynamicSegment != null && Utility.compareLt(dynamicSegment.end, start)) {
+			dynamicSegment = dynamicSegment.next;
+		}
+		int fixedIndex = firstSegmentEndingAtOrAfter(fixed.ends, start);
+		double min = Utility.big_M;
+		while (dynamicSegment != null && fixedIndex < fixed.size()) {
+			double fixedEnd = fixed.ends[fixedIndex];
+			double lo = Math.max(Math.max(dynamicSegment.start, fixed.starts[fixedIndex]), start);
+			double hi = Math.min(Math.min(dynamicSegment.end, fixedEnd), end);
+			if (Utility.compareLe(lo, hi)) {
+				double slope = dynamicSegment.slope + fixed.slopes[fixedIndex];
+				double intercept = dynamicSegment.intercept + fixed.intercepts[fixedIndex] + yShift;
+				double leftValue = slope * lo + intercept;
+				if (Utility.compareLt(leftValue, min)) {
+					min = leftValue;
+				}
+				double rightValue = slope * hi + intercept;
+				if (Utility.compareLt(rightValue, min)) {
+					min = rightValue;
+				}
+			}
+			double dynamicEnd = dynamicSegment.end;
+			if (Utility.compareLe(dynamicEnd, fixedEnd)) {
+				dynamicSegment = dynamicSegment.next;
+				if (Utility.compareEq(dynamicEnd, fixedEnd)) {
+					fixedIndex++;
+				}
+			} else {
+				fixedIndex++;
+			}
+			if (Utility.compareLt(end,
+					Math.max(dynamicSegment == null ? Double.POSITIVE_INFINITY : dynamicSegment.start,
+							fixedIndex >= fixed.size() ? Double.POSITIVE_INFINITY : fixed.starts[fixedIndex]))) {
+				break;
+			}
+		}
+		return min;
+	}
+
+	private static int firstSegmentEndingAtOrAfter(double[] ends, double start) {
+		int low = 0;
+		int high = ends.length;
+		while (low < high) {
+			int middle = (low + high) >>> 1;
+			if (Utility.compareLt(ends[middle], start)) {
+				low = middle + 1;
+			} else {
+				high = middle;
+			}
+		}
+		return low;
+	}
+
 	private static double findMinimalShiftedSumValue(PiecewiseLinearFunction f, double delta,
 			PiecewiseLinearFunction g, double yShift, boolean trimShiftedToDomain) {
 		if (f == null || g == null || f.head == null || g.head == null) {

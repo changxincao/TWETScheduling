@@ -2475,3 +2475,11 @@ zero-setup 下更合理的静态回退不是继续使用任意编号，也不宜
 为验证能否直接扩大，完全同配置只把 update limit 改为 top20。最后 certificate 从 5 轮降到 4 轮，单次困难 exact 从 `5.715s` 降至 `4.864s`；但更新 pair 从 186 增至 194，final 平均 ng-set 从 8.72 增至 8.88，完整 root 的 exact 几乎不变：top10 为 `16.057s`，top20 为 `16.052s`，总时间也只有 `54.873s -> 54.720s`。top20 的下一轮候选同样主要来自上一轮第 21--52 名，说明固定扩大只是在移动 cutoff，同时让后续 labeling 使用更大的 ng-set。当前不修改默认 top10。
 
 若继续做更新策略，合理方向不是全局固定 top20，而是困难轮自适应的较宽 reservoir：当一轮没有 elementary 列时，先更新 top10，再在同一轮已保存的第 11--20 名中检查哪些仍未被新增 pair 排除，只对存活者补充更新，然后才重新 labeling。该方案可能消除“第 11--25 名依次上浮”，又避免所有正常一轮 exact 都使用 top20；但它要求生产候选池保留比实际更新数更宽的 reservoir，并需统计 survivor 数和新增 pair，当前单例 top20 没有净收益，暂不实现。
+
+241. 2026-07-16 completion-bound 固定侧函数查询优化
+
+当前 ng-DSSR 扩展剪枝会把大量动态 label frontier 与同一 job 的固定 completion-bound `U/R` 函数反复求逐点和的最小值。旧实现每次都从两条 PWLF 链表头开始推进；W300 的最终 certificate 中 scalar check 后仍有数十万次完整函数查询，固定 `U/R` 的链表定位被重复执行。本轮只优化这一查询：`Bounds` 对每个 job 的 `U/R` 延迟构造一次 immutable primitive segment view；查询时动态 label 仍走原链表，固定侧用 segment-end 二分定位首个重叠段，再以双指针计算完全相同的端点最小值。completion bound 的构造、定义域相交判断、cutoff、等待闭包和 pruning 结论均未修改，dominance 存储也未改动。
+
+新增 `twet.bpc.completionBoundFlatFunctionQuery`，默认开启，设为 `false` 可完整回退原双链表查询。随机测试对 500000 组错位定义域、最多 30 段、BigM 段和非零纵向平移分别比较“右侧固定”和“左侧固定后交换求和顺序”，均与旧查询一致；`CompletionBoundPreparedBoundsCompatibilityTest` 同时通过。固定 view 只属于一次已构建完成的 `Bounds`，不跨 completion-bound 重建复用，因此不存在 PWLF 修改后的 stale snapshot。
+
+实际 A/B 使用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root-only `nearestK5/top10 + source-aware dominance + join-envelope prefilter + native interval delta` 配置，关闭 ALNS、strong branching、RMIH、SRI 和重型逐轮诊断。两轮正反顺序结果中，OFF exact 分别为 `32.803s/34.786s`，ON 为 `23.095s/24.849s`；平均由 `33.794s` 降至 `23.972s`，减少约 29.1%。平均 root 总时间由 `90.209s` 降至 `76.518s`，减少约 15.2%。四组均为 `bound=1726.014329`、`pricing=86`、`generated columns=22887`、`pool=22887`、`exact calls=11`、`valid=true`，DSSR 和入列轨迹未改变。该结果说明固定侧二分定位确实消除了高频重复链表扫描，收益足以保留。

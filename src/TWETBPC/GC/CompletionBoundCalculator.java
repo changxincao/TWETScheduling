@@ -46,6 +46,8 @@ final class CompletionBoundCalculator {
 		final PiecewiseLinearFunction[] backwardRByJob;
 		final PiecewiseLinearFunction[] forwardFByJob;
 		final PiecewiseLinearFunction[] backwardBByJob;
+		private final PiecewiseLinearFunction.ReadOnlySegmentView[] forwardUViewByJob;
+		private final PiecewiseLinearFunction.ReadOnlySegmentView[] backwardRViewByJob;
 		final double[][] forwardUBeforeByJob;
 		final double[][] backwardRAfterByJob;
 		final double[] forwardUMinByJob;
@@ -58,6 +60,8 @@ final class CompletionBoundCalculator {
 			this.backwardRByJob = new PiecewiseLinearFunction[n + 1];
 			this.forwardFByJob = new PiecewiseLinearFunction[n + 1];
 			this.backwardBByJob = new PiecewiseLinearFunction[n + 1];
+			this.forwardUViewByJob = new PiecewiseLinearFunction.ReadOnlySegmentView[n + 1];
+			this.backwardRViewByJob = new PiecewiseLinearFunction.ReadOnlySegmentView[n + 1];
 			this.forwardUBeforeByJob = new double[n + 1][];
 			this.backwardRAfterByJob = new double[n + 1][];
 			this.forwardUMinByJob = new double[n + 1];
@@ -95,6 +99,27 @@ final class CompletionBoundCalculator {
 				return Utility.big_M;
 			}
 			return discreteValue(backwardRAfterByJob[job], index);
+		}
+
+		PiecewiseLinearFunction.ReadOnlySegmentView forwardUView(int job) {
+			return fixedView(forwardUByJob, forwardUViewByJob, job);
+		}
+
+		PiecewiseLinearFunction.ReadOnlySegmentView backwardRView(int job) {
+			return fixedView(backwardRByJob, backwardRViewByJob, job);
+		}
+
+		private PiecewiseLinearFunction.ReadOnlySegmentView fixedView(PiecewiseLinearFunction[] functions,
+				PiecewiseLinearFunction.ReadOnlySegmentView[] views, int job) {
+			if (job <= 0 || job >= functions.length || functions[job] == null || functions[job].head == null) {
+				return null;
+			}
+			PiecewiseLinearFunction.ReadOnlySegmentView view = views[job];
+			if (view == null) {
+				view = functions[job].readOnlySegmentView();
+				views[job] = view;
+			}
+			return view;
 		}
 
 		double forwardUMin(int job) {

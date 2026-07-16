@@ -59,6 +59,10 @@ public class Tree {
 	private final CompletionBoundSubtreeArcEliminator completionBoundSubtreeArcEliminator;
 	private final List<Brancher> branchers;
 	private final BPCTraceSink traceSink;
+	private long lightweightSeedPreparationNanos;
+	private long lightweightSeedMachineColumnsScanned;
+	private long lightweightSeedOutsourcingColumnsScanned;
+	private int lightweightSeedPreparationCalls;
 
 	public Tree(Data data, TWETBPCConfig config, Pool pool, OutsourcingPool outsourcingPool, CutPool cutPool,
 			InitialColumnBuilder initialColumnBuilder, PC pc, List<Brancher> branchers, BPCTraceSink traceSink) {
@@ -79,6 +83,10 @@ public class Tree {
 
 	public TWETSolveResult solve() {
 		long solveStartNanos = System.nanoTime();
+		lightweightSeedPreparationNanos = 0L;
+		lightweightSeedMachineColumnsScanned = 0L;
+		lightweightSeedOutsourcingColumnsScanned = 0L;
+		lightweightSeedPreparationCalls = 0;
 		TimeLimitChecker timeLimitChecker = new TimeLimitChecker() {
 			@Override
 			public boolean isTimeLimitReached() {
@@ -308,6 +316,12 @@ public class Tree {
 		boolean timeLimitReached = isSolveTimeLimitReached(solveStartNanos);
 		bestBound = finalBound(queue, incumbentCost, bestBound, stoppedByTimeLimit || timeLimitReached);
 		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), stoppedByTimeLimit, timeLimitReached);
+		if (lightweightSeedPreparationCalls > 0) {
+			heartbeat(null, String.format(Locale.ROOT,
+					"strongBranchingLightSeedPreparation calls=%d,machineScanned=%d,outsourcingScanned=%d,timeMs=%.3f",
+					lightweightSeedPreparationCalls, lightweightSeedMachineColumnsScanned,
+					lightweightSeedOutsourcingColumnsScanned, lightweightSeedPreparationNanos / 1_000_000.0));
+		}
 		return new TWETSolveResult(status, incumbentCost, bestBound, processedNodes, totalPoolSize(), incumbentColumnIds,
 				incumbentOutsourcingValues,
 				"TWET BPC solved with LP RMP and configured pricing engines; advanced cuts/pricing remain pending");
@@ -741,6 +755,9 @@ public class Tree {
 	 * PC/LP 旧流程完成，本方法不引入 all-row slack。
 	 */
 	private void prepareLightweightRepairChildSeedColumns(Node child, LP parentLp) {
+		long startNanos = System.nanoTime();
+		int machineColumnsScanned = child.seedColumnIds.size() + parentLp.getRestrictedColumnIds().size();
+		int outsourcingColumnsScanned = parentLp.getRestrictedOutsourcingColumnIds().size();
 		LinkedHashSet<Integer> seed = new LinkedHashSet<Integer>();
 		LinkedHashSet<Integer> outsourcingSeed = new LinkedHashSet<Integer>(child.seedOutsourcingColumnIds);
 		Set<Integer> positiveParentColumns = parentLp.getLastSolution() == null ? Collections.<Integer>emptySet()
@@ -767,6 +784,10 @@ public class Tree {
 		}
 		child.seedColumnIds = new ArrayList<Integer>(seed);
 		child.seedOutsourcingColumnIds = new ArrayList<Integer>(outsourcingSeed);
+		lightweightSeedPreparationCalls++;
+		lightweightSeedMachineColumnsScanned += machineColumnsScanned;
+		lightweightSeedOutsourcingColumnsScanned += outsourcingColumnsScanned;
+		lightweightSeedPreparationNanos += System.nanoTime() - startNanos;
 	}
 
 	private void prepareChildSeedColumns(Node child, LP parentLp, Brancher brancher) {

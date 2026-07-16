@@ -77,6 +77,7 @@ public class Node implements Comparable<Node> {
 	private byte[][] adjacencyPairState;
 	private byte[] tariffSegmentState;
 	private byte[] outsourcingJobState;
+	private int requiredOutsourcingJobCount;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
 	private int repairFrom;
@@ -107,6 +108,7 @@ public class Node implements Comparable<Node> {
 		this.adjacencyPairState = new byte[data.n + 2][data.n + 2];
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.outsourcingJobState = new byte[data.n + 1];
+		this.requiredOutsourcingJobCount = 0;
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
 		this.repairTo = -1;
@@ -151,6 +153,7 @@ public class Node implements Comparable<Node> {
 		}
 		copy.tariffSegmentState = tariffSegmentState.clone();
 		copy.outsourcingJobState = outsourcingJobState.clone();
+		copy.requiredOutsourcingJobCount = requiredOutsourcingJobCount;
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
 		copy.repairTo = repairTo;
@@ -686,6 +689,9 @@ public class Node implements Comparable<Node> {
 			if (outsourcingJobState[job] == OUTSOURCE_FORBIDDEN) {
 				throw new IllegalStateException("Cannot require already forbidden outsourced job " + job);
 			}
+			if (outsourcingJobState[job] != OUTSOURCE_REQUIRED) {
+				requiredOutsourcingJobCount++;
+			}
 			outsourcingJobState[job] = OUTSOURCE_REQUIRED;
 			markOutsourcingRepair(job, true);
 		}
@@ -793,9 +799,12 @@ public class Node implements Comparable<Node> {
 
 	/** 判断一条列是否违反当前节点的 forbidden arc。 */
 	public boolean isColumnCompatible(TWETColumn column) {
-		for (int job = 1; job < outsourcingJobState.length; job++) {
-			if (outsourcingJobState[job] == OUTSOURCE_REQUIRED && column.containsJob(job)) {
-				return false;
+		// 无 required-outsourcing 分支时，内部列兼容检查无需扫描全部 job state。
+		if (requiredOutsourcingJobCount > 0) {
+			for (int job = 1; job < outsourcingJobState.length; job++) {
+				if (outsourcingJobState[job] == OUTSOURCE_REQUIRED && column.containsJob(job)) {
+					return false;
+				}
 			}
 		}
 		List<Integer> seq = column.getSequence();

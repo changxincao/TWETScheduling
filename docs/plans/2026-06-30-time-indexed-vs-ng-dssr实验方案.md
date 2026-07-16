@@ -1207,3 +1207,13 @@ backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackwa
 纯 time-indexed 的难点则不同。`50-2 timeX10` 为 `904.922s`，其中 graph pricing `505.312s/1122`、master LP `294.028s`、pool `177128`。这里不是单个图扫描实现异常，而是 horizon 放大后每轮全图扫描与 pseudo-column tail 共同造成上千次 pricing/LP 往返，列池又反过来加重 RMP。可验证的下一步是静态比较每轮返回列上限 300 与 600/1000，判断减少图扫描轮数能否抵消更重的 LP；更结构性的方向是只清理 restricted active columns、Pool 仍保留最佳 signature，并始终保留正值/基列，使零值长期不活跃列可以由 exact pricing 重新生成。再往后才是 DDD，这属于算法结构改造而不是局部优化。
 
 当前优化优先级因此为：第一，拆分 ng-DSSR pricing 内 time-indexed helper 与 node 后永久 fixing；第二，消除 strong branching seed 兼容检查中的无外包全 job 扫描，并补 seed-preparation 独立计时；第三，对纯 time-indexed 做返回批量与 restricted-column 管理 A/B；第四才是 completion bound 或启发式 PWLF 的进一步底层改造。completion bound 在 W1000 中约 `52.8s`，但它同时剪掉大量扩展，且 sparse delta/time-priority 已经启用；join 只有 `2.5s`，当前不再是优化对象。
+
+### 2026-07-16：拆分 pricing 内 time-indexed helper 与节点后 fixing
+
+`50-3 setupR50 timeX10 + W1000` 的旧日志中，ng-DSSR exact 共 `287.800s/154 calls`，其中初始化 `250.013s`，`window=185.061s`。这里的 `window` 不是一次 root preprocessing，也不只是逐 job 取窗口交集；主要内容是每个新的 exact pricing 在当前 dual 下重新构造 `TimeIndexedScalarCompletionBound` 的离散松弛图，计算正反向 scalar bound，再用结果收缩当轮 effective window。同一次 ng-DSSR 的后续 DSSR 轮可以复用，但下一次 LP/exact 的 dual 已变，因此旧实现会重新构造。W1000 的 horizon 和时空禁弧状态较大，累计形成了 185.1s。
+
+本次把 `timeIndexedCompletionBoundInRoundArcFixing` 的语义收紧为整套 pricing 内 helper 开关。关闭时，ng-DSSR exact 不再构造临时 time-indexed 图，也不做本轮 0-reduced-cost 时空弧 fixing/window tightening；节点 LP 闭合后的 `TimeIndexedScalarCompletionBound.applyArcFixing()`、cut-loop 闭合后的永久 pricing-only fixing 仍由原有 scalar/arc-fixing/cut-loop 开关控制，不受影响。打开时保持旧的 in-round 强化逻辑。该修改消除了开关关闭但仍支付建图成本的实现偏差；完整求解收益仍需 A/B，因为失去本轮窗口强化后 labeling 可能增加。
+
+同时修正 strong branching 外层耗时的归因。lightweight seed 为了保留父 LP 正值列并过滤其余 child-incompatible 列，仍必须扫描 `child.seedColumnIds` 和父 restricted columns；本次不能、也没有删除这层扫描。无 required-outsourcing 时，原 `Node.isColumnCompatible()` 确实会对每条内部列遍历全部 outsourcing state，但由于 Java 短路，此时不会调用 `column.containsJob()`。因此该循环是确定冗余，却不能直接解释全部 `84.387s` 未归类时间。本次维护 required-outsourcing 计数，计数为 0 时跳过 job-state 循环，同时保留完整 sequence arc 检查；并新增求解结束聚合日志 `strongBranchingLightSeedPreparation`，记录调用数、机器/外包列扫描数和真实耗时，后续再决定是否需要 branch-delta 检查或列 arc-incidence 缓存。
+
+验证方面，Java 22 定向编译通过；`TimeIndexedGraphOptimizationTest` 新增并通过无 required-outsourcing、required job、节点复制及 arc compatibility 回归。当前尚未跑完整 W1000 A/B，因此只确认调用语义和功能正确，不提前声称 185.1s 会等额转化为总求解收益。

@@ -6111,7 +6111,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		zeroDualExcludedJobCount = 0;
 		dualProfitableWindowEnabled = canUseDualProfitableWindow(lp);
 		precomputeEffectivePricingWindows(lp);
-		buildTimeIndexedScalarBoundAndTightenWindows(lp);
+		// 2026-07-16: in-round 关闭时，ng-DSSR pricing 内不再构造临时 time-indexed 图。
+		// node/cut-loop 收敛后的永久 fixing 由独立 applyArcFixing() 路径控制，不受这里影响。
+		if (config.timeIndexedCompletionBoundInRoundArcFixing) {
+			buildTimeIndexedScalarBoundAndTightenWindows(lp);
+		}
 		precomputeZeroDualExcludedJobs(lp);
 		precomputeCompletionBoundPricingWindows();
 	}
@@ -6138,15 +6142,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		timeIndexedScalarBuildNanos += timeIndexedScalarBound.getBuildNanos();
-		TimeIndexedScalarCompletionBound.WindowTightening tightened;
-		if (config.timeIndexedCompletionBoundInRoundArcFixing) {
-			// 2026-06-29: pricing 婵炴垶鎼╅崣鍐ㄎ涢幐搴氦妞ゆ挻绻傞弫鈺呮煕濞嗘ü绨峰┑鐐叉喘閹?no-SRI 闂佹眹鍔岀€氼垱绂嶉妶澶嬬厒?relaxed fixing闂?
-			// SRI-aware fixing 闂佸憡鐟禍娆戞崲濮樿埖鍋╂繛鍡楃箲闊?node 闂傚倸鍋嗛崢濂稿箖鎼淬劌瑙﹂幖杈剧稻閻ｉ亶鏌涘▎妯虹仯闁瑰鍏橀獮?reduced-cost fixing 婵炴垶鎼╅崣蹇曟濠靛鐒奸柛顭戝枛鐢櫕鎱ㄩ敐鍛闁?DSSR 闁哄鏅╅崢娲船椤掑倻纾奸悗娑櫭婵犮垼鍩栧銊︽叏閹间礁绠?bucket闂?
-			tightened = timeIndexedScalarBound.tightenWindowsAfterZeroReducedCostArcFixing(
-					effectiveJobHStart, effectiveJobHEnd);
-		} else {
-			tightened = timeIndexedScalarBound.tightenWindows(effectiveJobHStart, effectiveJobHEnd);
-		}
+		// pricing 内 helper 只在 in-round=true 时进入本方法。
+		TimeIndexedScalarCompletionBound.WindowTightening tightened =
+				timeIndexedScalarBound.tightenWindowsAfterZeroReducedCostArcFixing(
+						effectiveJobHStart, effectiveJobHEnd);
 		timeIndexedWindowTightenedJobs += tightened.tightenedJobs;
 		timeIndexedWindowReachableJobs += tightened.reachableJobs;
 		if (tightened.tightenedJobs > 0) {

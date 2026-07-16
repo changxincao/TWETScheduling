@@ -261,7 +261,7 @@ public class TWETBPCConfig {
 	 * fixing 证书，安全但不如完整 SRI-aware pricing 强；完整 SRI-aware fixing 另由开关控制，默认关闭以避免过重。
 	 */
 	public boolean timeIndexedCompletionBoundAllowNoSriWithActiveCuts = true;
-	/** 2026-06-29: 每轮 pricing 内部先按 0 reduced-cost 做本地 time-indexed arc fixing，再据此收缩本轮窗口。 */
+	/** 2026-07-16: 是否在每次 ng-DSSR exact 内构建临时 time-indexed helper，并按 0 reduced-cost fixing 收缩本轮窗口；关闭时完全跳过该图。 */
 	public boolean timeIndexedCompletionBoundInRoundArcFixing = false;
 	/** 2026-06-29: active SRI cut 下使用带 SRI state 的 time-indexed labeling 做本轮窗口强化。 */
 	public boolean timeIndexedCompletionBoundSriAwareArcFixing = false;

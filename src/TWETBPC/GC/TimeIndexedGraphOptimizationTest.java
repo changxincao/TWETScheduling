@@ -16,6 +16,8 @@ import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.LP.OutsourcingPool;
 import TWETBPC.LP.Pool;
+import TWETBPC.Model.ColumnSource;
+import TWETBPC.Model.TWETColumn;
 
 /**
  * 2026-07-14: time-indexed 热路径等价性回归测试，不依赖求解器。
@@ -28,6 +30,7 @@ public final class TimeIndexedGraphOptimizationTest {
 	public static void main(String[] args) throws Exception {
 		testCompressedPredecessorMatchesFullWaitingChain();
 		testTimeIndexedArcLookupMatchesNode();
+		testInternalColumnCompatibilityFastPath();
 		testStaticPricingDataMatchesInstance();
 		testExactPricingRejectsNonIntegerGrid();
 		testCompactWindowConsumptionBoundaries();
@@ -75,6 +78,30 @@ public final class TimeIndexedGraphOptimizationTest {
 		}
 	}
 
+	private static void testInternalColumnCompatibilityFastPath() throws Exception {
+		Data data = loadData();
+		TWETColumn column = new TWETColumn(0, Arrays.asList(Integer.valueOf(1), Integer.valueOf(2)),
+				data.n, 0.0, ColumnSource.MANUAL, false);
+		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		if (!node.isColumnCompatible(column)) {
+			throw new AssertionError("free outsourcing state rejected a compatible internal column");
+		}
+		node.forbidArc(1, 2);
+		if (node.isColumnCompatible(column)) {
+			throw new AssertionError("outsourcing fast path skipped arc compatibility");
+		}
+
+		Node required = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		required.requireOutsourcingJob(3);
+		if (!required.isColumnCompatible(column)) {
+			throw new AssertionError("unrelated required outsourcing job rejected internal column");
+		}
+		required.requireOutsourcingJob(2);
+		required.requireOutsourcingJob(2);
+		if (required.isColumnCompatible(column) || required.copy().isColumnCompatible(column)) {
+			throw new AssertionError("required outsourcing state was lost or ignored");
+		}
+	}
 	private static void testTimeIndexedArcLookupMatchesNode() throws Exception {
 		Data data = loadData();
 		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);

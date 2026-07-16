@@ -1136,3 +1136,9 @@ completion bound 不能采用上述标量内核，因为后续传播、arc fixin
 同时删除了 `insertOrReplaceCost()` 外层重复的定义域交集检查。现有诊断日志共 781 条启发式统计记录中，该检查拒绝次数始终为 0；内部标量核本身已经完成同一交集判断，因此外层检查只会重复读取链表端点。
 
 正确性验证包括 50 万组随机三路对拍：完整 PWLF reference、原链表标量核和新数组视图标量核结果一致；`OutsourcingMoveConsistencyTest` 的 14168 个 move 通过。隔离微基准中，20 段、200 万次调用约快 5.5%，5 段、400 万次调用约快 22.1%。40-2 root-only 两组正反顺序 A/B 的 pricing 轮数、heuristic/exact 调用数、pool、bound 和 valid 完全一致；候选成本计算平均约下降 5.2%，启发式总时间平均约下降 3.2%。视图重建使 apply 阶段累计增加约 135ms，但明显小于候选扫描节省。该优化收益属于稳定的小幅常数改进，不应解释为新的数量级加速；需要完整输出函数的 completion bound 和 exact propagation 仍应保留链表/包络表示。
+
+#### 持久只读视图的独立 correctness 复核
+
+提交后再次脱离性能 A/B 做正确性审计。数学上，数组视图路径与链表标量路径使用相同的物理定义域裁剪、prefix-min 等待闭包、suffix 反向平移、endpoint lower bound、BigM 和有限 `curUpperBound` 语义。状态生命周期上，ADD/REMOVE 只复制未受影响区间的 PWLF 及其视图，并从变动位置分别重建 forward/backward；EXCHANGE 重建两侧全部受影响项；unrestricted penalty 只读缓存对应 Data 初始化后不再修改的基础函数，compact/dual window context 则同步构造局部 penalty 及其视图。因此生产调用链不存在修改 PWLF 后继续读取旧视图的路径。
+
+验证把三路随机对拍扩大到 200 万组，完整 PWLF reference、链表标量核和数组视图核全部一致；`OutsourcingMoveConsistencyTest` 仍通过 14168 个 move。外层已删除的 overlap 检查与内部定义域交集判断严格重复，空函数和无交集仍由标量核直接返回 BigM。此次复核未发现 correctness 问题；只读视图的明确契约是不能跨原 PWLF 修改复用，当前启发式 profile 生命周期满足该契约。

@@ -2485,3 +2485,18 @@ zero-setup 下更合理的静态回退不是继续使用任意编号，也不宜
 实际 A/B 使用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root-only `nearestK5/top10 + source-aware dominance + join-envelope prefilter + native interval delta` 配置，关闭 ALNS、strong branching、RMIH、SRI 和重型逐轮诊断。两轮正反顺序结果中，OFF exact 分别为 `32.803s/34.786s`，ON 为 `23.095s/24.849s`；平均由 `33.794s` 降至 `23.972s`，减少约 29.1%。平均 root 总时间由 `90.209s` 降至 `76.518s`，减少约 15.2%。四组均为 `bound=1726.014329`、`pricing=86`、`generated columns=22887`、`pool=22887`、`exact calls=11`、`valid=true`，DSSR 和入列轨迹未改变。该结果说明固定侧二分定位确实消除了高频重复链表扫描，收益足以保留。
 
 提交后再次按控制流复核 fixed view 生命周期和边界语义。`U/R` 只在 `CompletionBoundCalculator` 构造、聚合和辅助 bound 重建阶段写入，外部 arc fixing、subtree eliminator 和 pricing 仅只读；每次 `solve()` 开头会清空 reusable bounds，同一次 DSSR 的后续轮才复用，因此 lazy view 不会跨函数修改存活。normal、list-partial 和 graph-partial pricing engine 都实例化同一个 ng-DSSR 主体，本次替换对三种 backend 的 completion-bound 查询同样生效，但不接触 dominance store。backward 查询交换了 prefix 与动态 label 的位置，只利用逐点加法交换律，定义域交集和 cutoff 仍在原位置判断。新增 hull 相交但真实 segment 不相交、一侧空函数及端点相接用例；扩大到 2000000 组随机双向 fixed-view 对拍均通过。未发现 correctness 问题，本轮只修正 `ReadOnlySegmentView` 的旧“启发式专用”注释。
+
+
+242. 2026-07-16 fixed-view 逻辑的全局复用边界
+
+本轮全局扫描了生产代码中的 PWLF 标量查询、join、completion-bound arc fixing、route enumeration prepared bound、启发式成本评估及旧 pricing 后端。该优化成立需要同时满足三个条件：一侧函数在一批查询期间不变；同一固定函数会被多次查询；调用方只需要最小值而不需要生成完整 PWLF。不能把结论简化为“数组比链表快”。如果函数会原地更新、每次只查询一次，或者后续还需要完整 segment 输出，构造 primitive snapshot 反而会增加复制和失效维护。
+
+当前 ng-DSSR 主线中，收益最大的 completion-bound `U/R` 高频查询已经覆盖，normal、list-partial 和 graph-partial backend 共用同一个实现。完全相同且严格可复用的位置是 `CompletionBoundSubtreeArcEliminator.PreparedBounds.canPruneForwardLabel()`：route enumeration 开启 prepared completion-bound 剪枝时，动态 enumeration frontier 会反复查询固定 `R_j`，可直接复用 `Bounds.backwardRView(job)`；该组件当前默认关闭，因此属于低风险但非当前主热点的补齐项。
+
+当前主线最值得独立 A/B 的位置是 label-level join。循环顺序是固定一个 backward label，再扫描多个 forward label；`backward.joinExtendedFrontier` 在首次构造后会缓存且 join 阶段不再修改，因此可以为 backward 侧延迟缓存 primitive view，并增加支持横向位移的“动态 forward + 固定 backward”标量求和查询。W300 重轮单次 exact 可有约 `460297` 次真实 join function evaluation，说明调用量足够大；但 group-envelope prefilter 已先删除大量 pair，最终 certificate 中真实 label join 甚至可能为 0，所以必须按完整 root A/B 决定是否保留，不能仅看微基准。相邻候选是 group-envelope prefilter：困难 certificate 可有约 `150947` 次 traced-envelope 标量拼接、约 `439ms`；可以给 traced envelope 增加不含 source 的 value-only primitive view 用于预过滤，真正生成列时仍保留原 source trace。该项局部收益上限更明确，但不会改变前后向扩展主导的困难轮。
+
+completion-bound arc fixing 也满足“一侧可固定”的结构，但量级较小。50-job 每轮只有 `2450` 条普通弧函数复核，最新 W300 日志约 `19--35ms`；可以增加 shifted fixed-view overload 并缓存 `F/B` view，跨多节点累计可能节省少量时间，但优先级低于 join。旧 `GCNGBBStyleBidirectional`、full-domain 和旧 partial 类仍有 `shiftX/add -> findMinimal` 或 `add -> findMinimal` 的临时 PWLF 写法，改成现有标量 helper 可以严格等价地减少分配；这些类不在当前 ng-DSSR 主线，除非重新启用旧 backend，否则不应为其扩大生产改动面。
+
+PWLF 底层其余操作不适合直接复用本次逻辑。`CompletionBoundCalculator` 的 F/B 传播、`mergeMinimum`、dominance envelope、`shiftX/add/normalize` 都必须产出或更新完整函数，而且参与运算的函数持续变化；fixed view 会立即失效，不能消除核心 segment 构造。`findMinimal()` 全局缓存也不合适，PWLF 存在多处原地 segment 修改和 SegmentPool 复用，完整失效协议的复杂度高于收益。`findMinimalInRange()` 可以对固定函数做二分起点查询，但当前 join range-LB 默认关闭，而且同一 pair 的动态侧仍需扫描，暂不应优先实现。启发式 ADD/EXCHANGE 已经使用 primitive 只读 profile 和无临时 PWLF 标量内核，不存在同类遗漏。
+
+当前建议顺序为：先对 join 的固定 backward view 增加复用次数/segment 数统计并做完整 W300 A/B；若净收益稳定，再考虑 group-envelope value-only view。route enumeration prepared bound 和旧 backend 只在对应功能重新启用时补齐；arc fixing 的 shifted view 作为低优先级常数优化。结论是该思路还能复用，但只能用于“固定侧、多次、只求标量”这类调用，不能作为 PWLF 全局数组化或统一替换策略。

@@ -2519,3 +2519,9 @@ PWLF 底层其余操作不适合直接复用本次逻辑。`CompletionBoundCalcu
 使用 wet050_003_3m_setupR50 + dueWindowHalfWidth=300、root-only、nearestK5/top10、no ALNS/no strong branching/no SRI 的相邻 A/B 共运行两轮正反顺序。四次运行的 8 次 exact 加列序列均严格为 5000/1742/1067/74/41/6/1/0，每轮 pool、DSSR rounds、accepted best reduced cost、最终 bound=1726.014329 和 valid=true 全部一致。第一轮 OFF/ON 的 exact 为 15.572s/14.864s，join phase 为 1.947s/1.719s；反序第二轮受整机负载影响，ON/OFF 的 exact 为 25.441s/18.505s，且 initialization、扩展和 join 同时整体变慢，不能据此声称稳定的端到端提速。按每轮 join phase 相对同轮 forward+backward 时间归一化，两次 OFF 平均为 24.39%，两次 ON 平均为 23.14%，约下降 5.1%。因此该修改作为代码量很小、语义等价、默认启用且可回退的常数优化保留，但不把它记录为稳定的大幅提速。
 
 另尝试并行关闭启发式运行 20-job smoke，两个 exact 都进入不具代表性的长尾，约 70 秒后主动停止，未写入 CSV，也不纳入性能结论。focused Java 22 编译通过，W300 四次运行均通过解验证。
+
+245. 2026-07-16 group-envelope 连续跳跃正确性复核
+
+提交后再次沿实际控制流检查连续 BitSet 跳跃。`ZERO`、`BEST_UB` 和 `BEST_RECORD` 三种 join 口径下，动态 join threshold 只可能等于 `-1e-6` 或比它更负；group-envelope prefilter 只在 envelope 下界不小于 `-1e-6` 时置位，因此所有 set bit 对三种口径都可安全跳过。forward candidates 在建索引前已完成 dominated label 压缩和按 `minReducedCost` 升序排序，BitSet 按该固定列表下标构造，join 期间列表不再修改；缓存同时按 backward envelope group 和 terminal job 隔离，不存在跨组或排序后的索引复用。
+
+新循环跨过旧循环可能触发 scalar-LB break 的 set-bit 区间时，也不会多生成列：若后面仍有 clear candidate，由于 forward `minReducedCost` 单调不降，它会在同一 lower-bound 检查处 break；若后面没有 clear candidate，则直接结束。SRI/full-SRI 路径由 `useJoinEnvelopePrefilter()` guard 排除，forward-to-sink 与 envelope-compression 路径也未改动。诊断口径唯一变化是连续跳过的 label 不再计入实际 `visited/dominated`，而计入 envelope potential-pruned；这不参与算法判断。使用 `target/classes` 和隔离 sourcepath 的 focused Java 22 编译通过，未发现 correctness 问题或新的冗余处理。

@@ -2500,3 +2500,12 @@ completion-bound arc fixing 也满足“一侧可固定”的结构，但量级�
 PWLF 底层其余操作不适合直接复用本次逻辑。`CompletionBoundCalculator` 的 F/B 传播、`mergeMinimum`、dominance envelope、`shiftX/add/normalize` 都必须产出或更新完整函数，而且参与运算的函数持续变化；fixed view 会立即失效，不能消除核心 segment 构造。`findMinimal()` 全局缓存也不合适，PWLF 存在多处原地 segment 修改和 SegmentPool 复用，完整失效协议的复杂度高于收益。`findMinimalInRange()` 可以对固定函数做二分起点查询，但当前 join range-LB 默认关闭，而且同一 pair 的动态侧仍需扫描，暂不应优先实现。启发式 ADD/EXCHANGE 已经使用 primitive 只读 profile 和无临时 PWLF 标量内核，不存在同类遗漏。
 
 当前建议顺序为：先对 join 的固定 backward view 增加复用次数/segment 数统计并做完整 W300 A/B；若净收益稳定，再考虑 group-envelope value-only view。route enumeration prepared bound 和旧 backend 只在对应功能重新启用时补齐；arc fixing 的 shifted view 作为低优先级常数优化。结论是该思路还能复用，但只能用于“固定侧、多次、只求标量”这类调用，不能作为 PWLF 全局数组化或统一替换策略。
+
+
+243. 2026-07-16 启发式之后的剩余热点复核
+
+使用 fixed-view 优化后的 W300 root-only 日志重新累计 11 次 exact pricing：总计约 `24.757s`，其中初始化 `7.523s`、forward `5.954s`、backward `7.629s`、join `3.515s`。初始化几乎全部是 completion-bound 构造；困难 no-negative certificate 内 completion bound 已在 DSSR 轮间复用，后续时间转为正反向 labeling 和 join。当前 root 的启发式 pricing 仍为 `46.368s/75 calls`，但 ADD/EXCHANGE 已使用无临时 PWLF 的 primitive 标量内核，没有新的明显实现冗余。
+
+本轮找到一处比固定 backward view 更直接的 join 冗余。group-envelope prefilter 已按 backward group 和 terminal job 生成 `BitSet`，标记全部可以整组剪掉的 forward label；但 `joinForwardGroupWithBackward()` 仍按 `i++` 扫描完整候选列表，再对每个置位元素执行一次 `BitSet.get(i)` 后跳过。最终 certificate 中 `join pairs tried=0`、真实 `funcEval=0`，但仍访问约 `3.298m` 个候选，其中约 `3.235m` 已被 group prefilter 标记，join 阶段仍耗时约 `2.007s`。可严格保持原候选顺序，使用 `BitSet.nextClearBit()` 直接跳到下一个未剪候选；这不改变 group 判定、BEST_UB 阈值、真实 pair 顺序或返回列，只需调整统计口径。该项应优先于给每个 backward frontier 建 primitive view，因为 certificate 轮根本没有进入真实函数拼接。
+
+除该项外，剩余方向都属于中等或较小收益。completion-bound 构造仍占普通 exact 的约 30%，但原生 interval delta 和固定 U/R 查询已经覆盖最明确冗余，继续优化需要重写 F/B/U/R 的 segment 存储或传播内核。困难 certificate 的正反向扩展约占 exact 的 55%，主要成本来自更多 survivor label、source-aware envelope merge 和多轮 DSSR 状态规模，不是 queue、位集或单个函数调用；此前 threshold-mask reachability 完整 A/B 仅节省 exact 约 0.34%，已撤回。固定 backward view、group-envelope value-only view和 completion-bound arc fixing view 仍可做常数优化，但预计都低于“跳过已知 BitSet 区间”。master LP、arc fixing 和统计在该 root-only 口径下均不是当前热点。

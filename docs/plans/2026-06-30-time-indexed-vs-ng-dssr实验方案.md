@@ -1154,3 +1154,15 @@ completion bound 不能采用上述标量内核，因为后续传播、arc fixin
 次一级方案是只在该 writer 内使用可复用 primitive scratch buffer，再在结果确定后一次物化为现有 Segment 链；是否值得做取决于流式链表 writer 的 A/B。backward `minimizeSuffixInPlace()` 当前需要反向访问，后续也可测试复用 `Segment[]` scratch，避免每次新建 `ArrayList`，但其收益大概率小于 merge 内核。现有 `addShifted`、segment reuse、融合 add+prefix-min 和 exact 扩展替换已经做过对拍且端到端无收益或退化，不应重复投入。
 
 若实施流式 merge，验证必须同时覆盖 forward/backward、不同左边界、BigM 空洞、段内交点、changed hull、右参数不变性以及 SegmentPool 开关，并用当前 property suite 逐点对拍旧实现；随后在 completion-bound merge timing 中分别比较 skip/copy/body/normalize 和完整 build 时间。只有组件时间与端到端 exact/solve 都改善才保留，不能仅凭减少对象数判断有效。
+
+### 2026-07-16 PWLF streaming lower-envelope 与 backward normalize 独立实验
+
+本轮没有修改 `PiecewiseLinearFunction`、completion bound 或 ng-DSSR 生产调用链，只在 `src/PWLFTesting/PiecewiseLinearFunctionStreamingMergeExperiment.java` 中实现独立实验。streaming merge 同时只读扫描两条已经按同一方向 normalize 的函数，把逐点下包络写入可复用的 primitive scratch；若没有改善，直接返回原左函数；若确有改善，只物化一次最终 Segment 链。由于同方向单调函数的逐点最小仍保持同方向单调，专用路径不再执行右函数复制、原地拆链和 merge 后完整 normalize。该结论仅适用于当前方向化 envelope 契约，不是通用任意 PWLF merge 替代品。
+
+正确性测试使用固定随机种子完成 100000 组样本：forward/backward merge 共 200000 次，并对 changed flag、changed hull、逐段端点/中点函数值和右输入不变性逐项对拍；suffix workspace 和融合版 backward normalize 各完成 100000 次对拍，额外覆盖 trailing BigM 与全 BigM。全部通过。现有通用 PWLF property suite 仍为既有 `passed=26, warnings=2, failed=7` 口径；本轮未改生产代码，测试生成的报告文件已恢复。
+
+性能上，随机 merge 样本中每组 64 对函数有 40--54 对实际改变 envelope；在这一混合口径下，20/50 段的多轮结果通常约快 1.4--1.7 倍，backward 样本最高接近 1.9 倍；5 段样本波动较大。无变化时，现有 `canSkipMergeMinimum()` 已经很便宜，streaming scratch 没有稳定优势，5 段时可慢约 10%--23%，20/50 段大多持平或略快。因此若后续接入，应保留 no-change 快路径语义，并重点替换 changed merge 的复制、拆链和 normalize 路径。
+
+backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackward()` 先完整扫描寻找最后一个非 BigM 段，再扫描压缩相邻段，`minimizeSuffixInPlace()` 又把全部 Segment 装入临时 `ArrayList` 后逆序处理，最后再压缩一次。镜像函数基准中，20/50 段原 backward normalize 约为 forward 的 1.7--1.8 倍；独立实现把尾部识别与第一次 compact 合并，并用可复用 `Segment[]` 代替每次 `ArrayList`，完整 backward normalize 约快 1.23--1.29 倍，单独 suffix-min 通常快约 1.2--1.5 倍。ng-DSSR backward 扩展还存在重复读取动态 HStart/HEnd 的常数项：同一候选在窗口重叠、rhoPrime 和后续边界判断中重复读取，后续可以合并为一次局部边界计算。
+
+当前结论是：backward 的实现不对称确实能解释一部分额外时间，但不能解释所有正反向总耗时差。实际 pricing 中候选数、保留 label 数、函数段数和 dominance 图规模仍是主导变量，部分现有日志甚至是 forward 显著更重。因此本轮不把实验代码接入全局；下一步若继续，应分别 A/B：一是生产化方向化 streaming merge，二是生产化 backward fused normalize，不能把两项和 label 数量变化混在一次实验中。

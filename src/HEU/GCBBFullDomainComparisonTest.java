@@ -186,6 +186,11 @@ public class GCBBFullDomainComparisonTest {
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit
 					+ (config.useIncrementalSourcedDominanceGraph ? "-srcDom" : "-paperDom");
 		}
+		if ((config.useGCNGBBStyleNgDssrPricing || config.useGCNGBBStyleNgDssrPartialDominancePricing
+				|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing)
+				&& "minimumNewPairsSegment".equalsIgnoreCase(config.ngDssrNonElementaryRouteUpdateMode)) {
+			mode += "-minSeg";
+		}
 		if (config.enableNgDssrHistoryWarmStart) {
 			mode += "-ngHistW" + config.ngDssrHistoryWarmStartWindowSize;
 		}
@@ -479,6 +484,9 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
 				config.ngDssrNonElementaryRouteUpdateLimit);
+		config.ngDssrNonElementaryRouteUpdateMode = System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateMode",
+				config.ngDssrNonElementaryRouteUpdateMode);
 		config.enableNgDssrHistoryWarmStart = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrHistoryWarmStart",
 				Boolean.toString(config.enableNgDssrHistoryWarmStart)));

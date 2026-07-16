@@ -366,6 +366,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrRoundsExecuted;
 	private int ngDssrTotalNgSetUpdates;
 	private int ngDssrTotalNonElementaryRoutes;
+	private boolean ngDssrUseMinimumNewPairsSegmentUpdate;
+	private int ngDssrMinimumSegmentRoutesConsidered;
+	private int ngDssrMinimumSegmentRoutesAlreadyBlocked;
+	private int ngDssrMinimumSegmentRoutesUpdated;
 	private int ngDssrTotalNonElementaryNegativeSeen;
 	private int ngDssrTotalElementaryColumnsReturned;
 	private int ngDssrRoundNonElementaryNegativeSeen;
@@ -943,6 +947,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private int updateNgNeighborhoodsFromNonElementaryRoutes() {
+		if (ngDssrUseMinimumNewPairsSegmentUpdate) {
+			return updateNgNeighborhoodsByMinimumNewPairsSegment();
+		}
+		return updateNgNeighborhoodsByAllRepeatedSegments();
+	}
+
+	private int updateNgNeighborhoodsByAllRepeatedSegments() {
 		int changed = 0;
 		for (int routeIndex = 0; routeIndex < nonElementaryNegativeRoutes.size(); routeIndex++) {
 			ArrayList<Integer> sequence = nonElementaryNegativeRoutes.get(routeIndex).sequence;
@@ -973,6 +984,87 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return changed;
 	}
 
+	private int updateNgNeighborhoodsByMinimumNewPairsSegment() {
+		int changed = 0;
+		for (NonElementaryNegativeRoute route : nonElementaryNegativeRoutes) {
+			ngDssrMinimumSegmentRoutesConsidered++;
+			int routeChanged = addMinimumNewPairsRepeatedSegment(route.sequence, ngNeighborhoodByJob, data.n,
+					ngDssrRoundAddedPairs);
+			if (routeChanged < 0) {
+				ngDssrMinimumSegmentRoutesAlreadyBlocked++;
+			} else if (routeChanged > 0) {
+				ngDssrMinimumSegmentRoutesUpdated++;
+				changed += routeChanged;
+			}
+		}
+		return changed;
+	}
+
+	/**
+	 * 只补齐一个完整重复段。返回 -1 表示该路径已被现有 ng-set 禁止，0 表示没有可更新的重复段。
+	 */
+	static int addMinimumNewPairsRepeatedSegment(List<Integer> sequence, PackedBitSet[] neighborhoods, int n,
+			List<String> addedPairs) {
+		int[] lastPosition = new int[n + 1];
+		Arrays.fill(lastPosition, -1);
+		int[] middleMarks = new int[n + 1];
+		int mark = 0;
+		int bestRepeatedJob = -1;
+		int bestStart = -1;
+		int bestEnd = -1;
+		int bestMissing = Integer.MAX_VALUE;
+		for (int pos = 0; pos < sequence.size(); pos++) {
+			int repeatedJob = sequence.get(pos).intValue();
+			if (repeatedJob <= 0 || repeatedJob > n) {
+				continue;
+			}
+			int previous = lastPosition[repeatedJob];
+			if (previous >= 0) {
+				mark++;
+				int missing = 0;
+				for (int middle = previous + 1; middle < pos; middle++) {
+					int middleJob = sequence.get(middle).intValue();
+					if (middleJob <= 0 || middleJob > n || middleJob == repeatedJob
+							|| middleMarks[middleJob] == mark) {
+						continue;
+					}
+					middleMarks[middleJob] = mark;
+					if (!neighborhoods[middleJob].contains(repeatedJob)) {
+						missing++;
+					}
+				}
+				if (missing == 0) {
+					return -1;
+				}
+				int span = pos - previous;
+				int bestSpan = bestEnd - bestStart;
+				if (missing < bestMissing || (missing == bestMissing && (bestStart < 0 || span < bestSpan))) {
+					bestRepeatedJob = repeatedJob;
+					bestStart = previous;
+					bestEnd = pos;
+					bestMissing = missing;
+				}
+			}
+			lastPosition[repeatedJob] = pos;
+		}
+		if (bestRepeatedJob < 0) {
+			return 0;
+		}
+		int changed = 0;
+		for (int middle = bestStart + 1; middle < bestEnd; middle++) {
+			int middleJob = sequence.get(middle).intValue();
+			if (middleJob > 0 && middleJob <= n && middleJob != bestRepeatedJob
+					&& !neighborhoods[middleJob].contains(bestRepeatedJob)) {
+				neighborhoods[middleJob].add(bestRepeatedJob);
+				changed++;
+				if (addedPairs != null) {
+					addedPairs.add(middleJob + "<-" + bestRepeatedJob);
+				}
+			}
+		}
+		return changed;
+	}
+
 	private void appendNgDssrSummary(String reason) {
 		lastMessage = lastMessage + " | ng-DSSR reason=" + reason + ngSetWarmStartSummary()
 				+ ngSetWindowRepeatabilitySummary()
@@ -981,10 +1073,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", totalNonElementaryStored=" + ngDssrTotalNonElementaryRoutes
 				+ ", totalElementaryReturned=" + ngDssrTotalElementaryColumnsReturned
 				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
+				+ ngDssrRouteUpdateSummary()
 				+ ngSetStatsSummary()
 				+ ngSetMembersSummary()
 				+ roundRouteRelationSummary()
 				+ duplicateRepairSummary();
+	}
+
+	private String ngDssrRouteUpdateSummary() {
+		if (!ngDssrUseMinimumNewPairsSegmentUpdate) {
+			return "";
+		}
+		return ", ngRouteUpdate=minSegment/considered" + ngDssrMinimumSegmentRoutesConsidered
+				+ "/blocked" + ngDssrMinimumSegmentRoutesAlreadyBlocked
+				+ "/updated" + ngDssrMinimumSegmentRoutesUpdated;
 	}
 
 	private String ngSetWarmStartSummary() {
@@ -1038,6 +1140,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrRoundsExecuted = 0;
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
+		String routeUpdateMode = config.ngDssrNonElementaryRouteUpdateMode == null
+				? "allSegments" : config.ngDssrNonElementaryRouteUpdateMode.trim();
+		if (!"allSegments".equalsIgnoreCase(routeUpdateMode)
+				&& !"minimumNewPairsSegment".equalsIgnoreCase(routeUpdateMode)) {
+			throw new IllegalArgumentException("Unsupported ngDssrNonElementaryRouteUpdateMode: " + routeUpdateMode);
+		}
+		ngDssrUseMinimumNewPairsSegmentUpdate = "minimumNewPairsSegment".equalsIgnoreCase(routeUpdateMode);
+		ngDssrMinimumSegmentRoutesConsidered = 0;
+		ngDssrMinimumSegmentRoutesAlreadyBlocked = 0;
+		ngDssrMinimumSegmentRoutesUpdated = 0;
 		ngDssrTotalNonElementaryNegativeSeen = 0;
 		ngDssrTotalElementaryColumnsReturned = 0;
 		ngDssrFirstRoundTmidAvailable = false;

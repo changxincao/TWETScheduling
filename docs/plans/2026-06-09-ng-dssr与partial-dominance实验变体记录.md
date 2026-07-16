@@ -2537,3 +2537,17 @@ PWLF 底层其余操作不适合直接复用本次逻辑。`CompletionBoundCalcu
 第三优先方向是 PC 层固定小批次合并。当前 pricing engine 按顺序执行，某个 engine 一旦实际加列，本轮立即返回并重解 RMP。因此启发式只加 `1--10` 条列时，后面的 exact 不会在同一 dual 下继续。可以实验固定规则：启发式返回少于某个很小阈值时，继续执行 exact，并把两者列合并后只重解一次 RMP。该做法不影响列正确性，但可能在 dual 即将明显变化时浪费一次 exact，且触及整个 PC engine 调度，优先级低于只修改 ng-DSSR 内部的同-dual批处理。
 
 已有证据不支持把 dual smoothing、历史 warm-start或继续静态放大 top-K 作为当前优先策略。50-2 全程 smoothing 曾把 root exact 从约 `118s` 放大到约 `1326s`，原因是平滑 dual 使 pricing 状态更稠密；warm-start 对变化后的 dual/window 不稳定；top20 虽把困难 certificate 从 5 轮降到 4 轮，但完整 root exact 几乎不变，因为更大的 ng-set 抵消了轮数收益。后续最合理的实验顺序是：先实现“同一 dual 累计到固定 elementary batch target”；若收益不足，再诊断“top25 + 最小完整重复段”；最后才考虑 PC 层启发式与 exact 的固定小批次合并。
+
+247. 2026-07-16 最小完整重复段更新实验
+
+进一步讨论后没有实现“同一 dual 累计基本列”。原因是下一次 RMP 重解后的 dual 可能暴露当前 dual 下不存在的新负列，强行留在旧 dual 上继续 DSSR 不一定减少总体工作。本轮只实现第二项，并保留为默认关闭的实验模式：候选池仍按 reduced cost 保存前 K 条负非基本路径；`allSegments` 完全保持原更新，`minimumNewPairsSegment` 则按候选顺序处理，对每条尚未被前面更新阻断的路径，只选择“新增 ng-pair 最少”的一个完整重复段，并补齐该段所需的全部 pair。若任一完整重复段已经被当前 ng-set 阻断，则该路径下一轮不可能原样出现，直接跳过。单独只加一个 pair 不能保证重复 job 在全部中间任务后仍留在 ng-memory，因此没有采用单 pair hitting-set。
+
+实现新增 `ngDssrNonElementaryRouteUpdateMode`，默认值仍为 `allSegments`；两个实验 runner 都支持显式选择新模式。新模式记录累计考虑、已被前序更新阻断和实际更新的路径数。聚焦测试覆盖：在多个重复段中选择新增 pair 更少者、已阻断路径跳过、相同代价的确定性 tie，以及被选重复段全部 pair 的补齐。focused Java 22 编译和测试均通过。
+
+W300 A/B 使用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root-only、nearestK5、启发式 pricing、source-aware dominance、group-envelope prefilter、all-cycles completion bound、no ALNS/no strong/no SRI 口径。三组均得到相同 `bound=1726.014329`、`pool=23512`、8 次 exact 和 `valid=true`：
+
+1. `top10/allSegments`：总时间 `60.287s`，exact `16.485s`；最后 certificate 5 轮，更新 186 个 pair，最终 ng-set 平均/最大为 `8.72/15`。
+2. `top10/minimumNewPairsSegment`：总时间 `53.620s`，exact `14.200s`；最后 certificate 6 轮，更新 93 个 pair，最终平均/最大为 `6.86/10`。它显著减小了状态，但较窄 reservoir 使候选分批上浮，轮数反而增加。
+3. `top25/minimumNewPairsSegment`：总时间 `57.824s`，exact `14.531s`；最后 certificate 4 轮，同样只更新 93 个 pair，最终平均/最大仍为 `6.86/10`。累计考虑 52 条候选，其中 18 条已被前面的更新自动阻断，实际更新 34 条。
+
+由此可以确认两个机制的作用不同：最小完整段负责避免 ng-set 膨胀，较宽 reservoir 负责把下一轮将上浮的候选提前处理。`top25/minSegment` 相对原 `top10/allSegments` 把困难 certificate 从 5 轮降为 4 轮，并将 pair 数减半；本轮 exact 约减少 11.9%。不过 `top10/minSegment` 的 exact 还略低于 top25，说明轮数和单轮状态成本仍有权衡，单个 W300 root 不足以修改默认。当前保留新模式供跨实例和完整树实验，生产默认继续使用 `allSegments`。

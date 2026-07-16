@@ -172,6 +172,8 @@ public class TWETBPCConfig {
 	public double ngDssrInitialNgPairCoefficient = 0.08;
 	/** 2026-06-10: 每轮 DSSR 最多用多少条最负 non-elementary route 更新 ng-set；默认 1 对齐旧 VRP。 */
 	public int ngDssrNonElementaryRouteUpdateLimit = 1;
+	/** 2026-07-16: allSegments 保持原更新；minimumNewPairsSegment 只补齐新增 pair 最少的一个完整重复段。 */
+	public String ngDssrNonElementaryRouteUpdateMode = "allSegments";
 	/** 2026-07-03: 实验开关；按最近若干次正式 ng-DSSR final ng-set 统计初始化下一次 ng-set。 */
 	public boolean enableNgDssrHistoryWarmStart = false;
 	/** 2026-07-12: 实验开关；同一 node 内在基础 ng-set 上有界追加最近困难 exact 的成员。 */

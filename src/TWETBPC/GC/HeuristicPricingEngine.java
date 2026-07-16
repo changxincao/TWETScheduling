@@ -353,8 +353,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private HeuristicWindowContext unrestrictedWindowContext() {
-		return new HeuristicWindowContext(null, data.penaltyFunction[0], data.CmaxH, singletonProfileCache, false,
-				null, null);
+		return new HeuristicWindowContext(null, data.penaltyFunction[0], data.CmaxH, singletonProfileCache, false);
 	}
 
 	/**
@@ -367,29 +366,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 		Node node = lp == null ? null : lp.getNode();
 		boolean useDualWindow = canUseDualProfitableWindow(lp);
 		boolean useCompactWindow = node != null && node.countTimeIndexedPricingWindowTightenedJobs() > 0;
-		boolean useStaticHardWindow = config.heuristicPricingHardWindowFeasibilityPrefilter
-				&& hasPreprocessedHardWindow();
-		boolean useFeasibilityPrefilter = config.heuristicPricingHardWindowFeasibilityPrefilter
-				&& (useCompactWindow || useStaticHardWindow);
-		if (!useDualWindow && !useCompactWindow && !useFeasibilityPrefilter) {
+		if (!useDualWindow && !useCompactWindow) {
 			return unrestrictedWindowContext();
 		}
 		PiecewiseLinearFunction[] penalties = new PiecewiseLinearFunction[data.n + 1];
-		double[] feasibilityHStart = useFeasibilityPrefilter ? new double[data.n + 1] : null;
-		double[] feasibilityHEnd = useFeasibilityPrefilter ? new double[data.n + 1] : null;
 		double horizon = 0.0;
 		boolean restricted = false;
 		for (int job = 1; job <= data.n; job++) {
 			double hStart = data.hardWindowStart[job];
 			double hEnd = data.hardWindowEnd[job];
-			if (node != null && node.hasTimeIndexedPricingWindow(job)) {
-				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
-				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
-			}
-			if (useFeasibilityPrefilter) {
-				feasibilityHStart[job] = hStart;
-				feasibilityHEnd[job] = hEnd;
-			}
 			if (useDualWindow) {
 				double baseline = outsourcingBaseline(job);
 				double jobDual = Math.max(0.0, lp.getJobDual(job));
@@ -397,6 +382,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 					hStart = Math.max(hStart, hWindowStart(job, jobDual));
 					hEnd = Math.min(hEnd, hWindowEnd(job, jobDual));
 				}
+			}
+			if (node != null && node.hasTimeIndexedPricingWindow(job)) {
+				hStart = Math.max(hStart, node.getTimeIndexedPricingWindowStart(job));
+				hEnd = Math.min(hEnd, node.getTimeIndexedPricingWindowEnd(job));
 			}
 			if (Utility.compareGt(hStart, data.hardWindowStart[job])
 					|| Utility.compareLt(hEnd, data.hardWindowEnd[job])) {
@@ -411,10 +400,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 		}
 		if (!restricted) {
-			return useFeasibilityPrefilter
-					? new HeuristicWindowContext(null, data.penaltyFunction[0], data.CmaxH,
-							singletonProfileCache, false, feasibilityHStart, feasibilityHEnd)
-					: unrestrictedWindowContext();
+			return unrestrictedWindowContext();
 		}
 		if (!Utility.compareGt(horizon, 0.0)) {
 			horizon = data.CmaxH;
@@ -422,21 +408,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		horizon = Math.min(horizon, data.CmaxH);
 		PiecewiseLinearFunction sourcePenalty = data.penaltyFunction[0].setDomain(0.0, horizon);
 		SegmentProfile[] localSingletonProfiles = buildSingletonProfileCache(penalties);
-		return new HeuristicWindowContext(penalties, sourcePenalty, horizon, localSingletonProfiles, useDualWindow,
-				feasibilityHStart, feasibilityHEnd);
+		return new HeuristicWindowContext(penalties, sourcePenalty, horizon, localSingletonProfiles, useDualWindow);
 	}
 
-	private boolean hasPreprocessedHardWindow() {
-		for (int job = 1; job <= data.n; job++) {
-			boolean finiteOutsourcingBaseline = data.outsourcingCost != null
-					&& !Utility.isBigMValue(data.outsourcingCost[job]);
-			if (finiteOutsourcingBaseline || Utility.compareGt(data.hardWindowStart[job], 0.0)
-					|| Utility.compareLt(data.hardWindowEnd[job], data.CmaxH)) {
-				return true;
-			}
-		}
-		return false;
-	}
 	private boolean canUseDualProfitableWindow(LP lp) {
 		if (!config.enableHeuristicDualProfitableWindow) {
 			return false;
@@ -556,8 +530,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private PiecewiseLinearFunction[] backward;
 		private final PiecewiseLinearFunction.PrefixMinimumWorkspace insertCostWorkspace =
 				new PiecewiseLinearFunction.PrefixMinimumWorkspace();
-		private double[] earliestHardWindowCompletion;
-		private double[] latestHardWindowCompletion;
 		private double cost;
 		private double currentReducedCost;
 		private final SriPricingContext sriContext;
@@ -643,11 +615,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 				stats.addAddTotalNanos(totalStart);
 				return null;
 			}
-			if (!isHardWindowInsertFeasible(pos, job, false)) {
-				if (stats.enabled) { stats.addHardWindowRejected++; }
-				stats.addAddTotalNanos(totalStart);
-				return null;
-			}
 			double threshold = acceptedMoveThreshold(MoveType.ADD, job, -1, iter, bestReducedCost,
 					bestMoveReducedCost);
 			if (shouldPruneByMoveLowerBound(pos, job, false, lp, threshold)) {
@@ -685,11 +652,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			long totalStart = stats.start();
 			if (!isInsertCompatible(pos, job, true, lp.getNode())) {
 				if (stats.enabled) { stats.exchangeIncompatible++; }
-				stats.addExchangeTotalNanos(totalStart);
-				return null;
-			}
-			if (!isHardWindowInsertFeasible(pos, job, true)) {
-				if (stats.enabled) { stats.exchangeHardWindowRejected++; }
 				stats.addExchangeTotalNanos(totalStart);
 				return null;
 			}
@@ -786,7 +748,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			recomputeForwardFrom(pos);
 			recomputeBackwardDownTo(pos - 1);
-			rebuildHardWindowFeasibilityProfiles();
 			updateCost();
 		}
 
@@ -812,7 +773,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			recomputeForwardFrom(pos);
 			recomputeBackwardDownTo(pos);
-			rebuildHardWindowFeasibilityProfiles();
 			updateCost();
 		}
 
@@ -832,7 +792,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			recomputeForwardFrom(pos);
 			recomputeBackwardDownTo(pos);
-			rebuildHardWindowFeasibilityProfiles();
 			updateCost();
 		}
 
@@ -873,23 +832,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			// 该口径与 TWETColumnEvaluator 一致；通用 merge3 在 compact-window BigM 边界下不适用。
 			double firstBridgeCost = data.getSetupCost(bridgeFrom, job);
 			double secondBridgeCost = suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo);
-			if (config.heuristicPricingScalarInsertCost) {
-				return PiecewiseLinearFunction.findMinimalInsertedJobCost(prefix, prefixShift, jobPenalty, suffix,
-						suffixShift, firstBridgeCost + secondBridgeCost, insertCostWorkspace);
-			}
-			PiecewiseLinearFunction prefixWithJob = PiecewiseLinearFunction.addShifted(prefix, prefixShift,
-					jobPenalty);
-			prefixWithJob.minimizePrefixInPlace();
-			if (prefixWithJob.isEmpty()) {
-				prefixWithJob.release();
-				return Utility.big_M;
-			}
-			// 2026-07-15: prefixWithJob 只用于下面这次标量 merge，不再复用。两个 setup 常数直接
-			// 合并进最终 yShift，避免为每个 add/exchange 候选再扫描整条临时 PWLF。
-			double cost = mergeHelper.merge2Segments(prefixWithJob, suffix, suffixShift,
-					firstBridgeCost + secondBridgeCost);
-			prefixWithJob.release();
-			return cost;
+			return PiecewiseLinearFunction.findMinimalInsertedJobCost(prefix, prefixShift, jobPenalty, suffix,
+					suffixShift, firstBridgeCost + secondBridgeCost, insertCostWorkspace);
 		}
 		/**
 		 * 三段全局最小值之和是单任务插入成本的安全下界，只用于证明候选不可能改进当前 best move。
@@ -1014,61 +958,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 					&& !isPricingArcForbidden(node, arcCompatibility, job, next);
 		}
 
-		/**
-		 * 外包预处理硬窗和 time-indexed compact window 都是连续 hull。对固定 prefix/job/suffix，
-		 * 最早前推与最晚后推区间不相交时，完整 PWLF 拼接必然为 BigM；dual window 不进入该判定。
-		 */
-		private boolean isHardWindowInsertFeasible(int pos, int job, boolean replace) {
-			if (!config.heuristicPricingHardWindowFeasibilityPrefilter
-					|| !windowContext.hasHardFeasibilityWindow()) {
-				return true;
-			}
-			if (stats.enabled) { stats.hardWindowFeasibilityChecks++; }
-			int prefixEnd = pos - 1;
-			int suffixStart = replace ? pos + 1 : pos;
-			int prev = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
-			double prefixCompletion = prefixEnd < 0 ? 0.0 : earliestHardWindowCompletion[prefixEnd];
-			double earliest = Math.max(windowContext.hardHStart[job],
-					prefixCompletion + data.s[prev][job] + data.p[job]);
-			double latest = windowContext.hardHEnd[job];
-			if (suffixStart < sequence.size()) {
-				int next = sequence.get(suffixStart).intValue();
-				latest = Math.min(latest, latestHardWindowCompletion[suffixStart]
-						- data.s[job][next] - data.p[next]);
-			}
-			return Utility.compareLe(earliest, latest);
-		}
-
-		private void rebuildHardWindowFeasibilityProfiles() {
-			if (!windowContext.hasHardFeasibilityWindow()) {
-				earliestHardWindowCompletion = null;
-				latestHardWindowCompletion = null;
-				return;
-			}
-			int size = sequence.size();
-			earliestHardWindowCompletion = new double[size];
-			latestHardWindowCompletion = new double[size];
-			double previousCompletion = 0.0;
-			int previousJob = 0;
-			for (int i = 0; i < size; i++) {
-				int job = sequence.get(i).intValue();
-				double earliest = Math.max(windowContext.hardHStart[job],
-						previousCompletion + data.s[previousJob][job] + data.p[job]);
-				earliestHardWindowCompletion[i] = earliest;
-				previousCompletion = earliest;
-				previousJob = job;
-			}
-			for (int i = size - 1; i >= 0; i--) {
-				int job = sequence.get(i).intValue();
-				double latest = windowContext.hardHEnd[job];
-				if (i + 1 < size) {
-					int next = sequence.get(i + 1).intValue();
-					latest = Math.min(latest,
-							latestHardWindowCompletion[i + 1] - data.s[job][next] - data.p[next]);
-				}
-				latestHardWindowCompletion[i] = latest;
-			}
-		}
 		private void rebuild() {
 			this.used = new boolean[data.n + 1];
 			for (int job : sequence) {
@@ -1078,7 +967,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			this.forward = buildForwardProfile(sequence, true, windowContext);
 			this.backward = buildBackwardProfile(sequence, windowContext);
-			rebuildHardWindowFeasibilityProfiles();
 			if (sriContext.isSequenceBased()) {
 				rebuildSriProfiles();
 			} else {
@@ -1246,19 +1134,14 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private final double horizon;
 		private final SegmentProfile[] singletonProfiles;
 		private final boolean requiresTrueCostRecheck;
-		private final double[] hardHStart;
-		private final double[] hardHEnd;
 
 		HeuristicWindowContext(PiecewiseLinearFunction[] penalties, PiecewiseLinearFunction sourcePenalty,
-				double horizon, SegmentProfile[] singletonProfiles, boolean requiresTrueCostRecheck,
-				double[] hardHStart, double[] hardHEnd) {
+				double horizon, SegmentProfile[] singletonProfiles, boolean requiresTrueCostRecheck) {
 			this.penalties = penalties;
 			this.sourcePenalty = sourcePenalty;
 			this.horizon = horizon;
 			this.singletonProfiles = singletonProfiles;
 			this.requiresTrueCostRecheck = requiresTrueCostRecheck;
-			this.hardHStart = hardHStart;
-			this.hardHEnd = hardHEnd;
 		}
 
 		PiecewiseLinearFunction penalty(int job) {
@@ -1272,10 +1155,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		boolean requiresTrueCostRecheck() {
 			return requiresTrueCostRecheck;
-		}
-
-		boolean hasHardFeasibilityWindow() {
-			return hardHStart != null && hardHEnd != null;
 		}
 	}
 
@@ -1374,9 +1253,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		long moveLowerBoundViolations;
 		double maxMoveLowerBoundViolation;
 		long insertFirstOverlapRejected;
-		long hardWindowFeasibilityChecks;
-		long addHardWindowRejected;
-		long exchangeHardWindowRejected;
 		long tryAddCalls;
 		long tryAddPoolFull;
 		long tryAddRejectedByReducedCost;
@@ -1495,8 +1371,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)
 					+ "/" + ms(exchangeCostNanos)
 					+ ", insertOverlapReject=" + insertFirstOverlapRejected
-					+ ", hardWindowFeas checks/rejectAdd/rejectEx=" + hardWindowFeasibilityChecks + "/"
-					+ addHardWindowRejected + "/" + exchangeHardWindowRejected
 					+ ", tryAdd calls/accepted/dup/rcSkip/poolFull=" + tryAddCalls + "/" + tryAddAccepted
 					+ "/" + tryAddDuplicate + "/" + tryAddRejectedByReducedCost + "/" + tryAddPoolFull
 					+ ", trueRecheck calls/ms/bigM/filtered/skipped=" + trueRecheckCalls + "/" + ms(trueRecheckNanos)

@@ -1110,10 +1110,15 @@ completion bound 不能采用上述标量内核，因为后续传播、arc fixin
 
 ### 2026-07-16：启发式 ADD/EXCHANGE 无临时 PWLF 标量内核
 
-本轮实现了上一节提出的标量扫描内核。旧流程对每个 ADD/EXCHANGE 候选先执行 `addShifted(prefix, shift, jobPenalty)` 构造一条和函数，再执行 `minimizePrefixInPlace()` 构造第二条前缀最小包络，最后才用 `findMinimalShiftedSumValue()` 与 suffix 求一个标量。新流程直接扫描 shifted prefix 与 job penalty 的重叠段，在线维护完全相同的 prefix-min 包络状态；每产生一段包络就立即与 suffix 双指针扫描，因此不创建任何候选级临时 `Segment/PWLF`。旧实现仍由独立开关保留，便于后续对拍和回退。
+本轮实现了上一节提出的标量扫描内核。旧流程对每个 ADD/EXCHANGE 候选先执行 `addShifted(prefix, shift, jobPenalty)` 构造一条和函数，再执行 `minimizePrefixInPlace()` 构造第二条前缀最小包络，最后才用 `findMinimalShiftedSumValue()` 与 suffix 求一个标量。新流程直接扫描 shifted prefix 与 job penalty 的重叠段，在线维护完全相同的 prefix-min 包络状态；每产生一段包络就立即与 suffix 双指针扫描，因此不创建任何候选级临时 `Segment/PWLF`。旧链表实现只保留在专用随机对拍测试中作为 reference，生产路径不再保留 A/B fallback。
 
 实现过程中先试过 primitive 数组缓存版本，200 万次、每个输入约 20 段的微基准中反而慢约 4.9%，已撤回。最终流式版本发现并修正了一处数值语义细节：suffix 段尾与 prefix-min 段尾在 `EPS` 下相等时，必须和旧双指针实现一样同时推进两侧，不能继续用同一 prefix 段扫描下一 suffix 段。修正后随机生成含正负斜率、BigM、断点、平移和有限 `curUpperBound` 的 50 万组输入，标量结果全部与旧链表实现一致。另将 `normalizeForward()` 中“先全链找 tail、再全链合并相邻同段”合并为一次扫描；用 HEAD 原实现与当前实现分别运行完整 PWLF property suite，报告和逐案例 CSV 的 SHA-256 完全一致。
 
-性能上，独立 JVM、相同 warmup 的 200 万次微基准中，旧实现三次为 `1.455/1.370/1.495s`，新实现为 `1.304/1.309/1.298s`；按中位数计算热点约快 `11.6%`。40-2 root-only 做了两组正反顺序 A/B，四次搜索轨迹严格一致：均为 58 次 HeuristicPricing、17 次 exact、pool `10376`、启发式加列 `10293`、exact 加列 `81`、root bound `22490`。旧实现启发式平均 `26.415s`，新实现 `24.630s`，约快 `6.8%`；总求解平均由 `35.858s` 降到 `35.190s`，约快 `1.9%`。端到端提升较小是因为 exact pricing、master LP 等时间不受该内核影响，但这是当前少数在保持搜索语义和轨迹不变时仍有稳定收益的 PWLF 底层优化，因此默认开启。
+性能上，独立 JVM、相同 warmup 的 200 万次微基准中，旧实现三次为 `1.455/1.370/1.495s`，新实现为 `1.304/1.309/1.298s`；按中位数计算热点约快 `11.6%`。40-2 root-only 做了两组正反顺序 A/B，四次搜索轨迹严格一致：均为 58 次 HeuristicPricing、17 次 exact、pool `10376`、启发式加列 `10293`、exact 加列 `81`、root bound `22490`。旧实现启发式平均 `26.415s`，新实现 `24.630s`，约快 `6.8%`；总求解平均由 `35.858s` 降到 `35.190s`，约快 `1.9%`。端到端提升较小是因为 exact pricing、master LP 等时间不受该内核影响，但这是当前少数在保持搜索语义和轨迹不变时仍有稳定收益的 PWLF 底层优化，因此直接作为唯一生产路径。
 
 同时重新检查了 `add/merge/normalize` 的逻辑冗余。`add()` 和 `addShifted()` 只负责逐点求和，不能自行加入前向或后向等待闭包；`mergeMinimum()` 的 no-change 预判虽然会额外扫描，但命中后可避免复制、分裂、merge 和 normalize，历史 completion-bound 测试也证明应保留；forward normalize 的前置 compact 会减少 prefix-min 输入段，后置 compact 则合并 prefix-min 新产生的水平段，两者用途不同；backward normalize 的首轮扫描还承担最后有限段定位，不能和后续截断机械合并。当前没有发现第二个同等明确、低风险且能减少高频完整链操作的点，进一步改成 primitive packed PWLF 或原生 interval delta 已属于结构性重写。
+### 2026-07-16：清理启发式 pricing 失败实验代码
+
+根据前述 A/B 结论，删除 `heuristicPricingHardWindowFeasibilityPrefilter` 整套生产代码，包括配置和 runner 参数、每条 route 的最早/最晚时间数组、每次接受 move 后的重建、ADD/EXCHANGE 预判以及对应诊断字段。该实验在 40-2 中检查约 1693 万候选只拒绝 316 个，反而使启发式从 `9.930s` 增至 `12.925s`；删除只取消一个安全但负收益的提前拒绝，外包原始硬窗、time-indexed compact window 和 dual window 仍继续通过实际 penalty PWLF 参与完整候选成本计算。
+
+同时删除 `heuristicPricingScalarInsertCost` 生产开关和旧链表 fallback。无临时 PWLF 标量内核已完成 50 万组随机对拍和真实同轨迹 A/B，现作为唯一生产路径；旧 `addShifted + minimizePrefix + merge2` 只留在 `PiecewiseLinearInsertScalarTest` 中作为 reference。清理后 focused 编译、50 万组标量对拍和 `OutsourcingMoveConsistencyTest` 的 14168 个 move 全部通过。40-2 root-only smoke 与清理前完全一致：HeuristicPricing `58` 次、exact `17` 次、pool `10376`、启发式加列 `10293`、exact 加列 `81`、root bound `22490`。segment-reuse、完整 PWLF 融合等失败实现此前已撤回，源码中没有残留；全局 `SegmentPool` 属于跨模块旧基础设施，本轮不做无关的大范围拆除。

@@ -2525,3 +2525,15 @@ PWLF 底层其余操作不适合直接复用本次逻辑。`CompletionBoundCalcu
 提交后再次沿实际控制流检查连续 BitSet 跳跃。`ZERO`、`BEST_UB` 和 `BEST_RECORD` 三种 join 口径下，动态 join threshold 只可能等于 `-1e-6` 或比它更负；group-envelope prefilter 只在 envelope 下界不小于 `-1e-6` 时置位，因此所有 set bit 对三种口径都可安全跳过。forward candidates 在建索引前已完成 dominated label 压缩和按 `minReducedCost` 升序排序，BitSet 按该固定列表下标构造，join 期间列表不再修改；缓存同时按 backward envelope group 和 terminal job 隔离，不存在跨组或排序后的索引复用。
 
 新循环跨过旧循环可能触发 scalar-LB break 的 set-bit 区间时，也不会多生成列：若后面仍有 clear candidate，由于 forward `minReducedCost` 单调不降，它会在同一 lower-bound 检查处 break；若后面没有 clear candidate，则直接结束。SRI/full-SRI 路径由 `useJoinEnvelopePrefilter()` guard 排除，forward-to-sink 与 envelope-compression 路径也未改动。诊断口径唯一变化是连续跳过的 label 不再计入实际 `visited/dominated`，而计入 envelope potential-pruned；这不参与算法判断。使用 `target/classes` 和隔离 sourcepath 的 focused Java 22 编译通过，未发现 correctness 问题或新的冗余处理。
+
+246. 2026-07-16 当前剩余的算法级优化方向
+
+继续沿当前 no-SRI 主线、最新 W300 日志和 `PC` 的真实调度检查后，暂未发现新的高收益底层冗余。PWLF 标量拼接、source-aware dominance、completion-bound interval delta、单 word 位集和 group-envelope 安全预剪枝已经覆盖当前最明确的实现热点。剩余机会主要不在单次 `shift/add/merge`，而在减少“少量加列后立即重解 RMP、随后用相近 dual 再做一次完整 exact”的往返。
+
+第一优先方向是同一 dual 内继续 DSSR 并批量累计基本列。当前 `solve()` 每轮 relaxed pricing 后，只要找到至少一条 elementary negative column，就立即返回；即使同一轮同时观察到大量负的非基本列，也不会更新 ng-set 后继续。本次 W300 日志的后期 exact 依次只返回 `74/41/6/1` 条基本列，但同轮仍分别观察到 `281/243/114/91` 条负非基本 witness；每次返回后 PC 都重解 RMP，下一次 exact 又重新构造约 `0.6--0.8s` 的 completion bound。可增加独立实验模式：在同一 LP dual 下累计已经找到的基本负列；若数量未达到固定 batch target，且本轮仍有负非基本 witness，则按现有规则更新 ng-set 并继续下一 DSSR round；达到 target、没有非基本 witness、时间到或完成证书时才返回。累计列按 sequence signature 去重，并继续沿用真实成本和当前 dual reduced-cost 复核。ng-set 增强不会删除任何 elementary route，因此之前找到的基本列始终有效；时间到时只返回已确认的负列，不输出闭合证书。该方向的收益来自把多个小批次 exact/RMP 往返合并为一次同-dual 批处理，而不是跨 dual warm-start。第一轮 A/B 应使用简单固定 target，例如 `300`，不引入复杂自适应。
+
+第二优先方向是扩大非基本候选 reservoir，但对每条 route 只选择一个最便宜的完整重复段进行 ng 更新。当前 top-K 更新会扫描候选 route 的所有重复段，并把每个重复段中全部缺失 pair 都加入 ng-set。要禁止一个具体重复段 `i ... i`，确实必须让所有中间 job 都记住 `i`；但若一条 route 含多个重复段，只禁止其中任意一个完整重复段，就足以禁止该 route 原样再次出现。因此可保留前 `20--25` 条负非基本候选，按 reduced cost 顺序处理；对尚未被本轮 overlay 排除的 route，选择“所需新增 pair 数最少”的一个重复段，只加入该段全部缺失 pair。这样有机会提前挡住此前会从上一轮第 `11--25` 名上浮的候选，又避免 top20 旧实验中因全段更新造成 ng-set 变大、单轮 labeling 变重。实现前先做纯诊断：比较 top10 全重复段更新与 top25 最小完整段更新各自新增 pair 数、实际挡住的候选数和预测 ng-set 大小，再决定是否 A/B。只加一个 pair 不能保证禁止整条重复段，因此不采用单 pair hitting-set 口径。
+
+第三优先方向是 PC 层固定小批次合并。当前 pricing engine 按顺序执行，某个 engine 一旦实际加列，本轮立即返回并重解 RMP。因此启发式只加 `1--10` 条列时，后面的 exact 不会在同一 dual 下继续。可以实验固定规则：启发式返回少于某个很小阈值时，继续执行 exact，并把两者列合并后只重解一次 RMP。该做法不影响列正确性，但可能在 dual 即将明显变化时浪费一次 exact，且触及整个 PC engine 调度，优先级低于只修改 ng-DSSR 内部的同-dual批处理。
+
+已有证据不支持把 dual smoothing、历史 warm-start或继续静态放大 top-K 作为当前优先策略。50-2 全程 smoothing 曾把 root exact 从约 `118s` 放大到约 `1326s`，原因是平滑 dual 使 pricing 状态更稠密；warm-start 对变化后的 dual/window 不稳定；top20 虽把困难 certificate 从 5 轮降到 4 轮，但完整 root exact 几乎不变，因为更大的 ng-set 抵消了轮数收益。后续最合理的实验顺序是：先实现“同一 dual 累计到固定 elementary batch target”；若收益不足，再诊断“top25 + 最小完整重复段”；最后才考虑 PC 层启发式与 exact 的固定小批次合并。

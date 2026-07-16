@@ -1142,3 +1142,15 @@ completion bound 不能采用上述标量内核，因为后续传播、arc fixin
 提交后再次脱离性能 A/B 做正确性审计。数学上，数组视图路径与链表标量路径使用相同的物理定义域裁剪、prefix-min 等待闭包、suffix 反向平移、endpoint lower bound、BigM 和有限 `curUpperBound` 语义。状态生命周期上，ADD/REMOVE 只复制未受影响区间的 PWLF 及其视图，并从变动位置分别重建 forward/backward；EXCHANGE 重建两侧全部受影响项；unrestricted penalty 只读缓存对应 Data 初始化后不再修改的基础函数，compact/dual window context 则同步构造局部 penalty 及其视图。因此生产调用链不存在修改 PWLF 后继续读取旧视图的路径。
 
 验证把三路随机对拍扩大到 200 万组，完整 PWLF reference、链表标量核和数组视图核全部一致；`OutsourcingMoveConsistencyTest` 仍通过 14168 个 move。外层已删除的 overlap 检查与内部定义域交集判断严格重复，空函数和无交集仍由标量核直接返回 BigM。此次复核未发现 correctness 问题；只读视图的明确契约是不能跨原 PWLF 修改复用，当前启发式 profile 生命周期满足该契约。
+
+#### PWLF 数据结构与通用函数操作的下一步优化判断
+
+本轮重新沿通用 PWLF 主链检查了 `copy/shift/add/normalize/mergeMinimum`，并区分了“整体替换数据结构”和“只重写热点运算”两类方案。当前 `PiecewiseLinearFunction` 以单向 `Segment` 链表保存 `start/end/slope/intercept/next`。这一结构的单次顺序扫描并不差，真正明显的重复成本集中在 `mergeMinimum()`：先完整扫描右函数判断能否跳过；不能跳过时复制整条右函数；再拆分、替换和拼接当前链；最后执行 `normalize()`，其中又包含边界清理、相邻段压缩以及 prefix/suffix minimum 的整链扫描或重建。completion bound 和 dominance envelope 会高频调用该操作，因此成本主要来自同一批 segment 被多次读取、复制和重新分配，而不是单次线性求值。
+
+不建议当前直接把全局表示改成数组。仓库旧 `PiecewiseLinearFunctionArray` 使用的是 `ArrayList<Segment>`，每次操作仍创建对象和新列表，历史上比链表慢；这只能否定该对象数组实现，不能否定 packed primitive array。但生产代码中直接访问 `.head/.tail` 的位置约 871 处、涉及 39 个 Java 文件，整体迁移会同时影响 completion bound、exact pricing、dominance graph、evaluator 和 heuristic，验证面过大。全局 primitive array、arena/index、persistent rope 或 lazy shift 都存在生命周期、容量浪费、输入别名和边界语义风险，当前不适合作为第一步。
+
+当前最值得单独 A/B 的方案是保留外部链表契约，新增一个只服务方向闭包函数的流式 lower-envelope writer。它只读扫描 `this` 与右函数，在定义域并集上直接输出逐点下包络，遇到交点时拆段，并在 append 时立即合并相邻同斜率同截距段；同时累计 `changed` 与 changed hull。输入已经分别经过 forward prefix-min 或 backward suffix-min 时，两条同方向单调函数的逐点最小仍保持同方向单调，因此不需要再次做完整 prefix/suffix normalize。这样一次操作可以同时去掉右函数 copy、当前链的原地拆分/回接、`canSkip` 后的第二次扫描以及 merge 后的完整 normalize。为控制风险，第一版应作为 completion-bound/source-aware dominance 专用入口保留旧 `mergeMinimum()` 回退，不应直接修改所有通用调用。
+
+次一级方案是只在该 writer 内使用可复用 primitive scratch buffer，再在结果确定后一次物化为现有 Segment 链；是否值得做取决于流式链表 writer 的 A/B。backward `minimizeSuffixInPlace()` 当前需要反向访问，后续也可测试复用 `Segment[]` scratch，避免每次新建 `ArrayList`，但其收益大概率小于 merge 内核。现有 `addShifted`、segment reuse、融合 add+prefix-min 和 exact 扩展替换已经做过对拍且端到端无收益或退化，不应重复投入。
+
+若实施流式 merge，验证必须同时覆盖 forward/backward、不同左边界、BigM 空洞、段内交点、changed hull、右参数不变性以及 SegmentPool 开关，并用当前 property suite 逐点对拍旧实现；随后在 completion-bound merge timing 中分别比较 skip/copy/body/normalize 和完整 build 时间。只有组件时间与端到端 exact/solve 都改善才保留，不能仅凭减少对象数判断有效。

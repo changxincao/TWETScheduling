@@ -44,6 +44,17 @@ public final class PiecewiseLinearMinimalSumViewTest {
 		right.addSegment(8.0, 10.0, 3.0, -10.0);
 		right.addSegment(15.0, 19.0, -0.25, 30.0);
 		assertEquivalent(left, right, 7.5, "gapped");
+
+		PiecewiseLinearFunction disjointLeft = new PiecewiseLinearFunction(0.0, 10.0);
+		disjointLeft.addSegment(1.0, 2.0, 1.0, 0.0);
+		disjointLeft.addSegment(5.0, 6.0, 1.0, 0.0);
+		PiecewiseLinearFunction disjointRight = new PiecewiseLinearFunction(0.0, 10.0);
+		disjointRight.addSegment(3.0, 4.0, -1.0, 0.0);
+		assertEquivalent(disjointLeft, disjointRight, 0.0, "disjoint physical domains");
+
+		PiecewiseLinearFunction empty = new PiecewiseLinearFunction(0.0, 10.0);
+		assertEquivalent(disjointLeft, empty, 0.0, "empty right");
+		assertEquivalent(empty, disjointRight, 0.0, "empty left");
 	}
 
 	private static void assertEquivalent(PiecewiseLinearFunction left, PiecewiseLinearFunction right,

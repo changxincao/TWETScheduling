@@ -183,7 +183,7 @@ public class PiecewiseLinearFunction {
 	}
 
 	/**
-	 * 启发式高频标量查询使用的不可变 segment 快照。
+	 * 高频标量查询使用的不可变 segment 快照。
 	 * PWLF 本体仍保留链表以支持切分、拼接和原地更新；只读查询则连续扫描 primitive 数组，
 	 * 快照只在对应 profile 被重建时刷新，不能跨 PWLF 修改复用。
 	 */

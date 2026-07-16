@@ -66,6 +66,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	/** 无 SRI 时所有 label 共享空状态；该数组只读，避免每次扩展分配零长度数组。 */
 	private static final byte[] EMPTY_SRI_COUNTS = new byte[0];
 	private static final HashSet<Integer> FULL_MIDPOINT_DIAGNOSTIC_DONE = new HashSet<Integer>();
+	/** 2026-07-16: group-envelope 已证明可剪时，按 BitSet 连续区间跳过，旧逐项扫描仅用于 A/B 回退。 */
+	private static final boolean JOIN_PREFILTER_SKIP_RUNS = Boolean.parseBoolean(
+			System.getProperty("twet.bpc.ngDssrJoinPrefilterSkipRuns", "true"));
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}
@@ -4028,8 +4031,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		BitSet prefilteredForwardIndices = prefilterIndex == null ? null
 				: prefilterIndex.prunedForwardIndices(lastJob, candidates, backward, lp, this);
-		for (int i = 0; i < candidates.size() && canContinue(); i++) {
-			ForwardLabel forward = candidates.get(i);
+		for (int i = 0; i < candidates.size() && canContinue();) {
+			if (JOIN_PREFILTER_SKIP_RUNS && prefilteredForwardIndices != null
+					&& prefilteredForwardIndices.get(i)) {
+				int nextCandidate = Math.min(candidates.size(), prefilteredForwardIndices.nextClearBit(i));
+				int skipped = nextCandidate - i;
+				// 逻辑剪枝数量仍完整计数，但没有读取的 label 不计入实际 visited。
+				joinEnvelopePrefilterPotentialPairsPruned += skipped;
+				i = nextCandidate;
+				continue;
+			}
+			int candidateIndex = i++;
+			ForwardLabel forward = candidates.get(candidateIndex);
 			joinCandidateLabelsVisited++;
 			if (forward.isDominated) {
 				joinCandidateLabelsDominated++;
@@ -4043,7 +4056,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				}
 				break;
 			}
-			if (prefilteredForwardIndices != null && prefilteredForwardIndices.get(i)) {
+			if (prefilteredForwardIndices != null && prefilteredForwardIndices.get(candidateIndex)) {
 				joinEnvelopePrefilterPotentialPairsPruned++;
 				continue;
 			}

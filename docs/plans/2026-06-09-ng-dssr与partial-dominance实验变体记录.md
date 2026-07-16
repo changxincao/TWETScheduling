@@ -2509,3 +2509,13 @@ PWLF 底层其余操作不适合直接复用本次逻辑。`CompletionBoundCalcu
 本轮找到一处比固定 backward view 更直接的 join 冗余。group-envelope prefilter 已按 backward group 和 terminal job 生成 `BitSet`，标记全部可以整组剪掉的 forward label；但 `joinForwardGroupWithBackward()` 仍按 `i++` 扫描完整候选列表，再对每个置位元素执行一次 `BitSet.get(i)` 后跳过。最终 certificate 中 `join pairs tried=0`、真实 `funcEval=0`，但仍访问约 `3.298m` 个候选，其中约 `3.235m` 已被 group prefilter 标记，join 阶段仍耗时约 `2.007s`。可严格保持原候选顺序，使用 `BitSet.nextClearBit()` 直接跳到下一个未剪候选；这不改变 group 判定、BEST_UB 阈值、真实 pair 顺序或返回列，只需调整统计口径。该项应优先于给每个 backward frontier 建 primitive view，因为 certificate 轮根本没有进入真实函数拼接。
 
 除该项外，剩余方向都属于中等或较小收益。completion-bound 构造仍占普通 exact 的约 30%，但原生 interval delta 和固定 U/R 查询已经覆盖最明确冗余，继续优化需要重写 F/B/U/R 的 segment 存储或传播内核。困难 certificate 的正反向扩展约占 exact 的 55%，主要成本来自更多 survivor label、source-aware envelope merge 和多轮 DSSR 状态规模，不是 queue、位集或单个函数调用；此前 threshold-mask reachability 完整 A/B 仅节省 exact 约 0.34%，已撤回。固定 backward view、group-envelope value-only view和 completion-bound arc fixing view 仍可做常数优化，但预计都低于“跳过已知 BitSet 区间”。master LP、arc fixing 和统计在该 root-only 口径下均不是当前热点。
+
+244. 2026-07-16 group-envelope BitSet 连续剪枝跳跃
+
+前一节确认 group-envelope prefilter 已经为每个 backward group 和 terminal job 缓存可剪 forward label 的 BitSet，但旧 join 仍逐项读取这些 label、检查 dominance 和 scalar lower bound，再执行 BitSet.get(i) 后跳过。困难 W300 certificate 中真实 funcEval=0，仍可能扫描数百万候选，因此本轮把已知可剪的连续 set-bit 区间改为 nextClearBit(i) 直接跳到下一个未剪候选。未被 BitSet 标记的候选顺序、lower-bound 检查和 tryJoin() 完全不变；该路径只在 no-SRI group-envelope prefilter 启用时生效。系统属性 twet.bpc.ngDssrJoinPrefilterSkipRuns=false 可恢复旧逐项扫描，默认启用新路径。
+
+正确性依赖两个已经存在的不变量。第一，BitSet 中的 set bit 只来自安全的 group-envelope 非负证书，因此逐项路径本来也一定 continue。第二，forward candidates 在 join 前按 minReducedCost 升序排序；即使连续跳跃跨过了旧路径本会触发的 scalar-LB break，后面的首个 clear candidate 也不可能具有更小的 scalar lower bound，会在原检查处停止，不会额外进入 tryJoin()。BitSet 构造后 active label 列表在本轮 join 内不再变化，因此索引不会失配。新统计口径中 join candidates visited 只计真正读取的 label，逻辑上被连续跳过的数量仍完整计入 joinEnvelopePrefilter skippedPairs。
+
+使用 wet050_003_3m_setupR50 + dueWindowHalfWidth=300、root-only、nearestK5/top10、no ALNS/no strong branching/no SRI 的相邻 A/B 共运行两轮正反顺序。四次运行的 8 次 exact 加列序列均严格为 5000/1742/1067/74/41/6/1/0，每轮 pool、DSSR rounds、accepted best reduced cost、最终 bound=1726.014329 和 valid=true 全部一致。第一轮 OFF/ON 的 exact 为 15.572s/14.864s，join phase 为 1.947s/1.719s；反序第二轮受整机负载影响，ON/OFF 的 exact 为 25.441s/18.505s，且 initialization、扩展和 join 同时整体变慢，不能据此声称稳定的端到端提速。按每轮 join phase 相对同轮 forward+backward 时间归一化，两次 OFF 平均为 24.39%，两次 ON 平均为 23.14%，约下降 5.1%。因此该修改作为代码量很小、语义等价、默认启用且可回退的常数优化保留，但不把它记录为稳定的大幅提速。
+
+另尝试并行关闭启发式运行 20-job smoke，两个 exact 都进入不具代表性的长尾，约 70 秒后主动停止，未写入 CSV，也不纳入性能结论。focused Java 22 编译通过，W300 四次运行均通过解验证。

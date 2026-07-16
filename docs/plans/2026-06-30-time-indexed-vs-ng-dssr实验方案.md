@@ -1122,3 +1122,9 @@ completion bound 不能采用上述标量内核，因为后续传播、arc fixin
 根据前述 A/B 结论，删除 `heuristicPricingHardWindowFeasibilityPrefilter` 整套生产代码，包括配置和 runner 参数、每条 route 的最早/最晚时间数组、每次接受 move 后的重建、ADD/EXCHANGE 预判以及对应诊断字段。该实验在 40-2 中检查约 1693 万候选只拒绝 316 个，反而使启发式从 `9.930s` 增至 `12.925s`；删除只取消一个安全但负收益的提前拒绝，外包原始硬窗、time-indexed compact window 和 dual window 仍继续通过实际 penalty PWLF 参与完整候选成本计算。
 
 同时删除 `heuristicPricingScalarInsertCost` 生产开关和旧链表 fallback。无临时 PWLF 标量内核已完成 50 万组随机对拍和真实同轨迹 A/B，现作为唯一生产路径；旧 `addShifted + minimizePrefix + merge2` 只留在 `PiecewiseLinearInsertScalarTest` 中作为 reference。清理后 focused 编译、50 万组标量对拍和 `OutsourcingMoveConsistencyTest` 的 14168 个 move 全部通过。40-2 root-only smoke 与清理前完全一致：HeuristicPricing `58` 次、exact `17` 次、pool `10376`、启发式加列 `10293`、exact 加列 `81`、root bound `22490`。segment-reuse、完整 PWLF 融合等失败实现此前已撤回，源码中没有残留；全局 `SegmentPool` 属于跨模块旧基础设施，本轮不做无关的大范围拆除。
+
+### 2026-07-16：保留修改的正确性复核
+
+再次按生产调用链复核无临时 PWLF 标量内核和清理后的启发式定价。标量内核仍严格复现旧 `addShifted + minimizePrefixInPlace + findMinimalShiftedSumValue` 的端点下界、有限 `curUpperBound`、BigM、平移和双指针断点推进语义；每个 `TabuRouteState` 独占一个 workspace，不存在跨 route 或并发复用。SRI 增量仍由 `reducedCostAfterAdd/Exchange` 单独计算，active SRI 下原有 move lower-bound 预剪枝仍关闭；compact window 继续通过 penalty PWLF 参与候选成本，dual window 候选仍在返回前用 `TWETColumnEvaluator` 回刷真实成本。失败的硬窗 hull 预判和生产 fallback 均无源码残留。
+
+验证上，focused 编译通过；连续分段随机对拍扩大到 200 万组，另外用临时测试加入物理空洞、单点段和 BigM 段再对拍 50 万组，全部与旧链表 reference 一致；`OutsourcingMoveConsistencyTest` 通过，`checked=14168`。修改前后运行同一份通用 PWLF property suite，报告和 findings 的 SHA-256 完全一致，现有不相交定义域及随机非生产形状失败不是本次 `normalizeForward()` 单遍扫描引入。当前未发现保留修改带来的 correctness 回归；剩余风险仍是 PWLF 公共工具既有的契约外输入问题，不属于启发式生产路径。

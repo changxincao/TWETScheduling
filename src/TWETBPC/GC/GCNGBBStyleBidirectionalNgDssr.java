@@ -1295,6 +1295,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				? null : ngDssrPreviousRoundNegativeRoutes.get(new SequenceSignature(selected.sequence));
 		int previousRank = previousMatch == null ? -1
 				: rankInRound(previousMatch, ngDssrPreviousRoundNegativeRoutes);
+		String selectedPreviousRanks = selectedPreviousRanks();
 		if (ngDssrRoundRouteRelation.length() > 0) {
 			ngDssrRoundRouteRelation.append(';');
 		}
@@ -1311,11 +1312,35 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(",prevRank=").append(previousRank < 0 ? "NA" : Integer.toString(previousRank))
 				.append(",prevRc=").append(previousMatch == null ? "NA"
 						: Double.toString(previousMatch.reducedCost))
+				.append(",selectedPrevRanks=").append(selectedPreviousRanks)
 				.append(",added=").append(changed)
 				.append(",pairs=").append(ngDssrRoundAddedPairs == null || ngDssrRoundAddedPairs.isEmpty()
 						? "-" : String.join(".", ngDssrRoundAddedPairs))
 				.append('}');
 		ngDssrPreviousRoundNegativeRoutes = ngDssrCurrentRoundNegativeRoutes;
+	}
+
+	private String selectedPreviousRanks() {
+		if (nonElementaryNegativeRoutes == null || nonElementaryNegativeRoutes.isEmpty()) {
+			return "-";
+		}
+		StringBuilder ranks = new StringBuilder();
+		int present = 0;
+		for (int i = 0; i < nonElementaryNegativeRoutes.size(); i++) {
+			NonElementaryNegativeRoute route = nonElementaryNegativeRoutes.get(i);
+			NonElementaryNegativeRoute previous = ngDssrPreviousRoundNegativeRoutes == null ? null
+					: ngDssrPreviousRoundNegativeRoutes.get(new SequenceSignature(route.sequence));
+			if (i > 0) {
+				ranks.append('.');
+			}
+			if (previous == null) {
+				ranks.append("NA");
+			} else {
+				present++;
+				ranks.append(rankInRound(previous, ngDssrPreviousRoundNegativeRoutes));
+			}
+		}
+		return present + "/" + nonElementaryNegativeRoutes.size() + ":" + ranks;
 	}
 
 	private int roundRouteCount(HashMap<SequenceSignature, NonElementaryNegativeRoute> routes) {

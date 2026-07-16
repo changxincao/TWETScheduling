@@ -2461,3 +2461,17 @@ zero-setup 下更合理的静态回退不是继续使用任意编号，也不宜
 剩余优化优先级已经比较清楚。启发式 `findBestMove` 的 ADD/EXCHANGE 仍是整轮主热点，但现有无临时 PWLF 标量内核、primitive 只读视图、普通弧扁平表和 dual 快照已经去掉明确实现冗余；再降低时间需要改变 seed、iteration 或邻域扫描语义，必须做完整求解 A/B。completion bound 的 F/B sparse-delta 传播仍是 exact 初始化热点，真正可能有量级收益的下一步是原生 interval delta，避免用含 BigM 空洞的临时 PWLF 复用通用 shift/add/normalize；这是数据结构级修改，必须逐 job 对拍完整 F/B/U/R，不能作为小补丁。无 SRI 的容器初始化、重复统计清零、诊断开启时的全列扫描等仍有少量冗余，但默认关闭或仅为微秒/毫秒级，不值得增加主线分支。join、candidate pool、active-label 压缩和 source-aware dominance 暂未发现新的高收益等价删除项。
 
 验证使用当前全部 `Basic/Common/HEU/Output/TWETBPC` 源码和 CPLEX/CP Optimizer jar 完整编译；`TimeIndexedGraphOptimizationTest`、`CompletionBoundPreparedBoundsCompatibilityTest`、新旧 dominance graph consistency、`NgDssrSameNodeWarmStartTest` 均通过。`SmallBPCBatchTest` 的 8/8 小规模算例与 ArcFlow 完全一致，tariff 分支例也 `valid=true`。
+
+240. 2026-07-16 completion bound 原生 interval delta 与 DSSR top-K 跨轮关系
+
+当前 multi-delta completion bound 只传播真正下降的多个时间区间，但旧实现仍把这些区间之间的未变化区域显式填成 BigM segment，再对该临时 PWLF 执行通用 `shiftX -> directional normalize -> add penalty -> normalize`。本轮新增原生 interval-delta 路径：delta 只保存真实下降区间，内部空洞保持隐式；对每条普通弧完成平移和定义域裁剪后，再执行 prefix/suffix minimum 并补齐对应方向的等待闭包。这里不能把 delta 在弧外预先 normalize 一次，因为 `shiftX` 会按原函数 metadata domain 裁剪，弧相关平移与等待闭包不交换。backward 新增等待段使用现有 SegmentPool，避免把节省的 segment 又变成短命对象。系统属性 `twet.bpc.completionBoundNativeIntervalDelta` 默认开启，显式设为 false 可完整回退旧 BigM-hole 路径。
+
+正确性验证覆盖三个层次。focused 编译和 `CompletionBoundPreparedBoundsCompatibilityTest` 通过；SmallBPC 的 8/8 ArcFlow 对照与 tariff 分支均为 `valid=true`；更重要的是在 `wet050_003_3m_setupR50 + W300` 的 K5/top10 root-only 配置上打开 `completionBoundMultiDeltaCompare`，8 次 exact pricing 的每次构造都逐 job 比较完整 F/B/U/R，全部输出 `result=equal`。独立 ON/OFF A/B 的 root bound 均为 `1726.014329`，exact 调用数、DSSR 轮数、候选规模和最终有效性一致，不是只比较最终 scalar minimum。
+
+同批次性能如下。旧 BigM-hole 路径 root 为 `58.537s`，exact `18.012s/8 calls`；原生 interval 路径为 `57.657s` 和 `17.148s/8 calls`。8 次 completion-bound build 累计由 `6534.960ms` 降至 `5959.350ms`，约减少 8.8%；F/B 传播由 `4952.416ms` 降至 `4490.801ms`，约减少 9.3%；candidate 第一遍 directional normalize 由 `788.555ms` 降至 `559.072ms`，约减少 29.1%；全部 candidate shift/normalize/add 热步骤由 `3124.868ms` 降至 `2758.260ms`，约减少 11.7%。最终 exact 约快 4.8%，root 总时间约快 1.5%。因此这项优化有稳定的中等局部收益，但不是数量级改善；主要价值是删除 BigM 空洞上的无效 segment 工作。
+
+同时扩展了默认关闭的 `ngDssrRoundRouteRelation` 诊断：除原 top1 外，记录本轮实际选中 top-K 中有多少条已存在于上一轮候选全集，以及它们在上一轮的 reduced-cost 名次。该统计不改变生产更新逻辑。K5/top10 的最后 no-negative certificate 共 5 轮：r1 从 89 条 unique 负非基本候选中更新 49 个 pair；r2 的 top10 有 9 条来自上一轮，原名次为 `11,12,13,16,17,NA,20,21,22,23`；r3 为 10/10，原名次主要在 `11--25`；r4 为 9/10，原名次主要在 `13--22`；r5 才无负 relaxed route。平均 ng-set size 从初始 5 依次升至 `5.98, 6.82, 7.58, 8.72`，最大值升至 15。结论很明确：top10 更新本身有效，上一轮已选 top10 基本被排除；多轮的原因是上一轮第 11--25 名顺次上浮，而不是被更新的原 top10 继续残留。
+
+为验证能否直接扩大，完全同配置只把 update limit 改为 top20。最后 certificate 从 5 轮降到 4 轮，单次困难 exact 从 `5.715s` 降至 `4.864s`；但更新 pair 从 186 增至 194，final 平均 ng-set 从 8.72 增至 8.88，完整 root 的 exact 几乎不变：top10 为 `16.057s`，top20 为 `16.052s`，总时间也只有 `54.873s -> 54.720s`。top20 的下一轮候选同样主要来自上一轮第 21--52 名，说明固定扩大只是在移动 cutoff，同时让后续 labeling 使用更大的 ng-set。当前不修改默认 top10。
+
+若继续做更新策略，合理方向不是全局固定 top20，而是困难轮自适应的较宽 reservoir：当一轮没有 elementary 列时，先更新 top10，再在同一轮已保存的第 11--20 名中检查哪些仍未被新增 pair 排除，只对存活者补充更新，然后才重新 labeling。该方案可能消除“第 11--25 名依次上浮”，又避免所有正常一轮 exact 都使用 top20；但它要求生产候选池保留比实际更新数更宽的 reservoir，并需统计 survivor 数和新增 pair，当前单例 top20 没有净收益，暂不实现。

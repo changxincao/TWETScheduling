@@ -2,12 +2,8 @@
 package Common;
 
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.Currency;
 import java.util.Deque;
-import java.util.List;
 
 import Common.Utility.TimerManager;
 
@@ -248,6 +244,10 @@ public class PiecewiseLinearFunction {
 			new ThreadLocal<MergeMinimumObserver>();
 	private static final ThreadLocal<Boolean> MERGE_MINIMUM_NORMALIZE_OBSERVER_ACTIVE =
 			new ThreadLocal<Boolean>();
+	private static final ThreadLocal<SuffixMinimumWorkspace> SUFFIX_MINIMUM_WORKSPACE =
+			ThreadLocal.withInitial(SuffixMinimumWorkspace::new);
+	private static final ThreadLocal<StreamingMinimumWorkspace> STREAMING_MINIMUM_WORKSPACE =
+			ThreadLocal.withInitial(StreamingMinimumWorkspace::new);
 
 	public static MergeMinimumObserver setMergeMinimumObserver(MergeMinimumObserver observer) {
 		MergeMinimumObserver previous = MERGE_MINIMUM_OBSERVER.get();
@@ -285,6 +285,222 @@ public class PiecewiseLinearFunction {
 			return slope * t + intercept;
 		}
 	}
+
+	/**
+	 * backward suffix-min 使用线程内复用数组，避免每次调用创建 ArrayList 和临时容器。
+	 */
+	private static final class SuffixMinimumWorkspace {
+		private Segment[] segments = new Segment[16];
+		private Segment builtTail;
+
+		private void minimize(PiecewiseLinearFunction function) {
+			int size = 0;
+			for (Segment segment = function.head; segment != null; segment = segment.next) {
+				if (size == segments.length) {
+					segments = Arrays.copyOf(segments, segments.length << 1);
+				}
+				segments[size++] = segment;
+			}
+			Segment nextSegment = null;
+			builtTail = null;
+			double runningMin = Utility.curUpperBound;
+			double lastTime = function.tail.end;
+			for (int index = size - 1; index >= 0; index--) {
+				Segment segment = segments[index];
+				double start = segment.start;
+				double end = segment.end;
+				double slope = segment.slope;
+				double intercept = segment.intercept;
+				double startValue = slope * start + intercept;
+				double endValue = slope * end + intercept;
+				if (Utility.compareLe(slope, 0.0)) {
+					if (Utility.compareLe(runningMin, endValue)) {
+						continue;
+					}
+					if (!Utility.compareEq(lastTime, end)) {
+						nextSegment = prepend(SegmentPool.obtain(end, lastTime, 0.0, runningMin), nextSegment);
+						lastTime = end;
+					}
+					runningMin = endValue;
+				} else {
+					if (Utility.compareLe(runningMin, startValue)) {
+						continue;
+					}
+					if (Utility.compareGt(endValue, runningMin)) {
+						double crossing = (runningMin - intercept) / slope;
+						if (Utility.compareGt(lastTime, crossing)
+								&& !Utility.compareEq(runningMin, Utility.curUpperBound)) {
+							nextSegment = prepend(
+									SegmentPool.obtain(crossing, lastTime, 0.0, runningMin), nextSegment);
+						}
+						segment.end = crossing;
+						nextSegment = prepend(segment, nextSegment);
+						runningMin = startValue;
+						lastTime = start;
+						continue;
+					}
+					if (!Utility.compareEq(lastTime, end)) {
+						nextSegment = prepend(SegmentPool.obtain(end, lastTime, 0.0, runningMin), nextSegment);
+					}
+					nextSegment = prepend(segment, nextSegment);
+					runningMin = startValue;
+					lastTime = start;
+				}
+			}
+			double firstStart = function.head.start;
+			if (Utility.compareLt(firstStart, lastTime)) {
+				nextSegment = prepend(SegmentPool.obtain(firstStart, lastTime, 0.0, runningMin), nextSegment);
+			}
+			if (Utility.compareGe(lastTime, firstStart) && nextSegment == null) {
+				nextSegment = prepend(SegmentPool.obtain(firstStart, lastTime, 0.0, runningMin), nextSegment);
+			}
+			function.head = nextSegment;
+			function.tail = builtTail;
+			Arrays.fill(segments, 0, size, null);
+		}
+
+		private Segment prepend(Segment segment, Segment next) {
+			segment.next = next;
+			if (builtTail == null) {
+				builtTail = segment;
+			}
+			return segment;
+		}
+	}
+
+
+	/**
+	 * 已按同一方向闭包的两条 PWLF 的流式下包络。只在确认严格改善后物化新链表。
+	 */
+	private static final class StreamingMinimumWorkspace {
+		private double[] segments = new double[64];
+		private int size;
+		private boolean changed;
+		private double changedStart;
+		private double changedEnd;
+
+		private boolean mergeInto(PiecewiseLinearFunction left, PiecewiseLinearFunction right,
+				boolean reportChanged, MergeResult changeHull) {
+			size = 0;
+			changed = false;
+			changedStart = Double.POSITIVE_INFINITY;
+			changedEnd = Double.NEGATIVE_INFINITY;
+			Segment leftSegment = left.head;
+			Segment rightSegment = right.head;
+			double cursor = Math.min(leftSegment.start, rightSegment.start);
+			double unionEnd = Math.max(left.tail.end, right.tail.end);
+			while (Utility.compareLt(cursor, unionEnd)) {
+				while (leftSegment != null && !Utility.compareGt(leftSegment.end, cursor)) {
+					leftSegment = leftSegment.next;
+				}
+				while (rightSegment != null && !Utility.compareGt(rightSegment.end, cursor)) {
+					rightSegment = rightSegment.next;
+				}
+				boolean leftActive = leftSegment != null && !Utility.compareGt(leftSegment.start, cursor);
+				boolean rightActive = rightSegment != null && !Utility.compareGt(rightSegment.start, cursor);
+				double leftEvent = leftSegment == null ? Double.POSITIVE_INFINITY
+						: leftActive ? leftSegment.end : leftSegment.start;
+				double rightEvent = rightSegment == null ? Double.POSITIVE_INFINITY
+						: rightActive ? rightSegment.end : rightSegment.start;
+				double next = Math.min(unionEnd, Math.min(leftEvent, rightEvent));
+				if (!Utility.compareLt(cursor, next)) {
+					throw new IllegalStateException("Non-positive streaming PWLF interval at " + cursor);
+				}
+				if (leftActive && rightActive) {
+					appendMinimum(cursor, next, leftSegment, rightSegment);
+				} else if (leftActive) {
+					append(cursor, next, leftSegment.slope, leftSegment.intercept);
+				} else if (rightActive) {
+					append(cursor, next, rightSegment.slope, rightSegment.intercept);
+					markChanged(cursor, next);
+				} else {
+					throw new IllegalArgumentException("Gap in streaming PWLF minimum at " + cursor);
+				}
+				cursor = next;
+			}
+			if (!changed) {
+				return false;
+			}
+			Segment oldHead = left.head;
+			left.head = left.tail = null;
+			for (int index = 0; index < size; index++) {
+				int offset = index << 2;
+				left.addSegment(segments[offset], segments[offset + 1], segments[offset + 2], segments[offset + 3]);
+			}
+			SegmentPool.release(oldHead);
+			left.resetMinimum();
+			if (reportChanged && changeHull != null) {
+				changeHull.markChanged(changedStart, changedEnd);
+			}
+			return true;
+		}
+
+		private void appendMinimum(double start, double end, Segment left, Segment right) {
+			double leftStart = left.getValue(start);
+			double leftEnd = left.getValue(end);
+			double rightStart = right.getValue(start);
+			double rightEnd = right.getValue(end);
+			if (Utility.compareLe(leftStart, rightStart) && Utility.compareLe(leftEnd, rightEnd)) {
+				append(start, end, left.slope, left.intercept);
+				return;
+			}
+			if (Utility.compareLe(rightStart, leftStart) && Utility.compareLe(rightEnd, leftEnd)) {
+				append(start, end, right.slope, right.intercept);
+				markChanged(start, end);
+				return;
+			}
+			double crossing = (right.intercept - left.intercept) / (left.slope - right.slope);
+			crossing = Math.max(start, Math.min(end, crossing));
+			if (Utility.compareLt(leftStart, rightStart)) {
+				append(start, crossing, left.slope, left.intercept);
+				append(crossing, end, right.slope, right.intercept);
+				markChanged(crossing, end);
+			} else {
+				append(start, crossing, right.slope, right.intercept);
+				markChanged(start, crossing);
+				append(crossing, end, left.slope, left.intercept);
+			}
+		}
+
+		private void append(double start, double end, double slope, double intercept) {
+			if (!Utility.compareLt(start, end)) {
+				return;
+			}
+			if (size > 0) {
+				int previous = (size - 1) << 2;
+				if (Utility.compareEq(segments[previous + 1], start)
+						&& Utility.compareEq(segments[previous + 2], slope)
+						&& Utility.compareEq(segments[previous + 3], intercept)) {
+					segments[previous + 1] = end;
+					return;
+				}
+			}
+			ensureCapacity(size + 1);
+			int offset = size << 2;
+			segments[offset] = start;
+			segments[offset + 1] = end;
+			segments[offset + 2] = slope;
+			segments[offset + 3] = intercept;
+			size++;
+		}
+
+		private void markChanged(double start, double end) {
+			if (!Utility.compareLt(start, end)) {
+				return;
+			}
+			changed = true;
+			changedStart = Math.min(changedStart, start);
+			changedEnd = Math.max(changedEnd, end);
+		}
+
+		private void ensureCapacity(int requiredSegments) {
+			int required = requiredSegments << 2;
+			if (required > segments.length) {
+				segments = Arrays.copyOf(segments, Math.max(required, segments.length << 1));
+			}
+		}
+	}
+
 
 	/**
 	 * 简单的链表节点复用池，用来缓存和重用 Segment 实例。
@@ -1301,118 +1517,15 @@ public class PiecewiseLinearFunction {
 	// segment初始化变少了，因为会复用，不过在规模40上时间变化不大
 	public void minimizeSuffixInPlace() {
 		Utility.debugCheckPWLFRightBound("minimizeSuffix.input", this);
-		// 函数 反向取小
-		if (head == null)
+		if (head == null) {
 			return;
+		}
 		TimerManager.start("分段线性函数后缀最小化");
-		// （1）把链表扫一遍装到数组里，便于倒序访问
-		List<Segment> segs = new ArrayList<>();
-		for (Segment s = head; s != null; s = s.next) {
-			segs.add(s);
-		}
-		int addTimes = 0;// 记录拼接段的次数
-		Segment nextSeg = null;
-		// （2）倒序处理，每次产出新段，先累到 newSegs（逆序）。
-		double runningMin = Utility.curUpperBound;//Double.POSITIVE_INFINITY;
-		double lastT = tail.end;
-		for (int i = segs.size() - 1; i >= 0; i--) {
-			Segment seg = segs.get(i);
-			double s = seg.start, e = seg.end;
-			double a = seg.slope, b = seg.intercept;
-			double fs = a * s + b;
-			double fe = a * e + b;
-
-			if (Utility.compareLe(a, 0)) {
-				// **单调递减段**：f(s) ≥ f(t) ≥ f(e)
-				if (Utility.compareLe(runningMin, fe)) {
-					// 整段都 ≥ runningMin → 全常数段
-					continue;
-				} else {
-					if (!Utility.compareEq(lastT, e)) {
-						Segment curSeg = SegmentPool.obtain(e, lastT, 0, runningMin);
-						addTimes++;
-						nextSeg = insertSegment(curSeg, nextSeg, addTimes);
-						lastT = e;
-					}
-					runningMin = fe;
-
-				}
-			} else {
-				// **单调递增段**：f(s) ≤ f(t) ≤ f(e)
-				if (Utility.compareLe(runningMin, fs)) {
-
-					continue;
-				}
-				// 段内穿越
-				if (Utility.compareGt(fe, runningMin)) {
-					double tCross = (runningMin - b) / a;
-					if (Utility.compareGt(lastT, tCross)) {
-						if(!Utility.compareEq(runningMin, Utility.curUpperBound)) {
-							// 2026-05-14: suffix 同样只跳过上界假段；真实尾部最小值不能因 lastT==tail.end 被漏掉。
-							// 详细讨论见 docs/plans/PiecewiseLinearFunction 专题记录。
-							// 2025.5.10 历史注释保留：新加if，原思路同prefix最小化。
-							Segment curSeg = SegmentPool.obtain(tCross, lastT, 0.0, runningMin);
-							addTimes++;
-							nextSeg = insertSegment(curSeg, nextSeg, addTimes);
-						}
-					}
-//					Segment curSeg=new Segment(seg.start, tCross, a, b);
-					Segment curSeg = seg;
-					seg.end = tCross;// 直接复用
-					addTimes++;
-					nextSeg = insertSegment(curSeg, nextSeg, addTimes);
-
-					runningMin = fs;
-					lastT = s;
-					continue;
-				}
-
-				else {
-					// 比起始段更高
-					if (!Utility.compareEq(lastT, e)) {
-						Segment curSeg = SegmentPool.obtain(e, lastT, 0, runningMin);
-						addTimes++;
-						nextSeg = insertSegment(curSeg, nextSeg, addTimes);
-
-					}
-					Segment curSeg = seg;
-					addTimes++;
-					nextSeg = insertSegment(curSeg, nextSeg, addTimes);
-					runningMin = fs;
-					lastT = s;
-				}
-
-			}
-		}
-		double prevStart = head.start;
-		if (Utility.compareLt(prevStart, lastT)) {
-			Segment curSeg = SegmentPool.obtain(prevStart, lastT, 0.0, runningMin);
-			addTimes++;
-			nextSeg = insertSegment(curSeg, nextSeg, addTimes);
-
-		}
-		//同prefixMinimize，若整个函数比上界还大，设置为水平线
-
-		if (Utility.compareGe(lastT, prevStart) && nextSeg == null) {
-			// suffix整个和prefix对称
-			Segment curSeg = SegmentPool.obtain(prevStart, lastT, 0.0, runningMin);
-			addTimes++;
-			nextSeg = insertSegment(curSeg, nextSeg, addTimes);
-		}
-
-		head = nextSeg;// 此时curSeg和nextSeg相等
+		SUFFIX_MINIMUM_WORKSPACE.get().minimize(this);
 		Utility.debugCheckPWLFRightBound("minimizeSuffix.output", this);
 		TimerManager.end("分段线性函数后缀最小化");
+		recordSegmentNumIfEnabled();
 	}
-
-	public Segment insertSegment(Segment curSeg, Segment nextSeg, int addTimes) {
-
-		curSeg.next = nextSeg;
-		if (addTimes == 1)
-			tail = curSeg;
-		return curSeg;
-	}
-
 	@Override
 	public String toString() {
 		StringBuilder sb = new StringBuilder();
@@ -1871,17 +1984,25 @@ public class PiecewiseLinearFunction {
 		}
 
 		long phaseStart = observer == null ? 0L : System.nanoTime();
-		// 2026-05-15: backward 方向与 forward normalize 对称。
-		// backward label 的固定端点是左端 0/domainStart，因此左侧 big_M 不能物理删除；
-		// 右侧连续 big_M 尾段表示后续无法接上的过晚完成时间，可以在 suffix-min 前裁掉。
-		Segment cur = head;
-		Segment lastNonBigM = null;
-		while (cur != null) {
-			if (!Utility.isBigMValue(cur.intercept)) {
-				lastNonBigM = cur;
+		// 2026-07-16: 一次扫描同时压缩相邻等值段、恢复 tail，并定位可删除的连续 big_M 尾部。
+		Segment write = head;
+		Segment lastNonBigM = Utility.isBigMValue(write.intercept) ? null : write;
+		Segment read = write.next;
+		while (read != null) {
+			Segment next = read.next;
+			if (Utility.compareEq(write.slope, read.slope)
+					&& Utility.compareEq(write.intercept, read.intercept)) {
+				write.end = read.end;
+			} else {
+				write.next = read;
+				write = read;
 			}
-			cur = cur.next;
+			if (!Utility.isBigMValue(write.intercept)) {
+				lastNonBigM = write;
+			}
+			read = next;
 		}
+		write.next = null;
 		if (lastNonBigM == null) {
 			head = tail = null;
 			if (observer != null) {
@@ -1891,22 +2012,7 @@ public class PiecewiseLinearFunction {
 		}
 		lastNonBigM.next = null;
 		tail = lastNonBigM;
-		long trimNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
-
-		phaseStart = observer == null ? 0L : System.nanoTime();
-		cur = head;
-		while (cur.next != null) {
-			if (Utility.compareEq(cur.slope, cur.next.slope) && Utility.compareEq(cur.intercept, cur.next.intercept)) {
-				cur.end = cur.next.end;
-				cur.next = cur.next.next;
-				if (cur.next == null) {
-					tail = cur;
-				}
-			} else {
-				cur = cur.next;
-			}
-		}
-		long preCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
+		long trimAndCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
 
 		phaseStart = observer == null ? 0L : System.nanoTime();
 		minimizeSuffixInPlace();
@@ -1915,12 +2021,11 @@ public class PiecewiseLinearFunction {
 		compactAdjacentEqualSegments();
 		long postCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
 		if (observer != null) {
-			observer.recordNormalize(Direction.BACKWARD, trimNanos, preCompactNanos,
+			observer.recordNormalize(Direction.BACKWARD, trimAndCompactNanos, 0L,
 					directionalMinNanos, postCompactNanos);
 		}
 		Utility.debugCheckPWLFLeftBound("normalize.backward.output", this);
 	}
-
 	/**
 	 * 将 p 段上的 [cur,nxt) 替换成常数段 lastMin，并保持链表连通。 prev 是 p 在拆分前的前驱（可能为 null）。
 	 */
@@ -2071,6 +2176,30 @@ public class PiecewiseLinearFunction {
 		return result;
 	}
 
+	private boolean isDirectionNormalized(Direction direction) {
+		if (head == null) {
+			return true;
+		}
+		Segment previous = null;
+		for (Segment segment = head; segment != null; segment = segment.next) {
+			if (previous != null && !Utility.compareEq(previous.end, segment.start)) {
+				return false;
+			}
+			if (direction == Direction.FORWARD) {
+				if (Utility.compareGt(segment.slope, 0.0)
+						|| previous != null && Utility.compareGt(
+								segment.getValue(segment.start), previous.getValue(previous.end))) {
+					return false;
+				}
+			} else if (Utility.compareLt(segment.slope, 0.0)
+					|| previous != null && Utility.compareLt(
+							segment.getValue(segment.start), previous.getValue(previous.end))) {
+				return false;
+			}
+			previous = segment;
+		}
+		return true;
+	}
 	private boolean canSkipMergeMinimum(PiecewiseLinearFunction g) {
 		if (this.head == null || g == null || g.head == null) {
 			return false;
@@ -2151,6 +2280,30 @@ public class PiecewiseLinearFunction {
 				observer.record(direction, true, false, skipNanos, 0L, 0L, 0L);
 			}
 			return false;
+		}
+		double streamingOverlapStart = Math.max(this.head.start, g.head.start);
+		double streamingOverlapEnd = Math.min(this.tail.end, g.tail.end);
+		boolean hasCommonClosureAnchor = direction == Direction.FORWARD
+				? Utility.compareEq(this.tail.end, g.tail.end)
+				: Utility.compareEq(this.head.start, g.head.start);
+		if (Configure.useStreamingPwlfMinimumMerge
+				&& hasCommonClosureAnchor
+				&& Utility.compareLt(streamingOverlapStart, streamingOverlapEnd)
+				&& this.isDirectionNormalized(direction) && g.isDirectionNormalized(direction)) {
+			long bodyStart = observer == null ? 0L : System.nanoTime();
+			boolean actualChanged = STREAMING_MINIMUM_WORKSPACE.get().mergeInto(this, g,
+					reportChanged, changeHull);
+			long bodyNanos = observer == null ? 0L : System.nanoTime() - bodyStart;
+			boolean reportedChanged = reportChanged && actualChanged;
+			if (observer != null) {
+				observer.record(direction, false, reportedChanged, skipNanos, 0L, bodyNanos, 0L);
+			}
+			if (direction == Direction.BACKWARD) {
+				Utility.debugCheckPWLFLeftBound("mergeMinimum.output", this);
+			} else {
+				Utility.debugCheckPWLFRightBound("mergeMinimum.output", this);
+			}
+			return reportedChanged;
 		}
 		boolean changed = false;
 		double originalHeadStart = this.head.start;

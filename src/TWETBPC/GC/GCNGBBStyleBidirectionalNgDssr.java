@@ -3128,10 +3128,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		PiecewiseLinearFunction nextFrontier;
 		PiecewiseLinearFunction nextNoSriFrontier;
 		long timingStart = extensionTimingStart();
-		double successorHStart = getDynamicBackwardHStart(prevJob, label.isSinkRoot ? node.sinkId() : label.jid);
+		int successor = label.isSinkRoot ? node.sinkId() : label.jid;
+		double successorHStart = getDynamicBackwardHStart(prevJob, successor);
+		double successorHEnd = getDynamicBackwardHEnd(prevJob, successor);
 		double rhoPrime;
 		if (label.isSinkRoot) {
-			rhoPrime = getDynamicBackwardHEnd(prevJob, node.sinkId());
+			rhoPrime = successorHEnd;
 			recordBackwardWindowCheckNanos(timingStart);
 			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				return null;
@@ -3153,13 +3155,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		} else {
 			double delay = data.getSetUp(prevJob, label.jid) + data.getProcessT(label.jid);
-			boolean hasWindowOverlap = hasBackwardExtensionWindowOverlap(label, prevJob, delay);
+			boolean hasWindowOverlap = hasBackwardExtensionWindowOverlap(
+					label, delay, successorHStart, successorHEnd);
 			recordBackwardWindowCheckNanos(timingStart);
 			if (!hasWindowOverlap) {
 				return null;
 			}
 			timingStart = extensionTimingStart();
-			rhoPrime = Math.min(label.frontier.tail.end - delay, getDynamicBackwardHEnd(prevJob, label.jid));
+			rhoPrime = Math.min(label.frontier.tail.end - delay, successorHEnd);
 			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				recordBackwardFunctionNanos(timingStart);
 				return null;
@@ -3292,14 +3295,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	/** 鎻愬墠鍒ゆ柇 backward 鎵╁睍鍚庣殑瀹屾垚鏃堕棿鍖洪棿鏄惁鍙兘涓庝换鍔℃湁鏁堢獥鍙ｇ浉浜わ紝閬垮厤鏋勯€犲繀涓虹┖鐨?PWLF銆?*/
-	private boolean hasBackwardExtensionWindowOverlap(BackwardLabel label, int prevJob, double delay) {
+	private boolean hasBackwardExtensionWindowOverlap(BackwardLabel label, double delay,
+			double successorHStart, double successorHEnd) {
 		if (label.frontier == null || label.frontier.head == null) {
 			return false;
 		}
 		double shiftedStart = Math.max(label.frontier.head.start - delay, label.frontier.domainStart);
 		double shiftedEnd = Math.min(label.frontier.tail.end - delay, label.frontier.domainEnd);
-		double windowStart = Math.max(getDynamicBackwardHStart(prevJob, label.jid), tMid);
-		double windowEnd = Math.min(getDynamicBackwardHEnd(prevJob, label.jid), pricingHorizon);
+		double windowStart = Math.max(successorHStart, tMid);
+		double windowEnd = Math.min(successorHEnd, pricingHorizon);
 		double overlapStart = Math.max(shiftedStart, windowStart);
 		double overlapEnd = Math.min(shiftedEnd, windowEnd);
 		return !Utility.compareLt(overlapEnd, overlapStart);

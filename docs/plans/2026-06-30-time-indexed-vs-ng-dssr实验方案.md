@@ -1166,3 +1166,12 @@ completion bound 不能采用上述标量内核，因为后续传播、arc fixin
 backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackward()` 先完整扫描寻找最后一个非 BigM 段，再扫描压缩相邻段，`minimizeSuffixInPlace()` 又把全部 Segment 装入临时 `ArrayList` 后逆序处理，最后再压缩一次。镜像函数基准中，20/50 段原 backward normalize 约为 forward 的 1.7--1.8 倍；独立实现把尾部识别与第一次 compact 合并，并用可复用 `Segment[]` 代替每次 `ArrayList`，完整 backward normalize 约快 1.23--1.29 倍，单独 suffix-min 通常快约 1.2--1.5 倍。ng-DSSR backward 扩展还存在重复读取动态 HStart/HEnd 的常数项：同一候选在窗口重叠、rhoPrime 和后续边界判断中重复读取，后续可以合并为一次局部边界计算。
 
 当前结论是：backward 的实现不对称确实能解释一部分额外时间，但不能解释所有正反向总耗时差。实际 pricing 中候选数、保留 label 数、函数段数和 dominance 图规模仍是主导变量，部分现有日志甚至是 forward 显著更重。因此本轮不把实验代码接入全局；下一步若继续，应分别 A/B：一是生产化方向化 streaming merge，二是生产化 backward fused normalize，不能把两项和 label 数量变化混在一次实验中。
+### 2026-07-16：PWLF 流式下包络与 backward 热路径接入主线
+
+本轮从独立实验中只保留了四项容易隔离、严格等价且可验证的优化。第一，`mergeMinimum()` 在 forward 共享右端闭包、backward 共享左端闭包，且两侧函数已经满足对应方向闭包时，直接用单次双指针扫描构造逐点下包络，不再复制右函数、原地拆链并再次完整 normalize；通用定义域或方向契约不满足时自动回退旧实现。无变化候选仍先由既有 `canSkipMergeMinimum()` 处理，不进入流式构造。第二，backward suffix-min 用线程内复用的 `Segment[]` 做逆序扫描，取消每次调用的 `ArrayList` 分配。第三，`normalizeBackward()` 把相邻等值段压缩、tail 恢复和连续 BigM 尾段定位合并为一次扫描。第四，ng-DSSR backward 扩展把同一 successor 的动态 `HStart/HEnd` 各读取一次并复用，删除重复窗口读取。
+
+接入时曾发现一个必须保留的边界：仅检查函数已经方向化还不够；如果 forward 的右端或 backward 的左端闭包锚点不同，逐点下包络不能代替旧实现的“并域后再方向闭包”。因此生产快路径增加共享闭包锚点检查，契约外输入继续走旧路径。加上该边界后，通用 PWLF property suite 恢复到修改前相同的 `passed=26, warnings=2, failed=7`，未增加失败项。
+
+验证分三层完成。10 万组随机函数对拍覆盖 forward/backward 共 20 万次 merge、10 万次 suffix 以及 trailing/all-BigM backward normalize，生产实现、旧 merge 路径和独立参考实现逐点一致，changed 标记及变化区间也一致。10 万次微基准中，真正发生 envelope 更新的流式 merge 在 5/20/50 段上约快 `1.15x-1.48x`；此前独立实验测得 suffix workspace 约快 `1.2x-1.5x`、完整 backward normalize 约快 `1.23x-1.29x`。整树 `SmallBPCBatchTest` A/B 中，开关两侧 8/8 随机例和 tariff 分支例均与 ArcFlow 精确值一致，目标、bound、节点和 pricing 轮数完全一致，小例平均 BPC 时间为 `60.25ms -> 59.13ms`；该时间只作为无退化 smoke，不用于外推大算例收益。`IncrementalSourcedDominanceGraphConsistencyTest`、`PaperDominanceGraphConsistencyTest` 和 `CompletionBoundPreparedBoundsCompatibilityTest` 也全部通过。
+
+当前结论是保留上述四项优化并默认启用流式 merge，同时保留配置开关和旧 merge fallback。没有把 packed-array PWLF、全局数据结构迁移或更宽松的定义域假设合入主线；这些改动范围大，当前证据不足。

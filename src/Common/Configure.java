@@ -26,6 +26,8 @@ public class Configure {
 	public static boolean debugBPCPricingColumnCheck=false;
 	// 2026-06-16: 分段数量统计会扫描整条 PWLF 链，默认关闭，避免混入真实求解热路径。
 	public static boolean debugPWLFSegmentStats=false;
+	// 2026-07-16: 对方向化 PWLF 直接流式构造逐点下包络。保留旧路径用于 A/B 和快速回退。
+	public static boolean useStreamingPwlfMinimumMerge=true;
 	// 2026-06-16: HEU 拼接次数统计只用于诊断，默认关闭，避免频繁写 debugMap。
 	public static boolean debugAlgorithmCounters=false;
 	public Solution bestSolution;

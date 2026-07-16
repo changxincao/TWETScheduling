@@ -263,7 +263,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 		}
 		for (int job = 1; job <= data.n; job++) {
-			if (state.used[job]) {
+			// required-outsourced job 不属于内部列域；seed 已兼容，局部搜索只需阻止重新插入。
+			if (state.used[job] || PricingCompatibility.isRequiredOutsourcedJob(lp.getNode(), job)) {
 				continue;
 			}
 			for (int pos = 0; pos <= state.sequence.size(); pos++) {
@@ -546,7 +547,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double[] sriPrefixPenalty;
 		private double[] sriSuffixPenalty;
 		private double sriPenalty;
-		private double lastMoveLowerBound = Double.NEGATIVE_INFINITY;
 		private final HeuristicArcCompatibility arcCompatibility;
 		private final HeuristicMoveDuals moveDuals;
 		private final HeuristicPricingStats stats;
@@ -621,13 +621,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 				stats.addAddTotalNanos(totalStart);
 				return null;
 			}
-			double threshold = acceptedMoveThreshold(MoveType.ADD, job, -1, iter, bestReducedCost,
-					bestMoveReducedCost);
-			if (shouldPruneByMoveLowerBound(pos, job, false, lp, threshold)) {
-				if (stats.enabled) { stats.addLowerBoundPruned++; }
-				stats.addAddTotalNanos(totalStart);
-				return null;
-			}
 			long costStart = stats.start();
 			double candidateCost = insertOrReplaceCost(pos, job, false);
 			stats.addAddCostNanos(costStart);
@@ -639,7 +632,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			long rcStart = stats.start();
 			double rc = reducedCostAfterAdd(pos, job, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
-			stats.observeLowerBound(lastMoveLowerBound, rc);
 			if (stats.enabled) { stats.addValid++; }
 			if (!isAcceptedCandidate(rc, MoveType.ADD, job, -1, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
@@ -662,13 +654,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 				return null;
 			}
 			int removedJob = sequence.get(pos).intValue();
-			double threshold = acceptedMoveThreshold(MoveType.EXCHANGE, job, removedJob, iter, bestReducedCost,
-					bestMoveReducedCost);
-			if (shouldPruneByMoveLowerBound(pos, job, true, lp, threshold)) {
-				if (stats.enabled) { stats.exchangeLowerBoundPruned++; }
-				stats.addExchangeTotalNanos(totalStart);
-				return null;
-			}
 			long costStart = stats.start();
 			double candidateCost = insertOrReplaceCost(pos, job, true);
 			stats.addExchangeCostNanos(costStart);
@@ -680,7 +665,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			long rcStart = stats.start();
 			double rc = reducedCostAfterExchange(pos, job, removedJob, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
-			stats.observeLowerBound(lastMoveLowerBound, rc);
 			if (stats.enabled) { stats.exchangeValid++; }
 			if (!isAcceptedCandidate(rc, MoveType.EXCHANGE, job, removedJob, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
@@ -691,29 +675,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (stats.enabled) { stats.exchangeSelected++; }
 			stats.addExchangeTotalNanos(totalStart);
 			return new TabuMove(candidateCost, rc, MoveType.EXCHANGE, pos, job, removedJob);
-		}
-		private double acceptedMoveThreshold(MoveType type, int primaryJob, int secondaryJob, int iter,
-				double bestReducedCost, double bestMoveReducedCost) {
-			boolean tabu = type == MoveType.EXCHANGE
-					? iter < tabuTenure[primaryJob] || iter < tabuTenure[secondaryJob]
-					: iter < tabuTenure[primaryJob];
-			return tabu ? Math.min(bestReducedCost, bestMoveReducedCost) : bestMoveReducedCost;
-		}
-
-		private boolean shouldPruneByMoveLowerBound(int pos, int job, boolean replace, LP lp, double threshold) {
-			if (sriContext.isActive()) {
-				lastMoveLowerBound = Double.NEGATIVE_INFINITY;
-				return false;
-			}
-			long start = stats.start();
-			double costLowerBound = insertOrReplaceCostLowerBound(pos, job, replace);
-			double reducedCostLowerBound = replace
-					? reducedCostAfterExchange(pos, job, sequence.get(pos).intValue(), costLowerBound, lp)
-					: reducedCostAfterAdd(pos, job, costLowerBound, lp);
-			lastMoveLowerBound = reducedCostLowerBound;
-			if (stats.enabled) { stats.moveLowerBoundChecks++; }
-			stats.addMoveLowerBoundNanos(start);
-			return Utility.compareGt(reducedCostLowerBound, threshold);
 		}
 		void apply(TabuMove move, int tenureUntil) {
 			if (move.type == MoveType.REMOVE) {
@@ -849,31 +810,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return PiecewiseLinearFunction.findMinimalInsertedJobCost(prefix, prefixShift, jobPenalty, suffix,
 					suffixShift, firstBridgeCost + secondBridgeCost, insertCostWorkspace);
 		}
-		/**
-		 * 三段全局最小值之和是单任务插入成本的安全下界，只用于证明候选不可能改进当前 best move。
-		 */
-		private double insertOrReplaceCostLowerBound(int pos, int job, boolean replace) {
-			int prefixEnd = pos - 1;
-			int suffixStart = replace ? pos + 1 : pos;
-			PiecewiseLinearFunction prefix = prefixEnd < 0 ? windowContext.sourcePenalty : forward[prefixEnd];
-			PiecewiseLinearFunction suffix = suffixStart >= sequence.size() ? windowContext.sourcePenalty
-					: backward[suffixStart];
-			PiecewiseLinearFunction single = windowContext.singletonProfiles[job].forward;
-			if (prefix == null || prefix.isEmpty() || suffix == null || suffix.isEmpty()
-					|| single == null || single.isEmpty()) {
-				return Double.NEGATIVE_INFINITY;
-			}
-			int bridgeFrom = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
-			int bridgeTo = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
-			double prefixMin = prefix.tail.getValue(prefix.tail.end);
-			double jobMin = single.tail.getValue(single.tail.end);
-			double suffixMin = suffix.head.getValue(suffix.head.start);
-			double bridgeCost = data.getSetupCost(bridgeFrom, job)
-					+ (suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo));
-			return prefixMin + jobMin + suffixMin + bridgeCost;
-		}
-
-
 		private double reducedCostAfterRemove(int pos, int removedJob, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
@@ -1254,7 +1190,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		long addCostNanos;
 		long exchangeCostNanos;
 		long moveReducedCostNanos;
-		long moveLowerBoundNanos;
 		long trueRecheckNanos;
 		long removeAttempts;
 		long addAttempts;
@@ -1274,11 +1209,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		long removeSelected;
 		long addSelected;
 		long exchangeSelected;
-		long moveLowerBoundChecks;
-		long addLowerBoundPruned;
-		long exchangeLowerBoundPruned;
-		long moveLowerBoundViolations;
-		double maxMoveLowerBoundViolation;
 		long tryAddCalls;
 		long tryAddPoolFull;
 		long tryAddRejectedByReducedCost;
@@ -1328,7 +1258,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		void addAddCostNanos(long start) { if (enabled) addCostNanos += elapsed(start); }
 		void addExchangeCostNanos(long start) { if (enabled) exchangeCostNanos += elapsed(start); }
 		void addMoveReducedCostNanos(long start) { if (enabled) moveReducedCostNanos += elapsed(start); }
-		void addMoveLowerBoundNanos(long start) { if (enabled) moveLowerBoundNanos += elapsed(start); }
 		void addTrueRecheckNanos(long start) { if (enabled) trueRecheckNanos += elapsed(start); }
 
 		void observeSeed(int seedOrdinal, long start, long added) {
@@ -1349,17 +1278,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			iterationBinCalls[bin]++;
 			iterationBinAdded[bin] += added;
 			iterationBinNanos[bin] += elapsed(start);
-		}
-
-		void observeLowerBound(double lowerBound, double exactValue) {
-			if (!enabled || !Double.isFinite(lowerBound) || !Double.isFinite(exactValue)) {
-				return;
-			}
-			double violation = lowerBound - exactValue;
-			if (Utility.compareGt(violation, 0.0)) {
-				moveLowerBoundViolations++;
-				maxMoveLowerBoundViolation = Math.max(maxMoveLowerBoundViolation, violation);
-			}
 		}
 
 		String summary() {
@@ -1388,10 +1306,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ ", moveNotSelected rem/add/ex=" + removeNotSelected + "/" + addNotSelected + "/"
 					+ exchangeNotSelected
 					+ ", moveSelected rem/add/ex=" + removeSelected + "/" + addSelected + "/" + exchangeSelected
-					+ ", moveLB checks/prunedAdd/prunedEx/ms/viol/max=" + moveLowerBoundChecks + "/"
-					+ addLowerBoundPruned + "/" + exchangeLowerBoundPruned + "/" + ms(moveLowerBoundNanos) + "/"
-					+ moveLowerBoundViolations + "/" + String.format("%.9f", maxMoveLowerBoundViolation)
-
 					+ ", moveMs total rem/add/ex=" + ms(removeTotalNanos) + "/" + ms(addTotalNanos)
 					+ "/" + ms(exchangeTotalNanos)
 					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)

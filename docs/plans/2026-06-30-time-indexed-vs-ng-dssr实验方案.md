@@ -1183,3 +1183,13 @@ backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackwa
 真正需要撤回的是生产 streaming `mergeMinimum`。该实现增加约 180 行生产代码，包括独立 scratch、方向归一化预扫描、共享闭包端点 guard、配置开关和旧路径回退。微基准中发生 envelope 更新的调用可快约 1.4--1.7 倍，但真实 40-2 ng-DSSR root-only 正反顺序 A/B 没有形成端到端收益。四次运行的目标、bound、节点、exact 调用数和搜索轨迹一致：旧路径两次为 `solve=19.132/21.504s，exact=2.271/3.035s`，streaming 两次为 `solve=20.438/24.970s，exact=2.455/2.769s`。平均 exact 仅由 `2.653s` 降到 `2.612s`，约快 1.5%，总时间却由 `20.318s` 增到 `22.704s`，约慢 11.7%。这说明 changed-merge 微基准没有代表真实调用构成，额外方向检查和系统噪声已经足以抵消局部收益。
 
 因此生产 streaming 分支已完整删除，`mergeMinimum()` 恢复为单一旧实现；独立实验类仍保留，用于记录该否定结果，不进入求解主线。其余三项保留：suffix workspace 用较短的复用数组逻辑替换了更长的 `ArrayList` 版本，并非双实现；backward normalize 和动态窗口缓存都减少了重复读取，代码量和分支数反而下降。清理后 focused 编译通过；随机 PWLF 对拍完成 100000 组；source-aware、paper dominance 和 completion-bound compatibility 测试通过；SmallBPC 8/8 及 tariff 分支与 ArcFlow 一致；同一 40-2 主线再次得到 `bound=22490、exact=7 calls、valid=true`。通用 PWLF property suite 仍为既有 `passed=26，warnings=2，failed=7`，没有新增失败。
+
+### 2026-07-16：启发式外包分支兼容与 move lower-bound 清理
+
+本轮复核发现，列化外包的 required 分支虽然会在 seed 阶段排除 required-outsourced job，但 Tabu 的 ADD/EXCHANGE 仍可能把该 job 重新插回内部机器列。修正放在 `findBestMove()` 的新增 job 外层枚举：若当前 job 被 node 要求外包，直接跳过其全部 ADD/EXCHANGE 候选。REMOVE 不会引入新 job，seed 本身已经兼容，因此不再在每个 move 或返回列处重复扫描整条 sequence。该修改只约束列化外包 required 分支，不影响无外包实验及 forbidden-outsourced 分支。
+
+同时完整删除此前的 move lower-bound 预剪枝及其诊断字段。40-2 原日志中，该预判检查 41,259,648 个 ADD/EXCHANGE 候选，只剪掉 2,771,574 个，剪枝率约 6.72%；lower-bound 本身耗时 2.555s，而按存活候选的平均实际评价成本估算，仅节省约 1.149s，净增加约 1.406s。该预判数学上安全，但在现有无临时 PWLF 标量内核和只读数组视图之后已成为负收益，因此不再保留运行开关或生产分支。
+
+严格复用旧 run 的全部配置后，40-2 root-only 从 `solve=40.823s, heuristic=29.160s/58, exact=8.273s/17, pool=10376` 变为 `solve=36.217s, heuristic=26.026s/50, exact=6.641s/12, pool=10237`，两者 root bound 均为 `22490`、`valid=true`。总时间下降约 11.3%，但调用次数和列池发生变化，说明移除预剪枝改变了启发式搜索轨迹；该结果只能说明本次端到端 A/B 更好，不能解释为单次候选评价内核同比加速。保留的有效优化仍为无临时 PWLF 标量内核、持久只读数组视图、seed heap 和已有 arc/dual 快照。
+
+验证包括 focused `javac`、50 万组 scalar-insert 随机对拍、`OutsourcingMoveConsistencyTest` 的 14168 个 move，以及 n=8 的列化外包 master/columns 对照；最后一项两种模型均得到 `obj=bound=15.7`、`valid=true`。

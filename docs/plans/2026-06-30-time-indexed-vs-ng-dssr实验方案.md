@@ -1193,3 +1193,17 @@ backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackwa
 严格复用旧 run 的全部配置后，40-2 root-only 从 `solve=40.823s, heuristic=29.160s/58, exact=8.273s/17, pool=10376` 变为 `solve=36.217s, heuristic=26.026s/50, exact=6.641s/12, pool=10237`，两者 root bound 均为 `22490`、`valid=true`。总时间下降约 11.3%，但调用次数和列池发生变化，说明移除预剪枝改变了启发式搜索轨迹；该结果只能说明本次端到端 A/B 更好，不能解释为单次候选评价内核同比加速。保留的有效优化仍为无临时 PWLF 标量内核、持久只读数组视图、seed heap 和已有 arc/dual 快照。
 
 验证包括 focused `javac`、50 万组 scalar-insert 随机对拍、`OutsourcingMoveConsistencyTest` 的 14168 个 move，以及 n=8 的列化外包 master/columns 对照；最后一项两种模型均得到 `obj=bound=15.7`、`valid=true`。
+
+### 2026-07-16：7 月 15 日完整求解日志的瓶颈复核
+
+本次重新按完整 solve、节点 summary 和 exact pricing 分阶段统计复核 7 月 15 日日志。结论不是“ng-DSSR 的 join 仍然太慢”，而是当前耗时已经转移到四个更明确的位置：启发式 pricing 的固定全邻域扫描、ng-DSSR 每次 exact 内构造的 time-indexed scalar/window helper、strong branching 的 seed 兼容筛选，以及 completion bound。source-aware dominance 和 group-envelope join 已经发挥作用，当前不应继续优先修改 join 或 dominance 语义。
+
+最重的代表例是 `50-3 setupR50 timeX10 + W1000`。完整求解为 `863.005s`，其中 `HeuristicPricing=304.620s/441`、`GCNGBBStyleNgDssrPricing=287.800s/154`、master LP `125.194s`。exact 内进一步汇总为：初始化 `250.013s`，其中 window `185.061s`、completion bound `52.776s`、midpoint probe `10.476s`；正式 forward/backward 扩展仅 `21.258/11.302s`，join 仅 `2.474s`。子节点单次 exact 中，window 常达到 `1.4--1.55s`，而节点已有约 4876 万条 time-indexed pricing-only arc。源码确认 `timeIndexedCompletionBoundInRoundArcFixing=false` 只关闭本轮零 reduced-cost arc fixing，并没有关闭 `TimeIndexedScalarCompletionBound.build()`；只要 `timeIndexedCompletionBoundScalarEnhancement=true`，该 helper 仍在每次新的 exact pricing 调用中重建一次，并只在同一次 DSSR 的后续轮次复用。它依赖当前 dual，不能跨 LP 状态直接缓存，但当前“pricing 内加强”和“node 收敛后永久 fixing”共用同一个总开关，无法只保留后者。下一项最高优先级 A/B 应把两者拆开：默认不在每次 ng-DSSR exact 内构造 time-indexed scalar/window helper，仍保留节点收敛后的 `applyArcFixing()`。这可能增加 labeling 数量，因此必须比较完整 exact/solve，不能只看省掉的 `185s`。
+
+同一 W1000 run 还有 `84.387s` 节点时间未落入 LP、pricing 或 subtree fixing，且几乎全部集中在 7 个发生 strong branching 的节点，每个约 `9.8--15.5s`。日志显示 280 个 phase-1 trial 的 CPLEX 求解为 `118.334s`，trial model build 仅 `0.031s`，因此这 84 秒属于 trial 外层 seed 准备。代码复核发现 `prepareLightweightRepairChildSeedColumns()` 对每个候选左右支反复扫描父 restricted columns，并调用 `Node.isColumnCompatible()`；该方法对每条内部列先遍历全部 job 的 outsourcing state，再调用 `containsJob()`。当前是无外包实验，所有状态均为 free，这一层完全无效，却被 20 个候选、左右两侧和多个分支节点放大。低风险修正应先给 required-outsourcing 状态增加零计数/空集合快路径；进一步才考虑按父节点兼容性不变量只检查本次新增 branch delta，或缓存列的 arc incidence。单纯减少 strong candidate 数可以省时间，但属于参数取舍，不应掩盖这项确定的实现冗余。
+
+启发式 pricing 方面，`50-2 W50 cost0` 的细分诊断仍表明 `findBestMove` 占约 99%：典型调用为 30 个 seed、每个最多 50 轮，单次扫描约 190 万个 remove/add/exchange 候选；seed、window、排序和建列通常只有数毫秒。现有无临时 PWLF 标量核、只读数组视图、arc/dual snapshot 等优化已经去掉主要对象分配，剩余慢点是固定搜索量，而不是 evaluator 重刷或明显重复构造。硬窗预判和 move lower bound 都已实测为负收益并删除。若不改变搜索预算/语义，继续做 PWLF 常数优化的预期收益有限；减少 seed/iteration 必须做完整求解 A/B，因为很可能把压力转给 exact pricing。
+
+纯 time-indexed 的难点则不同。`50-2 timeX10` 为 `904.922s`，其中 graph pricing `505.312s/1122`、master LP `294.028s`、pool `177128`。这里不是单个图扫描实现异常，而是 horizon 放大后每轮全图扫描与 pseudo-column tail 共同造成上千次 pricing/LP 往返，列池又反过来加重 RMP。可验证的下一步是静态比较每轮返回列上限 300 与 600/1000，判断减少图扫描轮数能否抵消更重的 LP；更结构性的方向是只清理 restricted active columns、Pool 仍保留最佳 signature，并始终保留正值/基列，使零值长期不活跃列可以由 exact pricing 重新生成。再往后才是 DDD，这属于算法结构改造而不是局部优化。
+
+当前优化优先级因此为：第一，拆分 ng-DSSR pricing 内 time-indexed helper 与 node 后永久 fixing；第二，消除 strong branching seed 兼容检查中的无外包全 job 扫描，并补 seed-preparation 独立计时；第三，对纯 time-indexed 做返回批量与 restricted-column 管理 A/B；第四才是 completion bound 或启发式 PWLF 的进一步底层改造。completion bound 在 W1000 中约 `52.8s`，但它同时剪掉大量扩展，且 sparse delta/time-priority 已经启用；join 只有 `2.5s`，当前不再是优化对象。

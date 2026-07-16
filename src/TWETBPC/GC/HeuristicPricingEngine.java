@@ -40,12 +40,14 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
 	private final SegmentProfile[] singletonProfileCache;
+	private final PiecewiseLinearFunction.ReadOnlySegmentView[] penaltySegmentViewCache;
 
 	public HeuristicPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
 		this.singletonProfileCache = buildSingletonProfileCache();
+		this.penaltySegmentViewCache = buildReadOnlySegmentViews(data.penaltyFunction);
 	}
 
 	@Override
@@ -353,7 +355,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private HeuristicWindowContext unrestrictedWindowContext() {
-		return new HeuristicWindowContext(null, data.penaltyFunction[0], data.CmaxH, singletonProfileCache, false);
+		return new HeuristicWindowContext(null, penaltySegmentViewCache, data.penaltyFunction[0],
+				penaltySegmentViewCache[0], data.CmaxH, singletonProfileCache, false);
 	}
 
 	/**
@@ -408,7 +411,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		horizon = Math.min(horizon, data.CmaxH);
 		PiecewiseLinearFunction sourcePenalty = data.penaltyFunction[0].setDomain(0.0, horizon);
 		SegmentProfile[] localSingletonProfiles = buildSingletonProfileCache(penalties);
-		return new HeuristicWindowContext(penalties, sourcePenalty, horizon, localSingletonProfiles, useDualWindow);
+		return new HeuristicWindowContext(penalties, buildReadOnlySegmentViews(penalties), sourcePenalty,
+				sourcePenalty.readOnlySegmentView(), horizon, localSingletonProfiles, useDualWindow);
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
@@ -528,6 +532,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private int[] tabuTenure;
 		private PiecewiseLinearFunction[] forward;
 		private PiecewiseLinearFunction[] backward;
+		private PiecewiseLinearFunction.ReadOnlySegmentView[] forwardViews;
+		private PiecewiseLinearFunction.ReadOnlySegmentView[] backwardViews;
 		private final PiecewiseLinearFunction.PrefixMinimumWorkspace insertCostWorkspace =
 				new PiecewiseLinearFunction.PrefixMinimumWorkspace();
 		private double cost;
@@ -729,6 +735,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private void applyRemove(int pos, int removedJob) {
 			PiecewiseLinearFunction[] oldForward = forward;
 			PiecewiseLinearFunction[] oldBackward = backward;
+			PiecewiseLinearFunction.ReadOnlySegmentView[] oldForwardViews = forwardViews;
+			PiecewiseLinearFunction.ReadOnlySegmentView[] oldBackwardViews = backwardViews;
 			this.sequence.remove(pos);
 			if (removedJob >= 1 && removedJob <= data.n) {
 				used[removedJob] = false;
@@ -740,11 +748,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			this.forward = new PiecewiseLinearFunction[sequence.size()];
 			this.backward = new PiecewiseLinearFunction[sequence.size()];
+			this.forwardViews = new PiecewiseLinearFunction.ReadOnlySegmentView[sequence.size()];
+			this.backwardViews = new PiecewiseLinearFunction.ReadOnlySegmentView[sequence.size()];
 			if (pos > 0) {
 				System.arraycopy(oldForward, 0, forward, 0, pos);
+				System.arraycopy(oldForwardViews, 0, forwardViews, 0, pos);
 			}
 			if (pos < sequence.size()) {
 				System.arraycopy(oldBackward, pos + 1, backward, pos, sequence.size() - pos);
+				System.arraycopy(oldBackwardViews, pos + 1, backwardViews, pos, sequence.size() - pos);
 			}
 			recomputeForwardFrom(pos);
 			recomputeBackwardDownTo(pos - 1);
@@ -754,6 +766,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private void applyAdd(int pos, int job) {
 			PiecewiseLinearFunction[] oldForward = forward;
 			PiecewiseLinearFunction[] oldBackward = backward;
+			PiecewiseLinearFunction.ReadOnlySegmentView[] oldForwardViews = forwardViews;
+			PiecewiseLinearFunction.ReadOnlySegmentView[] oldBackwardViews = backwardViews;
 			this.sequence.add(pos, Integer.valueOf(job));
 			if (job >= 1 && job <= data.n) {
 				used[job] = true;
@@ -765,11 +779,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			this.forward = new PiecewiseLinearFunction[sequence.size()];
 			this.backward = new PiecewiseLinearFunction[sequence.size()];
+			this.forwardViews = new PiecewiseLinearFunction.ReadOnlySegmentView[sequence.size()];
+			this.backwardViews = new PiecewiseLinearFunction.ReadOnlySegmentView[sequence.size()];
 			if (pos > 0) {
 				System.arraycopy(oldForward, 0, forward, 0, pos);
+				System.arraycopy(oldForwardViews, 0, forwardViews, 0, pos);
 			}
 			if (pos < oldBackward.length) {
 				System.arraycopy(oldBackward, pos, backward, pos + 1, oldBackward.length - pos);
+				System.arraycopy(oldBackwardViews, pos, backwardViews, pos + 1, oldBackwardViews.length - pos);
 			}
 			recomputeForwardFrom(pos);
 			recomputeBackwardDownTo(pos);
@@ -814,22 +832,18 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double insertOrReplaceCost(int pos, int job, boolean replace) {
 			int prefixEnd = pos - 1;
 			int suffixStart = replace ? pos + 1 : pos;
-			PiecewiseLinearFunction prefix = prefixEnd < 0 ? windowContext.sourcePenalty : forward[prefixEnd];
-			PiecewiseLinearFunction suffix = suffixStart >= sequence.size() ? windowContext.sourcePenalty
-					: backward[suffixStart];
+			PiecewiseLinearFunction.ReadOnlySegmentView prefix = prefixEnd < 0
+					? windowContext.sourcePenaltyView : forwardViews[prefixEnd];
+			PiecewiseLinearFunction.ReadOnlySegmentView suffix = suffixStart >= sequence.size()
+					? windowContext.sourcePenaltyView : backwardViews[suffixStart];
 			int bridgeFrom = prefixEnd < 0 ? 0 : sequence.get(prefixEnd).intValue();
 			double prefixShift = data.s[bridgeFrom][job] + data.p[job];
 			int bridgeTo = suffixStart >= sequence.size() ? 0 : sequence.get(suffixStart).intValue();
 			double suffixShift = suffixStart >= sequence.size() ? 0.0
 					: data.s[job][bridgeTo] + data.p[bridgeTo];
-			PiecewiseLinearFunction jobPenalty = windowContext.penalty(job);
-			if (!shiftedOverlaps(prefix, prefixShift, jobPenalty, true)) {
-				if (stats.enabled) { stats.insertFirstOverlapRejected++; }
-				return Utility.big_M;
-			}
+			PiecewiseLinearFunction.ReadOnlySegmentView jobPenalty = windowContext.penaltyView(job);
 
-			// 单 job 插入按固定序列递推：先构造 prefix + job 的前缀包络，再与 suffix 做 merge2。
-			// 该口径与 TWETColumnEvaluator 一致；通用 merge3 在 compact-window BigM 边界下不适用。
+			// 单 job 插入只消费最终标量；profile/view 在接受 move 后同步重建，候选循环只连续扫描数组。
 			double firstBridgeCost = data.getSetupCost(bridgeFrom, job);
 			double secondBridgeCost = suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo);
 			return PiecewiseLinearFunction.findMinimalInsertedJobCost(prefix, prefixShift, jobPenalty, suffix,
@@ -859,19 +873,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			return prefixMin + jobMin + suffixMin + bridgeCost;
 		}
 
-		private boolean shiftedOverlaps(PiecewiseLinearFunction shifted, double delta, PiecewiseLinearFunction other,
-				boolean trimShiftedToDomain) {
-			if (shifted == null || other == null || shifted.isEmpty() || other.isEmpty()) {
-				return false;
-			}
-			double shiftedStart = shifted.head.start + delta;
-			double shiftedEnd = shifted.tail.end + delta;
-			if (trimShiftedToDomain) {
-				shiftedStart = Math.max(shiftedStart, shifted.domainStart);
-				shiftedEnd = Math.min(shiftedEnd, shifted.domainEnd);
-			}
-			return Utility.compareLe(Math.max(shiftedStart, other.head.start), Math.min(shiftedEnd, other.tail.end));
-		}
 
 		private double reducedCostAfterRemove(int pos, int removedJob, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
@@ -967,6 +968,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			this.forward = buildForwardProfile(sequence, true, windowContext);
 			this.backward = buildBackwardProfile(sequence, windowContext);
+			this.forwardViews = buildReadOnlySegmentViews(forward);
+			this.backwardViews = buildReadOnlySegmentViews(backward);
 			if (sriContext.isSequenceBased()) {
 				rebuildSriProfiles();
 			} else {
@@ -1024,6 +1027,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 				}
 				cur.minimizePrefixInPlace();
 				forward[i] = cur;
+				forwardViews[i] = cur.readOnlySegmentView();
 			}
 		}
 
@@ -1046,6 +1050,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 				}
 				cur.minimizeSuffixInPlace();
 				backward[i] = cur;
+				backwardViews[i] = cur.readOnlySegmentView();
 			}
 		}
 
@@ -1124,21 +1129,39 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return new SegmentProfile(forward, backward);
 	}
 
+	private PiecewiseLinearFunction.ReadOnlySegmentView[] buildReadOnlySegmentViews(
+			PiecewiseLinearFunction[] functions) {
+		PiecewiseLinearFunction.ReadOnlySegmentView[] views =
+				new PiecewiseLinearFunction.ReadOnlySegmentView[functions.length];
+		for (int index = 0; index < functions.length; index++) {
+			PiecewiseLinearFunction function = functions[index];
+			views[index] = function == null ? null : function.readOnlySegmentView();
+		}
+		return views;
+	}
+
 	private PiecewiseLinearFunction emptyFunction() {
 		return new PiecewiseLinearFunction();
 	}
 
 	private final class HeuristicWindowContext {
 		private final PiecewiseLinearFunction[] penalties;
+		private final PiecewiseLinearFunction.ReadOnlySegmentView[] penaltyViews;
 		private final PiecewiseLinearFunction sourcePenalty;
+		private final PiecewiseLinearFunction.ReadOnlySegmentView sourcePenaltyView;
 		private final double horizon;
 		private final SegmentProfile[] singletonProfiles;
 		private final boolean requiresTrueCostRecheck;
 
-		HeuristicWindowContext(PiecewiseLinearFunction[] penalties, PiecewiseLinearFunction sourcePenalty,
+		HeuristicWindowContext(PiecewiseLinearFunction[] penalties,
+				PiecewiseLinearFunction.ReadOnlySegmentView[] penaltyViews,
+				PiecewiseLinearFunction sourcePenalty,
+				PiecewiseLinearFunction.ReadOnlySegmentView sourcePenaltyView,
 				double horizon, SegmentProfile[] singletonProfiles, boolean requiresTrueCostRecheck) {
 			this.penalties = penalties;
+			this.penaltyViews = penaltyViews;
 			this.sourcePenalty = sourcePenalty;
+			this.sourcePenaltyView = sourcePenaltyView;
 			this.horizon = horizon;
 			this.singletonProfiles = singletonProfiles;
 			this.requiresTrueCostRecheck = requiresTrueCostRecheck;
@@ -1146,6 +1169,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		PiecewiseLinearFunction penalty(int job) {
 			return penalties == null ? data.penaltyFunction[job] : penalties[job];
+		}
+
+		PiecewiseLinearFunction.ReadOnlySegmentView penaltyView(int job) {
+			return penaltyViews[job];
 		}
 
 		SegmentProfile singletonProfile(int job) {
@@ -1252,7 +1279,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		long exchangeLowerBoundPruned;
 		long moveLowerBoundViolations;
 		double maxMoveLowerBoundViolation;
-		long insertFirstOverlapRejected;
 		long tryAddCalls;
 		long tryAddPoolFull;
 		long tryAddRejectedByReducedCost;
@@ -1370,7 +1396,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ "/" + ms(exchangeTotalNanos)
 					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)
 					+ "/" + ms(exchangeCostNanos)
-					+ ", insertOverlapReject=" + insertFirstOverlapRejected
 					+ ", tryAdd calls/accepted/dup/rcSkip/poolFull=" + tryAddCalls + "/" + tryAddAccepted
 					+ "/" + tryAddDuplicate + "/" + tryAddRejectedByReducedCost + "/" + tryAddPoolFull
 					+ ", trueRecheck calls/ms/bigM/filtered/skipped=" + trueRecheckCalls + "/" + ms(trueRecheckNanos)

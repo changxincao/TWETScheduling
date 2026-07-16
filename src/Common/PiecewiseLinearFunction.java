@@ -123,12 +123,118 @@ public class PiecewiseLinearFunction {
 			suffixCursor = suffix;
 		}
 
+		private ReadOnlySegmentView flatSuffix;
+		private int flatSuffixIndex;
+
+		private void begin(ReadOnlySegmentView suffix, double delta, double fixedCost) {
+			flatSuffix = suffix;
+			flatSuffixIndex = 0;
+			suffixDelta = delta;
+			shiftedSuffixStart = Math.max(suffix.starts[0] + delta, suffix.domainStart);
+			shiftedSuffixEnd = Math.min(suffix.ends[suffix.size() - 1] + delta, suffix.domainEnd);
+			yShift = fixedCost;
+			minimum = Utility.big_M;
+			size = 0;
+		}
+
+		private void appendFlat(double start, double end, double slope, double intercept) {
+			lastEnd = end;
+			lastSlope = slope;
+			lastIntercept = intercept;
+			size++;
+			if (Utility.compareLt(end, shiftedSuffixStart) || Utility.compareLt(shiftedSuffixEnd, start)) {
+				return;
+			}
+			int suffixIndex = flatSuffixIndex;
+			while (suffixIndex < flatSuffix.size()
+					&& Utility.compareLt(flatSuffix.ends[suffixIndex] + suffixDelta, start)) {
+				suffixIndex++;
+			}
+			while (suffixIndex < flatSuffix.size()) {
+				double suffixStart = flatSuffix.starts[suffixIndex] + suffixDelta;
+				double suffixEnd = flatSuffix.ends[suffixIndex] + suffixDelta;
+				double lo = Math.max(Math.max(start, suffixStart), shiftedSuffixStart);
+				double hi = Math.min(Math.min(end, suffixEnd), shiftedSuffixEnd);
+				if (Utility.compareLe(lo, hi)) {
+					double suffixSlope = flatSuffix.slopes[suffixIndex];
+					double sumSlope = slope + suffixSlope;
+					double sumIntercept = intercept + flatSuffix.intercepts[suffixIndex]
+							- suffixSlope * suffixDelta + yShift;
+					minimum = Math.min(minimum,
+							Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept));
+				}
+				if (Utility.compareLe(suffixEnd, end)) {
+					boolean bothSegmentsEnd = Utility.compareEq(suffixEnd, end);
+					suffixIndex++;
+					if (bothSegmentsEnd) {
+						break;
+					}
+				} else {
+					break;
+				}
+			}
+			flatSuffixIndex = suffixIndex;
+		}
+
+		private double endpointLowerBound(ReadOnlySegmentView suffix, double fixedCost) {
+			return lastSlope * lastEnd + lastIntercept
+					+ suffix.slopes[0] * suffix.starts[0] + suffix.intercepts[0] + fixedCost;
+		}
 		private double endpointLowerBound(PiecewiseLinearFunction suffix, double fixedCost) {
 			return lastSlope * lastEnd + lastIntercept
 					+ suffix.head.getValue(suffix.head.start) + fixedCost;
 		}
 	}
 
+	/**
+	 * 启发式高频标量查询使用的不可变 segment 快照。
+	 * PWLF 本体仍保留链表以支持切分、拼接和原地更新；只读查询则连续扫描 primitive 数组，
+	 * 快照只在对应 profile 被重建时刷新，不能跨 PWLF 修改复用。
+	 */
+	public static final class ReadOnlySegmentView {
+		private static final ReadOnlySegmentView EMPTY = new ReadOnlySegmentView();
+		private final double[] starts;
+		private final double[] ends;
+		private final double[] slopes;
+		private final double[] intercepts;
+		private final double domainStart;
+		private final double domainEnd;
+
+		private ReadOnlySegmentView() {
+			starts = ends = slopes = intercepts = new double[0];
+			domainStart = 0.0;
+			domainEnd = 0.0;
+		}
+
+		private ReadOnlySegmentView(PiecewiseLinearFunction function) {
+			int size = 0;
+			for (Segment segment = function.head; segment != null; segment = segment.next) {
+				size++;
+			}
+			starts = new double[size];
+			ends = new double[size];
+			slopes = new double[size];
+			intercepts = new double[size];
+			int index = 0;
+			for (Segment segment = function.head; segment != null; segment = segment.next) {
+				starts[index] = segment.start;
+				ends[index] = segment.end;
+				slopes[index] = segment.slope;
+				intercepts[index] = segment.intercept;
+				index++;
+			}
+			domainStart = function.domainStart;
+			domainEnd = function.domainEnd;
+		}
+
+		private int size() {
+			return starts.length;
+		}
+	}
+
+	public ReadOnlySegmentView readOnlySegmentView() {
+		return head == null ? ReadOnlySegmentView.EMPTY : new ReadOnlySegmentView(this);
+	}
 	public interface MergeMinimumObserver {
 		void record(Direction direction, boolean skipped, boolean changed, long skipNanos, long copyNanos,
 				long bodyNanos, long normalizeNanos);
@@ -705,6 +811,118 @@ public class PiecewiseLinearFunction {
 		return Utility.isBigMValue(workspace.minimum) ? Utility.curUpperBound : workspace.minimum;
 	}
 
+	/** 与链表 overload 严格等价，但输入快照在候选之间复用，不在热循环中追逐 Segment 指针。 */
+	public static double findMinimalInsertedJobCost(ReadOnlySegmentView prefix, double prefixShift,
+			ReadOnlySegmentView jobPenalty, ReadOnlySegmentView suffix, double suffixShift,
+			double bridgeCost, PrefixMinimumWorkspace workspace) {
+		if (prefix == null || jobPenalty == null || suffix == null || workspace == null
+				|| prefix.size() == 0 || jobPenalty.size() == 0 || suffix.size() == 0) {
+			return Utility.big_M;
+		}
+		workspace.begin(suffix, -suffixShift, bridgeCost);
+		if (!buildShiftedSumPrefixMinimum(prefix, prefixShift, jobPenalty, workspace)) {
+			return Utility.big_M;
+		}
+		double endpointLowerBound = workspace.endpointLowerBound(suffix, bridgeCost);
+		if (Utility.compareGe(endpointLowerBound, Utility.curUpperBound)) {
+			return endpointLowerBound;
+		}
+		return Utility.isBigMValue(workspace.minimum) ? Utility.curUpperBound : workspace.minimum;
+	}
+
+	private static boolean buildShiftedSumPrefixMinimum(ReadOnlySegmentView f, double delta,
+			ReadOnlySegmentView g, PrefixMinimumWorkspace workspace) {
+		double shiftedStart = Math.max(f.starts[0] + delta, f.domainStart);
+		double shiftedEnd = Math.min(f.ends[f.size() - 1] + delta, f.domainEnd);
+		double start = Math.max(shiftedStart, g.starts[0]);
+		double end = Math.min(shiftedEnd, g.ends[g.size() - 1]);
+		if (Utility.compareLt(end, start)) {
+			return false;
+		}
+
+		int p = 0;
+		int q = 0;
+		while (p < f.size() && Utility.compareLt(f.ends[p] + delta, start)) {
+			p++;
+		}
+		while (q < g.size() && Utility.compareLt(g.ends[q], start)) {
+			q++;
+		}
+
+		double runningMin = Utility.curUpperBound;
+		double previousTime = start;
+		double lastEnd = start;
+		boolean found = false;
+		double current = start;
+		while (p < f.size() && q < g.size() && Utility.compareLe(current, end)) {
+			double pStart = Math.max(f.starts[p] + delta, f.domainStart);
+			double pEnd = Math.min(f.ends[p] + delta, f.domainEnd);
+			double segmentStart = Math.max(current, Math.max(pStart, g.starts[q]));
+			double segmentEnd = Math.min(Math.min(pEnd, g.ends[q]), end);
+			if (Utility.compareLe(segmentStart, segmentEnd)) {
+				if (!found) {
+					previousTime = segmentStart;
+					found = true;
+				}
+				double slope = f.slopes[p] + g.slopes[q];
+				double intercept = f.intercepts[p] - f.slopes[p] * delta + g.intercepts[q];
+				double valueAtStart = slope * segmentStart + intercept;
+				if (Utility.compareGe(slope, 0.0)) {
+					if (!Utility.compareLe(runningMin, valueAtStart)) {
+						if (!Utility.compareEq(previousTime, segmentStart)) {
+							workspace.appendFlat(previousTime, segmentStart, 0.0, runningMin);
+							previousTime = segmentStart;
+						}
+						runningMin = valueAtStart;
+					}
+				} else {
+					double valueAtEnd = slope * segmentEnd + intercept;
+					if (!Utility.compareLe(runningMin, valueAtEnd)) {
+						if (Utility.compareGt(valueAtStart, runningMin)) {
+							double crossing = (runningMin - intercept) / slope;
+							if (Utility.compareLt(previousTime, crossing)
+									&& !Utility.compareEq(runningMin, Utility.curUpperBound)) {
+								workspace.appendFlat(previousTime, crossing, 0.0, runningMin);
+							}
+							workspace.appendFlat(crossing, segmentEnd, slope, intercept);
+						} else {
+							if (!Utility.compareEq(previousTime, segmentStart)) {
+								workspace.appendFlat(previousTime, segmentStart, 0.0, runningMin);
+							}
+							workspace.appendFlat(segmentStart, segmentEnd, slope, intercept);
+						}
+						runningMin = valueAtEnd;
+						previousTime = segmentEnd;
+					}
+				}
+				lastEnd = segmentEnd;
+				current = segmentEnd;
+			}
+			if (Utility.compareEq(segmentEnd, pEnd)) {
+				p++;
+			}
+			if (Utility.compareEq(segmentEnd, g.ends[q])) {
+				q++;
+			}
+			if (p >= f.size() || q >= g.size()) {
+				break;
+			}
+			double nextStart = Math.max(f.starts[p] + delta, g.starts[q]);
+			if (Utility.compareLt(end, nextStart)) {
+				break;
+			}
+		}
+		if (!found) {
+			return false;
+		}
+		if (Utility.compareLt(previousTime, lastEnd)) {
+			workspace.appendFlat(previousTime, lastEnd, 0.0, runningMin);
+		}
+		if (workspace.size == 0 && Utility.compareLe(previousTime, lastEnd)) {
+			workspace.appendFlat(previousTime, lastEnd, 0.0, runningMin);
+		}
+		return workspace.size > 0;
+	}
 	private static boolean buildShiftedSumPrefixMinimum(PiecewiseLinearFunction f, double delta,
 			PiecewiseLinearFunction g, PrefixMinimumWorkspace workspace) {
 		double shiftedStart = Math.max(f.head.start + delta, f.domainStart);

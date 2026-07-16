@@ -40,10 +40,14 @@ public final class PiecewiseLinearInsertScalarTest {
                 double expected = reference(prefix, prefixShift, penalty, suffix, suffixShift, bridgeCost);
                 double actual = PiecewiseLinearFunction.findMinimalInsertedJobCost(prefix, prefixShift, penalty,
                         suffix, suffixShift, bridgeCost, workspace);
-                if (!same(expected, actual)) {
+                double flatActual = PiecewiseLinearFunction.findMinimalInsertedJobCost(
+                        prefix.readOnlySegmentView(), prefixShift, penalty.readOnlySegmentView(),
+                        suffix.readOnlySegmentView(), suffixShift, bridgeCost, workspace);
+                if (!same(expected, actual) || !same(expected, flatActual)) {
                     throw new AssertionError("Mismatch at case " + test + ": expected=" + expected
-                            + ", actual=" + actual + ", prefixShift=" + prefixShift
-                            + ", suffixShift=" + suffixShift + ", upperBound=" + Utility.curUpperBound);
+                            + ", actual=" + actual + ", flatActual=" + flatActual
+                            + ", prefixShift=" + prefixShift + ", suffixShift=" + suffixShift
+                            + ", upperBound=" + Utility.curUpperBound);
                 }
             }
         } finally {

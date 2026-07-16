@@ -30,6 +30,7 @@ public final class TimeIndexedGraphOptimizationTest {
 	public static void main(String[] args) throws Exception {
 		testCompressedPredecessorMatchesFullWaitingChain();
 		testTimeIndexedArcLookupMatchesNode();
+		testIncrementalTimeIndexedArcMergeMatchesPointUpdates();
 		testInternalColumnCompatibilityFastPath();
 		testStaticPricingDataMatchesInstance();
 		testExactPricingRejectsNonIntegerGrid();
@@ -134,6 +135,100 @@ public final class TimeIndexedGraphOptimizationTest {
 			throw new AssertionError("allowed-complement ignored an arc forbidden above its stored horizon");
 		}
 		assertLookupMatches(node, expandedLookup, pairWidth, horizon + 3);
+	}
+
+	private static void testIncrementalTimeIndexedArcMergeMatchesPointUpdates() throws Exception {
+		Data data = loadData();
+		int pairWidth = data.n + 1;
+
+		Node sparseExpected = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		Node sparseActual = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		sparseExpected.forbidTimeIndexedPricingOnlyArc(1, 2, 0);
+		sparseActual.forbidTimeIndexedPricingOnlyArc(1, 2, 0);
+		BitSet sparseAdditions = new BitSet();
+		addTimeArc(sparseAdditions, pairWidth, 1, 2, 0);
+		addTimeArc(sparseAdditions, pairWidth, 2, 3, 4);
+		addTimeArc(sparseAdditions, pairWidth, 4, 0, 6);
+		sparseExpected.forbidTimeIndexedPricingOnlyArc(1, 2, 0);
+		sparseExpected.forbidTimeIndexedPricingOnlyArc(2, 3, 4);
+		sparseExpected.forbidTimeIndexedPricingOnlyArc(4, 0, 6);
+		sparseActual.mergeTimeIndexedPricingOnlyArcSet(sparseAdditions, pairWidth, 6);
+		assertNodesHaveSameTimeArcs(sparseExpected, sparseActual, data.n + 2, 7);
+
+		int storedHorizon = 5;
+		int total = pairWidth * pairWidth * (storedHorizon + 1);
+		BitSet denseForbidden = new BitSet(total);
+		denseForbidden.set(0, total);
+		denseForbidden.clear(timeArcIndex(pairWidth, 1, 2, 1));
+		denseForbidden.clear(timeArcIndex(pairWidth, 3, 4, 3));
+		Node denseExpected = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		Node denseActual = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		denseExpected.replaceTimeIndexedPricingOnlyArcSet(denseForbidden, pairWidth, storedHorizon);
+		denseActual.replaceTimeIndexedPricingOnlyArcSet(denseForbidden, pairWidth, storedHorizon);
+		BitSet denseAdditions = new BitSet();
+		addTimeArc(denseAdditions, pairWidth, 2, 2, 2);
+		addTimeArc(denseAdditions, pairWidth, 1, 2, 1);
+		addTimeArc(denseAdditions, pairWidth, 3, 4, 7);
+		denseExpected.forbidTimeIndexedPricingOnlyArc(2, 2, 2);
+		denseExpected.forbidTimeIndexedPricingOnlyArc(1, 2, 1);
+		denseExpected.forbidTimeIndexedPricingOnlyArc(3, 4, 7);
+		denseActual.mergeTimeIndexedPricingOnlyArcSet(denseAdditions, pairWidth, 7);
+		assertNodesHaveSameTimeArcs(denseExpected, denseActual, data.n + 2, 8);
+
+		Random random = new Random(20260716L);
+		for (int round = 0; round < 60; round++) {
+			int randomPairWidth = round % 2 == 0 ? data.n + 1 : data.n + 2;
+			int baseHorizon = 2 + random.nextInt(9);
+			int expandedHorizon = baseHorizon + random.nextInt(5);
+			int randomTotal = randomPairWidth * randomPairWidth * (baseHorizon + 1);
+			double density = round % 2 == 0 ? 0.2 : 0.8;
+			BitSet base = new BitSet(randomTotal);
+			for (int index = 0; index < randomTotal; index++) {
+				if (random.nextDouble() < density) {
+					base.set(index);
+				}
+			}
+			Node randomExpected = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+			Node randomActual = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+			randomExpected.replaceTimeIndexedPricingOnlyArcSet(base, randomPairWidth, baseHorizon);
+			randomActual.replaceTimeIndexedPricingOnlyArcSet(base, randomPairWidth, baseHorizon);
+			BitSet additions = new BitSet();
+			int additionCount = 20 + random.nextInt(80);
+			for (int addition = 0; addition < additionCount; addition++) {
+				int from = random.nextInt(randomPairWidth);
+				int to = random.nextInt(randomPairWidth);
+				int time = random.nextInt(expandedHorizon + 1);
+				addTimeArc(additions, randomPairWidth, from, to, time);
+				randomExpected.forbidTimeIndexedPricingOnlyArc(from, to, time);
+			}
+			randomActual.mergeTimeIndexedPricingOnlyArcSet(additions, randomPairWidth, expandedHorizon);
+			assertNodesHaveSameTimeArcs(randomExpected, randomActual, data.n + 2, expandedHorizon + 1);
+			assertNodesHaveSameTimeArcs(randomExpected, randomActual.copy(), data.n + 2, expandedHorizon + 1);
+		}
+	}
+
+	private static void addTimeArc(BitSet arcs, int pairWidth, int from, int to, int time) {
+		arcs.set(timeArcIndex(pairWidth, from, to, time));
+	}
+
+	private static void assertNodesHaveSameTimeArcs(Node expected, Node actual,
+			int pairWidth, int horizon) {
+		if (expected.countTimeIndexedPricingOnlyForbiddenArcs()
+				!= actual.countTimeIndexedPricingOnlyForbiddenArcs()) {
+			throw new AssertionError("incremental time-arc count mismatch");
+		}
+		for (int from = 0; from < pairWidth; from++) {
+			for (int to = 0; to < pairWidth; to++) {
+				for (int time = 0; time <= horizon; time++) {
+					if (expected.isTimeIndexedPricingOnlyArcForbidden(from, to, time)
+							!= actual.isTimeIndexedPricingOnlyArcForbidden(from, to, time)) {
+						throw new AssertionError("incremental merge mismatch at "
+								+ from + "->" + to + "@" + time);
+					}
+				}
+			}
+		}
+		assertLookupMatches(actual, actual.createTimeIndexedPricingOnlyArcLookup(), pairWidth, horizon);
 	}
 
 	private static void testStaticPricingDataMatchesInstance() throws Exception {

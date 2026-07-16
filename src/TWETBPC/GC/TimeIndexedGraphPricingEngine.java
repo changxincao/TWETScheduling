@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -170,13 +171,14 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return 0;
 		}
 		GraphWindow window = computeSafeFixingGraphWindow(data, graphLp);
+		Node.TimeIndexedArcLookup timeArcLookup = targetNode.createTimeIndexedPricingOnlyArcLookup();
 		int promoted = 0;
 		for (int from = 0; from <= data.n; from++) {
 			for (int to = 1; to <= data.n; to++) {
 				if (from == to || targetNode.isArcForbidden(from, to) || targetNode.isPricingOnlyArcForbidden(from, to)) {
 					continue;
 				}
-				if (!hasAvailableTimeIndexedProcessCopy(data, targetNode, window, from, to)) {
+				if (!hasAvailableTimeIndexedProcessCopy(data, timeArcLookup, window, from, to)) {
 					targetNode.forbidPricingOnlyArc(from, to);
 					promoted++;
 				}
@@ -187,7 +189,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (targetNode.isArcForbidden(job, sink) || targetNode.isPricingOnlyArcForbidden(job, sink)) {
 				continue;
 			}
-			if (!hasAvailableTimeIndexedEndCopy(data, targetNode, window, job)) {
+			if (!hasAvailableTimeIndexedEndCopy(data, timeArcLookup, window, job)) {
 				targetNode.forbidPricingOnlyArc(job, sink);
 				promoted++;
 			}
@@ -195,7 +197,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		return promoted;
 	}
 
-	private static boolean hasAvailableTimeIndexedProcessCopy(Data data, Node node, GraphWindow window, int from, int to) {
+	private static boolean hasAvailableTimeIndexedProcessCopy(Data data, Node.TimeIndexedArcLookup timeArcLookup,
+			GraphWindow window, int from, int to) {
 		int duration = (int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
 		if (duration < 0) {
 			return false;
@@ -205,19 +208,20 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		for (int time = start; time <= end; time++) {
 			int completion = time + duration;
 			if (isGraphCompletionFeasible(data, window, to, completion)
-					&& !node.isTimeIndexedPricingOnlyArcForbidden(from, to, time)) {
+					&& !timeArcLookup.isForbidden(from, to, time)) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private static boolean hasAvailableTimeIndexedEndCopy(Data data, Node node, GraphWindow window, int job) {
+	private static boolean hasAvailableTimeIndexedEndCopy(Data data, Node.TimeIndexedArcLookup timeArcLookup,
+			GraphWindow window, int job) {
 		int start = Math.max(0, (int) Math.ceil(window.start[job] - 1e-9));
 		int end = Math.min(window.horizon, (int) Math.floor(window.end[job] + 1e-9));
 		for (int time = start; time <= end; time++) {
 			if (isGraphCompletionFeasible(data, window, job, time)
-					&& !node.isTimeIndexedPricingOnlyArcForbidden(job, 0, time)) {
+					&& !timeArcLookup.isForbidden(job, 0, time)) {
 				return true;
 			}
 		}
@@ -792,6 +796,10 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final double[] sinkArcBaseReducedCost;
 		private final boolean[][] processArcForbidden;
 		private final boolean[] endForbidden;
+		private final Node.TimeIndexedArcLookup inheritedTimeIndexedArcLookup;
+		private final BitSet localFixedTimeIndexedArc;
+		private final int timeArcPairWidth;
+		private final int timeArcPairCount;
 
 		ArcFixingSolver(Data data, TWETBPCConfig config, LP lp, double gap) {
 			this.data = data;
@@ -813,6 +821,11 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.sinkArcBaseReducedCost = new double[n + 1];
 			this.processArcForbidden = new boolean[n + 1][n + 1];
 			this.endForbidden = new boolean[n + 1];
+			this.inheritedTimeIndexedArcLookup = shouldUsePricingOnlyArcs()
+					? node.createTimeIndexedPricingOnlyArcLookup() : null;
+			this.timeArcPairWidth = n + 1;
+			this.timeArcPairCount = timeArcPairWidth * timeArcPairWidth;
+			this.localFixedTimeIndexedArc = new BitSet(timeArcPairCount * width);
 			precomputeStaticPricingData();
 		}
 
@@ -851,7 +864,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						}
 						double cmin = prefix + arcCost + backwardCost;
 						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
-							node.forbidTimeIndexedPricingOnlyArc(from, to, t);
+							forbidLocalTimeIndexedArc(from, to, t);
 							processFixed++;
 						}
 					}
@@ -861,7 +874,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						if (isFinite(backwardCost)) {
 							double cmin = prefix + backwardCost;
 							if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
-								node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+								forbidLocalTimeIndexedArc(from, from, t);
 								idleFixed++;
 							}
 						} else {
@@ -872,7 +885,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						endCandidates++;
 						double cmin = prefix + sinkArcReducedCost(from);
 						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
-							node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
+							forbidLocalTimeIndexedArc(from, 0, t);
 							endFixed++;
 						}
 					}
@@ -893,6 +906,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 			int candidates = processCandidates + idleCandidates + endCandidates;
 			int fixed = processFixed + idleFixed + endFixed + cleanupFixed;
+			node.mergeTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc, timeArcPairWidth, horizon);
 			return new ArcFixingResult(true, candidates, fixed, processFixed, idleFixed, endFixed, cleanupFixed,
 					cleanupRoundTrace.toString(), unavailable, gap, false, System.nanoTime() - start,
 					"paper time-indexed reduced-cost arc fixing");
@@ -989,24 +1003,24 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 							usefulProcessingAtCurrentTime = true;
 						}
 						if (!completionUseful) {
-							node.forbidTimeIndexedPricingOnlyArc(from, to, t);
+							forbidLocalTimeIndexedArc(from, to, t);
 							fixed++;
 						}
 					}
 					if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)
 							&& (!fromReachable || !isFinite(backward[index(from, t + 1)]))) {
-						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+						forbidLocalTimeIndexedArc(from, from, t);
 						fixed++;
 					}
 					// 若当前可以直接结束，且更晚时间没有任何有用处理弧，继续等待只会推迟同一路径的结束。
 					if (from > 0 && t < horizon && isEndAllowed(from, t)
 							&& !isTimeIndexedArcForbidden(from, from, t)
 							&& !usefulProcessingAtLaterTime[from]) {
-						node.forbidTimeIndexedPricingOnlyArc(from, from, t);
+						forbidLocalTimeIndexedArc(from, from, t);
 						fixed++;
 					}
 					if (from > 0 && isEndAllowed(from, t) && !fromReachable) {
-						node.forbidTimeIndexedPricingOnlyArc(from, 0, t);
+						forbidLocalTimeIndexedArc(from, 0, t);
 						fixed++;
 					}
 					if (usefulProcessingAtCurrentTime) {
@@ -1090,7 +1104,17 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		private boolean isTimeIndexedArcForbidden(int from, int to, int time) {
-			return shouldUsePricingOnlyArcs() && node.isTimeIndexedPricingOnlyArcForbidden(from, to, time);
+			return localFixedTimeIndexedArc.get(timeIndexedArcIndex(from, to, time))
+					|| (inheritedTimeIndexedArcLookup != null
+							&& inheritedTimeIndexedArcLookup.isForbidden(from, to, time));
+		}
+
+		private void forbidLocalTimeIndexedArc(int from, int to, int time) {
+			localFixedTimeIndexedArc.set(timeIndexedArcIndex(from, to, time));
+		}
+
+		private int timeIndexedArcIndex(int from, int to, int time) {
+			return time * timeArcPairCount + from * timeArcPairWidth + to;
 		}
 
 		private boolean shouldUsePricingOnlyArcs() {

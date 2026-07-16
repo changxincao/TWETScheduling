@@ -382,6 +382,71 @@ public class Node implements Comparable<Node> {
 		return timeIndexedPricingOnlyForbiddenArcCount;
 	}
 
+	/**
+	 * 2026-07-16: 增量并入本轮新固定的时空弧，避免为继承状态重新扫描完整 n^2 H 定义域。
+	 * 输入仍使用调用方的紧凑 pairWidth；写入时转换为 Node 自己的普通弧编号。
+	 */
+	public int mergeTimeIndexedPricingOnlyArcSet(BitSet newlyForbiddenArcIndices, int pairWidth, int horizon) {
+		if (newlyForbiddenArcIndices == null || newlyForbiddenArcIndices.isEmpty()) {
+			return timeIndexedPricingOnlyForbiddenArcCount;
+		}
+		if (pairWidth <= 0 || pairWidth > data.n + 2 || horizon < 0) {
+			throw new IllegalArgumentException("Invalid time-indexed arc dimensions");
+		}
+		if (timeIndexedPricingOnlyForbiddenArcCount == 0) {
+			return replaceTimeIndexedPricingOnlyArcSet(newlyForbiddenArcIndices, pairWidth, horizon);
+		}
+
+		int pairCount = pairWidth * pairWidth;
+		int total = pairCount * (horizon + 1);
+		int nodePairWidth = data.n + 2;
+		BitSet[] additionsByPair = new BitSet[nodePairWidth * nodePairWidth];
+		for (int index = newlyForbiddenArcIndices.nextSetBit(0); index >= 0 && index < total;
+				index = newlyForbiddenArcIndices.nextSetBit(index + 1)) {
+			int time = index / pairCount;
+			int remainder = index % pairCount;
+			int from = remainder / pairWidth;
+			int to = remainder % pairWidth;
+			int pairKey = timeIndexedArcPairKey(from, to);
+			BitSet additions = additionsByPair[pairKey];
+			if (additions == null) {
+				additions = new BitSet();
+				additionsByPair[pairKey] = additions;
+			}
+			additions.set(time);
+		}
+
+		for (int pairKey = 0; pairKey < additionsByPair.length; pairKey++) {
+			BitSet additions = additionsByPair[pairKey];
+			if (additions == null) {
+				continue;
+			}
+			BitSet stored = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
+			for (int time = additions.nextSetBit(0); time >= 0; time = additions.nextSetBit(time + 1)) {
+				if (timeIndexedPricingOnlyArcStoreAllowed && time <= timeIndexedPricingOnlyArcStoreHorizon) {
+					// allowed-complement 内缺失位本来就表示 forbidden，只清除仍为 allowed 的新弧。
+					if (stored != null && stored.get(time)) {
+						stored.clear(time);
+						timeIndexedPricingOnlyForbiddenArcCount++;
+					}
+					continue;
+				}
+				if (stored == null) {
+					stored = new BitSet();
+					timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, stored);
+				}
+				if (!stored.get(time)) {
+					stored.set(time);
+					timeIndexedPricingOnlyForbiddenArcCount++;
+				}
+			}
+			if (stored != null && stored.isEmpty()) {
+				timeIndexedPricingOnlyForbiddenArcTimesByPair.remove(pairKey);
+			}
+		}
+		return timeIndexedPricingOnlyForbiddenArcCount;
+	}
+
 	private void addStoredTimeIndexedArc(int index, int pairWidth) {
 		int pairCount = pairWidth * pairWidth;
 		int time = index / pairCount;

@@ -1227,3 +1227,13 @@ strong candidate 构造仍存在可见分配冗余：7 次分支、每次 20 个
 当前更明确的 node 后 fixing 低效位于 `writeLocalFixedArcsToNode()`。只要 node 已有时空禁弧，它就扫描全部约 `2601*20098=52,274,898` 个 index，每个 index 再查询现有 per-pair map，随后 `replaceTimeIndexedPricingOnlyArcSet()` 又按 allowed/forbidden 表示重建整张 map。日志与该实现吻合：root 没有继承状态，扫描约 5009 万 candidate 的 fixing 为 7.206s；node2 只扫描约 471 万 candidate，却因合并继承状态用 9.372s，其余 child 也稳定在 8.3--12.8s。下一项最高优先级应改为增量并入本轮 `localFixedTimeIndexedArc`：只遍历新增 set bit，按 pair 批量 `andNot/or` 到现有 allowed/forbidden BitSet，并按实际变化更新计数；root 无旧状态仍走一次性 replace。这样保留完全相同的永久 fixing 语义，只消除每个 child 的全域 union 扫描和整图重建。
 
 旧 W1000 的 `window=185.061s` 与上述 `67.375s` 是两笔不同成本。前者是 depth>0 的每次新 exact pricing 在当前 dual 下构造临时 time-indexed scalar/window helper，现已由 `timeIndexedCompletionBoundInRoundArcFixing=false` 完整关闭；root 因 `depth<=0` 原本就不会构造。后者是 node 收敛后按 `UB-LB` gap 做一次永久 fixing，仍保留且实际固定了大量新时空弧、继续收缩 compact window，不应直接关闭。
+
+#### 时空禁弧增量写回与 time-indexed 同类路径复核
+
+本次消除了永久 time-indexed fixing 写回的两个确定热点。Node 新增按新增禁弧批量合并的入口，先按普通弧 pair 聚合本轮 flat BitSet，每个 pair 只查询一次已有状态，再按 forbidden-set 或 allowed-complement 的当前表示原地并入；allowed-complement 在已有 horizon 内清除 allowed bit，在更大 horizon 上继续使用 forbidden overlay，避免了逐时空弧查询和整张状态表重建。scalar helper 同时持有继承状态的只读 lookup 与本轮 local fixed bitset，传播阶段立即看到本轮 fixing，收敛后只写回新增集合，不再扫描完整 n²H 域做 union。
+
+纯 time-indexed paper graph fixing 也采用相同的“本轮 local bitset + 最后一次批量 merge”口径。原实现虽然没有 scalar helper 的全域 union，却会在初始 fixing 和 cleanup 内对每条新禁弧立即更新 HashMap<Integer, BitSet>，现在热循环只写连续 bitset。普通 exact 和 rank-1 exact 原本已经使用 pair-index lookup，rank-1 静态 penalty/duration 也已复用；本次另把普通弧 promotion 的逐时刻 HashMap 查询改为 lookup。SRI-aware fixing 最终仍进入 scalar helper，因此自动得到相同写回优化，没有改变 SRI/no-SRI 的 fixing 语义。
+
+验证覆盖 sparse forbidden-set、dense allowed-complement、重复追加、超出旧 horizon 的 overlay、n+1/n+2 两种 pair width、60 轮随机增量和 Node.copy()。一个 40-job、horizon 20000 的合成写回对拍中，旧全域 union 为 445.708ms，新增量合并为 38.662ms，约 11.53x，10 万次随机查询完全一致。SmallBPCBatchTest 8/8 与 ArcFlow 一致；同一 30-job root smoke 中，paper graph fixing 与 ng-DSSR scalar fixing 均固定 152473 条时空弧，cleanup 分解均为 152443/30/0，两边最终结果均 valid=true，说明新增写回没有改变 fixing 集合和传播结果。
+
+该修改只作用于 node/cut-loop 闭合后的永久 fixing，不会重新开启已由 timeIndexedCompletionBoundInRoundArcFixing=false 关闭的逐 exact 临时 helper。当前 11.53x 是写回热点的独立 A/B，不等于完整 W1000 求解等比例加速；完整端到端收益仍需后续正式 run 验证。

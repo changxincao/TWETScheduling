@@ -162,6 +162,7 @@ public final class TimeIndexedScalarCompletionBound {
 	private final int[][] durationByArc;
 	private final boolean[][] processArcForbidden;
 	private final boolean[] endForbidden;
+	private final Node.TimeIndexedArcLookup inheritedTimeIndexedArcLookup;
 	private final boolean available;
 	private final String message;
 	private BitSet localFixedTimeIndexedArc;
@@ -277,6 +278,7 @@ public final class TimeIndexedScalarCompletionBound {
 		this.sink = node.sinkId();
 		this.exactIntegerTime = data.isExactIntegerTimeInstance();
 		this.horizon = Math.max(0, (int) Math.ceil(pricingHorizon - 1e-9));
+		this.inheritedTimeIndexedArcLookup = node.createTimeIndexedPricingOnlyArcLookup();
 		this.width = horizon + 1;
 		this.originalWindowStartByJob = Arrays.copyOf(hStartByJob, n + 1);
 		this.originalWindowEndByJob = Arrays.copyOf(hEndByJob, n + 1);
@@ -1001,23 +1003,7 @@ public final class TimeIndexedScalarCompletionBound {
 		if (!exactIntegerTime || localFixedTimeIndexedArc == null || localFixedTimeIndexedArc.isEmpty()) {
 			return 0;
 		}
-		int pairWidth = n + 1;
-		if (node.countTimeIndexedPricingOnlyForbiddenArcs() == 0) {
-			return node.replaceTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc, pairWidth, horizon);
-		}
-		int pairCount = pairWidth * pairWidth;
-		int total = pairCount * (horizon + 1);
-		BitSet combined = new BitSet(total);
-		for (int index = 0; index < total; index++) {
-			int time = index / pairCount;
-			int remainder = index % pairCount;
-			int from = remainder / pairWidth;
-			int to = remainder % pairWidth;
-			if (localFixedTimeIndexedArc.get(index) || node.isTimeIndexedPricingOnlyArcForbidden(from, to, time)) {
-				combined.set(index);
-			}
-		}
-		return node.replaceTimeIndexedPricingOnlyArcSet(combined, pairWidth, horizon);
+		return node.mergeTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc, n + 1, horizon);
 	}
 
 	private int applySriReachableWindowsToNode(SriWindowReachability reachability) {
@@ -1393,7 +1379,7 @@ public final class TimeIndexedScalarCompletionBound {
 	}
 
 	private boolean isTimeIndexedArcForbidden(int from, int to, int time) {
-		return node.isTimeIndexedPricingOnlyArcForbidden(from, to, time)
+		return inheritedTimeIndexedArcLookup.isForbidden(from, to, time)
 				|| (localFixedTimeIndexedArc != null && localFixedTimeIndexedArc.get(timeIndexedArcIndex(from, to, time)));
 	}
 

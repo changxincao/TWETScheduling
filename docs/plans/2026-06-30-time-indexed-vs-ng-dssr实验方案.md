@@ -1217,3 +1217,13 @@ backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackwa
 同时修正 strong branching 外层耗时的归因。lightweight seed 为了保留父 LP 正值列并过滤其余 child-incompatible 列，仍必须扫描 `child.seedColumnIds` 和父 restricted columns；本次不能、也没有删除这层扫描。无 required-outsourcing 时，原 `Node.isColumnCompatible()` 确实会对每条内部列遍历全部 outsourcing state，但由于 Java 短路，此时不会调用 `column.containsJob()`。因此该循环是确定冗余，却不能直接解释全部 `84.387s` 未归类时间。本次维护 required-outsourcing 计数，计数为 0 时跳过 job-state 循环，同时保留完整 sequence arc 检查；并新增求解结束聚合日志 `strongBranchingLightSeedPreparation`，记录调用数、机器/外包列扫描数和真实耗时，后续再决定是否需要 branch-delta 检查或列 arc-incidence 缓存。
 
 验证方面，Java 22 定向编译通过；`TimeIndexedGraphOptimizationTest` 新增并通过无 required-outsourcing、required job、节点复制及 arc compatibility 回归。当前尚未跑完整 W1000 A/B，因此只确认调用语义和功能正确，不提前声称 185.1s 会等额转化为总求解收益。
+
+#### W1000 strong branching 与 node 后 fixing 的进一步拆分
+
+重新按 7 个发生 strong branching 的 node summary 和 `timeIndexedScalarArcFixing.done` 对齐后，原先把 `84.387s` 全部归给 trial 外层 seed 准备是不正确的。7 个节点总时间为 `532.643s`，其中 LP `122.741s`、pricing `326.377s`、completion-bound subtree fixing `0.589s`；另有未计入 node summary 的 node 后 time-indexed scalar arc fixing `67.375s`。扣除后，`Node.copy()`、lightweight seed 筛选、candidate 构造及其它控制流合计只剩 `15.561s`。因此无 required-outsourcing 快路径仍是正确的小优化，但不是 84 秒主因；新增 `strongBranchingLightSeedPreparation` 计时仍用于下一次 A/B 进一步拆开这 15.6 秒。
+
+strong candidate 构造仍存在可见分配冗余：7 次分支、每次 20 个候选、左右各一个 child，正好调用 280 次 trial node copy；`Node.copy()` 会深克隆整张 time-indexed per-pair BitSet 状态。50-job helper 的实际时空 pair 为 `51*51=2601`，`CmaxH=20097` 时，若多数 BitSet 容量延伸到 horizon 末端，单个节点的 backing words 上界约 6.25 MiB，280 次约 1.71 GiB，单个分支点同时持有 40 个候选 child 时约 250 MiB。该值是容量估计而非实测；结合剩余总时间上限，当前不应先改共享语义，下一次应单独计时 candidate 构造后再决定是否让 trial 只读共享、正式入队前 detach。
+
+当前更明确的 node 后 fixing 低效位于 `writeLocalFixedArcsToNode()`。只要 node 已有时空禁弧，它就扫描全部约 `2601*20098=52,274,898` 个 index，每个 index 再查询现有 per-pair map，随后 `replaceTimeIndexedPricingOnlyArcSet()` 又按 allowed/forbidden 表示重建整张 map。日志与该实现吻合：root 没有继承状态，扫描约 5009 万 candidate 的 fixing 为 7.206s；node2 只扫描约 471 万 candidate，却因合并继承状态用 9.372s，其余 child 也稳定在 8.3--12.8s。下一项最高优先级应改为增量并入本轮 `localFixedTimeIndexedArc`：只遍历新增 set bit，按 pair 批量 `andNot/or` 到现有 allowed/forbidden BitSet，并按实际变化更新计数；root 无旧状态仍走一次性 replace。这样保留完全相同的永久 fixing 语义，只消除每个 child 的全域 union 扫描和整图重建。
+
+旧 W1000 的 `window=185.061s` 与上述 `67.375s` 是两笔不同成本。前者是 depth>0 的每次新 exact pricing 在当前 dual 下构造临时 time-indexed scalar/window helper，现已由 `timeIndexedCompletionBoundInRoundArcFixing=false` 完整关闭；root 因 `depth<=0` 原本就不会构造。后者是 node 收敛后按 `UB-LB` gap 做一次永久 fixing，仍保留且实际固定了大量新时空弧、继续收缩 compact window，不应直接关闭。

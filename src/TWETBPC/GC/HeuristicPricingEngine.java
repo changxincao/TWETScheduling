@@ -554,6 +554,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private int[] tabuTenure;
 		private PiecewiseLinearFunction[] forward;
 		private PiecewiseLinearFunction[] backward;
+		private final PiecewiseLinearFunction.PrefixMinimumWorkspace insertCostWorkspace =
+				new PiecewiseLinearFunction.PrefixMinimumWorkspace();
 		private double[] earliestHardWindowCompletion;
 		private double[] latestHardWindowCompletion;
 		private double cost;
@@ -871,6 +873,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 			// 该口径与 TWETColumnEvaluator 一致；通用 merge3 在 compact-window BigM 边界下不适用。
 			double firstBridgeCost = data.getSetupCost(bridgeFrom, job);
 			double secondBridgeCost = suffixStart >= sequence.size() ? 0.0 : data.getSetupCost(job, bridgeTo);
+			if (config.heuristicPricingScalarInsertCost) {
+				return PiecewiseLinearFunction.findMinimalInsertedJobCost(prefix, prefixShift, jobPenalty, suffix,
+						suffixShift, firstBridgeCost + secondBridgeCost, insertCostWorkspace);
+			}
 			PiecewiseLinearFunction prefixWithJob = PiecewiseLinearFunction.addShifted(prefix, prefixShift,
 					jobPenalty);
 			prefixWithJob.minimizePrefixInPlace();

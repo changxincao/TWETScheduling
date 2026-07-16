@@ -322,6 +322,9 @@ public class GCBBFullDomainComparisonTest {
 		config.heuristicPricingHardWindowFeasibilityPrefilter = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.heuristicHardWindowFeasibilityPrefilter",
 				Boolean.toString(config.heuristicPricingHardWindowFeasibilityPrefilter)));
+		config.heuristicPricingScalarInsertCost = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.heuristicScalarInsertCost",
+				Boolean.toString(config.heuristicPricingScalarInsertCost)));
 
 		config.enableNodeLocalHorizonImprovement = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.nodeLocalHorizonImprove",

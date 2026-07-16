@@ -1107,3 +1107,13 @@ ng-DSSR exact 的口径不同。50-3 timeX10+W300 的早期调用约 0.827s，�
 completion bound 不能采用上述标量内核，因为后续传播、arc fixing 和离散 cache 都需要完整的逐时点下包络。它当前已有 no-change merge、精确相邻段压缩和 multi-delta/time-priority 传播；历史数据还显示 `mergeMinimum` 的右参数 copy 只占 backward merge 约 0.4%，不值得继续做 no-copy。底层尚可尝试的严格等价小改动是给 `minimizeSuffixInPlace()` 复用反向遍历引用缓冲区，避免每次新建 `ArrayList` 和内部 `Object[]`，但它不会消除 O(segment) 扫描，预期收益有限。原生 interval delta 或 packed primitive-array PWLF 可能进一步改善缓存局部性和 BigM 空洞传播，但都会改动完整函数语义和大量调用方，属于结构性实验，不是当前可直接合入的小优化。
 
 其余底层点不作为优先项。`TimerManager` 关闭时只有一个静态布尔判断，字符串不会动态分配；`SegmentPool` 默认关闭且历史测试更慢；现有 `PiecewiseLinearFunctionArray` 只是未接主线的旧 `ArrayList<Segment>` 实验实现，并非 primitive packed storage，不能直接替换链表版。`addSegment()` 可以定向测试在线合并相邻同斜率同截距段，但 normalize 后已经有同口径压缩，当前没有命中率证据，必须先统计“避免了多少 Segment 创建”再决定是否保留。
+
+### 2026-07-16：启发式 ADD/EXCHANGE 无临时 PWLF 标量内核
+
+本轮实现了上一节提出的标量扫描内核。旧流程对每个 ADD/EXCHANGE 候选先执行 `addShifted(prefix, shift, jobPenalty)` 构造一条和函数，再执行 `minimizePrefixInPlace()` 构造第二条前缀最小包络，最后才用 `findMinimalShiftedSumValue()` 与 suffix 求一个标量。新流程直接扫描 shifted prefix 与 job penalty 的重叠段，在线维护完全相同的 prefix-min 包络状态；每产生一段包络就立即与 suffix 双指针扫描，因此不创建任何候选级临时 `Segment/PWLF`。旧实现仍由独立开关保留，便于后续对拍和回退。
+
+实现过程中先试过 primitive 数组缓存版本，200 万次、每个输入约 20 段的微基准中反而慢约 4.9%，已撤回。最终流式版本发现并修正了一处数值语义细节：suffix 段尾与 prefix-min 段尾在 `EPS` 下相等时，必须和旧双指针实现一样同时推进两侧，不能继续用同一 prefix 段扫描下一 suffix 段。修正后随机生成含正负斜率、BigM、断点、平移和有限 `curUpperBound` 的 50 万组输入，标量结果全部与旧链表实现一致。另将 `normalizeForward()` 中“先全链找 tail、再全链合并相邻同段”合并为一次扫描；用 HEAD 原实现与当前实现分别运行完整 PWLF property suite，报告和逐案例 CSV 的 SHA-256 完全一致。
+
+性能上，独立 JVM、相同 warmup 的 200 万次微基准中，旧实现三次为 `1.455/1.370/1.495s`，新实现为 `1.304/1.309/1.298s`；按中位数计算热点约快 `11.6%`。40-2 root-only 做了两组正反顺序 A/B，四次搜索轨迹严格一致：均为 58 次 HeuristicPricing、17 次 exact、pool `10376`、启发式加列 `10293`、exact 加列 `81`、root bound `22490`。旧实现启发式平均 `26.415s`，新实现 `24.630s`，约快 `6.8%`；总求解平均由 `35.858s` 降到 `35.190s`，约快 `1.9%`。端到端提升较小是因为 exact pricing、master LP 等时间不受该内核影响，但这是当前少数在保持搜索语义和轨迹不变时仍有稳定收益的 PWLF 底层优化，因此默认开启。
+
+同时重新检查了 `add/merge/normalize` 的逻辑冗余。`add()` 和 `addShifted()` 只负责逐点求和，不能自行加入前向或后向等待闭包；`mergeMinimum()` 的 no-change 预判虽然会额外扫描，但命中后可避免复制、分裂、merge 和 normalize，历史 completion-bound 测试也证明应保留；forward normalize 的前置 compact 会减少 prefix-min 输入段，后置 compact 则合并 prefix-min 新产生的水平段，两者用途不同；backward normalize 的首轮扫描还承担最后有限段定位，不能和后续截断机械合并。当前没有发现第二个同等明确、低风险且能减少高频完整链操作的点，进一步改成 primitive packed PWLF 或原生 interval delta 已属于结构性重写。

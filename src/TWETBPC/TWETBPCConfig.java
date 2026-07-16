@@ -442,6 +442,8 @@ public class TWETBPCConfig {
 	public boolean heuristicPricingPrecomputeMoveDuals = true;
 	/** 2026-07-15: 仅在外包预处理硬窗或 node 的 time-indexed compact window 存在时预判 ADD/EXCHANGE 时间可行性。 */
 	public boolean heuristicPricingHardWindowFeasibilityPrefilter = false;
+	/** 2026-07-15: ADD/EXCHANGE 仅求标量成本时跳过两条临时 PWLF；独立开关便于与旧链表实现对拍。 */
+	public boolean heuristicPricingScalarInsertCost = true;
 	/** 2026-06-28: node 级 local horizon 改进实验，当前默认关闭且不接入主求解。 */
 	public boolean enableNodeLocalHorizonImprovement = false;
 	public int nodeLocalHorizonImprovementNodeId = -1;

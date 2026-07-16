@@ -60,6 +60,75 @@ public class PiecewiseLinearFunction {
 		}
 	}
 
+	/**
+	 * 启发式 ADD/EXCHANGE 标量评价使用的可复用流式扫描状态。
+	 * 每产生一段 prefix-min 包络就立即与 suffix 扫描，不创建临时 Segment/PWLF 对象。
+	 */
+	public static final class PrefixMinimumWorkspace {
+		private Segment suffixCursor;
+		private double suffixDelta;
+		private double shiftedSuffixStart;
+		private double shiftedSuffixEnd;
+		private double yShift;
+		private double minimum;
+		private double lastEnd;
+		private double lastSlope;
+		private double lastIntercept;
+		private int size;
+
+		private void begin(PiecewiseLinearFunction suffix, double delta, double fixedCost) {
+			suffixCursor = suffix.head;
+			suffixDelta = delta;
+			shiftedSuffixStart = Math.max(suffix.head.start + delta, suffix.domainStart);
+			shiftedSuffixEnd = Math.min(suffix.tail.end + delta, suffix.domainEnd);
+			yShift = fixedCost;
+			minimum = Utility.big_M;
+			size = 0;
+		}
+
+		private void append(double start, double end, double slope, double intercept) {
+			lastEnd = end;
+			lastSlope = slope;
+			lastIntercept = intercept;
+			size++;
+			if (Utility.compareLt(end, shiftedSuffixStart) || Utility.compareLt(shiftedSuffixEnd, start)) {
+				return;
+			}
+			Segment suffix = suffixCursor;
+			while (suffix != null && Utility.compareLt(suffix.end + suffixDelta, start)) {
+				suffix = suffix.next;
+			}
+			while (suffix != null) {
+				double suffixStart = suffix.start + suffixDelta;
+				double suffixEnd = suffix.end + suffixDelta;
+				double lo = Math.max(Math.max(start, suffixStart), shiftedSuffixStart);
+				double hi = Math.min(Math.min(end, suffixEnd), shiftedSuffixEnd);
+				if (Utility.compareLe(lo, hi)) {
+					double sumSlope = slope + suffix.slope;
+					double sumIntercept = intercept + suffix.intercept
+							- suffix.slope * suffixDelta + yShift;
+					minimum = Math.min(minimum,
+							Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept));
+				}
+				if (Utility.compareLe(suffixEnd, end)) {
+					boolean bothSegmentsEnd = Utility.compareEq(suffixEnd, end);
+					suffix = suffix.next;
+					if (bothSegmentsEnd) {
+						break;
+					}
+				} else {
+					break;
+				}
+			}
+			suffixCursor = suffix;
+		}
+
+		private double endpointLowerBound(PiecewiseLinearFunction suffix, double fixedCost) {
+			return lastSlope * lastEnd + lastIntercept
+					+ suffix.head.getValue(suffix.head.start) + fixedCost;
+		}
+	}
+
 	public interface MergeMinimumObserver {
 		void record(Direction direction, boolean skipped, boolean changed, long skipNanos, long copyNanos,
 				long bodyNanos, long normalizeNanos);
@@ -608,6 +677,126 @@ public class PiecewiseLinearFunction {
 			}
 		}
 		return min;
+	}
+
+	/**
+	 * 直接计算固定 prefix 后插入单个 job、再连接 suffix 的最小成本。
+	 *
+	 * <p>严格复现 {@code addShifted(prefix, prefixShift, jobPenalty)}、
+	 * {@code minimizePrefixInPlace()} 和 {@code merge2Segments(...)} 的结果，但只构造 primitive
+	 * 片段并立即扫描 suffix，不产生两条临时 Segment 链。该方法只适合调用者最终只需要标量成本的路径。</p>
+	 */
+	public static double findMinimalInsertedJobCost(PiecewiseLinearFunction prefix, double prefixShift,
+			PiecewiseLinearFunction jobPenalty, PiecewiseLinearFunction suffix, double suffixShift,
+			double bridgeCost, PrefixMinimumWorkspace workspace) {
+		if (prefix == null || jobPenalty == null || suffix == null || workspace == null
+				|| prefix.head == null || jobPenalty.head == null || suffix.head == null) {
+			return Utility.big_M;
+		}
+		workspace.begin(suffix, -suffixShift, bridgeCost);
+		if (!buildShiftedSumPrefixMinimum(prefix, prefixShift, jobPenalty, workspace)) {
+			return Utility.big_M;
+		}
+
+		double endpointLowerBound = workspace.endpointLowerBound(suffix, bridgeCost);
+		if (Utility.compareGe(endpointLowerBound, Utility.curUpperBound)) {
+			return endpointLowerBound;
+		}
+		return Utility.isBigMValue(workspace.minimum) ? Utility.curUpperBound : workspace.minimum;
+	}
+
+	private static boolean buildShiftedSumPrefixMinimum(PiecewiseLinearFunction f, double delta,
+			PiecewiseLinearFunction g, PrefixMinimumWorkspace workspace) {
+		double shiftedStart = Math.max(f.head.start + delta, f.domainStart);
+		double shiftedEnd = Math.min(f.tail.end + delta, f.domainEnd);
+		double start = Math.max(shiftedStart, g.head.start);
+		double end = Math.min(shiftedEnd, g.tail.end);
+		if (Utility.compareLt(end, start)) {
+			return false;
+		}
+
+		Segment p = f.head;
+		Segment q = g.head;
+		while (p != null && Utility.compareLt(p.end + delta, start)) {
+			p = p.next;
+		}
+		while (q != null && Utility.compareLt(q.end, start)) {
+			q = q.next;
+		}
+
+		double runningMin = Utility.curUpperBound;
+		double previousTime = start;
+		double lastEnd = start;
+		boolean found = false;
+		double current = start;
+		while (p != null && q != null && Utility.compareLe(current, end)) {
+			double pStart = Math.max(p.start + delta, f.domainStart);
+			double pEnd = Math.min(p.end + delta, f.domainEnd);
+			double segmentStart = Math.max(current, Math.max(pStart, q.start));
+			double segmentEnd = Math.min(Math.min(pEnd, q.end), end);
+			if (Utility.compareLe(segmentStart, segmentEnd)) {
+				if (!found) {
+					previousTime = segmentStart;
+					found = true;
+				}
+				double slope = p.slope + q.slope;
+				double intercept = p.intercept - p.slope * delta + q.intercept;
+				double valueAtStart = slope * segmentStart + intercept;
+				if (Utility.compareGe(slope, 0.0)) {
+					if (!Utility.compareLe(runningMin, valueAtStart)) {
+						if (!Utility.compareEq(previousTime, segmentStart)) {
+							workspace.append(previousTime, segmentStart, 0.0, runningMin);
+							previousTime = segmentStart;
+						}
+						runningMin = valueAtStart;
+					}
+				} else {
+					double valueAtEnd = slope * segmentEnd + intercept;
+					if (!Utility.compareLe(runningMin, valueAtEnd)) {
+						if (Utility.compareGt(valueAtStart, runningMin)) {
+							double crossing = (runningMin - intercept) / slope;
+							if (Utility.compareLt(previousTime, crossing)
+									&& !Utility.compareEq(runningMin, Utility.curUpperBound)) {
+								workspace.append(previousTime, crossing, 0.0, runningMin);
+							}
+							workspace.append(crossing, segmentEnd, slope, intercept);
+						} else {
+							if (!Utility.compareEq(previousTime, segmentStart)) {
+								workspace.append(previousTime, segmentStart, 0.0, runningMin);
+							}
+							workspace.append(segmentStart, segmentEnd, slope, intercept);
+						}
+						runningMin = valueAtEnd;
+						previousTime = segmentEnd;
+					}
+				}
+				lastEnd = segmentEnd;
+				current = segmentEnd;
+			}
+			if (Utility.compareEq(segmentEnd, pEnd)) {
+				p = p.next;
+			}
+			if (Utility.compareEq(segmentEnd, q.end)) {
+				q = q.next;
+			}
+			if (p == null || q == null) {
+				break;
+			}
+			double nextStart = Math.max(p.start + delta, q.start);
+			if (Utility.compareLt(end, nextStart)) {
+				break;
+			}
+		}
+		if (!found) {
+			return false;
+		}
+		if (Utility.compareLt(previousTime, lastEnd)) {
+			workspace.append(previousTime, lastEnd, 0.0, runningMin);
+		}
+		if (workspace.size == 0 && Utility.compareLe(previousTime, lastEnd)) {
+			workspace.append(previousTime, lastEnd, 0.0, runningMin);
+		}
+		return workspace.size > 0;
 	}
 
 //	private double slopeAt(double t) {
@@ -1424,27 +1613,18 @@ public class PiecewiseLinearFunction {
 		// 把右尾闭包补回来。现在的语义是：左侧连续 M 仍然表示不可达起点并删除；
 		// 右侧 M 保留到 prefix-min 阶段处理，从而保持 forward 函数右端到 T。
 		phaseStart = observer == null ? 0L : System.nanoTime();
+		// 3) 合并相邻完全相同的段，并在同一遍扫描中恢复 tail。
+		// 旧实现先完整扫描一次只找 tail，随后又完整扫描一次压缩；两遍没有数据依赖。
 		Segment cur = head;
-		tail = null;
-		while (cur != null) {
-			tail = cur;
-			cur = cur.next;
-		}
-		// 妙啊
-
-		// 3) 合并相邻完全相同的段
-		cur = head;
 		while (cur.next != null) {
 			if (Utility.compareEq(cur.slope, cur.next.slope) && Utility.compareEq(cur.intercept, cur.next.intercept)) {
 				cur.end = cur.next.end;
 				cur.next = cur.next.next;
-				if (cur.next == null)
-					tail = cur;
 			} else {
 				cur = cur.next;
 			}
 		}
-
+		tail = cur;
 		// 4) 保证非增
 		long preCompactNanos = observer == null ? 0L : System.nanoTime() - phaseStart;
 		phaseStart = observer == null ? 0L : System.nanoTime();

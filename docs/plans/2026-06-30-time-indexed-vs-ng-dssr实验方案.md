@@ -1269,3 +1269,21 @@ strong candidate 构造仍存在可见分配冗余：7 次分支、每次 20 个
 setup cost 主要是交互项。timeX10 + setupR50 + cost20 中 ng-DSSR 317.697s 闭合，而 time-indexed 超过 20 分钟仍未完成；但原始时间 W50 + cost20 中，time-indexed 从 343.208s 加速到 194.950s，仍明显快于 ng-DSSR 的 392.417s。前者说明 setup cost 在大 horizon 和较松时间结构上可能进一步放大 pseudo-column/dual 长尾，后者说明在小 horizon、较窄窗口下，它也可能直接惩罚重复绕行、反而帮助 time-indexed。setup cost 因此不能独立用于预测。
 
 当前可用于判断算法适用性的指标应按以下顺序观察：第一是有效离散 horizon 和时空图状态/弧数量；第二是 time-indexed root 正值列中的 non-elementary 比例、pricing 调用数和 pool 增长速度；第三是各 job 的 repeatability 比例及 compact window 相对 horizon 的宽度；第四才是 setup/p 与 setup cost。只有 time-indexed 图已经不便宜，或者 pseudo 列带来的节点/列池长尾足以抵消其单次 pricing 优势时，ng-DSSR 的更强 elementary 定价才容易转化成总时间优势。任务规模本身也不是充分条件：60 任务但 horizon 小、重复路径少时，time-indexed 仍可能明显更快。
+
+### 2026-07-17 原始小时间算例的多随机种子补充实验
+
+为确认 ng-DSSR 在原始小时间数据上是否至少能够与 time-indexed 接近，本轮不再使用 timeX10、宽 due window 或 setup-cost 变体，而是直接测试 `data/40-2` 和 `data/50-2` 中此前未重点分析的随机种子。两种方法均使用当前 `target/classes`、ALNS 最多 60s、SA 关闭、单线程 CPLEX、无 SRI 和 strong branching phase1。ng-DSSR 使用当前默认好配置：初始 nearest `K=floor(n/10)`、`top25 + minimumNewPairsSegment` 更新、source-aware dominance graph、group-envelope join prefilter、completion bound、midpoint reuse/freeze，以及节点收敛后的 time-indexed scalar/window/arc fixing；逐 exact 的 time-indexed helper 和 time-indexed pre-heuristic 关闭。time-indexed 使用纯 graph pricing、dual window、每轮最多返回 300 列，不运行 HeuristicPricing。每个算例的两种方法同时启动，因此本轮适合作为方法筛选和结构比较；论文最终计时表仍应串行复跑，排除并发负载影响。
+
+| 算例 | ng-DSSR | time-indexed | TI/NG | nodes（NG/TI） | pool（NG/TI） |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wet040_002_2m` | 45.142s | 107.056s | 2.372 | 1 / 1 | 13,810 / 114,234 |
+| `wet040_003_2m` | 81.613s | 274.295s | 3.361 | 9 / 15 | 23,512 / 245,625 |
+| `wet040_004_2m` | 93.626s | 142.312s | 1.520 | 5 / 12 | 21,510 / 123,195 |
+| `wet050_002_2m` | 558.547s | 342.503s | 0.613 | 6 / 6 | 45,064 / 152,367 |
+| `wet050_003_2m` | 682.246s | 551.282s | 0.808 | 16 / 33 | 81,875 / 390,815 |
+
+五组均完整闭合或在 root 由已证明下界闭合，两个方法的目标值完全一致且 `valid=true`。40-job 三个种子中 ng-DSSR 全部更快，合计 220.380s 对 523.662s，time-indexed 合计时间约为 ng-DSSR 的 2.376 倍；ng-DSSR 的总节点为 15 对 28，总列池为 58,832 对 483,054。这里优势不依赖放大 horizon：time-indexed 单次图 pricing 仍便宜，但大量 pseudo columns 引起数百至上千次 pricing/LP 往返，并显著加重 root 和 strong-branching RMP。`wet040_003_2m` 最典型，time-indexed exact 只有 30.041s，但 master LP 达 191.025s、pool 达 245,625；ng-DSSR exact 只有 4.941s，最终 pool 为 23,512。
+
+50-job 两个种子则是混合结果。ng-DSSR 都显著减少节点和列池，但总时间分别慢 63.1% 和 23.8%。`wet050_002_2m` 两种方法 root bound 和最终节点数完全相同，elementary pricing 没有带来可兑现的强度提升；ng-DSSR 的 HeuristicPricing、exact 和 master LP 分别为 191.790s、70.383s 和 211.984s，因此无法抵消较小列池。`wet050_003_2m` 中 ng-DSSR root bound 为 39932.167，高于 time-indexed 的 39914.500，节点从 33 降到 16、pool 从 390,815 降到 81,875，但 HeuristicPricing 仍累计 205.431s，最终总时间仍略慢。
+
+这批结果支持比此前更有底气但也更准确的论文表述：ng-DSSR 并非只在时间放大后才有竞争力，在原始小时间 40-job 随机种子上已经能够稳定达到并超过 time-indexed；在 50-job 上，它仍稳定产生更小的树和列池，但是否转化为总时间优势取决于 root bound 提升能否覆盖启发式、exact 和强分支 LP 的额外成本。不能写成“ng-DSSR 在所有小时间算例上更快”，更合适的结论是“小时间下两者各有优势，ng-DSSR 已有一组稳定胜出的实例；horizon 放大后 ng-DSSR 的优势更稳定”。汇总数据保存在 `test-results/bpc/20260717-smalltime-seeds-v1-summary.csv`，每个 run 目录同时保留 `args.txt`、`command.txt`、PID、stdout/stderr 和事件日志。

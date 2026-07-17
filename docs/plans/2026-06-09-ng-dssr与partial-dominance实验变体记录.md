@@ -2563,3 +2563,12 @@ W300 A/B 使用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root-only�
 3. 原始 50-3 + W300：exact `53.281s -> 50.438s`，减少 5.3%；总轮数 `18 -> 16`，最大轮数 `6 -> 4`，pair 更新 `267 -> 181`。新模式考虑 81 条 route，其中 35 条被前序更新阻断，实际更新 46 条。
 
 三组 exact 合计由 `92.153s` 降至 `82.767s`，约减少 10.2%；root 总时间合计由 `240.233s` 降至 `226.132s`，约减少 5.9%。收益在三组中均为正，但幅度与重复 route 的集中程度有关：setupR75 中候选重叠最多、收益最大；原始版本状态更重且更新分散，收益较小。当前证据已经支持“最小完整段 + 较宽 reservoir”具有稳定潜力，但仍只覆盖同一基础 seed 的三个 setup 变体和 root-only。默认继续保持 `allSegments`，下一步应在不同 seed 或完整树上验证，而不是继续在该 seed 上调 top-K。
+249. 2026-07-17 基于可重复 job 的更新预算与下一步优化优先级
+
+固定 top15/top25 不应直接按 due-window 名称或绝对宽度切换。当前 ng-set 初始化已经在第一次 DSSR round 的 effective window 建立后统计每个 job 是否存在某个 job -> via -> job 可行重复环；整数实例且 dual window 或 node compact/time-arc 证据可用时，该判断逐离散时间点考虑 processing/setup、普通及 pricing-only arc 和 (i,j,t) 禁弧，比平均窗宽更贴近 non-elementary route 的真实规模。同一次 exact 中该统计只初始化一次，后续 DSSR round 可固定预算；下一次 exact 再按新 dual/node 证据重算。建议第一版仅在 time-indexed 精确判断可用时按可重复比例切换：比例不超过 50% 使用 top15，否则使用 top25；小数实例和无法获得精确逐点证据时固定 top25。显式正数配置仍应覆盖自动策略。历史日志中明显受限实例出现过 4/30、5/30、12/40，W300 基本为 50/50，50% 可先作为区分明显两端的初始阈值，但仍需低重复实例 A/B 后再落默认。
+
+进一步复核三组最新 minimum-segment 日志。setupR50、setupR75 和原始 50-3 共 29 次 exact，其中 26 次在返回 elementary negative columns 的同一轮仍保存了负 non-elementary witness；15 次只返回不超过 100 条基本列，合计仅 261 条。当前控制流只要找到一条基本负列便立即返回，不会利用同轮 witness 更新 ng-set，因此后期会出现多个小批次 exact/RMP 往返。当前最高优先级应是同一 dual 内累计基本列：把已确认的基本负列按 signature 去重保存；若累计数量未达到固定 batch target 且仍有负非基本 witness，则沿现有 minimum-segment 规则更新 ng-set并继续 DSSR；达到 target、没有 witness、时间到或完成无负列证明时返回。该方案不跨 dual 继承，不改变定价证书；时间到时只返回已确认负列。第一轮可用固定 target 200 或 300 做 A/B，同时设置最多额外 DSSR round，避免简单 pricing 被过度延长。
+
+第二优先级是把 raw reservoir 与实际更新预算分开。三组困难闭合调用中，候选 considered/blocked/updated 分别约为 52/18/34、85/42/43、56/23/33，约 35%--49% 的 top 候选会被本轮更早的更新自动阻断。因而 top15 若按原始名次数量截断，实际可能只产生 8--10 条有效更新。更合理的实现是保留最多 25 条候选，按 reduced cost 扫描并跳过已阻断路径，紧窗只允许最多 15 条真正发生 ng-set 改变的 route，宽窗允许 25 条；这样阻断候选不消耗预算。该口径比直接把候选池缩成 15 更符合 minimum-segment 的设计。
+
+第三优先级是在不增加 pair 数的前提下改善重复段选择。同一路径若有多个缺失 pair 数相同的最小重复段，当前按确定性位置选第一个；可在同样最小 pair 数的 tie 中，优先选择能同时阻断当前 reservoir 内更多其它路径的段。K 不超过 25 时，额外的交叉检查很小，且不会比当前方案增加该 route 的 pair 数。若仍有明显候选依次上浮，再考虑将只读 reservoir 扩到 40--50、但保持 15/25 个有效更新预算，以免 top25 被结构重复路径占满。按 label 状态规模给 pair 加权、历史 warm-start和继续静态扩大 K 的风险或不稳定性更高，暂不作为前序方案。

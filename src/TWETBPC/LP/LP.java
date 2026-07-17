@@ -501,6 +501,7 @@ public class LP {
 		if (cplexThreads > 0) {
 			cplex.setParam(IloCplex.Param.Threads, cplexThreads);
 		}
+		configureRootAlgorithm();
 		objective = null;
 		lambdaByColumnId = new HashMap<Integer, IloNumVar>();
 		branchImpliedPenaltyColumnIds = new HashSet<Integer>();
@@ -534,6 +535,22 @@ public class LP {
 				addFeasibilitySlacks();
 			}
 		}
+	}
+
+	/** 配置 LP 算法；Barrier 保留 CPLEX 默认 crossover，正式 pricing 仍可读取 dual。 */
+	private void configureRootAlgorithm() throws IloException {
+		String algorithm = config.cplexRootAlgorithm == null ? "auto"
+				: config.cplexRootAlgorithm.trim().toLowerCase();
+		if (algorithm.isEmpty() || "auto".equals(algorithm)) {
+			cplex.setParam(IloCplex.Param.RootAlgorithm, IloCplex.Algorithm.Auto);
+			return;
+		}
+		if ("barrier".equals(algorithm)) {
+			cplex.setParam(IloCplex.Param.RootAlgorithm, IloCplex.Algorithm.Barrier);
+			return;
+		}
+		throw new IllegalArgumentException("Unsupported CPLEX root algorithm: " + config.cplexRootAlgorithm
+				+ "; expected auto or barrier");
 	}
 
 	private void buildVariables() throws IloException {

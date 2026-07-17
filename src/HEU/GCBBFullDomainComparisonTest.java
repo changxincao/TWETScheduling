@@ -344,6 +344,8 @@ public class GCBBFullDomainComparisonTest {
 		config.solveTimeLimitSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.solveTimeLimitSeconds",
 				Double.toString(config.solveTimeLimitSeconds)));
+		config.cplexRootAlgorithm = System.getProperty(
+				"twet.bpc.fullDomainCompare.cplexRootAlgorithm", config.cplexRootAlgorithm);
 		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxHeuristicColumns",
 				1500);
 		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.fullDomainCompare.heuristicPoolSize",

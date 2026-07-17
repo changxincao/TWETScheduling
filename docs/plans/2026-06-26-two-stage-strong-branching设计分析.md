@@ -334,3 +334,11 @@ Phase-I 第一次求解后，不建议只保留当前非零 slack、删除零 sl
 `173.493s/17 nodes` 的 CSV 字段容易低估 strong branching 成本：其中 `HeuristicPricing=29.250s/183` 只统计正式节点启发式，不含 `HeuristicPricing[strongBranching]=84.191s/529`。强分支 master LP 另占 `22.509s`，包括 lightweight phase-1 RMP `18.303s/320`、phase-2 initial LP `2.701s/64` 和 phase-2 heuristic 后重解 `1.505s/465`。因此可直接归属于 strong branching 的时间至少为 `106.700s`，占总时间约 `61.5%`；全部启发式 pricing 合计 `113.441s`，占约 `65.4%`。CSV 的 `master LP=24.064s` 中约 `93.5%` 也来自 strong trial，正式节点普通 master LP 仅约 `1.56s`。
 
 ng-DSSR exact 不是本次瓶颈：正式 exact 为 `11.827s/57`，约占总时间 `6.8%`。其中 56 次带详细统计的调用共 `11.471s`，initialization 为 `11.008s`，completion bound 构造为 `10.729s`；也就是说 completion bound 占 exact 约九成，但只占整次求解约 `6.2%`。总时间扣除全部 pricing 和 master LP 后约剩 `23.7s`，与 root summary 中求解前后约 `24.4s` 的差值一致，主要是 ALNS seed、初始列及框架准备成本。当前实例若继续优化总时间，首要对象应是 strong phase-2 启发式调用次数/候选数，而不是 ng-DSSR exact 或普通 master LP。
+
+### 2026-07-17 CPLEX Barrier 对照
+
+当前 `LP.buildModel()` 原本只设置 `cplexThreads=1`，没有指定 `RootAlgorithm`，因此实际使用 CPLEX `Auto`。本次增加 `cplexRootAlgorithm=auto/barrier` 受控开关，默认仍为 `auto`；Barrier 保留 CPLEX 默认 crossover，不关闭 dual/basis 恢复，正式 pricing 仍按原流程读取 dual。
+
+在 `wet050_002_2m` 上严格复用 `20260717-smalltime-seeds-v1-50-002-ng` 的 ng-DSSR 配置，只把 LP 算法从 Auto 改成 Barrier。Auto 的 root node 为 `243.263s`，`lp=120.881s/189`，`pricing=116.765s/174`，其中 heuristic `96.307s/149`、exact `20.457s/25`，root pool 为 `22308`。Barrier 的 root node 为 `384.674s`，`lp=176.578s/250`，`pricing=204.558s/263`，其中 heuristic `152.333s/210`、exact `52.224s/53`，root pool 为 `23653`。Barrier 的 40 次 phase-1 lightweight trial LP 合计 `73.712s`，平均 `1.843s`，并未体现 trial 加速；两组最终都选择相同分支弧 `(9,35)`，root LP 目标同为 `39364.5`，说明差异主要来自退化最优对偶改变了列生成路径，而不是模型目标或分支语义变化。
+
+Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足以抵消该差距的迹象，因此在完成 root 和第一轮 strong branching 后停止，未继续浪费完整树资源。当前结论是保持 `auto` 默认；`barrier` 仅保留为后续特殊大 RMP 的诊断开关，不能作为 ng-DSSR/strong branching 默认算法。

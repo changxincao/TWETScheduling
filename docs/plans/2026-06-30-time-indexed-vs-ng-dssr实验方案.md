@@ -1258,3 +1258,14 @@ strong candidate 构造仍存在可见分配冗余：7 次分支、每次 20 个
 现有证据不支持“参数调整后大部分任务都迟到”。5 个算例中没有一个迟到比例严格超过 50%；时间扰动放大 10 倍的 40-2 仍为早到/迟到各 45%，说明保持相对时间结构的数值放大不会自然把排程推向迟到侧。W300 宽 due window 的无惩罚比例升到 22%，且早到仍多于迟到，宽窗口的直接效果主要是增加零惩罚任务，而不是制造更多迟到任务。
 
 早到/迟到构成只能作为 ng-DSSR 强度的间接信号。用户提出的方向具有机制依据：若大量任务已经处于迟到侧，重复访问会继续承担正的迟到斜率，time-indexed 松弛中的非基本重复路径通常更不划算，因而它与 elementary pricing 的下界差距可能缩小，ng-DSSR 的强度优势也可能变小。但当前样本并不由迟到任务主导，因此不能用这一点解释 ng-DSSR 当前表现。更直接的解释变量仍应是 time-indexed root 中非基本正值列比例、可重复任务比例、`LB_ng-LB_TI` 以及 ng-DSSR 的 DSSR 轮数和 exact pricing 时间。完整结果保存在 `test-results/bpc/tmp-optimal-timing-analysis-20260717/optimal-job-timing-summary.csv` 和 `optimal-job-timing-detail.csv`。
+### 2026-07-17 ng-DSSR 的优势区间与 setup 非单调性
+
+综合现有 40/50 规模实验，setup 的绝对大小不是决定 ng-DSSR 是否占优的主变量，而且影响明显非单调。`setupR25` 的 50-3 原始时间中 ng-DSSR 为 131.850s、time-indexed 为 180.738s；把 setup/p 从约 0.25 提高到 0.50 后，反而变成 time-indexed 82.447s、ng-DSSR 91.825s。40-2 原始时间叠加 cost20 时，R50 为 ng-DSSR 127.443s 对 time-indexed 210.584s，但更强的 R75 只剩 187.318s 对 199.126s。原因是 setup time/cost 同时有两种相反作用：它可能改变 dual 和路径成本结构、暴露 pseudo-column 尾部，也可能直接压制重复绕行，使 relaxed pseudo route 更接近 elementary route。因此不能把 setup ratio 或 setup cost 系数单独作为算法选择指标。
+
+当前最稳定的 ng-DSSR 优势来源是大离散 horizon 或整数 scale。50-2 直接 timeX10 时，两者节点数相同，ng-DSSR 为 658.306s、time-indexed 为 904.922s；50-3 setupR50 timeX10 且无 setup cost 时，ng-DSSR 216.607s、time-indexed 255.929s。这里即使相对 setup 结构基本不变，time-indexed 仍因 `O(n^2H)` 图扫描、更多 pricing/LP 往返和更大列池退化，而连续时间 ng-DSSR 对纯数值尺度更稳定。存在小数时间并需要放大成整数图时，机制相同，只是当前还缺系统实测矩阵。
+
+第二个有利条件是时间可行域足够宽，使非基本重复路径能够持续支撑 time-indexed RMP。timeX10 + W300 中 ng-DSSR 172.503s、time-indexed 262.671s；W1000 中 ng-DSSR 虽增至 863.005s，但能够闭合，time-indexed 超过 1114s 后仍未闭合且 pool 约 17.6 万。原始时间 W300 也会触发明显长尾，但两种方法都很难，不能保证 ng-DSSR 总时间更好；原始时间 W50 的两个实例反而都是 time-indexed 更有优势。因而更准确的有利区间是“大 horizon + 中到宽窗口”，而不是单独“窗口越宽越好”。窗口过宽同样会使 ng-DSSR 的 completion bound、双向扩展和 DSSR certificate 变重。
+
+setup cost 主要是交互项。timeX10 + setupR50 + cost20 中 ng-DSSR 317.697s 闭合，而 time-indexed 超过 20 分钟仍未完成；但原始时间 W50 + cost20 中，time-indexed 从 343.208s 加速到 194.950s，仍明显快于 ng-DSSR 的 392.417s。前者说明 setup cost 在大 horizon 和较松时间结构上可能进一步放大 pseudo-column/dual 长尾，后者说明在小 horizon、较窄窗口下，它也可能直接惩罚重复绕行、反而帮助 time-indexed。setup cost 因此不能独立用于预测。
+
+当前可用于判断算法适用性的指标应按以下顺序观察：第一是有效离散 horizon 和时空图状态/弧数量；第二是 time-indexed root 正值列中的 non-elementary 比例、pricing 调用数和 pool 增长速度；第三是各 job 的 repeatability 比例及 compact window 相对 horizon 的宽度；第四才是 setup/p 与 setup cost。只有 time-indexed 图已经不便宜，或者 pseudo 列带来的节点/列池长尾足以抵消其单次 pricing 优势时，ng-DSSR 的更强 elementary 定价才容易转化成总时间优势。任务规模本身也不是充分条件：60 任务但 horizon 小、重复路径少时，time-indexed 仍可能明显更快。

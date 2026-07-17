@@ -184,8 +184,14 @@ public class HeuristicPricingEngine implements PricingEngine {
 		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(bestSeeds);
 		Collections.sort(candidates, bestFirst);
 		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(candidates.size());
+		java.util.Set<Integer> positiveColumnIds = stats.enabled && lp.getLastSolution() != null
+				? lp.getLastSolution().getColumnValues().keySet() : Collections.<Integer>emptySet();
 		for (ScoredSeed candidate : candidates) {
 			seeds.add(candidate.column);
+			if (stats.enabled) {
+				stats.observeSelectedSeed(candidate.column,
+						positiveColumnIds.contains(Integer.valueOf(candidate.column.getId())));
+			}
 		}
 		return seeds;
 	}
@@ -222,6 +228,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, windowContext,
 				generatedSignatures, negativeCandidates, costAudit, stats);
 
+		long firstTwentyAccepted = 0L;
+		long remainingAccepted = 0L;
 		int iterations = Math.max(1, config.heuristicPricingTabuIterations);
 		for (int iter = 0; iter < iterations && !isHeuristicPoolFull(negativeCandidates)
 				&& !timeLimitChecker.isTimeLimitReached(); iter++) {
@@ -244,8 +252,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, windowContext,
 					generatedSignatures, negativeCandidates, costAudit, stats);
-			stats.observeTabuIteration(iter, iterationStart, stats.tryAddAccepted - acceptedBeforeIteration);
+			long accepted = stats.tryAddAccepted - acceptedBeforeIteration;
+			if (iter < 20) {
+				firstTwentyAccepted += accepted;
+			} else {
+				remainingAccepted += accepted;
+			}
+			stats.observeTabuIteration(iter, iterationStart, accepted);
 		}
+		stats.observeSeedPhaseYield(firstTwentyAccepted, remainingAccepted);
 	}
 
 	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost,
@@ -1174,6 +1189,16 @@ public class HeuristicPricingEngine implements PricingEngine {
 		int appliedMoves;
 		int returnedColumns;
 		int negativeCandidates;
+		int selectedPositiveSeeds;
+		int selectedHeuristicSeeds;
+		int selectedExactSeeds;
+		int selectedOtherSeeds;
+		int seedNoEarlyNoLate;
+		int seedNoEarlyLate;
+		int seedEarlyNoLate;
+		int seedEarlyLate;
+		long seedFirstTwentyAccepted;
+		long seedRemainingAccepted;
 		long sriContextNanos;
 		long windowContextNanos;
 		long seedCollectNanos;
@@ -1280,6 +1305,43 @@ public class HeuristicPricingEngine implements PricingEngine {
 			iterationBinNanos[bin] += elapsed(start);
 		}
 
+		void observeSelectedSeed(TWETColumn column, boolean positive) {
+			if (!enabled) {
+				return;
+			}
+			if (positive) {
+				selectedPositiveSeeds++;
+			}
+			if (column.getSource() == ColumnSource.PRICING_HEURISTIC) {
+				selectedHeuristicSeeds++;
+			} else if (column.getSource() == ColumnSource.PRICING_EXACT) {
+				selectedExactSeeds++;
+			} else {
+				selectedOtherSeeds++;
+			}
+		}
+
+		void observeSeedPhaseYield(long firstTwentyAccepted, long remainingAccepted) {
+			if (!enabled) {
+				return;
+			}
+			seedFirstTwentyAccepted += firstTwentyAccepted;
+			seedRemainingAccepted += remainingAccepted;
+			if (firstTwentyAccepted == 0L) {
+				if (remainingAccepted == 0L) {
+					seedNoEarlyNoLate++;
+				} else {
+					seedNoEarlyLate++;
+				}
+			} else {
+				if (remainingAccepted == 0L) {
+					seedEarlyNoLate++;
+				} else {
+					seedEarlyLate++;
+				}
+			}
+		}
+
 		String summary() {
 			if (!enabled) {
 				return "";
@@ -1289,6 +1351,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ "/" + ms(searchNanos) + "/" + ms(sortNanos) + "/" + ms(buildColumnsNanos)
 					+ ", seed scan/compatible/incompat/heap/used=" + seedScanned + "/" + seedCompatible
 					+ "/" + seedIncompatible + "/" + seedHeapSize + "/" + seedColumns
+					+ ", seed selected positive/heur/exact/other=" + selectedPositiveSeeds + "/"
+					+ selectedHeuristicSeeds + "/" + selectedExactSeeds + "/" + selectedOtherSeeds
+					+ ", seed phaseYield none-none/none-late/early-none/early-late=" + seedNoEarlyNoLate
+					+ "/" + seedNoEarlyLate + "/" + seedEarlyNoLate + "/" + seedEarlyLate
+					+ ", accepted first20/remaining=" + seedFirstTwentyAccepted + "/"
+					+ seedRemainingAccepted
 					+ ", tabu calls/valid/invalid/iters/noMove/apply=" + tabuSearchCalls + "/" + validSeeds
 					+ "/" + invalidSeeds + "/" + tabuIterations + "/" + noMoveBreaks + "/" + appliedMoves
 

@@ -342,3 +342,17 @@ ng-DSSR exact 不是本次瓶颈：正式 exact 为 `11.827s/57`，约占总时�
 在 `wet050_002_2m` 上严格复用 `20260717-smalltime-seeds-v1-50-002-ng` 的 ng-DSSR 配置，只把 LP 算法从 Auto 改成 Barrier。Auto 的 root node 为 `243.263s`，`lp=120.881s/189`，`pricing=116.765s/174`，其中 heuristic `96.307s/149`、exact `20.457s/25`，root pool 为 `22308`。Barrier 的 root node 为 `384.674s`，`lp=176.578s/250`，`pricing=204.558s/263`，其中 heuristic `152.333s/210`、exact `52.224s/53`，root pool 为 `23653`。Barrier 的 40 次 phase-1 lightweight trial LP 合计 `73.712s`，平均 `1.843s`，并未体现 trial 加速；两组最终都选择相同分支弧 `(9,35)`，root LP 目标同为 `39364.5`，说明差异主要来自退化最优对偶改变了列生成路径，而不是模型目标或分支语义变化。
 
 Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足以抵消该差距的迹象，因此在完成 root 和第一轮 strong branching 后停止，未继续浪费完整树资源。当前结论是保持 `auto` 默认；`barrier` 仅保留为后续特殊大 RMP 的诊断开关，不能作为 ng-DSSR/strong branching 默认算法。
+
+### 2026-07-17 保留 trial seed 后的后续优化方向
+
+当前不再缩减第一次 lightweight strong trial 的 seed，也不调整“父节点正值列无条件保留”的规则。原因是这部分直接承担 trial 初始可行性；继续压列虽然可能减小 RMP，但会重新混入 restricted columns 不足和 repair 语义问题。`branchSeedColumnLimit` 仍只用于 trial 已经求解并修复后的 phase2/正式 child seed 准备，不作为第一次 trial LP 的列数上限。
+
+50-job 最新日志中，strong phase1 仍是最明确的大头：`wet050_002_2m` 为 `197.877s/120`，`wet050_003_2m` 为 `301.398s/320`。此前记录的 `strong_branching_light_repair_rmp_build=0.022/0.035s` 只计量 `LP.construct()` 的 Java 列表准备，不包含 `LP.solveRelaxation()` 内部的 `buildModel()`；后者每次都会新建 `IloCplex`、重新建立变量/覆盖行/机器行/分支行，再调用 `cplex.solve()`。因此当前只能确定“Java seed 装载不是大头”，还不能把 CPLEX 建模和优化求解分开归因。下一步最小诊断应在 `LP.solveRelaxation()` 内分别统计 `buildModel` 与 `cplex.solve`，不改变任何列集和分支语义。
+
+如果 CPLEX 求解占主要部分，优先尝试父 LP basis warm-start。CPLEX 22.1 Java API 提供 `getBasisStatuses/setBasisStatuses`；trial 仍使用完全相同的 seed 和分支行，只把父模型中同 ID 列及公共约束的 basis 状态映射到新 trial 模型。由于 lightweight seed 可能删掉零值退化 basic 列，只有在父 basis 可完整映射时才导入，否则应自动退回当前求解，不能为了 basis 修改 seed。该方向不改变 trial 可行域和评分目标，风险明显低于继续筛列。
+
+第二个独立 A/B 是“常规启发式 pricing 只用于 root，非根正式节点直接进入 ng-DSSR exact”，但 repair 的 `findFeasible()` 仍保留启发式优先，strong phase2 也由原开关单独控制。50-2 的非根启发式为 `95.483s/474`、加列 `18336`，非根 exact 为 `49.925s/110`；50-3 的非根启发式为 `130.259s/857`、加列 `34253`，非根 exact 为 `40.988s/227`。分支禁弧和 compact window 已让非根 exact 明显轻于 root，因此该静态策略有试验价值；但启发式仍贡献大量列，关闭后 exact 调用和列批量可能增加，必须做完整 A/B，不能直接设为默认。
+
+第三个方向是 reliability/pseudo-cost strong branching：root 仍完整试探 20 个候选，后续节点对已有足够左右分支历史的同一 arc 使用归一化 pseudo-cost 估分，只对历史不足的候选继续 strong trial。它不改变单次 trial seed，但收益取决于候选 arc 在不同节点间的重复率。当前日志只稳定记录最终选中候选，尚不足以证明覆盖率；实现前应先记录每轮全部 20 个候选、左右 gain 和历史命中率。如果重复率低，该方案不会有实质收益。
+
+当前优先级为：先拆分 CPLEX build/solve；若 solve 为主，测试 basis warm-start；并行做 root-only heuristic 的完整 A/B；reliability branching 先只做统计。直接把候选数从 20 降到 10 暂不采用，因为最新两例实际选中 rank 出现过 11、13、15、18、20，静态截断会明显改变分支质量。

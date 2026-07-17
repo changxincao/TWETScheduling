@@ -353,9 +353,9 @@ public class GCBBFullDomainComparisonTest {
 		config.cplexRootAlgorithm = System.getProperty(
 				"twet.bpc.fullDomainCompare.cplexRootAlgorithm", config.cplexRootAlgorithm);
 		config.maxHeuristicPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxHeuristicColumns",
-				1500);
+				300);
 		config.heuristicPricingPoolSize = Integer.getInteger("twet.bpc.fullDomainCompare.heuristicPoolSize",
-				5000);
+				300);
 		config.maxExactPricingColumns = Integer.getInteger("twet.bpc.fullDomainCompare.maxExactColumns", 5000);
 		config.branchSeedColumnLimit = Integer.getInteger("twet.bpc.fullDomainCompare.branchSeedColumnLimit", 5000);
 		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(

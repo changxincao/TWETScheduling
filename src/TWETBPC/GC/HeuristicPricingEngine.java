@@ -163,6 +163,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		// 2026-07-12: 只保留最优 K 个 seed，避免为固定小 K 排序并保存全部 active columns。
 		PriorityQueue<ScoredSeed> bestSeeds = new PriorityQueue<ScoredSeed>(limit,
 				Collections.reverseOrder(bestFirst));
+		java.util.Set<Integer> positiveColumnIds = lp.getLastSolution() == null
+				? Collections.<Integer>emptySet() : lp.getLastSolution().getColumnValues().keySet();
 		for (int columnId : lp.getRestrictedColumnIds()) {
 			if (stats.enabled) { stats.seedScanned++; }
 			TWETColumn column = lp.getPool().getColumn(columnId);
@@ -173,7 +175,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (stats.enabled) { stats.seedCompatible++; }
 			double sriPenalty = sriContext.isActive() ? sriContext.penalty(column.getSequence()) : 0.0;
 			ScoredSeed candidate = new ScoredSeed(column,
-					reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty));
+					reducedCost(column.getSequence(), column.getCost(), lp, sriPenalty),
+					positiveColumnIds.contains(Integer.valueOf(columnId)));
 			if (bestSeeds.size() < limit) {
 				bestSeeds.add(candidate);
 			} else if (compareScoredSeed(candidate, bestSeeds.peek()) < 0) {
@@ -185,25 +188,27 @@ public class HeuristicPricingEngine implements PricingEngine {
 		ArrayList<ScoredSeed> candidates = new ArrayList<ScoredSeed>(bestSeeds);
 		Collections.sort(candidates, bestFirst);
 		ArrayList<TWETColumn> seeds = new ArrayList<TWETColumn>(candidates.size());
-		java.util.Set<Integer> positiveColumnIds = stats.enabled && lp.getLastSolution() != null
-				? lp.getLastSolution().getColumnValues().keySet() : Collections.<Integer>emptySet();
 		for (ScoredSeed candidate : candidates) {
 			seeds.add(candidate.column);
 			if (stats.enabled) {
-				stats.observeSelectedSeed(candidate.column,
-						positiveColumnIds.contains(Integer.valueOf(candidate.column.getId())));
+				stats.observeSelectedSeed(candidate.column, candidate.positive);
 			}
 		}
 		return seeds;
 	}
 
 	private static int compareScoredSeed(ScoredSeed a, ScoredSeed b) {
-		// 2026-07-03: Keep the Comparator strictly transitive; epsilon compare can break TimSort.
+		// 2026-07-17: 保持严格传递；同 reduced cost 时优先当前 LP 正值列，再优先长列。
+		// epsilon compare 会破坏 TimSort 的 Comparator contract。
 		int rcCompare = Double.compare(a.reducedCost, b.reducedCost);
 		if (rcCompare != 0) {
 			return rcCompare;
 		}
-		int sizeCompare = Integer.compare(a.column.size(), b.column.size());
+		int positiveCompare = Boolean.compare(b.positive, a.positive);
+		if (positiveCompare != 0) {
+			return positiveCompare;
+		}
+		int sizeCompare = Integer.compare(b.column.size(), a.column.size());
 		if (sizeCompare != 0) {
 			return sizeCompare;
 		}
@@ -244,6 +249,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 				if (stats.enabled) { stats.noMoveBreaks++; }
 				stats.observeTabuIteration(iter, iterationStart, 0L);
 				break;
+			}
+			if (stats.enabled && Utility.compareLt(bestMove.reducedCost, REDUCED_COST_TOLERANCE)) {
+				stats.appliedNegativeMoves++;
 			}
 			long applyStart = stats.start();
 			state.apply(bestMove, iter + config.heuristicPricingTabuTenure);
@@ -622,6 +630,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			double rc = reducedCostAfterRemove(pos, removedJob, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
 			if (stats.enabled) { stats.removeValid++; }
+			if (stats.enabled && Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) { stats.removeNegative++; }
 			if (!isAcceptedCandidate(rc, MoveType.REMOVE, removedJob, -1, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
 				if (stats.enabled) { stats.removeNotSelected++; }
@@ -655,6 +664,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			double rc = reducedCostAfterAdd(pos, job, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
 			if (stats.enabled) { stats.addValid++; }
+			if (stats.enabled && Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) { stats.addNegative++; }
 			if (!isAcceptedCandidate(rc, MoveType.ADD, job, -1, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
 				if (stats.enabled) { stats.addNotSelected++; }
@@ -688,6 +698,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			double rc = reducedCostAfterExchange(pos, job, removedJob, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
 			if (stats.enabled) { stats.exchangeValid++; }
+			if (stats.enabled && Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) { stats.exchangeNegative++; }
 			if (!isAcceptedCandidate(rc, MoveType.EXCHANGE, job, removedJob, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
 				if (stats.enabled) { stats.exchangeNotSelected++; }
@@ -1242,6 +1253,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		long removeSelected;
 		long addSelected;
 		long exchangeSelected;
+		long removeNegative;
+		long addNegative;
+		long exchangeNegative;
+		long appliedNegativeMoves;
 		long tryAddCalls;
 		long tryAddPoolFull;
 		long tryAddRejectedByReducedCost;
@@ -1354,6 +1369,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (!enabled) {
 				return "";
 			}
+			long negativeMoveUpperBound = removeNegative + addNegative + exchangeNegative;
+			// 仅统计已完成评价的负 move 次数；不构造 sequence，也不做 signature 去重或真成本复核。
+			long nonBestNegativeUpperBound = Math.max(0L, negativeMoveUpperBound - appliedNegativeMoves);
 			return ", heuristicStats phaseMs sri/window/seed/search/sort/buildCols="
 					+ ms(sriContextNanos) + "/" + ms(windowContextNanos) + "/" + ms(seedCollectNanos)
 					+ "/" + ms(searchNanos) + "/" + ms(sortNanos) + "/" + ms(buildColumnsNanos)
@@ -1384,6 +1402,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ ", moveSelected rem/add/ex=" + removeSelected + "/" + addSelected + "/" + exchangeSelected
 					+ ", moveMs total rem/add/ex=" + ms(removeTotalNanos) + "/" + ms(addTotalNanos)
 					+ "/" + ms(exchangeTotalNanos)
+					+ ", negativeMoveUpperBound rem/add/ex/appliedBest/nonBest=" + removeNegative + "/"
+					+ addNegative + "/" + exchangeNegative + "/" + appliedNegativeMoves + "/"
+					+ nonBestNegativeUpperBound
 					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)
 					+ "/" + ms(exchangeCostNanos)
 					+ ", tryAdd calls/accepted/dup/rcSkip/poolFull=" + tryAddCalls + "/" + tryAddAccepted
@@ -1734,9 +1755,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 		final TWETColumn column;
 		final double reducedCost;
 
-		ScoredSeed(TWETColumn column, double reducedCost) {
+		final boolean positive;
+		ScoredSeed(TWETColumn column, double reducedCost, boolean positive) {
 			this.column = column;
 			this.reducedCost = reducedCost;
+			this.positive = positive;
 		}
 	}
 

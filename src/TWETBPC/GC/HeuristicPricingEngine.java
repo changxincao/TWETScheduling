@@ -281,6 +281,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost,
 			HeuristicPricingStats stats) {
 		if (stats.enabled) { stats.findBestMoveCalls++; }
+		long negativeMoveCountBefore = stats.enabled ? stats.negativeMoveCount() : 0L;
 		TabuMove bestMove = null;
 		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
 		if (state.sequence.size() > 1) {
@@ -312,6 +313,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 					bestMoveReducedCost = move.reducedCost;
 				}
 			}
+		}
+		if (stats.enabled) {
+			stats.observeNonBestNegativeMoves(iter, stats.negativeMoveCount() - negativeMoveCountBefore, bestMove);
 		}
 		return bestMove;
 	}
@@ -1257,6 +1261,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 		long addNegative;
 		long exchangeNegative;
 		long appliedNegativeMoves;
+		long nonBestNegativeIterations;
+		long nonBestNegativeIterationsWithAny;
+		long nonBestNegativeSum;
+		long nonBestNegativeMax;
 		long tryAddCalls;
 		long tryAddPoolFull;
 		long tryAddRejectedByReducedCost;
@@ -1272,6 +1280,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		final long[] iterationBinCalls = new long[5];
 		final long[] iterationBinAdded = new long[5];
 		final long[] iterationBinNanos = new long[5];
+		final long[] nonBestNegativeIterationBinSum = new long[5];
+		final long[] nonBestNegativeIterationBinAny = new long[5];
+		final long[] nonBestNegativeCountBins = new long[8];
 
 		HeuristicPricingStats(boolean enabled) {
 			this.enabled = enabled;
@@ -1307,6 +1318,36 @@ public class HeuristicPricingEngine implements PricingEngine {
 		void addExchangeCostNanos(long start) { if (enabled) exchangeCostNanos += elapsed(start); }
 		void addMoveReducedCostNanos(long start) { if (enabled) moveReducedCostNanos += elapsed(start); }
 		void addTrueRecheckNanos(long start) { if (enabled) trueRecheckNanos += elapsed(start); }
+
+		long negativeMoveCount() {
+			return removeNegative + addNegative + exchangeNegative;
+		}
+
+		// 只统计未被选为下一步的负 move；不构造序列，也不改变 tabu 搜索。
+		void observeNonBestNegativeMoves(int iteration, long negativeMoves, TabuMove selectedMove) {
+			long selectedNegative = selectedMove != null
+					&& Utility.compareLt(selectedMove.reducedCost, REDUCED_COST_TOLERANCE) ? 1L : 0L;
+			long nonBestNegative = Math.max(0L, negativeMoves - selectedNegative);
+			nonBestNegativeIterations++;
+			nonBestNegativeSum += nonBestNegative;
+			nonBestNegativeMax = Math.max(nonBestNegativeMax, nonBestNegative);
+			int iterationBin = Math.min(iteration / 10, nonBestNegativeIterationBinSum.length - 1);
+			nonBestNegativeIterationBinSum[iterationBin] += nonBestNegative;
+			if (nonBestNegative > 0L) {
+				nonBestNegativeIterationsWithAny++;
+				nonBestNegativeIterationBinAny[iterationBin]++;
+			}
+			int countBin;
+			if (nonBestNegative == 0L) { countBin = 0; }
+			else if (nonBestNegative == 1L) { countBin = 1; }
+			else if (nonBestNegative < 5L) { countBin = 2; }
+			else if (nonBestNegative < 10L) { countBin = 3; }
+			else if (nonBestNegative < 50L) { countBin = 4; }
+			else if (nonBestNegative < 100L) { countBin = 5; }
+			else if (nonBestNegative < 500L) { countBin = 6; }
+			else { countBin = 7; }
+			nonBestNegativeCountBins[countBin]++;
+		}
 
 		void observeSeed(int seedOrdinal, long start, long added) {
 			if (!enabled) {
@@ -1405,6 +1446,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ ", negativeMoveUpperBound rem/add/ex/appliedBest/nonBest=" + removeNegative + "/"
 					+ addNegative + "/" + exchangeNegative + "/" + appliedNegativeMoves + "/"
 					+ nonBestNegativeUpperBound
+					+ ", nonBestNegativePerIteration rounds/any/sum/avg/max=" + nonBestNegativeIterations + "/"
+					+ nonBestNegativeIterationsWithAny + "/" + nonBestNegativeSum + "/"
+					+ average(nonBestNegativeSum, nonBestNegativeIterations) + "/" + nonBestNegativeMax
+					+ ", nonBestNegativeByIter10 sum=" + vector(nonBestNegativeIterationBinSum)
+					+ ", any=" + vector(nonBestNegativeIterationBinAny)
+					+ ", countBins 0/1/2-4/5-9/10-49/50-99/100-499/500+="
+					+ vector(nonBestNegativeCountBins)
 					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)
 					+ "/" + ms(exchangeCostNanos)
 					+ ", tryAdd calls/accepted/dup/rcSkip/poolFull=" + tryAddCalls + "/" + tryAddAccepted
@@ -1416,6 +1464,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		private static String ms(long nanos) {
 			return String.format("%.3f", nanos / 1_000_000.0);
+		}
+
+		private static String average(long total, long count) {
+			return count == 0L ? "0.000" : String.format("%.3f", total / (double) count);
 		}
 
 		private static String vector(long[] values) {

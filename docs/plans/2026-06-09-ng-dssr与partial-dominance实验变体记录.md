@@ -2551,3 +2551,15 @@ W300 A/B 使用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root-only�
 3. `top25/minimumNewPairsSegment`：总时间 `57.824s`，exact `14.531s`；最后 certificate 4 轮，同样只更新 93 个 pair，最终平均/最大仍为 `6.86/10`。累计考虑 52 条候选，其中 18 条已被前面的更新自动阻断，实际更新 34 条。
 
 由此可以确认两个机制的作用不同：最小完整段负责避免 ng-set 膨胀，较宽 reservoir 负责把下一轮将上浮的候选提前处理。`top25/minSegment` 相对原 `top10/allSegments` 把困难 certificate 从 5 轮降为 4 轮，并将 pair 数减半；本轮 exact 约减少 11.9%。不过 `top10/minSegment` 的 exact 还略低于 top25，说明轮数和单轮状态成本仍有权衡，单个 W300 root 不足以修改默认。当前保留新模式供跨实例和完整树实验，生产默认继续使用 `allSegments`。
+
+248. 2026-07-17 最小完整重复段更新的跨变体复测
+
+为判断第 247 节的收益是否只来自 setupR50，本轮继续使用相同的 root-only、nearestK5、启发式 pricing、source-aware dominance、group-envelope prefilter、all-cycles completion bound、no ALNS/no strong/no SRI 配置，在同一 50-3 数据的 setupR75 和未放大 setup 版本上分别比较 `top10/allSegments` 与 `top25/minimumNewPairsSegment`。所有实验串行运行并打开逐轮 ng-set 统计。
+
+三组配对中，新旧策略的 root bound、pricing 次数、生成列数、pool 和 `valid=true` 均完全一致：
+
+1. setupR50 + W300：exact `16.485s -> 14.531s`，减少 11.9%；总 DSSR 轮数 `12 -> 11`，困难调用最大轮数 `5 -> 4`，pair 更新 `186 -> 93`。
+2. setupR75 + W300：exact `22.387s -> 17.798s`，减少 20.5%；总轮数 `15 -> 14`，最大轮数 `6 -> 5`，pair 更新 `216 -> 156`。新模式累计考虑 110 条 route，其中 60 条已被前序更新阻断，只需实际更新 50 条。
+3. 原始 50-3 + W300：exact `53.281s -> 50.438s`，减少 5.3%；总轮数 `18 -> 16`，最大轮数 `6 -> 4`，pair 更新 `267 -> 181`。新模式考虑 81 条 route，其中 35 条被前序更新阻断，实际更新 46 条。
+
+三组 exact 合计由 `92.153s` 降至 `82.767s`，约减少 10.2%；root 总时间合计由 `240.233s` 降至 `226.132s`，约减少 5.9%。收益在三组中均为正，但幅度与重复 route 的集中程度有关：setupR75 中候选重叠最多、收益最大；原始版本状态更重且更新分散，收益较小。当前证据已经支持“最小完整段 + 较宽 reservoir”具有稳定潜力，但仍只覆盖同一基础 seed 的三个 setup 变体和 root-only。默认继续保持 `allSegments`，下一步应在不同 seed 或完整树上验证，而不是继续在该 seed 上调 top-K。

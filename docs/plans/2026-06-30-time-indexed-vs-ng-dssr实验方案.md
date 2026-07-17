@@ -1309,3 +1309,13 @@ exact 内部也已核实。50-2 的 70.052s 分阶段 exact 中，completion-bou
 
 root 正值列构成则支持另一个更重要的结论。50-2 的 time-indexed root 只有 4 条正值列，4 条均 elementary，正值和为 2；50-3 也是 4 条正值列，其中 3 条 elementary、1 条 non-elementary。因而这两例真正支撑 root 解的列已经几乎 elementary，这与 50-2 两种方法 root bound 完全相同、50-3 仅相差 17.667 一致。这里 time-indexed 获胜的根本原因是其松弛在这些实例上已经足够接近 elementary，同时图 pricing 单次便宜；不是因为它 strong trial 的列更少。另一方面，time-indexed 的普通 `after_pricing` LP 仍为 91.471/96.871s，远高于 ng-DSSR 的 11.017/13.152s，说明其大列池成本被转移到了正常列生成的反复 RMP 求解中。
 
+
+#### 60-3 setupR50 小时间完整树瓶颈
+
+在原始时间、W0、setup cost 系数 20、无 SRI、strong branching 保持开启且不做 time-indexed root preprocessing 的统一口径下，wet060_001_3m_setupR50 的两种方法均得到 obj=bound=39647、valid=true。ng-DSSR 为 538.524s、6 个处理节点、pool 40868；time-indexed 为 439.857s、13 个处理节点、pool 218817。ng-DSSR 的 root bound 为 39621，高于 time-indexed 的 39362.542，并把树和列池显著压小，但总时间仍慢 98.667s。
+
+ng-DSSR 的主要时间为 HeuristicPricing=232.934s/469、strong_branching_light_repair_rmp=149.202s/120、normal exact 83.352s/142；普通 initial+after_pricing master LP 只有约 8.3s。time-indexed 没有 Tabu heuristic，图 pricing 与 repair 合计约 86.1s，strong trial 为 118.990s/280，普通 after_pricing LP 则为 153.867s。两种方法的 exact pricing 总量已经接近；ng-DSSR 依靠小列池节省约 145s 普通 RMP，却额外承担约 233s 启发式搜索以及约 30s strong trial，最终净慢约 99s。当前瓶颈不是 join、dominance graph 或 elementary labeling，而是启发式尾部和 strong phase1。
+
+启发式 469 次调用中，142 次返回 0 列、149 次只返回 1--5 列，两类合计约 140.4s，却只产生 359 列；但 root 及部分新 dual 下仍会一次返回大量列，直接关闭或统一缩短会把压力转移给 exact pricing。此前单 seed 20 步无产出停止在不同算例上的收益不稳定，因此当前仍保持关闭，不能把这 140s 直接视为可无损删除。
+
+strong branching 共发生 3 次正式分支，每次测试 20 个候选的左右两侧，合计 120 个 trial；最终选中候选的 half-rank 分别为 2、17、17，简单把候选数从 20 降到 10 会改变后两次分支，不能视为免费加速。另需修正此前的计时表述：strong_branching_light_repair_rmp 包含 LP.solveRelaxation()，而该方法每次先 buildModel() 创建新的 CPLEX 模型，再调用 cplex.solve()；现有 strong_branching_*_rmp_build 只统计 trial 外层 LP.construct()，未单独统计 CPLEX 内部建模。因此 149.202s 是“CPLEX 模型重建 + LP 求解”总量，目前不能断言全部是 simplex 求解。下一项低风险诊断应先拆开这两部分；若模型重建占比高，优先研究 strong trial 的模型/basis 复用，若求解占比高，再研究 reliability/pseudo-cost 或候选预算。保持 strong branching 开启这一要求不变。

@@ -1141,7 +1141,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalNgSetUpdates = 0;
 		ngDssrTotalNonElementaryRoutes = 0;
 		String routeUpdateMode = config.ngDssrNonElementaryRouteUpdateMode == null
-				? "allSegments" : config.ngDssrNonElementaryRouteUpdateMode.trim();
+				? "minimumNewPairsSegment" : config.ngDssrNonElementaryRouteUpdateMode.trim();
 		if (!"allSegments".equalsIgnoreCase(routeUpdateMode)
 				&& !"minimumNewPairsSegment".equalsIgnoreCase(routeUpdateMode)) {
 			throw new IllegalArgumentException("Unsupported ngDssrNonElementaryRouteUpdateMode: " + routeUpdateMode);

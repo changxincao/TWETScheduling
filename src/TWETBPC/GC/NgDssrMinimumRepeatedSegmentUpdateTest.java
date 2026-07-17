@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import TWETBPC.TWETBPCConfig;
 import TWETBPC.Util.PackedBitSet;
 
 /** 最小新增 pair 重复段更新的聚焦测试。 */
@@ -13,6 +14,12 @@ public final class NgDssrMinimumRepeatedSegmentUpdateTest {
 	}
 
 	public static void main(String[] args) {
+		TWETBPCConfig config = new TWETBPCConfig();
+		assertEquals(25, config.ngDssrNonElementaryRouteUpdateLimit,
+				"minimum-segment reservoir should be enabled by default");
+		assertEquals("minimumNewPairsSegment", config.ngDssrNonElementaryRouteUpdateMode,
+				"minimum-segment route update should be enabled by default");
+
 		PackedBitSet[] neighborhoods = neighborhoods(6);
 		ArrayList<String> added = new ArrayList<String>();
 		int changed = GCNGBBStyleBidirectionalNgDssr.addMinimumNewPairsRepeatedSegment(
@@ -66,6 +73,12 @@ public final class NgDssrMinimumRepeatedSegmentUpdateTest {
 	}
 
 	private static void assertEquals(List<String> expected, List<String> actual, String message) {
+		if (!expected.equals(actual)) {
+			throw new AssertionError(message + ": expected=" + expected + ", actual=" + actual);
+		}
+	}
+
+	private static void assertEquals(String expected, String actual, String message) {
 		if (!expected.equals(actual)) {
 			throw new AssertionError(message + ": expected=" + expected + ", actual=" + actual);
 		}

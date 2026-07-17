@@ -2572,3 +2572,23 @@ W300 A/B 使用 `wet050_003_3m_setupR50 + dueWindowHalfWidth=300` 的 root-only�
 第二优先级是把 raw reservoir 与实际更新预算分开。三组困难闭合调用中，候选 considered/blocked/updated 分别约为 52/18/34、85/42/43、56/23/33，约 35%--49% 的 top 候选会被本轮更早的更新自动阻断。因而 top15 若按原始名次数量截断，实际可能只产生 8--10 条有效更新。更合理的实现是保留最多 25 条候选，按 reduced cost 扫描并跳过已阻断路径，紧窗只允许最多 15 条真正发生 ng-set 改变的 route，宽窗允许 25 条；这样阻断候选不消耗预算。该口径比直接把候选池缩成 15 更符合 minimum-segment 的设计。
 
 第三优先级是在不增加 pair 数的前提下改善重复段选择。同一路径若有多个缺失 pair 数相同的最小重复段，当前按确定性位置选第一个；可在同样最小 pair 数的 tie 中，优先选择能同时阻断当前 reservoir 内更多其它路径的段。K 不超过 25 时，额外的交叉检查很小，且不会比当前方案增加该 route 的 pair 数。若仍有明显候选依次上浮，再考虑将只读 reservoir 扩到 40--50、但保持 15/25 个有效更新预算，以免 top25 被结构重复路径占满。按 label 状态规模给 pair 加权、历史 warm-start和继续静态扩大 K 的风险或不稳定性更高，暂不作为前序方案。
+250. 2026-07-17 同一 dual 批量加列与有效更新预算实验
+
+本轮按第 249 节实现并分别测试了三项策略。第一项是在同一 LP dual 下批量累计基本负列：在尚未找到基本列时完全保持原 DSSR，继续强化 ng-set 直至找到基本列或完成无负列证明；一旦已经找到基本负列，只把后续 DSSR 当作继续收集列，不再把后续轮的结果解释为当前 pricing 已闭合。累计列按 sequence signature 去重，达到 300 条、没有非基本 witness、连续两轮无新增或时间到即返回。第二项把 raw reservoir 固定为 25，但最多只让 15 条实际改变 ng-set 的路径消耗有效更新预算，已被前序 pair 阻断的路径不计数。第三项只在最小新增 pair 数并列时，选择能顺带阻断更多后续 reservoir 路径的重复段；单条路径增加的 pair 数不变。
+
+A/B 使用 wet050_003_3m_setupR50/setupR75 + dueWindowHalfWidth=300，均为 root-only、nearestK5、启发式 pricing、source-aware dominance、group-envelope prefilter、all-cycles completion bound、no ALNS/no strong/no SRI。结果如下：
+
+| 算例/策略 | root 时间 | exact 时间/调用 | DSSR 总轮数/最大轮数 | considered/blocked/updated | pool |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| R75 baseline | 50.794s | 15.585s / 7 | 11 / 5 | 84 / 42 / 42 | 19115 |
+| R75 effective15 | 57.770s | 17.919s / 7 | 11 / 5 | 83 / 41 / 42 | 19115 |
+| R75 coverage | 49.748s | 16.138s / 7 | 11 / 5 | 84 / 43 / 41 | 19115 |
+| R75 effective15+coverage | 49.102s | 15.723s / 7 | 11 / 5 | 83 / 42 / 41 | 19115 |
+| R75 batch+combined | 54.555s | 25.649s / 7 | 25 / 6 | 406 / 206 / 200 | 19137 |
+| R50 baseline | 57.815s | 14.531s / 8 | 11 / 4 | 52 / 18 / 34 | 23512 |
+| R50 effective15+coverage | 67.147s | 18.880s / 10 | 15 / 5 | 89 / 38 / 51 | 22886 |
+| R50 batch+combined | 62.679s | 17.942s / 6 | 21 / 5 | 268 / 104 / 164 | 22983 |
+
+effective budget 没有减少困难 certificate 的轮数；coverage 在 R75 只表现出约 2%--3% 的 wall-time 波动，在 R50 则使 exact 调用和 DSSR 轮数增加。两者合并不具备跨算例稳定收益。同一 dual 批量模式的语义按预期工作：R75 后期原本每次返回 69/9/11/3 条基本列，批量模式变为 82/24/10/3，但为此额外执行 14 轮 DSSR，最终无负列证明仍需要 5 轮；R50 也没有抵消额外 labeling 成本。由此可知，后期小批次 RMP 往返并不是当前主要浪费，旧 dual 下继续强化 ng-set 的成本高于少解几次 RMP 的收益。
+
+上述三项实验实现均已从生产代码清除，不保留无收益开关。主线只保留第 247--248 节已有跨变体正收益证据的 top25 + minimumNewPairsSegment，并将其设为默认；allSegments 仍可显式恢复。Java 22 定向编译、默认配置断言和最小重复段聚焦测试均通过。

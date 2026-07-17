@@ -2592,3 +2592,19 @@ A/B 使用 wet050_003_3m_setupR50/setupR75 + dueWindowHalfWidth=300，均为 roo
 effective budget 没有减少困难 certificate 的轮数；coverage 在 R75 只表现出约 2%--3% 的 wall-time 波动，在 R50 则使 exact 调用和 DSSR 轮数增加。两者合并不具备跨算例稳定收益。同一 dual 批量模式的语义按预期工作：R75 后期原本每次返回 69/9/11/3 条基本列，批量模式变为 82/24/10/3，但为此额外执行 14 轮 DSSR，最终无负列证明仍需要 5 轮；R50 也没有抵消额外 labeling 成本。由此可知，后期小批次 RMP 往返并不是当前主要浪费，旧 dual 下继续强化 ng-set 的成本高于少解几次 RMP 的收益。
 
 上述三项实验实现均已从生产代码清除，不保留无收益开关。主线只保留第 247--248 节已有跨变体正收益证据的 top25 + minimumNewPairsSegment，并将其设为默认；allSegments 仍可显式恢复。Java 22 定向编译、默认配置断言和最小重复段聚焦测试均通过。
+
+251. 2026-07-17 当前 ng-DSSR 剩余策略优化优先级
+
+当前 no-SRI ng-DSSR 的底层主线已经覆盖 source-aware dominance、group-envelope join 预过滤、completion-bound interval delta 与固定函数查询、Tmid 复用、单 word 位集以及最小完整重复段更新。最新 W300 日志还表明，大部分 exact pricing 在第一轮 DSSR 就能返回基本负列；真正需要多轮 DSSR 的主要是最后的无负列证明。因此，继续微调 PWLF、位集或单纯扩大 top-K 的收益上限已经较低，剩余机会主要在“用较小的 ng-pair 增量更快排除结构不同的非基本路径”和“减少 exact/RMP 的无效批次”。
+
+第一优先级是扩展只读 non-elementary reservoir，并在固定 pair 预算下做全局重复段覆盖。当前 top25 仅按 reduced cost 保存，困难调用中约 35%--49% 的候选会被前面路径的更新顺带阻断，说明候选结构存在明显重复。下一步不应直接增加实际更新条数，而应只把只读 reservoir 扩到 50/100/200，先离线统计每个完整重复段需要新增的 pair、它能同时阻断多少 reservoir 路径，再在相同 pair 预算下比较当前逐路径 minimum-segment 与全局 bundle coverage。每个被选择的 bundle 仍必须补齐一个完整重复段所需的全部 pair，不能只选一个高覆盖 pair，否则不能保证该非基本路径被排除。这个方向与已失败的 coverage tie 不同：后者只在同一路径等 pair 数的重复段间打破平局，且只观察 top25，没有跨路径、固定总 pair 预算地选择 bundle。
+
+第二优先级是重新 A/B `maxExactPricingColumns`。当前首轮曾出现约 7998 条基本负候选、只保留 5000 条，而后期又出现只返回 1/6/20 条列但仍需重新构造 completion bound 的 exact 调用。现有 labeling 会完成整轮搜索，5000 主要限制保留和回刷数量，因此 3000/5000/8000 的比较不会改变定价正确性，但会改变 evaluator、Pool、RMP 大小和后续 dual 轨迹。该实验必须同时记录 exact 调用数、evaluator、master LP、pool 和 root/整树时间，不能只看单次 pricing；它比继续修改 ng-set 初始化更容易隔离，也可能直接减少后期小批次往返。
+
+第三优先级是先诊断短重复环，再决定是否引入独立的短期记忆。当前 nearest ng-set 在转移时可能遗忘最近访问任务；若负非基本 witness 主要由长度 2 或 3 的重复段构成，可以在较小 nearest K 上额外保留最近 2--3 个任务，直接排除短环。该约束只删除非基本路径，不删除任何 elementary 路径，理论上安全；但它会改变 label 状态和 dominance key，未必比直接增大 K 更轻。因此应先统计重复段长度 2/3/4+ 的比例和对应 pair 更新占比，只有短环占明显多数时，才比较 `较小 K + 短期记忆` 与当前 `nearest floor(n/10)`。
+
+候选列的多样性属于第四优先级。当前 elementary heap 只按 reduced cost 和 sequence signature 选前 K，可能返回大量共享相同弧的近似列。可以先诊断前 5000/全部负基本候选的弧覆盖率、路径重叠和每增加一条列带来的新增弧数；若冗余确实很高，再考虑保留一部分最负列，并用剩余名额选择 reduced cost 仍可接受但增加新弧覆盖的列。该策略可能减少 RMP 规模，也可能因舍弃最负列而增加迭代，不能未经完整 root A/B 直接启用。
+
+队列顺序只作为低成本复核项。历史小算例中 TIME 优于 REDUCED_COST，当前常用实验 runner 也直接固定为 TIME；可以把 runner 改为可由属性覆盖后，在最新 W300 主线上补一次 TIME/REDUCED_COST/REACHABLE_SIZE A/B，但不应把它当作当前主要缺陷。跨 dual 复用 completion bound 则不建议直接做：dual 改变会让弧成本同时升降，当前同一 build 内的单调 delta 不能安全跨 LP 复用；而现有 completion bound 在困难轮次确实能剪掉大量扩展，简单关闭或使用过弱旧 bound 很可能把成本转移到 labeling。
+
+已经有负面证据的方向不再重复：历史或同 node warm-start、same-dual 继续 DSSR 批量加列、dual smoothing、固定扩大 top-K、effective15、仅同路径 tie coverage、partial dominance、full-domain join、用 group envelope 替代真实 label join、duplicate greedy repair、每轮 time-indexed helper，以及继续做 PWLF/bitset 微小常数优化。若全局 bundle coverage 和列批量控制仍无稳定收益，下一层策略应转向按 node 的图规模和 repeatability 在 ng-DSSR 与 time-indexed 之间选择，而不是继续强迫单一 pricing 在所有实例上占优。

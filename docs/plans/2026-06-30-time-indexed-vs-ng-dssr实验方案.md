@@ -1299,3 +1299,13 @@ exact 内部也已核实。50-2 的 70.052s 分阶段 exact 中，completion-bou
 
 50-2 中 ng-DSSR 与 time-indexed 的 root bound 都是 39364.5，最终节点也同为 6 个，elementary pricing 没有产生可兑现的树强度收益。50-3 中 ng-DSSR root bound 高 17.667，节点从 33 降到 16、pool 从 390815 降到 81875，说明核心 relaxation 确实更强；但 301.398s strong trial 和 205.431s heuristic 抵消了该优势。因此下一轮优先 A/B 不应继续改 labeling，而应测试更轻的分支策略：减少 phase1 候选数，或只在 root/低可靠度阶段做 strong branching、随后使用 pseudo-cost。当前选中候选的 half-rank 常落在 6--20，简单把 20 固定砍到 5 可能增加节点，较合理的起点是 10 候选及 root-only/reliability branching 两种独立实验。启发式方面，root 仍一次加入约 2.2 万列，不能直接关闭；更值得测试固定的“root 保持 30 seeds/50 iterations，非根节点降低预算或 exact-first”口径，避免自适应逻辑，同时检查增加的 exact 是否抵消节省。该结论属于性能策略，不涉及当前正确性。
 
+
+
+#### time-indexed strong branching 对照
+
+同一批 50-job time-indexed 日志表明，其 strong branching 同样是明显成本，但总量低于 ng-DSSR。50-2 与 ng-DSSR 一样发生 120 次 trial，time-indexed 的 `strong_branching_light_repair_rmp` 为 121.025s，平均 1.009s/次；ng-DSSR 为 197.877s，平均 1.649s/次。50-3 的 time-indexed 因树更大而发生 1160 次 trial，总计 178.554s、平均 0.154s/次；ng-DSSR 只有 320 次，却为 301.398s、平均 0.942s/次。time-indexed strong trial 分别占自身总时间 35.3% 和 32.4%，占 master LP 时间 56.2% 和 61.5%。
+
+该差异不是 lightweight 把 time-indexed 列筛得更少。其 trial seed 平均列数反而为 30048/7654，明显高于 ng-DSSR 的 7519/4501；seed 准备为 2.402/5.598s、建模仅 0.077/0.170s，真正差异仍在 CPLEX 求解。现有日志没有 simplex iteration、退化 pivot 或矩阵条件数，因而不能进一步把单次 LP 更快归因到某个具体 CPLEX 机制。可以确认的是，大量 time-indexed 列高度冗余但提供了更多替代基，列数本身不能直接预测 trial LP 时间。
+
+root 正值列构成则支持另一个更重要的结论。50-2 的 time-indexed root 只有 4 条正值列，4 条均 elementary，正值和为 2；50-3 也是 4 条正值列，其中 3 条 elementary、1 条 non-elementary。因而这两例真正支撑 root 解的列已经几乎 elementary，这与 50-2 两种方法 root bound 完全相同、50-3 仅相差 17.667 一致。这里 time-indexed 获胜的根本原因是其松弛在这些实例上已经足够接近 elementary，同时图 pricing 单次便宜；不是因为它 strong trial 的列更少。另一方面，time-indexed 的普通 `after_pricing` LP 仍为 91.471/96.871s，远高于 ng-DSSR 的 11.017/13.152s，说明其大列池成本被转移到了正常列生成的反复 RMP 求解中。
+

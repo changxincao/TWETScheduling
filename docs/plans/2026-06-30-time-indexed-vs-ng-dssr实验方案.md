@@ -1287,3 +1287,15 @@ setup cost 主要是交互项。timeX10 + setupR50 + cost20 中 ng-DSSR 317.697s
 50-job 两个种子则是混合结果。ng-DSSR 都显著减少节点和列池，但总时间分别慢 63.1% 和 23.8%。`wet050_002_2m` 两种方法 root bound 和最终节点数完全相同，elementary pricing 没有带来可兑现的强度提升；ng-DSSR 的 HeuristicPricing、exact 和 master LP 分别为 191.790s、70.383s 和 211.984s，因此无法抵消较小列池。`wet050_003_2m` 中 ng-DSSR root bound 为 39932.167，高于 time-indexed 的 39914.500，节点从 33 降到 16、pool 从 390,815 降到 81,875，但 HeuristicPricing 仍累计 205.431s，最终总时间仍略慢。
 
 这批结果支持比此前更有底气但也更准确的论文表述：ng-DSSR 并非只在时间放大后才有竞争力，在原始小时间 40-job 随机种子上已经能够稳定达到并超过 time-indexed；在 50-job 上，它仍稳定产生更小的树和列池，但是否转化为总时间优势取决于 root bound 提升能否覆盖启发式、exact 和强分支 LP 的额外成本。不能写成“ng-DSSR 在所有小时间算例上更快”，更合适的结论是“小时间下两者各有优势，ng-DSSR 已有一组稳定胜出的实例；horizon 放大后 ng-DSSR 的优势更稳定”。汇总数据保存在 `test-results/bpc/20260717-smalltime-seeds-v1-summary.csv`，每个 run 目录同时保留 `args.txt`、`command.txt`、PID、stdout/stderr 和事件日志。
+
+
+#### 50-job ng-DSSR 耗时拆分
+
+进一步按事件日志拆分后，50-job 的主要问题不是 ng-DSSR exact labeling，而是 strong branching trial LP 和正常节点中的 Tabu heuristic。`wet050_002_2m` 总时间 558.547s，其中 120 次 `strong_branching_light_repair_rmp` 求解耗时 197.877s，占总时间 35.4%、占全部 master LP 时间 93.3%；HeuristicPricing 为 191.790s/623 次，占 34.3%；正常 ng-DSSR exact 为 70.383s/135 次，占 12.6%。`wet050_003_2m` 总时间 682.246s，其中 320 次 strong trial LP 为 301.398s，占总时间 44.2%、占 master LP 时间 92.2%；HeuristicPricing 为 205.431s/995 次，占 30.1%；正常 exact 为 57.405s/254 次，占 8.4%。两例中 strong trial 与 heuristic 合计已占总时间约 70%--74%，因此不能再把 50-job 退化主要归因于 join 或 dominance graph。
+
+lightweight seed 确实生效，但只减小 trial RMP，没有消除 trial LP。50-2 的 120 个 trial 平均仍含 7519 列，范围 2364--15439；50-3 的 320 个 trial 平均含 4501 列，范围 860--15245。对应 Java 建模总时间只有 0.022s 和 0.035s，真正的 CPLEX 求解时间分别为 197.877s 和 301.398s。相比之下，40-3/40-4 的 trial 平均仅 1353/3815 列，单次 LP 为 0.143/0.380s；50-2/50-3 单次已升至 1.649/0.942s。当前每个发生分支的节点固定测试 20 个候选、每个候选左右各解一次，因此 50-job 上这个非线性 LP 成本被直接放大。
+
+exact 内部也已核实。50-2 的 70.052s 分阶段 exact 中，completion-bound 构造为 35.314s，forward/backward 扩展为 15.867/10.490s，join 只有 1.248s；50-3 的 57.107s 中，completion bound 为 34.619s，forward/backward 为 4.709/8.912s，join 只有 1.174s。继续优化 join 即使完全消除也只能节省约 1 秒；exact 全部消除的理论上限也远小于 strong trial 与 heuristic，因此当前优化顺序必须调整。
+
+50-2 中 ng-DSSR 与 time-indexed 的 root bound 都是 39364.5，最终节点也同为 6 个，elementary pricing 没有产生可兑现的树强度收益。50-3 中 ng-DSSR root bound 高 17.667，节点从 33 降到 16、pool 从 390815 降到 81875，说明核心 relaxation 确实更强；但 301.398s strong trial 和 205.431s heuristic 抵消了该优势。因此下一轮优先 A/B 不应继续改 labeling，而应测试更轻的分支策略：减少 phase1 候选数，或只在 root/低可靠度阶段做 strong branching、随后使用 pseudo-cost。当前选中候选的 half-rank 常落在 6--20，简单把 20 固定砍到 5 可能增加节点，较合理的起点是 10 候选及 root-only/reliability branching 两种独立实验。启发式方面，root 仍一次加入约 2.2 万列，不能直接关闭；更值得测试固定的“root 保持 30 seeds/50 iterations，非根节点降低预算或 exact-first”口径，避免自适应逻辑，同时检查增加的 exact 是否抵消节省。该结论属于性能策略，不涉及当前正确性。
+

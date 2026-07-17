@@ -354,6 +354,8 @@ public class TWETBPCConfig {
 	public int heuristicPricingPoolSize = 5000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_iteration_number，每条 seed 的 tabu 搜索轮数。 */
 	public int heuristicPricingTabuIterations = 50;
+	/** 2026-07-17: 前 20 步没有生成新负列时，提前结束当前 seed；默认关闭，仅用于受控 A/B。 */
+	public boolean heuristicPricingStopUnproductiveSeedAfter20 = false;
 
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_tenure，tabu 禁忌长度。 */
 	public int heuristicPricingTabuTenure = 30;

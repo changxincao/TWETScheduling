@@ -318,6 +318,9 @@ public class GCBBFullDomainComparisonTest {
 		config.diagnosticHeuristicPricingDetails = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.heuristicPricingDiagnostics",
 				Boolean.toString(config.diagnosticHeuristicPricingDetails)));
+		config.heuristicPricingStopUnproductiveSeedAfter20 = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.heuristicStopUnproductiveSeedAfter20",
+				Boolean.toString(config.heuristicPricingStopUnproductiveSeedAfter20)));
 		config.heuristicPricingPrecomputeArcCompatibility = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.heuristicPrecomputeArcCompatibility",
 				Boolean.toString(config.heuristicPricingPrecomputeArcCompatibility)));

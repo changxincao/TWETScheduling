@@ -34,6 +34,7 @@ import TWETBPC.Util.SequenceSignature;
 public class HeuristicPricingEngine implements PricingEngine {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
+	private static final int UNPRODUCTIVE_SEED_WARMUP_ITERATIONS = 20;
 
 	private final Data data;
 	private final TWETBPCConfig config;
@@ -235,7 +236,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 				&& !timeLimitChecker.isTimeLimitReached(); iter++) {
 			if (stats.enabled) { stats.tabuIterations++; }
 			long iterationStart = stats.start();
-			long acceptedBeforeIteration = stats.tryAddAccepted;
+			int candidatesBeforeIteration = negativeCandidates.size();
 			long findStart = stats.start();
 			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost, stats);
 			stats.addFindBestMoveNanos(findStart);
@@ -252,13 +253,19 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, windowContext,
 					generatedSignatures, negativeCandidates, costAudit, stats);
-			long accepted = stats.tryAddAccepted - acceptedBeforeIteration;
+			long accepted = negativeCandidates.size() - candidatesBeforeIteration;
 			if (iter < 20) {
 				firstTwentyAccepted += accepted;
 			} else {
 				remainingAccepted += accepted;
 			}
 			stats.observeTabuIteration(iter, iterationStart, accepted);
+			if (config.heuristicPricingStopUnproductiveSeedAfter20
+					&& iter + 1 == UNPRODUCTIVE_SEED_WARMUP_ITERATIONS
+					&& firstTwentyAccepted == 0L) {
+				if (stats.enabled) { stats.unproductiveSeedEarlyStops++; }
+				break;
+			}
 		}
 		stats.observeSeedPhaseYield(firstTwentyAccepted, remainingAccepted);
 	}
@@ -1197,6 +1204,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		int seedNoEarlyLate;
 		int seedEarlyNoLate;
 		int seedEarlyLate;
+		int unproductiveSeedEarlyStops;
 		long seedFirstTwentyAccepted;
 		long seedRemainingAccepted;
 		long sriContextNanos;
@@ -1356,7 +1364,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ ", seed phaseYield none-none/none-late/early-none/early-late=" + seedNoEarlyNoLate
 					+ "/" + seedNoEarlyLate + "/" + seedEarlyNoLate + "/" + seedEarlyLate
 					+ ", accepted first20/remaining=" + seedFirstTwentyAccepted + "/"
-					+ seedRemainingAccepted
+					+ seedRemainingAccepted + ", unproductiveEarlyStops=" + unproductiveSeedEarlyStops
 					+ ", tabu calls/valid/invalid/iters/noMove/apply=" + tabuSearchCalls + "/" + validSeeds
 					+ "/" + invalidSeeds + "/" + tabuIterations + "/" + noMoveBreaks + "/" + appliedMoves
 

@@ -448,6 +448,8 @@ public class TWETBPCConfig {
 	public boolean diagnosticPricingSummaryDetails = false;
 	/** 2026-07-15: 启发式 pricing 热点拆分统计；默认关闭，避免高频 nanoTime 影响批量实验。 */
 	public boolean diagnosticHeuristicPricingDetails = false;
+	/** 2026-07-18: 记录标准 best-move 轨迹，并分析同 dual 下启发式漏掉的 exact elementary 负列。 */
+	public boolean diagnosticHeuristicExactMissAnalysis = false;
 	/** 2026-07-15: 启发式候选使用每轮预计算的扁平禁弧表；关闭可回退逐次 Node 查询。 */
 	public boolean heuristicPricingPrecomputeArcCompatibility = true;
 	/** 2026-07-15: 启发式局部 move 复用当前 LP dual 的扁平快照；关闭可回退 getter 路径。 */

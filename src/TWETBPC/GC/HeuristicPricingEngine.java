@@ -55,6 +55,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private final TWETColumnEvaluator evaluator;
 	private final SegmentProfile[] singletonProfileCache;
 	private final PiecewiseLinearFunction.ReadOnlySegmentView[] penaltySegmentViewCache;
+	private long diagnosticTraceCallSequence;
+	private HeuristicPricingDiagnosticTrace lastDiagnosticTrace;
 
 	public HeuristicPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
@@ -72,14 +74,18 @@ public class HeuristicPricingEngine implements PricingEngine {
 	@Override
 	public PricingResult price(LP lp, TimeLimitChecker timeLimitChecker) {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
+		lastDiagnosticTrace = null;
 		if (!config.enableHeuristicPricing || config.maxHeuristicPricingColumns <= 0) {
 			return PricingResult.noImprovement("Heuristic pricing disabled");
 		}
 		if (this.timeLimitChecker.isTimeLimitReached()) {
 			return PricingResult.noImprovement("Time limit reached before heuristic pricing");
 		}
+		lastDiagnosticTrace = config.diagnosticHeuristicExactMissAnalysis
+				? new HeuristicPricingDiagnosticTrace(++diagnosticTraceCallSequence) : null;
 
-		HeuristicPricingStats stats = new HeuristicPricingStats(config.diagnosticHeuristicPricingDetails);
+		HeuristicPricingStats stats = new HeuristicPricingStats(config.diagnosticHeuristicPricingDetails,
+				config.heuristicPricingCollectNonBestNegativeMoves);
 		long phaseStart = stats.start();
 		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
 		stats.addSriContextNanos(phaseStart);
@@ -100,7 +106,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		Utility.resetCurUpperBound(Utility.big_M);
 		// 标准轨迹池始终保持旧 OFF 语义；非 best 候选只能作为附加列，不能改变 Tabu 搜索停止条件。
 		HeuristicCandidatePool candidatePool = new HeuristicCandidatePool(config.heuristicPricingPoolSize, false);
-		ArrayList<ScoredSequence> nonBestCandidates = new ArrayList<ScoredSequence>();
+		ArrayList<ScoredSequence> nonBestCandidates = config.heuristicPricingCollectNonBestNegativeMoves
+				? new ArrayList<ScoredSequence>() : null;
 		HeuristicCostAudit costAudit = new HeuristicCostAudit();
 
 		phaseStart = stats.start();
@@ -113,8 +120,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 			long candidatesBeforeSeed = candidatePool.acceptedCount();
 			HeuristicCandidatePool seedNonBestPool = config.heuristicPricingCollectNonBestNegativeMoves
 					? new HeuristicCandidatePool(config.heuristicPricingNonBestColumnsPerSeed, true) : null;
-			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, arcCompatibility, moveDuals,
-					candidatePool, seedNonBestPool, costAudit, stats);
+			tabuSearch(seedOrdinal, seed.getSequence(), lp, sriContext, windowContext, arcCompatibility, moveDuals,
+					candidatePool, seedNonBestPool, costAudit, stats, lastDiagnosticTrace);
 			if (seedNonBestPool != null) {
 				nonBestCandidates.addAll(seedNonBestPool.sortedCandidates());
 				stats.candidatePoolReplacements += seedNonBestPool.replacementCount();
@@ -123,13 +130,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 		stats.addSearchNanos(phaseStart);
 
-		if (candidatePool.isEmpty() && nonBestCandidates.isEmpty()) {
+		if (candidatePool.isEmpty() && (nonBestCandidates == null || nonBestCandidates.isEmpty())) {
 			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column"
 					+ costAudit.summary() + stats.summary());
 		}
 		phaseStart = stats.start();
 		ArrayList<ScoredSequence> negativeCandidates = candidatePool.sortedCandidates();
-		Collections.sort(nonBestCandidates, BEST_CANDIDATE_ORDER);
+		if (nonBestCandidates != null) {
+			Collections.sort(nonBestCandidates, BEST_CANDIDATE_ORDER);
+		}
 		stats.addSortNanos(phaseStart);
 
 		phaseStart = stats.start();
@@ -137,6 +146,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		int limit = Math.min(config.maxHeuristicPricingColumns, negativeCandidates.size());
 		for (int i = 0; i < limit; i++) {
 			ScoredSequence candidate = negativeCandidates.get(i);
+			if (lastDiagnosticTrace != null) {
+				lastDiagnosticTrace.recordGeneratedColumn(candidate.sequence, candidate.cost, candidate.reducedCost);
+			}
 			columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost, ColumnSource.PRICING_HEURISTIC,
 					false));
 		}
@@ -146,25 +158,35 @@ public class HeuristicPricingEngine implements PricingEngine {
 			outputSignatures.add(candidate.signature);
 		}
 		int extraReturned = 0;
-		for (ScoredSequence candidate : nonBestCandidates) {
-			if (!outputSignatures.add(candidate.signature)) {
-				continue;
+		if (nonBestCandidates != null) {
+			for (ScoredSequence candidate : nonBestCandidates) {
+				if (!outputSignatures.add(candidate.signature)) {
+					continue;
+				}
+				columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost,
+						ColumnSource.PRICING_HEURISTIC, false));
+				extraReturned++;
 			}
-			columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost,
-					ColumnSource.PRICING_HEURISTIC, false));
-			extraReturned++;
 		}
 		stats.addBuildColumnsNanos(phaseStart);
 		stats.returnedColumns = columns.size();
 		stats.negativeCandidates = negativeCandidates.size();
 		stats.standardCandidates = negativeCandidates.size();
-		stats.extraCandidates = nonBestCandidates.size();
+		stats.extraCandidates = nonBestCandidates == null ? 0 : nonBestCandidates.size();
 		stats.extraReturnedColumns = extraReturned;
 		stats.candidatePoolReplacements += candidatePool.replacementCount();
-		return new PricingResult(columns, true,
-				"Tabu heuristic pricing generated " + columns.size() + " columns from standard/extra pools "
-						+ negativeCandidates.size() + "/" + nonBestCandidates.size()
-						+ costAudit.summary() + stats.summary());
+		String outputDescription = nonBestCandidates == null
+				? "Tabu heuristic pricing generated " + columns.size() + " standard best-move columns"
+				: "Tabu heuristic pricing generated " + columns.size() + " columns from standard/extra pools "
+						+ negativeCandidates.size() + "/" + nonBestCandidates.size();
+		return new PricingResult(columns, true, outputDescription + costAudit.summary() + stats.summary());
+	}
+
+	/** 返回并清除最近一次诊断轨迹，避免跨 LP dual 误复用。 */
+	public HeuristicPricingDiagnosticTrace takeLastDiagnosticTrace() {
+		HeuristicPricingDiagnosticTrace trace = lastDiagnosticTrace;
+		lastDiagnosticTrace = null;
+		return trace;
 	}
 
 	@Override
@@ -243,10 +265,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 		return Integer.compare(a.column.getId(), b.column.getId());
 	}
-	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
+	private void tabuSearch(int seedOrdinal, List<Integer> seed, LP lp, SriPricingContext sriContext,
 			HeuristicWindowContext windowContext, HeuristicArcCompatibility arcCompatibility,
 			HeuristicMoveDuals moveDuals, HeuristicCandidatePool candidatePool,
-			HeuristicCandidatePool seedNonBestPool, HeuristicCostAudit costAudit, HeuristicPricingStats stats) {
+			HeuristicCandidatePool seedNonBestPool, HeuristicCostAudit costAudit, HeuristicPricingStats stats,
+			HeuristicPricingDiagnosticTrace diagnosticTrace) {
 		if (stats.enabled) { stats.tabuSearchCalls++; }
 		long stateStart = stats.start();
 		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext, arcCompatibility, moveDuals,
@@ -258,6 +281,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 		if (stats.enabled) { stats.validSeeds++; }
 		double bestReducedCost = state.reducedCost(lp);
+		if (diagnosticTrace != null) {
+			diagnosticTrace.recordSeed(seedOrdinal, state.sequence, state.cost, bestReducedCost);
+		}
 		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, windowContext,
 				candidatePool, costAudit, stats);
 		NegativeMoveCollector moveCollector = seedNonBestPool == null ? null
@@ -287,7 +313,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 						candidatePool.acceptedCount() - candidatesBeforeIteration);
 				break;
 			}
-			if (stats.enabled && Utility.compareLt(bestMove.reducedCost, REDUCED_COST_TOLERANCE)) {
+			if (stats.trackNonBest && Utility.compareLt(bestMove.reducedCost, REDUCED_COST_TOLERANCE)) {
 				stats.appliedNegativeMoves++;
 			}
 			long applyStart = stats.start();
@@ -295,6 +321,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 			stats.addApplyMoveNanos(applyStart);
 			if (Utility.compareLt(state.currentReducedCost, bestReducedCost)) {
 				bestReducedCost = state.currentReducedCost;
+			}
+			if (diagnosticTrace != null) {
+				diagnosticTrace.recordBestMove(seedOrdinal, iter, state.sequence, bestMove.description(), state.cost,
+						state.currentReducedCost);
 			}
 			tryAddNegative(state.sequence, state.cost, state.currentReducedCost, lp, sriContext, windowContext,
 					candidatePool, costAudit, stats);
@@ -318,7 +348,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private TabuMove findBestMove(TabuRouteState state, LP lp, int iter, double bestReducedCost,
 			NegativeMoveCollector moveCollector, HeuristicPricingStats stats) {
 		if (stats.enabled) { stats.findBestMoveCalls++; }
-		long negativeMoveCountBefore = stats.enabled ? stats.negativeMoveCount() : 0L;
+		boolean trackNonBest = stats.enabled && stats.trackNonBest;
+		long negativeMoveCountBefore = trackNonBest ? stats.negativeMoveCount() : 0L;
 		TabuMove bestMove = null;
 		double bestMoveReducedCost = Double.POSITIVE_INFINITY;
 		if (state.sequence.size() > 1) {
@@ -353,7 +384,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 				}
 			}
 		}
-		if (stats.enabled) {
+		if (trackNonBest) {
 			stats.observeNonBestNegativeMoves(iter, stats.negativeMoveCount() - negativeMoveCountBefore, bestMove);
 		}
 		return bestMove;
@@ -670,11 +701,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 			double rc = reducedCostAfterRemove(pos, removedJob, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
 			if (stats.enabled) { stats.removeValid++; }
-			if (Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) {
-				if (stats.enabled) { stats.removeNegative++; }
-				if (moveCollector != null) {
-					moveCollector.consider(this, MoveType.REMOVE, pos, removedJob, candidateCost, rc);
-				}
+			if (moveCollector != null && Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) {
+				if (stats.trackNonBest) { stats.removeNegative++; }
+				moveCollector.consider(this, MoveType.REMOVE, pos, removedJob, candidateCost, rc);
 			}
 			if (!isAcceptedCandidate(rc, MoveType.REMOVE, removedJob, -1, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
@@ -709,11 +738,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 			double rc = reducedCostAfterAdd(pos, job, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
 			if (stats.enabled) { stats.addValid++; }
-			if (Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) {
-				if (stats.enabled) { stats.addNegative++; }
-				if (moveCollector != null) {
-					moveCollector.consider(this, MoveType.ADD, pos, job, candidateCost, rc);
-				}
+			if (moveCollector != null && Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) {
+				if (stats.trackNonBest) { stats.addNegative++; }
+				moveCollector.consider(this, MoveType.ADD, pos, job, candidateCost, rc);
 			}
 			if (!isAcceptedCandidate(rc, MoveType.ADD, job, -1, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
@@ -748,11 +775,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 			double rc = reducedCostAfterExchange(pos, job, removedJob, candidateCost, lp);
 			stats.addMoveReducedCostNanos(rcStart);
 			if (stats.enabled) { stats.exchangeValid++; }
-			if (Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) {
-				if (stats.enabled) { stats.exchangeNegative++; }
-				if (moveCollector != null) {
-					moveCollector.consider(this, MoveType.EXCHANGE, pos, job, candidateCost, rc);
-				}
+			if (moveCollector != null && Utility.compareLt(rc, REDUCED_COST_TOLERANCE)) {
+				if (stats.trackNonBest) { stats.exchangeNegative++; }
+				moveCollector.consider(this, MoveType.EXCHANGE, pos, job, candidateCost, rc);
 			}
 			if (!isAcceptedCandidate(rc, MoveType.EXCHANGE, job, removedJob, tabuTenure, iter, bestReducedCost)
 					|| !Utility.compareLt(rc, bestMoveReducedCost)) {
@@ -1478,6 +1503,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private static final class HeuristicPricingStats {
 
 		final boolean enabled;
+		final boolean trackNonBest;
 		int seedScanned;
 		int seedCompatible;
 		int seedIncompatible;
@@ -1573,8 +1599,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		final long[] nonBestNegativeIterationBinAny = new long[5];
 		final long[] nonBestNegativeCountBins = new long[8];
 
-		HeuristicPricingStats(boolean enabled) {
+		HeuristicPricingStats(boolean enabled, boolean trackNonBest) {
 			this.enabled = enabled;
+			this.trackNonBest = enabled && trackNonBest;
 		}
 
 		long start() {
@@ -1699,9 +1726,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 			if (!enabled) {
 				return "";
 			}
-			long negativeMoveUpperBound = removeNegative + addNegative + exchangeNegative;
-			// 仅统计已完成评价的负 move 次数；不构造 sequence，也不做 signature 去重或真成本复核。
-			long nonBestNegativeUpperBound = Math.max(0L, negativeMoveUpperBound - appliedNegativeMoves);
 			return ", heuristicStats phaseMs sri/window/seed/search/sort/buildCols="
 					+ ms(sriContextNanos) + "/" + ms(windowContextNanos) + "/" + ms(seedCollectNanos)
 					+ "/" + ms(searchNanos) + "/" + ms(sortNanos) + "/" + ms(buildColumnsNanos)
@@ -1732,28 +1756,33 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ ", moveSelected rem/add/ex=" + removeSelected + "/" + addSelected + "/" + exchangeSelected
 					+ ", moveMs total rem/add/ex=" + ms(removeTotalNanos) + "/" + ms(addTotalNanos)
 					+ "/" + ms(exchangeTotalNanos)
-					+ ", negativeMoveUpperBound rem/add/ex/appliedBest/nonBest=" + removeNegative + "/"
-					+ addNegative + "/" + exchangeNegative + "/" + appliedNegativeMoves + "/"
-					+ nonBestNegativeUpperBound
-					+ ", nonBestNegativePerIteration rounds/any/sum/avg/max=" + nonBestNegativeIterations + "/"
-					+ nonBestNegativeIterationsWithAny + "/" + nonBestNegativeSum + "/"
-					+ average(nonBestNegativeSum, nonBestNegativeIterations) + "/" + nonBestNegativeMax
-					+ ", nonBestNegativeByIter10 sum=" + vector(nonBestNegativeIterationBinSum)
-					+ ", any=" + vector(nonBestNegativeIterationBinAny)
-					+ ", countBins 0/1/2-4/5-9/10-49/50-99/100-499/500+="
-					+ vector(nonBestNegativeCountBins)
+					+ nonBestSummary()
 					+ ", moveMs cost rem/add/ex=" + ms(removeCostNanos) + "/" + ms(addCostNanos)
 					+ "/" + ms(exchangeCostNanos)
-					+ ", candidatePool moveSeen/thresholdSkip/sequenceBuild/replacements="
-					+ candidatePoolMoveConsidered + "/" + candidatePoolMoveThresholdRejected + "/"
-					+ candidatePoolMoveSequencesBuilt + "/" + candidatePoolReplacements
 					+ ", admissionThresholdSkip=" + candidatePoolThresholdRejected
 					+ ", tryAdd calls/accepted/dup/rcSkip/poolFull=" + tryAddCalls + "/" + tryAddAccepted
 					+ "/" + tryAddDuplicate + "/" + tryAddRejectedByReducedCost + "/" + tryAddPoolFull
 					+ ", trueRecheck calls/ms/bigM/filtered/skipped=" + trueRecheckCalls + "/" + ms(trueRecheckNanos)
 					+ "/" + trueRecheckBigM + "/" + trueRecheckFiltered + "/" + tryAddSkippedTrueRecheck
-					+ ", output standard/extra/extraReturned/total=" + standardCandidates + "/"
-					+ extraCandidates + "/" + extraReturnedColumns + "/" + returnedColumns;
+					+ ", output standard/total=" + standardCandidates + "/" + returnedColumns;
+		}
+
+		private String nonBestSummary() {
+			if (!trackNonBest) {
+				return "";
+			}
+			long upperBound = Math.max(0L, negativeMoveCount() - appliedNegativeMoves);
+			return ", nonBest upperBound=" + upperBound
+					+ ", perIteration rounds/any/sum/avg/max=" + nonBestNegativeIterations + "/"
+					+ nonBestNegativeIterationsWithAny + "/" + nonBestNegativeSum + "/"
+					+ average(nonBestNegativeSum, nonBestNegativeIterations) + "/" + nonBestNegativeMax
+					+ ", byIter10 sum=" + vector(nonBestNegativeIterationBinSum)
+					+ ", any=" + vector(nonBestNegativeIterationBinAny)
+					+ ", countBins=" + vector(nonBestNegativeCountBins)
+					+ ", collector seen/thresholdSkip/sequenceBuild/replacements="
+					+ candidatePoolMoveConsidered + "/" + candidatePoolMoveThresholdRejected + "/"
+					+ candidatePoolMoveSequencesBuilt + "/" + candidatePoolReplacements
+					+ ", output extra/returned=" + extraCandidates + "/" + extraReturnedColumns;
 		}
 
 		private static String ms(long nanos) {
@@ -2124,6 +2153,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 			this.position = position;
 			this.primaryJob = primaryJob;
 			this.secondaryJob = secondaryJob;
+		}
+
+		String description() {
+			return type + "(pos=" + position + ",job=" + primaryJob
+					+ (secondaryJob < 0 ? "" : ",removed=" + secondaryJob) + ")";
 		}
 	}
 

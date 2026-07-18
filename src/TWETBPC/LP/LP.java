@@ -314,6 +314,11 @@ public class LP {
 		return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, outsourcingMembershipDual, arcDual);
 	}
 
+	/** @return 当前 pricing 实际使用的 dual；稳定化开启时返回 override，否则返回真实 LP dual。 */
+	public PricingDualSnapshot captureEffectivePricingDuals() {
+		return pricingDualOverride == null ? captureTruePricingDuals() : pricingDualOverride.copy();
+	}
+
 	public void setPricingDualOverride(PricingDualSnapshot snapshot) {
 		this.pricingDualOverride = snapshot == null ? null : snapshot.copy();
 	}

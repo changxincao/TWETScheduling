@@ -12,12 +12,15 @@ import TWETBPC.TimeLimitChecker;
 import TWETBPC.CUT.CutGenerationResult;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
+import TWETBPC.GC.HeuristicPricingDiagnosticTrace;
+import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.GC.TimeIndexedGraphRank1CutPricingEngine;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.GC.TimeIndexedScalarCompletionBound;
+import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
@@ -41,6 +44,7 @@ public class PC {
 	private double incumbentForDualBoundPruning;
 	private double lastObservedDualBound;
 	private boolean lastNodePrunedByDualBound;
+	private HeuristicPricingDiagnosticTrace pendingHeuristicMissTrace;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
 	public PC(TWETBPCConfig config, List<PricingEngine> pricingEngines, List<CutGenerator> cutGenerators,
@@ -60,6 +64,7 @@ public class PC {
 	}
 
 	public TWETMasterSolution solve(LP lp, double incumbentCost) {
+		pendingHeuristicMissTrace = null;
 		lastReusableSubtreeArcEliminationBounds = null;
 		lastObservedDualBound = Double.NEGATIVE_INFINITY;
 		lastNodePrunedByDualBound = false;
@@ -656,6 +661,8 @@ public class PC {
 	private PricingPassResult runPricingPass(LP lp, String dualModeName, boolean allowReusableBounds,
 			LP.PricingDualSnapshot acceptanceDual, double dualBoundObjectiveOverride,
 			LP.PricingDualSnapshot separationDual) {
+		// 新一轮 pass 可能不重解 LP，只切换 stabilized pricing dual；旧轨迹不能跨口径复用。
+		pendingHeuristicMissTrace = null;
 		PricingPassResult bestObservedEmptyPass = PricingPassResult.EMPTY;
 		for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
 			PricingEngine engine = pricingEngines.get(engineIndex);
@@ -1188,6 +1195,8 @@ public class PC {
 			lastReusableSubtreeArcEliminationBounds = null;
 		}
 		int filteredByAcceptanceDual = 0;
+		ArrayList<TWETColumn> acceptedExactElementaryColumns = config.diagnosticHeuristicExactMissAnalysis
+				&& pendingHeuristicMissTrace != null ? new ArrayList<TWETColumn>() : null;
 		if (result.isImproved()) {
 			for (int i = 0; i < result.getColumns().size(); i++) {
 				TWETBPC.Model.TWETColumn column = result.getColumns().get(i);
@@ -1200,12 +1209,20 @@ public class PC {
 				Pool.ColumnUpdate update = lp.addOrImproveColumn(column);
 				Integer value = Integer.valueOf(update.columnId);
 				boolean firstSeenInBatch = seenColumnIds.add(value);
+				boolean acceptedColumn = false;
 				if (!lp.isRestrictedColumnActive(update.columnId) && firstSeenInBatch) {
 					generated.observeReducedCost(reducedCost, column, null);
 					generated.internalColumnIds.add(value);
+					acceptedColumn = true;
 				} else if (update.improvedCost) {
 					generated.observeReducedCost(reducedCost, column, null);
 					generated.improvedActiveInternalColumns++;
+					acceptedColumn = true;
+				}
+				if (acceptedColumn && acceptedExactElementaryColumns != null
+						&& column.getSource() == ColumnSource.PRICING_EXACT
+						&& isElementary(column.getSequence())) {
+					acceptedExactElementaryColumns.add(column);
 				}
 			}
 			for (int i = 0; i < result.getOutsourcingColumns().size(); i++) {
@@ -1227,6 +1244,10 @@ public class PC {
 				}
 			}
 		}
+		int directAddedColumns = generated.improvedActiveInternalColumns + generated.internalColumnIds.size()
+				+ generated.outsourcingColumnIds.size();
+		handleHeuristicExactMissDiagnostic(lp, engine, directAddedColumns, acceptedExactElementaryColumns,
+				!repairMode && !strongBranchingPhase2);
 		if (observeDualBound && shouldPairOutsourcingPricingForDualBound(lp, engine, repairMode, result)) {
 			PricingEngine outsourcingEngine = findOutsourcingPricingEngine();
 			if (outsourcingEngine != null) {
@@ -1259,9 +1280,60 @@ public class PC {
 		}
 		int reportedAddedColumns = generated.improvedActiveInternalColumns + generated.internalColumnIds.size()
 				+ generated.outsourcingColumnIds.size();
+		if (config.diagnosticHeuristicExactMissAnalysis && pendingHeuristicMissTrace != null
+				&& reportedAddedColumns > directAddedColumns) {
+			pendingHeuristicMissTrace = null;
+		}
 		traceSink.onPricingCall(lp.getNode(), name, reportedAddedColumns > 0, reportedAddedColumns, message,
 				totalPoolSize(lp), pricingNanos);
 		return generated;
+	}
+
+	private void handleHeuristicExactMissDiagnostic(LP lp, PricingEngine engine, int addedColumns,
+			List<TWETColumn> acceptedExactElementaryColumns, boolean eligibleNormalPricing) {
+		if (!config.diagnosticHeuristicExactMissAnalysis) {
+			return;
+		}
+		if (!eligibleNormalPricing) {
+			if (engine instanceof HeuristicPricingEngine) {
+				((HeuristicPricingEngine) engine).takeLastDiagnosticTrace();
+			}
+			pendingHeuristicMissTrace = null;
+			return;
+		}
+		if (engine instanceof HeuristicPricingEngine) {
+			HeuristicPricingDiagnosticTrace trace = ((HeuristicPricingEngine) engine).takeLastDiagnosticTrace();
+			if (trace != null) {
+				for (String line : trace.generatedColumnLines()) {
+					traceSink.onPricingDiagnostic(lp.getNode(), "HeuristicGeneratedColumn", line);
+				}
+			}
+			pendingHeuristicMissTrace = addedColumns == 0 ? trace : null;
+			return;
+		}
+		if (pendingHeuristicMissTrace == null || addedColumns <= 0) {
+			return;
+		}
+		if (acceptedExactElementaryColumns != null && !acceptedExactElementaryColumns.isEmpty()) {
+			LP.PricingDualSnapshot dual = lp.captureEffectivePricingDuals();
+			for (TWETColumn column : acceptedExactElementaryColumns) {
+				double reducedCost = lp.computeReducedCost(column, dual);
+				traceSink.onPricingDiagnostic(lp.getNode(), "HeuristicExactMiss",
+						pendingHeuristicMissTrace.analyzeExactColumn(engine.getName(), column, reducedCost));
+			}
+		}
+		// Any added column changes the next LP dual, so this trace must not cross the re-solve.
+		pendingHeuristicMissTrace = null;
+	}
+
+	private static boolean isElementary(List<Integer> sequence) {
+		HashSet<Integer> seen = new HashSet<Integer>();
+		for (Integer job : sequence) {
+			if (!seen.add(job)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	private int totalPoolSize(LP lp) {
@@ -1269,6 +1341,7 @@ public class PC {
 	}
 
 	private TWETMasterSolution solveRelaxationTimed(LP lp, String phase) {
+		pendingHeuristicMissTrace = null;
 		heartbeat(lp, "master." + phase + ".start");
 		long start = System.nanoTime();
 		TWETMasterSolution solution = lp.solveRelaxation();
@@ -1280,6 +1353,7 @@ public class PC {
 	}
 
 	private TWETMasterSolution resolveCurrentModelTimed(LP lp, String phase) {
+		pendingHeuristicMissTrace = null;
 		heartbeat(lp, "master." + phase + ".start");
 		long start = System.nanoTime();
 		TWETMasterSolution solution = lp.resolveCurrentModel();

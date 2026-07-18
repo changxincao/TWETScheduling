@@ -87,6 +87,11 @@ public final class BPCStreamingTraceSink implements BPCTraceSink, AutoCloseable 
 	}
 
 	@Override
+	public void onPricingDiagnostic(Node node, String category, String message) {
+		write("[" + category + "] node=" + (node == null ? -1 : node.id) + " " + message);
+	}
+
+	@Override
 	public void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
 			int cutPoolSize, long elapsedNanos) {
 		write(BPCOutputFormatters.formatCut(generatorName, node.id, separated, addedCuts, cutPoolSize, message,

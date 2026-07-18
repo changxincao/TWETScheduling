@@ -66,6 +66,13 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onPricingDiagnostic(Node node, String category, String message) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onPricingDiagnostic(node, category, message);
+		}
+	}
+
+	@Override
 	public void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
 			int cutPoolSize, long elapsedNanos) {
 		for (BPCTraceSink sink : delegates) {

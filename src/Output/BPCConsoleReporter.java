@@ -52,6 +52,11 @@ public final class BPCConsoleReporter implements BPCTraceSink {
 	}
 
 	@Override
+	public void onPricingDiagnostic(Node node, String category, String message) {
+		System.out.println("[" + category + "] node=" + (node == null ? -1 : node.id) + " " + message);
+	}
+
+	@Override
 	public void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
 			int cutPoolSize, long elapsedNanos) {
 		System.out.println(BPCOutputFormatters.formatCut(generatorName, node.id, separated, addedCuts, cutPoolSize,

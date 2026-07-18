@@ -40,6 +40,9 @@ public interface BPCTraceSink {
 		onPricingCall(node, engineName, improved, addedColumns, message, poolSize);
 	}
 
+	default void onPricingDiagnostic(Node node, String category, String message) {
+	}
+
 	default void onCutCall(Node node, String generatorName, boolean separated, int addedCuts, String message,
 			int cutPoolSize) {
 	}

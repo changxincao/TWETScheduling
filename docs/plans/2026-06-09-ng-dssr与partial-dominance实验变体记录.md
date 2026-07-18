@@ -2663,3 +2663,15 @@ root-only A/B 使用 40-2 的 `wet040_001_2m` 和 `wet040_002_2m`，统一关闭
 256. 2026-07-18 删除 full-ng top3 受限扩展启发式
 
 根据最终判断，full-ng top3 受限扩展虽然单次仅需约 9--25ms，但在两个 40-2 实例的 26 次调用中均未找到列，无法替代任何 exact ng-DSSR 调用，继续研究 limited-discrepancy 或静态 reduced-arc graph 的实现收益也不明确。因此已删除独立 `GCNGBBStyleBidirectionalNgDssrLimitedHeuristicPricingEngine`、配置项、runner 属性、engine-chain 接线以及 exact 类中的受限扩展分支，恢复到该实验加入前的 ng-DSSR 主线。原有 Tabu heuristic、exact ng-DSSR、DSSR 更新、dominance、join、completion bound 和其他既有策略均未修改。第 252--255 节保留为负实验与讨论记录，不再对应可运行开关。
+
+257. 2026-07-18 删除实验引擎后的主线正确性复核
+
+本轮按当前实际启用的 no-SRI ng-DSSR 主线重新审计，而不是只检查实验类是否删除。首先，`src/` 与引入 limited engine 之前的 `578d4328^` 逐文件比较一致，`enableNgDssrLimitedLabelingHeuristic`、limited engine 名称和受限扩展分支在源码中均无残留。因此删除动作没有改变原有 exact ng-DSSR、Tabu heuristic、strong branching、外包定价或主问题代码。
+
+控制流复核确认，非纯 time-indexed 模式下的内部定价顺序仍为可选 time-indexed pre-heuristic、Tabu `HeuristicPricingEngine`、唯一一个配置选中的 exact backend；列化外包时 `OutsourcingPricingEngine` 独立位于内部列族之后。任一 engine 加列后，PC 都先重解 RMP 并从第一个 engine 重新开始；只有 exact internal engine 返回有限且非负的 certified reduced cost 时，PC 才关闭内部列族。列化外包时该证书不会直接关闭整个 pricing，PC 还会补跑外包列定价并取得外包列族证书。
+
+ng-DSSR 自身仍按 DSSR 语义循环：本轮若返回基本负列则立即交回 PC；没有基本负列但存在负的非基本 witness 时更新 ng-set 后重跑；只有 relaxed round 不再存在负非基本路径时才给出闭合证书。最终候选不是直接使用半域 join 或 compact-window 推导成本，而是统一通过 `PricingColumnCostRechecker` / `TWETColumnEvaluator` 重算固定 sequence 的真实目标成本，再按当前真实 dual 重算 reduced cost，只返回真实负列。分支域方面，扩展和最终 sequence 检查均覆盖显式 forbidden/required arc、branch-implied 竞争弧、普通 pricing-only 弧、completion-bound 固定弧以及 required-outsourced job；repair 入口不使用普通 pricing certificate，因此不会把带 slack 的找列过程当成节点闭合证明。
+
+定向测试全部通过：`PackedBitSetStorageTest`、`PackedBitSetIntersectionTest`、`NgDssrInitialNgSetSizeTest`、`NgDssrSameNodeWarmStartTest`、`NgDssrMinimumRepeatedSegmentUpdateTest`、`IncrementalSourcedDominanceGraphConsistencyTest`、`CompletionBoundPreparedBoundsCompatibilityTest`、`PiecewiseLinearMinimalSumViewTest` 和 `LPRestrictedColumnMembershipTest`。其中 source-aware dominance 随机测试覆盖 96000 次插入；固定最小和测试覆盖 500000 组；bitset 两项分别覆盖 100000 和 200000 组。通用 `PiecewiseLinearFunctionPropertyTest` 仍会报告“不相交定义域 mergeMinimum”及未做方向闭包的任意函数随机失败，但当前主线使用方向 normalize 后的 frontier；同一测试中的 500 组 prefix-minimized frontier 和 500 组 forward/backward direction 对拍均通过。因此这些失败是通用 API 的既有契约边界，不是当前 no-SRI ng-DSSR 主线回归，旧/dormant backend 若重新启用仍需单独复核。
+
+端到端 smoke 使用 `wet021_001_2m`、source-aware dominance、group-envelope prefilter、all-cycles completion bound、midpoint probe/reuse、nearest `floor(n/10)`、top25 minimum-segment，关闭 ALNS、time-indexed 预处理和 strong branching，只处理 root。结果为 `ROOT_PROCESSED`，`obj=bound=6829`，`valid=true`，总时间 `1.138s`，ng-DSSR exact 两次共 `0.298s`。另一个 40-2 极端诊断关闭 ALNS 和启发式后在 exact join 内达到 120 秒限制，`valid=true` 但 root 未闭合；它只说明该非生产配置很难，不作为闭合正确性证据。当前结论是：未发现 limited engine 删除后或当前 no-SRI ng-DSSR 主线中的 correctness 回归；审计不把 dormant legacy backend 和 active-SRI 旧 store 自动包含在该结论中。

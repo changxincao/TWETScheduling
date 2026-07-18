@@ -2620,3 +2620,17 @@ effective budget 没有减少困难 certificate 的轮数；coverage 在 R75 只
 不建议第一版在 limited pass 内独立跑多轮 DSSR 并把 ng-set 更新带入 exact。受限弧图里的 non-elementary witness 分布可能与完整图不同，虽然新增 ng-pair 不会删除 elementary route，但可能让后续 exact 的 label 状态无意义地变重。更小的实现是：用当前 ng-set 各跑一次 discrepancy 0 和 1 的 restricted labeling；只要找到 elementary negative columns 就返回 RMP；没找到就完整重置搜索状态，走原 exact ng-DSSR。limited pass 不返回 no-negative certificate，不做 subtree fixing，不永久修改 ng-set。
 
 这个方向对 W300 值得实验，但不能预设 K=3 必然有效。每个 label 仍可产生最多 3 个 child，深路径的状态数仍可指数增长；多个 label 也可能重复选中同一组 good arcs，导致列多样性不足。最合理的小型矩阵是 K=3/5 与 discrepancy=0/1，同时记录 limited 0、limited 1 和 full exact 各自关闭的 pricing 比例、扩展候选数、PWLF frontier 构造数、返回基本负列数、后续 RMP 迭代数和总 wall time。判断标准不是 limited pass 本身快，而是完整 root/节点的 exact 调用和总时间下降，bound、objective 和 valid 保持一致，且 RMP 往返没有显著增加。
+
+253. 2026-07-18 独立 limited-labeling heuristic 的语义与扩展选择
+
+第 252 节把 limited labeling 描述成了 ng-DSSR 内部的前置阶段，本轮明确修正目标：需要的是一个与当前 Tabu `HeuristicPricingEngine` 同级的独立 pricing engine。它借用 exact 双向 labeling 的 PWLF 扩展、半域、join、硬时间窗、分支/pricing-only 禁弧和 dominance 内核，但不执行 DSSR，不返回闭合证书，不做 arc fixing。它在 PC 的 engine 链中应放在 Tabu heuristic 之后、exact ng-DSSR 之前；找到列时 PC 按现有逻辑立即回刷 RMP，找不到时只返回普通 empty result，由 PC 自然进入下一个 engine，不是 limited engine 内部主动 fallback。
+
+不用 ng-set 不等于不用 dominance。新 engine 可以让 ng-memory 始终为空，但仍保留每个 label 的当前 terminal job、PWLF frontier、基于当前函数定义域得到的 temporal reachability/dominance set、father trace 以及 source-aware dominance graph。在不考虑 SRI 时，两条路径的未来转移不再受历史 ng-memory 影响，因此 dominance 比当前 ng-DSSR 更强；某个 elementary 前缀可能被一个更便宜的 non-elementary 前缀压掉，但这只会让启发式漏列，不会让返回的列错误。join 后恢复 sequence，只保留无重复 job 且真实 reduced cost 为负的基本列；如果使用 dual window，继续按现有启发式口径对最终入列 sequence 做真实成本复核。
+
+第一版不应将 exact ng-DSSR 的整套 initialization 复制进来。可以复用 compact window、预编译弧 mask 和已有的 node Tmid，但不为该启发式单独运行 midpoint probe，也不应无条件重建完整 completion bound。历史 W300 中 exact initialization 本身就是重要成本；若启发式先支付一次完整 bound 和 probe，再因无列进入 exact，会把限制扩展的收益抵消。因此应先依靠缩小的弧图、硬时间窗和 dominance；只有存在与当前 dual 完全同口径的便宜可复用 scalar bound 时才直接使用。
+
+为保证双向扩展和 join 对同一条物理弧的认定一致，第一版建议构造“每次 dual 下的 reduced arc graph”，而不是每个 label 现场产生一套完全不同的 top3。对普通弧 i->j 预计算静态启发分数：弧/setup reduced-cost 增量，加上 j 在 effective window 内的最小 penalty/job-dual 增量，再加一步廉价 look-ahead；对每个 i 保留最好 K 条出弧，同时对每个 j 保留最好 K 条入弧，两者取并集得到平均度数约 2K 的缩减图。source/sink 弧可全保留或使用更大 K，当前分支显式 required arc 必须强制加入，forbidden/pricing-only arc 仍由原 mask 排除。forward 扩展、backward 扩展和 cross-arc join 都使用同一 reduced graph，这样 route 是否可被启发式找到不会依赖偶然 split 位置。
+
+若静态 reduced graph 仍产生太多 label，第二步才考虑 label-aware top3。对 label L 的候选 j，先用 frontier hull、setup/process 和 j 的 effective window 得到可达完成区间，再用 O(1) 近似分数“当前 frontier scalar min + 弧 reduced increment + 可达区间内最小 penalty + job 级 suffix scalar”选最小的 3 个。该分数只用于排名，不用于证明剪枝；用固定 3 个槽位线性扫描 `extensionSet` 即可，不需要排序或分配候选容器。但动态 top3 会使 join arc 的判定与 label 时间状态相关，接入双向 split 更复杂，因此应在静态 K=3/5 reduced graph 无法足够限制规模时再做。
+
+该 engine 的预期作用是补足 Tabu 对多步重组的缺口：它仍从 source 全局构造 route，不受单个 seed 的一步 move 邻域限制；同时又因缩减弧图、空 ng-memory 和更强 dominance 而应显著轻于 exact ng-DSSR。实验先比较 K=3/5，记录该 engine 命中率、label/extension/frontier/join 数、返回基本负列数、单次时间、后续 exact 调用数和完整 root 时间。若它经常只找到 non-elementary pseudo-route 或大多数调用均返回 empty，则说明空 ng-memory 的 relaxation 太弱，不应通过把它做成第二个 exact 来挽救。

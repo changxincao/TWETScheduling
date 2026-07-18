@@ -210,6 +210,8 @@ public class TWETBPCConfig {
 	public boolean enableNgDssrJoinEnvelopeCompression = false;
 	/** 2026-07-11: 仅用精确 ng-memory group envelope 过滤整组不可能改进的 label pair；通过后仍走标准 join。 */
 	public boolean enableNgDssrJoinEnvelopePrefilter = true;
+	/** 2026-07-18: 用真实访问位集识别必为非基本的 join pair，并按 DSSR top-K witness 下界安全剪枝。 */
+	public boolean enableNgDssrJoinVisitProfilePruning = true;
 	/**
 	 * 2026-05-28: 仅用于效率对照。true 时双向 pricing 改用 GCBB full-domain 复制版本，
 	 * 不按 Tmid 裁剪 forward/backward 标签函数；正式求解默认保持 false。
@@ -328,8 +330,14 @@ public class TWETBPCConfig {
 	public double bidirectionalMidpointProbeHighImbalanceRatio = 10.0;
 	/** 2026-06-07: 同一 BPC node 后续 pricing round 是否以上一轮选中的 Tmid 作为 probe reference。 */
 	public boolean bidirectionalMidpointProbeReuseWithinNode = true;
-	/** 2026-07-09: 同一次 ng-DSSR exact pricing 内，第 2 轮及以后是否复用第一轮 probe 选出的 Tmid。 */
+	/** 2026-07-18: 同一次 ng-DSSR exact 内复用最近 probe 的 Tmid，并按配置轮次周期重探。 */
 	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;
+	/** 2026-07-18: 同一次 DSSR 内每隔多少轮重新 probe；1 表示每轮，非正数表示始终复用首次结果。 */
+	public int bidirectionalMidpointProbeDssrRecheckInterval = 5;
+	/** 2026-07-18: 上一轮前后向标签数超过该倍数时，才预先移动下一次 probe 的初值。 */
+	public double bidirectionalMidpointProbeDssrImbalanceThreshold = 5.0;
+	/** 2026-07-18: DSSR 周期 probe 前按可用 horizon 宽度移动初值的比例。 */
+	public double bidirectionalMidpointProbeDssrSeedMoveRatio = 0.05;
 	/**
 	 * 2026-07-12: 同一 node、同一 active-cut 迭代内，Tmid 连续稳定后冻结并周期校验。
 	 * 固定规则为至少观察 5 次、最近 3 次偏差不超过 horizon 的 1%，冻结后跳过 5 次再正常 probe 一次。

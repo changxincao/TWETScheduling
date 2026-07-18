@@ -542,6 +542,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableNgDssrJoinEnvelopePrefilter = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrJoinEnvelopePrefilter",
 				Boolean.toString(config.enableNgDssrJoinEnvelopePrefilter)));
+		config.enableNgDssrJoinVisitProfilePruning = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssrJoinVisitProfilePruning",
+				Boolean.toString(config.enableNgDssrJoinVisitProfilePruning)));
 		config.ngDssrReturnRelaxedColumns = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrReturnRelaxedColumns",
 				Boolean.toString(config.ngDssrReturnRelaxedColumns)));
@@ -663,6 +666,15 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeReuseWithinDssr = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinDssr",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinDssr)));
+		config.bidirectionalMidpointProbeDssrRecheckInterval = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.midpointProbeDssrRecheckInterval",
+				config.bidirectionalMidpointProbeDssrRecheckInterval);
+		config.bidirectionalMidpointProbeDssrImbalanceThreshold = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeDssrImbalanceThreshold",
+				Double.toString(config.bidirectionalMidpointProbeDssrImbalanceThreshold)));
+		config.bidirectionalMidpointProbeDssrSeedMoveRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeDssrSeedMoveRatio",
+				Double.toString(config.bidirectionalMidpointProbeDssrSeedMoveRatio)));
 		config.bidirectionalMidpointProbeStableFreeze = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeStableFreeze",
 				Boolean.toString(config.bidirectionalMidpointProbeStableFreeze)));

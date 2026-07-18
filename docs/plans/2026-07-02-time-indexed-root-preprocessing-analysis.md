@@ -694,3 +694,20 @@ pricing engine 调度也有可量化但次一级的浪费。W300 的 `TimeIndexe
 重新筛选所有明确记录 `twet.data.dueWindowHalfWidth=300` 的历史日志后，确认该 50-3/setupR50 算例曾运行过纯 `TimeIndexedGraphPricing` 完整树：`tmp-wet050-003-setupR50-W300-timeindexed-14400-20260708b`。该 run 的 root bound 为 `1702.274302`，弱于当前 ng-DSSR 的 `1726.014329`；运行到 node 607、处理 408 次分支、Pool 约 320k，队列仍有 176 个 node，随后日志中断且没有 CSV，因此没有求解完成。另一次同配置 run 只到 node 34，也没有结果文件。
 
 该历史日志后期显示 incumbent `1771`、表面全局 gap 约 `0.09%`，但这个值来自 node 386 的 `RestrictedInteger ... coverRepair`。当时 time-indexed 主线仍允许 RMIH 在包含 repeated pseudo-schedule 的列池上工作；后续已经明确禁用该组合，因为 RMIH 的覆盖/分拆结果不能自动证明这些 pseudo columns 对应 elementary 机器序列。因而 `1771` 不能直接作为当前 elementary 原问题的可信 incumbent，更不能据此认为 time-indexed 已接近证明最优。若统一使用当前 ALNS 的可信 incumbent `1902`，历史 time-indexed root 松弛比 ng-DSSR 弱约 24，完整树日志也没有留下最终有效 bound/CSV。该 run 只能说明 time-indexed 单次 pricing 快、在约 19 分钟内处理了大量节点，不能作为已求最优记录。
+
+
+## 2026-07-18：DSSR 内周期 midpoint probe 与 join witness 剪枝
+
+60-2 原始小时间算例此前在一个 strong-trial repair exact 中耗时 730.105s。该次 exact 连续执行 79 轮 DSSR，但始终复用第一轮选出的 Tmid=1685.8125；最终 forward/backward labels 为 4580/105903，forward/backward/join 分别耗时 8.791/260.495/458.437s。这说明第一轮有限 probe 对当时的 ng-set 有效，不代表在后续 ng-set 扩大后仍能维持前后向平衡。
+
+本次把同一次 DSSR 内的 Tmid 处理改为“复用最近 probe 结果，并每隔 5 轮重新 probe”。周期 probe 只把上一轮完整 labeling 的前后向 label 数作为起点反馈：若一侧超过另一侧 5 倍，就把起点按可用 horizon 的 5% 向减轻重侧的方向移动；这只是 probe 初值，候选移动、评分和最终 Tmid 选择仍使用原有 probe 逻辑。每轮记录实际 Tmid、是否 probe、前后向 labels 和时间。暂未引入窗口分布初值，以便单独判断周期反馈的作用。
+
+join 只做严格等价的细节剪枝。对不超过 64 个任务的 no-SRI 主线，label 沿 father 链增量维护真实访问位集和是否 elementary。一个 forward/backward pair 若已确定为 elementary，完整执行原 join；若确定为非基本列，则只有在本轮 DSSR top-K witness 已满，且 pair 的安全 lower bound 严格差于当前最差 witness 时才跳过 PWLF join。函数值算出后也做同一判断，避免恢复不可能进入 top-K 的 sequence。相等 reduced cost 不剪，保留原长度和字典序 tie-break；SRI、relaxed-column 返回、target trace、route-relation 和 duplicate-repair 诊断均回退原路径。
+
+50-2 root-only 三组对照的最终 bound、pool、pricing 次数完全一致：旧 DSSR 复用为 73.632s、exact 19.422s；周期 probe 为 73.251s、exact 18.988s；周期 probe 加 join visit-profile 为 73.797s、exact 19.213s。这个普通 root 的 join 不是瓶颈，因此总时间只在噪声范围内变化；但最后一个 6 轮 exact 中，记录的负非基本 sequence 从 1521 降到 303，保留 witness 仍为 121、ng-set updates 仍为 37，说明剪枝没有改变 DSSR 更新结果。
+
+60-2 长测复现了真正困难的 repair exact。历史同位置为 730.105s、79 轮、无 elementary 列；新版本为 81.216s、72 轮并返回 36 条 elementary 列。forward/backward/join 从 8.791/260.495/458.437s 变为 17.487/35.342/22.136s，funcEval 从 21,200,984 降到 119,389。该轮访问约 15.02m join candidates，其中 visit-profile lower bound 直接剪掉约 14.90m；这是本次确定性的主要收益。周期 probe 同时把最严重的 backward 膨胀压低，但部分后段轮次会在多个 Tmid 间摆动，说明有限 probe 的局部评分仍可能和完整 exact 负载不一致。
+
+完整 1800s 对照中，新版本从历史的 incumbent/bound=37112/36739.428、gap 1.0039%、root 779.898s，改善到 36882/36759.333、gap 0.3326%、root 539.476s；新 run 处理 4 个节点，exact 371.300s/168 calls，最终仍因时间限制未闭合。该结果同时包含周期 probe 和 join 剪枝，不能把全部整树收益归给其中一个；从困难 exact 的分项统计看，join witness 剪枝是主要收益，周期 probe 负责避免固定 Tmid 在 DSSR 后段持续极端失衡。
+
+验证包括 focused javac、SmallBPCBatchTest 8/8 与 ArcFlow 对齐、tariff 分支有效，以及 IncrementalSourcedDominanceGraphConsistencyTest 的 96,000 次插入通过。当前默认保留 interval=5、imbalance threshold=5、seed move ratio=0.05 和 visit-profile 剪枝；残余风险是周期 Tmid 的摆动，后续若继续优化应先做“失衡触发而非无条件到期移动”的独立 A/B，不能直接改成窗口分布或更激进移动。

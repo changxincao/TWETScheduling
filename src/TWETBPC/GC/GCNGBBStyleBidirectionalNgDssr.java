@@ -209,6 +209,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinFunctionEvaluations;
 	private long joinFunctionPruned;
 	private long joinFunctionBestRecordPruned;
+	private long joinKnownElementaryPairs;
+	private long joinKnownNonElementaryPairs;
+	private long joinNonElementaryWitnessLowerBoundPruned;
+	private long joinNonElementaryWitnessValuePruned;
 	private long joinRangeLowerBoundChecks;
 	private long joinRangeLowerBoundPruned;
 	private long joinEnvelopeForwardGroups;
@@ -374,13 +378,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrTotalElementaryColumnsReturned;
 	private int ngDssrRoundNonElementaryNegativeSeen;
 	private int ngDssrRoundElementaryColumnsReturned;
-	private boolean ngDssrFirstRoundTmidAvailable;
-	private double ngDssrFirstRoundTmid;
-	private String ngDssrFirstRoundMidpointSummary;
-	private int ngDssrFirstRoundReferenceDirection;
-	private int ngDssrFirstRoundSelectedDirection;
-	private double ngDssrFirstRoundSelectedForwardMillis = Double.NaN;
-	private double ngDssrFirstRoundSelectedBackwardMillis = Double.NaN;
+	/** 同一次 DSSR 内最近一次 probe 选出的 Tmid；后续轮次复用并周期校正。 */
+	private double ngDssrReusableTmid;
+	private int ngDssrLastMidpointProbeRound;
+	private long ngDssrPreviousRoundForwardLabels;
+	private long ngDssrPreviousRoundBackwardLabels;
+	private double ngDssrPreviousRoundForwardMillis;
+	private double ngDssrPreviousRoundBackwardMillis;
+	private StringBuilder ngDssrMidpointByRound;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
 	/** 诊断每轮最优负非基本序列与上一轮候选集合的关系，不参与正式 DSSR 更新。 */
@@ -1075,6 +1080,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ", totalNgSetUpdates=" + ngDssrTotalNgSetUpdates
 				+ ngDssrRouteUpdateSummary()
 				+ ngSetStatsSummary()
+				+ ngDssrMidpointSummary()
 				+ ngSetMembersSummary()
 				+ roundRouteRelationSummary()
 				+ duplicateRepairSummary();
@@ -1152,13 +1158,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrMinimumSegmentRoutesUpdated = 0;
 		ngDssrTotalNonElementaryNegativeSeen = 0;
 		ngDssrTotalElementaryColumnsReturned = 0;
-		ngDssrFirstRoundTmidAvailable = false;
-		ngDssrFirstRoundTmid = Double.NaN;
-		ngDssrFirstRoundMidpointSummary = null;
-		ngDssrFirstRoundReferenceDirection = 0;
-		ngDssrFirstRoundSelectedDirection = 0;
-		ngDssrFirstRoundSelectedForwardMillis = Double.NaN;
-		ngDssrFirstRoundSelectedBackwardMillis = Double.NaN;
+		ngDssrReusableTmid = Double.NaN;
+		ngDssrLastMidpointProbeRound = 0;
+		ngDssrPreviousRoundForwardLabels = 0L;
+		ngDssrPreviousRoundBackwardLabels = 0L;
+		ngDssrPreviousRoundForwardMillis = Double.NaN;
+		ngDssrPreviousRoundBackwardMillis = Double.NaN;
+		ngDssrMidpointByRound = new StringBuilder();
 		resetExactPhaseTiming();
 		ngDssrHistoryWarmStartSkippedForRepeatability = false;
 		ngDssrWindowRepeatabilityFilterApplied = false;
@@ -1305,6 +1311,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private ArrayList<TWETColumn> solveRelaxedRound(LP lp) {
 		long exactStartNanos = System.nanoTime();
+		long forwardNanosBefore = exactForwardExpandNanos;
+		long backwardNanosBefore = exactBackwardExpandNanos;
 		Utility.resetCurUpperBound(Utility.big_M);
 		lastRelaxedRoundBestReducedCost = Double.POSITIVE_INFINITY;
 		diagnosticHeartbeat(lp, "initialize.start", true);
@@ -1367,6 +1375,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			exactFinalizeNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "finalize.done", true);
 		}
+		double roundForwardMillis = (exactForwardExpandNanos - forwardNanosBefore) / 1_000_000.0;
+		double roundBackwardMillis = (exactBackwardExpandNanos - backwardNanosBefore) / 1_000_000.0;
+		if (midpointProbeLabelsReadyForJoin) {
+			roundForwardMillis = midpointProbeSelectedForwardMillis;
+			roundBackwardMillis = midpointProbeSelectedBackwardMillis;
+		}
+		rememberDssrRoundMidpointFeedback(roundForwardMillis, roundBackwardMillis);
 		exactTotalNanos += System.nanoTime() - exactStartNanos;
 		updateMidpointProbeReuseAfterExact(lp, exactTotalNanos);
 		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
@@ -1375,6 +1390,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		lastMessage = "GCNGBB-style ng-DSSR bidirectional no-cut labeling generated " + generatedColumns.size() + " columns ("
 				+ completionState + "); " + statisticsSummary();
 		return generatedColumns;
+	}
+
+	/** 保存本轮完整 labeling 负载，供下一次周期 probe 调整起点；不参与当前轮结果。 */
+	private void rememberDssrRoundMidpointFeedback(double forwardMillis, double backwardMillis) {
+		ngDssrPreviousRoundForwardLabels = forwardLabelsKept;
+		ngDssrPreviousRoundBackwardLabels = backwardLabelsKept;
+		ngDssrPreviousRoundForwardMillis = forwardMillis;
+		ngDssrPreviousRoundBackwardMillis = backwardMillis;
+		ngDssrReusableTmid = tMid;
+		if (ngDssrMidpointByRound == null) {
+			return;
+		}
+		if (ngDssrMidpointByRound.length() > 0) {
+			ngDssrMidpointByRound.append(';');
+		}
+		ngDssrMidpointByRound.append('r').append(ngDssrRound)
+				.append("/t").append(String.format("%.3f", tMid))
+				.append('/').append(midpointProbePerformed ? "probe" : "reuse")
+				.append("/labels").append(forwardLabelsKept).append('-').append(backwardLabelsKept)
+				.append("/ms").append(String.format("%.1f", forwardMillis)).append('-')
+				.append(String.format("%.1f", backwardMillis));
+	}
+
+	private String ngDssrMidpointSummary() {
+		if (ngDssrMidpointByRound == null || ngDssrMidpointByRound.length() == 0) {
+			return "";
+		}
+		return ", midpointByDssrRound=" + ngDssrMidpointByRound.toString();
 	}
 
 	public String getLastMessage() {
@@ -1733,11 +1776,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		exactInitializePreCertificateNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
 		ensureExtensionArcMasks(lp.getNode());
-		if (!tryReuseFirstRoundMidpointWithinDssr()) {
+		if (!prepareMidpointWithinDssr(lp)) {
 			if (!tryUseStableFrozenMidpoint(lp)) {
 				runMidpointProbeIfEnabled(lp);
 			}
-			rememberFirstRoundMidpointWithinDssr();
+			rememberInitialMidpointWithinDssr();
 		}
 		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
@@ -1755,41 +1798,66 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		exactInitializeFullMidpointDiagnosticNanos += System.nanoTime() - sectionStart;
 	}
 
-	private boolean tryReuseFirstRoundMidpointWithinDssr() {
+	/**
+	 * 同一次 DSSR 内复用最近一次 probe 的 Tmid，并按固定轮次重新校准。
+	 * 周期 probe 只用上一轮完整 labeling 的负载轻移初值，最终选择仍完全交给原 probe。
+	 */
+	private boolean prepareMidpointWithinDssr(LP lp) {
 		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinDssr
-				|| ngDssrRound <= 1 || !ngDssrFirstRoundTmidAvailable
-				|| !Double.isFinite(ngDssrFirstRoundTmid)) {
+				|| ngDssrRound <= 1
+				|| !Double.isFinite(ngDssrReusableTmid)) {
 			return false;
 		}
-		tMid = clampCurrentMidpoint(ngDssrFirstRoundTmid);
+		int interval = config.bidirectionalMidpointProbeDssrRecheckInterval;
+		boolean recheck = interval > 0 && ngDssrRound - ngDssrLastMidpointProbeRound >= interval;
+		if (recheck) {
+			double seed = dssrPeriodicProbeSeed();
+			runMidpointProbeIfEnabled(lp, seed, "dssrPeriodicFeedback");
+			ngDssrReusableTmid = tMid;
+			ngDssrLastMidpointProbeRound = ngDssrRound;
+			return true;
+		}
+		tMid = clampCurrentMidpoint(ngDssrReusableTmid);
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
 		midpointProbeLabelsReadyForJoin = false;
-		midpointProbeReferenceSource = "dssrFirstRound";
-		midpointProbeReferenceDirection = ngDssrFirstRoundReferenceDirection;
-		midpointProbeSelectedDirection = ngDssrFirstRoundSelectedDirection;
-		midpointProbeSelectedForwardMillis = ngDssrFirstRoundSelectedForwardMillis;
-		midpointProbeSelectedBackwardMillis = ngDssrFirstRoundSelectedBackwardMillis;
-		midpointProbeSummary = "dssrReuseFirstRound, selected=" + tMid
-				+ ", firstRound={" + (ngDssrFirstRoundMidpointSummary == null
-						? "unknown" : ngDssrFirstRoundMidpointSummary) + "}";
+		midpointProbeReferenceSource = "dssrLatestProbe";
+		midpointProbeReferenceDirection = 0;
+		midpointProbeSelectedDirection = 0;
+		midpointProbeSelectedForwardMillis = ngDssrPreviousRoundForwardMillis;
+		midpointProbeSelectedBackwardMillis = ngDssrPreviousRoundBackwardMillis;
+		midpointProbeSummary = "dssrReuseLatest, selected=" + tMid + ", lastProbeRound="
+				+ ngDssrLastMidpointProbeRound;
 		return true;
 	}
 
-	private void rememberFirstRoundMidpointWithinDssr() {
+	/** 上一轮若失衡超过阈值，只把 probe 起点向较轻一侧移动 5% 左右，不直接决定最终 Tmid。 */
+	private double dssrPeriodicProbeSeed() {
+		double seed = clampCurrentMidpoint(ngDssrReusableTmid);
+		double threshold = config.bidirectionalMidpointProbeDssrImbalanceThreshold;
+		double moveRatio = config.bidirectionalMidpointProbeDssrSeedMoveRatio;
+		if (!Double.isFinite(threshold) || !Utility.compareGt(threshold, 1.0)
+				|| !Double.isFinite(moveRatio) || !Utility.compareGt(moveRatio, 0.0)) {
+			return seed;
+		}
+		double left = midpointLeftBound();
+		double step = Math.max(0.0, pricingHorizon - left) * Math.min(0.25, moveRatio);
+		if (ngDssrPreviousRoundBackwardLabels > threshold * ngDssrPreviousRoundForwardLabels) {
+			seed += step;
+		} else if (ngDssrPreviousRoundForwardLabels > threshold * ngDssrPreviousRoundBackwardLabels) {
+			seed -= step;
+		}
+		return clampCurrentMidpoint(seed);
+	}
+
+	private void rememberInitialMidpointWithinDssr() {
 		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinDssr
 				|| ngDssrRound != 1 || !Double.isFinite(tMid)) {
 			return;
 		}
-		// 2026-07-09: Reuse only the first round Tmid; probe labels are stale after ng-set updates.
-
-		ngDssrFirstRoundTmidAvailable = true;
-		ngDssrFirstRoundTmid = tMid;
-		ngDssrFirstRoundMidpointSummary = midpointProbeSummary;
-		ngDssrFirstRoundReferenceDirection = midpointProbeReferenceDirection;
-		ngDssrFirstRoundSelectedDirection = midpointProbeSelectedDirection;
-		ngDssrFirstRoundSelectedForwardMillis = midpointProbeSelectedForwardMillis;
-		ngDssrFirstRoundSelectedBackwardMillis = midpointProbeSelectedBackwardMillis;
+		// 2026-07-18: 只复用 probe 选出的 Tmid，不复用旧标签；后续按固定 DSSR 轮次重新校准。
+		ngDssrReusableTmid = tMid;
+		ngDssrLastMidpointProbeRound = 1;
 	}
 
 	/** 2026-07-12: 稳定冻结只跳过 probe；每次仍按冻结后的 Tmid 完整执行 exact labeling。 */
@@ -2212,13 +2280,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void runMidpointProbeIfEnabled(LP lp) {
+		runMidpointProbeIfEnabled(lp, Double.NaN, null);
+	}
+
+	/** 指定 reference 时仅覆盖 probe 起点，不改变原有候选移动、评分和最终选择规则。 */
+	private void runMidpointProbeIfEnabled(LP lp, double referenceOverride, String referenceSource) {
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbePerformed = false;
 		if (!config.bidirectionalMidpointProbe) {
 			midpointProbeSummary = "off";
 			return;
 		}
-		double reference = midpointProbeReference(lp);
+		double reference;
+		if (Double.isFinite(referenceOverride)) {
+			reference = referenceOverride;
+			midpointProbeReferenceSource = referenceSource == null ? "override" : referenceSource;
+		} else {
+			reference = midpointProbeReference(lp);
+		}
 		if (!Double.isFinite(reference) || !Utility.compareGt(reference, 0.0)) {
 			midpointProbeSummary = "skipped:noReference";
 			return;
@@ -4204,6 +4283,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
+		int elementaryState = -1;
+		if (config.enableNgDssrJoinVisitProfilePruning && !sriPricingEnabled
+				&& forward.routeVisitProfileAvailable && backward.routeVisitProfileAvailable) {
+			boolean elementaryPair = forward.routeElementary && backward.routeElementary
+					&& (forward.routeVisitedMask & backward.routeVisitedMask) == 0L;
+			elementaryState = elementaryPair ? 1 : 0;
+			if (elementaryPair) {
+				joinKnownElementaryPairs++;
+			} else {
+				joinKnownNonElementaryPairs++;
+			}
+		}
+		if (elementaryState == 0
+				&& shouldPruneNonElementaryWitness(
+						forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost, targetJoinPair)) {
+			joinNonElementaryWitnessLowerBoundPruned++;
+			return;
+		}
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
@@ -4284,13 +4381,36 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 
+		if (elementaryState == 0
+				&& shouldPruneNonElementaryWitness(reducedCostBound, targetJoinPair)) {
+			joinNonElementaryWitnessValuePruned++;
+			return;
+		}
 		if (sequence == null) {
 			sequence = recoverJoinSequence(forward, backward);
 		}
 		if (targetJoinPair) {
 			traceTarget("JOIN_KEEP reducedCostBound=" + reducedCostBound);
 		}
-		tryGenerateColumn(sequence, lp, reducedCostBound);
+		Boolean elementaryHint = elementaryState < 0 ? null : Boolean.valueOf(elementaryState == 1);
+		tryGenerateColumn(sequence, lp, reducedCostBound, false, elementaryHint);
+	}
+
+	/**
+	 * 已知 pair 必为非基本列时，只保留仍可能进入本轮 top-K DSSR witness 的候选。
+	 * 严格大于当前最差值才剪，保留 reduced-cost 相等时的原有序列 tie-break。
+	 */
+	private boolean shouldPruneNonElementaryWitness(double lowerBound, boolean targetJoinPair) {
+		if (targetJoinPair || config.ngDssrReturnRelaxedColumns || ngDssrTraceRoundRouteRelation
+				|| ngDssrDuplicateRepairDiagnostic || nonElementaryNegativeRoutes == null) {
+			return false;
+		}
+		int limit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
+		if (nonElementaryNegativeRoutes.size() < limit) {
+			return false;
+		}
+		NonElementaryNegativeRoute worst = nonElementaryNegativeRoutes.get(nonElementaryNegativeRoutes.size() - 1);
+		return Utility.compareGt(lowerBound, worst.reducedCost);
 	}
 
 	/**
@@ -4372,6 +4492,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinFunctionEvaluations = 0;
 		joinFunctionPruned = 0;
 		joinFunctionBestRecordPruned = 0;
+		joinKnownElementaryPairs = 0;
+		joinKnownNonElementaryPairs = 0;
+		joinNonElementaryWitnessLowerBoundPruned = 0;
+		joinNonElementaryWitnessValuePruned = 0;
 		joinRangeLowerBoundChecks = 0;
 		joinRangeLowerBoundPruned = 0;
 		joinEnvelopeForwardGroups = 0;
@@ -4721,6 +4845,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(joinPairsSetPruned).append("/").append(joinPairsLowerBoundPruned).append("/")
 				.append(joinPairsTimePruned).append("/").append(joinFunctionEvaluations).append("/")
 				.append(joinFunctionPruned);
+		builder.append(", joinVisitProfile elementary/nonElementary/lbPruned/valuePruned=")
+				.append(joinKnownElementaryPairs).append("/").append(joinKnownNonElementaryPairs).append("/")
+				.append(joinNonElementaryWitnessLowerBoundPruned).append("/")
+				.append(joinNonElementaryWitnessValuePruned);
 		builder.append(", joinRangeLB check/pruned=").append(joinRangeLowerBoundChecks).append("/")
 				.append(joinRangeLowerBoundPruned);
 		if (config.enableNgDssrJoinEnvelopeCompression) {
@@ -5590,17 +5718,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
-		tryGenerateColumn(sequence, lp, inferredReducedCost, false);
+		tryGenerateColumn(sequence, lp, inferredReducedCost, false, null);
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost,
 			boolean forceTrueCost) {
+		tryGenerateColumn(sequence, lp, inferredReducedCost, forceTrueCost, null);
+	}
+
+	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost,
+			boolean forceTrueCost, Boolean elementaryHint) {
 		observeRelaxedReducedCost(inferredReducedCost);
 		if (sequence.isEmpty() || config.maxExactPricingColumns <= 0) {
 			return;
 		}
 		boolean targetSequence = isTargetSequence(sequence);
-		boolean elementary = isElementarySequence(sequence);
+		boolean elementary = elementaryHint == null ? isElementarySequence(sequence) : elementaryHint.booleanValue();
 		if (!elementary && !config.ngDssrReturnRelaxedColumns) {
 			if (targetSequence) {
 				traceTarget("COLUMN_REJECT nonElementary inferredRC=" + inferredReducedCost);
@@ -8175,6 +8308,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final class ForwardLabel extends FunctionLabel {
 		final ForwardLabel father;
 		final int depth;
+		final boolean routeVisitProfileAvailable;
+		final boolean routeElementary;
+		final long routeVisitedMask;
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
@@ -8183,12 +8319,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					forwardEndpointMin(frontier), sriPenalty);
 			this.father = father;
 			this.depth = father == null ? 0 : father.depth + 1;
+			if (father == null) {
+				this.routeVisitProfileAvailable = true;
+				this.routeElementary = true;
+				this.routeVisitedMask = 0L;
+			} else if (father.routeVisitProfileAvailable && jid >= 1 && jid <= Long.SIZE) {
+				long bit = 1L << (jid - 1);
+				this.routeVisitProfileAvailable = true;
+				this.routeElementary = father.routeElementary && (father.routeVisitedMask & bit) == 0L;
+				this.routeVisitedMask = father.routeVisitedMask | bit;
+			} else {
+				this.routeVisitProfileAvailable = false;
+				this.routeElementary = false;
+				this.routeVisitedMask = 0L;
+			}
 		}
 	}
 
 	private static final class BackwardLabel extends FunctionLabel {
 		final BackwardLabel father;
 		final boolean isSinkRoot;
+		final boolean routeVisitProfileAvailable;
+		final boolean routeElementary;
+		final long routeVisitedMask;
 
 		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
@@ -8197,6 +8350,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					backwardEndpointMin(frontier), sriPenalty);
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
+			if (isSinkRoot) {
+				this.routeVisitProfileAvailable = true;
+				this.routeElementary = true;
+				this.routeVisitedMask = 0L;
+			} else if (father != null && father.routeVisitProfileAvailable && jid >= 1 && jid <= Long.SIZE) {
+				long bit = 1L << (jid - 1);
+				this.routeVisitProfileAvailable = true;
+				this.routeElementary = father.routeElementary && (father.routeVisitedMask & bit) == 0L;
+				this.routeVisitedMask = father.routeVisitedMask | bit;
+			} else {
+				this.routeVisitProfileAvailable = false;
+				this.routeElementary = false;
+				this.routeVisitedMask = 0L;
+			}
 		}
 	}
 }

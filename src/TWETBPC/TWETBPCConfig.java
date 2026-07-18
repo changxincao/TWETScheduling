@@ -356,8 +356,12 @@ public class TWETBPCConfig {
 	public int heuristicPricingTabuIterations = 50;
 	/** 2026-07-17: 前 20 步没有生成新负列时，提前结束当前 seed；默认关闭，仅用于受控 A/B。 */
 	public boolean heuristicPricingStopUnproductiveSeedAfter20 = false;
-	/** 2026-07-17: 收集每轮未被采用的负 move，并在满池后继续维护最优候选；默认关闭，仅用于受控 A/B。 */
+	/** 2026-07-18: 在每条 seed 内收集少量未采用的负 move，作为标准轨迹列之外的多样化补充；默认关闭。 */
 	public boolean heuristicPricingCollectNonBestNegativeMoves = false;
+	/** 2026-07-18: non-best 实验中，每次 Tabu 迭代最多保留多少个 runner-up move。 */
+	public int heuristicPricingNonBestMovesPerIteration = 2;
+	/** 2026-07-18: non-best 实验中，每条 seed 最多追加多少条额外负列。 */
+	public int heuristicPricingNonBestColumnsPerSeed = 10;
 
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_tenure，tabu 禁忌长度。 */
 	public int heuristicPricingTabuTenure = 30;

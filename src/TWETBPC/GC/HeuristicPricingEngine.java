@@ -98,8 +98,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		HeuristicMoveDuals moveDuals = config.heuristicPricingPrecomputeMoveDuals
 				? buildHeuristicMoveDuals(lp) : null;
 		Utility.resetCurUpperBound(Utility.big_M);
-		HeuristicCandidatePool candidatePool = new HeuristicCandidatePool(config.heuristicPricingPoolSize,
-				config.heuristicPricingCollectNonBestNegativeMoves);
+		// 标准轨迹池始终保持旧 OFF 语义；非 best 候选只能作为附加列，不能改变 Tabu 搜索停止条件。
+		HeuristicCandidatePool candidatePool = new HeuristicCandidatePool(config.heuristicPricingPoolSize, false);
+		ArrayList<ScoredSequence> nonBestCandidates = new ArrayList<ScoredSequence>();
 		HeuristicCostAudit costAudit = new HeuristicCostAudit();
 
 		phaseStart = stats.start();
@@ -110,18 +111,25 @@ public class HeuristicPricingEngine implements PricingEngine {
 			}
 			long seedStart = stats.start();
 			long candidatesBeforeSeed = candidatePool.acceptedCount();
+			HeuristicCandidatePool seedNonBestPool = config.heuristicPricingCollectNonBestNegativeMoves
+					? new HeuristicCandidatePool(config.heuristicPricingNonBestColumnsPerSeed, true) : null;
 			tabuSearch(seed.getSequence(), lp, sriContext, windowContext, arcCompatibility, moveDuals,
-					candidatePool, costAudit, stats);
+					candidatePool, seedNonBestPool, costAudit, stats);
+			if (seedNonBestPool != null) {
+				nonBestCandidates.addAll(seedNonBestPool.sortedCandidates());
+				stats.candidatePoolReplacements += seedNonBestPool.replacementCount();
+			}
 			stats.observeSeed(seedOrdinal++, seedStart, candidatePool.acceptedCount() - candidatesBeforeSeed);
 		}
 		stats.addSearchNanos(phaseStart);
 
-		if (candidatePool.isEmpty()) {
+		if (candidatePool.isEmpty() && nonBestCandidates.isEmpty()) {
 			return PricingResult.noImprovement("Tabu heuristic pricing found no negative reduced-cost column"
 					+ costAudit.summary() + stats.summary());
 		}
 		phaseStart = stats.start();
 		ArrayList<ScoredSequence> negativeCandidates = candidatePool.sortedCandidates();
+		Collections.sort(nonBestCandidates, BEST_CANDIDATE_ORDER);
 		stats.addSortNanos(phaseStart);
 
 		phaseStart = stats.start();
@@ -132,13 +140,31 @@ public class HeuristicPricingEngine implements PricingEngine {
 			columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost, ColumnSource.PRICING_HEURISTIC,
 					false));
 		}
+		// 标准轨迹列优先；非 best 列仅补充不同 signature，不能绕过标准 300 条的排序限制。
+		HashSet<SequenceSignature> outputSignatures = new HashSet<SequenceSignature>();
+		for (ScoredSequence candidate : negativeCandidates) {
+			outputSignatures.add(candidate.signature);
+		}
+		int extraReturned = 0;
+		for (ScoredSequence candidate : nonBestCandidates) {
+			if (!outputSignatures.add(candidate.signature)) {
+				continue;
+			}
+			columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost,
+					ColumnSource.PRICING_HEURISTIC, false));
+			extraReturned++;
+		}
 		stats.addBuildColumnsNanos(phaseStart);
 		stats.returnedColumns = columns.size();
 		stats.negativeCandidates = negativeCandidates.size();
-		stats.candidatePoolReplacements = candidatePool.replacementCount();
+		stats.standardCandidates = negativeCandidates.size();
+		stats.extraCandidates = nonBestCandidates.size();
+		stats.extraReturnedColumns = extraReturned;
+		stats.candidatePoolReplacements += candidatePool.replacementCount();
 		return new PricingResult(columns, true,
-				"Tabu heuristic pricing generated " + columns.size() + " columns from local pool "
-						+ negativeCandidates.size() + costAudit.summary() + stats.summary());
+				"Tabu heuristic pricing generated " + columns.size() + " columns from standard/extra pools "
+						+ negativeCandidates.size() + "/" + nonBestCandidates.size()
+						+ costAudit.summary() + stats.summary());
 	}
 
 	@Override
@@ -220,7 +246,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private void tabuSearch(List<Integer> seed, LP lp, SriPricingContext sriContext,
 			HeuristicWindowContext windowContext, HeuristicArcCompatibility arcCompatibility,
 			HeuristicMoveDuals moveDuals, HeuristicCandidatePool candidatePool,
-			HeuristicCostAudit costAudit, HeuristicPricingStats stats) {
+			HeuristicCandidatePool seedNonBestPool, HeuristicCostAudit costAudit, HeuristicPricingStats stats) {
 		if (stats.enabled) { stats.tabuSearchCalls++; }
 		long stateStart = stats.start();
 		TabuRouteState state = new TabuRouteState(seed, sriContext, windowContext, arcCompatibility, moveDuals,
@@ -234,8 +260,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		double bestReducedCost = state.reducedCost(lp);
 		tryAddNegative(state.sequence, state.cost, bestReducedCost, lp, sriContext, windowContext,
 				candidatePool, costAudit, stats);
-		NegativeMoveCollector moveCollector = config.heuristicPricingCollectNonBestNegativeMoves
-				? new NegativeMoveCollector(lp, sriContext, windowContext, candidatePool, costAudit, stats) : null;
+		NegativeMoveCollector moveCollector = seedNonBestPool == null ? null
+				: new NegativeMoveCollector(lp, sriContext, windowContext, seedNonBestPool, costAudit, stats,
+						config.heuristicPricingNonBestMovesPerIteration);
 
 		long firstTwentyAccepted = 0L;
 		long remainingAccepted = 0L;
@@ -246,8 +273,14 @@ public class HeuristicPricingEngine implements PricingEngine {
 			long iterationStart = stats.start();
 			long candidatesBeforeIteration = candidatePool.acceptedCount();
 			long findStart = stats.start();
+			if (moveCollector != null) {
+				moveCollector.startIteration();
+			}
 			TabuMove bestMove = findBestMove(state, lp, iter, bestReducedCost, moveCollector, stats);
 			stats.addFindBestMoveNanos(findStart);
+			if (moveCollector != null) {
+				moveCollector.finishIteration(state, bestMove);
+			}
 			if (bestMove == null) {
 				if (stats.enabled) { stats.noMoveBreaks++; }
 				stats.observeTabuIteration(iter, iterationStart,
@@ -1213,7 +1246,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	/**
-	 * 非 best 负 move 只竞争输出候选池，不参与 tabu 状态转移。
+	 * 非 best 负 move 只竞争当前 seed 的附加池，不参与 tabu 状态转移，也不挤占标准轨迹列。
+	 * 每轮只暂存最负的少数 move；确定实际 best 后再排除它并构造 sequence，避免为全部负 move 分配对象。
 	 */
 	private final class NegativeMoveCollector {
 		private final LP lp;
@@ -1222,20 +1256,35 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private final HeuristicCandidatePool candidatePool;
 		private final HeuristicCostAudit costAudit;
 		private final HeuristicPricingStats stats;
+		private final int movesPerIteration;
+		private final PriorityQueue<CollectedNegativeMove> iterationCandidates;
+		private long nextOrder;
 
 		NegativeMoveCollector(LP lp, SriPricingContext sriContext, HeuristicWindowContext windowContext,
-				HeuristicCandidatePool candidatePool, HeuristicCostAudit costAudit, HeuristicPricingStats stats) {
+				HeuristicCandidatePool candidatePool, HeuristicCostAudit costAudit, HeuristicPricingStats stats,
+				int movesPerIteration) {
 			this.lp = lp;
 			this.sriContext = sriContext;
 			this.windowContext = windowContext;
 			this.candidatePool = candidatePool;
 			this.costAudit = costAudit;
 			this.stats = stats;
+			this.movesPerIteration = Math.max(0, movesPerIteration);
+			int bufferCapacity = this.movesPerIteration + 1;
+			this.iterationCandidates = new PriorityQueue<CollectedNegativeMove>(Math.max(1, bufferCapacity),
+					BEST_COLLECTED_MOVE_ORDER.reversed());
+		}
+
+		void startIteration() {
+			iterationCandidates.clear();
 		}
 
 		void consider(TabuRouteState state, MoveType type, int position, int primaryJob,
 				double candidateCost, double reducedCost) {
 			if (stats.enabled) { stats.candidatePoolMoveConsidered++; }
+			if (movesPerIteration == 0) {
+				return;
+			}
 			int candidateSize = type == MoveType.REMOVE ? state.sequence.size() - 1
 					: type == MoveType.ADD ? state.sequence.size() + 1 : state.sequence.size();
 			// dual window 下必须先回刷真实成本，不能用受限 reduced cost 淘汰候选。
@@ -1244,22 +1293,98 @@ public class HeuristicPricingEngine implements PricingEngine {
 				if (stats.enabled) { stats.candidatePoolMoveThresholdRejected++; }
 				return;
 			}
-			ArrayList<Integer> candidateSequence = new ArrayList<Integer>(state.sequence);
-			if (type == MoveType.REMOVE) {
-				candidateSequence.remove(position);
-			} else if (type == MoveType.ADD) {
-				candidateSequence.add(position, Integer.valueOf(primaryJob));
-			} else {
-				candidateSequence.set(position, Integer.valueOf(primaryJob));
+			CollectedNegativeMove candidate = new CollectedNegativeMove(type, position, primaryJob,
+					candidateCost, reducedCost, candidateSize, nextOrder++);
+			int bufferCapacity = movesPerIteration + 1;
+			if (iterationCandidates.size() < bufferCapacity) {
+				iterationCandidates.add(candidate);
+				return;
 			}
-			if (stats.enabled) { stats.candidatePoolMoveSequencesBuilt++; }
-			tryAddNegative(candidateSequence, candidateCost, reducedCost, lp, sriContext, windowContext,
-					candidatePool, costAudit, stats);
+			CollectedNegativeMove worst = iterationCandidates.peek();
+			if (BEST_COLLECTED_MOVE_ORDER.compare(candidate, worst) < 0) {
+				iterationCandidates.poll();
+				iterationCandidates.add(candidate);
+			}
+		}
+
+		void finishIteration(TabuRouteState state, TabuMove selectedBest) {
+			if (movesPerIteration == 0 || iterationCandidates.isEmpty()) {
+				return;
+			}
+			ArrayList<CollectedNegativeMove> candidates = new ArrayList<CollectedNegativeMove>(iterationCandidates);
+			Collections.sort(candidates, BEST_COLLECTED_MOVE_ORDER);
+			int selected = 0;
+			for (CollectedNegativeMove candidate : candidates) {
+				if (candidate.matches(selectedBest)) {
+					continue;
+				}
+				ArrayList<Integer> candidateSequence = candidate.applyTo(state.sequence);
+				if (stats.enabled) { stats.candidatePoolMoveSequencesBuilt++; }
+				tryAddNegative(candidateSequence, candidate.cost, candidate.reducedCost, lp, sriContext,
+						windowContext, candidatePool, costAudit, stats);
+				selected++;
+				if (selected >= movesPerIteration) {
+					break;
+				}
+			}
 		}
 	}
 
+	private static final Comparator<CollectedNegativeMove> BEST_COLLECTED_MOVE_ORDER =
+			new Comparator<CollectedNegativeMove>() {
+		@Override
+		public int compare(CollectedNegativeMove a, CollectedNegativeMove b) {
+			int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
+			if (reducedCostCompare != 0) {
+				return reducedCostCompare;
+			}
+			int sizeCompare = Integer.compare(a.sequenceSize, b.sequenceSize);
+			if (sizeCompare != 0) {
+				return sizeCompare;
+			}
+			return Long.compare(a.order, b.order);
+		}
+	};
+
+	/** 单轮负 move 的轻量描述；仅入选 runner-up 后才真正构造 sequence。 */
+	private static final class CollectedNegativeMove {
+		final MoveType type;
+		final int position;
+		final int primaryJob;
+		final double cost;
+		final double reducedCost;
+		final int sequenceSize;
+		final long order;
+
+		CollectedNegativeMove(MoveType type, int position, int primaryJob, double cost,
+				double reducedCost, int sequenceSize, long order) {
+			this.type = type;
+			this.position = position;
+			this.primaryJob = primaryJob;
+			this.cost = cost;
+			this.reducedCost = reducedCost;
+			this.sequenceSize = sequenceSize;
+			this.order = order;
+		}
+
+		boolean matches(TabuMove move) {
+			return move != null && type == move.type && position == move.position && primaryJob == move.primaryJob;
+		}
+
+		ArrayList<Integer> applyTo(List<Integer> sequence) {
+			ArrayList<Integer> result = new ArrayList<Integer>(sequence);
+			if (type == MoveType.REMOVE) {
+				result.remove(position);
+			} else if (type == MoveType.ADD) {
+				result.add(position, Integer.valueOf(primaryJob));
+			} else {
+				result.set(position, Integer.valueOf(primaryJob));
+			}
+			return result;
+		}
+	}
 	/**
-	 * 默认模式保持旧的“满 5000 即停”；实验模式把 5000 解释为保留容量，满池后继续替换最差候选。
+	 * 标准轨迹使用插入序池，达到容量后停止搜索；每个 seed 的附加池使用 top-K，满池后替换最差候选。
 	 */
 	private static final class HeuristicCandidatePool {
 		private final int capacity;
@@ -1367,6 +1492,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 		int appliedMoves;
 		int returnedColumns;
 		int negativeCandidates;
+		int standardCandidates;
+		int extraCandidates;
+		int extraReturnedColumns;
 		int selectedPositiveSeeds;
 		int selectedHeuristicSeeds;
 		int selectedExactSeeds;
@@ -1624,7 +1752,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 					+ "/" + tryAddDuplicate + "/" + tryAddRejectedByReducedCost + "/" + tryAddPoolFull
 					+ ", trueRecheck calls/ms/bigM/filtered/skipped=" + trueRecheckCalls + "/" + ms(trueRecheckNanos)
 					+ "/" + trueRecheckBigM + "/" + trueRecheckFiltered + "/" + tryAddSkippedTrueRecheck
-					+ ", output candidates/returned=" + negativeCandidates + "/" + returnedColumns;
+					+ ", output standard/extra/extraReturned/total=" + standardCandidates + "/"
+					+ extraCandidates + "/" + extraReturnedColumns + "/" + returnedColumns;
 		}
 
 		private static String ms(long nanos) {

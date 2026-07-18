@@ -324,6 +324,12 @@ public class GCBBFullDomainComparisonTest {
 		config.heuristicPricingCollectNonBestNegativeMoves = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.heuristicCollectNonBestNegativeMoves",
 				Boolean.toString(config.heuristicPricingCollectNonBestNegativeMoves)));
+		config.heuristicPricingNonBestMovesPerIteration = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.heuristicNonBestMovesPerIteration",
+				config.heuristicPricingNonBestMovesPerIteration);
+		config.heuristicPricingNonBestColumnsPerSeed = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.heuristicNonBestColumnsPerSeed",
+				config.heuristicPricingNonBestColumnsPerSeed);
 		config.heuristicPricingPrecomputeArcCompatibility = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.heuristicPrecomputeArcCompatibility",
 				Boolean.toString(config.heuristicPricingPrecomputeArcCompatibility)));

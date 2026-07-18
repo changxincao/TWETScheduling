@@ -2608,3 +2608,15 @@ effective budget 没有减少困难 certificate 的轮数；coverage 在 R75 只
 队列顺序只作为低成本复核项。历史小算例中 TIME 优于 REDUCED_COST，当前常用实验 runner 也直接固定为 TIME；可以把 runner 改为可由属性覆盖后，在最新 W300 主线上补一次 TIME/REDUCED_COST/REACHABLE_SIZE A/B，但不应把它当作当前主要缺陷。跨 dual 复用 completion bound 则不建议直接做：dual 改变会让弧成本同时升降，当前同一 build 内的单调 delta 不能安全跨 LP 复用；而现有 completion bound 在困难轮次确实能剪掉大量扩展，简单关闭或使用过弱旧 bound 很可能把成本转移到 labeling。
 
 已经有负面证据的方向不再重复：历史或同 node warm-start、same-dual 继续 DSSR 批量加列、dual smoothing、固定扩大 top-K、effective15、仅同路径 tie coverage、partial dominance、full-domain join、用 group envelope 替代真实 label join、duplicate greedy repair、每轮 time-indexed helper，以及继续做 PWLF/bitset 微小常数优化。若全局 bundle coverage 和列批量控制仍无稳定收益，下一层策略应转向按 node 的图规模和 repeatability 在 ng-DSSR 与 time-indexed 之间选择，而不是继续强迫单一 pricing 在所有实例上占优。
+
+252. 2026-07-18 基于 exact labeling 框架的 limited-discrepancy pricing 启发式
+
+针对 Tabu pricing 找不到、但 exact ng-DSSR 仍能找到的多步结构列，一个更直接的方向是保留当前双向 labeling 框架，但在每个 label 扩展时只允许少量更有希望的弧。文献中与这个想法最接近的是 limited discrepancy search（LDS）：先按 reduced-cost 类似指标将每个任务的少量出弧标为 good arcs，其余标为 bad arcs；第一遍只允许整条路径使用 0 条 bad arc，失败后允许 1 条，仍失败才运行当前完整 exact ng-DSSR。这比“永久只扩展 top3”更稳健：早期某一个局部排名错误时，一条 bad arc 仍能恢复路径；而两个 limited 阶段都找不到列时，只能说启发式失败，不能用来证明 pricing 闭合。
+
+当前实现中，`extensionSet` 已经排除 ng-memory、硬时间窗、分支禁弧和 pricing-only 禁弧；limited 筛选应放在 `extensionSet` 之后、`buildForwardExtensionFrontier()` / `buildBackwardExtensionFrontier()` 之前，这样才能避免真正昂贵的 PWLF `shift/add/normalize` 构造。W300 历史统计中曾构造约 280.4 万个 extension frontier，仅约 66.2 万个通过 completion-bound 检查；扩展占排除 initialization 后 exact 时间约 87.1%。因此，如果 limited pass 能在相当一部分 pricing 调用中直接找到足够的 elementary negative columns，它有比继续微调 join 更高的潜在收益。
+
+第一版建议只做 no-SRI 前置启发式，不修改 exact 语义。每次 pricing 按当前 dual 为普通弧预计算一个便宜分数，优先可用“弧/setup reduced-cost 部分 + 下一任务 effective window 内最小 penalty + 标量 suffix bound”，然后对每个任务保留 K=3 或 5 条 good outgoing arcs。分数必须在一次 pricing 内按 job/arc 预计算，不能对每个 label 为所有后继重做 PWLF 区间查询，否则会在限制扩展前先付出接近 exact 扩展的成本。forward/backward label 各记一个很小的 bad-arc count；双向 join 时必须检查 forward count + backward count + join arc badness 不超过当前 discrepancy limit。source/sink 弧需要统一按 good arc 处理，避免对路径长度造成偏置。
+
+不建议第一版在 limited pass 内独立跑多轮 DSSR 并把 ng-set 更新带入 exact。受限弧图里的 non-elementary witness 分布可能与完整图不同，虽然新增 ng-pair 不会删除 elementary route，但可能让后续 exact 的 label 状态无意义地变重。更小的实现是：用当前 ng-set 各跑一次 discrepancy 0 和 1 的 restricted labeling；只要找到 elementary negative columns 就返回 RMP；没找到就完整重置搜索状态，走原 exact ng-DSSR。limited pass 不返回 no-negative certificate，不做 subtree fixing，不永久修改 ng-set。
+
+这个方向对 W300 值得实验，但不能预设 K=3 必然有效。每个 label 仍可产生最多 3 个 child，深路径的状态数仍可指数增长；多个 label 也可能重复选中同一组 good arcs，导致列多样性不足。最合理的小型矩阵是 K=3/5 与 discrepancy=0/1，同时记录 limited 0、limited 1 和 full exact 各自关闭的 pricing 比例、扩展候选数、PWLF frontier 构造数、返回基本负列数、后续 RMP 迭代数和总 wall time。判断标准不是 limited pass 本身快，而是完整 root/节点的 exact 调用和总时间下降，bound、objective 和 valid 保持一致，且 RMP 往返没有显著增加。

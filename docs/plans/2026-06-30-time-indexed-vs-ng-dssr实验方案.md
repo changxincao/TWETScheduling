@@ -1351,3 +1351,15 @@ backward 比 forward 大两个数量级的直接原因已经确定。第一轮 m
 join 长尾同样不是单次 PWLF 拼接特别慢，而是 pair 数量和负 pseudo route 的处理方式共同放大。最后一轮访问 `21271870` 个候选、尝试 `21200986` 个 pair，只有 11 次在函数值阶段被剪掉；group-envelope prefilter 已跳过约 `7898635` 个潜在 pair，但在几乎所有剩余 pair 都为负且非基本时无法继续证明剪枝。当前每个负 pair 都会恢复完整 sequence、分配 elementary 检查数组，再在线性 top-25 witness 列表中去重和比较；79 轮累计 5.54 亿条负非基本路径时，这部分分配和扫描不能再视为小常数。
 
 后续优化按以下顺序处理。第一，strong trial repair 应有独立 exact 预算；预算耗尽只能把该 trial side 标为 `UNUSABLE`，不能作为 `INF`，若最终选中该 child 仍回到正式节点完整 repair。这能直接避免一次试探占用 730s，且不改变正式树正确性。第二，做严格等价的 join elementary profile：join 前为每个 active label 一次性建立完整访问集合和“半路径是否 basic”，pair 可在不恢复 sequence 的情况下判断完整路径是否 basic；对确定非基本且 top-25 已满的 pair，若现有安全 lower bound 已不可能改善最差 witness，则跳过函数计算，函数计算后仍不能进入 top-25 时也不恢复 sequence。top-25 再改为 signature map 加 worst-first heap，避免每条负路径线性扫描。第三，DSSR 中间轮只要找到足够的负非基本 witness，就可以停止本轮 join、更新 ng-set 后重跑；此时不输出闭合证书，最终无 witness 的一轮仍完整枚举，因此 elementary route 不会丢失，dual bound 也只取最终证书轮。第四，根据上一轮完整 exact 的正反耗时或 label 比例调整下一轮 Tmid；当 backward/forward 比例已经超过 2--3 时，不应继续无条件复用第一轮 Tmid。第五，repair 专用的更强 ng 更新可以作为 A/B，但要防止一次加入过多 pair 后立即放大 label 状态，优先级低于前三项。
+
+#### 60-2 卡点中的 Tmid 与 join 进一步分析
+
+日志中的 halfWindowIneligible fw/bw=32/3 是当前 pricing 有效时间窗与 Tmid 的相对位置，不是 32 个任务在整个子问题中不可用。forward eligibility 要求任务的动态有效完成时间域非空且左端不晚于 Tmid；backward eligibility 要求反向有效时间域非空且右端不早于 Tmid。因此有效窗口整体位于 Tmid 右侧的任务只能进入 backward half，整体位于左侧的任务只能进入 forward half，跨过 Tmid 的任务两侧均可使用。这里的动态有效窗口已经包含 compact/dual window、分支及 pricing-only arc 的当前轮影响，不只是原始 due window。32/3 表明当前 Tmid 相对有效窗口分布明显偏左，给 backward 留下了远多于 forward 的可选任务。
+
+当前存在两套不同层次的 Tmid 复用。stableFreeze 作用于同一 BPC node 的多次独立 exact pricing，至少观察 5 次、最近 3 次稳定后冻结，跳过 5 次 probe 再校验一次，而且只在每次 exact 的第 1 轮 DSSR 生效。reuseWithinDssr 则作用于同一次 exact 内部：第 2 轮开始优先直接复用第一轮 Tmid。60-2 的 79 轮 repair 正是后者，因此第 2--79 轮不会触发 stableFreeze 的五次校验。第一轮有限 probe 每侧最多扩展约 2500 个状态，能看到浅层负载接近平衡，却看不到 ng-set 增长后 backward 的深层状态爆炸。
+
+不改变 pricing 控制流程时，Tmid 最合理的优化是利用上一轮完整 exact 的免费反馈，而不是重复运行有限 probe。每轮记录 forward/backward 的扩展耗时、constructed/kept labels 和 queue peak；backward 明显更重时向右移动 Tmid，反之向左移动。移动应使用 active horizon 的小比例并设置死区；方向反转后在前后两个 Tmid 之间二分，避免震荡。初始 Tmid 还可以用有效窗口的加权中位数预平衡 job eligibility，但最终应以完整 labeling 的方向工作量为准。目标不只是让 label 数相等，而是降低后续 join 的乘积规模；因此主要指标应优先使用完整扩展耗时和按 terminal 分组估计的 pair 数，job 数只适合作为初始参考。
+
+join 的下一步严格等价优化不应继续增加普通 reduced-cost lower bound。本次最后一轮约 2120 万个 pair 几乎全部为负，range bound 即使更紧也很难剪枝。更有价值的是为 no-SRI label 增量保存完整访问 mask 和 half-path elementary 标记。一个 pair 是否 elementary 可由两侧标记和访问 mask 交集 O(1) 判定，不必先恢复 sequence。对确定 non-elementary 的 pair，top-25 witness 满后可先用现有安全 pair lower bound 与当前最差 witness 比较；不能改善时跳过 PWLF 精确拼接，精确拼接后仍不能进入 top-25 时跳过 sequence 恢复。只有 elementary negative candidate 或真正可能进入 top-25 的 non-elementary pair 才恢复 sequence。top-25 本身可改为 signature map 加 worst-first heap；再配合增量 route hash，可避免同一路径不同 split 的重复恢复。该方案保留最终 certificate 的完整 pair 覆盖，只减少每个 pair 的对象分配和后处理。
+
+遍历顺序只有在上述 witness threshold 生效后才值得调整：按 group/pair optimistic bound best-first，可更早填满较强的 top-25，使后续已知 non-elementary pair 更容易被阈值剪掉。单独改变顺序不会减少最终 certificate 轮的 pair 数。按 crossing arc 预建兼容 backward 索引只能减少外层扫描，而本例 candidate visited 与 pair tried 已非常接近，说明热点是大量真实可拼 pair，不是 arc/ng-memory 检查本身，优先级较低。

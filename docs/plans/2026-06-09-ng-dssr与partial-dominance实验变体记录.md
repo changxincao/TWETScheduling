@@ -2634,3 +2634,16 @@ effective budget 没有减少困难 certificate 的轮数；coverage 在 R75 只
 若静态 reduced graph 仍产生太多 label，第二步才考虑 label-aware top3。对 label L 的候选 j，先用 frontier hull、setup/process 和 j 的 effective window 得到可达完成区间，再用 O(1) 近似分数“当前 frontier scalar min + 弧 reduced increment + 可达区间内最小 penalty + job 级 suffix scalar”选最小的 3 个。该分数只用于排名，不用于证明剪枝；用固定 3 个槽位线性扫描 `extensionSet` 即可，不需要排序或分配候选容器。但动态 top3 会使 join arc 的判定与 label 时间状态相关，接入双向 split 更复杂，因此应在静态 K=3/5 reduced graph 无法足够限制规模时再做。
 
 该 engine 的预期作用是补足 Tabu 对多步重组的缺口：它仍从 source 全局构造 route，不受单个 seed 的一步 move 邻域限制；同时又因缩减弧图、空 ng-memory 和更强 dominance 而应显著轻于 exact ng-DSSR。实验先比较 K=3/5，记录该 engine 命中率、label/extension/frontier/join 数、返回基本负列数、单次时间、后续 exact 调用数和完整 root 时间。若它经常只找到 non-elementary pseudo-route 或大多数调用均返回 empty，则说明空 ng-memory 的 relaxation 太弱，不应通过把它做成第二个 exact 来挽救。
+
+254. 2026-07-18 full-ng top3 受限扩展启发式实现与负结果
+
+按最新讨论实现了一个独立 pricing engine，位置在现有 Tabu `HeuristicPricingEngine` 之后、正式 exact ng-DSSR 之前。该引擎复用当前半域双向 labeling、PWLF 扩展、硬时间窗、分支/pricing-only 禁弧、source-aware dominance 和 join，但初始 ng-set 直接设为 full，因此本轮路径保持 elementary；只运行一轮，不做 DSSR 更新，不记录 ng-set 历史，也不返回 no-negative certificate。无列时 PC 继续调用 exact ng-DSSR，因而该实验层只可能影响速度，不改变最终闭合证明。
+
+每个 forward/backward label 仍扫描当前 `extensionSet` 中的全部可行方向，并构造与 exact 相同的 child frontier。通过基本可行性后，按该候选 PWLF 的最小 reduced cost 排序，只实体化、插入 dominance graph并入队最好的 3 个方向；其余候选立即释放。这个分数已经包含父 frontier、setup/process 转移、下一任务 penalty、job dual 和 arc dual，比只按 `setupCost-arcDual-jobDual` 排序更完整。为避免把 exact 初始化成本搬进启发式，该模式明确不构造 F/B/U/R completion bound，不运行 completion pre-certificate，也不做 midpoint probe，固定使用默认中点。统计 `limitedExtend K/fwSelectedDropped/bwSelectedDropped` 用于观察真实保留比例。
+
+root-only A/B 使用 40-2 的 `wet040_001_2m` 和 `wet040_002_2m`，统一关闭 ALNS、RMIH、strong branching、time-indexed root preprocessing 和 time-indexed pre-heuristic；exact ng-DSSR 使用 nearest `floor(n/10)`、top25 minimum-segment、source-aware dominance、group-envelope prefilter 和 all-cycles completion bound。两组 on/off 的最终 bound、pool、exact 调用数、exact 加列量和 `valid=true` 均完全一致：
+
+1. `wet040_001_2m`：关闭新引擎为 `15.467s`；开启后为 `16.612s`。新引擎调用 16 次、成功 0 次、加列 0、合计 `0.348s`；随后 exact 仍调用 16 次，其中 15 次成功，共加入 39 条列，exact 时间 `4.361s`。
+2. `wet040_002_2m`：关闭为 `15.376s`；开启后为 `15.764s`。新引擎调用 10 次、成功 0 次、加列 0、合计 `0.236s`；随后 exact 调用 10 次，其中 9 次成功，共加入 30 条列，exact 时间 `2.923s`。
+
+新引擎稳定后单次通常只需约 `9--25ms`，明显低于对应 exact 的约 `220--620ms`，说明去掉 completion bound 后受限 labeling 本身足够轻；但两个实例共 26 次调用全部 miss，而 exact 在其中 24 次成功。根因是 `full ng-set + 每 label 局部 top3` 过于贪心：真正负列需要某些局部并非前三的过渡，相关前缀在生成前就被丢弃。当前证据不支持把该引擎加入最好配置，配置 `enableNgDssrLimitedLabelingHeuristic` 默认保持 false。实现暂时保留用于后续研究静态 reduced-arc graph、一步 look-ahead 或带 discrepancy 的变体，但不能把当前 K=3 空结果用于闭合。

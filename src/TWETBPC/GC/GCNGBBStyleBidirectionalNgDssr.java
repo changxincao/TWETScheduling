@@ -263,6 +263,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long backwardExtensionInfeasible;
 	private long backwardExtensionConstructed;
 	private long backwardExtensionBoundSurvivors;
+	private long limitedForwardExtensionsSelected;
+	private long limitedForwardExtensionsDropped;
+	private long limitedBackwardExtensionsSelected;
+	private long limitedBackwardExtensionsDropped;
 	private long forwardExtensionArcCheckNanos;
 	private long forwardExtensionBuildNanos;
 	private long forwardExtensionWindowCheckNanos;
@@ -426,6 +430,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double ngDssrReusableEarliestSourceCompletion;
 	private HashSet<SequenceSignature> ngDssrReusableActiveColumnSignatures;
 	private final DominanceBackend dominanceBackend;
+	/** 0 表示完整扩展；正数表示启发式中每个 label 只保留最优的若干个方向。 */
+	private final int limitedExtensionCount;
+	/** full ng-set 单轮启发式不做 DSSR 更新，也不写入历史 warm-start。 */
+	private final boolean singleRoundFullNgHeuristic;
+	private final LimitedExtensionBuffer limitedExtensionBuffer;
 	private ArrayList<Integer> targetTraceSequence;
 	private StringBuilder targetTrace;
 	private int targetTraceEventLimit;
@@ -458,20 +467,55 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, DominanceBackend dominanceBackend,
 			NgDssrHistoryWarmStart historyWarmStart) {
+		this(data, config, midpointProbeReuseByNode, dominanceBackend, historyWarmStart, 0, false);
+	}
+
+	private GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
+			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, DominanceBackend dominanceBackend,
+			NgDssrHistoryWarmStart historyWarmStart, int limitedExtensionCount,
+			boolean singleRoundFullNgHeuristic) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
 		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
 		this.dominanceBackend = dominanceBackend == null ? DominanceBackend.PAPER : dominanceBackend;
 		this.historyWarmStart = historyWarmStart;
+		this.limitedExtensionCount = Math.max(0, limitedExtensionCount);
+		this.singleRoundFullNgHeuristic = singleRoundFullNgHeuristic;
+		this.limitedExtensionBuffer = this.limitedExtensionCount > 0
+				? new LimitedExtensionBuffer(this.limitedExtensionCount) : null;
 		this.completionBoundFlatFunctionQuery = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.completionBoundFlatFunctionQuery", "true"));
+	}
+
+	/** 创建 full-ng、单轮、每个 label 仅保留 top-K 扩展的独立启发式内核。 */
+	public static GCNGBBStyleBidirectionalNgDssr limitedLabelingHeuristic(
+			Data data, TWETBPCConfig config, int extensionLimit) {
+		if (extensionLimit <= 0) {
+			throw new IllegalArgumentException("extensionLimit must be positive");
+		}
+		return new GCNGBBStyleBidirectionalNgDssr(data, config, null, DominanceBackend.PAPER,
+				null, extensionLimit, true);
 	}
 
 	private void initializeNgNeighborhoods(LP lp) {
 		ngNeighborhoodByJob = new PackedBitSet[data.n + 2];
 		for (int job = 1; job <= data.n; job++) {
 			ngNeighborhoodByJob[job] = new PackedBitSet(data.n + 2);
+		}
+		if (singleRoundFullNgHeuristic) {
+			// full ng-memory 使本轮 labeling 直接保持 elementary；不混入窗口过滤和历史初始化。
+			for (int job = 1; job <= data.n; job++) {
+				for (int other = 1; other <= data.n; other++) {
+					if (other != job) {
+						ngNeighborhoodByJob[job].add(other);
+					}
+				}
+			}
+			ngDssrHistoryWarmStartApplied = false;
+			ngDssrSameNodeWarmStartApplied = false;
+			ngDssrHistoryWarmStartSkippedForRepeatability = false;
+			return;
 		}
 		prepareInitialRepeatabilityFilter(lp);
 		ngDssrHistoryWarmStartApplied = false;
@@ -1213,6 +1257,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrTotalElementaryColumnsReturned += ngDssrRoundElementaryColumnsReturned;
 			ngDssrTotalNonElementaryNegativeSeen += ngDssrRoundNonElementaryNegativeSeen;
 			ngDssrTotalNonElementaryRoutes += nonElementaryNegativeRoutes.size();
+			if (singleRoundFullNgHeuristic) {
+				appendNgSetStatsForRound(0);
+				appendRoundRouteRelation(0);
+				appendNgDssrSummary(columns.isEmpty()
+						? "full-ng limited labeling heuristic found no negative column"
+						: "full-ng limited labeling heuristic returned elementary negative columns");
+				return columns;
+			}
 			if (!columns.isEmpty()) {
 				appendNgSetStatsForRound(0);
 				appendRoundRouteRelation(0);
@@ -1691,11 +1743,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		tMid = Math.min(data.CmaxH * 0.5, pricingHorizon);
 		queueOrdering = parseQueueOrdering(config.bidirectionalLabelQueueOrdering);
 		joinBestThresholdMode = parseJoinBestThresholdMode(config.bidirectionalJoinBestThresholdMode);
-		completionBoundRelaxation = parseCompletionBoundRelaxation(config.bidirectionalCompletionBoundRelaxation);
+		completionBoundRelaxation = singleRoundFullNgHeuristic ? null
+				: parseCompletionBoundRelaxation(config.bidirectionalCompletionBoundRelaxation);
 		completionBoundQueueOrdering = parseCompletionBoundQueueOrdering(
 				config.bidirectionalCompletionBoundQueueOrdering);
-		completionBounds = ngDssrReusableCompletionBounds;
-		completionBoundFixedArc = ngDssrReusableCompletionBoundFixedArc;
+		completionBounds = singleRoundFullNgHeuristic ? null : ngDssrReusableCompletionBounds;
+		completionBoundFixedArc = singleRoundFullNgHeuristic ? null : ngDssrReusableCompletionBoundFixedArc;
 		bestGeneratedReducedCost = Utility.big_M;
 		generatedColumns = new ArrayList<TWETColumn>();
 		exactInitializeSetupNanos += System.nanoTime() - sectionStart;
@@ -1717,23 +1770,26 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		exactInitializeNgNeighborhoodNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
-		if (completionBounds == null) {
+		if (!singleRoundFullNgHeuristic && completionBounds == null) {
 			buildCompletionBounds(lp);
 		}
-		if (ngDssrReusableCompletionBounds == null && completionBounds != null) {
+		if (!singleRoundFullNgHeuristic && ngDssrReusableCompletionBounds == null && completionBounds != null) {
 			ngDssrReusableCompletionBounds = completionBounds;
 			ngDssrReusableCompletionBoundFixedArc = completionBoundFixedArc;
 		}
 		exactInitializeCompletionBoundNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
-		if (tryApplyCompletionBoundPreCertificate(lp)) {
+		if (!singleRoundFullNgHeuristic && tryApplyCompletionBoundPreCertificate(lp)) {
 			exactInitializePreCertificateNanos += System.nanoTime() - sectionStart;
 			return;
 		}
 		exactInitializePreCertificateNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
 		ensureExtensionArcMasks(lp.getNode());
-		if (!tryReuseFirstRoundMidpointWithinDssr()) {
+		if (singleRoundFullNgHeuristic) {
+			// 受限启发式固定使用默认中点，避免 probe 间接触发 completion-bound 构造。
+			midpointProbeSummary = "disabled-limited-heuristic";
+		} else if (!tryReuseFirstRoundMidpointWithinDssr()) {
 			if (!tryUseStableFrozenMidpoint(lp)) {
 				runMidpointProbeIfEnabled(lp);
 			}
@@ -1751,7 +1807,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		exactInitializeStateNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
-		runFullMidpointDiagnosticIfEnabled(lp);
+		if (!singleRoundFullNgHeuristic) {
+			runFullMidpointDiagnosticIfEnabled(lp);
+		}
 		exactInitializeFullMidpointDiagnosticNanos += System.nanoTime() - sectionStart;
 	}
 
@@ -2971,6 +3029,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		diagnosticForwardPops++;
 		traceWatchedLabel("WATCH_F_POP", label);
+		if (limitedExtensionCount > 0) {
+			forwardExtendLimited(label, lp);
+			diagnosticHeartbeat(lp, "forward.progress", false);
+			return;
+		}
 
 		for (int nextJob = label.extensionSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
 				nextJob = label.extensionSet.nextSetBit(nextJob + 1)) {
@@ -3026,6 +3089,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		diagnosticBackwardPops++;
 		traceWatchedLabel("WATCH_B_POP", label);
+		if (limitedExtensionCount > 0) {
+			backwardExtendLimited(label, lp);
+			diagnosticHeartbeat(lp, "backward.progress", false);
+			return;
+		}
 
 		for (int prevJob = label.extensionSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
 				prevJob = label.extensionSet.nextSetBit(prevJob + 1)) {
@@ -3070,6 +3138,111 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		diagnosticHeartbeat(lp, "backward.progress", false);
 	}
 
+	/**
+	 * 先构造当前可行候选，再只实体化函数最小 reduced cost 最好的 K 个方向；该启发式不构造 completion bound。
+	 * 评分已包含父函数、转移成本、任务函数及当前 dual，比单纯 arc 分数更贴近真实扩展质量。
+	 */
+	private void forwardExtendLimited(ForwardLabel label, LP lp) {
+		limitedExtensionBuffer.begin();
+		int survivors = 0;
+		try {
+			for (int nextJob = label.extensionSet.nextSetBit(1);
+					nextJob > 0 && nextJob <= data.n && canContinue();
+					nextJob = label.extensionSet.nextSetBit(nextJob + 1)) {
+				forwardExtensionCandidates++;
+				long timingStart = extensionTimingStart();
+				ExtensionFrontier candidate = buildForwardExtensionFrontier(label, nextJob, lp);
+				recordForwardBuildNanos(timingStart);
+				if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.FORWARD))) {
+					if (candidate != null) {
+						candidate.release();
+					}
+					forwardExtensionInfeasible++;
+					continue;
+				}
+				forwardExtensionConstructed++;
+				forwardExtensionBoundSurvivors++;
+				survivors++;
+				limitedExtensionBuffer.offer(nextJob,
+						candidate.minReducedCost(Direction.FORWARD), candidate);
+			}
+			int selected = limitedExtensionBuffer.size();
+			limitedForwardExtensionsSelected += selected;
+			limitedForwardExtensionsDropped += survivors - selected;
+			for (int index = 0; index < selected; index++) {
+				int nextJob = limitedExtensionBuffer.jobAt(index);
+				ExtensionFrontier candidate = limitedExtensionBuffer.takeAt(index);
+				long timingStart = extensionTimingStart();
+				ForwardLabel child = materializeForwardLabel(label, nextJob, candidate, lp);
+				recordForwardBuildNanos(timingStart);
+				traceTargetForward("F_CONSTRUCT", child, lp);
+				traceWatchedChild("WATCH_F_CHILD", label, child, nextJob);
+				timingStart = extensionTimingStart();
+				InsertStatus status = insertForward(child, lp);
+				recordForwardInsertNanos(timingStart);
+				traceTargetForward("F_INSERT_" + status, child, lp);
+				traceWatchedLabel("WATCH_F_INSERT_" + status, child);
+				if (status == InsertStatus.STORED_AND_ENQUEUE) {
+					timingStart = extensionTimingStart();
+					FWUL.add(child);
+					recordForwardQueueNanos(timingStart);
+				}
+			}
+		} finally {
+			limitedExtensionBuffer.releaseRemaining();
+		}
+	}
+
+	private void backwardExtendLimited(BackwardLabel label, LP lp) {
+		limitedExtensionBuffer.begin();
+		int survivors = 0;
+		try {
+			for (int prevJob = label.extensionSet.nextSetBit(1);
+					prevJob > 0 && prevJob <= data.n && canContinue();
+					prevJob = label.extensionSet.nextSetBit(prevJob + 1)) {
+				backwardExtensionCandidates++;
+				long timingStart = extensionTimingStart();
+				ExtensionFrontier candidate = buildBackwardExtensionFrontier(label, prevJob, lp);
+				recordBackwardBuildNanos(timingStart);
+				if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.BACKWARD))) {
+					if (candidate != null) {
+						candidate.release();
+					}
+					backwardExtensionInfeasible++;
+					continue;
+				}
+				backwardExtensionConstructed++;
+				backwardExtensionBoundSurvivors++;
+				survivors++;
+				limitedExtensionBuffer.offer(prevJob,
+						candidate.minReducedCost(Direction.BACKWARD), candidate);
+			}
+			int selected = limitedExtensionBuffer.size();
+			limitedBackwardExtensionsSelected += selected;
+			limitedBackwardExtensionsDropped += survivors - selected;
+			for (int index = 0; index < selected; index++) {
+				int prevJob = limitedExtensionBuffer.jobAt(index);
+				ExtensionFrontier candidate = limitedExtensionBuffer.takeAt(index);
+				long timingStart = extensionTimingStart();
+				BackwardLabel child = materializeBackwardLabel(label, prevJob, candidate, lp);
+				recordBackwardBuildNanos(timingStart);
+				traceTargetBackward("B_CONSTRUCT", child);
+				traceWatchedChild("WATCH_B_CHILD", label, child, prevJob);
+				timingStart = extensionTimingStart();
+				InsertStatus status = insertBackward(child, lp);
+				recordBackwardInsertNanos(timingStart);
+				traceTargetBackward("B_INSERT_" + status, child);
+				traceWatchedLabel("WATCH_B_INSERT_" + status, child);
+				if (status == InsertStatus.STORED_AND_ENQUEUE) {
+					timingStart = extensionTimingStart();
+					BWUL.add(child);
+					recordBackwardQueueNanos(timingStart);
+				}
+			}
+		} finally {
+			limitedExtensionBuffer.releaseRemaining();
+		}
+	}
 	private long extensionTimingStart() {
 		return config.ngDssrExtensionTimingDiagnostics ? System.nanoTime() : 0L;
 	}
@@ -4576,6 +4749,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		backwardExtensionInfeasible = 0;
 		backwardExtensionConstructed = 0;
 		backwardExtensionBoundSurvivors = 0;
+		limitedForwardExtensionsSelected = 0;
+		limitedForwardExtensionsDropped = 0;
+		limitedBackwardExtensionsSelected = 0;
+		limitedBackwardExtensionsDropped = 0;
 		forwardExtensionArcCheckNanos = 0;
 		forwardExtensionBuildNanos = 0;
 		forwardExtensionWindowCheckNanos = 0;
@@ -4775,6 +4952,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(backwardExtensionCandidates).append("/").append(backwardExtensionArcPruned).append("/")
 				.append(backwardExtensionInfeasible).append("/").append(backwardExtensionConstructed).append("/")
 				.append(backwardExtensionBoundSurvivors);
+		if (limitedExtensionCount > 0) {
+			builder.append(", limitedExtend K/fwSelectedDropped/bwSelectedDropped=")
+					.append(limitedExtensionCount).append("/")
+					.append(limitedForwardExtensionsSelected).append("-").append(limitedForwardExtensionsDropped)
+					.append("/").append(limitedBackwardExtensionsSelected).append("-")
+					.append(limitedBackwardExtensionsDropped);
+		}
 		builder.append(", forwardDepth kept/negSink=").append(formatDepthHistogram(forwardLabelsKeptByDepth))
 				.append("/").append(formatDepthHistogram(forwardSinkNegativeByDepth));
 		builder.append(", forwardReach kept avg/min/max=")
@@ -8058,6 +8242,76 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final ArrayList<ArrayList<L>> liveLabelsByCardinality = new ArrayList<ArrayList<L>>();
 	}
 
+	/** 固定容量、按 reduced cost 升序维护的复用缓冲区，避免每个 label 分配候选列表。 */
+	private static final class LimitedExtensionBuffer {
+		private final int[] jobs;
+		private final double[] scores;
+		private final ExtensionFrontier[] candidates;
+		private int size;
+
+		LimitedExtensionBuffer(int capacity) {
+			this.jobs = new int[capacity];
+			this.scores = new double[capacity];
+			this.candidates = new ExtensionFrontier[capacity];
+		}
+
+		void begin() {
+			releaseRemaining();
+			size = 0;
+		}
+
+		void offer(int job, double score, ExtensionFrontier candidate) {
+			int position = 0;
+			while (position < size && compare(scores[position], jobs[position], score, job) <= 0) {
+				position++;
+			}
+			if (size == candidates.length && position == size) {
+				candidate.release();
+				return;
+			}
+			if (size == candidates.length) {
+				candidates[size - 1].release();
+			} else {
+				size++;
+			}
+			for (int index = size - 1; index > position; index--) {
+				jobs[index] = jobs[index - 1];
+				scores[index] = scores[index - 1];
+				candidates[index] = candidates[index - 1];
+			}
+			jobs[position] = job;
+			scores[position] = score;
+			candidates[position] = candidate;
+		}
+
+		int size() {
+			return size;
+		}
+
+		int jobAt(int index) {
+			return jobs[index];
+		}
+
+		ExtensionFrontier takeAt(int index) {
+			ExtensionFrontier candidate = candidates[index];
+			candidates[index] = null;
+			return candidate;
+		}
+
+		void releaseRemaining() {
+			for (int index = 0; index < size; index++) {
+				if (candidates[index] != null) {
+					candidates[index].release();
+					candidates[index] = null;
+				}
+			}
+		}
+
+		private static int compare(double leftScore, int leftJob, double rightScore, int rightJob) {
+			int byScore = Double.compare(leftScore, rightScore);
+			return byScore != 0 ? byScore : Integer.compare(leftJob, rightJob);
+		}
+	}
 	/**
 	 * 已完成函数扩展、但尚未复制路径状态的轻量候选。
 	 * completion bound 先在这里判定；只有 survivor 才实体化为完整 label。

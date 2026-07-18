@@ -1319,3 +1319,23 @@ ng-DSSR 的主要时间为 HeuristicPricing=232.934s/469、strong_branching_ligh
 启发式 469 次调用中，142 次返回 0 列、149 次只返回 1--5 列，两类合计约 140.4s，却只产生 359 列；但 root 及部分新 dual 下仍会一次返回大量列，直接关闭或统一缩短会把压力转移给 exact pricing。此前单 seed 20 步无产出停止在不同算例上的收益不稳定，因此当前仍保持关闭，不能把这 140s 直接视为可无损删除。
 
 strong branching 共发生 3 次正式分支，每次测试 20 个候选的左右两侧，合计 120 个 trial；最终选中候选的 half-rank 分别为 2、17、17，简单把候选数从 20 降到 10 会改变后两次分支，不能视为免费加速。另需修正此前的计时表述：strong_branching_light_repair_rmp 包含 LP.solveRelaxation()，而该方法每次先 buildModel() 创建新的 CPLEX 模型，再调用 cplex.solve()；现有 strong_branching_*_rmp_build 只统计 trial 外层 LP.construct()，未单独统计 CPLEX 内部建模。因此 149.202s 是“CPLEX 模型重建 + LP 求解”总量，目前不能断言全部是 simplex 求解。下一项低风险诊断应先拆开这两部分；若模型重建占比高，优先研究 strong trial 的模型/basis 复用，若求解占比高，再研究 reliability/pseudo-cost 或候选预算。保持 strong branching 开启这一要求不变。
+
+### 2026-07-18 当前版本小时间串行复测
+
+为排除上一轮并发运行的资源竞争，本轮使用当前 `target/classes` 串行补测 `wet040_005_2m`、`wet040_006_2m` 和 `wet050_004_2m`。两种方法均使用单线程 CPLEX、ALNS 最多 60s、SA 关闭、无 SRI 和 strong branching phase1。ng-DSSR 使用 `nearest K=floor(n/10)`、`top25 + minimumNewPairsSegment`、source-aware dominance graph、group-envelope join prefilter、completion bound、midpoint reuse/freeze 和节点闭合后的 time-indexed scalar/window/arc fixing；逐轮 time-indexed helper、time-indexed root preprocessing 和 pre-heuristic 均关闭。time-indexed 使用 graph pricing、dual window 和每轮最多 300 列，不运行 HeuristicPricing。三组结果目标一致且 `valid=true`。
+
+| 算例 | ng-DSSR | time-indexed | TI/NG | nodes（NG/TI） | pool（NG/TI） |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `wet040_005_2m` | 117.222s | 252.356s | 2.153 | 7 / 15 | 18,304 / 162,313 |
+| `wet040_006_2m` | 31.713s | 108.397s | 3.418 | 1 / 1 | 13,480 / 141,909 |
+| `wet050_004_2m` | 346.632s | 327.105s | 0.944 | 8 / 14 | 29,905 / 213,536 |
+
+这次串行结果与上一轮结论一致，但证据更干净。40-job 两例中 ng-DSSR 分别快 2.15 倍和 3.42 倍；其优势不是单次 elementary exact pricing 比 time-indexed 图更便宜，而是更强的列显著减少了 pricing/LP 往返、节点数和列池。`40-006` 最典型：time-indexed exact 仅 5.814s，但 633 轮产生 141,903 列，master LP 达 82.052s；ng-DSSR exact 为 5.574s，只有 140 轮和 13,480 列，总时间因此从 108.397s 降到 31.713s。`40-005` 也把列池压缩约 8.9 倍，并把节点从 15 降到 7。
+
+50-job 的 `50-004` 则基本打平，time-indexed 快约 5.6%。ng-DSSR 的 root bound 为 42456.625，高于 time-indexed 的 42438.045，节点从 14 降到 8，列池缩小约 7.1 倍，说明强度和 RMP 规模优势都存在；但 strong trial LP 为 121.034s/200 次，HeuristicPricing 为 99.002s/566 次，二者合计已经占总时间约 63.5%。normal ng-DSSR exact 为 45.983s/154 次，只占约 13.3%，因此当前 50-job 退化不能再归因于 join 或 dominance graph。
+
+exact 内部统计进一步表明，当前 join 已不是热点。`50-004` 含 repair 的 160 次 exact 总阶段时间约 48.627s，其中初始化 30.092s、backward 9.980s、forward 4.801s、join 1.999s；初始化中的 completion bound 为 26.845s。`40-005` 和 `40-006` 的 completion bound 也分别占 exact 阶段约 65.7% 和 65.7%。这些 completion bound 会随 LP dual 改变，当前只在同一次 DSSR 的多轮之间复用，不能跨 pricing 调用直接沿用；同时它承担大量正反向扩展剪枝，不能仅因构造时间高就关闭。`50-004` 的 backward 通常约为 forward 的两倍，说明 midpoint 冻结后的真实正反负载仍不完全平衡，但即使完全消除该差额，对 346s 总时间的影响也有限。
+
+当前优化优先级因此调整为：第一，拆清 strong trial 中 CPLEX 建模与优化时间，并尝试不改变候选和可行域的模型/basis 复用；当前外层 `LP.construct()` 建模统计仅 0.016s，而 200 次 trial 总计 121.034s，热点明确在 `solveRelaxation()` 内。第二，HeuristicPricing 仍是 50-job 最大热点之一，但此前 non-best 回收、额外列和多种局部剪枝均无稳定收益，不能直接减少预算，否则可能增加 exact 调用；下一步只能做固定、可回退的独立 A/B。第三，completion bound 和 backward 扩展属于 exact 内部次级热点，可继续诊断增量 dual 更新或更可靠的 Tmid 负载指标，但优先级低于 strong trial 和 heuristic。group join、新 dominance graph 和 PWLF join 常数优化均已生效，继续优化 join 的理论收益很小。
+
+汇总数据见 `test-results/bpc/20260718-smalltime-current-v2-summary.csv`。每个 run 目录保留 `args.txt`、`command.txt`、stdout/stderr 和完整事件日志。`40-006` ng-DSSR 的 summary 中 `root bound=Infinity/root solving time=0` 是节点在正式 root summary 写入前被 completion-bound dual certificate 直接关闭造成的显示口径；对应 CSV 的最终 bound 为 23083、gap=0、`valid=true`，不是求解结果异常。

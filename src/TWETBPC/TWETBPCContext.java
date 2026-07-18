@@ -27,7 +27,6 @@ import TWETBPC.GC.GCBBStyleBidirectionalFullDomainPricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrPricingEngine;
-import TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrLimitedHeuristicPricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPartialDominancePricingEngine;
 import TWETBPC.GC.GCNGBBStyleBidirectionalPricingEngine;
 import TWETBPC.GC.HeuristicPricingEngine;
@@ -81,9 +80,6 @@ public class TWETBPCContext {
 				pricingEngines.add(TimeIndexedGraphPricingEngine.preHeuristic(data, config));
 			}
 			pricingEngines.add(new HeuristicPricingEngine(data, config));
-			if (config.enableNgDssrLimitedLabelingHeuristic && config.useGCNGBBStyleNgDssrPricing) {
-				pricingEngines.add(new GCNGBBStyleBidirectionalNgDssrLimitedHeuristicPricingEngine(data, config));
-			}
 		}
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。

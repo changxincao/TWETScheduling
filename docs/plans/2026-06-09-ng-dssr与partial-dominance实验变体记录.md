@@ -2659,3 +2659,7 @@ root-only A/B 使用 40-2 的 `wet040_001_2m` 和 `wet040_002_2m`，统一关闭
 如果排名回放表明当前评分本身较差，应改为每次 dual 只预计算一次静态 reduced-arc 分数，而不是对每个 label 先构造全部 PWLF。分数可由 `setup cost - arc dual - next-job dual + next-job 窗口内最小 penalty` 加一层非递归的一步 look-ahead 构成；这不是 completion bound，只用于排序，不能用于证明剪枝。对每个 job 分别保留 K 条最好出弧和 K 条最好入弧并取并集，required arc 强制加入，forbidden/pricing-only arc 继续排除。forward、backward 和 crossing join 使用同一缩减弧图，可避免 route 是否被发现依赖偶然 split，同时在构造 PWLF 之前真正减少候选方向。
 
 若上述两种方式仍漏列，再考虑按 terminal/depth 保留固定宽度的全局 beam，并用弧覆盖或任务集合差异维持多样性；不优先采用简单 K=5/10，因为它不能修复评分错误，而且会同时放大 full-ng label 数和 join。建议实验顺序为：排名回放诊断；`K3 + 一条 rank4--6 discrepancy`；静态入/出弧并集图 K3/K5；最后才是 beam。评价指标必须是 limited 命中率、替代 exact 的调用数和完整 root 时间，而不是 limited 单次时间。上述方案均明确不构造或调用 completion bound。
+
+256. 2026-07-18 删除 full-ng top3 受限扩展启发式
+
+根据最终判断，full-ng top3 受限扩展虽然单次仅需约 9--25ms，但在两个 40-2 实例的 26 次调用中均未找到列，无法替代任何 exact ng-DSSR 调用，继续研究 limited-discrepancy 或静态 reduced-arc graph 的实现收益也不明确。因此已删除独立 `GCNGBBStyleBidirectionalNgDssrLimitedHeuristicPricingEngine`、配置项、runner 属性、engine-chain 接线以及 exact 类中的受限扩展分支，恢复到该实验加入前的 ng-DSSR 主线。原有 Tabu heuristic、exact ng-DSSR、DSSR 更新、dominance、join、completion bound 和其他既有策略均未修改。第 252--255 节保留为负实验与讨论记录，不再对应可运行开关。

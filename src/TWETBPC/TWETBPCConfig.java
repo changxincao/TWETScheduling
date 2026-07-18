@@ -128,10 +128,6 @@ public class TWETBPCConfig {
 	public boolean routeEnumerationUseTimeIndexedWindow = false;
 	/** 2026-05-18: 是否在 exact pricing 前先用当前列池做一轮启发式定价。 */
 	public boolean enableHeuristicPricing = true;
-	/** 2026-07-18: 在 Tabu 与 exact ng-DSSR 之间运行 full-ng 的受限扩展 labeling 启发式。 */
-	public boolean enableNgDssrLimitedLabelingHeuristic = false;
-	/** 每个 label 只实体化候选函数最小 reduced cost 最好的若干个扩展方向。 */
-	public int ngDssrLimitedLabelingExtensionLimit = 3;
 	// 2026-06-29: Keep root dual profitable window out of heuristic pricing by default.
 	// Sparse initial RMP duals can make this window too narrow and kill all tabu seeds.
 	public boolean enableHeuristicDualProfitableWindow = false;

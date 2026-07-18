@@ -203,9 +203,6 @@ public class GCBBFullDomainComparisonTest {
 		if (config.ngDssrReturnRelaxedColumns) {
 			mode += "-ngRelaxedColumns";
 		}
-		if (config.enableNgDssrLimitedLabelingHeuristic) {
-			mode += "-limitedLabelK" + config.ngDssrLimitedLabelingExtensionLimit;
-		}
 		return mode;
 	}
 
@@ -485,12 +482,6 @@ public class GCBBFullDomainComparisonTest {
 		config.useGCNGBBStyleNgDssrPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssr",
 				Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
-		config.enableNgDssrLimitedLabelingHeuristic = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.ngDssrLimitedLabelingHeuristic",
-				Boolean.toString(config.enableNgDssrLimitedLabelingHeuristic)));
-		config.ngDssrLimitedLabelingExtensionLimit = Integer.getInteger(
-				"twet.bpc.fullDomainCompare.ngDssrLimitedLabelingExtensionLimit",
-				config.ngDssrLimitedLabelingExtensionLimit);
 		config.useIncrementalSourcedDominanceGraph = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.incrementalSourcedDominance",
 				Boolean.toString(config.useIncrementalSourcedDominanceGraph)));

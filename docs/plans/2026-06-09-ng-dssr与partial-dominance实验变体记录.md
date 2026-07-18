@@ -2647,3 +2647,15 @@ root-only A/B 使用 40-2 的 `wet040_001_2m` 和 `wet040_002_2m`，统一关闭
 2. `wet040_002_2m`：关闭为 `15.376s`；开启后为 `15.764s`。新引擎调用 10 次、成功 0 次、加列 0、合计 `0.236s`；随后 exact 调用 10 次，其中 9 次成功，共加入 30 条列，exact 时间 `2.923s`。
 
 新引擎稳定后单次通常只需约 `9--25ms`，明显低于对应 exact 的约 `220--620ms`，说明去掉 completion bound 后受限 labeling 本身足够轻；但两个实例共 26 次调用全部 miss，而 exact 在其中 24 次成功。根因是 `full ng-set + 每 label 局部 top3` 过于贪心：真正负列需要某些局部并非前三的过渡，相关前缀在生成前就被丢弃。当前证据不支持把该引擎加入最好配置，配置 `enableNgDssrLimitedLabelingHeuristic` 默认保持 false。实现暂时保留用于后续研究静态 reduced-arc graph、一步 look-ahead 或带 discrepancy 的变体，但不能把当前 K=3 空结果用于闭合。
+
+255. 2026-07-18 top3 受限扩展的下一步优化策略
+
+当前版本的主要问题是命中率，不是单次运行时间。它为了按 child PWLF 最小值选择 top3，仍会先为当前 label 的全部可行方向构造 candidate frontier；因此只省掉未入选 child 的后续 dominance、扩展和 join，没有省掉本层 PWLF 构造。更重要的是，prefix 当前最小 reduced cost 不包含后续任务收益，真正负列所需的某条弧可能在局部排名中很靠后，被永久 top3 直接删除。
+
+下一步不应直接调整 K，而应先对“limited miss、exact hit”的同一次 dual 做路径排名回放。对 exact 返回的每条负基本列，按实际 forward/backward split 重放其每个前缀，记录真实下一弧在当前 limited 分数中的排名、首次超过 K 的深度、整条路径超过 K 的次数及最大排名；同时确认该前缀是被 top-K 删除，还是在 dominance/join 阶段消失。若大多数列只有一次排名 4--6 的转移，优先采用 `K=3 + discrepancy=1`；若经常需要排名 10 以后的弧，则说明现有评分缺少前瞻，扩大 K 只会使状态数快速接近 exact。
+
+`discrepancy=1` 的安全启发式口径是把 top-K 视为 good arc，并允许整条 forward/backward 拼接路径最多使用一条 bad arc；forward、backward label 记录 bad-arc count，join 时检查两侧计数与 crossing arc 的总和。为避免一次性展开全部非 top-K 弧，bad 候选只保留紧随其后的少量弧，例如排名 4--6；具体宽度由上述排名回放决定。该引擎仍不返回闭合证书，失败后进入 exact，因而只影响速度。第一版保持 full ng-set，避免同时混入 non-elementary 路径的命中率问题。
+
+如果排名回放表明当前评分本身较差，应改为每次 dual 只预计算一次静态 reduced-arc 分数，而不是对每个 label 先构造全部 PWLF。分数可由 `setup cost - arc dual - next-job dual + next-job 窗口内最小 penalty` 加一层非递归的一步 look-ahead 构成；这不是 completion bound，只用于排序，不能用于证明剪枝。对每个 job 分别保留 K 条最好出弧和 K 条最好入弧并取并集，required arc 强制加入，forbidden/pricing-only arc 继续排除。forward、backward 和 crossing join 使用同一缩减弧图，可避免 route 是否被发现依赖偶然 split，同时在构造 PWLF 之前真正减少候选方向。
+
+若上述两种方式仍漏列，再考虑按 terminal/depth 保留固定宽度的全局 beam，并用弧覆盖或任务集合差异维持多样性；不优先采用简单 K=5/10，因为它不能修复评分错误，而且会同时放大 full-ng label 数和 join。建议实验顺序为：排名回放诊断；`K3 + 一条 rank4--6 discrepancy`；静态入/出弧并集图 K3/K5；最后才是 beam。评价指标必须是 limited 命中率、替代 exact 的调用数和完整 root 时间，而不是 limited 单次时间。上述方案均明确不构造或调用 completion bound。

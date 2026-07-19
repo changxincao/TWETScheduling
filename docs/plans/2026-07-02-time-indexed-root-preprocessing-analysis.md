@@ -711,3 +711,10 @@ join 只做严格等价的细节剪枝。对不超过 64 个任务的 no-SRI 主
 完整 1800s 对照中，新版本从历史的 incumbent/bound=37112/36739.428、gap 1.0039%、root 779.898s，改善到 36882/36759.333、gap 0.3326%、root 539.476s；新 run 处理 4 个节点，exact 371.300s/168 calls，最终仍因时间限制未闭合。该结果同时包含周期 probe 和 join 剪枝，不能把全部整树收益归给其中一个；从困难 exact 的分项统计看，join witness 剪枝是主要收益，周期 probe 负责避免固定 Tmid 在 DSSR 后段持续极端失衡。
 
 验证包括 focused javac、SmallBPCBatchTest 8/8 与 ArcFlow 对齐、tariff 分支有效，以及 IncrementalSourcedDominanceGraphConsistencyTest 的 96,000 次插入通过。当前默认保留 interval=5、imbalance threshold=5、seed move ratio=0.05 和 visit-profile 剪枝；残余风险是周期 Tmid 的摆动，后续若继续优化应先做“失衡触发而非无条件到期移动”的独立 A/B，不能直接改成窗口分布或更激进移动。
+
+
+### 2026-07-19：周期 Tmid 与 join visit-profile 的收益归因
+
+50-2 root-only 严格 A/B 显示，这一算例上两项优化都没有实质收益。旧复用、周期 probe、周期 probe+visit-profile 三组累计 forward labels 均为 20021、backward labels 均为 46961、join pairs 均为 101446，说明周期 probe 最终没有改变搜索域。visit-profile 只在 101207 次原始 funcEval 中提前剪掉 3902 次，并在函数值计算后省掉 13232 次 sequence 恢复；join 总时间仅由 0.265s 降到 0.243s，远小于约 17s 的 initialization，因此整轮 73s 左右的差异属于噪声。
+
+60-2 困难 repair 的加速不能只归因于 Tmid。周期调整把最终一次重轮的 backward kept labels 从 105903 降到 41302，forward kept labels从 4580 增到 5256，总 kept labels 从 110483 降到 46558；backward 时间从 260.495s 降到 35.342s，而 forward 从 8.791s 增到 17.487s，体现了把工作从严重失衡的 backward 侧移回 forward。与此同时，join candidate pairs 只从 21.201m 降到 15.018m，约减少 29%；真正进入 PWLF funcEval 的 pair 却降到 0.119m，因为 visit-profile 在新 run 的 15.018m 个非基本 pair 中，函数计算前剪掉 14.899m，函数计算后再跳过 0.119m 的 sequence 恢复。因此 Tmid 主要降低前后向扩展和候选 pair 基数，visit-profile 才是 join 从 458.437s 降到 22.136s 的主要原因。二者共同作用，不能只看最终 Tmid 或最终一轮 labels 判断。

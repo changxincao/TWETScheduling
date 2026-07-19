@@ -2697,3 +2697,11 @@ setupR75 的对应 exact 时间为 `16.292/14.181/13.217/12.651/12.784/12.628s`�
 60-3 W100 的 K10/20/25 root 为 `205.940/202.718/206.454s`，exact 为 `26.997/26.246/26.881s`，bound、pool、18次 exact 调用和9081条 exact 列完全一致。该场景的 exact 每次都直接返回基本列或由预证书闭合，没有发生 minimum-segment 更新，因此 K 不改变搜索结构；约3.7秒的 root 差异主要来自占总时间约170秒的启发式 pricing 波动。
 
 综合9个场景按各场景最优时间归一化，K20 的平均 exact/root 比为 `1.032/1.017`，K25 为 `1.028/1.012`，平均差仅约0.4%--0.5%；但真正受 DSSR 多轮影响的两个 W300 困难场景均由 K20 首次达到4轮平台，K25/K30 不再减少轮数且增加 pair。因此默认继续保持 K20，不改为25。窄窗口或低重复实例中预算通常自然用不满，K20 不会强制增加20条路径；困难宽窗口中它能避免 K5/K10 的候选分批上浮。
+
+260. 2026-07-19 DSSR 有效更新预算与有界 witness reservoir
+
+针对困难 repair 中大量候选被同轮前序 ng-pair 连带阻断的问题，更新逻辑改为按 reduced cost 顺序继续扫描：已被当前 ng-set 阻断的 route 不消耗预算，只有确实新增 ng-pair 的 route 才计入 `ngDssrNonElementaryRouteUpdateLimit`。`minimumNewPairsSegment` 仍只补齐缺失 pair 最少的一个完整重复段；`allSegments` 用于实验对比，会补齐被选 route 的全部连续重复段，但同样按有效 route 计数。
+
+候选 witness 不能改成无上限保存。无上限会使原有 top-C witness 阈值失效，join 无法根据当前最差候选 reduced cost 在 PWLF 拼接前剪掉已知 non-elementary pair。最终保留原有在线有序 `ArrayList` 实现、原有 sequence 去重/替换/排序以及两级 join threshold pruning，只把默认 `ngDssrNonElementaryRouteCandidateLimit` 从 100 提高到 1000。1000 是候选保留深度，不是每轮更新数；实际更新仍由 K 控制。这样在大量前序候选被连带阻断时更可能找到 K 条有效更新 route，同时仍保持 reservoir 有界并保留 join 优化。曾尝试的无上限 HashMap 和二分插入版本均已撤回，未进入最终代码。
+
+验证方面，focused Java 22 编译通过；`NgDssrMinimumRepeatedSegmentUpdateTest` 覆盖默认 candidate=1000、minimum-segment、all-segments 及 blocked route 不消耗预算；PackedBitSet、ng-set 初始化、same-node 状态、96,000 次 source-aware dominance consistency、completion-bound compatibility、500,000 次 PWLF minimal-sum 对拍和 LP restricted-column membership 均通过。后续 K 与单环/全环实验必须固定 candidate=1000，避免把候选深度和有效更新预算混在一起解释。

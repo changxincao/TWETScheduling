@@ -17,8 +17,8 @@ public final class NgDssrMinimumRepeatedSegmentUpdateTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		assertEquals(20, config.ngDssrNonElementaryRouteUpdateLimit,
 				"minimum-segment effective update budget should be conservative by default");
-		assertEquals(100, config.ngDssrNonElementaryRouteCandidateLimit,
-				"minimum-segment candidate reservoir should allow blocked-route replacement");
+		assertEquals(1000, config.ngDssrNonElementaryRouteCandidateLimit,
+				"online witness reservoir should preserve join threshold pruning");
 		assertEquals("minimumNewPairsSegment", config.ngDssrNonElementaryRouteUpdateMode,
 				"minimum-segment route update should be enabled by default");
 
@@ -51,6 +51,16 @@ public final class NgDssrMinimumRepeatedSegmentUpdateTest {
 		assertTrue(duplicateMiddle[2].contains(1) && duplicateMiddle[3].contains(1) && duplicateMiddle[4].contains(1),
 				"the chosen complete segment must be fully blocked");
 
+		PackedBitSet[] allSegments = neighborhoods(6);
+		int allChanged = GCNGBBStyleBidirectionalNgDssr.addAllNewPairsRepeatedSegments(
+				Arrays.asList(1, 2, 3, 1, 4, 5, 4), allSegments, 6, null);
+		assertEquals(3, allChanged, "all-segment mode must update every repeated segment of one route");
+		assertTrue(allSegments[2].contains(1) && allSegments[3].contains(1) && allSegments[5].contains(4),
+				"all-segment mode must add every missing directed pair");
+		int allBlocked = GCNGBBStyleBidirectionalNgDssr.addAllNewPairsRepeatedSegments(
+				Arrays.asList(4, 5, 4, 6, 1, 6), allSegments, 6, null);
+		assertEquals(-1, allBlocked, "an already blocked route must not consume the effective-route budget");
+		assertTrue(!allSegments[1].contains(6), "blocked all-segment routes must not add unrelated pairs");
 		System.out.println("NgDssrMinimumRepeatedSegmentUpdateTest passed");
 	}
 

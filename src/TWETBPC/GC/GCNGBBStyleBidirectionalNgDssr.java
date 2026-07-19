@@ -952,51 +952,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private int updateNgNeighborhoodsFromNonElementaryRoutes() {
-		if (ngDssrUseMinimumNewPairsSegmentUpdate) {
-			return updateNgNeighborhoodsByMinimumNewPairsSegment();
-		}
-		return updateNgNeighborhoodsByAllRepeatedSegments();
-	}
-
-	private int updateNgNeighborhoodsByAllRepeatedSegments() {
-		int changed = 0;
-		for (int routeIndex = 0; routeIndex < nonElementaryNegativeRoutes.size(); routeIndex++) {
-			ArrayList<Integer> sequence = nonElementaryNegativeRoutes.get(routeIndex).sequence;
-			int[] lastPosition = new int[data.n + 1];
-			Arrays.fill(lastPosition, -1);
-			for (int pos = 0; pos < sequence.size(); pos++) {
-				int repeatedJob = sequence.get(pos).intValue();
-				if (repeatedJob <= 0 || repeatedJob > data.n) {
-					continue;
-				}
-				int previous = lastPosition[repeatedJob];
-				if (previous >= 0) {
-					for (int middle = previous + 1; middle < pos; middle++) {
-						int middleJob = sequence.get(middle).intValue();
-						if (middleJob > 0 && middleJob <= data.n && middleJob != repeatedJob
-								&& !ngNeighborhoodByJob[middleJob].contains(repeatedJob)) {
-							ngNeighborhoodByJob[middleJob].add(repeatedJob);
-							changed++;
-							if (ngDssrRoundAddedPairs != null) {
-								ngDssrRoundAddedPairs.add(middleJob + "<-" + repeatedJob);
-							}
-						}
-					}
-				}
-				lastPosition[repeatedJob] = pos;
-			}
-		}
-		return changed;
-	}
-
-	private int updateNgNeighborhoodsByMinimumNewPairsSegment() {
 		int changed = 0;
 		int effectiveRouteLimit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
 		int effectiveRoutes = 0;
 		for (NonElementaryNegativeRoute route : nonElementaryNegativeRoutes) {
 			ngDssrMinimumSegmentRoutesConsidered++;
-			int routeChanged = addMinimumNewPairsRepeatedSegment(route.sequence, ngNeighborhoodByJob, data.n,
-					ngDssrRoundAddedPairs);
+			int routeChanged = ngDssrUseMinimumNewPairsSegmentUpdate
+					? addMinimumNewPairsRepeatedSegment(route.sequence, ngNeighborhoodByJob, data.n,
+							ngDssrRoundAddedPairs)
+					: addAllNewPairsRepeatedSegments(route.sequence, ngNeighborhoodByJob, data.n,
+							ngDssrRoundAddedPairs);
 			if (routeChanged < 0) {
 				ngDssrMinimumSegmentRoutesAlreadyBlocked++;
 			} else if (routeChanged > 0) {
@@ -1012,13 +977,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private int nonElementaryRouteCandidateLimit() {
-		if (!ngDssrUseMinimumNewPairsSegmentUpdate) {
-			return Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
-		}
 		return Math.max(Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit),
 				config.ngDssrNonElementaryRouteCandidateLimit);
 	}
-
 	/**
 	 * 只补齐一个完整重复段。返回 -1 表示该路径已被现有 ng-set 禁止，0 表示没有可更新的重复段。
 	 */
@@ -1084,6 +1045,58 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return changed;
 	}
 
+	/** 补齐一条路径的全部连续重复段；-1 表示该路径已被当前 ng-set 禁止。 */
+	static int addAllNewPairsRepeatedSegments(List<Integer> sequence, PackedBitSet[] neighborhoods, int n,
+			List<String> addedPairs) {
+		int[] lastPosition = new int[n + 1];
+		Arrays.fill(lastPosition, -1);
+		for (int pos = 0; pos < sequence.size(); pos++) {
+			int repeatedJob = sequence.get(pos).intValue();
+			if (repeatedJob <= 0 || repeatedJob > n) {
+				continue;
+			}
+			int previous = lastPosition[repeatedJob];
+			if (previous >= 0) {
+				boolean missingPair = false;
+				for (int middle = previous + 1; middle < pos; middle++) {
+					int middleJob = sequence.get(middle).intValue();
+					if (middleJob > 0 && middleJob <= n && middleJob != repeatedJob
+							&& !neighborhoods[middleJob].contains(repeatedJob)) {
+						missingPair = true;
+						break;
+					}
+				}
+				if (!missingPair) {
+					return -1;
+				}
+			}
+			lastPosition[repeatedJob] = pos;
+		}
+		Arrays.fill(lastPosition, -1);
+		int changed = 0;
+		for (int pos = 0; pos < sequence.size(); pos++) {
+			int repeatedJob = sequence.get(pos).intValue();
+			if (repeatedJob <= 0 || repeatedJob > n) {
+				continue;
+			}
+			int previous = lastPosition[repeatedJob];
+			if (previous >= 0) {
+				for (int middle = previous + 1; middle < pos; middle++) {
+					int middleJob = sequence.get(middle).intValue();
+					if (middleJob > 0 && middleJob <= n && middleJob != repeatedJob
+							&& !neighborhoods[middleJob].contains(repeatedJob)) {
+						neighborhoods[middleJob].add(repeatedJob);
+						changed++;
+						if (addedPairs != null) {
+							addedPairs.add(middleJob + "<-" + repeatedJob);
+						}
+					}
+				}
+			}
+			lastPosition[repeatedJob] = pos;
+		}
+		return changed;
+	}
 	private void appendNgDssrSummary(String reason) {
 		lastMessage = lastMessage + " | ng-DSSR reason=" + reason + ngSetWarmStartSummary()
 				+ ngSetWindowRepeatabilitySummary()
@@ -1101,16 +1114,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private String ngDssrRouteUpdateSummary() {
-		if (!ngDssrUseMinimumNewPairsSegmentUpdate) {
-			return "";
-		}
-		return ", ngRouteUpdate=minSegment/effectiveLimit" + config.ngDssrNonElementaryRouteUpdateLimit
+		String mode = ngDssrUseMinimumNewPairsSegmentUpdate ? "minSegment" : "allSegments";
+		return ", ngRouteUpdate=" + mode + "/effectiveLimit" + config.ngDssrNonElementaryRouteUpdateLimit
 				+ "/candidateLimit" + nonElementaryRouteCandidateLimit()
 				+ "/considered" + ngDssrMinimumSegmentRoutesConsidered
 				+ "/blocked" + ngDssrMinimumSegmentRoutesAlreadyBlocked
 				+ "/updated" + ngDssrMinimumSegmentRoutesUpdated;
 	}
-
 	private String ngSetWarmStartSummary() {
 		if (!config.enableNgDssrHistoryWarmStart && !config.enableNgDssrSameNodeWarmStart) {
 			return "";
@@ -4321,6 +4331,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			joinNonElementaryWitnessLowerBoundPruned++;
 			return;
 		}
+
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
@@ -4400,12 +4411,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
-
 		if (elementaryState == 0
 				&& shouldPruneNonElementaryWitness(reducedCostBound, targetJoinPair)) {
 			joinNonElementaryWitnessValuePruned++;
 			return;
 		}
+
 		if (sequence == null) {
 			sequence = recoverJoinSequence(forward, backward);
 		}
@@ -4416,10 +4427,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		tryGenerateColumn(sequence, lp, reducedCostBound, false, elementaryHint);
 	}
 
-	/**
-	 * 已知 pair 必为非基本列时，只保留仍可能进入本轮 top-K DSSR witness 的候选。
-	 * 严格大于当前最差值才剪，保留 reduced-cost 相等时的原有序列 tie-break。
-	 */
+	/** 已知 pair 必为非基本列时，只保留仍可能进入本轮 top-C witness 池的候选。 */
 	private boolean shouldPruneNonElementaryWitness(double lowerBound, boolean targetJoinPair) {
 		if (targetJoinPair || config.ngDssrReturnRelaxedColumns || ngDssrTraceRoundRouteRelation
 				|| ngDssrDuplicateRepairDiagnostic || nonElementaryNegativeRoutes == null) {
@@ -6138,6 +6146,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double savedBestGeneratedReducedCost = bestGeneratedReducedCost;
 		double savedLastRelaxedRoundBestReducedCost = lastRelaxedRoundBestReducedCost;
 		ArrayList<NonElementaryNegativeRoute> savedNonElementaryNegativeRoutes = nonElementaryNegativeRoutes;
+
 		int savedNgDssrRoundNonElementaryNegativeSeen = ngDssrRoundNonElementaryNegativeSeen;
 		try {
 			generatedColumns = new ArrayList<TWETColumn>();

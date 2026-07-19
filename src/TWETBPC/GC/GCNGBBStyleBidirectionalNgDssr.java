@@ -2273,7 +2273,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ForwardLabel source = new ForwardLabel(nextLabelId++, 0, null, sourceVisited,
 				sourceSets.dominanceSet, sourceSets.extensionSet, sourceNgMemory, sourceFrontier,
 				sriPricingEnabled ? sourceFrontier.copy() : null,
-				emptySriCounts(), 0.0);
+				emptySriCounts(), 0.0, maintainRouteVisitProfile());
 		if (insertForward(source, lp) == InsertStatus.STORED_AND_ENQUEUE) {
 			FWUL.add(source);
 		}
@@ -3031,7 +3031,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		BackwardLabel sink = new BackwardLabel(nextLabelId++, lp.getNode().sinkId(), null, sinkVisited,
 				sinkSets.dominanceSet, sinkSets.extensionSet, sinkNgMemory, sinkFrontier,
 				sriPricingEnabled ? sinkFrontier.copy() : null, emptySriCounts(),
-				0.0, true);
+				0.0, true, maintainRouteVisitProfile());
 		BWUL.add(sink);
 	}
 
@@ -3039,6 +3039,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return config.maxExactPricingColumns > 0;
 	}
 
+	/** 2026-07-19: 使用两个 label 内 long 覆盖 128 个任务；更大实例回退 sequence 判断。 */
+	private boolean maintainRouteVisitProfile() {
+		return config.enableNgDssrJoinVisitProfilePruning && !sriPricingEnabled && data.n <= 2 * Long.SIZE;
+	}
 
 	private void forwardExtend(LP lp) {
 		ForwardLabel label = FWUL.poll();
@@ -3479,7 +3483,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				candidate.frontier);
 		ForwardLabel child = new ForwardLabel(nextLabelId++, nextJob, parent, visited, childSets.dominanceSet,
 				childSets.extensionSet, childNgMemory, candidate.frontier, candidate.noSriFrontier,
-				candidate.sriCounts, candidate.sriPenalty);
+				candidate.sriCounts, candidate.sriPenalty, maintainRouteVisitProfile());
 		recordForwardStateNanos(timingStart);
 		return child;
 	}
@@ -3497,7 +3501,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				candidate.frontier);
 		BackwardLabel child = new BackwardLabel(nextLabelId++, prevJob, parent, visited, childSets.dominanceSet,
 				childSets.extensionSet, childNgMemory, candidate.frontier, candidate.noSriFrontier,
-				candidate.sriCounts, candidate.sriPenalty, false);
+				candidate.sriCounts, candidate.sriPenalty, false, maintainRouteVisitProfile());
 		recordBackwardStateNanos(timingStart);
 		return child;
 	}
@@ -4284,10 +4288,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		int elementaryState = -1;
-		if (config.enableNgDssrJoinVisitProfilePruning && !sriPricingEnabled
-				&& forward.routeVisitProfileAvailable && backward.routeVisitProfileAvailable) {
-			boolean elementaryPair = forward.routeElementary && backward.routeElementary
-					&& (forward.routeVisitedMask & backward.routeVisitedMask) == 0L;
+		if (maintainRouteVisitProfile()) {
+			boolean routeVisitsDisjoint = (forward.routeVisitedMask & backward.routeVisitedMask) == 0L
+					&& (forward.routeVisitedMaskHigh & backward.routeVisitedMaskHigh) == 0L;
+			boolean elementaryPair = forward.routeElementary && backward.routeElementary && routeVisitsDisjoint;
 			elementaryState = elementaryPair ? 1 : 0;
 			if (elementaryPair) {
 				joinKnownElementaryPairs++;
@@ -8308,30 +8312,36 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final class ForwardLabel extends FunctionLabel {
 		final ForwardLabel father;
 		final int depth;
-		final boolean routeVisitProfileAvailable;
 		final boolean routeElementary;
 		final long routeVisitedMask;
+		final long routeVisitedMaskHigh;
 
 		ForwardLabel(int labelId, int jid, ForwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
-				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double sriPenalty) {
+				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double sriPenalty,
+				boolean maintainRouteVisitProfile) {
 			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
 					forwardEndpointMin(frontier), sriPenalty);
 			this.father = father;
 			this.depth = father == null ? 0 : father.depth + 1;
-			if (father == null) {
-				this.routeVisitProfileAvailable = true;
-				this.routeElementary = true;
-				this.routeVisitedMask = 0L;
-			} else if (father.routeVisitProfileAvailable && jid >= 1 && jid <= Long.SIZE) {
-				long bit = 1L << (jid - 1);
-				this.routeVisitProfileAvailable = true;
-				this.routeElementary = father.routeElementary && (father.routeVisitedMask & bit) == 0L;
-				this.routeVisitedMask = father.routeVisitedMask | bit;
-			} else {
-				this.routeVisitProfileAvailable = false;
+			if (!maintainRouteVisitProfile) {
 				this.routeElementary = false;
 				this.routeVisitedMask = 0L;
+				this.routeVisitedMaskHigh = 0L;
+			} else if (father == null) {
+				this.routeElementary = true;
+				this.routeVisitedMask = 0L;
+				this.routeVisitedMaskHigh = 0L;
+			} else if (jid <= Long.SIZE) {
+				long bit = 1L << (jid - 1);
+				this.routeElementary = father.routeElementary && (father.routeVisitedMask & bit) == 0L;
+				this.routeVisitedMask = father.routeVisitedMask | bit;
+				this.routeVisitedMaskHigh = father.routeVisitedMaskHigh;
+			} else {
+				long bit = 1L << (jid - Long.SIZE - 1);
+				this.routeElementary = father.routeElementary && (father.routeVisitedMaskHigh & bit) == 0L;
+				this.routeVisitedMask = father.routeVisitedMask;
+				this.routeVisitedMaskHigh = father.routeVisitedMaskHigh | bit;
 			}
 		}
 	}
@@ -8339,30 +8349,36 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final class BackwardLabel extends FunctionLabel {
 		final BackwardLabel father;
 		final boolean isSinkRoot;
-		final boolean routeVisitProfileAvailable;
 		final boolean routeElementary;
 		final long routeVisitedMask;
+		final long routeVisitedMaskHigh;
 
 		BackwardLabel(int labelId, int jid, BackwardLabel father, PackedBitSet visitedSet, PackedBitSet dominanceSet,
 				PackedBitSet extensionSet, PackedBitSet ngMemorySet, PiecewiseLinearFunction frontier,
-				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double sriPenalty, boolean isSinkRoot) {
+				PiecewiseLinearFunction noSriFrontier, byte[] sriCounts, double sriPenalty, boolean isSinkRoot,
+				boolean maintainRouteVisitProfile) {
 			super(labelId, jid, visitedSet, dominanceSet, extensionSet, ngMemorySet, frontier, noSriFrontier, sriCounts,
 					backwardEndpointMin(frontier), sriPenalty);
 			this.father = father;
 			this.isSinkRoot = isSinkRoot;
-			if (isSinkRoot) {
-				this.routeVisitProfileAvailable = true;
-				this.routeElementary = true;
-				this.routeVisitedMask = 0L;
-			} else if (father != null && father.routeVisitProfileAvailable && jid >= 1 && jid <= Long.SIZE) {
-				long bit = 1L << (jid - 1);
-				this.routeVisitProfileAvailable = true;
-				this.routeElementary = father.routeElementary && (father.routeVisitedMask & bit) == 0L;
-				this.routeVisitedMask = father.routeVisitedMask | bit;
-			} else {
-				this.routeVisitProfileAvailable = false;
+			if (!maintainRouteVisitProfile) {
 				this.routeElementary = false;
 				this.routeVisitedMask = 0L;
+				this.routeVisitedMaskHigh = 0L;
+			} else if (isSinkRoot) {
+				this.routeElementary = true;
+				this.routeVisitedMask = 0L;
+				this.routeVisitedMaskHigh = 0L;
+			} else if (jid <= Long.SIZE) {
+				long bit = 1L << (jid - 1);
+				this.routeElementary = father.routeElementary && (father.routeVisitedMask & bit) == 0L;
+				this.routeVisitedMask = father.routeVisitedMask | bit;
+				this.routeVisitedMaskHigh = father.routeVisitedMaskHigh;
+			} else {
+				long bit = 1L << (jid - Long.SIZE - 1);
+				this.routeElementary = father.routeElementary && (father.routeVisitedMaskHigh & bit) == 0L;
+				this.routeVisitedMask = father.routeVisitedMask;
+				this.routeVisitedMaskHigh = father.routeVisitedMaskHigh | bit;
 			}
 		}
 	}

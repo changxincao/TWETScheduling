@@ -362,3 +362,9 @@ Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足�
 进一步按当前生产路径复核后，需要把前述“ArcBrancher 未显式跳过 branch-implied forbidden arc”的影响说得更准确。当前最好配置开启 strong branching、lightweight seed 和 branch-implied penalty。对可复用的 strong trial child，父节点正值竞争列虽然会临时保留，但从第一次 trial 建模起即按有限 M 成本处理；只有 repair 后 artificial slack 和正值 M 列都归零，trial seed 才会复用。随后筛列保留正值列，但此时正值列已不再包含 branch-implied 竞争弧，非正值不兼容列也会被过滤。因此，在 strong trial 成功并复用 seed 的主路径中，branch-implied arc 基本不会形成正式 child RMP 的正流量，更不会成为实际分支候选；`ArcBrancher` 缺少显式状态检查主要是一个不完整的候选生成不变量，不是当前主配置的性能瓶颈。
 
 边界仍然存在于不走 strong trial 的普通 arc 分支：lightweight child seed 会保留父节点正值列，正式节点又不启用 strong-trial M 目标；在 set-covering 覆盖行下，required arc 行并不自动排除其它正值列中的竞争入弧/出弧。因此这种弱口径下，历史 branch-implied 竞争列可以继续留在 RMP，并可能产生分数 arc flow。当前结论是暂不为主配置单独优化这一点；若后续关闭 strong branching 或复测普通分支，应把 `Node.getArcState()==FREE` 且非 branch-implied forbidden 作为候选生成的显式前置条件。
+
+### 2026-07-19：strong trial 限预算 repair 的后续设想
+
+60-2 的困难 strong-trial repair 曾在一次 `FindFeasible` 中执行大量 DSSR 轮次。后续可以单独实验一种只服务 strong branching 评分的限预算 repair：第一种口径只运行启发式 repair；第二种仍调用 exact ng-DSSR，但限制最多执行若干 DSSR 轮。预算内修复成功时，仍按当前 trial bound 正常评分；预算耗尽且尚未修复时，可以给该 side 一个“试探阶段未修复”的劣化评分或伪不可行评分，以避免一个候选长期占用 strong branching 时间。
+
+该状态不能复用现有真实 `INF` 语义。预算耗尽只说明有限试探没有找到修复列，不能证明完整 child 不可行，因此不能剪掉节点，也不能跳过正式 child 的完整 repair/exact pricing。若该候选最终被选中，正式入队时必须丢弃限预算 trial 的失败结论，按普通 child 流程重新做完整可行性修复。实现时应新增独立的 `UNRESOLVED_FOR_SCORE`（或等价）状态，并明确区分三类结果：已修复且可评分、已严格证明不可行、限预算未修复。当前只记录方案，暂不修改 strong branching 主线；先观察有效更新预算 K20 和 DSSR 内周期 Tmid 对 60-2 完整求解的实际改善。

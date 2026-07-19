@@ -1368,3 +1368,13 @@ join 的下一步严格等价优化不应继续增加普通 reduced-cost lower b
 因此 Tmid 优化应分两层。初始点可由 effective window endpoint sweep 选择，使 forwardEligible 与 backwardEligible 的加权规模先接近平衡，而不是只取 global min/max 中点；随后同一次 DSSR 的第 2 轮起，应使用上一轮完整 exact 的 forward/backward 时间、kept/constructed labels 和预估 pair 数做小步反馈。backward 更重时右移，forward 更重时左移，设置死区并在方向反转后做区间二分。node 级 stableFreeze 仍只负责下一次独立 exact 的初始参考，不应冻结同一次 DSSR 内随 ng-set 改变的平衡点。
 
 join 不调整遍历顺序。后续只考虑严格等价的细节优化：no-SRI label 使用 primitive visit mask 和 half-elementary 标记；确定 non-elementary 后，top-25 已满时先用安全 pair lower bound 判断能否改善最差 witness；精确函数值仍不能进入 top-25 时不恢复 sequence；top-25 使用 signature map 和 worst-first heap。当前 shifted-sum PWLF 已直接扫描函数，不再把重点放在函数拼接常数上。总体优先级仍是先修正 Tmid，因为它同时决定 backward label 数和 join pair 数，收益上限高于只优化单个 pair 的处理成本。
+
+### 2026-07-19 60-2 K20 有效更新与 DSSR 周期 Tmid 完整复测
+
+使用当前无 SRI ng-DSSR 主线重新求解 `wet060_001_2m`，时间上限为 1800s。配置采用 `nearest K=floor(n/10)=6`、minimum-segment 有效更新上限 20、候选 reservoir 100、DSSR 内每 5 轮检查一次 Tmid、source-aware dominance、group-envelope prefilter、completion bound、启发式 pricing 和 strong branching phase1；time-indexed root preprocessing 与 pre-heuristic 均关闭。最终状态为 `TIME_LIMIT`，`incumbent=36923`、`lowerBound=36800.046774`、`gap=0.3330%`、处理 3 个节点、pool 37629，结果校验 `valid=true`。完整结果见 `test-results/bpc/20260719-60-2-ng-k20-tmid-periodic-current-v4.csv`。
+
+本次并未改善 1800s 全局收敛。2026-07-18 的 K25 周期 Tmid 对照为 `incumbent=36882`、`lowerBound=36759.333333`、`gap=0.3326%`、处理 4 个节点；两次相对 gap 基本相同。本次初始 ALNS 上界从 36882 变为 36923，搜索轨迹并不完全一致，因此不能只按绝对下界比较 K20 与 K25。按同一计时口径，本次 root pricing/闭合时间为 701.497s，历史为 539.476s；包含 root strong branching 后的 node time 分别为 897.313s 和 620.009s，当前版本反而更慢。
+
+有效更新和周期 Tmid 对病态 repair 有局部收益，但没有消除 strong trial 长尾。本次 node 2 的困难 `FindFeasible` 用时 33.690s、58 轮 DSSR 并返回 39 条基本负列，明显好于此前 730.105s/79 轮且未找到基本列的异常；但全部 `FindFeasible` exact 仍为 388.792s/8 次，另一次 node 3 repair 达 84.947s/47 轮。正常 exact 为 385.725s/199 次，HeuristicPricing 为 579.659s/878 次，strong-trial RMP 为 342.269s/111 次。相比历史对照，正常 exact 由 371.300s/168 次略增，启发式由 423.408s 增至 579.659s，strong trial 由 240.472s 增至 342.269s；局部 repair 改善被更多 pricing 往返和更重 trial LP 抵消。
+
+当前结论是：K20 有效更新和 DSSR 周期 Tmid 可以保留，它们确实缓解了已知的单次 repair 爆炸，但不能据此宣称 60-2 整体求解已经加速。后续更直接的实验仍是给 strong-trial repair 设置独立预算：预算耗尽只用于评分并标记为未解决，不能作为真实 `INF` 剪枝；正式选中的 child 仍需完整 repair。该方案另见 `docs/plans/2026-06-26-two-stage-strong-branching设计分析.md`。

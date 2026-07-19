@@ -2705,3 +2705,17 @@ setupR75 的对应 exact 时间为 `16.292/14.181/13.217/12.651/12.784/12.628s`�
 候选 witness 不能改成无上限保存。无上限会使原有 top-C witness 阈值失效，join 无法根据当前最差候选 reduced cost 在 PWLF 拼接前剪掉已知 non-elementary pair。最终保留原有在线有序 `ArrayList` 实现、原有 sequence 去重/替换/排序以及两级 join threshold pruning，只把默认 `ngDssrNonElementaryRouteCandidateLimit` 从 100 提高到 1000。1000 是候选保留深度，不是每轮更新数；实际更新仍由 K 控制。这样在大量前序候选被连带阻断时更可能找到 K 条有效更新 route，同时仍保持 reservoir 有界并保留 join 优化。曾尝试的无上限 HashMap 和二分插入版本均已撤回，未进入最终代码。
 
 验证方面，focused Java 22 编译通过；`NgDssrMinimumRepeatedSegmentUpdateTest` 覆盖默认 candidate=1000、minimum-segment、all-segments 及 blocked route 不消耗预算；PackedBitSet、ng-set 初始化、same-node 状态、96,000 次 source-aware dominance consistency、completion-bound compatibility、500,000 次 PWLF minimal-sum 对拍和 LP restricted-column membership 均通过。后续 K 与单环/全环实验必须固定 candidate=1000，避免把候选深度和有效更新预算混在一起解释。
+
+261. 2026-07-19 candidate=1000 下有效更新 K 与单环/全环复测
+
+本轮固定 `ngDssrNonElementaryRouteCandidateLimit=1000`，继续比较有效 route 更新数 K 和重复段更新口径。所有实验均为 root-only，关闭 ALNS、RMIH、strong branching、SRI 和 time-indexed root preprocessing，保留启发式 pricing、nearest `floor(n/10)` 初始 ng-set、source-aware dominance、group-envelope prefilter、all-cycles completion bound、scalar/arc fixing、Tmid probe/reuse/freeze；因此比较重点是 exact 时间、DSSR 轮数和 ng-pair 增量，root 总时只作辅助参考。完整逐 run 汇总位于 `test-results/bpc/ab-ng-cand1000-effective-update-matrix-20260719.csv`。
+
+在 50-3 setupR50 W300 上，minimum-segment 的 K10/15/20/25 exact 分别为 `33.361/29.273/23.070/28.288s`，累计 DSSR 轮数为 `12/11/10/10`，单次最大轮数为 `6/5/4/4`。K20 首次达到轮数平台且时间最低；K25 没有继续减轮，反而回升约 22.6%。setupR75 W300 的对应 exact 为 `31.265/18.248/13.052/13.203s`，累计轮数为 `13/11/11/11`，最大轮数为 `6/4/4/4`；同样由 K20 进入时间平台。两种 setup 强度均支持 K20，不支持继续扩大到25。
+
+跨规模和窗口补测中，40-2 W100 的 K10/K20 minimum-segment exact 为 `4.860/3.819s`，累计 DSSR 轮数由37降至25；50-3 setupR50 W100 为 `9.992/7.171s`，累计轮数由30降至23。60-3 W100 本轮只比较 K20 的两种重复段口径，minimum-segment 为 `23.907s/18 calls`。这些结果说明 K20 对40、50规模仍能减少候选分批上浮；60规模当前没有 K10 对照，不能据此单独判断 K 的规模效应。
+
+`allSegments` 不是稳定更优。与同场景 K20 minimum-segment 相比，40-2 W100 为 `6.425s vs 3.819s`，50-3 setupR50 W300 为 `26.279s vs 23.070s`，均明显更慢；setupR75 W300 为 `12.804s vs 13.052s`，差异只有0.248秒。50-3 setupR50 W100 和60-3 W100 中 all-segments 分别为 `6.184s vs 7.171s`、`19.862s vs 23.907s`，通过减少部分 exact 调用取得局部收益，但前者 exact calls 反而为18次而 minimum-segment 为16次，说明结果受后续 dual/启发式轨迹影响，并非单调机制。
+
+更新量解释了这种不稳定性。R50 W300 中 all-segments 累计加入207个 pair，而 minimum-segment 只加入111个，最大 ng-set 从10升至15，但两者累计 DSSR 轮数同为10；40-2 W100 中 pair 为 `574 vs 292`，all-segments 仍更慢。R75 W300 中 all-segments 以182个 pair 将最大轮数从4降至3，才获得很小收益。也就是说，全环更新只有在额外 pair 正好提前消除下一轮 witness 时才有利；否则更大的 ng-set 会加重后续 labeling，并可能改变 dual 路径，不能作为默认策略。
+
+当前建议保持 `K=20 + minimumNewPairsSegment`。K10 在需要多轮 DSSR 的场景稳定偏慢，K25 已无稳定收益；all-segments 只保留为实验开关。candidate=1000 的深 reservoir 能保证 blocked route 不消耗 K 后继续补位，但窄窗口日志中累计 considered/blocked 很高，例如40-2 K20 minimum-segment 为 `4538/4365`，说明1000主要是在为困难 repair 提供保障，不应把它解释为每轮都会实际更新大量路径；是否将默认 reservoir 从1000回收至500应另做独立 A/B，不能与本轮 K/segment 结论混在一起。

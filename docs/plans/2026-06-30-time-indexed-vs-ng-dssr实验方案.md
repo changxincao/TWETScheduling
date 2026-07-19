@@ -1381,3 +1381,11 @@ join 不调整遍历顺序。后续只考虑严格等价的细节优化：no-SRI
 补充核对初始 ALNS 后，确认两次 runner 使用的是同一个确定性随机 seed：202605280100L + instanceFileName.hashCode()，EngineALNS 再对该值异或固定常量；ALNS 参数也同为 60s、80 次连续未改进、SA 关闭。结果仍不同的原因是 60s 墙钟上限参与停止条件。即使随机流起点相同，只要机器负载、JIT 或每轮邻域计算速度不同，截止前完成的迭代数和消费的随机数数量就不同。两次求解前置时间均约为 60s，说明都由时间上限截断，而不是在固定迭代位置自然停止。历史 run 得到 36882 和 19 条初始列，本次只得到 36923 和 17 条初始列；不同 initial basis/dual 使本次 root 生成 29032 条列，历史只生成 23161 条，同时节点闭合后的 fixing 从 2241 降为 2116，最终放大了 heuristic、exact 和 trial LP 时间。因此这两次不能作为严格的 K20/K25 A/B。后续算法配置比较应复用同一份预先生成的 incumbent/初始列，或取消墙钟截断并使用确定的迭代停止条件。
 
 node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 个 pair。前 57 轮各保留并检查 100 条负非基本候选，共 considered=5700；按本轮前序更新重新检查后，有 5602 条已经被连带禁止，只有 98 条 route 真正产生更新，且本例每条有效 route 恰好只增加 1 个 pair。逐轮新增 pair 的分布为：35 轮只加 1 个、11 轮加 2 个、6 轮加 3 个、2 轮加 4 个、3 轮加 5 个，最大仅 5，前 57 轮平均 1.72；第 58 轮直接找到 39 条基本负列，不再更新。K20 只是有效 route 的上限，而候选 reservoir 只有 100；前几条高度相似 route 加入 pair 后，后续候选大多已经不可能在下一轮原样出现，因此会被跳过。若要在这种 repair 中单轮取得更多独立更新，应优先扩大 candidate reservoir，而不是继续提高 K20；但这会增加候选保存和检查成本，需要单独 A/B。
+
+### 2026-07-20 60-2 candidate1000 + K20 完整 3600s 复测
+
+使用当前最好无 SRI ng-DSSR 配置完整求解 `wet060_001_2m`：初始 `nearest K=floor(n/10)=6`，candidate reservoir 1000，有效 route 更新上限 20，`minimumNewPairsSegment`，DSSR 周期 Tmid、source-aware dominance、group-envelope join prefilter、completion bound、启发式 pricing 和 strong branching phase1 均开启；time-indexed root preprocessing、逐轮 helper 和 pre-heuristic 关闭。求解在 `2794.349s` 内证明最优，`incumbent=bound=36803`、gap `0%`、处理 16 个节点、root `504.270s`、peak pool `140824`、`valid=true`。结果见 `test-results/bpc/20260719-60-2-ng-best-k20-cand1000-3600-v1.csv`。
+
+本次结果确认 candidate 1000 能消除此前 100 候选下有效更新严重不足造成的长尾，并使 ng-DSSR 在 3600s 内闭合，但代价仍明显。HeuristicPricing 为 `773.573s/2656`，普通 exact 为 `532.838s/465`，strong repair exact 为 `762.296s/36`，master LP 共 `637.655s`，其中 strong trial 为 `556.040s/440`。因此当前 60-2 的主耗时已不是单一 join，而是启发式、strong repair exact 和大列池 strong trial LP 三部分共同构成。
+
+日志中的 node 14 也说明必须区分 restricted RMP objective 与可信 dual bound。该节点曾出现 `MasterLP obj=36868.75`，高于 incumbent 36803，但此时 exact pricing 随后仍找到负 reduced-cost 列，因此不能仅凭该 RMP 目标剪枝。继续定价闭合后，节点才以 `pruned_by_dual_bound` 关闭。相应地，全局 gap 应按 incumbent 与队列中已证明的节点下界计算，不能直接拿尚未闭合节点的最新 restricted RMP objective 计算。

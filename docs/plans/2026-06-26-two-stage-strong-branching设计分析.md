@@ -356,3 +356,9 @@ Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足�
 第三个方向是 reliability/pseudo-cost strong branching：root 仍完整试探 20 个候选，后续节点对已有足够左右分支历史的同一 arc 使用归一化 pseudo-cost 估分，只对历史不足的候选继续 strong trial。它不改变单次 trial seed，但收益取决于候选 arc 在不同节点间的重复率。当前日志只稳定记录最终选中候选，尚不足以证明覆盖率；实现前应先记录每轮全部 20 个候选、左右 gain 和历史命中率。如果重复率低，该方案不会有实质收益。
 
 当前优先级为：先拆分 CPLEX build/solve；若 solve 为主，测试 basis warm-start；并行做 root-only heuristic 的完整 A/B；reliability branching 先只做统计。直接把候选数从 20 降到 10 暂不采用，因为最新两例实际选中 rank 出现过 11、13、15、18、20，静态截断会明显改变分支质量。
+
+### 2026-07-19：branch-implied 候选风险口径澄清
+
+进一步按当前生产路径复核后，需要把前述“ArcBrancher 未显式跳过 branch-implied forbidden arc”的影响说得更准确。当前最好配置开启 strong branching、lightweight seed 和 branch-implied penalty。对可复用的 strong trial child，父节点正值竞争列虽然会临时保留，但从第一次 trial 建模起即按有限 M 成本处理；只有 repair 后 artificial slack 和正值 M 列都归零，trial seed 才会复用。随后筛列保留正值列，但此时正值列已不再包含 branch-implied 竞争弧，非正值不兼容列也会被过滤。因此，在 strong trial 成功并复用 seed 的主路径中，branch-implied arc 基本不会形成正式 child RMP 的正流量，更不会成为实际分支候选；`ArcBrancher` 缺少显式状态检查主要是一个不完整的候选生成不变量，不是当前主配置的性能瓶颈。
+
+边界仍然存在于不走 strong trial 的普通 arc 分支：lightweight child seed 会保留父节点正值列，正式节点又不启用 strong-trial M 目标；在 set-covering 覆盖行下，required arc 行并不自动排除其它正值列中的竞争入弧/出弧。因此这种弱口径下，历史 branch-implied 竞争列可以继续留在 RMP，并可能产生分数 arc flow。当前结论是暂不为主配置单独优化这一点；若后续关闭 strong branching 或复测普通分支，应把 `Node.getArcState()==FREE` 且非 branch-implied forbidden 作为候选生成的显式前置条件。

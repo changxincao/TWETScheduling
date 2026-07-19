@@ -751,3 +751,9 @@ join 只做严格等价的细节剪枝。对不超过 128 个任务的 no-SRI �
 同一次 exact 的 DSSR 后续轮不重复无条件 probe。第 2--5 轮复用最近一次选中的 Tmid，第 6 轮重新 probe，之后按 5 轮周期重复。周期 probe 前只用上一轮完整 labeling 的 label 数调整起点：一侧超过另一侧 5 倍时，按当前有效 horizon 宽度的 5% 朝减轻重侧的方向移动；backward 更重则增大 Tmid，forward 更重则减小 Tmid。这个移动只改变 probe 初值，最终选择仍由原 probe 评分决定；每轮 ng-set 更新后仍会重新构建 half-domain 状态，不复用旧 labels。
 
 同一 node 的多次独立 exact 还维护第二层复用。完整 exact 后，以真实 exact 总时间为主记录历史 best Tmid；耗时差在 10% 内时，只有前后向 label 不平衡至少改善 30% 才替换。稳定冻结只作用于每次 exact 的第 1 个 DSSR round：至少观察 5 次、最近 3 次 Tmid 在 horizon 的 1% 内时冻结，随后 5 次 exact 跳过 probe 但仍完整 labeling，第 6 次恢复 probe 校验；校验变化则解冻。冻结状态按 node id 和 active-cut 集合隔离，cut 集合变化会重置冻结样本；历史 best Tmid 仍可作为新 cut 口径下的 probe 起点，但不会直接当闭合结果。不同 node 使用不同 map 项，不跨 node 直接复用。
+
+### 2026-07-19：Tmid 当前判断与后续优化边界
+
+当前 Tmid 策略可以继续作为默认好配置使用。普通短 exact 上周期重探几乎不改变搜索域；困难 60-2 repair 中，它避免了第一轮 Tmid 在几十轮 ng-set 扩大后继续造成极端 backward 膨胀，总 kept labels 从 110483 降到 46558，backward 时间从 260.495s 降到 35.342s。它只改变正反向半域划分，不改变完整 labeling 和 join 证书，因此属于性能选择，不是正确性口径。
+
+后续不能简单按 forward/backward 的时间或 label 比强制移动 Tmid。既有 full-curve 对拍已经表明，`F+B` 总耗时最小的位置本来就可能保持明显方向失衡，而且有限 capped probe 的局部方向曾与完整 exact 方向连续不一致。当前“失衡只轻移周期 probe 起点、最终仍由原 probe 选择”的处理因此比直接反馈更稳妥。若继续优化，第一优先级应是减少无效 probe：在同一次 DSSR 的周期 probe 连续选择相同 Tmid 后延长重探间隔，同时保留最大校验间隔；第二优先级是让 probe 分数估计总扩展与 join 工作量，而不是只追求队列平衡。两项都应先在 60-2 difficult repair 和 50-2 普通 root 上独立 A/B，当前不直接改默认逻辑。

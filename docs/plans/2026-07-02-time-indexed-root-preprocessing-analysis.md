@@ -723,3 +723,8 @@ join 只做严格等价的细节剪枝。对不超过 128 个任务的 no-SRI �
 
 旧 join 对所有通过普通 arc、ng-memory、时间域和 reduced-cost 下界检查的 label pair 都执行 PWLF 最小值计算，随后恢复 sequence 并检查 elementary。新流程不改变 elementary pair：它们仍完整进入 PWLF 和列生成。对于由 mask 已确定为 non-elementary 的 pair，只有在本轮 DSSR witness top-K 已填满后，才用 `forward.minReducedCost + backward.minReducedCost + crossingArcReducedCost` 与当前最差 witness 比较；严格更差时直接跳过 PWLF。通过这一层后仍会计算真实 PWLF 值，若真实值仍严格差于最差 witness，则再跳过 sequence 恢复。相等时不剪，以保留原有长度和字典序 tie-break。这一优化只减少 DSSR 更新候选的无用计算，不改变可加入 RMP 的 elementary 列或最终闭合证明。
 最终采用两个直接存放在 label 内的 `long`，分别覆盖任务 `1--64` 和 `65--128`。这样 100-job 规模仍然是零额外对象分配的 O(1) 更新和两次按位求交，比为每个 label 分配、复制 `PackedBitSet` 更适合当前预计规模。实例任务数超过 128 时整轮关闭该快速口径，回退原有 sequence 恢复与 elementary 检查，不会让部分 label 使用 mask、部分 label 回退。`routeElementary` 仍必须保留，因为两个访问集合也无法区分 `{3,7}` 与访问序列 `3,7,3`；原来表示 64 位口径是否可用的逐 label fallback 标志已删除。focused 编译和 65/100 位段及 129-task 回退反射测试通过；最终 20-2 root smoke 得到 `obj=bound=6343`、`valid=true`。
+### 2026-07-19：双 long route visit-profile 正确性复核
+
+本次从控制流和位运算两层重新检查双 `long` 实现。`precomputeSriPricing()` 在任何 label 创建前固定当前 exact pricing 的 SRI 状态；正向和反向 child 只从 `1..n` 的扩展集合产生，source 与 sink root 单独初始化且不写访问位。低位段映射任务 `1--64`，高位段映射 `65--128`；任务 64 和 128 分别使用对应 `long` 的 bit 63，不存在 Java 移位回绕。每个 child 在 father 的两个访问集合上增量置位，`routeElementary` 单独记录半路径内部是否发生过重复；join 只有在两侧各自 elementary 且低、高位段都不相交时才给出 elementary hint。partial dominance、函数裁剪和 Tmid 变化都不修改 father 序列，因此不会使访问轮廓失效。SRI active、开关关闭或任务数超过 128 时整轮不使用 hint，继续执行原 sequence 检查。
+
+定向反射测试覆盖任务 64、65、100、128 的位映射、半路径重复 65、跨半路径 65/100 冲突、低位段不相交和 129-task 关闭口径，全部通过。15-2 root 开关 A/B 均完整闭合到 `obj=bound=3360`，均为 8 次 pricing、637 列、`valid=true`。20-2 开启后 `34.925s` 闭合到 `6343`；关闭后 120 秒内未闭合，只能说明 sequence 恢复路径更慢，不能作为 bound 差异。当前未发现需要修改生产代码的问题。

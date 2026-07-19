@@ -728,3 +728,13 @@ join 只做严格等价的细节剪枝。对不超过 128 个任务的 no-SRI �
 本次从控制流和位运算两层重新检查双 `long` 实现。`precomputeSriPricing()` 在任何 label 创建前固定当前 exact pricing 的 SRI 状态；正向和反向 child 只从 `1..n` 的扩展集合产生，source 与 sink root 单独初始化且不写访问位。低位段映射任务 `1--64`，高位段映射 `65--128`；任务 64 和 128 分别使用对应 `long` 的 bit 63，不存在 Java 移位回绕。每个 child 在 father 的两个访问集合上增量置位，`routeElementary` 单独记录半路径内部是否发生过重复；join 只有在两侧各自 elementary 且低、高位段都不相交时才给出 elementary hint。partial dominance、函数裁剪和 Tmid 变化都不修改 father 序列，因此不会使访问轮廓失效。SRI active、开关关闭或任务数超过 128 时整轮不使用 hint，继续执行原 sequence 检查。
 
 定向反射测试覆盖任务 64、65、100、128 的位映射、半路径重复 65、跨半路径 65/100 冲突、低位段不相交和 129-task 关闭口径，全部通过。15-2 root 开关 A/B 均完整闭合到 `obj=bound=3360`，均为 8 次 pricing、637 列、`valid=true`。20-2 开启后 `34.925s` 闭合到 `6343`；关闭后 120 秒内未闭合，只能说明 sequence 恢复路径更慢，不能作为 bound 差异。当前未发现需要修改生产代码的问题。
+
+### 2026-07-19：修改后 60-2 的 DSSR 轮数与热点复核
+
+重新解析 `20260718-tmid-periodic-join-60-001-2m-ng` 的完整 1800s 日志后，必须区分普通 exact 与 strong-branching repair 的 `FindFeasible`。普通 `GCNGBBStyleNgDssrPricing` 共调用 168 次、累计 370.877s，DSSR 轮数中位数为 7、P90 为 10、P95 为 11、最大仅 13。repair exact 只调用 16 次，却累计 665.553s；其轮数中位数为 50、P90 为 72、最大为 91。因此当前 60-2 的 DSSR 重尾主要发生在 strong trial 的受限 RMP 修复，而不是普通 node pricing。
+
+最多 91 轮的 repair exact 总耗时 92.395s，其中 initialization/forward/backward/join 分别为 6.264/8.815/57.454/19.562s。该调用累计看到 36,785 条负非基本 route，每轮保留 25 条、共保留 2,275 条 witness。前 90 个更新轮共检查 2,250 条 witness，其中 2,099 条已被同一轮前面新增的 ng-pair 连带阻断，实际触发更新的 route 只有 151 条；每轮实际新增 ng-pair 平均 1.66 个，分布为 1 个 51 轮、2 个 22 轮、3 个 13 轮、4 个 3 轮、5 个 1 轮，最后 elementary 返回轮为 0 更新。这里的 `top25` 只是每轮保留并依次检查的非基本 witness 上限，不表示每轮一定新增 25 个 ng-pair。minimum-segment 更新会对每条仍存活 route 只补齐一个缺失 pair 最少的重复段；大量 top-25 route 共享同一类重复结构，前面的更新已经足以阻止后面的 route，所以真正增长很慢。旧 top-25 被排除后，候选排序中后续的负非基本 route 又会依次上浮，这正是仍需多轮 DSSR 的直接原因。
+
+整次 1800s 运行的最大热点是 exact repair，不再是 join。普通 exact 与 repair exact 合计约 1,037.2s，占总求解约 57.6%；启发式 pricing 约 424.1s，占 23.6%；master LP 约 266.6s，占 14.8%，其中 `strong_branching_light_repair_rmp` 单独为 240.472s。exact 内部累计 1,036.430s 的分项为 backward 356.886s（34.4%）、forward 285.621s（27.6%）、initialization 252.803s（24.4%）、join 137.536s（13.3%）。initialization 又几乎全部来自 midpoint probe 132.649s 和 completion bound 114.804s。由此可见，visit-profile 已把 join 从历史第一瓶颈压到第四；当前残余长尾是 repair dual 下需要几十轮 DSSR，每轮都重新做双向扩展、completion bound 和周期 midpoint probe，且后向扩展仍明显更重。
+
+当前结论不是简单把 `top25` 再增大。历史 top-K 对比已经显示，更大的 witness 上限会减少少量 DSSR 轮数，但也会扩大后续 ng-set、削弱 dominance 并增加单轮 labeling 成本。60-2 的 91 轮案例中，25 条 witness 有 93.3% 在真正轮到更新时已经被连带阻断，说明瓶颈不是“每轮只看 25 条太少”，而是这些候选高度重合、每轮只产生约 1--2 个有效新 pair，同时下一层候选持续上浮。后续若继续优化，应优先针对 repair exact 的更新信息密度、后向扩展和 probe/certificate 重复成本，而不是直接把 top-K 静态放大。

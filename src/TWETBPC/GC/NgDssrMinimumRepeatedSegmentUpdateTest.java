@@ -15,8 +15,10 @@ public final class NgDssrMinimumRepeatedSegmentUpdateTest {
 
 	public static void main(String[] args) {
 		TWETBPCConfig config = new TWETBPCConfig();
-		assertEquals(25, config.ngDssrNonElementaryRouteUpdateLimit,
-				"minimum-segment reservoir should be enabled by default");
+		assertEquals(20, config.ngDssrNonElementaryRouteUpdateLimit,
+				"minimum-segment effective update budget should be conservative by default");
+		assertEquals(100, config.ngDssrNonElementaryRouteCandidateLimit,
+				"minimum-segment candidate reservoir should allow blocked-route replacement");
 		assertEquals("minimumNewPairsSegment", config.ngDssrNonElementaryRouteUpdateMode,
 				"minimum-segment route update should be enabled by default");
 

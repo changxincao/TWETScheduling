@@ -177,13 +177,16 @@ public class GCBBFullDomainComparisonTest {
 		}
 		if (config.useGCNGBBStyleNgDssrPartialDominancePricing) {
 			mode += "-ngPartial-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
-					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
+					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit
+					+ "-cand" + config.ngDssrNonElementaryRouteCandidateLimit;
 		} else if (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
 			mode += "-ngGraphPartial-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
-					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit;
+					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit
+					+ "-cand" + config.ngDssrNonElementaryRouteCandidateLimit;
 		} else if (config.useGCNGBBStyleNgDssrPricing) {
 			mode += "-ng-" + config.ngDssrInitialNgSetMode + ngDssrInitialModeSuffix(config)
 					+ "-top" + config.ngDssrNonElementaryRouteUpdateLimit
+					+ "-cand" + config.ngDssrNonElementaryRouteCandidateLimit
 					+ (config.useIncrementalSourcedDominanceGraph ? "-srcDom" : "-paperDom");
 		}
 		if ((config.useGCNGBBStyleNgDssrPricing || config.useGCNGBBStyleNgDssrPartialDominancePricing
@@ -501,6 +504,9 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrNonElementaryRouteUpdateLimit = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateLimit",
 				config.ngDssrNonElementaryRouteUpdateLimit);
+		config.ngDssrNonElementaryRouteCandidateLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.ngDssrRouteCandidateLimit",
+				config.ngDssrNonElementaryRouteCandidateLimit);
 		config.ngDssrNonElementaryRouteUpdateMode = System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrRouteUpdateMode",
 				config.ngDssrNonElementaryRouteUpdateMode);

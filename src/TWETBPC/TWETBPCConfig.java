@@ -172,8 +172,11 @@ public class TWETBPCConfig {
 	public int ngDssrInitialNgSetSize = -1;
 	/** 2026-07-09: 旧 VRP 风格的初始 ng-set 系数；dualPair/reducedCostPair 模式按 floor(n * coef) 全局选负 pair。 */
 	public double ngDssrInitialNgPairCoefficient = 0.08;
-	/** 2026-07-17: 默认保留前 25 条负 non-elementary route，配合最小完整重复段更新。 */
-	public int ngDssrNonElementaryRouteUpdateLimit = 25;
+	/** 2026-07-19: 每轮最多使用多少条真正改变 ng-set 的负 non-elementary route。 */
+	public int ngDssrNonElementaryRouteUpdateLimit = 20;
+	/** 2026-07-19: 为跳过已被同轮前序更新阻断的 route，额外保留的候选深度。 */
+	public int ngDssrNonElementaryRouteCandidateLimit = 100;
+
 	/** 2026-07-17: 默认只补齐新增 pair 最少的一个完整重复段；allSegments 可恢复原更新。 */
 	public String ngDssrNonElementaryRouteUpdateMode = "minimumNewPairsSegment";
 	/** 2026-07-03: 实验开关；按最近若干次正式 ng-DSSR final ng-set 统计初始化下一次 ng-set。 */

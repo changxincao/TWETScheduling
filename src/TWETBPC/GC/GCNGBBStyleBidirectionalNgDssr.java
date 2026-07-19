@@ -991,6 +991,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private int updateNgNeighborhoodsByMinimumNewPairsSegment() {
 		int changed = 0;
+		int effectiveRouteLimit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
+		int effectiveRoutes = 0;
 		for (NonElementaryNegativeRoute route : nonElementaryNegativeRoutes) {
 			ngDssrMinimumSegmentRoutesConsidered++;
 			int routeChanged = addMinimumNewPairsRepeatedSegment(route.sequence, ngNeighborhoodByJob, data.n,
@@ -1000,9 +1002,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			} else if (routeChanged > 0) {
 				ngDssrMinimumSegmentRoutesUpdated++;
 				changed += routeChanged;
+				effectiveRoutes++;
+				if (effectiveRoutes >= effectiveRouteLimit) {
+					break;
+				}
 			}
 		}
 		return changed;
+	}
+
+	private int nonElementaryRouteCandidateLimit() {
+		if (!ngDssrUseMinimumNewPairsSegmentUpdate) {
+			return Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
+		}
+		return Math.max(Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit),
+				config.ngDssrNonElementaryRouteCandidateLimit);
 	}
 
 	/**
@@ -1090,7 +1104,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!ngDssrUseMinimumNewPairsSegmentUpdate) {
 			return "";
 		}
-		return ", ngRouteUpdate=minSegment/considered" + ngDssrMinimumSegmentRoutesConsidered
+		return ", ngRouteUpdate=minSegment/effectiveLimit" + config.ngDssrNonElementaryRouteUpdateLimit
+				+ "/candidateLimit" + nonElementaryRouteCandidateLimit()
+				+ "/considered" + ngDssrMinimumSegmentRoutesConsidered
 				+ "/blocked" + ngDssrMinimumSegmentRoutesAlreadyBlocked
 				+ "/updated" + ngDssrMinimumSegmentRoutesUpdated;
 	}
@@ -4409,7 +4425,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| ngDssrDuplicateRepairDiagnostic || nonElementaryNegativeRoutes == null) {
 			return false;
 		}
-		int limit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
+		int limit = nonElementaryRouteCandidateLimit();
 		if (nonElementaryNegativeRoutes.size() < limit) {
 			return false;
 		}
@@ -5825,7 +5841,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		recordRoundNegativeRoute(sequence, inferredReducedCost);
 		rememberDuplicateRepairCandidate(sequence, inferredReducedCost);
 		ngDssrRoundNonElementaryNegativeSeen++;
-		int limit = Math.max(1, config.ngDssrNonElementaryRouteUpdateLimit);
+		int limit = nonElementaryRouteCandidateLimit();
 		for (int i = 0; i < nonElementaryNegativeRoutes.size(); i++) {
 			NonElementaryNegativeRoute route = nonElementaryNegativeRoutes.get(i);
 			if (route.sequence.equals(sequence)) {

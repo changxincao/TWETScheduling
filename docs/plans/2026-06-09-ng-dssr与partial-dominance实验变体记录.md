@@ -2675,3 +2675,14 @@ ng-DSSR 自身仍按 DSSR 语义循环：本轮若返回基本负列则立即交
 定向测试全部通过：`PackedBitSetStorageTest`、`PackedBitSetIntersectionTest`、`NgDssrInitialNgSetSizeTest`、`NgDssrSameNodeWarmStartTest`、`NgDssrMinimumRepeatedSegmentUpdateTest`、`IncrementalSourcedDominanceGraphConsistencyTest`、`CompletionBoundPreparedBoundsCompatibilityTest`、`PiecewiseLinearMinimalSumViewTest` 和 `LPRestrictedColumnMembershipTest`。其中 source-aware dominance 随机测试覆盖 96000 次插入；固定最小和测试覆盖 500000 组；bitset 两项分别覆盖 100000 和 200000 组。通用 `PiecewiseLinearFunctionPropertyTest` 仍会报告“不相交定义域 mergeMinimum”及未做方向闭包的任意函数随机失败，但当前主线使用方向 normalize 后的 frontier；同一测试中的 500 组 prefix-minimized frontier 和 500 组 forward/backward direction 对拍均通过。因此这些失败是通用 API 的既有契约边界，不是当前 no-SRI ng-DSSR 主线回归，旧/dormant backend 若重新启用仍需单独复核。
 
 端到端 smoke 使用 `wet021_001_2m`、source-aware dominance、group-envelope prefilter、all-cycles completion bound、midpoint probe/reuse、nearest `floor(n/10)`、top25 minimum-segment，关闭 ALNS、time-indexed 预处理和 strong branching，只处理 root。结果为 `ROOT_PROCESSED`，`obj=bound=6829`，`valid=true`，总时间 `1.138s`，ng-DSSR exact 两次共 `0.298s`。另一个 40-2 极端诊断关闭 ALNS 和启发式后在 exact join 内达到 120 秒限制，`valid=true` 但 root 未闭合；它只说明该非生产配置很难，不作为闭合正确性证据。当前结论是：未发现 limited engine 删除后或当前 no-SRI ng-DSSR 主线中的 correctness 回归；审计不把 dormant legacy backend 和 active-SRI 旧 store 自动包含在该结论中。
+
+258. 2026-07-19 minimum-segment 按有效路径计数及更新数量实验
+此前 `top25/minimumNewPairsSegment` 的 25 表示最多检查 25 条候选，不表示真正更新 25 条路径。60-2 的 91 轮 repair 日志中，前 90 轮共检查 2250 条候选，其中 2099 条已被同轮前序更新连带阻断，实际只有 151 条路径触发更新，平均每轮 1.68 条。当前实现把只读候选 reservoir 与有效更新预算拆开：`ngDssrNonElementaryRouteCandidateLimit` 控制最多保留多少条负非基本 witness；`ngDssrNonElementaryRouteUpdateLimit` 只统计真正补入新 ng-pair、从而阻断该路径的更新。被前序更新已经阻断的候选继续向后扫描，不再消耗有效预算。该修改只影响 DSSR 收敛速度，不改变 exact 闭合条件。
+
+为选择有效更新数量，使用 50-3 W300 的 setupR50、setupR75 两个 root，统一 nearestK5、minimum-segment、source-aware dominance、group-envelope prefilter、all-cycles completion bound、启发式 pricing，关闭 ALNS、RMIH、strong branching、time-indexed root preprocessing 和 SRI；候选 reservoir 固定为 300，只改变有效更新数 5/10/15/20/25/30。所有组的 root bound、valid、exact calls 和列池基本一致。
+
+setupR50 的 K5/10/15/20/25/30 exact 时间分别为 `24.714/22.435/21.040/20.265/20.643/20.955s`，root 时间为 `51.599/49.328/47.926/46.906/47.750/48.213s`；最后一次 certificate 的 DSSR 轮数为 `10/6/5/4/4/4`。K20 相对 K5 将 exact 减少 18.0%，root 减少 9.1%。最终 pair 为 `108/106/106/108/108/110`，说明 K25/K30 已不能继续减少轮数，只开始增加无效检查和少量状态。
+
+setupR75 的对应 exact 时间为 `16.292/14.181/13.217/12.651/12.784/12.628s`，root 时间为 `40.499/37.974/36.988/36.119/37.295/36.464s`，certificate 轮数同样为 `10/6/5/4/4/4`。K20 相对 K5 将 exact 减少 22.3%，root 减少 10.8%；K25/K30 的最终 pair 从 139 增至 148，且没有减少轮数，额外更新没有稳定净收益。
+
+因此当前默认有效更新数设为 20，候选 reservoir 默认保持 100。20 的含义是每轮最多处理 20 条真正仍存活并被本轮新 pair 阻断的路径，不是固定增加 20 个 pair；一条路径的最小完整重复段可能加入多个 pair。K10 是更保守但稍慢的备选；K25/K30 暂不作为默认。该结论目前覆盖两个 W300 root，完整树和 repair 强分支仍需后续观察。

@@ -1546,3 +1546,9 @@ full-domain 的优势主要体现在 dominance graph 搜索路径上。由于函
 2026-05-20 曾在 `LP.construct()` 里补过 `Node.isColumnPreprocessingCompatible()`，用于兜底过滤包含 `Data.preprocessedArcForbidden` 的历史列。后续强分支和 repair 语义复核后确认，这个兜底放在建模入口会混淆 seed 语义：`construct(node, seedColumnIds)` 应只按调用方给定 seed 建 restricted RMP，不应静默删列。正常 pricing、初始列和 repair 入口都应已经避开静态预处理禁弧；若某个实验入口或旧 pool 把这类列塞进 seed，应在上游暴露并修正，而不是由 RMP 建模入口吞掉。
 
 因此当前代码已经删除 `LP.construct()` 中的 `isColumnPreprocessingCompatible()` 检查，并删除 `Node.isColumnPreprocessingCompatible()`。旧记录中关于“construct 只过滤全局静态 preprocessing forbidden arc”的描述是历史实现，不再代表当前主线。当前主线的分工为：`construct()` 只装 seed；分支行、repair slack、branch-implied M、外包 membership row 等语义都在 `buildModel()` 和 `PC.solve()` 中处理。
+
+## 2026-07-19 arc 分支候选禁弧复核
+
+当前普通 arc 分支与 strong branching 共用 `ArcBrancher.collectStrongBranchingCandidates()`。候选入口只显式跳过 `from==to` 和普通 `pricingOnlyForbiddenArc`，随后依赖弧流是否为分数进行筛选。显式 forbidden/required arc 在可行 RMP 中分别被分支行固定为 0/1，因此正常情况下会被小数性检查排除；完全禁止的时空弧若已聚合成普通 pricing-only arc，也会被显式排除。单纯的 `(i,j,t)` 局部禁弧不能排除普通 `(i,j)` 分支，因为其它时间仍可能允许该弧。
+
+但当前实现不能表述为“所有已禁弧都绝不会再次成为候选”。`branchImpliedForbiddenArc` 没有进入候选入口的显式判断；正式节点又不使用 strong-trial 的人工 M objective。如果当前 RMP 仍保留并正值使用违反右支排他语义的历史竞争列，这条隐含禁弧可能形成分数流并进入候选。`git` 历史显示，2026-06-26 的 `Simplify branch candidate state filters` 将原来的 `getArcState()!=FREE || isArcForbidden() || isPricingOnlyArcForbidden()` 简化成只检查 pricing-only，因而旧记录中“ArcBrancher 统一调用 isArcForbidden”已经不再代表当前代码。最小修正应恢复显式状态检查：跳过非 FREE arc、`isArcForbidden()` 和普通 pricing-only arc；这只删除冗余或冲突候选，不改变合法自由弧的评分与左右支语义。本次仅完成分析记录，尚未修改代码。

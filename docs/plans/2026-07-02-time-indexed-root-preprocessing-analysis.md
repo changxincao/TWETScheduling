@@ -743,3 +743,11 @@ join 只做严格等价的细节剪枝。对不超过 128 个任务的 no-SRI �
 补充澄清 91 轮调用的结果：该次 `FindFeasible` 日志为 `improved=true`、`addedColumns=304`、`reason=elementary negative columns returned`，即前 90 轮没有返回 elementary 列，第 91 轮找到了 304 条 repair-dual 口径下为负的 elementary 列。它没有证明 child 不可行，也没有单独证明 repair 已完成；返回后外层继续把列加入 repair RMP、重解并继续调用后续定价。之后仍出现多次启发式和 exact `FindFeasible`，最终一次 exact 因总时限中止，strong side 记录为 `leftBound=TIME_LIMIT`，而不是 `INF`。只有完整 exact 定价确认无负列、所有定价器均不能再加列，且 repair RMP 的 artificial slack 或 branch-implied penalty 列仍为正时，外层才能返回 infeasible。
 
 这里的“连带阻断”不是分支禁弧。每轮 labeling 先在同一个旧 ng-set 下得到并排序 top-25 非基本路径，随后按顺序原地更新 ng-set。对一条含重复任务 `j ... j` 的路径，代码检查两个 `j` 之间的中间任务 `k`；若 `j` 已属于所有这些 `k` 的 ng-neighborhood，则第二次访问 `j` 在下一轮已被 ng-memory 阻止，该路径被记为 `blocked`。前面路径新增的 `k <- j` pair 可能恰好补齐后面路径的某个重复段，因此后面路径即使还有其它重复段，也不再增加 pair。当前效率问题是 top-25 是更新前静态截取的候选表，blocked route 不会由第 26 名以后的候选在本轮补位；91 轮案例中实际有效更新预算只有 1.66 route/轮。若后续优化，应把“候选保留深度”和“有效更新 route 数”拆成两个参数，扫描更深候选并跳过已阻断项，直到达到有效更新预算或候选耗尽，再通过 A/B 判断增加的 ng-set 是否抵消轮数收益。
+
+## 2026-07-19 当前 Tmid 更新流程复核
+
+当前最好配置显式打开 midpoint probe；`TWETBPCConfig` 基类默认仍为关闭。单次 ng-DSSR exact 的第 1 轮先按当前 effective window 计算基础 Tmid：默认是 `max(dynamicMinHStart, earliestSourceCompletion)` 与 `pricingHorizon` 的中点。若同一 BPC node 已有历史完整 exact 记录，则用该 node 历史表现最好的 Tmid 作为 probe 起点。probe 默认比较 forward/backward 的 `kept+queueRemaining` 压力；forward 更重时把候选乘 `0.85` 左移，backward 更重时乘 `1.15` 右移。首次最多试 5 个候选，使用历史起点时最多试 3 个；方向反转时补试 bracket 中点，两侧队列都耗尽的 rank-0 候选可直接复用本次 probe labels。
+
+同一次 exact 的 DSSR 后续轮不重复无条件 probe。第 2--5 轮复用最近一次选中的 Tmid，第 6 轮重新 probe，之后按 5 轮周期重复。周期 probe 前只用上一轮完整 labeling 的 label 数调整起点：一侧超过另一侧 5 倍时，按当前有效 horizon 宽度的 5% 朝减轻重侧的方向移动；backward 更重则增大 Tmid，forward 更重则减小 Tmid。这个移动只改变 probe 初值，最终选择仍由原 probe 评分决定；每轮 ng-set 更新后仍会重新构建 half-domain 状态，不复用旧 labels。
+
+同一 node 的多次独立 exact 还维护第二层复用。完整 exact 后，以真实 exact 总时间为主记录历史 best Tmid；耗时差在 10% 内时，只有前后向 label 不平衡至少改善 30% 才替换。稳定冻结只作用于每次 exact 的第 1 个 DSSR round：至少观察 5 次、最近 3 次 Tmid 在 horizon 的 1% 内时冻结，随后 5 次 exact 跳过 probe 但仍完整 labeling，第 6 次恢复 probe 校验；校验变化则解冻。冻结状态按 node id 和 active-cut 集合隔离，cut 集合变化会重置冻结样本；历史 best Tmid 仍可作为新 cut 口径下的 probe 起点，但不会直接当闭合结果。不同 node 使用不同 map 项，不跨 node 直接复用。

@@ -2727,3 +2727,13 @@ setupR75 的对应 exact 时间为 `16.292/14.181/13.217/12.651/12.784/12.628s`�
 把 candidate reservoir 从1000直接缩为K，确实会把已知 non-elementary pair 的在线剪枝阈值从“当前第1000名”提高到“当前第K名”，因此能跳过更多 PWLF join；当前 reservoir 已经按 sequence 去重，所以这不需要新增“不重复列”定义。但“reduced cost 前K条”不等于“K条有效更新路径”：按 reduced cost 排在前面的多条路径可能共享同一重复段，第一条加入 ng-pair 后，其余路径会被连带禁止，不再消耗有效更新预算。若只保留K条，就无法继续使用第K名之后的候选补足有效更新数，容易增加 DSSR 轮数。candidate1000 的作用正是保留这些候补路径，K20 则只限制最终真正新增 ng-pair 的路径数。
 
 若要在线只保留“K条有效路径”，不能只在插入时判断 sequence 是否重复；需要按 reduced cost 全局顺序维护一套临时 ng-set overlay。后到的更优路径替换已有路径时，前序更新和后续路径的 blocked/effective 状态都可能改变，需要重建整套选择结果，复杂度和实现风险明显高于当前有界 reservoir。当前不修改实现，继续保留 candidate1000 与 effective K20 的职责分离；后续若要减小1000，优先做500/1000独立 A/B，而不是直接降到K。
+
+### 263. candidate1000 同质化与 blocking-signature 候选池思路
+
+60-2 完整 run 说明，candidate1000 的主要问题不是容量不足，而是全局按 reduced cost 保留的 sequence 高度共享重复段。33 次多轮 strong repair 共 1047 个更新轮，平均每轮检查约 1000 条候选，却只得到 2.87 条有效更新 route 和 2.91 个新 pair。`blocked` 表示候选在旧 ng-set 下生成时合法，但在轮末顺序更新中已被较早候选新增的 pair 连带阻断。由于候选集合固定在更新前，当前轮无法再从第 1001 名以后补入独立重复结构，只能重新 labeling 暴露下一层 witness。
+
+不建议把现有全局 reduced-cost reservoir 直接缩成 K。没有多样性约束时，top-K 比 top-1000 更容易全部共享同一重复结构，实际有效更新数会进一步下降。更合适的最小改动是为每条恢复出的非基本 sequence 一次性构造 repeated-segment profile：记录每个重复段在本轮起始 ng-set 下仍缺少的 ng-pair 集合，并记录当前 minimum-segment 策略选中的规范化 pair-set signature。完全相同的 minimum signature 只保留 reduced cost 更小的一条，可以安全消除最明显的更新冗余；同时用 hash map 替代当前至多 1000 条 sequence 的线性 equals 扫描。池满且新 reduced cost 不优于当前 worst 时，也应先按成本直接拒绝，再做 sequence/profile 构造。
+
+只记录 minimum signature 仍不能完全消除连带阻断。两个候选的 minimum signature 可以不同，但后一个候选的其他重复段可能已被前一个候选新增的 pair 完整覆盖。因此轮末仍应基于完整 repeated-segment profile 和一份虚拟 ng-set 顺序选择：若任一重复段已被虚拟 ng-set 阻断则跳过；否则按现有 minimum-segment 规则加入 pair，直到取得 K 条有效 route。候选池应保留大于 K 的 signature reservoir，初步可测试 5K、10K 和当前 1000，而不是直接等于 K。更进一步可以按“每个新增 pair 能覆盖多少尚未阻断候选”做 set-cover 式贪心，但这会改变 ng-set 增长轨迹，应在简单 signature 去重验证后再测试。
+
+该优化不在 labeling/join 过程中修改真实 ng-set，因为现有 label 都按本轮起始 ng-set 构造，中途修改会破坏同一轮语义。它只改变负非基本 witness 的保存和轮末更新选择，不影响 elementary 列、无负列 certificate 或最终正确性。建议先增加 raw sequence、distinct minimum signature、full-profile cross-blocked、最终有效 route/pair 数及候选池操作耗时统计，再在 60-2 困难 repair 上做 A/B。

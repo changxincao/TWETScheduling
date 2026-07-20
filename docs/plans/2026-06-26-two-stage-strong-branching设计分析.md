@@ -450,3 +450,12 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 这两次repair的直接开销较小：Phase-I LP的 `initial + after_pricing + true_rmp` 为 `0.179+0.016+0.280=0.475s`，启发式 `FindFeasible` 为 `0.109s/3`，合计约 `0.584s`。相比之下，40次repair前的 `strong_branching_light_repair_rmp` 为 `12.141s`，平均303.527ms/side；因此本次root里Phase-I repair只占这两部分直接时间约4.6%，主要strong成本仍是全部40个side都要执行的初始trial LP。最终root bound=22490、incumbent=22582、gap=0.4074%，选择 `arc(5,9)`，左右trial bound分别为22578.20618和22584。
 
 实验目录：`test-results/bpc/verify-phase1-repair-40-2-rootonly-20260720`。该例可用于验证“初始trial残留 -> Phase-I启发式补列 -> slack与竞争列归零 -> 恢复真实目标”的可行路径；不能用于评价困难repair中的exact DSSR收益或正residual的完整不可行证书。
+#### 40-2 root-only 同配置 repair A/B
+
+`300/600` 来自通用启发式定价批量限制，不是Phase-I专用参数：`maxHeuristicPricingColumns=300`且`heuristicPricingPoolSize=300`，所以一次 `findFeasible()` 最多返回300列。第一个repair调用一次即归零，日志为300；第二个repair第一次300列后仍有人工项，再调用一次，因此累计600。
+
+随后在同一当前代码、同一root-only参数下，仅关闭 `strongBranchingPhaseOneRepair` 重跑旧repair，再紧接着复跑Phase-I。两边root bound、最终分支、左右trial bound完全相同：均选择 `arc(5,9)`，left=22578.206183957107、right=22584.0。旧repair的直接成本为 `repair_slack_initial 0.192s + repair_after_pricing 0.030s + heuristic FindFeasible 0.132s + exact FindFeasible 0.366s = 0.720s`；Phase-I为 `phase_one_initial 0.134s + after_pricing 0.010s + true_rmp 0.209s + heuristic FindFeasible 0.081s = 0.434s`。Phase-I直接repair快0.286s，约39.7%，原因是省掉2次exact repair的0.366s，代价是增加2次真实目标RMP重解的0.209s。
+
+整个root nodeTime为旧repair 33.367s、Phase-I 32.926s，只快0.441s，约1.3%。不能用总求解时间比较，因为两次ALNS前置耗时不同；普通启发式同为84次却分别耗时13.062s和16.533s，同时40次进入repair前的初始trial LP分别为12.644s和8.388s，说明运行波动在非repair部分双向抵消。该例的可靠结论是：Phase-I对实际触发的两次repair本身有小幅绝对收益，但repair只占root很小一部分，因此没有形成显著整体加速。
+
+旧repair实验目录：`test-results/bpc/verify-old-repair-40-2-rootonly-20260720`；邻接Phase-I复跑目录：`test-results/bpc/verify-phase1-repair-40-2-rootonly-rerun-20260720`。

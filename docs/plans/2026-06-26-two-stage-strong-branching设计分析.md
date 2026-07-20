@@ -442,3 +442,11 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 强分支测试20个候选的左右两侧，共40次 `strong_branching_light_repair_rmp`，耗时62.200s，平均1.555s/side；seed准备仅0.225s。父Pool为19044列，lightweight后每个side仍保留3124--11252列，平均8040.2列。因此当前强分支瓶颈是大 restricted master LP，而不是建模或seed筛选。40个side全部在初始trial LP即得到可行结果，没有进入 `strong_branching_phase_one_*`，Phase-I repair启动次数为0；故该实例只能评价强分支LP成本，不能评价0/1 Phase-I repair质量，开关开/关在本轮应走相同算法路径。最终选择 `arc(10,5)`，候选按距0.5排名为16/77，左右bound分别44377.0和44647.30。
 
 实验目录：`test-results/bpc/ab-strong-phase1-50-2-rootonly-20260720`。
+
+### 2026-07-20 40-2 root-only Phase-I repair 触发例
+
+为避免用“Phase-I 启动0次”的50-2判断 repair，本次用当前代码重新运行 `wet040_001_2m`，保持 no-SRI ng-DSSR、strong phase1 candidate=20、phase2=0、lightweight seed、branch-implied penalty与Phase-I repair开启，并设置 `maxNodes=1`。根节点20个候选共40个side中有2个进入Phase-I repair：第一次启发式 `findFeasible()` 加入300列后归零，移除11条竞争惩罚列；第二次经过两轮启发式共加入600列后归零，移除8条竞争惩罚列。两次都没有调用ng-DSSR exact `findFeasible()`，也没有进入certificate不完整、正residual闭合或真实infeasible路径。删除静默fallback后的当前代码正常完成root并以 `NODE_LIMIT` 结束，说明Phase-I成功归零路径可正常工作。
+
+这两次repair的直接开销较小：Phase-I LP的 `initial + after_pricing + true_rmp` 为 `0.179+0.016+0.280=0.475s`，启发式 `FindFeasible` 为 `0.109s/3`，合计约 `0.584s`。相比之下，40次repair前的 `strong_branching_light_repair_rmp` 为 `12.141s`，平均303.527ms/side；因此本次root里Phase-I repair只占这两部分直接时间约4.6%，主要strong成本仍是全部40个side都要执行的初始trial LP。最终root bound=22490、incumbent=22582、gap=0.4074%，选择 `arc(5,9)`，左右trial bound分别为22578.20618和22584。
+
+实验目录：`test-results/bpc/verify-phase1-repair-40-2-rootonly-20260720`。该例可用于验证“初始trial残留 -> Phase-I启发式补列 -> slack与竞争列归零 -> 恢复真实目标”的可行路径；不能用于评价困难repair中的exact DSSR收益或正residual的完整不可行证书。

@@ -2797,3 +2797,12 @@ signature 只能解决一部分重复。现有 SequenceSignature 只去重完全
 当前更稳的方案仍是保留较大的 top-C candidate reservoir，收集阶段完全不修改 shadow；结束后按 reduced cost 做一次确定性的离线 greedy，在 ng-set 副本上跳过 already-blocked route，直到得到 K 条真正有效的更新。这样较差 route 不可能先于更负的 route 修改 shadow，也不存在 top-K 淘汰后的撤销问题。若后续只优化后处理常数，可在 candidate 入池后缓存其连续重复段描述 `(repeatedJob, middleJobs bitset)`，离线 greedy 用位运算判断 blocked、missing pair 和最小段，避免反复扫描 sequence；但当前每轮最多约 C=1000，先统计这部分耗时再决定是否值得做。
 
 若大候选池仍经常在得到 K 条有效 route 前耗尽，可以考虑额外的静态多样性 reservoir，但它必须在恢复 sequence 后计算 action signature，并会削弱当前 join 中基于第 C 名 reduced cost 的提前剪枝。现阶段不建议为此引入双 reservoir。当前结论是：继续使用“较大 top-C + 末尾一次离线有效 K 更新”最清晰且稳定；动态 shadow top-K 和增量淘汰不值得实现。
+265. 2026-07-20 candidateLimit 与有效 route update K 对照
+
+为回答“大 candidate reservoir 中通常需要扫描多少非基本列才能得到完整 K 条有效更新”，本次给已有 ng-set 逐轮统计补充 `scan-considered / already-blocked / updated` 三个整数。统计只复用原更新循环中的分支结果，不增加 sequence 扫描，也不改变 candidate、ng-set 或 labeling 逻辑。实验统一使用 `wet060_001_2m`、root-only、no ALNS、no strong、no SRI，配置为 nearestKAutoN10、all-cycles completion bound、BEST_UB join、group-envelope prefilter 和 minimum-new-pairs segment；所有完成组均为 `bound=36739.428063, valid=true`。
+
+固定 `candidateLimit=10000` 时，K5/K10/K20 结果分别为：K5 `solve=360.509s, exact=105.842s/68 calls, DSSR rounds=306`；K10 `solve=312.023s, exact=100.157s/73 calls, DSSR rounds=249`；K20 `solve=347.584s, exact=110.925s/87 calls, DSSR rounds=315`。K5 的 238 个有效更新轮中有 222 轮凑满 5，完整 K 的扫描数平均 61.82、范围 6--371；但更新过弱，DSSR 总轮数反而最多。K10 的 176 个有效更新轮中只有 27 轮凑满 10，完整 K 的扫描数平均 254.04、范围 94--546，全部更新轮平均实际更新 7.51。K20 的 228 个有效更新轮中没有一轮凑满 20，平均实际更新 7.07、最大 13；平均扫描 390.01、最大 3180。说明该实例每轮可获得的独立更新量主要集中在 7--8，K20 明显过高，K5又偏保守，已完成组中 K10 最合适。
+
+固定 K10 后，candidateLimit=1000/3000/10000 三组的算法路径完全一致：均为 249 个 DSSR rounds、176 个更新轮、27 轮凑满 K、73 次 exact、382 次 pricing、15928 列和相同 root bound。C3000 与 C10000 的逐轮 scan/blocked/updated 完全一致；C1000 只把少数未凑满 K 的轮次扫描上限截到 1000，但最终每轮更新数仍完全一致。三组 wall time 有较大系统波动，且 heuristic/exact 同时同比变化，不能归因于 candidateLimit。由此确认本例中 C>1000 没增加任何有效 ng-set 更新，只会理论上放松第 C 名 reduced-cost witness 剪枝。
+
+当前建议保持 `candidateLimit=1000`，不改成 3000 或 10000；route update K 在本例采用 10。该结论先限于 60-2 root，不直接改全局默认值。原计划的 K8 运行按用户要求中止，没有纳入比较。

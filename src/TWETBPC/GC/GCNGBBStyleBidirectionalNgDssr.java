@@ -374,6 +374,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrMinimumSegmentRoutesConsidered;
 	private int ngDssrMinimumSegmentRoutesAlreadyBlocked;
 	private int ngDssrMinimumSegmentRoutesUpdated;
+	/** 当前 DSSR 轮次为获得有效更新实际扫描、跳过和采用的 route 数。 */
+	private int ngDssrRoundRoutesConsidered;
+	private int ngDssrRoundRoutesAlreadyBlocked;
+	private int ngDssrRoundRoutesUpdated;
 	private int ngDssrTotalNonElementaryNegativeSeen;
 	private int ngDssrTotalElementaryColumnsReturned;
 	private int ngDssrRoundNonElementaryNegativeSeen;
@@ -957,6 +961,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int effectiveRoutes = 0;
 		for (NonElementaryNegativeRoute route : nonElementaryNegativeRoutes) {
 			ngDssrMinimumSegmentRoutesConsidered++;
+			ngDssrRoundRoutesConsidered++;
 			int routeChanged = ngDssrUseMinimumNewPairsSegmentUpdate
 					? addMinimumNewPairsRepeatedSegment(route.sequence, ngNeighborhoodByJob, data.n,
 							ngDssrRoundAddedPairs)
@@ -964,8 +969,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 							ngDssrRoundAddedPairs);
 			if (routeChanged < 0) {
 				ngDssrMinimumSegmentRoutesAlreadyBlocked++;
+				ngDssrRoundRoutesAlreadyBlocked++;
 			} else if (routeChanged > 0) {
 				ngDssrMinimumSegmentRoutesUpdated++;
+				ngDssrRoundRoutesUpdated++;
 				changed += routeChanged;
 				effectiveRoutes++;
 				if (effectiveRoutes >= effectiveRouteLimit) {
@@ -1238,6 +1245,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrRoundAddedPairs = ngDssrTraceRoundRouteRelation ? new ArrayList<String>() : null;
 			ngDssrRoundNonElementaryNegativeSeen = 0;
 			ngDssrRoundElementaryColumnsReturned = 0;
+			ngDssrRoundRoutesConsidered = 0;
+			ngDssrRoundRoutesAlreadyBlocked = 0;
+			ngDssrRoundRoutesUpdated = 0;
 			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
 			diagnoseDuplicateRepairs(lp);
 			ngDssrRoundsExecuted = ngDssrRound;
@@ -1298,6 +1308,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append("/u").append(changed)
 				.append("/neSeen").append(ngDssrRoundNonElementaryNegativeSeen)
 				.append("/neStored").append(nonElementaryNegativeRoutes == null ? 0 : nonElementaryNegativeRoutes.size())
+				.append("/scan").append(ngDssrRoundRoutesConsidered)
+				.append('-').append(ngDssrRoundRoutesAlreadyBlocked)
+				.append('-').append(ngDssrRoundRoutesUpdated)
 				.append("/elem").append(ngDssrRoundElementaryColumnsReturned);
 	}
 

@@ -365,8 +365,12 @@ public class PC {
 			if (needsRepair) {
 				// 2026-07-14: strong trial repair 要同时清掉 artificial slack 和正值 penalty 列。
 				// 两者都归零时，repair 模型的 primal objective 才可作为当前列集的 trial bound。
-				solution = domainRepair ? repairDomainFilteredStrongBranchingMaster(lp)
-						: repairInfeasibleMaster(lp, false, true);
+				if (domainRepair) {
+					solution = repairDomainFilteredStrongBranchingMaster(lp);
+				} else {
+					solution = config.enableStrongBranchingPhaseOneRepair
+							? repairStrongBranchingPhaseOne(lp) : repairInfeasibleMaster(lp, false, true);
+				}
 			}
 			if (strongRepairDualBoundClosure != null) {
 				return StrongBranchingTrialResult.dualBoundPruned(solution, strongRepairDualBoundClosure.bound,
@@ -1015,7 +1019,6 @@ public class PC {
 				break;
 			}
 		}
-
 		if (isTimeLimitReached()) {
 			lp.setFeasibilityRepairMode(false);
 			return solution;
@@ -1043,6 +1046,122 @@ public class PC {
 					+ "cleared: " + lp.getNode().diagnosticSummary() + ", message=" + finalSolution.getMessage());
 		}
 		return finalSolution;
+	}
+
+	/**
+	 * 2026-07-20: Pure Phase-I strong-trial repair. Legal columns cost 0; artificial slacks and
+	 * branch-implied competitors cost 1. Restore true costs only after the Phase-I objective reaches 0.
+	 */
+	private TWETMasterSolution repairStrongBranchingPhaseOne(LP lp) {
+		lp.setFeasibilityPhaseOneObjectiveMode(true);
+		lp.setFeasibilityRepairMode(true);
+		TWETMasterSolution phaseSolution = null;
+		int generatedForRepair = 0;
+		boolean phaseFeasible = false;
+		boolean phaseInfeasibleCertified = false;
+		boolean fallbackToStandardRepair = false;
+		try {
+			phaseSolution = solveRelaxationTimed(lp, "strong_branching_phase_one_initial");
+			if (isTimeLimitReached() || phaseSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				return phaseSolution;
+			}
+			phaseFeasible = !needsStrongRepair(lp);
+
+			while (!phaseFeasible && !isTimeLimitReached()) {
+				boolean addedInThisPass = false;
+				boolean internalClosedAtCurrentDual = false;
+				boolean outsourcingClosedAtCurrentDual = !lp.isColumnizedOutsourcing();
+				for (int engineIndex = 0; engineIndex < pricingEngines.size()
+						&& needsStrongRepair(lp) && !isTimeLimitReached(); engineIndex++) {
+					PricingEngine engine = pricingEngines.get(engineIndex);
+					if (!engine.supportsFeasibilityPhaseOneObjective()) {
+						continue;
+					}
+					boolean addedByThisEngine = false;
+					boolean keepCurrentEngine = true;
+					while (keepCurrentEngine && needsStrongRepair(lp) && !isTimeLimitReached()) {
+						HashSet<Integer> seenColumnIds = new HashSet<Integer>();
+						HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
+						GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true,
+								seenColumnIds, seenOutsourcingColumnIds, "strongBranchingPhaseOne", false,
+								null, Double.NaN);
+						if (engine instanceof OutsourcingPricingEngine) {
+							outsourcingClosedAtCurrentDual = isNonnegativeCertificate(
+									generated.certifiedOutsourcingReducedCost);
+						} else if (Double.isFinite(generated.certifiedInternalReducedCost)) {
+							internalClosedAtCurrentDual = isNonnegativeCertificate(
+									generated.certifiedInternalReducedCost);
+						}
+						if (generated.isEmpty()) {
+							break;
+						}
+						int addedColumns = generated.improvedActiveInternalColumns
+								+ lp.addColumns(generated.internalColumnIds)
+								+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
+						generatedForRepair += addedColumns;
+						if (addedColumns == 0) {
+							break;
+						}
+						addedInThisPass = true;
+						addedByThisEngine = true;
+						phaseSolution = resolveCurrentModelTimed(lp, "strong_branching_phase_one_after_pricing");
+						if (phaseSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+							return phaseSolution;
+						}
+						keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted()
+								&& needsStrongRepair(lp);
+					}
+					if (addedByThisEngine) {
+						resetFollowingPricingEngines(engineIndex + 1);
+					}
+				}
+				if (!needsStrongRepair(lp)) {
+					phaseFeasible = true;
+					break;
+				}
+				if (!addedInThisPass) {
+					phaseInfeasibleCertified = internalClosedAtCurrentDual
+							&& outsourcingClosedAtCurrentDual;
+					fallbackToStandardRepair = !phaseInfeasibleCertified;
+					break;
+				}
+			}
+		} finally {
+			lp.setFeasibilityRepairMode(false);
+			lp.setFeasibilityPhaseOneObjectiveMode(false);
+		}
+
+		if (isTimeLimitReached()) {
+			return phaseSolution;
+		}
+		if (phaseInfeasibleCertified) {
+			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
+					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
+					"Strong branching Phase-I optimum remains positive after generating "
+							+ generatedForRepair + " columns");
+		}
+		if (!phaseFeasible || fallbackToStandardRepair) {
+			traceSink.onStageHeartbeat(lp.getNode(),
+					"strongBranchingPhaseOne.fallback generated=" + generatedForRepair,
+					totalPoolSize(lp), lp.getCutPool().size());
+			return repairInfeasibleMaster(lp, false, true);
+		}
+
+		int removedPenaltyColumns = lp.removeBranchImpliedPenaltyColumnsFromRestrictedSet();
+		traceSink.onStageHeartbeat(lp.getNode(),
+				"strongBranchingPhaseOne.done generated=" + generatedForRepair
+						+ ",removedPenaltyColumns=" + removedPenaltyColumns,
+				totalPoolSize(lp), lp.getCutPool().size());
+		TWETMasterSolution trueSolution = solveRelaxationTimed(lp, "strong_branching_phase_one_true_rmp");
+		if (!isTimeLimitReached() && trueSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			throw new IllegalStateException("Phase-I reached zero but true-cost RMP became infeasible: "
+					+ lp.getNode().diagnosticSummary() + ", message=" + trueSolution.getMessage());
+		}
+		return trueSolution;
+	}
+
+	private static boolean isNonnegativeCertificate(double reducedCost) {
+		return Double.isFinite(reducedCost) && Utility.compareGe(reducedCost, -Utility.EPS);
 	}
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {

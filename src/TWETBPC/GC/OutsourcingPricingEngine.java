@@ -95,7 +95,8 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			if (Utility.isBigMValue(cost)) {
 				continue;
 			}
-			double reducedCost = cost - profit - lp.getOutsourcingColumnDual();
+			double objectiveCost = lp.isFeasibilityPhaseOneObjectiveMode() ? 0.0 : cost;
+			double reducedCost = objectiveCost - profit - lp.getOutsourcingColumnDual();
 			if (Utility.compareLt(reducedCost, bestReducedCost)) {
 				bestReducedCost = reducedCost;
 			}
@@ -130,6 +131,11 @@ public class OutsourcingPricingEngine implements PricingEngine {
 		return new PricingResult(Collections.<TWETBPC.Model.TWETColumn>emptyList(), columns, true,
 				"Generated " + columns.size() + " outsourcing columns; best rc=" + candidates.get(0).reducedCost)
 						.withCertifiedOutsourcingReducedCost(bestReducedCost);
+	}
+
+	@Override
+	public boolean supportsFeasibilityPhaseOneObjective() {
+		return true;
 	}
 
 	@Override

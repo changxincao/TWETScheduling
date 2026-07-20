@@ -146,10 +146,15 @@ public class HeuristicPricingEngine implements PricingEngine {
 		int limit = Math.min(config.maxHeuristicPricingColumns, negativeCandidates.size());
 		for (int i = 0; i < limit; i++) {
 			ScoredSequence candidate = negativeCandidates.get(i);
-			if (lastDiagnosticTrace != null) {
-				lastDiagnosticTrace.recordGeneratedColumn(candidate.sequence, candidate.cost, candidate.reducedCost);
+			double outputCost = lp.isFeasibilityPhaseOneObjectiveMode()
+					? trueSequenceCost(candidate.sequence) : candidate.cost;
+			if (Utility.isBigMValue(outputCost)) {
+				continue;
 			}
-			columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost, ColumnSource.PRICING_HEURISTIC,
+			if (lastDiagnosticTrace != null) {
+				lastDiagnosticTrace.recordGeneratedColumn(candidate.sequence, outputCost, candidate.reducedCost);
+			}
+			columns.add(new TWETColumn(-1, candidate.sequence, data.n, outputCost, ColumnSource.PRICING_HEURISTIC,
 					false));
 		}
 		// 标准轨迹列优先；非 best 列仅补充不同 signature，不能绕过标准 300 条的排序限制。
@@ -163,7 +168,12 @@ public class HeuristicPricingEngine implements PricingEngine {
 				if (!outputSignatures.add(candidate.signature)) {
 					continue;
 				}
-				columns.add(new TWETColumn(-1, candidate.sequence, data.n, candidate.cost,
+				double outputCost = lp.isFeasibilityPhaseOneObjectiveMode()
+						? trueSequenceCost(candidate.sequence) : candidate.cost;
+				if (Utility.isBigMValue(outputCost)) {
+					continue;
+				}
+				columns.add(new TWETColumn(-1, candidate.sequence, data.n, outputCost,
 						ColumnSource.PRICING_HEURISTIC, false));
 				extraReturned++;
 			}
@@ -187,6 +197,11 @@ public class HeuristicPricingEngine implements PricingEngine {
 		HeuristicPricingDiagnosticTrace trace = lastDiagnosticTrace;
 		lastDiagnosticTrace = null;
 		return trace;
+	}
+
+	@Override
+	public boolean supportsFeasibilityPhaseOneObjective() {
+		return true;
 	}
 
 	@Override
@@ -518,6 +533,9 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
+		if (lp != null && lp.isFeasibilityPhaseOneObjectiveMode()) {
+			return false;
+		}
 		if (!config.enableHeuristicDualProfitableWindow) {
 			return false;
 		}
@@ -616,7 +634,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		if (sequence.isEmpty() || Utility.isBigMValue(cost)) {
 			return Utility.big_M;
 		}
-		double reducedCost = cost - lp.getMachineDual() + sriPenalty;
+		double reducedCost = (lp.isFeasibilityPhaseOneObjectiveMode() ? 0.0 : cost) - lp.getMachineDual() + sriPenalty;
 		int prev = 0;
 		for (int job : sequence) {
 			reducedCost -= lp.getJobDual(job);
@@ -928,7 +946,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
 			// 2026-05-21: 对齐旧 VRP GCTabu，候选 move 的 reduced cost 只做局部增量更新。
 			// 机器真实成本变化由分段函数拼接给出；dual 部分只需要替换受影响的 job 和两三条弧。
-			return currentReducedCost + candidateCost - cost + sriRemoveDelta(pos)
+			return currentReducedCost + objectiveCostDelta(candidateCost - cost, lp) + sriRemoveDelta(pos)
 					+ moveJobDual(lp, removedJob) + moveArcDual(lp, prev, removedJob)
 					+ moveArcDual(lp, removedJob, next) - moveArcDual(lp, prev, next);
 		}
@@ -936,16 +954,20 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private double reducedCostAfterAdd(int pos, int job, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() ? lp.getNode().sinkId() : sequence.get(pos).intValue();
-			return currentReducedCost + candidateCost - cost + sriAddDelta(pos, job) - moveJobDual(lp, job)
+			return currentReducedCost + objectiveCostDelta(candidateCost - cost, lp) + sriAddDelta(pos, job) - moveJobDual(lp, job)
 					- moveArcDual(lp, prev, job) - moveArcDual(lp, job, next) + moveArcDual(lp, prev, next);
 		}
 
 		private double reducedCostAfterExchange(int pos, int job, int removedJob, double candidateCost, LP lp) {
 			int prev = pos == 0 ? 0 : sequence.get(pos - 1).intValue();
 			int next = pos == sequence.size() - 1 ? lp.getNode().sinkId() : sequence.get(pos + 1).intValue();
-			return currentReducedCost + candidateCost - cost + sriExchangeDelta(pos, removedJob, job)
+			return currentReducedCost + objectiveCostDelta(candidateCost - cost, lp) + sriExchangeDelta(pos, removedJob, job)
 					+ moveJobDual(lp, removedJob) - moveJobDual(lp, job) + moveArcDual(lp, prev, removedJob)
 					+ moveArcDual(lp, removedJob, next) - moveArcDual(lp, prev, job) - moveArcDual(lp, job, next);
+		}
+
+		private double objectiveCostDelta(double trueCostDelta, LP lp) {
+			return lp.isFeasibilityPhaseOneObjectiveMode() ? 0.0 : trueCostDelta;
 		}
 
 		private double moveJobDual(LP lp, int job) {

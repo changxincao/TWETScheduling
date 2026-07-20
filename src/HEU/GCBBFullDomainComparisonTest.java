@@ -454,6 +454,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableStrongBranchingBranchImpliedPenalty = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.strongBranchingBranchImpliedPenalty",
 				Boolean.toString(config.enableStrongBranchingBranchImpliedPenalty)));
+		config.enableStrongBranchingPhaseOneRepair = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.strongBranchingPhaseOneRepair",
+				Boolean.toString(config.enableStrongBranchingPhaseOneRepair)));
 		config.enableRouteEnumeration = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.routeEnumeration",
 				Boolean.toString(config.enableRouteEnumeration)));

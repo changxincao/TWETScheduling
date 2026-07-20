@@ -59,6 +59,8 @@ public class LP {
 	private HashMap<Integer, IloNumVar> lambdaByColumnId;
 	private HashSet<Integer> branchImpliedPenaltyColumnIds;
 	private boolean branchImpliedPenaltyObjectiveMode;
+	/** Pure Phase-I strong repair: legal columns cost 0 and artificial terms cost 1. */
+	private boolean feasibilityPhaseOneObjectiveMode;
 	private IloNumVar[] outsourceColumnVars;
 	private HashMap<Integer, IloNumVar> outsourceColumnById;
 	private IloNumVar[] outsourceVars;
@@ -109,6 +111,7 @@ public class LP {
 		this.repairObjectivePenalty = Utility.big_M;
 		this.allRowFeasibilityRepairMode = false;
 		this.branchImpliedPenaltyObjectiveMode = false;
+		this.feasibilityPhaseOneObjectiveMode = false;
 	}
 
 	public void construct(Node node, List<Integer> columnIds) {
@@ -126,6 +129,17 @@ public class LP {
 			branchImpliedPenaltyObjectiveMode = enabled;
 			lastSolution = null;
 		}
+	}
+
+	public void setFeasibilityPhaseOneObjectiveMode(boolean enabled) {
+		if (feasibilityPhaseOneObjectiveMode != enabled) {
+			feasibilityPhaseOneObjectiveMode = enabled;
+			lastSolution = null;
+		}
+	}
+
+	public boolean isFeasibilityPhaseOneObjectiveMode() {
+		return feasibilityPhaseOneObjectiveMode;
 	}
 
 	public Node getNode() {
@@ -332,7 +346,7 @@ public class LP {
 	}
 
 	public double computeReducedCost(TWETColumn column, PricingDualSnapshot dual) {
-		double reducedCost = column.getCost() - dual.machineDual;
+		double reducedCost = (feasibilityPhaseOneObjectiveMode ? 0.0 : column.getCost()) - dual.machineDual;
 		for (int job = column.getJobs().nextSetBit(1); job > 0 && job <= data.n;
 				job = column.getJobs().nextSetBit(job + 1)) {
 			int count = column.getJobVisitCount(job);
@@ -367,7 +381,8 @@ public class LP {
 	}
 
 	public double computeReducedCost(TWETOutsourcingColumn column, PricingDualSnapshot dual) {
-		double reducedCost = column.getCost() - dual.outsourcingColumnDual;
+		double reducedCost = (feasibilityPhaseOneObjectiveMode ? 0.0 : column.getCost())
+				- dual.outsourcingColumnDual;
 		for (int job : column.getJobs()) {
 			reducedCost -= dual.jobDual[job];
 			if (job < dual.outsourcingMembershipDual.length) {
@@ -606,15 +621,15 @@ public class LP {
 			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
 				TWETOutsourcingColumn column =
 						outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
-				obj.addTerm(column.getCost(), outsourceColumnVars[idx]);
+				obj.addTerm(outsourcingColumnObjectiveCost(column), outsourceColumnVars[idx]);
 			}
 			objective = cplex.addMinimize(obj);
 			return;
 		}
 		for (int l = 0; l < outsourcingTariffSegments.size(); l++) {
 			TariffSegment seg = outsourcingTariffSegments.get(l);
-			obj.addTerm(seg.slope, outsourceSegmentBaseline[l]);
-			obj.addTerm(seg.intercept, outsourceSegmentActive[l]);
+			obj.addTerm(feasibilityPhaseOneObjectiveMode ? 0.0 : seg.slope, outsourceSegmentBaseline[l]);
+			obj.addTerm(feasibilityPhaseOneObjectiveMode ? 0.0 : seg.intercept, outsourceSegmentActive[l]);
 		}
 		objective = cplex.addMinimize(obj);
 	}
@@ -833,7 +848,7 @@ public class LP {
 	 * 这样和现有 pricing engine 的 reduced-cost 口径一致；旧 repair 仍只 slack 当前新分支行。
 	 */
 	private void addAllRowFeasibilitySlacks() throws IloException {
-		double penalty = repairObjectivePenalty;
+		double penalty = repairArtificialObjectiveCost();
 		if (coverRanges != null) {
 			for (int job = 1; job < coverRanges.length; job++) {
 				addRangeRepairSlacks(coverRanges[job], "coverSlack_" + job, penalty);
@@ -888,7 +903,7 @@ public class LP {
 	 * coverage 如果不可行，应由 pricing/外包列修复；repair slack 只用于产生当前分支行的引导 dual。
 	 */
 	private void addFeasibilitySlacks() throws IloException {
-		double penalty = repairObjectivePenalty;
+		double penalty = repairArtificialObjectiveCost();
 		byte type = node.getRepairType();
 		if (type == Node.REPAIR_MACHINE_UPPER) {
 			addRepairSlack(machineRange, -1.0, "machineUpperSlack", penalty);
@@ -984,9 +999,17 @@ public class LP {
 			if (branchImpliedPenaltyColumnIds != null) {
 				branchImpliedPenaltyColumnIds.add(Integer.valueOf(columnId));
 			}
-			return repairObjectivePenalty;
+			return feasibilityPhaseOneObjectiveMode ? 1.0 : repairObjectivePenalty;
 		}
-		return column.getCost();
+		return feasibilityPhaseOneObjectiveMode ? 0.0 : column.getCost();
+	}
+
+	private double outsourcingColumnObjectiveCost(TWETOutsourcingColumn column) {
+		return feasibilityPhaseOneObjectiveMode ? 0.0 : column.getCost();
+	}
+
+	private double repairArtificialObjectiveCost() {
+		return feasibilityPhaseOneObjectiveMode ? 1.0 : repairObjectivePenalty;
 	}
 
 	private boolean isBranchImpliedPenaltyColumn(TWETColumn column) {
@@ -1006,6 +1029,28 @@ public class LP {
 			}
 		}
 		return false;
+	}
+
+	/** Remove branch-implied competitors before restoring the true-cost RMP. */
+	public int removeBranchImpliedPenaltyColumnsFromRestrictedSet() {
+		if (node == null || restrictedColumnIds.isEmpty()) {
+			return 0;
+		}
+		ArrayList<Integer> kept = new ArrayList<Integer>(restrictedColumnIds.size());
+		int removed = 0;
+		for (Integer columnId : restrictedColumnIds) {
+			TWETColumn column = pool.getColumn(columnId.intValue());
+			if (isBranchImpliedPenaltyColumn(column)) {
+				removed++;
+			} else {
+				kept.add(columnId);
+			}
+		}
+		if (removed > 0) {
+			replaceRestrictedColumnIds(kept);
+			lastSolution = null;
+		}
+		return removed;
 	}
 
 	public boolean hasPositiveBranchImpliedPenaltyColumn() {
@@ -1037,7 +1082,7 @@ public class LP {
 
 	private void addOutsourcingColumnToCurrentModel(int columnId) throws IloException {
 		TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
-		IloColumn cplexColumn = cplex.column(objective, column.getCost());
+		IloColumn cplexColumn = cplex.column(objective, outsourcingColumnObjectiveCost(column));
 		cplexColumn = cplexColumn.and(cplex.column(outsourcingColumnCountRange, 1.0));
 		for (int job = column.getJobSet().nextSetBit(1); job > 0 && job <= data.n;
 				job = column.getJobSet().nextSetBit(job + 1)) {

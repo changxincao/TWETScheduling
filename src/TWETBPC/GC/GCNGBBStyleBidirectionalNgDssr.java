@@ -129,6 +129,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private PackedBitSet[] backwardExtensionArcMaskBySuccessor;
 	private double bestGeneratedReducedCost;
 	private double lastRelaxedRoundBestReducedCost;
+	private boolean feasibilityPhaseOneObjectiveMode;
 
 	// 2026-05-22: 闂佸憡鐟ラ懟顖炲箖?midpoint闂佹寧绋戦懟顖濄亹瑜忛埀顒傛暩閹虫挾绱炵€ｎ喖绀?pricing 闁哄鍎愰崰妤€锕㈡笟鈧顐﹀醇濞戞帒浜?
 	private double tMid;
@@ -612,7 +613,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private double ngDistance(int from, int to) {
 		return data.getSetUp(from, to) + data.getSetUp(to, from)
-				+ data.getSetupCost(from, to) + data.getSetupCost(to, from);
+				+ pricingSetupCost(from, to) + pricingSetupCost(to, from);
 	}
 
 	/**
@@ -802,8 +803,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private double ngPairReducedCost(LP lp, int first, int second) {
-		return data.getSetupCost(first, second) - lp.getArcDual(first, second) - lp.getJobDual(second)
-				+ data.getSetupCost(second, first) - lp.getArcDual(second, first) - lp.getJobDual(first);
+		return pricingSetupCost(first, second) - lp.getArcDual(first, second) - lp.getJobDual(second)
+				+ pricingSetupCost(second, first) - lp.getArcDual(second, first) - lp.getJobDual(first);
 	}
 
 	private void prepareInitialRepeatabilityFilter(LP lp) {
@@ -1174,6 +1175,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
+		feasibilityPhaseOneObjectiveMode = lp.isFeasibilityPhaseOneObjectiveMode();
 		ngNeighborhoodByJob = null;
 		ngDssrInitialRepeatableMember = null;
 		ngDssrRoundsExecuted = 0;
@@ -1472,7 +1474,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 
 	CompletionBoundSubtreeArcEliminator.PreparedBounds reusableSubtreeArcEliminationBounds() {
-		if (completionBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
+		if (feasibilityPhaseOneObjectiveMode || completionBounds == null || completionBoundRelaxation == null || dualProfitableWindowEnabled
 				|| zeroDualExcludedJobs != null || config.timeIndexedCompletionBoundInRoundArcFixing) {
 			return null;
 		}
@@ -2304,7 +2306,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			sourceVisited.add(0);
 			addZeroDualExcludedJobs(sourceVisited);
 		}
-		PiecewiseLinearFunction sourceFrontier = cropToInterval(data.penaltyFunction[0].copy(), 0.0, tMid);
+		PiecewiseLinearFunction sourceFrontier = cropToInterval(pricingPenaltyFunction(0), 0.0, tMid);
 		sourceFrontier.shiftYInPlace(-lp.getMachineDual());
 		sourceFrontier.normalize(Direction.FORWARD);
 		PackedBitSet sourceNgMemory = new PackedBitSet(data.n + 2);
@@ -3350,7 +3352,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return null;
 			}
 		}
-		double fixedReducedCost = data.getSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
+		double fixedReducedCost = pricingSetupCost(label.jid, nextJob) - lp.getJobDual(nextJob)
 				- lp.getArcDual(label.jid, nextJob);
 		nextFrontier.shiftYInPlace(fixedReducedCost);
 		if (nextNoSriFrontier != null) {
@@ -3469,7 +3471,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					return null;
 				}
 			}
-			double fixedReducedCost = data.getSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
+			double fixedReducedCost = pricingSetupCost(prevJob, label.jid) - lp.getJobDual(prevJob)
 					- lp.getArcDual(prevJob, label.jid);
 			nextFrontier.shiftYInPlace(fixedReducedCost);
 			if (nextNoSriFrontier != null) {
@@ -3937,7 +3939,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (Utility.compareGt(forward.envelope.start() + delay, backward.envelope.end())) {
 			return true;
 		}
-		double fixedReducedCost = data.getSetupCost(lastJob, backward.terminalJob)
+		double fixedReducedCost = pricingSetupCost(lastJob, backward.terminalJob)
 				- lp.getArcDual(lastJob, backward.terminalJob);
 		double threshold = REDUCED_COST_TOLERANCE;
 		if (!Utility.compareLt(forward.minReducedCost + backward.minReducedCost + fixedReducedCost, threshold)) {
@@ -4184,7 +4186,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			joinEnvelopeGroupPairsPruned++;
 			return;
 		}
-		double joinFixedReducedCost = data.getSetupCost(lastJob, backward.terminalJob)
+		double joinFixedReducedCost = pricingSetupCost(lastJob, backward.terminalJob)
 				- lp.getArcDual(lastJob, backward.terminalJob);
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
@@ -4250,7 +4252,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			joinTerminalGroupsTimePruned++;
 			return;
 		}
-		double joinFixedReducedCost = data.getSetupCost(lastJob, backward.jid)
+		double joinFixedReducedCost = pricingSetupCost(lastJob, backward.jid)
 				- lp.getArcDual(lastJob, backward.jid);
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost + joinFixedReducedCost;
@@ -5427,7 +5429,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					rememberCompletionBoundFixedArc(fromJob, toJob, true);
 					continue;
 				}
-				double fixedReducedCost = data.getSetupCost(fromJob, toJob) - lp.getArcDual(fromJob, toJob);
+				double fixedReducedCost = pricingSetupCost(fromJob, toJob) - lp.getArcDual(fromJob, toJob);
 				if (isCompletionBoundArcScalarPruned(fromJob, toJob, fixedReducedCost, cutoff)) {
 					rememberCompletionBoundFixedArc(fromJob, toJob, false);
 					completionBoundArcFixingScalarPruned++;
@@ -5826,7 +5828,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private double computeCurrentPricingReducedCost(TWETColumn column, LP lp) {
-		double reducedCost = column.getCost() - lp.getMachineDual();
+		double reducedCost = (feasibilityPhaseOneObjectiveMode ? 0.0 : column.getCost()) - lp.getMachineDual();
 		int prev = 0;
 		for (int job : column.getSequence()) {
 			reducedCost -= lp.getJobDual(job);
@@ -6919,15 +6921,33 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		for (int job = 1; job <= data.n; job++) {
 			// 2026-05-24: data.penaltyFunction[job] 閻庤鐡曠亸娆戝垝閿熺姴绀岄柛娑卞幗閸庢捇鏌涢埡鍕€冪紒?b_j 闂佹眹鍔岀€氭澘顭囬妶澶婄畱濞达綀娅ｉ悡鎰棯椤撗冨闁绘稏鍎垫俊?
 			// dual 婵炴垶鎸哥粔鐑藉礂濡粯浜ゆ繛鎴烆殘椤忚鲸鎱ㄥ┑鍕姕闁轰礁婀卞Σ鎰槼婵＄偛鍊块弫宥囦沪閽樺鎽曢梺?pricing 闂佺儵鏅涢悺銊ф暜鐎涙ê绶炵€广儱娲﹂弳蹇涘级閳哄倻鎳侀悶姘抽哺缁嬪顢旈崟顐わ紮闂佺硶鏅濋崰鎾舵閿旈敮鍋撳☉娆欏叕缂佽鲸绻堥弻鍡涘垂椤旂厧璧嬪┑顕嗙到缁绘鎮块崱娑欑厒鐎广儱鎷嬪Σ?setDomain/crop闂?
-			baseForwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], 0.0, tMid);
-			baseBackwardHalfPenaltyByJob[job] = cropToInterval(data.penaltyFunction[job], tMid, pricingHorizon);
+			baseForwardHalfPenaltyByJob[job] = cropToInterval(pricingPenaltyFunction(job), 0.0, tMid);
+			baseBackwardHalfPenaltyByJob[job] = cropToInterval(pricingPenaltyFunction(job), tMid, pricingHorizon);
 		}
 		baseHalfPenaltyCacheTMid = tMid;
 		baseHalfPenaltyCacheHorizon = pricingHorizon;
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
-		return PricingCompatibility.canUseDualProfitableWindow(lp);
+		return !feasibilityPhaseOneObjectiveMode && PricingCompatibility.canUseDualProfitableWindow(lp);
+	}
+
+	private double pricingSetupCost(int from, int to) {
+		return feasibilityPhaseOneObjectiveMode ? 0.0 : data.getSetupCost(from, to);
+	}
+
+	private PiecewiseLinearFunction pricingPenaltyFunction(int job) {
+		if (!feasibilityPhaseOneObjectiveMode) {
+			return data.penaltyFunction[job];
+		}
+		double start = job == 0 ? 0.0 : data.hardWindowStart[job];
+		double end = job == 0 ? data.CmaxH : data.hardWindowEnd[job];
+		PiecewiseLinearFunction zero = new PiecewiseLinearFunction();
+		zero.resetDomain(start, end);
+		if (!Utility.compareGt(start, end)) {
+			zero.addSegment(start, end, 0.0, 0.0);
+		}
+		return zero;
 	}
 
 	/**
@@ -6952,22 +6972,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private PiecewiseLinearFunction buildForwardHalfPenalty(int job, double hStart, double hEnd) {
 		// 2026-05-23: 闂佸憡顨呴敃銈夋偂濞嗘劖缍囬柛锔诲幗濞呮洟鏌ｉ埡浣烘憼閻㈩垱鎸冲畷妯衡枎韫囨挸姹查梺鍛婃煟閸斿秹鍩€?job penalty闂?
 		// forward 闂佹眹鍔岀€氼參寮绘繝鍐╂珷?job 闂佸憡鍨兼慨銈夊汲閻旂厧鐭楁い蹇撳闊?[0,Tmid] 婵炴垶鎸搁敃銈咁嚕椤掍胶鈻?add闂佹寧绋戦懟顖炲矗閺囥垹绀傞柛妤冨仧閺嗘澘鈽夐弬娆炬Ц闁绘挻鐟︾€电厧顫濋崘鍙夘唶闂佺粯甯熼崺鏍ㄤ繆閹间礁鐭楃€规洖娴傛导鍌炴煕濡炵儵鍋撻搹顐ュ惈 Tmid闂?
-		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, tMid);
+		return cropToInterval(pricingPenaltyFunction(job).setDomain(hStart, hEnd, true), 0.0, tMid);
 	}
 
 	private PiecewiseLinearFunction buildBackwardHalfPenalty(int job, double hStart, double hEnd) {
 		// 2026-05-23: backward 闁诲酣娼у﹢杈叿婵炶揪缍€濞夋洟寮?[Tmid,pricingHorizon] 婵炴垶鎸搁敃锕€鈻撻幋锕€妫橀柡澶嬵儥閺?job 闂佸憡鍨兼慨銈夊汲閻旂厧违?
 		// 闂佸吋鐪归崕鎶芥偘閵夆晛鐭楅柨婵嗘噸缁狀垰銆掑鈧崒婵堫槹 big_M闂佹寧绋戦懟顖炲箖濡ゅ啰纾?normalize(BACKWARD) 婵炴潙鍚嬪畝鎼佸焵椤掍椒浜㈢紒?suffix-min 闁荤偞绋忛崝蹇涘箵椤忓牆鐏虫繝濠傚暙鐠佹彃霉閻橆喖鍔ら柣鈩冨灴瀹曟岸骞嶉鎯х倞闂佸憡鐟辩徊浠嬪船鐎电硶鍋撻悷鐗堟拱闁搞劍宀搁崹鎯р攽閸曘劌浜?
-		return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), tMid, pricingHorizon);
+		return cropToInterval(pricingPenaltyFunction(job).setDomain(hStart, hEnd, true), tMid, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction buildCompletionBoundPenalty(int job, double hStart, double hEnd) {
 		// 2026-06-01: Tmid pricing 闂佹眹鍔岀€氼參顢楀鍐惧殨?label 婵炲濮寸粔铏箾閸ヮ剚鍋ㄩ柕濞垮劙缁狀垶鏌涘▎蹇撴毐鐎规洘鍔欏畷娲偄瀹勭増鐦ｉ梺杞扮鎼存粎妲愰惇淇筸pletion bound
 		// 闂傚倸娲犻崑鎾绘偡閺囨氨顦﹂柛銊ょ矙瀵剟顢橀悙鑼紮闂?label 闂佸搫瀚烽崹浼村箚娴ｈ浜ゆ俊顖氱仢閸樻挳鎮跺☉鏍у姕闁搞劍姘ㄩ埀顒傛嚀閺堫剟寮抽敐鍥ㄥ闁绘柨鍢查悘娆撴煥濞戞瀚版繛鍙夌矊椤垽濡堕崨顓狀槹闂佺粯鐟崗娑欑箾閸ヮ剚鍋ㄩ柕濞垮劤閺嗘岸鏌?[0, pricingHorizon] 闁诲氦顫夐惌顔剧不閻旂厧鏄ラ柣鏃傝ˉ閸?
 		if (isEffectiveWindowTighterThanHard(job)) {
-			return cropToInterval(data.penaltyFunction[job].setDomain(hStart, hEnd, true), 0.0, pricingHorizon);
+			return cropToInterval(pricingPenaltyFunction(job).setDomain(hStart, hEnd, true), 0.0, pricingHorizon);
 		}
-		return cropToInterval(data.penaltyFunction[job], 0.0, pricingHorizon);
+		return cropToInterval(pricingPenaltyFunction(job), 0.0, pricingHorizon);
 	}
 
 	private PiecewiseLinearFunction getDynamicForwardJobPenalty(int prevJob, int job) {

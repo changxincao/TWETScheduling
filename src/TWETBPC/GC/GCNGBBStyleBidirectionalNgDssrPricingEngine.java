@@ -92,6 +92,11 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 	}
 
 	@Override
+	public boolean supportsFeasibilityPhaseOneObjective() {
+		return true;
+	}
+
+	@Override
 	public String getName() {
 		return "GCNGBBStyleNgDssrPricing";
 	}

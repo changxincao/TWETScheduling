@@ -60,4 +60,12 @@ public interface PricingEngine {
 
 	String getName();
 
+	/**
+	 * Whether this engine implements the pure Phase-I reduced-cost objective completely.
+	 * Unsupported engines are skipped only in the experimental strong-repair path.
+	 */
+	default boolean supportsFeasibilityPhaseOneObjective() {
+		return false;
+	}
+
 }

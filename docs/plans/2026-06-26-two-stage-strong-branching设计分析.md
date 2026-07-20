@@ -390,3 +390,25 @@ Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足�
 第一次 trial LP 有两种情况进入 repair：LP 本身 infeasible，或者 LP feasible 但仍有正值 penalty 列。repair mode 随后只给当前 required arc 行加一个 artificial slack；同一个有限 penalty 同时作用于 slack 和历史竞争列。外层依次调用启发式 `findFeasible()` 和 exact ng-DSSR `findFeasible()`，每次加列后重解当前 repair LP。pricing 按 child 域生成的新列正常不应再含 branch-implied 竞争弧；如果历史或异常新列仍不兼容，建模时仍按 penalty 成本处理。repair 成功的必要条件是 artificial slack 与正值 penalty 列同时归零，随后才按 reduced cost 筛选后续 seed。两者仍有任一正值且 exact 已耗尽时，当前实现把该 side 判为 infeasible；exact certified dual bound 达到 incumbent 时则用独立 `dual_bound_pruned` 状态按 INF 评分，不与结构 infeasible 混同。
 
 60-2 完整日志中，36 次 exact repair 有33次来自右支 required arc，累计637.017s，占 repair exact 总时间83.6%；左支 forbidden arc只有3次，但平均41.760s，高于右支平均19.304s。正确表述应是“右支因触发频率高而构成总瓶颈”，而不是“右支每次都比左支难”。
+
+### 2026-07-20：先用固定初始 ng-set 清除 slack/M 的可行性分析
+
+讨论了一种 strong repair 分层方案：先不执行 DSSR，只用初始 ng-set 做一轮 relaxed pricing；若该轮找到负的 elementary 列，就加入 repair RMP 并重解，重复到 artificial slack 和 branch-implied penalty 列都归零；若仍存在负的 non-elementary witness，再进入完整 DSSR。该方案在语义上安全，前提是固定 ng-set 阶段失败时必须回退完整 DSSR，不能把“没有 elementary 列”当作 child infeasible。
+
+当前实现事实上已经包含这一流程的核心。`ng-DSSR.findFeasible()` 每次先用当前初始 ng-set 执行第一轮 `solveRelaxedRound()`：只要找到 elementary 负列就立即返回，不更新 ng-set；外层 repair 加列、重解 RMP，并在 slack/M 仍为正时再次调用 pricing。只有第一轮没有 elementary 负列、却存在负的 non-elementary route 时，才更新 ng-set并继续 DSSR。因此另加一个“固定初始 ng-set pre-repair engine”会重复现有第一轮，不能减少已有工作。
+
+困难 repair 的实测也说明了这个边界。60-2 node 2 的一次50轮 `FindFeasible` 中，第一轮出现 `neSeen=7022, neStored=1000, elem=0`；直到第50轮才返回63条 elementary 负列。non-elementary route 不能作为合法 RMP 列加入，第一轮没有任何列可用于重解，所以反复执行相同固定 ng-set pricing 只会得到相同 RMP、相同 dual 和相同 relaxed witness，不会把 slack/M 推到0。DSSR 在这里不是多余闭合步骤，而是排除这些 relaxed witness、暴露合法 elementary 修复列的必要过程。
+
+另一个必须区分的点是：RMP 中不会存放 ng-DSSR 的 non-elementary route；RMP 只含合法 elementary 列、人工 slack，以及 strong trial 暂时按 penalty 成本处理的历史竞争列。是否需要 DSSR 应检查本次 pricing 的 non-elementary witness，而不是检查 RMP 是否有“非基本列”。如果 slack/M 已归零后还要继续做正式 exact pricing，应先关闭 repair/penalty 口径并重解一次干净 RMP；人工变量即使当前取0，repair 模型的 dual 也不等同于无人工变量、真实目标下的正式 dual。
+
+因此当前不建议实现重复的固定-ng前置层。若目标是从根本上减轻M dual 对 completion bound 的破坏，更直接的后续实验是独立纯 Phase-I：第一段只最小化 artificial slack/竞争列使用量，合法真实列在 Phase-I 中成本为0；归零后重建真实目标 RMP，再做普通 pricing。这个方案能把“恢复可行性”和“优化真实目标”分开，但需要 pricing/completion bound 明确支持 Phase-I reduced-cost 口径，改动明显大于新增一个前置 engine，而且仍不能保证消除需要 DSSR/Farkas exact pricing 的困难 repair。
+
+### 2026-07-20 纯 Phase-I strong repair 实现与 A/B
+
+按讨论新增了独立的 strong-trial repair 实验路径，开关为 `enableStrongBranchingPhaseOneRepair`，底层默认关闭。这里没有机器固定成本。Phase-I 只改变 RMP 和 pricing 的目标口径：branch row artificial slack 与 branch-implied 竞争列的系数为 1，其余合法内部列、列化外包列以及直接外包 tariff 项的系数均为 0；机器数、覆盖、分支和 cut 等约束仍保留，因此相应 dual 仍正常进入 reduced cost。内部 pricing 将 setup cost 和任务惩罚函数置零，外包 pricing 同样使用零列成本。Pool 始终保存 evaluator 得到的真实列成本，没有覆盖或临时改写，因此不需要额外保存成本快照。
+
+Phase-I 初始 LP 或后续 repair pricing 一旦使 artificial slack 和正值竞争列同时归零，就立即停止 Phase-I。此时先删除 restricted set 中的 branch-implied 竞争列，再关闭 repair/Phase-I 模式，按 Pool 中真实成本重建并求解一次 RMP；这次结果才作为 strong trial bound，并进入原有 seed 筛选流程。如果 Phase-I 目标仍为正，只有 ng-DSSR exact 已证明内部列族无负 reduced-cost，且列化外包时 OutsourcingPricingEngine 也在同一 dual 下给出无负列证书，才返回真实 infeasible；证书不完整则回退旧 repair，不用受限启发式结果误剪 child。Phase-I 中关闭 dual profitable window、subtree arc fixing 和 observed dual-bound pruning，避免把临时 0/1 目标下的证据写回正式搜索。
+
+在 `wet040_001_2m` 上进行了严格同配置 A/B，唯一差异是该开关。旧 repair 结果为 `obj=bound=22580`、`valid=true`、16 nodes、总时间 `129.257s`；纯 Phase-I 同样为 `obj=bound=22580`、`valid=true`、16 nodes、总时间 `164.357s`。新路径将 repair exact ng-DSSR 启动次数从 24 降到 4，下降 83.3%；repair after-pricing RMP 求解从 83 次降到 40 次，但额外发生 22 次 Phase-I 归零后的真实 RMP 求解。最终 master LP 时间由 `63.415s` 增至 `87.702s`，启发式时间由 `26.407s` 增至 `33.330s`，总时间增加 `35.100s`，约慢 27.2%；列池由 45,614 降至 40,672。
+
+结论是该设计在语义上成立，也确实消除了有限 M 对 dual/PWLF 的尺度污染，并显著减少困难 repair 内的 exact DSSR；但当前算例中零成本 Phase-I 的退化 LP 和恢复真实目标后的额外重解超过了这部分收益。代码保留作后续 A/B 和困难大 M 实例验证，默认继续使用旧 repair。实验目录分别为 `test-results/bpc/ab-strong-phase1-40-2-new-20260720b` 和 `test-results/bpc/ab-strong-phase1-40-2-old-20260720c`。

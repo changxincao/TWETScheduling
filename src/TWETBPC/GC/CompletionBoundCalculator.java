@@ -1056,7 +1056,7 @@ final class CompletionBoundCalculator {
 		if (!hasPositiveDomain(u)) {
 			return null;
 		}
-		u.shiftYInPlace(data.getSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
+		u.shiftYInPlace(pricingSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
 		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		if (intervalDelta) {
 			u.minimizePrefixInPlace();
@@ -1120,7 +1120,7 @@ final class CompletionBoundCalculator {
 		if (!hasPositiveDomain(r)) {
 			return null;
 		}
-		r.shiftYInPlace(data.getSetupCost(job, successor) - lp.getArcDual(job, successor));
+		r.shiftYInPlace(pricingSetupCost(job, successor) - lp.getArcDual(job, successor));
 		start = diagnosticCandidateTiming ? System.nanoTime() : 0L;
 		if (intervalDelta) {
 			r.minimizeSuffixInPlace();
@@ -1203,7 +1203,8 @@ final class CompletionBoundCalculator {
 	}
 
 	private PiecewiseLinearFunction sourcePropagationFunction() {
-		PiecewiseLinearFunction source = cropToInterval(data.penaltyFunction[0].copy(), 0.0, pricingHorizon);
+		PiecewiseLinearFunction source = lp.isFeasibilityPhaseOneObjectiveMode()
+				? constantFunction(0.0) : cropToInterval(data.penaltyFunction[0].copy(), 0.0, pricingHorizon);
 		source.shiftYInPlace(-lp.getMachineDual());
 		source.normalize(Direction.FORWARD);
 		return source;
@@ -1216,6 +1217,10 @@ final class CompletionBoundCalculator {
 	private PiecewiseLinearFunction backwardJobReducedPenalty(int job) {
 		return backwardReducedPenaltyByJob == null ? null : backwardReducedPenaltyByJob[job];
 	}
+	private double pricingSetupCost(int from, int to) {
+		return lp.isFeasibilityPhaseOneObjectiveMode() ? 0.0 : data.getSetupCost(from, to);
+	}
+
 
 	private PiecewiseLinearFunction constantFunction(double value) {
 		PiecewiseLinearFunction function = new PiecewiseLinearFunction();

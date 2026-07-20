@@ -93,6 +93,11 @@ public class GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine impleme
 	}
 
 	@Override
+	public boolean supportsFeasibilityPhaseOneObjective() {
+		return true;
+	}
+
+	@Override
 	public String getName() {
 		return "GCNGBBStyleNgDssrPartialDominancePricing";
 	}

@@ -1389,3 +1389,11 @@ node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 �
 本次结果确认 candidate 1000 能消除此前 100 候选下有效更新严重不足造成的长尾，并使 ng-DSSR 在 3600s 内闭合，但代价仍明显。HeuristicPricing 为 `773.573s/2656`，普通 exact 为 `532.838s/465`，strong repair exact 为 `762.296s/36`，master LP 共 `637.655s`，其中 strong trial 为 `556.040s/440`。因此当前 60-2 的主耗时已不是单一 join，而是启发式、strong repair exact 和大列池 strong trial LP 三部分共同构成。
 
 日志中的 node 14 也说明必须区分 restricted RMP objective 与可信 dual bound。该节点曾出现 `MasterLP obj=36868.75`，高于 incumbent 36803，但此时 exact pricing 随后仍找到负 reduced-cost 列，因此不能仅凭该 RMP 目标剪枝。继续定价闭合后，节点才以 `pruned_by_dual_bound` 关闭。相应地，全局 gap 应按 incumbent 与队列中已证明的节点下界计算，不能直接拿尚未闭合节点的最新 restricted RMP objective 计算。
+
+#### 强分支 side 评分、正式剪枝与中间整数解语义
+
+本次 `2794.349s` 的主要耗时由四部分构成：普通 HeuristicPricing 为 `773.573s/2656`，占总时间约 27.7%；strong repair exact 为 `762.296s/36`，占约 27.3%，单次平均 `21.175s`；strong phase1 trial RMP 为 `556.040s/440`，占约 19.9%，单次平均 `1.264s`；普通 ng-DSSR exact 为 `532.838s/465`，占约 19.1%，单次平均 `1.146s`。四者合计约占总时间 93.9%。440 次 trial 正好对应 11 次正式分支、每次 20 个候选、每个候选左右两侧各一次。当前瓶颈不是单一 join，而是高频启发式、少量但很重的 repair exact，以及大 restricted master 上的 strong trial LP。
+
+当前 strong phase1 不做完整 exact pricing，也不在评分阶段执行正式 dual-bound/incumbent 剪枝。每个 side 返回当前 restricted trial RMP 的有限目标值，评分使用 `max(leftBound-parentBound, eps) * max(rightBound-parentBound, eps)`。若 trial 经 repair 后被证明 infeasible，则日志显示 `INF`，该侧 gain 使用 `pseudoCostInf=1e18`，并且该 child 不入队；若只是有限 trial bound 高于 incumbent，则不能据此剪枝，因为补充新列后 full master LP 仍可能下降。它仍按有限 bound 参与评分，并作为 child 入队。child 的 `pseudoCost` 当前仍保留 parent LP bound，而不是 strong trial bound；正式出队后才重新执行完整 PC 流程。届时 certified dual bound 不小于 incumbent 时以 `pruned_by_dual_bound` 关闭，完整 pricing 后 master objective 不小于 incumbent 时以 `pruned_by_incumbent` 关闭。正式 child 后续如何关闭不会回写或修正父节点当时的 strong score。
+
+node 7 的中间 `MasterLP obj=36878, integer=true` 需要纠正此前口头解释。该解由当前节点下的真实可行列构成，因此即使后续发现负 reduced-cost 列并使 LP optimum 降到约 36866，它仍是原问题的一个真实可行整数解，可以安全把 incumbent 从 36923 更新为 36878。负列只说明该整数解不是当前完整 LP 的最优解，不会使原整数解失去可行性。当前代码只在 `PC.solve()` 完整返回后由 Tree 检查最终 solution 是否整数；PC 内部 pricing 往返中出现的中间整数 RMP 解没有上报，因此本次没有利用 36878。后续若优化，可在无 artificial slack、无正值 branch-penalty 列的正式 RMP 求解后保存最优中间整数解并上报 Tree；repair 模型中的整数状态不能按同一口径直接使用。

@@ -2737,3 +2737,10 @@ setupR75 的对应 exact 时间为 `16.292/14.181/13.217/12.651/12.784/12.628s`�
 只记录 minimum signature 仍不能完全消除连带阻断。两个候选的 minimum signature 可以不同，但后一个候选的其他重复段可能已被前一个候选新增的 pair 完整覆盖。因此轮末仍应基于完整 repeated-segment profile 和一份虚拟 ng-set 顺序选择：若任一重复段已被虚拟 ng-set 阻断则跳过；否则按现有 minimum-segment 规则加入 pair，直到取得 K 条有效 route。候选池应保留大于 K 的 signature reservoir，初步可测试 5K、10K 和当前 1000，而不是直接等于 K。更进一步可以按“每个新增 pair 能覆盖多少尚未阻断候选”做 set-cover 式贪心，但这会改变 ng-set 增长轨迹，应在简单 signature 去重验证后再测试。
 
 该优化不在 labeling/join 过程中修改真实 ng-set，因为现有 label 都按本轮起始 ng-set 构造，中途修改会破坏同一轮语义。它只改变负非基本 witness 的保存和轮末更新选择，不影响 elementary 列、无负列 certificate 或最终正确性。建议先增加 raw sequence、distinct minimum signature、full-profile cross-blocked、最终有效 route/pair 数及候选池操作耗时统计，再在 60-2 困难 repair 上做 A/B。
+### 264. 60-2 启发式有效率与 repair join 后续优化边界
+
+完整 2794s run 中，普通 `HeuristicPricing` 共调用 2656 次，其中 2191 次返回负列，有效率为 82.49%，累计加入 107033 列；有效调用耗时 624.539s，平均 285.05ms。其余 465 次空调用耗时 149.034s，平均 320.50ms，并且次数与普通 exact 的 465 次完全一致，反映当前流程正是启发式失败后进入 exact。`HeuristicPricing[FindFeasible]` 39 次全部有效，累计加入 11700 列，仅耗时 1.487s。因此启发式不是大量无效空跑，不能默认跳过；空调用稍慢是因为必须完整搜索后才能确认无负 move。此前自适应停止和额外 non-best 列策略均无稳定收益，当前没有比保留启发式更可靠的通用调整。
+
+join 的负担集中在 strong repair，而不是普通 exact。465 次普通 exact 的 join 共 22.986s，仅占普通 exact 的 4.3%；36 次 `FindFeasible` 的 join 共 209.393s，占 repair exact 的 27.5%。repair 累计访问 150.66m 个 label pair，visit-profile 在 PWLF 前剪掉 139.79m，group-envelope 另记录 53.51m skipped pair；最终仍执行 9.606m 次 shifted-sum 函数最小值计算。函数计算后仅 1910 次被普通函数阈值拒绝，但有 9.151m 条已知 non-elementary 路径因不能进入 top-1000 witness 池而被拒绝。说明现有 visit mask 和 group envelope 已经有效，剩余浪费主要是为大量高度相似的 non-elementary pair 计算精确 PWLF 值，最后只用于候选池排名。
+
+低风险第一步仍是上一节的 repeated-segment profile 与 blocking-signature reservoir：减少同一更新方向重复进入池，并用 hash map 替代 sequence 线性扫描。更高收益的第二步可以只作用于 DSSR 中间轮：当已通过真实 PWLF 值确认取得 K 条在虚拟 ng-set 下相互独立的负 non-elementary witness 后，后续已由 visit mask 确认必为 non-elementary 的 pair 可跳过 PWLF；elementary pair 仍完整扫描，最终无负列 certificate 轮也必须完整扫描。该方案会放弃被提前跳过轮次的完整 relaxed reduced-cost certificate，因此不能直接用于 observed dual bound；若 strong repair 仍需要同轮 certified bound，则必须回退完整 join。是否值得实施取决于 signature 多样化后 K20 能否较早填满，建议先完成候选池 A/B，再决定是否增加中间轮 non-elementary early stop。

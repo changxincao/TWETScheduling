@@ -2820,3 +2820,20 @@ signature 只能解决一部分重复。现有 SequenceSignature 只去重完全
 按前述问题口径再将 C 固定为 10000，严格复用 C1000 组的完整配置，只切换 K5/K10/K20。三组分别为 `solve=18.182/18.101/18.028s`、`exact=4.864/4.908/4.948s`，并且都得到 `bound=22490`、18 次 exact、29 个 DSSR rounds、90 次 pricing、5777 列和 `valid=true`。11 个有效更新轮平均新增 3.45 条独立更新、最大为 5；K5 仅有 1 轮恰好触顶，K10/K20 从未触顶，因此固定 C10000 后三个 K 的算法轨迹仍完全一致。
 
 C1000 与 C10000 两批 40-2 run 的 exact 次数和列池分别为 16/6209 与 18/5777，但完整配置比对除 C 外一致。进一步检查发现，两批的 candidate lower-bound/value threshold 计数均为 0，C1000 单轮 non-elementary witness 最大也远低于 1000，说明该跨批轨迹差异没有证据可归因于 candidate cap，而应视为独立运行中的 LP/dual/候选同值次序敏感性。因而 C 的效果只采用前述 60-2 同轨迹对照；小规模实验只用于判断固定 C 后 K 是否触顶。
+
+267. 2026-07-20 C20000 下 50 任务不同窗口的有效更新 K 对照
+
+为检验 candidateLimit 放大后 K 的平台是否变化，本轮固定 `candidateLimit=20000`，在同一个 50-3 基础实例的 setupR50/setupR75 两种 setup time 强度和 W100/W300 两种 due-window 宽度上比较 K10/K15/K20，共 12 个 root-only run。全部关闭 ALNS、strong branching、SRI 和 time-indexed root preprocessing，保持 nearestKAutoN10、启发式 pricing、source-aware dominance、group-envelope prefilter、all-cycles completion bound、Tmid probe/reuse、time-indexed scalar/window helper 和 minimum-new-pairs segment。每个场景内三个 K 并行运行，场景之间顺序执行；因此 wall time 只用于同场景组内参考，不与历史串行 run 比绝对秒数。全部结果均 `valid=true`，同场景 root bound 一致。
+
+| 场景 | K10 exact/calls/DSSR | K15 exact/calls/DSSR | K20 exact/calls/DSSR | K10/K15/K20 pool |
+| --- | ---: | ---: | ---: | ---: |
+| setupR50 W100 | 11.256s / 15 / 23 | 11.244s / 16 / 27 | 10.863s / 15 / 23 | 8434 / 8580 / 8576 |
+| setupR50 W300 | 65.725s / 13 / 20 | 62.339s / 13 / 19 | 63.178s / 13 / 18 | 15025 / 15025 / 15025 |
+| setupR75 W100 | 12.308s / 20 / 40 | 10.758s / 17 / 33 | 10.791s / 16 / 32 | 7644 / 7633 / 7632 |
+| setupR75 W300 | 32.856s / 7 / 12 | 30.095s / 7 / 11 | 29.686s / 7 / 10 | 12435 / 12435 / 12435 |
+
+实际更新统计表明 K20 在这些 50 任务场景中仍然会生效，而不是纯上限。setupR50 W100 的更新轮平均值/最大值为 K10 `9.00/10`、K15 `13.36/15`、K20 `15.62/20`；setupR50 W300 为 `8.43/10`、`11.50/15`、`16.00/20`。setupR75 W100 为 `8.80/10`、`10.69/15`、`11.88/20`；setupR75 W300 为 `8.40/10`、`10.50/15`、`14.33/20`。除 setupR50 W100 的 dual/加列轨迹波动外，K 从 10 增到 15/20 均减少 DSSR rounds；W300 两组呈现清晰的 `20->19->18` 和 `12->11->10`。但 K20 相对 K15 的 exact 收益已经很小，setupR50 W300 甚至因更大的后续 ng-set 状态略慢。
+
+按每个场景最优 exact 时间归一化，K10/K15/K20 的四场景平均值分别为 `1.0853/1.0122/1.0041`。因此 C20000 下 K20 总体最好，K15 已非常接近；K10 在多轮 DSSR 场景明显偏弱。若只从 K 选择看，结果继续支持 K20，不支持回退到 K10，也没有证据需要超过 20。
+
+C20000 没有破坏主要 join 剪枝。12 组的 candidate 专用拼接前 `lbPruned` 均为 0；W100 两组和 setupR75 W300 的拼接后 `valuePruned` 也为 0。只有 setupR50 W300 仍有 17082 条 value-threshold 剪枝，占约 94.4 万条 non-elementary join 结果的 1.81%。各组通用 `funcPruned/funcEval` 仍为约 84%--89%，说明放大 C 只放松 non-elementary witness reservoir 的末端阈值，不影响 bestUB、时间、completion-bound、group-envelope 和函数非负等主要剪枝。C20000 本身未显示出优于 C1000 的有效更新证据，默认 candidateLimit 仍不建议修改；本轮只确认固定大 C 时 K20 仍处于合理平台。逐 run 汇总为 `test-results/bpc/ab-ng-c20000-k-matrix-50m3-w100-w300-20260720.csv`。

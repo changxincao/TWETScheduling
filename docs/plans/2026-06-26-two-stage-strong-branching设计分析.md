@@ -483,3 +483,11 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 可直接归因的 repair 专属时间更稳定。旧 repair 两轮分别为 `3.744s` 和 `2.437s`，其中包含 `repair_slack_initial + repair_after_pricing + HeuristicPricing[FindFeasible] + GCNGBBStyleNgDssrPricing[FindFeasible]`；Phase-I 分别为 `0.808s` 和 `0.847s`，包含 `phase_one_initial + phase_one_after_pricing + phase_one_true_rmp + HeuristicPricing[FindFeasible]`。因此这一个实际触发 repair 的 side 上，Phase-I 直接节省约 `1.63--2.94s`，并省掉 1 次 exact `FindFeasible`；旧 repair 额外生成 107 条 elementary repair 列，但它们没有改变后续分支、正式 pricing 调用次数或节点数。
 
 当前结论是：50-2 上纯 Phase-I 的 repair 本身确实更便宜，并且没有改变 trial bound、分支选择或最终正确性；完整 wall time 也在两种运行顺序下都更短。但该实例全树只触发 1 个 repair side，可靠算法收益是数秒级，不能把全部 12%--28% wall-time 差异都归因于 Phase-I。实验目录为 `test-results/bpc/ab-50-2-repair-standard-full-bestseed-20260720`、`ab-50-2-repair-phase1-full-bestseed-20260720` 及对应 `-rep2-` 目录。
+
+### 2026-07-20：旧有限 M repair 与纯 Phase-I 的目标差异
+
+两种 repair 的核心区别不在于是否都能补列，而在于定价究竟服务哪个目标。旧有限 M 方案仍优化“真实列成本 + artificial slack/竞争列 penalty”。因此 pricing 首先寻找当前真实 reduced cost 最好的列，恢复可行性只是 penalty dual 带来的附带作用；一条列即使很有利于替代 slack 或竞争列，只要真实 setup、任务惩罚等成本较高，也可能不容易成为负 reduced-cost 列。
+
+纯 Phase-I 把所有合法真实列的目标系数设为 0，只让 artificial slack 和正值竞争列承担单位目标。此时 pricing 不再关心原问题中的成本优劣，主要搜索能够降低人工残留、把 Phase-I 目标推到 0 的合法列。因此它更接近专门的可行性搜索，往往能由启发式一次补入一批列后直接归零，避免进入困难 exact DSSR。代价是得到的列对恢复真实目标后的优化质量未必好，而且零成本合法列会形成较大的替代最优面。
+
+Phase-I 目标为 0 只证明当前 restricted master 已存在不依赖人工项的可行解，不是原始目标的 bound，也不证明正式列生成已经收敛。归零后必须恢复真实列成本并重解 RMP，所得真实目标值才用于 strong branching 评分；若人工残留始终为正，则仍需完整 exact pricing certificate 才能证明 child infeasible。

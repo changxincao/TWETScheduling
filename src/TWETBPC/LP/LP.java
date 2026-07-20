@@ -394,23 +394,27 @@ public class LP {
 
 	public int addColumns(List<Integer> columnIds) {
 		int added = 0;
+		ArrayList<IloNumVar> addedVars = cplex != null && objective != null
+				? new ArrayList<IloNumVar>(columnIds.size()) : null;
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
 			if (restrictedColumnIdSet.add(value)) {
 				restrictedColumnIds.add(value);
 				added++;
-				if (cplex != null && objective != null) {
+				if (addedVars != null) {
 					try {
-						addColumnToCurrentModel(id);
+						addedVars.add(addColumnToCurrentModel(id));
 					} catch (IloException ex) {
 						throw new IllegalStateException("Failed to add column " + id + " to current RMP", ex);
 					}
 				}
 			}
 		}
+		if (addedVars != null && !addedVars.isEmpty()) {
+			lambdaVars = append(lambdaVars, addedVars);
+		}
 		return added;
 	}
-
 	public Pool.ColumnUpdate addOrImproveColumn(TWETColumn column) {
 		Pool.ColumnUpdate update = pool.addOrImproveColumn(column.getSequence(), column.getCost(),
 				column.getSource(), column.isSeedColumn());
@@ -741,14 +745,16 @@ public class LP {
 			return 0;
 		}
 		int added = 0;
+		ArrayList<IloNumVar> addedVars = cplex != null && objective != null
+				? new ArrayList<IloNumVar>(columnIds.size()) : null;
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
 			if (restrictedOutsourcingColumnIdSet.add(value)) {
 				restrictedOutsourcingColumnIds.add(value);
 				added++;
-				if (cplex != null && objective != null) {
+				if (addedVars != null) {
 					try {
-						addOutsourcingColumnToCurrentModel(id);
+						addedVars.add(addOutsourcingColumnToCurrentModel(id));
 					} catch (IloException ex) {
 						throw new IllegalStateException("Failed to add outsourcing column " + id + " to current RMP",
 								ex);
@@ -756,9 +762,11 @@ public class LP {
 				}
 			}
 		}
+		if (addedVars != null && !addedVars.isEmpty()) {
+			outsourceColumnVars = append(outsourceColumnVars, addedVars);
+		}
 		return added;
 	}
-
 	private void addAdjacencyBranchConstraints(List<int[]> pairs, boolean required) throws IloException {
 		int sink = node.sinkId();
 		for (int[] pair : pairs) {
@@ -945,7 +953,7 @@ public class LP {
 		repairSlackVars.add(cplex.numVar(col, 0.0, Double.MAX_VALUE, name));
 	}
 
-	private void addColumnToCurrentModel(int columnId) throws IloException {
+	private IloNumVar addColumnToCurrentModel(int columnId) throws IloException {
 		TWETColumn column = pool.getColumn(columnId);
 		IloColumn cplexColumn = cplex.column(objective, internalColumnObjectiveCost(columnId));
 		cplexColumn = cplexColumn.and(cplex.column(machineRange, 1.0));
@@ -978,7 +986,7 @@ public class LP {
 		}
 		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "lambda_" + columnId);
 		lambdaByColumnId.put(Integer.valueOf(columnId), var);
-		lambdaVars = append(lambdaVars, var);
+		return var;
 	}
 
 	private void updateCurrentColumnObjective(int columnId) throws IloException {
@@ -1080,7 +1088,7 @@ public class LP {
 		return total;
 	}
 
-	private void addOutsourcingColumnToCurrentModel(int columnId) throws IloException {
+	private IloNumVar addOutsourcingColumnToCurrentModel(int columnId) throws IloException {
 		TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
 		IloColumn cplexColumn = cplex.column(objective, outsourcingColumnObjectiveCost(column));
 		cplexColumn = cplexColumn.and(cplex.column(outsourcingColumnCountRange, 1.0));
@@ -1095,16 +1103,17 @@ public class LP {
 		}
 		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "omega_" + columnId);
 		outsourceColumnById.put(Integer.valueOf(columnId), var);
-		outsourceColumnVars = append(outsourceColumnVars, var);
+		return var;
 	}
 
-	private IloNumVar[] append(IloNumVar[] vars, IloNumVar var) {
-		IloNumVar[] expanded = new IloNumVar[vars.length + 1];
+	private IloNumVar[] append(IloNumVar[] vars, List<IloNumVar> addedVars) {
+		IloNumVar[] expanded = new IloNumVar[vars.length + addedVars.size()];
 		System.arraycopy(vars, 0, expanded, 0, vars.length);
-		expanded[vars.length] = var;
+		for (int i = 0; i < addedVars.size(); i++) {
+			expanded[vars.length + i] = addedVars.get(i);
+		}
 		return expanded;
 	}
-
 	public double getColumnReducedCost(int columnId) {
 		if (cplex == null || lambdaByColumnId == null) {
 			return Double.POSITIVE_INFINITY;

@@ -473,3 +473,13 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 该比较不是严格同轨迹 A/B：旧 run 的 root 初始/最终 pool 为17/28857、ALNS incumbent为36923，本次为11/17708和37279；尽管两次 root LP 都闭合到同一36739.428063，node 2 restricted规模也接近，repair side 数量仍由7变为3。由此可以确认“本次 node 2 使用Phase-I后整体更快且没有 exact repair长尾”，但不能把全部25.2%改善都归因于Phase-I；严格归因仍需当前 class 下相邻 old/new 或固定 side 重放。
 
 旧 VRP 的启发式列批量口径也一并核对：`m_tabu_cg_size` 默认30，规模化测试常设50，用于选择 seed；候选池 `m_gen_size=1000`；最终每轮加入 master 的 `addin_size` 默认150，部分测试设200。`m_branch_Iter=300`不是启发式返回列上限。当前 TWET 的候选池和最终返回上限均为300，已经比旧 VRP 更激进。本次60-2 root前期连续触顶300，说明扩大上限可能减少前期往返；但root后期每轮只生成个位数列，扩大上限不能解决 exact 尾部，且可能增加相似列和LP负担，需单独 A/B 后再调整。
+
+### 2026-07-20：50-2 固定初始列的完整 Phase-I A/B
+
+前一轮 60-2 对比从根节点开始就使用了不同的 ALNS incumbent 和初始列，不能用于判断 Phase-I repair。本轮改用 `wet050_001_2m`，保持 no-SRI ng-DSSR、K20/C1000、source-aware dominance、completion bound、20 个 strong candidates、lightweight seed 和其它开关完全一致，只切换 `enableStrongBranchingPhaseOneRepair`。由于 `accepted` 初始历史受 60 秒墙钟内完成迭代数影响，严格对照改用 `initialHeuristicColumnHistoryMode=best`；两边均得到 95 条初始列、2 条 incumbent 列和 `initial incumbent=44383`。正式 root pricing 均在 strong branching 前收敛到 `bound=44353`、`restricted/pool=19212`，随后两个分支节点选择的 candidate、左右 trial bound、5 个处理节点及最终搜索结果完全一致，最终均为 `obj=bound=44383, valid=true`。
+
+为减小运行顺序影响，执行了两轮交错完整求解。第一轮旧 repair/Phase-I 分别为 `328.359s/237.108s`，第二轮反向执行为 `300.013s/262.866s`；Phase-I 两次分别快 27.8% 和 12.4%，两轮均值为 `249.987s`，旧 repair 均值为 `314.186s`。但该 64.199s 均值差不能全部归因于 repair：相同调用次数、相同加列轨迹的普通启发式、exact 和 master LP 在不同 JVM 运行间仍有 15%--37% 的速度波动，ALNS 初始化也在约 45--60s 之间变化。
+
+可直接归因的 repair 专属时间更稳定。旧 repair 两轮分别为 `3.744s` 和 `2.437s`，其中包含 `repair_slack_initial + repair_after_pricing + HeuristicPricing[FindFeasible] + GCNGBBStyleNgDssrPricing[FindFeasible]`；Phase-I 分别为 `0.808s` 和 `0.847s`，包含 `phase_one_initial + phase_one_after_pricing + phase_one_true_rmp + HeuristicPricing[FindFeasible]`。因此这一个实际触发 repair 的 side 上，Phase-I 直接节省约 `1.63--2.94s`，并省掉 1 次 exact `FindFeasible`；旧 repair 额外生成 107 条 elementary repair 列，但它们没有改变后续分支、正式 pricing 调用次数或节点数。
+
+当前结论是：50-2 上纯 Phase-I 的 repair 本身确实更便宜，并且没有改变 trial bound、分支选择或最终正确性；完整 wall time 也在两种运行顺序下都更短。但该实例全树只触发 1 个 repair side，可靠算法收益是数秒级，不能把全部 12%--28% wall-time 差异都归因于 Phase-I。实验目录为 `test-results/bpc/ab-50-2-repair-standard-full-bestseed-20260720`、`ab-50-2-repair-phase1-full-bestseed-20260720` 及对应 `-rep2-` 目录。

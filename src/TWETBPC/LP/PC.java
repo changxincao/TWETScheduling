@@ -1064,21 +1064,24 @@ public class PC {
 			if (isTimeLimitReached() || phaseSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return phaseSolution;
 			}
-			phaseFeasible = !needsStrongRepair(lp);
+			// 2026-07-20: residual 只会在 RMP 重解后变化。缓存结果，避免同一 LP 解上反复
+			// 查询 artificial slack 和全部 branch-implied penalty 变量。
+			boolean repairPending = needsStrongRepair(lp);
+			phaseFeasible = !repairPending;
 
-			while (!phaseFeasible && !isTimeLimitReached()) {
+			while (repairPending && !isTimeLimitReached()) {
 				boolean addedInThisPass = false;
 				boolean internalClosedAtCurrentDual = false;
 				boolean outsourcingClosedAtCurrentDual = !lp.isColumnizedOutsourcing();
 				for (int engineIndex = 0; engineIndex < pricingEngines.size()
-						&& needsStrongRepair(lp) && !isTimeLimitReached(); engineIndex++) {
+						&& repairPending && !isTimeLimitReached(); engineIndex++) {
 					PricingEngine engine = pricingEngines.get(engineIndex);
 					if (!engine.supportsFeasibilityPhaseOneObjective()) {
 						continue;
 					}
 					boolean addedByThisEngine = false;
 					boolean keepCurrentEngine = true;
-					while (keepCurrentEngine && needsStrongRepair(lp) && !isTimeLimitReached()) {
+					while (keepCurrentEngine && repairPending && !isTimeLimitReached()) {
 						HashSet<Integer> seenColumnIds = new HashSet<Integer>();
 						HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
 						GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true,
@@ -1107,14 +1110,15 @@ public class PC {
 						if (phaseSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 							return phaseSolution;
 						}
+						repairPending = needsStrongRepair(lp);
 						keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted()
-								&& needsStrongRepair(lp);
+								&& repairPending;
 					}
 					if (addedByThisEngine) {
 						resetFollowingPricingEngines(engineIndex + 1);
 					}
 				}
-				if (!needsStrongRepair(lp)) {
+				if (!repairPending) {
 					phaseFeasible = true;
 					break;
 				}

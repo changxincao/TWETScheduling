@@ -2762,3 +2762,12 @@ repair join 累计访问 150.66m 个 label pair，其中约139.79m 已被 visit-
 candidate1000 的高度同质化不是 repair 独有，但 repair 更严重。465 次普通 exact 共经历 1721 轮，更新统计为 `considered=817255, blocked=808614, updated=8641`，候选有效率约 1.057%；36 次 repair 共 1083 轮，统计为 `considered=1046842, blocked=1043838, updated=3004`，候选有效率只有 0.287%。按每次 exact 的最后一轮不再更新估算，普通 update round 平均约 6.9 条候选真正触发更新，repair 为 2.87 条。也就是说普通 DSSR 的 top-RC witness 也大量共享重复结构，只是 repair 的 artificial slack/penalty dual 使候选集中程度进一步提高，导致候选池很深但 ng-set 仍一层一层收紧。
 
 Tmid probe 已经在困难 repair 中实际生效。同一次 exact 的第1轮运行正式 probe，后续轮复用当前 Tmid，每隔5轮重新 probe；若上一轮 forward/backward kept labels 超过5倍，还会先按 horizon 的5%移动 probe 起点。日志中长 repair 的 Tmid 确实发生过 `1850.5 -> 1711.713 -> 1671.440 -> 1766.690` 等调整，因此不是“完全没有 probe”。但 probe 每个候选最多只弹出5000个 label，默认按浅层 `queue` 压力评分；`halfWindowIneligible` 则是任务有效窗口相对 Tmid 的结构计数，二者不是同一个目标。ng-set 每轮收紧后，浅层 queue 比例也不一定能预测完整扩展的后向标签膨胀。因而最终仍可出现 `halfWindowIneligible fw/bw=29/4` 或 `28/6`：大量任务不能进入 forward half，却能进入 backward half。当前 full exact 的正反向时间和标签会写入 node 内历史 best Tmid，也会作为下一次周期 probe 的失衡起点信号，但不会直接以完整后向耗时为目标连续求最优 Tmid。结论是 probe 已显著缓解过部分极端失衡，但没有从目标函数和采样深度上保证消除 half-domain 不平衡。
+### 267. repair join 下一步优化计划
+
+当前优先做严格等价的 group-envelope prefilter 索引优化。现实现对每个 backward envelope group 和 terminal job 构造 `prunedForwardIndices` 时，仍逐个扫描该 terminal 下全部 forward labels，再通过 `IdentityHashMap` 找到所属 forward group。即使整组最终被 envelope 证明可剪，这次逐 label 扫描已经发生。计划在构建 envelope index 时同步为每个 forward group 记录其在对应 `candidates` 列表中的成员位图；处理 backward group 时只遍历 forward groups，若 group-pair 可剪，直接 OR 对应成员位图。该修改保持现有 group 判定、label-level fallback、遍历顺序和返回列完全不变，应先单独 A/B。
+
+第二步只以实验开关测试 repair `findFeasible()` 的 DSSR 中间轮 effective-witness 早停。当前 repair 大量时间花在已经确认存在负 non-elementary witness 后继续完成剩余 join，并最终丢弃无法进入 top-1000 的同质候选。新口径不是简单“找到一条就停”，而是维护临时 ng-set overlay，只有真正新增 pair、能阻断一条当前 witness 的路径才消耗 K20；收集到 K 条有效 witness 后可结束本轮 join、更新真实 ng-set并重跑 labeling。任何早停轮必须显式标记 `roundComplete=false`，不得输出 no-negative certificate、observed dual bound、arc fixing 或 subtree pruning；只有最终完整扫描轮才能证明闭合。该策略数学上仍是合法 DSSR 收紧，但可能因选择的 witness 不够好而增加轮数，因此不能直接默认开启。
+
+第三步仅在前两项后 reservoir 维护仍是热点时处理。当前每条恢复 sequence 都在线性扫描 top-1000 做去重，并在插入/替换后完整排序；可以改为 signature map 加有界 worst-heap，但必须保持 sequence 去重、top-1000 顺序阈值和替换语义完全一致。它只能降低候选维护成本，不能减少前面的 PWLF 计算，因此优先级低于 prefilter 索引和中间轮早停。
+
+验证顺序固定为：先在60-2日志中最重的左右 repair side 上重放，比较 pair scanned、prefilter build/join、funcEval、DSSR轮数和返回列；再跑普通 root exact，确保普通 certificate 没有退化；最后跑完整60-2树。每个阶段都要对拍每个完整轮的 relaxed best reduced cost、elementary sequence及真实回刷成本。若严格等价索引不能降低 join，立即保留旧实现；若早停增加DSSR轮数或总 exact 时间，则默认关闭并撤回实验代码。

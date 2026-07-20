@@ -407,7 +407,7 @@ Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足�
 
 按讨论新增了独立的 strong-trial repair 实验路径，开关为 `enableStrongBranchingPhaseOneRepair`，底层默认关闭。这里没有机器固定成本。Phase-I 只改变 RMP 和 pricing 的目标口径：branch row artificial slack 与 branch-implied 竞争列的系数为 1，其余合法内部列、列化外包列以及直接外包 tariff 项的系数均为 0；机器数、覆盖、分支和 cut 等约束仍保留，因此相应 dual 仍正常进入 reduced cost。内部 pricing 将 setup cost 和任务惩罚函数置零，外包 pricing 同样使用零列成本。Pool 始终保存 evaluator 得到的真实列成本，没有覆盖或临时改写，因此不需要额外保存成本快照。
 
-Phase-I 初始 LP 或后续 repair pricing 一旦使 artificial slack 和正值竞争列同时归零，就立即停止 Phase-I。此时先删除 restricted set 中的 branch-implied 竞争列，再关闭 repair/Phase-I 模式，按 Pool 中真实成本重建并求解一次 RMP；这次结果才作为 strong trial bound，并进入原有 seed 筛选流程。如果 Phase-I 目标仍为正，只有 ng-DSSR exact 已证明内部列族无负 reduced-cost，且列化外包时 OutsourcingPricingEngine 也在同一 dual 下给出无负列证书，才返回真实 infeasible；证书不完整则回退旧 repair，不用受限启发式结果误剪 child。Phase-I 中关闭 dual profitable window、subtree arc fixing 和 observed dual-bound pruning，避免把临时 0/1 目标下的证据写回正式搜索。
+Phase-I 初始 LP 或后续 repair pricing 一旦使 artificial slack 和正值竞争列同时归零，就立即停止 Phase-I。此时先删除 restricted set 中的 branch-implied 竞争列，再关闭 repair/Phase-I 模式，按 Pool 中真实成本重建并求解一次 RMP；这次结果才作为 strong trial bound，并进入原有 seed 筛选流程。如果 Phase-I 目标仍为正，只有 ng-DSSR exact 已证明内部列族无负 reduced-cost，且列化外包时 OutsourcingPricingEngine 也在同一 dual 下给出无负列证书，才返回真实 infeasible；证书不完整属于 engine/配置契约错误，直接中止并暴露，不切换到旧 repair，也不把它误判为 child infeasible。Phase-I 中关闭 dual profitable window、subtree arc fixing 和 observed dual-bound pruning，避免把临时 0/1 目标下的证据写回正式搜索。
 
 在 `wet040_001_2m` 上进行了严格同配置 A/B，唯一差异是该开关。旧 repair 结果为 `obj=bound=22580`、`valid=true`、16 nodes、总时间 `129.257s`；纯 Phase-I 同样为 `obj=bound=22580`、`valid=true`、16 nodes、总时间 `164.357s`。新路径将 repair exact ng-DSSR 启动次数从 24 降到 4，下降 83.3%；repair after-pricing RMP 求解从 83 次降到 40 次，但额外发生 22 次 Phase-I 归零后的真实 RMP 求解。最终 master LP 时间由 `63.415s` 增至 `87.702s`，启发式时间由 `26.407s` 增至 `33.330s`，总时间增加 `35.100s`，约慢 27.2%；列池由 45,614 降至 40,672。
 
@@ -428,9 +428,9 @@ pricing 也因列集和后续 dual 轨迹改变而变重。普通 HeuristicPrici
 本次还存在明显运行级速度差异：普通 HeuristicPricing 平均调用时间由60.428ms增至77.873ms，慢28.9%；lightweight trial LP平均由176.960ms增至234.423ms，慢32.5%；多个相同node、相同restricted列数和相同LP目标的累计LP时间也普遍慢约27%--64%。这组一致放慢说明机器负载、JVM/CPLEX运行状态或缓存条件很可能贡献了大部分差异。当前只能确认纯Phase-I直接阶段比旧repair多4.096s，不能确认总时间慢27.2%都是算法退化。严格判断需要在相同环境做 old-new-old 或 new-old-new 交错复跑，并增加逐side初始LP计时，区分首次Phase-I之前和之后。
 #### Phase-I residual 与 certificate 检查时机
 
-Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` 检查 artificial slack 和正值 branch-implied 竞争列是否仍存在；任一仍为正就继续 repair，二者都归零则立即成功，不再要求 exact 闭合。原因是 Phase-I 目标是非负人工项之和，已经找到目标0就已达到全局最小值。certificate 不是每次重解都用于判 infeasible：只有一整个 pricing pass 没有新增任何列、residual仍为正时，才检查当前同一dual下的内部exact证书，以及列化外包时的外包exact证书；两类均非负才判child infeasible，缺任一证书就回退旧repair。恢复真实成本RMP只发生在 `phaseFeasible=true` 的路径；certificate infeasible、time limit都不恢复，fallback则交给旧repair自行处理。
-#### Phase-I fallback 场景与退化优化优先级
+Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` 检查 artificial slack 和正值 branch-implied 竞争列是否仍存在；任一仍为正就继续 repair，二者都归零则立即成功，不再要求 exact 闭合。原因是 Phase-I 目标是非负人工项之和，已经找到目标0就已达到全局最小值。certificate 不是每次重解都用于判 infeasible：只有一整个 pricing pass 没有新增任何列、residual仍为正时，才检查当前同一dual下的内部exact证书，以及列化外包时的外包exact证书；两类均非负才判child infeasible；缺任一证书直接抛出状态错误。恢复真实成本RMP只发生在 `phaseFeasible=true` 的路径；certificate infeasible 和 time limit 都不恢复。
+#### Phase-I 闭合契约与退化优化优先级
 
-“证书不完整”是安全兜底，不是当前no-SRI ng-DSSR主线的常规结果。本次40-2 A/B中fallback为0。它主要覆盖：当前pricing链没有支持Phase-I目标的内部exact engine；exact因诊断/非闭合返回而没有给出有限nonnegative certificate；列化外包缺少同dual的外包certificate；或生成结果因重复/数值过滤未真正进入RMP而无法形成完整闭合证明。time limit单独返回，不走fallback。启发式返回空永远不算证书。
+“证书不完整”不是可恢复的算法结果，而是当前 pricing engine/配置没有履行 Phase-I 闭合契约。本次40-2 A/B中该状态出现0次。可能原因包括：pricing链没有支持Phase-I目标的内部exact engine；exact因诊断/非闭合返回而没有给出有限nonnegative certificate；列化外包缺少同dual的外包certificate；或生成结果因重复/数值过滤未真正进入RMP而无法形成完整闭合证明。出现时直接中止并暴露；time limit单独返回，启发式返回空永远不算证书。 全局检查没有发现 exact BPC 主线中的第二处同类静默算法回退；completion-bound 的 scalar fallback 是预判不足时继续完整函数判断，RMIH 的 min-loss fallback 是整数启发式补列，均不改变 exact 证书语义。
 
-若交错复跑确认纯Phase-I确有算法退化，第一优先级是Phase-I归零后不再 `solveRelaxation()` 重建模型，而是在当前CPLEX模型内把slack/竞争列上界固定为0、将合法列目标系数原地恢复为Pool真实成本，再 `resolveCurrentModel()`，保留当前basis。第二优先级是给Phase-I启发式设置更小且多样化的专用返回批量；当前日志常一次加入300/600甚至更多只服务可行性的列，容易扩大零目标退化面。不能用普通有限epsilon真实成本作为主目标tie-break后直接证明infeasible，因为连续slack可任意小；严格词典序需要额外模型/dual口径。长期更干净但改动更大的方向是固定竞争列后使用Farkas pricing恢复RMP可行性。
+若交错复跑确认纯Phase-I确有算法退化，第一优先级应处理0/1目标本身形成的大替代最优面，例如给Phase-I启发式设置更小且多样化的专用返回批量；当前日志常一次加入300/600甚至更多只服务可行性的列，容易扩大退化面。Phase-I归零后原地恢复真实目标并复用CPLEX basis只能减少模型重建成本，属于第二优先级。不能用普通有限epsilon真实成本作为主目标tie-break后直接证明infeasible，因为连续slack可任意小；严格词典序需要额外模型/dual口径。长期更干净但改动更大的方向是固定竞争列后使用Farkas pricing恢复RMP可行性。

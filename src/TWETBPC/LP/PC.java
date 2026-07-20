@@ -1059,7 +1059,6 @@ public class PC {
 		int generatedForRepair = 0;
 		boolean phaseFeasible = false;
 		boolean phaseInfeasibleCertified = false;
-		boolean fallbackToStandardRepair = false;
 		try {
 			phaseSolution = solveRelaxationTimed(lp, "strong_branching_phase_one_initial");
 			if (isTimeLimitReached() || phaseSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -1122,7 +1121,13 @@ public class PC {
 				if (!addedInThisPass) {
 					phaseInfeasibleCertified = internalClosedAtCurrentDual
 							&& outsourcingClosedAtCurrentDual;
-					fallbackToStandardRepair = !phaseInfeasibleCertified;
+					if (!phaseInfeasibleCertified) {
+						// Phase-I must not silently switch repair semantics; incomplete closure is a contract error.
+						throw new IllegalStateException("Phase-I strong repair exhausted pricing without a complete "
+								+ "internal/outsourcing certificate: " + lp.getNode().diagnosticSummary()
+								+ ", internalClosed=" + internalClosedAtCurrentDual
+								+ ", outsourcingClosed=" + outsourcingClosedAtCurrentDual);
+					}
 					break;
 				}
 			}
@@ -1140,11 +1145,9 @@ public class PC {
 					"Strong branching Phase-I optimum remains positive after generating "
 							+ generatedForRepair + " columns");
 		}
-		if (!phaseFeasible || fallbackToStandardRepair) {
-			traceSink.onStageHeartbeat(lp.getNode(),
-					"strongBranchingPhaseOne.fallback generated=" + generatedForRepair,
-					totalPoolSize(lp), lp.getCutPool().size());
-			return repairInfeasibleMaster(lp, false, true);
+		if (!phaseFeasible) {
+			throw new IllegalStateException("Phase-I strong repair ended without a terminal state: "
+					+ lp.getNode().diagnosticSummary());
 		}
 
 		int removedPenaltyColumns = lp.removeBranchImpliedPenaltyColumnsFromRestrictedSet();

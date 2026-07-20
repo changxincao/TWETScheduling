@@ -44,6 +44,7 @@ public class PC {
 	private double incumbentForDualBoundPruning;
 	private double lastObservedDualBound;
 	private boolean lastNodePrunedByDualBound;
+	private StrongRepairDualBoundClosure strongRepairDualBoundClosure;
 	private HeuristicPricingDiagnosticTrace pendingHeuristicMissTrace;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
@@ -347,6 +348,7 @@ public class PC {
 			boolean lightweightRepair) {
 		PricingControllerState savedState = saveControllerState();
 		try {
+			strongRepairDualBoundClosure = null;
 			lp.setRepairObjectivePenalty(repairObjectivePenalty(incumbentForDualBoundPruning));
 			String initialPhase = domainRepair ? "strong_branching_domain_rmp"
 					: (lightweightRepair ? "strong_branching_light_repair_rmp" : "strong_branching_rmp");
@@ -364,7 +366,11 @@ public class PC {
 				// 2026-07-14: strong trial repair 要同时清掉 artificial slack 和正值 penalty 列。
 				// 两者都归零时，repair 模型的 primal objective 才可作为当前列集的 trial bound。
 				solution = domainRepair ? repairDomainFilteredStrongBranchingMaster(lp)
-						: repairInfeasibleMaster(lp, false);
+						: repairInfeasibleMaster(lp, false, true);
+			}
+			if (strongRepairDualBoundClosure != null) {
+				return StrongBranchingTrialResult.dualBoundPruned(solution, strongRepairDualBoundClosure.bound,
+						strongRepairDualBoundClosure.message());
 			}
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
@@ -978,6 +984,11 @@ public class PC {
 					HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
 					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, seenColumnIds,
 							seenOutsourcingColumnIds, "strongBranchingDomainRepair", true, null, Double.NaN);
+					if (tryCloseStrongRepairByDualBound(lp, engine, generated, seenColumnIds,
+							seenOutsourcingColumnIds, "strongBranchingDomainRepair")) {
+						lp.setFeasibilityRepairMode(false);
+						return solution;
+					}
 					if (generated.isEmpty()) {
 						break;
 					}
@@ -1035,10 +1046,11 @@ public class PC {
 	}
 
 	private TWETMasterSolution repairInfeasibleMaster(LP lp) {
-		return repairInfeasibleMaster(lp, true);
+		return repairInfeasibleMaster(lp, true, false);
 	}
 
-	private TWETMasterSolution repairInfeasibleMaster(LP lp, boolean resolveAfterColumnFilter) {
+	private TWETMasterSolution repairInfeasibleMaster(LP lp, boolean resolveAfterColumnFilter,
+			boolean allowDualBoundPruning) {
 		// 2026-05-18: 正常 RMP 不可行时，先建立带人工 slack 的同一节点 LP；
 		// slack 产生的 dual 用于引导启发式和精确定价器补列，补到 slack=0 后再回到正常 RMP。
 		lp.setFeasibilityRepairMode(true);
@@ -1065,6 +1077,11 @@ public class PC {
 					HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
 					GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true, seenColumnIds,
 							seenOutsourcingColumnIds);
+					if (allowDualBoundPruning && tryCloseStrongRepairByDualBound(lp, engine, generated,
+							seenColumnIds, seenOutsourcingColumnIds, "strongBranchingRepair")) {
+						lp.setFeasibilityRepairMode(false);
+						return solution;
+					}
 					if (generated.isEmpty()) {
 						break;
 					}
@@ -1134,6 +1151,50 @@ public class PC {
 		return finalSolution;
 	}
 
+	private boolean tryCloseStrongRepairByDualBound(LP lp, PricingEngine engine, GeneratedColumnIds generated,
+			HashSet<Integer> seenColumnIds, HashSet<Integer> seenOutsourcingColumnIds, String phase) {
+		if (!config.enableDualBoundPruning || strongRepairDualBoundClosure != null
+				|| engine instanceof OutsourcingPricingEngine
+				|| !Double.isFinite(incumbentForDualBoundPruning)
+				|| !Double.isFinite(generated.certifiedInternalReducedCost)) {
+			return false;
+		}
+		if (lp.isColumnizedOutsourcing() && !Double.isFinite(generated.certifiedOutsourcingReducedCost)) {
+			PricingEngine outsourcingEngine = findOutsourcingPricingEngine();
+			if (outsourcingEngine == null) {
+				return false;
+			}
+			// 2026-07-20: internal 与 outsourcing 必须在 repair RMP 尚未重解时使用同一个 dual。
+			GeneratedColumnIds outsourcingGenerated = generateColumnsFromEngine(lp, outsourcingEngine, true,
+					seenColumnIds, seenOutsourcingColumnIds, phase + ".pairedOutsourcing", false, null, Double.NaN);
+			generated.merge(outsourcingGenerated);
+		}
+		if (isTimeLimitReached()
+				|| (lp.isColumnizedOutsourcing()
+						&& !Double.isFinite(generated.certifiedOutsourcingReducedCost))) {
+			return false;
+		}
+		double bound = observedDualBoundEstimate(lp, generated, Double.NaN);
+		if (!Double.isFinite(bound)) {
+			return false;
+		}
+		boolean pruned = bound >= incumbentForDualBoundPruning - config.dualBoundPruningTolerance;
+		String message = "strongRepairDualBound.observed phase=" + phase
+				+ ",engine=" + engine.getName()
+				+ ",bound=" + bound
+				+ ",incumbent=" + incumbentForDualBoundPruning
+				+ ",internalRc=" + generated.certifiedInternalReducedCost
+				+ ",outsourcingRc=" + generated.certifiedOutsourcingReducedCost
+				+ ",pruned=" + pruned;
+		traceSink.onStageHeartbeat(lp.getNode(), message, totalPoolSize(lp), lp.getCutPool().size());
+		if (!pruned) {
+			return false;
+		}
+		strongRepairDualBoundClosure = new StrongRepairDualBoundClosure(bound,
+				generated.certifiedInternalReducedCost, generated.certifiedOutsourcingReducedCost, phase,
+				engine.getName());
+		return true;
+	}
 	private GeneratedColumnIds generateColumnsFromEngine(LP lp, PricingEngine engine, boolean repairMode,
 			HashSet<Integer> seenColumnIds, HashSet<Integer> seenOutsourcingColumnIds) {
 		return generateColumnsFromEngine(lp, engine, repairMode, seenColumnIds, seenOutsourcingColumnIds, "",
@@ -1483,10 +1544,36 @@ public class PC {
 		}
 	}
 
+	private static final class StrongRepairDualBoundClosure {
+		final double bound;
+		final double internalReducedCost;
+		final double outsourcingReducedCost;
+		final String phase;
+		final String engineName;
+
+		StrongRepairDualBoundClosure(double bound, double internalReducedCost, double outsourcingReducedCost,
+				String phase, String engineName) {
+			this.bound = bound;
+			this.internalReducedCost = internalReducedCost;
+			this.outsourcingReducedCost = outsourcingReducedCost;
+			this.phase = phase;
+			this.engineName = engineName;
+		}
+
+		String message() {
+			return "dual_bound_pruned phase=" + phase
+					+ ",engine=" + engineName
+					+ ",bound=" + bound
+					+ ",internalRc=" + internalReducedCost
+					+ ",outsourcingRc=" + outsourcingReducedCost;
+		}
+	}
+
 	public static final class StrongBranchingTrialResult {
 		private final TWETMasterSolution solution;
 		private final double bound;
 		private final boolean infeasible;
+		private final boolean dualBoundPruned;
 		private final boolean timeLimited;
 		private final boolean addedColumns;
 		private final ArrayList<Integer> internalColumnIds;
@@ -1494,11 +1581,12 @@ public class PC {
 		private final String message;
 
 		private StrongBranchingTrialResult(TWETMasterSolution solution, double bound, boolean infeasible,
-				boolean timeLimited, boolean addedColumns, ArrayList<Integer> internalColumnIds,
-				ArrayList<Integer> outsourcingColumnIds, String message) {
+				boolean dualBoundPruned, boolean timeLimited, boolean addedColumns,
+				ArrayList<Integer> internalColumnIds, ArrayList<Integer> outsourcingColumnIds, String message) {
 			this.solution = solution;
 			this.bound = bound;
 			this.infeasible = infeasible;
+			this.dualBoundPruned = dualBoundPruned;
 			this.timeLimited = timeLimited;
 			this.addedColumns = addedColumns;
 			this.internalColumnIds = internalColumnIds;
@@ -1517,17 +1605,24 @@ public class PC {
 			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
 			// 2026-07-12: infeasible/time-limit trial 不会作为正式 child seed 复用，避免无意义复制大列集。
 			if (infeasible || timeLimited) {
-				return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
+				return new StrongBranchingTrialResult(solution, bound, infeasible, false, timeLimited, addedColumns,
 						new ArrayList<Integer>(), new ArrayList<Integer>(), message);
 			}
-			return new StrongBranchingTrialResult(solution, bound, infeasible, timeLimited, addedColumns,
+			return new StrongBranchingTrialResult(solution, bound, infeasible, false, timeLimited, addedColumns,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
 
 		static StrongBranchingTrialResult infeasible(TWETMasterSolution solution, String message) {
-			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false,
+			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false, false,
 					new ArrayList<Integer>(), new ArrayList<Integer>(), message);
+		}
+
+		static StrongBranchingTrialResult dualBoundPruned(TWETMasterSolution solution, double certifiedBound,
+				String message) {
+			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, false, true, false, false,
+					new ArrayList<Integer>(), new ArrayList<Integer>(),
+					message + ",certifiedBound=" + certifiedBound);
 		}
 
 		public TWETMasterSolution getSolution() {
@@ -1542,12 +1637,20 @@ public class PC {
 			return infeasible;
 		}
 
+		public boolean isDualBoundPruned() {
+			return dualBoundPruned;
+		}
+
+		public boolean isClosed() {
+			return infeasible || dualBoundPruned;
+		}
+
 		public boolean isTimeLimited() {
 			return timeLimited;
 		}
 
 		public boolean isReusableForQueue() {
-			return !infeasible && !timeLimited;
+			return !isClosed() && !timeLimited;
 		}
 
 		public boolean hasAddedColumns() {

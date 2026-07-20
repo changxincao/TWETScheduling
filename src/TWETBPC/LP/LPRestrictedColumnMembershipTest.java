@@ -46,6 +46,15 @@ public final class LPRestrictedColumnMembershipTest {
 				&& unusable.getOutsourcingColumnIds().isEmpty(),
 				"non-reusable trial retained redundant seed columns");
 
+		PC.StrongBranchingTrialResult dualBoundPruned = PC.StrongBranchingTrialResult.dualBoundPruned(
+				null, 42.0, "dual_bound_pruned");
+		assertActiveState(dualBoundPruned.isDualBoundPruned(), "dual-bound closure flag missing");
+		assertActiveState(dualBoundPruned.isClosed(), "dual-bound-pruned trial not treated as closed");
+		assertActiveState(!dualBoundPruned.isInfeasible(), "dual-bound closure mislabeled as infeasible");
+		assertActiveState(!dualBoundPruned.isReusableForQueue(), "dual-bound-pruned trial unexpectedly reusable");
+		assertActiveState(Double.isInfinite(dualBoundPruned.getBound()),
+				"dual-bound-pruned trial must receive INF strong score");
+
 		System.out.println("LPRestrictedColumnMembershipTest passed");
 	}
 

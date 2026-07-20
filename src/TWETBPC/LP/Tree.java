@@ -635,7 +635,7 @@ public class Tree {
 			if (selection.hasTimeLimitedTrial()) {
 				return selection;
 			}
-			if (selection.bothChildrenInfeasible()) {
+			if (selection.bothChildrenClosed()) {
 				return selection;
 			}
 		}
@@ -903,7 +903,7 @@ public class Tree {
 		if (trial.isTimeLimited()) {
 			return 0.0;
 		}
-		if (trial.isInfeasible()) {
+		if (trial.isClosed()) {
 			return config.pseudoCostInf;
 		}
 		if (!Double.isFinite(parentBound) || !Double.isFinite(trial.getBound())) {
@@ -1102,9 +1102,9 @@ public class Tree {
 					|| (rightTrial != null && rightTrial.isTimeLimited());
 		}
 
-		boolean bothChildrenInfeasible() {
+		boolean bothChildrenClosed() {
 			return leftTrial != null && rightTrial != null
-					&& leftTrial.isInfeasible() && rightTrial.isInfeasible();
+					&& leftTrial.isClosed() && rightTrial.isClosed();
 		}
 
 		String summary() {
@@ -1130,7 +1130,7 @@ public class Tree {
 			if (trial.isTimeLimited()) {
 				return "TIME_LIMIT";
 			}
-			if (trial.isInfeasible()) {
+			if (trial.isClosed()) {
 				return "INF";
 			}
 			return String.valueOf(trial.getBound());

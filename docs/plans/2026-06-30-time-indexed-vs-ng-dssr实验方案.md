@@ -1405,3 +1405,13 @@ node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 �
 该判断必须满足同一 dual 口径。internal exact certificate、列化外包时的 outsourcing certificate 和 repair RMP objective 必须在再次 resolve 之前取得；所有列族都必须覆盖，启发式结果不能用于证明；有 active SRI 时必须使用包含当前 cut dual 的 exact pricing。下界仍沿用正式节点的公式：`repairRmpObjective + maxMachineCount * min(0, internalRcMin)`，列化外包时再加 `min(0, outsourcingRcMin)`。repair 模型中的 slack/penalty 已经包含在当前 objective 中，不要求它们先归零。
 
 实现时不能把这种结果混同为真实 infeasible。建议增加独立的 `BOUND_PRUNED`/`closedByDualBound` 状态：strong score 可以按已关闭 side 使用与 `INF` 相同的极大 gain，但日志必须明确写成 dual-bound closed，不能写 infeasible；该 child 不复用 seed、不入队。这个改动对 58/91 轮一类长 repair exact 尾部有直接潜力，因为一旦某轮 exact certificate 已经使下界超过 incumbent，就不必继续为 primal repair 生成列。
+
+### 2026-07-20 Strong-trial repair 的 certified dual-bound 提前关闭
+
+已在 strong branching 的两类 repair 路径中接入同一 dual 下的下界检查。初始 trial RMP 可行时仍按原流程直接评分；只有初始 infeasible 或仍使用正值 branch-implied penalty 列、进入 repair 并运行到能够返回有限 `certifiedInternalReducedCost` 的精确定价器时，才尝试计算
+
+`repair RMP objective + maxMachineCount * min(0, internalRc)`。
+
+列化外包时还必须在 repair RMP 尚未重解前，用同一 dual 补跑 `OutsourcingPricingEngine`，取得有限 `certifiedOutsourcingReducedCost`，再加上 `min(0, outsourcingRc)`。任一列族缺证书、定价超时或 incumbent 非有限值时均不剪枝。该下界达到 `incumbent - tolerance` 后，trial 记录为独立的 `dual_bound_pruned` 关闭状态：strong branching 评分按 `INF` 处理、该 child 不入队且不复用 trial seed，但不会误记成“真实 infeasible”。日志新增 `strongRepairDualBound.observed`，记录 phase、engine、bound、incumbent、两类 reduced-cost 证书及是否剪枝。
+
+这里允许 repair slack 或 penalty 列仍为正，原因不是把当前 repair primal 当作 child 可行解，而是使用当前 repair LP 的 dual objective。人工变量只给该 dual 增加额外约束；只要精确定价已对 child 的全部真实内部列证明 reduced-cost 下界，列化外包时再覆盖全部外包列族，该 dual 仍可给出原 child 的合法下界。因此提前关闭证明的是“该 child 不可能改善 incumbent”，不是“该 child 不可行”。普通正式节点 repair 仍保持原流程，不启用这条 strong-trial 专用关闭逻辑。

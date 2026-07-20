@@ -459,3 +459,7 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 整个root nodeTime为旧repair 33.367s、Phase-I 32.926s，只快0.441s，约1.3%。不能用总求解时间比较，因为两次ALNS前置耗时不同；普通启发式同为84次却分别耗时13.062s和16.533s，同时40次进入repair前的初始trial LP分别为12.644s和8.388s，说明运行波动在非repair部分双向抵消。该例的可靠结论是：Phase-I对实际触发的两次repair本身有小幅绝对收益，但repair只占root很小一部分，因此没有形成显著整体加速。
 
 旧repair实验目录：`test-results/bpc/verify-old-repair-40-2-rootonly-20260720`；邻接Phase-I复跑目录：`test-results/bpc/verify-phase1-repair-40-2-rootonly-rerun-20260720`。
+
+#### 60-2 root 强分支 repair 核对
+
+复核完整好配置日志 `test-results/bpc/20260719-60-2-ng-best-k20-cand1000-3600-v1`：root测试20个候选共40个lightweight trial side，但 `repair_slack_initial`、repair heuristic `FindFeasible` 和repair exact `FindFeasible` 均为0，40个side全部由初始trial RMP直接给出评分。因此60-2 root不能用于Phase-I/旧repair A/B。全树累计36个repair side全部出现在非根节点；最早是node 2，其40个trial side中7个进入repair，执行8次启发式和7次ng-DSSR exact `FindFeasible`。若要在60-2上比较两种repair，应至少运行到node 2，或固定并重放node 2的7个repair side。

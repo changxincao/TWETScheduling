@@ -434,3 +434,11 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 “证书不完整”不是可恢复的算法结果，而是当前 pricing engine/配置没有履行 Phase-I 闭合契约。本次40-2 A/B中该状态出现0次。可能原因包括：pricing链没有支持Phase-I目标的内部exact engine；exact因诊断/非闭合返回而没有给出有限nonnegative certificate；列化外包缺少同dual的外包certificate；或生成结果因重复/数值过滤未真正进入RMP而无法形成完整闭合证明。出现时直接中止并暴露；time limit单独返回，启发式返回空永远不算证书。 全局检查没有发现 exact BPC 主线中的第二处同类静默算法回退；completion-bound 的 scalar fallback 是预判不足时继续完整函数判断，RMIH 的 min-loss fallback 是整数启发式补列，均不改变 exact 证书语义。
 
 若交错复跑确认纯Phase-I确有算法退化，第一优先级应处理0/1目标本身形成的大替代最优面，例如给Phase-I启发式设置更小且多样化的专用返回批量；当前日志常一次加入300/600甚至更多只服务可行性的列，容易扩大退化面。Phase-I归零后原地恢复真实目标并复用CPLEX basis只能减少模型重建成本，属于第二优先级。不能用普通有限epsilon真实成本作为主目标tie-break后直接证明infeasible，因为连续slack可任意小；严格词典序需要额外模型/dual口径。长期更干净但改动更大的方向是固定竞争列后使用Farkas pricing恢复RMP可行性。
+
+### 2026-07-20 50-2 root-only Phase-I strong branching 观察
+
+使用 `wet050_001_2m`、no-SRI ng-DSSR、strong phase1 candidate=20、phase2=0、lightweight seed、Phase-I repair 开启，并设置 `maxNodes=1`，只完成 root 定价和 root 强分支。结果 root bound=44353、incumbent=44383、gap=0.0676%，root nodeTime=223.141s，总时间283.360s（包含约60s ALNS）。root 常规定价为151.322s，其中启发式126.054s/223次、ng-DSSR exact 25.269s/40次。
+
+强分支测试20个候选的左右两侧，共40次 `strong_branching_light_repair_rmp`，耗时62.200s，平均1.555s/side；seed准备仅0.225s。父Pool为19044列，lightweight后每个side仍保留3124--11252列，平均8040.2列。因此当前强分支瓶颈是大 restricted master LP，而不是建模或seed筛选。40个side全部在初始trial LP即得到可行结果，没有进入 `strong_branching_phase_one_*`，Phase-I repair启动次数为0；故该实例只能评价强分支LP成本，不能评价0/1 Phase-I repair质量，开关开/关在本轮应走相同算法路径。最终选择 `arc(10,5)`，候选按距0.5排名为16/77，左右bound分别44377.0和44647.30。
+
+实验目录：`test-results/bpc/ab-strong-phase1-50-2-rootonly-20260720`。

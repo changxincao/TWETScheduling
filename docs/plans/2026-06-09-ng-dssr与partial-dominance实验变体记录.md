@@ -2719,3 +2719,11 @@ setupR75 的对应 exact 时间为 `16.292/14.181/13.217/12.651/12.784/12.628s`�
 更新量解释了这种不稳定性。R50 W300 中 all-segments 累计加入207个 pair，而 minimum-segment 只加入111个，最大 ng-set 从10升至15，但两者累计 DSSR 轮数同为10；40-2 W100 中 pair 为 `574 vs 292`，all-segments 仍更慢。R75 W300 中 all-segments 以182个 pair 将最大轮数从4降至3，才获得很小收益。也就是说，全环更新只有在额外 pair 正好提前消除下一轮 witness 时才有利；否则更大的 ng-set 会加重后续 labeling，并可能改变 dual 路径，不能作为默认策略。
 
 当前建议保持 `K=20 + minimumNewPairsSegment`。K10 在需要多轮 DSSR 的场景稳定偏慢，K25 已无稳定收益；all-segments 只保留为实验开关。candidate=1000 的深 reservoir 能保证 blocked route 不消耗 K 后继续补位，但窄窗口日志中累计 considered/blocked 很高，例如40-2 K20 minimum-segment 为 `4538/4365`，说明1000主要是在为困难 repair 提供保障，不应把它解释为每轮都会实际更新大量路径；是否将默认 reservoir 从1000回收至500应另做独立 A/B，不能与本轮 K/segment 结论混在一起。
+
+262. 2026-07-20 elementary 命中后的 join 与 candidate1000/K20 关系
+
+当前一轮 relaxed pricing 在 join 中发现负 elementary 列后不会立即停止。`canContinue()` 只检查 `maxExactPricingColumns>0`，因此后续未扫描的 forward/backward label pair 仍按原流程执行；已知 non-elementary 的 pair 仍会经过 witness 下界剪枝，负的 non-elementary sequence 仍会按 sequence 去重并进入 candidate reservoir。这样可以继续收集最多 `maxExactPricingColumns` 条 elementary 候选，并完成本次 exact pricing 的全局最小 reduced-cost 观察。join 结束后统一回刷 elementary sequence 的真实成本；只要本轮存在真实负 elementary 列，外层 DSSR 立即把这些列返回 PC，不使用本轮同时收集的 non-elementary witness 更新 ng-set。只有本轮没有 elementary 负列、但存在负 non-elementary witness 时，才进入 ng-set 更新。
+
+把 candidate reservoir 从1000直接缩为K，确实会把已知 non-elementary pair 的在线剪枝阈值从“当前第1000名”提高到“当前第K名”，因此能跳过更多 PWLF join；当前 reservoir 已经按 sequence 去重，所以这不需要新增“不重复列”定义。但“reduced cost 前K条”不等于“K条有效更新路径”：按 reduced cost 排在前面的多条路径可能共享同一重复段，第一条加入 ng-pair 后，其余路径会被连带禁止，不再消耗有效更新预算。若只保留K条，就无法继续使用第K名之后的候选补足有效更新数，容易增加 DSSR 轮数。candidate1000 的作用正是保留这些候补路径，K20 则只限制最终真正新增 ng-pair 的路径数。
+
+若要在线只保留“K条有效路径”，不能只在插入时判断 sequence 是否重复；需要按 reduced cost 全局顺序维护一套临时 ng-set overlay。后到的更优路径替换已有路径时，前序更新和后续路径的 blocked/effective 状态都可能改变，需要重建整套选择结果，复杂度和实现风险明显高于当前有界 reservoir。当前不修改实现，继续保留 candidate1000 与 effective K20 的职责分离；后续若要减小1000，优先做500/1000独立 A/B，而不是直接降到K。

@@ -2806,3 +2806,17 @@ signature 只能解决一部分重复。现有 SequenceSignature 只去重完全
 固定 K10 后，candidateLimit=1000/3000/10000 三组的算法路径完全一致：均为 249 个 DSSR rounds、176 个更新轮、27 轮凑满 K、73 次 exact、382 次 pricing、15928 列和相同 root bound。C3000 与 C10000 的逐轮 scan/blocked/updated 完全一致；C1000 只把少数未凑满 K 的轮次扫描上限截到 1000，但最终每轮更新数仍完全一致。三组 wall time 有较大系统波动，且 heuristic/exact 同时同比变化，不能归因于 candidateLimit。由此确认本例中 C>1000 没增加任何有效 ng-set 更新，只会理论上放松第 C 名 reduced-cost witness 剪枝。
 
 当前建议保持 `candidateLimit=1000`，不改成 3000 或 10000；route update K 在本例采用 10。该结论先限于 60-2 root，不直接改全局默认值。原计划的 K8 运行按用户要求中止，没有纳入比较。
+
+266. 2026-07-20 candidate 阈值实际放松幅度与 40-2 的 K 对照
+
+进一步拆分 60-2、K10 的 C1000/C3000/C10000 日志后，candidateLimit 只影响函数求值后的 non-elementary witness 保留阈值，没有让前面的主要 join 剪枝失效。三组的 `join pairs tried=162313`、`funcEval=161506`、`funcPruned=141276` 完全一致，函数级剪枝率均为 87.474%。三组都生成了 133937 个 non-elementary join 结果；C1000 的 value threshold 额外剪掉 465 个，仅占 0.347%，而 C3000 和 C10000 均为 0。对应的 lower-bound threshold 剪枝三组均为 0。因此，从 C1000 放到 C10000 的“变松”只恢复了很少的末端 witness，不影响 arc/time/cost/function 等前置剪枝，更不能解释为大部分 join 剪枝失效。C3000 到 C10000 在本例已经没有可见阈值差异。
+
+该 candidate 阈值在 join 中有两次检查。第一处在 PWLF 拼接前，使用 `forward.minReducedCost + backward.minReducedCost + fixedCost` 这个乐观标量下界；第二处在 `findMinimalShiftedSumValue()` 已经完成函数拼接求最小值之后、恢复 sequence 和写入 witness 池之前，使用实际 join 函数最小值再次检查。本组 C1000/C3000/C10000 的第一处 `lbPruned` 均为 0；C1000 的 465 条全部来自第二处 `valuePruned`。因此 C10000 本次没有减少 PWLF 函数求值次数，只是让 465 个已经完成函数求值的 non-elementary 结果继续进入 sequence 恢复/候选池处理。
+
+随后固定 `candidateLimit=1000`，在更小的 `wet040_001_2m` 上比较 K5/K10/K20。三组均为 root-only、no ALNS、no strong、no SRI，并使用 nearestKAutoN10、all-cycles completion bound、BEST_UB join、group-envelope prefilter 和 minimum-new-pairs segment。结果分别为 `solve=31.548/31.311/31.511s`、`exact=7.594/7.616/7.772s`；三组的 `bound=22490`、16 次 exact、28 个 DSSR rounds、82 次 pricing、6209 列和 `valid=true` 全部相同。12 个有效更新轮平均只新增 3.42 条独立 route 更新，最大为 4，K5/K10/K20 均没有触顶；每轮平均扫描 73.08 条，其中 69.67 条已被前序 pair 连带阻断。三组并行运行，wall time 只作粗略参考，完全一致的算法轨迹才是主要证据。
+
+由此可知，K 只是上限，实际更新量受当前实例可获得的独立重复结构限制。40-2 上 K>=5 已经完全等价；60-2 上独立更新主要约为 7--8，K10 优于 K5 和 K20。就这两个实例而言，静态 K10 是较稳妥的共同取值：在 40-2 上自动退化为实际 3--4 条，在 60-2 上又不会像 K5 一样过早截断。但这还不是跨实例默认值结论；candidateLimit 仍建议保持 1000。
+
+按前述问题口径再将 C 固定为 10000，严格复用 C1000 组的完整配置，只切换 K5/K10/K20。三组分别为 `solve=18.182/18.101/18.028s`、`exact=4.864/4.908/4.948s`，并且都得到 `bound=22490`、18 次 exact、29 个 DSSR rounds、90 次 pricing、5777 列和 `valid=true`。11 个有效更新轮平均新增 3.45 条独立更新、最大为 5；K5 仅有 1 轮恰好触顶，K10/K20 从未触顶，因此固定 C10000 后三个 K 的算法轨迹仍完全一致。
+
+C1000 与 C10000 两批 40-2 run 的 exact 次数和列池分别为 16/6209 与 18/5777，但完整配置比对除 C 外一致。进一步检查发现，两批的 candidate lower-bound/value threshold 计数均为 0，C1000 单轮 non-elementary witness 最大也远低于 1000，说明该跨批轨迹差异没有证据可归因于 candidate cap，而应视为独立运行中的 LP/dual/候选同值次序敏感性。因而 C 的效果只采用前述 60-2 同轨迹对照；小规模实验只用于判断固定 C 后 K 是否触顶。

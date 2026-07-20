@@ -2744,3 +2744,13 @@ setupR75 的对应 exact 时间为 `16.292/14.181/13.217/12.651/12.784/12.628s`�
 join 的负担集中在 strong repair，而不是普通 exact。465 次普通 exact 的 join 共 22.986s，仅占普通 exact 的 4.3%；36 次 `FindFeasible` 的 join 共 209.393s，占 repair exact 的 27.5%。repair 累计访问 150.66m 个 label pair，visit-profile 在 PWLF 前剪掉 139.79m，group-envelope 另记录 53.51m skipped pair；最终仍执行 9.606m 次 shifted-sum 函数最小值计算。函数计算后仅 1910 次被普通函数阈值拒绝，但有 9.151m 条已知 non-elementary 路径因不能进入 top-1000 witness 池而被拒绝。说明现有 visit mask 和 group envelope 已经有效，剩余浪费主要是为大量高度相似的 non-elementary pair 计算精确 PWLF 值，最后只用于候选池排名。
 
 低风险第一步仍是上一节的 repeated-segment profile 与 blocking-signature reservoir：减少同一更新方向重复进入池，并用 hash map 替代 sequence 线性扫描。更高收益的第二步可以只作用于 DSSR 中间轮：当已通过真实 PWLF 值确认取得 K 条在虚拟 ng-set 下相互独立的负 non-elementary witness 后，后续已由 visit mask 确认必为 non-elementary 的 pair 可跳过 PWLF；elementary pair 仍完整扫描，最终无负列 certificate 轮也必须完整扫描。该方案会放弃被提前跳过轮次的完整 relaxed reduced-cost certificate，因此不能直接用于 observed dual bound；若 strong repair 仍需要同轮 certified bound，则必须回退完整 join。是否值得实施取决于 signature 多样化后 K20 能否较早填满，建议先完成候选池 A/B，再决定是否增加中间轮 non-elementary early stop。
+
+### 265. 60-2 repair DSSR 与普通 exact 的耗时差异
+
+同一完整 run 中，普通 ng-DSSR exact 共 465 次、累计 532.238s，平均每次 1.145s；strong-repair `findFeasible()` 只有 36 次，却累计 761.712s，平均每次 21.159s，单次约为普通 exact 的 18.5 倍。普通 exact 的 DSSR 平均 3.701 轮、中位数3轮、P90为6轮、最大10轮；repair 平均30.083轮、中位数30轮、P90为54轮、最大64轮。主要差距首先来自 DSSR 轮数，而不是 `findFeasible()` 换用了另一套 labeling 算法；它仍调用同一个 ng-DSSR `solve()` 主体，只是在带 artificial slack/branch-implied penalty 的 repair dual 下求列。
+
+阶段拆分表明，普通 exact 的 initialization/forward/backward/join 分别为 `259.657/164.209/83.593/22.986s`，占 `48.8%/30.9%/15.7%/4.3%`；repair 分别为 `76.175/156.739/316.924/209.393s`，占 `10.0%/20.6%/41.6%/27.5%`。因此 repair 的第一大头是前后向扩展，合计473.663s、占62.2%，其中 backward 单独占41.6%；join 是第二大头，占27.5%，不是唯一或最大的来源。困难 repair 中 forward 构造的 99,214/174,412 个扩展可以全部通过 bound，backward 也有 258,730/144,514 个存活，而普通调用常只有约四分之一到三分之一构造扩展通过 bound。repair dual 下 completion bound 的判别力明显下降，标签数和后续 label-pair 笛卡尔积同步放大。
+
+其根因是 Phase-I 型 repair dual 与普通经济目标 dual 的结构不同。当前 repair 保留真实列成本，同时给 artificial slack 和 branch-implied 竞争列有限大惩罚；困难调用中分支行 dual 可达到约 `1.84615e6`，而普通 job dual 仍处于几千量级。该 dual 会让大量包含重复任务的 relaxed route 呈现显著负 reduced cost，completion bound 很难提前排除它们。与此同时 child 时间窗/禁弧使半域明显不对称，重调用的 `halfWindowIneligible fw/bw` 达到 `29/4`、`28/6`，后向可进入的任务更多，解释了 backward 时间约为 forward 的两倍。
+
+repair join 累计访问 150.66m 个 label pair，其中约139.79m 已被 visit-profile 下界在 PWLF 前剪掉；仍有9.606m次 PWLF 最小值计算，约9.151m个结果最终因 non-elementary 且无法进入 top-1000 witness 池而被丢弃。与此相对，普通 exact 总共只访问2.42m个 pair、执行2.02m次函数计算。由此得到当前结论：repair 慢的主因依次是“30--64轮 DSSR + 每轮扩展存活过多，尤其 backward”，其次才是这些标签造成的 join 放大；initialization 不是 repair 的主瓶颈。

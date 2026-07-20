@@ -368,3 +368,15 @@ Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足�
 60-2 的困难 strong-trial repair 曾在一次 `FindFeasible` 中执行大量 DSSR 轮次。后续可以单独实验一种只服务 strong branching 评分的限预算 repair：第一种口径只运行启发式 repair；第二种仍调用 exact ng-DSSR，但限制最多执行若干 DSSR 轮。预算内修复成功时，仍按当前 trial bound 正常评分；预算耗尽且尚未修复时，可以给该 side 一个“试探阶段未修复”的劣化评分或伪不可行评分，以避免一个候选长期占用 strong branching 时间。
 
 该状态不能复用现有真实 `INF` 语义。预算耗尽只说明有限试探没有找到修复列，不能证明完整 child 不可行，因此不能剪掉节点，也不能跳过正式 child 的完整 repair/exact pricing。若该候选最终被选中，正式入队时必须丢弃限预算 trial 的失败结论，按普通 child 流程重新做完整可行性修复。实现时应新增独立的 `UNRESOLVED_FOR_SCORE`（或等价）状态，并明确区分三类结果：已修复且可评分、已严格证明不可行、限预算未修复。当前只记录方案，暂不修改 strong branching 主线；先观察有效更新预算 K20 和 DSSR 内周期 Tmid 对 60-2 完整求解的实际改善。
+
+### 2026-07-20：分支 child LP 可行性判定方法
+
+当前 repair 已经属于人工变量驱动的 Phase-I 型列生成。普通 repair 只给本次新增分支行加 artificial slack；全行 domain-repair 才给覆盖、机器数及相关分支行统一加 slack。模型目标没有切成纯 Phase-I，而是保留真实列成本，并给 artificial slack 和 branch-implied 竞争列有限大惩罚。外层先解带 slack 的 RMP，再按当前 repair dual 依次调用启发式和 exact `findFeasible()` 补列并重解；只有 exact 定价覆盖完整列族、没有超时且最终 slack/penalty 列仍为正时，才能把 child 判为不可行。仅凭最初 restricted columns 上的 LP infeasible 不能证明完整列主问题 infeasible。
+
+更标准的第一种替代是纯 Phase-I 列生成：目标只最小化 artificial slack 总量，slack 归零后再切回真实目标。它可避免真实成本和有限大惩罚共同塑造 repair dual，语义也最清楚，但并不会消除 pricing；每轮仍必须解完整 ng-DSSR/Farkas 等价子问题，Phase-I 最优值为正也只有在 exact pricing 闭合后才是不可能修复的证明。因此它可能改善 dual 方向和数值稳定性，但不能预期从根本上绕过当前30--64轮 DSSR。
+
+第二种是 Farkas pricing。restricted child RMP infeasible 时，从 CPLEX 取得 Farkas dual ray，再求一个“是否存在违反该射线的合法列”的定价子问题；找到列则加入并重解，找不到且 exact certificate 完整时才证明全列主问题 infeasible。当前代码没有使用 Farkas ray。它的优势是无需人为选择 slack penalty，且定价方向直接针对恢复可行性；但子问题仍是带分支域的 elementary route pricing，仍可能需要 ng-DSSR/DSSR，不能假设一定比当前 artificial-slack 路径快。
+
+第三种是单独解紧凑 LP 或 MIP。若紧凑模型与 child 的完整 route 域严格等价，则 MIP infeasible 可以安全剪掉 child，MIP feasible 还能直接给出一组可行列；但对每个 strong side 解一次完整 MIP 通常远重于当前 LP repair，而且它判断的是整数可行性，不是用于 strong score 的 master-LP 可行性。当前 relaxed time-indexed 图允许非基本/重复访问 pseudo-route，它的可行不能证明 elementary route master 可行；只有该放松模型也 infeasible 时，才能作为单向不可行证据。由此，紧凑 LP/MIP 更适合作为困难 side 的偶发 fallback 或快速充分/必要条件，而不适合直接替代每个 trial 的 Phase-I 列生成。
+
+分支冲突、required arc 时间可达性、required/forbidden 链冲突、机器数上下界等组合检查可以在建 LP 前排除一部分显然不可行 side，但这些只是必要条件预处理，无法覆盖多机器、覆盖约束和时间窗耦合下的完整可行性。当前阶段只形成分析结论，不修改 repair 实现。

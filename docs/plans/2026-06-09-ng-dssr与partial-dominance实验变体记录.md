@@ -2771,3 +2771,12 @@ Tmid probe 已经在困难 repair 中实际生效。同一次 exact 的第1轮�
 第三步仅在前两项后 reservoir 维护仍是热点时处理。当前每条恢复 sequence 都在线性扫描 top-1000 做去重，并在插入/替换后完整排序；可以改为 signature map 加有界 worst-heap，但必须保持 sequence 去重、top-1000 顺序阈值和替换语义完全一致。它只能降低候选维护成本，不能减少前面的 PWLF 计算，因此优先级低于 prefilter 索引和中间轮早停。
 
 验证顺序固定为：先在60-2日志中最重的左右 repair side 上重放，比较 pair scanned、prefilter build/join、funcEval、DSSR轮数和返回列；再跑普通 root exact，确保普通 certificate 没有退化；最后跑完整60-2树。每个阶段都要对拍每个完整轮的 relaxed best reduced cost、elementary sequence及真实回刷成本。若严格等价索引不能降低 join，立即保留旧实现；若早停增加DSSR轮数或总 exact 时间，则默认关闭并撤回实验代码。
+### 268. repair join 计划收窄为当前流程的严格等价优化
+
+按后续讨论取消第267节中的 DSSR 中间轮 effective-witness 早停，不修改 DSSR 轮次、candidate1000、K20、certificate 或 dual-bound 语义。join 不是当前总求解的首要热点，因此只保留两项低风险实现优化。
+
+第一项是 crossing-arc context 预计算。当前同一个 `lastJob -> firstJob` 下会遍历多个 backward labels，每次都会重复读取禁弧状态、`setup+process` 时间增量、`setupCost-arcDual` 固定 reduced cost。计划在一轮 join 开始前用原始 getter 和当前 LP dual 构造二维 primitive array，label-level join 只读取数组。所有数值和判断顺序保持一致。
+
+第二项是 envelope prefilter 成员位图。当前每个 backward envelope group 首次构造 `prunedForwardIndices` 时，会扫描该 terminal 下全部 forward labels并通过 identity map查询所属 forward group；group-pair 剪枝结果虽有缓存，但逐 label 归组扫描仍重复发生。计划在构建 envelope index 时为每个 forward group记录其在已排序 `candidates` 中的位置位图；某个 group-pair 可剪时直接 OR 对应位图。标准 label-level join、bitset skip-run、PWLF计算、sequence恢复和候选写入均不改变。
+
+验证只比较严格等价结果：每轮 group-pair 判定、pruned index、实际 visited pair、funcEval、elementary/non-elementary sequence、真实回刷成本必须一致。若任一项不一致立即撤回；若 join 局部计时没有稳定下降也不保留复杂实现。top-1000 reservoir、join早停和遍历顺序本轮均不动。

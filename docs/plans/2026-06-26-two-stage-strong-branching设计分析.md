@@ -421,3 +421,8 @@ Phase-I 初始 LP 或后续 repair pricing 一旦使 artificial slack 和正值�
 pricing 也因列集和后续 dual 轨迹改变而变重。普通 HeuristicPricing 从26.407s增至33.330s，增加6.923s；普通 exact 从7.103s增至8.151s，增加1.048s。repair pricing 本身反而由 `0.773+0.679=1.452s` 降至 `0.941+0.017=0.958s`，节省0.494s。新方案列池从45614降到40672，但 restricted seed/basis 更退化，后续相同数量的 strong trial LP 反而更慢；这属于 Phase-I 改变列和 dual 轨迹后的间接成本，不是 Phase-I 内部计时本身。扣除 master 和全部 pricing 后，其余框架时间还增加约3.336s。
 
 因此当前结论不能表述为“Phase-I repair 快但被一次重建抵消”。准确说法是：它有效消除了 exact repair，但该实例的 exact repair 原本并不贵；新增真实 RMP 重解、零目标退化以及由不同 seed/basis 引起的后续 strong-trial LP 和普通 pricing 退化共同造成总时间增加。若要继续评估，应放到旧 repair exact 为数十秒的困难 child 上单独 A/B，而不是依据40-2推断其对60-2长尾无效。
+#### `strong_branching_light_repair_rmp` 差异的口径修正
+
+`strong_branching_light_repair_rmp` 是每个 strong side 进入 repair 之前的初始 child RMP，不使用纯 Phase-I 的0/1目标。本次两组都执行320次，只有24个 side 随后进入 repair。因此其 `56.627s -> 75.015s` 不能直接解释为“Phase-I零目标使这一步变慢”。Phase-I 确实会从第一次 repair 开始改变全局 Pool、后续 trial seed 的列组成和 basis 退化程度，因而可能间接影响后面的初始 trial；但现有累计日志没有记录“首次 Phase-I 前后”的逐 call 时间，不能把18.388s全部归因于该间接效应。
+
+本次还存在明显运行级速度差异：普通 HeuristicPricing 平均调用时间由60.428ms增至77.873ms，慢28.9%；lightweight trial LP平均由176.960ms增至234.423ms，慢32.5%；多个相同node、相同restricted列数和相同LP目标的累计LP时间也普遍慢约27%--64%。这组一致放慢说明机器负载、JVM/CPLEX运行状态或缓存条件很可能贡献了大部分差异。当前只能确认纯Phase-I直接阶段比旧repair多4.096s，不能确认总时间慢27.2%都是算法退化。严格判断需要在相同环境做 old-new-old 或 new-old-new 交错复跑，并增加逐side初始LP计时，区分首次Phase-I之前和之后。

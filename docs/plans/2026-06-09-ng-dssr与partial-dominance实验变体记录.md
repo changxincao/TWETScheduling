@@ -2786,3 +2786,14 @@ Tmid probe 已经在困难 repair 中实际生效。同一次 exact 的第1轮�
 no-SRI ng-DSSR 的 group-envelope prefilter 原先在首次处理每个 backward group 与 lastJob 组合时，仍扫描该 lastJob 下的全部 forward labels，并通过 IdentityHashMap 找回所属 group；group-pair 的可剪结论虽然已有缓存，但 label 到 group 的展开扫描会随 backward group 数量重复。本次改为在构造 forward group 时记录其成员在 activeForwardByLastJob 中的位置位图。某个 forward group 被证明可剪后，直接把该 group 的成员位图 OR 到 prunedForwardIndices，不再逐 label 查询所属 group。只有成功生成 join extension、实际进入 envelope group 的 label 才在加入当场写入位图；空 extension 和 dominated label 与旧实现一样不进入 group 位图，后续仍由原 label-level 流程处理；group envelope、剪枝条件、label 顺序和最终 pair 集合均未改变。
 
 验证使用 wet040_001_2m、root-only、no ALNS/no strong、当前 source-aware dominance 和 all-cycles completion bound，对照仅切换 ngDssrJoinEnvelopePrefilter。开启/关闭两组均得到 bound=22490、pool=6209、16 次 exact、valid=true；总时间分别为 19.924s/19.897s，exact 为 5.775s/5.813s，差异属于运行波动。开启组日志确认 group prefilter 实际执行并跳过 label pair。本次修改的主要价值是删除随 backward group 重复的 label 扫描和 identity-map 查询，属于严格等价的常数优化，当前小 root 上没有可单独归因的整体 wall-time 提升。candidate reservoir 与 ng-set 更新逻辑本次未修改。
+264. 2026-07-20 non-elementary candidate 与有效 ng-set 更新分析
+
+当前实现将“候选质量”和“实际更新价值”分成两个阶段。join 过程中只按 inferred reduced cost 保留 top-C 条不同 sequence；一轮 labeling 结束后，再按 reduced cost 从小到大扫描 candidate，并在当前 ng-set 上调用 minimum-new-pairs 更新。若某条 route 已被前面加入的 pair 连带禁止，返回 already-blocked，不占 effective route 名额；只有确实新增 pair 的 route 才计入 K，扫描会继续到找到 K 条有效 route 或候选耗尽。因此候选重叠主要浪费 candidate 容量和后处理扫描，不会直接浪费 K。
+
+不建议在 join 过程中维护一个带 shadow ng-set 的动态 top-K。每条非基本 route 不是对应一个固定 signature，而是对应多个可选重复段；每个重复段又对应一组必须补齐的 ng-pair。shadow 更新后，route 是否已被禁止、哪个重复段缺失 pair 最少都会变化。若 top-K 满后淘汰旧 route，仅从 shadow set 删除它增加的 pair 不正确，因为 pair 可能由多条 route 共同贡献；即使用引用计数，后加入 route 当时可能依赖被淘汰 route 已覆盖的 pair，只补了剩余 pair，撤销后会反过来失去自身的阻断证据，需要级联重选和重建。该问题本质上不是普通 heap top-K，而是带相互覆盖的在线集合选择。
+
+signature 只能解决一部分重复。现有 SequenceSignature 只去重完全相同的 sequence。若改成“当前最小重复段的 pair 集合”作为 signature，该 signature 会随 shadow ng-set 变化；并且一条 route 可能有多个重复段，两条 route 当前最小 signature 相同，并不代表它们在后续 shadow 下仍等价。为每条 route 记录全部重复段 family 才能表达完整等价关系，但这种完全相同的 family 预计很少，而且会增加 sequence 恢复、哈希和内存成本，无法替代 reduced-cost reservoir。
+
+当前更稳的方案仍是保留较大的 top-C candidate reservoir，收集阶段完全不修改 shadow；结束后按 reduced cost 做一次确定性的离线 greedy，在 ng-set 副本上跳过 already-blocked route，直到得到 K 条真正有效的更新。这样较差 route 不可能先于更负的 route 修改 shadow，也不存在 top-K 淘汰后的撤销问题。若后续只优化后处理常数，可在 candidate 入池后缓存其连续重复段描述 `(repeatedJob, middleJobs bitset)`，离线 greedy 用位运算判断 blocked、missing pair 和最小段，避免反复扫描 sequence；但当前每轮最多约 C=1000，先统计这部分耗时再决定是否值得做。
+
+若大候选池仍经常在得到 K 条有效 route 前耗尽，可以考虑额外的静态多样性 reservoir，但它必须在恢复 sequence 后计算 action signature，并会削弱当前 join 中基于第 C 名 reduced cost 的提前剪枝。现阶段不建议为此引入双 reservoir。当前结论是：继续使用“较大 top-C + 末尾一次离线有效 K 更新”最清晰且稳定；动态 shadow top-K 和增量淘汰不值得实现。

@@ -463,3 +463,13 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 #### 60-2 root 强分支 repair 核对
 
 复核完整好配置日志 `test-results/bpc/20260719-60-2-ng-best-k20-cand1000-3600-v1`：root测试20个候选共40个lightweight trial side，但 `repair_slack_initial`、repair heuristic `FindFeasible` 和repair exact `FindFeasible` 均为0，40个side全部由初始trial RMP直接给出评分。因此60-2 root不能用于Phase-I/旧repair A/B。全树累计36个repair side全部出现在非根节点；最早是node 2，其40个trial side中7个进入repair，执行8次启发式和7次ng-DSSR exact `FindFeasible`。若要在60-2上比较两种repair，应至少运行到node 2，或固定并重放node 2的7个repair side。
+
+#### 60-2 node 2 Phase-I repair 观察
+
+按上述要求在当前 class 上启动 `test-results/bpc/20260720-60-2-ng-phase1-node2-ab-v2`，保持 no-SRI、K20、candidate1000、root preprocessing 关闭、strong phase2 关闭，仅打开 `strongBranchingPhaseOneRepair`。node 2 的40个 strong side 中有3个进入纯 Phase-I；每个 side 均只调用1次启发式 repair、加入300列后人工 slack 和竞争列归零，随后恢复真实成本 RMP，没有进入 ng-DSSR exact repair。
+
+与2026-07-19旧 repair 日志的 node 2 相比，本次 nodeTime 由213.085s降至159.444s，减少25.2%；pricing由175.860s降至114.342s，减少35.0%；exact由138.802s降至57.113s，减少58.9%。代价是 heuristic 由37.057s增至57.229s，LP由35.842s增至42.820s，但未抵消 exact 长尾的下降。因此按实验规则保留该 run 继续向后求解。
+
+该比较不是严格同轨迹 A/B：旧 run 的 root 初始/最终 pool 为17/28857、ALNS incumbent为36923，本次为11/17708和37279；尽管两次 root LP 都闭合到同一36739.428063，node 2 restricted规模也接近，repair side 数量仍由7变为3。由此可以确认“本次 node 2 使用Phase-I后整体更快且没有 exact repair长尾”，但不能把全部25.2%改善都归因于Phase-I；严格归因仍需当前 class 下相邻 old/new 或固定 side 重放。
+
+旧 VRP 的启发式列批量口径也一并核对：`m_tabu_cg_size` 默认30，规模化测试常设50，用于选择 seed；候选池 `m_gen_size=1000`；最终每轮加入 master 的 `addin_size` 默认150，部分测试设200。`m_branch_Iter=300`不是启发式返回列上限。当前 TWET 的候选池和最终返回上限均为300，已经比旧 VRP 更激进。本次60-2 root前期连续触顶300，说明扩大上限可能减少前期往返；但root后期每轮只生成个位数列，扩大上限不能解决 exact 尾部，且可能增加相似列和LP负担，需单独 A/B 后再调整。

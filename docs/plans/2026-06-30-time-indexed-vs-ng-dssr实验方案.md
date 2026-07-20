@@ -1397,3 +1397,11 @@ node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 �
 当前 strong phase1 不做完整 exact pricing，也不在评分阶段执行正式 dual-bound/incumbent 剪枝。每个 side 返回当前 restricted trial RMP 的有限目标值，评分使用 `max(leftBound-parentBound, eps) * max(rightBound-parentBound, eps)`。若 trial 经 repair 后被证明 infeasible，则日志显示 `INF`，该侧 gain 使用 `pseudoCostInf=1e18`，并且该 child 不入队；若只是有限 trial bound 高于 incumbent，则不能据此剪枝，因为补充新列后 full master LP 仍可能下降。它仍按有限 bound 参与评分，并作为 child 入队。child 的 `pseudoCost` 当前仍保留 parent LP bound，而不是 strong trial bound；正式出队后才重新执行完整 PC 流程。届时 certified dual bound 不小于 incumbent 时以 `pruned_by_dual_bound` 关闭，完整 pricing 后 master objective 不小于 incumbent 时以 `pruned_by_incumbent` 关闭。正式 child 后续如何关闭不会回写或修正父节点当时的 strong score。
 
 再次逐行核对后确认，前述“node 7 中间 `MasterLP obj=36878, integer=true`”并不存在，是把其他旧实验中的 `36878.x, integer=false` LP 值串到了本次日志。当前完整 run 的 node 7 最终为 `lpObj=36864.000000, integer=false`，随后进行了强分支；其选中候选左右 phase-1 trial bound 分别为 `36876.127639` 和 `40950.853640`。因此本次不存在漏用 36878 整数 incumbent 的问题，也不能据此提出中间整数解上报优化。一般语义仍然是：正式、无 artificial slack/正值 penalty 的 RMP 中间整数解可以作为可行上界，但 restricted RMP 目标不能作为完整列空间下界；本次日志没有出现这样的 36878 整数解。
+
+#### Strong repair exact 下界提前关闭思路
+
+当前 strong trial 的 repair 模式明确关闭 observed dual bound，但 ng-DSSR 的 `findFeasible()` 在完成一轮 exact pricing 后已经可以返回该 repair dual 下的 certified internal minimum reduced cost。因此，repair 尚未把 artificial slack 或 penalty 列降为 0 时，也可以利用当前 repair RMP objective 与完整列族的 certified reduced cost 构造合法拉格朗日下界。若该下界不小于当前 incumbent，则无需继续证明 primal repair 可行：无论原 child 最终可行与否，它都不可能改善 incumbent，可以直接关闭该 side。
+
+该判断必须满足同一 dual 口径。internal exact certificate、列化外包时的 outsourcing certificate 和 repair RMP objective 必须在再次 resolve 之前取得；所有列族都必须覆盖，启发式结果不能用于证明；有 active SRI 时必须使用包含当前 cut dual 的 exact pricing。下界仍沿用正式节点的公式：`repairRmpObjective + maxMachineCount * min(0, internalRcMin)`，列化外包时再加 `min(0, outsourcingRcMin)`。repair 模型中的 slack/penalty 已经包含在当前 objective 中，不要求它们先归零。
+
+实现时不能把这种结果混同为真实 infeasible。建议增加独立的 `BOUND_PRUNED`/`closedByDualBound` 状态：strong score 可以按已关闭 side 使用与 `INF` 相同的极大 gain，但日志必须明确写成 dual-bound closed，不能写 infeasible；该 child 不复用 seed、不入队。这个改动对 58/91 轮一类长 repair exact 尾部有直接潜力，因为一旦某轮 exact certificate 已经使下界超过 incumbent，就不必继续为 primal repair 生成列。

@@ -1415,3 +1415,10 @@ node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 �
 列化外包时还必须在 repair RMP 尚未重解前，用同一 dual 补跑 `OutsourcingPricingEngine`，取得有限 `certifiedOutsourcingReducedCost`，再加上 `min(0, outsourcingRc)`。任一列族缺证书、定价超时或 incumbent 非有限值时均不剪枝。该下界达到 `incumbent - tolerance` 后，trial 记录为独立的 `dual_bound_pruned` 关闭状态：strong branching 评分按 `INF` 处理、该 child 不入队且不复用 trial seed，但不会误记成“真实 infeasible”。日志新增 `strongRepairDualBound.observed`，记录 phase、engine、bound、incumbent、两类 reduced-cost 证书及是否剪枝。
 
 这里允许 repair slack 或 penalty 列仍为正，原因不是把当前 repair primal 当作 child 可行解，而是使用当前 repair LP 的 dual objective。人工变量只给该 dual 增加额外约束；只要精确定价已对 child 的全部真实内部列证明 reduced-cost 下界，列化外包时再覆盖全部外包列族，该 dual 仍可给出原 child 的合法下界。因此提前关闭证明的是“该 child 不可能改善 incumbent”，不是“该 child 不可行”。普通正式节点 repair 仍保持原流程，不启用这条 strong-trial 专用关闭逻辑。
+
+
+#### 60-2 candidate1000 阻断口径与 time-indexed 对照复核
+
+进一步复核 candidate1000 的统计口径后确认，`blocked` 不是指 pricing 阶段生成了非法或重复 sequence。每轮先在旧 ng-set 下按 reduced cost 保留最多 1000 条不同的负非基本路径，再按顺序用这些路径更新同一份 ng-set；前序路径加入新 pair 后，只要后续路径的任一重复段已被该 pair 阻断，整条路径下一轮便不可能原样出现，因此记为 `blocked`，不再从它的其他重复段继续更新。33 次多轮 `FindFeasible` 合计有 1047 个实际更新轮、检查 1,046,842 条候选，其中 1,043,838 条在顺序复检时已被前序更新连带阻断，实际用于更新的 route 为 3004 条、累计增加 3049 个 pair，即平均每轮仅 2.87 条有效 route、2.91 个新 pair。候选之间不是 sequence 完全重复，而是高度共享少量重复段；因此把 reservoir 扩大到 1000 仍无法让 K20 经常吃满。每轮更新后重新 labeling 才会暴露下一层不同的重复结构，这是 46--64 轮长尾的直接原因。
+
+同算例 time-indexed 的当前完整对照为 `1696.092s`、22 nodes、`obj=bound=36803`。其中直接记录的 strong phase1 trial RMP 为 `468.419s/772`；若把 strong repair 的 `FindFeasible` pricing `154.273s`、repair slack/after-pricing LP `25.767s` 和 lightweight seed preparation `10.181s` 一并计入，强分支相关工作约为 `658.6s`。历史最好完整 time-indexed 记录为 `1568.207s`、22 nodes，strong trial RMP 为 `485.401s/758`。因此 time-indexed 虽然处理节点更多、trial 次数更多，但单次 trial RMP 平均约 `0.61--0.64s`，明显低于本次 ng-DSSR 的 `1.264s`；同时它不存在 ng-DSSR repair 内部几十轮 DSSR 的长尾。

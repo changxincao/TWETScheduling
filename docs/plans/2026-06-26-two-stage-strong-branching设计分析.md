@@ -412,3 +412,12 @@ Phase-I 初始 LP 或后续 repair pricing 一旦使 artificial slack 和正值�
 在 `wet040_001_2m` 上进行了严格同配置 A/B，唯一差异是该开关。旧 repair 结果为 `obj=bound=22580`、`valid=true`、16 nodes、总时间 `129.257s`；纯 Phase-I 同样为 `obj=bound=22580`、`valid=true`、16 nodes、总时间 `164.357s`。新路径将 repair exact ng-DSSR 启动次数从 24 降到 4，下降 83.3%；repair after-pricing RMP 求解从 83 次降到 40 次，但额外发生 22 次 Phase-I 归零后的真实 RMP 求解。最终 master LP 时间由 `63.415s` 增至 `87.702s`，启发式时间由 `26.407s` 增至 `33.330s`，总时间增加 `35.100s`，约慢 27.2%；列池由 45,614 降至 40,672。
 
 结论是该设计在语义上成立，也确实消除了有限 M 对 dual/PWLF 的尺度污染，并显著减少困难 repair 内的 exact DSSR；但当前算例中零成本 Phase-I 的退化 LP 和恢复真实目标后的额外重解超过了这部分收益。代码保留作后续 A/B 和困难大 M 实例验证，默认继续使用旧 repair。实验目录分别为 `test-results/bpc/ab-strong-phase1-40-2-new-20260720b` 和 `test-results/bpc/ab-strong-phase1-40-2-old-20260720c`。
+#### Phase-I A/B 时间归因
+
+进一步按日志累计器拆分后，新方案的直接收益其实很小。repair exact `FindFeasible` 从 `0.679s/24` 降到 `0.017s/4`，只节省 `0.662s`；repair after-pricing LP 从 `0.309s/83` 降到 `0.153s/40`，再节省 `0.156s`。虽然 exact 启动次数下降83.3%，但40-2上的旧 repair exact 本来平均只有28.3ms，因此次数变化看起来很大，绝对收益合计不足1秒。
+
+慢项主要来自 master。旧方案 master LP 共 `63.415s`，新方案为 `87.702s`，增加 `24.287s`，解释总退化35.100s的69.2%。其中相同320次 `strong_branching_light_repair_rmp` 从 `56.627s` 增至 `75.015s`，单次平均由176.96ms增至234.42ms，增加 `18.388s`，是最大单项。纯 Phase-I 自身的 `initial + after_pricing + true_rmp` 为 `2.351+0.153+3.476=5.980s`，旧 repair 的 `slack_initial + after_pricing` 为 `1.575+0.309=1.884s`，直接 repair LP 多 `4.096s`；其中22次恢复真实目标后的 RMP 重解单独占3.476s。
+
+pricing 也因列集和后续 dual 轨迹改变而变重。普通 HeuristicPricing 从26.407s增至33.330s，增加6.923s；普通 exact 从7.103s增至8.151s，增加1.048s。repair pricing 本身反而由 `0.773+0.679=1.452s` 降至 `0.941+0.017=0.958s`，节省0.494s。新方案列池从45614降到40672，但 restricted seed/basis 更退化，后续相同数量的 strong trial LP 反而更慢；这属于 Phase-I 改变列和 dual 轨迹后的间接成本，不是 Phase-I 内部计时本身。扣除 master 和全部 pricing 后，其余框架时间还增加约3.336s。
+
+因此当前结论不能表述为“Phase-I repair 快但被一次重建抵消”。准确说法是：它有效消除了 exact repair，但该实例的 exact repair 原本并不贵；新增真实 RMP 重解、零目标退化以及由不同 seed/basis 引起的后续 strong-trial LP 和普通 pricing 退化共同造成总时间增加。若要继续评估，应放到旧 repair exact 为数十秒的困难 child 上单独 A/B，而不是依据40-2推断其对60-2长尾无效。

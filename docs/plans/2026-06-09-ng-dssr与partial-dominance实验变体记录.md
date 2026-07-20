@@ -2780,3 +2780,9 @@ Tmid probe 已经在困难 repair 中实际生效。同一次 exact 的第1轮�
 第二项是 envelope prefilter 成员位图。当前每个 backward envelope group 首次构造 `prunedForwardIndices` 时，会扫描该 terminal 下全部 forward labels并通过 identity map查询所属 forward group；group-pair 剪枝结果虽有缓存，但逐 label 归组扫描仍重复发生。计划在构建 envelope index 时为每个 forward group记录其在已排序 `candidates` 中的位置位图；某个 group-pair 可剪时直接 OR 对应位图。标准 label-level join、bitset skip-run、PWLF计算、sequence恢复和候选写入均不改变。
 
 验证只比较严格等价结果：每轮 group-pair 判定、pruned index、实际 visited pair、funcEval、elementary/non-elementary sequence、真实回刷成本必须一致。若任一项不一致立即撤回；若 join 局部计时没有稳定下降也不保留复杂实现。top-1000 reservoir、join早停和遍历顺序本轮均不动。
+
+263. 2026-07-20 group-envelope prefilter 成员位图优化
+
+no-SRI ng-DSSR 的 group-envelope prefilter 原先在首次处理每个 backward group 与 lastJob 组合时，仍扫描该 lastJob 下的全部 forward labels，并通过 IdentityHashMap 找回所属 group；group-pair 的可剪结论虽然已有缓存，但 label 到 group 的展开扫描会随 backward group 数量重复。本次改为在构造 forward group 时记录其成员在 activeForwardByLastJob 中的位置位图。某个 forward group 被证明可剪后，直接把该 group 的成员位图 OR 到 prunedForwardIndices，不再逐 label 查询所属 group。只有成功生成 join extension、实际进入 envelope group 的 label 才在加入当场写入位图；空 extension 和 dominated label 与旧实现一样不进入 group 位图，后续仍由原 label-level 流程处理；group envelope、剪枝条件、label 顺序和最终 pair 集合均未改变。
+
+验证使用 wet040_001_2m、root-only、no ALNS/no strong、当前 source-aware dominance 和 all-cycles completion bound，对照仅切换 ngDssrJoinEnvelopePrefilter。开启/关闭两组均得到 bound=22490、pool=6209、16 次 exact、valid=true；总时间分别为 19.924s/19.897s，exact 为 5.775s/5.813s，差异属于运行波动。开启组日志确认 group prefilter 实际执行并跳过 label pair。本次修改的主要价值是删除随 backward group 重复的 label 扫描和 identity-map 查询，属于严格等价的常数优化，当前小 root 上没有可单独归因的整体 wall-time 提升。candidate reservoir 与 ng-set 更新逻辑本次未修改。

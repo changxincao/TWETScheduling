@@ -4010,14 +4010,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			for (int i = 0; i < forwardLabels.size(); i++) {
 				ForwardLabel label = forwardLabels.get(i);
 				if (!label.isDominated) {
-					addForwardJoinEnvelopeGroup(forwardMap, job, label);
+					JoinEnvelopeGroup<ForwardLabel> group = addForwardJoinEnvelopeGroup(forwardMap, job, label);
+					if (group != null) {
+						group.memberIndices.set(i);
+					}
 				}
 			}
 			if (!forwardMap.isEmpty()) {
 				ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups =
 						new ArrayList<JoinEnvelopeGroup<ForwardLabel>>(forwardMap.values());
 				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups);
-				indexForwardJoinEnvelopeLabels(index, groups);
 				Collections.sort(groups);
 				index.forwardByTerminal.set(job, groups);
 				joinEnvelopeForwardGroups += groups.size();
@@ -4046,15 +4048,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return index;
 	}
 
-	private void indexForwardJoinEnvelopeLabels(JoinEnvelopeIndex index,
-			ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups) {
-		for (int i = 0; i < groups.size(); i++) {
-			JoinEnvelopeGroup<ForwardLabel> group = groups.get(i);
-			for (int j = 0; j < group.labels.size(); j++) {
-				index.forwardGroupByLabel.put(group.labels.get(j), group);
-			}
-		}
-	}
 
 	private void indexBackwardJoinEnvelopeLabels(JoinEnvelopeIndex index,
 			ArrayList<JoinEnvelopeGroup<BackwardLabel>> groups) {
@@ -4076,16 +4069,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return count;
 	}
 
-	private void addForwardJoinEnvelopeGroup(HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>> map,
+	/**
+	 * 把 label 加入对应的 forward envelope group；返回 null 表示该 label 没有可用于 join 的函数。
+	 */
+	private JoinEnvelopeGroup<ForwardLabel> addForwardJoinEnvelopeGroup(
+			HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>> map,
 			int terminalJob, ForwardLabel label) {
 		PiecewiseLinearFunction function = getForwardJoinExtension(label);
 		if (function == null || function.head == null) {
-			return;
+			return null;
 		}
 		JoinEnvelopeGroup<ForwardLabel> group = joinEnvelopeGroup(map, terminalJob, label.ngMemorySet);
 		group.labels.add(label);
 		group.envelope.merge(function, label);
 		joinEnvelopeForwardLabels++;
+		return group;
 	}
 
 	private void addBackwardJoinEnvelopeGroup(HashMap<PackedBitSet, JoinEnvelopeGroup<BackwardLabel>> map,
@@ -7908,8 +7906,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final class JoinEnvelopeIndex {
 		final ArrayList<ArrayList<JoinEnvelopeGroup<ForwardLabel>>> forwardByTerminal;
 		final ArrayList<ArrayList<JoinEnvelopeGroup<BackwardLabel>>> backwardByTerminal;
-		final IdentityHashMap<ForwardLabel, JoinEnvelopeGroup<ForwardLabel>> forwardGroupByLabel =
-				new IdentityHashMap<ForwardLabel, JoinEnvelopeGroup<ForwardLabel>>();
 		final IdentityHashMap<BackwardLabel, JoinEnvelopeGroup<BackwardLabel>> backwardGroupByLabel =
 				new IdentityHashMap<BackwardLabel, JoinEnvelopeGroup<BackwardLabel>>();
 		final IdentityHashMap<JoinEnvelopeGroup<ForwardLabel>,
@@ -7946,10 +7942,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return cachedIndices;
 			}
 			BitSet pruned = new BitSet(candidates.size());
-			for (int i = 0; i < candidates.size(); i++) {
-				JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroupByLabel.get(candidates.get(i));
-				if (forwardGroup != null && canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
-					pruned.set(i);
+			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups = forwardByTerminal.get(lastJob);
+			if (forwardGroups != null) {
+				for (int i = 0; i < forwardGroups.size(); i++) {
+					JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroups.get(i);
+					if (canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
+						pruned.or(forwardGroup.memberIndices);
+					}
 				}
 			}
 			byTerminal[lastJob] = pruned;
@@ -7984,6 +7983,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final PackedBitSet ngMemorySet;
 		final TracedJoinEnvelope<L> envelope = new TracedJoinEnvelope<L>();
 		final ArrayList<L> labels = new ArrayList<L>();
+		final BitSet memberIndices = new BitSet();
 		double minReducedCost = Utility.big_M;
 
 		JoinEnvelopeGroup(int terminalJob, PackedBitSet ngMemorySet) {

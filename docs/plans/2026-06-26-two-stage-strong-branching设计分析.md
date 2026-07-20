@@ -380,3 +380,13 @@ Barrier 在 root 已比 Auto 慢约 58.1%，且进入 child 后没有出现足�
 第三种是单独解紧凑 LP 或 MIP。若紧凑模型与 child 的完整 route 域严格等价，则 MIP infeasible 可以安全剪掉 child，MIP feasible 还能直接给出一组可行列；但对每个 strong side 解一次完整 MIP 通常远重于当前 LP repair，而且它判断的是整数可行性，不是用于 strong score 的 master-LP 可行性。当前 relaxed time-indexed 图允许非基本/重复访问 pseudo-route，它的可行不能证明 elementary route master 可行；只有该放松模型也 infeasible 时，才能作为单向不可行证据。由此，紧凑 LP/MIP 更适合作为困难 side 的偶发 fallback 或快速充分/必要条件，而不适合直接替代每个 trial 的 Phase-I 列生成。
 
 分支冲突、required arc 时间可达性、required/forbidden 链冲突、机器数上下界等组合检查可以在建 LP 前排除一部分显然不可行 side，但这些只是必要条件预处理，无法覆盖多机器、覆盖约束和时间窗耦合下的完整可行性。当前阶段只形成分析结论，不修改 repair 实现。
+
+### 2026-07-20：arc 左右支 repair 与有限 M 列流程
+
+当前 lightweight strong trial 先从父 restricted RMP 构造 child seed：父节点正值机器列无条件保留，其他列只保留 child-compatible 列。左支增加显式 forbidden arc 行 `sum(lambda using i->j)=0`；父正值列中使用该弧的列虽被临时保留，但不属于 branch-implied M 列，第一次 LP 由显式等式直接迫使其取0。若因此 restricted LP infeasible，repair mode 只给这条 forbidden 行增加一个有方向的 artificial slack，再按当前 repair dual 补列。
+
+右支增加显式 required arc 行 `sum(lambda using i->j)=1`，并将所有 `i->k(k!=j)`、`h->j(h!=i)` 记为 branch-implied forbidden arc。lightweight seed 会保留父节点正值竞争列以维持 repair 起点；从第一次 trial LP 建模开始，只要 `enableStrongBranchingBranchImpliedPenalty=true`，这些列的 objective coefficient 就由真实成本替换为 `50*incumbent` 的有限 repair penalty。它们不是等到 LP infeasible 后才加 M，也没有修改全局 pool 中的真实列成本。非正值且 child-incompatible 的竞争列在 lightweight seed 阶段已经过滤掉。
+
+第一次 trial LP 有两种情况进入 repair：LP 本身 infeasible，或者 LP feasible 但仍有正值 penalty 列。repair mode 随后只给当前 required arc 行加一个 artificial slack；同一个有限 penalty 同时作用于 slack 和历史竞争列。外层依次调用启发式 `findFeasible()` 和 exact ng-DSSR `findFeasible()`，每次加列后重解当前 repair LP。pricing 按 child 域生成的新列正常不应再含 branch-implied 竞争弧；如果历史或异常新列仍不兼容，建模时仍按 penalty 成本处理。repair 成功的必要条件是 artificial slack 与正值 penalty 列同时归零，随后才按 reduced cost 筛选后续 seed。两者仍有任一正值且 exact 已耗尽时，当前实现把该 side 判为 infeasible；exact certified dual bound 达到 incumbent 时则用独立 `dual_bound_pruned` 状态按 INF 评分，不与结构 infeasible 混同。
+
+60-2 完整日志中，36 次 exact repair 有33次来自右支 required arc，累计637.017s，占 repair exact 总时间83.6%；左支 forbidden arc只有3次，但平均41.760s，高于右支平均19.304s。正确表述应是“右支因触发频率高而构成总瓶颈”，而不是“右支每次都比左支难”。

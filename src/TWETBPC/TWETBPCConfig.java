@@ -38,8 +38,8 @@ public class TWETBPCConfig {
 	public double alnsSimulatedAnnealingInitialTemperatureRatio = 0.01;
 	public double alnsSimulatedAnnealingCoolingRate = 0.995;
 	public double alnsSimulatedAnnealingMinTemperatureRatio = 1.0e-6;
-	/** 2026-06-23: root 初始列使用哪类 ALNS 历史解；可选 accepted/best。 */
-	public String initialHeuristicColumnHistoryMode = "accepted";
+	/** 2026-07-21: root 默认使用历次全局 best；SA 只改变搜索轨迹，不改变该历史口径。 */
+	public String initialHeuristicColumnHistoryMode = "best";
 	public int acceptedSolutionHistoryLimit = 2000;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;

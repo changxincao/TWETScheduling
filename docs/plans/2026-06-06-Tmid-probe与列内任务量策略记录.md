@@ -583,3 +583,11 @@ formal 永久删弧和 pricingOnly 的差异也很明显。早期 `maxNodes=2` �
 013 上 pricingOnly 的负面例子说明了同一个问题的另一面。开启 pricingOnly 后，root 固定约 206 条，node2 又固定约 66 条，但在 required adjacency 右支 node3 提前爆炸：`Tmid≈408.723`，中止前 `fwQueue≈71983`、`fwKept≈138150`、`fBuilt≈1298746`、`cbFPruned=0`。同一进入路径下临时忽略 node3 的 pricingOnly arc 仍然爆，说明问题不是 node3 直接使用这批 pricingOnly arc 导致，而是前序 pricingOnly 改变了列池和 dual，使 node3 的 completion-bound suffix 过乐观、Tmid 偏右，forward child 全部 survivor。
 
 因此对 subtree 的当前建议是：pricingOnly 比 formal 更适合作为默认实验方向，因为它不直接破坏 RMP 列可行域，风险小；但它仍不是稳定加速器。它适合在 completion bound 能固定大量 arc、且固定后没有把 required adjacency dual/Tmid 推入坏状态的算例上使用，例如 012；在 013 这类 required adjacency dual 放大 relaxed suffix 的节点上，可能更早进入单侧爆炸。后续要判断某个节点上 subtree 是否真正有效，必须固定 node snapshot 后 replay 同一 dual/列池/Tmid，而不是从 root 完整重跑 on/off。
+
+## 2026-07-21 困难 DSSR 的完整 exact 反馈 Tmid 策略
+
+当前 DSSR 内每5轮重新 probe；上一轮完整 labeling 只有在 kept-label 比超过5倍时才把 probe 起点移动 horizon 的5%，最终 Tmid 仍由每侧最多2500次 pop 的浅层 queue probe决定。60-2 困难 repair 中 backward/forward 完整扩展耗时可超过16倍，但浅层 probe仍可能把起点重新选回不利位置，因此周期 probe已经生效却不能稳定抑制 backward 标签膨胀。
+
+更合理的下一版是保留第一轮现有 probe，后续 DSSR 轮直接使用上一轮完整 exact 的方向反馈预测 Tmid。以 forward/backward 扩展耗时为主指标、kept labels 和 half-window ineligible 为辅助；backward明显更重时上移 Tmid，forward更重时下移。移动量按对数耗时比连续变化，并限制为有效 horizon 的5%--10%；比例回到约1.5以内时保持不动。若移动后失衡方向反转，则记录一对正反方向 bracket，后续在 bracket 内插值或二分，避免来回跳动。浅层 probe只用于首轮、无历史反馈或连续振荡后的局部校验，不再每5轮覆盖完整 exact 给出的方向。
+
+该策略只在同一次 DSSR 内使用，因为此时 dual固定、仅ng-set逐轮收紧，上一轮反馈可比性最高。更换 node、cut epoch 或 repair 状态时重置；跨 exact 调用的 node-level freeze继续保留现有周期校验。实现前应先在最重的116轮 repair上离线回放 `(Tmid, fwMs, bwMs, fwLabels, bwLabels, halfWindowIneligible)`，确认控制方向和步长，再做开关式 A/B。

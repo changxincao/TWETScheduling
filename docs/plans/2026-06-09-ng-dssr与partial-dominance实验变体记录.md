@@ -2837,3 +2837,9 @@ C1000 与 C10000 两批 40-2 run 的 exact 次数和列池分别为 16/6209 与 
 按每个场景最优 exact 时间归一化，K10/K15/K20 的四场景平均值分别为 `1.0853/1.0122/1.0041`。因此 C20000 下 K20 总体最好，K15 已非常接近；K10 在多轮 DSSR 场景明显偏弱。若只从 K 选择看，结果继续支持 K20，不支持回退到 K10，也没有证据需要超过 20。
 
 C20000 没有破坏主要 join 剪枝。12 组的 candidate 专用拼接前 `lbPruned` 均为 0；W100 两组和 setupR75 W300 的拼接后 `valuePruned` 也为 0。只有 setupR50 W300 仍有 17082 条 value-threshold 剪枝，占约 94.4 万条 non-elementary join 结果的 1.81%。各组通用 `funcPruned/funcEval` 仍为约 84%--89%，说明放大 C 只放松 non-elementary witness reservoir 的末端阈值，不影响 bestUB、时间、completion-bound、group-envelope 和函数非负等主要剪枝。C20000 本身未显示出优于 C1000 的有效更新证据，默认 candidateLimit 仍不建议修改；本轮只确认固定大 C 时 K20 仍处于合理平台。逐 run 汇总为 `test-results/bpc/ab-ng-c20000-k-matrix-50m3-w100-w300-20260720.csv`。
+
+### 269. 2026-07-21 困难 repair 的 ng-set 更新下一步
+
+60-2 困难 repair 再次确认，当前 `candidateLimit=1000 + effective K20 + minimumNewPairsSegment` 并非更新预算没有生效，而是候选高度同质：每轮约1000条负非基本候选中，顺序更新后通常只有2--3条仍能提供独立 pair，其余已被前序更新连带禁止。历史完成 run 与当前版本已经使用同一更新机制，因此不能把当前长尾解释为“新版本更新较弱”；直接扩大 K 或 candidateLimit 也不会稳定解决问题。
+
+下一项更有针对性的实验应放在候选池的结构多样性，而不是继续调 K。每条 non-elementary route 恢复后，可一次性提取全部 repeated-segment profile，并以当前 minimum-segment 选中的缺失 pair-set 作为 blocking signature；相同 signature 只保留 reduced cost 更小的代表，同时保留原 top-C reduced-cost reservoir 作为兜底。这样有机会让1000个位置覆盖更多独立重复结构，从而提高每轮 effective updates。第一版只能做成双池 A/B，不能直接用 signature 池替换原池：minimum signature 会随 ng-set overlay 变化，且相同 minimum signature 的 route 可能还有不同的备选重复段。更激进的 set-cover 式选择会扩大 ng-set并改变后续 labeling 状态，暂不作为首选。

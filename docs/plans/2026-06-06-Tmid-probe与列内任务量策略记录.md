@@ -611,3 +611,15 @@ focused Java 22 编译通过。40-2 root-only smoke 中，一个 probe 候选总
 进一步沿 strong/repair 调用链复查后，未发现会影响定价正确性的状态串用。每次 `price()/findFeasible()` 都新建 solver，probe 只在当前 LP 的分支域和窗口上构造 label；只有标量 Tmid 历史保存在 pricing engine 中。未完整结束的正反队列、time limit 中断轮和 completion-bound 预证书轮都不会写完整 exact 反馈。需要注意的性能边界是：strong branching 的左右 trial 都由父 node `copy()` 得到，正式入队前沿用父 node id，因此按 node id 保存的 Tmid 标量历史会在同一父节点的多个 trial side 之间共享。它不会复用 label，也不会改变 exact 路径族或闭合证书，但不同分支域的耗时经验并不严格可比，可能让后续 trial 选择次优 Tmid。
 
 当前尚未完成三项工作。第一，尚未在固定的60-2困难 repair side 上做 time/queue 严格 A/B，这是判断收益的关键实验。第二，尚未把 node-level Tmid 历史按正式 node、strong trial candidate/side 和 cut epoch 完整隔离；目前只用 node id，freeze 额外看 active cut ids。第三，时间指标仍是单次墙钟测量，未做重复采样或平滑；且若第一个候选已让正反队列全部耗尽，原逻辑会立即接受 rank0，不再比较其他候选。后两项都属于性能鲁棒性，不是正确性缺口。
+
+### 当前 Tmid、DSSR、node pricing 与 repair 生命周期
+
+单次 ng-DSSR exact 调用的第一轮先构造当前 dual 下的窗口、completion bound 和初始 ng-set，再确定 Tmid。若同一 node 已有稳定冻结值，则首轮直接使用；否则以 node 历史 best exact Tmid 或当前 midpoint strategy 为起点做 probe。每个候选都重建半域和 label 状态，正反各执行固定 pop 数。time 口径先按“正反队列是否都耗尽”确定可靠性等级；同等级内先找到最小 forward+backward 耗时，保留其20%近优带，再选择正反耗时比最接近1的候选。候选移动方向由哪一侧耗时更大决定，默认按当前 Tmid 的15%乘法移动；方向反转时补测中点。若某候选已经让两侧队列全部耗尽，立即接受该 rank0 候选。只有最终选中的候选恰好是当前内存中的完整 rank0 状态时才直接复用 label 进入 join，否则丢弃 probe label，按选中的 Tmid 重新执行正式 labeling。
+
+同一次 exact 调用中的 DSSR 多轮共享 ng-set 和最近一次 Tmid。第一轮完成后，若只得到负非基本 route，则更新 ng-set。下一轮先看上一完整轮的 forward/backward 扩展耗时：超过2倍立即重新 probe；否则距上次实际 probe 满5轮时周期校准；两者都不满足时直接复用原 Tmid。重探前只按上一轮重侧方向把起点移动有效 horizon 的5%，最终值仍由完整 probe 选择。出现负基本列时立即返回给 master，不继续本次 DSSR；relaxed pricing 已无负 route 时返回闭合证书。每次 `price()/findFeasible()` 结束后，这组 DSSR 局部 ng-set、轮数和轮间 Tmid 状态都销毁。
+
+pricing engine 另外维护按 node id 索引的少量标量历史。正式 node 上启发式加列、LP 重解后再次调用 exact 时，会新建 ng-DSSR solver，但首轮 probe 可以使用该 node 历史 best Tmid；稳定冻结达到条件后可连续跳过5次 probe，随后强制正常 probe 校验。active cut ids 改变时冻结计数会重置，但 best exact Tmid 本身仍保留为 probe 起点。该历史不保存 ng-set、label、PWLF 或候选列，因此只影响性能，不改变定价域。
+
+strong trial 先用 child seed 和分支行求 LP；初始 infeasible 或存在正值 branch-implied penalty 列时进入 repair。当前 Phase-I repair 把合法列成本设为0，把 artificial slack 和竞争列成本设为1，只执行声明支持 Phase-I 目标的启发式、ng-DSSR exact，列化外包时最后执行 outsourcing exact；time-indexed pre-heuristic 当前不声明该能力，因此即使普通 pricing 开启也会在 Phase-I 中跳过。某个 engine 加列后立即重解 Phase-I LP。slack 和竞争列都归零后关闭 repair/Phase-I，移除竞争列并恢复真实成本重解一次；若完整内部/外包证书下 Phase-I 目标仍为正，则 trial 判 infeasible。旧有限M repair 则在真实目标加有限 penalty 的口径下按普通 engine 列表走 `findFeasible()` 循环，可包含已开启的 pre-heuristic。
+
+trial 成功后按当前 reduced cost 筛出 seed，但不为筛后的 seed 额外重解；trial bound 使用筛选前最后一次可行 LP 解。强分支只把最终选中的 branch result 的可复用左右 child 入队，infeasible、dual-bound pruned 或 time-limit side 不入队。可复用 child 保存筛后的内部/外包 seed，并标记 `strongBranchingSeedPrepared`。child 真正从队列取出时才获得新的 node id，以 seed 重建正式 RMP；初始 LP 可行后跳过普通 child 的再次筛列，直接进入完整 pricing/cut 流程。因此 trial 的列可以继承，trial 的 Tmid 标量历史不会按新 node id 继承。当前多个 strong candidate/side 在 trial 阶段仍沿用父 node id，会共享旧 id 下的 Tmid 标量经验，这是已知的性能隔离缺口。

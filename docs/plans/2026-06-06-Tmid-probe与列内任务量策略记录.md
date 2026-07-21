@@ -693,3 +693,15 @@ setupR75 的证据更明确。完整扩展在 `Tmid=675` 时为 `274.1/256.6ms`�
 该方案的核心不是用时间直接寻找本轮最优 Tmid，而是把上一轮真实重侧作为下一轮的小步控制信号。它保留了时间指标能覆盖真实单标签成本的优势，同时避开浅 probe 候选间不可重复的 wall-clock 排序。
 
 历史口径需要分成两部分。2026-07-21 切换为 time score 之前，浅 probe 的默认主指标是 queue pressure：正向为 `forwardKept + forwardQueueRemaining`，反向为 `backwardKept + backwardQueueRemaining`，候选分数是两者比值及其倒数的较大值。probe 先选择两侧都已耗尽的 rank-0 候选，否则选择 queue pressure 更接近1的候选；下一候选的移动方向也由该 pressure 的大小决定。当时 DSSR 轮间不使用 queue pressure，而是记录上一完整轮最终的 `forwardLabelsKept/backwardLabelsKept`。它只在距上次 probe 满5轮时触发周期重探；重探前若两侧 kept label 数相差超过5倍，先把 probe seed 沿有效 midpoint 区间向较轻侧移动5%，否则从原 Tmid 开始。这个5倍 label 指标当时只修正周期 probe 的起点，不会在每一轮立即平移 Tmid。
+
+### 2026-07-21 建议采用的完整 round 闭环策略
+
+Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧搜索爆炸，同时不显著增加总扩展和 join。前面的 full-probe 已经证明，最平衡的 Tmid 不一定总时间最短；因此控制器只处理明显失衡，并设置较宽死区，不对小差异反复调节。
+
+建议首轮不再执行多候选浅 probe，直接使用 default Tmid；同一正式 node、同一 cut epoch 的后续 exact，可以把上一次 exact 第一完整 DSSR round 使用的 Tmid 作为首轮起点，但不冻结。每个完整 DSSR round 结束后记录正反向扩展 CPU time、extension candidate 数、constructed 数和最终 kept labels。主方向使用当前 Java pricing 线程的 CPU time，而不是 wall-clock；这样能排除操作系统抢占和其他进程负载，同时仍能覆盖 PWLF、dominance 和对象分配的真实计算差异。计数只作方向一致性审计，不能替代时间，因为困难 repair 已出现 candidate 约4倍、实际时间约16倍的单候选成本差异。
+
+轮间控制采用宽死区和有界步长。正反 CPU time 比不超过2时保持 Tmid；超过2且 extension candidate 方向一致时，沿有效 midpoint 区间向较轻侧移动5%。若时间比超过3，即使计数方向暂时不一致也允许移动，因为这已不是普通测量波动。连续两轮同方向失衡时可把步长提高到7.5%，上限10%；方向反转时把步长减半并形成 bracket，避免在两侧来回震荡。所有移动都只影响下一完整 round，不额外执行 dry-run。固定每5轮 probe 和稳定冻结均可删除。
+
+该策略仍然允许一轮滞后，这是有意取舍。DSSR 更新会改变 ng-set，无法在不重复完整 labeling 的情况下准确预测本轮最优 Tmid；利用上一轮反馈只能做负载控制，不能声称找到本轮最优切分。time-limit 或未完整 round 不写反馈；active cut 或正式分支域变化时清空。strong trial 的 candidate/side 各自维护局部状态，repair 内部多轮可以闭环调整，但 trial 状态不传播给其他 side，也不继承给正式 child。
+
+实现时建议先做最小 A/B：关闭浅 probe 和周期 probe，只增加完整 round CPU-time反馈、2倍死区和固定5%步长；确认多个普通 exact 与困难 repair 上的 bound、列集合口径和总耗时后，再单独测试自适应步长。这样可以区分“完整反馈本身是否有效”和“步长控制是否有效”，避免一次引入过多策略。

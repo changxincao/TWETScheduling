@@ -1923,7 +1923,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			reuse = new MidpointProbeNodeReuse();
 			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
 		}
-		reuse.ensureFreezeCutEpoch(lp.getActiveCutIds());
+		reuse.ensureCutEpoch(lp.getActiveCutIds());
 		if (!reuse.tryAcquireFrozenMidpoint()) {
 			return false;
 		}
@@ -2449,9 +2449,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (config.bidirectionalMidpointProbeReuseWithinNode && midpointProbeReuseByNode != null
 				&& lp.getNode() != null) {
 			MidpointProbeNodeReuse cached = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
-			if (cached != null && cached.hasBestExact()) {
-				midpointProbeReferenceSource = "reuseBestExact";
-				return cached.bestExactTmid;
+			if (cached != null) {
+				cached.ensureCutEpoch(lp.getActiveCutIds());
+			}
+			if (cached != null && cached.hasLastExact()) {
+				midpointProbeReferenceSource = "reuseLatestExact";
+				return cached.lastExactTmid;
 			}
 		}
 		return tMid;
@@ -2459,7 +2462,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private int midpointProbeMaxCandidatesForCurrentReference() {
 		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
-		if ("reuseBestExact".equals(midpointProbeReferenceSource)) {
+		if ("reuseLatestExact".equals(midpointProbeReferenceSource)) {
 			maxCandidates = Math.min(maxCandidates, Math.max(1, config.bidirectionalMidpointProbeReuseMaxCandidates));
 		}
 		return maxCandidates;
@@ -2477,15 +2480,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			reuse = new MidpointProbeNodeReuse();
 			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
 		}
+		reuse.ensureCutEpoch(lp.getActiveCutIds());
 		double exactMillis = exactNanos / 1_000_000.0;
 		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
 		long labelTotal = forwardLabelsKept + backwardLabelsKept;
-		String action = reuse.considerExact(tMid, exactMillis, ratio, labelTotal,
-				forwardExactMillis, backwardExactMillis, forwardLabelsKept, backwardLabelsKept,
-				config.bidirectionalMidpointProbeExactTimeTieTolerance, normalizedExactBalanceImprovementTolerance());
+		reuse.rememberExact(tMid);
 		String freezeAction = "off";
 		if (config.bidirectionalMidpointProbeStableFreeze && ngDssrRound == 1) {
-			reuse.ensureFreezeCutEpoch(lp.getActiveCutIds());
 			if (midpointProbePerformed) {
 				freezeAction = reuse.considerFreezeSelection(tMid, pricingHorizon);
 			} else if (midpointProbeStableFreezeUsed) {
@@ -2494,17 +2495,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		int exactTimeDirection = direction(forwardExactMillis, backwardExactMillis);
 		int exactLabelDirection = direction(forwardLabelsKept, backwardLabelsKept);
-		midpointProbeFeedbackSummary = "exactReuse=" + action + ", exactMs=" + exactMillis + ", ratio=" + ratio
-				+ ", labels=" + labelTotal + ", bestT=" + reuse.bestExactTmid + ", bestMs="
-				+ reuse.bestExactMillis + ", bestRatio=" + reuse.bestExactRatio + ", bestLabels="
-				+ reuse.bestExactLabelTotal
+		midpointProbeFeedbackSummary = "exactReuse=latest, exactMs=" + exactMillis + ", ratio=" + ratio
+				+ ", labels=" + labelTotal + ", latestT=" + reuse.lastExactTmid
 				+ ", directionAudit ref/selected/exactTime/exactLabels=" + midpointProbeReferenceDirection + ":"
 				+ midpointProbeSelectedDirection + ":" + exactTimeDirection + ":" + exactLabelDirection
 				+ ", selectedSideMs=" + midpointProbeSelectedForwardMillis + ":"
 				+ midpointProbeSelectedBackwardMillis
 				+ ", exactSideMs=" + forwardExactMillis + ":" + backwardExactMillis
-				+ ", bestExactSideMs=" + reuse.bestExactForwardMillis + ":" + reuse.bestExactBackwardMillis
-				+ ", bestExactSideLabels=" + reuse.bestExactForwardLabels + ":" + reuse.bestExactBackwardLabels
+				+ ", exactSideLabels=" + forwardLabelsKept + ":" + backwardLabelsKept
 				+ ", stableFreeze=" + freezeAction + "/" + reuse.freezeSummary();
 	}
 
@@ -2540,12 +2538,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double normalizedProbeHighImbalanceRatio() {
 		double ratio = config.bidirectionalMidpointProbeHighImbalanceRatio;
 		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 10.0;
-	}
-
-	private double normalizedExactBalanceImprovementTolerance() {
-		double tolerance = config.bidirectionalMidpointProbeExactBalanceImprovementTolerance;
-		return Double.isFinite(tolerance) && Utility.compareGe(tolerance, 0.0)
-				&& Utility.compareLe(tolerance, 1.0) ? tolerance : 0.30;
 	}
 
 	private boolean isProbeDirectionReversed(MidpointProbeResult previous, MidpointProbeResult current, String mode) {
@@ -7644,18 +7636,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	static final class MidpointProbeNodeReuse {
-		double bestExactTmid = Double.NaN;
-		double bestExactMillis = Double.POSITIVE_INFINITY;
-		double bestExactRatio = Double.POSITIVE_INFINITY;
-		long bestExactLabelTotal = Long.MAX_VALUE;
-		double bestExactForwardMillis = Double.NaN;
-		double bestExactBackwardMillis = Double.NaN;
-		long bestExactForwardLabels;
-		long bestExactBackwardLabels;
 		double lastExactTmid = Double.NaN;
-		double lastExactMillis = Double.NaN;
-		double lastExactRatio = Double.NaN;
-		long lastExactLabelTotal;
 		private ArrayList<Integer> freezeActiveCutIds;
 		private int freezeExactCalls;
 		private double freezeLastSelectedTmid = Double.NaN;
@@ -7665,12 +7646,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		private int frozenSkippedCalls;
 		private boolean freezeValidationPending;
 
-		void ensureFreezeCutEpoch(List<Integer> activeCutIds) {
+		void ensureCutEpoch(List<Integer> activeCutIds) {
 			List<Integer> current = activeCutIds == null ? Collections.<Integer>emptyList() : activeCutIds;
 			if (freezeActiveCutIds != null && freezeActiveCutIds.equals(current)) {
 				return;
 			}
 			freezeActiveCutIds = new ArrayList<Integer>(current);
+			// 2026-07-21: cut 改变后 dual 和定价域已经变化，最近一次 Tmid 也不能跨 epoch 复用。
+			lastExactTmid = Double.NaN;
 			freezeExactCalls = 0;
 			freezeLastSelectedTmid = Double.NaN;
 			freezeStableSelections = 0;
@@ -7731,61 +7714,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					+ MIDPOINT_FREEZE_SKIPPED_CALLS + ", t=" + frozenTmid;
 		}
 
-		boolean hasBestExact() {
-			return Double.isFinite(bestExactTmid) && Double.isFinite(bestExactMillis)
-					&& Utility.compareGt(bestExactTmid, 0.0);
+		boolean hasLastExact() {
+			return Double.isFinite(lastExactTmid) && Utility.compareGt(lastExactTmid, 0.0);
 		}
 
-		String considerExact(double tMid, double exactMillis, double ratio, long labelTotal,
-				double forwardMillis, double backwardMillis, long forwardLabels, long backwardLabels,
-				double timeTieTolerance, double balanceImprovementTolerance) {
+		void rememberExact(double tMid) {
 			lastExactTmid = tMid;
-			lastExactMillis = exactMillis;
-			lastExactRatio = ratio;
-			lastExactLabelTotal = labelTotal;
-			if (!hasBestExact()) {
-				updateBest(tMid, exactMillis, ratio, labelTotal,
-						forwardMillis, backwardMillis, forwardLabels, backwardLabels);
-				return "init";
-			}
-			boolean timeClose = isTimeClose(exactMillis, bestExactMillis, timeTieTolerance);
-			if (timeClose && isBalanceMeaningfullyBetter(ratio, bestExactRatio, balanceImprovementTolerance)) {
-				updateBest(tMid, exactMillis, ratio, labelTotal,
-						forwardMillis, backwardMillis, forwardLabels, backwardLabels);
-				return "balance";
-			}
-			if (!timeClose && Utility.compareLt(exactMillis, bestExactMillis)) {
-				updateBest(tMid, exactMillis, ratio, labelTotal,
-						forwardMillis, backwardMillis, forwardLabels, backwardLabels);
-				return "time";
-			}
-			return "keep";
-		}
-
-		private void updateBest(double tMid, double exactMillis, double ratio, long labelTotal,
-				double forwardMillis, double backwardMillis, long forwardLabels, long backwardLabels) {
-			bestExactTmid = tMid;
-			bestExactMillis = exactMillis;
-			bestExactRatio = ratio;
-			bestExactLabelTotal = labelTotal;
-			bestExactForwardMillis = forwardMillis;
-			bestExactBackwardMillis = backwardMillis;
-			bestExactForwardLabels = forwardLabels;
-			bestExactBackwardLabels = backwardLabels;
-		}
-
-		private boolean isTimeClose(double currentMillis, double incumbentMillis, double tolerance) {
-			double base = Math.max(currentMillis, incumbentMillis);
-			return Double.isFinite(base) && Utility.compareLe(Math.abs(currentMillis - incumbentMillis),
-					base * tolerance);
-		}
-
-		private boolean isBalanceMeaningfullyBetter(double currentRatio, double incumbentRatio, double tolerance) {
-			if (!Double.isFinite(currentRatio) || !Double.isFinite(incumbentRatio)) {
-				return false;
-			}
-			double required = incumbentRatio * Math.max(0.0, 1.0 - tolerance);
-			return Utility.compareLt(currentRatio, required);
 		}
 	}
 

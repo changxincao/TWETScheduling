@@ -352,15 +352,6 @@ public class TWETBPCConfig {
 	public boolean bidirectionalMidpointProbeStableFreeze = true;
 	/** 2026-07-09: ng-DSSR 扩展热路径细分计时诊断；默认关闭，避免高频 nanoTime 影响批量实验。 */
 	public boolean ngDssrExtensionTimingDiagnostics = false;
-	/**
-	 * 2026-06-07: 保留的实验开关。当前主线改为复用同一 node 内历史 exact 表现最好的 Tmid，
-	 * 不再默认用上一轮 forward/backward 压力做方向乘法修正。
-	 */
-	public boolean bidirectionalMidpointProbeExactFeedback = false;
-	/** 2026-06-08: node 内历史 Tmid 复用时，两个 exact 耗时相差不超过较大值的该比例才进入二级比较。 */
-	public double bidirectionalMidpointProbeExactTimeTieTolerance = 0.10;
-	/** 2026-06-08: exact 耗时接近时，F/B kept ratio 至少改善该比例才替换历史最快 Tmid。 */
-	public double bidirectionalMidpointProbeExactBalanceImprovementTolerance = 0.30;
 	/** 2026-07-17: 单次启发式返回上限与本地候选池统一收紧到 300，控制 RMP 列规模。 */
 	public int maxHeuristicPricingColumns = 300;
 	/** 2026-05-18: 对应旧 VRP Configure.m_tabu_cg_size，从当前 RMP 中挑多少条低 reduced cost 列作为 tabu seed。 */

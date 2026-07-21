@@ -693,15 +693,6 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrExtensionTimingDiagnostics = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrExtensionTimingDiagnostics",
 				Boolean.toString(config.ngDssrExtensionTimingDiagnostics)));
-		config.bidirectionalMidpointProbeExactFeedback = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointProbeExactFeedback",
-				Boolean.toString(config.bidirectionalMidpointProbeExactFeedback)));
-		config.bidirectionalMidpointProbeExactTimeTieTolerance = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointProbeExactTimeTieTolerance",
-				Double.toString(config.bidirectionalMidpointProbeExactTimeTieTolerance)));
-		config.bidirectionalMidpointProbeExactBalanceImprovementTolerance = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointProbeExactBalanceImprovementTolerance",
-				Double.toString(config.bidirectionalMidpointProbeExactBalanceImprovementTolerance)));
 		return config;
 	}
 

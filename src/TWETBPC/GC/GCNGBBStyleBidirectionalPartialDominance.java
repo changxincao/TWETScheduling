@@ -734,9 +734,12 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 		if (config.bidirectionalMidpointProbeReuseWithinNode && midpointProbeReuseByNode != null
 				&& lp.getNode() != null) {
 			MidpointProbeNodeReuse cached = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
-			if (cached != null && cached.hasBestExact()) {
-				midpointProbeReferenceSource = "reuseBestExact";
-				return cached.bestExactTmid;
+			if (cached != null) {
+				cached.ensureCutEpoch(lp.getActiveCutIds());
+			}
+			if (cached != null && cached.hasLastExact()) {
+				midpointProbeReferenceSource = "reuseLatestExact";
+				return cached.lastExactTmid;
 			}
 		}
 		return tMid;
@@ -744,7 +747,7 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 
 	private int midpointProbeMaxCandidatesForCurrentReference() {
 		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
-		if ("reuseBestExact".equals(midpointProbeReferenceSource)) {
+		if ("reuseLatestExact".equals(midpointProbeReferenceSource)) {
 			maxCandidates = Math.min(maxCandidates, Math.max(1, config.bidirectionalMidpointProbeReuseMaxCandidates));
 		}
 		return maxCandidates;
@@ -761,15 +764,13 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 			reuse = new MidpointProbeNodeReuse();
 			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
 		}
+		reuse.ensureCutEpoch(lp.getActiveCutIds());
 		double exactMillis = exactNanos / 1_000_000.0;
 		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
 		long labelTotal = forwardLabelsKept + backwardLabelsKept;
-		String action = reuse.considerExact(tMid, exactMillis, ratio, labelTotal,
-				config.bidirectionalMidpointProbeExactTimeTieTolerance, normalizedExactBalanceImprovementTolerance());
-		midpointProbeFeedbackSummary = "exactReuse=" + action + ", exactMs=" + exactMillis + ", ratio=" + ratio
-				+ ", labels=" + labelTotal + ", bestT=" + reuse.bestExactTmid + ", bestMs="
-				+ reuse.bestExactMillis + ", bestRatio=" + reuse.bestExactRatio + ", bestLabels="
-				+ reuse.bestExactLabelTotal;
+		reuse.rememberExact(tMid);
+		midpointProbeFeedbackSummary = "exactReuse=latest, exactMs=" + exactMillis + ", ratio=" + ratio
+				+ ", labels=" + labelTotal + ", latestT=" + reuse.lastExactTmid;
 	}
 
 	private double normalizedProbeMoveRatio() {
@@ -789,12 +790,6 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 	private double normalizedProbeEarlyStopRatio() {
 		double ratio = config.bidirectionalMidpointProbeEarlyStopRatio;
 		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 0.0;
-	}
-
-	private double normalizedExactBalanceImprovementTolerance() {
-		double tolerance = config.bidirectionalMidpointProbeExactBalanceImprovementTolerance;
-		return Double.isFinite(tolerance) && Utility.compareGe(tolerance, 0.0)
-				&& Utility.compareLe(tolerance, 1.0) ? tolerance : 0.30;
 	}
 
 	private boolean isProbeDirectionReversed(MidpointProbeResult previous, MidpointProbeResult current, String mode) {
@@ -3737,61 +3732,24 @@ public class GCNGBBStyleBidirectionalPartialDominance {
 	}
 
 	static final class MidpointProbeNodeReuse {
-		double bestExactTmid = Double.NaN;
-		double bestExactMillis = Double.POSITIVE_INFINITY;
-		double bestExactRatio = Double.POSITIVE_INFINITY;
-		long bestExactLabelTotal = Long.MAX_VALUE;
 		double lastExactTmid = Double.NaN;
-		double lastExactMillis = Double.NaN;
-		double lastExactRatio = Double.NaN;
-		long lastExactLabelTotal;
+		private List<Integer> activeCutIds;
 
-		boolean hasBestExact() {
-			return Double.isFinite(bestExactTmid) && Double.isFinite(bestExactMillis)
-					&& Utility.compareGt(bestExactTmid, 0.0);
+		void ensureCutEpoch(List<Integer> currentCutIds) {
+			List<Integer> current = currentCutIds == null ? Collections.<Integer>emptyList() : currentCutIds;
+			if (activeCutIds != null && activeCutIds.equals(current)) {
+				return;
+			}
+			activeCutIds = new ArrayList<Integer>(current);
+			lastExactTmid = Double.NaN;
 		}
 
-		String considerExact(double tMid, double exactMillis, double ratio, long labelTotal,
-				double timeTieTolerance, double balanceImprovementTolerance) {
+		boolean hasLastExact() {
+			return Double.isFinite(lastExactTmid) && Utility.compareGt(lastExactTmid, 0.0);
+		}
+
+		void rememberExact(double tMid) {
 			lastExactTmid = tMid;
-			lastExactMillis = exactMillis;
-			lastExactRatio = ratio;
-			lastExactLabelTotal = labelTotal;
-			if (!hasBestExact()) {
-				updateBest(tMid, exactMillis, ratio, labelTotal);
-				return "init";
-			}
-			boolean timeClose = isTimeClose(exactMillis, bestExactMillis, timeTieTolerance);
-			if (timeClose && isBalanceMeaningfullyBetter(ratio, bestExactRatio, balanceImprovementTolerance)) {
-				updateBest(tMid, exactMillis, ratio, labelTotal);
-				return "balance";
-			}
-			if (!timeClose && Utility.compareLt(exactMillis, bestExactMillis)) {
-				updateBest(tMid, exactMillis, ratio, labelTotal);
-				return "time";
-			}
-			return "keep";
-		}
-
-		private void updateBest(double tMid, double exactMillis, double ratio, long labelTotal) {
-			bestExactTmid = tMid;
-			bestExactMillis = exactMillis;
-			bestExactRatio = ratio;
-			bestExactLabelTotal = labelTotal;
-		}
-
-		private boolean isTimeClose(double currentMillis, double incumbentMillis, double tolerance) {
-			double base = Math.max(currentMillis, incumbentMillis);
-			return Double.isFinite(base) && Utility.compareLe(Math.abs(currentMillis - incumbentMillis),
-					base * tolerance);
-		}
-
-		private boolean isBalanceMeaningfullyBetter(double currentRatio, double incumbentRatio, double tolerance) {
-			if (!Double.isFinite(currentRatio) || !Double.isFinite(incumbentRatio)) {
-				return false;
-			}
-			double required = incumbentRatio * Math.max(0.0, 1.0 - tolerance);
-			return Utility.compareLt(currentRatio, required);
 		}
 	}
 

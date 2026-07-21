@@ -612,13 +612,19 @@ focused Java 22 编译通过。40-2 root-only smoke 中，一个 probe 候选总
 
 当前尚未完成三项工作。第一，尚未在固定的60-2困难 repair side 上做 time/queue 严格 A/B，这是判断收益的关键实验。第二，尚未把 node-level Tmid 历史按正式 node、strong trial candidate/side 和 cut epoch 完整隔离；目前只用 node id，freeze 额外看 active cut ids。第三，时间指标仍是单次墙钟测量，未做重复采样或平滑；且若第一个候选已让正反队列全部耗尽，原逻辑会立即接受 rank0，不再比较其他候选。后两项都属于性能鲁棒性，不是正确性缺口。
 
+### 2026-07-21 历史 best Tmid 清理决定
+
+再次按代码调用链复核后，确认当前实现额外保留了旧的 `bestExactTmid`。它不是 DSSR 内的上一轮 Tmid，也不是稳定冻结值，而是把同一 `node.id` 下不同 pricing 调用、不同 dual 和不同 ng-set 的完整 DSSR 轮放在一起比较，保留历史耗时最短者作为下一次 probe 起点。该比较口径不稳定，也与后续讨论收敛出的简化生命周期不一致。
+
+当前最终决定是删除历史 best 选择，只保留两层必要状态：同一次 `price()/findFeasible()` 的 DSSR 多轮使用最近一轮 Tmid，并在上一轮正反耗时超过2倍或距上次 probe 满5轮时重新校准；同一 node、同一 active-cut epoch 的多次 pricing 调用只保存最近一次完整 round 的 Tmid 作为下一次 probe 起点，同时保留已经实现的稳定冻结及每5次跳过后的强制校验。active cut 集合变化时，最近 Tmid 和冻结状态一起清空。历史 exact 耗时、历史 best ratio、历史 best label 数量及其 tie-break 参数全部退出求解逻辑。旧文档中的历史 best 实验结果继续保留，用于说明尝试过程，不再代表当前主线。实现后对 `src/` 全局搜索，已不存在 `bestExact`、`reuseBestExact` 及三个旧配置引用；相关五个 Java 文件的 focused Java 22 编译通过。
+
 ### 当前 Tmid、DSSR、node pricing 与 repair 生命周期
 
-单次 ng-DSSR exact 调用的第一轮先构造当前 dual 下的窗口、completion bound 和初始 ng-set，再确定 Tmid。若同一 node 已有稳定冻结值，则首轮直接使用；否则以 node 历史 best exact Tmid 或当前 midpoint strategy 为起点做 probe。每个候选都重建半域和 label 状态，正反各执行固定 pop 数。time 口径先按“正反队列是否都耗尽”确定可靠性等级；同等级内先找到最小 forward+backward 耗时，保留其20%近优带，再选择正反耗时比最接近1的候选。候选移动方向由哪一侧耗时更大决定，默认按当前 Tmid 的15%乘法移动；方向反转时补测中点。若某候选已经让两侧队列全部耗尽，立即接受该 rank0 候选。只有最终选中的候选恰好是当前内存中的完整 rank0 状态时才直接复用 label 进入 join，否则丢弃 probe label，按选中的 Tmid 重新执行正式 labeling。
+单次 ng-DSSR exact 调用的第一轮先构造当前 dual 下的窗口、completion bound 和初始 ng-set，再确定 Tmid。若同一 node、同一 active-cut epoch 已有稳定冻结值，则首轮直接使用；否则以最近一次完整 round 的 Tmid 或当前 midpoint strategy 为起点做 probe。每个候选都重建半域和 label 状态，正反各执行固定 pop 数。time 口径先按“正反队列是否都耗尽”确定可靠性等级；同等级内先找到最小 forward+backward 耗时，保留其20%近优带，再选择正反耗时比最接近1的候选。候选移动方向由哪一侧耗时更大决定，默认按当前 Tmid 的15%乘法移动；方向反转时补测中点。若某候选已经让两侧队列全部耗尽，立即接受该 rank0 候选。只有最终选中的候选恰好是当前内存中的完整 rank0 状态时才直接复用 label 进入 join，否则丢弃 probe label，按选中的 Tmid 重新执行正式 labeling。
 
 同一次 exact 调用中的 DSSR 多轮共享 ng-set 和最近一次 Tmid。第一轮完成后，若只得到负非基本 route，则更新 ng-set。下一轮先看上一完整轮的 forward/backward 扩展耗时：超过2倍立即重新 probe；否则距上次实际 probe 满5轮时周期校准；两者都不满足时直接复用原 Tmid。重探前只按上一轮重侧方向把起点移动有效 horizon 的5%，最终值仍由完整 probe 选择。出现负基本列时立即返回给 master，不继续本次 DSSR；relaxed pricing 已无负 route 时返回闭合证书。每次 `price()/findFeasible()` 结束后，这组 DSSR 局部 ng-set、轮数和轮间 Tmid 状态都销毁。
 
-pricing engine 另外维护按 node id 索引的少量标量历史。正式 node 上启发式加列、LP 重解后再次调用 exact 时，会新建 ng-DSSR solver，但首轮 probe 可以使用该 node 历史 best Tmid；稳定冻结达到条件后可连续跳过5次 probe，随后强制正常 probe 校验。active cut ids 改变时冻结计数会重置，但 best exact Tmid 本身仍保留为 probe 起点。该历史不保存 ng-set、label、PWLF 或候选列，因此只影响性能，不改变定价域。
+pricing engine 另外按 node id 保存最近一次完整 round 的 Tmid。正式 node 上启发式加列、LP 重解后再次调用 exact 时，会新建 ng-DSSR solver，但首轮 probe 可以从该最近值开始；稳定冻结达到条件后可连续跳过5次 probe，随后强制正常 probe 校验。active cut ids 改变时，最近 Tmid 和冻结状态一起清空。这里不再比较历史 exact 耗时，也不保存历史 best ratio 或 label 数量；同时不保存 ng-set、label、PWLF 或候选列，因此只影响 probe 起点，不改变定价域。
 
 strong trial 先用 child seed 和分支行求 LP；初始 infeasible 或存在正值 branch-implied penalty 列时进入 repair。当前 Phase-I repair 把合法列成本设为0，把 artificial slack 和竞争列成本设为1，只执行声明支持 Phase-I 目标的启发式、ng-DSSR exact，列化外包时最后执行 outsourcing exact；time-indexed pre-heuristic 当前不声明该能力，因此即使普通 pricing 开启也会在 Phase-I 中跳过。某个 engine 加列后立即重解 Phase-I LP。slack 和竞争列都归零后关闭 repair/Phase-I，移除竞争列并恢复真实成本重解一次；若完整内部/外包证书下 Phase-I 目标仍为正，则 trial 判 infeasible。旧有限M repair 则在真实目标加有限 penalty 的口径下按普通 engine 列表走 `findFeasible()` 循环，可包含已开启的 pre-heuristic。
 

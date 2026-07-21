@@ -491,3 +491,11 @@ Phase-I 每次初始求解或加列重解后都会通过 `needsStrongRepair()` �
 纯 Phase-I 把所有合法真实列的目标系数设为 0，只让 artificial slack 和正值竞争列承担单位目标。此时 pricing 不再关心原问题中的成本优劣，主要搜索能够降低人工残留、把 Phase-I 目标推到 0 的合法列。因此它更接近专门的可行性搜索，往往能由启发式一次补入一批列后直接归零，避免进入困难 exact DSSR。代价是得到的列对恢复真实目标后的优化质量未必好，而且零成本合法列会形成较大的替代最优面。
 
 Phase-I 目标为 0 只证明当前 restricted master 已存在不依赖人工项的可行解，不是原始目标的 bound，也不证明正式列生成已经收敛。归零后必须恢复真实列成本并重解 RMP，所得真实目标值才用于 strong branching 评分；若人工残留始终为正，则仍需完整 exact pricing certificate 才能证明 child infeasible。
+
+### 2026-07-21：纯 Phase-I repair 的进一步验证口径
+
+现有证据已经说明纯 Phase-I 在实际触发的轻量 repair 上能够更快归零：40-2 root-only 的直接 repair 为 `0.434s`，旧方案为 `0.720s`；50-2 固定初始列的两轮完整 A/B 中，旧 repair 直接耗时为 `3.744s/2.437s`，Phase-I 为 `0.808s/0.847s`，且两边得到相同的五节点搜索树和最终最优值。但这些算例实际 repair side 很少，尚不足以判断困难 repair 上是否应默认开启。
+
+下一步最有判别力的验证应固定并重放同一个困难 child side，而不是只比较受 ALNS、JVM 和 CPLEX 波动影响的整树 wall time。重放输入至少固定父节点 restricted column IDs、分支方向、incumbent 和参数；旧 repair 与 Phase-I 按 ABBA 顺序重复运行。核心指标为 side 直接总时间、启发式/exact `FindFeasible` 次数、DSSR 轮数、生成列数、RMP 重解时间，以及 Phase-I 归零后的真实目标 RMP 时间。正确性同时检查人工 residual 是否单调不增、归零后 slack/竞争列是否全部为 0、恢复真实目标后的 clean RMP 是否可行，并在正式 child exact 闭合后比较最终 bound，而不能要求两种受限 repair seed 的 trial bound 必然相同。
+
+优先样本应来自 60-2 中旧 repair 需要 46--64 轮 DSSR 的右支 side。若 Phase-I 在同一个 side 上稳定把 exact DSSR 降为 0 或少数轮，且加上真实目标恢复重解后仍显著更快，则说明该方案对当前主要长尾有效；若只是减少 exact 次数但总 side 时间不降，或者生成大量零成本列使后续正式 child 变慢，则继续保持默认关闭。整树验证只作为第二层，要求固定初始列并至少交错运行两轮，分别报告 repair 专属时间与总时间。

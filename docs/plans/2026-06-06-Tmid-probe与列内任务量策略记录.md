@@ -715,3 +715,13 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 该安全 probe 不应再从所有候选中排序选“最优者”，而应采用 first acceptable：当前候选一旦低于极端阈值就直接使用。实现上还应区分“probe 已完成”和“probe 状态可继续”两个状态；被接受的最后一个候选已有合法 labels 和未完成队列，正式 labeling 可以从该状态继续，而不是清空后重新扩展。只有被判为极端并放弃的候选才丢弃状态。若当前代码接线无法安全续跑，第一版可以先保留重建，正确性验证后再单独实现续跑优化。
 
 后续 DSSR round 仍使用上一完整 round 的反馈进行小步修正。最终结构因此是两层：首轮用确定性浅 probe 防止极端情况；轮间用完整 round 的 CPU time 纠正真实长期失衡。前者阈值宽、次数少，后者不额外 dry-run，两者职责不混合。
+
+### 2026-07-21 浅 probe 的累计生成量与队列增长指标
+
+浅 probe 可以增加累计生成量，但不能直接把 kept、dominated 和 queue 当作三个互斥集合相加。kept 是累计被接受的 label，尚未出队的 queue 本身已经属于 kept；dominated 是生成后在插入阶段被拒绝的 label。因此 kept+dominated 表示已经到达 dominance 插入阶段的累计 label 尝试量，而额外加 queue 的含义不是“更多不同 label”，而是给尚未处理的未来工作再次计权。
+
+相比只看 kept+queue，累计 generated=kept+dominated 更能反映已经真实发生的扩展和 dominance 压力，特别是某一侧大量 label 被占优但仍消耗了 PWLF 和图操作的情况。但 raw queue 仍然不能直接删除：它反映尚未展开的分支，且在爆炸早期可能暂时不大。更有价值的是分块记录 queue 增长，例如正反向每扩展500个 label 记录一次队列大小，用最近一个 block 的入队率和净增长判断当前搜索是否仍在加速膨胀。
+
+第一版不建议把这些量立即压成带任意权重的单一 score，而是保留两个独立安全信号。信号一是累计 generated 的正反比；信号二是 queue remaining 的正反比及最近 block 的增长方向。若 generated 已出现数量级差异，或者 queue 比例极端且重侧仍持续净增长，就判为极端并移动 Tmid；若两个信号方向冲突，则不因中等差异移动，只在其中一个达到更高硬阈值时触发。这样比 kept+dominated+queue 的简单求和更容易解释和校准。
+
+如果后续确实需要一个标量，可使用“一层预测工作量”：已发生的 generated，加上 queueRemaining 乘最近 block 每个 pop 产生的 label 尝试数。它把 queue 解释为未来一次扩展的预计成本，而不是重复统计 label 数。不过该公式仍只预测下一层，不应作为精细选点目标，只适合首轮极端保护。A/B 时应同时保留 generated ratio、queue ratio、recent growth 和最终完整 round 的正反耗时，验证浅层信号是否真的能识别爆炸方向。

@@ -2071,25 +2071,87 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		initializeSearchState(lp);
 		initializeForwardSource(lp);
 		initializeBackwardSink(lp);
+		long forwardKeptBase = forwardLabelsKept;
+		long forwardDominatedBase = forwardLabelsDominated;
+		long backwardKeptBase = backwardLabelsKept;
+		long backwardDominatedBase = backwardLabelsDominated;
+		long forwardPopsBase = diagnosticForwardPops;
+		long backwardPopsBase = diagnosticBackwardPops;
+		long forwardConstructedBase = forwardExtensionConstructed;
+		long backwardConstructedBase = backwardExtensionConstructed;
+		int sideProbeLimit = Math.max(1, Integer.getInteger(
+				"twet.bpc.midpointPressureDiagnosticSidePopLimit", 2500));
+
+		long forwardProbeStart = System.nanoTime();
+		int forwardProbeCalls = 0;
+		while (canContinue() && !FWUL.isEmpty() && forwardProbeCalls < sideProbeLimit) {
+			forwardExtend(lp);
+			forwardProbeCalls++;
+		}
+		long forwardProbeElapsed = System.nanoTime() - forwardProbeStart;
+		long forwardProbePops = diagnosticForwardPops - forwardPopsBase;
+		long forwardProbeGenerated = forwardLabelsKept - forwardKeptBase
+				+ forwardLabelsDominated - forwardDominatedBase;
+		long forwardProbeConstructed = forwardExtensionConstructed - forwardConstructedBase;
+		int forwardProbeRawQueue = queueSize(FWUL);
+		int forwardProbeLiveQueue = liveQueueSize(FWUL);
+		double forwardPressure = oneLayerProbePressure(forwardProbeGenerated, forwardProbePops,
+				forwardProbeLiveQueue);
+
+		long backwardProbeStart = System.nanoTime();
+		int backwardProbeCalls = 0;
+		while (canContinue() && !BWUL.isEmpty() && backwardProbeCalls < sideProbeLimit) {
+			backwardExtend(lp);
+			backwardProbeCalls++;
+		}
+		long backwardProbeElapsed = System.nanoTime() - backwardProbeStart;
+		long backwardProbePops = diagnosticBackwardPops - backwardPopsBase;
+		long backwardProbeGenerated = backwardLabelsKept - backwardKeptBase
+				+ backwardLabelsDominated - backwardDominatedBase;
+		long backwardProbeConstructed = backwardExtensionConstructed - backwardConstructedBase;
+		int backwardProbeRawQueue = queueSize(BWUL);
+		int backwardProbeLiveQueue = liveQueueSize(BWUL);
+		double backwardPressure = oneLayerProbePressure(backwardProbeGenerated, backwardProbePops,
+				backwardProbeLiveQueue);
+
 		long start = System.nanoTime();
-		long forwardDeadline = deadlineNanos(start, forwardSeconds);
+		double forwardRemainingSeconds = Math.max(0.0,
+				forwardSeconds - forwardProbeElapsed / 1_000_000_000.0);
+		long forwardDeadline = deadlineNanos(start, forwardRemainingSeconds);
 		while (canContinue() && !FWUL.isEmpty() && !timeReached(forwardDeadline)) {
 			forwardExtend(lp);
 		}
-		long forwardElapsed = System.nanoTime() - start;
+		long forwardElapsed = forwardProbeElapsed + System.nanoTime() - start;
 		long forwardKept = forwardLabelsKept;
 		long forwardQueue = queueSize(FWUL);
 		boolean forwardExhausted = FWUL.isEmpty();
 
 		long backwardStart = System.nanoTime();
-		long backwardDeadline = deadlineNanos(backwardStart, backwardSeconds);
+		double backwardRemainingSeconds = Math.max(0.0,
+				backwardSeconds - backwardProbeElapsed / 1_000_000_000.0);
+		long backwardDeadline = deadlineNanos(backwardStart, backwardRemainingSeconds);
 		while (canContinue() && !BWUL.isEmpty() && !timeReached(backwardDeadline)) {
 			backwardExtend(lp);
 		}
-		long backwardElapsed = System.nanoTime() - backwardStart;
+		long backwardElapsed = backwardProbeElapsed + System.nanoTime() - backwardStart;
 		long backwardKept = backwardLabelsKept;
 		long backwardQueue = queueSize(BWUL);
 		boolean backwardExhausted = BWUL.isEmpty();
+		long forwardFinalGenerated = forwardLabelsKept - forwardKeptBase
+				+ forwardLabelsDominated - forwardDominatedBase;
+		long backwardFinalGenerated = backwardLabelsKept - backwardKeptBase
+				+ backwardLabelsDominated - backwardDominatedBase;
+		System.out.println("[midpointPressureDiagnostic] node=" + lp.getNode().id + " tMid=" + candidateTMid
+				+ " limit=" + sideProbeLimit + " fw="
+				+ pressureDiagnosticSide(forwardProbeCalls, forwardProbePops, forwardProbeGenerated,
+						forwardProbeConstructed, forwardProbeRawQueue, forwardProbeLiveQueue,
+						forwardPressure, forwardFinalGenerated));
+		System.out.println("[midpointPressureDiagnostic] bw="
+				+ pressureDiagnosticSide(backwardProbeCalls, backwardProbePops, backwardProbeGenerated,
+						backwardProbeConstructed, backwardProbeRawQueue, backwardProbeLiveQueue,
+						backwardPressure, backwardFinalGenerated)
+				+ " pRatio=" + directionalRatio(forwardPressure, backwardPressure)
+				+ " finalRatio=" + directionalRatio(forwardFinalGenerated, backwardFinalGenerated));
 		System.out.println("[midpointFullDiagnostic] node=" + lp.getNode().id
 				+ " tMid=" + candidateTMid
 				+ " fwElapsedMs=" + formatMillis(forwardElapsed)
@@ -2111,6 +2173,43 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " cbFPruned=" + completionForwardLabelsPruned
 				+ " cbBPruned=" + completionBackwardLabelsPruned);
 		System.out.flush();
+	}
+
+	private int liveQueueSize(PriorityQueue<? extends FunctionLabel> queue) {
+		if (queue == null || queue.isEmpty()) {
+			return 0;
+		}
+		int live = 0;
+		for (FunctionLabel label : queue) {
+			if (!label.isDominated) {
+				live++;
+			}
+		}
+		return live;
+	}
+
+	private double oneLayerProbePressure(long generated, long activePops, long liveQueue) {
+		if (activePops <= 0L) {
+			return generated;
+		}
+		return generated + liveQueue * ((double) generated / activePops);
+	}
+
+	private String formatPercent(long numerator, long denominator) {
+		return denominator <= 0L ? "NA" : String.format("%.2f%%", 100.0 * numerator / denominator);
+	}
+
+	private String pressureDiagnosticSide(long calls, long activePops, long generated, long constructed,
+			long rawQueue, long liveQueue, double pressure, long finalGenerated) {
+		return "calls/active/generated/constructed/qRaw/qLive/activePct/pressure/final="
+				+ calls + "/" + activePops + "/" + generated + "/" + constructed + "/"
+				+ rawQueue + "/" + liveQueue + "/" + formatPercent(liveQueue, rawQueue) + "/"
+				+ String.format("%.3f", pressure) + "/" + finalGenerated;
+	}
+
+	private String directionalRatio(double forward, double backward) {
+		double denominator = Math.max(1.0e-12, backward);
+		return String.format("%.3f:%.3f(%.6f)", forward, backward, forward / denominator);
 	}
 
 	private long deadlineNanos(long start, double seconds) {

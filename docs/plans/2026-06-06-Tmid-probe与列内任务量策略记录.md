@@ -735,3 +735,13 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 建议诊断版先在 probe 结束时扫描一次队列，统计 isDominated=false 的 Q_live；P_active 使用 probe 前后的 diagnostic pops 增量；G 使用 probe 初始化后的 kept+dominated 增量。定义 g=G/P_active，P_est=G+Q_live*g。若 P_active 为0则该侧不做外推。扫描队列是 O(Q)，但仅在最多几个安全 probe 候选结束时执行；若 raw queue 已超过硬上限，可以直接判极端而不扫描。后续若该指标有效，再考虑给 label 增加 queued 状态并增量维护 liveQueueCount，避免正式实现中的全队列扫描。
 
 在接入选点前应先只诊断：对每个浅 probe 输出 G、P_active、Q_raw、Q_live、g 和 P_est，并在同一候选继续完成 labeling 后记录最终 generated。主要检查两件事：P_est 判断正反重侧的方向命中率，以及它对首轮爆炸的召回率。只有方向稳定后再替换旧 queue pressure；不应直接根据单个算例设阈值。
+
+### 2026-07-22 活动队列比例与一层压力估计实测
+
+本次按上述口径增加了仅由 midpointFullDiagnostic 触发的诊断，不改变正式 probe 选点。每个候选先对正反向各执行最多2500次队列调用，记录真正扩展的 active pop、kept+dominated 增量、constructed child、raw/live queue 和一层压力；随后从同一状态继续跑完整 labeling。60-2 新旧 full diagnostic 的最终 kept、pop、candidate、constructed 和 completion-bound prune 计数逐项一致，确认“先浅探再继续”的诊断没有改变搜索结果。
+
+40-2 太轻，所有候选在2500次上限前均已耗尽，Q_raw=Q_live=0，只能验证计数一致性。60-2 中，反向2500次队列调用只有约1500次真正活动扩展，P_active/calls 约60%；浅探结束时 raw queue 为421--427，live queue 为253--257，Q_live/Q_raw 同样约60%。Tmid=2050 的正向为924/2500次活动扩展，raw/live queue 为139/86，活动比例61.87%。因此困难 probe 中约40%的原始队列项已经被后续 dominance 标记失效，直接使用固定2500和 PriorityQueue.size() 会明显高估有效工作量。
+
+一层压力在4个60-2候选上都判断对了正反重侧方向，但不是精确的完整树预测。Tmid=2050 的预测正反比为1.175，最终 generated 比为1.114，相对误差约5.5%；Tmid=1850 预测0.969，最终0.714，已经把实际后向偏重误判得接近平衡；Tmid=1650 预测0.476，最终0.121，低估失衡约3.9倍；Tmid=1450 预测0.055，最终0.0062，低估约9倍。原因是该公式只外推当前 live queue 的下一层，无法表示后续深层分支因子继续放大。
+
+当前结论是：P_active 和 Q_live 的修正是必要的，能够去掉约40%的懒删除噪声；一层压力适合做首轮极端失衡保护，方向判断在本组样本中可靠，但不能用于精确比较中等候选或寻找最优 Tmid。若压力比已达到数量级差异，可以据此移动；接近1时仍必须视为不确定，不能据此宣称两侧完整工作量平衡。实验日志位于 test-results/bpc/diag-tmid-pressure-40m2-20260721/ 和 test-results/bpc/diag-tmid-pressure-60m2-20260721/。

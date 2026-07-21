@@ -643,3 +643,9 @@ trial 成功后按当前 reduced cost 筛出 seed，但不为筛后的 seed 额�
 进一步复核发现不能把两种作用域都称为 `lastTmid`。当前代码在每个完整 DSSR round 结束后都调用 node 级 `rememberExact(tMid)`，所以一次 exact 若执行多轮，map 中最终留下的是最后一个完整 DSSR round 的 Tmid。该值适合本次 exact 内“下一 DSSR 轮”使用，却不一定适合下一次 exact 的第一轮：后者会重新建立初始 ng-set，而上一 exact 的最后一轮通常已经经过多次 ng-set 收紧，两轮 labeling 负载不可直接类比。
 
 后续若删除冻结，应明确拆成两个状态。第一，`dssrPreviousRoundTmid/FwMs/BwMs` 只存在于一次 `price()/findFeasible()` 内，每轮覆盖，服务下一 DSSR 轮。第二，`nodePreviousFirstRoundTmid/FwMs/BwMs` 按 node 和 cut epoch 保存，只在该次 exact 的第一个完整 DSSR round 结束后写回，服务下一次 exact 的第一轮。若一次 exact 只有一轮，两者数值相同；若有多轮，跨 exact 不应被最后一轮覆盖。time limit 或第一轮未完整结束时不更新 node 级反馈。
+
+### 2026-07-21 关于 DSSR 轮间 Tmid 差异的证据修正
+
+现有逐轮日志不支持“每轮 Tmid 差异很大”。Tmid 在未触发 probe 的轮次会原样复用，通常连续多轮完全相同；60-2 困难 exact 的典型记录为 r1--r5 使用 `1879.500`，r6--r8或r10使用 `1738.538`，一次变化约7.5%。40-2接线 smoke 曾因第一轮耗时明显失衡从约 `775.532` 调到 `1165.614`，变化约50%，但该实验关闭了标准启发式和ALNS，只能证明极端情况下可能变化，不能说明这是常态。
+
+因此上一节“跨 exact 应只保存第一轮”的结论应降级为待测性能假设，而不是必要语义。第一轮与下一次 exact 的初始 ng-set阶段更接近；最后一轮则是本次 exact 最新校准后的Tmid，两者谁更适合作为下一次起点没有现有证据。删除冻结时可以先保持当前“最后完整轮覆盖”的最小修改，配合该轮真实F/B耗时决定复用或probe；若后续固定side A/B显示退化，再比较first-round反馈。两种选择都只影响性能，不影响定价正确性。

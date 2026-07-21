@@ -691,3 +691,5 @@ setupR75 的证据更明确。完整扩展在 `Tmid=675` 时为 `274.1/256.6ms`�
 跨 exact 反馈应与 DSSR 轮内反馈分开。同一正式 node、同一 active-cut epoch 的下一次 exact 首轮，优先参考上一次 exact 的第一完整 DSSR round，而不是最后一轮；原因是每次 exact 会重新使用初始 ng-set，上一 exact 的最后一轮通常已经经过多次 ng-set 收紧，可比性较差。active cut 或正式分支域改变时清空。strong trial/repair 的左右 side 和不同 candidate 不应继续仅按父 node id 共享反馈；repair 内部的多轮 DSSR 可以局部使用上一轮时间，但 trial 结束后不把该反馈带给其他 side，正式 child 入队后重新建立 node 级状态。time-limit 或未完整结束的 round 不写回。
 
 该方案的核心不是用时间直接寻找本轮最优 Tmid，而是把上一轮真实重侧作为下一轮的小步控制信号。它保留了时间指标能覆盖真实单标签成本的优势，同时避开浅 probe 候选间不可重复的 wall-clock 排序。
+
+历史口径需要分成两部分。2026-07-21 切换为 time score 之前，浅 probe 的默认主指标是 queue pressure：正向为 `forwardKept + forwardQueueRemaining`，反向为 `backwardKept + backwardQueueRemaining`，候选分数是两者比值及其倒数的较大值。probe 先选择两侧都已耗尽的 rank-0 候选，否则选择 queue pressure 更接近1的候选；下一候选的移动方向也由该 pressure 的大小决定。当时 DSSR 轮间不使用 queue pressure，而是记录上一完整轮最终的 `forwardLabelsKept/backwardLabelsKept`。它只在距上次 probe 满5轮时触发周期重探；重探前若两侧 kept label 数相差超过5倍，先把 probe seed 沿有效 midpoint 区间向较轻侧移动5%，否则从原 Tmid 开始。这个5倍 label 指标当时只修正周期 probe 的起点，不会在每一轮立即平移 Tmid。

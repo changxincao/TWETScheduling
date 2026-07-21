@@ -601,3 +601,13 @@ formal 永久删弧和 pricingOnly 的差异也很明显。早期 `maxNodes=2` �
 本次实现改为只在正反队列完整结束且未触发 time limit 时记录反馈；node 历史接收当前轮总时间和当前轮 forward/backward 增量，不再读取累计计时器。DSSR 重探仍保留“距上次 probe 满5轮”的校验，同时增加上一完整轮正反耗时超过2倍时立即重探；周期 probe 的 5% 初始偏移也从标签数方向改为耗时方向。repair 仍复用同一个 ng-DSSR `solve()` 流程，因此单轮计时和周期重探修正自然生效，本次没有增加独立 repair Tmid 生命周期。
 
 focused Java 22 编译通过。40-2 root-only smoke 中，一个 probe 候选总耗时 `29.6765ms`、耗时比 `1.9351`，另一个为 `34.6226ms/1.1537`；两者处于20%近优带内，最终按设计选择后者。该次 DSSR 第一轮完整扩展为 `3.2/14.6ms`，超过2倍阈值后第二轮立即重探，将 Tmid 从约 `775.532` 调到 `1165.614`，第二轮完整扩展收敛到 `21.5/24.7ms`。smoke 最终在180秒全局限制下中断，末轮日志为 `midpointProbeFeedback=off`，没有追加该轮 `midpointByDssrRound`，确认不完整轮不会写 Tmid 反馈。该运行关闭了 ALNS、启发式 pricing、RMIH 和强分支，仅用于接线验证，不作为性能或最优性结论。
+
+### 40-2 同口径复核
+
+前述180秒 smoke 不能用于评价性能。它关闭了 ALNS 和启发式 pricing，并从2条初始列开始，49次 exact 独自生成11670条列，因此超时来自实验口径，不是 time score 单独造成。随后在同一份最新 class 上并行运行40-2 root-only A/B：两边均开启标准启发式 pricing、关闭ALNS/RMIH/strong，仅切换 `midpointProbeScore=time/queue`。两组都闭合到 root bound `22490` 且 `valid=true`；time 为 `17.083s`、exact `5.212s/18`，queue 为 `16.485s`、exact `4.609s/16`。time 慢约0.60秒，主要因为不同 Tmid 产生了不同负列轨迹，多做2次 exact，并非单次 probe 显著变慢；time 的 probe累计约174ms，反而低于queue的253ms。
+
+本例也说明该策略的适用边界。time/queue 两组 exact 初始化分别约4.881/4.375秒，占 exact 总时间均超过94%；正反扩展加join分别只有约0.208/0.118秒。Tmid只直接影响半域扩展和join，在初始化/completion-bound占绝对主导且每轮只有数百个label的40-2上，理论收益本来就很小，列轨迹差异足以淹没它。时间型 score 还依赖毫秒级墙钟测量，会比label/queue指标更容易受调度噪声影响，因此当前只能确认实现正确，不能据40-2认定它优于queue。真正目标仍应是60-2困难repair中backward扩展长尾；在固定困难side完成A/B前，不应把本次40-2结果解释成全局加速证据。
+
+进一步沿 strong/repair 调用链复查后，未发现会影响定价正确性的状态串用。每次 `price()/findFeasible()` 都新建 solver，probe 只在当前 LP 的分支域和窗口上构造 label；只有标量 Tmid 历史保存在 pricing engine 中。未完整结束的正反队列、time limit 中断轮和 completion-bound 预证书轮都不会写完整 exact 反馈。需要注意的性能边界是：strong branching 的左右 trial 都由父 node `copy()` 得到，正式入队前沿用父 node id，因此按 node id 保存的 Tmid 标量历史会在同一父节点的多个 trial side 之间共享。它不会复用 label，也不会改变 exact 路径族或闭合证书，但不同分支域的耗时经验并不严格可比，可能让后续 trial 选择次优 Tmid。
+
+当前尚未完成三项工作。第一，尚未在固定的60-2困难 repair side 上做 time/queue 严格 A/B，这是判断收益的关键实验。第二，尚未把 node-level Tmid 历史按正式 node、strong trial candidate/side 和 cut epoch 完整隔离；目前只用 node id，freeze 额外看 active cut ids。第三，时间指标仍是单次墙钟测量，未做重复采样或平滑；且若第一个候选已让正反队列全部耗尽，原逻辑会立即接受 rank0，不再比较其他候选。后两项都属于性能鲁棒性，不是正确性缺口。

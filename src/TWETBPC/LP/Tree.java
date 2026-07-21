@@ -274,7 +274,8 @@ public class Tree {
 			heartbeat(node, "branch.start");
 			for (Brancher brancher : branchers) {
 				StrongBranchingSelection strongSelection =
-						tryTwoStageStrongBranching(lp, brancher, subtreeArcElimination, solution.getObjectiveValue());
+						tryTwoStageStrongBranching(lp, brancher, subtreeArcElimination, solution.getObjectiveValue(),
+								incumbentCost);
 				if (strongSelection != null) {
 					if (strongSelection.hasTimeLimitedTrial()) {
 						traceSink.onBranch(node, brancher.getName(), strongSelection.traceResult(), queue.size());
@@ -593,7 +594,8 @@ public class Tree {
 	}
 
 	private StrongBranchingSelection tryTwoStageStrongBranching(LP parentLp, Brancher brancher,
-			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination, double parentBound) {
+			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination, double parentBound,
+			double incumbentCost) {
 		if (!config.enableTwoStageStrongBranching || config.strongBranchingCandidateLimit <= 0) {
 			return null;
 		}
@@ -617,15 +619,15 @@ public class Tree {
 			applySubtreeArcElimination(branchResult, subtreeArcElimination);
 			boolean domainRepair = useDomainFilteredStrongBranchingRepair(candidate, parentLp);
 			boolean lightweightRepair = !domainRepair && useLightweightStrongBranchingRepair(candidate, parentLp);
-			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(branchResult.getLeftNode(), parentLp,
-					domainRepair, lightweightRepair);
+			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(candidate, "left",
+					branchResult.getLeftNode(), parentLp, domainRepair, lightweightRepair, incumbentCost);
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
 			if (leftTrial != null && leftTrial.isTimeLimited()) {
 				return new StrongBranchingSelection(branchResult, candidate, leftTrial, null, 0.0, false,
 						candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
 			}
-			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(branchResult.getRightNode(), parentLp,
-					domainRepair, lightweightRepair);
+			StrongBranchingTrialResult rightTrial = solveStrongBranchingRmpTrial(candidate, "right",
+					branchResult.getRightNode(), parentLp, domainRepair, lightweightRepair, incumbentCost);
 			applyTrialSeed(branchResult.getRightNode(), rightTrial);
 			double score = hasTimeLimitedTrial(leftTrial, rightTrial) ? 0.0
 					: strongBranchingScore(parentBound, leftTrial, rightTrial);
@@ -706,8 +708,8 @@ public class Tree {
 		return builder.toString();
 	}
 
-	private StrongBranchingTrialResult solveStrongBranchingRmpTrial(Node child, LP parentLp,
-			boolean domainRepair, boolean lightweightRepair) {
+	private StrongBranchingTrialResult solveStrongBranchingRmpTrial(StrongBranchingCandidate candidate, String side,
+			Node child, LP parentLp, boolean domainRepair, boolean lightweightRepair, double incumbentCost) {
 		if (domainRepair) {
 			prepareDomainFilteredChildSeedColumns(child, parentLp);
 		} else if (lightweightRepair) {
@@ -715,6 +717,8 @@ public class Tree {
 		} else {
 			prepareChildSeedColumns(child, parentLp);
 		}
+		StrongRepairFixedSideReplay.runIfRequested(data, config, pool, outsourcingPool, cutPool,
+				parentLp, candidate, side, child, domainRepair, lightweightRepair, incumbentCost);
 		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
 		try {
 			String phase = domainRepair ? "strong_branching_domain_rmp_build"

@@ -485,6 +485,22 @@ public class TWETBPCConfig {
 				|| "sp1".equalsIgnoreCase(outsourcingModel);
 	}
 
+	/** 复制当前配置，供隔离的诊断求解使用，避免 A/B 开关污染正式求解。 */
+	public TWETBPCConfig copy() {
+		TWETBPCConfig copied = new TWETBPCConfig();
+		for (Field field : TWETBPCConfig.class.getFields()) {
+			if (Modifier.isStatic(field.getModifiers())) {
+				continue;
+			}
+			try {
+				field.set(copied, field.get(this));
+			} catch (IllegalAccessException ex) {
+				throw new IllegalStateException("Failed to copy BPC config field: " + field.getName(), ex);
+			}
+		}
+		return copied;
+	}
+
 	/**
 	 * 返回本次求解使用的配置快照。日志里记录最终 config 对象，而不是只记录命令行参数，方便追溯 runner 默认值与覆盖值。
 	 */

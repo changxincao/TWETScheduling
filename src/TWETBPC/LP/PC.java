@@ -60,6 +60,15 @@ public class PC {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 	}
 
+	/** 为不经过 Tree.solve() 的固定分支侧诊断设置与正式父节点相同的 incumbent 口径。 */
+	public void prepareStandaloneStrongBranchingTrial(double incumbentCost) {
+		incumbentForDualBoundPruning = incumbentCost;
+		lastObservedDualBound = Double.NEGATIVE_INFINITY;
+		lastNodePrunedByDualBound = false;
+		strongRepairDualBoundClosure = null;
+		pendingHeuristicMissTrace = null;
+	}
+
 	public TWETMasterSolution solve(LP lp) {
 		return solve(lp, Double.POSITIVE_INFINITY);
 	}

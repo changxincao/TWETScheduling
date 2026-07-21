@@ -499,3 +499,11 @@ Phase-I 目标为 0 只证明当前 restricted master 已存在不依赖人工�
 下一步最有判别力的验证应固定并重放同一个困难 child side，而不是只比较受 ALNS、JVM 和 CPLEX 波动影响的整树 wall time。重放输入至少固定父节点 restricted column IDs、分支方向、incumbent 和参数；旧 repair 与 Phase-I 按 ABBA 顺序重复运行。核心指标为 side 直接总时间、启发式/exact `FindFeasible` 次数、DSSR 轮数、生成列数、RMP 重解时间，以及 Phase-I 归零后的真实目标 RMP 时间。正确性同时检查人工 residual 是否单调不增、归零后 slack/竞争列是否全部为 0、恢复真实目标后的 clean RMP 是否可行，并在正式 child exact 闭合后比较最终 bound，而不能要求两种受限 repair seed 的 trial bound 必然相同。
 
 优先样本应来自 60-2 中旧 repair 需要 46--64 轮 DSSR 的右支 side。若 Phase-I 在同一个 side 上稳定把 exact DSSR 降为 0 或少数轮，且加上真实目标恢复重解后仍显著更快，则说明该方案对当前主要长尾有效；若只是减少 exact 次数但总 side 时间不降，或者生成大量零成本列使后续正式 child 变慢，则继续保持默认关闭。整树验证只作为第二层，要求固定初始列并至少交错运行两轮，分别报告 repair 专属时间与总时间。
+
+### 2026-07-21：60-2 固定 repair side 的 ABBA 复放结果
+
+已增加仅由系统属性显式触发的固定侧复放诊断。它在正式 strong trial 建模前锁定父节点、候选和方向，复制当时的内部列池、外包列池、cut pool、child seed、incumbent 与完整配置；每次运行使用独立 context 和 pool 快照，按 `old / Phase-I / Phase-I / old` 顺序执行，避免前一轮生成列污染后一轮。正式求解默认不触发该逻辑。
+
+本次锁定 `wet060_001_2m` 的 parent node 2、右支 `arc(36,24)`。四轮共同输入为 incumbent `36882`、父 RMP `5679` 列（hash `bd17752bb6bc4c0e`）、lightweight child seed `2952` 列（hash `9af2ef408e9c779b`），无外包列和 SRI cut。旧 repair 两轮分别耗时 `17.220s/16.208s`，平均 `16.714s`；Phase-I 两轮分别为 `2.985s/2.637s`，平均 `2.811s`，固定侧直接加速约 `5.94x`。差异几乎全部来自 pricing：旧方案平均 `14.939s`，每轮执行一次启发式 `FindFeasible` 加一次 ng-DSSR exact `FindFeasible`；Phase-I 平均 `0.090s`，只执行一次启发式并加入 300 列。Phase-I 的 master 时间反而由 `1.696s` 增至 `2.615s`，说明收益不是少解 LP，而是避开了困难 exact repair。
+
+两种方案最终都满足 `noSlack=true`、竞争列 residual 为 0，且均恢复真实目标得到可行 trial RMP。旧方案最终 restricted seed 为 `3132` 列、trial bound `37347.203349`；Phase-I 为 `2431` 列、trial bound `37526.838341`。这个 `179.635` 的差异来自 repair 生成列和二次筛选后 seed 不同：它们都是受限 RMP 的 strong-trial 评分，不是完整 child exact bound，不能据此宣称 Phase-I 的 relaxation 更强，也不能要求两者相同。当前能够严格确认的是：在完全固定输入的这个困难右支上，Phase-I 用一次启发式恢复可行，避免一次约 15 秒的 ng-DSSR exact repair，直接 repair 成本显著下降。实验原始记录见 `test-results/bpc/20260721-60-2-fixed-side-repair-replay-abba-v1/fixed-side-replay.log`。

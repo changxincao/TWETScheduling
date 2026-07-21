@@ -629,3 +629,11 @@ pricing engine 另外按 node id 保存最近一次完整 round 的 Tmid。正�
 strong trial 先用 child seed 和分支行求 LP；初始 infeasible 或存在正值 branch-implied penalty 列时进入 repair。当前 Phase-I repair 把合法列成本设为0，把 artificial slack 和竞争列成本设为1，只执行声明支持 Phase-I 目标的启发式、ng-DSSR exact，列化外包时最后执行 outsourcing exact；time-indexed pre-heuristic 当前不声明该能力，因此即使普通 pricing 开启也会在 Phase-I 中跳过。某个 engine 加列后立即重解 Phase-I LP。slack 和竞争列都归零后关闭 repair/Phase-I，移除竞争列并恢复真实成本重解一次；若完整内部/外包证书下 Phase-I 目标仍为正，则 trial 判 infeasible。旧有限M repair 则在真实目标加有限 penalty 的口径下按普通 engine 列表走 `findFeasible()` 循环，可包含已开启的 pre-heuristic。
 
 trial 成功后按当前 reduced cost 筛出 seed，但不为筛后的 seed 额外重解；trial bound 使用筛选前最后一次可行 LP 解。强分支只把最终选中的 branch result 的可复用左右 child 入队，infeasible、dual-bound pruned 或 time-limit side 不入队。可复用 child 保存筛后的内部/外包 seed，并标记 `strongBranchingSeedPrepared`。child 真正从队列取出时才获得新的 node id，以 seed 重建正式 RMP；初始 LP 可行后跳过普通 child 的再次筛列，直接进入完整 pricing/cut 流程。因此 trial 的列可以继承，trial 的 Tmid 标量历史不会按新 node id 继承。当前多个 strong candidate/side 在 trial 阶段仍沿用父 node id，会共享旧 id 下的 Tmid 标量经验，这是已知的性能隔离缺口。
+
+### 2026-07-21 删除冻结并统一为最近完整轮反馈的分析
+
+现有稳定冻结要累计至少5次实际 probe、连续3次选点偏差不超过 horizon 的1%，随后跳过5次再强制校验。该状态机与已经实现的“最近完整轮反馈”重复，而且用相邻 Tmid 差值判断稳定存在一个结构性问题：一旦跳过 probe 并直接复用，Tmid 本身必然不变，后续无法仅凭 Tmid 差值判断当前 dual、ng-set 和分支域下是否仍然合适。
+
+更直接的统一口径是只看上一完整 exact 的实际 forward/backward 扩展耗时。对同一 node、同一 active-cut epoch 的下一次 exact，若上一轮耗时比不超过当前 DSSR 使用的2倍阈值，直接复用上一轮 Tmid并完整 labeling；若超过2倍，则以上一轮 Tmid 为起点，按重侧方向先移动有效 horizon 的5%，再执行现有 probe。当前 exact 完成后覆盖保存 `lastTmid/lastForwardMillis/lastBackwardMillis`，不完整轮和 time-limit 轮不写回；active cut 变化时三者一起清空。这样 node 多次 pricing 与同一次 exact 内 DSSR 轮间使用同一判断，只是状态作用域不同。
+
+不建议继续用“Tmid变化小于1%”作为复用条件，也暂不需要额外的5次冻结和第6次校验。新口径的代价是反馈滞后一轮：dual变化若使原Tmid失衡，本次 exact 仍先承受一次，完成后下一次才重探；但这与当前DSSR反馈一致，而且Tmid只影响半域工作量，不影响路径域、reduced cost或闭合证书。剩余性能风险仍是 strong trial candidate/side 共享父 node id；删除冻结不会解决该隔离问题，实现时应继续明确记录。

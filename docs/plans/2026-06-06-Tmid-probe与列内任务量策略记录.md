@@ -725,3 +725,7 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 第一版不建议把这些量立即压成带任意权重的单一 score，而是保留两个独立安全信号。信号一是累计 generated 的正反比；信号二是 queue remaining 的正反比及最近 block 的增长方向。若 generated 已出现数量级差异，或者 queue 比例极端且重侧仍持续净增长，就判为极端并移动 Tmid；若两个信号方向冲突，则不因中等差异移动，只在其中一个达到更高硬阈值时触发。这样比 kept+dominated+queue 的简单求和更容易解释和校准。
 
 如果后续确实需要一个标量，可使用“一层预测工作量”：已发生的 generated，加上 queueRemaining 乘最近 block 每个 pop 产生的 label 尝试数。它把 queue 解释为未来一次扩展的预计成本，而不是重复统计 label 数。不过该公式仍只预测下一层，不应作为精细选点目标，只适合首轮极端保护。A/B 时应同时保留 generated ratio、queue ratio、recent growth 和最终完整 round 的正反耗时，验证浅层信号是否真的能识别爆炸方向。
+
+进一步简化后，可以不用最近 block，而使用本次一侧全部2500次 pop 的平均产出率，以降低局部波动。设 P 为实际 pop 数，G 为 probe 初始化完成后新增的 kept+dominated，Q 为结束时 queueRemaining，则每个 pop 的可插入 label 产出估计为 g=G/P，下一层预计新增量为 Q*g，压力定义为 P_est=G+Q*g。这里必须是加号；减号会让队列越大的一侧压力越小。G 应使用 probe 前后计数器差值，排除初始 source/sink label。
+
+该估计只预测当前队列再展开一层，而不是整个剩余搜索树。若继续使用几何级数估计全部后代，需要假设每层入队率稳定；实际 ng-memory、时间窗、completion bound 和 dominance 会随深度改变，该假设不可靠，且入队率大于等于1时公式会发散。因此第一版只用一层预测，作为极端保护。另需旁路记录 extensionConstructed/P：kept+dominated 只包含通过 completion bound 后进入插入判断的 child，已经构造函数但提前被 completion bound 剪掉的工作不在 G 中；constructed rate 可用于解释估计与真实耗时不一致，但暂不混入主公式。

@@ -637,3 +637,9 @@ trial 成功后按当前 reduced cost 筛出 seed，但不为筛后的 seed 额�
 更直接的统一口径是只看上一完整 exact 的实际 forward/backward 扩展耗时。对同一 node、同一 active-cut epoch 的下一次 exact，若上一轮耗时比不超过当前 DSSR 使用的2倍阈值，直接复用上一轮 Tmid并完整 labeling；若超过2倍，则以上一轮 Tmid 为起点，按重侧方向先移动有效 horizon 的5%，再执行现有 probe。当前 exact 完成后覆盖保存 `lastTmid/lastForwardMillis/lastBackwardMillis`，不完整轮和 time-limit 轮不写回；active cut 变化时三者一起清空。这样 node 多次 pricing 与同一次 exact 内 DSSR 轮间使用同一判断，只是状态作用域不同。
 
 不建议继续用“Tmid变化小于1%”作为复用条件，也暂不需要额外的5次冻结和第6次校验。新口径的代价是反馈滞后一轮：dual变化若使原Tmid失衡，本次 exact 仍先承受一次，完成后下一次才重探；但这与当前DSSR反馈一致，而且Tmid只影响半域工作量，不影响路径域、reduced cost或闭合证书。剩余性能风险仍是 strong trial candidate/side 共享父 node id；删除冻结不会解决该隔离问题，实现时应继续明确记录。
+
+### 2026-07-21 区分 DSSR 轮内反馈与跨 exact 反馈
+
+进一步复核发现不能把两种作用域都称为 `lastTmid`。当前代码在每个完整 DSSR round 结束后都调用 node 级 `rememberExact(tMid)`，所以一次 exact 若执行多轮，map 中最终留下的是最后一个完整 DSSR round 的 Tmid。该值适合本次 exact 内“下一 DSSR 轮”使用，却不一定适合下一次 exact 的第一轮：后者会重新建立初始 ng-set，而上一 exact 的最后一轮通常已经经过多次 ng-set 收紧，两轮 labeling 负载不可直接类比。
+
+后续若删除冻结，应明确拆成两个状态。第一，`dssrPreviousRoundTmid/FwMs/BwMs` 只存在于一次 `price()/findFeasible()` 内，每轮覆盖，服务下一 DSSR 轮。第二，`nodePreviousFirstRoundTmid/FwMs/BwMs` 按 node 和 cut epoch 保存，只在该次 exact 的第一个完整 DSSR round 结束后写回，服务下一次 exact 的第一轮。若一次 exact 只有一轮，两者数值相同；若有多轮，跨 exact 不应被最后一轮覆盖。time limit 或第一轮未完整结束时不更新 node 级反馈。

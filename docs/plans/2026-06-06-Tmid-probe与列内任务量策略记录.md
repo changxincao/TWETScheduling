@@ -729,3 +729,9 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 进一步简化后，可以不用最近 block，而使用本次一侧全部2500次 pop 的平均产出率，以降低局部波动。设 P 为实际 pop 数，G 为 probe 初始化完成后新增的 kept+dominated，Q 为结束时 queueRemaining，则每个 pop 的可插入 label 产出估计为 g=G/P，下一层预计新增量为 Q*g，压力定义为 P_est=G+Q*g。这里必须是加号；减号会让队列越大的一侧压力越小。G 应使用 probe 前后计数器差值，排除初始 source/sink label。
 
 该估计只预测当前队列再展开一层，而不是整个剩余搜索树。若继续使用几何级数估计全部后代，需要假设每层入队率稳定；实际 ng-memory、时间窗、completion bound 和 dominance 会随深度改变，该假设不可靠，且入队率大于等于1时公式会发散。因此第一版只用一层预测，作为极端保护。另需旁路记录 extensionConstructed/P：kept+dominated 只包含通过 completion bound 后进入插入判断的 child，已经构造函数但提前被 completion bound 剪掉的工作不在 G 中；constructed rate 可用于解释估计与真实耗时不一致，但暂不混入主公式。
+
+代码复核还发现两个必须处理的计数边界。当前 queueSize 直接返回 PriorityQueue.size，队列中可能保留已经被后续 dominance 标记为 isDominated、等待惰性弹出的失效 label；它们不会再扩展，只承担很小的 poll 成本。其次，probe 的 forwardPops/backwardPops 是循环调用次数，即使本次 poll 取到失效 label 并立即返回也会计数；真正执行扩展的数量是 diagnosticForwardPops/diagnosticBackwardPops。因此一层预测应使用活跃队列 Q_live 和真实扩展数 P_active，而不是原始 queue.size 与固定2500。
+
+建议诊断版先在 probe 结束时扫描一次队列，统计 isDominated=false 的 Q_live；P_active 使用 probe 前后的 diagnostic pops 增量；G 使用 probe 初始化后的 kept+dominated 增量。定义 g=G/P_active，P_est=G+Q_live*g。若 P_active 为0则该侧不做外推。扫描队列是 O(Q)，但仅在最多几个安全 probe 候选结束时执行；若 raw queue 已超过硬上限，可以直接判极端而不扫描。后续若该指标有效，再考虑给 label 增加 queued 状态并增量维护 liveQueueCount，避免正式实现中的全队列扫描。
+
+在接入选点前应先只诊断：对每个浅 probe 输出 G、P_active、Q_raw、Q_live、g 和 P_est，并在同一候选继续完成 labeling 后记录最终 generated。主要检查两件事：P_est 判断正反重侧的方向命中率，以及它对首轮爆炸的召回率。只有方向稳定后再替换旧 queue pressure；不应直接根据单个算例设阈值。

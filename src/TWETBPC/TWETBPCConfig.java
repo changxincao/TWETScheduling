@@ -319,8 +319,10 @@ public class TWETBPCConfig {
 	public int bidirectionalMidpointProbeReuseMaxCandidates = 3;
 	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.15 表示左移 *0.85，右移 *1.15。 */
 	public double bidirectionalMidpointProbeMoveRatio = 0.15;
-	/** 2026-06-06: Tmid probe 自动选择使用的 score；可选 kept/queue/bound/remaining/peak。 */
-	public String bidirectionalMidpointProbeScore = "queue";
+	/** 2026-07-21: ng-DSSR Tmid probe 默认使用正反向实际耗时；旧 pricing 实现不支持时仍回退 queue。 */
+	public String bidirectionalMidpointProbeScore = "time";
+	/** 2026-07-21: 总 probe 耗时在最小值该比例以内时，视为近似同档，再比较正反向耗时平衡。 */
+	public double bidirectionalMidpointProbeTimeTolerance = 0.20;
 	/** 2026-06-08: 二级 score 仍默认 off；remaining 只作为实验口径，个别算例不能证明适合全局默认。 */
 	public String bidirectionalMidpointProbeTieScore = "off";
 	/** 2026-06-07: 主指标倍数差不超过该值时，才使用二级 score 打破平局。 */
@@ -339,8 +341,8 @@ public class TWETBPCConfig {
 	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;
 	/** 2026-07-18: 同一次 DSSR 内每隔多少轮重新 probe；1 表示每轮，非正数表示始终复用首次结果。 */
 	public int bidirectionalMidpointProbeDssrRecheckInterval = 5;
-	/** 2026-07-18: 上一轮前后向标签数超过该倍数时，才预先移动下一次 probe 的初值。 */
-	public double bidirectionalMidpointProbeDssrImbalanceThreshold = 5.0;
+	/** 2026-07-21: 上一轮完整正反向扩展耗时超过该倍数时，下一轮提前重新 probe。 */
+	public double bidirectionalMidpointProbeDssrImbalanceThreshold = 2.0;
 	/** 2026-07-18: DSSR 周期 probe 前按可用 horizon 宽度移动初值的比例。 */
 	public double bidirectionalMidpointProbeDssrSeedMoveRatio = 0.05;
 	/**

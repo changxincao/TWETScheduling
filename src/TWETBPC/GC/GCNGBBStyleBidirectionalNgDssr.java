@@ -386,8 +386,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	/** 同一次 DSSR 内最近一次 probe 选出的 Tmid；后续轮次复用并周期校正。 */
 	private double ngDssrReusableTmid;
 	private int ngDssrLastMidpointProbeRound;
-	private long ngDssrPreviousRoundForwardLabels;
-	private long ngDssrPreviousRoundBackwardLabels;
 	private double ngDssrPreviousRoundForwardMillis;
 	private double ngDssrPreviousRoundBackwardMillis;
 	private StringBuilder ngDssrMidpointByRound;
@@ -1195,8 +1193,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalElementaryColumnsReturned = 0;
 		ngDssrReusableTmid = Double.NaN;
 		ngDssrLastMidpointProbeRound = 0;
-		ngDssrPreviousRoundForwardLabels = 0L;
-		ngDssrPreviousRoundBackwardLabels = 0L;
 		ngDssrPreviousRoundForwardMillis = Double.NaN;
 		ngDssrPreviousRoundBackwardMillis = Double.NaN;
 		ngDssrMidpointByRound = new StringBuilder();
@@ -1422,9 +1418,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			roundForwardMillis = midpointProbeSelectedForwardMillis;
 			roundBackwardMillis = midpointProbeSelectedBackwardMillis;
 		}
-		rememberDssrRoundMidpointFeedback(roundForwardMillis, roundBackwardMillis);
-		exactTotalNanos += System.nanoTime() - exactStartNanos;
-		updateMidpointProbeReuseAfterExact(lp, exactTotalNanos);
+		long roundExactNanos = System.nanoTime() - exactStartNanos;
+		exactTotalNanos += roundExactNanos;
+		boolean roundCompleted = !timeLimitChecker.isTimeLimitReached()
+				&& (midpointProbeLabelsReadyForJoin || (FWUL.isEmpty() && BWUL.isEmpty()));
+		if (roundCompleted) {
+			rememberDssrRoundMidpointFeedback(roundForwardMillis, roundBackwardMillis);
+			updateMidpointProbeReuseAfterExact(lp, roundExactNanos, roundForwardMillis, roundBackwardMillis);
+		}
 		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
 				: (midpointProbeLabelsReadyForJoin ? "probe rank0 queues exhausted"
 						: (canContinue() ? "queues exhausted" : "column cap disabled"));
@@ -1435,8 +1436,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	/** 保存本轮完整 labeling 负载，供下一次周期 probe 调整起点；不参与当前轮结果。 */
 	private void rememberDssrRoundMidpointFeedback(double forwardMillis, double backwardMillis) {
-		ngDssrPreviousRoundForwardLabels = forwardLabelsKept;
-		ngDssrPreviousRoundBackwardLabels = backwardLabelsKept;
 		ngDssrPreviousRoundForwardMillis = forwardMillis;
 		ngDssrPreviousRoundBackwardMillis = backwardMillis;
 		ngDssrReusableTmid = tMid;
@@ -1850,7 +1849,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return false;
 		}
 		int interval = config.bidirectionalMidpointProbeDssrRecheckInterval;
-		boolean recheck = interval > 0 && ngDssrRound - ngDssrLastMidpointProbeRound >= interval;
+		boolean recheck = isPreviousDssrRoundTimeImbalanced()
+				|| (interval > 0 && ngDssrRound - ngDssrLastMidpointProbeRound >= interval);
 		if (recheck) {
 			double seed = dssrPeriodicProbeSeed();
 			runMidpointProbeIfEnabled(lp, seed, "dssrPeriodicFeedback");
@@ -1872,7 +1872,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return true;
 	}
 
-	/** 上一轮若失衡超过阈值，只把 probe 起点向较轻一侧移动 5% 左右，不直接决定最终 Tmid。 */
+	private boolean isPreviousDssrRoundTimeImbalanced() {
+		double threshold = config.bidirectionalMidpointProbeDssrImbalanceThreshold;
+		return Double.isFinite(threshold) && Utility.compareGt(threshold, 1.0)
+				&& Double.isFinite(ngDssrPreviousRoundForwardMillis)
+				&& Double.isFinite(ngDssrPreviousRoundBackwardMillis)
+				&& (ngDssrPreviousRoundForwardMillis > threshold * ngDssrPreviousRoundBackwardMillis
+						|| ngDssrPreviousRoundBackwardMillis > threshold * ngDssrPreviousRoundForwardMillis);
+	}
+
+	/** 上一轮耗时若明显失衡，只把 probe 起点向较轻一侧移动 5% 左右，不直接决定最终 Tmid。 */
 	private double dssrPeriodicProbeSeed() {
 		double seed = clampCurrentMidpoint(ngDssrReusableTmid);
 		double threshold = config.bidirectionalMidpointProbeDssrImbalanceThreshold;
@@ -1883,9 +1892,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		double left = midpointLeftBound();
 		double step = Math.max(0.0, pricingHorizon - left) * Math.min(0.25, moveRatio);
-		if (ngDssrPreviousRoundBackwardLabels > threshold * ngDssrPreviousRoundForwardLabels) {
+		if (ngDssrPreviousRoundBackwardMillis > threshold * ngDssrPreviousRoundForwardMillis) {
 			seed += step;
-		} else if (ngDssrPreviousRoundForwardLabels > threshold * ngDssrPreviousRoundBackwardLabels) {
+		} else if (ngDssrPreviousRoundForwardMillis > threshold * ngDssrPreviousRoundBackwardMillis) {
 			seed -= step;
 		}
 		return clampCurrentMidpoint(seed);
@@ -2456,7 +2465,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return maxCandidates;
 	}
 
-	private void updateMidpointProbeReuseAfterExact(LP lp, long exactNanos) {
+	private void updateMidpointProbeReuseAfterExact(LP lp, long exactNanos,
+			double forwardExactMillis, double backwardExactMillis) {
 		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinNode
 				|| midpointProbeReuseByNode == null || lp == null || lp.getNode() == null || !Double.isFinite(tMid)) {
 			midpointProbeFeedbackSummary = "off";
@@ -2468,8 +2478,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
 		}
 		double exactMillis = exactNanos / 1_000_000.0;
-		double forwardExactMillis = exactForwardExpandNanos / 1_000_000.0;
-		double backwardExactMillis = exactBackwardExpandNanos / 1_000_000.0;
 		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
 		long labelTotal = forwardLabelsKept + backwardLabelsKept;
 		String action = reuse.considerExact(tMid, exactMillis, ratio, labelTotal,
@@ -2571,6 +2579,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private MidpointProbeResult selectMidpointProbeResult(ArrayList<MidpointProbeResult> results, String scoreMode) {
+		if ("time".equals(normalizeProbeScoreMode(scoreMode))) {
+			return selectMidpointProbeResultByTime(results);
+		}
 		MidpointProbeResult best = null;
 		for (MidpointProbeResult result : results) {
 			if (best == null || compareMidpointProbeResult(result, best, scoreMode) < 0) {
@@ -2578,6 +2589,54 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		}
 		return best;
+	}
+
+	/** 先限制在最短总耗时的 20% 近优带内，再选择正反向耗时更平衡的候选。 */
+	private MidpointProbeResult selectMidpointProbeResultByTime(ArrayList<MidpointProbeResult> results) {
+		int bestRank = Integer.MAX_VALUE;
+		double minTotalMillis = Double.POSITIVE_INFINITY;
+		for (MidpointProbeResult result : results) {
+			int rank = result.reliabilityRank("time");
+			if (rank < bestRank) {
+				bestRank = rank;
+				minTotalMillis = result.sideTotalMillis();
+			} else if (rank == bestRank) {
+				minTotalMillis = Math.min(minTotalMillis, result.sideTotalMillis());
+			}
+		}
+		double tolerance = config.bidirectionalMidpointProbeTimeTolerance;
+		if (!Double.isFinite(tolerance) || Utility.compareLt(tolerance, 0.0)) {
+			tolerance = 0.20;
+		}
+		double eligibleLimit = minTotalMillis * (1.0 + tolerance);
+		MidpointProbeResult best = null;
+		for (MidpointProbeResult result : results) {
+			if (result.reliabilityRank("time") != bestRank
+					|| Utility.compareGt(result.sideTotalMillis(), eligibleLimit)) {
+				continue;
+			}
+			if (best == null || compareTimeEligibleMidpointProbeResult(result, best) < 0) {
+				best = result;
+			}
+		}
+		return best;
+	}
+
+	private int compareTimeEligibleMidpointProbeResult(MidpointProbeResult a, MidpointProbeResult b) {
+		int imbalance = compareDouble(a.timeScore(), b.timeScore());
+		if (imbalance != 0) {
+			return imbalance;
+		}
+		int queue = compareDouble(a.queueScore, b.queueScore);
+		if (queue != 0) {
+			return queue;
+		}
+		int total = compareDouble(a.sideTotalMillis(), b.sideTotalMillis());
+		if (total != 0) {
+			return total;
+		}
+		int pops = Integer.compare(a.pops, b.pops);
+		return pops != 0 ? pops : compareDouble(a.tMid, b.tMid);
 	}
 
 	private int compareMidpointProbeResult(MidpointProbeResult a, MidpointProbeResult b, String scoreMode) {
@@ -2707,7 +2766,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return "queue";
 		}
 		String normalized = mode.trim().toLowerCase();
-		if ("kept".equals(normalized) || "queue".equals(normalized) || "bound".equals(normalized)
+		if ("time".equals(normalized) || "kept".equals(normalized) || "queue".equals(normalized) || "bound".equals(normalized)
 				|| "peak".equals(normalized) || "remaining".equals(normalized)) {
 			return normalized;
 		}
@@ -7788,6 +7847,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		double score(String mode) {
 			String normalized = normalizeProbeScoreMode(mode);
+			if ("time".equals(normalized)) {
+				return timeScore();
+			}
 			if ("kept".equals(normalized)) {
 				return keptScore;
 			}
@@ -7805,6 +7867,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		double leftPressure(String mode) {
 			String normalized = normalizeProbeScoreMode(mode);
+			if ("time".equals(normalized)) {
+				return forwardElapsedMillis;
+			}
 			if ("kept".equals(normalized)) {
 				return forwardKept;
 			}
@@ -7822,6 +7887,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		double rightPressure(String mode) {
 			String normalized = normalizeProbeScoreMode(mode);
+			if ("time".equals(normalized)) {
+				return backwardElapsedMillis;
+			}
 			if ("kept".equals(normalized)) {
 				return backwardKept;
 			}
@@ -7848,6 +7916,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return Math.round(leftPressure(mode) + rightPressure(mode));
 		}
 
+		double sideTotalMillis() {
+			return forwardElapsedMillis + backwardElapsedMillis;
+		}
+
+		double timeScore() {
+			double forward = Math.max(0.001, forwardElapsedMillis);
+			double backward = Math.max(0.001, backwardElapsedMillis);
+			return Math.max(forward / backward, backward / forward);
+		}
+
 		String compactSummary(String mode) {
 			String normalized = normalizeProbeScoreMode(mode);
 			return "t=" + tMid
@@ -7863,6 +7941,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					+ ",cb=" + forwardBoundPruned + ":" + backwardBoundPruned
 					+ ",rank=" + reliabilityRank(mode)
 					+ ",direction=" + pressureDirection(normalized)
+					+ ",timeTotal=" + sideTotalMillis()
+					+ ",timeRatio=" + timeScore()
 					+ ",queueRatio=" + queueScore
 					+ ",remainingRatio=" + remainingScore
 					+ ",selectedScore=" + normalized + ":" + score(normalized)

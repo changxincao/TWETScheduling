@@ -591,3 +591,13 @@ formal 永久删弧和 pricingOnly 的差异也很明显。早期 `maxNodes=2` �
 更合理的下一版是保留第一轮现有 probe，后续 DSSR 轮直接使用上一轮完整 exact 的方向反馈预测 Tmid。以 forward/backward 扩展耗时为主指标、kept labels 和 half-window ineligible 为辅助；backward明显更重时上移 Tmid，forward更重时下移。移动量按对数耗时比连续变化，并限制为有效 horizon 的5%--10%；比例回到约1.5以内时保持不动。若移动后失衡方向反转，则记录一对正反方向 bracket，后续在 bracket 内插值或二分，避免来回跳动。浅层 probe只用于首轮、无历史反馈或连续振荡后的局部校验，不再每5轮覆盖完整 exact 给出的方向。
 
 该策略只在同一次 DSSR 内使用，因为此时 dual固定、仅ng-set逐轮收紧，上一轮反馈可比性最高。更换 node、cut epoch 或 repair 状态时重置；跨 exact 调用的 node-level freeze继续保留现有周期校验。实现前应先在最重的116轮 repair上离线回放 `(Tmid, fwMs, bwMs, fwLabels, bwLabels, halfWindowIneligible)`，确认控制方向和步长，再做开关式 A/B。
+
+## 2026-07-21 probe 时间评价与 DSSR 单轮计时修正
+
+后续讨论收窄了上一节的方案。当前先不引入对数步长、bracket 历史或 repair 专用状态，只修改 probe 评价和现有 DSSR 周期重探。每个 probe 候选已经独立记录 forward/backward 扩展耗时；新口径先取可靠性等级最高的候选，找到最小正反总耗时，再保留总耗时不超过最小值 20% 的近优候选，最后从中选择正反耗时比例更均衡的点。这样既让实际 PWLF、dominance 和 completion-bound 工作量参与 Tmid 选择，又避免为了追求 1:1 选择总耗时明显更大的点。候选移动方向同步改为实际正反耗时，原候选上限、15% 移动、方向反转补中点和已有 early-stop 暂不改变。
+
+代码复核同时发现一个确定的计时口径错误。`rememberDssrRoundMidpointFeedback()` 使用当前轮进入前后的计时差，得到的 forward/backward 单轮增量正确；但 `updateMidpointProbeReuseAfterExact()` 原来读取整个 `solve()` 内累计的 `exactTotalNanos/exactForwardExpandNanos/exactBackwardExpandNanos`，却把这些累计值绑定到当前 DSSR 轮的 Tmid 和 label 数。第二轮以后因此分别记录前两轮、前三轮的累计时间，历史 best Tmid 会天然偏向较早轮次。另一个问题是 time limit 中断后仍会写 DSSR 反馈和 node 复用历史，虽然不会再进入下一轮，但会污染同 node 后续调用。
+
+本次实现改为只在正反队列完整结束且未触发 time limit 时记录反馈；node 历史接收当前轮总时间和当前轮 forward/backward 增量，不再读取累计计时器。DSSR 重探仍保留“距上次 probe 满5轮”的校验，同时增加上一完整轮正反耗时超过2倍时立即重探；周期 probe 的 5% 初始偏移也从标签数方向改为耗时方向。repair 仍复用同一个 ng-DSSR `solve()` 流程，因此单轮计时和周期重探修正自然生效，本次没有增加独立 repair Tmid 生命周期。
+
+focused Java 22 编译通过。40-2 root-only smoke 中，一个 probe 候选总耗时 `29.6765ms`、耗时比 `1.9351`，另一个为 `34.6226ms/1.1537`；两者处于20%近优带内，最终按设计选择后者。该次 DSSR 第一轮完整扩展为 `3.2/14.6ms`，超过2倍阈值后第二轮立即重探，将 Tmid 从约 `775.532` 调到 `1165.614`，第二轮完整扩展收敛到 `21.5/24.7ms`。smoke 最终在180秒全局限制下中断，末轮日志为 `midpointProbeFeedback=off`，没有追加该轮 `midpointByDssrRound`，确认不完整轮不会写 Tmid 反馈。该运行关闭了 ALNS、启发式 pricing、RMIH 和强分支，仅用于接线验证，不作为性能或最优性结论。

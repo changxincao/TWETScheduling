@@ -17,7 +17,7 @@ public final class NgDssrMinimumRepeatedSegmentUpdateTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		assertEquals(20, config.ngDssrNonElementaryRouteUpdateLimit,
 				"minimum-segment effective update budget should be conservative by default");
-		assertEquals(1000, config.ngDssrNonElementaryRouteCandidateLimit,
+		assertEquals(2000, config.ngDssrNonElementaryRouteCandidateLimit,
 				"online witness reservoir should preserve join threshold pruning");
 		assertEquals("minimumNewPairsSegment", config.ngDssrNonElementaryRouteUpdateMode,
 				"minimum-segment route update should be enabled by default");

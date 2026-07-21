@@ -2843,3 +2843,9 @@ C20000 没有破坏主要 join 剪枝。12 组的 candidate 专用拼接前 `lbP
 60-2 困难 repair 再次确认，当前 `candidateLimit=1000 + effective K20 + minimumNewPairsSegment` 并非更新预算没有生效，而是候选高度同质：每轮约1000条负非基本候选中，顺序更新后通常只有2--3条仍能提供独立 pair，其余已被前序更新连带禁止。历史完成 run 与当前版本已经使用同一更新机制，因此不能把当前长尾解释为“新版本更新较弱”；直接扩大 K 或 candidateLimit 也不会稳定解决问题。
 
 下一项更有针对性的实验应放在候选池的结构多样性，而不是继续调 K。每条 non-elementary route 恢复后，可一次性提取全部 repeated-segment profile，并以当前 minimum-segment 选中的缺失 pair-set 作为 blocking signature；相同 signature 只保留 reduced cost 更小的代表，同时保留原 top-C reduced-cost reservoir 作为兜底。这样有机会让1000个位置覆盖更多独立重复结构，从而提高每轮 effective updates。第一版只能做成双池 A/B，不能直接用 signature 池替换原池：minimum signature 会随 ng-set overlay 变化，且相同 minimum signature 的 route 可能还有不同的备选重复段。更激进的 set-cover 式选择会扩大 ng-set并改变后续 labeling 状态，暂不作为首选。
+
+### 270. 2026-07-21 candidate reservoir 调整与 repair Tmid 复核
+
+按当前实验口径，将 `ngDssrNonElementaryRouteCandidateLimit` 默认值由 1000 调整为 2000；有效更新预算仍为 K20，`minimumNewPairsSegment` 及离线顺序更新流程不变。该调整只是让困难 DSSR 轮保留更多按 reduced cost 排序的非基本 witness，避免 C1000 提前耗尽时缺少后续独立更新候选。已有 C1000/C3000/C10000 对照没有证明扩大 C 必然缩短 exact 时间，因此当前只记录为参数选择，不宣称稳定加速；后续应继续观察 `considered/blocked/updated` 与 candidate threshold 是否实际触发。
+
+重新拆分 60-2 日志后，普通 exact 465 次累计 forward/backward 为 164.209s/83.593s，后向仅为前向的 0.509；repair exact 36 次则为 156.739s/316.924s，后向约为前向的 2.022。由此确认明显后向膨胀主要出现在 repair dual 下，不是 ng-DSSR 普通路径的统一特征。当前默认 Tmid 已使用 effective window 的左边界与 pricing horizon 中点，并由浅层 probe 调整；后续若继续优化，建议把窗口分布只作为首轮确定性锚点：令 `F(t)=#{HStart_j<=t}`、`B(t)=#{HEnd_j>=t}`，选择使 `|F(t)-B(t)|` 最小的断点，再与现有中点做少量 probe。不能只按结束时间排序，也不能仅凭可访问 job 数直接替代实际 label 工作量；同一 DSSR 后续轮仍应利用完整 forward/backward 工作量形成二分 bracket。该方案本次只记录，未修改实现。

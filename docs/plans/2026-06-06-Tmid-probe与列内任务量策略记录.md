@@ -839,3 +839,11 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 上一节35个候选的矩阵使用的是诊断参数`sideLimit=2500`，即正反向每侧各最多2500次调用；当前正式`bidirectionalMidpointProbePopLimit=2500`在实现中拆成约1250:1250，不能直接把诊断阈值3当成正式默认的已验证参数。
 
 使用已有多深度实验中更接近正式深度的`sideLimit=1000`共14个候选复核：若把完整耗时达到20倍视为灾难性极端，浅探time阈值2识别5/5，但对9个非极端候选误触发5次；time阈值3只识别3/5，误触发2次。要求time阈值2且oneLayer也达到2，可将误触发降到1次，但会漏掉1个极端。因此正式浅probe确实可以承担高召回保险丝，但当前数据尚不存在同时低漏判、低误触发的单一阈值。若目标优先防止爆炸，可考虑timeScore约2的first-acceptable规则并接受部分多余移动；若更重视probe成本，则不应仅凭现有数据修改默认参数。上一节阈值3的12/13结果仅作为较深诊断证据保留，不再作为直接接线建议。
+
+### 2026-07-22 正式probe统一为每侧2500的修改计划
+
+决定将`bidirectionalMidpointProbePopLimit=2500`统一解释为每个方向各自最多2500次队列调用，而不是总预算2500再拆成约1250:1250。默认数值仍为2500，但语义改为per-side。需要同步修改`GCNGBBStyleBidirectionalNgDssr`、`GCNGBBStyleBidirectional`和`GCNGBBStyleBidirectionalPartialDominance`三套实现：forward和backward循环都直接使用同一个side limit；诊断full midpoint现有`sideProbeLimit`已经是每侧口径，不改计算。probe summary应显式输出`sideLimit=2500`，同时保留实际`sidePop=fw:bw`和总`pop`，避免后续再次混淆配置上限与实际调用数。
+
+命令行入口`fullDomainCompare.midpointProbePopLimit`和`outsourcingCompare.midpointProbePopLimit`保留原名称，避免增加别名和兼容分支，但注释和记录统一说明它们现在也是per-side。历史日志中的同名参数在本次修改前仍按总预算解释，不能直接与修改后结果横比；实验记录必须标明语义切换提交。
+
+这次只改预算语义，不同时修改`earlyStopRatio=1.5`、候选数、20% time接受带和bracket流程。原因是每侧预算翻倍本身已经改变成本和选点；若同时切换first-acceptable，A/B无法判断收益来源。验证分三层：focused javac编译三套实现；在不会提前耗尽的困难root上确认日志`sideLimit=2500`且`sidePop`可达到2500:2500；用同一LP状态对照修改前总2500与修改后每侧2500的最终列、bound和valid一致，再比较probe时间及所选Tmid。预算语义确认后，再单独讨论极端保护的first-acceptable逻辑。

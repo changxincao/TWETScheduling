@@ -2027,7 +2027,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		String tmidList = System.getProperty("twet.bpc.midpointFullDiagnosticTMids", "").trim();
 		boolean compareOriginalWithMedian = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.midpointFullDiagnosticCompareOriginalWithMedian", "false"));
-		if (tmidList.isEmpty() && !compareOriginalWithMedian) {
+		boolean compareOriginalWithAdaptive = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.midpointFullDiagnosticCompareOriginalWithAdaptive", "false"));
+		if (tmidList.isEmpty() && !compareOriginalWithMedian && !compareOriginalWithAdaptive) {
 			return;
 		}
 		if (!FULL_MIDPOINT_DIAGNOSTIC_DONE.add(Integer.valueOf(lp.getNode().id))) {
@@ -2054,24 +2056,39 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " tmids=" + tmidList
 				+ " sidePopLimits=" + sideLimitList);
 		System.out.flush();
-		if (compareOriginalWithMedian) {
+		if (compareOriginalWithMedian || compareOriginalWithAdaptive) {
 			for (String limitToken : sideLimitList.split(",")) {
 				String limitText = limitToken.trim();
 				if (!limitText.isEmpty()) {
 					int sideLimit = Math.max(1, Integer.parseInt(limitText));
+					System.out.println("[midpointDiagnosticRole] role=original tMid=" + originalTMid);
 					double[] originalResult = runFullMidpointDiagnosticCandidate(lp, originalTMid,
 							forwardSeconds, backwardSeconds, sideLimit);
-					double suggestedTMid = originalResult[0] >= originalResult[1]
-							? originalResult[2] : originalResult[3];
+					double suggestedTMid = compareOriginalWithAdaptive ? originalResult[4]
+							: (originalResult[0] >= originalResult[1] ? originalResult[2] : originalResult[3]);
 					if (Double.isFinite(suggestedTMid)) {
 						suggestedTMid = clampCurrentMidpoint(suggestedTMid);
-						System.out.println("[midpointOriginalMedianDiagnostic] node=" + lp.getNode().id
+						System.out.println("[midpointOriginal"
+								+ (compareOriginalWithAdaptive ? "Adaptive" : "Median")
+								+ "Diagnostic] node=" + lp.getNode().id
 								+ " originalTmid=" + originalTMid
 								+ " heavierSide="
 								+ (originalResult[0] >= originalResult[1] ? "forward" : "backward")
+								+ " adjustmentFraction="
+								+ (compareOriginalWithAdaptive ? originalResult[5] : 0.50)
 								+ " suggestedTmid=" + suggestedTMid);
-						runFullMidpointDiagnosticCandidate(lp, suggestedTMid, forwardSeconds,
-								backwardSeconds, sideLimit);
+						if (Math.abs(suggestedTMid - originalTMid) > 1.0e-9) {
+							System.out.println("[midpointDiagnosticRole] role="
+									+ (compareOriginalWithAdaptive ? "adaptive" : "median")
+									+ " tMid=" + suggestedTMid);
+							runFullMidpointDiagnosticCandidate(lp, suggestedTMid, forwardSeconds,
+									backwardSeconds, sideLimit);
+						}
+						if (compareOriginalWithAdaptive) {
+							System.out.println("[midpointDiagnosticRole] role=originalReplay tMid=" + originalTMid);
+							runFullMidpointDiagnosticCandidate(lp, originalTMid, forwardSeconds,
+									backwardSeconds, sideLimit);
+						}
 					}
 				}
 			}
@@ -2190,7 +2207,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long backwardFinalConstructed = backwardExtensionConstructed - backwardConstructedBase;
 		long forwardFinalPops = diagnosticForwardPops - forwardPopsBase;
 		long backwardFinalPops = diagnosticBackwardPops - backwardPopsBase;
-		double[] labelTimeMedians = printMidpointLabelTimeDistribution(lp, candidateTMid);
+		double[] labelTimeStats = printMidpointLabelTimeDistribution(lp, candidateTMid,
+				forwardElapsed, backwardElapsed);
 		System.out.println("[midpointPressureDiagnostic] node=" + lp.getNode().id + " tMid=" + candidateTMid
 				+ " limit=" + sideProbeLimit + " fw="
 				+ pressureDiagnosticSide(forwardProbeCalls, forwardProbePops, forwardProbeGenerated,
@@ -2246,14 +2264,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " cbBPruned=" + completionBackwardLabelsPruned);
 		System.out.flush();
 		return new double[] { forwardElapsed, backwardElapsed,
-				labelTimeMedians[0], labelTimeMedians[1] };
+				labelTimeStats[0], labelTimeStats[1], labelTimeStats[2], labelTimeStats[3] };
 	}
 
 	/**
 	 * 2026-07-22: 仅用于 full-midpoint 诊断。用仍存活 label 的可行时间端点估计移动
 	 * Tmid 后哪部分重侧 label 会失去可行域；不进入正式 probe 或 DSSR 控制。
 	 */
-	private double[] printMidpointLabelTimeDistribution(LP lp, double candidateTMid) {
+	private double[] printMidpointLabelTimeDistribution(LP lp, double candidateTMid, long forwardElapsed,
+			long backwardElapsed) {
 		ArrayList<Double> forwardEarliest = new ArrayList<Double>();
 		ArrayList<Double> backwardLatest = new ArrayList<Double>();
 		for (int job = 1; job <= data.n; job++) {
@@ -2272,11 +2291,34 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Collections.sort(backwardLatest);
 		double forwardMedian = forwardEarliest.isEmpty() ? Double.NaN : quantile(forwardEarliest, 0.50);
 		double backwardMedian = backwardLatest.isEmpty() ? Double.NaN : quantile(backwardLatest, 0.50);
+		double tolerance = Double.parseDouble(System.getProperty(
+				"twet.bpc.midpointFullDiagnosticAdaptiveTolerance", "2.0"));
+		double heavyElapsed = Math.max(forwardElapsed, backwardElapsed);
+		double lightElapsed = Math.min(forwardElapsed, backwardElapsed);
+		double imbalance = lightElapsed > 0.0 ? heavyElapsed / lightElapsed : Double.POSITIVE_INFINITY;
+		double adjustmentFraction = imbalance > tolerance
+				? Math.min(0.50, Math.max(0.0, 0.50 * (1.0 - tolerance / imbalance))) : 0.0;
+		double adaptiveTMid = candidateTMid;
+		if (adjustmentFraction > 0.0) {
+			if (forwardElapsed >= backwardElapsed && !forwardEarliest.isEmpty()) {
+				adaptiveTMid = quantile(forwardEarliest, 1.0 - adjustmentFraction);
+			} else if (backwardElapsed > forwardElapsed && !backwardLatest.isEmpty()) {
+				adaptiveTMid = quantile(backwardLatest, adjustmentFraction);
+			} else {
+				adaptiveTMid = Double.NaN;
+			}
+		}
 		System.out.println("[midpointLabelTimeDistribution] node=" + lp.getNode().id
 				+ " tMid=" + candidateTMid
 				+ " fwEarliest=" + quantileSummary(forwardEarliest)
 				+ " bwLatest=" + quantileSummary(backwardLatest));
-		return new double[] { forwardMedian, backwardMedian };
+		System.out.println("[midpointAdaptiveQuantile] node=" + lp.getNode().id
+				+ " tMid=" + candidateTMid
+				+ " imbalance=" + imbalance
+				+ " tolerance=" + tolerance
+				+ " adjustmentFraction=" + adjustmentFraction
+				+ " suggestedTmid=" + adaptiveTMid);
+		return new double[] { forwardMedian, backwardMedian, adaptiveTMid, adjustmentFraction };
 	}
 
 	private String quantileSummary(ArrayList<Double> sorted) {

@@ -914,3 +914,12 @@ DSSR轮间可以利用上一完整round的label时间分布替代机械5%移动�
 固定重侧q50的同状态结果也确认不稳定。40-2总扩展87.926ms降至70.654ms，R50由1678.362ms降至1602.602ms，60-2由330.474ms降至304.422ms；但50-2 W300由716.869ms升至959.544ms，50-3 W100由158.826ms升至217.735ms，分别退化约33.9%和37.1%。这进一步支持按完整比例控制分位数强度：`p=0.5*(1-2/R)`不是最优公式推导，而是把`(R-2)/R`这一归一化超额失衡映射到0--50%的裁剪区间；R=2不动，R=4裁25%，R=10裁40%，极端时最多裁50%。下一步应只A/B该动态候选，而不再测试固定q50。
 
 原始日志位于 `test-results/bpc/diag-tmid-default-probe-full-40m2-20260722/`、`diag-tmid-default-probe-full-50m2-w300-20260722/`、`diag-tmid-default-probe-full-50m3-w100-20260722/`、`diag-tmid-default-probe-full-50m3-w300-r50-20260722/` 和 `diag-tmid-default-vs-median-60m2-20260722/`。
+### 2026-07-22 动态分位数公式的多算例同状态 A-B-A 验证
+
+为直接验证 `p=0.5*(1-2/R)` 是否能把明显失衡的正反向搜索拉回可接受区间，本次增加了仅由 `midpointFullDiagnosticCompareOriginalWithAdaptive` 触发的诊断。每组在同一 JVM、同一 LP、dual、ng-set 和窗口状态下依次完整运行 `original -> adaptive -> originalReplay`。adaptive 候选只由第一次 original 的完整 F/B 耗时和存活 label 时间端点分布计算；正式 probe、DSSR 和 pricing 流程均未修改。originalReplay 用于量化 JIT、缓存和系统调度引起的 wall-clock 波动，并验证搜索结构是否一致。
+
+六组结果如下。40-2 的 original/replay 失衡为1.26/1.72，50-3 W100为1.34/1.90，均未超过阈值2，因此公式不移动 Tmid。50-2 W300由 `Tmid=1210.45` 调到1134，失衡由3.15/2.78降到1.05；50-3 W300 setup R50由732.31调到674，失衡由2.68/2.65降到1.001；setup R75由766.47调到678，失衡由4.52/4.14降到1.30；60-2由2276.90调到2078.97，失衡由10.93/7.45降到1.41。四个实际执行 adaptive 的算例全部回到2以内，两个原本可接受的算例没有误调，说明该公式作为“防单侧爆炸”的控制器具有较稳定的方向和强度。
+
+但平衡效果不能等同于总扩展时间最短。50-2 W300 的 adaptive 总 F+B 为1029.9ms，高于 original/replay 的849.3/963.6ms；R50为1466.6ms，相比首次original的1249.0ms较慢、与replay的1470.9ms基本相同；R75为1093.1ms，优于1123.0/1135.0ms；60-2为347.8ms，高于312.9/318.6ms。也就是说，该公式可靠地消除了极端失衡，但总时间有改善、持平和约10%至21%退化三种情况。A-B-A 中搜索计数保持一致而 wall-clock 仍有明显波动，也说明单次完整时间反馈只能用于宽阈值控制，不能用于追求精确1:1或毫秒级最优点。
+
+当前结论是保留该公式作为后续 DSSR 轮间策略候选，但不直接接入默认主线。若后续落地，应继续保持 `R<=2` 不动，把目标限定为避免4倍以上或数量级失衡；不能把候选达到1:1作为优化目标，也不能据此承诺总 F+B 必然下降。原始日志位于 `test-results/bpc/diag-tmid-adaptive-aba-40m2-20260722/`、`diag-tmid-adaptive-aba-50m2-w300-20260722/`、`diag-tmid-adaptive-aba-50m3-w100-20260722/`、`diag-tmid-adaptive-aba-50m3-w300-r50-20260722/`、`diag-tmid-adaptive-aba-50m3-w300-r75-20260722/` 和 `diag-tmid-adaptive-aba-60m2-20260722/`。

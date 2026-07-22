@@ -857,3 +857,35 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 随后在相同配置下做两组root-only A/B。50-2 W300中，当前`1.5+extra1`为153.61秒，exact 30.92秒，12次probe共试36个候选；`3.0+extra0`为135.50秒，exact 24.19秒，共试12个候选；`1.5+extra0`产生与`3.0+extra0`相同的pricing轮数、pool和所选Tmid，运行100.70秒，时间差包含机器/JIT波动，不能把两者之间的绝对时间差归因于阈值。相较当前流程，两种first-acceptable口径都减少了root pricing轮数，并避免多次bracket后选到完整扩展明显失衡的Tmid。
 
 50-3 W100给出了反向证据：当前流程48.81秒、exact 5.51秒/8次；`3.0+extra0`为54.20秒、exact 6.18秒/9次；`1.5+extra0`为52.69秒、exact 5.43秒/8次。三者root bound一致，但first-acceptable改变列生成轨迹后没有稳定减少LP/pricing轮数。因此本轮不修改`earlyStopRatio`、`extraAfterThreshold`、bracket或20%接受带，只保留已验证的总预算5000。当前结论是：每侧2500已统一；time仍是浅层指标中相对最有效的指标；first-acceptable在宽窗2-machine样例有明显潜力，但在较紧3-machine样例无稳定收益，需继续覆盖repair和分支状态后再改默认。
+
+### 2026-07-22 当前Tmid策略的收口判断
+
+结合固定状态矩阵和两组完整root A/B，Tmid不应继续被定义为“寻找正反向严格1:1的切分点”。固定状态中最平衡点不一定具有最小总扩展时间；浅probe只能看到每侧2500次pop的搜索前缀，也无法稳定预报深层label爆炸。更合理的目标是两层负载控制：首次没有完整反馈时只防止数量级失衡；已有完整round反馈后，用真实正反向扩展耗时对下一轮做小步纠偏。
+
+当前主线仍比这一目标复杂。浅probe使用time对多个候选排序，达到`earlyStopRatio=1.5`后还会额外试1个候选；方向反转检查又发生在early-stop之前，因此已经落入可接受区间时仍可能额外做bracket。DSSR内部还会每5轮机械重probe，node内另有按Tmid变化判断的稳定冻结。这些机制都在试图寻找较精确的Tmid，并与最近完整round反馈重复。
+
+若后续继续改主线，建议按以下最小结构单独A/B。首轮reference仍使用有效区间`[max(dynamicMinHStart, earliestSourceCompletion), pricingHorizon]`的中点。每侧2500次浅probe只作保险丝：两侧都耗尽时直接接受并复用；否则使用同一候选内的正反耗时方向，失衡比不超过3即first-acceptable，不再比较多个候选的细小优劣；超过3才按有效区间宽度的5%向减轻重侧的方向移动，最多修正2次。达到可接受范围的判断应先于bracket，`extraAfterThreshold`应为0；只有两个连续极端候选发生方向反转时才需要补一次中点。候选步长应基于有效区间宽度，而不是当前Tmid乘15%，避免时间原点和horizon变化造成过大移动。
+
+同一次exact的后续DSSR round应优先使用上一完整round的真实F/B耗时，不再机械每5轮probe。耗时比不超过2时原样复用Tmid；超过2时沿有效区间移动5%后直接执行下一完整round，不额外dry-run。连续round可以逐步纠偏，但暂不引入自适应步长。跨exact只在同一正式node、同一active-cut epoch内复用首轮反馈；active cut变化、新child、不同strong candidate/side和repair结束后均清空。repair内部多轮DSSR可以局部闭环，但不能把trial状态串给其他side。稳定冻结和历史长期best均没有必要，最近完整round已经提供了更直接的反馈。
+
+这套结构目前仍是下一步建议，不是已接入代码的默认行为。现阶段代码只确定了每侧2500预算；threshold、extra、bracket、周期probe和冻结尚未修改。进一步A/B应优先覆盖困难repair和分支side，因为现有root结果已经说明列生成轨迹会放大微小Tmid差异，单看root耗时不足以决定统一默认。
+### 2026-07-22 针对4至5倍失衡与label时间分布的修正分析
+
+用户进一步明确，Tmid的主要目标不是优化2至3倍范围内的数百毫秒差异，而是避免困难DSSR中单侧label持续膨胀；真实4至5倍失衡也应尽量识别。按35个未耗尽候选重新统计，若把完整耗时达到4倍或5倍视为需要处理，浅探time阈值1.5为`TP=19,FP=6,FN=0`，阈值2为`15/1/4`，阈值2.5为`13/1/6`，阈值3为`12/1/7`。因此此前为10倍极端选择阈值3的理由不再适用；若目标包含4至5倍，阈值2是更合理的折中，2至3倍完整失衡可以接受。
+
+已有五组固定状态也说明default midpoint不能单独承担保护。按default最邻近网格估计：40-2约2.35倍；50-2 W300约8.64倍；50-3 W100约18.63倍；50-3 W300 R50约1.47倍；R75约3.23倍。default在部分实例很好，但在两组中已经进入明显危险区，因此首轮仍需要轻量probe。
+
+有效midpoint区间定义为`L=max(dynamicMinHStart, earliestSourceCompletion)`到`R=pricingHorizon`，即当前窗口和source可达性下Tmid真正有意义的区间。基于`currentTmid*15%`移动会受时间原点影响；同样宽度的窗口整体平移后步长会改变。按`R-L`的比例移动具有平移不变性。结合现有default到较好网格的距离，首次保险probe可优先测试区间宽度10%的步长，而不是此前暂定的5%；50-2 W300差约11.4%区间宽度，50-3 W100差约15.2%，最多两次10%修正已经覆盖现有危险样本。该数值仍需repair状态A/B，不直接改默认。
+
+DSSR轮间可以利用上一完整round的label时间分布替代机械5%移动，但label不是单一完成时间，而是一个PWLF可行时间区间。若forward过重，可统计每个到达dominance阶段label的最早可行split时间`frontier.head.start`，降低Tmid后只有该值不超过新Tmid的label可能保留；若backward过重，可统计最晚可行split时间`frontier.tail.end`，提高Tmid后只有该值不小于新Tmid的label可能保留。可由两侧端点直方图估算某个候选Tmid会裁掉多少旧label，再选择刚好把重侧尾部裁掉10%至20%的分位点，而不是固定平移。
+
+该分位数只能作为下一轮起点，不能视为精确预测。ng-set更新会改变搜索树，dominance删除和后代增长也不会按旧label数量线性缩放。第一版诊断应同时记录kept label和所有到达dominance插入阶段label的端点直方图，比较哪一种对下一轮F/B耗时方向更稳定；不需要保存每条label，只需固定桶计数。当前日志没有这些端点分布，尚不能从历史结果直接验证分位数策略。
+
+同一node、同一cut epoch的后续pricing仍可保留最近稳定Tmid或冻结作为起点；它与DSSR轮间分位数调整不冲突。首轮probe一旦time比不超过2，应立即接受，不再为了寻找更平衡点额外测试；超过2时再移动。方向反转只在连续候选都仍超过阈值时补中点，避免当前流程在已可接受后仍进入bracket。
+### 2026-07-22 DSSR 完整 label 时间分布的指导性诊断
+
+为验证“利用上一轮完整 DSSR 的 label 时间分布修正下一轮 Tmid”是否可行，本次只增加 `midpointFullDiagnostic` 下的只读统计，不改变正式 probe、DSSR 或定价流程。对每个完整候选，分别统计存活 forward label 的最早可行时间和 backward label 的最晚可行时间，并输出 q10/q20/q25/q50/q75/q80/q90。这样可以直接观察：提高 Tmid 时哪些 backward label 会失去可行域，降低 Tmid 时哪些 forward label 会失去可行域。
+
+三组固定 LP 状态的反事实网格给出了较一致的结果。50-2 W300 中，Tmid=850 的完整 F/B 时间为 37.9/2150.4ms，backward 时间端点中位数为1124，而网格最快点为1150；Tmid=1450 时为2333.8/32.0ms，forward 中位数为1163，同样落在最快点附近。50-3 W100 中，Tmid=550 时为12.6/154.9ms，backward 中位数为712.8；较好区间位于650--750。60-2 中，当前默认 Tmid=1682.9 的邻近点1650为23.5/655.2ms，backward 中位数为1860.3；网格最快点1850为87.3/250.7ms。若继续追求接近1:1而移动到2050，总扩展反而增至231.0/160.0ms。因此2--3倍失衡可以接受，主要目标仍是避免数量级爆炸，而不是强制两侧严格相等。
+
+当前结论是：完整 DSSR 分布具有较好的方向和尺度指导意义，尤其“严重 backward-heavy 时取 backward latest 的中位数”“严重 forward-heavy 时取 forward earliest 的中位数”在三组实验中都能一步回到最快点或其邻近区间。固定 q20 或 q50 对所有失衡程度并不稳健；中位数只适合在完整时间比超过约3倍时作为纠偏候选。它也不是下一轮工作的精确预测，因为移动 Tmid 后轻侧会生成当前分布中不存在的新 label。更合理的后续 A/B 是：首轮仍用浅 probe 防极端；后续 DSSR 若上一轮完整 F/B 时间比在3倍以内则复用 Tmid，超过3倍则以重侧端点中位数生成一个新候选，再由下一轮真实完整反馈校正。诊断日志位于 `test-results/bpc/diag-tmid-labeldist-50m2-w300-20260722/`、`diag-tmid-labeldist-50m3-w100-20260722/` 和 `diag-tmid-labeldist-60m2-20260722/`。

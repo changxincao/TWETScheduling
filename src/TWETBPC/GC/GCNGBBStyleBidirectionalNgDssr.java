@@ -2165,6 +2165,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long backwardFinalConstructed = backwardExtensionConstructed - backwardConstructedBase;
 		long forwardFinalPops = diagnosticForwardPops - forwardPopsBase;
 		long backwardFinalPops = diagnosticBackwardPops - backwardPopsBase;
+		printMidpointLabelTimeDistribution(lp, candidateTMid);
 		System.out.println("[midpointPressureDiagnostic] node=" + lp.getNode().id + " tMid=" + candidateTMid
 				+ " limit=" + sideProbeLimit + " fw="
 				+ pressureDiagnosticSide(forwardProbeCalls, forwardProbePops, forwardProbeGenerated,
@@ -2219,6 +2220,63 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " cbFPruned=" + completionForwardLabelsPruned
 				+ " cbBPruned=" + completionBackwardLabelsPruned);
 		System.out.flush();
+	}
+
+	/**
+	 * 2026-07-22: 仅用于 full-midpoint 诊断。用仍存活 label 的可行时间端点估计移动
+	 * Tmid 后哪部分重侧 label 会失去可行域；不进入正式 probe 或 DSSR 控制。
+	 */
+	private void printMidpointLabelTimeDistribution(LP lp, double candidateTMid) {
+		ArrayList<Double> forwardEarliest = new ArrayList<Double>();
+		ArrayList<Double> backwardLatest = new ArrayList<Double>();
+		for (int job = 1; job <= data.n; job++) {
+			for (ForwardLabel label : activeForwardByLastJob.get(job)) {
+				if (!label.isDominated && label.frontier != null && label.frontier.head != null) {
+					forwardEarliest.add(Double.valueOf(label.frontier.head.start));
+				}
+			}
+			for (BackwardLabel label : activeBackwardByFirstJob.get(job)) {
+				if (!label.isDominated && label.frontier != null && label.frontier.tail != null) {
+					backwardLatest.add(Double.valueOf(label.frontier.tail.end));
+				}
+			}
+		}
+		Collections.sort(forwardEarliest);
+		Collections.sort(backwardLatest);
+		System.out.println("[midpointLabelTimeDistribution] node=" + lp.getNode().id
+				+ " tMid=" + candidateTMid
+				+ " fwEarliest=" + quantileSummary(forwardEarliest)
+				+ " bwLatest=" + quantileSummary(backwardLatest));
+	}
+
+	private String quantileSummary(ArrayList<Double> sorted) {
+		if (sorted.isEmpty()) {
+			return "count=0";
+		}
+		return "count=" + sorted.size()
+				+ ",q10=" + formatTimePoint(quantile(sorted, 0.10))
+				+ ",q20=" + formatTimePoint(quantile(sorted, 0.20))
+				+ ",q25=" + formatTimePoint(quantile(sorted, 0.25))
+				+ ",q50=" + formatTimePoint(quantile(sorted, 0.50))
+				+ ",q75=" + formatTimePoint(quantile(sorted, 0.75))
+				+ ",q80=" + formatTimePoint(quantile(sorted, 0.80))
+				+ ",q90=" + formatTimePoint(quantile(sorted, 0.90));
+	}
+
+	private String formatTimePoint(double value) {
+		return String.format(Locale.ROOT, "%.3f", value);
+	}
+
+	private double quantile(ArrayList<Double> sorted, double probability) {
+		double index = probability * (sorted.size() - 1);
+		int lower = (int) Math.floor(index);
+		int upper = (int) Math.ceil(index);
+		if (lower == upper) {
+			return sorted.get(lower).doubleValue();
+		}
+		double weight = index - lower;
+		return sorted.get(lower).doubleValue() * (1.0 - weight)
+				+ sorted.get(upper).doubleValue() * weight;
 	}
 
 	private int liveQueueSize(PriorityQueue<? extends FunctionLabel> queue) {

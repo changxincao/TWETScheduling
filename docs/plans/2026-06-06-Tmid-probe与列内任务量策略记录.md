@@ -934,10 +934,13 @@ DSSR轮间可以利用上一完整round的label时间分布替代机械5%移动�
 
 第二层是同一正式 node、同一 cut epoch 的后续 exact pricing。只保存上一次完整 exact 最终使用的 Tmid，把它作为本次首轮浅 probe 的 reference；不保存历史最优，不跨 cut epoch复用，也不再冻结并连续跳过验证。dual 改变后负载可能改变，因此“复用”只能省去从 default 开始搜索，不能直接跳过首轮极端检查。cut 集合变化后清空该 node 的 reference，重新按第一层处理。
 
-第三层是一次 exact 内的 DSSR 多轮。第1轮使用第一/第二层选出的 Tmid。每个完整 round 结束后记录真实 forward/backward 完整扩展时间；未耗尽、time limit 或提前中断的 round 不写反馈。若 `R=max(F,B)/min(F,B)` 不超过可接受范围，下一轮直接复用当前 Tmid。结合当前实验，建议把实际触发阈值先放宽到4，而动态公式中的目标仍取 `tau=2`：只有 `R>4` 时，才按 `p=0.5*(1-2/R)` 从重侧存活 label 的时间端点分布计算下一轮 Tmid。这样保留公式修复4倍以上爆炸的能力，同时避免对2--3倍但总时间已经较好的状态过度均衡。新 Tmid 直接用于下一轮正式 labeling，不再额外执行浅 probe，也取消机械的每5轮重探；下一完整 round 的真实反馈自然构成闭环。方向反转但仍超过4时，下一轮继续按新分布修正，不需要单独 bracket 或冻结状态。
+第三层是一次 exact 内的 DSSR 多轮。第1轮使用第一/第二层选出的 Tmid。每个完整 round 结束后记录真实 forward/backward 完整扩展时间；未耗尽、time limit 或提前中断的 round 不写反馈。当前有直接实验依据的触发口径仍是公式本身的 `tau=2`：若 `R=max(F,B)/min(F,B)<=2`，下一轮复用当前 Tmid；若 `R>2`，按 `p=0.5*(1-2/R)` 从重侧存活 label 的时间端点分布计算下一轮 Tmid。新 Tmid 直接用于下一轮正式 labeling，不再额外执行浅 probe，也取消机械的每5轮重探；下一完整 round 的真实反馈自然构成闭环。方向反转但仍超过2时，下一轮继续按新分布修正，不需要单独 bracket 或冻结状态。是否应把触发阈值放宽到3或4，现有实验没有给出证明，必须另做完整求解 A/B，不能由“2至3倍通常可接受”直接推出。
 
 为控制开销，正式实现不应像诊断一样每轮都构造并排序两个 `ArrayList<Double>`。先根据完整 F/B 时间判断是否超过触发阈值；只有确实需要移动时，扫描重侧仍存活 label，写入 primitive `double[]`，用选择算法取得目标分位点。正常轮只保存 Tmid 和两侧时间，额外成本接近零。
 
 node之间不建议第一版直接继承绝对 Tmid。父子 node 的分支域、dual、compact window 和 pricing-only arc 均可能变化；新 child 应按自己的 effective interval 做首轮 probe。后续若要测试父子继承，只能继承归一化位置 `alpha=(Tmid-L)/(H-L)` 作为 child 的首个 reference，并仍执行浅 probe，不能据此跳过验证；无亲缘关系的 node 不共享。strong trial/repair 的每个 candidate side 也应视为独立临时环境：repair 内部多轮 DSSR 可以使用完整反馈公式，但不同 side 之间不共享，trial 结果也不传给正式 child，因为 Phase-I/M 目标和正式目标不同。
 
 最终建议的最小主线为：新 node/cut epoch 用浅 probe 防极端；同 node 后续 exact 只复用最近 Tmid 作为浅 probe 起点；单次 exact 的 DSSR 轮间只用上一完整 round 的动态分位数反馈；父子 node、不同 strong side 和 repair/正式 child 之间暂不继承。相应地，现有稳定冻结、每5轮机械 probe、DSSR固定5%预移和重复 bracket 控制都可以退出 ng-DSSR 主线。该方案目前为设计结论，尚未修改正式代码。
+### 2026-07-22 触发阈值口径纠正
+
+前述将实际触发阈值从2放宽到4没有直接实验依据，是把“2至3倍失衡可能仍可接受”的定性观察错误外推成了控制阈值。现有A-B只证明：以2为阈值时，4个被触发样本都能显著改善F/B平衡；总时间则有改善、持平和退化，且不随原始R单调变化。因此当前设计应保持公式原始口径 `R<=2` 不动、`R>2` 调整；若要比较2、3、4三种触发阈值，必须在真实多轮DSSR和完整求解中单独A/B。

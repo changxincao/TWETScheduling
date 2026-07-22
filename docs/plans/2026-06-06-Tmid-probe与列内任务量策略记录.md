@@ -797,3 +797,15 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 固定 pop 浅探的根本限制进一步明确：Tmid 改变的不只是前几层可扩展任务数，而是正反向能够延伸的路径深度。两侧在搜索前缀中可能具有接近的分支数、label 数和单次耗时，但较深一侧要到后续才出现 ng-memory、reachable key、PWLF 和 dominance 状态的组合爆炸。因此，2500 或 5000 次得到的 time、generated 和 live queue 都只是搜索树前缀；live queue 趋势只能在爆炸已经开始后识别方向，若相变发生在更深层仍会误判。
 
 后续更合理的诊断应按 label 路径深度分层，而不是继续增加静态总量。每个方向可按深度记录 active pops、surviving children、平均单 label 耗时和 live frontier，观察深层繁殖率是否持续大于 1；同时可基于 effective window 和 pricing-only arc 估计两侧的可达层数。正式 probe 只需要可靠判断哪一侧更重，不必准确预测完整耗时比。若方向在多个深度窗口内稳定，可以提前停止；若达到 pop 预算仍未覆盖有代表性的深度，则当前结果只能作为弱证据，不能直接外推完整扩展工作量。
+
+### 2026-07-22 深度分层渐进 probe 的具体方案
+
+当前 ng-DSSR 主线确实支持 `time` score；通用 `GCNGBBStyleBidirectional` 仍会把不认识的 `time` 回退为 queue，但不影响当前分析的 ng-DSSR 类。现有 ng-DSSR probe 为每个候选分别初始化搜索状态，给正反向各一半固定 pop 预算，记录两侧浅探耗时后按局部方向移动和 bracket 选择。该实现无法判断固定预算是否已经覆盖到会发生 label 爆炸的深层。
+
+建议先做独立诊断，不立即替换正式选点规则。ForwardLabel 已保存 depth；BackwardLabel 需要增加对称 depth。probe 期间按方向和 parent depth 统计 active pops、扩展耗时、通过 completion bound 的 child 数、真正入队 child 数；每个检查点再扫描一次队列，仅统计未被支配 label 的 depth histogram。该扫描只发生在 probe 检查点，不进入正式扩展热循环。
+
+深度单调性可以提供比最大深度更可靠的完成口径：child depth 永远等于 parent depth+1。若检查点时某侧未支配队列中的最浅深度为 d，则小于 d 的层以后不可能再生成新 label，这些层的 pop、入队 child 和耗时已经完整。对每个已完成层计算 `reproduction(d)=enqueuedChildren(d+1)/activePops(d)` 和该层总耗时；只比较两侧最近两个已完成深度层的繁殖趋势和耗时趋势。PriorityQueue 虽按 reduced cost 而不是深度排序，但该“队列中已无更浅 live label”的完成判据仍成立；仅看当前最大深度则不成立。
+
+正式策略应采用同一候选搜索状态上的渐进检查点，例如2500、5000、10000，而不是每次重跑。若两侧都耗尽，直接得到rank0；若最近两个完整深度层持续指向同一重侧，且live frontier也同向增长，可以停止并据此移动Tmid；若方向冲突或尚无足够完整深度层，则继续加深。达到最大预算仍不成熟时，不应把浅探比当作完整耗时比，只允许从reference向浅探较重侧反方向移动一步，避免选择极端Tmid。候选之间仍沿用局部方向步进、方向反转后补中点的bracket，不改成宽网格全局选点。
+
+实现边界上，不应在每个label扩展中分配统计对象。使用固定长度primitive数组，只有probe诊断/渐进模式开启时累计；队列depth histogram在检查点一次性扫描。先用现有完整Tmid诊断对拍：验证“最后两个已完成层的方向”是否比2500/5000浅探time更稳定，再决定阈值和是否接入默认流程。成功标准是提高完整正反向重侧的方向命中率，并且额外probe耗时低于因错误Tmid增加的完整扩展耗时；在对拍完成前不应直接替换默认策略。

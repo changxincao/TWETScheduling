@@ -847,3 +847,13 @@ Tmid 的目标不应定义为让正反向严格1:1，而应定义为避免单侧
 命令行入口`fullDomainCompare.midpointProbePopLimit`和`outsourcingCompare.midpointProbePopLimit`保留原名称，避免增加别名和兼容分支，但注释和记录统一说明它们现在也是per-side。历史日志中的同名参数在本次修改前仍按总预算解释，不能直接与修改后结果横比；实验记录必须标明语义切换提交。
 
 这次只改预算语义，不同时修改`earlyStopRatio=1.5`、候选数、20% time接受带和bracket流程。原因是每侧预算翻倍本身已经改变成本和选点；若同时切换first-acceptable，A/B无法判断收益来源。验证分三层：focused javac编译三套实现；在不会提前耗尽的困难root上确认日志`sideLimit=2500`且`sidePop`可达到2500:2500；用同一LP状态对照修改前总2500与修改后每侧2500的最终列、bound和valid一致，再比较probe时间及所选Tmid。预算语义确认后，再单独讨论极端保护的first-acceptable逻辑。
+
+### 2026-07-22 正式修改与补充A/B
+
+上述“修改三套实现并重定义参数语义”的计划最终没有执行。重新检查主线后确认，ng-DSSR的`runMidpointProbeCandidate()`已经把`bidirectionalMidpointProbePopLimit`平均拆给forward和backward；因此最小修改只需把默认值从2500改成5000，现有逻辑自然得到每侧2500。此次源码只修改`TWETBPCConfig`这一处默认值，没有改通用bidirectional、partial实现和probe控制流程。focused javac通过；50-2 W300正式root日志中未耗尽候选均为`pop=5000, sidePop=2500:2500`，确认默认值与诊断矩阵口径一致。
+
+基于每侧2500的35个未耗尽固定状态重新统计，若把完整正反向耗时比达到10倍视为极端，浅探time阈值1.5、2、3分别得到`13/12/12`个命中，漏判`0/1/1`，误触发`12/4/1`；若以20倍为极端，三个阈值都无漏判，误触发分别为`15/6/3`。因此1.5偏向高召回但会频繁移动，3偏向只处理数量级失衡。该统计支持“浅probe只防极端”的方向，但仍不能单凭阈值分类决定完整root效率。
+
+随后在相同配置下做两组root-only A/B。50-2 W300中，当前`1.5+extra1`为153.61秒，exact 30.92秒，12次probe共试36个候选；`3.0+extra0`为135.50秒，exact 24.19秒，共试12个候选；`1.5+extra0`产生与`3.0+extra0`相同的pricing轮数、pool和所选Tmid，运行100.70秒，时间差包含机器/JIT波动，不能把两者之间的绝对时间差归因于阈值。相较当前流程，两种first-acceptable口径都减少了root pricing轮数，并避免多次bracket后选到完整扩展明显失衡的Tmid。
+
+50-3 W100给出了反向证据：当前流程48.81秒、exact 5.51秒/8次；`3.0+extra0`为54.20秒、exact 6.18秒/9次；`1.5+extra0`为52.69秒、exact 5.43秒/8次。三者root bound一致，但first-acceptable改变列生成轨迹后没有稳定减少LP/pricing轮数。因此本轮不修改`earlyStopRatio`、`extraAfterThreshold`、bracket或20%接受带，只保留已验证的总预算5000。当前结论是：每侧2500已统一；time仍是浅层指标中相对最有效的指标；first-acceptable在宽窗2-machine样例有明显潜力，但在较紧3-machine样例无稳定收益，需继续覆盖repair和分支状态后再改默认。

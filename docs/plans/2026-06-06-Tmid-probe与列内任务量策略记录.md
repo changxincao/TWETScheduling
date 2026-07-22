@@ -923,3 +923,21 @@ DSSR轮间可以利用上一完整round的label时间分布替代机械5%移动�
 但平衡效果不能等同于总扩展时间最短。50-2 W300 的 adaptive 总 F+B 为1029.9ms，高于 original/replay 的849.3/963.6ms；R50为1466.6ms，相比首次original的1249.0ms较慢、与replay的1470.9ms基本相同；R75为1093.1ms，优于1123.0/1135.0ms；60-2为347.8ms，高于312.9/318.6ms。也就是说，该公式可靠地消除了极端失衡，但总时间有改善、持平和约10%至21%退化三种情况。A-B-A 中搜索计数保持一致而 wall-clock 仍有明显波动，也说明单次完整时间反馈只能用于宽阈值控制，不能用于追求精确1:1或毫秒级最优点。
 
 当前结论是保留该公式作为后续 DSSR 轮间策略候选，但不直接接入默认主线。若后续落地，应继续保持 `R<=2` 不动，把目标限定为避免4倍以上或数量级失衡；不能把候选达到1:1作为优化目标，也不能据此承诺总 F+B 必然下降。原始日志位于 `test-results/bpc/diag-tmid-adaptive-aba-40m2-20260722/`、`diag-tmid-adaptive-aba-50m2-w300-20260722/`、`diag-tmid-adaptive-aba-50m3-w100-20260722/`、`diag-tmid-adaptive-aba-50m3-w300-r50-20260722/`、`diag-tmid-adaptive-aba-50m3-w300-r75-20260722/` 和 `diag-tmid-adaptive-aba-60m2-20260722/`。
+### 2026-07-22 动态分位数策略的适用范围判断
+
+该策略具有实际价值，但价值集中在同一次 exact pricing 内存在多轮 DSSR，尤其困难 repair 出现几十轮迭代的场景。它不额外执行 dry-run，而是复用上一完整 round 已经发生的 forward/backward 扩展耗时和 label 时间分布，修正下一轮 Tmid；因此第一轮仍由现有浅 probe 负责防极端，只有一轮便结束的 pricing 不会受益。下一步若接入，应使用独立开关，并优先在完整失衡超过较宽阈值时调整，验证指标应是完整 exact 时间、DSSR 轮数和最终定价结果，而不只是 F/B 比是否接近1。
+### 2026-07-22 首轮 probe、同 node 复用与 DSSR 轮间调整的建议流程
+
+当前实现把三种不同问题混在一起：新环境首次选点、同 node 后续 exact 的起点复用、单次 exact 内多轮 DSSR 的负载纠偏。现有 `prepareMidpointWithinDssr()` 会在上一轮完整时间失衡或距上次 probe 满5轮时再次执行浅 probe，并先按有效 horizon 固定移动5%；同 node 另有连续稳定后冻结、跳过5次再校验的状态。动态分位数诊断表明，完整 round 已经提供比浅 probe 更可靠的反馈，因此后两种机制不应继续叠加。
+
+建议把流程拆成三层。第一层是每个新正式 node、每个新 cut epoch 的第一次 exact。先根据该 node 当前 effective/compact window 和 completion-bound 口径计算 default Tmid，再执行现有每侧2500次的浅 probe。浅 probe 只作极端保护：当前候选的时间比不超过2就直接接受；超过2时，沿有效 midpoint 区间向较轻侧移动约10%并重试，最多修正两次，出现第一个可接受候选就停止。若均未达到阈值，则在已测候选中选择浅总时间处于最小值20%以内且失衡较小者。移动应按有效区间宽度而不是 `currentTmid*15%`，避免时间原点改变步长。若某候选的正反队列都已耗尽，该次浅 probe 实际已成为完整 labeling，可直接复用标签进入 join。
+
+第二层是同一正式 node、同一 cut epoch 的后续 exact pricing。只保存上一次完整 exact 最终使用的 Tmid，把它作为本次首轮浅 probe 的 reference；不保存历史最优，不跨 cut epoch复用，也不再冻结并连续跳过验证。dual 改变后负载可能改变，因此“复用”只能省去从 default 开始搜索，不能直接跳过首轮极端检查。cut 集合变化后清空该 node 的 reference，重新按第一层处理。
+
+第三层是一次 exact 内的 DSSR 多轮。第1轮使用第一/第二层选出的 Tmid。每个完整 round 结束后记录真实 forward/backward 完整扩展时间；未耗尽、time limit 或提前中断的 round 不写反馈。若 `R=max(F,B)/min(F,B)` 不超过可接受范围，下一轮直接复用当前 Tmid。结合当前实验，建议把实际触发阈值先放宽到4，而动态公式中的目标仍取 `tau=2`：只有 `R>4` 时，才按 `p=0.5*(1-2/R)` 从重侧存活 label 的时间端点分布计算下一轮 Tmid。这样保留公式修复4倍以上爆炸的能力，同时避免对2--3倍但总时间已经较好的状态过度均衡。新 Tmid 直接用于下一轮正式 labeling，不再额外执行浅 probe，也取消机械的每5轮重探；下一完整 round 的真实反馈自然构成闭环。方向反转但仍超过4时，下一轮继续按新分布修正，不需要单独 bracket 或冻结状态。
+
+为控制开销，正式实现不应像诊断一样每轮都构造并排序两个 `ArrayList<Double>`。先根据完整 F/B 时间判断是否超过触发阈值；只有确实需要移动时，扫描重侧仍存活 label，写入 primitive `double[]`，用选择算法取得目标分位点。正常轮只保存 Tmid 和两侧时间，额外成本接近零。
+
+node之间不建议第一版直接继承绝对 Tmid。父子 node 的分支域、dual、compact window 和 pricing-only arc 均可能变化；新 child 应按自己的 effective interval 做首轮 probe。后续若要测试父子继承，只能继承归一化位置 `alpha=(Tmid-L)/(H-L)` 作为 child 的首个 reference，并仍执行浅 probe，不能据此跳过验证；无亲缘关系的 node 不共享。strong trial/repair 的每个 candidate side 也应视为独立临时环境：repair 内部多轮 DSSR 可以使用完整反馈公式，但不同 side 之间不共享，trial 结果也不传给正式 child，因为 Phase-I/M 目标和正式目标不同。
+
+最终建议的最小主线为：新 node/cut epoch 用浅 probe 防极端；同 node 后续 exact 只复用最近 Tmid 作为浅 probe 起点；单次 exact 的 DSSR 轮间只用上一完整 round 的动态分位数反馈；父子 node、不同 strong side 和 repair/正式 child 之间暂不继承。相应地，现有稳定冻结、每5轮机械 probe、DSSR固定5%预移和重复 bracket 控制都可以退出 ng-DSSR 主线。该方案目前为设计结论，尚未修改正式代码。

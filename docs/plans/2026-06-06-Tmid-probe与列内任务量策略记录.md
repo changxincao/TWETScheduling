@@ -896,3 +896,11 @@ DSSR轮间可以利用上一完整round的label时间分布替代机械5%移动�
 60-2 的同状态结果为：程序实际 default `Tmid=1831.415640745721`，forward/backward 完整扩展分别为94.086/236.388ms，总计330.474ms；backward 的 `frontier.tail.end` 中位数为2183.293024297392。使用该精确候选后，forward/backward 为219.931/84.491ms，总计304.422ms，比 default 减少26.052ms，约7.88%。候选把 backward-heavy 变为 forward-heavy，但总扩展时间确实下降，证明分布具有指导性；同时改善幅度有限，也证明中位数不是严格最优点，只是无需额外网格搜索即可从上一完整 round 得到的稳健纠偏候选。
 
 这里的“完整 F/B 时间”是固定 Tmid 后，将 forward 与 backward labeling 各自运行到队列耗尽所消耗的实际 wall-clock 时间，不是 Tmid 数值比、浅 probe 时间或 label 数量比。“邻近点完整 F/B 失衡”仅表示此前网格中离 default 最近的测试点上的完整耗时比；它不能替代本次同状态 exact-default 对照。
+
+### 2026-07-22 基于完整 F/B 比例的动态分位数方案
+
+此前表格中的 `Tmid=850/550/1650` 是固定 LP 反事实网格中故意选择的失衡测试点，不是算法运行时的精确 default；其中1650只接近某次历史 default。当前同状态精确 default 为1831.415640745721。后续记录必须明确区分 `originalTmid`、诊断候选和网格邻近点，不能再把“当前测试点”写成 default。
+
+固定取重侧 q50 没有利用失衡程度。一个更稳健的动态方案是先令 `R=max(F,B)/min(F,B)`，其中F/B是上一完整 DSSR round的正反向扩展耗时；设可接受阈值 `tau=2`。若 `R<=tau`，不移动。若 `R>tau`，定义本轮希望从重侧旧label中裁掉的比例 `p=0.5*(1-tau/R)`，因此p从0连续增加并始终小于0.5。backward较重时取 `backwardLatest` 的q(p)；forward较重时取 `forwardEarliest` 的q(1-p)。两个方向使用不同分位点，是因为提高Tmid会删除latest较小的backward label，而降低Tmid会删除earliest较大的forward label。
+
+该公式在现有三组诊断上的候选强度与较好区间吻合：50-2 W300的850点耗时比约56.7，得到p=48.2%，接近此前有效的backward中位数；50-3 W100的550点比约12.3，得到p=41.9%，候选约落在690附近，位于650--750较好区间；60-2的1650点比约27.9，得到p=46.4%，候选约1848，接近实测较好点1850。精确default的耗时比约2.51时p仅10.2%，会比直接q50明显保守，避免将94/236ms直接过冲成220/84ms。该公式目前只是基于已有点构造的待A/B策略，尚未接入正式DSSR，也不能视为理论最优。

@@ -889,3 +889,10 @@ DSSR轮间可以利用上一完整round的label时间分布替代机械5%移动�
 三组固定 LP 状态的反事实网格给出了较一致的结果。50-2 W300 中，Tmid=850 的完整 F/B 时间为 37.9/2150.4ms，backward 时间端点中位数为1124，而网格最快点为1150；Tmid=1450 时为2333.8/32.0ms，forward 中位数为1163，同样落在最快点附近。50-3 W100 中，Tmid=550 时为12.6/154.9ms，backward 中位数为712.8；较好区间位于650--750。60-2 中，当前默认 Tmid=1682.9 的邻近点1650为23.5/655.2ms，backward 中位数为1860.3；网格最快点1850为87.3/250.7ms。若继续追求接近1:1而移动到2050，总扩展反而增至231.0/160.0ms。因此2--3倍失衡可以接受，主要目标仍是避免数量级爆炸，而不是强制两侧严格相等。
 
 当前结论是：完整 DSSR 分布具有较好的方向和尺度指导意义，尤其“严重 backward-heavy 时取 backward latest 的中位数”“严重 forward-heavy 时取 forward earliest 的中位数”在三组实验中都能一步回到最快点或其邻近区间。固定 q20 或 q50 对所有失衡程度并不稳健；中位数只适合在完整时间比超过约3倍时作为纠偏候选。它也不是下一轮工作的精确预测，因为移动 Tmid 后轻侧会生成当前分布中不存在的新 label。更合理的后续 A/B 是：首轮仍用浅 probe 防极端；后续 DSSR 若上一轮完整 F/B 时间比在3倍以内则复用 Tmid，超过3倍则以重侧端点中位数生成一个新候选，再由下一轮真实完整反馈校正。诊断日志位于 `test-results/bpc/diag-tmid-labeldist-50m2-w300-20260722/`、`diag-tmid-labeldist-50m3-w100-20260722/` 和 `diag-tmid-labeldist-60m2-20260722/`。
+### 2026-07-22 同一 LP 状态下的精确 default 与分布候选对照
+
+前一轮网格只能用邻近测试点近似 default，且跨 JVM 重启时 root LP/dual 路径可能变化，不能据此声称当前 default 的精确效果。为消除该问题，诊断新增 `midpointFullDiagnosticCompareOriginalWithMedian`：在同一次 JVM、同一 LP、dual、ng-set 和窗口状态下，先使用运行时实际 `originalTmid` 完整扩展；再根据该次完整扩展中耗时较重一侧的存活 label 时间端点中位数生成候选，并立即完整扩展第二次。该开关只属于 full diagnostic，不接入正式定价控制。
+
+60-2 的同状态结果为：程序实际 default `Tmid=1831.415640745721`，forward/backward 完整扩展分别为94.086/236.388ms，总计330.474ms；backward 的 `frontier.tail.end` 中位数为2183.293024297392。使用该精确候选后，forward/backward 为219.931/84.491ms，总计304.422ms，比 default 减少26.052ms，约7.88%。候选把 backward-heavy 变为 forward-heavy，但总扩展时间确实下降，证明分布具有指导性；同时改善幅度有限，也证明中位数不是严格最优点，只是无需额外网格搜索即可从上一完整 round 得到的稳健纠偏候选。
+
+这里的“完整 F/B 时间”是固定 Tmid 后，将 forward 与 backward labeling 各自运行到队列耗尽所消耗的实际 wall-clock 时间，不是 Tmid 数值比、浅 probe 时间或 label 数量比。“邻近点完整 F/B 失衡”仅表示此前网格中离 default 最近的测试点上的完整耗时比；它不能替代本次同状态 exact-default 对照。

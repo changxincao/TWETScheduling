@@ -2038,12 +2038,19 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				"twet.bpc.midpointFullDiagnosticForwardSeconds", "180.0"));
 		double backwardSeconds = Double.parseDouble(System.getProperty(
 				"twet.bpc.midpointFullDiagnosticBackwardSeconds", "120.0"));
+		// 2026-07-22: 仅在 full diagnostic 中横向比较多个浅探深度，不接入正式 Tmid 选择。
+		String sideLimitList = System.getProperty("twet.bpc.midpointPressureDiagnosticSidePopLimits", "").trim();
+		if (sideLimitList.isEmpty()) {
+			sideLimitList = String.valueOf(Math.max(1, Integer.getInteger(
+					"twet.bpc.midpointPressureDiagnosticSidePopLimit", 2500)));
+		}
 		System.out.println("[midpointFullDiagnostic] node=" + lp.getNode().id
 				+ " pricingHorizon=" + pricingHorizon
 				+ " originalTmid=" + originalTMid
 				+ " forwardSeconds=" + forwardSeconds
 				+ " backwardSeconds=" + backwardSeconds
-				+ " tmids=" + tmidList);
+				+ " tmids=" + tmidList
+				+ " sidePopLimits=" + sideLimitList);
 		System.out.flush();
 		for (String token : tmidList.split(",")) {
 			String trimmed = token.trim();
@@ -2051,7 +2058,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				continue;
 			}
 			double candidate = clampCurrentMidpoint(Double.parseDouble(trimmed));
-			runFullMidpointDiagnosticCandidate(lp, candidate, forwardSeconds, backwardSeconds);
+			for (String limitToken : sideLimitList.split(",")) {
+				String limitText = limitToken.trim();
+				if (!limitText.isEmpty()) {
+					runFullMidpointDiagnosticCandidate(lp, candidate, forwardSeconds, backwardSeconds,
+							Math.max(1, Integer.parseInt(limitText)));
+				}
+			}
 		}
 		fullMidpointDiagnosticRan = true;
 		tMid = originalTMid;
@@ -2064,7 +2077,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void runFullMidpointDiagnosticCandidate(LP lp, double candidateTMid, double forwardSeconds,
-			double backwardSeconds) {
+			double backwardSeconds, int sideProbeLimit) {
 		tMid = candidateTMid;
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
@@ -2079,20 +2092,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long backwardPopsBase = diagnosticBackwardPops;
 		long forwardConstructedBase = forwardExtensionConstructed;
 		long backwardConstructedBase = backwardExtensionConstructed;
-		int sideProbeLimit = Math.max(1, Integer.getInteger(
-				"twet.bpc.midpointPressureDiagnosticSidePopLimit", 2500));
-
+		int forwardProbeQueuePeak = queueSize(FWUL);
+		int backwardProbeQueuePeak = queueSize(BWUL);
 		long forwardProbeStart = System.nanoTime();
 		int forwardProbeCalls = 0;
 		while (canContinue() && !FWUL.isEmpty() && forwardProbeCalls < sideProbeLimit) {
 			forwardExtend(lp);
 			forwardProbeCalls++;
+			forwardProbeQueuePeak = Math.max(forwardProbeQueuePeak, queueSize(FWUL));
 		}
 		long forwardProbeElapsed = System.nanoTime() - forwardProbeStart;
 		long forwardProbePops = diagnosticForwardPops - forwardPopsBase;
 		long forwardProbeGenerated = forwardLabelsKept - forwardKeptBase
 				+ forwardLabelsDominated - forwardDominatedBase;
 		long forwardProbeConstructed = forwardExtensionConstructed - forwardConstructedBase;
+		long forwardProbeKept = forwardLabelsKept - forwardKeptBase;
 		int forwardProbeRawQueue = queueSize(FWUL);
 		int forwardProbeLiveQueue = liveQueueSize(FWUL);
 		double forwardPressure = oneLayerProbePressure(forwardProbeGenerated, forwardProbePops,
@@ -2103,15 +2117,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		while (canContinue() && !BWUL.isEmpty() && backwardProbeCalls < sideProbeLimit) {
 			backwardExtend(lp);
 			backwardProbeCalls++;
+			backwardProbeQueuePeak = Math.max(backwardProbeQueuePeak, queueSize(BWUL));
 		}
 		long backwardProbeElapsed = System.nanoTime() - backwardProbeStart;
 		long backwardProbePops = diagnosticBackwardPops - backwardPopsBase;
 		long backwardProbeGenerated = backwardLabelsKept - backwardKeptBase
 				+ backwardLabelsDominated - backwardDominatedBase;
 		long backwardProbeConstructed = backwardExtensionConstructed - backwardConstructedBase;
+		long backwardProbeKept = backwardLabelsKept - backwardKeptBase;
 		int backwardProbeRawQueue = queueSize(BWUL);
 		int backwardProbeLiveQueue = liveQueueSize(BWUL);
 		double backwardPressure = oneLayerProbePressure(backwardProbeGenerated, backwardProbePops,
+				backwardProbeLiveQueue);
+		double forwardConstructedPressure = oneLayerProbePressure(forwardProbeConstructed, forwardProbePops,
+				forwardProbeLiveQueue);
+		double backwardConstructedPressure = oneLayerProbePressure(backwardProbeConstructed, backwardProbePops,
 				backwardProbeLiveQueue);
 
 		long start = System.nanoTime();
@@ -2141,6 +2161,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ forwardLabelsDominated - forwardDominatedBase;
 		long backwardFinalGenerated = backwardLabelsKept - backwardKeptBase
 				+ backwardLabelsDominated - backwardDominatedBase;
+		long forwardFinalConstructed = forwardExtensionConstructed - forwardConstructedBase;
+		long backwardFinalConstructed = backwardExtensionConstructed - backwardConstructedBase;
+		long forwardFinalPops = diagnosticForwardPops - forwardPopsBase;
+		long backwardFinalPops = diagnosticBackwardPops - backwardPopsBase;
 		System.out.println("[midpointPressureDiagnostic] node=" + lp.getNode().id + " tMid=" + candidateTMid
 				+ " limit=" + sideProbeLimit + " fw="
 				+ pressureDiagnosticSide(forwardProbeCalls, forwardProbePops, forwardProbeGenerated,
@@ -2152,6 +2176,28 @@ public class GCNGBBStyleBidirectionalNgDssr {
 						backwardPressure, backwardFinalGenerated)
 				+ " pRatio=" + directionalRatio(forwardPressure, backwardPressure)
 				+ " finalRatio=" + directionalRatio(forwardFinalGenerated, backwardFinalGenerated));
+		System.out.println("[midpointPressureMetrics] node=" + lp.getNode().id + " tMid=" + candidateTMid
+				+ " limit=" + sideProbeLimit
+				+ " kept=" + directionalRatio(forwardProbeKept, backwardProbeKept)
+				+ " queueRaw=" + directionalRatio(forwardProbeKept + forwardProbeRawQueue,
+						backwardProbeKept + backwardProbeRawQueue)
+				+ " queueLive=" + directionalRatio(forwardProbeKept + forwardProbeLiveQueue,
+						backwardProbeKept + backwardProbeLiveQueue)
+				+ " peakRaw=" + directionalRatio(forwardProbeKept + forwardProbeQueuePeak,
+						backwardProbeKept + backwardProbeQueuePeak)
+				+ " remainingRaw=" + directionalRatio(forwardProbeRawQueue, backwardProbeRawQueue)
+				+ " remainingLive=" + directionalRatio(forwardProbeLiveQueue, backwardProbeLiveQueue)
+				+ " generated=" + directionalRatio(forwardProbeGenerated, backwardProbeGenerated)
+				+ " oneLayer=" + directionalRatio(forwardPressure, backwardPressure)
+				+ " constructedLayer=" + directionalRatio(forwardConstructedPressure,
+						backwardConstructedPressure)
+				+ " shallowTime=" + directionalRatio(forwardProbeElapsed, backwardProbeElapsed));
+		System.out.println("[midpointPressureTargets] node=" + lp.getNode().id + " tMid=" + candidateTMid
+				+ " limit=" + sideProbeLimit
+				+ " finalGenerated=" + directionalRatio(forwardFinalGenerated, backwardFinalGenerated)
+				+ " finalConstructed=" + directionalRatio(forwardFinalConstructed, backwardFinalConstructed)
+				+ " finalPops=" + directionalRatio(forwardFinalPops, backwardFinalPops)
+				+ " fullTime=" + directionalRatio(forwardElapsed, backwardElapsed));
 		System.out.println("[midpointFullDiagnostic] node=" + lp.getNode().id
 				+ " tMid=" + candidateTMid
 				+ " fwElapsedMs=" + formatMillis(forwardElapsed)

@@ -1149,3 +1149,20 @@ repair 与正式 pricing 使用相同入口。每次 `findFeasible()` 都构造�
 当前最大残余误判出现在 setupR50 W300 的一次首轮 pricing。浅 probe 从634的162.8/311.3ms向右移动到751.2，浅层为225.7/164.7ms、比例1.370，因而接受；完整扩展为916.8/186.7ms、比例4.909。方向判断正确，浅层仍低估了forward深层增长。后续一次三候选加二分选择692.6时，浅层206.0/174.8ms、完整453.7/268.9ms，比例为1.688。50-3 W300 本轮最大完整失衡为2.703，没有复现旧5000预算下25.563倍的极端值。
 
 四组共70个DSSR轮：平均候选数分别为1.000、1.000、1.182和1.300；只有3轮测试多个候选、2轮进入二分。完整F/B不超过2倍的比例分别为71.8%、100%、81.8%和90%。因此当前probe对窄窗50规模基本只做一次候选并保持稳定；宽窗或setup变化时仍可防住多数极端，但浅层时间比不能作为完整平衡证书。原始日志位于 `test-results/bpc/exp-tmid-current-50-*-20260723a/`。
+
+### 2026-07-23 四组root的耗时瓶颈分解
+
+四组日志的计时必须避免重复相加：`timeIndexedRootPreprocess.total` 已经包含临时 root 内的 time-indexed pricing、RMP 重解和图 fixing；BPC 汇总中的 master LP 与 time-indexed pricing 大部分发生在该预处理内部。按这一口径，50-2 base 的主要瓶颈不是 ng-DSSR，而是临时 time-indexed root 预处理：预处理总计124.968s，临时池扩到90165列；全部 master LP 为104.168s，time-indexed pricing为17.878s，说明预处理里的大 restricted master 反复重解占了绝大部分。正式 ng-DSSR exact 仅4.470s。
+
+50-3 W100 的预处理为21.945s，其中全部 master LP 为15.908s、time-indexed pricing为3.954s；启发式 pricing 为11.032s，ng-DSSR exact 仅3.304s。总时间97.422s中还有约60s没有独立阶段计时，结合当前 `ALNS=60s` 配置可判断主要来自初始列构造/ALNS，但这里只作为残差判断，不写成精确 ALNS 计时。
+
+W300 两组的 time-indexed 预处理已经较轻，主要矛盾转移到 exact pricing。无 setup 的 W300 中，exact 18.521s 的内部构成为 completion bound 12.674s、probe加正式F/B扩展4.931s、join 0.851s，completion bound 占68.4%。setupR50 W300 中，exact 14.567s 的内部构成为 completion bound 5.423s、probe加正式F/B扩展7.541s、join 1.497s，此时扩展占51.8%，completion bound占37.2%。50-2和W100的exact总量本身很小，继续压缩其内部常数不会改变整体时间。
+
+| 算例 | 主要已计时瓶颈 | ng-DSSR exact内部主要部分 | join占exact |
+|---|---|---|---:|
+| 50-2 base | time-indexed root预处理124.968s；其中大RMP重解约104s | exact总计4.470s，不是整体瓶颈 | 约3.6% |
+| 50-3 W100 | 初始构造/ALNS残差约60s；预处理21.945s | completion bound 1.613s，扩展1.259s | 约7.9% |
+| 50-3 W300 | 初始构造/ALNS残差约27--30s；exact 18.568s | completion bound 12.674s | 约4.6% |
+| 50-3 setupR50 W300 | 初始构造/ALNS残差约28s；exact 14.613s | 扩展7.541s，其次completion bound 5.423s | 约10.3% |
+
+启发式 pricing 的有效调用比例分别为88/107、34/41、8/16和28/36。W300无setup中启发式一半调用找不到列，但总耗时仅3.153s；50-2启发式累计21.915s，仍明显小于预处理。由此当前优化优先级应按算例分开：50-2优先控制time-indexed预处理的列池和RMP重解成本；W300无setup优先看completion-bound构造；setupR50 W300再看正反向扩展。当前join和Tmid都不是四组中的首要时间瓶颈。

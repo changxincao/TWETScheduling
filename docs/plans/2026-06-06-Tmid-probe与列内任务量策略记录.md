@@ -987,3 +987,13 @@ probe标签不需要为每个候选同时保存。搜索过程中只保留当前
 方向反转后二分时，A/B只作为括号端点，保存各自的Tmid和重侧方向，不保存A/B对应的label、dominance graph或队列。每次测试中点M前，旧候选的搜索状态可以释放；M成为唯一的当前候选并持有唯一一套probe搜索状态。若M满足1.5阈值或两侧队列均耗尽，最终Tmid就是M，并直接从M的现有状态继续join或完整扩展。若M仍不合格，则按M的重侧方向替换同方向端点，再测试新中点；新中点再次成为唯一当前候选。
 
 若括号已经缩到 `0.01W`、候选因数值精度重复或到达其他终止条件，但仍没有点满足1.5，最终也不回选A/B或历史最好点，而是直接采用最后一次实际测试的当前中点。这样每次终止时被选择的Tmid都恰好拥有内存中现成的label、dominance graph和FWUL/BWUL，可以继续运行，不需要保存或重建历史候选。所谓“状态保存”因此只表示保留当前Tmid已经完成的部分labeling工作；二分端点只需两个数值和两个方向标记。
+
+### 2026-07-23 连续步进、反转二分与当前状态续跑正式接入
+
+本次按上一节最终方案修改 ng-DSSR no-SRI 主线。probe 主指标固定为正反向浅扩展 wall-clock 时间比，接受阈值沿用配置默认值1.5。候选区间取 `L=max(dynamicMinHStart,earliestSourceCompletion)`、`H=pricingHorizon`，同向移动步长固定为 `0.10(H-L)`。候选不合格且重侧方向不变时继续同向移动，不再受历史 `maxCandidates` 限制；相邻两个不合格候选方向反转后，改在两端点间二分，括号宽度降至 `0.01(H-L)`时停止。达到阈值、两侧队列均耗尽、到达边界或二分精度终止时，均采用最后一次实际测试的当前候选，不再维护候选列表、历史最优选择、额外候选或回选 fallback。
+
+probe 搜索状态和“已经完整耗尽”状态已拆开。当前候选被接受但队列尚未耗尽时，保留它的 label、增量 dominance graph、FWUL 和 BWUL，正式 labeling 从已有队列继续；两侧已经耗尽时直接进入 join。初始化只补候选列容器，不重新构建搜索状态。完整 round 的 forward/backward 时间统计包含被选中候选已经执行的浅扩展时间，避免 DSSR 轮间反馈低估 probe 部分工作。
+
+日志新增两层统计。单轮 `midpointProbe` 输出 `iterations`、`walkIterations`、`bracketIterations`、`totalPops` 和 `stateReuse=rank0|partial`；同一次 exact pricing 内的实际 probe 另累计为 `midpointProbeRuns=r轮次/i总迭代/w步进/b二分/p总pop/停止原因/t最终值`。DSSR 仅复用 Tmid 的轮次不会重复记为 probe，且后续轮次不再覆盖前一轮真实 probe 的迭代记录。
+
+验证分三组。默认每侧2500 pop的40-2 probe-on与probe-off root bound均为22490，`valid=true`；该小图在预算内完整耗尽，因此正常记录为一次rank0 probe。为覆盖部分状态续跑，诊断性地把总pop降至100且保持阈值1.5，root bound仍为22490，首轮记录 `i2/w2/b0/p200/acceptable`、`stateReuse=partial`。再把诊断阈值临时收紧至1.01以强制覆盖反转二分，多次记录为 `i6/w2/b4/p600/bracketTolerance`，root bound仍为22490。focused javac通过。低pop和1.01阈值只用于路径验证，不修改正式默认配置。

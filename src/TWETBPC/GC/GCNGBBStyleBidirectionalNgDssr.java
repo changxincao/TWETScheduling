@@ -159,10 +159,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int midpointProbeSelectedDirection;
 	private double midpointProbeSelectedForwardMillis = Double.NaN;
 	private double midpointProbeSelectedBackwardMillis = Double.NaN;
+	/** 当前 probe 候选的 label、dominance 和双向队列可直接继续使用。 */
+	private boolean midpointProbeSearchStateReady;
 	private boolean midpointProbeLabelsReadyForJoin;
 	private boolean midpointProbePerformed;
 	private boolean midpointProbeStableFreezeUsed;
 	private long midpointStrategyNanos;
+	private static final double MIDPOINT_PROBE_STEP_FRACTION = 0.10;
+	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.01;
 	private static final int MIDPOINT_FREEZE_MIN_EXACT_CALLS = 5;
 	private static final int MIDPOINT_FREEZE_STABLE_SELECTIONS = 3;
 	private static final int MIDPOINT_FREEZE_SKIPPED_CALLS = 5;
@@ -389,6 +393,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double ngDssrPreviousRoundForwardMillis;
 	private double ngDssrPreviousRoundBackwardMillis;
 	private StringBuilder ngDssrMidpointByRound;
+	/** 每次实际 probe 的迭代统计；DSSR 复用轮不重复记录。 */
+	private StringBuilder ngDssrMidpointProbeRuns;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
 	/** 诊断每轮最优负非基本序列与上一轮候选集合的关系，不参与正式 DSSR 更新。 */
@@ -1114,6 +1120,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ngDssrRouteUpdateSummary()
 				+ ngSetStatsSummary()
 				+ ngDssrMidpointSummary()
+				+ ngDssrMidpointProbeRunsSummary()
 				+ ngSetMembersSummary()
 				+ roundRouteRelationSummary()
 				+ duplicateRepairSummary();
@@ -1196,6 +1203,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrPreviousRoundForwardMillis = Double.NaN;
 		ngDssrPreviousRoundBackwardMillis = Double.NaN;
 		ngDssrMidpointByRound = new StringBuilder();
+		ngDssrMidpointProbeRuns = new StringBuilder();
 		resetExactPhaseTiming();
 		ngDssrHistoryWarmStartSkippedForRepeatability = false;
 		ngDssrWindowRepeatabilityFilterApplied = false;
@@ -1367,13 +1375,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			exactTotalNanos += System.nanoTime() - exactStartNanos;
 			return generatedColumns;
 		}
-		if (!midpointProbeLabelsReadyForJoin) {
+		if (!midpointProbeSearchStateReady) {
 			phaseStart = System.nanoTime();
 			initializeBackwardSink(lp);
 			exactBackwardSinkNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "backwardSink.done", true);
 		} else {
-			diagnosticHeartbeat(lp, "probe.rank0.reuse", true);
+			diagnosticHeartbeat(lp, midpointProbeLabelsReadyForJoin
+					? "probe.rank0.reuse" : "probe.partial.reuse", true);
 		}
 		// 2026-05-26: GCNGBB-style 婵犮垼鍩栭悧鏇㈡儑閺夋５瑙勬媴鐞涒剝鐓犻梺闈涙閸婃悂宕㈠☉銏犵闁糕剝顨呴悞濂告煠閻楀牜娈旈柡浣圭墬缁嬪濡堕崟顒佺彿闂傚倸鍟伴崰搴ㄥ垂椤忓牊鏅悘鐐靛亾娴犳﹢鏌涘顒佹崳缂侇喚鍎ょ粙澶愬焵椤掑嫬绠ユい鎰剁到娴?backward labels 闂?crossing-arc join闂?
 		if (!midpointProbeLabelsReadyForJoin) {
@@ -1414,9 +1423,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		double roundForwardMillis = (exactForwardExpandNanos - forwardNanosBefore) / 1_000_000.0;
 		double roundBackwardMillis = (exactBackwardExpandNanos - backwardNanosBefore) / 1_000_000.0;
-		if (midpointProbeLabelsReadyForJoin) {
-			roundForwardMillis = midpointProbeSelectedForwardMillis;
-			roundBackwardMillis = midpointProbeSelectedBackwardMillis;
+		if (midpointProbeSearchStateReady) {
+			roundForwardMillis += midpointProbeSelectedForwardMillis;
+			roundBackwardMillis += midpointProbeSelectedBackwardMillis;
 		}
 		long roundExactNanos = System.nanoTime() - exactStartNanos;
 		exactTotalNanos += roundExactNanos;
@@ -1451,6 +1460,30 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append("/labels").append(forwardLabelsKept).append('-').append(backwardLabelsKept)
 				.append("/ms").append(String.format("%.1f", forwardMillis)).append('-')
 				.append(String.format("%.1f", backwardMillis));
+	}
+
+	private String ngDssrMidpointProbeRunsSummary() {
+		if (ngDssrMidpointProbeRuns == null || ngDssrMidpointProbeRuns.length() == 0) {
+			return "";
+		}
+		return ", midpointProbeRuns=" + ngDssrMidpointProbeRuns;
+	}
+
+	private void recordMidpointProbeRun(int iterations, int walkIterations, int bracketIterations,
+			long totalPops, String stopReason) {
+		if (ngDssrMidpointProbeRuns == null) {
+			return;
+		}
+		if (ngDssrMidpointProbeRuns.length() > 0) {
+			ngDssrMidpointProbeRuns.append(';');
+		}
+		ngDssrMidpointProbeRuns.append('r').append(ngDssrRound)
+				.append("/i").append(iterations)
+				.append("/w").append(walkIterations)
+				.append("/b").append(bracketIterations)
+				.append("/p").append(totalPops)
+				.append('/').append(stopReason)
+				.append("/t").append(String.format("%.3f", tMid));
 	}
 
 	private String ngDssrMidpointSummary() {
@@ -1824,9 +1857,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
-		if (midpointProbeLabelsReadyForJoin) {
-			// 2026-06-08: 闁荤偞鍑归崑濠囧焵椤掆偓椤︻噣鎳欓幋锔藉剭?rank0 probe 閻庤鐡曠亸娆戝垝閿熺姵鍤€婵°倐鍋撻柡浣圭墬缁嬪濡堕崟顒佺彿 label 闂傚倸鍟伴崰搴ㄥ垂椤忓牊鏅悘鐐舵鐠佹彃霉閻橆喖鍔ゆ繛鎻掓健楠炴帡濡烽妸褏顔掗梺?join闂?
-			// 闁哄鏅滈悷鈺呭闯閻戣棄鐭楁い蹇撴硽婢跺娼伴柨婵嗘噽绾偓闂佺锕ラ悷鈺呭焵椤掆偓椤︻垶宕归鍫濆偍濠电姵鑹惧▍?闂佸壊鍋勫Λ娑欐叏閹间礁绠戝〒姘功缁€澶愭⒑椤掆偓閻忔繈宕㈤妶澶婅Е閻忕偠鍋愰鍗炩槈?Tmid 闂佸憡鍔曠粔椋庣玻閸ャ劎鈻旈柍褜鍓熼弻?labeling闂?
+		if (midpointProbeSearchStateReady) {
+			// probe 已初始化当前 Tmid 的双向搜索状态；这里只补候选列容器，避免重做已完成的 pop。
 			initializeCandidateState(lp);
 		} else {
 			initializeSearchState(lp);
@@ -1861,6 +1893,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		tMid = clampCurrentMidpoint(ngDssrReusableTmid);
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
+		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbeReferenceSource = "dssrLatestProbe";
 		midpointProbeReferenceDirection = 0;
@@ -1930,6 +1963,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		tMid = clampCurrentMidpoint(reuse.frozenTmid);
 		rebuildHalfDomainForCurrentMidpoint();
 		resetProbeAffectedStatistics();
+		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbePerformed = false;
 		midpointProbeStableFreezeUsed = true;
@@ -2035,6 +2069,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!FULL_MIDPOINT_DIAGNOSTIC_DONE.add(Integer.valueOf(lp.getNode().id))) {
 			return;
 		}
+		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		double originalTMid = tMid;
 		String originalProbeSummary = midpointProbeSummary;
@@ -2115,6 +2150,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		resetProbeAffectedStatistics();
 		initializeSearchState(lp);
 		initializeForwardSource(lp);
+		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 	}
 
@@ -2608,8 +2644,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		runMidpointProbeIfEnabled(lp, Double.NaN, null);
 	}
 
-	/** 指定 reference 时仅覆盖 probe 起点，不改变原有候选移动、评分和最终选择规则。 */
+	/**
+	 * 2026-07-23: probe 只负责避开明显单侧爆炸。候选按有效区间固定步长推进，
+	 * 方向反转后在两个不合格端点间二分；最终当前候选的搜索状态直接续跑。
+	 */
 	private void runMidpointProbeIfEnabled(LP lp, double referenceOverride, String referenceSource) {
+		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbePerformed = false;
 		if (!config.bidirectionalMidpointProbe) {
@@ -2627,96 +2667,117 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			midpointProbeSummary = "skipped:noReference";
 			return;
 		}
+
 		int popLimit = Math.max(1, config.bidirectionalMidpointProbePopLimit);
-		int maxCandidates = midpointProbeMaxCandidatesForCurrentReference();
-		double moveRatio = normalizedProbeMoveRatio();
-		double earlyStopRatio = normalizedProbeEarlyStopRatio();
-		double highImbalanceRatio = normalizedProbeHighImbalanceRatio();
-		int extraAfterThreshold = Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold);
-		String scoreMode = config.bidirectionalMidpointProbeScore;
-		ArrayList<MidpointProbeResult> results = new ArrayList<MidpointProbeResult>();
-		HashSet<String> seen = new HashSet<String>();
-		double candidate = clampCurrentMidpoint(reference);
+		String scoreMode = "time";
+		double acceptableRatio = normalizedProbeEarlyStopRatio();
+		double lower = midpointProbeLowerBound();
+		double upper = clampCurrentMidpoint(pricingHorizon);
+		double width = Math.max(0.0, upper - lower);
+		double step = MIDPOINT_PROBE_STEP_FRACTION * width;
+		double bracketTolerance = MIDPOINT_PROBE_BRACKET_TOLERANCE * width;
+		double candidate = clampMidpointProbeCandidate(reference, lower, upper);
 		MidpointProbeResult previous = null;
-		MidpointProbeResult currentStateResult = null;
-		MidpointProbeResult acceptedRank0 = null;
-		int extraCandidatesRemaining = -1;
-		String stopReason = "maxCandidates";
+		MidpointProbeResult current = null;
+		MidpointProbeResult first = null;
+		boolean bracketed = false;
+		double bracketLow = Double.NaN;
+		double bracketHigh = Double.NaN;
+		int bracketLowDirection = 0;
 		int candidateCount = 0;
+		int walkCandidates = 0;
+		int bracketCandidates = 0;
+		long totalPops = 0L;
+		String stopReason = "boundary";
+		StringBuilder candidateSummaries = new StringBuilder();
+
 		while (true) {
-			String key = String.format("%.9f", candidate);
-			if (!seen.add(key)) {
-				stopReason = "duplicate";
-				break;
-			}
-			MidpointProbeResult result = runMidpointProbeCandidate(lp, candidate, popLimit);
+			current = runMidpointProbeCandidate(lp, candidate, popLimit);
 			candidateCount++;
-			currentStateResult = result;
-			results.add(result);
-			if (result.reliabilityRank(scoreMode) == 0) {
-				acceptedRank0 = result;
+			totalPops += current.pops;
+			if (bracketed) {
+				bracketCandidates++;
+			} else {
+				walkCandidates++;
+			}
+			if (candidateSummaries.length() > 0) {
+				candidateSummaries.append('|');
+			}
+			candidateSummaries.append(current.compactSummary(scoreMode));
+			if (first == null) {
+				first = current;
+			}
+
+			if (current.reliabilityRank(scoreMode) == 0) {
 				stopReason = "rank0";
 				break;
 			}
-			if (config.bidirectionalMidpointProbeBracketOnDirectionChange && previous != null
-					&& isProbeDirectionReversed(previous, result, scoreMode)) {
-				double bracketMidpoint = clampCurrentMidpoint((previous.tMid + result.tMid) * 0.5);
-				String bracketKey = String.format("%.9f", bracketMidpoint);
-				if (seen.add(bracketKey)) {
-					MidpointProbeResult bracketResult = runMidpointProbeCandidate(lp, bracketMidpoint, popLimit);
-					currentStateResult = bracketResult;
-					results.add(bracketResult);
-				}
-				stopReason = "bracket";
+			if (Utility.compareLe(current.score(scoreMode), acceptableRatio)) {
+				stopReason = "acceptable";
 				break;
 			}
-			if (candidateCount >= maxCandidates) {
-				if (!shouldContinueHighImbalanceProbe(previous, result, scoreMode, highImbalanceRatio)) {
-					stopReason = Utility.compareLe(result.score(scoreMode), highImbalanceRatio)
-							? "highImbalanceResolved" : "maxCandidates";
+
+			int currentDirection = current.pressureDirection(scoreMode);
+			if (bracketed) {
+				if (currentDirection == bracketLowDirection) {
+					bracketLow = candidate;
+				} else {
+					bracketHigh = candidate;
+				}
+				if (Utility.compareLe(bracketHigh - bracketLow, bracketTolerance)) {
+					stopReason = "bracketTolerance";
 					break;
 				}
+				double next = 0.5 * (bracketLow + bracketHigh);
+				if (Double.compare(next, candidate) == 0) {
+					stopReason = "bracketResolution";
+					break;
+				}
+				candidate = next;
+				continue;
 			}
-			if (extraCandidatesRemaining > 0) {
-				extraCandidatesRemaining--;
-				if (extraCandidatesRemaining == 0) {
-					stopReason = "thresholdExtra";
+
+			if (previous != null && isProbeDirectionReversed(previous, current, scoreMode)) {
+				bracketed = true;
+				if (Utility.compareLt(previous.tMid, current.tMid)) {
+					bracketLow = previous.tMid;
+					bracketLowDirection = previous.pressureDirection(scoreMode);
+					bracketHigh = current.tMid;
+				} else {
+					bracketLow = current.tMid;
+					bracketLowDirection = currentDirection;
+					bracketHigh = previous.tMid;
+				}
+				if (Utility.compareLe(bracketHigh - bracketLow, bracketTolerance)) {
+					stopReason = "bracketTolerance";
 					break;
 				}
-			} else if (extraCandidatesRemaining < 0 && Utility.compareGt(earlyStopRatio, 1.0)
-					&& Utility.compareLe(result.score(scoreMode), earlyStopRatio)) {
-				extraCandidatesRemaining = extraAfterThreshold;
-				if (extraCandidatesRemaining == 0) {
-					stopReason = "threshold";
-					break;
-				}
+				candidate = 0.5 * (bracketLow + bracketHigh);
+				continue;
 			}
-			previous = result;
-			candidate = nextMidpointProbeCandidate(result, candidate, moveRatio);
+
+			double next = currentDirection > 0 ? candidate - step : candidate + step;
+			next = clampMidpointProbeCandidate(next, lower, upper);
+			if (Double.compare(next, candidate) == 0) {
+				stopReason = "boundary";
+				break;
+			}
+			previous = current;
+			candidate = next;
 		}
-		MidpointProbeResult best = acceptedRank0 != null ? acceptedRank0
-				: selectMidpointProbeResult(results, scoreMode);
-		if (best == null) {
-			midpointProbeSummary = "skipped:noResult";
-			return;
-		}
-		tMid = best.tMid;
-		midpointProbeReferenceDirection = results.isEmpty() ? 0 : results.get(0).pressureDirection(scoreMode);
-		midpointProbeSelectedDirection = best.pressureDirection(scoreMode);
-		midpointProbeSelectedForwardMillis = best.forwardElapsedMillis;
-		midpointProbeSelectedBackwardMillis = best.backwardElapsedMillis;
+
+		tMid = current.tMid;
+		midpointProbeReferenceDirection = first.pressureDirection(scoreMode);
+		midpointProbeSelectedDirection = current.pressureDirection(scoreMode);
+		midpointProbeSelectedForwardMillis = current.forwardElapsedMillis;
+		midpointProbeSelectedBackwardMillis = current.backwardElapsedMillis;
 		midpointProbePerformed = true;
-		midpointProbeLabelsReadyForJoin = best == currentStateResult
-				&& best.reliabilityRank(scoreMode) == 0;
-		if (!midpointProbeLabelsReadyForJoin) {
-			rebuildHalfDomainForCurrentMidpoint();
-			resetProbeAffectedStatistics();
-		}
-		midpointProbeSummary = formatMidpointProbeSummary(reference, best, results, stopReason, maxCandidates,
-				results.size());
-		if (midpointProbeLabelsReadyForJoin) {
-			midpointProbeSummary += ", rank0LabelsReused=true";
-		}
+		midpointProbeSearchStateReady = true;
+		midpointProbeLabelsReadyForJoin = current.reliabilityRank(scoreMode) == 0;
+		midpointProbeSummary = formatMidpointProbeSummary(reference, current, stopReason,
+				candidateCount, walkCandidates, bracketCandidates, totalPops, step, bracketTolerance,
+				candidateSummaries);
+		recordMidpointProbeRun(candidateCount, walkCandidates, bracketCandidates, totalPops, stopReason);
 	}
 
 	private double midpointProbeReference(LP lp) {
@@ -2733,14 +2794,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		}
 		return tMid;
-	}
-
-	private int midpointProbeMaxCandidatesForCurrentReference() {
-		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
-		if ("reuseLatestExact".equals(midpointProbeReferenceSource)) {
-			maxCandidates = Math.min(maxCandidates, Math.max(1, config.bidirectionalMidpointProbeReuseMaxCandidates));
-		}
-		return maxCandidates;
 	}
 
 	private void updateMidpointProbeReuseAfterExact(LP lp, long exactNanos,
@@ -2791,14 +2844,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return 0;
 	}
 
-	private double normalizedProbeMoveRatio() {
-		double ratio = config.bidirectionalMidpointProbeMoveRatio;
-		if (!Double.isFinite(ratio) || !Utility.compareGt(ratio, 0.0) || !Utility.compareLt(ratio, 0.5)) {
-			return 0.10;
-		}
-		return ratio;
-	}
-
 	private double directionalImbalance(long left, long right) {
 		double l = (double) left + 1.0;
 		double r = (double) right + 1.0;
@@ -2807,155 +2852,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private double normalizedProbeEarlyStopRatio() {
 		double ratio = config.bidirectionalMidpointProbeEarlyStopRatio;
-		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 0.0;
-	}
-
-	private double normalizedProbeHighImbalanceRatio() {
-		double ratio = config.bidirectionalMidpointProbeHighImbalanceRatio;
-		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 10.0;
+		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 1.5;
 	}
 
 	private boolean isProbeDirectionReversed(MidpointProbeResult previous, MidpointProbeResult current, String mode) {
 		int previousDirection = previous.pressureDirection(mode);
 		int currentDirection = current.pressureDirection(mode);
 		return previousDirection != 0 && currentDirection != 0 && previousDirection != currentDirection;
-	}
-
-	private boolean shouldContinueHighImbalanceProbe(MidpointProbeResult previous, MidpointProbeResult current,
-			String mode, double highImbalanceRatio) {
-		if (Utility.compareLe(current.score(mode), highImbalanceRatio)) {
-			return false;
-		}
-		int currentDirection = current.pressureDirection(mode);
-		if (currentDirection == 0) {
-			return false;
-		}
-		if (previous == null) {
-			return true;
-		}
-		int previousDirection = previous.pressureDirection(mode);
-		return previousDirection == 0 || previousDirection == currentDirection;
-	}
-
-	private double nextMidpointProbeCandidate(MidpointProbeResult result, double current, double moveRatio) {
-		String mode = normalizeProbeScoreMode(config.bidirectionalMidpointProbeScore);
-		double leftPressure = result.leftPressure(mode);
-		double rightPressure = result.rightPressure(mode);
-		double multiplier = Utility.compareGt(leftPressure, rightPressure) ? (1.0 - moveRatio) : (1.0 + moveRatio);
-		return clampCurrentMidpoint(current * multiplier);
-	}
-
-	private MidpointProbeResult selectMidpointProbeResult(ArrayList<MidpointProbeResult> results, String scoreMode) {
-		if ("time".equals(normalizeProbeScoreMode(scoreMode))) {
-			return selectMidpointProbeResultByTime(results);
-		}
-		MidpointProbeResult best = null;
-		for (MidpointProbeResult result : results) {
-			if (best == null || compareMidpointProbeResult(result, best, scoreMode) < 0) {
-				best = result;
-			}
-		}
-		return best;
-	}
-
-	/** 先限制在最短总耗时的 20% 近优带内，再选择正反向耗时更平衡的候选。 */
-	private MidpointProbeResult selectMidpointProbeResultByTime(ArrayList<MidpointProbeResult> results) {
-		int bestRank = Integer.MAX_VALUE;
-		double minTotalMillis = Double.POSITIVE_INFINITY;
-		for (MidpointProbeResult result : results) {
-			int rank = result.reliabilityRank("time");
-			if (rank < bestRank) {
-				bestRank = rank;
-				minTotalMillis = result.sideTotalMillis();
-			} else if (rank == bestRank) {
-				minTotalMillis = Math.min(minTotalMillis, result.sideTotalMillis());
-			}
-		}
-		double tolerance = config.bidirectionalMidpointProbeTimeTolerance;
-		if (!Double.isFinite(tolerance) || Utility.compareLt(tolerance, 0.0)) {
-			tolerance = 0.20;
-		}
-		double eligibleLimit = minTotalMillis * (1.0 + tolerance);
-		MidpointProbeResult best = null;
-		for (MidpointProbeResult result : results) {
-			if (result.reliabilityRank("time") != bestRank
-					|| Utility.compareGt(result.sideTotalMillis(), eligibleLimit)) {
-				continue;
-			}
-			if (best == null || compareTimeEligibleMidpointProbeResult(result, best) < 0) {
-				best = result;
-			}
-		}
-		return best;
-	}
-
-	private int compareTimeEligibleMidpointProbeResult(MidpointProbeResult a, MidpointProbeResult b) {
-		int imbalance = compareDouble(a.timeScore(), b.timeScore());
-		if (imbalance != 0) {
-			return imbalance;
-		}
-		int queue = compareDouble(a.queueScore, b.queueScore);
-		if (queue != 0) {
-			return queue;
-		}
-		int total = compareDouble(a.sideTotalMillis(), b.sideTotalMillis());
-		if (total != 0) {
-			return total;
-		}
-		int pops = Integer.compare(a.pops, b.pops);
-		return pops != 0 ? pops : compareDouble(a.tMid, b.tMid);
-	}
-
-	private int compareMidpointProbeResult(MidpointProbeResult a, MidpointProbeResult b, String scoreMode) {
-		int reliability = Integer.compare(a.reliabilityRank(scoreMode), b.reliabilityRank(scoreMode));
-		if (reliability != 0) {
-			return reliability;
-		}
-		double aPrimaryScore = a.score(scoreMode);
-		double bPrimaryScore = b.score(scoreMode);
-		int score = compareDouble(aPrimaryScore, bPrimaryScore);
-		String tieMode = normalizeProbeTieScoreMode(config.bidirectionalMidpointProbeTieScore);
-		if (!"off".equals(tieMode) && isProbePrimaryScoreClose(aPrimaryScore, bPrimaryScore)
-				&& isProbeTieScoreComparable(a, b, tieMode)) {
-			int tieScore = compareDouble(a.score(tieMode), b.score(tieMode));
-			if (tieScore != 0) {
-				return tieScore;
-			}
-		}
-		if (score != 0) {
-			return score;
-		}
-		int pressure = Long.compare(a.totalPressure(scoreMode), b.totalPressure(scoreMode));
-		if (pressure != 0) {
-			return pressure;
-		}
-		int pops = Integer.compare(a.pops, b.pops);
-		if (pops != 0) {
-			return pops;
-		}
-		int elapsed = compareDouble(a.elapsedMillis, b.elapsedMillis);
-		if (elapsed != 0) {
-			return elapsed;
-		}
-		return compareDouble(a.tMid, b.tMid);
-	}
-
-	private boolean isProbePrimaryScoreClose(double a, double b) {
-		double tolerance = config.bidirectionalMidpointProbeTieTolerance;
-		return Double.isFinite(tolerance) && Utility.compareGt(tolerance, 0.0)
-				&& Utility.compareLe(Math.abs(a - b), tolerance);
-	}
-
-	private boolean isProbeTieScoreComparable(MidpointProbeResult a, MidpointProbeResult b, String tieMode) {
-		if (!"remaining".equals(tieMode)) {
-			return true;
-		}
-		// remaining 闂佸憡鐟禍婵嬫儊椤旇姤缍囬柛鎰屽棌鎷℃繛鎴炴惄娴滄繂锕㈤銏″殌婵°倐鍋撻柡浣圭墵瀹曟劕鈻庨幘顖氫壕濠㈣泛鏈悾閬嶆煕閹绢垱娅冪紓宥嗗灴濮婂ジ鎮㈠畡鎵粴闂佸憡锚椤戝懏鎱ㄨ箛娑欐櫖婵炴垶顨嗗畷鎻掆槈閹绢垰浜炬繛鎾寸殰閸愩劌娈ョ紓鍌欑缁绘鍩€椤掍緡娈旈柡浣圭墵瀵喚鎷嬮崷顓狀槷0 闂傚倸鍟伴崰搴ㄥ垂椤忓懎顕辨慨妯夸含婢瑰啴鏌涜缁绘劘銇愰幓鎹帡寮埀顒勫焵椤戭兛璁查崑?
-		return !a.forwardExhausted && !a.backwardExhausted && !b.forwardExhausted && !b.backwardExhausted;
-	}
-
-	private int compareDouble(double a, double b) {
-		return Double.compare(a, b);
 	}
 
 	private MidpointProbeResult runMidpointProbeCandidate(LP lp, double candidateTMid, int popLimit) {
@@ -2999,33 +2902,25 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				fwQueuePeak, bwQueuePeak);
 	}
 
-	private String formatMidpointProbeSummary(double reference, MidpointProbeResult best,
-			ArrayList<MidpointProbeResult> results, String stopReason, int maxCandidates, int candidateCount) {
-		StringBuilder builder = new StringBuilder();
-		builder.append("ref=").append(reference)
-				.append("(").append(midpointProbeReferenceSource).append(")")
-				.append(", selected=").append(best.tMid)
-				.append(", scoreMode=").append(normalizeProbeScoreMode(config.bidirectionalMidpointProbeScore))
-				.append(", tieScoreMode=").append(normalizeProbeTieScoreMode(config.bidirectionalMidpointProbeTieScore))
-				.append(", tieTolerance=").append(Math.max(0.0, config.bidirectionalMidpointProbeTieTolerance))
-				.append(", moveRatio=").append(normalizedProbeMoveRatio())
-				.append(", earlyStopRatio=").append(normalizedProbeEarlyStopRatio())
-				.append(", extraAfterThreshold=")
-				.append(Math.max(0, config.bidirectionalMidpointProbeExtraCandidatesAfterThreshold))
-				.append(", highImbalanceRatio=").append(normalizedProbeHighImbalanceRatio())
-				.append(", bracket=").append(config.bidirectionalMidpointProbeBracketOnDirectionChange)
+	private String formatMidpointProbeSummary(double reference, MidpointProbeResult selected,
+			String stopReason, int candidateCount, int walkCandidates, int bracketCandidates,
+			long totalPops, double step, double bracketTolerance, StringBuilder candidateSummaries) {
+		return new StringBuilder()
+				.append("ref=").append(reference)
+				.append('(').append(midpointProbeReferenceSource).append(')')
+				.append(", selected=").append(selected.tMid)
+				.append(", scoreMode=time")
+				.append(", acceptableRatio=").append(normalizedProbeEarlyStopRatio())
+				.append(", step=").append(step)
+				.append(", bracketTolerance=").append(bracketTolerance)
 				.append(", stop=").append(stopReason)
-				.append(", maxCandidates=").append(maxCandidates)
-				.append(", candidateCount=").append(candidateCount)
-				.append(", candidates=");
-		for (int i = 0; i < results.size(); i++) {
-			if (i > 0) {
-				builder.append('|');
-			}
-			MidpointProbeResult result = results.get(i);
-			builder.append(result.compactSummary(config.bidirectionalMidpointProbeScore));
-		}
-		return builder.toString();
+				.append(", iterations=").append(candidateCount)
+				.append(", walkIterations=").append(walkCandidates)
+				.append(", bracketIterations=").append(bracketCandidates)
+				.append(", totalPops=").append(totalPops)
+				.append(", stateReuse=").append(midpointProbeLabelsReadyForJoin ? "rank0" : "partial")
+				.append(", candidates=").append(candidateSummaries)
+				.toString();
 	}
 
 	private static String normalizeProbeScoreMode(String mode) {
@@ -3038,17 +2933,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return normalized;
 		}
 		return "queue";
-	}
-
-	private static String normalizeProbeTieScoreMode(String mode) {
-		if (mode == null) {
-			return "off";
-		}
-		String normalized = mode.trim().toLowerCase();
-		if ("off".equals(normalized) || "none".equals(normalized)) {
-			return "off";
-		}
-		return normalizeProbeScoreMode(normalized);
 	}
 
 	private void initializeSearchState(LP lp) {
@@ -4963,6 +4847,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointProbeSelectedDirection = 0;
 		midpointProbeSelectedForwardMillis = Double.NaN;
 		midpointProbeSelectedBackwardMillis = Double.NaN;
+		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbePerformed = false;
 		midpointProbeStableFreezeUsed = false;
@@ -7126,6 +7011,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		});
 		return candidates;
+	}
+
+	private double midpointProbeLowerBound() {
+		return clampCurrentMidpoint(Math.max(dynamicMinHStart, earliestSourceCompletion));
+	}
+
+	private double clampMidpointProbeCandidate(double candidate, double lower, double upper) {
+		return Math.max(lower, Math.min(upper, candidate));
 	}
 
 	private double clampCurrentMidpoint(double candidate) {

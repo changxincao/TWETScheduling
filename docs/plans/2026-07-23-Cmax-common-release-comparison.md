@@ -105,3 +105,15 @@ ECT/SPT 型启发式得到：
 三组代表算例的只加载数据对照为：40-2/001 的粗糙式、旧启发式乘 1.1、新公式分别为 3773、2131.8、2178.5；50-2/001 为 5392、2889.7、3182.5；50-3/003 为 4474、1747.9、1917.333。新公式仍比原粗糙式明显紧，但不再依赖某条启发式调度的 makespan。
 
 验证新增可手算回归：两台机器、处理时间 `[19,18,17,12,15,10]`、零 setup 时公式得到 55；将六个任务的最大进入 setup 依次设为 3 到 8 后得到 73。focused `javac` 编译通过，`CommonReleaseSetupHorizonTest` 通过。此前专题中“统一 release 仍使用启发式 makespan”的风险结论仍成立，但当前实现已改为公式负载上界，不再使用该错误启发式。
+
+## 8. 当前实际调用流程澄清
+
+当前 Cmax 只使用公共最大 release 的确定性公式。对任务 `j`，先计算最大进入 setup：`sMax_j=max_{i!=j}s[i][j]`，其中包含虚拟起点 `0 -> j`；再定义膨胀处理时间 `q_j=p_j+sMax_j`。辅助 release 沿用旧无等待分析的定义 `release_j=d_l[j]-p_j`，但代码不修改 `data.r[j]`，只在 Cmax 公式中统一取 `rMax=max(0,max_j release_j)`。最终计算
+
+`Cmax = rMax + sum_j(q_j)/m + (m-1)max_j(q_j)/m`，
+
+并令 `CmaxE=CmaxH=Cmax`。项目允许连续时间，因此不向下取整，也不再额外乘 1.1。
+
+普通 `Data` 在最终输入读取完成后调用一次 `setCmax()`。Tanaka runner 会在构造 `Data` 后覆盖任务、due window 和 setup，因此覆盖结束后调用旧兼容入口 `setImprovedCmax()`；该方法现在仅转调 `setCmax()`，不再运行启发式。随后才重建 hard windows 和 penalty functions，使这些结构使用新的 horizon。
+
+当前明确不再用于主线 Cmax 的内容包括：runner 的 `maxDue+sumP+n*globalMaxSetup+20` 粗糙式、`SchedulerForReleaseNoWait`、启发式 makespan 以及 `heuristicMakespan*1.1`。旧调度器类暂时保留在仓库中，但没有 Cmax 调用方。方法名 `setImprovedCmax()` 也仅因现有 runner 兼容而保留，不能再把它理解为启发式收缩。

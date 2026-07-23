@@ -83,7 +83,7 @@ public class PC {
 		// 2026-05-23: 以下计时只写入 trace，用于拆分 RMP、pricing 和 cut 的耗时，
 		// 不参与列选择、剪枝或对偶计算，避免改变 BPC 求解流程。
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "initial");
-		if (isTimeLimitReached()) {
+		if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
 			return solution;
 		}
 		boolean strongBranchingSeedPrepared = lp.getNode() != null && lp.getNode().isStrongBranchingSeedPrepared();
@@ -92,10 +92,7 @@ public class PC {
 				throw new IllegalStateException("Prepared strong branching child is infeasible on formal solve");
 			}
 			solution = repairInfeasibleMaster(lp);
-			if (isTimeLimitReached()) {
-				return solution;
-			}
-			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return solution;
 			}
 		} else if (!strongBranchingSeedPrepared && lp.getNode() != null && lp.getNode().depth > 0
@@ -105,7 +102,7 @@ public class PC {
 			lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
 					config.branchSeedReducedCostAllowance);
 			solution = solveRelaxationTimed(lp, "after_column_filter");
-			if (isTimeLimitReached()) {
+			if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
 				return solution;
 			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
@@ -115,7 +112,7 @@ public class PC {
 		}
 
 		solution = solvePricingLoop(lp, solution);
-		if (isTimeLimitReached()) {
+		if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
 			return solution;
 		}
 
@@ -140,11 +137,11 @@ public class PC {
 					traceSink.onCutCall(lp.getNode(), "SubsetRowCutInactiveRemoval", true, -removed,
 							"removed inactive rank-1 cuts with zero pricing dual", lp.getCutPool().size(), 0L);
 					solution = solveRelaxationTimed(lp, "after_inactive_cut_removal");
-					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 						return solution;
 					}
 					solution = solvePricingLoop(lp, solution);
-					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 						return solution;
 					}
 					applyCutLoopPricingOnlyArcFixing(lp, solution);
@@ -179,18 +176,12 @@ public class PC {
 			lastReusableSubtreeArcEliminationBounds = null;
 			lp.addCuts(newCutIds);
 			solution = solveRelaxationTimed(lp, "after_cut");
-			if (isTimeLimitReached()) {
-				return solution;
-			}
-			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return solution;
 			}
 			// 2026-06-13: 新 cut 改变 dual 和 reduced cost，必须重新定价闭合；否则 SRI dual 已读出但没有进入 pricing。
 			solution = solvePricingLoop(lp, solution);
-			if (isTimeLimitReached()) {
-				return solution;
-			}
-			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return solution;
 			}
 			applyCutLoopPricingOnlyArcFixing(lp, solution);
@@ -367,6 +358,10 @@ public class PC {
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
 			}
+			if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+				return StrongBranchingTrialResult.unusable(solution,
+						withSolutionMessage("rmp_trial_not_solved", solution));
+			}
 			boolean needsRepair = solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			if (!needsRepair && branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
 				needsRepair = true;
@@ -387,6 +382,10 @@ public class PC {
 			}
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "time_limit", true);
+			}
+			if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+				return StrongBranchingTrialResult.unusable(solution,
+						withSolutionMessage("rmp_trial_not_solved_after_repair", solution));
 			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				return StrongBranchingTrialResult.from(lp, solution, false,
@@ -443,6 +442,10 @@ public class PC {
 			if (isTimeLimitReached()) {
 				return StrongBranchingTrialResult.from(lp, solution, false, "heuristic_trial_initial_time_limit", true);
 			}
+			if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+				return StrongBranchingTrialResult.unusable(solution,
+						withSolutionMessage("heuristic_trial_initial_not_solved", solution));
+			}
 			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 				throw new IllegalStateException("Strong branching phase2 child is infeasible before heuristic pricing");
 			}
@@ -476,6 +479,10 @@ public class PC {
 						return StrongBranchingTrialResult.from(lp, solution, totalAdded > 0,
 								"heuristic_trial time_limit_after_add passes=" + passes + " added=" + totalAdded,
 								true);
+					}
+					if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+						return StrongBranchingTrialResult.unusable(solution,
+								withSolutionMessage("heuristic_trial_not_solved_after_add", solution));
 					}
 					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 						throw new IllegalStateException(
@@ -579,7 +586,7 @@ public class PC {
 				resetFollowingPricingEngines(engineIndex + 1);
 				lastReusableSubtreeArcEliminationBounds = null;
 				solution = resolveCurrentModelTimed(lp, "after_pricing");
-				if (isTimeLimitReached()) {
+				if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 					return solution;
 				}
 				addedColumn = true;
@@ -608,7 +615,7 @@ public class PC {
 			if (stabilizedPass.addedColumns > 0) {
 				dualState.observeAccepted(outDual, stabilizedPass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
-				if (isTimeLimitReached()) {
+				if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 					return solution;
 				}
 				continue;
@@ -624,7 +631,7 @@ public class PC {
 			if (truePass.addedColumns > 0) {
 				dualState.observeAccepted(outDual, truePass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
-				if (isTimeLimitReached()) {
+				if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 					return solution;
 				}
 				continue;
@@ -980,7 +987,7 @@ public class PC {
 		// 若 RMP 不可行，就给所有核心行加 slack 以找回覆盖/机器数/分支行可行性；旧 repair 不受影响。
 		lp.setAllRowFeasibilityRepairMode(true);
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "strong_branching_domain_repair_slack_initial");
-		if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+		if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 			lp.setFeasibilityRepairMode(false);
 			return solution;
 		}
@@ -1014,7 +1021,7 @@ public class PC {
 					addedInThisPass = true;
 					addedByThisEngine = true;
 					solution = resolveCurrentModelTimed(lp, "strong_branching_domain_repair_after_pricing");
-					if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 						lp.setFeasibilityRepairMode(false);
 						return solution;
 					}
@@ -1070,7 +1077,7 @@ public class PC {
 		boolean phaseInfeasibleCertified = false;
 		try {
 			phaseSolution = solveRelaxationTimed(lp, "strong_branching_phase_one_initial");
-			if (isTimeLimitReached() || phaseSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+			if (isTimeLimitReached() || phaseSolution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return phaseSolution;
 			}
 			// 2026-07-20: residual 只会在 RMP 重解后变化。缓存结果，避免同一 LP 解上反复
@@ -1116,7 +1123,7 @@ public class PC {
 						addedInThisPass = true;
 						addedByThisEngine = true;
 						phaseSolution = resolveCurrentModelTimed(lp, "strong_branching_phase_one_after_pricing");
-						if (phaseSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+						if (phaseSolution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 							return phaseSolution;
 						}
 						repairPending = needsStrongRepair(lp);
@@ -1190,11 +1197,7 @@ public class PC {
 		// slack 产生的 dual 用于引导启发式和精确定价器补列，补到 slack=0 后再回到正常 RMP。
 		lp.setFeasibilityRepairMode(true);
 		TWETMasterSolution solution = solveRelaxationTimed(lp, "repair_slack_initial");
-		if (isTimeLimitReached()) {
-			lp.setFeasibilityRepairMode(false);
-			return solution;
-		}
-		if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+		if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 			lp.setFeasibilityRepairMode(false);
 			return solution;
 		}
@@ -1229,11 +1232,7 @@ public class PC {
 					addedInThisPass = true;
 					addedByThisEngine = true;
 					solution = resolveCurrentModelTimed(lp, "repair_after_pricing");
-					if (isTimeLimitReached()) {
-						lp.setFeasibilityRepairMode(false);
-						return solution;
-					}
-					if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+					if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 						lp.setFeasibilityRepairMode(false);
 						return solution;
 					}
@@ -1710,19 +1709,21 @@ public class PC {
 		private final boolean infeasible;
 		private final boolean dualBoundPruned;
 		private final boolean timeLimited;
+		private final boolean unusable;
 		private final boolean addedColumns;
 		private final ArrayList<Integer> internalColumnIds;
 		private final ArrayList<Integer> outsourcingColumnIds;
 		private final String message;
 
 		private StrongBranchingTrialResult(TWETMasterSolution solution, double bound, boolean infeasible,
-				boolean dualBoundPruned, boolean timeLimited, boolean addedColumns,
+				boolean dualBoundPruned, boolean timeLimited, boolean unusable, boolean addedColumns,
 				ArrayList<Integer> internalColumnIds, ArrayList<Integer> outsourcingColumnIds, String message) {
 			this.solution = solution;
 			this.bound = bound;
 			this.infeasible = infeasible;
 			this.dualBoundPruned = dualBoundPruned;
 			this.timeLimited = timeLimited;
+			this.unusable = unusable;
 			this.addedColumns = addedColumns;
 			this.internalColumnIds = internalColumnIds;
 			this.outsourcingColumnIds = outsourcingColumnIds;
@@ -1736,28 +1737,37 @@ public class PC {
 
 		static StrongBranchingTrialResult from(LP lp, TWETMasterSolution solution, boolean addedColumns,
 				String message, boolean timeLimited) {
+			if (solution != null && solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+				return unusable(solution, message);
+			}
 			boolean infeasible = solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE;
 			double bound = infeasible ? Double.POSITIVE_INFINITY : solution.getObjectiveValue();
 			// 2026-07-12: infeasible/time-limit trial 不会作为正式 child seed 复用，避免无意义复制大列集。
 			if (infeasible || timeLimited) {
-				return new StrongBranchingTrialResult(solution, bound, infeasible, false, timeLimited, addedColumns,
+				return new StrongBranchingTrialResult(solution, bound, infeasible, false, timeLimited, false, addedColumns,
 						new ArrayList<Integer>(), new ArrayList<Integer>(), message);
 			}
-			return new StrongBranchingTrialResult(solution, bound, infeasible, false, timeLimited, addedColumns,
+			return new StrongBranchingTrialResult(solution, bound, infeasible, false, timeLimited, false, addedColumns,
 					new ArrayList<Integer>(lp.getRestrictedColumnIds()),
 					new ArrayList<Integer>(lp.getRestrictedOutsourcingColumnIds()), message);
 		}
 
 		static StrongBranchingTrialResult infeasible(TWETMasterSolution solution, String message) {
-			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false, false,
+			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, true, false, false, false, false,
 					new ArrayList<Integer>(), new ArrayList<Integer>(), message);
 		}
 
 		static StrongBranchingTrialResult dualBoundPruned(TWETMasterSolution solution, double certifiedBound,
 				String message) {
-			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, false, true, false, false,
+			return new StrongBranchingTrialResult(solution, Double.POSITIVE_INFINITY, false, true, false, false, false,
 					new ArrayList<Integer>(), new ArrayList<Integer>(),
 					message + ",certifiedBound=" + certifiedBound);
+		}
+
+		/** solver 未完成的 trial 不参与 INF 评分，也不向正式 child 复用受限列集。 */
+		static StrongBranchingTrialResult unusable(TWETMasterSolution solution, String message) {
+			return new StrongBranchingTrialResult(solution, Double.NaN, false, false, false, true, false,
+					new ArrayList<Integer>(), new ArrayList<Integer>(), message);
 		}
 
 		public TWETMasterSolution getSolution() {
@@ -1785,7 +1795,11 @@ public class PC {
 		}
 
 		public boolean isReusableForQueue() {
-			return !isClosed() && !timeLimited;
+			return !isClosed() && !timeLimited && !unusable;
+		}
+
+		public boolean isUnusable() {
+			return unusable;
 		}
 
 		public boolean hasAddedColumns() {

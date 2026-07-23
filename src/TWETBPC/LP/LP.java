@@ -466,7 +466,7 @@ public class LP {
 			return solveCurrentModel("Restricted master LP solved");
 		} catch (IloException ex) {
 			clearDuals();
-			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
+			lastSolution = new TWETMasterSolution(TWETMasterStatus.NOT_SOLVED, new LinkedHashMap<Integer, Double>(), 0.0,
 					false, "Restricted master error: " + ex.getMessage());
 			return lastSolution;
 		}
@@ -481,7 +481,7 @@ public class LP {
 			return solveCurrentModel("Restricted master LP resolved");
 		} catch (IloException ex) {
 			clearDuals();
-			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
+			lastSolution = new TWETMasterSolution(TWETMasterStatus.NOT_SOLVED, new LinkedHashMap<Integer, Double>(), 0.0,
 					false, "Restricted master resolve error: " + ex.getMessage());
 			return lastSolution;
 		}
@@ -498,8 +498,12 @@ public class LP {
 		boolean solved = cplex.solve();
 		if (!solved) {
 			clearDuals();
-			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
-					false, "Restricted master infeasible or not solved: " + cplex.getStatus());
+			// 2026-07-23: 只有 CPLEX 明确证明 infeasible 才能关闭节点；异常和未知状态必须向上传播。
+			IloCplex.Status cplexStatus = cplex.getStatus();
+			TWETMasterStatus status = cplexStatus == IloCplex.Status.Infeasible
+					? TWETMasterStatus.INFEASIBLE : TWETMasterStatus.NOT_SOLVED;
+			lastSolution = new TWETMasterSolution(status, new LinkedHashMap<Integer, Double>(), 0.0,
+					false, "Restricted master not solved: " + cplexStatus);
 			return lastSolution;
 		}
 

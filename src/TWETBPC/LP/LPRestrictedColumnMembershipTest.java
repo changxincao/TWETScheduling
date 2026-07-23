@@ -4,6 +4,8 @@ import java.util.Arrays;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.Model.TWETMasterSolution;
+import TWETBPC.Model.TWETMasterStatus;
 
 /** 验证 restricted column 的列表顺序与增量 membership set 始终保持一致。 */
 public final class LPRestrictedColumnMembershipTest {
@@ -45,6 +47,14 @@ public final class LPRestrictedColumnMembershipTest {
 		assertActiveState(unusable.getInternalColumnIds().isEmpty()
 				&& unusable.getOutsourcingColumnIds().isEmpty(),
 				"non-reusable trial retained redundant seed columns");
+
+		TWETMasterSolution notSolved = new TWETMasterSolution(TWETMasterStatus.NOT_SOLVED,
+				new java.util.LinkedHashMap<Integer, Double>(), 0.0, false, "test_not_solved");
+		PC.StrongBranchingTrialResult unresolved = PC.StrongBranchingTrialResult.from(lp, notSolved, false,
+				"test_not_solved", false);
+		assertActiveState(unresolved.isUnusable(), "not-solved trial must be unusable");
+		assertActiveState(!unresolved.isClosed() && !unresolved.isReusableForQueue(),
+				"not-solved trial must neither close a child nor provide a reusable seed");
 
 		PC.StrongBranchingTrialResult dualBoundPruned = PC.StrongBranchingTrialResult.dualBoundPruned(
 				null, 42.0, "dual_bound_pruned");

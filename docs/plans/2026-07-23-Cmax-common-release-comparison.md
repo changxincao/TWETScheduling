@@ -62,3 +62,29 @@ infeasible 即可。
 泄漏；遗漏的是每个正式节点完成后的最后一个 native model。应对单节点完整处理
 增加统一 `try/finally`，在 incumbent、fixing、branch seed 和 trace 均读取完成后
 调用 `lp.closeModel()`。这是低风险资源生命周期修复。
+
+## 5. CPLEX 状态与正式节点 LP 生命周期修复
+
+2026-07-23 已完成前述第 3、4 节的最小修改。`LP` 现在只有在 CPLEX 明确返回 `Infeasible` 时才生成 `TWETMasterStatus.INFEASIBLE`；`IloException` 以及其他 `solve()==false` 状态统一生成 `NOT_SOLVED`，原始状态或异常信息保留在 message。正式树节点收到 `NOT_SOLVED` 后终止本次 BPC 并返回 `FAILED`，不会进入 repair、不会关闭节点，也不会继续报告最优。strong branching trial 收到同样状态时标为 `unusable`：评分增益为 0，不按 INF 处理，不复用该 trial 的 seed；若该分支最终通过其他候选逻辑被选中，正式 child 仍按正常流程求解。
+
+`Tree` 中每个正式节点创建的 `LP` 已用统一 `try/finally` 包围。incumbent 更新、arc fixing、branch child seed 和 trace 全部读取完后执行 `lp.closeModel()`；所有 `continue`、`break` 和异常路径也会经过同一个释放点。strong trial 原有的独立 `finally closeModel()` 保持不变。
+
+验证使用 focused `javac` 编译 `LP/PC/Tree/LPRestrictedColumnMembershipTest`，并运行 `LPRestrictedColumnMembershipTest`。测试额外确认 `NOT_SOLVED` trial 同时满足：不是 infeasible、不是 closed、不可复用 seed。
+
+## 6. 统一 release 仍失败的具体反例
+
+反例有两台相同机器、6 个任务，所有 release 和 due date 都为 0，setup 为 0。任务的 `(processing time, weight)` 为：`J1=(19,441)`、`J2=(18,1000)`、`J3=(17,187)`、`J4=(12,242)`、`J5=(15,797)`、`J6=(10,756)`。目标是最小化 `sum w_j C_j`，因此这里不存在不同 release 造成的等待空隙。
+
+ECT/SPT 型启发式得到：
+
+- M1：`J6 -> J5 -> J2`，完工时间为 `10,25,43`；目标贡献为 `756*10 + 797*25 + 1000*43 = 70485`。
+- M2：`J4 -> J3 -> J1`，完工时间为 `12,29,48`；目标贡献为 `242*12 + 187*29 + 441*48 = 29495`。
+
+因此启发式 makespan 为 48，总目标为 99980，按当前规则生成的 exact horizon 是 `1.1*48=52.8`。
+
+穷举全部双机分配和机内顺序后，最优目标为 80854；其中最小 makespan 仍为 54。一组最优调度为：
+
+- M1：`J6 -> J5 -> J4`，完工时间为 `10,25,37`；目标贡献为 `756*10 + 797*25 + 242*37 = 36439`。
+- M2：`J2 -> J1 -> J3`，完工时间为 `18,37,54`；目标贡献为 `1000*18 + 441*37 + 187*54 = 44415`。
+
+总目标为 `36439+44415=80854`，但 makespan 为 54。原因不是等待，而是两个目标不同：ECT 为缩短最后完工时间，会把短任务均匀铺到两台机器；加权目标则愿意让低权重 `J3` 延迟到 54，以便高权重 `J2/J5/J6` 更早完成。`52.8` 会直接删掉这组真实最优调度。因此“把 release 统一成最大值”只修掉了旧启发式中的 release 空隙，不能把启发式 makespan 变成 exact 安全上界。

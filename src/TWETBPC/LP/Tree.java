@@ -112,6 +112,7 @@ public class Tree {
 		double[] incumbentOutsourcingValues = initialOutsourcingValues(initial);
 		int processedNodes = 0;
 		boolean stoppedByTimeLimit = false;
+		boolean failedByMaster = false;
 
 		if (config.enableTimeIndexedRootPreprocessingForNgDssr) {
 			traceSink.onStageHeartbeat(root, "timeIndexedRootPreprocess.start", totalPoolSize(), cutPool.size());
@@ -142,9 +143,16 @@ public class Tree {
 			}
 
 			LP lp = new LP(data, pool, cutPool, config, outsourcingPool);
-			lp.construct(node, node.seedColumnIds);
+			try {
+				lp.construct(node, node.seedColumnIds);
 			heartbeat(node, "pc.solve.start");
-			TWETMasterSolution solution = pc.solve(lp, incumbentCost);
+				TWETMasterSolution solution = pc.solve(lp, incumbentCost);
+
+				if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+					traceSink.onNodeClosed(node, "master_not_solved:" + solution.getMessage(), queue.size());
+					failedByMaster = true;
+					break;
+				}
 
 			if (isSolveTimeLimitReached(solveStartNanos)) {
 				traceSink.onNodeClosed(node, "time_limit", queue.size());
@@ -312,11 +320,16 @@ public class Tree {
 			if (!branched) {
 				traceSink.onNodeClosed(node, "closed_without_branch", queue.size());
 			}
+			} finally {
+				// 正式节点的最后一个 native CPLEX model 不再依赖 GC 回收。
+				lp.closeModel();
+			}
 		}
 
 		boolean timeLimitReached = isSolveTimeLimitReached(solveStartNanos);
 		bestBound = finalBound(queue, incumbentCost, bestBound, stoppedByTimeLimit || timeLimitReached);
-		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), stoppedByTimeLimit, timeLimitReached);
+		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), stoppedByTimeLimit, timeLimitReached,
+				failedByMaster);
 		if (lightweightSeedPreparationCalls > 0) {
 			heartbeat(null, String.format(Locale.ROOT,
 					"strongBranchingLightSeedPreparation calls=%d,machineScanned=%d,outsourcingScanned=%d,timeMs=%.3f",
@@ -890,6 +903,9 @@ public class Tree {
 
 	private double strongBranchingScore(double parentBound, StrongBranchingTrialResult left,
 			StrongBranchingTrialResult right) {
+		if ((left != null && left.isUnusable()) || (right != null && right.isUnusable())) {
+			return 0.0;
+		}
 		double leftGain = strongBranchingGain(parentBound, left);
 		double rightGain = strongBranchingGain(parentBound, right);
 		double eps = Math.max(0.0, config.strongBranchingScoreEpsilon);
@@ -904,7 +920,7 @@ public class Tree {
 		if (trial == null) {
 			throw new IllegalStateException("Strong branching score requested for missing trial result");
 		}
-		if (trial.isTimeLimited()) {
+		if (trial.isTimeLimited() || trial.isUnusable()) {
 			return 0.0;
 		}
 		if (trial.isClosed()) {
@@ -962,7 +978,10 @@ public class Tree {
 	}
 
 	private TWETSolveStatus finalStatus(int processedNodes, boolean queueEmpty, boolean stoppedByTimeLimit,
-			boolean timeLimitReached) {
+			boolean timeLimitReached, boolean failedByMaster) {
+		if (failedByMaster) {
+			return TWETSolveStatus.FAILED;
+		}
 		if (stoppedByTimeLimit) {
 			return TWETSolveStatus.TIME_LIMIT;
 		}

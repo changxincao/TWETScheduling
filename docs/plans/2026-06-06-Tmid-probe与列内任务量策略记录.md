@@ -1059,3 +1059,23 @@ probe 搜索本身保持现状，但不应在每一轮 DSSR 和每一次同 node
 同一次 exact pricing 内，第 r 轮完整 labeling 结束后计算真实扩展耗时比 `R=max(F,B)/min(F,B)`。若 `R<=2`，第 r+1 轮不做分位数预移，以第 r 轮 Tmid 作为初始候选；若 `R>2`，使用第 r 轮重侧存活 label 的 split 时间分布按既定动态分位数公式生成第 r+1 轮初始候选。无论是否预移，第 r+1 轮都执行现有浅 probe，由新的 ng-set 环境做一次低成本校准；预计多数情况下首个候选即可接受，失衡时仍由10% walk和反转二分处理。
 
 这里能复用的是“第 r+1 轮 probe 选中候选已经生成的部分 label、dominance graph 和队列”，它们与第 r+1 轮的新 ng-set 一致，可以直接续跑正式 labeling。第 r 轮的 label 不能跨 DSSR 轮复用，因为 ng-set 更新后状态、dominance key和可扩展集合已经变化。该方案兼顾完整轮深层反馈与新一轮浅校准，比单独依赖分位数候选更稳，也不需要跨 pricing 历史状态；尚需做每轮probe与首轮probe两个口径的困难60规模A/B后再接入正式代码。
+
+
+### 2026-07-23 正式接入每轮 probe 与 DSSR 完整反馈
+
+当前主线已按生命周期重新整理 Tmid。每次 exact pricing 的第一轮从当前 effective 区间的 default 中点独立执行 probe，不再继承同 node 上一次 pricing 的 Tmid，也不再使用 node 级稳定冻结。一次 pricing 内的后续 DSSR 轮仍利用上一完整轮的信息：若上一轮完整 forward/backward 耗时比不超过 2，则以上一轮 Tmid 为下一轮 probe 起点；若超过 2，则按重侧存活 label 的 split 时间分布和动态分位数公式生成起点，再执行同一套 probe。probe 选中候选后直接复用该候选已经建立的 label、dominance graph 和队列继续正式 labeling，不重复初始化。repair 的 `findFeasible()` 每次调用创建独立 pricing 对象，因此首轮同样从 default 开始，内部 DSSR 轮按上述反馈处理；repair 状态不会带入正式 child。
+
+在 40/50/60 规模、不同机器数、setup 和 due-window 的 6 组有效 root 实验中，共记录 331 个 DSSR round。每轮平均测试 1.076 个 Tmid，最大 3 个；只有 3 轮进入方向反转后的二分，占 0.91%。完整轮失衡超过 2 后共触发 42 次动态分位数起点调整，42 次全部降低下一轮完整 F/B 失衡，并且调整后的 42 轮全部回到 2 以内；调整前失衡比中位数为 2.740，调整后为 1.178，中位改善倍数为 2.285。全部 331 轮的完整 F/B 失衡比中位数为 1.289，90 分位数为 2.404。
+
+| 算例 | DSSR轮数 | 平均probe候选 | 二分轮数 | 动态调整成功数 | 完整F/B中位数 / 最大值 |
+|---|---:|---:|---:|---:|---:|
+| 40-2 base | 16 | 1.000 | 0 | 1/1 | 1.376 / 2.285 |
+| 40-2 setupR50 | 23 | 1.000 | 0 | 7/7 | 1.920 / 4.549 |
+| 50-2 base | 36 | 1.000 | 0 | 3/3 | 1.767 / 2.890 |
+| 50-3 W300 | 7 | 1.429 | 0 | 0 | 2.121 / 25.563 |
+| 60-2 base | 215 | 1.079 | 1 | 31/31 | 1.213 / 3.180 |
+| 60-3 setupR50 W100 | 34 | 1.147 | 2 | 0 | 1.232 / 1.947 |
+
+需要保留一个明确局限。50-3 W300 的一次单轮 pricing 中，浅 probe 选择的 Tmid 在完整扩展后仍出现 25.563 倍失衡；该 pricing 第一轮已经找到基本负列，没有下一 DSSR 轮，因此轮间反馈来不及修正。这说明每侧 2500 pop 的浅时间指标只能防多数极端情况，不能证明深层搜索一定平衡。当前不再增加跨 pricing 历史或更重 probe：前者受 dual 和初始 ng-set 变化影响，后者会把保护机制本身变成新开销。现阶段结论是，DSSR 轮间动态反馈已经得到稳定验证，首轮浅 probe 的少数深层误判作为剩余风险保留。
+
+强分支隔离验证处理到 node 2，状态为 `NODE_LIMIT`、`valid=true`，日志包含 82 次 `strong_branching_light_repair`，repair 上下文中的 ng-DSSR 同样输出逐轮 `midpointByDssrRound`。focused `javac`、`NgDssrMinimumRepeatedSegmentUpdateTest` 和 `git diff --check` 均通过。

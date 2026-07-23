@@ -90,7 +90,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private final TWETBPCConfig config;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
-	private final HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode;
 	private final NgDssrHistoryWarmStart historyWarmStart;
 
 	private PriorityQueue<ForwardLabel> FWUL;
@@ -159,11 +158,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int midpointProbeSelectedDirection;
 	private double midpointProbeSelectedForwardMillis = Double.NaN;
 	private double midpointProbeSelectedBackwardMillis = Double.NaN;
+	private double midpointProbeReferenceTmid = Double.NaN;
+	private int midpointProbeCandidateCount;
+	private int midpointProbeBracketCandidateCount;
 	/** 当前 probe 候选的 label、dominance 和双向队列可直接继续使用。 */
 	private boolean midpointProbeSearchStateReady;
 	private boolean midpointProbeLabelsReadyForJoin;
 	private boolean midpointProbePerformed;
-	private boolean midpointProbeStableFreezeUsed;
 	private long midpointStrategyNanos;
 	private static final double MIDPOINT_PROBE_STEP_FRACTION = 0.10;
 	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.05;
@@ -387,13 +388,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private int ngDssrTotalElementaryColumnsReturned;
 	private int ngDssrRoundNonElementaryNegativeSeen;
 	private int ngDssrRoundElementaryColumnsReturned;
-	/** 同一次 DSSR 内最近一次 probe 选出的 Tmid；后续轮次复用并周期校正。 */
+	/** 同一次 DSSR 内上一完整轮选出的 Tmid，下一轮只把它作为 probe 起点。 */
 	private double ngDssrReusableTmid;
-	private int ngDssrLastMidpointProbeRound;
 	private double ngDssrPreviousRoundForwardMillis;
 	private double ngDssrPreviousRoundBackwardMillis;
+	private String ngDssrProbeSeedSource;
 	private StringBuilder ngDssrMidpointByRound;
-	/** 每次实际 probe 的迭代统计；DSSR 复用轮不重复记录。 */
+	/** 每轮 probe 的迭代统计。 */
 	private StringBuilder ngDssrMidpointProbeRuns;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
@@ -450,7 +451,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private String lastMessage = "GCNGBB-style ng-DSSR bidirectional pricing not executed";
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config) {
-		this(data, config, null);
+		this(data, config, DominanceBackend.PAPER);
+	}
+
+
+	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
+			DominanceBackend dominanceBackend) {
+		this(data, config, null, dominanceBackend, null);
+	}
+
+	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
+			DominanceBackend dominanceBackend, NgDssrHistoryWarmStart historyWarmStart) {
+		this(data, config, null, dominanceBackend, historyWarmStart);
 	}
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
@@ -475,7 +487,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
-		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
 		this.dominanceBackend = dominanceBackend == null ? DominanceBackend.PAPER : dominanceBackend;
 		this.historyWarmStart = historyWarmStart;
 		this.completionBoundFlatFunctionQuery = Boolean.parseBoolean(System.getProperty(
@@ -1199,9 +1210,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrTotalNonElementaryNegativeSeen = 0;
 		ngDssrTotalElementaryColumnsReturned = 0;
 		ngDssrReusableTmid = Double.NaN;
-		ngDssrLastMidpointProbeRound = 0;
 		ngDssrPreviousRoundForwardMillis = Double.NaN;
 		ngDssrPreviousRoundBackwardMillis = Double.NaN;
+		ngDssrProbeSeedSource = "default";
 		ngDssrMidpointByRound = new StringBuilder();
 		ngDssrMidpointProbeRuns = new StringBuilder();
 		resetExactPhaseTiming();
@@ -1433,7 +1444,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				&& (midpointProbeLabelsReadyForJoin || (FWUL.isEmpty() && BWUL.isEmpty()));
 		if (roundCompleted) {
 			rememberDssrRoundMidpointFeedback(roundForwardMillis, roundBackwardMillis);
-			updateMidpointProbeReuseAfterExact(lp, roundExactNanos, roundForwardMillis, roundBackwardMillis);
+			recordMidpointProbeExactFeedback(lp, roundExactNanos, roundForwardMillis, roundBackwardMillis);
 		}
 		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
 				: (midpointProbeLabelsReadyForJoin ? "probe rank0 queues exhausted"
@@ -1443,23 +1454,30 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return generatedColumns;
 	}
 
-	/** 保存本轮完整 labeling 负载，供下一次周期 probe 调整起点；不参与当前轮结果。 */
 	private void rememberDssrRoundMidpointFeedback(double forwardMillis, double backwardMillis) {
+		double previousRatio = fullTimeImbalance(ngDssrPreviousRoundForwardMillis,
+				ngDssrPreviousRoundBackwardMillis);
+		double currentRatio = fullTimeImbalance(forwardMillis, backwardMillis);
+		ngDssrReusableTmid = tMid;
+		if (ngDssrMidpointByRound != null) {
+			if (ngDssrMidpointByRound.length() > 0) {
+				ngDssrMidpointByRound.append(';');
+			}
+			ngDssrMidpointByRound.append('r').append(ngDssrRound)
+					.append("/t").append(String.format("%.3f", tMid))
+					.append('/').append(midpointProbePerformed ? "probe" : "reuse")
+					.append("/seedSource=").append(midpointProbeReferenceSource)
+					.append("/seed=").append(String.format("%.3f", midpointProbeReferenceTmid))
+					.append("/probeI=").append(midpointProbeCandidateCount)
+					.append("/probeB=").append(midpointProbeBracketCandidateCount)
+					.append("/prevR=").append(String.format("%.3f", previousRatio))
+					.append("/fullR=").append(String.format("%.3f", currentRatio))
+					.append("/labels").append(forwardLabelsKept).append('-').append(backwardLabelsKept)
+					.append("/ms").append(String.format("%.1f", forwardMillis)).append('-')
+					.append(String.format("%.1f", backwardMillis));
+		}
 		ngDssrPreviousRoundForwardMillis = forwardMillis;
 		ngDssrPreviousRoundBackwardMillis = backwardMillis;
-		ngDssrReusableTmid = tMid;
-		if (ngDssrMidpointByRound == null) {
-			return;
-		}
-		if (ngDssrMidpointByRound.length() > 0) {
-			ngDssrMidpointByRound.append(';');
-		}
-		ngDssrMidpointByRound.append('r').append(ngDssrRound)
-				.append("/t").append(String.format("%.3f", tMid))
-				.append('/').append(midpointProbePerformed ? "probe" : "reuse")
-				.append("/labels").append(forwardLabelsKept).append('-').append(backwardLabelsKept)
-				.append("/ms").append(String.format("%.1f", forwardMillis)).append('-')
-				.append(String.format("%.1f", backwardMillis));
 	}
 
 	private String ngDssrMidpointProbeRunsSummary() {
@@ -1850,9 +1868,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sectionStart = System.nanoTime();
 		ensureExtensionArcMasks(lp.getNode());
 		if (!prepareMidpointWithinDssr(lp)) {
-			if (!tryUseStableFrozenMidpoint(lp)) {
-				runMidpointProbeIfEnabled(lp);
-			}
+			// 每次 pricing 的首轮从当前 effective 区间 default 独立 probe，不继承 node 历史。
+			runMidpointProbeIfEnabled(lp, computeDefaultMidpoint(), "default");
 			rememberInitialMidpointWithinDssr();
 		}
 		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;
@@ -1870,38 +1887,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		exactInitializeFullMidpointDiagnosticNanos += System.nanoTime() - sectionStart;
 	}
 
-	/**
-	 * 同一次 DSSR 内复用最近一次 probe 的 Tmid，并按固定轮次重新校准。
-	 * 周期 probe 只用上一轮完整 labeling 的负载轻移初值，最终选择仍完全交给原 probe。
-	 */
 	private boolean prepareMidpointWithinDssr(LP lp) {
 		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinDssr
-				|| ngDssrRound <= 1
-				|| !Double.isFinite(ngDssrReusableTmid)) {
+				|| ngDssrRound <= 1 || !Double.isFinite(ngDssrReusableTmid)) {
 			return false;
 		}
-		int interval = config.bidirectionalMidpointProbeDssrRecheckInterval;
-		boolean recheck = isPreviousDssrRoundTimeImbalanced()
-				|| (interval > 0 && ngDssrRound - ngDssrLastMidpointProbeRound >= interval);
-		if (recheck) {
-			double seed = dssrPeriodicProbeSeed();
-			runMidpointProbeIfEnabled(lp, seed, "dssrPeriodicFeedback");
-			ngDssrReusableTmid = tMid;
-			ngDssrLastMidpointProbeRound = ngDssrRound;
-			return true;
-		}
-		tMid = clampCurrentMidpoint(ngDssrReusableTmid);
-		rebuildHalfDomainForCurrentMidpoint();
-		resetProbeAffectedStatistics();
-		midpointProbeSearchStateReady = false;
-		midpointProbeLabelsReadyForJoin = false;
-		midpointProbeReferenceSource = "dssrLatestProbe";
-		midpointProbeReferenceDirection = 0;
-		midpointProbeSelectedDirection = 0;
-		midpointProbeSelectedForwardMillis = ngDssrPreviousRoundForwardMillis;
-		midpointProbeSelectedBackwardMillis = ngDssrPreviousRoundBackwardMillis;
-		midpointProbeSummary = "dssrReuseLatest, selected=" + tMid + ", lastProbeRound="
-				+ ngDssrLastMidpointProbeRound;
+		double seed = dssrFeedbackProbeSeed();
+		runMidpointProbeIfEnabled(lp, seed, ngDssrProbeSeedSource);
+		ngDssrReusableTmid = tMid;
 		return true;
 	}
 
@@ -1914,23 +1907,98 @@ public class GCNGBBStyleBidirectionalNgDssr {
 						|| ngDssrPreviousRoundBackwardMillis > threshold * ngDssrPreviousRoundForwardMillis);
 	}
 
-	/** 上一轮耗时若明显失衡，只把 probe 起点向较轻一侧移动 5% 左右，不直接决定最终 Tmid。 */
-	private double dssrPeriodicProbeSeed() {
+
+	private double fullTimeImbalance(double forwardMillis, double backwardMillis) {
+		if (!Double.isFinite(forwardMillis) || !Double.isFinite(backwardMillis)) {
+			return Double.NaN;
+		}
+		double light = Math.min(forwardMillis, backwardMillis);
+		if (!Utility.compareGt(light, 0.0)) {
+			return Double.POSITIVE_INFINITY;
+		}
+		return Math.max(forwardMillis, backwardMillis) / light;
+	}
+
+	private double dssrFeedbackProbeSeed() {
 		double seed = clampCurrentMidpoint(ngDssrReusableTmid);
-		double threshold = config.bidirectionalMidpointProbeDssrImbalanceThreshold;
-		double moveRatio = config.bidirectionalMidpointProbeDssrSeedMoveRatio;
-		if (!Double.isFinite(threshold) || !Utility.compareGt(threshold, 1.0)
-				|| !Double.isFinite(moveRatio) || !Utility.compareGt(moveRatio, 0.0)) {
+		ngDssrProbeSeedSource = "dssrPreviousTmid";
+		if (!isPreviousDssrRoundTimeImbalanced()) {
 			return seed;
 		}
-		double left = midpointLeftBound();
-		double step = Math.max(0.0, pricingHorizon - left) * Math.min(0.25, moveRatio);
-		if (ngDssrPreviousRoundBackwardMillis > threshold * ngDssrPreviousRoundForwardMillis) {
-			seed += step;
-		} else if (ngDssrPreviousRoundForwardMillis > threshold * ngDssrPreviousRoundBackwardMillis) {
-			seed -= step;
+		double threshold = config.bidirectionalMidpointProbeDssrImbalanceThreshold;
+		double heavy = Math.max(ngDssrPreviousRoundForwardMillis, ngDssrPreviousRoundBackwardMillis);
+		double light = Math.min(ngDssrPreviousRoundForwardMillis, ngDssrPreviousRoundBackwardMillis);
+		if (!Utility.compareGt(light, 0.0)) {
+			return seed;
 		}
-		return clampCurrentMidpoint(seed);
+		double imbalance = heavy / light;
+		double adjustmentFraction = Math.min(0.50,
+				Math.max(0.0, 0.50 * (1.0 - threshold / imbalance)));
+		double adaptive;
+		if (ngDssrPreviousRoundForwardMillis > ngDssrPreviousRoundBackwardMillis) {
+			adaptive = activeForwardSplitTimeQuantile(1.0 - adjustmentFraction);
+			ngDssrProbeSeedSource = "dssrAdaptiveForward";
+		} else {
+			adaptive = activeBackwardSplitTimeQuantile(adjustmentFraction);
+			ngDssrProbeSeedSource = "dssrAdaptiveBackward";
+		}
+		if (!Double.isFinite(adaptive)) {
+			ngDssrProbeSeedSource = "dssrPreviousTmid";
+			return seed;
+		}
+		return clampCurrentMidpoint(adaptive);
+	}
+
+
+	/** 只在上一完整 round 明显失衡时扫描重侧存活 label，避免平衡轮额外开销。 */
+	private double activeForwardSplitTimeQuantile(double probability) {
+		int count = 0;
+		for (int job = 1; job <= data.n; job++) {
+			for (ForwardLabel label : activeForwardByLastJob.get(job)) {
+				if (!label.isDominated && label.frontier != null && label.frontier.head != null) {
+					count++;
+				}
+			}
+		}
+		if (count == 0) {
+			return Double.NaN;
+		}
+		double[] splitTimes = new double[count];
+		int index = 0;
+		for (int job = 1; job <= data.n; job++) {
+			for (ForwardLabel label : activeForwardByLastJob.get(job)) {
+				if (!label.isDominated && label.frontier != null && label.frontier.head != null) {
+					splitTimes[index++] = label.frontier.head.start;
+				}
+			}
+		}
+		Arrays.sort(splitTimes);
+		return quantile(splitTimes, probability);
+	}
+
+	private double activeBackwardSplitTimeQuantile(double probability) {
+		int count = 0;
+		for (int job = 1; job <= data.n; job++) {
+			for (BackwardLabel label : activeBackwardByFirstJob.get(job)) {
+				if (!label.isDominated && label.frontier != null && label.frontier.tail != null) {
+					count++;
+				}
+			}
+		}
+		if (count == 0) {
+			return Double.NaN;
+		}
+		double[] splitTimes = new double[count];
+		int index = 0;
+		for (int job = 1; job <= data.n; job++) {
+			for (BackwardLabel label : activeBackwardByFirstJob.get(job)) {
+				if (!label.isDominated && label.frontier != null && label.frontier.tail != null) {
+					splitTimes[index++] = label.frontier.tail.end;
+				}
+			}
+		}
+		Arrays.sort(splitTimes);
+		return quantile(splitTimes, probability);
 	}
 
 	private void rememberInitialMidpointWithinDssr() {
@@ -1938,39 +2006,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| ngDssrRound != 1 || !Double.isFinite(tMid)) {
 			return;
 		}
-		// 2026-07-18: 只复用 probe 选出的 Tmid，不复用旧标签；后续按固定 DSSR 轮次重新校准。
 		ngDssrReusableTmid = tMid;
-		ngDssrLastMidpointProbeRound = 1;
 	}
 
-	/** 2026-07-12: 稳定冻结只跳过 probe；每次仍按冻结后的 Tmid 完整执行 exact labeling。 */
-	private boolean tryUseStableFrozenMidpoint(LP lp) {
-		midpointProbeStableFreezeUsed = false;
-		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinNode
-				|| !config.bidirectionalMidpointProbeStableFreeze || ngDssrRound != 1
-				|| midpointProbeReuseByNode == null || lp == null || lp.getNode() == null) {
-			return false;
-		}
-		MidpointProbeNodeReuse reuse = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
-		if (reuse == null) {
-			reuse = new MidpointProbeNodeReuse();
-			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
-		}
-		reuse.ensureCutEpoch(lp.getActiveCutIds());
-		if (!reuse.tryAcquireFrozenMidpoint()) {
-			return false;
-		}
-		tMid = clampCurrentMidpoint(reuse.frozenTmid);
-		rebuildHalfDomainForCurrentMidpoint();
-		resetProbeAffectedStatistics();
-		midpointProbeSearchStateReady = false;
-		midpointProbeLabelsReadyForJoin = false;
-		midpointProbePerformed = false;
-		midpointProbeStableFreezeUsed = true;
-		midpointProbeReferenceSource = "stableFreeze";
-		midpointProbeSummary = "stableFreeze, selected=" + tMid + ", " + reuse.freezeSummary();
-		return true;
-	}
 
 	/**
 	 * 2026-06-12: 婵炲濮撮幊鎰板极閵堝棛顩查幖杈剧磿閺嗘澘霉閿濆懐孝闁诡喗鎹囬幃鈺呮嚋绾版ê浜?partial 濠电姵娲栫换鎰板垂椤忓牆违闁稿本绮嶇粣妤呮煛瀹ュ懏鎼愮紒顭戝弮瀹曟艾螖閸涱亜浜炬慨妯虹－缁犳牜绱掗婵嗗惞缂侇喛娅ｆ禒锕傛倷缁懓浜剧憸宀€妲愰崼鏇炵闁靛鍨崇粈澶婎潡濞戞瑯鐒炬い鎾愁煼瀹曟骞庨懞銉川闂?
@@ -2652,6 +2690,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbePerformed = false;
+		midpointProbeReferenceTmid = Double.NaN;
+		midpointProbeCandidateCount = 0;
+		midpointProbeBracketCandidateCount = 0;
 		if (!config.bidirectionalMidpointProbe) {
 			midpointProbeSummary = "off";
 			return;
@@ -2667,6 +2708,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			midpointProbeSummary = "skipped:noReference";
 			return;
 		}
+		midpointProbeReferenceTmid = reference;
 
 		int popLimit = Math.max(1, config.bidirectionalMidpointProbePopLimit);
 		String scoreMode = "time";
@@ -2772,6 +2814,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointProbeSelectedForwardMillis = current.forwardElapsedMillis;
 		midpointProbeSelectedBackwardMillis = current.backwardElapsedMillis;
 		midpointProbePerformed = true;
+		midpointProbeCandidateCount = candidateCount;
+		midpointProbeBracketCandidateCount = bracketCandidates;
 		midpointProbeSearchStateReady = true;
 		midpointProbeLabelsReadyForJoin = current.reliabilityRank(scoreMode) == 0;
 		midpointProbeSummary = formatMidpointProbeSummary(reference, current, stopReason,
@@ -2781,57 +2825,25 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private double midpointProbeReference(LP lp) {
-		midpointProbeReferenceSource = "strategy";
-		if (config.bidirectionalMidpointProbeReuseWithinNode && midpointProbeReuseByNode != null
-				&& lp.getNode() != null) {
-			MidpointProbeNodeReuse cached = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
-			if (cached != null) {
-				cached.ensureCutEpoch(lp.getActiveCutIds());
-			}
-			if (cached != null && cached.hasLastExact()) {
-				midpointProbeReferenceSource = "reuseLatestExact";
-				return cached.lastExactTmid;
-			}
-		}
-		return tMid;
+		midpointProbeReferenceSource = "default";
+		return computeDefaultMidpoint();
 	}
 
-	private void updateMidpointProbeReuseAfterExact(LP lp, long exactNanos,
+	private void recordMidpointProbeExactFeedback(LP lp, long exactNanos,
 			double forwardExactMillis, double backwardExactMillis) {
-		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinNode
-				|| midpointProbeReuseByNode == null || lp == null || lp.getNode() == null || !Double.isFinite(tMid)) {
-			midpointProbeFeedbackSummary = "off";
-			return;
-		}
-		MidpointProbeNodeReuse reuse = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
-		if (reuse == null) {
-			reuse = new MidpointProbeNodeReuse();
-			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
-		}
-		reuse.ensureCutEpoch(lp.getActiveCutIds());
 		double exactMillis = exactNanos / 1_000_000.0;
-		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
-		long labelTotal = forwardLabelsKept + backwardLabelsKept;
-		reuse.rememberExact(tMid);
-		String freezeAction = "off";
-		if (config.bidirectionalMidpointProbeStableFreeze && ngDssrRound == 1) {
-			if (midpointProbePerformed) {
-				freezeAction = reuse.considerFreezeSelection(tMid, pricingHorizon);
-			} else if (midpointProbeStableFreezeUsed) {
-				freezeAction = "reuse";
-			}
-		}
+		double timeRatio = fullTimeImbalance(forwardExactMillis, backwardExactMillis);
 		int exactTimeDirection = direction(forwardExactMillis, backwardExactMillis);
 		int exactLabelDirection = direction(forwardLabelsKept, backwardLabelsKept);
-		midpointProbeFeedbackSummary = "exactReuse=latest, exactMs=" + exactMillis + ", ratio=" + ratio
-				+ ", labels=" + labelTotal + ", latestT=" + reuse.lastExactTmid
+		midpointProbeFeedbackSummary = "exactRound, exactMs=" + exactMillis + ", timeRatio=" + timeRatio
+				+ ", labels=" + (forwardLabelsKept + backwardLabelsKept)
+				+ ", selectedT=" + tMid
 				+ ", directionAudit ref/selected/exactTime/exactLabels=" + midpointProbeReferenceDirection + ":"
 				+ midpointProbeSelectedDirection + ":" + exactTimeDirection + ":" + exactLabelDirection
 				+ ", selectedSideMs=" + midpointProbeSelectedForwardMillis + ":"
 				+ midpointProbeSelectedBackwardMillis
 				+ ", exactSideMs=" + forwardExactMillis + ":" + backwardExactMillis
-				+ ", exactSideLabels=" + forwardLabelsKept + ":" + backwardLabelsKept
-				+ ", stableFreeze=" + freezeAction + "/" + reuse.freezeSummary();
+				+ ", exactSideLabels=" + forwardLabelsKept + ":" + backwardLabelsKept;
 	}
 
 	private int direction(double forward, double backward) {
@@ -4847,10 +4859,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointProbeSelectedDirection = 0;
 		midpointProbeSelectedForwardMillis = Double.NaN;
 		midpointProbeSelectedBackwardMillis = Double.NaN;
+		midpointProbeReferenceTmid = Double.NaN;
+		midpointProbeCandidateCount = 0;
+		midpointProbeBracketCandidateCount = 0;
 		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbePerformed = false;
-		midpointProbeStableFreezeUsed = false;
 		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
 		diagnosticPricingOnlyJobArcCount = 0;

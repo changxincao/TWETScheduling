@@ -1,7 +1,6 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
@@ -20,13 +19,11 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 	private final Data data;
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
-	private final HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse> midpointProbeReuseByNode;
 	private final NgDssrHistoryWarmStart historyWarmStart;
 
 	public GCNGBBStyleBidirectionalNgDssrPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse>();
 		this.historyWarmStart = new NgDssrHistoryWarmStart(data.n);
 	}
 
@@ -42,7 +39,7 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR bidirectional pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				midpointProbeReuseByNode, GCNGBBStyleBidirectionalNgDssr.DominanceBackend.PAPER, historyWarmStart);
+				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.PAPER, historyWarmStart);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -67,8 +64,7 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 		if (!config.enableBidirectionalPricing || !config.useGCNGBBStyleNgDssrPricing) {
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR bidirectional pricing disabled");
 		}
-		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				midpointProbeReuseByNode);
+		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -86,9 +82,6 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 	@Override
 	public void reset() {
 		lastReusableSubtreeArcEliminationBounds = null;
-		if (!config.bidirectionalMidpointProbeReuseWithinNode) {
-			midpointProbeReuseByNode.clear();
-		}
 	}
 
 	@Override

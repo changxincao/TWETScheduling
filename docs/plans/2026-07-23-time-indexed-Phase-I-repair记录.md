@@ -19,3 +19,10 @@ Phase-I 打开时，time-indexed 图保留处理时间、硬时间窗、当前 n
 新增 `TimeIndexedGraphOptimizationTest` 回归项，检查普通和 rank-1 engine 都声明 Phase-I 支持；Phase-I 返回列保存 evaluator 的真实成本；LP 按零真实成本口径计算其 reduced cost；Phase-I 禁用 dual window；no-cut 完整搜索能够返回非负闭合证书。focused `javac` 编译通过，`TimeIndexedGraphOptimizationTest passed`。
 
 当前尚未做 time-indexed strong-branch repair 的完整算例 A/B，因此只能确认接线与成本语义正确，不能先声称它一定比旧 M repair 更快。由于纯 time-indexed 没有额外启发式，实际收益要由出现 repair 的固定 side 或完整求解实验确认。
+## 四组合正确性复核
+
+本次按 no-cut/SRI cut 与 ng-DSSR/time-indexed 四种组合重新检查。四条路径共用同一套 LP Phase-I 语义：合法内部列、合法外包列和直接建模外包变量的目标系数为 0，artificial slack 与 branch-implied 竞争列为 1；当前 node 的分支行、已有 cut 行、硬时间窗和 pricing-only 禁弧仍作为约束保留。只有 slack 与正值竞争列同时归零，才关闭 Phase-I、删除竞争列并重建真实成本 RMP。若残差仍为正，只有内部列族 exact 证书非负，且列化外包时外包列族证书也在同一未重解 dual 下非负，才能证明 child infeasible。
+
+ng-DSSR no-cut 的 exact DSSR 返回 elementary 内部列族证书；ng-DSSR+SRI 使用 partial-list SRI 状态和 active cut dual，最终候选还由 `LP.computeReducedCost` 按完整 SRI 系数复核。普通 time-indexed 的完整前向图搜索返回 no-cut 证书；rank-1 time-indexed 在存在 active SRI 时由 exact bucket labeling 返回证书，图内 heuristic 本身不冒充闭合证明。两条 time-indexed 路径在 Phase-I 中关闭 dual profitable window，候选写入 Pool 前仍保存 evaluator 的真实目标成本。
+
+新增 `StrongBranchingPhaseOnePricingTest`，分别验证四种组合。no-cut 两组必须找到 Phase-I 负列且列成本等于 evaluator 真实成本；SRI 两组注入足够强的负 cut dual，要求 exact pricing 不返回受 cut 排除的负列并给出非负完整证书。`StrongBranchingPhaseOnePricingTest passed`，既有 `TimeIndexedGraphOptimizationTest passed`。当前未发现有无 cut、ng-DSSR/time-indexed 之间的正确性分叉；尚未覆盖的是完整算例下四组合 repair 的性能差异，不影响本次语义结论。

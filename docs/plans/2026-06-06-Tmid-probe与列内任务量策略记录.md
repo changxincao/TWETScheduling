@@ -1019,3 +1019,12 @@ probe 搜索本身保持现状，但不应在每一轮 DSSR 和每一次同 node
 前一节把“同 node 上一次完整 exact 的耗时”写成单一反馈不准确。一次 ng-DSSR exact pricing 可能包含多轮完整 relaxed labeling，每一轮使用的 ng-set 不同；当前默认下一次 pricing 又从初始 ng-set 重新开始。因此跨 pricing 的第一轮不能使用上一次 pricing 最后一轮 DSSR 的 Tmid/耗时作为同口径反馈，相关性更强的是上一次 pricing 第一轮 DSSR 的 Tmid。当前 `updateMidpointProbeReuseAfterExact()` 实际在每轮 `solveRelaxedRound()` 完成后调用，node 级 `lastExactTmid` 会被最后一轮覆盖，方法命名和缓存语义容易造成误读。
 
 调度应分成两层。一次 pricing 内，DSSR 第 r+1 轮使用本次 pricing 第 r 轮的完整 forward/backward 耗时反馈，失衡时重新 probe、平衡时复用并周期校准；这是相邻 ng-set 的连续变化。跨 pricing 时，新调用第一轮重新处于初始 ng-set，不能继承旧调用最后一轮的大 ng-set Tmid。保守且简单的口径是每次 pricing 的第一轮都执行 probe，只把上一次 pricing 第一轮选中的 Tmid 作为 probe 初值；后续 DSSR 轮再采用轮间条件 probe。这样 dual 改变后仍有本次浅探校准，同时避免每个 DSSR 轮都重复 probe。若以后要跳过某些 pricing 第一轮 probe，也必须单独保存“上一调用第一轮”的反馈，不能使用当前会被最后一轮覆盖的 node cache。当前仅修正分析，尚未修改代码。
+
+
+### 2026-07-23 再次更正：DSSR 轮间使用动态时间分位数，不重新 probe
+
+前两节中“DSSR 失衡或每隔 5 轮重新 probe”的表述沿用了当前旧代码，和本专题第 900--943 行附近已经形成的最终设计结论不一致，现明确作废。probe 只负责一个新 pricing 环境的第一轮选点；同一次 exact pricing 的 DSSR 后续轮次不再执行浅 probe。
+
+第 r 轮完整 labeling 结束后记录实际 forward/backward 扩展耗时 F/B。令 `R=max(F,B)/min(F,B)`，接受阈值 `tau=2`。若 `R<=2`，第 r+1 轮直接复用当前 Tmid。若 `R>2`，计算希望从重侧旧 label 中裁掉的比例 `p=0.5*(1-2/R)`。backward 较重时，扫描存活 backward label 的最晚可行 split 时间 `frontier.tail.end`，下一轮 Tmid 取该分布的 `q(p)`；forward 较重时，扫描存活 forward label 的最早可行 split 时间 `frontier.head.start`，下一轮 Tmid 取该分布的 `q(1-p)`。新 Tmid 直接进入下一轮正式 labeling，不再经过 probe。
+
+该公式使 R=2 时不移动，R=4 时约裁掉重侧 25%，R=10 时约裁掉 40%，极端情况下最多趋近 50%。它利用上一完整 round 的实际深层搜索分布，只在失衡超过 2 倍时收集重侧 primitive 时间数组并选择分位点；平衡轮不扫描分布。ng-set 更新会改变下一轮搜索树，所以该值只是闭环控制候选，不是精确预测；下一轮完成后继续使用新的真实 F/B 和时间分布修正。机械 5 轮重探、固定 5% 预移和 DSSR 内 bracket 均不属于该方案。当前正式代码尚未接入动态分位数，仍运行旧的轮间重 probe 逻辑。

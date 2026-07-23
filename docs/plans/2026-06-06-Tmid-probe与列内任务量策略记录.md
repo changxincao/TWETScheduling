@@ -1012,3 +1012,10 @@ probe 搜索本身保持现状，但不应在每一轮 DSSR 和每一次同 node
 建议口径为：新 node 的第一次 exact pricing 必须 probe；cut 集合变化后视为新的 epoch，也必须 probe。同一 node、同一 cut epoch 的后续 pricing，若上一次完整 exact 的正反向耗时比不超过 2，则直接复用最近 Tmid；若超过 2，则下一次以最近 Tmid 为起点重新 probe。为避免 dual 多轮变化后缓慢漂移但始终未触发 2 倍阈值，可从上一次实际 probe 起每 5 次 pricing 强制校准一次。该周期按“距离上次真实 probe 的次数”计，不按 node 内绝对 pricing 序号取模。
 
 同一次 exact pricing 的 DSSR 内采用相同原则：第一轮沿用外层决定；后续轮次通常复用最近 Tmid。上一轮完整 labeling 的耗时比超过 2 时，下一轮立即重新 probe；否则每隔 5 个未 probe 的 DSSR 轮次校准一次。重新 probe 的初值仍可按上一轮重侧向修正方向移动 5% 有效区间，再交给现有 10% walk、1.5 接受阈值和 5% bracket 容差流程决定最终 Tmid。当前源码已基本采用该 DSSR 轮间策略；同 node 多次 pricing 仍混有 stable-freeze 机制，后续若实施统一调度，应以完整 exact 耗时反馈替代单纯的“Tmid 连续稳定”判据，避免两套复用状态并存。
+
+
+### 2026-07-23 更正：跨 pricing 与 DSSR 轮间反馈必须分层
+
+前一节把“同 node 上一次完整 exact 的耗时”写成单一反馈不准确。一次 ng-DSSR exact pricing 可能包含多轮完整 relaxed labeling，每一轮使用的 ng-set 不同；当前默认下一次 pricing 又从初始 ng-set 重新开始。因此跨 pricing 的第一轮不能使用上一次 pricing 最后一轮 DSSR 的 Tmid/耗时作为同口径反馈，相关性更强的是上一次 pricing 第一轮 DSSR 的 Tmid。当前 `updateMidpointProbeReuseAfterExact()` 实际在每轮 `solveRelaxedRound()` 完成后调用，node 级 `lastExactTmid` 会被最后一轮覆盖，方法命名和缓存语义容易造成误读。
+
+调度应分成两层。一次 pricing 内，DSSR 第 r+1 轮使用本次 pricing 第 r 轮的完整 forward/backward 耗时反馈，失衡时重新 probe、平衡时复用并周期校准；这是相邻 ng-set 的连续变化。跨 pricing 时，新调用第一轮重新处于初始 ng-set，不能继承旧调用最后一轮的大 ng-set Tmid。保守且简单的口径是每次 pricing 的第一轮都执行 probe，只把上一次 pricing 第一轮选中的 Tmid 作为 probe 初值；后续 DSSR 轮再采用轮间条件 probe。这样 dual 改变后仍有本次浅探校准，同时避免每个 DSSR 轮都重复 probe。若以后要跳过某些 pricing 第一轮 probe，也必须单独保存“上一调用第一轮”的反馈，不能使用当前会被最后一轮覆盖的 node cache。当前仅修正分析，尚未修改代码。

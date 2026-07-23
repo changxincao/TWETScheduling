@@ -1126,3 +1126,8 @@ probe 接受后的完整 F/B 比例统计为：中位数 1.289，75 分位数 1.
 repair 与正式 pricing 使用相同入口。每次 `findFeasible()` 都构造新的 ng-DSSR solver，并读取 repair LP 当前 dual；同一 repair solve 内的 DSSR 轮间仍可用上一轮 seed，但 LP 重解后的下一次调用重新从 default 开始。strong trial 选中的 child 入队时仅保留分支状态和筛后的 seed column IDs，不携带 Tmid、probe label 或 dominance 状态；正式出队后按 child 当前 LP/window 重新 probe。因此删除跨 node 复用后，repair 和入队 child 都不存在旧 Tmid 污染，也不损失需要保留的状态。
 
 验证：受影响的 config、runner、旧/新 bidirectional core 与 wrapper 均通过 `javac -encoding UTF-8` 编译；`NgDssrMinimumRepeatedSegmentUpdateTest` 通过；源码全局扫描确认上述字段和 `MidpointProbeNodeReuse` 无残留。
+### 2026-07-23 二次正确性复查
+
+再次按正式 pricing、repair、DSSR 轮间和 strong child 入队四条调用链检查提交 `cfeace1f`。`GCNGBBStyleBidirectionalNgDssr.solve()` 每次开始都将 `ngDssrReusableTmid` 重置为 `NaN`，首轮从当前 effective window 的 default Tmid 开始；只有同一次 solve 的后续 DSSR 轮使用上一轮 Tmid/耗时反馈作为新 probe 初值。`price()` 与 `findFeasible()` 都逐次创建新的 core，repair LP 重解后不会沿用旧 Tmid；正式 pricing 保留的 `NgDssrHistoryWarmStart` 只影响 ng-set history，不携带 probe 状态。strong trial 选中 child 后仅复制内部/外包 seed column IDs 和 prepared 标记，child 正式出队时重新创建 pricing core。因此删除跨 node reuse 不会造成跨 dual、跨 repair 或跨 child 的状态污染，也没有删除求解正确性所需状态。
+
+补充验证通过：所有受影响类重新编译；`NgDssrMinimumRepeatedSegmentUpdateTest`、`NgDssrSameNodeWarmStartTest`、`NgDssrInitialNgSetSizeTest` 均通过；全局引用扫描确认已删除字段、常量和容器无残留。未启动完整 CPLEX 算例回归，剩余风险仅为未覆盖的运行时性能路径，不涉及已发现的正确性问题。

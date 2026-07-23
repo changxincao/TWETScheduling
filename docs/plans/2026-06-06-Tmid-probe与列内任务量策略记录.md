@@ -1028,3 +1028,22 @@ probe 搜索本身保持现状，但不应在每一轮 DSSR 和每一次同 node
 第 r 轮完整 labeling 结束后记录实际 forward/backward 扩展耗时 F/B。令 `R=max(F,B)/min(F,B)`，接受阈值 `tau=2`。若 `R<=2`，第 r+1 轮直接复用当前 Tmid。若 `R>2`，计算希望从重侧旧 label 中裁掉的比例 `p=0.5*(1-2/R)`。backward 较重时，扫描存活 backward label 的最晚可行 split 时间 `frontier.tail.end`，下一轮 Tmid 取该分布的 `q(p)`；forward 较重时，扫描存活 forward label 的最早可行 split 时间 `frontier.head.start`，下一轮 Tmid 取该分布的 `q(1-p)`。新 Tmid 直接进入下一轮正式 labeling，不再经过 probe。
 
 该公式使 R=2 时不移动，R=4 时约裁掉重侧 25%，R=10 时约裁掉 40%，极端情况下最多趋近 50%。它利用上一完整 round 的实际深层搜索分布，只在失衡超过 2 倍时收集重侧 primitive 时间数组并选择分位点；平衡轮不扫描分布。ng-set 更新会改变下一轮搜索树，所以该值只是闭环控制候选，不是精确预测；下一轮完成后继续使用新的真实 F/B 和时间分布修正。机械 5 轮重探、固定 5% 预移和 DSSR 内 bracket 均不属于该方案。当前正式代码尚未接入动态分位数，仍运行旧的轮间重 probe 逻辑。
+
+### 2026-07-23 每轮 DSSR 从 default 独立 probe 的分布实验
+
+为区分同一 node 上“跨 pricing 的 dual 变化”和“单次 pricing 内 ng-set 逐轮收紧”对 Tmid 的影响，本次使用现有开关做隔离实验：每次 pricing 的每轮 DSSR 都从 `default` 几何中点初始化并执行 probe，关闭 node/DSSR 复用和稳定冻结；只处理 root，关闭 strong branching，避免 trial/repair 样本混入口径。其余保持当前 ng-DSSR 主线配置，包括增量 source-aware dominance、nearest `n/10`、top20 更新、candidate 2000、completion bound、time-indexed root preprocessing、200 条 root seed、启发式 pricing 和 ALNS。40、50、60 规模按两进程并行分批运行，因此 wall-clock 毫秒可能受进程竞争影响；Tmid 离散分布和 DSSR 轮次结构仍可直接比较。
+
+| 算例 | pricing / DSSR轮 | 单个pricing内Tmid变化 | Tmid分布（min / Q1 / median / Q3 / max） | default占比 | 完整F/B时间比中位数 / 最大值 |
+|---|---:|---:|---:|---:|---:|
+| 40-2 base | 8 / 15 | 0 / 8 | 848 / 848 / 848 / 848 / 848 | 100% | 1.375 / 1.895 |
+| 40-2 setupR50 | 11 / 17 | 0 / 11 | 818.5 / 818.5 / 818.5 / 818.5 / 818.5 | 100% | 1.500 / 4.545 |
+| 50-2 base | 19 / 40 | 0 / 19 | 1140.5 / 1140.5 / 1140.5 / 1140.5 / 1140.5 | 100% | 2.115 / 4.020 |
+| 50-3 W300 | 6 / 9 | 0 / 6 | 615 / 615 / 615 / 615 / 722.2 | 77.78% | 2.244 / 4.416 |
+| 60-2 base | 70 / 362 | 46 / 70 | 1715.6 / 1715.6 / 1884 / 1884 / 1884 | 70.17% | 1.992 / 3.682 |
+| 60-3 setupR50 W100 | 17 / 30 | 5 / 17 | 1965 / 1965 / 1965 / 2028.1 / 2091.2 | 66.67% | 1.536 / 2.146 |
+
+40规模和50-2中，每一轮 probe 都在第一次候选直接接受 default；重复 probe 没有改变 Tmid。50-3 W300 的不同 pricing 之间会选择 615 或 722.2，但同一 pricing 内各轮 DSSR 始终一致，说明这里主要是 pricing 状态变化，而不是 ng-set 收紧导致移动。60-2 则有 46/70 个 pricing 在其 DSSR 轮内出现多个 Tmid：1884 出现254轮，1715.6出现100轮，二分中点1799.8出现8轮。60-3 W100也有5/17个 pricing 出现轮内变化。由此确认，规模增大后 ng-set 更新本身能够显著改变浅层搜索压力，不能假设一个 pricing 内所有 DSSR 轮都适合同一 Tmid。
+
+浅 probe 的局限也很明确。50-2 每轮都在 default 一次接受，但完整 labeling 的 F/B 时间比中位数仍为2.115，52.5%的轮次超过2；50-3 W300对应中位数为2.244，55.56%的轮次超过2。也就是说，每轮都从 default 重跑浅 probe 并不能可靠修正深层失衡，只会在稳定算例中重复相同工作。60-2 虽然 probe 经常移动，完整时间比仍有48.9%的轮次超过2。因此该实验不支持“每轮 DSSR 无条件重新 probe”作为正式策略；更合理的分层仍是：新 pricing 首轮用浅 probe 防极端，同一 pricing 的后续 DSSR 使用上一完整 round 的真实 F/B 与存活 label 时间分布做闭环修正。
+
+完整逐轮数据位于 `test-results/bpc/exp-tmid-default-every-dssr-analysis-20260723a/tmid_rounds.csv`，每个 pricing 的箱线摘要位于 `pricing_boxes.csv`，算例汇总位于 `case_summary.csv`。60-3 setupR50 W300 在 completion-bound pre-certificate 阶段直接闭合，没有进入 labeling/probe，故不纳入 Tmid 分布表。

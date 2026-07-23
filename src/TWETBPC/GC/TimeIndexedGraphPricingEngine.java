@@ -77,7 +77,11 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		TimeIndexedGraphSolver solver = new TimeIndexedGraphSolver(lp);
 		ArrayList<TWETColumn> columns = solver.solve();
 		if (columns.isEmpty()) {
-			return PricingResult.noImprovement(solver.message(false));
+			PricingResult result = PricingResult.noImprovement(solver.message(false));
+			if (lp.isFeasibilityPhaseOneObjectiveMode() && solver.hasCompleteInternalCertificate()) {
+				result = result.withCertifiedInternalReducedCost(solver.certifiedInternalReducedCost());
+			}
+			return result;
 		}
 		return new PricingResult(columns, true, solver.message(true));
 	}
@@ -110,6 +114,11 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	@Override
 	public String getName() {
 		return preHeuristicMode ? "TimeIndexedPreHeuristicPricing" : "TimeIndexedGraphPricing";
+	}
+
+	@Override
+	public boolean supportsFeasibilityPhaseOneObjective() {
+		return !preHeuristicMode;
 	}
 
 	/**
@@ -238,7 +247,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		return !Utility.isBigMValue(penalty);
 	}
 	private static boolean canUseDualProfitableWindow(LP lp) {
-		return PricingCompatibility.canUseDualProfitableWindow(lp);
+		return lp != null && !lp.isFeasibilityPhaseOneObjectiveMode()
+				&& PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	private static double hWindowStart(Data data, int job, double gamma) {
@@ -298,6 +308,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int horizon;
 		private final int width;
 		private final GraphWindow graphWindow;
+		private final boolean phaseOneObjective;
 		private final double[] dist;
 		private final int[] predState;
 		private final int[] predAddedJob;
@@ -332,6 +343,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node == null ? data.n + 1 : node.sinkId();
+			this.phaseOneObjective = lp.isFeasibilityPhaseOneObjectiveMode();
 			this.graphWindow = computeGraphWindow(data, lp, preHeuristicMode,
 					config.enableTimeIndexedGraphDualWindow);
 			this.horizon = graphWindow.horizon;
@@ -394,6 +406,12 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		private TWETColumn maybeRecheckSelectedCandidate(TWETColumn column) {
+			if (phaseOneObjective) {
+				// Phase-I 搜索阶段只维护零真实成本 reduced cost；仅对最终 top-K 物化真实列成本。
+				double trueCost = evaluator.evaluate(column.getSequence());
+				return Utility.isBigMValue(trueCost) ? null
+						: new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+			}
 			if (!graphWindow.dualWindow) {
 				return column;
 			}
@@ -451,12 +469,16 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return forwardPassCompleted && Utility.compareGe(certifiedInternalReducedCost(), -RC_TOLERANCE);
 		}
 
+		boolean hasCompleteInternalCertificate() {
+			return forwardPassCompleted;
+		}
+
 		double certifiedInternalReducedCost() {
 			return Double.isFinite(bestPseudoReducedCost) ? bestPseudoReducedCost : 0.0;
 		}
 
 		private double reducedCost(List<Integer> sequence, double cost) {
-			double reducedCost = cost - lp.getMachineDual();
+			double reducedCost = (phaseOneObjective ? 0.0 : cost) - lp.getMachineDual();
 			int prev = 0;
 			for (int job : sequence) {
 				reducedCost -= lp.getJobDual(job);
@@ -635,7 +657,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 		private double processArcReducedCost(int from, int to, int completion) {
 			double penalty = penaltyByJobTime[to][completion];
-			return isFinite(penalty) ? processArcBaseReducedCost[from][to] + penalty : INF;
+			return isFinite(penalty)
+					? processArcBaseReducedCost[from][to] + (phaseOneObjective ? 0.0 : penalty)
+					: INF;
 		}
 
 		private double sinkArcReducedCost(int lastJob) {
@@ -652,7 +676,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					processArcForbidden[from][to] = from == to
 							|| PricingCompatibility.isRequiredOutsourcedJob(node, to)
 							|| isProcessArcForbiddenByNode(from, to);
-					processArcBaseReducedCost[from][to] = data.getSetupCost(from, to)
+					processArcBaseReducedCost[from][to] = (phaseOneObjective ? 0.0 : data.getSetupCost(from, to))
 							- lp.getJobDual(to) - lp.getArcDual(from, to)
 							- (from == 0 ? lp.getMachineDual() : 0.0);
 				}

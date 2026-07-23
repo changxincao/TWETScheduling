@@ -11,6 +11,7 @@ import java.util.Random;
 import Basic.Data;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.CutPool;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
@@ -34,6 +35,7 @@ public final class TimeIndexedGraphOptimizationTest {
 		testInternalColumnCompatibilityFastPath();
 		testStaticPricingDataMatchesInstance();
 		testExactPricingRejectsNonIntegerGrid();
+		testPhaseOnePricingUsesZeroSearchCostAndStoresTrueCost();
 		testCompactWindowConsumptionBoundaries();
 		System.out.println("TimeIndexedGraphOptimizationTest passed");
 	}
@@ -259,6 +261,56 @@ public final class TimeIndexedGraphOptimizationTest {
 					throw new AssertionError("penalty cache mismatch");
 				}
 			}
+		}
+	}
+
+	private static void testPhaseOnePricingUsesZeroSearchCostAndStoresTrueCost() throws Exception {
+		Data data = loadData();
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.useTimeIndexedGraphPricing = true;
+		config.enableTimeIndexedGraphDualWindow = true;
+		config.timeIndexedGraphMaxExactPricingColumns = 8;
+
+		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		LP lp = new LP(data, new Pool(data), new CutPool(), config, new OutsourcingPool(data));
+		lp.construct(node, node.seedColumnIds);
+		lp.setFeasibilityPhaseOneObjectiveMode(true);
+		Field jobDualField = LP.class.getDeclaredField("jobDual");
+		jobDualField.setAccessible(true);
+		double[] jobDual = (double[]) jobDualField.get(lp);
+		jobDual[1] = 1.0e6;
+
+		TimeIndexedGraphPricingEngine engine = new TimeIndexedGraphPricingEngine(data, config);
+		if (!engine.supportsFeasibilityPhaseOneObjective()
+				|| !new TimeIndexedGraphRank1CutPricingEngine(data, config)
+						.supportsFeasibilityPhaseOneObjective()) {
+			throw new AssertionError("time-indexed exact pricing did not advertise Phase-I support");
+		}
+		PricingResult improving = engine.price(lp);
+		if (!improving.isImproved() || improving.getColumns().isEmpty()) {
+			throw new AssertionError("Phase-I time-indexed pricing did not find a dual-improving column");
+		}
+		TWETColumnEvaluator evaluator = new TWETColumnEvaluator(data);
+		for (TWETColumn column : improving.getColumns()) {
+			double trueCost = evaluator.evaluate(column.getSequence());
+			if (Math.abs(trueCost - column.getCost()) > 1e-7 * Math.max(1.0, Math.abs(trueCost))) {
+				throw new AssertionError("Phase-I column did not retain true objective cost");
+			}
+			if (!Utility.compareLt(lp.computeReducedCost(column, lp.captureTruePricingDuals()), -1e-6)) {
+				throw new AssertionError("Phase-I returned a non-improving column");
+			}
+		}
+		if (!improving.getMessage().contains("piWindow=disabled")) {
+			throw new AssertionError("Phase-I pricing incorrectly enabled the dual profitable window");
+		}
+
+		LP closedLp = new LP(data, new Pool(data), new CutPool(), config, new OutsourcingPool(data));
+		closedLp.construct(node.copy(), node.seedColumnIds);
+		closedLp.setFeasibilityPhaseOneObjectiveMode(true);
+		PricingResult closed = new TimeIndexedGraphPricingEngine(data, config).price(closedLp);
+		if (closed.isImproved() || !Double.isFinite(closed.getCertifiedInternalReducedCost())
+				|| Utility.compareLt(closed.getCertifiedInternalReducedCost(), -1e-6)) {
+			throw new AssertionError("Phase-I no-cut pricing did not return a complete nonnegative certificate");
 		}
 	}
 

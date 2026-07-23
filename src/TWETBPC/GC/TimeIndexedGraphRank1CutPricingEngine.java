@@ -109,6 +109,11 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		return "TimeIndexedGraphRank1CutPricing";
 	}
 
+	@Override
+	public boolean supportsFeasibilityPhaseOneObjective() {
+		return true;
+	}
+
 	private final class Rank1CutSolver {
 		private final LP lp;
 		private final Node node;
@@ -119,6 +124,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final int width;
 		private final int tStar;
 		private final boolean heuristicMode;
+		private final boolean phaseOneObjective;
 		private final double[][] penaltyByJobTime;
 		private final int[][] durationByArc;
 		private final double[][] processArcBaseReducedCost;
@@ -155,6 +161,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.width = horizon + 1;
 			this.tStar = computeTStar(graphWindow);
 			this.heuristicMode = heuristicMode;
+			this.phaseOneObjective = lp.isFeasibilityPhaseOneObjectiveMode();
 			this.penaltyByJobTime = staticPricingData.penaltyByJobTime;
 			this.durationByArc = staticPricingData.durationByArc;
 			this.processArcBaseReducedCost = new double[n + 1][n + 1];
@@ -202,9 +209,22 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			Collections.sort(candidates, bestCandidateFirstComparator());
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 			for (int i = 0; i < candidates.size() && columns.size() < maxReturnedColumns(); i++) {
-				columns.add(candidates.get(i).column);
+				TWETColumn column = materializeSelectedCandidate(candidates.get(i).column);
+				if (column != null) {
+					columns.add(column);
+				}
 			}
 			return columns;
+		}
+
+		private TWETColumn materializeSelectedCandidate(TWETColumn column) {
+			if (!phaseOneObjective) {
+				return column;
+			}
+			// 与 no-cut 图一致，只对最终 top-K 计算并保存真实目标成本。
+			double trueCost = evaluator.evaluate(column.getSequence());
+			return Utility.isBigMValue(trueCost) ? null
+					: new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
 		}
 
 		private void initializeForward() {
@@ -493,7 +513,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private double reducedCost(List<Integer> sequence, double cost) {
-			double reducedCost = cost - lp.getMachineDual();
+			double reducedCost = (phaseOneObjective ? 0.0 : cost) - lp.getMachineDual();
 			int prev = 0;
 			for (int job : sequence) {
 				reducedCost -= lp.getJobDual(job);
@@ -512,7 +532,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 
 		private double processArcReducedCost(int from, int to, int completion) {
 			double penalty = penaltyByJobTime[to][completion];
-			return isFinite(penalty) ? processArcBaseReducedCost[from][to] + penalty : INF;
+			return isFinite(penalty)
+					? processArcBaseReducedCost[from][to] + (phaseOneObjective ? 0.0 : penalty)
+					: INF;
 		}
 
 		private double sinkArcReducedCost(int lastJob) {
@@ -525,7 +547,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					processArcForbidden[from][to] = from == to
 							|| PricingCompatibility.isRequiredOutsourcedJob(node, to)
 							|| isProcessArcForbiddenByNode(from, to);
-					processArcBaseReducedCost[from][to] = data.getSetupCost(from, to)
+					processArcBaseReducedCost[from][to] = (phaseOneObjective ? 0.0 : data.getSetupCost(from, to))
 							- lp.getJobDual(to) - lp.getArcDual(from, to)
 							- (from == 0 ? lp.getMachineDual() : 0.0);
 				}
@@ -942,7 +964,8 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	}
 
 	private static boolean canUseDualProfitableWindow(LP lp) {
-		return PricingCompatibility.canUseDualProfitableWindow(lp);
+		return lp != null && !lp.isFeasibilityPhaseOneObjectiveMode()
+				&& PricingCompatibility.canUseDualProfitableWindow(lp);
 	}
 
 	private static double hWindowStart(Data data, int job, double gamma) {

@@ -311,8 +311,8 @@ public class TWETBPCConfig {
 	public int bidirectionalMidpointColumnLimit = 400;
 	/** 2026-06-06: 是否在正式 exact pricing 前用有限 pop dry-run 试探多个 Tmid。 */
 	public boolean bidirectionalMidpointProbe = false;
-	/** 2026-07-22: 每个 Tmid probe 候选的正反向总调用上限；5000 对应每侧最多2500次。 */
-	public int bidirectionalMidpointProbePopLimit = 5000;
+	/** 2026-07-23: 每个 Tmid probe 候选的总 pop 上限；10000 对应正反向各最多5000次，选中状态由正式 labeling 直接续跑。 */
+	public int bidirectionalMidpointProbePopLimit = 10000;
 	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
 	public int bidirectionalMidpointProbeMaxCandidates = 5;
 	/** 2026-07-21: 同一 node 已有最近完整 exact Tmid 时，后续 probe 最多试探多少个候选点。 */

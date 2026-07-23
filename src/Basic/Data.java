@@ -215,24 +215,29 @@ public class Data {
 	}
 
 	/**
-	 * 将每个任务的加工长度保守替换为 q_j=p_j+max_i s_ij，再套用公共 release 的并行机上界。
-	 * rMax 沿用无等待论证中的 max_j(d_l[j]-p_j)。连续时间数据不向下取整。
+	 * 将任务长度保守替换为 q_j=p_j+max_i s_ij，并统一使用最大的真实/辅助 release。
+	 * 无 setup cost 时使用并行机负载上界；存在 setup cost 时，换机可能改变目标值，必须退回串行安全界。
 	 */
 	public double computeCommonReleaseSetupHorizon() {
 		double totalInflatedProcessing = 0.0;
 		double maxInflatedProcessing = 0.0;
 		double maxRelease = 0.0;
+		boolean hasSetupCost = false;
 		for (int j = 1; j <= n; j++) {
 			double maxIncomingSetup = 0.0;
 			for (int i = 0; i <= n; i++) {
 				if (i != j) {
 					maxIncomingSetup = Math.max(maxIncomingSetup, s[i][j]);
+					hasSetupCost |= setupCost[i][j] != 0.0;
 				}
 			}
 			double inflatedProcessing = p[j] + maxIncomingSetup;
 			totalInflatedProcessing += inflatedProcessing;
 			maxInflatedProcessing = Math.max(maxInflatedProcessing, inflatedProcessing);
-			maxRelease = Math.max(maxRelease, d_l[j] - p[j]);
+			maxRelease = Math.max(maxRelease, Math.max(r[j], d_l[j] - p[j]));
+		}
+		if (hasSetupCost) {
+			return maxRelease + totalInflatedProcessing;
 		}
 		return maxRelease + totalInflatedProcessing / m
 				+ (1.0 - 1.0 / m) * maxInflatedProcessing;

@@ -20,6 +20,7 @@ public final class CommonReleaseSetupHorizonTest {
 		}
 		for (int i = 0; i <= data.n; i++) {
 			Arrays.fill(data.s[i], 0, data.n + 1, 0.0);
+			Arrays.fill(data.setupCost[i], 0, data.n + 1, 0.0);
 		}
 
 		assertClose(55.0, data.computeCommonReleaseSetupHorizon(), "zero-setup bound");
@@ -32,6 +33,14 @@ public final class CommonReleaseSetupHorizonTest {
 		data.setImprovedCmax();
 		assertClose(73.0, data.CmaxE, "CmaxE");
 		assertClose(73.0, data.CmaxH, "CmaxH");
+
+		data.r[2] = 80.0;
+		assertClose(153.0, data.computeCommonReleaseSetupHorizon(), "actual release bound");
+		data.r[2] = 0.0;
+
+		// 非零 setup cost 可能使最优解主动保留更长的便宜序列，必须使用串行安全界。
+		data.setupCost[0][1] = 1.0;
+		assertClose(124.0, data.computeCommonReleaseSetupHorizon(), "setup-cost-safe bound");
 		System.out.println("CommonReleaseSetupHorizonTest passed");
 	}
 

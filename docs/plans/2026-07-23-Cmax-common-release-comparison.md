@@ -92,15 +92,15 @@ ECT/SPT 型启发式得到：
 
 2026-07-23 根据公式复核，原 Tanaka runner 所谓粗糙上界并不是图 1 的逐任务 setup 负载式，而是 `maxDue + sumP + n * globalMaxSetup + 20`。旧 `Data.setCmax()` 的负载部分接近图 2，但末项使用 `max_j(d_e[j] - p_j - maxSetup_j) + 1`；随后 runner 又用 release/no-wait 启发式 makespan 覆盖，实际存在三套串联口径。
 
-当前统一为
+无 setup cost 的基础口径为
 
 `q_j = p_j + max_{i != j} s_ij`
 
-`rMax = max(0, max_j(d_l[j] - p_j))`
+`rMax = max(0, max_j(r_j, d_l[j] - p_j))`
 
 `Cmax = rMax + sum_j(q_j) / m + (m - 1) * max_j(q_j) / m`。
 
-这里先把所有任务的辅助 release 统一为最大值 `rMax`，消除不同 release 导致的空隙；再把每个任务的处理长度保守替换为自身处理时间加最大进入 setup。项目支持连续时间，因此不按文献整数式向下取整。`CmaxE` 和 `CmaxH` 取同一个值，不再乘 1.1。旧 `setImprovedCmax()` 方法名仅为兼容最终数据覆盖后的重算入口，不再调用 `SchedulerForReleaseNoWait`。
+这里先把所有任务的真实 release 和辅助 release 统一为最大值 `rMax`，再把每个任务的处理长度保守替换为自身处理时间加最大进入 setup。项目支持连续时间，因此不按文献整数式向下取整。`CmaxE` 和 `CmaxH` 取同一个值，不再乘 1.1。旧 `setImprovedCmax()` 方法名仅为兼容最终数据覆盖后的重算入口，不再调用 `SchedulerForReleaseNoWait`。
 
 三组代表算例的只加载数据对照为：40-2/001 的粗糙式、旧启发式乘 1.1、新公式分别为 3773、2131.8、2178.5；50-2/001 为 5392、2889.7、3182.5；50-3/003 为 4474、1747.9、1917.333。新公式仍比原粗糙式明显紧，但不再依赖某条启发式调度的 makespan。
 
@@ -108,12 +108,26 @@ ECT/SPT 型启发式得到：
 
 ## 8. 当前实际调用流程澄清
 
-当前 Cmax 只使用公共最大 release 的确定性公式。对任务 `j`，先计算最大进入 setup：`sMax_j=max_{i!=j}s[i][j]`，其中包含虚拟起点 `0 -> j`；再定义膨胀处理时间 `q_j=p_j+sMax_j`。辅助 release 沿用旧无等待分析的定义 `release_j=d_l[j]-p_j`，但代码不修改 `data.r[j]`，只在 Cmax 公式中统一取 `rMax=max(0,max_j release_j)`。最终计算
+当前 Cmax 只使用公共最大 release 的确定性公式。对任务 `j`，先计算最大进入 setup：`sMax_j=max_{i!=j}s[i][j]`，其中包含虚拟起点 `0 -> j`；再定义膨胀处理时间 `q_j=p_j+sMax_j`。代码不修改 `data.r[j]`，但 Cmax 公式同时考虑真实 release 和辅助 release，统一取
 
-`Cmax = rMax + sum_j(q_j)/m + (m-1)max_j(q_j)/m`，
+`rMax=max(0,max_j(r_j,d_l[j]-p_j))`。
+
+若所有 setup cost 为 0，计算
+
+`Cmax = rMax + sum_j(q_j)/m + (m-1)max_j(q_j)/m`。
+
+若任一 setup cost 非 0，则改用
+
+`Cmax = rMax + sum_j(q_j)`。
 
 并令 `CmaxE=CmaxH=Cmax`。项目允许连续时间，因此不向下取整，也不再额外乘 1.1。
 
 普通 `Data` 在最终输入读取完成后调用一次 `setCmax()`。Tanaka runner 会在构造 `Data` 后覆盖任务、due window 和 setup，因此覆盖结束后调用旧兼容入口 `setImprovedCmax()`；该方法现在仅转调 `setCmax()`，不再运行启发式。随后才重建 hard windows 和 penalty functions，使这些结构使用新的 horizon。
 
 当前明确不再用于主线 Cmax 的内容包括：runner 的 `maxDue+sumP+n*globalMaxSetup+20` 粗糙式、`SchedulerForReleaseNoWait`、启发式 makespan 以及 `heuristicMakespan*1.1`。旧调度器类暂时保留在仓库中，但没有 Cmax 调用方。方法名 `setImprovedCmax()` 也仅因现有 runner 兼容而保留，不能再把它理解为启发式收缩。
+
+## 9. 最终正确性审计
+
+2026-07-23 最后一轮审计补出两个边界。第一，公共 release 不能只取 `d_l[j]-p_j`，否则实例显式给出的更晚 `r[j]` 会被漏掉；当前已统一取两者最大值。第二，并行负载公式依赖“把末尾任务移到更早空闲机器不会恶化目标”。setup cost 非零时这个条件不成立：换机可能显著增加起始弧或连接弧成本，最优解可能主动使用 makespan 更长但 setup cost 更低的串行序列。因此 setup cost 非零时改用 `rMax+sum(q_j)` 的串行安全界。
+
+实现仍只在原有 `O(n^2)` 最大进入 setup 扫描中顺带检测 setup cost，没有增加额外渐进复杂度。手算回归新增真实 release 和 setup-cost fallback 两项；另对无 setup cost 的两机小实例做 4300 组独立穷举对拍，未发现并行公式小于真实 TWET 最优解最小 makespan 的情况。setup cost 非零时 horizon 会比无 setup cost 版本更宽，这是保证 exact 正确性所需，不是额外的实现冗余。

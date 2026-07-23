@@ -1109,3 +1109,13 @@ probe 接受后的完整 F/B 比例统计为：中位数 1.289，75 分位数 1.
 进一步拆分root变慢来源：5000预算下exact为5次、20.459s，共返回653条；10000预算下exact为8次、39.071s，共返回1070条。调用序列从484/143/21/5/0变为871/108/75/10/2/2/2/0，说明首轮更深probe返回更多基本负列后改变了RMP dual和后续列生成轨迹，并产生三轮只返回2条列的尾部。heuristic均为11次，耗时2.196s与3.831s；master LP均为145次，耗时3.173s与3.895s。因此root增加32.621s的最大可定位项是exact增加18.612s，不是LP求解；其余差异包含heuristic和整轮运行噪声。
 
 选中probe状态的正式续跑顺序保持原主线：若队列未耗尽，先从已有FWUL继续完成forward，再从已有BWUL继续完成backward，随后压缩active label、执行join并回收列。这里不是重新跑正反向；probe中已完成的pop及其labels、dominance状态和PWLF继续保留。若probe已经耗尽两侧队列，则跳过正反向扩展直接join。
+
+### 2026-07-23 probe与repair流程复查
+
+本次按普通exact、DSSR多轮和strong-branch repair三条路径重新检查。选中probe候选后，正式阶段只初始化输出列候选容器，不重建label搜索状态；未耗尽时按forward、backward、join顺序续跑，已耗尽时直接join。每次新的price/findFeasible调用都会新建求解器并重新读取当前LP dual，因此repair加列重解后不会携带上一份label、completion bound或probe状态。只有同一次findFeasible内部、LP dual不变的DSSR多轮使用上一轮Tmid和完整F/B反馈作为下一轮probe起点。
+
+旧repair在slack或branch-implied penalty为正时依次调用启发式、exact和外包pricing，每次加列后立即重解并重新检查residual；slack和penalty均为0后筛seed。Phase-I路径将合法列成本置0、人工项与竞争列置1，达到0后关闭Phase-I、删除竞争列并重解真实成本RMP。列化外包的不可行证书要求内部与外包pricing使用同一dual闭合。当前主线配置下流程正确。旧repair在整轮无加列后直接把残余slack/M判为不可行，正确性依赖pricing engine列表中包含并实际运行完整exact证书；当前最好配置满足该前提，但代码没有像Phase-I一样显式检查证书完整性。
+
+实现上确认存在失效旧入口：bidirectionalMidpointProbeReuseWithinNode、stableFreeze、DssrRecheckInterval、DssrSeedMoveRatio及MidpointProbeNodeReuse容器仍保留在config/wrapper，但当前ng-DSSR核心不读取node复用表，且DSSR开启复用时实际每轮都重新probe。这些入口不影响结果，运行开销也仅为空HashMap和少量字段，但会误导配置解释，后续应单独清理，不在本次参数检查中改动。前一轮明显失衡时按active label时间分位数构造下一轮seed需要扫描、排序上一轮active labels，是当前probe流程中剩余的可见额外开销；只在失衡超过阈值时发生。
+
+定向javac通过，NgDssrMinimumRepeatedSegmentUpdateTest通过。

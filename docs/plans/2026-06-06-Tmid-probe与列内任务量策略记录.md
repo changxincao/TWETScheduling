@@ -1126,8 +1126,26 @@ probe 接受后的完整 F/B 比例统计为：中位数 1.289，75 分位数 1.
 repair 与正式 pricing 使用相同入口。每次 `findFeasible()` 都构造新的 ng-DSSR solver，并读取 repair LP 当前 dual；同一 repair solve 内的 DSSR 轮间仍可用上一轮 seed，但 LP 重解后的下一次调用重新从 default 开始。strong trial 选中的 child 入队时仅保留分支状态和筛后的 seed column IDs，不携带 Tmid、probe label 或 dominance 状态；正式出队后按 child 当前 LP/window 重新 probe。因此删除跨 node 复用后，repair 和入队 child 都不存在旧 Tmid 污染，也不损失需要保留的状态。
 
 验证：受影响的 config、runner、旧/新 bidirectional core 与 wrapper 均通过 `javac -encoding UTF-8` 编译；`NgDssrMinimumRepeatedSegmentUpdateTest` 通过；源码全局扫描确认上述字段和 `MidpointProbeNodeReuse` 无残留。
+
 ### 2026-07-23 二次正确性复查
 
 再次按正式 pricing、repair、DSSR 轮间和 strong child 入队四条调用链检查提交 `cfeace1f`。`GCNGBBStyleBidirectionalNgDssr.solve()` 每次开始都将 `ngDssrReusableTmid` 重置为 `NaN`，首轮从当前 effective window 的 default Tmid 开始；只有同一次 solve 的后续 DSSR 轮使用上一轮 Tmid/耗时反馈作为新 probe 初值。`price()` 与 `findFeasible()` 都逐次创建新的 core，repair LP 重解后不会沿用旧 Tmid；正式 pricing 保留的 `NgDssrHistoryWarmStart` 只影响 ng-set history，不携带 probe 状态。strong trial 选中 child 后仅复制内部/外包 seed column IDs 和 prepared 标记，child 正式出队时重新创建 pricing core。因此删除跨 node reuse 不会造成跨 dual、跨 repair 或跨 child 的状态污染，也没有删除求解正确性所需状态。
 
 补充验证通过：所有受影响类重新编译；`NgDssrMinimumRepeatedSegmentUpdateTest`、`NgDssrSameNodeWarmStartTest`、`NgDssrInitialNgSetSizeTest` 均通过；全局引用扫描确认已删除字段、常量和容器无残留。未启动完整 CPLEX 算例回归，剩余风险仅为未覆盖的运行时性能路径，不涉及已发现的正确性问题。
+
+### 2026-07-23 最新流程的50规模root复核
+
+清理跨 pricing/node 的旧 Tmid 状态后，使用最新 class 和当前 ng-DSSR 配置串行运行四组 `maxNodes=1` root 诊断。统一开启 time-indexed root preprocessing、nearest `K=floor(n/10)`、DSSR top20/candidate2000、新 dominance graph、join envelope/profile pruning、completion bound、每候选总 pop 10000、ALNS 60s；关闭 time-indexed pre-heuristic、SRI、RMIH 和 strong branching。四组均 `valid=true`、stderr为空。
+
+| 算例 | root总时间 | exact时间/调用 | DSSR轮数 | 平均probe候选 | 完整F/B比中位数 / 90分位 / 最大值 |
+|---|---:|---:|---:|---:|---:|
+| 50-2 base | 213.448s | 4.470s / 19 | 39 | 1.000 | 1.796 / 2.459 / 3.023 |
+| 50-3 W100 | 97.422s | 3.304s / 7 | 10 | 1.000 | 1.474 / 1.640 / 1.653 |
+| 50-3 W300 | 57.592s | 18.568s / 8 | 11 | 1.182 | 1.754 / 2.572 / 2.703 |
+| 50-3 setupR50 W300 | 55.835s | 14.613s / 8 | 10 | 1.300 | 1.431 / 1.688 / 4.909 |
+
+按最终 Tmid 聚合完整正反向扩展时间，50-2 默认 `Tmid=1156.5` 共33轮，F/B累计为1157.8/664.1ms；发生完整反馈调整后还使用898.173、926、937和1043，调整点单轮量级较小。50-3 W100固定使用668.5，10轮累计483.0/693.0ms。50-3 W300主要使用614.5，10轮累计1498.6/2726.2ms；另一次经方向反转二分选择668.05，完整152.3/80.9ms。setupR50 W300主要使用634，8轮累计1836.8/2611.1ms；另使用751.2和692.6。
+
+当前最大残余误判出现在 setupR50 W300 的一次首轮 pricing。浅 probe 从634的162.8/311.3ms向右移动到751.2，浅层为225.7/164.7ms、比例1.370，因而接受；完整扩展为916.8/186.7ms、比例4.909。方向判断正确，浅层仍低估了forward深层增长。后续一次三候选加二分选择692.6时，浅层206.0/174.8ms、完整453.7/268.9ms，比例为1.688。50-3 W300 本轮最大完整失衡为2.703，没有复现旧5000预算下25.563倍的极端值。
+
+四组共70个DSSR轮：平均候选数分别为1.000、1.000、1.182和1.300；只有3轮测试多个候选、2轮进入二分。完整F/B不超过2倍的比例分别为71.8%、100%、81.8%和90%。因此当前probe对窄窗50规模基本只做一次候选并保持稳定；宽窗或setup变化时仍可防住多数极端，但浅层时间比不能作为完整平衡证书。原始日志位于 `test-results/bpc/exp-tmid-current-50-*-20260723a/`。

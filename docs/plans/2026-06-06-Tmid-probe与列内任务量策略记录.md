@@ -997,3 +997,9 @@ probe 搜索状态和“已经完整耗尽”状态已拆开。当前候选被�
 日志新增两层统计。单轮 `midpointProbe` 输出 `iterations`、`walkIterations`、`bracketIterations`、`totalPops` 和 `stateReuse=rank0|partial`；同一次 exact pricing 内的实际 probe 另累计为 `midpointProbeRuns=r轮次/i总迭代/w步进/b二分/p总pop/停止原因/t最终值`。DSSR 仅复用 Tmid 的轮次不会重复记为 probe，且后续轮次不再覆盖前一轮真实 probe 的迭代记录。
 
 验证分三组。默认每侧2500 pop的40-2 probe-on与probe-off root bound均为22490，`valid=true`；该小图在预算内完整耗尽，因此正常记录为一次rank0 probe。为覆盖部分状态续跑，诊断性地把总pop降至100且保持阈值1.5，root bound仍为22490，首轮记录 `i2/w2/b0/p200/acceptable`、`stateReuse=partial`。再把诊断阈值临时收紧至1.01以强制覆盖反转二分，多次记录为 `i6/w2/b4/p600/bracketTolerance`，root bound仍为22490。focused javac通过。低pop和1.01阈值只用于路径验证，不修改正式默认配置。
+
+### 2026-07-23 bracket 收敛容差调整为 5%
+
+当前 probe 的目标先限定为避免明显的正反向单侧爆炸，不继续追求方向反转区间内接近 1:1 的精细选点。因此将方向反转后二分的终止宽度由 `0.01(H-L)` 调整为 `0.05(H-L)`，固定步长仍为 `0.10(H-L)`，时间比接受阈值仍为 1.5。初始 bracket 通常宽约 `0.10(H-L)`，新口径下一次中点测试后即可缩到 5%，相比原口径通常减少三次候选 probe。
+
+该调整只影响 Tmid 搜索成本，不改变 exact pricing 的可行域、dominance、扩展和 join。达到 5% 容差后仍保留最后一个候选的 label、dominance graph 和 FWUL/BWUL；若队列未耗尽，正式 labeling 从该状态继续直至完整闭合。因此即使该候选的浅 probe 时间比仍大于 1.5，也不会被当作定价收敛证书，不影响正确性。

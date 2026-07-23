@@ -166,7 +166,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private boolean midpointProbeStableFreezeUsed;
 	private long midpointStrategyNanos;
 	private static final double MIDPOINT_PROBE_STEP_FRACTION = 0.10;
-	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.01;
+	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.05;
 	private static final int MIDPOINT_FREEZE_MIN_EXACT_CALLS = 5;
 	private static final int MIDPOINT_FREEZE_STABLE_SELECTIONS = 3;
 	private static final int MIDPOINT_FREEZE_SKIPPED_CALLS = 5;

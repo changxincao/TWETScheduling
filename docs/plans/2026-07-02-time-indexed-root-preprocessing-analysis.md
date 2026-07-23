@@ -773,3 +773,7 @@ W300 exact 暂时没有同等级的低风险热点修改。transition-only U/R �
 为排除 ALNS 按时间停止导致初始列数量和 incumbent 不一致，本轮增加 runner 属性 `twet.bpc.fullDomainCompare.timeIndexedGraphMaxExactColumns`，默认仍沿用 300；随后对 `wet050_001_2m` 关闭 ALNS、设置 `maxNodes=0`，两组都只从相同的 2 条可行 incumbent 列运行临时 time-indexed root，仅切换单轮上限 300/600。两组均完整闭合，stderr 为空，graph fixing gap 均为 `99219.038462`，`avgWindowLen` 均为 `2813.220`，说明最终写回证据强度一致。
 
 结果显示 600 明显退化。300 组为 290 次 pricing、加入 64,424 列、`tempPool=64,426`，graph pricing 7.831s，master `after_pricing=15.854s/289`，预处理总计 26.044s；600 组为 274 次 pricing、加入 100,632 列、`tempPool=100,634`，graph pricing 8.162s，master `after_pricing=28.041s/273`，预处理总计 38.709s。600 仅减少 5.5% pricing/LP 轮数，却增加 56.2% 临时列、76.9% master LP 时间和 48.6% 预处理总时间。批量扩大后一次加入更多相近负列，改变后续 dual 轨迹并使 RMP 更快膨胀，因此默认 300 保持不变，不继续测试 1000。实验目录为 `test-results/bpc/exp-ti-batch-isolated-300-50-2-20260723a` 和 `exp-ti-batch-isolated-600-50-2-20260723a`。
+
+### 2026-07-23：当前优化阶段收口
+
+临时 time-indexed root 使用 incumbent-only seed 的方向暂不实现。虽然历史单例中较小 seed 明显减少了临时列和预处理时间，但初始列会改变 RMP dual 轨迹，无法保证所有实例上都更好；正式主线继续保持当前“临时预处理继承正式 root seed”的统一口径。结合 600 列 batch 已确认退化，当前 no-SRI ng-DSSR 主线也没有新的、已证实低风险且具有明显收益的实现级冗余。后续只有在新日志暴露新的稳定热点，或形成可严格验证的算法方案时再继续修改，不为单例收益增加默认分支和自适应逻辑。

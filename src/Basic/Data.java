@@ -9,7 +9,6 @@ import java.util.Arrays;
 import Common.Configure;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
-import HEU.SchedulerForReleaseNoWait;
 
 public class Data {
 	private static final double OUTSOURCING_TARIFF_DOMAIN_MIN_MARGIN = 1.0;
@@ -81,7 +80,6 @@ public class Data {
 		applyDefaultSetupCostFromSetupTime();
 
 		setCmax();
-		setImprovedCmax();
 		ensureOutsourcingCostFunction();
 
 //        Cmax=7700;
@@ -205,81 +203,41 @@ public class Data {
 	}
 
 	public void setCmax() {
-		/* ---- compute horizon (s_ij = 0) ---- */
-		double sumP = 0, maxP = 0, maxD = 0, maxR = 0;
-		for (int j = 1; j <= n; j++) {
-			sumP += p[j];
-			double max_sj = 0;
-			for (int i = 0; i < n + 1; i++) {
-				max_sj = Math.max(max_sj, s[i][j]);
-			}
-			sumP += max_sj;
-			maxP = Math.max(maxP, p[j] + max_sj);
-			maxR = Math.max(maxR, r[j]);
-			maxD = Math.max(maxD, d_e[j] - (p[j] + max_sj));// 即每个任务在d_ej-pj-maxi(s_ij)这个时间以后执行，那么在任务前不可能存在等待时间，等待只会导致延迟？
-			// 如果可能是小数的话，那就不能向下取整了？
-		}
-		CmaxH = (sumP / (double) m + (1.0 - 1.0 / (double) m) * maxP) + maxD + 1;
-		CmaxE=CmaxH;
-		// 不做取整，如果都是整数，向下取值，参考下文
-//        Kramer, A., Dell’Amico, M., Feillet, D., & Iori, M. (2020). Scheduling jobs with release dates on identical parallel machines by minimizing the total weighted completion time. Computers and Operations Research, 123, 105018. https://doi.org/10.1016/j.cor.2020.105018
+		double bound = computeCommonReleaseSetupHorizon();
+		CmaxH = bound;
+		CmaxE = bound;
 	}
-	// 每个任务在时间max{(d_i-si-pi),r_i}之后不会有等待时间，其中s_i为所有i设置时间的最大
-	// 在此基础上取前m-1个任务的平均执行时间+最大任务的执行时间，，这是无等待情况下，因此基于所有任务的最大最早开始时间执行
-	// 还可以看作是一个带有不同释放时间的东西，后续启发式求解
-	
 
 	public void setImprovedCmax() {
-		//不采用简单的基于每个任务的d_l,计算可能无等待的最大累计时间
-		//将该问题作为一个决策问题，启发式获得上界，同样考虑无等待，认为每个任务的释放时间为
-		//即每个任务在时间d_l[j]-p[j]释放，且其setup可发生在release之前,此时任务开始执行必然在释放时间之后，且任务不可能等待取寻求更好的成本
-		SchedulerForReleaseNoWait scheduler=new SchedulerForReleaseNoWait(this);
-		double improvedCmax=scheduler.solve(CmaxH, 2, 10);
-		if(Utility.compareLt(improvedCmax, CmaxH)) {
-			if (Configure.debugAlgorithmCounters) {
-				System.out.println("Cmax被进一步改进："+CmaxH+" "+improvedCmax);
-			}
-			CmaxE=improvedCmax;
-			CmaxH=CmaxE*1.1;
-//			Cmax*=5;
-			//暂时感觉是正确的..虽然结果和不设置此处不太一样，有高有低
-			//相对于前边那种计算方法还是小了不少的
-			//虽然结果似乎有时候会变差，但变得更快，但这个变差感觉是启发式的问题
-			//这个的大小会严重影响求解速度
-			//确实会有一些影响, 暂时设置一个1.4倍吧 但这个Cmax对精确应该是可用的，对启发式需要给一定的冗余才能搜到更好的解 
-			//也不一定，有时候小点又快又好,感觉主要还是略大一点，保证存在ALNS更新可行解的同时，加深ls次数可能稳定一些
-		}
+		// 2026-07-23: 旧 release/no-wait 启发式 makespan 不能界定 TWET 最优解的 makespan。
+		// 保留旧方法名兼容 runner；现在只在最终 due/setup 数据写完后重算确定性公共 release 上界。
+		setCmax();
 	}
 
-	//TODO 2025.5.16 这俩玩意的一个问题在于，设置上界以后虽然速度会快很多，但不知道这个东西限制的太死会不会导致某些解直接无法被搜索到，从而导致陷入局部最优
-	//可能说限制的太死，扰动范围可能就很小.
-	//或者就是扰动的时候允许一个更大的Cmax，VND则保持原样。在ALNS处允许函数范围扩大一定倍数
-	//不能这么做，这么做要修改像下边的这些东西，而且如果ALNS基于这个算了一个Cmax超出的解，那进入VND也是一个上界不可行的解相当于
-	//两种办法：
-		//1、要么就是将这种解超出Cmax的解当作不可行解，但仍然接受做一定惩罚
-		//2、要么就是仍然只允许可行解，但将Cmax设置大一些,但这个是否永远不会报错就不一定，只能设置足够大 
-		//还得尝试一下 先用第2种吧，第一种还得修改评估逻辑,稍微大一点应该都有可行的解，主要看一下对不同的Cmax结果变化大不大，是不是Cmax越大可行解越好越稳定
-		//因为Cmax变大会显著影响时间
-	
-	//	public void enlargeCmax() {
-//		this.Cmax*=1.3;
-//		for(PiecewiseLinearFunction f:this.penaltyFunction) {
-//			f.tail.end*=1.3;
-//			f.domainEnd*=1.3;
-//		}
-		
-//	}
-	
-//	public void resetCmax() {
-//		this.Cmax/=1.3;
-//		for(PiecewiseLinearFunction f:this.penaltyFunction) {
-//			f.tail.end/=1.3;
-//			f.domainEnd*=1.3;
-//		}
-//	}
-	
-	
-	
+	/**
+	 * 将每个任务的加工长度保守替换为 q_j=p_j+max_i s_ij，再套用公共 release 的并行机上界。
+	 * rMax 沿用无等待论证中的 max_j(d_l[j]-p_j)。连续时间数据不向下取整。
+	 */
+	public double computeCommonReleaseSetupHorizon() {
+		double totalInflatedProcessing = 0.0;
+		double maxInflatedProcessing = 0.0;
+		double maxRelease = 0.0;
+		for (int j = 1; j <= n; j++) {
+			double maxIncomingSetup = 0.0;
+			for (int i = 0; i <= n; i++) {
+				if (i != j) {
+					maxIncomingSetup = Math.max(maxIncomingSetup, s[i][j]);
+				}
+			}
+			double inflatedProcessing = p[j] + maxIncomingSetup;
+			totalInflatedProcessing += inflatedProcessing;
+			maxInflatedProcessing = Math.max(maxInflatedProcessing, inflatedProcessing);
+			maxRelease = Math.max(maxRelease, d_l[j] - p[j]);
+		}
+		return maxRelease + totalInflatedProcessing / m
+				+ (1.0 - 1.0 / m) * maxInflatedProcessing;
+	}
+
 
 	public void setPenaltyFunctions() {
 		refreshExactIntegerTimeInstance();

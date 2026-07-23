@@ -55,7 +55,6 @@ public class OutsourcingMoveConsistencyTest {
 			}
 		}
 		data.setCmax();
-		data.setImprovedCmax();
 		Arrays.fill(data.outsourcingCost, 10.0);
 		data.outsourcingCost[0] = 0;
 		data.outsourcingCostFunction = new PiecewiseLinearFunction(0, data.n * 20.0);

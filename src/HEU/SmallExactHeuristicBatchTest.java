@@ -139,8 +139,7 @@ public class SmallExactHeuristicBatchTest {
 			}
 		}
 
-		data.CmaxH = computeSafeHorizon(data);
-		data.CmaxE = data.CmaxH;
+		data.setImprovedCmax();
 		data.outsourcingCostFunction = new PiecewiseLinearFunction(0, Math.max(1.0, totalBaseline));
 		// 这里先用线性 G(B)，便于和 ArcFlow 精确模型做直接一致性校验。
 		// 后续如果要测凹折扣函数，可以在这个入口继续扩展多段 tariff。
@@ -154,7 +153,6 @@ public class SmallExactHeuristicBatchTest {
 	private static Data loadBaseDataQuietly() throws IOException {
 		PrintStream oldOut = System.out;
 		try {
-			// Data 构造函数会运行一次旧的 Cmax 改进启发式并打印信息。
 			// 本测试随后会覆盖 n/m/数据字段，因此这里静音只为保持批量对拍输出可读。
 			System.setOut(new PrintStream(OutputStream.nullOutputStream()));
 			return new Data(BASE_INSTANCE, false, true);
@@ -163,19 +161,6 @@ public class SmallExactHeuristicBatchTest {
 		}
 	}
 
-	private static double computeSafeHorizon(Data data) {
-		double sumP = 0.0;
-		double maxSetup = 0.0;
-		double maxDue = 0.0;
-		for (int j = 1; j <= data.n; j++) {
-			sumP += data.p[j];
-			maxDue = Math.max(maxDue, data.d_l[j]);
-			for (int i = 0; i <= data.n; i++) {
-				maxSetup = Math.max(maxSetup, data.s[i][j]);
-			}
-		}
-		return Math.max(maxDue + sumP + data.n * maxSetup + 20.0, sumP + data.n * maxSetup + 20.0);
-	}
 
 	private ExactResult solveExact(Data data) throws Exception {
 		Utility.resetCurUpperBound(Utility.big_M);

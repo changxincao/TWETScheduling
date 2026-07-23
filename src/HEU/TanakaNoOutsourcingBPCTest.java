@@ -137,11 +137,8 @@ public class TanakaNoOutsourcingBPCTest {
 		}
 		applyDueWindowHalfWidth(data);
 		applyDefaultSetupCostFromTime(data);
-		data.CmaxH = computeSafeHorizon(data);
-		data.CmaxE = data.CmaxH;
-		// 2026-06-28: 目标 Tanaka 算例覆写完任务和 setup 后，必须重新跑一次
-		// release/no-wait 启发式收缩 CmaxH。否则只会使用 computeSafeHorizon 的粗上界，
-		// 60-2 这类算例会把 pricing horizon 放到 5700 左右，明显宽于启发式可行 Cmax。
+		// 2026-07-23: 最终 due/setup 数据写完后，使用公共最大 release 的确定性上界。
+		// 旧 release/no-wait 调度启发式会低估允许改变任务顺序的 TWET makespan，不能再用于裁剪时间域。
 		data.setImprovedCmax();
 		data.outsourcingCostFunction = new PiecewiseLinearFunction(0, 1);
 		data.outsourcingCostFunction.addSegment(0, 1, 1, 0);
@@ -196,19 +193,6 @@ public class TanakaNoOutsourcingBPCTest {
 		}
 	}
 
-	private static double computeSafeHorizon(Data data) {
-		double sumP = 0.0;
-		double maxSetup = 0.0;
-		double maxDue = 0.0;
-		for (int j = 1; j <= data.n; j++) {
-			sumP += data.p[j];
-			maxDue = Math.max(maxDue, data.d_l[j]);
-			for (int i = 0; i <= data.n; i++) {
-				maxSetup = Math.max(maxSetup, data.s[i][j]);
-			}
-		}
-		return Math.max(maxDue + sumP + data.n * maxSetup + 20.0, sumP + data.n * maxSetup + 20.0);
-	}
 
 	private static String nextNonEmptyLine(BufferedReader reader) throws IOException {
 		String line;

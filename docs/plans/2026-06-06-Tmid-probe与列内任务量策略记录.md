@@ -1054,4 +1054,8 @@ probe 搜索本身保持现状，但不应在每一轮 DSSR 和每一次同 node
 
 据此，跨 pricing 复用历史 Tmid 的必要性很低。每次 exact pricing 的第一轮都应从当前 effective 区间的 default 几何中点独立启动 probe，不继承上一 pricing 的 first/last Tmid，也不需要 node 级 stable-freeze。当前 first-acceptable probe 在40/50规模通常只测试default一次，60规模通常也只测试一至两个离散候选，已经不是早期固定测试多个候选的高成本流程。这样既简化状态生命周期，也避免 dual、RMP列集或cut变化后复用旧环境的选点。
 
-该结论只针对跨 pricing。一次 pricing 内后续 DSSR 轮与上一轮 ng-set 连续，仍应复用当前 Tmid；若上一完整 round 出现不可接受的极端 F/B 失衡，再使用完整轮反馈调整，而不是重新从default做浅probe。当前仅形成最终调度结论，尚未修改源码。
+该结论只针对跨 pricing。一次 pricing 内后续 DSSR 轮与上一轮 ng-set 连续，仍应利用上一完整轮反馈；具体调度进一步修正如下。
+
+同一次 exact pricing 内，第 r 轮完整 labeling 结束后计算真实扩展耗时比 `R=max(F,B)/min(F,B)`。若 `R<=2`，第 r+1 轮不做分位数预移，以第 r 轮 Tmid 作为初始候选；若 `R>2`，使用第 r 轮重侧存活 label 的 split 时间分布按既定动态分位数公式生成第 r+1 轮初始候选。无论是否预移，第 r+1 轮都执行现有浅 probe，由新的 ng-set 环境做一次低成本校准；预计多数情况下首个候选即可接受，失衡时仍由10% walk和反转二分处理。
+
+这里能复用的是“第 r+1 轮 probe 选中候选已经生成的部分 label、dominance graph 和队列”，它们与第 r+1 轮的新 ng-set 一致，可以直接续跑正式 labeling。第 r 轮的 label 不能跨 DSSR 轮复用，因为 ng-set 更新后状态、dominance key和可扩展集合已经变化。该方案兼顾完整轮深层反馈与新一轮浅校准，比单独依赖分位数候选更稳，也不需要跨 pricing 历史状态；尚需做每轮probe与首轮probe两个口径的困难60规模A/B后再接入正式代码。

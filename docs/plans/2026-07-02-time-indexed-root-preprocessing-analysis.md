@@ -767,3 +767,9 @@ join 只做严格等价的细节剪枝。对不超过 128 个任务的 no-SRI �
 第二优先级是预处理专用 batch A/B。50-2 有 264 轮撞满 300 条，说明把上限测试为 600/1000 有机会减少大量 LP 往返；代价是每轮更早扩张 RMP，不能凭调用次数判断收益。应同时统计 pricing calls、最终 restricted 列数、master LP 总时间和预处理总时间。第三优先级才是周期 restricted-column cleanup：保留全部正值列和 reduced cost 较好的列，仅从临时 RMP 移除其余列，Pool 仍保留并允许后续重新激活。现有筛列方法具备保留正值列的基本语义，但还没有接入预处理循环；该方案比 seed/batch 更复杂，必须确认筛后 LP 可行且最终仍由完整 pricing 闭合后才允许写回永久 fixing。
 
 W300 exact 暂时没有同等级的低风险热点修改。transition-only U/R 重建曾因 BigM window 反例改变 completion-bound 语义，已经回退；构造 frontier 前的 completion prefilter 虽剪掉约 198 万候选，但因额外扫描使 exact 慢约 16.1%，也不应重做。当前 native interval delta、source-aware dominance、group-envelope prefilter、direct min-sum join 均已生效；join 只占 exact 约 4%--10%。因此下一轮实现/实验应先做“临时 incumbent-only seed”隔离，再测 600/1000 batch，不再继续修改 completion-bound 或 join 语义。
+
+### 2026-07-23：time-indexed 单轮 300/600 列隔离对比
+
+为排除 ALNS 按时间停止导致初始列数量和 incumbent 不一致，本轮增加 runner 属性 `twet.bpc.fullDomainCompare.timeIndexedGraphMaxExactColumns`，默认仍沿用 300；随后对 `wet050_001_2m` 关闭 ALNS、设置 `maxNodes=0`，两组都只从相同的 2 条可行 incumbent 列运行临时 time-indexed root，仅切换单轮上限 300/600。两组均完整闭合，stderr 为空，graph fixing gap 均为 `99219.038462`，`avgWindowLen` 均为 `2813.220`，说明最终写回证据强度一致。
+
+结果显示 600 明显退化。300 组为 290 次 pricing、加入 64,424 列、`tempPool=64,426`，graph pricing 7.831s，master `after_pricing=15.854s/289`，预处理总计 26.044s；600 组为 274 次 pricing、加入 100,632 列、`tempPool=100,634`，graph pricing 8.162s，master `after_pricing=28.041s/273`，预处理总计 38.709s。600 仅减少 5.5% pricing/LP 轮数，却增加 56.2% 临时列、76.9% master LP 时间和 48.6% 预处理总时间。批量扩大后一次加入更多相近负列，改变后续 dual 轨迹并使 RMP 更快膨胀，因此默认 300 保持不变，不继续测试 1000。实验目录为 `test-results/bpc/exp-ti-batch-isolated-300-50-2-20260723a` 和 `exp-ti-batch-isolated-600-50-2-20260723a`。

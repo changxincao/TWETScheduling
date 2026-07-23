@@ -1,7 +1,6 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
@@ -18,12 +17,10 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
-	private final HashMap<Integer, GCNGBBStyleBidirectional.MidpointProbeNodeReuse> midpointProbeReuseByNode;
 
 	public GCNGBBStyleBidirectionalPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectional.MidpointProbeNodeReuse>();
 	}
 
 	@Override
@@ -37,7 +34,7 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 		if (!config.enableBidirectionalPricing) {
 			return PricingResult.noImprovement("GCNGBB-style bidirectional pricing disabled");
 		}
-		GCNGBBStyleBidirectional gc = new GCNGBBStyleBidirectional(data, config, midpointProbeReuseByNode);
+		GCNGBBStyleBidirectional gc = new GCNGBBStyleBidirectional(data, config);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -54,9 +51,6 @@ public class GCNGBBStyleBidirectionalPricingEngine implements PricingEngine {
 	@Override
 	public void reset() {
 		lastReusableSubtreeArcEliminationBounds = null;
-		if (!config.bidirectionalMidpointProbeReuseWithinNode) {
-			midpointProbeReuseByNode.clear();
-		}
 	}
 
 	@Override

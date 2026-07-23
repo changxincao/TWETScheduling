@@ -1,7 +1,6 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
@@ -21,7 +20,6 @@ public class GCNGBBStyleBidirectionalPartialDominancePricingEngine implements Pr
 	private final TWETBPCConfig config;
 	private final boolean diagnosticForceEnabled;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
-	private final HashMap<Integer, GCNGBBStyleBidirectionalPartialDominance.MidpointProbeNodeReuse> midpointProbeReuseByNode;
 
 	public GCNGBBStyleBidirectionalPartialDominancePricingEngine(Data data, TWETBPCConfig config) {
 		this(data, config, false);
@@ -33,7 +31,6 @@ public class GCNGBBStyleBidirectionalPartialDominancePricingEngine implements Pr
 		this.data = data;
 		this.config = config;
 		this.diagnosticForceEnabled = diagnosticForceEnabled;
-		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectionalPartialDominance.MidpointProbeNodeReuse>();
 	}
 
 	@Override
@@ -48,8 +45,7 @@ public class GCNGBBStyleBidirectionalPartialDominancePricingEngine implements Pr
 				|| (!diagnosticForceEnabled && !config.useGCNGBBStylePartialDominancePricing)) {
 			return PricingResult.noImprovement("GCNGBB-style partial-dominance bidirectional pricing disabled");
 		}
-		GCNGBBStyleBidirectionalPartialDominance gc = new GCNGBBStyleBidirectionalPartialDominance(data, config,
-				midpointProbeReuseByNode);
+		GCNGBBStyleBidirectionalPartialDominance gc = new GCNGBBStyleBidirectionalPartialDominance(data, config);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -66,9 +62,6 @@ public class GCNGBBStyleBidirectionalPartialDominancePricingEngine implements Pr
 	@Override
 	public void reset() {
 		lastReusableSubtreeArcEliminationBounds = null;
-		if (!config.bidirectionalMidpointProbeReuseWithinNode) {
-			midpointProbeReuseByNode.clear();
-		}
 	}
 
 	@Override

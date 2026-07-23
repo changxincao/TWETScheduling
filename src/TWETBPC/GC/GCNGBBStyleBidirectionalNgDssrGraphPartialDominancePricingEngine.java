@@ -1,7 +1,6 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 
@@ -24,13 +23,11 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 	private final Data data;
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
-	private final HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse> midpointProbeReuseByNode;
 	private final NgDssrHistoryWarmStart historyWarmStart;
 
 	public GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse>();
 		this.historyWarmStart = new NgDssrHistoryWarmStart(data.n);
 	}
 
@@ -46,8 +43,7 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR graph partial-dominance pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				midpointProbeReuseByNode, GCNGBBStyleBidirectionalNgDssr.DominanceBackend.GRAPH_PARTIAL,
-				historyWarmStart);
+				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.GRAPH_PARTIAL, historyWarmStart);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (config.diagnosticCrossCheckPartialDominance && shouldRunSameStateCrossCheck(lp, !columns.isEmpty())) {
 			String message = gc.getLastMessage() + runSameStateCrossCheck(lp, columns);
@@ -101,8 +97,7 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 	private void appendBackendCheck(StringBuilder summary, String label, LP lp, HashSet<SequenceSignature> graphSignatures,
 			GCNGBBStyleBidirectionalNgDssr.DominanceBackend backend) {
 		long begin = System.nanoTime();
-		GCNGBBStyleBidirectionalNgDssr checker = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				new HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse>(), backend);
+		GCNGBBStyleBidirectionalNgDssr checker = new GCNGBBStyleBidirectionalNgDssr(data, config, backend);
 		ArrayList<TWETColumn> columns = checker.solve(lp);
 		double elapsedMs = (System.nanoTime() - begin) / 1_000_000.0;
 		summary.append(" ").append(label).append("{cols=").append(columns.size())
@@ -204,7 +199,7 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR graph partial-dominance pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				midpointProbeReuseByNode, true);
+				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.GRAPH_PARTIAL);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -222,9 +217,6 @@ public class GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine im
 	@Override
 	public void reset() {
 		lastReusableSubtreeArcEliminationBounds = null;
-		if (!config.bidirectionalMidpointProbeReuseWithinNode) {
-			midpointProbeReuseByNode.clear();
-		}
 	}
 
 	@Override

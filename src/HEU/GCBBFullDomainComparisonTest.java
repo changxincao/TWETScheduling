@@ -644,9 +644,6 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeMaxCandidates = Integer.getInteger(
 				"twet.bpc.fullDomainCompare.midpointProbeMaxCandidates",
 				config.bidirectionalMidpointProbeMaxCandidates);
-		config.bidirectionalMidpointProbeReuseMaxCandidates = Integer.getInteger(
-				"twet.bpc.fullDomainCompare.midpointProbeReuseMaxCandidates",
-				config.bidirectionalMidpointProbeReuseMaxCandidates);
 		config.bidirectionalMidpointProbeMoveRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeMoveRatio",
 				Double.toString(config.bidirectionalMidpointProbeMoveRatio)));
@@ -672,24 +669,12 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeHighImbalanceRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeHighImbalanceRatio",
 				Double.toString(config.bidirectionalMidpointProbeHighImbalanceRatio)));
-		config.bidirectionalMidpointProbeReuseWithinNode = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinNode",
-				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinNode)));
 		config.bidirectionalMidpointProbeReuseWithinDssr = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinDssr",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinDssr)));
-		config.bidirectionalMidpointProbeDssrRecheckInterval = Integer.getInteger(
-				"twet.bpc.fullDomainCompare.midpointProbeDssrRecheckInterval",
-				config.bidirectionalMidpointProbeDssrRecheckInterval);
 		config.bidirectionalMidpointProbeDssrImbalanceThreshold = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeDssrImbalanceThreshold",
 				Double.toString(config.bidirectionalMidpointProbeDssrImbalanceThreshold)));
-		config.bidirectionalMidpointProbeDssrSeedMoveRatio = Double.parseDouble(System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointProbeDssrSeedMoveRatio",
-				Double.toString(config.bidirectionalMidpointProbeDssrSeedMoveRatio)));
-		config.bidirectionalMidpointProbeStableFreeze = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.fullDomainCompare.midpointProbeStableFreeze",
-				Boolean.toString(config.bidirectionalMidpointProbeStableFreeze)));
 		config.ngDssrExtensionTimingDiagnostics = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrExtensionTimingDiagnostics",
 				Boolean.toString(config.ngDssrExtensionTimingDiagnostics)));

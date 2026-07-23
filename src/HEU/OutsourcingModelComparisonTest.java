@@ -238,9 +238,6 @@ public final class OutsourcingModelComparisonTest {
 		config.bidirectionalMidpointProbeMaxCandidates = Integer.getInteger(
 				"twet.bpc.outsourcingCompare.midpointProbeMaxCandidates",
 				config.bidirectionalMidpointProbeMaxCandidates);
-		config.bidirectionalMidpointProbeReuseMaxCandidates = Integer.getInteger(
-				"twet.bpc.outsourcingCompare.midpointProbeReuseMaxCandidates",
-				config.bidirectionalMidpointProbeReuseMaxCandidates);
 		config.bidirectionalMidpointProbeMoveRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.midpointProbeMoveRatio",
 				Double.toString(config.bidirectionalMidpointProbeMoveRatio)));
@@ -260,9 +257,6 @@ public final class OutsourcingModelComparisonTest {
 		config.bidirectionalMidpointProbeHighImbalanceRatio = Double.parseDouble(System.getProperty(
 				"twet.bpc.outsourcingCompare.midpointProbeHighImbalanceRatio",
 				Double.toString(config.bidirectionalMidpointProbeHighImbalanceRatio)));
-		config.bidirectionalMidpointProbeReuseWithinNode = Boolean.parseBoolean(System.getProperty(
-				"twet.bpc.outsourcingCompare.midpointProbeReuseWithinNode",
-				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinNode)));
 		config.enableDualStabilization = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.outsourcingCompare.dualStabilization",
 				Boolean.toString(config.enableDualStabilization)));

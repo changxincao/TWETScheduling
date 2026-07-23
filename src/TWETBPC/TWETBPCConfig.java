@@ -315,8 +315,6 @@ public class TWETBPCConfig {
 	public int bidirectionalMidpointProbePopLimit = 10000;
 	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
 	public int bidirectionalMidpointProbeMaxCandidates = 5;
-	/** 2026-07-21: 同一 node 已有最近完整 exact Tmid 时，后续 probe 最多试探多少个候选点。 */
-	public int bidirectionalMidpointProbeReuseMaxCandidates = 3;
 	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.15 表示左移 *0.85，右移 *1.15。 */
 	public double bidirectionalMidpointProbeMoveRatio = 0.15;
 	/** 2026-07-21: ng-DSSR Tmid probe 默认使用正反向实际耗时；旧 pricing 实现不支持时仍回退 queue。 */
@@ -335,21 +333,10 @@ public class TWETBPCConfig {
 	public boolean bidirectionalMidpointProbeBracketOnDirectionChange = true;
 	/** 2026-06-14: probe 到达基础候选数后，如果不均衡仍超过该倍数，则允许继续同方向试探。 */
 	public double bidirectionalMidpointProbeHighImbalanceRatio = 10.0;
-	/** 2026-06-07: 同一 BPC node 后续 pricing round 是否以上一轮选中的 Tmid 作为 probe reference。 */
-	public boolean bidirectionalMidpointProbeReuseWithinNode = true;
-	/** 2026-07-18: 同一次 ng-DSSR exact 内复用最近 probe 的 Tmid，并按配置轮次周期重探。 */
+	/** 2026-07-23: 同一次 ng-DSSR exact 内，以上一 DSSR 轮的 Tmid/失衡反馈作为下一轮 probe 初值；每轮仍独立 probe。 */
 	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;
-	/** 2026-07-18: 同一次 DSSR 内每隔多少轮重新 probe；1 表示每轮，非正数表示始终复用首次结果。 */
-	public int bidirectionalMidpointProbeDssrRecheckInterval = 5;
 	/** 2026-07-21: 上一轮完整正反向扩展耗时超过该倍数时，下一轮提前重新 probe。 */
 	public double bidirectionalMidpointProbeDssrImbalanceThreshold = 2.0;
-	/** 2026-07-18: DSSR 周期 probe 前按可用 horizon 宽度移动初值的比例。 */
-	public double bidirectionalMidpointProbeDssrSeedMoveRatio = 0.05;
-	/**
-	 * 2026-07-12: 同一 node、同一 active-cut 迭代内，Tmid 连续稳定后冻结并周期校验。
-	 * 固定规则为至少观察 5 次、最近 3 次偏差不超过 horizon 的 1%，冻结后跳过 5 次再正常 probe 一次。
-	 */
-	public boolean bidirectionalMidpointProbeStableFreeze = true;
 	/** 2026-07-09: ng-DSSR 扩展热路径细分计时诊断；默认关闭，避免高频 nanoTime 影响批量实验。 */
 	public boolean ngDssrExtensionTimingDiagnostics = false;
 	/** 2026-07-17: 单次启发式返回上限与本地候选池统一收紧到 300，控制 RMP 列规模。 */

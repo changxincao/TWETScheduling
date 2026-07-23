@@ -1119,3 +1119,10 @@ probe 接受后的完整 F/B 比例统计为：中位数 1.289，75 分位数 1.
 实现上确认存在失效旧入口：bidirectionalMidpointProbeReuseWithinNode、stableFreeze、DssrRecheckInterval、DssrSeedMoveRatio及MidpointProbeNodeReuse容器仍保留在config/wrapper，但当前ng-DSSR核心不读取node复用表，且DSSR开启复用时实际每轮都重新probe。这些入口不影响结果，运行开销也仅为空HashMap和少量字段，但会误导配置解释，后续应单独清理，不在本次参数检查中改动。前一轮明显失衡时按active label时间分位数构造下一轮seed需要扫描、排序上一轮active labels，是当前probe流程中剩余的可见额外开销；只在失衡超过阈值时发生。
 
 定向javac通过，NgDssrMinimumRepeatedSegmentUpdateTest通过。
+## 2026-07-23 清理失效的跨 node Tmid 配置
+
+当前 ng-DSSR 的每次新 pricing 都从当前 LP、effective window 和 arc 状态重新计算 default Tmid，再执行 probe；同一次 `solve()` 的 DSSR 后续轮只以上一轮 Tmid 和完整正反向耗时反馈作为下一轮 probe 初值，每轮仍独立 probe。此前保留的 `bidirectionalMidpointProbeReuseWithinNode`、`bidirectionalMidpointProbeStableFreeze`、`bidirectionalMidpointProbeDssrRecheckInterval`、`bidirectionalMidpointProbeDssrSeedMoveRatio` 以及 `MidpointProbeNodeReuse` 已没有主线读者，容易造成配置语义误判。本次一并删除这些字段、runner 属性、wrapper 空 map 和旧 pricing 实现中的 node-history/freeze 状态；关联的 `bidirectionalMidpointProbeReuseMaxCandidates` 也随 node reuse 删除。
+
+repair 与正式 pricing 使用相同入口。每次 `findFeasible()` 都构造新的 ng-DSSR solver，并读取 repair LP 当前 dual；同一 repair solve 内的 DSSR 轮间仍可用上一轮 seed，但 LP 重解后的下一次调用重新从 default 开始。strong trial 选中的 child 入队时仅保留分支状态和筛后的 seed column IDs，不携带 Tmid、probe label 或 dominance 状态；正式出队后按 child 当前 LP/window 重新 probe。因此删除跨 node 复用后，repair 和入队 child 都不存在旧 Tmid 污染，也不损失需要保留的状态。
+
+验证：受影响的 config、runner、旧/新 bidirectional core 与 wrapper 均通过 `javac -encoding UTF-8` 编译；`NgDssrMinimumRepeatedSegmentUpdateTest` 通过；源码全局扫描确认上述字段和 `MidpointProbeNodeReuse` 无残留。

@@ -70,7 +70,6 @@ public class GCNGBBStyleBidirectional {
 	private final TWETBPCConfig config;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
-	private final HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode;
 
 	private PriorityQueue<ForwardLabel> FWUL;
 	private PriorityQueue<BackwardLabel> BWUL;
@@ -121,7 +120,6 @@ public class GCNGBBStyleBidirectional {
 	private double midpointColumnTaskMax = Double.NaN;
 	private String midpointProbeSummary = "off";
 	private String midpointProbeReferenceSource = "strategy";
-	private String midpointProbeFeedbackSummary = "off";
 	private boolean midpointProbeLabelsReadyForJoin;
 	private long midpointStrategyNanos;
 	// 2026-05-22: 当前定价轮的 job-level 动态 H_j 缓存。
@@ -243,15 +241,9 @@ public class GCNGBBStyleBidirectional {
 	private String lastMessage = "GCNGBB-style bidirectional pricing not executed";
 
 	public GCNGBBStyleBidirectional(Data data, TWETBPCConfig config) {
-		this(data, config, null);
-	}
-
-	public GCNGBBStyleBidirectional(Data data, TWETBPCConfig config,
-			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
-		this.midpointProbeReuseByNode = midpointProbeReuseByNode;
 	}
 
 	public ArrayList<TWETColumn> solve(LP lp) {
@@ -260,7 +252,6 @@ public class GCNGBBStyleBidirectional {
 
 	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
-		long exactStartNanos = System.nanoTime();
 		Utility.resetCurUpperBound(Utility.big_M);
 		diagnosticHeartbeat(lp, "initialize.start", true);
 		initialize(lp);
@@ -300,7 +291,6 @@ public class GCNGBBStyleBidirectional {
 			finalizeGeneratedColumns(lp);
 			diagnosticHeartbeat(lp, "finalize.done", true);
 		}
-		updateMidpointProbeReuseAfterExact(lp, System.nanoTime() - exactStartNanos);
 		String completionState = timeLimitChecker.isTimeLimitReached() ? "time limit reached"
 				: (midpointProbeLabelsReadyForJoin ? "probe rank0 queues exhausted"
 						: (canContinue() ? "queues exhausted" : "column cap disabled"));
@@ -729,46 +719,11 @@ public class GCNGBBStyleBidirectional {
 
 	private double midpointProbeReference(LP lp) {
 		midpointProbeReferenceSource = "strategy";
-		if (config.bidirectionalMidpointProbeReuseWithinNode && midpointProbeReuseByNode != null
-				&& lp.getNode() != null) {
-			MidpointProbeNodeReuse cached = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
-			if (cached != null) {
-				cached.ensureCutEpoch(lp.getActiveCutIds());
-			}
-			if (cached != null && cached.hasLastExact()) {
-				midpointProbeReferenceSource = "reuseLatestExact";
-				return cached.lastExactTmid;
-			}
-		}
 		return tMid;
 	}
 
 	private int midpointProbeMaxCandidatesForCurrentReference() {
-		int maxCandidates = Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
-		if ("reuseLatestExact".equals(midpointProbeReferenceSource)) {
-			maxCandidates = Math.min(maxCandidates, Math.max(1, config.bidirectionalMidpointProbeReuseMaxCandidates));
-		}
-		return maxCandidates;
-	}
-
-	private void updateMidpointProbeReuseAfterExact(LP lp, long exactNanos) {
-		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinNode
-				|| midpointProbeReuseByNode == null || lp == null || lp.getNode() == null || !Double.isFinite(tMid)) {
-			midpointProbeFeedbackSummary = "off";
-			return;
-		}
-		MidpointProbeNodeReuse reuse = midpointProbeReuseByNode.get(Integer.valueOf(lp.getNode().id));
-		if (reuse == null) {
-			reuse = new MidpointProbeNodeReuse();
-			midpointProbeReuseByNode.put(Integer.valueOf(lp.getNode().id), reuse);
-		}
-		reuse.ensureCutEpoch(lp.getActiveCutIds());
-		double exactMillis = exactNanos / 1_000_000.0;
-		double ratio = directionalImbalance(forwardLabelsKept, backwardLabelsKept);
-		long labelTotal = forwardLabelsKept + backwardLabelsKept;
-		reuse.rememberExact(tMid);
-		midpointProbeFeedbackSummary = "exactReuse=latest, exactMs=" + exactMillis + ", ratio=" + ratio
-				+ ", labels=" + labelTotal + ", latestT=" + reuse.lastExactTmid;
+		return Math.max(1, config.bidirectionalMidpointProbeMaxCandidates);
 	}
 
 	private double normalizedProbeMoveRatio() {
@@ -777,12 +732,6 @@ public class GCNGBBStyleBidirectional {
 			return 0.10;
 		}
 		return ratio;
-	}
-
-	private double directionalImbalance(long left, long right) {
-		double l = (double) left + 1.0;
-		double r = (double) right + 1.0;
-		return Math.max(l / r, r / l);
 	}
 
 	private double normalizedProbeEarlyStopRatio() {
@@ -1878,7 +1827,6 @@ public class GCNGBBStyleBidirectional {
 		midpointColumnTaskMedian = Double.NaN;
 		midpointColumnTaskMax = Double.NaN;
 		midpointProbeSummary = "off";
-		midpointProbeFeedbackSummary = "off";
 		midpointProbeLabelsReadyForJoin = false;
 		midpointStrategyNanos = 0;
 		diagnosticForbiddenJobArcCount = 0;
@@ -2071,7 +2019,6 @@ public class GCNGBBStyleBidirectional {
 				+ "/" + midpointColumnTaskMin + "/" + midpointColumnTaskAvg + "/" + midpointColumnTaskMedian
 				+ "/" + midpointColumnTaskMax
 				+ ", midpointProbe=" + midpointProbeSummary
-				+ ", midpointProbeFeedback=" + midpointProbeFeedbackSummary
 				+ ", zeroDualExcludedJobs=" + zeroDualExcludedJobCount
 				+ ", piWindow=" + (dualProfitableWindowEnabled ? "enabled" : "disabled")
 				+ ", " + PaperDominanceGraphs.statisticsSummary();
@@ -3700,28 +3647,6 @@ public class GCNGBBStyleBidirectional {
 		ColumnMidpointTimingCandidate(int columnId, TWETColumnEvaluator.Timing timing) {
 			this.columnId = columnId;
 			this.timing = timing;
-		}
-	}
-
-	static final class MidpointProbeNodeReuse {
-		double lastExactTmid = Double.NaN;
-		private List<Integer> activeCutIds;
-
-		void ensureCutEpoch(List<Integer> currentCutIds) {
-			List<Integer> current = currentCutIds == null ? Collections.<Integer>emptyList() : currentCutIds;
-			if (activeCutIds != null && activeCutIds.equals(current)) {
-				return;
-			}
-			activeCutIds = new ArrayList<Integer>(current);
-			lastExactTmid = Double.NaN;
-		}
-
-		boolean hasLastExact() {
-			return Double.isFinite(lastExactTmid) && Utility.compareGt(lastExactTmid, 0.0);
-		}
-
-		void rememberExact(double tMid) {
-			lastExactTmid = tMid;
 		}
 	}
 

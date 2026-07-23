@@ -168,10 +168,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long midpointStrategyNanos;
 	private static final double MIDPOINT_PROBE_STEP_FRACTION = 0.10;
 	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.05;
-	private static final int MIDPOINT_FREEZE_MIN_EXACT_CALLS = 5;
-	private static final int MIDPOINT_FREEZE_STABLE_SELECTIONS = 3;
-	private static final int MIDPOINT_FREEZE_SKIPPED_CALLS = 5;
-	private static final double MIDPOINT_FREEZE_HORIZON_TOLERANCE = 0.01;
 	// 2026-05-22: 閻熸粎澧楅幐鍛婃櫠閻樼鍋撶憴鍕叝闁绘粠鍨卞顏堫敊閻愵剛鏆?job-level 闂佸憡鏌ｉ崝宥夊焵?H_j 缂傚倸鍊归幐鎼佹偤閵娾晛违?
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHStart;
@@ -457,33 +453,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			DominanceBackend dominanceBackend) {
-		this(data, config, null, dominanceBackend, null);
+		this(data, config, dominanceBackend, null);
 	}
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			DominanceBackend dominanceBackend, NgDssrHistoryWarmStart historyWarmStart) {
-		this(data, config, null, dominanceBackend, historyWarmStart);
-	}
-
-	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
-			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode) {
-		this(data, config, midpointProbeReuseByNode, DominanceBackend.PAPER);
-	}
-
-	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
-			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, boolean useGraphPartialDominance) {
-		this(data, config, midpointProbeReuseByNode,
-				useGraphPartialDominance ? DominanceBackend.GRAPH_PARTIAL : DominanceBackend.PAPER);
-	}
-
-	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
-			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, DominanceBackend dominanceBackend) {
-		this(data, config, midpointProbeReuseByNode, dominanceBackend, null);
-	}
-
-	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
-			HashMap<Integer, MidpointProbeNodeReuse> midpointProbeReuseByNode, DominanceBackend dominanceBackend,
-			NgDssrHistoryWarmStart historyWarmStart) {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
@@ -7814,94 +7788,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ColumnMidpointTimingCandidate(int columnId, TWETColumnEvaluator.Timing timing) {
 			this.columnId = columnId;
 			this.timing = timing;
-		}
-	}
-
-	static final class MidpointProbeNodeReuse {
-		double lastExactTmid = Double.NaN;
-		private ArrayList<Integer> freezeActiveCutIds;
-		private int freezeExactCalls;
-		private double freezeLastSelectedTmid = Double.NaN;
-		private int freezeStableSelections;
-		private boolean frozen;
-		private double frozenTmid = Double.NaN;
-		private int frozenSkippedCalls;
-		private boolean freezeValidationPending;
-
-		void ensureCutEpoch(List<Integer> activeCutIds) {
-			List<Integer> current = activeCutIds == null ? Collections.<Integer>emptyList() : activeCutIds;
-			if (freezeActiveCutIds != null && freezeActiveCutIds.equals(current)) {
-				return;
-			}
-			freezeActiveCutIds = new ArrayList<Integer>(current);
-			// 2026-07-21: cut 改变后 dual 和定价域已经变化，最近一次 Tmid 也不能跨 epoch 复用。
-			lastExactTmid = Double.NaN;
-			freezeExactCalls = 0;
-			freezeLastSelectedTmid = Double.NaN;
-			freezeStableSelections = 0;
-			frozen = false;
-			frozenTmid = Double.NaN;
-			frozenSkippedCalls = 0;
-			freezeValidationPending = false;
-		}
-
-		boolean tryAcquireFrozenMidpoint() {
-			if (!frozen || !Double.isFinite(frozenTmid)) {
-				return false;
-			}
-			if (frozenSkippedCalls >= MIDPOINT_FREEZE_SKIPPED_CALLS) {
-				freezeValidationPending = true;
-				return false;
-			}
-			frozenSkippedCalls++;
-			return true;
-		}
-
-		String considerFreezeSelection(double selectedTmid, double horizon) {
-			freezeExactCalls++;
-			double tolerance = Math.max(Utility.EPS,
-					Math.abs(horizon) * MIDPOINT_FREEZE_HORIZON_TOLERANCE);
-			double reference = freezeValidationPending ? frozenTmid : freezeLastSelectedTmid;
-			boolean stable = Double.isFinite(reference)
-					&& Utility.compareLe(Math.abs(selectedTmid - reference), tolerance);
-			freezeLastSelectedTmid = selectedTmid;
-			if (freezeValidationPending) {
-				freezeValidationPending = false;
-				frozenSkippedCalls = 0;
-				if (stable) {
-					frozenTmid = selectedTmid;
-					freezeStableSelections = Math.max(freezeStableSelections,
-							MIDPOINT_FREEZE_STABLE_SELECTIONS);
-					return "validated";
-				}
-				frozen = false;
-				frozenTmid = Double.NaN;
-				freezeStableSelections = 1;
-				return "validationChanged";
-			}
-			freezeStableSelections = stable ? freezeStableSelections + 1 : 1;
-			if (!frozen && freezeExactCalls >= MIDPOINT_FREEZE_MIN_EXACT_CALLS
-					&& freezeStableSelections >= MIDPOINT_FREEZE_STABLE_SELECTIONS) {
-				frozen = true;
-				frozenTmid = selectedTmid;
-				frozenSkippedCalls = 0;
-				return "frozen";
-			}
-			return stable ? "stable" : "reset";
-		}
-
-		String freezeSummary() {
-			return "active=" + frozen + ", exact=" + freezeExactCalls + ", stable="
-					+ freezeStableSelections + ", skipped=" + frozenSkippedCalls + "/"
-					+ MIDPOINT_FREEZE_SKIPPED_CALLS + ", t=" + frozenTmid;
-		}
-
-		boolean hasLastExact() {
-			return Double.isFinite(lastExactTmid) && Utility.compareGt(lastExactTmid, 0.0);
-		}
-
-		void rememberExact(double tMid) {
-			lastExactTmid = tMid;
 		}
 	}
 

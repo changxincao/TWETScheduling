@@ -1,7 +1,6 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
@@ -20,13 +19,11 @@ public class GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine impleme
 	private final Data data;
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
-	private final HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse> midpointProbeReuseByNode;
 	private final NgDssrHistoryWarmStart historyWarmStart;
 
 	public GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
 		this.config = config;
-		this.midpointProbeReuseByNode = new HashMap<Integer, GCNGBBStyleBidirectionalNgDssr.MidpointProbeNodeReuse>();
 		this.historyWarmStart = new NgDssrHistoryWarmStart(data.n);
 	}
 
@@ -42,8 +39,7 @@ public class GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine impleme
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR partial-list dominance pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				midpointProbeReuseByNode, GCNGBBStyleBidirectionalNgDssr.DominanceBackend.LIST_PARTIAL,
-				historyWarmStart);
+				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.LIST_PARTIAL, historyWarmStart);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -69,7 +65,7 @@ public class GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine impleme
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR partial-list dominance pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
-				midpointProbeReuseByNode, GCNGBBStyleBidirectionalNgDssr.DominanceBackend.LIST_PARTIAL);
+				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.LIST_PARTIAL);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -87,9 +83,6 @@ public class GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine impleme
 	@Override
 	public void reset() {
 		lastReusableSubtreeArcEliminationBounds = null;
-		if (!config.bidirectionalMidpointProbeReuseWithinNode) {
-			midpointProbeReuseByNode.clear();
-		}
 	}
 
 	@Override

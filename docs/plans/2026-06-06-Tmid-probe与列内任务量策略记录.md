@@ -1003,3 +1003,12 @@ probe 搜索状态和“已经完整耗尽”状态已拆开。当前候选被�
 当前 probe 的目标先限定为避免明显的正反向单侧爆炸，不继续追求方向反转区间内接近 1:1 的精细选点。因此将方向反转后二分的终止宽度由 `0.01(H-L)` 调整为 `0.05(H-L)`，固定步长仍为 `0.10(H-L)`，时间比接受阈值仍为 1.5。初始 bracket 通常宽约 `0.10(H-L)`，新口径下一次中点测试后即可缩到 5%，相比原口径通常减少三次候选 probe。
 
 该调整只影响 Tmid 搜索成本，不改变 exact pricing 的可行域、dominance、扩展和 join。达到 5% 容差后仍保留最后一个候选的 label、dominance graph 和 FWUL/BWUL；若队列未耗尽，正式 labeling 从该状态继续直至完整闭合。因此即使该候选的浅 probe 时间比仍大于 1.5，也不会被当作定价收敛证书，不影响正确性。
+
+
+### 2026-07-23 node 多次 pricing 与 DSSR 轮间的 probe 调度分析
+
+probe 搜索本身保持现状，但不应在每一轮 DSSR 和每一次同 node pricing 中无条件重复。一个候选的最终状态能够续跑，只能避免最终候选的工作浪费；前面被放弃的 walk/bracket 候选仍是额外成本。调度应只依赖最近一次完整 labeling 的 forward/backward 耗时反馈，不再引入历史最优 Tmid 或更多标签数量指标。
+
+建议口径为：新 node 的第一次 exact pricing 必须 probe；cut 集合变化后视为新的 epoch，也必须 probe。同一 node、同一 cut epoch 的后续 pricing，若上一次完整 exact 的正反向耗时比不超过 2，则直接复用最近 Tmid；若超过 2，则下一次以最近 Tmid 为起点重新 probe。为避免 dual 多轮变化后缓慢漂移但始终未触发 2 倍阈值，可从上一次实际 probe 起每 5 次 pricing 强制校准一次。该周期按“距离上次真实 probe 的次数”计，不按 node 内绝对 pricing 序号取模。
+
+同一次 exact pricing 的 DSSR 内采用相同原则：第一轮沿用外层决定；后续轮次通常复用最近 Tmid。上一轮完整 labeling 的耗时比超过 2 时，下一轮立即重新 probe；否则每隔 5 个未 probe 的 DSSR 轮次校准一次。重新 probe 的初值仍可按上一轮重侧向修正方向移动 5% 有效区间，再交给现有 10% walk、1.5 接受阈值和 5% bracket 容差流程决定最终 Tmid。当前源码已基本采用该 DSSR 轮间策略；同 node 多次 pricing 仍混有 stable-freeze 机制，后续若实施统一调度，应以完整 exact 耗时反馈替代单纯的“Tmid 连续稳定”判据，避免两套复用状态并存。

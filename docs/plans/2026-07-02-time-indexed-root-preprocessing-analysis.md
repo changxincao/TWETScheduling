@@ -757,3 +757,13 @@ join 只做严格等价的细节剪枝。对不超过 128 个任务的 no-SRI �
 当前 Tmid 策略可以继续作为默认好配置使用。普通短 exact 上周期重探几乎不改变搜索域；困难 60-2 repair 中，它避免了第一轮 Tmid 在几十轮 ng-set 扩大后继续造成极端 backward 膨胀，总 kept labels 从 110483 降到 46558，backward 时间从 260.495s 降到 35.342s。它只改变正反向半域划分，不改变完整 labeling 和 join 证书，因此属于性能选择，不是正确性口径。
 
 后续不能简单按 forward/backward 的时间或 label 比强制移动 Tmid。既有 full-curve 对拍已经表明，`F+B` 总耗时最小的位置本来就可能保持明显方向失衡，而且有限 capped probe 的局部方向曾与完整 exact 方向连续不一致。当前“失衡只轻移周期 probe 起点、最终仍由原 probe 选择”的处理因此比直接反馈更稳妥。若继续优化，第一优先级应是减少无效 probe：在同一次 DSSR 的周期 probe 连续选择相同 Tmid 后延长重探间隔，同时保留最大校验间隔；第二优先级是让 probe 分数估计总扩展与 join 工作量，而不是只追求队列平衡。两项都应先在 60-2 difficult repair 和 50-2 普通 root 上独立 A/B，当前不直接改默认逻辑。
+
+### 2026-07-23：当前 root 热点后的下一步优化顺序
+
+基于最新 `exp-tmid-current-50-2-base-20260723a` 重新拆分临时 time-indexed root。预处理从 89 条主线 ALNS seed 开始，共调用 385 次 `TimeIndexedGraphPricing`，加入 90,076 条列；其中 264 次正好达到单轮 300 条上限，最终 `tempPool=90,165`。整个预处理为 124.968s，而图 fixing 和 scalar fixing 仅约 0.883s/0.210s；全 run 的 `after_pricing` master LP 为 104.004s/490 calls。当前主要成本不是 graph shortest path，而是“每轮最多 300 列、加入后立即重解、临时 RMP 最终膨胀到 9 万列”的闭合过程。
+
+第一优先级应当是把临时预处理 seed 与正式 ng-DSSR seed 解耦。现实现直接复制 `root.seedColumnIds`，因此把 ALNS 的 89 条 seed 全带入临时 time-indexed root；但正式主线真正需要这些 ALNS 列，不代表临时图 root 也需要。既有 40-2 隔离结果已经显示，同一预处理从 ALNS seed 口径的 `tempPool=84,133 / 60.584s` 改为两条可行 incumbent seed 后，降到 `tempPool=44,526 / 17.125s`。建议新增默认关闭 A/B：临时 root 只复制 incumbent schedule 列作为 seed，正式 root 继续保留全部 ALNS seed，并继续接收预处理挑出的 200 条 elementary seed。验收必须比较临时 root 是否完整闭合、最终 time-indexed LB、写回 fixing/window、正式 ng-DSSR root bound 和 `valid`，不能只看预处理时间。
+
+第二优先级是预处理专用 batch A/B。50-2 有 264 轮撞满 300 条，说明把上限测试为 600/1000 有机会减少大量 LP 往返；代价是每轮更早扩张 RMP，不能凭调用次数判断收益。应同时统计 pricing calls、最终 restricted 列数、master LP 总时间和预处理总时间。第三优先级才是周期 restricted-column cleanup：保留全部正值列和 reduced cost 较好的列，仅从临时 RMP 移除其余列，Pool 仍保留并允许后续重新激活。现有筛列方法具备保留正值列的基本语义，但还没有接入预处理循环；该方案比 seed/batch 更复杂，必须确认筛后 LP 可行且最终仍由完整 pricing 闭合后才允许写回永久 fixing。
+
+W300 exact 暂时没有同等级的低风险热点修改。transition-only U/R 重建曾因 BigM window 反例改变 completion-bound 语义，已经回退；构造 frontier 前的 completion prefilter 虽剪掉约 198 万候选，但因额外扫描使 exact 慢约 16.1%，也不应重做。当前 native interval delta、source-aware dominance、group-envelope prefilter、direct min-sum join 均已生效；join 只占 exact 约 4%--10%。因此下一轮实现/实验应先做“临时 incumbent-only seed”隔离，再测 600/1000 batch，不再继续修改 completion-bound 或 join 语义。

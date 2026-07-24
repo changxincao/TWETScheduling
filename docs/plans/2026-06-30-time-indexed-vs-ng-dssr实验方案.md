@@ -1468,3 +1468,19 @@ time-indexed 的主要瓶颈相反：46 次分支产生 1832 次 strong-trial LP
 50-2 和 60-3 中 ng-DSSR 分别快约 3.02 倍和 2.08 倍，决定性差异是 time-indexed 生成的列池及后续 RMP：50-2 最终 337805 列，master LP 单独耗时 303.030s；60-3 最终 117478 列，master LP 为 189.578s。50-3 setupR50 W100 中 ng-DSSR 虽然树和 master 更小，但 heuristic pricing 为 178.741s/679 次，最终仍比 time-indexed 慢约 10.7%。这再次说明 ng-DSSR 的优势取决于它能否用较小列池和较少节点抵消启发式与 exact pricing 成本，不能只由 W 或 setup 单独判断。
 
 有效输出为 `exp-50-2-base-{ng-c1000,ti}-20260724a.csv`、`exp-60-3-base-{ng-c1000,ti}-20260724a.csv`、`exp-50m3-setupR50-real-W100-ng-c1000-20260724c.csv` 和 `exp-50m3-setupR50-real-W100-ti-20260724b.csv`。
+
+### 2026-07-24 strong branching phase2 与 root preprocessing 复核
+
+当前最好 ng-DSSR 配置继续使用 `strongBranchingPhase2CandidateLimit=0`。此前 50-3 同口径对照已经记录：phase2=4 时总时间为 381.350s、10 nodes，phase2=0 时为 352.319s、14 nodes。二阶段确实改善了分支选择并减少节点，但 trial 节点上的 `HeuristicPricing[strongBranching]` 达到 153.195s/529 次，额外开销超过树缩小收益；只用 phase1 的结果已经足以完成当前分支选择。因此当前关闭 phase2 是性能选择，不是正确性要求，也不表示 phase2 数学上无效。
+
+在 candidate C1000、K20、minimum-segment 更新、completion bound、midpoint probe、ALNS 60s、strong branching phase1 等配置保持不变的情况下，仅关闭 `timeIndexedRootPreprocessingForNgDssr`，补跑三组完整求解。全部达到 `obj=bound` 且 `valid=true`。
+
+| 算例 | root preprocessing 开 | root preprocessing 关 | root 开/关 | nodes 开/关 | heuristic 开/关 | exact 开/关 |
+|---|---:|---:|---:|---:|---:|---:|
+| 50-2 base | 176.714s | 327.955s | 148.406/186.817s | 5/5 | 21.246/170.808s | 5.353/34.254s |
+| 60-3 base | 195.555s | 808.104s | 102.455/223.471s | 18/18 | 48.079/348.660s | 20.312/79.307s |
+| 50-3 setupR50 W100 | 318.520s | 395.047s | 79.840/156.268s | 23/18 | 178.741/212.659s | 56.820/51.718s |
+
+关闭预处理后，50-2 总时间增加 85.6%，60-3 增至 4.13 倍，setupR50 W100 增加 24.0%；三组 root 时间也都变差。50-2 和 60-3 的节点数没有变化，但 heuristic、exact 和 master 的工作量明显增加，说明预处理写回的 compact window、pricing-only arc 与 seed 对后续定价/RMP仍有实际收益。setupR50 W100 虽然关闭后节点和 pool 更少，但 root、heuristic 和 master 增量仍使总时间变慢。
+
+这三组关闭预处理的 run 为并行执行，而 ALNS 使用 60s 墙钟停止条件；CPU竞争改变了截止前完成的 ALNS 迭代数，导致初始 incumbent 不完全相同。因此上述倍率用于判断配置方向，不作为严格隔离的单变量计时结论。当前证据仍一致支持默认开启 time-indexed root preprocessing。有效输出为 `exp-50-2-base-ng-c1000-norootpre-20260724a.csv`、`exp-60-3-base-ng-c1000-norootpre-20260724a.csv` 和 `exp-50m3-setupR50-real-W100-ng-c1000-norootpre-20260724a.csv`。

@@ -1166,3 +1166,9 @@ W300 两组的 time-indexed 预处理已经较轻，主要矛盾转移到 exact 
 | 50-3 setupR50 W300 | 初始构造/ALNS残差约28s；exact 14.613s | 扩展7.541s，其次completion bound 5.423s | 约10.3% |
 
 启发式 pricing 的有效调用比例分别为88/107、34/41、8/16和28/36。W300无setup中启发式一半调用找不到列，但总耗时仅3.153s；50-2启发式累计21.915s，仍明显小于预处理。由此当前优化优先级应按算例分开：50-2优先控制time-indexed预处理的列池和RMP重解成本；W300无setup优先看completion-bound构造；setupR50 W300再看正反向扩展。当前join和Tmid都不是四组中的首要时间瓶颈。
+
+### 2026-07-24 当前 normal ng-DSSR probe 参数语义复核
+
+再次按实际调用链核对后，当前 normal/source-aware ng-DSSR 主线中，`bidirectionalMidpointProbePopLimit=10000` 表示每个候选 Tmid 的正反向总 pop 预算，forward 和 backward 各最多 5000，并不是每侧 10000。主线固定使用正反向浅 probe 的实际运行时间作为评价指标，接受阈值为较慢侧不超过较快侧的 1.5 倍。
+
+当前主线不再读取 `bidirectionalMidpointProbeMaxCandidates=5` 和 `bidirectionalMidpointProbeTimeTolerance=0.20`；这两个字段仅残留在旧 partial-dominance probe 路径，不能用于描述当前 normal ng-DSSR。新主线从有效 Tmid 区间宽度的 10% 作为移动步长，在方向反转后进入二分，直到区间宽度不超过有效区间的 5%。此外，某侧搜索耗尽、达到平衡阈值或触及有效边界也会停止。因此当前候选数不是固定最多 5 个。

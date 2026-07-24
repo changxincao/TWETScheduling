@@ -1304,7 +1304,7 @@ public class GCBBAsymmetricBidirectional {
 		// appendSegments(extended, forward);
 		// if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, pricingHorizon)) {
 		//     addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon,
-		//             valueAtOrNearest(forward, dynamicHF));
+		//             forward.evaluateAtClampedEndpoint(dynamicHF));
 		// }
 		// mergeAdjacentEqualSegments(extended);
 		// return extended;
@@ -1329,18 +1329,11 @@ public class GCBBAsymmetricBidirectional {
 		// PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
 		// if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
 		//     addConstantSegmentOrPoint(extended, 0.0, backward.head.start,
-		//             valueAtOrNearest(backward, dynamicHB));
+		//             backward.evaluateAtClampedEndpoint(dynamicHB));
 		// }
 		// appendSegments(extended, backward);
 		// mergeAdjacentEqualSegments(extended);
 		// return extended;
-	}
-
-	private double valueAtOrNearest(PiecewiseLinearFunction function, double t) {
-		if (function == null || function.head == null) {
-			return Utility.big_M;
-		}
-		return function.evaluateAtClampedEndpoint(t);
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {

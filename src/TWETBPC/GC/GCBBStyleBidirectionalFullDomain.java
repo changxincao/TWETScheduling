@@ -1343,7 +1343,7 @@ public class GCBBStyleBidirectionalFullDomain {
 		// PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
 		// appendSegments(extended, forward);
 		// if (forward != null && forward.tail != null && Utility.compareLt(forward.tail.end, pricingHorizon)) {
-		//     addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon, valueAtOrNearest(forward, tMid));
+		//     addConstantSegmentOrPoint(extended, forward.tail.end, pricingHorizon, forward.evaluateAtClampedEndpoint(tMid));
 		// }
 		// mergeAdjacentEqualSegments(extended);
 		// return extended;
@@ -1365,18 +1365,11 @@ public class GCBBStyleBidirectionalFullDomain {
 		// full-domain 下不应再需要下面这种 half-domain 常数延拓；保留旧逻辑便于回看。
 		// PiecewiseLinearFunction extended = new PiecewiseLinearFunction(0.0, pricingHorizon);
 		// if (backward != null && backward.head != null && Utility.compareLt(0.0, backward.head.start)) {
-		//     addConstantSegmentOrPoint(extended, 0.0, backward.head.start, valueAtOrNearest(backward, tMid));
+		//     addConstantSegmentOrPoint(extended, 0.0, backward.head.start, backward.evaluateAtClampedEndpoint(tMid));
 		// }
 		// appendSegments(extended, backward);
 		// mergeAdjacentEqualSegments(extended);
 		// return extended;
-	}
-
-	private double valueAtOrNearest(PiecewiseLinearFunction function, double t) {
-		if (function == null || function.head == null) {
-			return Utility.big_M;
-		}
-		return function.evaluateAtClampedEndpoint(t);
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {

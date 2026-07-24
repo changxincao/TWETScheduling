@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import Common.PiecewiseLinearFunction;
+import Common.Utility;
 
 /**
  * ng-DSSR join 扩展在 Tmid 紧贴 PWLF 端点时的回归测试。
@@ -16,16 +17,17 @@ public final class NgDssrJoinExtensionBoundaryTest {
 
 		double expectedTail = 2.0 * 1934.0 + 3.0;
 		assertClose(expectedTail,
-				GCNGBBStyleBidirectionalNgDssr.valueAtOrNearest(function, 1934.000001),
+				function.evaluateAtClampedEndpoint(1934.000001),
 				"right endpoint clamp");
 		assertClose(expectedTail, function.evaluate(1934.000001), "direct right endpoint clamp");
 		assertClose(2.0 * 1500.0 + 3.0,
-				GCNGBBStyleBidirectionalNgDssr.valueAtOrNearest(function, 1500.0),
+				function.evaluateAtClampedEndpoint(1500.0),
 				"interior evaluation");
 		assertClose(2.0 * 1000.0 + 3.0,
-				GCNGBBStyleBidirectionalNgDssr.valueAtOrNearest(function, 999.999999),
+				function.evaluateAtClampedEndpoint(999.999999),
 				"left endpoint clamp");
 		assertClose(2.0 * 1000.0 + 3.0, function.evaluate(999.999999), "direct left endpoint clamp");
+		assertClose(Utility.curUpperBound, function.evaluate(1934.01), "true outside-domain evaluation");
 
 		PiecewiseLinearFunction gapped = new PiecewiseLinearFunction(0.0, 2513.0);
 		gapped.addSegment(1000.0, 1200.0, 1.0, 0.0);

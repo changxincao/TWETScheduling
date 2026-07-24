@@ -1477,7 +1477,7 @@ public class GCBBStyleBidirectionalFullDomainNodeJoin {
 		return joinFunctionPositivePruned == 0 ? 0.0 : joinPositiveReducedCostMax;
 	}
 
-	// 2026-05-30: getForwardJoinExtension/getBackwardJoinExtension/valueAtOrNearest 是
+	// 2026-05-30: getForwardJoinExtension/getBackwardJoinExtension 是
 	// half-domain crossing-arc join 的常数延拓残留。旧流程只保存半域 frontier，join 前需要
 	// 把另一侧补成常数；当前 full-domain node join 直接拼 preNodeFrontier 和 backward.frontier，
 	// 因此不再需要延拓缓存和最近端点取值。

@@ -22,3 +22,5 @@
 本次把真实首尾端点钳制收敛到 `PiecewiseLinearFunction.evaluateAtClampedEndpoint()`，并将上述已确认入口统一调用该方法。距离定义域超过原有 EPS 的 dominance 查询仍返回 `big_M`；仅处于容差带内但物理上越过首尾端点的点才钳制。内部函数空档仍由严格 `evaluate()` 抛出异常，没有被端点修复掩盖。focused 编译、端点/内部空档回归、Paper dominance 一致性测试和增量 source-aware dominance 一致性测试均通过。
 
 二次复核发现，仅在已知调用点使用 helper 仍可能遗漏未来或现有的直接 `evaluate(t)` 调用。最终处理把“已通过原有 EPS 定义域检查、但物理上略过首尾端点”的钳制下沉到 `PiecewiseLinearFunction.evaluate()` 本身；超过 EPS 的域外点仍返回原有上界值，内部空档仍抛异常。由此撤掉 crop 和 dominance 调用点的重复钳制，只保留 `valueAtOrNearest()` 对任意域外时间取最近端点所需的 helper。
+
+第三次全局复核进一步删除了六个仅转发调用的 `valueAtOrNearest()` wrapper，join 延拓直接使用公共 `evaluateAtClampedEndpoint()`；普通 `evaluate()` 仍只钳制原 EPS 容差带内的物理越界。回归测试补充了真正超过 EPS 的域外查询，确认其仍返回原上界，同时重新通过端点/内部空档、Paper dominance 和增量 source-aware dominance 三组测试。当前未再发现独立复制的端点求值逻辑。

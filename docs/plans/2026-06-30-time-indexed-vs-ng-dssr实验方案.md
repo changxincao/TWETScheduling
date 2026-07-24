@@ -1518,3 +1518,8 @@ time-indexed 的主要瓶颈相反：46 次分支产生 1832 次 strong-trial LP
 两组均在限时内完成且 `valid=true`，最优目标均为9019。ng-DSSR为765.517秒、16个处理节点、root bound 8977.860994、root 197.149秒、peak pool 75804；time-indexed为955.794秒、79个处理节点、root bound 8936.507785、root 137.996秒、peak pool 656928。ng-DSSR总时间减少190.277秒，即快19.91%，time-indexed耗时为其1.249倍。ng-DSSR虽然root慢59.153秒，但root下界强41.353，最终分支调用仅12次，对比time-indexed的56次；ng在722.761秒找到9019，time-indexed在867.480秒才找到。
 
 耗时结构也不同。ng-DSSR的 heuristic/exact 分别为268.186秒/863次和297.443秒/232次，strong lightweight RMP为43.004秒/480次；time-indexed普通/repair exact分别为340.392秒/4610次和126.034秒/610次，strong lightweight RMP为254.219秒/2224次，另有约45.97秒 Phase-I master LP。由此可见，本算例当前 ng-DSSR 的主要代价仍是 heuristic+exact pricing，但更强root和更小列池显著减少了树与strong trial；time-indexed虽然单次pricing快，却因弱root、更多节点和巨大列池在strong trial上损失更大。完整结果日志分别位于 `test-results/bpc/exp-50-2-W300-current-ng-20260724a` 和 `test-results/bpc/exp-50-2-W300-current-ti-20260724a`，并行控制台保存在前述 `...current-parallel-20260724a` 目录。
+#### ng-DSSR node 8 长尾拆解
+
+node 8 的87.508秒不是 strong repair 或 join 爆炸。该节点 LP 总计仅3.974秒/116次，strong branching测试20个候选且没有 `FindFeasible` repair pricing；主要时间为 heuristic 37.538秒/76次和exact 45.152秒/25次。76次heuristic中51次成功、共加1467列，另外25次失败后各触发一次exact；25次exact中24次成功但总共只加255列，第一轮即加169列，后24次合计只加86列，后半段经常一次只加1--3列。因此这是少量负列驱动的RMP/dual反复更新，即典型column-generation tailing-off，而不是单轮DSSR异常。
+
+25次exact累计50轮DSSR，轮数分布为13次1轮、5次2轮、4次3轮和3次5轮。exact内部45.117秒中，初始化32.183秒，其中midpoint probe 21.255秒、completion bound 10.775秒；正向/反向扩展分别6.328/2.202秒，join仅4.060秒。全run的232次exact同样为297.004秒，其中probe 140.735秒（47.38%）、completion bound 81.336秒（27.39%）、正反扩展44.386秒、join 26.672秒。当前ng-DSSR主要瓶颈因此是heuristic 反复失败后频繁进入exact，并在每次exact/DSSR轮重新承担probe和completion-bound初始化；join已经被group-envelope过滤压到exact的约8.98%。probe选中状态会继续用于正式扩展，并非全部浪费，但未选候选和跨exact重复probe仍是明确开销。

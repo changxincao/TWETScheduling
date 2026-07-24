@@ -1443,3 +1443,12 @@ node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 �
 setupR50 W100 重启后完整求解，time-indexed 快 121.42s。其节点和 pool 分别达到 70 和 190071，显著高于 ng-DSSR 的 24 和 22805；但 ng-DSSR 的 heuristic pricing 达 236.52s/684 次，占总时间约 57.8%，抵消了小树和小 master 的优势。这说明“窗口放宽或 setup 增大必然有利于 ng-DSSR”不成立，两者的交互会改变启发式有效性和 exact 调用轨迹，至少需要跨实例重复。启动检查还发现，最初四个命名为 `exp-50m3-setupR50-W{0,100}-...` 的输出实际仍使用 `dir=data\50-3, case=wet050_003_3m`，原因是 runner 由 `dir + case` 选实例，而启动脚本错误地尝试替换完整路径。这四个输出只是基础算例重复运行，禁止作为 setup 结果引用。真实 setupR50 输出统一带 `setupR50-real` 标记，并已从详细日志复核 `dir=data\setup-variants\50-3`、`case=wet050_003_3m_setupR50`。
 
 有效 CSV 为 `exp-50m3-base-W0-{ng-c2000,ti}-20260724a.csv`、`exp-50m3-base-W100-{ng-c2000,ti}-20260724a.csv`、`exp-50m3-setupR50-real-W0-{ng-c2000,ti}-20260724a.csv` 和 `exp-50m3-setupR50-real-W100-{ng-c2000,ti}-20260724b.csv`。
+
+#### setupR50 W100 热点复核
+
+ng-DSSR 的决定性瓶颈是启发式 pricing，而不是 join 或异常 DSSR 长尾。684 次启发式共耗时 236.518s，平均 345.8ms；其中 477 次成功、加入 15305 列并耗时 163.488s，207 次失败仍耗时 73.031s，失败后才进入 exact。207 次 exact 共 66.387s、累计 343 轮 DSSR，95 次为多轮、最大仅 5 轮，说明本例不是此前 repair 中几十轮 DSSR 的问题。exact 内部 66.129s 中 initialization 为 62.678s，其中 completion bound 45.754s、midpoint probe/复用扩展 16.300s，join 仅 2.534s；当前 join 优化已生效，不是主要方向。
+
+该耗时来自系统性的定价交替：启发式成功后重解 RMP，启发式失败后 exact 生成列并改变 dual，随后又从启发式开始。setupR50 W100 相对 base W100 将启发式从 `65.123s/293` 放大到 `236.518s/684`，exact 从 `22.188s/71` 放大到 `66.387s/207`，nodes 从 10 增到 24。不存在单个异常节点；启发式最重的 node 1 也只有 37.959s，耗时分散在整棵树。
+
+time-indexed 的主要瓶颈相反：46 次分支产生 1832 次 strong-trial LP，共 88.052s；普通 exact 为 80.746s/1667，repair exact 为 21.370s/179，全部 master LP 为 107.776s。它处理 70 个节点和 19 万列仍更快，是因为单次 time-indexed exact 平均 48.4ms，远低于 ng-DSSR exact 的 320.7ms和启发式的 345.8ms。ng-DSSR 虽通过小树和小列池节省约 77.2s master LP，却在定价上比 time-indexed 多花约 202.8s，净结果慢 121.4s。
+

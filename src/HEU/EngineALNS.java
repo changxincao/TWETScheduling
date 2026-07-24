@@ -117,16 +117,14 @@ public class EngineALNS {
             } else {
                 noImprove++;
                 if(noImprove%ratioChangeNoImpIterN==0) {
-	double rate=increaseRate;
-	if(Utility.compareGe(curRemoveRatioU*(1+increaseRate),maxRemRatio)) {
-		rate=maxRemRatio/curRemoveRatioU-1;
-		if(!Utility.compareEq(rate, 0.0)) {
-			//当到达最大阈值的时候删除率保持不变,直到结束或新解刷新
-	curRemoveRatioL*=(1+rate);
-	curRemoveRatioU*=(1+rate);
-	remRatioChangeN++;
-		}
-
+	// 2026-07-24: increaseRate 表示相对当前区间的放大倍数。
+	// 原逻辑只在下一步会越过上限时才更新，导致默认 5%-20% 永远无法开始放大。
+	double nextRemoveRatioU=Math.min(maxRemRatio,curRemoveRatioU*increaseRate);
+	if(Utility.compareGt(nextRemoveRatioU,curRemoveRatioU)) {
+		double scale=nextRemoveRatioU/curRemoveRatioU;
+		curRemoveRatioL*=scale;
+		curRemoveRatioU=nextRemoveRatioU;
+		remRatioChangeN++;
 	}
 
                 }

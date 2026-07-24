@@ -736,6 +736,13 @@ public class PiecewiseLinearFunction {
 			//见Move的注释，暂时认为没啥区别，可以混用
 		if (!(Utility.compareLe(t, tail.end) && Utility.compareLe(head.start, t)))
 			return Utility.curUpperBound;
+		// 2026-07-25：容差判断允许首尾端点外 EPS 内的查询，但 segment 定位必须使用
+		// 真实定义域内的时间，避免等价容差表达在浮点边界给出不同结果。
+		if (t < head.start) {
+			t = head.start;
+		} else if (t > tail.end) {
+			t = tail.end;
+		}
 		TimerManager.start("分段线性函数evaluate");
 		Segment prev = null;
 		for (Segment cur = head; cur != null; cur = cur.next) {

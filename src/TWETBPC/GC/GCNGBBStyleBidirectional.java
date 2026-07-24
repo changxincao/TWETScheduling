@@ -3499,7 +3499,7 @@ public class GCNGBBStyleBidirectional {
 		// 但 join 时要能用 Tmid 处常数延拓评价，因此这里保留零长度常数段。
 		if (Utility.compareEq(start, end)) {
 			if (!Utility.compareLt(start, function.head.start) && !Utility.compareGt(start, function.tail.end)) {
-				addConstantSegmentOrPoint(cropped, start, end, function.evaluateAtClampedEndpoint(start));
+				addConstantSegmentOrPoint(cropped, start, end, function.evaluate(start));
 			}
 			return cropped;
 		}

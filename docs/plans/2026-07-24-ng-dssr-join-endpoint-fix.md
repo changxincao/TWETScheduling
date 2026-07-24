@@ -20,3 +20,5 @@
 2026-07-25 继续全局检查同类数值边界。除 ng-DSSR 主线的 join 延拓外，标准双向、partial dominance、旧双向对照实现仍保留相同的 `valueAtOrNearest()` 写法；各双向实现和 completion bound 的零长度单点裁剪也会先用 EPS 判定“在域内”，再把未经钳制的点交给严格 `evaluate()`。旧 dominance 点查询存在相同的端点风险，当前增量 source-aware dominance graph 自己按 segment 求值，不调用严格 PWLF `evaluate()`，不属于该问题。
 
 本次把真实首尾端点钳制收敛到 `PiecewiseLinearFunction.evaluateAtClampedEndpoint()`，并将上述已确认入口统一调用该方法。距离定义域超过原有 EPS 的 dominance 查询仍返回 `big_M`；仅处于容差带内但物理上越过首尾端点的点才钳制。内部函数空档仍由严格 `evaluate()` 抛出异常，没有被端点修复掩盖。focused 编译、端点/内部空档回归、Paper dominance 一致性测试和增量 source-aware dominance 一致性测试均通过。
+
+二次复核发现，仅在已知调用点使用 helper 仍可能遗漏未来或现有的直接 `evaluate(t)` 调用。最终处理把“已通过原有 EPS 定义域检查、但物理上略过首尾端点”的钳制下沉到 `PiecewiseLinearFunction.evaluate()` 本身；超过 EPS 的域外点仍返回原有上界值，内部空档仍抛异常。由此撤掉 crop 和 dominance 调用点的重复钳制，只保留 `valueAtOrNearest()` 对任意域外时间取最近端点所需的 helper。

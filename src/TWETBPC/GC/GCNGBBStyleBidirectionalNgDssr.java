@@ -7626,7 +7626,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		// 婵?join 闂佸搫鍟崕濂搞€呴敃鍌涘殑闁伙絽鏈弳?Tmid 婵犮垼娉涚€氼剟鎮ラ崼鏇炴瀬闁哄瀵ч浠嬫煙闁垮宕勯柣锕€瀛╃粋鎺楀礄閵堝洨顦梺鎼炲劤婵敻顢楀┑鍥ㄤ氦婵炲棙鎸稿▍鈥城庨崶銊х畼闁哄棌鍋撻梻鍌氭閻栧ジ寮虫潏銊﹀劅闁挎洍鍋撻柣鏍х埣瀵偊鎮ч崼顐㈡杸闂?
 		if (Utility.compareEq(start, end)) {
 			if (!Utility.compareLt(start, function.head.start) && !Utility.compareGt(start, function.tail.end)) {
-				addConstantSegmentOrPoint(cropped, start, end, function.evaluateAtClampedEndpoint(start));
+				addConstantSegmentOrPoint(cropped, start, end, function.evaluate(start));
 			}
 			return cropped;
 		}

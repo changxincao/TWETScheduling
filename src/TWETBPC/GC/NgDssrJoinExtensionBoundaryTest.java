@@ -18,12 +18,14 @@ public final class NgDssrJoinExtensionBoundaryTest {
 		assertClose(expectedTail,
 				GCNGBBStyleBidirectionalNgDssr.valueAtOrNearest(function, 1934.000001),
 				"right endpoint clamp");
+		assertClose(expectedTail, function.evaluate(1934.000001), "direct right endpoint clamp");
 		assertClose(2.0 * 1500.0 + 3.0,
 				GCNGBBStyleBidirectionalNgDssr.valueAtOrNearest(function, 1500.0),
 				"interior evaluation");
 		assertClose(2.0 * 1000.0 + 3.0,
 				GCNGBBStyleBidirectionalNgDssr.valueAtOrNearest(function, 999.999999),
 				"left endpoint clamp");
+		assertClose(2.0 * 1000.0 + 3.0, function.evaluate(999.999999), "direct left endpoint clamp");
 
 		PiecewiseLinearFunction gapped = new PiecewiseLinearFunction(0.0, 2513.0);
 		gapped.addSegment(1000.0, 1200.0, 1.0, 0.0);

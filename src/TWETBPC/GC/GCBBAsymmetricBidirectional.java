@@ -1340,13 +1340,7 @@ public class GCBBAsymmetricBidirectional {
 		if (function == null || function.head == null) {
 			return Utility.big_M;
 		}
-		if (!Utility.compareLt(t, function.head.start) && !Utility.compareGt(t, function.tail.end)) {
-			return function.evaluate(t);
-		}
-		if (Utility.compareLt(t, function.head.start)) {
-			return function.evaluate(function.head.start);
-		}
-		return function.evaluate(function.tail.end);
+		return function.evaluateAtClampedEndpoint(t);
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {
@@ -1977,7 +1971,7 @@ public class GCBBAsymmetricBidirectional {
 		// 但 join 时要能用 Tmid 处常数延拓评价，因此这里保留零长度常数段。
 		if (Utility.compareEq(start, end)) {
 			if (!Utility.compareLt(start, function.head.start) && !Utility.compareGt(start, function.tail.end)) {
-				addConstantSegmentOrPoint(cropped, start, end, function.evaluate(start));
+				addConstantSegmentOrPoint(cropped, start, end, function.evaluateAtClampedEndpoint(start));
 			}
 			return cropped;
 		}

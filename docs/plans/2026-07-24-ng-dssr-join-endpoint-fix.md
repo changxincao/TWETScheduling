@@ -16,3 +16,7 @@
 启动后已核对实际 JDK 子进程和完整命令行。两组均保持 W100、1800 秒、60 秒 ALNS、单 CPLEX 线程和 strong branching；ng-DSSR 继续使用 C1000/K20、新 dominance/group prefilter、completion bound 与 time-indexed root preprocessing/seed200，time-indexed 继续使用 dual-window exact graph pricing。
 
 该次重启随后按用户要求立即停止。两个输出目录仅保留不完整的过程日志，不作为性能或最优性结论；端点修复本身的 focused 编译和独立回归结果不受影响。
+
+2026-07-25 继续全局检查同类数值边界。除 ng-DSSR 主线的 join 延拓外，标准双向、partial dominance、旧双向对照实现仍保留相同的 `valueAtOrNearest()` 写法；各双向实现和 completion bound 的零长度单点裁剪也会先用 EPS 判定“在域内”，再把未经钳制的点交给严格 `evaluate()`。旧 dominance 点查询存在相同的端点风险，当前增量 source-aware dominance graph 自己按 segment 求值，不调用严格 PWLF `evaluate()`，不属于该问题。
+
+本次把真实首尾端点钳制收敛到 `PiecewiseLinearFunction.evaluateAtClampedEndpoint()`，并将上述已确认入口统一调用该方法。距离定义域超过原有 EPS 的 dominance 查询仍返回 `big_M`；仅处于容差带内但物理上越过首尾端点的点才钳制。内部函数空档仍由严格 `evaluate()` 抛出异常，没有被端点修复掩盖。focused 编译、端点/内部空档回归、Paper dominance 一致性测试和增量 source-aware dominance 一致性测试均通过。

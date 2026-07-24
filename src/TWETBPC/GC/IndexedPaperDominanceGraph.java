@@ -804,6 +804,9 @@ final class IndexedPaperDominanceGraph implements DominanceStore {
 		if (Utility.compareLt(pointTime, envelope.head.start) || Utility.compareGt(pointTime, envelope.tail.end)) {
 			return Utility.big_M;
 		}
+		if (pointTime < envelope.head.start || pointTime > envelope.tail.end) {
+			return envelope.evaluateAtClampedEndpoint(pointTime);
+		}
 		if (direction == Direction.FORWARD && Utility.compareEq(pointTime, envelope.tail.end)) {
 			return envelope.tail.getValue(envelope.tail.end);
 		}

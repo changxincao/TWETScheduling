@@ -165,7 +165,11 @@ final class PartialListDominanceStore implements DominanceStore {
 						|| !label.reachableSet.isSupersetOf(reachableSet)) {
 					continue;
 				}
-				double value = label.frontier.evaluate(pointTime);
+				if (Utility.compareLt(pointTime, label.frontier.head.start)
+						|| Utility.compareGt(pointTime, label.frontier.tail.end)) {
+					continue;
+				}
+				double value = label.frontier.evaluateAtClampedEndpoint(pointTime);
 				if (!Utility.compareGt(value, pointValue)) {
 					return true;
 				}

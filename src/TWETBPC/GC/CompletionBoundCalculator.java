@@ -1758,7 +1758,7 @@ final class CompletionBoundCalculator {
 		}
 		if (Utility.compareEq(start, end)) {
 			if (!Utility.compareLt(start, function.head.start) && !Utility.compareGt(start, function.tail.end)) {
-				cropped.addSegment(start, end, 0.0, function.evaluate(start));
+				cropped.addSegment(start, end, 0.0, function.evaluateAtClampedEndpoint(start));
 			}
 			return cropped;
 		}

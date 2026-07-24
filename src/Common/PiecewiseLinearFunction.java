@@ -764,6 +764,23 @@ public class PiecewiseLinearFunction {
 
 	}
 
+	/**
+	 * 按真实首尾端点钳制后求值。只处理浮点运算把查询点推到整体定义域外的情形，
+	 * 不改变函数内部断点或空档的严格求值语义。
+	 */
+	public double evaluateAtClampedEndpoint(double t) {
+		if (head == null) {
+			return Utility.curUpperBound;
+		}
+		if (t < head.start) {
+			return evaluate(head.start);
+		}
+		if (t > tail.end) {
+			return evaluate(tail.end);
+		}
+		return evaluate(t);
+	}
+
 	public double findMinimalInRange(double start, double end) {
 		if (head == null) {
 			return Utility.big_M;

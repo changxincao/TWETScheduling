@@ -25,6 +25,19 @@ public final class NgDssrJoinExtensionBoundaryTest {
 				GCNGBBStyleBidirectionalNgDssr.valueAtOrNearest(function, 999.999999),
 				"left endpoint clamp");
 
+		PiecewiseLinearFunction gapped = new PiecewiseLinearFunction(0.0, 2513.0);
+		gapped.addSegment(1000.0, 1200.0, 1.0, 0.0);
+		gapped.addSegment(1300.0, 1934.0, 1.0, 0.0);
+		boolean rejectedInternalGap = false;
+		try {
+			gapped.evaluateAtClampedEndpoint(1250.0);
+		} catch (IllegalArgumentException expected) {
+			rejectedInternalGap = true;
+		}
+		if (!rejectedInternalGap) {
+			throw new AssertionError("endpoint clamp must not hide an internal gap");
+		}
+
 		System.out.println("NgDssrJoinExtensionBoundaryTest passed.");
 	}
 

@@ -1508,3 +1508,9 @@ time-indexed 的主要瓶颈相反：46 次分支产生 1832 次 strong-trial LP
 累计到root fixing结束的证据如下。50-2开启时固定8222389条时空弧、2145条普通弧，关闭时为7961546和1411；最终窗口的平均hull/reachable点数为291.0/238.2，对比683.9/629.9。60-3开启时为12679109条时空弧、2976条普通弧，关闭时为12527649和2128；窗口为161.8/118.9，对比326.4/301.1。setupR50 W100开启时为5342996条时空弧、430条普通弧，关闭时为5220720和292；窗口为955.5/916.3，对比1067.6/1021.5。前两组的时空弧总数差异并不算大，真正显著的是普通弧更多、窗口更紧，而且这些证据在正式root开始前已经可用。
 
 初始上界也是重要混杂因素。初始列与incumbent在预处理启动前已经生成，因此50-2的44383/44607、60-3的16550/16728和setup的16675/16725差异不是预处理产生的，而是60s ALNS墙钟及并行负载造成的不同轨迹。对应root LP相同，50-2 fixing gap由30扩大到254，60-3由56.727扩大到234.727，显著削弱关闭组的arc fixing；setup只由660.583扩大到710.583，影响较小。因此当前实验能确认“预处理提前提供缩域证据”有效，但不能把全部root差异归因于该开关。严格A/B必须固定同一初始incumbent和初始列，再串行比较。
+
+### 2026-07-24 50-2 W300 当前主线并行对照
+
+按当前编译产物启动 `wet050_001_2m`、`dueWindowHalfWidth=300` 的 ng-DSSR/time-indexed 两进程并行对照，每个进程固定 `cplexThreads=1`，限时1800秒。两组共同开启60秒 ALNS、strong branching、lightweight Phase-I repair、dual-bound pruning，关闭 SRI、RMIH 和 strong phase2。ng-DSSR 使用当前 `nearestK auto`、`C1000/K20/minimumNewPairsSegment`、新 incremental sourced dominance、group-envelope/visit-profile join pruning、allCycles completion bound、midpoint probe、repeatability filter，以及 time-indexed root preprocessing/seed200；time-indexed 使用 exact graph pricing、dual window 和每轮最多300列，关闭 heuristic/ng/completion-bound helper。
+
+输出目录为 `test-results/bpc/exp-50-2-W300-current-parallel-20260724a/ng-dssr` 与 `test-results/bpc/exp-50-2-W300-current-parallel-20260724a/time-indexed`。启动器 PID 分别为36532和40336；启动检查确认两个真实 solver JVM 均在运行，stderr 无异常。ng-DSSR 当前先执行配置中的 time-indexed root preprocessing，因此其初始日志出现 `TimeIndexedGraphPricing` 属于预期行为。最终结果和热点统计待进程结束后补充。

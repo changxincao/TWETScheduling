@@ -1422,3 +1422,22 @@ node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 �
 进一步复核 candidate1000 的统计口径后确认，`blocked` 不是指 pricing 阶段生成了非法或重复 sequence。每轮先在旧 ng-set 下按 reduced cost 保留最多 1000 条不同的负非基本路径，再按顺序用这些路径更新同一份 ng-set；前序路径加入新 pair 后，只要后续路径的任一重复段已被该 pair 阻断，整条路径下一轮便不可能原样出现，因此记为 `blocked`，不再从它的其他重复段继续更新。33 次多轮 `FindFeasible` 合计有 1047 个实际更新轮、检查 1,046,842 条候选，其中 1,043,838 条在顺序复检时已被前序更新连带阻断，实际用于更新的 route 为 3004 条、累计增加 3049 个 pair，即平均每轮仅 2.87 条有效 route、2.91 个新 pair。候选之间不是 sequence 完全重复，而是高度共享少量重复段；因此把 reservoir 扩大到 1000 仍无法让 K20 经常吃满。每轮更新后重新 labeling 才会暴露下一层不同的重复结构，这是 46--64 轮长尾的直接原因。
 
 同算例 time-indexed 的当前完整对照为 `1696.092s`、22 nodes、`obj=bound=36803`。其中直接记录的 strong phase1 trial RMP 为 `468.419s/772`；若把 strong repair 的 `FindFeasible` pricing `154.273s`、repair slack/after-pricing LP `25.767s` 和 lightweight seed preparation `10.181s` 一并计入，强分支相关工作约为 `658.6s`。历史最好完整 time-indexed 记录为 `1568.207s`、22 nodes，strong trial RMP 为 `485.401s/758`。因此 time-indexed 虽然处理节点更多、trial 次数更多，但单次 trial RMP 平均约 `0.61--0.64s`，明显低于本次 ng-DSSR 的 `1.264s`；同时它不存在 ng-DSSR repair 内部几十轮 DSSR 的长尾。
+
+### 2026-07-24 50-3 小时间下 W0/W100 与 setupR50 对照
+
+使用当前最新 class 在 `wet050_003_3m` 上比较纯 time-indexed 与 no-SRI ng-DSSR。两组均开启 ALNS 60s、strong branching、lightweight Phase-I repair 和 dual-bound pruning；ng-DSSR 使用 nearest `K=floor(n/10)=5`、minimum-segment K20、candidate reservoir `C=2000`、source-aware dominance、group-envelope join prefilter、completion bound、midpoint probe、time-indexed root preprocessing 和 200 条 elementary seed，关闭 time-indexed pre-heuristic。每个并行进程使用 1 个 CPLEX thread。全部完成结果均为 `gap=0`、`valid=true`。
+
+| 数据 | W | 方法 | 目标 | 总时间 | root | nodes | pool | heuristic | exact | master LP |
+|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| base | 0 | ng-DSSR | 26527 | 121.693s | 58.249s | 14 | 15306 | 38.529s | 7.761s | 26.530s |
+| base | 0 | time-indexed | 26527 | 105.143s | 53.453s | 12 | 68855 | 0 | 11.166s | 45.487s |
+| base | 100 | ng-DSSR | 11555 | 161.397s | 83.913s | 10 | 9016 | 65.123s | 22.188s | 15.831s |
+| base | 100 | time-indexed | 11555 | 192.952s | 62.165s | 45 | 96384 | 0 | 40.006s | 84.905s |
+| setupR50 | 0 | ng-DSSR | 32237 | 54.583s | 48.947s | 3 | 4127 | 2.955s | 2.786s | 4.376s |
+| setupR50 | 0 | time-indexed | 32237 | 73.854s | 46.307s | 8 | 38814 | 0 | 6.492s | 22.622s |
+
+基础 W0 中 time-indexed 快 16.55s；放宽到 W100 后，ng-DSSR 快 31.56s。主要变化不是 ng-DSSR root 更快，而是 time-indexed 的树从 12 增至 45 个节点、pool 从 68855 增至 96384，master LP 从 45.49s 增至 84.90s。ng-DSSR 的 pool 反而降至 9016，仍由 heuristic pricing 主导耗时。真实 setupR50 W0 中 ng-DSSR 快 19.27s，节点和 pool 分别只有 time-indexed 的 `3/8` 和约 `10.6%`，说明 setup 增大本身也可能把优势推向 ng-DSSR；但本轮只有一个实例，不能据此宣称普遍规律。
+
+setupR50 W100 两组已按用户要求在 root 阶段中止，不纳入时间比较。启动检查还发现，最初四个命名为 `exp-50m3-setupR50-W{0,100}-...` 的输出实际仍使用 `dir=data\50-3, case=wet050_003_3m`，原因是 runner 由 `dir + case` 选实例，而启动脚本错误地尝试替换完整路径。这四个输出只是基础算例重复运行，禁止作为 setup 结果引用。真实 setupR50 输出统一带 `setupR50-real` 标记，并已从详细日志复核 `dir=data\setup-variants\50-3`、`case=wet050_003_3m_setupR50`。
+
+有效 CSV 为 `exp-50m3-base-W0-{ng-c2000,ti}-20260724a.csv`、`exp-50m3-base-W100-{ng-c2000,ti}-20260724a.csv` 和 `exp-50m3-setupR50-real-W0-{ng-c2000,ti}-20260724a.csv`。

@@ -5963,17 +5963,19 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return extended;
 	}
 
-	private double valueAtOrNearest(PiecewiseLinearFunction function, double t) {
+	static double valueAtOrNearest(PiecewiseLinearFunction function, double t) {
 		if (function == null || function.head == null) {
 			return Utility.big_M;
 		}
-		if (!Utility.compareLt(t, function.head.start) && !Utility.compareGt(t, function.tail.end)) {
-			return function.evaluate(t);
-		}
-		if (Utility.compareLt(t, function.head.start)) {
+		// 2026-07-24：Tmid 可能等于真实端点加 EPS。先按真实首尾端点钳制，
+		// 避免两种等价容差表达在浮点边界给出不同结果后把域外时间交给 evaluate()。
+		if (t < function.head.start) {
 			return function.evaluate(function.head.start);
 		}
-		return function.evaluate(function.tail.end);
+		if (t > function.tail.end) {
+			return function.evaluate(function.tail.end);
+		}
+		return function.evaluate(t);
 	}
 
 	private void tryGenerateColumn(ArrayList<Integer> sequence, LP lp, double inferredReducedCost) {

@@ -1452,3 +1452,19 @@ ng-DSSR 的决定性瓶颈是启发式 pricing，而不是 join 或异常 DSSR �
 
 time-indexed 的主要瓶颈相反：46 次分支产生 1832 次 strong-trial LP，共 88.052s；普通 exact 为 80.746s/1667，repair exact 为 21.370s/179，全部 master LP 为 107.776s。它处理 70 个节点和 19 万列仍更快，是因为单次 time-indexed exact 平均 48.4ms，远低于 ng-DSSR exact 的 320.7ms和启发式的 345.8ms。ng-DSSR 虽通过小树和小列池节省约 77.2s master LP，却在定价上比 time-indexed 多花约 202.8s，净结果慢 121.4s。
 
+
+### 2026-07-24 candidate C1000 与 time-indexed 补充对照
+
+在 50-3 setupR50 W100、50-2 base 和 60-3 base 上复核 ng-DSSR 的 non-elementary witness reservoir。C1000/C500 的完整结果分别为：50-3 setupR50 W100 为 318.520s/331.439s，50-2 base 为 176.714s/188.649s，60-3 base 为 195.555s/181.259s。C1000 在三组中赢两组，且 50-3、50-2 的优势分别为 3.9% 和 6.3%；C500 只在 60-3 快 7.3%。因此默认 candidate limit 从 2000 调整为 1000，K20 和 minimumNewPairsSegment 更新口径不变。该选择是跨算例折中，不表示 C1000 对所有实例逐例最优。
+
+使用同一套强分支、ALNS 60s、单 CPLEX 线程配置补齐纯 time-indexed 对照；50-3 setupR50 W100 复用 2026-07-24 已完成结果。三组均达到 gap=0 且 valid=true：
+
+| 算例 | ng-DSSR C1000 | time-indexed | ng nodes/pool | TI nodes/pool | ng exact | TI exact | ng master | TI master |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 50-2 base | 176.714s | 534.248s | 5 / 23712 | 21 / 337805 | 5.353s / 80 | 127.683s / 2027 | 85.929s | 303.030s |
+| 60-3 base | 195.555s | 406.436s | 18 / 31984 | 20 / 117478 | 20.312s / 232 | 126.544s / 1316 | 54.798s | 189.578s |
+| 50-3 setupR50 W100 | 318.520s | 287.773s | 23 / 22001 | 70 / 190071 | 56.820s / 219 | 80.746s / 1667 | 26.595s | 107.776s |
+
+50-2 和 60-3 中 ng-DSSR 分别快约 3.02 倍和 2.08 倍，决定性差异是 time-indexed 生成的列池及后续 RMP：50-2 最终 337805 列，master LP 单独耗时 303.030s；60-3 最终 117478 列，master LP 为 189.578s。50-3 setupR50 W100 中 ng-DSSR 虽然树和 master 更小，但 heuristic pricing 为 178.741s/679 次，最终仍比 time-indexed 慢约 10.7%。这再次说明 ng-DSSR 的优势取决于它能否用较小列池和较少节点抵消启发式与 exact pricing 成本，不能只由 W 或 setup 单独判断。
+
+有效输出为 `exp-50-2-base-{ng-c1000,ti}-20260724a.csv`、`exp-60-3-base-{ng-c1000,ti}-20260724a.csv`、`exp-50m3-setupR50-real-W100-ng-c1000-20260724c.csv` 和 `exp-50m3-setupR50-real-W100-ti-20260724b.csv`。

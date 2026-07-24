@@ -1435,9 +1435,11 @@ node 2 的 58 轮 repair 也说明这里的 K20 不能理解为每轮必加 20 �
 | base | 100 | time-indexed | 11555 | 192.952s | 62.165s | 45 | 96384 | 0 | 40.006s | 84.905s |
 | setupR50 | 0 | ng-DSSR | 32237 | 54.583s | 48.947s | 3 | 4127 | 2.955s | 2.786s | 4.376s |
 | setupR50 | 0 | time-indexed | 32237 | 73.854s | 46.307s | 8 | 38814 | 0 | 6.492s | 22.622s |
+| setupR50 | 100 | ng-DSSR | 16130 | 409.196s | 112.227s | 24 | 22805 | 236.518s | 66.387s | 30.600s |
+| setupR50 | 100 | time-indexed | 16130 | 287.773s | 65.978s | 70 | 190071 | 0 | 80.746s | 107.776s |
 
 基础 W0 中 time-indexed 快 16.55s；放宽到 W100 后，ng-DSSR 快 31.56s。主要变化不是 ng-DSSR root 更快，而是 time-indexed 的树从 12 增至 45 个节点、pool 从 68855 增至 96384，master LP 从 45.49s 增至 84.90s。ng-DSSR 的 pool 反而降至 9016，仍由 heuristic pricing 主导耗时。真实 setupR50 W0 中 ng-DSSR 快 19.27s，节点和 pool 分别只有 time-indexed 的 `3/8` 和约 `10.6%`，说明 setup 增大本身也可能把优势推向 ng-DSSR；但本轮只有一个实例，不能据此宣称普遍规律。
 
-setupR50 W100 两组已按用户要求在 root 阶段中止，不纳入时间比较。启动检查还发现，最初四个命名为 `exp-50m3-setupR50-W{0,100}-...` 的输出实际仍使用 `dir=data\50-3, case=wet050_003_3m`，原因是 runner 由 `dir + case` 选实例，而启动脚本错误地尝试替换完整路径。这四个输出只是基础算例重复运行，禁止作为 setup 结果引用。真实 setupR50 输出统一带 `setupR50-real` 标记，并已从详细日志复核 `dir=data\setup-variants\50-3`、`case=wet050_003_3m_setupR50`。
+setupR50 W100 重启后完整求解，time-indexed 快 121.42s。其节点和 pool 分别达到 70 和 190071，显著高于 ng-DSSR 的 24 和 22805；但 ng-DSSR 的 heuristic pricing 达 236.52s/684 次，占总时间约 57.8%，抵消了小树和小 master 的优势。这说明“窗口放宽或 setup 增大必然有利于 ng-DSSR”不成立，两者的交互会改变启发式有效性和 exact 调用轨迹，至少需要跨实例重复。启动检查还发现，最初四个命名为 `exp-50m3-setupR50-W{0,100}-...` 的输出实际仍使用 `dir=data\50-3, case=wet050_003_3m`，原因是 runner 由 `dir + case` 选实例，而启动脚本错误地尝试替换完整路径。这四个输出只是基础算例重复运行，禁止作为 setup 结果引用。真实 setupR50 输出统一带 `setupR50-real` 标记，并已从详细日志复核 `dir=data\setup-variants\50-3`、`case=wet050_003_3m_setupR50`。
 
-有效 CSV 为 `exp-50m3-base-W0-{ng-c2000,ti}-20260724a.csv`、`exp-50m3-base-W100-{ng-c2000,ti}-20260724a.csv` 和 `exp-50m3-setupR50-real-W0-{ng-c2000,ti}-20260724a.csv`。
+有效 CSV 为 `exp-50m3-base-W0-{ng-c2000,ti}-20260724a.csv`、`exp-50m3-base-W100-{ng-c2000,ti}-20260724a.csv`、`exp-50m3-setupR50-real-W0-{ng-c2000,ti}-20260724a.csv` 和 `exp-50m3-setupR50-real-W100-{ng-c2000,ti}-20260724b.csv`。

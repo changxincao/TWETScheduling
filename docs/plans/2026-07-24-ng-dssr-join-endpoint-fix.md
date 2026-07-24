@@ -14,3 +14,5 @@
 - time-indexed：`test-results/bpc/exp-60-3-W100-current-ti-rerun-20260725c`
 
 启动后已核对实际 JDK 子进程和完整命令行。两组均保持 W100、1800 秒、60 秒 ALNS、单 CPLEX 线程和 strong branching；ng-DSSR 继续使用 C1000/K20、新 dominance/group prefilter、completion bound 与 time-indexed root preprocessing/seed200，time-indexed 继续使用 dual-window exact graph pricing。
+
+该次重启随后按用户要求立即停止。两个输出目录仅保留不完整的过程日志，不作为性能或最优性结论；端点修复本身的 focused 编译和独立回归结果不受影响。

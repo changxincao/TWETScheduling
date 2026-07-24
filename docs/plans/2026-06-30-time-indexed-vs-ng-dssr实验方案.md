@@ -1484,3 +1484,27 @@ time-indexed 的主要瓶颈相反：46 次分支产生 1832 次 strong-trial LP
 关闭预处理后，50-2 总时间增加 85.6%，60-3 增至 4.13 倍，setupR50 W100 增加 24.0%；三组 root 时间也都变差。50-2 和 60-3 的节点数没有变化，但 heuristic、exact 和 master 的工作量明显增加，说明预处理写回的 compact window、pricing-only arc 与 seed 对后续定价/RMP仍有实际收益。setupR50 W100 虽然关闭后节点和 pool 更少，但 root、heuristic 和 master 增量仍使总时间变慢。
 
 这三组关闭预处理的 run 为并行执行，而 ALNS 使用 60s 墙钟停止条件；CPU竞争改变了截止前完成的 ALNS 迭代数，导致初始 incumbent 不完全相同。因此上述倍率用于判断配置方向，不作为严格隔离的单变量计时结论。当前证据仍一致支持默认开启 time-indexed root preprocessing。有效输出为 `exp-50-2-base-ng-c1000-norootpre-20260724a.csv`、`exp-60-3-base-ng-c1000-norootpre-20260724a.csv` 和 `exp-50m3-setupR50-real-W100-ng-c1000-norootpre-20260724a.csv`。
+
+#### 关闭 root preprocessing 后的增时来源
+
+三组结果不能把全部增时直接归因给预处理本身。关闭预处理确实移除了 root 写回的 compact window、普通 pricing-only arc、时空禁弧与 200 条 elementary seed。首轮 exact 的状态空间随之扩大：50-2 的 forward/backward 扩展候选由 4784/2579 增至 11912/8850；60-3 由 8120/6032 增至 13302/18687。开启时两组 root 的平均 compact window 长度分别只有 301.46 和 162.12，并带有 2135/2970 条普通 pricing-only arc，因此后续 heuristic、exact 与 trial RMP 的输入明显更干净。
+
+但本轮三个 no-preprocessing run 是同时并行启动的，而对应 enabled 记录并非同一次并行 A/B。60-3 的调用次数只从 heuristic 865、exact 232、strong trial 480 变化为 1130、269、464，单次平均时间却分别从 55.6ms、87.6ms、43.9ms 增至 308.5ms、294.8ms、615.1ms。50-2 也出现 heuristic 50.2ms 到338.2ms、exact 66.9ms 到300.5ms、strong trial 83.9ms 到611.0ms的全面放大。这种所有组件同时变慢的特征不能由搜索域单独解释，CPU竞争和60s ALNS墙钟停止造成的初始解/dual差异是重要混杂因素。
+
+按汇总计时，50-2 的151.24s增量主要表现为 heuristic增加149.56s、exact增加28.90s，master反而减少28.78s；60-3的612.55s增量主要是heuristic增加300.58s、master增加248.11s（其中strong trial增加264.34s）和exact增加58.99s；setupR50 W100的76.53s增量主要是heuristic增加33.92s和master增加32.81s。因此当前能确认的算法原因是缺少compact window/禁弧/seed后定价与trial LP变重；4.13倍等具体倍率则混入并行负载，不能作为纯预处理收益。
+
+#### root 时间、初始上界与 arc fixing 的直接对照
+
+按 root 单独复核后，关闭预处理变慢的核心不是“最终没有做 arc fixing”，而是 fixing 的时机发生在正式 ng-DSSR root 闭合之后。开启预处理时，临时 time-indexed root 先把时空禁弧、普通 pricing-only arc、compact window 和200条seed写回，正式 root 从第一次 pricing 起就在缩小后的域内运行；关闭时，正式 root 必须先在原始大域中完成全部加列，最后才用收敛 dual 执行 scalar/time-indexed fixing。后者得到的 fixing 只能帮助子节点，无法反过来减少已经完成的 root pricing 和 RMP 重解。
+
+| 算例 | root总时间 开/关 | 正式root nodeTime 开/关 | 初始UB 开/关 | 相同root LP | 正式root pricing 开/关 | restricted列 开/关 |
+|---|---:|---:|---:|---:|---:|---:|
+| 50-2 | 148.406/186.817s | 14.613/159.177s | 44383/44607 | 44353.000 | 9.285/123.236s | 7364/11190 |
+| 60-3 | 102.455/223.471s | 9.451/226.317s | 16550/16728 | 16493.273 | 7.449/158.610s | 2445/12356 |
+| setupR50 W100 | 79.840/156.268s | 30.874/105.474s | 16675/16725 | 16014.417 | 27.954/93.608s | 3554/7848 |
+
+开启预处理本身分别耗时90.716s、34.383s和4.501s，但正式root nodeTime分别节省144.564s、216.866s和74.600s，因此仍有净收益。50-2与60-3的正式root pricing分别从123.236s/158.610s降至9.285s/7.449s，RMP列数也明显下降；这才是root总时间降低的直接来源。
+
+累计到root fixing结束的证据如下。50-2开启时固定8222389条时空弧、2145条普通弧，关闭时为7961546和1411；最终窗口的平均hull/reachable点数为291.0/238.2，对比683.9/629.9。60-3开启时为12679109条时空弧、2976条普通弧，关闭时为12527649和2128；窗口为161.8/118.9，对比326.4/301.1。setupR50 W100开启时为5342996条时空弧、430条普通弧，关闭时为5220720和292；窗口为955.5/916.3，对比1067.6/1021.5。前两组的时空弧总数差异并不算大，真正显著的是普通弧更多、窗口更紧，而且这些证据在正式root开始前已经可用。
+
+初始上界也是重要混杂因素。初始列与incumbent在预处理启动前已经生成，因此50-2的44383/44607、60-3的16550/16728和setup的16675/16725差异不是预处理产生的，而是60s ALNS墙钟及并行负载造成的不同轨迹。对应root LP相同，50-2 fixing gap由30扩大到254，60-3由56.727扩大到234.727，显著削弱关闭组的arc fixing；setup只由660.583扩大到710.583，影响较小。因此当前实验能确认“预处理提前提供缩域证据”有效，但不能把全部root差异归因于该开关。严格A/B必须固定同一初始incumbent和初始列，再串行比较。

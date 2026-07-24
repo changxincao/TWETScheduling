@@ -3,8 +3,6 @@ package HEU;
 
 import java.util.*;
 
-import javax.swing.text.html.CSS;
-
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
@@ -17,13 +15,12 @@ import Common.Utility;
 public class EngineALNS {
     private Data data;
     private Solution current;
-    private EngineVND vnd;
     private List<RemovalOperator> removals;
     private List<InsertionOperator> insertions;
 
     public static Random rng = new Random(0);
     public static double defaultRemoveRatioU=0.2;//默认删除上界
-    public static double defaultRemoveRatioL=0.05;//默认删除上界
+    public static double defaultRemoveRatioL=0.05;//默认删除下界
     public static int maxNoImpIterN=80;//最多无改进次数
     public static long maxRuntimeMillis=600_000L;
     public static int maxremRatioChangeN=8;//最多扩大删除率次数
@@ -66,7 +63,7 @@ public class EngineALNS {
     /** 主搜索过程 */
     public void search() {
         int noImprove = 0;
-        int remRatioChangeN=0;//这个参数其实没啥用，不起控制作用,师兄那个是因为还有一个别的共同作用的
+        int remRatioChangeN=0;
         long startNanos = System.nanoTime();
         int iteration = 0;
         double initialTemperature = initialTemperature();
@@ -80,9 +77,6 @@ public class EngineALNS {
 	// 2026-05-17: ALNS 会接受扰动后的较差解，进入该阶段前必须恢复真实目标值。
 	// 不能沿用 VND 阶段可能使用过的局部上界截断值，否则后续外包差分更新会破坏 curCost。
 	tmpSol.curCost = tmpSol.calCost();
-//        	double test1=Move.testSequence(data,tmpSol.sequences.get(0),tmpSol);
-//        	double test2=Move.testSequence(data,tmpSol.sequences.get(1),tmpSol);
-//        	System.out.println("当前解成本："+tmpSol.curCost+" "+(test1+test2)+" "+Utility.curUpperBound);
 
             // 1) 破坏
             RemovalOperator rem = removals.get(rng.nextInt(removals.size()));
@@ -93,15 +87,10 @@ public class EngineALNS {
             // 2) 修复
             InsertionOperator ins = insertions.get(rng.nextInt(insertions.size()));
             ins.insert(tmpSol, removed);
-//            System.out.println("完成ALNS步骤"+" "+rem.getClass().getName()+" "+ins.getClass().getName());
-//            System.out.println("删除："+removed);
-//            System.out.println(tmpSol.sequences);
             // 3) 局部精炼
 
-            vnd=new EngineVND(data, tmpSol);
+            EngineVND vnd=new EngineVND(data, tmpSol);
             vnd.search();
-//            System.out.println("完成VND步骤");
-//            System.out.println(tmpSol.sequences);
 
 
             // 4) 更新全局最优
@@ -497,7 +486,6 @@ class GreedyInsertion implements InsertionOperator {
             } else {
 	s.insertJob(bestM, bestPos, job);
             }
-//            System.out.println("插入任务："+job+" "+bestM+" "+bestPos+" "+bestDelta);
         }
     }
 
@@ -553,7 +541,6 @@ class RegretKInsertion implements InsertionOperator {
                 }
 
             }
-//            System.out.println(bestJob+" "+bestM+" "+bestPos);
             // 对 bestJob 做贪心插入
             if (bestM == -1) {
 	s.addOutsourcedJob(bestJob);

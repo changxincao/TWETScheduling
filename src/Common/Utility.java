@@ -76,9 +76,10 @@ public class Utility {
 	}
 	
 	public static void debugNumPlus() {
+		if (!Configure.debugAlgorithmCounters) {
+			return;
+		}
 		debugNum++;
-	
-//		System.out.print("debug:"+debugNum);
 	}
 
 	/**
@@ -290,6 +291,7 @@ public static class TimerManager {
     private static long startTimeNano = -1;
 
     public static void globalStart() {
+        if (!Configure.timeManage) return;
         if (startTimeNano < 0)
             startTimeNano = System.nanoTime();
     }
@@ -335,6 +337,7 @@ public static class TimerManager {
 
     /** 输出所有组件时间占比信息 */
     public  static void report() {
+        if (!Configure.timeManage) return;
     	System.out.println("计时组件时间："+totalTime);
         long total = timers.values().stream().mapToLong(t -> t.totalTimeMills).sum();
         List<Map.Entry<String, TimerStat>> list = new ArrayList<>(timers.entrySet());

@@ -21,6 +21,18 @@ public final class NgDssrMinimumRepeatedSegmentUpdateTest {
 				"online witness reservoir should preserve join threshold pruning");
 		assertEquals("minimumNewPairsSegment", config.ngDssrNonElementaryRouteUpdateMode,
 				"minimum-segment route update should be enabled by default");
+		assertEquals(0, config.strongBranchingPhase2CandidateLimit,
+				"ng-DSSR default should use phase-1-only strong branching");
+		assertEquals("allCycles", config.bidirectionalCompletionBoundRelaxation,
+				"ng-DSSR default should enable all-cycle completion bounds");
+		assertTrue(config.bidirectionalMidpointProbe,
+				"ng-DSSR default should enable midpoint probing");
+		assertTrue(config.enableTimeIndexedRootPreprocessingForNgDssr,
+				"ng-DSSR default should enable time-indexed root preprocessing");
+		assertTrue(config.timeIndexedRootPreprocessingSeedElementaryColumns,
+				"ng-DSSR default should transfer elementary preprocessing seeds");
+		assertTrue(config.enableNgDssrWindowRepeatabilityInitialFilter,
+				"ng-DSSR default should filter non-repeatable initial ng members");
 
 		PackedBitSet[] neighborhoods = neighborhoods(6);
 		ArrayList<String> added = new ArrayList<String>();

@@ -95,7 +95,7 @@ public class TWETBPCConfig {
 	/** 2026-06-26: 第一阶段最多试探最接近 0.5 的分支候选数。 */
 	public int strongBranchingCandidateLimit = 20;
 	/** 2026-06-26: 第二阶段进入启发式 pricing 试探的候选数。 */
-	public int strongBranchingPhase2CandidateLimit = 4;
+	public int strongBranchingPhase2CandidateLimit = 0;
 	/** 2026-06-26: 第二阶段每个 trial 最多执行几轮启发式 pricing；0 表示直到启发式无列。 */
 	public int strongBranchingPhase2MaxHeuristicPasses = 0;
 	/** 2026-06-26: strong branching 评分里避免一侧提升为 0 导致 product 退化的极小值。 */
@@ -206,8 +206,8 @@ public class TWETBPCConfig {
 	 * ng-relaxed 列进入 RMP，不再只用于 DSSR 收紧 ng-set；默认关闭，保持主线 elementary 列口径。
 	 */
 	public boolean ngDssrReturnRelaxedColumns = false;
-	/** 2026-07-05: 实验开关；按本轮 effective window 从初始 ng-set 里删掉不可能重复访问的 job。 */
-	public boolean enableNgDssrWindowRepeatabilityInitialFilter = false;
+	/** 2026-07-05: 按本轮 effective window 从初始 ng-set 里删掉不可能重复访问的 job。 */
+	public boolean enableNgDssrWindowRepeatabilityInitialFilter = true;
 	/**
 	 * 2026-07-09: 实验开关；ng-DSSR 在 join 前按 (terminal job, true ngMemorySet)
 	 * 构造带来源 label 的下包络，用 group-envelope join 替代逐 label join。
@@ -257,9 +257,9 @@ public class TWETBPCConfig {
 	public boolean bidirectionalJoinRangeRestrictedLowerBound = false;
 	/**
 	 * 2026-05-31: full-domain node-join 实验分支的 completion bound 松弛模式。
-	 * 可选值：off、allCycles、twoCycle。默认关闭，避免改变现有对照实验语义。
+	 * 可选值：off、allCycles、twoCycle。当前 ng-DSSR 默认使用 allCycles；对照实验可显式关闭。
 	 */
-	public String bidirectionalCompletionBoundRelaxation = "off";
+	public String bidirectionalCompletionBoundRelaxation = "allCycles";
 	/** 2026-06-01: completion bound correcting 队列顺序；可选 fifo/reducedCost，当前实测 FIFO 更稳。 */
 	public String bidirectionalCompletionBoundQueueOrdering = "fifo";
 	/** 2026-06-02: completion bound 是否启用离散 scalar 预筛；仅用于 full-domain 对照路径。 */
@@ -290,9 +290,9 @@ public class TWETBPCConfig {
 	/** 2026-06-03: 只诊断 completion bound 能否在当前 pricing 轮安全判掉 job-job arc，不写回 node。 */
 	public boolean bidirectionalCompletionBoundArcFixingDiagnostic = false;
 	/** 2026-06-03: node LP 最优且已有上界后，是否把 completion-bound reduced-cost fixing 继承到子节点。 */
-	public boolean bidirectionalCompletionBoundSubtreeArcElimination = false;
+	public boolean bidirectionalCompletionBoundSubtreeArcElimination = true;
 	/** 2026-06-03: debug 对照；只在后续 pricing 中禁用 subtree arcs，不过滤初始列，也不建 master forbidden 行。 */
-	public boolean bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = false;
+	public boolean bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = true;
 	/** 2026-06-03: debug 对照；child 初始 LP 可行后不按当前 forbidden arc 过滤 RMP 列。 */
 	public boolean debugSkipBranchColumnFilter = false;
 	/** 2026-06-09: 诊断开关；指定 node 在 pricing/CB 中临时忽略 pricingOnly arc，默认关闭。 */
@@ -310,7 +310,7 @@ public class TWETBPCConfig {
 	/** 2026-06-06: column-based Tmid 策略最多评价多少条低 reduced-cost 当前列。 */
 	public int bidirectionalMidpointColumnLimit = 400;
 	/** 2026-06-06: 是否在正式 exact pricing 前用有限 pop dry-run 试探多个 Tmid。 */
-	public boolean bidirectionalMidpointProbe = false;
+	public boolean bidirectionalMidpointProbe = true;
 	/** 2026-07-23: 每个 Tmid probe 候选的总 pop 上限；10000 对应正反向各最多5000次，选中状态由正式 labeling 直接续跑。 */
 	public int bidirectionalMidpointProbePopLimit = 10000;
 	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
@@ -370,14 +370,14 @@ public class TWETBPCConfig {
 	/**
 	 * 2026-07-02: ng-DSSR 主线可选的 root 预处理实验。
 	 * 先用独立 no-cut time-indexed root 完整闭合，再只把其 arc fixing / compact window
-	 * 证据转给真正的 ng-DSSR root；临时 graph 列不进入主线列池。
+	 * 证据转给真正的 ng-DSSR root；临时 graph 列不进入主线列池。当前综合配置默认开启。
 	 */
-	public boolean enableTimeIndexedRootPreprocessingForNgDssr = false;
+	public boolean enableTimeIndexedRootPreprocessingForNgDssr = true;
 	/**
 	 * 2026-07-04: time-indexed root 预处理闭合后，可选把临时 root RMP 里的 elementary
-	 * 列按 reduced cost 排序复制到 ng-DSSR root seed。默认关闭，保持预处理只传 fixing/window 证据的旧口径。
+	 * 列按 reduced cost 排序复制到 ng-DSSR root seed。当前默认转入最多 200 条，减少正式 root 的初始定价工作。
 	 */
-	public boolean timeIndexedRootPreprocessingSeedElementaryColumns = false;
+	public boolean timeIndexedRootPreprocessingSeedElementaryColumns = true;
 	/** 2026-07-04: 预处理后最多转入 ng-DSSR root seed 的 elementary 列数。 */
 	public int timeIndexedRootPreprocessingSeedColumnLimit = 200;
 	/**

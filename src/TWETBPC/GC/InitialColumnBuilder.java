@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 
@@ -12,6 +13,7 @@ import TWETBPC.IO.SolutionBridge;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.Pool;
 import TWETBPC.Model.ColumnSource;
+import TWETBPC.Util.SequenceSignature;
 
 /**
  * 初始列构造器。
@@ -53,10 +55,12 @@ public class InitialColumnBuilder {
 		Solution seed = seedProvider.getOrBuildSeed();
 		LinkedHashSet<Integer> initialColumnIds = new LinkedHashSet<Integer>();
 		LinkedHashSet<Integer> incumbentColumnIds = new LinkedHashSet<Integer>();
+		// 只复用本次 build 已经精确评价过的序列；不能仅凭全局 Pool 命中跳过成本改善。
+		HashMap<SequenceSignature, Integer> evaluatedSequenceIds = new HashMap<SequenceSignature, Integer>();
 
-		addHistoryColumns(initialColumnIds);
+		addHistoryColumns(initialColumnIds, evaluatedSequenceIds);
 		// 2026-06-23: selected history normally already contains the final seed; this call mainly records incumbent ids.
-		addMachineColumns(seed, initialColumnIds, incumbentColumnIds);
+		addMachineColumns(seed, initialColumnIds, incumbentColumnIds, evaluatedSequenceIds);
 
 		return new InitialColumnBundle(seed, new ArrayList<Integer>(initialColumnIds),
 				new ArrayList<Integer>(incumbentColumnIds), SolutionBridge.extractOutsourcedJobs(seed),
@@ -64,7 +68,8 @@ public class InitialColumnBuilder {
 	}
 
 	private void addMachineColumns(Solution solution, LinkedHashSet<Integer> initialColumnIds,
-			LinkedHashSet<Integer> incumbentColumnIds) {
+			LinkedHashSet<Integer> incumbentColumnIds,
+			HashMap<SequenceSignature, Integer> evaluatedSequenceIds) {
 		if (solution == null) {
 			return;
 		}
@@ -73,7 +78,15 @@ public class InitialColumnBuilder {
 			if (seq.isEmpty()) {
 				continue;
 			}
-			int id = pool.addColumn(seq, evaluator.evaluate(seq), ColumnSource.HEURISTIC_FULL, true);
+			SequenceSignature signature = new SequenceSignature(seq);
+			Integer existingId = evaluatedSequenceIds.get(signature);
+			int id;
+			if (existingId == null) {
+				id = pool.addColumn(seq, evaluator.evaluate(seq), ColumnSource.HEURISTIC_FULL, true);
+				evaluatedSequenceIds.put(signature, Integer.valueOf(id));
+			} else {
+				id = existingId.intValue();
+			}
 			initialColumnIds.add(Integer.valueOf(id));
 			if (incumbentColumnIds != null) {
 				incumbentColumnIds.add(Integer.valueOf(id));
@@ -81,13 +94,14 @@ public class InitialColumnBuilder {
 		}
 	}
 
-	private void addHistoryColumns(LinkedHashSet<Integer> initialColumnIds) {
+	private void addHistoryColumns(LinkedHashSet<Integer> initialColumnIds,
+			HashMap<SequenceSignature, Integer> evaluatedSequenceIds) {
 		if (data.configure == null) {
 			return;
 		}
 		if ("best".equalsIgnoreCase(config.initialHeuristicColumnHistoryMode)) {
 			for (Solution historicalBest : data.configure.getBestSolutionHistoryCopies()) {
-				addMachineColumns(historicalBest, initialColumnIds, null);
+				addMachineColumns(historicalBest, initialColumnIds, null, evaluatedSequenceIds);
 			}
 			return;
 		}
@@ -95,7 +109,7 @@ public class InitialColumnBuilder {
 			if (accepted == null) {
 				continue;
 			}
-			addMachineColumns(accepted, initialColumnIds, null);
+			addMachineColumns(accepted, initialColumnIds, null, evaluatedSequenceIds);
 		}
 	}
 

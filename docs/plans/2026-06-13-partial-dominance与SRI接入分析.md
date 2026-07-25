@@ -461,3 +461,15 @@ join 时不能把正反 state 合成一个相同 key，也不能要求二者相�
 当前 active SRI 后并不按完全相同的 `sriStateKey` 分桶，而是由 `SriAwarePartialListDominanceStore` 包装旧 `PartialListDominanceStore`，允许不同 residual state 的 labels 直接比较。设支配方为 A、被支配方为 B。首先仍要求两者 terminal job 相同，且 `reachableSet(A)` 是 `reachableSet(B)` 的超集。A 的 frontier 已经包含半路径内部实际触发的 SRI reduced-cost penalty；比较未来状态差异时，对每条 active SRI 检查：`state(A)=1`、`state(B)` 为偶数，并且 B 仍可到达一个 A/B 都未访问、且 A 未访问的 scope job。满足时，把该 cut 的 `-dual` 加到 A 的比较函数上。由于 SRI 行 dual 非正，所以这是一项非负补偿。随后用 `A.frontier + compensation` 对 B.frontier 执行 partial trim；只删除被覆盖的时间区间，全部区间被覆盖才删除 B。新 label 未被完全支配后，还会反向扫描可被它支配的旧 labels，使用同一补偿规则裁剪旧函数。
 
 limited state 在扩展阶段已经按 memory 更新：arc-memory 遇到非 memory arc 先把 residual 清零，node-memory 遇到非 memory job 清零；head job 属于 cut scope 时 residual 加一，达到 2 时把 `-dual` 写入 frontier 并回到 0。因此 dominance 比较不重复计算已经发生的 cut coefficient，只补偿未来最多多触发的一次 penalty。当前 `mayDominatedUseSriLater()` 只看 scope、visitedSet 和 reachableSet，没有检查具体 memory arc；对 arc-memory 来说可能在 residual 实际会被下一条非 memory arc 清零时仍加补偿，因此会少做一些 dominance，但不会因此更激进地误删。Tmid 单点 label 不走 wrapper 的无状态接口，而是在单独的 `SinglePointStore` 中逐 label 使用同一 reachableSet 和 SRI compensation 规则比较。
+
+### 保留 source-aware 联合包络的 SRI dominance
+
+考虑 SRI 后不必退回逐 label 的 partial-list。对每个 reachableSet node，先按实际出现的 residual state `s` 维护 sourced envelope `E_s(t)`；`E_s` 本身仍是该 state 下所有 labels 及 predecessor sources 的逐点最小值。对于待判断的目标 label state `r`，构造有效联合包络
+
+`G_r(t) = min_s { E_s(t) + C(s,r) }`，
+
+其中 `C(s,r)` 是支配方处于 `s`、目标处于 `r` 时未来最多可能多承担的 SRI penalty。当前 `p=1/2` limited/arc-memory 的安全基础补偿可取：对每条 cut，若 `s=1,r=0`，加入 `-dual`；其他组合加入 0。非 memory arc 可能在真实扩展中清零 residual，因此这个基础补偿可能偏大，但不会误删。若后续预计算每个 dominance node 上“该 cut residual 是否仍可能沿 memory arcs 到达下一个 scope job”的 relevance mask，则只对 relevant cuts 补偿，可以恢复更多占优。
+
+新 label 不再和历史 labels 逐个比较，而只用自身 state 对应的 `G_r` 做一次 sourced-envelope trim。若有保留区间，则更新它所属的 `E_r`；产生的 delta 仍沿 reachableSet Hasse successors 传播。实现上可不物化所有 `G_r`：第一版在查询时扫描当前 node 中实际存在的 state envelopes，复杂度从 labels 数量降为 distinct states 数量；若 state 数稳定很小，再为常用目标 state 缓存 `G_r`。每个 segment 的 source label 继续保留，因此 source 消失、partial 裁剪和最终路径追踪仍沿用当前 source-aware 机制。
+
+还可以构造一个与目标 state 无关的更保守单包络：对 source state 中每个 residual=1 的 cut一律加 `-dual` 后再取最小。它只维护一个 envelope，但会对 `r=1` 等本来无需补偿的目标也抬高支配方，预计占优明显偏弱。更合理的第一版是 sparse `E_s` 加按目标 state 动态形成 `G_r`，既保留跨 state 的联合占优，也避免 partial-list 的 label 级扫描。

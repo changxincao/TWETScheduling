@@ -99,3 +99,25 @@ focused `javac` 已覆盖以下文件并通过：
 旧 no-cut 完整结果使用 `148` 条初始列、初始上界 `2149`；当前 cut 版第一次单独启动得到 `154` 条和 `2128`，因此该 run 已停止，不能与旧结果直接比较。重新并行启动后，两边均为 `154` 条初始列、3 条 incumbent 列、初始上界 `2128`。runner 对同一实例使用固定随机种子，两边 ALNS 和初始列参数完全相同；同时开启 root pool dump，root 完成后将继续核对 column `0..153` 的 sequence，避免只凭列数判断一致。
 
 当前 no-cut 重跑在 `4323.568s` 求得 `obj=bound=2044`，比旧 no-cut 的 `5144.914s` 快 `821.346s`。这不是 root relaxation 变强：两次 root bound 完全相同，均为 `1973.144339`。主要差异是当前初始列/上界变化后，strong trial 的 seed 和评分发生变化；前两个 arc 分支仍相同，从 node 3 开始分支选择分叉。当前 run 处理 636 nodes、414 次 branch、16560 次 lightweight trial，旧 run 分别为 730、470、18800；pricing rounds 由 28063 降至 25198，并且 2044 incumbent 由约 3492.5 秒提前到约 3137.0 秒。由此减少普通 graph pricing 约 479.7 秒、repair pricing 约 106.0 秒、strong-trial LP 约 153.6 秒。单次调用也有约 4%--8% 波动，但不是 821 秒差异的主体。因此该加速属于不同初始列触发的搜索树路径改善，不能当作 no-cut pricing 实现本身获得了同幅度优化。
+
+## 13. 与论文完整流程的再次对照及当前 SRI 慢点
+
+2026-07-25 对照论文 `On the exact solution of a large class of parallel machine scheduling` 和当前 60-3 W100 cut/no-cut 日志。结论是：当前实现与论文的 rank-1 定价核心基本一致，但本次实际运行并没有启用论文用于控制 SRI 定价成本的完整外围流程，因此不能称为完整复现。
+
+一致部分包括：limited-memory cut coefficient 的 residual state 转移；从当前正值列构造最小 memory 后补反向 pair 和正 multiplier job pair；同 multiplier cut 合并 memory；一行和三行、乘子为 `1/2` 的 rank-1 cut；每轮最多加入 50/75 条两类 cut；同 `(job,time)` bucket 的单标签启发式；带 cut-state dominance 的双向 exact labeling 和 residual join 修正；启发式/exact 每次最多返回 50/300 条负列；inactive cut 删除以及连续两轮 gap 改善低于 2% 时停止 separation。当前 `tStar` 也按各 job 可达窗口左右端点的平均值计算。
+
+仍不一致或本次未启用的部分主要有四项。
+
+1. 论文在每次 column generation 收敛后、分离下一轮 cuts 前执行 reduced-cost arc fixing、graph cleanup，并据缩减后的可达图重算 `tStar`。当前已有对应入口，但本次参数明确设置 `timeIndexedCompletionBoundCutLoopArcFixing=false`，节点结束 fixing 也关闭。因此 active-SRI pricing 日志始终为 `timeArcSkips=0`，每次都扫描完整 horizon 图。
+
+2. 论文明确使用 automatic dual price smoothing stabilization。当前代码有 smoothing 实现，但本次 `enableDualStabilization=false`，所以 cut dual 变化后直接在 true dual 上反复重新定价。论文总结中将 stabilization 视为避免大量 CG 迭代的关键组件；本次运行没有使用。
+
+3. 当前 cut 只加入正在求解的 `LP.activeCutIds`，没有同步回 `Node.activeCutIds`。分支器复制的是 node，因此日志中 node 1 到 node 18 每个节点都以 `activeCuts=0` 开始，随后重新分离 cuts；全局 `CutPool` 只负责复用 cut id 和合并 memory。该做法不影响正确性，但子节点初始松弛更弱，并重复执行整套 separation 与 SRI pricing。论文只说明每个节点求解“可能带 additional rank-1 cuts”的 DWM，没有明确展开 cut 继承细节，因此这里不能直接定性为违反论文，但它确实是当前实现与常规 BCP cut 继承流程的工程差异。
+
+4. 论文的 DWM 列是完整 time-indexed path。当前全局 `Pool` 仍按 job sequence 去重，只保留同 sequence 的最低已知成本版本。这是模型存储层的结构差异，但它倾向于减少主问题列数，不是本次 SRI 定价变慢的原因。
+
+当前慢点已经可以从日志直接量化。SRI run 到 node 18 的快照中，rank-1 bucket heuristic 调用 678 次、累计 `1073.304s`、平均 `1.583s`；exact 调用 959 次、累计 `4106.526s`、平均 `4.282s`，两项合计约 `5179.8s`，已经占据几乎全部墙钟时间。典型 exact pricing 有 70--100 个 nonzero-dual active cuts，保留约 43--56 万 labels、拒绝/删除约 1150--1330 万 labels，并扫描约 1170--1380 万 processing arcs；每个 label extension、dominance 和 join 还要遍历 cut residual。即使单标签 heuristic 每个 bucket 最终只留一个 label，它仍需产生并比较这些候选、复制 residual，并扫描完整图，因此仍达到 1--2 秒甚至更高。
+
+作为对照，当前 no-cut run 虽然处理 636 个节点、执行 25198 次图定价，但 no-cut DAG pricing 平均约 `118.7ms`，pricing 总计约 `2992.0s`，最终在 `4323.568s` 结束。SRI 的单次 exact 不是比 no-cut 贵一点，而是大约贵 30--50 倍；cuts 减少的节点数尚不足以抵消该倍数。论文自己也明确指出每个 active rank-1 cut 都增加一个定价资源，cut 过多会使 pricing 很耗时，并把 arc fixing、limited memory 和 dual stabilization共同列为可扩展性的关键。
+
+因此当前优先级不是继续修改 rank-1 residual 公式。首先应做固定实例 A/B：只开启论文式 cut-loop arc fixing，确认 `timeArcSkips`、每次 arc scans、labels 和 pricing 时间是否显著下降；随后单独开启 dual stabilization，观察 pricing 轮数和 wall time。cut 继承应另做语义清晰的实验，比较“子节点继承父节点 active cuts”和“每个节点重新分离”，不能与前两项同时修改。当前运行未证明 SRI 数学实现错误，证明的是本次配置缺少论文依赖的两个主要加速组件，并且当前 cut 生命周期会放大节点间重复工作。

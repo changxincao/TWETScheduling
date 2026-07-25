@@ -175,3 +175,25 @@ Dual stabilization 的边界符合当前要求。入口要求 `!lp.isFeasibility
 随后对 `data/50-2/wet050_001_2m.dat` 做同配置并行 A/B，只切换默认 Wentges smoothing，均使用 60 秒 ALNS、no-cut time-indexed、strong branching、Phase-I repair、单 CPLEX 线程。两组均得到 `obj=bound=44383`、15 nodes、`valid=true`。关闭 stabilization 为 `522.518s`，root node `265.158s`、root pricing `16.219s/479`、root pool `113165`；开启后为 `739.443s`，root node `290.962s`、root pricing `36.682s/837`、root pool `118974`。完整日志分解显示，开启后执行 3755 次 stabilized pass，约 928870 条候选在 true-dual 复核时被过滤，随后仍执行 1205 次 true-dual pass；总图定价时间约 `362.685s`，关闭时约 `131.218s`。本例 stabilization 总时间退化约 41.5%，没有减少节点，因此继续保持默认关闭。
 
 本次还修正了实验 CSV 的统计口径。此前稳定化开启时只查询精确键 `TimeIndexedGraphPricing`，导致 `[stabilized.*]` 和 `[true]` 两类正式调用被漏报为 `exact_s=0, exact_calls=0`。现在只额外汇总这两类正式后缀，不把 repair 或 strong-branching 调用混入 exact 统计。
+
+## 18. time-indexed SRI 与论文算法的静态逻辑审计
+
+2026-07-25 仅按论文算法和当前代码调用链复核，不运行求解实验。结论是：当前 time-indexed SRI 的核心数学实现与论文 Algorithms 1--6 一致，未发现 cut coefficient、limited memory、正反向 residual、dominance、join、RMP 系数或 cut 继承上的正确性错误；但默认完整 BCP 流程不是论文实现的逐项复刻，若直接写成“与论文完全一致”并不准确。
+
+一致的核心逻辑如下。`SubsetRowCutEvaluator` 按序列逐任务更新 residual；memory arc 中断时先清零，再加入当前任务乘子，达到分母后回绕并增加 cut coefficient。序列首任务前额外检查 depot memory 在初始 residual 为零时不改变结果。`SubsetRowCutGenerator` 从正值 RMP 列提取最小 memory，补入反向 pair 和所有正乘子任务间的 pair；同 multiplier、RHS 和 scope 的 cut 在 `CutPool` 中合并 memory。RMP 建模、已有列和新加列都调用同一 evaluator，任务覆盖与 reduced cost 使用 visit count，因此 repeated pseudo-schedule 的 cut 和覆盖系数口径一致。
+
+rank-1 图定价的状态转移也与论文一致。前向扩展先按 memory arc 决定是否清 residual，再加入新任务；后向 prepend 先把当前 join 任务计入 residual 并处理回绕，再按前驱 arc 决定是否清状态。后向 bucket residual 不含当前 bucket 的 join 任务，前向 residual 包含该任务，join 时通过 residual 和是否达到分母补一次 cut dual shift，因此 join job 恰好计数一次。相同 `(job,time)` 下的 dominance 使用负 cut dual 对 residual 差异进行修正；等待弧不改变 residual。恢复序列后重新用统一 evaluator 计算 coefficient，RMP 写入和 pricing 使用同一 cut 语义。父 LP 的最终 active cut 在创建任何普通 child 或 strong-trial child 前同步到 Node，删除的 inactive cut 不继承，保留 cut 由 child 深复制并在建模时恢复。
+
+当前与论文完整流程的差异主要有五项。
+
+1. 论文 Algorithm 7 使用 active-SRI 状态计算 reduced-cost arc fixing。当前默认 `timeIndexedCompletionBoundSriAwareArcFixing=false`，active SRI 时采用忽略 SRI cut 的松弛 fixing。由于有效 SRI dual 非正，忽略 cut contribution 得到的是更低的路径 reduced-cost 下界，所以该 fixing 更弱但安全，不会错误删弧。
+
+2. 论文使用 automatic dual smoothing；当前默认关闭，且 active-SRI pricing 明确绕过 smoothing。该差异影响 column-generation 迭代数和时间，不改变最终 true-dual exact closure 的正确性。
+
+3. 当前默认 `maxCutRounds=8`，并限制每个任务最多参与 20 条 subset-row cuts。论文采用 inactive-cut 删除和连续两轮 gap 改善低于 2% 的 tailing-off，但没有这两个相同的硬限制。当前做法会提前停止一部分 cut 加强，属于松弛强度差异，不是无效 cut。
+
+4. 论文建议同 bucket 的 exact labels 按 reduced cost 排序以加快 dominance；当前 exact bucket 并未保持该顺序，而是逐项扫描。语义不变，但 active cuts 较多时会放大 dominance 成本。
+
+5. 论文 DWM 以完整 time-indexed path 作为列身份；当前 Pool 按 job sequence 去重并保留该 sequence 的最低已知真实成本。SRI coefficient 只依赖 sequence，所以这不会造成 cut coefficient 不一致；但模型存储层并非论文 DWM 的逐路径身份，不能称为结构完全相同。
+
+因此当前可以确认的是：SRI cut 本身、图上 residual 资源、双向拼接和 master 接线在代码逻辑上正确；当前 SRI 慢不能归因于这些公式写错。论文与默认实现最重要的性能差异是 SRI-aware fixing 和 smoothing 未启用，以及额外的 cut-round/appearance 限制。仍缺少一项更强的独立验证：目前没有随机小图上把“图状态得到的 coefficient/reduced cost”与完整序列 evaluator 对所有 split 逐一枚举对拍的专门测试；现有回归覆盖接线和已知边界，但不能替代该穷举性质测试。

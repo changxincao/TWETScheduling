@@ -97,3 +97,5 @@ focused `javac` 已覆盖以下文件并通过：
 `test-results/bpc/exp-60-3-W100-current-ti-sri-ab-7200s-20260725g`
 
 旧 no-cut 完整结果使用 `148` 条初始列、初始上界 `2149`；当前 cut 版第一次单独启动得到 `154` 条和 `2128`，因此该 run 已停止，不能与旧结果直接比较。重新并行启动后，两边均为 `154` 条初始列、3 条 incumbent 列、初始上界 `2128`。runner 对同一实例使用固定随机种子，两边 ALNS 和初始列参数完全相同；同时开启 root pool dump，root 完成后将继续核对 column `0..153` 的 sequence，避免只凭列数判断一致。
+
+当前 no-cut 重跑在 `4323.568s` 求得 `obj=bound=2044`，比旧 no-cut 的 `5144.914s` 快 `821.346s`。这不是 root relaxation 变强：两次 root bound 完全相同，均为 `1973.144339`。主要差异是当前初始列/上界变化后，strong trial 的 seed 和评分发生变化；前两个 arc 分支仍相同，从 node 3 开始分支选择分叉。当前 run 处理 636 nodes、414 次 branch、16560 次 lightweight trial，旧 run 分别为 730、470、18800；pricing rounds 由 28063 降至 25198，并且 2044 incumbent 由约 3492.5 秒提前到约 3137.0 秒。由此减少普通 graph pricing 约 479.7 秒、repair pricing 约 106.0 秒、strong-trial LP 约 153.6 秒。单次调用也有约 4%--8% 波动，但不是 821 秒差异的主体。因此该加速属于不同初始列触发的搜索树路径改善，不能当作 no-cut pricing 实现本身获得了同幅度优化。

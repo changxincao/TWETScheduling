@@ -85,6 +85,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 
 		ArrayList<Candidate> candidates = new ArrayList<Candidate>();
 		double bestReducedCost = Double.POSITIVE_INFINITY;
+		Candidate bestOracle = null;
 		for (Label label : labels) {
 			if (requiredJobs.isEmpty() && label.jobs.isEmpty()) {
 				continue;
@@ -99,6 +100,7 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			double reducedCost = objectiveCost - profit - lp.getOutsourcingColumnDual();
 			if (Utility.compareLt(reducedCost, bestReducedCost)) {
 				bestReducedCost = reducedCost;
+				bestOracle = new Candidate(mergeJobs(requiredJobs, label.jobs), baseline, cost, reducedCost);
 			}
 			if (Utility.compareLt(reducedCost, -REDUCED_COST_TOLERANCE)) {
 				candidates.add(new Candidate(mergeJobs(requiredJobs, label.jobs), baseline, cost, reducedCost));
@@ -108,8 +110,10 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			bestReducedCost = 0.0;
 		}
 		if (candidates.isEmpty()) {
-			return PricingResult.noImprovement("No negative outsourcing column")
+			PricingResult result = PricingResult.noImprovement("No negative outsourcing column")
 					.withCertifiedOutsourcingReducedCost(bestReducedCost);
+			return bestOracle == null ? result
+					: result.withOutsourcingOracle(toColumn(bestOracle));
 		}
 		Collections.sort(candidates, new Comparator<Candidate>() {
 			@Override
@@ -128,9 +132,16 @@ public class OutsourcingPricingEngine implements PricingEngine {
 			columns.add(new TWETOutsourcingColumn(-1, c.jobs, data.n, c.baseline, c.cost, ColumnSource.PRICING_EXACT,
 					false));
 		}
-		return new PricingResult(Collections.<TWETBPC.Model.TWETColumn>emptyList(), columns, true,
+		PricingResult result = new PricingResult(Collections.<TWETBPC.Model.TWETColumn>emptyList(), columns, true,
 				"Generated " + columns.size() + " outsourcing columns; best rc=" + candidates.get(0).reducedCost)
 						.withCertifiedOutsourcingReducedCost(bestReducedCost);
+		return bestOracle == null ? result
+				: result.withOutsourcingOracle(toColumn(bestOracle));
+	}
+
+	private TWETOutsourcingColumn toColumn(Candidate candidate) {
+		return new TWETOutsourcingColumn(-1, candidate.jobs, data.n, candidate.baseline, candidate.cost,
+				ColumnSource.PRICING_EXACT, false);
 	}
 
 	@Override

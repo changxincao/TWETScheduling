@@ -263,3 +263,13 @@ dual-bound pruning 的口径也随之简化。普通 smoothing 点如果有可�
 Pessoa 论文中的结果确实很好，但实验口径不能直接等同于当前 TWET-BPC。其 `P||sum w_jT_j` 定价是允许重复任务的 `O(nT)` 动态规划，不含当前模型的 setup、earliness/due-window、分支 repair 和完整 BPC 开销；表 3--4 比较的是 master LP column generation。对 parallel machine scheduling，automatic Wentges smoothing 相对无稳定化的时间加速几何均值约 2.91，迭代/定价调用分别减少约 2.16/2.12 倍；automatic directional 组合的时间加速约 3.61。论文同时明确指出，VRP、cutting stock、vertex coloring 等问题会因为 smoothed dual 更稠密、更均匀而使 pricing 变难，收益并不稳定。当前 time-indexed 50-2 正属于“额外 pricing 成本超过迭代收益”的情况。
 
 因此当前判断为：无 cut 下的稳定化闭合语义正确，但只是 Pessoa/Wentges 的工程化子集，尤其 `alpha` subgradient 信号尚未严格对齐；active SRI 下当前完全没有使用 stabilization。现有 50-2 结果足以支持继续默认关闭，但不能据此否定论文的完整自动稳定化。若继续研究，优先级应是先实现准确的聚合 oracle subgradient 和 Case B 复用，再做同一 root 的 CG-only A/B；在此之前不应直接把 directional 或 penalty 重新叠加到主线。
+
+## 22. 2026-07-25：补齐 Pessoa oracle 语义并完成 50-2 复测
+
+本次按第 21 节列出的缺口补齐纯 smoothing 主线，没有重新引入 directional smoothing、piecewise-linear penalty 或 SRI 组合。`PricingResult` 现在可携带 exact internal/outsourcing oracle 见证列和对应列族的全局 reduced-cost 证书；time-indexed exact pricing 即使没有负列，也会保留最优 oracle 路径。PC 用完整 oracle 解构造 `b-Ax` 方向信号，不再用“本轮被真实 dual 接受的一条代表列”近似；当 separation point 未被切开、但同一 oracle 列能切开 out-point 时，按 Pessoa Case B 直接复用该列。
+
+实现过程中发现原有 center 语义存在一个明确错误：代码把 restricted master 的原始 dual 向量与 `z_RMP+M*min(0,rc_min)` 得到的 Lagrangian 标量配在一起保存。两者不是同一点，后续凸组合和 subgradient 方向因此没有统一口径。现在 exact 证书为负时，会把该 reduced cost 吸收到机器数 convexity dual；列化外包同理修正 outsourcing-column dual，并按 range dual 的实际端点重算 RHS objective。保存和混合的 center 因而是对完整列族可行、向量与 objective 一致的 in-point。修复前的 50-2 日志中，stabilized pass 经常生成 300 条 separation-dual 负列，却全部被 out-dual 过滤；修复后 `filteredByOutDual>0` 的记录为 0，说明 Case A 的凸性关系恢复，Case B 也实际触发过 1 次。
+
+同口径 A/B 仍不支持默认开启 stabilization。关闭组完整求解为 `334.999s`、15 nodes、`obj=bound=44383`、`valid=true`，time-indexed exact 为 `78.349s/1731 calls`。修复后的开启组运行到 node 4 后主动停止；停止前已经执行 7375 次 stabilized exact 和 462 次 true-dual exact，耗时已不具备优于关闭组的可能。主要长尾不是候选过滤，而是自动调度把全局 `alpha` 推到约 0.997 后出现 Case C：separation oracle 的最小 reduced cost约为 0，且 oracle 也不能切开 out-point。论文的局部回退公式每次只减少约 `1-alpha`，因此一次 mispricing sequence 会产生数百至上千次 exact oracle 调用。
+
+当前结论是：本次修改修正了现有 Pessoa 基础实现的 oracle、Case B、subgradient 和 in-point 一致性，数学闭合仍由最终 true-dual exact pricing保证；但该基础方法在当前 50-2 time-indexed 定价上没有提速，反而因 `alpha` 接近 1 的 Case C 长尾显著退化。因此 `enableDualStabilization` 继续默认关闭。本轮按当前范围到此为止，不追加 alpha 上限、tail-only 触发、directional smoothing 或 penalty 等进一步工程处理。

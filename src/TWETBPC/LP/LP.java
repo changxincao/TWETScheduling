@@ -89,6 +89,8 @@ public class LP {
 	private double outsourcingColumnDual;
 	private double[] outsourcingMembershipDual;
 	private double[][] arcDual;
+	/** Pricing dual components multiplied by the right-hand sides of their master rows. */
+	private double pricingDualRhsObjective;
 	private PricingDualSnapshot pricingDualOverride;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
@@ -333,7 +335,39 @@ public class LP {
 	 * SRI cut dual 暂不混合，保持用当前 LP 真实值，避免 cut state 与稳定化中心不同步。
 	 */
 	public PricingDualSnapshot captureTruePricingDuals() {
-		return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, outsourcingMembershipDual, arcDual);
+		return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, outsourcingMembershipDual, arcDual,
+				pricingDualRhsObjective);
+	}
+
+	/**
+	 * 把 exact pricing 的 reduced-cost 证书吸收到机器数/外包列数 dual 中，得到对完整列族可行的 in-point。
+	 * 机器数和列化外包在当前模型中分别只有上界 {@code maxMachineCount} 和 1；最小 reduced cost 为负时，
+	 * 下移对应 convexity dual 后，所有该列族约束均满足，并按 range dual 的实际符号重新计算 objective。
+	 */
+	public PricingDualSnapshot makePricingDualFeasible(PricingDualSnapshot dual,
+			double certifiedInternalReducedCost, double certifiedOutsourcingReducedCost) {
+		double internalShift = Double.isFinite(certifiedInternalReducedCost)
+				? Math.min(0.0, certifiedInternalReducedCost) : 0.0;
+		double outsourcingShift = isColumnizedOutsourcing() && Double.isFinite(certifiedOutsourcingReducedCost)
+				? Math.min(0.0, certifiedOutsourcingReducedCost) : 0.0;
+		double shiftedMachineDual = dual.machineDual + internalShift;
+		double shiftedOutsourcingDual = dual.outsourcingColumnDual + outsourcingShift;
+		double rhsObjective = dual.rhsObjective
+				- machineDualObjectiveContribution(dual.machineDual)
+				+ machineDualObjectiveContribution(shiftedMachineDual)
+				- dual.outsourcingColumnDual + shiftedOutsourcingDual;
+		return new PricingDualSnapshot(dual.jobDual, shiftedMachineDual, shiftedOutsourcingDual,
+				dual.outsourcingMembershipDual, dual.arcDual, rhsObjective);
+	}
+
+	private double machineDualObjectiveContribution(double dual) {
+		if (Utility.compareGt(dual, VALUE_TOLERANCE)) {
+			return dual * node.minMachineCount;
+		}
+		if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
+			return dual * node.maxMachineCount;
+		}
+		return 0.0;
 	}
 
 	/** @return 当前 pricing 实际使用的 dual；稳定化开启时返回 override，否则返回真实 LP dual。 */
@@ -1256,17 +1290,33 @@ public class LP {
 		clearDuals();
 		for (int job = 1; job <= data.n; job++) {
 			jobDual[job] = cplex.getDual(coverRanges[job]);
+			pricingDualRhsObjective += jobDual[job];
 		}
 		machineDual = cplex.getDual(machineRange);
+		if (Utility.compareGt(machineDual, VALUE_TOLERANCE)) {
+			pricingDualRhsObjective += machineDual * node.minMachineCount;
+		} else if (Utility.compareLt(machineDual, -VALUE_TOLERANCE)) {
+			pricingDualRhsObjective += machineDual * node.maxMachineCount;
+		}
 		outsourcingColumnDual = isColumnizedOutsourcing() && outsourcingColumnCountRange != null
 				? cplex.getDual(outsourcingColumnCountRange) : 0.0;
+		pricingDualRhsObjective += outsourcingColumnDual;
 		for (Map.Entry<Integer, IloRange> entry : outsourcingMembershipBranchRanges.entrySet()) {
-			outsourcingMembershipDual[entry.getKey().intValue()] = cplex.getDual(entry.getValue());
+			int job = entry.getKey().intValue();
+			double dual = cplex.getDual(entry.getValue());
+			outsourcingMembershipDual[job] = dual;
+			if (node.getOutsourcingJobState(job) == Node.OUTSOURCE_REQUIRED) {
+				pricingDualRhsObjective += dual;
+			}
 		}
 		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
 			int from = decodeFrom(entry.getKey().longValue());
 			int to = decodeTo(entry.getKey().longValue());
-			arcDual[from][to] = cplex.getDual(entry.getValue());
+			double dual = cplex.getDual(entry.getValue());
+			arcDual[from][to] = dual;
+			if (node.getArcState(from, to) == Node.ARC_REQUIRED) {
+				pricingDualRhsObjective += dual;
+			}
 		}
 		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
 			int first = decodeFrom(entry.getKey().longValue());
@@ -1274,6 +1324,9 @@ public class LP {
 			double dual = cplex.getDual(entry.getValue());
 			arcDual[first][second] += dual;
 			arcDual[second][first] += dual;
+			if (node.getAdjacencyPairState(first, second) == Node.ADJACENCY_REQUIRED) {
+				pricingDualRhsObjective += dual;
+			}
 		}
 		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
 			double dual = cplex.getDual(entry.getValue());
@@ -1377,6 +1430,7 @@ public class LP {
 				arcDual[i][j] = 0.0;
 			}
 		}
+		pricingDualRhsObjective = 0.0;
 		if (activeSubsetRowPricingCutIds != null) {
 			activeSubsetRowPricingCutIds.clear();
 		}
@@ -1460,19 +1514,21 @@ public class LP {
 		final double outsourcingColumnDual;
 		final double[] outsourcingMembershipDual;
 		final double[][] arcDual;
+		final double rhsObjective;
 
 		PricingDualSnapshot(double[] jobDual, double machineDual, double outsourcingColumnDual,
-				double[] outsourcingMembershipDual, double[][] arcDual) {
+				double[] outsourcingMembershipDual, double[][] arcDual, double rhsObjective) {
 			this.jobDual = copy(jobDual);
 			this.machineDual = machineDual;
 			this.outsourcingColumnDual = outsourcingColumnDual;
 			this.outsourcingMembershipDual = copy(outsourcingMembershipDual);
 			this.arcDual = copy(arcDual);
+			this.rhsObjective = rhsObjective;
 		}
 
 		public PricingDualSnapshot copy() {
 			return new PricingDualSnapshot(jobDual, machineDual, outsourcingColumnDual, outsourcingMembershipDual,
-					arcDual);
+					arcDual, rhsObjective);
 		}
 
 		public static PricingDualSnapshot blend(PricingDualSnapshot current, PricingDualSnapshot center,
@@ -1498,7 +1554,8 @@ public class LP {
 			return new PricingDualSnapshot(blendedJob,
 					currentWeight * current.machineDual + centerWeight * center.machineDual,
 					currentWeight * current.outsourcingColumnDual + centerWeight * center.outsourcingColumnDual,
-					blendedOutsourcingMembership, blendedArc);
+					blendedOutsourcingMembership, blendedArc,
+					currentWeight * current.rhsObjective + centerWeight * center.rhsObjective);
 		}
 
 		private static double[] copy(double[] values) {

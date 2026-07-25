@@ -27,6 +27,10 @@ public final class PricingResult {
 	private final double certifiedInternalReducedCost;
 	/** 可选：本次 pricing 已证明的外包列族最小 reduced cost；NaN 表示没有证书。 */
 	private final double certifiedOutsourcingReducedCost;
+	/** 当前 pricing dual 下的 exact oracle 见证列；它不一定在真实 RMP dual 下为负。 */
+	private final TWETColumn internalOracleColumn;
+	/** 当前 pricing dual 下的外包 exact oracle 见证列。 */
+	private final TWETOutsourcingColumn outsourcingOracleColumn;
 
 	/**
 	 * 构造一个 pricing 结果。
@@ -43,16 +47,21 @@ public final class PricingResult {
 		this.message = message;
 		this.certifiedInternalReducedCost = Double.NaN;
 		this.certifiedOutsourcingReducedCost = Double.NaN;
+		this.internalOracleColumn = null;
+		this.outsourcingOracleColumn = null;
 	}
 
 	private PricingResult(List<TWETColumn> columns, List<TWETOutsourcingColumn> outsourcingColumns, boolean improved,
-			String message, double certifiedInternalReducedCost, double certifiedOutsourcingReducedCost) {
+			String message, double certifiedInternalReducedCost, double certifiedOutsourcingReducedCost,
+			TWETColumn internalOracleColumn, TWETOutsourcingColumn outsourcingOracleColumn) {
 		this.columns = new ArrayList<TWETColumn>(columns);
 		this.outsourcingColumns = new ArrayList<TWETOutsourcingColumn>(outsourcingColumns);
 		this.improved = improved;
 		this.message = message;
 		this.certifiedInternalReducedCost = certifiedInternalReducedCost;
 		this.certifiedOutsourcingReducedCost = certifiedOutsourcingReducedCost;
+		this.internalOracleColumn = internalOracleColumn;
+		this.outsourcingOracleColumn = outsourcingOracleColumn;
 	}
 
 	/**
@@ -89,14 +98,32 @@ public final class PricingResult {
 		return certifiedOutsourcingReducedCost;
 	}
 
+	public TWETColumn getInternalOracleColumn() {
+		return internalOracleColumn;
+	}
+
+	public TWETOutsourcingColumn getOutsourcingOracleColumn() {
+		return outsourcingOracleColumn;
+	}
+
 	public PricingResult withCertifiedInternalReducedCost(double reducedCost) {
 		return new PricingResult(columns, outsourcingColumns, improved, message, reducedCost,
-				certifiedOutsourcingReducedCost);
+				certifiedOutsourcingReducedCost, internalOracleColumn, outsourcingOracleColumn);
 	}
 
 	public PricingResult withCertifiedOutsourcingReducedCost(double reducedCost) {
 		return new PricingResult(columns, outsourcingColumns, improved, message, certifiedInternalReducedCost,
-				reducedCost);
+				reducedCost, internalOracleColumn, outsourcingOracleColumn);
+	}
+
+	public PricingResult withInternalOracle(TWETColumn column) {
+		return new PricingResult(columns, outsourcingColumns, improved, message, certifiedInternalReducedCost,
+				certifiedOutsourcingReducedCost, column, outsourcingOracleColumn);
+	}
+
+	public PricingResult withOutsourcingOracle(TWETOutsourcingColumn column) {
+		return new PricingResult(columns, outsourcingColumns, improved, message, certifiedInternalReducedCost,
+				certifiedOutsourcingReducedCost, internalOracleColumn, column);
 	}
 
 }

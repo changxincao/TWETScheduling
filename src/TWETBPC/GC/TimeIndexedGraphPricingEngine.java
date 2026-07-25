@@ -76,14 +76,16 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 		TimeIndexedGraphSolver solver = new TimeIndexedGraphSolver(lp);
 		ArrayList<TWETColumn> columns = solver.solve();
-		if (columns.isEmpty()) {
-			PricingResult result = PricingResult.noImprovement(solver.message(false));
-			if (lp.isFeasibilityPhaseOneObjectiveMode() && solver.hasCompleteInternalCertificate()) {
-				result = result.withCertifiedInternalReducedCost(solver.certifiedInternalReducedCost());
-			}
-			return result;
+		PricingResult result = columns.isEmpty()
+				? PricingResult.noImprovement(solver.message(false))
+				: new PricingResult(columns, true, solver.message(true));
+		if (solver.hasCompleteInternalCertificate()) {
+			result = result.withCertifiedInternalReducedCost(solver.certifiedInternalReducedCost());
 		}
-		return new PricingResult(columns, true, solver.message(true));
+		if (solver.oracleColumn() != null) {
+			result = result.withInternalOracle(solver.oracleColumn());
+		}
+		return result;
 	}
 
 	private PricingResult pricePreHeuristic(LP lp) {
@@ -328,6 +330,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private int duplicateJobCandidates;
 		private int nextCandidateId;
 		private double bestPseudoReducedCost;
+		private int bestOracleState;
+		private TWETColumn oracleColumn;
 		private int dualWindowRecheckCount;
 		private int dualWindowRecheckAccepted;
 		private int dualWindowRecheckFiltered;
@@ -365,6 +369,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
 			this.bestPseudoReducedCost = INF;
+			this.bestOracleState = -1;
+			this.oracleColumn = null;
 			this.dualWindowRecheckCount = 0;
 			this.dualWindowRecheckAccepted = 0;
 			this.dualWindowRecheckFiltered = 0;
@@ -389,10 +395,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			observeDualWindowBestCandidate(candidates.isEmpty() ? null : candidates.get(0));
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 			for (int i = 0; i < candidates.size() && columns.size() < maxColumns; i++) {
-				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i).column);
+				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i).column, i == 0);
 				if (column != null) {
 					columns.add(column);
 				}
+			}
+			if (oracleColumn == null) {
+				materializeNonnegativeOracle();
 			}
 			return columns;
 		}
@@ -405,14 +414,23 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					: config.maxExactPricingColumns;
 		}
 
-		private TWETColumn maybeRecheckSelectedCandidate(TWETColumn column) {
+		private TWETColumn maybeRecheckSelectedCandidate(TWETColumn column, boolean oracleCandidate) {
 			if (phaseOneObjective) {
 				// Phase-I 搜索阶段只维护零真实成本 reduced cost；仅对最终 top-K 物化真实列成本。
 				double trueCost = evaluator.evaluate(column.getSequence());
-				return Utility.isBigMValue(trueCost) ? null
-						: new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+				if (Utility.isBigMValue(trueCost)) {
+					return null;
+				}
+				TWETColumn checked = new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+				if (oracleCandidate) {
+					oracleColumn = checked;
+				}
+				return checked;
 			}
 			if (!graphWindow.dualWindow) {
+				if (oracleCandidate) {
+					oracleColumn = column;
+				}
 				return column;
 			}
 			double graphReducedCost = reducedCost(column.getSequence(), column.getCost());
@@ -425,6 +443,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				return null;
 			}
 			double trueReducedCost = reducedCost(column.getSequence(), trueCost);
+			if (oracleCandidate) {
+				oracleColumn = new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+			}
 			if (!config.timeIndexedDualWindowRecheckDiagnostics) {
 				observeDualWindowRecheckDelta(graphReducedCost, trueReducedCost);
 			}
@@ -434,6 +455,26 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 			dualWindowRecheckAccepted++;
 			return new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+		}
+
+		private void materializeNonnegativeOracle() {
+			if (!forwardPassCompleted || bestOracleState < 0) {
+				return;
+			}
+			ArrayList<Integer> sequence = reconstructSequence(bestOracleState);
+			if (sequence.isEmpty() || (preHeuristicMode && hasRepeatedJob(sequence))) {
+				return;
+			}
+			double trueCost = evaluator.evaluate(sequence);
+			if (Utility.isBigMValue(trueCost)) {
+				return;
+			}
+			ColumnSource source = preHeuristicMode ? ColumnSource.PRICING_HEURISTIC : ColumnSource.PRICING_EXACT;
+			oracleColumn = new TWETColumn(-1, sequence, n, trueCost, source, false);
+		}
+
+		TWETColumn oracleColumn() {
+			return oracleColumn;
 		}
 
 		private void observeDualWindowRecheckDiagnostics(List<Integer> sequence, double[] completions,
@@ -602,6 +643,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			double reducedCost = baseReducedCost + sinkArcReducedCost(lastJob);
 			if (Utility.compareLt(reducedCost, bestPseudoReducedCost)) {
 				bestPseudoReducedCost = reducedCost;
+				bestOracleState = state;
 			}
 			if (Utility.compareGe(reducedCost, -RC_TOLERANCE) || !isPotentialTopCandidate(reducedCost)) {
 				return;

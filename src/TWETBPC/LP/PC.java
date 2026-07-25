@@ -34,7 +34,8 @@ import TWETBPC.Model.TWETOutsourcingColumn;
 public class PC {
 	private static final double REPAIR_PENALTY_INCUMBENT_MULTIPLIER = 50.0;
 
-	private static final double MAX_SMOOTHING_ALPHA = 0.8;
+	/** Pessoa et al. require alpha < 1; keep only a numerical open-end cap. */
+	private static final double MAX_SMOOTHING_ALPHA = 1.0 - 1e-9;
 
 	private final TWETBPCConfig config;
 	private final List<PricingEngine> pricingEngines;
@@ -611,15 +612,16 @@ public class PC {
 			if (stabilizedPass.dualBoundPruned) {
 				return solution;
 			}
-			dualState.observeSeparation(stabilizedPass);
 			if (stabilizedPass.addedColumns > 0) {
-				dualState.observeAccepted(outDual, stabilizedPass);
+				dualState.observeAccepted(lp, outDual, stabilizedPass);
+				dualState.observeSeparation(lp, stabilizedPass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_stabilized");
 				if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 					return solution;
 				}
 				continue;
 			}
+			dualState.observeSeparation(lp, stabilizedPass);
 			PricingPassResult truePass = runPricingPass(lp, "true", true, null, Double.NaN, outDual);
 			if (isTimeLimitReached()) {
 				return solution;
@@ -627,15 +629,16 @@ public class PC {
 			if (truePass.dualBoundPruned) {
 				return solution;
 			}
-			dualState.observeSeparation(truePass);
 			if (truePass.addedColumns > 0) {
-				dualState.observeAccepted(outDual, truePass);
+				dualState.observeAccepted(lp, outDual, truePass);
+				dualState.observeSeparation(lp, truePass);
 				solution = resolveCurrentModelTimed(lp, "after_pricing_true");
 				if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 					return solution;
 				}
 				continue;
 			}
+			dualState.observeSeparation(lp, truePass);
 			break;
 		}
 		lp.clearPricingDualOverride();
@@ -712,8 +715,7 @@ public class PC {
 				if (separationDual != null && Double.isFinite(generated.observedDualBound)
 						&& (!Double.isFinite(bestObservedEmptyPass.separationDualBound)
 								|| generated.observedDualBound > bestObservedEmptyPass.separationDualBound)) {
-					bestObservedEmptyPass = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null,
-							false, separationDual, generated.observedDualBound);
+					bestObservedEmptyPass = pricingPassResult(0, generated, separationDual);
 				}
 				if (pricingFamilyClosed) {
 					return bestObservedEmptyPass;
@@ -727,8 +729,7 @@ public class PC {
 				if (separationDual != null && Double.isFinite(generated.observedDualBound)
 						&& (!Double.isFinite(bestObservedEmptyPass.separationDualBound)
 								|| generated.observedDualBound > bestObservedEmptyPass.separationDualBound)) {
-					bestObservedEmptyPass = new PricingPassResult(0, Double.POSITIVE_INFINITY, null, null,
-							false, separationDual, generated.observedDualBound);
+					bestObservedEmptyPass = pricingPassResult(0, generated, separationDual);
 				}
 				if (pricingFamilyClosed) {
 					return bestObservedEmptyPass;
@@ -738,10 +739,17 @@ public class PC {
 
 			resetFollowingPricingEngines(engineIndex + 1);
 			lastReusableSubtreeArcEliminationBounds = null;
-			return new PricingPassResult(addedColumns, generated.bestAcceptedReducedCost, generated.representativeColumn,
-					generated.representativeOutsourcingColumn, false, separationDual, generated.observedDualBound);
+			return pricingPassResult(addedColumns, generated, separationDual);
 		}
 		return bestObservedEmptyPass;
+	}
+
+	private PricingPassResult pricingPassResult(int addedColumns, GeneratedColumnIds generated,
+			LP.PricingDualSnapshot separationDual) {
+		return new PricingPassResult(addedColumns, generated.bestAcceptedReducedCost, generated.representativeColumn,
+				generated.representativeOutsourcingColumn, false, separationDual, generated.observedDualBound,
+				generated.oracleInternalColumn, generated.certifiedInternalReducedCost,
+				generated.oracleOutsourcingColumn, generated.certifiedOutsourcingReducedCost);
 	}
 
 	private final class DualStabilizationState {
@@ -761,20 +769,28 @@ public class PC {
 		}
 
 		StabilizedDualPoint stabilizedDual(LP.PricingDualSnapshot outDual, double outObjective, double attemptAlpha) {
+			if (!Double.isFinite(centerObjective)) {
+				// 初始 center 只是当前 RMP dual；第一次 exact oracle 尚未给出其 Lagrangian 值，
+				// 因此先原样评价一次 out-point。
+				return new StabilizedDualPoint(outDual.copy(), outObjective);
+			}
 			double clippedAlpha = Math.max(0.0, Math.min(MAX_SMOOTHING_ALPHA, attemptAlpha));
 			LP.PricingDualSnapshot ordinary = LP.PricingDualSnapshot.blend(outDual, center, 1.0 - clippedAlpha);
 			double ordinaryObjective = blendObjective(outObjective, centerObjective, 1.0 - clippedAlpha);
 			return new StabilizedDualPoint(ordinary, ordinaryObjective);
 		}
 
-		void observeSeparation(PricingPassResult pass) {
-			if (pass.separationDual == null || !Double.isFinite(pass.separationDualBound)) {
+		void observeSeparation(LP lp, PricingPassResult pass) {
+			if (pass.separationDual == null || !Double.isFinite(pass.separationDualBound)
+					|| !hasCompleteOracleSubgradient(lp, pass)) {
 				return;
 			}
+			LP.PricingDualSnapshot feasibleInPoint = lp.makePricingDualFeasible(pass.separationDual,
+					pass.certifiedInternalReducedCost, pass.certifiedOutsourcingReducedCost);
 			if ("neame".equals(smoothingRule)) {
-				// Neame rule (23): the next in-point follows the latest evaluated
-				// smoothed point, with its certified L(pi_sep) value.
-				center = pass.separationDual.copy();
+				// Neame 规则 (23)：下一轮 in-point 跟随最近一次已评价的 smoothed point。
+				// 先用 exact reduced-cost 证书修正 convexity dual，保证它对完整列族可行。
+				center = feasibleInPoint;
 				centerObjective = pass.separationDualBound;
 				return;
 			}
@@ -783,23 +799,31 @@ public class PC {
 			// separation point that generated a column.
 			if (!Double.isFinite(centerObjective)
 					|| pass.separationDualBound > centerObjective + config.dualBoundPruningTolerance) {
-				center = pass.separationDual.copy();
+				center = feasibleInPoint;
 				centerObjective = pass.separationDualBound;
 			}
 		}
 
-		void observeAccepted(LP.PricingDualSnapshot outDual, PricingPassResult pass) {
-			if (pass.hasRepresentative()) {
-				LP.PricingDualSnapshot acceptedGradient = representativeGradient(pass.representativeColumn,
-						pass.representativeOutsourcingColumn);
-				double signal = dotDifferenceGradient(outDual, center, acceptedGradient);
-				if (signal > 0.0) {
-					alpha = alpha + config.dualStabilizationAlphaIncreaseFraction * (1.0 - alpha);
-				} else {
-					alpha = Math.max(0.0, alpha - config.dualStabilizationAlphaDecreaseStep);
-				}
-				alpha = Math.max(0.0, Math.min(MAX_SMOOTHING_ALPHA, alpha));
+		void observeAccepted(LP lp, LP.PricingDualSnapshot outDual, PricingPassResult pass) {
+			if (!Double.isFinite(centerObjective) || pass.separationDual == null
+					|| !hasCompleteOracleSubgradient(lp, pass)) {
+				return;
 			}
+			double signal = outDual.rhsObjective - center.rhsObjective;
+			if (pass.certifiedInternalReducedCost < -config.dualStabilizationReducedCostTolerance) {
+				int machineCopies = lp.getNode() == null ? 1 : Math.max(1, lp.getNode().maxMachineCount);
+				signal -= machineCopies * columnDualContributionDifference(lp, pass.oracleInternalColumn,
+						outDual, center);
+			}
+			if (pass.certifiedOutsourcingReducedCost < -config.dualStabilizationReducedCostTolerance) {
+				signal -= outsourcingDualContributionDifference(lp, pass.oracleOutsourcingColumn, outDual, center);
+			}
+			if (signal > 0.0) {
+				alpha = alpha + config.dualStabilizationAlphaIncreaseFraction * (1.0 - alpha);
+			} else {
+				alpha = Math.max(0.0, alpha - config.dualStabilizationAlphaDecreaseStep);
+			}
+			alpha = Math.max(0.0, Math.min(MAX_SMOOTHING_ALPHA, alpha));
 		}
 
 		private String normalizeSmoothingRule(String value) {
@@ -809,41 +833,33 @@ public class PC {
 			return "wentges";
 		}
 
-		private LP.PricingDualSnapshot representativeGradient(TWETColumn column, TWETOutsourcingColumn outsourcingColumn) {
-			double[] job = new double[center.jobDual.length];
-			double machine = 0.0;
-			double outsource = 0.0;
-			double[] outsourcingMembership = new double[center.outsourcingMembershipDual.length];
-			double[][] arc = new double[center.arcDual.length][];
-			for (int i = 0; i < arc.length; i++) {
-				arc[i] = new double[center.arcDual[i].length];
+		private boolean hasCompleteOracleSubgradient(LP lp, PricingPassResult pass) {
+			if (!Double.isFinite(pass.certifiedInternalReducedCost)) {
+				return false;
 			}
-			if (column != null) {
-				machine = -1.0;
-				for (int j = 1; j < job.length; j++) {
-					job[j] = -column.getJobVisitCount(j);
-				}
-				int sink = center.arcDual.length - 1;
-				for (int from = 0; from < arc.length; from++) {
-					for (int to = 1; to < arc[from].length; to++) {
-						int count = column.getArcVisitCount(from, to, sink);
-						if (count > 0) {
-							arc[from][to] = -count;
-						}
-					}
-				}
-			} else if (outsourcingColumn != null) {
-				outsource = -1.0;
-				for (int j : outsourcingColumn.getJobs()) {
-					if (j >= 0 && j < job.length) {
-						job[j] = -1.0;
-					}
-					if (j >= 0 && j < outsourcingMembership.length) {
-						outsourcingMembership[j] = -1.0;
-					}
-				}
+			if (pass.certifiedInternalReducedCost < -config.dualStabilizationReducedCostTolerance
+					&& pass.oracleInternalColumn == null) {
+				return false;
 			}
-			return new LP.PricingDualSnapshot(job, machine, outsource, outsourcingMembership, arc);
+			if (lp.isColumnizedOutsourcing() && !Double.isFinite(pass.certifiedOutsourcingReducedCost)) {
+				return false;
+			}
+			if (Double.isFinite(pass.certifiedOutsourcingReducedCost)
+					&& pass.certifiedOutsourcingReducedCost < -config.dualStabilizationReducedCostTolerance
+					&& pass.oracleOutsourcingColumn == null) {
+				return false;
+			}
+			return true;
+		}
+
+		private double columnDualContributionDifference(LP lp, TWETColumn column,
+				LP.PricingDualSnapshot outDual, LP.PricingDualSnapshot centerDual) {
+			return lp.computeReducedCost(column, centerDual) - lp.computeReducedCost(column, outDual);
+		}
+
+		private double outsourcingDualContributionDifference(LP lp, TWETOutsourcingColumn column,
+				LP.PricingDualSnapshot outDual, LP.PricingDualSnapshot centerDual) {
+			return lp.computeReducedCost(column, centerDual) - lp.computeReducedCost(column, outDual);
 		}
 	}
 
@@ -868,6 +884,10 @@ public class PC {
 		final boolean dualBoundPruned;
 		final LP.PricingDualSnapshot separationDual;
 		final double separationDualBound;
+		final TWETColumn oracleInternalColumn;
+		final double certifiedInternalReducedCost;
+		final TWETOutsourcingColumn oracleOutsourcingColumn;
+		final double certifiedOutsourcingReducedCost;
 
 		PricingPassResult(int addedColumns, double bestAcceptedReducedCost, TWETColumn representativeColumn,
 				TWETOutsourcingColumn representativeOutsourcingColumn) {
@@ -878,6 +898,16 @@ public class PC {
 		PricingPassResult(int addedColumns, double bestAcceptedReducedCost, TWETColumn representativeColumn,
 				TWETOutsourcingColumn representativeOutsourcingColumn, boolean dualBoundPruned,
 				LP.PricingDualSnapshot separationDual, double separationDualBound) {
+			this(addedColumns, bestAcceptedReducedCost, representativeColumn, representativeOutsourcingColumn,
+					dualBoundPruned, separationDual, separationDualBound, null, Double.NaN,
+					null, Double.NaN);
+		}
+
+		PricingPassResult(int addedColumns, double bestAcceptedReducedCost, TWETColumn representativeColumn,
+				TWETOutsourcingColumn representativeOutsourcingColumn, boolean dualBoundPruned,
+				LP.PricingDualSnapshot separationDual, double separationDualBound,
+				TWETColumn oracleInternalColumn, double certifiedInternalReducedCost,
+				TWETOutsourcingColumn oracleOutsourcingColumn, double certifiedOutsourcingReducedCost) {
 			this.addedColumns = addedColumns;
 			this.bestAcceptedReducedCost = bestAcceptedReducedCost;
 			this.representativeColumn = representativeColumn;
@@ -885,6 +915,10 @@ public class PC {
 			this.dualBoundPruned = dualBoundPruned;
 			this.separationDual = separationDual == null ? null : separationDual.copy();
 			this.separationDualBound = separationDualBound;
+			this.oracleInternalColumn = oracleInternalColumn;
+			this.certifiedInternalReducedCost = certifiedInternalReducedCost;
+			this.oracleOutsourcingColumn = oracleOutsourcingColumn;
+			this.certifiedOutsourcingReducedCost = certifiedOutsourcingReducedCost;
 		}
 
 		static PricingPassResult dualBoundPruned() {
@@ -928,53 +962,6 @@ public class PC {
 			return Double.NaN;
 		}
 		return clippedWeight * currentObjective + (1.0 - clippedWeight) * centerObjective;
-	}
-
-
-	private static double dotDifferenceGradient(LP.PricingDualSnapshot out, LP.PricingDualSnapshot center,
-			LP.PricingDualSnapshot gradient) {
-		return dot(difference(out, center), gradient);
-	}
-
-	private static double dot(LP.PricingDualSnapshot a, LP.PricingDualSnapshot b) {
-		double sum = a.machineDual * b.machineDual + a.outsourcingColumnDual * b.outsourcingColumnDual;
-		int jobLimit = Math.min(a.jobDual.length, b.jobDual.length);
-		for (int i = 1; i < jobLimit; i++) {
-			sum += a.jobDual[i] * b.jobDual[i];
-		}
-		int outsourcingMembershipLimit = Math.min(a.outsourcingMembershipDual.length,
-				b.outsourcingMembershipDual.length);
-		for (int i = 1; i < outsourcingMembershipLimit; i++) {
-			sum += a.outsourcingMembershipDual[i] * b.outsourcingMembershipDual[i];
-		}
-		int arcLimit = Math.min(a.arcDual.length, b.arcDual.length);
-		for (int i = 0; i < arcLimit; i++) {
-			int innerLimit = Math.min(a.arcDual[i].length, b.arcDual[i].length);
-			for (int j = 0; j < innerLimit; j++) {
-				sum += a.arcDual[i][j] * b.arcDual[i][j];
-			}
-		}
-		return sum;
-	}
-
-	private static LP.PricingDualSnapshot difference(LP.PricingDualSnapshot a, LP.PricingDualSnapshot b) {
-		double[] job = new double[a.jobDual.length];
-		for (int i = 0; i < job.length; i++) {
-			job[i] = a.jobDual[i] - b.jobDual[i];
-		}
-		double[] outsourcingMembership = new double[a.outsourcingMembershipDual.length];
-		for (int i = 0; i < outsourcingMembership.length; i++) {
-			outsourcingMembership[i] = a.outsourcingMembershipDual[i] - b.outsourcingMembershipDual[i];
-		}
-		double[][] arc = new double[a.arcDual.length][];
-		for (int i = 0; i < a.arcDual.length; i++) {
-			arc[i] = new double[a.arcDual[i].length];
-			for (int j = 0; j < a.arcDual[i].length; j++) {
-				arc[i][j] = a.arcDual[i][j] - b.arcDual[i][j];
-			}
-		}
-		return new LP.PricingDualSnapshot(job, a.machineDual - b.machineDual,
-				a.outsourcingColumnDual - b.outsourcingColumnDual, outsourcingMembership, arc);
 	}
 
 
@@ -1378,6 +1365,7 @@ public class PC {
 			return generated;
 		}
 		generated.observeCertifiedReducedCosts(result);
+		generated.observeOracle(result);
 		if (!repairMode && !result.isImproved()) {
 			if (allowReusableBounds) {
 				CompletionBoundSubtreeArcEliminator.PreparedBounds reusableBounds =
@@ -1439,6 +1427,11 @@ public class PC {
 				}
 			}
 		}
+		int caseBColumns = 0;
+		if (!result.isImproved() && acceptanceDual != null) {
+			caseBColumns = acceptPessoaCaseBOracle(lp, generated, seenColumnIds, seenOutsourcingColumnIds,
+					acceptanceDual);
+		}
 		int directAddedColumns = generated.improvedActiveInternalColumns + generated.internalColumnIds.size()
 				+ generated.outsourcingColumnIds.size();
 		handleHeuristicExactMissDiagnostic(lp, engine, directAddedColumns, acceptedExactElementaryColumns,
@@ -1471,7 +1464,8 @@ public class PC {
 				}
 			}
 			message += " acceptedBestRc=" + generated.bestAcceptedReducedCost + " observedDualBound="
-					+ observedDualBound + " filteredByOutDual=" + filteredByAcceptanceDual;
+					+ observedDualBound + " filteredByOutDual=" + filteredByAcceptanceDual
+					+ " caseB=" + caseBColumns;
 		}
 		int reportedAddedColumns = generated.improvedActiveInternalColumns + generated.internalColumnIds.size()
 				+ generated.outsourcingColumnIds.size();
@@ -1482,6 +1476,47 @@ public class PC {
 		traceSink.onPricingCall(lp.getNode(), name, reportedAddedColumns > 0, reportedAddedColumns, message,
 				totalPoolSize(lp), pricingNanos);
 		return generated;
+	}
+
+	/**
+	 * Pessoa Case B：exact oracle 未切开 separation point，但同一列能切开当前 RMP dual。
+	 * 直接复用该列，避免再执行一次 true-dual exact pricing。
+	 */
+	private int acceptPessoaCaseBOracle(LP lp, GeneratedColumnIds generated, HashSet<Integer> seenColumnIds,
+			HashSet<Integer> seenOutsourcingColumnIds, LP.PricingDualSnapshot outDual) {
+		int accepted = 0;
+		TWETColumn internal = generated.oracleInternalColumn;
+		if (internal != null) {
+			double reducedCost = lp.computeReducedCost(internal, outDual);
+			if (reducedCost < -config.dualStabilizationReducedCostTolerance) {
+				Pool.ColumnUpdate update = lp.addOrImproveColumn(internal);
+				Integer id = Integer.valueOf(update.columnId);
+				if (!lp.isRestrictedColumnActive(update.columnId) && seenColumnIds.add(id)) {
+					generated.internalColumnIds.add(id);
+					generated.observeReducedCost(reducedCost, internal, null);
+					accepted++;
+				} else if (update.improvedCost) {
+					generated.improvedActiveInternalColumns++;
+					generated.observeReducedCost(reducedCost, internal, null);
+					accepted++;
+				}
+			}
+		}
+		TWETOutsourcingColumn outsourcing = generated.oracleOutsourcingColumn;
+		if (outsourcing != null) {
+			double reducedCost = lp.computeReducedCost(outsourcing, outDual);
+			if (reducedCost < -config.dualStabilizationReducedCostTolerance) {
+				int id = lp.getOutsourcingPool().addColumn(outsourcing);
+				Integer value = Integer.valueOf(id);
+				if (id >= 0 && !lp.isRestrictedOutsourcingColumnActive(id)
+						&& seenOutsourcingColumnIds.add(value)) {
+					generated.outsourcingColumnIds.add(value);
+					generated.observeReducedCost(reducedCost, null, outsourcing);
+					accepted++;
+				}
+			}
+		}
+		return accepted;
 	}
 
 	private void handleHeuristicExactMissDiagnostic(LP lp, PricingEngine engine, int addedColumns,
@@ -1831,6 +1866,8 @@ public class PC {
 		double observedDualBound = Double.NaN;
 		TWETColumn representativeColumn;
 		TWETOutsourcingColumn representativeOutsourcingColumn;
+		TWETColumn oracleInternalColumn;
+		TWETOutsourcingColumn oracleOutsourcingColumn;
 
 		boolean isEmpty() {
 			return internalColumnIds.isEmpty() && outsourcingColumnIds.isEmpty() && improvedActiveInternalColumns == 0;
@@ -1863,6 +1900,15 @@ public class PC {
 			}
 		}
 
+		void observeOracle(PricingResult result) {
+			if (result.getInternalOracleColumn() != null) {
+				oracleInternalColumn = result.getInternalOracleColumn();
+			}
+			if (result.getOutsourcingOracleColumn() != null) {
+				oracleOutsourcingColumn = result.getOutsourcingOracleColumn();
+			}
+		}
+
 		void merge(GeneratedColumnIds other) {
 			internalColumnIds.addAll(other.internalColumnIds);
 			outsourcingColumnIds.addAll(other.outsourcingColumnIds);
@@ -1883,6 +1929,12 @@ public class PC {
 			}
 			if (Double.isFinite(other.certifiedOutsourcingReducedCost)) {
 				certifiedOutsourcingReducedCost = other.certifiedOutsourcingReducedCost;
+			}
+			if (other.oracleInternalColumn != null) {
+				oracleInternalColumn = other.oracleInternalColumn;
+			}
+			if (other.oracleOutsourcingColumn != null) {
+				oracleOutsourcingColumn = other.oracleOutsourcingColumn;
 			}
 			// observedDualBound 依赖合并后的内部列/外包列证书，必须在调用处统一重算。
 			if (representativeColumn == null) {

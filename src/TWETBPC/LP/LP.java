@@ -211,6 +211,14 @@ public class LP {
 		return activeCutIds;
 	}
 
+	/**
+	 * 将当前正式 RMP 最终仍激活的 cuts 写回节点，供随后创建的所有 child 继承。
+	 * LP 内 cut 集会在 cut loop 中增删，不能继续使用建模前的 node 快照。
+	 */
+	public void syncActiveCutsToNode() {
+		node.activeCutIds = new ArrayList<Integer>(activeCutIds);
+	}
+
 	/** @return 当前 LP dual 下真正参与 SRI pricing 的 subset-row cut id；只包含负 dual 的行。 */
 	public List<Integer> getActiveSubsetRowPricingCutIds() {
 		if (activeSubsetRowPricingCutIds == null) {

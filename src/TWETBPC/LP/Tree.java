@@ -279,6 +279,8 @@ public class Tree {
 			}
 
 			boolean branched = false;
+			// 2026-07-25: strong trial 也会直接 copy 当前 node，必须在任何 child 创建前写回最终 cuts。
+			lp.syncActiveCutsToNode();
 			heartbeat(node, "branch.start");
 			for (Brancher brancher : branchers) {
 				StrongBranchingSelection strongSelection =

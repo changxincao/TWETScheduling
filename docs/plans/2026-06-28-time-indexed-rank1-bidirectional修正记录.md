@@ -130,4 +130,20 @@ focused `javac` 已覆盖以下文件并通过：
 
 调度论文的有无 SRI 结果明确显示收益来自“更贵的 root 换更小的树”。例如无 setup 的 60-3：有 cuts 时 root time `36.5s`、root gap `0.04%`、平均 `3.0` nodes、总时间 `94.8s`；无 cuts 时为 `10.4s`、`0.27%`、`56.7` nodes、`298.0s`。带 setup 的 60-3 small setup：有 cuts 为 root `688.1s`、`5.2` nodes、总时间 `1338.3s`；无 cuts 为 root `473.8s`、`131.7` nodes、总时间 `1461.0s`。large setup 下两者总时间已经很接近，说明 SRI 并不保证更快。
 
-当前 60-3 W100 SRI run 在 2026-07-25 13:41 仍未结束，进程停留在 node 22，incumbent 为 `2128`，最近全局 gap 约 `4.77%`，即将触及 7200 秒上限。它仍在正常推进，不是死锁；当前症状是每个 node 从 `activeCuts=0` 开始重复 separation，且 cut-loop arc fixing 和 dual stabilization 均关闭，使每轮 active-SRI exact pricing 持续扫描完整图。
+当前 60-3 W100 SRI run 最终在 7200 秒达到时限，结果为 `TIME_LIMIT, incumbent=2128, bound=2027.072331`。它不是死锁；当前症状是每个 node 从 `activeCuts=0` 开始重复 separation，且 cut-loop arc fixing、node-end arc fixing 和 dual stabilization 均被本次命令显式关闭，使每轮 active-SRI exact pricing 持续扫描完整图。
+
+## 15. 节点 fixing、cut 继承和 tStar 复核
+
+正常默认配置下，正式 node 完成 column generation 和 cut loop、且未被 incumbent 剪枝后，会在分支前执行一次 time-indexed reduced-cost graph fixing；cut loop 每次闭合后还可执行 in-round fixing。前述 60-3 W100 SRI run 的启动参数将 `timeIndexedCompletionBoundArcFixing` 和 `timeIndexedCompletionBoundCutLoopArcFixing` 都设为 `false`，因此该次运行两类 fixing 都没有执行，不能用它评价论文式 fixing 的效果。
+
+复核发现 cut 生命周期确有实现错误：cut loop 只更新 `LP.activeCutIds`，而所有 brancher 都从 `lp.getNode().copy()` 创建 child；父 `Node.activeCutIds` 一直停留在建模前快照，所以 child 和 strong-branch trial 都从空 cut 集开始。现已在任何 branch candidate 创建之前，把正式父 LP 最终仍 active 的 cut id 一次性写回父 Node。`Node.copy()` 原有的深复制随后负责普通 child 和 strong-trial child 的继承；已在 cut loop 中删除的 inactive cut 不会继承，child 后续仍可按自己的 dual 删除失活 cut。focused 编译通过；定向回归覆盖“父 LP 加两个 cut、删除一个、同步、复制 child”，确认 child 仅继承保留项且父子列表不共享；已有 Phase-I × ng-DSSR/time-indexed × no-cut/SRI 回归也通过。
+
+当前 rank-1 双向定价中的 `tStar` 按当前 graph window 逐 job 计算：
+
+`tStar = round(sum_j(ceil(windowStart_j) + floor(windowEnd_j)) / (2 * feasibleJobCount))`
+
+并钳制到 `[0, horizon]`。这在公式形式上是各 job 时间区间中点的平均值，但当前 rank-1 engine 的输入不是论文所说的 fixing 后真实剩余顶点集：它只读取 `data.hardWindowStart/End`，允许时再叠加 dual profitable window，没有读取 `Node` 的 compact window，也没有从未被禁用的 `(job,time)` 顶点重新提取最早/最晚时间。论文则明确要求先删弧和孤立顶点，再以剩余 `R_j^k` 的 `tMin/tMax` 计算 `tStar`。因此当前实现的公式形式一致、输入口径偏弱；本次 SRI run 未使用 dual window且未执行 arc fixing，`tStar=1759` 基本只是 `horizon=3519` 的中点。即使后续打开 fixing，当前 `computeTStar()` 也不会自动利用 compact window 重新平衡双向图，这是另一个待单独处理的性能问题。
+
+调度论文没有给 dual stabilization 的开关消融或 CG 迭代数对照。正文只说明使用 Pessoa et al. (2018) 的 automatic dual-price smoothing，结论部分直接声称其显著减少迭代；表 3--6 的有 cut/无 cut 版本都包含 stabilization，不能单独证明该组件的贡献。严格证据来自被引用的 stabilization 专门论文，其中比较了 automatic smoothing、penalty stabilization 及其组合，并讨论参数自动调整。因而当前应把“减少迭代”理解为引用既有方法的实验结论和作者实现经验，而不是这篇调度论文自身完成的独立消融。
+
+当前工程代码还没有实现论文中的 active-SRI + smoothing 组合。`PC.solvePricingLoop()` 只有在 `activeSubsetRowPricingCutIds` 为空时才进入 dual stabilization；一旦存在真正参与 pricing 的 SRI cut，就直接使用 true-dual pricing。因此本次运行不仅在命令行上关闭了 stabilization，即使只打开总开关，active-SRI 轮次仍不会被稳定化。若后续要复现论文完整流程，需要先把 SRI dual、同一 stabilized point 的完整 dual objective 和 reduced-cost certificate 纳入统一 snapshot，而不能只改配置开关。

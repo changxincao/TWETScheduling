@@ -295,3 +295,11 @@ Pessoa 论文中的结果确实很好，但实验口径不能直接等同于当�
 再次检查后不能把当前实现描述为原文控制流的完全复现。第一，`runStabilizedPricingSequence()` 在一次 Case C mispricing 序列中只把最后一次 pass 返回给外层；前面已经由 exact oracle 证明可行的 separation points 及其 `L(pi_sep)` 没有交给 Wentges incumbent 更新。原文要求 `hat pi` 在任何已观察到的 Lagrangian bound 改善时更新，因此当前实现可能遗漏该序列中更好的中间 in-point。它不破坏最终正确性，但会改变后续 center 和性能。第二，初始 center 还没有 certified objective 时，第一次所谓 stabilized pass 实际就在 out/true dual 上运行；若该 pass 已证明无负列，外层仍会再执行一次完全相同的 true-dual exact pricing。这是确定的重复计算。更一般地，当局部 schedule 到达 `alpha=0` 时，当前代码先提交最后一个失败 separation point，再由外层单独执行 true pass；这与论文把 `alpha=0` 作为同一 mispricing schedule 的最后一次 oracle 调用不完全相同，也会使随后的自动 alpha 方向使用不同的 in-point。
 
 因此当前结论应修正为：在已支持配置下，现有实现的 dual 向量、Lagrangian bound、range 修正、oracle 和最终闭合数学上是安全的，最终最优性不受影响；但是 Wentges 中间 incumbent 的保留和 `alpha=0`/初始 true-pass 控制流尚未逐步对齐论文。若要求“和论文 smoothing 完全一致”，下一步应把一次 mispricing sequence 作为完整对象处理：固定该序列起始 in-point，保留序列内最好的 certified Wentges in-point，在同一序列中执行 `alpha=0` 的 true oracle，并避免外层重复定价。Neame 只需要保留最后一个 separation point，不能错误使用 Wentges 的 best-bound 更新规则。
+
+## 25. 2026-07-25：阶段性停止稳定化改造
+
+本阶段不再继续修改 dual stabilization。当前严格支持范围只有无 active SRI、非 repair、且能返回完整 exact oracle witness 的 time-indexed pricing。该范围内的 50-2 对照已经显示稳定化没有带来搜索树收益，反而在 `alpha` 接近 1 后因 Case C 回退产生大量额外 exact pricing；即使把第 24 节的中间 Wentges in-point 和重复 true-pass 控制流继续补齐，也只能消除局部重复，无法解释或消除当前数倍级退化。因此 time-indexed 主线继续默认关闭稳定化。
+
+ng-DSSR 当前不提供稳定化要求的完整 oracle witness，入口会直接绕过 smoothing，执行原 true-dual pricing。这里不能表述为“当前严格 Pessoa 实现在 ng-DSSR 上实测无效”，因为它实际上没有接入；更准确的结论是：若要支持 ng-DSSR，还需额外设计完整 oracle 与 Lagrangian-bound 口径，而现有实验没有给出值得投入这项复杂改造的收益证据。active SRI、repair 和显式外包变量存在 snapshot 缺口时也继续绕过稳定化。
+
+因此当前统一决策为：ng-DSSR 与 time-indexed 的默认求解均不使用 dual stabilization。time-indexed 是已有直接负面 A/B 证据；ng-DSSR 是当前不完整适配且缺少收益证据。保留现有安全实现和测试作为后续研究入口，不再为追求论文控制流逐步一致而继续增加主线复杂度。

@@ -121,3 +121,13 @@ focused `javac` 已覆盖以下文件并通过：
 作为对照，当前 no-cut run 虽然处理 636 个节点、执行 25198 次图定价，但 no-cut DAG pricing 平均约 `118.7ms`，pricing 总计约 `2992.0s`，最终在 `4323.568s` 结束。SRI 的单次 exact 不是比 no-cut 贵一点，而是大约贵 30--50 倍；cuts 减少的节点数尚不足以抵消该倍数。论文自己也明确指出每个 active rank-1 cut 都增加一个定价资源，cut 过多会使 pricing 很耗时，并把 arc fixing、limited memory 和 dual stabilization共同列为可扩展性的关键。
 
 因此当前优先级不是继续修改 rank-1 residual 公式。首先应做固定实例 A/B：只开启论文式 cut-loop arc fixing，确认 `timeArcSkips`、每次 arc scans、labels 和 pricing 时间是否显著下降；随后单独开启 dual stabilization，观察 pricing 轮数和 wall time。cut 继承应另做语义清晰的实验，比较“子节点继承父节点 active cuts”和“每个节点重新分离”，不能与前两项同时修改。当前运行未证明 SRI 数学实现错误，证明的是本次配置缺少论文依赖的两个主要加速组件，并且当前 cut 生命周期会放大节点间重复工作。
+
+## 14. 论文 SRI 配套技术和 dual stabilization 说明
+
+论文的 SRI 不是单独使用，而是和以下技术组成完整 BCP：limited-memory rank-1 cuts；graph-native 单标签 bucket heuristic 加 exact 双向 labeling；每次 heuristic/exact 最多返回 50/300 条负列；CG 闭合后的 reduced-cost arc fixing、graph cleanup 和 `tStar` 更新；一行/三行 rank-1 cut separation 及每轮 50/75 条上限；inactive zero-dual cuts 立即删除；连续两轮 primal-dual gap 改善低于 2% 时停止 cut separation；automatic dual-price smoothing stabilization；两阶段 strong branching 和 pseudo-cost。
+
+调度论文对 stabilization 只说明采用 Pessoa et al. (2018) 的自动 dual-price smoothing，没有展开公式或参数，也没有报告 stabilization 开/关消融。其作用是不用当前 RMP 的跳动 true dual 直接定价，而是在稳定中心和当前 dual 之间形成平滑的 separation/pricing dual，并动态调整平滑程度；若平滑 dual 产生的列在 true dual 下无效，则属于 mispricing，算法减弱平滑并最终回到 true dual exact pricing闭合。这样不改变最终正确性，主要减少 degeneracy 下 dual 来回跳动造成的 CG 轮数。Pessoa et al. (2018) 的专门论文比较了 automatic smoothing、penalty stabilization 及组合方案；调度论文表 3--6 的有 cut/无 cut 对照则都使用 stabilization，因此不能从这些表单独量化 stabilization 的贡献。
+
+调度论文的有无 SRI 结果明确显示收益来自“更贵的 root 换更小的树”。例如无 setup 的 60-3：有 cuts 时 root time `36.5s`、root gap `0.04%`、平均 `3.0` nodes、总时间 `94.8s`；无 cuts 时为 `10.4s`、`0.27%`、`56.7` nodes、`298.0s`。带 setup 的 60-3 small setup：有 cuts 为 root `688.1s`、`5.2` nodes、总时间 `1338.3s`；无 cuts 为 root `473.8s`、`131.7` nodes、总时间 `1461.0s`。large setup 下两者总时间已经很接近，说明 SRI 并不保证更快。
+
+当前 60-3 W100 SRI run 在 2026-07-25 13:41 仍未结束，进程停留在 node 22，incumbent 为 `2128`，最近全局 gap 约 `4.77%`，即将触及 7200 秒上限。它仍在正常推进，不是死锁；当前症状是每个 node 从 `activeCuts=0` 开始重复 separation，且 cut-loop arc fixing 和 dual stabilization 均关闭，使每轮 active-SRI exact pricing 持续扫描完整图。

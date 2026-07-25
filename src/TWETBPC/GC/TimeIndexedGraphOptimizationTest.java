@@ -36,6 +36,7 @@ public final class TimeIndexedGraphOptimizationTest {
 		testStaticPricingDataMatchesInstance();
 		testExactPricingRejectsNonIntegerGrid();
 		testPhaseOnePricingUsesZeroSearchCostAndStoresTrueCost();
+		testDualStabilizationOracleMatchesCertificate();
 		testCompactWindowConsumptionBoundaries();
 		System.out.println("TimeIndexedGraphOptimizationTest passed");
 	}
@@ -333,6 +334,51 @@ public final class TimeIndexedGraphOptimizationTest {
 			throw new AssertionError("rank-1 exact pricing accepted a non-integer grid");
 		} catch (IllegalArgumentException expected) {
 			// expected
+		}
+	}
+
+	private static void testDualStabilizationOracleMatchesCertificate() throws Exception {
+		Data data = loadData();
+		for (int job = 1; job <= data.n; job++) {
+			data.outsourcingCost[job] = Utility.big_M;
+		}
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.useTimeIndexedGraphPricing = true;
+		config.enableTimeIndexedGraphDualWindow = true;
+		config.enableDualStabilization = true;
+		config.timeIndexedGraphMaxExactPricingColumns = 8;
+
+		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		LP lp = new LP(data, new Pool(data), new CutPool(), config, new OutsourcingPool(data));
+		lp.construct(node, node.seedColumnIds);
+		Field jobDualField = LP.class.getDeclaredField("jobDual");
+		jobDualField.setAccessible(true);
+		double[] jobDual = (double[]) jobDualField.get(lp);
+		for (int job = 1; job <= data.n; job++) {
+			jobDual[job] = 1000.0;
+		}
+
+		PricingResult result = new TimeIndexedGraphPricingEngine(data, config).price(lp);
+		if (!Double.isFinite(result.getCertifiedInternalReducedCost())
+				|| result.getInternalOracleColumn() == null) {
+			throw new AssertionError("dual stabilization exact pricing did not return a complete oracle");
+		}
+		if (!result.getMessage().contains("piWindow=enabled")
+				|| !Utility.compareLt(result.getCertifiedInternalReducedCost(), -1e-6)) {
+			throw new AssertionError("oracle regression did not exercise negative dual-window pricing");
+		}
+		double oracleReducedCost =
+				lp.computeReducedCost(result.getInternalOracleColumn(), lp.captureTruePricingDuals());
+		double tolerance = 1e-7 * Math.max(1.0, Math.abs(result.getCertifiedInternalReducedCost()));
+		if (Math.abs(oracleReducedCost - result.getCertifiedInternalReducedCost()) > tolerance) {
+			throw new AssertionError("oracle/certificate reduced-cost mismatch: oracle=" + oracleReducedCost
+					+ ", certificate=" + result.getCertifiedInternalReducedCost());
+		}
+
+		config.enableDualStabilization = false;
+		PricingResult ordinary = new TimeIndexedGraphPricingEngine(data, config).price(lp);
+		if (ordinary.getInternalOracleColumn() != null) {
+			throw new AssertionError("ordinary pricing materialized an unused stabilization oracle");
 		}
 	}
 

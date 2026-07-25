@@ -540,10 +540,22 @@ public class PC {
 	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
 		lp.clearPricingDualOverride();
 		if (config.enableDualStabilization && !lp.isFeasibilityRepairMode()
+				&& lp.supportsDualStabilizationSnapshot()
+				&& supportsDualStabilizationOracleFamilies(lp)
 				&& lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
 			return solvePricingLoopWithDualStabilization(lp, currentSolution);
 		}
 		return solvePricingLoopWithTrueDuals(lp, currentSolution);
+	}
+
+	private boolean supportsDualStabilizationOracleFamilies(LP lp) {
+		boolean internalSupported = false;
+		boolean outsourcingSupported = !lp.isColumnizedOutsourcing();
+		for (PricingEngine engine : pricingEngines) {
+			internalSupported |= engine.supportsInternalDualStabilizationOracle();
+			outsourcingSupported |= engine.supportsOutsourcingDualStabilizationOracle();
+		}
+		return internalSupported && outsourcingSupported;
 	}
 
 	private TWETMasterSolution solvePricingLoopWithTrueDuals(LP lp, TWETMasterSolution currentSolution) {
@@ -811,7 +823,7 @@ public class PC {
 			}
 			double signal = outDual.rhsObjective - center.rhsObjective;
 			if (pass.certifiedInternalReducedCost < -config.dualStabilizationReducedCostTolerance) {
-				int machineCopies = lp.getNode() == null ? 1 : Math.max(1, lp.getNode().maxMachineCount);
+				int machineCopies = lp.getNode() == null ? 0 : Math.max(0, lp.getNode().maxMachineCount);
 				signal -= machineCopies * columnDualContributionDifference(lp, pass.oracleInternalColumn,
 						outDual, center);
 			}
@@ -1691,7 +1703,7 @@ public class PC {
 				: solution.getObjectiveValue();
 		double correction = 0.0;
 		if (generated.certifiedInternalReducedCost < 0.0) {
-			int machineCopies = lp.getNode() == null ? 1 : Math.max(1, lp.getNode().maxMachineCount);
+			int machineCopies = lp.getNode() == null ? 0 : Math.max(0, lp.getNode().maxMachineCount);
 			correction += machineCopies * generated.certifiedInternalReducedCost;
 		}
 		if (lp.isColumnizedOutsourcing() && generated.certifiedOutsourcingReducedCost < 0.0) {

@@ -150,6 +150,11 @@ public class OutsourcingPricingEngine implements PricingEngine {
 	}
 
 	@Override
+	public boolean supportsOutsourcingDualStabilizationOracle() {
+		return true;
+	}
+
+	@Override
 	public String getName() {
 		return "OutsourcingPricing";
 	}

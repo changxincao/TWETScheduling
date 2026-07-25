@@ -68,4 +68,18 @@ public interface PricingEngine {
 		return false;
 	}
 
+	/**
+	 * @return 是否能为内部机器列族返回与 certified reduced cost 对应的 exact oracle 见证列。
+	 */
+	default boolean supportsInternalDualStabilizationOracle() {
+		return false;
+	}
+
+	/**
+	 * @return 是否能为列化外包列族返回与 certified reduced cost 对应的 exact oracle 见证列。
+	 */
+	default boolean supportsOutsourcingDualStabilizationOracle() {
+		return false;
+	}
+
 }

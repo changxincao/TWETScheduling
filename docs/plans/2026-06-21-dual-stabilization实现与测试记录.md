@@ -268,8 +268,22 @@ Pessoa 论文中的结果确实很好，但实验口径不能直接等同于当�
 
 本次按第 21 节列出的缺口补齐纯 smoothing 主线，没有重新引入 directional smoothing、piecewise-linear penalty 或 SRI 组合。`PricingResult` 现在可携带 exact internal/outsourcing oracle 见证列和对应列族的全局 reduced-cost 证书；time-indexed exact pricing 即使没有负列，也会保留最优 oracle 路径。PC 用完整 oracle 解构造 `b-Ax` 方向信号，不再用“本轮被真实 dual 接受的一条代表列”近似；当 separation point 未被切开、但同一 oracle 列能切开 out-point 时，按 Pessoa Case B 直接复用该列。
 
-实现过程中发现原有 center 语义存在一个明确错误：代码把 restricted master 的原始 dual 向量与 `z_RMP+M*min(0,rc_min)` 得到的 Lagrangian 标量配在一起保存。两者不是同一点，后续凸组合和 subgradient 方向因此没有统一口径。现在 exact 证书为负时，会把该 reduced cost 吸收到机器数 convexity dual；列化外包同理修正 outsourcing-column dual，并按 range dual 的实际端点重算 RHS objective。保存和混合的 center 因而是对完整列族可行、向量与 objective 一致的 in-point。修复前的 50-2 日志中，stabilized pass 经常生成 300 条 separation-dual 负列，却全部被 out-dual 过滤；修复后 `filteredByOutDual>0` 的记录为 0，说明 Case A 的凸性关系恢复，Case B 也实际触发过 1 次。
+实现过程中发现原有 center 语义存在一个明确错误：代码把 restricted master 的原始 dual 向量与 `z_RMP+M*min(0,rc_min)` 得到的 Lagrangian 标量配在一起保存。两者不是同一点，后续凸组合和 subgradient 方向因此没有统一口径。现在 exact 证书为负时，会把该 reduced cost 吸收到机器数 range 的 upper-bound dual；列化外包同理修正 outsourcing-column upper dual。RHS objective 按 `maxMachineCount*rc_internal+rc_outsourcing` 同步修正，不再根据修正后净 dual 的符号重新选择 range 端点。这样即使净 machine dual 跨过 0，原 lower/upper dual 分解仍保持一致。保存和混合的 center 因而是对完整列族可行、向量与 objective 一致的 in-point。修复前的 50-2 日志中，stabilized pass 经常生成 300 条 separation-dual 负列，却全部被 out-dual 过滤；修复后 `filteredByOutDual>0` 的记录为 0，说明 Case A 的凸性关系恢复，Case B 也实际触发过 1 次。
 
 同口径 A/B 仍不支持默认开启 stabilization。关闭组完整求解为 `334.999s`、15 nodes、`obj=bound=44383`、`valid=true`，time-indexed exact 为 `78.349s/1731 calls`。修复后的开启组运行到 node 4 后主动停止；停止前已经执行 7375 次 stabilized exact 和 462 次 true-dual exact，耗时已不具备优于关闭组的可能。主要长尾不是候选过滤，而是自动调度把全局 `alpha` 推到约 0.997 后出现 Case C：separation oracle 的最小 reduced cost约为 0，且 oracle 也不能切开 out-point。论文的局部回退公式每次只减少约 `1-alpha`，因此一次 mispricing sequence 会产生数百至上千次 exact oracle 调用。
 
 当前结论是：本次修改修正了现有 Pessoa 基础实现的 oracle、Case B、subgradient 和 in-point 一致性，数学闭合仍由最终 true-dual exact pricing保证；但该基础方法在当前 50-2 time-indexed 定价上没有提速，反而因 `alpha` 接近 1 的 Case C 长尾显著退化。因此 `enableDualStabilization` 继续默认关闭。本轮按当前范围到此为止，不追加 alpha 上限、tail-only 触发、directional smoothing 或 penalty 等进一步工程处理。
+
+## 23. 2026-07-25：稳定化边界与 range-dual 再审计
+
+本次从 dual 向量、RHS objective、oracle 证书和实际 engine 接线四层重新检查第 22 节实现，发现并修正两处会影响数学口径的边界问题。
+
+第一，机器数约束是 `minMachineCount <= sum lambda <= maxMachineCount` 的 range。将负 `rc_min` 吸收到 machine dual 时，等价操作是保持原 lower dual 不变、把修正量加入 upper dual；不能只看修正后净 dual 的正负重新选择 RHS 端点，否则净 dual 跨 0 时会改变 lower/upper 分解。当前实现固定按 `maxMachineCount*min(0,rc_min_internal)` 修正 RHS objective，列化外包按其上界 1 再加 `min(0,rc_min_outsourcing)`。新增回归以 `machineDual=2`、内部证书 `-5`、机器上界 3 为例，确认修正后净 dual 为 `-3`，RHS objective 减少 15，而不是按净 dual 符号重新解释原 dual。
+
+第二，现有 `PricingDualSnapshot` 覆盖 job、machine、列化外包、membership 和 branch arc 等参与 pricing 的 dual，但不覆盖显式外包变量及 tariff 子模型的完整行乘子。显式 `masterVariables` 模式只要存在有限外包任务，混合 job dual 就会同时改变显式外包变量的 dual feasibility；此时只对内部列做 pricing 不能形成完整稳定化 in-point。当前入口因此只在列化外包，或显式模式下完全没有可外包任务时允许 smoothing。该限制不是额外求解 fallback，而是防止使用不完整 snapshot 形成错误下界。
+
+同时收紧了 engine 能力边界。只有能返回“certified reduced cost + 对应 exact oracle witness”的内部和外包 engine 才能进入稳定化。普通 time-indexed exact 支持；rank-1 engine 仅在无 active SRI、实际委托 no-cut exact 时支持；列化外包由 `OutsourcingPricingEngine` 支持。ng-DSSR 和旧 exact 当前没有完整 witness，因此即使全局开关打开也直接走普通 true-dual loop，避免在闭合尾部重复执行一次无效的 stabilized exact。repair、strong phase2 和 active SRI 仍不进入稳定化。
+
+效率上，time-indexed 现在只在上述稳定化路径真正可能消费 oracle 时保存 oracle state，并在无负列时调用 evaluator 物化 witness；关闭稳定化、pre-heuristic、Phase-I repair 和 active SRI 不再做该额外工作。新增 dual-window 回归明确命中 `piWindow=enabled` 和负证书，确认回刷后的 oracle reduced cost 与 graph certificate 一致；关闭稳定化后 oracle 为空。focused 编译以及 `DualStabilizationInPointTest`、`TimeIndexedGraphOptimizationTest`、`StrongBranchingPhaseOnePricingTest`、`ActiveCutInheritanceTest` 均通过。
+
+复核后的结论是：无 active SRI、非 repair、无显式外包变量缺口且 exact engine 提供完整 oracle 时，当前 Pessoa 基础 smoothing 的 in-point、Case B、方向信号和最终 true-dual 闭合口径一致。ng-DSSR、active SRI 和显式外包变量模式尚未实现完整 Pessoa oracle，不应描述为已支持；这三个范围现在会明确绕过稳定化，不影响普通求解正确性。

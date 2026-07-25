@@ -119,6 +119,11 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	}
 
 	@Override
+	public boolean supportsInternalDualStabilizationOracle() {
+		return !preHeuristicMode;
+	}
+
+	@Override
 	public boolean supportsFeasibilityPhaseOneObjective() {
 		return !preHeuristicMode;
 	}
@@ -311,6 +316,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int width;
 		private final GraphWindow graphWindow;
 		private final boolean phaseOneObjective;
+		private final boolean collectStabilizationOracle;
 		private final double[] dist;
 		private final int[] predState;
 		private final int[] predAddedJob;
@@ -348,6 +354,10 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.n = data.n;
 			this.sink = node == null ? data.n + 1 : node.sinkId();
 			this.phaseOneObjective = lp.isFeasibilityPhaseOneObjectiveMode();
+			this.collectStabilizationOracle = config.enableDualStabilization && !preHeuristicMode
+					&& !phaseOneObjective && !lp.isFeasibilityRepairMode()
+					&& lp.supportsDualStabilizationSnapshot()
+					&& lp.getActiveSubsetRowPricingCutIds().isEmpty();
 			this.graphWindow = computeGraphWindow(data, lp, preHeuristicMode,
 					config.enableTimeIndexedGraphDualWindow);
 			this.horizon = graphWindow.horizon;
@@ -395,12 +405,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			observeDualWindowBestCandidate(candidates.isEmpty() ? null : candidates.get(0));
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 			for (int i = 0; i < candidates.size() && columns.size() < maxColumns; i++) {
-				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i).column, i == 0);
+				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i).column,
+						collectStabilizationOracle && i == 0);
 				if (column != null) {
 					columns.add(column);
 				}
 			}
-			if (oracleColumn == null) {
+			if (collectStabilizationOracle && oracleColumn == null) {
 				materializeNonnegativeOracle();
 			}
 			return columns;
@@ -643,7 +654,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			double reducedCost = baseReducedCost + sinkArcReducedCost(lastJob);
 			if (Utility.compareLt(reducedCost, bestPseudoReducedCost)) {
 				bestPseudoReducedCost = reducedCost;
-				bestOracleState = state;
+				if (collectStabilizationOracle) {
+					bestOracleState = state;
+				}
 			}
 			if (Utility.compareGe(reducedCost, -RC_TOLERANCE) || !isPotentialTopCandidate(reducedCost)) {
 				return;

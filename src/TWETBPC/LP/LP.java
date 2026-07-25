@@ -209,6 +209,22 @@ public class LP {
 		return config.useColumnizedOutsourcing();
 	}
 
+	/**
+	 * 当前 pricing snapshot 是否覆盖 smoothing 所需的全部可变成本口径。
+	 * 列化外包的 dual 已显式进入 snapshot；显式外包只有在没有任何可外包任务时才不会随 job dual 改变。
+	 */
+	public boolean supportsDualStabilizationSnapshot() {
+		if (isColumnizedOutsourcing()) {
+			return true;
+		}
+		for (int job = 1; job <= data.n; job++) {
+			if (outsourcingPool.isOutsourceable(job)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	public List<Integer> getActiveCutIds() {
 		return activeCutIds;
 	}
@@ -341,8 +357,8 @@ public class LP {
 
 	/**
 	 * 把 exact pricing 的 reduced-cost 证书吸收到机器数/外包列数 dual 中，得到对完整列族可行的 in-point。
-	 * 机器数和列化外包在当前模型中分别只有上界 {@code maxMachineCount} 和 1；最小 reduced cost 为负时，
-	 * 下移对应 convexity dual 后，所有该列族约束均满足，并按 range dual 的实际符号重新计算 objective。
+	 * 最小 reduced cost 为负时，把修正量加入对应 upper-bound dual。这样即使 machine range 的净 dual
+	 * 跨过 0，也保留原 lower/upper dual 分解，snapshot 向量和 RHS objective 始终代表同一个 dual 点。
 	 */
 	public PricingDualSnapshot makePricingDualFeasible(PricingDualSnapshot dual,
 			double certifiedInternalReducedCost, double certifiedOutsourcingReducedCost) {
@@ -352,22 +368,10 @@ public class LP {
 				? Math.min(0.0, certifiedOutsourcingReducedCost) : 0.0;
 		double shiftedMachineDual = dual.machineDual + internalShift;
 		double shiftedOutsourcingDual = dual.outsourcingColumnDual + outsourcingShift;
-		double rhsObjective = dual.rhsObjective
-				- machineDualObjectiveContribution(dual.machineDual)
-				+ machineDualObjectiveContribution(shiftedMachineDual)
-				- dual.outsourcingColumnDual + shiftedOutsourcingDual;
+		int machineUpperBound = node == null ? 0 : Math.max(0, node.maxMachineCount);
+		double rhsObjective = dual.rhsObjective + machineUpperBound * internalShift + outsourcingShift;
 		return new PricingDualSnapshot(dual.jobDual, shiftedMachineDual, shiftedOutsourcingDual,
 				dual.outsourcingMembershipDual, dual.arcDual, rhsObjective);
-	}
-
-	private double machineDualObjectiveContribution(double dual) {
-		if (Utility.compareGt(dual, VALUE_TOLERANCE)) {
-			return dual * node.minMachineCount;
-		}
-		if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
-			return dual * node.maxMachineCount;
-		}
-		return 0.0;
 	}
 
 	/** @return 当前 pricing 实际使用的 dual；稳定化开启时返回 override，否则返回真实 LP dual。 */

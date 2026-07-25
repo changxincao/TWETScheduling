@@ -114,6 +114,12 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		return true;
 	}
 
+	@Override
+	public boolean supportsInternalDualStabilizationOracle() {
+		// Active SRI 时 PC 不进入稳定化；无 active SRI 时本类委托给 no-cut exact engine。
+		return true;
+	}
+
 	private final class Rank1CutSolver {
 		private final LP lp;
 		private final Node node;

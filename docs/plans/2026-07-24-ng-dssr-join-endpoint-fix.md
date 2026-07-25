@@ -24,3 +24,5 @@
 二次复核发现，仅在已知调用点使用 helper 仍可能遗漏未来或现有的直接 `evaluate(t)` 调用。最终处理把“已通过原有 EPS 定义域检查、但物理上略过首尾端点”的钳制下沉到 `PiecewiseLinearFunction.evaluate()` 本身；超过 EPS 的域外点仍返回原有上界值，内部空档仍抛异常。由此撤掉 crop 和 dominance 调用点的重复钳制，只保留 `valueAtOrNearest()` 对任意域外时间取最近端点所需的 helper。
 
 第三次全局复核进一步删除了六个仅转发调用的 `valueAtOrNearest()` wrapper，join 延拓直接使用公共 `evaluateAtClampedEndpoint()`；普通 `evaluate()` 仍只钳制原 EPS 容差带内的物理越界。回归测试补充了真正超过 EPS 的域外查询，确认其仍返回原上界，同时重新通过端点/内部空档、Paper dominance 和增量 source-aware dominance 三组测试。当前未再发现独立复制的端点求值逻辑。
+
+完成再次独立复核后，重新并行启动此前因端点问题中断的 60-3 W100 对照，输出目录为 `test-results/bpc/exp-60-3-W100-current-ng-endpointfix-20260725d` 和 `test-results/bpc/exp-60-3-W100-current-ti-rerun-20260725d`。两组复用上一轮完整 `args.txt`，只替换实验名和输出目录；均为 1800 秒、单 CPLEX 线程、60 秒 ALNS 和 strong branching。启动日志已确认 ng-DSSR 使用 `GCNGBBStyleNgDssrPricing + HeuristicPricing`、time-indexed 使用 `TimeIndexedGraphPricing`，实例均为 `wet060_001_3m`、3 台机器、W100，stderr 为空。Oracle `javapath` 会生成等待 launcher，因此目录内 `pid.txt` 已改写为真正执行计算的 JDK PID，launcher PID 单独写入 `launcher-pid.txt`。

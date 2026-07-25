@@ -429,3 +429,13 @@ pricing 侧目前只接入 partial-list ng-DSSR 这条 SRI-aware 主路径，并
 在不让新 graph 携带 SRI state 的前提下，有三种可保持正确性的使用方式。第一，把 no-SRI pricing 作为 relaxed oracle：`min rc_noSRI >= 0` 时直接闭合；小于零时只把回刷后真实 reduced cost 为负的候选加列，同时用 relaxed reduced-cost certificate 计算保守 dual bound，但不能把 cut-RMP 宣称为完整闭合。第二，做机会式 SRI：若 relaxed oracle 不能闭合，就删除本轮 active SRI、回到 no-cut master 重新闭合；这样实现简单且精确，但 SRI 强化只在能够被 no-SRI certificate 直接验证的轮次保留。第三，只在 root 用现有 SRI-aware pricing 完整闭合 cut LP，随后树内移除 cut 并恢复新 source-aware graph；已证明的 root cut bound 仍可作为所有后代的 inherited lower-bound floor，但后续 child 不再继续获得 SRI 强化。
 
 当前更值得实验的是第三种 root-only 混合方案。它把 SRI state 的高成本限制在 root，同时保留 root cut 对整棵子树的合法下界；现有 40/4 记录也表明 SRI 的主要收益正是显著减少节点，而主要代价集中在 root cut-pricing。若要求从 root 到所有 child 都持续保留并完整利用 SRI 强化，则没有“不在 pricing 中考虑 SRI”同时仍严格闭合的通用捷径，只能让 dominance state 区分 SRI residual，或切换到现有 SRI-aware pricing。
+
+### 2026-07-25 修正后 time-indexed SRI 结果下的 ng-DSSR 接入判断
+
+60-3 W100 的修正配置结果表明，time-indexed SRI 在 `969.058s/46 nodes` 完成，而当前 no-SRI ng-DSSR 为 `4586.267s/194 nodes`。静态检查确认，现有 ng-DSSR 确实已经具备完整 SRI 路径，但只允许 `DominanceBackend.LIST_PARTIAL` 使用：`precomputeSriPricing()` 同时要求 `enableSubsetRowCutsForPartialDominance=true` 和 partial-list backend；label 保存每条 active cut 的 residual，正反向扩展及 join 均计入 cut dual，最终列再由 LP 完整 reduced cost 复核。normal ng-DSSR 即使打开 cut generator，也不会成为通用的 SRI-aware exact pricing。
+
+该现有路径的关键问题是性能而非正确性。active SRI 后，新的 incremental source-aware dominance 自动关闭，退回 `SriAwarePartialListDominanceStore`；group-envelope compression/prefilter 和 route-visit-profile join pruning也关闭。也就是说，最近在 no-SRI 主线上获得的 source-aware 删除、避免历史 label 扫描和 group 级 join 过滤都不能使用。历史 40/4 对照已经显示这种结构：SRI 将节点从 129 降到 8，但时间从 `91.686s` 墻到 `146.559s`；另有 40-2 partial+SRI 明显慢于 no-SRI。故仅在 60-3 W100 上切换现有 partial-list SRI，可能缩树，但没有充分理由预期追平约 4.73 倍差距。
+
+若要让 ng-DSSR 真正利用 SRI，优先方案应是新增“按 SRI residual state 分区的 source-aware graph”，而不是继续优化旧 partial-list。第一版只让 residual 完全相同的 labels 进入同一份现有 source-aware dominance graph；不同 residual state 之间不做 dominance，虽然偏弱，但严格安全。join group key 扩为 `(terminal job, true ngMemorySet, sriResidualState)`，group-envelope prefilter 的下界加入 crossing memory arc 对应的 SRI join shift。当前 cut 均为 `p=1/2`，每条 residual 只有 0/1，可用 packed bit vector 和状态驻留表避免为每个 label 保存 `String + byte[]`。arc-memory 会在大量非 memory arcs 上清空 residual，实际 distinct state 数可能远小于理论组合数，这是该方案可能有效的基础。跨 residual 的论文式补偿 dominance 可作为后续增强，不应放进第一版。
+
+该方案能恢复当前 no-SRI 主线最重要的 dominance 和 join 实现，但仍不能保证在小整数 horizon 上击败 time-indexed SRI：time-indexed 当前每次 SRI pricing 平均只有约 `0.11s`，而 ng-DSSR 仍需构造 PWLF、completion bound、midpoint probe 和 DSSR。更合理的算法定位仍是组合选择：小整数且 fixing 后图很稀时使用 time-indexed SRI；horizon 很大、时间为小数或时空图膨胀时使用 ng-DSSR。若继续开发，先在同一 60-3 W100 上运行现有 partial-list arc-memory SRI，量化 active state、labels、join 和节点缩减，作为是否实现 state-partitioned source-aware graph 的基线；不建议直接把现有 partial-list SRI设为默认。

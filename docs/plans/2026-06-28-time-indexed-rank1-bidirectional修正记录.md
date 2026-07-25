@@ -163,3 +163,15 @@ cut 继承链再次按完整生命周期验证：正式父 LP 的 cut loop 最�
 本次 60-3 W100 SRI run 仍应明确解释为“完全没有执行 time-indexed arc fixing”：参数同时关闭了 node-end、cut-loop 和 in-round fixing。默认配置并非如此；默认 node-end 和 cut-loop fixing 均开启，只是该次对照命令显式覆盖为 false。
 
 当前 dual stabilization 的适用边界没有变化：只进入非 repair 且没有 active SRI pricing cut 的正式 pricing loop，可覆盖 no-cut time-indexed、no-SRI ng-DSSR、普通 heuristic 和列化外包 pricing；Phase-I/repair 和 active-SRI rank-1 pricing均直接使用 true dual。active cut 仅存在于 cut pool、但其 dual 为零且未进入 active pricing cut 集时，不会阻止 stabilization。
+
+## 17. SRI 强分支、tStar 复核与 no-cut stabilization A/B
+
+2026-07-25 再次沿当前主线检查 time-indexed + SRI 的强分支和 repair。Phase 1 始终先解左右 child 的 trial RMP；初始 RMP 不可行或仍使用 branch-implied penalty 列时进入 Phase-I repair。time-indexed 主线只注册一个图定价器：没有 active SRI dual 时直接运行 no-cut exact shortest-path pricing；存在 active SRI dual 时，rank-1 定价器先运行单标签 bucket heuristic，只有启发式未返回列时才运行带 cut-state 的双向 exact labeling。因此 repair 不是只跑 exact，也没有额外的通用 tabu heuristic。Phase 2 若开启，只调用 rank-1 图内 bucket heuristic，不回退 exact；当前主要实验配置将 `strongBranchingPhase2CandidateLimit=0`，所以实际只使用 Phase 1。
+
+Dual stabilization 的边界符合当前要求。入口要求 `!lp.isFeasibilityRepairMode()` 且 active SRI pricing cut 为空；Phase-I repair 和旧 slack repair 都直接调用 pricing engine，不经过 stabilized pricing loop，strong phase 2 也直接调用图启发式。因此 stabilization 只影响无 active SRI cut 的正式节点求解，不进入 repair。
+
+`tStar` 数据流再次核对如下。paper graph fixing 使用 hard window、继承 compact window、普通/时空 pricing-only 禁弧和当前分支弧构造安全图，不使用 dual profitable window。每轮 cleanup 的新增禁弧立即进入下一轮 forward/backward 可达性；最后按每个 job 同时 source-reachable 和 sink-reachable 的时空顶点提取最早、最晚时间并写回 node。rank-1 exact 图仍保持原 hard graph 定义域，只将该 compact hull 与 graph window 取交后计算端点平均值。历史 fixing 日志中的 cleanup 均在 2--3 轮内达到零删除，当前 8 轮上限没有截断已观察实例；即使极端情形达到上限，代码也会按最终已删弧重新计算距离，影响只可能是 hull 偏宽、`tStar` 较弱，不会删掉合法列。
+
+随后对 `data/50-2/wet050_001_2m.dat` 做同配置并行 A/B，只切换默认 Wentges smoothing，均使用 60 秒 ALNS、no-cut time-indexed、strong branching、Phase-I repair、单 CPLEX 线程。两组均得到 `obj=bound=44383`、15 nodes、`valid=true`。关闭 stabilization 为 `522.518s`，root node `265.158s`、root pricing `16.219s/479`、root pool `113165`；开启后为 `739.443s`，root node `290.962s`、root pricing `36.682s/837`、root pool `118974`。完整日志分解显示，开启后执行 3755 次 stabilized pass，约 928870 条候选在 true-dual 复核时被过滤，随后仍执行 1205 次 true-dual pass；总图定价时间约 `362.685s`，关闭时约 `131.218s`。本例 stabilization 总时间退化约 41.5%，没有减少节点，因此继续保持默认关闭。
+
+本次还修正了实验 CSV 的统计口径。此前稳定化开启时只查询精确键 `TimeIndexedGraphPricing`，导致 `[stabilized.*]` 和 `[true]` 两类正式调用被漏报为 `exact_s=0, exact_calls=0`。现在只额外汇总这两类正式后缀，不把 repair 或 strong-branching 调用混入 exact 统计。

@@ -145,7 +145,8 @@ public class GCBBFullDomainComparisonTest {
 				solver.getContext().pool.size(), summary.getSolveTimeSeconds(), summary.getRootSolveTimeSeconds(),
 				seconds(summary.getPricingTimeNanos(), HEURISTIC_ENGINE),
 				count(summary.getPricingCallCount(), HEURISTIC_ENGINE), exactEngine,
-				seconds(summary.getPricingTimeNanos(), exactEngine), count(summary.getPricingCallCount(), exactEngine),
+				formalPricingSeconds(summary.getPricingTimeNanos(), exactEngine),
+				formalPricingCalls(summary.getPricingCallCount(), exactEngine),
 				totalSeconds(summary.getMasterLpTimeNanos()), validation.isFeasible(), log.toString().replace('/', '\\'));
 	}
 
@@ -698,6 +699,34 @@ public class GCBBFullDomainComparisonTest {
 	private static double seconds(Map<String, Long> counter, String key) {
 		Long value = counter.get(key);
 		return value == null ? 0.0 : value.longValue() / 1_000_000_000.0;
+	}
+
+	/**
+	 * Dual stabilization 会给正式定价附加 [stabilized.*] 或 [true] 口径。
+	 * CSV 应汇总这两类正式调用，但不能把 repair/strong-branching 试探混入 exact 统计。
+	 */
+	private static int formalPricingCalls(Map<String, Integer> counter, String engine) {
+		int total = count(counter, engine);
+		for (Map.Entry<String, Integer> entry : counter.entrySet()) {
+			if (isFormalStabilizedPricingKey(entry.getKey(), engine)) {
+				total += entry.getValue().intValue();
+			}
+		}
+		return total;
+	}
+
+	private static double formalPricingSeconds(Map<String, Long> counter, String engine) {
+		long total = counter.containsKey(engine) ? counter.get(engine).longValue() : 0L;
+		for (Map.Entry<String, Long> entry : counter.entrySet()) {
+			if (isFormalStabilizedPricingKey(entry.getKey(), engine)) {
+				total += entry.getValue().longValue();
+			}
+		}
+		return total / 1_000_000_000.0;
+	}
+
+	private static boolean isFormalStabilizedPricingKey(String key, String engine) {
+		return key != null && (key.startsWith(engine + "[stabilized.") || key.equals(engine + "[true]"));
 	}
 
 	private static double totalSeconds(Map<String, Long> counter) {

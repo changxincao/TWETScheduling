@@ -87,3 +87,13 @@ focused `javac` 已覆盖以下文件并通过：
 当前 arc fixing 需要区分三层语义。第一层是 pricing 内部剪枝，例如 rank1 exact pricing 的 `cbPruned`，它只减少本轮 label 入桶，不写 node 状态。第二层是 cut-loop pricing-only fixing，由 `timeIndexedCompletionBoundCutLoopArcFixing` 控制，在每次 pricing 收敛后、下一次 cut separation 或 inactive cut 处理之间触发；该路径不删除当前 RMP 旧列，只把固定结果作为 pricing-only 状态给同一 node 后续 cut/pricing 和子节点使用。active SRI cut 存在时，默认 `timeIndexedCompletionBoundAllowNoSriWithActiveCuts=true` 且 `timeIndexedCompletionBoundSriAwareArcFixing=false`，因此使用 no-SRI 松弛版 fixing，而不是昂贵的 SRI-aware helper。按当前 SRI cut 对偶符号，忽略 SRI 对偶是一种更弱的 reduced-cost fixing 证书，安全但不如完整 SRI-aware pricing 强。第三层是 node-close fixing，由 `timeIndexedCompletionBoundArcFixing` 控制，在节点 LP/cut/pricing 都结束、确认需要继续分支前执行，用于加强后续分支和子树。
 
 随后将 `timeIndexedCompletionBoundCutLoopArcFixing` 默认改为开启，并在同一算例上重跑 `tmp-rank1-cutloopfix-full-20260704`。结果为 `FINISHED, obj=bound=22580, valid=true, solve=182.925s, nodes=4`，相比未开启 cut-loop fixing 的 `207.994s / 7 nodes` 有改善。详细日志显示 root 内第一次 cut-loop fixing 固定约 `1.59e6` 条时空弧，后续 pricing 的 `timeArcSkips` 上升到几十万，说明 fixing 结果确实被同一 node 后续 pricing 消费。代价是 root master LP 时间上升，root node summary 从 116.343s 增至 127.657s；总体变快主要来自后续节点减少和 exact pricing 时间从 79.952s 降到 43.380s。
+
+## 12. 60-3 W100 当前版本 cut/no-cut 公平对照
+
+2026-07-25 启动当前 class 下的 time-indexed cut/no-cut 并行对照，实例均为 `data/60-3/wet060_001_3m.dat`、`W=100`、7200 秒、单 CPLEX 线程、60 秒 ALNS、`best` 初始历史、strong branching 和 Phase-I repair。两边只切换 `timeIndexedGraphRank1CutPricing` 与 `enableSubsetRowCutsForTimeIndexedGraph`，输出分别为：
+
+`test-results/bpc/exp-60-3-W100-current-ti-nocut-ab-7200s-20260725g`
+
+`test-results/bpc/exp-60-3-W100-current-ti-sri-ab-7200s-20260725g`
+
+旧 no-cut 完整结果使用 `148` 条初始列、初始上界 `2149`；当前 cut 版第一次单独启动得到 `154` 条和 `2128`，因此该 run 已停止，不能与旧结果直接比较。重新并行启动后，两边均为 `154` 条初始列、3 条 incumbent 列、初始上界 `2128`。runner 对同一实例使用固定随机种子，两边 ALNS 和初始列参数完全相同；同时开启 root pool dump，root 完成后将继续核对 column `0..153` 的 sequence，避免只凭列数判断一致。

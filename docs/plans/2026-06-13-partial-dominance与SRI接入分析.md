@@ -473,3 +473,9 @@ limited state 在扩展阶段已经按 memory 更新：arc-memory 遇到非 memo
 新 label 不再和历史 labels 逐个比较，而只用自身 state 对应的 `G_r` 做一次 sourced-envelope trim。若有保留区间，则更新它所属的 `E_r`；产生的 delta 仍沿 reachableSet Hasse successors 传播。实现上可不物化所有 `G_r`：第一版在查询时扫描当前 node 中实际存在的 state envelopes，复杂度从 labels 数量降为 distinct states 数量；若 state 数稳定很小，再为常用目标 state 缓存 `G_r`。每个 segment 的 source label 继续保留，因此 source 消失、partial 裁剪和最终路径追踪仍沿用当前 source-aware 机制。
 
 还可以构造一个与目标 state 无关的更保守单包络：对 source state 中每个 residual=1 的 cut一律加 `-dual` 后再取最小。它只维护一个 envelope，但会对 `r=1` 等本来无需补偿的目标也抬高支配方，预计占优明显偏弱。更合理的第一版是 sparse `E_s` 加按目标 state 动态形成 `G_r`，既保留跨 state 的联合占优，也避免 partial-list 的 label 级扫描。
+
+进一步检查后，需要收紧上述 state-envelope 方案的适用判断。若有 200 条二值 residual cut，一个原 reachableSet key 的理论状态数是 `2^200`；只物化实际出现的 state 也不能消除最坏情况，困难节点中 distinct states 可能随 labels 一起增长。因而不能把完整 residual vector 分桶作为默认实现，否则可能只是把 partial-list 的 label 扫描换成 state-envelope 爆炸。
+
+不枚举完整状态时，只能使用更弱但安全的联合包络。最简单的是给每个 source label 的 frontier 加上其所有 pending residual 的最坏 liability，`P(s)=sum_{c:s_c=1}(-dual_c)`，再构造单一 `U=min(F+P)`；对任意目标 state，`U<=F_target` 都是安全支配条件，因为真实共同 continuation 中 source 相对 target 多承担的 SRI penalty 不会超过该 liability。该 envelope 可以作为 source-aware 快速拒绝/裁剪器，但不能仅因某 label 不再贡献 `U` 就直接删除它，因为 `U<=F+P` 不等于 `U<=F`。更稳妥的接法是用 `U` 做前置联合筛选，survivors 再进入当前精确 SRI-aware dominance，或者在 label 出队/join 前懒检查。
+
+介于两者之间可采用有界状态：只精确跟踪少量高 dual、当前 terminal 下 memory-relevant 的 cuts，最多形成固定的 `2^K` 个 envelope；其余 cuts 一律按 pending liability 补偿。该方法状态数可控且安全，但强度依赖 K 和 cut 选择。数学上，不保留能够区分未来 SRI 转移的状态，就不可能得到与完整逐 label SRI dominance 等强的单一标量 envelope。因此当前更现实的顺序是：先评估 universal liability envelope 能过滤多少 labels；若收益不足，再考虑小 K 有界状态，而不是直接实现200-bit完整分桶。

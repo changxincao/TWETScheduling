@@ -287,3 +287,11 @@ Pessoa 论文中的结果确实很好，但实验口径不能直接等同于当�
 效率上，time-indexed 现在只在上述稳定化路径真正可能消费 oracle 时保存 oracle state，并在无负列时调用 evaluator 物化 witness；关闭稳定化、pre-heuristic、Phase-I repair 和 active SRI 不再做该额外工作。新增 dual-window 回归明确命中 `piWindow=enabled` 和负证书，确认回刷后的 oracle reduced cost 与 graph certificate 一致；关闭稳定化后 oracle 为空。focused 编译以及 `DualStabilizationInPointTest`、`TimeIndexedGraphOptimizationTest`、`StrongBranchingPhaseOnePricingTest`、`ActiveCutInheritanceTest` 均通过。
 
 复核后的结论是：无 active SRI、非 repair、无显式外包变量缺口且 exact engine 提供完整 oracle 时，当前 Pessoa 基础 smoothing 的 in-point、Case B、方向信号和最终 true-dual 闭合口径一致。ng-DSSR、active SRI 和显式外包变量模式尚未实现完整 Pessoa oracle，不应描述为已支持；这三个范围现在会明确绕过稳定化，不影响普通求解正确性。
+
+## 24. 2026-07-25：按原文公式再次审计 smoothing 控制流
+
+本次直接逐项对照 Pessoa et al.（2018）的公式（23）、（24）、（28）、Proposition 1 和 Table 1。第 23 节的 range-dual 修正是正确的：内部列最小 reduced cost 为负时，将该值加入机器数 range 的 upper dual，并按 `maxMachineCount*rc_min` 修正 dual objective，等价于在不改变原 lower dual 的情况下补足所有内部列约束；列化外包同理使用上界 1。即使净 machine dual 跨过 0，也不能按净符号重新选择 range 端点。当前 `alpha*in+(1-alpha)*out`、Wentges/Neame 两种 center 规则、完整 oracle 的 `b-Ax` 方向信号、Case B 复用以及 `alpha, 1-2(1-alpha), ... , 0` 的局部回退公式均与原文主骨架一致。`b-Ax` 计算中虽然表面包含 machine/outsource dual objective，但对应 oracle 列的 reduced-cost 差会抵消 convexity dual，因此最终仍是原文公式（21）的 coupling-row subgradient 方向。
+
+再次检查后不能把当前实现描述为原文控制流的完全复现。第一，`runStabilizedPricingSequence()` 在一次 Case C mispricing 序列中只把最后一次 pass 返回给外层；前面已经由 exact oracle 证明可行的 separation points 及其 `L(pi_sep)` 没有交给 Wentges incumbent 更新。原文要求 `hat pi` 在任何已观察到的 Lagrangian bound 改善时更新，因此当前实现可能遗漏该序列中更好的中间 in-point。它不破坏最终正确性，但会改变后续 center 和性能。第二，初始 center 还没有 certified objective 时，第一次所谓 stabilized pass 实际就在 out/true dual 上运行；若该 pass 已证明无负列，外层仍会再执行一次完全相同的 true-dual exact pricing。这是确定的重复计算。更一般地，当局部 schedule 到达 `alpha=0` 时，当前代码先提交最后一个失败 separation point，再由外层单独执行 true pass；这与论文把 `alpha=0` 作为同一 mispricing schedule 的最后一次 oracle 调用不完全相同，也会使随后的自动 alpha 方向使用不同的 in-point。
+
+因此当前结论应修正为：在已支持配置下，现有实现的 dual 向量、Lagrangian bound、range 修正、oracle 和最终闭合数学上是安全的，最终最优性不受影响；但是 Wentges 中间 incumbent 的保留和 `alpha=0`/初始 true-pass 控制流尚未逐步对齐论文。若要求“和论文 smoothing 完全一致”，下一步应把一次 mispricing sequence 作为完整对象处理：固定该序列起始 in-point，保留序列内最好的 certified Wentges in-point，在同一序列中执行 `alpha=0` 的 true oracle，并避免外层重复定价。Neame 只需要保留最后一个 separation point，不能错误使用 Wentges 的 best-bound 更新规则。

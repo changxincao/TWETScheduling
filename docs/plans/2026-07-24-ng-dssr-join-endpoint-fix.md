@@ -32,3 +32,7 @@
 约 51 分钟的中间快照显示，两组都没有再次出现端点异常，但 B&B 树收敛很慢。ng-DSSR 从 root bound `1987.904309` 推进到约 `2039.63`，incumbent 仍为 `2149`，gap 约 `5.09%`，处理约 127 个节点且队列约 126；time-indexed 从 root bound `1973.144339` 推进到约 `2037.26`，gap 约 `5.20%`，处理约 379 个节点且队列约 375。两边几乎每处理一个节点都会留下两个 child，当前慢的根本原因是初始 gap 较大且尚未形成有效 fathoming，不是端点修复造成停滞。
 
 同期累计计时进一步表明，ng-DSSR 的主要耗时为 heuristic pricing `1285.597s/3528`、exact pricing `1073.100s/1621` 和 strong trial RMP `612.910s/5452`；time-indexed 的主要耗时为普通图 pricing `1512.545s/14027`、repair 图 pricing `447.314s/1160` 和 strong trial RMP `859.760s/16040`。ng-DSSR 当前典型 exact 的 `848.924ms` 中 completion bound 为约 `463.427ms`、被正式复用的 midpoint probe/扩展为约 `322.844ms`，join 仅约 `48.305ms`，因此本算例当前瓶颈不是 join。time-indexed 单次图 pricing 较便宜，但节点更多、每个节点反复定价且列池已超过 114 万，累计调用次数把总时间放大。上述均为运行中快照，不作为最终时间或最优性结论。
+
+ng-DSSR 随后在 `4586.267s` 正常证明最优，`obj=bound=2044`、`gap=0`、`valid=true`，处理 194 个节点，root bound 为 `1987.904309`，root 时间 `181.434s`，peak pool 为 232190。全程 heuristic pricing 为 `1863.289s/5062`、ng-DSSR exact 为 `1600.885s/2305`、strong trial RMP 为 `840.750s/7080`；177 次分支中有 15 个节点被 dual bound 剪枝。端点异常没有再次出现。
+
+同一时刻 time-indexed 仍在运行，约 `4630s` 时处理到 node 613，incumbent 已同样更新为 `2044`，global bound 约 `2042.04`、gap 约 `0.0961%`，pool 约 190 万。它尚未形成终止摘要，因此最终耗时和节点数仍待补充。

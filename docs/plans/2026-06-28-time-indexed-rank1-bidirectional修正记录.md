@@ -197,3 +197,9 @@ rank-1 图定价的状态转移也与论文一致。前向扩展先按 memory ar
 5. 论文 DWM 以完整 time-indexed path 作为列身份；当前 Pool 按 job sequence 去重并保留该 sequence 的最低已知真实成本。SRI coefficient 只依赖 sequence，所以这不会造成 cut coefficient 不一致；但模型存储层并非论文 DWM 的逐路径身份，不能称为结构完全相同。
 
 因此当前可以确认的是：SRI cut 本身、图上 residual 资源、双向拼接和 master 接线在代码逻辑上正确；当前 SRI 慢不能归因于这些公式写错。论文与默认实现最重要的性能差异是 SRI-aware fixing 和 smoothing 未启用，以及额外的 cut-round/appearance 限制。仍缺少一项更强的独立验证：目前没有随机小图上把“图状态得到的 coefficient/reduced cost”与完整序列 evaluator 对所有 split 逐一枚举对拍的专门测试；现有回归覆盖接线和已知边界，但不能替代该穷举性质测试。
+
+## 19. 60-3 W100 修正配置重跑
+
+2026-07-25 按用户要求重新启动 `wet060_001_3m`、W100、time-indexed rank-1/SRI 完整求解，时限 7200 秒。旧对照命令曾显式关闭 node-end 和 cut-loop time-indexed fixing；本轮改为 `timeIndexedCompletionBoundArcFixing=true`、`timeIndexedCompletionBoundCutLoopArcFixing=true`，保留默认 no-SRI 松弛 fixing，未启用计算很重的 SRI-aware fixing，也继续关闭已证实退化的 dual stabilization。当前代码已包含 child active-cut 继承和 fixing 后 compact-window `tStar` 修正。
+
+输出目录为 `test-results/bpc/exp-60-3-W100-current-ti-sri-fixed-7200s-20260725h`，Java PID 为 `35880`。启动日志确认实例、W100、rank-1 engine、strong branching 和两类 fixing 参数均正确，stderr 为空。root 闭合时为 `bound=2001.137099`、pool `44846`、cutPool `371`；cut loop 中单次 pricing 已跳过约 85 万至 109 万条时空弧，SRI exact 约 0.09--0.15 秒，说明修正后的 fixing 已实际被消费。当前主要耗时已转为 root strong-trial RMP，每个 trial LP 约 1--2.5 秒。最终结果待进程结束后补充。

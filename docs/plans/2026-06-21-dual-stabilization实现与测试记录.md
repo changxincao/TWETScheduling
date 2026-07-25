@@ -251,3 +251,15 @@ dual-bound pruning 的口径也随之简化。普通 smoothing 点如果有可�
 因此当前结论为：dual smoothing 在本 TWET-BPC 主线中不适合作为默认组件。代码层面继续保持 `enableDualStabilization=false`，显式打开时只作为实验路径。后续若继续研究，应改成 tail-only 或受控触发：前期仍用 true dual；只有连续多轮 LP 改善极小、exact 只返回少量弱负列、或 tailing-off 明显时，才短暂尝试 smoothing，并且应优先限制在 exact pricing 阶段，不建议让启发式 pricing 全程使用 smoothing。
 
 本节结论确认后，仍在运行的 `tmp-wet050-001-dualstab-compare-stab-20260623` 对照进程已手动中止。该 run 已经足够说明全程 smoothing 在当前配置下明显拖慢，不再继续消耗计算时间。
+
+## 21. 2026-07-25：再次对照 Pessoa 2018 与当前 time-indexed 实现
+
+本次直接对照 Pessoa、Sadykov、Uchoa、Vanderbeck（2018）原文和当前 `PC` 实现。当前无 active SRI cut 的正式 pricing 已对齐论文 smoothing 的主骨架：当前 RMP dual 作为 out-point；Wentges 模式以当前最好 certified Lagrangian bound 对应点作为 center/in-point；pricing dual 为 `alpha*center+(1-alpha)*out`；局部 mispricing 序列使用 `alpha, 1-2(1-alpha), ... , 0`；全局 `alpha` 初值为 0.5，并采用 `alpha+0.1(1-alpha)` / `max(0,alpha-0.1)` 更新；最终必须回到 true dual exact pricing 闭合。repair 被明确排除在 stabilization 外，active SRI pricing cut 存在时也直接走 true dual。
+
+当前实现并不等于论文的完整 automatic/combined stabilization。第一，代码只保留纯 smoothing，论文测试还包括 directional smoothing、piecewise-linear penalty 及二者组合。第二，代码把 `alpha` 上限限制为 0.8，这是本工程的保守参数，不是原文规则。第三，也是最实质的差异，论文用完整 oracle 解产生的 Lagrangian subgradient `b-Ax` 判断 `g_sep·(pi_out-pi_in)`；当前 `representativeGradient()` 只用本次接受的单条代表列构造 `-Aq` 近似，既没有 RHS 项，也没有聚合多台同构机器对应的 oracle 解，而且代表列按 true out-dual 接受成本选取，不一定是 separation dual 下的 oracle minimizer。因此当前 `alpha` 自适应方向不是论文公式的严格实现。该差异只影响性能调度，不影响最终正确性，因为 true-dual 闭合仍保留。
+
+流程上还有一个效率差异。论文的 Case B 会在 separation point 没被切开、但同一 oracle 列仍切开 out-point 时直接加入该列。当前 pricing engine 只返回 separation dual 下的负列；若 stabilized pass 没有可接受列，外层会重新执行一遍完整 true-dual pricing，而不是复用 separation oracle 的最优非负列检查 Case B。与此同时，time-indexed engine 会批量返回 stabilized dual 下的候选，PC 再逐条用 out-dual 过滤。50-2 A/B 中因此出现 3755 次 stabilized pass、约 92.9 万条 out-dual 过滤候选，之后仍有 1205 次 true-dual pass；总图定价约 362.7 秒，而关闭 stabilization 约 131.2 秒。两组都为 15 nodes 和 `obj=bound=44383`，开启后总时间由 522.5 秒增至 739.4 秒。结论是这次退化不是正确性错误，而是 stabilized pass 没减少节点或有效 CG 轮次，反而改变 reduced-cost landscape、增加批量无效候选和 true-dual 复核。
+
+Pessoa 论文中的结果确实很好，但实验口径不能直接等同于当前 TWET-BPC。其 `P||sum w_jT_j` 定价是允许重复任务的 `O(nT)` 动态规划，不含当前模型的 setup、earliness/due-window、分支 repair 和完整 BPC 开销；表 3--4 比较的是 master LP column generation。对 parallel machine scheduling，automatic Wentges smoothing 相对无稳定化的时间加速几何均值约 2.91，迭代/定价调用分别减少约 2.16/2.12 倍；automatic directional 组合的时间加速约 3.61。论文同时明确指出，VRP、cutting stock、vertex coloring 等问题会因为 smoothed dual 更稠密、更均匀而使 pricing 变难，收益并不稳定。当前 time-indexed 50-2 正属于“额外 pricing 成本超过迭代收益”的情况。
+
+因此当前判断为：无 cut 下的稳定化闭合语义正确，但只是 Pessoa/Wentges 的工程化子集，尤其 `alpha` subgradient 信号尚未严格对齐；active SRI 下当前完全没有使用 stabilization。现有 50-2 结果足以支持继续默认关闭，但不能据此否定论文的完整自动稳定化。若继续研究，优先级应是先实现准确的聚合 oracle subgradient 和 Case B 复用，再做同一 root 的 CG-only A/B；在此之前不应直接把 directional 或 penalty 重新叠加到主线。

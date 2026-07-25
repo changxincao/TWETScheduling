@@ -1212,6 +1212,16 @@ backward 比 forward 多出的固定工作已经确认。现有 `normalizeBackwa
 
 `50-3 setupR50 timeX10 + W1000` 的旧日志中，ng-DSSR exact 共 `287.800s/154 calls`，其中初始化 `250.013s`，`window=185.061s`。这里的 `window` 不是一次 root preprocessing，也不只是逐 job 取窗口交集；主要内容是每个新的 exact pricing 在当前 dual 下重新构造 `TimeIndexedScalarCompletionBound` 的离散松弛图，计算正反向 scalar bound，再用结果收缩当轮 effective window。同一次 ng-DSSR 的后续 DSSR 轮可以复用，但下一次 LP/exact 的 dual 已变，因此旧实现会重新构造。W1000 的 horizon 和时空禁弧状态较大，累计形成了 185.1s。
 
+### 2026-07-25：60-3 W100 严格时间放大20倍的 time-indexed SRI root 对照
+
+本轮沿用 `exp-60-3-W100-current-ti-sri-fixed-7200s-20260725h` 的完整修正配置，包括 ALNS 60 秒、time-indexed rank-1/SRI、dual window、每轮最多300列、node-end/cut-loop fixing、strong branching 和 Phase-I repair；只把 `maxNodes` 改为1。原始组使用 `wet060_001_3m` 和 `W=100`，放大组把 processing、due date、完整 setup time 矩阵和 due-window half width 全部乘20，即 `W=2000`。此前误启动的 ×20/W100 组已立即停止并标记为无效，不进入任何结论。
+
+原尺度 root 为 `117.143s`，time-indexed pricing 为 `8.540s/349`，pool/cutPool 为 `44846/371`；×20 root 为 `305.083s`，pricing 为 `182.409s/301`，pool/cutPool 为 `39909/315`。因此 root 总时间只增加到2.60倍，但 pricing 总时间增加21.36倍；所有调用的混合平均从 `24.470ms` 增至 `606.010ms`，约24.77倍。总时间倍数较小不是图没有膨胀，而是×20组 pricing调用更少，master LP 又从 `102.523s/389` 降至 `73.506s/341`。两组 ALNS 得到的初始列和 incumbent 也不同，分别为 `154/2128` 与 `147/42980`，因此 root总时间、cut轮数和列池不能解释为纯尺度常数。
+
+图规模本身基本按20倍增长。rank-1 horizon 从3519变为70367，为19.996倍；首次完整 graph-fixing candidates 从12,916,872变为258,219,527，为19.99倍。SRI heuristic pricing 的平均 arc scans 从1,143,091变为23,954,579，为20.96倍，平均 kept labels 从65,957变为1,392,996，为21.12倍；SRI exact 的平均 arc scans 从1,386,803变为28,303,576，为20.41倍，平均 kept labels 从70,137变为1,451,968，为20.70倍。也就是说，实际可达状态和扫描弧没有被 fixing 压到原尺度，而是仍接近线性随 horizon 膨胀。
+
+单次计算时间的增长略高于图规模。SRI heuristic 平均从 `37.805ms` 增至 `1187.705ms`，约31.42倍；SRI exact 从 `99.912ms` 增至 `2920.858ms`，约29.23倍。无 active cut 的普通图阶段平均从 `11.415ms` 增至 `165.191ms`，约14.47倍。cut-loop graph fixing 共计从 `3.079s/11次` 增至 `46.638s/9次`，总时间约15.15倍；首次完整 fixing 单次从0.732秒增至11.202秒。当前结论是：严格时间尺度放大不会明显改变列数和pricing轮数，但会让 time-indexed 的状态、弧扫描和 rank-1 label 数近似按 horizon 线性放大，并使带cut单次pricing出现约29至31倍退化。这正是大时间尺度下 ng-DSSR 可能获得优势的主要机制。
+
 本次把 `timeIndexedCompletionBoundInRoundArcFixing` 的语义收紧为整套 pricing 内 helper 开关。关闭时，ng-DSSR exact 不再构造临时 time-indexed 图，也不做本轮 0-reduced-cost 时空弧 fixing/window tightening；节点 LP 闭合后的 `TimeIndexedScalarCompletionBound.applyArcFixing()`、cut-loop 闭合后的永久 pricing-only fixing 仍由原有 scalar/arc-fixing/cut-loop 开关控制，不受影响。打开时保持旧的 in-round 强化逻辑。该修改消除了开关关闭但仍支付建图成本的实现偏差；完整求解收益仍需 A/B，因为失去本轮窗口强化后 labeling 可能增加。
 
 同时修正 strong branching 外层耗时的归因。lightweight seed 为了保留父 LP 正值列并过滤其余 child-incompatible 列，仍必须扫描 `child.seedColumnIds` 和父 restricted columns；本次不能、也没有删除这层扫描。无 required-outsourcing 时，原 `Node.isColumnCompatible()` 确实会对每条内部列遍历全部 outsourcing state，但由于 Java 短路，此时不会调用 `column.containsJob()`。因此该循环是确定冗余，却不能直接解释全部 `84.387s` 未归类时间。本次维护 required-outsourcing 计数，计数为 0 时跳过 job-state 循环，同时保留完整 sequence arc 检查；并新增求解结束聚合日志 `strongBranchingLightSeedPreparation`，记录调用数、机器/外包列扫描数和真实耗时，后续再决定是否需要 branch-delta 检查或列 arc-incidence 缓存。

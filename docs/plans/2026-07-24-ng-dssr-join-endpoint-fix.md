@@ -36,3 +36,7 @@
 ng-DSSR 随后在 `4586.267s` 正常证明最优，`obj=bound=2044`、`gap=0`、`valid=true`，处理 194 个节点，root bound 为 `1987.904309`，root 时间 `181.434s`，peak pool 为 232190。全程 heuristic pricing 为 `1863.289s/5062`、ng-DSSR exact 为 `1600.885s/2305`、strong trial RMP 为 `840.750s/7080`；177 次分支中有 15 个节点被 dual bound 剪枝。端点异常没有再次出现。
 
 同一时刻 time-indexed 仍在运行，约 `4630s` 时处理到 node 613，incumbent 已同样更新为 `2044`，global bound 约 `2042.04`、gap 约 `0.0961%`，pool 约 190 万。它尚未形成终止摘要，因此最终耗时和节点数仍待补充。
+
+time-indexed 最终也正常证明最优：`5144.914s`、`obj=bound=2044`、`gap=0`、`valid=true`，处理 730 个节点，root bound 为 `1973.144339`，root 时间 `94.874s`，peak pool 为 2275217。累计普通图 pricing 为 `3008.596s/26657`，repair 图 pricing 为 `569.101s/1406`，strong trial RMP 为 `1014.630s/18800`；有 258 个节点被 incumbent 剪枝。
+
+最终同机并行口径下，ng-DSSR 为 `4586.267s/194 nodes/peak pool 232190`，time-indexed 为 `5144.914s/730 nodes/peak pool 2275217`。ng-DSSR 总时间少 `558.647s`，约快 `10.86%`；其 root 慢 `86.560s`，但 root bound 强 `14.759970`，最终节点数减少 `73.42%`、peak pool 减少 `89.80%`。本轮两组均达到相同最优值且端点异常未复现。

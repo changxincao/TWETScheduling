@@ -147,3 +147,19 @@ focused `javac` 已覆盖以下文件并通过：
 调度论文没有给 dual stabilization 的开关消融或 CG 迭代数对照。正文只说明使用 Pessoa et al. (2018) 的 automatic dual-price smoothing，结论部分直接声称其显著减少迭代；表 3--6 的有 cut/无 cut 版本都包含 stabilization，不能单独证明该组件的贡献。严格证据来自被引用的 stabilization 专门论文，其中比较了 automatic smoothing、penalty stabilization 及其组合，并讨论参数自动调整。因而当前应把“减少迭代”理解为引用既有方法的实验结论和作者实现经验，而不是这篇调度论文自身完成的独立消融。
 
 当前工程代码还没有实现论文中的 active-SRI + smoothing 组合。`PC.solvePricingLoop()` 只有在 `activeSubsetRowPricingCutIds` 为空时才进入 dual stabilization；一旦存在真正参与 pricing 的 SRI cut，就直接使用 true-dual pricing。因此本次运行不仅在命令行上关闭了 stabilization，即使只打开总开关，active-SRI 轮次仍不会被稳定化。若后续要复现论文完整流程，需要先把 SRI dual、同一 stabilized point 的完整 dual objective 和 reduced-cost certificate 纳入统一 snapshot，而不能只改配置开关。
+
+## 16. fixing 后 tStar 与 child cut 继承复核
+
+2026-07-25 将论文 `tStar` 的输入口径补齐到 fixing 后剩余顶点。paper graph fixing 的 cleanup 收敛后，直接复用最终 forward/backward 可达数组，按 job 提取仍同时可从 source 到达且可到 sink 的最早、最晚时空顶点，并写入 node compact window。只有 cleanup 达到轮数上限且最后一轮仍删弧时才补算一次距离；通常零删除终止轮的距离可直接复用。rank-1 exact 图本身仍按原 hard window 和精确时空禁弧构造，不把 compact hull 当作新的 exact 图定义域；compact window 只用于
+
+`tStar = round(sum_j(tMin_j + tMax_j) / (2 * |J_feasible|))`
+
+的端点输入。因此本次修改只改变双向切分位置，不改变定价列族。
+
+ng-DSSR 新增 `midpointStrategy=windowAverage`，用当前 effective windows 的左右端点平均作为 probe 初始参考；默认仍为原 `default`。40-2、关闭 root preprocessing、相同 seed/配置的 root-only 并行 A/B 中，两组均为 `bound=22490`、14 次 exact。default 为 `solve=19.351s, exact=4.710s`，windowAverage 为 `solve=19.078s, exact=4.656s`。新策略把原始参考从约 1425 改为约 820，但现有 probe 最终大多仍选到约 850，性能差异约 1%，不足以证明更优，因此只保留为实验开关。
+
+cut 继承链再次按完整生命周期验证：正式父 LP 的 cut loop 最终得到 `LP.activeCutIds`，分支前一次性同步到 `Node.activeCutIds`；所有普通 brancher 和 strong-trial brancher 都从该 node 深拷贝 child；child `LP.construct()` 再从 child node 恢复 active cut rows。已在父 LP 中删除的 inactive cut 不会继承，child 后续仍可按自己的 dual 删除失活 cut。回归测试同时覆盖列表不共享和 child RMP 的实际恢复。
+
+本次 60-3 W100 SRI run 仍应明确解释为“完全没有执行 time-indexed arc fixing”：参数同时关闭了 node-end、cut-loop 和 in-round fixing。默认配置并非如此；默认 node-end 和 cut-loop fixing 均开启，只是该次对照命令显式覆盖为 false。
+
+当前 dual stabilization 的适用边界没有变化：只进入非 repair 且没有 active SRI pricing cut 的正式 pricing loop，可覆盖 no-cut time-indexed、no-SRI ng-DSSR、普通 heuristic 和列化外包 pricing；Phase-I/repair 和 active-SRI rank-1 pricing均直接使用 true dual。active cut 仅存在于 cut pool、但其 dual 为零且未进入 active pricing cut 集时，不会阻止 stabilization。

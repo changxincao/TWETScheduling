@@ -305,7 +305,7 @@ public class TWETBPCConfig {
 	 * 取 0..1 时强制使用本轮 pricingHorizon 的该比例，不是全局 CmaxH 的比例。
 	 */
 	public double bidirectionalRootLocalHorizonMidpointRatio = Double.NaN;
-	/** 2026-06-06: GCNGBB-style bidirectional pricing 的 Tmid 策略；默认 default 保持原有逻辑。 */
+	/** GCNGBB-style Tmid 初值策略；windowAverage 使用论文 time-indexed t* 的窗口端点平均。 */
 	public String bidirectionalMidpointStrategy = "default";
 	/** 2026-06-06: column-based Tmid 策略最多评价多少条低 reduced-cost 当前列。 */
 	public int bidirectionalMidpointColumnLimit = 400;

@@ -337,8 +337,7 @@ public final class TimeIndexedGraphOptimizationTest {
 	}
 
 	/**
-	 * 2026-07-14: compact hull 只供 pre-heuristic/fixing 等受限入口使用；正式 exact 图
-	 * 必须继续按 hard window 和精确时空禁弧构造，不能再次把 job hull 套到 exact horizon 上。
+	 * compact hull 不改变正式 exact 图定义域；rank-1 只用它按论文公式计算切分点 t*。
 	 */
 	private static void testCompactWindowConsumptionBoundaries() throws Exception {
 		Data data = loadData();
@@ -381,6 +380,19 @@ public final class TimeIndexedGraphOptimizationTest {
 		if (horizon.getInt(rank1Window) != hardHorizon) {
 			throw new AssertionError("rank-1 exact consumed compact horizon: " + horizon.getInt(rank1Window)
 					+ " != " + hardHorizon);
+		}
+		Method computeTStar = TimeIndexedGraphRank1CutPricingEngine.class
+				.getDeclaredMethod("computeTStar", rank1Window.getClass(), Node.class);
+		computeTStar.setAccessible(true);
+		int expectedTStar = 0;
+		for (int job = 1; job <= data.n; job++) {
+			expectedTStar += node.getTimeIndexedPricingWindowStart(job);
+		}
+		expectedTStar = (int) Math.round(expectedTStar / (double) data.n);
+		int actualTStar = ((Integer) computeTStar.invoke(null, rank1Window, node)).intValue();
+		if (actualTStar != expectedTStar) {
+			throw new AssertionError("rank-1 tStar ignored remaining-vertex windows: "
+					+ actualTStar + " != " + expectedTStar);
 		}
 	}
 

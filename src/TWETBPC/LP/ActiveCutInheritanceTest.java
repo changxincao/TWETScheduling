@@ -41,6 +41,12 @@ public final class ActiveCutInheritanceTest {
 		if (!parent.activeCutIds.equals(Collections.singletonList(Integer.valueOf(keptCut)))) {
 			throw new AssertionError("Child and parent active-cut lists are aliased");
 		}
+		child.activeCutIds.add(Integer.valueOf(keptCut));
+		LP childLp = new LP(data, pool, cutPool, config, new OutsourcingPool(data));
+		childLp.construct(child, child.seedColumnIds);
+		if (!childLp.getActiveCutIds().equals(Collections.singletonList(Integer.valueOf(keptCut)))) {
+			throw new AssertionError("Inherited cut was not restored when the child RMP was constructed");
+		}
 		System.out.println("ActiveCutInheritanceTest passed");
 	}
 }

@@ -159,7 +159,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.graphWindow = computeGraphWindow(data, lp);
 			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
-			this.tStar = computeTStar(graphWindow);
+			this.tStar = computeTStar(graphWindow, lp == null ? null : lp.getNode());
 			this.heuristicMode = heuristicMode;
 			this.phaseOneObjective = lp.isFeasibilityPhaseOneObjectiveMode();
 			this.penaltyByJobTime = staticPricingData.penaltyByJobTime;
@@ -946,13 +946,21 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		return new GraphWindow(discreteHorizon, start, end, dualWindow);
 	}
 
-	private static int computeTStar(GraphWindow window) {
+	private static int computeTStar(GraphWindow window, Node node) {
 		double sum = 0.0;
 		int count = 0;
 		for (int job = 1; job < window.start.length; job++) {
-			if (!Utility.compareGt(window.start[job], window.end[job])) {
-				sum += Math.ceil(window.start[job] - 1e-9);
-				sum += Math.floor(window.end[job] + 1e-9);
+			double start = window.start[job];
+			double end = window.end[job];
+			// 2026-07-25: 论文 t* 使用 fixing 后仍存在顶点的最早/最晚时间；
+			// compact hull 只参与切分点计算，不改变 rank-1 exact 图的定义域。
+			if (node != null && node.hasTimeIndexedPricingWindow(job)) {
+				start = Math.max(start, node.getTimeIndexedPricingWindowStart(job));
+				end = Math.min(end, node.getTimeIndexedPricingWindowEnd(job));
+			}
+			if (!Utility.compareGt(start, end)) {
+				sum += Math.ceil(start - 1e-9);
+				sum += Math.floor(end + 1e-9);
 				count++;
 			}
 		}

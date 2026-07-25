@@ -6809,7 +6809,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 
 		double left = midpointLeftBound();
-		if ("incumbentMakespan".equalsIgnoreCase(midpointStrategyUsed)) {
+		if ("windowAverage".equalsIgnoreCase(midpointStrategyUsed)) {
+			double reference = effectiveWindowAverageMidpoint();
+			if (Double.isFinite(reference)) {
+				midpointReferenceTime = reference;
+				midpointStrategyNanos += System.nanoTime() - start;
+				return clampCurrentMidpoint(reference);
+			}
+		} else if ("incumbentMakespan".equalsIgnoreCase(midpointStrategyUsed)) {
 			double reference = incumbentBestMakespan();
 			if (Double.isFinite(reference)) {
 				midpointReferenceTime = reference;
@@ -6861,6 +6868,21 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointReferenceTime = pricingHorizon;
 		midpointStrategyNanos += System.nanoTime() - start;
 		return candidate;
+	}
+
+	/** 论文 t* 口径：对当前 effective job windows 的左右端点求总平均。 */
+	private double effectiveWindowAverageMidpoint() {
+		double sum = 0.0;
+		int count = 0;
+		for (int job = 1; job <= data.n; job++) {
+			double start = effectiveJobHStart[job];
+			double end = effectiveJobHEnd[job];
+			if (!Utility.compareGt(start, end) && Double.isFinite(start) && Double.isFinite(end)) {
+				sum += start + end;
+				count++;
+			}
+		}
+		return count == 0 ? Double.NaN : sum / (2.0 * count);
 	}
 
 	private double computeDefaultMidpoint() {

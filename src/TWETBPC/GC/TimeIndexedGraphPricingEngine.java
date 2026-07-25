@@ -917,6 +917,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 			int cleanupFixed = 0;
 			StringBuilder cleanupRoundTrace = new StringBuilder();
+			boolean cleanupDistancesCurrent = false;
 			for (int cleanupRound = 0; cleanupRound < 8; cleanupRound++) {
 				int roundFixed = cleanupGraph();
 				if (cleanupRoundTrace.length() > 0) {
@@ -924,16 +925,43 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				}
 				cleanupRoundTrace.append(roundFixed);
 				if (roundFixed <= 0) {
+					cleanupDistancesCurrent = true;
 					break;
 				}
 				cleanupFixed += roundFixed;
 			}
+			// 论文中的 t* 使用 cleanup 后仍存在的时空顶点。这里直接复用 fixing 已计算的
+			// forward/backward 可达性提取每个 job 的最早/最晚顶点，避免后续 pricing 重扫 O(n^2 H)。
+			writeRemainingVertexWindows(cleanupDistancesCurrent);
 			int candidates = processCandidates + idleCandidates + endCandidates;
 			int fixed = processFixed + idleFixed + endFixed + cleanupFixed;
 			node.mergeTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc, timeArcPairWidth, horizon);
 			return new ArcFixingResult(true, candidates, fixed, processFixed, idleFixed, endFixed, cleanupFixed,
 					cleanupRoundTrace.toString(), unavailable, gap, false, System.nanoTime() - start,
 					"paper time-indexed reduced-cost arc fixing");
+		}
+
+		private void writeRemainingVertexWindows(boolean distancesCurrent) {
+			// cleanup 最后一轮若仍删弧，现有距离是删弧前的；只有这种少见情况才补算一次。
+			if (!distancesCurrent) {
+				computeForwardDistances();
+				computeBackwardDistances();
+			}
+			for (int job = 1; job <= n; job++) {
+				int min = -1;
+				int max = -1;
+				int start = Math.max(0, (int) Math.ceil(graphWindow.start[job] - 1e-9));
+				int end = Math.min(horizon, (int) Math.floor(graphWindow.end[job] + 1e-9));
+				for (int time = start; time <= end; time++) {
+					if (isFinite(forward[index(job, time)]) && isFinite(backward[index(job, time)])) {
+						if (min < 0) {
+							min = time;
+						}
+						max = time;
+					}
+				}
+				node.tightenTimeIndexedPricingWindow(job, min < 0 ? 1 : min, min < 0 ? 0 : max);
+			}
 		}
 
 		private void computeForwardDistances() {

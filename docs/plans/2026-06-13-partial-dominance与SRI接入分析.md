@@ -419,3 +419,13 @@ pricing 侧目前只接入 partial-list ng-DSSR 这条 SRI-aware 主路径，并
 本次将 `TWETBPCConfig.subsetRowCutMemoryMode` 的默认值从 `full` 改为 `arcMemory`。因此后续只要打开 ng-DSSR partial+SRI，而没有额外传 `twet.bpc.fullDomainCompare.subsetRowCutMemoryMode`，默认就会走 limited arc-memory SRI。旧 full-SRI 仍保留为显式对照口径，可通过 `-Dtwet.bpc.fullDomainCompare.subsetRowCutMemoryMode=full` 恢复。
 
 验证上，只修改默认配置值，不改变 cut generator 和 pricing 的算法逻辑。focused `javac` 编译 `TWETBPCConfig`、`SubsetRowCutGenerator` 和 `GCBBFullDomainComparisonTest` 通过。
+
+### 2026-07-25 新 source-aware graph 下不显式携带 SRI state 的可行边界
+
+当前 SRI master 行是 `<=`，有效 pricing dual 只取负值；对任意列，SRI 对 reduced cost 的贡献为 `-dual × coefficient >= 0`。因此完全忽略 SRI penalty 的 no-SRI pricing 是含 SRI pricing 的松弛：`rc_noSRI(c) <= rc_SRI(c)`。这给出一个严格安全但单向的结论：若当前增量 source-aware graph 能证明 `min rc_noSRI >= 0`，则含 SRI 的真实 pricing 也必然闭合，SRI cut 可以保留在 master 中，节点 bound 有效。
+
+反方向不成立。若 no-SRI pricing 找到负列，但该序列补上 SRI penalty 后不再为负，不能据此断言真实 SRI pricing没有负列；另一个 no-SRI 成本稍高、SRI coefficient 更小的序列仍可能具有负的真实 reduced cost。更关键的是，no-SRI dominance 可能已经删除这种序列的 partial label，因此“恢复若干 no-SRI 候选后统一回刷 SRI coefficient”不能替代完整 SRI-aware pricing。只有 active SRI dual 全为零时，忽略 SRI 才与真实 pricing 完全等价。
+
+在不让新 graph 携带 SRI state 的前提下，有三种可保持正确性的使用方式。第一，把 no-SRI pricing 作为 relaxed oracle：`min rc_noSRI >= 0` 时直接闭合；小于零时只把回刷后真实 reduced cost 为负的候选加列，同时用 relaxed reduced-cost certificate 计算保守 dual bound，但不能把 cut-RMP 宣称为完整闭合。第二，做机会式 SRI：若 relaxed oracle 不能闭合，就删除本轮 active SRI、回到 no-cut master 重新闭合；这样实现简单且精确，但 SRI 强化只在能够被 no-SRI certificate 直接验证的轮次保留。第三，只在 root 用现有 SRI-aware pricing 完整闭合 cut LP，随后树内移除 cut 并恢复新 source-aware graph；已证明的 root cut bound 仍可作为所有后代的 inherited lower-bound floor，但后续 child 不再继续获得 SRI 强化。
+
+当前更值得实验的是第三种 root-only 混合方案。它把 SRI state 的高成本限制在 root，同时保留 root cut 对整棵子树的合法下界；现有 40/4 记录也表明 SRI 的主要收益正是显著减少节点，而主要代价集中在 root cut-pricing。若要求从 root 到所有 child 都持续保留并完整利用 SRI 强化，则没有“不在 pricing 中考虑 SRI”同时仍严格闭合的通用捷径，只能让 dominance state 区分 SRI residual，或切换到现有 SRI-aware pricing。

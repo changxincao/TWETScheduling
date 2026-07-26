@@ -1,0 +1,344 @@
+\section{Branch-Price-and-Cut Algorithm}\label{sec:solution}
+
+Both formulations are solved by branch-price-and-cut. Their internal columns,
+internal pricing problem, and machine-side branching rules are identical. They
+differ only in the representation of outsourcing: formulation
+$\mathrm{SC\text{-}M}$ keeps the outsourcing decisions in the master, whereas
+$\mathrm{SC\text{-}C}$ invokes a second pricing problem for outsourcing columns.
+This section first describes the common node-processing framework and then presents
+the two pricing problems and the formulation-specific branching decisions.
+
+\subsection{Restricted master problem and node processing}
+
+At a branch-and-bound node $u$, let $\mathcal R_u\subset\mathcal R$ denote the
+current set of internal columns. For $\mathrm{SC\text{-}C}$, let
+$\mathcal O_u\subset\mathcal O$ denote the current set of outsourcing columns. The
+node is processed by repeatedly solving the corresponding restricted master
+problem (RMP), generating negative-reduced-cost columns, and reoptimizing the RMP.
+In the principal continuous-time configuration, the internal pricing engines are
+called in the following order:
+\begin{enumerate}[label=(\roman*)]
+    \item a tabu-search pricing heuristic;
+    \item exact continuous-time bidirectional labeling with ng-route decremental
+    state-space relaxation (ng-DSSR).
+\end{enumerate}
+The time-indexed method is mounted as an alternative exact engine and does not call
+the external tabu-search engine first; its inexpensive bucket search, when active,
+is internal to the time-indexed pricing procedure.
+For $\mathrm{SC\text{-}C}$, exact outsourcing pricing is then performed with the
+same RMP dual solution. Thus, the pricing loop is closed only after all column
+families have been priced exactly.
+
+Let $z_u^{\mathrm{RMP}}$ be the optimal RMP value, let
+$\bar c_u^{\mathrm{in}}$ be a certified lower bound on the reduced cost of any
+internal column, and, for $\mathrm{SC\text{-}C}$, let
+$\bar c_u^{\mathrm{out}}$ be the corresponding bound for outsourcing columns. Let
+$m_u^{\max}$ denote the machine-count upper bound that remains valid at node $u$. A
+valid node lower bound is
+\begin{equation}
+    \underline z_u
+    =
+    z_u^{\mathrm{RMP}}
+    +
+    m_u^{\max}\min\{0,\bar c_u^{\mathrm{in}}\}
+    +
+    \mathbf 1_{\{\mathrm{SC\text{-}C}\}}
+    \min\{0,\bar c_u^{\mathrm{out}}\}.
+    \label{eq:node-dual-bound}
+\end{equation}
+The machine multiplier in \eqref{eq:node-dual-bound} follows from the node-specific
+version of \eqref{eq:machine-capacity}; at most one outsourcing column can be
+selected in $\mathrm{SC\text{-}C}$. The bound is used only when the relevant pricing
+certificates are complete. In particular, a certificate for internal columns alone
+cannot close a node of $\mathrm{SC\text{-}C}$.
+
+\paragraph{Initial columns and incumbent.}
+An initial feasible schedule is obtained by a multi-start adaptive
+large-neighborhood search. Its machine sequences are inserted into the global
+column pool, together with singleton columns needed to initialize the RMP. When a
+root time-indexed preprocessing run is enabled, a small number of elementary
+columns with favorable reduced costs are also transferred to the continuous-time
+root RMP. At a child node, the restricted column set retains the positive parent
+columns and selected low-reduced-cost columns, so that the branch decision is
+evaluated from the parent's actual LP support rather than from an unrelated column
+sample.
+
+\paragraph{Column identity and cost evaluation.}
+The global pool identifies an internal column by its ordered job sequence. The cost
+stored for that sequence is the minimum timing cost over its valid time domain, as
+defined in \eqref{eq:internal-column-cost}. Bidirectional labeling may recover the same
+sequence through different split points. A sequence accepted for the master is
+therefore evaluated once over its complete valid domain before it is inserted or
+used to update an existing pool entry. This separates route discovery from final
+sequence costing and avoids making the master coefficient depend on the particular
+bidirectional split used to recover the sequence.
+
+\subsection{Functional representation of internal pricing}
+\label{subsec:functional-pricing}
+
+For a fixed partial sequence, its best reduced cost depends on the completion time
+of its last job. We represent this relation by a piecewise-linear function (PWLF).
+Consider a forward partial sequence ending at job $j$. Its label contains:
+\begin{itemize}
+    \item the terminal job and a predecessor pointer for sequence recovery;
+    \item an ng-memory set and a set of jobs that remain extendable;
+    \item a PWLF giving the minimum reduced cost for each feasible completion time
+    of $j$.
+\end{itemize}
+Waiting is handled by the directional closure of the PWLF: a forward function
+stores the best value attainable no later than a given completion time, whereas a
+backward function stores the symmetric suffix information. Extending a label
+through arc $(i,j)$ shifts its time domain by $s_{ij}+p_j$, adds the penalty
+function of $j$ and all applicable dual contributions, intersects the result with
+the current hard time domain of $j$, and normalizes the resulting function.
+
+The functional representation is important for two reasons. First, it handles
+continuous completion times directly and therefore does not scale with the numeric
+length of the scheduling horizon. Second, dominance compares the complete
+time--cost trade-off of two partial sequences rather than a single scalar cost
+evaluated at an arbitrarily selected time.
+
+\subsection{Heuristic internal pricing}
+
+The heuristic pricing engine is a tabu search over complete machine sequences. Its
+seeds are drawn from active RMP columns, prioritizing favorable reduced costs and
+positive basic columns. Starting from each seed, the search evaluates three move
+families: removing a job, adding a job, and exchanging an included job with an
+excluded job. Each iteration applies the best admissible move; a tabu move is
+allowed when it improves the best value reached from the current seed.
+
+Sequence costs are updated by functional prefix--suffix composition. Before a move
+is accepted, arcs prohibited by the current branching decisions and pricing-only
+fixing information are checked directly. Negative-reduced-cost sequences reached
+along the accepted search trajectory are collected, deduplicated by sequence, and
+returned in increasing reduced-cost order. The heuristic does not provide an
+optimality certificate. Failure to find a column therefore transfers control to
+the exact internal pricing engine.
+
+\subsection{Exact continuous-time pricing by bidirectional ng-DSSR}
+\label{subsec:ng-dssr}
+
+The principal continuous-time configuration studied here combines bidirectional PWLF
+labeling, ng-route relaxation, and DSSR. It is exact at termination: intermediate
+rounds may admit non-elementary walks, but every returned master column is
+elementary, and the ng sets are enlarged whenever a negative non-elementary witness
+remains.
+
+\subsubsection{Bidirectional labeling and midpoint selection}
+
+Forward and backward labels are generated on complementary half-domains separated
+by a midpoint $T^{\mathrm{mid}}$. The initial midpoint is derived from the effective
+time horizon. A bounded probe evaluates candidate midpoints by running limited
+forward and backward expansions. If one direction is substantially heavier, the
+probe moves the midpoint toward that direction and, after the imbalance changes
+sign, refines the bracket. The selected candidate's labels are reused by the full
+labeling run, so the probe is not a separate discarded computation.
+
+Within a DSSR sequence, the previous round supplies feedback on the observed
+forward/backward workload. A sufficiently unbalanced round shifts the next probe
+seed toward the heavier side; otherwise, the current midpoint is retained as the
+next starting point. This mechanism addresses the main failure mode of a fixed
+geometric midpoint: long or heterogeneous time windows can make one half-domain
+orders of magnitude harder than the other even when their numeric widths are
+similar.
+
+\subsubsection{Ng-memory and state-space refinement}
+
+Let $N_j\subseteq\mathcal J\setminus\{j\}$ be the ng-neighborhood of job $j$. For a
+forward label $L$ ending at $j$, the ng-memory $M(L)$ contains recently visited
+jobs whose repetition remains relevant under the current neighborhoods. Extending
+$L$ to job $k$ is forbidden when $k\in M(L)$, and the memory is updated by
+intersecting the inherited memory with $N_k$ and adding the newly visited
+information required by the ng-route rule. Jobs that cannot be reached again under
+the effective time windows are excluded when the initial neighborhoods are
+constructed.
+
+The initial neighborhood size grows with the instance size and is restricted to
+jobs that can genuinely participate in a repeated visit. After a pricing round,
+negative elementary sequences are returned to the master. Negative non-elementary
+sequences are retained as DSSR witnesses. For each selected witness, repeated
+subsequences identify missing ng pairs; adding these pairs prevents the same
+violation from surviving unchanged in the next round. Witnesses are processed in
+reduced-cost order, while redundant witnesses already eliminated by earlier
+updates are skipped. The algorithm terminates when it finds elementary negative
+columns or when an exact round proves that no negative relaxed route remains. The
+latter condition also proves that no negative elementary column exists.
+
+\subsubsection{Source-aware incremental dominance}
+
+Labels are organized by terminal job and a reachable-set key. The complement of
+this key combines the jobs retained by ng-memory with jobs that are currently
+unreachable under the label's time domain. Keys form a partial order: a predecessor key
+represents a state that can dominate labels stored at a successor key. For each
+key, the algorithm maintains a sourced lower envelope. Every envelope segment
+records the local label that contributes it, or records that it was inherited from
+a predecessor key.
+
+When a new label arrives, the existing envelope is first used for a read-only
+dominance test. A surviving label is merged into the local envelope. Only the
+intervals on which the envelope decreases are propagated to successor keys.
+Because segment sources are retained, a local label is removed as soon as its last
+contributing interval disappears; the algorithm does not rescan all historical
+labels at that key. Under partial dominance, the retained intervals are applied
+lazily before a label is expanded or joined. Thus, the normal and partial modes
+share the same incremental dominance graph, and partial dominance adds only
+functional-domain trimming.
+
+This source-aware implementation is computationally important. A conventional
+dominance graph repeatedly rebuilds predecessor envelopes and scans all labels at
+affected nodes. The incremental graph instead propagates only geometric
+improvements and identifies dominated labels from their disappearing sources.
+
+\subsubsection{Completion bounds}
+
+Forward and backward completion-bound functions are computed from a relaxation
+that omits ng-memory restrictions while retaining time feasibility and admissible
+arcs. They bound the best possible continuation of a partial label. A label is
+discarded when its frontier combined with the appropriate completion function
+cannot beat the current pricing cutoff.
+
+The bound construction propagates only intervals whose function values have
+improved. Forward and backward fixed points are computed first; the auxiliary
+transition functions needed by the two labeling directions are then rebuilt once
+from the converged functions. This avoids repeatedly merging unchanged portions of
+intermediate PWLFs. The same completion information supports reduced-cost arc
+fixing after a node is closed. Such fixing uses only node-valid hard domains and
+arc restrictions; a dual-profitable window used to accelerate one pricing call is
+not written back as permanent subtree fixing evidence.
+
+\subsubsection{Joining forward and backward labels}
+
+Labels are grouped by terminal job and true ng-memory set. Before individual label
+pairs are considered, the lower envelopes of a forward and backward group are
+joined. If this optimistic group-pair bound is nonnegative, every underlying label
+pair is skipped. Otherwise, the algorithm reverts to label-level joining, which
+preserves exactness.
+
+For an individual pair, inexpensive compatibility tests precede PWLF composition.
+They check the connecting arc, ng-memory intersection, and whether the two partial
+sequences already share a job. Visit information is stored in packed machine words,
+so these tests usually avoid sequence reconstruction. Only surviving pairs undergo
+functional joining. The minimum of the shifted forward frontier plus the backward
+frontier is computed by a simultaneous segment scan without constructing a
+temporary summed PWLF. Recovered elementary sequences are evaluated over their
+complete valid domain before insertion into the master, as explained above.
+
+\subsection{Exact time-indexed pricing}
+\label{subsec:time-indexed-pricing}
+
+For integer-time instances, the alternative exact pricing method constructs an
+acyclic graph with state $(j,t)$, where $j$ is the last processed job and $t$ is its
+completion time. A processing arc appends a job and advances time by its setup and
+processing duration; a waiting arc advances time without changing the sequence.
+Arc costs include the relevant job, machine, branching, and cut dual terms. A
+shortest source--sink path therefore yields a minimum-reduced-cost pseudo-schedule
+in the current graph.
+
+The graph can contain repeated job visits. Consequently, negative end states are
+ranked and converted to job sequences, but only elementary sequences are returned
+as master columns. If the best pseudo-schedule is already nonnegative, the graph
+provides a certificate for the entire internal column family. When a
+dual-profitable time window is used to shrink a pricing graph, accepted elementary
+sequences are evaluated on their full valid domain before their objective
+coefficients are stored.
+
+The time-indexed graph also supports reduced-cost fixing. Forward and backward
+shortest-path values identify time arcs that cannot belong to an improving column.
+A cleanup pass removes waiting or processing states that no longer lead to a useful
+extension, and the resulting safe state windows can be inherited by descendants.
+The time-indexed method is often effective when the horizon is moderate and the
+windows are tight, but its graph size depends directly on the numeric horizon.
+This dependence motivates the continuous-time ng-DSSR method.
+
+\paragraph{Rank-1 cuts.}
+For the explicit-outsourcing formulation, the time-indexed implementation can be
+combined with limited-memory subset-row rank-1 cuts. The cut state is carried in
+the pricing labels, and cuts inherited from the parent remain active at child
+nodes. This variant strengthens the master relaxation but enlarges the pricing
+state space. The source-aware continuous-time ng-DSSR configuration reported here
+does not carry active rank-1 cut states: incorporating cut memories into its
+dominance keys would destroy the compact envelope structure that provides its main
+computational advantage. A separate partial-list continuous-time variant and the
+time-indexed rank-1 variant support cut-aware pricing.
+
+\subsection{Outsourcing-column pricing}
+\label{subsec:outsourcing-pricing}
+
+This pricing problem is required only by $\mathrm{SC\text{-}C}$. For any total
+baseline amount $q$, define
+\begin{equation}
+    V(q)=
+    \max\left\{
+        \sum_{j\in O}\pi_j:
+        O\subseteq\mathcal J,
+        \sum_{j\in O}b_j=q
+    \right\}.
+\end{equation}
+At a node with outsourcing-membership branch rows, let $\eta_j$ denote the
+corresponding dual contribution for including job $j$ in the outsourcing set and
+define $\widetilde\pi_j=\pi_j+\eta_j$; otherwise, let $\eta_j=0$. The definition of
+$V(q)$ then uses $\widetilde\pi_j$ in place of $\pi_j$. The pricing objective in
+\eqref{eq:outsourcing-subset-pricing} becomes
+$\max_q\{V(q)-G(q)\}$. The implementation constructs a Pareto frontier of states
+$(q,v)$ by processing jobs one at a time. From each state it creates an exclusion
+transition, which keeps $(q,v)$, and an inclusion transition, which produces
+$(q+b_j,v+\widetilde\pi_j)$. States with no better dual reward at the same or greater
+baseline amount are discarded. Branching decisions that require or forbid
+outsourcing membership are enforced during these transitions.
+
+The best negative-reduced-cost sets are recovered from predecessor pointers,
+deduplicated, and added to the outsourcing pool. The same dynamic program supplies
+the exact outsourcing reduced-cost certificate used in
+\eqref{eq:node-dual-bound}.
+
+\subsection{Cuts and branching}
+\label{subsec:cuts-branching}
+
+The branch-price-and-cut tree uses formulation-specific branching priorities. For
+$\mathrm{SC\text{-}M}$, the algorithm first branches on the active tariff segment,
+then on the number of selected internal-machine columns, and finally on internal
+adjacency or directed-arc decisions. For $\mathrm{SC\text{-}C}$, tariff branching
+is absent. The algorithm branches on the machine count and machine-side
+adjacencies/arcs before branching on whether a job belongs to the selected
+outsourcing set.
+
+Machine-side branch decisions are enforced both in the RMP and in internal
+pricing. An arc-forbidden branch removes the corresponding transition; an
+arc-required branch excludes competing transitions that would violate the required
+predecessor--successor relation. Outsourcing-membership branches are enforced in
+the outsourcing dynamic program and, when a job is required to be outsourced, in
+internal pricing as well.
+
+\subsection{Strong branching and Phase-I repair}
+\label{subsec:strong-branching}
+
+Strong branching evaluates a bounded set of fractional candidates. For each trial
+child, the restricted master is initialized from the parent's positive support and
+selected low-reduced-cost columns. If this RMP is infeasible, the implementation
+solves a pure Phase-I column-generation problem. Legal columns receive objective
+coefficient zero, whereas artificial cover slacks and branch-implied competing
+columns receive coefficient one. Heuristic and exact pricing are then performed
+with the Phase-I duals. A zero Phase-I objective yields a feasible restricted
+master for the child; a positive objective together with complete pricing
+certificates proves infeasibility.
+
+After a successful repair, all original column coefficients are restored and the
+RMP is reoptimized before the strong-branching score is recorded. This prevents
+large artificial penalties from contaminating the pricing duals and separates
+feasibility restoration from the child's true objective value. The current
+implementation uses one strong-branching screening phase; an additional heuristic
+second phase is omitted because its repeated pricing cost was not compensated by
+a consistent improvement in candidate selection.
+
+\subsection{Termination and correctness}
+
+At every node, heuristic pricing may add columns but cannot certify closure.
+Closure requires the exact internal pricing certificate and, for
+$\mathrm{SC\text{-}C}$, the exact outsourcing certificate. The relaxed ng-route
+space contains every elementary internal sequence, so nonnegativity of its exact
+minimum reduced cost is sufficient. Time-indexed pricing supplies the corresponding
+certificate from the complete acyclic graph. The branch-and-bound node is fathomed
+when it is infeasible, when its certified lower bound is no better than the
+incumbent, or when the closed RMP solution satisfies all integrality conditions.
+Consequently, the algorithm terminates with an optimal solution to the selected
+set-covering formulation.

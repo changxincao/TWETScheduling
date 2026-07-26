@@ -1,0 +1,20 @@
+\begin{abstract}
+We study an identical parallel-machine scheduling problem in which each job must
+either be processed internally or outsourced. Internally processed jobs incur
+sequence-dependent setup times and costs as well as job-dependent due-window
+penalties. Outsourced jobs are charged through a nondecreasing concave
+piecewise-linear tariff defined on their aggregate baseline outsourcing cost.
+The resulting problem couples machine assignment, sequencing, timing, and outsourcing
+decisions. We develop two set-covering column-generation formulations. The first represents
+both internal schedules and outsourced subsets by columns, whereas the second keeps
+the outsourcing decisions and tariff segments explicitly in the master problem.
+Their common internal pricing problem is solved by a continuous-time bidirectional
+labeling algorithm in which the timing cost of a partial sequence is represented by
+a piecewise-linear function. An ng-route relaxation with decremental state-space
+refinement provides an exact pricing certificate while controlling the label space.
+We embed the formulations and pricing algorithms in a branch-and-price framework
+with heuristic pricing, completion bounds, reduced-cost fixing, strong branching,
+and Phase-I repair of restricted master problems. For integer-time instances, a
+time-indexed pricing algorithm provides an exact alternative and a computational
+reference for assessing sensitivity to the time horizon.
+\end{abstract}

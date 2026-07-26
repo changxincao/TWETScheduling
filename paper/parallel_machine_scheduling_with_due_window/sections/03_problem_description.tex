@@ -1,0 +1,93 @@
+\section{Problem Description}\label{sec:problem}
+
+\subsection{Internal production}
+
+Let $\mathcal J=\{1,\ldots,n\}$ be a set of jobs and let
+$\mathcal M=\{1,\ldots,m\}$ be a set of identical parallel machines. All jobs and
+machines are available at time zero. Each job must either be processed internally on
+one machine or outsourced. Internal processing is nonpreemptive, and a machine
+processes at most one job at a time.
+
+Job $j\in\mathcal J$ has processing time $p_j$ and due window
+$[d_j^e,d_j^l]$. If job $j$ follows job $i$ on the same machine, the transition
+requires setup time $s_{ij}$ and incurs setup cost $\kappa_{ij}$. Index $0$ denotes
+the initial state of a machine; hence $s_{0j}$ and $\kappa_{0j}$ are the initial
+setup time and cost of job $j$. Idle time is allowed between consecutive jobs.
+
+The completion-time penalty of job $j$ is a nonnegative, finitely represented
+piecewise-linear function $\phi_j(t)$. The principal case is weighted
+earliness--tardiness with a due window,
+\begin{equation}
+    \phi_j(t)
+    =
+    \alpha_j[d_j^e-t]^+
+    +
+    \beta_j[t-d_j^l]^+,
+    \qquad [x]^+:=\max\{x,0\},
+    \label{eq:due-window-penalty}
+\end{equation}
+but the pricing algorithms only require that sums, translations, lower envelopes,
+and interval minima of the represented functions can be evaluated exactly. This
+also covers due dates as zero-width windows and several bounded or piecewise-linear
+early/late-work penalties.
+
+An internal machine schedule is an elementary sequence
+$r=(j_1,\ldots,j_q)$ of distinct jobs. Let $j_0=0$ and $C_{j_0}=0$. Its cost is
+\begin{equation}
+    c_r^{\mathrm{in}}
+    =
+    \sum_{h=1}^{q}\kappa_{j_{h-1}j_h}
+    +
+    \min_{\boldsymbol C}
+    \left\{
+        \sum_{h=1}^{q}\phi_{j_h}(C_{j_h})
+        :
+        C_{j_h}\ge
+        C_{j_{h-1}}+s_{j_{h-1}j_h}+p_{j_h}
+    \right\}.
+    \label{eq:internal-column-cost}
+\end{equation}
+The inequalities in \eqref{eq:internal-column-cost} permit intentional idle time.
+Thus, a column specifies a job order, while its cost already contains the optimal
+timing of that order.
+
+\subsection{Aggregate outsourcing tariff}
+
+If job $j$ is outsourced, it leaves the internal schedule and has baseline
+outsourcing amount $b_j\ge0$. For an outsourced set $O\subseteq\mathcal J$, define
+\begin{equation}
+    B(O)=\sum_{j\in O}b_j.
+\end{equation}
+The actual payment is $G(B(O))$, where $G$ is a nondecreasing concave
+piecewise-linear tariff satisfying $G(0)=0$. Let
+$\mathcal L=\{1,\ldots,L\}$ be its tariff segments. Segment $\ell$ applies on
+$[\underline q_\ell,\overline q_\ell]$ and has affine expression
+\begin{equation}
+    G(q)=a_\ell q+c_\ell
+    \quad
+    \text{for }
+    q\in[\underline q_\ell,\overline q_\ell].
+\end{equation}
+Concavity implies nonincreasing marginal rates $a_\ell$. The no-discount case is
+the single-segment tariff $G(q)=q$.
+
+The outsourcing tariff is aggregate rather than job-separable. Hence the cost of
+outsourcing job $j$ depends on the other outsourced jobs. This coupling motivates
+the two formulations in Section~\ref{sec:formulations}.
+
+\subsection{Optimization problem}
+
+A feasible solution consists of at most $m$ elementary internal sequences and one
+outsourced set such that every job is covered. Its objective is
+\begin{equation}
+    \min
+    \left\{
+        \sum_{r\in R^\star}c_r^{\mathrm{in}}
+        +
+        G(B(O))
+    \right\},
+    \label{eq:original-problem}
+\end{equation}
+where $R^\star$ is the selected set of internal machine schedules and $O$ is the
+outsourced job set. The formulations below use covering rows, as in the implemented
+restricted master problems.

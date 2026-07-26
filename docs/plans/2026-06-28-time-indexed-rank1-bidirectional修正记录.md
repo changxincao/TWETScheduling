@@ -212,3 +212,13 @@ rank-1 图定价的状态转移也与论文一致。前向扩展先按 memory ar
 问题不在 seed 正值列保留或 cut ID 继承数量，而在 `CutPool.addCut()` 原来的 limited-memory 合并语义。不同节点若生成同一 rank-1 base、但 memory arc 集不同的 cut，代码会把已有 ID 对应的 `TWETCut` 原地替换成 memory 并集。这样 node 3 trial 所引用的 cut ID 与 node 6 正式重建时读取的同一 ID 已经不是同一组系数。更严重的是，已经建立的 CPLEX cut row 不会随全局对象替换而同步更新，而 pricing 会立即读取替换后的 cut 对象，因此同一轮内也可能出现 master row 与 pricing residual 口径不一致。
 
 修复后 cut pool 只对完整 signature 完全相同的 cut 复用 ID。相同 rank-1 base 在不同节点得到不同 limited memory 时分配新 ID；任何已分配 ID 的 scope、memory、multiplier 和 RHS 均保持不可变。当前节点只激活自己实际加入的 ID，child 继承的旧 ID 因而能稳定重建相同模型。新增 `CutPoolImmutableIdTest` 验证三个条件：不同 memory 不复用 ID、加入新 memory 版本不修改旧 ID、完整 signature 相同仍正常去重。该测试与 `ActiveCutInheritanceTest` 均已通过。修复后的同配置 SRI 运行输出在 `test-results/bpc/exp-50-3-R50-W100-cost20-ti-sri-20260726b`。
+
+## 21. Time-indexed 与 ng-DSSR 的 SRI 正确性边界复核
+
+2026-07-26 再次沿 master、pricing、join 和最终列回算四条链复核两种 SRI。两者共用 `SubsetRowCutEvaluator` 计算 RMP cut 系数、增量加列系数和最终 reduced cost，且共用不可变的 `CutPool` ID；因此第 20 节修复的跨节点 memory 原地改写问题同时覆盖 time-indexed 和 ng-DSSR，而不是只修复某一个定价器。
+
+Time-indexed rank-1 定价对每条 active cut 精确维护 residual。前向扩展按 memory 断点清零后计入新任务；后向状态先把当前任务并入后缀，再决定该状态能否越过前驱 memory arc 继续向左传播；join job 只由前向一侧计数，拼接时只补两侧 residual 合并产生的回绕 penalty。恢复 sequence 后再次用统一 evaluator 计算 cut coefficient，因而图状态、RMP 行和最终列 reduced cost 口径一致。修复 cut ID 后的完整求解已得到 `obj=bound=30884, valid=true`，当前未发现新的 time-indexed SRI correctness 问题。
+
+ng-DSSR 的 active-SRI 路径只在 partial-list backend 上启用，正反向 label 分别维护 cut state，join 再补 residual 合并 penalty；最终 elementary sequence 会由 evaluator 重算真实目标，并由 `LP.computeReducedCost()` 按真实 active cuts 重新过滤。limited-memory 路径按实际访问更新 residual；full-SRI 对中间非基本 ng-route 只统计首次访问，这相当于忽略重复访问可能产生的额外非负 SRI penalty，得到的是更松的 ng-route reduced cost。它可能增加 DSSR 轮数，但不会漏掉真实负 elementary 列，也不会错误给出闭合证书。SRI dominance 对无法精确利用的 memory relevance 采用额外 liability 补偿，口径偏保守，只会少删 label。
+
+因此当前结论是：两种 SRI 的 master 接线和最终 elementary 列语义均正确；time-indexed SRI 的状态定价也是精确口径。ng-DSSR SRI 在 intended partial-list 路径下保持正确，但其中间 ng-route 松弛和 dominance 更保守，而且 active SRI 会关闭新的 source-aware dominance、group-envelope join 等 no-SRI 优化，所以主要问题是计算效率，不是 cut 公式错误。当前仍没有把 active SRI state 接入 source-aware graph；不能把普通高效 ng-DSSR 主线描述成已经原生支持 SRI。

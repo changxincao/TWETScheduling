@@ -43,17 +43,9 @@ public class CutPool {
 		if (existing != null) {
 			return existing.intValue();
 		}
-		if (cut.hasLimitedMemory()) {
-			for (int id = 0; id < cuts.size(); id++) {
-				TWETCut old = cuts.get(id);
-				if (old.hasSameRank1Base(cut)) {
-					TWETCut merged = old.mergedMemoryWith(cut);
-					cuts.set(id, merged);
-					signatureToId.put(merged.signature(), Integer.valueOf(id));
-					return id;
-				}
-			}
-		}
+		// 2026-07-26: cut ID 一旦被节点继承或进入 CPLEX 模型，其系数定义必须保持不变。
+		// 不同节点为同一 rank-1 base 得到的 limited memory 可能不同，不能原地扩大旧 ID 的 memory；
+		// 否则排队节点重建时会读取到与 strong trial 不同的 cut，并且当前模型的行与 pricing 口径也会失配。
 		int id = cuts.size();
 		cuts.add(cut);
 		signatureToId.put(signature, Integer.valueOf(id));

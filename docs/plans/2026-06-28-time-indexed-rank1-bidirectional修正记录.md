@@ -205,3 +205,10 @@ rank-1 图定价的状态转移也与论文一致。前向扩展先按 memory ar
 输出目录为 `test-results/bpc/exp-60-3-W100-current-ti-sri-fixed-7200s-20260725h`，Java PID 为 `35880`。启动日志确认实例、W100、rank-1 engine、strong branching 和两类 fixing 参数均正确，stderr 为空。最终在 `969.058s` 证明 `obj=bound=2044`，处理 46 个节点，root 为 `bound=2001.137099`、`109.321s`，peak pool `75013`，peak cut pool `6783`。cut loop 中单次 pricing 跳过约 75 万至 109 万条时空弧，SRI pricing 总计 `253.012s/2309`、平均 `109.576ms`；旧错误配置的 active-SRI exact 为数秒级完整图扫描，并在 7200 秒时仍只有 `incumbent=2128,bound=2027.072331`。本轮最大耗时已转为 strong-trial RMP：`405.916s/1480`，其次是正式 master LP 各阶段约 `141.2s`、SRI pricing `253.0s` 和 cut separation `30.9s`。因此修正 fixing 与 cut 继承后，SRI 定价不再是失控瓶颈，完整求解时间相对旧错误配置至少缩短 86.5%。
 
 与此前同一 60-3 W100 的当前 ng-DSSR 完整结果 `4586.267s/194 nodes` 比较，修正后的 time-indexed SRI 快约 `4.73` 倍，节点减少约 `76.3%`。这不是单一组件的小幅常数优化：时空 fixing 使 SRI 定价平均降到约 `0.11s`，而 rank-1 cuts 又显著缩小了搜索树；ng-DSSR 在该小整数 horizon 上既承担连续 PWLF 双向 labeling、completion bound、probe 和 join 的较高单次成本，又没有获得同等幅度的 cut 树缩减，因此在该实例上已经不存在竞争优势。
+## 20. Limited-memory cut ID 原地改写导致 strong child 失效
+
+2026-07-26 在 `50-3 / W100 / setupR50 / setupCost=20*setupTime` 的 time-indexed SRI 运行中，node 3 对 required arc `(44,28)` 的右侧 strong trial 先进入 Phase-I repair。初始 RMP 不可行，定价加入 50 条列后 Phase-I residual 归零；关闭 Phase-I 并重建真实成本 RMP 后得到可行 bound `31877.067899`，随后筛出 3420 条 seed。该 child 排队期间 node 4、node 5 又执行了 SRI separation。node 6 正式出队时仍显示继承 130 条 active cuts，但使用同一 seed 重建 RMP 后直接 infeasible。
+
+问题不在 seed 正值列保留或 cut ID 继承数量，而在 `CutPool.addCut()` 原来的 limited-memory 合并语义。不同节点若生成同一 rank-1 base、但 memory arc 集不同的 cut，代码会把已有 ID 对应的 `TWETCut` 原地替换成 memory 并集。这样 node 3 trial 所引用的 cut ID 与 node 6 正式重建时读取的同一 ID 已经不是同一组系数。更严重的是，已经建立的 CPLEX cut row 不会随全局对象替换而同步更新，而 pricing 会立即读取替换后的 cut 对象，因此同一轮内也可能出现 master row 与 pricing residual 口径不一致。
+
+修复后 cut pool 只对完整 signature 完全相同的 cut 复用 ID。相同 rank-1 base 在不同节点得到不同 limited memory 时分配新 ID；任何已分配 ID 的 scope、memory、multiplier 和 RHS 均保持不可变。当前节点只激活自己实际加入的 ID，child 继承的旧 ID 因而能稳定重建相同模型。新增 `CutPoolImmutableIdTest` 验证三个条件：不同 memory 不复用 ID、加入新 memory 版本不修改旧 ID、完整 signature 相同仍正常去重。该测试与 `ActiveCutInheritanceTest` 均已通过。修复后的同配置 SRI 运行输出在 `test-results/bpc/exp-50-3-R50-W100-cost20-ti-sri-20260726b`。

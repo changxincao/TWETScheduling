@@ -248,3 +248,13 @@ Limited arc memory 不是只由 cut scope 决定，而是根据当前节点 LP �
 随后完全复用历史 `60-3 W100 time-indexed SRI root-only` 参数运行当前版本。4轮后续分离共发生24个 `memoryMergedBases`，移除24个旧 active memory 版本；说明重复版本确实存在。可是最终 active cuts 仅由历史129降到127，root总时间由177.541秒变为176.579秒，exact pricing由8.540秒/349次变为8.832秒/347次，基本没有性能差异。新运行的全局 cut pool 为428，高于历史371，是因为 immutable pool保留被替换的历史版本；pricing只读取127条当前 active cuts，不能再用全局 pool ID 数衡量状态维数。该实验说明同 base 合并是正确的论文对齐项，但不是当前 active cut 过多或定价爆炸的主要原因。
 
 当前 `maxSubsetRowCutsPerRound=10` 只在 legacy partial-list 三元 subset-row 分支中读取。time-indexed paper rank-1 分支完全不读取该值，而是分别硬限制每轮最多50条one-row和75条three-row cut，再受 active base总量、job appearance、inactive removal和tailing-off约束。本次root各轮实际处理94、87、84、86和79个发生变化的cut操作，最终127条active cuts基本都是不同scope的base。因此cut数量增长的主要来源正是paper family额度和大量不同scope候选；若要A/B降低cut数量，应增加独立的paper one-row/three-row上限，不能误以为把现有legacy参数设为10已经生效。
+
+## 24. 同 base memory 合并的静态正确性复核
+
+2026-07-26 再次沿 cut 系数、RMP 重建、pricing dual、节点继承和 inactive-cut 删除五条链路检查第23节实现。对 arc limited memory，扩大 memory 只会减少 route 扫描中的 residual 清零；把相邻 memory 段合并后，累计跨过 multiplier 分母的次数不会减少，因此 union cut 对任意列的系数不小于任一旧 memory 版本。该结论与4个job、长度1至6的全序列穷举测试一致。
+
+当前节点分离时只修改临时 active ID 列表。旧 cut 对象和旧 ID 保持不可变；随后 `LP.removeCuts()/addCuts()` 更新 active ID，并由 `solveRelaxation()` 结束旧 CPLEX、完整重建变量、cut rows、pricing cut ID 和 dual 数组。因此不存在旧 master row 与新 pricing memory 同轮并存。child 创建前调用 `syncActiveCutsToNode()`，`Node.copy()` 又复制 active ID 列表，所以已排队节点继续读取原 immutable ID，新 child 继承当前 union ID，二者不会互相污染。
+
+inactive-cut 删除读取的是重建并重新求解后真正具有负 dual 的 active subset-row ID；union 版本若为零 dual 会按原 paper 流程删除，不会错误恢复旧版本。同一 base 的 appearance 和 node 数量按 scope 唯一计数，paper 模式的一行/三行 cut 的 multiplier 与 RHS 由 scope 大小固定，因此当前 scope signature 与 base 口径一致。有效 memory 扩展仍占 family 50/75 配额，这是分离强度和性能取舍，不是正确性问题。全局 cut pool 会保留历史 immutable 版本，可能增加少量内存和日志计数，但 pricing 只读取当前 active IDs。
+
+复核未发现新的正确性缺陷。现有定向回归覆盖 immutable ID、active union 唯一性、no-op 合并、重复版本收敛、系数单调性和 child cut 继承；该结论证明的是实现链路和局部不变量，不能替代所有算例的完整最优性回归。

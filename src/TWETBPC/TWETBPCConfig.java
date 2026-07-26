@@ -395,7 +395,7 @@ public class TWETBPCConfig {
 	public boolean enableSubsetRowCutsForPartialDominance = false;
 	/** 2026-06-28: 允许 time-indexed rank-1 cut pricing 使用 subset-row cut。 */
 	public boolean enableSubsetRowCutsForTimeIndexedGraph = false;
-	/** 2026-06-13: 每轮 subset-row separation 最多加入多少条 cut。 */
+	/** 2026-07-26: legacy partial-list 三元 subset-row 每轮上限；paper rank-1 使用各 cut family 的独立上限。 */
 	public int maxSubsetRowCutsPerRound = 10;
 	/** 2026-06-14: subset-row cut 默认不限制单 node 总数，只保留每轮加入上限。 */
 	public int maxSubsetRowCutsPerNode = Integer.MAX_VALUE;

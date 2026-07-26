@@ -298,7 +298,6 @@ public class GCBBFullDomainComparisonTest {
 			config.enableSubsetRowCutsForTimeIndexedGraph = timeIndexedRank1;
 			config.subsetRowCutMemoryMode = "arcMemory";
 			config.maxCutRounds = 8;
-			config.maxSubsetRowCutsPerRound = 10;
 			config.maxSubsetRowCutAppearancesPerJob = 20;
 			config.bidirectionalMidpointProbe = false;
 			return;

@@ -1535,3 +1535,10 @@ time-indexed 的主要瓶颈相反：46 次分支产生 1832 次 strong-trial LP
 node 8 的87.508秒不是 strong repair 或 join 爆炸。该节点 LP 总计仅3.974秒/116次，strong branching测试20个候选且没有 `FindFeasible` repair pricing；主要时间为 heuristic 37.538秒/76次和exact 45.152秒/25次。76次heuristic中51次成功、共加1467列，另外25次失败后各触发一次exact；25次exact中24次成功但总共只加255列，第一轮即加169列，后24次合计只加86列，后半段经常一次只加1--3列。因此这是少量负列驱动的RMP/dual反复更新，即典型column-generation tailing-off，而不是单轮DSSR异常。
 
 25次exact累计50轮DSSR，轮数分布为13次1轮、5次2轮、4次3轮和3次5轮。exact内部45.117秒中，初始化32.183秒，其中midpoint probe 21.255秒、completion bound 10.775秒；正向/反向扩展分别6.328/2.202秒，join仅4.060秒。全run的232次exact同样为297.004秒，其中probe 140.735秒（47.38%）、completion bound 81.336秒（27.39%）、正反扩展44.386秒、join 26.672秒。当前ng-DSSR主要瓶颈因此是heuristic 反复失败后频繁进入exact，并在每次exact/DSSR轮重新承担probe和completion-bound初始化；join已经被group-envelope过滤压到exact的约8.98%。probe选中状态会继续用于正式扩展，并非全部浪费，但未选候选和跨exact重复probe仍是明确开销。
+## 50-3 W100、setupR50、setup cost 对照
+
+2026-07-26 使用 `wet050_003_3m_setupR50`、`W=100`、`setupCost=20*setupTime`，分别运行当前 ng-DSSR、time-indexed no-cut 和 time-indexed rank-1/SRI，三组均开启 strong branching、Phase-I repair、60 秒 ALNS 和单线程 CPLEX，时限 7200 秒。三组最终都证明 `obj=bound=30884` 且 `valid=true`。
+
+ng-DSSR 用时 `1760.321s`、88 nodes、root `117.371s`、pool `66072`，其中启发式 pricing `1233.338s/2195`，exact `263.148s/713`，master LP `118.659s`。time-indexed no-cut 用时 `2337.215s`、524 nodes、root `72.224s`、pool `1136379`，exact pricing `1239.822s/9040`，master LP `640.714s`。修复 cut ID 不可变语义后的 time-indexed SRI 用时 `1116.491s`、30 nodes、root `148.737s`、pool `48839`，SRI pricing `723.102s/1354`，master LP `272.866s`。SRI 的 root 最慢，但 cuts 将搜索树从 no-cut 的 524 nodes 压到 30 nodes，最终比 ng-DSSR 快约 36.6%，比 no-cut 快约 52.2%。
+
+该比较存在一个初始状态限制：ng-DSSR 与 no-cut 首次并行启动时均为 93 条初始列、初始 incumbent `31882`；SRI 修复后单独重启得到 95 条初始列、初始 incumbent `31820`。因此三组最终最优值和正确性可直接比较，整体时间只能作为当前配置表现，不能解释为严格固定 ALNS 起点下的纯算法消融。输出目录分别为 `exp-50-3-R50-W100-cost20-ng-20260726a`、`exp-50-3-R50-W100-cost20-ti-nocut-20260726a` 和 `exp-50-3-R50-W100-cost20-ti-sri-20260726b`。

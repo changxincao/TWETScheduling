@@ -130,19 +130,13 @@ public final class TWETCut {
 		if (other == null || !hasSameRank1Base(other)) {
 			return this;
 		}
-		ArrayList<Integer> mergedJobs = new ArrayList<Integer>(memoryJobs);
-		for (int job : other.memoryJobs) {
-			if (!mergedJobs.contains(Integer.valueOf(job))) {
-				mergedJobs.add(Integer.valueOf(job));
-			}
-		}
+		HashSet<Integer> jobSet = new HashSet<Integer>(memoryJobs);
+		jobSet.addAll(other.memoryJobs);
+		ArrayList<Integer> mergedJobs = new ArrayList<Integer>(jobSet);
 		Collections.sort(mergedJobs);
-		ArrayList<Long> mergedArcs = new ArrayList<Long>(memoryArcs);
-		for (Long arc : other.memoryArcs) {
-			if (!mergedArcs.contains(arc)) {
-				mergedArcs.add(arc);
-			}
-		}
+		HashSet<Long> arcSet = new HashSet<Long>(memoryArcs);
+		arcSet.addAll(other.memoryArcs);
+		ArrayList<Long> mergedArcs = new ArrayList<Long>(arcSet);
 		Collections.sort(mergedArcs);
 		return new TWETCut(id, type, scopeJobs, mergedJobs, mergedArcs, multiplier, rhs, description);
 	}

@@ -54,33 +54,36 @@ public class SubsetRowCutGenerator implements CutGenerator {
 
 	private CutGenerationResult separatePaperRank1Cuts(LP lp, TWETMasterSolution solution) {
 		HashSet<String> activeCuts = activeCutSignatures(lp);
-		int remainingNodeCuts = config.maxSubsetRowCutsPerNode - activeCuts.size();
-		if (remainingNodeCuts <= 0) {
-			return CutGenerationResult.empty("rank-1 node cut limit reached: " + activeCuts.size());
-		}
+		int remainingNewBases = Math.max(0, config.maxSubsetRowCutsPerNode - activeCuts.size());
 		int[] appearances = activeSubsetRowAppearances(lp);
 		ArrayList<Candidate> oneRow = new ArrayList<Candidate>();
 		ArrayList<Candidate> threeRow = new ArrayList<Candidate>();
 		for (int first = 1; first <= lp.getData().n; first++) {
-			if (appearances[first] < config.maxSubsetRowCutAppearancesPerJob) {
-				addCandidateIfViolated(lp, solution, null, oneRow, new int[] { first });
+			int[] oneRowScope = new int[] { first };
+			if (activeCuts.contains(scopeSignature(oneRowScope))
+					|| appearances[first] < config.maxSubsetRowCutAppearancesPerJob) {
+				addCandidateIfViolated(lp, solution, oneRow, oneRowScope);
 			}
 			for (int second = first + 1; second <= lp.getData().n; second++) {
 				for (int third = second + 1; third <= lp.getData().n; third++) {
-					if (appearances[first] >= config.maxSubsetRowCutAppearancesPerJob
+					int[] scope = new int[] { first, second, third };
+					boolean activeBase = activeCuts.contains(scopeSignature(scope));
+					if (!activeBase && (appearances[first] >= config.maxSubsetRowCutAppearancesPerJob
 							|| appearances[second] >= config.maxSubsetRowCutAppearancesPerJob
-							|| appearances[third] >= config.maxSubsetRowCutAppearancesPerJob) {
+							|| appearances[third] >= config.maxSubsetRowCutAppearancesPerJob)) {
 						continue;
 					}
-					addCandidateIfViolated(lp, solution, null, threeRow, new int[] { first, second, third });
+					addCandidateIfViolated(lp, solution, threeRow, scope);
 				}
 			}
 		}
 		sortCandidates(oneRow);
 		sortCandidates(threeRow);
 		ArrayList<TWETCut> cuts = new ArrayList<TWETCut>();
-		addPaperCuts(lp, solution, oneRow, cuts, appearances, remainingNodeCuts, PAPER_MAX_ONE_ROW_CUTS_PER_ROUND);
-		addPaperCuts(lp, solution, threeRow, cuts, appearances, remainingNodeCuts, PAPER_MAX_THREE_ROW_CUTS_PER_ROUND);
+		int newBases = addPaperCuts(lp, solution, oneRow, cuts, appearances, activeCuts,
+				remainingNewBases, PAPER_MAX_ONE_ROW_CUTS_PER_ROUND);
+		addPaperCuts(lp, solution, threeRow, cuts, appearances, activeCuts,
+				remainingNewBases - newBases, PAPER_MAX_THREE_ROW_CUTS_PER_ROUND);
 		if (cuts.isEmpty()) {
 			return CutGenerationResult.empty("rank-1 no violated one-row or three-row cuts");
 		}
@@ -167,12 +170,8 @@ public class SubsetRowCutGenerator implements CutGenerator {
 				&& config.useTimeIndexedGraphRank1CutPricing;
 	}
 
-	private void addCandidateIfViolated(LP lp, TWETMasterSolution solution, HashSet<String> activeCuts,
+	private void addCandidateIfViolated(LP lp, TWETMasterSolution solution,
 			ArrayList<Candidate> candidates, int[] scope) {
-		String signature = scopeSignature(scope);
-		if (activeCuts != null && activeCuts.contains(signature)) {
-			return;
-		}
 		double rhs = Math.floor(0.5 * scope.length + VALUE_TOLERANCE);
 		double lhs = rank1Value(lp, solution, scope, rhs);
 		if (Utility.compareGt(lhs, rhs + VALUE_TOLERANCE)) {
@@ -180,20 +179,56 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		}
 	}
 
-	private void addPaperCuts(LP lp, TWETMasterSolution solution, ArrayList<Candidate> candidates,
-			ArrayList<TWETCut> cuts, int[] appearances, int remainingNodeCuts, int familyLimit) {
+	private int addPaperCuts(LP lp, TWETMasterSolution solution, ArrayList<Candidate> candidates,
+			ArrayList<TWETCut> cuts, int[] appearances, HashSet<String> activeCuts,
+			int remainingNewBases, int familyLimit) {
 		int addedFamilyCuts = 0;
+		int addedNewBases = 0;
 		for (Candidate candidate : candidates) {
-			if (cuts.size() >= remainingNodeCuts || addedFamilyCuts >= familyLimit) {
+			if (addedFamilyCuts >= familyLimit) {
 				break;
 			}
-			if (!canUseScope(candidate.scope, appearances)) {
+			String signature = scopeSignature(candidate.scope);
+			boolean activeBase = activeCuts.contains(signature);
+			if (!activeBase && (addedNewBases >= remainingNewBases || !canUseScope(candidate.scope, appearances))) {
 				continue;
 			}
-			cuts.add(buildCut(lp, solution, candidate.scope, candidate.rhs));
-			increaseAppearances(candidate.scope, appearances);
+			TWETCut cut = mergeWithActivePaperMemory(lp, buildCut(lp, solution, candidate.scope, candidate.rhs));
+			if (cut == null) {
+				continue;
+			}
+			cuts.add(cut);
+			if (!activeBase) {
+				activeCuts.add(signature);
+				increaseAppearances(candidate.scope, appearances);
+				addedNewBases++;
+			}
 			addedFamilyCuts++;
 		}
+		return addedNewBases;
+	}
+
+	/**
+	 * 预先合并当前节点同 base memory，并跳过 memory 没有变化的候选。
+	 * 这样 no-op 候选不会占用论文每个 family 的分离额度，也不会让 cut loop 空转。
+	 */
+	private TWETCut mergeWithActivePaperMemory(LP lp, TWETCut candidate) {
+		TWETCut merged = candidate;
+		int matchingCount = 0;
+		TWETCut soleActive = null;
+		for (int cutId : lp.getActiveCutIds()) {
+			TWETCut active = lp.getCutPool().getCut(cutId);
+			if (!active.hasSameRank1Base(candidate)) {
+				continue;
+			}
+			matchingCount++;
+			soleActive = active;
+			merged = merged.mergedMemoryWith(active);
+		}
+		if (matchingCount == 1 && merged.signature().equals(soleActive.signature())) {
+			return null;
+		}
+		return merged;
 	}
 
 	private TWETCut buildCut(LP lp, TWETMasterSolution solution, int[] scope, double rhs) {
@@ -235,9 +270,14 @@ public class SubsetRowCutGenerator implements CutGenerator {
 
 	private int[] activeSubsetRowAppearances(LP lp) {
 		int[] appearances = new int[lp.getData().n + 1];
+		HashSet<String> countedBases = new HashSet<String>();
 		for (int cutId : lp.getActiveCutIds()) {
 			TWETCut cut = lp.getCutPool().getCut(cutId);
 			if (cut.getType() != TWETCutType.SUBSET_ROW) {
+				continue;
+			}
+			String base = scopeSignature(cut.getScopeJobs());
+			if (!countedBases.add(base)) {
 				continue;
 			}
 			for (int job : cut.getScopeJobs()) {

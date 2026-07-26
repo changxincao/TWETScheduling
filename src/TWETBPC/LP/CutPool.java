@@ -52,6 +52,38 @@ public class CutPool {
 		return id;
 	}
 
+	/**
+	 * 将同一 rank-1 multiplier 的当前 active memory 版本合并为一个新版本。
+	 * <p>
+	 * 2026-07-26: 论文要求重复分离到同一 multiplier 时扩大已有 memory。这里不能原地修改全局
+	 * cut ID，否则已经排队的 child 会读取到变化后的系数；因此只改调用方提供的当前节点 active
+	 * ID 列表，并把 memory 并集作为新的不可变 cut 放入池中。
+	 */
+	public Rank1MemoryMergeResult mergeRank1MemoryIntoActive(List<Integer> activeCutIds, TWETCut candidate) {
+		TWETCut merged = candidate;
+		ArrayList<Integer> matchingIds = new ArrayList<Integer>();
+		for (int cutId : activeCutIds) {
+			TWETCut active = getCut(cutId);
+			if (active.hasSameRank1Base(candidate)) {
+				matchingIds.add(Integer.valueOf(cutId));
+				merged = merged.mergedMemoryWith(active);
+			}
+		}
+		int mergedId = addCut(merged);
+		if (matchingIds.size() == 1 && matchingIds.get(0).intValue() == mergedId) {
+			return new Rank1MemoryMergeResult(false, 1, 0);
+		}
+		activeCutIds.removeAll(matchingIds);
+		if (!activeCutIds.contains(Integer.valueOf(mergedId))) {
+			activeCutIds.add(Integer.valueOf(mergedId));
+		}
+		int removedVersions = matchingIds.size();
+		if (matchingIds.contains(Integer.valueOf(mergedId))) {
+			removedVersions--;
+		}
+		return new Rank1MemoryMergeResult(true, matchingIds.size(), removedVersions);
+	}
+
 	/** @return 根据 id 取 cut */
 	public TWETCut getCut(int id) {
 		return cuts.get(id);
@@ -65,6 +97,32 @@ public class CutPool {
 	/** @return 当前所有 cut 的存储列表 */
 	public List<TWETCut> getCuts() {
 		return cuts;
+	}
+
+	/** 当前节点执行一次同 base memory 合并后的结果。 */
+	public static final class Rank1MemoryMergeResult {
+
+		private final boolean changed;
+		private final int matchedActiveVersions;
+		private final int removedActiveVersions;
+
+		private Rank1MemoryMergeResult(boolean changed, int matchedActiveVersions, int removedActiveVersions) {
+			this.changed = changed;
+			this.matchedActiveVersions = matchedActiveVersions;
+			this.removedActiveVersions = removedActiveVersions;
+		}
+
+		public boolean isChanged() {
+			return changed;
+		}
+
+		public int getMatchedActiveVersions() {
+			return matchedActiveVersions;
+		}
+
+		public int getRemovedActiveVersions() {
+			return removedActiveVersions;
+		}
 	}
 
 }

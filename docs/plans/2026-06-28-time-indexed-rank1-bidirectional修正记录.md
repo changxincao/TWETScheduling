@@ -238,3 +238,13 @@ Limited arc memory 不是只由 cut scope 决定，而是根据当前节点 LP �
 论文也明确承认 setup time 使时间上界显著增长时，time-indexed 方法性能下降，并把取消时间离散作为后续降低运行时间的方向。无 cut 图的基础工作量约随时域长度线性增长；加入 `L` 个二值 cut residual 后，同一 `(job,time)` bucket 可保留多个状态，理论组合上限为 `2^L`，limited memory 和 dominance 只能压缩实际状态，不能消除该增长。因此严格时间放大导致显著退化是方法本身的真实边界，但不能把当前 7200 秒全部解释为不可避免：当前尚未实现论文式同 base memory 合并，active-SRI fixing 也默认关闭并改用安全但更弱的 no-SRI 松弛 fixing，dual smoothing 则因现有 A/B 退化而关闭。
 
 后续最值得先做的 A/B 不是盲目降低 cut 数，而是实现“当前节点内同 base memory 并集 + 新 immutable ID 替换旧 active row”，并统计 active base 数、同 base memory 版本数、residual 状态数和单次 pricing 时间。第二优先级是单独测试 SRI-aware fixing 能否用更高的 fixing 成本换来更小的后续图。只有这两项仍无法控制时，才应把严格大时域视为需要改用非全量时间离散方法的结构性场景。论文原文只明确提出 dropping the time discretization，并举 Ioachim et al. (1998) 的连续时间分段线性资源函数方法为例；动态离散化/DDD 是可另行研究的工程方向，不是该论文提出或验证的方法。
+
+## 23. 当前节点同 base memory 合并实现与实际影响
+
+2026-07-26 按论文 separation 流程实现同 rank-1 base 的 limited memory 并集。全局 `CutPool` 继续保持 cut ID 不可变；分离器在当前节点内把新 memory 与所有同 multiplier/scope 的 active memory 取并集，若并集没有变化则直接跳过，若发生变化则创建新的 immutable cut ID。PC 在下一次重建 RMP 前统一从当前 active 集删除旧版本并加入新 ID，因此旧节点、已排队 child 和当前节点之间不会共享可变 cut 系数。appearance 和 node cut 总量也改为按唯一 base 计数；已有 base 的 memory 更新不消耗新 base 名额，不受 job appearance 已满阻止。
+
+新增回归测试覆盖旧 ID 不变、当前 active 集只剩一个 union ID、重复合并为 no-op、历史多个版本收敛为一个 ID，以及 arc-memory 扩大后的系数单调性。最后一项穷举4个job、长度1至6的全部序列，确认 union cut coefficient 不小于任一旧 memory cut。focused 编译、`CutPoolActiveRank1MemoryMergeTest`、`CutPoolImmutableIdTest` 和 `ActiveCutInheritanceTest` 均通过。
+
+随后完全复用历史 `60-3 W100 time-indexed SRI root-only` 参数运行当前版本。4轮后续分离共发生24个 `memoryMergedBases`，移除24个旧 active memory 版本；说明重复版本确实存在。可是最终 active cuts 仅由历史129降到127，root总时间由177.541秒变为176.579秒，exact pricing由8.540秒/349次变为8.832秒/347次，基本没有性能差异。新运行的全局 cut pool 为428，高于历史371，是因为 immutable pool保留被替换的历史版本；pricing只读取127条当前 active cuts，不能再用全局 pool ID 数衡量状态维数。该实验说明同 base 合并是正确的论文对齐项，但不是当前 active cut 过多或定价爆炸的主要原因。
+
+当前 `maxSubsetRowCutsPerRound=10` 只在 legacy partial-list 三元 subset-row 分支中读取。time-indexed paper rank-1 分支完全不读取该值，而是分别硬限制每轮最多50条one-row和75条three-row cut，再受 active base总量、job appearance、inactive removal和tailing-off约束。本次root各轮实际处理94、87、84、86和79个发生变化的cut操作，最终127条active cuts基本都是不同scope的base。因此cut数量增长的主要来源正是paper family额度和大量不同scope候选；若要A/B降低cut数量，应增加独立的paper one-row/three-row上限，不能误以为把现有legacy参数设为10已经生效。

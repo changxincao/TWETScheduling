@@ -151,7 +151,8 @@ public class PC {
 					}
 				}
 			}
-			ArrayList<Integer> newCutIds = new ArrayList<Integer>();
+			ArrayList<Integer> activeBeforeSeparation = new ArrayList<Integer>(lp.getActiveCutIds());
+			ArrayList<Integer> activeAfterSeparation = new ArrayList<Integer>(activeBeforeSeparation);
 			boolean separated = false;
 			for (CutGenerator generator : cutGenerators) {
 				if (isTimeLimitReached()) {
@@ -161,20 +162,57 @@ public class PC {
 				CutGenerationResult result = generator.separate(lp);
 				long cutNanos = System.nanoTime() - cutStart;
 				int addedCuts = 0;
+				int mergedBases = 0;
+				int removedMemoryVersions = 0;
 				if (result.isSeparated()) {
-					separated = true;
 					for (int i = 0; i < result.getCuts().size(); i++) {
-						newCutIds.add(Integer.valueOf(lp.getCutPool().addCut(result.getCuts().get(i))));
+						TWETCut cut = result.getCuts().get(i);
+						if (usesPaperStyleTimeIndexedRank1Cuts() && cut.getType() == TWETCutType.SUBSET_ROW) {
+							CutPool.Rank1MemoryMergeResult merge = lp.getCutPool()
+									.mergeRank1MemoryIntoActive(activeAfterSeparation, cut);
+							if (merge.isChanged()) {
+								addedCuts++;
+								if (merge.getMatchedActiveVersions() > 0) {
+									mergedBases++;
+									removedMemoryVersions += merge.getRemovedActiveVersions();
+								}
+							}
+						} else {
+							int cutId = lp.getCutPool().addCut(cut);
+							if (!activeAfterSeparation.contains(Integer.valueOf(cutId))) {
+								activeAfterSeparation.add(Integer.valueOf(cutId));
+								addedCuts++;
+							}
+						}
 					}
-					addedCuts = result.getCuts().size();
 				}
-				traceSink.onCutCall(lp.getNode(), generator.getName(), result.isSeparated(), addedCuts,
-						result.getMessage(), lp.getCutPool().size(), cutNanos);
+				boolean generatorChanged = addedCuts > 0;
+				separated |= generatorChanged;
+				String message = result.getMessage();
+				if (mergedBases > 0) {
+					message += ", memoryMergedBases=" + mergedBases
+							+ ", removedActiveMemoryVersions=" + removedMemoryVersions;
+				}
+				traceSink.onCutCall(lp.getNode(), generator.getName(), generatorChanged, addedCuts,
+						message, lp.getCutPool().size(), cutNanos);
 			}
 			if (!separated) {
 				break;
 			}
 			lastReusableSubtreeArcEliminationBounds = null;
+			ArrayList<Integer> removedCutIds = new ArrayList<Integer>();
+			for (int cutId : activeBeforeSeparation) {
+				if (!activeAfterSeparation.contains(Integer.valueOf(cutId))) {
+					removedCutIds.add(Integer.valueOf(cutId));
+				}
+			}
+			ArrayList<Integer> newCutIds = new ArrayList<Integer>();
+			for (int cutId : activeAfterSeparation) {
+				if (!activeBeforeSeparation.contains(Integer.valueOf(cutId))) {
+					newCutIds.add(Integer.valueOf(cutId));
+				}
+			}
+			lp.removeCuts(removedCutIds);
 			lp.addCuts(newCutIds);
 			solution = solveRelaxationTimed(lp, "after_cut");
 			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {

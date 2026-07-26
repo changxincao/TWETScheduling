@@ -224,3 +224,17 @@ ng-DSSR 的 active-SRI 路径只在 partial-list backend 上启用，正反向 l
 因此当前结论是：两种 SRI 的 master 接线和最终 elementary 列语义均正确；time-indexed SRI 的状态定价也是精确口径。ng-DSSR SRI 在 intended partial-list 路径下保持正确，但其中间 ng-route 松弛和 dominance 更保守，而且 active SRI 会关闭新的 source-aware dominance、group-envelope join 等 no-SRI 优化，所以主要问题是计算效率，不是 cut 公式错误。当前仍没有把 active SRI state 接入 source-aware graph；不能把普通高效 ng-DSSR 主线描述成已经原生支持 SRI。
 
 Limited arc memory 不是只由 cut scope 决定，而是根据当前节点 LP 解中的正值内部列构造。生成器只扫描 `solution.columnValues` 中取值大于容差的列，并进一步跳过 full rank-1 coefficient 为零的列；对剩余 route，从出现第一个未配对 scope job 开始记录沿途 arcs，到第二个 scope job 使 coefficient 增加时，才把该段 arcs 加入 memory，最后再补反向 arcs 和 scope jobs 之间的 arcs。因此不同节点即使分离出相同 scope，其正值列不同也会得到不同 memory；这些 cut 对未来列的 coefficient 定义不同，必须使用不同且不可变的 cut ID。
+
+## 22. 严格时间放大下 SRI 配置与论文流程再对拍
+
+2026-07-26 重新核对 `50-3 / setupR50 / timeX10 / W1000 / setupCost=20*setupTime` 的 time-indexed SRI 运行参数、实际日志和论文 Algorithms 1--7。该次运行不是误用旧 class 或漏开主要配置：使用 rank-1 双向图定价、arc limited memory、strong branching、Phase-I repair、node-end fixing 和 cut-loop fixing；child cut 继承与 immutable cut ID 修复也已在该运行之前生效。运行在 7200.073 秒达到时限，保持 `incumbent=313870`，最后 gap 约 1.6882%。`TimeIndexedGraphRank1CutPricing` 为 6549.020 秒/1077 次，平均 6.081 秒，已经是决定性瓶颈。
+
+论文与当前实现一致的部分包括：以 `(job,time)` 为时空状态、active cut 每条增加一个二值 residual、先 bucket heuristic 再 exact labeling、正反向 residual 转移、join 补偿、相同 `(job,time)` 下带 cut dual 的 dominance、50/300 列上限、inactive cut 删除和连续两轮改善低于 2% 的 tailing-off。`tStar` 也已按 fixing 后各 job 最早/最晚剩余时空顶点的平均值计算。当前未发现这些公式或接线导致错误列、漏列或错误闭合。
+
+仍有一项重要机制没有与论文完全对齐。论文在再次分离出相同 multiplier/scope 时，不新增独立 cut，而是把新 memory 合并进已有 cut。当前 `SubsetRowCutGenerator` 虽构造了 active base 信息，但 paper rank-1 候选加入时没有使用它；`CutPool` 又按包含 memory 的完整 signature 去重，因此相同 base、不同 memory 会成为多个不可变 cut ID。不可变 ID 是修复跨节点 row/pricing 口径漂移所必需的，不能恢复为全局原地改写；若要对齐论文，只能在当前节点内删除旧 active row，创建 memory 并集的新不可变 cut ID，并让 child 继承新 ID。当前做法下每个 cut 本身仍有效，但同一 base 可能占用多个 residual 状态，定价维数和 dominance 成本会高于论文的 memory-union 口径。
+
+该次运行中 paper rank-1 模式也并不受 `maxSubsetRowCutsPerRound=10` 控制；该参数只属于 legacy triple SRI。paper 模式实际按论文上限每轮最多加入 50 条 one-row 和 75 条 three-row cuts，日志中 root 首轮加入 93 条，随后多轮加入约 87--91 条并删除约 74--83 条 inactive cuts。977 条定价日志中 active cuts 平均 61.55、最大 127；cuts 为 0--20、21--50、51--100、101 以上时，平均单次定价分别约为 3.21、3.47、7.75、14.07 秒。最后一次 exact 在 42 条 active cuts、horizon 51120 下保留约 157 万 labels、支配约 717 万 labels并扫描约 2354 万 arcs。该证据说明慢点主要来自“时间层数乘以 cut residual 状态”的联合增长，而不是普通最短路本身。
+
+论文也明确承认 setup time 使时间上界显著增长时，time-indexed 方法性能下降，并把取消时间离散作为后续降低运行时间的方向。无 cut 图的基础工作量约随时域长度线性增长；加入 `L` 个二值 cut residual 后，同一 `(job,time)` bucket 可保留多个状态，理论组合上限为 `2^L`，limited memory 和 dominance 只能压缩实际状态，不能消除该增长。因此严格时间放大导致显著退化是方法本身的真实边界，但不能把当前 7200 秒全部解释为不可避免：当前尚未实现论文式同 base memory 合并，active-SRI fixing 也默认关闭并改用安全但更弱的 no-SRI 松弛 fixing，dual smoothing 则因现有 A/B 退化而关闭。
+
+后续最值得先做的 A/B 不是盲目降低 cut 数，而是实现“当前节点内同 base memory 并集 + 新 immutable ID 替换旧 active row”，并统计 active base 数、同 base memory 版本数、residual 状态数和单次 pricing 时间。第二优先级是单独测试 SRI-aware fixing 能否用更高的 fixing 成本换来更小的后续图。只有这两项仍无法控制时，才应把严格大时域视为必须改用连续时间/ng-DSSR 或动态离散化的结构性场景。

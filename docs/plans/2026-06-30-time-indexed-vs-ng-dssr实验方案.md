@@ -1542,3 +1542,8 @@ node 8 的87.508秒不是 strong repair 或 join 爆炸。该节点 LP 总计仅
 ng-DSSR 用时 `1760.321s`、88 nodes、root `117.371s`、pool `66072`，其中启发式 pricing `1233.338s/2195`，exact `263.148s/713`，master LP `118.659s`。time-indexed no-cut 用时 `2337.215s`、524 nodes、root `72.224s`、pool `1136379`，exact pricing `1239.822s/9040`，master LP `640.714s`。修复 cut ID 不可变语义后的 time-indexed SRI 用时 `1116.491s`、30 nodes、root `148.737s`、pool `48839`，SRI pricing `723.102s/1354`，master LP `272.866s`。SRI 的 root 最慢，但 cuts 将搜索树从 no-cut 的 524 nodes 压到 30 nodes，最终比 ng-DSSR 快约 36.6%，比 no-cut 快约 52.2%。
 
 该比较存在一个初始状态限制：ng-DSSR 与 no-cut 首次并行启动时均为 93 条初始列、初始 incumbent `31882`；SRI 修复后单独重启得到 95 条初始列、初始 incumbent `31820`。因此三组最终最优值和正确性可直接比较，整体时间只能作为当前配置表现，不能解释为严格固定 ALNS 起点下的纯算法消融。输出目录分别为 `exp-50-3-R50-W100-cost20-ng-20260726a`、`exp-50-3-R50-W100-cost20-ti-nocut-20260726a` 和 `exp-50-3-R50-W100-cost20-ti-sri-20260726b`。
+## 2026-07-26：50-3 setupR50 严格时间 ×10、W1000 三算法并行实验
+
+沿用 `50-3 / setupR50 / W100 / setupCost=20*setupTime` 三算法实验的完整配置，只将实例替换为 `data/time-scale/setup-variants/50-3/wet050_003_3m_setupR50_timeX10.dat`，并将 due-window 半宽同步由 100 放大为 1000。ng-DSSR、time-indexed no-cut 和 time-indexed rank-1/SRI 三组均使用 7200 秒时限、单 CPLEX 线程、60 秒 ALNS、best history、Phase-I strong repair 和一阶段 strong branching；ng-DSSR 继续使用 root time-indexed preprocessing/seed200、source-aware dominance、group prefilter、C1000/K20 和 completion bound。
+
+三组于同一时段并行启动，输出目录分别为 `exp-50-3-R50-timeX10-W1000-cost20-ng-20260726a`、`exp-50-3-R50-timeX10-W1000-cost20-ti-nocut-20260726a` 和 `exp-50-3-R50-timeX10-W1000-cost20-ti-sri-20260726a`。实际日志确认三边均为 `CmaxH=51120`、129 条初始列、3 条 incumbent 列和初始上界 313870；pricing engine 与 cut 开关符合各自口径，stderr 均为空。Java PID 分别为 6512、5160 和 39560，结果待运行完成后补充。

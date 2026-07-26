@@ -1547,3 +1547,15 @@ ng-DSSR 用时 `1760.321s`、88 nodes、root `117.371s`、pool `66072`，其中�
 沿用 `50-3 / setupR50 / W100 / setupCost=20*setupTime` 三算法实验的完整配置，只将实例替换为 `data/time-scale/setup-variants/50-3/wet050_003_3m_setupR50_timeX10.dat`，并将 due-window 半宽同步由 100 放大为 1000。ng-DSSR、time-indexed no-cut 和 time-indexed rank-1/SRI 三组均使用 7200 秒时限、单 CPLEX 线程、60 秒 ALNS、best history、Phase-I strong repair 和一阶段 strong branching；ng-DSSR 继续使用 root time-indexed preprocessing/seed200、source-aware dominance、group prefilter、C1000/K20 和 completion bound。
 
 三组于同一时段并行启动，输出目录分别为 `exp-50-3-R50-timeX10-W1000-cost20-ng-20260726a`、`exp-50-3-R50-timeX10-W1000-cost20-ti-nocut-20260726a` 和 `exp-50-3-R50-timeX10-W1000-cost20-ti-sri-20260726a`。实际日志确认三边均为 `CmaxH=51120`、129 条初始列、3 条 incumbent 列和初始上界 313870；pricing engine 与 cut 开关符合各自口径，stderr 均为空。Java PID 分别为 6512、5160 和 39560，结果待运行完成后补充。
+
+复核默认 profile 后发现，上述 no-cut 启动命令错误地显式设置了
+`timeIndexedCompletionBoundArcFixing=false`，关闭了正式 node 闭合后的 paper graph
+fixing。2026-07-26 重新以修正配置单独启动
+`exp-50-3-R50-timeX10-W1000-cost20-ti-nocut-bestfix-20260726b`，保持实例、W1000、
+setup cost 系数20、dual window、每轮300列、Phase-I repair、strong phase1和7200秒时限不变，
+仅将 node-end fixing 改为开启。实际配置快照为
+`TimeIndexedGraphPricing + NoOpCutGenerator`、`timeIndexedCompletionBoundArcFixing=true`、
+SRI/cut-loop fixing/通用 completion helper/外部启发式均关闭，CmaxH仍为51120，stderr为空。
+本轮 Java PID 为10112。由于60秒ALNS按墙钟停止，本轮初始状态变为134条列、3条incumbent列和
+上界311740，与旧轮129条列/313870不同；本轮可作为修正后正式profile结果，但不能和旧轮时间作
+严格单变量fixing A/B。

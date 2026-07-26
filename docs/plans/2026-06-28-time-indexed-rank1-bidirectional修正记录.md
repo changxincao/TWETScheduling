@@ -237,4 +237,4 @@ Limited arc memory 不是只由 cut scope 决定，而是根据当前节点 LP �
 
 论文也明确承认 setup time 使时间上界显著增长时，time-indexed 方法性能下降，并把取消时间离散作为后续降低运行时间的方向。无 cut 图的基础工作量约随时域长度线性增长；加入 `L` 个二值 cut residual 后，同一 `(job,time)` bucket 可保留多个状态，理论组合上限为 `2^L`，limited memory 和 dominance 只能压缩实际状态，不能消除该增长。因此严格时间放大导致显著退化是方法本身的真实边界，但不能把当前 7200 秒全部解释为不可避免：当前尚未实现论文式同 base memory 合并，active-SRI fixing 也默认关闭并改用安全但更弱的 no-SRI 松弛 fixing，dual smoothing 则因现有 A/B 退化而关闭。
 
-后续最值得先做的 A/B 不是盲目降低 cut 数，而是实现“当前节点内同 base memory 并集 + 新 immutable ID 替换旧 active row”，并统计 active base 数、同 base memory 版本数、residual 状态数和单次 pricing 时间。第二优先级是单独测试 SRI-aware fixing 能否用更高的 fixing 成本换来更小的后续图。只有这两项仍无法控制时，才应把严格大时域视为必须改用连续时间/ng-DSSR 或动态离散化的结构性场景。
+后续最值得先做的 A/B 不是盲目降低 cut 数，而是实现“当前节点内同 base memory 并集 + 新 immutable ID 替换旧 active row”，并统计 active base 数、同 base memory 版本数、residual 状态数和单次 pricing 时间。第二优先级是单独测试 SRI-aware fixing 能否用更高的 fixing 成本换来更小的后续图。只有这两项仍无法控制时，才应把严格大时域视为需要改用非全量时间离散方法的结构性场景。论文原文只明确提出 dropping the time discretization，并举 Ioachim et al. (1998) 的连续时间分段线性资源函数方法为例；动态离散化/DDD 是可另行研究的工程方向，不是该论文提出或验证的方法。

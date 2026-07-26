@@ -254,8 +254,104 @@ public class GCBBFullDomainComparisonTest {
 		Files.write(outputDir.resolve(caseName + ".incumbentAudit.csv"), lines);
 	}
 
+	/**
+	 * 2026-07-26: 按实际定价器应用已经验证的默认组合。系统属性在此后读取，
+	 * 因而仍可显式覆盖单项参数做 A/B，不再要求每个启动命令重复列出整套配置。
+	 */
+	static void applyBestPricingModeDefaults(TWETBPCConfig config,
+			boolean timeIndexedGraph, boolean timeIndexedRank1, boolean ngDssr) {
+		config.useTimeIndexedGraphRank1CutPricing = timeIndexedRank1;
+		config.useTimeIndexedGraphPricing = timeIndexedGraph || timeIndexedRank1;
+		config.useGCNGBBStyleNgDssrPricing = ngDssr;
+
+		config.runALNSForSeed = true;
+		config.alnsMaxRuntimeMillis = 60_000L;
+		config.alnsUseSimulatedAnnealingAcceptance = false;
+		config.initialHeuristicColumnHistoryMode = "best";
+		config.enableTwoStageStrongBranching = true;
+		config.strongBranchingCandidateLimit = 20;
+		config.strongBranchingPhase2CandidateLimit = 0;
+		config.strongBranchingPhase2MaxHeuristicPasses = 0;
+		config.enableStrongBranchingLightweightRepair = true;
+		config.enableStrongBranchingBranchImpliedPenalty = true;
+		config.enableStrongBranchingPhaseOneRepair = true;
+		config.enableDualBoundPruning = true;
+		config.enableDualStabilization = false;
+		config.enableRestrictedMasterIntegerHeuristic = false;
+		config.enableRouteEnumeration = false;
+
+		if (config.useTimeIndexedGraphPricing) {
+			config.enableHeuristicPricing = false;
+			config.enableTimeIndexedGraphDualWindow = true;
+			config.timeIndexedGraphMaxExactPricingColumns = 300;
+			config.bidirectionalCompletionBoundRelaxation = "off";
+			config.bidirectionalCompletionBoundScalarPruning = false;
+			config.bidirectionalCompletionBoundArcFixing = false;
+			config.bidirectionalCompletionBoundSubtreeArcElimination = false;
+			config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = false;
+			config.timeIndexedCompletionBoundScalarEnhancement = false;
+			config.timeIndexedCompletionBoundWindowTightening = false;
+			config.timeIndexedCompletionBoundArcFixing = true;
+			config.timeIndexedCompletionBoundInRoundArcFixing = false;
+			config.timeIndexedCompletionBoundCutLoopArcFixing = timeIndexedRank1;
+			config.timeIndexedCompletionBoundSriAwareArcFixing = false;
+			config.enableSubsetRowCutsForTimeIndexedGraph = timeIndexedRank1;
+			config.subsetRowCutMemoryMode = "arcMemory";
+			config.maxCutRounds = 8;
+			config.maxSubsetRowCutsPerRound = 10;
+			config.maxSubsetRowCutAppearancesPerJob = 20;
+			config.bidirectionalMidpointProbe = false;
+			return;
+		}
+
+		if (ngDssr) {
+			config.enableHeuristicPricing = true;
+			config.ngDssrInitialNgSetMode = "nearestK";
+			config.ngDssrInitialNgSetSize = -1;
+			config.ngDssrNonElementaryRouteUpdateLimit = 20;
+			config.ngDssrNonElementaryRouteCandidateLimit = 1000;
+			config.ngDssrNonElementaryRouteUpdateMode = "minimumNewPairsSegment";
+			config.useIncrementalSourcedDominanceGraph = true;
+			config.enableNgDssrJoinEnvelopePrefilter = true;
+			config.enableNgDssrJoinVisitProfilePruning = true;
+			config.enableNgDssrWindowRepeatabilityInitialFilter = true;
+			config.enableNgDssrHistoryWarmStart = false;
+			config.enableNgDssrSameNodeWarmStart = false;
+			config.bidirectionalJoinBestThresholdMode = "bestUB";
+			config.bidirectionalCompletionBoundRelaxation = "allCycles";
+			config.bidirectionalCompletionBoundScalarPruning = true;
+			config.bidirectionalCompletionBoundArcFixing = true;
+			config.bidirectionalCompletionBoundSubtreeArcElimination = true;
+			config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = true;
+			config.bidirectionalMidpointProbe = true;
+			config.bidirectionalMidpointProbePopLimit = 10000;
+			config.bidirectionalMidpointProbeScore = "time";
+			config.bidirectionalMidpointProbeEarlyStopRatio = 1.5;
+			config.bidirectionalMidpointProbeDssrImbalanceThreshold = 2.0;
+			config.enableTimeIndexedPreHeuristicPricing = false;
+			config.enableTimeIndexedRootPreprocessingForNgDssr = true;
+			config.timeIndexedRootPreprocessingSeedElementaryColumns = true;
+			config.timeIndexedRootPreprocessingSeedColumnLimit = 200;
+			config.timeIndexedCompletionBoundScalarEnhancement = true;
+			config.timeIndexedCompletionBoundWindowTightening = true;
+			config.timeIndexedCompletionBoundArcFixing = true;
+			config.timeIndexedCompletionBoundInRoundArcFixing = false;
+			config.timeIndexedCompletionBoundCutLoopArcFixing = true;
+		}
+	}
+
 	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain, boolean nodeJoin) {
 		TWETBPCConfig config = new TWETBPCConfig();
+		boolean timeIndexedGraph = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedGraphPricing",
+				Boolean.toString(config.useTimeIndexedGraphPricing)));
+		boolean timeIndexedRank1 = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.timeIndexedGraphRank1CutPricing",
+				Boolean.toString(config.useTimeIndexedGraphRank1CutPricing)));
+		boolean ngDssr = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.ngDssr",
+				Boolean.toString(config.useGCNGBBStyleNgDssrPricing)));
+		applyBestPricingModeDefaults(config, timeIndexedGraph, timeIndexedRank1, ngDssr);
 		config.instanceName = stripDat(instance.getFileName().toString()) + "-no-outsourcing-domain";
 		config.enableBPCConsoleOutput = false;
 		config.writeBPCResultFiles = false;
@@ -383,6 +479,9 @@ public class GCBBFullDomainComparisonTest {
 		config.useTimeIndexedGraphRank1CutPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphRank1CutPricing",
 				Boolean.toString(config.useTimeIndexedGraphRank1CutPricing)));
+		if (config.useTimeIndexedGraphRank1CutPricing) {
+			config.useTimeIndexedGraphPricing = true;
+		}
 		config.enableTimeIndexedGraphDualWindow = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphDualWindow",
 				Boolean.toString(config.enableTimeIndexedGraphDualWindow)));

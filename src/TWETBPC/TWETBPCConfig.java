@@ -63,7 +63,7 @@ public class TWETBPCConfig {
 	/** 2026-07-06: 在 ng-DSSR/heuristic 前插入 no-cut time-indexed 快速找列器；不替代 exact pricing。 */
 	public boolean enableTimeIndexedPreHeuristicPricing = false;
 	/** 2026-07-07: strong branching phase2 是否使用 time-indexed pre-heuristic；默认保持原口径。 */
-	public boolean enableTimeIndexedPreHeuristicInStrongBranchingPhase2 = true;
+	public boolean enableTimeIndexedPreHeuristicInStrongBranchingPhase2 = false;
 	/** 2026-07-06: 前置 time-indexed 启发式每轮最多返回多少条 elementary 负列。 */
 	public int timeIndexedPreHeuristicColumnLimit = 300;
 	/**
@@ -111,11 +111,11 @@ public class TWETBPCConfig {
 	 * 2026-07-01: strong branching 轻量 repair 试验。Phase 1 初始 seed 保留父 LP 正值机器列，
 	 * 其它机器列按 child 域过滤；repair 仍走旧流程，只给当前新增分支行挂 slack。
 	 */
-	public boolean enableStrongBranchingLightweightRepair = false;
+	public boolean enableStrongBranchingLightweightRepair = true;
 	/** 2026-07-04: strong branching phase-1 是否用 big-M 统一惩罚 branch-implied 竞争弧列。 */
 	public boolean enableStrongBranchingBranchImpliedPenalty = true;
-	/** 2026-07-20: A/B switch for pure Phase-I strong-trial repair; disabled by default. */
-	public boolean enableStrongBranchingPhaseOneRepair = false;
+	/** 2026-07-26: strong trial 默认使用纯 Phase-I repair；仍可由 runner 参数显式关闭做 A/B。 */
+	public boolean enableStrongBranchingPhaseOneRepair = true;
 	/** 2026-06-24: 节点 LP true-dual 闭合后，是否尝试枚举所有 rc < UB-LB 的列并解有限主问题。 */
 	public boolean enableRouteEnumeration = false;
 	/** 2026-06-24: 只有节点绝对 gap 小于该阈值时才触发 route enumeration。 */
@@ -386,7 +386,7 @@ public class TWETBPCConfig {
 	 */
 	public String forwardLabelQueueOrdering = "reducedCost";
 	/** 2026-05-18: 对应旧 VRP Configure.m_initial_col_number，子节点初始 RMP 最多继承多少条低 reduced-cost 列。 */
-	public int branchSeedColumnLimit = 1000;
+	public int branchSeedColumnLimit = 5000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_addin_red_cost，父节点 reduced cost 低于该阈值的列优先传给子节点。 */
 	public double branchSeedReducedCostAllowance = 5000.0;
 	/** 单个节点内最多进行多少轮 cut separation。 */

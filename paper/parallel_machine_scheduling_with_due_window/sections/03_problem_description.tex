@@ -13,6 +13,14 @@ $[d_j^e,d_j^l]$. If job $j$ follows job $i$ on the same machine, the transition
 requires setup time $s_{ij}$ and incurs setup cost $\kappa_{ij}$. Index $0$ denotes
 the initial state of a machine; hence $s_{0j}$ and $\kappa_{0j}$ are the initial
 setup time and cost of job $j$. Idle time is allowed between consecutive jobs.
+The setup times satisfy the triangle inequality,
+\begin{equation}
+    s_{ik}\le s_{ij}+s_{jk},
+    \qquad
+    i\in\mathcal J\cup\{0\},\quad j,k\in\mathcal J,
+    \label{eq:setup-time-triangle}
+\end{equation}
+for pairwise distinct indices.
 
 The completion-time penalty of job $j$ is a nonnegative, finitely represented
 piecewise-linear function $\phi_j(t)$. The principal case is weighted
@@ -77,8 +85,10 @@ the two formulations in Section~\ref{sec:formulations}.
 
 \subsection{Optimization problem}
 
-A feasible solution consists of at most $m$ elementary internal sequences and one
-outsourced set such that every job is covered. Its objective is
+A feasible solution consists of at most $m$ mutually disjoint elementary internal
+sequences and one outsourced set. The outsourced set is disjoint from all internal
+sequences, and every job appears exactly once, either in one internal sequence or in
+the outsourced set. Its objective is
 \begin{equation}
     \min
     \left\{

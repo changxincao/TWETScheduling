@@ -1,9 +1,9 @@
 \section{Literature Review}\label{sec:literature}
 
-The present study lies at the intersection of four research streams: scheduling
-with due-window penalties, exact methods for parallel-machine scheduling,
-production scheduling with outsourcing, and relaxed elementary pricing. We review
-these streams by the role they play in the proposed model and algorithm.
+The present study lies at the intersection of three scheduling research streams:
+scheduling with due-window penalties, exact methods for parallel-machine
+scheduling, and production scheduling with outsourcing. We review these streams
+by the role they play in the proposed problem and solution framework.
 
 \subsection{Due-window scheduling and functional timing costs}
 
@@ -22,13 +22,8 @@ machine environments, setup assumptions, release dates, and idle-time decisions.
 Two methodological implications are important here. First, the cost of a fixed
 sequence cannot generally be obtained by simply processing its jobs without idle
 time; the completion times must be optimized jointly. Second, the value of a
-partial sequence is naturally a function of its boundary time. This functional
-view also appears in routing with time-dependent penalties. \citet{ibaraki2008ils}
-use dynamic programming to evaluate a fixed route under convex piecewise-linear
-time penalties, and \citet{liberatore2011soft} embed soft time-window penalties in
-an exact column-generation algorithm. These studies motivate our PWLF
-representation, although the present pricing problem concerns machine schedules
-rather than vehicle routes.
+partial sequence is naturally a function of its boundary time. These observations
+motivate the PWLF representation developed in Section~\ref{subsec:functional-pricing}.
 
 \subsection{Exact methods for parallel-machine scheduling}
 
@@ -73,37 +68,22 @@ aggregate concave tariff.
 
 Aggregate pricing is studied more directly by \citet{lu2021discount}, who analyze
 in-house production and outsourcing under alternative discount schemes on total
-outsourcing cost. Related routing models provide exact decomposition precedents.
-\citet{gahm2017routing} consider private vehicles, multiple common carriers,
-volume discounts, and rental options. \citet{dabia2019rich} develop two exact
-formulations for a rich private-fleet/common-carrier routing problem: one
-columnizes both private routes and common-carrier choices, whereas the other keeps
-the outsourcing decisions in the master. \citet{baller2020partial} extend this
-line to partial outsourcing and solve two path-based formulations by
-branch-price-and-cut. These routing studies motivate our two alternative
-outsourcing formulations. Their internal columns, however, are routes; they do not
-address the timing of parallel-machine sequences with due-window costs and
-sequence-dependent setups.
+outsourcing cost. This work provides a scheduling precedent for representing the
+outsourcing decision through a portfolio-level tariff rather than independent
+job-level charges.
 
-\subsection{Relaxed elementary pricing and research gap}
+\subsection{Research gap}
 
-Elementarity is a principal source of pricing complexity. Ng-route relaxations keep
-only selected visit memories, while decremental state-space relaxation restores
-missing memories when repeated-visit witnesses are found.
-\citet{martinelli2014pricing} combine ng-route relaxation, DSSR, and completion
-bounds to solve elementary and restricted non-elementary route pricing. We adapt
-this logic to scheduling, where a label carries a PWLF rather than a scalar cost
-and where forward and backward labels must be joined over continuous completion
-times.
-
-The literature therefore provides the necessary ingredients separately.
-Due-window studies define the timing costs and show the difficulty created by
-general setups; parallel-machine research supplies lower bounds and exact
-column-generation frameworks; outsourcing studies integrate make-or-buy
-decisions; discount and common-carrier models introduce aggregate tariffs; and
-routing research supplies ng-DSSR pricing techniques. We are not aware of an exact
-method that combines identical parallel machines, job-dependent due windows,
-sequence-dependent setup times and costs, an aggregate concave outsourcing tariff,
-and exact branch-and-price. The contribution of this paper is to integrate these
-elements and to develop the continuous-time functional pricing machinery required
-by their combination.
+The scheduling literature therefore provides the necessary ingredients
+separately. Due-window studies define the timing costs and show the difficulty
+created by general setups; parallel-machine research supplies lower bounds and
+exact column-generation frameworks; outsourcing studies integrate make-or-buy
+decisions; and discount models introduce aggregate tariffs. We are not aware of
+an exact method that combines identical parallel machines, job-dependent due
+windows, sequence-dependent setup times and costs, an aggregate concave
+outsourcing tariff, and exact branch-and-price. The contribution of this paper is
+to integrate these elements and to develop the continuous-time functional pricing
+machinery required by their combination. Algorithmic ideas adapted from the
+shortest-path pricing literature are attributed where they are introduced in
+Section~\ref{sec:solution}, rather than treated as part of the scheduling problem
+literature.

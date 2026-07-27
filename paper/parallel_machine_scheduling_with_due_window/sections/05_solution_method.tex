@@ -122,7 +122,9 @@ The principal continuous-time configuration studied here combines bidirectional 
 labeling, ng-route relaxation, and DSSR. It is exact at termination: intermediate
 rounds may admit non-elementary walks, but every returned master column is
 elementary, and the ng sets are enlarged whenever a negative non-elementary witness
-remains.
+remains. The ng-memory and decremental-refinement logic is adapted from the route
+pricing framework of \citet{martinelli2014pricing}; the state, resource, and cost
+representations below are specific to the scheduling pricing problem.
 
 \subsubsection{Bidirectional labeling and midpoint selection}
 
@@ -166,28 +168,57 @@ latter condition also proves that no negative elementary column exists.
 
 \subsubsection{Source-aware incremental dominance}
 
-Labels are organized by terminal job and a reachable-set key. The complement of
-this key combines the jobs retained by ng-memory with jobs that are currently
-unreachable under the label's time domain. Keys form a partial order: a predecessor key
-represents a state that can dominate labels stored at a successor key. For each
-key, the algorithm maintains a sourced lower envelope. Every envelope segment
-records the local label that contributes it, or records that it was inherited from
-a predecessor key.
+Our dominance structure adapts the set-dominance graph of
+\citet{luo2017dominance}. In that graph, labels with the same earliest service
+time and reachable set occupy one node, and the node stores their pointwise lower
+envelope over the delivered-quantity resource. Dominance inherited through the
+graph can consequently be established by a set of labels even when no individual
+label dominates the candidate over its complete domain.
 
-When a new label arrives, the existing envelope is first used for a read-only
-dominance test. A surviving label is merged into the local envelope. Only the
-intervals on which the envelope decreases are propagated to successor keys.
-Because segment sources are retained, a local label is removed as soon as its last
-contributing interval disappears; the algorithm does not rescan all historical
-labels at that key. Under partial dominance, the retained intervals are applied
-lazily before a label is expanded or joined. Thus, the normal and partial modes
-share the same incremental dominance graph, and partial dominance adds only
-functional-domain trimming.
+For the present scheduling problem, a separate graph is maintained for each
+terminal job and search direction. A node $u$ is identified by a reachable-set key
+$R_u$; its complement contains jobs retained by ng-memory and jobs that cannot be
+extended from the current functional time domain. The scalar time state used in
+the original graph is not a separate key here because feasible completion times
+and their reduced costs are represented jointly by the label PWLF. The keys form
+a Hasse graph under set inclusion. If $\mathcal A_u$ is the set of active local
+labels and $\operatorname{pred}(u)$ is the set of immediate predecessor nodes, the
+single envelope maintained at $u$ is
+\begin{equation}
+    g_u(t)=
+    \min\left\{
+        \min_{L\in\mathcal A_u} f_L(t),
+        \min_{v\in\operatorname{pred}(u)} g_v(t)
+    \right\},
+    \label{eq:sourced-dominance-envelope}
+\end{equation}
+where $f_L$ is the frontier of label $L$. Every segment of $g_u$ records either
+the local label that supplies it or that the segment is inherited from a
+predecessor.
 
-This source-aware implementation is computationally important. A conventional
-dominance graph repeatedly rebuilds predecessor envelopes and scans all labels at
-affected nodes. The incremental graph instead propagates only geometric
-improvements and identifies dominated labels from their disappearing sources.
+Insertion is incremental. The current $g_u$ first rejects a label that is already
+dominated. Otherwise, $f_L$ is merged into $g_u$ by one segment sweep. The merge
+returns both the updated envelope and a sparse delta containing only intervals on
+which its numerical value decreases. This delta, rather than the complete
+envelope, is propagated to immediate successors. Propagation stops at a node when
+the delta produces no numerical change. A local label is removed when the merge
+shows that its source no longer appears on any segment of the node envelope. An
+empty node is deleted and its predecessor--successor links are reconnected.
+Under partial dominance, the surviving source intervals are recorded during the
+same merge and are applied lazily immediately before the label is expanded or
+joined.
+
+This source bookkeeping is the main implementation difference from the
+pseudocode of \citet{luo2017dominance}. Their label-removal procedure explicitly
+iterates over every label stored at each affected successor node and compares its
+function with the updated predecessor envelope. Here, the segment merge itself
+identifies which local sources lose their last contributing interval. Dominance
+propagation therefore does not scan the node's historical label list or rebuild
+separate local, predecessor, and combined envelopes. It still performs
+reachable-set graph searches and segment-level envelope scans, so the claim is a
+more economical realization of the same set-dominance principle for PWLF
+scheduling labels, not a general complexity comparison with the routing
+algorithm.
 
 \subsubsection{Completion bounds}
 

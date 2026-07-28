@@ -1,6 +1,7 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 
@@ -25,11 +26,26 @@ public class CutPool {
 	private final ArrayList<TWETCut> cuts;
 	/** cut signature 到全局 id 的映射，用于去重。 */
 	private final HashMap<String, Integer> signatureToId;
+	/** 按 cut/column ID 分页保存已经计算过的 SRI 系数；页只在实际访问时分配。 */
+	private final ArrayList<short[][]> subsetRowCoefficientPages;
+	private final boolean cacheSubsetRowCoefficients;
+	private final long maxSubsetRowCoefficientCacheEntries;
+	private long allocatedSubsetRowCoefficientCacheEntries;
+
+	private static final int COEFFICIENT_PAGE_SHIFT = 12;
+	private static final int COEFFICIENT_PAGE_SIZE = 1 << COEFFICIENT_PAGE_SHIFT;
+	private static final int COEFFICIENT_PAGE_MASK = COEFFICIENT_PAGE_SIZE - 1;
+	private static final short COEFFICIENT_NOT_CACHED = -1;
 
 	/** 构造一个空的 cut pool。 */
 	public CutPool() {
 		this.cuts = new ArrayList<TWETCut>();
 		this.signatureToId = new HashMap<String, Integer>();
+		this.subsetRowCoefficientPages = new ArrayList<short[][]>();
+		this.cacheSubsetRowCoefficients =
+				Boolean.parseBoolean(System.getProperty("twet.bpc.cacheSubsetRowCoefficients", "true"));
+		this.maxSubsetRowCoefficientCacheEntries =
+				Math.max(0L, Long.getLong("twet.bpc.maxSubsetRowCoefficientCacheEntries", 16_777_216L));
 	}
 
 	/**
@@ -48,8 +64,54 @@ public class CutPool {
 		// 否则排队节点重建时会读取到与 strong trial 不同的 cut，并且当前模型的行与 pricing 口径也会失配。
 		int id = cuts.size();
 		cuts.add(cut);
+		subsetRowCoefficientPages.add(null);
 		signatureToId.put(signature, Integer.valueOf(id));
 		return id;
+	}
+
+	/**
+	 * @return 已缓存系数；尚未缓存时返回 -1。
+	 */
+	public int getSubsetRowCoefficient(int cutId, int columnId) {
+		if (!cacheSubsetRowCoefficients || cutId < 0 || cutId >= subsetRowCoefficientPages.size()
+				|| columnId < 0) {
+			return -1;
+		}
+		short[][] pages = subsetRowCoefficientPages.get(cutId);
+		int pageIndex = columnId >>> COEFFICIENT_PAGE_SHIFT;
+		if (pages == null || pageIndex >= pages.length || pages[pageIndex] == null) {
+			return -1;
+		}
+		return pages[pageIndex][columnId & COEFFICIENT_PAGE_MASK];
+	}
+
+	/**
+	 * 缓存不可变 cut/column ID 对应的非负整数系数。超过全局页容量时停止分配新页，已有页继续使用。
+	 */
+	public void cacheSubsetRowCoefficient(int cutId, int columnId, int coefficient) {
+		if (!cacheSubsetRowCoefficients || cutId < 0 || cutId >= subsetRowCoefficientPages.size()
+				|| columnId < 0 || coefficient < 0 || coefficient > Short.MAX_VALUE) {
+			return;
+		}
+		int pageIndex = columnId >>> COEFFICIENT_PAGE_SHIFT;
+		short[][] pages = subsetRowCoefficientPages.get(cutId);
+		short[] page = pages != null && pageIndex < pages.length ? pages[pageIndex] : null;
+		if (page == null) {
+			if (allocatedSubsetRowCoefficientCacheEntries + COEFFICIENT_PAGE_SIZE
+					> maxSubsetRowCoefficientCacheEntries) {
+				return;
+			}
+			if (pages == null || pageIndex >= pages.length) {
+				int newLength = Math.max(pageIndex + 1, pages == null ? 1 : pages.length << 1);
+				pages = pages == null ? new short[newLength][] : Arrays.copyOf(pages, newLength);
+				subsetRowCoefficientPages.set(cutId, pages);
+			}
+			page = new short[COEFFICIENT_PAGE_SIZE];
+			Arrays.fill(page, COEFFICIENT_NOT_CACHED);
+			pages[pageIndex] = page;
+			allocatedSubsetRowCoefficientCacheEntries += COEFFICIENT_PAGE_SIZE;
+		}
+		page[columnId & COEFFICIENT_PAGE_MASK] = (short) coefficient;
 	}
 
 	/**

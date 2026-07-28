@@ -430,7 +430,7 @@ public class LP {
 		if (activeSubsetRowPricingCutIds != null && activeSubsetRowPricingDuals != null) {
 			for (int i = 0; i < activeSubsetRowPricingCutIds.size(); i++) {
 				TWETCut cut = cutPool.getCut(activeSubsetRowPricingCutIds.get(i).intValue());
-				double coefficient = subsetRowCoefficient(column, cut);
+				double coefficient = SubsetRowCutEvaluator.coefficient(cut, column.getSequence(), data.n);
 				if (coefficient > 0.0) {
 					reducedCost -= coefficient * activeSubsetRowPricingDuals.get(i).doubleValue();
 				}
@@ -998,7 +998,7 @@ public class LP {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
 			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
 				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
-				double coefficient = subsetRowCoefficient(column, cut);
+				double coefficient = subsetRowCoefficient(cutId, column.getId(), column, cut);
 				if (coefficient > 0.0) {
 					expr.addTerm(coefficient, lambdaVars[idx]);
 				}
@@ -1009,8 +1009,14 @@ public class LP {
 		}
 	}
 
-	private double subsetRowCoefficient(TWETColumn column, TWETCut cut) {
-		return SubsetRowCutEvaluator.coefficient(cut, column.getSequence(), data.n);
+	private int subsetRowCoefficient(int cutId, int columnId, TWETColumn column, TWETCut cut) {
+		int cached = cutPool.getSubsetRowCoefficient(cutId, columnId);
+		if (cached >= 0) {
+			return cached;
+		}
+		int coefficient = SubsetRowCutEvaluator.coefficient(cut, column.getSequence(), data.n);
+		cutPool.cacheSubsetRowCoefficient(cutId, columnId, coefficient);
+		return coefficient;
 	}
 
 	private void buildOutsourcingTariffConstraints() throws IloException {
@@ -1182,7 +1188,7 @@ public class LP {
 		}
 		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
 			TWETCut cut = cutPool.getCut(entry.getKey().intValue());
-			double coefficient = subsetRowCoefficient(column, cut);
+			double coefficient = subsetRowCoefficient(entry.getKey().intValue(), columnId, column, cut);
 			if (coefficient > 0.0) {
 				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), coefficient));
 			}

@@ -50,6 +50,7 @@ public class LP {
 	private final boolean shareColumnPattern;
 	private final boolean buildCoverageRowsByColumn;
 	private final boolean boundedReducedCostColumnSelection;
+	private final boolean restrictedColumnFilterTimingEnabled;
 	private Node node;
 	private ArrayList<Integer> restrictedColumnIds;
 	private HashSet<Integer> restrictedColumnIdSet;
@@ -108,6 +109,8 @@ public class LP {
 	private long masterLpPhaseModelInitNanos;
 	private long masterLpPhaseVariablesObjectiveNanos;
 	private long masterLpPhaseCoverageNanos;
+	private long masterLpPhaseCoverageRowsNanos;
+	private long masterLpPhaseMachineRowsNanos;
 	private long masterLpPhaseBranchRowsNanos;
 	private long masterLpPhaseCutRowsNanos;
 	private long masterLpPhaseRepairRowsNanos;
@@ -129,6 +132,8 @@ public class LP {
 				Boolean.parseBoolean(System.getProperty("twet.bpc.buildCoverageRowsByColumn", "true"));
 		this.boundedReducedCostColumnSelection =
 				Boolean.parseBoolean(System.getProperty("twet.bpc.boundedReducedCostColumnSelection", "true"));
+		this.restrictedColumnFilterTimingEnabled =
+				Boolean.parseBoolean(System.getProperty("twet.bpc.restrictedColumnFilterTiming", "false"));
 		replaceRestrictedColumnIds(Collections.<Integer>emptyList());
 		replaceRestrictedOutsourcingColumnIds(Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>();
@@ -568,6 +573,8 @@ public class LP {
 		masterLpPhaseModelInitNanos = 0L;
 		masterLpPhaseVariablesObjectiveNanos = 0L;
 		masterLpPhaseCoverageNanos = 0L;
+		masterLpPhaseCoverageRowsNanos = 0L;
+		masterLpPhaseMachineRowsNanos = 0L;
 		masterLpPhaseBranchRowsNanos = 0L;
 		masterLpPhaseCutRowsNanos = 0L;
 		masterLpPhaseRepairRowsNanos = 0L;
@@ -603,12 +610,14 @@ public class LP {
 		long otherNanos = Math.max(0L, masterLpPhaseTotalNanos - accountedNanos);
 		return String.format(java.util.Locale.US,
 				"phase=%s mode=%s outerMs=%.3f totalMs=%.3f buildMs=%.3f modelInitMs=%.3f "
-						+ "variablesObjectiveMs=%.3f coverageMs=%.3f branchRowsMs=%.3f cutRowsMs=%.3f "
+						+ "variablesObjectiveMs=%.3f coverageMs=%.3f coverageRowsMs=%.3f machineRowsMs=%.3f "
+						+ "branchRowsMs=%.3f cutRowsMs=%.3f "
 						+ "repairRowsMs=%.3f solveMs=%.3f extractMs=%.3f otherMs=%.3f",
 				phase, masterLpPhaseTimingRebuild ? "rebuild" : "resolve", outerElapsedNanos / 1.0e6,
 				masterLpPhaseTotalNanos / 1.0e6, masterLpPhaseBuildNanos / 1.0e6,
 				masterLpPhaseModelInitNanos / 1.0e6, masterLpPhaseVariablesObjectiveNanos / 1.0e6,
-				masterLpPhaseCoverageNanos / 1.0e6, masterLpPhaseBranchRowsNanos / 1.0e6,
+				masterLpPhaseCoverageNanos / 1.0e6, masterLpPhaseCoverageRowsNanos / 1.0e6,
+				masterLpPhaseMachineRowsNanos / 1.0e6, masterLpPhaseBranchRowsNanos / 1.0e6,
 				masterLpPhaseCutRowsNanos / 1.0e6, masterLpPhaseRepairRowsNanos / 1.0e6,
 				masterLpPhaseSolveNanos / 1.0e6, masterLpPhaseExtractNanos / 1.0e6, otherNanos / 1.0e6);
 	}
@@ -734,8 +743,12 @@ public class LP {
 
 		phaseStartNanos = masterLpTimingStart();
 		buildCoverageConstraints();
+		masterLpPhaseCoverageRowsNanos += masterLpTimingElapsed(phaseStartNanos);
+		phaseStartNanos = masterLpTimingStart();
 		buildMachineConstraint();
-		masterLpPhaseCoverageNanos += masterLpTimingElapsed(phaseStartNanos);
+		masterLpPhaseMachineRowsNanos += masterLpTimingElapsed(phaseStartNanos);
+		masterLpPhaseCoverageNanos =
+				masterLpPhaseCoverageRowsNanos + masterLpPhaseMachineRowsNanos;
 
 		phaseStartNanos = masterLpTimingStart();
 		buildOutsourcingMembershipBranchConstraints();
@@ -1402,29 +1415,51 @@ public class LP {
 
 	/**
 	 * repair 成功后，按当前 LP 的 reduced cost 筛出正式子节点列集。
+	 * 2026-07-28: 正值列直接复用本次求解快照，其余 reduced cost 一次批量读取，避免逐变量访问 CPLEX。
 	 */
 	public void resetRestrictedColumnsByCurrentReducedCost(int maxColumns, double reducedCostAllowance) {
 		if (cplex == null || lambdaByColumnId == null) {
 			return;
+		}
+		final long startNanos = restrictedColumnFilterTimingEnabled ? System.nanoTime() : 0L;
+		final int inputColumnCount = restrictedColumnIds.size();
+		if (lastSolution == null || lastSolution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new IllegalStateException("Restricted-column filtering requires the current LP solution.");
+		}
+		Set<Integer> positiveColumnIds = lastSolution.getColumnValues().keySet();
+		final double[] reducedCosts;
+		try {
+			reducedCosts = cplex.getReducedCosts(lambdaVars);
+		} catch (IloException ex) {
+			throw new IllegalStateException("Unable to read restricted-column reduced costs in bulk.", ex);
+		}
+		if (reducedCosts.length != inputColumnCount) {
+			throw new IllegalStateException("Restricted-column IDs and reduced costs are not aligned.");
 		}
 		ArrayList<Integer> selected = new ArrayList<Integer>();
 		ArrayList<ColumnReducedCost> candidates =
 				boundedReducedCostColumnSelection ? null : new ArrayList<ColumnReducedCost>();
 		PriorityQueue<ColumnReducedCost> boundedCandidates =
 				boundedReducedCostColumnSelection ? newReducedCostCandidateHeap(maxColumns) : null;
-		for (int columnId : restrictedColumnIds) {
-			TWETColumn column = pool.getColumn(columnId);
-			boolean compatible = isColumnCompatible(column);
-			if (isPositiveCurrentColumn(columnId)) {
+		int positiveCount = 0;
+		int incompatibleCount = 0;
+		for (int index = 0; index < inputColumnCount; index++) {
+			int columnId = restrictedColumnIds.get(index).intValue();
+			boolean positive = positiveColumnIds.contains(Integer.valueOf(columnId));
+			if (positive) {
 				// 2026-07-04: seed 筛选只做规模控制，不能删掉当前可行 LP 的正值列。
 				// 分支隐含竞争列若需要排斥，由 strong-trial 的 M 目标处理。
 				selected.add(Integer.valueOf(columnId));
+				positiveCount++;
 				continue;
 			}
+			TWETColumn column = pool.getColumn(columnId);
+			boolean compatible = isColumnCompatible(column);
 			if (!compatible) {
+				incompatibleCount++;
 				continue;
 			}
-			double reducedCost = getColumnReducedCost(columnId);
+			double reducedCost = reducedCosts[index];
 			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
 				addReducedCostCandidate(candidates, boundedCandidates, maxColumns, columnId, reducedCost);
 			}
@@ -1441,6 +1476,12 @@ public class LP {
 		}
 		if (isColumnizedOutsourcing()) {
 			resetRestrictedOutsourcingColumnsByCurrentReducedCost(maxColumns, reducedCostAllowance);
+		}
+		if (restrictedColumnFilterTimingEnabled) {
+			System.out.println(String.format(java.util.Locale.US,
+					"[RestrictedColumnFilterTiming] input=%d positive=%d incompatible=%d selected=%d timeMs=%.3f",
+					inputColumnCount, positiveCount, incompatibleCount, restrictedColumnIds.size(),
+					(System.nanoTime() - startNanos) / 1.0e6));
 		}
 	}
 
@@ -1531,18 +1572,6 @@ public class LP {
 	private static int compareColumnReducedCost(int columnId, double reducedCost, ColumnReducedCost other) {
 		int reducedCostCompare = Double.compare(reducedCost, other.reducedCost);
 		return reducedCostCompare != 0 ? reducedCostCompare : Integer.compare(columnId, other.columnId);
-	}
-
-	private boolean isPositiveCurrentColumn(int columnId) {
-		IloNumVar var = lambdaByColumnId.get(Integer.valueOf(columnId));
-		if (var == null) {
-			return false;
-		}
-		try {
-			return Utility.compareGt(cplex.getValue(var), VALUE_TOLERANCE);
-		} catch (IloException ex) {
-			return false;
-		}
 	}
 
 	private ArrayList<TariffSegment> collectOutsourcingTariffSegments() {

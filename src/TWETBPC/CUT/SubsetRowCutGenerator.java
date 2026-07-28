@@ -56,13 +56,14 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		HashSet<String> activeCuts = activeCutSignatures(lp);
 		int remainingNewBases = Math.max(0, config.maxSubsetRowCutsPerNode - activeCuts.size());
 		int[] appearances = activeSubsetRowAppearances(lp);
+		ArrayList<PositiveColumn> positiveColumns = positiveColumns(lp, solution);
 		ArrayList<Candidate> oneRow = new ArrayList<Candidate>();
 		ArrayList<Candidate> threeRow = new ArrayList<Candidate>();
 		for (int first = 1; first <= lp.getData().n; first++) {
 			int[] oneRowScope = new int[] { first };
 			if (activeCuts.contains(scopeSignature(oneRowScope))
 					|| appearances[first] < config.maxSubsetRowCutAppearancesPerJob) {
-				addCandidateIfViolated(lp, solution, oneRow, oneRowScope);
+				addCandidateIfViolated(positiveColumns, oneRow, oneRowScope);
 			}
 			for (int second = first + 1; second <= lp.getData().n; second++) {
 				for (int third = second + 1; third <= lp.getData().n; third++) {
@@ -73,7 +74,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 							|| appearances[third] >= config.maxSubsetRowCutAppearancesPerJob)) {
 						continue;
 					}
-					addCandidateIfViolated(lp, solution, threeRow, scope);
+					addCandidateIfViolated(positiveColumns, threeRow, scope);
 				}
 			}
 		}
@@ -112,13 +113,14 @@ public class SubsetRowCutGenerator implements CutGenerator {
 					if (appearances[third] >= config.maxSubsetRowCutAppearancesPerJob) {
 						continue;
 					}
-					String signature = scopeSignature(new int[] { first, second, third });
+					int[] scope = new int[] { first, second, third };
+					String signature = scopeSignature(scope);
 					if (activeTriples.contains(signature)) {
 						continue;
 					}
-					double lhs = subsetRowValue(lp, solution, new int[] { first, second, third });
+					double lhs = subsetRowValue(lp, solution, scope);
 					if (Utility.compareGt(lhs, 1.0 + VALUE_TOLERANCE)) {
-						candidates.add(new Candidate(new int[] { first, second, third }, lhs, 1.0));
+						candidates.add(new Candidate(scope, lhs, 1.0, signature));
 					}
 				}
 			}
@@ -170,12 +172,12 @@ public class SubsetRowCutGenerator implements CutGenerator {
 				&& config.useTimeIndexedGraphRank1CutPricing;
 	}
 
-	private void addCandidateIfViolated(LP lp, TWETMasterSolution solution,
+	private void addCandidateIfViolated(ArrayList<PositiveColumn> positiveColumns,
 			ArrayList<Candidate> candidates, int[] scope) {
 		double rhs = Math.floor(0.5 * scope.length + VALUE_TOLERANCE);
-		double lhs = rank1Value(lp, solution, scope, rhs);
+		double lhs = rank1Value(positiveColumns, scope);
 		if (Utility.compareGt(lhs, rhs + VALUE_TOLERANCE)) {
-			candidates.add(new Candidate(scope, lhs, rhs));
+			candidates.add(new Candidate(scope, lhs, rhs, scopeSignature(scope)));
 		}
 	}
 
@@ -188,8 +190,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 			if (addedFamilyCuts >= familyLimit) {
 				break;
 			}
-			String signature = scopeSignature(candidate.scope);
-			boolean activeBase = activeCuts.contains(signature);
+			boolean activeBase = activeCuts.contains(candidate.signature);
 			if (!activeBase && (addedNewBases >= remainingNewBases || !canUseScope(candidate.scope, appearances))) {
 				continue;
 			}
@@ -199,7 +200,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 			}
 			cuts.add(cut);
 			if (!activeBase) {
-				activeCuts.add(signature);
+				activeCuts.add(candidate.signature);
 				increaseAppearances(candidate.scope, appearances);
 				addedNewBases++;
 			}
@@ -306,14 +307,22 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		return value;
 	}
 
-	private double rank1Value(LP lp, TWETMasterSolution solution, int[] scope, double rhs) {
-		double value = 0.0;
-		TWETCut fullCut = new TWETCut(-1, TWETCutType.SUBSET_ROW, scopeList(scope), rhs, "rank1FullProbe");
+	private ArrayList<PositiveColumn> positiveColumns(LP lp, TWETMasterSolution solution) {
+		ArrayList<PositiveColumn> result = new ArrayList<PositiveColumn>(solution.getColumnValues().size());
 		for (Map.Entry<Integer, Double> entry : solution.getColumnValues().entrySet()) {
-			TWETColumn column = lp.getPool().getColumn(entry.getKey().intValue());
-			int coefficient = SubsetRowCutEvaluator.coefficient(fullCut, column.getSequence(), lp.getData().n);
+			result.add(new PositiveColumn(lp.getPool().getColumn(entry.getKey().intValue()),
+					entry.getValue().doubleValue()));
+		}
+		return result;
+	}
+
+	private double rank1Value(ArrayList<PositiveColumn> positiveColumns, int[] scope) {
+		double value = 0.0;
+		for (PositiveColumn positive : positiveColumns) {
+			int coefficient = fullRank1Coefficient(positive.column, scope);
 			if (coefficient > 0) {
-				value += coefficient * entry.getValue().doubleValue();
+				// 保持原 restricted-column 顺序累加，避免改变浮点同值候选的排序。
+				value += coefficient * positive.value;
 			}
 		}
 		return value;
@@ -341,7 +350,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 				continue;
 			}
 			TWETColumn column = lp.getPool().getColumn(entry.getKey().intValue());
-			if (!hasPositiveFullRank1Coefficient(lp, column, scope)) {
+			if (!hasPositiveFullRank1Coefficient(column, scope)) {
 				continue;
 			}
 			HashSet<Integer> aux = new HashSet<Integer>();
@@ -372,7 +381,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 				continue;
 			}
 			TWETColumn column = lp.getPool().getColumn(entry.getKey().intValue());
-			if (!hasPositiveFullRank1Coefficient(lp, column, scope)) {
+			if (!hasPositiveFullRank1Coefficient(column, scope)) {
 				continue;
 			}
 			ArrayList<Long> part = new ArrayList<Long>();
@@ -412,10 +421,20 @@ public class SubsetRowCutGenerator implements CutGenerator {
 		return result;
 	}
 
-	private boolean hasPositiveFullRank1Coefficient(LP lp, TWETColumn column, int[] scope) {
-		TWETCut fullCut = new TWETCut(-1, TWETCutType.SUBSET_ROW, scopeList(scope), Math.floor(scope.length * 0.5),
-				"rank1FullProbe");
-		return SubsetRowCutEvaluator.coefficient(fullCut, column.getSequence(), lp.getData().n) > 0;
+	private boolean hasPositiveFullRank1Coefficient(TWETColumn column, int[] scope) {
+		return fullRank1Coefficient(column, scope) > 0;
+	}
+
+	/**
+	 * full-memory、multiplier=1/2 的 rank-1 系数只取决于 scope 内总访问次数。
+	 * 直接读取 ColumnPattern 缓存，避免为每个三元 scope 重建 cut 并扫描完整 sequence。
+	 */
+	static int fullRank1Coefficient(TWETColumn column, int[] scope) {
+		int visits = 0;
+		for (int job : scope) {
+			visits += column.getJobVisitCount(job);
+		}
+		return visits / 2;
 	}
 
 	private boolean canUseScope(int[] scope, int[] appearances) {
@@ -481,20 +500,32 @@ public class SubsetRowCutGenerator implements CutGenerator {
 				if (a.scope.length != b.scope.length) {
 					return Integer.compare(a.scope.length, b.scope.length);
 				}
-				return scopeSignature(a.scope).compareTo(scopeSignature(b.scope));
+				return a.signature.compareTo(b.signature);
 			}
 		});
+	}
+
+	private static final class PositiveColumn {
+		final TWETColumn column;
+		final double value;
+
+		PositiveColumn(TWETColumn column, double value) {
+			this.column = column;
+			this.value = value;
+		}
 	}
 
 	private static final class Candidate {
 		final int[] scope;
 		final double value;
 		final double rhs;
+		final String signature;
 
-		Candidate(int[] scope, double value, double rhs) {
+		Candidate(int[] scope, double value, double rhs, String signature) {
 			this.scope = scope;
 			this.value = value;
 			this.rhs = rhs;
+			this.signature = signature;
 		}
 	}
 }

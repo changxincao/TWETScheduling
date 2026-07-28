@@ -52,6 +52,9 @@ public class InitialColumnBuilder {
 	 * 使用 {@link LinkedHashSet} 是为了去重，同时保留列加入顺序。
 	 */
 	public InitialColumnBundle build() {
+		if (config.fixedInitialColumnSeed != null) {
+			return buildFixedSeed(config.fixedInitialColumnSeed);
+		}
 		Solution seed = seedProvider.getOrBuildSeed();
 		LinkedHashSet<Integer> initialColumnIds = new LinkedHashSet<Integer>();
 		LinkedHashSet<Integer> incumbentColumnIds = new LinkedHashSet<Integer>();
@@ -65,6 +68,39 @@ public class InitialColumnBuilder {
 		return new InitialColumnBundle(seed, new ArrayList<Integer>(initialColumnIds),
 				new ArrayList<Integer>(incumbentColumnIds), SolutionBridge.extractOutsourcedJobs(seed),
 				SolutionBridge.extractOutsourcingBaseline(seed), SolutionBridge.extractOutsourcingCost(seed));
+	}
+
+	/**
+	 * 固定 sequence 实验只在目标实例上重新评价成本，不再运行目标实例自己的 seed/ALNS。
+	 */
+	private InitialColumnBundle buildFixedSeed(FixedInitialColumnSeed fixedSeed) {
+		LinkedHashSet<Integer> initialColumnIds = new LinkedHashSet<Integer>();
+		LinkedHashSet<Integer> incumbentColumnIds = new LinkedHashSet<Integer>();
+		HashMap<SequenceSignature, Integer> evaluatedSequenceIds = new HashMap<SequenceSignature, Integer>();
+		addSequences(fixedSeed.getInitialSequences(), initialColumnIds, null, evaluatedSequenceIds);
+		addSequences(fixedSeed.getIncumbentSequences(), initialColumnIds, incumbentColumnIds, evaluatedSequenceIds);
+		return new InitialColumnBundle(null, new ArrayList<Integer>(initialColumnIds),
+				new ArrayList<Integer>(incumbentColumnIds));
+	}
+
+	private void addSequences(List<List<Integer>> sequences, LinkedHashSet<Integer> initialColumnIds,
+			LinkedHashSet<Integer> incumbentColumnIds,
+			HashMap<SequenceSignature, Integer> evaluatedSequenceIds) {
+		for (List<Integer> sequence : sequences) {
+			SequenceSignature signature = new SequenceSignature(sequence);
+			Integer existingId = evaluatedSequenceIds.get(signature);
+			int id;
+			if (existingId == null) {
+				id = pool.addColumn(sequence, evaluator.evaluate(sequence), ColumnSource.HEURISTIC_FULL, true);
+				evaluatedSequenceIds.put(signature, Integer.valueOf(id));
+			} else {
+				id = existingId.intValue();
+			}
+			initialColumnIds.add(Integer.valueOf(id));
+			if (incumbentColumnIds != null) {
+				incumbentColumnIds.add(Integer.valueOf(id));
+			}
+		}
 	}
 
 	private void addMachineColumns(Solution solution, LinkedHashSet<Integer> initialColumnIds,

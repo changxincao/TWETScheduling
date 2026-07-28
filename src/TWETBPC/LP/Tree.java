@@ -105,8 +105,8 @@ public class Tree {
 		PriorityQueue<Node> queue = new PriorityQueue<Node>();
 		queue.add(root);
 
-		double incumbentCost = data.configure.bestSolution == null ? Double.POSITIVE_INFINITY
-				: data.configure.bestSolution.curCost;
+		// 固定初始列实验没有目标实例侧的启发式 Solution；bundle 中的 incumbent 列仍是完整可行解。
+		double incumbentCost = incumbentCostFromInitial(initial);
 		double bestBound = Double.POSITIVE_INFINITY;
 		ArrayList<Integer> incumbentColumnIds = new ArrayList<Integer>(initial.getIncumbentColumnIds());
 		double[] incumbentOutsourcingValues = initialOutsourcingValues(initial);
@@ -1058,7 +1058,8 @@ public class Tree {
 	}
 
 	private double incumbentCostFromInitial(InitialColumnBundle initial) {
-		if (data.configure.bestSolution != null) {
+		// 固定 seed 实验中，incumbent 列已按目标实例重算；UB 必须与这组列来自同一口径。
+		if (config.fixedInitialColumnSeed == null && data.configure.bestSolution != null) {
 			return data.configure.bestSolution.curCost;
 		}
 		double cost = initial.getIncumbentOutsourcingCost();

@@ -7,6 +7,8 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+import TWETBPC.GC.FixedInitialColumnSeed;
+
 /**
  * TWET-BPC 框架的可调参数集合。
  */
@@ -41,6 +43,11 @@ public class TWETBPCConfig {
 	/** 2026-07-21: root 默认使用历次全局 best；SA 只改变搜索轨迹，不改变该历史口径。 */
 	public String initialHeuristicColumnHistoryMode = "best";
 	public int acceptedSolutionHistoryLimit = 2000;
+	/**
+	 * 2026-07-26: 受控时间尺度实验使用。非空时直接按固定 sequence 重建初始列，
+	 * 目标数据仍自行评价列成本，不复用来源实例的数值。
+	 */
+	public FixedInitialColumnSeed fixedInitialColumnSeed = null;
 	/** 树搜索最多处理多少个节点。 */
 	public int maxNodes = 1000;
 	/** 2026-06-25: BPC 全局 wall-clock 时间上限，单位秒；<=0 表示不限时。默认 2 小时。 */

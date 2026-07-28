@@ -490,8 +490,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (hasRepeatedJob(sequence)) {
 				repeatedJobCandidates++;
 			}
-			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
+			double cost;
 			if (graphWindow.dualWindow) {
+				// dual window 下最终必须按真实函数重刷，无需先做一遍马上会被覆盖的 cut 成本反推。
 				cost = evaluator.evaluate(sequence);
 				if (Utility.isBigMValue(cost)) {
 					return;
@@ -500,6 +501,8 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				if (Utility.compareGe(reducedCost, -RC_TOLERANCE)) {
 					return;
 				}
+			} else {
+				cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			}
 			ColumnPattern pattern = new ColumnPattern(sequence, n);
 			rememberCandidate(pattern.getSignature(),
@@ -714,6 +717,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					+ ", cbPruned=" + completionBoundPruned
 					+ ", negativeStates=" + negativeStateCandidates
 					+ ", repeatedJobCandidates=" + repeatedJobCandidates
+					+ cutStateData.timingSummary()
 					+ (timedOut ? ", timeLimit=true" : "");
 		}
 
@@ -756,6 +760,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	private final class CutStateData {
 		private static final String PACKED_RESIDUAL_PROPERTY = "twet.bpc.packedRank1Residual";
 		private static final String VERIFY_PACKED_RESIDUAL_PROPERTY = "twet.bpc.verifyPackedRank1Residual";
+		private static final String CUT_STATE_TIMING_PROPERTY = "twet.bpc.rank1CutStateTiming";
 
 		private final ArrayList<TWETCut> cuts;
 		private final double[] duals;
@@ -773,8 +778,16 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final long[] forwardRetainMaskByArc;
 		private final long[] forwardToggleMaskByArc;
 		private final long[] backwardRetainMaskByArc;
+		private final boolean timingEnabled;
+		private final long allocationNanos;
+		private final long cutLoadNanos;
+		private final long packedBuildNanos;
+		private final long legacyPayloadBytes;
+		private final long packedPayloadBytes;
 
 		CutStateData(LP lp) {
+			this.timingEnabled = Boolean.getBoolean(CUT_STATE_TIMING_PROPERTY);
+			long startNanos = timingEnabled ? System.nanoTime() : 0L;
 			List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
 			List<Double> pricingDuals = lp.getActiveSubsetRowPricingDuals();
 			this.cuts = new ArrayList<TWETCut>(cutIds.size());
@@ -794,6 +807,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.forwardRetainMaskByArc = packedResidualEnabled ? new long[arcTableSize * residualWordCount] : null;
 			this.forwardToggleMaskByArc = packedResidualEnabled ? new long[arcTableSize * residualWordCount] : null;
 			this.backwardRetainMaskByArc = packedResidualEnabled ? new long[arcTableSize * residualWordCount] : null;
+			long allocatedNanos = timingEnabled ? System.nanoTime() : 0L;
 			for (int idx = 0; idx < cutIds.size(); idx++) {
 				TWETCut cut = lp.getCutPool().getCut(cutIds.get(idx).intValue());
 				cuts.add(cut);
@@ -825,9 +839,38 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					}
 				}
 			}
+			long loadedNanos = timingEnabled ? System.nanoTime() : 0L;
 			if (packedResidualEnabled) {
 				buildPackedMasks();
 			}
+			long packedNanos = timingEnabled ? System.nanoTime() : 0L;
+			this.allocationNanos = timingEnabled ? allocatedNanos - startNanos : 0L;
+			this.cutLoadNanos = timingEnabled ? loadedNanos - allocatedNanos : 0L;
+			this.packedBuildNanos = timingEnabled ? packedNanos - loadedNanos : 0L;
+			this.legacyPayloadBytes = timingEnabled
+					? (long) cutIds.size() * ((data.n + 1L) * 2L + arcTableSize + 2L) : 0L;
+			this.packedPayloadBytes = timingEnabled ? packedPayloadBytes() : 0L;
+		}
+
+		private long packedPayloadBytes() {
+			long words = 0L;
+			words += zeroPackedResidual == null ? 0L : zeroPackedResidual.length;
+			words += scopeMaskByJob == null ? 0L : scopeMaskByJob.length;
+			words += forwardRetainMaskByArc == null ? 0L : forwardRetainMaskByArc.length;
+			words += forwardToggleMaskByArc == null ? 0L : forwardToggleMaskByArc.length;
+			words += backwardRetainMaskByArc == null ? 0L : backwardRetainMaskByArc.length;
+			return words * Long.BYTES;
+		}
+
+		String timingSummary() {
+			if (!timingEnabled) {
+				return "";
+			}
+			return ", cutStateAllocMs=" + allocationNanos / 1_000_000.0
+					+ ", cutStateLoadMs=" + cutLoadNanos / 1_000_000.0
+					+ ", cutStatePackedMs=" + packedBuildNanos / 1_000_000.0
+					+ ", cutStateLegacyPayloadBytes~=" + legacyPayloadBytes
+					+ ", cutStatePackedPayloadBytes=" + packedPayloadBytes;
 		}
 
 		private void buildPackedMasks() {

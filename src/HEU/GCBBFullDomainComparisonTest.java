@@ -18,7 +18,12 @@ import Output.ValidationResult;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETBPCSolver;
 import TWETBPC.TWETSolveResult;
+import TWETBPC.GC.FixedInitialColumnSeed;
+import TWETBPC.GC.InitialColumnBuilder;
+import TWETBPC.GC.InitialColumnBundle;
+import TWETBPC.IO.HeuristicSeedProvider;
 import TWETBPC.IO.TWETColumnEvaluator;
+import TWETBPC.LP.Pool;
 import TWETBPC.Model.TWETColumn;
 
 /**
@@ -120,6 +125,7 @@ public class GCBBFullDomainComparisonTest {
 		boolean zeroSetup = Boolean.getBoolean("twet.bpc.fullDomainCompare.zeroSetup");
 		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(instance.toString(), zeroSetup);
 		TWETBPCConfig config = buildConfig(instance, fullDomain, nodeJoin);
+		applyFixedInitialColumnReference(data, config, fullDomain, nodeJoin, zeroSetup);
 		String mode = runModeName(config, fullDomain, nodeJoin);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		// 2026-06-23: live trace 会在每个节点/阶段写文件，只用于诊断；
@@ -148,6 +154,96 @@ public class GCBBFullDomainComparisonTest {
 				formalPricingSeconds(summary.getPricingTimeNanos(), exactEngine),
 				formalPricingCalls(summary.getPricingCallCount(), exactEngine),
 				totalSeconds(summary.getMasterLpTimeNanos()), validation.isFeasible(), log.toString().replace('/', '\\'));
+	}
+
+	/**
+	 * 时间尺度对照可只在原尺度实例生成一次初始列，再把相同 sequence 交给目标实例重估成本。
+	 * 这样目标实例不会单独运行 ALNS，初始列差异也不会污染图规模比较。
+	 */
+	private static void applyFixedInitialColumnReference(Data targetData, TWETBPCConfig targetConfig,
+			boolean fullDomain, boolean nodeJoin, boolean zeroSetup) throws Exception {
+		String referenceDir = System.getProperty("twet.bpc.fullDomainCompare.fixedInitialReferenceDir", "");
+		if (referenceDir.isBlank()) {
+			return;
+		}
+		String referenceCase = System.getProperty("twet.bpc.fullDomainCompare.fixedInitialReferenceCase", "");
+		List<Path> references = listInstances(Path.of(referenceDir), referenceCase);
+		if (references.size() != 1) {
+			throw new IllegalStateException("Expected exactly one fixed-initial reference instance, found "
+					+ references.size() + " under " + referenceDir + " filter=" + referenceCase);
+		}
+		Path reference = references.get(0);
+		String dueWindowKey = "twet.data.dueWindowHalfWidth";
+		String oldDueWindow = System.getProperty(dueWindowKey);
+		String referenceDueWindow = System.getProperty(
+				"twet.bpc.fullDomainCompare.fixedInitialReferenceDueWindowHalfWidth", "0");
+		Data referenceData;
+		try {
+			System.setProperty(dueWindowKey, referenceDueWindow);
+			referenceData = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(reference.toString(), zeroSetup);
+		} finally {
+			if (oldDueWindow == null) {
+				System.clearProperty(dueWindowKey);
+			} else {
+				System.setProperty(dueWindowKey, oldDueWindow);
+			}
+		}
+
+		resetHeuristicSeed(reference);
+		TWETBPCConfig referenceConfig = buildConfig(reference, fullDomain, nodeJoin);
+		referenceConfig.fixedInitialColumnSeed = null;
+		Pool referencePool = new Pool(referenceData);
+		InitialColumnBuilder referenceBuilder = new InitialColumnBuilder(referenceData, referenceConfig,
+				referencePool, new HeuristicSeedProvider(referenceData, referenceConfig));
+		InitialColumnBundle referenceBundle = referenceBuilder.build();
+
+		ArrayList<List<Integer>> initialSequences = extractSequences(referencePool,
+				referenceBundle.getInitialColumnIds());
+		ArrayList<List<Integer>> incumbentSequences = extractSequences(referencePool,
+				referenceBundle.getIncumbentColumnIds());
+		double expectedScale = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.fixedInitialExpectedCostScale", "1"));
+		TWETColumnEvaluator targetEvaluator = new TWETColumnEvaluator(targetData);
+		double maximumScaleError = 0.0;
+		for (int id : referenceBundle.getInitialColumnIds()) {
+			TWETColumn sourceColumn = referencePool.getColumn(id);
+			double targetCost = targetEvaluator.evaluate(sourceColumn.getSequence());
+			maximumScaleError = Math.max(maximumScaleError,
+					Math.abs(targetCost - expectedScale * sourceColumn.getCost()));
+		}
+		double referenceIncumbent = columnCost(referencePool, referenceBundle.getIncumbentColumnIds());
+		double targetIncumbent = 0.0;
+		for (List<Integer> sequence : incumbentSequences) {
+			targetIncumbent += targetEvaluator.evaluate(sequence);
+		}
+		double tolerance = 1.0e-6 * Math.max(1.0, Math.abs(expectedScale * referenceIncumbent));
+		if (maximumScaleError > tolerance
+				|| Math.abs(targetIncumbent - expectedScale * referenceIncumbent) > tolerance) {
+			throw new IllegalStateException(String.format(Locale.US,
+					"Fixed initial columns do not scale as expected: sourceInc=%.6f targetInc=%.6f scale=%.6f maxColumnError=%.6g",
+					referenceIncumbent, targetIncumbent, expectedScale, maximumScaleError));
+		}
+		targetConfig.fixedInitialColumnSeed = new FixedInitialColumnSeed(initialSequences, incumbentSequences);
+		System.out.printf(Locale.US,
+				"Fixed initial columns from %s: columns=%d incumbentColumns=%d sourceInc=%.6f targetInc=%.6f scale=%.6f maxColumnError=%.6g%n",
+				reference, initialSequences.size(), incumbentSequences.size(), referenceIncumbent,
+				targetIncumbent, expectedScale, maximumScaleError);
+	}
+
+	private static ArrayList<List<Integer>> extractSequences(Pool pool, List<Integer> columnIds) {
+		ArrayList<List<Integer>> sequences = new ArrayList<List<Integer>>(columnIds.size());
+		for (int id : columnIds) {
+			sequences.add(new ArrayList<Integer>(pool.getColumn(id).getSequence()));
+		}
+		return sequences;
+	}
+
+	private static double columnCost(Pool pool, List<Integer> columnIds) {
+		double total = 0.0;
+		for (int id : columnIds) {
+			total += pool.getColumn(id).getCost();
+		}
+		return total;
 	}
 
 	private static String runModeName(TWETBPCConfig config, boolean fullDomain, boolean nodeJoin) {

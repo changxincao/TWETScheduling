@@ -49,6 +49,16 @@ public final class ActiveCutInheritanceTest {
 		if (blocked.getStatus() != TWETMasterStatus.INFEASIBLE) {
 			throw new AssertionError("Incrementally added SRI was not present in the live RMP");
 		}
+
+		ArrayList<Integer> reversedSequence = new ArrayList<Integer>(fullSequence);
+		Collections.reverse(reversedSequence);
+		int addedAfterCut = pool.addOrImproveColumn(reversedSequence, 90.0, ColumnSource.MANUAL, true).columnId;
+		lp.addColumns(Collections.singletonList(Integer.valueOf(addedAfterCut)));
+		TWETMasterSolution stillBlocked = lp.resolveCurrentModel();
+		if (stillBlocked.getStatus() != TWETMasterStatus.INFEASIBLE) {
+			throw new AssertionError("A column added after the SRI did not receive its cut coefficient");
+		}
+
 		lp.removeCuts(Collections.singletonList(Integer.valueOf(blockingCut)));
 		TWETMasterSolution restored = lp.resolveCurrentModel();
 		if (restored.getStatus() != TWETMasterStatus.LP_RELAXATION) {

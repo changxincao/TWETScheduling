@@ -15,6 +15,7 @@ import TWETBPC.CUT.SubsetRowCutEvaluator;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
+import TWETBPC.Model.ColumnPattern;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
@@ -143,6 +144,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final ArrayList<Label>[] backwardBuckets;
 		private final HashMap<SequenceSignature, Candidate> candidateBySignature;
 		private final PriorityQueue<Candidate> candidateHeap;
+		/** 每个候选递增 epoch，避免 repeated-job 检查反复分配并清零 boolean[]。 */
+		private final int[] repeatedJobMarks;
+		private int repeatedJobEpoch;
 		private int nextLabelId;
 		private int nextCandidateId;
 		private int labelsKept;
@@ -183,6 +187,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
+			this.repeatedJobMarks = new int[n + 1];
 			this.bestPseudoReducedCost = INF;
 			precomputePricingData();
 		}
@@ -485,7 +490,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (hasRepeatedJob(sequence)) {
 				repeatedJobCandidates++;
 			}
-			SequenceSignature signature = new SequenceSignature(sequence);
 			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			if (graphWindow.dualWindow) {
 				cost = evaluator.evaluate(sequence);
@@ -497,8 +501,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					return;
 				}
 			}
-			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, ColumnSource.PRICING_EXACT, false),
-					reducedCost);
+			ColumnPattern pattern = new ColumnPattern(sequence, n);
+			rememberCandidate(pattern.getSignature(),
+					new TWETColumn(-1, pattern, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
 		}
 
 		private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost) {
@@ -637,13 +642,13 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private boolean hasRepeatedJob(ArrayList<Integer> sequence) {
-			boolean[] seen = new boolean[n + 1];
+			int epoch = ++repeatedJobEpoch;
 			for (int job : sequence) {
 				if (job >= 1 && job <= n) {
-					if (seen[job]) {
+					if (repeatedJobMarks[job] == epoch) {
 						return true;
 					}
-					seen[job] = true;
+					repeatedJobMarks[job] = epoch;
 				}
 			}
 			return false;

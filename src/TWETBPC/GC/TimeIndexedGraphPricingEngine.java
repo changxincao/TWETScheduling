@@ -15,6 +15,7 @@ import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
+import TWETBPC.Model.ColumnPattern;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Util.SequenceSignature;
@@ -329,6 +330,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final Node.TimeIndexedArcLookup timeIndexedArcLookup;
 		private final HashMap<SequenceSignature, Candidate> candidateBySignature;
 		private final PriorityQueue<Candidate> candidateHeap;
+		/** 每个候选递增 epoch，避免 repeated-job 检查反复分配并清零 boolean[]。 */
+		private final int[] repeatedJobMarks;
+		private int repeatedJobEpoch;
 		private int relaxedStates;
 		private int processArcScans;
 		private int timeIndexedArcSkips;
@@ -378,6 +382,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
 			this.candidateHeap = new PriorityQueue<Candidate>(Math.max(1, maxReturnedColumns()),
 					worstCandidateFirstComparator());
+			this.repeatedJobMarks = new int[n + 1];
 			this.bestPseudoReducedCost = INF;
 			this.bestOracleState = -1;
 			this.oracleColumn = null;
@@ -672,11 +677,10 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					return;
 				}
 			}
-			SequenceSignature signature = new SequenceSignature(sequence);
 			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			ColumnSource source = preHeuristicMode ? ColumnSource.PRICING_HEURISTIC : ColumnSource.PRICING_EXACT;
-			rememberCandidate(signature, new TWETColumn(-1, sequence, n, cost, source, false),
-					reducedCost);
+			ColumnPattern pattern = new ColumnPattern(sequence, n);
+			rememberCandidate(pattern.getSignature(), new TWETColumn(-1, pattern, cost, source, false), reducedCost);
 		}
 
 		private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost) {
@@ -784,13 +788,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		private boolean hasRepeatedJob(List<Integer> sequence) {
-			boolean[] seen = new boolean[n + 1];
+			int epoch = ++repeatedJobEpoch;
 			for (int i = 0; i < sequence.size(); i++) {
 				int job = sequence.get(i).intValue();
-				if (seen[job]) {
+				if (repeatedJobMarks[job] == epoch) {
 					return true;
 				}
-				seen[job] = true;
+				repeatedJobMarks[job] = epoch;
 			}
 			return false;
 		}

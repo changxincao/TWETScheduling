@@ -8,6 +8,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Set;
 
 import Basic.Data;
@@ -48,6 +49,7 @@ public class LP {
 	private final OutsourcingPool outsourcingPool;
 	private final boolean shareColumnPattern;
 	private final boolean buildCoverageRowsByColumn;
+	private final boolean boundedReducedCostColumnSelection;
 	private Node node;
 	private ArrayList<Integer> restrictedColumnIds;
 	private HashSet<Integer> restrictedColumnIdSet;
@@ -123,6 +125,8 @@ public class LP {
 		this.shareColumnPattern = Boolean.parseBoolean(System.getProperty("twet.bpc.shareColumnPattern", "true"));
 		this.buildCoverageRowsByColumn =
 				Boolean.parseBoolean(System.getProperty("twet.bpc.buildCoverageRowsByColumn", "true"));
+		this.boundedReducedCostColumnSelection =
+				Boolean.parseBoolean(System.getProperty("twet.bpc.boundedReducedCostColumnSelection", "true"));
 		replaceRestrictedColumnIds(Collections.<Integer>emptyList());
 		replaceRestrictedOutsourcingColumnIds(Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>();
@@ -1346,7 +1350,10 @@ public class LP {
 			return;
 		}
 		ArrayList<Integer> selected = new ArrayList<Integer>();
-		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
+		ArrayList<ColumnReducedCost> candidates =
+				boundedReducedCostColumnSelection ? null : new ArrayList<ColumnReducedCost>();
+		PriorityQueue<ColumnReducedCost> boundedCandidates =
+				boundedReducedCostColumnSelection ? newReducedCostCandidateHeap(maxColumns) : null;
 		for (int columnId : restrictedColumnIds) {
 			TWETColumn column = pool.getColumn(columnId);
 			boolean compatible = isColumnCompatible(column);
@@ -1361,19 +1368,11 @@ public class LP {
 			}
 			double reducedCost = getColumnReducedCost(columnId);
 			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
-				candidates.add(new ColumnReducedCost(columnId, reducedCost));
+				addReducedCostCandidate(candidates, boundedCandidates, maxColumns, columnId, reducedCost);
 			}
 		}
-		Collections.sort(candidates, new Comparator<ColumnReducedCost>() {
-			@Override
-			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
-				int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
-				if (reducedCostCompare != 0) {
-					return reducedCostCompare;
-				}
-				return Integer.compare(a.columnId, b.columnId);
-			}
-		});
+		candidates = orderedReducedCostCandidates(candidates, boundedCandidates,
+				Math.max(0, maxColumns - selected.size()));
 
 		for (int i = 0; i < candidates.size() && selected.size() < maxColumns; i++) {
 			selected.add(Integer.valueOf(candidates.get(i).columnId));
@@ -1392,7 +1391,10 @@ public class LP {
 			return;
 		}
 		ArrayList<Integer> selected = new ArrayList<Integer>();
-		ArrayList<ColumnReducedCost> candidates = new ArrayList<ColumnReducedCost>();
+		ArrayList<ColumnReducedCost> candidates =
+				boundedReducedCostColumnSelection ? null : new ArrayList<ColumnReducedCost>();
+		PriorityQueue<ColumnReducedCost> boundedCandidates =
+				boundedReducedCostColumnSelection ? newReducedCostCandidateHeap(maxColumns) : null;
 		for (int columnId : restrictedOutsourcingColumnIds) {
 			TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
 			if (isPositiveCurrentOutsourcingColumn(columnId)) {
@@ -1404,19 +1406,11 @@ public class LP {
 			}
 			double reducedCost = getOutsourcingColumnReducedCost(columnId);
 			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
-				candidates.add(new ColumnReducedCost(columnId, reducedCost));
+				addReducedCostCandidate(candidates, boundedCandidates, maxColumns, columnId, reducedCost);
 			}
 		}
-		Collections.sort(candidates, new Comparator<ColumnReducedCost>() {
-			@Override
-			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
-				int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
-				if (reducedCostCompare != 0) {
-					return reducedCostCompare;
-				}
-				return Integer.compare(a.columnId, b.columnId);
-			}
-		});
+		candidates = orderedReducedCostCandidates(candidates, boundedCandidates,
+				Math.max(0, maxColumns - selected.size()));
 		for (int i = 0; i < candidates.size() && selected.size() < maxColumns; i++) {
 			selected.add(Integer.valueOf(candidates.get(i).columnId));
 		}
@@ -1424,6 +1418,61 @@ public class LP {
 			replaceRestrictedOutsourcingColumnIds(selected);
 			lastSolution = null;
 		}
+	}
+
+	private static PriorityQueue<ColumnReducedCost> newReducedCostCandidateHeap(int limit) {
+		return new PriorityQueue<ColumnReducedCost>(Math.max(1, limit), new Comparator<ColumnReducedCost>() {
+			@Override
+			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
+				return compareColumnReducedCost(b, a);
+			}
+		});
+	}
+
+	private static void addReducedCostCandidate(ArrayList<ColumnReducedCost> candidates,
+			PriorityQueue<ColumnReducedCost> boundedCandidates, int limit, int columnId, double reducedCost) {
+		if (boundedCandidates == null) {
+			candidates.add(new ColumnReducedCost(columnId, reducedCost));
+			return;
+		}
+		if (limit <= 0) {
+			return;
+		}
+		if (boundedCandidates.size() < limit) {
+			boundedCandidates.add(new ColumnReducedCost(columnId, reducedCost));
+			return;
+		}
+		if (compareColumnReducedCost(columnId, reducedCost, boundedCandidates.peek()) < 0) {
+			boundedCandidates.poll();
+			boundedCandidates.add(new ColumnReducedCost(columnId, reducedCost));
+		}
+	}
+
+	private static ArrayList<ColumnReducedCost> orderedReducedCostCandidates(
+			ArrayList<ColumnReducedCost> candidates, PriorityQueue<ColumnReducedCost> boundedCandidates, int limit) {
+		if (boundedCandidates != null) {
+			while (boundedCandidates.size() > limit) {
+				boundedCandidates.poll();
+			}
+			candidates = new ArrayList<ColumnReducedCost>(boundedCandidates);
+		}
+		Collections.sort(candidates, new Comparator<ColumnReducedCost>() {
+			@Override
+			public int compare(ColumnReducedCost a, ColumnReducedCost b) {
+				return compareColumnReducedCost(a, b);
+			}
+		});
+		return candidates;
+	}
+
+	private static int compareColumnReducedCost(ColumnReducedCost a, ColumnReducedCost b) {
+		int reducedCostCompare = Double.compare(a.reducedCost, b.reducedCost);
+		return reducedCostCompare != 0 ? reducedCostCompare : Integer.compare(a.columnId, b.columnId);
+	}
+
+	private static int compareColumnReducedCost(int columnId, double reducedCost, ColumnReducedCost other) {
+		int reducedCostCompare = Double.compare(reducedCost, other.reducedCost);
+		return reducedCostCompare != 0 ? reducedCostCompare : Integer.compare(columnId, other.columnId);
 	}
 
 	private boolean isPositiveCurrentColumn(int columnId) {

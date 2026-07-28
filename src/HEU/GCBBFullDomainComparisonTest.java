@@ -1,7 +1,9 @@
 package HEU;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -59,24 +61,26 @@ public class GCBBFullDomainComparisonTest {
 		if (instances.isEmpty()) {
 			throw new IllegalStateException("No .dat instance matched " + caseFilter + " under " + instanceDir);
 		}
+		boolean zeroSetup = Boolean.getBoolean("twet.bpc.fullDomainCompare.zeroSetup");
+		FixedInitialReference fixedInitialReference = prepareFixedInitialColumnReference(zeroSetup);
 
 		ArrayList<RunRecord> records = new ArrayList<RunRecord>();
 		ArrayList<String> lines = new ArrayList<String>();
 		lines.add(
-				"case,mode,status,incumbent,bound,gap,nodes,pricing,cols,pool,solve_s,root_s,heuristic_s,heuristic_calls,exact_engine,exact_s,exact_calls,master_lp_s,valid,log");
+				"case,mode,status,incumbent,bound,gap,nodes,pricing,cols,pool,solve_s,root_s,heuristic_s,heuristic_calls,exact_engine,exact_s,exact_calls,master_lp_s,valid,fixed_seed_fingerprint,log");
 		for (Path instance : instances) {
 			if (shouldRunNormal(modeFilter)) {
-				RunRecord normal = runOne(instance, false, outputDir);
+				RunRecord normal = runOne(instance, false, outputDir, fixedInitialReference);
 				records.add(normal);
 				lines.add(normal.toCsvLine());
 			}
 			if (shouldRunFullDomain(modeFilter)) {
-				RunRecord fullDomain = runOne(instance, true, outputDir);
+				RunRecord fullDomain = runOne(instance, true, outputDir, fixedInitialReference);
 				records.add(fullDomain);
 				lines.add(fullDomain.toCsvLine());
 			}
 			if (shouldRunNodeJoin(modeFilter)) {
-				RunRecord nodeJoin = runOne(instance, false, true, outputDir);
+				RunRecord nodeJoin = runOne(instance, false, true, outputDir, fixedInitialReference);
 				records.add(nodeJoin);
 				lines.add(nodeJoin.toCsvLine());
 			}
@@ -115,17 +119,18 @@ public class GCBBFullDomainComparisonTest {
 		return instances;
 	}
 
-	private static RunRecord runOne(Path instance, boolean fullDomain, Path outputDir) throws Exception {
-		return runOne(instance, fullDomain, false, outputDir);
+	private static RunRecord runOne(Path instance, boolean fullDomain, Path outputDir,
+			FixedInitialReference fixedInitialReference) throws Exception {
+		return runOne(instance, fullDomain, false, outputDir, fixedInitialReference);
 	}
 
-	private static RunRecord runOne(Path instance, boolean fullDomain, boolean nodeJoin, Path outputDir)
-			throws Exception {
+	private static RunRecord runOne(Path instance, boolean fullDomain, boolean nodeJoin, Path outputDir,
+			FixedInitialReference fixedInitialReference) throws Exception {
 		resetHeuristicSeed(instance);
 		boolean zeroSetup = Boolean.getBoolean("twet.bpc.fullDomainCompare.zeroSetup");
 		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(instance.toString(), zeroSetup);
 		TWETBPCConfig config = buildConfig(instance, fullDomain, nodeJoin);
-		applyFixedInitialColumnReference(data, config, fullDomain, nodeJoin, zeroSetup);
+		applyFixedInitialColumnReference(data, config, fixedInitialReference);
 		String mode = runModeName(config, fullDomain, nodeJoin);
 		Path log = outputDir.resolve(stripDat(instance.getFileName().toString()) + "-" + mode + ".log");
 		// 2026-06-23: live trace 会在每个节点/阶段写文件，只用于诊断；
@@ -153,18 +158,18 @@ public class GCBBFullDomainComparisonTest {
 				count(summary.getPricingCallCount(), HEURISTIC_ENGINE), exactEngine,
 				formalPricingSeconds(summary.getPricingTimeNanos(), exactEngine),
 				formalPricingCalls(summary.getPricingCallCount(), exactEngine),
-				totalSeconds(summary.getMasterLpTimeNanos()), validation.isFeasible(), log.toString().replace('/', '\\'));
+				totalSeconds(summary.getMasterLpTimeNanos()), validation.isFeasible(),
+				fixedInitialReference == null ? "" : fixedInitialReference.fingerprint,
+				log.toString().replace('/', '\\'));
 	}
 
 	/**
-	 * 时间尺度对照可只在原尺度实例生成一次初始列，再把相同 sequence 交给目标实例重估成本。
-	 * 这样目标实例不会单独运行 ALNS，初始列差异也不会污染图规模比较。
+	 * 在所有 mode 启动前只运行一次 reference ALNS，保证 normal/full/nodeJoin 使用完全相同的列快照。
 	 */
-	private static void applyFixedInitialColumnReference(Data targetData, TWETBPCConfig targetConfig,
-			boolean fullDomain, boolean nodeJoin, boolean zeroSetup) throws Exception {
+	private static FixedInitialReference prepareFixedInitialColumnReference(boolean zeroSetup) throws Exception {
 		String referenceDir = System.getProperty("twet.bpc.fullDomainCompare.fixedInitialReferenceDir", "");
 		if (referenceDir.isBlank()) {
-			return;
+			return null;
 		}
 		String referenceCase = System.getProperty("twet.bpc.fullDomainCompare.fixedInitialReferenceCase", "");
 		List<Path> references = listInstances(Path.of(referenceDir), referenceCase);
@@ -190,7 +195,8 @@ public class GCBBFullDomainComparisonTest {
 		}
 
 		resetHeuristicSeed(reference);
-		TWETBPCConfig referenceConfig = buildConfig(reference, fullDomain, nodeJoin);
+		// reference seed 与待比较的 pricing mode 无关，固定使用 normal 配置构造一次。
+		TWETBPCConfig referenceConfig = buildConfig(reference, false, false);
 		referenceConfig.fixedInitialColumnSeed = null;
 		Pool referencePool = new Pool(referenceData);
 		InitialColumnBuilder referenceBuilder = new InitialColumnBuilder(referenceData, referenceConfig,
@@ -201,33 +207,57 @@ public class GCBBFullDomainComparisonTest {
 				referenceBundle.getInitialColumnIds());
 		ArrayList<List<Integer>> incumbentSequences = extractSequences(referencePool,
 				referenceBundle.getIncumbentColumnIds());
+		ArrayList<Double> sourceInitialCosts = new ArrayList<Double>(referenceBundle.getInitialColumnIds().size());
+		for (int id : referenceBundle.getInitialColumnIds()) {
+			sourceInitialCosts.add(Double.valueOf(referencePool.getColumn(id).getCost()));
+		}
+		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(initialSequences, incumbentSequences);
+		FixedInitialReference snapshot = new FixedInitialReference(reference, seed, sourceInitialCosts,
+				columnCost(referencePool, referenceBundle.getIncumbentColumnIds()), fixedSeedFingerprint(seed));
+		System.out.printf(Locale.US,
+				"Prepared fixed initial reference %s: columns=%d incumbentColumns=%d sourceInc=%.6f fingerprint=%s%n",
+				reference, initialSequences.size(), incumbentSequences.size(), snapshot.sourceIncumbent,
+				snapshot.fingerprint);
+		return snapshot;
+	}
+
+	/**
+	 * 目标实例只重评同一个不可变快照，不再重新运行 reference ALNS。
+	 */
+	private static void applyFixedInitialColumnReference(Data targetData, TWETBPCConfig targetConfig,
+			FixedInitialReference snapshot) {
+		if (snapshot == null) {
+			return;
+		}
+		List<List<Integer>> initialSequences = snapshot.seed.getInitialSequences();
+		List<List<Integer>> incumbentSequences = snapshot.seed.getIncumbentSequences();
 		double expectedScale = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.fixedInitialExpectedCostScale", "1"));
 		TWETColumnEvaluator targetEvaluator = new TWETColumnEvaluator(targetData);
 		double maximumScaleError = 0.0;
-		for (int id : referenceBundle.getInitialColumnIds()) {
-			TWETColumn sourceColumn = referencePool.getColumn(id);
-			double targetCost = targetEvaluator.evaluate(sourceColumn.getSequence());
+		for (int index = 0; index < initialSequences.size(); index++) {
+			List<Integer> sequence = initialSequences.get(index);
+			double sourceCost = snapshot.sourceInitialCosts.get(index).doubleValue();
+			double targetCost = targetEvaluator.evaluate(sequence);
 			maximumScaleError = Math.max(maximumScaleError,
-					Math.abs(targetCost - expectedScale * sourceColumn.getCost()));
+					Math.abs(targetCost - expectedScale * sourceCost));
 		}
-		double referenceIncumbent = columnCost(referencePool, referenceBundle.getIncumbentColumnIds());
 		double targetIncumbent = 0.0;
 		for (List<Integer> sequence : incumbentSequences) {
 			targetIncumbent += targetEvaluator.evaluate(sequence);
 		}
-		double tolerance = 1.0e-6 * Math.max(1.0, Math.abs(expectedScale * referenceIncumbent));
+		double tolerance = 1.0e-6 * Math.max(1.0, Math.abs(expectedScale * snapshot.sourceIncumbent));
 		if (maximumScaleError > tolerance
-				|| Math.abs(targetIncumbent - expectedScale * referenceIncumbent) > tolerance) {
+				|| Math.abs(targetIncumbent - expectedScale * snapshot.sourceIncumbent) > tolerance) {
 			throw new IllegalStateException(String.format(Locale.US,
 					"Fixed initial columns do not scale as expected: sourceInc=%.6f targetInc=%.6f scale=%.6f maxColumnError=%.6g",
-					referenceIncumbent, targetIncumbent, expectedScale, maximumScaleError));
+					snapshot.sourceIncumbent, targetIncumbent, expectedScale, maximumScaleError));
 		}
-		targetConfig.fixedInitialColumnSeed = new FixedInitialColumnSeed(initialSequences, incumbentSequences);
+		targetConfig.fixedInitialColumnSeed = snapshot.seed;
 		System.out.printf(Locale.US,
-				"Fixed initial columns from %s: columns=%d incumbentColumns=%d sourceInc=%.6f targetInc=%.6f scale=%.6f maxColumnError=%.6g%n",
-				reference, initialSequences.size(), incumbentSequences.size(), referenceIncumbent,
-				targetIncumbent, expectedScale, maximumScaleError);
+				"Fixed initial columns from %s: columns=%d incumbentColumns=%d sourceInc=%.6f targetInc=%.6f scale=%.6f maxColumnError=%.6g fingerprint=%s%n",
+				snapshot.reference, initialSequences.size(), incumbentSequences.size(), snapshot.sourceIncumbent,
+				targetIncumbent, expectedScale, maximumScaleError, snapshot.fingerprint);
 	}
 
 	private static ArrayList<List<Integer>> extractSequences(Pool pool, List<Integer> columnIds) {
@@ -244,6 +274,31 @@ public class GCBBFullDomainComparisonTest {
 			total += pool.getColumn(id).getCost();
 		}
 		return total;
+	}
+
+	private static String fixedSeedFingerprint(FixedInitialColumnSeed seed) throws Exception {
+		MessageDigest digest = MessageDigest.getInstance("SHA-256");
+		updateFingerprint(digest, "initial", seed.getInitialSequences());
+		updateFingerprint(digest, "incumbent", seed.getIncumbentSequences());
+		byte[] hash = digest.digest();
+		StringBuilder value = new StringBuilder(hash.length * 2);
+		for (byte item : hash) {
+			value.append(String.format(Locale.ROOT, "%02x", item & 0xff));
+		}
+		return value.toString();
+	}
+
+	private static void updateFingerprint(MessageDigest digest, String section, List<List<Integer>> sequences) {
+		digest.update(section.getBytes(StandardCharsets.UTF_8));
+		digest.update((byte) ':');
+		for (List<Integer> sequence : sequences) {
+			digest.update((byte) '[');
+			for (int job : sequence) {
+				digest.update(Integer.toString(job).getBytes(StandardCharsets.UTF_8));
+				digest.update((byte) ',');
+			}
+			digest.update((byte) ']');
+		}
 	}
 
 	private static String runModeName(TWETBPCConfig config, boolean fullDomain, boolean nodeJoin) {
@@ -968,6 +1023,24 @@ public class GCBBFullDomainComparisonTest {
 		return "\"" + value.replace("\"", "\"\"") + "\"";
 	}
 
+	/** 同一次比较中供所有 pricing mode 共享的 reference seed 快照。 */
+	private static final class FixedInitialReference {
+		final Path reference;
+		final FixedInitialColumnSeed seed;
+		final ArrayList<Double> sourceInitialCosts;
+		final double sourceIncumbent;
+		final String fingerprint;
+
+		FixedInitialReference(Path reference, FixedInitialColumnSeed seed, List<Double> sourceInitialCosts,
+				double sourceIncumbent, String fingerprint) {
+			this.reference = reference;
+			this.seed = seed;
+			this.sourceInitialCosts = new ArrayList<Double>(sourceInitialCosts);
+			this.sourceIncumbent = sourceIncumbent;
+			this.fingerprint = fingerprint;
+		}
+	}
+
 	private static final class RunRecord {
 		final String caseName;
 		final String mode;
@@ -988,12 +1061,13 @@ public class GCBBFullDomainComparisonTest {
 		final int exactCalls;
 		final double masterLpSeconds;
 		final boolean valid;
+		final String fixedSeedFingerprint;
 		final String logPath;
 
 		RunRecord(String caseName, String mode, String status, double incumbent, double bound, double gap, int nodes,
 				int pricingRounds, int generatedColumns, int poolSize, double solveSeconds, double rootSeconds,
 				double heuristicSeconds, int heuristicCalls, String exactEngine, double exactSeconds, int exactCalls,
-				double masterLpSeconds, boolean valid, String logPath) {
+				double masterLpSeconds, boolean valid, String fixedSeedFingerprint, String logPath) {
 			this.caseName = caseName;
 			this.mode = mode;
 			this.status = status;
@@ -1013,6 +1087,7 @@ public class GCBBFullDomainComparisonTest {
 			this.exactCalls = exactCalls;
 			this.masterLpSeconds = masterLpSeconds;
 			this.valid = valid;
+			this.fixedSeedFingerprint = fixedSeedFingerprint;
 			this.logPath = logPath;
 		}
 
@@ -1021,7 +1096,8 @@ public class GCBBFullDomainComparisonTest {
 					String.valueOf(nodes), String.valueOf(pricingRounds), String.valueOf(generatedColumns),
 					String.valueOf(poolSize), fmt(solveSeconds), fmt(rootSeconds), fmt(heuristicSeconds),
 					String.valueOf(heuristicCalls), quote(exactEngine), fmt(exactSeconds),
-					String.valueOf(exactCalls), fmt(masterLpSeconds), String.valueOf(valid), quote(logPath));
+					String.valueOf(exactCalls), fmt(masterLpSeconds), String.valueOf(valid),
+					quote(fixedSeedFingerprint), quote(logPath));
 		}
 	}
 }

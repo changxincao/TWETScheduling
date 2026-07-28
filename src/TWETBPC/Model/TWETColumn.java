@@ -1,7 +1,5 @@
 package TWETBPC.Model;
 
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import TWETBPC.Util.PackedBitSet;
@@ -24,14 +22,8 @@ public final class TWETColumn {
 
 	/** 列在全局列池中的编号。 */
 	private final int id;
-	/** 该列对应的单机 job 序列。 */
-	private final ArrayList<Integer> sequence;
-	/** 用于快速判重的序列签名。 */
-	private final SequenceSignature signature;
-	/** 该列覆盖的 job 集合；用于后续做覆盖判断、冲突判断等。 */
-	private final PackedBitSet jobs;
-	/** 每个 job 在该列序列中出现的次数；time-indexed pseudo-schedule 列需要该系数。 */
-	private final int[] jobVisitCounts;
+	/** 不随列成本、来源和 id 变化的序列结构。 */
+	private final ColumnPattern pattern;
 	/** 列成本，即把这条序列放在一台机器上的目标值。 */
 	private final double cost;
 	/** 列的来源类型。 */
@@ -50,16 +42,15 @@ public final class TWETColumn {
 	 * @param seedColumn 是否是初始列
 	 */
 	public TWETColumn(int id, List<Integer> sequence, int jobCount, double cost, ColumnSource source, boolean seedColumn) {
+		this(id, new ColumnPattern(sequence, jobCount), cost, source, seedColumn);
+	}
+
+	/**
+	 * 使用已经构造好的不可变列结构创建轻量列头。
+	 */
+	public TWETColumn(int id, ColumnPattern pattern, double cost, ColumnSource source, boolean seedColumn) {
 		this.id = id;
-		this.sequence = new ArrayList<Integer>(sequence);
-		this.signature = new SequenceSignature(this.sequence);
-		this.jobs = PackedBitSet.ofJobs(jobCount, this.sequence);
-		this.jobVisitCounts = new int[jobCount + 1];
-		for (int job : this.sequence) {
-			if (job >= 1 && job <= jobCount) {
-				this.jobVisitCounts[job]++;
-			}
-		}
+		this.pattern = pattern;
 		this.cost = cost;
 		this.source = source;
 		this.seedColumn = seedColumn;
@@ -76,12 +67,17 @@ public final class TWETColumn {
 	 * 外部不应直接修改列中的 job 顺序，因此这里暴露不可修改视图。
 	 */
 	public List<Integer> getSequence() {
-		return Collections.unmodifiableList(sequence);
+		return pattern.getSequence();
 	}
 
 	/** @return 序列签名，用于判重和比较 */
 	public SequenceSignature getSignature() {
-		return signature;
+		return pattern.getSignature();
+	}
+
+	/** @return 可由 candidate 与 Pool 正式列共享的不可变列结构 */
+	public ColumnPattern getPattern() {
+		return pattern;
 	}
 
 	/**
@@ -91,7 +87,7 @@ public final class TWETColumn {
 	 * 约定调用方把它视为只读对象使用。
 	 */
 	public PackedBitSet getJobs() {
-		return jobs;
+		return pattern.getJobs();
 	}
 
 	/** @return 列成本 */
@@ -111,21 +107,21 @@ public final class TWETColumn {
 
 	/** @return 序列长度 */
 	public int size() {
-		return sequence.size();
+		return pattern.size();
 	}
 
 	/**
 	 * 判断该列是否覆盖给定 job。
 	 */
 	public boolean containsJob(int job) {
-		return jobs.contains(job);
+		return pattern.getJobs().contains(job);
 	}
 
 	/**
 	 * @return 该 job 在列序列中出现的次数。普通 elementary 列为 0/1；论文 DWM pseudo-schedule 列可大于 1。
 	 */
 	public int getJobVisitCount(int job) {
-		return job >= 0 && job < jobVisitCounts.length ? jobVisitCounts[job] : 0;
+		return pattern.getJobVisitCount(job);
 	}
 
 	/**
@@ -147,6 +143,7 @@ public final class TWETColumn {
 	 * @return 调度序列中给定普通 arc 的出现次数。对重复 job 的 pseudo-schedule，arc 系数可能大于 1。
 	 */
 	public int getArcVisitCount(int from, int to, int sinkId) {
+		List<Integer> sequence = pattern.getSequence();
 		if (sequence.isEmpty()) {
 			return 0;
 		}
@@ -167,7 +164,8 @@ public final class TWETColumn {
 
 	@Override
 	public String toString() {
-		return "TWETColumn{id=" + id + ", seq=" + sequence + ", cost=" + cost + ", source=" + source + "}";
+		return "TWETColumn{id=" + id + ", seq=" + pattern.getSequence() + ", cost=" + cost + ", source=" + source
+				+ "}";
 	}
 
 }

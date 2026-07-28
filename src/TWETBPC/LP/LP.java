@@ -45,6 +45,7 @@ public class LP {
 	private final CutPool cutPool;
 	private final TWETBPCConfig config;
 	private final OutsourcingPool outsourcingPool;
+	private final boolean shareColumnPattern;
 	private Node node;
 	private ArrayList<Integer> restrictedColumnIds;
 	private HashSet<Integer> restrictedColumnIdSet;
@@ -117,6 +118,7 @@ public class LP {
 		this.cutPool = cutPool;
 		this.config = config;
 		this.outsourcingPool = outsourcingPool;
+		this.shareColumnPattern = Boolean.parseBoolean(System.getProperty("twet.bpc.shareColumnPattern", "true"));
 		replaceRestrictedColumnIds(Collections.<Integer>emptyList());
 		replaceRestrictedOutsourcingColumnIds(Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>();
@@ -476,8 +478,9 @@ public class LP {
 		return added;
 	}
 	public Pool.ColumnUpdate addOrImproveColumn(TWETColumn column) {
-		Pool.ColumnUpdate update = pool.addOrImproveColumn(column.getSequence(), column.getCost(),
-				column.getSource(), column.isSeedColumn());
+		Pool.ColumnUpdate update = shareColumnPattern ? pool.addOrImproveColumn(column)
+				: pool.addOrImproveColumn(column.getSequence(), column.getCost(), column.getSource(),
+						column.isSeedColumn());
 		if (update.improvedCost && cplex != null && objective != null) {
 			try {
 				updateCurrentColumnObjective(update.columnId);

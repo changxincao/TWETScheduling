@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 
 import Basic.Data;
+import TWETBPC.Model.ColumnPattern;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Util.SequenceSignature;
@@ -73,6 +74,31 @@ public class Pool {
 		TWETColumn column = new TWETColumn(id, sequence, data.n, cost, source, seedColumn);
 		columns.add(column);
 		signatureToId.put(column.getSignature(), Integer.valueOf(id));
+		return new ColumnUpdate(id, true, false);
+	}
+
+	/**
+	 * 直接接收 pricing candidate，复用其不可变列结构，避免进入 Pool 时二次扫描 sequence。
+	 */
+	public ColumnUpdate addOrImproveColumn(TWETColumn candidate) {
+		ColumnPattern pattern = candidate.getPattern();
+		Integer existing = signatureToId.get(pattern.getSignature());
+		if (existing != null) {
+			int id = existing.intValue();
+			TWETColumn old = columns.get(id);
+			if (candidate.getCost() + 1e-8 < old.getCost()) {
+				TWETColumn improved = new TWETColumn(id, old.getPattern(), candidate.getCost(),
+						candidate.getSource(), old.isSeedColumn() || candidate.isSeedColumn());
+				columns.set(id, improved);
+				return new ColumnUpdate(id, false, true);
+			}
+			return new ColumnUpdate(id, false, false);
+		}
+		int id = columns.size();
+		TWETColumn column = new TWETColumn(id, pattern, candidate.getCost(), candidate.getSource(),
+				candidate.isSeedColumn());
+		columns.add(column);
+		signatureToId.put(pattern.getSignature(), Integer.valueOf(id));
 		return new ColumnUpdate(id, true, false);
 	}
 

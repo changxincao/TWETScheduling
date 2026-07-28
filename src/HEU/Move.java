@@ -1106,7 +1106,7 @@ public ArrayList<ArrayList<Integer>> getNeqSeqs(ArrayList<Integer>s1,int from1,i
 			int m2 = operation.m2;
 
 			if (allCover) {
-				continue;
+				break;
 			}
 			if (coverdMachines[m1] || coverdMachines[m2])
 				continue;
@@ -1913,7 +1913,7 @@ class CrossExchangeOperator implements Move {
 			int m2 = operation.m2;
 
 			if (allCover) {
-				continue;
+				break;
 			}
 			if (coverdMachines[m1] || coverdMachines[m2])
 				continue;

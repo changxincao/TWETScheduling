@@ -828,48 +828,36 @@ public class Tree {
 	}
 
 	private void prepareDomainFilteredChildSeedColumns(Node child, LP parentLp) {
-		ArrayList<Integer> seed = new ArrayList<Integer>();
-		ArrayList<Integer> outsourcingSeed = new ArrayList<Integer>();
+		LinkedHashSet<Integer> seed = new LinkedHashSet<Integer>();
+		LinkedHashSet<Integer> outsourcingSeed = new LinkedHashSet<Integer>();
 		for (int id : child.seedColumnIds) {
 			TWETColumn column = pool.getColumn(id);
 			if (child.isColumnCompatible(column)) {
-				Integer value = Integer.valueOf(id);
-				if (!seed.contains(value)) {
-					seed.add(value);
-				}
+				seed.add(Integer.valueOf(id));
 			}
 		}
 		if (parentLp != null) {
 			for (int id : parentLp.getRestrictedColumnIds()) {
 				TWETColumn column = pool.getColumn(id);
 				if (child.isColumnCompatible(column)) {
-					Integer value = Integer.valueOf(id);
-					if (!seed.contains(value)) {
-						seed.add(value);
-					}
+					seed.add(Integer.valueOf(id));
 				}
 			}
 			for (int id : parentLp.getRestrictedOutsourcingColumnIds()) {
 				TWETOutsourcingColumn column = outsourcingPool.getColumn(id);
 				if (child.isOutsourcingColumnCompatible(column)) {
-					Integer value = Integer.valueOf(id);
-					if (!outsourcingSeed.contains(value)) {
-						outsourcingSeed.add(value);
-					}
+					outsourcingSeed.add(Integer.valueOf(id));
 				}
 			}
 		}
 		for (int id : child.seedOutsourcingColumnIds) {
 			TWETOutsourcingColumn column = outsourcingPool.getColumn(id);
 			if (child.isOutsourcingColumnCompatible(column)) {
-				Integer value = Integer.valueOf(id);
-				if (!outsourcingSeed.contains(value)) {
-					outsourcingSeed.add(value);
-				}
+				outsourcingSeed.add(Integer.valueOf(id));
 			}
 		}
-		child.seedColumnIds = seed;
-		child.seedOutsourcingColumnIds = outsourcingSeed;
+		child.seedColumnIds = new ArrayList<Integer>(seed);
+		child.seedOutsourcingColumnIds = new ArrayList<Integer>(outsourcingSeed);
 	}
 
 	private StrongBranchingTrialResult solveStrongBranchingHeuristicTrial(Node child) {

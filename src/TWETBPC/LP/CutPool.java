@@ -115,6 +115,46 @@ public class CutPool {
 	}
 
 	/**
+	 * 缓存剩余容量不足一整页后，释放当前模型不再使用的 cut 页。
+	 * <p>
+	 * queued node 后续再次启用被释放的 cut 时会重新计算系数；cut 定义和已建 CPLEX row
+	 * 都不受影响。未达到容量时直接返回，避免给普通热路径增加 active-set 扫描。
+	 *
+	 * @return 实际释放的缓存页数
+	 */
+	public int reclaimInactiveSubsetRowCoefficientPages(List<Integer> activeCutIds) {
+		if (!cacheSubsetRowCoefficients || maxSubsetRowCoefficientCacheEntries < COEFFICIENT_PAGE_SIZE
+				|| allocatedSubsetRowCoefficientCacheEntries
+						<= maxSubsetRowCoefficientCacheEntries - COEFFICIENT_PAGE_SIZE) {
+			return 0;
+		}
+		boolean[] active = new boolean[subsetRowCoefficientPages.size()];
+		for (int cutId : activeCutIds) {
+			if (cutId >= 0 && cutId < active.length) {
+				active[cutId] = true;
+			}
+		}
+		int releasedPages = 0;
+		for (int cutId = 0; cutId < subsetRowCoefficientPages.size(); cutId++) {
+			if (active[cutId]) {
+				continue;
+			}
+			short[][] pages = subsetRowCoefficientPages.get(cutId);
+			if (pages == null) {
+				continue;
+			}
+			for (short[] page : pages) {
+				if (page != null) {
+					releasedPages++;
+				}
+			}
+			subsetRowCoefficientPages.set(cutId, null);
+		}
+		allocatedSubsetRowCoefficientCacheEntries -= (long) releasedPages * COEFFICIENT_PAGE_SIZE;
+		return releasedPages;
+	}
+
+	/**
 	 * 将同一 rank-1 multiplier 的当前 active memory 版本合并为一个新版本。
 	 * <p>
 	 * 2026-07-26: 论文要求重复分离到同一 multiplier 时扩大已有 memory。这里不能原地修改全局

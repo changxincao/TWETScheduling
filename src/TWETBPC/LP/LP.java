@@ -57,6 +57,8 @@ public class LP {
 	private HashSet<Integer> restrictedOutsourcingColumnIdSet;
 	private ArrayList<Integer> activeCutIds;
 	private TWETMasterSolution lastSolution;
+	/** 最近一次有效 LP 解中取正值的列化外包列；避免 strong sides 重复查询 CPLEX。 */
+	private Set<Integer> positiveOutsourcingColumnIds;
 
 	private IloCplex cplex;
 	private IloObjective objective;
@@ -138,6 +140,7 @@ public class LP {
 		this.allRowFeasibilityRepairMode = false;
 		this.branchImpliedPenaltyObjectiveMode = false;
 		this.feasibilityPhaseOneObjectiveMode = false;
+		this.positiveOutsourcingColumnIds = Collections.emptySet();
 	}
 
 	public void construct(Node node, List<Integer> columnIds) {
@@ -147,6 +150,7 @@ public class LP {
 				? node.seedOutsourcingColumnIds : Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>(node.activeCutIds);
 		this.lastSolution = null;
+		this.positiveOutsourcingColumnIds = Collections.emptySet();
 		clearDuals();
 	}
 
@@ -217,16 +221,10 @@ public class LP {
 	}
 
 	public Set<Integer> getPositiveOutsourcingColumnIds() {
-		if (!isColumnizedOutsourcing() || outsourceColumnById == null) {
+		if (!isColumnizedOutsourcing() || lastSolution == null || positiveOutsourcingColumnIds.isEmpty()) {
 			return Collections.emptySet();
 		}
-		HashSet<Integer> positive = new HashSet<Integer>();
-		for (int columnId : restrictedOutsourcingColumnIds) {
-			if (isPositiveCurrentOutsourcingColumn(columnId)) {
-				positive.add(Integer.valueOf(columnId));
-			}
-		}
-		return positive;
+		return new HashSet<Integer>(positiveOutsourcingColumnIds);
 	}
 
 	public boolean isColumnizedOutsourcing() {
@@ -501,6 +499,12 @@ public class LP {
 	}
 
 	public void addCuts(List<Integer> cutIds) {
+		if (!cutIds.isEmpty()) {
+			ArrayList<Integer> retainedCutIds = new ArrayList<Integer>(activeCutIds.size() + cutIds.size());
+			retainedCutIds.addAll(activeCutIds);
+			retainedCutIds.addAll(cutIds);
+			cutPool.reclaimInactiveSubsetRowCoefficientPages(retainedCutIds);
+		}
 		boolean changed = false;
 		for (int id : cutIds) {
 			Integer value = Integer.valueOf(id);
@@ -652,9 +656,11 @@ public class LP {
 			cplex.end();
 			cplex = null;
 		}
+		positiveOutsourcingColumnIds = Collections.emptySet();
 	}
 
 	private TWETMasterSolution solveCurrentModel(String successMessage) throws IloException {
+		positiveOutsourcingColumnIds = Collections.emptySet();
 		long solveStartNanos = masterLpTimingStart();
 		boolean solved;
 		try {
@@ -870,7 +876,7 @@ public class LP {
 	}
 
 	/**
-	 * 2026-07-28: 每条内部列只读取一次，并把非零覆盖系数分发到各 job 行。
+	 * 2026-07-28: 每条内部列和列化外包列都只读取一次，并把非零覆盖系数分发到各 job 行。
 	 * 每行的 term 仍按 restricted column 顺序加入，模型系数和输入顺序与逐 job 路径一致。
 	 */
 	private void buildCoverageConstraintsByColumn() throws IloException {
@@ -886,16 +892,18 @@ public class LP {
 				expressions[job].addTerm(column.getJobVisitCount(job), lambdaVars[idx]);
 			}
 		}
+		if (isColumnizedOutsourcing()) {
+			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
+				TWETOutsourcingColumn column =
+						outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
+				for (int job : column.getJobs()) {
+					expressions[job].addTerm(1.0, outsourceColumnVars[idx]);
+				}
+			}
+		}
 		for (int job = 1; job <= data.n; job++) {
 			IloLinearNumExpr expr = expressions[job];
 			if (isColumnizedOutsourcing()) {
-				for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
-					TWETOutsourcingColumn column =
-							outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
-					if (column.containsJob(job)) {
-						expr.addTerm(1.0, outsourceColumnVars[idx]);
-					}
-				}
 				coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
 			} else {
 				expr.addTerm(1.0, outsourceVars[job]);
@@ -1022,6 +1030,7 @@ public class LP {
 	}
 
 	private void buildSubsetRowCutConstraints() throws IloException {
+		cutPool.reclaimInactiveSubsetRowCoefficientPages(activeCutIds);
 		for (int cutId : activeCutIds) {
 			addSubsetRowCutToCurrentModel(cutId);
 		}
@@ -1604,9 +1613,11 @@ public class LP {
 	private double[] readOutsourcingValues() throws IloException {
 		double[] values = new double[data.n + 1];
 		if (isColumnizedOutsourcing()) {
+			HashSet<Integer> positiveColumnIds = new HashSet<Integer>();
 			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
 				double value = cplex.getValue(outsourceColumnVars[idx]);
 				if (Utility.compareGt(value, VALUE_TOLERANCE)) {
+					positiveColumnIds.add(restrictedOutsourcingColumnIds.get(idx));
 					TWETOutsourcingColumn column =
 							outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
 					for (int job : column.getJobs()) {
@@ -1614,6 +1625,7 @@ public class LP {
 					}
 				}
 			}
+			positiveOutsourcingColumnIds = positiveColumnIds;
 			return values;
 		}
 		for (int job = 1; job <= data.n; job++) {

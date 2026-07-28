@@ -32,11 +32,26 @@ public final class CutPoolCoefficientCacheTest {
 			pool.cacheSubsetRowCoefficient(cut1, 0, 11);
 			assertValue(-1, pool.getSubsetRowCoefficient(cut0, 4096), "capacity blocks next page");
 			assertValue(-1, pool.getSubsetRowCoefficient(cut1, 0), "capacity shared across cuts");
+			assertValue(0, pool.reclaimInactiveSubsetRowCoefficientPages(Arrays.asList(cut0, cut1)),
+					"active page retained");
+			assertValue(1, pool.reclaimInactiveSubsetRowCoefficientPages(Arrays.asList(cut1)),
+					"inactive page reclaimed");
+			pool.cacheSubsetRowCoefficient(cut1, 0, 11);
+			assertValue(-1, pool.getSubsetRowCoefficient(cut0, 0), "released cut misses");
+			assertValue(11, pool.getSubsetRowCoefficient(cut1, 0), "active cut reuses capacity");
 
-			pool.cacheSubsetRowCoefficient(cut0, 1, Short.MAX_VALUE);
-			assertValue(Short.MAX_VALUE, pool.getSubsetRowCoefficient(cut0, 1), "maximum cached coefficient");
-			pool.cacheSubsetRowCoefficient(cut0, 2, Short.MAX_VALUE + 1);
-			assertValue(-1, pool.getSubsetRowCoefficient(cut0, 2), "oversized coefficient is not cached");
+			pool.cacheSubsetRowCoefficient(cut1, 1, Short.MAX_VALUE);
+			assertValue(Short.MAX_VALUE, pool.getSubsetRowCoefficient(cut1, 1), "maximum cached coefficient");
+			pool.cacheSubsetRowCoefficient(cut1, 2, Short.MAX_VALUE + 1);
+			assertValue(-1, pool.getSubsetRowCoefficient(cut1, 2), "oversized coefficient is not cached");
+
+			System.setProperty("twet.bpc.maxSubsetRowCoefficientCacheEntries", "5000");
+			CutPool nonAlignedCapacity = new CutPool();
+			int nonAlignedCut0 = nonAlignedCapacity.addCut(cut("nonAligned0"));
+			int nonAlignedCut1 = nonAlignedCapacity.addCut(cut("nonAligned1"));
+			nonAlignedCapacity.cacheSubsetRowCoefficient(nonAlignedCut0, 0, 3);
+			assertValue(1, nonAlignedCapacity.reclaimInactiveSubsetRowCoefficientPages(Arrays.asList(nonAlignedCut1)),
+					"non-page-aligned capacity reclaimed");
 
 			System.setProperty("twet.bpc.cacheSubsetRowCoefficients", "false");
 			CutPool disabled = new CutPool();

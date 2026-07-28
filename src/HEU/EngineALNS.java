@@ -67,6 +67,10 @@ public class EngineALNS {
         long startNanos = System.nanoTime();
         int iteration = 0;
         double initialTemperature = initialTemperature();
+        boolean vndOperatorTimingEnabled = EngineVND.operatorTimingEnabled();
+        if (vndOperatorTimingEnabled) {
+            EngineVND.resetOperatorTiming();
+        }
         try {
         while (noImprove < maxNoImpIterN&&remRatioChangeN<maxremRatioChangeN&&withinTimeLimit(startNanos)) {
 	iteration++;
@@ -128,6 +132,9 @@ public class EngineALNS {
         }
 
         } finally {
+            if (vndOperatorTimingEnabled) {
+                System.out.println("[VND operator timing] " + EngineVND.operatorTimingSummary());
+            }
             // 2026-07-07：ALNS/VND 会把 curUpperBound 当作局部搜索剪枝上界；返回 BPC 前必须清回 BigM。
             Utility.resetCurUpperBound(Utility.big_M);
         }

@@ -10,7 +10,53 @@ public class EngineVND {
 
 	public Data data;
 	public Solution s;
-	
+	/** 2026-07-28: 诊断模式下累计一次 ALNS 内各 VND 算子的搜索、提交耗时和改进次数。 */
+	private static final LinkedHashMap<String, OperatorTimingStat> operatorTimingStats = new LinkedHashMap<>();
+
+	private static final class OperatorTimingStat {
+		long calls;
+		long improvements;
+		long searchNanos;
+		long commitNanos;
+	}
+
+	static boolean operatorTimingEnabled() {
+		return Boolean.getBoolean("twet.alns.vndOperatorTiming");
+	}
+
+	static void resetOperatorTiming() {
+		if (operatorTimingEnabled()) {
+			operatorTimingStats.clear();
+		}
+	}
+
+	private static void recordOperatorTiming(Move move, long searchNanos, long commitNanos, boolean improved) {
+		OperatorTimingStat stat = operatorTimingStats.computeIfAbsent(move.getClass().getSimpleName(),
+				key -> new OperatorTimingStat());
+		stat.calls++;
+		if (improved) {
+			stat.improvements++;
+		}
+		stat.searchNanos += searchNanos;
+		stat.commitNanos += commitNanos;
+	}
+
+	static String operatorTimingSummary() {
+		if (!operatorTimingEnabled()) {
+			return null;
+		}
+		StringBuilder summary = new StringBuilder();
+		for (Map.Entry<String, OperatorTimingStat> entry : operatorTimingStats.entrySet()) {
+			if (summary.length() > 0) {
+				summary.append(" | ");
+			}
+			OperatorTimingStat stat = entry.getValue();
+			summary.append(String.format(Locale.US, "%s calls=%d improved=%d searchMs=%.3f commitMs=%.3f",
+					entry.getKey(), stat.calls, stat.improvements, stat.searchNanos / 1.0e6,
+					stat.commitNanos / 1.0e6));
+		}
+		return summary.toString();
+	}
 
 	public EngineVND(Data data, Solution s) {
 		this.data = data;
@@ -48,6 +94,7 @@ public class EngineVND {
 		// 如果不限制可能无法停止
 		
 		int iter = 0;
+		boolean timingEnabled = operatorTimingEnabled();
 		
 		boolean improved = true;
 		while (improved) {
@@ -56,9 +103,16 @@ public class EngineVND {
 			List<Move> ops = buildOps();
 			
 			for (Move move:ops) {
-				
+				long searchStartNanos = timingEnabled ? System.nanoTime() : 0L;
 				move.searchBest();
-				improved = improved || commit(move);
+				long searchNanos = timingEnabled ? System.nanoTime() - searchStartNanos : 0L;
+				long commitStartNanos = timingEnabled ? System.nanoTime() : 0L;
+				boolean committed = commit(move);
+				long commitNanos = timingEnabled ? System.nanoTime() - commitStartNanos : 0L;
+				if (timingEnabled) {
+					recordOperatorTiming(move, searchNanos, commitNanos, committed);
+				}
+				improved = improved || committed;
 				iter++;
 					// TODO 时间监测
 					

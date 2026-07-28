@@ -481,6 +481,10 @@ public class LP {
 		if (addedVars != null && !addedVars.isEmpty()) {
 			lambdaVars = append(lambdaVars, addedVars);
 		}
+		if (added > 0) {
+			lastSolution = null;
+			positiveOutsourcingColumnIds = Collections.emptySet();
+		}
 		return added;
 	}
 	public Pool.ColumnUpdate addOrImproveColumn(TWETColumn column) {
@@ -1007,6 +1011,10 @@ public class LP {
 		}
 		if (addedVars != null && !addedVars.isEmpty()) {
 			outsourceColumnVars = append(outsourceColumnVars, addedVars);
+		}
+		if (added > 0) {
+			lastSolution = null;
+			positiveOutsourcingColumnIds = Collections.emptySet();
 		}
 		return added;
 	}

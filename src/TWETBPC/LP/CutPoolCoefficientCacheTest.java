@@ -44,6 +44,10 @@ public final class CutPoolCoefficientCacheTest {
 			assertValue(Short.MAX_VALUE, pool.getSubsetRowCoefficient(cut1, 1), "maximum cached coefficient");
 			pool.cacheSubsetRowCoefficient(cut1, 2, Short.MAX_VALUE + 1);
 			assertValue(-1, pool.getSubsetRowCoefficient(cut1, 2), "oversized coefficient is not cached");
+			assertValue(1, pool.reclaimInactiveSubsetRowCoefficientPages(Arrays.asList(cut0)),
+					"reactivated cut releases previous active page");
+			pool.cacheSubsetRowCoefficient(cut0, 0, 5);
+			assertValue(5, pool.getSubsetRowCoefficient(cut0, 0), "reactivated cut can be cached again");
 
 			System.setProperty("twet.bpc.maxSubsetRowCoefficientCacheEntries", "5000");
 			CutPool nonAlignedCapacity = new CutPool();

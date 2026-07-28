@@ -3,15 +3,15 @@
 Both formulations are solved by branch-price-and-cut. Their internal columns,
 internal pricing problem, and machine-side branching rules are identical. They
 differ only in the representation of outsourcing: formulation
-$\mathrm{SC\text{-}M}$ keeps the outsourcing decisions in the master, whereas
-$\mathrm{SC\text{-}C}$ invokes a second pricing problem for outsourcing columns.
+\textup{(SP2)} keeps the outsourcing decisions in the master, whereas
+\textup{(SP1)} invokes a second pricing problem for outsourcing columns.
 This section first describes the common node-processing framework and then presents
 the two pricing problems and the formulation-specific branching decisions.
 
 \subsection{Restricted master problem and node processing}
 
 At a branch-and-bound node $u$, let $\mathcal R_u\subset\mathcal R$ denote the
-current set of internal columns. For $\mathrm{SC\text{-}C}$, let
+current set of internal columns. For \textup{(SP1)}, let
 $\mathcal O_u\subset\mathcal O$ denote the current set of outsourcing columns. The
 node is processed by repeatedly solving the corresponding restricted master
 problem (RMP), generating negative-reduced-cost columns, and reoptimizing the RMP.
@@ -25,13 +25,13 @@ called in the following order:
 The time-indexed method is mounted as an alternative exact engine and does not call
 the external tabu-search engine first; its inexpensive bucket search, when active,
 is internal to the time-indexed pricing procedure.
-For $\mathrm{SC\text{-}C}$, exact outsourcing pricing is then performed with the
+For \textup{(SP1)}, exact outsourcing pricing is then performed with the
 same RMP dual solution. Thus, the pricing loop is closed only after all column
 families have been priced exactly.
 
 Let $z_u^{\mathrm{RMP}}$ be the optimal RMP value, let
 $\bar c_u^{\mathrm{in}}$ be a certified lower bound on the reduced cost of any
-internal column, and, for $\mathrm{SC\text{-}C}$, let
+internal column, and, for \textup{(SP1)}, let
 $\bar c_u^{\mathrm{out}}$ be the corresponding bound for outsourcing columns. Let
 $m_u^{\max}$ denote the machine-count upper bound that remains valid at node $u$. A
 valid node lower bound is
@@ -42,15 +42,15 @@ valid node lower bound is
     +
     m_u^{\max}\min\{0,\bar c_u^{\mathrm{in}}\}
     +
-    \mathbf 1_{\{\mathrm{SC\text{-}C}\}}
+    \mathbf 1_{\{\mathrm{SP1}\}}
     \min\{0,\bar c_u^{\mathrm{out}}\}.
     \label{eq:node-dual-bound}
 \end{equation}
 The machine multiplier in \eqref{eq:node-dual-bound} follows from the node-specific
 version of \eqref{eq:machine-capacity}; at most one outsourcing column can be
-selected in $\mathrm{SC\text{-}C}$. The bound is used only when the relevant pricing
+selected in \textup{(SP1)}. The bound is used only when the relevant pricing
 certificates are complete. In particular, a certificate for internal columns alone
-cannot close a node of $\mathrm{SC\text{-}C}$.
+cannot close a node of \textup{(SP1)}.
 
 \paragraph{Initial columns and incumbent.}
 An initial feasible schedule is obtained by a multi-start adaptive
@@ -93,10 +93,11 @@ function of $j$ and all applicable dual contributions, intersects the result wit
 the current hard time domain of $j$, and normalizes the resulting function.
 
 The functional representation is important for two reasons. First, it handles
-continuous completion times directly and therefore does not scale with the numeric
-length of the scheduling horizon. Second, dominance compares the complete
-time--cost trade-off of two partial sequences rather than a single scalar cost
-evaluated at an arbitrarily selected time.
+continuous completion times directly and does not create one state for every time
+point in the scheduling horizon. Its size is governed by the generated labels and
+PWLF segments rather than by an explicit time grid. Second, dominance compares the
+complete time--cost trade-off of two partial sequences rather than a single scalar
+cost evaluated at an arbitrarily selected time.
 
 \subsection{Heuristic internal pricing}
 
@@ -295,7 +296,7 @@ time-indexed rank-1 variant support cut-aware pricing.
 \subsection{Outsourcing-column pricing}
 \label{subsec:outsourcing-pricing}
 
-This pricing problem is required only by $\mathrm{SC\text{-}C}$. For any total
+This pricing problem is required only by \textup{(SP1)}. For any total
 baseline amount $q$, define
 \begin{equation}
     V(q)=
@@ -310,25 +311,36 @@ corresponding dual contribution for including job $j$ in the outsourcing set and
 define $\widetilde\pi_j=\pi_j+\eta_j$; otherwise, let $\eta_j=0$. The definition of
 $V(q)$ then uses $\widetilde\pi_j$ in place of $\pi_j$. The pricing objective in
 \eqref{eq:outsourcing-subset-pricing} becomes
-$\max_q\{V(q)-G(q)\}$. The implementation constructs a Pareto frontier of states
-$(q,v)$ by processing jobs one at a time. From each state it creates an exclusion
-transition, which keeps $(q,v)$, and an inclusion transition, which produces
-$(q+b_j,v+\widetilde\pi_j)$. States with no better dual reward at the same or greater
-baseline amount are discarded. Branching decisions that require or forbid
-outsourcing membership are enforced during these transitions.
+$\max_q\{V(q)-G(q)\}$. The implementation processes the jobs in a fixed order and
+constructs a Pareto frontier of states $(q,v)$, where $q$ is accumulated baseline
+outsourcing cost and $v$ is accumulated dual benefit. Excluding job $j$ keeps
+$(q,v)$, while including it produces
+$(q+b_j,v+\widetilde\pi_j)$. At the same decision stage, state $(q_1,v_1)$
+dominates $(q_2,v_2)$ when $q_1\le q_2$ and $v_1\ge v_2$. For every common future
+extension, the first state retains at least as much dual benefit and cannot incur a
+higher payment because $G$ is nondecreasing. Concavity and piecewise linearity are
+therefore unnecessary for this dominance rule; the pricing logic needs only an
+evaluator for $G$ at complete states. The implementation used in this paper
+evaluates the piecewise-linear tariff defined in
+\eqref{eq:outsourcing-tariff-segment}, but replacing that evaluator by any
+evaluable nondecreasing aggregate function leaves the dynamic program unchanged.
+Branching decisions that require or forbid outsourcing membership are enforced
+during the state transitions.
 
-The best negative-reduced-cost sets are recovered from predecessor pointers,
-deduplicated, and added to the outsourcing pool. The same dynamic program supplies
-the exact outsourcing reduced-cost certificate used in
-\eqref{eq:node-dual-bound}.
+Negative-reduced-cost terminal states are sorted by reduced cost, and the best
+configured number of their job sets are added to the outsourcing pool. The same
+dynamic program supplies the exact outsourcing reduced-cost certificate used in
+\eqref{eq:node-dual-bound}. If outsourcing columns use a more general
+inclusion-monotone set cost $C^{\mathrm{out}}(O)$, this dynamic program is replaced
+by an exact pricing oracle for that cost; the master formulation is unchanged.
 
 \subsection{Cuts and branching}
 \label{subsec:cuts-branching}
 
 The branch-price-and-cut tree uses formulation-specific branching priorities. For
-$\mathrm{SC\text{-}M}$, the algorithm first branches on the active tariff segment,
+\textup{(SP2)}, the algorithm first branches on the active tariff segment,
 then on the number of selected internal-machine columns, and finally on internal
-adjacency or directed-arc decisions. For $\mathrm{SC\text{-}C}$, tariff branching
+adjacency or directed-arc decisions. For \textup{(SP1)}, tariff branching
 is absent. The algorithm branches on the machine count and machine-side
 adjacencies/arcs before branching on whether a job belongs to the selected
 outsourcing set.
@@ -364,8 +376,8 @@ a consistent improvement in candidate selection.
 \subsection{Termination and correctness}
 
 At every node, heuristic pricing may add columns but cannot certify closure.
-Closure requires the exact internal pricing certificate and, for
-$\mathrm{SC\text{-}C}$, the exact outsourcing certificate. The relaxed ng-route
+Closure requires the exact internal pricing certificate and, for \textup{(SP1)},
+the exact outsourcing certificate. The relaxed ng-route
 space contains every elementary internal sequence, so nonnegativity of its exact
 minimum reduced cost is sufficient. Time-indexed pricing supplies the corresponding
 certificate from the complete acyclic graph. The branch-and-bound node is fathomed

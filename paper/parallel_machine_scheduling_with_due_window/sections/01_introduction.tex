@@ -1,79 +1,97 @@
 \section{Introduction}\label{sec:introduction}
 
-Manufacturers facing volatile demand must decide not only how to allocate and
-sequence jobs on their internal machines, but also which jobs should be transferred
-to an external provider. These decisions are particularly interdependent in
-just-in-time production. Completing a job before its due window may create inventory
-or holding costs, whereas completing it after the window may cause service failures
-or contractual penalties. Sequence-dependent setups further couple the jobs assigned
-to a machine. Outsourcing can relieve internal congestion, but it is not necessarily
-priced job by job: providers often offer quantity discounts based on the total value
-of the outsourced work. Consequently, the marginal outsourcing cost of a job depends
-on the other jobs outsourced with it.
+Meeting delivery commitments requires manufacturers to coordinate machine
+assignment, sequencing, and completion timing. Finishing a job too early may
+create inventory and holding costs, while finishing it too late may cause service
+failures or contractual penalties. Earliness--tardiness scheduling formalizes
+this trade-off \citep{baker1990review,kramer2019unified}; a due window further
+recognizes that completion is acceptable over an interval rather than at one
+prescribed instant \citep{wan2002tabu,rosa2017algorithms}. The resulting decision
+is not simply to process jobs as early as possible. A manufacturer must decide
+which jobs share a machine, in what order they are processed, and where deliberate
+idle time should be inserted to align their completion times with different
+delivery windows.
 
-Due-window scheduling and production outsourcing have largely developed as separate
-research streams. Due-window models capture the operational consequences of early
-and late completion and have been studied under a wide range of machine environments
-and cost criteria \citep{wan2002tabu,rosa2017algorithms,kramer2019unified}.
-Exact methods for parallel-machine scheduling have progressed from problem-specific
-branch-and-bound procedures to column-generation and branch-and-price methods in
-which a column represents a complete single-machine schedule
-\citep{kedad2008lowerbounds,sen2015preemptive,bulhoes2020exact}. Research on
-scheduling with outsourcing, by contrast, has mainly focused on deciding which jobs
-are processed internally and which are assigned to external resources, often using
-additive outsourcing charges or heuristic solution methods
-\citep{lee2008outsourcing,zhong2022coordinated,lu2021discount}. These models do not capture
-the combination considered here: job-dependent due windows, sequence-dependent
-internal setups, and a nonseparable aggregate outsourcing tariff.
+Internal production is not the only way to meet these commitments. Subcontracting
+provides a capacity option when the internal system is congested or when processing
+a particular job internally is uneconomical \citep{vanmieghem1999subcontracting}.
+In a scheduling setting, however, outsourcing and internal production cannot be
+optimized independently. Outsourcing one job removes its processing and setup
+requirements from an internal machine, changes the feasible positions of the
+remaining jobs, and may reduce both earliness and tardiness costs. Existing studies
+therefore jointly decide which jobs are outsourced and how the retained jobs are
+scheduled in single-machine, flow-shop, job-shop, or coordinated
+production--distribution systems
+\citep{lee2008outsourcing,safarzadeh2019jobshop,kim2022flowshop,zhong2022coordinated}.
 
-The nonseparable tariff changes both the formulation and the solution method. If an
-outsourced subset is represented by a single column, its pricing problem becomes a
-subset-selection problem with an aggregate concave cost. If outsourcing decisions
-are kept explicitly in the master problem, the tariff must instead be represented by
-segment variables and the branch-and-price tree must enforce a consistent segment.
-This distinction is analogous to the alternative private-fleet/common-carrier
-formulations of \citet{dabia2019rich}, but the internal columns in the present problem
-are schedules rather than vehicle routes, and their costs require optimizing the
-completion times of a fixed job sequence.
+A further coupling arises when the external provider prices the outsourced
+portfolio rather than each job separately. Quantity discounts or spend-based
+tariffs make the payment depend on the aggregate baseline cost of all outsourced
+jobs \citep{lu2021discount}. The marginal outsourcing cost of one job then depends
+on which other jobs are outsourced with it. Similar portfolio pricing has also
+motivated alternative exact decompositions in private-fleet/common-carrier
+planning \citep{dabia2019rich}. In the present scheduling setting, this price
+coupling interacts with due-window congestion: outsourcing a group of jobs can
+simultaneously move the total payment to a different tariff range and reshape the
+internal machine schedules.
 
-The internal pricing problem presents a second difficulty. A time-indexed graph gives
-an exact dynamic program when all time data are integral, but its size grows with the
-numerical time horizon. A continuous-time formulation avoids this dependence.
-However, a label must then carry a function of completion time rather than a scalar
-cost. We represent this function explicitly as a piecewise-linear lower envelope and
-combine forward and backward labels at an adaptively selected midpoint. To control
-elementarity without placing the full visited set in every label, we use an ng-route
-relaxation and a decremental state-space refinement procedure, following the general
-pricing principles of \citet{martinelli2014pricing}. The refinement terminates only
-when an elementary negative-reduced-cost schedule has been found or the relaxed
-problem itself certifies that no such schedule exists.
+The relevant scheduling literature provides these ingredients only separately.
+Due-window research models general early and late completion costs, including
+sequence-dependent setups, but normally requires all jobs to be processed
+internally \citep{wan2002tabu,rosa2017algorithms}. Parallel-machine exact methods
+provide strong relaxations and column-generation frameworks for machine schedules
+\citep{kedad2008lowerbounds,sen2015preemptive,bulhoes2020exact}. Scheduling with
+outsourcing or rejection decides which jobs leave the internal system, but most
+models use additive job-level charges, outsourcing lead times, or objectives that
+do not optimize job-dependent due-window costs
+\citep{slotnick2011review,lee2008outsourcing,kim2022flowshop,zhong2022coordinated}.
+To the best of our knowledge, no exact approach jointly addresses identical
+parallel machines, job-dependent due windows, sequence-dependent internal setups,
+and a nonseparable aggregate outsourcing tariff.
 
-The main contributions are as follows.
+This combination also exposes an algorithmic limitation. In a Dantzig--Wolfe
+decomposition, an internal column is a complete single-machine schedule. For
+integer-time data, its pricing problem can be solved on a time-indexed acyclic
+graph \citep{bulhoes2020exact}, but the numbers of states and arcs grow with the
+numerical time horizon.
+Moreover, if elementarity is relaxed in this graph, negative non-elementary
+pseudo-schedules may be found even though only elementary schedules can enter the
+master problem. A continuous-time alternative avoids the explicit horizon
+expansion, but it cannot value a partial sequence by one scalar: the best reduced
+cost depends on the completion time at its boundary. This calls for a functional
+labeling method that controls repeated visits while preserving an exact pricing
+certificate.
+
+We address these gaps through the following contributions.
 \begin{enumerate}[label=(\roman*)]
-    \item We formulate an integrated parallel-machine scheduling and outsourcing
-    problem with job-dependent due-window costs, sequence-dependent internal setups,
-    and an aggregate quantity-discount tariff.
+    \item We introduce an integrated parallel-machine due-window scheduling
+    problem with aggregate outsourcing. The model couples job sourcing with
+    internal assignment, sequencing, timing, and sequence-dependent setups.
 
-    \item We develop two set-covering column-generation formulations that place the
-    outsourcing structure on different sides of the decomposition: an
-    outsourcing-column formulation and a formulation with explicit outsourcing and
-    tariff variables in the master problem.
+    \item We derive two set-covering formulations that place the outsourcing
+    decision on different sides of the decomposition. Formulation \textup{(SP1)}
+    represents outsourced job sets by columns, whereas formulation \textup{(SP2)}
+    keeps job-level outsourcing and tariff variables in the master problem.
+    This distinction accommodates different outsourcing cost structures and
+    exposes the trade-off between a second pricing family and a richer master.
 
-    \item We develop a continuous-time exact pricing algorithm based on
+    \item We develop an exact continuous-time internal pricing method based on
     bidirectional piecewise-linear labeling and ng-route decremental state-space
-    refinement. The method does not require discretizing the time horizon.
+    refinement. Its source-aware dominance structure maintains collective
+    functional envelopes, and the method does not explicitly discretize the time
+    horizon. An exact time-indexed method is retained as an alternative for
+    integer-time instances.
 
-    \item We integrate the pricing routines into a branch-and-price framework with
-    heuristic pricing, certified node bounds, completion-bound and time-indexed
-    reduced-cost fixing, formulation-specific branching, strong-branching trials,
-    and Phase-I feasibility repair. An exact time-indexed pricing algorithm is
-    retained as an alternative for integer-time instances.
+    \item We embed both formulations and both internal pricing approaches in a
+    unified branch-price-and-cut framework with formulation-specific outsourcing
+    pricing, branching, certified node bounds, and Phase-I feasibility repair.
 \end{enumerate}
 
-The remainder of the paper is organized as follows. Section~\ref{sec:literature}
-reviews the related scheduling, outsourcing, and exact-method literature.
-Section~\ref{sec:problem} defines the problem and its cost structure.
-Section~\ref{sec:formulations} presents the two column-generation formulations.
-Section~\ref{sec:solution} describes the exact solution framework and both internal
-pricing approaches. Section~\ref{sec:experiments} will report the computational
-study, and Section~\ref{sec:conclusions} concludes.
+The remainder of the paper is organized as follows.
+Section~\ref{sec:literature} reviews due-window scheduling and scheduling with
+outsourcing. Section~\ref{sec:problem} defines the integrated decision problem and
+its cost structure. Section~\ref{sec:formulations} presents formulations
+\textup{(SP1)} and \textup{(SP2)}. Section~\ref{sec:solution} describes the exact
+solution framework and the internal and outsourcing pricing algorithms.
+Section~\ref{sec:experiments} reports the computational study, and
+Section~\ref{sec:conclusions} concludes.

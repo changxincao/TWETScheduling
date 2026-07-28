@@ -1,26 +1,57 @@
 \section{Problem Description}\label{sec:problem}
 
+A manufacturer must complete a set of jobs with identical internal parallel
+machines and an external production provider. Before operations begin, the
+manufacturer decides whether each job is processed internally or outsourced.
+Internally retained jobs are assigned, sequenced, and timed on the available
+machines. An outsourced job no longer consumes internal processing or setup time;
+its production and delivery consequences are assumed to be included in the
+provider's quoted baseline cost. Each job is processed exactly once by one of
+these two modes.
+
+Table~\ref{tab:core-notation} summarizes the notation used throughout the model.
+\begin{table}[t]
+    \centering
+    \caption{Core problem notation.}
+    \label{tab:core-notation}
+    \begin{tabularx}{\textwidth}{@{}lX@{}}
+        \toprule
+        Symbol & Definition \\
+        \midrule
+        $\mathcal J,\mathcal M$ & Sets of jobs and identical internal machines \\
+        $p_j,[d_j^e,d_j^l]$ & Processing time and preferred completion window of job $j$ \\
+        $s_{ij},\kappa_{ij}$ & Setup time and setup cost when job $j$ follows $i$ \\
+        $\phi_j(t)$ & Internal completion-time penalty of job $j$ at time $t$ \\
+        $b_j$ & Baseline cost quoted for outsourcing job $j$ \\
+        $B(O)$ & Total baseline outsourcing cost of job set $O$ \\
+        $G(B(O))$ & Actual payment after applying the aggregate outsourcing tariff \\
+        $\mathcal R$ & Set of feasible elementary single-machine schedules \\
+        $c_r^{\mathrm{in}}$ & Minimum setup and timing cost of internal schedule $r$ \\
+        \bottomrule
+    \end{tabularx}
+\end{table}
+
 \subsection{Internal production}
 
-Let $\mathcal J=\{1,\ldots,n\}$ be a set of jobs and let
-$\mathcal M=\{1,\ldots,m\}$ be a set of identical parallel machines. All jobs and
-machines are available at time zero. Each job must either be processed internally on
-one machine or outsourced. Internal processing is nonpreemptive, and a machine
-processes at most one job at a time.
+Let $\mathcal J=\{1,\ldots,n\}$ be the set of jobs and
+$\mathcal M=\{1,\ldots,m\}$ the set of identical internal machines. All jobs and
+machines are available at time zero. Internal processing is nonpreemptive, and a
+machine processes at most one job at a time.
 
 Job $j\in\mathcal J$ has processing time $p_j$ and due window
 $[d_j^e,d_j^l]$. If job $j$ follows job $i$ on the same machine, the transition
-requires setup time $s_{ij}$ and incurs setup cost $\kappa_{ij}$. Index $0$ denotes
-the initial state of a machine; hence $s_{0j}$ and $\kappa_{0j}$ are the initial
-setup time and cost of job $j$. Idle time is allowed between consecutive jobs.
-The setup times satisfy the triangle inequality,
+requires setup time $s_{ij}$ and incurs setup cost $\kappa_{ij}$. Index $0$
+denotes the initial state of a machine; hence $s_{0j}$ and $\kappa_{0j}$ are the
+initial setup time and cost of job $j$. Idle time is allowed between consecutive
+jobs. The setup times satisfy the directed triangle inequality
 \begin{equation}
     s_{ik}\le s_{ij}+s_{jk},
     \qquad
     i\in\mathcal J\cup\{0\},\quad j,k\in\mathcal J,
     \label{eq:setup-time-triangle}
 \end{equation}
-for pairwise distinct indices.
+for pairwise distinct indices. No corresponding triangle inequality is imposed on
+the setup costs.
 
 The completion-time penalty of job $j$ is a nonnegative, finitely represented
 piecewise-linear function $\phi_j(t)$. The principal case is weighted
@@ -31,16 +62,17 @@ earliness--tardiness with a due window,
     \alpha_j[d_j^e-t]^+
     +
     \beta_j[t-d_j^l]^+,
-    \qquad [x]^+:=\max\{x,0\},
+    \qquad [x]^+:=\max\{x,0\}.
     \label{eq:due-window-penalty}
 \end{equation}
-but the pricing algorithms only require that sums, translations, lower envelopes,
-and interval minima of the represented functions can be evaluated exactly. This
-also covers due dates as zero-width windows and several bounded or piecewise-linear
-early/late-work penalties.
+The pricing algorithms require sums, translations, lower envelopes, and interval
+minima of these functions to be evaluated exactly. The representation therefore
+also includes due dates as zero-width windows and other finitely represented
+piecewise-linear early and late completion costs.
 
 An internal machine schedule is an elementary sequence
-$r=(j_1,\ldots,j_q)$ of distinct jobs. Let $j_0=0$ and $C_{j_0}=0$. Its cost is
+$r=(j_1,\ldots,j_q)$ of distinct jobs. Let $j_0=0$ and $C_{j_0}=0$. The minimum
+cost associated with this order is
 \begin{equation}
     c_r^{\mathrm{in}}
     =
@@ -56,48 +88,53 @@ $r=(j_1,\ldots,j_q)$ of distinct jobs. Let $j_0=0$ and $C_{j_0}=0$. Its cost is
     \label{eq:internal-column-cost}
 \end{equation}
 The inequalities in \eqref{eq:internal-column-cost} permit intentional idle time.
-Thus, a column specifies a job order, while its cost already contains the optimal
-timing of that order.
+Thus, an internal column specifies a job order, while its coefficient already
+contains the optimal completion times for that order.
 
 \subsection{Aggregate outsourcing tariff}
 
-If job $j$ is outsourced, it leaves the internal schedule and has baseline
-outsourcing amount $b_j\ge0$. For an outsourced set $O\subseteq\mathcal J$, define
+Job $j$ has baseline outsourcing cost $b_j\ge0$. For an outsourced set
+$O\subseteq\mathcal J$, its total baseline outsourcing cost is
 \begin{equation}
     B(O)=\sum_{j\in O}b_j.
+    \label{eq:baseline-outsourcing-cost}
 \end{equation}
-The actual payment is $G(B(O))$, where $G$ is a nondecreasing concave
-piecewise-linear tariff satisfying $G(0)=0$. Let
-$\mathcal L=\{1,\ldots,L\}$ be its tariff segments. Segment $\ell$ applies on
+The actual payment is $G(B(O))$, where $G:\mathbb R_+\rightarrow\mathbb R_+$ is
+continuous, nondecreasing, and concave, with $G(0)=0$. The baseline model uses a
+finite piecewise-linear tariff. Let $\mathcal L=\{1,\ldots,L\}$ be its segments.
+Segment $\ell$ applies on
 $[\underline q_\ell,\overline q_\ell]$ and has affine expression
 \begin{equation}
-    G(q)=a_\ell q+c_\ell
-    \quad
-    \text{for }
+    G(q)=\gamma_\ell q+\delta_\ell
+    \qquad
     q\in[\underline q_\ell,\overline q_\ell].
+    \label{eq:outsourcing-tariff-segment}
 \end{equation}
-Concavity implies nonincreasing marginal rates $a_\ell$. The no-discount case is
-the single-segment tariff $G(q)=q$.
+Concavity implies nonincreasing marginal rates $\gamma_\ell$, while
+nondecreasingness requires $\gamma_\ell\ge0$. The no-discount case is the
+single-segment tariff $G(q)=q$.
 
-The outsourcing tariff is aggregate rather than job-separable. Hence the cost of
-outsourcing job $j$ depends on the other outsourced jobs. This coupling motivates
-the two formulations in Section~\ref{sec:formulations}.
+The tariff is aggregate rather than job-separable. Consequently, the incremental
+payment for outsourcing job $j$ depends on the baseline cost already assigned to
+the provider. Concavity captures quantity discounts in the studied problem, but
+Section~\ref{subsec:sp1} explains why the outsourcing-column formulation can also
+handle a broader class of outsourcing cost functions.
 
-\subsection{Optimization problem}
+\subsection{Integrated optimization problem}
 
 A feasible solution consists of at most $m$ mutually disjoint elementary internal
-sequences and one outsourced set. The outsourced set is disjoint from all internal
-sequences, and every job appears exactly once, either in one internal sequence or in
-the outsourced set. Its objective is
+schedules and one outsourced set. The outsourced set is disjoint from all internal
+schedules, and every job appears exactly once, either in one internal schedule or
+in the outsourced set. The objective is
 \begin{equation}
     \min
     \left\{
-        \sum_{r\in R^\star}c_r^{\mathrm{in}}
+        \sum_{r\in\mathcal R^\star}c_r^{\mathrm{in}}
         +
         G(B(O))
     \right\},
     \label{eq:original-problem}
 \end{equation}
-where $R^\star$ is the selected set of internal machine schedules and $O$ is the
-outsourced job set. The formulations below use covering rows, as in the implemented
-restricted master problems.
+where $\mathcal R^\star$ is the selected collection of internal schedules and
+$O$ is the outsourced job set. The formulations below use covering rows, matching
+the restricted master problems implemented in the exact algorithm.

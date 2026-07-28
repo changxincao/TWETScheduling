@@ -1,89 +1,89 @@
 \section{Literature Review}\label{sec:literature}
 
-The present study lies at the intersection of three scheduling research streams:
-scheduling with due-window penalties, exact methods for parallel-machine
-scheduling, and production scheduling with outsourcing. We review these streams
-by the role they play in the proposed problem and solution framework.
+The proposed problem connects two scheduling research streams. The first studies
+completion-time costs defined by due dates or due windows and the exact solution of
+the resulting machine-scheduling problems. The second integrates internal
+scheduling with order rejection, acceptance, or outsourcing. We review each stream
+and then identify the modelling and algorithmic gaps created by combining them.
 
-\subsection{Due-window scheduling and functional timing costs}
+\subsection{Scheduling with due-window costs}
 
-A due window specifies an interval of preferred completion times instead of a
-single due date. Completing a job before the lower endpoint incurs earliness,
-whereas completing it after the upper endpoint incurs tardiness. In the
-single-machine setting, \citet{wan2002tabu} combine a timing procedure with tabu
-search for distinct due windows and weighted earliness--tardiness penalties.
-\citet{rosa2017algorithms} subsequently consider distinct time windows, general
-earliness--tardiness penalties, and sequence-dependent setups. Their exact results
-require a restricted setup structure, whereas the complete problem is treated
-heuristically. The annotated review of \citet{kramer2019unified} places these
-models in the broader earliness--tardiness literature and documents the variety of
-machine environments, setup assumptions, release dates, and idle-time decisions.
+Earliness--tardiness scheduling recognizes that completing every job as early as
+possible is not generally optimal. The review of \citet{baker1990review} establishes
+the classical role of inventory costs before a target date and service penalties
+after it. Due-window models replace the target date by an interval of acceptable
+completion times. \citet{wan2002tabu} study a single machine with distinct due
+windows and weighted earliness--tardiness penalties. \citet{rosa2017algorithms}
+consider distinct time windows, general early and late penalties, and
+sequence-dependent setups; their complete problem is treated heuristically, while
+exact results require a restricted setup structure. The annotated review of
+\citet{kramer2019unified} places these variants within the broader family of
+earliness--tardiness problems and documents the effects of machine environments,
+release dates, setup assumptions, and permitted idle time.
 
-Two methodological implications are important here. First, the cost of a fixed
-sequence cannot generally be obtained by simply processing its jobs without idle
-time; the completion times must be optimized jointly. Second, the value of a
-partial sequence is naturally a function of its boundary time. These observations
-motivate the PWLF representation developed in Section~\ref{subsec:functional-pricing}.
+Parallel-machine research has developed increasingly strong bounds and exact
+decompositions for related completion-time objectives.
+\citet{kedad2008lowerbounds} derive assignment-based and time-indexed lower bounds
+for parallel-machine earliness--tardiness scheduling with distinct due dates.
+\citet{sen2015preemptive} construct a preemptive relaxation for weighted tardiness
+and earliness--tardiness problems on unrelated parallel machines and use it within
+a Benders framework. \citet{bulhoes2020exact} propose a generic
+branch-cut-and-price method in which each column is a complete schedule on one
+machine. Their framework combines column generation with branching, cuts,
+stabilization, and reduced-cost fixing for a broad class of parallel-machine
+objectives.
 
-\subsection{Exact methods for parallel-machine scheduling}
+These studies show both why due-window timing must be optimized and why a
+single-machine schedule is a natural column. They do not decide whether a job
+should leave the internal production system, nor do they account for a cost that
+couples the jobs assigned to an external provider. The latter decision changes the
+set of jobs entering every internal machine-pricing problem.
 
-For parallel-machine earliness--tardiness scheduling,
-\citet{kedad2008lowerbounds} develop assignment-based and time-indexed lower bounds
-for distinct due dates. \citet{sen2015preemptive} derive a strong preemptive
-relaxation for weighted tardiness and earliness--tardiness problems on unrelated
-parallel machines and use it within a Benders framework. These contributions show
-the value of problem-specific relaxations, but they do not provide a general exact
-framework for the combination studied here.
+\subsection{Scheduling with outsourcing}
 
-Column generation offers a different decomposition: one master column represents a
-complete schedule on one machine. \citet{bulhoes2020exact} develop a generic
-branch-cut-and-price framework for a broad class of parallel-machine scheduling
-problems and integrate strong branching, reduced-cost fixing, dual stabilization,
-and rank-1 cuts. Their work is the closest exact-method predecessor of our machine
-side. The present problem adds two features that materially change this framework.
-The internal pricing cost is a continuous piecewise-linear function induced by
-job-dependent due windows and sequence-dependent setups, and the master must also
-decide which jobs are outsourced under a nonseparable tariff.
+Order acceptance and scheduling jointly determine which orders enter a production
+system and how accepted orders are processed. \citet{slotnick2011review} organize
+this literature by machine environment, acceptance decision, and scheduling
+criterion. Later models incorporate richer production structures. For example,
+\citet{li2021acceptance} combine order acceptance with earliness--tardiness
+penalties and overtime, while \citet{chen2023lbbd} apply logic-based Benders
+decomposition to acceptance and scheduling across heterogeneous factories.
+Rejection or nonacceptance is normally charged through an additive job-level loss,
+so the cost of excluding one job does not depend on the other excluded jobs.
 
-\subsection{Scheduling with acceptance, rejection, and outsourcing}
+Scheduling with an explicit subcontracting option is more closely related to the
+present decision. \citet{lee2008outsourcing} study single-machine scheduling with
+outsourcing under due-date-related criteria. \citet{safarzadeh2019jobshop} allow
+jobs or operations to be outsourced in a job-shop environment, and
+\citet{kim2022flowshop} account for outsourcing lead times in a two-machine flow
+shop. \citet{zhong2022coordinated} jointly optimize outsourcing, in-house parallel
+machine production, and outbound delivery. Although these models differ in their
+machine environments and objectives, their outsourcing payments are principally
+specified job by job.
 
-Order acceptance and scheduling jointly decide which jobs enter the production
-system and how the accepted jobs are processed. \citet{slotnick2011review} provide
-a taxonomy of this literature. More recent work combines acceptance with richer
-timing or production structures. For example, \citet{li2021acceptance} include
-earliness--tardiness penalties and overtime, while \citet{chen2023lbbd} use
-logic-based Benders decomposition for acceptance and scheduling in distributed
-manufacturing. These models establish the importance of integrating selection and
-scheduling, but rejection is normally represented by an additive job-level loss.
+Aggregate pricing changes this separable structure. \citet{lu2021discount} study
+in-house production and outsourcing under discount schemes defined on total
+outsourcing cost. Their analysis establishes a scheduling precedent for pricing
+the outsourced portfolio as a whole rather than summing independent adjusted job
+charges. However, that setting does not include job-dependent due-window penalties,
+sequence-dependent setups, or an exact column-generation treatment of internal
+parallel-machine schedules.
 
-Scheduling with an explicit outsourcing option is closer to the present setting.
-\citet{lee2008outsourcing} study due-date-related measures on a single machine with
-outsourcing, and \citet{safarzadeh2019jobshop} allow jobs to be outsourced in a job
-shop. \citet{kim2022flowshop} introduce outsourcing lead times in a two-machine
-flow shop. At a broader system level, \citet{zhong2022coordinated} coordinate
-outsourcing, in-house production, and distribution. These studies differ in
-machine environment and solution method, but most attach a cost or lead time to
-each outsourced job. They do not model the outsourced portfolio through one
-aggregate concave tariff.
+\subsection{Synthesis and research gap}
 
-Aggregate pricing is studied more directly by \citet{lu2021discount}, who analyze
-in-house production and outsourcing under alternative discount schemes on total
-outsourcing cost. This work provides a scheduling precedent for representing the
-outsourcing decision through a portfolio-level tariff rather than independent
-job-level charges.
+The two streams leave a specific gap. Due-window scheduling captures the cost of
+internal completion timing but keeps the job set fixed. Outsourcing scheduling
+changes the internal job set but generally uses additive external costs or machine
+environments without general due-window timing. We are not aware of an exact method
+that combines identical parallel machines, job-dependent due windows,
+sequence-dependent setup times and costs, and an aggregate quantity-discount
+outsourcing tariff.
 
-\subsection{Research gap}
-
-The scheduling literature therefore provides the necessary ingredients
-separately. Due-window studies define the timing costs and show the difficulty
-created by general setups; parallel-machine research supplies lower bounds and
-exact column-generation frameworks; outsourcing studies integrate make-or-buy
-decisions; and discount models introduce aggregate tariffs. We are not aware of
-an exact method that combines identical parallel machines, job-dependent due
-windows, sequence-dependent setup times and costs, an aggregate concave
-outsourcing tariff, and exact branch-and-price. The contribution of this paper is
-to integrate these elements and to develop the continuous-time functional pricing
-machinery required by their combination. Algorithmic ideas adapted from the
-shortest-path pricing literature are attributed where they are introduced in
-Section~\ref{sec:solution}, rather than treated as part of the scheduling problem
-literature.
+There is also an unresolved decomposition choice. Outsourcing can be represented by
+one column for the complete outsourced set or by job-level decisions and tariff
+variables in the master problem. These alternatives produce different master
+relaxations, pricing families, and branching decisions. On the internal side,
+existing exact parallel-machine methods motivate schedule-based column generation,
+but time-indexed pricing expands with the numerical horizon. The formulations in
+Section~\ref{sec:formulations} address the first issue, and the continuous-time
+functional pricing method in Section~\ref{sec:solution} addresses the second.

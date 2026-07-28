@@ -1,41 +1,132 @@
 \section{Set-Covering Formulations}\label{sec:formulations}
 
-Let $\mathcal R$ be the set of all feasible elementary internal sequences. For
-$r\in\mathcal R$, let $a_{jr}$ be 1 if sequence $r$ contains job $j$ and 0
-otherwise, and let $x_r$ indicate whether the sequence is selected. Both
-formulations use the machine-capacity constraint
+Let $\mathcal R$ be the set of all feasible elementary internal schedules. For
+$r\in\mathcal R$, let $a_{jr}$ equal 1 if schedule $r$ contains job $j$ and 0
+otherwise, and let $x_r$ indicate whether $r$ is selected. Both formulations use
+the machine-capacity constraint
 \begin{equation}
     \sum_{r\in\mathcal R}x_r\le m.
     \label{eq:machine-capacity}
 \end{equation}
+They differ in whether the complete outsourced set is represented by a column or
+by explicit master variables. This pair of decomposition choices parallels the
+private-fleet/common-carrier formulations of \citet{dabia2019rich}, but the
+internal columns here are timed machine schedules rather than vehicle routes.
 
-\subsection{Formulation with explicit outsourcing variables}
-\label{subsec:master-outsourcing-formulation}
+\subsection{Outsourcing-column formulation}
+\label{subsec:sp1}
 
-The default formulation generates only internal schedule columns. Let $y_j$ be 1
-if job $j$ is outsourced. The nonlinear set-covering formulation is
+Formulation \textup{(SP1)} represents both internal schedules and outsourced job
+sets by columns. Let
+$\mathcal O=2^{\mathcal J}\setminus\{\varnothing\}$ be the family of nonempty
+outsourced sets. For $o\in\mathcal O$, let $d_{jo}$ equal 1 if job $j$ belongs to
+set $o$ and 0 otherwise, and define
+\begin{equation}
+    c_o^{\mathrm{out}}
+    =
+    G\left(\sum_{j\in\mathcal J}b_jd_{jo}\right).
+    \label{eq:outsourcing-column-cost}
+\end{equation}
+Variable $w_o$ selects outsourcing column $o$. The formulation is
 \begin{align}
-(\mathrm{SC\text{-}M})\qquad
+\textup{(SP1)}\qquad
+\min\quad
+    &\sum_{r\in\mathcal R}c_r^{\mathrm{in}}x_r
+     +\sum_{o\in\mathcal O}c_o^{\mathrm{out}}w_o
+     \label{eq:sp1-obj}\\
+\text{s.t.}\quad
+    &\sum_{r\in\mathcal R}a_{jr}x_r
+     +\sum_{o\in\mathcal O}d_{jo}w_o\ge1
+     &&j\in\mathcal J, \label{eq:sp1-cover}\\
+    &\sum_{r\in\mathcal R}x_r\le m,
+     \label{eq:sp1-machines}\\
+    &\sum_{o\in\mathcal O}w_o\le1,
+     \label{eq:sp1-at-most-one-outsourcing}\\
+    &x_r\in\{0,1\}
+     &&r\in\mathcal R,\\
+    &w_o\in\{0,1\}
+     &&o\in\mathcal O.
+\end{align}
+Selecting no $w_o$ represents a solution without outsourcing.
+Constraint \eqref{eq:sp1-at-most-one-outsourcing} is essential because the
+provider prices one aggregate outsourced portfolio rather than several
+independently charged subsets.
+
+Let $\pi_j\ge0$ be the dual value of covering row
+\eqref{eq:sp1-cover}, $\sigma\le0$ the dual value of the machine-capacity row, and
+$\mu\le0$ the dual value of
+\eqref{eq:sp1-at-most-one-outsourcing}. The reduced costs of an internal schedule
+$r$ and an outsourcing column $o$ are
+\begin{align}
+    \bar c_r^{\mathrm{in}}
+    &=
+    c_r^{\mathrm{in}}
+    -\sum_{j\in\mathcal J}\pi_j a_{jr}
+    -\sigma,
+    \label{eq:internal-reduced-cost}\\
+    \bar c_o^{\mathrm{out}}
+    &=
+    G\left(\sum_{j\in\mathcal J}b_jd_{jo}\right)
+    -\sum_{j\in\mathcal J}\pi_jd_{jo}
+    -\mu.
+    \label{eq:outsourcing-reduced-cost}
+\end{align}
+After removing the constant $-\mu$, outsourcing pricing is equivalent to
+\begin{equation}
+    \max_{O\subseteq\mathcal J}
+    \left\{
+        \sum_{j\in O}\pi_j
+        -
+        G\left(\sum_{j\in O}b_j\right)
+    \right\}.
+    \label{eq:outsourcing-subset-pricing}
+\end{equation}
+Branching rows add the corresponding dual terms to these expressions.
+
+The outsourcing-column representation is not tied to a concave piecewise-linear
+tariff. For the aggregate form in \eqref{eq:outsourcing-column-cost}, the
+two-dimensional pricing algorithm described in
+Section~\ref{subsec:outsourcing-pricing} remains valid for any evaluable
+nondecreasing function $G$; neither piecewise linearity nor concavity is required
+by its state transitions or dominance rule. Nondecreasingness also ensures that,
+with the covering rows used here, an outsourced job already covered internally can
+be removed from the outsourcing column without increasing its cost. Concavity
+provides the quantity-discount interpretation adopted in the baseline problem,
+and the computational implementation instantiates $G$ by the piecewise-linear
+tariff in \eqref{eq:outsourcing-tariff-segment}. More generally, an
+inclusion-monotone set cost $C^{\mathrm{out}}(O)$ can be assigned directly to
+outsourcing columns, provided that an exact pricing oracle compatible with that
+cost replaces \eqref{eq:outsourcing-subset-pricing}. A nonmonotone arbitrary set
+cost would require a different master representation or partitioning rows and is
+outside the present extension.
+
+\subsection{Explicit-outsourcing formulation}
+\label{subsec:sp2}
+
+Formulation \textup{(SP2)} generates only internal schedule columns. Let $y_j$
+equal 1 if job $j$ is outsourced. Its nonlinear form is
+\begin{align}
+\textup{(SP2)}\qquad
 \min\quad
     & \sum_{r\in\mathcal R}c_r^{\mathrm{in}}x_r
       +G\left(\sum_{j\in\mathcal J}b_jy_j\right)
-      \label{eq:scm-obj}\\
+      \label{eq:sp2-obj}\\
 \text{s.t.}\quad
     & \sum_{r\in\mathcal R}a_{jr}x_r+y_j\ge1
-      && j\in\mathcal J, \label{eq:scm-cover}\\
-    & \sum_{r\in\mathcal R}x_r\le m, \label{eq:scm-machines}\\
+      &&j\in\mathcal J, \label{eq:sp2-cover}\\
+    & \sum_{r\in\mathcal R}x_r\le m, \label{eq:sp2-machines}\\
     & x_r\in\{0,1\}
-      && r\in\mathcal R, \label{eq:scm-x}\\
+      &&r\in\mathcal R,\\
     & y_j\in\{0,1\}
-      && j\in\mathcal J. \label{eq:scm-y}
+      &&j\in\mathcal J.
 \end{align}
 
-The implemented master represents $G$ by tariff-segment variables. Let $z_\ell$
-select segment $\ell$ and let $q_\ell$ be the baseline outsourcing amount assigned
-to that segment. The tariff term in \eqref{eq:scm-obj} is replaced by
+The implemented master represents the baseline tariff by segment-selection
+variables. Let $z_\ell$ select segment $\ell$ and let $q_\ell$ be the aggregate
+baseline cost assigned to it. The tariff term in \eqref{eq:sp2-obj} is replaced by
 \begin{equation}
     \sum_{\ell\in\mathcal L}
-    \left(a_\ell q_\ell+c_\ell z_\ell\right),
+    \left(\gamma_\ell q_\ell+\delta_\ell z_\ell\right),
     \label{eq:tariff-objective}
 \end{equation}
 and the following constraints are added:
@@ -54,87 +145,21 @@ and the following constraints are added:
       &&\ell\in\mathcal L.
       \label{eq:tariff-domains}
 \end{align}
-Only the internal sequence variables are generated dynamically. The outsourcing and
-tariff decisions remain in the restricted master problem.
-
-Let $\pi_j\ge0$ be the dual value of covering row
-\eqref{eq:scm-cover}, and let $\sigma\le0$ be the dual value of
-\eqref{eq:scm-machines} under the displayed minimization convention. The reduced
-cost of an internal schedule $r$ is
-\begin{equation}
-    \bar c_r^{\mathrm{in}}
-    =
-    c_r^{\mathrm{in}}
-    -\sum_{j\in\mathcal J}\pi_j a_{jr}
-    -\sigma.
-    \label{eq:internal-reduced-cost}
-\end{equation}
-Branching rows and active cuts add the corresponding dual terms; these terms are
-described with the algorithm in Section~\ref{sec:solution}.
-
-\subsection{Formulation with outsourcing columns}
-\label{subsec:columnized-outsourcing-formulation}
-
-The alternative formulation represents an outsourced set by one column. Let
-$\mathcal O=2^{\mathcal J}\setminus\{\varnothing\}$, let $d_{jo}$ indicate whether
-job $j$ belongs to outsourced set $o$, and define
-\begin{equation}
-    c_o^{\mathrm{out}}
-    =
-    G\left(\sum_{j\in\mathcal J}b_jd_{jo}\right).
-\end{equation}
-Variable $w_o$ selects outsourcing column $o$. The formulation is
-\begin{align}
-(\mathrm{SC\text{-}C})\qquad
-\min\quad
-    &\sum_{r\in\mathcal R}c_r^{\mathrm{in}}x_r
-     +\sum_{o\in\mathcal O}c_o^{\mathrm{out}}w_o
-     \label{eq:scc-obj}\\
-\text{s.t.}\quad
-    &\sum_{r\in\mathcal R}a_{jr}x_r
-     +\sum_{o\in\mathcal O}d_{jo}w_o\ge1
-     &&j\in\mathcal J, \label{eq:scc-cover}\\
-    &\sum_{r\in\mathcal R}x_r\le m,
-     \label{eq:scc-machines}\\
-    &\sum_{o\in\mathcal O}w_o\le1,
-     \label{eq:scc-at-most-one-outsourcing}\\
-    &x_r\in\{0,1\}
-     &&r\in\mathcal R,\\
-    &w_o\in\{0,1\}
-     &&o\in\mathcal O.
-\end{align}
-No empty outsourcing column is needed: selecting no $w_o$ represents the case in
-which all jobs are processed internally.
-
-Let $\mu\le0$ be the dual value of
-\eqref{eq:scc-at-most-one-outsourcing}. The reduced cost of outsourcing column $o$
-is
-\begin{equation}
-    \bar c_o^{\mathrm{out}}
-    =
-    G\left(\sum_{j\in\mathcal J}b_jd_{jo}\right)
-    -\sum_{j\in\mathcal J}\pi_jd_{jo}
-    -\mu.
-    \label{eq:outsourcing-reduced-cost}
-\end{equation}
-Thus, after removing the constant $-\mu$, outsourcing pricing solves
-\begin{equation}
-    \max_{O\subseteq\mathcal J}
-    \left\{
-        \sum_{j\in O}\pi_j
-        -
-        G\left(\sum_{j\in O}b_j\right)
-    \right\}.
-    \label{eq:outsourcing-subset-pricing}
-\end{equation}
+Only internal schedules are generated dynamically. The outsourcing decisions and
+the finite tariff representation remain in the restricted master problem. With
+$\pi_j$ denoting the dual value of \eqref{eq:sp2-cover}, internal reduced cost is
+again given by \eqref{eq:internal-reduced-cost}.
 
 \subsection{Comparison of the formulations}
+\label{subsec:formulation-comparison}
 
-Formulation $\mathrm{SC\text{-}M}$ has one pricing family and a larger master that
-contains the tariff representation. Formulation $\mathrm{SC\text{-}C}$ keeps the
-master outsourcing structure compact but requires a second pricing problem and
-membership branching for outsourced sets. The two formulations therefore expose
-different computational trade-offs: master complexity and tariff branching in
-$\mathrm{SC\text{-}M}$, versus an additional combinatorial pricing family in
-$\mathrm{SC\text{-}C}$. Their internal schedule columns and internal pricing problem
-are identical.
+Formulation \textup{(SP1)} separates the master from the detailed outsourcing cost
+structure and can accommodate a broad outsourcing-column cost interface. Its cost
+is a second combinatorial pricing family and outsourcing-membership branching.
+Formulation \textup{(SP2)} avoids outsourcing pricing and has only one generated
+column family, but the outsourcing tariff must have a finite master
+representation, such as
+\eqref{eq:tariff-objective}--\eqref{eq:tariff-domains}. The two formulations
+therefore trade a more general but columnized outsourcing side against a richer
+explicit master. Their internal columns and internal pricing problem are
+identical.

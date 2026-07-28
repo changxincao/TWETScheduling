@@ -501,20 +501,48 @@ public class LP {
 	}
 
 	public void addCuts(List<Integer> cutIds) {
+		boolean changed = false;
 		for (int id : cutIds) {
 			Integer value = Integer.valueOf(id);
-			if (!activeCutIds.contains(value)) {
-				activeCutIds.add(value);
+			if (activeCutIds.contains(value)) {
+				continue;
 			}
+			if (cplex != null && objective != null) {
+				try {
+					addSubsetRowCutToCurrentModel(id);
+				} catch (IloException ex) {
+					throw new IllegalStateException("Failed to add cut " + id + " to current RMP", ex);
+				}
+			}
+			activeCutIds.add(value);
+			changed = true;
+		}
+		if (changed) {
+			lastSolution = null;
+			clearPricingDualOverride();
 		}
 	}
 
 	public int removeCuts(List<Integer> cutIds) {
 		int removed = 0;
 		for (int id : cutIds) {
-			if (activeCutIds.remove(Integer.valueOf(id))) {
-				removed++;
+			Integer value = Integer.valueOf(id);
+			if (!activeCutIds.contains(value)) {
+				continue;
 			}
+			IloRange range = subsetRowCutRanges == null ? null : subsetRowCutRanges.get(value);
+			if (range != null) {
+				if (cplex != null) {
+					try {
+						cplex.remove(range);
+					} catch (IloException ex) {
+						throw new IllegalStateException("Failed to remove cut " + id + " from current RMP", ex);
+					}
+				}
+				subsetRowCutRanges.remove(value);
+			}
+			activeCutIds.remove(value);
+			removed++;
 		}
 		if (removed > 0) {
 			lastSolution = null;
@@ -995,22 +1023,35 @@ public class LP {
 
 	private void buildSubsetRowCutConstraints() throws IloException {
 		for (int cutId : activeCutIds) {
-			TWETCut cut = cutPool.getCut(cutId);
-			if (cut.getType() != TWETCutType.SUBSET_ROW) {
-				continue;
-			}
-			IloLinearNumExpr expr = cplex.linearNumExpr();
-			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
-				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
-				double coefficient = subsetRowCoefficient(cutId, column.getId(), column, cut);
-				if (coefficient > 0.0) {
-					expr.addTerm(coefficient, lambdaVars[idx]);
-				}
-			}
-			// 2026-06-14: 普通 SRI 仍是 0/1 系数；limited-memory SRI 可能产生更大整数系数。
-			IloRange range = cplex.addLe(expr, cut.getRhs(), "subsetRow_" + cutId);
-			subsetRowCutRanges.put(Integer.valueOf(cutId), range);
+			addSubsetRowCutToCurrentModel(cutId);
 		}
+	}
+
+	/**
+	 * 向当前 RMP 增量加入一条 SRI。已有列的系数在这里一次性写入；后续新列由
+	 * {@link #addColumnToCurrentModel(int)} 补上该行系数，避免 cut loop 重建整个模型。
+	 */
+	private void addSubsetRowCutToCurrentModel(int cutId) throws IloException {
+		Integer key = Integer.valueOf(cutId);
+		if (subsetRowCutRanges.containsKey(key)) {
+			return;
+		}
+		TWETCut cut = cutPool.getCut(cutId);
+		if (cut.getType() != TWETCutType.SUBSET_ROW) {
+			return;
+		}
+		IloLinearNumExpr expr = cplex.linearNumExpr();
+		for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
+			int columnId = restrictedColumnIds.get(idx).intValue();
+			TWETColumn column = pool.getColumn(columnId);
+			int coefficient = subsetRowCoefficient(cutId, columnId, column, cut);
+			if (coefficient > 0) {
+				expr.addTerm(coefficient, lambdaVars[idx]);
+			}
+		}
+		// 普通 SRI 是 0/1 系数；limited-memory SRI 允许更大的整数系数。
+		IloRange range = cplex.addLe(expr, cut.getRhs(), "subsetRow_" + cutId);
+		subsetRowCutRanges.put(key, range);
 	}
 
 	private int subsetRowCoefficient(int cutId, int columnId, TWETColumn column, TWETCut cut) {

@@ -137,7 +137,7 @@ public class PC {
 				if (removed > 0) {
 					traceSink.onCutCall(lp.getNode(), "SubsetRowCutInactiveRemoval", true, -removed,
 							"removed inactive rank-1 cuts with zero pricing dual", lp.getCutPool().size(), 0L);
-					solution = solveRelaxationTimed(lp, "after_inactive_cut_removal");
+					solution = resolveCurrentModelTimed(lp, "after_inactive_cut_removal");
 					if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 						return solution;
 					}
@@ -214,7 +214,7 @@ public class PC {
 			}
 			lp.removeCuts(removedCutIds);
 			lp.addCuts(newCutIds);
-			solution = solveRelaxationTimed(lp, "after_cut");
+			solution = resolveCurrentModelTimed(lp, "after_cut");
 			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return solution;
 			}

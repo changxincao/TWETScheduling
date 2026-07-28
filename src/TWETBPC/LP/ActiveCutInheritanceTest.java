@@ -1,11 +1,15 @@
 package TWETBPC.LP;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 
 import Basic.Data;
+import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
+import TWETBPC.Model.TWETMasterSolution;
+import TWETBPC.Model.TWETMasterStatus;
 import TWETBPC.TWETBPCConfig;
 
 /**
@@ -21,9 +25,35 @@ public final class ActiveCutInheritanceTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		Pool pool = new Pool(data);
 		CutPool cutPool = new CutPool();
-		Node parent = new Node(data, Collections.<Integer>emptyList(), Collections.<Integer>emptyList(), 0.0);
+
+		ArrayList<Integer> fullSequence = new ArrayList<Integer>(data.n);
+		for (int job = 1; job <= data.n; job++) {
+			fullSequence.add(Integer.valueOf(job));
+		}
+		int seedColumnId = pool.addOrImproveColumn(fullSequence, 100.0, ColumnSource.MANUAL, true).columnId;
+		Node parent = new Node(data, Collections.singletonList(Integer.valueOf(seedColumnId)),
+				Collections.singletonList(Integer.valueOf(seedColumnId)), 0.0);
 		LP lp = new LP(data, pool, cutPool, config, new OutsourcingPool(data));
 		lp.construct(parent, parent.seedColumnIds);
+		TWETMasterSolution initial = lp.solveRelaxation();
+		if (initial.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new AssertionError("Initial RMP should be feasible: " + initial.getMessage());
+		}
+
+		// 三个任务均在唯一列中，标准 SRI 系数为 floor(3/2)=1；rhs=0 会阻断该列。
+		int blockingCut = cutPool.addCut(new TWETCut(-1, TWETCutType.SUBSET_ROW,
+				Arrays.asList(Integer.valueOf(1), Integer.valueOf(2), Integer.valueOf(3)), 0.0,
+				"incremental-blocking"));
+		lp.addCuts(Collections.singletonList(Integer.valueOf(blockingCut)));
+		TWETMasterSolution blocked = lp.resolveCurrentModel();
+		if (blocked.getStatus() != TWETMasterStatus.INFEASIBLE) {
+			throw new AssertionError("Incrementally added SRI was not present in the live RMP");
+		}
+		lp.removeCuts(Collections.singletonList(Integer.valueOf(blockingCut)));
+		TWETMasterSolution restored = lp.resolveCurrentModel();
+		if (restored.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new AssertionError("RMP did not recover after incremental SRI removal: " + restored.getMessage());
+		}
 
 		int keptCut = cutPool.addCut(
 				new TWETCut(-1, TWETCutType.SUBSET_ROW, Arrays.asList(Integer.valueOf(1)), 0.0, "kept"));
@@ -47,6 +77,8 @@ public final class ActiveCutInheritanceTest {
 		if (!childLp.getActiveCutIds().equals(Collections.singletonList(Integer.valueOf(keptCut)))) {
 			throw new AssertionError("Inherited cut was not restored when the child RMP was constructed");
 		}
+		lp.closeModel();
+		childLp.closeModel();
 		System.out.println("ActiveCutInheritanceTest passed");
 	}
 }

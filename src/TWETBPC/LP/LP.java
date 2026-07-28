@@ -92,6 +92,20 @@ public class LP {
 	/** Pricing dual components multiplied by the right-hand sides of their master rows. */
 	private double pricingDualRhsObjective;
 	private PricingDualSnapshot pricingDualOverride;
+	/** 2026-07-28: 仅在诊断开关开启时记录 RMP 建模、求解和结果读取的真实耗时。 */
+	private boolean masterLpPhaseTimingEnabled;
+	private boolean masterLpPhaseTimingRecorded;
+	private boolean masterLpPhaseTimingRebuild;
+	private long masterLpPhaseTotalNanos;
+	private long masterLpPhaseBuildNanos;
+	private long masterLpPhaseModelInitNanos;
+	private long masterLpPhaseVariablesObjectiveNanos;
+	private long masterLpPhaseCoverageNanos;
+	private long masterLpPhaseBranchRowsNanos;
+	private long masterLpPhaseCutRowsNanos;
+	private long masterLpPhaseRepairRowsNanos;
+	private long masterLpPhaseSolveNanos;
+	private long masterLpPhaseExtractNanos;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
 		this(data, pool, cutPool, new TWETBPCConfig(), new OutsourcingPool(data));
@@ -498,11 +512,67 @@ public class LP {
 		return removed;
 	}
 
+	private long beginMasterLpPhaseTiming(boolean rebuild) {
+		masterLpPhaseTimingEnabled = Boolean.getBoolean("twet.bpc.masterLpPhaseTiming");
+		masterLpPhaseTimingRecorded = false;
+		masterLpPhaseTimingRebuild = rebuild;
+		masterLpPhaseTotalNanos = 0L;
+		masterLpPhaseBuildNanos = 0L;
+		masterLpPhaseModelInitNanos = 0L;
+		masterLpPhaseVariablesObjectiveNanos = 0L;
+		masterLpPhaseCoverageNanos = 0L;
+		masterLpPhaseBranchRowsNanos = 0L;
+		masterLpPhaseCutRowsNanos = 0L;
+		masterLpPhaseRepairRowsNanos = 0L;
+		masterLpPhaseSolveNanos = 0L;
+		masterLpPhaseExtractNanos = 0L;
+		return masterLpPhaseTimingEnabled ? System.nanoTime() : 0L;
+	}
+
+	private long masterLpTimingStart() {
+		return masterLpPhaseTimingEnabled ? System.nanoTime() : 0L;
+	}
+
+	private long masterLpTimingElapsed(long startNanos) {
+		return masterLpPhaseTimingEnabled ? System.nanoTime() - startNanos : 0L;
+	}
+
+	private void finishMasterLpPhaseTiming(long totalStartNanos) {
+		if (masterLpPhaseTimingEnabled) {
+			masterLpPhaseTotalNanos = System.nanoTime() - totalStartNanos;
+			masterLpPhaseTimingRecorded = true;
+		}
+	}
+
+	/**
+	 * 返回最近一次 RMP 调用的分段计时。只在显式诊断开关开启时生成字符串，
+	 * 避免常规求解承担格式化和日志分配开销。
+	 */
+	String masterLpPhaseTimingSummary(String phase, long outerElapsedNanos) {
+		if (!masterLpPhaseTimingRecorded) {
+			return null;
+		}
+		long accountedNanos = masterLpPhaseBuildNanos + masterLpPhaseSolveNanos + masterLpPhaseExtractNanos;
+		long otherNanos = Math.max(0L, masterLpPhaseTotalNanos - accountedNanos);
+		return String.format(java.util.Locale.US,
+				"phase=%s mode=%s outerMs=%.3f totalMs=%.3f buildMs=%.3f modelInitMs=%.3f "
+						+ "variablesObjectiveMs=%.3f coverageMs=%.3f branchRowsMs=%.3f cutRowsMs=%.3f "
+						+ "repairRowsMs=%.3f solveMs=%.3f extractMs=%.3f otherMs=%.3f",
+				phase, masterLpPhaseTimingRebuild ? "rebuild" : "resolve", outerElapsedNanos / 1.0e6,
+				masterLpPhaseTotalNanos / 1.0e6, masterLpPhaseBuildNanos / 1.0e6,
+				masterLpPhaseModelInitNanos / 1.0e6, masterLpPhaseVariablesObjectiveNanos / 1.0e6,
+				masterLpPhaseCoverageNanos / 1.0e6, masterLpPhaseBranchRowsNanos / 1.0e6,
+				masterLpPhaseCutRowsNanos / 1.0e6, masterLpPhaseRepairRowsNanos / 1.0e6,
+				masterLpPhaseSolveNanos / 1.0e6, masterLpPhaseExtractNanos / 1.0e6, otherNanos / 1.0e6);
+	}
+
 	public TWETMasterSolution solveRelaxation() {
 		clearPricingDualOverride();
+		long totalStartNanos = beginMasterLpPhaseTiming(true);
 		if (node == null) {
 			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
 					false, "Node not constructed");
+			finishMasterLpPhaseTiming(totalStartNanos);
 			return lastSolution;
 		}
 
@@ -515,6 +585,8 @@ public class LP {
 			lastSolution = new TWETMasterSolution(TWETMasterStatus.NOT_SOLVED, new LinkedHashMap<Integer, Double>(), 0.0,
 					false, "Restricted master error: " + ex.getMessage());
 			return lastSolution;
+		} finally {
+			finishMasterLpPhaseTiming(totalStartNanos);
 		}
 	}
 
@@ -523,6 +595,7 @@ public class LP {
 		if (cplex == null) {
 			return solveRelaxation();
 		}
+		long totalStartNanos = beginMasterLpPhaseTiming(false);
 		try {
 			return solveCurrentModel("Restricted master LP resolved");
 		} catch (IloException ex) {
@@ -530,6 +603,8 @@ public class LP {
 			lastSolution = new TWETMasterSolution(TWETMasterStatus.NOT_SOLVED, new LinkedHashMap<Integer, Double>(), 0.0,
 					false, "Restricted master resolve error: " + ex.getMessage());
 			return lastSolution;
+		} finally {
+			finishMasterLpPhaseTiming(totalStartNanos);
 		}
 	}
 
@@ -541,7 +616,14 @@ public class LP {
 	}
 
 	private TWETMasterSolution solveCurrentModel(String successMessage) throws IloException {
-		boolean solved = cplex.solve();
+		long solveStartNanos = masterLpTimingStart();
+		boolean solved;
+		try {
+			solved = cplex.solve();
+		} finally {
+			masterLpPhaseSolveNanos += masterLpTimingElapsed(solveStartNanos);
+		}
+		long extractStartNanos = masterLpTimingStart();
 		if (!solved) {
 			clearDuals();
 			// 2026-07-23: 只有 CPLEX 明确证明 infeasible 才能关闭节点；异常和未知状态必须向上传播。
@@ -550,6 +632,7 @@ public class LP {
 					? TWETMasterStatus.INFEASIBLE : TWETMasterStatus.NOT_SOLVED;
 			lastSolution = new TWETMasterSolution(status, new LinkedHashMap<Integer, Double>(), 0.0,
 					false, "Restricted master not solved: " + cplexStatus);
+			masterLpPhaseExtractNanos += masterLpTimingElapsed(extractStartNanos);
 			return lastSolution;
 		}
 
@@ -562,10 +645,13 @@ public class LP {
 				: successMessage;
 		lastSolution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues, outsourcingValues,
 				segmentValues, cplex.getObjValue(), integer, message);
+		masterLpPhaseExtractNanos += masterLpTimingElapsed(extractStartNanos);
 		return lastSolution;
 	}
 
 	private void buildModel() throws IloException {
+		long buildStartNanos = masterLpTimingStart();
+		long phaseStartNanos = buildStartNanos;
 		if (cplex != null) {
 			cplex.end();
 		}
@@ -590,18 +676,32 @@ public class LP {
 		activeSubsetRowPricingDuals = new ArrayList<Double>();
 		outsourcingTariffSegments = isColumnizedOutsourcing() ? new ArrayList<TariffSegment>()
 				: collectOutsourcingTariffSegments();
+		masterLpPhaseModelInitNanos += masterLpTimingElapsed(phaseStartNanos);
 
+		phaseStartNanos = masterLpTimingStart();
 		buildVariables();
 		buildObjective();
+		masterLpPhaseVariablesObjectiveNanos += masterLpTimingElapsed(phaseStartNanos);
+
+		phaseStartNanos = masterLpTimingStart();
 		buildCoverageConstraints();
 		buildMachineConstraint();
+		masterLpPhaseCoverageNanos += masterLpTimingElapsed(phaseStartNanos);
+
+		phaseStartNanos = masterLpTimingStart();
 		buildOutsourcingMembershipBranchConstraints();
 		buildArcBranchConstraints();
 		buildAdjacencyBranchConstraints();
+		masterLpPhaseBranchRowsNanos += masterLpTimingElapsed(phaseStartNanos);
+
+		phaseStartNanos = masterLpTimingStart();
 		if (!isColumnizedOutsourcing()) {
 			buildSubsetRowCutConstraints();
 			buildOutsourcingTariffConstraints();
 		}
+		masterLpPhaseCutRowsNanos += masterLpTimingElapsed(phaseStartNanos);
+
+		phaseStartNanos = masterLpTimingStart();
 		if (feasibilityRepairMode) {
 			if (allRowFeasibilityRepairMode) {
 				addAllRowFeasibilitySlacks();
@@ -609,6 +709,8 @@ public class LP {
 				addFeasibilitySlacks();
 			}
 		}
+		masterLpPhaseRepairRowsNanos += masterLpTimingElapsed(phaseStartNanos);
+		masterLpPhaseBuildNanos += masterLpTimingElapsed(buildStartNanos);
 	}
 
 	/** 配置 LP 算法；Barrier 保留 CPLEX 默认 crossover，正式 pricing 仍可读取 dual。 */

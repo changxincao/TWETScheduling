@@ -1629,6 +1629,7 @@ public class PC {
 		traceSink.onMasterLpSolve(lp.getNode(), phase, elapsed);
 		traceSink.onMasterLpSolution(lp.getNode(), phase, solution, lp.getRestrictedColumnIds().size(),
 				totalPoolSize(lp), elapsed);
+		traceMasterLpPhaseTiming(lp, phase, elapsed);
 		return solution;
 	}
 
@@ -1641,7 +1642,15 @@ public class PC {
 		traceSink.onMasterLpSolve(lp.getNode(), phase, elapsed);
 		traceSink.onMasterLpSolution(lp.getNode(), phase, solution, lp.getRestrictedColumnIds().size(),
 				totalPoolSize(lp), elapsed);
+		traceMasterLpPhaseTiming(lp, phase, elapsed);
 		return solution;
+	}
+
+	private void traceMasterLpPhaseTiming(LP lp, String phase, long elapsedNanos) {
+		String summary = lp.masterLpPhaseTimingSummary(phase, elapsedNanos);
+		if (summary != null) {
+			traceSink.onPricingDiagnostic(lp.getNode(), "MasterLpPhaseTiming", summary);
+		}
 	}
 
 	private void resetFollowingPricingEngines(int startIndex) {

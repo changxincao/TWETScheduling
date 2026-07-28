@@ -21,6 +21,7 @@ import TWETBPC.Model.TWETCutType;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 import TWETBPC.Model.TWETOutsourcingColumn;
+import TWETBPC.Util.PackedBitSet;
 import ilog.concert.IloColumn;
 import ilog.concert.IloException;
 import ilog.concert.IloLinearNumExpr;
@@ -46,6 +47,7 @@ public class LP {
 	private final TWETBPCConfig config;
 	private final OutsourcingPool outsourcingPool;
 	private final boolean shareColumnPattern;
+	private final boolean buildCoverageRowsByColumn;
 	private Node node;
 	private ArrayList<Integer> restrictedColumnIds;
 	private HashSet<Integer> restrictedColumnIdSet;
@@ -119,6 +121,8 @@ public class LP {
 		this.config = config;
 		this.outsourcingPool = outsourcingPool;
 		this.shareColumnPattern = Boolean.parseBoolean(System.getProperty("twet.bpc.shareColumnPattern", "true"));
+		this.buildCoverageRowsByColumn =
+				Boolean.parseBoolean(System.getProperty("twet.bpc.buildCoverageRowsByColumn", "true"));
 		replaceRestrictedColumnIds(Collections.<Integer>emptyList());
 		replaceRestrictedOutsourcingColumnIds(Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>();
@@ -794,6 +798,15 @@ public class LP {
 	}
 
 	private void buildCoverageConstraints() throws IloException {
+		if (buildCoverageRowsByColumn) {
+			buildCoverageConstraintsByColumn();
+			return;
+		}
+		buildCoverageConstraintsByJob();
+	}
+
+	/** 保留原始逐 job 扫描路径，供严格 A/B 使用。 */
+	private void buildCoverageConstraintsByJob() throws IloException {
 		coverRanges = new IloRange[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
@@ -819,6 +832,41 @@ public class LP {
 				// 2026-05-24: BPC pricing 后续按 set covering 对偶语义处理任务覆盖行。
 				// 在 setup time/cost 满足三角不等式的设定下，重复服务任务不会带来有利的列结构；
 				// 覆盖行放宽为 >= 后，job dual 非负，动态 profitable window 可退化为 job-level H_j。
+				coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
+			}
+		}
+	}
+
+	/**
+	 * 2026-07-28: 每条内部列只读取一次，并把非零覆盖系数分发到各 job 行。
+	 * 每行的 term 仍按 restricted column 顺序加入，模型系数和输入顺序与逐 job 路径一致。
+	 */
+	private void buildCoverageConstraintsByColumn() throws IloException {
+		coverRanges = new IloRange[data.n + 1];
+		IloLinearNumExpr[] expressions = new IloLinearNumExpr[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			expressions[job] = cplex.linearNumExpr();
+		}
+		for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
+			TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
+			PackedBitSet jobs = column.getJobs();
+			for (int job = jobs.nextSetBit(1); job >= 1 && job <= data.n; job = jobs.nextSetBit(job + 1)) {
+				expressions[job].addTerm(column.getJobVisitCount(job), lambdaVars[idx]);
+			}
+		}
+		for (int job = 1; job <= data.n; job++) {
+			IloLinearNumExpr expr = expressions[job];
+			if (isColumnizedOutsourcing()) {
+				for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
+					TWETOutsourcingColumn column =
+							outsourcingPool.getColumn(restrictedOutsourcingColumnIds.get(idx).intValue());
+					if (column.containsJob(job)) {
+						expr.addTerm(1.0, outsourceColumnVars[idx]);
+					}
+				}
+				coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
+			} else {
+				expr.addTerm(1.0, outsourceVars[job]);
 				coverRanges[job] = cplex.addGe(expr, 1.0, "cover_" + job);
 			}
 		}

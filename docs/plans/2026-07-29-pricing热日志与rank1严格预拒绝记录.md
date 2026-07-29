@@ -145,3 +145,25 @@ exact CG。恢复已验证的 root preprocessing 和 heuristic pricing 后，同
 `test-results/bpc/diag-wet021-ng-isolation-20260729a`、
 `test-results/bpc/ab-wet021-ng-precheck-after-bestroot-20260729a` 和
 `test-results/bpc/diag-wet021-bidir-precheck-after-20260729a`。
+
+## 2026-07-29 completion-bound 与启发式/ng-DSSR 剩余冗余复核
+
+本轮只做静态复核，不修改算法源码。首先否决再次实现 completion-bound transition-only U/R。该方案
+在 2026-07-11 已经实现并通过若干实例逐函数对拍，但 2026-07-12 构造出的 BigM 窗口反例证明它不
+严格等价：transition 的 `u/r` 可能仍有正定义域，而加入 job penalty 后完整 `f/b` 只落在 BigM
+区域，并在第二次方向 normalize 后变为空。完整 candidate 的 job penalty add 和第二次 normalize
+因此同时承担 eligibility 判断，不能当作无效计算删除。历史约 23.2% 的 U/R rebuild 时间是真实成本，
+但其中包含保证界口径正确所需的工作。
+
+其余四项成立。`HeuristicPricingEngine` 的 `singletonProfileCache`、restricted-window
+`localSingletonProfiles`、context getter 和本地 `SegmentProfile` 在项目中没有调用者，属于确定死
+计算；删除后可避免每次 restricted-window context 构造时的 `2*n` 次 PWLF copy 和 prefix/suffix
+minimize。默认关闭 non-best move 时，`outputSignatures` 也没有消费者，整个 HashSet 构造及
+`negativeCandidates` 全池扫描可移入 `nonBestCandidates != null` 分支。
+
+ng-DSSR 的 forward-to-sink 可在 `maintainRouteVisitProfile()` 为真时直接把
+`label.routeElementary` 作为 hint 传给 `tryGenerateColumn()`；该条件已经严格限制为 no-SRI、
+启用 visit profile 且 `n<=128`，与 join 使用相同的两段 long 状态，其他情形继续传 null 并扫描
+sequence。join group 已按固定 `(lastJob, backward.jid)` 计算 delay，而 `tryJoin()` 又按完全相同
+公式重算；可把 delay 与 `joinFixedReducedCost` 一起传入，避免每个存活 pair 的重复数组读取和加法。
+后二者严格等价但属于较小常数优化，优先级低于两项启发式死计算清理。

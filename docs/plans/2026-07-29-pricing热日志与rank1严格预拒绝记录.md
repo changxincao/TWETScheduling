@@ -69,3 +69,19 @@ rank-1、ng-DSSR join 和 source-aware dominance 在诊断开关关闭与开启�
 最终 173 个主线 Java 文件编译通过，time-indexed、strong Phase-I、ng-DSSR 边界、source-aware dominance、
 外包正值列缓存和 SRI posting 回归通过。一次测试命令因包名写错未找到类，改用正确类名
 `TWETBPC.LP.SubsetRowColumnPostingIndexTest` 后通过，不属于代码失败。
+
+## 提交后正确性复核
+
+再次沿生命周期检查后确认，`restrictedColumnIds` 与 `lambdaVars` 在完整建模时按同一顺序创建，增量加列时
+只对 membership set 新接受的 ID 同步追加变量，筛列后则同时替换 ID 列表并重建模型。因此
+`cplex.getValues(lambdaVars)` 的返回下标与原逐变量读取的 column ID 映射严格一致；空变量数组继续由显式
+分支处理。当前所有 restricted ID getter 调用者均为只读，没有外部修改列表破坏该不变量。
+
+同时发现第一次 trace 配额修正只覆盖了前后向扩展入口，join、候选列和 partial-trim helper 在配额耗尽后仍
+可能通过 `targetTraceSequence` 恢复序列。本次将所有纯 trace 判断统一接到 `isTargetTraceActive()`：最后一个
+额度仍正常写入，之后不再恢复 join/column/trim 序列或扩展 watched-label 链。显式
+`targetTraceProtectTarget` 的 trim 保护判断保持独立，不因日志额度耗尽而改变。正式求解在未设置 trace 属性时
+始终走短路分支，算法语义不变。
+
+173 个主线 Java 文件重新编译通过；restricted-column membership、time-indexed、strong Phase-I、
+ng-DSSR 边界、source-aware dominance、SRI posting 和 active-cut inheritance 七项回归通过。

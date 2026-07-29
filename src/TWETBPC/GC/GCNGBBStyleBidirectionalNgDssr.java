@@ -2050,7 +2050,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 			@Override
 			public void onTrim(Label trimmed, Label dominator, TrimResult result, Direction direction) {
-				traceTargetPartialListTrim(trimmed, dominator, result, direction);
+				if (isTargetTraceActive()) {
+					traceTargetPartialListTrim(trimmed, dominator, result, direction);
+				}
 			}
 		});
 	}
@@ -4027,7 +4029,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		forwardSinkLabelsVisited++;
 		double reducedCost = label.minReducedCost - lp.getArcDual(label.jid, sink);
 		observeRelaxedReducedCost(reducedCost);
-		if (isWatchedLabel(label)) {
+		if (isTargetTraceActive() && isWatchedLabel(label)) {
 			traceTarget("WATCH_F_SINK_CHECK #" + labelId(label)
 					+ " seq=" + recoverForwardSequence(label)
 					+ " rc=" + reducedCost
@@ -7448,15 +7450,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean isTargetSequence(ArrayList<Integer> sequence) {
-		return targetTraceSequence != null && targetTraceSequence.equals(sequence);
+		return isTargetTraceActive() && targetTraceSequence.equals(sequence);
 	}
 
 	private boolean isTargetSignature(SequenceSignature signature) {
-		return targetTraceSequence != null && signature.equals(new SequenceSignature(targetTraceSequence));
+		return isTargetTraceActive() && signature.equals(new SequenceSignature(targetTraceSequence));
 	}
 
 	private boolean isTargetJoinPair(ForwardLabel forward, BackwardLabel backward) {
-		if (targetTraceSequence == null) {
+		if (!isTargetTraceActive()) {
 			return false;
 		}
 		ArrayList<Integer> sequence = recoverJoinSequence(forward, backward);
@@ -7464,7 +7466,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void traceTargetForward(String stage, ForwardLabel label, LP lp) {
-		if (targetTraceSequence == null || label == null) {
+		if (!isTargetTraceActive() || label == null) {
 			return;
 		}
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
@@ -7497,7 +7499,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void traceTargetBackward(String stage, BackwardLabel label) {
-		if (targetTraceSequence == null || label == null || label.isSinkRoot) {
+		if (!isTargetTraceActive() || label == null || label.isSinkRoot) {
 			return;
 		}
 		ArrayList<Integer> sequence = recoverBackwardSequence(label);
@@ -7511,7 +7513,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void traceTargetPartialListTrim(Label trimmed, Label dominator, TrimResult result, Direction direction) {
-		if (targetTraceSequence == null || trimmed == null || dominator == null) {
+		if (!isTargetTraceActive() || trimmed == null || dominator == null) {
 			return;
 		}
 		ArrayList<Integer> trimmedSequence = recoverAnySequence(trimmed);
@@ -7570,7 +7572,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private void watchTargetDominator(Label dominator, Direction direction, ArrayList<Integer> dominatorSequence,
 			ArrayList<Integer> trimmedSequence) {
-		if (!targetTraceDominatorFollow || dominator == null || targetTraceWatchedLabelIds == null) {
+		if (!isTargetTraceActive() || !targetTraceDominatorFollow || dominator == null
+				|| targetTraceWatchedLabelIds == null) {
 			return;
 		}
 		int id = labelId(dominator);
@@ -7640,7 +7643,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void traceWatchedChild(String stage, FunctionLabel parent, FunctionLabel child, int extensionJob) {
-		if (!targetTraceDominatorFollow || !isWatchedLabel(parent) || child == null) {
+		if (!isTargetTraceActive() || !targetTraceDominatorFollow || !isWatchedLabel(parent) || child == null) {
 			return;
 		}
 		watchLabel(child);
@@ -7655,7 +7658,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void traceWatchedLabel(String stage, FunctionLabel label) {
-		if (!targetTraceDominatorFollow || !isWatchedLabel(label)) {
+		if (!isTargetTraceActive() || !targetTraceDominatorFollow || !isWatchedLabel(label)) {
 			return;
 		}
 		traceTarget(stage

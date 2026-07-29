@@ -242,13 +242,20 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private TWETColumn materializeSelectedCandidate(Candidate candidate) {
-			double cost = candidate.cost;
+			double cost;
 			if (phaseOneObjective) {
 				// 与 no-cut 图一致，只对最终 top-K 计算并保存真实目标成本。
 				cost = evaluator.evaluate(candidate.sequence);
 				if (Utility.isBigMValue(cost)) {
 					return null;
 				}
+			} else if (graphWindow.dualWindow) {
+				// dual window 候选已按真实函数回刷，直接复用候选阶段保存的成本。
+				cost = candidate.cost;
+			} else {
+				// 2026-07-29: 普通 rank-1 候选的排序和证书只依赖 reduced cost，
+				// 因此仅为最终返回的 top-K 恢复目标成本，避免重复扫描 sequence 与 active cuts。
+				cost = objectiveCostFromReducedCost(candidate.sequence, candidate.reducedCost);
 			}
 			// 2026-07-29: 去重和 top-K 只需要 sequence/signature；重对象延迟到最终入选后构造。
 			ColumnPattern pattern = new ColumnPattern(candidate.sequence, n);
@@ -657,9 +664,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (PRICING_DIAGNOSTICS && hasRepeatedJob(sequence)) {
 				repeatedJobCandidates++;
 			}
-			double cost;
-			if (graphWindow.dualWindow) {
-				// dual window 下最终必须按真实函数重刷，无需先做一遍马上会被覆盖的 cut 成本反推。
+			double cost = Double.NaN;
+			if (!phaseOneObjective && graphWindow.dualWindow) {
+				// dual window 下最终必须按真实函数重刷；该真实成本会由最终列直接复用。
 				cost = evaluator.evaluate(sequence);
 				if (Utility.isBigMValue(cost)) {
 					return;
@@ -668,8 +675,6 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				if (Utility.compareGe(reducedCost, -RC_TOLERANCE)) {
 					return;
 				}
-			} else {
-				cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			}
 			SequenceSignature signature = new SequenceSignature(sequence);
 			rememberCandidate(signature, sequence, cost, reducedCost);
@@ -1603,6 +1608,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		final int id;
 		final SequenceSignature signature;
 		final ArrayList<Integer> sequence;
+		// 非 dual-window 候选延迟恢复成本，此时保存 NaN；最终物化前不会读取。
 		final double cost;
 		final double reducedCost;
 

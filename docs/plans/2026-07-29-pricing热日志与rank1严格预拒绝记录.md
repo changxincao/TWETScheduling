@@ -116,3 +116,7 @@ rank-1 候选池现在只立即保存恢复出的 sequence、`SequenceSignature`
 40-2 no-cut time-indexed root 的 before/after 均得到 `bound=22487.647059`、211 次 pricing、45113 条列和 `valid=true`，9 条关键算法轨迹逐行零差异。普通 exact pricing 由 `2.678398s` 降至 `2.052505s`，约减少 23.4%；root 由 `9.091428s` 降至 `7.495770s`，约减少 17.5%；总 solve 由 `23.048539s` 降至 `21.510709s`，约减少 6.7%。173 个主线 Java 文件完整编译通过，time-indexed、Phase-I/multiword rank-1、restricted membership、active-cut inheritance、column sharing、SRI coefficient 和 posting 七项回归通过。
 
 提交后再次复核确认：候选 ID 仍只在同签名候选真正进入或替换 active map 时递增，排序 tie-break 不变；三条 sequence 来源均为回溯新建列表，入池后无写入；普通、dual-window、Phase-I、pre-heuristic 和 stabilization oracle 分支均保留原成本与过滤顺序。`TimeIndexedGraphOptimizationTest` 和 `StrongBranchingPhaseOnePricingTest` 再次通过，未发现错误。
+
+进一步把非 dual-window 的目标成本恢复推迟到最终返回候选。rank-1 候选阶段现在只保存 sequence、signature 和 reduced cost；Phase-I 最终调用 evaluator，普通 rank-1 最终才调用 `objectiveCostFromReducedCost()`，dual-window 仍在候选阶段按真实函数回刷并保存成本。普通 no-cut 引擎同样只为最终 top-K 反推目标成本，dual-window 诊断与回刷路径不变。该调整不改变候选判重、heap、排序、certificate 或返回顺序；成本恢复函数只读取本轮固定 dual、active cuts 和不可变 sequence，没有状态副作用。
+
+40-2 rank-1 root 的修改前后均为 `bound=22527.007009`、275 次 pricing、46609 条列、235 条 cut，正值列数量和各轮 cut 轨迹一致；rank-1 exact 由 `13.875196s` 降至 `12.055843s`，约减少 13.1%。普通 no-cut root 仍为 `bound=22487.647059`、211 次 pricing、45113 条列，语义轨迹一致；其目标成本恢复本身不含 SRI coefficient 扫描，单次总耗时较小，本轮 wall time 波动不能归因为稳定收益。173 个主线文件编译通过，七项既有回归及 `DualStabilizationInPointTest` 通过。

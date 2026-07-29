@@ -446,7 +446,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				return checked;
 			}
 			if (!graphWindow.dualWindow) {
-				TWETColumn column = new TWETColumn(-1, candidate.sequence, n, candidate.cost, candidate.source, false);
+				// 2026-07-29: 普通候选只在最终返回时反推目标成本。
+				double cost = objectiveCostFromReducedCost(candidate.sequence, candidate.reducedCost);
+				TWETColumn column = new TWETColumn(-1, candidate.sequence, n, cost, candidate.source, false);
 				if (oracleCandidate) {
 					oracleColumn = column;
 				}
@@ -830,8 +832,10 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (existing != null && Utility.compareLe(existing.reducedCost, reducedCost)) {
 				return;
 			}
-			// 2026-07-29: 只有真正进入或替换 active top-K 的候选才反推图内目标成本。
-			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
+			// dual window 诊断和真实回刷仍需要候选阶段的图内成本；其余模式延迟到最终 top-K。
+			double cost = !phaseOneObjective && graphWindow.dualWindow
+					? objectiveCostFromReducedCost(sequence, reducedCost)
+					: Double.NaN;
 			Candidate candidate = new Candidate(nextCandidateId++, signature, sequence, cost, source, reducedCost);
 			candidateBySignature.put(signature, candidate);
 			candidateHeap.add(candidate);
@@ -1438,6 +1442,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		final int id;
 		final SequenceSignature signature;
 		final ArrayList<Integer> sequence;
+		// 非 dual-window 候选延迟恢复成本，此时保存 NaN；最终物化前不会读取。
 		final double cost;
 		final ColumnSource source;
 		final double reducedCost;

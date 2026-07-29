@@ -114,3 +114,5 @@ rank-1 候选池现在只立即保存恢复出的 sequence、`SequenceSignature`
 普通 time-indexed 候选延迟物化的独立 A/B 已完成并保留。sequence 仍在候选入口恢复，用于 pre-heuristic elementary 过滤和 `SequenceSignature`；active candidate 只保存 sequence、signature、图内成本、source 和 reduced cost，最终排序后才构造 `TWETColumn`。同签名旧候选不优于新值时，目标成本反推也一并跳过。dual-window recheck、Phase-I evaluator、best-candidate 诊断和 stabilization oracle 均改为读取轻量候选字段，原执行时点不变；dual-window oracle 若同时作为返回列，只物化一次。
 
 40-2 no-cut time-indexed root 的 before/after 均得到 `bound=22487.647059`、211 次 pricing、45113 条列和 `valid=true`，9 条关键算法轨迹逐行零差异。普通 exact pricing 由 `2.678398s` 降至 `2.052505s`，约减少 23.4%；root 由 `9.091428s` 降至 `7.495770s`，约减少 17.5%；总 solve 由 `23.048539s` 降至 `21.510709s`，约减少 6.7%。173 个主线 Java 文件完整编译通过，time-indexed、Phase-I/multiword rank-1、restricted membership、active-cut inheritance、column sharing、SRI coefficient 和 posting 七项回归通过。
+
+提交后再次复核确认：候选 ID 仍只在同签名候选真正进入或替换 active map 时递增，排序 tie-break 不变；三条 sequence 来源均为回溯新建列表，入池后无写入；普通、dual-window、Phase-I、pre-heuristic 和 stabilization oracle 分支均保留原成本与过滤顺序。`TimeIndexedGraphOptimizationTest` 和 `StrongBranchingPhaseOnePricingTest` 再次通过，未发现错误。

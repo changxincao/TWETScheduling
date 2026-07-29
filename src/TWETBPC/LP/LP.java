@@ -1,6 +1,7 @@
 package TWETBPC.LP;
 
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -51,6 +52,9 @@ public class LP {
 	private final boolean buildCoverageRowsByColumn;
 	private final boolean boundedReducedCostColumnSelection;
 	private final boolean restrictedColumnFilterTimingEnabled;
+	private final boolean subsetRowPostingEnabled;
+	private final boolean subsetRowBuildTimingEnabled;
+	private SubsetRowColumnPostingIndex subsetRowPostingIndex;
 	private Node node;
 	private ArrayList<Integer> restrictedColumnIds;
 	private HashSet<Integer> restrictedColumnIdSet;
@@ -134,6 +138,10 @@ public class LP {
 				Boolean.parseBoolean(System.getProperty("twet.bpc.boundedReducedCostColumnSelection", "true"));
 		this.restrictedColumnFilterTimingEnabled =
 				Boolean.parseBoolean(System.getProperty("twet.bpc.restrictedColumnFilterTiming", "false"));
+		this.subsetRowPostingEnabled =
+				Boolean.parseBoolean(System.getProperty("twet.bpc.subsetRowPosting", "true"));
+		this.subsetRowBuildTimingEnabled =
+				Boolean.parseBoolean(System.getProperty("twet.bpc.subsetRowBuildTiming", "false"));
 		replaceRestrictedColumnIds(Collections.<Integer>emptyList());
 		replaceRestrictedOutsourcingColumnIds(Collections.<Integer>emptyList());
 		this.activeCutIds = new ArrayList<Integer>();
@@ -218,6 +226,8 @@ public class LP {
 	private void replaceRestrictedColumnIds(List<Integer> columnIds) {
 		restrictedColumnIds = new ArrayList<Integer>(columnIds);
 		restrictedColumnIdSet = new HashSet<Integer>(columnIds);
+		// position posting 与 restricted 顺序绑定；筛列或切换 node 后必须按新顺序重建。
+		subsetRowPostingIndex = null;
 	}
 
 	private void replaceRestrictedOutsourcingColumnIds(List<Integer> columnIds) {
@@ -472,6 +482,7 @@ public class LP {
 		for (int id : columnIds) {
 			Integer value = Integer.valueOf(id);
 			if (restrictedColumnIdSet.add(value)) {
+				int position = restrictedColumnIds.size();
 				restrictedColumnIds.add(value);
 				added++;
 				if (addedVars != null) {
@@ -480,6 +491,9 @@ public class LP {
 					} catch (IloException ex) {
 						throw new IllegalStateException("Failed to add column " + id + " to current RMP", ex);
 					}
+				}
+				if (subsetRowPostingIndex != null) {
+					subsetRowPostingIndex.append(position, pool.getColumn(id));
 				}
 			}
 		}
@@ -514,6 +528,7 @@ public class LP {
 			retainedCutIds.addAll(cutIds);
 			cutPool.reclaimInactiveSubsetRowCoefficientPages(retainedCutIds);
 		}
+		SubsetRowBuildStats stats = subsetRowBuildTimingEnabled ? new SubsetRowBuildStats() : null;
 		boolean changed = false;
 		for (int id : cutIds) {
 			Integer value = Integer.valueOf(id);
@@ -522,7 +537,7 @@ public class LP {
 			}
 			if (cplex != null && objective != null) {
 				try {
-					addSubsetRowCutToCurrentModel(id);
+					addSubsetRowCutToCurrentModel(id, stats);
 				} catch (IloException ex) {
 					throw new IllegalStateException("Failed to add cut " + id + " to current RMP", ex);
 				}
@@ -530,6 +545,7 @@ public class LP {
 			activeCutIds.add(value);
 			changed = true;
 		}
+		traceSubsetRowBuild("add", stats);
 		if (changed) {
 			lastSolution = null;
 			clearPricingDualOverride();
@@ -537,6 +553,7 @@ public class LP {
 	}
 
 	public int removeCuts(List<Integer> cutIds) {
+		long startNanos = subsetRowBuildTimingEnabled ? System.nanoTime() : 0L;
 		int removed = 0;
 		for (int id : cutIds) {
 			Integer value = Integer.valueOf(id);
@@ -556,6 +573,11 @@ public class LP {
 			}
 			activeCutIds.remove(value);
 			removed++;
+		}
+		if (subsetRowBuildTimingEnabled && !cutIds.isEmpty()) {
+			System.out.println(String.format(java.util.Locale.US,
+					"[SriRowRemoveTiming] requested=%d removed=%d timeMs=%.3f",
+					cutIds.size(), removed, (System.nanoTime() - startNanos) / 1.0e6));
 		}
 		if (removed > 0) {
 			lastSolution = null;
@@ -669,6 +691,7 @@ public class LP {
 			cplex.end();
 			cplex = null;
 		}
+		subsetRowPostingIndex = null;
 		positiveOutsourcingColumnIds = Collections.emptySet();
 	}
 
@@ -730,6 +753,7 @@ public class LP {
 		adjacencyBranchRanges = new HashMap<Long, IloRange>();
 		outsourcingColumnCountRange = null;
 		subsetRowCutRanges = new HashMap<Integer, IloRange>();
+		subsetRowPostingIndex = null;
 		activeSubsetRowPricingCutIds = new ArrayList<Integer>();
 		activeSubsetRowPricingDuals = new ArrayList<Double>();
 		outsourcingTariffSegments = isColumnizedOutsourcing() ? new ArrayList<TariffSegment>()
@@ -1052,16 +1076,19 @@ public class LP {
 
 	private void buildSubsetRowCutConstraints() throws IloException {
 		cutPool.reclaimInactiveSubsetRowCoefficientPages(activeCutIds);
+		SubsetRowBuildStats stats = subsetRowBuildTimingEnabled ? new SubsetRowBuildStats() : null;
 		for (int cutId : activeCutIds) {
-			addSubsetRowCutToCurrentModel(cutId);
+			addSubsetRowCutToCurrentModel(cutId, stats);
 		}
+		traceSubsetRowBuild("rebuild", stats);
 	}
 
 	/**
 	 * 向当前 RMP 增量加入一条 SRI。已有列的系数在这里一次性写入；后续新列由
 	 * {@link #addColumnToCurrentModel(int)} 补上该行系数，避免 cut loop 重建整个模型。
 	 */
-	private void addSubsetRowCutToCurrentModel(int cutId) throws IloException {
+	private void addSubsetRowCutToCurrentModel(int cutId, SubsetRowBuildStats stats) throws IloException {
+		long totalStart = stats == null ? 0L : System.nanoTime();
 		Integer key = Integer.valueOf(cutId);
 		if (subsetRowCutRanges.containsKey(key)) {
 			return;
@@ -1070,28 +1097,99 @@ public class LP {
 		if (cut.getType() != TWETCutType.SUBSET_ROW) {
 			return;
 		}
+
+		BitSet candidatePositions = null;
+		if (subsetRowPostingEnabled) {
+			long postingStart = stats == null ? 0L : System.nanoTime();
+			ensureSubsetRowPostingIndex();
+			candidatePositions = subsetRowPostingIndex.candidatePositions(cut);
+			if (stats != null) {
+				stats.postingNanos += System.nanoTime() - postingStart;
+			}
+		}
+
 		IloLinearNumExpr expr = cplex.linearNumExpr();
-		for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
+		int fullColumnCount = restrictedColumnIds.size();
+		int candidateCount = candidatePositions == null ? fullColumnCount : candidatePositions.cardinality();
+		if (stats != null) {
+			stats.rows++;
+			stats.fullColumns += fullColumnCount;
+			stats.candidateColumns += candidateCount;
+		}
+		for (int idx = candidatePositions == null ? 0 : candidatePositions.nextSetBit(0);
+				idx >= 0 && idx < fullColumnCount;
+				idx = candidatePositions == null ? idx + 1 : candidatePositions.nextSetBit(idx + 1)) {
 			int columnId = restrictedColumnIds.get(idx).intValue();
 			TWETColumn column = pool.getColumn(columnId);
-			int coefficient = subsetRowCoefficient(cutId, columnId, column, cut);
+			long coefficientStart = stats == null ? 0L : System.nanoTime();
+			int coefficient = subsetRowCoefficient(cutId, columnId, column, cut, stats);
+			if (stats != null) {
+				stats.coefficientNanos += System.nanoTime() - coefficientStart;
+			}
 			if (coefficient > 0) {
+				long termStart = stats == null ? 0L : System.nanoTime();
 				expr.addTerm(coefficient, lambdaVars[idx]);
+				if (stats != null) {
+					stats.termNanos += System.nanoTime() - termStart;
+					stats.nonzeroTerms++;
+				}
 			}
 		}
 		// 普通 SRI 是 0/1 系数；limited-memory SRI 允许更大的整数系数。
+		long rangeStart = stats == null ? 0L : System.nanoTime();
 		IloRange range = cplex.addLe(expr, cut.getRhs(), "subsetRow_" + cutId);
+		if (stats != null) {
+			stats.rangeNanos += System.nanoTime() - rangeStart;
+			stats.totalNanos += System.nanoTime() - totalStart;
+		}
 		subsetRowCutRanges.put(key, range);
 	}
 
 	private int subsetRowCoefficient(int cutId, int columnId, TWETColumn column, TWETCut cut) {
+		return subsetRowCoefficient(cutId, columnId, column, cut, null);
+	}
+
+	private int subsetRowCoefficient(int cutId, int columnId, TWETColumn column, TWETCut cut,
+			SubsetRowBuildStats stats) {
 		int cached = cutPool.getSubsetRowCoefficient(cutId, columnId);
 		if (cached >= 0) {
+			if (stats != null) {
+				stats.cacheHits++;
+			}
 			return cached;
+		}
+		if (stats != null) {
+			stats.cacheMisses++;
 		}
 		int coefficient = SubsetRowCutEvaluator.coefficient(cut, column.getSequence(), data.n);
 		cutPool.cacheSubsetRowCoefficient(cutId, columnId, coefficient);
 		return coefficient;
+	}
+
+	private void ensureSubsetRowPostingIndex() {
+		if (subsetRowPostingIndex == null) {
+			subsetRowPostingIndex = new SubsetRowColumnPostingIndex(data.n);
+			subsetRowPostingIndex.rebuild(restrictedColumnIds, pool);
+		}
+		if (subsetRowPostingIndex.size() != restrictedColumnIds.size()) {
+			throw new IllegalStateException("SRI posting index is not aligned with restricted columns.");
+		}
+	}
+
+	private void traceSubsetRowBuild(String phase, SubsetRowBuildStats stats) {
+		if (!subsetRowBuildTimingEnabled || stats == null || stats.rows == 0) {
+			return;
+		}
+		double candidateRatio = stats.fullColumns == 0L ? 0.0
+				: (double) stats.candidateColumns / stats.fullColumns;
+		System.out.println(String.format(java.util.Locale.US,
+				"[SriRowBuildTiming] phase=%s posting=%s rows=%d full=%d candidates=%d ratio=%.6f "
+						+ "cacheHitMiss=%d/%d nonzero=%d postingMs=%.3f coefficientMs=%.3f "
+						+ "termMs=%.3f rangeMs=%.3f totalMs=%.3f",
+				phase, Boolean.toString(subsetRowPostingEnabled), stats.rows, stats.fullColumns,
+				stats.candidateColumns, candidateRatio, stats.cacheHits, stats.cacheMisses,
+				stats.nonzeroTerms, stats.postingNanos / 1.0e6, stats.coefficientNanos / 1.0e6,
+				stats.termNanos / 1.0e6, stats.rangeNanos / 1.0e6, stats.totalNanos / 1.0e6));
 	}
 
 	private void buildOutsourcingTariffConstraints() throws IloException {
@@ -1784,6 +1882,20 @@ public class LP {
 
 	private int decodeTo(long key) {
 		return (int) (key % (data.n + 2L));
+	}
+
+	private static final class SubsetRowBuildStats {
+		int rows;
+		long fullColumns;
+		long candidateColumns;
+		long cacheHits;
+		long cacheMisses;
+		long nonzeroTerms;
+		long postingNanos;
+		long coefficientNanos;
+		long termNanos;
+		long rangeNanos;
+		long totalNanos;
 	}
 
 	private static final class TariffSegment {

@@ -233,7 +233,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			Collections.sort(candidates, bestCandidateFirstComparator());
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 			for (int i = 0; i < candidates.size() && columns.size() < maxReturnedColumns(); i++) {
-				TWETColumn column = materializeSelectedCandidate(candidates.get(i).column);
+				TWETColumn column = materializeSelectedCandidate(candidates.get(i));
 				if (column != null) {
 					columns.add(column);
 				}
@@ -241,14 +241,18 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			return columns;
 		}
 
-		private TWETColumn materializeSelectedCandidate(TWETColumn column) {
-			if (!phaseOneObjective) {
-				return column;
+		private TWETColumn materializeSelectedCandidate(Candidate candidate) {
+			double cost = candidate.cost;
+			if (phaseOneObjective) {
+				// 与 no-cut 图一致，只对最终 top-K 计算并保存真实目标成本。
+				cost = evaluator.evaluate(candidate.sequence);
+				if (Utility.isBigMValue(cost)) {
+					return null;
+				}
 			}
-			// 与 no-cut 图一致，只对最终 top-K 计算并保存真实目标成本。
-			double trueCost = evaluator.evaluate(column.getSequence());
-			return Utility.isBigMValue(trueCost) ? null
-					: new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+			// 2026-07-29: 去重和 top-K 只需要 sequence/signature；重对象延迟到最终入选后构造。
+			ColumnPattern pattern = new ColumnPattern(candidate.sequence, n);
+			return new TWETColumn(-1, pattern, cost, ColumnSource.PRICING_EXACT, false);
 		}
 
 		private void initializeForward() {
@@ -667,9 +671,8 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			} else {
 				cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			}
-			ColumnPattern pattern = new ColumnPattern(sequence, n);
-			rememberCandidate(pattern.getSignature(),
-					new TWETColumn(-1, pattern, cost, ColumnSource.PRICING_EXACT, false), reducedCost);
+			SequenceSignature signature = new SequenceSignature(sequence);
+			rememberCandidate(signature, sequence, cost, reducedCost);
 		}
 
 		private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost) {
@@ -828,12 +831,13 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			return worst != null && Utility.compareLt(reducedCost, worst.reducedCost);
 		}
 
-		private void rememberCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
+		private void rememberCandidate(SequenceSignature signature, ArrayList<Integer> sequence,
+				double cost, double reducedCost) {
 			Candidate existing = candidateBySignature.get(signature);
 			if (existing != null && Utility.compareLe(existing.reducedCost, reducedCost)) {
 				return;
 			}
-			Candidate candidate = new Candidate(nextCandidateId++, signature, column, reducedCost);
+			Candidate candidate = new Candidate(nextCandidateId++, signature, sequence, cost, reducedCost);
 			candidateBySignature.put(signature, candidate);
 			candidateHeap.add(candidate);
 			while (candidateBySignature.size() > maxReturnedColumns()) {
@@ -1598,13 +1602,16 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	private static final class Candidate {
 		final int id;
 		final SequenceSignature signature;
-		final TWETColumn column;
+		final ArrayList<Integer> sequence;
+		final double cost;
 		final double reducedCost;
 
-		Candidate(int id, SequenceSignature signature, TWETColumn column, double reducedCost) {
+		Candidate(int id, SequenceSignature signature, ArrayList<Integer> sequence,
+				double cost, double reducedCost) {
 			this.id = id;
 			this.signature = signature;
-			this.column = column;
+			this.sequence = sequence;
+			this.cost = cost;
 			this.reducedCost = reducedCost;
 		}
 	}

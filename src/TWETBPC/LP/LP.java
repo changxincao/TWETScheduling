@@ -719,12 +719,14 @@ public class LP {
 
 		readDuals();
 		LinkedHashMap<Integer, Double> columnValues = readColumnValues();
-		double[] outsourcingValues = readOutsourcingValues();
+		OutsourcingPrimalRead outsourcingPrimal = readOutsourcingValues();
 		double[] segmentValues = readOutsourceSegmentValues();
-		boolean integer = isIntegerSolution(columnValues, outsourcingValues);
+		boolean integer = isIntegerSolution(columnValues, outsourcingPrimal.jobValues,
+				outsourcingPrimal.columnValues, segmentValues);
 		String message = feasibilityRepairMode && !isNoSlack() ? successMessage + " with positive artificial slack"
 				: successMessage;
-		lastSolution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues, outsourcingValues,
+		lastSolution = new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, columnValues,
+				outsourcingPrimal.jobValues,
 				segmentValues, cplex.getObjValue(), integer, message);
 		masterLpPhaseExtractNanos += masterLpTimingElapsed(extractStartNanos);
 		return lastSolution;
@@ -1587,21 +1589,32 @@ public class LP {
 		if (outsourceColumnById == null) {
 			return;
 		}
+		final int inputColumnCount = restrictedOutsourcingColumnIds.size();
+		final double[] reducedCosts;
+		try {
+			reducedCosts = cplex.getReducedCosts(outsourceColumnVars);
+		} catch (IloException ex) {
+			throw new IllegalStateException("Unable to read outsourcing-column reduced costs in bulk.", ex);
+		}
+		if (reducedCosts.length != inputColumnCount) {
+			throw new IllegalStateException("Restricted outsourcing-column IDs and reduced costs are not aligned.");
+		}
 		ArrayList<Integer> selected = new ArrayList<Integer>();
 		ArrayList<ColumnReducedCost> candidates =
 				boundedReducedCostColumnSelection ? null : new ArrayList<ColumnReducedCost>();
 		PriorityQueue<ColumnReducedCost> boundedCandidates =
 				boundedReducedCostColumnSelection ? newReducedCostCandidateHeap(maxColumns) : null;
-		for (int columnId : restrictedOutsourcingColumnIds) {
+		for (int index = 0; index < inputColumnCount; index++) {
+			int columnId = restrictedOutsourcingColumnIds.get(index).intValue();
 			TWETOutsourcingColumn column = outsourcingPool.getColumn(columnId);
-			if (isPositiveCurrentOutsourcingColumn(columnId)) {
+			if (positiveOutsourcingColumnIds.contains(Integer.valueOf(columnId))) {
 				selected.add(Integer.valueOf(columnId));
 				continue;
 			}
 			if (!node.isOutsourcingColumnCompatible(column)) {
 				continue;
 			}
-			double reducedCost = getOutsourcingColumnReducedCost(columnId);
+			double reducedCost = reducedCosts[index];
 			if (Utility.compareLt(reducedCost, reducedCostAllowance)) {
 				addReducedCostCandidate(candidates, boundedCandidates, maxColumns, columnId, reducedCost);
 			}
@@ -1685,8 +1698,9 @@ public class LP {
 
 	private void readDuals() throws IloException {
 		clearDuals();
+		double[] coverageDuals = cplex.getDuals(coverRanges, 1, data.n);
 		for (int job = 1; job <= data.n; job++) {
-			jobDual[job] = cplex.getDual(coverRanges[job]);
+			jobDual[job] = coverageDuals[job - 1];
 			pricingDualRhsObjective += jobDual[job];
 		}
 		machineDual = cplex.getDual(machineRange);
@@ -1698,40 +1712,75 @@ public class LP {
 		outsourcingColumnDual = isColumnizedOutsourcing() && outsourcingColumnCountRange != null
 				? cplex.getDual(outsourcingColumnCountRange) : 0.0;
 		pricingDualRhsObjective += outsourcingColumnDual;
-		for (Map.Entry<Integer, IloRange> entry : outsourcingMembershipBranchRanges.entrySet()) {
-			int job = entry.getKey().intValue();
-			double dual = cplex.getDual(entry.getValue());
-			outsourcingMembershipDual[job] = dual;
-			if (node.getOutsourcingJobState(job) == Node.OUTSOURCE_REQUIRED) {
-				pricingDualRhsObjective += dual;
+		if (!outsourcingMembershipBranchRanges.isEmpty()) {
+			ArrayList<Map.Entry<Integer, IloRange>> outsourcingEntries =
+					new ArrayList<Map.Entry<Integer, IloRange>>(outsourcingMembershipBranchRanges.entrySet());
+			double[] outsourcingDuals = readRangeDuals(outsourcingEntries);
+			for (int index = 0; index < outsourcingEntries.size(); index++) {
+				Map.Entry<Integer, IloRange> entry = outsourcingEntries.get(index);
+				int job = entry.getKey().intValue();
+				double dual = outsourcingDuals[index];
+				outsourcingMembershipDual[job] = dual;
+				if (node.getOutsourcingJobState(job) == Node.OUTSOURCE_REQUIRED) {
+					pricingDualRhsObjective += dual;
+				}
 			}
 		}
-		for (Map.Entry<Long, IloRange> entry : arcBranchRanges.entrySet()) {
-			int from = decodeFrom(entry.getKey().longValue());
-			int to = decodeTo(entry.getKey().longValue());
-			double dual = cplex.getDual(entry.getValue());
-			arcDual[from][to] = dual;
-			if (node.getArcState(from, to) == Node.ARC_REQUIRED) {
-				pricingDualRhsObjective += dual;
+		if (!arcBranchRanges.isEmpty()) {
+			ArrayList<Map.Entry<Long, IloRange>> arcEntries =
+					new ArrayList<Map.Entry<Long, IloRange>>(arcBranchRanges.entrySet());
+			double[] arcDuals = readRangeDuals(arcEntries);
+			for (int index = 0; index < arcEntries.size(); index++) {
+				Map.Entry<Long, IloRange> entry = arcEntries.get(index);
+				int from = decodeFrom(entry.getKey().longValue());
+				int to = decodeTo(entry.getKey().longValue());
+				double dual = arcDuals[index];
+				arcDual[from][to] = dual;
+				if (node.getArcState(from, to) == Node.ARC_REQUIRED) {
+					pricingDualRhsObjective += dual;
+				}
 			}
 		}
-		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
-			int first = decodeFrom(entry.getKey().longValue());
-			int second = decodeTo(entry.getKey().longValue());
-			double dual = cplex.getDual(entry.getValue());
-			arcDual[first][second] += dual;
-			arcDual[second][first] += dual;
-			if (node.getAdjacencyPairState(first, second) == Node.ADJACENCY_REQUIRED) {
-				pricingDualRhsObjective += dual;
+		if (!adjacencyBranchRanges.isEmpty()) {
+			ArrayList<Map.Entry<Long, IloRange>> adjacencyEntries =
+					new ArrayList<Map.Entry<Long, IloRange>>(adjacencyBranchRanges.entrySet());
+			double[] adjacencyDuals = readRangeDuals(adjacencyEntries);
+			for (int index = 0; index < adjacencyEntries.size(); index++) {
+				Map.Entry<Long, IloRange> entry = adjacencyEntries.get(index);
+				int first = decodeFrom(entry.getKey().longValue());
+				int second = decodeTo(entry.getKey().longValue());
+				double dual = adjacencyDuals[index];
+				arcDual[first][second] += dual;
+				arcDual[second][first] += dual;
+				if (node.getAdjacencyPairState(first, second) == Node.ADJACENCY_REQUIRED) {
+					pricingDualRhsObjective += dual;
+				}
 			}
 		}
-		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
-			double dual = cplex.getDual(entry.getValue());
-			if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
-				activeSubsetRowPricingCutIds.add(entry.getKey());
-				activeSubsetRowPricingDuals.add(Double.valueOf(dual));
+		if (!subsetRowCutRanges.isEmpty()) {
+			ArrayList<Map.Entry<Integer, IloRange>> cutEntries =
+					new ArrayList<Map.Entry<Integer, IloRange>>(subsetRowCutRanges.entrySet());
+			double[] cutDuals = readRangeDuals(cutEntries);
+			for (int index = 0; index < cutEntries.size(); index++) {
+				Map.Entry<Integer, IloRange> entry = cutEntries.get(index);
+				double dual = cutDuals[index];
+				if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
+					activeSubsetRowPricingCutIds.add(entry.getKey());
+					activeSubsetRowPricingDuals.add(Double.valueOf(dual));
+				}
 			}
 		}
+	}
+
+	private double[] readRangeDuals(List<? extends Map.Entry<?, IloRange>> entries) throws IloException {
+		if (entries.isEmpty()) {
+			return new double[0];
+		}
+		IloRange[] ranges = new IloRange[entries.size()];
+		for (int index = 0; index < entries.size(); index++) {
+			ranges[index] = entries.get(index).getValue();
+		}
+		return cplex.getDuals(ranges);
 	}
 
 	private LinkedHashMap<Integer, Double> readColumnValues() throws IloException {
@@ -1749,12 +1798,14 @@ public class LP {
 		return values;
 	}
 
-	private double[] readOutsourcingValues() throws IloException {
+	private OutsourcingPrimalRead readOutsourcingValues() throws IloException {
 		double[] values = new double[data.n + 1];
 		if (isColumnizedOutsourcing()) {
+			double[] columnValues = outsourceColumnVars.length == 0
+					? new double[0] : cplex.getValues(outsourceColumnVars);
 			HashSet<Integer> positiveColumnIds = new HashSet<Integer>();
 			for (int idx = 0; idx < restrictedOutsourcingColumnIds.size(); idx++) {
-				double value = cplex.getValue(outsourceColumnVars[idx]);
+				double value = columnValues[idx];
 				if (Utility.compareGt(value, VALUE_TOLERANCE)) {
 					positiveColumnIds.add(restrictedOutsourcingColumnIds.get(idx));
 					TWETOutsourcingColumn column =
@@ -1765,26 +1816,25 @@ public class LP {
 				}
 			}
 			positiveOutsourcingColumnIds = positiveColumnIds;
-			return values;
+			return new OutsourcingPrimalRead(values, columnValues);
 		}
-		for (int job = 1; job <= data.n; job++) {
-			values[job] = cplex.getValue(outsourceVars[job]);
+		if (data.n > 0) {
+			double[] jobValues = cplex.getValues(outsourceVars, 1, data.n);
+			System.arraycopy(jobValues, 0, values, 1, data.n);
 		}
-		return values;
+		return new OutsourcingPrimalRead(values, new double[0]);
 	}
 
 	private double[] readOutsourceSegmentValues() throws IloException {
 		if (isColumnizedOutsourcing()) {
 			return new double[0];
 		}
-		double[] values = new double[outsourceSegmentActive.length];
-		for (int segment = 0; segment < outsourceSegmentActive.length; segment++) {
-			values[segment] = cplex.getValue(outsourceSegmentActive[segment]);
-		}
-		return values;
+		return outsourceSegmentActive.length == 0
+				? new double[0] : cplex.getValues(outsourceSegmentActive);
 	}
 
-	private boolean isIntegerSolution(Map<Integer, Double> columnValues, double[] outsourcingValues) throws IloException {
+	private boolean isIntegerSolution(Map<Integer, Double> columnValues, double[] outsourcingValues,
+			double[] outsourcingColumnValues, double[] segmentValues) {
 		for (double value : columnValues.values()) {
 			if (!isIntegral01(value)) {
 				return false;
@@ -1796,15 +1846,15 @@ public class LP {
 			}
 		}
 		if (isColumnizedOutsourcing()) {
-			for (IloNumVar var : outsourceColumnVars) {
-				if (!isIntegral01(cplex.getValue(var))) {
+			for (double value : outsourcingColumnValues) {
+				if (!isIntegral01(value)) {
 					return false;
 				}
 			}
 			return true;
 		}
-		for (IloNumVar var : outsourceSegmentActive) {
-			if (!isIntegral01(cplex.getValue(var))) {
+		for (double value : segmentValues) {
+			if (!isIntegral01(value)) {
 				return false;
 			}
 		}
@@ -1843,18 +1893,6 @@ public class LP {
 		}
 	}
 
-	private boolean isPositiveCurrentOutsourcingColumn(int columnId) {
-		IloNumVar var = outsourceColumnById.get(Integer.valueOf(columnId));
-		if (var == null) {
-			return false;
-		}
-		try {
-			return Utility.compareGt(cplex.getValue(var), VALUE_TOLERANCE);
-		} catch (IloException ex) {
-			return false;
-		}
-	}
-
 	public double getOutsourcingColumnReducedCost(int columnId) {
 		if (!isColumnizedOutsourcing() || cplex == null || outsourceColumnById == null) {
 			return Double.POSITIVE_INFINITY;
@@ -1867,6 +1905,16 @@ public class LP {
 			return cplex.getReducedCost(var);
 		} catch (IloException ex) {
 			return Double.POSITIVE_INFINITY;
+		}
+	}
+
+	private static final class OutsourcingPrimalRead {
+		final double[] jobValues;
+		final double[] columnValues;
+
+		OutsourcingPrimalRead(double[] jobValues, double[] columnValues) {
+			this.jobValues = jobValues;
+			this.columnValues = columnValues;
 		}
 	}
 

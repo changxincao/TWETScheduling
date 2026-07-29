@@ -85,3 +85,18 @@ rank-1、ng-DSSR join 和 source-aware dominance 在诊断开关关闭与开启�
 
 173 个主线 Java 文件重新编译通过；restricted-column membership、time-indexed、strong Phase-I、
 ng-DSSR 边界、source-aware dominance、SRI posting 和 active-cut inheritance 七项回归通过。
+## 2026-07-29 后续读取与候选物化审查
+
+本轮只做静态审查，未修改算法代码。下一批值得处理的项目有三项。第一，`LP` 仍逐行读取 coverage、branch 和 cut dual，并逐变量读取外包列、逐任务外包变量和 tariff segment；`isIntegerSolution()` 又会重新读取外包列或 segment。应批量读取各行族和变量族，并把同一批原始 primal 同时用于聚合外包量、记录正值外包列和判断整数性。这里不能只用逐任务聚合外包量判断列化外包整数性，因为多条分数列可能聚合为整数覆盖。第二，列化外包筛列仍逐列读取正值和 reduced cost，可严格复用最近一次 LP 解保存的正值外包列集合，并一次读取全部外包列 reduced costs。第三，rank-1 候选在签名去重和 top-K 确认前就构造 `ColumnPattern` 和 `TWETColumn`。签名仍是判重所必需，但 sequence 副本、job bitset 和 visit counts 可延迟到最终保留候选再构造。现有日志中单轮 `negativeStates` 可达数万而最终只返回 300 条，说明该项具备真实减少分配的空间，适合独立 A/B。
+
+其余建议暂不进入主线。`concatenateLabels()` 的序列缓存只能省 predecessor 链回溯，最终拼接列表仍需复制，而且当前只在负 reduced cost 且通过 top-K 门槛后恢复序列，应先统计同一 label 的恢复复用率。启发式 seed 收集已有分阶段计时，历史结果显示通常仅为毫秒级，主耗时仍是 move 的 PWLF 评价；跨 pricing 缓存兼容性还需要处理 node domain/pricing-only arc 变化，不值得增加失效协议。SRI `LIST_PARTIAL` 可在计算 compensation 前按原 frontier 端点短路无重叠比较，该变换严格安全但只影响备用路径，优先级很低。`refreshMinReducedCost()` 在 partial trim 后仍负责重算完整函数最小值，不能删除。
+
+## 2026-07-29 LP 批量读取与 rank-1 候选延迟物化
+
+本轮完成前述三项主线优化。`LP` 将 coverage、branch、adjacency 和 active-cut 行按各自原迭代顺序批量读取 dual；内部列、显式外包变量、列化外包变量和 tariff segment 也改为按变量数组一次读取。列化外包仍同时检查逐任务聚合值和每条原始外包列的整数性，避免多条分数列聚合成整数覆盖后被误判。strong-trial 外包筛列复用最近一次 LP 解记录的正值外包列，并一次读取全部 restricted outsourcing reduced costs。变量数组与 restricted ID 列表的同序不变量未改变，所有浮点累加顺序也保持原样。
+
+rank-1 候选池现在只立即保存恢复出的 sequence、`SequenceSignature`、目标成本和 reduced cost。签名去重、候选替换、worst-first heap、top-K 阈值及 candidate ID 次序均未改变；只有最终排序后真正返回的候选才构造 `ColumnPattern`、job bitset、visit counts 和 `TWETColumn`。Phase-I 仍只对最终候选用 evaluator 刷新真实成本。三条候选入口得到的 sequence 都是新建列表，入池后不再修改，因此延迟持有不存在别名写入问题。
+
+40-2 rank-1 root 的独立 before/after 结果完全保持 `bound=22527.007009`、275 次 pricing、46609 条列、peak cut pool 235 和 `valid=true`；rank-1 exact pricing 由 `15.163613s` 降至 `13.875196s`，约减少 8.5%，root 时间由 `37.798827s` 降至 `36.462446s`。总 solve 时间基本不变，因为该实验后半段由 strong-trial LP 主导。列化外包 SP1/SP2 三组 smoke test 的目标、bound、外包数量和内部列数逐组一致。173 个主线 Java 文件完整编译通过；strong Phase-I（含 65 条 cut 的 multiword packed 等价对拍）、time-indexed、restricted membership、active-cut inheritance 和 column-pattern sharing 回归通过。
+
+序列恢复缓存、跨 pricing 的启发式 seed 缓存和 SRI `LIST_PARTIAL` overlap 短路均未接入。前两项没有足够热点证据且需要额外失效协议，后一项只影响当前非主线的备用 dominance store。`refreshMinReducedCost()` 继续保留。

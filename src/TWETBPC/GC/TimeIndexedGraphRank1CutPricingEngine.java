@@ -159,6 +159,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private int repeatedJobCandidates;
 		private boolean timedOut;
 		private double bestPseudoReducedCost;
+		private long packedCandidatesPrepared;
+		private long packedCandidatesMaterialized;
+		private long packedCandidatesImmediatelyRejected;
+		private long packedCandidatesEvictedOld;
 
 		@SuppressWarnings("unchecked")
 		Rank1CutSolver(LP lp, boolean heuristicMode) {
@@ -299,10 +303,23 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 							if (!isFinite(arcCost)) {
 								continue;
 							}
-							Label child = cutStateData.extendForward(label, nextLabelId++, nextJob, completion,
-									arcCost, lastJob);
-							if (!isPrunedByBackwardCompletion(child)) {
-								insertLabel(forwardBuckets, child);
+							int childId = nextLabelId++;
+							if (cutStateData.usesDeferredPackedLabelMaterialization()) {
+								double shift = cutStateData.preparePackedForward(label, lastJob, nextJob);
+								double extensionCost = arcCost + shift;
+								double childReducedCost = label.reducedCost + extensionCost;
+								packedCandidatesPrepared++;
+								if (!isPreparedPackedPrunedByBackwardCompletion(nextJob, completion,
+										childReducedCost)) {
+									insertPreparedPackedLabel(forwardBuckets, label, childId, nextJob, completion,
+											extensionCost, nextJob);
+								}
+							} else {
+								Label child = cutStateData.extendForward(label, childId, nextJob, completion, arcCost,
+										lastJob);
+								if (!isPrunedByBackwardCompletion(child)) {
+									insertLabel(forwardBuckets, child);
+								}
 							}
 						}
 					}
@@ -371,9 +388,18 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 										currentJob, arcCost);
 								rememberBackwardCompleteCandidate(label, sourceArcCost);
 							} else if (previousTime >= tStar && canReachBackwardState(previousJob, previousTime)) {
-								Label child = cutStateData.extendBackward(label, nextLabelId++, previousJob, previousTime,
-										arcCost, currentJob);
-								insertLabel(backwardBuckets, child);
+								int childId = nextLabelId++;
+								if (cutStateData.usesDeferredPackedLabelMaterialization()) {
+									double shift = cutStateData.preparePackedBackward(label, previousJob, currentJob);
+									double extensionCost = arcCost + shift;
+									packedCandidatesPrepared++;
+									insertPreparedPackedLabel(backwardBuckets, label, childId, previousJob,
+											previousTime, extensionCost, previousJob);
+								} else {
+									Label child = cutStateData.extendBackward(label, childId, previousJob, previousTime,
+											arcCost, currentJob);
+									insertLabel(backwardBuckets, child);
+								}
 							}
 						}
 					}
@@ -454,6 +480,57 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			}
 			bucket.add(label);
 			labelsKept++;
+			return true;
+		}
+
+		/**
+		 * 对 packed scratch 候选先做支配，确认保留后才复制 residual 并创建 Label。
+		 */
+		private boolean insertPreparedPackedLabel(ArrayList<Label>[] buckets, Label parent, int labelId,
+				int lastJob, int time, double extensionCost, int addedJob) {
+			double candidateReducedCost = parent.reducedCost + extensionCost;
+			int idx = index(lastJob, time);
+			ArrayList<Label> bucket = buckets[idx];
+			if (bucket == null) {
+				bucket = new ArrayList<Label>();
+				buckets[idx] = bucket;
+			}
+			if (heuristicMode && !bucket.isEmpty()) {
+				Label existing = bucket.get(0);
+				if (Utility.compareLe(existing.reducedCost, candidateReducedCost)) {
+					labelsDominated++;
+					packedCandidatesImmediatelyRejected++;
+					return false;
+				}
+				Label materialized = parent.extend(labelId, lastJob, time, extensionCost, null,
+						cutStateData.materializePreparedPackedResidual(), addedJob);
+				bucket.clear();
+				bucket.add(materialized);
+				labelsDominated++;
+				labelsKept++;
+				packedCandidatesEvictedOld++;
+				packedCandidatesMaterialized++;
+				return true;
+			}
+			for (int i = 0; i < bucket.size(); i++) {
+				if (cutStateData.existingDominatesPrepared(bucket.get(i), candidateReducedCost)) {
+					labelsDominated++;
+					packedCandidatesImmediatelyRejected++;
+					return false;
+				}
+			}
+			for (int i = bucket.size() - 1; i >= 0; i--) {
+				if (cutStateData.preparedDominatesExisting(candidateReducedCost, bucket.get(i))) {
+					bucket.remove(i);
+					labelsDominated++;
+					packedCandidatesEvictedOld++;
+				}
+			}
+			Label materialized = parent.extend(labelId, lastJob, time, extensionCost, null,
+					cutStateData.materializePreparedPackedResidual(), addedJob);
+			bucket.add(materialized);
+			labelsKept++;
+			packedCandidatesMaterialized++;
 			return true;
 		}
 
@@ -717,6 +794,11 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					+ ", cbPruned=" + completionBoundPruned
 					+ ", negativeStates=" + negativeStateCandidates
 					+ ", repeatedJobCandidates=" + repeatedJobCandidates
+					+ ", deferredPackedLabels=" + cutStateData.usesDeferredPackedLabelMaterialization()
+					+ ", packedPrepared=" + packedCandidatesPrepared
+					+ ", packedMaterialized=" + packedCandidatesMaterialized
+					+ ", packedImmediateRejected=" + packedCandidatesImmediatelyRejected
+					+ ", packedEvictedOld=" + packedCandidatesEvictedOld
 					+ cutStateData.timingSummary()
 					+ (timedOut ? ", timeLimit=true" : "");
 		}
@@ -726,17 +808,28 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private boolean isPrunedByBackwardCompletion(Label label) {
-			if (heuristicMode || label.lastJob <= 0 || label.time < tStar) {
+			return isPrunedByBackwardCompletion(label.lastJob, label.time, label.reducedCost, label);
+		}
+
+		private boolean isPreparedPackedPrunedByBackwardCompletion(int lastJob, int time, double reducedCost) {
+			return isPrunedByBackwardCompletion(lastJob, time, reducedCost, null);
+		}
+
+		private boolean isPrunedByBackwardCompletion(int lastJob, int time, double forwardReducedCost,
+				Label materializedForward) {
+			if (heuristicMode || lastJob <= 0 || time < tStar) {
 				return false;
 			}
 			double bestCompletion = INF;
-			if (isEndAllowed(label.lastJob, label.time)) {
-				bestCompletion = label.reducedCost + sinkArcReducedCost(label.lastJob);
+			if (isEndAllowed(lastJob, time)) {
+				bestCompletion = forwardReducedCost + sinkArcReducedCost(lastJob);
 			}
-			ArrayList<Label> suffixLabels = backwardBuckets[index(label.lastJob, label.time)];
+			ArrayList<Label> suffixLabels = backwardBuckets[index(lastJob, time)];
 			if (suffixLabels != null && !suffixLabels.isEmpty()) {
 				for (Label suffix : suffixLabels) {
-					double reducedCost = label.reducedCost + suffix.reducedCost + cutStateData.joinShift(label, suffix);
+					double joinShift = materializedForward == null ? cutStateData.preparedJoinShift(suffix)
+							: cutStateData.joinShift(materializedForward, suffix);
+					double reducedCost = forwardReducedCost + suffix.reducedCost + joinShift;
 					if (Utility.compareLt(reducedCost, bestCompletion)) {
 						bestCompletion = reducedCost;
 					}
@@ -761,6 +854,8 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private static final String PACKED_RESIDUAL_PROPERTY = "twet.bpc.packedRank1Residual";
 		private static final String VERIFY_PACKED_RESIDUAL_PROPERTY = "twet.bpc.verifyPackedRank1Residual";
 		private static final String CUT_STATE_TIMING_PROPERTY = "twet.bpc.rank1CutStateTiming";
+		private static final String DEFER_LABEL_MATERIALIZATION_PROPERTY =
+				"twet.bpc.deferRank1LabelMaterialization";
 
 		private final ArrayList<TWETCut> cuts;
 		private final double[] duals;
@@ -772,8 +867,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private final byte[] zeroResidual;
 		private final boolean packedResidualEnabled;
 		private final boolean verifyPackedResidual;
+		private final boolean deferredPackedLabelMaterialization;
 		private final int residualWordCount;
 		private final long[] zeroPackedResidual;
+		private final long[] scratchPackedResidual;
 		private final long[] scopeMaskByJob;
 		private final long[] forwardRetainMaskByArc;
 		private final long[] forwardToggleMaskByArc;
@@ -801,8 +898,11 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.packedResidualEnabled = Boolean.parseBoolean(System.getProperty(PACKED_RESIDUAL_PROPERTY, "true"));
 			this.verifyPackedResidual = packedResidualEnabled
 					&& Boolean.getBoolean(VERIFY_PACKED_RESIDUAL_PROPERTY);
+			this.deferredPackedLabelMaterialization = packedResidualEnabled && !verifyPackedResidual
+					&& Boolean.parseBoolean(System.getProperty(DEFER_LABEL_MATERIALIZATION_PROPERTY, "true"));
 			this.residualWordCount = (cutIds.size() + Long.SIZE - 1) / Long.SIZE;
 			this.zeroPackedResidual = packedResidualEnabled ? new long[residualWordCount] : null;
+			this.scratchPackedResidual = deferredPackedLabelMaterialization ? new long[residualWordCount] : null;
 			this.scopeMaskByJob = packedResidualEnabled ? new long[(data.n + 1) * residualWordCount] : null;
 			this.forwardRetainMaskByArc = packedResidualEnabled ? new long[arcTableSize * residualWordCount] : null;
 			this.forwardToggleMaskByArc = packedResidualEnabled ? new long[arcTableSize * residualWordCount] : null;
@@ -912,6 +1012,41 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			return packedResidualEnabled ? zeroPackedResidual : null;
 		}
 
+		boolean usesDeferredPackedLabelMaterialization() {
+			return deferredPackedLabelMaterialization;
+		}
+
+		/**
+		 * 先在 solver-local scratch 上计算 packed 状态。只有候选通过 completion/dominance 后才复制该状态。
+		 */
+		double preparePackedForward(Label parent, int from, int nextJob) {
+			System.arraycopy(parent.packedResidual, 0, scratchPackedResidual, 0, residualWordCount);
+			return applyPackedForwardExtension(scratchPackedResidual, from, nextJob);
+		}
+
+		double preparePackedBackward(Label parent, int previousJob, int currentJob) {
+			System.arraycopy(parent.packedResidual, 0, scratchPackedResidual, 0, residualWordCount);
+			return applyPackedBackwardPrepend(scratchPackedResidual, previousJob, currentJob);
+		}
+
+		long[] materializePreparedPackedResidual() {
+			return scratchPackedResidual.clone();
+		}
+
+		boolean existingDominatesPrepared(Label existing, double candidateReducedCost) {
+			return packedDominates(existing.reducedCost, existing.packedResidual, candidateReducedCost,
+					scratchPackedResidual);
+		}
+
+		boolean preparedDominatesExisting(double candidateReducedCost, Label existing) {
+			return packedDominates(candidateReducedCost, scratchPackedResidual, existing.reducedCost,
+					existing.packedResidual);
+		}
+
+		double preparedJoinShift(Label backward) {
+			return packedJoinShift(scratchPackedResidual, backward.packedResidual);
+		}
+
 		Label extendForward(Label parent, int id, int nextJob, int completion, double arcCost, int from) {
 			if (!packedResidualEnabled) {
 				byte[] residual = copyResidual(parent.residual);
@@ -933,6 +1068,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (!packedResidualEnabled) {
 				byte[] residual = copyResidual(parent.residual);
 				return arcCost + applyBackwardPrepend(residual, previousJob, currentJob);
+			}
+			if (deferredPackedLabelMaterialization) {
+				return arcCost + preparePackedBackward(parent, previousJob, currentJob);
 			}
 			long[] packed = copyPackedResidual(parent.packedResidual);
 			double shift = applyPackedBackwardPrepend(packed, previousJob, currentJob);
@@ -1101,12 +1239,18 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		}
 
 		private boolean packedDominates(Label first, Label second) {
-			double bound = second.reducedCost;
+			return packedDominates(first.reducedCost, first.packedResidual, second.reducedCost,
+					second.packedResidual);
+		}
+
+		private boolean packedDominates(double firstReducedCost, long[] firstResidual, double secondReducedCost,
+				long[] secondResidual) {
+			double bound = secondReducedCost;
 			for (int word = 0; word < residualWordCount; word++) {
-				long corrections = first.packedResidual[word] & ~second.packedResidual[word];
+				long corrections = firstResidual[word] & ~secondResidual[word];
 				bound = addDuals(bound, corrections, word);
 			}
-			return Utility.compareLe(first.reducedCost, bound + RC_TOLERANCE);
+			return Utility.compareLe(firstReducedCost, bound + RC_TOLERANCE);
 		}
 
 		private double subtractDuals(double value, long bits, int word) {

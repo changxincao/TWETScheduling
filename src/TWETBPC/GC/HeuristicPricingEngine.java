@@ -53,7 +53,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private final TWETBPCConfig config;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
-	private final SegmentProfile[] singletonProfileCache;
 	private final PiecewiseLinearFunction.ReadOnlySegmentView[] penaltySegmentViewCache;
 	private long diagnosticTraceCallSequence;
 	private HeuristicPricingDiagnosticTrace lastDiagnosticTrace;
@@ -62,7 +61,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
-		this.singletonProfileCache = buildSingletonProfileCache();
 		this.penaltySegmentViewCache = buildReadOnlySegmentViews(data.penaltyFunction);
 	}
 
@@ -157,13 +155,13 @@ public class HeuristicPricingEngine implements PricingEngine {
 			columns.add(new TWETColumn(-1, candidate.sequence, data.n, outputCost, ColumnSource.PRICING_HEURISTIC,
 					false));
 		}
-		// 标准轨迹列优先；非 best 列仅补充不同 signature，不能绕过标准 300 条的排序限制。
-		HashSet<SequenceSignature> outputSignatures = new HashSet<SequenceSignature>();
-		for (ScoredSequence candidate : negativeCandidates) {
-			outputSignatures.add(candidate.signature);
-		}
 		int extraReturned = 0;
 		if (nonBestCandidates != null) {
+			// 标准轨迹列优先；非 best 列仅补充不同 signature，不能绕过标准列的排序限制。
+			HashSet<SequenceSignature> outputSignatures = new HashSet<SequenceSignature>();
+			for (ScoredSequence candidate : negativeCandidates) {
+				outputSignatures.add(candidate.signature);
+			}
 			for (ScoredSequence candidate : nonBestCandidates) {
 				if (!outputSignatures.add(candidate.signature)) {
 					continue;
@@ -473,7 +471,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 	private HeuristicWindowContext unrestrictedWindowContext() {
 		return new HeuristicWindowContext(null, penaltySegmentViewCache, data.penaltyFunction[0],
-				penaltySegmentViewCache[0], data.CmaxH, singletonProfileCache, false);
+				penaltySegmentViewCache[0], data.CmaxH, false);
 	}
 
 	/**
@@ -527,9 +525,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 		}
 		horizon = Math.min(horizon, data.CmaxH);
 		PiecewiseLinearFunction sourcePenalty = data.penaltyFunction[0].setDomain(0.0, horizon);
-		SegmentProfile[] localSingletonProfiles = buildSingletonProfileCache(penalties);
 		return new HeuristicWindowContext(penalties, buildReadOnlySegmentViews(penalties), sourcePenalty,
-				sourcePenalty.readOnlySegmentView(), horizon, localSingletonProfiles, useDualWindow);
+				sourcePenalty.readOnlySegmentView(), horizon, useDualWindow);
 	}
 
 	private boolean canUseDualProfitableWindow(LP lp) {
@@ -1179,27 +1176,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 		return result;
 	}
 
-	private SegmentProfile[] buildSingletonProfileCache() {
-		return buildSingletonProfileCache(null);
-	}
-
-	private SegmentProfile[] buildSingletonProfileCache(PiecewiseLinearFunction[] penalties) {
-		SegmentProfile[] cache = new SegmentProfile[data.n + 1];
-		for (int job = 1; job <= data.n; job++) {
-			cache[job] = buildSingletonProfile(job, penalties);
-		}
-		return cache;
-	}
-
-	private SegmentProfile buildSingletonProfile(int job, PiecewiseLinearFunction[] penalties) {
-		PiecewiseLinearFunction penalty = penalties == null ? data.penaltyFunction[job] : penalties[job];
-		PiecewiseLinearFunction forward = penalty == null ? emptyFunction() : penalty.copy();
-		forward.minimizePrefixInPlace();
-		PiecewiseLinearFunction backward = penalty == null ? emptyFunction() : penalty.copy();
-		backward.minimizeSuffixInPlace();
-		return new SegmentProfile(forward, backward);
-	}
-
 	private PiecewiseLinearFunction.ReadOnlySegmentView[] buildReadOnlySegmentViews(
 			PiecewiseLinearFunction[] functions) {
 		PiecewiseLinearFunction.ReadOnlySegmentView[] views =
@@ -1221,20 +1197,18 @@ public class HeuristicPricingEngine implements PricingEngine {
 		private final PiecewiseLinearFunction sourcePenalty;
 		private final PiecewiseLinearFunction.ReadOnlySegmentView sourcePenaltyView;
 		private final double horizon;
-		private final SegmentProfile[] singletonProfiles;
 		private final boolean requiresTrueCostRecheck;
 
 		HeuristicWindowContext(PiecewiseLinearFunction[] penalties,
 				PiecewiseLinearFunction.ReadOnlySegmentView[] penaltyViews,
 				PiecewiseLinearFunction sourcePenalty,
 				PiecewiseLinearFunction.ReadOnlySegmentView sourcePenaltyView,
-				double horizon, SegmentProfile[] singletonProfiles, boolean requiresTrueCostRecheck) {
+				double horizon, boolean requiresTrueCostRecheck) {
 			this.penalties = penalties;
 			this.penaltyViews = penaltyViews;
 			this.sourcePenalty = sourcePenalty;
 			this.sourcePenaltyView = sourcePenaltyView;
 			this.horizon = horizon;
-			this.singletonProfiles = singletonProfiles;
 			this.requiresTrueCostRecheck = requiresTrueCostRecheck;
 		}
 
@@ -1244,11 +1218,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 
 		PiecewiseLinearFunction.ReadOnlySegmentView penaltyView(int job) {
 			return penaltyViews[job];
-		}
-
-		SegmentProfile singletonProfile(int job) {
-			SegmentProfile cached = singletonProfiles[job];
-			return new SegmentProfile(cached.forward.copy(), cached.backward);
 		}
 
 		boolean requiresTrueCostRecheck() {
@@ -2131,16 +2100,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 				}
 			}
 			return false;
-		}
-	}
-
-	private static final class SegmentProfile {
-		final PiecewiseLinearFunction forward;
-		final PiecewiseLinearFunction backward;
-
-		private SegmentProfile(PiecewiseLinearFunction forward, PiecewiseLinearFunction backward) {
-			this.forward = forward;
-			this.backward = backward;
 		}
 	}
 

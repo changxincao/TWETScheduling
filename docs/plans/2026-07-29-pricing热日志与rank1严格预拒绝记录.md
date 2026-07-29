@@ -167,3 +167,32 @@ ng-DSSR 的 forward-to-sink 可在 `maintainRouteVisitProfile()` 为真时直接
 sequence。join group 已按固定 `(lastJob, backward.jid)` 计算 delay，而 `tryJoin()` 又按完全相同
 公式重算；可把 delay 与 `joinFixedReducedCost` 一起传入，避免每个存活 pair 的重复数组读取和加法。
 后二者严格等价但属于较小常数优化，优先级低于两项启发式死计算清理。
+
+### 实现与 A/B 结果
+
+上述四项严格等价清理已逐项接入，completion-bound transition-only 继续保持回退状态。40-2 root-only
+统一使用当前 ng-DSSR 好配置、time-indexed root preprocessing、heuristic pricing、单 CPLEX 线程、
+关闭 strong branching。基线为 root `22.468s`，HeuristicPricing `4.493s/28`，ng-DSSR exact
+`5.581s/10`，bound `22490`，peak pool `45113`。
+
+删除 singleton profiles 后两次复跑为 root `18.490/19.050s`，HeuristicPricing
+`3.490s/22` 和 `3.563s/22`，但 exact 同时从 10 次变为 5 次。进一步逐轮比较确认前 226 个 pricing
+事件完全一致，之后 time-based Tmid 因运行耗时变化选择了不同反馈轨迹；因此约 4 秒总时间差不能归因
+于 singleton 删除。直接看 HeuristicPricing 单次平均，基线 `160.476ms`，两次 after 为
+`158.619/161.938ms`，没有可测的稳定加速。该项仍予以保留，因为它完整删除了无人读取的 `2*n`
+PWLF copy/minimize 和关联数据结构，并降低代码复杂度。
+
+把 `outputSignatures` 移入 non-best 分支后，默认模式继续得到 238 个 pricing 事件、22 次 heuristic、
+5 次 exact、相同 bound 和 pool；本轮所有 LP/pricing 同时变慢，属于整机波动。该项每次最多节省约
+300 个 HashSet 插入，不是热点，但默认主线不再执行无消费者的全池扫描。显式开启 non-best 的
+`wet021` smoke 仍得到 `obj=bound=6829`、`valid=true`。
+
+forward-sink elementary hint 和 join delay 传递也保持相同 bound、pool 和定价调用结构。本例五次
+exact 的 forward-sink negative 总数为 0，因此没有触发 hint 收益；join 内部时间又随整机速度在
+`21--36ms` 波动，无法分离一次 setup/process 读取的收益。两项仅复用当前 label/group 已有的精确信息，
+没有新增缓存、失效协议或算法分支，作为小型常数优化保留，但不声称具有可测总加速。
+
+全量 173 个主线 Java 文件编译通过；HeuristicPricing trace、ng-DSSR join boundary、source-aware
+dominance、strong Phase-I 和 time-indexed optimization 五项回归通过。第一次 root 与测试启动分别
+因 PowerShell 动态属性拼接和裸 `-Dfile.encoding` 参数解析失败，JVM 均未进入算法；后续统一使用完整
+字符串参数数组启动，所有有效实验均为单求解进程。

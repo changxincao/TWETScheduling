@@ -4042,7 +4042,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		forwardSinkNegativeCandidates++;
 		recordDepthCount(forwardSinkNegativeByDepth, label.depth);
 		ArrayList<Integer> sequence = recoverForwardSequence(label);
-		tryGenerateColumn(sequence, lp, reducedCost);
+		Boolean elementaryHint = maintainRouteVisitProfile() ? Boolean.valueOf(label.routeElementary) : null;
+		tryGenerateColumn(sequence, lp, reducedCost, false, elementaryHint);
 	}
 
 	/**
@@ -4584,11 +4585,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				joinEnvelopePrefilterPotentialPairsPruned++;
 				continue;
 			}
-			tryJoin(forward, backward, lp, joinFixedReducedCost);
+			tryJoin(forward, backward, lp, joinFixedReducedCost, delay);
 		}
 	}
 
-	private void tryJoin(ForwardLabel forward, BackwardLabel backward, LP lp, double joinFixedReducedCost) {
+	private void tryJoin(ForwardLabel forward, BackwardLabel backward, LP lp, double joinFixedReducedCost,
+			double joinDelay) {
 		if (config.maxExactPricingColumns <= 0) {
 			return;
 		}
@@ -4641,7 +4643,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 
-		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
+		double delta = joinDelay;
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
 			if (HOT_PATH_DIAGNOSTICS) {

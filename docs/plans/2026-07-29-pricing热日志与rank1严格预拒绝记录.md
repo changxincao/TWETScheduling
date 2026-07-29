@@ -102,3 +102,11 @@ rank-1 候选池现在只立即保存恢复出的 sequence、`SequenceSignature`
 序列恢复缓存、跨 pricing 的启发式 seed 缓存和 SRI `LIST_PARTIAL` overlap 短路均未接入。前两项没有足够热点证据且需要额外失效协议，后一项只影响当前非主线的备用 dominance store。`refreshMinReducedCost()` 继续保留。
 
 提交后再次按正确性而非性能复核。CPLEX 批量 dual 数组与各 `HashMap` entry 快照使用同一顺序，coverage 的 `start=1,num=n` 与保留空位的 `coverRanges` 对齐；内部列和外包列变量数组分别与 restricted ID 列表同序。列化外包的整数性同时检查聚合 job value 和原始 column value，筛列使用的正值集合与 reduced cost 来自同一次 LP 解。rank-1 候选的三条 sequence 恢复入口均创建独立列表，heap 中被替换的旧候选仍按 map identity 惰性失效，Phase-I 仍只对最终 top-K 刷真实成本。40-2 before/after 日志抽取的 9 条算法轨迹逐行零差异；显式外包与列化外包三组 SP1/SP2 再次得到相同 objective、bound、外包任务数和内部列数。未发现正确性问题。
+
+## 2026-07-29 普通 time-indexed 候选与强分支 top-K 后续判断
+
+普通 `TimeIndexedGraphPricingEngine` 的候选延迟物化值得作为下一项独立 A/B。当前 sequence 必须立即恢复，才能执行 pre-heuristic 重复任务过滤和构造 `SequenceSignature`，因此不能省掉 predecessor 回溯；但 `ColumnPattern`、job bitset、visit counts 和 `TWETColumn` 可以延迟到最终 top-K。历史普通 time-indexed 日志中，单次 pricing 常见 `negativeStates=5.6万--6.8万`，最终只返回约 160--300 列，说明当前确实为大量后来被同签名替换或 top-K 淘汰的候选构造重对象。实现不能机械照搬 rank-1：dual-window recheck 和 Phase-I 本来就只在最终候选执行，应保持不变；dual-window best-candidate 诊断和 stabilization oracle 需要改为直接读取轻量候选的 sequence、cost 和 source。候选成本也只需在签名确认会进入或替换 active map 后计算。
+
+强分支候选的有界堆不值得修改。`Tree` 传入 `Integer.MAX_VALUE` 是为了同时保留真实 `candidateCount`；若 brancher 只返回 top-K，就需要新增 batch/result 接口才能保留日志与评分语义。历史 49096 条 strong-branching 记录中，candidateCount 中位数 1、P90 为 115、P99 为 181、最大 275；排序最多几百个轻量对象，相比左右 trial LP 可忽略。Outsourcing brancher 最多只有 n 个候选，tariff brancher 更少。
+
+两个 pricing heap 的 stale candidate 暂不增加统计或重建协议。旧候选只在同签名被更优值替换时滞留，随后一旦需要读取 worst candidate，较差的 stale root 会由现有 identity 检查惰性弹出；solver 结束后整套 heap 释放。普通引擎完成延迟物化后，stale candidate 也不再持有 `ColumnPattern/TWETColumn`，潜在内存成本进一步下降。最终 top-K 重建一次签名、dense `arcDual` 清零、snapshot 深拷贝及临时 map/range 数组仍属次要项，不继续增加缓存状态。

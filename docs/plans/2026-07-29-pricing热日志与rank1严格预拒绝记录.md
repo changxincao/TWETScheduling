@@ -122,3 +122,26 @@ rank-1 候选池现在只立即保存恢复出的 sequence、`SequenceSignature`
 40-2 rank-1 root 的修改前后均为 `bound=22527.007009`、275 次 pricing、46609 条列、235 条 cut，正值列数量和各轮 cut 轨迹一致；rank-1 exact 由 `13.875196s` 降至 `12.055843s`，约减少 13.1%。普通 no-cut root 仍为 `bound=22487.647059`、211 次 pricing、45113 条列，语义轨迹一致；其目标成本恢复本身不含 SRI coefficient 扫描，单次总耗时较小，本轮 wall time 波动不能归因为稳定收益。173 个主线文件编译通过，七项既有回归及 `DualStabilizationInPointTest` 通过。
 
 同类思路在 ng-DSSR 上只有较小潜力。当前普通候选会在 `tryGenerateColumn()` 中先由 inferred reduced cost 反推目标成本并构造 `TWETColumn`，随后才进入同签名判重和 top-K；最终 `finalizeGeneratedColumns()` 又统一用 evaluator 恢复固定 sequence 的全域真实成本。因此非 `forceTrueCost` 候选可以只保存 sequence/signature/inferred reduced cost，最终保留下来的候选再构造列。但 no-SRI 主线的成本反推只扫描 route，不含 rank-1 的 active-cut coefficient 全扫描，历史候选池也常见 `seen=689, kept=363` 或更少，节省量相对于 PWLF 扩展、completion bound 和 join 很小。`forceTrueCost` 的 envelope/join 路径不能照搬延迟：该路径传入的 inferred value 只是下界，必须立即 evaluator 回刷后才能执行负值过滤和候选排序。当前先记录为低优先级 A/B，不直接修改 ng-DSSR。
+
+## 2026-07-29 ng-DSSR/no-cut 同签名预检查实验
+
+本轮实现了最小版本：非 `forceTrueCost` 候选保留原 `generatedCandidateCount` 和 candidate ID 递增时点，
+先用 signature 与 inferred reduced cost 判断是否能替换当前同签名候选，确认可保留后才调用
+`buildInferredColumn()`；`forceTrueCost` 路径不动。编译和 ng-DSSR 边界、同节点状态、source-aware
+dominance、strong Phase-I 回归均通过，逻辑上与原 comparator 的 reduced-cost/candidate-ID 次序等价。
+
+第一次 A/B 启动错误地同时关闭 heuristic pricing 和 time-indexed root preprocessing，且旧/新两个 JVM
+并行运行，结果没有实时日志，不能用于归因。随后按启动清单单进程重做并打开 live trace。该隔离配置在
+`wet021_001_2m` 上 60 秒内执行 135 次 ng-DSSR exact，exact 合计 59.697 秒；单次通常约
+0.16--1.10 秒。慢点不是某一次 21-job labeling 爆炸，而是弱初始 RMP 下不断找到少量新列并反复重启
+exact CG。恢复已验证的 root preprocessing 和 heuristic pricing 后，同一实例 2.543 秒闭合，
+`obj=bound=6829`，正式 ng-DSSR exact 仅 1 次、0.164 秒。
+
+更关键的是，135 轮 ng-DSSR exact 合计 `seen=4021`，在候选池未达到 5000 上限且未使用
+`BEST_RECORD` 阈值的口径下，同签名拒绝只有 3 次。因此该预检查对当前 ng-DSSR 主线几乎没有实际收益。
+普通 no-cut 的弱 RMP 诊断中确实出现大量 `dropped`，但其中绝大部分来自 top-K 满后的 heap 淘汰；一次
+重轮访问约 1.52 亿个 join pair、`seen=2405811`，主耗时仍是 join 和候选池上限后的维护，不是少量
+同签名列构造。由此撤回两处生产代码修改，不保留额外 helper；源码恢复到实验前状态。实验日志位于
+`test-results/bpc/diag-wet021-ng-isolation-20260729a`、
+`test-results/bpc/ab-wet021-ng-precheck-after-bestroot-20260729a` 和
+`test-results/bpc/diag-wet021-bidir-precheck-after-20260729a`。

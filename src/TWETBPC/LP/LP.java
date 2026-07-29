@@ -1736,8 +1736,12 @@ public class LP {
 
 	private LinkedHashMap<Integer, Double> readColumnValues() throws IloException {
 		LinkedHashMap<Integer, Double> values = new LinkedHashMap<Integer, Double>();
+		if (lambdaVars.length == 0) {
+			return values;
+		}
+		double[] primalValues = cplex.getValues(lambdaVars);
 		for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
-			double value = cplex.getValue(lambdaVars[idx]);
+			double value = primalValues[idx];
 			if (Utility.compareGt(value, VALUE_TOLERANCE)) {
 				values.put(restrictedColumnIds.get(idx), Double.valueOf(value));
 			}

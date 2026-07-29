@@ -43,3 +43,29 @@ rank-1 严格预拒绝与正式 packed dominance 使用同一 residual 修正项
 本次还修正两个纯诊断遗漏：full-midpoint 诊断关闭热统计时不再把 `fCand=0` 当作真实统计输出；forward sink
 禁弧路径在未启用目标 trace 时不再调用 trace helper。173 个主线 Java 文件重新编译通过，time-indexed、
 rank-1、ng-DSSR join 和 source-aware dominance 在诊断开关关闭与开启口径下均通过回归。
+
+## Primal 批量读取与后续建议复核
+
+本轮继续逐项复核 primal 提取、rank-1 bucket 扫描和 ng-DSSR SRI 备用路径。
+
+1. `LP.readColumnValues()` 改为一次 `cplex.getValues(lambdaVars)`，再按原 restricted-column 顺序筛选正值。
+   40-2 纯 time-indexed root 的 scalar/batch 对照均为 bound `22487.647059`、211 次 pricing 和
+   `valid=true`。210 次 after-pricing resolve 的 extract 累计由 `960.872ms` 降到 `542.580ms`，
+   下降约 43.5%。跳过中间 primal 提取没有实现，因为 `HeuristicPricingEngine` 会读取当前正值列，
+   该改动不能无条件推广到所有 pricing engine。
+2. 尝试将 rank-1 strict/formal dominance 合并为一次分类扫描。修正 heuristic 不应进入该分类后，
+   old/fused 的 275 条 pricing 事件逐行一致；exact 中确实可跳过约 353 万次第二遍 existing-dominates
+   扫描。但连续同机复测 exact 为 `9.216s` 和 `9.385s`，没有净收益。原因是分类仍需继续扫描 bucket
+   以区分 strict 与 formal，抵消了少一次扫描的收益，因此该实验代码已完整撤回。
+3. ng-DSSR SRI label 的 `sriStateKey` 从未被任何 dominance 或 join 读取，已删除字符串字段、构造和接口；
+   SRI dominance 继续直接读取不可变 `byte[] sriCounts`。trace 事件额度耗尽后，调用点也会立即停止序列
+   恢复和动态字符串构造。
+4. `noSriFrontier` 暂不删除。虽然代数上始终满足
+   `frontier(t)=noSriFrontier(t)+sriPenalty`，但两套函数分别经过 shift/normalize；改为常数回推会改变
+   浮点断点归一化轨迹，而且只影响 SRI + LIST_PARTIAL 备用路径，当前收益不足以承担该风险。
+5. 其余 envelope、completion scalar 和 depth/message 计数暂不继续清理。部分字段仍用于 Tmid 或完成界
+   诊断，纯展示字段的数量级收益很小；默认热路径中最明显的 trace 配额遗漏已经处理。
+
+最终 173 个主线 Java 文件编译通过，time-indexed、strong Phase-I、ng-DSSR 边界、source-aware dominance、
+外包正值列缓存和 SRI posting 回归通过。一次测试命令因包名写错未找到类，改用正确类名
+`TWETBPC.LP.SubsetRowColumnPostingIndexTest` 后通过，不属于代码失败。

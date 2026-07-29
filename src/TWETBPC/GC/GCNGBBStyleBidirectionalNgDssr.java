@@ -2078,6 +2078,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		targetTrace.append(message);
 	}
 
+	private boolean isTargetTraceActive() {
+		return targetTrace != null && targetTraceEventLimit > 0;
+	}
+
 	private void runFullMidpointDiagnosticIfEnabled(LP lp) {
 		int targetNodeId = Integer.getInteger("twet.bpc.midpointFullDiagnosticNodeId", -1);
 		if (targetNodeId < 0 || lp.getNode() == null || lp.getNode().id != targetNodeId) {
@@ -3312,7 +3316,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(label.jid), label);
 		}
 		diagnosticForwardPops++;
-		if (targetTrace != null) {
+		if (isTargetTraceActive()) {
 			traceWatchedLabel("WATCH_F_POP", label);
 		}
 
@@ -3347,14 +3351,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			timingStart = extensionTimingStart();
 			ForwardLabel child = materializeForwardLabel(label, nextJob, candidate, lp);
 			recordForwardBuildNanos(timingStart);
-			if (targetTrace != null) {
+			if (isTargetTraceActive()) {
 				traceTargetForward("F_CONSTRUCT", child, lp);
 				traceWatchedChild("WATCH_F_CHILD", label, child, nextJob);
 			}
 			timingStart = extensionTimingStart();
 			InsertStatus status = insertForward(child, lp);
 			recordForwardInsertNanos(timingStart);
-			if (targetTrace != null) {
+			if (isTargetTraceActive()) {
 				traceTargetForward("F_INSERT_" + status, child, lp);
 				traceWatchedLabel("WATCH_F_INSERT_" + status, child);
 			}
@@ -3377,7 +3381,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(label.jid), label);
 		}
 		diagnosticBackwardPops++;
-		if (targetTrace != null) {
+		if (isTargetTraceActive()) {
 			traceWatchedLabel("WATCH_B_POP", label);
 		}
 
@@ -3412,14 +3416,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			timingStart = extensionTimingStart();
 			BackwardLabel child = materializeBackwardLabel(label, prevJob, candidate, lp);
 			recordBackwardBuildNanos(timingStart);
-			if (targetTrace != null) {
+			if (isTargetTraceActive()) {
 				traceTargetBackward("B_CONSTRUCT", child);
 				traceWatchedChild("WATCH_B_CHILD", label, child, prevJob);
 			}
 			timingStart = extensionTimingStart();
 			InsertStatus status = insertBackward(child, lp);
 			recordBackwardInsertNanos(timingStart);
-			if (targetTrace != null) {
+			if (isTargetTraceActive()) {
 				traceTargetBackward("B_INSERT_" + status, child);
 				traceWatchedLabel("WATCH_B_INSERT_" + status, child);
 			}
@@ -4015,7 +4019,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Node node = lp.getNode();
 		int sink = node.sinkId();
 		if (isPricingArcForbidden(node, label.jid, sink)) {
-			if (targetTrace != null) {
+			if (isTargetTraceActive()) {
 				traceWatchedLabel("WATCH_F_SINK_ARC_FORBIDDEN", label);
 			}
 			return;
@@ -8546,7 +8550,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final PiecewiseLinearFunction noSriFrontier;
 		final byte[] sriCounts;
 		final double sriPenalty;
-		final String sriStateKey;
 		/** join 闂傚倸鍟抽崺鏍敊鐏炲墽鈻旈悗娑櫳戦ˇ褔鎮介姘暈闁哄棛鍠庨娆撴嚋闂堟稓褰囬梺鍛婅壘濞村嘲鈻撻幋锕€绀勯柤鎭掑劜濞堝墎绱撻崒娑欏碍闁宦板姂閺佸秴鈻界喊绯眅l frontier 闂佸憡甯楃粙鎴犵磽閹捐瑙﹂幖瀛樼箘閻熸繈鏌涢幇顒傂￠柟渚垮姂瀵劑鎯傞崫銉ь槷闂佸憡鐟崹顖涚閹烘柡鍋撻悷閭︽Ц闁告瑥绻戝鍕吋閸ャ劍娈㈤梺?*/
 		PiecewiseLinearFunction joinExtendedFrontier;
 
@@ -8562,31 +8565,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			this.noSriFrontier = noSriFrontier;
 			this.sriCounts = sriCounts == null ? EMPTY_SRI_COUNTS : sriCounts;
 			this.sriPenalty = sriPenalty;
-			this.sriStateKey = buildSriStateKey(this.sriCounts);
-		}
-
-		@Override
-		public String sriStateKey() {
-			return sriStateKey;
 		}
 
 		@Override
 		public byte[] sriCounts() {
 			return sriCounts;
-		}
-
-		private static String buildSriStateKey(byte[] counts) {
-			if (counts == null || counts.length == 0) {
-				return "";
-			}
-			StringBuilder key = new StringBuilder(counts.length);
-			for (int i = 0; i < counts.length; i++) {
-				if (i > 0) {
-					key.append(',');
-				}
-				key.append((int) counts[i]);
-			}
-			return key.toString();
 		}
 
 		@Override

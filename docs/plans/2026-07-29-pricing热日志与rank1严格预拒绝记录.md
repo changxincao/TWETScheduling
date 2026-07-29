@@ -27,3 +27,19 @@
 ng-DSSR join、source-aware dominance、SRI coefficient/posting、active-memory merge 和 cut inheritance
 回归均通过。ng-DSSR hot diagnostics 的并行 wall-time 对照不能作为轨迹等价证据，因为当前 midpoint probe
 本身按实测时间选择 Tmid，两个竞争进程会产生不同反馈；字段引用审计确认本轮关闭的计数只进入 message/reset。
+
+## 二次正确性审计
+
+再次逐字段检查后确认，被 `HOT_PATH_DIAGNOSTICS`、`PRICING_DIAGNOSTICS` 控制的字段只用于递增、清零和
+日志输出，不进入 Tmid、DSSR 更新、剪枝、候选排序、定价证书或返回列判断。time-indexed pre-heuristic 的
+elementary 检查仍无条件执行；只有 exact 模式下原本仅服务计数的重复序列扫描被跳过。
+
+rank-1 严格预拒绝与正式 packed dominance 使用同一 residual 修正项。正式判断允许
+`existingRC <= correctedCandidateRC + RC_TOLERANCE`，预拒绝只接受
+`existingRC <= correctedCandidateRC - RC_TOLERANCE`，因此严格属于正式 dominance 的子集。exact 模式先完整
+构造 backward labels，最终 concatenation 也会再次枚举保留的 forward label 与同一 suffix；被已有 label
+严格支配的候选不可能改善列集合或 `bestPseudoReducedCost`。
+
+本次还修正两个纯诊断遗漏：full-midpoint 诊断关闭热统计时不再把 `fCand=0` 当作真实统计输出；forward sink
+禁弧路径在未启用目标 trace 时不再调用 trace helper。173 个主线 Java 文件重新编译通过，time-indexed、
+rank-1、ng-DSSR join 和 source-aware dominance 在诊断开关关闭与开启口径下均通过回归。

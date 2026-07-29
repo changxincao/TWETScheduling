@@ -2318,7 +2318,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " keptRatio=" + directionalRatio(forwardKept, backwardKept)
 				+ " fwPops=" + diagnosticForwardPops
 				+ " bwPops=" + diagnosticBackwardPops
-				+ " fCand=" + forwardExtensionCandidates
+				+ (HOT_PATH_DIAGNOSTICS ? " fCand=" + forwardExtensionCandidates : " hotPathDiagnostics=off")
 				+ " fBuilt=" + forwardExtensionConstructed
 				+ " fBoundSurvivors=" + forwardExtensionBoundSurvivors
 				+ " cbFPruned=" + completionForwardLabelsPruned
@@ -4015,7 +4015,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Node node = lp.getNode();
 		int sink = node.sinkId();
 		if (isPricingArcForbidden(node, label.jid, sink)) {
-			traceWatchedLabel("WATCH_F_SINK_ARC_FORBIDDEN", label);
+			if (targetTrace != null) {
+				traceWatchedLabel("WATCH_F_SINK_ARC_FORBIDDEN", label);
+			}
 			return;
 		}
 		forwardSinkLabelsVisited++;

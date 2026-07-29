@@ -320,25 +320,25 @@ public class TWETBPCConfig {
 	public boolean bidirectionalMidpointProbe = true;
 	/** 2026-07-23: 每个 Tmid probe 候选的总 pop 上限；10000 对应正反向各最多5000次，选中状态由正式 labeling 直接续跑。 */
 	public int bidirectionalMidpointProbePopLimit = 10000;
-	/** 2026-06-06: Tmid probe 最多连续试探多少个候选点。 */
+	/** 旧双向 pricing 的 probe 候选上限；2026-07-23 后的 ng-DSSR 固定流程不使用。 */
 	public int bidirectionalMidpointProbeMaxCandidates = 5;
-	/** 2026-06-06: Tmid probe 每轮按左右压力移动的比例；0.15 表示左移 *0.85，右移 *1.15。 */
+	/** 旧双向 pricing 的乘法移动比例；ng-DSSR 改为有效区间宽度的固定 10%。 */
 	public double bidirectionalMidpointProbeMoveRatio = 0.15;
-	/** 2026-07-21: ng-DSSR Tmid probe 默认使用正反向实际耗时；旧 pricing 实现不支持时仍回退 queue。 */
+	/** 旧双向 pricing 的可选 score；ng-DSSR 的 effective score 固定为 time。 */
 	public String bidirectionalMidpointProbeScore = "time";
-	/** 2026-07-21: 总 probe 耗时在最小值该比例以内时，视为近似同档，再比较正反向耗时平衡。 */
+	/** 旧候选排序的时间容忍；ng-DSSR 固定 walk/bracket 流程不使用。 */
 	public double bidirectionalMidpointProbeTimeTolerance = 0.20;
-	/** 2026-06-08: 二级 score 仍默认 off；remaining 只作为实验口径，个别算例不能证明适合全局默认。 */
+	/** 旧候选排序的二级 score；ng-DSSR 固定 walk/bracket 流程不使用。 */
 	public String bidirectionalMidpointProbeTieScore = "off";
-	/** 2026-06-07: 主指标倍数差不超过该值时，才使用二级 score 打破平局。 */
+	/** 旧候选排序的二级 score 容忍；ng-DSSR 固定 walk/bracket 流程不使用。 */
 	public double bidirectionalMidpointProbeTieTolerance = 0.0;
-	/** 2026-06-07: rank=1 候选达到该不均衡倍数后，再额外试少量候选即可停止；小于等于 1 表示关闭。 */
+	/** ng-DSSR 浅层正反向耗时比不超过该值时接受当前 Tmid；非法值回退 1.5。 */
 	public double bidirectionalMidpointProbeEarlyStopRatio = 1.5;
-	/** 2026-06-07: 达到早停阈值后额外继续试探的候选数。 */
+	/** 旧 probe 达到阈值后的附加候选数；ng-DSSR 找到可接受点后立即停止。 */
 	public int bidirectionalMidpointProbeExtraCandidatesAfterThreshold = 1;
-	/** 2026-06-07: Tmid 试探方向反转时，是否在前后两个候选之间额外试一次中点后停止。 */
+	/** 旧 probe 的 bracket 开关；ng-DSSR 方向反转后固定进入二分。 */
 	public boolean bidirectionalMidpointProbeBracketOnDirectionChange = true;
-	/** 2026-06-14: probe 到达基础候选数后，如果不均衡仍超过该倍数，则允许继续同方向试探。 */
+	/** 旧 probe 超过基础候选数后的续探阈值；ng-DSSR 不使用候选数上限。 */
 	public double bidirectionalMidpointProbeHighImbalanceRatio = 10.0;
 	/** 2026-07-23: 同一次 ng-DSSR exact 内，以上一 DSSR 轮的 Tmid/失衡反馈作为下一轮 probe 初值；每轮仍独立 probe。 */
 	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;

@@ -27,6 +27,11 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 		this.historyWarmStart = new NgDssrHistoryWarmStart(data.n);
 	}
 
+	/** 返回 ng-DSSR 当前实际使用的固定 midpoint probe 口径，供 run 配置日志复现。 */
+	public static String effectiveMidpointProbeConfiguration(TWETBPCConfig config) {
+		return GCNGBBStyleBidirectionalNgDssr.effectiveMidpointProbeConfiguration(config);
+	}
+
 	@Override
 	public PricingResult price(LP lp) {
 		return price(lp, TimeLimitChecker.NONE);

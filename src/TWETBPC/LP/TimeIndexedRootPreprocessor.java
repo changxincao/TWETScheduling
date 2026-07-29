@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.PriorityQueue;
 
 import Basic.Data;
 import Output.BPCTraceSink;
@@ -30,6 +31,23 @@ import TWETBPC.Model.TWETMasterStatus;
  * 证据复制回正式 root；临时 graph 列不会进入主线 Pool。
  */
 final class TimeIndexedRootPreprocessor {
+
+	private static final Comparator<ScoredColumn> SCORED_COLUMN_ORDER = new Comparator<ScoredColumn>() {
+		@Override
+		public int compare(ScoredColumn a, ScoredColumn b) {
+			int rc = Double.compare(a.reducedCost, b.reducedCost);
+			if (rc != 0) {
+				return rc;
+			}
+			return Integer.compare(a.sourceColumnId, b.sourceColumnId);
+		}
+	};
+	private static final Comparator<ScoredColumn> WORST_SCORED_COLUMN_FIRST = new Comparator<ScoredColumn>() {
+		@Override
+		public int compare(ScoredColumn a, ScoredColumn b) {
+			return SCORED_COLUMN_ORDER.compare(b, a);
+		}
+	};
 
 	private TimeIndexedRootPreprocessor() {
 	}
@@ -211,7 +229,13 @@ final class TimeIndexedRootPreprocessor {
 			return 0;
 		}
 		LP.PricingDualSnapshot dual = preLp.captureTruePricingDuals();
-		ArrayList<ScoredColumn> candidates = new ArrayList<ScoredColumn>();
+		HashSet<Integer> existingSeedIds = new HashSet<Integer>(root.seedColumnIds);
+		long requiredCapacity = (long) config.timeIndexedRootPreprocessingSeedColumnLimit
+				+ existingSeedIds.size();
+		int capacity = (int) Math.min(Integer.MAX_VALUE, requiredCapacity);
+		int initialCapacity = Math.max(1, Math.min(capacity, preLp.getRestrictedColumnIds().size()));
+		PriorityQueue<ScoredColumn> bestCandidates =
+				new PriorityQueue<ScoredColumn>(initialCapacity, WORST_SCORED_COLUMN_FIRST);
 		for (int columnId : preLp.getRestrictedColumnIds()) {
 			TWETColumn column = prePool.getColumn(columnId);
 			if (!column.getPattern().isElementary()) {
@@ -220,19 +244,19 @@ final class TimeIndexedRootPreprocessor {
 			if (usesPricingOnlyForbiddenArc(column, root)) {
 				continue;
 			}
-			candidates.add(new ScoredColumn(columnId, column, preLp.computeReducedCost(column, dual)));
-		}
-		candidates.sort(new Comparator<ScoredColumn>() {
-			@Override
-			public int compare(ScoredColumn a, ScoredColumn b) {
-				int rc = Double.compare(a.reducedCost, b.reducedCost);
-				if (rc != 0) {
-					return rc;
-				}
-				return Integer.compare(a.sourceColumnId, b.sourceColumnId);
+			double reducedCost = preLp.computeReducedCost(column, dual);
+			if (bestCandidates.size() < capacity) {
+				bestCandidates.add(new ScoredColumn(columnId, column, reducedCost));
+				continue;
 			}
-		});
-		HashSet<Integer> existingSeedIds = new HashSet<Integer>(root.seedColumnIds);
+			ScoredColumn worst = bestCandidates.peek();
+			if (compareScore(reducedCost, columnId, worst) < 0) {
+				bestCandidates.poll();
+				bestCandidates.add(new ScoredColumn(columnId, column, reducedCost));
+			}
+		}
+		ArrayList<ScoredColumn> candidates = new ArrayList<ScoredColumn>(bestCandidates);
+		candidates.sort(SCORED_COLUMN_ORDER);
 		int copied = 0;
 		for (ScoredColumn candidate : candidates) {
 			if (copied >= config.timeIndexedRootPreprocessingSeedColumnLimit) {
@@ -247,6 +271,11 @@ final class TimeIndexedRootPreprocessor {
 			}
 		}
 		return copied;
+	}
+
+	private static int compareScore(double reducedCost, int sourceColumnId, ScoredColumn other) {
+		int rc = Double.compare(reducedCost, other.reducedCost);
+		return rc != 0 ? rc : Integer.compare(sourceColumnId, other.sourceColumnId);
 	}
 
 	private static boolean usesPricingOnlyForbiddenArc(TWETColumn column, Node root) {

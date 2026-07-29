@@ -931,7 +931,42 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrExtensionTimingDiagnostics = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrExtensionTimingDiagnostics",
 				Boolean.toString(config.ngDssrExtensionTimingDiagnostics)));
+		validateNgDssrMidpointProbeOverrides(config);
 		return config;
+	}
+
+	/**
+	 * 2026-07-30: ng-DSSR 使用 7 月 23 日后的固定 time-probe。旧旋钮仍服务其他双向
+	 * pricing，但在 ng-DSSR 比较 runner 中显式设置会形成无效 A/B，因此直接拒绝。
+	 */
+	private static void validateNgDssrMidpointProbeOverrides(TWETBPCConfig config) {
+		if (!config.useGCNGBBStyleNgDssrPricing
+				&& !config.useGCNGBBStyleNgDssrPartialDominancePricing
+				&& !config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
+			return;
+		}
+		String prefix = "twet.bpc.fullDomainCompare.";
+		String requestedScore = System.getProperty(prefix + "midpointProbeScore");
+		if (requestedScore != null && !"time".equalsIgnoreCase(requestedScore.trim())) {
+			throw new IllegalArgumentException(prefix + "midpointProbeScore=" + requestedScore
+					+ " is unsupported by ng-DSSR; effective scoreMode is fixed to time");
+		}
+		String[] unsupported = new String[] {
+				"midpointProbeMaxCandidates",
+				"midpointProbeMoveRatio",
+				"midpointProbeTimeTolerance",
+				"midpointProbeTieScore",
+				"midpointProbeTieTolerance",
+				"midpointProbeExtraCandidates",
+				"midpointProbeBracket",
+				"midpointProbeHighImbalanceRatio"
+		};
+		for (String suffix : unsupported) {
+			if (System.getProperty(prefix + suffix) != null) {
+				throw new IllegalArgumentException(prefix + suffix
+						+ " belongs to the legacy midpoint probe and is unsupported by ng-DSSR");
+			}
+		}
 	}
 
 	private static void resetHeuristicSeed(Path instance) {

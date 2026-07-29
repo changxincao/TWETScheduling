@@ -173,6 +173,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long midpointStrategyNanos;
 	private static final double MIDPOINT_PROBE_STEP_FRACTION = 0.10;
 	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.05;
+
+	static String effectiveMidpointProbeConfiguration(TWETBPCConfig config) {
+		double acceptableRatio = config.bidirectionalMidpointProbeEarlyStopRatio;
+		if (!Double.isFinite(acceptableRatio) || !Utility.compareGt(acceptableRatio, 1.0)) {
+			acceptableRatio = 1.5;
+		}
+		return "enabled=" + config.bidirectionalMidpointProbe
+				+ ",scoreMode=time"
+				+ ",popLimit=" + Math.max(1, config.bidirectionalMidpointProbePopLimit)
+				+ ",candidateLimit=untilAcceptBracketOrBoundary"
+				+ ",stepFraction=" + MIDPOINT_PROBE_STEP_FRACTION
+				+ ",bracketToleranceFraction=" + MIDPOINT_PROBE_BRACKET_TOLERANCE
+				+ ",acceptableRatio=" + acceptableRatio
+				+ ",dssrReuse=" + config.bidirectionalMidpointProbeReuseWithinDssr
+				+ ",dssrImbalanceThreshold=" + config.bidirectionalMidpointProbeDssrImbalanceThreshold;
+	}
 	// 2026-05-22: 閻熸粎澧楅幐鍛婃櫠閻樼鍋撶憴鍕叝闁绘粠鍨卞顏堫敊閻愵剛鏆?job-level 闂佸憡鏌ｉ崝宥夊焵?H_j 缂傚倸鍊归幐鎼佹偤閵娾晛违?
 	private PiecewiseLinearFunction[] dynamicJobPenaltyByJob;
 	private double[] dynamicJobHStart;

@@ -1172,3 +1172,21 @@ W300 两组的 time-indexed 预处理已经较轻，主要矛盾转移到 exact 
 再次按实际调用链核对后，当前 normal/source-aware ng-DSSR 主线中，`bidirectionalMidpointProbePopLimit=10000` 表示每个候选 Tmid 的正反向总 pop 预算，forward 和 backward 各最多 5000，并不是每侧 10000。主线固定使用正反向浅 probe 的实际运行时间作为评价指标，接受阈值为较慢侧不超过较快侧的 1.5 倍。
 
 当前主线不再读取 `bidirectionalMidpointProbeMaxCandidates=5` 和 `bidirectionalMidpointProbeTimeTolerance=0.20`；这两个字段仅残留在旧 partial-dominance probe 路径，不能用于描述当前 normal ng-DSSR。新主线从有效 Tmid 区间宽度的 10% 作为移动步长，在方向反转后进入二分，直到区间宽度不超过有效区间的 5%。此外，某侧搜索耗尽、达到平衡阈值或触及有效边界也会停止。因此当前候选数不是固定最多 5 个。
+
+### 2026-07-30 固定 time-probe 的配置收口
+
+本轮确认比较 runner 仍读取一组旧 probe 属性，但 7 月 23 日后的 ng-DSSR 核心固定使用
+time score、有效区间 10% 步长和 5% bracket tolerance，候选数由接受、二分或边界条件决定。
+因此旧属性即使出现在配置快照中也不会改变 ng-DSSR，曾经显式设置
+`midpointProbeScore=queue` 的实验不能解释为 queue/time A/B。
+
+当前选择保留固定 time-probe，不重新接回旧候选排序流程。`GCBBFullDomainComparisonTest` 在
+ng-DSSR 模式下会拒绝显式的非 time score，以及 `maxCandidates/moveRatio/timeTolerance/
+tieScore/tieTolerance/extraCandidates/bracket/highImbalanceRatio` 等旧属性；非 ng-DSSR
+双向定价仍可继续使用这些旋钮。每份 run 配置新增
+`run.effective.ngDssrMidpointProbe`，直接由核心常量和当前有效配置生成，明确记录 pop limit、
+无固定候选上限、10% 步长、5% 二分容忍、1.5 接受阈值和 DSSR 轮间反馈配置。
+
+验证中，显式 `midpointProbeScore=queue` 在模型构造前 fail-fast；相同属性用于非 ng-DSSR
+入口仍可正常初始化。默认 40-2 root 日志正确输出 effective 配置，probe、DSSR 和返回列代码
+本身没有修改。

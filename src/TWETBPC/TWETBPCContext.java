@@ -197,6 +197,12 @@ public class TWETBPCContext {
 		lines.add("run.components.pricingEngines=" + classNames(pricingEngines));
 		lines.add("run.components.cutGenerators=" + classNames(cutGenerators));
 		lines.add("run.components.branchers=" + classNames(branchers));
+		if (config.useGCNGBBStyleNgDssrPricing
+				|| config.useGCNGBBStyleNgDssrPartialDominancePricing
+				|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
+			lines.add("run.effective.ngDssrMidpointProbe="
+					+ GCNGBBStyleBidirectionalNgDssrPricingEngine.effectiveMidpointProbeConfiguration(config));
+		}
 		lines.add("run.system.javaVersion=" + System.getProperty("java.version"));
 		lines.add("run.system.availableProcessors=" + Runtime.getRuntime().availableProcessors());
 		lines.addAll(config.snapshotLines());

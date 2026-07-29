@@ -30,9 +30,33 @@ public final class StrongBranchingPhaseOnePricingTest {
 	public static void main(String[] args) throws Exception {
 		testTimeIndexedWithoutCut();
 		testTimeIndexedWithSriCut();
+		testTimeIndexedDeferredPackedMultiwordEquivalence();
 		testNgDssrWithoutCut();
 		testNgDssrWithSriCut();
 		System.out.println("StrongBranchingPhaseOnePricingTest passed");
+	}
+
+	private static void testTimeIndexedDeferredPackedMultiwordEquivalence() throws Exception {
+		String property = "twet.bpc.deferRank1LabelMaterialization";
+		String original = System.getProperty(property);
+		try {
+			System.setProperty(property, "false");
+			TestContext legacyContext = createContext(timeIndexedConfig(true), 65);
+			PricingResult legacy = new TimeIndexedGraphRank1CutPricingEngine(legacyContext.data, legacyContext.config)
+					.price(legacyContext.lp);
+
+			System.setProperty(property, "true");
+			TestContext deferredContext = createContext(timeIndexedConfig(true), 65);
+			PricingResult deferred = new TimeIndexedGraphRank1CutPricingEngine(deferredContext.data,
+					deferredContext.config).price(deferredContext.lp);
+			assertEquivalentPricingResults("time-indexed/SRI multiword deferred", legacy, deferred);
+		} finally {
+			if (original == null) {
+				System.clearProperty(property);
+			} else {
+				System.setProperty(property, original);
+			}
+		}
 	}
 
 	private static void testTimeIndexedWithoutCut() throws Exception {
@@ -89,8 +113,12 @@ public final class StrongBranchingPhaseOnePricingTest {
 	}
 
 	private static TestContext createContext(TWETBPCConfig config, boolean withCut) throws Exception {
+		return createContext(config, withCut ? 1 : 0);
+	}
+
+	private static TestContext createContext(TWETBPCConfig config, int cutCount) throws Exception {
 		Data data = new Data("data/40-2/wet040_001_2m.dat", true, true);
-		data.n = 6;
+		data.n = cutCount > 20 ? 10 : 6;
 		for (int job = 1; job <= data.n; job++) {
 			data.hardWindowStart[job] = 0.0;
 			data.hardWindowEnd[job] = data.CmaxH;
@@ -111,17 +139,50 @@ public final class StrongBranchingPhaseOnePricingTest {
 		jobDual[2] = 10.0;
 		jobDual[3] = 10.0;
 
-		if (withCut) {
-			int cutId = cutPool.addCut(new TWETCut(-1, TWETCutType.SUBSET_ROW,
-					Arrays.asList(Integer.valueOf(1), Integer.valueOf(2), Integer.valueOf(3)),
-					1.0, "phaseOneRegression"));
-			node.activeCutIds.add(Integer.valueOf(cutId));
-			setField(lp, "activeSubsetRowPricingCutIds",
-					new ArrayList<Integer>(Arrays.asList(Integer.valueOf(cutId))));
-			setField(lp, "activeSubsetRowPricingDuals",
-					new ArrayList<Double>(Arrays.asList(Double.valueOf(-100.0))));
+		if (cutCount > 0) {
+			ArrayList<Integer> cutIds = new ArrayList<Integer>(cutCount);
+			ArrayList<Double> cutDuals = new ArrayList<Double>(cutCount);
+			outer: for (int first = 1; first <= data.n; first++) {
+				for (int second = first + 1; second <= data.n; second++) {
+					for (int third = second + 1; third <= data.n; third++) {
+						int cutId = cutPool.addCut(new TWETCut(-1, TWETCutType.SUBSET_ROW,
+								Arrays.asList(Integer.valueOf(first), Integer.valueOf(second),
+										Integer.valueOf(third)),
+								1.0, "phaseOneRegression-" + cutIds.size()));
+						cutIds.add(Integer.valueOf(cutId));
+						cutDuals.add(Double.valueOf(-100.0));
+						if (cutIds.size() == cutCount) {
+							break outer;
+						}
+					}
+				}
+			}
+			if (cutIds.size() != cutCount) {
+				throw new AssertionError("unable to construct " + cutCount + " distinct rank-1 cuts");
+			}
+			node.activeCutIds.addAll(cutIds);
+			setField(lp, "activeSubsetRowPricingCutIds", cutIds);
+			setField(lp, "activeSubsetRowPricingDuals", cutDuals);
 		}
 		return new TestContext(data, config, lp);
+	}
+
+	private static void assertEquivalentPricingResults(String name, PricingResult first, PricingResult second) {
+		if (first.isImproved() != second.isImproved()
+				|| Double.doubleToLongBits(first.getCertifiedInternalReducedCost()) != Double
+						.doubleToLongBits(second.getCertifiedInternalReducedCost())
+				|| first.getColumns().size() != second.getColumns().size()
+				|| first.getOutsourcingColumns().size() != second.getOutsourcingColumns().size()) {
+			throw new AssertionError(name + " result header mismatch");
+		}
+		for (int index = 0; index < first.getColumns().size(); index++) {
+			TWETColumn left = first.getColumns().get(index);
+			TWETColumn right = second.getColumns().get(index);
+			if (!left.getSignature().equals(right.getSignature())
+					|| Double.doubleToLongBits(left.getCost()) != Double.doubleToLongBits(right.getCost())) {
+				throw new AssertionError(name + " column mismatch at index " + index);
+			}
+		}
 	}
 
 	private static void assertFindsTrueCostColumns(String name, PricingResult result, TestContext context) {

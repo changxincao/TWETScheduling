@@ -2,7 +2,6 @@ package TWETBPC;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Properties;
 
@@ -223,12 +222,8 @@ public class TWETBPCContext {
 			names.add(object instanceof PricingEngine ? ((PricingEngine) object).getName()
 					: object.getClass().getSimpleName());
 		}
-		Collections.sort(names, new Comparator<String>() {
-			@Override
-			public int compare(String a, String b) {
-				return a.compareTo(b);
-			}
-		});
+		// 2026-07-29: pricing、cut 和 branching 组件均按列表顺序执行，日志必须保留该顺序。
+		// 只有下方无执行顺序语义的 JVM 属性继续排序。
 		return names.toString();
 	}
 

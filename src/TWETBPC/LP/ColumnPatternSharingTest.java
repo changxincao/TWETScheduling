@@ -22,6 +22,7 @@ public final class ColumnPatternSharingTest {
 	public static void main(String[] args) throws Exception {
 		testSharedPatternPreservesColumnSemantics();
 		testLegacyPathRemainsAvailableForComparison();
+		testElementaryCacheMatchesSequenceSemantics();
 		if (Boolean.getBoolean("twet.test.columnPatternBenchmark")) {
 			runBenchmark();
 		}
@@ -88,7 +89,8 @@ public final class ColumnPatternSharingTest {
 	private static void assertEquivalentStructure(TWETColumn expected, TWETColumn actual, int sinkId) {
 		if (!expected.getSequence().equals(actual.getSequence())
 				|| !expected.getSignature().equals(actual.getSignature())
-				|| expected.size() != actual.size()) {
+				|| expected.size() != actual.size()
+				|| expected.getPattern().isElementary() != actual.getPattern().isElementary()) {
 			throw new AssertionError("shared pattern changed sequence structure");
 		}
 		for (int job = 1; job < sinkId; job++) {
@@ -103,6 +105,21 @@ public final class ColumnPatternSharingTest {
 					throw new AssertionError("shared pattern changed arc coefficient");
 				}
 			}
+		}
+	}
+
+	private static void testElementaryCacheMatchesSequenceSemantics() {
+		assertElementary(Arrays.asList(1, 2, 3), 3, true);
+		assertElementary(Arrays.asList(1, 2, 1), 3, false);
+		assertElementary(Collections.<Integer>emptyList(), 3, false);
+		assertElementary(Arrays.asList(0, 1), 3, false);
+		assertElementary(Arrays.asList(1, 4), 3, false);
+	}
+
+	private static void assertElementary(List<Integer> sequence, int jobCount, boolean expected) {
+		TWETColumn column = new TWETColumn(-1, sequence, jobCount, 0.0, ColumnSource.PRICING_EXACT, false);
+		if (column.getPattern().isElementary() != expected) {
+			throw new AssertionError("elementary cache mismatch for sequence=" + sequence);
 		}
 	}
 

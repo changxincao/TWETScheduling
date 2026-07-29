@@ -20,6 +20,7 @@ public final class ColumnPattern {
 	private final SequenceSignature signature;
 	private final PackedBitSet jobs;
 	private final int[] jobVisitCounts;
+	private final boolean elementary;
 
 	public ColumnPattern(List<Integer> sequence, int jobCount) {
 		this.sequence = new ArrayList<Integer>(sequence);
@@ -27,11 +28,17 @@ public final class ColumnPattern {
 		this.signature = new SequenceSignature(this.sequence);
 		this.jobs = PackedBitSet.ofJobs(jobCount, this.sequence);
 		this.jobVisitCounts = new int[jobCount + 1];
+		boolean isElementary = !this.sequence.isEmpty();
 		for (int job : this.sequence) {
 			if (job >= 1 && job <= jobCount) {
-				this.jobVisitCounts[job]++;
+				if (++this.jobVisitCounts[job] > 1) {
+					isElementary = false;
+				}
+			} else {
+				isElementary = false;
 			}
 		}
+		this.elementary = isElementary;
 	}
 
 	public List<Integer> getSequence() {
@@ -55,5 +62,10 @@ public final class ColumnPattern {
 
 	public int getJobVisitCount(int job) {
 		return job >= 0 && job < jobVisitCounts.length ? jobVisitCounts[job] : 0;
+	}
+
+	/** @return 序列非空、任务编号合法且每个任务至多出现一次 */
+	public boolean isElementary() {
+		return elementary;
 	}
 }

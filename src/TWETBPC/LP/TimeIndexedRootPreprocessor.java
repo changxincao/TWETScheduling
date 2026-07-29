@@ -71,13 +71,13 @@ final class TimeIndexedRootPreprocessor {
 			preLp.construct(preRoot, preRoot.seedColumnIds);
 			TWETMasterSolution solution = prePc.solve(preLp, incumbentCost);
 			if (isTimeLimitReached(timeLimitChecker)) {
-				return Result.skipped("time limit during preprocessing");
+				return Result.skipped("time limit during preprocessing", System.nanoTime() - start);
 			}
 			if (solution == null || solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
-				return Result.skipped("time-indexed preprocessing root infeasible");
+				return Result.skipped("time-indexed preprocessing root infeasible", System.nanoTime() - start);
 			}
 			if (solution.getStatus() != TWETMasterStatus.LP_RELAXATION && !solution.isInteger()) {
-				return Result.skipped("time-indexed preprocessing root not solved");
+				return Result.skipped("time-indexed preprocessing root not solved", System.nanoTime() - start);
 			}
 			if (config.timeIndexedDualWindowRecheckDiagnostics && preConfig.enableTimeIndexedGraphDualWindow) {
 				TWETBPCConfig noDualCheckConfig = copyConfig(preConfig);
@@ -139,7 +139,7 @@ final class TimeIndexedRootPreprocessor {
 			traceSink.onStageHeartbeat(node, "timeIndexedRootPreprocess.positiveColumn idx=" + index
 					+ ", id=" + entry.getKey()
 					+ ", value=" + value
-					+ ", elementary=" + isElementary(column, data.n)
+					+ ", elementary=" + column.getPattern().isElementary()
 					+ ", len=" + column.size()
 					+ ", storedCost=" + column.getCost()
 					+ ", evalCost=" + trueCost
@@ -214,7 +214,7 @@ final class TimeIndexedRootPreprocessor {
 		ArrayList<ScoredColumn> candidates = new ArrayList<ScoredColumn>();
 		for (int columnId : preLp.getRestrictedColumnIds()) {
 			TWETColumn column = prePool.getColumn(columnId);
-			if (!isElementary(column, data.n)) {
+			if (!column.getPattern().isElementary()) {
 				continue;
 			}
 			if (usesPricingOnlyForbiddenArc(column, root)) {
@@ -247,20 +247,6 @@ final class TimeIndexedRootPreprocessor {
 			}
 		}
 		return copied;
-	}
-
-	private static boolean isElementary(TWETColumn column, int jobCount) {
-		if (column.size() == 0) {
-			return false;
-		}
-		boolean[] seen = new boolean[jobCount + 1];
-		for (int job : column.getSequence()) {
-			if (job < 1 || job > jobCount || seen[job]) {
-				return false;
-			}
-			seen[job] = true;
-		}
-		return true;
 	}
 
 	private static boolean usesPricingOnlyForbiddenArc(TWETColumn column, Node root) {
@@ -296,6 +282,13 @@ final class TimeIndexedRootPreprocessor {
 
 		static Result skipped(String message) {
 			return new Result(false, message, 0L);
+		}
+
+		/**
+		 * 已经构造并求解临时模型后的退出必须保留真实耗时；前置禁用仍使用零耗时重载。
+		 */
+		static Result skipped(String message, long elapsedNanos) {
+			return new Result(false, message, elapsedNanos);
 		}
 
 		static Result applied(int tempPoolSize, int timeArcCount, int promotedOrdinaryArcs, int tightenedJobs,

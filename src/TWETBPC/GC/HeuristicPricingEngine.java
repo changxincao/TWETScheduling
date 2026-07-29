@@ -53,6 +53,8 @@ public class HeuristicPricingEngine implements PricingEngine {
 	private final TWETBPCConfig config;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 	private final TWETColumnEvaluator evaluator;
+	/** merge2Segments 不读取 Solution 的可变解状态，整个 pricing engine 复用一个辅助实例。 */
+	private final Solution mergeHelper;
 	private final PiecewiseLinearFunction.ReadOnlySegmentView[] penaltySegmentViewCache;
 	private long diagnosticTraceCallSequence;
 	private HeuristicPricingDiagnosticTrace lastDiagnosticTrace;
@@ -61,6 +63,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);
+		this.mergeHelper = new Solution(data);
 		this.penaltySegmentViewCache = buildReadOnlySegmentViews(data.penaltyFunction);
 	}
 
@@ -643,7 +646,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 	}
 
 	private final class TabuRouteState {
-		private final Solution mergeHelper = new Solution(data);
 		private ArrayList<Integer> sequence;
 		private boolean[] used;
 		private int[] tabuTenure;
@@ -670,7 +672,6 @@ public class HeuristicPricingEngine implements PricingEngine {
 				HeuristicArcCompatibility arcCompatibility, HeuristicMoveDuals moveDuals,
 				HeuristicPricingStats stats) {
 			this.sequence = new ArrayList<Integer>(seed);
-			this.used = new boolean[data.n + 1];
 			this.tabuTenure = new int[data.n + 1];
 			this.sriContext = sriContext;
 			this.windowContext = windowContext;

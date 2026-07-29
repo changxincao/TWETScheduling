@@ -100,3 +100,5 @@ rank-1 候选池现在只立即保存恢复出的 sequence、`SequenceSignature`
 40-2 rank-1 root 的独立 before/after 结果完全保持 `bound=22527.007009`、275 次 pricing、46609 条列、peak cut pool 235 和 `valid=true`；rank-1 exact pricing 由 `15.163613s` 降至 `13.875196s`，约减少 8.5%，root 时间由 `37.798827s` 降至 `36.462446s`。总 solve 时间基本不变，因为该实验后半段由 strong-trial LP 主导。列化外包 SP1/SP2 三组 smoke test 的目标、bound、外包数量和内部列数逐组一致。173 个主线 Java 文件完整编译通过；strong Phase-I（含 65 条 cut 的 multiword packed 等价对拍）、time-indexed、restricted membership、active-cut inheritance 和 column-pattern sharing 回归通过。
 
 序列恢复缓存、跨 pricing 的启发式 seed 缓存和 SRI `LIST_PARTIAL` overlap 短路均未接入。前两项没有足够热点证据且需要额外失效协议，后一项只影响当前非主线的备用 dominance store。`refreshMinReducedCost()` 继续保留。
+
+提交后再次按正确性而非性能复核。CPLEX 批量 dual 数组与各 `HashMap` entry 快照使用同一顺序，coverage 的 `start=1,num=n` 与保留空位的 `coverRanges` 对齐；内部列和外包列变量数组分别与 restricted ID 列表同序。列化外包的整数性同时检查聚合 job value 和原始 column value，筛列使用的正值集合与 reduced cost 来自同一次 LP 解。rank-1 候选的三条 sequence 恢复入口均创建独立列表，heap 中被替换的旧候选仍按 map identity 惰性失效，Phase-I 仍只对最终 top-K 刷真实成本。40-2 before/after 日志抽取的 9 条算法轨迹逐行零差异；显式外包与列化外包三组 SP1/SP2 再次得到相同 objective、bound、外包任务数和内部列数。未发现正确性问题。

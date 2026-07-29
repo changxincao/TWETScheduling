@@ -110,3 +110,7 @@ rank-1 候选池现在只立即保存恢复出的 sequence、`SequenceSignature`
 强分支候选的有界堆不值得修改。`Tree` 传入 `Integer.MAX_VALUE` 是为了同时保留真实 `candidateCount`；若 brancher 只返回 top-K，就需要新增 batch/result 接口才能保留日志与评分语义。历史 49096 条 strong-branching 记录中，candidateCount 中位数 1、P90 为 115、P99 为 181、最大 275；排序最多几百个轻量对象，相比左右 trial LP 可忽略。Outsourcing brancher 最多只有 n 个候选，tariff brancher 更少。
 
 两个 pricing heap 的 stale candidate 暂不增加统计或重建协议。旧候选只在同签名被更优值替换时滞留，随后一旦需要读取 worst candidate，较差的 stale root 会由现有 identity 检查惰性弹出；solver 结束后整套 heap 释放。普通引擎完成延迟物化后，stale candidate 也不再持有 `ColumnPattern/TWETColumn`，潜在内存成本进一步下降。最终 top-K 重建一次签名、dense `arcDual` 清零、snapshot 深拷贝及临时 map/range 数组仍属次要项，不继续增加缓存状态。
+
+普通 time-indexed 候选延迟物化的独立 A/B 已完成并保留。sequence 仍在候选入口恢复，用于 pre-heuristic elementary 过滤和 `SequenceSignature`；active candidate 只保存 sequence、signature、图内成本、source 和 reduced cost，最终排序后才构造 `TWETColumn`。同签名旧候选不优于新值时，目标成本反推也一并跳过。dual-window recheck、Phase-I evaluator、best-candidate 诊断和 stabilization oracle 均改为读取轻量候选字段，原执行时点不变；dual-window oracle 若同时作为返回列，只物化一次。
+
+40-2 no-cut time-indexed root 的 before/after 均得到 `bound=22487.647059`、211 次 pricing、45113 条列和 `valid=true`，9 条关键算法轨迹逐行零差异。普通 exact pricing 由 `2.678398s` 降至 `2.052505s`，约减少 23.4%；root 由 `9.091428s` 降至 `7.495770s`，约减少 17.5%；总 solve 由 `23.048539s` 降至 `21.510709s`，约减少 6.7%。173 个主线 Java 文件完整编译通过，time-indexed、Phase-I/multiword rank-1、restricted membership、active-cut inheritance、column sharing、SRI coefficient 和 posting 七项回归通过。

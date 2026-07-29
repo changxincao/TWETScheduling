@@ -15,7 +15,6 @@ import TWETBPC.TimeLimitChecker;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
-import TWETBPC.Model.ColumnPattern;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Util.SequenceSignature;
@@ -413,7 +412,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			observeDualWindowBestCandidate(candidates.isEmpty() ? null : candidates.get(0));
 			ArrayList<TWETColumn> columns = new ArrayList<TWETColumn>();
 			for (int i = 0; i < candidates.size() && columns.size() < maxColumns; i++) {
-				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i).column,
+				TWETColumn column = maybeRecheckSelectedCandidate(candidates.get(i),
 						collectStabilizationOracle && i == 0);
 				if (column != null) {
 					columns.add(column);
@@ -433,37 +432,40 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					: config.maxExactPricingColumns;
 		}
 
-		private TWETColumn maybeRecheckSelectedCandidate(TWETColumn column, boolean oracleCandidate) {
+		private TWETColumn maybeRecheckSelectedCandidate(Candidate candidate, boolean oracleCandidate) {
 			if (phaseOneObjective) {
 				// Phase-I 搜索阶段只维护零真实成本 reduced cost；仅对最终 top-K 物化真实列成本。
-				double trueCost = evaluator.evaluate(column.getSequence());
+				double trueCost = evaluator.evaluate(candidate.sequence);
 				if (Utility.isBigMValue(trueCost)) {
 					return null;
 				}
-				TWETColumn checked = new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+				TWETColumn checked = new TWETColumn(-1, candidate.sequence, n, trueCost, candidate.source, false);
 				if (oracleCandidate) {
 					oracleColumn = checked;
 				}
 				return checked;
 			}
 			if (!graphWindow.dualWindow) {
+				TWETColumn column = new TWETColumn(-1, candidate.sequence, n, candidate.cost, candidate.source, false);
 				if (oracleCandidate) {
 					oracleColumn = column;
 				}
 				return column;
 			}
-			double graphReducedCost = reducedCost(column.getSequence(), column.getCost());
-			double trueCost = evaluator.evaluate(column.getSequence());
+			double graphReducedCost = reducedCost(candidate.sequence, candidate.cost);
+			double trueCost = evaluator.evaluate(candidate.sequence);
 			if (config.timeIndexedDualWindowRecheckDiagnostics) {
-				observeDualWindowRecheckDelta(graphReducedCost, reducedCost(column.getSequence(), trueCost));
+				observeDualWindowRecheckDelta(graphReducedCost, reducedCost(candidate.sequence, trueCost));
 			}
 			if (Utility.isBigMValue(trueCost)) {
 				dualWindowRecheckFiltered++;
 				return null;
 			}
-			double trueReducedCost = reducedCost(column.getSequence(), trueCost);
+			double trueReducedCost = reducedCost(candidate.sequence, trueCost);
+			TWETColumn checked = null;
 			if (oracleCandidate) {
-				oracleColumn = new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+				checked = new TWETColumn(-1, candidate.sequence, n, trueCost, candidate.source, false);
+				oracleColumn = checked;
 			}
 			if (!config.timeIndexedDualWindowRecheckDiagnostics) {
 				observeDualWindowRecheckDelta(graphReducedCost, trueReducedCost);
@@ -473,7 +475,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				return null;
 			}
 			dualWindowRecheckAccepted++;
-			return new TWETColumn(-1, column.getSequence(), n, trueCost, column.getSource(), false);
+			return checked != null ? checked
+					: new TWETColumn(-1, candidate.sequence, n, trueCost, candidate.source, false);
 		}
 
 		private void materializeNonnegativeOracle() {
@@ -589,19 +592,18 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				dualWindowBestCandidateDiagnostic = ", bestGraphCandidate=none";
 				return;
 			}
-			TWETColumn column = candidate.column;
-			double graphCost = column.getCost();
-			double graphReducedCost = reducedCost(column.getSequence(), graphCost);
-			double trueCost = evaluator.evaluate(column.getSequence());
-			double trueReducedCost = reducedCost(column.getSequence(), trueCost);
+			double graphCost = candidate.cost;
+			double graphReducedCost = reducedCost(candidate.sequence, graphCost);
+			double trueCost = evaluator.evaluate(candidate.sequence);
+			double trueReducedCost = reducedCost(candidate.sequence, trueCost);
 			dualWindowBestCandidateDiagnostic = ", bestGraphCandidate={graphRc=" + graphReducedCost
 					+ ", trueRc=" + trueReducedCost
 					+ ", graphCost=" + graphCost
 					+ ", trueCost=" + trueCost
 					+ ", costDiff=" + (graphCost - trueCost)
-					+ ", repeated=" + hasRepeatedJob(column.getSequence())
-					+ ", len=" + column.size()
-					+ ", seq=" + column.getSequence()
+					+ ", repeated=" + hasRepeatedJob(candidate.sequence)
+					+ ", len=" + candidate.sequence.size()
+					+ ", seq=" + candidate.sequence
 					+ "}";
 		}
 
@@ -693,10 +695,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					return;
 				}
 			}
-			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
 			ColumnSource source = preHeuristicMode ? ColumnSource.PRICING_HEURISTIC : ColumnSource.PRICING_EXACT;
-			ColumnPattern pattern = new ColumnPattern(sequence, n);
-			rememberCandidate(pattern.getSignature(), new TWETColumn(-1, pattern, cost, source, false), reducedCost);
+			SequenceSignature signature = new SequenceSignature(sequence);
+			rememberCandidate(signature, sequence, source, reducedCost);
 		}
 
 		private double objectiveCostFromReducedCost(ArrayList<Integer> sequence, double reducedCost) {
@@ -823,12 +824,15 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return worst != null && Utility.compareLt(reducedCost, worst.reducedCost);
 		}
 
-		private void rememberCandidate(SequenceSignature signature, TWETColumn column, double reducedCost) {
+		private void rememberCandidate(SequenceSignature signature, ArrayList<Integer> sequence,
+				ColumnSource source, double reducedCost) {
 			Candidate existing = candidateBySignature.get(signature);
 			if (existing != null && Utility.compareLe(existing.reducedCost, reducedCost)) {
 				return;
 			}
-			Candidate candidate = new Candidate(nextCandidateId++, signature, column, reducedCost);
+			// 2026-07-29: 只有真正进入或替换 active top-K 的候选才反推图内目标成本。
+			double cost = objectiveCostFromReducedCost(sequence, reducedCost);
+			Candidate candidate = new Candidate(nextCandidateId++, signature, sequence, cost, source, reducedCost);
 			candidateBySignature.put(signature, candidate);
 			candidateHeap.add(candidate);
 			int maxColumns = maxReturnedColumns();
@@ -1433,13 +1437,18 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	private static final class Candidate {
 		final int id;
 		final SequenceSignature signature;
-		final TWETColumn column;
+		final ArrayList<Integer> sequence;
+		final double cost;
+		final ColumnSource source;
 		final double reducedCost;
 
-		Candidate(int id, SequenceSignature signature, TWETColumn column, double reducedCost) {
+		Candidate(int id, SequenceSignature signature, ArrayList<Integer> sequence,
+				double cost, ColumnSource source, double reducedCost) {
 			this.id = id;
 			this.signature = signature;
-			this.column = column;
+			this.sequence = sequence;
+			this.cost = cost;
+			this.source = source;
 			this.reducedCost = reducedCost;
 		}
 	}

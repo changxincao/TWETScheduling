@@ -64,6 +64,9 @@ import TWETBPC.Util.SequenceSignature;
 public class GCNGBBStyleBidirectionalNgDssr {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
+	/** 只写入 message 的高频计数默认关闭；算法反馈所需计数不受影响。 */
+	private static final boolean HOT_PATH_DIAGNOSTICS = Boolean
+			.getBoolean("twet.bpc.ngDssrHotPathDiagnostics");
 	private static final int DUPLICATE_REPAIR_DIAGNOSTIC_ROUTE_LIMIT = 10;
 	/** 无 SRI 时所有 label 共享空状态；该数组只读，避免每次扩展分配零长度数组。 */
 	private static final byte[] EMPTY_SRI_COUNTS = new byte[0];
@@ -3309,11 +3312,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			IncrementalSourcedDominanceGraphs.prepareLabelForUse(FWTL.get(label.jid), label);
 		}
 		diagnosticForwardPops++;
-		traceWatchedLabel("WATCH_F_POP", label);
+		if (targetTrace != null) {
+			traceWatchedLabel("WATCH_F_POP", label);
+		}
 
 		for (int nextJob = label.extensionSet.nextSetBit(1); nextJob > 0 && nextJob <= data.n && canContinue();
 				nextJob = label.extensionSet.nextSetBit(nextJob + 1)) {
-			forwardExtensionCandidates++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				forwardExtensionCandidates++;
+			}
 			long timingStart = extensionTimingStart();
 			ExtensionFrontier candidate = buildForwardExtensionFrontier(label, nextJob, lp);
 			recordForwardBuildNanos(timingStart);
@@ -3321,7 +3328,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				if (candidate != null) {
 					candidate.release();
 				}
-				forwardExtensionInfeasible++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					forwardExtensionInfeasible++;
+				}
 				continue;
 			}
 			forwardExtensionConstructed++;
@@ -3338,13 +3347,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			timingStart = extensionTimingStart();
 			ForwardLabel child = materializeForwardLabel(label, nextJob, candidate, lp);
 			recordForwardBuildNanos(timingStart);
-			traceTargetForward("F_CONSTRUCT", child, lp);
-			traceWatchedChild("WATCH_F_CHILD", label, child, nextJob);
+			if (targetTrace != null) {
+				traceTargetForward("F_CONSTRUCT", child, lp);
+				traceWatchedChild("WATCH_F_CHILD", label, child, nextJob);
+			}
 			timingStart = extensionTimingStart();
 			InsertStatus status = insertForward(child, lp);
 			recordForwardInsertNanos(timingStart);
-			traceTargetForward("F_INSERT_" + status, child, lp);
-			traceWatchedLabel("WATCH_F_INSERT_" + status, child);
+			if (targetTrace != null) {
+				traceTargetForward("F_INSERT_" + status, child, lp);
+				traceWatchedLabel("WATCH_F_INSERT_" + status, child);
+			}
 			if (status == InsertStatus.STORED_AND_ENQUEUE) {
 				timingStart = extensionTimingStart();
 				FWUL.add(child);
@@ -3364,11 +3377,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			IncrementalSourcedDominanceGraphs.prepareLabelForUse(BWTL.get(label.jid), label);
 		}
 		diagnosticBackwardPops++;
-		traceWatchedLabel("WATCH_B_POP", label);
+		if (targetTrace != null) {
+			traceWatchedLabel("WATCH_B_POP", label);
+		}
 
 		for (int prevJob = label.extensionSet.nextSetBit(1); prevJob > 0 && prevJob <= data.n && canContinue();
 				prevJob = label.extensionSet.nextSetBit(prevJob + 1)) {
-			backwardExtensionCandidates++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				backwardExtensionCandidates++;
+			}
 			long timingStart = extensionTimingStart();
 			ExtensionFrontier candidate = buildBackwardExtensionFrontier(label, prevJob, lp);
 			recordBackwardBuildNanos(timingStart);
@@ -3376,7 +3393,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				if (candidate != null) {
 					candidate.release();
 				}
-				backwardExtensionInfeasible++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					backwardExtensionInfeasible++;
+				}
 				continue;
 			}
 			backwardExtensionConstructed++;
@@ -3393,13 +3412,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			timingStart = extensionTimingStart();
 			BackwardLabel child = materializeBackwardLabel(label, prevJob, candidate, lp);
 			recordBackwardBuildNanos(timingStart);
-			traceTargetBackward("B_CONSTRUCT", child);
-			traceWatchedChild("WATCH_B_CHILD", label, child, prevJob);
+			if (targetTrace != null) {
+				traceTargetBackward("B_CONSTRUCT", child);
+				traceWatchedChild("WATCH_B_CHILD", label, child, prevJob);
+			}
 			timingStart = extensionTimingStart();
 			InsertStatus status = insertBackward(child, lp);
 			recordBackwardInsertNanos(timingStart);
-			traceTargetBackward("B_INSERT_" + status, child);
-			traceWatchedLabel("WATCH_B_INSERT_" + status, child);
+			if (targetTrace != null) {
+				traceTargetBackward("B_INSERT_" + status, child);
+				traceWatchedLabel("WATCH_B_INSERT_" + status, child);
+			}
 			if (status == InsertStatus.STORED_AND_ENQUEUE) {
 				timingStart = extensionTimingStart();
 				BWUL.add(child);
@@ -4378,26 +4401,36 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return;
 		}
 		Node node = lp.getNode();
-		joinTerminalGroupsScanned++;
+		if (HOT_PATH_DIAGNOSTICS) {
+			joinTerminalGroupsScanned++;
+		}
 		joinEnvelopeGroupPairs++;
 		if (backward.ngMemorySet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.terminalJob)) {
-			joinTerminalGroupsArcOrVisitPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinTerminalGroupsArcOrVisitPruned++;
+			}
 			joinEnvelopeGroupPairsPruned++;
 			return;
 		}
 		if (forward.terminalJob == backward.terminalJob) {
-			joinPairsSetPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinPairsSetPruned++;
+			}
 			joinEnvelopeGroupPairsPruned++;
 			return;
 		}
 		if (bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
-			joinPairsSetPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinPairsSetPruned++;
+			}
 			joinEnvelopeGroupPairsPruned++;
 			return;
 		}
 		double delay = data.getSetUp(lastJob, backward.terminalJob) + data.getProcessT(backward.terminalJob);
 		if (Utility.compareGt(forward.envelope.start() + delay, backward.envelope.end())) {
-			joinTerminalGroupsTimePruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinTerminalGroupsTimePruned++;
+			}
 			joinEnvelopeGroupPairsPruned++;
 			return;
 		}
@@ -4406,30 +4439,46 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
 		if (!Utility.compareLt(groupLB, joinThreshold)) {
-			joinTerminalGroupsCostPruned++;
-			joinPairsLowerBoundPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinTerminalGroupsCostPruned++;
+			}
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinPairsLowerBoundPruned++;
+			}
 			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
-				joinPairsBestBoundPruned++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					joinPairsBestBoundPruned++;
+				}
 			}
 			joinEnvelopeGroupPairsPruned++;
 			return;
 		}
-		joinPairsTried++;
-		joinFunctionEvaluations++;
+		if (HOT_PATH_DIAGNOSTICS) {
+			joinPairsTried++;
+		}
+		if (HOT_PATH_DIAGNOSTICS) {
+			joinFunctionEvaluations++;
+		}
 		joinEnvelopeFunctionEvaluations++;
 		JoinEnvelopeMinResult result = findMinimalShiftedTracedSum(forward.envelope, delay, backward.envelope,
 				joinFixedReducedCost);
 		double reducedCostBound = result.reducedCost;
 		observeRelaxedReducedCost(reducedCostBound);
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
-			joinFunctionPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinFunctionPruned++;
+			}
 			if (Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
-				joinFunctionBestRecordPruned++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					joinFunctionBestRecordPruned++;
+				}
 			}
 			return;
 		}
 		if (result.forwardLabel == null || result.backwardLabel == null) {
-			joinFunctionPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinFunctionPruned++;
+			}
 			return;
 		}
 		// 2026-07-09: envelope join 每个 group-pair 只返回一个代表 split；同一 sequence 的更优 split
@@ -4457,14 +4506,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Node node = lp.getNode();
 		// 2026-05-23: 闂?joinFromForward 闁诲酣娼у﹢杈叿闂佹寧绋戞總鏃傜箔婢舵劖鍤勯柣锝呮湰閺?backward.reachableSet 闂佸憡鐟ョ粔鐢垫暜瑜版帒绠ラ柍褜鍓熷鍨緞婵犲倽顔夐梺鐟板槻閸氬鏁幘顔肩鐎广儱娲ㄧ壕濠氭煏?
 		// 闁荤姴娲㈤崕闈涒枖閿曞倸瑙﹂柛顐ゅ枑绗?backward 缂傚倷缍€閸涱垱鏆伴梺鍛婄閸ㄥ灚绋婅箛娑樼闁宠桨鑳跺鏃堟煟閵娿儱顏╅柍褜鍓氶悷鈺呭焵椤掆偓椤р偓缂佽鲸绻冪粙澶婎吋閸モ晜鎯ｆ繛瀵稿Ь濞撳湱鑺遍鍕闁逞屽墴瀵灚寰勬繝鍌濐唹婵炴垶鎸告鍝ョ礊鐎ｎ喖绀堢€广儱鎳忛崐鐢电磽閸屾浜鹃梺鐟板槻閸氬鏁幘顔藉剭?forward terminal闂?
-		joinTerminalGroupsScanned++;
+		if (HOT_PATH_DIAGNOSTICS) {
+			joinTerminalGroupsScanned++;
+		}
 		if (backward.ngMemorySet.contains(lastJob) || isPricingArcForbidden(node, lastJob, backward.jid)) {
-			joinTerminalGroupsArcOrVisitPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinTerminalGroupsArcOrVisitPruned++;
+			}
 			return;
 		}
 		double delay = data.getSetUp(lastJob, backward.jid) + data.getProcessT(backward.jid);
 		if (Utility.compareGt(minForwardEllByLastJob[lastJob] + delay, backward.frontier.tail.end)) {
-			joinTerminalGroupsTimePruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinTerminalGroupsTimePruned++;
+			}
 			return;
 		}
 		double joinFixedReducedCost = pricingSetupCost(lastJob, backward.jid)
@@ -4472,9 +4527,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double joinThreshold = joinLowerBoundThreshold();
 		double groupLB = minForwardReducedCostByLastJob[lastJob] + backward.minReducedCost + joinFixedReducedCost;
 		if (!Utility.compareLt(groupLB, joinThreshold)) {
-			joinTerminalGroupsCostPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinTerminalGroupsCostPruned++;
+			}
 			if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
-				joinPairsBestBoundPruned++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					joinPairsBestBoundPruned++;
+				}
 			}
 			return;
 		}
@@ -4492,16 +4551,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			int candidateIndex = i++;
 			ForwardLabel forward = candidates.get(candidateIndex);
-			joinCandidateLabelsVisited++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinCandidateLabelsVisited++;
+			}
 			if (forward.isDominated) {
-				joinCandidateLabelsDominated++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					joinCandidateLabelsDominated++;
+				}
 				continue;
 			}
 			double optimisticJoinLB = forward.minReducedCost + backward.minReducedCost + joinFixedReducedCost;
 			if (!Utility.compareLt(optimisticJoinLB, joinThreshold)) {
-				joinPairsLowerBoundPruned++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					joinPairsLowerBoundPruned++;
+				}
 				if (Utility.compareLt(joinThreshold, REDUCED_COST_TOLERANCE)) {
-					joinPairsBestBoundPruned++;
+					if (HOT_PATH_DIAGNOSTICS) {
+						joinPairsBestBoundPruned++;
+					}
 				}
 				break;
 			}
@@ -4517,7 +4584,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (config.maxExactPricingColumns <= 0) {
 			return;
 		}
-		joinPairsTried++;
+		if (HOT_PATH_DIAGNOSTICS) {
+			joinPairsTried++;
+		}
 		boolean targetJoinPair = isTargetJoinPair(forward, backward);
 		if (targetJoinPair) {
 			traceTarget("JOIN_PAIR f#" + forward.labelId + " b#" + backward.labelId
@@ -4525,7 +4594,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					+ " fMin=" + forward.minReducedCost + " bMin=" + backward.minReducedCost);
 		}
 		if (forward.jid == backward.jid) {
-			joinPairsSetPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinPairsSetPruned++;
+			}
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED sameTerminal");
 			}
@@ -4534,7 +4605,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
 			// 2026-06-09: ng-DSSR 闂佸憡鐟禍鐐哄极?ng-memory 闂佸憡甯囬崐鏍蓟閸ヮ剙绠柛蹇曞帶婢跺秹鏌￠崟闈涚仩闁诡垯鐒﹀璇测攽閸℃鍞ㄩ悷婊呭閹稿憡鏅堕悩鍨闁哄娉曠粻鎾绘煥?
 			// 闂佹椿浜為崰搴ㄦ偪閸曨垱鐓傜€广儱鎷嬪Σ濠氱叓閸パ勫殗闁靛棗绻掔划鍨緞鎼达綆妲?reduced-cost route 闂佽鍘归崹褰捤囬弻銉ヨЕ閹肩补鈧櫕娅冮柣鐘辩劍濠㈡绱?cycle闂佹寧绋戦惉濂稿极閵堝棛顩查幖绮瑰墲閸婄數绱撴笟鍥у箺婵炴彃娼″?ng-set闂?
-			joinPairsSetPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinPairsSetPruned++;
+			}
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED ngMemoryIntersect fMem=" + forward.ngMemorySet
 						+ " bMem=" + backward.ngMemorySet);
@@ -4563,7 +4636,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double delta = data.getSetUp(forward.jid, backward.jid) + data.getProcessT(backward.jid);
 		double earliestBackwardCompletion = forward.frontier.head.start + delta;
 		if (Utility.compareGt(earliestBackwardCompletion, backward.frontier.tail.end)) {
-			joinPairsTimePruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinPairsTimePruned++;
+			}
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED time earliestBackwardCompletion=" + earliestBackwardCompletion
 						+ " bTail=" + backward.frontier.tail.end);
@@ -4573,7 +4648,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		PiecewiseLinearFunction forwardFull = getForwardJoinExtension(forward);
 		if (forwardFull.head == null) {
-			joinFunctionPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinFunctionPruned++;
+			}
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED forwardFullEmpty");
 			}
@@ -4581,7 +4658,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		PiecewiseLinearFunction backwardFull = getBackwardJoinExtension(backward);
 		if (backwardFull.head == null) {
-			joinFunctionPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinFunctionPruned++;
+			}
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED backwardFullEmpty");
 			}
@@ -4602,7 +4681,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		double overlapStart = Math.max(shiftedForwardStart, backwardFull.head.start);
 		double overlapEnd = Math.min(shiftedForwardEnd, backwardFull.tail.end);
 		if (Utility.compareLt(overlapEnd, overlapStart)) {
-			joinFunctionPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinFunctionPruned++;
+			}
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED joinDomainEmpty");
 			}
@@ -4617,7 +4698,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (!Utility.compareLt(rangeLowerBound, threshold)) {
 				joinRangeLowerBoundPruned++;
 				if (Utility.compareLt(threshold, REDUCED_COST_TOLERANCE)) {
-					joinPairsBestBoundPruned++;
+					if (HOT_PATH_DIAGNOSTICS) {
+						joinPairsBestBoundPruned++;
+					}
 				}
 				if (targetJoinPair) {
 					traceTarget("JOIN_PRUNED rangeLB=" + rangeLowerBound);
@@ -4625,14 +4708,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return;
 			}
 		}
-		joinFunctionEvaluations++;
+		if (HOT_PATH_DIAGNOSTICS) {
+			joinFunctionEvaluations++;
+		}
 		double reducedCostBound = PiecewiseLinearFunction.findMinimalShiftedSumValue(forwardFull, delta,
 				backwardFull, fixedJoinShift);
 		observeRelaxedReducedCost(reducedCostBound);
 		if (!shouldKeepJoinedReducedCost(reducedCostBound)) {
-			joinFunctionPruned++;
+			if (HOT_PATH_DIAGNOSTICS) {
+				joinFunctionPruned++;
+			}
 			if (Utility.compareLt(reducedCostBound, REDUCED_COST_TOLERANCE)) {
-				joinFunctionBestRecordPruned++;
+				if (HOT_PATH_DIAGNOSTICS) {
+					joinFunctionBestRecordPruned++;
+				}
 			}
 			if (targetJoinPair) {
 				traceTarget("JOIN_PRUNED reducedCostBound=" + reducedCostBound);
@@ -5022,12 +5111,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " fwDom=" + forwardLabelsDominated
 				+ " bwKept=" + backwardLabelsKept
 				+ " bwDom=" + backwardLabelsDominated
-				+ " fCand=" + forwardExtensionCandidates
 				+ " fBuilt=" + forwardExtensionConstructed
 				+ " fBoundSurvivors=" + forwardExtensionBoundSurvivors
 				+ " cbFPruned=" + completionForwardLabelsPruned
 				+ " cbBPruned=" + completionBackwardLabelsPruned
-				+ " joinPairs=" + joinPairsTried
+				+ (HOT_PATH_DIAGNOSTICS
+						? " fCand=" + forwardExtensionCandidates + " joinPairs=" + joinPairsTried
+						: " hotPathDiagnostics=off")
 				+ " generated=" + generatedCandidateCount
 				+ " bestRC=" + bestGeneratedReducedCost
 				+ " pricingHorizon=" + pricingHorizon
@@ -5095,15 +5185,19 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(forwardSinglePointDominatedByStore).append("/").append(forwardSinglePointDominatedByGraph);
 		builder.append(", bw kept/storeDom/graphDom=").append(backwardSinglePointKept).append("/")
 				.append(backwardSinglePointDominatedByStore).append("/").append(backwardSinglePointDominatedByGraph);
-		builder.append(", join groups scanned/arcOrVisit/timeLB/costLB=").append(joinTerminalGroupsScanned)
-				.append("/").append(joinTerminalGroupsArcOrVisitPruned).append("/")
-				.append(joinTerminalGroupsTimePruned).append("/").append(joinTerminalGroupsCostPruned);
-		builder.append(", join candidates visited/dominated=").append(joinCandidateLabelsVisited).append("/")
-				.append(joinCandidateLabelsDominated);
-		builder.append(", join pairs tried/set/lb/time/funcEval/funcPruned=").append(joinPairsTried).append("/")
-				.append(joinPairsSetPruned).append("/").append(joinPairsLowerBoundPruned).append("/")
-				.append(joinPairsTimePruned).append("/").append(joinFunctionEvaluations).append("/")
-				.append(joinFunctionPruned);
+		if (HOT_PATH_DIAGNOSTICS) {
+			builder.append(", join groups scanned/arcOrVisit/timeLB/costLB=").append(joinTerminalGroupsScanned)
+					.append("/").append(joinTerminalGroupsArcOrVisitPruned).append("/")
+					.append(joinTerminalGroupsTimePruned).append("/").append(joinTerminalGroupsCostPruned);
+			builder.append(", join candidates visited/dominated=").append(joinCandidateLabelsVisited).append("/")
+					.append(joinCandidateLabelsDominated);
+			builder.append(", join pairs tried/set/lb/time/funcEval/funcPruned=").append(joinPairsTried).append("/")
+					.append(joinPairsSetPruned).append("/").append(joinPairsLowerBoundPruned).append("/")
+					.append(joinPairsTimePruned).append("/").append(joinFunctionEvaluations).append("/")
+					.append(joinFunctionPruned);
+		} else {
+			builder.append(", hotPathDiagnostics=off");
+		}
 		builder.append(", joinVisitProfile elementary/nonElementary/lbPruned/valuePruned=")
 				.append(joinKnownElementaryPairs).append("/").append(joinKnownNonElementaryPairs).append("/")
 				.append(joinNonElementaryWitnessLowerBoundPruned).append("/")
@@ -5129,9 +5223,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					.append(String.format("%.3f", joinEnvelopeBuildNanos / 1_000_000.0)).append("/")
 					.append(String.format("%.3f", joinEnvelopeJoinNanos / 1_000_000.0));
 		}
-		builder.append(", joinBest mode/bestRC/lbPruned/recordPruned=").append(joinBestThresholdMode).append("/")
-				.append(bestGeneratedReducedCost).append("/").append(joinPairsBestBoundPruned).append("/")
-				.append(joinFunctionBestRecordPruned);
+		builder.append(", joinBest mode/bestRC=").append(joinBestThresholdMode).append("/")
+				.append(bestGeneratedReducedCost);
+		if (HOT_PATH_DIAGNOSTICS) {
+			builder.append(", joinBest lbPruned/recordPruned=").append(joinPairsBestBoundPruned).append("/")
+					.append(joinFunctionBestRecordPruned);
+		}
 		builder.append(", completionBound mode/cutoff/buildMs/eval/fwPruned/bwPruned=")
 				.append(completionBoundRelaxationForSummary()).append("/").append(completionBoundCutoffForSummary())
 				.append("/").append(formatMillis(completionBoundBuildNanos)).append("/")
@@ -5154,14 +5251,23 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				.append(formatMillis(completionBoundArcFixingNanos));
 		builder.append(", forwardSink visited/negative=").append(forwardSinkLabelsVisited).append("/")
 				.append(forwardSinkNegativeCandidates);
-		builder.append(", forwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=")
-				.append(forwardExtensionCandidates).append("/").append(forwardExtensionArcPruned).append("/")
-				.append(forwardExtensionInfeasible).append("/").append(forwardExtensionConstructed).append("/")
-				.append(forwardExtensionBoundSurvivors);
-		builder.append(", backwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=")
-				.append(backwardExtensionCandidates).append("/").append(backwardExtensionArcPruned).append("/")
-				.append(backwardExtensionInfeasible).append("/").append(backwardExtensionConstructed).append("/")
-				.append(backwardExtensionBoundSurvivors);
+		if (HOT_PATH_DIAGNOSTICS) {
+			builder.append(", forwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=")
+					.append(forwardExtensionCandidates).append("/").append(forwardExtensionArcPruned).append("/")
+					.append(forwardExtensionInfeasible).append("/").append(forwardExtensionConstructed).append("/")
+					.append(forwardExtensionBoundSurvivors);
+			builder.append(", backwardExtend candidates/arcPruned/infeasible/constructed/boundSurvivors=")
+					.append(backwardExtensionCandidates).append("/").append(backwardExtensionArcPruned).append("/")
+					.append(backwardExtensionInfeasible).append("/").append(backwardExtensionConstructed).append("/")
+					.append(backwardExtensionBoundSurvivors);
+		} else {
+			builder.append(", forwardExtend arcPruned/constructed/boundSurvivors=")
+					.append(forwardExtensionArcPruned).append("/").append(forwardExtensionConstructed).append("/")
+					.append(forwardExtensionBoundSurvivors);
+			builder.append(", backwardExtend arcPruned/constructed/boundSurvivors=")
+					.append(backwardExtensionArcPruned).append("/").append(backwardExtensionConstructed).append("/")
+					.append(backwardExtensionBoundSurvivors);
+		}
 		builder.append(", forwardDepth kept/negSink=").append(formatDepthHistogram(forwardLabelsKeptByDepth))
 				.append("/").append(formatDepthHistogram(forwardSinkNegativeByDepth));
 		builder.append(", forwardReach kept avg/min/max=")

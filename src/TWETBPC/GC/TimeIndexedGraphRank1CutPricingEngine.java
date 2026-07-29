@@ -33,6 +33,12 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	private static final double RC_TOLERANCE = 1e-6;
 	private static final boolean DEFERRED_LABEL_DIAGNOSTICS = Boolean
 			.getBoolean("twet.bpc.rank1DeferredLabelDiagnostics");
+	/** 候选、弧扫描与重复序列等纯日志统计默认关闭，避免污染 rank-1 热循环。 */
+	private static final boolean PRICING_DIAGNOSTICS = Boolean
+			.getBoolean("twet.bpc.rank1PricingDiagnostics");
+	/** 严格 dominance 是正式 dominance 的真子集；默认在 completion 扫描前拒绝必然不会入桶的候选。 */
+	private static final boolean STRICT_COMPLETION_PRE_DOMINANCE = Boolean.parseBoolean(
+			System.getProperty("twet.bpc.rank1StrictCompletionPreDominance", "true"));
 
 	private final Data data;
 	private final TWETBPCConfig config;
@@ -165,6 +171,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private long packedCandidatesMaterialized;
 		private long packedCandidatesImmediatelyRejected;
 		private long packedCandidatesEvictedOld;
+		private long packedCandidatesStrictPreRejected;
 
 		@SuppressWarnings("unchecked")
 		Rank1CutSolver(LP lp, boolean heuristicMode) {
@@ -279,7 +286,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					}
 					for (int labelIndex = 0; labelIndex < bucket.size(); labelIndex++) {
 						Label label = bucket.get(labelIndex);
-						relaxedLabels++;
+						if (PRICING_DIAGNOSTICS) {
+							relaxedLabels++;
+						}
 						rememberEndCandidateIfNegative(label);
 						if (t < horizon && !isTimeIndexedArcForbidden(lastJob, lastJob, t)) {
 							Label child = label.extend(nextLabelId++, lastJob, t + 1, 0.0, label.residual,
@@ -292,9 +301,13 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 							if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]) {
 								continue;
 							}
-							processArcScans++;
+							if (PRICING_DIAGNOSTICS) {
+								processArcScans++;
+							}
 							if (isTimeIndexedArcForbidden(lastJob, nextJob, t)) {
-								timeIndexedArcSkips++;
+								if (PRICING_DIAGNOSTICS) {
+									timeIndexedArcSkips++;
+								}
 								continue;
 							}
 							int completion = t + durationByArc[lastJob][nextJob];
@@ -313,8 +326,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 								if (DEFERRED_LABEL_DIAGNOSTICS) {
 									packedCandidatesPrepared++;
 								}
-								if (!isPreparedPackedPrunedByBackwardCompletion(nextJob, completion,
-										childReducedCost)) {
+								if (!isPreparedStrictlyDominated(forwardBuckets, nextJob, completion, childReducedCost)
+										&& !isPreparedPackedPrunedByBackwardCompletion(nextJob, completion,
+												childReducedCost)) {
 									insertPreparedPackedLabel(forwardBuckets, label, childId, nextJob, completion,
 											extensionCost, nextJob);
 								}
@@ -361,7 +375,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					boolean currentCompletionFeasible = isCompletionFeasible(currentJob, t);
 					for (int labelIndex = 0; labelIndex < bucket.size(); labelIndex++) {
 						Label label = bucket.get(labelIndex);
-						relaxedLabels++;
+						if (PRICING_DIAGNOSTICS) {
+							relaxedLabels++;
+						}
 						if (t > tStar && canReachBackwardState(currentJob, t - 1)
 								&& !isTimeIndexedArcForbidden(currentJob, currentJob, t - 1)) {
 							insertLabel(backwardBuckets, label.extend(nextLabelId++, currentJob, t - 1, 0.0,
@@ -374,13 +390,17 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 							if (previousJob == currentJob || processArcForbidden[previousJob][currentJob]) {
 								continue;
 							}
-							processArcScans++;
+							if (PRICING_DIAGNOSTICS) {
+								processArcScans++;
+							}
 							int previousTime = t - durationByArc[previousJob][currentJob];
 							if (previousTime < 0) {
 								continue;
 							}
 							if (isTimeIndexedArcForbidden(previousJob, currentJob, previousTime)) {
-								timeIndexedArcSkips++;
+								if (PRICING_DIAGNOSTICS) {
+									timeIndexedArcSkips++;
+								}
 								continue;
 							}
 							double arcCost = processArcReducedCost(previousJob, currentJob, t);
@@ -462,31 +482,67 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (heuristicMode && !bucket.isEmpty()) {
 				Label existing = bucket.get(0);
 				if (Utility.compareLe(existing.reducedCost, label.reducedCost)) {
-					labelsDominated++;
+					if (PRICING_DIAGNOSTICS) {
+						labelsDominated++;
+					}
 					return false;
 				}
 				bucket.clear();
 				bucket.add(label);
-				labelsDominated++;
-				labelsKept++;
+				if (PRICING_DIAGNOSTICS) {
+					labelsDominated++;
+				}
+				if (PRICING_DIAGNOSTICS) {
+					labelsKept++;
+				}
 				return true;
 			}
 			for (int i = 0; i < bucket.size(); i++) {
 				Label existing = bucket.get(i);
 				if (cutStateData.dominates(existing, label)) {
-					labelsDominated++;
+					if (PRICING_DIAGNOSTICS) {
+						labelsDominated++;
+					}
 					return false;
 				}
 			}
 			for (int i = bucket.size() - 1; i >= 0; i--) {
 				if (cutStateData.dominates(label, bucket.get(i))) {
 					bucket.remove(i);
-					labelsDominated++;
+					if (PRICING_DIAGNOSTICS) {
+						labelsDominated++;
+					}
 				}
 			}
 			bucket.add(label);
-			labelsKept++;
+			if (PRICING_DIAGNOSTICS) {
+				labelsKept++;
+			}
 			return true;
+		}
+
+		/**
+		 * 只提前拒绝严格落在已有 label dominance 内部的候选。该谓词是正式 dominance 的真子集，
+		 * 用于测试能否在不扫描 backward completion 前排除必然不会入桶的状态。
+		 */
+		private boolean isPreparedStrictlyDominated(ArrayList<Label>[] buckets, int lastJob, int time,
+				double candidateReducedCost) {
+			if (!STRICT_COMPLETION_PRE_DOMINANCE || heuristicMode) {
+				return false;
+			}
+			ArrayList<Label> bucket = buckets[index(lastJob, time)];
+			if (bucket == null) {
+				return false;
+			}
+			for (int i = 0; i < bucket.size(); i++) {
+				if (cutStateData.existingStrictlyDominatesPrepared(bucket.get(i), candidateReducedCost)) {
+					if (DEFERRED_LABEL_DIAGNOSTICS) {
+						packedCandidatesStrictPreRejected++;
+					}
+					return true;
+				}
+			}
+			return false;
 		}
 
 		/**
@@ -504,7 +560,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (heuristicMode && !bucket.isEmpty()) {
 				Label existing = bucket.get(0);
 				if (Utility.compareLe(existing.reducedCost, candidateReducedCost)) {
-					labelsDominated++;
+					if (PRICING_DIAGNOSTICS) {
+						labelsDominated++;
+					}
 					if (DEFERRED_LABEL_DIAGNOSTICS) {
 						packedCandidatesImmediatelyRejected++;
 					}
@@ -514,8 +572,12 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 						cutStateData.materializePreparedPackedResidual(), addedJob);
 				bucket.clear();
 				bucket.add(materialized);
-				labelsDominated++;
-				labelsKept++;
+				if (PRICING_DIAGNOSTICS) {
+					labelsDominated++;
+				}
+				if (PRICING_DIAGNOSTICS) {
+					labelsKept++;
+				}
 				if (DEFERRED_LABEL_DIAGNOSTICS) {
 					packedCandidatesEvictedOld++;
 					packedCandidatesMaterialized++;
@@ -524,7 +586,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			}
 			for (int i = 0; i < bucket.size(); i++) {
 				if (cutStateData.existingDominatesPrepared(bucket.get(i), candidateReducedCost)) {
-					labelsDominated++;
+					if (PRICING_DIAGNOSTICS) {
+						labelsDominated++;
+					}
 					if (DEFERRED_LABEL_DIAGNOSTICS) {
 						packedCandidatesImmediatelyRejected++;
 					}
@@ -534,7 +598,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			for (int i = bucket.size() - 1; i >= 0; i--) {
 				if (cutStateData.preparedDominatesExisting(candidateReducedCost, bucket.get(i))) {
 					bucket.remove(i);
-					labelsDominated++;
+					if (PRICING_DIAGNOSTICS) {
+						labelsDominated++;
+					}
 					if (DEFERRED_LABEL_DIAGNOSTICS) {
 						packedCandidatesEvictedOld++;
 					}
@@ -543,7 +609,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			Label materialized = parent.extend(labelId, lastJob, time, extensionCost, null,
 					cutStateData.materializePreparedPackedResidual(), addedJob);
 			bucket.add(materialized);
-			labelsKept++;
+			if (PRICING_DIAGNOSTICS) {
+				labelsKept++;
+			}
 			if (DEFERRED_LABEL_DIAGNOSTICS) {
 				packedCandidatesMaterialized++;
 			}
@@ -579,8 +647,10 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			if (sequence.isEmpty()) {
 				return;
 			}
-			negativeStateCandidates++;
-			if (hasRepeatedJob(sequence)) {
+			if (PRICING_DIAGNOSTICS) {
+				negativeStateCandidates++;
+			}
+			if (PRICING_DIAGNOSTICS && hasRepeatedJob(sequence)) {
 				repeatedJobCandidates++;
 			}
 			double cost;
@@ -802,20 +872,23 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					+ ", horizon=" + horizon
 					+ ", tStar=" + tStar
 					+ ", piWindow=" + (graphWindow.dualWindow ? "enabled" : "disabled")
-					+ ", labelsKept=" + labelsKept
-					+ ", labelsDominated=" + labelsDominated
-					+ ", relaxedLabels=" + relaxedLabels
-					+ ", arcScans=" + processArcScans
-					+ ", timeArcSkips=" + timeIndexedArcSkips
-					+ ", cbPruned=" + completionBoundPruned
-					+ ", negativeStates=" + negativeStateCandidates
-					+ ", repeatedJobCandidates=" + repeatedJobCandidates
+					+ (PRICING_DIAGNOSTICS
+							? ", labelsKept=" + labelsKept
+									+ ", labelsDominated=" + labelsDominated
+									+ ", relaxedLabels=" + relaxedLabels
+									+ ", arcScans=" + processArcScans
+									+ ", timeArcSkips=" + timeIndexedArcSkips
+									+ ", cbPruned=" + completionBoundPruned
+									+ ", negativeStates=" + negativeStateCandidates
+									+ ", repeatedJobCandidates=" + repeatedJobCandidates
+							: ", pricingDiagnostics=off")
 					+ ", deferredPackedLabels=" + cutStateData.usesDeferredPackedLabelMaterialization()
 					+ (DEFERRED_LABEL_DIAGNOSTICS
 							? ", packedPrepared=" + packedCandidatesPrepared
 									+ ", packedMaterialized=" + packedCandidatesMaterialized
 									+ ", packedImmediateRejected=" + packedCandidatesImmediatelyRejected
 									+ ", packedEvictedOld=" + packedCandidatesEvictedOld
+									+ ", packedStrictPreRejected=" + packedCandidatesStrictPreRejected
 							: "")
 					+ cutStateData.timingSummary()
 					+ (timedOut ? ", timeLimit=true" : "");
@@ -857,7 +930,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				bestPseudoReducedCost = bestCompletion;
 			}
 			if (Utility.compareGe(bestCompletion, -RC_TOLERANCE)) {
-				completionBoundPruned++;
+				if (PRICING_DIAGNOSTICS) {
+					completionBoundPruned++;
+				}
 				return true;
 			}
 			return false;
@@ -1067,6 +1142,16 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 
 		long[] materializePreparedPackedResidual() {
 			return scratchPackedResidual.clone();
+		}
+
+		/** 使用不含容差重叠的严格 RC 条件，保证该判断是正式 dominance 的真子集。 */
+		boolean existingStrictlyDominatesPrepared(Label existing, double candidateReducedCost) {
+			double bound = candidateReducedCost;
+			for (int word = 0; word < residualWordCount; word++) {
+				long corrections = existing.packedResidual[word] & ~scratchPackedResidual[word];
+				bound = addDuals(bound, corrections, word);
+			}
+			return existing.reducedCost <= bound - RC_TOLERANCE;
 		}
 
 		boolean existingDominatesPrepared(Label existing, double candidateReducedCost) {

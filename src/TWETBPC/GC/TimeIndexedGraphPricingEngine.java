@@ -31,6 +31,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 
 	private static final double INF = 1e100;
 	private static final double RC_TOLERANCE = 1e-6;
+	/** 纯日志热统计默认关闭；需要复现实验计数时可由 JVM property 显式开启。 */
+	private static final boolean PRICING_DIAGNOSTICS = Boolean
+			.getBoolean("twet.bpc.timeIndexedPricingDiagnostics");
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final boolean preHeuristicMode;
@@ -553,11 +556,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					+ ", bestPseudoRC=" + bestPseudoReducedCost
 					+ ", horizon=" + horizon
 					+ ", piWindow=" + (graphWindow.dualWindow ? "enabled" : "disabled")
-					+ ", states=" + relaxedStates
-					+ ", arcScans=" + processArcScans
-					+ ", timeArcSkips=" + timeIndexedArcSkips
-					+ ", negativeStates=" + negativeStateCandidates
-					+ ", repeatedJobCandidates=" + duplicateJobCandidates
+					+ (PRICING_DIAGNOSTICS
+							? ", states=" + relaxedStates
+									+ ", arcScans=" + processArcScans
+									+ ", timeArcSkips=" + timeIndexedArcSkips
+									+ ", negativeStates=" + negativeStateCandidates
+									+ ", repeatedJobCandidates=" + duplicateJobCandidates
+							: ", pricingDiagnostics=off")
 					+ ", timeLimit=" + timedOut
 					+ dualWindowRecheckDiagnosticMessage();
 		}
@@ -620,7 +625,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					if (!isFinite(base)) {
 						continue;
 					}
-					relaxedStates++;
+					if (PRICING_DIAGNOSTICS) {
+						relaxedStates++;
+					}
 					rememberEndCandidateIfNegative(lastJob, t, state, base);
 					if (t < horizon) {
 						int waitTarget = index(lastJob, t + 1);
@@ -632,9 +639,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						if (nextJob == lastJob || processArcForbidden[lastJob][nextJob]) {
 							continue;
 						}
-						processArcScans++;
+						if (PRICING_DIAGNOSTICS) {
+							processArcScans++;
+						}
 						if (isTimeIndexedArcForbidden(lastJob, nextJob, t)) {
-							timeIndexedArcSkips++;
+							if (PRICING_DIAGNOSTICS) {
+								timeIndexedArcSkips++;
+							}
 							continue;
 						}
 						int completion = completionTime(lastJob, nextJob, t);
@@ -666,13 +677,18 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			if (Utility.compareGe(reducedCost, -RC_TOLERANCE) || !isPotentialTopCandidate(reducedCost)) {
 				return;
 			}
-			negativeStateCandidates++;
+			if (PRICING_DIAGNOSTICS) {
+				negativeStateCandidates++;
+			}
 			ArrayList<Integer> sequence = reconstructSequence(state);
 			if (sequence.isEmpty()) {
 				return;
 			}
-			if (hasRepeatedJob(sequence)) {
-				duplicateJobCandidates++;
+			// pre-heuristic 必须过滤重复任务；exact 模式下该扫描只服务诊断。
+			if ((preHeuristicMode || PRICING_DIAGNOSTICS) && hasRepeatedJob(sequence)) {
+				if (PRICING_DIAGNOSTICS) {
+					duplicateJobCandidates++;
+				}
 				if (preHeuristicMode) {
 					return;
 				}

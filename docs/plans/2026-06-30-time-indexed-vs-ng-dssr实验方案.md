@@ -1608,6 +1608,10 @@ exact pricing总时间减少85.74%，单次平均由约117.84ms降至26.59ms，�
 
 W0 的 `master LP=379.387s` 不是 cut separation 耗时。cut generator 12 次累计仅 `0.245s`；master LP 可拆为普通加列后重解 `68.587s/594`、加 cut 后重解 `83.262s/12`、删除 inactive cut 后重解 `141.976s/11`、strong repair RMP `85.030s/40` 和初始求解 `0.532s`。其中加/删 cut 后的 23 次重解合计 `225.238s`，单次平均分别为 6.94 和 12.91 秒；strong repair 单次 LP 也由 no-cut 的 84.5ms 增至 2.126s。根本原因是 W0 进行了 35 个 cut lifecycle rounds，peak cut pool 达 933，并在约 7.9 万列的退化 RMP 上反复改变行集合，导致 simplex basis 被持续扰动；strong trial 又继承 active cuts，使每次 trial 的建模和求解同步变重。对比 W300 只有 5 个 cut rounds、peak cut pool 156，cut 后/删除后重解合计仅 7.377s，因此 SRI 总时间降至 109.584s。由此应把 W0 的慢点表述为“cut lifecycle 引发的 RMP 反复重优化”，而不是“分离 cut 很慢”。
 
+进一步与旧 VRP 实现对照后，需要区分必要步骤与当前策略。新增有效 cut 后重解 RMP，并在新 cut dual 下重新完成 exact pricing，是正确闭合所必需的；正式节点内保留同一个 CPLEX 模型、增量加列和加 cut 的做法也已与旧 VRP 一致。不是必需的是当前 paper rank-1 路径在每轮分离前立即删除全部零 pricing-dual cut，并单独执行一次 resolve、pricing closure 后才继续分离。W0 的 12 次分离每次新增 76--80 个 cut，11 次 inactive cleanup 共删除 803 个、平均每次 73 个，形成明显的“加约 78 行、下一轮删约 73 行”换行循环。旧 VRP 的 `LP.AddSRCut()` 只增量添加 full-memory SRI，`LP.GetDual()` 仅把非零 dual cut 交给 pricing，但不从当前节点 RMP 删除零 dual 行；其 `Tree` 也没有 strong branching trial，因此不存在当前额外的 40 次带 cut trial LP。旧 VRP 的稳定 cut 行不能直接照搬到 limited-memory rank-1，因为后者还要处理 memory 版本合并和 queued child 的不可变 cut ID，但它证明“每轮立即 purge 并重解”并非 correctness 要求。
+
+后续最值得独立 A/B 的顺序为：第一，改为 age/budget 驱动的批量 purge，至少连续若干次闭合为零 dual 或 active row 超过阈值后才删除；第二，把 purge 与下一批新 cut/新 memory version 的行修改合并，只做一次 resolve，避免当前每轮一次删除后重解和一次加 cut 后重解；第三，strong branching 的 cut-free 或 reduced-cut trial 仅用于候选评分，正式 child 仍继承全部 cut 并重新精确闭合，禁止用弱 trial 的近似结果直接作正式 certificate。第一项直接针对当前 `141.976s/11` 的删除后重解以及大量 cut 重新生成，潜力最大；第二项可能减少最多 11 次昂贵重解；第三项针对 `85.030s/40` 的 strong repair RMP。降低每轮 cut 上限或提前 tailing-off 也是安全的强度/时间权衡，但会影响树规模，应排在 lifecycle A/B 之后。`peak cut pool=933` 是全局不可变历史版本数，不等于 933 行同时存在于 RMP，后续记录不得混用这两个口径。
+
 正式输出目录：
 
 1. W0：`test-results/bpc/exp-40-2-timeX10-W0-{ng,ti-nocut,ti-sri}-best-20260730a`

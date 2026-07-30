@@ -1855,3 +1855,17 @@ strong-trial LP 约放大 24.08 倍。该实例的主要困难不是单次 root�
 结果目录为 `test-results/bpc/exp-60-3-base-W0-ng-20260730b` 和
 `test-results/bpc/exp-60-3-base-W100-ng-20260730a`。本轮启动时尚未按后续新增规则开启
 实时 trace，因此运行中不能读取 gap；最终日志和 CSV 均已正常落盘。
+
+### 2026-07-30 60-3 W100 跨进程初始列口径失效
+
+后续启动 time-indexed no-cut 对照时发现，`fixedInitialReference*` 只能保证同一个
+`GCBBFullDomainComparisonTest` 进程内的多个 mode 共用一次 reference snapshot，不能让多个
+独立 Java 进程自动复用同一份 ALNS 结果。ng-DSSR 进程生成了 154 条初始列、初始上界 2128，
+fingerprint 为 `88ec9333...`；time-indexed 进程生成了 151 条初始列、初始上界 2138，
+fingerprint 为 `37d73d82...`。原因是两个进程分别运行了按墙钟停止的 60 秒 ALNS。
+
+因此该 W100 time-indexed run 在 node 101、bound 2024.632077、incumbent 2138、gap 5.3025%
+时被停止，不能与前述 ng-DSSR W100 结果作严格 A/B。W0 三组的 fingerprint 均为
+`a6de93dc...`，其对照仍有效。后续跨进程算法比较必须先持久化一次 immutable initial seed，
+三个进程读取同一份初始列和 incumbent；启动后第一项校验必须是 fingerprint 完全一致，不一致
+立即停止。

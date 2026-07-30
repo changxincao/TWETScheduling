@@ -1626,6 +1626,11 @@ public class PC {
 		long start = System.nanoTime();
 		TWETMasterSolution solution = lp.solveRelaxation();
 		long elapsed = System.nanoTime() - start;
+		long modelBuildNanos = lp.getLastMasterLpModelBuildNanos();
+		if (modelBuildNanos > 0L) {
+			traceSink.onMasterLpBuild(lp.getNode(), phase, lp.getRestrictedColumnIds().size(),
+					totalPoolSize(lp), modelBuildNanos);
+		}
 		traceSink.onMasterLpSolve(lp.getNode(), phase, elapsed);
 		traceSink.onMasterLpSolution(lp.getNode(), phase, solution, lp.getRestrictedColumnIds().size(),
 				totalPoolSize(lp), elapsed);

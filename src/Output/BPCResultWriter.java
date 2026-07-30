@@ -71,6 +71,10 @@ public final class BPCResultWriter {
 			writeNamedCounters(writer, "Pricing 新增列数", trace.getPricingColumnCount());
 			writeNamedTimes(writer, "Pricing 耗时", trace.getPricingTimeNanos(), trace.getPricingCallCount());
 			writeNamedTimes(writer, "RMP/LP 求解耗时", trace.getMasterLpTimeNanos(), trace.getMasterLpCallCount());
+			writeNamedTimes(writer, "RMP/LP 模型构造耗时（已包含于求解总耗时）",
+					trace.getMasterLpBuildTimeNanos(), trace.getMasterLpBuildCallCount());
+			writeNamedTimes(writer, "Strong trial 状态准备耗时",
+					trace.getStrongTrialSetupTimeNanos(), trace.getStrongTrialSetupCallCount());
 			writeNamedCounters(writer, "Cut 调用次数", trace.getCutCallCount());
 			writeNamedCounters(writer, "Cut 成功次数", trace.getCutSuccessCount());
 			writeNamedCounters(writer, "Cut 新增数量", trace.getCutCountByGenerator());

@@ -63,6 +63,8 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private final LinkedHashMap<String, Long> masterLpTimeNanos = new LinkedHashMap<String, Long>();
 	private final LinkedHashMap<String, Integer> masterLpBuildCallCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Long> masterLpBuildTimeNanos = new LinkedHashMap<String, Long>();
+	private final LinkedHashMap<String, Integer> strongTrialSetupCallCount = new LinkedHashMap<String, Integer>();
+	private final LinkedHashMap<String, Long> strongTrialSetupTimeNanos = new LinkedHashMap<String, Long>();
 	private final LinkedHashMap<String, Integer> cutCallCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> cutSuccessCount = new LinkedHashMap<String, Integer>();
 	private final LinkedHashMap<String, Integer> cutCountByGenerator = new LinkedHashMap<String, Integer>();
@@ -221,6 +223,15 @@ public class BPCTraceSummary implements BPCTraceSink {
 		increment(masterLpBuildCallCount, phase, 1);
 		increment(masterLpBuildTimeNanos, phase, elapsedNanos);
 		eventLines.add(BPCOutputFormatters.formatMasterLpBuild(node == null ? -1 : node.id, phase,
+				restrictedColumnCount, poolSize, elapsedNanos));
+	}
+
+	@Override
+	public void onStrongTrialSetup(Node node, String phase, int restrictedColumnCount, int poolSize,
+			long elapsedNanos) {
+		increment(strongTrialSetupCallCount, phase, 1);
+		increment(strongTrialSetupTimeNanos, phase, elapsedNanos);
+		eventLines.add(BPCOutputFormatters.formatStrongTrialSetup(node == null ? -1 : node.id, phase,
 				restrictedColumnCount, poolSize, elapsedNanos));
 	}
 
@@ -644,6 +655,14 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public Map<String, Integer> getMasterLpBuildCallCount() {
 		return Collections.unmodifiableMap(masterLpBuildCallCount);
+	}
+
+	public Map<String, Long> getStrongTrialSetupTimeNanos() {
+		return Collections.unmodifiableMap(strongTrialSetupTimeNanos);
+	}
+
+	public Map<String, Integer> getStrongTrialSetupCallCount() {
+		return Collections.unmodifiableMap(strongTrialSetupCallCount);
 	}
 
 	public Map<String, Integer> getCutCallCount() {

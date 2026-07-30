@@ -736,9 +736,9 @@ public class Tree {
 				parentLp, candidate, side, child, domainRepair, lightweightRepair, incumbentCost);
 		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
 		try {
-			String phase = domainRepair ? "strong_branching_domain_rmp_build"
-					: (lightweightRepair ? "strong_branching_light_repair_rmp_build"
-							: "strong_branching_rmp_build");
+			String phase = domainRepair ? "strong_branching_domain_rmp_setup"
+					: (lightweightRepair ? "strong_branching_light_repair_rmp_setup"
+							: "strong_branching_rmp_setup");
 			constructStrongBranchingTrialTimed(trial, child, phase);
 			return pc.solveStrongBranchingRmpTrial(trial, domainRepair, lightweightRepair);
 		} finally {
@@ -863,7 +863,7 @@ public class Tree {
 	private StrongBranchingTrialResult solveStrongBranchingHeuristicTrial(Node child) {
 		LP trial = new LP(data, pool, cutPool, config, outsourcingPool);
 		try {
-			constructStrongBranchingTrialTimed(trial, child, "strong_branching_phase2_build");
+			constructStrongBranchingTrialTimed(trial, child, "strong_branching_phase2_setup");
 			return pc.solveStrongBranchingHeuristicTrial(trial);
 		} finally {
 			trial.closeModel();
@@ -875,7 +875,7 @@ public class Tree {
 		trial.construct(child, child.seedColumnIds);
 		long elapsed = System.nanoTime() - start;
 		int poolSize = pool.size() + (config.useColumnizedOutsourcing() ? outsourcingPool.size() : 0);
-		traceSink.onMasterLpBuild(child, phase, trial.getRestrictedColumnIds().size(), poolSize, elapsed);
+		traceSink.onStrongTrialSetup(child, phase, trial.getRestrictedColumnIds().size(), poolSize, elapsed);
 	}
 
 	private void applyTrialSeed(Node child, StrongBranchingTrialResult trial) {

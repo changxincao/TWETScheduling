@@ -120,6 +120,8 @@ public class LP {
 	private long masterLpPhaseRepairRowsNanos;
 	private long masterLpPhaseSolveNanos;
 	private long masterLpPhaseExtractNanos;
+	/** 最近一次 solveRelaxation() 中真实 buildModel() 的墙钟耗时。 */
+	private long lastMasterLpModelBuildNanos;
 
 	public LP(Data data, Pool pool, CutPool cutPool) {
 		this(data, pool, cutPool, new TWETBPCConfig(), new OutsourcingPool(data));
@@ -646,6 +648,7 @@ public class LP {
 
 	public TWETMasterSolution solveRelaxation() {
 		clearPricingDualOverride();
+		lastMasterLpModelBuildNanos = 0L;
 		long totalStartNanos = beginMasterLpPhaseTiming(true);
 		if (node == null) {
 			lastSolution = new TWETMasterSolution(TWETMasterStatus.INFEASIBLE, new LinkedHashMap<Integer, Double>(), 0.0,
@@ -655,7 +658,12 @@ public class LP {
 		}
 
 		try {
-			buildModel();
+			long modelBuildStart = System.nanoTime();
+			try {
+				buildModel();
+			} finally {
+				lastMasterLpModelBuildNanos = System.nanoTime() - modelBuildStart;
+			}
 			cplex.setOut(null);
 			return solveCurrentModel("Restricted master LP solved");
 		} catch (IloException ex) {
@@ -666,6 +674,10 @@ public class LP {
 		} finally {
 			finishMasterLpPhaseTiming(totalStartNanos);
 		}
+	}
+
+	long getLastMasterLpModelBuildNanos() {
+		return lastMasterLpModelBuildNanos;
 	}
 
 	public TWETMasterSolution resolveCurrentModel() {

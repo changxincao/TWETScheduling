@@ -1586,3 +1586,28 @@ exact pricing总时间减少85.74%，单次平均由约117.84ms降至26.59ms，�
 的incumbent，直到node 372才更新到最优；这抵消了部分图缩小收益。当前可以确认的结论是：
 不乘10会显著降低单次time-indexed pricing成本，但总求解时间还同时受ALNS初始上界和分支树
 剪枝轨迹影响，不能按horizon比例线性缩放。
+## 2026-07-30：40-2 严格时间乘 10、W0/W100/W300 三算法对照
+
+本轮使用 `wet040_001_2m` 构造严格时间乘 10 实例：processing time、due date 和 setup time 全部乘 10，权重保持不变；setup cost 系数为 0。三种算法均使用 2026-07-30 当前 best profile、单 CPLEX 线程、60 秒 ALNS、best history、Phase-I strong repair、一阶段 strong branching 和 3600 秒时限。ng-DSSR 使用 C1000/K20、source-aware dominance、group-envelope prefilter、completion bound 和 time-indexed root preprocessing；time-indexed no-cut 使用 dual-window graph pricing 与 node-end paper fixing；time-indexed rank-1 使用 arc-memory SRI、cut-loop fixing 和当前 packed residual/posting 优化。
+
+每个 W 单独生成 fixed reference seed，并在该 W 的三种算法之间共享。W0/W100/W300 的 fingerprint 分别为 `69aaaf47...d64`、`eb7c8459...df32` 和 `5a7ffd90...db4f`；三组各自的初始列数、incumbent 列、初始上界和逐列目标均完全一致。第一次误将 W0 reference 用于 W100/W300 时，runner 因 due-window 改变列成本而 fail-fast；该批次未进入 BPC，已排除，正式结果使用后缀 `20260730a` 的 W0 和 `20260730b` 的 W100/W300。
+
+| W | 算法 | 状态 | 最优值 | 时间/s | nodes | pricing | pool | exact/s | master LP/s |
+|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
+| 0 | ng-DSSR | FINISHED | 225800 | 146.444 | 22 | 1125 | 57981 | 5.187 | 50.812 |
+| 0 | time-indexed no-cut | FINISHED | 225800 | 209.494 | 25 | 1454 | 134591 | 69.658 | 98.280 |
+| 0 | time-indexed rank-1/SRI | FINISHED | 225800 | 506.958 | 3 | 620 | 79137 | 84.437 | 379.387 |
+| 100 | ng-DSSR | FINISHED | 209570 | 85.815 | 5 | 453 | 8037 | 1.887 | 31.213 |
+| 100 | time-indexed no-cut | FINISHED | 209570 | 127.463 | 10 | 528 | 68362 | 41.703 | 68.713 |
+| 100 | time-indexed rank-1/SRI | ROOT_PROCESSED | 209570 | 254.888 | 1 | 466 | 61684 | 50.034 | 176.033 |
+| 300 | ng-DSSR | FINISHED | 183480 | 78.261 | 3 | 423 | 7998 | 1.775 | 24.657 |
+| 300 | time-indexed no-cut | FINISHED | 183480 | 129.722 | 8 | 679 | 89302 | 50.079 | 63.887 |
+| 300 | time-indexed rank-1/SRI | ROOT_PROCESSED | 183480 | 109.584 | 1 | 390 | 64710 | 51.506 | 48.637 |
+
+`ROOT_PROCESSED` 两组均由精确 dual bound 在 root 将队列剪空，最终 incumbent 与 lower bound 相等且校验 `valid=true`，因此同样完成最优证明。ng-DSSR 在三个 W 上均最快，相对 no-cut 分别减少 30.10%、32.67% 和 39.67%，相对 SRI 分别减少 71.11%、66.33% 和 28.58%。SRI 在 W0/W100 上虽然显著减少节点，但 cut 后 RMP 成本过高；W300 时 SRI 能在 root 闭合，总时间比 no-cut 少 15.52%，但仍比 ng-DSSR 慢 40.01%。本例支持“大离散 horizon 下 ng-DSSR 更稳定”的判断，同时也说明 SRI 的缩树收益只有在 master LP 成本能够被抵消时才会转化为总时间收益。
+
+正式输出目录：
+
+1. W0：`test-results/bpc/exp-40-2-timeX10-W0-{ng,ti-nocut,ti-sri}-best-20260730a`
+2. W100：`test-results/bpc/exp-40-2-timeX10-W100-{ng,ti-nocut,ti-sri}-best-20260730b`
+3. W300：`test-results/bpc/exp-40-2-timeX10-W300-{ng,ti-nocut,ti-sri}-best-20260730b`

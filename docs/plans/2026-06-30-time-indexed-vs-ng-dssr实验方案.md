@@ -1787,3 +1787,29 @@ ng-DSSR 原故障 strong side `arc(14,22)` 本轮仍稳定得到 `rightBound=INF
 `test-results/bpc/exp-40-2-base-W100-ng-retest-20260730h`、
 `test-results/bpc/exp-40-2-base-W100-ti-nocut-retest-20260730h` 和
 `test-results/bpc/exp-40-2-base-W100-ti-sri-retest-20260730h`。
+
+### 2026-07-30 原始时间 50-3 W100 三种算法对照
+
+沿用上一组严格口径，将实例替换为基础数据 `data/50-3/wet050_003_3m.dat`，仍使用 W100、
+setup cost 系数 0、CPLEX 单线程、3600 秒时限、20000 个节点上限、ALNS 最长 60 秒、best history
+和同一 fixed reference。三组均使用 166 条初始列、3 条 incumbent 列、初始目标 11751，
+fingerprint 均为
+`9491c833ec51cfb927299dbe15abd245f9257c3921a5c967189ba3f089bf0d94`，stderr 均为空。
+
+| 方法 | 总求解时间 | root bound | 节点 | 定价时间 | 主要额外耗时 |
+|---|---:|---:|---:|---:|---:|
+| ng-DSSR | 95.483s | 11519.889313 | 16 | heuristic 49.115s；ng exact 23.650s/99 | strong trial LP 13.040s |
+| time-indexed no-cut | 63.789s | 11469.712548 | 40 | 6.293s/868 | strong trial LP 41.036s |
+| time-indexed rank-1/SRI | **43.317s** | **11539.757652** | **4** | 6.266s/339 | after-cut LP 11.828s；strong trial LP 11.852s |
+
+三组最终均为 `obj=bound=11555`、gap 0、`valid=true`。SRI 比 no-cut 快约 32.1%，比 ng-DSSR
+快约 54.6%；no-cut 比 ng-DSSR 快约 33.2%。ng-DSSR 的 root bound 明显强于 no-cut，节点也由
+40 个降到 16 个，但 49.115 秒启发式 pricing 和 23.650 秒 exact labeling 抵消了缩树收益。
+no-cut 的图 pricing 仅 6.293 秒，主要代价转为 1000 次 strong trial LP。SRI 加入 168 条 cut，
+root bound 距最终最优值只差约 15.24，并把树压缩到 4 个节点；其 11.828 秒 after-cut LP 成本
+明显小于缩树带来的收益，因此在该原始小时间算例上优势最明显。
+
+结果目录分别为
+`test-results/bpc/exp-50-3-base-W100-ng-retest-20260730a`、
+`test-results/bpc/exp-50-3-base-W100-ti-nocut-retest-20260730a` 和
+`test-results/bpc/exp-50-3-base-W100-ti-sri-retest-20260730a`。

@@ -22,3 +22,5 @@ ng-DSSR 现在显式记录最后一轮是否完整结束。只有正反向队列
 后续按真实调用链再次收缩实现。pricing engine 每次调用都会新建 solver，且每个 DSSR round 已在 `solveRelaxedRound()` 入口初始化证书状态，因此删除 `solve()` 入口的重复清空。证书写入来源只有初始 `Double.POSITIVE_INFINITY`、经过有限性校验的 completion bound 和正常 reduced cost，因此 getter 不再为理论上不会出现的其他非有限值增加保护；当前只保留“轮次未完成返回 `NaN`、完整轮无终端候选返回 `0.0`、否则返回实际 reduced cost”三条必要语义。focused 编译及 midpoint、DSSR 更新、Phase-I pricing 三项回归通过。
 
 上述边界收紧后又以完全相同的 fixed seed 和 W=100 配置完整复跑一次。最终运行仍命中 `repair=4:14->22` 的闭合记录，strong trial 仍得到 `rightBound=INF` 和“Phase-I optimum remains positive after generating 623 columns”；实例最终 `obj=bound=11221`、`valid=true`、处理 2 个节点。结果位于 `test-results/bpc/exp-40-2-base-W100-ng-certfix-final-20260730g`。
+
+第三次独立静态复核覆盖 normal、partial 和 graph-partial 的 `price/findFeasible` 入口、证书全部写入点、`solveRelaxedRound()` 的提前返回路径以及 PC 的有限性消费边界。三个 engine 均在每次调用时新建 solver；completion-bound 证书写入前已校验有限，普通 reduced cost 仅在实际观察到更小值时写入；PC 聚合证书时仍统一要求有限值。当前净修改只保留完成标志、每轮初始化、两个完整结束点、未完成轮提前返回和完整无候选时 `+Infinity -> 0.0`，未发现多余保护或新的正确性问题。

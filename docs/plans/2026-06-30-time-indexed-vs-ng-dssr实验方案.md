@@ -1617,3 +1617,46 @@ W0 的 `master LP=379.387s` 不是 cut separation 耗时。cut generator 12 次�
 1. W0：`test-results/bpc/exp-40-2-timeX10-W0-{ng,ti-nocut,ti-sri}-best-20260730a`
 2. W100：`test-results/bpc/exp-40-2-timeX10-W100-{ng,ti-nocut,ti-sri}-best-20260730b`
 3. W300：`test-results/bpc/exp-40-2-timeX10-W300-{ng,ti-nocut,ti-sri}-best-20260730b`
+
+### 2026-07-30：按论文修正 inactive rank-1 cut 生命周期
+
+重新核对 *On the exact solution of a large class of parallel machine scheduling* 后，前述“优先尝试
+age/budget purge”的判断需要收紧。论文的实际流程是：列生成在当前 cut 集合下收敛后，立即从
+master 中删除 dual 为零的 rank-1 cuts；随后再判断 tailing-off 或进入下一轮分离。论文没有要求
+为这次删除单独重新求解 RMP，更没有要求删除后先重新完成一轮 pricing closure。age/budget purge
+只能作为另一个可能的工程变体，不能称为论文做法。
+
+旧实现虽然也会删除零 dual cut，但删除发生在下一轮分离开始时，并且删除后额外执行一次
+`resolve + exact pricing + fixing`。这既晚于论文流程，也造成了 W0 中
+`after_inactive_cut_removal=141.976s/11` 的独立重解长尾；若 tailing-off 或轮数上限在前一轮触发，
+零 dual cut 还可能直接保留到 branching，并被 strong trial 和 child 继承。
+
+现在改为每次 pricing closure 和 fixing 完成后立即删除零 dual cut，包括第一次 cut separation
+之前以及每次新增 cut 后的闭合点。删除只移除 CPLEX rows 和 active cut IDs，不再触发独立 resolve。
+该处理严格保持当前最优解：被删除行在当前最优 dual 中的分量为零，删除该行后当前 primal 解仍可行，
+去掉该零分量后的 dual 解仍可行且目标不变，因此当前 primal/dual 仍为缩减 RMP 的一对最优解。
+普通 `removeCuts()` 的失效语义未改变；只有经过零 dual 校验的 paper rank-1 cleanup 使用保留当前
+solution 的专用入口，并同步清除可能引用旧 cut 集的 pricing-dual override。
+
+在与旧 W0 完全相同的 fixed seed 下重新求解：
+
+| 口径 | 旧实现 | 论文对齐实现 | 变化 |
+|---|---:|---:|---:|
+| 最优值 / valid | 225800 / true | 225800 / true | 一致 |
+| 总时间 | 506.958s | 367.860s | -139.098s，-27.44% |
+| rank-1 exact pricing | 84.437s / 620 | 58.908s / 567 | -25.529s |
+| 普通加列后 LP | 68.587s / 594 | 58.597s / 545 | -9.990s |
+| inactive-cut 删除后 LP | 141.976s / 11 | 0 / 0 | 完全消除 |
+| strong repair LP | 85.030s / 40 | 50.525s / 40 | -34.505s |
+| 加 cut 后 LP | 83.262s / 12 | 162.743s / 19 | 轨迹变化，增加 79.481s |
+
+两组初始列均为 87 条、incumbent 列均为 2 条、初始上界均为 225840，fingerprint 均为
+`69aaaf47fcf93cd28a072e223498db02857bbd51fa7910724403891dcbf99d64`。两组最终均为
+`obj=bound=225800`、`valid=true`。新流程进行了更多分离轮次，因此不能把 139.098s 简单解释成
+原 141.976s 的机械删除；可以确认的是，独立 inactive-cut 重解已被消除，branching 前 active cut
+集合更干净，strong repair 和 pricing 也同步下降，最终净收益仍为 27.44%。新输出位于
+`test-results/bpc/exp-40-2-timeX10-W0-ti-sri-paperpurge-20260730a`。
+
+本次仅对齐论文的 cut 生命周期，没有把 strong branching 改成论文的 50 个第一阶段候选和
+3 个第二阶段候选。当前项目仍保留已单独验证的 20 个第一阶段候选、关闭第二阶段的 best profile；
+两者不能混写成“整个算法已逐项复现论文”。

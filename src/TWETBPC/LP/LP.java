@@ -555,6 +555,26 @@ public class LP {
 	}
 
 	public int removeCuts(List<Integer> cutIds) {
+		return removeCuts(cutIds, false);
+	}
+
+	/**
+	 * 删除当前真实 LP dual 为零的 subset-row cuts，同时保留已经闭合的 primal/dual 快照。
+	 * 2026-07-30: 对齐 Bulhões et al. (2020) 的 immediate inactive-cut removal。零 dual 行删除后，
+	 * 原 primal 解仍可行，去掉零分量后的原 dual 解也仍可行且目标不变，因此不需要单独 resolve。
+	 */
+	public int removeZeroDualCutsPreservingCurrentSolution(List<Integer> cutIds) {
+		HashSet<Integer> pricingCutIds = new HashSet<Integer>(activeSubsetRowPricingCutIds);
+		for (int id : cutIds) {
+			TWETCut cut = cutPool.getCut(id);
+			if (cut.getType() != TWETCutType.SUBSET_ROW || pricingCutIds.contains(Integer.valueOf(id))) {
+				throw new IllegalArgumentException("Only zero-dual subset-row cuts can preserve the current LP solution: " + id);
+			}
+		}
+		return removeCuts(cutIds, true);
+	}
+
+	private int removeCuts(List<Integer> cutIds, boolean preserveCurrentSolution) {
 		long startNanos = subsetRowBuildTimingEnabled ? System.nanoTime() : 0L;
 		int removed = 0;
 		for (int id : cutIds) {
@@ -578,12 +598,15 @@ public class LP {
 		}
 		if (subsetRowBuildTimingEnabled && !cutIds.isEmpty()) {
 			System.out.println(String.format(java.util.Locale.US,
-					"[SriRowRemoveTiming] requested=%d removed=%d timeMs=%.3f",
-					cutIds.size(), removed, (System.nanoTime() - startNanos) / 1.0e6));
+					"[SriRowRemoveTiming] requested=%d removed=%d preserveSolution=%s timeMs=%.3f",
+					cutIds.size(), removed, Boolean.toString(preserveCurrentSolution),
+					(System.nanoTime() - startNanos) / 1.0e6));
 		}
 		if (removed > 0) {
-			lastSolution = null;
 			clearPricingDualOverride();
+			if (!preserveCurrentSolution) {
+				lastSolution = null;
+			}
 		}
 		return removed;
 	}

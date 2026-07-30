@@ -65,6 +65,22 @@ public final class ActiveCutInheritanceTest {
 			throw new AssertionError("RMP did not recover after incremental SRI removal: " + restored.getMessage());
 		}
 
+		// 零 dual 行删除后原 primal/dual 证书仍然有效，论文流程不应为 purge 单独重解。
+		int inactiveCut = cutPool.addCut(
+				new TWETCut(-1, TWETCutType.SUBSET_ROW, Arrays.asList(Integer.valueOf(1)), 0.0, "inactive"));
+		lp.addCuts(Collections.singletonList(Integer.valueOf(inactiveCut)));
+		TWETMasterSolution beforeInactiveRemoval = lp.resolveCurrentModel();
+		if (beforeInactiveRemoval.getStatus() != TWETMasterStatus.LP_RELAXATION
+				|| lp.getActiveSubsetRowPricingCutIds().contains(Integer.valueOf(inactiveCut))) {
+			throw new AssertionError("Redundant SRI should have a zero pricing dual");
+		}
+		int inactiveRemoved = lp.removeZeroDualCutsPreservingCurrentSolution(
+				Collections.singletonList(Integer.valueOf(inactiveCut)));
+		if (inactiveRemoved != 1 || lp.getLastSolution() != beforeInactiveRemoval
+				|| lp.getActiveCutIds().contains(Integer.valueOf(inactiveCut))) {
+			throw new AssertionError("Zero-dual SRI removal did not preserve the closed LP solution");
+		}
+
 		int keptCut = cutPool.addCut(
 				new TWETCut(-1, TWETCutType.SUBSET_ROW, Arrays.asList(Integer.valueOf(1)), 0.0, "kept"));
 		int removedCut = cutPool.addCut(

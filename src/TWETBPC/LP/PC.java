@@ -128,31 +128,13 @@ public class PC {
 		if (solution.isInteger()) {
 			return solution;
 		}
+		removeInactivePaperRank1CutsAfterClosure(lp);
 
 		double previousRank1Gap = Double.NaN;
 		double previousRank1GapDecrease = Double.NaN;
 		for (int round = 0; round < config.maxCutRounds; round++) {
 			if (isTimeLimitReached()) {
 				break;
-			}
-			if (usesPaperStyleTimeIndexedRank1Cuts()) {
-				int removed = removeInactiveSubsetRowCuts(lp);
-				if (removed > 0) {
-					traceSink.onCutCall(lp.getNode(), "SubsetRowCutInactiveRemoval", true, -removed,
-							"removed inactive rank-1 cuts with zero pricing dual", lp.getCutPool().size(), 0L);
-					solution = resolveCurrentModelTimed(lp, "after_inactive_cut_removal");
-					if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
-						return solution;
-					}
-					solution = solvePricingLoop(lp, solution);
-					if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
-						return solution;
-					}
-					applyCutLoopPricingOnlyArcFixing(lp, solution);
-					if (isTimeLimitReached() || solution.isInteger()) {
-						return solution;
-					}
-				}
 			}
 			ArrayList<Integer> activeBeforeSeparation = new ArrayList<Integer>(lp.getActiveCutIds());
 			ArrayList<Integer> activeAfterSeparation = new ArrayList<Integer>(activeBeforeSeparation);
@@ -230,6 +212,7 @@ public class PC {
 			if (isTimeLimitReached() || solution.isInteger()) {
 				return solution;
 			}
+			removeInactivePaperRank1CutsAfterClosure(lp);
 			if (usesPaperStyleTimeIndexedRank1Cuts()) {
 				double gap = currentAbsoluteGap(solution);
 				if (Double.isFinite(gap) && Double.isFinite(previousRank1Gap)
@@ -351,7 +334,21 @@ public class PC {
 				inactive.add(Integer.valueOf(cutId));
 			}
 		}
-		return inactive.isEmpty() ? 0 : lp.removeCuts(inactive);
+		return inactive.isEmpty() ? 0 : lp.removeZeroDualCutsPreservingCurrentSolution(inactive);
+	}
+
+	/** 论文 rank-1 流程：CG 闭合后立即删除零 dual 行，但不为该删除单独重解。 */
+	private int removeInactivePaperRank1CutsAfterClosure(LP lp) {
+		if (!usesPaperStyleTimeIndexedRank1Cuts()) {
+			return 0;
+		}
+		int removed = removeInactiveSubsetRowCuts(lp);
+		if (removed > 0) {
+			traceSink.onCutCall(lp.getNode(), "SubsetRowCutInactiveRemoval", true, -removed,
+					"removed inactive rank-1 cuts after pricing closure without redundant resolve",
+					lp.getCutPool().size(), 0L);
+		}
+		return removed;
 	}
 
 	private double currentAbsoluteGap(TWETMasterSolution solution) {

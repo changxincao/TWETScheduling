@@ -88,6 +88,8 @@ public class LP {
 	private HashMap<Integer, IloRange> subsetRowCutRanges;
 	private ArrayList<Integer> activeSubsetRowPricingCutIds;
 	private ArrayList<Double> activeSubsetRowPricingDuals;
+	/** 当前真实 LP 解中 dual 严格为 0.0/-0.0、可无重解删除的 subset-row cuts。 */
+	private ArrayList<Integer> exactZeroSubsetRowCutIds;
 	private IloRange[] tariffActiveBounds;
 	private IloRange[] tariffBranchRanges;
 	private ArrayList<TariffSegment> outsourcingTariffSegments;
@@ -290,6 +292,14 @@ public class LP {
 			return Collections.emptyList();
 		}
 		return Collections.unmodifiableList(activeSubsetRowPricingDuals);
+	}
+
+	/** @return 本次有效真实 LP 解中 dual 严格为零的 subset-row cut IDs。 */
+	List<Integer> getExactZeroSubsetRowCutIds() {
+		if (exactZeroSubsetRowCutIds == null) {
+			return Collections.emptyList();
+		}
+		return Collections.unmodifiableList(exactZeroSubsetRowCutIds);
 	}
 
 	public TWETMasterSolution getLastSolution() {
@@ -559,16 +569,20 @@ public class LP {
 	}
 
 	/**
-	 * 删除当前真实 LP dual 为零的 subset-row cuts，同时保留已经闭合的 primal/dual 快照。
-	 * 2026-07-30: 对齐 Bulhões et al. (2020) 的 immediate inactive-cut removal。零 dual 行删除后，
-	 * 原 primal 解仍可行，去掉零分量后的原 dual 解也仍可行且目标不变，因此不需要单独 resolve。
+	 * 删除当前真实 LP dual 严格为零的 subset-row cuts，同时保留已经闭合的 primal/dual 快照。
+	 * 2026-07-30: pricing-active 使用数值容差，而该接口只接受 CPLEX 返回的 0.0/-0.0；
+	 * near-zero 非零行必须保留，不能在不重解的情况下继续沿用旧 bound。
 	 */
 	public int removeZeroDualCutsPreservingCurrentSolution(List<Integer> cutIds) {
-		HashSet<Integer> pricingCutIds = new HashSet<Integer>(activeSubsetRowPricingCutIds);
+		if (lastSolution == null || lastSolution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new IllegalStateException("Zero-dual cuts require a current solved LP relaxation");
+		}
+		HashSet<Integer> exactZeroCutIds = new HashSet<Integer>(getExactZeroSubsetRowCutIds());
 		for (int id : cutIds) {
 			TWETCut cut = cutPool.getCut(id);
-			if (cut.getType() != TWETCutType.SUBSET_ROW || pricingCutIds.contains(Integer.valueOf(id))) {
-				throw new IllegalArgumentException("Only zero-dual subset-row cuts can preserve the current LP solution: " + id);
+			if (cut.getType() != TWETCutType.SUBSET_ROW || !exactZeroCutIds.contains(Integer.valueOf(id))) {
+				throw new IllegalArgumentException(
+						"Only exact-zero-dual subset-row cuts can preserve the current LP solution: " + id);
 			}
 		}
 		return removeCuts(cutIds, true);
@@ -594,6 +608,9 @@ public class LP {
 				subsetRowCutRanges.remove(value);
 			}
 			activeCutIds.remove(value);
+			if (exactZeroSubsetRowCutIds != null) {
+				exactZeroSubsetRowCutIds.remove(value);
+			}
 			removed++;
 		}
 		if (subsetRowBuildTimingEnabled && !cutIds.isEmpty()) {
@@ -793,6 +810,7 @@ public class LP {
 		subsetRowPostingIndex = null;
 		activeSubsetRowPricingCutIds = new ArrayList<Integer>();
 		activeSubsetRowPricingDuals = new ArrayList<Double>();
+		exactZeroSubsetRowCutIds = new ArrayList<Integer>();
 		outsourcingTariffSegments = isColumnizedOutsourcing() ? new ArrayList<TariffSegment>()
 				: collectOutsourcingTariffSegments();
 		masterLpPhaseModelInitNanos += masterLpTimingElapsed(phaseStartNanos);
@@ -1731,6 +1749,11 @@ public class LP {
 		return segments;
 	}
 
+	/** 仅严格的 IEEE 0.0/-0.0 支持删除 row 后复用当前 LP 最优解。 */
+	static boolean isExactZeroSubsetRowDual(double dual) {
+		return dual == 0.0;
+	}
+
 	private void readDuals() throws IloException {
 		clearDuals();
 		double[] coverageDuals = cplex.getDuals(coverRanges, 1, data.n);
@@ -1802,6 +1825,9 @@ public class LP {
 				if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
 					activeSubsetRowPricingCutIds.add(entry.getKey());
 					activeSubsetRowPricingDuals.add(Double.valueOf(dual));
+				}
+				if (isExactZeroSubsetRowDual(dual)) {
+					exactZeroSubsetRowCutIds.add(entry.getKey());
 				}
 			}
 		}
@@ -1925,6 +1951,9 @@ public class LP {
 		}
 		if (activeSubsetRowPricingDuals != null) {
 			activeSubsetRowPricingDuals.clear();
+		}
+		if (exactZeroSubsetRowCutIds != null) {
+			exactZeroSubsetRowCutIds.clear();
 		}
 	}
 

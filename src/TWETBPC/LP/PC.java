@@ -325,16 +325,10 @@ public class PC {
 				&& config.enableSubsetRowCutsForTimeIndexedGraph;
 	}
 
-	private int removeInactiveSubsetRowCuts(LP lp) {
-		HashSet<Integer> pricingCuts = new HashSet<Integer>(lp.getActiveSubsetRowPricingCutIds());
-		ArrayList<Integer> inactive = new ArrayList<Integer>();
-		for (int cutId : lp.getActiveCutIds()) {
-			TWETCut cut = lp.getCutPool().getCut(cutId);
-			if (cut.getType() == TWETCutType.SUBSET_ROW && !pricingCuts.contains(Integer.valueOf(cutId))) {
-				inactive.add(Integer.valueOf(cutId));
-			}
-		}
-		return inactive.isEmpty() ? 0 : lp.removeZeroDualCutsPreservingCurrentSolution(inactive);
+	private int removeExactZeroSubsetRowCuts(LP lp) {
+		List<Integer> exactZeroCutIds = lp.getExactZeroSubsetRowCutIds();
+		return exactZeroCutIds.isEmpty() ? 0
+				: lp.removeZeroDualCutsPreservingCurrentSolution(new ArrayList<Integer>(exactZeroCutIds));
 	}
 
 	/** 论文 rank-1 流程：CG 闭合后立即删除零 dual 行，但不为该删除单独重解。 */
@@ -342,7 +336,7 @@ public class PC {
 		if (!usesPaperStyleTimeIndexedRank1Cuts()) {
 			return 0;
 		}
-		int removed = removeInactiveSubsetRowCuts(lp);
+		int removed = removeExactZeroSubsetRowCuts(lp);
 		if (removed > 0) {
 			traceSink.onCutCall(lp.getNode(), "SubsetRowCutInactiveRemoval", true, -removed,
 					"removed inactive rank-1 cuts after pricing closure without redundant resolve",

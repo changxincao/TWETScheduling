@@ -1730,3 +1730,31 @@ exact-zero 集合；任何 add/remove column、add/remove cut 或 objective 切�
 失效时，同步清空该集合。测试除现有 exact-zero 行外，还需覆盖 near-zero 不删除、模型变化后旧零 dual
 集合不可复用，以及 PC 闭合后无额外 resolve 三个边界。该方案是充分但偏保守的条件：可能暂时多保留
 少量数值 near-zero rows，但不改变模型、bound 或列生成证书。
+
+### 2026-07-30：严格零 dual cleanup 实现与复跑结果
+
+代码已按上述双集合方案实现。`LP.readDuals()` 保持原 pricing-active 容差，同时单独记录 CPLEX
+返回值满足 `dual == 0.0` 的 subset-row cut IDs；PC 闭合点只复制并删除该 exact-zero 集合。
+preserve-solution 接口现在要求存在当前有效的 LP relaxation，并拒绝任何不属于本次 exact-zero
+集合的 cut。普通模型修改会把 `lastSolution` 置空，因此旧 exact-zero 状态不能跨模型版本复用。
+
+编译排除历史 `src/BPC` 包后通过。`ActiveCutInheritanceTest` 新增并通过 `0.0/-0.0` 与
+`±1e-12` 分类、exact-zero 删除保留同一 solution、模型变化后拒绝旧 dual 状态三项检查；cut
+coefficient、memory merge、coefficient cache、immutable ID、posting、time-indexed optimization
+和 strong Phase-I 等其余七项回归也全部通过。
+
+使用与旧 paper-purge 实验完全相同的 40-2 timeX10 W0 fixed seed 复跑。两组均使用 87 条初始列、
+2 条 incumbent 列、初始目标 225840，fingerprint 均为
+`69aaaf47fcf93cd28a072e223498db02857bbd51fa7910724403891dcbf99d64`，最终均为
+`obj=bound=225800, valid=true`。旧 tolerance-purge 的 root 前八次 cleanup 共删除 567 条，
+严格零版本删除 551 条，只多保留 16 条 near-zero rows，说明 immediate cleanup 并未被实质关闭。
+但两版从第一轮少删一条 row 后即产生不同的后续 cuts、列和 root bound：旧版为
+`225717.185829`，严格版为 `225660.453611`。因此“不进入 pricing 的 row 可以作为零 dual row
+无重解删除”不是等价实现，差异足以改变求解轨迹。
+
+严格版总时间为 406.327s，旧版为 367.860s；不能把约 10.5% 差距直接解释为 strict cleanup
+开销，因为当前复跑同一初始 arc fixing 已由 2774ms 变为 4078ms，strong repair 单次 LP 也约慢
+1.5 倍，存在明显机器负载差异。更可比的 root 时间为 303.779s 对 293.401s，约增加 3.5%；
+严格版反而只执行 11 次 cut separation、peak cut pool 854，旧版为 19 次和 1475。当前结论是：
+修正恢复了论文“真实零 dual 才无重解删除”的正确性条件，cleanup 强度基本保留，没有证据表明它引入
+新的计算热点。

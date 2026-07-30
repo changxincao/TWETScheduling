@@ -23,6 +23,10 @@ public final class ActiveCutInheritanceTest {
 	public static void main(String[] args) throws Exception {
 		Data data = new Data("data/40-2/wet040_001_2m.dat", false, true);
 		TWETBPCConfig config = new TWETBPCConfig();
+		if (!LP.isExactZeroSubsetRowDual(0.0) || !LP.isExactZeroSubsetRowDual(-0.0)
+				|| LP.isExactZeroSubsetRowDual(-1e-12) || LP.isExactZeroSubsetRowDual(1e-12)) {
+			throw new AssertionError("Exact-zero SRI dual classification is not strict");
+		}
 		Pool pool = new Pool(data);
 		CutPool cutPool = new CutPool();
 
@@ -71,8 +75,9 @@ public final class ActiveCutInheritanceTest {
 		lp.addCuts(Collections.singletonList(Integer.valueOf(inactiveCut)));
 		TWETMasterSolution beforeInactiveRemoval = lp.resolveCurrentModel();
 		if (beforeInactiveRemoval.getStatus() != TWETMasterStatus.LP_RELAXATION
-				|| lp.getActiveSubsetRowPricingCutIds().contains(Integer.valueOf(inactiveCut))) {
-			throw new AssertionError("Redundant SRI should have a zero pricing dual");
+				|| lp.getActiveSubsetRowPricingCutIds().contains(Integer.valueOf(inactiveCut))
+				|| !lp.getExactZeroSubsetRowCutIds().contains(Integer.valueOf(inactiveCut))) {
+			throw new AssertionError("Redundant SRI should have an exact-zero dual");
 		}
 		int inactiveRemoved = lp.removeZeroDualCutsPreservingCurrentSolution(
 				Collections.singletonList(Integer.valueOf(inactiveCut)));
@@ -86,6 +91,15 @@ public final class ActiveCutInheritanceTest {
 		int removedCut = cutPool.addCut(
 				new TWETCut(-1, TWETCutType.SUBSET_ROW, Arrays.asList(Integer.valueOf(2)), 0.0, "removed"));
 		lp.addCuts(Arrays.asList(Integer.valueOf(keptCut), Integer.valueOf(removedCut)));
+		boolean rejectedStaleZeroDualState = false;
+		try {
+			lp.removeZeroDualCutsPreservingCurrentSolution(Collections.singletonList(Integer.valueOf(keptCut)));
+		} catch (IllegalStateException expected) {
+			rejectedStaleZeroDualState = true;
+		}
+		if (!rejectedStaleZeroDualState) {
+			throw new AssertionError("Model mutation should invalidate exact-zero cut removal state");
+		}
 		lp.removeCuts(Collections.singletonList(Integer.valueOf(removedCut)));
 		lp.syncActiveCutsToNode();
 

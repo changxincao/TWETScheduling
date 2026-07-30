@@ -133,6 +133,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private PackedBitSet[] backwardExtensionArcMaskBySuccessor;
 	private double bestGeneratedReducedCost;
 	private double lastRelaxedRoundBestReducedCost;
+	private boolean lastRelaxedRoundCompleted;
 	private boolean feasibilityPhaseOneObjectiveMode;
 
 	// 2026-05-22: 闂佸憡鐟ラ懟顖炲箖?midpoint闂佹寧绋戦懟顖濄亹瑜忛埀顒傛暩閹虫挾绱炵€ｎ喖绀?pricing 闁哄鍎愰崰妤€锕㈡笟鈧顐﹀醇濞戞帒浜?
@@ -1300,6 +1301,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				recordNgSetHistory(lp);
 				return columns;
 			}
+			if (!lastRelaxedRoundCompleted) {
+				appendNgSetStatsForRound(0);
+				appendRoundRouteRelation(0);
+				appendNgDssrSummary(timeLimitChecker.isTimeLimitReached()
+						? "time limit reached" : "relaxed pricing round incomplete");
+				recordNgSetHistory(lp);
+				return columns;
+			}
 			if (nonElementaryNegativeRoutes.isEmpty()) {
 				appendNgSetStatsForRound(0);
 				appendRoundRouteRelation(0);
@@ -1390,12 +1399,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long backwardNanosBefore = exactBackwardExpandNanos;
 		Utility.resetCurUpperBound(Utility.big_M);
 		lastRelaxedRoundBestReducedCost = Double.POSITIVE_INFINITY;
+		lastRelaxedRoundCompleted = false;
 		diagnosticHeartbeat(lp, "initialize.start", true);
 		long phaseStart = System.nanoTime();
 		initialize(lp);
 		exactInitializeNanos += System.nanoTime() - phaseStart;
 		diagnosticHeartbeat(lp, "initialize.done", true);
 		if (completionBoundPreCertificateClosed) {
+			lastRelaxedRoundCompleted = true;
 			exactTotalNanos += System.nanoTime() - exactStartNanos;
 			return generatedColumns;
 		}
@@ -1461,6 +1472,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		exactTotalNanos += roundExactNanos;
 		boolean roundCompleted = !timeLimitChecker.isTimeLimitReached()
 				&& (midpointProbeLabelsReadyForJoin || (FWUL.isEmpty() && BWUL.isEmpty()));
+		lastRelaxedRoundCompleted = roundCompleted && canContinue();
 		if (roundCompleted) {
 			rememberDssrRoundMidpointFeedback(roundForwardMillis, roundBackwardMillis);
 			recordMidpointProbeExactFeedback(lp, roundExactNanos, roundForwardMillis, roundBackwardMillis);
@@ -1535,8 +1547,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	public double getLastRelaxedRoundBestReducedCost() {
-		if (Double.isInfinite(lastRelaxedRoundBestReducedCost)) {
+		if (!lastRelaxedRoundCompleted) {
 			return Double.NaN;
+		}
+		if (Double.isInfinite(lastRelaxedRoundBestReducedCost)) {
+			// 完整轮没有实际评价到终端候选时，以 0 表示已证明不存在负 reduced-cost 列。
+			return 0.0;
 		}
 		return lastRelaxedRoundBestReducedCost;
 	}

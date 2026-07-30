@@ -116,7 +116,8 @@ public class PC {
 		}
 
 		solution = solvePricingLoop(lp, solution);
-		if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+		if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.NOT_SOLVED
+				|| lastNodePrunedByDualBound) {
 			return solution;
 		}
 
@@ -205,7 +206,8 @@ public class PC {
 			}
 			// 2026-06-13: 新 cut 改变 dual 和 reduced cost，必须重新定价闭合；否则 SRI dual 已读出但没有进入 pricing。
 			solution = solvePricingLoop(lp, solution);
-			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION
+					|| lastNodePrunedByDualBound) {
 				return solution;
 			}
 			applyCutLoopPricingOnlyArcFixing(lp, solution);

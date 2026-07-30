@@ -1876,3 +1876,11 @@ reference ALNS 并以确定性文本格式写出初始列、incumbent 列、逐�
 fingerprint；文件已存在时，后续进程直接读取并重新计算 fingerprint，不再运行 reference
 ALNS。40-2 独立双进程烟测中，写入端和读取端均为 74 条初始列、2 条 incumbent 列、上界
 11469，fingerprint 均为 `29d22e1e...`。后续 60-3 W100 三算法对照使用该入口重新开始。
+
+严格 W100 对照中，no-cut 使用该 snapshot 完成求解：`obj=bound=2044`、820.448s、
+495 个处理节点、fingerprint 为 `88ec9333...`。并行启动的 SRI 在 node 31 暴露出一个
+dual-bound 剪枝后的生命周期错误：pricing 已用有效 dual bound 证明节点可剪，但 active 列
+成本改善使 RMP objective 更新并清空 `lastSolution`，`PC.solve()` 随后仍继续执行严格零-dual
+cut cleanup，因而抛出“需要当前已求解 LP”的异常。修复是在初始 pricing 闭合和每轮 cut 后
+pricing 闭合处，一旦 `lastNodePrunedByDualBound` 成立即直接返回给 Tree；Tree 原本就优先按
+该证书关闭节点。未增加 fallback，也未改变未剪枝节点的 cut-and-price 顺序。

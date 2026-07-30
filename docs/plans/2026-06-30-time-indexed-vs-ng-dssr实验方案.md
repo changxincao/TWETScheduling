@@ -1884,3 +1884,15 @@ dual-bound 剪枝后的生命周期错误：pricing 已用有效 dual bound 证�
 cut cleanup，因而抛出“需要当前已求解 LP”的异常。修复是在初始 pricing 闭合和每轮 cut 后
 pricing 闭合处，一旦 `lastNodePrunedByDualBound` 成立即直接返回给 Tree；Tree 原本就优先按
 该证书关闭节点。未增加 fallback，也未改变未剪枝节点的 cut-and-price 顺序。
+
+### 机器数量对算法比较的混杂影响
+
+机器数量增加通常会让组合搜索更容易，但也会同步强化 time-indexed 方法。原因不是机器数直接
+进入单机定价图的状态维度，而是更多机器通常降低可行排程的 makespan/Cmax，使 pricing horizon、
+任务可达时间范围和后续 compact window 一起缩短；time-indexed 图的时间节点和时间弧随之减少。
+每台机器承担的任务数下降后，定价路径深度也会变浅，graph fixing 更容易进一步删除无用状态。
+
+ng-DSSR 同样会从更浅的路径和更小的搜索树中受益，但其复杂度对绝对时间刻度本来较稳定；
+time-indexed 则会额外获得 horizon 缩短带来的直接图规模收益。因此，不能把“增加机器后整体
+更容易”解释成两种定价方法受到相同程度的改善。正式实验应固定机器数后比较时间尺度和 due
+window；`m=2` 与 `m=3` 分层报告，不把机器数变化与时间尺度变化混在一个速度比中。

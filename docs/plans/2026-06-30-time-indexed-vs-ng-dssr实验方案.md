@@ -1833,3 +1833,25 @@ fw/bw 字段为 0；这不表示扩展没有成本，而是扩展成本已经记
 当前主要结论是：若继续优化该配置，优先级应为启发式 pricing 的单次固定开销和调用次数，其次是
 completion-bound 构造与 midpoint probe；join、DSSR 轮数及 dominance graph 不是这组数据上的
 主要优化对象。
+
+### 2026-07-30 原始时间 60-3 的 ng-DSSR W0/W100 对照
+
+使用 `data/60-3/wet060_001_3m.dat`、setup cost 系数 0、当前 ng-DSSR best profile、CPLEX
+单线程、7200 秒时限和 20000 节点上限，分别求解 W0 和 W100。每组 fixed reference 与目标
+due-window 一致并通过逐列成本校验。W0 使用 242 条初始列、3 条 incumbent 列和初始上界
+16728；W100 使用 154 条初始列、3 条 incumbent 列和初始上界 2128。
+
+| W | 状态 | 最优值 | 总时间 | root bound / 时间 | 节点 | heuristic pricing | ng exact | strong-trial LP |
+|---:|---|---:|---:|---:|---:|---:|---:|---:|
+| 0 | FINISHED | 16531 | 489.413s | 16493.272727 / 78.495s | 12 | 319.966s / 813 | 74.790s / 193 | 39.298s / 360 |
+| 100 | FINISHED | 2044 | 3972.082s | 1987.904309 / 65.197s | 206 | 1526.966s / 5314 | 1307.227s / 2416 | 946.440s / 7120 |
+
+两组均为 `obj=bound`、gap 0、`valid=true`。W100 总时间约为 W0 的 8.12 倍，虽然 root
+反而略快，但 root 相对最优值的缺口由约 0.23% 扩大到 2.74%，节点数由 12 增至 206。
+相较 W0，W100 的启发式 pricing 时间约放大 4.77 倍，ng exact 约放大 17.48 倍，
+strong-trial LP 约放大 24.08 倍。该实例的主要困难不是单次 root，而是宽 due window
+造成分支树、正式 exact 调用和强分支 trial 数量同时增长。
+
+结果目录为 `test-results/bpc/exp-60-3-base-W0-ng-20260730b` 和
+`test-results/bpc/exp-60-3-base-W100-ng-20260730a`。本轮启动时尚未按后续新增规则开启
+实时 trace，因此运行中不能读取 gap；最终日志和 CSV 均已正常落盘。

@@ -1912,7 +1912,20 @@ window；`m=2` 与 `m=3` 分层报告，不把机器数变化与时间尺度变�
 `TimeIndexedGraphPricing` 与 `TimeIndexedGraphRank1CutPricing + SubsetRowCutGenerator`，
 实时日志已启用。放大后 pricing horizon 为 35184；初步运行约 2.5 分钟时，no-cut 已到
 node 15，单次 pricing 约 0.05--0.07s，SRI 仍在 node 2，约 40 条 active cuts 下单次 exact
-pricing 约 0.47--0.55s。最终结果待运行结束后补充。
+pricing 约 0.47--0.55s。
+
+SRI 最终在 1812.952s 内求得并证明最优，`obj=bound=20440`、`gap=0`、`valid=true`，
+处理 66 个节点。其 root 为 119.987s，pricing 为 999.785s/2636 次，master LP 为
+240.140s，新增 1069 条 cuts，峰值 cut pool 为 11923。与基础 W100 的 SRI 结果相比，
+总时间由 304.556s 增至 1812.952s，放大约 5.95 倍；pricing 时间由 53.185s 增至
+999.785s，放大约 18.80 倍，节点由 46 增至 66。
+
+并行 no-cut 在 1472s、node 248、queue 245、pool 418049 时因 Windows 提交内存/分页文件
+不足退出，并非算法超时或正常闭合；当时 pseudo bound 约为 20345.79，incumbent 仍为
+21280，gap 约 4.39%。该目录不能用于最终时间比较。SRI 完成并释放内存后，使用完全相同配置
+在 `test-results/bpc/exp-60-3-timeX10-W1000-sharedseed-ti-nocut-20260730d`
+单独重启 no-cut，PID 为 49416；fixed seed、成本缩放和 effective engine 已再次校验，最终结果
+待该单进程运行结束后补充。
 
 前两个 `20260730a/b` 目录因 `cmd /c` 对批处理路径的解析失败，没有创建有效 Java solver
 进程和主日志，仅保留为启动故障证据，不得用于结果比较。正式 `20260730c` 使用唯一的直接

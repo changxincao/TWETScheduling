@@ -9,6 +9,7 @@ import java.util.Map;
 
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.GC.PricingMode;
 import TWETBPC.LP.LP;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
@@ -28,13 +29,11 @@ public class SubsetRowCutGenerator implements CutGenerator {
 	private static final int PAPER_MAX_THREE_ROW_CUTS_PER_ROUND = 75;
 
 	private final TWETBPCConfig config;
+	private final PricingMode pricingMode;
 
-	public SubsetRowCutGenerator() {
-		this(new TWETBPCConfig());
-	}
-
-	public SubsetRowCutGenerator(TWETBPCConfig config) {
+	public SubsetRowCutGenerator(TWETBPCConfig config, PricingMode pricingMode) {
 		this.config = config;
+		this.pricingMode = pricingMode;
 	}
 
 	@Override
@@ -160,7 +159,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 
 	private boolean isSupportedPricingMode() {
 		if (config.enableSubsetRowCutsForPartialDominance
-				&& config.useGCNGBBStyleNgDssrPartialDominancePricing) {
+				&& pricingMode.supportsPartialNgSubsetRowCuts()) {
 			return true;
 		}
 		return isTimeIndexedRank1Mode();
@@ -168,8 +167,7 @@ public class SubsetRowCutGenerator implements CutGenerator {
 
 	private boolean isTimeIndexedRank1Mode() {
 		return config.enableSubsetRowCutsForTimeIndexedGraph
-				&& config.useTimeIndexedGraphPricing
-				&& config.useTimeIndexedGraphRank1CutPricing;
+				&& pricingMode.supportsTimeIndexedRank1Cuts();
 	}
 
 	private void addCandidateIfViolated(ArrayList<PositiveColumn> positiveColumns,

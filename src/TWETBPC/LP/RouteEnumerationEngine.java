@@ -12,6 +12,7 @@ import Common.PiecewiseLinearFunction.Direction;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
+import TWETBPC.GC.PricingMode;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
@@ -31,11 +32,13 @@ public final class RouteEnumerationEngine {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private final PricingMode pricingMode;
 	private final TWETColumnEvaluator evaluator;
 
-	public RouteEnumerationEngine(Data data, TWETBPCConfig config) {
+	public RouteEnumerationEngine(Data data, TWETBPCConfig config, PricingMode pricingMode) {
 		this.data = data;
 		this.config = config;
+		this.pricingMode = pricingMode;
 		this.evaluator = new TWETColumnEvaluator(data);
 	}
 
@@ -184,7 +187,7 @@ public final class RouteEnumerationEngine {
 		if (!Double.isFinite(incumbentCost) || !Double.isFinite(nodeLowerBound)) {
 			return "no finite incumbent or lower bound";
 		}
-		if (config.useTimeIndexedGraphPricing) {
+		if (pricingMode.usesTimeIndexedPricing()) {
 			return "time-indexed graph pricing uses non-elementary columns";
 		}
 		double gap = incumbentCost - nodeLowerBound;

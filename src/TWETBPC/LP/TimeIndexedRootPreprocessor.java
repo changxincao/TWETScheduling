@@ -15,6 +15,7 @@ import TWETBPC.TimeLimitChecker;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.CUT.NoOpCutGenerator;
 import TWETBPC.GC.PricingEngine;
+import TWETBPC.GC.PricingMode;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.GC.TimeIndexedScalarCompletionBound;
@@ -52,10 +53,11 @@ final class TimeIndexedRootPreprocessor {
 	private TimeIndexedRootPreprocessor() {
 	}
 
-	static Result run(Data data, TWETBPCConfig config, Pool mainPool, Node root, double incumbentCost,
+	static Result run(Data data, TWETBPCConfig config, PricingMode pricingMode, Pool mainPool, Node root,
+			double incumbentCost,
 			BPCTraceSink traceSink, TimeLimitChecker timeLimitChecker) {
 		long start = System.nanoTime();
-		if (!shouldRun(config)) {
+		if (!shouldRun(config, pricingMode)) {
 			return Result.skipped("disabled or incompatible main pricing");
 		}
 		// 非整数时间图是放松网格，不能作为 exact root 或永久 fixing/window 写回依据。
@@ -79,7 +81,7 @@ final class TimeIndexedRootPreprocessor {
 		engines.add(new TimeIndexedGraphPricingEngine(data, preConfig));
 		ArrayList<CutGenerator> cuts = new ArrayList<CutGenerator>();
 		cuts.add(new NoOpCutGenerator());
-		PC prePc = new PC(preConfig, engines, cuts, traceSink);
+		PC prePc = new PC(preConfig, PricingMode.TIME_INDEXED, engines, cuts, traceSink);
 		prePc.setTimeLimitChecker(timeLimitChecker);
 		LP preLp = new LP(data, prePool, preCutPool, preConfig, preOutsourcingPool);
 		try {
@@ -168,12 +170,9 @@ final class TimeIndexedRootPreprocessor {
 		}
 	}
 
-	private static boolean shouldRun(TWETBPCConfig config) {
+	private static boolean shouldRun(TWETBPCConfig config, PricingMode pricingMode) {
 		return config.enableTimeIndexedRootPreprocessingForNgDssr
-				&& !config.useTimeIndexedGraphPricing
-				&& (config.useGCNGBBStyleNgDssrPricing
-						|| config.useGCNGBBStyleNgDssrPartialDominancePricing
-						|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing)
+				&& pricingMode.usesNgDssrPricing()
 				&& !config.useColumnizedOutsourcing();
 	}
 

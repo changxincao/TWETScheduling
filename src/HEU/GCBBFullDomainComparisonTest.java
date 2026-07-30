@@ -23,6 +23,7 @@ import TWETBPC.TWETSolveResult;
 import TWETBPC.GC.FixedInitialColumnSeed;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
+import TWETBPC.GC.PricingMode;
 import TWETBPC.IO.HeuristicSeedProvider;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.LP.Pool;
@@ -139,6 +140,7 @@ public class GCBBFullDomainComparisonTest {
 			config.liveTraceLogPath = log.toString();
 		}
 		TWETBPCSolver solver = new TWETBPCSolver(data, config);
+		validateNgDssrMidpointProbeOverrides(solver.getContext().pricingMode);
 		TWETSolveResult result = solver.solve();
 		BPCTraceSummary summary = solver.getContext().traceSummary;
 		ValidationResult validation = BPCSolutionValidator.validate(data, solver.getContext().pool, result);
@@ -931,7 +933,6 @@ public class GCBBFullDomainComparisonTest {
 		config.ngDssrExtensionTimingDiagnostics = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.ngDssrExtensionTimingDiagnostics",
 				Boolean.toString(config.ngDssrExtensionTimingDiagnostics)));
-		validateNgDssrMidpointProbeOverrides(config);
 		return config;
 	}
 
@@ -939,10 +940,8 @@ public class GCBBFullDomainComparisonTest {
 	 * 2026-07-30: ng-DSSR 使用 7 月 23 日后的固定 time-probe。旧旋钮仍服务其他双向
 	 * pricing，但在 ng-DSSR 比较 runner 中显式设置会形成无效 A/B，因此直接拒绝。
 	 */
-	private static void validateNgDssrMidpointProbeOverrides(TWETBPCConfig config) {
-		if (!config.useGCNGBBStyleNgDssrPricing
-				&& !config.useGCNGBBStyleNgDssrPartialDominancePricing
-				&& !config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
+	private static void validateNgDssrMidpointProbeOverrides(PricingMode pricingMode) {
+		if (!pricingMode.usesNgDssrPricing()) {
 			return;
 		}
 		String prefix = "twet.bpc.fullDomainCompare.";

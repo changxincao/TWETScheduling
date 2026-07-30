@@ -32,6 +32,7 @@ import TWETBPC.BP.StrongBranchingCandidate;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
+import TWETBPC.GC.PricingMode;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.GC.TimeIndexedScalarCompletionBound;
 import TWETBPC.IO.TWETColumnEvaluator;
@@ -48,6 +49,7 @@ public class Tree {
 
 	private final Data data;
 	private final TWETBPCConfig config;
+	private final PricingMode pricingMode;
 	private final Pool pool;
 	private final OutsourcingPool outsourcingPool;
 	private final CutPool cutPool;
@@ -64,17 +66,19 @@ public class Tree {
 	private long lightweightSeedOutsourcingColumnsScanned;
 	private int lightweightSeedPreparationCalls;
 
-	public Tree(Data data, TWETBPCConfig config, Pool pool, OutsourcingPool outsourcingPool, CutPool cutPool,
-			InitialColumnBuilder initialColumnBuilder, PC pc, List<Brancher> branchers, BPCTraceSink traceSink) {
+	public Tree(Data data, TWETBPCConfig config, PricingMode pricingMode, Pool pool, OutsourcingPool outsourcingPool,
+			CutPool cutPool, InitialColumnBuilder initialColumnBuilder, PC pc, List<Brancher> branchers,
+			BPCTraceSink traceSink) {
 		this.data = data;
 		this.config = config;
+		this.pricingMode = pricingMode;
 		this.pool = pool;
 		this.outsourcingPool = outsourcingPool;
 		this.cutPool = cutPool;
 		this.initialColumnBuilder = initialColumnBuilder;
 		this.pc = pc;
 		this.restrictedMasterIntegerHeuristic = new RestrictedMasterIntegerHeuristic(data, config);
-		this.routeEnumerationEngine = new RouteEnumerationEngine(data, config);
+		this.routeEnumerationEngine = new RouteEnumerationEngine(data, config, pricingMode);
 		this.routeEnumerationFiniteMaster = new RouteEnumerationFiniteMaster(data, config);
 		this.completionBoundSubtreeArcEliminator = new CompletionBoundSubtreeArcEliminator(data, config);
 		this.branchers = branchers;
@@ -114,10 +118,10 @@ public class Tree {
 		boolean stoppedByTimeLimit = false;
 		boolean failedByMaster = false;
 
-		if (config.enableTimeIndexedRootPreprocessingForNgDssr) {
+		if (config.enableTimeIndexedRootPreprocessingForNgDssr && pricingMode.usesNgDssrPricing()) {
 			traceSink.onStageHeartbeat(root, "timeIndexedRootPreprocess.start", totalPoolSize(), cutPool.size());
-			TimeIndexedRootPreprocessor.Result preprocessResult = TimeIndexedRootPreprocessor.run(data, config, pool,
-					root, incumbentCost, traceSink, timeLimitChecker);
+			TimeIndexedRootPreprocessor.Result preprocessResult = TimeIndexedRootPreprocessor.run(data, config,
+					pricingMode, pool, root, incumbentCost, traceSink, timeLimitChecker);
 			traceSink.onStageHeartbeat(root, preprocessResult.summary(), totalPoolSize(), cutPool.size());
 		}
 
@@ -191,7 +195,7 @@ public class Tree {
 				break;
 			}
 			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic
-					&& !config.useTimeIndexedGraphPricing) {
+					&& !pricingMode.usesTimeIndexedPricing()) {
 				heartbeat(node, "rmih.start");
 				RestrictedMasterIntegerHeuristic.Result integerResult = restrictedMasterIntegerHeuristic.solve(lp);
 				boolean heuristicImproved = integerResult.isFeasible()
@@ -207,14 +211,14 @@ public class Tree {
 					traceSink.onIncumbentUpdated(node, integerResult.getSolution(), incumbentCost);
 				}
 			} else if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic
-					&& config.useTimeIndexedGraphPricing) {
+					&& pricingMode.usesTimeIndexedPricing()) {
 				heartbeat(node, "rmih.skipped timeIndexedGraphPricing");
 			}
 
 			traceSink.onMasterSolved(node, solution, lp.getRestrictedColumnIds().size(), lp.getActiveCutIds().size(),
 					bestBound, incumbentCost, queue.size(), totalPoolSize(), cutPool.size(), incumbentUpdated);
 			maybeDumpRootColumnDiagnostics(lp, solution);
-			if (node.depth == 0 && config.useTimeIndexedGraphPricing) {
+			if (node.depth == 0 && pricingMode.usesTimeIndexedPricing()) {
 				traceSink.onStageHeartbeat(node,
 						"timeIndexedRootSolutionColumns " + ColumnSolutionStats.from(solution, pool, data.n).summary(),
 						totalPoolSize(), cutPool.size());
@@ -237,7 +241,7 @@ public class Tree {
 
 			applyTimeIndexedGraphArcFixing(lp, incumbentCost);
 			CompletionBoundSubtreeArcEliminator.Result subtreeArcElimination = null;
-			if (!config.useTimeIndexedGraphPricing) {
+			if (!pricingMode.usesTimeIndexedPricing()) {
 				applyTimeIndexedScalarCompletionArcFixing(lp, incumbentCost);
 				heartbeat(node, "subtreeArcElimination.start");
 				subtreeArcElimination = evaluateSubtreeArcElimination(lp, incumbentCost, solution.getObjectiveValue());
@@ -399,7 +403,7 @@ public class Tree {
 	}
 
 	private void applyTimeIndexedGraphArcFixing(LP lp, double incumbentCost) {
-		if (!config.useTimeIndexedGraphPricing || !config.timeIndexedCompletionBoundArcFixing) {
+		if (!pricingMode.usesTimeIndexedPricing() || !config.timeIndexedCompletionBoundArcFixing) {
 			return;
 		}
 		heartbeat(lp.getNode(), "timeIndexedArcFixing.start");
@@ -424,9 +428,7 @@ public class Tree {
 	}
 
 	private boolean isNgDssrPricingActive() {
-		return config.useGCNGBBStyleNgDssrPricing
-				|| config.useGCNGBBStyleNgDssrPartialDominancePricing
-				|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing;
+		return pricingMode.usesNgDssrPricing();
 	}
 
 	private void heartbeat(Node node, String phase) {
@@ -666,7 +668,7 @@ public class Tree {
 			}
 		});
 		// 2026-06-28: no-cut time-indexed 不混用原机器序列启发式；rank1 cut 模式的 phase2 使用图定价器内部 bucket heuristic。
-		if (config.useTimeIndexedGraphPricing && !config.useTimeIndexedGraphRank1CutPricing) {
+		if (pricingMode == PricingMode.TIME_INDEXED) {
 			return phase1.get(0);
 		}
 		int phase2Limit = Math.min(config.strongBranchingPhase2CandidateLimit, phase1.size());

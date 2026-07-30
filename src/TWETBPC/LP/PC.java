@@ -16,6 +16,7 @@ import TWETBPC.GC.HeuristicPricingDiagnosticTrace;
 import TWETBPC.GC.HeuristicPricingEngine;
 import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PricingEngine;
+import TWETBPC.GC.PricingMode;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.GC.TimeIndexedGraphRank1CutPricingEngine;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
@@ -38,6 +39,7 @@ public class PC {
 	private static final double MAX_SMOOTHING_ALPHA = 1.0 - 1e-9;
 
 	private final TWETBPCConfig config;
+	private final PricingMode pricingMode;
 	private final List<PricingEngine> pricingEngines;
 	private final List<CutGenerator> cutGenerators;
 	private final BPCTraceSink traceSink;
@@ -49,9 +51,10 @@ public class PC {
 	private HeuristicPricingDiagnosticTrace pendingHeuristicMissTrace;
 	private TimeLimitChecker timeLimitChecker = TimeLimitChecker.NONE;
 
-	public PC(TWETBPCConfig config, List<PricingEngine> pricingEngines, List<CutGenerator> cutGenerators,
-			BPCTraceSink traceSink) {
+	public PC(TWETBPCConfig config, PricingMode pricingMode, List<PricingEngine> pricingEngines,
+			List<CutGenerator> cutGenerators, BPCTraceSink traceSink) {
 		this.config = config;
+		this.pricingMode = pricingMode;
 		this.pricingEngines = pricingEngines;
 		this.cutGenerators = cutGenerators;
 		this.traceSink = traceSink;
@@ -259,7 +262,7 @@ public class PC {
 				|| !Double.isFinite(incumbentForDualBoundPruning)) {
 			return;
 		}
-		if (config.useTimeIndexedGraphPricing) {
+		if (pricingMode.usesTimeIndexedPricing()) {
 			applyCutLoopTimeIndexedGraphFixing(lp);
 			return;
 		}
@@ -331,14 +334,11 @@ public class PC {
 	}
 
 	private boolean isNgDssrPricingActive() {
-		return config.useGCNGBBStyleNgDssrPricing
-				|| config.useGCNGBBStyleNgDssrPartialDominancePricing
-				|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing;
+		return pricingMode.usesNgDssrPricing();
 	}
 
 	private boolean usesPaperStyleTimeIndexedRank1Cuts() {
-		return config.useTimeIndexedGraphPricing
-				&& config.useTimeIndexedGraphRank1CutPricing
+		return pricingMode.usesTimeIndexedRank1Pricing()
 				&& config.enableSubsetRowCutsForTimeIndexedGraph;
 	}
 
@@ -553,8 +553,7 @@ public class PC {
 		}
 		// 2026-06-27: Phase 2 仍不跑内部 exact pricing；但 columnized outsourcing 的集合定价较轻，
 		// 且 outsourcing membership 分支的评分需要看到外包列族的即时反应，因此允许它进入 trial。
-		if (config.useTimeIndexedGraphPricing && config.useTimeIndexedGraphRank1CutPricing
-				&& engine instanceof TimeIndexedGraphRank1CutPricingEngine) {
+		if (engine instanceof TimeIndexedGraphRank1CutPricingEngine) {
 			return true;
 		}
 		return lp.isColumnizedOutsourcing() && engine instanceof OutsourcingPricingEngine;

@@ -33,6 +33,7 @@ import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.OutsourcingPricingEngine;
 import TWETBPC.GC.PaperDominanceExactPricingEngine;
 import TWETBPC.GC.PricingEngine;
+import TWETBPC.GC.PricingMode;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
 import TWETBPC.GC.TimeIndexedGraphRank1CutPricingEngine;
 import TWETBPC.IO.HeuristicSeedProvider;
@@ -55,6 +56,7 @@ public class TWETBPCContext {
 	public final HeuristicSeedProvider seedProvider;
 	public final InitialColumnBuilder initialColumnBuilder;
 	public final List<PricingEngine> pricingEngines;
+	public final PricingMode pricingMode;
 	public final List<CutGenerator> cutGenerators;
 	public final List<Brancher> branchers;
 	public final BPCTraceSummary traceSummary;
@@ -75,38 +77,48 @@ public class TWETBPCContext {
 		this.pricingEngines = new ArrayList<PricingEngine>();
 		// 2026-06-28: time-indexed 实验线只使用图定价器本身；rank1 cut 时由图定价器内部先跑 bucket heuristic。
 		if (!config.useTimeIndexedGraphPricing) {
-			if (shouldAddTimeIndexedPreHeuristic()) {
-				pricingEngines.add(TimeIndexedGraphPricingEngine.preHeuristic(data, config));
-			}
 			pricingEngines.add(new HeuristicPricingEngine(data, config));
 		}
 		// 2026-05-20: exact pricing 层二选一。打开双向时不再顺序调用单向 forward，
 		// 关闭双向时才按 usePaperDominancePricing 选择原有单向实现。
+		// 2026-07-30: mode 必须在同一分支中确定；下游不能再解释可能被更高优先级覆盖的原始 flag。
+		PricingMode selectedPricingMode;
 		if (config.useTimeIndexedGraphPricing) {
 			if (config.useTimeIndexedGraphRank1CutPricing) {
 				pricingEngines.add(new TimeIndexedGraphRank1CutPricingEngine(data, config));
+				selectedPricingMode = PricingMode.TIME_INDEXED_RANK1;
 			} else {
 				pricingEngines.add(new TimeIndexedGraphPricingEngine(data, config));
+				selectedPricingMode = PricingMode.TIME_INDEXED;
 			}
 		} else if (config.enableBidirectionalPricing) {
 			if (config.useGCBBAsymmetricBidirectionalPricing) {
 				pricingEngines.add(new GCBBAsymmetricBidirectionalPricingEngine(data, config));
+				selectedPricingMode = PricingMode.OTHER;
 			} else if (config.useGCBBFullDomainNodeJoinBidirectionalPricing) {
 				pricingEngines.add(new GCBBStyleBidirectionalFullDomainNodeJoinPricingEngine(data, config));
+				selectedPricingMode = PricingMode.OTHER;
 			} else if (config.useGCBBFullDomainBidirectionalPricing) {
 				pricingEngines.add(new GCBBStyleBidirectionalFullDomainPricingEngine(data, config));
+				selectedPricingMode = PricingMode.OTHER;
 			} else if (config.useGCNGBBStyleNgDssrPartialDominancePricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine(data, config));
+				selectedPricingMode = PricingMode.NG_DSSR_PARTIAL;
 			} else if (config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine(data, config));
+				selectedPricingMode = PricingMode.NG_DSSR_GRAPH_PARTIAL;
 			} else if (config.useGCNGBBStyleNgDssrPricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalNgDssrPricingEngine(data, config));
+				selectedPricingMode = PricingMode.NG_DSSR;
 			} else if (config.useGCNGBBStylePartialDominancePricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalPartialDominancePricingEngine(data, config));
+				selectedPricingMode = PricingMode.OTHER;
 			} else if (config.useGCNGBBStyleBidirectionalPricing) {
 				pricingEngines.add(new GCNGBBStyleBidirectionalPricingEngine(data, config));
+				selectedPricingMode = PricingMode.OTHER;
 			} else {
 				pricingEngines.add(new BidirectionalPricingEngine(data, config));
+				selectedPricingMode = PricingMode.OTHER;
 			}
 			if (config.diagnosticCrossCheckPartialDominance
 					&& config.useGCNGBBStyleBidirectionalPricing
@@ -126,8 +138,14 @@ public class TWETBPCContext {
 			}
 		} else if (config.usePaperDominancePricing) {
 			pricingEngines.add(new PaperDominanceExactPricingEngine(data, config));
+			selectedPricingMode = PricingMode.OTHER;
 		} else {
 			pricingEngines.add(new ExactPricingEngine(data, config));
+			selectedPricingMode = PricingMode.OTHER;
+		}
+		this.pricingMode = selectedPricingMode;
+		if (shouldAddTimeIndexedPreHeuristic()) {
+			pricingEngines.add(0, TimeIndexedGraphPricingEngine.preHeuristic(data, config));
 		}
 		if (config.useColumnizedOutsourcing()) {
 			// 2026-06-22: 外包集合列放在内部 exact 后；dual-bound pruning 开启时，PC 会用同一套 dual
@@ -136,10 +154,11 @@ public class TWETBPCContext {
 		}
 		this.cutGenerators = new ArrayList<CutGenerator>();
 		cutGenerators.add(new NoOpCutGenerator());
-		if (!config.useColumnizedOutsourcing()
-				&& (config.enableSubsetRowCutsForPartialDominance
-						|| config.enableSubsetRowCutsForTimeIndexedGraph)) {
-			cutGenerators.add(new SubsetRowCutGenerator(config));
+		boolean enableSelectedSubsetRowCuts =
+				(config.enableSubsetRowCutsForPartialDominance && pricingMode.supportsPartialNgSubsetRowCuts())
+				|| (config.enableSubsetRowCutsForTimeIndexedGraph && pricingMode.supportsTimeIndexedRank1Cuts());
+		if (!config.useColumnizedOutsourcing() && enableSelectedSubsetRowCuts) {
+			cutGenerators.add(new SubsetRowCutGenerator(config, pricingMode));
 		}
 
 		this.branchers = new ArrayList<Brancher>();
@@ -172,17 +191,16 @@ public class TWETBPCContext {
 		}
 		this.traceSink = new BPCCompositeTraceSink(sinks);
 
-		this.pc = new PC(config, pricingEngines, cutGenerators, traceSink);
-		this.tree = new Tree(data, config, pool, outsourcingPool, cutPool, initialColumnBuilder, pc, branchers, traceSink);
+		this.pc = new PC(config, pricingMode, pricingEngines, cutGenerators, traceSink);
+		this.tree = new Tree(data, config, pricingMode, pool, outsourcingPool, cutPool, initialColumnBuilder, pc,
+				branchers, traceSink);
 	}
 
 	private boolean shouldAddTimeIndexedPreHeuristic() {
 		return config.enableTimeIndexedPreHeuristicPricing
 				&& data.isExactIntegerTimeInstance()
 				&& config.enableBidirectionalPricing
-				&& (config.useGCNGBBStyleNgDssrPricing
-						|| config.useGCNGBBStyleNgDssrPartialDominancePricing
-						|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing);
+				&& pricingMode.usesNgDssrPricing();
 	}
 
 	/**
@@ -196,18 +214,10 @@ public class TWETBPCContext {
 		lines.add("run.data.m=" + data.m);
 		lines.add("run.data.CmaxH=" + data.CmaxH);
 		lines.add("run.components.pricingEngines=" + classNames(pricingEngines));
+		lines.add("run.effective.pricingMode=" + pricingMode);
 		lines.add("run.components.cutGenerators=" + classNames(cutGenerators));
 		lines.add("run.components.branchers=" + classNames(branchers));
-		boolean usesNgDssrPricing = false;
-		for (PricingEngine engine : pricingEngines) {
-			if (engine instanceof GCNGBBStyleBidirectionalNgDssrPricingEngine
-					|| engine instanceof GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine
-					|| engine instanceof GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine) {
-				usesNgDssrPricing = true;
-				break;
-			}
-		}
-		if (usesNgDssrPricing) {
+		if (pricingMode.usesNgDssrPricing()) {
 			lines.add("run.effective.ngDssrMidpointProbe="
 					+ GCNGBBStyleBidirectionalNgDssrPricingEngine.effectiveMidpointProbeConfiguration(config));
 		}

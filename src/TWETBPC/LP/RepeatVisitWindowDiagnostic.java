@@ -70,8 +70,8 @@ public final class RepeatVisitWindowDiagnostic {
 		}
 
 		if (rootPreprocess) {
-			TimeIndexedRootPreprocessor.Result result = TimeIndexedRootPreprocessor.run(data, config, pool, root,
-					incumbentCost, new BPCTraceSink() {
+			TimeIndexedRootPreprocessor.Result result = TimeIndexedRootPreprocessor.run(data, config,
+					TWETBPC.GC.PricingMode.NG_DSSR, pool, root, incumbentCost, new BPCTraceSink() {
 					}, TimeLimitChecker.NONE);
 			System.out.println(result.summary());
 			Window compact = buildCompactWindow(data, root);

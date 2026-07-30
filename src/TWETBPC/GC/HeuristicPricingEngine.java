@@ -88,7 +88,7 @@ public class HeuristicPricingEngine implements PricingEngine {
 		HeuristicPricingStats stats = new HeuristicPricingStats(config.diagnosticHeuristicPricingDetails,
 				config.heuristicPricingCollectNonBestNegativeMoves);
 		long phaseStart = stats.start();
-		SriPricingContext sriContext = SriPricingContext.from(lp, config, data.n);
+		SriPricingContext sriContext = SriPricingContext.from(lp, data.n);
 		stats.addSriContextNanos(phaseStart);
 		phaseStart = stats.start();
 		HeuristicWindowContext windowContext = buildHeuristicWindowContext(lp);
@@ -1836,15 +1836,10 @@ public class HeuristicPricingEngine implements PricingEngine {
 			this.sequenceBased = sequenceBased;
 		}
 
-		static SriPricingContext from(LP lp, TWETBPCConfig config, int jobCount) {
+		static SriPricingContext from(LP lp, int jobCount) {
 			List<Integer> cutIds = lp.getActiveSubsetRowPricingCutIds();
 			List<Double> duals = lp.getActiveSubsetRowPricingDuals();
-			boolean partialNgSri = config.enableSubsetRowCutsForPartialDominance
-					&& config.useGCNGBBStyleNgDssrPartialDominancePricing;
-			boolean timeIndexedSri = config.enableSubsetRowCutsForTimeIndexedGraph
-					&& config.useTimeIndexedGraphPricing
-					&& config.useTimeIndexedGraphRank1CutPricing;
-			if ((!partialNgSri && !timeIndexedSri) || cutIds.isEmpty()) {
+			if (cutIds.isEmpty()) {
 				return INACTIVE;
 			}
 			double[] penalties = new double[cutIds.size()];

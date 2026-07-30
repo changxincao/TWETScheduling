@@ -1708,3 +1708,25 @@ child 只继承清理后 cut 集”，这些是后续应补的回归边界。
 ID、posting、time-indexed optimization 和 strong Phase-I 共八项回归，全部通过。当前可以确认的
 表述应是：“rank-1 cut 公式、memory、定价状态及 lifecycle 主流程已对齐论文；完整 BCP 保留若干
 经实验选择的工程差异，并且 preserve-solution cleanup 的严格零 dual 判定仍需收紧。”
+
+### 2026-07-30：严格零 dual cleanup 的最小修正方案
+
+进一步分析后，不应把 pricing-active 阈值改成严格零，也没有必要为 cleanup 维护一张长期完整 dual
+map。pricing 仍需要约 `1e-6` 的容差来避免把数值噪声作为 SRI dual 引入定价；cleanup 则应在
+`readDuals()` 中另外记录本次 LP 解里 `dual == 0.0` 的 subset-row cut IDs。Java 的该判断同时接受
+`0.0` 和 `-0.0`。两个集合语义必须分离：
+
+1. pricing-active cuts 仍按现有容差判定，决定哪些 dual 进入 reduced cost；
+2. exact-zero cuts 只服务于无重解删除，决定哪些 row 可以安全调用 preserve-solution 接口。
+
+PC 闭合点只删除 exact-zero 集合中的 active cuts。落在 pricing tolerance 内、但 dual 非零的 rows
+暂时保留；它们不会进入 pricing，也不会错误复用删除前的 bound，后续 LP 中若变成真实零 dual 再删除。
+不建议把 near-zero rows 删除后统一重解，因为这会重新引入刚刚消除的 inactive-cut resolve 长尾；
+也不能试图按 dual 绝对值给旧 objective 做一个简单误差修正，因为删除整条约束属于非局部 RHS 变化，
+目标变化不能由当前小 dual 直接界定。
+
+实现时还应让 preserve-solution 接口检查当前 `lastSolution` 有效，并校验传入 IDs 全部属于本次解的
+exact-zero 集合；任何 add/remove column、add/remove cut 或 objective 切换导致 `lastSolution`
+失效时，同步清空该集合。测试除现有 exact-zero 行外，还需覆盖 near-zero 不删除、模型变化后旧零 dual
+集合不可复用，以及 PC 闭合后无额外 resolve 三个边界。该方案是充分但偏保守的条件：可能暂时多保留
+少量数值 near-zero rows，但不改变模型、bound 或列生成证书。

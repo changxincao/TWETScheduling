@@ -188,6 +188,7 @@ public class TWETBPCContext {
 	/**
 	 * 汇总本次 run 的实际配置。这里同时记录最终装配出的组件和 JVM 属性覆盖项，避免只看结果时无法复原实验口径。
 	 */
+
 	public List<String> runConfigurationLines() {
 		ArrayList<String> lines = new ArrayList<String>();
 		lines.add("run.instance=" + resolveInstanceName());
@@ -197,9 +198,16 @@ public class TWETBPCContext {
 		lines.add("run.components.pricingEngines=" + classNames(pricingEngines));
 		lines.add("run.components.cutGenerators=" + classNames(cutGenerators));
 		lines.add("run.components.branchers=" + classNames(branchers));
-		if (config.useGCNGBBStyleNgDssrPricing
-				|| config.useGCNGBBStyleNgDssrPartialDominancePricing
-				|| config.useGCNGBBStyleNgDssrGraphPartialDominancePricing) {
+		boolean usesNgDssrPricing = false;
+		for (PricingEngine engine : pricingEngines) {
+			if (engine instanceof GCNGBBStyleBidirectionalNgDssrPricingEngine
+					|| engine instanceof GCNGBBStyleBidirectionalNgDssrPartialDominancePricingEngine
+					|| engine instanceof GCNGBBStyleBidirectionalNgDssrGraphPartialDominancePricingEngine) {
+				usesNgDssrPricing = true;
+				break;
+			}
+		}
+		if (usesNgDssrPricing) {
 			lines.add("run.effective.ngDssrMidpointProbe="
 					+ GCNGBBStyleBidirectionalNgDssrPricingEngine.effectiveMidpointProbeConfiguration(config));
 		}

@@ -166,9 +166,23 @@ public class GCBBFullDomainComparisonTest {
 	}
 
 	/**
-	 * 在所有 mode 启动前只运行一次 reference ALNS，保证 normal/full/nodeJoin 使用完全相同的列快照。
+	 * 在所有 mode 启动前只运行一次 reference ALNS；配置 snapshot 文件时可跨 Java 进程复用。
 	 */
 	private static FixedInitialReference prepareFixedInitialColumnReference(boolean zeroSetup) throws Exception {
+		String snapshotFile = System.getProperty("twet.bpc.fullDomainCompare.fixedInitialSeedSnapshot", "").trim();
+		if (!snapshotFile.isEmpty()) {
+			Path snapshotPath = Path.of(snapshotFile);
+			if (Files.exists(snapshotPath)) {
+				FixedInitialReference snapshot = readFixedInitialReference(snapshotPath);
+				System.out.printf(Locale.US,
+						"Loaded fixed initial reference %s: columns=%d incumbentColumns=%d sourceInc=%.6f fingerprint=%s snapshot=%s%n",
+						snapshot.reference, snapshot.seed.getInitialSequences().size(),
+						snapshot.seed.getIncumbentSequences().size(), snapshot.sourceIncumbent,
+						snapshot.fingerprint, snapshotPath);
+				return snapshot;
+			}
+		}
+
 		String referenceDir = System.getProperty("twet.bpc.fullDomainCompare.fixedInitialReferenceDir", "");
 		if (referenceDir.isBlank()) {
 			return null;
@@ -216,11 +230,107 @@ public class GCBBFullDomainComparisonTest {
 		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(initialSequences, incumbentSequences);
 		FixedInitialReference snapshot = new FixedInitialReference(reference, seed, sourceInitialCosts,
 				columnCost(referencePool, referenceBundle.getIncumbentColumnIds()), fixedSeedFingerprint(seed));
+		if (!snapshotFile.isEmpty()) {
+			writeFixedInitialReference(Path.of(snapshotFile), snapshot);
+		}
 		System.out.printf(Locale.US,
-				"Prepared fixed initial reference %s: columns=%d incumbentColumns=%d sourceInc=%.6f fingerprint=%s%n",
+				"Prepared fixed initial reference %s: columns=%d incumbentColumns=%d sourceInc=%.6f fingerprint=%s%s%n",
 				reference, initialSequences.size(), incumbentSequences.size(), snapshot.sourceIncumbent,
-				snapshot.fingerprint);
+				snapshot.fingerprint, snapshotFile.isEmpty() ? "" : " snapshot=" + snapshotFile);
 		return snapshot;
+	}
+
+	/** 以确定性文本格式保存跨进程共享的初始列快照。 */
+	private static void writeFixedInitialReference(Path snapshotPath, FixedInitialReference snapshot) throws Exception {
+		ArrayList<String> lines = new ArrayList<String>();
+		lines.add("TWET_FIXED_INITIAL_REFERENCE_V1");
+		lines.add("reference\t" + snapshot.reference);
+		lines.add("sourceIncumbent\t" + Double.toString(snapshot.sourceIncumbent));
+		lines.add("fingerprint\t" + snapshot.fingerprint);
+		List<List<Integer>> initialSequences = snapshot.seed.getInitialSequences();
+		lines.add("initial\t" + initialSequences.size());
+		for (int index = 0; index < initialSequences.size(); index++) {
+			lines.add(Double.toString(snapshot.sourceInitialCosts.get(index).doubleValue()) + "\t"
+					+ encodeSequence(initialSequences.get(index)));
+		}
+		List<List<Integer>> incumbentSequences = snapshot.seed.getIncumbentSequences();
+		lines.add("incumbent\t" + incumbentSequences.size());
+		for (List<Integer> sequence : incumbentSequences) {
+			lines.add(encodeSequence(sequence));
+		}
+		Path parent = snapshotPath.toAbsolutePath().getParent();
+		if (parent != null) {
+			Files.createDirectories(parent);
+		}
+		Files.write(snapshotPath, lines, StandardCharsets.UTF_8);
+	}
+
+	/** 读取快照并重新计算 fingerprint，损坏或错配时在进入 BPC 前直接失败。 */
+	private static FixedInitialReference readFixedInitialReference(Path snapshotPath) throws Exception {
+		List<String> lines = Files.readAllLines(snapshotPath, StandardCharsets.UTF_8);
+		int cursor = 0;
+		if (lines.isEmpty() || !"TWET_FIXED_INITIAL_REFERENCE_V1".equals(lines.get(cursor++))) {
+			throw new IllegalStateException("Unsupported fixed initial seed snapshot: " + snapshotPath);
+		}
+		Path reference = Path.of(valueAfterTab(lines.get(cursor++), "reference"));
+		double sourceIncumbent = Double.parseDouble(valueAfterTab(lines.get(cursor++), "sourceIncumbent"));
+		String storedFingerprint = valueAfterTab(lines.get(cursor++), "fingerprint");
+		int initialCount = Integer.parseInt(valueAfterTab(lines.get(cursor++), "initial"));
+		ArrayList<List<Integer>> initialSequences = new ArrayList<List<Integer>>(initialCount);
+		ArrayList<Double> sourceInitialCosts = new ArrayList<Double>(initialCount);
+		for (int index = 0; index < initialCount; index++) {
+			String[] fields = lines.get(cursor++).split("\\t", 2);
+			if (fields.length != 2) {
+				throw new IllegalStateException("Malformed initial column in snapshot: " + snapshotPath);
+			}
+			sourceInitialCosts.add(Double.valueOf(fields[0]));
+			initialSequences.add(decodeSequence(fields[1]));
+		}
+		int incumbentCount = Integer.parseInt(valueAfterTab(lines.get(cursor++), "incumbent"));
+		ArrayList<List<Integer>> incumbentSequences = new ArrayList<List<Integer>>(incumbentCount);
+		for (int index = 0; index < incumbentCount; index++) {
+			incumbentSequences.add(decodeSequence(lines.get(cursor++)));
+		}
+		if (cursor != lines.size()) {
+			throw new IllegalStateException("Unexpected trailing data in fixed initial seed snapshot: " + snapshotPath);
+		}
+		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(initialSequences, incumbentSequences);
+		String actualFingerprint = fixedSeedFingerprint(seed);
+		if (!storedFingerprint.equals(actualFingerprint)) {
+			throw new IllegalStateException("Fixed initial seed fingerprint mismatch: stored=" + storedFingerprint
+					+ " actual=" + actualFingerprint + " snapshot=" + snapshotPath);
+		}
+		return new FixedInitialReference(reference, seed, sourceInitialCosts, sourceIncumbent, actualFingerprint);
+	}
+
+	private static String valueAfterTab(String line, String expectedKey) {
+		String prefix = expectedKey + "\t";
+		if (!line.startsWith(prefix)) {
+			throw new IllegalStateException("Expected " + expectedKey + " in fixed initial seed snapshot");
+		}
+		return line.substring(prefix.length());
+	}
+
+	private static String encodeSequence(List<Integer> sequence) {
+		StringBuilder encoded = new StringBuilder();
+		for (int index = 0; index < sequence.size(); index++) {
+			if (index > 0) {
+				encoded.append(',');
+			}
+			encoded.append(sequence.get(index).intValue());
+		}
+		return encoded.toString();
+	}
+
+	private static List<Integer> decodeSequence(String encoded) {
+		ArrayList<Integer> sequence = new ArrayList<Integer>();
+		if (encoded.isEmpty()) {
+			return sequence;
+		}
+		for (String token : encoded.split(",")) {
+			sequence.add(Integer.valueOf(token));
+		}
+		return sequence;
 	}
 
 	/**

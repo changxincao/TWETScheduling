@@ -1869,3 +1869,10 @@ fingerprint 为 `37d73d82...`。原因是两个进程分别运行了按墙钟停
 `a6de93dc...`，其对照仍有效。后续跨进程算法比较必须先持久化一次 immutable initial seed，
 三个进程读取同一份初始列和 incumbent；启动后第一项校验必须是 fingerprint 完全一致，不一致
 立即停止。
+
+为落实上述口径，比较 runner 新增
+`twet.bpc.fullDomainCompare.fixedInitialSeedSnapshot`。文件不存在时，第一个进程运行一次
+reference ALNS 并以确定性文本格式写出初始列、incumbent 列、逐列源成本、源 incumbent 和
+fingerprint；文件已存在时，后续进程直接读取并重新计算 fingerprint，不再运行 reference
+ALNS。40-2 独立双进程烟测中，写入端和读取端均为 74 条初始列、2 条 incumbent 列、上界
+11469，fingerprint 均为 `29d22e1e...`。后续 60-3 W100 三算法对照使用该入口重新开始。

@@ -38,7 +38,7 @@ public class GCBBFullDomainBestProfileTest {
 		require("bestUB".equals(config.bidirectionalJoinBestThresholdMode), "ng join threshold");
 		require(config.bidirectionalCompletionBoundScalarPruning, "ng scalar completion pruning");
 		require(config.bidirectionalCompletionBoundArcFixing, "ng completion arc fixing");
-		require(config.bidirectionalCompletionBoundSubtreeArcElimination, "ng subtree fixing");
+		require(!config.bidirectionalCompletionBoundSubtreeArcElimination, "ng hard subtree fixing off");
 		require(config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly,
 				"ng pricing-only subtree fixing");
 		require(!config.enableTimeIndexedPreHeuristicPricing, "ng time-indexed pre-heuristic off");

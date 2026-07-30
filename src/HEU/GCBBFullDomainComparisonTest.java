@@ -583,7 +583,7 @@ public class GCBBFullDomainComparisonTest {
 			config.bidirectionalCompletionBoundRelaxation = "allCycles";
 			config.bidirectionalCompletionBoundScalarPruning = true;
 			config.bidirectionalCompletionBoundArcFixing = true;
-			config.bidirectionalCompletionBoundSubtreeArcElimination = true;
+			config.bidirectionalCompletionBoundSubtreeArcElimination = false;
 			config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = true;
 			config.bidirectionalMidpointProbe = true;
 			config.bidirectionalMidpointProbePopLimit = 10000;

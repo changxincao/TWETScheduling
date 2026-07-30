@@ -296,8 +296,8 @@ public class TWETBPCConfig {
 	public boolean bidirectionalCompletionBoundArcFixing = true;
 	/** 2026-06-03: 只诊断 completion bound 能否在当前 pricing 轮安全判掉 job-job arc，不写回 node。 */
 	public boolean bidirectionalCompletionBoundArcFixingDiagnostic = false;
-	/** 2026-06-03: node LP 最优且已有上界后，是否把 completion-bound reduced-cost fixing 继承到子节点。 */
-	public boolean bidirectionalCompletionBoundSubtreeArcElimination = true;
+	/** 2026-07-30: 默认仅把 completion-bound fixing 用于后续 pricing，避免 hard 模式过滤子节点 RMP/seed。 */
+	public boolean bidirectionalCompletionBoundSubtreeArcElimination = false;
 	/** 2026-06-03: debug 对照；只在后续 pricing 中禁用 subtree arcs，不过滤初始列，也不建 master forbidden 行。 */
 	public boolean bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = true;
 	/** 2026-06-03: debug 对照；child 初始 LP 可行后不按当前 forbidden arc 过滤 RMP 列。 */

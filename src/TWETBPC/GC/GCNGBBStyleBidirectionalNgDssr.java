@@ -1207,8 +1207,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		feasibilityPhaseOneObjectiveMode = lp.isFeasibilityPhaseOneObjectiveMode();
-		lastRelaxedRoundBestReducedCost = Double.POSITIVE_INFINITY;
-		lastRelaxedRoundCompleted = false;
 		ngNeighborhoodByJob = null;
 		ngDssrInitialRepeatableMember = null;
 		ngDssrRoundsExecuted = 0;
@@ -1556,8 +1554,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			// 完整轮没有实际评价到终端候选时，以 0 表示已证明不存在负 reduced-cost 列。
 			return 0.0;
 		}
-		return Double.isFinite(lastRelaxedRoundBestReducedCost)
-				? lastRelaxedRoundBestReducedCost : Double.NaN;
+		return lastRelaxedRoundBestReducedCost;
 	}
 
 

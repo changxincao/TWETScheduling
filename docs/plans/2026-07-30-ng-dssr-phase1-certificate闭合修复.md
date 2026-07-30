@@ -19,6 +19,6 @@ ng-DSSR 现在显式记录最后一轮是否完整结束。只有正反向队列
 
 原失败的 `repair=4:14->22` 最后一轮仍返回 0 列和 `relaxed pricing found no negative route`，但现在形成完整内部证书，strong trial 正确得到 `rightBound=INF` 和 `rmp_trial_infeasible: Strong branching Phase-I optimum remains positive after generating 623 columns`。完整实例最终 `obj=bound=11221`、`valid=true`、2 个处理节点，未再出现 certificate contract 异常。结果位于 `test-results/bpc/exp-40-2-base-W100-ng-certfix-20260730f`。
 
-后续正确性复核又收紧了两个非主路径边界：每次 `solve()` 入口显式清空完成状态，防止复用 solver 且调用前已超时时读取上次证书；只有 `Double.POSITIVE_INFINITY` 才规范化为 `0.0`，其他非有限异常值返回 `NaN`。focused 编译及 midpoint、DSSR 更新、Phase-I pricing 三项回归通过。
+后续按真实调用链再次收缩实现。pricing engine 每次调用都会新建 solver，且每个 DSSR round 已在 `solveRelaxedRound()` 入口初始化证书状态，因此删除 `solve()` 入口的重复清空。证书写入来源只有初始 `Double.POSITIVE_INFINITY`、经过有限性校验的 completion bound 和正常 reduced cost，因此 getter 不再为理论上不会出现的其他非有限值增加保护；当前只保留“轮次未完成返回 `NaN`、完整轮无终端候选返回 `0.0`、否则返回实际 reduced cost”三条必要语义。focused 编译及 midpoint、DSSR 更新、Phase-I pricing 三项回归通过。
 
 上述边界收紧后又以完全相同的 fixed seed 和 W=100 配置完整复跑一次。最终运行仍命中 `repair=4:14->22` 的闭合记录，strong trial 仍得到 `rightBound=INF` 和“Phase-I optimum remains positive after generating 623 columns”；实例最终 `obj=bound=11221`、`valid=true`、处理 2 个节点。结果位于 `test-results/bpc/exp-40-2-base-W100-ng-certfix-final-20260730g`。

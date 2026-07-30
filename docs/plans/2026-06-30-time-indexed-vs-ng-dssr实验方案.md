@@ -1896,3 +1896,25 @@ ng-DSSR 同样会从更浅的路径和更小的搜索树中受益，但其复杂
 time-indexed 则会额外获得 horizon 缩短带来的直接图规模收益。因此，不能把“增加机器后整体
 更容易”解释成两种定价方法受到相同程度的改善。正式实验应固定机器数后比较时间尺度和 due
 window；`m=2` 与 `m=3` 分层报告，不把机器数变化与时间尺度变化混在一个速度比中。
+
+### 2026-07-30 60-3 W100 全时间量放大 10 倍
+
+为直接观察 time-indexed 的时间尺度敏感性，启动 `wet060_001_3m_timeX10`、W1000 的 no-cut
+与 SRI 两组并行求解，时间上限 7200s。两组都读取基础 W100 的同一 fixed-seed snapshot，
+保持 154 条初始列和 3 条 incumbent 列不变，并用
+`fixedInitialExpectedCostScale=10` 逐列校验目标成本。启动日志确认 source incumbent 2128
+严格变为 21280，所有初始列最大缩放误差为 0，fingerprint 均为
+`88ec933347838f04655ed471e8d5dd1e7051ee7ac54c29f18ca61998c8e50014`。
+
+有效实验目录为
+`test-results/bpc/exp-60-3-timeX10-W1000-sharedseed-ti-nocut-20260730c` 和
+`test-results/bpc/exp-60-3-timeX10-W1000-sharedseed-ti-sri-20260730c`。实际 engine 分别为
+`TimeIndexedGraphPricing` 与 `TimeIndexedGraphRank1CutPricing + SubsetRowCutGenerator`，
+实时日志已启用。放大后 pricing horizon 为 35184；初步运行约 2.5 分钟时，no-cut 已到
+node 15，单次 pricing 约 0.05--0.07s，SRI 仍在 node 2，约 40 条 active cuts 下单次 exact
+pricing 约 0.47--0.55s。最终结果待运行结束后补充。
+
+前两个 `20260730a/b` 目录因 `cmd /c` 对批处理路径的解析失败，没有创建有效 Java solver
+进程和主日志，仅保留为启动故障证据，不得用于结果比较。正式 `20260730c` 使用唯一的直接
+`Start-Process java` 入口和原生 stdout/stderr 重定向；Oracle javapath launcher 会再生成实际
+JDK 22 child process，因此目录同时记录 launcher 与 child PID。

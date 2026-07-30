@@ -1606,6 +1606,8 @@ exact pricing总时间减少85.74%，单次平均由约117.84ms降至26.59ms，�
 
 `ROOT_PROCESSED` 两组均由精确 dual bound 在 root 将队列剪空，最终 incumbent 与 lower bound 相等且校验 `valid=true`，因此同样完成最优证明。ng-DSSR 在三个 W 上均最快，相对 no-cut 分别减少 30.10%、32.67% 和 39.67%，相对 SRI 分别减少 71.11%、66.33% 和 28.58%。SRI 在 W0/W100 上虽然显著减少节点，但 cut 后 RMP 成本过高；W300 时 SRI 能在 root 闭合，总时间比 no-cut 少 15.52%，但仍比 ng-DSSR 慢 40.01%。本例支持“大离散 horizon 下 ng-DSSR 更稳定”的判断，同时也说明 SRI 的缩树收益只有在 master LP 成本能够被抵消时才会转化为总时间收益。
 
+W0 的 `master LP=379.387s` 不是 cut separation 耗时。cut generator 12 次累计仅 `0.245s`；master LP 可拆为普通加列后重解 `68.587s/594`、加 cut 后重解 `83.262s/12`、删除 inactive cut 后重解 `141.976s/11`、strong repair RMP `85.030s/40` 和初始求解 `0.532s`。其中加/删 cut 后的 23 次重解合计 `225.238s`，单次平均分别为 6.94 和 12.91 秒；strong repair 单次 LP 也由 no-cut 的 84.5ms 增至 2.126s。根本原因是 W0 进行了 35 个 cut lifecycle rounds，peak cut pool 达 933，并在约 7.9 万列的退化 RMP 上反复改变行集合，导致 simplex basis 被持续扰动；strong trial 又继承 active cuts，使每次 trial 的建模和求解同步变重。对比 W300 只有 5 个 cut rounds、peak cut pool 156，cut 后/删除后重解合计仅 7.377s，因此 SRI 总时间降至 109.584s。由此应把 W0 的慢点表述为“cut lifecycle 引发的 RMP 反复重优化”，而不是“分离 cut 很慢”。
+
 正式输出目录：
 
 1. W0：`test-results/bpc/exp-40-2-timeX10-W0-{ng,ti-nocut,ti-sri}-best-20260730a`

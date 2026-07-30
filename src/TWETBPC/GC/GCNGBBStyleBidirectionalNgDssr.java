@@ -174,7 +174,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final double MIDPOINT_PROBE_STEP_FRACTION = 0.10;
 	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.05;
 
+	static void validateMidpointProbeConfiguration(TWETBPCConfig config) {
+		if (config == null) {
+			throw new IllegalArgumentException("ng-DSSR config must not be null");
+		}
+		if (!config.bidirectionalMidpointProbe) {
+			return;
+		}
+		String scoreMode = config.bidirectionalMidpointProbeScore;
+		if (scoreMode == null || !"time".equalsIgnoreCase(scoreMode.trim())) {
+			throw new IllegalArgumentException("ng-DSSR midpoint probe only supports scoreMode=time, but was "
+					+ String.valueOf(scoreMode));
+		}
+	}
+
 	static String effectiveMidpointProbeConfiguration(TWETBPCConfig config) {
+		validateMidpointProbeConfiguration(config);
 		double acceptableRatio = config.bidirectionalMidpointProbeEarlyStopRatio;
 		if (!Double.isFinite(acceptableRatio) || !Utility.compareGt(acceptableRatio, 1.0)) {
 			acceptableRatio = 1.5;
@@ -482,6 +497,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	public GCNGBBStyleBidirectionalNgDssr(Data data, TWETBPCConfig config,
 			DominanceBackend dominanceBackend, NgDssrHistoryWarmStart historyWarmStart) {
+		validateMidpointProbeConfiguration(config);
 		this.data = data;
 		this.config = config;
 		this.evaluator = new TWETColumnEvaluator(data);

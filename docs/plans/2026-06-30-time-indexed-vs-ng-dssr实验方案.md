@@ -1758,3 +1758,32 @@ coefficient、memory merge、coefficient cache、immutable ID、posting、time-i
 严格版反而只执行 11 次 cut separation、peak cut pool 854，旧版为 19 次和 1475。当前结论是：
 修正恢复了论文“真实零 dual 才无重解删除”的正确性条件，cleanup 强度基本保留，没有证据表明它引入
 新的计算热点。
+
+### 2026-07-30 原始时间 W100 三种算法重新对照
+
+在 ng-DSSR Phase-I 闭合证书修复并完成精简复核后，重新串行求解 `data/40-2/wet040_001_2m.dat`、
+`dueWindowHalfWidth=100`、setup cost 系数 0。三组均使用当前 `target/classes`、CPLEX 单线程、
+3600 秒时限、20000 个节点上限、ALNS 最长 60 秒、best history 和同一 fixed reference；实际
+fingerprint 均为
+`64933ae560e18033532c22ae284625b8ea3948f24ec35c31514a1b5477676694`，初始列 91 条、
+incumbent 11221，stderr 均为空。
+
+| 方法 | 状态 | 总求解时间 | root bound | 节点 | 定价时间 | 主要 LP 时间 |
+|---|---|---:|---:|---:|---:|---:|
+| ng-DSSR | FINISHED | 104.940s | 11216.652174 | 2 | ng exact 1.372s/15；repair 0.118s/14 | after-pricing 90.450s |
+| time-indexed no-cut | FINISHED | 143.494s | 11207.448276 | 3 | 5.646s/569 | after-pricing 77.263s；strong trial 55.640s |
+| time-indexed rank-1/SRI | ROOT_PROCESSED | 129.604s | 未写入汇总字段 | 1 | 6.893s/572 | after-pricing 117.118s |
+
+三组最终均为 `obj=bound=11221`、gap 0、`valid=true`。当前排序为 ng-DSSR、SRI、no-cut；
+ng-DSSR 分别比 SRI 和 no-cut 快约 19.0% 和 26.9%，SRI 比 no-cut 快约 9.7%。SRI 在 root
+加入 85 条 cut 后由 dual bound 关闭，汇总器没有走标准 root-bound/root-time 写入路径，因此输出
+`root bound=Infinity, root solving time=0`；该字段不能解释为数学下界为无穷，实际最终 lower bound
+为 11221。当前差异仍主要来自 RMP 重解而不是 pricing：ng-DSSR exact 只占 1.372 秒；no-cut 的
+最大额外项是 strong-trial RMP；SRI 虽然只处理一个节点，但 570 次 after-pricing LP 重解累计
+117.118 秒。
+
+ng-DSSR 原故障 strong side `arc(14,22)` 本轮仍稳定得到 `rightBound=INF`，消息为 Phase-I 在生成
+623 列后目标仍为正，没有再出现 certificate contract 异常。结果目录分别为
+`test-results/bpc/exp-40-2-base-W100-ng-retest-20260730h`、
+`test-results/bpc/exp-40-2-base-W100-ti-nocut-retest-20260730h` 和
+`test-results/bpc/exp-40-2-base-W100-ti-sri-retest-20260730h`。

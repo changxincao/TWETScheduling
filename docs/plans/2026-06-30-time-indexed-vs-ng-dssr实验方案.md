@@ -1813,3 +1813,23 @@ root bound 距最终最优值只差约 15.24，并把树压缩到 4 个节点；
 `test-results/bpc/exp-50-3-base-W100-ng-retest-20260730a`、
 `test-results/bpc/exp-50-3-base-W100-ti-nocut-retest-20260730a` 和
 `test-results/bpc/exp-50-3-base-W100-ti-sri-retest-20260730a`。
+
+### 2026-07-30 50-3 W100 的 ng-DSSR 热点拆分
+
+对上述 ng-DSSR 日志进一步按实际调用阶段汇总。总求解时间为 95.483s，其中启发式 pricing 为
+49.115s/337 次，占总时间约 51.4%；238 次成功加入 9824 条列，99 次失败调用耗时 14.244s。
+因此启发式 pricing 是整棵树上的第一热点，但并非主要由无效调用构成，约 70.6% 的调用仍能找到负列。
+
+正式 ng-DSSR exact pricing 为 23.650s/99 次，占总时间约 24.8%。日志中的 `exactPhaseMs`
+合计为 23.514s，其中 init 22.520s、join 0.912s、compact 0.067s、finalize 0.014s。
+init 内部又由 completion bound 15.411s 和 midpoint probe 6.978s 主导，二者分别占 exact
+阶段约 65.5% 和 29.7%。当前 probe 选中状态会直接复用并完成正式 F/B 扩展，因此独立的
+fw/bw 字段为 0；这不表示扩展没有成本，而是扩展成本已经记入 probe。该实例上 join 仅占 exact
+的约 3.9%，新的 dominance graph、group-envelope 预筛和 join 位图路径没有形成热点。
+
+99 次 exact 共执行 150 轮 DSSR，最大仅 4 轮：61 次一轮闭合、27 次两轮、9 次三轮、2 次四轮。
+由此可见本例不是 DSSR 长尾或 ng-set 更新过弱导致的慢点。强分支 trial LP 另占
+13.040s/400 次，其中真实模型 build 为 5.185s；root time-indexed preprocessing 为 5.731s。
+当前主要结论是：若继续优化该配置，优先级应为启发式 pricing 的单次固定开销和调用次数，其次是
+completion-bound 构造与 midpoint probe；join、DSSR 轮数及 dominance graph 不是这组数据上的
+主要优化对象。

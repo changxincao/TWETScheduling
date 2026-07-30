@@ -1660,3 +1660,51 @@ solution 的专用入口，并同步清除可能引用旧 cut 集的 pricing-dua
 本次仅对齐论文的 cut 生命周期，没有把 strong branching 改成论文的 50 个第一阶段候选和
 3 个第二阶段候选。当前项目仍保留已单独验证的 20 个第一阶段候选、关闭第二阶段的 best profile；
 两者不能混写成“整个算法已逐项复现论文”。
+
+### 2026-07-30：论文一致性与正确性复核
+
+本次复核确认，inactive-cut cleanup 的控制流已经与论文一致：初始列生成闭合后、以及每一轮
+新增 rank-1 cut 后的列生成闭合后，均在下一次 separation、tailing-off 判断和 branching 之前立即
+删除 inactive cuts；删除动作不再触发独立的 resolve/pricing。整数节点会在 cleanup 前直接关闭，
+但不会继续 branching 或向 child 继承 cut，因此不影响该语义。memory 版本替换仍走普通
+`removeCuts()` 并在新增版本后重解，没有错误复用旧 solution。
+
+仍存在一个需要修正后才能称为严格正确的数值边界。论文写的是 dual variable 等于零，而当前
+`LP.readDuals()` 只把 `Utility.compareLt(dual,-1e-8)` 的 cut 视为 pricing-active；
+`Utility.EPS=1e-6`，因此实际会把约 `dual >= -1.01e-6` 的 cut 当作 inactive。
+`removeZeroDualCutsPreservingCurrentSolution()` 只检查 cut 是否不在 active pricing 列表中，
+没有保存并检查真实 dual 是否严格为零。对真正的零 dual 行，删除后保留原 primal/dual optimum 的
+证明成立；对很小但非零的负 dual，删除约束后继续沿用旧 objective 只能视为数值容差处理，不能写成
+严格数学等价。在 tailing-off 后直接返回或随后按该 objective branching 时，理论上可能产生一个很小的
+bound 高估。W0 同起点结果一致不能排除这一边界。
+
+最小修正方向是保存每条 active subset-row row 的真实 dual，只对 CPLEX 返回的严格 `0.0/-0.0`
+执行 preserve-solution cleanup；落在 pricing tolerance 内但非零的 row 暂时保留，或者删除后重新
+resolve。前者最贴合论文且不增加重解。当前 `ActiveCutInheritanceTest` 只覆盖了冗余行的零 dual
+删除，没有覆盖 near-zero dual，也没有在 PC 层直接断言“cleanup 后不 resolve、tailing-off 前已删除、
+child 只继承清理后 cut 集”，这些是后续应补的回归边界。
+
+除上述数值边界外，rank-1/SRI 主体与论文的对应关系如下。
+
+1. 已一致：只分离一个或三个 `1/2` multiplier；每轮最多 50 条一行 cut 和 75 条三行 cut；memory
+   由当前正值列按 Algorithm 2 构造，包含最小 arc memory、反向 arcs 和 scope 内全部 pairs；同一
+   multiplier/base 再次出现时做 memory 并集；定价先运行每 bucket 只保留一个 label 的 heuristic，
+   失败后运行 exact；每轮 heuristic/exact 分别最多返回 50/300 列；`tStar` 使用 fixing 后每个 job
+   剩余时间的最小/最大值平均；连续两轮 primal-dual gap 改善低于 2% 时停止 separation。
+2. 安全但不完全一致：当前 active SRI 下的 arc fixing 默认忽略 SRI dual，使用 no-SRI 松弛下界；
+   该界更弱但安全，论文 Algorithm 7 则在 label 拼接时显式计入 active cut state。当前 immutable
+   cut ID 加当前节点 memory-union replacement 是为 queued child 正确性增加的工程实现，数学上与
+   论文“扩大已有 active cut memory”等价。
+3. 明确不同：当前固定 `maxCutRounds=8`，论文只用 2% tailing-off 停止；当前还限制每个 job 最多
+   出现在 20 个 active cut bases 中，论文没有该限制。这两项不会破坏精确性，但会削弱 cut 强度并
+   改变树和运行时间，不能用于宣称完全复现论文 cut separation。
+4. 算法框架不同：论文默认使用 automatic dual-price smoothing；当前 best profile 明确关闭
+   stabilization。论文 strong branching 第一阶段最多测试 50 个候选，并按历史 pseudo-cost 与
+   job-machine/job-job 候选组合选择，再将 3 个候选送入 heuristic column generation 第二阶段；
+   当前 profile 测试 20 个候选、关闭第二阶段，候选族和 repair 也按 TWET/外包模型扩展。这些不影响
+   rank-1 cut 的合法性，但完整 BCP 不能称为论文算法的逐项实现。
+
+重新执行 `ActiveCutInheritanceTest`、cut coefficient、memory merge、coefficient cache、immutable
+ID、posting、time-indexed optimization 和 strong Phase-I 共八项回归，全部通过。当前可以确认的
+表述应是：“rank-1 cut 公式、memory、定价状态及 lifecycle 主流程已对齐论文；完整 BCP 保留若干
+经实验选择的工程差异，并且 preserve-solution cleanup 的严格零 dual 判定仍需收紧。”

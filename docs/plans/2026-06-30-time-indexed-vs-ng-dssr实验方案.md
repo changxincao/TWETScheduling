@@ -1588,7 +1588,7 @@ exact pricing总时间减少85.74%，单次平均由约117.84ms降至26.59ms，�
 剪枝轨迹影响，不能按horizon比例线性缩放。
 ## 2026-07-30：40-2 严格时间乘 10、W0/W100/W300 三算法对照
 
-本轮使用 `wet040_001_2m` 构造严格时间乘 10 实例：processing time、due date 和 setup time 全部乘 10，权重保持不变；setup cost 系数为 0。三种算法均使用 2026-07-30 当前 best profile、单 CPLEX 线程、60 秒 ALNS、best history、Phase-I strong repair、一阶段 strong branching 和 3600 秒时限。ng-DSSR 使用 C1000/K20、source-aware dominance、group-envelope prefilter、completion bound 和 time-indexed root preprocessing；time-indexed no-cut 使用 dual-window graph pricing 与 node-end paper fixing；time-indexed rank-1 使用 arc-memory SRI、cut-loop fixing 和当前 packed residual/posting 优化。
+本轮使用 `wet040_001_2m` 构造严格时间乘 10 实例：processing time、due date 和 setup time 全部乘 10，权重保持不变；setup cost 系数为 0。需要注意，运行参数中的 due-window 半宽仍分别取绝对值 `W=0/100/300`，并未同步放大为 `0/1000/3000`。因此该实验是“基础时间数据乘 10，同时比较绝对半宽 W0/W100/W300”，不能解释成所有时间量连同 W 都按比例乘 10；若要与原始时间 W100/W300 做严格同比，应另跑 timeX10 的 W1000/W3000。三种算法均使用 2026-07-30 当前 best profile、单 CPLEX 线程、60 秒 ALNS、best history、Phase-I strong repair、一阶段 strong branching 和 3600 秒时限。ng-DSSR 使用 C1000/K20、source-aware dominance、group-envelope prefilter、completion bound 和 time-indexed root preprocessing；time-indexed no-cut 使用 dual-window graph pricing 与 node-end paper fixing；time-indexed rank-1 使用 arc-memory SRI、cut-loop fixing 和当前 packed residual/posting 优化。
 
 每个 W 单独生成 fixed reference seed，并在该 W 的三种算法之间共享。W0/W100/W300 的 fingerprint 分别为 `69aaaf47...d64`、`eb7c8459...df32` 和 `5a7ffd90...db4f`；三组各自的初始列数、incumbent 列、初始上界和逐列目标均完全一致。第一次误将 W0 reference 用于 W100/W300 时，runner 因 due-window 改变列成本而 fail-fast；该批次未进入 BPC，已排除，正式结果使用后缀 `20260730a` 的 W0 和 `20260730b` 的 W100/W300。
 

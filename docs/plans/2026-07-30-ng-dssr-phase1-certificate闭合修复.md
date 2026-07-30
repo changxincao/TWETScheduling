@@ -18,3 +18,5 @@ ng-DSSR 现在显式记录最后一轮是否完整结束。只有正反向队列
 针对原失败配置使用相同 fixed seed 重跑 `wet040_001_2m`、W=100。初始列仍为 91 条，incumbent 仍为 11221，fingerprint 仍为 `64933ae560e18033532c22ae284625b8ea3948f24ec35c31514a1b5477676694`。
 
 原失败的 `repair=4:14->22` 最后一轮仍返回 0 列和 `relaxed pricing found no negative route`，但现在形成完整内部证书，strong trial 正确得到 `rightBound=INF` 和 `rmp_trial_infeasible: Strong branching Phase-I optimum remains positive after generating 623 columns`。完整实例最终 `obj=bound=11221`、`valid=true`、2 个处理节点，未再出现 certificate contract 异常。结果位于 `test-results/bpc/exp-40-2-base-W100-ng-certfix-20260730f`。
+
+后续正确性复核又收紧了两个非主路径边界：每次 `solve()` 入口显式清空完成状态，防止复用 solver 且调用前已超时时读取上次证书；只有 `Double.POSITIVE_INFINITY` 才规范化为 `0.0`，其他非有限异常值返回 `NaN`。focused 编译及 midpoint、DSSR 更新、Phase-I pricing 三项回归通过。

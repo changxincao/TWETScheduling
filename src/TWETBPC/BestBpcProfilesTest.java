@@ -146,6 +146,7 @@ public final class BestBpcProfilesTest {
 	}
 
 	private static void assertCommon(TWETBPCConfig config) {
+		require(config.solveTimeLimitSeconds == 10800.0, "formal three-hour solve limit");
 		require(config.runALNSForSeed, "ALNS seed");
 		require(config.alnsMaxRuntimeMillis == 60_000L, "ALNS time");
 		require(!config.alnsUseSimulatedAnnealingAcceptance, "SA off");

@@ -196,7 +196,7 @@ public final class FormalExperimentRunner {
 			outsourcingModel = value(values, "outsourcingModel", "none");
 			outsourcingUnitRate = number(values, "outsourcingUnitRate", 1.0);
 			discountStrength = number(values, "discountStrength", 0.0);
-			timeLimitSeconds = number(values, "timeLimitSeconds", 7200.0);
+			timeLimitSeconds = number(values, "timeLimitSeconds", 10800.0);
 			maxNodes = integer(values, "maxNodes", 100000);
 		}
 

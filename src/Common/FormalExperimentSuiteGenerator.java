@@ -386,7 +386,7 @@ public final class FormalExperimentSuiteGenerator {
 		private Path outputRoot = Path.of("experiment-suite", "formal-v1");
 		private int casesPerSize = 3;
 		private int[] sizes = new int[] { 40, 50, 60, 100 };
-		private double timeLimitSeconds = 7200.0;
+		private double timeLimitSeconds = 10800.0;
 		private int maxNodes = 100000;
 
 		private static Options parse(String[] args) {

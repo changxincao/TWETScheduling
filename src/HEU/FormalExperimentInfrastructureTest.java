@@ -28,7 +28,7 @@ public final class FormalExperimentInfrastructureTest {
 		Path suite = root.resolve("suite");
 		FormalExperimentSuiteGenerator.main(new String[] {
 				"--dataRoot=" + dataRoot, "--outputRoot=" + suite, "--sizes=3", "--casesPerSize=1",
-				"--timeLimitSeconds=60", "--maxNodes=10" });
+				"--maxNodes=10" });
 		String manifest = Files.readString(suite.resolve("manifest.tsv"), StandardCharsets.UTF_8);
 		assertContains(manifest, "dependsOn", "dependency column");
 		assertContains(manifest, "NG_DSSR", "ng-DSSR row");
@@ -37,6 +37,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(manifest, "\tseed-", "solver dependency");
 		assertContains(manifest, "--action=\"seed\"", "seed task");
 		assertContains(manifest, "--outputDir=\"${WORKSPACE}/", "seed output metadata directory");
+		assertContains(manifest, "--timeLimitSeconds=\"10800\"", "formal solve time limit");
 		assertContains(manifest, "${WORKSPACE}/", "manifest should remain portable across machines");
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");

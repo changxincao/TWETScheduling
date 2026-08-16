@@ -70,6 +70,7 @@ public final class BPCResultWriterPostSolveCsvTest {
 		trace.onRootPricingClosedBeforeCuts(root,
 				new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, Collections.emptyMap(), 120.0, false, "test"), 0);
 		trace.onCutCall(root, "testCut", true, 2, "test", 2, 50_000_000L);
+		trace.onNodeClosed(root, "pruned_by_dual_bound", 0);
 		trace.setNote("csv smoke test");
 
 		double[] outsourcingValues = new double[data.n + 1];
@@ -91,6 +92,7 @@ public final class BPCResultWriterPostSolveCsvTest {
 		String summaryMarkdown = Files.readString(summary);
 		assertContains(summaryMarkdown, ".core-summary.csv", "summary should mention core-summary.csv");
 		assertContains(summaryMarkdown, ".pool-columns.csv", "summary should mention pool-columns.csv");
+		assertContains(summaryMarkdown, "被 dual bound 剪枝节点数：1", "dual-bound prune count missing");
 
 		String columnsCsv = Files.readString(methodDir.resolve("demo-instance.columns.csv"));
 		assertContains(columnsCsv, "[1, 2, 3]", "incumbent columns should remain in columns.csv");
@@ -101,9 +103,12 @@ public final class BPCResultWriterPostSolveCsvTest {
 		assertContains(coreSummaryCsv,
 				"initialColumnBuildTimeSeconds,rootPreprocessingApplied,rootPreprocessingTimeSeconds,rootBoundBeforeCuts",
 				"root setup fields missing");
+		assertContains(coreSummaryCsv, "prunedByIncumbentCount,prunedByDualBoundCount,closedWithoutBranchCount",
+				"node prune fields missing");
 		assertContains(coreSummaryCsv, "123.000000,0.250000,true,0.100000", "root setup values mismatch");
 		assertContains(coreSummaryCsv, "120.000000,,2,0.050000", "root cut fields mismatch");
 		assertContains(coreSummaryCsv, "postsolve-method,demo-instance,FINISHED", "core-summary row mismatch");
+		assertContains(coreSummaryCsv, ",7,0,0,1,0,", "dual-bound prune value mismatch");
 		assertContains(coreSummaryCsv, ",2,1,3,1,", "core-summary should include machine/outsourcing/total pool sizes");
 
 		String componentsCsv = Files.readString(methodDir.resolve("demo-instance.components.csv"));

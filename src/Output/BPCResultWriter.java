@@ -63,6 +63,7 @@ public final class BPCResultWriter {
 			writer.write("已处理节点数：" + result.getProcessedNodes() + "\n\n");
 			writer.write("整数节点数：" + trace.getIntegerNodeCount() + "\n\n");
 			writer.write("被 incumbent 剪枝节点数：" + trace.getPrunedByIncumbentCount() + "\n\n");
+			writer.write("被 dual bound 剪枝节点数：" + trace.getPrunedByDualBoundCount() + "\n\n");
 			writer.write("未能继续分支而关闭的节点数：" + trace.getClosedWithoutBranchCount() + "\n\n");
 			writer.write("初始列数：" + trace.getInitialColumnCount() + "\n\n");
 			writer.write("初始 incumbent 列数：" + trace.getInitialIncumbentColumnCount() + "\n\n");
@@ -167,7 +168,8 @@ public final class BPCResultWriter {
 					"initialColumnBuildTimeSeconds", "rootPreprocessingApplied", "rootPreprocessingTimeSeconds",
 					"rootBoundBeforeCuts", "rootBound", "rootGeneratedCuts", "rootCutSeparationTimeSeconds",
 					"rootSolveTimeSeconds", "incumbentCost", "bestBound", "gapPercent", "solveTimeSeconds",
-					"processedNodes", "integerNodeCount", "prunedByIncumbentCount", "closedWithoutBranchCount",
+					"processedNodes", "integerNodeCount", "prunedByIncumbentCount", "prunedByDualBoundCount",
+					"closedWithoutBranchCount",
 					"initialColumnCount", "initialIncumbentColumnCount", "machinePoolSize", "outsourcingPoolSize",
 					"totalPoolSize", "cutPoolSize", "incumbentColumnCount", "pricingRounds", "generatedColumns",
 					"cutRounds", "generatedCuts", "branchCalls", "incumbentUpdates", "queuePeak",
@@ -184,6 +186,7 @@ public final class BPCResultWriter {
 					formatFinite(BPCOutputFormatters.gapPercent(result.getBestBound(), result.getIncumbentCost())),
 					formatFinite(trace.getSolveTimeSeconds()), Integer.toString(result.getProcessedNodes()),
 					Integer.toString(trace.getIntegerNodeCount()), Integer.toString(trace.getPrunedByIncumbentCount()),
+					Integer.toString(trace.getPrunedByDualBoundCount()),
 					Integer.toString(trace.getClosedWithoutBranchCount()),
 					Integer.toString(trace.getInitialColumnCount()),
 					Integer.toString(trace.getInitialIncumbentColumnCount()), Integer.toString(context.pool.size()),

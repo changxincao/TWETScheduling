@@ -17,6 +17,7 @@ import Common.Utility;
 import Output.BPCSolutionValidator;
 import Output.BPCTraceSummary;
 import Output.ValidationResult;
+import TWETBPC.BestBpcProfiles;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETBPCSolver;
 import TWETBPC.TWETSolveResult;
@@ -523,83 +524,7 @@ public class GCBBFullDomainComparisonTest {
 	 */
 	static void applyBestPricingModeDefaults(TWETBPCConfig config,
 			boolean timeIndexedGraph, boolean timeIndexedRank1, boolean ngDssr) {
-		config.useTimeIndexedGraphRank1CutPricing = timeIndexedRank1;
-		config.useTimeIndexedGraphPricing = timeIndexedGraph || timeIndexedRank1;
-		config.useGCNGBBStyleNgDssrPricing = ngDssr;
-
-		config.runALNSForSeed = true;
-		config.alnsMaxRuntimeMillis = 60_000L;
-		config.alnsUseSimulatedAnnealingAcceptance = false;
-		config.initialHeuristicColumnHistoryMode = "best";
-		config.enableTwoStageStrongBranching = true;
-		config.strongBranchingCandidateLimit = 20;
-		config.strongBranchingPhase2CandidateLimit = 0;
-		config.strongBranchingPhase2MaxHeuristicPasses = 0;
-		config.enableStrongBranchingLightweightRepair = true;
-		config.enableStrongBranchingBranchImpliedPenalty = true;
-		config.enableStrongBranchingPhaseOneRepair = true;
-		config.enableDualBoundPruning = true;
-		config.enableDualStabilization = false;
-		config.enableRestrictedMasterIntegerHeuristic = false;
-		config.enableRouteEnumeration = false;
-
-		if (config.useTimeIndexedGraphPricing) {
-			config.enableHeuristicPricing = false;
-			config.enableTimeIndexedGraphDualWindow = true;
-			config.timeIndexedGraphMaxExactPricingColumns = 300;
-			config.bidirectionalCompletionBoundRelaxation = "off";
-			config.bidirectionalCompletionBoundScalarPruning = false;
-			config.bidirectionalCompletionBoundArcFixing = false;
-			config.bidirectionalCompletionBoundSubtreeArcElimination = false;
-			config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = false;
-			config.timeIndexedCompletionBoundScalarEnhancement = false;
-			config.timeIndexedCompletionBoundWindowTightening = false;
-			config.timeIndexedCompletionBoundArcFixing = true;
-			config.timeIndexedCompletionBoundInRoundArcFixing = false;
-			config.timeIndexedCompletionBoundCutLoopArcFixing = timeIndexedRank1;
-			config.timeIndexedCompletionBoundSriAwareArcFixing = false;
-			config.enableSubsetRowCutsForTimeIndexedGraph = timeIndexedRank1;
-			config.subsetRowCutMemoryMode = "arcMemory";
-			config.maxCutRounds = 8;
-			config.maxSubsetRowCutAppearancesPerJob = 20;
-			config.bidirectionalMidpointProbe = false;
-			return;
-		}
-
-		if (ngDssr) {
-			config.enableHeuristicPricing = true;
-			config.ngDssrInitialNgSetMode = "nearestK";
-			config.ngDssrInitialNgSetSize = -1;
-			config.ngDssrNonElementaryRouteUpdateLimit = 20;
-			config.ngDssrNonElementaryRouteCandidateLimit = 1000;
-			config.ngDssrNonElementaryRouteUpdateMode = "minimumNewPairsSegment";
-			config.useIncrementalSourcedDominanceGraph = true;
-			config.enableNgDssrJoinEnvelopePrefilter = true;
-			config.enableNgDssrJoinVisitProfilePruning = true;
-			config.enableNgDssrWindowRepeatabilityInitialFilter = true;
-			config.enableNgDssrHistoryWarmStart = false;
-			config.enableNgDssrSameNodeWarmStart = false;
-			config.bidirectionalJoinBestThresholdMode = "bestUB";
-			config.bidirectionalCompletionBoundRelaxation = "allCycles";
-			config.bidirectionalCompletionBoundScalarPruning = true;
-			config.bidirectionalCompletionBoundArcFixing = true;
-			config.bidirectionalCompletionBoundSubtreeArcElimination = false;
-			config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = true;
-			config.bidirectionalMidpointProbe = true;
-			config.bidirectionalMidpointProbePopLimit = 10000;
-			config.bidirectionalMidpointProbeScore = "time";
-			config.bidirectionalMidpointProbeEarlyStopRatio = 1.5;
-			config.bidirectionalMidpointProbeDssrImbalanceThreshold = 2.0;
-			config.enableTimeIndexedPreHeuristicPricing = false;
-			config.enableTimeIndexedRootPreprocessingForNgDssr = true;
-			config.timeIndexedRootPreprocessingSeedElementaryColumns = true;
-			config.timeIndexedRootPreprocessingSeedColumnLimit = 200;
-			config.timeIndexedCompletionBoundScalarEnhancement = true;
-			config.timeIndexedCompletionBoundWindowTightening = true;
-			config.timeIndexedCompletionBoundArcFixing = true;
-			config.timeIndexedCompletionBoundInRoundArcFixing = false;
-			config.timeIndexedCompletionBoundCutLoopArcFixing = true;
-		}
+		BestBpcProfiles.applyBestPricingModeDefaults(config, timeIndexedGraph, timeIndexedRank1, ngDssr);
 	}
 
 	private static TWETBPCConfig buildConfig(Path instance, boolean fullDomain, boolean nodeJoin) {

@@ -4,6 +4,7 @@ import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
@@ -11,6 +12,8 @@ import TWETBPC.TWETBPCContext;
 import TWETBPC.TWETSolveResult;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
+import TWETBPC.Model.TWETOutsourcingColumn;
+import TWETBPC.IO.TWETColumnEvaluator;
 
 /**
  * BPC 结果导出工具。
@@ -28,6 +31,11 @@ public final class BPCResultWriter {
 		Path log = dir.resolve(stem + ".log");
 		Path nodes = dir.resolve(stem + ".nodes.csv");
 		Path columns = dir.resolve(stem + ".columns.csv");
+		Path coreSummary = dir.resolve(stem + ".core-summary.csv");
+		Path components = dir.resolve(stem + ".components.csv");
+		Path poolSummary = dir.resolve(stem + ".pool-summary.csv");
+		Path poolColumns = dir.resolve(stem + ".pool-columns.csv");
+		Path incumbentSchedule = dir.resolve(stem + ".incumbent-schedule.csv");
 		Path outsourcing = dir.resolve(stem + ".outsourcing.csv");
 		Path cuts = dir.resolve(stem + ".cuts.csv");
 		Path configFile = dir.resolve(stem + ".config.properties");
@@ -98,6 +106,13 @@ public final class BPCResultWriter {
 			writer.write("- `.log`：逐步过程输出\n");
 			writer.write("- `.nodes.csv`：节点级摘要\n");
 			writer.write("- `.columns.csv`：最终 incumbent 列\n");
+			writer.write("- `.core-summary.csv`：核心结果一行摘要\n");
+			writer.write("- `.components.csv`：组件级计数与耗时摘要\n");
+			writer.write("- `.pool-summary.csv`：最终列池聚合摘要\n");
+			if (context.config.writeDetailedBPCArtifacts) {
+				writer.write("- `.pool-columns.csv`：最终全局列池快照\n");
+				writer.write("- `.incumbent-schedule.csv`：最终内部机器调度与成本分解\n");
+			}
 			writer.write("- `.cuts.csv`：当前 cut 池\n\n");
 			writer.write("- `.config.properties`：本次求解配置快照\n\n");
 			if (trace.getNote() != null && !trace.getNote().isEmpty()) {
@@ -139,6 +154,68 @@ public final class BPCResultWriter {
 			}
 		}
 
+		try (BufferedWriter writer = Files.newBufferedWriter(coreSummary)) {
+			writeCsvLine(writer, "methodName", "instanceName", "status", "initialIncumbentCost", "rootBound",
+					"rootSolveTimeSeconds", "incumbentCost", "bestBound", "gapPercent", "solveTimeSeconds",
+					"processedNodes", "integerNodeCount", "prunedByIncumbentCount", "closedWithoutBranchCount",
+					"initialColumnCount", "initialIncumbentColumnCount", "machinePoolSize", "outsourcingPoolSize",
+					"totalPoolSize", "cutPoolSize", "incumbentColumnCount", "pricingRounds", "generatedColumns",
+					"cutRounds", "generatedCuts", "branchCalls", "incumbentUpdates", "queuePeak",
+					"remainingQueueSize", "maxPoolSize", "maxCutPoolSize", "validationFeasible",
+					"validationObjectiveConsistent", "recomputedObjective", "message", "note");
+			writeCsvLine(writer, methodName, instanceName, String.valueOf(result.getStatus()),
+					formatFinite(trace.getInitialIncumbentCost()), formatFinite(trace.getRootBound()),
+					formatFinite(trace.getRootSolveTimeSeconds()), formatFinite(result.getIncumbentCost()),
+					formatFinite(result.getBestBound()),
+					formatFinite(BPCOutputFormatters.gapPercent(result.getBestBound(), result.getIncumbentCost())),
+					formatFinite(trace.getSolveTimeSeconds()), Integer.toString(result.getProcessedNodes()),
+					Integer.toString(trace.getIntegerNodeCount()), Integer.toString(trace.getPrunedByIncumbentCount()),
+					Integer.toString(trace.getClosedWithoutBranchCount()),
+					Integer.toString(trace.getInitialColumnCount()),
+					Integer.toString(trace.getInitialIncumbentColumnCount()), Integer.toString(context.pool.size()),
+					Integer.toString(context.outsourcingPool.size()), Integer.toString(totalPoolSize(context)),
+					Integer.toString(context.cutPool.size()), Integer.toString(result.getIncumbentColumnIds().size()),
+					Integer.toString(trace.getPricingRounds()), Integer.toString(trace.getGeneratedColumns()),
+					Integer.toString(trace.getCutRounds()), Integer.toString(trace.getGeneratedCuts()),
+					Integer.toString(trace.getBranchCalls()), Integer.toString(trace.getIncumbentUpdates()),
+					Integer.toString(trace.getQueuePeak()), Integer.toString(trace.getRemainingQueueSize()),
+					Integer.toString(trace.getMaxPoolSize()), Integer.toString(trace.getMaxCutPoolSize()),
+					Boolean.toString(validation.isFeasible()), Boolean.toString(validation.isObjectiveConsistent()),
+					formatFinite(validation.getRecomputedObjective()), safe(result.getMessage()),
+					safe(trace.getNote()));
+		}
+
+		try (BufferedWriter writer = Files.newBufferedWriter(components)) {
+			writeCsvLine(writer, "category", "component", "calls", "successes", "generated", "totalSeconds",
+					"averageMillis");
+			writeNamedComponentRows(writer, "pricing", trace.getPricingRounds(), trace.getGeneratedColumns(),
+					trace.getPricingCallCount(), trace.getPricingSuccessCount(), trace.getPricingColumnCount(),
+					trace.getPricingTimeNanos(), true);
+			writeNamedComponentRows(writer, "masterLp", sumInt(trace.getMasterLpCallCount()), null,
+					trace.getMasterLpCallCount(), null, null, trace.getMasterLpTimeNanos(), true);
+			writeNamedComponentRows(writer, "masterLpBuild", sumInt(trace.getMasterLpBuildCallCount()), null,
+					trace.getMasterLpBuildCallCount(), null, null, trace.getMasterLpBuildTimeNanos(), true);
+			writeNamedComponentRows(writer, "strongTrialSetup", sumInt(trace.getStrongTrialSetupCallCount()), null,
+					trace.getStrongTrialSetupCallCount(), null, null, trace.getStrongTrialSetupTimeNanos(), true);
+			writeNamedComponentRows(writer, "cut", trace.getCutRounds(), trace.getGeneratedCuts(),
+					trace.getCutCallCount(), trace.getCutSuccessCount(), trace.getCutCountByGenerator(),
+					trace.getCutTimeNanos(), true);
+			writeNamedComponentRows(writer, "branch", sumInt(trace.getBranchAttemptCount()), null,
+					trace.getBranchAttemptCount(), trace.getBranchSuccessCount(), null, null, false);
+		}
+
+		try (BufferedWriter writer = Files.newBufferedWriter(poolSummary)) {
+			writeCsvLine(writer, "recordType", "poolType", "source", "columnCount", "seedCount", "totalCost",
+					"minCost", "maxCost", "avgCost", "totalSize", "avgSize", "maxSize", "elementaryCount",
+					"nonElementaryCount", "totalBaseline", "minBaseline", "maxBaseline", "avgBaseline");
+			writeMachinePoolSummary(writer, context);
+			writeOutsourcingPoolSummary(writer, context);
+		}
+
+		if (context.config.writeDetailedBPCArtifacts) {
+			writeDetailedArtifacts(poolColumns, incumbentSchedule, context, result);
+		}
+
 		try (BufferedWriter writer = Files.newBufferedWriter(outsourcing)) {
 			// 2026-05-17: y_j 是 RMP 的正式解变量，单独导出，避免结果只看内部机器列。
 			double outsourcingBaseline = outsourcingBaseline(context, result);
@@ -157,12 +234,12 @@ public final class BPCResultWriter {
 		}
 
 		try (BufferedWriter writer = Files.newBufferedWriter(cuts)) {
-			writer.write("cutId,type,rhs,scopeJobs,description\n");
+			writer.write("cutId,type,rhs,scopeJobs,description,multiplier,memoryJobs,memoryArcs\n");
 			for (int cutId = 0; cutId < context.cutPool.size(); cutId++) {
 				TWETCut cut = context.cutPool.getCut(cutId);
-				writer.write(String.format(Locale.US, "%d,%s,%.6f,\"%s\",\"%s\"\n", cut.getId(), cut.getType(),
-						cut.getRhs(), cut.getScopeJobs().toString(),
-						(cut.getDescription() == null ? "" : cut.getDescription()).replace("\"", "'")));
+				writeCsvLine(writer, Integer.toString(cut.getId()), String.valueOf(cut.getType()),
+						formatFinite(cut.getRhs()), cut.getScopeJobs().toString(), safe(cut.getDescription()),
+						formatFinite(cut.getMultiplier()), cut.getMemoryJobs().toString(), cut.getMemoryArcs().toString());
 			}
 		}
 		try (BufferedWriter writer = Files.newBufferedWriter(configFile)) {
@@ -172,6 +249,52 @@ public final class BPCResultWriter {
 			}
 		}
 		return summary;
+	}
+
+	private static void writeDetailedArtifacts(Path poolColumns, Path incumbentSchedule, TWETBPCContext context,
+			TWETSolveResult result) throws IOException {
+		try (BufferedWriter writer = Files.newBufferedWriter(poolColumns)) {
+			writeCsvLine(writer, "poolType", "columnId", "cost", "size", "source", "seed", "elementary",
+					"baseline", "sequenceOrJobs");
+			for (TWETColumn column : context.pool.getColumns()) {
+				writeCsvLine(writer, "machine", Integer.toString(column.getId()), formatFinite(column.getCost()),
+						Integer.toString(column.size()), String.valueOf(column.getSource()),
+						Boolean.toString(column.isSeedColumn()),
+						Boolean.toString(column.getPattern().isElementary()), "", column.getSequence().toString());
+			}
+			for (TWETOutsourcingColumn column : context.outsourcingPool.getColumns()) {
+				writeCsvLine(writer, "outsourcing", Integer.toString(column.getId()), formatFinite(column.getCost()),
+						Integer.toString(column.size()), String.valueOf(column.getSource()),
+						Boolean.toString(column.isSeedColumn()), "", formatFinite(column.getBaseline()),
+						column.getJobs().toString());
+			}
+		}
+
+		try (BufferedWriter writer = Files.newBufferedWriter(incumbentSchedule)) {
+			writeCsvLine(writer, "machine", "columnId", "position", "job", "completion", "earliness",
+					"tardiness", "penaltyCost", "setupCost", "jobContribution");
+			TWETColumnEvaluator evaluator = new TWETColumnEvaluator(context.data);
+			int machine = 0;
+			for (int columnId : result.getIncumbentColumnIds()) {
+				TWETColumn column = context.pool.getColumn(columnId);
+				TWETColumnEvaluator.Timing timing = evaluator.evaluateTiming(column.getSequence());
+				int previousJob = 0;
+				for (int position = 0; position < column.getSequence().size(); position++) {
+					int job = column.getSequence().get(position).intValue();
+					double completion = timing.completions[position];
+					double earliness = Math.max(0.0, context.data.d_e[job] - completion);
+					double tardiness = Math.max(0.0, completion - context.data.d_l[job]);
+					double penalty = context.data.w_e[job] * earliness + context.data.w_t[job] * tardiness;
+					double setupCost = context.data.getSetupCost(previousJob, job);
+					writeCsvLine(writer, Integer.toString(machine), Integer.toString(columnId),
+							Integer.toString(position), Integer.toString(job), formatFinite(completion),
+							formatFinite(earliness), formatFinite(tardiness), formatFinite(penalty),
+							formatFinite(setupCost), formatFinite(penalty + setupCost));
+					previousJob = job;
+				}
+				machine++;
+			}
+		}
 	}
 
 	private static void writeNamedCounters(BufferedWriter writer, String title, Map<String, Integer> counters)
@@ -224,6 +347,195 @@ public final class BPCResultWriter {
 	private static int totalPoolSize(TWETBPCContext context) {
 		return context.pool.size()
 				+ (context.config.useColumnizedOutsourcing() ? context.outsourcingPool.size() : 0);
+	}
+
+	private static void writeNamedComponentRows(BufferedWriter writer, String category, int totalCalls,
+			Integer totalGenerated, Map<String, Integer> calls, Map<String, Integer> successes,
+			Map<String, Integer> generated, Map<String, Long> nanos, boolean hasTiming) throws IOException {
+		writeComponentRow(writer, category, "TOTAL", totalCalls,
+				successes == null ? null : Integer.valueOf(sumInt(successes)),
+				totalGenerated, hasTiming ? Long.valueOf(sumLong(nanos)) : null);
+		for (Map.Entry<String, Integer> entry : calls.entrySet()) {
+			String name = entry.getKey();
+			writeComponentRow(writer, category, name, entry.getValue().intValue(),
+					successes == null ? null : Integer.valueOf(valueInt(successes, name)),
+					generated == null ? null : Integer.valueOf(valueInt(generated, name)),
+					hasTiming ? Long.valueOf(valueLong(nanos, name)) : null);
+		}
+	}
+
+	private static void writeComponentRow(BufferedWriter writer, String category, String component, int calls,
+			Integer successes, Integer generated, Long elapsedNanos) throws IOException {
+		writeCsvLine(writer, category, component, Integer.toString(calls), valueOrBlank(successes),
+				valueOrBlank(generated), elapsedNanos == null ? "" : formatFinite(elapsedNanos.longValue() / 1_000_000_000.0),
+				elapsedNanos == null ? ""
+						: formatFinite(calls == 0 ? 0.0 : elapsedNanos.longValue() / 1_000_000.0 / calls));
+	}
+
+	private static void writeMachinePoolSummary(BufferedWriter writer, TWETBPCContext context) throws IOException {
+		PoolAggregate total = new PoolAggregate();
+		LinkedHashMap<String, PoolAggregate> bySource = new LinkedHashMap<String, PoolAggregate>();
+		for (TWETColumn column : context.pool.getColumns()) {
+			total.acceptMachine(column);
+			aggregate(bySource, String.valueOf(column.getSource())).acceptMachine(column);
+		}
+		writePoolSummaryRow(writer, "TOTAL", "machine", "ALL", total, true, false);
+		for (Map.Entry<String, PoolAggregate> entry : bySource.entrySet()) {
+			writePoolSummaryRow(writer, "SOURCE", "machine", entry.getKey(), entry.getValue(), true, false);
+		}
+	}
+
+	private static void writeOutsourcingPoolSummary(BufferedWriter writer, TWETBPCContext context) throws IOException {
+		PoolAggregate total = new PoolAggregate();
+		LinkedHashMap<String, PoolAggregate> bySource = new LinkedHashMap<String, PoolAggregate>();
+		for (TWETOutsourcingColumn column : context.outsourcingPool.getColumns()) {
+			total.acceptOutsourcing(column);
+			aggregate(bySource, String.valueOf(column.getSource())).acceptOutsourcing(column);
+		}
+		writePoolSummaryRow(writer, "TOTAL", "outsourcing", "ALL", total, false, true);
+		for (Map.Entry<String, PoolAggregate> entry : bySource.entrySet()) {
+			writePoolSummaryRow(writer, "SOURCE", "outsourcing", entry.getKey(), entry.getValue(), false, true);
+		}
+	}
+
+	private static void writePoolSummaryRow(BufferedWriter writer, String recordType, String poolType, String source,
+			PoolAggregate aggregate, boolean includeElementary, boolean includeBaseline) throws IOException {
+		writeCsvLine(writer, recordType, poolType, source, Integer.toString(aggregate.columnCount),
+				Integer.toString(aggregate.seedCount), formatAggregate(aggregate.totalCost, aggregate.columnCount > 0),
+				formatAggregate(aggregate.minCost, aggregate.columnCount > 0),
+				formatAggregate(aggregate.maxCost, aggregate.columnCount > 0),
+				formatAggregate(aggregate.columnCount == 0 ? Double.NaN : aggregate.totalCost / aggregate.columnCount,
+						aggregate.columnCount > 0),
+				Integer.toString(aggregate.totalSize),
+				formatAggregate(aggregate.columnCount == 0 ? Double.NaN : aggregate.totalSize / (double) aggregate.columnCount,
+						aggregate.columnCount > 0),
+				Integer.toString(aggregate.maxSize),
+				includeElementary ? Integer.toString(aggregate.elementaryCount) : "",
+				includeElementary ? Integer.toString(aggregate.nonElementaryCount) : "",
+				includeBaseline ? formatAggregate(aggregate.totalBaseline, aggregate.columnCount > 0) : "",
+				includeBaseline ? formatAggregate(aggregate.minBaseline, aggregate.columnCount > 0) : "",
+				includeBaseline ? formatAggregate(aggregate.maxBaseline, aggregate.columnCount > 0) : "",
+				includeBaseline
+						? formatAggregate(aggregate.columnCount == 0 ? Double.NaN
+								: aggregate.totalBaseline / aggregate.columnCount, aggregate.columnCount > 0)
+						: "");
+	}
+
+	private static PoolAggregate aggregate(LinkedHashMap<String, PoolAggregate> aggregates, String key) {
+		PoolAggregate aggregate = aggregates.get(key);
+		if (aggregate == null) {
+			aggregate = new PoolAggregate();
+			aggregates.put(key, aggregate);
+		}
+		return aggregate;
+	}
+
+	private static void writeCsvLine(BufferedWriter writer, String... values) throws IOException {
+		for (int i = 0; i < values.length; i++) {
+			if (i > 0) {
+				writer.write(",");
+			}
+			writer.write(escapeCsv(values[i]));
+		}
+		writer.write("\n");
+	}
+
+	private static String escapeCsv(String value) {
+		String safeValue = safe(value);
+		if (safeValue.indexOf(',') < 0 && safeValue.indexOf('"') < 0 && safeValue.indexOf('\n') < 0
+				&& safeValue.indexOf('\r') < 0) {
+			return safeValue;
+		}
+		return "\"" + safeValue.replace("\"", "\"\"") + "\"";
+	}
+
+	private static String safe(String value) {
+		return value == null ? "" : value;
+	}
+
+	private static String formatFinite(double value) {
+		return Double.isFinite(value) ? String.format(Locale.US, "%.6f", value) : "";
+	}
+
+	private static String formatAggregate(double value, boolean present) {
+		return present ? formatFinite(value) : "";
+	}
+
+	private static String valueOrBlank(Integer value) {
+		return value == null ? "" : Integer.toString(value.intValue());
+	}
+
+	private static int sumInt(Map<String, Integer> values) {
+		int total = 0;
+		for (Integer value : values.values()) {
+			total += value.intValue();
+		}
+		return total;
+	}
+
+	private static long sumLong(Map<String, Long> values) {
+		long total = 0L;
+		for (Long value : values.values()) {
+			total += value.longValue();
+		}
+		return total;
+	}
+
+	private static int valueInt(Map<String, Integer> values, String key) {
+		Integer value = values.get(key);
+		return value == null ? 0 : value.intValue();
+	}
+
+	private static long valueLong(Map<String, Long> values, String key) {
+		Long value = values.get(key);
+		return value == null ? 0L : value.longValue();
+	}
+
+	private static final class PoolAggregate {
+		int columnCount;
+		int seedCount;
+		double totalCost;
+		double minCost = Double.POSITIVE_INFINITY;
+		double maxCost = Double.NEGATIVE_INFINITY;
+		int totalSize;
+		int maxSize;
+		int elementaryCount;
+		int nonElementaryCount;
+		double totalBaseline;
+		double minBaseline = Double.POSITIVE_INFINITY;
+		double maxBaseline = Double.NEGATIVE_INFINITY;
+
+		void acceptMachine(TWETColumn column) {
+			columnCount++;
+			if (column.isSeedColumn()) {
+				seedCount++;
+			}
+			totalCost += column.getCost();
+			minCost = Math.min(minCost, column.getCost());
+			maxCost = Math.max(maxCost, column.getCost());
+			totalSize += column.size();
+			maxSize = Math.max(maxSize, column.size());
+			if (column.getPattern().isElementary()) {
+				elementaryCount++;
+			} else {
+				nonElementaryCount++;
+			}
+		}
+
+		void acceptOutsourcing(TWETOutsourcingColumn column) {
+			columnCount++;
+			if (column.isSeedColumn()) {
+				seedCount++;
+			}
+			totalCost += column.getCost();
+			minCost = Math.min(minCost, column.getCost());
+			maxCost = Math.max(maxCost, column.getCost());
+			totalSize += column.size();
+			maxSize = Math.max(maxSize, column.size());
+			totalBaseline += column.getBaseline();
+			minBaseline = Math.min(minBaseline, column.getBaseline());
+			maxBaseline = Math.max(maxBaseline, column.getBaseline());
+		}
 	}
 
 }

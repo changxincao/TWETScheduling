@@ -49,6 +49,7 @@ public final class FormalExperimentRunner {
 		if (arguments.seedFile == null) {
 			throw new IllegalArgumentException("seed action requires --seedFile");
 		}
+		long startNanos = System.nanoTime();
 		TWETBPCConfig config = new TWETBPCConfig();
 		BestBpcProfiles.NG_DSSR.apply(config);
 		config.reuseConfiguredBestSolution = false;
@@ -60,10 +61,30 @@ public final class FormalExperimentRunner {
 				extractSequences(pool, bundle.getInitialColumnIds()),
 				extractSequences(pool, bundle.getIncumbentColumnIds()));
 		FixedInitialSeedSnapshotIO.write(arguments.seedFile, arguments.instance.toString(), seed);
+		long elapsedNanos = System.nanoTime() - startNanos;
+		String fingerprint = FixedInitialSeedSnapshotIO.fingerprint(seed);
+		Files.createDirectories(arguments.outputDir);
+		writeSeedMetadata(arguments, seed, fingerprint, elapsedNanos);
 		System.out.printf(Locale.US,
-				"formalSeed run=%s initial=%d incumbent=%d fingerprint=%s file=%s%n",
+				"formalSeed run=%s initial=%d incumbent=%d fingerprint=%s elapsedSeconds=%.3f file=%s%n",
 				arguments.runId, seed.getInitialSequences().size(), seed.getIncumbentSequences().size(),
-				FixedInitialSeedSnapshotIO.fingerprint(seed), arguments.seedFile.toAbsolutePath());
+				fingerprint, elapsedNanos / 1_000_000_000.0, arguments.seedFile.toAbsolutePath());
+	}
+
+	private static void writeSeedMetadata(Arguments arguments, FixedInitialColumnSeed seed, String fingerprint,
+			long elapsedNanos) throws Exception {
+		ArrayList<String> lines = new ArrayList<String>();
+		lines.add("runId=" + arguments.runId);
+		lines.add("updatedAt=" + Instant.now());
+		lines.add("action=seed");
+		lines.add("instance=" + arguments.instance.toAbsolutePath());
+		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
+		lines.add("seedFile=" + arguments.seedFile.toAbsolutePath());
+		lines.add("seedFingerprint=" + fingerprint);
+		lines.add("initialColumnCount=" + seed.getInitialSequences().size());
+		lines.add("incumbentColumnCount=" + seed.getIncumbentSequences().size());
+		lines.add("elapsedSeconds=" + elapsedNanos / 1_000_000_000.0);
+		Files.write(arguments.outputDir.resolve("run.properties"), lines, StandardCharsets.UTF_8);
 	}
 
 	private static List<List<Integer>> extractSequences(Pool pool, List<Integer> columnIds) {
@@ -93,26 +114,29 @@ public final class FormalExperimentRunner {
 		config.outsourcingModel = "none".equals(arguments.outsourcingModel)
 				? "masterVariables" : arguments.outsourcingModel;
 		config.reuseConfiguredBestSolution = false;
+		String seedFingerprint = "";
 		if (arguments.seedFile != null) {
 			config.fixedInitialColumnSeed = FixedInitialSeedSnapshotIO.read(arguments.seedFile);
+			seedFingerprint = FixedInitialSeedSnapshotIO.fingerprint(config.fixedInitialColumnSeed);
 		}
 		System.setProperty("twet.bpc.cplexThreads", "1");
 		Files.createDirectories(arguments.outputDir);
-		writeRunMetadata(arguments, profile, null);
+		writeRunMetadata(arguments, profile, seedFingerprint, null);
 
 		System.out.printf(Locale.US,
 				"formalRun start run=%s profile=%s profileVersion=%s n=%d m=%d timeLimit=%.1fs output=%s%n",
 				arguments.runId, profile.getName(), BestBpcProfiles.VERSION, data.n, data.m,
 				arguments.timeLimitSeconds, arguments.outputDir.toAbsolutePath());
 		TWETSolveResult result = new TWETBPCSolver(data, config).solve();
-		writeRunMetadata(arguments, profile, result);
+		writeRunMetadata(arguments, profile, seedFingerprint, result);
 		System.out.printf(Locale.US,
 				"formalRun finished run=%s status=%s incumbent=%.6f bound=%.6f nodes=%d columns=%d%n",
 				arguments.runId, result.getStatus(), result.getIncumbentCost(), result.getBestBound(),
 				result.getProcessedNodes(), result.getGeneratedColumns());
 	}
 
-	private static void writeRunMetadata(Arguments arguments, BPCAlgorithmProfile profile, TWETSolveResult result)
+	private static void writeRunMetadata(Arguments arguments, BPCAlgorithmProfile profile, String seedFingerprint,
+			TWETSolveResult result)
 			throws Exception {
 		ArrayList<String> lines = new ArrayList<String>();
 		lines.add("runId=" + arguments.runId);
@@ -127,6 +151,7 @@ public final class FormalExperimentRunner {
 		lines.add("outsourcingUnitRate=" + arguments.outsourcingUnitRate);
 		lines.add("discountStrength=" + arguments.discountStrength);
 		lines.add("seedFile=" + (arguments.seedFile == null ? "" : arguments.seedFile.toAbsolutePath()));
+		lines.add("seedFingerprint=" + seedFingerprint);
 		lines.add("cplexThreads=1");
 		if (result != null) {
 			lines.add("status=" + result.getStatus());

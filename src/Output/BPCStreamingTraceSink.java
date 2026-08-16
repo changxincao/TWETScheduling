@@ -54,6 +54,25 @@ public final class BPCStreamingTraceSink implements BPCTraceSink, AutoCloseable 
 	}
 
 	@Override
+	public void onInitialColumnsReady(int initialColumnCount, int incumbentColumnCount, double initialIncumbentCost,
+			long elapsedNanos) {
+		write(BPCOutputFormatters.formatInitialColumns(initialColumnCount, incumbentColumnCount, initialIncumbentCost)
+				+ String.format(java.util.Locale.US, ", buildMs=%.3f", elapsedNanos / 1_000_000.0));
+	}
+
+	@Override
+	public void onRootPreprocessing(boolean applied, String message, long elapsedNanos) {
+		write(String.format(java.util.Locale.US, "Root preprocessing applied=%s elapsedMs=%.3f %s",
+				Boolean.toString(applied), elapsedNanos / 1_000_000.0, message));
+	}
+
+	@Override
+	public void onRootPricingClosedBeforeCuts(Node node, TWETMasterSolution solution, int activeCutCount) {
+		write(String.format(java.util.Locale.US, "Root pricing closed before cuts: objective=%.6f activeCuts=%d",
+				solution.getObjectiveValue(), activeCutCount));
+	}
+
+	@Override
 	public void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
 		write(BPCOutputFormatters.formatNodeHeader(node, queueSize, poolSize, cutPoolSize));
 	}

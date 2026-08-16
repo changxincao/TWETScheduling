@@ -26,6 +26,12 @@ public class BPCTraceSummary implements BPCTraceSink {
 	private int initialColumnCount;
 	private int initialIncumbentColumnCount;
 	private double initialIncumbentCost = Double.POSITIVE_INFINITY;
+	private long initialColumnBuildTimeNanos;
+	private long rootPreprocessingTimeNanos;
+	private boolean rootPreprocessingApplied;
+	private double rootBoundBeforeCuts = Double.POSITIVE_INFINITY;
+	private int rootGeneratedCuts;
+	private long rootCutTimeNanos;
 	private int processedNodes;
 	private int integerNodeCount;
 	private int pricingRounds;
@@ -106,6 +112,28 @@ public class BPCTraceSummary implements BPCTraceSink {
 		this.initialIncumbentCost = initialIncumbentCost;
 		eventLines.add(BPCOutputFormatters.formatInitialColumns(initialColumnCount, incumbentColumnCount,
 				initialIncumbentCost));
+	}
+
+	@Override
+	public void onInitialColumnsReady(int initialColumnCount, int incumbentColumnCount, double initialIncumbentCost,
+			long elapsedNanos) {
+		onInitialColumnsReady(initialColumnCount, incumbentColumnCount, initialIncumbentCost);
+		initialColumnBuildTimeNanos = elapsedNanos;
+	}
+
+	@Override
+	public void onRootPreprocessing(boolean applied, String message, long elapsedNanos) {
+		rootPreprocessingApplied = applied;
+		rootPreprocessingTimeNanos = elapsedNanos;
+		eventLines.add(String.format(Locale.US, "Root preprocessing applied=%s elapsedMs=%.3f %s",
+				Boolean.toString(applied), elapsedNanos / 1_000_000.0, message));
+	}
+
+	@Override
+	public void onRootPricingClosedBeforeCuts(Node node, TWETMasterSolution solution, int activeCutCount) {
+		if (node != null && node.id == 1 && solution != null && Double.isFinite(solution.getObjectiveValue())) {
+			rootBoundBeforeCuts = solution.getObjectiveValue();
+		}
 	}
 
 	@Override
@@ -202,6 +230,12 @@ public class BPCTraceSummary implements BPCTraceSink {
 			generatedCuts += addedCuts;
 			increment(cutSuccessCount, generatorName, 1);
 			increment(cutCountByGenerator, generatorName, addedCuts);
+		}
+		if (node != null && node.id == 1) {
+			rootCutTimeNanos += elapsedNanos;
+			if (separated && addedCuts > 0) {
+				rootGeneratedCuts += addedCuts;
+			}
 		}
 		maxCutPoolSize = Math.max(maxCutPoolSize, cutPoolSize);
 		eventLines.add(BPCOutputFormatters.formatCut(generatorName, node.id, separated, addedCuts, cutPoolSize, message,
@@ -509,6 +543,18 @@ public class BPCTraceSummary implements BPCTraceSink {
 		return initialIncumbentCost;
 	}
 
+	public double getInitialColumnBuildTimeSeconds() {
+		return initialColumnBuildTimeNanos / 1_000_000_000.0;
+	}
+
+	public boolean isRootPreprocessingApplied() {
+		return rootPreprocessingApplied;
+	}
+
+	public double getRootPreprocessingTimeSeconds() {
+		return rootPreprocessingTimeNanos / 1_000_000_000.0;
+	}
+
 	public int getProcessedNodes() {
 		return processedNodes;
 	}
@@ -603,6 +649,18 @@ public class BPCTraceSummary implements BPCTraceSink {
 
 	public double getRootBound() {
 		return rootBound;
+	}
+
+	public double getRootBoundBeforeCuts() {
+		return rootBoundBeforeCuts;
+	}
+
+	public int getRootGeneratedCuts() {
+		return rootGeneratedCuts;
+	}
+
+	public double getRootCutTimeSeconds() {
+		return rootCutTimeNanos / 1_000_000_000.0;
 	}
 
 	public double getRootSolveTimeSeconds() {

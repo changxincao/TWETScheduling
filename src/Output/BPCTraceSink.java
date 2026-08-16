@@ -23,6 +23,17 @@ public interface BPCTraceSink {
 	default void onInitialColumnsReady(int initialColumnCount, int incumbentColumnCount, double initialIncumbentCost) {
 	}
 
+	default void onInitialColumnsReady(int initialColumnCount, int incumbentColumnCount, double initialIncumbentCost,
+			long elapsedNanos) {
+		onInitialColumnsReady(initialColumnCount, incumbentColumnCount, initialIncumbentCost);
+	}
+
+	default void onRootPreprocessing(boolean applied, String message, long elapsedNanos) {
+	}
+
+	default void onRootPricingClosedBeforeCuts(Node node, TWETMasterSolution solution, int activeCutCount) {
+	}
+
 	default void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
 	}
 

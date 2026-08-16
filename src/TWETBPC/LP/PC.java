@@ -120,6 +120,9 @@ public class PC {
 				|| lastNodePrunedByDualBound) {
 			return solution;
 		}
+		if (lp.getNode() != null && lp.getNode().id == 1) {
+			traceSink.onRootPricingClosedBeforeCuts(lp.getNode(), solution, lp.getActiveCutIds().size());
+		}
 
 		// 2026-06-13: 对齐旧 VRP PC.Solve()：pricing 收敛后若 LP 已经整数，不再做 cut separation。
 		applyCutLoopPricingOnlyArcFixing(lp, solution);

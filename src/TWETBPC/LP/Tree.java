@@ -99,12 +99,14 @@ public class Tree {
 		};
 		pc.setTimeLimitChecker(timeLimitChecker);
 		heartbeat(null, "initialColumnBuilder.start");
+		long initialColumnBuildStart = System.nanoTime();
 		InitialColumnBundle initial = initialColumnBuilder.build();
+		long initialColumnBuildNanos = System.nanoTime() - initialColumnBuildStart;
 		heartbeat(null, "initialColumnBuilder.done");
 		Node root = new Node(data, initial.getInitialColumnIds(), initial.getIncumbentColumnIds(), config.pseudoCostInf);
 		seedInitialOutsourcingColumn(root, initial);
 		traceSink.onInitialColumnsReady(initial.getInitialColumnIds().size(), initial.getIncumbentColumnIds().size(),
-				incumbentCostFromInitial(initial));
+				incumbentCostFromInitial(initial), initialColumnBuildNanos);
 
 		PriorityQueue<Node> queue = new PriorityQueue<Node>();
 		queue.add(root);
@@ -122,6 +124,8 @@ public class Tree {
 			traceSink.onStageHeartbeat(root, "timeIndexedRootPreprocess.start", totalPoolSize(), cutPool.size());
 			TimeIndexedRootPreprocessor.Result preprocessResult = TimeIndexedRootPreprocessor.run(data, config,
 					pricingMode, pool, root, incumbentCost, traceSink, timeLimitChecker);
+			traceSink.onRootPreprocessing(preprocessResult.applied, preprocessResult.message,
+					preprocessResult.elapsedNanos);
 			traceSink.onStageHeartbeat(root, preprocessResult.summary(), totalPoolSize(), cutPool.size());
 		}
 

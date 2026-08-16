@@ -99,6 +99,7 @@ public final class BestBpcProfilesTest {
 		require(config.maxCutRounds == 8, "outer cut rounds");
 		require(config.maxSubsetRowCutAppearancesPerJob == 20, "rank-1 job appearance limit");
 		require(!config.bidirectionalMidpointProbe, "midpoint probe off");
+		require(!config.enableStrongBranchingPhaseOneRepair, "time-indexed old M repair");
 		assertCommon(config);
 	}
 
@@ -140,6 +141,7 @@ public final class BestBpcProfilesTest {
 		require(config.bidirectionalMidpointProbeEarlyStopRatio == 1.5, "ng midpoint acceptance ratio");
 		require(config.bidirectionalMidpointProbeDssrImbalanceThreshold == 2.0,
 				"ng DSSR midpoint feedback ratio");
+		require(config.enableStrongBranchingPhaseOneRepair, "ng Phase-I repair");
 		assertCommon(config);
 	}
 
@@ -154,7 +156,6 @@ public final class BestBpcProfilesTest {
 		require(config.strongBranchingPhase2MaxHeuristicPasses == 0, "strong phase2 heuristic pass off");
 		require(config.enableStrongBranchingLightweightRepair, "lightweight strong trial");
 		require(config.enableStrongBranchingBranchImpliedPenalty, "branch-implied penalty");
-		require(config.enableStrongBranchingPhaseOneRepair, "Phase-I repair");
 		require(config.enableDualBoundPruning, "dual-bound pruning");
 		require(!config.enableDualStabilization, "dual stabilization off");
 		require(!config.enableRestrictedMasterIntegerHeuristic, "restricted-master heuristic off");

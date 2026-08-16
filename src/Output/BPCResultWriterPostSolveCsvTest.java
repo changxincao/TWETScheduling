@@ -12,9 +12,12 @@ import TWETBPC.TWETBPCContext;
 import TWETBPC.TWETSolveResult;
 import TWETBPC.TWETSolveStatus;
 import TWETBPC.CUT.SubsetRowCutEvaluator;
+import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
+import TWETBPC.Model.TWETMasterSolution;
+import TWETBPC.Model.TWETMasterStatus;
 
 /**
  * 结果写出层的 post-solve CSV 回归测试。
@@ -59,7 +62,14 @@ public final class BPCResultWriterPostSolveCsvTest {
 		BPCTraceSummary trace = new BPCTraceSummary(config);
 		trace.onSolveStarted("demo-instance");
 		trace.onRunConfiguration(Collections.singletonList("config.test=true"));
-		trace.onInitialColumnsReady(2, 1, 123.0);
+		trace.onInitialColumnsReady(2, 1, 123.0, 250_000_000L);
+		trace.onRootPreprocessing(true, "test", 100_000_000L);
+		Node root = new Node(data, Arrays.asList(Integer.valueOf(incumbentColumnId)),
+				Arrays.asList(Integer.valueOf(incumbentColumnId)), config.pseudoCostInf);
+		root.id = 1;
+		trace.onRootPricingClosedBeforeCuts(root,
+				new TWETMasterSolution(TWETMasterStatus.LP_RELAXATION, Collections.emptyMap(), 120.0, false, "test"), 0);
+		trace.onCutCall(root, "testCut", true, 2, "test", 2, 50_000_000L);
 		trace.setNote("csv smoke test");
 
 		double[] outsourcingValues = new double[data.n + 1];
@@ -88,6 +98,11 @@ public final class BPCResultWriterPostSolveCsvTest {
 
 		String coreSummaryCsv = Files.readString(methodDir.resolve("demo-instance.core-summary.csv"));
 		assertContains(coreSummaryCsv, "methodName,instanceName,status", "core-summary header mismatch");
+		assertContains(coreSummaryCsv,
+				"initialColumnBuildTimeSeconds,rootPreprocessingApplied,rootPreprocessingTimeSeconds,rootBoundBeforeCuts",
+				"root setup fields missing");
+		assertContains(coreSummaryCsv, "123.000000,0.250000,true,0.100000", "root setup values mismatch");
+		assertContains(coreSummaryCsv, "120.000000,,2,0.050000", "root cut fields mismatch");
 		assertContains(coreSummaryCsv, "postsolve-method,demo-instance,FINISHED", "core-summary row mismatch");
 		assertContains(coreSummaryCsv, ",2,1,3,1,", "core-summary should include machine/outsourcing/total pool sizes");
 

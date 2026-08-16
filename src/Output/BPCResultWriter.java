@@ -45,7 +45,15 @@ public final class BPCResultWriter {
 			writer.write("算例名：`" + instanceName + "`\n\n");
 			writer.write("状态：" + result.getStatus() + "\n\n");
 			writer.write(String.format(Locale.US, "初始 incumbent：%.6f\n\n", trace.getInitialIncumbentCost()));
+			writer.write(String.format(Locale.US, "初始列构造时间：%.3f s\n\n", trace.getInitialColumnBuildTimeSeconds()));
+			writer.write("根节点预处理应用：" + trace.isRootPreprocessingApplied() + "\n\n");
+			writer.write(String.format(Locale.US, "根节点预处理时间：%.3f s\n\n",
+					trace.getRootPreprocessingTimeSeconds()));
+			writer.write(String.format(Locale.US, "cut 前根节点下界：%.6f\n\n", trace.getRootBoundBeforeCuts()));
 			writer.write(String.format(Locale.US, "根节点下界：%.6f\n\n", trace.getRootBound()));
+			writer.write("根节点新增 cuts 数：" + trace.getRootGeneratedCuts() + "\n\n");
+			writer.write(String.format(Locale.US, "根节点 cut separation 时间：%.3f s\n\n",
+					trace.getRootCutTimeSeconds()));
 			writer.write(String.format(Locale.US, "根节点求解时间：%.3f s\n\n", trace.getRootSolveTimeSeconds()));
 			writer.write(String.format(Locale.US, "最终 incumbent：%.6f\n\n", result.getIncumbentCost()));
 			writer.write(String.format(Locale.US, "最终 lower bound：%.6f\n\n", result.getBestBound()));
@@ -155,7 +163,9 @@ public final class BPCResultWriter {
 		}
 
 		try (BufferedWriter writer = Files.newBufferedWriter(coreSummary)) {
-			writeCsvLine(writer, "methodName", "instanceName", "status", "initialIncumbentCost", "rootBound",
+			writeCsvLine(writer, "methodName", "instanceName", "status", "initialIncumbentCost",
+					"initialColumnBuildTimeSeconds", "rootPreprocessingApplied", "rootPreprocessingTimeSeconds",
+					"rootBoundBeforeCuts", "rootBound", "rootGeneratedCuts", "rootCutSeparationTimeSeconds",
 					"rootSolveTimeSeconds", "incumbentCost", "bestBound", "gapPercent", "solveTimeSeconds",
 					"processedNodes", "integerNodeCount", "prunedByIncumbentCount", "closedWithoutBranchCount",
 					"initialColumnCount", "initialIncumbentColumnCount", "machinePoolSize", "outsourcingPoolSize",
@@ -164,7 +174,11 @@ public final class BPCResultWriter {
 					"remainingQueueSize", "maxPoolSize", "maxCutPoolSize", "validationFeasible",
 					"validationObjectiveConsistent", "recomputedObjective", "message", "note");
 			writeCsvLine(writer, methodName, instanceName, String.valueOf(result.getStatus()),
-					formatFinite(trace.getInitialIncumbentCost()), formatFinite(trace.getRootBound()),
+					formatFinite(trace.getInitialIncumbentCost()), formatFinite(trace.getInitialColumnBuildTimeSeconds()),
+					Boolean.toString(trace.isRootPreprocessingApplied()),
+					formatFinite(trace.getRootPreprocessingTimeSeconds()),
+					formatFinite(trace.getRootBoundBeforeCuts()), formatFinite(trace.getRootBound()),
+					Integer.toString(trace.getRootGeneratedCuts()), formatFinite(trace.getRootCutTimeSeconds()),
 					formatFinite(trace.getRootSolveTimeSeconds()), formatFinite(result.getIncumbentCost()),
 					formatFinite(result.getBestBound()),
 					formatFinite(BPCOutputFormatters.gapPercent(result.getBestBound(), result.getIncumbentCost())),

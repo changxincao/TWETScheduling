@@ -35,6 +35,8 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(manifest, "TIME_INDEXED", "time-indexed row");
 		assertContains(manifest, "TIME_INDEXED_SRI", "rank-1 row");
 		assertContains(manifest, "\tseed-", "solver dependency");
+		assertContains(manifest, "--action=\"seed\"", "seed task");
+		assertContains(manifest, "--outputDir=\"${WORKSPACE}/", "seed output metadata directory");
 		assertContains(manifest, "${WORKSPACE}/", "manifest should remain portable across machines");
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");

@@ -41,6 +41,28 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onInitialColumnsReady(int initialColumnCount, int incumbentColumnCount, double initialIncumbentCost,
+			long elapsedNanos) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onInitialColumnsReady(initialColumnCount, incumbentColumnCount, initialIncumbentCost, elapsedNanos);
+		}
+	}
+
+	@Override
+	public void onRootPreprocessing(boolean applied, String message, long elapsedNanos) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onRootPreprocessing(applied, message, elapsedNanos);
+		}
+	}
+
+	@Override
+	public void onRootPricingClosedBeforeCuts(Node node, TWETMasterSolution solution, int activeCutCount) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onRootPricingClosedBeforeCuts(node, solution, activeCutCount);
+		}
+	}
+
+	@Override
 	public void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
 		for (BPCTraceSink sink : delegates) {
 			sink.onNodePicked(node, queueSize, poolSize, cutPoolSize);

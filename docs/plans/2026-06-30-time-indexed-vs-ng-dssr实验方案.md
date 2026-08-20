@@ -1932,3 +1932,31 @@ pool 56470，未形成最终下界证书，因此该目录只保留单进程轨�
 进程和主日志，仅保留为启动故障证据，不得用于结果比较。正式 `20260730c` 使用唯一的直接
 `Start-Process java` 入口和原生 stdout/stderr 重定向；Oracle javapath launcher 会再生成实际
 JDK 22 child process，因此目录同时记录 launcher 与 child PID。
+### 2026-07-31 原始时间 60-2/002 W0 三种算法串行对照
+
+为避免只依赖 `wet060_001_2m` 得出结论，新增 `data/60-2/wet060_002_2m.dat` 的三算法对照。
+输入文件 SHA-256 为
+`A02772804BD4A32D60EE0A8AFE5A526E670EFB3AA0FAE71B91704E7F95779879`，本轮使用 W0、
+setup cost 系数 0、CPLEX 单线程、每种方法 7200 秒时限和 20000 节点上限。三种方法依次为
+ng-DSSR 无 SRI、time-indexed no-cut 和 time-indexed rank-1/SRI，并在三个独立 JVM 中串行
+运行，避免并发资源争用污染 wall time。
+
+三组共同读取
+`test-results/bpc/fixed-seeds/wet060_002_2m-W0-20260731.snapshot`。首个 ng-DSSR 进程生成
+199 条初始列、2 条 incumbent 列和初始上界 30037，fingerprint 为
+`7873a32ba71027030e45b0bc7fe3e1b76d01cee31d22221ef901deaf4b167321`；后续两组必须读取
+同一 fingerprint。控制目录为
+`test-results/bpc/exp-60-2-002-W0-three-method-control-20260731a`，其中保存实验清单、
+串行启动脚本、每组状态和 fingerprint。三组实际 fingerprint 完全一致，最终均得到
+`obj=bound=29964`、gap 0、`valid=true`。
+
+| 方法 | 总时间 | 处理节点 | exact pricing | 最终状态 |
+|---|---:|---:|---:|---|
+| ng-DSSR 无 SRI | 1163.872s | 40 | 290.827s / 1243 | FINISHED |
+| time-indexed no-cut | **700.312s** | 90 | 50.770s / 6976 | FINISHED |
+| time-indexed rank-1/SRI | 971.989s | 5 | 29.897s / 1916 | FINISHED |
+
+本例 time-indexed no-cut 最快；ng-DSSR 比其慢 66.2%，rank-1/SRI 比其慢 38.8%，但 SRI
+仍比 ng-DSSR 快 16.5%。SRI 将处理节点从 no-cut 的 90 个压到 5 个，但 cut-and-price 的额外
+主问题处理成本超过缩树收益，因此没有取得最短总时间。三组 stderr 均无异常；SRI 仅出现一次
+CPLEX basis singularity 自动修复提示，随后正常闭合并通过最终可行性验证。

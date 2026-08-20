@@ -2849,3 +2849,50 @@ C20000 没有破坏主要 join 剪枝。12 组的 candidate 专用拼接前 `lbP
 按当前实验口径，将 `ngDssrNonElementaryRouteCandidateLimit` 默认值由 1000 调整为 2000；有效更新预算仍为 K20，`minimumNewPairsSegment` 及离线顺序更新流程不变。该调整只是让困难 DSSR 轮保留更多按 reduced cost 排序的非基本 witness，避免 C1000 提前耗尽时缺少后续独立更新候选。已有 C1000/C3000/C10000 对照没有证明扩大 C 必然缩短 exact 时间，因此当前只记录为参数选择，不宣称稳定加速；后续应继续观察 `considered/blocked/updated` 与 candidate threshold 是否实际触发。
 
 重新拆分 60-2 日志后，普通 exact 465 次累计 forward/backward 为 164.209s/83.593s，后向仅为前向的 0.509；repair exact 36 次则为 156.739s/316.924s，后向约为前向的 2.022。由此确认明显后向膨胀主要出现在 repair dual 下，不是 ng-DSSR 普通路径的统一特征。当前默认 Tmid 已使用 effective window 的左边界与 pricing horizon 中点，并由浅层 probe 调整；后续若继续优化，建议把窗口分布只作为首轮确定性锚点：令 `F(t)=#{HStart_j<=t}`、`B(t)=#{HEnd_j>=t}`，选择使 `|F(t)-B(t)|` 最小的断点，再与现有中点做少量 probe。不能只按结束时间排序，也不能仅凭可访问 job 数直接替代实际 label 工作量；同一 DSSR 后续轮仍应利用完整 forward/backward 工作量形成二分 bracket。该方案本次只记录，未修改实现。
+### 271. 2026-07-21 repair 前后向 16.7 倍失衡与 probe 改进分析
+
+代表性困难 repair 中，forward/backward 的 half-window 不可进入任务为29/4，kept labels为21601/88281，dominated labels为189312/742807，扩展候选为210912/839070，累计扩展时间为16.230s/271.194s。候选规模比为3.98，而单候选平均成本约为77us/323us，backward单候选又贵4.20倍；二者相乘约16.7，完整解释了时间差。两侧 dominance 淘汰率都约89%，backward并不是淘汰比例突然失效，而是可进入任务更多导致宽度扩大，随后更大的label/store/PWLF状态又提高了每次扩展和dominance操作成本。
+
+当前probe存在三个错位。第一，默认queue score只比较浅层probe后的kept+remaining queue，不计每侧单位pop耗时；每侧固定约一半pop，因此无法识别backward每个候选贵4.2倍。第二，同一DSSR周期重探前只有上一轮kept-label比例超过5才预移seed，本例比例4.09，虽然真实时间比已达16.71，仍不会触发。第三，默认每5轮重探一次，若单轮已耗数百秒，等待5轮不可接受。
+
+后续最小而有针对性的改进应是：probe为每侧计算 `estimatedWork=(kept+remainingQueue)*elapsed/pops`，按估计总工作量选候选，并用两侧estimatedWork决定移动方向；完整一轮结束后，以真实forward/backward时间比作为最高优先级反馈，时间比超过约2时下一轮立即重探，不等待固定5轮。初始候选增加一个effective-window分布锚点：在所有窗口端点中选择使可进入forward任务数与backward任务数接近的位置，但该锚点只用于提供候选，不能直接替代工作量probe，因为本例backward单位扩展成本明显更高。搜索移动建议维护方向bracket：backward重则提高Tmid，forward重则降低Tmid；两侧方向都出现后取中点，避免固定15%乘法在窄有效区间中过冲。目标应最小化两侧估计成本之和，而不是机械追求label数相等。本次只完成分析记录，尚未修改probe实现。
+#### 271.1 probe 动态触发的简化修正
+
+进一步讨论后，不采用按单位pop耗时构造复合estimatedWork指标；该指标可能随JVM、PWLF形状和dominance状态波动，参数稳定性不足。更简单的后续实验是保留现有浅层queue probe，只把同一DSSR内的固定“每5轮重探”改为按上一轮完整kept-label压力动态触发：每轮结束记录forward/backward kept labels；下一轮比例未超过阈值则直接复用当前Tmid，超过阈值才立即probe，并按重侧使用现有方向移动。建议先从阈值3开始A/B；当前阈值5会漏掉本例4.09倍label、16.7倍时间的明显失衡。该规则只决定何时重新probe，不用上一轮比例直接计算新的Tmid，因此比复杂比例控制稳定。
+
+同一node的多次独立exact仍使用现有node级历史：下一次probe从历史总exact时间最好的Tmid开始，时间相差10%以内时只有balance至少改善30%才替换；连续稳定后可冻结并周期校验。DSSR内部动态触发与node级复用是两层机制，前者处理ng-set逐轮变化，后者处理同node不同LP dual下的长期起点。
+#### 271.2 改用时间型 probe score 的分析结论
+
+进一步决定优先测试统一的time score，而不再用kept/queue/bound/remaining/peak等数量指标控制Tmid。理由是浅层label数量没有包含不同状态下PWLF、dominance和扩展的单次处理难度；完整F/B时间能够综合这些成本。实现边界需要区分：完整一轮exact的F/B时间是真实总成本；固定两侧相同pop数的probe时间只是浅层样本成本，仍会低估尚未展开的队列宽度，但比单纯queue数量更能识别“单个backward label显著更贵”的情况。
+
+计划保持初始Tmid计算不变，并为probe score增加`time`：score取forward/backward probe elapsed的失衡比，移动方向直接由两侧elapsed决定，候选仍沿用现有有限probe、方向反转bracket和历史node复用。node级历史本来就以完整exact总时间为首要标准，因此无需修改。DSSR内保留每5轮强制重探，因为ng-set在上一轮结束后刚更新，上一轮完整时间相对下一轮存在一轮滞后；周期probe以当前Tmid为起点直接使用time score重新选择，不再用上一轮label比超过5才预移5%的规则。label、queue、dominated等统计继续保留为诊断，不参与默认Tmid选择。
+
+首轮验证应固定同一个困难repair side做queue/time严格复放，再检查普通exact，避免只优化repair却使普通forward-heavy路径退化。主要比较probe选择的Tmid、probe自身耗时、完整F/B时间、exact总时间和列结果一致性。该讨论当前仍为设计结论，尚未修改代码。
+#### 271.3 time score 与 DSSR 自适应重探实施计划
+
+时间型probe需要同时保留方向与平衡度。原始方向值定义为`timeRatio=forwardElapsed/backwardElapsed`：大于1表示forward更重、下一候选降低Tmid；小于1表示backward更重、下一候选提高Tmid。候选排序使用该ratio相对1的对称距离，不能只保存max/min后丢失方向。现有forward/backward probe elapsed已经记录，不新增高频计时。
+
+同一DSSR内改为双触发：每轮结束保存完整forward/backward时间；下一轮开始时，若上一轮完整时间比超过可配置阈值则立即probe，否则复用当前Tmid。同时保留周期兜底，但“每5轮”按距离上一次实际probe的轮数计算；任何自适应probe都会重置lastProbeRound，下一次周期probe从它重新计5轮。当前代码的周期判断本来就是`currentRound-lastProbeRound>=interval`，实现时只需把时间失衡条件并入同一入口。上一轮时间相对更新后的ng-set存在一轮滞后，但立即probe运行在新ng-set上；若上一轮平衡而本轮更新后才失衡，最多承受一轮后即可在下一轮修正。周期probe继续用于发现未越过阈值的渐进漂移。
+
+为保证可恢复，保留现有queue及其他score模式，不删除旧路径；新增独立time score和DSSR自适应重探开关，A/B时只切换这两个参数。初始Tmid、候选数、15%移动、方向反转bracket、node级bestExact复用和稳定冻结均不修改。验证先固定困难repair side比较queue与time，再跑普通exact，要求最终列/最小reduced cost/bound一致，并比较probe开销、完整F/B时间、DSSR轮数和exact总时间。实现完成后单独提交，关闭新开关即可恢复当前行为。
+#### 271.4 DSSR 每轮时间反馈采用5%直接微调
+
+动态失衡处理进一步简化为“每轮小步移动、周期probe校准”。上一轮完整exact若forward/backward时间比超过阈值，下一轮不立即运行多候选probe，而是直接按有效宽度`pricingHorizon-midpointLeftBound`移动5%：backward更慢则提高Tmid，forward更慢则降低Tmid，并clamp到合法区间；若时间比在阈值内则原样复用。直接5%微调不更新`lastProbeRound`，因此不会无限推迟周期校准；距离上一次实际probe满5轮时仍运行time-score probe，若上一轮仍失衡，可把同方向5%位置作为该次probe seed。初始Tmid不变。
+
+实现应保留旧label反馈路径以便恢复，新增time-feedback开关和时间失衡阈值，复用现有`bidirectionalMidpointProbeDssrSeedMoveRatio=0.05`。`prepareMidpointWithinDssr()`的优先级为：首次probe；周期到期则实际probe；未到期但上一轮时间失衡则直接5%微调并重建half-domain；否则复用。time probe score仍使用有方向的forward/backward elapsed，候选按接近1选择。验证重点增加Tmid逐轮轨迹，检查是否在阈值边缘来回5%摆动；第一版阈值建议2.0，先固定困难repair side A/B后再决定默认值。
+#### 271.5 time probe 记录、周期seed与移动步长细化
+
+每次probe的全部候选只写入当次`midpointProbeSummary`，不会逐候选更新node历史。probe最终选中的Tmid完成正式exact后，才由`MidpointProbeNodeReuse.considerExact()`按完整exact总时间更新`bestExactTmid`；若时间接近再比较完整label平衡。因此新增time score不会把浅层候选耗时直接当成历史最好证据。
+
+不把job window头尾作为唯一候选。Tmid经过窗口端点时可进入任务集合会离散变化，但即使集合不变，half-domain裁剪后的PWLF形状、label扩展深度、dominance状态和join分布仍会随Tmid连续变化；宽window时端点更几乎没有区分度。端点最多可作为后续粗锚点，本轮不加入，保持当前连续候选移动。
+
+周期probe的reference应使用上一轮实际采用的当前Tmid，即`ngDssrReusableTmid`。如果前几轮已经因时间失衡做过5%直接微调，那么周期到期时直接从已调整后的当前Tmid开始probe，不再额外叠加一次5%，避免重复过冲。若周期到期前从未微调，也仍从上次probe选中的Tmid开始。动态微调步长继续定义为有效跨度`(pricingHorizon-midpointLeftBound)*0.05`，不改为`currentTmid*0.15`：后者依赖绝对时间原点，Tmid较大时步长过大，并与现有probe候选的15%乘法搜索重复。15%只保留在真正probe内部用于探索候选，DSSR逐轮反馈使用5%跨度做保守校正。
+
+实现时需要：为`MidpointProbeResult`增加time模式的有方向ratio和对称排序；在`prepareMidpointWithinDssr()`增加“首次probe、距上次实际probe满interval、未到期但上一轮完整时间失衡、直接复用”四分支；直接微调只更新Tmid、重建half-domain并写`timeNudge`日志，不修改`lastProbeRound`；周期probe使用当前Tmid作为reference并在完成后更新lastProbeRound。旧queue/label路径和独立开关保留，便于一键恢复。
+#### 271.6 DSSR逐轮记录与node历史best的当前口径问题
+
+代码复核确认两层记录不能混为一谈。`midpointByDssrRound`在每轮结束时记录独立的round delta：`r/t/probe-or-reuse/labels/F-B ms`；同一个Tmid被多轮复用时，每轮仍各有一条记录，因此可以直接观察ng-set更新后同一切分的工作量变化。用于下一轮动态5%反馈的`ngDssrPreviousRoundForwardMillis/BackwardMillis`也是当前轮独立时间，口径正确。
+
+但node级`bestExactTmid`当前在每个DSSR relaxed round后都调用`updateMidpointProbeReuseAfterExact()`，传入的`exactTotalNanos`及F/B phase时间是从本次exact第1轮累计到当前轮的值，而不是本轮delta。同一Tmid连续复用时没有按Tmid聚合或平均；后续轮次只是以更大的累计时间再次参与best比较，因此通常天然输给第1轮。若中途Tmid改变，后面的新Tmid也会背负前面轮次时间，比较不公平。这说明node历史best目前主要被首轮样本主导。
+
+计划修改时应保留逐轮diagnostic和上一轮delta反馈，但把node历史best限定为每次独立exact的第1个DSSR round，只用第1轮自身总时间、F/B时间和labels更新。下一次独立exact也是从初始ng-set/当前dual开始，第1轮之间可比性最好；后续DSSR轮的ng-set不断增强，不适合作为同一node跨pricing调用的历史起点样本。同一个Tmid在DSSR多轮复用只保留逐轮日志和动态控制输入，不重复写node历史best。

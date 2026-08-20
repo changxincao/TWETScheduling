@@ -507,3 +507,18 @@ Phase-I 目标为 0 只证明当前 restricted master 已存在不依赖人工�
 本次锁定 `wet060_001_2m` 的 parent node 2、右支 `arc(36,24)`。四轮共同输入为 incumbent `36882`、父 RMP `5679` 列（hash `bd17752bb6bc4c0e`）、lightweight child seed `2952` 列（hash `9af2ef408e9c779b`），无外包列和 SRI cut。旧 repair 两轮分别耗时 `17.220s/16.208s`，平均 `16.714s`；Phase-I 两轮分别为 `2.985s/2.637s`，平均 `2.811s`，固定侧直接加速约 `5.94x`。差异几乎全部来自 pricing：旧方案平均 `14.939s`，每轮执行一次启发式 `FindFeasible` 加一次 ng-DSSR exact `FindFeasible`；Phase-I 平均 `0.090s`，只执行一次启发式并加入 300 列。Phase-I 的 master 时间反而由 `1.696s` 增至 `2.615s`，说明收益不是少解 LP，而是避开了困难 exact repair。
 
 两种方案最终都满足 `noSlack=true`、竞争列 residual 为 0，且均恢复真实目标得到可行 trial RMP。旧方案最终 restricted seed 为 `3132` 列、trial bound `37347.203349`；Phase-I 为 `2431` 列、trial bound `37526.838341`。这个 `179.635` 的差异来自 repair 生成列和二次筛选后 seed 不同：它们都是受限 RMP 的 strong-trial 评分，不是完整 child exact bound，不能据此宣称 Phase-I 的 relaxation 更强，也不能要求两者相同。当前能够严格确认的是：在完全固定输入的这个困难右支上，Phase-I 用一次启发式恢复可行，避免一次约 15 秒的 ng-DSSR exact repair，直接 repair 成本显著下降。实验原始记录见 `test-results/bpc/20260721-60-2-fixed-side-repair-replay-abba-v1/fixed-side-replay.log`。
+
+### 2026-07-21：60-2 旧 repair 与纯 Phase-I 完整并行对照
+
+使用当前最新 class 对 `wet060_001_2m` 同时启动旧有限 M repair 与纯 Phase-I repair。两边采用完全相同的 no-SRI ng-DSSR 配置：K20、candidate1000、source-aware dominance、join prefilter、completion bound、midpoint 复用、strong branching 开启、phase2 关闭、RMIH 关闭、time-indexed root preprocessing/pre-heuristic 关闭、ALNS 60 秒且 `initialHeuristicColumnHistoryMode=best`；仅 `strongBranchingPhaseOneRepair` 不同。两边 root 轨迹严格一致，均得到 incumbent 37112、root bound 36739.428063、pool 19317，root 时间为 661.453s/659.111s，说明初始列和公共流程口径一致。
+
+Phase-I 在 2159.009s 内处理13个节点并得到 `obj=bound=36803, valid=true`。旧 repair 在3600.447s达到时间上限，只处理8个节点，incumbent仍为37112、bound为36784.454545、gap为0.8826%。旧方案的决定性瓶颈是 `GCNGBBStyleNgDssrPricing[FindFeasible]`：14次共1695.168s，平均121.083s；普通 exact 为763.380s/349次。Phase-I 的28个 repair side只执行31次启发式 `FindFeasible`，合计1.517s，没有调用 exact `FindFeasible`；Phase-I LP恢复成本为 `phase_one_initial 11.533s + after_pricing 0.183s + true_rmp 13.784s`。两边 strong trial LP接近，旧方案267.538s/280次，Phase-I 254.832s/240次。
+
+差异从node 2开始出现。旧方案node 2耗时773.468s，其中exact 701.451s；Phase-I为97.542s，exact 25.625s。node 3旧方案耗时1025.420s、exact 840.631s；Phase-I为379.514s、exact 205.312s。旧 repair 的困难 side会在有限 M/真实目标 repair dual 下产生大量负非基本路径，DSSR需要数十轮逐步收紧，例如node 3一次 exact `FindFeasible` 迭代76轮并耗时83.940s。纯Phase-I把定价目标集中在消除人工项，启发式即可归零，避免这些 exact repair 长尾。完整求解还会因repair seed和trial评分不同而形成不同搜索树，因此总时间差不能全部视为同轨迹直接成本；但1695.168s对0的 exact repair差异，以及完全一致的root，已经直接说明Phase-I解决了当前60-2的主要repair瓶颈。实验目录为 `test-results/bpc/20260721-60-2-repair-parallel-v1`，旧方案最终状态为TIME_LIMIT，Phase-I为FINISHED。
+
+### 2026-07-21：旧 VRP repair slack 系数核对
+
+旧 VRP 的分支 repair 在 `BPC/LP/LP.java::AddSlack()` 中，无论左右分支都把人工 slack 的目标系数设为 `data.m_BigNumber`；实际 BPC 使用的 `Common/Data.java` 将其定义为 `100000000`，即 1e8。旧 LP 中另有初值 1e5、步长 1 的 customer coverage/stabilization slack，那是另一套稳定化变量，不能与分支 repair slack 混为一谈。
+### 2026-07-21：旧 VRP 大系数 repair dual 的影响
+
+旧 VRP 分支 repair 将人工 slack 的目标系数直接设为 1e8。只要 slack 仍为正或其列仍参与当前基，分支行 dual 就可能受到该大系数主导，pricing 的 reduced cost 会优先反映“替代人工 slack”的价值，而不是原始距离目标下的列质量；这与当前有限 M repair 中 completion bound 变弱、DSSR 标签和轮数膨胀是同类现象，而且 1e8 的尺度更极端。该现象不意味着修复不正确：大系数的目的正是优先恢复可行性；问题在于用普通最优性 pricing 完成 Phase-I 工作，可能产生较差的 dual、弱 completion bound 和大量只对消除 slack 有用的列。slack 归零后重新求解真实目标 RMP，dual 才回到正常定价口径。因此旧 VRP 的 repair 很可能也存在明显的 pricing 长尾，只是其离散成本 labeling、实例规模和启发式补列能力可能掩盖了这部分开销。

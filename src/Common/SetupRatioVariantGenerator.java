@@ -222,14 +222,17 @@ public final class SetupRatioVariantGenerator {
         return (int) Math.rint(value);
     }
 
-    private static void enforceDirectedTriangleInequality(int[][] setup) {
+    /**
+     * 0 是机器初始状态而不是可中转任务；闭包只通过真实任务传播。
+     */
+    static void enforceDirectedTriangleInequality(int[][] setup) {
         int size = setup.length;
-        for (int k = 0; k < size; k++) {
+        for (int k = 1; k < size; k++) {
             for (int i = 0; i < size; i++) {
                 if (i == k) {
                     continue;
                 }
-                for (int j = 0; j < size; j++) {
+                for (int j = 1; j < size; j++) {
                     if (i == j || j == k) {
                         continue;
                     }

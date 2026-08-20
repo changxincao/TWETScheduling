@@ -132,18 +132,17 @@ public final class ETConverter {
     }
 
     /**
-     * 2026-06-14: pricing/启发式会直接使用 setup 三角不等式做安全剪枝。
-     * 因此生成数据时直接对包含虚拟起点 0 在内的完整 setup 图做 Floyd 闭包，
-     * 避免后续临时算例只局部修正、仍残留经 0 中转的三角违例。
+     * 2026-08-20: 0 只表示机器初始状态，不能作为两个真实任务之间的中转点。
+     * 因此 Floyd 只允许真实任务作为中间点，同时保留 source-to-job 的三角不等式。
      */
-    private static void enforceDirectedTriangleInequality(int[][] setup) {
+    static void enforceDirectedTriangleInequality(int[][] setup) {
         int size = setup.length;
-        for (int k = 0; k < size; k++) {
+        for (int k = 1; k < size; k++) {
             for (int i = 0; i < size; i++) {
                 if (i == k) {
                     continue;
                 }
-                for (int j = 0; j < size; j++) {
+                for (int j = 1; j < size; j++) {
                     if (i == j || j == k) {
                         continue;
                     }

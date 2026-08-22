@@ -1018,9 +1018,13 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			writeRemainingVertexWindows(cleanupDistancesCurrent);
 			int candidates = processCandidates + idleCandidates + endCandidates;
 			int fixed = processFixed + idleFixed + endFixed + cleanupFixed;
-			node.mergeTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc, timeArcPairWidth, horizon);
+			int nodeTimeArcFixedBefore = node.countTimeIndexedPricingOnlyForbiddenArcs();
+			int nodeTimeArcFixedAfter = node.mergeTimeIndexedPricingOnlyArcSet(
+					localFixedTimeIndexedArc, timeArcPairWidth, horizon);
+			int nodeTimeArcNewlyFixed = nodeTimeArcFixedAfter - nodeTimeArcFixedBefore;
 			return new ArcFixingResult(true, candidates, fixed, processFixed, idleFixed, endFixed, cleanupFixed,
-					cleanupRoundTrace.toString(), unavailable, gap, false, System.nanoTime() - start,
+					cleanupRoundTrace.toString(), unavailable, nodeTimeArcFixedBefore, nodeTimeArcNewlyFixed,
+					nodeTimeArcFixedAfter, gap, false, System.nanoTime() - start,
 					"paper time-indexed reduced-cost arc fixing");
 		}
 
@@ -1276,13 +1280,17 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final int cleanupFixed;
 		private final String cleanupRounds;
 		private final int unavailable;
+		private final int nodeTimeArcFixedBefore;
+		private final int nodeTimeArcNewlyFixed;
+		private final int nodeTimeArcFixedAfter;
 		private final double gap;
 		private final boolean reusedForwardDistances;
 		private final long totalNanos;
 		private final String message;
 
 		private ArcFixingResult(boolean available, int candidates, int fixed, int processFixed, int idleFixed,
-				int endFixed, int cleanupFixed, String cleanupRounds, int unavailable, double gap,
+				int endFixed, int cleanupFixed, String cleanupRounds, int unavailable,
+				int nodeTimeArcFixedBefore, int nodeTimeArcNewlyFixed, int nodeTimeArcFixedAfter, double gap,
 				boolean reusedForwardDistances, long totalNanos, String message) {
 			this.available = available;
 			this.candidates = candidates;
@@ -1293,6 +1301,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			this.cleanupFixed = cleanupFixed;
 			this.cleanupRounds = cleanupRounds;
 			this.unavailable = unavailable;
+			this.nodeTimeArcFixedBefore = nodeTimeArcFixedBefore;
+			this.nodeTimeArcNewlyFixed = nodeTimeArcNewlyFixed;
+			this.nodeTimeArcFixedAfter = nodeTimeArcFixedAfter;
 			this.gap = gap;
 			this.reusedForwardDistances = reusedForwardDistances;
 			this.totalNanos = totalNanos;
@@ -1300,7 +1311,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		static ArcFixingResult skipped(String message) {
-			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, null, 0, Double.NaN, false, 0L, message);
+			return new ArcFixingResult(false, 0, 0, 0, 0, 0, 0, null, 0,
+					0, 0, 0, Double.NaN, false, 0L, message);
 		}
 
 		public boolean isAvailable() {
@@ -1335,6 +1347,18 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			return unavailable;
 		}
 
+		public int getNodeTimeArcFixedBefore() {
+			return nodeTimeArcFixedBefore;
+		}
+
+		public int getNodeTimeArcNewlyFixed() {
+			return nodeTimeArcNewlyFixed;
+		}
+
+		public int getNodeTimeArcFixedAfter() {
+			return nodeTimeArcFixedAfter;
+		}
+
 		public double getGap() {
 			return gap;
 		}
@@ -1352,6 +1376,9 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					+ ", processFixed=" + processFixed + ", idleFixed=" + idleFixed + ", endFixed=" + endFixed
 					+ ", cleanupFixed=" + cleanupFixed
 					+ (cleanupRounds == null ? "" : ", cleanupRounds=" + cleanupRounds)
+					+ ", nodeTimeArcFixedBefore=" + nodeTimeArcFixedBefore
+					+ ", nodeTimeArcNewlyFixed=" + nodeTimeArcNewlyFixed
+					+ ", nodeTimeArcFixedAfter=" + nodeTimeArcFixedAfter
 					+ ", reusedForward=" + reusedForwardDistances
 					+ ", gap=" + gap + ", ms="
 					+ String.format("%.3f", totalNanos / 1_000_000.0);

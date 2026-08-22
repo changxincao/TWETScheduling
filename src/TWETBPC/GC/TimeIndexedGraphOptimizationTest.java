@@ -155,7 +155,11 @@ public final class TimeIndexedGraphOptimizationTest {
 		sparseExpected.forbidTimeIndexedPricingOnlyArc(1, 2, 0);
 		sparseExpected.forbidTimeIndexedPricingOnlyArc(2, 3, 4);
 		sparseExpected.forbidTimeIndexedPricingOnlyArc(4, 0, 6);
-		sparseActual.mergeTimeIndexedPricingOnlyArcSet(sparseAdditions, pairWidth, 6);
+		int sparseBefore = sparseActual.countTimeIndexedPricingOnlyForbiddenArcs();
+		int sparseAfter = sparseActual.mergeTimeIndexedPricingOnlyArcSet(sparseAdditions, pairWidth, 6);
+		if (sparseAfter - sparseBefore != 2) {
+			throw new AssertionError("sparse merge did not report the two unique new forbidden arcs");
+		}
 		assertNodesHaveSameTimeArcs(sparseExpected, sparseActual, data.n + 2, 7);
 
 		int storedHorizon = 5;
@@ -175,7 +179,11 @@ public final class TimeIndexedGraphOptimizationTest {
 		denseExpected.forbidTimeIndexedPricingOnlyArc(2, 2, 2);
 		denseExpected.forbidTimeIndexedPricingOnlyArc(1, 2, 1);
 		denseExpected.forbidTimeIndexedPricingOnlyArc(3, 4, 7);
-		denseActual.mergeTimeIndexedPricingOnlyArcSet(denseAdditions, pairWidth, 7);
+		int denseBefore = denseActual.countTimeIndexedPricingOnlyForbiddenArcs();
+		int denseAfter = denseActual.mergeTimeIndexedPricingOnlyArcSet(denseAdditions, pairWidth, 7);
+		if (denseAfter - denseBefore != 2) {
+			throw new AssertionError("dense merge did not report the two unique new forbidden arcs");
+		}
 		assertNodesHaveSameTimeArcs(denseExpected, denseActual, data.n + 2, 8);
 
 		Random random = new Random(20260716L);

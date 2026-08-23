@@ -37,7 +37,7 @@ public final class FormalSetupAuditRunner {
 		Map<String, int[]> familyAssignments = readFamilyAssignments(setupMetadata);
 		List<String> indexLines = Files.readAllLines(index, StandardCharsets.UTF_8);
 		ArrayList<String> output = new ArrayList<String>();
-		output.add("taskSetId\tsetupType\tscaleLevel\tscale\tmachines\tinstance\ttargetMean\tactualMean\t"
+		output.add("taskSetId\tsetupType\tscaleLevel\tnominalScale\tmachines\tinstance\ttargetMean\tactualMean\t"
 				+ "meanError\tcap\tmaximum\ttriangleViolations\tfloydChangedArcs\twithinMean\tbetweenMean\tbodySha256");
 		HashMap<String, String> bodyHashByGroup = new HashMap<String, String>();
 		double maxError = 0.0;
@@ -52,14 +52,14 @@ public final class FormalSetupAuditRunner {
 			int machines = Integer.parseInt(fields[3]);
 			String setupType = fields[4];
 			String scaleLevel = fields[5];
-			int scale = Integer.parseInt(fields[6]);
+			int nominalScale = Integer.parseInt(fields[6]);
 			Path indexedPath = Path.of(fields[7]);
 			Path path = indexedPath.isAbsolute() ? indexedPath : generatedRoot.resolve(indexedPath).normalize();
 			ParsedInstance instance = readInstance(path, size);
-			long baseProcessingTotal = baseProcessingTotal(instance.processing(), size, scale);
-			double averageProcessing = (double) Math.multiplyExact(baseProcessingTotal, scale) / size;
+			long processingTotal = processingTotal(instance.processing(), size);
+			double averageProcessing = (double) processingTotal / size;
 			double targetMean = FormalExperimentDesign.SETUP_MEAN_RATIO * averageProcessing;
-			int cap = Math.multiplyExact(Math.toIntExact(baseProcessingTotal / size), scale);
+			int cap = Math.max(1, (int) Math.floor(averageProcessing));
 			int[] family = "family".equals(setupType) ? familyAssignments.get(taskSetId) : null;
 			if ("family".equals(setupType) && family == null) {
 				throw new IOException("Missing family assignment for " + taskSetId);
@@ -68,7 +68,7 @@ public final class FormalSetupAuditRunner {
 			Report report = validator.audit(instance.setup(), targetMean, cap, family);
 			validator.requirePreset(report, "family".equals(setupType));
 			String bodyHash = hashBody(path);
-			String group = taskSetId + "/" + setupType + "/" + scaleLevel + "/g" + scale;
+			String group = taskSetId + "/" + setupType + "/" + scaleLevel + "/n" + nominalScale;
 			String previous = bodyHashByGroup.putIfAbsent(group, bodyHash);
 			if (previous != null && !previous.equals(bodyHash)) {
 				throw new IllegalStateException("Machine copies differ for " + group + ": " + path);
@@ -76,7 +76,7 @@ public final class FormalSetupAuditRunner {
 			maxError = Math.max(maxError, Math.abs(report.meanError()));
 			output.add(String.format(Locale.ROOT,
 					"%s\t%s\t%s\t%d\t%d\t%s\t%.9f\t%.9f\t%.9f\t%d\t%d\t%d\t%d\t%.9f\t%.9f\t%s",
-					taskSetId, setupType, scaleLevel, scale, machines,
+					taskSetId, setupType, scaleLevel, nominalScale, machines,
 					portable(absoluteSuiteRoot.relativize(path.toAbsolutePath().normalize())), report.targetMean(),
 					report.actualMean(), report.meanError(), report.cap(), report.maximum(),
 					report.triangleViolations(), report.floydChangedArcs(), report.withinMean(),
@@ -151,13 +151,10 @@ public final class FormalSetupAuditRunner {
 		return value.toString();
 	}
 
-	private static long baseProcessingTotal(int[] values, int size, int scale) throws IOException {
+	private static long processingTotal(int[] values, int size) {
 		long total = 0L;
 		for (int job = 1; job <= size; job++) {
-			if (values[job] % scale != 0) {
-				throw new IOException("Processing time is not divisible by scale " + scale + ": " + values[job]);
-			}
-			total += values[job] / scale;
+			total += values[job];
 		}
 		return total;
 	}

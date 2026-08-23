@@ -14,6 +14,7 @@ import Common.formal.FormalExperimentDataGenerator;
 import Common.formal.FormalExperimentDataGenerator.GeneratedInstance;
 import Common.formal.FormalExperimentDesign;
 import Common.formal.FormalSetupAuditRunner;
+import Common.formal.FormalTimeScaleAuditRunner;
 
 /**
  * 生成论文实验数据引用和三份正式求解 manifest。
@@ -41,6 +42,7 @@ public final class FormalExperimentSuiteGenerator {
 				new FormalExperimentDataGenerator(options.dataRoot, options.casesPerSize)
 						.generate(options.outputRoot.resolve("instances"), options.sizes);
 		FormalSetupAuditRunner.audit(options.outputRoot);
+		FormalTimeScaleAuditRunner.audit(options.outputRoot);
 		List<InstanceRef> instances = generated.instances().stream().map(InstanceRef::new).toList();
 		writeInstanceManifest(options, instances);
 		writeSolveManifest(options, instances);
@@ -51,11 +53,11 @@ public final class FormalExperimentSuiteGenerator {
 
 	private static void writeInstanceManifest(Options options, List<InstanceRef> instances) throws IOException {
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("taskSetId\tsize\tcaseIndex\tmachines\tsetupType\tscaleLevel\tscale\tinstance\taverageProcessing");
+		lines.add("taskSetId\tsize\tcaseIndex\tmachines\tsetupType\tscaleLevel\tnominalScale\tinstance\taverageProcessing");
 		for (InstanceRef instance : instances) {
 			lines.add(String.format(Locale.US, "%s\t%d\t%d\t%d\t%s\t%s\t%d\t%s\t%.6f",
 					instance.taskSetId, instance.size, instance.caseIndex, instance.machines,
-					instance.setupType, instance.scaleLevel, instance.scale, portable(instance.path),
+					instance.setupType, instance.scaleLevel, instance.nominalScale, portable(instance.path),
 					instance.averageProcessing));
 		}
 		Files.write(options.outputRoot.resolve("instances.tsv"), lines, StandardCharsets.UTF_8);
@@ -79,7 +81,7 @@ public final class FormalExperimentSuiteGenerator {
 				"discountModel=" + options.discountModel), StandardCharsets.UTF_8);
 		for (InstanceRef instance : instances) {
 			for (int baseHalfWidth : WINDOW_HALF_WIDTHS) {
-				double halfWidth = (double) baseHalfWidth * instance.scale;
+				double halfWidth = (double) baseHalfWidth * instance.nominalScale;
 				String scenario = scenarioId(instance, halfWidth, SETUP_COST_COEFFICIENT);
 				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
 				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
@@ -95,7 +97,7 @@ public final class FormalExperimentSuiteGenerator {
 
 		// 外包性能使用原时间尺度，完整交叉窗口、价格和两种 BPC formulation。
 		for (InstanceRef instance : instances) {
-			if (instance.scale != 1) {
+			if (!instance.scaleLevel.equals("base")) {
 				continue;
 			}
 			for (int halfWidth : WINDOW_HALF_WIDTHS) {
@@ -118,7 +120,7 @@ public final class FormalExperimentSuiteGenerator {
 
 		// 实验三只做结果后处理；实验四仅补 n=50、中价、无折扣的缺失求解。
 		for (InstanceRef instance : instances) {
-			if (instance.size != 50 || instance.scale != 1) {
+			if (instance.size != 50 || !instance.scaleLevel.equals("base")) {
 				continue;
 			}
 			for (int halfWidth : WINDOW_HALF_WIDTHS) {
@@ -256,7 +258,7 @@ public final class FormalExperimentSuiteGenerator {
 			throws IOException {
 		LinkedHashMap<String, Double> totals = new LinkedHashMap<String, Double>();
 		for (InstanceRef instance : instances) {
-			if (instance.scale != 1) {
+			if (!instance.scaleLevel.equals("base")) {
 				continue;
 			}
 			if (requiredSize > 0 && instance.size != requiredSize) {
@@ -288,7 +290,7 @@ public final class FormalExperimentSuiteGenerator {
 		int originalScaleInstanceCount = 0;
 		int n50OriginalScaleInstanceCount = 0;
 		for (InstanceRef instance : instances) {
-			if (instance.scale == 1) {
+			if (instance.scaleLevel.equals("base")) {
 				originalScaleInstanceCount++;
 				if (instance.size == 50) {
 					n50OriginalScaleInstanceCount++;
@@ -312,10 +314,10 @@ public final class FormalExperimentSuiteGenerator {
 		lines.add("执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。");
 		lines.add("也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。");
 		lines.add("");
-		lines.add("`pricing-comparison` 使用 W0/W100/W300 和每个任务集合预先生成的 base/medium/high 三个尺度比较三种 BPC；processing、due-window center 和 setup time 已写入独立 `.dat`，runner 不接收时间倍率。`outsourcing-performance` 在原时间尺度完整比较三档价格和 columns/masterVariables。`outsourcing-discount` 只补 n=50、中价、无折扣任务。实验三不生成求解任务。");
+		lines.add("`pricing-comparison` 使用 W0/W100/W300 和每个任务集合预先生成的 base/medium/high 三个尺度比较三种 BPC。medium/high 对每个任务使用配对的异质倍率，W 按名义倍率 10/20 放大；setup 按实际总 processing workload 比例整体缩放。所有数据已写入独立 `.dat`，runner 不接收时间倍率。`outsourcing-performance` 在原时间尺度完整比较三档价格和 columns/masterVariables。`outsourcing-discount` 只补 n=50、中价、无折扣任务。实验三不生成求解任务。");
 		lines.add("");
 		lines.add("已准备落盘实例记录数：" + instances.size() + "；每个规模固定取 "
-				+ options.casesPerSize + " 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率和 setup 审计见 `instances/` 下的 metadata。");
+				+ options.casesPerSize + " 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率、逐任务放大和 setup 审计见 `instances/` 下的 metadata 与两个 `post-generation-*-audit.tsv`。");
 		lines.add("");
 		lines.add("总 manifest 包含 " + seedTaskCount + " 个共享 seed 任务和 " + solveTaskCount
 				+ " 个求解任务。其中 pricing comparison=" + pricingTaskCount
@@ -329,7 +331,7 @@ public final class FormalExperimentSuiteGenerator {
 
 	private static String scenarioId(InstanceRef instance, double halfWidth, double setupCost) {
 		return instance.taskSetId + "-m" + instance.machines + "-" + instance.setupType
-				+ "-" + instance.scaleLevel + "-g" + instance.scale
+				+ "-" + instance.scaleLevel + "-n" + instance.nominalScale
 				+ "-w" + compact(halfWidth) + "-sc" + compact(setupCost);
 	}
 
@@ -378,7 +380,7 @@ public final class FormalExperimentSuiteGenerator {
 		private final int machines;
 		private final String setupType;
 		private final String scaleLevel;
-		private final int scale;
+		private final int nominalScale;
 		private final Path path;
 		private final double averageProcessing;
 
@@ -389,7 +391,7 @@ public final class FormalExperimentSuiteGenerator {
 			machines = generated.machines();
 			setupType = generated.setupType();
 			scaleLevel = generated.scaleLevel();
-			scale = generated.scale();
+			nominalScale = generated.nominalScale();
 			path = generated.path();
 			averageProcessing = generated.averageProcessing();
 		}

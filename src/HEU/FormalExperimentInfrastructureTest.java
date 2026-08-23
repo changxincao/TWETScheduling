@@ -7,7 +7,9 @@ import java.nio.file.attribute.DosFileAttributeView;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import Common.FormalExperimentSuiteGenerator;
 import TWETBPC.TWETBPCConfig;
@@ -67,6 +69,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(!manifest.contains("--timeScale="), "time scale must be materialized in instance files");
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");
+		assertPricingWindowMatrix(suite.resolve("manifests/pricing-comparison.tsv"));
 		assertTrue(Files.exists(suite.resolve("manifests/outsourcing-performance.tsv")),
 				"missing outsourcing performance manifest");
 		assertTrue(Files.exists(suite.resolve("manifests/outsourcing-discount.tsv")),
@@ -92,6 +95,8 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(experimentProperties, "outsourcingBreakpointReferenceTotal=3050", "breakpoint metadata");
 		assertTrue(Files.exists(suite.resolve("instances/post-generation-setup-audit.tsv")),
 				"missing independent post-generation setup audit");
+		assertTrue(Files.exists(suite.resolve("instances/post-generation-time-scale-audit.tsv")),
+				"missing independent post-generation time-scale audit");
 		assertFamilyMetricSetup(suite);
 
 		FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
@@ -110,8 +115,12 @@ public final class FormalExperimentInfrastructureTest {
 		FormalExperimentDataFactory.Scenario baseScenario = new FormalExperimentDataFactory.Scenario();
 		var baseData = FormalExperimentDataFactory.load(baseRow.path, baseScenario);
 		assertTrue(data.n == 20 && data.m == 2, "derived instance dimensions");
-		assertTrue(data.p[1] == scaledRow.scale * baseData.p[1], "time scale");
-		assertTrue(data.s[0][1] == scaledRow.scale * baseData.s[0][1], "materialized setup scale");
+		int firstJobMultiplier = readJobMultiplier(suite, "n020-set01", "medium", 1);
+		assertTrue(scaledRow.nominalScale == 10, "medium nominal scale");
+		assertTrue(data.p[1] == firstJobMultiplier * baseData.p[1], "job-specific time scale");
+		double scaledCenter = 0.5 * (data.d_e[1] + data.d_l[1]);
+		double baseCenter = 0.5 * (baseData.d_e[1] + baseData.d_l[1]);
+		assertTrue(scaledCenter == firstJobMultiplier * baseCenter, "job-specific due-center scale");
 		assertTrue(data.d_l[1] - data.d_e[1] == 40.0, "due-window width");
 		assertTrue(data.outsourcingCost[1] == data.p[1] * Math.max(data.w_e[1], data.w_t[1]),
 				"outsourcing baseline");
@@ -136,6 +145,72 @@ public final class FormalExperimentInfrastructureTest {
 		assertLegacySnapshotCompatibility(root);
 		assertSeedWinnerSelection();
 		System.out.println("FormalExperimentInfrastructureTest passed");
+	}
+
+	private static void assertPricingWindowMatrix(Path path) throws Exception {
+		Map<String, Map<Double, Integer>> counts = new HashMap<String, Map<Double, Integer>>();
+		for (String level : List.of("base", "medium", "high")) {
+			counts.put(level, new HashMap<Double, Integer>());
+		}
+		List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+		for (int row = 1; row < lines.size(); row++) {
+			String[] fields = lines.get(row).split("\\t", -1);
+			if (!fields[0].startsWith("pricing-")) {
+				continue;
+			}
+			String level;
+			if (fields[0].contains("-base-n1-")) {
+				level = "base";
+			} else if (fields[0].contains("-medium-n10-")) {
+				level = "medium";
+			} else if (fields[0].contains("-high-n20-")) {
+				level = "high";
+			} else {
+				throw new AssertionError("Unknown pricing scale in " + fields[0]);
+			}
+			double halfWidth = Double.parseDouble(argumentValue(fields[2], "dueWindowHalfWidth"));
+			counts.get(level).merge(Double.valueOf(halfWidth), Integer.valueOf(1), Integer::sum);
+		}
+		assertWindowCounts(counts.get("base"), new double[] { 0.0, 100.0, 300.0 });
+		assertWindowCounts(counts.get("medium"), new double[] { 0.0, 1000.0, 3000.0 });
+		assertWindowCounts(counts.get("high"), new double[] { 0.0, 2000.0, 6000.0 });
+	}
+
+	private static void assertWindowCounts(Map<Double, Integer> actual, double[] expected) {
+		assertTrue(actual.size() == expected.length, "pricing window level count");
+		for (double halfWidth : expected) {
+			assertTrue(actual.getOrDefault(Double.valueOf(halfWidth), Integer.valueOf(0)).intValue() == 36,
+					"pricing window row count for W=" + halfWidth);
+		}
+	}
+
+	private static String argumentValue(String arguments, String name) {
+		String marker = "--" + name + "=\"";
+		int start = arguments.indexOf(marker);
+		if (start < 0) {
+			throw new AssertionError("Missing argument " + name);
+		}
+		start += marker.length();
+		int end = arguments.indexOf('"', start);
+		if (end < 0) {
+			throw new AssertionError("Unterminated argument " + name);
+		}
+		return arguments.substring(start, end);
+	}
+
+	private static int readJobMultiplier(Path suite, String taskSetId, String scaleLevel, int job)
+			throws Exception {
+		List<String> lines = Files.readAllLines(suite.resolve("instances/scale-selection.tsv"),
+				StandardCharsets.UTF_8);
+		for (int row = 1; row < lines.size(); row++) {
+			String[] fields = lines.get(row).split("\\t", -1);
+			if (!fields[0].equals(taskSetId) || !fields[1].equals(scaleLevel)) {
+				continue;
+			}
+			String[] multipliers = fields[8].split(",");
+			return Integer.parseInt(multipliers[job - 1]);
+		}
+		throw new AssertionError("Missing scale vector " + taskSetId + "/" + scaleLevel);
 	}
 
 	private static void assertFixedOutsourcingRestoration(Basic.Data data, FixedInitialColumnSeed seed) {
@@ -286,6 +361,6 @@ public final class FormalExperimentInfrastructureTest {
 		}
 	}
 
-	private record GeneratedIndexRow(Path path, int scale) {
+	private record GeneratedIndexRow(Path path, int nominalScale) {
 	}
 }

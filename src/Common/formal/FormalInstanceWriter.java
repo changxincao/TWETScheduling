@@ -16,7 +16,7 @@ public final class FormalInstanceWriter {
 	public Path write(Path outputRoot, FormalTaskSet taskSet, FormalSetupGenerator.Type setupType,
 			Scale scale, int machines, ScaledData data) throws IOException {
 		Path directory = outputRoot.resolve("data").resolve(taskSet.id())
-				.resolve(setupType.id()).resolve(scale.level() + "-g" + scale.multiplier());
+				.resolve(setupType.id()).resolve(scale.directoryName());
 		Files.createDirectories(directory);
 		Path output = directory.resolve("m" + machines + ".dat");
 		ArrayList<String> lines = new ArrayList<String>(2 * taskSet.size() + 3);

@@ -3,12 +3,20 @@ package HEU;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.DosFileAttributeView;
+import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
 import Common.FormalExperimentSuiteGenerator;
+import TWETBPC.TWETBPCConfig;
 import TWETBPC.GC.FixedInitialColumnSeed;
+import TWETBPC.GC.InitialColumnBuilder;
+import TWETBPC.GC.InitialColumnBundle;
 import TWETBPC.IO.FixedInitialSeedSnapshotIO;
+import TWETBPC.IO.HeuristicSeedProvider;
+import TWETBPC.LP.Pool;
 
 /** 不启动 CPLEX，验证正式数据派生、manifest 和固定初始列快照。 */
 public final class FormalExperimentInfrastructureTest {
@@ -68,12 +76,80 @@ public final class FormalExperimentInfrastructureTest {
 		assertLegacyTimeScaleRejected();
 
 		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(
-				List.of(List.of(1, 2), List.of(3)), List.of(List.of(1, 2), List.of(3)));
+				List.of(List.of(1, 2)), List.of(List.of(1, 2)), List.of(3));
 		Path snapshot = root.resolve("seed.snapshot");
 		FixedInitialSeedSnapshotIO.write(snapshot, "fixture", seed);
 		FixedInitialColumnSeed restored = FixedInitialSeedSnapshotIO.read(snapshot);
 		assertTrue(seed.getInitialSequences().equals(restored.getInitialSequences()), "seed round trip");
+		assertTrue(seed.getIncumbentOutsourcedJobs().equals(restored.getIncumbentOutsourcedJobs()),
+				"outsourced jobs round trip");
+		assertFixedOutsourcingRestoration(data, restored);
+		assertLegacySnapshotCompatibility(root);
+		assertSeedWinnerSelection();
 		System.out.println("FormalExperimentInfrastructureTest passed");
+	}
+
+	private static void assertFixedOutsourcingRestoration(Basic.Data data, FixedInitialColumnSeed seed) {
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.fixedInitialColumnSeed = seed;
+		Pool pool = new Pool(data);
+		InitialColumnBundle bundle = new InitialColumnBuilder(data, config, pool,
+				new HeuristicSeedProvider(data, config)).build();
+		assertTrue(bundle.getIncumbentOutsourcedJobs().equals(List.of(3)), "fixed outsourced jobs");
+		assertClose(bundle.getIncumbentOutsourcingBaseline(), data.outsourcingCost[3], "fixed outsourcing baseline");
+		assertClose(bundle.getIncumbentOutsourcingCost(), data.evaluateOutsourcingCost(data.outsourcingCost[3]),
+				"fixed outsourcing tariff");
+	}
+
+	private static void assertLegacySnapshotCompatibility(Path root) throws Exception {
+		List<List<Integer>> sequences = List.of(List.of(1, 2), List.of(3));
+		ArrayList<String> lines = new ArrayList<String>();
+		lines.add("TWET_FIXED_INITIAL_SEED_V1");
+		lines.add("reference\tlegacy");
+		lines.add("fingerprint\t" + legacyFingerprint(sequences, sequences));
+		lines.add("initial\t2");
+		lines.add("1,2");
+		lines.add("3");
+		lines.add("incumbent\t2");
+		lines.add("1,2");
+		lines.add("3");
+		Path path = root.resolve("legacy-seed.snapshot");
+		Files.write(path, lines, StandardCharsets.UTF_8);
+		FixedInitialColumnSeed restored = FixedInitialSeedSnapshotIO.read(path);
+		assertTrue(restored.getIncumbentOutsourcedJobs().isEmpty(), "legacy outsourced jobs");
+	}
+
+	private static String legacyFingerprint(List<List<Integer>> initial, List<List<Integer>> incumbent)
+			throws Exception {
+		MessageDigest digest = MessageDigest.getInstance("SHA-256");
+		updateLegacyFingerprint(digest, "initial", initial);
+		updateLegacyFingerprint(digest, "incumbent", incumbent);
+		StringBuilder value = new StringBuilder(64);
+		for (byte item : digest.digest()) {
+			value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));
+		}
+		return value.toString();
+	}
+
+	private static void updateLegacyFingerprint(MessageDigest digest, String name, List<List<Integer>> sequences) {
+		digest.update(name.getBytes(StandardCharsets.UTF_8));
+		for (List<Integer> sequence : sequences) {
+			digest.update((byte) '[');
+			for (int job : sequence) {
+				digest.update(Integer.toString(job).getBytes(StandardCharsets.UTF_8));
+				digest.update((byte) ',');
+			}
+			digest.update((byte) ']');
+		}
+	}
+
+	private static void assertSeedWinnerSelection() {
+		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(List.of(List.of(1)), List.of(List.of(1)));
+		FormalExperimentRunner.SeedRun selected = FormalExperimentRunner.selectBestSeedRun(List.of(
+				new FormalExperimentRunner.SeedRun(0, 1L, 2L, seed, 10.0, 1L, "a"),
+				new FormalExperimentRunner.SeedRun(1, 3L, 4L, seed, 8.0, 1L, "b"),
+				new FormalExperimentRunner.SeedRun(2, 5L, 6L, seed, 8.0, 1L, "c")));
+		assertTrue(selected.repetition == 1, "seed winner cost and tie break");
 	}
 
 	private static void assertLegacyTimeScaleRejected() throws Exception {
@@ -90,6 +166,10 @@ public final class FormalExperimentInfrastructureTest {
 			try (var paths = Files.walk(root)) {
 				paths.sorted(Comparator.reverseOrder()).forEach(path -> {
 					try {
+						DosFileAttributeView dos = Files.getFileAttributeView(path, DosFileAttributeView.class);
+						if (dos != null) {
+							dos.setReadOnly(false);
+						}
 						Files.delete(path);
 					} catch (Exception ex) {
 						throw new RuntimeException(ex);
@@ -109,6 +189,12 @@ public final class FormalExperimentInfrastructureTest {
 	private static void assertTrue(boolean condition, String message) {
 		if (!condition) {
 			throw new AssertionError(message);
+		}
+	}
+
+	private static void assertClose(double actual, double expected, String message) {
+		if (Math.abs(actual - expected) > 1e-8) {
+			throw new AssertionError(message + ": expected=" + expected + " actual=" + actual);
 		}
 	}
 }

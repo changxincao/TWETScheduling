@@ -132,6 +132,14 @@ public final class BPCResultWriterPostSolveCsvTest {
 				"cuts row should include multiplier and memory jobs");
 		assertContains(cutsCsv, "\"[1, 4294967298]\"", "cuts row should include memory arcs");
 
+		String outsourcingCsv = Files.readString(methodDir.resolve("demo-instance.outsourcing.csv"));
+		assertContains(outsourcingCsv, "outsourcedJobCount,outsourcedJobFraction,outsourcedProcessing",
+				"outsourcing aggregate fields missing");
+		assertContains(outsourcingCsv, "processingTime,weightedProcessing,dueWindowStart,dueWindowEnd",
+				"outsourcing job fields missing");
+		assertContains(outsourcingCsv, "JOB,3,1.000000,7.000000,7.000000",
+				"outsourced job detail mismatch");
+
 		config.writeDetailedBPCArtifacts = false;
 		Path compactSummary = BPCResultWriter.write(outputRoot, "postsolve-compact", "demo-instance", context,
 				result, validation, trace);

@@ -6,6 +6,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 import Basic.Data;
+import Common.Utility;
 import HEU.Solution;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.IO.HeuristicSeedProvider;
@@ -74,13 +75,50 @@ public class InitialColumnBuilder {
 	 * 固定 sequence 实验只在目标实例上重新评价成本，不再运行目标实例自己的 seed/ALNS。
 	 */
 	private InitialColumnBundle buildFixedSeed(FixedInitialColumnSeed fixedSeed) {
+		validateFixedIncumbent(fixedSeed);
 		LinkedHashSet<Integer> initialColumnIds = new LinkedHashSet<Integer>();
 		LinkedHashSet<Integer> incumbentColumnIds = new LinkedHashSet<Integer>();
 		HashMap<SequenceSignature, Integer> evaluatedSequenceIds = new HashMap<SequenceSignature, Integer>();
 		addSequences(fixedSeed.getInitialSequences(), initialColumnIds, null, evaluatedSequenceIds);
 		addSequences(fixedSeed.getIncumbentSequences(), initialColumnIds, incumbentColumnIds, evaluatedSequenceIds);
+		double outsourcingBaseline = 0.0;
+		for (int job : fixedSeed.getIncumbentOutsourcedJobs()) {
+			outsourcingBaseline += data.outsourcingCost[job];
+		}
 		return new InitialColumnBundle(null, new ArrayList<Integer>(initialColumnIds),
-				new ArrayList<Integer>(incumbentColumnIds));
+				new ArrayList<Integer>(incumbentColumnIds), fixedSeed.getIncumbentOutsourcedJobs(),
+				outsourcingBaseline, data.evaluateOutsourcingCost(outsourcingBaseline));
+	}
+
+	/** 固定快照恢复时只检查一次完整覆盖，避免错误 UB 进入正式树搜索。 */
+	private void validateFixedIncumbent(FixedInitialColumnSeed fixedSeed) {
+		boolean[] covered = new boolean[data.n + 1];
+		for (List<Integer> sequence : fixedSeed.getIncumbentSequences()) {
+			for (int job : sequence) {
+				markFixedJob(covered, job, false);
+			}
+		}
+		for (int job : fixedSeed.getIncumbentOutsourcedJobs()) {
+			markFixedJob(covered, job, true);
+		}
+		for (int job = 1; job <= data.n; job++) {
+			if (!covered[job]) {
+				throw new IllegalArgumentException("Fixed incumbent does not cover job " + job);
+			}
+		}
+	}
+
+	private void markFixedJob(boolean[] covered, int job, boolean outsourced) {
+		if (job < 1 || job > data.n) {
+			throw new IllegalArgumentException("Fixed incumbent contains invalid job " + job);
+		}
+		if (covered[job]) {
+			throw new IllegalArgumentException("Fixed incumbent covers job more than once: " + job);
+		}
+		if (outsourced && Utility.isBigMValue(data.outsourcingCost[job])) {
+			throw new IllegalArgumentException("Fixed incumbent outsources unavailable job " + job);
+		}
+		covered[job] = true;
 	}
 
 	private void addSequences(List<List<Integer>> sequences, LinkedHashSet<Integer> initialColumnIds,

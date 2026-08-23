@@ -9,8 +9,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 
 import Basic.Data;
+import Common.Utility;
 import TWETBPC.BPCAlgorithmProfile;
 import TWETBPC.BestBpcProfiles;
 import TWETBPC.TWETBPCConfig;
@@ -30,48 +32,93 @@ import TWETBPC.LP.Pool;
  * 所有长运行默认写流式日志，热循环诊断保持关闭。
  */
 public final class FormalExperimentRunner {
+	private static final int INITIAL_SEED_RUNS = 3;
 
 	private FormalExperimentRunner() {
 	}
 
 	public static void main(String[] args) throws Exception {
 		Arguments arguments = Arguments.parse(args);
-		FormalExperimentDataFactory.Scenario scenario = arguments.buildScenario();
-		Data data = FormalExperimentDataFactory.load(arguments.instance, scenario);
 		if ("seed".equals(arguments.action)) {
-			writeSeed(data, arguments);
+			writeSeed(arguments);
 			return;
 		}
+		Data data = FormalExperimentDataFactory.load(arguments.instance, arguments.buildScenario());
 		runSolver(data, arguments);
 	}
 
-	private static void writeSeed(Data data, Arguments arguments) throws Exception {
+	private static void writeSeed(Arguments arguments) throws Exception {
 		if (arguments.seedFile == null) {
 			throw new IllegalArgumentException("seed action requires --seedFile");
 		}
 		long startNanos = System.nanoTime();
+		ArrayList<SeedRun> runs = new ArrayList<SeedRun>(INITIAL_SEED_RUNS);
+		for (int repetition = 0; repetition < INITIAL_SEED_RUNS; repetition++) {
+			runs.add(runInitialSeed(arguments, repetition));
+		}
+		SeedRun winner = selectBestSeedRun(runs);
+		FixedInitialSeedSnapshotIO.write(arguments.seedFile, arguments.instance.toString(), winner.seed);
+		long elapsedNanos = System.nanoTime() - startNanos;
+		Files.createDirectories(arguments.outputDir);
+		writeSeedMetadata(arguments, runs, winner, elapsedNanos);
+		System.out.printf(Locale.US,
+				"formalSeed run=%s selected=%d cost=%.6f initial=%d incumbent=%d outsourced=%d fingerprint=%s elapsedSeconds=%.3f file=%s%n",
+				arguments.runId, winner.repetition, winner.incumbentCost, winner.seed.getInitialSequences().size(),
+				winner.seed.getIncumbentSequences().size(), winner.seed.getIncumbentOutsourcedJobs().size(),
+				winner.fingerprint, elapsedNanos / 1_000_000_000.0, arguments.seedFile.toAbsolutePath());
+	}
+
+	private static SeedRun runInitialSeed(Arguments arguments, int repetition) throws Exception {
+		long alnsSeed = deterministicSeed(arguments.runId, repetition, 0x41c64e6dL);
+		long utilitySeed = deterministicSeed(arguments.runId, repetition, 0x9e3779b9L);
+		EngineALNS.rng = new Random(alnsSeed);
+		Utility.rng = new Random(utilitySeed);
+		Data data = FormalExperimentDataFactory.load(arguments.instance, arguments.buildScenario());
 		TWETBPCConfig config = new TWETBPCConfig();
 		BestBpcProfiles.NG_DSSR.apply(config);
 		config.reuseConfiguredBestSolution = false;
 		config.fixedInitialColumnSeed = null;
 		Pool pool = new Pool(data);
+		long startNanos = System.nanoTime();
 		InitialColumnBundle bundle = new InitialColumnBuilder(data, config, pool,
 				new HeuristicSeedProvider(data, config)).build();
+		long elapsedNanos = System.nanoTime() - startNanos;
 		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(
 				extractSequences(pool, bundle.getInitialColumnIds()),
-				extractSequences(pool, bundle.getIncumbentColumnIds()));
-		FixedInitialSeedSnapshotIO.write(arguments.seedFile, arguments.instance.toString(), seed);
-		long elapsedNanos = System.nanoTime() - startNanos;
-		String fingerprint = FixedInitialSeedSnapshotIO.fingerprint(seed);
-		Files.createDirectories(arguments.outputDir);
-		writeSeedMetadata(arguments, seed, fingerprint, elapsedNanos);
-		System.out.printf(Locale.US,
-				"formalSeed run=%s initial=%d incumbent=%d fingerprint=%s elapsedSeconds=%.3f file=%s%n",
-				arguments.runId, seed.getInitialSequences().size(), seed.getIncumbentSequences().size(),
-				fingerprint, elapsedNanos / 1_000_000_000.0, arguments.seedFile.toAbsolutePath());
+				extractSequences(pool, bundle.getIncumbentColumnIds()), bundle.getIncumbentOutsourcedJobs());
+		double incumbentCost = bundle.getIncumbentOutsourcingCost();
+		for (int columnId : bundle.getIncumbentColumnIds()) {
+			incumbentCost += pool.getColumn(columnId).getCost();
+		}
+		return new SeedRun(repetition, alnsSeed, utilitySeed, seed, incumbentCost, elapsedNanos,
+				FixedInitialSeedSnapshotIO.fingerprint(seed));
 	}
 
-	private static void writeSeedMetadata(Arguments arguments, FixedInitialColumnSeed seed, String fingerprint,
+	static SeedRun selectBestSeedRun(List<SeedRun> runs) {
+		if (runs.isEmpty()) {
+			throw new IllegalArgumentException("At least one initial seed run is required");
+		}
+		SeedRun best = runs.get(0);
+		for (int index = 1; index < runs.size(); index++) {
+			SeedRun candidate = runs.get(index);
+			if (candidate.incumbentCost < best.incumbentCost
+					|| (Double.compare(candidate.incumbentCost, best.incumbentCost) == 0
+							&& candidate.repetition < best.repetition)) {
+				best = candidate;
+			}
+		}
+		return best;
+	}
+
+	private static long deterministicSeed(String runId, int repetition, long salt) {
+		long value = 0xcbf29ce484222325L ^ salt;
+		for (int index = 0; index < runId.length(); index++) {
+			value = (value ^ runId.charAt(index)) * 0x100000001b3L;
+		}
+		return value ^ (0x9e3779b97f4a7c15L * (repetition + 1L));
+	}
+
+	private static void writeSeedMetadata(Arguments arguments, List<SeedRun> runs, SeedRun winner,
 			long elapsedNanos) throws Exception {
 		ArrayList<String> lines = new ArrayList<String>();
 		lines.add("runId=" + arguments.runId);
@@ -80,9 +127,24 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
 		lines.add("seedFile=" + arguments.seedFile.toAbsolutePath());
-		lines.add("seedFingerprint=" + fingerprint);
-		lines.add("initialColumnCount=" + seed.getInitialSequences().size());
-		lines.add("incumbentColumnCount=" + seed.getIncumbentSequences().size());
+		lines.add("seedRunCount=" + runs.size());
+		for (SeedRun run : runs) {
+			String prefix = "seedRun" + run.repetition + ".";
+			lines.add(prefix + "alnsSeed=" + run.alnsSeed);
+			lines.add(prefix + "utilitySeed=" + run.utilitySeed);
+			lines.add(prefix + "incumbentCost=" + run.incumbentCost);
+			lines.add(prefix + "elapsedSeconds=" + run.elapsedNanos / 1_000_000_000.0);
+			lines.add(prefix + "initialColumnCount=" + run.seed.getInitialSequences().size());
+			lines.add(prefix + "incumbentColumnCount=" + run.seed.getIncumbentSequences().size());
+			lines.add(prefix + "outsourcedJobCount=" + run.seed.getIncumbentOutsourcedJobs().size());
+			lines.add(prefix + "fingerprint=" + run.fingerprint);
+		}
+		lines.add("selectedSeedRun=" + winner.repetition);
+		lines.add("seedFingerprint=" + winner.fingerprint);
+		lines.add("initialColumnCount=" + winner.seed.getInitialSequences().size());
+		lines.add("incumbentColumnCount=" + winner.seed.getIncumbentSequences().size());
+		lines.add("incumbentOutsourcedJobCount=" + winner.seed.getIncumbentOutsourcedJobs().size());
+		lines.add("incumbentCost=" + winner.incumbentCost);
 		lines.add("elapsedSeconds=" + elapsedNanos / 1_000_000_000.0);
 		Files.write(arguments.outputDir.resolve("run.properties"), lines, StandardCharsets.UTF_8);
 	}
@@ -93,6 +155,27 @@ public final class FormalExperimentRunner {
 			sequences.add(new ArrayList<Integer>(pool.getColumn(columnId).getSequence()));
 		}
 		return sequences;
+	}
+
+	static final class SeedRun {
+		final int repetition;
+		final long alnsSeed;
+		final long utilitySeed;
+		final FixedInitialColumnSeed seed;
+		final double incumbentCost;
+		final long elapsedNanos;
+		final String fingerprint;
+
+		SeedRun(int repetition, long alnsSeed, long utilitySeed, FixedInitialColumnSeed seed,
+				double incumbentCost, long elapsedNanos, String fingerprint) {
+			this.repetition = repetition;
+			this.alnsSeed = alnsSeed;
+			this.utilitySeed = utilitySeed;
+			this.seed = seed;
+			this.incumbentCost = incumbentCost;
+			this.elapsedNanos = elapsedNanos;
+			this.fingerprint = fingerprint;
+		}
 	}
 
 	private static void runSolver(Data data, Arguments arguments) throws Exception {

@@ -14,22 +14,24 @@ import TWETBPC.GC.FixedInitialColumnSeed;
 /**
  * 跨进程共享固定初始列的确定性文本格式。
  * <p>
- * 快照只保存任务序列；每个目标实例仍用自己的 evaluator 重算列成本。
+ * V2 同时保存任务序列和 incumbent 外包集合；每个目标场景仍重算内部列成本与外包 tariff。
  */
 public final class FixedInitialSeedSnapshotIO {
 
-	private static final String HEADER = "TWET_FIXED_INITIAL_SEED_V1";
+	private static final String HEADER_V1 = "TWET_FIXED_INITIAL_SEED_V1";
+	private static final String HEADER_V2 = "TWET_FIXED_INITIAL_SEED_V2";
 
 	private FixedInitialSeedSnapshotIO() {
 	}
 
 	public static void write(Path path, String reference, FixedInitialColumnSeed seed) throws IOException {
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add(HEADER);
+		lines.add(HEADER_V2);
 		lines.add("reference\t" + reference);
 		lines.add("fingerprint\t" + fingerprint(seed));
 		writeSection(lines, "initial", seed.getInitialSequences());
 		writeSection(lines, "incumbent", seed.getIncumbentSequences());
+		lines.add("outsourced\t" + encode(seed.getIncumbentOutsourcedJobs()));
 		Path parent = path.toAbsolutePath().getParent();
 		if (parent != null) {
 			Files.createDirectories(parent);
@@ -40,7 +42,12 @@ public final class FixedInitialSeedSnapshotIO {
 	public static FixedInitialColumnSeed read(Path path) throws IOException {
 		List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
 		int cursor = 0;
-		if (lines.isEmpty() || !HEADER.equals(lines.get(cursor++))) {
+		if (lines.isEmpty()) {
+			throw new IllegalArgumentException("Unsupported fixed initial seed snapshot: " + path);
+		}
+		String header = lines.get(cursor++);
+		boolean legacyV1 = HEADER_V1.equals(header);
+		if (!legacyV1 && !HEADER_V2.equals(header)) {
 			throw new IllegalArgumentException("Unsupported fixed initial seed snapshot: " + path);
 		}
 		valueAfterTab(lines.get(cursor++), "reference");
@@ -49,11 +56,18 @@ public final class FixedInitialSeedSnapshotIO {
 		cursor = initial.nextCursor;
 		Section incumbent = readSection(lines, cursor, "incumbent", path);
 		cursor = incumbent.nextCursor;
+		List<Integer> outsourcedJobs = new ArrayList<Integer>();
+		if (!legacyV1) {
+			if (cursor >= lines.size()) {
+				throw new IllegalArgumentException("Missing outsourced section in " + path);
+			}
+			outsourcedJobs = decode(valueAfterTab(lines.get(cursor++), "outsourced"));
+		}
 		if (cursor != lines.size()) {
 			throw new IllegalArgumentException("Unexpected trailing data in fixed initial seed snapshot: " + path);
 		}
-		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(initial.sequences, incumbent.sequences);
-		String actualFingerprint = fingerprint(seed);
+		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(initial.sequences, incumbent.sequences, outsourcedJobs);
+		String actualFingerprint = legacyV1 ? legacyFingerprint(seed) : fingerprint(seed);
 		if (!storedFingerprint.equals(actualFingerprint)) {
 			throw new IllegalArgumentException("Fixed initial seed fingerprint mismatch: stored="
 					+ storedFingerprint + " actual=" + actualFingerprint + " snapshot=" + path);
@@ -62,10 +76,21 @@ public final class FixedInitialSeedSnapshotIO {
 	}
 
 	public static String fingerprint(FixedInitialColumnSeed seed) {
+		return fingerprint(seed, true);
+	}
+
+	private static String legacyFingerprint(FixedInitialColumnSeed seed) {
+		return fingerprint(seed, false);
+	}
+
+	private static String fingerprint(FixedInitialColumnSeed seed, boolean includeOutsourcedJobs) {
 		try {
 			MessageDigest digest = MessageDigest.getInstance("SHA-256");
 			updateFingerprint(digest, "initial", seed.getInitialSequences());
 			updateFingerprint(digest, "incumbent", seed.getIncumbentSequences());
+			if (includeOutsourcedJobs) {
+				updateFingerprint(digest, "outsourced", List.of(seed.getIncumbentOutsourcedJobs()));
+			}
 			StringBuilder value = new StringBuilder(64);
 			for (byte item : digest.digest()) {
 				value.append(String.format(java.util.Locale.ROOT, "%02x", item & 0xff));

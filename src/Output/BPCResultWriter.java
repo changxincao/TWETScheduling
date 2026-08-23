@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 
+import Common.Utility;
 import TWETBPC.TWETBPCContext;
 import TWETBPC.TWETSolveResult;
 import TWETBPC.Model.TWETColumn;
@@ -235,17 +236,44 @@ public final class BPCResultWriter {
 
 		try (BufferedWriter writer = Files.newBufferedWriter(outsourcing)) {
 			// 2026-05-17: y_j 是 RMP 的正式解变量，单独导出，避免结果只看内部机器列。
-			double outsourcingBaseline = outsourcingBaseline(context, result);
-			double outsourcingCost = context.data.evaluateOutsourcingCost(outsourcingBaseline);
-			writer.write("recordType,jobId,value,baselineCost,weightedBaselineContribution,outsourcingCostTotal\n");
-			writer.write(String.format(Locale.US, "TOTAL,,,%.6f,%.6f,%.6f\n", outsourcingBaseline,
-					outsourcingBaseline, outsourcingCost));
 			double[] values = result.getIncumbentOutsourcingValues();
+			double outsourcingBaseline = 0.0;
+			double outsourcedProcessing = 0.0;
+			double totalProcessing = 0.0;
+			double totalAvailableBaseline = 0.0;
+			int outsourcedJobCount = 0;
+			for (int job = 1; job <= context.data.n; job++) {
+				double value = job < values.length ? values[job] : 0.0;
+				totalProcessing += context.data.p[job];
+				if (!Utility.isBigMValue(context.data.outsourcingCost[job])) {
+					totalAvailableBaseline += context.data.outsourcingCost[job];
+				}
+				if (value > 1e-8) {
+					outsourcedJobCount++;
+					outsourcedProcessing += value * context.data.p[job];
+					outsourcingBaseline += value * context.data.outsourcingCost[job];
+				}
+			}
+			double outsourcingCost = context.data.evaluateOutsourcingCost(outsourcingBaseline);
+			writeCsvLine(writer, "recordType", "jobId", "value", "baselineCost",
+					"weightedBaselineContribution", "outsourcingCostTotal", "processingTime",
+					"weightedProcessing", "dueWindowStart", "dueWindowEnd", "earlinessWeight",
+					"tardinessWeight", "outsourcedJobCount", "outsourcedJobFraction",
+					"outsourcedProcessing", "outsourcedProcessingFraction", "quotationFraction");
+			writeCsvLine(writer, "TOTAL", "", "", "", formatFinite(outsourcingBaseline),
+					formatFinite(outsourcingCost), "", "", "", "", "", "",
+					Integer.toString(outsourcedJobCount), formatFinite(safeRatio(outsourcedJobCount, context.data.n)),
+					formatFinite(outsourcedProcessing), formatFinite(safeRatio(outsourcedProcessing, totalProcessing)),
+					formatFinite(safeRatio(outsourcingBaseline, totalAvailableBaseline)));
 			for (int job = 1; job <= context.data.n; job++) {
 				double value = job < values.length ? values[job] : 0.0;
 				if (value > 1e-8) {
-					writer.write(String.format(Locale.US, "JOB,%d,%.6f,%.6f,%.6f,\n", job, value,
-							context.data.outsourcingCost[job], value * context.data.outsourcingCost[job]));
+					writeCsvLine(writer, "JOB", Integer.toString(job), formatFinite(value),
+							formatFinite(context.data.outsourcingCost[job]),
+							formatFinite(value * context.data.outsourcingCost[job]), "",
+							formatFinite(context.data.p[job]), formatFinite(value * context.data.p[job]),
+							formatFinite(context.data.d_e[job]), formatFinite(context.data.d_l[job]),
+							formatFinite(context.data.w_e[job]), formatFinite(context.data.w_t[job]), "", "", "", "", "");
 				}
 			}
 		}
@@ -349,16 +377,8 @@ public final class BPCResultWriter {
 		writer.write("\n");
 	}
 
-	private static double outsourcingBaseline(TWETBPCContext context, TWETSolveResult result) {
-		double baseline = 0.0;
-		double[] values = result.getIncumbentOutsourcingValues();
-		for (int job = 1; job <= context.data.n && job < values.length; job++) {
-			double value = values[job];
-			if (value > 1e-8) {
-				baseline += value * context.data.outsourcingCost[job];
-			}
-		}
-		return baseline;
+	private static double safeRatio(double numerator, double denominator) {
+		return denominator > 0.0 ? numerator / denominator : 0.0;
 	}
 
 	private static int totalPoolSize(TWETBPCContext context) {

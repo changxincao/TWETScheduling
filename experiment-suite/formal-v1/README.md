@@ -1,11 +1,11 @@
 # 正式计算实验 pilot 包
 
-这个目录先验证数据派生、共享起点、任务依赖、结果输出和服务器并发，不代表论文样本已经冻结。三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，随后三种算法复用同一快照和 SHA-256 fingerprint。
+这个目录先验证落盘实例生成、共享起点、任务依赖、结果输出和服务器并发，不代表论文样本已经冻结。三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，随后三种算法复用同一快照和 SHA-256 fingerprint。
 
 执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。
 也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。
 
-`pricing-comparison` 比较 n=40/50/60、m=2/3/4、相对窗口 0/2/6 倍平均处理时间以及时间尺度 1/5/10。外包模型和灵敏度不与时间尺度做全因子乘积。
+`pricing-comparison` 比较 n=40/50/60、m=2/3/4、相对窗口 0/2/6 倍平均处理时间以及时间尺度 1/5/10。放大后的 processing、due date 和 setup time 已写入 `instances/` 下的独立 `.dat`，runner 不再接收时间倍率。外包模型和灵敏度不与时间尺度做全因子乘积。
 
 已准备实例记录数：39；当前每个规模只取按文件名排序后的前 3 个 case。n=100 的 m=2/3/4/5 数据只进入 `instances.tsv`，默认不进入耗时很高的完整精确批次。
 

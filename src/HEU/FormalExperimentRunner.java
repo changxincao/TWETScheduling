@@ -144,7 +144,6 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("algorithm=" + profile.getName());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
-		lines.add("timeScale=" + arguments.timeScale);
 		lines.add("dueWindowHalfWidth=" + arguments.dueWindowHalfWidth);
 		lines.add("setupCostCoefficient=" + arguments.setupCostCoefficient);
 		lines.add("outsourcingModel=" + arguments.outsourcingModel);
@@ -170,7 +169,6 @@ public final class FormalExperimentRunner {
 		private final String runId;
 		private final Path outputDir;
 		private final Path seedFile;
-		private final double timeScale;
 		private final double dueWindowHalfWidth;
 		private final double setupCostCoefficient;
 		private final String outsourcingModel;
@@ -180,6 +178,10 @@ public final class FormalExperimentRunner {
 		private final int maxNodes;
 
 		private Arguments(Map<String, String> values) {
+			if (values.containsKey("timeScale")) {
+				throw new IllegalArgumentException(
+						"timeScale is no longer a solver argument; use a materialized instance file");
+			}
 			action = value(values, "action", "solve").toLowerCase(Locale.ROOT);
 			if (!"seed".equals(action) && !"solve".equals(action)) {
 				throw new IllegalArgumentException("action must be seed or solve: " + action);
@@ -190,7 +192,6 @@ public final class FormalExperimentRunner {
 			outputDir = Path.of(value(values, "outputDir", "results/formal/" + runId));
 			String seed = value(values, "seedFile", "");
 			seedFile = seed.isEmpty() ? null : Path.of(seed);
-			timeScale = number(values, "timeScale", 1.0);
 			dueWindowHalfWidth = number(values, "dueWindowHalfWidth", 0.0);
 			setupCostCoefficient = number(values, "setupCostCoefficient", 0.0);
 			outsourcingModel = value(values, "outsourcingModel", "none");
@@ -202,7 +203,6 @@ public final class FormalExperimentRunner {
 
 		private FormalExperimentDataFactory.Scenario buildScenario() {
 			FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
-			scenario.timeScale = timeScale;
 			scenario.dueWindowHalfWidth = dueWindowHalfWidth;
 			scenario.setupCostCoefficient = setupCostCoefficient;
 			scenario.outsourcingEnabled = !"none".equalsIgnoreCase(outsourcingModel);

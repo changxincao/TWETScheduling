@@ -11,7 +11,7 @@ import Common.Utility;
 /**
  * 正式计算实验的数据派生入口。
  * <p>
- * 基础文件保持不变；时间尺度、due window、setup cost 和外包经济参数在加载后统一应用，
+ * 直接读取已经落盘的时间尺度实例；due window、setup cost 和外包经济参数在加载后统一应用，
  * 随后一次性重建 horizon、硬窗、禁弧和惩罚函数。
  */
 public final class FormalExperimentDataFactory {
@@ -21,32 +21,11 @@ public final class FormalExperimentDataFactory {
 
 	public static Data load(Path instance, Scenario scenario) throws IOException {
 		Data data = new Data(instance.toString(), true, true);
-		applyTimeScale(data, scenario.timeScale);
 		applyDueWindow(data, scenario.dueWindowHalfWidth);
 		applySetupCost(data, scenario.setupCostCoefficient);
 		applyOutsourcing(data, scenario);
 		rebuildDerivedData(data);
 		return data;
-	}
-
-	private static void applyTimeScale(Data data, double scale) {
-		if (!Double.isFinite(scale) || Utility.compareLe(scale, 0.0)) {
-			throw new IllegalArgumentException("timeScale must be positive: " + scale);
-		}
-		if (Utility.compareEq(scale, 1.0)) {
-			return;
-		}
-		for (int job = 1; job <= data.n; job++) {
-			data.p[job] *= scale;
-			data.d_e[job] *= scale;
-			data.d_l[job] *= scale;
-			data.r[job] *= scale;
-		}
-		for (int from = 0; from <= data.n; from++) {
-			for (int to = 0; to <= data.n; to++) {
-				data.s[from][to] *= scale;
-			}
-		}
 	}
 
 	private static void applyDueWindow(Data data, double halfWidth) {
@@ -124,9 +103,8 @@ public final class FormalExperimentDataFactory {
 		data.precomputeSetupCostAdvantages();
 	}
 
-	/** 实验层参数；默认值对应原时间尺度、零宽窗、无 setup cost、无外包。 */
+	/** 实验层参数；时间尺度已经固化在输入文件中。 */
 	public static final class Scenario {
-		public double timeScale = 1.0;
 		public double dueWindowHalfWidth = 0.0;
 		public double setupCostCoefficient = 0.0;
 		public boolean outsourcingEnabled = false;

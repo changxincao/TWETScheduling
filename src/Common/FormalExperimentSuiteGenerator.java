@@ -110,14 +110,15 @@ public final class FormalExperimentSuiteGenerator {
 				continue;
 			}
 			for (double scale : new double[] { 1.0, 5.0, 10.0 }) {
+				Path scenarioInstance = materializeTimeScaleInstance(options, instance, scale);
 				for (double windowRatio : new double[] { 0.0, 2.0, 6.0 }) {
 					double halfWidth = Math.rint(windowRatio * instance.averageProcessing * scale);
 					String scenario = scenarioId(instance, scale, halfWidth, 0.0);
 					Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-					addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, scale, halfWidth, 0.0);
+					addSeedRow(seedRows, seedFiles, options, scenario, scenarioInstance, seedFile, halfWidth, 0.0);
 					for (String algorithm : new String[] { "NG_DSSR", "TIME_INDEXED", "TIME_INDEXED_SRI" }) {
 						String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
-						solveRows.add(solveRow(options, runId, instance.path, algorithm, seedFile, scale, halfWidth,
+						solveRows.add(solveRow(options, runId, scenarioInstance, algorithm, seedFile, halfWidth,
 								0.0, "none", 1.0, 0.0, "pricing-comparison"));
 					}
 				}
@@ -132,20 +133,20 @@ public final class FormalExperimentSuiteGenerator {
 			double halfWidth = Math.rint(2.0 * instance.averageProcessing);
 			String scenario = scenarioId(instance, 1.0, halfWidth, 0.0);
 			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, 1.0, halfWidth, 0.0);
+			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth, 0.0);
 			for (String model : new String[] { "masterVariables", "columns" }) {
 				String runId = "outsourcing-formulation-" + scenario + "-" + model;
-				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, 1.0, halfWidth,
+				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
 						0.0, model, 1.0, 0.15, "outsourcing-formulation"));
 			}
 			for (double rate : new double[] { 0.75, 1.0, 1.25 }) {
 				String runId = "outsourcing-price-" + scenario + "-r" + compact(rate);
-				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, 1.0, halfWidth,
+				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
 						0.0, "masterVariables", rate, 0.15, "outsourcing-price"));
 			}
 			for (double discount : new double[] { 0.0, 0.15, 0.30 }) {
 				String runId = "outsourcing-discount-" + scenario + "-d" + compact(discount);
-				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, 1.0, halfWidth,
+				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
 						0.0, "masterVariables", 1.0, discount, "outsourcing-discount"));
 			}
 		}
@@ -207,7 +208,7 @@ public final class FormalExperimentSuiteGenerator {
 	}
 
 	private static void addSeedRow(List<RunRow> rows, Map<String, Path> seedFiles, Options options, String scenario,
-			Path instance, Path seedFile, double scale, double halfWidth, double setupCostCoefficient) {
+			Path instance, Path seedFile, double halfWidth, double setupCostCoefficient) {
 		if (seedFiles.putIfAbsent(scenario, seedFile) != null) {
 			return;
 		}
@@ -216,18 +217,17 @@ public final class FormalExperimentSuiteGenerator {
 		String args = arguments(mapOf(
 				"action", "seed", "runId", runId, "instance", portable(instance), "seedFile", portable(seedFile),
 				"outputDir", portable(output),
-				"timeScale", compact(scale), "dueWindowHalfWidth", compact(halfWidth),
-				"setupCostCoefficient", compact(setupCostCoefficient)));
+				"dueWindowHalfWidth", compact(halfWidth), "setupCostCoefficient", compact(setupCostCoefficient)));
 		rows.add(new RunRow(runId, args, portable(output), "", "seed"));
 	}
 
 	private static RunRow solveRow(Options options, String runId, Path instance, String algorithm, Path seedFile,
-			double scale, double halfWidth, double setupCostCoefficient, String outsourcingModel,
+			double halfWidth, double setupCostCoefficient, String outsourcingModel,
 			double outsourcingRate, double discount, String block) {
 		Path output = options.outputRoot.resolve("runs").resolve(block).resolve(runId);
 		String args = arguments(mapOf(
 				"action", "solve", "runId", runId, "instance", portable(instance), "algorithm", algorithm,
-				"outputDir", portable(output), "seedFile", portable(seedFile), "timeScale", compact(scale),
+				"outputDir", portable(output), "seedFile", portable(seedFile),
 				"dueWindowHalfWidth", compact(halfWidth), "setupCostCoefficient", compact(setupCostCoefficient),
 				"outsourcingModel", outsourcingModel, "outsourcingUnitRate", compact(outsourcingRate),
 				"discountStrength", compact(discount), "timeLimitSeconds", compact(options.timeLimitSeconds),
@@ -253,12 +253,12 @@ public final class FormalExperimentSuiteGenerator {
 		ArrayList<String> lines = new ArrayList<String>();
 		lines.add("# 正式计算实验 pilot 包");
 		lines.add("");
-		lines.add("这个目录先验证数据派生、共享起点、任务依赖、结果输出和服务器并发，不代表论文样本已经冻结。三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，随后三种算法复用同一快照和 SHA-256 fingerprint。");
+		lines.add("这个目录先验证落盘实例生成、共享起点、任务依赖、结果输出和服务器并发，不代表论文样本已经冻结。三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，随后三种算法复用同一快照和 SHA-256 fingerprint。");
 		lines.add("");
 		lines.add("执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。");
 		lines.add("也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。");
 		lines.add("");
-		lines.add("`pricing-comparison` 比较 n=40/50/60、m=2/3/4、相对窗口 0/2/6 倍平均处理时间以及时间尺度 1/5/10。外包模型和灵敏度不与时间尺度做全因子乘积。");
+		lines.add("`pricing-comparison` 比较 n=40/50/60、m=2/3/4、相对窗口 0/2/6 倍平均处理时间以及时间尺度 1/5/10。放大后的 processing、due date 和 setup time 已写入 `instances/` 下的独立 `.dat`，runner 不再接收时间倍率。外包模型和灵敏度不与时间尺度做全因子乘积。");
 		lines.add("");
 		lines.add("已准备实例记录数：" + instances.size() + "；当前每个规模只取按文件名排序后的前 "
 				+ options.casesPerSize + " 个 case。n=100 的 m=2/3/4/5 数据只进入 `instances.tsv`，默认不进入耗时很高的完整精确批次。");
@@ -271,6 +271,72 @@ public final class FormalExperimentSuiteGenerator {
 		lines.add("");
 		lines.add("正式批量运行前必须重新确定 `casesPerSize` 和分层抽样规则；当前“前几个文件”只适合 smoke/pilot，不能直接作为论文代表性样本。");
 		Files.write(options.outputRoot.resolve("README.md"), lines, StandardCharsets.UTF_8);
+	}
+
+	/**
+	 * 时间尺度属于数据生成口径。放大后的实例在生成 suite 时写盘，正式 runner 只读取最终文件。
+	 */
+	private static Path materializeTimeScaleInstance(Options options, InstanceRef instance, double scale)
+			throws IOException {
+		if (!Double.isFinite(scale) || scale <= 0.0) {
+			throw new IllegalArgumentException("time scale must be positive: " + scale);
+		}
+		if (scale == 1.0) {
+			return instance.path;
+		}
+		List<String> input = Files.readAllLines(instance.path, StandardCharsets.UTF_8);
+		if (input.size() < instance.size + 2) {
+			throw new IOException("Malformed instance: " + instance.path);
+		}
+		ArrayList<String> output = new ArrayList<String>(input.size());
+		output.add(input.get(0));
+		for (int row = 1; row <= instance.size; row++) {
+			String[] tokens = input.get(row).trim().split("\\s+");
+			if (tokens.length < 4) {
+				throw new IOException("Malformed job row " + row + " in " + instance.path);
+			}
+			tokens[0] = scaleIntegerToken(tokens[0], scale, "processing", instance.path);
+			tokens[1] = scaleIntegerToken(tokens[1], scale, "due date", instance.path);
+			output.add(String.join(" ", tokens));
+		}
+		int setupHeader = instance.size + 1;
+		if (!"SETUP".equalsIgnoreCase(input.get(setupHeader).trim())) {
+			throw new IOException("Expected SETUP block in " + instance.path);
+		}
+		output.add("SETUP");
+		int setupEnd = setupHeader + instance.size + 1;
+		if (input.size() <= setupEnd) {
+			throw new IOException("Incomplete SETUP block in " + instance.path);
+		}
+		for (int row = setupHeader + 1; row <= setupEnd; row++) {
+			String[] tokens = input.get(row).trim().split("\\s+");
+			if (tokens.length != instance.size + 1) {
+				throw new IOException("Malformed SETUP row in " + instance.path + ": " + input.get(row));
+			}
+			for (int column = 0; column < tokens.length; column++) {
+				tokens[column] = compact(Double.parseDouble(tokens[column]) * scale);
+			}
+			output.add(String.join(" ", tokens));
+		}
+		output.addAll(input.subList(setupEnd + 1, input.size()));
+
+		Path directory = options.outputRoot.resolve("instances")
+				.resolve(instance.size + "-" + instance.machines);
+		Files.createDirectories(directory);
+		String stem = stripExtension(instance.path.getFileName().toString());
+		Path target = directory.resolve(stem + "_timeX" + compact(scale) + ".dat");
+		Files.write(target, output, StandardCharsets.UTF_8);
+		return target;
+	}
+
+	private static String scaleIntegerToken(String token, double scale, String field, Path source)
+			throws IOException {
+		double scaled = Double.parseDouble(token) * scale;
+		long rounded = Math.round(scaled);
+		if (Math.abs(scaled - rounded) > 1e-8 || rounded < Integer.MIN_VALUE || rounded > Integer.MAX_VALUE) {
+			throw new IOException("Scaled " + field + " must remain an integer in " + source + ": " + scaled);
+		}
+		return Long.toString(rounded);
 	}
 
 	private static String scenarioId(InstanceRef instance, double scale, double halfWidth, double setupCost) {

@@ -39,6 +39,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(manifest, "--outputDir=\"${WORKSPACE}/", "seed output metadata directory");
 		assertContains(manifest, "--timeLimitSeconds=\"10800\"", "formal solve time limit");
 		assertContains(manifest, "${WORKSPACE}/", "manifest should remain portable across machines");
+		assertTrue(!manifest.contains("--timeScale="), "time scale must be materialized in instance files");
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");
 		assertTrue(Files.exists(suite.resolve("manifests/outsourcing-formulation.tsv")),
@@ -49,17 +50,22 @@ public final class FormalExperimentInfrastructureTest {
 				"missing outsourcing discount manifest");
 
 		FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
-		scenario.timeScale = 5.0;
 		scenario.dueWindowHalfWidth = 20.0;
 		scenario.setupCostCoefficient = 0.5;
 		scenario.outsourcingEnabled = true;
 		scenario.outsourcingUnitRate = 1.25;
 		scenario.discountStrength = 0.15;
-		var data = FormalExperimentDataFactory.load(dataRoot.resolve("3-2/wet003_001_2m.dat"), scenario);
+		Path scaledInstance = suite.resolve("instances/3-2/wet003_001_2m_timeX5.dat");
+		assertTrue(Files.exists(scaledInstance), "missing materialized time-scale instance");
+		var data = FormalExperimentDataFactory.load(scaledInstance, scenario);
+		FormalExperimentDataFactory.Scenario baseScenario = new FormalExperimentDataFactory.Scenario();
+		var baseData = FormalExperimentDataFactory.load(dataRoot.resolve("3-2/wet003_001_2m.dat"), baseScenario);
 		assertTrue(data.n == 3 && data.m == 2, "derived instance dimensions");
 		assertTrue(data.p[1] == 50.0, "time scale");
+		assertTrue(data.s[0][1] == 5.0 * baseData.s[0][1], "materialized setup scale");
 		assertTrue(data.d_l[1] - data.d_e[1] == 40.0, "due-window width");
 		assertTrue(data.outsourcingCost[1] == data.p[1], "outsourcing baseline");
+		assertLegacyTimeScaleRejected();
 
 		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(
 				List.of(List.of(1, 2), List.of(3)), List.of(List.of(1, 2), List.of(3)));
@@ -68,6 +74,15 @@ public final class FormalExperimentInfrastructureTest {
 		FixedInitialColumnSeed restored = FixedInitialSeedSnapshotIO.read(snapshot);
 		assertTrue(seed.getInitialSequences().equals(restored.getInitialSequences()), "seed round trip");
 		System.out.println("FormalExperimentInfrastructureTest passed");
+	}
+
+	private static void assertLegacyTimeScaleRejected() throws Exception {
+		try {
+			FormalExperimentRunner.main(new String[] { "--timeScale=5" });
+			throw new AssertionError("legacy timeScale argument should be rejected");
+		} catch (IllegalArgumentException expected) {
+			assertTrue(expected.getMessage().contains("materialized instance"), "legacy timeScale error message");
+		}
 	}
 
 	private static void reset(Path root) throws Exception {

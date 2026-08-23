@@ -2,6 +2,8 @@
 
 当前数据生成与实验参数的唯一规范见 `../../docs/plans/2026-08-23-正式实验当前统一方案.md`；代码和540个落盘文件的审计证据见 `../../docs/input/2026-08-23-正式实验数据生成与setup审计.md`。本目录的 `instances/design.properties`、`scale-selection.tsv`、`task-selection.tsv` 和 setup audit 文件是本次生成结果的机器可读快照。历史 `data/` 转换文件和旧实验讨论不能覆盖这些参数。
 
+**2026-08-24执行警告：**现有medium/high文件使用逐实例统一倍率，已因无法形成新的组合结构而否决。在逐任务异质倍率版本重建并重新审计前，不得启动 `pricing-comparison.tsv` 中的medium/high任务；base纯调度、base外包和折扣数据不受影响。
+
 三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，待比较方法复用同一快照和 SHA-256 fingerprint。
 
 执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。

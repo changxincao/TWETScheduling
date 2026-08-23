@@ -28,10 +28,14 @@ public final class FormalExperimentInfrastructureTest {
 		Path root = Path.of("tmp", "formal-experiment-infrastructure-test");
 		reset(root);
 		Path dataRoot = root.resolve("data");
-		Path sourceDir = dataRoot.resolve("3-1");
+		Path sourceDir = dataRoot.resolve("40-1");
 		Files.createDirectories(sourceDir);
-		Files.write(sourceDir.resolve("wet003_001.dat"), List.of(
-				"3", "10 20 1 2", "15 35 2 1", "8 48 1 1"), StandardCharsets.UTF_8);
+		ArrayList<String> jobs40 = new ArrayList<String>();
+		jobs40.add("40");
+		for (int job = 1; job <= 40; job++) {
+			jobs40.add((5 + job) + " " + (20 + 3 * job) + " " + (1 + job % 3) + " " + (2 + job % 4));
+		}
+		Files.write(sourceDir.resolve("wet040_001.dat"), jobs40, StandardCharsets.UTF_8);
 		Path sourceDir50 = dataRoot.resolve("50-1");
 		Files.createDirectories(sourceDir50);
 		ArrayList<String> jobs50 = new ArrayList<String>();
@@ -48,7 +52,7 @@ public final class FormalExperimentInfrastructureTest {
 		Files.writeString(suite.resolve("manifests/outsourcing-price.tsv"), "obsolete",
 				StandardCharsets.UTF_8);
 		FormalExperimentSuiteGenerator.main(new String[] {
-				"--dataRoot=" + dataRoot, "--outputRoot=" + suite, "--sizes=3,50", "--casesPerSize=1",
+				"--dataRoot=" + dataRoot, "--outputRoot=" + suite, "--sizes=20,50", "--casesPerSize=1",
 				"--maxNodes=10" });
 		String manifest = Files.readString(suite.resolve("manifest.tsv"), StandardCharsets.UTF_8);
 		assertContains(manifest, "dependsOn", "dependency column");
@@ -86,6 +90,8 @@ public final class FormalExperimentInfrastructureTest {
 				StandardCharsets.UTF_8);
 		assertContains(experimentProperties, "outsourcingQuotation=p*max(wE,wT)", "quotation metadata");
 		assertContains(experimentProperties, "outsourcingBreakpointReferenceTotal=1000", "breakpoint metadata");
+		assertTrue(Files.exists(suite.resolve("instances/post-generation-setup-audit.tsv")),
+				"missing independent post-generation setup audit");
 
 		FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
 		scenario.dueWindowHalfWidth = 20.0;
@@ -95,14 +101,16 @@ public final class FormalExperimentInfrastructureTest {
 		scenario.discountStrength = 0.15;
 		scenario.outsourcingBreakpoint1 = 20.0;
 		scenario.outsourcingBreakpoint2 = 40.0;
-		Path scaledInstance = suite.resolve("instances/3-2/wet003_001_2m_timeX5.dat");
+		GeneratedIndexRow scaledRow = findGeneratedInstance(suite, "n020-set01", "random", "medium", 2);
+		GeneratedIndexRow baseRow = findGeneratedInstance(suite, "n020-set01", "random", "base", 2);
+		Path scaledInstance = scaledRow.path;
 		assertTrue(Files.exists(scaledInstance), "missing materialized time-scale instance");
 		var data = FormalExperimentDataFactory.load(scaledInstance, scenario);
 		FormalExperimentDataFactory.Scenario baseScenario = new FormalExperimentDataFactory.Scenario();
-		var baseData = FormalExperimentDataFactory.load(dataRoot.resolve("3-2/wet003_001_2m.dat"), baseScenario);
-		assertTrue(data.n == 3 && data.m == 2, "derived instance dimensions");
-		assertTrue(data.p[1] == 50.0, "time scale");
-		assertTrue(data.s[0][1] == 5.0 * baseData.s[0][1], "materialized setup scale");
+		var baseData = FormalExperimentDataFactory.load(baseRow.path, baseScenario);
+		assertTrue(data.n == 20 && data.m == 2, "derived instance dimensions");
+		assertTrue(data.p[1] == scaledRow.scale * baseData.p[1], "time scale");
+		assertTrue(data.s[0][1] == scaledRow.scale * baseData.s[0][1], "materialized setup scale");
 		assertTrue(data.d_l[1] - data.d_e[1] == 40.0, "due-window width");
 		assertTrue(data.outsourcingCost[1] == data.p[1] * Math.max(data.w_e[1], data.w_t[1]),
 				"outsourcing baseline");
@@ -111,8 +119,12 @@ public final class FormalExperimentInfrastructureTest {
 		assertClose(data.evaluateOutsourcingCost(50.0), 55.0, "third tariff segment");
 		assertLegacyTimeScaleRejected();
 
+		ArrayList<Integer> internalJobs = new ArrayList<Integer>();
+		for (int job = 1; job < data.n; job++) {
+			internalJobs.add(Integer.valueOf(job));
+		}
 		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(
-				List.of(List.of(1, 2)), List.of(List.of(1, 2)), List.of(3));
+				List.of(internalJobs), List.of(internalJobs), List.of(data.n));
 		Path snapshot = root.resolve("seed.snapshot");
 		FixedInitialSeedSnapshotIO.write(snapshot, "fixture", seed);
 		FixedInitialColumnSeed restored = FixedInitialSeedSnapshotIO.read(snapshot);
@@ -131,10 +143,25 @@ public final class FormalExperimentInfrastructureTest {
 		Pool pool = new Pool(data);
 		InitialColumnBundle bundle = new InitialColumnBuilder(data, config, pool,
 				new HeuristicSeedProvider(data, config)).build();
-		assertTrue(bundle.getIncumbentOutsourcedJobs().equals(List.of(3)), "fixed outsourced jobs");
-		assertClose(bundle.getIncumbentOutsourcingBaseline(), data.outsourcingCost[3], "fixed outsourcing baseline");
-		assertClose(bundle.getIncumbentOutsourcingCost(), data.evaluateOutsourcingCost(data.outsourcingCost[3]),
+		assertTrue(bundle.getIncumbentOutsourcedJobs().equals(List.of(data.n)), "fixed outsourced jobs");
+		assertClose(bundle.getIncumbentOutsourcingBaseline(), data.outsourcingCost[data.n], "fixed outsourcing baseline");
+		assertClose(bundle.getIncumbentOutsourcingCost(), data.evaluateOutsourcingCost(data.outsourcingCost[data.n]),
 				"fixed outsourcing tariff");
+	}
+
+	private static GeneratedIndexRow findGeneratedInstance(Path suite, String taskSetId, String setupType,
+			String scaleLevel, int machines) throws Exception {
+		List<String> lines = Files.readAllLines(suite.resolve("instances.tsv"), StandardCharsets.UTF_8);
+		for (int index = 1; index < lines.size(); index++) {
+			String[] fields = lines.get(index).split("\\t");
+			if (fields[0].equals(taskSetId) && Integer.parseInt(fields[3]) == machines
+					&& fields[4].equals(setupType) && fields[5].equals(scaleLevel)) {
+				String rawPath = fields[7].replace("${WORKSPACE}", Path.of("").toAbsolutePath().toString());
+				return new GeneratedIndexRow(Path.of(rawPath), Integer.parseInt(fields[6]));
+			}
+		}
+		throw new AssertionError("Missing generated instance " + taskSetId + "/" + setupType + "/"
+				+ scaleLevel + "/m" + machines);
 	}
 
 	private static void assertLegacySnapshotCompatibility(Path root) throws Exception {
@@ -232,5 +259,8 @@ public final class FormalExperimentInfrastructureTest {
 		if (Math.abs(actual - expected) > 1e-8) {
 			throw new AssertionError(message + ": expected=" + expected + " actual=" + actual);
 		}
+	}
+
+	private record GeneratedIndexRow(Path path, int scale) {
 	}
 }

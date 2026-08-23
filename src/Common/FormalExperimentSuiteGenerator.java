@@ -5,11 +5,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+
+import Common.formal.FormalExperimentDataGenerator;
+import Common.formal.FormalExperimentDataGenerator.GeneratedInstance;
+import Common.formal.FormalExperimentDesign;
+import Common.formal.FormalSetupAuditRunner;
 
 /**
  * 生成论文实验数据引用和三份正式求解 manifest。
@@ -19,10 +23,10 @@ import java.util.Map;
 public final class FormalExperimentSuiteGenerator {
 	private static final String WORKSPACE_TOKEN = "${WORKSPACE}";
 	private static final Path WORKSPACE_ROOT = Path.of("").toAbsolutePath().normalize();
-	private static final double SETUP_COST_COEFFICIENT = 20.0;
-	private static final double DEFAULT_DISCOUNT_STRENGTH = 0.15;
-	private static final double[] WINDOW_HALF_WIDTHS = new double[] { 0.0, 100.0, 300.0 };
-	private static final double[] OUTSOURCING_RATES = new double[] { 0.5, 1.0, 2.0 };
+	private static final double SETUP_COST_COEFFICIENT = FormalExperimentDesign.SETUP_COST_COEFFICIENT;
+	private static final double DEFAULT_DISCOUNT_STRENGTH = FormalExperimentDesign.DEFAULT_DISCOUNT_STRENGTH;
+	private static final int[] WINDOW_HALF_WIDTHS = FormalExperimentDesign.WINDOW_HALF_WIDTHS;
+	private static final double[] OUTSOURCING_RATES = FormalExperimentDesign.OUTSOURCING_RATES;
 	private static final String[] BPC_ALGORITHMS = new String[] {
 			"NG_DSSR", "TIME_INDEXED", "TIME_INDEXED_SRI" };
 	private static final String[] OUTSOURCING_MODELS = new String[] { "columns", "masterVariables" };
@@ -33,7 +37,11 @@ public final class FormalExperimentSuiteGenerator {
 	public static void main(String[] args) throws Exception {
 		Options options = Options.parse(args);
 		Files.createDirectories(options.outputRoot);
-		List<InstanceRef> instances = prepareInstances(options);
+		FormalExperimentDataGenerator.GenerationResult generated =
+				new FormalExperimentDataGenerator(options.dataRoot, options.casesPerSize)
+						.generate(options.outputRoot.resolve("instances"), options.sizes);
+		FormalSetupAuditRunner.audit(options.outputRoot);
+		List<InstanceRef> instances = generated.instances().stream().map(InstanceRef::new).toList();
 		writeInstanceManifest(options, instances);
 		writeSolveManifest(options, instances);
 		writeReadme(options, instances);
@@ -41,69 +49,14 @@ public final class FormalExperimentSuiteGenerator {
 				instances.size(), options.outputRoot.toAbsolutePath());
 	}
 
-	private static List<InstanceRef> prepareInstances(Options options) throws Exception {
-		ArrayList<InstanceRef> instances = new ArrayList<InstanceRef>();
-		for (int size : options.sizes) {
-			Path sourceDir = options.dataRoot.resolve(size + "-1");
-			if (size == 60 && !Files.isDirectory(sourceDir)) {
-				prepareTruncatedSixty(options.dataRoot, options.casesPerSize);
-			}
-			if (!Files.isDirectory(sourceDir)) {
-				System.err.println("Skip missing single-machine source directory: " + sourceDir);
-				continue;
-			}
-			List<Path> sourceFiles = listDatFiles(sourceDir, options.casesPerSize);
-			int[] machines = size <= 60 ? new int[] { 2, 3, 4 } : new int[] { 2, 3, 4, 5 };
-			for (Path source : sourceFiles) {
-				ArrayList<Integer> missingMachines = new ArrayList<Integer>();
-				for (int machine : machines) {
-					Path target = convertedPath(options.dataRoot, source, size, machine);
-					if (!Files.exists(target)) {
-						missingMachines.add(Integer.valueOf(machine));
-					}
-				}
-				if (!missingMachines.isEmpty()) {
-					ETConverter.convertFile(source.toString(), toIntArray(missingMachines));
-				}
-				for (int machine : machines) {
-					Path target = convertedPath(options.dataRoot, source, size, machine);
-					if (Files.exists(target)) {
-						instances.add(new InstanceRef(size, machine, target, averageProcessing(source)));
-					}
-				}
-			}
-		}
-		instances.sort(Comparator.comparingInt((InstanceRef value) -> value.size)
-				.thenComparingInt(value -> value.machines).thenComparing(value -> value.path.toString()));
-		return instances;
-	}
-
-	private static void prepareTruncatedSixty(Path dataRoot, int limit) throws IOException {
-		Path sourceDir = dataRoot.resolve("100-1");
-		Path targetDir = dataRoot.resolve("60-1");
-		Files.createDirectories(targetDir);
-		for (Path source : listDatFiles(sourceDir, limit)) {
-			List<String> input = Files.readAllLines(source, StandardCharsets.UTF_8);
-			if (input.size() < 61) {
-				throw new IllegalArgumentException("Cannot truncate malformed 100-job instance: " + source);
-			}
-			ArrayList<String> output = new ArrayList<String>(61);
-			output.add("60");
-			output.addAll(input.subList(1, 61));
-			String name = source.getFileName().toString().replaceFirst("100", "060");
-			Path target = targetDir.resolve(name);
-			if (!Files.exists(target)) {
-				Files.write(target, output, StandardCharsets.UTF_8);
-			}
-		}
-	}
-
 	private static void writeInstanceManifest(Options options, List<InstanceRef> instances) throws IOException {
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("size\tmachines\tinstance\taverageProcessing");
+		lines.add("taskSetId\tsize\tcaseIndex\tmachines\tsetupType\tscaleLevel\tscale\tinstance\taverageProcessing");
 		for (InstanceRef instance : instances) {
-			lines.add(String.format(Locale.US, "%d\t%d\t%s\t%.6f", instance.size, instance.machines,
-					portable(instance.path), instance.averageProcessing));
+			lines.add(String.format(Locale.US, "%s\t%d\t%d\t%d\t%s\t%s\t%d\t%s\t%.6f",
+					instance.taskSetId, instance.size, instance.caseIndex, instance.machines,
+					instance.setupType, instance.scaleLevel, instance.scale, portable(instance.path),
+					instance.averageProcessing));
 		}
 		Files.write(options.outputRoot.resolve("instances.tsv"), lines, StandardCharsets.UTF_8);
 	}
@@ -125,29 +78,29 @@ public final class FormalExperimentSuiteGenerator {
 				"maxNodes=" + options.maxNodes,
 				"discountModel=" + options.discountModel), StandardCharsets.UTF_8);
 		for (InstanceRef instance : instances) {
-			for (double scale : new double[] { 1.0, 5.0, 10.0 }) {
-				Path scenarioInstance = materializeTimeScaleInstance(options, instance, scale);
-				for (double baseHalfWidth : WINDOW_HALF_WIDTHS) {
-					double halfWidth = baseHalfWidth * scale;
-					String scenario = scenarioId(instance, scale, halfWidth, SETUP_COST_COEFFICIENT);
-					Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-					addSeedRow(seedRows, seedFiles, options, scenario, scenarioInstance, seedFile, halfWidth,
-							SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints);
-					for (String algorithm : BPC_ALGORITHMS) {
-						String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
-						solveRows.add(solveRow(options, runId, scenarioInstance, algorithm, seedFile, halfWidth,
-								SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints,
-								"pricing-comparison"));
-					}
+			for (int baseHalfWidth : WINDOW_HALF_WIDTHS) {
+				double halfWidth = (double) baseHalfWidth * instance.scale;
+				String scenario = scenarioId(instance, halfWidth, SETUP_COST_COEFFICIENT);
+				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
+				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
+						SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints);
+				for (String algorithm : BPC_ALGORITHMS) {
+					String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
+					solveRows.add(solveRow(options, runId, instance.path, algorithm, seedFile, halfWidth,
+							SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints,
+							"pricing-comparison"));
 				}
 			}
 		}
 
 		// 外包性能使用原时间尺度，完整交叉窗口、价格和两种 BPC formulation。
 		for (InstanceRef instance : instances) {
-			for (double halfWidth : WINDOW_HALF_WIDTHS) {
+			if (instance.scale != 1) {
+				continue;
+			}
+			for (int halfWidth : WINDOW_HALF_WIDTHS) {
 				for (double rate : OUTSOURCING_RATES) {
-					String scenario = scenarioId(instance, 1.0, halfWidth, SETUP_COST_COEFFICIENT)
+					String scenario = scenarioId(instance, halfWidth, SETUP_COST_COEFFICIENT)
 							+ "-or" + compact(rate) + "-d" + compact(DEFAULT_DISCOUNT_STRENGTH);
 					Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
 					addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
@@ -165,11 +118,11 @@ public final class FormalExperimentSuiteGenerator {
 
 		// 实验三只做结果后处理；实验四仅补 n=50、中价、无折扣的缺失求解。
 		for (InstanceRef instance : instances) {
-			if (instance.size != 50) {
+			if (instance.size != 50 || instance.scale != 1) {
 				continue;
 			}
-			for (double halfWidth : WINDOW_HALF_WIDTHS) {
-				String scenario = scenarioId(instance, 1.0, halfWidth, SETUP_COST_COEFFICIENT)
+			for (int halfWidth : WINDOW_HALF_WIDTHS) {
+				String scenario = scenarioId(instance, halfWidth, SETUP_COST_COEFFICIENT)
 						+ "-or1-d0";
 				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
 				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
@@ -303,6 +256,9 @@ public final class FormalExperimentSuiteGenerator {
 			throws IOException {
 		LinkedHashMap<String, Double> totals = new LinkedHashMap<String, Double>();
 		for (InstanceRef instance : instances) {
+			if (instance.scale != 1) {
+				continue;
+			}
 			if (requiredSize > 0 && instance.size != requiredSize) {
 				continue;
 			}
@@ -329,15 +285,20 @@ public final class FormalExperimentSuiteGenerator {
 
 	private static void writeReadme(Options options, List<InstanceRef> instances) throws IOException {
 		int mainInstanceCount = instances.size();
-		int n50InstanceCount = 0;
+		int originalScaleInstanceCount = 0;
+		int n50OriginalScaleInstanceCount = 0;
 		for (InstanceRef instance : instances) {
-			if (instance.size == 50) {
-				n50InstanceCount++;
+			if (instance.scale == 1) {
+				originalScaleInstanceCount++;
+				if (instance.size == 50) {
+					n50OriginalScaleInstanceCount++;
+				}
 			}
 		}
-		int pricingSeedCount = mainInstanceCount * 9;
-		int outsourcingSeedCount = mainInstanceCount * 9;
-		int discountSeedCount = n50InstanceCount * 3;
+		int pricingSeedCount = mainInstanceCount * WINDOW_HALF_WIDTHS.length;
+		int outsourcingSeedCount = originalScaleInstanceCount * WINDOW_HALF_WIDTHS.length
+				* OUTSOURCING_RATES.length;
+		int discountSeedCount = n50OriginalScaleInstanceCount * WINDOW_HALF_WIDTHS.length;
 		int seedTaskCount = pricingSeedCount + outsourcingSeedCount + discountSeedCount;
 		int pricingTaskCount = pricingSeedCount * BPC_ALGORITHMS.length;
 		int outsourcingPerformanceTaskCount = outsourcingSeedCount * OUTSOURCING_MODELS.length;
@@ -351,10 +312,10 @@ public final class FormalExperimentSuiteGenerator {
 		lines.add("执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。");
 		lines.add("也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。");
 		lines.add("");
-		lines.add("`pricing-comparison` 使用 W0/W100/W300 和时间尺度 1/5/10 比较三种 BPC；放大后的 processing、due date 和 setup time 写入独立 `.dat`，runner 不接收时间倍率。`outsourcing-performance` 在原时间尺度完整比较三档价格和 columns/masterVariables。`outsourcing-discount` 只补 n=50、中价、无折扣任务。实验三不生成求解任务。");
+		lines.add("`pricing-comparison` 使用 W0/W100/W300 和每个任务集合预先生成的 base/medium/high 三个尺度比较三种 BPC；processing、due-window center 和 setup time 已写入独立 `.dat`，runner 不接收时间倍率。`outsourcing-performance` 在原时间尺度完整比较三档价格和 columns/masterVariables。`outsourcing-discount` 只补 n=50、中价、无折扣任务。实验三不生成求解任务。");
 		lines.add("");
-		lines.add("已准备基础实例记录数：" + instances.size() + "；当前每个规模取 "
-				+ options.casesPerSize + " 个 case。实例抽样和 random/family setup 的最终落盘规则仍由正式数据生成步骤负责。");
+		lines.add("已准备落盘实例记录数：" + instances.size() + "；每个规模固定取 "
+				+ options.casesPerSize + " 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率和 setup 审计见 `instances/` 下的 metadata。");
 		lines.add("");
 		lines.add("总 manifest 包含 " + seedTaskCount + " 个共享 seed 任务和 " + solveTaskCount
 				+ " 个求解任务。其中 pricing comparison=" + pricingTaskCount
@@ -366,75 +327,10 @@ public final class FormalExperimentSuiteGenerator {
 		Files.write(options.outputRoot.resolve("README.md"), lines, StandardCharsets.UTF_8);
 	}
 
-	/**
-	 * 时间尺度属于数据生成口径。放大后的实例在生成 suite 时写盘，正式 runner 只读取最终文件。
-	 */
-	private static Path materializeTimeScaleInstance(Options options, InstanceRef instance, double scale)
-			throws IOException {
-		if (!Double.isFinite(scale) || scale <= 0.0) {
-			throw new IllegalArgumentException("time scale must be positive: " + scale);
-		}
-		if (scale == 1.0) {
-			return instance.path;
-		}
-		List<String> input = Files.readAllLines(instance.path, StandardCharsets.UTF_8);
-		if (input.size() < instance.size + 2) {
-			throw new IOException("Malformed instance: " + instance.path);
-		}
-		ArrayList<String> output = new ArrayList<String>(input.size());
-		output.add(input.get(0));
-		for (int row = 1; row <= instance.size; row++) {
-			String[] tokens = input.get(row).trim().split("\\s+");
-			if (tokens.length < 4) {
-				throw new IOException("Malformed job row " + row + " in " + instance.path);
-			}
-			tokens[0] = scaleIntegerToken(tokens[0], scale, "processing", instance.path);
-			tokens[1] = scaleIntegerToken(tokens[1], scale, "due date", instance.path);
-			output.add(String.join(" ", tokens));
-		}
-		int setupHeader = instance.size + 1;
-		if (!"SETUP".equalsIgnoreCase(input.get(setupHeader).trim())) {
-			throw new IOException("Expected SETUP block in " + instance.path);
-		}
-		output.add("SETUP");
-		int setupEnd = setupHeader + instance.size + 1;
-		if (input.size() <= setupEnd) {
-			throw new IOException("Incomplete SETUP block in " + instance.path);
-		}
-		for (int row = setupHeader + 1; row <= setupEnd; row++) {
-			String[] tokens = input.get(row).trim().split("\\s+");
-			if (tokens.length != instance.size + 1) {
-				throw new IOException("Malformed SETUP row in " + instance.path + ": " + input.get(row));
-			}
-			for (int column = 0; column < tokens.length; column++) {
-				tokens[column] = compact(Double.parseDouble(tokens[column]) * scale);
-			}
-			output.add(String.join(" ", tokens));
-		}
-		output.addAll(input.subList(setupEnd + 1, input.size()));
-
-		Path directory = options.outputRoot.resolve("instances")
-				.resolve(instance.size + "-" + instance.machines);
-		Files.createDirectories(directory);
-		String stem = stripExtension(instance.path.getFileName().toString());
-		Path target = directory.resolve(stem + "_timeX" + compact(scale) + ".dat");
-		Files.write(target, output, StandardCharsets.UTF_8);
-		return target;
-	}
-
-	private static String scaleIntegerToken(String token, double scale, String field, Path source)
-			throws IOException {
-		double scaled = Double.parseDouble(token) * scale;
-		long rounded = Math.round(scaled);
-		if (Math.abs(scaled - rounded) > 1e-8 || rounded < Integer.MIN_VALUE || rounded > Integer.MAX_VALUE) {
-			throw new IOException("Scaled " + field + " must remain an integer in " + source + ": " + scaled);
-		}
-		return Long.toString(rounded);
-	}
-
-	private static String scenarioId(InstanceRef instance, double scale, double halfWidth, double setupCost) {
-		String stem = stripExtension(instance.path.getFileName().toString());
-		return stem + "-a" + compact(scale) + "-w" + compact(halfWidth) + "-sc" + compact(setupCost);
+	private static String scenarioId(InstanceRef instance, double halfWidth, double setupCost) {
+		return instance.taskSetId + "-m" + instance.machines + "-" + instance.setupType
+				+ "-" + instance.scaleLevel + "-g" + instance.scale
+				+ "-w" + compact(halfWidth) + "-sc" + compact(setupCost);
 	}
 
 	private static String arguments(Map<String, String> values) {
@@ -470,52 +366,32 @@ public final class FormalExperimentSuiteGenerator {
 		return String.format(Locale.ROOT, "%.6f", value).replaceAll("0+$", "").replaceAll("\\.$", "");
 	}
 
-	private static List<Path> listDatFiles(Path dir, int limit) throws IOException {
-		try (java.util.stream.Stream<Path> stream = Files.list(dir)) {
-			return stream.filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".dat"))
-					.sorted().limit(limit).toList();
-		}
-	}
-
-	private static int[] toIntArray(List<Integer> values) {
-		int[] result = new int[values.size()];
-		for (int index = 0; index < values.size(); index++) {
-			result[index] = values.get(index).intValue();
-		}
-		return result;
-	}
-
-	private static Path convertedPath(Path dataRoot, Path source, int size, int machine) {
-		String stem = stripExtension(source.getFileName().toString());
-		return dataRoot.resolve(size + "-" + machine).resolve(stem + "_" + machine + "m.dat");
-	}
-
 	private static String stripExtension(String name) {
 		int dot = name.lastIndexOf('.');
 		return dot < 0 ? name : name.substring(0, dot);
 	}
 
-	private static double averageProcessing(Path source) throws IOException {
-		List<String> lines = Files.readAllLines(source, StandardCharsets.UTF_8);
-		int n = Integer.parseInt(lines.get(0).trim().split("\\s+")[0]);
-		double total = 0.0;
-		for (int index = 1; index <= n; index++) {
-			total += Double.parseDouble(lines.get(index).trim().split("\\s+")[0]);
-		}
-		return total / n;
-	}
-
 	private static final class InstanceRef {
+		private final String taskSetId;
 		private final int size;
+		private final int caseIndex;
 		private final int machines;
+		private final String setupType;
+		private final String scaleLevel;
+		private final int scale;
 		private final Path path;
 		private final double averageProcessing;
 
-		private InstanceRef(int size, int machines, Path path, double averageProcessing) {
-			this.size = size;
-			this.machines = machines;
-			this.path = path;
-			this.averageProcessing = averageProcessing;
+		private InstanceRef(GeneratedInstance generated) {
+			taskSetId = generated.taskSetId();
+			size = generated.size();
+			caseIndex = generated.caseIndex();
+			machines = generated.machines();
+			setupType = generated.setupType();
+			scaleLevel = generated.scaleLevel();
+			scale = generated.scale();
+			path = generated.path();
+			averageProcessing = generated.averageProcessing();
 		}
 	}
 
@@ -543,8 +419,8 @@ public final class FormalExperimentSuiteGenerator {
 	private static final class Options {
 		private Path dataRoot = Path.of("data");
 		private Path outputRoot = Path.of("experiment-suite", "formal");
-		private int casesPerSize = 3;
-		private int[] sizes = new int[] { 40, 50, 60, 100 };
+		private int casesPerSize = FormalExperimentDesign.CASES_PER_SIZE;
+		private int[] sizes = FormalExperimentDesign.TASK_SIZES.clone();
 		private double timeLimitSeconds = 10800.0;
 		private int maxNodes = 100000;
 		private String discountModel = "masterVariables";

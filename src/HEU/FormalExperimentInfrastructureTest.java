@@ -41,7 +41,7 @@ public final class FormalExperimentInfrastructureTest {
 		ArrayList<String> jobs50 = new ArrayList<String>();
 		jobs50.add("50");
 		for (int job = 1; job <= 50; job++) {
-			jobs50.add("10 " + (20 + job) + " 1 2");
+			jobs50.add((5 + job) + " " + (20 + job) + " 1 2");
 		}
 		Files.write(sourceDir50.resolve("wet050_001.dat"), jobs50, StandardCharsets.UTF_8);
 
@@ -83,15 +83,16 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(manifest, "--outsourcingUnitRate=\"0.5\"", "low outsourcing price");
 		assertContains(manifest, "--outsourcingUnitRate=\"2\"", "high outsourcing price");
 		assertContains(manifest, "--outsourcingBreakpoint1=\"", "fixed first outsourcing breakpoint");
-		assertContains(manifest, "--outsourcingBreakpoint1=\"250\"", "reference first breakpoint");
-		assertContains(manifest, "--outsourcingBreakpoint2=\"500\"", "reference second breakpoint");
+		assertContains(manifest, "--outsourcingBreakpoint1=\"762.5\"", "reference first breakpoint");
+		assertContains(manifest, "--outsourcingBreakpoint2=\"1525\"", "reference second breakpoint");
 		assertContains(manifest, "--setupCostCoefficient=\"20\"", "formal setup cost coefficient");
 		String experimentProperties = Files.readString(suite.resolve("experiment.properties"),
 				StandardCharsets.UTF_8);
 		assertContains(experimentProperties, "outsourcingQuotation=p*max(wE,wT)", "quotation metadata");
-		assertContains(experimentProperties, "outsourcingBreakpointReferenceTotal=1000", "breakpoint metadata");
+		assertContains(experimentProperties, "outsourcingBreakpointReferenceTotal=3050", "breakpoint metadata");
 		assertTrue(Files.exists(suite.resolve("instances/post-generation-setup-audit.tsv")),
 				"missing independent post-generation setup audit");
+		assertFamilyMetricSetup(suite);
 
 		FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
 		scenario.dueWindowHalfWidth = 20.0;
@@ -180,6 +181,30 @@ public final class FormalExperimentInfrastructureTest {
 		Files.write(path, lines, StandardCharsets.UTF_8);
 		FixedInitialColumnSeed restored = FixedInitialSeedSnapshotIO.read(path);
 		assertTrue(restored.getIncumbentOutsourcedJobs().isEmpty(), "legacy outsourced jobs");
+	}
+
+	private static void assertFamilyMetricSetup(Path suite) throws Exception {
+		List<String> lines = Files.readAllLines(suite.resolve("instances/setup-audit.tsv"),
+				StandardCharsets.UTF_8);
+		boolean checked = false;
+		for (int row = 1; row < lines.size(); row++) {
+			String[] fields = lines.get(row).split("\\t", -1);
+			if (!"family".equals(fields[1]) || !"base".equals(fields[2])) {
+				continue;
+			}
+			assertTrue(Integer.parseInt(fields[10]) == 0, "family triangle violations");
+			assertTrue(Integer.parseInt(fields[11]) == 0, "family Floyd audit changes");
+			assertTrue(Integer.parseInt(fields[16]) == 0, "family generation must not run Floyd");
+			assertClose(Double.parseDouble(fields[14]), Double.parseDouble(fields[15]),
+					"family raw and closed means");
+			assertClose(Double.parseDouble(fields[20]), 4.0 * Double.parseDouble(fields[4]),
+					"family switch penalty");
+			double ratio = Double.parseDouble(fields[21]);
+			assertTrue(ratio >= 4.0 && ratio <= 5.3, "family separation ratio");
+			assertTrue(Double.parseDouble(fields[20]) > 0.0, "family switch penalty");
+			checked = true;
+		}
+		assertTrue(checked, "missing family setup audit row");
 	}
 
 	private static String legacyFingerprint(List<List<Integer>> initial, List<List<Integer>> incumbent)

@@ -8,7 +8,9 @@ public final class FormalExperimentDesign {
 	public static final int CASES_PER_SIZE = 5;
 	public static final int[] WINDOW_HALF_WIDTHS = new int[] { 0, 100, 300 };
 	public static final double SETUP_MEAN_RATIO = 0.5;
-	public static final double FAMILY_WITHIN_MEAN_RATIO = 0.4;
+	public static final double FAMILY_SWITCH_PENALTY_RATIO = 2.0;
+	public static final double FAMILY_SEPARATION_RATIO_MIN = 4.0;
+	public static final double FAMILY_SEPARATION_RATIO_MAX = 5.3;
 	public static final double SETUP_COST_COEFFICIENT = 20.0;
 	public static final double[] OUTSOURCING_RATES = new double[] { 0.5, 1.0, 2.0 };
 	public static final double DEFAULT_DISCOUNT_STRENGTH = 0.15;

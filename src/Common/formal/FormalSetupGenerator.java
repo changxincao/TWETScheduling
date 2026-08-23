@@ -7,7 +7,7 @@ import java.util.Random;
 
 import Common.formal.FormalSetupValidator.Report;
 
-/** 生成配对的random/family setup，并在连续闭包后校准最终整数均值。 */
+/** 生成配对的random/family setup；family由同一基础有向度量叠加换族setup得到。 */
 public final class FormalSetupGenerator {
 	private static final double SQRT_TWO_PI = Math.sqrt(2.0 * Math.PI);
 	private static final double MIN_PROBABILITY = 1e-12;
@@ -24,19 +24,12 @@ public final class FormalSetupGenerator {
 		int cap = Math.max(1, (int) Math.floor(averageProcessing));
 		int[] familyByJob = assignFamilies(taskSet);
 		double withinPairRatio = withinPairRatio(familyByJob);
-		double withinTarget = FormalExperimentDesign.FAMILY_WITHIN_MEAN_RATIO * targetMean;
-		double betweenTarget = (targetMean - withinPairRatio * withinTarget) / (1.0 - withinPairRatio);
 
 		double randomDeviation = targetMean / 2.0;
-		double withinDeviation = withinTarget / 2.0;
-		double betweenDeviation = betweenTarget / 2.0;
 		double randomLocation = calibratedLocation(targetMean, randomDeviation, cap);
-		double withinLocation = calibratedLocation(withinTarget, withinDeviation, cap);
-		double betweenLocation = calibratedLocation(betweenTarget, betweenDeviation, cap);
 
 		double[][] quantiles = pairedQuantiles(taskSet);
 		double[][] randomRaw = new double[n + 1][n + 1];
-		double[][] familyRaw = new double[n + 1][n + 1];
 		for (int from = 0; from <= n; from++) {
 			for (int to = 1; to <= n; to++) {
 				if (from == to) {
@@ -45,35 +38,54 @@ public final class FormalSetupGenerator {
 				double u = quantiles[from][to];
 				double randomValue = sampleTruncated(u, randomLocation, randomDeviation, cap);
 				randomRaw[from][to] = randomValue;
-				if (from == 0) {
-					familyRaw[from][to] = randomValue;
-				} else if (familyByJob[from] == familyByJob[to]) {
-					familyRaw[from][to] = sampleTruncated(u, withinLocation, withinDeviation, cap);
-				} else {
-					familyRaw[from][to] = sampleTruncated(u, betweenLocation, betweenDeviation, cap);
-				}
 			}
 		}
 
 		Result randomResult = finish(Type.RANDOM, randomRaw, null, targetMean, cap,
-				randomLocation, Double.NaN, Double.NaN, withinPairRatio);
+				randomLocation, Double.NaN, withinPairRatio, true);
+		double familySwitchPenalty = FormalExperimentDesign.FAMILY_SWITCH_PENALTY_RATIO * averageProcessing;
+		double[][] familyRaw = addFamilySwitchPenalty(randomResult.setup(), familyByJob,
+				familySwitchPenalty);
 		Result familyResult = finish(Type.FAMILY, familyRaw, familyByJob, targetMean, cap,
-				randomLocation, withinLocation, betweenLocation, withinPairRatio);
+				randomLocation, familySwitchPenalty, withinPairRatio, false);
 		return List.of(randomResult, familyResult);
 	}
 
 	private Result finish(Type type, double[][] raw, int[] familyByJob, double targetMean, int cap,
-			double randomLocation, double withinLocation, double betweenLocation, double withinPairRatio) {
+			double randomLocation, double familySwitchPenalty, double withinPairRatio, boolean applyClosure) {
 		double rawMean = meanJobArcs(raw);
-		int firstFloydChangedArcs = closeInPlace(raw);
+		int firstFloydChangedArcs = applyClosure ? closeInPlace(raw) : 0;
 		double closedMean = meanJobArcs(raw);
 		double calibrationScale = calibrateScale(raw, targetMean, cap);
 		int[][] setup = integerize(raw, calibrationScale, cap);
 		Report report = validator.audit(setup, targetMean, cap, familyByJob);
 		validator.requirePreset(report, type == Type.FAMILY);
+		double familySeparationRatio = familyByJob == null
+				? Double.NaN : report.betweenMean() / report.withinMean();
 		return new Result(type, setup, familyByJob == null ? null : familyByJob.clone(), targetMean, cap,
 				rawMean, closedMean, firstFloydChangedArcs, calibrationScale, randomLocation,
-				withinLocation, betweenLocation, withinPairRatio, report);
+				familySwitchPenalty, familySeparationRatio, withinPairRatio, report);
+	}
+
+	/**
+	 * 2026-08-23: family离散度量与基础有向度量的和仍是有向度量，因此这里不再做Floyd。
+	 */
+	private static double[][] addFamilySwitchPenalty(int[][] baseMetric, int[] familyByJob,
+			double familySwitchPenalty) {
+		int n = baseMetric.length - 1;
+		double[][] result = new double[n + 1][n + 1];
+		for (int from = 0; from <= n; from++) {
+			for (int to = 1; to <= n; to++) {
+				if (from == to) {
+					continue;
+				}
+				result[from][to] = baseMetric[from][to];
+				if (from > 0 && familyByJob[from] != familyByJob[to]) {
+					result[from][to] += familySwitchPenalty;
+				}
+			}
+		}
+		return result;
 	}
 
 	private static int[] assignFamilies(FormalTaskSet taskSet) {
@@ -327,7 +339,7 @@ public final class FormalSetupGenerator {
 
 	public record Result(Type type, int[][] setup, int[] familyByJob, double targetMean, int cap,
 			double rawMean, double closedMean, int firstFloydChangedArcs, double calibrationScale,
-			double randomLocation, double withinLocation, double betweenLocation,
+			double randomLocation, double familySwitchPenalty, double familySeparationRatio,
 			double withinPairRatio, Report audit) {
 	}
 }

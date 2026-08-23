@@ -86,8 +86,13 @@ public final class FormalSetupValidator {
 		if (report.triangleViolations() != 0 || report.floydChangedArcs() != 0) {
 			throw new IllegalStateException("Setup triangle audit failed: " + report);
 		}
-		if (familySetup && !(report.betweenMean() > report.withinMean())) {
-			throw new IllegalStateException("Family setup lost within/between separation: " + report);
+		if (familySetup) {
+			double ratio = report.betweenMean() / report.withinMean();
+			if (ratio < FormalExperimentDesign.FAMILY_SEPARATION_RATIO_MIN
+					|| ratio > FormalExperimentDesign.FAMILY_SEPARATION_RATIO_MAX) {
+				throw new IllegalStateException("Family setup separation misses target range: ratio="
+						+ ratio + " report=" + report);
+			}
 		}
 	}
 

@@ -109,7 +109,7 @@ public final class FormalExperimentDataGenerator {
 				"taskSetId\tsetupType\tscaleLevel\tmultiplier\ttargetMean\tactualMean\tmeanError\tcap\tmaximum\t"
 				+ "capHitRate\ttriangleViolations\tfloydChangedArcs\twithinMean\tbetweenMean\trawMean\t"
 				+ "closedMean\tfirstFloydChangedArcs\tcalibrationScale\twithinPairRatio\trandomLocation\t"
-				+ "withinLocation\tbetweenLocation\tfamilyByJob"));
+				+ "baseFamilySwitchPenalty\tfamilySeparationRatio\tfamilyByJob"));
 	}
 
 	private static String setupMetadataRow(FormalTaskSet taskSet, Result setup, Scale scale, Report audit) {
@@ -121,8 +121,8 @@ public final class FormalExperimentDataGenerator {
 				audit.actualMean(), audit.meanError(), audit.cap(), audit.maximum(), audit.capHitRate(),
 				audit.triangleViolations(), audit.floydChangedArcs(), audit.withinMean(), audit.betweenMean(),
 				setup.rawMean(), setup.closedMean(), setup.firstFloydChangedArcs(), setup.calibrationScale(),
-				setup.withinPairRatio(), setup.randomLocation(), setup.withinLocation(), setup.betweenLocation(),
-				familyByJob);
+				setup.withinPairRatio(), setup.randomLocation(), setup.familySwitchPenalty(),
+				setup.familySeparationRatio(), familyByJob);
 	}
 
 	private static String familyAssignment(int[] familyByJob) {
@@ -169,7 +169,8 @@ public final class FormalExperimentDataGenerator {
 		values.put("setupMeanRatio", "0.5");
 		values.put("setupCapRatio", "1.0");
 		values.put("familyCounts", "20:3,40:3,50:4,60:4,80:5,100:6");
-		values.put("familyWithinMeanRatio", "0.4");
+		values.put("familySwitchPenaltyRatio", "2.0");
+		values.put("familySeparationRatioRange", "4.0,5.3");
 		values.put("setupCostCoefficient", "20");
 		values.put("mediumScaleRange", "5,15");
 		values.put("highScaleOffset", "10");

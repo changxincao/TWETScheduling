@@ -127,6 +127,13 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
 		lines.add("seedFile=" + arguments.seedFile.toAbsolutePath());
+		lines.add("dueWindowHalfWidth=" + arguments.dueWindowHalfWidth);
+		lines.add("setupCostCoefficient=" + arguments.setupCostCoefficient);
+		lines.add("outsourcingModel=" + arguments.outsourcingModel);
+		lines.add("outsourcingUnitRate=" + arguments.outsourcingUnitRate);
+		lines.add("discountStrength=" + arguments.discountStrength);
+		lines.add("outsourcingBreakpoint1=" + arguments.outsourcingBreakpoint1);
+		lines.add("outsourcingBreakpoint2=" + arguments.outsourcingBreakpoint2);
 		lines.add("seedRunCount=" + runs.size());
 		for (SeedRun run : runs) {
 			String prefix = "seedRun" + run.repetition + ".";
@@ -232,6 +239,8 @@ public final class FormalExperimentRunner {
 		lines.add("outsourcingModel=" + arguments.outsourcingModel);
 		lines.add("outsourcingUnitRate=" + arguments.outsourcingUnitRate);
 		lines.add("discountStrength=" + arguments.discountStrength);
+		lines.add("outsourcingBreakpoint1=" + arguments.outsourcingBreakpoint1);
+		lines.add("outsourcingBreakpoint2=" + arguments.outsourcingBreakpoint2);
 		lines.add("seedFile=" + (arguments.seedFile == null ? "" : arguments.seedFile.toAbsolutePath()));
 		lines.add("seedFingerprint=" + seedFingerprint);
 		lines.add("cplexThreads=1");
@@ -257,6 +266,8 @@ public final class FormalExperimentRunner {
 		private final String outsourcingModel;
 		private final double outsourcingUnitRate;
 		private final double discountStrength;
+		private final double outsourcingBreakpoint1;
+		private final double outsourcingBreakpoint2;
 		private final double timeLimitSeconds;
 		private final int maxNodes;
 
@@ -280,6 +291,8 @@ public final class FormalExperimentRunner {
 			outsourcingModel = value(values, "outsourcingModel", "none");
 			outsourcingUnitRate = number(values, "outsourcingUnitRate", 1.0);
 			discountStrength = number(values, "discountStrength", 0.0);
+			outsourcingBreakpoint1 = number(values, "outsourcingBreakpoint1", Double.NaN);
+			outsourcingBreakpoint2 = number(values, "outsourcingBreakpoint2", Double.NaN);
 			timeLimitSeconds = number(values, "timeLimitSeconds", 10800.0);
 			maxNodes = integer(values, "maxNodes", 100000);
 		}
@@ -291,6 +304,8 @@ public final class FormalExperimentRunner {
 			scenario.outsourcingEnabled = !"none".equalsIgnoreCase(outsourcingModel);
 			scenario.outsourcingUnitRate = outsourcingUnitRate;
 			scenario.discountStrength = discountStrength;
+			scenario.outsourcingBreakpoint1 = outsourcingBreakpoint1;
+			scenario.outsourcingBreakpoint2 = outsourcingBreakpoint2;
 			return scenario;
 		}
 

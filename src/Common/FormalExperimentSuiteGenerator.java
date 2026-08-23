@@ -12,13 +12,20 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * 生成论文正式实验所需的多机数据和批处理 manifest。
+ * 生成论文实验数据引用和三份正式求解 manifest。
  * <p>
- * 默认主比较只覆盖 n=40/50/60；n=100 数据同时生成，留作扩展性 pilot，避免默认批次直接爆炸。
+ * 实验三只复用已有结果做后处理，因此不生成独立求解任务；compact CPLEX 当前也不进入批次。
  */
 public final class FormalExperimentSuiteGenerator {
 	private static final String WORKSPACE_TOKEN = "${WORKSPACE}";
 	private static final Path WORKSPACE_ROOT = Path.of("").toAbsolutePath().normalize();
+	private static final double SETUP_COST_COEFFICIENT = 20.0;
+	private static final double DEFAULT_DISCOUNT_STRENGTH = 0.15;
+	private static final double[] WINDOW_HALF_WIDTHS = new double[] { 0.0, 100.0, 300.0 };
+	private static final double[] OUTSOURCING_RATES = new double[] { 0.5, 1.0, 2.0 };
+	private static final String[] BPC_ALGORITHMS = new String[] {
+			"NG_DSSR", "TIME_INDEXED", "TIME_INDEXED_SRI" };
+	private static final String[] OUTSOURCING_MODELS = new String[] { "columns", "masterVariables" };
 
 	private FormalExperimentSuiteGenerator() {
 	}
@@ -105,56 +112,81 @@ public final class FormalExperimentSuiteGenerator {
 		ArrayList<RunRow> seedRows = new ArrayList<RunRow>();
 		ArrayList<RunRow> solveRows = new ArrayList<RunRow>();
 		LinkedHashMap<String, Path> seedFiles = new LinkedHashMap<String, Path>();
+		double[] breakpoints = outsourcingBreakpoints(instances);
+		Files.write(options.outputRoot.resolve("experiment.properties"), List.of(
+				"outsourcingQuotation=p*max(wE,wT)",
+				"outsourcingBreakpointReferenceTotal=" + compact(2.0 * breakpoints[1]),
+				"outsourcingBreakpoint1=" + compact(breakpoints[0]),
+				"outsourcingBreakpoint2=" + compact(breakpoints[1]),
+				"outsourcingRates=0.5,1,2",
+				"discountMarginalRates=1,0.85,0.70",
+				"setupCostCoefficient=" + compact(SETUP_COST_COEFFICIENT),
+				"solveTimeLimitSeconds=" + compact(options.timeLimitSeconds),
+				"maxNodes=" + options.maxNodes,
+				"discountModel=" + options.discountModel), StandardCharsets.UTF_8);
 		for (InstanceRef instance : instances) {
-			if (instance.size > 60) {
-				continue;
-			}
 			for (double scale : new double[] { 1.0, 5.0, 10.0 }) {
 				Path scenarioInstance = materializeTimeScaleInstance(options, instance, scale);
-				for (double windowRatio : new double[] { 0.0, 2.0, 6.0 }) {
-					double halfWidth = Math.rint(windowRatio * instance.averageProcessing * scale);
-					String scenario = scenarioId(instance, scale, halfWidth, 0.0);
+				for (double baseHalfWidth : WINDOW_HALF_WIDTHS) {
+					double halfWidth = baseHalfWidth * scale;
+					String scenario = scenarioId(instance, scale, halfWidth, SETUP_COST_COEFFICIENT);
 					Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-					addSeedRow(seedRows, seedFiles, options, scenario, scenarioInstance, seedFile, halfWidth, 0.0);
-					for (String algorithm : new String[] { "NG_DSSR", "TIME_INDEXED", "TIME_INDEXED_SRI" }) {
+					addSeedRow(seedRows, seedFiles, options, scenario, scenarioInstance, seedFile, halfWidth,
+							SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints);
+					for (String algorithm : BPC_ALGORITHMS) {
 						String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
 						solveRows.add(solveRow(options, runId, scenarioInstance, algorithm, seedFile, halfWidth,
-								0.0, "none", 1.0, 0.0, "pricing-comparison"));
+								SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints,
+								"pricing-comparison"));
 					}
 				}
 			}
 		}
 
-		// 外包模型与灵敏度采用原时间尺度和中等窗口，避免和时间尺度实验做全因子乘积。
+		// 外包性能使用原时间尺度，完整交叉窗口、价格和两种 BPC formulation。
 		for (InstanceRef instance : instances) {
-			if (instance.size > 60) {
-				continue;
-			}
-			double halfWidth = Math.rint(2.0 * instance.averageProcessing);
-			String scenario = scenarioId(instance, 1.0, halfWidth, 0.0);
-			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth, 0.0);
-			for (String model : new String[] { "masterVariables", "columns" }) {
-				String runId = "outsourcing-formulation-" + scenario + "-" + model;
-				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
-						0.0, model, 1.0, 0.15, "outsourcing-formulation"));
-			}
-			for (double rate : new double[] { 0.75, 1.0, 1.25 }) {
-				String runId = "outsourcing-price-" + scenario + "-r" + compact(rate);
-				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
-						0.0, "masterVariables", rate, 0.15, "outsourcing-price"));
-			}
-			for (double discount : new double[] { 0.0, 0.15, 0.30 }) {
-				String runId = "outsourcing-discount-" + scenario + "-d" + compact(discount);
-				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
-						0.0, "masterVariables", 1.0, discount, "outsourcing-discount"));
+			for (double halfWidth : WINDOW_HALF_WIDTHS) {
+				for (double rate : OUTSOURCING_RATES) {
+					String scenario = scenarioId(instance, 1.0, halfWidth, SETUP_COST_COEFFICIENT)
+							+ "-or" + compact(rate) + "-d" + compact(DEFAULT_DISCOUNT_STRENGTH);
+					Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
+					addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
+							SETUP_COST_COEFFICIENT, "masterVariables", rate, DEFAULT_DISCOUNT_STRENGTH,
+							breakpoints);
+					for (String model : OUTSOURCING_MODELS) {
+						String runId = "outsourcing-performance-" + scenario + "-" + model;
+						solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
+								SETUP_COST_COEFFICIENT, model, rate, DEFAULT_DISCOUNT_STRENGTH,
+								breakpoints, "outsourcing-performance"));
+					}
+				}
 			}
 		}
 
-		ArrayList<String> lines = new ArrayList<String>();
+		// 实验三只做结果后处理；实验四仅补 n=50、中价、无折扣的缺失求解。
+		for (InstanceRef instance : instances) {
+			if (instance.size != 50) {
+				continue;
+			}
+			for (double halfWidth : WINDOW_HALF_WIDTHS) {
+				String scenario = scenarioId(instance, 1.0, halfWidth, SETUP_COST_COEFFICIENT)
+						+ "-or1-d0";
+				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
+				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
+						SETUP_COST_COEFFICIENT, "masterVariables", 1.0, 0.0, breakpoints);
+				String runId = "outsourcing-discount-" + scenario + "-" + options.discountModel;
+				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
+						SETUP_COST_COEFFICIENT, options.discountModel, 1.0, 0.0, breakpoints,
+						"outsourcing-discount"));
+			}
+		}
+
 		writeManifest(options.outputRoot.resolve("manifest.tsv"), seedRows, solveRows);
 		Path manifestDir = options.outputRoot.resolve("manifests");
 		Files.createDirectories(manifestDir);
+		// 2026-08-23: formulation 与 price 已合并，避免重用输出目录时留下第四、第五份旧清单。
+		Files.deleteIfExists(manifestDir.resolve("outsourcing-formulation.tsv"));
+		Files.deleteIfExists(manifestDir.resolve("outsourcing-price.tsv"));
 		LinkedHashMap<String, RunRow> seedById = new LinkedHashMap<String, RunRow>();
 		for (RunRow seedRow : seedRows) {
 			seedById.put(seedRow.runId, seedRow);
@@ -163,17 +195,19 @@ public final class FormalExperimentSuiteGenerator {
 		for (RunRow solveRow : solveRows) {
 			solvesByBlock.computeIfAbsent(solveRow.block, ignored -> new ArrayList<RunRow>()).add(solveRow);
 		}
-		for (Map.Entry<String, ArrayList<RunRow>> entry : solvesByBlock.entrySet()) {
+		for (String block : new String[] {
+				"pricing-comparison", "outsourcing-performance", "outsourcing-discount" }) {
+			ArrayList<RunRow> blockRows = solvesByBlock.getOrDefault(block, new ArrayList<RunRow>());
 			LinkedHashMap<String, RunRow> requiredSeeds = new LinkedHashMap<String, RunRow>();
-			for (RunRow solveRow : entry.getValue()) {
+			for (RunRow solveRow : blockRows) {
 				RunRow seedRow = seedById.get(solveRow.dependsOn);
 				if (seedRow == null) {
 					throw new IllegalStateException("Missing seed row for " + solveRow.runId + ": " + solveRow.dependsOn);
 				}
 				requiredSeeds.put(seedRow.runId, seedRow);
 			}
-			writeManifest(manifestDir.resolve(entry.getKey() + ".tsv"),
-					new ArrayList<RunRow>(requiredSeeds.values()), entry.getValue());
+			writeManifest(manifestDir.resolve(block + ".tsv"),
+					new ArrayList<RunRow>(requiredSeeds.values()), blockRows);
 		}
 	}
 
@@ -208,7 +242,8 @@ public final class FormalExperimentSuiteGenerator {
 	}
 
 	private static void addSeedRow(List<RunRow> rows, Map<String, Path> seedFiles, Options options, String scenario,
-			Path instance, Path seedFile, double halfWidth, double setupCostCoefficient) {
+			Path instance, Path seedFile, double halfWidth, double setupCostCoefficient, String outsourcingModel,
+			double outsourcingRate, double discount, double[] breakpoints) {
 		if (seedFiles.putIfAbsent(scenario, seedFile) != null) {
 			return;
 		}
@@ -217,59 +252,117 @@ public final class FormalExperimentSuiteGenerator {
 		String args = arguments(mapOf(
 				"action", "seed", "runId", runId, "instance", portable(instance), "seedFile", portable(seedFile),
 				"outputDir", portable(output),
-				"dueWindowHalfWidth", compact(halfWidth), "setupCostCoefficient", compact(setupCostCoefficient)));
+				"dueWindowHalfWidth", compact(halfWidth), "setupCostCoefficient", compact(setupCostCoefficient),
+				"outsourcingModel", outsourcingModel, "outsourcingUnitRate", compact(outsourcingRate),
+				"discountStrength", compact(discount), "outsourcingBreakpoint1", compact(breakpoints[0]),
+				"outsourcingBreakpoint2", compact(breakpoints[1])));
 		rows.add(new RunRow(runId, args, portable(output), "", "seed"));
 	}
 
 	private static RunRow solveRow(Options options, String runId, Path instance, String algorithm, Path seedFile,
 			double halfWidth, double setupCostCoefficient, String outsourcingModel,
-			double outsourcingRate, double discount, String block) {
+			double outsourcingRate, double discount, double[] breakpoints, String block) {
 		Path output = options.outputRoot.resolve("runs").resolve(block).resolve(runId);
 		String args = arguments(mapOf(
 				"action", "solve", "runId", runId, "instance", portable(instance), "algorithm", algorithm,
 				"outputDir", portable(output), "seedFile", portable(seedFile),
 				"dueWindowHalfWidth", compact(halfWidth), "setupCostCoefficient", compact(setupCostCoefficient),
 				"outsourcingModel", outsourcingModel, "outsourcingUnitRate", compact(outsourcingRate),
-				"discountStrength", compact(discount), "timeLimitSeconds", compact(options.timeLimitSeconds),
+				"discountStrength", compact(discount), "outsourcingBreakpoint1", compact(breakpoints[0]),
+				"outsourcingBreakpoint2", compact(breakpoints[1]),
+				"timeLimitSeconds", compact(options.timeLimitSeconds),
 				"maxNodes", Integer.toString(options.maxNodes)));
 		return new RunRow(runId, args, portable(output), "seed-" + stripExtension(seedFile.getFileName().toString()),
 				block);
 	}
 
-	private static void writeReadme(Options options, List<InstanceRef> instances) throws IOException {
-		int mainInstanceCount = 0;
+	/**
+	 * 断点只从 n=50 正式任务集合计算一次；同一任务集合的不同机器副本只计一次。
+	 */
+	private static double[] outsourcingBreakpoints(List<InstanceRef> instances) throws IOException {
+		LinkedHashMap<String, Double> totals = quotationTotals(instances, 50);
+		if (totals.isEmpty()) {
+			totals = quotationTotals(instances, -1);
+		}
+		if (totals.isEmpty()) {
+			throw new IllegalArgumentException("Cannot determine outsourcing breakpoints without instances");
+		}
+		ArrayList<Double> values = new ArrayList<Double>(totals.values());
+		values.sort(Double::compare);
+		double median;
+		int middle = values.size() / 2;
+		if (values.size() % 2 == 0) {
+			median = 0.5 * (values.get(middle - 1).doubleValue() + values.get(middle).doubleValue());
+		} else {
+			median = values.get(middle).doubleValue();
+		}
+		return new double[] { 0.25 * median, 0.50 * median };
+	}
+
+	private static LinkedHashMap<String, Double> quotationTotals(List<InstanceRef> instances, int requiredSize)
+			throws IOException {
+		LinkedHashMap<String, Double> totals = new LinkedHashMap<String, Double>();
 		for (InstanceRef instance : instances) {
-			if (instance.size <= 60) {
-				mainInstanceCount++;
+			if (requiredSize > 0 && instance.size != requiredSize) {
+				continue;
+			}
+			List<String> lines = Files.readAllLines(instance.path, StandardCharsets.UTF_8);
+			StringBuilder taskKey = new StringBuilder();
+			double total = 0.0;
+			for (int row = 1; row <= instance.size; row++) {
+				String normalized = lines.get(row).trim().replaceAll("\\s+", " ");
+				String[] tokens = normalized.split(" ");
+				if (tokens.length < 4) {
+					throw new IOException("Malformed job row " + row + " in " + instance.path);
+				}
+				double processing = Double.parseDouble(tokens[0]);
+				double earlyWeight = Double.parseDouble(tokens[2]);
+				double tardyWeight = Double.parseDouble(tokens[3]);
+				// due center 可能因旧机器派生文件不同；固定断点只按决定 q_j 的字段去重。
+				taskKey.append(tokens[0]).append('/').append(tokens[2]).append('/').append(tokens[3]).append(';');
+				total += processing * Math.max(earlyWeight, tardyWeight);
+			}
+			totals.putIfAbsent(taskKey.toString(), Double.valueOf(total));
+		}
+		return totals;
+	}
+
+	private static void writeReadme(Options options, List<InstanceRef> instances) throws IOException {
+		int mainInstanceCount = instances.size();
+		int n50InstanceCount = 0;
+		for (InstanceRef instance : instances) {
+			if (instance.size == 50) {
+				n50InstanceCount++;
 			}
 		}
-		int seedTaskCount = mainInstanceCount * 9;
-		int pricingTaskCount = seedTaskCount * 3;
-		int outsourcingFormulationTaskCount = mainInstanceCount * 2;
-		int outsourcingPriceTaskCount = mainInstanceCount * 3;
-		int outsourcingDiscountTaskCount = mainInstanceCount * 3;
-		int solveTaskCount = pricingTaskCount + outsourcingFormulationTaskCount
-				+ outsourcingPriceTaskCount + outsourcingDiscountTaskCount;
+		int pricingSeedCount = mainInstanceCount * 9;
+		int outsourcingSeedCount = mainInstanceCount * 9;
+		int discountSeedCount = n50InstanceCount * 3;
+		int seedTaskCount = pricingSeedCount + outsourcingSeedCount + discountSeedCount;
+		int pricingTaskCount = pricingSeedCount * BPC_ALGORITHMS.length;
+		int outsourcingPerformanceTaskCount = outsourcingSeedCount * OUTSOURCING_MODELS.length;
+		int outsourcingDiscountTaskCount = discountSeedCount;
+		int solveTaskCount = pricingTaskCount + outsourcingPerformanceTaskCount + outsourcingDiscountTaskCount;
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("# 正式计算实验 pilot 包");
+		lines.add("# 正式计算实验任务包");
 		lines.add("");
-		lines.add("这个目录先验证落盘实例生成、共享起点、任务依赖、结果输出和服务器并发，不代表论文样本已经冻结。三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，随后三种算法复用同一快照和 SHA-256 fingerprint。");
+		lines.add("三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，待比较方法复用同一快照和 SHA-256 fingerprint。");
 		lines.add("");
 		lines.add("执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。");
 		lines.add("也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。");
 		lines.add("");
-		lines.add("`pricing-comparison` 比较 n=40/50/60、m=2/3/4、相对窗口 0/2/6 倍平均处理时间以及时间尺度 1/5/10。放大后的 processing、due date 和 setup time 已写入 `instances/` 下的独立 `.dat`，runner 不再接收时间倍率。外包模型和灵敏度不与时间尺度做全因子乘积。");
+		lines.add("`pricing-comparison` 使用 W0/W100/W300 和时间尺度 1/5/10 比较三种 BPC；放大后的 processing、due date 和 setup time 写入独立 `.dat`，runner 不接收时间倍率。`outsourcing-performance` 在原时间尺度完整比较三档价格和 columns/masterVariables。`outsourcing-discount` 只补 n=50、中价、无折扣任务。实验三不生成求解任务。");
 		lines.add("");
-		lines.add("已准备实例记录数：" + instances.size() + "；当前每个规模只取按文件名排序后的前 "
-				+ options.casesPerSize + " 个 case。n=100 的 m=2/3/4/5 数据只进入 `instances.tsv`，默认不进入耗时很高的完整精确批次。");
+		lines.add("已准备基础实例记录数：" + instances.size() + "；当前每个规模取 "
+				+ options.casesPerSize + " 个 case。实例抽样和 random/family setup 的最终落盘规则仍由正式数据生成步骤负责。");
 		lines.add("");
 		lines.add("总 manifest 包含 " + seedTaskCount + " 个共享 seed 任务和 " + solveTaskCount
 				+ " 个求解任务。其中 pricing comparison=" + pricingTaskCount
-				+ "，outsourcing formulation=" + outsourcingFormulationTaskCount
-				+ "，outsourcing price=" + outsourcingPriceTaskCount
-				+ "，outsourcing discount=" + outsourcingDiscountTaskCount + "。这些是场景/算法任务数，不是不同原始数据实例数。");
+				+ "，outsourcing performance=" + outsourcingPerformanceTaskCount
+				+ "，outsourcing discount=" + outsourcingDiscountTaskCount
+				+ "。这些是场景/方法任务数，不是不同原始数据实例数。");
 		lines.add("");
-		lines.add("正式批量运行前必须重新确定 `casesPerSize` 和分层抽样规则；当前“前几个文件”只适合 smoke/pilot，不能直接作为论文代表性样本。");
+		lines.add("外包报价为 q_j=p_j*max(wE_j,wT_j)；Q1/Q2 从 n=50 不重复任务集合的报价总量中位数按 25%/50% 一次确定，并写入每条外包任务参数。");
 		Files.write(options.outputRoot.resolve("README.md"), lines, StandardCharsets.UTF_8);
 	}
 
@@ -449,11 +542,12 @@ public final class FormalExperimentSuiteGenerator {
 
 	private static final class Options {
 		private Path dataRoot = Path.of("data");
-		private Path outputRoot = Path.of("experiment-suite", "formal-v1");
+		private Path outputRoot = Path.of("experiment-suite", "formal");
 		private int casesPerSize = 3;
 		private int[] sizes = new int[] { 40, 50, 60, 100 };
 		private double timeLimitSeconds = 10800.0;
 		private int maxNodes = 100000;
+		private String discountModel = "masterVariables";
 
 		private static Options parse(String[] args) {
 			Options options = new Options();
@@ -481,12 +575,18 @@ public final class FormalExperimentSuiteGenerator {
 					options.timeLimitSeconds = Double.parseDouble(value);
 				} else if ("maxNodes".equals(key)) {
 					options.maxNodes = Integer.parseInt(value);
+				} else if ("discountModel".equals(key)) {
+					options.discountModel = value;
 				} else {
 					throw new IllegalArgumentException("Unknown option: " + key);
 				}
 			}
 			if (options.casesPerSize <= 0) {
 				throw new IllegalArgumentException("casesPerSize must be positive");
+			}
+			if (!"columns".equalsIgnoreCase(options.discountModel)
+					&& !"masterVariables".equalsIgnoreCase(options.discountModel)) {
+				throw new IllegalArgumentException("discountModel must be columns or masterVariables");
 			}
 			return options;
 		}

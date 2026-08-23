@@ -32,10 +32,23 @@ public final class FormalExperimentInfrastructureTest {
 		Files.createDirectories(sourceDir);
 		Files.write(sourceDir.resolve("wet003_001.dat"), List.of(
 				"3", "10 20 1 2", "15 35 2 1", "8 48 1 1"), StandardCharsets.UTF_8);
+		Path sourceDir50 = dataRoot.resolve("50-1");
+		Files.createDirectories(sourceDir50);
+		ArrayList<String> jobs50 = new ArrayList<String>();
+		jobs50.add("50");
+		for (int job = 1; job <= 50; job++) {
+			jobs50.add("10 " + (20 + job) + " 1 2");
+		}
+		Files.write(sourceDir50.resolve("wet050_001.dat"), jobs50, StandardCharsets.UTF_8);
 
 		Path suite = root.resolve("suite");
+		Files.createDirectories(suite.resolve("manifests"));
+		Files.writeString(suite.resolve("manifests/outsourcing-formulation.tsv"), "obsolete",
+				StandardCharsets.UTF_8);
+		Files.writeString(suite.resolve("manifests/outsourcing-price.tsv"), "obsolete",
+				StandardCharsets.UTF_8);
 		FormalExperimentSuiteGenerator.main(new String[] {
-				"--dataRoot=" + dataRoot, "--outputRoot=" + suite, "--sizes=3", "--casesPerSize=1",
+				"--dataRoot=" + dataRoot, "--outputRoot=" + suite, "--sizes=3,50", "--casesPerSize=1",
 				"--maxNodes=10" });
 		String manifest = Files.readString(suite.resolve("manifest.tsv"), StandardCharsets.UTF_8);
 		assertContains(manifest, "dependsOn", "dependency column");
@@ -50,12 +63,29 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(!manifest.contains("--timeScale="), "time scale must be materialized in instance files");
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");
-		assertTrue(Files.exists(suite.resolve("manifests/outsourcing-formulation.tsv")),
-				"missing outsourcing formulation manifest");
-		assertTrue(Files.exists(suite.resolve("manifests/outsourcing-price.tsv")),
-				"missing outsourcing price manifest");
+		assertTrue(Files.exists(suite.resolve("manifests/outsourcing-performance.tsv")),
+				"missing outsourcing performance manifest");
 		assertTrue(Files.exists(suite.resolve("manifests/outsourcing-discount.tsv")),
 				"missing outsourcing discount manifest");
+		String discountManifest = Files.readString(suite.resolve("manifests/outsourcing-discount.tsv"),
+				StandardCharsets.UTF_8);
+		assertContains(discountManifest, "--action=\"seed\"", "discount seed task");
+		assertContains(discountManifest, "outsourcing-discount", "discount solve task");
+		assertTrue(!Files.exists(suite.resolve("manifests/outsourcing-formulation.tsv")),
+				"obsolete outsourcing formulation manifest");
+		assertTrue(!Files.exists(suite.resolve("manifests/outsourcing-price.tsv")),
+				"obsolete outsourcing price manifest");
+		assertContains(manifest, "outsourcing-performance", "merged outsourcing performance block");
+		assertContains(manifest, "--outsourcingUnitRate=\"0.5\"", "low outsourcing price");
+		assertContains(manifest, "--outsourcingUnitRate=\"2\"", "high outsourcing price");
+		assertContains(manifest, "--outsourcingBreakpoint1=\"", "fixed first outsourcing breakpoint");
+		assertContains(manifest, "--outsourcingBreakpoint1=\"250\"", "reference first breakpoint");
+		assertContains(manifest, "--outsourcingBreakpoint2=\"500\"", "reference second breakpoint");
+		assertContains(manifest, "--setupCostCoefficient=\"20\"", "formal setup cost coefficient");
+		String experimentProperties = Files.readString(suite.resolve("experiment.properties"),
+				StandardCharsets.UTF_8);
+		assertContains(experimentProperties, "outsourcingQuotation=p*max(wE,wT)", "quotation metadata");
+		assertContains(experimentProperties, "outsourcingBreakpointReferenceTotal=1000", "breakpoint metadata");
 
 		FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
 		scenario.dueWindowHalfWidth = 20.0;
@@ -63,6 +93,8 @@ public final class FormalExperimentInfrastructureTest {
 		scenario.outsourcingEnabled = true;
 		scenario.outsourcingUnitRate = 1.25;
 		scenario.discountStrength = 0.15;
+		scenario.outsourcingBreakpoint1 = 20.0;
+		scenario.outsourcingBreakpoint2 = 40.0;
 		Path scaledInstance = suite.resolve("instances/3-2/wet003_001_2m_timeX5.dat");
 		assertTrue(Files.exists(scaledInstance), "missing materialized time-scale instance");
 		var data = FormalExperimentDataFactory.load(scaledInstance, scenario);
@@ -72,7 +104,11 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(data.p[1] == 50.0, "time scale");
 		assertTrue(data.s[0][1] == 5.0 * baseData.s[0][1], "materialized setup scale");
 		assertTrue(data.d_l[1] - data.d_e[1] == 40.0, "due-window width");
-		assertTrue(data.outsourcingCost[1] == data.p[1], "outsourcing baseline");
+		assertTrue(data.outsourcingCost[1] == data.p[1] * Math.max(data.w_e[1], data.w_t[1]),
+				"outsourcing baseline");
+		assertClose(data.evaluateOutsourcingCost(10.0), 12.5, "first tariff segment");
+		assertClose(data.evaluateOutsourcingCost(30.0), 35.625, "second tariff segment");
+		assertClose(data.evaluateOutsourcingCost(50.0), 55.0, "third tariff segment");
 		assertLegacyTimeScaleRejected();
 
 		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(

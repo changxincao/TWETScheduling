@@ -69,16 +69,27 @@ public final class FormalExperimentDataFactory {
 		}
 		double totalBaseline = 0.0;
 		for (int job = 1; job <= data.n; job++) {
-			// 实验中 b_j 取处理时间，保证外包规模与任务工作量同量纲。
-			data.outsourcingCost[job] = data.p[job];
+			// 2026-08-23: 正式报价量同时反映加工负荷和任务较严格一侧的服务重要性。
+			data.outsourcingCost[job] = data.p[job] * Math.max(data.w_e[job], data.w_t[job]);
 			totalBaseline += data.outsourcingCost[job];
 		}
 		double domainEnd = Math.max(1.0, totalBaseline + 1.0);
 		PiecewiseLinearFunction tariff = new PiecewiseLinearFunction(0.0, domainEnd);
-		double[] ends = new double[] { totalBaseline / 3.0, 2.0 * totalBaseline / 3.0, domainEnd };
+		double firstBreakpoint = scenario.outsourcingBreakpoint1;
+		double secondBreakpoint = scenario.outsourcingBreakpoint2;
+		if (!Double.isFinite(firstBreakpoint) || !Double.isFinite(secondBreakpoint)
+				|| Utility.compareLe(firstBreakpoint, 0.0)
+				|| Utility.compareLe(secondBreakpoint, firstBreakpoint)) {
+			throw new IllegalArgumentException("outsourcing breakpoints must satisfy 0 < Q1 < Q2");
+		}
+		double[] ends = new double[] { Math.min(firstBreakpoint, domainEnd),
+				Math.min(secondBreakpoint, domainEnd), domainEnd };
 		double start = 0.0;
 		double valueAtStart = 0.0;
 		for (int segment = 0; segment < ends.length; segment++) {
+			if (!Utility.compareGt(ends[segment], start)) {
+				continue;
+			}
 			double slope = scenario.outsourcingUnitRate * (1.0 - segment * scenario.discountStrength);
 			double intercept = valueAtStart - slope * start;
 			tariff.addSegment(start, ends[segment], slope, intercept);
@@ -110,5 +121,7 @@ public final class FormalExperimentDataFactory {
 		public boolean outsourcingEnabled = false;
 		public double outsourcingUnitRate = 1.0;
 		public double discountStrength = 0.0;
+		public double outsourcingBreakpoint1 = Double.NaN;
+		public double outsourcingBreakpoint2 = Double.NaN;
 	}
 }

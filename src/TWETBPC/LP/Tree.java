@@ -303,6 +303,15 @@ public class Tree {
 						branched = true;
 						break;
 					}
+					if (strongSelection.hasUnusableTrial()) {
+						// 2026-08-24: NOT_SOLVED 不是不可行证明；沿用正式节点 master 失败语义，
+						// 把完整 strong trial 上下文写入现有 trace 后停止，不能丢弃未知一侧继续搜索。
+						String failure = "strong_trial_not_solved:" + strongSelection.summary();
+						traceSink.onNodeClosed(node, failure, queue.size());
+						heartbeat(node, "strongBranching.failed " + strongSelection.summary());
+						failedByMaster = true;
+						break;
+					}
 					enqueueStrongBranchingChild(queue, strongSelection.result.getLeftNode(), strongSelection.leftTrial,
 							lp, brancher);
 					enqueueStrongBranchingChild(queue, strongSelection.result.getRightNode(), strongSelection.rightTrial,
@@ -324,7 +333,7 @@ public class Tree {
 				branched = true;
 				break;
 			}
-			if (stoppedByTimeLimit) {
+			if (stoppedByTimeLimit || failedByMaster) {
 				break;
 			}
 			if (!branched) {
@@ -1123,6 +1132,11 @@ public class Tree {
 		boolean hasTimeLimitedTrial() {
 			return (leftTrial != null && leftTrial.isTimeLimited())
 					|| (rightTrial != null && rightTrial.isTimeLimited());
+		}
+
+		boolean hasUnusableTrial() {
+			return (leftTrial != null && leftTrial.isUnusable())
+					|| (rightTrial != null && rightTrial.isUnusable());
 		}
 
 		boolean bothChildrenClosed() {

@@ -1,5 +1,7 @@
 # 正式计算实验任务包
 
+> **暂停执行：** 本目录仍是已淘汰的平衡配对时间倍率版本，不符合当前统一方案第1.4节确认的四条独立processing/center随机倍率规则。生成器和数据重建完成前，不得用本目录启动正式长跑；当前唯一规范见 `docs/plans/2026-08-23-正式实验当前统一方案.md`。
+
 三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，待比较方法复用同一快照和 SHA-256 fingerprint。
 
 执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。

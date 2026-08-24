@@ -60,10 +60,10 @@ public final class FormalExperimentInfrastructureTest {
 				"--maxNodes=10" });
 		String manifest = Files.readString(suite.resolve("manifest.tsv"), StandardCharsets.UTF_8);
 		assertContains(manifest, "dependsOn", "dependency column");
-		assertContains(manifest, "\taction\texperiment\ttaskSetId\tsize\tmachines\tsetupType\t"
-				+ "scaleLevel\tnominalScale\twindowLevel\talgorithm\toutsourcingModel\toutsourcingRate\t"
+		assertContains(manifest, "\taction\ttaskSetId\tsize\tmachines\tsetupType\t"
+				+ "scaleLevel\twindowLevel\talgorithm\toutsourcingModel\toutsourcingRate\t"
 				+ "discountLevel", "scheduler selection metadata columns");
-		assertContains(manifest, "\tsolve\tpricing-comparison\tn020-set01\t20\t2\trandom\tbase\t1\tzero\t"
+		assertContains(manifest, "\tsolve\tn020-set01\t20\t2\trandom\tbase\tzero\t"
 				+ "NG_DSSR\t\t\tnot-applicable", "pricing selection metadata values");
 		assertContains(manifest, "NG_DSSR", "ng-DSSR row");
 		assertContains(manifest, "TIME_INDEXED", "time-indexed row");

@@ -75,6 +75,9 @@ public class ExperimentBatchScheduler {
 				allRunSpecs.size(), selection.matchedCount, selection.dependencyCount, runSpecs.size(),
 				selection.localSuccessCount, runSpecs.size() - selection.localSuccessCount,
 				Boolean.toString(scanOnly), selectorTexts.isEmpty() ? "<none>" : selectorTexts);
+		System.out.printf("ExperimentBatchScheduler selected solves: algorithms=%s outsourcingModels=%s%n",
+				countSelectedSolveField(runSpecs, "algorithm"),
+				countSelectedSolveField(runSpecs, "outsourcingModel"));
 		if (runSpecs.isEmpty()) {
 			System.out.println("ExperimentBatchScheduler: no run selected from manifest " + normalizedManifest);
 			return;
@@ -83,6 +86,20 @@ public class ExperimentBatchScheduler {
 			return;
 		}
 		executeRuns(normalizedManifest.getParent(), runSpecs);
+	}
+
+	private static Map<String, Integer> countSelectedSolveField(List<RunSpec> runSpecs, String field) {
+		LinkedHashMap<String, Integer> counts = new LinkedHashMap<String, Integer>();
+		for (RunSpec spec : runSpecs) {
+			if (!"solve".equalsIgnoreCase(spec.fieldValue("action"))) {
+				continue;
+			}
+			String value = spec.fieldValue(field);
+			if (!value.isEmpty()) {
+				counts.merge(value, Integer.valueOf(1), Integer::sum);
+			}
+		}
+		return counts;
 	}
 
 	private SelectionPlan selectRuns(Path manifestDir, List<RunSpec> allRunSpecs,

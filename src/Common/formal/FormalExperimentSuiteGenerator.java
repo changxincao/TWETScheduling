@@ -82,7 +82,7 @@ public final class FormalExperimentSuiteGenerator {
 		for (InstanceRef instance : instances) {
 			String scenario = scenarioId(instance);
 			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, "");
+			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile);
 			for (String algorithm : BPC_ALGORITHMS) {
 				String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
 				solveRows.add(solveRow(options, runId, instance.path, algorithm, seedFile,
@@ -99,8 +99,7 @@ public final class FormalExperimentSuiteGenerator {
 				CompleteInstance complete = outsourcing.require(instance.path, rate, DEFAULT_DISCOUNT_STRENGTH);
 				String scenario = scenarioId(instance) + "-or" + compact(rate) + "-ddefault";
 				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-				addSeedRow(seedRows, seedFiles, options, scenario, complete.path(), seedFile,
-						"masterVariables");
+				addSeedRow(seedRows, seedFiles, options, scenario, complete.path(), seedFile);
 				for (String model : OUTSOURCING_MODELS) {
 					String runId = "outsourcing-performance-" + scenario + "-" + model;
 					solveRows.add(solveRow(options, runId, complete.path(), "NG_DSSR",
@@ -117,8 +116,7 @@ public final class FormalExperimentSuiteGenerator {
 			CompleteInstance complete = outsourcing.require(instance.path, 1.0, 0.0);
 			String scenario = scenarioId(instance) + "-or1-dnone";
 			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-			addSeedRow(seedRows, seedFiles, options, scenario, complete.path(), seedFile,
-					"masterVariables");
+			addSeedRow(seedRows, seedFiles, options, scenario, complete.path(), seedFile);
 			String runId = "outsourcing-discount-" + scenario + "-" + options.discountModel;
 			solveRows.add(solveRow(options, runId, complete.path(), "NG_DSSR", seedFile,
 					options.discountModel, "outsourcing-discount"));
@@ -185,7 +183,7 @@ public final class FormalExperimentSuiteGenerator {
 	}
 
 	private static void addSeedRow(List<RunRow> rows, Map<String, Path> seedFiles, Options options, String scenario,
-			Path instance, Path seedFile, String outsourcingModel) {
+			Path instance, Path seedFile) {
 		if (seedFiles.putIfAbsent(scenario, seedFile) != null) {
 			return;
 		}
@@ -194,7 +192,6 @@ public final class FormalExperimentSuiteGenerator {
 		Map<String, String> values = mapOf(
 				"action", "seed", "runId", runId, "instance", portable(instance), "seedFile", portable(seedFile),
 				"outputDir", portable(output));
-		putIfNotEmpty(values, "outsourcingModel", outsourcingModel);
 		String args = arguments(values);
 		rows.add(new RunRow(runId, args, portable(output), "", "seed"));
 	}

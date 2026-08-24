@@ -44,7 +44,7 @@ public final class FormalExperimentRunner {
 			writeSeed(arguments);
 			return;
 		}
-		Data data = arguments.loadData();
+		Data data = arguments.loadSolveData();
 		runSolver(data, arguments);
 	}
 
@@ -74,12 +74,9 @@ public final class FormalExperimentRunner {
 		long utilitySeed = deterministicSeed(arguments.runId, repetition, 0x9e3779b9L);
 		EngineALNS.rng = new Random(alnsSeed);
 		Utility.rng = new Random(utilitySeed);
-		Data data = arguments.loadData();
+		Data data = arguments.loadInstance();
 		TWETBPCConfig config = new TWETBPCConfig();
 		BestBpcProfiles.NG_DSSR.apply(config);
-		if (data.hasOutsourcingData()) {
-			config.outsourcingModel = arguments.outsourcingModel;
-		}
 		config.reuseConfiguredBestSolution = false;
 		config.fixedInitialColumnSeed = null;
 		Pool pool = new Pool(data);
@@ -131,8 +128,6 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
 		lines.add("seedFile=" + arguments.seedFile.toAbsolutePath());
-		lines.add("outsourcingModel=" + (arguments.outsourcingModel.isEmpty()
-				? "not-applicable" : arguments.outsourcingModel));
 		lines.add("seedRunCount=" + runs.size());
 		for (SeedRun run : runs) {
 			String prefix = "seedRun" + run.repetition + ".";
@@ -281,12 +276,19 @@ public final class FormalExperimentRunner {
 			String seed = value(values, "seedFile", "");
 			seedFile = seed.isEmpty() ? null : Path.of(seed);
 			outsourcingModel = value(values, "outsourcingModel", "");
+			if ("seed".equals(action) && !outsourcingModel.isEmpty()) {
+				throw new IllegalArgumentException("seed action does not use --outsourcingModel");
+			}
 			timeLimitSeconds = number(values, "timeLimitSeconds", 10800.0);
 			maxNodes = integer(values, "maxNodes", 100000);
 		}
 
-		private Data loadData() throws Exception {
-			Data data = FormalExperimentDataFactory.load(instance);
+		private Data loadInstance() throws Exception {
+			return FormalExperimentDataFactory.load(instance);
+		}
+
+		private Data loadSolveData() throws Exception {
+			Data data = loadInstance();
 			FormalExperimentDataFactory.validateOutsourcingModel(data, outsourcingModel, instance);
 			return data;
 		}

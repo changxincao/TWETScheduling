@@ -75,6 +75,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(!manifest.contains("--outsourcingUnitRate="), "outsourcing rate must be materialized");
 		assertTrue(!manifest.contains("--discountStrength="), "discount must be materialized");
 		assertTrue(!manifest.contains("--outsourcingData="), "complete outsourcing files need one input path");
+		assertSeedRowsDoNotSpecifyOutsourcingModel(suite.resolve("manifest.tsv"));
 		assertPricingRowsDoNotSpecifyOutsourcingModel(suite.resolve("manifests/pricing-comparison.tsv"));
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");
@@ -131,6 +132,7 @@ public final class FormalExperimentInfrastructureTest {
 				== baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]), "persisted outsourcing baseline");
 		assertClose(outsourcingData.evaluateOutsourcingCost(10.0), 10.0, "persisted tariff first segment");
 		assertUnknownArgumentRejected();
+		assertSeedOutsourcingModelRejected(baseRow.path);
 
 		ArrayList<Integer> internalJobs = new ArrayList<Integer>();
 		for (int job = 1; job < outsourcingData.n; job++) {
@@ -191,6 +193,15 @@ public final class FormalExperimentInfrastructureTest {
 		for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
 			assertTrue(!line.contains("--outsourcingModel="),
 					"scheduling-only manifest must infer no-outsourcing from the instance");
+		}
+	}
+
+	private static void assertSeedRowsDoNotSpecifyOutsourcingModel(Path path) throws Exception {
+		for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+			if (line.contains("--action=\"seed\"")) {
+				assertTrue(!line.contains("--outsourcingModel="),
+						"seed generation must not depend on an outsourcing formulation");
+			}
 		}
 	}
 
@@ -357,6 +368,17 @@ public final class FormalExperimentInfrastructureTest {
 			throw new AssertionError("unknown argument should be rejected");
 		} catch (IllegalArgumentException expected) {
 			assertTrue(expected.getMessage().contains("Unknown argument"), "unknown argument error message");
+		}
+	}
+
+	private static void assertSeedOutsourcingModelRejected(Path instance) throws Exception {
+		try {
+			FormalExperimentRunner.main(new String[] { "--action=seed", "--instance=" + instance,
+					"--outsourcingModel=masterVariables" });
+			throw new AssertionError("seed formulation should be rejected");
+		} catch (IllegalArgumentException expected) {
+			assertTrue(expected.getMessage().contains("seed action does not use"),
+					"seed formulation error message");
 		}
 	}
 

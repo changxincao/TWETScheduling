@@ -346,7 +346,8 @@ public class Tree {
 		}
 
 		boolean timeLimitReached = isSolveTimeLimitReached(solveStartNanos);
-		bestBound = finalBound(queue, incumbentCost, bestBound, stoppedByTimeLimit || timeLimitReached);
+		bestBound = finalBound(queue, incumbentCost, bestBound,
+				stoppedByTimeLimit || timeLimitReached || failedByMaster);
 		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), stoppedByTimeLimit, timeLimitReached,
 				failedByMaster);
 		if (lightweightSeedPreparationCalls > 0) {
@@ -652,7 +653,8 @@ public class Tree {
 			StrongBranchingTrialResult leftTrial = solveStrongBranchingRmpTrial(candidate, "left",
 					branchResult.getLeftNode(), parentLp, domainRepair, lightweightRepair, incumbentCost);
 			applyTrialSeed(branchResult.getLeftNode(), leftTrial);
-			if (leftTrial != null && leftTrial.isTimeLimited()) {
+			// NOT_SOLVED 必须在试算现场立即上送，不能进入候选排序后被其它 candidate 掩盖。
+			if (leftTrial != null && (leftTrial.isTimeLimited() || leftTrial.isUnusable())) {
 				return new StrongBranchingSelection(branchResult, candidate, leftTrial, null, 0.0, false,
 						candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
 			}
@@ -663,10 +665,10 @@ public class Tree {
 					: strongBranchingScore(parentBound, leftTrial, rightTrial);
 			StrongBranchingSelection selection = new StrongBranchingSelection(branchResult, candidate, leftTrial,
 					rightTrial, score, false, candidateCount, candidates.size(), candidateIndex + 1, candidatePreview);
-			phase1.add(selection);
-			if (selection.hasTimeLimitedTrial()) {
+			if (selection.hasTimeLimitedTrial() || selection.hasUnusableTrial()) {
 				return selection;
 			}
+			phase1.add(selection);
 			if (selection.bothChildrenClosed()) {
 				return selection;
 			}
@@ -694,7 +696,7 @@ public class Tree {
 			StrongBranchingTrialResult leftTrial = !selected.leftTrial.isReusableForQueue()
 					? selected.leftTrial : solveStrongBranchingHeuristicTrial(selected.result.getLeftNode());
 			applyTrialSeed(selected.result.getLeftNode(), leftTrial);
-			if (leftTrial != null && leftTrial.isTimeLimited()) {
+			if (leftTrial != null && (leftTrial.isTimeLimited() || leftTrial.isUnusable())) {
 				return new StrongBranchingSelection(selected.result, selected.candidate, leftTrial, selected.rightTrial,
 						0.0, true, selected.candidateCount, selected.testedCandidateCount, selected.rankByHalf,
 						selected.candidatePreview);
@@ -707,10 +709,10 @@ public class Tree {
 			StrongBranchingSelection selection = new StrongBranchingSelection(selected.result, selected.candidate,
 					leftTrial, rightTrial, score, true, selected.candidateCount, selected.testedCandidateCount,
 					selected.rankByHalf, selected.candidatePreview);
-			phase2.add(selection);
-			if (selection.hasTimeLimitedTrial()) {
+			if (selection.hasTimeLimitedTrial() || selection.hasUnusableTrial()) {
 				return selection;
 			}
+			phase2.add(selection);
 		}
 		Collections.sort(phase2, new Comparator<StrongBranchingSelection>() {
 			@Override
@@ -967,11 +969,11 @@ public class Tree {
 	}
 
 	private double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound,
-			boolean timeLimitReached) {
+			boolean searchIncomplete) {
 		// 2026-05-19: 如果队列为空，所有节点已经关闭，最终 LB 应等于 incumbent；
-		// 如果达到节点上限仍有 open node，则用 open queue 中最小伪下界作为当前全局 LB。
+		// 如果搜索因时限或 master 失败而中断，队列为空也不能伪装成正常闭合。
 		if (queue.isEmpty()) {
-			return timeLimitReached ? lastReportedBound : incumbentCost;
+			return searchIncomplete ? lastReportedBound : incumbentCost;
 		}
 		double bound = queue.peek().pseudoCost;
 		// 2026-06-25: root 尚未处理或伪下界仍是占位大数时，不能把 bound 截成 incumbent；

@@ -12,6 +12,7 @@
 | 4 | [RouteOpt: An Open-Source Modular Exact Solver for Vehicle Routing Problems](09-routeopt/PDFs/RouteOpt_An_Open-Source_Modular_Exact_Solver_for_Vehicle_Routing_Problems.pdf) | 现代 VRP exact solver 的完整流程和模块边界 | 仅用于实现对照；现成 CVRP/VRPTW 应用不能直接求解当前 TWET |
 | 5 | [A Generic Exact Solver for Vehicle Routing and Related Problems](10-vrpsolver-generic-exact/PDFs/A_Generic_Exact_Solver_for_Vehicle_Routing_and_Related_Problems.pdf) | VRPSolver/BaPCod 的 packing set、ng-route、rank-1、enumeration 与分支框架 | 仅用于逻辑对照；通用 RCSP 接口不能直接表达当前 PWLF 定价语义 |
 | 6 | [Resource-Window Reduction by Reduced Costs in Path-Based Formulations for Routing and Scheduling Problems](08-arc-specific-resource-windows/PDFs/Resource-Window_Reduction_by_Reduced_Costs_in_Path-Based_Formulations_for_Routing_and_Scheduling_Problems.pdf) | reduced-cost resource windows、arc-specific fixing | 与现有 dual-window、time-arc fixing 的正确性边界和实现细节直接相关 |
+| 7 | [A Branch-and-Price Algorithm for the Minimum Latency Problem](12-minimum-latency-ng-memory/PDFs/A_Branch-and-Price_Algorithm_for_the_Minimum_Latency_Problem.pdf) | arc-based ng-memory、fully dynamic memory reduction、multiple partial label dominance | 完成时间型目标与 TWET 接近；arc/dynamic 组件没有干净独立消融，需先做实现语义对照 |
 
 ## 条件性参考
 
@@ -25,4 +26,4 @@
 
 ## 文件校验
 
-本批共 11 篇正文。下载后逐份检查了 `%PDF` 文件签名、下载清单中的 SHA-256，并用 PDF 解析器读取页数和首页文本；所有文件均通过。2LBB 预印本的内部交叉引用表存在非致命告警，但 74 页正文可正常解析和阅读。
+本批共 12 篇正文。下载后逐份检查了 `%PDF` 文件签名、下载清单中的 SHA-256，并用 PDF 解析器读取页数和首页文本；所有文件均可正常解析和阅读。2LBB 预印本的内部交叉引用表存在非致命告警；Minimum Latency 开放技术报告的 PDF 交叉引用起点存在非致命告警，28 页正文仍可完整提取。

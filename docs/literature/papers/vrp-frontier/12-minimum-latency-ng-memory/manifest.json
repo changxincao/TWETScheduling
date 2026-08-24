@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T11:31:47.002Z",
+  "request": {
+    "topic": "",
+    "title": "A Branch-and-Price Algorithm for the Minimum Latency Problem",
+    "dois": [],
+    "pdf_url": "https://www.math.u-bordeaux.fr/~rsadykov/papers/BulhoesSadykovUchoa_LOGIS17.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 2.6
+  },
+  "results": [
+    {
+      "title": "A Branch-and-Price Algorithm for the Minimum Latency Problem",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\12-minimum-latency-ng-memory\\PDFs\\A_Branch-and-Price_Algorithm_for_the_Minimum_Latency_Problem.pdf",
+      "bytes": 329733,
+      "sha256": "2a9d2df02550622c0cf9a18fdee7c1994764ae755978050dfa46b814eff425a4",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://www.math.u-bordeaux.fr/~rsadykov/papers/BulhoesSadykovUchoa_LOGIS17.pdf",
+      "si_requested": false
+    }
+  ]
+}

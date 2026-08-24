@@ -71,6 +71,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(!manifest.contains("--setupCostCoefficient="), "setup cost must be materialized");
 		assertTrue(!manifest.contains("--outsourcingUnitRate="), "outsourcing rate must be materialized");
 		assertTrue(!manifest.contains("--discountStrength="), "discount must be materialized");
+		assertTrue(!manifest.contains("--outsourcingData="), "complete outsourcing files need one input path");
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");
 		assertPricingWindowMatrix(suite.resolve("manifests/pricing-comparison.tsv"));
@@ -87,7 +88,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(!Files.exists(suite.resolve("manifests/outsourcing-price.tsv")),
 				"obsolete outsourcing price manifest");
 		assertContains(manifest, "outsourcing-performance", "merged outsourcing performance block");
-		assertContains(manifest, "--outsourcingData=\"${WORKSPACE}/", "persisted outsourcing overlay");
+		assertContains(manifest, "/outsourcing-data/default-discount/", "complete outsourcing instance path");
 		String experimentProperties = Files.readString(suite.resolve("experiment.properties"),
 				StandardCharsets.UTF_8);
 		assertContains(experimentProperties, "outsourcingQuotation=p*max(wE,wT)", "quotation metadata");
@@ -116,12 +117,12 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(scaledCenter == firstCenterMultiplier * baseCenter, "independent due-center scale");
 		assertTrue(data.getSetupCost(1, 2) == 20.0 * data.s[1][2], "persisted setup cost");
 		assertTrue(data.outsourcingCost[1] >= Common.Utility.big_M, "no-outsourcing data remains disabled");
-		Path overlay = findOutsourcingOverlay(suite, "n020-set01", 1.0, 0.15);
-		var outsourcingData = FormalExperimentDataFactory.loadOutsourcing(baseRow.path, overlay);
+		Path completeOutsourcing = findOutsourcingInstance(suite, baseRow.path, 1.0, 0.15);
+		assertSchedulingPrefix(baseRow.path, completeOutsourcing);
+		var outsourcingData = FormalExperimentDataFactory.loadOutsourcing(completeOutsourcing);
 		assertTrue(outsourcingData.outsourcingCost[1]
 				== baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]), "persisted outsourcing baseline");
 		assertClose(outsourcingData.evaluateOutsourcingCost(10.0), 10.0, "persisted tariff first segment");
-		assertOutsourcingOverlayRejectsSchedulingBlocks(root, baseRow.path, outsourcingData.n);
 		assertUnknownArgumentRejected();
 
 		ArrayList<Integer> internalJobs = new ArrayList<Integer>();
@@ -218,18 +219,29 @@ public final class FormalExperimentInfrastructureTest {
 		throw new AssertionError("Missing window vector");
 	}
 
-	private static Path findOutsourcingOverlay(Path suite, String taskSetId, double rate,
+	private static Path findOutsourcingInstance(Path suite, Path sourceInstance, double rate,
 			double discount) throws Exception {
-		List<String> lines = Files.readAllLines(suite.resolve("instances/outsourcing-data.tsv"),
+		List<String> lines = Files.readAllLines(suite.resolve("instances/outsourcing-instances.tsv"),
 				StandardCharsets.UTF_8);
+		Path normalizedSource = sourceInstance.toAbsolutePath().normalize();
 		for (int row = 1; row < lines.size(); row++) {
 			String[] fields = lines.get(row).split("\\t", -1);
-			if (fields[0].equals(taskSetId) && Double.parseDouble(fields[1]) == rate
-					&& Double.parseDouble(fields[2]) == discount) {
-				return suite.resolve("instances").resolve(fields[6]).normalize();
+			Path indexedSource = suite.resolve("instances").resolve(fields[11]).normalize()
+					.toAbsolutePath().normalize();
+			if (indexedSource.equals(normalizedSource) && Double.parseDouble(fields[5]) == rate
+					&& Double.parseDouble(fields[6]) == discount) {
+				return suite.resolve("instances").resolve(fields[12]).normalize();
 			}
 		}
-		throw new AssertionError("Missing outsourcing overlay");
+		throw new AssertionError("Missing complete outsourcing instance");
+	}
+
+	private static void assertSchedulingPrefix(Path scheduling, Path outsourcing) throws Exception {
+		List<String> schedulingLines = Files.readAllLines(scheduling, StandardCharsets.UTF_8);
+		List<String> outsourcingLines = Files.readAllLines(outsourcing, StandardCharsets.UTF_8);
+		assertTrue(outsourcingLines.size() > schedulingLines.size(), "outsourcing file appends economic blocks");
+		assertTrue(outsourcingLines.subList(0, schedulingLines.size()).equals(schedulingLines),
+				"complete outsourcing file preserves scheduling prefix");
 	}
 
 	private static void assertFixedOutsourcingRestoration(Basic.Data data, FixedInitialColumnSeed seed) {
@@ -341,30 +353,6 @@ public final class FormalExperimentInfrastructureTest {
 			throw new AssertionError("unknown argument should be rejected");
 		} catch (IllegalArgumentException expected) {
 			assertTrue(expected.getMessage().contains("Unknown argument"), "unknown argument error message");
-		}
-	}
-
-	private static void assertOutsourcingOverlayRejectsSchedulingBlocks(Path root, Path schedulingPath, int n)
-			throws Exception {
-		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("SETUP_COST");
-		String zeroRow = "0" + " 0".repeat(n);
-		for (int row = 0; row <= n; row++) {
-			lines.add(zeroRow);
-		}
-		lines.add("OUTSOURCING_COST");
-		lines.add("1" + " 1".repeat(n - 1));
-		lines.add("OUTSOURCING_TARIFF");
-		lines.add("1");
-		lines.add("0 1000000000 1 0");
-		Path invalidOverlay = root.resolve("invalid-outsourcing-overlay.dat");
-		Files.write(invalidOverlay, lines, StandardCharsets.UTF_8);
-		try {
-			FormalExperimentDataFactory.loadOutsourcing(schedulingPath, invalidOverlay);
-			throw new AssertionError("outsourcing overlay must reject scheduling blocks");
-		} catch (java.io.IOException expected) {
-			assertTrue(expected.getMessage().contains("Unknown block in outsourcing overlay"),
-					"strict outsourcing overlay error message");
 		}
 	}
 

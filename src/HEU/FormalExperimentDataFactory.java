@@ -5,7 +5,7 @@ import java.nio.file.Path;
 
 import Basic.Data;
 
-/** 正式实验只读取已落盘的调度数据，并按需叠加已落盘的外包经济数据。 */
+/** 正式实验只读取已经完整落盘的单个实例文件。 */
 public final class FormalExperimentDataFactory {
 
 	private FormalExperimentDataFactory() {
@@ -15,11 +15,12 @@ public final class FormalExperimentDataFactory {
 		return new Data(schedulingInstance.toString(), true, true);
 	}
 
-	public static Data loadOutsourcing(Path schedulingInstance, Path outsourcingOverlay)
-			throws IOException {
-		if (outsourcingOverlay == null) {
-			throw new IllegalArgumentException("Outsourcing experiments require a persisted overlay file");
+	public static Data loadOutsourcing(Path completeInstance) throws IOException {
+		Data data = new Data(completeInstance.toString(), true, true);
+		if (!data.hasOutsourcingData()) {
+			throw new IOException("Outsourcing instance is missing OUTSOURCING_COST or OUTSOURCING_TARIFF: "
+					+ completeInstance);
 		}
-		return new Data(schedulingInstance.toString(), outsourcingOverlay.toString(), true, true);
+		return data;
 	}
 }

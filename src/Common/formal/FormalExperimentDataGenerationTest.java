@@ -30,12 +30,17 @@ public final class FormalExperimentDataGenerationTest {
 				generator.generate(suite.resolve("instances"), FormalExperimentDesign.TASK_SIZES);
 		FormalSetupAuditRunner.AuditSummary audit = FormalSetupAuditRunner.audit(suite);
 		FormalTimeScaleAuditRunner.AuditSummary scaleAudit = FormalTimeScaleAuditRunner.audit(suite);
+		FormalOutsourcingAuditRunner.AuditSummary outsourcingAudit = FormalOutsourcingAuditRunner.audit(suite);
 		assertTrue(first.taskSets().size() == 6, "six task sizes");
 		assertTrue(first.instances().size() == 324,
 				"six sizes x two setups x three scales x three windows x three machines");
 		assertTrue(audit.fileCount() == 324 && audit.groupCount() == 108,
 				"independent setup audit coverage");
 		assertTrue(scaleAudit.fileCount() == 324, "independent time-scale audit coverage");
+		assertTrue(outsourcingAudit.defaultDiscountCount() == 324,
+				"base scheduling scenarios x three prices");
+		assertTrue(outsourcingAudit.noDiscountCount() == 18,
+				"n50 base scenarios get separate no-discount files");
 		assertTrue(audit.maxRelativeMeanError() <= 0.005, "setup relative mean tolerance");
 
 		HashMap<String, String> selected = selectedJobs(suite.resolve("instances/task-selection.tsv"));

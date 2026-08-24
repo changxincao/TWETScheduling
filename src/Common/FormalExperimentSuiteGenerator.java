@@ -14,7 +14,7 @@ import Common.formal.FormalExperimentDataGenerator;
 import Common.formal.FormalExperimentDataGenerator.GeneratedInstance;
 import Common.formal.FormalExperimentDesign;
 import Common.formal.FormalOutsourcingDataGenerator;
-import Common.formal.FormalOutsourcingDataGenerator.Overlay;
+import Common.formal.FormalOutsourcingDataGenerator.CompleteInstance;
 import Common.formal.FormalOutsourcingAuditRunner;
 import Common.formal.FormalSetupAuditRunner;
 import Common.formal.FormalTimeScaleAuditRunner;
@@ -88,10 +88,10 @@ public final class FormalExperimentSuiteGenerator {
 		for (InstanceRef instance : instances) {
 			String scenario = scenarioId(instance);
 			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, null, seedFile, "none");
+			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, "none");
 			for (String algorithm : BPC_ALGORITHMS) {
 				String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
-				solveRows.add(solveRow(options, runId, instance.path, null, algorithm, seedFile,
+				solveRows.add(solveRow(options, runId, instance.path, algorithm, seedFile,
 						"none", "pricing-comparison"));
 			}
 		}
@@ -102,14 +102,14 @@ public final class FormalExperimentSuiteGenerator {
 				continue;
 			}
 			for (double rate : OUTSOURCING_RATES) {
-				Overlay overlay = outsourcing.require(instance.taskSetId, rate, DEFAULT_DISCOUNT_STRENGTH);
+				CompleteInstance complete = outsourcing.require(instance.path, rate, DEFAULT_DISCOUNT_STRENGTH);
 				String scenario = scenarioId(instance) + "-or" + compact(rate) + "-ddefault";
 				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, overlay.path(),
-						seedFile, "masterVariables");
+				addSeedRow(seedRows, seedFiles, options, scenario, complete.path(), seedFile,
+						"masterVariables");
 				for (String model : OUTSOURCING_MODELS) {
 					String runId = "outsourcing-performance-" + scenario + "-" + model;
-					solveRows.add(solveRow(options, runId, instance.path, overlay.path(), "NG_DSSR",
+					solveRows.add(solveRow(options, runId, complete.path(), "NG_DSSR",
 							seedFile, model, "outsourcing-performance"));
 				}
 			}
@@ -120,13 +120,13 @@ public final class FormalExperimentSuiteGenerator {
 			if (instance.size != 50 || !instance.scaleLevel.equals("base")) {
 				continue;
 			}
-			Overlay overlay = outsourcing.require(instance.taskSetId, 1.0, 0.0);
+			CompleteInstance complete = outsourcing.require(instance.path, 1.0, 0.0);
 			String scenario = scenarioId(instance) + "-or1-dnone";
 			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, overlay.path(), seedFile,
+			addSeedRow(seedRows, seedFiles, options, scenario, complete.path(), seedFile,
 					"masterVariables");
 			String runId = "outsourcing-discount-" + scenario + "-" + options.discountModel;
-			solveRows.add(solveRow(options, runId, instance.path, overlay.path(), "NG_DSSR", seedFile,
+			solveRows.add(solveRow(options, runId, complete.path(), "NG_DSSR", seedFile,
 					options.discountModel, "outsourcing-discount"));
 		}
 
@@ -191,7 +191,7 @@ public final class FormalExperimentSuiteGenerator {
 	}
 
 	private static void addSeedRow(List<RunRow> rows, Map<String, Path> seedFiles, Options options, String scenario,
-			Path instance, Path outsourcingData, Path seedFile, String outsourcingModel) {
+			Path instance, Path seedFile, String outsourcingModel) {
 		if (seedFiles.putIfAbsent(scenario, seedFile) != null) {
 			return;
 		}
@@ -199,19 +199,17 @@ public final class FormalExperimentSuiteGenerator {
 		Path output = options.outputRoot.resolve("runs").resolve(runId);
 		String args = arguments(mapOf(
 				"action", "seed", "runId", runId, "instance", portable(instance), "seedFile", portable(seedFile),
-				"outputDir", portable(output), "outsourcingModel", outsourcingModel,
-				"outsourcingData", outsourcingData == null ? "" : portable(outsourcingData)));
+				"outputDir", portable(output), "outsourcingModel", outsourcingModel));
 		rows.add(new RunRow(runId, args, portable(output), "", "seed"));
 	}
 
-	private static RunRow solveRow(Options options, String runId, Path instance, Path outsourcingData,
+	private static RunRow solveRow(Options options, String runId, Path instance,
 			String algorithm, Path seedFile, String outsourcingModel, String block) {
 		Path output = options.outputRoot.resolve("runs").resolve(block).resolve(runId);
 		String args = arguments(mapOf(
 				"action", "solve", "runId", runId, "instance", portable(instance), "algorithm", algorithm,
 				"outputDir", portable(output), "seedFile", portable(seedFile),
 				"outsourcingModel", outsourcingModel,
-				"outsourcingData", outsourcingData == null ? "" : portable(outsourcingData),
 				"timeLimitSeconds", compact(options.timeLimitSeconds),
 				"maxNodes", Integer.toString(options.maxNodes)));
 		return new RunRow(runId, args, portable(output), "seed-" + stripExtension(seedFile.getFileName().toString()),
@@ -246,7 +244,7 @@ public final class FormalExperimentSuiteGenerator {
 		lines.add("执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。");
 		lines.add("也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。");
 		lines.add("");
-		lines.add("`pricing-comparison` 使用逐任务落盘的 zero/narrow/wide 窗口和 base/medium/high 三个尺度比较三种 BPC。medium/high 的 processing 与 due-center 倍率独立抽取，setup 按实际 processing workload 比例整体缩放。`outsourcing-performance` 在原时间尺度比较三档已落盘报价 overlay 和 columns/masterVariables；`outsourcing-discount` 只补 n=50、中价、无折扣 overlay。runner 不构造任何物理或经济数据。");
+		lines.add("`pricing-comparison` 使用逐任务落盘的 zero/narrow/wide 窗口和 base/medium/high 三个尺度比较三种 BPC。medium/high 的 processing 与 due-center 倍率独立抽取，setup 按实际 processing workload 比例整体缩放。`outsourcing-performance` 使用包含完整调度与经济数据的单文件，在原时间尺度比较三档报价和 columns/masterVariables；`outsourcing-discount` 只补 n=50、中价、无折扣的完整文件。runner 不构造任何物理或经济数据。");
 		lines.add("");
 		lines.add("已准备落盘实例记录数：" + instances.size() + "；每个规模固定取 "
 				+ options.casesPerSize + " 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率、逐任务窗口、setup 和外包审计见 `instances/` 下的 metadata 与三个 `post-generation-*-audit.tsv`。");

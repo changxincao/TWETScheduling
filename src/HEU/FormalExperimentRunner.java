@@ -127,7 +127,6 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
 		lines.add("seedFile=" + arguments.seedFile.toAbsolutePath());
-		lines.add("outsourcingData=" + pathValue(arguments.outsourcingData));
 		lines.add("outsourcingModel=" + arguments.outsourcingModel);
 		lines.add("seedRunCount=" + runs.size());
 		for (SeedRun run : runs) {
@@ -157,10 +156,6 @@ public final class FormalExperimentRunner {
 			sequences.add(new ArrayList<Integer>(pool.getColumn(columnId).getSequence()));
 		}
 		return sequences;
-	}
-
-	private static String pathValue(Path path) {
-		return path == null ? "" : path.toAbsolutePath().toString();
 	}
 
 	static final class SeedRun {
@@ -233,7 +228,6 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("algorithm=" + profile.getName());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
-		lines.add("outsourcingData=" + pathValue(arguments.outsourcingData));
 		lines.add("outsourcingModel=" + arguments.outsourcingModel);
 		lines.add("seedFile=" + (arguments.seedFile == null ? "" : arguments.seedFile.toAbsolutePath()));
 		lines.add("seedFingerprint=" + seedFingerprint);
@@ -251,7 +245,7 @@ public final class FormalExperimentRunner {
 	private static final class Arguments {
 		private static final java.util.Set<String> SUPPORTED_KEYS = java.util.Set.of(
 				"action", "instance", "algorithm", "runId", "outputDir", "seedFile",
-				"outsourcingData", "outsourcingModel", "timeLimitSeconds", "maxNodes");
+				"outsourcingModel", "timeLimitSeconds", "maxNodes");
 
 		private final String action;
 		private final Path instance;
@@ -259,7 +253,6 @@ public final class FormalExperimentRunner {
 		private final String runId;
 		private final Path outputDir;
 		private final Path seedFile;
-		private final Path outsourcingData;
 		private final String outsourcingModel;
 		private final double timeLimitSeconds;
 		private final int maxNodes;
@@ -280,21 +273,15 @@ public final class FormalExperimentRunner {
 			outputDir = Path.of(value(values, "outputDir", "results/formal/" + runId));
 			String seed = value(values, "seedFile", "");
 			seedFile = seed.isEmpty() ? null : Path.of(seed);
-			String overlay = value(values, "outsourcingData", "");
-			outsourcingData = overlay.isEmpty() ? null : Path.of(overlay);
 			outsourcingModel = value(values, "outsourcingModel", "none");
-			if ("none".equalsIgnoreCase(outsourcingModel) != (outsourcingData == null)) {
-				throw new IllegalArgumentException(
-						"outsourcingModel=none requires no overlay; outsourcing models require --outsourcingData");
-			}
 			timeLimitSeconds = number(values, "timeLimitSeconds", 10800.0);
 			maxNodes = integer(values, "maxNodes", 100000);
 		}
 
 		private Data loadData() throws Exception {
-			return outsourcingData == null
+			return "none".equalsIgnoreCase(outsourcingModel)
 					? FormalExperimentDataFactory.loadNoOutsourcing(instance)
-					: FormalExperimentDataFactory.loadOutsourcing(instance, outsourcingData);
+					: FormalExperimentDataFactory.loadOutsourcing(instance);
 		}
 
 		private static Arguments parse(String[] args) {

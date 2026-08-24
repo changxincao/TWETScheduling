@@ -38,6 +38,7 @@ public final class FormalExperimentDataGenerator {
 
 	public GenerationResult generate(Path outputRoot, int[] sizes) throws IOException {
 		resetGeneratedData(outputRoot.resolve("data"));
+		resetGeneratedData(outputRoot.resolve("outsourcing-data"));
 		Files.createDirectories(outputRoot);
 		List<FormalTaskSet> taskSets = taskSetGenerator.generate(sizes);
 		Map<String, List<Scale>> scalesByTaskSet = timeScaleGenerator.generate(taskSets);
@@ -85,7 +86,7 @@ public final class FormalExperimentDataGenerator {
 		Files.write(outputRoot.resolve("setup-audit.tsv"), setupMetadata, StandardCharsets.UTF_8);
 		writeDesignProperties(outputRoot, sizes, casesPerSize);
 		FormalOutsourcingDataGenerator.Result outsourcing =
-				outsourcingDataGenerator.generate(outputRoot, taskSets);
+				outsourcingDataGenerator.generate(outputRoot, taskSets, instances);
 		return new GenerationResult(List.copyOf(taskSets), List.copyOf(instances), outsourcing);
 	}
 

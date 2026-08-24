@@ -5,7 +5,7 @@
 执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。
 也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。
 
-`pricing-comparison` 使用逐任务落盘的 zero/narrow/wide 窗口和 base/medium/high 三个尺度比较三种 BPC。medium/high 的 processing 与 due-center 倍率独立抽取，setup 按实际 processing workload 比例整体缩放。`outsourcing-performance` 在原时间尺度比较三档已落盘报价 overlay 和 columns/masterVariables；`outsourcing-discount` 只补 n=50、中价、无折扣 overlay。runner 不构造任何物理或经济数据。
+`pricing-comparison` 使用逐任务落盘的 zero/narrow/wide 窗口和 base/medium/high 三个尺度比较三种 BPC。medium/high 的 processing 与 due-center 倍率独立抽取，setup 按实际 processing workload 比例整体缩放。`outsourcing-performance` 使用包含完整调度与经济数据的单文件，在原时间尺度比较三档报价和 columns/masterVariables；`outsourcing-discount` 只补 n=50、中价、无折扣的完整文件。runner 不构造任何物理或经济数据。
 
 已准备落盘实例记录数：1620；每个规模固定取 5 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率、逐任务窗口、setup 和外包审计见 `instances/` 下的 metadata 与三个 `post-generation-*-audit.tsv`。
 

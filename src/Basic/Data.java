@@ -50,11 +50,6 @@ public class Data {
 	public double[] lateTime;// 标记每个任务的完成时间时间窗,后续label setting的时候可能动态迭代更新
 
 	public Data(String path, boolean setup, boolean due_date) throws IOException {
-		this(path, null, setup, due_date);
-	}
-
-	/** 读取调度实例，并可选叠加一个独立的外包经济参数文件。 */
-	public Data(String path, String outsourcingPath, boolean setup, boolean due_date) throws IOException {
 		configure = new Configure();
 		try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
 			String line = reader.readLine();
@@ -69,10 +64,12 @@ public class Data {
 				load_dw_data(setup, reader);
 			}
 		}
-		if (outsourcingPath != null) {
-			loadOutsourcingOverlay(outsourcingPath);
-		}
 		finishInitialization();
+	}
+
+	/** 当前实例文件是否显式包含完整的外包报价和 tariff。 */
+	public boolean hasOutsourcingData() {
+		return outsourcingCostProvidedByInput && outsourcingTariffProvidedByInput;
 	}
 
 	private void initializeArrays() {
@@ -572,38 +569,6 @@ public class Data {
 			}
 			line = nextNonEmptyLine(reader);
 		}
-	}
-
-	private void loadOutsourcingOverlay(String path) throws IOException {
-		outsourcingCostProvidedByInput = false;
-		outsourcingTariffProvidedByInput = false;
-		try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
-			String line = nextNonEmptyLine(reader);
-			while (line != null) {
-				String blockName = line.trim();
-				if ("OUTSOURCING_COST".equalsIgnoreCase(blockName)) {
-					if (outsourcingCostProvidedByInput) {
-						throw new IOException("Duplicate OUTSOURCING_COST block in overlay: " + path);
-					}
-					fillOutsourcingCost(splitTokens(reader.readLine()));
-					outsourcingCostProvidedByInput = true;
-				} else if ("OUTSOURCING_TARIFF".equalsIgnoreCase(blockName)) {
-					if (outsourcingTariffProvidedByInput) {
-						throw new IOException("Duplicate OUTSOURCING_TARIFF block in overlay: " + path);
-					}
-					fillOutsourcingTariff(reader);
-					outsourcingTariffProvidedByInput = true;
-				} else {
-					throw new IOException("Unknown block in outsourcing overlay: " + line);
-				}
-				line = nextNonEmptyLine(reader);
-			}
-		}
-		if (!outsourcingCostProvidedByInput || !outsourcingTariffProvidedByInput) {
-			throw new IOException("Outsourcing overlay must contain OUTSOURCING_COST and OUTSOURCING_TARIFF: "
-					+ path);
-		}
-		ensureOutsourcingTariffDomainCoverage();
 	}
 
 	/**

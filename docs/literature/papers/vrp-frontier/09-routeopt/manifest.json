@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:48:19.256Z",
+  "request": {
+    "topic": "",
+    "title": "RouteOpt: An Open-Source Modular Exact Solver for Vehicle Routing Problems",
+    "dois": [],
+    "pdf_url": "https://zhengzhong-you.github.io/papers/routeopt_preprint.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 1.3
+  },
+  "results": [
+    {
+      "title": "RouteOpt: An Open-Source Modular Exact Solver for Vehicle Routing Problems",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\09-routeopt\\PDFs\\RouteOpt_An_Open-Source_Modular_Exact_Solver_for_Vehicle_Routing_Problems.pdf",
+      "bytes": 563315,
+      "sha256": "234ecb0440b4cd5446ca705a31aba60c94a376c65ccdd01798d87ca465eff1cc",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://zhengzhong-you.github.io/papers/routeopt_preprint.pdf",
+      "si_requested": false
+    }
+  ]
+}

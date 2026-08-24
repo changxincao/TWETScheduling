@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:48:20.988Z",
+  "request": {
+    "topic": "",
+    "title": "A Generic Exact Solver for Vehicle Routing and Related Problems",
+    "dois": [],
+    "pdf_url": "https://optimization-online.org/wp-content/uploads/2019/06/7238.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 3.1
+  },
+  "results": [
+    {
+      "title": "A Generic Exact Solver for Vehicle Routing and Related Problems",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\10-vrpsolver-generic-exact\\PDFs\\A_Generic_Exact_Solver_for_Vehicle_Routing_and_Related_Problems.pdf",
+      "bytes": 507544,
+      "sha256": "a992a93375afc80d7d1f49f95fbb10b0c5d28718d804865a34ce728aaa983ddb",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://optimization-online.org/wp-content/uploads/2019/06/7238.pdf",
+      "si_requested": false
+    }
+  ]
+}

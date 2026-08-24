@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:47:50.877Z",
+  "request": {
+    "topic": "",
+    "title": "Column Elimination: An Iterative Approach to Solving Integer Programs",
+    "dois": [],
+    "pdf_url": "https://optimization-online.org/wp-content/uploads/2024/10/column_elimination.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 5
+  },
+  "results": [
+    {
+      "title": "Column Elimination: An Iterative Approach to Solving Integer Programs",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\06-column-elimination-framework\\PDFs\\Column_Elimination_An_Iterative_Approach_to_Solving_Integer_Programs.pdf",
+      "bytes": 1201824,
+      "sha256": "c92493d3ffc6dc1e1a3883a39d409d31664ccfa8b1e1b77f73c6a6ccb368ee4b",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://optimization-online.org/wp-content/uploads/2024/10/column_elimination.pdf",
+      "si_requested": false
+    }
+  ]
+}

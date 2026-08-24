@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:48:20.926Z",
+  "request": {
+    "topic": "",
+    "title": "A Bucket Graph-Based Labeling Algorithm with Application to Vehicle Routing",
+    "dois": [],
+    "pdf_url": "https://optimization-online.org/wp-content/uploads/2017/10/6281.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 3.2
+  },
+  "results": [
+    {
+      "title": "A Bucket Graph-Based Labeling Algorithm with Application to Vehicle Routing",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\11-bucket-graph\\PDFs\\A_Bucket_Graph-Based_Labeling_Algorithm_with_Application_to_Vehicle_Routing.pdf",
+      "bytes": 482770,
+      "sha256": "2e66755e2a89fc00be3ab98b3a5c992bc59f0fc46832eeaa44eb96683268f0f9",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://optimization-online.org/wp-content/uploads/2017/10/6281.pdf",
+      "si_requested": false
+    }
+  ]
+}

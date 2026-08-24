@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:46:05.899Z",
+  "request": {
+    "topic": "",
+    "title": "DeLuxing: Deep Lagrangian Underestimate Fixing for Column-Generation-Based Exact Methods",
+    "dois": [],
+    "pdf_url": "https://optimization-online.org/wp-content/uploads/2023/09/DeLuxing_OR_2023.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 9.5
+  },
+  "results": [
+    {
+      "title": "DeLuxing: Deep Lagrangian Underestimate Fixing for Column-Generation-Based Exact Methods",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\03-deluxing\\PDFs\\DeLuxing_Deep_Lagrangian_Underestimate_Fixing_for_Column-Generation-Based_Exact_Methods.pdf",
+      "bytes": 2796315,
+      "sha256": "79cff2cfda88ec5bed927b3169198233f634a9b3116f6b6b224c249910b58a9c",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://optimization-online.org/wp-content/uploads/2023/09/DeLuxing_OR_2023.pdf",
+      "si_requested": false
+    }
+  ]
+}

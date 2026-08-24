@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:47:50.006Z",
+  "request": {
+    "topic": "",
+    "title": "Column Elimination for Capacitated Vehicle Routing Problems",
+    "dois": [],
+    "pdf_url": "https://optimization-online.org/wp-content/uploads/2023/03/column_cpaior2023.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 3.4
+  },
+  "results": [
+    {
+      "title": "Column Elimination for Capacitated Vehicle Routing Problems",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\07-column-elimination-cvrp\\PDFs\\Column_Elimination_for_Capacitated_Vehicle_Routing_Problems.pdf",
+      "bytes": 488919,
+      "sha256": "07b02aaf9c9f4e8a9c0a256ee08c01a2738417975ad7234b7811ef239202b866",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://optimization-online.org/wp-content/uploads/2023/03/column_cpaior2023.pdf",
+      "si_requested": false
+    }
+  ]
+}

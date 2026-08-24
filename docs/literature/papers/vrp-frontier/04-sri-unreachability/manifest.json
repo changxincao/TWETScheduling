@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:48:00.514Z",
+  "request": {
+    "topic": "",
+    "title": "Subset-Row Inequalities and Unreachability in Path-Based Formulations for Vehicle Routing and Scheduling Problems",
+    "dois": [],
+    "pdf_url": "https://openscience.ub.uni-mainz.de/bitstreams/d41e12c2-4cc9-42a7-93de-5c1b0fa74fc1/download",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 13.6
+  },
+  "results": [
+    {
+      "title": "Subset-Row Inequalities and Unreachability in Path-Based Formulations for Vehicle Routing and Scheduling Problems",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\04-sri-unreachability\\PDFs\\Subset-Row_Inequalities_and_Unreachability_in_Path-Based_Formulations_for_Vehicle_Routing_and_Scheduling_Problems.pdf",
+      "bytes": 2058082,
+      "sha256": "d8533cf07862bee49b084821703039fcd67fa83c1a5125a2a777802880ac8224",
+      "contentType": "application/pdf;charset=UTF-8",
+      "format": "pdf",
+      "source": "https://openscience.ub.uni-mainz.de/bitstreams/d41e12c2-4cc9-42a7-93de-5c1b0fa74fc1/download",
+      "si_requested": false
+    }
+  ]
+}

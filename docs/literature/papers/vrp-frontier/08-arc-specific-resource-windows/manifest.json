@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:48:46.940Z",
+  "request": {
+    "topic": "",
+    "title": "Resource-Window Reduction by Reduced Costs in Path-Based Formulations for Routing and Scheduling Problems",
+    "dois": [],
+    "pdf_url": "https://download.uni-mainz.de/fb03-logistikmanagement/tech-reports/LM-2022-05.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 3.1
+  },
+  "results": [
+    {
+      "title": "Resource-Window Reduction by Reduced Costs in Path-Based Formulations for Routing and Scheduling Problems",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\08-arc-specific-resource-windows\\PDFs\\Resource-Window_Reduction_by_Reduced_Costs_in_Path-Based_Formulations_for_Routing_and_Scheduling_Problems.pdf",
+      "bytes": 696958,
+      "sha256": "1f178816110a71743c2ce3eae09c59661fd9e9dcd9b346f8bf5733288b6d3e2e",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://download.uni-mainz.de/fb03-logistikmanagement/tech-reports/LM-2022-05.pdf",
+      "si_requested": false
+    }
+  ]
+}

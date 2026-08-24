@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:46:12.075Z",
+  "request": {
+    "topic": "",
+    "title": "Two-Stage Learning to Branch in Branch-Price-and-Cut Algorithms for Solving Vehicle Routing Problems Exactly",
+    "dois": [],
+    "pdf_url": "https://zhengzhong-you.github.io/papers/2lbb_preprint.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 15.5
+  },
+  "results": [
+    {
+      "title": "Two-Stage Learning to Branch in Branch-Price-and-Cut Algorithms for Solving Vehicle Routing Problems Exactly",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\02-two-stage-learning-to-branch\\PDFs\\Two-Stage_Learning_to_Branch_in_Branch-Price-and-Cut_Algorithms_for_Solving_Vehicle_Routing_Problems_Exactly.pdf",
+      "bytes": 5783614,
+      "sha256": "1d731494e8dfc63539270f521bd547fcb14648c8e7909b5c4300055db298a09d",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://zhengzhong-you.github.io/papers/2lbb_preprint.pdf",
+      "si_requested": false
+    }
+  ]
+}

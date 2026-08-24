@@ -1,0 +1,38 @@
+{
+  "version": 2,
+  "generated_at": "2026-08-24T04:45:34.999Z",
+  "request": {
+    "topic": "",
+    "title": "Cluster Branching for Vehicle Routing Problems",
+    "dois": [],
+    "pdf_url": "https://optimization-online.org/wp-content/uploads/2024/07/L_2024_2___Cluster_branching.pdf",
+    "si_requested": false,
+    "language_override": "",
+    "route_override": "open_access",
+    "source_url": "",
+    "api_fallback_web": null,
+    "api_fallback_web_for": [],
+    "no_api_fallback_web_for": []
+  },
+  "summary": {
+    "total": 1,
+    "downloaded": 1,
+    "seconds": 4.8
+  },
+  "results": [
+    {
+      "title": "Cluster Branching for Vehicle Routing Problems",
+      "status": "open_access_downloaded",
+      "provider": "direct_url",
+      "accessMode": "open_access",
+      "ok": true,
+      "file": "docs\\literature\\papers\\vrp-frontier\\01-cluster-branching\\PDFs\\Cluster_Branching_for_Vehicle_Routing_Problems.pdf",
+      "bytes": 1120807,
+      "sha256": "1311041d9454727baec2ad5390cd3367da412f074c21193a50d8d9cb50dbbbee",
+      "contentType": "application/pdf",
+      "format": "pdf",
+      "source": "https://optimization-online.org/wp-content/uploads/2024/07/L_2024_2___Cluster_branching.pdf",
+      "si_requested": false
+    }
+  ]
+}

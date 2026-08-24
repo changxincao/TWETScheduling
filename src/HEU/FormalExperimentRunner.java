@@ -249,6 +249,10 @@ public final class FormalExperimentRunner {
 	}
 
 	private static final class Arguments {
+		private static final java.util.Set<String> SUPPORTED_KEYS = java.util.Set.of(
+				"action", "instance", "algorithm", "runId", "outputDir", "seedFile",
+				"outsourcingData", "outsourcingModel", "timeLimitSeconds", "maxNodes");
+
 		private final String action;
 		private final Path instance;
 		private final String algorithm;
@@ -261,14 +265,10 @@ public final class FormalExperimentRunner {
 		private final int maxNodes;
 
 		private Arguments(Map<String, String> values) {
-			if (values.containsKey("timeScale") || values.containsKey("dueWindowHalfWidth")
-					|| values.containsKey("setupCostCoefficient")
-					|| values.containsKey("outsourcingUnitRate")
-					|| values.containsKey("discountStrength")
-					|| values.containsKey("outsourcingBreakpoint1")
-					|| values.containsKey("outsourcingBreakpoint2")) {
-				throw new IllegalArgumentException(
-						"Formal data parameters must be materialized in instance or outsourcing overlay files");
+			for (String key : values.keySet()) {
+				if (!SUPPORTED_KEYS.contains(key)) {
+					throw new IllegalArgumentException("Unknown argument --" + key);
+				}
 			}
 			action = value(values, "action", "solve").toLowerCase(Locale.ROOT);
 			if (!"seed".equals(action) && !"solve".equals(action)) {

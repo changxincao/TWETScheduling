@@ -122,7 +122,7 @@ public final class FormalExperimentInfrastructureTest {
 				== baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]), "persisted outsourcing baseline");
 		assertClose(outsourcingData.evaluateOutsourcingCost(10.0), 10.0, "persisted tariff first segment");
 		assertOutsourcingOverlayRejectsSchedulingBlocks(root, baseRow.path, outsourcingData.n);
-		assertLegacyTimeScaleRejected();
+		assertUnknownArgumentRejected();
 
 		ArrayList<Integer> internalJobs = new ArrayList<Integer>();
 		for (int job = 1; job < outsourcingData.n; job++) {
@@ -335,12 +335,12 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(selected.repetition == 1, "seed winner cost and tie break");
 	}
 
-	private static void assertLegacyTimeScaleRejected() throws Exception {
+	private static void assertUnknownArgumentRejected() throws Exception {
 		try {
-			FormalExperimentRunner.main(new String[] { "--timeScale=5" });
-			throw new AssertionError("legacy timeScale argument should be rejected");
+			FormalExperimentRunner.main(new String[] { "--unknown=5" });
+			throw new AssertionError("unknown argument should be rejected");
 		} catch (IllegalArgumentException expected) {
-			assertTrue(expected.getMessage().contains("materialized"), "legacy timeScale error message");
+			assertTrue(expected.getMessage().contains("Unknown argument"), "unknown argument error message");
 		}
 	}
 

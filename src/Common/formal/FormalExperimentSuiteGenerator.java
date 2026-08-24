@@ -1,4 +1,4 @@
-package Common;
+package Common.formal;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -10,14 +10,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import Common.formal.FormalExperimentDataGenerator;
 import Common.formal.FormalExperimentDataGenerator.GeneratedInstance;
-import Common.formal.FormalExperimentDesign;
-import Common.formal.FormalOutsourcingDataGenerator;
 import Common.formal.FormalOutsourcingDataGenerator.CompleteInstance;
-import Common.formal.FormalOutsourcingAuditRunner;
-import Common.formal.FormalSetupAuditRunner;
-import Common.formal.FormalTimeScaleAuditRunner;
 
 /**
  * 生成论文实验数据引用和三份正式求解 manifest。
@@ -88,11 +82,11 @@ public final class FormalExperimentSuiteGenerator {
 		for (InstanceRef instance : instances) {
 			String scenario = scenarioId(instance);
 			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, "none");
+			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, "");
 			for (String algorithm : BPC_ALGORITHMS) {
 				String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
 				solveRows.add(solveRow(options, runId, instance.path, algorithm, seedFile,
-						"none", "pricing-comparison"));
+						"", "pricing-comparison"));
 			}
 		}
 
@@ -197,21 +191,24 @@ public final class FormalExperimentSuiteGenerator {
 		}
 		String runId = "seed-" + scenario;
 		Path output = options.outputRoot.resolve("runs").resolve(runId);
-		String args = arguments(mapOf(
+		Map<String, String> values = mapOf(
 				"action", "seed", "runId", runId, "instance", portable(instance), "seedFile", portable(seedFile),
-				"outputDir", portable(output), "outsourcingModel", outsourcingModel));
+				"outputDir", portable(output));
+		putIfNotEmpty(values, "outsourcingModel", outsourcingModel);
+		String args = arguments(values);
 		rows.add(new RunRow(runId, args, portable(output), "", "seed"));
 	}
 
 	private static RunRow solveRow(Options options, String runId, Path instance,
 			String algorithm, Path seedFile, String outsourcingModel, String block) {
 		Path output = options.outputRoot.resolve("runs").resolve(block).resolve(runId);
-		String args = arguments(mapOf(
+		Map<String, String> values = mapOf(
 				"action", "solve", "runId", runId, "instance", portable(instance), "algorithm", algorithm,
 				"outputDir", portable(output), "seedFile", portable(seedFile),
-				"outsourcingModel", outsourcingModel,
 				"timeLimitSeconds", compact(options.timeLimitSeconds),
-				"maxNodes", Integer.toString(options.maxNodes)));
+				"maxNodes", Integer.toString(options.maxNodes));
+		putIfNotEmpty(values, "outsourcingModel", outsourcingModel);
+		String args = arguments(values);
 		return new RunRow(runId, args, portable(output), "seed-" + stripExtension(seedFile.getFileName().toString()),
 				block);
 	}
@@ -279,6 +276,12 @@ public final class FormalExperimentSuiteGenerator {
 			result.put(values[index], values[index + 1]);
 		}
 		return result;
+	}
+
+	private static void putIfNotEmpty(Map<String, String> values, String key, String value) {
+		if (value != null && !value.isEmpty()) {
+			values.put(key, value);
+		}
 	}
 
 	private static String quote(String value) {
@@ -351,7 +354,7 @@ public final class FormalExperimentSuiteGenerator {
 		}
 
 		private String toTsv() {
-			return runId + "\tHEU.FormalExperimentRunner\t" + args + "\t" + outputDir + "\t" + dependsOn
+			return runId + "\tCommon.formal.FormalExperimentRunner\t" + args + "\t" + outputDir + "\t" + dependsOn
 					+ "\t" + block;
 		}
 	}

@@ -1,4 +1,4 @@
-package HEU;
+package Common.formal.smoke;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -11,7 +11,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import Common.FormalExperimentSuiteGenerator;
+import Common.formal.FormalExperimentDataFactory;
+import Common.formal.FormalExperimentRunner;
+import Common.formal.FormalExperimentSuiteGenerator;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.GC.FixedInitialColumnSeed;
 import TWETBPC.GC.InitialColumnBuilder;
@@ -63,6 +65,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(manifest, "TIME_INDEXED_SRI", "rank-1 row");
 		assertContains(manifest, "\tseed-", "solver dependency");
 		assertContains(manifest, "--action=\"seed\"", "seed task");
+		assertContains(manifest, "Common.formal.FormalExperimentRunner", "formal runner package");
 		assertContains(manifest, "--outputDir=\"${WORKSPACE}/", "seed output metadata directory");
 		assertContains(manifest, "--timeLimitSeconds=\"10800\"", "formal solve time limit");
 		assertContains(manifest, "${WORKSPACE}/", "manifest should remain portable across machines");
@@ -72,6 +75,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(!manifest.contains("--outsourcingUnitRate="), "outsourcing rate must be materialized");
 		assertTrue(!manifest.contains("--discountStrength="), "discount must be materialized");
 		assertTrue(!manifest.contains("--outsourcingData="), "complete outsourcing files need one input path");
+		assertPricingRowsDoNotSpecifyOutsourcingModel(suite.resolve("manifests/pricing-comparison.tsv"));
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");
 		assertPricingWindowMatrix(suite.resolve("manifests/pricing-comparison.tsv"));
@@ -105,8 +109,10 @@ public final class FormalExperimentInfrastructureTest {
 		GeneratedIndexRow baseRow = findGeneratedInstance(suite, "n020-set01", "random", "base", "narrow", 2);
 		Path scaledInstance = scaledRow.path;
 		assertTrue(Files.exists(scaledInstance), "missing materialized time-scale instance");
-		var data = FormalExperimentDataFactory.loadNoOutsourcing(scaledInstance);
-		var baseData = FormalExperimentDataFactory.loadNoOutsourcing(baseRow.path);
+		var data = FormalExperimentDataFactory.load(scaledInstance);
+		FormalExperimentDataFactory.validateOutsourcingModel(data, "", scaledInstance);
+		var baseData = FormalExperimentDataFactory.load(baseRow.path);
+		FormalExperimentDataFactory.validateOutsourcingModel(baseData, "", baseRow.path);
 		assertTrue(data.n == 20 && data.m == 2, "derived instance dimensions");
 		int firstJobMultiplier = readJobMultiplier(suite, "n020-set01", "medium", 1, 12);
 		int firstCenterMultiplier = readJobMultiplier(suite, "n020-set01", "medium", 1, 13);
@@ -119,8 +125,8 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(data.outsourcingCost[1] >= Common.Utility.big_M, "no-outsourcing data remains disabled");
 		Path completeOutsourcing = findOutsourcingInstance(suite, baseRow.path, 1.0, 0.15);
 		assertSchedulingPrefix(baseRow.path, completeOutsourcing);
-		assertNoOutsourcingRejectsCompleteInstance(completeOutsourcing);
-		var outsourcingData = FormalExperimentDataFactory.loadOutsourcing(completeOutsourcing);
+		var outsourcingData = FormalExperimentDataFactory.load(completeOutsourcing);
+		assertOutsourcingModelValidation(baseData, baseRow.path, outsourcingData, completeOutsourcing);
 		assertTrue(outsourcingData.outsourcingCost[1]
 				== baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]), "persisted outsourcing baseline");
 		assertClose(outsourcingData.evaluateOutsourcingCost(10.0), 10.0, "persisted tariff first segment");
@@ -140,7 +146,6 @@ public final class FormalExperimentInfrastructureTest {
 				"outsourced jobs round trip");
 		assertFixedOutsourcingRestoration(outsourcingData, restored);
 		assertLegacySnapshotCompatibility(root);
-		assertSeedWinnerSelection();
 		System.out.println("FormalExperimentInfrastructureTest passed");
 	}
 
@@ -180,6 +185,13 @@ public final class FormalExperimentInfrastructureTest {
 		assertWindowCounts(counts.get("base"));
 		assertWindowCounts(counts.get("medium"));
 		assertWindowCounts(counts.get("high"));
+	}
+
+	private static void assertPricingRowsDoNotSpecifyOutsourcingModel(Path path) throws Exception {
+		for (String line : Files.readAllLines(path, StandardCharsets.UTF_8)) {
+			assertTrue(!line.contains("--outsourcingModel="),
+					"scheduling-only manifest must infer no-outsourcing from the instance");
+		}
 	}
 
 	private static void assertWindowCounts(Map<String, Integer> actual) {
@@ -339,15 +351,6 @@ public final class FormalExperimentInfrastructureTest {
 		}
 	}
 
-	private static void assertSeedWinnerSelection() {
-		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(List.of(List.of(1)), List.of(List.of(1)));
-		FormalExperimentRunner.SeedRun selected = FormalExperimentRunner.selectBestSeedRun(List.of(
-				new FormalExperimentRunner.SeedRun(0, 1L, 2L, seed, 10.0, 1L, "a"),
-				new FormalExperimentRunner.SeedRun(1, 3L, 4L, seed, 8.0, 1L, "b"),
-				new FormalExperimentRunner.SeedRun(2, 5L, 6L, seed, 8.0, 1L, "c")));
-		assertTrue(selected.repetition == 1, "seed winner cost and tie break");
-	}
-
 	private static void assertUnknownArgumentRejected() throws Exception {
 		try {
 			FormalExperimentRunner.main(new String[] { "--unknown=5" });
@@ -357,13 +360,23 @@ public final class FormalExperimentInfrastructureTest {
 		}
 	}
 
-	private static void assertNoOutsourcingRejectsCompleteInstance(Path completeInstance) throws Exception {
+	private static void assertOutsourcingModelValidation(Basic.Data schedulingData, Path schedulingInstance,
+			Basic.Data outsourcingData, Path outsourcingInstance) {
+		FormalExperimentDataFactory.validateOutsourcingModel(schedulingData, "", schedulingInstance);
+		FormalExperimentDataFactory.validateOutsourcingModel(outsourcingData, "columns", outsourcingInstance);
+		FormalExperimentDataFactory.validateOutsourcingModel(outsourcingData, "masterVariables", outsourcingInstance);
+		assertIllegalArgument(() -> FormalExperimentDataFactory.validateOutsourcingModel(
+				schedulingData, "columns", schedulingInstance), "Scheduling-only instance");
+		assertIllegalArgument(() -> FormalExperimentDataFactory.validateOutsourcingModel(
+				outsourcingData, "", outsourcingInstance), "Outsourcing instance");
+	}
+
+	private static void assertIllegalArgument(Runnable action, String expectedMessage) {
 		try {
-			FormalExperimentDataFactory.loadNoOutsourcing(completeInstance);
-			throw new AssertionError("no-outsourcing loader should reject a complete outsourcing instance");
-		} catch (java.io.IOException expected) {
-			assertTrue(expected.getMessage().contains("No-outsourcing run"),
-					"no-outsourcing data mode error message");
+			action.run();
+			throw new AssertionError("Expected IllegalArgumentException containing " + expectedMessage);
+		} catch (IllegalArgumentException expected) {
+			assertTrue(expected.getMessage().contains(expectedMessage), "data/model mismatch message");
 		}
 	}
 

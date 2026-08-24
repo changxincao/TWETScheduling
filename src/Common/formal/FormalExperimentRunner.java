@@ -1,4 +1,4 @@
-package HEU;
+package Common.formal;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -13,6 +13,7 @@ import java.util.Random;
 
 import Basic.Data;
 import Common.Utility;
+import HEU.EngineALNS;
 import TWETBPC.BPCAlgorithmProfile;
 import TWETBPC.BestBpcProfiles;
 import TWETBPC.TWETBPCConfig;
@@ -76,6 +77,9 @@ public final class FormalExperimentRunner {
 		Data data = arguments.loadData();
 		TWETBPCConfig config = new TWETBPCConfig();
 		BestBpcProfiles.NG_DSSR.apply(config);
+		if (data.hasOutsourcingData()) {
+			config.outsourcingModel = arguments.outsourcingModel;
+		}
 		config.reuseConfiguredBestSolution = false;
 		config.fixedInitialColumnSeed = null;
 		Pool pool = new Pool(data);
@@ -94,7 +98,7 @@ public final class FormalExperimentRunner {
 				FixedInitialSeedSnapshotIO.fingerprint(seed));
 	}
 
-	static SeedRun selectBestSeedRun(List<SeedRun> runs) {
+	private static SeedRun selectBestSeedRun(List<SeedRun> runs) {
 		if (runs.isEmpty()) {
 			throw new IllegalArgumentException("At least one initial seed run is required");
 		}
@@ -127,7 +131,8 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
 		lines.add("seedFile=" + arguments.seedFile.toAbsolutePath());
-		lines.add("outsourcingModel=" + arguments.outsourcingModel);
+		lines.add("outsourcingModel=" + (arguments.outsourcingModel.isEmpty()
+				? "not-applicable" : arguments.outsourcingModel));
 		lines.add("seedRunCount=" + runs.size());
 		for (SeedRun run : runs) {
 			String prefix = "seedRun" + run.repetition + ".";
@@ -158,7 +163,7 @@ public final class FormalExperimentRunner {
 		return sequences;
 	}
 
-	static final class SeedRun {
+	private static final class SeedRun {
 		final int repetition;
 		final long alnsSeed;
 		final long utilitySeed;
@@ -195,8 +200,9 @@ public final class FormalExperimentRunner {
 		config.diagnosticPricingSummaryDetails = false;
 		config.solveTimeLimitSeconds = arguments.timeLimitSeconds;
 		config.maxNodes = arguments.maxNodes;
-		config.outsourcingModel = "none".equals(arguments.outsourcingModel)
-				? "masterVariables" : arguments.outsourcingModel;
+		if (data.hasOutsourcingData()) {
+			config.outsourcingModel = arguments.outsourcingModel;
+		}
 		config.reuseConfiguredBestSolution = false;
 		String seedFingerprint = "";
 		if (arguments.seedFile != null) {
@@ -228,7 +234,8 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("algorithm=" + profile.getName());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
-		lines.add("outsourcingModel=" + arguments.outsourcingModel);
+		lines.add("outsourcingModel=" + (arguments.outsourcingModel.isEmpty()
+				? "not-applicable" : arguments.outsourcingModel));
 		lines.add("seedFile=" + (arguments.seedFile == null ? "" : arguments.seedFile.toAbsolutePath()));
 		lines.add("seedFingerprint=" + seedFingerprint);
 		lines.add("cplexThreads=1");
@@ -273,15 +280,15 @@ public final class FormalExperimentRunner {
 			outputDir = Path.of(value(values, "outputDir", "results/formal/" + runId));
 			String seed = value(values, "seedFile", "");
 			seedFile = seed.isEmpty() ? null : Path.of(seed);
-			outsourcingModel = value(values, "outsourcingModel", "none");
+			outsourcingModel = value(values, "outsourcingModel", "");
 			timeLimitSeconds = number(values, "timeLimitSeconds", 10800.0);
 			maxNodes = integer(values, "maxNodes", 100000);
 		}
 
 		private Data loadData() throws Exception {
-			return "none".equalsIgnoreCase(outsourcingModel)
-					? FormalExperimentDataFactory.loadNoOutsourcing(instance)
-					: FormalExperimentDataFactory.loadOutsourcing(instance);
+			Data data = FormalExperimentDataFactory.load(instance);
+			FormalExperimentDataFactory.validateOutsourcingModel(data, outsourcingModel, instance);
+			return data;
 		}
 
 		private static Arguments parse(String[] args) {

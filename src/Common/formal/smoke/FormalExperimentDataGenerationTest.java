@@ -1,4 +1,4 @@
-package Common.formal;
+package Common.formal.smoke;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -11,6 +11,12 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import Common.formal.FormalExperimentDataGenerator;
+import Common.formal.FormalExperimentDesign;
+import Common.formal.FormalOutsourcingAuditRunner;
+import Common.formal.FormalSetupAuditRunner;
+import Common.formal.FormalTimeScaleAuditRunner;
 
 /** 不调用求解器，验证六个规模的数据生成、嵌套任务、倍率和setup独立审计。 */
 public final class FormalExperimentDataGenerationTest {

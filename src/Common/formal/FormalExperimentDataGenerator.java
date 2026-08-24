@@ -17,6 +17,7 @@ import Common.formal.FormalSetupGenerator.Result;
 import Common.formal.FormalSetupValidator.Report;
 import Common.formal.FormalTimeScaleGenerator.Scale;
 import Common.formal.FormalTimeScaleGenerator.ScaledData;
+import Common.formal.FormalWindowGenerator.Window;
 
 /** 组装各个独立生成组件，并输出正式实例和完整审计metadata。 */
 public final class FormalExperimentDataGenerator {
@@ -26,6 +27,8 @@ public final class FormalExperimentDataGenerator {
 	private final FormalSetupValidator setupValidator = new FormalSetupValidator();
 	private final FormalSetupGenerator setupGenerator = new FormalSetupGenerator(setupValidator);
 	private final FormalTimeScaleGenerator timeScaleGenerator = new FormalTimeScaleGenerator();
+	private final FormalWindowGenerator windowGenerator = new FormalWindowGenerator();
+	private final FormalOutsourcingDataGenerator outsourcingDataGenerator = new FormalOutsourcingDataGenerator();
 	private final FormalInstanceWriter instanceWriter = new FormalInstanceWriter();
 
 	public FormalExperimentDataGenerator(Path tanakaDataRoot, int casesPerSize) {
@@ -41,6 +44,7 @@ public final class FormalExperimentDataGenerator {
 		ArrayList<GeneratedInstance> instances = new ArrayList<GeneratedInstance>();
 		ArrayList<String> taskMetadata = taskMetadataHeader();
 		ArrayList<String> scaleMetadata = scaleMetadataHeader();
+		ArrayList<String> windowMetadata = windowMetadataHeader();
 		ArrayList<String> setupMetadata = setupMetadataHeader();
 
 		for (FormalTaskSet taskSet : taskSets) {
@@ -57,12 +61,18 @@ public final class FormalExperimentDataGenerator {
 							setupResult.familyByJob());
 					setupValidator.requirePreset(audit, setupResult.type() == FormalSetupGenerator.Type.FAMILY);
 					setupMetadata.add(setupMetadataRow(taskSet, setupResult, scale, audit));
-					for (int machines : FormalExperimentDesign.machines(taskSet.size())) {
-						Path path = instanceWriter.write(outputRoot, taskSet, setupResult.type(), scale,
-								machines, scaled);
-						instances.add(new GeneratedInstance(taskSet.id(), taskSet.size(), taskSet.caseIndex(),
-								machines, setupResult.type().id(), scale.level(), scale.nominalMultiplier(), path,
-								taskSet.sourceFile(), average(scaled.processing(), taskSet.size())));
+					for (Window window : windowGenerator.generate(taskSet, scale)) {
+						if (setupResult.type() == FormalSetupGenerator.Type.RANDOM) {
+							windowMetadata.add(windowMetadataRow(taskSet, scale, window));
+						}
+						for (int machines : FormalExperimentDesign.machines(taskSet.size())) {
+							Path path = instanceWriter.write(outputRoot, taskSet, setupResult.type(), scale,
+									window, machines, scaled);
+							instances.add(new GeneratedInstance(taskSet.id(), taskSet.size(), taskSet.caseIndex(),
+									machines, setupResult.type().id(), scale.level(), scale.nominalMultiplier(),
+									window.level(), window.minimum(), window.maximum(), window.fingerprint(), path,
+									taskSet.sourceFile(), average(scaled.processing(), taskSet.size())));
+						}
 					}
 				}
 			}
@@ -71,9 +81,12 @@ public final class FormalExperimentDataGenerator {
 		writeInstanceIndex(outputRoot, instances);
 		Files.write(outputRoot.resolve("task-selection.tsv"), taskMetadata, StandardCharsets.UTF_8);
 		Files.write(outputRoot.resolve("scale-selection.tsv"), scaleMetadata, StandardCharsets.UTF_8);
+		Files.write(outputRoot.resolve("window-selection.tsv"), windowMetadata, StandardCharsets.UTF_8);
 		Files.write(outputRoot.resolve("setup-audit.tsv"), setupMetadata, StandardCharsets.UTF_8);
 		writeDesignProperties(outputRoot, sizes, casesPerSize);
-		return new GenerationResult(List.copyOf(taskSets), List.copyOf(instances));
+		FormalOutsourcingDataGenerator.Result outsourcing =
+				outsourcingDataGenerator.generate(outputRoot, taskSets);
+		return new GenerationResult(List.copyOf(taskSets), List.copyOf(instances), outsourcing);
 	}
 
 	private static ArrayList<String> taskMetadataHeader() {
@@ -102,15 +115,32 @@ public final class FormalExperimentDataGenerator {
 
 	private static ArrayList<String> scaleMetadataHeader() {
 		return new ArrayList<String>(List.of(
-				"taskSetId\tscaleLevel\tnominalMultiplier\tselectionSeed\tarithmeticMean\t"
-				+ "processingWeightedMean\tminimum\tmaximum\tjobMultipliers\tmultiplierFingerprint"));
+				"taskSetId\tscaleLevel\tnominalMultiplier\tprocessingSeed\tcenterSeed\t"
+				+ "processingArithmeticMean\tcenterArithmeticMean\tprocessingWeightedMean\t"
+				+ "processingMinimum\tprocessingMaximum\tcenterMinimum\tcenterMaximum\t"
+				+ "processingMultipliers\tcenterMultipliers\tprocessingFingerprint\tcenterFingerprint"));
 	}
 
 	private static String scaleMetadataRow(FormalTaskSet taskSet, Scale scale) {
-		return String.format(Locale.ROOT, "%s\t%s\t%d\t%d\t%.9f\t%.9f\t%d\t%d\t%s\t%s",
-				taskSet.id(), scale.level(), scale.nominalMultiplier(), scale.selectionSeed(),
-				scale.arithmeticMean(), scale.processingWeightedMultiplier(), scale.minimumMultiplier(),
-				scale.maximumMultiplier(), scale.multiplierValues(), scale.fingerprint());
+		return String.format(Locale.ROOT,
+				"%s\t%s\t%d\t%d\t%d\t%.9f\t%.9f\t%.9f\t%d\t%d\t%d\t%d\t%s\t%s\t%s\t%s",
+				taskSet.id(), scale.level(), scale.nominalMultiplier(), scale.processingSeed(),
+				scale.centerSeed(), scale.processingArithmeticMean(), scale.centerArithmeticMean(),
+				scale.processingWeightedMultiplier(), scale.processingMinimum(),
+				scale.processingMaximum(), scale.centerMinimum(), scale.centerMaximum(),
+				scale.processingValues(), scale.centerValues(), scale.processingFingerprint(),
+				scale.centerFingerprint());
+	}
+
+	private static ArrayList<String> windowMetadataHeader() {
+		return new ArrayList<String>(List.of(
+				"taskSetId\tscaleLevel\twindowLevel\tminimum\tmaximum\tseed\thalfWidths\tfingerprint"));
+	}
+
+	private static String windowMetadataRow(FormalTaskSet taskSet, Scale scale, Window window) {
+		return String.format(Locale.ROOT, "%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s",
+				taskSet.id(), scale.level(), window.level(), window.minimum(), window.maximum(),
+				window.seed(), window.values(), window.fingerprint());
 	}
 
 	private static ArrayList<String> setupMetadataHeader() {
@@ -150,11 +180,14 @@ public final class FormalExperimentDataGenerator {
 
 	private static void writeInstanceIndex(Path outputRoot, List<GeneratedInstance> instances) throws IOException {
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("taskSetId\tsize\tcaseIndex\tmachines\tsetupType\tscaleLevel\tnominalScale\tinstance\tsourceFile\taverageProcessing");
+		lines.add("taskSetId\tsize\tcaseIndex\tmachines\tsetupType\tscaleLevel\tnominalScale\t"
+				+ "windowLevel\twindowMinimum\twindowMaximum\twindowFingerprint\tinstance\tsourceFile\taverageProcessing");
 		for (GeneratedInstance instance : instances) {
-			lines.add(String.format(Locale.ROOT, "%s\t%d\t%d\t%d\t%s\t%s\t%d\t%s\t%s\t%.9f",
+			lines.add(String.format(Locale.ROOT,
+					"%s\t%d\t%d\t%d\t%s\t%s\t%d\t%s\t%d\t%d\t%s\t%s\t%s\t%.9f",
 					instance.taskSetId(), instance.size(), instance.caseIndex(), instance.machines(),
-					instance.setupType(), instance.scaleLevel(), instance.nominalScale(),
+					instance.setupType(), instance.scaleLevel(), instance.nominalScale(), instance.windowLevel(),
+					instance.windowMinimum(), instance.windowMaximum(), instance.windowFingerprint(),
 					portable(outputRoot.toAbsolutePath().normalize()
 							.relativize(instance.path().toAbsolutePath().normalize())),
 					portable(instance.sourceFile()), instance.averageProcessing()));
@@ -173,7 +206,9 @@ public final class FormalExperimentDataGenerator {
 		values.put("casesPerSize", Integer.toString(casesPerSize));
 		values.put("machines.n20To60", "2,3,4");
 		values.put("machines.n80To100", "3,4,5");
-		values.put("windowHalfWidths", "0,100,300");
+		values.put("windowLevels", "zero,narrow,wide");
+		values.put("baseWindowRanges", "zero:0,narrow:80-120,wide:280-320");
+		values.put("windowScaleMode", "nominal-scale-independent-per-job");
 		values.put("setupTypes", "random,family");
 		values.put("setupMeanRatio", "0.5");
 		values.put("setupCapRatio", "1.0");
@@ -182,11 +217,10 @@ public final class FormalExperimentDataGenerator {
 		values.put("familySeparationRatioRange", "4.0,5.3");
 		values.put("setupCostCoefficient", "20");
 		values.put("mediumScaleRange", "5,15");
-		values.put("highScaleOffset", "10");
-		values.put("timeScaleMode", "job-balanced-paired");
+		values.put("highScaleRange", "15,25");
+		values.put("timeScaleMode", "independent-processing-and-center-per-job");
 		values.put("mediumNominalScale", "10");
 		values.put("highNominalScale", "20");
-		values.put("windowScaleMode", "nominal-scale");
 		values.put("setupScaleMode", "processing-weighted-global");
 		ArrayList<String> lines = new ArrayList<String>();
 		for (Map.Entry<String, String> entry : values.entrySet()) {
@@ -204,11 +238,13 @@ public final class FormalExperimentDataGenerator {
 	}
 
 	public record GeneratedInstance(String taskSetId, int size, int caseIndex, int machines,
-			String setupType, String scaleLevel, int nominalScale, Path path, Path sourceFile,
-			double averageProcessing) {
+			String setupType, String scaleLevel, int nominalScale, String windowLevel,
+			int windowMinimum, int windowMaximum, String windowFingerprint, Path path,
+			Path sourceFile, double averageProcessing) {
 	}
 
-	public record GenerationResult(List<FormalTaskSet> taskSets, List<GeneratedInstance> instances) {
+	public record GenerationResult(List<FormalTaskSet> taskSets, List<GeneratedInstance> instances,
+			FormalOutsourcingDataGenerator.Result outsourcing) {
 	}
 
 	private static void resetGeneratedData(Path dataDirectory) throws IOException {

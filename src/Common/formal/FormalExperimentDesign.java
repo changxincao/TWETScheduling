@@ -6,7 +6,7 @@ import java.util.Arrays;
 public final class FormalExperimentDesign {
 	public static final int[] TASK_SIZES = new int[] { 20, 40, 50, 60, 80, 100 };
 	public static final int CASES_PER_SIZE = 5;
-	public static final int[] WINDOW_HALF_WIDTHS = new int[] { 0, 100, 300 };
+	public static final String[] WINDOW_LEVELS = new String[] { "zero", "narrow", "wide" };
 	public static final double SETUP_MEAN_RATIO = 0.5;
 	public static final double FAMILY_SWITCH_PENALTY_RATIO = 2.0;
 	public static final double FAMILY_SEPARATION_RATIO_MIN = 4.0;
@@ -20,6 +20,7 @@ public final class FormalExperimentDesign {
 	public static final long FAMILY_ASSIGNMENT_SEED = 2026082303L;
 	public static final long SETUP_QUANTILE_SEED = 2026082304L;
 	public static final long TIME_SCALE_SEED = 2026082305L;
+	public static final long WINDOW_SEED = 2026082306L;
 
 	private FormalExperimentDesign() {
 	}

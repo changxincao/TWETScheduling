@@ -31,10 +31,12 @@ public final class FormalExperimentDataGenerationTest {
 		FormalSetupAuditRunner.AuditSummary audit = FormalSetupAuditRunner.audit(suite);
 		FormalTimeScaleAuditRunner.AuditSummary scaleAudit = FormalTimeScaleAuditRunner.audit(suite);
 		assertTrue(first.taskSets().size() == 6, "six task sizes");
-		assertTrue(first.instances().size() == 108, "six sizes x two setups x three scales x three machines");
-		assertTrue(audit.fileCount() == 108 && audit.groupCount() == 36, "independent setup audit coverage");
-		assertTrue(scaleAudit.fileCount() == 72, "independent time-scale audit coverage");
-		assertTrue(audit.maxAbsoluteMeanError() <= 0.5, "setup mean tolerance");
+		assertTrue(first.instances().size() == 324,
+				"six sizes x two setups x three scales x three windows x three machines");
+		assertTrue(audit.fileCount() == 324 && audit.groupCount() == 108,
+				"independent setup audit coverage");
+		assertTrue(scaleAudit.fileCount() == 324, "independent time-scale audit coverage");
+		assertTrue(audit.maxRelativeMeanError() <= 0.005, "setup relative mean tolerance");
 
 		HashMap<String, String> selected = selectedJobs(suite.resolve("instances/task-selection.tsv"));
 		assertPrefix(selected.get("n020-set01"), selected.get("n040-set01"), "20/40 nesting");
@@ -42,11 +44,13 @@ public final class FormalExperimentDataGenerationTest {
 		assertPrefix(selected.get("n080-set01"), selected.get("n100-set01"), "80/100 nesting");
 		Map<String, ScaleVectors> scaleVectors = assertScaleRanges(
 				suite.resolve("instances/scale-selection.tsv"));
+		assertWindowRanges(suite.resolve("instances/window-selection.tsv"));
 		assertHeterogeneousMaterialization(first.instances(), scaleVectors.get("n060-set01"));
 
 		Path representative = first.instances().stream()
 				.filter(item -> item.taskSetId().equals("n060-set01") && item.setupType().equals("family")
-						&& item.scaleLevel().equals("medium") && item.machines() == 2)
+						&& item.scaleLevel().equals("medium") && item.windowLevel().equals("narrow")
+						&& item.machines() == 2)
 				.findFirst().orElseThrow().path();
 		String hashBefore = sha256(representative);
 		generator.generate(suite.resolve("instances"), FormalExperimentDesign.TASK_SIZES);
@@ -85,41 +89,37 @@ public final class FormalExperimentDataGenerationTest {
 	}
 
 	private static Map<String, ScaleVectors> assertScaleRanges(Path path) throws Exception {
-		LinkedHashMap<String, int[]> mediumByTaskSet = new LinkedHashMap<String, int[]>();
+		LinkedHashMap<String, int[][]> mediumByTaskSet = new LinkedHashMap<String, int[][]>();
 		LinkedHashMap<String, ScaleVectors> result = new LinkedHashMap<String, ScaleVectors>();
 		List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
 		for (int row = 1; row < lines.size(); row++) {
 			String[] fields = lines.get(row).split("\\t", -1);
-			assertTrue(fields.length == 10, "scale metadata schema");
+			assertTrue(fields.length == 16, "scale metadata schema");
 			int nominal = Integer.parseInt(fields[2]);
-			double arithmeticMean = Double.parseDouble(fields[4]);
-			double weightedMean = Double.parseDouble(fields[5]);
-			int minimum = Integer.parseInt(fields[6]);
-			int maximum = Integer.parseInt(fields[7]);
-			int[] multipliers = parseVector(fields[8]);
-			assertTrue(fields[9].length() == 64, "scale fingerprint");
+			double arithmeticMean = Double.parseDouble(fields[5]);
+			double weightedMean = Double.parseDouble(fields[7]);
+			int minimum = Integer.parseInt(fields[8]);
+			int maximum = Integer.parseInt(fields[9]);
+			int[] multipliers = parseVector(fields[12]);
+			int[] centerMultipliers = parseVector(fields[13]);
+			assertTrue(fields[14].length() == 64 && fields[15].length() == 64, "scale fingerprints");
+			assertClose(arithmeticMean, mean(multipliers), "processing arithmetic mean");
+			assertTrue(weightedMean >= minimum && weightedMean <= maximum,
+					"processing weighted mean range");
 			if (fields[1].equals("medium")) {
 				assertTrue(nominal == 10 && minimum >= 5 && maximum <= 15,
 						"medium multiplier range");
-				assertClose(arithmeticMean, 10.0, "medium arithmetic mean");
-				assertTrue(Math.abs(weightedMean - 10.0) <= 0.10,
-						"medium processing-weighted mean");
 				assertTrue(!allEqual(multipliers), "medium scale must vary by job");
-				mediumByTaskSet.put(fields[0], multipliers);
+				assertInRange(centerMultipliers, 5, 15, "medium center multiplier");
+				mediumByTaskSet.put(fields[0], new int[][] { multipliers, centerMultipliers });
 			} else if (fields[1].equals("high")) {
 				assertTrue(nominal == 20 && minimum >= 15 && maximum <= 25,
 						"high multiplier range");
-				assertClose(arithmeticMean, 20.0, "high arithmetic mean");
-				assertTrue(Math.abs(weightedMean - 20.0) <= 0.10,
-						"high processing-weighted mean");
-				int[] medium = mediumByTaskSet.get(fields[0]);
-				assertTrue(medium != null && medium.length == multipliers.length,
+				assertInRange(centerMultipliers, 15, 25, "high center multiplier");
+				int[][] medium = mediumByTaskSet.get(fields[0]);
+				assertTrue(medium != null && medium[0].length == multipliers.length,
 						"paired medium vector");
-				for (int job = 0; job < multipliers.length; job++) {
-					assertTrue(multipliers[job] == medium[job] + 10,
-							"paired high multiplier for job " + (job + 1));
-				}
-				result.put(fields[0], new ScaleVectors(medium, multipliers));
+				result.put(fields[0], new ScaleVectors(medium[0], medium[1], multipliers, centerMultipliers));
 			} else {
 				assertTrue(nominal == 1 && minimum == 1 && maximum == 1,
 						"base multiplier");
@@ -130,21 +130,37 @@ public final class FormalExperimentDataGenerationTest {
 		return result;
 	}
 
+	private static void assertWindowRanges(Path path) throws Exception {
+		List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+		for (String line : lines.subList(1, lines.size())) {
+			String[] fields = line.split("\\t", -1);
+			assertTrue(fields.length == 8, "window metadata schema");
+			int minimum = Integer.parseInt(fields[3]);
+			int maximum = Integer.parseInt(fields[4]);
+			int[] values = parseVector(fields[6]);
+			assertInRange(values, minimum, maximum, "window half width");
+			assertTrue(fields[7].length() == 64, "window fingerprint");
+			if (!fields[2].equals("zero")) {
+				assertTrue(!allEqual(values), "each job must independently sample W");
+			}
+		}
+	}
+
 	private static void assertHeterogeneousMaterialization(
 			List<FormalExperimentDataGenerator.GeneratedInstance> instances, ScaleVectors vectors)
 			throws Exception {
 		assertTrue(vectors != null, "missing representative scale vectors");
-		Path basePath = findInstance(instances, "n060-set01", "family", "base", 2);
-		Path mediumPath = findInstance(instances, "n060-set01", "family", "medium", 2);
+		Path basePath = findInstance(instances, "n060-set01", "family", "base", "zero", 2);
+		Path mediumPath = findInstance(instances, "n060-set01", "family", "medium", "zero", 2);
 		ParsedInstance base = readInstance(basePath, 60);
 		ParsedInstance medium = readInstance(mediumPath, 60);
 		long baseWorkload = 0L;
 		long mediumWorkload = 0L;
 		for (int job = 1; job <= 60; job++) {
-			int multiplier = vectors.medium()[job - 1];
+			int multiplier = vectors.mediumProcessing()[job - 1];
 			assertTrue(medium.processing()[job] == base.processing()[job] * multiplier,
 					"processing scale for job " + job);
-			assertTrue(medium.centers()[job] == base.centers()[job] * multiplier,
+			assertTrue(medium.centers()[job] == base.centers()[job] * vectors.mediumCenters()[job - 1],
 					"due-center scale for job " + job);
 			baseWorkload += base.processing()[job];
 			mediumWorkload += medium.processing()[job];
@@ -162,10 +178,11 @@ public final class FormalExperimentDataGenerationTest {
 	}
 
 	private static Path findInstance(List<FormalExperimentDataGenerator.GeneratedInstance> instances,
-			String taskSetId, String setupType, String scaleLevel, int machines) {
+			String taskSetId, String setupType, String scaleLevel, String windowLevel, int machines) {
 		return instances.stream()
 				.filter(item -> item.taskSetId().equals(taskSetId) && item.setupType().equals(setupType)
-						&& item.scaleLevel().equals(scaleLevel) && item.machines() == machines)
+						&& item.scaleLevel().equals(scaleLevel) && item.windowLevel().equals(windowLevel)
+						&& item.machines() == machines)
 				.map(FormalExperimentDataGenerator.GeneratedInstance::path)
 				.findFirst().orElseThrow();
 	}
@@ -177,7 +194,7 @@ public final class FormalExperimentDataGenerationTest {
 		for (int job = 1; job <= n; job++) {
 			String[] fields = lines.get(job).trim().split("\\s+");
 			processing[job] = Integer.parseInt(fields[0]);
-			centers[job] = Integer.parseInt(fields[1]);
+			centers[job] = (Integer.parseInt(fields[1]) + Integer.parseInt(fields[2])) / 2;
 		}
 		assertTrue(lines.get(n + 1).equals("SETUP"), "setup marker");
 		int[][] setup = new int[n + 1][n + 1];
@@ -206,6 +223,20 @@ public final class FormalExperimentDataGenerationTest {
 			}
 		}
 		return true;
+	}
+
+	private static void assertInRange(int[] values, int minimum, int maximum, String message) {
+		for (int value : values) {
+			assertTrue(value >= minimum && value <= maximum, message + ": " + value);
+		}
+	}
+
+	private static double mean(int[] values) {
+		long total = 0L;
+		for (int value : values) {
+			total += value;
+		}
+		return (double) total / values.length;
 	}
 
 	private static String sha256(Path path) throws Exception {
@@ -249,7 +280,8 @@ public final class FormalExperimentDataGenerationTest {
 		}
 	}
 
-	private record ScaleVectors(int[] medium, int[] high) {
+	private record ScaleVectors(int[] mediumProcessing, int[] mediumCenters,
+			int[] highProcessing, int[] highCenters) {
 	}
 
 	private record ParsedInstance(int[] processing, int[] centers, int[][] setup) {

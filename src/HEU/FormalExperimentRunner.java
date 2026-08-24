@@ -43,7 +43,7 @@ public final class FormalExperimentRunner {
 			writeSeed(arguments);
 			return;
 		}
-		Data data = FormalExperimentDataFactory.load(arguments.instance, arguments.buildScenario());
+		Data data = arguments.loadData();
 		runSolver(data, arguments);
 	}
 
@@ -73,7 +73,7 @@ public final class FormalExperimentRunner {
 		long utilitySeed = deterministicSeed(arguments.runId, repetition, 0x9e3779b9L);
 		EngineALNS.rng = new Random(alnsSeed);
 		Utility.rng = new Random(utilitySeed);
-		Data data = FormalExperimentDataFactory.load(arguments.instance, arguments.buildScenario());
+		Data data = arguments.loadData();
 		TWETBPCConfig config = new TWETBPCConfig();
 		BestBpcProfiles.NG_DSSR.apply(config);
 		config.reuseConfiguredBestSolution = false;
@@ -127,13 +127,8 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
 		lines.add("seedFile=" + arguments.seedFile.toAbsolutePath());
-		lines.add("dueWindowHalfWidth=" + arguments.dueWindowHalfWidth);
-		lines.add("setupCostCoefficient=" + arguments.setupCostCoefficient);
+		lines.add("outsourcingData=" + pathValue(arguments.outsourcingData));
 		lines.add("outsourcingModel=" + arguments.outsourcingModel);
-		lines.add("outsourcingUnitRate=" + arguments.outsourcingUnitRate);
-		lines.add("discountStrength=" + arguments.discountStrength);
-		lines.add("outsourcingBreakpoint1=" + arguments.outsourcingBreakpoint1);
-		lines.add("outsourcingBreakpoint2=" + arguments.outsourcingBreakpoint2);
 		lines.add("seedRunCount=" + runs.size());
 		for (SeedRun run : runs) {
 			String prefix = "seedRun" + run.repetition + ".";
@@ -162,6 +157,10 @@ public final class FormalExperimentRunner {
 			sequences.add(new ArrayList<Integer>(pool.getColumn(columnId).getSequence()));
 		}
 		return sequences;
+	}
+
+	private static String pathValue(Path path) {
+		return path == null ? "" : path.toAbsolutePath().toString();
 	}
 
 	static final class SeedRun {
@@ -234,13 +233,8 @@ public final class FormalExperimentRunner {
 		lines.add("instance=" + arguments.instance.toAbsolutePath());
 		lines.add("algorithm=" + profile.getName());
 		lines.add("profileVersion=" + BestBpcProfiles.VERSION);
-		lines.add("dueWindowHalfWidth=" + arguments.dueWindowHalfWidth);
-		lines.add("setupCostCoefficient=" + arguments.setupCostCoefficient);
+		lines.add("outsourcingData=" + pathValue(arguments.outsourcingData));
 		lines.add("outsourcingModel=" + arguments.outsourcingModel);
-		lines.add("outsourcingUnitRate=" + arguments.outsourcingUnitRate);
-		lines.add("discountStrength=" + arguments.discountStrength);
-		lines.add("outsourcingBreakpoint1=" + arguments.outsourcingBreakpoint1);
-		lines.add("outsourcingBreakpoint2=" + arguments.outsourcingBreakpoint2);
 		lines.add("seedFile=" + (arguments.seedFile == null ? "" : arguments.seedFile.toAbsolutePath()));
 		lines.add("seedFingerprint=" + seedFingerprint);
 		lines.add("cplexThreads=1");
@@ -261,20 +255,20 @@ public final class FormalExperimentRunner {
 		private final String runId;
 		private final Path outputDir;
 		private final Path seedFile;
-		private final double dueWindowHalfWidth;
-		private final double setupCostCoefficient;
+		private final Path outsourcingData;
 		private final String outsourcingModel;
-		private final double outsourcingUnitRate;
-		private final double discountStrength;
-		private final double outsourcingBreakpoint1;
-		private final double outsourcingBreakpoint2;
 		private final double timeLimitSeconds;
 		private final int maxNodes;
 
 		private Arguments(Map<String, String> values) {
-			if (values.containsKey("timeScale")) {
+			if (values.containsKey("timeScale") || values.containsKey("dueWindowHalfWidth")
+					|| values.containsKey("setupCostCoefficient")
+					|| values.containsKey("outsourcingUnitRate")
+					|| values.containsKey("discountStrength")
+					|| values.containsKey("outsourcingBreakpoint1")
+					|| values.containsKey("outsourcingBreakpoint2")) {
 				throw new IllegalArgumentException(
-						"timeScale is no longer a solver argument; use a materialized instance file");
+						"Formal data parameters must be materialized in instance or outsourcing overlay files");
 			}
 			action = value(values, "action", "solve").toLowerCase(Locale.ROOT);
 			if (!"seed".equals(action) && !"solve".equals(action)) {
@@ -286,27 +280,21 @@ public final class FormalExperimentRunner {
 			outputDir = Path.of(value(values, "outputDir", "results/formal/" + runId));
 			String seed = value(values, "seedFile", "");
 			seedFile = seed.isEmpty() ? null : Path.of(seed);
-			dueWindowHalfWidth = number(values, "dueWindowHalfWidth", 0.0);
-			setupCostCoefficient = number(values, "setupCostCoefficient", 0.0);
+			String overlay = value(values, "outsourcingData", "");
+			outsourcingData = overlay.isEmpty() ? null : Path.of(overlay);
 			outsourcingModel = value(values, "outsourcingModel", "none");
-			outsourcingUnitRate = number(values, "outsourcingUnitRate", 1.0);
-			discountStrength = number(values, "discountStrength", 0.0);
-			outsourcingBreakpoint1 = number(values, "outsourcingBreakpoint1", Double.NaN);
-			outsourcingBreakpoint2 = number(values, "outsourcingBreakpoint2", Double.NaN);
+			if ("none".equalsIgnoreCase(outsourcingModel) != (outsourcingData == null)) {
+				throw new IllegalArgumentException(
+						"outsourcingModel=none requires no overlay; outsourcing models require --outsourcingData");
+			}
 			timeLimitSeconds = number(values, "timeLimitSeconds", 10800.0);
 			maxNodes = integer(values, "maxNodes", 100000);
 		}
 
-		private FormalExperimentDataFactory.Scenario buildScenario() {
-			FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
-			scenario.dueWindowHalfWidth = dueWindowHalfWidth;
-			scenario.setupCostCoefficient = setupCostCoefficient;
-			scenario.outsourcingEnabled = !"none".equalsIgnoreCase(outsourcingModel);
-			scenario.outsourcingUnitRate = outsourcingUnitRate;
-			scenario.discountStrength = discountStrength;
-			scenario.outsourcingBreakpoint1 = outsourcingBreakpoint1;
-			scenario.outsourcingBreakpoint2 = outsourcingBreakpoint2;
-			return scenario;
+		private Data loadData() throws Exception {
+			return outsourcingData == null
+					? FormalExperimentDataFactory.loadNoOutsourcing(instance)
+					: FormalExperimentDataFactory.loadOutsourcing(instance, outsourcingData);
 		}
 
 		private static Arguments parse(String[] args) {

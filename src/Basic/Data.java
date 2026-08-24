@@ -25,6 +25,8 @@ public class Data {
 	public boolean setupCostTriangleInequalitySatisfied;// 2026-05-20: 若所有 B_ij 都为 0，则 pricing 动态硬窗可退化为 job 级缓存
 	public double[][] setupCost;// sequence dependent setup cost，和 s[i][j] 使用同一条弧 i->j
 	private boolean setupCostProvidedByInput;
+	private boolean outsourcingCostProvidedByInput;
+	private boolean outsourcingTariffProvidedByInput;
 	public double min_s[];// 每个任务的最小setup
 	public double[] outsourcingCost;// 每个任务的 baseline outsourcing cost；默认 big_M 表示暂不收缩预处理粗硬窗
 	public PiecewiseLinearFunction outsourcingCostFunction;// 2026-05-16: 总外包成本函数 G(B(O))，输入为 baseline 总量
@@ -48,12 +50,32 @@ public class Data {
 	public double[] lateTime;// 标记每个任务的完成时间时间窗,后续label setting的时候可能动态迭代更新
 
 	public Data(String path, boolean setup, boolean due_date) throws IOException {
+		this(path, null, setup, due_date);
+	}
+
+	/** 读取调度实例，并可选叠加一个独立的外包经济参数文件。 */
+	public Data(String path, String outsourcingPath, boolean setup, boolean due_date) throws IOException {
 		configure = new Configure();
-		BufferedReader reader = new BufferedReader(new FileReader(path));
-		String line = reader.readLine();
-		String[] headerTokens = splitTokens(line);
-		this.n = Integer.parseInt(headerTokens[0]);
-		this.m = Integer.parseInt(headerTokens[1]);
+		try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
+			String line = reader.readLine();
+			String[] headerTokens = splitTokens(line);
+			this.n = Integer.parseInt(headerTokens[0]);
+			this.m = Integer.parseInt(headerTokens[1]);
+			initializeArrays();
+			debug_set();
+			if (due_date) {
+				load_dd_data(setup, reader);
+			} else {
+				load_dw_data(setup, reader);
+			}
+		}
+		if (outsourcingPath != null) {
+			loadOutsourcingOverlay(outsourcingPath);
+		}
+		finishInitialization();
+	}
+
+	private void initializeArrays() {
 		this.p = new double[n + 1];
 		this.d_e = new double[n + 1];
 		this.d_l = new double[n + 1];
@@ -71,12 +93,9 @@ public class Data {
 		this.hardWindowEnd = new double[n + 1];
 		Arrays.fill(this.outsourcingCost, Utility.big_M);
 		this.outsourcingCost[0] = 0;
-		debug_set();
-		if (due_date) {
-			load_dd_data(setup, reader);
-		} else {
-			load_dw_data(setup, reader);
-		}
+	}
+
+	private void finishInitialization() {
 		applyDefaultSetupCostFromSetupTime();
 
 		setCmax();
@@ -94,7 +113,6 @@ public class Data {
 			}
 			min_s[i] = minSi;
 		}
-
 	}
 
 	public void setTimeWindows() {
@@ -483,10 +501,19 @@ public class Data {
 			String line = reader.readLine();
 			String[] tokens = splitTokens(line);
 			this.p[jid] = Integer.parseInt(tokens[0]) * scale;
-			this.d_e[jid] = Integer.parseInt(tokens[1]) * scale;
-			this.d_l[jid] = Integer.parseInt(tokens[1]) * scale;
-			this.w_e[jid] = Integer.parseInt(tokens[2]);
-			this.w_t[jid] = Integer.parseInt(tokens[3]);
+			if (tokens.length == 4) {
+				this.d_e[jid] = Integer.parseInt(tokens[1]) * scale;
+				this.d_l[jid] = Integer.parseInt(tokens[1]) * scale;
+				this.w_e[jid] = Integer.parseInt(tokens[2]);
+				this.w_t[jid] = Integer.parseInt(tokens[3]);
+			} else if (tokens.length == 5) {
+				this.d_e[jid] = Integer.parseInt(tokens[1]) * scale;
+				this.d_l[jid] = Integer.parseInt(tokens[2]) * scale;
+				this.w_e[jid] = Integer.parseInt(tokens[3]);
+				this.w_t[jid] = Integer.parseInt(tokens[4]);
+			} else {
+				throw new IOException("Invalid job row " + jid + ": expected 4 or 5 fields");
+			}
 		}
 		if (setup) {
 			loadSetupMatrices(reader);
@@ -522,6 +549,11 @@ public class Data {
 			}
 			line = nextNonEmptyLine(reader);
 		}
+		loadOptionalBlocks(reader, line);
+		ensureOutsourcingTariffDomainCoverage();
+	}
+
+	private void loadOptionalBlocks(BufferedReader reader, String line) throws IOException {
 		while (line != null) {
 			String blockName = line.trim();
 			if ("SETUP_COST".equalsIgnoreCase(blockName)) {
@@ -531,12 +563,45 @@ public class Data {
 				}
 			} else if ("OUTSOURCING_COST".equalsIgnoreCase(blockName)) {
 				fillOutsourcingCost(splitTokens(reader.readLine()));
+				outsourcingCostProvidedByInput = true;
 			} else if ("OUTSOURCING_TARIFF".equalsIgnoreCase(blockName)) {
 				fillOutsourcingTariff(reader);
+				outsourcingTariffProvidedByInput = true;
 			} else {
 				throw new IOException("Unknown optional block after SETUP: " + line);
 			}
 			line = nextNonEmptyLine(reader);
+		}
+	}
+
+	private void loadOutsourcingOverlay(String path) throws IOException {
+		outsourcingCostProvidedByInput = false;
+		outsourcingTariffProvidedByInput = false;
+		try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
+			String line = nextNonEmptyLine(reader);
+			while (line != null) {
+				String blockName = line.trim();
+				if ("OUTSOURCING_COST".equalsIgnoreCase(blockName)) {
+					if (outsourcingCostProvidedByInput) {
+						throw new IOException("Duplicate OUTSOURCING_COST block in overlay: " + path);
+					}
+					fillOutsourcingCost(splitTokens(reader.readLine()));
+					outsourcingCostProvidedByInput = true;
+				} else if ("OUTSOURCING_TARIFF".equalsIgnoreCase(blockName)) {
+					if (outsourcingTariffProvidedByInput) {
+						throw new IOException("Duplicate OUTSOURCING_TARIFF block in overlay: " + path);
+					}
+					fillOutsourcingTariff(reader);
+					outsourcingTariffProvidedByInput = true;
+				} else {
+					throw new IOException("Unknown block in outsourcing overlay: " + line);
+				}
+				line = nextNonEmptyLine(reader);
+			}
+		}
+		if (!outsourcingCostProvidedByInput || !outsourcingTariffProvidedByInput) {
+			throw new IOException("Outsourcing overlay must contain OUTSOURCING_COST and OUTSOURCING_TARIFF: "
+					+ path);
 		}
 		ensureOutsourcingTariffDomainCoverage();
 	}

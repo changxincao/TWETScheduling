@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.DosFileAttributeView;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -20,7 +21,8 @@ public final class ExperimentBatchSchedulerTest {
 	}
 
 	public static void main(String[] args) throws Exception {
-		Path baseDir = Path.of("tmp", "experiment-batch-scheduler-test");
+		// Windows 可能在子 JVM 退出后短暂保留重定向日志句柄，测试目录按次隔离。
+		Path baseDir = Path.of("tmp", "experiment-batch-scheduler-test-" + Long.toUnsignedString(System.nanoTime()));
 		resetDirectory(baseDir);
 		verifyManifestValidation(baseDir.resolve("invalid"));
 		verifySchedulingAndSkip(baseDir.resolve("schedule"));
@@ -123,13 +125,20 @@ public final class ExperimentBatchSchedulerTest {
 			return;
 		}
 		try (var stream = Files.walk(dir)) {
-			stream.sorted(Comparator.reverseOrder()).forEach(path -> {
+			List<Path> paths = stream.toList();
+			for (Path path : paths) {
 				try {
-					Files.delete(path);
+					DosFileAttributeView dos = Files.getFileAttributeView(path, DosFileAttributeView.class);
+					if (dos != null) {
+						dos.setReadOnly(false);
+					}
 				} catch (IOException ex) {
 					throw new RuntimeException(ex);
 				}
-			});
+			}
+			for (Path path : paths.stream().sorted(Comparator.reverseOrder()).toList()) {
+				Files.delete(path);
+			}
 		}
 		Files.createDirectories(dir);
 	}

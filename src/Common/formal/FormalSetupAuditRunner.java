@@ -24,8 +24,9 @@ public final class FormalSetupAuditRunner {
 		Path suiteRoot = args.length == 0 ? Path.of("experiment-suite", "formal") : Path.of(args[0]);
 		AuditSummary summary = audit(suiteRoot);
 		System.out.printf(Locale.ROOT,
-				"Formal setup audit passed: files=%d groups=%d maxMeanError=%.9f output=%s%n",
+				"Formal setup audit passed: files=%d groups=%d maxMeanError=%.9f maxRelativeMeanError=%.9f output=%s%n",
 				summary.fileCount(), summary.groupCount(), summary.maxAbsoluteMeanError(),
+				summary.maxRelativeMeanError(),
 				summary.output().toAbsolutePath());
 	}
 
@@ -37,14 +38,15 @@ public final class FormalSetupAuditRunner {
 		Map<String, int[]> familyAssignments = readFamilyAssignments(setupMetadata);
 		List<String> indexLines = Files.readAllLines(index, StandardCharsets.UTF_8);
 		ArrayList<String> output = new ArrayList<String>();
-		output.add("taskSetId\tsetupType\tscaleLevel\tnominalScale\tmachines\tinstance\ttargetMean\tactualMean\t"
+		output.add("taskSetId\tsetupType\tscaleLevel\twindowLevel\tnominalScale\tmachines\tinstance\ttargetMean\tactualMean\t"
 				+ "meanError\tcap\tmaximum\ttriangleViolations\tfloydChangedArcs\twithinMean\tbetweenMean\tbodySha256");
 		HashMap<String, String> bodyHashByGroup = new HashMap<String, String>();
 		double maxError = 0.0;
+		double maxRelativeError = 0.0;
 		int files = 0;
 		for (int row = 1; row < indexLines.size(); row++) {
 			String[] fields = indexLines.get(row).split("\\t", -1);
-			if (fields.length < 10) {
+			if (fields.length < 14) {
 				throw new IOException("Malformed generated instance index row: " + indexLines.get(row));
 			}
 			String taskSetId = fields[0];
@@ -53,7 +55,8 @@ public final class FormalSetupAuditRunner {
 			String setupType = fields[4];
 			String scaleLevel = fields[5];
 			int nominalScale = Integer.parseInt(fields[6]);
-			Path indexedPath = Path.of(fields[7]);
+			String windowLevel = fields[7];
+			Path indexedPath = Path.of(fields[11]);
 			Path path = indexedPath.isAbsolute() ? indexedPath : generatedRoot.resolve(indexedPath).normalize();
 			ParsedInstance instance = readInstance(path, size);
 			long processingTotal = processingTotal(instance.processing(), size);
@@ -68,15 +71,18 @@ public final class FormalSetupAuditRunner {
 			Report report = validator.audit(instance.setup(), targetMean, cap, family);
 			validator.requirePreset(report, "family".equals(setupType));
 			String bodyHash = hashBody(path);
-			String group = taskSetId + "/" + setupType + "/" + scaleLevel + "/n" + nominalScale;
+			String group = taskSetId + "/" + setupType + "/" + scaleLevel + "/" + windowLevel
+					+ "/n" + nominalScale;
 			String previous = bodyHashByGroup.putIfAbsent(group, bodyHash);
 			if (previous != null && !previous.equals(bodyHash)) {
 				throw new IllegalStateException("Machine copies differ for " + group + ": " + path);
 			}
 			maxError = Math.max(maxError, Math.abs(report.meanError()));
+			maxRelativeError = Math.max(maxRelativeError,
+					Math.abs(report.meanError()) / Math.max(1.0, report.targetMean()));
 			output.add(String.format(Locale.ROOT,
-					"%s\t%s\t%s\t%d\t%d\t%s\t%.9f\t%.9f\t%.9f\t%d\t%d\t%d\t%d\t%.9f\t%.9f\t%s",
-					taskSetId, setupType, scaleLevel, nominalScale, machines,
+					"%s\t%s\t%s\t%s\t%d\t%d\t%s\t%.9f\t%.9f\t%.9f\t%d\t%d\t%d\t%d\t%.9f\t%.9f\t%s",
+					taskSetId, setupType, scaleLevel, windowLevel, nominalScale, machines,
 					portable(absoluteSuiteRoot.relativize(path.toAbsolutePath().normalize())), report.targetMean(),
 					report.actualMean(), report.meanError(), report.cap(), report.maximum(),
 					report.triangleViolations(), report.floydChangedArcs(), report.withinMean(),
@@ -85,7 +91,7 @@ public final class FormalSetupAuditRunner {
 		}
 		Path outputPath = generatedRoot.resolve("post-generation-setup-audit.tsv");
 		Files.write(outputPath, output, StandardCharsets.UTF_8);
-		return new AuditSummary(files, bodyHashByGroup.size(), maxError, outputPath);
+		return new AuditSummary(files, bodyHashByGroup.size(), maxError, maxRelativeError, outputPath);
 	}
 
 	private static String portable(Path path) {
@@ -162,6 +168,7 @@ public final class FormalSetupAuditRunner {
 	private record ParsedInstance(int[] processing, int[][] setup) {
 	}
 
-	public record AuditSummary(int fileCount, int groupCount, double maxAbsoluteMeanError, Path output) {
+	public record AuditSummary(int fileCount, int groupCount, double maxAbsoluteMeanError,
+			double maxRelativeMeanError, Path output) {
 	}
 }

@@ -13,6 +13,9 @@ import java.util.Map;
 import Common.formal.FormalExperimentDataGenerator;
 import Common.formal.FormalExperimentDataGenerator.GeneratedInstance;
 import Common.formal.FormalExperimentDesign;
+import Common.formal.FormalOutsourcingDataGenerator;
+import Common.formal.FormalOutsourcingDataGenerator.Overlay;
+import Common.formal.FormalOutsourcingAuditRunner;
 import Common.formal.FormalSetupAuditRunner;
 import Common.formal.FormalTimeScaleAuditRunner;
 
@@ -24,9 +27,7 @@ import Common.formal.FormalTimeScaleAuditRunner;
 public final class FormalExperimentSuiteGenerator {
 	private static final String WORKSPACE_TOKEN = "${WORKSPACE}";
 	private static final Path WORKSPACE_ROOT = Path.of("").toAbsolutePath().normalize();
-	private static final double SETUP_COST_COEFFICIENT = FormalExperimentDesign.SETUP_COST_COEFFICIENT;
 	private static final double DEFAULT_DISCOUNT_STRENGTH = FormalExperimentDesign.DEFAULT_DISCOUNT_STRENGTH;
-	private static final int[] WINDOW_HALF_WIDTHS = FormalExperimentDesign.WINDOW_HALF_WIDTHS;
 	private static final double[] OUTSOURCING_RATES = FormalExperimentDesign.OUTSOURCING_RATES;
 	private static final String[] BPC_ALGORITHMS = new String[] {
 			"NG_DSSR", "TIME_INDEXED", "TIME_INDEXED_SRI" };
@@ -43,9 +44,10 @@ public final class FormalExperimentSuiteGenerator {
 						.generate(options.outputRoot.resolve("instances"), options.sizes);
 		FormalSetupAuditRunner.audit(options.outputRoot);
 		FormalTimeScaleAuditRunner.audit(options.outputRoot);
+		FormalOutsourcingAuditRunner.audit(options.outputRoot);
 		List<InstanceRef> instances = generated.instances().stream().map(InstanceRef::new).toList();
 		writeInstanceManifest(options, instances);
-		writeSolveManifest(options, instances);
+		writeSolveManifest(options, instances, generated.outsourcing());
 		writeReadme(options, instances);
 		System.out.printf(Locale.US, "Formal suite generated: instances=%d output=%s%n",
 				instances.size(), options.outputRoot.toAbsolutePath());
@@ -53,45 +55,44 @@ public final class FormalExperimentSuiteGenerator {
 
 	private static void writeInstanceManifest(Options options, List<InstanceRef> instances) throws IOException {
 		ArrayList<String> lines = new ArrayList<String>();
-		lines.add("taskSetId\tsize\tcaseIndex\tmachines\tsetupType\tscaleLevel\tnominalScale\tinstance\taverageProcessing");
+		lines.add("taskSetId\tsize\tcaseIndex\tmachines\tsetupType\tscaleLevel\tnominalScale\t"
+				+ "windowLevel\twindowMinimum\twindowMaximum\twindowFingerprint\tinstance\taverageProcessing");
 		for (InstanceRef instance : instances) {
-			lines.add(String.format(Locale.US, "%s\t%d\t%d\t%d\t%s\t%s\t%d\t%s\t%.6f",
+			lines.add(String.format(Locale.US,
+					"%s\t%d\t%d\t%d\t%s\t%s\t%d\t%s\t%d\t%d\t%s\t%s\t%.6f",
 					instance.taskSetId, instance.size, instance.caseIndex, instance.machines,
-					instance.setupType, instance.scaleLevel, instance.nominalScale, portable(instance.path),
+					instance.setupType, instance.scaleLevel, instance.nominalScale, instance.windowLevel,
+					instance.windowMinimum, instance.windowMaximum, instance.windowFingerprint,
+					portable(instance.path),
 					instance.averageProcessing));
 		}
 		Files.write(options.outputRoot.resolve("instances.tsv"), lines, StandardCharsets.UTF_8);
 	}
 
-	private static void writeSolveManifest(Options options, List<InstanceRef> instances) throws IOException {
+	private static void writeSolveManifest(Options options, List<InstanceRef> instances,
+			FormalOutsourcingDataGenerator.Result outsourcing) throws IOException {
 		ArrayList<RunRow> seedRows = new ArrayList<RunRow>();
 		ArrayList<RunRow> solveRows = new ArrayList<RunRow>();
 		LinkedHashMap<String, Path> seedFiles = new LinkedHashMap<String, Path>();
-		double[] breakpoints = outsourcingBreakpoints(instances);
 		Files.write(options.outputRoot.resolve("experiment.properties"), List.of(
 				"outsourcingQuotation=p*max(wE,wT)",
-				"outsourcingBreakpointReferenceTotal=" + compact(2.0 * breakpoints[1]),
-				"outsourcingBreakpoint1=" + compact(breakpoints[0]),
-				"outsourcingBreakpoint2=" + compact(breakpoints[1]),
+				"outsourcingBreakpointReferenceTotal=" + compact(outsourcing.referenceTotal()),
+				"outsourcingBreakpoint1=" + compact(outsourcing.breakpoint1()),
+				"outsourcingBreakpoint2=" + compact(outsourcing.breakpoint2()),
 				"outsourcingRates=0.5,1,2",
 				"discountMarginalRates=1,0.85,0.70",
-				"setupCostCoefficient=" + compact(SETUP_COST_COEFFICIENT),
+				"setupCostCoefficient=" + compact(FormalExperimentDesign.SETUP_COST_COEFFICIENT),
 				"solveTimeLimitSeconds=" + compact(options.timeLimitSeconds),
 				"maxNodes=" + options.maxNodes,
 				"discountModel=" + options.discountModel), StandardCharsets.UTF_8);
 		for (InstanceRef instance : instances) {
-			for (int baseHalfWidth : WINDOW_HALF_WIDTHS) {
-				double halfWidth = (double) baseHalfWidth * instance.nominalScale;
-				String scenario = scenarioId(instance, halfWidth, SETUP_COST_COEFFICIENT);
-				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
-						SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints);
-				for (String algorithm : BPC_ALGORITHMS) {
-					String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
-					solveRows.add(solveRow(options, runId, instance.path, algorithm, seedFile, halfWidth,
-							SETUP_COST_COEFFICIENT, "none", 1.0, 0.0, breakpoints,
-							"pricing-comparison"));
-				}
+			String scenario = scenarioId(instance);
+			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
+			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, null, seedFile, "none");
+			for (String algorithm : BPC_ALGORITHMS) {
+				String runId = "pricing-" + scenario + "-" + algorithm.toLowerCase(Locale.ROOT);
+				solveRows.add(solveRow(options, runId, instance.path, null, algorithm, seedFile,
+						"none", "pricing-comparison"));
 			}
 		}
 
@@ -100,20 +101,16 @@ public final class FormalExperimentSuiteGenerator {
 			if (!instance.scaleLevel.equals("base")) {
 				continue;
 			}
-			for (int halfWidth : WINDOW_HALF_WIDTHS) {
-				for (double rate : OUTSOURCING_RATES) {
-					String scenario = scenarioId(instance, halfWidth, SETUP_COST_COEFFICIENT)
-							+ "-or" + compact(rate) + "-d" + compact(DEFAULT_DISCOUNT_STRENGTH);
-					Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-					addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
-							SETUP_COST_COEFFICIENT, "masterVariables", rate, DEFAULT_DISCOUNT_STRENGTH,
-							breakpoints);
-					for (String model : OUTSOURCING_MODELS) {
-						String runId = "outsourcing-performance-" + scenario + "-" + model;
-						solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
-								SETUP_COST_COEFFICIENT, model, rate, DEFAULT_DISCOUNT_STRENGTH,
-								breakpoints, "outsourcing-performance"));
-					}
+			for (double rate : OUTSOURCING_RATES) {
+				Overlay overlay = outsourcing.require(instance.taskSetId, rate, DEFAULT_DISCOUNT_STRENGTH);
+				String scenario = scenarioId(instance) + "-or" + compact(rate) + "-ddefault";
+				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
+				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, overlay.path(),
+						seedFile, "masterVariables");
+				for (String model : OUTSOURCING_MODELS) {
+					String runId = "outsourcing-performance-" + scenario + "-" + model;
+					solveRows.add(solveRow(options, runId, instance.path, overlay.path(), "NG_DSSR",
+							seedFile, model, "outsourcing-performance"));
 				}
 			}
 		}
@@ -123,17 +120,14 @@ public final class FormalExperimentSuiteGenerator {
 			if (instance.size != 50 || !instance.scaleLevel.equals("base")) {
 				continue;
 			}
-			for (int halfWidth : WINDOW_HALF_WIDTHS) {
-				String scenario = scenarioId(instance, halfWidth, SETUP_COST_COEFFICIENT)
-						+ "-or1-d0";
-				Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
-				addSeedRow(seedRows, seedFiles, options, scenario, instance.path, seedFile, halfWidth,
-						SETUP_COST_COEFFICIENT, "masterVariables", 1.0, 0.0, breakpoints);
-				String runId = "outsourcing-discount-" + scenario + "-" + options.discountModel;
-				solveRows.add(solveRow(options, runId, instance.path, "NG_DSSR", seedFile, halfWidth,
-						SETUP_COST_COEFFICIENT, options.discountModel, 1.0, 0.0, breakpoints,
-						"outsourcing-discount"));
-			}
+			Overlay overlay = outsourcing.require(instance.taskSetId, 1.0, 0.0);
+			String scenario = scenarioId(instance) + "-or1-dnone";
+			Path seedFile = options.outputRoot.resolve("seeds").resolve(scenario + ".seed");
+			addSeedRow(seedRows, seedFiles, options, scenario, instance.path, overlay.path(), seedFile,
+					"masterVariables");
+			String runId = "outsourcing-discount-" + scenario + "-" + options.discountModel;
+			solveRows.add(solveRow(options, runId, instance.path, overlay.path(), "NG_DSSR", seedFile,
+					options.discountModel, "outsourcing-discount"));
 		}
 
 		writeManifest(options.outputRoot.resolve("manifest.tsv"), seedRows, solveRows);
@@ -197,8 +191,7 @@ public final class FormalExperimentSuiteGenerator {
 	}
 
 	private static void addSeedRow(List<RunRow> rows, Map<String, Path> seedFiles, Options options, String scenario,
-			Path instance, Path seedFile, double halfWidth, double setupCostCoefficient, String outsourcingModel,
-			double outsourcingRate, double discount, double[] breakpoints) {
+			Path instance, Path outsourcingData, Path seedFile, String outsourcingModel) {
 		if (seedFiles.putIfAbsent(scenario, seedFile) != null) {
 			return;
 		}
@@ -206,83 +199,23 @@ public final class FormalExperimentSuiteGenerator {
 		Path output = options.outputRoot.resolve("runs").resolve(runId);
 		String args = arguments(mapOf(
 				"action", "seed", "runId", runId, "instance", portable(instance), "seedFile", portable(seedFile),
-				"outputDir", portable(output),
-				"dueWindowHalfWidth", compact(halfWidth), "setupCostCoefficient", compact(setupCostCoefficient),
-				"outsourcingModel", outsourcingModel, "outsourcingUnitRate", compact(outsourcingRate),
-				"discountStrength", compact(discount), "outsourcingBreakpoint1", compact(breakpoints[0]),
-				"outsourcingBreakpoint2", compact(breakpoints[1])));
+				"outputDir", portable(output), "outsourcingModel", outsourcingModel,
+				"outsourcingData", outsourcingData == null ? "" : portable(outsourcingData)));
 		rows.add(new RunRow(runId, args, portable(output), "", "seed"));
 	}
 
-	private static RunRow solveRow(Options options, String runId, Path instance, String algorithm, Path seedFile,
-			double halfWidth, double setupCostCoefficient, String outsourcingModel,
-			double outsourcingRate, double discount, double[] breakpoints, String block) {
+	private static RunRow solveRow(Options options, String runId, Path instance, Path outsourcingData,
+			String algorithm, Path seedFile, String outsourcingModel, String block) {
 		Path output = options.outputRoot.resolve("runs").resolve(block).resolve(runId);
 		String args = arguments(mapOf(
 				"action", "solve", "runId", runId, "instance", portable(instance), "algorithm", algorithm,
 				"outputDir", portable(output), "seedFile", portable(seedFile),
-				"dueWindowHalfWidth", compact(halfWidth), "setupCostCoefficient", compact(setupCostCoefficient),
-				"outsourcingModel", outsourcingModel, "outsourcingUnitRate", compact(outsourcingRate),
-				"discountStrength", compact(discount), "outsourcingBreakpoint1", compact(breakpoints[0]),
-				"outsourcingBreakpoint2", compact(breakpoints[1]),
+				"outsourcingModel", outsourcingModel,
+				"outsourcingData", outsourcingData == null ? "" : portable(outsourcingData),
 				"timeLimitSeconds", compact(options.timeLimitSeconds),
 				"maxNodes", Integer.toString(options.maxNodes)));
 		return new RunRow(runId, args, portable(output), "seed-" + stripExtension(seedFile.getFileName().toString()),
 				block);
-	}
-
-	/**
-	 * 断点只从 n=50 正式任务集合计算一次；同一任务集合的不同机器副本只计一次。
-	 */
-	private static double[] outsourcingBreakpoints(List<InstanceRef> instances) throws IOException {
-		LinkedHashMap<String, Double> totals = quotationTotals(instances, 50);
-		if (totals.isEmpty()) {
-			totals = quotationTotals(instances, -1);
-		}
-		if (totals.isEmpty()) {
-			throw new IllegalArgumentException("Cannot determine outsourcing breakpoints without instances");
-		}
-		ArrayList<Double> values = new ArrayList<Double>(totals.values());
-		values.sort(Double::compare);
-		double median;
-		int middle = values.size() / 2;
-		if (values.size() % 2 == 0) {
-			median = 0.5 * (values.get(middle - 1).doubleValue() + values.get(middle).doubleValue());
-		} else {
-			median = values.get(middle).doubleValue();
-		}
-		return new double[] { 0.25 * median, 0.50 * median };
-	}
-
-	private static LinkedHashMap<String, Double> quotationTotals(List<InstanceRef> instances, int requiredSize)
-			throws IOException {
-		LinkedHashMap<String, Double> totals = new LinkedHashMap<String, Double>();
-		for (InstanceRef instance : instances) {
-			if (!instance.scaleLevel.equals("base")) {
-				continue;
-			}
-			if (requiredSize > 0 && instance.size != requiredSize) {
-				continue;
-			}
-			List<String> lines = Files.readAllLines(instance.path, StandardCharsets.UTF_8);
-			StringBuilder taskKey = new StringBuilder();
-			double total = 0.0;
-			for (int row = 1; row <= instance.size; row++) {
-				String normalized = lines.get(row).trim().replaceAll("\\s+", " ");
-				String[] tokens = normalized.split(" ");
-				if (tokens.length < 4) {
-					throw new IOException("Malformed job row " + row + " in " + instance.path);
-				}
-				double processing = Double.parseDouble(tokens[0]);
-				double earlyWeight = Double.parseDouble(tokens[2]);
-				double tardyWeight = Double.parseDouble(tokens[3]);
-				// due center 可能因旧机器派生文件不同；固定断点只按决定 q_j 的字段去重。
-				taskKey.append(tokens[0]).append('/').append(tokens[2]).append('/').append(tokens[3]).append(';');
-				total += processing * Math.max(earlyWeight, tardyWeight);
-			}
-			totals.putIfAbsent(taskKey.toString(), Double.valueOf(total));
-		}
-		return totals;
 	}
 
 	private static void writeReadme(Options options, List<InstanceRef> instances) throws IOException {
@@ -297,10 +230,9 @@ public final class FormalExperimentSuiteGenerator {
 				}
 			}
 		}
-		int pricingSeedCount = mainInstanceCount * WINDOW_HALF_WIDTHS.length;
-		int outsourcingSeedCount = originalScaleInstanceCount * WINDOW_HALF_WIDTHS.length
-				* OUTSOURCING_RATES.length;
-		int discountSeedCount = n50OriginalScaleInstanceCount * WINDOW_HALF_WIDTHS.length;
+		int pricingSeedCount = mainInstanceCount;
+		int outsourcingSeedCount = originalScaleInstanceCount * OUTSOURCING_RATES.length;
+		int discountSeedCount = n50OriginalScaleInstanceCount;
 		int seedTaskCount = pricingSeedCount + outsourcingSeedCount + discountSeedCount;
 		int pricingTaskCount = pricingSeedCount * BPC_ALGORITHMS.length;
 		int outsourcingPerformanceTaskCount = outsourcingSeedCount * OUTSOURCING_MODELS.length;
@@ -314,10 +246,10 @@ public final class FormalExperimentSuiteGenerator {
 		lines.add("执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。");
 		lines.add("也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。");
 		lines.add("");
-		lines.add("`pricing-comparison` 使用 W0/W100/W300 和每个任务集合预先生成的 base/medium/high 三个尺度比较三种 BPC。medium/high 对每个任务使用配对的异质倍率，W 按名义倍率 10/20 放大；setup 按实际总 processing workload 比例整体缩放。所有数据已写入独立 `.dat`，runner 不接收时间倍率。`outsourcing-performance` 在原时间尺度完整比较三档价格和 columns/masterVariables。`outsourcing-discount` 只补 n=50、中价、无折扣任务。实验三不生成求解任务。");
+		lines.add("`pricing-comparison` 使用逐任务落盘的 zero/narrow/wide 窗口和 base/medium/high 三个尺度比较三种 BPC。medium/high 的 processing 与 due-center 倍率独立抽取，setup 按实际 processing workload 比例整体缩放。`outsourcing-performance` 在原时间尺度比较三档已落盘报价 overlay 和 columns/masterVariables；`outsourcing-discount` 只补 n=50、中价、无折扣 overlay。runner 不构造任何物理或经济数据。");
 		lines.add("");
 		lines.add("已准备落盘实例记录数：" + instances.size() + "；每个规模固定取 "
-				+ options.casesPerSize + " 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率、逐任务放大和 setup 审计见 `instances/` 下的 metadata 与两个 `post-generation-*-audit.tsv`。");
+				+ options.casesPerSize + " 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率、逐任务窗口、setup 和外包审计见 `instances/` 下的 metadata 与三个 `post-generation-*-audit.tsv`。");
 		lines.add("");
 		lines.add("总 manifest 包含 " + seedTaskCount + " 个共享 seed 任务和 " + solveTaskCount
 				+ " 个求解任务。其中 pricing comparison=" + pricingTaskCount
@@ -329,10 +261,10 @@ public final class FormalExperimentSuiteGenerator {
 		Files.write(options.outputRoot.resolve("README.md"), lines, StandardCharsets.UTF_8);
 	}
 
-	private static String scenarioId(InstanceRef instance, double halfWidth, double setupCost) {
+	private static String scenarioId(InstanceRef instance) {
 		return instance.taskSetId + "-m" + instance.machines + "-" + instance.setupType
 				+ "-" + instance.scaleLevel + "-n" + instance.nominalScale
-				+ "-w" + compact(halfWidth) + "-sc" + compact(setupCost);
+				+ "-w" + instance.windowLevel;
 	}
 
 	private static String arguments(Map<String, String> values) {
@@ -381,6 +313,10 @@ public final class FormalExperimentSuiteGenerator {
 		private final String setupType;
 		private final String scaleLevel;
 		private final int nominalScale;
+		private final String windowLevel;
+		private final int windowMinimum;
+		private final int windowMaximum;
+		private final String windowFingerprint;
 		private final Path path;
 		private final double averageProcessing;
 
@@ -392,6 +328,10 @@ public final class FormalExperimentSuiteGenerator {
 			setupType = generated.setupType();
 			scaleLevel = generated.scaleLevel();
 			nominalScale = generated.nominalScale();
+			windowLevel = generated.windowLevel();
+			windowMinimum = generated.windowMinimum();
+			windowMaximum = generated.windowMaximum();
+			windowFingerprint = generated.windowFingerprint();
 			path = generated.path();
 			averageProcessing = generated.averageProcessing();
 		}

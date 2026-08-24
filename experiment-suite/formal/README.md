@@ -1,15 +1,13 @@
 # 正式计算实验任务包
 
-> **暂停执行：** 本目录仍是已淘汰的平衡配对时间倍率版本，不符合当前统一方案第1.4节确认的四条独立processing/center随机倍率规则。生成器和数据重建完成前，不得用本目录启动正式长跑；当前唯一规范见 `docs/plans/2026-08-23-正式实验当前统一方案.md`。
-
 三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，待比较方法复用同一快照和 SHA-256 fingerprint。
 
 执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。
 也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。
 
-`pricing-comparison` 使用 W0/W100/W300 和每个任务集合预先生成的 base/medium/high 三个尺度比较三种 BPC。medium/high 对每个任务使用配对的异质倍率，W 按名义倍率 10/20 放大；setup 按实际总 processing workload 比例整体缩放。所有数据已写入独立 `.dat`，runner 不接收时间倍率。`outsourcing-performance` 在原时间尺度完整比较三档价格和 columns/masterVariables。`outsourcing-discount` 只补 n=50、中价、无折扣任务。实验三不生成求解任务。
+`pricing-comparison` 使用逐任务落盘的 zero/narrow/wide 窗口和 base/medium/high 三个尺度比较三种 BPC。medium/high 的 processing 与 due-center 倍率独立抽取，setup 按实际 processing workload 比例整体缩放。`outsourcing-performance` 在原时间尺度比较三档已落盘报价 overlay 和 columns/masterVariables；`outsourcing-discount` 只补 n=50、中价、无折扣 overlay。runner 不构造任何物理或经济数据。
 
-已准备落盘实例记录数：540；每个规模固定取 5 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率、逐任务放大和 setup 审计见 `instances/` 下的 metadata 与两个 `post-generation-*-audit.tsv`。
+已准备落盘实例记录数：1620；每个规模固定取 5 个任务集合，并生成 random/family 与 base/medium/high 尺度。完整抽样、倍率、逐任务窗口、setup 和外包审计见 `instances/` 下的 metadata 与三个 `post-generation-*-audit.tsv`。
 
 总 manifest 包含 3330 个共享 seed 任务和 8190 个求解任务。其中 pricing comparison=4860，outsourcing performance=3240，outsourcing discount=90。这些是场景/方法任务数，不是不同原始数据实例数。
 

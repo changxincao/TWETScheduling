@@ -67,6 +67,10 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(manifest, "--timeLimitSeconds=\"10800\"", "formal solve time limit");
 		assertContains(manifest, "${WORKSPACE}/", "manifest should remain portable across machines");
 		assertTrue(!manifest.contains("--timeScale="), "time scale must be materialized in instance files");
+		assertTrue(!manifest.contains("--dueWindowHalfWidth="), "window must be materialized in instance files");
+		assertTrue(!manifest.contains("--setupCostCoefficient="), "setup cost must be materialized");
+		assertTrue(!manifest.contains("--outsourcingUnitRate="), "outsourcing rate must be materialized");
+		assertTrue(!manifest.contains("--discountStrength="), "discount must be materialized");
 		assertTrue(Files.exists(suite.resolve("manifests/pricing-comparison.tsv")),
 				"missing pricing block manifest");
 		assertPricingWindowMatrix(suite.resolve("manifests/pricing-comparison.tsv"));
@@ -83,12 +87,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(!Files.exists(suite.resolve("manifests/outsourcing-price.tsv")),
 				"obsolete outsourcing price manifest");
 		assertContains(manifest, "outsourcing-performance", "merged outsourcing performance block");
-		assertContains(manifest, "--outsourcingUnitRate=\"0.5\"", "low outsourcing price");
-		assertContains(manifest, "--outsourcingUnitRate=\"2\"", "high outsourcing price");
-		assertContains(manifest, "--outsourcingBreakpoint1=\"", "fixed first outsourcing breakpoint");
-		assertContains(manifest, "--outsourcingBreakpoint1=\"762.5\"", "reference first breakpoint");
-		assertContains(manifest, "--outsourcingBreakpoint2=\"1525\"", "reference second breakpoint");
-		assertContains(manifest, "--setupCostCoefficient=\"20\"", "formal setup cost coefficient");
+		assertContains(manifest, "--outsourcingData=\"${WORKSPACE}/", "persisted outsourcing overlay");
 		String experimentProperties = Files.readString(suite.resolve("experiment.properties"),
 				StandardCharsets.UTF_8);
 		assertContains(experimentProperties, "outsourcingQuotation=p*max(wE,wT)", "quotation metadata");
@@ -97,60 +96,56 @@ public final class FormalExperimentInfrastructureTest {
 				"missing independent post-generation setup audit");
 		assertTrue(Files.exists(suite.resolve("instances/post-generation-time-scale-audit.tsv")),
 				"missing independent post-generation time-scale audit");
+		assertTrue(Files.exists(suite.resolve("instances/post-generation-outsourcing-audit.tsv")),
+				"missing independent post-generation outsourcing audit");
 		assertFamilyMetricSetup(suite);
 
-		FormalExperimentDataFactory.Scenario scenario = new FormalExperimentDataFactory.Scenario();
-		scenario.dueWindowHalfWidth = 20.0;
-		scenario.setupCostCoefficient = 0.5;
-		scenario.outsourcingEnabled = true;
-		scenario.outsourcingUnitRate = 1.25;
-		scenario.discountStrength = 0.15;
-		scenario.outsourcingBreakpoint1 = 20.0;
-		scenario.outsourcingBreakpoint2 = 40.0;
-		GeneratedIndexRow scaledRow = findGeneratedInstance(suite, "n020-set01", "random", "medium", 2);
-		GeneratedIndexRow baseRow = findGeneratedInstance(suite, "n020-set01", "random", "base", 2);
+		GeneratedIndexRow scaledRow = findGeneratedInstance(suite, "n020-set01", "random", "medium", "narrow", 2);
+		GeneratedIndexRow baseRow = findGeneratedInstance(suite, "n020-set01", "random", "base", "narrow", 2);
 		Path scaledInstance = scaledRow.path;
 		assertTrue(Files.exists(scaledInstance), "missing materialized time-scale instance");
-		var data = FormalExperimentDataFactory.load(scaledInstance, scenario);
-		FormalExperimentDataFactory.Scenario baseScenario = new FormalExperimentDataFactory.Scenario();
-		var baseData = FormalExperimentDataFactory.load(baseRow.path, baseScenario);
+		var data = FormalExperimentDataFactory.loadNoOutsourcing(scaledInstance);
+		var baseData = FormalExperimentDataFactory.loadNoOutsourcing(baseRow.path);
 		assertTrue(data.n == 20 && data.m == 2, "derived instance dimensions");
-		int firstJobMultiplier = readJobMultiplier(suite, "n020-set01", "medium", 1);
+		int firstJobMultiplier = readJobMultiplier(suite, "n020-set01", "medium", 1, 12);
+		int firstCenterMultiplier = readJobMultiplier(suite, "n020-set01", "medium", 1, 13);
 		assertTrue(scaledRow.nominalScale == 10, "medium nominal scale");
 		assertTrue(data.p[1] == firstJobMultiplier * baseData.p[1], "job-specific time scale");
-		double scaledCenter = 0.5 * (data.d_e[1] + data.d_l[1]);
-		double baseCenter = 0.5 * (baseData.d_e[1] + baseData.d_l[1]);
-		assertTrue(scaledCenter == firstJobMultiplier * baseCenter, "job-specific due-center scale");
-		assertTrue(data.d_l[1] - data.d_e[1] == 40.0, "due-window width");
-		assertTrue(data.outsourcingCost[1] == data.p[1] * Math.max(data.w_e[1], data.w_t[1]),
-				"outsourcing baseline");
-		assertClose(data.evaluateOutsourcingCost(10.0), 12.5, "first tariff segment");
-		assertClose(data.evaluateOutsourcingCost(30.0), 35.625, "second tariff segment");
-		assertClose(data.evaluateOutsourcingCost(50.0), 55.0, "third tariff segment");
+		double scaledCenter = data.d_l[1] - readWindowHalfWidth(suite, "n020-set01", "medium", "narrow", 1);
+		double baseCenter = baseData.d_l[1] - readWindowHalfWidth(suite, "n020-set01", "base", "narrow", 1);
+		assertTrue(scaledCenter == firstCenterMultiplier * baseCenter, "independent due-center scale");
+		assertTrue(data.getSetupCost(1, 2) == 20.0 * data.s[1][2], "persisted setup cost");
+		assertTrue(data.outsourcingCost[1] >= Common.Utility.big_M, "no-outsourcing data remains disabled");
+		Path overlay = findOutsourcingOverlay(suite, "n020-set01", 1.0, 0.15);
+		var outsourcingData = FormalExperimentDataFactory.loadOutsourcing(baseRow.path, overlay);
+		assertTrue(outsourcingData.outsourcingCost[1]
+				== baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]), "persisted outsourcing baseline");
+		assertClose(outsourcingData.evaluateOutsourcingCost(10.0), 10.0, "persisted tariff first segment");
+		assertOutsourcingOverlayRejectsSchedulingBlocks(root, baseRow.path, outsourcingData.n);
 		assertLegacyTimeScaleRejected();
 
 		ArrayList<Integer> internalJobs = new ArrayList<Integer>();
-		for (int job = 1; job < data.n; job++) {
+		for (int job = 1; job < outsourcingData.n; job++) {
 			internalJobs.add(Integer.valueOf(job));
 		}
 		FixedInitialColumnSeed seed = new FixedInitialColumnSeed(
-				List.of(internalJobs), List.of(internalJobs), List.of(data.n));
+				List.of(internalJobs), List.of(internalJobs), List.of(outsourcingData.n));
 		Path snapshot = root.resolve("seed.snapshot");
 		FixedInitialSeedSnapshotIO.write(snapshot, "fixture", seed);
 		FixedInitialColumnSeed restored = FixedInitialSeedSnapshotIO.read(snapshot);
 		assertTrue(seed.getInitialSequences().equals(restored.getInitialSequences()), "seed round trip");
 		assertTrue(seed.getIncumbentOutsourcedJobs().equals(restored.getIncumbentOutsourcedJobs()),
 				"outsourced jobs round trip");
-		assertFixedOutsourcingRestoration(data, restored);
+		assertFixedOutsourcingRestoration(outsourcingData, restored);
 		assertLegacySnapshotCompatibility(root);
 		assertSeedWinnerSelection();
 		System.out.println("FormalExperimentInfrastructureTest passed");
 	}
 
 	private static void assertPricingWindowMatrix(Path path) throws Exception {
-		Map<String, Map<Double, Integer>> counts = new HashMap<String, Map<Double, Integer>>();
+		Map<String, Map<String, Integer>> counts = new HashMap<String, Map<String, Integer>>();
 		for (String level : List.of("base", "medium", "high")) {
-			counts.put(level, new HashMap<Double, Integer>());
+			counts.put(level, new HashMap<String, Integer>());
 		}
 		List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
 		for (int row = 1; row < lines.size(); row++) {
@@ -168,37 +163,33 @@ public final class FormalExperimentInfrastructureTest {
 			} else {
 				throw new AssertionError("Unknown pricing scale in " + fields[0]);
 			}
-			double halfWidth = Double.parseDouble(argumentValue(fields[2], "dueWindowHalfWidth"));
-			counts.get(level).merge(Double.valueOf(halfWidth), Integer.valueOf(1), Integer::sum);
+			String window;
+			if (fields[0].contains("-wzero-")) {
+				window = "zero";
+			} else if (fields[0].contains("-wnarrow-")) {
+				window = "narrow";
+			} else if (fields[0].contains("-wwide-")) {
+				window = "wide";
+			} else {
+				throw new AssertionError("Unknown pricing window in " + fields[0]);
+			}
+			counts.get(level).merge(window, Integer.valueOf(1), Integer::sum);
 		}
-		assertWindowCounts(counts.get("base"), new double[] { 0.0, 100.0, 300.0 });
-		assertWindowCounts(counts.get("medium"), new double[] { 0.0, 1000.0, 3000.0 });
-		assertWindowCounts(counts.get("high"), new double[] { 0.0, 2000.0, 6000.0 });
+		assertWindowCounts(counts.get("base"));
+		assertWindowCounts(counts.get("medium"));
+		assertWindowCounts(counts.get("high"));
 	}
 
-	private static void assertWindowCounts(Map<Double, Integer> actual, double[] expected) {
-		assertTrue(actual.size() == expected.length, "pricing window level count");
-		for (double halfWidth : expected) {
-			assertTrue(actual.getOrDefault(Double.valueOf(halfWidth), Integer.valueOf(0)).intValue() == 36,
-					"pricing window row count for W=" + halfWidth);
+	private static void assertWindowCounts(Map<String, Integer> actual) {
+		assertTrue(actual.size() == 3, "pricing window level count");
+		for (String window : List.of("zero", "narrow", "wide")) {
+			assertTrue(actual.getOrDefault(window, Integer.valueOf(0)).intValue() == 36,
+					"pricing window row count for " + window);
 		}
 	}
 
-	private static String argumentValue(String arguments, String name) {
-		String marker = "--" + name + "=\"";
-		int start = arguments.indexOf(marker);
-		if (start < 0) {
-			throw new AssertionError("Missing argument " + name);
-		}
-		start += marker.length();
-		int end = arguments.indexOf('"', start);
-		if (end < 0) {
-			throw new AssertionError("Unterminated argument " + name);
-		}
-		return arguments.substring(start, end);
-	}
-
-	private static int readJobMultiplier(Path suite, String taskSetId, String scaleLevel, int job)
+	private static int readJobMultiplier(Path suite, String taskSetId, String scaleLevel, int job,
+			int vectorField)
 			throws Exception {
 		List<String> lines = Files.readAllLines(suite.resolve("instances/scale-selection.tsv"),
 				StandardCharsets.UTF_8);
@@ -207,10 +198,38 @@ public final class FormalExperimentInfrastructureTest {
 			if (!fields[0].equals(taskSetId) || !fields[1].equals(scaleLevel)) {
 				continue;
 			}
-			String[] multipliers = fields[8].split(",");
+			String[] multipliers = fields[vectorField].split(",");
 			return Integer.parseInt(multipliers[job - 1]);
 		}
 		throw new AssertionError("Missing scale vector " + taskSetId + "/" + scaleLevel);
+	}
+
+	private static int readWindowHalfWidth(Path suite, String taskSetId, String scaleLevel,
+			String windowLevel, int job) throws Exception {
+		List<String> lines = Files.readAllLines(suite.resolve("instances/window-selection.tsv"),
+				StandardCharsets.UTF_8);
+		for (int row = 1; row < lines.size(); row++) {
+			String[] fields = lines.get(row).split("\\t", -1);
+			if (fields[0].equals(taskSetId) && fields[1].equals(scaleLevel)
+					&& fields[2].equals(windowLevel)) {
+				return Integer.parseInt(fields[6].split(",")[job - 1]);
+			}
+		}
+		throw new AssertionError("Missing window vector");
+	}
+
+	private static Path findOutsourcingOverlay(Path suite, String taskSetId, double rate,
+			double discount) throws Exception {
+		List<String> lines = Files.readAllLines(suite.resolve("instances/outsourcing-data.tsv"),
+				StandardCharsets.UTF_8);
+		for (int row = 1; row < lines.size(); row++) {
+			String[] fields = lines.get(row).split("\\t", -1);
+			if (fields[0].equals(taskSetId) && Double.parseDouble(fields[1]) == rate
+					&& Double.parseDouble(fields[2]) == discount) {
+				return suite.resolve("instances").resolve(fields[6]).normalize();
+			}
+		}
+		throw new AssertionError("Missing outsourcing overlay");
 	}
 
 	private static void assertFixedOutsourcingRestoration(Basic.Data data, FixedInitialColumnSeed seed) {
@@ -226,18 +245,19 @@ public final class FormalExperimentInfrastructureTest {
 	}
 
 	private static GeneratedIndexRow findGeneratedInstance(Path suite, String taskSetId, String setupType,
-			String scaleLevel, int machines) throws Exception {
+			String scaleLevel, String windowLevel, int machines) throws Exception {
 		List<String> lines = Files.readAllLines(suite.resolve("instances.tsv"), StandardCharsets.UTF_8);
 		for (int index = 1; index < lines.size(); index++) {
 			String[] fields = lines.get(index).split("\\t");
 			if (fields[0].equals(taskSetId) && Integer.parseInt(fields[3]) == machines
-					&& fields[4].equals(setupType) && fields[5].equals(scaleLevel)) {
-				String rawPath = fields[7].replace("${WORKSPACE}", Path.of("").toAbsolutePath().toString());
+					&& fields[4].equals(setupType) && fields[5].equals(scaleLevel)
+					&& fields[7].equals(windowLevel)) {
+				String rawPath = fields[11].replace("${WORKSPACE}", Path.of("").toAbsolutePath().toString());
 				return new GeneratedIndexRow(Path.of(rawPath), Integer.parseInt(fields[6]));
 			}
 		}
 		throw new AssertionError("Missing generated instance " + taskSetId + "/" + setupType + "/"
-				+ scaleLevel + "/m" + machines);
+				+ scaleLevel + "/" + windowLevel + "/m" + machines);
 	}
 
 	private static void assertLegacySnapshotCompatibility(Path root) throws Exception {
@@ -320,7 +340,31 @@ public final class FormalExperimentInfrastructureTest {
 			FormalExperimentRunner.main(new String[] { "--timeScale=5" });
 			throw new AssertionError("legacy timeScale argument should be rejected");
 		} catch (IllegalArgumentException expected) {
-			assertTrue(expected.getMessage().contains("materialized instance"), "legacy timeScale error message");
+			assertTrue(expected.getMessage().contains("materialized"), "legacy timeScale error message");
+		}
+	}
+
+	private static void assertOutsourcingOverlayRejectsSchedulingBlocks(Path root, Path schedulingPath, int n)
+			throws Exception {
+		ArrayList<String> lines = new ArrayList<String>();
+		lines.add("SETUP_COST");
+		String zeroRow = "0" + " 0".repeat(n);
+		for (int row = 0; row <= n; row++) {
+			lines.add(zeroRow);
+		}
+		lines.add("OUTSOURCING_COST");
+		lines.add("1" + " 1".repeat(n - 1));
+		lines.add("OUTSOURCING_TARIFF");
+		lines.add("1");
+		lines.add("0 1000000000 1 0");
+		Path invalidOverlay = root.resolve("invalid-outsourcing-overlay.dat");
+		Files.write(invalidOverlay, lines, StandardCharsets.UTF_8);
+		try {
+			FormalExperimentDataFactory.loadOutsourcing(schedulingPath, invalidOverlay);
+			throw new AssertionError("outsourcing overlay must reject scheduling blocks");
+		} catch (java.io.IOException expected) {
+			assertTrue(expected.getMessage().contains("Unknown block in outsourcing overlay"),
+					"strict outsourcing overlay error message");
 		}
 	}
 

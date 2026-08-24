@@ -27,7 +27,7 @@ public final class FormalExperimentSuiteGenerator {
 			"NG_DSSR", "TIME_INDEXED", "TIME_INDEXED_SRI" };
 	private static final String[] OUTSOURCING_MODELS = new String[] { "columns", "masterVariables" };
 	private static final String[] MANIFEST_METADATA_COLUMNS = new String[] {
-			"action", "experiment", "taskSetId", "size", "caseIndex", "machines", "setupType",
+			"action", "experiment", "taskSetId", "size", "machines", "setupType",
 			"scaleLevel", "nominalScale", "windowLevel", "algorithm", "outsourcingModel",
 			"outsourcingRate", "discountLevel" };
 
@@ -229,7 +229,6 @@ public final class FormalExperimentSuiteGenerator {
 		values.put("experiment", experiment);
 		values.put("taskSetId", instance.taskSetId);
 		values.put("size", Integer.toString(instance.size));
-		values.put("caseIndex", Integer.toString(instance.caseIndex));
 		values.put("machines", Integer.toString(instance.machines));
 		values.put("setupType", instance.setupType);
 		values.put("scaleLevel", instance.scaleLevel);

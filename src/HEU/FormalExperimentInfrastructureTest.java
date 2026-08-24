@@ -119,6 +119,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(data.outsourcingCost[1] >= Common.Utility.big_M, "no-outsourcing data remains disabled");
 		Path completeOutsourcing = findOutsourcingInstance(suite, baseRow.path, 1.0, 0.15);
 		assertSchedulingPrefix(baseRow.path, completeOutsourcing);
+		assertNoOutsourcingRejectsCompleteInstance(completeOutsourcing);
 		var outsourcingData = FormalExperimentDataFactory.loadOutsourcing(completeOutsourcing);
 		assertTrue(outsourcingData.outsourcingCost[1]
 				== baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]), "persisted outsourcing baseline");
@@ -353,6 +354,16 @@ public final class FormalExperimentInfrastructureTest {
 			throw new AssertionError("unknown argument should be rejected");
 		} catch (IllegalArgumentException expected) {
 			assertTrue(expected.getMessage().contains("Unknown argument"), "unknown argument error message");
+		}
+	}
+
+	private static void assertNoOutsourcingRejectsCompleteInstance(Path completeInstance) throws Exception {
+		try {
+			FormalExperimentDataFactory.loadNoOutsourcing(completeInstance);
+			throw new AssertionError("no-outsourcing loader should reject a complete outsourcing instance");
+		} catch (java.io.IOException expected) {
+			assertTrue(expected.getMessage().contains("No-outsourcing run"),
+					"no-outsourcing data mode error message");
 		}
 	}
 

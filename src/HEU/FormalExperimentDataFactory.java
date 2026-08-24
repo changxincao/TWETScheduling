@@ -12,7 +12,12 @@ public final class FormalExperimentDataFactory {
 	}
 
 	public static Data loadNoOutsourcing(Path schedulingInstance) throws IOException {
-		return new Data(schedulingInstance.toString(), true, true);
+		Data data = new Data(schedulingInstance.toString(), true, true);
+		if (data.hasOutsourcingData()) {
+			throw new IOException("No-outsourcing run received an instance with outsourcing data: "
+					+ schedulingInstance);
+		}
+		return data;
 	}
 
 	public static Data loadOutsourcing(Path completeInstance) throws IOException {

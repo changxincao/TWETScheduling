@@ -27,8 +27,38 @@ public final class ExperimentBatchSchedulerTest {
 		verifyManifestValidation(baseDir.resolve("invalid"));
 		verifySchedulingAndSkip(baseDir.resolve("schedule"));
 		verifyDependencies(baseDir.resolve("dependencies"));
+		verifySelectionAndScan(baseDir.resolve("selection"));
 		verifyFailureAggregation(baseDir.resolve("failure"));
 		System.out.println("ExperimentBatchSchedulerTest passed");
+	}
+
+	private static void verifySelectionAndScan(Path workDir) throws Exception {
+		Files.createDirectories(workDir);
+		Path prerequisite = workDir.resolve("seed-20.ready").toAbsolutePath();
+		String portablePrerequisite = "${WORKSPACE}/" + Path.of(System.getProperty("user.dir"))
+				.toAbsolutePath().normalize().relativize(prerequisite).toString().replace('\\', '/');
+		Path manifest = workDir.resolve("selection.tsv");
+		List<String> lines = List.of(
+				"runId\tmainClass\targs\toutputDir\tdependsOn\taction\tsize\talgorithm",
+				"seed-20\tHEU.ExperimentBatchSchedulerTest$CreateFileMain\t\"" + portablePrerequisite
+						+ "\"\tout-seed-20\t\tseed\t20\t",
+				"solve-20-ng\tHEU.ExperimentBatchSchedulerTest$RequireFileMain\t\"" + portablePrerequisite
+						+ "\"\tout-solve-20-ng\tseed-20\tsolve\t20\tNG_DSSR",
+				"solve-20-ti\tHEU.ExperimentBatchSchedulerTest$FailureMain\tnot-selected"
+						+ "\tout-solve-20-ti\tseed-20\tsolve\t20\tTIME_INDEXED",
+				"seed-40\tHEU.ExperimentBatchSchedulerTest$FailureMain\tnot-selected"
+						+ "\tout-seed-40\t\tseed\t40\t");
+		Files.write(manifest, lines, StandardCharsets.UTF_8);
+
+		List<String> selectors = List.of("size=20", "algorithm=NG_DSSR");
+		new ExperimentBatchScheduler(2).run(manifest, selectors, true);
+		assertTrue(!Files.exists(prerequisite), "scan-only must not start selected dependency");
+		new ExperimentBatchScheduler(2).run(manifest, selectors, false);
+		assertTrue(Files.exists(prerequisite), "selected solve dependency was not started");
+		assertFileContains(workDir.resolve("out-solve-20-ng/status.txt"), "state=SUCCEEDED",
+				"selected solve status");
+		assertTrue(!Files.exists(workDir.resolve("out-solve-20-ti")), "unselected algorithm unexpectedly ran");
+		assertTrue(!Files.exists(workDir.resolve("out-seed-40")), "unselected size unexpectedly ran");
 	}
 
 	private static void verifyDependencies(Path workDir) throws Exception {

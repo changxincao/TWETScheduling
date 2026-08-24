@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -45,7 +46,8 @@ public class ExperimentBatchScheduler {
 
 	public static void main(String[] args) throws Exception {
 		BatchArguments batchArguments = BatchArguments.parse(args);
-		new ExperimentBatchScheduler(batchArguments.maxParallel).run(batchArguments.manifestPath);
+		new ExperimentBatchScheduler(batchArguments.maxParallel).run(batchArguments.manifestPath,
+				batchArguments.selectors, batchArguments.scanOnly);
 	}
 
 	ExperimentBatchScheduler(int maxParallel) {
@@ -59,27 +61,125 @@ public class ExperimentBatchScheduler {
 	}
 
 	void run(Path manifestPath) throws Exception {
+		run(manifestPath, Collections.<String>emptyList(), false);
+	}
+
+	void run(Path manifestPath, List<String> selectorTexts, boolean scanOnly) throws Exception {
 		Path normalizedManifest = manifestPath.toAbsolutePath().normalize();
-		List<RunSpec> runSpecs = readManifest(normalizedManifest);
+		List<RunSpec> allRunSpecs = readManifest(normalizedManifest);
+		List<SelectionFilter> selectors = parseSelectors(selectorTexts);
+		SelectionPlan selection = selectRuns(normalizedManifest.getParent(), allRunSpecs, selectors);
+		List<RunSpec> runSpecs = selection.runSpecs;
+		System.out.printf("ExperimentBatchScheduler scan: total=%d matched=%d dependencies=%d selected=%d "
+				+ "localSuccess=%d pending=%d scanOnly=%s selectors=%s%n",
+				allRunSpecs.size(), selection.matchedCount, selection.dependencyCount, runSpecs.size(),
+				selection.localSuccessCount, runSpecs.size() - selection.localSuccessCount,
+				Boolean.toString(scanOnly), selectorTexts.isEmpty() ? "<none>" : selectorTexts);
 		if (runSpecs.isEmpty()) {
-			System.out.println("ExperimentBatchScheduler: no run found in manifest " + normalizedManifest);
+			System.out.println("ExperimentBatchScheduler: no run selected from manifest " + normalizedManifest);
+			return;
+		}
+		if (scanOnly) {
 			return;
 		}
 		executeRuns(normalizedManifest.getParent(), runSpecs);
+	}
+
+	private SelectionPlan selectRuns(Path manifestDir, List<RunSpec> allRunSpecs,
+			List<SelectionFilter> selectors) {
+		if (allRunSpecs.isEmpty()) {
+			return new SelectionPlan(Collections.<RunSpec>emptyList(), 0, 0, 0);
+		}
+		for (SelectionFilter selector : selectors) {
+			if (!allRunSpecs.get(0).hasField(selector.field)) {
+				throw new IllegalArgumentException("unknown manifest selector field: " + selector.field
+						+ "; available=" + allRunSpecs.get(0).fields.keySet());
+			}
+		}
+
+		LinkedHashMap<String, RunSpec> byId = new LinkedHashMap<String, RunSpec>();
+		for (RunSpec spec : allRunSpecs) {
+			byId.put(spec.runId, spec);
+		}
+		ArrayList<RunSpec> matched = new ArrayList<RunSpec>();
+		for (RunSpec spec : allRunSpecs) {
+			boolean accepted = true;
+			for (SelectionFilter selector : selectors) {
+				if (!selector.matches(spec)) {
+					accepted = false;
+					break;
+				}
+			}
+			if (accepted) {
+				matched.add(spec);
+			}
+		}
+
+		LinkedHashSet<String> selectedIds = new LinkedHashSet<String>();
+		for (RunSpec spec : matched) {
+			selectedIds.add(spec.runId);
+			if (!hasSuccessMarker(manifestDir, spec)) {
+				addDependencies(spec, byId, selectedIds, manifestDir);
+			}
+		}
+		ArrayList<RunSpec> selected = new ArrayList<RunSpec>();
+		int localSuccess = 0;
+		for (RunSpec spec : allRunSpecs) {
+			if (selectedIds.contains(spec.runId)) {
+				selected.add(spec);
+				if (hasSuccessMarker(manifestDir, spec)) {
+					localSuccess++;
+				}
+			}
+		}
+		return new SelectionPlan(selected, matched.size(), selected.size() - matched.size(), localSuccess);
+	}
+
+	private static void addDependencies(RunSpec spec, Map<String, RunSpec> byId,
+			LinkedHashSet<String> selectedIds, Path manifestDir) {
+		for (String dependencyId : spec.dependencies) {
+			RunSpec dependency = byId.get(dependencyId);
+			if (dependency == null) {
+				throw new IllegalArgumentException("unknown dependency " + dependencyId + " for " + spec.runId);
+			}
+			if (selectedIds.add(dependencyId) && !hasSuccessMarker(manifestDir, dependency)) {
+				addDependencies(dependency, byId, selectedIds, manifestDir);
+			}
+		}
+	}
+
+	private static boolean hasSuccessMarker(Path manifestDir, RunSpec spec) {
+		return Files.exists(resolveOutputDir(manifestDir, spec.outputDirText).resolve(SUCCESS_MARKER_FILE));
+	}
+
+	private static List<SelectionFilter> parseSelectors(List<String> selectorTexts) {
+		ArrayList<SelectionFilter> result = new ArrayList<SelectionFilter>();
+		for (String selectorText : selectorTexts) {
+			result.add(SelectionFilter.parse(selectorText));
+		}
+		return result;
 	}
 
 	private void executeRuns(Path manifestDir, List<RunSpec> runSpecs) throws Exception {
 		ExecutorService executor = Executors.newFixedThreadPool(Math.min(maxParallel, runSpecs.size()));
 		CompletionService<RunResult> completion = new ExecutorCompletionService<RunResult>(executor);
 		LinkedHashMap<String, RunSpec> pending = new LinkedHashMap<String, RunSpec>();
+		java.util.HashSet<String> finishedSuccessfully = new java.util.HashSet<String>();
+		java.util.HashSet<String> failedIds = new java.util.HashSet<String>();
+		ArrayList<RunResult> results = new ArrayList<RunResult>();
 		for (RunSpec spec : runSpecs) {
+			Path outputDir = resolveOutputDir(manifestDir, spec.outputDirText);
+			if (Files.exists(outputDir.resolve(SUCCESS_MARKER_FILE))) {
+				Files.createDirectories(outputDir);
+				writeStatus(outputDir, spec, "SKIPPED", null, null, "existing success marker");
+				results.add(new RunResult(spec.runId, "SKIPPED", outputDir, 0));
+				finishedSuccessfully.add(spec.runId);
+				continue;
+			}
 			if (pending.put(spec.runId, spec) != null) {
 				throw new IllegalArgumentException("duplicate runId in manifest: " + spec.runId);
 			}
 		}
-		java.util.HashSet<String> finishedSuccessfully = new java.util.HashSet<String>();
-		java.util.HashSet<String> failedIds = new java.util.HashSet<String>();
-		ArrayList<RunResult> results = new ArrayList<RunResult>();
 		int running = 0;
 		try {
 			while (results.size() < runSpecs.size()) {
@@ -199,12 +299,16 @@ public class ExperimentBatchScheduler {
 			String argsText = cell(cells, columns.get("args"));
 			String outputDir = cell(cells, columns.get("outputDir"));
 			String dependsOn = dependsOnColumn == null ? "" : cell(cells, dependsOnColumn.intValue());
+			LinkedHashMap<String, String> fields = new LinkedHashMap<String, String>();
+			for (Map.Entry<String, Integer> column : columns.entrySet()) {
+				fields.put(column.getKey(), cell(cells, column.getValue().intValue()));
+			}
 			if (runId.isEmpty() || mainClass.isEmpty() || outputDir.isEmpty()) {
 				throw new IllegalArgumentException(
 						"manifest line " + (lineIndex + 1) + " has empty required fields: " + rawLine);
 			}
 			runSpecs.add(new RunSpec(runId, mainClass, splitCommandLine(argsText), outputDir,
-					splitDependencies(dependsOn), lineIndex + 1));
+					splitDependencies(dependsOn), fields, lineIndex + 1));
 		}
 		java.util.HashSet<String> ids = new java.util.HashSet<String>();
 		for (RunSpec spec : runSpecs) {
@@ -505,20 +609,102 @@ public class ExperimentBatchScheduler {
 		final List<String> mainArgs;
 		final String outputDirText;
 		final List<String> dependencies;
+		final Map<String, String> fields;
 		final int manifestLineNumber;
 
 		RunSpec(String runId, String mainClass, List<String> mainArgs, String outputDirText, int manifestLineNumber) {
-			this(runId, mainClass, mainArgs, outputDirText, Collections.<String>emptyList(), manifestLineNumber);
+			this(runId, mainClass, mainArgs, outputDirText, Collections.<String>emptyList(),
+					defaultFields(runId, mainClass, outputDirText), manifestLineNumber);
 		}
 
 		RunSpec(String runId, String mainClass, List<String> mainArgs, String outputDirText,
-				List<String> dependencies, int manifestLineNumber) {
+				List<String> dependencies, Map<String, String> fields, int manifestLineNumber) {
 			this.runId = runId;
 			this.mainClass = mainClass;
 			this.mainArgs = Collections.unmodifiableList(new ArrayList<String>(mainArgs));
 			this.outputDirText = outputDirText;
 			this.dependencies = Collections.unmodifiableList(new ArrayList<String>(dependencies));
+			this.fields = Collections.unmodifiableMap(new LinkedHashMap<String, String>(fields));
 			this.manifestLineNumber = manifestLineNumber;
+		}
+
+		boolean hasField(String requestedField) {
+			for (String field : fields.keySet()) {
+				if (field.equalsIgnoreCase(requestedField)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		String fieldValue(String requestedField) {
+			for (Map.Entry<String, String> entry : fields.entrySet()) {
+				if (entry.getKey().equalsIgnoreCase(requestedField)) {
+					return entry.getValue();
+				}
+			}
+			return "";
+		}
+
+		private static Map<String, String> defaultFields(String runId, String mainClass, String outputDir) {
+			LinkedHashMap<String, String> values = new LinkedHashMap<String, String>();
+			values.put("runId", runId);
+			values.put("mainClass", mainClass);
+			values.put("outputDir", outputDir);
+			return values;
+		}
+	}
+
+	private static final class SelectionFilter {
+		final String field;
+		final List<String> acceptedValues;
+
+		private SelectionFilter(String field, List<String> acceptedValues) {
+			this.field = field;
+			this.acceptedValues = acceptedValues;
+		}
+
+		boolean matches(RunSpec spec) {
+			String actual = spec.fieldValue(field);
+			for (String expected : acceptedValues) {
+				if (actual.equalsIgnoreCase(expected)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		static SelectionFilter parse(String text) {
+			int equals = text == null ? -1 : text.indexOf('=');
+			if (equals <= 0 || equals == text.length() - 1) {
+				throw new IllegalArgumentException("selector must be field=value1[,value2]: " + text);
+			}
+			String field = text.substring(0, equals).trim();
+			ArrayList<String> values = new ArrayList<String>();
+			for (String token : text.substring(equals + 1).split(",")) {
+				String value = token.trim();
+				if (!value.isEmpty()) {
+					values.add(value);
+				}
+			}
+			if (field.isEmpty() || values.isEmpty()) {
+				throw new IllegalArgumentException("selector must be field=value1[,value2]: " + text);
+			}
+			return new SelectionFilter(field, Collections.unmodifiableList(values));
+		}
+	}
+
+	private static final class SelectionPlan {
+		final List<RunSpec> runSpecs;
+		final int matchedCount;
+		final int dependencyCount;
+		final int localSuccessCount;
+
+		SelectionPlan(List<RunSpec> runSpecs, int matchedCount, int dependencyCount, int localSuccessCount) {
+			this.runSpecs = runSpecs;
+			this.matchedCount = matchedCount;
+			this.dependencyCount = dependencyCount;
+			this.localSuccessCount = localSuccessCount;
 		}
 	}
 
@@ -539,20 +725,42 @@ public class ExperimentBatchScheduler {
 	private static final class BatchArguments {
 		final Path manifestPath;
 		final int maxParallel;
+		final List<String> selectors;
+		final boolean scanOnly;
 
-		private BatchArguments(Path manifestPath, int maxParallel) {
+		private BatchArguments(Path manifestPath, int maxParallel, List<String> selectors, boolean scanOnly) {
 			this.manifestPath = manifestPath;
 			this.maxParallel = maxParallel;
+			this.selectors = selectors;
+			this.scanOnly = scanOnly;
 		}
 
 		private static BatchArguments parse(String[] args) {
-			if (args == null || args.length == 0 || args.length > 2) {
+			if (args == null || args.length == 0) {
 				throw new IllegalArgumentException(
-						"Usage: HEU.ExperimentBatchScheduler <manifest.tsv> [maxParallel]");
+						"Usage: HEU.ExperimentBatchScheduler <manifest.tsv> [maxParallel] "
+								+ "[--select=field=value1,value2]... [--scan-only]");
 			}
 			Path manifestPath = Path.of(args[0]);
-			int maxParallel = args.length >= 2 ? Integer.parseInt(args[1]) : DEFAULT_MAX_PARALLEL;
-			return new BatchArguments(manifestPath, maxParallel);
+			int index = 1;
+			int maxParallel = DEFAULT_MAX_PARALLEL;
+			if (index < args.length && !args[index].startsWith("--")) {
+				maxParallel = Integer.parseInt(args[index++]);
+			}
+			ArrayList<String> selectors = new ArrayList<String>();
+			boolean scanOnly = false;
+			for (; index < args.length; index++) {
+				String argument = args[index];
+				if (argument.startsWith("--select=")) {
+					selectors.add(argument.substring("--select=".length()));
+				} else if ("--scan-only".equals(argument)) {
+					scanOnly = true;
+				} else {
+					throw new IllegalArgumentException("unknown scheduler argument: " + argument);
+				}
+			}
+			return new BatchArguments(manifestPath, maxParallel,
+					Collections.unmodifiableList(selectors), scanOnly);
 		}
 	}
 }

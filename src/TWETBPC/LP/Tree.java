@@ -778,6 +778,9 @@ public class Tree {
 	 * 2026-07-01: strong branching 轻量 repair seed。父 LP 正值机器列先保留，用来维持旧 repair
 	 * 的可行起点；其它机器列按 child 域过滤，降低 trial RMP 规模。repair 成功后的正式筛列仍由
 	 * PC/LP 旧流程完成，本方法不引入 all-row slack。
+	 * 2026-08-24: SP1 membership 右支也会暂时保留包含 required-outsourcing job 的父正值内部列；
+	 * 默认配置依赖 two-stage strong trial、branch-implied penalty 和 Phase-I repair 将其归零并从正式
+	 * child seed 删除。若关闭其中任一路径，普通 child 构造必须先补显式过滤/固定，不能直接复用该 seed。
 	 */
 	private void prepareLightweightRepairChildSeedColumns(Node child, LP parentLp) {
 		long startNanos = System.nanoTime();

@@ -402,7 +402,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long diagnosticHeartbeatIntervalNanos;
 	private long diagnosticForwardPops;
 	private long diagnosticBackwardPops;
-	private static final long PROGRESS_HEARTBEAT_POP_MASK = 4095L;
+	private static final long PROGRESS_HEARTBEAT_POP_INTERVAL = 20000L;
+	private long diagnosticNextForwardHeartbeatCheckPop;
+	private long diagnosticNextBackwardHeartbeatCheckPop;
 	private long diagnosticPricingCallId;
 	private int diagnosticNodePricingCall;
 	private boolean diagnosticRepairPricing;
@@ -3448,7 +3450,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				recordForwardQueueNanos(timingStart);
 			}
 		}
-		if (isProgressHeartbeatCheckDue(diagnosticForwardPops)) {
+		if (config.diagnosticStageHeartbeat && isProgressHeartbeatCheckDue(diagnosticForwardPops,
+				diagnosticNextForwardHeartbeatCheckPop)) {
+			diagnosticNextForwardHeartbeatCheckPop = diagnosticForwardPops + PROGRESS_HEARTBEAT_POP_INTERVAL;
 			diagnosticHeartbeat(lp, "forward.progress", false);
 		}
 	}
@@ -3515,13 +3519,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				recordBackwardQueueNanos(timingStart);
 			}
 		}
-		if (isProgressHeartbeatCheckDue(diagnosticBackwardPops)) {
+		if (config.diagnosticStageHeartbeat && isProgressHeartbeatCheckDue(diagnosticBackwardPops,
+				diagnosticNextBackwardHeartbeatCheckPop)) {
+			diagnosticNextBackwardHeartbeatCheckPop = diagnosticBackwardPops + PROGRESS_HEARTBEAT_POP_INTERVAL;
 			diagnosticHeartbeat(lp, "backward.progress", false);
 		}
 	}
 
-	static boolean isProgressHeartbeatCheckDue(long popCount) {
-		return (popCount & PROGRESS_HEARTBEAT_POP_MASK) == 0L;
+	static boolean isProgressHeartbeatCheckDue(long popCount, long nextCheckPop) {
+		return popCount >= nextCheckPop;
 	}
 
 	private long extensionTimingStart() {
@@ -5070,6 +5076,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				* 1000000L;
 		diagnosticForwardPops = 0;
 		diagnosticBackwardPops = 0;
+		diagnosticNextForwardHeartbeatCheckPop = PROGRESS_HEARTBEAT_POP_INTERVAL;
+		diagnosticNextBackwardHeartbeatCheckPop = PROGRESS_HEARTBEAT_POP_INTERVAL;
 	}
 
 	private void resetProbeAffectedStatistics() {
@@ -5130,6 +5138,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		completionBoundLastEvaluationCutoff = Double.NaN;
 		diagnosticForwardPops = 0;
 		diagnosticBackwardPops = 0;
+		diagnosticNextForwardHeartbeatCheckPop = PROGRESS_HEARTBEAT_POP_INTERVAL;
+		diagnosticNextBackwardHeartbeatCheckPop = PROGRESS_HEARTBEAT_POP_INTERVAL;
 		fullMidpointDiagnosticRan = false;
 	}
 

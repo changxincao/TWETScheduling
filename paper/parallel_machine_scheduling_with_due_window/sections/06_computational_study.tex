@@ -1,0 +1,142 @@
+\section{Computational Study}\label{sec:experiments}
+
+This section has three objectives. We first compare the continuous-time and
+time-indexed pricing methods for the internal scheduling problem. We then compare
+the two formulations of the outsourcing decision. Finally, we examine how the
+availability and pricing of outsourcing affect the resulting production plans. All
+algorithms were implemented in Java and use IBM ILOG CPLEX 22.1.1 to solve the
+restricted master problems and auxiliary mathematical programs. Each run uses a
+single thread and is subject to a time limit of 10,800 seconds.
+% Add the final server CPU, memory, and operating system before reporting results.
+
+\subsection{Instance Generation}\label{sec:instance-generation}
+
+We derive the test instances from the single-machine total weighted
+earliness--tardiness benchmark of \citet{tanaka2009exact}, available from Tanaka's
+benchmark repository \citep{tanakaBenchmark}. The source files specify a processing
+time, a due date, and earliness and tardiness weights for each job. We consider
+$n\in\{20,40,50,60,80,100\}$ and select five job sets for each size, giving 30 base
+job sets. The 20-job sets are sampled from the selected 40-job instances, whereas
+the 60- and 80-job sets are sampled from the selected 100-job instances; the 40-,
+50-, and 100-job sets retain their source sizes. All selections are fixed before
+the algorithms are run and are independent of their computational performance.
+
+We convert each base job set into a collection of parallel-machine production
+environments. For instances with at most 60 jobs, the number of machines is 2, 3,
+or 4; for the larger instances, it is 3, 4, or 5. The job data are held fixed across
+the three machine levels. To preserve the relative timing of the source instance,
+the original due dates are adjusted for the retained workload and a reference
+number of parallel machines and used as due-window centers. We then create three
+due-window classes. The zero-width class sets $W_j=0$, while the narrow and wide
+classes independently draw the half-width of each job from $\{80,\ldots,120\}$ and
+$\{280,\ldots,320\}$, respectively. The due window of job $j$ is therefore
+$[\max\{0,c_j-W_j\},c_j+W_j]$, where $c_j$ denotes its adjusted center.
+
+To distinguish the effect of setup structure from that of overall setup intensity,
+we generate two paired sequence-dependent setup matrices for every job set. The
+random structure contains no explicit job grouping. The family structure partitions
+the jobs into three to six approximately balanced families and assigns smaller
+setups within a family than between families. Both structures have an average setup
+time of approximately $0.5\bar p$, where $\bar p$ is the average processing time,
+and no setup time exceeds $\bar p$. The generated matrices satisfy the directed
+triangle inequality. In a family instance, the average between-family setup is
+approximately four to five times the average within-family setup. The common setup
+intensity lies between the small and large setup classes used by
+\citet{bulhoes2020exact}, while the paired construction isolates the additional
+effect of family structure. Setup costs are defined as $\kappa_{ij}=20s_{ij}$.
+
+We complete each original-scale production environment by specifying the outsourcing
+tariff. In line with scheduling models that charge outsourced processing in
+proportion to the external capacity used \citep{lee2011twostage}, processing time
+serves as the workload basis and the standard quotation of job $j$ is
+\[
+q_j=p_j\max\{w_j^E,w_j^T\}.
+\]
+The weight multiplier captures the service importance of the more costly side of the
+due window and is specific to our instance design. We obtain three outsourcing price
+levels by setting the undiscounted quotation to $b_j(\lambda)=\lambda q_j$, where
+$\lambda\in\{0.5,1,2\}$. Unless stated otherwise, the tariff applies a continuous
+incremental quantity discount, consistent with the structures studied in production
+outsourcing and private-fleet routing
+\citep{lu2021discount,dabia2019rich}. Let
+$Q_{50}^{\mathrm{ref}}$ be the median of $\sum_jq_j$ over the five 50-job sets and
+define the common breakpoints
+$Q_1=0.25Q_{50}^{\mathrm{ref}}$ and
+$Q_2=0.50Q_{50}^{\mathrm{ref}}$. The marginal rates in the three intervals are
+$1$, $0.85$, and $0.70$, respectively. These breakpoints are fixed across all job
+sets and machine, due-window, setup, and price levels.
+
+The 30 base job sets, three machine levels, two setup structures, and three
+due-window classes yield 540 original-scale production environments. The three
+outsourcing price levels expand this set to 1,620 complete instances. This common
+instance set supports both the formulation comparison and the subsequent sensitivity
+analysis, while the internal-pricing experiment uses the same production data after
+removing the outsourcing option.
+
+\subsection{Comparison of Internal Pricing Methods}\label{sec:pricing-comparison}
+
+The first experiment identifies the production environments in which continuous-time
+and time-indexed pricing are most effective. We disable outsourcing and solve the
+internal scheduling problem using NG-DSSR, time-indexed pricing without cuts, and
+time-indexed pricing with rank-1 cuts. Because the size of a time-indexed graph
+depends directly on the magnitude of the time parameters, we supplement the original
+scale with medium- and high-scale variants. For each job, the processing time and
+due-window center are independently multiplied by an integer drawn from
+$\{5,\ldots,15\}$ in the medium-scale class and $\{15,\ldots,25\}$ in the high-scale
+class. Setup times and due-window widths are adjusted to the corresponding scale:
+each setup matrix follows the realized aggregate processing-time multiplier, while
+the narrow and wide half-width ranges are multiplied by 10 and 20, respectively.
+The earliness and tardiness weights remain unchanged. This design yields 1,620
+scheduling instances and 4,860 runs. The comparison therefore reveals how the
+relative performance of the three pricing methods changes with job size, machine
+availability, due-window width, setup structure, and time scale. The results are
+reported in the tables and figures below.
+
+\subsection{Comparison of Outsourcing Formulations}\label{sec:outsourcing-formulation-comparison}
+
+The second experiment examines how the representation of outsourcing affects exact
+solution performance. We compare formulations \textup{(SP1)} and \textup{(SP2)} on
+the 1,620 complete instances defined in Section~\ref{sec:instance-generation}. Both
+formulations use the same NG-DSSR method for internal pricing and the same initial
+solution for each instance. Consequently, the comparison isolates a single modelling
+choice: outsourced job sets are either generated as columns or represented explicitly
+in the restricted master problem. The two formulations produce 3,240 runs in total.
+Their performance is compared across job sizes, machine levels, due-window classes,
+setup structures, and outsourcing price levels, with the results reported in the
+tables below.
+
+\subsection{Sensitivity Analysis}\label{sec:sensitivity-analysis}
+
+After selecting the better-performing outsourcing formulation, we turn from
+computational performance to the structure of the optimal production plan. The two
+analyses below separate the effect of making outsourcing available from the effect
+of offering quantity discounts. They reuse the paired instances and solutions from
+the preceding experiments whenever possible.
+
+\subsubsection{Impact of Outsourcing}\label{sec:impact-outsourcing}
+
+This analysis assesses both the value of making outsourcing available and the
+response of the optimal plan to its price. For each original-scale production
+environment, we compare the solution without outsourcing with the solutions under
+the low, medium, and high price levels. The comparison is stratified by machine
+availability, due-window class, and setup structure. We examine total cost, outsourced
+job and workload shares, the earliness, tardiness, setup, and outsourcing cost
+components, the proportions of jobs completed early, within their due windows, and
+late, and changes in the remaining internal sequences. These measures distinguish
+the direct payment for outsourcing from its indirect scheduling effect: removing a
+job may also make the remaining internal sequence less costly to organize. The
+results are reported in the tables and representative schedules below.
+
+\subsubsection{Impact of Quantity Discounts}\label{sec:impact-discounts}
+
+Following the comparative design of \citet{dabia2019rich}, we finally ask whether a
+quantity discount merely lowers the payment for jobs that would already be outsourced
+or changes the outsourcing decision itself. We use the five 50-job sets at the
+original time scale and the medium outsourcing price. For each combination of three
+machine levels, three due-window classes, and two setup structures, the default
+marginal rates $(1,0.85,0.70)$ are compared with a tariff that applies the
+undiscounted rate throughout. This gives 90 paired production environments. We
+compare the outsourced sets and quotation volumes, whether the solutions cross the
+common breakpoints $Q_1$ and $Q_2$, and the resulting changes in internal costs and
+machine sequences. The results are summarized in the tables and representative
+schedules below.

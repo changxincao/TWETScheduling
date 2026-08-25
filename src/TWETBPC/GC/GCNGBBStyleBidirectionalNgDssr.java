@@ -402,6 +402,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long diagnosticHeartbeatIntervalNanos;
 	private long diagnosticForwardPops;
 	private long diagnosticBackwardPops;
+	private static final long PROGRESS_HEARTBEAT_POP_MASK = 4095L;
+	private long diagnosticPricingCallId;
+	private int diagnosticNodePricingCall;
+	private boolean diagnosticRepairPricing;
 	private boolean fullMidpointDiagnosticRan;
 	private PackedBitSet[] ngNeighborhoodByJob;
 	private ArrayList<NonElementaryNegativeRoute> nonElementaryNegativeRoutes;
@@ -506,6 +510,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		this.historyWarmStart = historyWarmStart;
 		this.completionBoundFlatFunctionQuery = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.completionBoundFlatFunctionQuery", "true"));
+	}
+
+	/** 关联同一进程中的 pricing 调用、正式节点和 DSSR 轮次，便于串联 stdout 与 live 日志。 */
+	void setDiagnosticPricingContext(long pricingCallId, int nodePricingCall, boolean repairPricing) {
+		this.diagnosticPricingCallId = pricingCallId;
+		this.diagnosticNodePricingCall = nodePricingCall;
+		this.diagnosticRepairPricing = repairPricing;
 	}
 
 	private void initializeNgNeighborhoods(LP lp) {
@@ -1137,6 +1148,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 	private void appendNgDssrSummary(String reason) {
 		lastMessage = lastMessage + " | ng-DSSR reason=" + reason + ngSetWarmStartSummary()
+				+ diagnosticPricingContextSummary()
 				+ ngSetWindowRepeatabilitySummary()
 				+ ", rounds=" + ngDssrRoundsExecuted
 				+ ", totalNonElementarySeen=" + ngDssrTotalNonElementaryNegativeSeen
@@ -1150,6 +1162,24 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ngSetMembersSummary()
 				+ roundRouteRelationSummary()
 				+ duplicateRepairSummary();
+	}
+
+	private String diagnosticPricingContextSummary() {
+		if (diagnosticPricingCallId <= 0L) {
+			return "";
+		}
+		return ", pricingCall=" + diagnosticPricingCallId
+				+ ", nodePricingCall=" + diagnosticNodePricingCall
+				+ ", repairPricing=" + diagnosticRepairPricing;
+	}
+
+	private String diagnosticPricingHeartbeatContext() {
+		if (diagnosticPricingCallId <= 0L) {
+			return "";
+		}
+		return " pricingCall=" + diagnosticPricingCallId
+				+ " nodePricingCall=" + diagnosticNodePricingCall
+				+ " repair=" + diagnosticRepairPricing;
 	}
 
 	private String ngDssrRouteUpdateSummary() {
@@ -3418,7 +3448,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				recordForwardQueueNanos(timingStart);
 			}
 		}
-		diagnosticHeartbeat(lp, "forward.progress", false);
+		if (isProgressHeartbeatCheckDue(diagnosticForwardPops)) {
+			diagnosticHeartbeat(lp, "forward.progress", false);
+		}
 	}
 
 	private void backwardExtend(LP lp) {
@@ -3483,7 +3515,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				recordBackwardQueueNanos(timingStart);
 			}
 		}
-		diagnosticHeartbeat(lp, "backward.progress", false);
+		if (isProgressHeartbeatCheckDue(diagnosticBackwardPops)) {
+			diagnosticHeartbeat(lp, "backward.progress", false);
+		}
+	}
+
+	static boolean isProgressHeartbeatCheckDue(long popCount) {
+		return (popCount & PROGRESS_HEARTBEAT_POP_MASK) == 0L;
 	}
 
 	private long extensionTimingStart() {
@@ -5160,6 +5198,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		Node node = lp == null ? null : lp.getNode();
 		String nodeId = node == null ? "-" : Integer.toString(node.id);
 		System.out.println("[BPC exact heartbeat] node=" + nodeId
+				+ diagnosticPricingHeartbeatContext()
+				+ " dssrRound=" + ngDssrRound
 				+ " phase=" + phase
 				+ " fwQueue=" + queueSize(FWUL)
 				+ " bwQueue=" + queueSize(BWUL)

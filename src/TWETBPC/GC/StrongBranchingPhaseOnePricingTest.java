@@ -73,9 +73,14 @@ public final class StrongBranchingPhaseOnePricingTest {
 
 	private static void testNgDssrWithoutCut() throws Exception {
 		TestContext context = createContext(ngDssrConfig(false), false);
-		assertFindsTrueCostColumns("ng-DSSR/no-cut",
-				new GCNGBBStyleBidirectionalNgDssrPricingEngine(context.data, context.config).price(context.lp),
-				context);
+		PricingResult result =
+				new GCNGBBStyleBidirectionalNgDssrPricingEngine(context.data, context.config).price(context.lp);
+		assertFindsTrueCostColumns("ng-DSSR/no-cut", result, context);
+		if (!result.getMessage().contains("pricingCall=1")
+				|| !result.getMessage().contains("nodePricingCall=1")
+				|| !result.getMessage().contains("repairPricing=false")) {
+			throw new AssertionError("ng-DSSR pricing message lacks invocation context: " + result.getMessage());
+		}
 	}
 
 	private static void testNgDssrWithSriCut() throws Exception {

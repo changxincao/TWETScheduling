@@ -1,6 +1,7 @@
 package TWETBPC.GC;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 
 import Basic.Data;
 import TWETBPC.TWETBPCConfig;
@@ -20,6 +21,8 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 	private final TWETBPCConfig config;
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
 	private final NgDssrHistoryWarmStart historyWarmStart;
+	private long pricingCallSequence;
+	private final HashMap<Integer, Integer> pricingCallsByNode = new HashMap<Integer, Integer>();
 
 	public GCNGBBStyleBidirectionalNgDssrPricingEngine(Data data, TWETBPCConfig config) {
 		this.data = data;
@@ -45,6 +48,7 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
 				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.PAPER, historyWarmStart);
+		installDiagnosticPricingContext(gc, lp, false);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -70,6 +74,7 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 			return PricingResult.noImprovement("GCNGBB-style ng-DSSR bidirectional pricing disabled");
 		}
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config);
+		installDiagnosticPricingContext(gc, lp, true);
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
@@ -82,6 +87,13 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 	@Override
 	public CompletionBoundSubtreeArcEliminator.PreparedBounds getReusableSubtreeArcEliminationBounds() {
 		return lastReusableSubtreeArcEliminationBounds;
+	}
+
+	private void installDiagnosticPricingContext(GCNGBBStyleBidirectionalNgDssr gc, LP lp, boolean repairPricing) {
+		int nodeId = lp.getNode() == null ? -1 : lp.getNode().id;
+		int nodePricingCall = pricingCallsByNode.merge(Integer.valueOf(nodeId), Integer.valueOf(1),
+				(left, right) -> Integer.valueOf(left.intValue() + right.intValue())).intValue();
+		gc.setDiagnosticPricingContext(++pricingCallSequence, nodePricingCall, repairPricing);
 	}
 
 	@Override

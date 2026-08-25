@@ -2,8 +2,8 @@
 
 三种定价算法统一使用运行时 `BestBpcProfiles.VERSION` 对应的参数；每个场景先生成一次固定初始列，待比较方法复用同一快照和 SHA-256 fingerprint。
 
-执行：`java HEU.ExperimentBatchScheduler manifest.tsv 4`。每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。
-也可以在 Eclipse 中直接运行 `HEU.FormalExperimentBatchLauncher`：无参数时读取类顶部的 manifest、并发数、筛选条件和 scan-only 配置；传入参数时仍使用原命令行语法。首次运行默认只扫描，确认任务数量后将 `SCAN_ONLY` 改为 `false` 才会启动子进程。
+每个子 JVM 固定 CPLEX 单线程，调度器始终最多保持 4 个独立进程。若从命令行启动，必须先把 `target/classes`、项目依赖和 `cplex.jar` 放入 classpath，并通过 `-Djava.library.path=<CPLEX native目录>` 配置本机动态库，再运行 `HEU.ExperimentBatchScheduler <manifest> 4`。
+推荐在 Eclipse 中直接运行 `HEU.FormalExperimentBatchLauncher`：无参数时读取类顶部的 manifest、并发数、筛选条件和 scan-only 配置；传入参数时仍使用原命令行语法。首次运行默认只扫描，确认任务数量后将 `SCAN_ONLY` 改为 `false` 才会启动子进程。
 也可以只执行 `manifests/` 下与论文实验小节对应的单独 manifest；每个子 manifest 已包含自己依赖的 seed 任务。
 调度器支持按 manifest 显式字段筛选，例如：`java HEU.ExperimentBatchScheduler manifests/pricing-comparison.tsv 4 --select=size=50 --select=setupType=family --select=scaleLevel=base --select=windowLevel=narrow --select=algorithm=NG_DSSR,TIME_INDEXED`。多个字段取交集，逗号分隔值取并集；筛选 solve 后自动补齐 seed 依赖。
 正式启动前可在同一命令末尾增加 `--scan-only`。该模式只扫描本地 `SUCCESS` 并报告匹配数、依赖数、已完成数、待运行数及所选算法/外包模型计数，不创建目录或启动子进程。正式运行也会先做相同扫描，已有 `SUCCESS` 的任务直接跳过。

@@ -19,6 +19,7 @@ import TWETBPC.BestBpcProfiles;
 import TWETBPC.TWETBPCConfig;
 import TWETBPC.TWETBPCSolver;
 import TWETBPC.TWETSolveResult;
+import TWETBPC.TWETSolveStatus;
 import TWETBPC.GC.FixedInitialColumnSeed;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
@@ -218,6 +219,17 @@ public final class FormalExperimentRunner {
 				"formalRun finished run=%s status=%s incumbent=%.6f bound=%.6f nodes=%d columns=%d%n",
 				arguments.runId, result.getStatus(), result.getIncumbentCost(), result.getBestBound(),
 				result.getProcessedNodes(), result.getGeneratedColumns());
+		if (!isReportableSolveStatus(result.getStatus())) {
+			throw new IllegalStateException("Formal solve ended with non-reportable status: " + result.getStatus());
+		}
+	}
+
+	/** 只有形成可用于实验汇总的正常终止状态，子进程才允许返回0。 */
+	static boolean isReportableSolveStatus(TWETSolveStatus status) {
+		return status == TWETSolveStatus.FINISHED
+				|| status == TWETSolveStatus.ROOT_PROCESSED
+				|| status == TWETSolveStatus.TIME_LIMIT
+				|| status == TWETSolveStatus.NODE_LIMIT;
 	}
 
 	private static void writeRunMetadata(Arguments arguments, BPCAlgorithmProfile profile, String seedFingerprint,

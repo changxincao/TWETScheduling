@@ -1,12 +1,13 @@
 \section{Computational Study}\label{sec:experiments}
 
-This section has three objectives. We first compare the continuous-time and
-time-indexed pricing methods for the internal scheduling problem. We then compare
-the two formulations of the outsourcing decision. Finally, we examine how the
-availability and pricing of outsourcing affect the resulting production plans. All
-algorithms were implemented in Java and use IBM ILOG CPLEX 22.1.1 to solve the
-restricted master problems and auxiliary mathematical programs. Each run uses a
-single thread and is subject to a time limit of 10,800 seconds.
+This section evaluates the computational performance of the proposed exact solution
+framework and the effect of outsourcing on the resulting production plans. The
+experiments first assess alternative exact implementations of internal pricing and
+then compare the two formulations of the outsourcing decision. A sensitivity
+analysis subsequently examines the effects of outsourcing availability and quantity
+discounts. All algorithms were implemented in Java and use IBM ILOG CPLEX 22.1.1 to
+solve the restricted master problems and auxiliary mathematical programs. Each run
+uses a single thread and is subject to a time limit of 10,800 seconds.
 % Add the final server CPU, memory, and operating system before reporting results.
 
 \subsection{Instance Generation}\label{sec:instance-generation}
@@ -75,22 +76,22 @@ removing the outsourcing option.
 
 \subsection{Comparison of Internal Pricing Methods}\label{sec:pricing-comparison}
 
-The first experiment identifies the production environments in which continuous-time
-and time-indexed pricing are most effective. We disable outsourcing and solve the
-internal scheduling problem using NG-DSSR, time-indexed pricing without cuts, and
-time-indexed pricing with rank-1 cuts. Because the size of a time-indexed graph
-depends directly on the magnitude of the time parameters, we supplement the original
-scale with medium- and high-scale variants. For each job, the processing time and
-due-window center are independently multiplied by an integer drawn from
+The first experiment compares the three exact internal-pricing configurations
+introduced in Section~\ref{sec:solution}: NG-DSSR, time-indexed pricing
+without cuts, and time-indexed pricing with rank-1 cuts. Outsourcing is disabled so
+that the comparison is driven only by the internal scheduling problem. Because the
+size of a time-indexed graph depends directly on the magnitude of the time parameters,
+we supplement the original scale with medium- and high-scale variants. For each job,
+the processing time and due-window center are independently multiplied by an integer drawn from
 $\{5,\ldots,15\}$ in the medium-scale class and $\{15,\ldots,25\}$ in the high-scale
 class. Setup times and due-window widths are adjusted to the corresponding scale:
 each setup matrix follows the realized aggregate processing-time multiplier, while
 the narrow and wide half-width ranges are multiplied by 10 and 20, respectively.
 The earliness and tardiness weights remain unchanged. This design yields 1,620
-scheduling instances and 4,860 runs. The comparison therefore reveals how the
-relative performance of the three pricing methods changes with job size, machine
-availability, due-window width, setup structure, and time scale. The results are
-reported in the tables and figures below.
+scheduling instances and 4,860 runs. The results compare the three configurations
+across job sizes, machine levels, due-window classes, setup structures, and time
+scales, thereby identifying the instance conditions under which each representation
+is computationally most suitable.
 
 \subsection{Comparison of Outsourcing Formulations}\label{sec:outsourcing-formulation-comparison}
 
@@ -118,25 +119,21 @@ the preceding experiments whenever possible.
 This analysis assesses both the value of making outsourcing available and the
 response of the optimal plan to its price. For each original-scale production
 environment, we compare the solution without outsourcing with the solutions under
-the low, medium, and high price levels. The comparison is stratified by machine
-availability, due-window class, and setup structure. We examine total cost, outsourced
-job and workload shares, the earliness, tardiness, setup, and outsourcing cost
-components, the proportions of jobs completed early, within their due windows, and
-late, and changes in the remaining internal sequences. These measures distinguish
-the direct payment for outsourcing from its indirect scheduling effect: removing a
-job may also make the remaining internal sequence less costly to organize. The
-results are reported in the tables and representative schedules below.
+the low, medium, and high price levels. The analysis focuses on changes in the use
+of outsourcing, the composition of total cost, and the structure of the remaining
+internal schedule under different levels of machine availability, due-window width,
+and setup structure. It therefore captures both the direct outsourcing payment and
+the scheduling benefit that may arise when difficult jobs are removed from internal
+production.
 
 \subsubsection{Impact of Quantity Discounts}\label{sec:impact-discounts}
 
-Following the comparative design of \citet{dabia2019rich}, we finally ask whether a
-quantity discount merely lowers the payment for jobs that would already be outsourced
-or changes the outsourcing decision itself. We use the five 50-job sets at the
-original time scale and the medium outsourcing price. For each combination of three
-machine levels, three due-window classes, and two setup structures, the default
-marginal rates $(1,0.85,0.70)$ are compared with a tariff that applies the
-undiscounted rate throughout. This gives 90 paired production environments. We
-compare the outsourced sets and quotation volumes, whether the solutions cross the
-common breakpoints $Q_1$ and $Q_2$, and the resulting changes in internal costs and
-machine sequences. The results are summarized in the tables and representative
-schedules below.
+Following the comparative design of \citet{dabia2019rich}, we finally examine whether
+a quantity discount merely lowers the payment for jobs that would already be
+outsourced or changes the outsourcing decision itself. We use the five 50-job sets
+at the original time scale and the medium outsourcing price. For each combination
+of three machine levels, three due-window classes, and two setup structures, the
+default marginal rates $(1,0.85,0.70)$ are compared with a tariff that applies the
+undiscounted rate throughout, giving 90 paired production environments. The analysis
+then examines whether the discount changes the extent and composition of outsourcing
+and, consequently, the organization and cost of internal production.

@@ -25,6 +25,10 @@ import TWETBPC.Util.SequenceSignature;
  * <p>
  * 该实现只在没有 active SRI cut、非 time-indexed pricing、gap 足够小时启用。内部机器列按 elementary
  * full-domain 序列枚举；列化外包模式会同步枚举外包列。枚举达到上限时不关闭节点。
+ * <p>
+ * 2026-08-26: 理论上可参考 RouteOpt，在 completion-bound reduced-cost arc elimination 后改成
+ * meet-in-the-middle 双向枚举；但这里的 label 携带全域 PWLF，双向 join、elementarity 相容、
+ * state/PWLF-segment/route 预算及中止后的完整性证书都需要重新设计。当前保留可核查的单向枚举，暂不改流程。
  */
 public final class RouteEnumerationEngine {
 

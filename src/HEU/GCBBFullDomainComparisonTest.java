@@ -471,6 +471,12 @@ public class GCBBFullDomainComparisonTest {
 		if (config.ngDssrReturnRelaxedColumns) {
 			mode += "-ngRelaxedColumns";
 		}
+		if (config.enableCutSetBranching) {
+			mode += "-cutSet";
+		}
+		if (config.enableClusterBranching) {
+			mode += "-cluster";
+		}
 		return mode;
 	}
 
@@ -660,6 +666,19 @@ public class GCBBFullDomainComparisonTest {
 		config.enableUndirectedAdjacencyBranching = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableUndirectedAdjacencyBranching",
 				Boolean.toString(config.enableUndirectedAdjacencyBranching)));
+		config.enableCutSetBranching = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableCutSetBranching",
+				Boolean.toString(config.enableCutSetBranching)));
+		config.cutSetCandidatePoolLimit = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.cutSetCandidatePoolLimit", config.cutSetCandidatePoolLimit);
+		config.enableClusterBranching = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.enableClusterBranching",
+				Boolean.toString(config.enableClusterBranching)));
+		config.clusterMstTheta = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.clusterMstTheta", Double.toString(config.clusterMstTheta)));
+		config.clusterTemporalWeight = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.clusterTemporalWeight",
+				Double.toString(config.clusterTemporalWeight)));
 		config.useTimeIndexedGraphPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphPricing",
 				Boolean.toString(config.useTimeIndexedGraphPricing)));

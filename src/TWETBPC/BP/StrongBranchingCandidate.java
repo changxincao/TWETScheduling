@@ -21,7 +21,8 @@ public abstract class StrongBranchingCandidate {
 		this.type = type;
 		this.description = description;
 		this.value = value;
-		this.distanceToHalf = Math.abs(value - 0.5);
+		double fractionalPart = value - Math.floor(value);
+		this.distanceToHalf = Math.abs(fractionalPart - 0.5);
 		this.order = order;
 	}
 

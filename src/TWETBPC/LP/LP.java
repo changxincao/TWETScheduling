@@ -16,6 +16,7 @@ import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.BP.AggregateArcBranchConstraint;
 import TWETBPC.CUT.SubsetRowCutEvaluator;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETCut;
@@ -85,6 +86,7 @@ public class LP {
 	private HashMap<Integer, IloRange> outsourcingMembershipBranchRanges;
 	private HashMap<Long, IloRange> arcBranchRanges;
 	private HashMap<Long, IloRange> adjacencyBranchRanges;
+	private ArrayList<IloRange> aggregateArcBranchRanges;
 	private HashMap<Integer, IloRange> subsetRowCutRanges;
 	private ArrayList<Integer> activeSubsetRowPricingCutIds;
 	private ArrayList<Double> activeSubsetRowPricingDuals;
@@ -805,6 +807,7 @@ public class LP {
 		arcBranchRanges = new HashMap<Long, IloRange>();
 		outsourcingMembershipBranchRanges = new HashMap<Integer, IloRange>();
 		adjacencyBranchRanges = new HashMap<Long, IloRange>();
+		aggregateArcBranchRanges = new ArrayList<IloRange>();
 		outsourcingColumnCountRange = null;
 		subsetRowCutRanges = new HashMap<Integer, IloRange>();
 		subsetRowPostingIndex = null;
@@ -833,6 +836,7 @@ public class LP {
 		buildOutsourcingMembershipBranchConstraints();
 		buildArcBranchConstraints();
 		buildAdjacencyBranchConstraints();
+		buildAggregateArcBranchConstraints();
 		masterLpPhaseBranchRowsNanos += masterLpTimingElapsed(phaseStartNanos);
 
 		phaseStartNanos = masterLpTimingStart();
@@ -1079,6 +1083,25 @@ public class LP {
 		addAdjacencyBranchConstraints(node.getRequiredAdjacencyPairs(), true);
 	}
 
+	private void buildAggregateArcBranchConstraints() throws IloException {
+		List<AggregateArcBranchConstraint> constraints = node.getAggregateArcConstraints();
+		for (int constraintIndex = 0; constraintIndex < constraints.size(); constraintIndex++) {
+			AggregateArcBranchConstraint constraint = constraints.get(constraintIndex);
+			IloLinearNumExpr expr = cplex.linearNumExpr();
+			for (int columnIndex = 0; columnIndex < restrictedColumnIds.size(); columnIndex++) {
+				TWETColumn column = pool.getColumn(restrictedColumnIds.get(columnIndex).intValue());
+				int coefficient = constraint.coefficient(column, node.sinkId());
+				if (coefficient != 0) {
+					expr.addTerm(coefficient, lambdaVars[columnIndex]);
+				}
+			}
+			IloRange range = constraint.isLowerBound()
+					? cplex.addGe(expr, constraint.getRhs(), "aggregateArcLower_" + constraintIndex)
+					: cplex.addLe(expr, constraint.getRhs(), "aggregateArcUpper_" + constraintIndex);
+			aggregateArcBranchRanges.add(range);
+		}
+	}
+
 	public int addOutsourcingColumns(List<Integer> columnIds) {
 		if (!isColumnizedOutsourcing()) {
 			return 0;
@@ -1310,6 +1333,9 @@ public class LP {
 		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
 			addRangeRepairSlacks(entry.getValue(), "adjacencySlack_" + entry.getKey(), penalty);
 		}
+		for (int index = 0; index < aggregateArcBranchRanges.size(); index++) {
+			addRangeRepairSlacks(aggregateArcBranchRanges.get(index), "aggregateArcSlack_" + index, penalty);
+		}
 		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
 			addRangeRepairSlacks(entry.getValue(), "subsetRowSlack_" + entry.getKey(), penalty);
 		}
@@ -1374,6 +1400,13 @@ public class LP {
 				double coeff = type == Node.REPAIR_OUTSOURCING_REQUIRED ? 1.0 : -1.0;
 				addRepairSlack(range, coeff, "outsourcingMembershipSlack_" + node.getRepairFrom(), penalty);
 			}
+		} else if (type == Node.REPAIR_AGGREGATE_ARC_UPPER || type == Node.REPAIR_AGGREGATE_ARC_LOWER) {
+			int index = node.getRepairAggregateConstraintIndex();
+			if (index >= 0 && index < aggregateArcBranchRanges.size()) {
+				double coeff = type == Node.REPAIR_AGGREGATE_ARC_LOWER ? 1.0 : -1.0;
+				addRepairSlack(aggregateArcBranchRanges.get(index), coeff,
+						"aggregateArcBranchSlack_" + index, penalty);
+			}
 		} else if (type == Node.REPAIR_TARIFF_FORBIDDEN || type == Node.REPAIR_TARIFF_REQUIRED) {
 			int segment = node.getRepairSegment();
 			if (tariffBranchRanges != null && segment >= 0 && segment < tariffBranchRanges.length
@@ -1412,6 +1445,13 @@ public class LP {
 			int second = decodeTo(entry.getKey().longValue());
 			if (node.columnCoversAdjacencyPair(column, first, second)) {
 				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			}
+		}
+		List<AggregateArcBranchConstraint> aggregateConstraints = node.getAggregateArcConstraints();
+		for (int index = 0; index < aggregateArcBranchRanges.size(); index++) {
+			int coefficient = aggregateConstraints.get(index).coefficient(column, node.sinkId());
+			if (coefficient != 0) {
+				cplexColumn = cplexColumn.and(cplex.column(aggregateArcBranchRanges.get(index), coefficient));
 			}
 		}
 		for (Map.Entry<Integer, IloRange> entry : subsetRowCutRanges.entrySet()) {
@@ -1813,6 +1853,17 @@ public class LP {
 				if (node.getAdjacencyPairState(first, second) == Node.ADJACENCY_REQUIRED) {
 					pricingDualRhsObjective += dual;
 				}
+			}
+		}
+		if (!aggregateArcBranchRanges.isEmpty()) {
+			double[] aggregateDuals = cplex.getDuals(
+					aggregateArcBranchRanges.toArray(new IloRange[aggregateArcBranchRanges.size()]));
+			List<AggregateArcBranchConstraint> constraints = node.getAggregateArcConstraints();
+			for (int index = 0; index < aggregateDuals.length; index++) {
+				double dual = aggregateDuals[index];
+				AggregateArcBranchConstraint constraint = constraints.get(index);
+				constraint.addDualTo(arcDual, dual);
+				pricingDualRhsObjective += dual * constraint.getRhs();
 			}
 		}
 		if (!subsetRowCutRanges.isEmpty()) {

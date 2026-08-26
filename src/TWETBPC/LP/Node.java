@@ -3,6 +3,7 @@ package TWETBPC.LP;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -11,6 +12,7 @@ import java.util.Map;
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
+import TWETBPC.BP.AggregateArcBranchConstraint;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETOutsourcingColumn;
 
@@ -51,6 +53,8 @@ public class Node implements Comparable<Node> {
 	public static final byte REPAIR_ADJACENCY_REQUIRED = 8;
 	public static final byte REPAIR_OUTSOURCING_FORBIDDEN = 9;
 	public static final byte REPAIR_OUTSOURCING_REQUIRED = 10;
+	public static final byte REPAIR_AGGREGATE_ARC_UPPER = 11;
+	public static final byte REPAIR_AGGREGATE_ARC_LOWER = 12;
 
 	private final Data data;
 	public int id;
@@ -78,11 +82,13 @@ public class Node implements Comparable<Node> {
 	private byte[] tariffSegmentState;
 	private byte[] outsourcingJobState;
 	private int requiredOutsourcingJobCount;
+	private ArrayList<AggregateArcBranchConstraint> aggregateArcConstraints;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
 	private int repairFrom;
 	private int repairTo;
 	private int repairSegment;
+	private int repairAggregateConstraintIndex;
 
 	public Node(Data data, List<Integer> seedColumnIds, List<Integer> incumbentColumnIds, double pseudoCost) {
 		this.data = data;
@@ -109,10 +115,12 @@ public class Node implements Comparable<Node> {
 		this.tariffSegmentState = new byte[countTariffSegments(data)];
 		this.outsourcingJobState = new byte[data.n + 1];
 		this.requiredOutsourcingJobCount = 0;
+		this.aggregateArcConstraints = new ArrayList<AggregateArcBranchConstraint>();
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
 		this.repairTo = -1;
 		this.repairSegment = -1;
+		this.repairAggregateConstraintIndex = -1;
 	}
 
 	public Node copy() {
@@ -154,10 +162,12 @@ public class Node implements Comparable<Node> {
 		copy.tariffSegmentState = tariffSegmentState.clone();
 		copy.outsourcingJobState = outsourcingJobState.clone();
 		copy.requiredOutsourcingJobCount = requiredOutsourcingJobCount;
+		copy.aggregateArcConstraints = new ArrayList<AggregateArcBranchConstraint>(aggregateArcConstraints);
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
 		copy.repairTo = repairTo;
 		copy.repairSegment = repairSegment;
+		copy.repairAggregateConstraintIndex = repairAggregateConstraintIndex;
 		return copy;
 	}
 
@@ -638,7 +648,9 @@ public class Node implements Comparable<Node> {
 				+ ",tariffReq=" + countRequiredTariffSegments() + ",tariffForbid=" + countForbiddenTariffSegments()
 				+ ",outReq=" + countOutsourcingJobStates(OUTSOURCE_REQUIRED)
 				+ ",outForbid=" + countOutsourcingJobStates(OUTSOURCE_FORBIDDEN)
-				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment;
+				+ ",aggregateArc=" + aggregateArcConstraints.size()
+				+ ",repair=" + repairType + ":" + repairFrom + "->" + repairTo + "/seg=" + repairSegment
+				+ "/agg=" + repairAggregateConstraintIndex;
 	}
 
 	private String formatOptionalDouble(double value) {
@@ -691,6 +703,18 @@ public class Node implements Comparable<Node> {
 		repairSegment = segment;
 	}
 
+	/** 新增一条 aggregate-arc 分支行；不可变约束对象可在父子节点间安全共享。 */
+	public void addAggregateArcConstraint(AggregateArcBranchConstraint constraint) {
+		aggregateArcConstraints.add(constraint);
+		repairAggregateConstraintIndex = aggregateArcConstraints.size() - 1;
+		repairType = constraint.isLowerBound() ? REPAIR_AGGREGATE_ARC_LOWER : REPAIR_AGGREGATE_ARC_UPPER;
+		repairFrom = repairTo = repairSegment = -1;
+	}
+
+	public List<AggregateArcBranchConstraint> getAggregateArcConstraints() {
+		return Collections.unmodifiableList(aggregateArcConstraints);
+	}
+
 	public byte getRepairType() {
 		return repairType;
 	}
@@ -713,6 +737,10 @@ public class Node implements Comparable<Node> {
 
 	public int getRepairSegment() {
 		return repairSegment;
+	}
+
+	public int getRepairAggregateConstraintIndex() {
+		return repairAggregateConstraintIndex;
 	}
 
 	public byte getTariffSegmentState(int segment) {

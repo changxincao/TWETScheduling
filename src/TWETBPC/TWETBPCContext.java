@@ -14,6 +14,7 @@ import Output.BPCTraceSummary;
 import TWETBPC.BP.ArcBrancher;
 import TWETBPC.BP.Brancher;
 import TWETBPC.BP.OutsourcingMembershipBrancher;
+import TWETBPC.BP.StructuredArcFlowBrancher;
 import TWETBPC.BP.UndirectedAdjacencyBrancher;
 import TWETBPC.CUT.CutGenerator;
 import TWETBPC.CUT.NoOpCutGenerator;
@@ -168,7 +169,7 @@ public class TWETBPCContext {
 			if (config.enableUndirectedAdjacencyBranching) {
 				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
 			}
-			branchers.add(new ArcBrancher(config.branchingTolerance));
+			branchers.add(createArcFlowBrancher());
 			branchers.add(new OutsourcingMembershipBrancher(config.branchingTolerance));
 		} else {
 			branchers.add(new TWETBPC.BP.TariffSegmentBrancher(config.branchingTolerance));
@@ -176,7 +177,7 @@ public class TWETBPCContext {
 			if (config.enableUndirectedAdjacencyBranching) {
 				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
 			}
-			branchers.add(new ArcBrancher(config.branchingTolerance));
+			branchers.add(createArcFlowBrancher());
 		}
 
 		this.traceSummary = new BPCTraceSummary(config);
@@ -194,6 +195,12 @@ public class TWETBPCContext {
 		this.pc = new PC(config, pricingMode, pricingEngines, cutGenerators, traceSink);
 		this.tree = new Tree(data, config, pricingMode, pool, outsourcingPool, cutPool, initialColumnBuilder, pc,
 				branchers, traceSink);
+	}
+
+	private Brancher createArcFlowBrancher() {
+		return config.enableCutSetBranching || config.enableClusterBranching
+				? new StructuredArcFlowBrancher(data, config)
+				: new ArcBrancher(config.branchingTolerance);
 	}
 
 	private boolean shouldAddTimeIndexedPreHeuristic() {

@@ -17,7 +17,7 @@ import TWETBPC.Model.TWETMasterSolution;
  */
 public class ArcBrancher implements Brancher {
 
-	private final double tolerance;
+	protected final double tolerance;
 
 	public ArcBrancher(double tolerance) {
 		this.tolerance = tolerance;
@@ -51,7 +51,7 @@ public class ArcBrancher implements Brancher {
 		return new ArrayList<StrongBranchingCandidate>(candidates.subList(0, limit));
 	}
 
-	private ArrayList<StrongBranchingCandidate> collectInternalArcCandidates(LP lp, Node node, int sink,
+	protected ArrayList<StrongBranchingCandidate> collectInternalArcCandidates(LP lp, Node node, int sink,
 			double[][] arcValues) {
 		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
 		for (int from = 1; from < sink; from++) {
@@ -62,7 +62,7 @@ public class ArcBrancher implements Brancher {
 		return candidates;
 	}
 
-	private ArrayList<StrongBranchingCandidate> collectEndpointArcCandidates(LP lp, Node node, int sink,
+	protected ArrayList<StrongBranchingCandidate> collectEndpointArcCandidates(LP lp, Node node, int sink,
 			double[][] arcValues) {
 		ArrayList<StrongBranchingCandidate> candidates = new ArrayList<StrongBranchingCandidate>();
 		for (int job = 1; job < sink; job++) {
@@ -90,7 +90,7 @@ public class ArcBrancher implements Brancher {
 		});
 	}
 
-	private double[][] accumulateArcValues(LP lp, int sink) {
+	protected double[][] accumulateArcValues(LP lp, int sink) {
 		double[][] values = new double[sink + 1][sink + 1];
 		TWETMasterSolution solution = lp.getLastSolution();
 		for (Map.Entry<Integer, Double> entry : solution.getColumnValues().entrySet()) {
@@ -140,7 +140,7 @@ public class ArcBrancher implements Brancher {
 				"Branched on arc (" + bestFrom + "," + bestTo + ") value=" + value);
 	}
 
-	private void sortCandidates(ArrayList<StrongBranchingCandidate> candidates) {
+	protected void sortCandidates(ArrayList<StrongBranchingCandidate> candidates) {
 		Collections.sort(candidates, new Comparator<StrongBranchingCandidate>() {
 			@Override
 			public int compare(StrongBranchingCandidate a, StrongBranchingCandidate b) {

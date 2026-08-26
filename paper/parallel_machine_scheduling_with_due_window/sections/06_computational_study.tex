@@ -2,13 +2,15 @@
 
 This section evaluates the computational performance of the proposed exact solution
 framework and the sensitivity of the outsourcing decisions to the associated
-economic parameters. We first disable outsourcing and compare exact pricing methods
-for the resulting pure parallel-machine scheduling problem. We then restore the
-outsourcing option and compare the two formulations of the integrated scheduling and
-outsourcing problem. Finally, we examine the effects of outsourcing availability,
-the baseline outsourcing price, and quantity discounts. All algorithms were
-implemented in Java and use IBM ILOG CPLEX 22.1.1 as the LP solver. Each run uses a
-single thread and is subject to a time limit of 10,800 seconds.
+economic parameters. The first experiment disables outsourcing and benchmarks the
+proposed continuous-time NG-DSSR pricing algorithm against the time-indexed pricing
+framework of \citet{bulhoes2020exact} for the resulting pure parallel-machine
+scheduling problem. We then restore the outsourcing option and compare the two
+formulations of the integrated scheduling and outsourcing problem. Finally, we
+examine the effects of outsourcing availability, the baseline outsourcing price, and
+quantity discounts. All algorithms were implemented in Java and use IBM ILOG CPLEX
+22.1.1 as the LP solver. Each run uses a single thread and is subject to a time limit
+of 10,800 seconds.
 % Add the final server CPU, memory, and operating system before reporting results.
 
 \subsection{Instance Generation}\label{sec:instance-generation}

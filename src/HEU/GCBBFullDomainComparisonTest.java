@@ -477,6 +477,10 @@ public class GCBBFullDomainComparisonTest {
 		if (config.enableClusterBranching) {
 			mode += "-cluster";
 		}
+		if ((config.enableCutSetBranching || config.enableClusterBranching)
+				&& config.structuredArcStrictTypePriority) {
+			mode += "-strictType";
+		}
 		return mode;
 	}
 
@@ -674,6 +678,9 @@ public class GCBBFullDomainComparisonTest {
 		config.enableClusterBranching = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.enableClusterBranching",
 				Boolean.toString(config.enableClusterBranching)));
+		config.structuredArcStrictTypePriority = Boolean.parseBoolean(System.getProperty(
+				"twet.bpc.fullDomainCompare.structuredArcStrictTypePriority",
+				Boolean.toString(config.structuredArcStrictTypePriority)));
 		config.clusterMstTheta = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.clusterMstTheta", Double.toString(config.clusterMstTheta)));
 		config.clusterTemporalWeight = Double.parseDouble(System.getProperty(

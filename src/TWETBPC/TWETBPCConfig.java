@@ -426,6 +426,11 @@ public class TWETBPCConfig {
 	public int cutSetCandidatePoolLimit = 40;
 	/** 2026-08-26: 基于 setup-time/due-center 静态 MST 聚类的 Cluster 分支实验开关。 */
 	public boolean enableClusterBranching = false;
+	/**
+	 * 2026-08-26: 实验性严格类型优先。按 Cluster、CutSet、Arc 逐层回退，
+	 * 当前层存在分数候选时不让后一层参与本节点 strong branching。
+	 */
+	public boolean structuredArcStrictTypePriority = false;
 	/** MST 中删除大于 mean + theta * std 的边。 */
 	public double clusterMstTheta = 0.5;
 	/** 聚类距离中归一化 due-window center 距离的权重。 */

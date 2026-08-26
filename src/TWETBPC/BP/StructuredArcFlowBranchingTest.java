@@ -89,6 +89,7 @@ public final class StructuredArcFlowBranchingTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		require(!config.enableCutSetBranching, "cutset default off");
 		require(!config.enableClusterBranching, "cluster default off");
+		require(!config.structuredArcStrictTypePriority, "strict type priority default off");
 		require(config.clusterMinimumCandidateSize == 2, "singleton cluster candidates excluded");
 	}
 

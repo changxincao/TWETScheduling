@@ -16,8 +16,9 @@ import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 
 /**
- * 在同一 strong-branching 候选池中比较普通 arc、动态 CutSet 和静态 Cluster 分支。
- * 三类约束最终都只是有向 arc 流量之和，因此定价仍使用既有 arc dual。
+ * 比较普通 arc、动态 CutSet 和静态 Cluster 分支。默认共享候选池；实验性严格优先模式
+ * 按 Cluster、CutSet、Arc 逐层回退。三类约束最终都只是有向 arc 流量之和，
+ * 因此定价仍使用既有 arc dual。
  */
 public final class StructuredArcFlowBrancher extends ArcBrancher {
 
@@ -44,15 +45,26 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		Set<String> aggregateKeys = new HashSet<String>();
 		if (config.enableClusterBranching) {
 			collectClusterCandidates(candidates, aggregateKeys, lp, arcValues, sink);
+			if (config.structuredArcStrictTypePriority && !candidates.isEmpty()) {
+				return sortedAndLimited(candidates, limit);
+			}
 		}
 		if (config.enableCutSetBranching) {
 			collectCutSetCandidates(candidates, aggregateKeys, lp, arcValues, sink);
+			if (config.structuredArcStrictTypePriority && !candidates.isEmpty()) {
+				return sortedAndLimited(candidates, limit);
+			}
 		}
 		ArrayList<StrongBranchingCandidate> arcCandidates = collectInternalArcCandidates(lp, node, sink, arcValues);
 		if (arcCandidates.isEmpty()) {
 			arcCandidates = collectEndpointArcCandidates(lp, node, sink, arcValues);
 		}
 		candidates.addAll(arcCandidates);
+		return sortedAndLimited(candidates, limit);
+	}
+
+	private List<StrongBranchingCandidate> sortedAndLimited(
+			ArrayList<StrongBranchingCandidate> candidates, int limit) {
 		sortCandidates(candidates);
 		return candidates.size() <= limit ? candidates
 				: new ArrayList<StrongBranchingCandidate>(candidates.subList(0, limit));

@@ -25,29 +25,29 @@ jobs from the source instances, we construct five fixed job sets for each
 $n\in\{20,40,50,60,80,100\}$, giving 30 base job sets in total.
 
 For each base job set, we construct three parallel-machine variants, with
-$m\in\{2,3,4\}$ for $n\leq 60$ and $m\in\{3,4,5\}$ otherwise. Because the source
-due dates are defined on a single-machine time horizon and some job sets are
-extracted from larger instances, we adjust them for both the retained workload and
-parallel processing. Let $\mathcal J^0$ denote the source job set and
-$\mathcal J\subseteq\mathcal J^0$ the retained job set. We define the retained
-workload share and the due-window center as
+$m\in\{2,3,4\}$ for $n\leq 60$ and $m\in\{3,4,5\}$ otherwise. The due window of
+job $j$ is defined as
+\[
+[d_j^e,d_j^l]=[\max\{0,c_j-W_j\},c_j+W_j],
+\]
+where $c_j$ determines its location on the time axis and $W_j$ is its half-width.
+Because the source due dates are defined on a single-machine time horizon and some
+job sets are extracted from larger instances, we adjust the due-window centers for
+both the retained workload and parallel processing. Let $\mathcal J^0$ denote the
+source job set and $\mathcal J\subseteq\mathcal J^0$ the retained job set. The
+retained workload share and the due-window center are defined as
 \[
 r=\frac{\sum_{i\in\mathcal J}p_i}{\sum_{i\in\mathcal J^0}p_i},
 \qquad
 c_j=\left\lceil\frac{\operatorname{round}(d_j^0r)}{m^{\mathrm{ref}}}\right\rceil,
 \]
 where $d_j^0$ is the source due date. The reference machine counts
-$m^{\mathrm{ref}}=3$ for $n\leq60$ and $m^{\mathrm{ref}}=4$ otherwise are the
-middle values of the corresponding machine sets. Using a common reference value
-keeps the due windows unchanged across the three actual machine levels, so that
-varying $m$ changes internal capacity rather than the delivery requirements. The
-center $c_j$ determines the location of the due window, while its half-width $W_j$
-determines the allowable interval around that location. We set $W_j=0$ in the
-zero-width class and independently draw $W_j$ from $\{80,\ldots,120\}$ and
-$\{280,\ldots,320\}$ in the narrow and wide classes, respectively. Hence,
-\[
-[d_j^e,d_j^l]=[\max\{0,c_j-W_j\},c_j+W_j].
-\]
+$m^{\mathrm{ref}}=3$ for $n\leq60$ and $m^{\mathrm{ref}}=4$ otherwise. Using a
+common reference value keeps the due windows unchanged across the three actual
+machine levels, so that varying $m$ changes internal capacity rather than the
+delivery requirements. We set $W_j=0$ in the zero-width class and independently draw
+$W_j$ from $\{80,\ldots,120\}$ and $\{280,\ldots,320\}$ in the narrow and wide
+classes, respectively.
 
 For every job set, we generate two matched sequence-dependent setup structures. In
 the random instances, setup times contain no explicit job grouping and are converted

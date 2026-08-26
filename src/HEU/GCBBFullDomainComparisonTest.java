@@ -679,6 +679,9 @@ public class GCBBFullDomainComparisonTest {
 		config.clusterTemporalWeight = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.clusterTemporalWeight",
 				Double.toString(config.clusterTemporalWeight)));
+		config.clusterMinimumCandidateSize = Integer.getInteger(
+				"twet.bpc.fullDomainCompare.clusterMinimumCandidateSize",
+				config.clusterMinimumCandidateSize);
 		config.useTimeIndexedGraphPricing = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.timeIndexedGraphPricing",
 				Boolean.toString(config.useTimeIndexedGraphPricing)));

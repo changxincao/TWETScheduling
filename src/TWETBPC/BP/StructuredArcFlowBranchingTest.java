@@ -45,6 +45,16 @@ public final class StructuredArcFlowBranchingTest {
 		constraint.addDualTo(dual, 3.25);
 		require(dual[1][2] == 3.25 && dual[4][2] == 3.25, "member arc dual expansion");
 		require(dual[2][3] == 0.0 && dual[3][2] == 0.0, "inside arcs excluded");
+
+		BitSet depotPair = new BitSet(width * width);
+		depotPair.set(2);
+		depotPair.set(3 * width + 6);
+		AggregateArcBranchConstraint depotConstraint = new AggregateArcBranchConstraint(
+				"clusterDepotPair", "depot-{2,3}", depotPair, width, false, 1);
+		TWETColumn depotColumn = new TWETColumn(1, Arrays.asList(2, 3), 5,
+				0.0, ColumnSource.MANUAL, false);
+		require(depotConstraint.coefficient(depotColumn, 6) == 2,
+				"depot pair counts both route endpoints");
 	}
 
 	private static void verifyHalfIntegerOrdering() {
@@ -79,6 +89,7 @@ public final class StructuredArcFlowBranchingTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		require(!config.enableCutSetBranching, "cutset default off");
 		require(!config.enableClusterBranching, "cluster default off");
+		require(config.clusterMinimumCandidateSize == 2, "singleton cluster candidates excluded");
 	}
 
 	private static void require(boolean condition, String message) {

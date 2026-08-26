@@ -60,21 +60,31 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 
 	private void collectClusterCandidates(ArrayList<StrongBranchingCandidate> candidates, Set<String> keys,
 			LP lp, double[][] arcValues, int sink) {
+		// singleton boundary恒为1，其pair也更接近普通arc聚合；只保留真正的簇级候选。
+		ArrayList<Integer> eligibleClusters = new ArrayList<Integer>();
 		for (int cluster = 0; cluster < clusters.size(); cluster++) {
 			BitSet jobs = clusters.get(cluster);
+			if (jobs.cardinality() < config.clusterMinimumCandidateSize) {
+				continue;
+			}
+			eligibleClusters.add(Integer.valueOf(cluster));
 			addAggregateCandidate(candidates, keys, "clusterBoundary",
 					"clusterBoundary(" + jobSetText(jobs) + ")", incomingMask(jobs, sink),
 					flowValue(incomingMask(jobs, sink), arcValues, sink), cluster);
+			BitSet depotMask = depotPairMask(jobs, sink);
+			addAggregateCandidate(candidates, keys, "clusterDepotPair",
+					"clusterDepotPair(" + cluster + ")", depotMask,
+					flowValue(depotMask, arcValues, sink), cluster);
 		}
-		int order = clusters.size();
-		for (int fromCluster = 0; fromCluster < clusters.size(); fromCluster++) {
-			for (int toCluster = 0; toCluster < clusters.size(); toCluster++) {
-				if (fromCluster == toCluster) {
-					continue;
-				}
-				BitSet mask = betweenMask(clusters.get(fromCluster), clusters.get(toCluster), sink);
+		int order = clusters.size() * 2;
+		for (int firstIndex = 0; firstIndex < eligibleClusters.size(); firstIndex++) {
+			int firstCluster = eligibleClusters.get(firstIndex).intValue();
+			for (int secondIndex = firstIndex + 1; secondIndex < eligibleClusters.size(); secondIndex++) {
+				int secondCluster = eligibleClusters.get(secondIndex).intValue();
+				BitSet mask = betweenUndirectedMask(
+						clusters.get(firstCluster), clusters.get(secondCluster), sink);
 				addAggregateCandidate(candidates, keys, "clusterPair",
-						"clusterPair(" + fromCluster + "->" + toCluster + ")", mask,
+						"clusterPair(" + firstCluster + "<->" + secondCluster + ")", mask,
 						flowValue(mask, arcValues, sink), order++);
 			}
 		}
@@ -175,10 +185,13 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		if ("clusterBoundary".equals(family)) {
 			return 0;
 		}
-		if ("clusterPair".equals(family)) {
+		if ("clusterDepotPair".equals(family)) {
 			return 1;
 		}
-		return 2;
+		if ("clusterPair".equals(family)) {
+			return 2;
+		}
+		return 3;
 	}
 
 	private BitSet incomingMask(BitSet jobs, int sink) {
@@ -193,12 +206,25 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		return mask;
 	}
 
-	private BitSet betweenMask(BitSet fromJobs, BitSet toJobs, int sink) {
+	/** 聚合两个簇之间的双向连接，保持论文cluster-pair的高层连接语义。 */
+	private BitSet betweenUndirectedMask(BitSet firstJobs, BitSet secondJobs, int sink) {
 		BitSet mask = new BitSet((sink + 1) * (sink + 1));
-		for (int from = fromJobs.nextSetBit(1); from >= 0; from = fromJobs.nextSetBit(from + 1)) {
-			for (int to = toJobs.nextSetBit(1); to >= 0; to = toJobs.nextSetBit(to + 1)) {
-				mask.set(from * (sink + 1) + to);
+		for (int first = firstJobs.nextSetBit(1); first >= 0; first = firstJobs.nextSetBit(first + 1)) {
+			for (int second = secondJobs.nextSetBit(1); second >= 0;
+					second = secondJobs.nextSetBit(second + 1)) {
+				mask.set(first * (sink + 1) + second);
+				mask.set(second * (sink + 1) + first);
 			}
+		}
+		return mask;
+	}
+
+	/** 将TWET分离的source/sink合并解释为论文中的depot cluster。 */
+	private BitSet depotPairMask(BitSet jobs, int sink) {
+		BitSet mask = new BitSet((sink + 1) * (sink + 1));
+		for (int job = jobs.nextSetBit(1); job >= 0; job = jobs.nextSetBit(job + 1)) {
+			mask.set(job);
+			mask.set(job * (sink + 1) + sink);
 		}
 		return mask;
 	}

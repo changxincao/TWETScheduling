@@ -424,12 +424,14 @@ public class TWETBPCConfig {
 	public boolean enableCutSetBranching = false;
 	/** 动态 CutSet 在进入共享 strong-branching 候选池前最多保留多少个候选。 */
 	public int cutSetCandidatePoolLimit = 40;
-	/** 2026-08-26: 基于 setup-time/due-center 静态 MST 聚类的 directed Cluster 分支实验开关。 */
+	/** 2026-08-26: 基于 setup-time/due-center 静态 MST 聚类的 Cluster 分支实验开关。 */
 	public boolean enableClusterBranching = false;
 	/** MST 中删除大于 mean + theta * std 的边。 */
-	public double clusterMstTheta = 1.0;
+	public double clusterMstTheta = 0.5;
 	/** 聚类距离中归一化 due-window center 距离的权重。 */
 	public double clusterTemporalWeight = 1.0;
+	/** Cluster候选忽略更小的退化分量；普通Arc仍负责这些任务的分支完备性。 */
+	public int clusterMinimumCandidateSize = 2;
 	/** 节点初始伪成本占位值。 */
 	public double pseudoCostInf = 1e18;
 	/** 2026-07-12: 是否用 restricted columns 求整数 RMP 刷新上界；连续失败会重复消耗 MIP，默认关闭。 */

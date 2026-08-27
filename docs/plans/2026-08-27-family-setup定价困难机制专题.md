@@ -376,3 +376,57 @@ ng-DSSR 需要分两层处理。novelty/diversity witness 和从 time-indexed �
 time-indexed 不保存 visited-memory，也不支付排除这些重复环的 certificate 成本。`F=2,m=2` 虽有较多重复 relaxed 列，但它们造成的最终 gap 只有 `0.45%`，9 个节点即可补掉；其 time-indexed pricing 共生成约 6.24 万列却只耗 `4.123s`，时间主要花在 RMP。此时接受一个很小的松弛 gap 再分支，比在根节点证明所有负 non-elementary walk 都不能产生 elementary 负列更便宜。`F=3,m=3` 则相反：elementary certificate 很便宜，而 time-indexed 仍需 28 个节点和 `32.585s` 的 master LP，ng-DSSR 在根节点闭合更有利。
 
 当前结论不是切换默认算法，而是识别出一个可观测的交叉条件：当 relaxed gap 已很小，但正值 relaxed 列重复高、低 setup 块远大于初始 ng memory、首个 exact 调用的 DSSR 轮数和 labels 已明显膨胀时，time-indexed 可能优于 ng-DSSR；当首个 exact 很快而 time-indexed 分数结构仍需要较多节点时，ng-DSSR 更有优势。后续若做自动选择，可以利用已经执行的 time-indexed root preprocessing，再结合首个 exact 调用的耗时、轮数和 labels 做有界判断；本轮只记录条件，不改求解流程。
+
+## 24. setup cost 不是主因，family setup time 才是结构载体
+
+保持 family setup time 不变、只把显式 setup cost 系数从 `20` 降到 `8` 和 `0` 后，family 根 gap 仍为 `4.391%` 和 `4.030%`，加权重复次数仍为 `6.690` 和 `6.510`。因此系数 20 会放大边界偏好，却不是 family 困难的主导来源。即使 setup cost 为 0，setup time 仍进入完成时间递推：一次跨族转移增加的时间会把后续所有任务的完成时间整体后移，并通过每个任务的 earliness/tardiness PWLF 改变整个 suffix 的成本。family 结构因而不是一个可单独删掉的局部弧费用，而是会传播到整条序列的时间结构。
+
+这也解释了为何只有把 setup time 和 setup cost 同时清零时，根 gap 才降到 `0.179%`、正值列全部 elementary、ng-DSSR exact 降到 `1.626s`。当前可确认的核心不是“20 太大”，而是 setup time 形成了稳定的块内短、块间长结构；显式费用只是附加放大项。
+
+## 25. 从重复覆盖到三个分数单族流
+
+对任意根 LP 解，令总机器流 `M=sum_r lambda_r`，定义
+
+\[
+D=\frac{\sum_r\lambda_r|\operatorname{distinct}(r)|}{M},\qquad
+R=\frac{\sum_r\lambda_r(|r|-|\operatorname{distinct}(r)|)}{M}.
+\]
+
+`D` 表示每消耗一单位 LP 机器流平均接触多少个不同任务，`R` 表示同一单位机器流中有多少序列位置用于重复已访问任务。family 的 `20=13.102+6.898` 对应覆盖放大倍数 `20/13.102=1.527`；random 的 `20=19.065+0.935` 仅为 `1.049`。这不是对真实机器排程的解释，而是在量化 visit-count master 中一单位分数机器流能够制造多少覆盖系数。
+
+用 `F=3,m=2` 的示意例子可把机制写清。假设每个 family 有约 13 个任务，并有一组单族 relaxed 列平均走 20 个位置，即每个不同任务平均出现约 `20/13` 次。给每个 family 的单族列混合总权重约 `13/20=0.65`，该族每个任务可得到约 `0.65*(20/13)=1` 的 visit-count 覆盖。三个 family 合计只消耗约 `3*0.65=1.95` 单位机器流，却能把全部覆盖行填满，而且没有任何一条列跨 family。真实 set02 根解的三组权重为 `0.693/0.595/0.713`，合计恰为 2；具体重复分布不是完全均匀，但数学作用相同。
+
+如果列必须 elementary，同一任务最多出现一次。只用单族列覆盖某个 family 时，该 family 的列权重至少为 1；三个 family 分开至少需要 3 单位机器流。真实问题只有 2 台机器，所以至少一台机器必须同时加工两个 family，并承担至少一次跨族 setup time、可能的 setup cost 以及由时间后移造成的 suffix ET 变化。`F>m` 的含义正是：整数解存在不可避免的跨族合并决策，而 visit-count relaxation 可以用小于 1 的重复单族流逃掉该决策。`F<=m` 时每族本来就可以分配一台机器，重复环仍可能让 pricing 很难，但不再系统性逃避一项整数解必付的跨族合并。
+
+family 之所以比 random/zero 更容易形成这种重复流，不是因为 setup 均值更小，而是低 setup 弧具有相关拓扑。family 的块内大量入口和出口同时较短，重复任务或换到另一个已访问同族任务可以长期留在一个低 setup 子图内；换成族外未访问任务则普遍触发较长 setup，并移动整个后缀完成时间。每个 family 又同时含早、中、晚 due 任务，使这种单块 walk 能贯穿较长 horizon。random 的短弧是分散噪声，没有一个成员集合能持续封闭地提供低 setup 替代；zero 中访问任意未访问任务与重复任务的 setup 都同为 0，重复不再规避任何边界，只剩额外 processing 和 ET 扰动。zero 因而只能在 setup 图意义上看成一个完全均匀块；random 是无稳定分层的异质图，不能严格称为一个 family。
+
+## 26. family-touch cover cut 的准确含义
+
+对每个已知结构组 `G`，可定义列系数
+
+\[
+q_{Gr}=\mathbf 1\{r\text{ 至少访问一次 }G\},
+\]
+
+并加入
+
+\[
+\sum_r q_{Gr}\lambda_r\ge 1.
+\]
+
+该行约束的是“触及该 family 的路线权重”，而不是访问次数。某条列无论在 `G` 中重复 1 次还是 10 次，系数都只有 1。它对目标 elementary master 是有效的：`G` 中的任务必须被覆盖，所以至少有一单位被选路线流触及 `G`。它并不要求每个 family 独占一台机器；一条跨两个 family 的路线可同时在两条 family-touch 行中计 1。以三个 family、两台机器为例，三条 touch 行迫使总计出现三次 family touch，而机器流只有 2，因此至少一单位路线流必须同时触及两个 family，正好恢复 relaxation 逃掉的跨族合并语义。
+
+该 cut 目前只是待测方向，尚未实现。它的优点是行数少、对 family 数较小时 pricing 只需记录某个 family 是否已首次触及；风险是它只适用于数据中确有固定结构组的实例，也不能处理单轮 ng-DSSR labeling 已经爆炸的问题。它首先针对 time-indexed visit-count 弱界，不是 ng-DSSR 的直接加速器。
+
+## 27. 初始 ng-set 为空的严格 A/B
+
+本轮使用同一正式数据加载器、同一 `F=2,m=2` 实例、同一 seed 和完整 `BestBpcProfiles.NG_DSSR` 配置，只把每次 exact pricing 的初始模式从 `nearestK` 改为 `empty`。正式 `nearestK` 在 40 个任务下实际为每个任务 4 个其他任务。两组都在根节点闭合到 `78510`，结果验证通过。
+
+| 初始模式 | 总时间 | exact pricing | exact calls | DSSR 总轮数 | non-elementary seen | ng updates | elementary returned |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `nearestK(4)` | `84.343s` | `71.982s` | 7 | 107 | 811311 | 359 | 58 |
+| `empty` | `98.076s` | `71.747s` | 7 | 118 | 804392 | 530 | 44 |
+
+空集的 exact 时间只少 `0.235s`，差异约 `0.3%`，没有实际加速；DSSR 轮数增加 `10.3%`，ng 更新增加 `47.6%`，返回 elementary 负列反而更少。总时间多出的约 `13.7s` 主要来自与初始 ng-set 无关的运行波动：同一 time-indexed root preprocessing 为 `25.530s` 对 `11.837s`，master LP 为 `18.216s` 对 `7.353s`。因此不能把总时间差归因于空集，但 exact 指标足以判定空初始集无收益，当前应保留 `nearestK(4)`。
+
+普通 VRP 也会遇到 ng-relaxation 的重复路线和 DSSR 多轮问题，这正是 dynamic ng、arc memory 和 selective pricing 等工作的背景。但 TWET family 结构叠加了几个更不利因素：没有容量或硬时间窗快速截断重复；soft due 只增加代价而不立即判 infeasible；删除一次重复访问会整体移动后缀完成时间，不能简单使用度量 shortcut 证明改进；块内短、块间长的 setup time 又为大量可交换重复环提供稳定拓扑。当前 `ngDssrReturnRelaxedColumns=false`，这些非基本路线不会进入 elementary RMP，但它们仍作为 pricing witness 反复触发 memory 更新；time-indexed root relaxation 则确实会把 visit-count 非基本列放入临时 master，因而同时表现出弱 LB。两种困难共享同一 family 重复结构，但发生在算法的不同层。

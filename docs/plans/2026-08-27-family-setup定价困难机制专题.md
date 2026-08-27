@@ -557,3 +557,33 @@ zero 不会同样恶化，与第29.2节第一层是同一原因。没有跨族�
 当前不实现 family-touch cut，也暂不继续 robust boundary cut、动态集合分离或其他 family 专用 cuts。touch-once cut 非 robust，需要额外pricing状态；robust boundary cut虽低侵入，但更弱且当前尚无增量实验依据。现阶段只保留机制分析，不改变模型、定价流程和正式配置。
 
 正式数据继续使用。其可辩护口径为：random/family只改变setup的相关结构而保持总体均值；全部family分离比为`4.6336--5.0959`且通过cap、非负和三角审计；`n040-set02`平均processing为55、最大setup为44；当前整数解实际setup time为family/random `325/528`，占总processing `2200` 的`14.8%/24.0%`；显式setup cost占总目标`7.89%/10.64%`；实验矩阵同时包含`F>m`、`F=m`和`F<m`。这些证据说明数据是有意构造的强family压力测试，但没有被setup量级或单一最困难family/机器关系支配。
+
+## 31. 暂定补充实验：family 数跨越机器数的阈值效应
+
+### 31.1 实验问题和最小设计
+
+暂定增加一个机制型补充实验，专门回答：固定任务和机器数后，family 数从不超过机器数变为超过机器数时，time-indexed relaxation 是否出现可重复的 root-gap 突变，以及该变化是否由单族重复覆盖解释。
+
+主设计选 `n=40,m=3`，family 数取 `F={1,2,3,4,5}`。选择 `m=3` 而不是继续使用已有 `m=2`，是为了做阈值平移检验：已有单实例诊断在 `m=2` 时由 `F=2` 的 `0.450%` 跳到 `F=3` 的 `7.816%`；若机制确为 `F>m`，新实验应在 `F<=3` 时保持较小gap，并在 `F=4` 首次出现明显上升。`F=5` 用于观察超过阈值后继续增加强制跨族合并数，gap 是继续扩大还是趋于饱和。`F=1` 是无family边界控制，`F=2` 和 `F=3` 分别代表 `F<m` 与 `F=m`。
+
+使用正式 `n040` 的5个任务集合，每个任务集合共享processing、due、权重、机器数、原始random有向度量和setup总体均值，只改变平衡family划分和由此产生的跨族项。family assignment使用每个任务集合一份固定随机排序，再按不同`F`均衡分配；所有`F`均保持平均setup约为`0.5*p_bar`、setup cost系数20、相同cap和三角审计。主实验固定base时间尺度、点due窗口`W=0`和不允许外包，避免窗口、尺度和外包同时变化。5个任务集合乘5个family档位，共25个物理实例；同一实例的算法对照共享其专用seed。
+
+### 31.2 主要指标
+
+主结论只依赖 no-cut time-indexed 根 LP，不要求把补充实验扩成新的完整算法矩阵。每个实例报告以下指标：
+
+1. 以该实例已证明最优值为基准的 root relaxation gap；若个别实例未证明最优，只能标记best-known gap，不能与proven gap混合求均值。
+2. 加权不同任务数 `D`、重复位置 `R` 和覆盖放大倍数 `(D+R)/D`。
+3. 正值列中elementary/non-elementary比例、只触及一个family的列权重，以及每列触及family数 `h_r`。
+4. 加权额外family touch `E=sum_r (h_r-1)*lambda_r`，并与elementary解必须满足的下限 `max(F-m,0)` 比较。若 `F>m` 时 relaxed根解仍有 `E< F-m`，即可直接说明它通过重复单族流逃掉了必需跨族合并。
+5. root RMP列数、pricing rounds和root时间，作为计算代价背景，不把总求解时间作为该机制实验的首要结论。
+
+ng-DSSR可在同一25个实例上附带记录root exact pricing时间、DSSR总轮数、non-elementary witness数和最大labels，用于说明family数对certificate难度的影响；但不预设其在`F=4`也发生单调突变。family数增加同时会减小每个块的规模，ng-DSSR可能出现“time-indexed gap变差但块内替代环减少”的非单调结果，这恰好能继续区分两类机制。
+
+### 31.3 结果展示和验收条件
+
+正文或补充材料优先使用一张双面板图。横轴均为`F`，在`F=m=3`后画竖线：面板A画5个任务集合的配对root gap及均值/中位数；面板B画重复次数`R`和额外family touch deficit `max(F-m,0)-E`。必要时另用一张小表报告ng-DSSR rounds/exact time，不把全部日志指标塞入主图。
+
+支持当前机制的最低证据不是某一个set02再次变难，而是：大多数配对任务集合的gap上升位置从旧`m=2`实验的`F=3`平移到新`m=3`实验的`F=4`；上升同时伴随`R`增加、正值单族列权重增加和`E<F-m`。若gap随`F`平滑变化、在`F=4`没有共同变化，或gap变化不伴随上述列结构，则不能写成`F>m`阈值结论，只能报告family数的经验敏感性。
+
+该实验当前只作为暂定补充设计记录。尚未生成25个实例、运行求解或改动正式manifest；完成小规模预跑并确认root可在合理时间闭合后，再决定是否纳入论文正式实验包。n50/m4不同时展开，只有n40/m3结果清晰后，才考虑用少量`F={3,4,5}`的n50实例检查阈值是否进一步平移到`F=5`。

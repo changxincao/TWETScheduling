@@ -546,8 +546,14 @@ zero 不会同样恶化，与第29.2节第一层是同一原因。没有跨族�
 
 ### 30.3 数据设计没有数值错误，但属于强结构化压力测试
 
-当前正式数据在数学和量级上没有发现违反直觉的错误。random/family 保持相同任务、due、机器数和job-to-job总体平均 setup；setup 矩阵非负、无cap触顶、满足有向三角不等式，family类间/类内均值比在全部正式数据中为 `4.6336--5.0959`。family scheduling 文献本来就常用“同族无需或只需很小setup、换族需要显著setup”的结构，因此严格分层本身不是不合理假设；当前模型保留 `1--15` 的族内sequence-dependent setup，反而比经典同族setup为0更一般。
+当前正式数据在数学和量级上没有发现违反直觉的错误。random/family 保持相同任务、due、机器数和job-to-job总体平均 setup；setup 矩阵非负、无cap触顶、满足有向三角不等式，family类间/类内均值比在全部正式数据中为 `4.6336--5.0959`。family scheduling 文献本来就常用“同族无需或只需很小setup、换族需要显著setup”的结构，因此严格分层本身不是不合理假设。[Schaller and Gupta (2008, *EJOR*)](https://www.sciencedirect.com/science/article/pii/S0377221706008204)明确采用同族相邻时无需setup、换族时需要已知family setup的经典模型；[Kramer, Iori, and Lacomme (2021, *EJOR*)](https://www.sciencedirect.com/science/article/pii/S0377221719305703)研究并行机family setup时同样规定只有连续任务来自不同family才发生setup。当前模型保留 `1--15` 的族内sequence-dependent setup，反而比经典同族setup为0更一般。
 
 量级也没有被setup淹没。`n040-set02` 的平均 processing为55、总processing为2200，setup总体目标均值为27.5、最大落盘setup为44，未超过单任务平均processing。当前整数解中family/random实际setup time分别约为`325/528`，只占总processing的`14.8%/24.0%`；显式setup cost占总目标`7.89%/10.64%`。系数20有可见影响但没有主导目标。family数与机器数也同时包含`F>m`、`F=m`和`F<m`档位，不是所有实验都固定在最坏关系。
 
 需要在论文中诚实保留两个边界。第一，类间setup严格高于类内setup且比值约4--5是刻意的 strong-family 场景，不能宣称代表所有任意sequence-dependent setup；random配对实例正是必要对照。第二，due-window center按Tanaka processing workload和参考机器数构造，没有再补偿名义setup负荷，因此不能宣称保留原Tanaka实例的绝对时间松紧度。现有正文已经把setup写成在固定任务/窗口后加入的独立生产因素，这个口径是安全的。该设计不会使算例“失真到不可用”，但结论应表述为强family结构如何影响算法，而不是现实工厂中4--5倍分离的普遍频率或绝对性能。
+
+### 30.4 当前最终决定
+
+当前不实现 family-touch cut，也暂不继续 robust boundary cut、动态集合分离或其他 family 专用 cuts。touch-once cut 非 robust，需要额外pricing状态；robust boundary cut虽低侵入，但更弱且当前尚无增量实验依据。现阶段只保留机制分析，不改变模型、定价流程和正式配置。
+
+正式数据继续使用。其可辩护口径为：random/family只改变setup的相关结构而保持总体均值；全部family分离比为`4.6336--5.0959`且通过cap、非负和三角审计；`n040-set02`平均processing为55、最大setup为44；当前整数解实际setup time为family/random `325/528`，占总processing `2200` 的`14.8%/24.0%`；显式setup cost占总目标`7.89%/10.64%`；实验矩阵同时包含`F>m`、`F=m`和`F<m`。这些证据说明数据是有意构造的强family压力测试，但没有被setup量级或单一最困难family/机器关系支配。

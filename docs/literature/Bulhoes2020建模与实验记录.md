@@ -25,3 +25,11 @@
 ## 当前判断
 
 对我们后续做 TWET 精确算法，这篇文章最重要的启发不是“time-indexed 直解能不能打过 BCP”，因为它根本没有回答这个问题。它真正给出的信息是：第一，可以从 arc-time-indexed 模型出发，经 Dantzig-Wolfe 分解走到 BCP；第二，BCP 的表现对初始上界质量很敏感，好的上界是值得花时间先求的；第三，在 TWET 这类问题上，很多时候 heuristic 已经能把 upper bound 做得很强，exact 方法的主要价值更可能体现在 lower bound、gap closing 和 optimality proof 上，而不只是继续挤 upper bound。
+
+## Setup实例来源与本次family现象的区别
+
+Bulhões et al. (2020) 对Kramer (2015)实例的说明只到“在原Şen--Bülbül实例上增加small setup和large setup两类数据”，正文没有重新给出逐个setup的随机分布。根据此前对Kramer (2015)第4.7节的本地追溯，这两类setup沿用Cicirello--Smith式随机生成：以`\bar s=eta*\bar p`确定均值，从截断到`[0,2\bar s]`的正态分布独立抽取任务对setup，small和large分别使用`eta=0.25/0.75`。因此论文中的`S/L`是随机pairwise setup的幅度变化，不是当前正式数据中“族内便宜、族间昂贵”的family块结构。
+
+论文的完整BCP结果也显示large setup明显更难。例如40任务、2台机器时，small setup的平均root时间约193.4秒、60/60求解，总时间约193.5秒；large setup对应约580.8秒、60/60求解，总时间约834.0秒。规模增大后差异更明显，论文汇总中未解的small setup实例只有11个，而large setup有101个。作者给出的直接解释是更大的setup扩大了时间域`T`，从而使arc-time-indexed图和BCP更难。这一证据支持“setup幅度增大会拖慢time-indexed BCP”，但不能直接证明family结构本身一定让每次time-indexed定价更慢。
+
+当前40任务matched A/B恰好说明需要区分“单次time-indexed relaxed DP的运行量”和“它给后续exact certificate留下的松弛质量”。family的临时time-indexed root用10.463秒，random反而用22.269秒；family生成的临时列更少，说明其time-indexed kernel没有直接变慢。但family得到的`UB-LB`为2651.619、平均有效窗口1462.950，random只有477和695.725。也就是说，family低成本块让relaxed pseudo-schedule bound明显更松，固定和推广的弧更少，最终把更宽、更退化的图交给elementary ng-DSSR。完整exact time-indexed/rank-1 BCP仍可能因此更难，但现有直接证据是“证书质量变差并拖慢后续”，不是“每次time-indexed relaxed pricing本身必然更慢”。

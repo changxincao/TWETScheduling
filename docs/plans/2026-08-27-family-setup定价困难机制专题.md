@@ -355,3 +355,24 @@ ng-DSSR 中，同族大小 13--20 而初始 `K=4` 只记住少数近邻。一个
 当前不应通过把 `kappa=20` 改小来治疗算法；`kappa=0` 仍保留约 4% family gap，说明这只改变模型权重而不能消除结构瓶颈。更针对 time-indexed 弱界的候选是 family-touch cover cut：对每个结构组 `G` 加入 `sum_r 1{r touches G} lambda_r>=1`。它对真实 elementary master 是冗余有效不等式，却能阻止总权重小于 1 的单-family 重复列仅靠 visit count 填满该组。其 pricing 系数是“是否首次进入该 family”，family 数只有 3--6 时可用小 bit mask；需要先做默认关闭的 root A/B，验证 LB、fixing、总时间和正确性，尚未实施。
 
 ng-DSSR 需要分两层处理。novelty/diversity witness 和从 time-indexed 正值重复列提取少量 pair，针对的是同质 witness 导致的多轮更新；低 setup component-aware 的小型 cycle-hitting 初始 memory 也只能小规模测试，不能把完整 family 放进 ng-set。对于 `F=5` 这种单轮 labeling 已经上百秒的情况，还必须同时改善窗口/完成界或研究困难 root 的 IP-pricing 交叉诊断。后续实验必须分别报告 DSSR rounds、每轮 labels、final memory、exact time 和 root LB，不能再用一个总时间把两类机制混在一起。
+
+## 23. ng-DSSR 与 time-indexed 的完整求解交叉对比
+
+为判断 `F=2,m=2` 的慢 exact pricing 是否意味着 ng-DSSR 整体不如 time-indexed，本轮对 `F=2,m=2` 自定义受控实例和正式 `F=3,m=3` 实例分别使用当前正式 profile、相同实例专用 seed、`600s` 时限和完整树求解。结果如下：
+
+| 实例 | 方法 | 总时间 | 节点数 | 根 LB / incumbent | 主要耗时 |
+| --- | --- | ---: | ---: | --- | --- |
+| `F=2,m=2` | time-indexed | `36.626s` | 9 | `78157 / 78510` | master LP `28.301s`，pricing `4.484s` |
+| `F=2,m=2` | ng-DSSR | `84.341s` | 1 | 根节点闭合到 `78510` | exact pricing `71.982s`，master LP `7.353s` |
+| `F=3,m=3` | time-indexed | `41.351s` | 28 | `46503.179 / 46819` | master LP `32.585s`，pricing `2.617s` |
+| `F=3,m=3` | ng-DSSR | `9.797s` | 1 | 根节点闭合到 `46819` | exact pricing `5.135s`，master LP `1.565s` |
+
+因此两种方法没有固定优劣。`F=2,m=2` 上 time-indexed 比 ng-DSSR 快约 `2.30` 倍；`F=3,m=3` 上 ng-DSSR 反而比 time-indexed 快约 `4.22` 倍。真正的比较是：证明 elementary root certificate 的成本，和保留 non-elementary relaxation 后通过 RMP 与分支树补掉 gap 的成本，哪一个更低。
+
+两个实例的 time-indexed 根绝对 gap 很接近，分别为 `353` 和 `315.821`，但 ng-DSSR exact 成本相差约 14 倍，所以 root gap 不能解释该差异。`F=2` 每个低 setup 块有 20 个任务，当前按 `0.08n` 初始化的 nearest memory 每个任务只约覆盖 3 个邻居，尚有约 16 个同族便宜替代项；`F=3` 的块只有 13--14 个任务，未记忆替代项约 9--10 个。前者能构成更多 reduced cost 接近、重复 pair 不同的可交换环。其预处理正值 relaxed 列平均重复次数为 `3.430`，而 `F=3,m=3` 仅为 `0.976`，说明这一差异已经在 exact pricing 前的 relaxed 解中出现。
+
+时间状态进一步放大了该差异。`F=2,m=2` 的 pricing horizon 为 `1646`、平均 window 长度 `576.150`；`F=3,m=3` 分别为 `1158` 和 `395.925`，前者约大 `42%/45%`。更多同族替代环乘以更长的可达时间域，既增加前几轮待排除的 non-elementary witness，也使 memory 增大后相似 PWLF labels 更难 dominance。完整 exact 统计中，`F=2,m=2` 的 7 次调用累计 `107` 轮 DSSR、观察到 `811311` 条 non-elementary 路线，最大 forward/backward kept labels 为 `88069/11823`；`F=3,m=3` 只有 `44` 轮、`158196` 条和 `5588/3471`。这才是 `71.982s` 对 `5.135s` 的直接来源。
+
+time-indexed 不保存 visited-memory，也不支付排除这些重复环的 certificate 成本。`F=2,m=2` 虽有较多重复 relaxed 列，但它们造成的最终 gap 只有 `0.45%`，9 个节点即可补掉；其 time-indexed pricing 共生成约 6.24 万列却只耗 `4.123s`，时间主要花在 RMP。此时接受一个很小的松弛 gap 再分支，比在根节点证明所有负 non-elementary walk 都不能产生 elementary 负列更便宜。`F=3,m=3` 则相反：elementary certificate 很便宜，而 time-indexed 仍需 28 个节点和 `32.585s` 的 master LP，ng-DSSR 在根节点闭合更有利。
+
+当前结论不是切换默认算法，而是识别出一个可观测的交叉条件：当 relaxed gap 已很小，但正值 relaxed 列重复高、低 setup 块远大于初始 ng memory、首个 exact 调用的 DSSR 轮数和 labels 已明显膨胀时，time-indexed 可能优于 ng-DSSR；当首个 exact 很快而 time-indexed 分数结构仍需要较多节点时，ng-DSSR 更有优势。后续若做自动选择，可以利用已经执行的 time-indexed root preprocessing，再结合首个 exact 调用的耗时、轮数和 labels 做有界判断；本轮只记录条件，不改求解流程。

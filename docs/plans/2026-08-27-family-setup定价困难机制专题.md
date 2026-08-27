@@ -476,3 +476,42 @@ zero setup 下上述两个选择的 setup 都为 0。重复 `j` 和访问新任�
 于是每次 exact pricing 都经历“最负路线是非基本单族 walk -> 加少量 memory -> 换一个同族重复环再次成为最负路线”的过程。`F=2,m=2` 的 7 次 exact 调用累计执行 107 轮、观察约 81.1 万条 non-elementary routes。memory 增大后，带不同 memory 状态的 labels 更难 dominance；宽时间窗和 sequence-dependent PWLF 又使相同任务集合、不同到达时间的 labels不能简单合并，所以后期单轮也越来越贵。zero 下没有统一昂贵边界，relaxed pricing 更容易直接延伸到未访问任务并较早得到 elementary 负列或无负证书；family 下则需要先排掉一个庞大的低 setup 重复路线族。
 
 因此两类恶化要继续分开表述：`F>m + visit count` 解释 time-indexed LB 为什么弱；`块内可替换重复环 + 小初始 memory + 宽时间/PWLF状态` 解释 ng-DSSR certificate 为什么慢。前者不会原样污染当前 elementary RMP，后者即使最终 root gap 很小也仍然可能非常严重。
+
+## 29. 用户核心直觉的原样记录与严格化
+
+### 29.1 用户当前理解原文
+
+> family的这种情况更倾向先访问family内的，即使存在重复，因为这样做再LP上既可以满足现有的覆盖约束，因为可以一个里边重复访问，那么就倾向于每一列不做family之间的访问，因为一旦做就会增加成本，而每一列即使不跨family去访问，由于重复访问，最终也可以满足覆盖条件。  而对于random zero的来说，找列的时候由于不存在family的概念，其实可以看成是一个family内部，那么其实就相当于说为了满足覆盖约束以及最小化成本，没有类似那种跨family的高成本，那我可能就更倾向于减少重复的访问,即把那种重复访问的job换成其他类似的setu的job，既能够提高基本列的比例，又能成本基本不变，然后还能满足覆盖约束。  大概就是这么个思路吗  即两个权衡，首先最小化成本，其次基本列，family放弃基本列能够最小化很大的成本，那就LP很弱，而random zero没有这种放弃基本列的需求，不存在一个列跨family的高成本，那就尽可能基本列 是这个思路吗
+
+这段理解的主干是正确的：family 中“不跨块但重复”可以同时取得低 setup 路径和 visit-count 覆盖，random/zero 中则可用未访问任务替代重复而不付统一的跨块代价。需要修正的只有“首先最小化成本，其次基本列”这一句。pricing 没有 elementarity 次级目标；它只最小化 reduced cost。基本列比例更高，是替代选择的自然结果，不是算法主动偏好基本列。
+
+### 29.2 更精细的两层机制
+
+第一层是单次 pricing 的局部扩展。RMP 覆盖约束通过 dual `pi_j` 变成每访问一次任务 `j` 就取得一次 reduced-cost reward。family 中，当路线已经在块内时，重复本族任务和访问族外新任务都能取得 dual，但后者统一多付严格更大的跨族 setup time，并把时间差传播到后缀 ET 成本。于是 relaxed pricing 存在稳定偏好：即使牺牲 elementarity，也继续在块内重复。zero 中所有任务都没有 setup 边界；random 中也不存在一个对整组任务统一昂贵的出口。对某个重复任务，通常能从大量未访问任务中找到 processing、dual、时间位置和 setup 都相近的替代，因此 elementary extension自然更容易竞争过 revisit。
+
+第二层是 master 的全局拼装。pricing 产生的单族重复列并不是自己“满足全部覆盖”，而是多条列以分数权重组合后，利用访问次数把本族每个覆盖行填到 1。`F>m` 时，这种组合把每个 family 压成小于一单位机器流，多个单族流合计为 `m`，从而逃掉真实解必须执行的跨族合并。random/zero 没有对应的结构边界，重复列即使偶然存在，也很难组成多个互不跨越、同时显著低估成本的分数子解，所以根极点更接近 elementary 排程。
+
+因此最精炼且准确的表述是：
+
+> family 的严格 setup 分层使 relaxed pricing 愿意用重复访问换取“不跨块”；visit-count master 又把这些重复转化为覆盖放大；当 `F>m` 时，多组单族分数流可完全规避真实机器必须承担的跨族合并，因而形成弱 LP。zero/random 没有统一昂贵的块边界，重复任务通常可被成本相近的未访问任务替代，所以非基本性缺少系统收益，LP 自然更接近 elementary 解。这里不存在“次级最小化重复”，只有 reduced-cost 竞争结果。
+
+### 29.3 `q_Gr` 不是新变量，而是列的预计算属性
+
+对固定 family `G` 和固定路线列 `r`，`q_Gr` 只是一个 0/1 系数：
+
+\[
+q_{Gr}=\begin{cases}
+1,&r\text{ 的序列中至少出现一个属于 }G\text{ 的任务},\\
+0,&r\text{ 完全不访问 }G.
+\end{cases}
+\]
+
+例如 `G={1,4,7}`：路线 `(0,1,4,1,0)` 虽在 `G` 中访问三次，`q_Gr` 仍为 1；路线 `(0,2,5,0)` 完全不碰 `G`，系数为 0；路线 `(0,1,2,4,0)` 触及两个 `G` 中任务，系数也仍为 1。约束 `sum_r q_Gr*lambda_r>=1` 因而计算“总共有多少路线权重真正触及 G”，不计算访问了多少次。
+
+在两个任务的示例中，`r1=(a1,a2,a1)`、`r2=(a1,a2,a2)` 的 `q_Ar1=q_Ar2=1`，但 `lambda_r1=lambda_r2=1/3`，所以 touch flow 只有 `2/3<1`，正好被该 cut 排除。它阻止的是“少于一单位路线流靠重复 visit count 覆盖整个 family”。
+
+### 29.4 ng-DSSR 与 zero 的区别
+
+“family ng-DSSR 慢，本质是 DSSR 轮数多且后期每轮越来越难”是准确结论。轮数多来自同一低 setup 块内有大量可替换重复环；每轮变难来自 memory 增大后 label 状态更细、dominance 变弱，再叠加宽时间域和 PWLF envelope。
+
+zero 不会同样恶化，与第29.2节第一层是同一原因。没有跨族边界时，relaxed pricing 可以在全部未访问任务中寻找与 revisit 相近或更好的扩展，最负路线更容易直接 elementary；即使出现偶然重复环，也没有 20 个任务组成的封闭低 setup 块提供成批替代。初始 nearest-K 往往足以破坏少量短环，DSSR dynamic memory增长很小，后续 dominance不会持续恶化。历史 set01 对照中，zero 为 `42` 次 exact、合计 `50` 轮和 `16.348s`，平均每次约 `1.19` 轮；family 为 `10` 次 exact、合计 `150` 轮和 `288.116s`，平均每次 `15` 轮。这说明 zero 不是绝对没有非基本 witness，而是 witness 不形成需要连续十几轮收紧的稳定结构族。

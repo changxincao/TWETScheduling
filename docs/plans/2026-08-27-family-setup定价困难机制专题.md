@@ -515,3 +515,39 @@ q_{Gr}=\begin{cases}
 “family ng-DSSR 慢，本质是 DSSR 轮数多且后期每轮越来越难”是准确结论。轮数多来自同一低 setup 块内有大量可替换重复环；每轮变难来自 memory 增大后 label 状态更细、dominance 变弱，再叠加宽时间域和 PWLF envelope。
 
 zero 不会同样恶化，与第29.2节第一层是同一原因。没有跨族边界时，relaxed pricing 可以在全部未访问任务中寻找与 revisit 相近或更好的扩展，最负路线更容易直接 elementary；即使出现偶然重复环，也没有 20 个任务组成的封闭低 setup 块提供成批替代。初始 nearest-K 往往足以破坏少量短环，DSSR dynamic memory增长很小，后续 dominance不会持续恶化。历史 set01 对照中，zero 为 `42` 次 exact、合计 `50` 轮和 `16.348s`，平均每次约 `1.19` 轮；family 为 `10` 次 exact、合计 `150` 轮和 `288.116s`，平均每次 `15` 轮。这说明 zero 不是绝对没有非基本 witness，而是 witness 不形成需要连续十几轮收紧的稳定结构族。
+
+## 30. 论文解释口径、cut 的 robust 性和数据合理性
+
+### 30.1 一条统一的论文解释：松弛路径的边界规避
+
+论文中不应堆叠“dual、重复、dominance、窗口、PWLF”等实现原因作为第一解释。最容易理解的统一机制是：family setup 在任务图中形成了昂贵的组间边界；当 family 数超过机器数时，真实排程至少有一台机器必须跨越边界；松弛路径却可以通过在组内循环来延迟或完全规避这次跨越。
+
+该机制在两种算法中产生不同后果。time-indexed 松弛允许组内循环列进入临时 master，重复访问又按 visit count 贡献覆盖，所以多个分数单族流能够替代真实的跨族机器，直接造成弱 LB。ng-DSSR 的 elementary master 不接收这些循环列，但 relaxed pricing 仍会把它们识别为最便宜路线；DSSR 必须不断增加 memory，直到所有当前负 reduced-cost 的组内循环都被击中，才能找到 elementary 列或取得无负列 certificate。zero/random 没有稳定昂贵边界，将重复任务换成未访问任务通常不增加同等级转移代价，循环因而没有持续的边界规避收益。
+
+可用于论文的压缩表述为：
+
+> Family-dependent setups create costly boundaries between task groups. When the number of families exceeds the number of machines, a feasible schedule must cross at least one such boundary. The relaxed path spaces can avoid this decision by cycling within a family. In the time-indexed relaxation, repeated visits provide multiple coverage contributions and allow fractional within-family paths to replace the required cross-family machine. In ng-DSSR pricing, these paths are not admitted to the elementary master, but they repeatedly appear as the cheapest relaxed routes and must be eliminated through successive memory refinements. Without a persistent family boundary, a repeated task can typically be replaced by an unvisited task at a comparable transition cost, and the mechanism largely disappears.
+
+该段先给一个原因和两个后果。`D/R`、`F>m`、107轮DSSR和PWLF弱dominance应放在后续实证或技术解释中，不要全部塞入主解释。
+
+### 30.2 family-touch cut 不是 robust cut
+
+`q_Gr=1{route r touches G}` 对每条路线只计一次，不能写成固定 arc 系数之和：路线第一次进入 `G` 应计 dual，后续再次进入不能重复计。pricing 因而必须记录“是否已经触及 G”的状态；多个 `G` 会增加一组 bit memory。按 branch-price 文献的通常定义，它不是 robust cut。它在任意非空任务子集 `G` 上都对 elementary 目标模型有效，所以聚类质量不影响正确性；但 `G` 选得不好只会产生弱行并增加 pricing 状态。
+
+若真实数据没有已知 family，可从 setup-time 图或当前 relaxed LP support 中启发式寻找低内部setup、低边界流且违反 `sum q_Gr*lambda_r>=1` 的集合，但对 touch coefficient 的精确动态分离不是普通 min-cut，工程上并不低侵入。因此原 family-touch cut 不应直接作为近期实现建议。
+
+对应的 robust 替代是有向边界 cut：
+
+\[
+\sum_{(i,j):i\notin G,j\in G}x_{ij}\ge1.
+\]
+
+它按进入 `G` 的 arc 次数计数，dual 可直接加到 arc reduced cost，不增加pricing状态，并可在聚合 LP arc flow 上通过 depot-rooted min-cut 动态寻找 `G`。它对当前“单族路线从depot进入一次后一直留在族内”的正值列也能形成相同约束；但若非基本路线多次离开再进入 `G`，重复 entry 会放大左端，因此它比 touch-once cut 弱。后续若研究cut，应先评估这种可自动分离的 robust boundary cut，而不是依赖人工 family 标签。
+
+### 30.3 数据设计没有数值错误，但属于强结构化压力测试
+
+当前正式数据在数学和量级上没有发现违反直觉的错误。random/family 保持相同任务、due、机器数和job-to-job总体平均 setup；setup 矩阵非负、无cap触顶、满足有向三角不等式，family类间/类内均值比在全部正式数据中为 `4.6336--5.0959`。family scheduling 文献本来就常用“同族无需或只需很小setup、换族需要显著setup”的结构，因此严格分层本身不是不合理假设；当前模型保留 `1--15` 的族内sequence-dependent setup，反而比经典同族setup为0更一般。
+
+量级也没有被setup淹没。`n040-set02` 的平均 processing为55、总processing为2200，setup总体目标均值为27.5、最大落盘setup为44，未超过单任务平均processing。当前整数解中family/random实际setup time分别约为`325/528`，只占总processing的`14.8%/24.0%`；显式setup cost占总目标`7.89%/10.64%`。系数20有可见影响但没有主导目标。family数与机器数也同时包含`F>m`、`F=m`和`F<m`档位，不是所有实验都固定在最坏关系。
+
+需要在论文中诚实保留两个边界。第一，类间setup严格高于类内setup且比值约4--5是刻意的 strong-family 场景，不能宣称代表所有任意sequence-dependent setup；random配对实例正是必要对照。第二，due-window center按Tanaka processing workload和参考机器数构造，没有再补偿名义setup负荷，因此不能宣称保留原Tanaka实例的绝对时间松紧度。现有正文已经把setup写成在固定任务/窗口后加入的独立生产因素，这个口径是安全的。该设计不会使算例“失真到不可用”，但结论应表述为强family结构如何影响算法，而不是现实工厂中4--5倍分离的普遍频率或绝对性能。

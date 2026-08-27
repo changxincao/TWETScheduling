@@ -430,3 +430,49 @@ q_{Gr}=\mathbf 1\{r\text{ 至少访问一次 }G\},
 空集的 exact 时间只少 `0.235s`，差异约 `0.3%`，没有实际加速；DSSR 轮数增加 `10.3%`，ng 更新增加 `47.6%`，返回 elementary 负列反而更少。总时间多出的约 `13.7s` 主要来自与初始 ng-set 无关的运行波动：同一 time-indexed root preprocessing 为 `25.530s` 对 `11.837s`，master LP 为 `18.216s` 对 `7.353s`。因此不能把总时间差归因于空集，但 exact 指标足以判定空初始集无收益，当前应保留 `nearestK(4)`。
 
 普通 VRP 也会遇到 ng-relaxation 的重复路线和 DSSR 多轮问题，这正是 dynamic ng、arc memory 和 selective pricing 等工作的背景。但 TWET family 结构叠加了几个更不利因素：没有容量或硬时间窗快速截断重复；soft due 只增加代价而不立即判 infeasible；删除一次重复访问会整体移动后缀完成时间，不能简单使用度量 shortcut 证明改进；块内短、块间长的 setup time 又为大量可交换重复环提供稳定拓扑。当前 `ngDssrReturnRelaxedColumns=false`，这些非基本路线不会进入 elementary RMP，但它们仍作为 pricing witness 反复触发 memory 更新；time-indexed root relaxation 则确实会把 visit-count 非基本列放入临时 master，因而同时表现出弱 LB。两种困难共享同一 family 重复结构，但发生在算法的不同层。
+
+## 28. family 相对 zero 的重复诱因、elementary master 和 VRP 边界
+
+### 28.1 当前 family 矩阵是严格分层，不只是均值分离
+
+正式生成器先取得有向 random 基础度量 `D`，对每条 job-to-job 跨族弧统一增加 `Delta=2*p_bar`，族内弧不加，然后整体缩放到相同 setup 总均值。由于基础弧本身有 `p_bar` 上限，当前数据中跨族弧和族内弧形成严格分层。对 `n040-set02` 的实际落盘矩阵重新统计，族内 setup time 范围为 `1--15`、均值 `7.7146`，跨族范围为 `30--44`、均值 `36.6660`。因此任意两个不同 family 之间的 job-to-job setup 都比任意同族 setup 大；起点到任务的 depot 弧不加 family switch penalty，不属于这一陈述。
+
+### 28.2 family 为何会重复，而 zero 不会
+
+需要比较的不是“重复任务”和“任意未访问任务”，而是当一条 relaxed 路线已经使用了本族大部分时间合适、dual 较高的任务后，下一次扩展的两个选择：再次访问一个本族高 dual 任务，或转向族外尚未访问任务。两者都会取得一次任务 dual；差异在物理增量。family 中前者只付 `1--15` 的 setup time，后者必付 `30--44`，并把这个额外时间传播给整个后缀的 ET penalty。只要族外任务的 dual 和时间收益不足以补偿这项边界代价，revisit 的 reduced cost 就更低。
+
+例如当前在 family A，重复 `j in A` 的近似增量为“setup 5 + processing/ET 20 - dual 35 = -10”；访问尚未出现的 `k in B` 为“setup 35 + processing/ET 20 - dual 35 = 20”。这只是机制示意，不是实际某条列的逐项重算，但说明同样取得一次 dual 时，family 边界如何把重复变成更便宜的扩展。一个 family 只有约 13 个任务，而根 LP 每单位机器流平均需要约 20 个 visit-count 位置；当便宜且时间合适的 13 个不同任务不足以继续提供负 reduced cost 时，relaxation 可以重复其中部分任务，继续取得 dual，同时避免跨出低 setup 块。
+
+zero setup 下上述两个选择的 setup 都为 0。重复 `j` 和访问新任务 `k` 都能取得一次 dual，但新任务不产生重复且可直接形成 elementary 覆盖；重复任务还额外消耗 processing time，并在更晚位置承受或传播 ET 变化。因此除非某个 `pi_j` 偶然极端大，重复没有稳定优势。random 中也可能偶然出现某条重复负路线，但从当前任务出发通常能在全部未访问任务中找到 setup 相近的出口，不存在“所有族外任务统一贵 20--30 个时间单位”的封闭边界，所以这种优势不会在一整个任务块中反复复制。
+
+### 28.3 `F>m` 弱界是 visit-count relaxation 特有放大，不等于普通 LP 分数性
+
+用户对 time-indexed 根解的概括是准确的：zero、random 或 `F<=m` 时，不存在必须由有限机器承担的额外跨族合并，relaxed 列即使分数，也更接近真实机器排程；`F>m` 时则可出现多组总权重小于 1 的单族重复列，每组都不跨族，却利用重复 visit count 填满本组覆盖，最终以总机器流 `m` 拼出一个离真实整数解很远的 LP 解。
+
+但这一完整逃逸机制不会原样出现在当前 ng-DSSR 的 elementary master 中。若所有列 elementary 且都只触及一个 family，则对每个 family `G`，覆盖其中任一任务已经要求触及 `G` 的列权重至少为 1。三个 family 因而至少需要 3 单位机器流，不能在 `m=2` 下仅靠单族 elementary 列满足覆盖。elementary LP 仍然可能分数，也可能把若干跨族列以分数权重组合，但它必须在加权意义上承担至少一单位跨族连接，不能像 time-indexed visit-count 解那样完全省掉跨族 setup。
+
+更形式地，令一条路线触及的 family 数为 `h_r`。每个 family 至少需要一单位 touch，所以 `sum_r h_r*lambda_r>=F`；机器数行为 `sum_r lambda_r=m`。因此
+
+\[
+\sum_r (h_r-1)\lambda_r\ge F-m.
+\]
+
+当 `F=3,m=2` 时，elementary LP 至少承担一单位“额外 family touch”，即必须存在总权重足够的跨族路线。普通 set-partitioning fractionality仍可能造成 gap，但不再具有三个 `2/3` 单族重复流这种额外的覆盖放大。
+
+### 28.4 family-touch cut 与子环约束的关系
+
+它与 VRP subset connectivity/capacity cut 有相同直觉：选择一个任务集合 `G`，要求解必须有路线进入并服务它。但它不是普通 arc-level subtour elimination constraint 的直接照搬。标准边界 cut 通常按路线穿越 `delta(G)` 的次数计系数；一条非基本路线多次进入 `G` 会被计多次，分数权重仍可能借重复穿越放大。family-touch cut 把每条路线的系数截成二元值：只要触及 `G` 就计 1，无论访问、进入或重复多少次。因此它更准确地说是 route-level subset cover/linking inequality，在 elementary master 中冗余有效，专门用于切掉 visit-count relaxed columns 的重复放大。family 只是当前有明确数据结构、行数很少的一组候选集合。
+
+### 28.5 VRP 并非绝对没有该现象
+
+标准 elementary VRP route master 与上述 elementary 证明相同：若 cluster 数超过车辆数，只使用单 cluster elementary routes 也不可能满足固定车辆数，必须有跨 cluster routes。若某个 VRP 求解器把可重复客户的 q-route/ng-route 以 visit-count 系数直接放入 master，它理论上也可能产生当前这种分数重复覆盖；这正是 q-route/ng-route lower bound 更弱、需要 DSSR或cuts恢复的原因之一。
+
+普通 VRP 中该现象通常没有当前 family TWET 突出，原因不是单纯“车辆更多”，而是几项结构共同限制。很多 clustered VRP 的可用车辆数不小于自然 cluster 数，跨 cluster 合并本来就不是必付决策；固定车辆且 cluster 数更多时，类似压力仍会出现。其次，容量、route duration 和硬时间窗会随重复访问单调消耗资源，使一条路线难以把 13 个客户扩成 20 次访问。再次，度量旅行成本允许删除重复客户并 shortcut，通常不增加物理路径成本。TWET 没有硬容量，due 是软约束，重复仍可在宽 horizon 内保持可行；删除重复位置还会移动整个后缀完成时间，不能由三角不等式直接证明更优。因此车辆数只是条件之一，真正区别是 elementary incidence、资源单调性、硬可行性和 shortcut 性质。
+
+### 28.6 当前 ng-DSSR 慢在哪里
+
+当前 ng-DSSR RMP 只接收 elementary columns，所以它没有 time-indexed 的三个分数单族流弱界。它慢在 exact pricing 的证明过程：初始 nearest-K 只记住 4 个邻居，而 `F=2` 的每个低 setup 块有 20 个任务。一个已访问任务离开 ng memory 后，relaxed walk 可以在块内经由其他未记忆任务回到它；DSSR 禁掉一个 missing pair 后，还有大量同族任务可替换成新的低 setup 回路。
+
+于是每次 exact pricing 都经历“最负路线是非基本单族 walk -> 加少量 memory -> 换一个同族重复环再次成为最负路线”的过程。`F=2,m=2` 的 7 次 exact 调用累计执行 107 轮、观察约 81.1 万条 non-elementary routes。memory 增大后，带不同 memory 状态的 labels 更难 dominance；宽时间窗和 sequence-dependent PWLF 又使相同任务集合、不同到达时间的 labels不能简单合并，所以后期单轮也越来越贵。zero 下没有统一昂贵边界，relaxed pricing 更容易直接延伸到未访问任务并较早得到 elementary 负列或无负证书；family 下则需要先排掉一个庞大的低 setup 重复路线族。
+
+因此两类恶化要继续分开表述：`F>m + visit count` 解释 time-indexed LB 为什么弱；`块内可替换重复环 + 小初始 memory + 宽时间/PWLF状态` 解释 ng-DSSR certificate 为什么慢。前者不会原样污染当前 elementary RMP，后者即使最终 root gap 很小也仍然可能非常严重。

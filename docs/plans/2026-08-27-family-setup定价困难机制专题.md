@@ -213,3 +213,63 @@ K=8 已经证明“轮数少”不等于“总时间少”。完整 family memor
 高度可信的机制推断：due 全范围交错让单-family relaxed walk 在整个 horizon 内保持时间可行，同时迫使 elementary 排程在 due 与 family batching 间权衡；同族可替代重复 pair 导致 DSSR 多轮，memory 增长和 sequence-dependent PWLF 又放大单轮 labels。
 
 仍需 A/B 的优化判断：novelty witness 池能减少多少 rounds 与 total labels；有界 same-node warm start 是否净加速；从 time-indexed 正值列提取少量 pair 是否优于纯 K=4。现有证据只支持按此顺序试验，不支持直接打开完整 history warm start、扩大 K 或把整个 family 写入 ng memory。
+
+## 12. 进一步澄清：配对标签、加权统计和分数机器流
+
+random 实例本身没有 family。第 2 节对 random 正值列使用的 F0/F1/F2，是把同一批 40 个任务按配对 family 实例的分组标签重新着色，仅用于检查 random 列是否也会沿这个人为分区形成块。准确表述应是“在 family 配对标签下，random 的 24 条正值列全部同时访问三个标签组”，而不是“random 同时访问三个 family”。该结果恰好说明 random setup 与这组标签无关，没有形成 family 的三个低成本子图。
+
+加权统计均以根 LP 的列变量值 `lambda_r` 为权重，并除以总机器流 `sum_r lambda_r=2`。例如，加权不同任务数为
+
+\[
+\frac{\sum_r \lambda_r\,|\operatorname{distinct}(r)|}{2},
+\]
+
+加权重复次数为
+
+\[
+\frac{\sum_r \lambda_r\,(|r|-|\operatorname{distinct}(r)|)}{2}.
+\]
+
+因此 family 的 `13.102+6.898=20` 表示随机抽取一单位 LP 机器流时，平均列长为 20，但只含 13.102 个不同任务，另外 6.898 个位置是重复访问；random 的 `19.065+0.935=20` 则几乎是 elementary 列。
+
+分数机器流可用一个最小例子说明。设列 `r=(1,2,1,2)`，并令 `lambda_r=0.5`。机器数行只收到 `0.5`，但任务 1 和 2 都被访问两次，所以两个覆盖行都收到 `2*0.5=1`。若列是 elementary 的 `(1,2)`，同样的 `lambda=0.5` 只能给两个任务各 `0.5` 覆盖，必须把总列权重提高到至少 1。对真实 set02 family 根解而言，并不是一条列以 `0.6--0.7` 覆盖全族，而是每个 family 的多条单族重复列混合后，总权重分别只有 `0.693/0.595/0.713`，却借助访问次数把本族每个任务的覆盖都填到 1。
+
+“三个 family 分开至少需要 3 台机器”也应理解为 LP 结构陈述：如果所有 elementary 列都只在一个标签组内运行，那么任取该组一个任务，其覆盖最多等于该组全部列权重，因此每组列权重至少为 1，三组合计至少为 3。真实问题只有 2 台机器，所以可行整数解必须让至少一条机器路线跨组；family relaxed 根解却把三个单族流压成总权重 2，从而避开了这个跨组决策。
+
+## 13. setup-cost 系数 20 的量级
+
+正式数据使用 `kappa_ij=20*s_ij`。对 set02，family 的类内/类间平均 setup time 为 `7.71/36.67`，对应平均直接成本约 `154/733`；跨族相对类内的一次平均直接溢价约为
+
+\[
+(36.67-7.71)\times20=579.2.
+\]
+
+这说明系数 20 会明显强化“少跨一次 family 边界”的局部动机，但不能据此说 setup cost 已主导总目标。由当前输出的 incumbent schedule 逐任务求和，family 的 TWET penalty/setup cost 为 `75851/6500`，setup 占总目标 `82351` 的 `7.89%`；random 为 `88715/10560`，占总目标 `99275` 的 `10.64%`。直接 setup cost 是一阶但次要的目标组成，没有淹没 TWET。系数 20 的正式设计动机也是让本来较小的 setup time 产生可见直接成本，同时要求用最终解的成本占比确认其既不消失也不主导；set02 的这两个比例满足该设计目标。
+
+当前证据仍不能把 family 困难全部归因于系数 20，因为现有 zero-setup A/B 同时清除了 setup time 和 setup cost，没有单独保持 family setup time、只把 cost coefficient 从 20 改为 0/8。严格分离两者需要这组 cost-only A/B。但不论系数取 8 还是 20，只要类内/类间 setup time 本身仍为强块结构，它通过完成时间递推也会保留一部分块效应；系数 20 主要是进一步放大，而不是创造三个低成本子图。
+
+## 14. 弱 LB 的最深层原因
+
+“family 分数块解导致 LB 弱”仍然只是对最优 LP 解的描述。更深层原因是四个数学语义发生了错配：真实列要求每个任务至多一次；机器是不可分的整条排程；三个低成本子图超过两台机器，真实解必须支付至少一次跨块和 due-order 折中；no-cut time-indexed 列却允许重复访问，master 又允许分数列并按访问次数计覆盖。于是原本不可分的“哪台机器跨块”决策，被 relaxation 拆成三个可分的单块流，再用重复次数补足覆盖。
+
+random 和 zero 不会稳定利用这一错配，关键不是单条弧均值，而是低成本弧的相关拓扑。family 中，一个任务的许多同族出入弧同时便宜，组成可长期循环的大子图；把重复访问替换成族外未访问任务，通常要穿过高成本边界。random 中便宜弧只是分散的局部偶然值，不存在一个对所有成员都持续便宜的封闭子图；从当前任务转向尚未访问任务时，通常仍能找到普通成本的出口，重复不能系统性规避一笔固定式边界费。zero 中所有替换出口都同样便宜，重复更没有规避边界的收益。真正触发弱界的是“便宜弧在同一组内高度相关、组间普遍昂贵、组数又超过机器数”，而不是“setup 小”或“存在若干便宜弧”。
+
+due 横跨全范围进一步使每个便宜子图从 horizon 前端到后端都有早、中、晚任务，单块 walk 可以长期留在块内而不立即遭遇极端时间罚；random 没有与某个低成本子图一致的成员集合，因而无法同时获得这种时间覆盖和边界规避。
+
+## 15. witness 阻断、候选 1000 和后续保留方向
+
+random 的 witness 也有高度重叠，但绝对工作量和所处阶段完全不同。set02 random 全树 124 次 exact 记录合计 `considered=55707, blocked=54721, updatedRoutes=986`，阻断率为 `98.23%`。其首次 exact 一轮就返回 445 条 elementary 列，因此虽然看到 2469 条 non-elementary route、保留 1000 条，控制流直接返回 elementary 列，`considered/blocked/updated` 均为 0。后续真正需要 DSSR 更新的调用通常只有 2--4 轮。family 首次困难调用则在 23 轮中扫描 22000 条保留候选，21891 条已被同轮前序更新阻断，仅 109 条路线实际更新，同时每轮 labeling 已经膨胀到几十万 labels。由此，阻断比例本身不是 family 特有现象；family 真正的问题是高阻断发生在一个没有大量 elementary 负列可直接返回、必须连续重解 23 轮的巨大 labeling 中。
+
+`ngDssrNonElementaryRouteCandidateLimit=1000` 不是“最后保留 1000 条 master 列”，而是每个 relaxed DSSR round 在线保留 reduced cost 最低、sequence signature 不同的最多 1000 条负非基本 witness。它有三层作用：限制 witness 内存；在前序候选被同轮更新连带阻断后，仍允许继续向后扫描，尽量凑到最多 20 条真正有效的 route update；池满后以当前第 1000 名 reduced cost 作为 non-elementary witness 阈值，在已知拼接一定非基本时剪掉不可能进入 top-C 的 join，并在函数值算出后避免恢复无望 sequence。它不剪 elementary join，也不提供最终 certificate。历史 C1000/C3000/C10000 对照显示，更大池没有增加有效更新，主要只会放松末端 witness 阈值，因此当前 1000 是有界深度与候选后备之间的折中。
+
+本轮只记录、暂不实施以下三个方向。第一，保留 reduced-cost 主池，同时在更新顺序中优先选择新增 missing pair 或重复段与已选路线重叠更少的 witness，以降低候选同质化。第二，只做有界 same-node warm start，复用同一节点近几次困难 exact 中少量高频 pair，不继承完整 final memory。第三，从 time-indexed 根 LP 的正值非基本列中提取少量高频重复 pair，经过 repeatability filter 后作为 ng-DSSR 初始提示，但绝不把这些 relaxed 列放入 elementary master。三者都必须以 total labels 和 exact wall time 验收，不能只看 DSSR rounds。
+
+## 16. SoftCluVRP 的准确类比与限制
+
+Hintsch and Irnich 的 SoftCluVRP 不是“成本上偏好同组”，而是硬性规定：一条路线一旦访问 cluster `h` 的任一客户，就必须由同一车辆把该 cluster 的全部客户访问完，但这些客户不要求连续。label 因而必须同时记录每个 cluster 尚未访问的客户数和逐客户访问状态。部分路径刚进入一个 cluster 时并不立即不可行，它可以先去别的 cluster，再回来补完；只有回到 depot 时尚有 cluster 未完成才被判不可行。这就是论文所谓约束很 loose：大量后来无法高效完成的部分路径在早期都不能被剪掉，dominance 还必须比较不同的未完成 cluster/客户集合，双向拼接也要匹配两侧剩余状态。DSSR 只放松并逐步恢复 elementarity，不能消掉“已选择 cluster 必须完整服务”的全局完成状态。
+
+论文的 IP pricing 直接对单条负 reduced-cost 路线建立 edge/cluster 选择模型：二元 routing 变量决定走哪些边，cluster 变量决定选择哪些整组客户，coupling 和 capacity 约束表达整组选择，连通性/subtour 约束由 CPLEX lazy/user cuts 分离。它能直接对“选不选一个 cluster”进行整数分支，并用连通 cuts 一次排掉整类不连通解，不必枚举所有开放 cluster 状态的局部 labels。作者将该子问题解释为 cluster-profit 的 profitable/prize-collecting TSP；这类结构本来就更适合 branch-and-cut。完整 B&P 对照中，labeling 只解出 34/158 个 root LP、证明 23 个实例，branch-and-cut pricing 解出 150/158 个 root LP、证明 142 个实例；32 个筛选实例中，primal heuristic 加 branch-and-cut 的平均/几何平均 root-LP 时间为 `2.6/0.9s`，相对默认 labeling 的加速比超过 `340/66`。
+
+对本项目的可借鉴结论有限。相似点是 family 结构让大量局部便宜路径在全局机器分配或最终 elementarity 约束下才暴露问题，局部 labeling 状态难以及早区分。不同点是 TWET family 没有“整族同机”的硬约束，exact pricing 还含 sequence-dependent setup、完成时间和 PWLF 成本；若改成 IP pricing，需要为单条排程建立 arc/order、completion time 和分段线性惩罚模型，并在每次 CG 调用求 MIP，不能由 SoftCluVRP 的结果直接推出会更快。它目前更适合作为“对困难 root exact 做一次 IP-pricing 交叉诊断”的研究线索，而不是替换主线 labeling。
+
+普通 CVRP 的 cluster branching 解决的是 root LP 闭合之后的分支树弱，而当前 family40 的主要时间已经消耗在 root exact pricing 内部，甚至没有进入分支。因而 Cluster Branching 或 cutset branching 对当前底层瓶颈没有直接作用；必须先改善 witness 收紧或换一种 exact-pricing 表达，分支策略才有施展空间。

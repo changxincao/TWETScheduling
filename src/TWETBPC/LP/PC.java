@@ -398,6 +398,7 @@ public class PC {
 						withSolutionMessage("rmp_trial_not_solved", solution));
 			}
 			boolean needsRepair = solution.getStatus() == TWETMasterStatus.INFEASIBLE;
+			boolean seedFilteredByOldRepair = false;
 			if (!needsRepair && branchImpliedPenalty && lp.hasPositiveBranchImpliedPenaltyColumn()) {
 				needsRepair = true;
 			}
@@ -407,8 +408,14 @@ public class PC {
 				if (domainRepair) {
 					solution = repairDomainFilteredStrongBranchingMaster(lp);
 				} else {
-					solution = config.enableStrongBranchingPhaseOneRepair
-							? repairStrongBranchingPhaseOne(lp) : repairInfeasibleMaster(lp, false, true);
+					if (config.enableStrongBranchingPhaseOneRepair) {
+						solution = repairStrongBranchingPhaseOne(lp);
+					} else {
+						solution = repairInfeasibleMaster(lp, false, true);
+						// 2026-08-27: old slack repair已在关闭repair模型前筛过child seed，
+						// 此时LP求解快照已失效，外层不能再按同一reduced cost重复筛列。
+						seedFilteredByOldRepair = solution.getStatus() == TWETMasterStatus.LP_RELAXATION;
+					}
 				}
 			}
 			if (strongRepairDualBoundClosure != null) {
@@ -434,8 +441,10 @@ public class PC {
 				// 2026-07-04: 这里的筛列只用于减小后续 child seed。
 				// 内部列和外包列都会保留当前正值列；repair 已确认 slack/M 清零，
 				// 因此不再为了 seed 重解一次 LP，后续 phase2/正式 child 会基于 seed 自己建模求解。
-				lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
-						config.branchSeedReducedCostAllowance);
+				if (!seedFilteredByOldRepair) {
+					lp.resetRestrictedColumnsByCurrentReducedCost(config.branchSeedColumnLimit,
+							config.branchSeedReducedCostAllowance);
+				}
 				return StrongBranchingTrialResult.from(lp, solution, false,
 						(domainRepair ? "domain_rmp_trial"
 								: (lightweightRepair ? "lightweight_rmp_trial" : "rmp_trial"))

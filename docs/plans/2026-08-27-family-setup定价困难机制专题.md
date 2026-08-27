@@ -273,3 +273,85 @@ Hintsch and Irnich 的 SoftCluVRP 不是“成本上偏好同组”，而是硬�
 对本项目的可借鉴结论有限。相似点是 family 结构让大量局部便宜路径在全局机器分配或最终 elementarity 约束下才暴露问题，局部 labeling 状态难以及早区分。不同点是 TWET family 没有“整族同机”的硬约束，exact pricing 还含 sequence-dependent setup、完成时间和 PWLF 成本；若改成 IP pricing，需要为单条排程建立 arc/order、completion time 和分段线性惩罚模型，并在每次 CG 调用求 MIP，不能由 SoftCluVRP 的结果直接推出会更快。它目前更适合作为“对困难 root exact 做一次 IP-pricing 交叉诊断”的研究线索，而不是替换主线 labeling。
 
 普通 CVRP 的 cluster branching 解决的是 root LP 闭合之后的分支树弱，而当前 family40 的主要时间已经消耗在 root exact pricing 内部，甚至没有进入分支。因而 Cluster Branching 或 cutset branching 对当前底层瓶颈没有直接作用；必须先改善 witness 收紧或换一种 exact-pricing 表达，分支策略才有施展空间。
+
+## 17. setup cost、setup time 与 family 数量的受控拆分
+
+为避免继续把显式 setup cost、setup time 资源和 family/机器数量混在一起，本轮固定 `n040-set02` 的 processing、due 和权重，做了三组单因素诊断。所有根 LP 都使用 no-cut time-indexed profile、`maxNodes=1` 和各实例专用初始解；自定义 family 数实验使用同一个 random 基础有向度量、相同总平均 setup `27.5` 和平衡分组，只改变 family 数。它们是机制诊断，不替代正式 benchmark。
+
+第一组只缩放 `SETUP_COST=kappa*s_ij` 中的 `kappa`，setup time 矩阵保持不变：
+
+| setup 类型 | `kappa` | incumbent | 根 LB | gap | 加权不同任务数 | 加权重复次数 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| family | 20 | 82351 | 78194.245 | 5.048% | 13.102 | 6.898 |
+| family | 8 | 78451 | 75006.600 | 4.391% | 13.310 | 6.690 |
+| family | 0 | 75851 | 72793.969 | 4.030% | 13.490 | 6.510 |
+| random | 20 | 99421 | 98844.391 | 0.580% | 19.065 | 0.935 |
+| random | 8 | 92893 | 92414.583 | 0.515% | 19.200 | 0.800 |
+| random | 0 | 88541 | 87892.338 | 0.733% | 19.190 | 0.810 |
+
+因此系数 20 确实放大跨族代价，但不是困难的创造者。即使 `kappa=0`，family setup time 仍进入完成时间递推和 TWET penalty，正值列仍全部非基本，重复次数只从 `6.898` 降到 `6.510`。真正把 setup time 和 setup cost 都清零后，专用 seed 的结果变为：根 gap `0.179%`，10 条正值列全部 elementary，加权不同任务数/重复次数为 `20/0`；ng-DSSR 根节点 exact pricing 总计仅 `1.626s`。这组结果严格区分了“取消显式 setup 费用”和“没有 setup 时间结构”。
+
+第二组比较 family 数 `F` 与机器数 `m=2`。使用专用 seed 后结果为：
+
+| `F` | family 大小 | 根 gap | 加权重复次数 | 解释 |
+| ---: | --- | ---: | ---: | --- |
+| 1 | 40 | 0.580% | 0.935 | 等价于无 family 分隔的 paired random 基准 |
+| 2 | 20/20 | 0.450% | 3.430 | 每个块可由一台机器承担，重复存在但没有明显逃避跨块合并 |
+| 3 | 14/13/13 | 7.816% | 7.250 | 块数超过机器数，分数单块流开始系统性替代跨块机器 |
+| 4 | 10/10/10/10 | 7.910% | 9.830 | 更多单块分数流依靠更高重复覆盖填满任务行 |
+| 5 | 8/8/8/8/8 | 8.219% | 10.870 | 平均每单位机器流只有约 9.13 个不同任务 |
+
+第三组使用正式 3-family 数据直接比较 `m=2/3`。`m=2` 时 gap/repeat 为 `5.048%/6.898`；`m=3` 时降至约 `0.675%/0.976`。random `m=3` 的根 LP 直接为整数，重复为 0。由此可以确认：低 setup 稠密块负责制造可交换的重复 walk；`F>m` 则把这些 walk 转化为显著的 time-indexed 弱界。二者不是同一个条件。
+
+ng-DSSR 还受另一个维度控制。自定义 `F=2,m=2` 的 time-indexed gap 只有 `0.45%`，但 ng-DSSR 根 exact 仍耗 `91.333s`，首个 pricing 调用需要 16 轮 DSSR；正式 `F=3,m=3` 的 exact 总计只有 `5.858s`。自定义 `F=5,m=2` 在 600 秒内只完成 3 次 exact、第四次到时限，exact 合计 `599.841s`，最后一次保留/占优 labels 为 `344305/2078171`。因此弱 root gap 会恶化预处理和 dual，但不是 ng-DSSR 慢的必要条件；大块内的可交换循环、时间窗口宽度和 memory 增长后的 dominance 破坏可以单独使 pricing 变慢。
+
+## 18. 加权不同任务数和重复次数到底表示什么
+
+设根 LP 正值列为 `r`，列变量为 `lambda_r`，总机器流为 `M=sum_r lambda_r`。一般定义应写成
+
+\[
+D=\frac{\sum_r\lambda_r|\operatorname{distinct}(r)|}{M},\qquad
+R=\frac{\sum_r\lambda_r(|r|-|\operatorname{distinct}(r)|)}{M}.
+\]
+
+以前公式中的分母 2 只是因为该实例 `M=2`，不是定义的一部分。把一单位 LP 机器流看成按 `lambda_r/M` 抽取一条列，`D` 是该列平均包含多少个不同任务，`R` 是平均有多少个序列位置在重复已经出现的任务。恒有 `D+R=L`，其中 `L=sum lambda_r|r|/M` 是加权平均列长。
+
+例如三条正值列的权重为 `0.7/0.6/0.7`，长度都为 20，不同任务数为 `14/13/13`。总机器流为 2，则 `D=(0.7*14+0.6*13+0.7*13)/2=13.35`，`R=20-13.35=6.65`。它不是说某台真实机器加工了 13.35 个任务，也不是把所有列的任务集合先求并集；它描述的是 LP 每消耗一单位机器流，实际接触了多少不同覆盖行，又用多少重复访问把覆盖系数放大。
+
+这两个指标的用途正是拆开一个原本没有诊断价值的事实：在 40-job、2-machine 根解中，覆盖行通常紧约束，所以平均列长几乎被固定在 20。只看长度会误以为 family 与 random 相同；拆开后 family 是 `13.102+6.898`，random 是 `19.065+0.935`。对应的覆盖放大倍数 `L/D` 分别约为 `1.527` 和 `1.049`。前者说明同样一单位机器流通过重复访问产生了约 52.7% 的额外 visit-count 覆盖能力，后者接近真实 elementary 机器流。
+
+## 19. 最核心的结构机制
+
+当前 time-indexed 路径状态不保存完整已访问集合，而 master 覆盖行使用 `getJobVisitCount(job)`，机器数行对整列固定计 1。pricing reduced cost 又按 sequence 中的每次出现扣除一次 job dual。于是重复访问不仅是允许存在的冗余动作，还会再次获得任务 dual、再次贡献覆盖系数。
+
+family setup 把任务图变成多个大的低 setup 稠密子图。关键不是“每个点找最近邻”，而是相关性：从块内任一任务出发，都有很多仍在块内的低 setup 入口和出口，因而能构成大量长度不同、重复 pair 不同但 reduced cost 相近的闭合 walk。random 的低 setup 弧是分散的偶然值，通常不能连续组成一个稳定封闭子图；zero setup 中所有未访问任务与重复任务同样容易到达，重复任务没有系统性优势。真实 zero-setup 对照中正值列全部 elementary，直接验证了这一点。
+
+当 `F>m` 时，真实 elementary 解至少有一台机器跨 family。relaxed master 却可给每个 family 若干总权重小于 1 的单-family 列，再靠列内重复把每个任务覆盖补到 1；这等价于把不可分的“哪台机器跨块”决策拆成多个分数单块流。due center 与 family 独立分配，每个 family 都含早、中、晚任务，使单块 walk 从 horizon 前端到后端始终能找到时间上尚可的扩展，因而不会很快被 TWET penalty 排除。`F=m` 时每块本来就可由一单位机器流承担，重复覆盖不再能逃掉一项必付的跨块机器决策，所以根 gap 可以很小；但块内循环仍会让 exact pricing 本身变慢，这就是 `F=2,m=2` 仍需 91 秒 exact 的原因。
+
+ng-DSSR 中，同族大小 13--20 而初始 `K=4` 只记住少数近邻。一个重复 pair 被加入 memory 后，还有大量同族未记忆任务可替换成下一条低 reduced-cost cycle。随后 memory 状态越来越细，PWLF 到达时间/envelope 又使相似前缀难以互相 dominance，因此出现两个乘法因素：需要多轮排掉可替换循环；后期每轮 labels 也更贵。novelty witness 只能减少前者，不能挽回当前一轮已经完成的 labeling 成本；`F=5` 仅 8--9 轮仍到 600 秒时限就是直接证据。
+
+## 20. 为什么有限车辆数 CVRP 通常没有同样严重
+
+车辆数上限本身并不能防止这个问题。标准 route-based CVRP 同样有每条路线机器/车辆系数 1 和分数 `lambda_r`；真正差异在列和资源语义。
+
+第一，exact CVRP master 的合法列是 elementary route，客户 incidence 为 0/1。即使三个地理 cluster 超过两辆车，分数 route LP 仍可能有普通 set-partitioning gap，但不能用同一客户访问两次配合 `lambda=0.5` 产生完整覆盖。若某个 VRP 实现把 non-elementary route 以 visit-count 系数直接放进 master，它也会产生同类弱界；文献采用 ng/q-route relaxation时本来就明确接受更弱的 LP bound，DSSR/elementary pricing正是用于恢复正确的 elementary certificate。
+
+第二，CVRP 的容量是单调硬资源，重复访问通常再次消耗需求或至少占用路线长度，硬 time window/route duration 也会迅速截断循环。当前 TWET 只有软 due penalty，重复任务只增加 processing/setup 时间，并不会立即不可行；horizon 较宽时仍可保留很长的重复 walk。
+
+第三，度量旅行成本允许删除一个重复访问并 shortcut，通常不增加物理路线成本；未访问客户仍必须由某条 elementary route 服务。TWET 的 sequence-dependent completion cost 与 soft earliness/tardiness使“删除一个位置”会整体移动后缀完成时间，不能只靠三角不等式推出列一定更差。更重要的是，当前 relaxed reduced cost 对重复出现再次扣 job dual，这使物理冗余动作在定价空间中具有直接收益。
+
+因此普通限车 CVRP 与当前问题相似的是“cluster 数可能超过车辆数”；不同的是它通常没有“重复一次客户就额外获得一次覆盖和 dual”的杠杆。当前 family 困难不是车辆数约束独有，而是 `F>m`、soft-time sequencing、非基本 time-indexed 路径和 visit-count master 系数四者叠加。
+
+## 21. top-1000 witness 阈值的准确剪枝流程
+
+每轮 labeling 在线维护最多 1000 条 sequence signature 不同的负非基本路线，按 reduced cost 从小到大排序。同一 signature 只保留更负者；池未满时直接加入，池满后只有比当前第 1000 名更负的路线才能替换它。设当前第 1000 名为 `-100`：
+
+1. 在构造 join PWLF 前，如果 forward/backward 的访问 bit mask 已证明拼接一定非基本，则先计算乐观下界 `forward.minRC+backward.minRC+fixedJoinRC`。若该下界为 `-80`，真实 join reduced cost 只可能更高，不可能击败 `-100`，可直接剪掉。
+2. 若乐观下界为 `-120`，暂时不能剪，继续做时间域相交和 PWLF 最小和。若精确 join 值最终为 `-90`，在恢复完整 sequence 前再按同一第 1000 名阈值剪一次；若为 `-130`，才恢复 sequence、去重并尝试入池。
+3. 该阈值只用于已知非基本 witness。elementary join 不受它限制，target trace、返回 relaxed columns 或诊断模式也会关闭此剪枝，所以它不会参与最终无负 elementary 列的 certificate。
+
+## 22. 基于机制的后续方向
+
+当前不应通过把 `kappa=20` 改小来治疗算法；`kappa=0` 仍保留约 4% family gap，说明这只改变模型权重而不能消除结构瓶颈。更针对 time-indexed 弱界的候选是 family-touch cover cut：对每个结构组 `G` 加入 `sum_r 1{r touches G} lambda_r>=1`。它对真实 elementary master 是冗余有效不等式，却能阻止总权重小于 1 的单-family 重复列仅靠 visit count 填满该组。其 pricing 系数是“是否首次进入该 family”，family 数只有 3--6 时可用小 bit mask；需要先做默认关闭的 root A/B，验证 LB、fixing、总时间和正确性，尚未实施。
+
+ng-DSSR 需要分两层处理。novelty/diversity witness 和从 time-indexed 正值重复列提取少量 pair，针对的是同质 witness 导致的多轮更新；低 setup component-aware 的小型 cycle-hitting 初始 memory 也只能小规模测试，不能把完整 family 放进 ng-set。对于 `F=5` 这种单轮 labeling 已经上百秒的情况，还必须同时改善窗口/完成界或研究困难 root 的 IP-pricing 交叉诊断。后续实验必须分别报告 DSSR rounds、每轮 labels、final memory、exact time 和 root LB，不能再用一个总时间把两类机制混在一起。

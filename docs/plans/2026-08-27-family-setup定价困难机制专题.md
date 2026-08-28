@@ -743,3 +743,17 @@ probe日志中的`elapsed`是墙钟运行时间，不是调度完成时间、lab
 结论不是“memory越多轮数越少就越快”。25-pair确实把轮数降到19，但更大的初始memory削弱dominance，forward耗时超过关闭复用；5-pair又不足以提前阻断主要稳定重复结构，轮数没有下降。10-pair在该困难实例上取得平衡：第三次exact相对关闭复用少5轮、快约19.3%，前三次完整exact合计由`253.108s`降至`229.149s`，约快9.5%；300秒内第四次已推进17轮，而关闭复用只推进13轮。总exact墙钟都接近时限，不应用该总量判断无收益，真正差异是相同时限内完成的DSSR工作量。
 
 代码保持`enableNgDssrSameNodeWarmStart=false`，未改变正式profile。默认关闭的实验参数改为窗口3、每job最多2、全局10、最少出现2次；正式使用前仍需在普通random/zero及另一组family实例做外部验证。25和5的负结果也说明暂不继承完整final memory，不再扩大初始K。下一项若继续优化，再单独处理probe的完整轮方向约束，不能与本机制混测。
+
+### 32.12 10-pair复用后的剩余瓶颈
+
+10-pair的约9.5%仅是前三次完整exact的局部改善，不能理解成主瓶颈已解决。300秒内两组仍各完成3次exact并进入第4次，exact累计都约285--287秒；受墙钟probe扰动和不同返回列轨迹影响，该单次A/B只能说明10优于5/25的机制方向，尚不能证明全树稳定提速。机制至少需要两份同节点final ng-set才生效，因此10-pair run前两次exact的`99.257+71.912=171.169s`完全没有得到复用收益，已经占前三次完整exact的74.7%。
+
+第三次exact内部仍有`32.803s/57.950s=56.6%`用于正式forward labeling，`18.929s/57.950s=32.7%`用于midpoint probe，backward和join仅为`2.205s/3.508s`。前三次完整exact合计也保持同一结构：forward约58.7%，probe约32.4%。复用把第三次轮数从22降到17，但每轮平均forward时间由约`1.76s`升到`1.93s`，累计forward labels由每轮约3.98万升到4.36万；这正是更大初始memory削弱dominance的代价。因此warm start只是用“少跑几轮”抵消“每轮更贵”，没有改变每轮labeling算法。
+
+probe仍是最明确的剩余冗余。10-pair第三次exact第2--15轮中，上一完整轮的forward/backward耗时比为`3.708--17.406`，adaptive seed已降到约`493--546`；浅probe却每轮都测试3个候选并把最终Tmid提高到约`701--754`，即固定落在`seed+208.35`附近。对应完整轮继续保持forward重`6.329--17.406`倍。第16轮不再反向提高seed，取`tMid=542`后完整比降到`1.805`；第17轮复用同一Tmid后进一步降到`1.397`。17轮probe共执行`413064`次pop，其中第2--15轮为`351483`次；若完整轮方向约束使这些轮只测试seed的首个10000-pop候选，可少约`211483`次probe pop，约占本次probe工作量51.2%。按当前耗时近似线性估计，直接可节省约9--10秒，尚未计入更合理Tmid对正式labeling的潜在影响；该数值是日志外推，不是已完成A/B。
+
+DSSR轮数本身仍有明显信息利用问题。第三次exact共保留16批、每批1000条non-elementary witness用于更新；`16000`条路线中`15918`条在顺序处理时已被同批前面新增的pair阻断，只有82条路线产生83个动态pair，平均每轮约5.1条有效路线，远低于route limit 20。当前top-1000按reduced cost集中保留同质路线，说明每轮labeling产生了大量重复证据。下一项可在固定新增pair预算下增加按重复段/缺失pair签名的novelty辅助池，但必须同时观测轮数和每轮labels，不能简单把20条路线全部转成20个新增pair。
+
+当前same-node“频率”也较粗。它统计pair是否存在于最近final ng-set，而final memory会保留一次pricing内所有历史更新；只要pair在多次调用最终都存在就计为高频，不能区分它阻断了多少witness、出现于多少不同DSSR轮或重复段。由于满足两次出现的候选超过25个，同频候选最终仍按job/member编号排序。这解释了10-pair只有中等收益，也给出更准确的后续方向：在一次困难exact内统计pair的跨轮出现次数、witness支持数和重复段多样性，使第二次exact即可复用5--10个真正高支持pair；final-set跨调用频率只作为稳定性门槛。该统计必须默认关闭并单独A/B，不能与probe修正同时上线。
+
+由此，剩余耗时优先级为：第一，midpoint probe的直接重复工作及其反向覆盖完整轮feedback；第二，family memory增长后昂贵的forward labeling；第三，top-1000 witness同质化造成每轮只取得约5个独立更新。RMP、启发式、backward和join均不是当前主要优化对象。下一次应先单变量测试“上一完整轮forward重时probe不得提高Tmid、上一轮已平衡则直接复用”的方向约束，再决定是否实现witness级pair支持度。

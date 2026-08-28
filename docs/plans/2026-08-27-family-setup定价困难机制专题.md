@@ -770,15 +770,15 @@ DSSR轮数本身仍有明显信息利用问题。第三次exact共保留16批、
 
 本节的阶段结论只保留两点：扩大池到3000没有增加列产出；all-segments虽将DSSR轮数降低约62%，但在该n40固定Tmid单例中被单轮状态膨胀抵消。固定复用首轮`Tmid`不再作为候选方案，正式判断转入下一节的adaptive-direct多实例测试。
 
-### 32.14 保留 adaptive、取消后续浅探及 n30 多实例矩阵
+### 32.14 adaptive-direct实验语义及 n30 多实例矩阵
 
-最终语义为：同一次exact的第一轮仍从default seed执行浅层midpoint probe；从第二轮开始，先用上一完整DSSR轮的forward/backward正式扩展耗时判断失衡，再从重侧存活label的split-time分位数计算adaptive `Tmid`。后续轮直接采用该adaptive值并重建half-domain，不再运行额外浅层probe。若上一轮不失衡或没有有效分位数，则复用上一完整轮`Tmid`。因此被取消的只有浅层候选测试，完整轮反馈及其adaptive移动均保留。
+本节adaptive-direct实验语义为：同一次exact的第一轮仍从default seed执行浅层midpoint probe；从第二轮开始，先用上一完整DSSR轮的forward/backward正式扩展耗时判断失衡，再从重侧存活label的split-time分位数计算adaptive `Tmid`。后续轮直接采用该adaptive值并重建half-domain，不再运行额外浅层probe。若上一轮不失衡或没有有效分位数，则复用上一完整轮`Tmid`。因此被取消的只有浅层候选测试，完整轮反馈及其adaptive移动均保留；该语义仅用于A/B，不等于正式默认方案。
 
 代码路径重新逐项核对如下。`dssrFeedbackProbeSeed()`在`initializeSearchState()`清空上一轮搜索状态前读取上一完整轮的active labels；只有`roundCompleted=true`才由`rememberDssrRoundMidpointFeedback()`写入可复用耗时和`Tmid`，时限中断轮不会污染下一轮。direct分支随后清除probe复用标记，将probe耗时置为`NaN`、候选数置0，按新`Tmid`调用`rebuildHalfDomainForCurrentMidpoint()`，再由统一初始化路径创建一次forward source；`solveRelaxedRound()`仍只在`midpointProbeSearchStateReady=false`时创建一次backward sink。由于direct轮不把`NaN` probe时间加入正式F/B耗时，下一轮adaptive反馈只来自完整正式扩展。未发现第二个sink、重复正式labeling或不完整轮反馈写回。
 
 为避免继续依赖单个n40困难实例，本轮从正式n40 set01--03的family/random配对数据截取前30个任务及对应setup子矩阵，保持任务、setup和setup-cost数值，统一`m=2`、固定seed、root单节点和120秒上限，共运行21组。每个实例先用同一seed列快照，再比较adaptive-direct下的`minimum/1000`、`minimum/3000`和`allSegments/1000`；另对3个family实例增加“每轮继续浅探、minimum/1000”基线。该矩阵统一开启实验性的same-node高频pair复用，窗口3、每job 2、全局10、至少出现2次，使witness策略和probe对照保持同一条件。全部run正常结束，无超时和异常；同一实例的各配置得到相同LB、UB和gap，incumbent可行性及目标重算一致性均为true。汇总文件为`test-results/bpc/diagnostic-n030-family-witness-matrix-20260828.csv`。
 
-3个family实例中，每轮继续浅探的平均wall/exact为`34.766/29.551s`，adaptive-direct minimum/1000降为`26.210/21.877s`，分别下降`24.6%/26.0%`；后续轮probe候选次数由246降为0。首轮probe仍保留，因此adaptive-direct仍有合计`17.324s` probe时间。该结果说明收益来自取消重复浅探，而不是取消adaptive移动，正式ng-DSSR profile据此升级为`2026-08-29-v4`并默认关闭后续轮浅探。
+3个family实例中，每轮继续浅探的平均wall/exact为`34.766/29.551s`，adaptive-direct minimum/1000降为`26.210/21.877s`，分别下降`24.6%/26.0%`；后续轮probe候选次数由246降为0。首轮probe仍保留，因此adaptive-direct仍有合计`17.324s` probe时间。该结果只能说明“取消后续浅探”在这些family实例上有正信号，不能据此改成全局默认。
 
 由于正式profile默认关闭same-node warm start，又补做3个family实例的关闭复用配对。adaptive-direct的平均wall/exact为`29.47/25.04s`，每轮继续浅探为`50.31/45.38s`，分别下降约`41.4%/44.8%`，后续轮probe候选次数由459降为0；两组总DSSR轮数为231/227，几乎相同，说明主要节省的是浅探本身及其错误中点选择，不是靠减少DSSR轮数。分实例看，set01和set03基本持平，set02的exact由`80.80s`降至`18.46s`，因此不能声称每个实例都有同幅度提速，但可以确认正式默认条件下没有总体退化，收益也不依赖pair复用。6组均根节点闭合并保持相同LB/UB与验证结果。
 
@@ -787,3 +787,15 @@ DSSR轮数本身仍有明显信息利用问题。第三次exact共保留16批、
 `allSegments/1000`在family上有真实信号：3例平均wall/exact为`18.922/15.117s`，相对minimum/1000下降`27.8%/30.9%`，总DSSR轮数由183降至99，seen witness由901053降至423186；set02、set03明显获益，set01则小幅变慢。random实例本身exact很轻，minimum/1000平均wall/exact为`6.088/0.705s`，优于allSegments的`7.128/0.918s`。其机制也符合预期：allSegments一次补齐一条witness的全部连续重复段，能更快打断family内大量可替代重复环，但会更快扩大memory、削弱dominance；普通random没有足够多轮数可节省，主要承担memory代价。
 
 因此当前不把allSegments改成全局正式默认，也不按已知`setupType`手工为family/random配置不同算法，否则正式配对比较会混入求解器调参差异。保守统一配置仍为`minimumNewPairsSegment + candidate1000`。若目标是单独构造family优化profile，现有3例支持`allSegments + 1000`继续做n40/n50和全树验证；在没有更大规模验证或结构自适应触发规则前，不作为统一最佳配置。
+
+### 32.15 为什么不能全局关闭probe，以及应使用什么动态信号
+
+进一步逐轮拆解关闭same-node warm start的3组n30 family对照后，原“probe时间都是冗余”的说法不准确。probe在一个候选`Tmid`上生成的label状态会被正式labeling复用；若首个候选直接acceptable、rank0或继续在同一状态完成，则这部分工作不是重算。真正明确的额外工作是改变`Tmid`后丢弃旧候选状态。每轮probe基线的196个后续DSSR轮共测试459个候选，其中82轮测试了多个候选，明确丢弃263个中间候选状态。因此需要控制的是多候选walk/bracket，而不是简单关闭全部后续probe。
+
+adaptive-direct同样存在结构性风险。201个后续轮中有49轮根据完整轮失衡移动`Tmid`。当相对有效时间域的位移小于5%时，完整F/B耗时比均值约2.20；位移为5%--10%时均值约1.72。位移达到10%--20%或20%以上时，均值分别升到约110和416，最大值超过1200。set03曾从约297直接移动到865，下一完整轮F/B比达到107.6；其他调用还出现700--1200级过冲。继续probe把最终位移压在约8.64%以内，虽然付出了候选游走代价，却避免了这类直接过冲。因此现有数据同时否定“每轮都完整probe一定好”和“第二轮以后全部不probe一定好”。
+
+开关也不应按输入标签`family/random`写死。同一family set01在关闭pair warm start时adaptive-direct略慢，开启后又略快；set03关闭复用时近似持平、开启后明显更快。决定行为的是当前dual、ng-memory和时间域造成的在线label负载，不是静态setup类型。正式profile因此恢复`2026-08-28-v3`和后续轮继续probe，adaptive-direct仅保留为实验分支。
+
+下一步应测试统一的动态规则，而不是实例专用参数。第一轮仍完整probe。后续轮先根据上一完整轮计算adaptive seed：若无需移动，或建议位移不超过有效时间域的5%--10%，直接复用/采用该点，取消候选游走；若建议位移更大、方向相对前两轮反转，或本轮ng-memory新增pair很多，则必须进行浅层验证，但最多测试1--2个候选，并限制单轮`Tmid`位移，不能继续当前4--6候选的长walk/bracket。阈值5%还是10%、pair增长门槛和两候选规则必须通过n30/n40的逐轮A/B确定，本轮不写入代码。
+
+witness策略也采用相同原则。`candidateLimit=1000`继续作为统一基础池，3000已被否定。`allSegments`不按family标签打开，而应在minimum模式连续多轮后，根据在线指标触发：top-1000连续饱和、already-blocked比例极高、每轮有效更新路线明显低于20，并且待加入的全部missing pairs受一个小pair预算约束。random通常1--2轮即返回elementary列，不会触发；family式同质witness才会自然进入加强阶段。该hybrid规则尚未实现，当前正式update mode继续保持minimum。

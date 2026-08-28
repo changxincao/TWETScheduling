@@ -7,7 +7,7 @@ import java.util.Objects;
  */
 public final class BestBpcProfiles {
 	/** 写入正式实验结果，便于服务器侧确认三组运行使用同一套参数。 */
-	public static final String VERSION = "2026-08-29-v4";
+	public static final String VERSION = "2026-08-28-v3";
 
 	public static final BPCAlgorithmProfile TIME_INDEXED_GRAPH = new BPCAlgorithmProfile(
 			"timeIndexedGraph", true, false, false, config -> applyTimeIndexedDefaults(config, false));
@@ -152,8 +152,6 @@ public final class BestBpcProfiles {
 		config.bidirectionalMidpointProbeScore = "time";
 		config.bidirectionalMidpointProbeEarlyStopRatio = 1.5;
 		config.bidirectionalMidpointProbeDssrImbalanceThreshold = 2.0;
-		// 2026-08-29: 完整轮反馈继续自适应移动 Tmid，后续 DSSR 轮不再重复浅层 probe。
-		config.bidirectionalMidpointProbeAfterFirstDssrRound = false;
 		config.enableTimeIndexedPreHeuristicPricing = false;
 		config.enableTimeIndexedRootPreprocessingForNgDssr = true;
 		config.timeIndexedRootPreprocessingSeedElementaryColumns = true;

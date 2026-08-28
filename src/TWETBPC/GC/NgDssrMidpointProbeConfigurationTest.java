@@ -14,8 +14,8 @@ public final class NgDssrMidpointProbeConfigurationTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		config.bidirectionalMidpointProbe = true;
 		config.bidirectionalMidpointProbeScore = " TIME ";
-		assertTrue(!config.bidirectionalMidpointProbeAfterFirstDssrRound,
-				"later DSSR rounds should use complete-round adaptive feedback without another shallow probe");
+		assertTrue(config.bidirectionalMidpointProbeAfterFirstDssrRound,
+				"later DSSR rounds should keep probing by default until a dynamic policy is validated");
 		GCNGBBStyleBidirectionalNgDssr.validateMidpointProbeConfiguration(config);
 
 		config.bidirectionalMidpointProbeScore = "queue";

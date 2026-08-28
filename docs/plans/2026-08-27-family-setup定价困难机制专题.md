@@ -693,3 +693,15 @@ time-indexed保留为root arc/window preprocessing、elementary seed columns、�
 “在同一dual/ng-set快照上完整测试多个Tmid”仅指离线诊断：冻结同一node、dual、cuts、窗口、completion bounds和某一DSSR轮的ng-set，对每个候选Tmid独立跑完forward、backward、compact和join，校验最小reduced cost和certificate一致，再比较完整总耗时。它可作为评估浅probe质量的oracle，但生产中每轮这样做会把一次exact成本放大为候选数倍。当前bracket还只采用最后停留点，没有保存所有已测候选中的最佳点；若未来修正，应按可靠性和预计完整负载保留最佳候选，但复用较早候选的label状态需要重跑或保存大状态，不能直接当作零成本改动。
 
 当前结论仅限诊断，未修改配置或算法，也未启动新求解。后续严格顺序应是：先把`TIME`显式固定进ng-DSSR正式profile并加入回归断言；再单独修正“一侧耗尽仍可接受”的probe判据；最后才评估10%固定步长、窄bracket或多深度代理。不能把队列纠正、probe修正和family结构优化一次混测。
+
+### 32.8 TIME 单变量复跑与 probe 位移结论
+
+已将`TWETBPCConfig`中的单向和双向label queue默认值统一改为`time`，并在`BestBpcProfiles.NG_DSSR`中再次显式固定两项`time`，profile版本升级为`2026-08-28-v3`。`BestBpcProfilesTest`同时锁定裸默认值和正式profile值；旧`GCBBFullDomainBestProfileTest`原来错误要求所有profile都开启Phase-I repair，本次将该断言移回ng-DSSR专属部分，并明确time-indexed继续使用旧M repair。除queue外，`C1000/K20`、nearest约`n/10`、repeatability filter、关闭warm start、root preprocessing、pricing-only subtree fixing和strong phase2关闭等均未发现漂移。当前ng-DSSR仍有一组失效配置面：快照中的`MoveRatio=0.15`、`MaxCandidates`、`TimeTolerance`、`TieScore`、`ExtraCandidates`、`BracketOnDirectionChange`和`HighImbalanceRatio`不控制主线，主线实际固定使用`step=0.10*width`和`bracketTolerance=0.05*width`；本轮只记录，未与queue同时修改。
+
+使用相同`n040-set02 family,m=2`、相同seed指纹`48fb3e...c1e35`、相同`900s`时限和节点上限，只把queue从`REDUCED_COST`改为`TIME`复跑。旧run完成1次exact并在第2次中途超时，exact累计`919.580s`、完成调用生成18列；新run完成12次exact、生成29列，exact累计`882.425s`，平均每次`73.535s`。第一次exact仍为23轮DSSR，但从`732.079s`降至`97.251s`，其中forward从`711.978s`降至`59.827s`，约快11.9倍。由此确认queue误配是旧run灾难性forward长尾的主要放大因素；family结构造成的多轮DSSR仍然存在，新run 12次exact合计262轮，平均21.83轮/次，900秒内根节点仍未闭合。
+
+`TIME`没有让浅probe成为可靠的完整负载预测器。12次exact合计`882.076s`中，probe为`284.297s`、占`32.2%`，forward完整扩展`490.905s`、backward`43.301s`、join`56.256s`。262轮平均测试2.71个probe候选，完整forward/backward耗时比平均`8.13`，214轮仍超过2。排除每次pricing没有历史反馈的第一轮后，probe只有两种实质结果：55轮原样接受完整反馈seed，完整耗时比平均`1.66`、仅8轮超过2；其余195轮全部把seed固定提高`208.35=0.05*width`，完整耗时比平均约`10.17`，195轮全部超过2。原因是seed处浅层backward略重，先向上跳`416.7`，方向反转后bracket只折半一次就停在`seed+208.35`；这个浅层平衡点在完整搜索中仍然是forward极重。
+
+因此下一项A/B不应先把10%步长简单改小。小步长会增加walk候选数，而当前probe本身已消耗近三分之一exact时间；它只能减轻过冲，不能修复浅层方向与完整方向相反。更直接的低风险策略是让上一完整轮提供方向约束：上一轮forward重时，下一轮adaptive seed之后的probe不得再提高Tmid；backward重时不得降低；上一轮已经在阈值内时直接复用上一Tmid，不再probe。第一轮没有完整反馈时仍可保留现有probe。现有自然对照已经足以支持先测该策略，没有必要先对同一dual/ng-set完整跑多个Tmid网格。
+
+“仅一侧耗尽”仍应作为独立的小修复，但本轮未实现。建议在`acceptableRatio`判断前处理：仅backward耗尽时强制认为forward更重，仅forward耗尽时强制认为backward更重，不能按局部elapsed比接受；两侧都未耗尽时才使用启发式elapsed比，两侧都耗尽时结果完整。它只改变probe停止和移动方向，不改变定价集合或certificate。当前bracket采用最后测试点而非历史最佳点不是主要矛盾：本轮最后的浅层score通常确实最好，但它对完整负载预测仍然错误；即使改成“浅层score最小”也很可能继续选`seed+208.35`。保存较早候选还需要重跑或保留大label状态，因此该项暂不修改，优先级低于完整轮方向约束和单侧耗尽判据。

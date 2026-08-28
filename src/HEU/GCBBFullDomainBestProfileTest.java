@@ -23,6 +23,9 @@ public class GCBBFullDomainBestProfileTest {
 		GCBBFullDomainComparisonTest.applyBestPricingModeDefaults(config, false, false, true);
 		require(config.useGCNGBBStyleNgDssrPricing, "ng-DSSR engine");
 		require(config.enableHeuristicPricing, "ng heuristic pricing");
+		require("time".equals(config.forwardLabelQueueOrdering), "ng forward time queue");
+		require("time".equals(config.bidirectionalLabelQueueOrdering), "ng bidirectional time queue");
+		require(config.enableStrongBranchingPhaseOneRepair, "ng Phase-I repair");
 		require("nearestK".equals(config.ngDssrInitialNgSetMode), "ng initial mode");
 		require(config.ngDssrInitialNgSetSize == -1, "ng auto n/10 initial size");
 		require("allCycles".equals(config.bidirectionalCompletionBoundRelaxation), "ng completion bound");
@@ -77,6 +80,7 @@ public class GCBBFullDomainBestProfileTest {
 		require(config.timeIndexedCompletionBoundCutLoopArcFixing == sri, "cut-loop fixing");
 		require(!config.timeIndexedCompletionBoundSriAwareArcFixing, "SRI-aware fixing off");
 		require(config.enableSubsetRowCutsForTimeIndexedGraph == sri, "SRI separation");
+		require(!config.enableStrongBranchingPhaseOneRepair, "time-indexed old M repair");
 		require("arcMemory".equals(config.subsetRowCutMemoryMode), "arc memory");
 		require(config.maxCutRounds == 8, "outer cut rounds");
 		require(config.maxSubsetRowCutAppearancesPerJob == 20, "rank-1 job appearance limit");
@@ -93,7 +97,6 @@ public class GCBBFullDomainBestProfileTest {
 		require(config.strongBranchingPhase2CandidateLimit == 0, "strong phase2 off");
 		require(config.enableStrongBranchingLightweightRepair, "lightweight strong trial");
 		require(config.enableStrongBranchingBranchImpliedPenalty, "branch-implied penalty");
-		require(config.enableStrongBranchingPhaseOneRepair, "Phase-I repair");
 		require(config.enableDualBoundPruning, "dual-bound pruning");
 		require(!config.enableDualStabilization, "dual stabilization off");
 		require(!config.enableRouteEnumeration, "route enumeration off");

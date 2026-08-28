@@ -7,7 +7,7 @@ import java.util.Objects;
  */
 public final class BestBpcProfiles {
 	/** 写入正式实验结果，便于服务器侧确认三组运行使用同一套参数。 */
-	public static final String VERSION = "2026-08-16-v2";
+	public static final String VERSION = "2026-08-28-v3";
 
 	public static final BPCAlgorithmProfile TIME_INDEXED_GRAPH = new BPCAlgorithmProfile(
 			"timeIndexedGraph", true, false, false, config -> applyTimeIndexedDefaults(config, false));
@@ -127,6 +127,9 @@ public final class BestBpcProfiles {
 		// ng-DSSR 的多轮 DSSR repair 使用纯 Phase-I 明显更容易先恢复可行 RMP。
 		config.enableStrongBranchingPhaseOneRepair = true;
 		config.enableHeuristicPricing = true;
+		// 2026-08-28: 显式固定历史 A/B 更快的时间队列，避免正式 runner 继承漂移。
+		config.forwardLabelQueueOrdering = "time";
+		config.bidirectionalLabelQueueOrdering = "time";
 		config.ngDssrInitialNgSetMode = "nearestK";
 		config.ngDssrInitialNgSetSize = -1;
 		config.ngDssrNonElementaryRouteUpdateLimit = 20;

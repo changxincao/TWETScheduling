@@ -9,11 +9,18 @@ public final class BestBpcProfilesTest {
 	}
 
 	public static void main(String[] args) {
+		verifyQueueDefaults();
 		verifyNamedProfiles();
 		verifySelectorDefaults();
 		verifyOverlapSemantics();
 		verifyNamedProfileClearsStaleModes();
 		System.out.println("BestBpcProfilesTest passed.");
+	}
+
+	private static void verifyQueueDefaults() {
+		TWETBPCConfig config = new TWETBPCConfig();
+		require("time".equals(config.forwardLabelQueueOrdering), "default forward time queue");
+		require("time".equals(config.bidirectionalLabelQueueOrdering), "default bidirectional time queue");
 	}
 
 	private static void verifyNamedProfileClearsStaleModes() {
@@ -108,6 +115,8 @@ public final class BestBpcProfilesTest {
 		require(!config.useTimeIndexedGraphRank1CutPricing, "rank-1 flag off");
 		require(config.useGCNGBBStyleNgDssrPricing, "ng-DSSR engine");
 		require(config.enableHeuristicPricing, "ng heuristic pricing");
+		require("time".equals(config.forwardLabelQueueOrdering), "ng forward time queue");
+		require("time".equals(config.bidirectionalLabelQueueOrdering), "ng bidirectional time queue");
 		require("nearestK".equals(config.ngDssrInitialNgSetMode), "ng initial mode");
 		require(config.ngDssrInitialNgSetSize == -1, "ng auto n/10 initial size");
 		require("allCycles".equals(config.bidirectionalCompletionBoundRelaxation), "ng completion bound");

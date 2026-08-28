@@ -253,8 +253,10 @@ public class TWETBPCConfig {
 	/**
 	 * 2026-05-26: GCNGBB-style 双向 pricing 的 label 扩展队列排序。
 	 * 可选值：reducedCost、time、reachableSize。
+	 * 2026-08-28: 历史重复 A/B 中 time 明显更快，且按时间单调展开更适合 Tmid probe，
+	 * 因此将正式默认值固定为 time，不再依赖具体 runner 覆盖旧默认值。
 	 */
-	public String bidirectionalLabelQueueOrdering = "reducedCost";
+	public String bidirectionalLabelQueueOrdering = "time";
 	/**
 	 * 2026-05-31: 使用 K 堆的双向 final join 是否用当前最好负列加强剪枝。
 	 * 可选值：zero（只和 0 比，默认）、bestUB（仅 group/pair 下界和当前最好负列上界比）、
@@ -392,8 +394,9 @@ public class TWETBPCConfig {
 	/**
 	 * 2026-05-26: 单向 forward exact pricing 的 label 扩展队列排序。
 	 * 可选值：reducedCost、time、reachableSize。
+	 * 2026-08-28: 与双向主线保持一致，默认使用历史 A/B 更快的 time 顺序。
 	 */
-	public String forwardLabelQueueOrdering = "reducedCost";
+	public String forwardLabelQueueOrdering = "time";
 	/** 2026-05-18: 对应旧 VRP Configure.m_initial_col_number，子节点初始 RMP 最多继承多少条低 reduced-cost 列。 */
 	public int branchSeedColumnLimit = 5000;
 	/** 2026-05-18: 对应旧 VRP Configure.m_addin_red_cost，父节点 reduced cost 低于该阈值的列优先传给子节点。 */

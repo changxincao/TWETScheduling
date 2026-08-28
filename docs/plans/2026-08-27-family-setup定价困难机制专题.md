@@ -679,3 +679,17 @@ time-indexed保留为root arc/window preprocessing、elementary seed columns、�
 后续改变family数量时，将本节机制作为待检验假设，而不是预设结论。最直观的解释是：zero/random没有稳定的昂贵组间边界，pricing通常可以用成本相近的未访问任务替代重复任务，因此更倾向继续探索新任务；family结构则形成“组内普遍便宜、组外普遍昂贵”的低成本块，当组内有吸引力的新任务逐渐耗尽后，重复组内高dual任务可能比跨族探索更便宜。只有当`F>m`时，这种局部重复偏好才能进一步在master中把多个family各压缩为小于1单位的分数机器流，并规避真实解必需的跨族合并。
 
 灵敏度结果应按“局部列结构—全局分数拼装—最终gap”三层顺序分析。首先检查`F`增加后非基本单族列、重复位置`R`和覆盖放大倍数是否增加；其次检查单族正值流是否降到1以下、额外family touch `E`是否低于`F-m`；最后才判断这些变化是否对应root gap在`F=m+1`附近上升。若只有gap变化而重复覆盖与family-touch deficit没有同步变化，就不能归因于分数机器流压缩；若重复增加但`F<=m`时gap仍小，则应解释为pricing变难而不是下界漏洞。ng-DSSR同样只把重复结构用于解释certificate成本，不能直接套用time-indexed的visit-count gap结论。
+
+### 32.7 双向队列配置漂移与 Tmid probe 复核
+
+本次`n040-set02 family`困难诊断没有沿用历史上反复验证更快的`TIME`队列，而是实际使用了`REDUCED_COST`。原因不是正式比较后改回，而是旧的`GCBBFullDomainComparisonTest`在应用profile后强制把forward和bidirectional queue都设为`time`；2026-08-16建立的`BestBpcProfiles.applyNgDssrDefaults()`没有显式固定bidirectional queue，新的`FormalExperimentRunner`也不再经过旧runner的强制赋值，因此回落到`TWETBPCConfig`为兼容历史行为保留的`reducedCost`默认值。2026-05的重复A/B中，ng双向定价的`TIME`为`1.561--1.678s`，`REDUCED_COST`为`2.573--2.922s`，目标值和界一致。仓库日志也以`TIME`为绝对多数；当前困难run的配置快照则明确记录`queueOrdering=REDUCED_COST`。因此`732.079s`仍能说明family结构会制造困难，但其绝对幅度混入了队列配置漂移，不能代表当前已知最佳ng-DSSR配置。
+
+当前未发现第二个同样有历史A/B支持、却被正式profile遗漏的核心开关。`C=1000/K=20`、nearest约`n/10`、repeatability filter、关闭warm start、best-UB/all-cycles、root preprocessing及subtree pricing-only等均与预期一致。需要注意的是，正式profile仍继承若干类默认值，后续若固定最终实验配置，应把exact cap、Tabu参数、DSSR Tmid复用、branch seed和CPLEX模式等显式写入profile并补回归断言，防止默认值继续漂移；这只是可复现性措施，目前没有证据说明这些默认值设置错误。旧midpoint配置中的若干字段已不再控制当前ng-DSSR核心，属于失效配置面而不是这次运行时误配。
+
+当前Tmid流程是：一次pricing调用内，第一轮从有效时间域中点出发；完成一轮forward/backward labeling后，用完整轮的两侧耗时和surviving-label分布为下一轮生成seed；若重侧与轻侧耗时比为`R`，用`alpha=min(0.5,0.5(1-2/R))`截去重侧上一轮约`alpha`比例的分布。该式在`R=2`时不移动，`R=4`时移动25%，`R`趋于无穷时最多移动50%，本质是带50%上限的经验比例控制器，不是最优性公式。更新ng-set后，当前实现又从该seed执行浅probe，按整个有效时间域宽度的10%移动并做bracket；接受后复用该候选的partial state，再把两侧队列完整跑完并join。
+
+困难run暴露出浅probe会反向覆盖更可靠的完整轮反馈。第7轮完整结果显示forward极重，seed由`893.7`降到`492.0`；在该seed附近，前5000个backward pop较慢，但这是`REDUCED_COST`队列下不同深度label的局部前缀，并不代表完整工作量。probe随后一次按全域宽度移动`416.7`到`908.7`：forward在5000 pop时尚未耗尽，backward只用1186 pop已经耗尽，但两侧局部elapsed之比为`1.173<1.5`，当前控制流仍直接接受。该比较把“全部backward工作”与“forward前缀”相比较，效率语义不成立。只要一侧耗尽，未耗尽侧就应视为更重；只有两侧都耗尽时才能直接接受，两侧都未耗尽时才可结合elapsed、queue backlog、kept labels和多深度增长率作启发式判断。
+
+“在同一dual/ng-set快照上完整测试多个Tmid”仅指离线诊断：冻结同一node、dual、cuts、窗口、completion bounds和某一DSSR轮的ng-set，对每个候选Tmid独立跑完forward、backward、compact和join，校验最小reduced cost和certificate一致，再比较完整总耗时。它可作为评估浅probe质量的oracle，但生产中每轮这样做会把一次exact成本放大为候选数倍。当前bracket还只采用最后停留点，没有保存所有已测候选中的最佳点；若未来修正，应按可靠性和预计完整负载保留最佳候选，但复用较早候选的label状态需要重跑或保存大状态，不能直接当作零成本改动。
+
+当前结论仅限诊断，未修改配置或算法，也未启动新求解。后续严格顺序应是：先把`TIME`显式固定进ng-DSSR正式profile并加入回归断言；再单独修正“一侧耗尽仍可接受”的probe判据；最后才评估10%固定步长、窄bracket或多深度代理。不能把队列纠正、probe修正和family结构优化一次混测。

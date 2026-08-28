@@ -1,15 +1,17 @@
 \section{Computational Study}\label{sec:experiments}
 
 This section evaluates the computational performance of the proposed exact solution
-framework and the sensitivity of the outsourcing decisions to key parameters. The first
-experiment disables outsourcing and benchmarks the proposed continuous-time NG-DSSR
-pricing algorithm against the time-indexed pricing framework of
+framework and examines how outsourcing decisions respond to production and tariff
+conditions. We first disable outsourcing and compare the proposed continuous-time
+NG-DSSR pricing algorithm with the time-indexed pricing framework of
 \citet{bulhoes2020exact} for the resulting pure parallel-machine scheduling problem.
-We then compare the computational performance of the two outsourcing formulations.
-Finally, we examine the effects of outsourcing availability, the baseline
-outsourcing price, and quantity discounts. All algorithms were implemented in Java
-and use IBM ILOG CPLEX 22.1.1 as the LP solver. Each run uses a single thread and is
-subject to a time limit of 10,800 seconds.
+We next isolate how the number of job families affects the two pricing approaches,
+and then compare the two outsourcing formulations. Finally, we analyze the effects
+of outsourcing availability, the baseline outsourcing price, and quantity discounts,
+paying particular attention to whether random and family-structured setups induce
+different responses. All algorithms were implemented in Java and use IBM ILOG CPLEX
+22.1.1 as the LP solver. Each run uses a single thread and is subject to a time limit
+of 10,800 seconds.
 % Add the final server CPU, memory, and operating system before reporting results.
 
 \subsection{Instance Generation}\label{sec:instance-generation}
@@ -98,65 +100,105 @@ outsourcing disabled.
 
 \subsection{Comparison of Internal Pricing Methods}\label{sec:pricing-comparison}
 
-The first experiment considers the pure parallel-machine scheduling problem in which
-every job must be processed internally. It compares the proposed continuous-time
-NG-DSSR pricing algorithm with the time-indexed pricing method of
-\citet{bulhoes2020exact}, implemented both without and with rank-1 cuts. To examine
-their sensitivity to the magnitude of the time parameters, we augment the
+The first experiment considers the pure parallel-machine scheduling problem, in which
+all jobs must be processed internally. We compare the proposed continuous-time
+NG-DSSR pricing algorithm with the time-indexed pricing framework of
+\citet{bulhoes2020exact}, using the latter both without and with rank-1 cuts. The
+comparison is designed to identify the conditions under which the continuous-time and
+time-indexed approaches are most effective, rather than to evaluate either method at
+a single time resolution.
+
+To assess sensitivity to the magnitude of the time parameters, we augment the
 original-scale instances with medium- and high-scale variants. For each job, its
 processing time and due-window center are independently multiplied by integers drawn
 from $\{5,\ldots,15\}$ in the medium-scale class and $\{15,\ldots,25\}$ in the
 high-scale class. Each setup matrix is scaled by the resulting change in total
 processing workload, while the narrow and wide half-width ranges are multiplied by
-10 and 20, respectively. The unit earliness and tardiness penalties remain
-unchanged. The three time scales produce 1,620 scheduling instances and 4,860
-algorithm runs. This design compares the relative performance and applicable ranges
-of continuous-time and time-indexed pricing across job sizes, machine levels,
-due-window widths, setup structures, and time scales.
+10 and 20, respectively. The unit earliness and tardiness penalties remain unchanged.
+The three time scales produce 1,620 scheduling instances and 4,860 algorithm runs.
+
+Performance is examined across job sizes, machine levels, due-window classes, setup
+structures, and time scales. In particular, the matched random and family instances
+have comparable average setup intensity but differ in how short and long setup arcs
+are organized. Their comparison therefore isolates whether family structure, rather
+than a general increase in setup times, changes the relative behavior of continuous-
+time and time-indexed pricing.
+
+\subsection{Impact of Family Structure on Internal Pricing}
+\label{sec:family-pricing-impact}
+
+The matched random--family comparison identifies whether setup organization affects
+the two pricing approaches, but it does not by itself explain how this effect depends
+on the relationship between the number of families and the number of machines. We
+therefore conduct a focused experiment with $n=40$, $m=3$, the original time scale,
+zero-width due windows, and no outsourcing. For each of the five base job sets, we
+construct matched instances with $F\in\{1,2,3,4,5\}$ approximately balanced families,
+while holding the job data, average setup intensity, setup-cost coefficient, and all
+other generation rules fixed. This yields 25 instances that differ only in
+their family partition and the resulting organization of setup times.
+
+The experiment tests whether pricing behavior changes when the number of families
+first exceeds the number of machines. In an elementary schedule, $F>m$ requires at
+least one machine to process jobs from multiple families and incur a between-family
+changeover. A non-elementary time-indexed relaxation may partly avoid this requirement
+through repeated job visits, whereas NG-DSSR must progressively eliminate such
+repetitions to certify elementary pricing. We therefore use changes in the root
+relaxation and repeated-job structure to interpret the time-indexed results, and use
+the number of DSSR rounds and exact-pricing effort as complementary evidence for
+NG-DSSR. A threshold interpretation is made only if the change around $F=m+1$ is
+consistently accompanied by the corresponding change in repeated-job behavior across
+the five matched job sets.
 
 \subsection{Comparison of Outsourcing Formulations}\label{sec:outsourcing-formulation-comparison}
 
-The second experiment examines how the representation of outsourcing affects exact
+The next experiment evaluates how the representation of outsourcing affects exact
 solution performance. We compare formulations \textup{(SP1)} and \textup{(SP2)} on
 the 1,620 complete instances defined in Section~\ref{sec:instance-generation}. Both
-formulations use NG-DSSR for internal pricing and start from the same initial
-solution for each instance. The only experimental difference is the representation
-of outsourcing: \textup{(SP1)} generates outsourced job sets as columns, whereas
+formulations use NG-DSSR for internal pricing and start from the same initial solution
+for each instance. The experimental difference is confined to the outsourcing
+representation: \textup{(SP1)} generates outsourced job sets as columns, whereas
 \textup{(SP2)} represents the outsourcing decisions explicitly in the restricted
-master problem. The comparison comprises 3,240 runs and covers all job sizes,
-machine levels, due-window classes, setup structures, and outsourcing price levels.
+master problem. The comparison comprises 3,240 runs and spans all job sizes, machine
+levels, due-window classes, setup structures, and outsourcing price levels. Results
+are also separated by random and family setups to determine whether the relative
+performance of the two formulations is robust to the structure of the internal
+changeovers.
 
 \subsection{Sensitivity Analysis}\label{sec:sensitivity-analysis}
 
-Using the formulation selected from the preceding comparison, we analyze the
-sensitivity of the optimal outsourcing decisions to the economic conditions. The
-first analysis varies the availability and baseline price of outsourcing, whereas
-the second isolates the effect of the quantity-discount schedule. Paired instances
-are used so that the production environment remains unchanged within each
-comparison.
+Using the formulation selected from the preceding comparison, we analyze how the
+optimal outsourcing decisions respond to the outsourcing price and discount schedule.
+The first analysis varies the availability and baseline price of outsourcing, whereas
+the second isolates the effect of quantity discounts. All comparisons are paired so
+that the underlying jobs and production conditions remain unchanged. We report the
+random and family instances separately because the value of removing a job from the
+internal schedule may depend not only on its timing requirements but also on how it
+changes the sequence of family changeovers.
 
 \subsubsection{Impact of Outsourcing}\label{sec:impact-outsourcing}
 
 This analysis assesses the value of making outsourcing available and the sensitivity
 of the outsourcing decisions to its baseline price. For each original-scale
 production environment, the solution without outsourcing is compared with the
-solutions under the low, medium, and high price levels. The paired comparison reveals
-how machine availability, due-window width, and setup structure influence outsourcing
-usage and the resulting cost composition. In particular, it distinguishes direct
-outsourcing payments from changes in internal timing penalties and setup costs after
-jobs that are costly to accommodate internally are assigned to the external
-provider.
+solutions under the low, medium, and high price levels. These paired comparisons show
+how internal capacity, due-window width, and setup structure shape outsourcing usage
+and the resulting cost composition. The random--family comparison further indicates
+whether outsourcing primarily relieves timing congestion or also reorganizes the
+internal schedule by avoiding costly between-family changeovers. Accordingly, the
+analysis distinguishes direct outsourcing payments from the associated changes in
+internal earliness, tardiness, and setup costs.
 
 \subsubsection{Impact of Quantity Discounts}\label{sec:impact-discounts}
 
 Following \citet{dabia2019rich}, this analysis examines whether a quantity discount
-only lowers the payment for jobs that would already be outsourced or also changes
-the outsourcing decision itself. We use the five 50-job sets at the original time
-scale and the medium outsourcing price. Across all combinations of three machine
-levels, three due-window classes, and two setup structures, the default marginal
-rates $(1,0.85,0.70)$ are compared with a tariff that applies the undiscounted rate
-throughout. This produces 90 paired production environments and isolates the effect
-of the discount schedule while holding the standard job quotations and production
-conditions fixed. The comparison therefore identifies whether the discount changes
-only outsourcing expenditure or also the outsourced job set and the associated
-internal scheduling costs.
+only lowers the payment for jobs that would already be outsourced or also changes the
+outsourcing decision itself. We use the five 50-job sets at the original time scale
+and the medium outsourcing price. Across all combinations of three machine levels,
+three due-window classes, and two setup structures, the default marginal rates
+$(1,0.85,0.70)$ are compared with a tariff that applies the undiscounted rate
+throughout. This produces 90 paired production environments and isolates the discount
+effect while holding the standard job quotations and production conditions fixed.
+Comparing the random and family instances additionally tests whether discounts are
+more likely to alter the outsourced job set when outsourcing a group of jobs can also
+simplify the remaining family-changeover structure, rather than merely reduce the
+payment for an otherwise unchanged outsourcing decision.

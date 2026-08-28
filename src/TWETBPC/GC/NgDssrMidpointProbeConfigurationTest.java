@@ -14,6 +14,8 @@ public final class NgDssrMidpointProbeConfigurationTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		config.bidirectionalMidpointProbe = true;
 		config.bidirectionalMidpointProbeScore = " TIME ";
+		assertTrue(config.bidirectionalMidpointProbeAfterFirstDssrRound,
+				"later DSSR rounds should keep probing by default");
 		GCNGBBStyleBidirectionalNgDssr.validateMidpointProbeConfiguration(config);
 
 		config.bidirectionalMidpointProbeScore = "queue";
@@ -27,6 +29,12 @@ public final class NgDssrMidpointProbeConfigurationTest {
 		GCNGBBStyleBidirectionalNgDssr.validateMidpointProbeConfiguration(config);
 
 		System.out.println("NgDssrMidpointProbeConfigurationTest passed");
+	}
+
+	private static void assertTrue(boolean condition, String message) {
+		if (!condition) {
+			throw new AssertionError(message);
+		}
 	}
 
 	private static void assertRejected(TWETBPCConfig config, String expectedValue) {

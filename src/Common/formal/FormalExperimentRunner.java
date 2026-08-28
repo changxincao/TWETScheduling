@@ -257,6 +257,12 @@ public final class FormalExperimentRunner {
 				+ arguments.ngDssrSameNodeWarmStartTriggerRounds);
 		lines.add("ngDssrSameNodeWarmStartMinimumOccurrenceOverride="
 				+ arguments.ngDssrSameNodeWarmStartMinimumOccurrence);
+		lines.add("bidirectionalMidpointProbeAfterFirstDssrRoundOverride="
+				+ arguments.bidirectionalMidpointProbeAfterFirstDssrRound);
+		lines.add("ngDssrNonElementaryRouteCandidateLimitOverride="
+				+ arguments.ngDssrNonElementaryRouteCandidateLimit);
+		lines.add("ngDssrNonElementaryRouteUpdateModeOverride="
+				+ arguments.ngDssrNonElementaryRouteUpdateMode);
 		if (result != null) {
 			lines.add("status=" + result.getStatus());
 			lines.add("incumbent=" + result.getIncumbentCost());
@@ -273,7 +279,9 @@ public final class FormalExperimentRunner {
 				"outsourcingModel", "timeLimitSeconds", "maxNodes", "ngDssrSameNodeWarmStart",
 				"ngDssrSameNodeWarmStartWindow", "ngDssrSameNodeWarmStartPerJobLimit",
 				"ngDssrSameNodeWarmStartGlobalPairLimit", "ngDssrSameNodeWarmStartTriggerRounds",
-				"ngDssrSameNodeWarmStartMinimumOccurrence");
+				"ngDssrSameNodeWarmStartMinimumOccurrence",
+				"bidirectionalMidpointProbeAfterFirstDssrRound",
+				"ngDssrNonElementaryRouteCandidateLimit", "ngDssrNonElementaryRouteUpdateMode");
 
 		private final String action;
 		private final Path instance;
@@ -290,6 +298,9 @@ public final class FormalExperimentRunner {
 		private final Integer ngDssrSameNodeWarmStartGlobalPairLimit;
 		private final Integer ngDssrSameNodeWarmStartTriggerRounds;
 		private final Integer ngDssrSameNodeWarmStartMinimumOccurrence;
+		private final Boolean bidirectionalMidpointProbeAfterFirstDssrRound;
+		private final Integer ngDssrNonElementaryRouteCandidateLimit;
+		private final String ngDssrNonElementaryRouteUpdateMode;
 
 		private Arguments(Map<String, String> values) {
 			for (String key : values.keySet()) {
@@ -323,6 +334,12 @@ public final class FormalExperimentRunner {
 					"ngDssrSameNodeWarmStartTriggerRounds");
 			ngDssrSameNodeWarmStartMinimumOccurrence = optionalInteger(values,
 					"ngDssrSameNodeWarmStartMinimumOccurrence");
+			bidirectionalMidpointProbeAfterFirstDssrRound = optionalBoolean(values,
+					"bidirectionalMidpointProbeAfterFirstDssrRound");
+			ngDssrNonElementaryRouteCandidateLimit = optionalInteger(values,
+					"ngDssrNonElementaryRouteCandidateLimit");
+			ngDssrNonElementaryRouteUpdateMode = optionalString(values,
+					"ngDssrNonElementaryRouteUpdateMode");
 		}
 
 		/** 仅显式传参时覆盖正式 profile，未传参保持生产配置不变。 */
@@ -345,6 +362,17 @@ public final class FormalExperimentRunner {
 			if (ngDssrSameNodeWarmStartMinimumOccurrence != null) {
 				config.ngDssrSameNodeWarmStartMinimumOccurrence =
 						ngDssrSameNodeWarmStartMinimumOccurrence.intValue();
+			}
+			if (bidirectionalMidpointProbeAfterFirstDssrRound != null) {
+				config.bidirectionalMidpointProbeAfterFirstDssrRound =
+						bidirectionalMidpointProbeAfterFirstDssrRound.booleanValue();
+			}
+			if (ngDssrNonElementaryRouteCandidateLimit != null) {
+				config.ngDssrNonElementaryRouteCandidateLimit =
+						ngDssrNonElementaryRouteCandidateLimit.intValue();
+			}
+			if (ngDssrNonElementaryRouteUpdateMode != null) {
+				config.ngDssrNonElementaryRouteUpdateMode = ngDssrNonElementaryRouteUpdateMode;
 			}
 		}
 
@@ -395,6 +423,11 @@ public final class FormalExperimentRunner {
 		private static Integer optionalInteger(Map<String, String> values, String key) {
 			String result = values.get(key);
 			return result == null || result.trim().isEmpty() ? null : Integer.valueOf(result.trim());
+		}
+
+		private static String optionalString(Map<String, String> values, String key) {
+			String result = values.get(key);
+			return result == null || result.trim().isEmpty() ? null : result.trim();
 		}
 
 		private static Boolean optionalBoolean(Map<String, String> values, String key) {

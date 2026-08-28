@@ -348,6 +348,8 @@ public class TWETBPCConfig {
 	public double bidirectionalMidpointProbeHighImbalanceRatio = 10.0;
 	/** 2026-07-23: 同一次 ng-DSSR exact 内，以上一 DSSR 轮的 Tmid/失衡反馈作为下一轮 probe 初值；每轮仍独立 probe。 */
 	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;
+	/** 实验开关；false 时仅首轮 probe，后续 DSSR 轮固定复用首轮选中的 Tmid。 */
+	public boolean bidirectionalMidpointProbeAfterFirstDssrRound = true;
 	/** 2026-07-21: 上一轮完整正反向扩展耗时超过该倍数时，下一轮提前重新 probe。 */
 	public double bidirectionalMidpointProbeDssrImbalanceThreshold = 2.0;
 	/** 2026-07-09: ng-DSSR 扩展热路径细分计时诊断；默认关闭，避免高频 nanoTime 影响批量实验。 */

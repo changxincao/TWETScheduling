@@ -757,3 +757,15 @@ DSSR轮数本身仍有明显信息利用问题。第三次exact共保留16批、
 当前same-node“频率”也较粗。它统计pair是否存在于最近final ng-set，而final memory会保留一次pricing内所有历史更新；只要pair在多次调用最终都存在就计为高频，不能区分它阻断了多少witness、出现于多少不同DSSR轮或重复段。由于满足两次出现的候选超过25个，同频候选最终仍按job/member编号排序。这解释了10-pair只有中等收益，也给出更准确的后续方向：在一次困难exact内统计pair的跨轮出现次数、witness支持数和重复段多样性，使第二次exact即可复用5--10个真正高支持pair；final-set跨调用频率只作为稳定性门槛。该统计必须默认关闭并单独A/B，不能与probe修正同时上线。
 
 由此，剩余耗时优先级为：第一，midpoint probe的直接重复工作及其反向覆盖完整轮feedback；第二，family memory增长后昂贵的forward labeling；第三，top-1000 witness同质化造成每轮只取得约5个独立更新。RMP、启发式、backward和join均不是当前主要优化对象。下一次应先单变量测试“上一完整轮forward重时probe不得提高Tmid、上一轮已平衡则直接复用”的方向约束，再决定是否实现witness级pair支持度。
+
+### 32.13 取消轮间 probe、扩大 witness 池和全重复段更新 A/B
+
+本轮继续固定`n040-set02 family,m=2`、同一seed、`TIME`队列、300秒根节点预算及same-node高频pair预算10，只改变一个DSSR机制。这里两个上限必须区分：`candidateLimit=1000`是每轮保留并按reduced cost检查的非基本负路线候选数；`effectiveLimit=20`是按当前ng-memory过滤后，每轮最多允许真正触发更新的witness路线数，不存在“2000”这一设置。
+
+首先测试仅首轮执行midpoint probe，后续DSSR轮固定复用首轮选中的`Tmid`。实现时发现两个原有非probe路径边界：直接重建搜索状态时只初始化forward source、未初始化backward sink；以及修改`Tmid`后必须同步重建half-domain。缺少任一处理都会产生错误的两轮根节点闭合，因此前三个诊断run全部判为无效，不计入性能结论。修正后，运行稳定完成22--23轮DSSR，forward/backward队列、join和负列均正常。与每轮probe的10-pair基线相比，前三次完整exact由`229.149s`降至`180.947s`，约快21.0%；300秒内完整exact由3次增至4次。DSSR轮数没有下降，平均反而由20.67变为21.50；收益来自probe初始化累计`75.596s -> 10.409s`，代价是固定`Tmid=643.05`后backward累计`5.255s -> 35.045s`。因此轮间probe确有大额冗余，但固定首轮中点仍不是最终平衡策略，正式默认暂不改变。
+
+在上述首轮probe方案上，将`candidateLimit`从1000单独扩大到3000、仍只更新新增pair最少的一个重复段。300秒内完成5次exact，完整调用DSSR轮数为`20/21/17/18/19`，平均19.00；共耗`261.016s`并加入22条exact列。固定1000池同期完成4次、平均21.50轮、加入10条exact列。更大候选池扫描的路线中绝大多数仍会被同轮前面的更新阻断，但它能找到少量top-1000之外的新missing pair witness，因而同时降低轮数并提高返回列数量。更新扫描本身不是瓶颈，净效果为正；不过当前证据只有一个困难family实例，尚不足以把3000写入正式默认。
+
+最后恢复`candidateLimit=1000`，把更新模式从`minimumNewPairsSegment`改为`allSegments`。每条有效witness一次补齐其全部尚未阻断的连续重复段，DSSR轮数明显降为`6/7/9/9/7/9/9`，平均8.00；300秒完成7次exact并加入22条exact列。代价是每次调用加入约111--174个pair，完整调用累计1051个pair，而3000池最小段策略仅558个；例如第二次exact第6轮forward kept labels约8.35万，约为最小段策略同期的三倍。最终7次完整exact耗`278.463s`，平均每次39.78秒，优于固定1000最小段的55.63秒；但取得同样22条exact列比3000池最小段的`261.016s`仍慢约6.7%。因此“全部重复段”能真正减少DSSR轮数，但会以更弱dominance换取轮数，当前不能仅凭轮数判断更优。
+
+当前单算例排序为：取消轮间probe是明确的直接收益，但还需更合理的跨轮中点复用规则；witness池扩大到3000是本轮风险最低且端到端列产出最好的方向；all-segments适合作为激进对照，尚未证明优于3000池的minimum-segment。三个实验均未闭合root，不能据此声称最终全树加速，也暂不修改正式profile默认值。

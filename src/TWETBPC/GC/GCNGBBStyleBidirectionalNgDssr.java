@@ -1951,6 +1951,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		} else {
 			initializeSearchState(lp);
 			initializeForwardSource(lp);
+			initializeBackwardSink(lp);
 		}
 		exactInitializeStateNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
@@ -1963,10 +1964,32 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| ngDssrRound <= 1 || !Double.isFinite(ngDssrReusableTmid)) {
 			return false;
 		}
+		if (!config.bidirectionalMidpointProbeAfterFirstDssrRound) {
+			usePreviousDssrMidpointWithoutProbe();
+			return true;
+		}
 		double seed = dssrFeedbackProbeSeed();
 		runMidpointProbeIfEnabled(lp, seed, ngDssrProbeSeedSource);
 		ngDssrReusableTmid = tMid;
 		return true;
+	}
+
+	/** 后续 DSSR 轮固定复用首轮 probe 已完整验证过的 Tmid，不再做轮间 probe 或 adaptive 移动。 */
+	private void usePreviousDssrMidpointWithoutProbe() {
+		midpointProbeSearchStateReady = false;
+		midpointProbeLabelsReadyForJoin = false;
+		midpointProbePerformed = false;
+		midpointProbeReferenceSource = "dssrPreviousTmid";
+		midpointProbeReferenceTmid = ngDssrReusableTmid;
+		midpointProbeReferenceDirection = 0;
+		midpointProbeSelectedDirection = 0;
+		midpointProbeSelectedForwardMillis = Double.NaN;
+		midpointProbeSelectedBackwardMillis = Double.NaN;
+		midpointProbeCandidateCount = 0;
+		midpointProbeBracketCandidateCount = 0;
+		tMid = clampCurrentMidpoint(ngDssrReusableTmid);
+		rebuildHalfDomainForCurrentMidpoint();
+		midpointProbeSummary = "skipped:dssrAfterFirstRound";
 	}
 
 	private boolean isPreviousDssrRoundTimeImbalanced() {
@@ -2265,6 +2288,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		resetProbeAffectedStatistics();
 		initializeSearchState(lp);
 		initializeForwardSource(lp);
+		initializeBackwardSink(lp);
 		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 	}

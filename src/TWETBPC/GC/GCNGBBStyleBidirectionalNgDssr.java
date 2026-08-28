@@ -1964,7 +1964,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return false;
 		}
 		if (!config.bidirectionalMidpointProbeAfterFirstDssrRound) {
-			usePreviousDssrMidpointWithoutProbe();
+			double adaptiveMidpoint = dssrFeedbackProbeSeed();
+			useDssrAdaptiveMidpointWithoutProbe(adaptiveMidpoint);
 			return true;
 		}
 		double seed = dssrFeedbackProbeSeed();
@@ -1973,22 +1974,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return true;
 	}
 
-	/** 后续 DSSR 轮固定复用首轮 probe 已完整验证过的 Tmid，不再做轮间 probe 或 adaptive 移动。 */
-	private void usePreviousDssrMidpointWithoutProbe() {
+	/** 后续 DSSR 轮保留完整轮反馈产生的 adaptive 移动，只跳过额外的浅层 probe。 */
+	private void useDssrAdaptiveMidpointWithoutProbe(double adaptiveMidpoint) {
 		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 		midpointProbePerformed = false;
-		midpointProbeReferenceSource = "dssrPreviousTmid";
-		midpointProbeReferenceTmid = ngDssrReusableTmid;
+		midpointProbeReferenceSource = ngDssrProbeSeedSource;
+		midpointProbeReferenceTmid = adaptiveMidpoint;
 		midpointProbeReferenceDirection = 0;
 		midpointProbeSelectedDirection = 0;
 		midpointProbeSelectedForwardMillis = Double.NaN;
 		midpointProbeSelectedBackwardMillis = Double.NaN;
 		midpointProbeCandidateCount = 0;
 		midpointProbeBracketCandidateCount = 0;
-		tMid = clampCurrentMidpoint(ngDssrReusableTmid);
+		tMid = clampCurrentMidpoint(adaptiveMidpoint);
 		rebuildHalfDomainForCurrentMidpoint();
-		midpointProbeSummary = "skipped:dssrAfterFirstRound";
+		midpointProbeSummary = "skipped:dssrAfterFirstRound,adaptiveDirect=true";
 	}
 
 	private boolean isPreviousDssrRoundTimeImbalanced() {

@@ -3,7 +3,7 @@ package TWETBPC.GC;
 import TWETBPC.TWETBPCConfig;
 
 /**
- * 验证 ng-DSSR 固定 time midpoint probe 的通用配置边界。
+ * 验证 ng-DSSR time midpoint probe 及轮间复用的通用配置边界。
  */
 public final class NgDssrMidpointProbeConfigurationTest {
 
@@ -14,8 +14,8 @@ public final class NgDssrMidpointProbeConfigurationTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		config.bidirectionalMidpointProbe = true;
 		config.bidirectionalMidpointProbeScore = " TIME ";
-		assertTrue(config.bidirectionalMidpointProbeAfterFirstDssrRound,
-				"later DSSR rounds should keep probing by default");
+		assertTrue(!config.bidirectionalMidpointProbeAfterFirstDssrRound,
+				"later DSSR rounds should use complete-round adaptive feedback without another shallow probe");
 		GCNGBBStyleBidirectionalNgDssr.validateMidpointProbeConfiguration(config);
 
 		config.bidirectionalMidpointProbeScore = "queue";

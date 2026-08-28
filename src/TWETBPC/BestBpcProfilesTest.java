@@ -137,8 +137,8 @@ public final class BestBpcProfilesTest {
 		require("bestUB".equals(config.bidirectionalJoinBestThresholdMode), "ng join threshold");
 		require(config.bidirectionalCompletionBoundScalarPruning, "ng scalar completion pruning");
 		require(config.bidirectionalCompletionBoundArcFixing, "ng completion arc fixing");
-		require(config.bidirectionalMidpointProbeAfterFirstDssrRound,
-				"ng later DSSR rounds keep probing by default");
+		require(!config.bidirectionalMidpointProbeAfterFirstDssrRound,
+				"ng later DSSR rounds use adaptive feedback without another shallow probe");
 		require(!config.bidirectionalCompletionBoundSubtreeArcElimination, "ng hard subtree fixing off");
 		require(config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly,
 				"ng pricing-only subtree fixing");

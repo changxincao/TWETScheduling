@@ -758,14 +758,30 @@ DSSR轮数本身仍有明显信息利用问题。第三次exact共保留16批、
 
 由此，剩余耗时优先级为：第一，midpoint probe的直接重复工作及其反向覆盖完整轮feedback；第二，family memory增长后昂贵的forward labeling；第三，top-1000 witness同质化造成每轮只取得约5个独立更新。RMP、启发式、backward和join均不是当前主要优化对象。下一次应先单变量测试“上一完整轮forward重时probe不得提高Tmid、上一轮已平衡则直接复用”的方向约束，再决定是否实现witness级pair支持度。
 
-### 32.13 取消轮间 probe、扩大 witness 池和全重复段更新 A/B
+### 32.13 历史 A/B：固定 Tmid、扩大 witness 池和全重复段更新
 
 本轮继续固定`n040-set02 family,m=2`、同一seed、`TIME`队列、300秒根节点预算及same-node高频pair预算10，只改变一个DSSR机制。这里两个上限必须区分：`candidateLimit=1000`是每轮保留并按reduced cost检查的非基本负路线候选数；`effectiveLimit=20`是按当前ng-memory过滤后，每轮最多允许真正触发更新的witness路线数，不存在“2000”这一设置。
 
-首先测试仅首轮执行midpoint probe，后续DSSR轮固定复用首轮选中的`Tmid`。初版在修改`Tmid`后没有同步重建half-domain，造成错误的两轮根节点闭合；这些诊断run全部判为无效。随后曾误判非probe路径遗漏backward sink，并在`initialize()`中提前补了一次；严谨复核发现`solveRelaxedRound()`本来就会在正式扩展前统一初始化sink，日志中的`initialize.done bwQueue=1`和`backwardSink.done bwQueue=2`反而证明该补丁造成重复初始化。该重复不构成错误certificate，但会污染性能计时，因此已撤销。真正必须保留的修复只有变更`Tmid`后调用`rebuildHalfDomainForCurrentMidpoint()`；下述性能数字需以撤销重复sink后的复跑结果为准。
+本节最初测试的是仅首轮执行midpoint probe、后续DSSR轮固定复用首轮选中的`Tmid`，并非最终采用的“保留完整轮adaptive反馈、只取消后续浅探”。初版在修改`Tmid`后没有同步重建half-domain，造成错误的两轮根节点闭合；这些诊断run全部判为无效。随后曾误判非probe路径遗漏backward sink，并在`initialize()`中提前补了一次；严谨复核发现`solveRelaxedRound()`本来就会在正式扩展前统一初始化sink，日志中的`initialize.done bwQueue=1`和`backwardSink.done bwQueue=2`反而证明该补丁造成重复初始化。该重复不构成错误certificate，但会污染性能计时，因此已撤销。真正必须保留的正确性修复是变更`Tmid`后调用`rebuildHalfDomainForCurrentMidpoint()`；下述固定Tmid数字仅保留为诊断历史，不用于确定当前正式中点规则。
 
 撤销重复sink后的干净复跑中，仅首轮probe、`candidateLimit=1000`、minimum-segment在300秒内完成7次exact，轮数为`22/23/18/18/19/21/21`，共加入20条exact列；7次完整调用合计`271.317s`，平均38.76秒。将候选池单独扩大到3000后只完成4次exact，轮数为`20/21/17/18`，同样加入20条列；4次完整调用合计`247.526s`，随后第5次又运行40.387秒但未返回列。扩大池没有改变每轮最多20条有效witness的限制，只是将top-C保留阈值从第1000名放宽到第3000名。这样可能保留更多missing-pair证据，但也使join的非基本候选阈值剪枝更晚、更弱；本次最终列产出没有增加，不能认定为优化。
 
 恢复`candidateLimit=1000`并改用`allSegments`后，6次完整exact的轮数为`6/8/7/8/8/9`，平均7.67，确实远低于minimum-segment的20.29；但每次调用一次加入约111--173个pair，ng-memory快速膨胀，单轮dominance明显变弱。6次完整exact合计`272.607s`、平均45.43秒，只加入19条列，随后第7次运行11.160秒仍未返回列。它把“多轮、每轮较小”改成“少轮、每轮很大”，最终没有提高300秒内的列产出，也未闭合root。因此all-segments只证明轮数可压缩，不是当前有效加速方案。
 
-当前结论为：仅首轮probe仍有明确正信号，干净run在300秒内完成7次exact并加入20列，而每轮probe基线只完成3次、加入6列；但首轮probe选出的`Tmid`存在`434.7/643.05`运行间波动，尚需用确定性更强的跨轮中点规则验证。扩大池到3000没有增加列产出，all-segments虽将DSSR轮数降低约62%，却被单轮状态膨胀抵消；两者均不采用。三项只改变搜索分割或ng-memory收紧顺序，不改变elementary route集合和最终certificate语义，正式profile仍保持每轮probe、candidate1000和minimum-segment。
+本节的阶段结论只保留两点：扩大池到3000没有增加列产出；all-segments虽将DSSR轮数降低约62%，但在该n40固定Tmid单例中被单轮状态膨胀抵消。固定复用首轮`Tmid`不再作为候选方案，正式判断转入下一节的adaptive-direct多实例测试。
+
+### 32.14 保留 adaptive、取消后续浅探及 n30 多实例矩阵
+
+最终语义为：同一次exact的第一轮仍从default seed执行浅层midpoint probe；从第二轮开始，先用上一完整DSSR轮的forward/backward正式扩展耗时判断失衡，再从重侧存活label的split-time分位数计算adaptive `Tmid`。后续轮直接采用该adaptive值并重建half-domain，不再运行额外浅层probe。若上一轮不失衡或没有有效分位数，则复用上一完整轮`Tmid`。因此被取消的只有浅层候选测试，完整轮反馈及其adaptive移动均保留。
+
+代码路径重新逐项核对如下。`dssrFeedbackProbeSeed()`在`initializeSearchState()`清空上一轮搜索状态前读取上一完整轮的active labels；只有`roundCompleted=true`才由`rememberDssrRoundMidpointFeedback()`写入可复用耗时和`Tmid`，时限中断轮不会污染下一轮。direct分支随后清除probe复用标记，将probe耗时置为`NaN`、候选数置0，按新`Tmid`调用`rebuildHalfDomainForCurrentMidpoint()`，再由统一初始化路径创建一次forward source；`solveRelaxedRound()`仍只在`midpointProbeSearchStateReady=false`时创建一次backward sink。由于direct轮不把`NaN` probe时间加入正式F/B耗时，下一轮adaptive反馈只来自完整正式扩展。未发现第二个sink、重复正式labeling或不完整轮反馈写回。
+
+为避免继续依赖单个n40困难实例，本轮从正式n40 set01--03的family/random配对数据截取前30个任务及对应setup子矩阵，保持任务、setup和setup-cost数值，统一`m=2`、固定seed、root单节点和120秒上限，共运行21组。每个实例先用同一seed列快照，再比较adaptive-direct下的`minimum/1000`、`minimum/3000`和`allSegments/1000`；另对3个family实例增加“每轮继续浅探、minimum/1000”基线。全部run正常结束，无超时和异常；同一实例的各配置得到相同LB、UB和gap，incumbent可行性及目标重算一致性均为true。汇总文件为`test-results/bpc/diagnostic-n030-family-witness-matrix-20260828.csv`。
+
+3个family实例中，每轮继续浅探的平均wall/exact为`34.766/29.551s`，adaptive-direct minimum/1000降为`26.210/21.877s`，分别下降`24.6%/26.0%`；后续轮probe候选次数由246降为0。首轮probe仍保留，因此adaptive-direct仍有合计`17.324s` probe时间。该结果说明收益来自取消重复浅探，而不是取消adaptive移动，正式ng-DSSR profile据此升级为`2026-08-29-v4`并默认关闭后续轮浅探。
+
+候选池不应扩大。family下minimum/3000与minimum/1000的平均wall几乎相同（`26.171/26.210s`），exact也几乎相同（`21.958/21.877s`），但seen witness由`901053`增至`1903426`、stored由`167110`增至`472508`，分别约为`2.11/2.83`倍；random下minimum/3000也由`6.088/0.705s`恶化到`7.746/1.030s`。扩大池既没有减少总轮数，也显著放松top-1000 join阈值剪枝，因此全局继续保持1000。
+
+`allSegments/1000`在family上有真实信号：3例平均wall/exact为`18.922/15.117s`，相对minimum/1000下降`27.8%/30.9%`，总DSSR轮数由183降至99，seen witness由901053降至423186；set02、set03明显获益，set01则小幅变慢。random实例本身exact很轻，minimum/1000平均wall/exact为`6.088/0.705s`，优于allSegments的`7.128/0.918s`。其机制也符合预期：allSegments一次补齐一条witness的全部连续重复段，能更快打断family内大量可替代重复环，但会更快扩大memory、削弱dominance；普通random没有足够多轮数可节省，主要承担memory代价。
+
+因此当前不把allSegments改成全局正式默认，也不按已知`setupType`手工为family/random配置不同算法，否则正式配对比较会混入求解器调参差异。保守统一配置仍为`minimumNewPairsSegment + candidate1000`。若目标是单独构造family优化profile，现有3例支持`allSegments + 1000`继续做n40/n50和全树验证；在没有更大规模验证或结构自适应触发规则前，不作为统一最佳配置。

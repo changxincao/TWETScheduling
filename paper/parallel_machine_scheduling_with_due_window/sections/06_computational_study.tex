@@ -19,36 +19,36 @@ earliness--tardiness instances used by \citet{tanaka2009exact} and distributed i
 Tanaka's online repository at
 \url{https://sites.google.com/site/shunjitanaka/sips/benchmark-results-sips}.
 The instances generated for this study are available at
-\textit{[data repository URL]}. The source files specify a processing time, a due
-date, and earliness and tardiness weights for each job. By retaining or extracting
-jobs from the source instances, we construct five fixed job sets for each
-$n\in\{20,40,50,60,80,100\}$, giving 30 base job sets in total.
+\textit{[data repository URL]}. Consider a benchmark instance with job set
+$\mathcal J^0$. For each job $j\in\mathcal J^0$, the benchmark provides a
+processing time $p_j$, a due date $d_j^0$, and earliness and tardiness weights
+$\alpha_j$ and $\beta_j$. From each selected benchmark instance, we either retain
+all jobs or extract a subset $\mathcal J\subseteq\mathcal J^0$ to form a base job
+set; hence, $\mathcal J=\mathcal J^0$ when the benchmark instance is used in full.
+We construct five fixed base job sets for each
+$n=|\mathcal J|\in\{20,40,50,60,80,100\}$, giving 30 base job sets in total.
 
-For each base job set, we construct three parallel-machine variants, with
-$m\in\{2,3,4\}$ for $n\leq 60$ and $m\in\{3,4,5\}$ otherwise. Let $\mathcal J$
-denote the jobs in the resulting base job set and $\mathcal J^0$ all jobs in
-the Tanaka source instance from which it is constructed. Thus,
-$\mathcal J\subseteq\mathcal J^0$, with equality when the source instance is
-retained in full. For each job $j\in\mathcal J$, the due window is defined as
+For each base job set $\mathcal J$, we construct three parallel-machine variants,
+with $m\in\{2,3,4\}$ for $n\leq 60$ and $m\in\{3,4,5\}$ otherwise. For each job
+$j\in\mathcal J$, the due window is defined as
 \[
 [d_j^e,d_j^l]=[\max\{0,c_j-W_j\},c_j+W_j],
 \]
-where $c_j$ is the due-window center and $W_j$ is its half-width. To construct
-$c_j$, let $d_j^0$ denote the due date of job $j$ in the Tanaka source instance
-and define the retained workload ratio as
+where $c_j$ is the due-window center and $W_j$ is its half-width. We derive the
+center from the benchmark due date $d_j^0$ in two steps. First, we define the
+retained workload ratio
 \[
 r=\frac{\sum_{i\in\mathcal J}p_i}{\sum_{i\in\mathcal J^0}p_i},
 \]
-so that $r=1$ when the complete source instance is retained and $r<1$ when only
-a subset of its jobs is used. The due-window center is then computed as
+which equals one when $\mathcal J=\mathcal J^0$ and rescales the benchmark due
+date when only a subset of jobs is retained. Second, we set
+$m^{\mathrm{ref}}=3$ for $n\leq60$ and $m^{\mathrm{ref}}=4$ otherwise, and compute
 \[
 c_j=\left\lceil\frac{\operatorname{round}(d_j^0r)}{m^{\mathrm{ref}}}\right\rceil,
 \]
-where $m^{\mathrm{ref}}=3$ for $n\leq60$ and $m^{\mathrm{ref}}=4$ otherwise.
-Multiplying $d_j^0$ by $r$ adjusts the source single-machine time horizon to the
-workload retained in the current job set, while division by $m^{\mathrm{ref}}$
-maps that horizon to the parallel-machine setting. The same reference value is
-used for all three actual machine levels of a base job set, so varying $m$ changes
+where division by $m^{\mathrm{ref}}$ converts the due date from the single-machine
+benchmark horizon to the parallel-machine horizon. The same reference value is used
+for all three actual machine levels of a base job set, so varying $m$ changes
 internal capacity without simultaneously changing the due windows. Finally, we set
 $W_j=0$ in the zero-width class and independently draw $W_j$ from
 $\{80,\ldots,120\}$ and $\{280,\ldots,320\}$ in the narrow and wide classes,

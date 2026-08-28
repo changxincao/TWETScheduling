@@ -623,3 +623,9 @@ zero/random缺少第二项收益。zero中任意替换出口setup相同；random
 time-indexed允许这些非基本列进入临时master，所以该机制直接表现为弱LB。当前ng-DSSR master只接收elementary列，不能把三个纯单族分数流压入两台机器，因此没有同一visit-count gap；但ng-relaxed pricing仍会不断找到这些边界规避型组内循环，DSSR需要多轮memory refinement才能排除它们。两种算法共享的是“松弛路径偏向边界规避”，不同的是time-indexed把它变成下界漏洞，ng-DSSR把它变成certificate成本。
 
 论文解释应优先使用“昂贵family边界—重复覆盖—分数机器压缩”这一条主线，再用`1.527`对`1.5`、三组分数流和DSSR轮数作为证据；不应把窗口、dual、dominance和PWLF并列成多个同等层级的根因。
+
+### 32.5 后续 family 数量灵敏度分析的解释口径
+
+后续改变family数量时，将本节机制作为待检验假设，而不是预设结论。最直观的解释是：zero/random没有稳定的昂贵组间边界，pricing通常可以用成本相近的未访问任务替代重复任务，因此更倾向继续探索新任务；family结构则形成“组内普遍便宜、组外普遍昂贵”的低成本块，当组内有吸引力的新任务逐渐耗尽后，重复组内高dual任务可能比跨族探索更便宜。只有当`F>m`时，这种局部重复偏好才能进一步在master中把多个family各压缩为小于1单位的分数机器流，并规避真实解必需的跨族合并。
+
+灵敏度结果应按“局部列结构—全局分数拼装—最终gap”三层顺序分析。首先检查`F`增加后非基本单族列、重复位置`R`和覆盖放大倍数是否增加；其次检查单族正值流是否降到1以下、额外family touch `E`是否低于`F-m`；最后才判断这些变化是否对应root gap在`F=m+1`附近上升。若只有gap变化而重复覆盖与family-touch deficit没有同步变化，就不能归因于分数机器流压缩；若重复增加但`F<=m`时gap仍小，则应解释为pricing变难而不是下界漏洞。ng-DSSR同样只把重复结构用于解释certificate成本，不能直接套用time-indexed的visit-count gap结论。

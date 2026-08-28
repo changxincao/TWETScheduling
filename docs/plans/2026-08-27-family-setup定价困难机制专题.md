@@ -776,9 +776,11 @@ DSSR轮数本身仍有明显信息利用问题。第三次exact共保留16批、
 
 代码路径重新逐项核对如下。`dssrFeedbackProbeSeed()`在`initializeSearchState()`清空上一轮搜索状态前读取上一完整轮的active labels；只有`roundCompleted=true`才由`rememberDssrRoundMidpointFeedback()`写入可复用耗时和`Tmid`，时限中断轮不会污染下一轮。direct分支随后清除probe复用标记，将probe耗时置为`NaN`、候选数置0，按新`Tmid`调用`rebuildHalfDomainForCurrentMidpoint()`，再由统一初始化路径创建一次forward source；`solveRelaxedRound()`仍只在`midpointProbeSearchStateReady=false`时创建一次backward sink。由于direct轮不把`NaN` probe时间加入正式F/B耗时，下一轮adaptive反馈只来自完整正式扩展。未发现第二个sink、重复正式labeling或不完整轮反馈写回。
 
-为避免继续依赖单个n40困难实例，本轮从正式n40 set01--03的family/random配对数据截取前30个任务及对应setup子矩阵，保持任务、setup和setup-cost数值，统一`m=2`、固定seed、root单节点和120秒上限，共运行21组。每个实例先用同一seed列快照，再比较adaptive-direct下的`minimum/1000`、`minimum/3000`和`allSegments/1000`；另对3个family实例增加“每轮继续浅探、minimum/1000”基线。全部run正常结束，无超时和异常；同一实例的各配置得到相同LB、UB和gap，incumbent可行性及目标重算一致性均为true。汇总文件为`test-results/bpc/diagnostic-n030-family-witness-matrix-20260828.csv`。
+为避免继续依赖单个n40困难实例，本轮从正式n40 set01--03的family/random配对数据截取前30个任务及对应setup子矩阵，保持任务、setup和setup-cost数值，统一`m=2`、固定seed、root单节点和120秒上限，共运行21组。每个实例先用同一seed列快照，再比较adaptive-direct下的`minimum/1000`、`minimum/3000`和`allSegments/1000`；另对3个family实例增加“每轮继续浅探、minimum/1000”基线。该矩阵统一开启实验性的same-node高频pair复用，窗口3、每job 2、全局10、至少出现2次，使witness策略和probe对照保持同一条件。全部run正常结束，无超时和异常；同一实例的各配置得到相同LB、UB和gap，incumbent可行性及目标重算一致性均为true。汇总文件为`test-results/bpc/diagnostic-n030-family-witness-matrix-20260828.csv`。
 
 3个family实例中，每轮继续浅探的平均wall/exact为`34.766/29.551s`，adaptive-direct minimum/1000降为`26.210/21.877s`，分别下降`24.6%/26.0%`；后续轮probe候选次数由246降为0。首轮probe仍保留，因此adaptive-direct仍有合计`17.324s` probe时间。该结果说明收益来自取消重复浅探，而不是取消adaptive移动，正式ng-DSSR profile据此升级为`2026-08-29-v4`并默认关闭后续轮浅探。
+
+由于正式profile默认关闭same-node warm start，又补做3个family实例的关闭复用配对。adaptive-direct的平均wall/exact为`29.47/25.04s`，每轮继续浅探为`50.31/45.38s`，分别下降约`41.4%/44.8%`，后续轮probe候选次数由459降为0；两组总DSSR轮数为231/227，几乎相同，说明主要节省的是浅探本身及其错误中点选择，不是靠减少DSSR轮数。分实例看，set01和set03基本持平，set02的exact由`80.80s`降至`18.46s`，因此不能声称每个实例都有同幅度提速，但可以确认正式默认条件下没有总体退化，收益也不依赖pair复用。6组均根节点闭合并保持相同LB/UB与验证结果。
 
 候选池不应扩大。family下minimum/3000与minimum/1000的平均wall几乎相同（`26.171/26.210s`），exact也几乎相同（`21.958/21.877s`），但seen witness由`901053`增至`1903426`、stored由`167110`增至`472508`，分别约为`2.11/2.83`倍；random下minimum/3000也由`6.088/0.705s`恶化到`7.746/1.030s`。扩大池既没有减少总轮数，也显著放松top-1000 join阈值剪枝，因此全局继续保持1000。
 

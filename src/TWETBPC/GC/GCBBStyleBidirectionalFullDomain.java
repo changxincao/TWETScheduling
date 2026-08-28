@@ -223,9 +223,13 @@ public class GCBBStyleBidirectionalFullDomain {
 
 	private LabelQueueOrdering parseQueueOrdering(String value) {
 		if (value == null) {
-			return LabelQueueOrdering.REDUCED_COST;
+			return LabelQueueOrdering.TIME;
 		}
 		String normalized = value.trim().toLowerCase();
+		if ("reducedcost".equals(normalized) || "reduced_cost".equals(normalized)
+				|| "reduced-cost".equals(normalized) || "rc".equals(normalized)) {
+			return LabelQueueOrdering.REDUCED_COST;
+		}
 		if ("time".equals(normalized)) {
 			return LabelQueueOrdering.TIME;
 		}
@@ -233,7 +237,7 @@ public class GCBBStyleBidirectionalFullDomain {
 				|| "reachable".equals(normalized)) {
 			return LabelQueueOrdering.REACHABLE_SIZE;
 		}
-		return LabelQueueOrdering.REDUCED_COST;
+		return LabelQueueOrdering.TIME;
 	}
 
 	private JoinBestThresholdMode parseJoinBestThresholdMode(String value) {

@@ -715,3 +715,13 @@ time-indexed保留为root arc/window preprocessing、elementary seed columns、�
 本次同时重新核对了配置读者。当前ng-DSSR真正使用`bidirectionalMidpointProbe`、`PopLimit=10000`、固定`score=time`、`EarlyStopRatio=1.5`、`ReuseWithinDssr=true`和`DssrImbalanceThreshold=2.0`；步长`0.10*width`、bracket容差`0.05*width`为核心常量。`MaxCandidates`、`MoveRatio`、`TimeTolerance`、`TieScore/TieTolerance`、`ExtraCandidatesAfterThreshold`、`BracketOnDirectionChange`和`HighImbalanceRatio`只控制旧普通双向类，出现在ng-DSSR快照中不影响本次主线。剩余一个真实配置风险是`parseQueueOrdering()`对null或未知字符串仍静默回退`REDUCED_COST`；当前默认值、正式profile、回归断言和effective快照已共同锁定`TIME`，所以本次运行不受影响，但后续宜将未知值改成fail-fast，避免拼写错误重新触发同类性能退化。`completionBoundQueueOrdering=fifo`属于独立completion-bound DP，不是遗漏的label TIME配置。
 
 12次TIME exact合计262轮DSSR，probe累计`284.297s`，平均每次exact`23.69s`、每轮`1.085s`，不是单个候选花费21--32秒；每轮平均测试2.71个候选。大量轮次机械得到`seed+208.35`并非算法“固定选择”该点，而是先按10%宽度移动`416.7`，方向反转后取中点，再因5%宽度容差恰为`208.35`而立即停止。下一项A/B仍应先限制probe不得反向推翻上一完整轮反馈；步长变小和历史浅层best选择均排在其后。
+
+### 32.10 TIME回退统一、elapsed语义与启发式定价判断
+
+当前对TIME收益的解释分成两条。对probe而言，核心是固定5000-pop样本从“按reduced cost抽取任意深度label”改成按时间资源顺序展开，因此两侧前缀更接近对应时间域的有序样本，Tmid轨迹明显稳定。对完整labeling而言，核心是扩展顺序改变后，更早建立可能支配后续状态的时间前沿，减少深层同族重复label先生成大量后代、后续再被支配的冗余。两条机制相关，但不能把完整labeling的11.9倍提速全部解释成probe更准。
+
+按用户决定，所有8个labeling实现的`parseQueueOrdering()`现已统一为：null和未知字符串回退`TIME`，显式`reducedCost/reduced_cost/reduced-cost/rc`仍保留为受控A/B入口，`reachableSize`语义不变。涉及单向GC、普通双向、asymmetric、full-domain、node-join、旧GCNGBB、ng-DSSR和partial-dominance；completion-bound自己的FIFO/REDUCED_COST解析未改。新增`LabelQueueOrderingFallbackTest`逐个验证三种口径，8个实现focused编译以及现有profile、midpoint、effective-engine三组回归测试均通过。
+
+probe日志中的`elapsed`是墙钟运行时间，不是调度完成时间、label的时间资源，也不是剩余工作量。`forwardElapsedMillis/backwardElapsedMillis`分别由`System.nanoTime()`包围当前候选下正向/反向最多5000次queue pop的扩展循环，包含取队列、构造扩展、PWLF更新、completion-bound判断和dominance维护。若某侧提前耗尽，其elapsed是该侧完整工作时间；未耗尽侧的elapsed只是5000-pop前缀时间。因此单侧耗尽时，只有“未耗尽侧当前elapsed已经不小于已耗尽侧完整elapsed”才能严格判定未耗尽侧最终更重；否则需要定向加深，不能直接强制移动。
+
+当前family TIME run不支持启发式定价存在实现或列质量问题。`HeuristicPricing`共94次、81次成功、加入17496条elementary列，只耗`9.896s`；master LP在214次pricing后重解中合计`3.362s`。主循环在任一启发式调用加列后立即重解并从第一个engine重启，只有当前dual下启发式返回0列才调用ng-DSSR exact。12次exact之前均可观察到启发式先失败，exact加1--7列后有时又使启发式找到少量新列，符合预期协同流程。启发式直接耗时仅约占总900秒的1.1%，也没有造成LP建模瓶颈；关闭它很可能把前期17496条便宜列转移给昂贵exact。尚不能排除大量相似启发式列通过dual退化改变后续exact轨迹，但这属于间接性能假设，必须用相同TIME基线做heuristic on/off单变量A/B，并比较首次exact出现位置、RMP列数、dual、DSSR轮数和总exact时间后才能判断，本轮不改启发式配置。

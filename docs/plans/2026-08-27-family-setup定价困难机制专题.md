@@ -705,3 +705,13 @@ time-indexed保留为root arc/window preprocessing、elementary seed columns、�
 因此下一项A/B不应先把10%步长简单改小。小步长会增加walk候选数，而当前probe本身已消耗近三分之一exact时间；它只能减轻过冲，不能修复浅层方向与完整方向相反。更直接的低风险策略是让上一完整轮提供方向约束：上一轮forward重时，下一轮adaptive seed之后的probe不得再提高Tmid；backward重时不得降低；上一轮已经在阈值内时直接复用上一Tmid，不再probe。第一轮没有完整反馈时仍可保留现有probe。现有自然对照已经足以支持先测该策略，没有必要先对同一dual/ng-set完整跑多个Tmid网格。
 
 “仅一侧耗尽”仍应作为独立的小修复，但本轮未实现。建议在`acceptableRatio`判断前处理：仅backward耗尽时强制认为forward更重，仅forward耗尽时强制认为backward更重，不能按局部elapsed比接受；两侧都未耗尽时才使用启发式elapsed比，两侧都耗尽时结果完整。它只改变probe停止和移动方向，不改变定价集合或certificate。当前bracket采用最后测试点而非历史最佳点不是主要矛盾：本轮最后的浅层score通常确实最好，但它对完整负载预测仍然错误；即使改成“浅层score最小”也很可能继续选`seed+208.35`。保存较早候选还需要重跑或保留大label状态，因此该项暂不修改，优先级低于完整轮方向约束和单侧耗尽判据。
+
+### 32.9 TIME排序的作用机制与单侧耗尽判据修正
+
+进一步对比相同第一次exact的内部规模后，`TIME`不只是改变Tmid轨迹。`REDUCED_COST`共保留`547289`个forward label、构造`15856151`次forward扩展，`TIME`分别降为`102895`和`2449755`，即约减少`81.2%`和`84.6%`；两者DSSR轮数同为23。当前forward队列的`TIME`顺序按最早完成时间递增，backward按最晚完成时间递减，而`REDUCED_COST`会优先扩展当前内部reduced cost最低、但可能处在任意时间层和深度的label。family内部低setup和重复取dual使后者尤其容易持续追逐深层同族重复路径，在更浅、更可能形成有效dominance envelope的时间状态建立前先生成大量后代。`TIME`更接近单调资源拓扑顺序，因此既让固定5000-pop probe样本更能反映Tmid两侧的时间域工作，也让正式labeling更早建立可支配后续状态的前沿。第一次exact的Tmid范围由`686.35--1078.05`收窄为`643.05--787.35`，完整F/B耗时比均值由约`1270.6`降为`9.65`；但TIME的23轮仍全部大于2，说明probe准确性得到数量级改善但没有恢复为可靠完整负载预测器。
+
+此前“只要一侧耗尽就把未耗尽侧强制视为更重”的一般表述过强。若backward已在100ms完成，forward在5000-pop处用时95ms但只剩极少工作，forward最终仍可能小于100ms。可确定的判据应为：一侧耗尽且未耗尽侧当前elapsed已经不小于已耗尽侧时，未耗尽侧最终工作量必然更大；若未耗尽侧当前更快，则方向仍不确定，应只对未耗尽侧定向追加少量pop，直到它也耗尽、累计elapsed越过已耗尽侧，或达到额外预算。旧`492 -> 908.7`异常属于前一种确定情况：forward未耗尽且已用`38.660ms`，backward已耗尽且只用`32.946ms`，因此可以安全判定forward更重。若额外预算后仍不确定，应优先保留上一完整轮方向或当前seed，不宜立即做10%全域移动。
+
+本次同时重新核对了配置读者。当前ng-DSSR真正使用`bidirectionalMidpointProbe`、`PopLimit=10000`、固定`score=time`、`EarlyStopRatio=1.5`、`ReuseWithinDssr=true`和`DssrImbalanceThreshold=2.0`；步长`0.10*width`、bracket容差`0.05*width`为核心常量。`MaxCandidates`、`MoveRatio`、`TimeTolerance`、`TieScore/TieTolerance`、`ExtraCandidatesAfterThreshold`、`BracketOnDirectionChange`和`HighImbalanceRatio`只控制旧普通双向类，出现在ng-DSSR快照中不影响本次主线。剩余一个真实配置风险是`parseQueueOrdering()`对null或未知字符串仍静默回退`REDUCED_COST`；当前默认值、正式profile、回归断言和effective快照已共同锁定`TIME`，所以本次运行不受影响，但后续宜将未知值改成fail-fast，避免拼写错误重新触发同类性能退化。`completionBoundQueueOrdering=fifo`属于独立completion-bound DP，不是遗漏的label TIME配置。
+
+12次TIME exact合计262轮DSSR，probe累计`284.297s`，平均每次exact`23.69s`、每轮`1.085s`，不是单个候选花费21--32秒；每轮平均测试2.71个候选。大量轮次机械得到`seed+208.35`并非算法“固定选择”该点，而是先按10%宽度移动`416.7`，方向反转后取中点，再因5%宽度容差恰为`208.35`而立即停止。下一项A/B仍应先限制probe不得反向推翻上一完整轮反馈；步长变小和历史浅层best选择均排在其后。

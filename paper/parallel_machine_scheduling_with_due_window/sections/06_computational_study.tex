@@ -5,13 +5,11 @@ framework and the sensitivity of the outsourcing decisions to key parameters. We
 first disable outsourcing and compare the proposed continuous-time
 NG-DSSR pricing algorithm with the time-indexed pricing framework of
 \citet{bulhoes2020exact} for the resulting pure parallel-machine scheduling problem.
-We next isolate how the number of job families affects the two pricing approaches,
-and then compare the two outsourcing formulations. Finally, we analyze the effects
-of outsourcing availability, the baseline outsourcing price, and quantity discounts,
-paying particular attention to whether random and family-structured setups induce
-different responses. All algorithms were implemented in Java and use IBM ILOG CPLEX
-22.1.1 as the LP solver. Each run uses a single thread and is subject to a time limit
-of 10,800 seconds.
+We next compare the two outsourcing formulations. Finally, we conduct sensitivity
+analyses of the number of job families, outsourcing availability and baseline price,
+and quantity discounts. All algorithms were implemented in Java and use IBM ILOG
+CPLEX 22.1.1 as the LP solver. Each run uses a single thread and is subject to a time
+limit of 10,800 seconds.
 % Add the final server CPU, memory, and operating system before reporting results.
 
 \subsection{Instance Generation}\label{sec:instance-generation}
@@ -124,7 +122,30 @@ are organized. Their comparison therefore isolates whether family structure, rat
 than a general increase in setup times, changes the relative behavior of continuous-
 time and time-indexed pricing.
 
-\subsection{Impact of Family Structure on Internal Pricing}
+\subsection{Comparison of Outsourcing Formulations}\label{sec:outsourcing-formulation-comparison}
+
+The next experiment evaluates how the representation of outsourcing affects exact
+solution performance. We compare formulations \textup{(SP1)} and \textup{(SP2)} on
+the 1,620 complete instances defined in Section~\ref{sec:instance-generation}. Both
+formulations use NG-DSSR for internal pricing and start from the same initial solution
+for each instance. The experimental difference is confined to the outsourcing
+representation: \textup{(SP1)} generates outsourced job sets as columns, whereas
+\textup{(SP2)} represents the outsourcing decisions explicitly in the restricted
+master problem. The comparison comprises 3,240 runs and spans all job sizes, machine
+levels, due-window classes, setup structures, and outsourcing price levels. Results
+are also separated by random and family setups to determine whether the relative
+performance of the two formulations is robust to the structure of the internal
+changeovers.
+
+\subsection{Sensitivity Analysis}\label{sec:sensitivity-analysis}
+
+We first examine how the number of job families relative to the number of machines
+affects NG-DSSR and time-indexed pricing. Using the formulation selected from the
+preceding comparison, we then analyze the effects of outsourcing availability and
+baseline price, followed by the effect of quantity discounts. All comparisons are
+paired so that the factors not under examination remain unchanged.
+
+\subsubsection{Impact of Family Structure on Internal Pricing}
 \label{sec:family-pricing-impact}
 
 The matched random--family comparison identifies whether setup organization affects
@@ -148,32 +169,6 @@ the number of DSSR rounds and exact-pricing effort as complementary evidence for
 NG-DSSR. A threshold interpretation is made only if the change around $F=m+1$ is
 consistently accompanied by the corresponding change in repeated-job behavior across
 the five matched job sets.
-
-\subsection{Comparison of Outsourcing Formulations}\label{sec:outsourcing-formulation-comparison}
-
-The next experiment evaluates how the representation of outsourcing affects exact
-solution performance. We compare formulations \textup{(SP1)} and \textup{(SP2)} on
-the 1,620 complete instances defined in Section~\ref{sec:instance-generation}. Both
-formulations use NG-DSSR for internal pricing and start from the same initial solution
-for each instance. The experimental difference is confined to the outsourcing
-representation: \textup{(SP1)} generates outsourced job sets as columns, whereas
-\textup{(SP2)} represents the outsourcing decisions explicitly in the restricted
-master problem. The comparison comprises 3,240 runs and spans all job sizes, machine
-levels, due-window classes, setup structures, and outsourcing price levels. Results
-are also separated by random and family setups to determine whether the relative
-performance of the two formulations is robust to the structure of the internal
-changeovers.
-
-\subsection{Sensitivity Analysis}\label{sec:sensitivity-analysis}
-
-Using the formulation selected from the preceding comparison, we analyze how the
-optimal outsourcing decisions respond to the outsourcing price and discount schedule.
-The first analysis varies the availability and baseline price of outsourcing, whereas
-the second isolates the effect of quantity discounts. All comparisons are paired so
-that the underlying jobs and production conditions remain unchanged. We report the
-random and family instances separately because the value of removing a job from the
-internal schedule may depend not only on its timing requirements but also on how it
-changes the sequence of family changeovers.
 
 \subsubsection{Impact of Outsourcing}\label{sec:impact-outsourcing}
 

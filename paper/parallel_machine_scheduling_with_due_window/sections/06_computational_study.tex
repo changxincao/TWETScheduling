@@ -38,38 +38,27 @@ where $c_j$ is the due-window center and $W_j$ is its half-width. We set
 \[
 c_j=\left\lceil\frac{\operatorname{round}(d_j^0r)}{m^{\mathrm{ref}}}\right\rceil,
 \]
-where $d_j^0$ is the due date of job $j$ in the benchmark instance,
-$m^{\mathrm{ref}}=3$ for $n\leq60$ and $m^{\mathrm{ref}}=4$ otherwise. The
-retained workload ratio $r$ is defined as
+where the retained workload ratio $r$ is defined as
 \[
 r=\frac{\sum_{i\in\mathcal J}p_i}{\sum_{i\in\mathcal J^0}p_i}
 \].
-This ratio equals one when
-$\mathcal J=\mathcal J^0$ and rescales the benchmark due date when only a subset of
-jobs is retained. Division by $m^{\mathrm{ref}}$ then converts the adjusted due date
-from the single-machine benchmark horizon to the parallel-machine horizon. The same
-reference value is used for all three actual machine levels of a base job set, so
-varying $m$ changes internal capacity without simultaneously changing the due
-windows. Finally, we set
-$W_j=0$ in the zero-width class and independently draw $W_j$ from
-$\{80,\ldots,120\}$ and $\{280,\ldots,320\}$ in the narrow and wide classes,
-respectively.
+It rescales the benchmark due date to the workload of the retained job set
+$\mathcal J$. We set $m^{\mathrm{ref}}=3$ for $n\leq60$ and
+$m^{\mathrm{ref}}=4$ otherwise to convert the adjusted due date from the
+single-machine benchmark scale to a representative parallel-machine scale. We
+consider three due-window classes: $W_j=0$ for zero-width windows, whereas $W_j$ is
+drawn independently from $\{80,\ldots,120\}$ and $\{280,\ldots,320\}$ for narrow
+and wide windows, respectively.
 
-For every job set, we generate two matched sequence-dependent setup structures. In
-the random instances, setup times contain no explicit job grouping and are converted
-into a directed metric. The corresponding family instances are built from the same
-base metric, partition the jobs into three to six approximately balanced families,
-and add a changeover component to between-family transitions. This construction
-reflects the
-smaller within-family and larger between-family setups commonly considered in family
-scheduling \citep{schutten1996parallel,schaller2000flowline}, while keeping the
-overall setup intensity comparable across the two structures. In both cases, the
-average setup time is approximately $0.5\bar p$, where $\bar p$ is the average
-processing time, no setup time exceeds $\bar p$, and the directed triangle
-inequality is satisfied. The average between-family setup in the family instances is
-approximately four to five times the average within-family setup. The resulting
-setup intensity lies between the small and large setup classes used by
-\citet{bulhoes2020exact}. Setup costs are defined as $\kappa_{ij}=20s_{ij}$.
+For each job set, we generate random and family sequence-dependent setup instances.
+The random instances contain no explicit job-family structure. In the family
+instances, jobs are partitioned into three to six approximately balanced families,
+with smaller within-family setups and larger between-family setups. In both classes,
+the average setup time is approximately $0.5\bar p$, where $\bar p$ is the average
+processing time, no setup time exceeds $\bar p$, and the directed triangle inequality
+is satisfied. In the family instances, the average between-family setup is
+approximately four to five times the average within-family setup. Setup costs are
+defined as $\kappa_{ij}=20s_{ij}$.
 
 Each original-scale production environment is completed by an outsourcing tariff.
 Following \citet{lee2011twostage}, who scale outsourcing costs with processing

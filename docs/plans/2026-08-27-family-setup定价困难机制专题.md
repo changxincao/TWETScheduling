@@ -624,7 +624,57 @@ time-indexed允许这些非基本列进入临时master，所以该机制直接�
 
 论文解释应优先使用“昂贵family边界—重复覆盖—分数机器压缩”这一条主线，再用`1.527`对`1.5`、三组分数流和DSSR轮数作为证据；不应把窗口、dual、dominance和PWLF并列成多个同等层级的根因。
 
-### 32.5 后续 family 数量灵敏度分析的解释口径
+### 32.5 family 结构下 ng-DSSR 的剩余优化空间
+
+#### 32.5.1 当前真正慢在哪里
+
+当前证据已经把主要耗时定位到 exact ng-DSSR 的 forward labeling，而不是RMP、join、候选扫描或time-indexed预处理。`n040-set02 family`第一次exact pricing耗时`732.079s`、经历23轮DSSR，只返回18条elementary列；其中forward阶段为`711.978s`，占该次exact的`97.3%`，init、backward和join分别仅为`15.698s/0.568s/3.262s`。该调用累计约`1586万`次forward extension和`54.7万`个保留forward labels。完成时间bound已经剪掉约`1050万`次扩展，但仍有约`534万`次扩展存活，因此不能把瓶颈归因于缺少现有completion bound。
+
+困难由两个乘数共同形成。第一个是DSSR轮数：低setup块内存在大量结构等价的重复环，每轮只击中一部分后，下一批替代环仍然为负。第二个是后期单轮成本：memory扩大后label状态被进一步区分，dominance变弱；宽时间域和PWLF envelope又使大量label长期存活。`F=2,m=2`实例虽只有`0.450%`的time-indexed根gap，ng-DSSR仍累计107轮、exact耗时`91.3s`，说明弱LB不是ng-DSSR慢的必要条件；真正应优化的是“每轮工作量乘轮数”，而不是继续围绕root gap调参。
+
+候选处理不是直接时间热点，但暴露了轮数问题。`n040-set02 family`困难调用中约22000条witness进入更新检查，21891条在轮到时已被同轮前面的pair阻断，最终只有109条路线产生更新。高blocked比例本身说明minimum-segment更新有效，不代表扫描这两万条路线很耗时；它说明top-1000 reduced-cost池高度同质，一轮labeling付出数十秒后通常只能取得少量彼此独立的结构信息，随后还要重新跑完整一轮。
+
+#### 32.5.2 第一优先级：让 `Tmid` 跟随完整一轮的真实负载
+
+当前双向定价的实际分割严重偏向forward。困难调用多轮的forward/backward时间比超过数百，个别轮次达到数千；例如第一轮约为`25416ms/128ms`，后续仍出现`25613ms/29ms`以及更极端的不平衡。此时继续优化join或backward没有意义，最直接的目标是把一部分路径状态转移到backward侧，使两侧最大工作量下降。
+
+现有adaptive midpoint会在每轮前做有上限的浅层probe，但probe只弹出约万级labels，难以预测forward在宽时间域下数百万扩展的尾部爆炸。已有日志中，上一完整轮已经明确forward更重，下一轮probe仍可能把`Tmid`向更晚时间移动，导致完整轮继续失衡。这不是定价正确性错误，而是probe目标与完整工作量不一致。
+
+近期最值得做的A/B只改变midpoint选择，不改变DSSR、dominance、候选池或返回列：用上一完整轮的forward/backward耗时、扩展数和保留label数决定下一轮允许移动的方向，forward明显更重时`Tmid`只能不增，backward明显更重时只能不减；probe在重侧达到pop cap且队列仍非空时标记为截断，不能再把当前elapsed ratio当作完整工作量估计；先测试直接采用full-round feedback seed，再测试在该seed附近做窄范围probe，不能让浅probe把分割点重新推回已证实更差的方向。
+
+任意内部`Tmid`在forward/backward覆盖和join保持完整时只影响计算分工，不改变可生成路线集合和certificate，因此这是当前风险最低、最可能直接降低`711.978s`主体耗时的方向。验收必须同时比较每轮forward/backward时间、最大单侧时间、extensions、labels、DSSR轮数、最终最小reduced cost、root bound和certificate；只看总时间不足以判断是否稳定。
+
+#### 32.5.3 第二优先级：固定更新预算下提高 witness 的独立性
+
+当前每轮先按reduced cost保留top-1000 non-elementary routes，再依次用minimum missing segment更新，最多处理20条有效路线。该策略优先得到最负witness，但family块内大量路线只是在同一个重复段周围替换邻近任务，前几次更新后其余候选会一起被阻断。问题不是20条预算太小，而是付出一轮labeling后得到的候选代表性不足。
+
+可在不改变exact pricing流程和pair预算的前提下，增加一个很小的结构代表池：对完整non-elementary候选记录其minimum-missing-pair segment、重复job和缺失pair集合的规范签名；主池仍保留reduced-cost top-1000，辅助池只为不同阻断签名各保留最负代表。更新时在虚拟ng overlay上选择仍未被已选pair阻断、且带来新缺失pair或新重复段的路线，最终仍执行现有`effectiveRouteUpdateLimit=20`和minimum-segment规则。
+
+目标是减少下一轮次数，不是增大一轮加入的pair数。第一步只加诊断，统计每轮top-1000中的不同签名数、每个签名规模、虚拟选择后可独立更新的路线数和pair总量；确认同质性确实压缩有效更新后再实现辅助池。A/B必须固定20条有效路线和pair预算，避免把少跑轮次与大memory造成的dominance退化混在一起。
+
+#### 32.5.4 第三优先级：同样大小下构造连贯的初始 ng memory
+
+简单把`nearestK`从4扩大到8已有负面证据：困难调用的DSSR轮数下降，但exact时间反而从`288.116s`上升到`354.134s`。初始空集A/B也没有收益。因此后续若改初始memory，重点不能再是加大K，而应是在相同K下让限制更有结构。
+
+标准ng更新中，重复job `j`只有在整个`j ... j`中间段的各中心节点都持续记住`j`时才会被阻断。当前nearest-K由每个中心任务独立选择邻居；在稠密family内，各行的4个最近任务可能不同，于是没有某个高风险重复job能穿过整个块持续留在memory中。可从setup图自动识别低成本块，在每个块内选少量高repeat-risk或高dual anchor，并让该块的中心任务共享这些anchor。平均ng-set大小仍为K=4，却能完整阻断少数最有吸引力的组内重复环，而不是对许多不同任务各限制一小段。
+
+该方向必须先做静态诊断：统计困难witness中各重复job的频率，以及每个job作为member被多少同块中心的当前nearest-K包含。只有出现“高频重复job但跨中心memory覆盖很低”时，cluster-anchor假设才成立。随后单独对比`nearestK4`与同大小的`clusterAnchorK4`，不能与witness diversity或warm start同时修改。分块必须由setup矩阵自动得到，不能依赖人工family标签。
+
+#### 32.5.5 较低优先级和研究型后备方案
+
+有界same-node warm start已有默认关闭实现。历史小样本出现约7%的中等收益，但增大memory也有明确反例；若前三项后仍有困难，只考虑在同一node前一次exact超过轮数或label阈值时复用极少数高频pair，设置严格总cap并随简单调用立即清空。它只能作为单独A/B，不能直接打开全量历史memory。
+
+time-indexed结果可用于提供极少量初始提示：从root正值非基本列提取高频重复pair，经repeatability检查后追加到初始ng memory，但不能让这些列进入elementary master，也不能一次导入完整重复结构。该方向仍受“大memory削弱dominance”的约束，优先级低于同大小anchor设计。
+
+如果经过midpoint、witness和同大小memory优化后，个别family exact调用仍稳定超过数十轮或数分钟，可研究no-SRI场景下的direct elementary MIP pricing后备：用job选择、序列arc、完成时间和PWLF变量直接强制elementarity，由CPLEX最优性给出定价certificate。它可能避开DSSR反复消除组内循环，但需要新的big-M、数值稳定性、多列提取和cut dual兼容设计，属于独立研究路线，不是近期小改。
+
+#### 32.5.6 time-indexed 的定位和实施顺序
+
+当前不建议继续把主要精力投入完整time-indexed下界。它在`F>m`时的弱点来自visit-count relaxation允许重复覆盖和分数机器压缩，普通数据结构或常数级实现优化不能消除该模型差距；把覆盖改成0/1或记录visited jobs实质上会重新引入elementarity状态。family-touch cut非robust，rank-1/SRI会增加pricing状态，也没有现成证据表明收益超过代价。
+
+time-indexed保留为root arc/window preprocessing、elementary seed columns、困难结构诊断和少量pair提示即可。实施顺序固定为：`Tmid full-round feedback`、`witness签名诊断/辅助池`、`同大小cluster-anchor memory`，三项逐项A/B；之后才考虑tiny same-node warm start。任何一项若不能在family困难实例降低exact时间，同时保持random/zero和普通算例无明显回退，就不进入正式profile。当前只形成优化计划，未修改算法代码、配置或实验数据，也未启动新求解。
+
+### 32.6 后续 family 数量灵敏度分析的解释口径
 
 后续改变family数量时，将本节机制作为待检验假设，而不是预设结论。最直观的解释是：zero/random没有稳定的昂贵组间边界，pricing通常可以用成本相近的未访问任务替代重复任务，因此更倾向继续探索新任务；family结构则形成“组内普遍便宜、组外普遍昂贵”的低成本块，当组内有吸引力的新任务逐渐耗尽后，重复组内高dual任务可能比跨族探索更便宜。只有当`F>m`时，这种局部重复偏好才能进一步在master中把多个family各压缩为小于1单位的分数机器流，并规避真实解必需的跨族合并。
 

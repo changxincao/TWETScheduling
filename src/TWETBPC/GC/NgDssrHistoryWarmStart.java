@@ -81,9 +81,11 @@ final class NgDssrHistoryWarmStart {
 		int[] learnedByJob = new int[n + 1];
 		int globalLimit = Math.max(0, config.ngDssrSameNodeWarmStartGlobalPairLimit);
 		int perJobLimit = Math.max(0, config.ngDssrSameNodeWarmStartPerJobLimit);
+		int minimumOccurrence = Math.max(1, config.ngDssrSameNodeWarmStartMinimumOccurrence);
 		int used = 0;
 		for (BoundedMember candidate : candidates) {
-			if (used >= globalLimit || learnedByJob[candidate.job] >= perJobLimit
+			if (candidate.count < minimumOccurrence || used >= globalLimit
+					|| learnedByJob[candidate.job] >= perJobLimit
 					|| target[candidate.job].contains(candidate.member)) {
 				continue;
 			}
@@ -93,7 +95,7 @@ final class NgDssrHistoryWarmStart {
 			sameNodeLastAdded++;
 			used++;
 		}
-		return true;
+		return sameNodeLastAdded > 0;
 	}
 
 	String sameNodeSummary() {

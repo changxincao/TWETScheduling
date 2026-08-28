@@ -129,6 +129,11 @@ public final class BestBpcProfilesTest {
 		require("minimumNewPairsSegment".equals(config.ngDssrNonElementaryRouteUpdateMode), "ng update mode");
 		require(!config.enableNgDssrHistoryWarmStart, "ng history warm-start off");
 		require(!config.enableNgDssrSameNodeWarmStart, "ng same-node warm-start off");
+		require(config.ngDssrSameNodeWarmStartWindowSize == 3, "ng same-node history window");
+		require(config.ngDssrSameNodeWarmStartPerJobLimit == 2, "ng same-node per-job cap");
+		require(config.ngDssrSameNodeWarmStartGlobalPairLimit == 10, "ng same-node global cap");
+		require(config.ngDssrSameNodeWarmStartMinimumOccurrence == 2,
+				"ng same-node minimum occurrence");
 		require("bestUB".equals(config.bidirectionalJoinBestThresholdMode), "ng join threshold");
 		require(config.bidirectionalCompletionBoundScalarPruning, "ng scalar completion pruning");
 		require(config.bidirectionalCompletionBoundArcFixing, "ng completion arc fixing");

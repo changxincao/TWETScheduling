@@ -197,11 +197,13 @@ public class TWETBPCConfig {
 	/** 同 node 只统计最近若干次正式 exact 的 final ng-set。 */
 	public int ngDssrSameNodeWarmStartWindowSize = 3;
 	/** 每个 job 最多追加多少个历史成员。 */
-	public int ngDssrSameNodeWarmStartPerJobLimit = 3;
+	public int ngDssrSameNodeWarmStartPerJobLimit = 2;
 	/** 单次初始化最多追加多少个历史 directed pair；该固定预算保证集合不会随 exact 次数增长。 */
-	public int ngDssrSameNodeWarmStartGlobalPairLimit = 25;
+	public int ngDssrSameNodeWarmStartGlobalPairLimit = 10;
 	/** 最近一次 exact 至少达到该 DSSR 轮数才启用历史，避免简单轮次无谓放大初始集合。 */
 	public int ngDssrSameNodeWarmStartTriggerRounds = 3;
+	/** pair 至少出现在多少个同节点 final ng-set 中才允许复用，排除单次偶然成员。 */
+	public int ngDssrSameNodeWarmStartMinimumOccurrence = 2;
 	/** 2026-07-03: ng-set 历史窗口大小；越大越接近全局历史。默认 100，避免窗口过短导致频率波动。 */
 	public int ngDssrHistoryWarmStartWindowSize = 100;
 	/** 2026-07-03: 成员进入 learned seed 的最低出现频率阈值。 */

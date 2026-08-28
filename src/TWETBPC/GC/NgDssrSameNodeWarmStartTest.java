@@ -19,6 +19,7 @@ public final class NgDssrSameNodeWarmStartTest {
 		config.ngDssrSameNodeWarmStartPerJobLimit = 2;
 		config.ngDssrSameNodeWarmStartGlobalPairLimit = 3;
 		config.ngDssrSameNodeWarmStartTriggerRounds = 3;
+		config.ngDssrSameNodeWarmStartMinimumOccurrence = 1;
 		NgDssrHistoryWarmStart warmStart = new NgDssrHistoryWarmStart(4);
 
 		PackedBitSet[] first = neighborhoods(4);
@@ -56,6 +57,32 @@ public final class NgDssrSameNodeWarmStartTest {
 		PackedBitSet[] latest = baseNeighborhoods(4);
 		assertTrue(warmStart.applySameNode(latest, 8, Collections.<Integer>emptyList(), config)
 				&& latest[2].contains(4), "one hard sample should provide a bounded next-exact seed");
+
+		TWETBPCConfig frequentConfig = new TWETBPCConfig();
+		frequentConfig.enableNgDssrSameNodeWarmStart = true;
+		frequentConfig.ngDssrSameNodeWarmStartWindowSize = 3;
+		frequentConfig.ngDssrSameNodeWarmStartPerJobLimit = 2;
+		frequentConfig.ngDssrSameNodeWarmStartGlobalPairLimit = 3;
+		frequentConfig.ngDssrSameNodeWarmStartTriggerRounds = 3;
+		frequentConfig.ngDssrSameNodeWarmStartMinimumOccurrence = 2;
+		NgDssrHistoryWarmStart frequentWarmStart = new NgDssrHistoryWarmStart(4);
+		PackedBitSet[] frequentFirst = neighborhoods(4);
+		frequentFirst[1].add(3);
+		frequentFirst[2].add(4);
+		frequentWarmStart.recordSameNode(frequentFirst, 9, Collections.<Integer>emptyList(), 4, frequentConfig);
+		assertTrue(!frequentWarmStart.applySameNode(baseNeighborhoods(4), 9,
+				Collections.<Integer>emptyList(), frequentConfig),
+				"one snapshot must not qualify as cross-exact frequent");
+		PackedBitSet[] frequentSecond = neighborhoods(4);
+		frequentSecond[1].add(3);
+		frequentSecond[3].add(2);
+		frequentWarmStart.recordSameNode(frequentSecond, 9, Collections.<Integer>emptyList(), 4, frequentConfig);
+		PackedBitSet[] frequentRestored = baseNeighborhoods(4);
+		assertTrue(frequentWarmStart.applySameNode(frequentRestored, 9,
+				Collections.<Integer>emptyList(), frequentConfig), "repeated pair should qualify");
+		assertTrue(frequentRestored[1].contains(3), "pair present in both snapshots should be reused");
+		assertTrue(!frequentRestored[2].contains(4) && !frequentRestored[3].contains(2),
+				"one-off pairs must not be reused");
 
 		System.out.println("NgDssrSameNodeWarmStartTest passed");
 	}

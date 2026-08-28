@@ -184,6 +184,7 @@ public final class FormalExperimentRunner {
 		BPCAlgorithmProfile profile = BestBpcProfiles.require(arguments.algorithm);
 		TWETBPCConfig config = new TWETBPCConfig();
 		profile.apply(config);
+		arguments.applyNgDssrExperimentOverrides(config);
 		config.instanceName = arguments.runId;
 		config.bpcMethodName = profile.getName();
 		config.bpcOutputRoot = arguments.outputDir.toString();
@@ -246,6 +247,16 @@ public final class FormalExperimentRunner {
 		lines.add("seedFile=" + (arguments.seedFile == null ? "" : arguments.seedFile.toAbsolutePath()));
 		lines.add("seedFingerprint=" + seedFingerprint);
 		lines.add("cplexThreads=1");
+		lines.add("ngDssrSameNodeWarmStartOverride=" + arguments.ngDssrSameNodeWarmStart);
+		lines.add("ngDssrSameNodeWarmStartWindowOverride=" + arguments.ngDssrSameNodeWarmStartWindow);
+		lines.add("ngDssrSameNodeWarmStartPerJobLimitOverride="
+				+ arguments.ngDssrSameNodeWarmStartPerJobLimit);
+		lines.add("ngDssrSameNodeWarmStartGlobalPairLimitOverride="
+				+ arguments.ngDssrSameNodeWarmStartGlobalPairLimit);
+		lines.add("ngDssrSameNodeWarmStartTriggerRoundsOverride="
+				+ arguments.ngDssrSameNodeWarmStartTriggerRounds);
+		lines.add("ngDssrSameNodeWarmStartMinimumOccurrenceOverride="
+				+ arguments.ngDssrSameNodeWarmStartMinimumOccurrence);
 		if (result != null) {
 			lines.add("status=" + result.getStatus());
 			lines.add("incumbent=" + result.getIncumbentCost());
@@ -259,7 +270,10 @@ public final class FormalExperimentRunner {
 	private static final class Arguments {
 		private static final java.util.Set<String> SUPPORTED_KEYS = java.util.Set.of(
 				"action", "instance", "algorithm", "runId", "outputDir", "seedFile",
-				"outsourcingModel", "timeLimitSeconds", "maxNodes");
+				"outsourcingModel", "timeLimitSeconds", "maxNodes", "ngDssrSameNodeWarmStart",
+				"ngDssrSameNodeWarmStartWindow", "ngDssrSameNodeWarmStartPerJobLimit",
+				"ngDssrSameNodeWarmStartGlobalPairLimit", "ngDssrSameNodeWarmStartTriggerRounds",
+				"ngDssrSameNodeWarmStartMinimumOccurrence");
 
 		private final String action;
 		private final Path instance;
@@ -270,6 +284,12 @@ public final class FormalExperimentRunner {
 		private final String outsourcingModel;
 		private final double timeLimitSeconds;
 		private final int maxNodes;
+		private final Boolean ngDssrSameNodeWarmStart;
+		private final Integer ngDssrSameNodeWarmStartWindow;
+		private final Integer ngDssrSameNodeWarmStartPerJobLimit;
+		private final Integer ngDssrSameNodeWarmStartGlobalPairLimit;
+		private final Integer ngDssrSameNodeWarmStartTriggerRounds;
+		private final Integer ngDssrSameNodeWarmStartMinimumOccurrence;
 
 		private Arguments(Map<String, String> values) {
 			for (String key : values.keySet()) {
@@ -293,6 +313,39 @@ public final class FormalExperimentRunner {
 			}
 			timeLimitSeconds = number(values, "timeLimitSeconds", 10800.0);
 			maxNodes = integer(values, "maxNodes", 100000);
+			ngDssrSameNodeWarmStart = optionalBoolean(values, "ngDssrSameNodeWarmStart");
+			ngDssrSameNodeWarmStartWindow = optionalInteger(values, "ngDssrSameNodeWarmStartWindow");
+			ngDssrSameNodeWarmStartPerJobLimit = optionalInteger(values,
+					"ngDssrSameNodeWarmStartPerJobLimit");
+			ngDssrSameNodeWarmStartGlobalPairLimit = optionalInteger(values,
+					"ngDssrSameNodeWarmStartGlobalPairLimit");
+			ngDssrSameNodeWarmStartTriggerRounds = optionalInteger(values,
+					"ngDssrSameNodeWarmStartTriggerRounds");
+			ngDssrSameNodeWarmStartMinimumOccurrence = optionalInteger(values,
+					"ngDssrSameNodeWarmStartMinimumOccurrence");
+		}
+
+		/** 仅显式传参时覆盖正式 profile，未传参保持生产配置不变。 */
+		private void applyNgDssrExperimentOverrides(TWETBPCConfig config) {
+			if (ngDssrSameNodeWarmStart != null) {
+				config.enableNgDssrSameNodeWarmStart = ngDssrSameNodeWarmStart.booleanValue();
+			}
+			if (ngDssrSameNodeWarmStartWindow != null) {
+				config.ngDssrSameNodeWarmStartWindowSize = ngDssrSameNodeWarmStartWindow.intValue();
+			}
+			if (ngDssrSameNodeWarmStartPerJobLimit != null) {
+				config.ngDssrSameNodeWarmStartPerJobLimit = ngDssrSameNodeWarmStartPerJobLimit.intValue();
+			}
+			if (ngDssrSameNodeWarmStartGlobalPairLimit != null) {
+				config.ngDssrSameNodeWarmStartGlobalPairLimit = ngDssrSameNodeWarmStartGlobalPairLimit.intValue();
+			}
+			if (ngDssrSameNodeWarmStartTriggerRounds != null) {
+				config.ngDssrSameNodeWarmStartTriggerRounds = ngDssrSameNodeWarmStartTriggerRounds.intValue();
+			}
+			if (ngDssrSameNodeWarmStartMinimumOccurrence != null) {
+				config.ngDssrSameNodeWarmStartMinimumOccurrence =
+						ngDssrSameNodeWarmStartMinimumOccurrence.intValue();
+			}
 		}
 
 		private Data loadInstance() throws Exception {
@@ -337,6 +390,23 @@ public final class FormalExperimentRunner {
 
 		private static int integer(Map<String, String> values, String key, int fallback) {
 			return Integer.parseInt(value(values, key, Integer.toString(fallback)));
+		}
+
+		private static Integer optionalInteger(Map<String, String> values, String key) {
+			String result = values.get(key);
+			return result == null || result.trim().isEmpty() ? null : Integer.valueOf(result.trim());
+		}
+
+		private static Boolean optionalBoolean(Map<String, String> values, String key) {
+			String result = values.get(key);
+			if (result == null || result.trim().isEmpty()) {
+				return null;
+			}
+			String normalized = result.trim().toLowerCase(Locale.ROOT);
+			if (!"true".equals(normalized) && !"false".equals(normalized)) {
+				throw new IllegalArgumentException("--" + key + " must be true or false: " + result);
+			}
+			return Boolean.valueOf(normalized);
 		}
 
 		private static String stripExtension(String fileName) {

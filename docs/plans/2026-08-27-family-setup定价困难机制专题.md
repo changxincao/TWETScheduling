@@ -149,7 +149,7 @@ witness 有三个边界：
 
 当前代码已有两种默认关闭的 warm start：
 
-1. `same-node warm start`：保存同一 BPC node、同一 active-cut 集合最近几次困难 exact 的 final ng-set，在下一次调用的基础 K 上有界追加高频成员。当前默认窗口为 3，单 job 最多追加 3 个，全局最多 25 个 pair，且上一调用至少执行 3 轮才触发。追加成员仍会经过当前 repeatability filter。
+1. `same-node warm start`：保存同一 BPC node、同一 active-cut 集合最近几次困难 exact 的 final ng-set，在下一次调用的基础 K 上有界追加高频成员。2026-08-28 A/B 后，默认关闭的实验参数收敛为窗口 3、至少跨 2 次 exact 重复出现、单 job 最多追加 2 个、全局最多 10 个 pair，且上一调用至少执行 3 轮才触发。追加成员仍会经过当前 repeatability filter。
 2. `history warm start`：跨调用/节点按出现频率学习一套初始 memory。它可能直接替换基础 seed；当前 repeatability filter 生效时会保守跳过，且 root 默认不使用。它的状态漂移和 dominance 代价更难控制。
 
 warm start 的动机是避免同一 node 的多次 exact 反复发现相同 family pair。family K=8 对照显示，跨 15 次 exact 只有 83 个 unique 动态 pair，最频繁的 10 个每次都会重新加入，说明存在复用信号。但 K=8 虽把 DSSR 轮数从 150 降到 91，exact 时间却从 288.116s 增至 354.134s，因为更大的初始 memory显著削弱 dominance。由此，warm start 不能理解成“把上次 final ng-set 全带过来”；合理试验只能是同 node、频率高、数量很小的 pair 复用，并以总 labels 和总时间验收，不能只看 rounds。
@@ -725,3 +725,21 @@ time-indexed保留为root arc/window preprocessing、elementary seed columns、�
 probe日志中的`elapsed`是墙钟运行时间，不是调度完成时间、label的时间资源，也不是剩余工作量。`forwardElapsedMillis/backwardElapsedMillis`分别由`System.nanoTime()`包围当前候选下正向/反向最多5000次queue pop的扩展循环，包含取队列、构造扩展、PWLF更新、completion-bound判断和dominance维护。若某侧提前耗尽，其elapsed是该侧完整工作时间；未耗尽侧的elapsed只是5000-pop前缀时间。因此单侧耗尽时，只有“未耗尽侧当前elapsed已经不小于已耗尽侧完整elapsed”才能严格判定未耗尽侧最终更重；否则需要定向加深，不能直接强制移动。
 
 当前family TIME run不支持启发式定价存在实现或列质量问题。`HeuristicPricing`共94次、81次成功、加入17496条elementary列，只耗`9.896s`；master LP在214次pricing后重解中合计`3.362s`。主循环在任一启发式调用加列后立即重解并从第一个engine重启，只有当前dual下启发式返回0列才调用ng-DSSR exact。12次exact之前均可观察到启发式先失败，exact加1--7列后有时又使启发式找到少量新列，符合预期协同流程。启发式直接耗时仅约占总900秒的1.1%，也没有造成LP建模瓶颈；关闭它很可能把前期17496条便宜列转移给昂贵exact。尚不能排除大量相似启发式列通过dual退化改变后续exact轨迹，但这属于间接性能假设，必须用相同TIME基线做heuristic on/off单变量A/B，并比较首次exact出现位置、RMP列数、dual、DSSR轮数和总exact时间后才能判断，本轮不改启发式配置。
+
+### 32.11 高频 same-node pair 复用 A/B
+
+本轮先测试减少DSSR轮数，不修改midpoint probe。旧same-node实现虽然会统计最近final ng-set中的成员次数，但候选只来自最新快照；当历史中只有一次困难exact时，所有候选频次均为1，排序实际退化为job/member编号。直接启用旧参数因此不是“复用高频pair”，而是从上一轮final memory中按编号追加最多25个成员。新增`ngDssrSameNodeWarmStartMinimumOccurrence`后，pair只有在同一node、相同active-cut集合最近至少两次final ng-set中都出现，才允许加入下一次基础K；仍只从最新快照取候选，并保留repeatability、每job上限、全局上限和困难轮数门槛。该操作只收紧ng relaxation，不排除elementary route，不改变master或certificate语义。
+
+使用相同`n040-set02 family,m=2`、seed指纹`48fb3e...c1e35`、`TIME`队列、300秒时限和单节点上限，比较关闭复用、旧25-pair、频次至少2且预算25/10/5五组。由于probe按墙钟elapsed选择Tmid，各独立进程的前两次exact及返回列轨迹存在波动，结果应理解为机制筛选而非最终统计结论。第三次完整exact的结果如下：
+
+| 方案 | 初始复用 | DSSR轮数 | exact时间 | forward时间 |
+| --- | ---: | ---: | ---: | ---: |
+| 关闭复用 | 0 | 22 | 71.853s | 38.794s |
+| 旧语义 | 25个单次成员 | 19 | 83.065s | 52.671s |
+| 高频25 | 25个至少出现2次的pair | 19 | 80.927s | 48.011s |
+| 高频10 | 10个至少出现2次的pair | 17 | 57.980s | 32.803s |
+| 高频5 | 5个至少出现2次的pair | 22 | 78.919s | 44.567s |
+
+结论不是“memory越多轮数越少就越快”。25-pair确实把轮数降到19，但更大的初始memory削弱dominance，forward耗时超过关闭复用；5-pair又不足以提前阻断主要稳定重复结构，轮数没有下降。10-pair在该困难实例上取得平衡：第三次exact相对关闭复用少5轮、快约19.3%，前三次完整exact合计由`253.108s`降至`229.149s`，约快9.5%；300秒内第四次已推进17轮，而关闭复用只推进13轮。总exact墙钟都接近时限，不应用该总量判断无收益，真正差异是相同时限内完成的DSSR工作量。
+
+代码保持`enableNgDssrSameNodeWarmStart=false`，未改变正式profile。默认关闭的实验参数改为窗口3、每job最多2、全局10、最少出现2次；正式使用前仍需在普通random/zero及另一组family实例做外部验证。25和5的负结果也说明暂不继承完整final memory，不再扩大初始K。下一项若继续优化，再单独处理probe的完整轮方向约束，不能与本机制混测。

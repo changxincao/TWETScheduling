@@ -1,16 +1,16 @@
 \section{Computational Study}\label{sec:experiments}
 
 This section evaluates the computational performance of the proposed exact solution
-framework and the sensitivity of the outsourcing decisions to key parameters. We
-first disable outsourcing and compare the proposed continuous-time
+framework and conducts sensitivity analyses of key problem parameters. We first
+disable outsourcing and compare the proposed continuous-time
 NG-DSSR pricing algorithm with the time-indexed pricing framework of
 \citet{bulhoes2020exact} for the resulting pure parallel-machine scheduling problem.
 We next compare the two outsourcing formulations. Finally, we conduct sensitivity
 analyses of the number of job families, outsourcing availability and baseline price,
 and quantity discounts. All algorithms were implemented in Java and use IBM ILOG
-CPLEX 22.1.1 as the LP solver. Each run uses a single thread and is subject to a time
-limit of 10,800 seconds.
-% Add the final server CPU, memory, and operating system before reporting results.
+CPLEX 22.1.1 as the LP solver. The experiments were conducted on a PC equipped with
+a 13th Gen Intel Core i5-13500H processor and 32 GB of RAM, running Microsoft Windows
+11 25H2. Each run uses a single thread and is subject to a time limit of 10,800 seconds.
 
 \subsection{Instance Generation}\label{sec:instance-generation}
 
@@ -34,22 +34,23 @@ $j\in\mathcal J$, the due window is defined as
 \[
 [d_j^e,d_j^l]=[\max\{0,c_j-W_j\},c_j+W_j],
 \]
-where $c_j$ is the due-window center and $W_j$ is its half-width. We derive the
-center from the benchmark due date $d_j^0$ in two steps. First, we define the
-retained workload ratio
-\[
-r=\frac{\sum_{i\in\mathcal J}p_i}{\sum_{i\in\mathcal J^0}p_i},
-\]
-which equals one when $\mathcal J=\mathcal J^0$ and rescales the benchmark due
-date when only a subset of jobs is retained. Second, we set
-$m^{\mathrm{ref}}=3$ for $n\leq60$ and $m^{\mathrm{ref}}=4$ otherwise, and compute
+where $c_j$ is the due-window center and $W_j$ is its half-width. We set
 \[
 c_j=\left\lceil\frac{\operatorname{round}(d_j^0r)}{m^{\mathrm{ref}}}\right\rceil,
 \]
-where division by $m^{\mathrm{ref}}$ converts the due date from the single-machine
-benchmark horizon to the parallel-machine horizon. The same reference value is used
-for all three actual machine levels of a base job set, so varying $m$ changes
-internal capacity without simultaneously changing the due windows. Finally, we set
+where $d_j^0$ is the due date of job $j$ in the benchmark instance,
+$m^{\mathrm{ref}}=3$ for $n\leq60$ and $m^{\mathrm{ref}}=4$ otherwise. The
+retained workload ratio $r$ is defined as
+\[
+r=\frac{\sum_{i\in\mathcal J}p_i}{\sum_{i\in\mathcal J^0}p_i}
+\].
+This ratio equals one when
+$\mathcal J=\mathcal J^0$ and rescales the benchmark due date when only a subset of
+jobs is retained. Division by $m^{\mathrm{ref}}$ then converts the adjusted due date
+from the single-machine benchmark horizon to the parallel-machine horizon. The same
+reference value is used for all three actual machine levels of a base job set, so
+varying $m$ changes internal capacity without simultaneously changing the due
+windows. Finally, we set
 $W_j=0$ in the zero-width class and independently draw $W_j$ from
 $\{80,\ldots,120\}$ and $\{280,\ldots,320\}$ in the narrow and wide classes,
 respectively.

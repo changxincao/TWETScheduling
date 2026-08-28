@@ -1951,7 +1951,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		} else {
 			initializeSearchState(lp);
 			initializeForwardSource(lp);
-			initializeBackwardSink(lp);
 		}
 		exactInitializeStateNanos += System.nanoTime() - sectionStart;
 		sectionStart = System.nanoTime();
@@ -2288,7 +2287,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		resetProbeAffectedStatistics();
 		initializeSearchState(lp);
 		initializeForwardSource(lp);
-		initializeBackwardSink(lp);
 		midpointProbeSearchStateReady = false;
 		midpointProbeLabelsReadyForJoin = false;
 	}

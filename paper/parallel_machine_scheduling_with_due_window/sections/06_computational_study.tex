@@ -51,14 +51,26 @@ drawn independently from $\{80,\ldots,120\}$ and $\{280,\ldots,320\}$ for narrow
 and wide windows, respectively.
 
 For each job set, we generate random and family sequence-dependent setup instances.
-The random instances contain no explicit job-family structure. In the family
-instances, jobs are partitioned into three to six approximately balanced families,
-with smaller within-family setups and larger between-family setups. In both classes,
-the average setup time is approximately $0.5\bar p$, where $\bar p$ is the average
-processing time, no setup time exceeds $\bar p$, and the directed triangle inequality
-is satisfied. In the family instances, the average between-family setup is
-approximately four to five times the average within-family setup. Setup costs are
-defined as $\kappa_{ij}=20s_{ij}$.
+Let
+\[
+\bar p=\frac{1}{n}\sum_{j\in\mathcal J}p_j
+\]
+denote the average processing time. In the random instances, setup times are
+generated according to the truncated normal distribution
+\[
+s_{ij}^{R}\sim
+\operatorname{TN}_{[0,\bar p]}\left(0.5\bar p,(0.25\bar p)^2\right),
+\qquad i\ne j,
+\]
+where $\operatorname{TN}_{[0,\bar p]}$ denotes a normal distribution truncated to
+$[0,\bar p]$. The generated random setup matrix satisfies the directed triangle
+inequality. In the family instances, jobs are randomly partitioned into three to six
+approximately balanced families. The family setup matrix is constructed from the
+corresponding random setup matrix: within-family setups retain their random values,
+whereas $2\bar p$ is added to between-family setups. To maintain the same overall
+setup intensity in the two classes, each setup matrix is proportionally adjusted so
+that its average setup time is approximately $0.5\bar p$. Setup costs are defined as
+$\kappa_{ij}=20s_{ij}$.
 
 Each original-scale production environment is completed by an outsourcing tariff.
 Following \citet{lee2011twostage}, who scale outsourcing costs with processing

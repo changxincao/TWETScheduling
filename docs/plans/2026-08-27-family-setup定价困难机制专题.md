@@ -826,6 +826,10 @@ time-indexed三例900秒合计中，strong-trial RMP求解464.17秒、对应模�
 
 DSSR更新不再继续设计hybrid或novelty触发器。现有证据支持两个简单固定口径：统一random/family正式比较继续使用`minimumNewPairsSegment + candidate1000`；若专门研究family实例，可固定使用`allSegments + candidate1000`做独立profile。n30 family三例中allSegments相对minimum使exact平均下降30.9%、DSSR轮数由183降到99，但set01小幅变慢，且random三例minimum仍更快，因此不能把allSegments写成统一默认。candidate3000已经确认只扩大存储与join阈值，未带来稳定收益。
 
+再次核对实验快照后，需要进一步限定上述证据。早期n40“关闭probe”实际是首轮probe后固定复用同一`Tmid`，其中未重建half-domain和重复初始化backward sink的两批run无效；撤销这些问题后的固定`Tmid`复跑也不是当前adaptive-direct语义。真正有效的关闭实验是n30三例：第一轮仍probe，后续轮保留完整轮feedback产生的adaptive移动，只取消额外浅探。正式warm-start关闭条件下，adaptive-direct相对每轮probe的平均wall/exact由`50.31/45.38s`降至`29.47/25.04s`，但收益几乎全部来自set02的`80.80s -> 18.46s`；set01略慢，set03近似持平。因此该实验在正确性和总体时间上有效，却不足以支持全局关闭probe。逐轮结果还显示adaptive位移超过有效时间域10%时可能产生严重过冲，浅probe在这类轮次具有保护作用。
+
+`allSegments/1000`的30.9% family收益来自另一组统一开启10-pair same-node warm-start、关闭后续浅探的矩阵。该矩阵内all/min只改变update mode，因此相对比较有效；但它不等于当前正式的“后续probe开启、warm-start关闭”配置。当前可以直接确定的是candidate仍取1000：family中`min3000`与`min1000`平均exact几乎相同（`21.96s`对`21.88s`），non-elementary seen却由约90万增至190万、stored由16.7万增至47.3万，random也更慢。update mode则保持统一正式`minimumNewPairsSegment`；若要把family专项改成`allSegments`，还需补同一正式probe/warm-start口径下的all1000与min1000配对，不能把已有混合口径直接当作最终配置。
+
 same-node warm-start只复用同一node、相同active-cut集合下最近若干次正式exact的final ng-set，不跨node，也不继承完整final memory。当前实验参数为最近3个snapshot、pair至少在其中2次出现、每个job最多2个、全局最多10个，并且上一exact至少执行3轮DSSR才触发；这些pair只追加到本次基础nearest-K seed，之后仍执行正常DSSR。n40困难例中全局10个高频pair使前三次exact合计由253.108秒降到229.149秒，约9.5%，但25个pair会因削弱dominance而变慢，5个又不足以减少轮数；n30尚无严格隔离的稳定收益。因此它只保留为默认关闭的family实验项，不能当成已证实的统一加速。
 
 用户所称`On the exact`指Bulhoes等人的并行机调度BCP，而不是RouteOpt或旧Java VRP。原文使用两阶段strong branching：phase 1最多测试50个候选，预计当前分支子树较小时允许减少；非root时一半候选按branching history/pseudo-cost选出，其余候选在job-machine assignment和job-job immediate-precedence两类中按接近0.5选择；每个候选左右支只加入branch row并重解restricted master，不生成新列；按两侧LB增量乘积选3个进入phase 2，再用heuristic column generation试算，最终仍按product rule选择。原文依据见Bulhoes et al. (2020), Section 6：<https://www.math.u-bordeaux.fr/~rsadykov/papers/Bulhoes_etall_LOGIS18.pdf>。

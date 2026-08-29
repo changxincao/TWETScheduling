@@ -78,12 +78,13 @@ we define the standard quotation of job $j$ as
 \[
 q_j=p_j\max\{\alpha_j,\beta_j\}.
 \]
-For an outsourced job set $O$, the aggregate baseline quotation is
-$B(O)=\sum_{j\in O}q_j$. We create low, medium, and high
-outsourcing price levels by setting $\lambda\in\{0.5,1,2\}$. Consistent with the
-quantity-discount structure of \citet{dabia2019rich}, all instances use the same
-three-segment continuous piecewise-linear tariff, with fixed breakpoints
-$Q_1=4000$ and $Q_2=8000$. The outsourcing payment is defined as
+For an outsourced job set $O$, let $B(O)=\sum_{j\in O}q_j$ denote its aggregate
+standard quotation. We scale the tariff by $\lambda\in\{0.5,1,2\}$, which
+corresponds to low, medium, and high outsourcing prices, respectively. Following
+the quantity-discount structure of \citet{dabia2019rich}, the outsourcing payment
+is calculated using a three-segment continuous piecewise-linear tariff. All
+instances use the same tariff structure, with fixed breakpoints $Q_1=4000$ and
+$Q_2=8000$:
 \[
 G_\lambda(B)=
 \begin{cases}

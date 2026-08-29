@@ -15,4 +15,4 @@
 
 总 manifest 包含 3330 个共享 seed 任务和 8190 个求解任务。其中 pricing comparison=4860，outsourcing performance=3240，outsourcing discount=90。这些是场景/方法任务数，不是不同原始数据实例数。
 
-外包报价为 q_j=p_j*max(wE_j,wT_j)；统一使用固定断点 Q1=4000 和 Q2=8000。
+外包报价为 q_j=lambda*p_j*max(wE_j,wT_j)；统一使用固定断点 Q1=4000 和 Q2=8000。

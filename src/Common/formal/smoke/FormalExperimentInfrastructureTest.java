@@ -101,7 +101,7 @@ public final class FormalExperimentInfrastructureTest {
 		assertContains(manifest, "/outsourcing-data/default-discount/", "complete outsourcing instance path");
 		String experimentProperties = Files.readString(suite.resolve("experiment.properties"),
 				StandardCharsets.UTF_8);
-		assertContains(experimentProperties, "outsourcingQuotation=p*max(wE,wT)", "quotation metadata");
+		assertContains(experimentProperties, "outsourcingQuotation=lambda*p*max(wE,wT)", "quotation metadata");
 		assertContains(experimentProperties, "outsourcingBreakpointPolicy=fixed", "breakpoint policy");
 		assertContains(experimentProperties, "outsourcingBreakpoint1=4000", "first breakpoint");
 		assertContains(experimentProperties, "outsourcingBreakpoint2=8000", "second breakpoint");
@@ -138,6 +138,13 @@ public final class FormalExperimentInfrastructureTest {
 		assertTrue(outsourcingData.outsourcingCost[1]
 				== baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]), "persisted outsourcing baseline");
 		assertClose(outsourcingData.evaluateOutsourcingCost(10.0), 10.0, "persisted tariff first segment");
+		var lowPriceData = FormalExperimentDataFactory.load(findOutsourcingInstance(suite, baseRow.path, 0.5, 0.15));
+		var highPriceData = FormalExperimentDataFactory.load(findOutsourcingInstance(suite, baseRow.path, 2.0, 0.15));
+		double baseQuotation = baseData.p[1] * Math.max(baseData.w_e[1], baseData.w_t[1]);
+		assertClose(lowPriceData.outsourcingCost[1], 0.5 * baseQuotation, "low-price job quotation");
+		assertClose(highPriceData.outsourcingCost[1], 2.0 * baseQuotation, "high-price job quotation");
+		assertClose(lowPriceData.evaluateOutsourcingCost(10.0), 10.0, "low-price tariff first segment");
+		assertClose(highPriceData.evaluateOutsourcingCost(10.0), 10.0, "high-price tariff first segment");
 		assertUnknownArgumentRejected();
 		assertSeedOutsourcingModelRejected(baseRow.path);
 

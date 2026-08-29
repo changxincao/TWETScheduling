@@ -73,25 +73,24 @@ that its average setup time is approximately $0.5\bar p$. Setup costs are define
 $\kappa_{ij}=20s_{ij}$.
 
 We augment each scheduling instance with outsourcing options. Following
-\citet{lee2011twostage}, who set outsourcing costs proportional to processing times,
-we define the standard quotation of job $j$ as
+\citet{lee2011twostage}, we use processing time as the basis for the outsourcing
+quotation. Under price level $\lambda$, the quotation of job $j$ is
 \[
-q_j=p_j\max\{\alpha_j,\beta_j\}.
+q_j=\lambda p_j\max\{\alpha_j,\beta_j\},
 \]
-For an outsourced job set $O$, let $B(O)=\sum_{j\in O}q_j$ denote its aggregate
-standard quotation. We scale the tariff by $\lambda\in\{0.5,1,2\}$, which
-corresponds to low, medium, and high outsourcing prices, respectively. Following
-the quantity-discount structure of \citet{dabia2019rich}, the outsourcing payment
-is calculated using a three-segment continuous piecewise-linear tariff. All
-instances use the same tariff structure, with fixed breakpoints $Q_1=4000$ and
-$Q_2=8000$:
+where $\lambda\in\{0.5,1,2\}$ corresponds to low, medium, and high outsourcing
+prices, respectively. For an outsourced job set $O$, let
+$B(O)=\sum_{j\in O}q_j$ denote its aggregate quotation. Following the
+quantity-discount structure of \citet{dabia2019rich}, the outsourcing payment is
+calculated using a three-segment continuous piecewise-linear tariff. All instances
+use the same tariff structure, with fixed breakpoints $Q_1=4000$ and $Q_2=8000$:
 \[
-G_\lambda(B)=
+G(B)=
 \begin{cases}
-\lambda B, & 0\leq B\leq Q_1,\\
-\lambda Q_1+0.85\lambda(B-Q_1), & Q_1<B\leq Q_2,\\
-\lambda Q_1+0.85\lambda(Q_2-Q_1)+0.70\lambda(B-Q_2), & B>Q_2,
-\end{cases}
+B, & 0\leq B\leq Q_1,\\
+Q_1+0.85(B-Q_1), & Q_1<B\leq Q_2,\\
+Q_1+0.85(Q_2-Q_1)+0.70(B-Q_2), & B>Q_2,
+\end{cases}.
 \]
 Combining the 30 base job sets with three machine levels, two setup structures, and
 three due-window classes yields 540 original-scale production environments. The

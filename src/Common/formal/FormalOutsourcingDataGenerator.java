@@ -61,8 +61,8 @@ public final class FormalOutsourcingDataGenerator {
 		Files.createDirectories(output.getParent());
 
 		ArrayList<String> lines = new ArrayList<String>(Files.readAllLines(source.path(), StandardCharsets.UTF_8));
-		double[] quotations = quotations(taskSet);
-		double total = appendEconomics(lines, quotations, rate, discountStrength,
+		double[] quotations = quotations(taskSet, rate);
+		double total = appendEconomics(lines, quotations, discountStrength,
 				firstBreakpoint, secondBreakpoint);
 		Files.write(output, lines, StandardCharsets.UTF_8);
 		return new CompleteInstance(source.taskSetId(), source.size(), source.machines(), source.setupType(),
@@ -70,7 +70,7 @@ public final class FormalOutsourcingDataGenerator {
 				total, experimentType, source.path(), output);
 	}
 
-	private static double appendEconomics(List<String> lines, double[] quotations, double rate,
+	private static double appendEconomics(List<String> lines, double[] quotations,
 			double discountStrength, double firstBreakpoint, double secondBreakpoint) {
 		lines.add("OUTSOURCING_COST");
 		StringBuilder quotationLine = new StringBuilder();
@@ -84,7 +84,7 @@ public final class FormalOutsourcingDataGenerator {
 		}
 		lines.add(quotationLine.toString());
 		lines.add("OUTSOURCING_TARIFF");
-		List<Segment> segments = segments(rate, discountStrength, firstBreakpoint, secondBreakpoint,
+		List<Segment> segments = segments(discountStrength, firstBreakpoint, secondBreakpoint,
 				Math.max(1.0, total + 1.0));
 		lines.add(Integer.toString(segments.size()));
 		for (Segment segment : segments) {
@@ -94,10 +94,10 @@ public final class FormalOutsourcingDataGenerator {
 		return total;
 	}
 
-	static List<Segment> segments(double rate, double discountStrength,
+	static List<Segment> segments(double discountStrength,
 			double firstBreakpoint, double secondBreakpoint, double domainEnd) {
 		if (discountStrength == 0.0) {
-			return List.of(new Segment(0.0, domainEnd, rate, 0.0));
+			return List.of(new Segment(0.0, domainEnd, 1.0, 0.0));
 		}
 		double[] ends = new double[] { Math.min(firstBreakpoint, domainEnd),
 				Math.min(secondBreakpoint, domainEnd), domainEnd };
@@ -108,7 +108,7 @@ public final class FormalOutsourcingDataGenerator {
 			if (ends[index] <= start) {
 				continue;
 			}
-			double slope = rate * (1.0 - index * discountStrength);
+			double slope = 1.0 - index * discountStrength;
 			double intercept = valueAtStart - slope * start;
 			result.add(new Segment(start, ends[index], slope, intercept));
 			valueAtStart += slope * (ends[index] - start);
@@ -117,11 +117,12 @@ public final class FormalOutsourcingDataGenerator {
 		return result;
 	}
 
-	private static double[] quotations(FormalTaskSet taskSet) {
+	private static double[] quotations(FormalTaskSet taskSet, double rate) {
 		double[] result = new double[taskSet.size() + 1];
 		for (int job = 1; job <= taskSet.size(); job++) {
 			FormalTaskSet.Job source = taskSet.jobs().get(job - 1);
-			result[job] = source.processing() * Math.max(source.earlyWeight(), source.tardyWeight());
+			result[job] = rate * source.processing()
+					* Math.max(source.earlyWeight(), source.tardyWeight());
 		}
 		return result;
 	}
@@ -145,7 +146,7 @@ public final class FormalOutsourcingDataGenerator {
 		long defaultCount = instances.stream().filter(item -> item.discountStrength > 0.0).count();
 		long noDiscountCount = instances.size() - defaultCount;
 		Files.write(outputRoot.resolve("outsourcing-design.properties"), List.of(
-				"quotation=p*max(wE,wT)",
+				"quotation=lambda*p*max(wE,wT)",
 				"breakpointPolicy=fixed",
 				"breakpoint1=" + compact(firstBreakpoint),
 				"breakpoint2=" + compact(secondBreakpoint),

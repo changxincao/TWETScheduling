@@ -48,9 +48,11 @@ public final class FormalOutsourcingAuditRunner {
 			}
 			double rate = Double.parseDouble(fields[5]);
 			double discount = Double.parseDouble(fields[6]);
+			double[] expectedQuotations = scaledQuotations(quotation.values, rate);
+			double expectedTotal = rate * quotation.total;
 			if (!close(Double.parseDouble(fields[7]), breakpoint1)
 					|| !close(Double.parseDouble(fields[8]), breakpoint2)
-					|| !close(Double.parseDouble(fields[9]), quotation.total)) {
+					|| !close(Double.parseDouble(fields[9]), expectedTotal)) {
 				throw new IOException("Outsourcing index values do not match frozen design in row " + row);
 			}
 			Path source = generatedRoot.resolve(fields[11]).normalize();
@@ -60,13 +62,13 @@ public final class FormalOutsourcingAuditRunner {
 				throw new IOException("Duplicate complete outsourcing instance: " + complete);
 			}
 			CompleteData data = readCompleteInstance(source, complete, quotation.size);
-			if (!java.util.Arrays.equals(data.quotations, quotation.values)) {
+			if (!java.util.Arrays.equals(data.quotations, expectedQuotations)) {
 				throw new IOException("Outsourcing quotations do not match source tasks: " + complete);
 			}
-			List<Segment> expected = FormalOutsourcingDataGenerator.segments(rate, discount,
-					breakpoint1, breakpoint2, Math.max(1.0, quotation.total + 1.0));
+			List<Segment> expected = FormalOutsourcingDataGenerator.segments(discount,
+					breakpoint1, breakpoint2, Math.max(1.0, expectedTotal + 1.0));
 			if (!sameSegments(data.segments, expected)
-					|| !coversAndIsContinuous(data.segments, quotation.total)) {
+					|| !coversAndIsContinuous(data.segments, expectedTotal)) {
 				throw new IOException("Outsourcing tariff does not match frozen design: " + complete);
 			}
 			String experimentType = fields[10];
@@ -85,7 +87,7 @@ public final class FormalOutsourcingAuditRunner {
 				throw new IOException("Unknown outsourcing experiment type: " + experimentType);
 			}
 			output.add(String.format(Locale.ROOT, "%s\t%.6f\t%.6f\t%.9f\t%d\t%s\t%s",
-					fields[0], rate, discount, quotation.total, data.segments.size(), experimentType,
+					fields[0], rate, discount, expectedTotal, data.segments.size(), experimentType,
 					portable(suiteRoot.toAbsolutePath().normalize()
 							.relativize(complete.toAbsolutePath().normalize()))));
 		}
@@ -190,6 +192,14 @@ public final class FormalOutsourcingAuditRunner {
 			}
 		}
 		return true;
+	}
+
+	private static double[] scaledQuotations(double[] baseQuotations, double rate) {
+		double[] result = new double[baseQuotations.length];
+		for (int job = 1; job < baseQuotations.length; job++) {
+			result[job] = rate * baseQuotations[job];
+		}
+		return result;
 	}
 
 	private static boolean coversAndIsContinuous(List<Segment> segments, double requiredEnd) {

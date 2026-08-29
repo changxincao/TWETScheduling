@@ -73,7 +73,7 @@ public final class FormalExperimentSuiteGenerator {
 		ArrayList<RunRow> solveRows = new ArrayList<RunRow>();
 		LinkedHashMap<String, Path> seedFiles = new LinkedHashMap<String, Path>();
 		Files.write(options.outputRoot.resolve("experiment.properties"), List.of(
-				"outsourcingQuotation=p*max(wE,wT)",
+				"outsourcingQuotation=lambda*p*max(wE,wT)",
 				"outsourcingBreakpointPolicy=fixed",
 				"outsourcingBreakpoint1=" + compact(outsourcing.breakpoint1()),
 				"outsourcingBreakpoint2=" + compact(outsourcing.breakpoint2()),
@@ -281,7 +281,7 @@ public final class FormalExperimentSuiteGenerator {
 				+ "，outsourcing discount=" + outsourcingDiscountTaskCount
 				+ "。这些是场景/方法任务数，不是不同原始数据实例数。");
 		lines.add("");
-		lines.add("外包报价为 q_j=p_j*max(wE_j,wT_j)；统一使用固定断点 Q1=4000 和 Q2=8000。");
+		lines.add("外包报价为 q_j=lambda*p_j*max(wE_j,wT_j)；统一使用固定断点 Q1=4000 和 Q2=8000。");
 		Files.write(options.outputRoot.resolve("README.md"), lines, StandardCharsets.UTF_8);
 	}
 

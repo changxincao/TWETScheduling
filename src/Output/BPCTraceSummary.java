@@ -140,7 +140,6 @@ public class BPCTraceSummary implements BPCTraceSink {
 	public void onPricingClosure(Node node, double closureBound, double bestCertifiedNodeBound, int activeCutCount) {
 		if (node != null && node.id == 1 && Double.isFinite(bestCertifiedNodeBound)) {
 			rootBound = bestCertifiedNodeBound;
-			rootSolveTimeSeconds = (System.nanoTime() - solveStartNano) / 1_000_000_000.0;
 		}
 		eventLines.add(String.format(Locale.US,
 				"Pricing closure node=%d objective=%.6f bestCertifiedBound=%.6f activeCuts=%d",
@@ -168,8 +167,11 @@ public class BPCTraceSummary implements BPCTraceSink {
 		}
 		maxPoolSize = Math.max(maxPoolSize, poolSize);
 		maxCutPoolSize = Math.max(maxCutPoolSize, cutPoolSize);
-		if (node.id == 1 && Double.isInfinite(rootBound)) {
-			rootBound = solution.getObjectiveValue();
+		if (node.id == 1) {
+			if (Double.isFinite(solution.getObjectiveValue())) {
+				rootBound = Double.isFinite(rootBound)
+						? Math.max(rootBound, solution.getObjectiveValue()) : solution.getObjectiveValue();
+			}
 			rootSolveTimeSeconds = (System.nanoTime() - solveStartNano) / 1_000_000_000.0;
 		}
 		double gap = BPCOutputFormatters.gapPercent(bestBound, incumbentCost);
@@ -334,6 +336,10 @@ public class BPCTraceSummary implements BPCTraceSink {
 	@Override
 	public void onNodeClosed(Node node, String reason, int queueSizeAfterClose) {
 		remainingQueueSize = queueSizeAfterClose;
+		// 根节点若在PC内部超时/失败，不会触发onMasterSolved；此时仍需记录实际根处理时间。
+		if (node != null && node.id == 1 && rootSolveTimeSeconds <= 0.0) {
+			rootSolveTimeSeconds = (System.nanoTime() - solveStartNano) / 1_000_000_000.0;
+		}
 		if ("pruned_by_incumbent".equals(reason)) {
 			prunedByIncumbentCount++;
 		} else if ("pruned_by_dual_bound".equals(reason)) {

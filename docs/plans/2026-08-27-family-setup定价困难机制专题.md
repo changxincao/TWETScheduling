@@ -835,3 +835,13 @@ same-node warm-start只复用同一node、相同active-cut集合下最近若干�
 当前唯一证据充分的重复计算是strong-trial模型生命周期。`Tree.solveStrongBranchingRmpTrial()`对每个candidate side都新建`LP`、重新建立变量、coverage/machine/branch/cut rows，求解后立即关闭；n30 family三例共发生22093次，模型重建142.90秒。Bulhoes原文的操作表述是临时加入branching constraint并resolve RMP；现代RouteOpt的对应LP testing实现也在同一个node solver中加入一条row、求左支、反转row求右支、删除row。旧Java VRP的`BranchD`同样在一个父LP中把branch row从`[0,0]`改成`[1,1]`。因此父节点级trial workspace与参考实现方向一致，而且不要求改变候选数量、评分或列池策略。
 
 该复用不能简单改成“所有candidate共用父RMP后只换一条row”。当前right branch还包含branch-implied禁弧，不同side的seed列集也可能不同；为保持现有trial分数，workspace必须对不属于当前side精确seed的变量临时设UB为0，并完整恢复branch row、变量UB、objective和basis。若初始trial需要artificial-slack repair或补入branch-specific columns，第一版应回退现有独立LP路径，避免复杂回滚改变repair语义。这样只消除普通phase-1 RMP的重复建模，仍保留Bulhoes原文式候选控制和当前正确性边界。142.90秒是模型重建的理论上限，464.17秒CPLEX trial solve和repair/FindFeasible并不会因删除建模直接消失。
+
+### 32.18 父节点级reusable strong-trial LP实测：不保留
+
+本轮只测试父节点级reusable strong-trial LP，候选数、评分、repair、pricing和其它配置全部不动。实例固定为`n030-set01 family,m=2`、正式no-cut time-indexed profile、同一seed和单线程CPLEX，并先限制为3个节点。旧路径120次phase-1 trial合计`9.104s`，其中模型重建`2.800s`、CPLEX solve`6.212s`；最终处理3个节点，bound为`52653.842857`，生成19277列。
+
+第一版严格保持每个side现有lightweight seed：父节点只建一个union model，不属于当前side seed的变量临时设UB为0，右支继续使用branch-implied penalty；首次RMP若不可行或penalty列取正值，立即回退原独立LP repair。三个节点选中的分支arc及左右bound与旧路径一致到数值误差，最终bound、节点数和列数完全一致，因此比较的是同一分支轨迹。但120次reusable RMP的solve增至`17.256s`，加上2次repair fallback后的strong RMP总计`17.477s`，相对旧路径`9.104s`慢约92%；端到端节点前缀由`15.236s`增至`29.051s`。模型重建虽被消除，几千个变量UB和目标系数的反复切换破坏了热启动，union model也始终大于多数side的精确seed。
+
+第二版按RouteOpt式固定父列集，不再切换UB，只增删一条branch row并仅修改真正的penalty系数；任何child seed含父RMP外列或需要repair时仍回退旧路径。该版本更差：根节点父RMP有16442列，而各side旧模型通常只有约2800--6000列；120次reusable RMP的CPLEX solve达到`29.446s`，工作区一次性建模仅`0.140s`，3节点端到端前缀为`39.254s`。这证明当前问题不在Java建模接口本身，而在复用后必须让每次trial解一个远大于side-filtered RMP的模型。
+
+因此撤回第32.16--32.17节“该项应保留为明确实现优化”的暂定判断。RouteOpt能够复用，是因为LP testing在同一个有限列集上只改变一条分支行；当前TWET strong trial先按child域形成显著不同且更小的lightweight seed，两者前提不相同。旧计时中重建只占strong RMP时间约30.8%，即使零成本消除，理论收益也有限；一旦复用使CPLEX solve增加，净收益立即转负。实验代码和配置开关已全部撤回，正式流程保持原样。除非以后先改变trial列集语义或CPLEX能够直接复制父basis到独立side模型，否则不再推进父节点级reusable workspace；这两项都会超出“只消除冗余、不改流程”的当前边界。

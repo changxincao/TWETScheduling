@@ -46,6 +46,7 @@ public class PC {
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
 	private double incumbentForDualBoundPruning;
 	private double lastObservedDualBound;
+	private double bestCertifiedNodeBound = Double.NEGATIVE_INFINITY;
 	private boolean lastNodePrunedByDualBound;
 	private StrongRepairDualBoundClosure strongRepairDualBoundClosure;
 	private HeuristicPricingDiagnosticTrace pendingHeuristicMissTrace;
@@ -68,6 +69,7 @@ public class PC {
 	public void prepareStandaloneStrongBranchingTrial(double incumbentCost) {
 		incumbentForDualBoundPruning = incumbentCost;
 		lastObservedDualBound = Double.NEGATIVE_INFINITY;
+		bestCertifiedNodeBound = Double.NEGATIVE_INFINITY;
 		lastNodePrunedByDualBound = false;
 		strongRepairDualBoundClosure = null;
 		pendingHeuristicMissTrace = null;
@@ -81,6 +83,7 @@ public class PC {
 		pendingHeuristicMissTrace = null;
 		lastReusableSubtreeArcEliminationBounds = null;
 		lastObservedDualBound = Double.NEGATIVE_INFINITY;
+		bestCertifiedNodeBound = Double.NEGATIVE_INFINITY;
 		lastNodePrunedByDualBound = false;
 		incumbentForDualBoundPruning = incumbentCost;
 		lp.setRepairObjectivePenalty(repairObjectivePenalty(incumbentCost));
@@ -120,6 +123,7 @@ public class PC {
 				|| lastNodePrunedByDualBound) {
 			return solution;
 		}
+		recordCertifiedNodeBound(lp, solution);
 		if (lp.getNode() != null && lp.getNode().id == 1) {
 			traceSink.onRootPricingClosedBeforeCuts(lp.getNode(), solution, lp.getActiveCutIds().size());
 		}
@@ -213,6 +217,7 @@ public class PC {
 					|| lastNodePrunedByDualBound) {
 				return solution;
 			}
+			recordCertifiedNodeBound(lp, solution);
 			applyCutLoopPricingOnlyArcFixing(lp, solution);
 			if (isTimeLimitReached() || solution.isInteger()) {
 				return solution;
@@ -367,8 +372,30 @@ public class PC {
 		return lastObservedDualBound;
 	}
 
+	public double getBestCertifiedNodeBound() {
+		return bestCertifiedNodeBound;
+	}
+
 	public boolean wasLastNodePrunedByDualBound() {
 		return lastNodePrunedByDualBound;
+	}
+
+	private void recordCertifiedNodeBound(LP lp, TWETMasterSolution solution) {
+		if (solution == null || solution.getStatus() != TWETMasterStatus.LP_RELAXATION
+				|| !Double.isFinite(solution.getObjectiveValue())) {
+			return;
+		}
+		double closureBound = solution.getObjectiveValue();
+		bestCertifiedNodeBound = strongestCertifiedBound(bestCertifiedNodeBound, closureBound);
+		traceSink.onPricingClosure(lp.getNode(), closureBound, bestCertifiedNodeBound,
+				lp.getActiveCutIds().size());
+	}
+
+	static double strongestCertifiedBound(double currentBound, double candidateBound) {
+		if (!Double.isFinite(candidateBound)) {
+			return currentBound;
+		}
+		return Double.isFinite(currentBound) ? Math.max(currentBound, candidateBound) : candidateBound;
 	}
 
 	public StrongBranchingTrialResult solveStrongBranchingRmpTrial(LP lp) {

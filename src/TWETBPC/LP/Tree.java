@@ -153,8 +153,12 @@ public class Tree {
 			LP lp = new LP(data, pool, cutPool, config, outsourcingPool);
 			try {
 				lp.construct(node, node.seedColumnIds);
-			heartbeat(node, "pc.solve.start");
+				heartbeat(node, "pc.solve.start");
 				TWETMasterSolution solution = pc.solve(lp, incumbentCost);
+				double certifiedNodeBound = pc.getBestCertifiedNodeBound();
+				if (Double.isFinite(certifiedNodeBound)) {
+					bestBound = updateReportedBound(queue, certifiedNodeBound, incumbentCost);
+				}
 
 				if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
 					traceSink.onNodeClosed(node, "master_not_solved:" + solution.getMessage(), queue.size());
@@ -172,13 +176,15 @@ public class Tree {
 				continue;
 			}
 			if (pc.wasLastNodePrunedByDualBound()) {
-				bestBound = updateReportedBound(queue, pc.getLastObservedDualBound(), incumbentCost);
+				double dualBound = Math.max(pc.getLastObservedDualBound(), certifiedNodeBound);
+				bestBound = updateReportedBound(queue, dualBound, incumbentCost);
 				traceSink.onNodeClosed(node, "pruned_by_dual_bound", queue.size());
 				continue;
 			}
 
 			if (solution.getStatus() == TWETMasterStatus.LP_RELAXATION) {
-				bestBound = updateReportedBound(queue, solution.getObjectiveValue(), incumbentCost);
+				double currentNodeBound = Math.max(solution.getObjectiveValue(), certifiedNodeBound);
+				bestBound = updateReportedBound(queue, currentNodeBound, incumbentCost);
 			}
 
 			boolean incumbentUpdated = false;

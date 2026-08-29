@@ -73,6 +73,13 @@ public final class BPCStreamingTraceSink implements BPCTraceSink, AutoCloseable 
 	}
 
 	@Override
+	public void onPricingClosure(Node node, double closureBound, double bestCertifiedNodeBound, int activeCutCount) {
+		write(String.format(java.util.Locale.US,
+				"Pricing closure: node=%d objective=%.6f bestCertifiedBound=%.6f activeCuts=%d",
+				node == null ? -1 : node.id, closureBound, bestCertifiedNodeBound, activeCutCount));
+	}
+
+	@Override
 	public void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
 		write(BPCOutputFormatters.formatNodeHeader(node, queueSize, poolSize, cutPoolSize));
 	}

@@ -137,6 +137,17 @@ public class BPCTraceSummary implements BPCTraceSink {
 	}
 
 	@Override
+	public void onPricingClosure(Node node, double closureBound, double bestCertifiedNodeBound, int activeCutCount) {
+		if (node != null && node.id == 1 && Double.isFinite(bestCertifiedNodeBound)) {
+			rootBound = bestCertifiedNodeBound;
+			rootSolveTimeSeconds = (System.nanoTime() - solveStartNano) / 1_000_000_000.0;
+		}
+		eventLines.add(String.format(Locale.US,
+				"Pricing closure node=%d objective=%.6f bestCertifiedBound=%.6f activeCuts=%d",
+				node == null ? -1 : node.id, closureBound, bestCertifiedNodeBound, activeCutCount));
+	}
+
+	@Override
 	public void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
 		// 2026-05-19: pseudoCost 预剪枝节点不会进入 onMasterSolved，也应计入已弹出处理的节点数。
 		processedNodes = Math.max(processedNodes, node.id);

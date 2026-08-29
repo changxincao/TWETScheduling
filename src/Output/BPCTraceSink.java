@@ -34,6 +34,9 @@ public interface BPCTraceSink {
 	default void onRootPricingClosedBeforeCuts(Node node, TWETMasterSolution solution, int activeCutCount) {
 	}
 
+	default void onPricingClosure(Node node, double closureBound, double bestCertifiedNodeBound, int activeCutCount) {
+	}
+
 	default void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
 	}
 

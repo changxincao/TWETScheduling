@@ -63,6 +63,13 @@ public final class BPCCompositeTraceSink implements BPCTraceSink {
 	}
 
 	@Override
+	public void onPricingClosure(Node node, double closureBound, double bestCertifiedNodeBound, int activeCutCount) {
+		for (BPCTraceSink sink : delegates) {
+			sink.onPricingClosure(node, closureBound, bestCertifiedNodeBound, activeCutCount);
+		}
+	}
+
+	@Override
 	public void onNodePicked(Node node, int queueSize, int poolSize, int cutPoolSize) {
 		for (BPCTraceSink sink : delegates) {
 			sink.onNodePicked(node, queueSize, poolSize, cutPoolSize);

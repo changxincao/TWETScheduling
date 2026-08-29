@@ -867,3 +867,9 @@ same-node warm-start只复用同一node、相同active-cut集合下最近若干�
 当前结果CSV把SRI三例的`bestBound/gap`写空，是报告路径没有保留“最近一次完整闭合界”：`PC.solve()`只在第一次无cut闭合时通过`onRootPricingClosedBeforeCuts()`写入专用trace字段，后续cut轮闭合值只出现在pricing日志的`observedDualBound`中；`Tree.bestBound`仍保持初始`+Infinity`，只有整个节点求解返回后才更新。cut loop内超时时，Tree直接按时限退出，因而最终结果既没有回填pre-cut界，也没有回填更强的最后闭合界。这是超时报告口径的边界缺口，不影响cut有效性和各次完整定价闭合证明。正确修复方向是让`PC`持续保存last certified closed bound，并让`Tree`在任何超时返回前用它更新全局bound；本轮只纠正记录，未修改求解代码。
 
 SRI三例的rank-1 pricing分别耗时`248.358/193.104/204.373s`，master LP分别耗时`47.009/99.545/86.851s`，执行`491/663/675`次pricing。每加入一批SRI后，cut dual会诱导大量新的负非基本列，RMP又从无cut闭合时的约`1.24万--1.82万`列扩到`2.86万--3.35万`列；与此同时每个label还需携带数十个active cut residual state。由最后闭合gap可知，SRI对family弱界的强化非常明显，甚至把set02压到`0.1034%`，但代价是三例300秒内都无法完成下一轮闭合并离开根节点。因此当前结论不是“SRI无效”，而是“bound收益显著、闭合成本过高”；在现有实现和300秒口径下仍不宜作为family默认配置。
+
+### 32.20 SRI超时后的certified bound报告修复
+
+针对第32.19节发现的报告缺口，`PC`现在只在一次pricing真正闭合、且没有时限、`NOT_SOLVED`或中途dual-bound剪枝时记录节点下界。记录值取该节点所有已完成闭合目标值的最大值，而不是只记第一次或盲目覆盖为最后一次；这样即使后续active cut集合发生变化，任何已经由有效cut和完整pricing证明过的更强下界都不会丢失。当前未闭合RMP的目标值仍不进入该状态。`Tree`在`PC.solve()`返回后、处理`NOT_SOLVED`和时限退出之前先接收该certified bound，并继续与open queue最小pseudo-cost按原逻辑合并；正常完成、dual-bound剪枝和超时三个出口使用同一口径。trace新增每次闭合的`objective/bestCertifiedBound/activeCuts`事件，root摘要同步保存最强闭合界。
+
+验证使用`n030-set01 family,m=2`、相同固定seed、正式`TIME_INDEXED_SRI` profile和80秒时限。运行依次完成`52566.300000`、`53480.071911`和`53948.425115`三次闭合，随后在下一批cut后的pricing中超时。最终`run.properties`、core summary和solve-finished事件均报告`bestBound=53948.425115`，root摘要同样为`rootBound=53948.425115`，对应gap为`1.525217%`；未闭合轮没有污染结果。focused `javac`、`CertifiedNodeBoundTrackingTest`和`BPCResultWriterPostSolveCsvTest`通过。本次只修复下界状态保存与输出，不改变cut生成、pricing、列接受、剪枝或分支流程。

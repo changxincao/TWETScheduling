@@ -845,3 +845,23 @@ same-node warm-start只复用同一node、相同active-cut集合下最近若干�
 第二版按RouteOpt式固定父列集，不再切换UB，只增删一条branch row并仅修改真正的penalty系数；任何child seed含父RMP外列或需要repair时仍回退旧路径。该版本更差：根节点父RMP有16442列，而各side旧模型通常只有约2800--6000列；120次reusable RMP的CPLEX solve达到`29.446s`，工作区一次性建模仅`0.140s`，3节点端到端前缀为`39.254s`。这证明当前问题不在Java建模接口本身，而在复用后必须让每次trial解一个远大于side-filtered RMP的模型。
 
 因此撤回第32.16--32.17节“该项应保留为明确实现优化”的暂定判断。RouteOpt能够复用，是因为LP testing在同一个有限列集上只改变一条分支行；当前TWET strong trial先按child域形成显著不同且更小的lightweight seed，两者前提不相同。旧计时中重建只占strong RMP时间约30.8%，即使零成本消除，理论收益也有限；一旦复用使CPLEX solve增加，净收益立即转负。实验代码和配置开关已全部撤回，正式流程保持原样。除非以后先改变trial列集语义或CPLEX能够直接复制父basis到独立side模型，否则不再推进父节点级reusable workspace；这两项都会超出“只消除冗余、不改流程”的当前边界。
+
+### 32.19 n30 family：ng-DSSR、time-indexed无cut与SRI对照
+
+本轮继续使用第32.16节相同的3个`n=30,m=2` family实例、相同固定seed、CPLEX单线程和300秒时限。ng-DSSR采用正式`2026-08-28-v3` profile；time-indexed无cut沿用第32.16节结果；新增的加cut组使用正式`TIME_INDEXED_SRI` profile，即`TimeIndexedGraphRank1CutPricing`、arc-memory SRI、最多8轮cut-loop设置和cut-loop arc fixing。没有修改算法代码、候选控制或其它配置。
+
+| 实例 | 方法 | 状态 | 总时间/s | 有效best bound | 最终gap | 节点 | 列池/生成列 | 根active cuts |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| set01 | ng-DSSR | 根节点最优 | 19.947 | 54784.000 | 0 | 1 | 7394 / 23742 | 0 |
+| set01 | time-indexed无cut | 300秒未解完 | 300.054 | 53387.042 | 2.5499% | 226 | 712908 / 778590 | 0 |
+| set01 | time-indexed+SRI | 300秒根未闭合 | 300.070 | 不可用 | 不可用 | 1 | 28584 / 28554 | 414 |
+| set02 | ng-DSSR | 根节点最优 | 86.716 | 41870.000 | 0 | 1 | 6784 / 24856 | 0 |
+| set02 | time-indexed无cut | 300秒未解完 | 300.037 | 40556.002 | 3.1383% | 162 | 794037 / 885084 | 0 |
+| set02 | time-indexed+SRI | 300秒根未闭合 | 300.062 | 不可用 | 不可用 | 1 | 33481 / 33444 | 597 |
+| set03 | ng-DSSR | 根节点最优 | 44.257 | 39194.000 | 0 | 1 | 4885 / 17019 | 0 |
+| set03 | time-indexed无cut | 300秒未解完 | 300.109 | 37320.971 | 4.7789% | 170 | 658007 / 705058 | 0 |
+| set03 | time-indexed+SRI | 300秒根未闭合 | 300.119 | 不可用 | 不可用 | 1 | 30205 / 30146 | 619 |
+
+三例ng-DSSR平均`50.306s`并全部在根节点证明最优；两组time-indexed平均都达到约300秒。无cut版本的根CG只需`1.69--1.97s`，但留下`4.05%--6.95%`的弱根gap，随后在大树中仍保留`2.55%--4.78%`gap。SRI版本则走向另一个极端：三例在300秒内均未完成根cut loop，因而结果中的空root bound和空gap表示尚未重新取得完整reduced-cost certificate，不能把中途RMP目标当成有效下界。
+
+SRI三例的rank-1 pricing分别耗时`248.358/193.104/204.373s`，master LP分别耗时`47.009/99.545/86.851s`，执行`491/663/675`次pricing。每加入一批SRI后，cut dual会诱导大量新的负非基本列，RMP又从无cut闭合时的约`1.24万--1.82万`列扩到`2.86万--3.35万`列；与此同时每个label还需携带数十个active cut residual state。说明当前SRI没有直接堵住family下“组内重复访问按visit count填覆盖”的核心松弛，却同时放大了定价状态和RMP。因此在这3个n30 family实例上，正式ng-DSSR明显优于time-indexed；给time-indexed打开当前SRI不仅没有改善300秒结果，反而使求解无法离开根节点，暂不应作为family默认配置。

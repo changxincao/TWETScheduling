@@ -72,18 +72,17 @@ setup intensity in the two classes, each setup matrix is proportionally adjusted
 that its average setup time is approximately $0.5\bar p$. Setup costs are defined as
 $\kappa_{ij}=20s_{ij}$.
 
-Each original-scale production environment is completed by an outsourcing tariff.
-Following \citet{lee2011twostage}, who scale outsourcing costs with processing
-requirements, we define the standard quotation of job $j$ as
+We augment each scheduling instance with outsourcing options. Following
+\citet{lee2011twostage}, who set outsourcing costs proportional to processing times,
+we define the standard quotation of job $j$ as
 \[
 q_j=p_j\max\{\alpha_j,\beta_j\}.
 \]
-Thus, the quotation increases with both the processing requirement and the larger
-of the two unit timing penalties. For an outsourced job set $O$, the aggregate
-baseline quotation is $B(O)=\sum_{j\in O}q_j$. We create low, medium, and high
+For an outsourced job set $O$, the aggregate baseline quotation is
+$B(O)=\sum_{j\in O}q_j$. We create low, medium, and high
 outsourcing price levels by setting $\lambda\in\{0.5,1,2\}$. Consistent with the
-piecewise-linear tariffs studied in production outsourcing and private-fleet routing
-\citep{lu2021discount,dabia2019rich}, the actual outsourcing payment is
+quantity-discount structure of \citet{dabia2019rich}, the outsourcing payment is
+represented by the following three-segment continuous piecewise-linear function:
 \[
 G_\lambda(B)=
 \begin{cases}
@@ -92,7 +91,7 @@ G_\lambda(B)=
 \lambda Q_1+0.85\lambda(Q_2-Q_1)+0.70\lambda(B-Q_2), & B>Q_2,
 \end{cases}
 \]
-where $Q_1=4283.75$ and $Q_2=8567.50$. The same breakpoints are used for all
+where $Q_1=4284$ and $Q_2=8568$. The same breakpoints are used for all
 instances.
 
 Combining the 30 base job sets with three machine levels, two setup structures, and

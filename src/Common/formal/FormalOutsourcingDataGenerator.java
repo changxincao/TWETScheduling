@@ -19,8 +19,8 @@ public final class FormalOutsourcingDataGenerator {
 	public Result generate(Path outputRoot, List<FormalTaskSet> taskSets,
 			List<GeneratedInstance> schedulingInstances) throws IOException {
 		double referenceTotal = referenceTotal(taskSets);
-		double firstBreakpoint = 0.25 * referenceTotal;
-		double secondBreakpoint = 0.50 * referenceTotal;
+		double firstBreakpoint = Math.round(0.25 * referenceTotal);
+		double secondBreakpoint = Math.round(0.50 * referenceTotal);
 		Map<String, FormalTaskSet> taskSetById = new LinkedHashMap<String, FormalTaskSet>();
 		for (FormalTaskSet taskSet : taskSets) {
 			taskSetById.put(taskSet.id(), taskSet);

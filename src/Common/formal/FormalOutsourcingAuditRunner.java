@@ -30,8 +30,8 @@ public final class FormalOutsourcingAuditRunner {
 		Path generatedRoot = suiteRoot.resolve("instances");
 		Map<String, TaskQuotation> quotations = readTaskQuotations(generatedRoot.resolve("task-selection.tsv"));
 		double referenceTotal = referenceTotal(quotations.values());
-		double breakpoint1 = 0.25 * referenceTotal;
-		double breakpoint2 = 0.50 * referenceTotal;
+		double breakpoint1 = Math.round(0.25 * referenceTotal);
+		double breakpoint2 = Math.round(0.50 * referenceTotal);
 		List<String> indexLines = Files.readAllLines(generatedRoot.resolve("outsourcing-instances.tsv"),
 				StandardCharsets.UTF_8);
 		ArrayList<String> output = new ArrayList<String>();

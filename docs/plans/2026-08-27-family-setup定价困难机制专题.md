@@ -799,3 +799,23 @@ adaptive-direct同样存在结构性风险。201个后续轮中有49轮根据完
 下一步应测试统一的动态规则，而不是实例专用参数。第一轮仍完整probe。后续轮先根据上一完整轮计算adaptive seed：若无需移动，或建议位移不超过有效时间域的5%--10%，直接复用/采用该点，取消候选游走；若建议位移更大、方向相对前两轮反转，或本轮ng-memory新增pair很多，则必须进行浅层验证，但最多测试1--2个候选，并限制单轮`Tmid`位移，不能继续当前4--6候选的长walk/bracket。阈值5%还是10%、pair增长门槛和两候选规则必须通过n30/n40的逐轮A/B确定，本轮不写入代码。
 
 witness策略也采用相同原则。`candidateLimit=1000`继续作为统一基础池，3000已被否定。`allSegments`不按family标签打开，而应在minimum模式连续多轮后，根据在线指标触发：top-1000连续饱和、already-blocked比例极高、每轮有效更新路线明显低于20，并且待加入的全部missing pairs受一个小pair预算约束。random通常1--2轮即返回elementary列，不会触发；family式同质witness才会自然进入加强阶段。该hybrid规则尚未实现，当前正式update mode继续保持minimum。
+
+### 32.16 n30 family当前瓶颈与time-indexed完整对照
+
+本轮先用正式ng-DSSR配置（后续轮继续probe、minimum/1000、same-node warm start关闭）汇总3个n30 family实例。31次exact共执行227轮DSSR，平均7.32轮；`1113409`条non-elementary witness被发现，`213331`条进入top-1000存储，`188373`条进入更新检查，其中`186993`条已被同轮前序pair阻断，只有1380条路线实际更新，平均每轮约6.1条，远低于有效路线预算20。该现象说明DSSR更新循环本身不是CPU热点，真正代价是每轮取得的独立阻断信息太少，迫使完整labeling重复227轮。因此allSegments/novelty的评价目标应是减少后续轮数和总labels，而不是只缩短pair插入代码。
+
+按现有计时口径，3例exact合计136.13秒，其中probe记账114.93秒、join 9.51秒、completion-bound 2.89秒。probe数字包含首个候选上可被正式labeling复用的搜索，不能全部当冗余；明确可删除的是多候选切换后丢弃的状态。adaptive-direct对照将同一工作重新记到正式forward/backward，3例合计forward/backward约28.05/16.61秒，说明在减少候选游走以后，下一层瓶颈会转为memory增长后的正式label扩展与dominance。heuristic pricing合计6.37秒、master LP 2.21秒、time-indexed预处理/辅助定价2.74秒，当前均不是主要优化对象；join约占一成，可排在midpoint、DSSR信息利用和label扩展之后。
+
+随后对相同3个实例、相同seed使用正式no-cut time-indexed profile做300秒完整求解。结果如下：
+
+| 实例 | root LB | root gap | root列数 | 300秒best bound | 最终gap | 节点 | 生成列 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| set01 | 52566.300 | 4.0481% | 16442 | 53387.042 | 2.5499% | 226 | 778590 |
+| set02 | 39473.092 | 5.7246% | 18156 | 40556.002 | 3.1383% | 162 | 885084 |
+| set03 | 36471.095 | 6.9472% | 12350 | 37320.971 | 4.7789% | 170 | 705058 |
+
+三个time-indexed根CG本身都很快：55--72次pricing，pricing约0.92--0.97秒、master约0.46--0.65秒；但根解的全部正值列都是non-elementary pseudo-schedule，elementary正值列为0。由此形成4.05%--6.95%的弱root gap并进入大树。相同实例的ng-DSSR分别在`19.95/86.72/44.26`秒根节点闭合、gap为0。因此time-indexed在这批family实例上的问题不是单次图pricing慢，而是visit-count relaxation质量差。
+
+time-indexed三例900秒合计中，strong-trial RMP求解464.17秒、对应模型重建142.90秒；repair slack求解/重建94.43秒，`FindFeasible`定价76.53秒。当前`Tree.solveStrongBranchingRmpTrial()`仍为每个candidate side新建`LP`、construct并close，三例共发生22093次strong-trial RMP，没有父节点级reusable trial workspace。正常time-indexed pricing合计90.72秒。也就是说进入树后约八成以上时间由20候选乘左右两侧的strong trial及其repair驱动，海量列是弱松弛和大树的后果。
+
+据此分开排序。对ng-DSSR，优先级为：动态限制midpoint多候选walk/bracket；提高witness独立阻断信息，测试受pair预算的minimum/allSegments hybrid与novelty；随后再处理正式label扩展/dominance和有界same-node高频pair复用。join只列第三梯队，completion-bound、RMP和heuristic暂不动。对纯time-indexed，首先应承认其family松弛弱；若仍要优化该求解器，实现父节点级reusable strong-trial LP是当前最明确且不改变分支语义的工程优化，其次才是动态strong candidate预算和列池控制。但这些只能降低树上单位节点成本，不能修复根gap；当前更合理的用途仍是作为ng-DSSR的root preprocessing和窗口/arc fixing辅助，而不是family实例的独立主求解器。

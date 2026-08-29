@@ -81,8 +81,9 @@ q_j=p_j\max\{\alpha_j,\beta_j\}.
 For an outsourced job set $O$, the aggregate baseline quotation is
 $B(O)=\sum_{j\in O}q_j$. We create low, medium, and high
 outsourcing price levels by setting $\lambda\in\{0.5,1,2\}$. Consistent with the
-quantity-discount structure of \citet{dabia2019rich}, the outsourcing payment is
-represented by the following three-segment continuous piecewise-linear function:
+quantity-discount structure of \citet{dabia2019rich}, all instances use the same
+three-segment continuous piecewise-linear tariff, with fixed breakpoints
+$Q_1=4000$ and $Q_2=8000$. The outsourcing payment is defined as
 \[
 G_\lambda(B)=
 \begin{cases}
@@ -91,9 +92,6 @@ G_\lambda(B)=
 \lambda Q_1+0.85\lambda(Q_2-Q_1)+0.70\lambda(B-Q_2), & B>Q_2,
 \end{cases}
 \]
-where $Q_1=4000$ and $Q_2=8000$. The same breakpoints are used for all
-instances.
-
 Combining the 30 base job sets with three machine levels, two setup structures, and
 three due-window classes yields 540 original-scale production environments. The
 three outsourcing price levels expand this set to 1,620 complete instances.

@@ -63,10 +63,11 @@ s_{ij}^{R}\sim
 \qquad i\ne j,
 \]
 where $\operatorname{TN}_{[0,\bar p]}$ denotes a normal distribution truncated to
-$[0,\bar p]$. The generated random setup matrix satisfies the directed triangle
-inequality. In the family instances, jobs are randomly partitioned into three to six
-approximately balanced families. The family setup matrix is constructed from the
-corresponding random setup matrix: within-family setups retain their random values,
+$[0,\bar p]$, and the resulting setup times satisfy the directed triangle inequality.
+In the family instances, jobs are randomly partitioned into three to six families,
+with the numbers of jobs in any two families differing by at most one. The family
+setup matrix is constructed from the corresponding random setup matrix: within-family
+setups retain their random values,
 whereas $2\bar p$ is added to between-family setups. To maintain the same overall
 setup intensity in the two classes, each setup matrix is proportionally adjusted so
 that its average setup time is approximately $0.5\bar p$. Setup costs are defined as
@@ -155,7 +156,8 @@ the two pricing approaches, but it does not by itself explain how this effect de
 on the relationship between the number of families and the number of machines. We
 therefore conduct a focused experiment with $n=40$, $m=3$, the original time scale,
 zero-width due windows, and no outsourcing. For each of the five base job sets, we
-construct matched instances with $F\in\{1,2,3,4,5\}$ approximately balanced families,
+construct matched instances with $F\in\{1,2,3,4,5\}$ families, with the numbers of
+jobs in any two families differing by at most one,
 while holding the job data, average setup intensity, setup-cost coefficient, and all
 other generation rules fixed. This yields 25 instances that differ only in
 their family partition and the resulting organization of setup times.

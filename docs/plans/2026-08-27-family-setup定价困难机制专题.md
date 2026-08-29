@@ -854,14 +854,16 @@ same-node warm-start只复用同一node、相同active-cut集合下最近若干�
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | set01 | ng-DSSR | 根节点最优 | 19.947 | 54784.000 | 0 | 1 | 7394 / 23742 | 0 |
 | set01 | time-indexed无cut | 300秒未解完 | 300.054 | 53387.042 | 2.5499% | 226 | 712908 / 778590 | 0 |
-| set01 | time-indexed+SRI | 300秒根未闭合 | 300.070 | 不可用 | 不可用 | 1 | 28584 / 28554 | 414 |
+| set01 | time-indexed+SRI | 300秒cut后根未闭合 | 300.070 | 52566.300（pre-cut） | 4.0481%（保守） | 1 | 28584 / 28554 | 414 |
 | set02 | ng-DSSR | 根节点最优 | 86.716 | 41870.000 | 0 | 1 | 6784 / 24856 | 0 |
 | set02 | time-indexed无cut | 300秒未解完 | 300.037 | 40556.002 | 3.1383% | 162 | 794037 / 885084 | 0 |
-| set02 | time-indexed+SRI | 300秒根未闭合 | 300.062 | 不可用 | 不可用 | 1 | 33481 / 33444 | 597 |
+| set02 | time-indexed+SRI | 300秒cut后根未闭合 | 300.062 | 39473.092（pre-cut） | 5.7246%（保守） | 1 | 33481 / 33444 | 597 |
 | set03 | ng-DSSR | 根节点最优 | 44.257 | 39194.000 | 0 | 1 | 4885 / 17019 | 0 |
 | set03 | time-indexed无cut | 300秒未解完 | 300.109 | 37320.971 | 4.7789% | 170 | 658007 / 705058 | 0 |
-| set03 | time-indexed+SRI | 300秒根未闭合 | 300.119 | 不可用 | 不可用 | 1 | 30205 / 30146 | 619 |
+| set03 | time-indexed+SRI | 300秒cut后根未闭合 | 300.119 | 36471.095（pre-cut） | 6.9472%（保守） | 1 | 30205 / 30146 | 619 |
 
-三例ng-DSSR平均`50.306s`并全部在根节点证明最优；两组time-indexed平均都达到约300秒。无cut版本的根CG只需`1.69--1.97s`，但留下`4.05%--6.95%`的弱根gap，随后在大树中仍保留`2.55%--4.78%`gap。SRI版本则走向另一个极端：三例在300秒内均未完成根cut loop，因而结果中的空root bound和空gap表示尚未重新取得完整reduced-cost certificate，不能把中途RMP目标当成有效下界。
+三例ng-DSSR平均`50.306s`并全部在根节点证明最优；两组time-indexed平均都达到约300秒。无cut版本的根CG只需`1.69--1.97s`，但留下`4.05%--6.95%`的弱根gap，随后在大树中仍保留`2.55%--4.78%`gap。SRI版本则走向另一个极端：三例在300秒内均未完成根cut loop。这里必须区分两层界：第一次无cut pricing已经完整闭合，因此`52566.300/39473.092/36471.095`始终是安全的pre-cut根下界，对应保守gap为`4.0481%/5.7246%/6.9472%`；尚不可使用的只是中途已经升高、但没有重新取得完整reduced-cost certificate的cut-RMP目标。
+
+当前结果CSV把SRI三例的`bestBound/gap`写空，是报告路径没有继承上述安全界：`PC.solve()`在第一次pricing闭合后只通过`onRootPricingClosedBeforeCuts()`把目标写入trace summary；`Tree.bestBound`仍保持初始`+Infinity`，只有整个节点求解返回后才更新。cut loop内超时时，Tree直接按时限退出，因而最终结果没有回填已经记录的pre-cut bound。这是超时报告口径的边界缺口，不影响cut有效性或此前无cut闭合证明。表中已显式用pre-cut bound给出保守certified gap；不能报告的只是更强的cut后gap。
 
 SRI三例的rank-1 pricing分别耗时`248.358/193.104/204.373s`，master LP分别耗时`47.009/99.545/86.851s`，执行`491/663/675`次pricing。每加入一批SRI后，cut dual会诱导大量新的负非基本列，RMP又从无cut闭合时的约`1.24万--1.82万`列扩到`2.86万--3.35万`列；与此同时每个label还需携带数十个active cut residual state。说明当前SRI没有直接堵住family下“组内重复访问按visit count填覆盖”的核心松弛，却同时放大了定价状态和RMP。因此在这3个n30 family实例上，正式ng-DSSR明显优于time-indexed；给time-indexed打开当前SRI不仅没有改善300秒结果，反而使求解无法离开根节点，暂不应作为family默认配置。

@@ -881,3 +881,65 @@ SRI三例的rank-1 pricing分别耗时`248.358/193.104/204.373s`，master LP分�
 随后对全部返回路径和trace口径再次做了正确性审计。每个被保存的界都位于一次完整pricing闭合之后；超时、`NOT_SOLVED`和dual-bound提前剪枝均在保存前返回，未闭合RMP目标不会进入该状态。同一node上不同有效cut集合的完整闭合LP均是该node整数可行域的下界，因此取这些闭合界的最大值安全；Tree在当前node已出队时再与open queue最小伪下界取小值，仍保持原有全局报告口径。审计同时发现初版callback把`rootSolveTimeSeconds`误记成最后一次闭合时刻，遗漏后续cut separation、pricing和RMIH；现已改为closure只更新root bound，正常结束由`onMasterSolved`记录根处理时间，PC内部超时/失败则由`onNodeClosed`补记。20秒SRI复跑完成`52566.300000`和`53480.071911`两次闭合，下一轮超时后最终`rootBound=bestBound=53480.071911`、`rootSolveTimeSeconds=20.168115`、总时间`20.172020`、gap=`2.380126%`，说明认证界和根时间两个口径均正确。
 
 第二次反例审计发现一个只在非根中断时出现的全局汇总边界：当前node已经从priority queue取出，若其认证界为100、兄弟节点最小pseudo-cost为150，处理中断前`updateReportedBound()`会正确得到100；但旧`finalBound()`在queue非空时又直接返回150，相当于从全局下界中漏掉尚未关闭的当前子树。根节点SRI复跑因queue为空不会暴露该问题。现将“搜索整体未完成”和“当前node未关闭”分开传入：只有当前node因超时或master失败未关闭时，最终界才继续取`min(lastReportedBound, queue.peek().pseudoCost)`；若时限恰好发生在两个已完整关闭的node之间，则仍直接使用open queue界，不损失正常报告强度。新增`TreeFinalBoundTest`覆盖`100/150`当前节点中断、兄弟界更低、节点间超时、空队列中断和正常闭树五种情形；与前三个认证界/trace/CSV测试一起全部通过。
+
+### 32.21 n40 family/random完整根节点：轮间probe与DSSR更新模式2x2对照
+
+本轮补齐3个`n=40,m=2` family实例及其matched random实例。每个实例的四组运行共用同一固定seed，统一使用`TIME`队列、candidate limit 1000、same-node warm-start关闭、CPLEX单线程和`maxNodes=1`；两个实验因子分别为DSSR第二轮以后是否继续浅层probe，以及更新模式取`minimumNewPairsSegment`或`allSegments`。单次时限为3600秒，以下24组均完成根节点闭合并得到有效bound。一次set02 direct+all运行曾在任务中断后把挂起墙钟时间计入forward并按时限退出，该样本已排除，正式结果来自无中断重跑。
+
+| setup | 实例 | probe+minimum/s | direct+minimum/s | probe+all/s | direct+all/s |
+| --- | --- | ---: | ---: | ---: | ---: |
+| family | set01 | 152.731 | 140.539 | **123.568** | 126.517 |
+| family | set02 | 807.781 | **419.701** | 561.587 | 651.321 |
+| family | set03 | 617.470 | **421.676** | 565.825 | 519.398 |
+| family | 平均 | 525.994 | **327.305** | 416.993 | 432.412 |
+| random | set01 | 23.975 | 25.598 | 27.576 | **23.045** |
+| random | set02 | **19.887** | 23.089 | 23.928 | 21.410 |
+| random | set03 | 21.326 | 21.736 | **17.684** | 19.979 |
+| random | 平均 | 21.729 | 23.474 | 23.063 | **21.478** |
+
+family三例最终bound分别为`86852/82351/73543`，四种配置在同一实例上完全一致。random set01/set02完成根闭合后因`maxNodes=1`返回`NODE_LIMIT`，有效root bound分别为`106382.444444/98977.181818`；set03在根节点闭合，bound为`88621`。因此表中比较的是同一数学下界和同一根节点任务，不包含错误收敛或未闭合RMP。
+
+`allSegments`确实稳定减少DSSR轮数。family中，minimum两组每次成功exact平均约`21.5--21.9`轮，allSegments两组降到约`10.3--10.8`轮；但总时间没有同步下降。allSegments一次加入更多pair，后续轮memory更大、dominance更弱，单轮forward/backward和join随之变重。set02 direct路径中，allSegments虽然把轮数从26.71降到8.89，根时间却由419.701秒增至651.321秒；set03也由421.676秒增至519.398秒。只有set01中allSegments略快。因此“减少DSSR轮数”不能单独作为配置判据，必须同时观察总labels、单轮耗时和完整根闭合时间。
+
+轮间probe也存在交互。在minimum模式下，adaptive-direct在三个family实例上均更快，根时间分别下降约`8.0%/48.0%/31.7%`；三例成功exact中的probe累计时间由约457.238秒降到首轮必要probe的34.579秒。allSegments下则没有统一方向：set01/set02保留probe更快，set03关闭probe更快。random实例每次exact平均仅约1.7--2.2轮，exact总计只有约2--7秒，四种组合的总时间差主要已落入预处理、RMP和运行波动，不能据此选择DSSR策略。
+
+当前不改正式profile。candidate limit继续固定1000；allSegments只保留实验配置，不能因减轮直接设为family默认。下一项隔离实验以本轮family平均最快、且三个family实例都优于对应probe版本的`adaptive-direct + minimumNewPairsSegment`为基线，只打开现有10-pair same-node高频memory warm-start；随后再单独测试“浅probe不得反向推翻上一完整轮adaptive方向”的约束，避免把两项影响混在一起。
+
+### 32.22 n40 same-node高频pair warm-start隔离复跑
+
+本轮以第32.21节的`adaptive-direct + minimumNewPairsSegment + candidate1000`为唯一基线，只打开现有same-node warm-start。复用窗口固定为最近3次正式exact，pair至少出现2次，每个job最多2个、全局最多10个，上一exact至少执行3轮DSSR才触发；其余seed、实例、单线程和`maxNodes=1`条件保持不变。6组family/random运行均完整结束，实例bound与关闭warm-start时一致。
+
+| setup | 实例 | warm关闭/s | warm10/s | 变化 |
+| --- | --- | ---: | ---: | ---: |
+| family | set01 | 140.539 | 126.111 | -10.3% |
+| family | set02 | 419.701 | 796.288 | +89.7% |
+| family | set03 | 421.676 | 821.110 | +94.7% |
+| family | 平均 | 327.305 | 581.170 | +77.6% |
+| random | set01 | 25.598 | 25.169 | -1.7% |
+| random | set02 | 23.089 | 24.598 | +6.5% |
+| random | set03 | 21.736 | 19.733 | -9.2% |
+| random | 平均 | 23.474 | 23.167 | -1.3% |
+
+family set01中warm-start使exact由`122.314s`降至`109.272s`，但set02/set03分别由`405.388/401.398s`升至`776.575/788.683s`。这不是单纯运行波动：set02 exact调用由8次增至12次，set03返回的exact列由59条增至154条，说明少量历史pair改变了dominance、witness和后续RMP dual轨迹。它有时减少当前调用轮数，有时却使基础memory更大并改变返回列集合，最终需要更多CG调用。random三例只触发`0/1/2`次复用，约1%的平均差异没有稳定意义。
+
+因此10-pair不是可统一启用的低风险加速。same-node warm-start继续默认关闭；此前单个set02前三次exact约快9.5%的结果只保留为局部诊断，不能覆盖本轮完整根节点反例。若以后重做，必须基于witness支持度和跨轮独立信息重新定义pair价值，而不能继续只按final ng-set中的跨调用出现频率选取。
+
+### 32.23 n40 adaptive方向硬约束：完整A/B后撤回
+
+最后一个未完成项是测试“上一完整轮判定forward更重并向下移动adaptive seed后，后续浅probe不得再越过seed向上；backward更重时对称处理”。为隔离该规则，实验恢复正式`probe + minimum + candidate1000`，warm-start关闭，只增加单侧方向边界。首次probe、完整轮feedback、DSSR更新、labeling、join和certificate均未改变。实验开关默认关闭，并通过边界测试后才运行。
+
+| setup | 实例 | 原probe+minimum/s | 方向硬约束/s | 变化 |
+| --- | --- | ---: | ---: | ---: |
+| family | set01 | 152.731 | 335.436 | +119.6% |
+| family | set02 | 807.781 | 1147.904 | +42.1% |
+| family | set03 | 617.470 | 741.067 | +20.0% |
+| family | 平均 | 525.994 | 741.469 | +41.0% |
+| random | set01 | 23.975 | 19.304 | -19.5% |
+| random | set02 | 19.887 | 18.063 | -9.2% |
+| random | set03 | 21.326 | 17.224 | -19.2% |
+
+三组family均完整闭合并保持原bound`86852/82351/73543`，所以这是性能反例，不是正确性失败。硬约束虽然消除了同一轮probe直接反向越过adaptive seed，却把正式labeling固定在不够好的中点上，并改变了本轮保留列及后续dual轨迹。set01 exact由`136.411s/4次`增至`313.917s/15次`；set02由`785.542s/12次`增至`1130.297s/14次`；set03由`594.364s/21次`增至`713.029s/23次`。set02的`Tmid`仍会在约540与750之间跨DSSR轮反复切换，说明硬约束只能限制当前浅探，不能解决完整轮feedback本身的方向振荡和位移过大。
+
+random三例看似更快，但其exact总计仅约`1.9--5.2s`，总时间还包含root preprocessing、RMP和strong trial波动；而且大多数probe直接rank0耗尽，方向规则很少真正限制候选。该弱正信号不能抵消family三例一致且幅度很大的退化。实验代码、runner参数和测试断言已全部撤回，正式profile从未启用该规则。
+
+本轮最终结论是：不能把上一完整轮方向当成不可越过的硬约束。若继续优化midpoint，只能考虑限制单轮最大位移、在大位移或方向反转时保留1--2个验证候选，并比较所有已测候选的可靠工作量；这些都需要新的逐轮证据。本轮用户要求的n40 probe开关、minimum/allSegments、warm-start和方向约束四部分已经全部完成，没有剩余运行。现有统一正式配置仍保持后续probe开启、`minimumNewPairsSegment + candidate1000`、same-node warm-start关闭。

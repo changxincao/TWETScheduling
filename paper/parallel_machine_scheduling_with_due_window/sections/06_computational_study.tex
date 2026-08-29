@@ -79,24 +79,25 @@ requirements, we define the standard quotation of job $j$ as
 q_j=p_j\max\{\alpha_j,\beta_j\}.
 \]
 Thus, the quotation increases with both the processing requirement and the larger
-of the two unit timing penalties. We create low, medium, and high outsourcing price
-levels by setting the undiscounted baseline cost to
-$b_j(\lambda)=\lambda q_j$, where $\lambda\in\{0.5,1,2\}$. Unless stated otherwise,
-the payment function applies a continuous incremental quantity discount, consistent
-with the tariff structures studied in production outsourcing and private-fleet
-routing \citep{lu2021discount,dabia2019rich}. To apply the same absolute tariff to
-all instance sizes, the breakpoints $Q_1$ and $Q_2$ are fixed at 25\% and 50\% of
-the median total standard quotation among the 50-job sets. The marginal rates over
-the three intervals are $1$, $0.85$, and $0.70$, with the intercepts chosen to keep
-the payment function continuous. Both breakpoints and marginal rates remain fixed
-across all instances.
+of the two unit timing penalties. For an outsourced job set $O$, the aggregate
+baseline quotation is $B(O)=\sum_{j\in O}q_j$. We create low, medium, and high
+outsourcing price levels by setting $\lambda\in\{0.5,1,2\}$. Consistent with the
+piecewise-linear tariffs studied in production outsourcing and private-fleet routing
+\citep{lu2021discount,dabia2019rich}, the actual outsourcing payment is
+\[
+G_\lambda(B)=
+\begin{cases}
+\lambda B, & 0\leq B\leq Q_1,\\
+\lambda Q_1+0.85\lambda(B-Q_1), & Q_1<B\leq Q_2,\\
+\lambda Q_1+0.85\lambda(Q_2-Q_1)+0.70\lambda(B-Q_2), & B>Q_2,
+\end{cases}
+\]
+where $Q_1=4283.75$ and $Q_2=8567.50$. The same breakpoints are used for all
+instances.
 
 Combining the 30 base job sets with three machine levels, two setup structures, and
 three due-window classes yields 540 original-scale production environments. The
-three outsourcing price levels expand this set to 1,620 complete instances. The
-formulation comparison and sensitivity analyses use these complete instances,
-whereas the internal-pricing comparison uses the same production data with
-outsourcing disabled.
+three outsourcing price levels expand this set to 1,620 complete instances.
 
 \subsection{Comparison of Internal Pricing Methods}\label{sec:pricing-comparison}
 

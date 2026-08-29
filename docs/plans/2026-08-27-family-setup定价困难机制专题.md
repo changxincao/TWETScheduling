@@ -818,4 +818,20 @@ witness策略也采用相同原则。`candidateLimit=1000`继续作为统一基�
 
 time-indexed三例900秒合计中，strong-trial RMP求解464.17秒、对应模型重建142.90秒；repair slack求解/重建94.43秒，`FindFeasible`定价76.53秒。当前`Tree.solveStrongBranchingRmpTrial()`仍为每个candidate side新建`LP`、construct并close，三例共发生22093次strong-trial RMP，没有父节点级reusable trial workspace。正常time-indexed pricing合计90.72秒。也就是说进入树后约八成以上时间由20候选乘左右两侧的strong trial及其repair驱动，海量列是弱松弛和大树的后果。
 
-据此分开排序。对ng-DSSR，优先级为：动态限制midpoint多候选walk/bracket；提高witness独立阻断信息，测试受pair预算的minimum/allSegments hybrid与novelty；随后再处理正式label扩展/dominance和有界same-node高频pair复用。join只列第三梯队，completion-bound、RMP和heuristic暂不动。对纯time-indexed，首先应承认其family松弛弱；若仍要优化该求解器，实现父节点级reusable strong-trial LP是当前最明确且不改变分支语义的工程优化，其次才是动态strong candidate预算和列池控制。但这些只能降低树上单位节点成本，不能修复根gap；当前更合理的用途仍是作为ng-DSSR的root preprocessing和窗口/arc fixing辅助，而不是family实例的独立主求解器。
+据此分开排序。对ng-DSSR，当前先不再设计复杂的动态witness策略；统一正式配置继续使用`minimumNewPairsSegment + candidate1000`，`allSegments + 1000`仅作为family专项固定A/B。midpoint保持当前正式口径，即每次DSSR更新后的下一轮先利用上一完整轮反馈生成adaptive seed，再继续浅层probe；后续若优化，只处理多候选切换时丢弃的搜索状态。对纯time-indexed，首先应承认其family松弛弱；若仍要优化该求解器，当前只保留父节点级reusable strong-trial LP这一项明确的实现冗余，不再把动态strong candidate预算和列池控制列为当前方案。这一工程优化只能降低树上单位节点成本，不能修复根gap；当前更合理的用途仍是作为ng-DSSR的root preprocessing和窗口/arc fixing辅助，而不是family实例的独立主求解器。
+
+### 32.17 DSSR轮间probe、pair warm-start与原文strong branching口径澄清
+
+当前正式配置`bidirectionalMidpointProbeAfterFirstDssrRound=true`。因此一轮relaxed pricing没有返回elementary负列、并用non-elementary witness更新ng-set后，下一轮仍会做probe：先由上一完整轮forward/backward耗时形成adaptive seed，再从该seed运行浅层probe。最终选中候选上已经生成的label状态会被正式labeling复用，真正可确认的冗余只是probe切换到其他候选后被丢弃的中间状态。实验开关设为false时才是“首轮probe，后续轮只采用adaptive midpoint而不再浅探”；该变体没有进入正式profile。
+
+DSSR更新不再继续设计hybrid或novelty触发器。现有证据支持两个简单固定口径：统一random/family正式比较继续使用`minimumNewPairsSegment + candidate1000`；若专门研究family实例，可固定使用`allSegments + candidate1000`做独立profile。n30 family三例中allSegments相对minimum使exact平均下降30.9%、DSSR轮数由183降到99，但set01小幅变慢，且random三例minimum仍更快，因此不能把allSegments写成统一默认。candidate3000已经确认只扩大存储与join阈值，未带来稳定收益。
+
+same-node warm-start只复用同一node、相同active-cut集合下最近若干次正式exact的final ng-set，不跨node，也不继承完整final memory。当前实验参数为最近3个snapshot、pair至少在其中2次出现、每个job最多2个、全局最多10个，并且上一exact至少执行3轮DSSR才触发；这些pair只追加到本次基础nearest-K seed，之后仍执行正常DSSR。n40困难例中全局10个高频pair使前三次exact合计由253.108秒降到229.149秒，约9.5%，但25个pair会因削弱dominance而变慢，5个又不足以减少轮数；n30尚无严格隔离的稳定收益。因此它只保留为默认关闭的family实验项，不能当成已证实的统一加速。
+
+用户所称`On the exact`指Bulhoes等人的并行机调度BCP，而不是RouteOpt或旧Java VRP。原文使用两阶段strong branching：phase 1最多测试50个候选，预计当前分支子树较小时允许减少；非root时一半候选按branching history/pseudo-cost选出，其余候选在job-machine assignment和job-job immediate-precedence两类中按接近0.5选择；每个候选左右支只加入branch row并重解restricted master，不生成新列；按两侧LB增量乘积选3个进入phase 2，再用heuristic column generation试算，最终仍按product rule选择。原文依据见Bulhoes et al. (2020), Section 6：<https://www.math.u-bordeaux.fr/~rsadykov/papers/Bulhoes_etall_LOGIS18.pdf>。
+
+当前TWET no-cut time-indexed正式配置并未严格复现该控制：phase 1固定截取20个候选，候选来源也没有按原文的“半数pseudo-cost历史 + 两类变量均分”组织；由于当前没有no-cut graph-native heuristic trial，time-indexed路径在phase 1后直接选最优，phase 2为0。这里不再新增“按深度、score和trial成本动态降低20候选”或树上列池阈值策略。若以后要严格对齐原文，应单独实现原文的候选构成、最多50/取3以及graph-native heuristic phase 2，而不是在当前20候选上继续叠加一套未经验证的控制。
+
+当前唯一证据充分的重复计算是strong-trial模型生命周期。`Tree.solveStrongBranchingRmpTrial()`对每个candidate side都新建`LP`、重新建立变量、coverage/machine/branch/cut rows，求解后立即关闭；n30 family三例共发生22093次，模型重建142.90秒。Bulhoes原文的操作表述是临时加入branching constraint并resolve RMP；现代RouteOpt的对应LP testing实现也在同一个node solver中加入一条row、求左支、反转row求右支、删除row。旧Java VRP的`BranchD`同样在一个父LP中把branch row从`[0,0]`改成`[1,1]`。因此父节点级trial workspace与参考实现方向一致，而且不要求改变候选数量、评分或列池策略。
+
+该复用不能简单改成“所有candidate共用父RMP后只换一条row”。当前right branch还包含branch-implied禁弧，不同side的seed列集也可能不同；为保持现有trial分数，workspace必须对不属于当前side精确seed的变量临时设UB为0，并完整恢复branch row、变量UB、objective和basis。若初始trial需要artificial-slack repair或补入branch-specific columns，第一版应回退现有独立LP路径，避免复杂回滚改变repair语义。这样只消除普通phase-1 RMP的重复建模，仍保留Bulhoes原文式候选控制和当前正确性边界。142.90秒是模型重建的理论上限，464.17秒CPLEX trial solve和repair/FindFeasible并不会因删除建模直接消失。

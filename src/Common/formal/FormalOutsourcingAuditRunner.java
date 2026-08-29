@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -29,9 +28,8 @@ public final class FormalOutsourcingAuditRunner {
 	public static AuditSummary audit(Path suiteRoot) throws Exception {
 		Path generatedRoot = suiteRoot.resolve("instances");
 		Map<String, TaskQuotation> quotations = readTaskQuotations(generatedRoot.resolve("task-selection.tsv"));
-		double referenceTotal = referenceTotal(quotations.values());
-		double breakpoint1 = Math.round(0.25 * referenceTotal);
-		double breakpoint2 = Math.round(0.50 * referenceTotal);
+		double breakpoint1 = FormalExperimentDesign.OUTSOURCING_BREAKPOINT_1;
+		double breakpoint2 = FormalExperimentDesign.OUTSOURCING_BREAKPOINT_2;
 		List<String> indexLines = Files.readAllLines(generatedRoot.resolve("outsourcing-instances.tsv"),
 				StandardCharsets.UTF_8);
 		ArrayList<String> output = new ArrayList<String>();
@@ -177,24 +175,6 @@ public final class FormalOutsourcingAuditRunner {
 			result.put(fields[0], new TaskQuotation(size, values, total));
 		}
 		return result;
-	}
-
-	private static double referenceTotal(java.util.Collection<TaskQuotation> quotations) {
-		ArrayList<Double> totals = new ArrayList<Double>();
-		for (TaskQuotation quotation : quotations) {
-			if (quotation.size == 50) {
-				totals.add(Double.valueOf(quotation.total));
-			}
-		}
-		if (totals.isEmpty()) {
-			for (TaskQuotation quotation : quotations) {
-				totals.add(Double.valueOf(quotation.total));
-			}
-		}
-		totals.sort(Comparator.naturalOrder());
-		int middle = totals.size() / 2;
-		return totals.size() % 2 == 0
-				? 0.5 * (totals.get(middle - 1) + totals.get(middle)) : totals.get(middle);
 	}
 
 	private static boolean sameSegments(List<Segment> actual, List<Segment> expected) {

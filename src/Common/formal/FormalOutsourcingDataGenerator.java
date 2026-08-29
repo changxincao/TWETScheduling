@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -18,9 +17,8 @@ public final class FormalOutsourcingDataGenerator {
 
 	public Result generate(Path outputRoot, List<FormalTaskSet> taskSets,
 			List<GeneratedInstance> schedulingInstances) throws IOException {
-		double referenceTotal = referenceTotal(taskSets);
-		double firstBreakpoint = Math.round(0.25 * referenceTotal);
-		double secondBreakpoint = Math.round(0.50 * referenceTotal);
+		double firstBreakpoint = FormalExperimentDesign.OUTSOURCING_BREAKPOINT_1;
+		double secondBreakpoint = FormalExperimentDesign.OUTSOURCING_BREAKPOINT_2;
 		Map<String, FormalTaskSet> taskSetById = new LinkedHashMap<String, FormalTaskSet>();
 		for (FormalTaskSet taskSet : taskSets) {
 			taskSetById.put(taskSet.id(), taskSet);
@@ -45,8 +43,8 @@ public final class FormalOutsourcingDataGenerator {
 						firstBreakpoint, secondBreakpoint, "no-discount"));
 			}
 		}
-		writeIndex(outputRoot, completeInstances, referenceTotal, firstBreakpoint, secondBreakpoint);
-		return new Result(List.copyOf(completeInstances), referenceTotal, firstBreakpoint, secondBreakpoint);
+		writeIndex(outputRoot, completeInstances, firstBreakpoint, secondBreakpoint);
+		return new Result(List.copyOf(completeInstances), firstBreakpoint, secondBreakpoint);
 	}
 
 	private static CompleteInstance write(Path outputRoot, GeneratedInstance source, FormalTaskSet taskSet,
@@ -128,38 +126,8 @@ public final class FormalOutsourcingDataGenerator {
 		return result;
 	}
 
-	private static double referenceTotal(List<FormalTaskSet> taskSets) {
-		ArrayList<Double> totals = new ArrayList<Double>();
-		for (FormalTaskSet taskSet : taskSets) {
-			if (taskSet.size() == 50) {
-				totals.add(Double.valueOf(totalQuotation(taskSet)));
-			}
-		}
-		if (totals.isEmpty()) {
-			for (FormalTaskSet taskSet : taskSets) {
-				totals.add(Double.valueOf(totalQuotation(taskSet)));
-			}
-		}
-		if (totals.isEmpty()) {
-			throw new IllegalArgumentException("At least one task set is required");
-		}
-		totals.sort(Comparator.naturalOrder());
-		int middle = totals.size() / 2;
-		return totals.size() % 2 == 0
-				? 0.5 * (totals.get(middle - 1).doubleValue() + totals.get(middle).doubleValue())
-				: totals.get(middle).doubleValue();
-	}
-
-	private static double totalQuotation(FormalTaskSet taskSet) {
-		double total = 0.0;
-		for (FormalTaskSet.Job source : taskSet.jobs()) {
-			total += source.processing() * Math.max(source.earlyWeight(), source.tardyWeight());
-		}
-		return total;
-	}
-
 	private static void writeIndex(Path outputRoot, List<CompleteInstance> instances,
-			double referenceTotal, double firstBreakpoint, double secondBreakpoint) throws IOException {
+			double firstBreakpoint, double secondBreakpoint) throws IOException {
 		ArrayList<String> lines = new ArrayList<String>();
 		lines.add("taskSetId\tsize\tmachines\tsetupType\twindowLevel\trate\tdiscountStrength\t"
 				+ "breakpoint1\tbreakpoint2\tquotationTotal\texperimentType\tsourceInstance\tinstance");
@@ -178,8 +146,7 @@ public final class FormalOutsourcingDataGenerator {
 		long noDiscountCount = instances.size() - defaultCount;
 		Files.write(outputRoot.resolve("outsourcing-design.properties"), List.of(
 				"quotation=p*max(wE,wT)",
-				"breakpointReferenceN=50",
-				"breakpointReferenceTotal=" + compact(referenceTotal),
+				"breakpointPolicy=fixed",
 				"breakpoint1=" + compact(firstBreakpoint),
 				"breakpoint2=" + compact(secondBreakpoint),
 				"defaultDiscountMarginalRates=1,0.85,0.70",
@@ -205,8 +172,7 @@ public final class FormalOutsourcingDataGenerator {
 	public record Segment(double start, double end, double slope, double intercept) {
 	}
 
-	public record Result(List<CompleteInstance> instances, double referenceTotal,
-			double breakpoint1, double breakpoint2) {
+	public record Result(List<CompleteInstance> instances, double breakpoint1, double breakpoint2) {
 		public CompleteInstance require(Path sourceInstance, double rate, double discountStrength) {
 			Path normalized = sourceInstance.toAbsolutePath().normalize();
 			for (CompleteInstance instance : instances) {

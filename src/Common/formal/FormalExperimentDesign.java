@@ -14,6 +14,8 @@ public final class FormalExperimentDesign {
 	public static final double SETUP_COST_COEFFICIENT = 20.0;
 	public static final double[] OUTSOURCING_RATES = new double[] { 0.5, 1.0, 2.0 };
 	public static final double DEFAULT_DISCOUNT_STRENGTH = 0.15;
+	public static final double OUTSOURCING_BREAKPOINT_1 = 4000.0;
+	public static final double OUTSOURCING_BREAKPOINT_2 = 8000.0;
 
 	public static final long SOURCE_SELECTION_SEED = 2026082301L;
 	public static final long TASK_PERMUTATION_SEED = 2026082302L;

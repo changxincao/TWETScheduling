@@ -102,7 +102,9 @@ public final class FormalExperimentInfrastructureTest {
 		String experimentProperties = Files.readString(suite.resolve("experiment.properties"),
 				StandardCharsets.UTF_8);
 		assertContains(experimentProperties, "outsourcingQuotation=p*max(wE,wT)", "quotation metadata");
-		assertContains(experimentProperties, "outsourcingBreakpointReferenceTotal=3050", "breakpoint metadata");
+		assertContains(experimentProperties, "outsourcingBreakpointPolicy=fixed", "breakpoint policy");
+		assertContains(experimentProperties, "outsourcingBreakpoint1=4000", "first breakpoint");
+		assertContains(experimentProperties, "outsourcingBreakpoint2=8000", "second breakpoint");
 		assertTrue(Files.exists(suite.resolve("instances/post-generation-setup-audit.tsv")),
 				"missing independent post-generation setup audit");
 		assertTrue(Files.exists(suite.resolve("instances/post-generation-time-scale-audit.tsv")),

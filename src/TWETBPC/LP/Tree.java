@@ -352,8 +352,9 @@ public class Tree {
 		}
 
 		boolean timeLimitReached = isSolveTimeLimitReached(solveStartNanos);
+		boolean currentNodeIncomplete = stoppedByTimeLimit || failedByMaster;
 		bestBound = finalBound(queue, incumbentCost, bestBound,
-				stoppedByTimeLimit || timeLimitReached || failedByMaster);
+				currentNodeIncomplete || timeLimitReached, currentNodeIncomplete);
 		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), stoppedByTimeLimit, timeLimitReached,
 				failedByMaster);
 		if (lightweightSeedPreparationCalls > 0) {
@@ -974,8 +975,8 @@ public class Tree {
 		return bound;
 	}
 
-	private double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound,
-			boolean searchIncomplete) {
+	static double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound,
+			boolean searchIncomplete, boolean currentNodeIncomplete) {
 		// 2026-05-19: 如果队列为空，所有节点已经关闭，最终 LB 应等于 incumbent；
 		// 如果搜索因时限或 master 失败而中断，队列为空也不能伪装成正常闭合。
 		if (queue.isEmpty()) {
@@ -986,6 +987,11 @@ public class Tree {
 		// 否则 TIME_LIMIT / NODE_LIMIT 会被误报成 gap=0。
 		if (!Double.isFinite(bound) || Utility.isBigMValue(bound)) {
 			return lastReportedBound;
+		}
+		// 当前节点已经出队；若它在超时/失败时尚未关闭，open queue不包含其子树。
+		// lastReportedBound在退出前已合并当前节点认证界，不能被更高的兄弟节点伪下界覆盖。
+		if (currentNodeIncomplete && Double.isFinite(lastReportedBound)) {
+			bound = Math.min(bound, lastReportedBound);
 		}
 		if (Double.isFinite(incumbentCost) && Utility.compareGt(bound, incumbentCost)) {
 			return incumbentCost;

@@ -159,7 +159,7 @@ public final class BestBpcProfilesTest {
 				"ng later DSSR midpoint acceptance ratio");
 		require(config.bidirectionalMidpointProbeDssrMoveFraction == 0.05,
 				"ng later DSSR midpoint move fraction");
-		require(config.bidirectionalMidpointProbeDssrImbalanceThreshold == 2.0,
+		require(config.bidirectionalMidpointProbeDssrImbalanceThreshold == 4.0,
 				"ng DSSR midpoint feedback ratio");
 		require(config.enableStrongBranchingPhaseOneRepair, "ng Phase-I repair");
 		assertCommon(config);

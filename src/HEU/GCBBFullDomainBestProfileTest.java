@@ -56,7 +56,7 @@ public class GCBBFullDomainBestProfileTest {
 		require(config.bidirectionalMidpointProbePopLimit == 10000, "ng midpoint total pop budget");
 		require("time".equals(config.bidirectionalMidpointProbeScore), "ng midpoint score");
 		require(config.bidirectionalMidpointProbeEarlyStopRatio == 1.5, "ng midpoint acceptance ratio");
-		require(config.bidirectionalMidpointProbeDssrImbalanceThreshold == 2.0,
+		require(config.bidirectionalMidpointProbeDssrImbalanceThreshold == 4.0,
 				"ng DSSR midpoint feedback ratio");
 		verifyCommon(config);
 	}

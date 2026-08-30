@@ -258,7 +258,7 @@ due-window 仍是一阶段共同决策，因为 \(a,\ell\) 没有场景下标。
 
 若采用 2025 风格，分解边界才改为：master 保留 \(x,a,\ell\)，固定排程和窗口后分别求各场景的 \(C,w,e,t\)。这一路线作为对照，不是当前主算法。
 
-## 5. 分位数函数如何精确求解
+## 5. 最终求解路线与分位数的角色
 
 直接写 \(a_j=Q_j(\tau_j^a)\) 会遇到决策相关排序、样本并列和集合值问题，因此不应显式编码分位数等式。式 (1) 本身是 LP，它已经是分位数函数的紧凑线性表示。
 
@@ -353,6 +353,6 @@ Q(x)=\min_y\{q^\top y:Ay\ge h-Bx\},
 | 2025 风格 | master 保留 \(x,a,\ell\) | 固定窗口后按场景求 timing LP | 场景可分，但 master 和 cuts 较多 |
 | 2026 风格 \((P_2)\) | master 只保留 \(x,\Theta\) | 共同窗口与全部场景 timing 的联合 LP | master 小；场景被共同窗口耦合 |
 
-当前建议先建立直接 MILP，再以 2026 风格 projected Benders 为主算法，并以 2025 风格作为分解边界对照。不要显式建立 order-statistic 排序变量：分位数用于解释和恢复最优窗口，LP 扩展式与对偶 cuts 用于求解。
+当前建议先建立直接 MILP，再以 2026 风格 projected Benders 为主算法，并以 2025 风格作为分解边界对照。主算法直接分解 $(P_0)$，不显式建立 order-statistic 排序变量，也不计算分位数。分位数只用于解释窗口结构、分析参数和校验最优窗口；LP 扩展式与联合 LP 的对偶 cuts 才实际用于求解。不要把分位数投影列为独立算法贡献。
 
 上述逐任务投影要求任务使用彼此独立的软 due window。若使用 common window、跨任务窗口预算或 hard-window 可行性约束，仍可联合投影，但不能写成 \(\sum_j\Phi_j(\mathbf C_j)\)。若目标改成 early/tardy job 数量，连续 LP 结构也会消失，classical Benders 对偶 cut 不再直接适用。

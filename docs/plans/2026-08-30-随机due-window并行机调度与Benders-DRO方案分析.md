@@ -4,7 +4,7 @@
 
 主要参考 Çelik et al. (2025) 的 two-step Benders、Cavaliere et al. (2026) 的强位置模型与投影式 Benders、Hosseini and Turner 的 deepest Benders cuts，以及 Avgerinos et al. 的 local-branching neighbourhood supercut。本文是模型与算法方案，不表示这些随机模型或算法已经在当前代码中实现。
 
-关于窗口位置成本、范围约束、二阶段等待成本、宽度成本是否必要，以及局部投影如何扩展到 SAA 的专项核对，见[决策型 due window 的问题设定：文献对照、退化条件与 SAA 结构](2026-08-30-due-window问题设定文献调研与SAA结构分析.md)。从完整 SAA 模型推出经验分位数、消去窗口变量并得到 projected Benders 值函数的统一推导，见[随机 due-window 并行机调度：分位数投影与完整模型推导](2026-08-30-due-window分位数投影与完整模型推导.md)。当前研究边界已经明确：所有候选模型都允许场景内等待，只比较免费等待 FW 与付费等待 PW，不再考虑 no-voluntary-idle 版本。
+关于窗口位置成本、范围约束、二阶段等待成本、宽度成本是否必要，以及局部投影如何扩展到 SAA 的专项核对，见[决策型 due window 的问题设定：文献对照、退化条件与 SAA 结构](2026-08-30-due-window问题设定文献调研与SAA结构分析.md)。窗口端点与场景完成时间之间的经验分位数关系只作为模型性质、参数解释和解校验，完整推导见[随机 due-window 并行机调度：分位数投影与完整模型推导](2026-08-30-due-window分位数投影与完整模型推导.md)；它不进入当前 2026 风格 Benders 的实际求解流程。当前研究边界已经明确：所有候选模型都允许场景内等待，只比较免费等待 FW 与付费等待 PW，不再考虑 no-voluntary-idle 版本。
 
 ## 1. 问题边界与最重要的建模判断
 
@@ -40,9 +40,11 @@ $$
 
 第一种只有在范围具有真实承诺含义时最自然；第二种是当前推荐的 PW 主模型；第三种形成与原 TWA 免费等待语义最接近、但用位置成本替代 overtime 的 FW 基准。主比较应让 FW 与 PW 使用相同的位置和宽度成本，只改变 $\eta=0$ 与 $\eta>0$。
 
-### 1.2 含 waiting cost 的统一窗口投影
+### 1.2 结构性质：窗口分位数（不进入主算法）
 
 当前主模型直接保留场景 waiting cost $\eta_jW_{j\omega}$；免费等待只需令 $\eta_j=0$。不再先消去单个任务的等待，也不在完整模型中使用 $\min\{\alpha_j,\eta_j\}$ 替换 early 系数。
+
+本节只解释给定场景完成时间后，最优 due window 具有怎样的结构，不定义最终的 Benders 分解。主算法直接固定离散排程 $x$，联合求解原始模型 $(P_0)$ 中的 $a,b,C,W,E,T$ 连续 LP；算法既不建立下面的 $\Phi_j$，也不计算分位数。
 
 给定所有等待已经计入后的实际完成时间向量 $\mathbf C_j=(C_{j1},\ldots,C_{jN})$，任务 $j$ 的最优窗口成本为
 
@@ -79,7 +81,7 @@ c(x)+\frac1N\sum_{\omega,j}\eta_jW_{j\omega}
 \right\}.
 $$
 
-$\Phi_j$ 是凸分段线性 LP 值函数，而不是需要显式编码的排序黑箱。直接确定性等价模型保留 $a,b,E,T$ 即为精确线性扩展式；2026 风格则进一步把 $a,b,C,W,E,T$ 投影成只关于排程 $x$ 的联合 recourse 值函数 $Q(x)$，再由 LP 对偶生成 Benders cuts。完整推导及窗口 LP 对偶见上述专项文档。
+$\Phi_j$ 是凸分段线性 LP 值函数。这个结论可以用来解释成本参数、检查求得的窗口是否满足最优性，并识别模型退化；但当前算法并不先显式消去窗口。2026 风格直接把原始模型中的 $a,b,C,W,E,T$ 一次性投影成只关于排程 $x$ 的联合 recourse 值函数 $Q(x)$，再由联合 LP 的对偶生成 Benders cuts。因此，除非另行实现并比较基于 $(P_1)$ 的专用分离算法，否则不能把分位数关系称为算法组成或计算贡献。
 
 宽度仍需正成本、固定值或真实上界，否则可用覆盖所有实际完成时刻的宽窗口同时消掉 ET。免费等待时还需要位置成本或真实范围阻止整体时间平移。
 
@@ -358,7 +360,7 @@ Avgerinos et al. 式 exact neighbourhood supercut 要求整个邻域已经被完
 
 第一阶段直接做相同并行机、任务特定的决策型 due window、随机加工时间和经典加权 ET，所有版本均保留场景自适应等待。以 PW 为主模型：正位置成本、正宽度成本和正 waiting cost 同时存在；以相同模型中的 $\eta=0$ 形成 FW 免费等待基准。PW 再增加一个删除位置成本的消融，用于验证付费等待能否单独锚定位置，但该消融不与 FW 直接比较。
 
-先建立小规模确定性等价模型作正确性基准，再以 2026 风格的强位置 formulation + 投影式 Benders 为主算法，以 2025 two-step Benders 为结构对照。主模型始终保留 $\eta W$，固定实际完成时间后投影窗口得到 $\Phi_j(\mathbf C_j)$；完整序列的等待传播和所有场景 timing 由联合 LP 处理。
+先建立小规模确定性等价模型作正确性基准，再以 2026 风格的强位置 formulation + 投影式 Benders 为主算法，以 2025 two-step Benders 为结构对照。主算法固定 $x$ 后，直接在同一个连续 LP 中联合优化 $a,b,C,W,E,T$，并始终保留 $\eta W$；它在实现上仍是对 TWA projected Benders 的机器调度适配。分位数关系只作为理论命题和求解结果校验，不参与这一主算法。
 
 第二阶段只在这个连续 ET 主模型上加入 deepest cuts 和 selective local branching，并逐项消融。local branching 先做限时 primal heuristic；只有邻域完整闭合后才测试 exact supercut。
 

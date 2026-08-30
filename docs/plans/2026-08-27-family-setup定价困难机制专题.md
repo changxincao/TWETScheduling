@@ -1009,3 +1009,17 @@ family则已有明确证据表明当前轮间probe过于敏感：`probe+minimum`
 “上一轮平衡就跳过probe”暂不采用。上一轮平衡时adaptive seed确实等于旧`Tmid`，但ng-memory已经更新；在当前memory上运行首候选仍有校验价值，而且该候选的pop可被正式labeling复用，通常不是额外扩展。真正需要减少的是首候选不合格后无上限切换中点产生的废弃状态。因此推荐的实验版本为：首轮原probe加单侧修正；后续轮阈值4、最多两个候选、修正步长2.5%或5%、无bracket；adaptive分位数公式和seed本身先不设位移上限。若该版本仍出现adaptive一次大跨度过冲，再把最大位移作为后续独立因子。
 
 验证顺序仍需隔离。先只加入单侧耗尽累计比较，确认新增pop、接受/拒绝变化和总耗时；再测试后续轮`R=4 + maxCandidates=2`，最后比较2.5%与5%修正步长。每组至少覆盖现有n40 matched family/random三例，并额外用更高规模random检查“probe准确”还是“影响很小”。所有实验记录最终bound、DSSR轮数、每轮adaptive位移、样本/完整F/B比、单侧追加pop、候选数和丢弃候选时间。该方案不读取setup类型，也不修改任何ng-memory更新逻辑。
+
+### 32.28 probe信息复用范围与拟定参数
+
+当前probe信息的复用范围仅限同一次exact pricing调用内部。每次`solve(lp)`开始都会把`ngDssrReusableTmid`以及上一轮forward/backward耗时重置为`NaN`，ng-memory也重新初始化；因此即使仍在同一BPC node，只要RMP更新dual后再次调用exact pricing，该调用的第一轮仍从当前有效时间域的默认中点独立probe，不继承同node上一次exact的`Tmid`、方向或耗时。跨node同样不复用。只有一次exact内部的DSSR第2轮及以后，才使用上一完整轮的最终`Tmid`、完整正反向耗时和存活label分位数生成adaptive seed。每一轮因ng-memory变化仍要重建label搜索状态，但本轮最终选中的probe候选状态会直接由本轮正式labeling续跑。
+
+这种边界暂时合理。不同exact调用之间dual、负路线结构和active cuts可能已经变化，直接继承上一次`Tmid`又会形成另一种历史warm-start；而现有问题主要发生在同一次exact内部反复DSSR时，没必要把跨调用复用混入本轮实验。首轮继续从头probe，后续轮才采用轻量校验。
+
+实现参数建议分成首轮和后续轮两组。现有`bidirectionalMidpointProbePopLimit=10000`继续表示每个候选初始forward/backward各最多5000 pop；`bidirectionalMidpointProbeEarlyStopRatio=1.5`只控制首轮；`bidirectionalMidpointProbeDssrImbalanceThreshold=2.0`继续控制上一完整轮何时触发adaptive分位数移动。新增三个含义明确的后续轮参数：`bidirectionalMidpointProbeDssrEarlyStopRatio=4.0`、`bidirectionalMidpointProbeDssrMaxCandidates=2`、`bidirectionalMidpointProbeDssrMoveFraction=0.025`。5%只作为第二个A/B值，不设为首选，因为困难n40有效宽度下5%约为208.35，正是历史probe经常产生且可能过大的修正。
+
+单侧耗尽续探按512 pop一批实现即可，先不暴露配置。初始采样后若恰有一侧耗尽，保留当前候选的队列和计时；若未耗尽侧当前累计耗时尚未达到本轮阈值`R`乘以已耗尽侧完整耗时，则每扩展最多512次后重新检查队列、累计elapsed和全局time limit。额外时间直接加到原side elapsed，不重建candidate。首轮取`R=1.5`，后续轮取`R=4.0`。若追加侧耗尽则使用完整比值；若仍未耗尽但达到`R E`则可靠判定候选不合格。512只是降低高频计时开销的批大小，对pricing集合和最终证书没有影响。
+
+后续轮最多两个候选的流程固定为：在adaptive seed运行首候选；候选可接受则直接续跑；只有被可靠或等pop样本判为超过4时，才按当前实测重侧移动有效宽度2.5%并重建第二候选；第二候选完成初始/单侧续探后直接用于正式labeling，不再walk或bracket。首轮仍使用现有无固定候选上限的10% walk和5% bracket。adaptive公式、方向和seed先不设最大位移；若分层probe验证后仍有大跨度过冲，再独立增加位移上限。
+
+random现有三例只能支持“probe无明显代价”，不能区分准确与调用次数少。新版本验证时应在matched n40 family/random上完成三步隔离A/B：单侧修正；后续`R=4/maxCandidates=2/step2.5%`；仅将step改为5%。随后增加更高规模random，逐轮统计probe样本方向与完整方向一致率、样本比和完整比、首候选接受率、单侧续探批次、废弃候选时间及根闭合时间。所有ng-memory、witness和warm-start参数保持现状。

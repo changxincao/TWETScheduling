@@ -943,3 +943,13 @@ family set01中warm-start使exact由`122.314s`降至`109.272s`，但set02/set03�
 random三例看似更快，但其exact总计仅约`1.9--5.2s`，总时间还包含root preprocessing、RMP和strong trial波动；而且大多数probe直接rank0耗尽，方向规则很少真正限制候选。该弱正信号不能抵消family三例一致且幅度很大的退化。实验代码、runner参数和测试断言已全部撤回，正式profile从未启用该规则。
 
 本轮最终结论是：不能把上一完整轮方向当成不可越过的硬约束。若继续优化midpoint，只能考虑限制单轮最大位移、在大位移或方向反转时保留1--2个验证候选，并比较所有已测候选的可靠工作量；这些都需要新的逐轮证据。本轮用户要求的n40 probe开关、minimum/allSegments、warm-start和方向约束四部分已经全部完成，没有剩余运行。现有统一正式配置仍保持后续probe开启、`minimumNewPairsSegment + candidate1000`、same-node warm-start关闭。
+
+### 32.24 10-pair warm-start与后续probe默认值的语义澄清
+
+所谓“10-pair warm-start”并不是继承上一调用的完整final memory，也不向RMP加入列。每次正式exact仍先构造本次基础nearest-K ng-set；同一node、相同active-cut集合下，求解器最多保存最近3次已结束exact的final ng-set。只有最近一次exact至少执行3轮DSSR时才考虑复用，并统计每个有向ng成员关系`job -> member`在窗口内出现了几次。候选必须仍存在于最新snapshot且至少出现2次，随后按出现次数降序选择，每个job最多2个、全局最多10个，并跳过基础ng-set已经包含的成员。窗口中只有一个snapshot时不可能达到“两次出现”，因此最早从同一node的第三次exact开始生效。repair pricing使用不带该共享历史的求解器，不会写入或读取这组状态。
+
+该“高频”定义的局限也需要明确：final ng-set是一次pricing中所有DSSR更新的累积结果，某个pair跨调用保留下来，不等于它在新dual下仍会阻断大量witness。当前选择也不统计pair支持的witness数、跨轮出现次数或重复段多样性；同频时只按job/member编号稳定排序。因此10个pair有时提前阻断重复结构，有时只是提前扩大memory、削弱dominance并改变返回列和后续dual轨迹。第32.22节的完整根节点结果已证明它不能统一开启。
+
+`bidirectionalMidpointProbeAfterFirstDssrRound=true`同样只是性能默认，不是正确性条件。后续轮先使用上一完整DSSR轮的forward/backward耗时形成adaptive seed：当耗时比超过2时，根据失衡程度计算移动比例，再从重侧存活label的split-time分位数选新点。此时下一轮ng-memory已经变化，而分位数只描述上一轮存活label的时间位置，并不直接预测新memory下每个label的扩展代价、后代数量和join组合量，所以seed可能移动不足，也可能“均衡过头”。继续浅probe使用新一轮memory在seed附近实际扩展，理论上可以纠正这种过冲；因此第32.23节的硬方向约束不合理，它禁止了本来可能必要的反向修正。
+
+但这不等于`true`已经被证明更快。最新n40 minimum模式中，adaptive-direct在3个family实例上均优于继续probe，平均`327.305s`对`525.994s`；n30 family总体也明显受益，只是个别实例持平或略慢。继续probe的依据是避免已观察到的大位移过冲、并为random/allSegments等结构保留鲁棒性；它是保守统一默认。若目标是当前困难family实例的专用速度，现有证据反而更支持`bidirectionalMidpointProbeAfterFirstDssrRound=false + minimum/1000`。因此后续表述必须区分：统一正式profile暂保留`true`，family专项候选取`false`；不能再把`true`称为已确认的最佳配置。

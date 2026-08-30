@@ -991,6 +991,9 @@ public class GCBBFullDomainComparisonTest {
 		config.bidirectionalMidpointProbeReuseWithinDssr = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeReuseWithinDssr",
 				Boolean.toString(config.bidirectionalMidpointProbeReuseWithinDssr)));
+		config.bidirectionalMidpointProbeDssrEarlyStopRatio = Double.parseDouble(System.getProperty(
+				"twet.bpc.fullDomainCompare.midpointProbeDssrEarlyStopRatio",
+				Double.toString(config.bidirectionalMidpointProbeDssrEarlyStopRatio)));
 		config.bidirectionalMidpointProbeDssrImbalanceThreshold = Double.parseDouble(System.getProperty(
 				"twet.bpc.fullDomainCompare.midpointProbeDssrImbalanceThreshold",
 				Double.toString(config.bidirectionalMidpointProbeDssrImbalanceThreshold)));

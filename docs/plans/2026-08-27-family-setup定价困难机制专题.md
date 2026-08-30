@@ -1320,3 +1320,25 @@ t^{\mathrm{WA}}=\frac{1}{2|J|}\sum_{j\in J}
 日志还说明probe在两种起点上都没有移动首轮reference。三次default第一轮均为`Tmid=911.5`，保留forward/backward labels为`4512/59`；三次windowAverage均为`936.067`，对应`4516/38`。每次首轮都只测试一个probe候选并原地接受，随后完整F/B耗时比仍分别约为`16--17`和`19--22`。第2轮完整反馈才把default调整到`522--525`、把windowAverage调整到`511--517`，后续中点已经接近。由此可见，这个A/B主要改变首轮很小的一段时间划分和首批返回列，根时间差由这些列引起的后续RMP dual与CG轨迹放大，而不是windowAverage让probe持续找到明显更轻的搜索域。
 
 “关闭probe”必须区分两个配置。若设置`bidirectionalMidpointProbe=false`，当前代码会在每个DSSR轮重新计算配置的静态起点，完全不执行浅探，也不会读取上一完整轮反馈；这不是“只用迭代”。若保持总开关为true、只设置`bidirectionalMidpointProbeAfterFirstDssrRound=false`，则第一轮仍从default或windowAverage执行probe，第2轮以后使用上一完整轮F/B耗时生成adaptive Tmid并直接正式labeling，不再追加浅层probe；这才是此前所说的adaptive-direct或“只用迭代”。正式profile当前仍是两个开关都为true，即首轮和后续轮均允许probe。
+
+### 32.42 n40/n50起点扩展对照与阈值3复核
+
+本轮保留当前完整流程，只比较每次exact第一轮的静态reference：`default + probe + 完整轮反馈`与`windowAverage + probe + 完整轮反馈`。代码审计确认，`ngDssrReusableTmid`在每次exact pricing调用开始时重置，因此静态策略不是整棵树只用一次，而是每次exact的第1轮都会重新进入；同一次exact的第2轮以后，才读取上一完整轮forward/backward耗时生成feedback seed并再次probe。故静态公式本身不在DSSR轮间迭代，但其首轮选点和返回列会改变RMP dual及后续CG轨迹，不能认为它对迭代无影响。
+
+单侧耗尽修正也重新逐段检查。初始probe给两侧各自的pop预算；若恰好一侧耗尽，只继续扩展未耗尽侧，每250次pop重新检查。新增batch耗时只累加到未完成侧，已完成侧不重启也不重复扩展；未完成侧若也耗尽则得到完整比较，若累计耗时达到已完成侧乘以当前接受比例则停止并确认方向。选中候选的现有搜索状态继续用于正式labeling；完整forward、backward与join仍正常完成，因此该处理只影响候选选择和计算量，不改变定价集合或certificate。配置与策略单元测试均通过。
+
+根节点串行对照结果如下。两种起点都启用首轮及后续probe、完整轮反馈、TIME队列、minimum-segment/1000 witness、warm-start关闭和CPLEX单线程。n40在根节点闭合，n50限制处理一个根节点以隔离pricing；同一规模内最终bound完全一致且均为`valid=true`。
+
+| 实例与起点 | 根时间/s | exact/s | exact调用 | DSSR轮 | 结果 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| n40 family m2，default | 217.121 | 202.572 | 12 | 172 | `LB=UB=81757` |
+| n40 family m2，windowAverage | 222.156 | 208.709 | 11 | 167 | `LB=UB=81757` |
+| n50 family m3，default | 209.926 | 120.748 | 44 | 171 | root bound `40199.875` |
+| n50 family m3，default复跑 | 236.051 | 132.441 | 43 | 163 | root bound `40199.875` |
+| n50 family m3，windowAverage | 157.955 | 89.534 | 22 | 108 | root bound `40199.875` |
+
+n40中两种reference为`947.50/970.45`，相差22.95；probe选中点也整体平移22.95，default主要为479.75，windowAverage主要为502.70。windowAverage总时和exact分别慢`2.3%/3.0%`，没有优势。n50中reference为`1148.00/1263.25`，相差115.25；但候选网格不同后，windowAverage的22次首轮全部选到692.25，default两次可复现运行则在691.20和805.40之间切换。default两次的exact调用、exact列和池规模高度一致，分别为`44/43`次、`918/919`条和`10361/10362`，说明其算法轨迹可复现；墙钟仍从209.9秒波动到236.1秒。windowAverage在该实例确实形成了另一条更短的CG轨迹，但n40结论相反，且n30历史样本同样表现为部分小幅变慢、部分长尾显著改善。因此当前只能判断起点会通过离散probe网格和列批次放大，不能判断windowAverage普遍更优。
+
+最后在相同n50 default上只把后续DSSR的feedback触发阈值和probe接受阈值从4同时改为3；首轮比例仍为1.5，后续步长仍为5%。阈值3得到`208.337s / exact 119.167s / 40次exact / 157轮DSSR`，相对阈值4第一次运行仅快`0.76%/1.31%`，处于同配置复跑的墙钟波动范围；完整运行中只多触发1次adaptive，未形成稳定机制优势。诊断runner新增了`midpointProbeDssrEarlyStopRatio`覆盖入口，未提供属性时原值原样保留；有效配置日志确认本次两项阈值均为3，而正式profile仍为4。
+
+当前决定是保留原始正式状态：`default`起点、首轮及后续probe、完整轮反馈、阈值4和5%步长都不改。windowAverage保留为实验策略，不切换默认；阈值3也不采用。现有证据表明继续微调Tmid参数很容易改变有限列批次和CG长尾，收益不稳定，暂时没有足够可靠的新选点规则值得替换当前流程。

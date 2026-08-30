@@ -174,6 +174,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long midpointStrategyNanos;
 	private static final double MIDPOINT_PROBE_STEP_FRACTION = 0.10;
 	private static final double MIDPOINT_PROBE_BRACKET_TOLERANCE = 0.05;
+	private static final int MIDPOINT_PROBE_ONE_SIDE_BATCH_POPS = 250;
 
 	static void validateMidpointProbeConfiguration(TWETBPCConfig config) {
 		if (config == null) {
@@ -195,6 +196,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!Double.isFinite(acceptableRatio) || !Utility.compareGt(acceptableRatio, 1.0)) {
 			acceptableRatio = 1.5;
 		}
+		double dssrAcceptableRatio = config.bidirectionalMidpointProbeDssrEarlyStopRatio;
+		if (!Double.isFinite(dssrAcceptableRatio) || !Utility.compareGt(dssrAcceptableRatio, 1.0)) {
+			dssrAcceptableRatio = acceptableRatio;
+		}
+		double dssrStepFraction = config.bidirectionalMidpointProbeDssrMoveFraction;
+		if (!Double.isFinite(dssrStepFraction) || !Utility.compareGt(dssrStepFraction, 0.0)
+				|| Utility.compareGt(dssrStepFraction, 1.0)) {
+			dssrStepFraction = MIDPOINT_PROBE_STEP_FRACTION;
+		}
 		return "enabled=" + config.bidirectionalMidpointProbe
 				+ ",scoreMode=time"
 				+ ",popLimit=" + Math.max(1, config.bidirectionalMidpointProbePopLimit)
@@ -203,6 +213,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ ",bracketToleranceFraction=" + MIDPOINT_PROBE_BRACKET_TOLERANCE
 				+ ",acceptableRatio=" + acceptableRatio
 				+ ",dssrReuse=" + config.bidirectionalMidpointProbeReuseWithinDssr
+				+ ",dssrAcceptableRatio=" + dssrAcceptableRatio
+				+ ",dssrStepFraction=" + dssrStepFraction
 				+ ",dssrImbalanceThreshold=" + config.bidirectionalMidpointProbeDssrImbalanceThreshold;
 	}
 	// 2026-05-22: 閻熸粎澧楅幐鍛婃櫠閻樼鍋撶憴鍕叝闁绘粠鍨卞顏堫敊閻愵剛鏆?job-level 闂佸憡鏌ｉ崝宥夊焵?H_j 缂傚倸鍊归幐鎼佹偤閵娾晛违?
@@ -438,6 +450,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private StringBuilder ngDssrMidpointByRound;
 	/** 每轮 probe 的迭代统计。 */
 	private StringBuilder ngDssrMidpointProbeRuns;
+	/** 单侧提前耗尽诊断按首次 probe 与 DSSR 反馈 probe 分开聚合，不参与 Tmid 选择。 */
+	private OneSideProbeStats initialOneSideProbeStats;
+	private OneSideProbeStats dssrOneSideProbeStats;
 	private boolean ngDssrTraceNgSetStats;
 	private boolean ngDssrTraceNgSetMembers;
 	/** 诊断每轮最优负非基本序列与上一轮候选集合的关系，不参与正式 DSSR 更新。 */
@@ -1262,6 +1277,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		ngDssrProbeSeedSource = "default";
 		ngDssrMidpointByRound = new StringBuilder();
 		ngDssrMidpointProbeRuns = new StringBuilder();
+		initialOneSideProbeStats = new OneSideProbeStats();
+		dssrOneSideProbeStats = new OneSideProbeStats();
 		resetExactPhaseTiming();
 		ngDssrHistoryWarmStartSkippedForRepeatability = false;
 		ngDssrWindowRepeatabilityFilterApplied = false;
@@ -1442,6 +1459,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			exactTotalNanos += System.nanoTime() - exactStartNanos;
 			return generatedColumns;
 		}
+		if (timeLimitChecker.isTimeLimitReached()) {
+			lastMessage = "GCNGBB-style ng-DSSR bidirectional initialization reached the global time limit";
+			exactTotalNanos += System.nanoTime() - exactStartNanos;
+			return generatedColumns;
+		}
 		if (fullMidpointDiagnosticRan && Boolean.getBoolean("twet.bpc.midpointFullDiagnosticStopAfter")) {
 			generatedColumns.clear();
 			lastMessage = "GCNGBB-style ng-DSSR bidirectional midpoint full diagnostic executed; exact pricing skipped";
@@ -1547,7 +1569,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (ngDssrMidpointProbeRuns == null || ngDssrMidpointProbeRuns.length() == 0) {
 			return "";
 		}
-		return ", midpointProbeRuns=" + ngDssrMidpointProbeRuns;
+		return ", midpointProbeRuns=" + ngDssrMidpointProbeRuns
+				+ ", midpointProbeOneSide initial=" + initialOneSideProbeStats.compactSummary()
+				+ ", dssr=" + dssrOneSideProbeStats.compactSummary();
 	}
 
 	private void recordMidpointProbeRun(int iterations, int walkIterations, int bracketIterations,
@@ -2821,12 +2845,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		int popLimit = Math.max(1, config.bidirectionalMidpointProbePopLimit);
 		String scoreMode = "time";
-		double acceptableRatio = normalizedProbeEarlyStopRatio();
+		boolean dssrFeedbackProbe = ngDssrRound > 1;
+		double acceptableRatio = dssrFeedbackProbe
+				? normalizedDssrProbeEarlyStopRatio() : normalizedProbeEarlyStopRatio();
+		double stepFraction = dssrFeedbackProbe
+				? normalizedDssrProbeStepFraction() : MIDPOINT_PROBE_STEP_FRACTION;
 		double lower = midpointProbeLowerBound();
 		double upper = clampCurrentMidpoint(pricingHorizon);
 		double width = Math.max(0.0, upper - lower);
-		double step = MIDPOINT_PROBE_STEP_FRACTION * width;
-		double bracketTolerance = MIDPOINT_PROBE_BRACKET_TOLERANCE * width;
+		double step = stepFraction * width;
+		double bracketTolerance = (dssrFeedbackProbe ? 0.5 * stepFraction
+				: MIDPOINT_PROBE_BRACKET_TOLERANCE) * width;
 		double candidate = clampMidpointProbeCandidate(reference, lower, upper);
 		MidpointProbeResult previous = null;
 		MidpointProbeResult current = null;
@@ -2843,7 +2872,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		StringBuilder candidateSummaries = new StringBuilder();
 
 		while (true) {
-			current = runMidpointProbeCandidate(lp, candidate, popLimit);
+			current = runMidpointProbeCandidate(lp, candidate, popLimit, acceptableRatio);
+			(dssrFeedbackProbe ? dssrOneSideProbeStats : initialOneSideProbeStats).record(current);
 			candidateCount++;
 			totalPops += current.pops;
 			if (bracketed) {
@@ -2857,6 +2887,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			candidateSummaries.append(current.compactSummary(scoreMode));
 			if (first == null) {
 				first = current;
+			}
+			if (timeLimitChecker.isTimeLimitReached()) {
+				stopReason = "globalTimeLimit";
+				break;
 			}
 
 			if (current.reliabilityRank(scoreMode) == 0) {
@@ -2929,7 +2963,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		midpointProbeLabelsReadyForJoin = current.reliabilityRank(scoreMode) == 0;
 		midpointProbeSummary = formatMidpointProbeSummary(reference, current, stopReason,
 				candidateCount, walkCandidates, bracketCandidates, totalPops, step, bracketTolerance,
-				candidateSummaries);
+				candidateSummaries, dssrFeedbackProbe, acceptableRatio);
 		recordMidpointProbeRun(candidateCount, walkCandidates, bracketCandidates, totalPops, stopReason);
 	}
 
@@ -2976,13 +3010,48 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0) ? ratio : 1.5;
 	}
 
+	private double normalizedDssrProbeEarlyStopRatio() {
+		double ratio = config.bidirectionalMidpointProbeDssrEarlyStopRatio;
+		return Double.isFinite(ratio) && Utility.compareGt(ratio, 1.0)
+				? ratio : normalizedProbeEarlyStopRatio();
+	}
+
+	private double normalizedDssrProbeStepFraction() {
+		double fraction = config.bidirectionalMidpointProbeDssrMoveFraction;
+		return Double.isFinite(fraction) && Utility.compareGt(fraction, 0.0)
+				&& Utility.compareLe(fraction, 1.0) ? fraction : MIDPOINT_PROBE_STEP_FRACTION;
+	}
+
 	private boolean isProbeDirectionReversed(MidpointProbeResult previous, MidpointProbeResult current, String mode) {
 		int previousDirection = previous.pressureDirection(mode);
 		int currentDirection = current.pressureDirection(mode);
 		return previousDirection != 0 && currentDirection != 0 && previousDirection != currentDirection;
 	}
 
-	private MidpointProbeResult runMidpointProbeCandidate(LP lp, double candidateTMid, int popLimit) {
+	enum OneSideProbeDecision {
+		NOT_APPLICABLE,
+		COMPLETE,
+		CONTINUE,
+		RATIO_REACHED
+	}
+
+	static OneSideProbeDecision classifyOneSideProbe(boolean forwardExhausted, boolean backwardExhausted,
+			double forwardElapsedMillis, double backwardElapsedMillis, double acceptableRatio) {
+		if (forwardExhausted && backwardExhausted) {
+			return OneSideProbeDecision.COMPLETE;
+		}
+		if (forwardExhausted == backwardExhausted) {
+			return OneSideProbeDecision.NOT_APPLICABLE;
+		}
+		double completedMillis = forwardExhausted ? forwardElapsedMillis : backwardElapsedMillis;
+		double unfinishedMillis = forwardExhausted ? backwardElapsedMillis : forwardElapsedMillis;
+		double threshold = Math.max(0.001, completedMillis) * acceptableRatio;
+		return Utility.compareGe(unfinishedMillis, threshold)
+				? OneSideProbeDecision.RATIO_REACHED : OneSideProbeDecision.CONTINUE;
+	}
+
+	private MidpointProbeResult runMidpointProbeCandidate(LP lp, double candidateTMid, int popLimit,
+			double acceptableRatio) {
 		long start = System.nanoTime();
 		tMid = candidateTMid;
 		rebuildHalfDomainForCurrentMidpoint();
@@ -3006,12 +3075,71 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		double forwardElapsedMillis = (System.nanoTime() - forwardStart) / 1_000_000.0;
 		long backwardStart = System.nanoTime();
-		while (backwardPops < backwardLimit && !BWUL.isEmpty()) {
-			backwardExtend(lp);
-			backwardPops++;
-			bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
+		if (!timeLimitChecker.isTimeLimitReached()) {
+			while (backwardPops < backwardLimit && !BWUL.isEmpty()) {
+				backwardExtend(lp);
+				backwardPops++;
+				bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
+			}
 		}
 		double backwardElapsedMillis = (System.nanoTime() - backwardStart) / 1_000_000.0;
+		int continuationPops = 0;
+		double continuationMillis = 0.0;
+		String continuationOutcome = "none";
+		boolean initiallyForwardExhausted = FWUL.isEmpty();
+		boolean initiallyBackwardExhausted = BWUL.isEmpty();
+		if (initiallyForwardExhausted != initiallyBackwardExhausted) {
+			OneSideProbeDecision decision = classifyOneSideProbe(initiallyForwardExhausted,
+					initiallyBackwardExhausted, forwardElapsedMillis, backwardElapsedMillis, acceptableRatio);
+			if (timeLimitChecker.isTimeLimitReached()) {
+				continuationOutcome = "globalTimeLimit";
+			} else if (decision == OneSideProbeDecision.RATIO_REACHED) {
+				continuationOutcome = "alreadyOverRatio";
+			} else {
+				boolean continueForward = !initiallyForwardExhausted;
+				while (decision == OneSideProbeDecision.CONTINUE) {
+					if (timeLimitChecker.isTimeLimitReached()) {
+						continuationOutcome = "globalTimeLimit";
+						break;
+					}
+					long batchStart = System.nanoTime();
+					int batchPops = 0;
+					if (continueForward) {
+						while (batchPops < MIDPOINT_PROBE_ONE_SIDE_BATCH_POPS && !FWUL.isEmpty()) {
+							forwardExtend(lp);
+							forwardPops++;
+							batchPops++;
+							fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
+						}
+					} else {
+						while (batchPops < MIDPOINT_PROBE_ONE_SIDE_BATCH_POPS && !BWUL.isEmpty()) {
+							backwardExtend(lp);
+							backwardPops++;
+							batchPops++;
+							bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
+						}
+					}
+					double batchMillis = (System.nanoTime() - batchStart) / 1_000_000.0;
+					continuationPops += batchPops;
+					continuationMillis += batchMillis;
+					if (continueForward) {
+						forwardElapsedMillis += batchMillis;
+					} else {
+						backwardElapsedMillis += batchMillis;
+					}
+					decision = classifyOneSideProbe(FWUL.isEmpty(), BWUL.isEmpty(),
+							forwardElapsedMillis, backwardElapsedMillis, acceptableRatio);
+					if (timeLimitChecker.isTimeLimitReached()) {
+						continuationOutcome = "globalTimeLimit";
+						break;
+					}
+				}
+				if (!"globalTimeLimit".equals(continuationOutcome)) {
+					continuationOutcome = decision == OneSideProbeDecision.COMPLETE
+							? "exhausted" : "ratioReached";
+				}
+			}
+		}
 		int pops = forwardPops + backwardPops;
 		fwQueuePeak = Math.max(fwQueuePeak, queueSize(FWUL));
 		bwQueuePeak = Math.max(bwQueuePeak, queueSize(BWUL));
@@ -3020,18 +3148,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				pops, FWUL.isEmpty(), BWUL.isEmpty(),
 				forwardPops, backwardPops, forwardLabelsKept, backwardLabelsKept, forwardExtensionBoundSurvivors,
 				completionForwardLabelsPruned, completionBackwardLabelsPruned, queueSize(FWUL), queueSize(BWUL),
-				fwQueuePeak, bwQueuePeak);
+				fwQueuePeak, bwQueuePeak, continuationOutcome, continuationPops, continuationMillis);
 	}
 
 	private String formatMidpointProbeSummary(double reference, MidpointProbeResult selected,
 			String stopReason, int candidateCount, int walkCandidates, int bracketCandidates,
-			long totalPops, double step, double bracketTolerance, StringBuilder candidateSummaries) {
+			long totalPops, double step, double bracketTolerance, StringBuilder candidateSummaries,
+			boolean dssrFeedbackProbe, double acceptableRatio) {
 		return new StringBuilder()
 				.append("ref=").append(reference)
 				.append('(').append(midpointProbeReferenceSource).append(')')
 				.append(", selected=").append(selected.tMid)
+				.append(", phase=").append(dssrFeedbackProbe ? "dssrFeedback" : "initial")
 				.append(", scoreMode=time")
-				.append(", acceptableRatio=").append(normalizedProbeEarlyStopRatio())
+				.append(", acceptableRatio=").append(acceptableRatio)
 				.append(", step=").append(step)
 				.append(", bracketTolerance=").append(bracketTolerance)
 				.append(", stop=").append(stopReason)
@@ -8072,6 +8202,37 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 	}
 
+	private static final class OneSideProbeStats {
+		int detected;
+		int completed;
+		int cutoff;
+		int globalLimit;
+		long continuationPops;
+		double continuationMillis;
+
+		void record(MidpointProbeResult result) {
+			String outcome = result.oneSideContinuationOutcome;
+			if ("none".equals(outcome)) {
+				return;
+			}
+			detected++;
+			continuationPops += result.oneSideContinuationPops;
+			continuationMillis += result.oneSideContinuationMillis;
+			if ("exhausted".equals(outcome)) {
+				completed++;
+			} else if ("globalTimeLimit".equals(outcome)) {
+				globalLimit++;
+			} else {
+				cutoff++;
+			}
+		}
+
+		String compactSummary() {
+			return detected + ":" + completed + ":" + cutoff + ":" + globalLimit + ":"
+					+ continuationPops + ":" + String.format("%.3f", continuationMillis);
+		}
+	}
+
 	private static final class MidpointProbeResult {
 		final double tMid;
 		final double elapsedMillis;
@@ -8091,6 +8252,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final long backwardQueueRemaining;
 		final long forwardQueuePeak;
 		final long backwardQueuePeak;
+		final String oneSideContinuationOutcome;
+		final int oneSideContinuationPops;
+		final double oneSideContinuationMillis;
 		final double keptScore;
 		final double queueScore;
 		final double boundScore;
@@ -8102,7 +8266,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				int forwardPops, int backwardPops,
 				long forwardKept, long backwardKept, long forwardBoundSurvivors,
 				long forwardBoundPruned, long backwardBoundPruned, long forwardQueueRemaining, long backwardQueueRemaining,
-				long forwardQueuePeak, long backwardQueuePeak) {
+				long forwardQueuePeak, long backwardQueuePeak, String oneSideContinuationOutcome,
+				int oneSideContinuationPops, double oneSideContinuationMillis) {
 			this.tMid = tMid;
 			this.elapsedMillis = elapsedMillis;
 			this.forwardElapsedMillis = forwardElapsedMillis;
@@ -8121,6 +8286,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			this.backwardQueueRemaining = backwardQueueRemaining;
 			this.forwardQueuePeak = forwardQueuePeak;
 			this.backwardQueuePeak = backwardQueuePeak;
+			this.oneSideContinuationOutcome = oneSideContinuationOutcome;
+			this.oneSideContinuationPops = oneSideContinuationPops;
+			this.oneSideContinuationMillis = oneSideContinuationMillis;
 			this.keptScore = imbalance(forwardKept, backwardKept);
 			this.queueScore = imbalance(forwardKept + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
 			this.boundScore = imbalance(forwardBoundSurvivors + forwardQueueRemaining, backwardKept + backwardQueueRemaining);
@@ -8217,6 +8385,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					+ ",pop=" + pops
 					+ ",sidePop=" + forwardPops + ":" + backwardPops
 					+ ",ex=" + (forwardExhausted ? "F" : "f") + (backwardExhausted ? "B" : "b")
+					+ ",oneSide=" + oneSideContinuationOutcome + ":" + oneSideContinuationPops + ":"
+					+ oneSideContinuationMillis
 					+ ",kept=" + forwardKept + ":" + backwardKept
 					+ ",q=" + forwardQueueRemaining + ":" + backwardQueueRemaining
 					+ ",qPeak=" + forwardQueuePeak + ":" + backwardQueuePeak

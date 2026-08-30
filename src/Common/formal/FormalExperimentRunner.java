@@ -259,6 +259,10 @@ public final class FormalExperimentRunner {
 				+ arguments.ngDssrSameNodeWarmStartMinimumOccurrence);
 		lines.add("bidirectionalMidpointProbeAfterFirstDssrRoundOverride="
 				+ arguments.bidirectionalMidpointProbeAfterFirstDssrRound);
+		lines.add("bidirectionalMidpointProbeDssrEarlyStopRatioOverride="
+				+ arguments.bidirectionalMidpointProbeDssrEarlyStopRatio);
+		lines.add("bidirectionalMidpointProbeDssrMoveFractionOverride="
+				+ arguments.bidirectionalMidpointProbeDssrMoveFraction);
 		lines.add("ngDssrNonElementaryRouteCandidateLimitOverride="
 				+ arguments.ngDssrNonElementaryRouteCandidateLimit);
 		lines.add("ngDssrNonElementaryRouteUpdateModeOverride="
@@ -281,6 +285,8 @@ public final class FormalExperimentRunner {
 				"ngDssrSameNodeWarmStartGlobalPairLimit", "ngDssrSameNodeWarmStartTriggerRounds",
 				"ngDssrSameNodeWarmStartMinimumOccurrence",
 				"bidirectionalMidpointProbeAfterFirstDssrRound",
+				"bidirectionalMidpointProbeDssrEarlyStopRatio",
+				"bidirectionalMidpointProbeDssrMoveFraction",
 				"ngDssrNonElementaryRouteCandidateLimit", "ngDssrNonElementaryRouteUpdateMode");
 
 		private final String action;
@@ -299,6 +305,8 @@ public final class FormalExperimentRunner {
 		private final Integer ngDssrSameNodeWarmStartTriggerRounds;
 		private final Integer ngDssrSameNodeWarmStartMinimumOccurrence;
 		private final Boolean bidirectionalMidpointProbeAfterFirstDssrRound;
+		private final Double bidirectionalMidpointProbeDssrEarlyStopRatio;
+		private final Double bidirectionalMidpointProbeDssrMoveFraction;
 		private final Integer ngDssrNonElementaryRouteCandidateLimit;
 		private final String ngDssrNonElementaryRouteUpdateMode;
 
@@ -336,6 +344,10 @@ public final class FormalExperimentRunner {
 					"ngDssrSameNodeWarmStartMinimumOccurrence");
 			bidirectionalMidpointProbeAfterFirstDssrRound = optionalBoolean(values,
 					"bidirectionalMidpointProbeAfterFirstDssrRound");
+			bidirectionalMidpointProbeDssrEarlyStopRatio = optionalDouble(values,
+					"bidirectionalMidpointProbeDssrEarlyStopRatio");
+			bidirectionalMidpointProbeDssrMoveFraction = optionalDouble(values,
+					"bidirectionalMidpointProbeDssrMoveFraction");
 			ngDssrNonElementaryRouteCandidateLimit = optionalInteger(values,
 					"ngDssrNonElementaryRouteCandidateLimit");
 			ngDssrNonElementaryRouteUpdateMode = optionalString(values,
@@ -366,6 +378,14 @@ public final class FormalExperimentRunner {
 			if (bidirectionalMidpointProbeAfterFirstDssrRound != null) {
 				config.bidirectionalMidpointProbeAfterFirstDssrRound =
 						bidirectionalMidpointProbeAfterFirstDssrRound.booleanValue();
+			}
+			if (bidirectionalMidpointProbeDssrEarlyStopRatio != null) {
+				config.bidirectionalMidpointProbeDssrEarlyStopRatio =
+						bidirectionalMidpointProbeDssrEarlyStopRatio.doubleValue();
+			}
+			if (bidirectionalMidpointProbeDssrMoveFraction != null) {
+				config.bidirectionalMidpointProbeDssrMoveFraction =
+						bidirectionalMidpointProbeDssrMoveFraction.doubleValue();
 			}
 			if (ngDssrNonElementaryRouteCandidateLimit != null) {
 				config.ngDssrNonElementaryRouteCandidateLimit =
@@ -423,6 +443,11 @@ public final class FormalExperimentRunner {
 		private static Integer optionalInteger(Map<String, String> values, String key) {
 			String result = values.get(key);
 			return result == null || result.trim().isEmpty() ? null : Integer.valueOf(result.trim());
+		}
+
+		private static Double optionalDouble(Map<String, String> values, String key) {
+			String result = values.get(key);
+			return result == null || result.trim().isEmpty() ? null : Double.valueOf(result.trim());
 		}
 
 		private static String optionalString(Map<String, String> values, String key) {

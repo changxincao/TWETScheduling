@@ -350,6 +350,10 @@ public class TWETBPCConfig {
 	public boolean bidirectionalMidpointProbeReuseWithinDssr = true;
 	/** 实验开关；false 时仅首轮做浅层 probe，后续 DSSR 轮直接采用上一完整轮反馈的 adaptive Tmid。 */
 	public boolean bidirectionalMidpointProbeAfterFirstDssrRound = true;
+	/** 后续 DSSR 轮浅层耗时接受比；NaN 时沿用首轮接受比。 */
+	public double bidirectionalMidpointProbeDssrEarlyStopRatio = Double.NaN;
+	/** 后续 DSSR 轮相对有效时间域的单次移动比例；NaN 时沿用 10% 步长。 */
+	public double bidirectionalMidpointProbeDssrMoveFraction = Double.NaN;
 	/** 2026-07-21: 上一轮完整正反向扩展耗时超过该倍数时，下一轮提前重新 probe。 */
 	public double bidirectionalMidpointProbeDssrImbalanceThreshold = 2.0;
 	/** 2026-07-09: ng-DSSR 扩展热路径细分计时诊断；默认关闭，避免高频 nanoTime 影响批量实验。 */

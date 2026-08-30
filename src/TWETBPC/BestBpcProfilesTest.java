@@ -155,6 +155,10 @@ public final class BestBpcProfilesTest {
 		require(config.bidirectionalMidpointProbePopLimit == 10000, "ng midpoint total pop budget");
 		require("time".equals(config.bidirectionalMidpointProbeScore), "ng midpoint score");
 		require(config.bidirectionalMidpointProbeEarlyStopRatio == 1.5, "ng midpoint acceptance ratio");
+		require(config.bidirectionalMidpointProbeDssrEarlyStopRatio == 4.0,
+				"ng later DSSR midpoint acceptance ratio");
+		require(config.bidirectionalMidpointProbeDssrMoveFraction == 0.05,
+				"ng later DSSR midpoint move fraction");
 		require(config.bidirectionalMidpointProbeDssrImbalanceThreshold == 2.0,
 				"ng DSSR midpoint feedback ratio");
 		require(config.enableStrongBranchingPhaseOneRepair, "ng Phase-I repair");

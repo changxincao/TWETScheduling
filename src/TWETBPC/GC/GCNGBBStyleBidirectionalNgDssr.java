@@ -1963,8 +1963,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sectionStart = System.nanoTime();
 		ensureExtensionArcMasks(lp.getNode());
 		if (!prepareMidpointWithinDssr(lp)) {
-			// 每次 pricing 的首轮从当前 effective 区间 default 独立 probe，不继承 node 历史。
-			runMidpointProbeIfEnabled(lp, computeDefaultMidpoint(), "default");
+			// 2026-08-30: 首轮仍不继承 node 历史，但实验性静态策略必须作为 probe 起点生效。
+			// 正式 profile 使用 default，因而默认求解路径和原先完全一致。
+			runMidpointProbeIfEnabled(lp, tMid, midpointStrategyUsed);
 			rememberInitialMidpointWithinDssr();
 		}
 		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;

@@ -1,236 +1,201 @@
-# 随机 due-window 并行机调度与 Benders-DRO 方案分析
+# 决策型 due-window 随机并行机调度：SAA、Benders 与 Wasserstein-DRO 方案
 
-本文讨论一个从当前确定性 TWET 问题延伸出来的新问题：在加工时间或换型时间不确定时，先决定任务的机器分配和加工顺序，再根据实现的场景调整等待时间与完成时间，使期望 due-window 违约、加班及其他生产成本最小。分析主要参考 Çelik et al. (2025)、Cavaliere et al. (2026)、Hosseini and Turner (2024) 和 Avgerinos et al. (2025)，同时以当前仓库已经实现的“相同并行机、任务级 due window、序列相关 setup、允许主动空闲”为基础。本文是方案分析，不表示随机模型、Benders 或 DRO 已经实现，也没有新的计算实验结果。
+本文分析的新问题不是“给定 due window 后做随机调度”，而是：在随机加工时间或换型时间实现以前，同时决定任务的机器分配、加工顺序以及每个任务的 due window；场景实现以后，再调整允许的等待、开始和完成时间。本文只讨论与 early/tardy（ET）直接相关的目标，包括完成时刻的 earliness/tardiness、early work/tardy work，以及早到/迟到任务数量。机器没有明确的班次或加班语义，因此不把 overtime 放入模型。
 
-## 1. 主要结论
+主要参考 Çelik et al. (2025) 的 two-step Benders、Cavaliere et al. (2026) 的强位置模型与投影式 Benders、Hosseini and Turner 的 deepest Benders cuts，以及 Avgerinos et al. 的 local-branching neighbourhood supercut。本文是模型与算法方案，不表示这些随机模型或算法已经在当前代码中实现。
 
-这个新问题可以直接从多机器开始，没有必要先做单机再机械扩展。当前确定性问题本身已经是相同并行机：每台机器对应一条任务序列，主问题最多选择 (m) 条序列。随机扩展后，最自然的两阶段结构是：一阶段固定任务分配与顺序，二阶段在场景实现后调整每台机器上的等待、开始和完成时间。只要不确定性只进入加工时间、setup time、release time 等时间递推右端项，且二阶段目标采用经典 earliness/tardiness、加班、最大拖期或 CVaR 等凸分段线性指标，固定一阶段排程后的场景子问题就是连续 LP，适合经典 Benders、deepest Benders cut 和 RHS-Wasserstein DRO。
+## 1. 问题边界与最重要的建模判断
 
-当前仓库原生实现的是确定性任务级 ET：`Data.buildBasePenaltyFunction()` 构造连续三段 earliness/tardiness 损失，`ArcFlowModel` 和现有 BPC 都没有 SAA、Wasserstein、Benders 或 local branching 实现。论文草稿中对一般 PWLF 目标的抽象，不表示代码已经原生支持 early/tardy work 或数量型目标。
+可以直接研究相同并行机，没有必要先把单机作为最终问题。第一阶段决定每个任务由哪台机器加工、在该机器上的位置或前后继关系，以及任务特定的 due window。所有场景共享同一个排程和同一组窗口；第二阶段只根据场景调整时间线。因此，多机器增加的是第一阶段的组合难度，并不破坏两阶段结构。
 
-建议的核心研究对象为“具有任务级 due window 和序列相关 setup 的两阶段随机相同并行机调度”。第一版先以总加权 earliness/tardiness 加机器级 overtime 为主目标，以场景 SAA 为基础，比较弧流 big-(M) 模型、位置/弧位置强模型以及专门的多割 Benders。deepest cut 和 selective local branching 应当作为在基础算法正确、稳定以后逐步加入的加速模块，而不是第一版同时堆入。Wasserstein-DRO 可以继续做，但它适合作为第二阶段工作或独立扩展：RHS 不确定性确实提供了可利用结构，却不等于自动得到一个简单 LP，有限支持、完整 recourse、对偶域和内层最坏分布分离都必须单独验证。
+不建议模仿 Cavaliere et al. 给机器添加 overtime。该项在原文中对应车辆/司机的正常工作时长，具有明确业务含义；如果机器没有班次结束、加班班次或额外人工成本，硬加一个 overtime 只会改变原问题。
 
-early work/tardy work 和早到/迟到任务数量可以研究，但不能与经典 ET 视为同一难度。前者是封顶的非凸分段线性损失，后者是阶跃损失；精确建模通常使二阶段带有离散变量或不连续语义。它们适合做独立目标变体、LBBD/CP 子问题或局部邻域扩展，不适合直接宣称仍可使用 2026 年论文的 LP-Benders 和标准 RHS-Wasserstein 推导。
+不过，原文的 overtime 还隐含地限制了把所有窗口无限向后移动。当前问题去掉 overtime 后，必须用真实业务约束锚定窗口位置。否则，在允许主动等待且场景集合有界时，模型可能把每个窗口设成很晚的零宽窗口，并在较短场景中插入等待，使所有场景恰好在承诺时刻完工，从而得到“窗口宽度为零、ET 也为零”的平凡解。
 
-## 2. 四篇核心文献中真正可迁移的机制
+推荐对每个任务给出可承诺区间 [L_j,U_j]，并要求
 
-### 2.1 Çelik et al. (2025)：two-step Benders 与场景保留
+$$
+L_j \le a_j \le b_j \le U_j,
+$$
 
-该文研究随机旅行时间下的 time-window assignment TSP。一阶段同时含路径二进制变量 (x) 和连续 time-window assignment 变量 (y)，二阶段是连续的场景违约变量。其 two-step Benders 不是把同一组场景子问题简单求两次，而是先固定二进制 (x)，在聚合 LP (AP(x)) 中联合优化连续一阶段变量 (y) 与所有场景 recourse；随后把该 (y) 固定到各单场景子问题，生成比直接使用当前 master 中任意 (y) 更强的 multi-optimality cuts。论文还把一部分代表场景直接保留在 master，并用实际场景和人工凸组合场景增强下界。
+其中 [a_j,b_j] 是模型决定的 due window。若订单数据中有目标交期，也可以把可承诺区间设为目标交期附近允许调整的范围。只有一个非常宽的全局计划期 H 往往不够强，仍可能允许模型把窗口整体推到计划期末端。
 
-对当前拟议问题，这一机制的适用性取决于 due window 是参数还是决策。若每个任务的 ([d_j^e,d_j^l]) 已给定，一阶段只有分配和排序二进制变量，不存在与 Çelik 等人相同的连续一阶段 (y)，two-step 的主要强化来源也随之消失。此时更应借鉴的是多割、代表场景进入 master、整数 incumbent 处分离和场景聚类，而不是照搬 two-step 名称。只有在进一步研究“生产商同时承诺/设计任务交付窗口”的变体、把窗口端点或窗口宽度作为连续一阶段变量时，Çelik 等人的 (x\rightarrow AP(x)\rightarrow y\rightarrow SP(x,y,\omega)) 两步结构才真正对口。
+窗口宽度也必须有明确语义。可以采用两种版本：
 
-### 2.2 Cavaliere et al. (2026)：强位置模型与专门 Benders
+1. 固定或分档宽度：b_j=a_j+w_j，模型只决定窗口位置；
+2. 可变宽度：对 b_j-a_j 收取成本，或给出上下界。
 
-该文同样研究随机旅行时间下的 time-window assignment TSP，但提出了不依赖 big-(M) 的弧-位置三指标模型。变量 (x_{ij}^p) 表示弧 ((i,j)) 位于路线位置 (p)，因此场景到达时间可按位置递推，旅行时间写成 \(\sum_{ij}t_{ij}^{\omega}x_{ij}^p\)，不再使用“若选弧则激活时间约束”的大 (M)。论文的专门 Benders 将 2-index 和 3-index 路径变量留在 master，把 time-window 和所有场景时间变量放入一个连续 subproblem；运行时先分离 subtour，再对当前解支持集上不可区分的场景进行聚合，最后由 LP 对偶生成最优性割。论文的数值结果表明，3-index 分离远强于 big-(M) 分离。
+若宽度可任意扩大而没有成本，ET 可以通过扩大窗口被消除；若只惩罚宽度却不限制位置，又会出现前述“零宽窗口后移”的退化。因此，“位置可承诺范围”和“宽度控制”要同时存在。宽度成本属于 due-window assignment 本身，不是另加的生产绩效目标。
 
-这一结构对多机调度很有价值。可令 (x_{ijmp}=1) 表示机器 (m) 在位置 (p) 从任务 (i) 转到任务 (j)，或用“任务-机器-位置”变量加相邻任务变量。场景时间递推可写成选中加工时间和 setup time 的线性组合；任务的 due-window 端点也可按当前位置所对应任务的变量线性选取。代价是变量规模从弧流的 (O(mn^2)) 上升到约 (O(mn^3))，并出现相同机器的对称性。因此它最适合作为小中规模强模型和 Benders cut generator，而不应未经实验就认定能直接替代大规模算法。
+## 2. 两阶段 SAA 模型骨架
 
-当前问题比 Cavaliere 等人的一个重要简化是 due window 固定且任务特定。固定窗口不跨场景耦合，故场景子问题天然可以分解并行，不必像论文那样为了投影 time-window 变量而把所有场景放在一个 LP 中。相反，论文的 support-based scenario aggregation 是否有效取决于不确定性结构：如果所有任务加工时间在每个场景都变化，两个场景很少会在当前排程支持集上完全相同；若不确定性是局部 breakdown、少量 setup arc 扰动或少量任务延误，聚合才可能像原文一样明显。
+令 J 为任务集合，M 为相同并行机集合，Ω_N 为训练样本中的 N 个场景。场景 ω 给出加工时间 p_j^ω，以及需要时的序列相关换型时间 s_ij^ω。第一阶段变量包括排程变量 x 和任务窗口端点 a_j、b_j。x 可以采用弧流变量，也可以采用任务—机器—位置及弧—位置变量。
 
-### 2.3 Hosseini and Turner (2024)：deepest Benders cuts
+固定排程与窗口后，每个场景决定开始时间 S_jω、完成时间 C_jω、早到量 E_jω 和迟到量 T_jω：
 
-deepest cut 是经典 Benders cut 的选择机制。普通 Benders 在当前 master 点 ((\bar x,\bar\theta)) 处取一个最优对偶极点，但最优对偶解可能不唯一；deepest cut 在一个归一化后的分离问题中选择距离当前点最远的支撑超平面。论文用 \(\ell_p\) 范数定义 cut depth，并证明 cut 分离与把当前点投影到 recourse epigraph 之间存在对偶关系。其 Guided Projections Algorithm 利用这一关系反复引导投影和分离；\(\ell_1\) 与 \(\ell_\infty\) 版本通常比欧氏 \(\ell_2\) 版本更便于计算。该方法可以统一处理可行性割和最优性割，并可能在经典方法产生可行性割时直接得到最优性割。
+$$
+C_{j\omega}=S_{j\omega}+p_j^\omega,
+$$
 
-对本问题，deepest cut 只应作用于“固定排程后的连续 LP recourse”这一层。它不是 SRI/rank-1 cut，也不是 local-branching 邻域 cut；若目标换成 number of tardy jobs 或精确 early/tardy work，使二阶段成为 MIP/非凸问题，就失去直接使用 LP 对偶 deepest cut 的基础。由于经典 ET 加软 overtime 具有完整 recourse，本问题通常不会频繁需要可行性割，deepest cut 的主要价值是改善最优性割方向和早期下界，而不是修复不可行场景。
+$$
+E_{j\omega}\ge a_j-C_{j\omega},\qquad
+T_{j\omega}\ge C_{j\omega}-b_j,\qquad
+E_{j\omega},T_{j\omega}\ge 0.
+$$
 
-第一版实验建议只比较普通 extreme-point cut、Pareto/Magnanti-Wong 类 cut 和 \(\ell_1\)-deepest cut。deepest separation 比普通单场景 LP 更贵，不应默认对每个场景、每个节点都执行；可只在根节点、聚合割或连续若干轮下界改善过小时触发，并记录“cut 数减少”是否真的抵消“单次分离变贵”。
+机器顺序由 x 决定，并在每个场景中满足相应的加工与换型递推。模型允许场景实现后插入主动等待。若真实生产中加工时间是逐个揭示的，这种场景特定等待使用了完整场景信息，属于两阶段 wait-and-see 近似；论文中应明确解释为班前已获得状态信息，或承认它是滚动执行策略的下界模型。
 
-### 2.4 Avgerinos et al. (2025)：把 local branching 变成邻域 supercut
+推荐的主目标为
 
-该文研究具有序列相关且资源受限 setup 的 unrelated parallel machine scheduling，master 为 position-based MILP，subproblem 为 CP，目标包括总完成时间和总拖期。普通 Branch-and-Check 的 no-good/Benders cut 每次只删除一个排程，作者则围绕当前整数排程构造一个与其变量编码严格对应的 4-OPT 邻域，完整求出邻域内的最优排程，然后用一条 local-branching 补集约束删除整个已被证明无改进的邻域。为控制成本，论文使用轻量松弛 domination rule 跳过不可能改善 incumbent 的候选，并提出只在部分节点启动邻域求解的 selective local branching。
+$$
+\min
+\lambda\sum_{j\in J}(b_j-a_j)
++\frac{1}{N}\sum_{\omega\in\Omega_N}\sum_{j\in J}
+\left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right).
+$$
 
-这一方法可迁移到 due-window 多机问题，但 cut 与邻域必须按本问题采用的变量编码重新证明。若 master 使用任务-位置-机器变量、弧变量或弧-位置变量，同一个“交换两个任务”的 move 会改变不同数量的二进制变量，不能直接把原文的 4-OPT 常数抄过来。保持精确性的条件也很严格：被删除的邻域必须在同一个 SAA/DRO 目标下被完整求到最优；若只抽样邻居、设置未闭合的时间限或使用近似场景值，只能把 local branching 当作 primal heuristic，不能添加删除整个邻域的 exact supercut。
+若窗口宽度固定，则删除第一项。这里不加入 overtime，也不再扩展其他绩效目标。确定性的换型成本是否进入目标可按原问题语义决定，但不应把它包装成本文的目标创新。
 
-因此建议分两层使用。第一层是临时加入邻域约束 (d(x,\bar x)\le k)，求一个较好 incumbent 后撤掉，作为不影响全局 exactness 的启发式。第二层才是 Avgerinos 式 exact neighbourhood solve：只有邻域已经闭合，并证明其最优值不优于更新后的 incumbent，才添加 (d(x,\bar x)\ge k+1)。在多场景问题中，邻域求解本身很重，优先采用 selective 策略，并先从同机内部 swap 开始。
+只要采用经典 ET，且随机加工/换型时间只进入时间递推右端项，固定第一阶段决策后的场景 recourse 是连续 LP。软 ET 又通常保证相对完整 recourse，因此基础算法主要生成 Benders 最优性割。
 
-## 3. 建议的问题定义与两阶段信息结构
+## 3. 两条应当直接比较的 Benders 路线
 
-令 \(\mathcal J=\{1,\ldots,n\}\) 为任务集合，\(\mathcal M=\{1,\ldots,m\}\) 为相同并行机集合。任务 (j) 具有固定 due window \([d_j^e,d_j^l]\)、早到/迟到单位成本 \(\alpha_j,\beta_j\)。一阶段在不确定参数实现前决定任务分配和每台机器上的相对顺序。场景 \(\omega\) 实现后，二阶段决定主动等待、开始时间、完成时间和加班量。第一版可令随机向量包含 \(p_j^\omega\) 和/或 \(s_{ij}^\omega\)，而 setup cost \(\kappa_{ij}\) 仍保持确定。
+### 3.1 2025 风格：窗口显式留在 master 的 two-step Benders
 
-该模型隐含一个必须写进论文的观察假设：二阶段 timing 决策可以基于完整场景。若真实生产中加工时间逐个揭示，场景特定的所有等待时间会使用未来信息，两阶段模型相当于“班次开始前已知当天状态”或一个 wait-and-see 近似。若要描述加工过程中的逐步揭示，需要多阶段随机规划、滚动重调度或非预见策略，不能把当前两阶段 SAA 直接称为完全动态模型。
+这条路线与本问题完全对口，因为第一阶段确实同时含有离散排程 x 和连续窗口变量 (a,b)。master 保留 x、a、b 及 recourse 估计变量。对一个候选排程 x̄，先固定 x̄，求一个跨全部场景的聚合 LP：
 
-多机器不会破坏上述结构。机器分配和顺序都在一阶段，因此不同场景共享同一排程；每个场景仅重新优化各机器时间线。为避免把研究范围一次扩得过大，第一篇工作建议先做相同并行机。unrelated machines 只需把加工时间扩展为 \(p_{jm}^\omega\)，但变量、对称性、数据和邻域结构都会明显增加，可作为后续泛化。
+$$
+AP(\bar x)=\min_{a,b,\text{全部场景 timing}}
+\left\{\lambda\sum_j(b_j-a_j)+
+\frac1N\sum_\omega ET_\omega\right\}.
+$$
 
-## 4. SAA 模型
+该问题重新优化共同窗口，得到针对排程 x̄ 的最优窗口 (â,b̂)。第二步再固定 (x̄,â,b̂)，分别求各场景 timing LP，由场景对偶生成 multi-optimality cuts。其核心价值不是“把同一子问题求两次”，而是避免用 master 中一个尚未优化好的任意窗口生成弱割。
 
-### 4.1 弧流 big-\(M\) 基线
+可以进一步借鉴原文的 scenario retention：把少量代表场景的完整 timing 结构直接放进 master，其余场景仍由 Benders 处理。代表场景应通过消融比较随机选择、聚类选择和不保留场景，不能只报告最好配置。
 
-令 \(x_{ijm}=1\) 表示机器 (m) 上任务 (j) 紧随 (i)，以虚拟源点 0 和汇点 (n+1) 表示机器序列首尾；\(u_{jm}\) 表示任务分配，\(v_m\) 表示机器是否启用。master 包含每个任务恰有一个前驱和一个后继、源汇流、机器启用、分配链接和消除子环的约束。
+优点是窗口含义清楚、场景在第二步可以并行，并且最接近 Çelik et al. 的原始 two-step 逻辑。缺点是 master 同时带有窗口连续变量和大量场景割，规模和数值稳定性可能较差。
 
-对场景 \(\omega\)，二阶段可写为
+### 3.2 2026 风格：把共同窗口投影到一个联合连续子问题
 
-\[
-\begin{aligned}
-Q_\omega(x)=\min\;&
-\sum_{j\in\mathcal J}\left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right)
-+\sum_{m\in\mathcal M}\gamma_m O_{m\omega},\\
-\text{s.t. }&S_{j\omega}\ge C_{i\omega}+s_{ij}^{\omega}
--M_{ij}^{\omega}(1-x_{ijm}),\\
-&C_{j\omega}=S_{j\omega}+p_j^{\omega},\\
-&E_{j\omega}\ge d_j^e-C_{j\omega},\qquad
-T_{j\omega}\ge C_{j\omega}-d_j^l,\\
-&R_{m\omega}\ge C_{i\omega}+s_{i,n+1}^{\omega}
--M_{i,n+1}^{\omega}(1-x_{i,n+1,m}),\\
-&O_{m\omega}\ge R_{m\omega}-H_m,\\
-&S,C,E,T,R,O\ge0.
-\end{aligned}
-\]
+这条路线的 master 只保留排程/位置二进制变量 x 和总 recourse 下界 θ。对候选排程 x̄，子问题联合优化所有任务的共同窗口 (a,b) 与全部场景的 timing：
 
-这里 (H_m) 为正常班次结束时间，\(O_{m\omega}\) 为机器级加班。若允许无限软加班且 ET 也是软惩罚，任何无环一阶段排程都有可行 timing，故二阶段具有完整 recourse，算法主要生成最优性割。SAA 确定性等价模型为
+$$
+Q(\bar x)=\min_{a,b,\text{全部场景 timing}}
+\left\{\lambda\sum_j(b_j-a_j)+
+\frac1N\sum_\omega ET_\omega\right\}.
+$$
 
-\[
-\min_{x\in X}\left\{c^\top x+\frac1N\sum_{r=1}^NQ(x,\xi^r)\right\}.
-\]
+窗口仍然是一阶段决策，因为所有场景只能使用同一组 (a,b)；这里只是在算法上把连续一阶段变量从 master 中投影掉。由联合 LP 的对偶生成只含排程变量的 Benders cut。
 
-该模型最容易由当前 `ArcFlowModel` 扩展，也是必须保留的小规模正确性基准。缺点是时间递推和场景数量共同放大 big-(M) 松弛弱点，Benders cut 系数也会继承大 (M) 的数值问题。
+Cavaliere et al. 的另一项关键贡献是弧—位置强模型。对机器调度，可用 z_ijmp 表示机器 m 的第 p 个转移为 i→j，使场景位置时间通过被选中的 p_j^ω 和 s_ij^ω 直接递推，尽量避免弧流时间约束中的大 M。其代价是变量数量和相同机器对称性显著增加，需要连续占位、空位置处理和对称破除。
 
-### 4.2 位置/弧-位置强模型
+优点是 master 小、窗口被完整投影、位置模型通常比 big-M 弧流松弛更强。缺点是所有场景因共同窗口而耦合在一个较大的 LP 中，不能像窗口已固定时那样完全按场景分解。
 
-为模仿 Cavaliere 等人的 3-index 思路，可令 \(x_{ijmp}=1\) 表示机器 (m) 的第 (p) 个转移为 (i\to j)。场景完成时间按机器和位置递推：
+### 3.3 怎样比较才不会把两个因素混在一起
 
-\[
-C_{m,p,\omega}\ge C_{m,p-1,\omega}
-+\sum_{i,j}\left(s_{ij}^{\omega}+p_j^{\omega}\right)x_{ijmp}.
-\]
+建议把“模型强弱”和“分解边界”拆成两个实验因素：
 
-位置 (p) 上任务的窗口端点可由 \(\sum_{i,j}d_j^e x_{ijmp}\) 和 \(\sum_{i,j}d_j^l x_{ijmp}\) 选出，再定义位置早到和迟到变量，从而避免在时间递推中使用大 (M)。需要为不足 (n) 个任务的机器引入 dummy/empty position，或使用连续填充和对称性约束。该模型的优势是 LP relaxation 和由其生成的 Benders cut 更强，代价是变量规模、机器对称性和实现复杂度更高。
+1. formulation：弧流 big-M 与位置/弧—位置强模型；
+2. decomposition：窗口留在 master 的 2025 two-step，与窗口投影到联合子问题的 2026 风格。
 
-建议把两种模型明确命名为 `SAA-AF` 和 `SAA-POS`，避免与当前论文中的外包 SP1/SP2 混淆。实验先比较根松弛、节点数、数值稳定性和场景规模扩展，再决定主算法是否只保留 POS 模型。
+两条路线必须使用相同 SAA 样本、同样的窗口可承诺区间、同样的宽度规则和同样的 ET 权重。至少报告根松弛、根节点时间、master 与 subproblem 时间、割数量、首次可行解时间、最终 gap 和最优性证书。若只比较“2025 算法+弱模型”和“2026 算法+强模型”，无法判断差异来自 formulation 还是 decomposition。
 
-### 4.3 专门多割 Benders
+第一版实现顺序建议为：确定性等价小规模基准；2026 风格强位置模型与投影 Benders；再实现 2025 two-step 作为结构对照。这样既符合用户希望“主要模仿 2026”，也保留两种模型差异的可解释实验。
 
-最小 master 可写为
+## 4. 只分析三类 ET 目标
 
-\[
-\min\ c^\top x+\frac1N\sum_{r=1}^N\theta_r,
-\qquad x\in X,
-\]
+### 4.1 完成时刻 earliness/tardiness
 
-其中 \(\theta_r\) 低估场景 (r) 的 timing recourse。固定当前 \(\bar x\) 后，各场景 LP 返回对偶解 \(\pi_r\)，生成
+定义
 
-\[
-\theta_r\ge \pi_r^\top h_r-\pi_r^\top T_r x.
-\]
+$$
+E_{j\omega}=[a_j-C_{j\omega}]^+,\qquad
+T_{j\omega}=[C_{j\omega}-b_j]^+.
+$$
 
-基础算法先使用场景 multi-cut；当 (N) 很大时再测试 single-cut、固定场景 bundle 和动态聚类。cut 应先在根节点和整数 incumbent 处分离，记录 fractional separation 是否带来足够 bound 收益，再决定是否扩大。subtour/assignment 等纯组合约束应先分离，只有当前解满足排程结构时才求昂贵的场景 recourse，这与 Cavaliere 等人的回调顺序一致。
+这是最推荐的主线。它直接描述完工时刻相对承诺窗口的偏离，符合 due-window 作为交付承诺的语义；损失是凸分段线性的，场景 recourse 保持 LP，因此 ordinary Benders、deepest cuts 和 RHS-Wasserstein 扩展都有清楚基础。可比较对称/非对称、任务加权及不同 λ，但不需要再引入其他目标。
 
-场景保留有两种不同含义，不能混写。一是 Çelik 等人的 partial Benders：选少量代表场景，将其完整 recourse 变量和约束放进 master，以增强初始下界；二是 Cavaliere 等人的 incumbent-support aggregation：在当前排程实际使用的随机参数上相同的场景临时合并，只减少本次 subproblem。两者都必须做消融，并与随机选场景、无保留/无聚合比较。
+### 4.2 early work/tardy work
 
-## 5. deepest cut 与 local branching 的组合方式
+对不可抢占任务 [S_jω,C_jω]，窗口前和窗口后的加工量分别为
 
-推荐算法不是把两种 cut 混成一个公式，而是让它们处理不同层次：
+$$
+EW_{j\omega}=\min\{p_j^\omega,[a_j-S_{j\omega}]^+\},
+$$
 
-1. master 给出候选排程 \(\bar x\)；
-2. 连续场景 recourse 由普通或 deepest Benders separation 生成全局有效最优性割；
-3. 得到可行排程和真实 SAA 值后更新 incumbent；
-4. 仅在触发条件满足时，围绕该排程解一个受限邻域问题；
-5. 若邻域已被完整证明不含更优解，更新 incumbent 并添加 local-branching 补集 supercut。
+$$
+TW_{j\omega}=\min\{p_j^\omega,[C_{j\omega}-b_j]^+\}.
+$$
 
-deepest cut 负责“在许多有效 LP 对偶割中选方向更好的一个”；local-branching cut 负责“在组合排程空间中一次删除一个已完整检查的邻域”。前者是连续 recourse 的全局下界强化，后者是排程邻域的组合枚举压缩。对 classic ET/overtime 模型，可以同时存在；对 early/tardy count 等 MIP recourse，只能保留 local branching/LBBD 层，deepest LP cut 至多来自一个松弛。
+它与普通 ET 不同：ET 衡量完工时刻偏离多少，early/tardy work 衡量一项加工有多少时长落在窗口以外。若 due window 表示“希望完成的时间区间”，ET 的业务语义更自然；只有当窗口表示期望的加工/占用区间时，work 指标才特别有解释力。
 
-selective local branching 的触发条件可先设为：当前整数解未改善 incumbent、全局 gap 已进入中后期、距离上一次邻域求解已有若干节点，并且邻域松弛下界可能改善 incumbent。邻域规模从同机内部 swap 开始，再考虑跨机 relocation 或 swap。所有 exact supercut 都要保存邻域定义、求解状态、邻域最优值和 incumbent 关系，防止时间限下误删未闭合邻域。
+精确函数包含截断 min。以 tardy work 为例，它随 C 先为 0、再线性增加、最后封顶为 p，斜率为 0→1→0；作为最小化损失不是凸函数。对当前不可抢占、允许调整 timing 的模型，精确线性化通常需要区段二元变量、SOS2 或 CP 逻辑，不能直接声称子问题仍是连续 LP。若 p_j^ω 也随机，封顶值本身随场景变化，不确定性也不再只是一个简单的 ET-RHS 结构。
 
-## 6. Wasserstein-DRO 扩展
+因此该目标可以做，但应作为独立的非凸/混合整数 recourse 变体。适合 position master + MIP/CP timing subproblem、logic-based Benders、branch-and-check 和 local branching；不适合直接套用 deepest LP cuts。只有在额外条件使 timing 唯一、或采用凸近似时，才可能恢复较简单的连续模型，但那已经改变了原问题。
 
-### 6.1 基本形式
+### 4.3 早到/迟到任务数量
 
-令训练样本为 \(\widehat\xi^1,\ldots,\widehat\xi^N\)，经验分布为 \(\widehat{\mathbb P}_N\)。以半径 \(\varepsilon\) 的 Wasserstein 球 \(\mathcal P_N(\varepsilon)\) 表示可能分布，则模型为
+定义
 
-\[
-\min_{x\in X}
-\left\{
-c^\top x+
-\sup_{\mathbb P\in\mathcal P_N(\varepsilon)}
-\mathbb E_{\mathbb P}[Q(x,\xi)]
-\right\}.
-\]
+$$
+N^E_\omega=\sum_j w_j^E\,\mathbf 1(C_{j\omega}<a_j),\qquad
+N^T_\omega=\sum_j w_j^T\,\mathbf 1(C_{j\omega}>b_j).
+$$
 
-对经典 ET/overtime，若加工和 setup duration 仅进入时间递推 RHS，二阶段矩阵和目标系数保持确定，\(Q(x,\xi)\) 是一个固定 recourse LP 的最优值。这正是 RHS-Wasserstein 两阶段线性 recourse 的可利用结构。但 Esfahani and Kuhn 的有限重构需要枚举二阶段对偶多面体的顶点，顶点数一般可能指数增长；Gamboa et al. 因而针对矩形支持提出 CCG、single-cut Benders 和 multi-cut Benders，而不是把它当作一次普通 LP 就结束。
+该指标回答“多少任务违约”，而不是“违约多严重”。它适合作为服务质量或公平性指标，但阶跃函数需要场景二元变量，并且必须明确 C=a 或 C=b 时是否算违约及数值容差。因此精确 recourse 通常是 MIP，不属于 2025/2026 连续 LP-Benders 的直接适用范围。
 
-### 6.2 必须先验证的条件
+数量目标尤其依赖窗口边界控制：若窗口宽度不受约束，可以把所有任务包含在宽窗口内；若窗口位置不受约束，只计算迟到数量时可以把窗口无限后移。因此仍需相同的可承诺区间与宽度规则。
 
-第一，支持集应有物理含义。加工时间和 setup time 非负，最好采用由历史/工艺给出的有界箱或低维因子支持，而不是默认无界欧氏空间。第二，软 ET 和软 overtime 应保证相对完整 recourse；若加入硬 due window、硬班次上限或不可违约服务约束，就会出现不可行 recourse，需要可行性处理。第三，要证明或构造有限有效的对偶界，避免最坏分布 oracle 中出现无界乘子。第四，若使用 early/tardy work 且加工时间随机，其封顶值 \(p_j^\omega\) 也随机，已不再是单纯 RHS 不确定性；数量型目标更直接产生整数 recourse。
+可以研究三种 ET 内部组合：仅最小化加权窗外任务数；先最小化窗外任务数、再以总 ET 打破平局；或用 ε-constraint 限制窗外任务数并最小化总 ET。后两种更能避免“很多任务只差一点”和“一个任务差很多”被数量目标视为相同。算法上应走 LBBD/MIP-recourse 路线，不应把它作为 deepest-cut 主线的同一个子问题。
 
-本问题的 ET 是双侧损失，不能假定“持续时间越大越坏”。更短的加工/setup 时间可能增加 earliness，更长的时间可能增加 tardiness 或 overtime；因此有界支持的最坏点必须同时考虑下端、样本附近和上端。只检查上界端点会漏掉合法的最坏场景。
+综合判断如下：
 
-### 6.3 推荐求解路线
+| 指标 | 精确场景 recourse | deepest LP cut | Wasserstein RHS 主线 | 推荐定位 |
+|---|---|---|---|---|
+| 完成时刻 ET | 连续凸 PWL/LP | 适合 | 适合 | 第一篇主模型 |
+| early/tardy work | 一般非凸，精确模型常需离散逻辑 | 不直接适合 | 不宜作为首个 DRO 版本 | 独立算法扩展 |
+| 早到/迟到任务数 | 阶跃型 MIP recourse | 不适合 | 明显更重 | 服务指标或 LBBD 扩展 |
 
-第一版 DRO 建议固定一个已经验证的 SAA-POS/BD master，在外层保留排程 (x)，内层使用精确 Wasserstein recourse oracle。对于矩形支持和 scaled-\(\ell_1\) 距离，可先实现 CCG：给定 (x) 和 Wasserstein 对偶参数，oracle 为每个经验样本寻找最坏支持点/对偶极点，若发现违反则加入对应的 affine recourse piece。single-cut 与 multi-cut Benders 作为对照。只有 oracle 返回全局最优并给出证书时，外层 bound 才能称为 DRO 精确界。
+## 5. deepest cuts 与 local branching 放在哪里
 
-若随机向量包含所有 \(s_{ij}\)，维度达到 (O(n^2))，Wasserstein 距离既统计稀疏又使 oracle 昂贵。更合理的第一版是随机 \(p_j\)、机器/班次公共速度因子，或少量 family/setup shock；由这些原始因子生成所有持续时间，并保留样本内相关性。不要对每个任务或每条 setup arc 各自建立独立 Wasserstein 球，否则会破坏相关结构并改变模型含义。
+deepest cuts 只作用于连续 LP recourse。普通 Benders 在对偶最优解不唯一时可能得到方向很差的割；deepest separation 通过归一化距离选择对当前 master 点切得更深的有效割。它最适合主线 ET 模型，可分别嵌入 2025 的场景 multi-cut 或 2026 的联合投影 cut。
 
-半径和尺度只能用训练数据选择。建议先按任务/因子尺度标准化，再用训练内部的 holdout 或交叉验证选择 \(\varepsilon\)，用全部训练样本重求最终决策，最后在独立 OOS 场景上比较 SAA 和 DRO。需要报告平均成本、标准差、CVaR/高分位、早到/窗内/迟到比例、加班分布以及求解证书；不能用同一 OOS 样本反向选择半径。
+deepest separation 本身比普通取一个对偶极点更贵，因此建议先比较 ordinary cut、Pareto/Magnanti-Wong 类 cut和 l1-deepest cut，再决定是否只在根节点或下界停滞时触发。窗口位置与时间变量尺度差异较大，做 deepest cut 前必须统一变量尺度和归一化，否则“更深”可能只是单位选择造成的。
 
-## 7. 目标函数逐项可行性
+local branching 作用于排程二进制变量，而不是 ET 连续变量。对 incumbent 排程 x̄，可临时加入 d(x,x̄)≤k，完整重新优化邻域内的 due windows 和所有场景 timing，以寻找更好的排程。若只是限时或抽样搜索，它只能作为 primal heuristic。
 
-| 目标 | 精确定义示例 | 固定排程后的 recourse | 经典 Benders / deepest | RHS-Wasserstein | 建议定位 |
-|---|---|---|---|---|---|
-| 总加权 ET | \(\sum_j\alpha_j[d_j^e-C_j]^++\beta_j[C_j-d_j^l]^+\) | 凸 PWL，LP | 最适合 | 最适合的主目标 | 主模型 |
-| 总拖期 | \(\sum_j\beta_j[C_j-d_j]^+\) | 凸 PWL，LP | 适合 | 适合 | 简化基准 |
-| overtime | \(\sum_m\gamma_m[R_m-H_m]^+\) | 凸 PWL，LP | 适合 | 适合 | 建议与 ET 同时做 |
-| makespan / 最大拖期 | \(\max_j C_j\)、\(\max_j[C_j-d_j]^+\) | 加 epigraph 后 LP | 适合 | 可做 | 服务/产能副指标 |
-| CVaR | 场景总 ET 或 overtime 的 CVaR | 通过 \(\eta,z_\omega\) 线性化 | 可做，\(\eta\) 使场景轻度耦合 | 可做但推导更复杂 | 风险厌恶扩展 |
-| early/tardy work | \(Q_j=\min\{p_j,[d_j^e-S_j]^+\}\)、\(Y_j=\min\{p_j,[C_j-d_j^l]^+\}\) | 封顶非凸 PWL；精确模型通常需 segment binary/SOS2 | 不能直接使用 LP 对偶；可 LBBD/CP | 非纯 RHS，尤其 \(p_j\) 随机时 | 独立目标扩展 |
-| 早到/迟到任务数量 | \(\sum_jw_j^E\mathbf1\{C_j<d_j^e\}+w_j^T\mathbf1\{C_j>d_j^l\}\) | 阶跃、不连续，通常为 MIP recourse | 用 LBBD/no-good/邻域 cut，不是 classical/deepest | 标准期望 recourse 不直接适用；可改做 DR chance constraint | 不建议与主算法第一版混做 |
-| 窗内任务数 | 最大化 \(\sum_j\mathbf1\{d_j^e\le C_j\le d_j^l\}\) | 同样需要二进制分类 | 同上 | 同上 | 管理指标或双目标 |
-| time-window width | \(\sum_j(d_j^l-d_j^e)\) | 它是一阶段窗口设计成本，不是固定窗口下的 recourse | 若窗口为决策，2025 two-step 才对口 | 可做但成为另一个问题 | 后续“承诺窗口设计”变体 |
+Avgerinos et al. 式 exact neighbourhood supercut 要求整个邻域已经被完整求解，并证明其中不存在优于 incumbent 的方案，才可以加入补集约束 d(x,x̄)≥k+1。相同并行机存在机器标签对称，邻域距离必须基于规范化排程或配合对称破除；原文针对特定位置编码的邻域常数不能直接照抄。
 
-early/tardy work 的含义要特别注意。对不可抢占任务，late work 是落在 \(d_j^l\) 之后的加工量 \(\min\{p_j,[C_j-d_j^l]^+\}\)，early work 是落在 \(d_j^e\) 之前的加工量 \(\min\{p_j,[d_j^e-S_j]^+\}\)，不是普通 earliness/tardiness。其函数先线性变化、随后封顶，作为最小化损失一般不是凸函数。当前连续 PWLF evaluator 在确定性固定序列下可以数值评价这类函数，并不等于其 SAA 场景子问题仍是 LP，更不等于可以直接从 LP 对偶生成 Benders cut。
+两者可以叠加但职责不同：deepest cut 强化连续 recourse 的全局下界；local branching 在组合排程空间寻找解，或删除已经完整证明的邻域。对 early/tardy work 和数量目标，deepest LP cut 失去直接基础，local branching/LBBD 反而更重要。
 
-加班是最值得从 2026 年文章借用的新目标。建议以机器级正常班次 (H_m) 为界，定义最后完成时间 \(R_{m\omega}\) 和线性加班量 \(O_{m\omega}\)。如果想研究“是否启用加班班次”或分段加班费，可把班次启用放到一阶段、实际小时放到二阶段；但一旦加班涉及共享工人数量或离散班次，subproblem 可能由 LP 变为资源受限 MIP/CP，这时 local branching/LBBD 的价值会上升。
+## 6. Wasserstein-DRO 是否能做
 
-## 8. 建议的算法与实验路线
+对主线 ET 模型可以做。若随机加工时间和换型时间只进入固定排程后的时间递推 RHS，且二阶段保持连续线性，recourse value 是关于 RHS 不确定参数的分段线性凸值函数。due-window 仍是分布实现前的共同决策；采用 2026 风格时，它与所有场景 timing 一起在联合连续层中优化，并不变成场景决策。
 
-第一阶段只做 SAA-ET-overtime，并明确使用相同并行机、固定任务级 due window、随机加工时间和确定 setup；然后逐步加入随机 setup。至少比较以下方法：
+但“子问题连续、随机量在 RHS”并不意味着 Wasserstein-DRO 自动变成一个小 LP。最坏分布层仍需处理 Wasserstein 对偶、支持集和 recourse 对偶极点。推荐先限定有界物理支持，例如加工时间/换型因子的区间或低维箱集，并采用训练样本上的 scaled-l1 距离；再用 CCG 或 single/multi-cut 方法逐步生成最坏支持点和 recourse affine pieces。每次只有在内层 oracle 全局闭合时，外层下界才是可证明的精确界。
 
-1. `SAA-AF`：弧流 big-\(M\) 确定性等价模型，作为最小正确性基线；
-2. `SAA-POS`：位置/弧-位置强确定性等价模型，比较模型差异；
-3. `BD-Classic`：基于强模型的 ordinary multi-cut Benders；
-4. `BD-Deep`：只改变 cut selection 的 \(\ell_1\)-deepest 版本；
-5. `BD-LB`：在经过验证的 BD 上加入启发式 local branching；
-6. `BD-SLB-Exact`：只在邻域闭合时加入 selective supercut 的精确版本。
+这一扩展首先只配完成时刻 ET。early/tardy work 的截断非凸性和随机上限、数量目标的二元 recourse 都会破坏“连续固定 recourse + RHS-Wasserstein”的干净结构，不能与 ET 版本共用一套推导。
 
-每个增强都做逐项消融：big-\(M\) 对位置模型、single/multi/bundle cut、普通/Pareto/deepest cut、无场景保留/随机保留/聚类保留、无 local branching/启发式/selective exact。不能只与求解器默认参数比较，也不能把“cut 数少”直接等同于“算法更快”。至少记录 root bound、root time、cut 数、单次 separation 时间、master/subproblem 时间占比、incumbent 时间、最终 gap 和最优性证书。
+实验顺序应为：同一窗口规则下的 SAA 基线；用训练内部验证选择 Wasserstein 半径；用全部训练样本重求决策；最后用独立大样本 OOS 比较 ET、窗口宽度和窗外任务比例。OOS 样本不能反向用于选择半径。
 
-SAA 统计验证应使用多次独立训练样本。对每个样本规模 (N) 生成若干独立 SAA replication，得到训练最优值的均值/方差和候选排程；再用一个远大于 (N) 的独立 OOS 样本评价候选，报告平均值与置信区间。Cavaliere 等人用 5000 场景完整集检查 50--1000 个样本的目标估计，并把固定一阶段解放回完整场景集重估，这一“固定决策后大样本复评”应保留；若没有可枚举的完整场景宇宙，则使用标准独立 replication/OOS 设计代替。
+## 7. 推荐研究路线
 
-当前 BPC 也可作为第三类长期候选：一条机器序列的 SAA 成本等于各场景最优 timing 成本的平均值，理论上仍可作为列成本。但精确定价状态需要同时处理大量场景的 PWLF/对偶信息，可能比紧凑 Benders 更难；在没有可信的多场景 dominance 和 pricing bound 前，不建议把“把 evaluator 在所有场景上跑一遍再平均”当作完整 BPC 实现。
+第一阶段直接做相同并行机、任务特定的决策型 due window、随机加工时间和经典加权 ET。固定或惩罚窗口宽度，并用客户可承诺区间锚定窗口位置。先建立小规模确定性等价模型作正确性基准，再以 2026 风格的强位置 formulation + 投影式 Benders 为主算法，以 2025 two-step Benders 为结构对照。
 
-## 9. 推荐研究顺序与论文边界
+第二阶段只在这个连续 ET 主模型上加入 deepest cuts 和 selective local branching，并逐项消融。local branching 先做限时 primal heuristic；只有邻域完整闭合后才测试 exact supercut。
 
-### 9.1 第一篇/主线工作
+第三阶段在同一 ET 模型上做 Wasserstein-DRO，先限制为低维、有界、RHS 型加工/换型不确定性。SAA 与 DRO 使用同一训练/OOS 协议。
 
-研究“随机加工时间下、具有任务级 due window 和序列相关 setup 的相同并行机 SAA”。主目标采用 expected weighted ET + overtime。贡献集中为：强位置模型、专门多割 Benders、场景处理、deepest cut 选择和 selective local branching。即使最终 deep/local 的计算收益有限，强模型与 Benders 的结构比较仍是完整主线。
+early/tardy work 和早到/迟到任务数量分别形成两个独立目标变体。它们可以共享排程和窗口定义，但求解层应转向 MIP/CP recourse、LBBD 或 branch-and-check，不应为了“目标都做”而把它们与连续 LP-Benders 主线混成一个模型。
 
-### 9.2 第二层扩展
-
-在同一模型上做 Wasserstein-DRO，先限制为低维 RHS 因子不确定性、矩形支持和连续 recourse，比较 CCG、single-cut 和 multi-cut，并用严格 OOS 评估鲁棒性。这个扩展不应与第一版所有目标同时交叉，否则算法层和统计层都很难归因。
-
-### 9.3 目标函数专题
-
-将 early/tardy work 和数量型目标单列。early/tardy work 可研究 position master + CP/MIP timing subproblem + LBBD/local branching；早到/迟到任务数可研究加权窗外任务数、服务水平或 chance constraint。若想保留 LP-Benders 主线，更稳妥的做法是把这些指标作为 OOS 后处理或 epsilon-constraint 的服务约束，而不是替换主 recourse 目标。
-
-### 9.4 不建议的第一步
-
-不建议一开始同时做 unrelated machines、随机 \(p_{jm}\)、随机全部 \(s_{ij}\)、early/tardy count、Wasserstein-DRO、deepest cut 和 exact 8-OPT local branching。这样即使数值失败，也无法判断失败来自模型、统计维度、cut、邻域还是 recourse 非凸性。也不建议把 2025 two-step 直接命名为本问题主方法，除非确实把 due-window 端点设为连续一阶段决策。
-
-## 10. 当前待确认事项
-
-1. 不确定性在班次开始前一次揭示，还是随加工逐步揭示；这决定两阶段模型是否与业务语义一致。
-2. 第一版随机参数是加工时间、setup time，还是低维共同因子；建议先用加工时间或共同速度因子。
-3. overtime 是每台机器独立线性成本、工厂总加班，还是共享人员/离散班次；只有前两者自然保持 LP recourse。
-4. due window 继续作为给定参数，还是研究同时设计承诺窗口；后者才直接对应 2025 two-step Benders。
-5. 主论文是否只保留 ET + overtime；建议 early/tardy work 和数量型目标先做单独计算可行性试验，再决定是否进入同一篇论文。
+当前还需由实际业务数据确定的只有三点：每个任务允许承诺窗口的 [L_j,U_j]；窗口宽度是固定、分档还是连续付费；加工时间是在开工前整体揭示还是逐步揭示。这三点会改变模型语义，但不会改变“无 overtime、due window 是决策、主线只做 ET”的总体方向。
 
 ## 参考文献
 
-- Çelik, Ş., Martin, L., Schrotenboer, A. H., and Van Woensel, T. (2025). Exact Two-Step Benders Decomposition for the Time Window Assignment Traveling Salesperson Problem. *Transportation Science*, 59(2), 210--228. https://doi.org/10.1287/trsc.2024.0750
-- Cavaliere, F., Fischetti, M., Roberti, R., and Salvagnin, D. (2026). Models and algorithms for the Time Window Assignment Traveling Salesperson Problem with stochastic travel times. *European Journal of Operational Research*, 329(1), 96--111. https://doi.org/10.1016/j.ejor.2025.07.034
-- Hosseini, M., and Turner, J. (2025; published online 2024). Deepest Cuts for Benders Decomposition. *Operations Research*, 73(5), 2591--2609. https://doi.org/10.1287/opre.2021.0503
-- Avgerinos, I., Mourtos, I., Vatikiotis, S., and Zois, G. (2025). One Benders cut to rule all schedules in the neighbourhood. *European Journal of Operational Research*, 323(1), 62--85. https://doi.org/10.1016/j.ejor.2024.12.009
-- Esfahani, P. M., and Kuhn, D. (2018). Data-driven distributionally robust optimization using the Wasserstein metric: Performance guarantees and tractable reformulations. *Mathematical Programming*, 171, 115--166. https://doi.org/10.1007/s10107-017-1172-1
-- Gamboa, C., Homem-de-Mello, T., Street, A., and Valladão, D. (2021). A novel solution methodology for Wasserstein-based data-driven distributionally robust problems. *Optimization Online*. https://optimization-online.org/2020/10/8069/
-- Duque, D., Mehrotra, S., and Morton, D. P. (2022). Distributionally Robust Two-Stage Stochastic Programming. *SIAM Journal on Optimization*, 32(3), 1499--1522. https://doi.org/10.1137/20M1370227
-- Sterna, M. (2021). Late and early work scheduling: A survey. *Omega*, 104, 102453. https://doi.org/10.1016/j.omega.2021.102453
-- Shabtay, D., Mosheiov, G., and Oron, D. (2022). Single machine scheduling with common assignable due date/due window to minimize total weighted early and late work. *European Journal of Operational Research*, 303(1), 66--77. https://doi.org/10.1016/j.ejor.2022.02.017
+- Çelik, Ş., Martin, L., Schrotenboer, A. H., and Van Woensel, T. (2025). Exact Two-Step Benders Decomposition for the Time Window Assignment Traveling Salesperson Problem. Transportation Science, 59(2), 210–228. https://doi.org/10.1287/trsc.2024.0750
+- Cavaliere, F., Fischetti, M., Roberti, R., and Salvagnin, D. (2026). Models and algorithms for the Time Window Assignment Traveling Salesperson Problem with stochastic travel times. European Journal of Operational Research, 329(1), 96–111. https://doi.org/10.1016/j.ejor.2025.07.034
+- Hosseini, M., and Turner, J. Deepest Cuts for Benders Decomposition. Operations Research. https://doi.org/10.1287/opre.2021.0503
+- Avgerinos, I., Mourtos, I., Vatikiotis, S., and Zois, G. One Benders cut to rule all schedules in the neighbourhood. European Journal of Operational Research. https://doi.org/10.1016/j.ejor.2024.12.009
+- Sterna, M. (2021). Late and early work scheduling: A survey. Omega, 104, 102453. https://doi.org/10.1016/j.omega.2021.102453
+- Shabtay, D., Mosheiov, G., and Oron, D. (2022). Single machine scheduling with common assignable due date/due window to minimize total weighted early and late work. European Journal of Operational Research, 303(1), 66–77. https://doi.org/10.1016/j.ejor.2022.02.017

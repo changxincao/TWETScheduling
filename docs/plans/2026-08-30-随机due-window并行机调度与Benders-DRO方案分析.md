@@ -4,6 +4,8 @@
 
 主要参考 Çelik et al. (2025) 的 two-step Benders、Cavaliere et al. (2026) 的强位置模型与投影式 Benders、Hosseini and Turner 的 deepest Benders cuts，以及 Avgerinos et al. 的 local-branching neighbourhood supercut。本文是模型与算法方案，不表示这些随机模型或算法已经在当前代码中实现。
 
+关于窗口位置成本、范围约束、二阶段等待成本、宽度成本是否必要，以及确定性投影如何扩展到 SAA 的专项核对，见[决策型 due window 的问题设定：文献对照、退化条件与 SAA 结构](2026-08-30-due-window问题设定文献调研与SAA结构分析.md)。该专项文档进一步区分了 no-voluntary-idle 的位置成本基准与允许付费等待的两阶段主模型。
+
 ## 1. 问题边界与最重要的建模判断
 
 可以直接研究相同并行机，没有必要先把单机作为最终问题。第一阶段决定每个任务由哪台机器加工、在该机器上的位置或前后继关系，以及任务特定的 due window。所有场景共享同一个排程和同一组窗口；第二阶段只根据场景调整时间线。因此，多机器增加的是第一阶段的组合难度，并不破坏两阶段结构。
@@ -169,7 +171,7 @@ T_{j\omega}\ge C_{j\omega}-b_j,\qquad
 E_{j\omega},T_{j\omega}\ge 0.
 $$
 
-机器顺序由 x 决定，并在每个场景中满足相应的加工与换型递推。这里必须在两个 timing 版本中明确选一个。版本 A 允许场景实现后插入主动等待，它是完整场景已知的 wait-and-see 模型，需要可承诺区间或非预见等待防止任务特定窗口退化。版本 B 强制 earliest-start，不允许为对齐窗口而等待；给定排程后场景完成时刻确定，可以直接使用第 1.2 节的分位数投影。两个版本不能在实验中混用。
+机器顺序由 x 决定，并在每个场景中满足相应的加工与换型递推。这里必须在两个 timing 版本中明确选一个。版本 A 允许场景实现后插入主动等待，它是完整场景已知的 wait-and-see 模型；当前建议对首任务 initial idle 和任务间主动等待统一设置正成本，而不是为机器虚构 overtime。若等待仍免费，则必须用可承诺区间、非预见等待或其他位置锚防止任务特定窗口退化。版本 B 强制 earliest-start，不允许为对齐窗口而等待；给定排程后场景完成时刻确定，可以直接使用第 1.2 节的分位数投影。两个版本不能在实验中混用。
 
 推荐的主目标为
 
@@ -177,10 +179,10 @@ $$
 \min
 \lambda\sum_{j\in J}(b_j-a_j)
 +\frac{1}{N}\sum_{\omega\in\Omega_N}\sum_{j\in J}
-\left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right).
+\left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}+\eta_jI_{j\omega}\right).
 $$
 
-若窗口宽度固定，则删除第一项。这里不加入 overtime，也不再扩展其他绩效目标。确定性的换型成本是否进入目标可按原问题语义决定，但不应把它包装成本文的目标创新。
+其中 $I_{j\omega}$ 为相对最早可执行时刻的主动等待。版本 A 要求 $\eta_j>0$；版本 B 不存在主动等待，可直接删除该项。若窗口宽度固定，则删除第一项。这里不加入 overtime，也不再扩展其他绩效目标。确定性的换型成本是否进入目标可按原问题语义决定，但不应把它包装成本文的目标创新。
 
 只要采用经典 ET，且随机加工/换型时间只进入时间递推右端项，固定第一阶段决策后的场景 recourse 是连续 LP。软 ET 又通常保证相对完整 recourse，因此基础算法主要生成 Benders 最优性割。
 
@@ -193,8 +195,10 @@ $$
 $$
 AP(\bar x)=\min_{a,b,\text{全部场景 timing}}
 \left\{\lambda\sum_j(b_j-a_j)+
-\frac1N\sum_\omega ET_\omega\right\}.
+\frac1N\sum_\omega (ET_\omega+WAIT_\omega)\right\}.
 $$
+
+这里 $WAIT_\omega=\sum_j\eta_jI_{j\omega}$；在 earliest-start 版本中该项为 0。后续 2026 风格联合子问题使用相同记号。
 
 该问题重新优化共同窗口，得到针对排程 x̄ 的最优窗口 (â,b̂)。第二步再固定 (x̄,â,b̂)，分别求各场景 timing LP，由场景对偶生成 multi-optimality cuts。其核心价值不是“把同一子问题求两次”，而是避免用 master 中一个尚未优化好的任意窗口生成弱割。
 
@@ -209,7 +213,7 @@ $$
 $$
 Q(\bar x)=\min_{a,b,\text{全部场景 timing}}
 \left\{\lambda\sum_j(b_j-a_j)+
-\frac1N\sum_\omega ET_\omega\right\}.
+\frac1N\sum_\omega (ET_\omega+WAIT_\omega)\right\}.
 $$
 
 窗口仍然是一阶段决策，因为所有场景只能使用同一组 (a,b)；这里只是在算法上把连续一阶段变量从 master 中投影掉。由联合 LP 的对偶生成只含排程变量的 Benders cut。

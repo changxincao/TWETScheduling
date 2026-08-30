@@ -1984,6 +1984,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean prepareMidpointWithinDssr(LP lp) {
+		double workCurveOracleTmid = Double.parseDouble(System.getProperty(
+				"twet.bpc.midpointWorkCurveOracleAfterFirstTmid", "NaN"));
+		if (ngDssrRound > 1 && Double.isFinite(workCurveOracleTmid)) {
+			// 2026-08-30: 仅用于隔离工作曲线的理论选点收益，缺省关闭，不进入正式策略。
+			ngDssrProbeSeedSource = "workCurveOracle";
+			useDssrAdaptiveMidpointWithoutProbe(workCurveOracleTmid);
+			midpointProbeSummary = "skipped:workCurveOracle,selected=" + tMid;
+			return true;
+		}
 		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinDssr
 				|| ngDssrRound <= 1 || !Double.isFinite(ngDssrReusableTmid)) {
 			return false;
@@ -2221,6 +2230,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (targetNodeId < 0 || lp.getNode() == null || lp.getNode().id != targetNodeId) {
 			return;
 		}
+		int targetDssrRound = Integer.getInteger("twet.bpc.midpointFullDiagnosticDssrRound", -1);
+		if (targetDssrRound >= 1 && ngDssrRound != targetDssrRound) {
+			return;
+		}
 		String tmidList = System.getProperty("twet.bpc.midpointFullDiagnosticTMids", "").trim();
 		boolean compareOriginalWithMedian = Boolean.parseBoolean(System.getProperty(
 				"twet.bpc.midpointFullDiagnosticCompareOriginalWithMedian", "false"));
@@ -2247,6 +2260,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					"twet.bpc.midpointPressureDiagnosticSidePopLimit", 2500)));
 		}
 		System.out.println("[midpointFullDiagnostic] node=" + lp.getNode().id
+				+ " dssrRound=" + ngDssrRound
 				+ " pricingHorizon=" + pricingHorizon
 				+ " originalTmid=" + originalTMid
 				+ " forwardSeconds=" + forwardSeconds
@@ -2442,6 +2456,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				+ " finalPops=" + directionalRatio(forwardFinalPops, backwardFinalPops)
 				+ " fullTime=" + directionalRatio(forwardElapsed, backwardElapsed));
 		System.out.println("[midpointFullDiagnostic] node=" + lp.getNode().id
+				+ " dssrRound=" + ngDssrRound
 				+ " tMid=" + candidateTMid
 				+ " fwElapsedMs=" + formatMillis(forwardElapsed)
 				+ " bwElapsedMs=" + formatMillis(backwardElapsed)

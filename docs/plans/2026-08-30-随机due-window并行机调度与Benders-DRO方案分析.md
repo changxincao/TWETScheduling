@@ -4,7 +4,7 @@
 
 主要参考 Çelik et al. (2025) 的 two-step Benders、Cavaliere et al. (2026) 的强位置模型与投影式 Benders、Hosseini and Turner 的 deepest Benders cuts，以及 Avgerinos et al. 的 local-branching neighbourhood supercut。本文是模型与算法方案，不表示这些随机模型或算法已经在当前代码中实现。
 
-关于窗口位置成本、范围约束、二阶段等待成本、宽度成本是否必要，以及局部投影如何扩展到 SAA 的专项核对，见[决策型 due window 的问题设定：文献对照、退化条件与 SAA 结构](2026-08-30-due-window问题设定文献调研与SAA结构分析.md)。当前研究边界已经明确：所有候选模型都允许场景内等待，只比较免费等待 FW 与付费等待 PW，不再考虑 no-voluntary-idle 版本。
+关于窗口位置成本、范围约束、二阶段等待成本、宽度成本是否必要，以及局部投影如何扩展到 SAA 的专项核对，见[决策型 due window 的问题设定：文献对照、退化条件与 SAA 结构](2026-08-30-due-window问题设定文献调研与SAA结构分析.md)。从完整 SAA 模型推出经验分位数、消去窗口变量并得到 projected Benders 值函数的统一推导，见[随机 due-window 并行机调度：分位数投影与完整模型推导](2026-08-30-due-window分位数投影与完整模型推导.md)。当前研究边界已经明确：所有候选模型都允许场景内等待，只比较免费等待 FW 与付费等待 PW，不再考虑 no-voluntary-idle 版本。
 
 ## 1. 问题边界与最重要的建模判断
 
@@ -40,55 +40,11 @@ $$
 
 第一种只有在范围具有真实承诺含义时最自然；第二种是当前推荐的 PW 主模型；第三种形成与原 TWA 免费等待语义最接近、但用位置成本替代 overtime 的 FW 基准。主比较应让 FW 与 PW 使用相同的位置和宽度成本，只改变 $\eta=0$ 与 $\eta>0$。
 
-### 1.2 两种不同的投影：窗口投影可全局使用，等待投影只能局部使用
+### 1.2 含 waiting cost 的统一窗口投影
 
-当前始终允许场景自适应等待。为看清等待单价的局部作用，可以先隔离一个任务，并用 $\underline C_j^\omega$ 表示该任务在场景 $\omega$ 中不额外等待时的最早完成时刻。只有在该任务的等待不改变任何后续任务时，给定窗口 $[a_j,b_j]$ 后的局部 recourse 才是
+当前主模型直接保留场景 waiting cost $\eta_jW_{j\omega}$；免费等待只需令 $\eta_j=0$。不再先消去单个任务的等待，也不在完整模型中使用 $\min\{\alpha_j,\eta_j\}$ 替换 early 系数。
 
-$$
-\min_{I_{j\omega}\ge0}
-\left\{
-\eta_jI_{j\omega}
-+\alpha_j(a_j-\underline C_j^\omega-I_{j\omega})^+
-+\beta_j(\underline C_j^\omega+I_{j\omega}-b_j)^+
-\right\}.
-$$
-
-其精确值为
-
-$$
-\bar\alpha_j(a_j-\underline C_j^\omega)^+
-+\beta_j(\underline C_j^\omega-b_j)^+,
-\qquad
-\bar\alpha_j=\min\{\alpha_j,\eta_j\}.
-$$
-
-免费等待 $\eta_j=0$ 会令 $\bar\alpha_j=0$，局部 earliness 完全失效；付费等待 $\eta_j>0$ 则恢复正的早到侧斜率。当 $\eta_j<\alpha_j$ 时，隔离任务会选择等待而不是支付 early，但等待本身仍产生 $\eta_jI_{j\omega}$。
-
-若暂时忽略下游传播、位置成本和端点碰撞，正宽度成本下的局部窗口问题使用 $\bar\alpha_j$ 代替 $\alpha_j$。当
-
-$$
-\lambda_j\le
-\frac{\bar\alpha_j\beta_j}{\bar\alpha_j+\beta_j},
-$$
-
-两个端点分别对应经验分位水平
-
-$$
-a_j^*\in Q_j\!\left(\frac{\lambda_j}{\bar\alpha_j}\right),
-\qquad
-b_j^*\in Q_j\!\left(1-\frac{\lambda_j}{\beta_j}\right).
-$$
-
-若两个水平交叉，窗口收缩为点，其局部分位水平为
-
-$$
-a_j^*=b_j^*\in
-Q_j\!\left(\frac{\beta_j}{\bar\alpha_j+\beta_j}\right).
-$$
-
-上述 $\bar\alpha_j$ 分位数只属于隔离任务的局部诊断。当前机器调度中的 idle 会移动同一机器上的所有后续任务，因此不能对每个任务分别优化等待，也不能在完整模型中统一用 $\bar\alpha_j$ 替换 $\alpha_j$。
-
-另一种投影则对完整模型严格成立。给定所有等待已经计入后的实际完成时间向量 $\mathbf C_j=(C_{j1},\ldots,C_{jN})$，定义
+给定所有等待已经计入后的实际完成时间向量 $\mathbf C_j=(C_{j1},\ldots,C_{jN})$，任务 $j$ 的最优窗口成本为
 
 $$
 \Phi_j(\mathbf C_j)=
@@ -103,17 +59,27 @@ $$
 \right\}.
 $$
 
-只要任务窗口彼此独立且不进入机器可行性约束，给定 $C$ 后该窗口投影可对所有任务同时使用。完整模型精确等价于
+在内部端点条件下，最优左、右端点分别是实际完成时间的加权经验分位数
 
 $$
-\min_{x,\,C,\,I\in\mathcal T(x)}
+a_j^*\in Q_j\!\left(\frac{\lambda_j-\rho_j}{\alpha_j}\right),
+\qquad
+b_j^*\in Q_j\!\left(1-\frac{\lambda_j}{\beta_j}\right).
+$$
+
+若分位水平越界或交叉，则由非负边界、外生范围或 $a_j=b_j$ 的点窗口条件决定。waiting cost 不出现在上述比例里，是因为这里固定的是已经包含等待的实际完成时间；$\eta_j$ 通过外层 timing 优化改变 $\mathbf C_j$。
+
+只要任务窗口彼此独立且不进入机器可行性约束，给定 $C$ 后该窗口投影可对所有任务同时使用。消去 $a,b,E,T$ 后，完整模型精确等价于
+
+$$
+\min_{x,\,C,\,W\in\mathcal T(x)}
 \left\{
-c(x)+\frac1N\sum_{\omega,j}\eta_jI_{j\omega}
+c(x)+\frac1N\sum_{\omega,j}\eta_jW_{j\omega}
 +\sum_j\Phi_j(\mathbf C_j)
 \right\}.
 $$
 
-$\Phi_j$ 的最优端点是实际完成时间的经验分位数，但函数值并不只是“一个分位数”，而是窗口成本与全部 ET 偏差的最小值。它是凸分段线性函数。直接写分位数等式会引入排序和集合值问题；保留 $a,b,E,T$ 就得到精确 LP 扩展式，不需要任何额外非线性。若进一步把 $a,b,C,I$ 全部投影掉，则得到仅关于排程变量 $x$ 的联合连续 recourse 值函数 $Q(x)$，可由 2026 风格的 Benders 对偶割表示。
+$\Phi_j$ 是凸分段线性 LP 值函数，而不是需要显式编码的排序黑箱。直接确定性等价模型保留 $a,b,E,T$ 即为精确线性扩展式；2026 风格则进一步把 $a,b,C,W,E,T$ 投影成只关于排程 $x$ 的联合 recourse 值函数 $Q(x)$，再由 LP 对偶生成 Benders cuts。完整推导及窗口 LP 对偶见上述专项文档。
 
 宽度仍需正成本、固定值或真实上界，否则可用覆盖所有实际完成时刻的宽窗口同时消掉 ET。免费等待时还需要位置成本或真实范围阻止整体时间平移。
 
@@ -159,9 +125,9 @@ $$
 
 有并列样本时，相应分位数可能是一个区间，但最优值仍可由排序后的完成时间直接计算。若窗口宽度固定为 w_j，则只需优化窗口起点 a_j，得到一个一维凸分段线性问题，也可通过完成时间的排序统计量求解。
 
-因此，你提出的“直接变成某个函数表达式”是成立的，但成立条件是给定排程后的场景完成时刻不能再通过场景特定等待任意移动。此时可以把 (a,b) 从模型中完全投影掉，以 φ_j(x) 作为排程的场景协同成本。这样 2026 风格的投影路线会更自然；2025 two-step 中显式连续窗口变量所提供的算法价值反而会减弱。
+因此，在无场景自适应等待的文献设定中，给定排程后 $C_j^\omega(x)$ 已经确定，可以同时把窗口和完成时间都代入，直接得到只关于排程的 $\phi_j(x)$。当前允许等待的模型仍可先投影窗口，但 $C,W$ 还要在 timing 可行域中联合优化；只有再把整个连续 timing LP 投影掉，才得到只关于排程的 $Q(x)$。
 
-这里的“显式函数”不等于一个预先固定的线性系数。C_j^ω 随排程 x 改变，各场景完成时间的排序也可能改变，所以 φ_j(x) 是由场景次序统计量形成的分段函数，并且仍然跨场景耦合。固定 x 后它很容易排序求值，但全局优化仍需要联合 LP、Benders cut、order-statistic 线性化或专门的割；不能把 N 个场景完全拆成彼此独立的 recourse。
+这里的“显式函数”不等于一个预先固定的线性系数。$C_j^\omega$ 随排程 $x$ 改变，各场景完成时间的排序也可能改变，所以 $\phi_j(x)$ 是由场景次序统计量形成的分段函数，并且仍然跨场景耦合。全局优化应保留窗口 LP 的线性扩展式，或使用其对偶 Benders cuts；没有必要显式建立 order-statistic 排序变量，也不能把 $N$ 个场景完全拆成彼此独立的 recourse。
 
 宽度仍需有明确规则。若 λ_j=0 且宽度可变，任取 a_j≤min_ω C_j^ω、b_j≥max_ω C_j^ω 即可得到零 ET，只是存在许多无限宽或非唯一窗口；若宽度固定或 λ_j>0，上述分位数权衡才真正存在。
 
@@ -392,7 +358,7 @@ Avgerinos et al. 式 exact neighbourhood supercut 要求整个邻域已经被完
 
 第一阶段直接做相同并行机、任务特定的决策型 due window、随机加工时间和经典加权 ET，所有版本均保留场景自适应等待。以 PW 为主模型：正位置成本、正宽度成本和正 waiting cost 同时存在；以相同模型中的 $\eta=0$ 形成 FW 免费等待基准。PW 再增加一个删除位置成本的消融，用于验证付费等待能否单独锚定位置，但该消融不与 FW 直接比较。
 
-先建立小规模确定性等价模型作正确性基准，再以 2026 风格的强位置 formulation + 投影式 Benders 为主算法，以 2025 two-step Benders 为结构对照。单任务的 $\min\{\alpha,\eta\}$ 分位数公式只作值函数诊断；完整序列的等待传播仍由联合 LP 处理，不能用局部闭式公式替代。
+先建立小规模确定性等价模型作正确性基准，再以 2026 风格的强位置 formulation + 投影式 Benders 为主算法，以 2025 two-step Benders 为结构对照。主模型始终保留 $\eta W$，固定实际完成时间后投影窗口得到 $\Phi_j(\mathbf C_j)$；完整序列的等待传播和所有场景 timing 由联合 LP 处理。
 
 第二阶段只在这个连续 ET 主模型上加入 deepest cuts 和 selective local branching，并逐项消融。local branching 先做限时 primal heuristic；只有邻域完整闭合后才测试 exact supercut。
 

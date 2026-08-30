@@ -1037,3 +1037,15 @@ random三例的`16/22/33`个probe轮最终全部以rank0双侧耗尽结束，没
 因此后续轮建议保留“一次反转修正”，不保留无上限二分。首候选在adaptive seed运行，超过4才向实测方向移动有效宽度5%并测试第二候选。若第二候选不超过4，直接接受；若仍超过4且方向未反转，也直接用第二候选正式续跑，留给下一完整轮继续adaptive；只有第二候选仍超过4且方向与首候选相反时，额外测试二者中点，即相对首seed移动2.5%，随后无论结果如何都停止probe并续跑。因此后续轮通常最多2个候选，反转时最多3个，不再继续缩小bracket。首轮仍保留现有10%步长和完整反转bracket，只增加单侧耗尽修正。
 
 这也给出了步长区分的理由。首轮没有历史反馈，需要10%探索；后续adaptive seed已有上一完整轮指导，只有当前memory样本失衡超过4才修正，先走5%可以形成有意义的第二测点，若过冲则一次中点自然得到2.5%。直接从2.5%开始再二分只剩1.25%，可能不足以分辨两侧压力。最终拟定参数为：首轮`R=1.5/step=10%/现有bracket`；后续轮`R=4/step=5%/通常2候选/反转最多3候选一次中点`；两者单侧续探均按250 pop分批。adaptive阈值2和公式、ng-memory及warm-start全部不变。
+
+### 32.30 单侧续探停止语义、最小统计与候选预算
+
+单侧续探中的`R E`是候选内部的比较预算，不是整个BPC或pricing的全局time limit。初始正反向各最多5000 pop后，若恰有一侧耗尽，记该侧完整耗时为`E`、另一侧当前累计耗时为`U`。若未耗尽侧已经满足`U>=R E`，无需追加即可可靠判定该侧更重，当前候选不合格并按该方向移动`Tmid`。否则保留同一候选的队列、label和dominance状态，每250 pop追加未耗尽侧并累计其实际执行时间。每批结束先检查队列：若该侧也耗尽，则当前候选的两侧搜索已经完整，应直接保留rank-0状态进入join；即使最终完整耗时比超过`R`，此时为追求平衡重建另一个中点只会丢掉已完成工作。只有队列仍未空且累计耗时达到`R E`时，才判候选不合格并移动中点。若全局time limit先到，则本次exact按时限退出，不能再重建另一个候选。
+
+不需要为该逻辑长期增加七个平铺统计量。候选结果中保留一个续探结局字段和两个数值即可：结局取`none/alreadyOverRatio/exhausted/ratioReached/globalTimeLimit`，另记`continuationPops`和`continuationMillis`。现有`ex`、正反向初始pop和side elapsed已经能够识别哪一侧先耗尽；`batches`可由250-pop批次和追加pop近似恢复，`detected`及各类停止次数可按结局聚合。因此无需单独维护`oneSideDetected`、`AlreadyBeyondThreshold`、`ContinuationBatches`等七个全局字段。新实验仍可从每个候选摘要汇总单侧发生率、真正追加率、完成/阈值停止比例和追加时间。
+
+“第二候选仍超过4且方向未反转时直接使用第二候选”是拟议的后续DSSR轮预算规则，不是当前实现。当前主线会继续按有效宽度10%移动，直到接受、到达边界，或方向反转后反复二分到5%宽度。拟议规则把后续probe定位为adaptive seed的有限校验：A不合格时只允许沿实测方向做一次5%修正得到B；若B仍指向同一重侧，说明尚未找到重侧切换区间，继续浅层walk可能连续销毁多个10000-pop候选，而且family证据已表明浅层趋势不能稳定预测完整负载。因此停止probe并复用B的当前状态完成正式labeling，由这一完整轮为下一DSSR轮提供新反馈。此处`B`不是被判为“平衡”，停止原因应明确记录为`candidateBudget`，也不能声称B一定优于A；选择B只是避免重跑已销毁的A并给候选搜索设置硬成本上限。若A、B重侧反转，则只额外测试一次中点C，随后同样停止。
+
+实现应只改midpoint probe这一条路径。第一，在`runMidpointProbeCandidate()`中加入单侧续探，并把本轮接受阈值传入候选函数；追加pop必须更新对应side elapsed、side pop、queue peak和最终exhausted状态。第二，在`runMidpointProbeIfEnabled()`中显式区分exact首轮与DSSR后续轮：首轮继续使用`R=1.5`、10% walk和现有bracket；后续轮使用`R=4`、5%一步修正、通常最多两个候选，只有方向反转时增加一个中点候选。第三，外层循环收到`globalTimeLimit`后立即停止probe并让原有未完成round路径退出，不能继续移动`Tmid`。第四，`MidpointProbeResult`只增加续探结局、追加pop和追加毫秒，并把它们写入现有candidate摘要；adaptive公式、ng-memory、witness更新、join、dominance和certificate逻辑全部不改。
+
+验证分两步，避免把收益来源混在一起。先只启用单侧续探，保持现有候选walk/bracket，检查所有实例bound不变，并统计模糊单侧候选是否从错误接受转为“补到完整”或“达到比例预算后移动”。再启用后续轮候选预算规则，在matched n40 family/random三例及更高规模random上比较probe时间、废弃候选时间、候选数、选中`Tmid`相对adaptive seed的位移、选中样本方向与完整轮方向一致率、完整`F+B`耗时和DSSR总时间。所谓“选到更好”必须以选中点续跑后的完整轮工作量衡量，不能只以浅层ratio更接近1衡量。

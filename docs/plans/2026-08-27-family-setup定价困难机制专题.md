@@ -991,3 +991,21 @@ probe的优化目标应是减少被丢弃的候选状态，同时保留在新mem
 上一完整轮分位数产生的adaptive seed本身仍可能一次移动很远。相比“位移小则跳过probe”，更直接的后续A/B是限制单轮adaptive位移幅度，例如最多为有效宽度10%，然后仍在受限seed上执行首个当前memory候选。该限制不约束方向，只防止一次从约297跳到865一类大跨度过冲；是否取5%或10%需要在单侧耗尽修正和两候选上限验证后再单独测试，不能同时混入第一版。
 
 因此probe的隔离修改顺序修正为：第一，只修单侧耗尽的1.5阈值比较；第二，在此基础上将walk/bracket收缩为最多两个候选、第二步取较小位移；第三，再单测adaptive seed的最大位移限制。`updateNgNeighborhoodsFromNonElementaryRoutes()`、minimum/allSegments语义、每轮20条有效路线、candidate1000、初始ng-set和warm-start均不修改；本节也不再把基于新增pair数跳过probe列为当前必要方案。
+
+### 32.27 首轮严格probe与DSSR轮间轻量校验方案
+
+当前先不启用allSegments，warm-start继续关闭，ng-memory更新流程保持`minimumNewPairsSegment + effective route limit 20 + candidate1000`不变。现阶段只处理中点误差：第一次DSSR轮没有上一完整轮反馈，需要probe从默认中点寻找可用分割；后续轮已经有上一完整轮forward/backward耗时和存活label分布，probe应主要校验adaptive seed是否明显失衡，而不再追求浅层样本严格达到1.5倍以内。
+
+真实控制流为：每轮完整labeling结束后保存本轮最终`Tmid`及forward/backward完整耗时；若没有elementary负列但存在non-elementary witness，则按现有方法更新ng-memory。下一轮先以旧`Tmid`为基准，完整耗时比不超过2时不移动；超过2时令`alpha=min(0.5,0.5(1-2/I))`，从上一轮重侧存活label的split-time分位数产生adaptive seed。当前实现随后总会在新memory下从该seed运行浅probe：每侧最多5000次pop，样本耗时比不超过1.5即接受，否则按有效宽度10%移动，并可能在方向反转后继续二分到5%宽度。最终候选状态由正式labeling直接续跑，之前候选状态被丢弃。
+
+random现有n40三例中，`probe+minimum`平均`21.729s`，`adaptive-direct+minimum`平均`23.474s`，说明保留probe至少没有总体退化，并有轻微正信号；但这些实例每次exact仅约1.7--2.2轮，尚不能据此断言浅probe准确预测了完整工作量。需要区分“方向和比例确实准确”与“即使不准也因DSSR轮数很少而影响不大”。后续若验证random，应逐轮比较probe方向、选中候选样本比、完整F/B比和丢弃候选数，而不能只看总时间。
+
+family则已有明确证据表明当前轮间probe过于敏感：`probe+minimum`三例平均`525.994s`，而保留adaptive反馈、取消后续浅probe为`327.305s`。问题集中在后续轮的`1.5`接受阈值、10%固定步长和无上限walk/bracket；首轮probe没有同样的替代信息，不应一起收紧。因此建议构造分层规则，而不是按输入文件的family标签走不同算法。
+
+第一轮继续使用当前严格规则：接受阈值1.5、10%步长及现有walk/bracket先全部保留，只统一修正单侧耗尽比较。后续DSSR轮先按原公式计算adaptive seed，在该点运行一个新memory候选；把接受阈值放宽到4。两侧均未耗尽时仍比较等量5000-pop的elapsed；恰有一侧耗尽时，以当前轮阈值`R`继续未耗尽侧，直到其也耗尽或累计时间达到`R`倍已耗尽侧完整时间。追加扩展直接沿用当前候选队列和计时，`elapsedTotal=elapsedInitial+elapsedExtra`，不重建状态；可按256或512次pop分批检查阈值，避免每次扩展读取时钟。
+
+若后续轮首候选的可靠/等pop耗时比不超过4，直接保留该状态进入正式labeling。只有比值超过4才允许一个修正候选，随后停止，不再bracket。修正方向仍由当前候选实测重侧决定，不施加历史方向硬边界。当前10%步长在困难实例上约为416.7，方向反转后二分常落到208.35；若目标是真正缩小修正，5%仍相当于历史常见的208.35，第一轮A/B更适合比较2.5%（约104.2）与5%。第二候选会销毁第一候选状态，因此第一候选必须先被可靠判为不合格，第二候选运行后直接用于正式labeling，不能声称无成本选择两个候选中的最好者。
+
+“上一轮平衡就跳过probe”暂不采用。上一轮平衡时adaptive seed确实等于旧`Tmid`，但ng-memory已经更新；在当前memory上运行首候选仍有校验价值，而且该候选的pop可被正式labeling复用，通常不是额外扩展。真正需要减少的是首候选不合格后无上限切换中点产生的废弃状态。因此推荐的实验版本为：首轮原probe加单侧修正；后续轮阈值4、最多两个候选、修正步长2.5%或5%、无bracket；adaptive分位数公式和seed本身先不设位移上限。若该版本仍出现adaptive一次大跨度过冲，再把最大位移作为后续独立因子。
+
+验证顺序仍需隔离。先只加入单侧耗尽累计比较，确认新增pop、接受/拒绝变化和总耗时；再测试后续轮`R=4 + maxCandidates=2`，最后比较2.5%与5%修正步长。每组至少覆盖现有n40 matched family/random三例，并额外用更高规模random检查“probe准确”还是“影响很小”。所有实验记录最终bound、DSSR轮数、每轮adaptive位移、样本/完整F/B比、单侧追加pop、候选数和丢弃候选时间。该方案不读取setup类型，也不修改任何ng-memory更新逻辑。

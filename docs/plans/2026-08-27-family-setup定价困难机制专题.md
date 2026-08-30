@@ -953,3 +953,25 @@ random三例看似更快，但其exact总计仅约`1.9--5.2s`，总时间还包�
 `bidirectionalMidpointProbeAfterFirstDssrRound=true`同样只是性能默认，不是正确性条件。后续轮先使用上一完整DSSR轮的forward/backward耗时形成adaptive seed：当耗时比超过2时，根据失衡程度计算移动比例，再从重侧存活label的split-time分位数选新点。此时下一轮ng-memory已经变化，而分位数只描述上一轮存活label的时间位置，并不直接预测新memory下每个label的扩展代价、后代数量和join组合量，所以seed可能移动不足，也可能“均衡过头”。继续浅probe使用新一轮memory在seed附近实际扩展，理论上可以纠正这种过冲；因此第32.23节的硬方向约束不合理，它禁止了本来可能必要的反向修正。
 
 但这不等于`true`已经被证明更快。最新n40 minimum模式中，adaptive-direct在3个family实例上均优于继续probe，平均`327.305s`对`525.994s`；n30 family总体也明显受益，只是个别实例持平或略慢。继续probe的依据是避免已观察到的大位移过冲、并为random/allSegments等结构保留鲁棒性；它是保守统一默认。若目标是当前困难family实例的专用速度，现有证据反而更支持`bidirectionalMidpointProbeAfterFirstDssrRound=false + minimum/1000`。因此后续表述必须区分：统一正式profile暂保留`true`，family专项候选取`false`；不能再把`true`称为已确认的最佳配置。
+
+### 32.25 allSegments的条件性收益、probe改造顺序与后续策略
+
+当前决定继续关闭same-node warm-start。完整n40根节点结果已经表明，10-pair复用在family三例上平均由`327.305s`恶化到`581.170s`；其问题不是pair本身不安全，而是跨pricing调用的final-memory频率不能代表新dual下的witness价值，提前加入的pair会削弱dominance并改变后续列和dual轨迹。因此后续优化应优先利用当前pricing调用、当前dual下的witness信息，而不是继续调整历史复用窗口或pair数量。
+
+`allSegments`在family上的作用是明确的，但收益依赖与probe的组合。保留后续probe时，三例根时间由`probe+minimum`的平均`525.994s`降到`probe+all`的`416.993s`，下降`20.7%`，三个实例均改善；成功exact的平均DSSR轮数由约`21.9`降到`10.3`。关闭后续probe时，`direct+minimum`平均为`327.305s`，而`direct+all`反而达到`432.412s`，慢`32.1%`，其中set02和set03分别慢`55.2%`和`23.2%`。原因在于当前`ngDssrNonElementaryRouteUpdateLimit=20`限制的是“发生更新的witness路线数”，并不限制新增pair总数。minimum模式每条路线只补一个新增pair最少的完整重复段；allSegments会补该路线中全部连续重复段，一批可一次加入上百个pair。它虽然更快阻断同族替代环，却也会使下一轮memory跳变、dominance显著变弱。此时上一完整轮得到的时间分布已经过时，继续probe能在新memory下重新校准中点；adaptive-direct直接采用旧轮分位数，容易把“大memory+错误中点”叠加到一起。
+
+因此目前存在两个由实验支持、但目标不同的family组合。若只追求这三例的平均根节点速度，`adaptive-direct + minimum/1000`最快；若保留统一正式profile的后续probe，则`probe + allSegments/1000`是比`probe + minimum/1000`更好的family专项候选。不能把`direct + allSegments`作为候选，也不能因allSegments减少轮数就设为全局默认；random的exact本来很轻，四组平均都在`21--23s`，allSegments没有稳定收益。正式统一配置暂时仍保持minimum/1000和warm关闭。
+
+probe的优化目标应是减少被丢弃的候选状态，同时保留在新memory下纠正adaptive过冲的能力，而不是再加方向硬约束。当前每个候选固定各执行约5000次forward/backward pop，选中候选的状态会被正式labeling复用；明确冗余只来自移动到新候选后丢弃的旧状态。建议按以下顺序做单变量A/B。
+
+1. 先修正单侧提前耗尽时的比较口径。若一侧队列已空，其elapsed是该侧完整时间；另一侧未空时的elapsed只是5000-pop前缀，两者不能仅凭比值小于1.5就判定平衡。此时只继续扩展未耗尽侧，直到它也耗尽，或其累计elapsed达到已耗尽侧的完整elapsed且队列仍未空。前者得到完整比较，后者已经足以证明未耗尽侧更重，不需要把两侧都完整跑完。
+
+2. 后续轮按“反馈是否仍可信”决定是否probe。第一轮仍正常probe；上一完整轮本来平衡、adaptive seed没有移动时，直接复用，不再机械浅探。建议位移不超过有效时间域约`5%`且本轮新增pair较少时，可直接采用adaptive seed；位移超过`5%--10%`、方向相对近期反馈反转，或者allSegments造成pair大幅增长时，才在新memory下执行probe。现有n30逐轮证据表明小于`5%`的位移通常尚可，而超过`10%`曾出现100以上甚至1200级的完整F/B失衡；这些阈值只能作为首轮A/B起点，不能直接写成最终参数。
+
+3. 对需要probe的轮次限制候选数量，不限制移动方向。先测试adaptive seed；若不合格，按当前实测压力方向只再测试一个较近候选，例如移动有效宽度的`5%`。允许第二个候选反向纠正seed，但不再沿固定10%步长长距离walk并反复二分。停止时应在已测候选中按“比较可靠性优先、预计完整工作量其次”选择最好点，而不是默认采用最后一个候选。该方案保留纠正能力，同时把每轮被丢弃状态限制在至多一组。
+
+除probe外，下一项更有针对性的DSSR优化不是重新打开warm-start，而是对当前top-1000 witness做重复段覆盖选择。每个完整重复段可表示成一组需要新增的有向pair，同时可统计它能阻断当前池中多少条尚未阻断的witness。更新时不再逐条路线独立选择“最少pair段”，而是在固定新增pair预算下，贪婪选择“每个新增pair能阻断最多新witness”的段，并在每次选择后更新剩余覆盖。其目的不是改变DSSR流程，而是用更少memory取得allSegments式的跨路线阻断效果，直接针对当前`15918/16000`路线在处理时已被前序更新阻断的高度同质现象。elementary路线集合、最终exact certificate和master列语义均不改变，变化的只是DSSR收紧顺序。
+
+一个更简单的中间方案是bounded-allSegments：仍处理一条witness中的多个重复段，但把每轮预算从“最多20条有效路线”改成“最多新增若干pair”，达到预算即停。这能避免一条复杂witness一次把memory放大上百个pair，实施和解释都比动态模式切换简单，但pair预算需要通过family多实例A/B确定。若后续需要自动切换，只应依据当前池饱和度、already-blocked比例、有效更新路线数和新增pair数等在线信号，不应读取`family/random`输入标签。
+
+当前明确不再推进的方向包括：把candidate pool从1000扩大到3000、盲目增大初始nearest-K、继承完整final memory、重新调整10-pair历史warm-start，以及对probe施加不可反向的硬边界。优先验证顺序为：单侧耗尽口径；小位移跳过probe加最多两候选的有界probe；当前轮重复段覆盖选择；最后才是bounded-allSegments。每项都应分别记录完整根时间、DSSR轮数、每轮新增pair、forward/backward labels、probe丢弃候选和最终bound，不能只看轮数。

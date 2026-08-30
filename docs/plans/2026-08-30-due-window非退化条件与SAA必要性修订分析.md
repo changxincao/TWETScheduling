@@ -115,7 +115,7 @@ $$
 
 如果实际系统没有明确的日历原点，所有时刻只表示相对时间，那么整体平移不影响业务，直接固定首任务从 0 开始是最干净的规范化。当前机器调度问题没有强烈的 overtime 语义，因此推荐采用这种方式，而不是为了数学有界性给机器增加不自然的加班成本。
 
-## 6. 位置成本和宽度成本的精确系数关系
+## 6. 给定完成时间后的局部窗口关系
 
 为了判断系数是否把窗口强行推到某种边界，先固定任务 $j$ 在所有场景下的实际完工时刻，忽略上下界和等待传播，考虑窗口投影子问题
 
@@ -142,27 +142,16 @@ F(b^-)\le q_b\le F(b),
 q_b=1-\frac{\lambda}{\beta}.
 $$
 
-这两个经验分位水平只用于分析给定完成向量下的窗口结构。它们给出以下清楚的系数判别。
+这两个经验分位水平只用于分析给定完成向量下的窗口结构，不用于构造当前 Benders 算法。真正可直接用于预处理的是前两个占优关系。
 
 | 系数区间 | 窗口结构倾向 | 含义 |
 |---|---|---|
 | $\rho\ge\lambda$ | $a$ 落到允许的下界 | 增加起点的直接成本不低于缩窄窗口的收益，early 一侧容易退出 |
 | $\lambda\ge\beta$ | $b$ 被压低，常与 $a$ 合并 | 扩宽一单位的成本不低于最多可减少的一单位 tardiness 成本 |
 | $q_a\ge q_b$ | $a=b$ | 两个无约束分位点交叉，正宽窗口收缩成 due date |
-| $0<q_a<q_b<1$ | 两个不同的内部经验分位点 | 给定完成向量下存在真正的双端点权衡 |
+| $0<q_a<q_b<1$ | 两个不同的内部经验分位点 | 给定完成向量下存在真正的双端点权衡，但只是局部形态描述 |
 
-忽略样本并列与范围激活时，最后一行等价于
-
-$$
-0<\lambda<\beta,
-\qquad
-\max\left\{0,\lambda-\alpha\left(1-\frac{\lambda}{\beta}\right)\right\}
-<\rho<\lambda.
-$$
-
-这正面回答了“位置成本系数比宽度成本小，会不会使位置成本没用”。不会。$\rho<\lambda$ 反而是左端点离开下界、形成内部左分位点的必要条件之一。原因是固定 $b$ 时把 $a$ 向右移动一单位，会支付 $\rho$，同时节省 $\lambda$ 的宽度成本。$\rho<\lambda$ 时，模型愿意从左侧缩窄窗口；但窗口整体后移一单位仍需支付 $\rho$，所以位置并不是免费的。
-
-真正需要防止的是 $\rho$ 过小或过大。$\rho$ 很小会使 $q_a$ 变大，左端点快速接近右端点，最终可能得到 $a=b$；$\rho\ge\lambda$ 又会把 $a$ 压到下界，使 early 一侧经常为 0。若希望给定完成向量时两个端点都参与决策，$\rho$ 应落在上面的中间区间，而不是只满足“正数”即可。
+因此，不再根据内部双分位点条件为全部任务设计统一参数区间。$\rho<\lambda$ 时没有一般占优结论，位置成本仍然控制窗口整体后移；最终是内部窗口还是点窗口，要由该任务的完成时间向量和其他成本共同决定。
 
 如果 $q_a\ge q_b$，点窗口并不等于模型完全退化。此时窗口变成可决策 due date $d$，其内部经验分位水平为
 
@@ -231,90 +220,64 @@ $\kappa>0$ 只能保证窗口不能无代价地无限延伸，不能保证最优
 
 上述结论仍是局部投影。完整多机序列中，为当前任务等待会改变后续任务的 $\widehat C$，所以不能据此逐任务预先固定 $[0,b]$ 或 $[b,b]$；但它非常适合用于解释算例系数、识别模型为何大量出现某一种窗口形态，并设计参数对照实验。
 
-## 7. 加入等待成本后，early 为什么可能消失
+## 7. $\alpha$、$\eta$ 和最早可完工时刻到底表示什么
 
-首先必须修正一个容易造成混乱的表述：“给定场景实际完工时刻”与“给定不等待时的最早可完工时刻”不是同一个投影问题。
-
-| 已经固定的对象 | 还要不要优化等待 | early 侧使用的系数 | 结论的适用范围 |
-|---|---|---:|---|
-| 实际完工时刻 $C_\omega$，其中已经包含等待 | 不再优化 | $\alpha$ | 标准窗口投影，对每个任务可分别做 |
-| 最早可完工时刻 $\widehat C_\omega$ | 优化本任务的局部等待 | $\bar\alpha=\min\{\alpha,\eta\}$ | 仅适用于等待不影响下游和 terminal cost 的隔离任务 |
-| 完整多机序列中的 timing | 所有等待联合优化 | 不能统一替成 $\bar\alpha$ | 必须求联合场景 LP/SAA |
-
-对第二行的隔离任务，令 $w_\omega\ge0$ 为主动等待，实际完工时刻为 $C_\omega=\widehat C_\omega+w_\omega$。如果 $\widehat C_\omega<a$，存在两种局部处理：不等待时支付 $\alpha(a-\widehat C_\omega)$；恰好等待到 $a$ 时支付 $\eta(a-\widehat C_\omega)$，并令 observed earliness 变成 0。两者取较便宜者，因此优化掉局部等待后的场景成本为
+模型中真正的 earliness 定义为
 
 $$
-\min_{w_\omega\ge0}
+E_\omega=(a-C_\omega)^+,
+$$
+
+其中 $C_\omega$ 是场景 $\omega$ 下最终实际完工时刻，$\alpha E_\omega$ 是早完工成本；$\alpha$ 只是每单位 earliness 的价格，例如库存、保管、提前交付或客户不便成本，它不是由最早可完工时刻决定的。
+
+$\widehat C_\omega$ 只表示在给定排程和该场景加工时间下、不插入主动等待时最早能够完成的时刻。若没有等待，则 $C_\omega=\widehat C_\omega$；当 $\widehat C_\omega<a$ 时，earliness 数量就是 $a-\widehat C_\omega$，所以成本为
+
+$$
+\alpha(a-\widehat C_\omega).
+$$
+
+若允许主动等待 $w_\omega\ge0$，则实际完工时刻变成
+
+$$
+C_\omega=\widehat C_\omega+w_\omega,
+$$
+
+同时支付等待成本 $\eta w_\omega$。对一个没有任何下游任务的隔离任务，如果 $\widehat C_\omega<a$，模型只是在“不等待并支付 early”与“等待到 $a$ 并支付 waiting”之间比较。因此该局部比较可写成
+
+$$
+\min_{0\le w_\omega\le a-\widehat C_\omega}
 \left\{
-\eta w_\omega
-+\alpha(a-C_\omega)^+
-+\beta(C_\omega-b)^+
+\eta w_\omega+
+\alpha(a-\widehat C_\omega-w_\omega)
 \right\}
-=\bar\alpha(a-\widehat C_\omega)^+
-+\beta(\widehat C_\omega-b)^+,
+=\min\{\alpha,\eta\}(a-\widehat C_\omega).
 $$
 
-其中
+这段推导的作用仅是解释等待与 earliness 之间的替代关系，不用于化简完整模型。完整机器序列中，等待当前任务还会推迟后续任务，其真实边际代价等于直接 waiting cost 加上下游 tardiness 等传播成本，不能只比较 $\eta$ 与 $\alpha$，也不能在完整 SAA 中把 $\alpha$ 统一替换成 $\min\{\alpha,\eta\}$。因此 $\eta\ge\alpha$ 不是必须满足的建模条件；$\eta$ 应按主动 idle 的实际业务成本设定，完整模型仍同时保留 $\alpha E$ 和 $\eta w$。
+
+### 7.1 真正有用的两个成本占优关系
+
+下列关系按任务 $j$ 分别判断，不要求所有任务共享同一个 $\rho/\lambda$。
+
+第一，给定实际完成时间向量，若
 
 $$
-\bar\alpha=\min\{\alpha,\eta\}.
+\rho_j\ge\lambda_j,
 $$
 
-“免费等待消除局部 earliness”只表示：当 $\eta=0$ 且 $\widehat C_\omega<a$ 时，隔离任务可以免费等待 $a-\widehat C_\omega$，于是实际完工时刻变成 $a$，该任务的 earliness 为 0。它不表示完整序列中的所有 early 都会消失，因为等待任务 $j$ 会推迟后续任务，可能制造 downstream tardiness 或 terminal overtime；此时即使等待本身免费，在总目标上也未必值得等待。
+则固定右端点 $b_j$ 时，提高左端点 $a_j$ 的直接成本变化为 $\rho_j-\lambda_j\ge0$，同时还不会减少 earliness。因此一定存在最优解令 $a_j$ 取允许下界；若下界为 0，则 $a_j=0$，位置成本项消失，剩余窗口成本等价为 $\lambda_jb_j$。这时可以说位置成本被宽度成本占优，该任务的左端点可以预处理固定。
 
-在隔离任务上，把局部等待优化掉以后，再优化窗口端点，目标为
+若 $\rho_j<\lambda_j$，则一般不能仅凭两者关系确定 $a_j$：提高 $a_j$ 会节省宽度成本，但可能增加 earliness，最终位置取决于完成时间分布和其他成本。只有在“点窗口允许且 early 已被免费等待完全消除”的局部模型中，才严格得到 $a_j=b_j$，即 due window 收缩为可决策 due date。
 
-$$
-G(a,b)=
-\rho a+\lambda(b-a)
-+\bar\alpha\sum_\omega p_\omega(a-\widehat C_\omega)^+
-+\beta\sum_\omega p_\omega(\widehat C_\omega-b)^+.
-$$
-
-忽略样本并列和端点边界，并假设 $\bar\alpha>0$，两个内部端点的一阶条件分别为
+第二，给定 $a_j$ 和实际完成时间向量，右移 $b_j$ 一单位需要支付 $\lambda_j$，而最多只能在所有场景都迟到时节省 $\beta_j$ 的期望 tardiness 成本。因此，若
 
 $$
-F_{\widehat C}(a)=q_a=\frac{\lambda-\rho}{\bar\alpha},
-\qquad
-F_{\widehat C}(b)=q_b=1-\frac{\lambda}{\beta}.
+\lambda_j>\beta_j,
 $$
 
-原因可以直接从边际成本看出。固定 $b$ 并把 $a$ 向右移动一单位，会增加 $\rho$ 的位置成本、节省 $\lambda$ 的宽度成本，并对所有落在 $a$ 左侧的场景增加 $\bar\alpha$ 的 early/waiting 成本。因此
+则扩大右端点严格不划算，最优解取最小可行宽度：点窗口允许时为 $b_j=a_j$，有最小宽度 $D_j^{\min}$ 时为 $b_j=a_j+D_j^{\min}$。若 $\lambda_j=\beta_j$，取最小宽度仍然最优，但可能存在平坦的并列最优区间；若 $\lambda_j<\beta_j$，是否扩宽取决于晚于当前 $b_j$ 的场景比例，不能仅由两个系数确定。
 
-$$
-\frac{\partial G}{\partial a}
-=\rho-\lambda+\bar\alpha F_{\widehat C}(a).
-$$
-
-固定 $a$ 并把 $b$ 向右移动一单位，会增加 $\lambda$ 的宽度成本，同时只对当前晚于 $b$ 的场景节省 tardiness，因此
-
-$$
-\frac{\partial G}{\partial b}
-=\lambda-\beta\bigl[1-F_{\widehat C}(b)\bigr].
-$$
-
-两个不同的内部端点要求 $0<q_a<q_b<1$。整理以后得到
-
-$$
-0<\lambda<\beta,
-\qquad
-\max\left\{0,\lambda-\bar\alpha
-\left(1-\frac{\lambda}{\beta}\right)\right\}
-<\rho<\lambda.
-$$
-
-这组条件的含义是：
-
-1. $\rho<\lambda$ 并不表示位置成本无效。固定 $b$ 时，模型愿意支付 $\rho$ 把 $a$ 向右移动，以节省更高的宽度成本 $\lambda$；但把整个窗口 $a,b$ 同时向右移动一单位时，仍需支付 $\rho$，所以窗口位置并不免费。
-2. $\rho$ 太小时，节省宽度成本的动力过强，$q_a$ 上升；当 $q_a\ge q_b$ 时，左端点追上右端点，受约束的最优窗口收缩成 $a=b$。
-3. $\rho\ge\lambda$ 时，单独提高 $a$ 连直接成本都不能节省，左端点因而落在允许的下界，通常为 0。
-4. $\lambda\ge\beta$ 时，扩宽一单位的确定成本不低于它最多能够节省的一单位期望 tardiness 成本，右端点不会为了减少 tardiness 而继续向右扩张。
-
-当等待免费时 $\eta=0$，于是 $\bar\alpha=0$，不能把 0 直接代入 $q_a$，因为左端点的一阶分位条件已经不存在。此时必须回到第 6.1 节直接比较 $\rho a+\lambda(b-a)$：若 $\rho<\lambda$，严格得到 $a=b$，即 due window 退化成一个可决策 due date；若 $\rho>\lambda$，严格得到 $a=0$，即窗口变成从时间原点开始的单侧 deadline；若两者相等，固定 $b$ 时所有 $a\in[0,b]$ 同价。换言之，隔离任务在免费等待下通常只保留一个真正有效的端点，而不会稳定地产生 $0<a<b$ 的双端点窗口。
-
-若研究希望 early 不被便宜等待系统性替换，主参数档位应包含 $\eta\ge\alpha$。这句话仍只是局部机制判断：$\eta\ge\alpha$ 意味着仅为了消除本任务 early 而等待不再更便宜，并不保证完整序列一定出现正 earliness，也不排除等待因改善其他任务而发生。
-
-最后仍要区分“避免结构性消失”和“保证每个算例都有正 early、正 tardy”。任何一组成本系数都不能保证后者；若场景完成时刻本来非常集中，或窗口成本相对很低，最优解中 ET 为 0 可能是正常的成本权衡。当前需要排除的是由免费自由度造成的系统性零值。
+这两个占优关系有有限但明确的求解价值：$\rho_j\ge\lambda_j$ 时可固定左端点，$\lambda_j>\beta_j$ 时可固定最小宽度。除此之外，分位数区间主要用于解释最优窗口形态和检查结果，不会把当前含场景等待传播的联合 SAA 简化成确定性调度问题。
 
 ## 8. 三类候选设定是否合适
 
@@ -322,7 +285,7 @@ $$
 
 这一设定有明确文献基础，也足以替代 TWA 中的 overtime。$\rho_j>0$ 控制窗口整体后移，$\lambda_j>0$ 控制窗口扩张，所以不会出现“零宽点窗口无限后移且 ET 全为 0”的免费构造。机器没有班次语义时，这是比人工 overtime 更自然的承诺报价模型：承诺越晚，位置成本越高；承诺越宽，精度成本越高。
 
-如果等待免费，该模型仍可能使 earliness 很少，并按照 $\rho_j$ 与 $\lambda_j$ 的相对大小形成点窗口或下界窗口。它可以作为免费等待基准，但不适合用来保证丰富的双侧 ET。若等待付费，尤其令 $\eta_j$ 不低于 $\alpha_j$ 的同量级，位置、宽度、early、tardy 与场景 timing 都更可能同时进入权衡。
+如果等待免费，该模型仍可能使 earliness 很少，并按照每个任务自身的 $\rho_j$ 与 $\lambda_j$ 关系形成点窗口或下界窗口。若等待付费，则直接 waiting cost 与下游传播共同决定是否等待；$\eta_j$ 应按主动 idle 的业务代价设定，而不是为了制造正 earliness 人为要求它大于 $\alpha_j$。
 
 ### 8.2 真实范围 + 宽度控制
 
@@ -334,7 +297,7 @@ $$
 
 这一设定在机器调度中也是成立的，但有两个前提。第一，宽度仍必须受控，否则模型可取巨大窗口，ET 和等待同时为 0。第二，首任务开始必须固定在最早可行时刻，或者 initial idle 也作为主动 waiting 计价；否则付费等待作为唯一位置锚会被一个免费的机器级平移量削弱。
 
-在这些前提下，窗口后移会迫使较快场景支付等待，$\eta_j>0$ 因而可以单独提供位置斜率。该模型的经济含义是：不直接惩罚承诺晚，而惩罚为了履行统一承诺所浪费的生产能力。它是一个合理的候选主模型。不过，若 $\eta_j<\alpha_j$，显式 earliness 会大量转化成 waiting；若论文需要同时研究 observed earliness 与 observed tardiness，参数应至少包含 $\eta_j\ge\alpha_j$ 的档位。
+在这些前提下，窗口后移会迫使较快场景支付等待，$\eta_j>0$ 因而可以单独提供位置斜率。该模型的经济含义是：不直接惩罚承诺晚，而惩罚为了履行统一承诺所浪费的生产能力。$\eta_j$ 较低时，模型更倾向于用 waiting 代替 observed earliness；这是一种正常的最优决策结果，不应仅为保留正 earliness 而强行改变成本关系。
 
 ### 8.4 overtime + 宽度成本
 
@@ -467,19 +430,9 @@ $$
 \bigl[\alpha_jE_{j\omega}+\beta_jT_{j\omega}+\eta_jI_{j\omega}\bigr],
 $$
 
-其中 $\rho_j,\lambda_j,\eta_j>0$，不设 overtime；所有任务间主动等待都允许，每台启用机器的首任务固定在最早可行时刻。这样 width cost 控制扩张，position cost 和 paid waiting 共同控制后移，initial idle 不必人为收费。
+其中 $\rho_j,\lambda_j>0$，$\eta_j\ge0$，不设 overtime；所有任务间主动等待都允许，每台启用机器的首任务固定在最早可行时刻。这样 width cost 控制扩张，position cost 控制窗口整体后移；$\eta_j=0$ 和 $\eta_j>0$ 分别形成免费等待与付费等待版本，不再把 $\eta_j\ge\alpha_j$ 作为主模型必须满足的条件。
 
-参数不宜只按绝对数值随意设置。可以先选择希望窗口端点对应的局部分位水平 $q_a<q_b$，再用
-
-$$
-\lambda_j=\beta_j(1-q_b),
-\qquad
-\rho_j=\lambda_j-\bar\alpha_jq_a,
-\qquad
-\bar\alpha_j=\min\{\alpha_j,\eta_j\},
-$$
-
-反推位置和宽度系数，并检查 $\rho_j>0$。这只是初始标定，因为完整序列中的传播会改变最终端点，但它能避免一开始就落入明显的边界支配区间。若希望 observed earliness 不被 waiting 系统性替代，主档位应包含 $\eta_j\ge\alpha_j$；$0<\eta_j<\alpha_j$ 可作为“以付费等待替代库存/早到”的机制档位，$\eta_j=0$ 只作为免费等待退化基准。
+$\rho_j$ 与 $\lambda_j$ 不需要在任务间保持相同，也不需要统一规定谁更大。若采用异质客户或任务，建议直接使用任务特定成本，并在求解前按第 7.1 节检查两个明确的占优区间：$\rho_j\ge\lambda_j$ 时固定左端点下界，$\lambda_j>\beta_j$ 时固定最小宽度。其余任务保留完整窗口变量交给联合 SAA 求解，不再根据局部分位数反推全部成本系数，也没有必要专门围绕一个全局 $\rho/\lambda$ 比值组织实验。
 
 第二种有意义的对照模型是删除位置成本，改用有业务来源的 $L_j\le a_j\le b_j\le U_j$，同时保留 width cost 与 waiting cost。它比较“价格锚”和“硬承诺域”两种机制。若没有可信范围，不建议把它作为主模型。
 
@@ -493,7 +446,7 @@ TWA 式 overtime 版本可以作为扩展，但只有在机器确实存在 shift
 
 ### 13.1 论文怎样解释窗口宽度成本
 
-几篇论文对 width cost 的共同解释不是“窗口本身消耗机器时间”，而是把窗口宽度视为承诺质量或客户服务水平。较宽的窗口给企业、车辆或生产系统更大的执行灵活性，却把更多时间不确定性转移给客户；较窄窗口对客户更有吸引力、便于安排后续活动，却使企业更难履约，因而增加 ET、等待、路线或 overtime 压力。
+几篇论文对 width cost 的共同解释不是“窗口本身消耗机器时间”，而是把窗口宽度视为承诺质量或客户服务水平。可以直接概括为：客户偏好较窄窗口，因为承诺更精确、便于安排后续活动；物流服务商偏好较宽窗口，因为宽窗口带来更大的执行灵活性。对应到制造场景，小窗口对客户更有吸引力，但会减少制造商的生产灵活性；大窗口更容易满足，却可能因为承诺过于模糊而导致客户流失。
 
 Yue and Zhou (2021) 在引言中明确说明，不同窗口宽度意味着不同的运营灵活性和成本；小窗口有利于吸引客户但降低制造商的生产灵活性，大窗口更容易满足却可能造成客户流失。因此其 $\delta_j(d_j-e_j)$ 应理解为“提供模糊交付承诺的客户侧损失或商业惩罚”，而不是车间真的为每一单位窗口宽度发生一笔直接现金支出。
 
@@ -505,17 +458,15 @@ Cavaliere et al. (2026) 的解释最直接：客户通常偏好较小窗口，�
 
 代表性论文并没有给出“位置成本一般应高于宽度成本”或相反的统一经验规律，实际设置如下。
 
-| 文献 | 位置与宽度符号 | 理论中的大小关系 | 算例设置 |
+| 文献 | 系数层级与位置/宽度符号 | 理论中的大小关系 | 算例设置 |
 |---|---|---|---|
-| Yue and Zhou (2021), EJOR | $\gamma_j e_j+\delta_j(d_j-e_j)$ | 按 $\gamma_j-\delta_j$ 的正负分别讨论；Case 7 在 $\gamma_j\ge\delta_j$ 且 $\delta_j<\beta_j$ 时得到 $e_j^*=0$ | 第 5.1 节将 $\alpha_j,\beta_j,\gamma_j,\delta_j$ 全部独立生成于 $U[1,10]$，没有规定位置与宽度谁更大 |
-| Yue and Wan (2016), JORS | $\gamma d'_j+\delta D_j$ | Lemma 9 明确按 $\gamma\ge\delta$ 与 $\gamma<\delta$ 分情况；给定完工时刻后，目标可退化成 $\min\{\beta,\gamma,\delta\}C_j$ 的不同分支 | 论文以结构推导和小例子为主，没有提供可作为经验标定的统一随机系数比 |
-| Zhang et al. (2024), JCO | $\gamma d_j^1+\eta D_j$ | 推导中直接出现 $\min\{\gamma,\eta\}$，与免费等待投影后的替代结构一致 | 第 6 节令 $\beta,\gamma,\eta\in U[1,10]$，并为测试困难分支附加 $\min\{\gamma,\eta\}>\beta$；仍未规定 $\gamma$ 与 $\eta$ 谁更大 |
-| Çelik et al. (2025), Transportation Science | 没有任务位置成本；$\sigma$ 为宽度成本 | 位置由固定出发时刻和 terminal overtime 间接锚定 | $\sigma=1$、ET 权重 $\phi=3$、overtime 权重 $\psi=4$ |
-| Cavaliere et al. (2026), EJOR | 没有任务位置成本；$\alpha$ 为宽度成本 | 位置由 $w_{0\omega}=0$、shift 时限 $T$ 和 overtime 间接锚定 | 默认 $\alpha=1,\beta=10,\delta=10$，分别对应宽度、overtime、ET；灵敏度取 $\alpha\in\{0.5,1,2\}$，$\beta,\delta\in\{5,10,20\}$ |
+| Yue and Zhou (2021), EJOR | 任务特定；$\gamma_j e_j+\delta_j(d_j-e_j)$ | 按每个任务的 $\gamma_j-\delta_j$ 分情况；Case 7 在 $\gamma_j\ge\delta_j$ 且 $\delta_j<\beta_j$ 时得到 $e_j^*=0$ | 第 5.1 节将 $\alpha_j,\beta_j,\gamma_j,\delta_j$ 对每个任务独立生成于 $U[1,10]$，不存在统一的全局比值 |
+| Yue and Wan (2016), JORS | 实例级公共系数；$\gamma d'_j+\delta D_j$ | Lemma 9 按 $\gamma\ge\delta$ 与 $\gamma<\delta$ 分情况；给定完工时刻后，目标可退化成 $\min\{\beta,\gamma,\delta\}C_j$ 的不同分支 | 论文以结构推导和小例子为主，没有提供可作为经验标定的统一随机系数比 |
+| Zhang et al. (2024), JCO | 实例级公共系数；$\gamma d_j^1+\eta D_j$ | 推导中直接出现 $\min\{\gamma,\eta\}$，与免费等待投影后的替代结构一致 | 第 6 节令 $\beta,\gamma,\eta\in U[1,10]$，并为测试困难分支附加 $\min\{\gamma,\eta\}>\beta$ |
+| Çelik et al. (2025), Transportation Science | 全局权重；没有客户位置成本，$\sigma$ 为宽度权重 | 位置由固定出发时刻和 terminal overtime 间接锚定 | $\sigma=1$、ET 权重 $\phi=3$、overtime 权重 $\psi=4$ |
+| Cavaliere et al. (2026), EJOR | 全局权重；没有客户位置成本，$\alpha$ 为宽度权重 | 位置由 $w_{0\omega}=0$、shift 时限 $T$ 和 overtime 间接锚定 | 默认 $\alpha=1,\beta=10,\delta=10$，分别对应宽度、overtime、ET；灵敏度取 $\alpha\in\{0.5,1,2\}$，$\beta,\delta\in\{5,10,20\}$ |
 
-这组证据意味着，当前模型不能从文献中直接抄一个“$\rho$ 必须大于 $\lambda$”的先验。Yue and Zhou (2021) 的同分布独立生成实际上有意覆盖两侧结构；2025/2026 TWA 更不能用于比较 $\rho/\lambda$，因为它们根本没有任务位置系数，而是使用全局 overtime 锚。
-
-对当前算例，更干净的实验设计是把“窗口形态”和“承诺时间价格”拆开。先固定 $\kappa=\min\{\rho,\lambda\}$，比较 $(\rho,\lambda)=(2\kappa,\kappa)$、$(\kappa,2\kappa)$，分别观察免费等待下的 $[0,b]$ 与 $[b,b]$ 倾向；$\rho=\lambda$ 只作为左端点不唯一的边界诊断。然后固定 $\rho/\lambda$，再改变 $\kappa/\beta$，考察右端点对应的目标分位水平 $1-\kappa/\beta$。这样不会把“形态变化”和“整体时间价格变化”混在同一组参数里。付费等待主模型则仍应按第 6、7 节的双端点条件标定，不能只看 $\rho$ 与 $\lambda$ 的大小。
+这组证据意味着，当前模型不能从文献中直接抄一个全局统一的“$\rho$ 必须大于 $\lambda$”先验。若采用任务特定系数，$\rho_j$ 与 $\lambda_j$ 的关系只对任务 $j$ 自身成立。它的主要用途是识别占优变量：$\rho_j\ge\lambda_j$ 时可固定左端点，$\lambda_j>\beta_j$ 时可固定最小宽度；其余情况下只是窗口形态趋势，对当前联合 SAA 和 Benders 分解没有直接简化作用。因此不再建议围绕统一的 $\rho/\lambda$ 或分位水平单独设计一整套参数实验。
 
 两篇 TWA 则采用另一条路线：都使用 width cost 和 terminal overtime，没有任务特定位置成本，也没有 $L_j\le a_j\le b_j\le U_j$ 形式的外生位置范围。它们说明“width control + terminal anchor”是一种完整组合，但并不说明机器调度必须采用 overtime。
 

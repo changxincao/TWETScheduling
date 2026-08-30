@@ -1984,15 +1984,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private boolean prepareMidpointWithinDssr(LP lp) {
-		double fixedAfterFirstTmid = Double.parseDouble(System.getProperty(
-				"twet.bpc.midpointFixedAfterFirstTmid", "NaN"));
-		if (ngDssrRound > 1 && Double.isFinite(fixedAfterFirstTmid)) {
-			// 2026-08-30: 仅用于测试首轮后固定中点，缺省关闭；它不是逐轮工作曲线oracle。
-			ngDssrProbeSeedSource = "fixedAfterFirst";
-			useDssrAdaptiveMidpointWithoutProbe(fixedAfterFirstTmid);
-			midpointProbeSummary = "skipped:fixedAfterFirst,selected=" + tMid;
-			return true;
-		}
 		if (!config.bidirectionalMidpointProbe || !config.bidirectionalMidpointProbeReuseWithinDssr
 				|| ngDssrRound <= 1 || !Double.isFinite(ngDssrReusableTmid)) {
 			return false;

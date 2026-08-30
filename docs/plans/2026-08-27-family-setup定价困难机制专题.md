@@ -1282,7 +1282,7 @@ t^{\mathrm{WA}}=\frac{1}{2|J|}\sum_{j\in J}
 
 这不是oracle，更不是已经完成的在线算法。真正的逐轮oracle必须在每一个exact调用的每一个DSSR轮固定当前dual和ng-memory，对多个候选分别完成双向labeling，再选择该轮完整`forward+backward`最小的点继续；本轮没有这样做。固定`Tmid`的一次完整labeling只观察左侧forward和右侧backward，不能免费得到整个时间域上两侧的完整工作曲线；本轮的`500`只是在第1、2轮离线扫描后选出的固定值。若要落地主线，需要额外构造可在线获得的确定性代理，例如按时间层累计extension、constructed或kept工作量，再用极少量局部候选校准。当前浅probe本身也经常把后续点移动到`480--520`，新方法必须证明其优势来自减少被丢弃候选和降低墙钟噪声，而不只是重新发现同一区间。
 
-本轮只增加默认关闭的诊断入口：可指定完整曲线对应的DSSR轮，并可在第2轮以后强制使用固定点。未设置JVM属性时不进入这些分支，正式profile、默认中点、probe、DSSR更新、返回列和certificate流程均不变。当前证据只来自一个n30 family实例，不能据此更换正式配置；它支持继续研究低成本的轮间工作量预测，但目前没有测试该预测策略本身。
+本轮当时增加了默认关闭的固定点诊断入口。后续复核确认它不是所需算法，并已删除`twet.bpc.midpointFixedAfterFirstTmid`及对应控制分支；上述数据只保留为历史负面诊断，不能再通过当前主线运行。完整曲线的离线诊断仍保留，正式profile、默认中点、probe、DSSR更新、返回列和certificate流程均未因该固定点实验改变。
 
 ### 32.40 上一完整轮时间分层工作量直接选点的实际验证
 
@@ -1302,4 +1302,21 @@ t^{\mathrm{WA}}=\frac{1}{2|J|}\sum_{j\in J}
 
 失败原因在于一轮完整双向labeling并没有观测整个时间域上的两条完整工作曲线。旧分割点`T`只给出`T`左侧的forward工作和右侧的backward工作：若下一轮向左移动，新增区间`[T_{new},T]`所需的backward工作上一轮根本没有计算；若向右移动，新增区间`[T,T_{new}]`所需的forward工作同样缺失。直接拼接forward前缀与backward后缀会系统性把“新扩大的那一侧”估计为零或过小，于是从一端过冲到另一端。每轮ng-memory还会变化，使上一轮代理进一步失真，但即使memory不变，上述未观测区间已经足以使原始策略不成立。
 
-因此，原先“后续轮用上一完整轮的时间分层工作量曲线直接选点”这一未经限定的提议已被否定。若加入移动限幅、局部校准或额外候选完整展开，得到的是另一种带probe或阻尼的策略，不能再声称由上一轮曲线直接决定。本轮临时算法和测试代码均已撤回，正式profile及默认求解流程没有改变；失败日志保留在`test-results/bpc/tmid-prev-workcurve-n030-set02-family-rep1b-20260830/`。
+因此，原先“后续轮用上一完整轮的时间分层工作量曲线直接选点”这一未经限定的提议已被否定。若加入移动限幅、局部校准或额外候选完整展开，得到的是另一种带probe或阻尼的策略，不能再声称由上一轮曲线直接决定。本轮临时算法和测试代码均已撤回，随后固定500的诊断分支也已删除；正式profile及默认求解流程没有改变。失败日志保留在`test-results/bpc/tmid-prev-workcurve-n030-set02-family-rep1b-20260830/`。
+
+### 32.41 default与windowAverage起点的正确probe对照
+
+本轮按正确口径只比较两种策略：`default起点 + probe`与`windowAverage起点 + probe`。两者都设置`bidirectionalMidpointProbe=true`和`bidirectionalMidpointProbeAfterFirstDssrRound=true`，首轮probe接受比为1.5，后续DSSR轮接受比、移动步长和adaptive触发阈值分别为4、5%和4。除每次exact第一轮的reference分别为有效时间域中点`911.5`和窗口端点平均`936.067`外，其余配置完全相同。实例仍为`n030-set02-family-base-zero-m2`的root-only诊断，关闭strong branching，仅用于隔离pricing差异。
+
+三组重新编译后的串行配对结果如下，运行顺序交替。六条运行均为`ROOT_PROCESSED`、`valid=true`，并得到`LB=UB=37948`。
+
+| 起点 | 三次总时间/s | 总时均值/中位数 | 三次exact时间/s | exact均值/中位数 | exact调用 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| default | `11.499/19.105/34.805` | `21.803/19.105` | `7.673/14.025/26.313` | `16.004/14.025` | `6/7/9` |
+| windowAverage | `11.912/20.067/18.118` | `16.699/18.118` | `8.188/15.697/10.134` | `11.340/10.134` | `7/9/7` |
+
+新三组中前两组均是default略快，差约3.6%和5.0%；第三组windowAverage快47.9%，因为default进入了9次exact的长CG轨迹。因此windowAverage较低的均值主要由一次default长尾驱动，不能解释成稳定的单轮labeling提速。若把第32.38节已有的两组有效probe运行合并，五次总样本中default/windowAverage的总时均值为`20.10/15.49s`、中位数为`19.10/13.98s`，exact均值为`14.64/10.47s`，两者exact调用均值都为7.4。合并结果继续给windowAverage正信号，但仍只来自一个实例，且轨迹方差较大，不足以更换正式默认值。
+
+日志还说明probe在两种起点上都没有移动首轮reference。三次default第一轮均为`Tmid=911.5`，保留forward/backward labels为`4512/59`；三次windowAverage均为`936.067`，对应`4516/38`。每次首轮都只测试一个probe候选并原地接受，随后完整F/B耗时比仍分别约为`16--17`和`19--22`。第2轮完整反馈才把default调整到`522--525`、把windowAverage调整到`511--517`，后续中点已经接近。由此可见，这个A/B主要改变首轮很小的一段时间划分和首批返回列，根时间差由这些列引起的后续RMP dual与CG轨迹放大，而不是windowAverage让probe持续找到明显更轻的搜索域。
+
+“关闭probe”必须区分两个配置。若设置`bidirectionalMidpointProbe=false`，当前代码会在每个DSSR轮重新计算配置的静态起点，完全不执行浅探，也不会读取上一完整轮反馈；这不是“只用迭代”。若保持总开关为true、只设置`bidirectionalMidpointProbeAfterFirstDssrRound=false`，则第一轮仍从default或windowAverage执行probe，第2轮以后使用上一完整轮F/B耗时生成adaptive Tmid并直接正式labeling，不再追加浅层probe；这才是此前所说的adaptive-direct或“只用迭代”。正式profile当前仍是两个开关都为true，即首轮和后续轮均允许probe。

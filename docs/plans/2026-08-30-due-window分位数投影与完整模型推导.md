@@ -1,77 +1,59 @@
-# 随机 due-window 并行机调度：分位数投影与完整模型推导
+# 随机 due-window 并行机调度：分位数投影与完整模型
 
-本文只处理当前主模型：任务特定 due window、场景自适应等待、线性 waiting cost、线性 earliness/tardiness、窗口位置成本和窗口宽度成本。等待始终允许，等待单价记为 $\eta$；免费等待就是令 $\eta=0$。这里不再先消去单个任务的等待，也不使用 $\min\{\alpha,\eta\}$ 的隔离任务公式。
+本文只推导当前主模型：任务特定 due window、场景自适应等待、线性 waiting cost 和线性 earliness/tardiness。等待始终允许；令 \(\eta_j=0\) 即得到免费等待版本。
 
-整个推导按以下顺序进行：先写含 due-window 变量的完整 SAA 模型；固定实际完成时间后推出窗口端点的经验分位数；再把窗口变量从完整模型中投影掉；最后说明投影后的分段线性函数怎样精确求解。
+## 1. 符号与假设
 
-## 1. 原始完整模型
+| 符号 | 定义 |
+|---|---|
+| \(J\) | 任务集合，索引为 \(j\) |
+| \(\Omega\) | SAA 场景集合，索引为 \(\omega\) |
+| \(p_\omega\) | 场景概率，\(\sum_{\omega\in\Omega}p_\omega=1\)；等概率 SAA 中 \(p_\omega=1/|\Omega|\) |
+| \(x\) | 一阶段机器分配与加工顺序变量 |
+| \(\mathcal T(x)\) | 给定排程 \(x\) 后，所有场景的加工、前后继和等待传播可行域 |
+| \(a_j\) | 任务 \(j\) 的窗口起点 |
+| \(\ell_j\) | 窗口宽度，因而 \(b_j=a_j+\ell_j\) |
+| \(w_{j\omega}\) | 场景 \(\omega\) 中任务 \(j\) 前的主动等待 |
+| \(C_{j\omega}\) | 已包含全部等待后的实际完成时间 |
+| \(e_{j\omega},t_{j\omega}\) | 相对窗口的 earliness 和 tardiness |
+| \(\rho_j,\lambda_j\) | 窗口位置和宽度的单位成本 |
+| \(\alpha_j,\beta_j,\eta_j\) | earliness、tardiness 和 waiting 的单位成本 |
+| \(\mathbf C_j\) | 任务 \(j\) 的场景完成时间向量 \((C_{j\omega}:\omega\in\Omega)\) |
 
-任务集合为 $J$，SAA 场景集合为 $\Omega$，场景概率为 $p_\omega$，满足 $\sum_\omega p_\omega=1$。等概率 SAA 中 $p_\omega=1/|\Omega|$。
+若 \(\eta_j>0\)，所有能推迟时间线的 initial idle 和任务间 idle 都必须计入 \(w\)；timing 约束不能另留未计费的自由 slack。并行机、序列相关换型时间或强位置 formulation 只改变 \(\mathcal T(x)\)，不改变下面的窗口投影。
 
-对任务 $j$，将 due window 写成
+## 2. 含 due-window 的完整 SAA 模型
 
-$$
-[a_j,b_j]=[a_j,a_j+\ell_j],
-$$
+原始模型为
 
-其中 $a_j\ge0$ 是窗口起点，$\ell_j\ge0$ 是窗口宽度。使用宽度变量 $\ell_j$ 只是为了后续对偶推导更清楚，与直接使用 $a_j,b_j$ 完全等价。
-
-变量和成本含义如下：$x$ 表示机器分配与加工顺序；$C_{j\omega}$ 是已经包含场景等待后的实际完成时间；$W_{j\omega}\ge0$ 表示任务前的主动机器等待或相应 idle；$E_{j\omega},T_{j\omega}\ge0$ 分别表示相对 due window 的早到和晚到。窗口位置、宽度、早到、晚到和等待的单位成本分别记为 $\rho_j,\lambda_j,\alpha_j,\beta_j,\eta_j$。
-
-若 $\eta_j>0$，所有能够把时间线向后移动的 initial idle 和任务间 idle 都必须由 $W$ 记录，timing 约束中不能另外留下未计费的自由 slack；否则模型仍可通过未计费 slack 绕开 waiting cost。下文默认 $\mathcal T$ 已满足这一计费闭合条件。
-
-用 $\mathcal T(x)$ 表示由机器分配、顺序、场景加工时间和等待传播构成的 timing 可行域。它包含类似“后继任务开始时间等于前驱完成时间加主动等待”和“完成时间等于开始时间加场景加工时间”的约束。并行机、序列相关换型时间和不同的强位置 formulation 只会改变 $\mathcal T(x)$ 的具体写法，不改变下面的窗口投影。
-
-完整确定性等价模型为
-
-$$
+\[
 \begin{aligned}
 (P_0)\qquad
-\min_{x,a,\ell,C,W,E,T}\quad
+\min\quad
 &c^{\mathrm{sch}}(x)
-+\sum_{j\in J}(\rho_ja_j+\lambda_j\ell_j)\\
++\sum_{j\in J}\bigl(\rho_ja_j+\lambda_j\ell_j\bigr)\\
 &+\sum_{\omega\in\Omega}p_\omega
 \sum_{j\in J}
-(\eta_jW_{j\omega}+\alpha_jE_{j\omega}+\beta_jT_{j\omega})\\
+\bigl(\eta_jw_{j\omega}+\alpha_je_{j\omega}+\beta_jt_{j\omega}\bigr)\\
 \text{s.t.}\quad
-&(x,C,W)\in\mathcal T,\\
-&E_{j\omega}\ge a_j-C_{j\omega}, &&j\in J,\omega\in\Omega,\\
-&T_{j\omega}\ge C_{j\omega}-a_j-\ell_j, &&j\in J,\omega\in\Omega,\\
-&a_j,\ell_j,E_{j\omega},T_{j\omega},W_{j\omega}\ge0.
+&(x,C,w)\in\mathcal T,\\
+&e_{j\omega}\ge a_j-C_{j\omega},
+&&j\in J,\ \omega\in\Omega,\\
+&t_{j\omega}\ge C_{j\omega}-a_j-\ell_j,
+&&j\in J,\ \omega\in\Omega,\\
+&a_j,\ell_j,e_{j\omega},t_{j\omega},w_{j\omega}\ge0.
 \end{aligned}
-$$
+\]
 
-其中 $c^{\mathrm{sch}}(x)$ 可以是排程、换型或路径成本。若当前研究不需要某一项，只需把相应系数设为 0；特别地，免费等待就是 $\eta_j=0$。只要 $x$ 固定，$(P_0)$ 的其余部分是连续 LP。
+\(c^{\mathrm{sch}}(x)\) 表示排程、换型或路径成本。模型 \((P_0)\) 是 MILP；固定离散排程 \(x\) 后，其余部分是连续 LP。免费等待只需设置 \(\eta_j=0\)，其余模型不变。
 
-## 2. 固定实际完成时间后的窗口子问题
+## 3. 固定实际完成时间后，推出窗口分位数
 
-现在固定一个可行的 $(x,C,W)$。此时 waiting cost 已经是常数，due-window 变量只出现在位置、宽度和 ET 成本中，而且不同任务之间完全分离。对任意任务 $j$，窗口子问题为
+固定一个可行的 \((x,C,w)\)。waiting cost 此时为常数，不参与窗口端点的优化。任务 \(j\) 的窗口子问题为
 
-$$
-\begin{aligned}
+\[
 \Phi_j(\mathbf C_j)=
-\min_{a_j,\ell_j,E_j,T_j}\quad
-&\rho_ja_j+\lambda_j\ell_j
-+\sum_{\omega\in\Omega}p_\omega
-(\alpha_jE_{j\omega}+\beta_jT_{j\omega})\\
-\text{s.t.}\quad
-&E_{j\omega}\ge a_j-C_{j\omega},\\
-&T_{j\omega}\ge C_{j\omega}-a_j-\ell_j,\\
-&a_j,\ell_j,E_{j\omega},T_{j\omega}\ge0,
-\end{aligned}
-$$
-
-其中
-
-$$
-\mathbf C_j=(C_{j\omega}:\omega\in\Omega)
-$$
-
-是任务 $j$ 的实际场景完成时间向量。由于 $E,T$ 的成本非负，它们在最优解中自动取最小可行值。因此令 $b_j=a_j+\ell_j$，可将窗口子问题写成
-
-$$
-\Phi_j(\mathbf C_j)
-=\min_{0\le a_j\le b_j}
+\min_{0\le a_j\le b_j}
 \left\{
 \rho_ja_j+\lambda_j(b_j-a_j)
 +\sum_{\omega\in\Omega}p_\omega
@@ -80,293 +62,253 @@ $$
 +\beta_j(C_{j\omega}-b_j)^+
 \right]
 \right\}.
-$$
+\tag{1}
+\]
 
-这一步只固定了实际完成时间，没有固定 earliest completion。等待已经通过 $C_{j\omega}$ 进入窗口子问题。
+这里 \(\Phi_j(\mathbf C_j)\) 是给定实际完成时间向量后，任务 \(j\) 的最小窗口与 ET 成本。定义加权经验分布函数
 
-## 3. 左、右端点为什么是经验分位数
-
-定义任务 $j$ 的加权经验分布函数
-
-$$
+\[
 \widehat F_j(z)=
 \sum_{\omega\in\Omega}p_\omega
 \mathbf 1\{C_{j\omega}\le z\},
-$$
+\]
 
-并用 $\widehat F_j(z^-)$ 表示严格小于 $z$ 的场景概率。
+并以 \(\widehat F_j(z^-)\) 表示严格小于 \(z\) 的场景概率。
 
 ### 3.1 左端点
 
-暂时假设 $a_j>0$ 且 $a_j<b_j$，即左端点下界和端点耦合约束均不活跃。保持 $b_j$ 不变时，与 $a_j$ 有关的项为
+在 \(a_j>0\) 且 \(a_j<b_j\) 的内部情形下，与 \(a_j\) 有关的部分是
 
-$$
-(\rho_j-\lambda_j)a_j
-+\alpha_j\sum_\omega p_\omega(a_j-C_{j\omega})^+.
-$$
+\[
+(\rho_j-\lambda_j)a_j+
+\alpha_j\sum_\omega p_\omega(a_j-C_{j\omega})^+.
+\]
 
-由于正部函数在 $a_j=C_{j\omega}$ 处不可微，其次梯度区间为
+其次梯度最优条件为
 
-$$
-\partial_{a_j}Phi_j
-=
-\rho_j-\lambda_j
-+\alpha_j
-[\widehat F_j(a_j^-),\widehat F_j(a_j)].
-$$
+\[
+0\in
+\rho_j-\lambda_j+
+\alpha_j[\widehat F_j(a_j^-),\widehat F_j(a_j)].
+\]
 
-最优条件 $0\in\partial_{a_j}\Phi_j$ 等价于
+因此
 
-$$
+\[
 \widehat F_j(a_j^-)
 \le
 \frac{\lambda_j-\rho_j}{\alpha_j}
 \le
-\widehat F_j(a_j).
-$$
+\widehat F_j(a_j),
+\]
 
-因此，内部最优左端点是加权经验分位数
+即
 
-$$
-a_j^*\in
-Q_j\!\left(\tau_j^a\right),
-\qquad
-\tau_j^a=\frac{\lambda_j-\rho_j}{\alpha_j}.
-$$
+\[
+\boxed{
+a_j^*\in Q_j(\tau_j^a),\qquad
+\tau_j^a=\frac{\lambda_j-\rho_j}{\alpha_j}
+}.
+\tag{2}
+\]
 
-这个比例的含义直接来自边际成本：把左端点向右移动会减少窗口宽度成本 $\lambda_j$，但会增加位置成本 $\rho_j$，并使位于左端点之前的场景产生更多 earliness。经验分位数条件正是这三项边际成本平衡的结果。
+\(Q_j(\tau)\) 表示 \(\mathbf C_j\) 的加权经验 \(\tau\)-分位数集合。
 
 ### 3.2 右端点
 
-保持 $a_j$ 不变时，与 $b_j$ 有关的项为
+与 \(b_j\) 有关的部分是
 
-$$
-\lambda_jb_j
-+\beta_j\sum_\omega p_\omega(C_{j\omega}-b_j)^+.
-$$
+\[
+\lambda_jb_j+
+\beta_j\sum_\omega p_\omega(C_{j\omega}-b_j)^+.
+\]
 
-其次梯度最优条件可写为
+最优条件为
 
-$$
+\[
 \widehat F_j(b_j^-)
 \le
 1-\frac{\lambda_j}{\beta_j}
 \le
-\widehat F_j(b_j).
-$$
+\widehat F_j(b_j),
+\]
 
-因此，内部最优右端点是
+所以
 
-$$
-b_j^*\in
-Q_j\!\left(\tau_j^b\right),
-\qquad
-\tau_j^b=1-\frac{\lambda_j}{\beta_j}.
-$$
+\[
+\boxed{
+b_j^*\in Q_j(\tau_j^b),\qquad
+\tau_j^b=1-\frac{\lambda_j}{\beta_j}
+}.
+\tag{3}
+\]
 
-右端点的边际权衡是：右移 $b_j$ 会增加窗口宽度成本，但会减少位于右端点之后的场景 tardiness。
+### 3.3 端点碰撞与边界
 
-### 3.3 端点碰撞和边界
+若 \(0\le\tau_j^a\le\tau_j^b\le1\)，可分别使用式 (2)–(3)。若 \(\tau_j^a>\tau_j^b\)，约束 \(a_j\le b_j\) 活跃，窗口收缩为点 \(a_j=b_j=d_j\)，且
 
-上述两个分位数公式要求分位水平有效，并且左端点不超过右端点。如果
-
-$$
-\tau_j^a\le\tau_j^b,
-$$
-
-则可以分别选择相应的左、右分位数；等概率 SAA 中，它们就是排序后完成时间向量中的相应 order statistics。
-
-如果 $\tau_j^a>\tau_j^b$，两个独立端点的最优方向发生交叉，约束 $a_j\le b_j$ 将活跃，窗口收缩为点 $a_j=b_j=d_j$。此时宽度成本为 0，点窗口问题为
-
-$$
-\min_{d_j\ge0}
-\left\{
-\rho_jd_j
-+\sum_\omega p_\omega
-[\alpha_j(d_j-C_{j\omega})^+
-+\beta_j(C_{j\omega}-d_j)^+]
-\right\},
-$$
-
-其内部分位水平为
-
-$$
+\[
+\boxed{
 d_j^*\in
 Q_j\!\left(
 \frac{\beta_j-\rho_j}{\alpha_j+\beta_j}
-\right).
-$$
+\right)
+}.
+\tag{4}
+\]
 
-若某个分位水平不在 $[0,1]$ 内，或者存在外生边界 $L_j\le a_j\le b_j\le U_j$，最优端点落在相应边界或端点碰撞位置。此时不应强行套内部公式，直接求解上面的窗口 LP 即可。有并列完成时间时，最优分位数可能是区间，但最优值不受影响。
+若分位水平越界，或存在 \(L_j\le a_j\le b_j\le U_j\)，端点落在相应边界。样本并列时，分位数可能是一个区间；窗口 LP 仍给出唯一最优值。
 
-### 3.4 waiting cost 为什么没有出现在分位数比例里
+waiting cost \(\eta_jw_{j\omega}\) 没有出现在式 (2)–(4) 中，因为这些公式以实际 \(C_{j\omega}\) 为条件。系数 \(\eta_j\) 通过外层 timing 决定模型愿意支付多少等待来改变 \(C_{j\omega}\)；令 \(\eta_j=0\) 只会删除 waiting cost，不改变条件窗口子问题 (1)。
 
-推导分位数时固定的是**实际完成时间** $C_{j\omega}$ 和已经发生的等待 $W_{j\omega}$。因此 $\eta_jW_{j\omega}$ 对窗口子问题是常数，不进入关于 $a_j,b_j$ 的边际条件。
+## 4. 消去 due-window 后的整体模型
 
-这不表示 waiting cost 没有作用。它在完整模型的外层决定模型是否愿意通过等待改变 $C_{j\omega}$：$\eta_j>0$ 时，向后移动完成时间需要支付 waiting cost；$\eta_j=0$ 时，这一项直接消失。最终窗口仍然是**最优实际完成时间向量**的分位数，而实际完成时间向量会随 $\eta_j$ 改变。
+对固定 \((x,C,w)\)，各任务窗口相互独立，所以窗口与 ET 部分的最优值为 \(\sum_j\Phi_j(\mathbf C_j)\)。将其代回 \((P_0)\)，得到
 
-因此，当前完整模型中不需要把 early 系数改成 $\min\{\alpha_j,\eta_j\}$。那个式子来自“单独消去一个不影响后续任务的等待量”，不适用于机器 idle 会向后传播的完整序列。
-
-## 4. 消去 due-window 后，完整模型变成什么
-
-对固定 $(x,C,W)$，不同任务的窗口子问题彼此独立，因此
-
-$$
-\min_{a,\ell,E,T}
-\left\{
-\sum_j(\rho_ja_j+\lambda_j\ell_j)
-+\sum_{\omega,j}p_\omega
-(\alpha_jE_{j\omega}+\beta_jT_{j\omega})
-\right\}
-=
-\sum_j\Phi_j(\mathbf C_j).
-$$
-
-将这个最优值代回 $(P_0)$，得到只投影 due-window 变量后的等价模型
-
-$$
+\[
 \begin{aligned}
 (P_1)\qquad
-\min_{x,C,W}\quad
+\min_{x,C,w}\quad
 &c^{\mathrm{sch}}(x)
-+\sum_{\omega,j}p_\omega\eta_jW_{j\omega}
++\sum_{\omega,j}p_\omega\eta_jw_{j\omega}
 +\sum_j\Phi_j(\mathbf C_j)\\
 \text{s.t.}\quad
-&(x,C,W)\in\mathcal T.
+&(x,C,w)\in\mathcal T.
 \end{aligned}
-$$
+\tag{5}
+\]
 
-推导 $(P_1)$ 时先固定 $C,W$ 再最小化窗口，只是对联合确定性等价模型做代数上的部分最小化，并没有改变随机决策时序。$a_j,\ell_j$ 始终没有场景下标，所有场景仍共用同一个承诺窗口；场景实现后可调整的只有 $C,W$。如果改成每个场景各有一组 $a_{j\omega},b_{j\omega}$，才会错误地把 due window 变成 wait-and-see 决策。
+在 \((P_1)\) 中，\(a_j,b_j,e_{j\omega},t_{j\omega}\) 已从显式变量中消失。due-window 决策被编码在 \(\Phi_j\) 中；求得最优 \(\mathbf C_j^*\) 后，可用式 (2)–(4) 或小型窗口 LP 恢复 \(a_j^*,b_j^*\)。
 
-在 $(P_1)$ 中，$a_j,b_j,E_{j\omega},T_{j\omega}$ 已经从显式变量集合中消失，但 due-window 决策并没有被删除。它被包含在值函数 $\Phi_j$ 中。得到最优 $(x^*,C^*,W^*)$ 后，可通过分位数条件或重新求解每个任务的小型窗口 LP 恢复 $a_j^*,b_j^*$。
+若进一步投影所有连续 timing 变量，定义
 
-模型 $(P_1)$ 仍不是一个简单的任务可分问题。虽然 $\sum_j\Phi_j(\mathbf C_j)$ 在目标中按任务相加，但所有 $C_{j\omega}$ 通过 $\mathcal T$ 中的机器顺序和等待传播耦合。一次等待会改变同一机器上多个后续任务的完成时间，从而同时改变多个 $\Phi_j$。
-
-如果进一步对固定排程 $x$ 把所有连续 timing 变量也投影掉，可定义
-
-$$
+\[
 Q(x)=
-\min_{C,W:\,(x,C,W)\in\mathcal T}
+\min_{C,w:\,(x,C,w)\in\mathcal T}
 \left\{
-\sum_{\omega,j}p_\omega\eta_jW_{j\omega}
+\sum_{\omega,j}p_\omega\eta_jw_{j\omega}
 +\sum_j\Phi_j(\mathbf C_j)
-\right\}.
-$$
-
-于是完整问题进一步写成
-
-$$
-(P_2)\qquad
-\min_x
-\left\{
-c^{\mathrm{sch}}(x)+Q(x)
-\right\}.
-$$
-
-$(P_2)$ 就是 2026 风格 projected Benders 所使用的结构：master 只处理离散排程 $x$ 和 recourse 下界变量 $\theta$，固定 $x$ 后的联合连续子问题计算 $Q(x)$。
-
-## 5. 分位数函数是不是难建模的非线性
-
-答案要分成“显式分位数映射”和“投影值函数”两部分。
-
-若直接写
-
-$$
-a_j=Q_j(\tau_j^a),
-\qquad
-b_j=Q_j(\tau_j^b),
-$$
-
-而 $C_{j\omega}$ 又是决策变量，那么哪个场景位于第几个 order statistic 会随排程和等待改变。分位数映射是非光滑、可能集合值的；若强行把排序关系直接编码进 MILP，通常需要额外排序或选择逻辑。这种写法没有必要，也不是推荐实现。
-
-但投影值函数 $\Phi_j(\mathbf C_j)$ 不是一般意义上的困难非线性。它是一个连续 LP 的最优值函数，因而是凸分段线性的。这个结论可以从窗口 LP 的对偶直接看出。
-
-对任务 $j$，为约束
-
-$$
-E_{j\omega}-a_j\ge-C_{j\omega},
-\qquad
-T_{j\omega}+a_j+\ell_j\ge C_{j\omega}
-$$
-
-分别引入非负对偶变量 $u_{j\omega},v_{j\omega}$。窗口子问题的对偶为
-
-$$
-\begin{aligned}
-\Phi_j(\mathbf C_j)=
-\max_{u_j,v_j}\quad
-&\sum_{\omega\in\Omega}
-(v_{j\omega}-u_{j\omega})C_{j\omega}\\
-\text{s.t.}\quad
-&-\sum_\omega u_{j\omega}
-+\sum_\omega v_{j\omega}\le\rho_j,\\
-&\sum_\omega v_{j\omega}\le\lambda_j,\\
-&0\le u_{j\omega}\le p_\omega\alpha_j,\\
-&0\le v_{j\omega}\le p_\omega\beta_j.
-\end{aligned}
-$$
-
-对偶可行域与 $\mathbf C_j$ 无关，所以 $\Phi_j$ 是一组关于 $\mathbf C_j$ 的线性函数的最大值：
-
-$$
-\Phi_j(\mathbf C_j)
-=
-\max_{r\in\mathcal R_j}
-\left\{
-\sum_\omega
-(v_{j\omega}^{r}-u_{j\omega}^{r})C_{j\omega}
 \right\},
-$$
+\tag{6}
+\]
 
-其中 $\mathcal R_j$ 可取对偶多面体的极点集合。因此 $\Phi_j$ 是凸分段线性函数，而不是黑箱非线性函数。
+则完整问题成为
 
-若在模型中真正消去 $a_j,b_j,E_j,T_j$，可以为 $\Phi_j$ 设置上图变量 $\theta_j$，并加入
+\[
+\boxed{
+(P_2)\qquad
+\min_x\{c^{\mathrm{sch}}(x)+Q(x)\}
+}.
+\tag{7}
+\]
 
-$$
-\theta_j\ge
+三层关系可概括为
+
+\[
+\underbrace{(x,a,b,C,w,e,t)}_{(P_0)}
+\ \xrightarrow{\text{投影窗口}}\
+\underbrace{(x,C,w,\Phi)}_{(P_1)}
+\ \xrightarrow{\text{投影 timing}}\
+\underbrace{(x,Q)}_{(P_2)}.
+\]
+
+这个变换不改变信息结构：\(a_j,b_j\) 始终不带场景下标，所有场景共享同一窗口。投影只是代数消元，不是把窗口改成场景决策。
+
+## 5. 分位数函数如何精确求解
+
+直接写 \(a_j=Q_j(\tau_j^a)\) 会遇到决策相关排序、样本并列和集合值问题，因此不应显式编码分位数等式。式 (1) 本身是 LP，它已经是分位数函数的紧凑线性表示。
+
+### 5.1 直接保留窗口变量
+
+最简单的精确方法是直接求解 \((P_0)\)，保留 \(a,\ell,e,t\)。求解器自动得到满足分位数条件的窗口，无需排序变量。这是小规模正确性基准。
+
+### 5.2 真正投影窗口：对偶与 cut
+
+将 \(b_j\) 写成 \(a_j+\ell_j\)。窗口 LP 的两组核心约束是
+
+\[
+e_{j\omega}-a_j\ge-C_{j\omega},\qquad
+t_{j\omega}+a_j+\ell_j\ge C_{j\omega}.
+\]
+
+分别以 \(u_{j\omega}\ge0\) 和 \(v_{j\omega}\ge0\) 表示这两组约束的对偶变量。定义对偶可行域
+
+\[
+\mathcal D_j=
+\left\{
+(u_j,v_j):
+\begin{array}{l}
+-\sum_\omega u_{j\omega}+\sum_\omega v_{j\omega}\le\rho_j,\\
+\sum_\omega v_{j\omega}\le\lambda_j,\\
+0\le u_{j\omega}\le p_\omega\alpha_j,\\
+0\le v_{j\omega}\le p_\omega\beta_j
+\end{array}
+\right\}.
+\tag{8}
+\]
+
+由 LP 强对偶，
+
+\[
+\boxed{
+\Phi_j(\mathbf C_j)=
+\max_{(u_j,v_j)\in\mathcal D_j}
+\sum_\omega(v_{j\omega}-u_{j\omega})C_{j\omega}
+}.
+\tag{9}
+\]
+
+因此 \(\Phi_j\) 是线性函数的最大值，即凸分段线性函数。若希望从模型中真正删除窗口变量，在 master 中引入投影成本变量 \(z_j\)；已生成的 cuts 共同给出 \(\Phi_j(\mathbf C_j)\) 的下近似。第 \(k\) 次切平面生成时，在当前完成时间向量上求解式 (9)，得到固定对偶最优解 \((\bar u_j^k,\bar v_j^k)\)，再加入
+
+\[
+\boxed{
+z_j\ge
 \sum_\omega
-(v_{j\omega}^{r}-u_{j\omega}^{r})C_{j\omega},
-\qquad r\in\mathcal R_j.
-$$
+(\bar v_{j\omega}^k-\bar u_{j\omega}^k)C_{j\omega}
+}.
+\tag{10}
+\]
 
-极点可能很多，因此不必预先全部枚举。给定当前完成时间向量后，求一次窗口 LP 或其对偶，得到当前最优 $(u^r,v^r)$，再加入一条切平面即可。这就是针对 $\Phi_j$ 的精确 cutting-plane/Benders 表示。
+式 (10) 中：
 
-## 6. 三种精确求解方式的区别
+- \(z_j\)：任务 \(j\) 的投影窗口成本变量；
+- \(k\)：已生成 cut 的编号；
+- 上标 \(k\)：cut 编号，不是幂；
+- 横线 \(\bar{\cdot}\)：对偶子问题已经求得的固定数值；
+- \(u_{j\omega}\)、\(v_{j\omega}\)：分别对应 early 和 tardy 线性化约束的对偶变量；
+- \(v-u\) 中间的“\(-\)”才是减号。
 
-### 6.1 直接确定性等价 MILP
+原稿中的上标 \(r\) 也只是“第 \(r\) 个对偶极点/cut”的编号。为避免未定义和误读，本文统一改用定义明确的 \(k\)。
 
-保留 $(P_0)$ 中的 $a,\ell,E,T$。此时整个窗口部分完全线性，不需要显式计算或建模分位数。分位数只是最优解满足的结构性质。该模型最适合作为小规模正确性基准，也能检验 projected Benders 的最优值。
+### 5.3 2026 风格 projected Benders
 
-### 6.2 只投影窗口变量
+2026 风格直接使用 \((P_2)\)。master 只保留离散排程 \(x\) 和总 recourse 下界 \(\Theta\)；固定 \(x\) 后，联合 LP 优化全部场景的 \(C,w\) 及共同窗口。实现联合 LP 时可以保留 \(a,\ell,e,t\) 作为紧凑辅助变量。
 
-使用 $(P_1)$，以 $\theta_j$ 和上面的对偶切平面表示每个 $\Phi_j$。这会真正从模型中删除显式 due-window 变量，但 timing 变量仍保留。由于每个任务的窗口 LP 本来很小，单独做这一层投影未必比直接扩展式更快；其主要价值是解释结构，而不是自动带来计算优势。
+若联合子问题写成
 
-### 6.3 2026 风格联合 projected Benders
+\[
+Q(x)=\min_y\{q^\top y:Ay\ge h-Bx\},
+\]
 
-使用 $(P_2)$。master 只保留排程变量 $x$ 和 $\theta$；固定 $x$ 后，联合子问题同时优化所有场景的 $C,W$ 和共同的 due-window。实际实现时，子问题仍可保留 $a,\ell,E,T$ 作为线性辅助变量，因为它们是 $\Phi_j$ 的紧凑扩展式。这里所谓“消去 due window”是指它不在 master 中，而不是求解器内部永远不能出现这些变量。
+其中 \(y=(a,\ell,C,w,e,t)\)，第 \(k\) 次求得的固定对偶最优解记为 \(\bar\pi^k\)，则 master 加入
 
-固定 $x$ 后，联合子问题是 LP。若写成标准形式
+\[
+\boxed{
+\Theta\ge(\bar\pi^k)^\top(h-Bx)
+}.
+\tag{11}
+\]
 
-$$
-Q(x)=min_y\{q^\top y:Ay\ge h-Bx\},
-$$
+\(\Theta\) 是总 recourse cost 的下界变量；\(\bar\pi^k\) 是第 \(k\) 次联合 LP 的固定对偶解。数学表达式 \(Q(x)\) 已投影窗口和 timing；求值所用的 LP 重新采用这些变量作为扩展式，两者并不矛盾。
 
-其对偶极点 $\pi^r$ 产生 Benders optimality cut
+## 6. 求解路线与当前选择
 
-$$
-\theta\ge(\pi^r)^\top(h-Bx).
-$$
+| 路线 | master/完整模型保留什么 | 连续层 | 主要特点 |
+|---|---|---|---|
+| 直接 MILP \((P_0)\) | \(x,a,\ell,C,w,e,t\) | 不分解 | 精确、最清楚；作为小规模基准 |
+| 2025 风格 | master 保留 \(x,a,\ell\) | 固定窗口后按场景求 timing LP | 场景可分，但 master 和 cuts 较多 |
+| 2026 风格 \((P_2)\) | master 只保留 \(x,\Theta\) | 共同窗口与全部场景 timing 的联合 LP | master 小；场景被共同窗口耦合 |
 
-该路线保持 exact optimality proof。主要瓶颈是共同窗口把所有场景耦合在同一个 LP 中，以及不同对偶最优解可能产生强弱差异较大的 cuts。deepest Benders cuts 后续正是作用于这一层，而不是去直接编码经验分位数。
+当前建议先建立直接 MILP，再以 2026 风格 projected Benders 为主算法，并以 2025 风格作为分解边界对照。不要显式建立 order-statistic 排序变量：分位数用于解释和恢复最优窗口，LP 扩展式与对偶 cuts 用于求解。
 
-## 7. 当前建模结论
-
-第一，窗口分位数必须基于包含等待后的实际完成时间 $C_{j\omega}$，不能预先使用 earliest completion。waiting cost 始终以 $\eta_jW_{j\omega}$ 留在 timing 目标中；$\eta_j=0$ 就得到免费等待版本。
-
-第二，给定实际完成时间后，任务特定窗口可以逐任务投影，最优端点是经验分位数。投影后 due-window 变量从 $(P_1)$ 的显式变量中消失，但可从最优完成时间向量恢复。
-
-第三，投影后的 $\Phi_j$ 是凸分段线性 LP 值函数。最稳妥的直接建模方式仍是保留 $a,\ell,E,T$；若希望从 master 中消去窗口，则通过 LP 对偶和 Benders cuts 表示，而不是显式建立 order-statistic 排序变量。
-
-第四，多任务和多机器不破坏窗口投影，但 timing 仍然全局耦合。只有在任务窗口彼此独立、窗口只进入软 ET 成本、固定排程后的 timing recourse 为连续 LP 时，才能得到上述 $\sum_j\Phi_j$ 和 classical Benders 结构。若使用 common due window、跨任务窗口预算或 hard-window 可行性约束，窗口仍可联合投影，但不能再逐任务分解；若目标改为 early/tardy job 数量，固定排程后的子问题会含整数变量，不能直接使用上述 LP 对偶 cuts。
-
-因此，当前建议是：先用 $(P_0)$ 建立确定性等价 MILP 基准，再以 $(P_2)$ 作为 2026 风格 projected Benders 主算法。不要为了使用分位数结论而显式建立排序变量；分位数用于证明和解释最优窗口，LP 扩展式与 Benders 对偶用于实际求解。
+上述逐任务投影要求任务使用彼此独立的软 due window。若使用 common window、跨任务窗口预算或 hard-window 可行性约束，仍可联合投影，但不能写成 \(\sum_j\Phi_j(\mathbf C_j)\)。若目标改成 early/tardy job 数量，连续 LP 结构也会消失，classical Benders 对偶 cut 不再直接适用。

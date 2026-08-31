@@ -6,7 +6,7 @@
 
 Work 3 可以沿用 2025 和 2026 两篇 TWATSP-ST 的基本思路，把“客户访问顺序 + 随机旅行时间 + 可决策时间窗”改写为“机器分配与任务顺序 + 随机加工时间 + 可决策 due window”。但机器调度模型不能直接删除 TWA 中的 overtime 后保持其余设定不变。两篇 TWA 都没有任务位置成本，窗口的绝对位置主要由固定出发时刻和班次结束时间共同约束；一旦删掉 overtime，又保留免费等待和仅按窗口宽度收费，窗口就失去绝对时间锚。
 
-当前推荐的核心问题为：考虑同质并行机、任务特定 DIF due window、随机加工时间、与机器无关的序列相关 setup \(s_{ij}\)、场景自适应等待；一阶段共同决定机器分配、加工顺序和每个任务的 due window，二阶段按场景决定实际开始与完工时刻；目标包括 setup 成本、due-window 位置成本、宽度成本和期望 earliness/tardiness（ET）成本，不含 overtime，也不对 waiting 单独收费；同时设置任务特定的窗口位置区间和窗口长度上下界。
+当前推荐的核心问题为：考虑同质并行机、任务特定 DIF due window、随机加工时间、与机器无关但随场景变化的序列相关 setup \(s_{ij\omega}\)、场景自适应等待；一阶段共同决定机器分配、加工顺序和每个任务的 due window，二阶段按场景决定实际开始与完工时刻；目标包括确定的 setup 转换金额 \(g_{ij}\)、due-window 位置成本、宽度成本和期望 earliness/tardiness（ET）成本，不含 overtime，也不对 waiting 单独收费；同时设置任务特定的窗口位置区间和窗口长度上下界。另设 \(g_{ij}=0\) 的消融，区分“转换本身有固定金额”和“转换只通过随机持续时间影响 ET”两种业务口径。
 
 这个设定同时使用了两种互补机制：位置成本在可行区间内部给较晚承诺定价，有限区间则表达不可违反的合同或客户边界。二者并非数学上都必需，但现实含义不同，合用后模型更稳定，也与前两个 work 的 due-window 设定保持连续。
 
@@ -125,15 +125,15 @@ JIT 文献对 ET 的解释相对稳定。earliness 可对应成品库存、仓�
 
 ### 4.5 setup
 
-Kim and Lee (2009) 已把序列相关 setup 引入 due-date assignment，例子是注塑生产：连续任务使用相同材料时只需换模，材料改变时还需要清洗螺杆，setup 时间取决于前后任务组合。当前 Work 3 使用同质机假设，令 \(s_{ij}\) 表示任务 \(i\) 后加工任务 \(j\) 的换型时间，不带机器下标，并从 MES 换型日志、工艺标准或 SMED 数据估计。
+Kim and Lee (2009) 已把序列相关 setup 引入 due-date assignment，说明换模、换料和清洗使 setup 取决于前后任务组合。当前 Work 3 使用同质机假设，令 \(s_{ij\omega}\) 表示场景 \(\omega\) 下任务 \(i\) 后加工任务 \(j\) 的换型时间，不带机器下标；随机性可由设备状态、污染程度、班组和批次共同驱动，应从 MES 换型日志按产品族转换和场景共同因子估计，而不是对每条弧独立加噪声。
 
-setup 时间必须进入场景时间传播，setup cost 在当前核心模型中默认保留，并暂定统一写成任务转换金额 \(g_{ij}\)。它可由人工、材料、清洗剂、能耗或报废损失直接估计；若只有 setup 时间数据，再令 \(g_{ij}=\kappa^s s_{ij}\)。\(s_{ij}\) 负责时间传播，\(g_{ij}\) 负责目标计价，避免两个符号混用或重复计费。
+两篇 TWA 都把确定弧成本 \(d_{ij}\) 与随机弧旅行时间 \(t_{ij\omega}\) 分开。对应到本问题，\(g_{ij}\) 是确定的一阶段转换金额，\(s_{ij\omega}\) 是进入二阶段时间传播的随机持续时间。若费用只是固定时薪/能耗率乘随机 setup 时长，其期望 \(\sum_\omega\pi_\omega\kappa^s s_{ij\omega}\) 可预聚合进 \(g_{ij}\)，不必留在二阶段；只有跨班次、时段能价、临时用工或加急等依赖实际二阶段状态的费用才是真正 recourse cost。核心模型保留确定 \(g_{ij}\)，另用 \(g_{ij}=0\) 做消融，避免把同一 setup 时间重复计费。
 
 ## 5. 推荐的两阶段 SAA 模型
 
 ### 5.1 集合、参数与决策
 
-令 \(J\) 为任务集合，机器数量为 \(M\)，\(\Omega\) 为场景集合，\(\pi_\omega\) 为归一化场景概率。\(p_{j\omega}\) 是任务 \(j\) 在场景 \(\omega\) 下的加工时间，\(s_{ij}\) 是确定性的序列相关 setup 时间；若 setup 也不确定，可扩展为 \(s_{ij\omega}\)。
+令 \(J\) 为任务集合，机器数量为 \(M\)，\(\Omega\) 为场景集合，\(\pi_\omega\) 为归一化场景概率。\(p_{j\omega}\) 是任务 \(j\) 在场景 \(\omega\) 下的加工时间，\(s_{ij\omega}\) 是随机的序列相关 setup 时间；二者在同一场景中允许相关。
 
 紧凑模型的一阶段顺序变量为不带机器下标的 \(x_{ij}\)，机器由从 dummy source 出发的至多 \(M\) 条路径隐式表示；对照模型使用带机器下标的 position 变量。两个模型都包含任务特定窗口端点 \(a_j,b_j\)。二阶段连续变量包括场景开始时刻、完工时刻、earliness 和 tardiness。waiting 不必单独建变量：时间递推使用“\(\ge\)”而不是等式，其松弛量就是允许的 initial 或内部 waiting。两个模型、其子问题和 position 缩减的完整写法见 [补充分析](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
 
@@ -149,7 +149,7 @@ setup 时间必须进入场景时间传播，setup cost 在当前核心模型中
 \left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right).
 \]
 
-第一项是默认保留的 setup 成本。若没有独立转换金额，就用 \(g_{ij}=\kappa^s s_{ij}\) 生成该参数。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；更宽的窗口降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序和 setup 又改变所有下游任务在各场景中的完工分布。
+第一项是默认保留的确定 setup 金额。若没有独立转换金额，可令 \(g_{ij}=0\) 做纯 timing 版本；若只知道固定单位时间费率，则用 \(g_{ij}=\kappa^s\sum_\omega\pi_\omega s_{ij\omega}\) 预聚合，不能再在二阶段重复收费。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；更宽的窗口降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序以及随机加工/setup 时长又改变所有下游任务在各场景中的完工分布。
 
 ### 5.3 主要约束
 
@@ -164,7 +164,7 @@ D_j^{\min}\le b_j-a_j\le D_j^{\max}.
 若 \(i\) 紧接 \(j\)，场景时间满足
 
 \[
-S_{j\omega}\ge C_{i\omega}+s_{ij}-M_{ij\omega}(1-x_{ij}),
+S_{j\omega}\ge C_{i\omega}+s_{ij\omega}-M_{ij\omega}(1-x_{ij}),
 \qquad
 C_{j\omega}=S_{j\omega}+p_{j\omega}.
 \]
@@ -321,6 +321,14 @@ F_j(b_j^-)\le q^b_j\le F_j(b_j),
 
 后者把窗口放入子问题只是算法投影，不表示窗口变成二阶段随机决策；同一 \(a,b\) 仍由所有场景共享。两种路线都直接分解原始线性扩展模型，不需要显式计算分位数。后续可以比较两种分解边界，再在有效的基础上加入 deepest Benders cut 和 local branching；不能把分位数分析本身当成新的 Benders 方法。
 
+### 8.4 一阶段路线、二阶段随机 recourse 的 VRP 文献给出的启示
+
+Laporte, Louveaux, and Van Hamme (2002) 的 VRP with stochastic demands 与当前阶段顺序最接近：一阶段用 2-indexed 弧变量决定 a priori routes，二阶段在需求揭示后发生补货回库 recourse。其 integer L-shaped master 使用一个总 \(\Theta\)，并靠 route/partial-route lower-bounding functionals 强化。Jabali et al. (2014) 和 Hoogendoorn and Spliet (2023) 延续这条路线；Parada et al. (2024) 进一步用任务级 \(\theta_j\) 和 path cuts 实现 route-disaggregated recourse，但必须证明“删除路线中的客户不会增加 recourse”的单调性。
+
+这说明无机器标签的 2-indexed 模型不是完全不能按路线强化。准确结论是：固定整数解时可以按路线并行求值；普通 LP 对偶 cut 仍应先作为全局基线；若要让一条 route/path cut 对未来其他解继续有效，必须包含完整 depot 路线的激活条件，或者证明当前 recourse 的单调性后使用更一般的子路径激活。对本问题，免费 waiting 和任务可分窗口成本有利于单调性，但随机 sequence-dependent setup 还必须满足场景逐一的 shortcut 条件，详见[双模型补充分析](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。因此不能直接把每次得到的临时路线 LP 对偶式当作永久 machine multi-cut。
+
+Adulyasak, Cordeau, and Jans (2015) 的 stochastic production-routing 还表明，一阶段 visit schedules 与连续场景 recourse 可在单棵分支树中使用 scenario-group、Pareto 和 lifting cuts；这是当前后续强化的直接参考。Subramanyam, Wang, and Gounaris (2018) 虽然研究 TWAVRP scenario decomposition，但其一阶段是窗口、二阶段才是路线，分解方向相反，只适合参考场景并行和黑箱求解思想，不能直接照搬 cuts。
+
 ## 9. ET、early/tardy work 与 early/tardy job 数量
 
 ### 9.1 ET 是最适合的核心目标
@@ -369,15 +377,15 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 不考虑 setup 时，模型不会自动变得可分或得到统一的 SPT/EDD 规则。任务特定的 \(\rho,\lambda,\alpha,\beta\)、机器相关随机加工时间、共享 due-window 决策和下游 waiting 传播仍使顺序重要。能得到的主要简化是：时间递推少了 arc-dependent 常数，机器之间在固定分配后更容易分解，主问题也减少 setup arc 成本和部分异质性。只有在进一步加入同质系数、确定加工时间、无自愿 idle 或公共窗口等特殊条件时，才可能恢复交换性质或 DP。
 
-因此，主模型保留 sequence-dependent setup；另设 matched no-setup 基准，用来衡量 setup 对算法难度、窗口位置和 ET 传播的影响。不能把 no-setup 结果直接解释为一般随机多机 DWA 的结构定理。
+因此，主模型保留随机 sequence-dependent setup 时长 \(s_{ij\omega}\) 和确定转换金额 \(g_{ij}\)。至少做两组 matched 消融：一组令 \(g_{ij}=0\) 但保留随机 setup 时长，区分直接弧成本与 timing 传播；另一组同时令 setup 时长和金额为 0，衡量 setup 对算法难度、窗口位置和 ET 传播的总影响。不能把 no-setup 结果直接解释为一般随机多机 DWA 的结构定理。
 
 ## 11. 建议的模型与实验层次
 
-1. **核心模型 W3-Core**：同质多机 + 位置成本 + 宽度成本 + 有限位置区间 + 长度上下界 + 免费 waiting + 期望 ET + 与机器无关的 sequence-dependent setup 时间及其 setup cost；无 overtime、无 waiting cost。
+1. **核心模型 W3-Core**：同质多机 + 位置成本 + 宽度成本 + 有限位置区间 + 长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。
 2. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
 3. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
 4. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
-5. **结构消融**：对核心模型做 setup/no-setup matched 比较。目标始终先保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
+5. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
 
 核心算例生成后应先做结构审计：检查 \(U_j\) 与加工时间尺度是否匹配、\(D_j^{\min}\le D_j^{\max}\le U_j-L_j\)、三个参数支配条件的任务比例、最小宽度和位置边界命中率、正 ET 任务比例，以及目标各项的数量级。若出现“所有任务 ET=0”，先判断这是正常支付位置/宽度成本后的经济选择，还是由于范围过松、系数失衡或实现漏计成本造成的结构性退化。
 
@@ -389,7 +397,7 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 ## 13. 最终判断
 
-当前 Work 3 的核心创新不应表述为“把随机窗口写成分位数并消去变量”，因为最终精确求解仍会回到与 TWA 类似的联合线性窗口/timing 模型。真正清楚的问题差异是：机器调度没有自然的驾驶员班次 overtime，于是使用任务特定位置成本和有限承诺范围替代终端 overtime；同时加入多机分配、随机加工时间和 sequence-dependent setup，在允许场景等待的条件下联合设计排程和任务特定 due windows。
+当前 Work 3 的核心创新不应表述为“把随机窗口写成分位数并消去变量”，因为最终精确求解仍会回到与 TWA 类似的联合线性窗口/timing 模型。真正清楚的问题差异是：机器调度没有自然的驾驶员班次 overtime，于是使用任务特定位置成本和有限承诺范围替代终端 overtime；同时加入多机分配、随机加工时间和随机 sequence-dependent setup 时长，在允许场景等待的条件下联合设计排程和任务特定 due windows。
 
 ET 目标足以使问题成立，并且是保留连续 recourse 与精确 Benders 的关键。位置成本、范围和长度界不仅用于防止数学退化，也分别表达 lead-time 价格、不可违反的承诺边界和客户可接受的时间精度。waiting cost、early/tardy work 和 early/tardy job counts 都有现实意义，但会改变问题含义或算法结构，当前应作为清楚标注的消融或后续扩展，而不是混入核心模型。
 
@@ -402,4 +410,10 @@ ET 目标足以使问题成立，并且是保留连续 recourse 与精确 Bender
 5. Shabtay, D. (2016). Optimal restricted due date assignment in scheduling. *European Journal of Operational Research*, 252(1), 79-89. https://doi.org/10.1016/j.ejor.2015.12.043
 6. Shabtay, D., Mosheiov, G., and Oron, D. (2022). Single machine scheduling with common assignable due date/due window to minimize total weighted early and late work. *European Journal of Operational Research*, 303(1), 66-77. https://doi.org/10.1016/j.ejor.2022.02.017
 7. Kim, J.-G., and Lee, D.-H. (2009). Algorithms for common due-date assignment and sequencing on a single machine with sequence-dependent setup times. *Journal of the Operational Research Society*, 60(9), 1264-1272. https://doi.org/10.1057/jors.2008.95
-8. 本地综述表：D:\重要文件\桌面备份\曹长新\同济大学\学习和生活\博士\研究生学习\研究方向\毕设相关\TWET\work2_DDA\2026.06相关分析记录\DDA_literature_final.xlsx。该表用于定位和交叉检查全文，不替代原论文作为最终证据。
+8. Laporte, G., Louveaux, F. V., and Van Hamme, L. (2002). An Integer L-Shaped Algorithm for the Capacitated Vehicle Routing Problem with Stochastic Demands. *Operations Research*, 50(3), 415-423. https://doi.org/10.1287/opre.50.3.415.7751
+9. Jabali, O., Rei, W., Gendreau, M., and Laporte, G. (2014). Partial-route inequalities for the multi-vehicle routing problem with stochastic demands. *Discrete Applied Mathematics*, 177, 121-136. https://doi.org/10.1016/j.dam.2014.06.011
+10. Parada, L., Legault, R., Côté, J.-F., and Gendreau, M. (2024). A disaggregated integer L-shaped method for stochastic vehicle routing problems with monotonic recourse. *European Journal of Operational Research*, 318(2), 520-533. https://doi.org/10.1016/j.ejor.2024.05.012
+11. Adulyasak, Y., Cordeau, J.-F., and Jans, R. (2015). Benders Decomposition for Production Routing Under Demand Uncertainty. *Operations Research*, 63(4), 851-867. https://doi.org/10.1287/opre.2015.1401
+12. Subramanyam, A., Wang, A., and Gounaris, C. E. (2018). A scenario decomposition algorithm for strategic time window assignment vehicle routing problems. *Transportation Research Part B*, 117, 296-317. https://doi.org/10.1016/j.trb.2018.09.008
+13. Hadj Salem, K., Kramer, A., and Robbes, A. (2026). Job sequencing and tool switching problem with non-identical parallel machines: Mathematical formulations and modeling improvements. *European Journal of Operational Research*, 330(2), 416-426. https://doi.org/10.1016/j.ejor.2025.09.026
+14. 本地综述表：D:\重要文件\桌面备份\曹长新\同济大学\学习和生活\博士\研究生学习\研究方向\毕设相关\TWET\work2_DDA\2026.06相关分析记录\DDA_literature_final.xlsx。该表用于定位和交叉检查全文，不替代原论文作为最终证据。

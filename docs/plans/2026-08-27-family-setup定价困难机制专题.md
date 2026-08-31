@@ -1458,6 +1458,8 @@ random的3/4三次为`16.243/17.781/19.872s`，exact为`3.201/3.424/4.494s`，�
 
 ### 32.48 历史2/1.5、2/4、4/4及adaptive-only的大规模复核
 
+本节结果全部是关闭ALNS和strong branching的root-only机制诊断，只用于筛掉静态中点、确认历史参数语义和观察阈值如何改变DSSR轨迹，不能作为正式端到端配置选择。第32.49节已在正式profile、固定ALNS seed、强分支开启和完整树口径下重新比较四个保留方案；最终配置判断以第32.49节为准。
+
 本轮先重新核对历史阈值语义。历史配置并不是`1.5/2`。在后续DSSR轮尚未设置独立接受比例时，`bidirectionalMidpointProbeEarlyStopRatio=1.5`同时控制浅层probe接受比例，`bidirectionalMidpointProbeDssrImbalanceThreshold=2.0`控制上一完整轮何时触发adaptive seed。按当前“adaptive触发阈值/后续probe接受阈值”的记法，历史参数代理应写成`2/1.5`。早期probe实现细节与当前不同，因此这里比较的是在当前单侧耗尽修正和5%步长下复现历史参数语义，不是逐行恢复旧算法。
 
 实验选择`n050-set01/02 family,m3`和`n060-set01/02 random,m3`，均使用正式ng-DSSR其余配置、TIME队列、root-only、关闭ALNS和strong branching、CPLEX单线程。三组阈值均启用首轮与后续probe。四个实例内各组最终root bound完全相同且`valid=true`。
@@ -1487,3 +1489,25 @@ adaptive-direct四点合计只比当前`4/4`低`2.9%`，family两点分别低`4.
 固定Tmid在两个family实例上都出现结构性单侧膨胀。set01中default/average多轮约为`1.0--1.4万`个forward pop对`38--160`个backward pop，exact分别达到`523.2/656.0s`；set02也达到`74--80s`，约为当前4/4的三倍。random实例固定点没有同等级爆炸，但性能仍不稳定。固定策略不是数学上不可行，也不会破坏certificate；问题是ng-memory变化后最合适的切分点会移动，静态点在每轮重复制造相同失衡。default与windowAverage在family set01仅相差有效时间域约5%，两者仍同时落在坏区间，说明调整静态公式无法代替反馈和probe。因此不采用固定default、固定windowAverage，也不根据单个random点的短时优势更换流程。
 
 为复现实验，比较runner新增`twet.bpc.fullDomainCompare.midpointProbeAfterFirstDssrRound`覆盖入口；未设置时原样使用正式profile值。算法主线、正式默认和certificate流程均未修改。本轮所有24条根节点运行完整结束，结果保存在`test-results/bpc/20260831-threshold-*`与`test-results/bpc/20260831-midpoint-*`。
+
+### 32.49 正式最佳配置下的完整求解阈值复核
+
+前述root-only实验没有运行ALNS和strong branching，不能回答整棵BPC应采用哪组midpoint参数。本轮改用正式`BestBpcProfiles.NG_DSSR`版本`2026-08-30-v5`，仅覆盖`bidirectionalMidpointProbeDssrImbalanceThreshold`、`bidirectionalMidpointProbeDssrEarlyStopRatio`和`bidirectionalMidpointProbeAfterFirstDssrRound`。其余配置保持一致：`TIME`队列、`minimumNewPairsSegment + candidate1000 + effectiveLimit20`、same-node warm-start关闭、time-indexed root preprocessing开启、强分支开启且phase-1测试20个候选、phase-2候选数为0、CPLEX单线程、`maxNodes=100000`。每个实例先按正式流程运行3次ALNS并选取最好seed，四个方案复用相同seed指纹。两份`n40 family,m2`和两份`n50 random,m3`均使用`base/zero`正式持久化实例；family两例最终在根节点证明最优，random两例均完整处理6个节点，不存在节点上限截断或中途样本。
+
+| 实例 | `4/4 + probe` | `2/4 + probe` | `2/1.5 + probe` | `4/4 adaptive-only` |
+| --- | ---: | ---: | ---: | ---: |
+| n40 family set01 | `300.470s` | `342.073s` | `499.105s` | `727.604s` |
+| n40 family set02 | `319.541s` | `411.435s` | `506.926s` | `696.323s` |
+| family平均 | **`310.006s`** | `376.754s` | `503.016s` | `711.964s` |
+| 相对当前 | - | `+21.5%` | `+62.3%` | `+129.7%` |
+| n50 random set01 | `22.932s` | `23.169s` | `22.812s` | `29.015s` |
+| n50 random set02 | `22.276s` | `22.848s` | `22.406s` | `30.023s` |
+| random平均 | **`22.604s`** | `23.009s` | `22.609s` | `29.519s` |
+
+所有方案都得到相同incumbent和bound：family为`86852/82351`，random为`39447/70126`；同一实例四组seed指纹、节点数和有效终止状态一致。family中当前`4/4 + probe`在两例上均最快。其exact平均为`289.452s`，而`2/4`、`2/1.5`和adaptive-only分别为`355.264/482.465/687.377s`。四组family合计DSSR轮数为`505/593/643/789`，probe候选数为`658/761/1310/267`。严格`1.5`虽然仍执行后续probe，却因候选walk和状态切换使probe累计增至`379.918s`，高于当前的`223.499s`；触发阈值降到2也改变返回列和后续dual，使exact调用与DSSR轮数增加。
+
+adaptive-only的负面结果更关键。它把family的probe累计时间从当前`223.499s`降到`66.464s`，但正式forward、backward和join合计从`347.288s`增至`1292.668s`。因此后续probe不是单纯冗余：它在新ng-memory下校验并修正上一完整轮给出的adaptive seed，且选中候选状态可被正式labeling复用。直接取消probe虽然省掉候选工作，却会在较差的`Tmid`上完成更大的两侧搜索，并通过不同返回列继续放大CG轨迹。旧root-only中adaptive-only的轻微优势不能迁移到当前正式配置。
+
+random两例的exact合计仅约4--6秒，另外三种probe开启方案总时间都落在`22.3--23.2s`的小范围内，差异主要是预处理、RMP和强分支的运行波动；adaptive-only则两例都约慢30%，exact调用和DSSR轮数也略增。该结果不支持为了random恢复严格`2/1.5`，但明确排除了关闭后续probe。综合family的稳定大幅差异和random的无明显回退，正式配置继续采用`adaptive触发4 / 后续probe接受4 / 后续probe开启`，不恢复`2/4`、历史`2/1.5`或adaptive-only。
+
+完整汇总保存于`test-results/bpc/20260831-midpoint-fulltree-summary.csv`，原始结果目录统一为`test-results/bpc/20260831-midpoint-fulltree-*`。为支持正式runner受控覆盖，本轮只新增`bidirectionalMidpointProbeDssrImbalanceThreshold`可选参数和对应元数据；未传参时正式profile与算法主线不变。

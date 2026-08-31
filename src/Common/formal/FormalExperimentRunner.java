@@ -261,6 +261,8 @@ public final class FormalExperimentRunner {
 				+ arguments.bidirectionalMidpointProbeAfterFirstDssrRound);
 		lines.add("bidirectionalMidpointProbeDssrEarlyStopRatioOverride="
 				+ arguments.bidirectionalMidpointProbeDssrEarlyStopRatio);
+		lines.add("bidirectionalMidpointProbeDssrImbalanceThresholdOverride="
+				+ arguments.bidirectionalMidpointProbeDssrImbalanceThreshold);
 		lines.add("bidirectionalMidpointProbeDssrMoveFractionOverride="
 				+ arguments.bidirectionalMidpointProbeDssrMoveFraction);
 		lines.add("ngDssrNonElementaryRouteCandidateLimitOverride="
@@ -286,6 +288,7 @@ public final class FormalExperimentRunner {
 				"ngDssrSameNodeWarmStartMinimumOccurrence",
 				"bidirectionalMidpointProbeAfterFirstDssrRound",
 				"bidirectionalMidpointProbeDssrEarlyStopRatio",
+				"bidirectionalMidpointProbeDssrImbalanceThreshold",
 				"bidirectionalMidpointProbeDssrMoveFraction",
 				"ngDssrNonElementaryRouteCandidateLimit", "ngDssrNonElementaryRouteUpdateMode");
 
@@ -306,6 +309,7 @@ public final class FormalExperimentRunner {
 		private final Integer ngDssrSameNodeWarmStartMinimumOccurrence;
 		private final Boolean bidirectionalMidpointProbeAfterFirstDssrRound;
 		private final Double bidirectionalMidpointProbeDssrEarlyStopRatio;
+		private final Double bidirectionalMidpointProbeDssrImbalanceThreshold;
 		private final Double bidirectionalMidpointProbeDssrMoveFraction;
 		private final Integer ngDssrNonElementaryRouteCandidateLimit;
 		private final String ngDssrNonElementaryRouteUpdateMode;
@@ -346,6 +350,8 @@ public final class FormalExperimentRunner {
 					"bidirectionalMidpointProbeAfterFirstDssrRound");
 			bidirectionalMidpointProbeDssrEarlyStopRatio = optionalDouble(values,
 					"bidirectionalMidpointProbeDssrEarlyStopRatio");
+			bidirectionalMidpointProbeDssrImbalanceThreshold = optionalDouble(values,
+					"bidirectionalMidpointProbeDssrImbalanceThreshold");
 			bidirectionalMidpointProbeDssrMoveFraction = optionalDouble(values,
 					"bidirectionalMidpointProbeDssrMoveFraction");
 			ngDssrNonElementaryRouteCandidateLimit = optionalInteger(values,
@@ -382,6 +388,10 @@ public final class FormalExperimentRunner {
 			if (bidirectionalMidpointProbeDssrEarlyStopRatio != null) {
 				config.bidirectionalMidpointProbeDssrEarlyStopRatio =
 						bidirectionalMidpointProbeDssrEarlyStopRatio.doubleValue();
+			}
+			if (bidirectionalMidpointProbeDssrImbalanceThreshold != null) {
+				config.bidirectionalMidpointProbeDssrImbalanceThreshold =
+						bidirectionalMidpointProbeDssrImbalanceThreshold.doubleValue();
 			}
 			if (bidirectionalMidpointProbeDssrMoveFraction != null) {
 				config.bidirectionalMidpointProbeDssrMoveFraction =

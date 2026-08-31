@@ -1414,3 +1414,34 @@ wall time和thread CPU time测量的对象不同。wall time是从代码段开�
 又在n50-set01 random补充一次`0/20/50ms`配对。三组均为9次exact、11轮DSSR、相同root bound `44174.676471`且`valid=true`；总时分别为`27.501/28.422/27.340s`，exact为`4.513/4.536/4.499s`。20/50ms都抑制了2次短adaptive，但求解轨迹和时间基本未变，说明这些cheap rank-0轮即使比例很大，移动与否通常也不构成主要开销。
 
 因此绝对门槛没有稳定收益：20ms只在一个重复中偶然缩短CG轨迹，50ms已出现过度抑制。临时配置、runner入口和测试代码均已撤回，重新focused编译后`NgDssrMidpointProbePolicyTest`、`NgDssrMidpointProbeConfigurationTest`和`GCBBFullDomainBestProfileTest`通过。正式状态继续保持`default + wall time + 4/4`。若以后还要研究计时噪声，只值得先做不改变决策的wall/thread-CPU双计时诊断，而不是再次加入绝对门槛。
+
+### 32.46 wall/thread CPU双计时与3/4阈值实测
+
+本轮临时给ng-DSSR的probe候选、单侧续探和完整DSSR轮反馈同时记录wall time与当前Java线程CPU time，并允许受控选择其中一种驱动Tmid；全局solve、exact phase和time limit始终保留wall口径。实验均为单进程、CPLEX单线程、串行根节点运行，状态为`NODE_LIMIT`或`ROOT_PROCESSED`，不能解释为完整树求解时间。实验结束后临时代码已撤回，正式profile没有增加CPU时钟选项。
+
+在`n50-set02 random,m3`上交错运行wall与thread CPU各3次。所有运行均得到相同root bound `57741.110204`且`valid=true`，结果如下。
+
+| 决策时钟 | 总时/s | exact/s | exact调用 | DSSR轮数 | adaptive次数 | 最终pool |
+| --- | --- | --- | --- | --- | --- | --- |
+| wall-r1 | 17.075 | 3.179 | 9 | 24 | 10 | 4707 |
+| wall-r2 | 16.195 | 2.948 | 9 | 23 | 9 | 4740 |
+| wall-r3 | 14.923 | 2.460 | 7 | 21 | 8 | 4755 |
+| CPU-r1 | 17.021 | 3.191 | 9 | 30 | 0 | 4636 |
+| CPU-r2 | 16.729 | 3.079 | 9 | 30 | 0 | 4636 |
+| CPU-r3 | 17.006 | 3.235 | 9 | 30 | 0 | 4636 |
+
+thread CPU没有变得更稳定或更快。CPU相对wall的总时中位数高约`5.0%`，exact中位数高约`8.2%`，DSSR轮数从中位23增到30。更根本的问题是本机Windows/JVM的current-thread CPU计时在这些短区间上呈现约`15.625ms`的量化：每次运行60个完整轮单侧样本中有38--44个读数为0，其余主要是`15.6/31.3/46.9ms`的整数倍。wall下常见的`9.0/8.1ms`、`4.9/7.4ms`等有效比较，在CPU口径下会变成`15.625/0`或`0/0`。三次CPU运行因此都把每次exact的后续Tmid固定在静态点`1107`，完整轮反馈无法形成有效adaptive移动；三次wall运行则稳定把主要后续点移到约`745--803`。CPU time理论上能排除线程被抢占时间，但在当前平台上分辨率远低于probe单侧耗时，实际信号比wall更差，不能用于Tmid决策。重复增加CPU采样次数也不能恢复已经丢失的亚时间片信息。
+
+随后按正确口径测试`3/4`：只把完整轮触发adaptive的阈值从4降到3，后续probe接受阈值仍为4，步长仍为5%。所有结果均保持相同实例的root bound且`valid=true`。
+
+| 实例 | 4/4总时/exact/s | 3/4总时/exact/s | exact调用4/3 | 3/4 DSSR轮/候选/丢弃 |
+| --- | ---: | ---: | ---: | ---: |
+| n50-set02 random,m3，中位 | 16.195 / 2.948 | 17.781 / 3.424 | 9 / 10 | 25 / 25 / 0 |
+| n50-set02 family,m3 | 52.418 / 25.402 | 57.934 / 32.260 | 6 / 9 | 62 / 129 / 67 |
+| n40-set02 family,m3 | 11.400 / 3.670 | 19.749 / 8.874 | 5 / 9 | 43 / 61 / 18 |
+
+random的3/4三次为`16.243/17.781/19.872s`，exact为`3.201/3.424/4.494s`，中位数相对本轮4/4分别慢约`9.8%/16.1%`。n50 family慢约`10.5%/27.0%`，n40 family,m3慢约`73.2%/141.8%`。family下的机制很清楚：3--4倍之间的中等失衡更频繁触发全局adaptive分位点，新点在当前memory下仍需probe验证，从而增加未选候选。选中候选的状态会被正式labeling复用，真正明确冗余的是被丢弃候选；n50 family的3/4丢弃67个，明显高于历史4/4的32个，n40 family,m3为18个，高于历史4/4的10个。另有一次误用`n40-set02 family,m2`的非配对运行，结果为`206.819s/exact 189.552s/18 calls/231 DSSR rounds`；由于没有同批4/4基线，只保留为困难度记录，不参与阈值结论。
+
+当前阈值结论由此完整闭合：`2/4`在6点中快慢各半但family exact合计更差，`3/4`在本轮random重复和两个family点均更差，`4/4`虽然不能消除wall噪声，却形成了必要的deadband，避免对3--4倍的中等失衡反复纠偏。绝对小时间门槛`20/50ms`也已证实会改变CG轨迹而没有稳定收益。因此正式配置继续保持`default + wall time + 4/4 + 5%`，不增加materiality gate，不使用thread CPU，不继续微调2/3/4之间的阈值。
+
+从后续优化角度，Tmid参数方向已经基本耗尽。wall重复仍有7--9次exact和21--24轮DSSR的轨迹波动，说明小的计时差异会经“返回列-RMP dual-下一次pricing”放大；继续平滑比例、缩步长或重复probe只会增加另一层路径依赖，不能从局部平衡推出整棵CG更快。现有证据下仍值得保留的方向只有两类。第一，困难family若再次表现为单次exact内部耗时高，应先用默认关闭的细分诊断确认是forward扩展、dominance还是PWLF计算，不再默认归因于midpoint；第二，跨exact的固定初始化成本中，completion bound的双向传播存在理论并行空间，但同一次DSSR已经复用bound，跨dual不能缓存，且当前正式批处理采用外层多进程、每个solver单线程，因此只有改变计算资源策略后才值得做线程隔离审计。warm-start、allSegments、扩大候选池、same-dual batch、关闭completion bound和继续压join常数均已有负面或低收益证据，暂不重开。

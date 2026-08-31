@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f7fafc"/>
+      <stop offset="1" stop-color="#eef5f3"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#123047" flood-opacity="0.12"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#3b566b"/>
+    </marker>
+    <style>
+      .title{font:700 38px Arial,'Segoe UI',sans-serif;fill:#17324d}
+      .subtitle{font:500 20px Arial,'Segoe UI',sans-serif;fill:#557086}
+      .head{font:700 24px Arial,'Segoe UI',sans-serif;fill:#17324d}
+      .body{font:500 19px Arial,'Segoe UI',sans-serif;fill:#294357}
+      .small{font:500 16px Arial,'Segoe UI',sans-serif;fill:#566f81}
+      .formula{font:italic 21px Georgia,'Times New Roman',serif;fill:#183650}
+      .box{fill:#fff;stroke:#afc3d2;stroke-width:2;rx:18;filter:url(#shadow)}
+      .danger{fill:#fff2ef;stroke:#cf6654;stroke-width:2.5;rx:18;filter:url(#shadow)}
+      .m1{fill:#edf5ff;stroke:#4d7eb4;stroke-width:2.5;rx:18;filter:url(#shadow)}
+      .m2{fill:#f3efff;stroke:#7864ad;stroke-width:2.5;rx:18;filter:url(#shadow)}
+      .m3{fill:#fff8e8;stroke:#c5962f;stroke-width:2.5;rx:18;filter:url(#shadow)}
+      .core{fill:#edf8ef;stroke:#47955d;stroke-width:3;rx:22;filter:url(#shadow)}
+      .line{stroke:#3b566b;stroke-width:3;fill:none;marker-end:url(#arrow)}
+      .dash{stroke:#7d8e9b;stroke-width:2.5;stroke-dasharray:8 7;fill:none;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1600" height="1000" fill="url(#bg)"/>
+  <text x="800" y="55" text-anchor="middle" class="title">Work 3: Position Anchors for Stochastic Due-Window Scheduling</text>
+  <text x="800" y="90" text-anchor="middle" class="subtitle">Scenario-adaptive waiting is always allowed; structural anchors are separated from optional operating costs</text>
+
+  <rect x="400" y="125" width="800" height="135" class="box"/>
+  <text x="800" y="165" text-anchor="middle" class="head">Original TWA structure</text>
+  <text x="800" y="205" text-anchor="middle" class="formula">route/setup + window width + scenario ET + overtime</text>
+  <text x="800" y="235" text-anchor="middle" class="small">Overtime prices absolute finishing time; width and ET measure service quality</text>
+
+  <path d="M800 260 L800 310" class="line"/>
+  <rect x="400" y="315" width="800" height="145" class="danger"/>
+  <text x="800" y="355" text-anchor="middle" class="head">Remove overtime while retaining width cost and free waiting only</text>
+  <text x="800" y="395" text-anchor="middle" class="body">Assign recursively late minimum-width windows; faster scenarios wait</text>
+  <text x="800" y="430" text-anchor="middle" class="formula">ET = 0, width = minimum  →  route/setup base cost only</text>
+
+  <path d="M800 460 L800 505" class="line"/>
+  <path d="M800 505 L275 505 L275 550" class="line"/>
+  <path d="M800 505 L800 550" class="line"/>
+  <path d="M800 505 L1325 505 L1325 550" class="line"/>
+
+  <rect x="70" y="555" width="410" height="205" class="m1"/>
+  <text x="275" y="596" text-anchor="middle" class="head">Model 1: position + width costs</text>
+  <text x="275" y="638" text-anchor="middle" class="formula">rho(a-L) + lambda(b-a)</text>
+  <text x="275" y="675" text-anchor="middle" class="body">Position anchored by a marginal price</text>
+  <text x="275" y="710" text-anchor="middle" class="small">Initial idle may be free; range may be inactive</text>
+  <text x="275" y="738" text-anchor="middle" class="small">Lead-time versus commitment-precision trade-off</text>
+
+  <rect x="595" y="555" width="410" height="205" class="m2"/>
+  <text x="800" y="596" text-anchor="middle" class="head">Model 2: finite range + width cost</text>
+  <text x="800" y="638" text-anchor="middle" class="formula">L ≤ a ≤ b ≤ U</text>
+  <text x="800" y="675" text-anchor="middle" class="body">Position anchored by a finite feasible set</text>
+  <text x="800" y="710" text-anchor="middle" class="small">Initial idle may be free; waiting cost is optional</text>
+  <text x="800" y="738" text-anchor="middle" class="small">Contract, customer, and planning-horizon bounds</text>
+
+  <rect x="1120" y="555" width="410" height="205" class="m3"/>
+  <text x="1325" y="596" text-anchor="middle" class="head">Model 3: width + waiting costs</text>
+  <text x="1325" y="638" text-anchor="middle" class="formula">lambda(b-a) + eta W</text>
+  <text x="1325" y="675" text-anchor="middle" class="body">Waiting is the sole position price</text>
+  <text x="1325" y="710" text-anchor="middle" class="small">Charge initial idle or translation symmetry remains</text>
+  <text x="1325" y="738" text-anchor="middle" class="small">Adding a finite range yields Model 2 + waiting</text>
+
+  <path d="M275 760 L275 810 L575 810" class="line"/>
+  <path d="M800 760 L800 810" class="line"/>
+  <path d="M1325 760 L1325 810 L1025 810" class="dash"/>
+
+  <rect x="285" y="825" width="1030" height="135" class="core"/>
+  <text x="800" y="866" text-anchor="middle" class="head">Recommended W3-Core: Model 1 + Model 2</text>
+  <text x="800" y="905" text-anchor="middle" class="body">Multi-machine assignment and sequencing + sequence-dependent setup + stochastic processing + free waiting</text>
+  <text x="800" y="938" text-anchor="middle" class="body">Position and width costs + finite position/length bounds + scenario ET; no overtime or waiting cost</text>
+</svg>

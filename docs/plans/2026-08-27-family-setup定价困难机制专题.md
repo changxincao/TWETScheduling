@@ -1455,3 +1455,35 @@ random的3/4三次为`16.243/17.781/19.872s`，exact为`3.201/3.424/4.494s`，�
 验证方面，从当前源码重新focused编译并运行`NgDssrMidpointProbeConfigurationTest`、`NgDssrMidpointProbePolicyTest`和`BestBpcProfilesTest`，均通过。`wet020`上当前probe与关闭probe均得到`obj=bound=6343`、`valid=true`；`n030-set01-family,m2`上两条路径均得到`obj=bound=55392`、3次exact调用、`valid=true`。当前probe运行实际覆盖18次单侧检测，其中12次追加到另一侧耗尽，最终闭合与关闭probe完全一致。
 
 唯一保留的低严重度边界是time-limit响应性，而不是certificate正确性。单侧续探会在250-pop批次之间检查时限，但每次`forwardExtend/backwardExtend`内部会扫描当前label的全部可扩展任务；正式forward/backward和join热循环也没有把time-limit直接并入`canContinue()`。因此极重的单个扩展或完整labeling可能超过配置时限后才返回。返回后`roundCompleted`仍会因time limit为false，不能据此形成错误certificate。该行为早于本轮probe修改；若以后需要严格时限，只应按固定pop间隔增加低频检查并单独评估热路径开销，当前不为此修改算法。
+
+### 32.48 历史2/1.5、2/4、4/4及adaptive-only的大规模复核
+
+本轮先重新核对历史阈值语义。历史配置并不是`1.5/2`。在后续DSSR轮尚未设置独立接受比例时，`bidirectionalMidpointProbeEarlyStopRatio=1.5`同时控制浅层probe接受比例，`bidirectionalMidpointProbeDssrImbalanceThreshold=2.0`控制上一完整轮何时触发adaptive seed。按当前“adaptive触发阈值/后续probe接受阈值”的记法，历史参数代理应写成`2/1.5`。早期probe实现细节与当前不同，因此这里比较的是在当前单侧耗尽修正和5%步长下复现历史参数语义，不是逐行恢复旧算法。
+
+实验选择`n050-set01/02 family,m3`和`n060-set01/02 random,m3`，均使用正式ng-DSSR其余配置、TIME队列、root-only、关闭ALNS和strong branching、CPLEX单线程。三组阈值均启用首轮与后续probe。四个实例内各组最终root bound完全相同且`valid=true`。
+
+| 实例 | `2/1.5` exact/s, calls, DSSR轮 | `2/4` exact/s, calls, DSSR轮 | `4/4` exact/s, calls, DSSR轮 |
+| --- | ---: | ---: | ---: |
+| n50-set01 family,m3 | `169.759, 33, 142` | `109.312, 20, 107` | `136.215, 43, 162` |
+| n50-set02 family,m3 | `59.741, 10, 72` | `74.128, 12, 94` | `26.784, 6, 37` |
+| n60-set01 random,m3 | `9.121, 7, 13` | `11.645, 6, 11` | `11.515, 6, 11` |
+| n60-set02 random,m3 | `23.597, 16, 20` | `21.373, 16, 20` | `18.976, 16, 20` |
+| 四点合计 | `262.218, 66, 247` | `216.458, 54, 232` | `193.490, 71, 230` |
+
+历史`2/1.5`四点exact合计比当前`4/4`高`35.5%`，不应恢复。`2/4`与`4/4`仍有实例级轨迹反转：set01 family中`2/4`快`19.8%`，set02 family中反而慢`176.8%`；四点合计`2/4`比`4/4`高`11.9%`。对应probe初始化耗时合计约为`193.6/151.3/134.1s`，DSSR总轮数则为`247/232/230`。因此主要收益来自把后续probe接受区间从1.5放宽到4，减少不必要的候选移动和状态重建；adaptive触发阈值2或4仍会通过返回列和RMP dual改变整个CG轨迹，单点没有统一胜者。结合此前六点2/4对照，正式配置继续保留`4/4`。
+
+随后比较当前`4/4`、仅首轮probe后续adaptive-direct，以及完全关闭probe的固定default/windowAverage。adaptive-direct仍在每次exact第一轮执行正常probe；同一次exact第2轮以后使用上一完整轮F/B反馈得到的adaptive Tmid直接正式labeling，不再追加浅层probe。固定策略则每轮重新使用静态公式，既没有probe，也没有轮间反馈。
+
+| 实例 | 当前`4/4` exact/s | adaptive-direct exact/s | 固定default exact/s | 固定windowAverage exact/s |
+| --- | ---: | ---: | ---: | ---: |
+| n50-set01 family,m3 | `136.215` | `130.498` | `523.175` | `656.032` |
+| n50-set02 family,m3 | `26.784` | `25.847` | `80.202` | `74.084` |
+| n60-set01 random,m3 | `11.515` | `15.058` | `26.998` | `28.374` |
+| n60-set02 random,m3 | `18.976` | `16.527` | `16.905` | `15.278` |
+| 四点合计 | `193.490` | `187.930` | `647.280` | `773.768` |
+
+adaptive-direct四点合计只比当前`4/4`低`2.9%`，family两点分别低`4.2%/3.5%`，但random set01高`30.8%`、set02低`12.9%`，方向不稳定。选中probe候选的状态本来会被正式labeling复用，所以关闭后续probe并不等于纯粹消除冗余；它同时失去对新ng-memory下adaptive seed的校验，可能减少候选开销，也可能增加正式labeling。当前幅度不足以更改默认值，正式profile继续启用后续probe，adaptive-direct只保留为受控实验选项。
+
+固定Tmid在两个family实例上都出现结构性单侧膨胀。set01中default/average多轮约为`1.0--1.4万`个forward pop对`38--160`个backward pop，exact分别达到`523.2/656.0s`；set02也达到`74--80s`，约为当前4/4的三倍。random实例固定点没有同等级爆炸，但性能仍不稳定。固定策略不是数学上不可行，也不会破坏certificate；问题是ng-memory变化后最合适的切分点会移动，静态点在每轮重复制造相同失衡。default与windowAverage在family set01仅相差有效时间域约5%，两者仍同时落在坏区间，说明调整静态公式无法代替反馈和probe。因此不采用固定default、固定windowAverage，也不根据单个random点的短时优势更换流程。
+
+为复现实验，比较runner新增`twet.bpc.fullDomainCompare.midpointProbeAfterFirstDssrRound`覆盖入口；未设置时原样使用正式profile值。算法主线、正式默认和certificate流程均未修改。本轮所有24条根节点运行完整结束，结果保存在`test-results/bpc/20260831-threshold-*`与`test-results/bpc/20260831-midpoint-*`。

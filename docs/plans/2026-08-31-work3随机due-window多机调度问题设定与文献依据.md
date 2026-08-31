@@ -95,7 +95,7 @@ Yue and Zhou (2021) 对随机加工时间下的任务特定 DIF due window 使�
 \mathbb E\!\left[\alpha_jE_j+\beta_jT_j+\gamma_ja_j+\delta_j(b_j-a_j)\right].
 \]
 
-论文的现实解释是：较窄窗口对客户更有吸引力，但降低制造商的生产灵活性；较宽窗口更容易满足，却可能造成客户流失，因此必须在客户吸引力和运营灵活性之间权衡。TWA 文献的解释与此一致：客户偏好更精确的服务时间，物流服务商偏好更宽的时间窗以获得执行灵活性。宽度成本并不是“制造商使用宽窗口产生的直接现金支出”，而是较模糊承诺造成的服务价值或客户满意度损失。
+论文的现实解释是：较窄窗口对客户更有吸引力，但降低制造商的生产灵活性；较宽窗口更容易满足，却可能造成客户流失，因此必须在客户吸引力和运营灵活性之间权衡。两篇 TWA 也有明确解释，但详细程度不同。Çelik et al. (2025) 把提前向客户沟通可靠时间窗视为提升 customer service 的手段，指出客户会根据该承诺安排其后续活动，并在结果中把窗口宽度和窗口违反共同作为服务质量指标。Cavaliere et al. (2026) 表述得更直接：客户通常偏好较小窗口，物流服务商为了执行灵活性偏好较大窗口；模型中路线和 overtime 属于 operational costs，窗口宽度、earliness 和 tardiness 属于 customer satisfaction，并可用目标权重调节运营吸引力与客户偏好。因此，宽度成本不是“使用宽窗口产生的一笔直接生产或运输现金支出”，而是较模糊承诺造成的服务价值、客户满意度或订单吸引力损失。[Çelik et al. (2025)](https://doi.org/10.1287/trsc.2024.0750) [Cavaliere et al. (2026)](https://doi.org/10.1016/j.ejor.2025.07.034)
 
 现实量化可来自不同承诺档位的报价差、客户对 1/2/4 小时时间槽的选择率、取消或流失概率、因宽承诺支付的折扣或补偿，以及 SLA 中不同时间精度对应的价格。若有历史订单，可把“窗口每扩大一小时导致的期望贡献毛利损失”作为 \(\lambda_j\)；没有可靠数据时，\(\lambda_j\) 只能解释为标准化权重，不能声称是实际货币成本。
 
@@ -218,41 +218,54 @@ Kim and Lee (2009) 已把序列相关 setup 引入 due-date assignment，说明�
 
 因此，现实数据充分时，\(\alpha,\beta,g,L,U,D^{\min},D^{\max}\) 主要来自财务、MES、合同和服务目录，\(\rho,\lambda\) 主要来自客户选择/报价数据。没有客户数据时，\(\rho,\lambda\) 只能称为标准化偏好权重，并通过敏感性分析解释，不能写成已经观测到的货币成本。当前不设置 waiting 和 overtime 成本只是论文的问题边界，不表示现实机器空闲或超班必然没有成本；相应费用可在扩展实验中加入，但不应为了“现实感”把与 \(\alpha,\beta,g\) 重复的损失再次计入。
 
-### 4.7 审稿人追问“现实中数据怎样设置”时的处理
+### 4.7 窗口宽度成本的直接现实证据与量化方式
 
-这个问题不能靠引用一篇 DWA 论文后继续使用无解释的 \(U[1,10]\) 回避。应先区分论文定位：若声称解决某家企业的实际问题，就必须给出该企业的数据提取和标定过程；若论文定位为新模型与精确算法研究，则允许使用半合成 benchmark，但必须说明每类数据的业务锚、生成公式、单位、参数档位和稳健性验证，且不能声称合成权重是企业实测成本。
+#### 4.7.1 两篇 TWA 到底怎样解释
 
-#### 4.7.1 三层数据来源
+Çelik et al. (2025) 没有把 \(\sigma(b_i-a_i)\) 解释成物流服务商支付的直接货币成本，也没有从客户数据估计 \(\sigma\)。它的业务逻辑是：次日配送需要提前向客户沟通可靠的访问窗口，客户会根据该窗口安排依赖性的后续活动；因此，窗口越窄、违反越少，customer service 越好。论文将总窗口宽度称为 time-window assignment cost，并用“窗口宽度 + earliness/lateness”衡量服务结果。也就是说，\(\sigma\) 是把承诺精度转换为目标值的 service-quality weight。其算例令宽度、ET 和 overtime 权重分别为 \(1,3,4\)，作者说明目的是平衡四类目标项并使其与路线成本具有可比尺度，而不是声称这些值来自企业估计。
 
-第一层是可直接从企业系统取得的数据。加工时间和换型时间来自 MES/工单；\(g_{ij}\) 来自人工、耗材、能耗和首件报废；\(\alpha_j\) 来自库存持有、维护和资金占用；\(\beta_j\) 来自合同罚金、加急补救和历史迟交损失；\(L_j,U_j,D_j^{\min},D_j^{\max}\) 来自合同、客户接收规则和服务目录。这些参数不需要通过客户选择模型估计。
+Cavaliere et al. (2026) 给出的解释更明确。原文直接写明 customers generally prefer smaller time windows whereas providers seek larger ones for increased flexibility，并在模型定义中称客户窗口 the narrower the better。它进一步把路线与 overtime 归为 operational costs，把窗口宽度、earliness 和 tardiness归为 customer satisfaction。因而 \(\alpha(b_i-a_i)\) 表示较宽承诺降低客户满意度或服务偏好，而不是宽窗口增加车辆运营成本。服务商从宽窗口获得的好处已经通过更容易安排路线、减少 ET 和 overtime 内生体现，不应再把这部分重复写进 \(\alpha\)。其默认算例使用宽度、overtime 和 ET 权重 \(1,10,10\)，再通过敏感性实验改变权重；同样没有把这些数值解释为实证货币估计。
 
-第二层是位置和宽度偏好的半实证标定。按客户等级或产品族而不是单个一次性任务，使用历史报价中的“报价金额、承诺交期、窗口宽度、是否成交”估计接受概率；也可以利用加急费、交期档位价差、标准/高级服务槽价格，或开展 stated-choice 调查。Feng and Zhang (2017) 的 MTO lead-time/price quotation 模型明确假设企业可由历史数据掌握客户对价格和 lead time 的敏感性，并可在谈判中获得个体信息；Oyama et al. (2024) 则实际用选择实验分别估计配送速度和时间槽精度的支付意愿。这两类文献说明该标定路径在方法上成立，但不意味着它们已经给出了当前制造问题的 \(\rho_j,\lambda_j\)。[Feng and Zhang (2017)](https://doi.org/10.1016/j.ejor.2016.08.050) [Oyama et al. (2024)](https://doi.org/10.1016/j.jretconser.2024.103711)
+两篇论文因此都为“宽度进入目标”提供了实际问题解释；区别是 2025 以可靠承诺和 customer service 间接说明，2026 明确写成客户与服务商之间的偏好冲突。它们的不足仅在于没有进行货币化标定，而不是缺少现实动机。
 
-第三层是在没有客户级报价数据时使用结构化半合成参数。此时不再宣称货币标定，而是把 \(\rho_j,\lambda_j\) 称为 customer-preference weights，并使实验回答“算法在不同偏好结构下是否稳定”，而不是回答某家企业应采用哪个精确数值。
+#### 4.7.2 相关配送文献给出的可观测证据
 
-#### 4.7.2 推荐的半合成算例生成方式
+相关 time-slot management 文献把上述抽象的满意度权重进一步落到了真实报价和客户选择上。
 
-1. **统一单位。** 时间统一为小时，成本统一为货币/小时；若原始 benchmark 没有金额，则将 \(\beta_j\) 或订单贡献毛利作为任务成本尺度 \(c_j\)，其余系数以 \(c_j\) 的比例生成。目标整体乘同一常数不改变最优解，真正需要报告的是各成本的相对比例。
-2. **保留任务异质性但避免独立乱抽。** 先给每个任务分配客户/产品类别，再由类别给出 \(\rho,\lambda,\alpha,\beta\) 的基准比例，最后乘小幅任务扰动。这样可以解释为高价值、交期敏感、精度敏感等客户类型，也避免四个系数独立取 \(U[1,10]\) 后产生大量偶然边界任务。
-3. **设置一个非退化主档。** 主 benchmark 应逐任务筛除已知的充分边界条件 \(\rho_j>\lambda_j\)、\(\lambda_j>\beta_j\)、\(\lambda_j>\rho_j+\alpha_j\) 以及联合分位交叉条件，使大多数任务没有被参数预先强迫到左边界或最小宽度。也可选取诊断分位水平 \(0<q_j^a<q_j^b<1\)，再由
+1. Köhler et al. (2020) 研究 attended home delivery 的长短时间槽，列举 Tesco 同时提供一小时和四小时时间槽、短窗口价格约为长窗口两倍的实际做法，并使用德国线上超市的真实订单数据构造部分需求场景。这说明窗口精度本身可以作为有价格差的服务产品，而不仅是抽象偏好。[Köhler et al. (2020)](https://doi.org/10.1016/j.omega.2019.01.001)
+2. Yang et al. (2016) 使用真实线上超市历史预订数据估计 multinomial-logit 客户选择模型，再根据客户对各时间槽和价格的选择确定折扣或附加费。这说明时间槽价值可以从“提供了哪些槽、各自价格、客户最终选择哪个槽”的业务数据中识别。[Yang et al. (2016)](https://doi.org/10.1287/trsc.2014.0549)
+3. Oyama et al. (2024) 直接定义 time-slot shortening 的支付意愿 VOTS，即客户愿意为时间槽缩短一小时额外支付多少钱。其 4,062 人选择实验得到的 VOTS 中位数为 5.0 JPY/小时，并发现不同客户、商品类别和购物频率之间存在明显异质性。这为“每扩大一小时窗口造成多少客户价值损失”提供了最直接的货币化定义。[Oyama et al. (2024)](https://doi.org/10.1016/j.jretconser.2024.103711)
+4. Köhler et al. (2023) 把不同长度窗口区分为 standard 与 premium delivery options，并用 static/dynamic price 和 nested-logit 客户选择模型研究盈利和服务质量。这说明若企业真实销售的是离散服务档位，宽度价值更适合用阶梯或分段函数，而不必强行假设全程线性。[Köhler et al. (2023)](https://doi.org/10.1016/j.ejtl.2023.100108)
+5. Ulmer et al. (2024) 从上门服务直接解释了客户为什么在意宽度：客户通常必须调整自己的日程并在场，因此需要准确的到达时间估计；其研究把窄而可靠的客户特定窗口作为 customer convenience，并明确要求将路线效率的节省与客户便利损失权衡。这为“客户下游计划占用”提供了不依赖价格数据的行为依据。[Ulmer et al. (2024)](https://doi.org/10.1287/trsc.2023.0004)
+
+#### 4.7.3 在当前制造业问题中的对应含义
+
+制造业 DWA 文献给出的对应机制同样明确。Mosheiov and Sarig (2008) 直接把 due-window 长度设为销售谈判中与客户共同决定的变量：推迟窗口结束时刻、扩大窗口会增加供应商的生产灵活性和交付选择，但大窗口会降低供应商竞争力。Yue and Wan (2016) 随后指出大窗口可能不被客户接受并造成销售损失，小窗口则减少制造商的生产灵活性和交付选择；Yue and Zhou (2021) 在随机加工的定制服装案例中再次说明，小窗口更吸引客户，大窗口虽然容易满足却可能造成客户流失。对当前按单/定制生产问题，\(\lambda_j(b_j-a_j)\) 因此可以解释为：任务 \(j\) 的承诺区间每扩大一小时，客户因交付精度下降、需要保留更长验收/提货待命区间或无法准确安排下游活动而产生的价值损失。它是客户侧承诺精度损失，经价格、成交概率、折扣或满意度权重转化到制造商目标中。[Mosheiov and Sarig (2008)](https://doi.org/10.1016/j.mcm.2007.08.018) [Yue and Wan (2016)](https://doi.org/10.1057/jors.2015.107) [Yue and Zhou (2021)](https://doi.org/10.1016/j.ejor.2020.08.029)
+
+这个解释与 ET 成本不重复。\(\lambda_j\) 对事前承诺的模糊程度定价，即使最终在窗口内完成也会发生；\(\alpha_j,\beta_j\) 则对事后实际完成早于或晚于承诺窗口的偏差定价。制造商从宽窗口获得的生产灵活性由排程更容易、ET 更低体现，不应把它再次作为负的宽度成本重复计算。
+
+#### 4.7.4 宽度系数可以怎样设置
+
+现实中至少有四种可落地方式。
+
+1. **服务档位价格差。** 若宽度 \(D^{S}\) 的精确承诺售价为 \(P^{S}\)，宽度 \(D^{L}>D^{S}\) 的弹性承诺售价为 \(P^{L}<P^{S}\)，线性近似为
 
    \[
-   \lambda_j=\beta_j(1-q_j^b),
-   \qquad
-   \rho_j=\lambda_j-\alpha_jq_j^a
+   \lambda_j\approx\frac{P^{S}-P^{L}}{D^{L}-D^{S}}.
    \]
 
-   反推正的 \(\rho_j,\lambda_j\)。这里的分位关系只用于生成不易出现局部边界支配的成本比例，不用于消除完整 SAA 模型中的 due-window 变量，也不声称是经验估计。
-4. **另设结构压力档。** 除非退化主档外，再设置 position-dominant、width-dominant、tardiness-dominant 和文献式 unrestricted-random 四组，并报告每组中满足各边界条件的任务比例。这样理论性质既得到验证，也不会让所有计算结论只来自刻意筛选的简单实例。
-5. **窗口范围跟随业务时间尺度。** 若没有真实合同，可先用一个固定、公开且与待比较算法无关的 nominal schedule 生成参考完成时刻 \(\widetilde C_j\)，再设置 \(L_j=\max\{0,\widetilde C_j-\Delta_j^-\}\)、\(U_j=\widetilde C_j+\Delta_j^+\)。\(D_j^{\min}=0\) 作为通用基线；只有槽粒度或验收持续时间明确时才设正值；\(D_j^{\max}\) 取 \(U_j-L_j\) 的业务档位比例。生成后实例固定，所有算法使用完全相同的数据。
-6. **随机时间保留共同冲击。** 从确定 benchmark 或 MES 均值生成 \(p_{j\omega},s_{ij\omega}\) 时，应加入班次、设备状态或人员效率等场景共同因子，再叠加任务/转换特定扰动，不能对每个任务和每条 setup 弧完全独立加噪。至少设置低、中、高三个 CV 档，并公开随机种子。
-7. **SAA 与评价样本分开。** 训练场景用于求解，一组更大的独立场景用于样本外评价；对每个实例做多个独立 SAA replication，报告窗口位置/宽度、ET、setup 成本、总成本及置信区间，避免参数结论依赖一组随机样本。
+   若有多个一天、半天、两小时等档位，应使用分段线性或离散档位成本，而不是单一斜率。
+2. **客户选择或支付意愿。** 通过交付窗口宽度与价格的 stated/revealed choice 数据估计客户类型 \(g\) 的 VOTS；对于属于该类型的任务，\(\lambda_j\) 可取相应的货币/小时估值，并按订单价值或客户等级调整。
+3. **成交概率与贡献毛利。** 若历史报价表明窗口扩大使接受概率下降，设订单贡献毛利为 \(m_j\)，则局部边际损失可写成
 
-#### 4.7.3 论文中必须报告的验证
+   \[
+   \lambda_j\approx-m_j\frac{\partial P_g(\text{accept}\mid D,z)}{\partial D}.
+   \]
 
-算例表应列出所有参数的单位、来源、分布、相关结构和随机种子。结果表除总目标外，还应报告位置、宽度、earliness、tardiness 和 setup 各项占比，以及点窗口比例、端点落界比例和触发理论边界条件的任务比例。对 \(\rho\) 和 \(\lambda\) 至少做 \(0.5/1/2\) 倍或相近的多档敏感性；若窗口结构在合理范围内完全不变，应如实说明该参数在当前数据上不敏感，而不能只报告算法时间。
+   这里应按客户或产品群组估计，不能要求为每个一次性任务单独拟合 \(P_j\)。
+4. **合同折扣或补偿。** 如果采购合同或 SLA 规定精确承诺对应溢价、宽承诺需要折扣或补偿，则直接按每扩大一小时减少的合同收入设置 \(\lambda_j\)。
 
-因此，对审稿人的核心回应不是“这些值在现实中就是 \(U[1,10]\)”，而是：现有研究和企业实践支撑模型中的经济机制；可直接观察的参数来自运营和合同数据；难直接观察的客户偏好可由报价/选择数据估计；本文在缺乏专有企业数据时采用具有明确业务尺度和结构控制的半合成实例，并通过多档敏感性、结构统计和独立样本外实验验证结论不依赖某一组任意权重。该口径既不夸大实证性，也足以支撑方法论文的数值研究。
+因此，当前模型的现实依据并不是“为了防止窗口无限扩张而人为加一项成本”。数学上它确实同时防止退化，但业务上它表达的是客户对承诺精度的价值。最有力的论文叙述应从定制生产中的交期协商和客户下游计划出发，再用 TWA 的 customer-satisfaction 解释、制造业 DWA 的客户流失解释，以及 time-slot pricing 的真实价格和选择证据共同支撑。数值实验如何生成只能放在此后单独说明，不能代替这条实际问题链。
 
 ## 5. 推荐的两阶段 SAA 模型
 
@@ -542,3 +555,11 @@ ET 目标足以使问题成立，并且是保留连续 recourse 与精确 Bender
 12. Subramanyam, A., Wang, A., and Gounaris, C. E. (2018). A scenario decomposition algorithm for strategic time window assignment vehicle routing problems. *Transportation Research Part B*, 117, 296-317. https://doi.org/10.1016/j.trb.2018.09.008
 13. Hadj Salem, K., Kramer, A., and Robbes, A. (2026). Job sequencing and tool switching problem with non-identical parallel machines: Mathematical formulations and modeling improvements. *European Journal of Operational Research*, 330(2), 416-426. https://doi.org/10.1016/j.ejor.2025.09.026
 14. 本地综述表：D:\重要文件\桌面备份\曹长新\同济大学\学习和生活\博士\研究生学习\研究方向\毕设相关\TWET\work2_DDA\2026.06相关分析记录\DDA_literature_final.xlsx。该表用于定位和交叉检查全文，不替代原论文作为最终证据。
+15. Mosheiov, G., and Sarig, A. (2008). A multi-criteria scheduling with due-window assignment problem. *Mathematical and Computer Modelling*, 48(5-6), 898-907. https://doi.org/10.1016/j.mcm.2007.08.018
+16. Yue, Q., and Wan, G. (2016). Single machine SLK/DIF due window assignment problem with job-dependent linear deterioration effects. *Journal of the Operational Research Society*, 67(6), 872-883. https://doi.org/10.1057/jors.2015.107
+17. Köhler, C., Ehmke, J. F., and Campbell, A. M. (2020). Flexible time window management for attended home deliveries. *Omega*, 91, 102023. https://doi.org/10.1016/j.omega.2019.01.001
+18. Yang, X., Strauss, A. K., Currie, C. S. M., and Eglese, R. (2016). Choice-Based Demand Management and Vehicle Routing in E-Fulfillment. *Transportation Science*, 50(2), 473-488. https://doi.org/10.1287/trsc.2014.0549
+19. Oyama, Y., Fukuda, D., Imura, N., and Nishinari, K. (2024). Do people really want fast and precisely scheduled delivery? E-commerce customers' valuations of home delivery timing. *Journal of Retailing and Consumer Services*, 78, 103711. https://doi.org/10.1016/j.jretconser.2024.103711
+20. Köhler, C., Ehmke, J. F., Campbell, A. M., and Cleophas, C. (2023). Evaluating pricing strategies for premium delivery time windows. *EURO Journal on Transportation and Logistics*, 12, 100108. https://doi.org/10.1016/j.ejtl.2023.100108
+21. Ulmer, M. W., Goodson, J. C., and Thomas, B. W. (2024). Optimal Service Time Windows. *Transportation Science*, 58(2), 394-411. https://doi.org/10.1287/trsc.2023.0004
+22. Zorzini, M., Corti, D., and Pozzetti, A. (2008). Due date (DD) quotation and capacity planning in make-to-order companies: Results from an empirical analysis. *International Journal of Production Economics*, 112(2), 919-933. https://doi.org/10.1016/j.ijpe.2007.08.005

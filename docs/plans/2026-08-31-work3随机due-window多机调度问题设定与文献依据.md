@@ -105,15 +105,17 @@ Yue and Zhou (2021) 对随机加工时间下的任务特定 DIF due window 使�
 
 现有核心调度文献并没有把 \(\rho_j,\lambda_j\) 标定为企业实测货币值。Yue and Zhou (2021) 虽然使用任务特定 ET、位置和宽度系数，但算例中均从 \(U[1,10]\) 生成；2025 TWA 使用宽度、ET、overtime 的归一化权重 1、3、4，2026 TWA 默认使用 1、10、10，二者都没有位置成本。因此，这些论文支持的是成本形式和权衡，不是数值标定。
 
-若需要现实量化，可令 \(P_j(a,D)\) 表示客户面对窗口起点 \(a\)、宽度 \(D\) 时的订单接受概率，\(m_j\) 为贡献毛利，局部线性化得到
+若企业有足够的历史报价数据，可以按客户等级、产品族或市场划分群组 \(g\)，估计群组接受概率 \(P_g(a,D,z)\)，其中 \(z\) 包含价格和订单属性。不能为每个通常只出现一次的任务单独可靠估计 \(P_j\)。设 \(m_j\) 为贡献毛利，局部线性化可得到
 
 \[
-\rho_j\approx-m_j\frac{\partial P_j}{\partial a},
+\rho_j\approx-m_j\frac{\partial P_g}{\partial a},
 \qquad
-\lambda_j\approx-m_j\frac{\partial P_j}{\partial D}.
+\lambda_j\approx-m_j\frac{\partial P_g}{\partial D}.
 \]
 
-这些导数可以由历史报价—接受数据、分档服务价格或 stated-choice/mixed-logit 调查估计。Zorzini et al. 对 15 家按单制造企业的实证研究支持承诺 lead time 对订单获取的重要性；一项 2024 配送选择研究则直接估计 Value of Delivery Time 和 Value of Time Slot Shortening，说明位置与宽度的边际偏好可以分别识别，但其电商数值不能直接移植到制造业。没有企业选择数据时，\(\rho_j,\lambda_j\) 应写成异质 preference weights，并做比例敏感性，而不能称为真实货币成本。[Zorzini et al. (2008)](https://doi.org/10.1016/j.ijpe.2007.08.005) [delivery timing valuation study (2024)](https://doi.org/10.1016/j.jretconser.2024.103711)
+这要求大量同时包含承诺位置、窗口宽度、价格和接受/拒绝结果的数据，现实中往往难以获得，不能把它作为模型成立的前提。Zorzini et al. 对 15 家按单/按工程制造企业的实证研究只证明 due-date quotation、交付 lead time 与接单阶段产能评估是重要的现实决策，没有估计 \(\rho_j\) 或 \(\lambda_j\)。2024 配送选择研究则通过消费者在配送速度、窗口宽度和价格之间的选择，说明两类偏好在有选择数据时可以分别识别；其电商估值不能移植为制造业参数。现实中更可行的标定顺序是：企业已有的加急报价和服务档位价差；销售人员的无差异判断；最后才是归一化 preference weights 和敏感性分析。[Zorzini et al. (2008)](https://doi.org/10.1016/j.ijpe.2007.08.005) [delivery timing valuation study (2024)](https://doi.org/10.1016/j.jretconser.2024.103711)
+
+当前模型最合适的统一现实场景是按单/定制生产中的交付承诺设计，而不是所有制造系统。制造商在生产前与客户协商订单完成、提货或验收区间；更早、更窄的承诺更有吸引力，但随机加工和随机换型使其更难兑现。Yue and Zhou (2021) 的定制服装案例直接包含客户特定 due window、随机加工、提前完成后的存储维护、迟完工后的投诉折扣，以及窗口宽度与生产灵活性的权衡。MTO/ETO 实证支撑交付位置对接单竞争力的影响；restricted due-date 文献支撑过晚承诺可能违反既有客户协议；TWAVRP 文献则直接把外生窗口解释为客户营业时间、工时和政府规定。因此当前组合是由几类真实业务机制整合而来，但随机 setup、同质多机和任务特定四个窗口界属于本文扩展，不能声称已有一个企业案例完整采用了同一数学模型。[Yue and Zhou (2021)](https://doi.org/10.1016/j.ejor.2020.08.029) [Shabtay (2016)](https://doi.org/10.1016/j.ejor.2015.12.043) [Subramanyam et al. (2018)](https://doi.org/10.1016/j.trb.2018.09.008)
 
 ### 4.3 位置区间与长度上下界
 
@@ -149,18 +151,18 @@ Kim and Lee (2009) 已把序列相关 setup 引入 due-date assignment，说明�
 
 1. **earliness 系数**：设任务货值为 \(v_j\)，年库存持有率为 \(r_j\)，则资金占用部分约为 \(v_jr_j/8760\)；再加每小时仓储、维护、保险、保鲜和内部搬运边际费用，得到 \(\alpha_j\)。这部分通常可以从财务、仓储和 MES 数据直接估计。
 2. **tardiness 系数**：把合同每小时罚金、期望加急运输/加班补救费用，以及“迟交一小时增加的取消或流失概率 × 订单贡献毛利”相加，得到 \(\beta_j\)。若合同是阶梯罚金，应使用分段线性 tardiness 成本，而不是强行压成一个常数斜率。
-3. **位置成本**：设订单贡献毛利为 \(m_j\)，客户接受概率为 \(P_j(a,D)\)，其中 \(a\) 是承诺开始时刻、\(D=b-a\) 是窗口宽度。承诺推迟的局部边际损失可估为
+3. **位置成本**：有足够报价样本时，按客户/产品群组 \(g\) 估计接受概率 \(P_g(a,D,z)\)，而不是为单个任务估计 \(P_j\)。承诺推迟的局部边际损失可估为
 
    \[
-   \rho_j\approx -m_j\frac{\partial P_j(a,D)}{\partial a}
+   \rho_j\approx -m_j\frac{\partial P_g(a,D,z)}{\partial a}
    +\text{每小时报价折扣或延期回款成本}.
    \]
 
-   \(P_j\) 可由历史报价—接受数据做 logistic/choice 模型，也可由不同交期报价的 A/B 数据估计。Yue and Zhou (2021) 支持位置成本这一建模项；Shabtay (2016) 直接说明承诺过晚可能违反制造商与客户的先期协议。[Shabtay (2016)](https://doi.org/10.1016/j.ejor.2015.12.043)
+   若没有足够选择数据，直接使用加急报价、交期档位折扣或归一化权重。Yue and Zhou (2021) 支持位置成本这一建模项；Shabtay (2016) 直接说明承诺过晚可能违反制造商与客户的先期协议。[Shabtay (2016)](https://doi.org/10.1016/j.ejor.2015.12.043)
 4. **宽度成本**：同一接受概率模型给出
 
    \[
-   \lambda_j\approx -m_j\frac{\partial P_j(a,D)}{\partial D}
+   \lambda_j\approx -m_j\frac{\partial P_g(a,D,z)}{\partial D}
    +\text{窗口每扩大一小时对应的折扣或 SLA 补偿}.
    \]
 

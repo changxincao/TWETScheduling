@@ -1394,3 +1394,23 @@ windowAverage只在6个点中的2个更快，总时间配对变化的中位数�
 若以后继续改进时间信号，优先顺序如下。第一，只增加诊断，同时记录单调wall time和当前Java线程CPU time，在固定dual/ng-memory快照及重复运行上比较方差、方向一致率和阈值跨越次数；只有CPU time稳定优于wall time后才考虑切换决策依据。第二，处理小分母而非平滑所有比例：当两侧总耗时很小、或两侧都在probe预算内耗尽时，即使比例很大也不值得为此移动Tmid，可增加绝对节省必须覆盖额外probe成本的materiality gate。第三，不采用跨DSSR轮的简单移动平均或EWMA，因为每轮ng-memory都在变化，旧耗时并非同一搜索问题，平滑会把过时结构带入新一轮。重复计时取中位数虽稳定，但需要重复labeling，开销也不合理。
 
 因此当前结论仍是保留`default + wall-time comparison + 4/4`。时间信号并非理想无噪声指标，但在未完成CPU/wall双计时诊断前，它仍是最直接且总体成本最低的代理；3/4只记录为未测试候选，不因插值直觉直接采用。
+
+### 32.45 短耗时materiality gate实测与wall/CPU时间区别
+
+wall time和thread CPU time测量的对象不同。wall time是从代码段开始到结束现实中过去的时间，包含当前线程真正执行、被操作系统换出、其他进程抢占、等待以及JVM safepoint/GC暂停；它直接对应用户看到的求解时间，但短片段容易受运行环境扰动。thread CPU time只累计当前Java线程实际占用CPU执行指令的时间，线程被挂起或等待时不计，因此对纯单线程labeling通常更可重复；但它会忽略真实发生的调度与全局暂停，也不能自动消除JIT、缓存和不同label计算成本差异。合理做法是先同时记录两者，而不是预设CPU time必然优于wall time。
+
+先用现有4/4日志统计“完整轮比例超过4并在下一轮实际触发adaptive”的绝对耗时。n40-set01 family有13次，全部超过`1.2s`；n50-set02 family只有1次，为`337ms`；n50-set02 random有14次，全部低于`250ms`，其中11次低于`20ms`、13次低于`50ms`。最极端的两次完整轮只耗`3.0/3.5ms`，却分别把Tmid移动约`1015/1084`。其余三个已检查实例没有此类adaptive。因此小分母问题主要集中在较容易的random exact调用，不是当前困难family定价的主要来源。
+
+为验证这些短轮是否会通过错误Tmid放大后续轨迹，临时增加了默认关闭的绝对门槛：仅当上一完整轮`forward+backward`总耗时达到门槛时才允许adaptive分位点跳转；下一轮原有probe、状态复用、正式labeling和certificate完全不变。对n50-set02 random按交替顺序运行`0/20/50ms`各3次，结果如下，所有运行均为同一root bound `57741.110204`且`valid=true`。
+
+| 门槛 | 总时均值/中位数/s | exact均值/中位数/s | exact调用均值/中位数 | 三次DSSR轮合计 | adaptive/被门槛抑制 |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 0ms | 24.745 / 23.276 | 5.211 / 4.879 | 12.33 / 12 | 93 | 41 / 0 |
+| 20ms | 25.335 / 26.113 | 4.854 / 5.005 | 9.33 / 10 | 79 | 22 / 19 |
+| 50ms | 24.892 / 24.394 | 5.406 / 5.791 | 12.33 / 13 | 128 | 4 / 85 |
+
+`20ms`确实减少了exact调用和DSSR轮数，但总时均值仍慢`2.4%`、中位数慢`12.2%`，exact中位数也没有改善；一次7-call短轨迹被另两次10/11-call轨迹抵消。`50ms`抑制更彻底，却把三次DSSR轮合计从93增到128，exact中位数慢约`18.7%`。这说明门槛改变的主要不是几毫秒probe本身，而是首批列、RMP dual和后续CG路径；方向仍不稳定。
+
+又在n50-set01 random补充一次`0/20/50ms`配对。三组均为9次exact、11轮DSSR、相同root bound `44174.676471`且`valid=true`；总时分别为`27.501/28.422/27.340s`，exact为`4.513/4.536/4.499s`。20/50ms都抑制了2次短adaptive，但求解轨迹和时间基本未变，说明这些cheap rank-0轮即使比例很大，移动与否通常也不构成主要开销。
+
+因此绝对门槛没有稳定收益：20ms只在一个重复中偶然缩短CG轨迹，50ms已出现过度抑制。临时配置、runner入口和测试代码均已撤回，重新focused编译后`NgDssrMidpointProbePolicyTest`、`NgDssrMidpointProbeConfigurationTest`和`GCBBFullDomainBestProfileTest`通过。正式状态继续保持`default + wall time + 4/4`。若以后还要研究计时噪声，只值得先做不改变决策的wall/thread-CPU双计时诊断，而不是再次加入绝对门槛。

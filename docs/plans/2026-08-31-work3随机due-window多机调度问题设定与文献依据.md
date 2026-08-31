@@ -127,7 +127,7 @@ JIT 文献对 ET 的解释相对稳定。earliness 可对应成品库存、仓�
 
 Kim and Lee (2009) 已把序列相关 setup 引入 due-date assignment，例子是注塑生产：连续任务使用相同材料时只需换模，材料改变时还需要清洗螺杆，setup 时间取决于前后任务组合。当前 Work 3 使用同质机假设，令 \(s_{ij}\) 表示任务 \(i\) 后加工任务 \(j\) 的换型时间，不带机器下标，并从 MES 换型日志、工艺标准或 SMED 数据估计。
 
-setup 时间必须进入场景时间传播，setup cost 在当前核心模型中默认保留。若只有 setup 时间数据，可使用统一单位时间成本 \(\kappa^s\)，目标写成 \(\kappa^s\sum_{i,j}s_{ij}x_{ij}\)；若人工、材料、清洗剂、能耗或报废损失可单独获得，则改用任务转换成本 \(g_{ij}\)。两种口径二选一，避免重复计费。
+setup 时间必须进入场景时间传播，setup cost 在当前核心模型中默认保留，并暂定统一写成任务转换金额 \(g_{ij}\)。它可由人工、材料、清洗剂、能耗或报废损失直接估计；若只有 setup 时间数据，再令 \(g_{ij}=\kappa^s s_{ij}\)。\(s_{ij}\) 负责时间传播，\(g_{ij}\) 负责目标计价，避免两个符号混用或重复计费。
 
 ## 5. 推荐的两阶段 SAA 模型
 
@@ -143,13 +143,13 @@ setup 时间必须进入场景时间传播，setup cost 在当前核心模型中
 
 \[
 \min
-\kappa^s\sum_{i,j}s_{ij}x_{ij}
+\sum_{i,j}g_{ij}x_{ij}
 +\sum_{j\in J}\left[\rho_j(a_j-L_j)+\lambda_j(b_j-a_j)\right]
 +\sum_{\omega\in\Omega}\pi_\omega\sum_{j\in J}
 \left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right).
 \]
 
-第一项是默认保留的 setup 成本；若获得独立转换金额 \(g_{ij}\)，用 \(\sum g_{ij}x_{ij}\) 替代按时间计费的形式。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；更宽的窗口降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序和 setup 又改变所有下游任务在各场景中的完工分布。
+第一项是默认保留的 setup 成本。若没有独立转换金额，就用 \(g_{ij}=\kappa^s s_{ij}\) 生成该参数。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；更宽的窗口降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序和 setup 又改变所有下游任务在各场景中的完工分布。
 
 ### 5.3 主要约束
 

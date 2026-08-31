@@ -6,7 +6,7 @@
 
 Work 3 可以沿用 2025 和 2026 两篇 TWATSP-ST 的基本思路，把“客户访问顺序 + 随机旅行时间 + 可决策时间窗”改写为“机器分配与任务顺序 + 随机加工时间 + 可决策 due window”。但机器调度模型不能直接删除 TWA 中的 overtime 后保持其余设定不变。两篇 TWA 都没有任务位置成本，窗口的绝对位置主要由固定出发时刻和班次结束时间共同约束；一旦删掉 overtime，又保留免费等待和仅按窗口宽度收费，窗口就失去绝对时间锚。
 
-当前推荐的核心问题为：考虑并行或非相关多机、任务特定 DIF due window、随机加工时间、序列相关 setup、场景自适应等待；一阶段共同决定机器分配、加工顺序和每个任务的 due window，二阶段按场景决定实际开始与完工时刻；目标包括 due-window 位置成本、宽度成本和期望 earliness/tardiness（ET）成本，不含 overtime，也不对 waiting 单独收费；同时设置任务特定的窗口位置区间和窗口长度上下界。
+当前推荐的核心问题为：考虑同质并行机、任务特定 DIF due window、随机加工时间、与机器无关的序列相关 setup \(s_{ij}\)、场景自适应等待；一阶段共同决定机器分配、加工顺序和每个任务的 due window，二阶段按场景决定实际开始与完工时刻；目标包括 setup 成本、due-window 位置成本、宽度成本和期望 earliness/tardiness（ET）成本，不含 overtime，也不对 waiting 单独收费；同时设置任务特定的窗口位置区间和窗口长度上下界。
 
 这个设定同时使用了两种互补机制：位置成本在可行区间内部给较晚承诺定价，有限区间则表达不可违反的合同或客户边界。二者并非数学上都必需，但现实含义不同，合用后模型更稳定，也与前两个 work 的 due-window 设定保持连续。
 
@@ -125,17 +125,17 @@ JIT 文献对 ET 的解释相对稳定。earliness 可对应成品库存、仓�
 
 ### 4.5 setup
 
-Kim and Lee (2009) 已把序列相关 setup 引入 due-date assignment，例子是注塑生产：连续任务使用相同材料时只需换模，材料改变时还需要清洗螺杆，setup 时间取决于前后任务组合。当前 Work 3 可令 \(s_{ijm}\) 表示任务 \(i\) 后在机器 \(m\) 加工任务 \(j\) 的换型时间，并从 MES 换型日志、工艺标准或 SMED 数据估计。
+Kim and Lee (2009) 已把序列相关 setup 引入 due-date assignment，例子是注塑生产：连续任务使用相同材料时只需换模，材料改变时还需要清洗螺杆，setup 时间取决于前后任务组合。当前 Work 3 使用同质机假设，令 \(s_{ij}\) 表示任务 \(i\) 后加工任务 \(j\) 的换型时间，不带机器下标，并从 MES 换型日志、工艺标准或 SMED 数据估计。
 
-setup 时间必须进入场景时间传播；setup 成本 \(c^{s}_{ijm}\) 是否进入目标取决于是否存在独立于时间的人工、材料、清洗剂、能耗或报废损失。若这些代价已经由 ET 间接体现，就不必为了“让目标更多”再加 setup cost。推荐核心目标只保留 ET、位置和宽度三类成本，setup cost 作为有实际数据时的可选一阶段项。
+setup 时间必须进入场景时间传播，setup cost 在当前核心模型中默认保留。若只有 setup 时间数据，可使用统一单位时间成本 \(\kappa^s\)，目标写成 \(\kappa^s\sum_{i,j}s_{ij}x_{ij}\)；若人工、材料、清洗剂、能耗或报废损失可单独获得，则改用任务转换成本 \(g_{ij}\)。两种口径二选一，避免重复计费。
 
 ## 5. 推荐的两阶段 SAA 模型
 
 ### 5.1 集合、参数与决策
 
-令 \(J\) 为任务集合，\(M\) 为机器集合，\(\Omega\) 为场景集合，\(\pi_\omega\) 为归一化场景概率。\(p_{jm\omega}\) 是任务 \(j\) 在机器 \(m\) 和场景 \(\omega\) 下的加工时间，\(s_{ijm}\) 是确定性的序列相关 setup 时间；若 setup 也不确定，可扩展为 \(s_{ijm\omega}\)。
+令 \(J\) 为任务集合，机器数量为 \(M\)，\(\Omega\) 为场景集合，\(\pi_\omega\) 为归一化场景概率。\(p_{j\omega}\) 是任务 \(j\) 在场景 \(\omega\) 下的加工时间，\(s_{ij}\) 是确定性的序列相关 setup 时间；若 setup 也不确定，可扩展为 \(s_{ij\omega}\)。
 
-一阶段决策包括机器分配与顺序变量 \(x_{ijm}\)，以及任务特定窗口端点 \(a_j,b_j\)。二阶段连续变量包括场景开始时刻 \(S_{j\omega}\)、完工时刻 \(C_{j\omega}\)、earliness \(E_{j\omega}\) 和 tardiness \(T_{j\omega}\)。waiting 不必单独建变量：时间递推使用“\(\ge\)”而不是等式，其松弛量就是允许的 initial 或内部 waiting。
+紧凑模型的一阶段顺序变量为不带机器下标的 \(x_{ij}\)，机器由从 dummy source 出发的至多 \(M\) 条路径隐式表示；对照模型使用带机器下标的 position 变量。两个模型都包含任务特定窗口端点 \(a_j,b_j\)。二阶段连续变量包括场景开始时刻、完工时刻、earliness 和 tardiness。waiting 不必单独建变量：时间递推使用“\(\ge\)”而不是等式，其松弛量就是允许的 initial 或内部 waiting。两个模型、其子问题和 position 缩减的完整写法见 [补充分析](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
 
 ### 5.2 目标函数
 
@@ -143,13 +143,13 @@ setup 时间必须进入场景时间传播；setup 成本 \(c^{s}_{ijm}\) 是否
 
 \[
 \min
-\sum_{m\in M}\sum_{i,j}c^{s}_{ijm}x_{ijm}
+\kappa^s\sum_{i,j}s_{ij}x_{ij}
 +\sum_{j\in J}\left[\rho_j(a_j-L_j)+\lambda_j(b_j-a_j)\right]
 +\sum_{\omega\in\Omega}\pi_\omega\sum_{j\in J}
 \left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right).
 \]
 
-第一项在没有独立 setup 成本时删去。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；更宽的窗口降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序和 setup 又改变所有下游任务在各场景中的完工分布。
+第一项是默认保留的 setup 成本；若获得独立转换金额 \(g_{ij}\)，用 \(\sum g_{ij}x_{ij}\) 替代按时间计费的形式。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；更宽的窗口降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序和 setup 又改变所有下游任务在各场景中的完工分布。
 
 ### 5.3 主要约束
 
@@ -161,12 +161,12 @@ L_j\le a_j\le b_j\le U_j,
 D_j^{\min}\le b_j-a_j\le D_j^{\max}.
 \]
 
-若 \(i\) 紧接 \(j\) 且二者在机器 \(m\) 上，场景时间满足
+若 \(i\) 紧接 \(j\)，场景时间满足
 
 \[
-S_{j\omega}\ge C_{i\omega}+s_{ijm}-M_{ijm\omega}(1-x_{ijm}),
+S_{j\omega}\ge C_{i\omega}+s_{ij}-M_{ij\omega}(1-x_{ij}),
 \qquad
-C_{j\omega}=S_{j\omega}+p_{jm\omega}.
+C_{j\omega}=S_{j\omega}+p_{j\omega}.
 \]
 
 首任务由 dummy origin 与 release time 连接，仍使用不等式，因此 initial idle 免费且允许。ET 可精确线性化为
@@ -231,7 +231,26 @@ b_j-a_j=D_j^{\min}.
 
 若 \(D_j^{\min}=D_j^{\max}\)，宽度已经固定，\(\lambda_j(b_j-a_j)\) 是常数，后两个关于“压缩到最小宽度”的条件失去分析对象。
 
-### 6.4 如何用于算例而不是过度解释
+### 6.4 两端点共同导致的最小长度条件
+
+前面三项是分别移动左端或右端得到的简单充分条件，并不穷尽全部边界结构。固定任务 \(j\) 的场景完成时间向量且 \(\alpha_j,\beta_j>0\) 时，两个无约束分位水平为
+
+\[
+q_j^a=\frac{\lambda_j-\rho_j}{\alpha_j},
+\qquad
+q_j^b=1-\frac{\lambda_j}{\beta_j}.
+\]
+
+若 \(q_j^a>q_j^b\)，等价于
+
+\[
+\lambda_j>
+\frac{\beta_j(\alpha_j+\rho_j)}{\alpha_j+\beta_j},
+\]
+
+则左端点偏好的分位数位于右端点偏好的分位数右侧，窗口顺序约束无法同时满足两个偏好，因此 \(b_j-a_j=D_j^{\min}\)；若 \(D_j^{\min}=0\)，窗口成为点。等号在离散 SAA 中可能形成平坦最优集，不宜作强预处理。该条件及零系数、固定长度、随机 SAA 折点结构的完整分析见 [补充分析](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
+
+### 6.5 如何用于算例而不是过度解释
 
 这些条件都是 job-specific 的。单个任务落在边界不会使整个模型退化，也不会显著简化算法；只有条件覆盖全部或大量任务时，才会系统性消除窗口位置或宽度决策。反向条件也只是排除上述充分边界，不保证窗口一定在内部，更不保证 ET 一定为正。
 
@@ -243,7 +262,7 @@ b_j-a_j=D_j^{\min}.
 \lambda_j>\rho_j+\alpha_j,
 \]
 
-并报告三类边界任务的比例、窗口下界/上界命中率、最小宽度命中率以及正 earliness/tardiness 的任务比例。另设一组不控制参数的 stress instances，检验算法在大量边界解下是否稳定。数据设计的目标是避免无意生成一个几乎没有 due-window 决策的主基准，而不是保证每个实例都出现正 ET。
+并报告三项单端占优条件和一项联合分位条件的覆盖比例、窗口下界/上界命中率、最小宽度命中率以及正 earliness/tardiness 的任务比例。另设一组不控制参数的 stress instances，检验算法在大量边界解下是否稳定。数据设计的目标是避免无意生成一个几乎没有 due-window 决策的主基准，而不是保证每个实例都出现正 ET。
 
 ## 7. 只有场景 ET 成本是否足够
 
@@ -354,7 +373,7 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 ## 11. 建议的模型与实验层次
 
-1. **核心模型 W3-Core**：位置成本 + 宽度成本 + 有限位置区间 + 长度上下界 + 免费 waiting + 期望 ET + sequence-dependent setup；无 overtime、无 waiting cost。
+1. **核心模型 W3-Core**：同质多机 + 位置成本 + 宽度成本 + 有限位置区间 + 长度上下界 + 免费 waiting + 期望 ET + 与机器无关的 sequence-dependent setup 时间及其 setup cost；无 overtime、无 waiting cost。
 2. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
 3. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
 4. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。

@@ -1511,3 +1511,11 @@ adaptive-only的负面结果更关键。它把family的probe累计时间从当�
 random两例的exact合计仅约4--6秒，另外三种probe开启方案总时间都落在`22.3--23.2s`的小范围内，差异主要是预处理、RMP和强分支的运行波动；adaptive-only则两例都约慢30%，exact调用和DSSR轮数也略增。该结果不支持为了random恢复严格`2/1.5`，但明确排除了关闭后续probe。综合family的稳定大幅差异和random的无明显回退，正式配置继续采用`adaptive触发4 / 后续probe接受4 / 后续probe开启`，不恢复`2/4`、历史`2/1.5`或adaptive-only。
 
 完整汇总保存于`test-results/bpc/20260831-midpoint-fulltree-summary.csv`，原始结果目录统一为`test-results/bpc/20260831-midpoint-fulltree-*`。为支持正式runner受控覆盖，本轮只新增`bidirectionalMidpointProbeDssrImbalanceThreshold`可选参数和对应元数据；未传参时正式profile与算法主线不变。
+
+### 32.50 正式ng-DSSR配置完整性复核
+
+本轮同时核对`BestBpcProfiles.NG_DSSR`、`FormalExperimentRunner`和最近完整求解的配置快照。正式runner每次都先新建`TWETBPCConfig`再应用命名profile，因此第32.49节的四组正式运行实际装配均正确：定价器为`HeuristicPricing + GCNGBBStyleNgDssrPricing`，cut为`NoOp`，分支顺序为`TariffSegment + MachineCount + Arc`；TIME队列、`nearestK=floor(n/10)`、`minimumNewPairsSegment/C1000/K20`、warm-start关闭、time-indexed root preprocessing、phase-1 strong testing 20个候选、phase-2关闭以及`default + wall time + 4/4 + 5%`均与当前结论一致。这里的“最好”是现有完整树A/B支持的统一正式profile，不表示每个实例上的逐参数全局最优；尤其root preprocessing和DSSR更新方式仍有实例异质性，但现有证据不足以拆成family/random两套正式算法。
+
+检查发现一个不影响上述正式结果、但会影响其他入口复用配置对象的隐患：命名profile原来没有显式恢复`enableBidirectionalPricing=true`。若调用者先把该值设为false，再应用`NG_DSSR`，虽然ng-DSSR模式flag为true，组件装配仍会越过整个双向分支并回退到单向定价器。类似地，固定midpoint、relaxed-column返回、实验brancher、SRI和启发式实验开关也有部分依赖构造器默认值。2026-08-16审计中已记录的次级继承项还包括exact返回5000、Tabu`300/30/50/30`、DSSR轮间reuse、branch seed 5000和CPLEX root算法`auto`。现已只做profile自包含加固：显式恢复这些已确认的正式取值，不修改新建配置下的任何有效参数，也不改变正式runner现有运行路径；实例、输出、外包模型、求解时限和节点上限仍由调用者控制。回归测试先写入相反旧值，再应用profile，确认最终仍恢复双向ng-DSSR、普通Arc分支、elementary-only、default midpoint、后续probe、no-cut及上述次级参数。
+
+验证重新编译`BPCAlgorithmProfile`、`BestBpcProfiles`及测试后，`BestBpcProfilesTest`、`NgDssrMidpointProbeConfigurationTest`、`NgDssrMidpointProbePolicyTest`和`TWETBPCContextEffectiveNgDssrConfigurationTest`全部通过。旧midpoint字段`MaxCandidates/MoveRatio/TimeTolerance/TieScore/ExtraCandidates/BracketOnDirectionChange/HighImbalanceRatio`仍会出现在快照，但当前ng-DSSR固定walk/bracket主线不读取它们，不属于漏配；后续可以单独整理配置接口，当前不为减少日志字段改算法。

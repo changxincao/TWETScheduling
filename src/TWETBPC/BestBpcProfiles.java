@@ -82,21 +82,45 @@ public final class BestBpcProfiles {
 		config.useGCNGBBStyleBidirectionalPricing = true;
 	}
 
+	/** 命名正式 profile 同时排除已验证不采用的实验分支，旧布尔入口仍保留调用者的覆盖语义。 */
+	static void resetNamedExperimentFlags(TWETBPCConfig config) {
+		config.enableStrongBranchingDomainRepair = false;
+		config.enableUndirectedAdjacencyBranching = false;
+		config.enableCutSetBranching = false;
+		config.enableClusterBranching = false;
+		config.structuredArcStrictTypePriority = false;
+		config.enableSubsetRowCutsForPartialDominance = false;
+		config.enableNodeLocalHorizonImprovement = false;
+		config.debugSkipBranchColumnFilter = false;
+		config.debugIgnorePricingOnlyArcsAtNode = -1;
+	}
+
 	static void applyCommonDefaults(TWETBPCConfig config) {
 		config.runALNSForSeed = true;
 		config.alnsMaxRuntimeMillis = 60_000L;
+		config.alnsMaxNoImproveIterations = 80;
 		config.alnsUseSimulatedAnnealingAcceptance = false;
 		config.initialHeuristicColumnHistoryMode = "best";
+		config.acceptedSolutionHistoryLimit = 2000;
+		config.cplexRootAlgorithm = "auto";
 		config.enableTwoStageStrongBranching = true;
 		config.strongBranchingCandidateLimit = 20;
 		config.strongBranchingPhase2CandidateLimit = 0;
+		// 0 在 pass 参数上表示不限轮数；这里由 candidateLimit=0 关闭整个 Phase 2。
 		config.strongBranchingPhase2MaxHeuristicPasses = 0;
+		config.strongBranchingScoreEpsilon = 1.0e-6;
 		config.enableStrongBranchingLightweightRepair = true;
 		config.enableStrongBranchingBranchImpliedPenalty = true;
 		config.enableDualBoundPruning = true;
+		config.dualBoundPruningTolerance = 1.0e-7;
 		config.enableDualStabilization = false;
 		config.enableRestrictedMasterIntegerHeuristic = false;
 		config.enableRouteEnumeration = false;
+		config.branchSeedColumnLimit = 5000;
+		config.branchSeedReducedCostAllowance = 5000.0;
+		config.branchingTolerance = 1.0e-6;
+		config.pseudoCostInf = 1.0e18;
+		config.maxOutsourcingPricingColumns = 150;
 	}
 
 	private static void applyTimeIndexedDefaults(TWETBPCConfig config, boolean timeIndexedRank1) {
@@ -127,6 +151,19 @@ public final class BestBpcProfiles {
 		// ng-DSSR 的多轮 DSSR repair 使用纯 Phase-I 明显更容易先恢复可行 RMP。
 		config.enableStrongBranchingPhaseOneRepair = true;
 		config.enableHeuristicPricing = true;
+		config.enableHeuristicDualProfitableWindow = false;
+		config.maxHeuristicPricingColumns = 300;
+		config.heuristicPricingSeedColumns = 30;
+		config.heuristicPricingPoolSize = 300;
+		config.heuristicPricingTabuIterations = 50;
+		config.heuristicPricingTabuTenure = 30;
+		config.heuristicPricingStopUnproductiveSeedAfter20 = false;
+		config.heuristicPricingCollectNonBestNegativeMoves = false;
+		config.heuristicPricingPrecomputeArcCompatibility = true;
+		config.heuristicPricingPrecomputeMoveDuals = true;
+		config.maxExactPricingColumns = 5000;
+		// 命名 profile 必须显式恢复主定价入口，不能依赖新建 config 时恰好默认为 true。
+		config.enableBidirectionalPricing = true;
 		// 2026-08-28: 显式固定历史 A/B 更快的时间队列，避免正式 runner 继承漂移。
 		config.forwardLabelQueueOrdering = "time";
 		config.bidirectionalLabelQueueOrdering = "time";
@@ -141,12 +178,18 @@ public final class BestBpcProfiles {
 		config.enableNgDssrWindowRepeatabilityInitialFilter = true;
 		config.enableNgDssrHistoryWarmStart = false;
 		config.enableNgDssrSameNodeWarmStart = false;
+		config.ngDssrReturnRelaxedColumns = false;
+		config.enableNgDssrJoinEnvelopeCompression = false;
 		config.bidirectionalJoinBestThresholdMode = "bestUB";
+		config.bidirectionalJoinRangeRestrictedLowerBound = false;
 		config.bidirectionalCompletionBoundRelaxation = "allCycles";
+		config.bidirectionalCompletionBoundQueueOrdering = "fifo";
 		config.bidirectionalCompletionBoundScalarPruning = true;
 		config.bidirectionalCompletionBoundArcFixing = true;
 		config.bidirectionalCompletionBoundSubtreeArcElimination = false;
 		config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly = true;
+		config.bidirectionalRootLocalHorizonMidpointRatio = Double.NaN;
+		config.bidirectionalMidpointStrategy = "default";
 		config.bidirectionalMidpointProbe = true;
 		config.bidirectionalMidpointProbePopLimit = 10000;
 		config.bidirectionalMidpointProbeScore = "time";
@@ -155,7 +198,11 @@ public final class BestBpcProfiles {
 		config.bidirectionalMidpointProbeDssrEarlyStopRatio = 4.0;
 		config.bidirectionalMidpointProbeDssrMoveFraction = 0.05;
 		config.bidirectionalMidpointProbeDssrImbalanceThreshold = 4.0;
+		config.bidirectionalMidpointProbeReuseWithinDssr = true;
+		config.bidirectionalMidpointProbeAfterFirstDssrRound = true;
 		config.enableTimeIndexedPreHeuristicPricing = false;
+		config.enableTimeIndexedPreHeuristicInStrongBranchingPhase2 = false;
+		config.enableTimeIndexedGraphDualWindow = true;
 		config.enableTimeIndexedRootPreprocessingForNgDssr = true;
 		config.timeIndexedRootPreprocessingSeedElementaryColumns = true;
 		config.timeIndexedRootPreprocessingSeedColumnLimit = 200;
@@ -164,5 +211,7 @@ public final class BestBpcProfiles {
 		config.timeIndexedCompletionBoundArcFixing = true;
 		config.timeIndexedCompletionBoundInRoundArcFixing = false;
 		config.timeIndexedCompletionBoundCutLoopArcFixing = true;
+		config.timeIndexedCompletionBoundSriAwareArcFixing = false;
+		config.enableSubsetRowCutsForTimeIndexedGraph = false;
 	}
 }

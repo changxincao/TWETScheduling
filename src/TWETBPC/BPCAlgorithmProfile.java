@@ -45,6 +45,7 @@ public final class BPCAlgorithmProfile {
 	public void apply(TWETBPCConfig config) {
 		Objects.requireNonNull(config, "config");
 		BestBpcProfiles.resetNamedPricingModeFlags(config);
+		BestBpcProfiles.resetNamedExperimentFlags(config);
 		BestBpcProfiles.applyModeFlags(config, timeIndexedGraph, timeIndexedRank1, ngDssr);
 		BestBpcProfiles.applyCommonDefaults(config);
 		applyBranchDefaults(config);

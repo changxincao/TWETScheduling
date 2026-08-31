@@ -1445,3 +1445,13 @@ random的3/4三次为`16.243/17.781/19.872s`，exact为`3.201/3.424/4.494s`，�
 当前阈值结论由此完整闭合：`2/4`在6点中快慢各半但family exact合计更差，`3/4`在本轮random重复和两个family点均更差，`4/4`虽然不能消除wall噪声，却形成了必要的deadband，避免对3--4倍的中等失衡反复纠偏。绝对小时间门槛`20/50ms`也已证实会改变CG轨迹而没有稳定收益。因此正式配置继续保持`default + wall time + 4/4 + 5%`，不增加materiality gate，不使用thread CPU，不继续微调2/3/4之间的阈值。
 
 从后续优化角度，Tmid参数方向已经基本耗尽。wall重复仍有7--9次exact和21--24轮DSSR的轨迹波动，说明小的计时差异会经“返回列-RMP dual-下一次pricing”放大；继续平滑比例、缩步长或重复probe只会增加另一层路径依赖，不能从局部平衡推出整棵CG更快。现有证据下仍值得保留的方向只有两类。第一，困难family若再次表现为单次exact内部耗时高，应先用默认关闭的细分诊断确认是forward扩展、dominance还是PWLF计算，不再默认归因于midpoint；第二，跨exact的固定初始化成本中，completion bound的双向传播存在理论并行空间，但同一次DSSR已经复用bound，跨dual不能缓存，且当前正式批处理采用外层多进程、每个solver单线程，因此只有改变计算资源策略后才值得做线程隔离审计。warm-start、allSegments、扩大候选池、same-dual batch、关闭completion bound和继续压join常数均已有负面或低收益证据，暂不重开。
+
+### 32.47 当前midpoint/probe主线正确性复核
+
+本轮对当前`default + TIME + wall time + 4/4 + 5%`主线做了逐路径复核，并由独立验证智能体检查相同范围。检查覆盖DSSR轮间反馈、adaptive seed、浅层probe、单侧耗尽后每250 pop续探、候选切换后的状态重建、选中候选状态复用、正式forward/backward补全、join以及time-limit退出。未发现会改变可行路线集合、遗漏负列、错误返回reduced-cost certificate或把未完成pricing误判为闭合的问题。`4/4`和`5%`只决定何时改变分割点及probe候选位置；无论选择哪个合法`Tmid`，只有两侧搜索完整耗尽后才把relaxed round标记为完成。probe为rank-0时两侧队列已经耗尽，可以直接保留label/dominance状态进入join；probe为partial时正式labeling从选中候选的队列继续扩展。切换候选会重新初始化label搜索状态，未选候选不会泄漏到最终join。
+
+单侧耗尽处理的控制流也保持一致：已耗尽侧耗时是完整值，未耗尽侧先使用5000-pop前缀；若尚未达到对应接受倍数，则只沿未耗尽侧每250 pop继续，直到该侧也耗尽或累计耗时达到阈值。前者得到完整rank-0状态并直接复用，后者只确定负载方向并继续walk/bracket。累计时间包含初始前缀和所有追加批次，状态始终沿同一候选延续，没有重启或重复计数。
+
+验证方面，从当前源码重新focused编译并运行`NgDssrMidpointProbeConfigurationTest`、`NgDssrMidpointProbePolicyTest`和`BestBpcProfilesTest`，均通过。`wet020`上当前probe与关闭probe均得到`obj=bound=6343`、`valid=true`；`n030-set01-family,m2`上两条路径均得到`obj=bound=55392`、3次exact调用、`valid=true`。当前probe运行实际覆盖18次单侧检测，其中12次追加到另一侧耗尽，最终闭合与关闭probe完全一致。
+
+唯一保留的低严重度边界是time-limit响应性，而不是certificate正确性。单侧续探会在250-pop批次之间检查时限，但每次`forwardExtend/backwardExtend`内部会扫描当前label的全部可扩展任务；正式forward/backward和join热循环也没有把time-limit直接并入`canContinue()`。因此极重的单个扩展或完整labeling可能超过配置时限后才返回。返回后`roundCompleted`仍会因time limit为false，不能据此形成错误certificate。该行为早于本轮probe修改；若以后需要严格时限，只应按固定pop间隔增加低频检查并单独评估热路径开销，当前不为此修改算法。

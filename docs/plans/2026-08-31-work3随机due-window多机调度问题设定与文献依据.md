@@ -6,7 +6,7 @@
 
 Work 3 可以沿用 2025 和 2026 两篇 TWATSP-ST 的基本思路，把“客户访问顺序 + 随机旅行时间 + 可决策时间窗”改写为“机器分配与任务顺序 + 随机加工时间 + 可决策 due window”。但机器调度模型不能直接删除 TWA 中的 overtime 后保持其余设定不变。两篇 TWA 都没有任务位置成本，窗口的绝对位置主要由固定出发时刻和班次结束时间共同约束；一旦删掉 overtime，又保留免费等待和仅按窗口宽度收费，窗口就失去绝对时间锚。
 
-当前推荐的核心问题为：考虑同质并行机、任务特定 DIF due window、随机加工时间、与机器无关但随场景变化的序列相关 setup \(s_{ij\omega}\)、场景自适应等待；一阶段共同决定机器分配、加工顺序和每个任务的 due window，二阶段按场景决定实际开始与完工时刻；目标包括确定的 setup 转换金额 \(g_{ij}\)、due-window 位置成本、宽度成本和期望 earliness/tardiness（ET）成本，不含 overtime，也不对 waiting 单独收费；同时设置任务特定的窗口位置区间和窗口长度上下界。另设 \(g_{ij}=0\) 的消融，区分“转换本身有固定金额”和“转换只通过随机持续时间影响 ET”两种业务口径。
+当前推荐的核心问题为：考虑同质并行机、任务特定 DIF due window、随机加工时间、与机器无关但随场景变化的序列相关 setup \(s_{ij\omega}\)、场景自适应等待；一阶段共同决定机器分配、加工顺序和每个任务的 due window，二阶段按场景决定实际开始与完工时刻；目标包括确定的 setup 转换金额 \(g_{ij}\)、due-window 位置成本、宽度成本和期望 earliness/tardiness（ET）成本，不含 overtime，也不对 waiting 单独收费；同时设置任务特定的窗口位置区间和窗口长度上下界。这里把“setup 的固定项”解释为每次转换的确定金额 \(g_{ij}\)，不是固定 setup 时长；setup 持续时间 \(s_{ij\omega}\) 与加工时间 \(p_{j\omega}\) 都是随机的。另设 \(g_{ij}=0\) 的消融，区分“转换本身有固定金额”和“转换只通过随机持续时间影响 ET”两种业务口径。
 
 这个设定同时使用了两种互补机制：位置成本在可行区间内部给较晚承诺定价，有限区间则表达不可违反的合同或客户边界。二者并非数学上都必需，但现实含义不同，合用后模型更稳定，也与前两个 work 的 due-window 设定保持连续。
 
@@ -102,6 +102,18 @@ Yue and Zhou (2021) 对随机加工时间下的任务特定 DIF due window 使�
 位置成本衡量把最早可接受交付承诺推迟的代价。它可以对应较长 lead time 导致的订单流失、折扣、延迟收入、客户不满意和声誉损失。Kim and Lee (2009) 对 due-date assignment 的解释是：交期过早会增加无法按时交付的风险，交期过晚又会影响客户谈判和商誉，因此交期本身是需要付费的决策。Shabtay (2016) 进一步指出，过晚的 due date 可能违反制造商与客户的先期协议。
 
 在当前模型中，\(\rho_j\) 是窗口左端从 \(L_j\) 向后移动一单位的边际损失。可以用报价折扣随承诺 lead time 的变化、订单接受概率或取消风险乘以贡献毛利、延迟回款的资金成本，或合同中延长承诺时间的补偿标准进行估计。若客户只在超过某个 acceptable lead time 后才产生损失，更合适的形式是分段线性成本 \(\rho_j(a_j-A_j)^+\)，而不是强行使用从 \(L_j\) 开始的单一直线；核心线性模型可先使用 \(\rho_j(a_j-L_j)\)，再把分段形式作为扩展。
+
+现有核心调度文献并没有把 \(\rho_j,\lambda_j\) 标定为企业实测货币值。Yue and Zhou (2021) 虽然使用任务特定 ET、位置和宽度系数，但算例中均从 \(U[1,10]\) 生成；2025 TWA 使用宽度、ET、overtime 的归一化权重 1、3、4，2026 TWA 默认使用 1、10、10，二者都没有位置成本。因此，这些论文支持的是成本形式和权衡，不是数值标定。
+
+若需要现实量化，可令 \(P_j(a,D)\) 表示客户面对窗口起点 \(a\)、宽度 \(D\) 时的订单接受概率，\(m_j\) 为贡献毛利，局部线性化得到
+
+\[
+\rho_j\approx-m_j\frac{\partial P_j}{\partial a},
+\qquad
+\lambda_j\approx-m_j\frac{\partial P_j}{\partial D}.
+\]
+
+这些导数可以由历史报价—接受数据、分档服务价格或 stated-choice/mixed-logit 调查估计。Zorzini et al. 对 15 家按单制造企业的实证研究支持承诺 lead time 对订单获取的重要性；一项 2024 配送选择研究则直接估计 Value of Delivery Time 和 Value of Time Slot Shortening，说明位置与宽度的边际偏好可以分别识别，但其电商数值不能直接移植到制造业。没有企业选择数据时，\(\rho_j,\lambda_j\) 应写成异质 preference weights，并做比例敏感性，而不能称为真实货币成本。[Zorzini et al. (2008)](https://doi.org/10.1016/j.ijpe.2007.08.005) [delivery timing valuation study (2024)](https://doi.org/10.1016/j.jretconser.2024.103711)
 
 ### 4.3 位置区间与长度上下界
 
@@ -365,7 +377,7 @@ F_j(b_j^-)\le q^b_j\le F_j(b_j),
 
 Laporte, Louveaux, and Van Hamme (2002) 的 VRP with stochastic demands 与当前阶段顺序最接近：一阶段用 2-indexed 弧变量决定 a priori routes，二阶段在需求揭示后发生补货回库 recourse。其 integer L-shaped master 使用一个总 \(\Theta\)，并靠 route/partial-route lower-bounding functionals 强化。Jabali et al. (2014) 和 Hoogendoorn and Spliet (2023) 延续这条路线；Parada et al. (2024) 进一步用任务级 \(\theta_j\) 和 path cuts 实现 route-disaggregated recourse，但必须证明“删除路线中的客户不会增加 recourse”的单调性。
 
-这说明无机器标签的 2-indexed 模型不是完全不能按路线强化。准确结论是：固定整数解时可以按路线并行求值；普通 LP 对偶 cut 仍应先作为全局基线；若要让一条 route/path cut 对未来其他解继续有效，必须包含完整 depot 路线的激活条件，或者证明当前 recourse 的单调性后使用更一般的子路径激活。对本问题，免费 waiting 和任务可分窗口成本有利于单调性，但随机 sequence-dependent setup 还必须满足场景逐一的 shortcut 条件，详见[双模型补充分析](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。因此不能直接把每次得到的临时路线 LP 对偶式当作永久 machine multi-cut。
+这说明无机器标签的 2-indexed 模型不是完全不能按路线强化。准确结论是：固定整数解时可以按路线并行求值；普通 LP 对偶 cut 仍应先作为全局基线；若要让一条 route/path cut 对未来其他解继续有效，必须证明删除单调性和上下文无关的有效下界。完整路线激活虽无条件有效，但只是换一条弧就失效的基本 no-good/LBBD cut，明显不如当前已有的全局 LP 对偶 cut，不列入第一版算法。随机 sequence-dependent setup 的逐场景 shortcut 条件也只是一道必要的结构检查，不能单独保证 partial-path ET 下界有效，详见[双模型补充分析](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
 
 Adulyasak, Cordeau, and Jans (2015) 的 stochastic production-routing 还表明，一阶段 visit schedules 与连续场景 recourse 可在单棵分支树中使用 scenario-group、Pareto 和 lifting cuts；这是当前后续强化的直接参考。Subramanyam, Wang, and Gounaris (2018) 虽然研究 TWAVRP scenario decomposition，但其一阶段是窗口、二阶段才是路线，分解方向相反，只适合参考场景并行和黑箱求解思想，不能直接照搬 cuts。
 

@@ -601,7 +601,7 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 1. **完整异质主模型 W3-FullHet**：同质多机 + 任务特定 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。position 表示采用任务—位置 perspective/析取变量和 position-specific completion bounds，并明确承认 VUB/有限 \(H\)；2-indexed 表示保留任务索引成本和弧时间 big-\(M\)。
 2. **共同费率消融**：不建立独立的 W3-Common 业务模型，只在相同实例结构下令 \(\rho_j\equiv\rho,\lambda_j\equiv\lambda,\alpha_j\equiv\alpha,\beta_j\equiv\beta\)，用于测量任务费率异质性对模型规模、LP 界和求解时间的影响。
-3. **建模比较原则**：2-indexed 和 machine-position 在任何正式比较中必须使用同一组 FullHet 参数和同一批实例；共同费率只作为两种 formulation 都同时采用的 matched ablation，不能把参数差异混入 formulation 性能差异。
+3. **建模比较原则**：2-indexed 和 machine-position 在任何正式比较中必须使用同一组 FullHet 参数和同一批实例；共同费率只作为两种 formulation 都同时采用的 matched ablation，不能把参数差异混入 formulation 性能差异。当前不预设 position 更好：2-indexed 作为主基线，position 先通过小中规模门槛测试。若其根节点界、节点数、内存或总时间没有显示稳定优势，就不继续把 position 包装成主方法。
 4. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
 5. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
 6. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。

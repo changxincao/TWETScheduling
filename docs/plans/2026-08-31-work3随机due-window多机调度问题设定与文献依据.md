@@ -43,7 +43,7 @@ Work 3 可以沿用 2025 和 2026 两篇 TWATSP-ST 的基本思路，把“客�
 \rho(a_j-L_j)+\lambda\bigl[(b_j-a_j)-D_j^{\min}\bigr],
 \]
 
-其中 \(L_j\) 是任务 \(j\) 最早允许的窗口起点，\(D_j^{\min}\) 是合同、服务目录或验收流程已经包含的基础窗口长度。当前核心模型对同一制造商和服务等级使用共同费率 \(\rho,\lambda\)：窗口整体后移一单位产生 \(\rho\) 的边际成本，超过基础长度后每扩张一单位产生 \(\lambda\) 的边际成本。只要 \(\rho>0\) 且 \(\lambda>0\)，窗口整体后移和无代价扩张两个方向都受到控制。initial idle 可以免费，因为窗口与排程共同平移会增加位置成本。
+其中 \(L_j\) 是任务 \(j\) 最早允许的窗口起点，\(D_j^{\min}\) 是合同、服务目录或验收流程已经包含的基础窗口长度。共同费率版本对同一制造商和服务等级使用 \(\rho,\lambda\)；完整异质版本则使用 \(\rho_j,\lambda_j\)。窗口整体后移一单位产生相应位置边际成本，超过基础长度后每扩张一单位产生相应宽度边际成本。只要各任务的两类费率为正，窗口整体后移和无代价扩张两个方向都受到控制。initial idle 可以免费，因为窗口与排程共同平移会增加位置成本。
 
 位置成本相对 \(L_j\) 而不是相对时间 0 计费更合适。若直接写 \(\rho a_j\)，区间 \([0,L_j]\) 是任务根本不能选择的时间，却仍被记入成本；写成 \(\rho(a_j-L_j)\) 后，\(L_j\) 对应零基准，只有超出最早可接受承诺的部分收费。两种写法在 \(L_j\) 为常数时只差一个常数，但后者的经济解释和跨任务比较更清楚。
 
@@ -387,7 +387,7 @@ E_{j\omega},T_{j\omega}\ge0.
 
 中让所有任务共用四个单位成本；其中 \(d'_j\) 是任务窗口开始时间、\(D_j=d''_j-d'_j\) 是窗口长度，所以该文的 \(\gamma\) 对应本文位置成本 \(\rho\)，\(\delta\) 对应宽度成本 \(\lambda\)。不同论文对希腊字母的分配并不统一，例如 Janiak et al. (2015) 汇总的部分 common due-window 模型把 \(\gamma\) 写在宽度项上、把 \(\delta\) 写在位置项上，因此必须依据目标函数定义，而不能仅凭符号判断。Liman et al. (1998) 的单机模型、Mosheiov and Oron (2004) 及 Janiak et al. (2012) 的同质并行机模型也都采用共同的窗口位置/长度单位系数；共同系数不是为了迁就当前算法才临时增加的假设。
 
-现实上可把研究对象限定为同一制造商、同一合同模板和同一服务等级：统一过渡资源费率 \(\rho\)、验收资源预留费率 \(\lambda\)、库存费率 \(\alpha\) 和迟交费率 \(\beta\)，任务异质性仍由随机加工/setup、转换金额和窗口范围表达。两个候选模型必须求解同一个 W3-Core-Common 问题，不能用异质参数测试 2-indexed、再用同质参数测试 position。只有在统一实例上确认哪种表示更有效后，才考虑在胜出的模型上增加任务特定成本扩展。
+共同费率版本可把研究对象限定为同一制造商、同一合同模板和同一服务等级：统一过渡资源费率 \(\rho\)、验收资源预留费率 \(\lambda\)、库存费率 \(\alpha\) 和迟交费率 \(\beta\)，任务异质性仍由随机加工/setup、转换金额和窗口范围表达。若采用完整异质版本，则四类费率必须全部任务特定，不能只为了简化 position 模型而保留部分共同。2-indexed 与 position 的 formulation 比较必须固定同一个参数版本，不能用异质参数测试前者、再用共同参数测试后者。
 
 随机 DWA 的直接证据需要单独限定。Yue and Zhou (2021) 是当前检索到的最直接随机机器调度 DWA：单机、随机加工、DIF 任务窗口、无 setup、禁止 idle；其 \(\alpha_j,\beta_j,\gamma_j,\delta_j\) 均为任务特定参数，算例分别从 \(U[1,10]\) 生成。因此它支撑“随机加工下联合决定排程和任务窗口”，不支撑共同四费率。当前尚未找到另一篇随机机器调度 DWA 专门采用共同四费率；共同费率的直接依据来自确定性 DWA 和随机 TWA 两条相邻文献流，只能表述为文献支持的合理特例。
 
@@ -395,7 +395,7 @@ E_{j\omega},T_{j\omega}\ge0.
 
 这里的“给定序列后求窗口”不是业务决策先后，而是利用 \(\min_{s,e,d}z=\min_s\min_{e,d}z\) 做条件优化。固定候选序列后，无 setup、无 idle 和独立随机加工使每个位置的完成时间分布由累计均值、方差唯一确定，任务窗口又彼此可分，因此可以解析求分位端点，再把最优窗口值代回外层搜索序列。该文 \(P2\_SAA\) 实际计算的是 \(K^{-1}\sum_k\min_{e^k,d^k}f_k\)，而当前共同承诺窗口需要 \(\min_{e,d}K^{-1}\sum_kf_k\)；前者允许样本自适应窗口，通常给出更低、偏乐观的值，不能作为当前模型的直接 SAA。
 
-共同四费率也不是唯一可行路线。当前新增三个待原型验证的异质候选：其一，采用任务特定 \(\rho_j,\lambda_j\) 和共同 \(\alpha,\beta\)，只拆分任务—位置窗口变量，保留按位置计 ET，不引入场景完工时刻身份 \(H\)，是最优先的折中；其二，采用完整异质四费率，以任务—位置 perspective/凸包式连续变量和由有限 \(U_j\)、场景加工/setup 时长推导的 position-specific 界构造精确 formulation，并研究其 projected Benders；其三，若企业存在少量合同服务等级，则使用 class heterogeneity，把场景身份变量规模从任务数降到类别数。只有这些原型均明显不可用时，才退回全同质核心模型。更激进的无 compact-bound 路线是按完整单机序列列生成，每列内部求异质联合 SAA LP，但其 pricing 将成为非加性的 branch-price-and-Benders 问题，适合另立算法主线。完整分析见[双模型补充分析第 6.2.7--6.2.8 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
+成本参数只保留两种完整设定，不再采用“只异质一部分费率”或服务等级折中。W3-Common 令 \(\rho,\lambda,\alpha,\beta\) 全部共同，得到最接近 2026 的紧凑 position 基线；W3-FullHet 令 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) 全部任务特定，并承担任务—位置窗口/完成时刻身份变量及有限 \(H\) 的规模代价。部分异质虽然能减少变量，但无法说明为什么只有某类客户成本异质，容易使问题设定受算法便利驱动，因此删除。完整异质 position 的可行强化方向是把一位置一任务写成析取凸包/perspective formulation，使用真实 \(U_j\) 与 position/scenario 界，而不是声称完全无 big-\(M\)。不采用按完整序列列生成。完整分析见[双模型补充分析第 6.2.8 和第 9 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
 
 ## 6. 非退化与逐任务参数边界
 
@@ -593,28 +593,27 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 序列相关 setup 使当前问题与 TWA 的结构更接近：TWA 的 arc travel time 对应任务转换 setup time，访问顺序对应每台机器上的任务顺序，随机旅行时间对应随机加工或 setup 时间。固定离散顺序后，场景 timing 和窗口仍是连续 LP，setup 不破坏 Benders 的基本条件。
 
-不考虑 setup 时，模型不会自动变得可分或得到统一的 SPT/EDD 规则。任务特定的 \(\rho,\lambda,\alpha,\beta\)、机器相关随机加工时间、共享 due-window 决策和下游 waiting 传播仍使顺序重要。能得到的主要简化是：时间递推少了 arc-dependent 常数，机器之间在固定分配后更容易分解，主问题也减少 setup arc 成本和部分异质性。只有在进一步加入同质系数、确定加工时间、无自愿 idle 或公共窗口等特殊条件时，才可能恢复交换性质或 DP。
+不考虑 setup 时，模型不会自动变得可分或得到统一的 SPT/EDD 规则。W3-FullHet 的任务特定费率、两种版本都存在的随机加工时间、共享 due-window 决策和下游 waiting 传播仍使顺序重要。能得到的主要简化只是时间递推少了 arc-dependent 常数，机器之间在固定分配后更容易分解，主问题也减少 setup 弧成本。只有在进一步加入同质费率、确定加工时间、无自愿 idle 或公共窗口等特殊条件时，才可能恢复交换性质或 DP。
 
 因此，主模型保留随机 sequence-dependent setup 时长 \(s_{ij\omega}\) 和确定转换金额 \(g_{ij}\)。至少做两组 matched 消融：一组令 \(g_{ij}=0\) 但保留随机 setup 时长，区分直接弧成本与 timing 传播；另一组同时令 setup 时长和金额为 0，衡量 setup 对算法难度、窗口位置和 ET 传播的总影响。不能把 no-setup 结果直接解释为一般随机多机 DWA 的结构定理。
 
 ## 11. 建议的模型与实验层次
 
-1. **优先原型 W3-WindowHet**：同质多机 + 任务特定 \(\rho_j,\lambda_j\) + 共同 \(\alpha,\beta\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。该层只拆分任务—位置窗口，不需要场景完工时刻身份 \(H\)，是目前业务异质性与 position 紧凑性之间最合理的候选。
-2. **完整异质原型 W3-FullHet**：进一步令 \(\alpha_j,\beta_j\) 任务特定，使用任务—位置 perspective/析取凸包变量和 position-specific completion bounds。先在小规模上核验正确性、LP 界和数值稳定性；若相对 W3-WindowHet 的规模代价可接受，则完整异质模型优先成为正式主模型。
-3. **同质回退 W3-Core-Common**：共同 \(\rho,\lambda,\alpha,\beta\) 不再预先指定为唯一核心，只在两种异质 position 原型均明显不可用时回退。此时任务的 \(p_{j\omega},s_{ij\omega},g_{ij},L_j,U_j,D_j^{\min},D_j^{\max}\) 仍保持异质，并需要由 DRO 或新的序列/分解算法补足与 2026 的方法差异。
-4. **建模比较原则**：2-indexed 和 machine-position 在任何正式比较中必须使用同一个参数层次和同一批实例，不能用完整异质参数测试 2-indexed、再用共同参数测试 position。W3-WindowHet、W3-FullHet 和 W3-Core-Common 是三个模型层次，不应混成一次 formulation 性能比较。
-5. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
-6. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
-7. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
-8. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
+1. **共同费率模型 W3-Common**：同质多机 + 共同 \(\rho,\lambda,\alpha,\beta\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。这是紧凑 position 和与 2026 对照的基线，不预先包装成主要创新。
+2. **完整异质模型 W3-FullHet**：在同一业务结构上令 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) 全部任务特定。position 表示采用任务—位置 perspective/析取凸包变量和 position-specific completion bounds，并明确承认 VUB/有限 \(H\)；2-indexed 表示则保留任务索引成本和弧时间 big-\(M\)。先用小规模核验两种 formulation 的正确性、LP 界和数值稳定性，再决定正式主模型。
+3. **建模比较原则**：2-indexed 和 machine-position 在任何正式比较中必须使用同一个参数版本和同一批实例。W3-Common 与 W3-FullHet 是两个业务参数版本；2-indexed 与 position 是同一版本的两种 formulation，不能把参数差异混入 formulation 性能差异。
+4. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
+5. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
+6. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
+7. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
 
 核心算例生成后应先做结构审计：检查 \(U_j\) 与加工时间尺度是否匹配、\(D_j^{\min}\le D_j^{\max}\le U_j-L_j\)、三个参数支配条件的任务比例、最小宽度和位置边界命中率、正 ET 任务比例，以及目标各项的数量级。若出现“所有任务 ET=0”，先判断这是正常支付位置/宽度成本后的经济选择，还是由于范围过松、系数失衡或实现漏计成本造成的结构性退化。
 
 ## 12. 与后续 Wasserstein DRO 的兼容性
 
-推荐的 ET 模型适合作为后续 Wasserstein DRO 的基础，因为随机加工时间或随机 setup 时间进入场景 timing 约束的右端，固定离散排程后 recourse 是连续 LP。可以先建立并验证 SAA 与 Benders，再在同一 recourse 上研究经验分布附近的 Wasserstein 模糊集和对偶 reformulation。
+推荐的 ET 模型适合作为后续 Wasserstein DRO 的基础，因为随机加工时间或随机 setup 时间进入场景 timing 约束的右端，固定离散排程后 recourse 是连续 LP。可以先建立并验证 SAA 与 Benders，再在同一 recourse 上研究经验分布附近的 Wasserstein 模糊集和对偶 reformulation。但“RHS 不确定性 + 连续 recourse + Wasserstein 球”本身已是成熟工具，单纯把 SAA 换成标准 Wasserstein reformulation 只能算稳健性扩展，不能自动成为第二个方法创新点。
 
-这并不意味着 DRO 会自动得到一个很小的闭式模型。机器顺序变量会改变不确定参数进入哪些时间递推约束，支持集、距离范数和二阶段相对完全 recourse 都需要单独处理。但 ET 保持连续 recourse，至少保留了 LP 对偶和 cut 生成的基础；若改用 early/tardy work 或 job counts，整数 recourse 会使 Wasserstein 对偶和精确分解同时复杂化。因此合理顺序是：ET-SAA 基线，Benders 比较，随后 ET-Wasserstein DRO；其他目标另立分支。
+这并不意味着 DRO 会自动得到一个很小的闭式模型。机器顺序变量会改变哪些随机 setup 分量被激活，支持集还应保持加工时长与换型时长的相关性，距离范数、半径标定和二阶段相对完全 recourse 都需要单独处理。只有进一步利用“路径激活的随机 setup + 共享 due window + 多机 recourse”推导新的紧凑 reformulation、分离 oracle 或机器级分解，DRO 才可能产生方法贡献；否则其定位应是 OOS 稳健性与管理分析。合理顺序仍是先完成 ET-SAA 和 full-heterogeneous formulation，再决定 DRO 是否值得扩展；其他目标另立分支。
 
 ## 13. 最终判断
 

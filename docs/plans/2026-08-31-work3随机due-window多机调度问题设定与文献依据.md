@@ -358,17 +358,36 @@ E_{j\omega},T_{j\omega}\ge0.
 
 正成本最小化保证两变量自动等于相应正部函数。固定一阶段排程和窗口后，所有场景 timing 问题都是 LP；固定排程但把共同窗口也放入联合子问题时，仍然是跨场景共享 \(a,b\) 的 LP。
 
-### 5.4 异质参数与无 big-\(M\) position 模型
+### 5.4 共同成本的紧凑 position 模型与异质扩展
 
 2026 的位置模型之所以能够完全按位置定义窗口、ET 和场景时钟，是因为其宽度、ET 和 overtime 权重都是全局统一的，且客户窗口域没有任务特定的 \(L_j,U_j,D_j^{\min},D_j^{\max}\)。当前模型要区分三类异质性。
 
-1. 随机加工/setup 时间、确定 setup 金额 \(g_{ij}\) 和全部窗口界可以保持异质。它们分别作为二元分配/相邻变量的线性系数或加权右端进入模型，不需要 big-\(M\) 激活。
-2. 位置和宽度系数 \(\rho_j,\lambda_j\) 也可以保持异质。通过任务—位置连续窗口变量 \(a_{jkm},b_{jkm}\) 及自然界 \(L_jy_{jkm}\le a_{jkm},b_{jkm}\le U_jy_{jkm}\)，目标可以直接线性计价，不需要时间抽取 \(H\)，代价是增加 \(O(nMK)\) 个连续变量。
-3. 真正导致 position 场景时钟需要身份抽取的是任务特定 ET 系数 \(\alpha_j,\beta_j\)。位置时钟 \(c_{km\omega}\) 必须先判断属于哪个任务，才能施加该任务的 ET 单价；紧凑线性模型需要 \(c_{jkm\omega}\le H_{km\omega}y_{jkm}\) 或等价有界析取。
+1. 随机加工/setup 时间、确定 setup 金额 \(g_{ij}\) 和全部窗口界可以保持异质。特别地，每个已用位置恰好分配一个任务时，可直接写
 
-因此，为消除 position 模型中的 \(H\)，最低要求只是令 \(\alpha_j\equiv\alpha\)、\(\beta_j\equiv\beta\)；此时 \(\rho_j,\lambda_j\) 仍可异质，但窗口连续变量较多。若还希望得到与 2026 同样紧凑的纯位置窗口模型，则进一步令 \(\rho_j\equiv\rho\)、\(\lambda_j\equiv\lambda\)，而 \(L_j,U_j,D_j^{\min},D_j^{\max}\)、\(p_{j\omega},s_{ij\omega},g_{ij}\) 全部仍可异质。详细线性式见[双模型补充分析第 6.2 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
+   \[
+   \sum_jL_jy_{jkm}\le A_{km}\le B_{km}\le\sum_jU_jy_{jkm},
+   \]
 
-共同时间成本有直接文献先例：两篇 TWA 都使用全局时间权重；Yue and Wan (2016) 的 DIF due-window 模型允许每个任务拥有不同窗口，却让所有任务共用 \(\alpha,\beta,\gamma,\delta\)。现实上可把样本限定为同一制造商、同一合同模板和同一服务等级，使用统一的过渡资源费率、验收资源预留费率、库存费率和迟交费率，而保留任务时间、setup、窗口界和转换金额的异质性。当前建议以共同 \(\rho,\lambda,\alpha,\beta\) 作为无 big-\(M\) position 主基线，再用任务特定系数做异质性扩展；后者不能继续宣称整个 position 模型完全无 big-\(M\)。
+   \[
+   \sum_jD_j^{\min}y_{jkm}\le B_{km}-A_{km}
+   \le\sum_jD_j^{\max}y_{jkm}.
+   \]
+
+   这些是任务参数对二元分配变量的加权右端，不需要用大数关闭未选任务的窗口约束。
+2. 异质位置和宽度系数 \(\rho_j,\lambda_j\) 若通过任务—位置连续窗口变量 \(a_{jkm},b_{jkm}\) 计价，通常需要 \(a_{jkm},b_{jkm}\le U_jy_{jkm}\) 或等价激活界。这在数学上就是 variable upper bound 型 big-\(M\)：\(U_j\) 有真实业务含义只说明它可能较紧，不改变其析取激活性质；若 \(U_j\) 取得任意大，松弛和数值问题同样存在。
+3. 异质 ET 系数 \(\alpha_j,\beta_j\) 还要求识别位置时钟属于哪个任务。紧凑线性模型需要 \(c_{jkm\omega}\le H_{km\omega}y_{jkm}\)、indicator 或等价有界析取。若 \(H\) 与 2-indexed 模型采用相同全局完工上界，两者的大数尺度并无本质差别。
+
+因此，令 \(\alpha_j\equiv\alpha,\beta_j\equiv\beta\) 只能消掉完工时钟身份抽取的 \(H\)；只要 \(\rho_j,\lambda_j\) 仍然异质，任务—位置窗口变量的 VUB 激活界通常还在。要得到与 2026 最接近的紧凑 position 模型，应进一步令 \(\rho_j\equiv\rho,\lambda_j\equiv\lambda\)，同时保留 \(L_j,U_j,D_j^{\min},D_j^{\max},p_{j\omega},s_{ij\omega},g_{ij}\) 的异质性。详细线性式见[双模型补充分析第 6.2 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
+
+共同时间成本有直接的调度文献先例。Yue and Wan (2016) 的 DIF 模型允许各任务拥有不同窗口，却在
+
+\[
+\sum_j\left(\alpha E_j+\beta T_j+\gamma d'_j+\delta D_j\right)
+\]
+
+中让所有任务共用四个单位成本；其中 \(d'_j\) 是任务窗口开始时间、\(D_j=d''_j-d'_j\) 是窗口长度，所以该文的 \(\gamma\) 对应本文位置成本 \(\rho\)，\(\delta\) 对应宽度成本 \(\lambda\)。不同论文对希腊字母的分配并不统一，例如 Janiak et al. (2015) 汇总的部分 common due-window 模型把 \(\gamma\) 写在宽度项上、把 \(\delta\) 写在位置项上，因此必须依据目标函数定义，而不能仅凭符号判断。Liman et al. (1998) 的单机模型、Mosheiov and Oron (2004) 及 Janiak et al. (2012) 的同质并行机模型也都采用共同的窗口位置/长度单位系数；共同系数不是为了迁就当前算法才临时增加的假设。
+
+现实上可把研究对象限定为同一制造商、同一合同模板和同一服务等级：统一过渡资源费率 \(\rho\)、验收资源预留费率 \(\lambda\)、库存费率 \(\alpha\) 和迟交费率 \(\beta\)，任务异质性仍由随机加工/setup、转换金额和窗口范围表达。两个候选模型必须求解同一个 W3-Core-Common 问题，不能用异质参数测试 2-indexed、再用同质参数测试 position。只有在统一实例上确认哪种表示更有效后，才考虑在胜出的模型上增加任务特定成本扩展。
 
 ## 6. 非退化与逐任务参数边界
 
@@ -572,12 +591,12 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 ## 11. 建议的模型与实验层次
 
-1. **核心概念模型 W3-Core-Het**：同质多机 + 任务特定位置/宽度/ET 系数 + 有限位置区间 + 长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。该版本优先由 2-indexed 模型表达。
-2. **紧凑 position 基线 W3-Core-Common**：四类单位时间系数取全局 \(\rho,\lambda,\alpha,\beta\)，但 \(p_{j\omega},s_{ij\omega},g_{ij},L_j,U_j,D_j^{\min},D_j^{\max}\) 全部允许任务异质。该版本可以使用每个机器—位置一组时间和窗口变量，避免按任务抽取位置时钟的人工 horizon 大数。
-3. **折中 position 版本 W3-Core-ETCommon**：只令 \(\alpha_j\equiv\alpha,\beta_j\equiv\beta\)，保留异质 \(\rho_j,\lambda_j\)。它不需要任务完工时钟抽取 \(H\)，但需要任务—位置窗口变量及真实业务上界 \(U_j\) 做激活，规模为 \(O(nMK)\)。这里的 \(U_j\) 是模型本身的可接受时间上界，不是人为放大的数值 \(M\)。
-4. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
-5. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
-6. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
+1. **唯一核心问题 W3-Core-Common**：同质多机 + 共同 \(\rho,\lambda,\alpha,\beta\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。任务的 \(p_{j\omega},s_{ij\omega},g_{ij},L_j,U_j,D_j^{\min},D_j^{\max}\) 仍保持异质。
+2. **建模比较**：2-indexed 和 machine-position 必须使用同一组 W3-Core-Common 实例、目标和参数。比较内容只有模型表示、松弛、分解 cut 和计算效率，不能混入成本同质性差异。
+3. **异质成本扩展 W3-Het**：仅在主模型比较完成且确有业务必要时研究。在胜出的模型上令 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) 任务特定；紧凑 position 表示此时一般需要 VUB/indicator，不能继续宣称完全无 big-\(M\)。
+4. **位置锚消融 W3-Position**：保留 \(\rho(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
+5. **范围锚消融 W3-Range**：令 \(\rho=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
+6. **waiting 机制消融 W3-Wait**：令 \(\rho=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
 7. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
 
 核心算例生成后应先做结构审计：检查 \(U_j\) 与加工时间尺度是否匹配、\(D_j^{\min}\le D_j^{\max}\le U_j-L_j\)、三个参数支配条件的任务比例、最小宽度和位置边界命中率、正 ET 任务比例，以及目标各项的数量级。若出现“所有任务 ET=0”，先判断这是正常支付位置/宽度成本后的经济选择，还是由于范围过松、系数失衡或实现漏计成本造成的结构性退化。
@@ -621,3 +640,8 @@ ET 目标足以使问题成立，并且是保留连续 recourse 与精确 Bender
 23. Hegedus, M. G., and Hopp, W. J. (2001). Due date setting with supply constraints in systems using MRP. *Computers & Industrial Engineering*, 39(3-4), 293-305. https://doi.org/10.1016/S0360-8352(01)00007-9
 24. Zhao, X., Stecke, K. E., and Prasad, A. (2012). Lead Time and Price Quotation Mode Selection: Uniform or Differentiated? *Production and Operations Management*, 21(1), 177-193. https://doi.org/10.1111/j.1937-5956.2011.01248.x
 25. Yu, X., Shen, S., Badri-Koohi, B., and Seada, H. (2023). Time window optimization for attended home service delivery under multiple sources of uncertainties. *Computers & Operations Research*, 150, 106045. https://doi.org/10.1016/j.cor.2022.106045
+26. Liman, S. D., Panwalkar, S. S., and Thongmee, S. (1998). Common due window size and location determination in a single machine scheduling problem. *Journal of the Operational Research Society*, 49(9), 1007-1010. https://doi.org/10.1057/palgrave.jors.2600601
+27. Mosheiov, G., and Oron, D. (2004). Due-window assignment with unit processing-time jobs. *Naval Research Logistics*, 51(7), 1005-1017. https://doi.org/10.1002/nav.20039
+28. Janiak, A., Janiak, W. A., Kovalyov, M. Y., Marek, M., and Werner, F. (2012). Soft due window assignment and scheduling of unit-time jobs on parallel machines. *4OR*, 10, 347-360. https://doi.org/10.1007/s10288-012-0201-4
+29. Bulhões, T., Sadykov, R., Subramanian, A., and Uchoa, E. (2020). On the exact solution of a large class of parallel machine scheduling problems. *Journal of Scheduling*, 23, 411-429. https://doi.org/10.1007/s10951-020-00640-z
+30. Pessoa, A. A., Poggi de Aragão, M., Uchoa, E., and Rodrigues, R. (2010). Algorithms over arc-time indexed formulations for single and parallel machine scheduling problems. *Mathematical Programming Computation*, 2, 259-290. https://doi.org/10.1007/s12532-010-0019-z

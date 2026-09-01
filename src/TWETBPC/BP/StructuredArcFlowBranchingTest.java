@@ -46,15 +46,26 @@ public final class StructuredArcFlowBranchingTest {
 		require(dual[1][2] == 3.25 && dual[4][2] == 3.25, "member arc dual expansion");
 		require(dual[2][3] == 0.0 && dual[3][2] == 0.0, "inside arcs excluded");
 
-		BitSet depotPair = new BitSet(width * width);
-		depotPair.set(2);
-		depotPair.set(3 * width + 6);
-		AggregateArcBranchConstraint depotConstraint = new AggregateArcBranchConstraint(
-				"clusterDepotPair", "depot-{2,3}", depotPair, width, false, 1);
-		TWETColumn depotColumn = new TWETColumn(1, Arrays.asList(2, 3), 5,
+		BitSet directedPair = new BitSet(width * width);
+		for (int from : new int[] { 2, 3 }) {
+			for (int to : new int[] { 4, 5 }) {
+				directedPair.set(from * width + to);
+			}
+		}
+		AggregateArcBranchConstraint directedConstraint = new AggregateArcBranchConstraint(
+				"clusterPair", "{2,3}->{4,5}", directedPair, width, false, 1);
+		TWETColumn forwardColumn = new TWETColumn(1, Arrays.asList(2, 4, 3, 5), 5,
 				0.0, ColumnSource.MANUAL, false);
-		require(depotConstraint.coefficient(depotColumn, 6) == 2,
-				"depot pair counts both route endpoints");
+		TWETColumn reverseColumn = new TWETColumn(2, Arrays.asList(4, 5, 2, 3), 5,
+				0.0, ColumnSource.MANUAL, false);
+		require(directedConstraint.coefficient(forwardColumn, 6) == 2,
+				"directed pair counts forward cluster transitions");
+		require(directedConstraint.coefficient(reverseColumn, 6) == 0,
+				"directed pair excludes reverse cluster transitions");
+		double[][] directedDual = new double[width][width];
+		directedConstraint.addDualTo(directedDual, 2.5);
+		require(directedDual[2][4] == 2.5 && directedDual[4][2] == 0.0,
+				"directed pair expands dual in one direction only");
 	}
 
 	private static void verifyHalfIntegerOrdering() {

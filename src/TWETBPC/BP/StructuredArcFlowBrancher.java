@@ -83,21 +83,22 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			addAggregateCandidate(candidates, keys, "clusterBoundary",
 					"clusterBoundary(" + jobSetText(jobs) + ")", incomingMask(jobs, sink),
 					flowValue(incomingMask(jobs, sink), arcValues, sink), cluster);
-			BitSet depotMask = depotPairMask(jobs, sink);
-			addAggregateCandidate(candidates, keys, "clusterDepotPair",
-					"clusterDepotPair(" + cluster + ")", depotMask,
-					flowValue(depotMask, arcValues, sink), cluster);
 		}
-		int order = clusters.size() * 2;
+		int order = clusters.size();
 		for (int firstIndex = 0; firstIndex < eligibleClusters.size(); firstIndex++) {
 			int firstCluster = eligibleClusters.get(firstIndex).intValue();
 			for (int secondIndex = firstIndex + 1; secondIndex < eligibleClusters.size(); secondIndex++) {
 				int secondCluster = eligibleClusters.get(secondIndex).intValue();
-				BitSet mask = betweenUndirectedMask(
+				BitSet forwardMask = betweenDirectedMask(
 						clusters.get(firstCluster), clusters.get(secondCluster), sink);
 				addAggregateCandidate(candidates, keys, "clusterPair",
-						"clusterPair(" + firstCluster + "<->" + secondCluster + ")", mask,
-						flowValue(mask, arcValues, sink), order++);
+						"clusterPair(" + firstCluster + "->" + secondCluster + ")", forwardMask,
+						flowValue(forwardMask, arcValues, sink), order++);
+				BitSet backwardMask = betweenDirectedMask(
+						clusters.get(secondCluster), clusters.get(firstCluster), sink);
+				addAggregateCandidate(candidates, keys, "clusterPair",
+						"clusterPair(" + secondCluster + "->" + firstCluster + ")", backwardMask,
+						flowValue(backwardMask, arcValues, sink), order++);
 			}
 		}
 	}
@@ -197,13 +198,10 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		if ("clusterBoundary".equals(family)) {
 			return 0;
 		}
-		if ("clusterDepotPair".equals(family)) {
+		if ("clusterPair".equals(family)) {
 			return 1;
 		}
-		if ("clusterPair".equals(family)) {
-			return 2;
-		}
-		return 3;
+		return 2;
 	}
 
 	private BitSet incomingMask(BitSet jobs, int sink) {
@@ -218,25 +216,13 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		return mask;
 	}
 
-	/** 聚合两个簇之间的双向连接，保持论文cluster-pair的高层连接语义。 */
-	private BitSet betweenUndirectedMask(BitSet firstJobs, BitSet secondJobs, int sink) {
+	/** 分开统计两个簇之间的有向连接，保留TWET的setup方向和完成时序。 */
+	private BitSet betweenDirectedMask(BitSet fromJobs, BitSet toJobs, int sink) {
 		BitSet mask = new BitSet((sink + 1) * (sink + 1));
-		for (int first = firstJobs.nextSetBit(1); first >= 0; first = firstJobs.nextSetBit(first + 1)) {
-			for (int second = secondJobs.nextSetBit(1); second >= 0;
-					second = secondJobs.nextSetBit(second + 1)) {
-				mask.set(first * (sink + 1) + second);
-				mask.set(second * (sink + 1) + first);
+		for (int from = fromJobs.nextSetBit(1); from >= 0; from = fromJobs.nextSetBit(from + 1)) {
+			for (int to = toJobs.nextSetBit(1); to >= 0; to = toJobs.nextSetBit(to + 1)) {
+				mask.set(from * (sink + 1) + to);
 			}
-		}
-		return mask;
-	}
-
-	/** 将TWET分离的source/sink合并解释为论文中的depot cluster。 */
-	private BitSet depotPairMask(BitSet jobs, int sink) {
-		BitSet mask = new BitSet((sink + 1) * (sink + 1));
-		for (int job = jobs.nextSetBit(1); job >= 0; job = jobs.nextSetBit(job + 1)) {
-			mask.set(job);
-			mask.set(job * (sink + 1) + sink);
 		}
 		return mask;
 	}

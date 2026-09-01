@@ -393,6 +393,10 @@ E_{j\omega},T_{j\omega}\ge0.
 
 该文的主模型分别研究加工时间正态分布已知，以及只知道均值和方差；前者解析期望 ET 并用分支定界搜索序列，后者用上下界的线性组合建立近似问题。其第 5.2 节 \(P2\_SAA\) 只是评价近似质量的 benchmark：排序变量跨样本共享，但原式把窗口写成样本特定 \(e_{kj},d_{kj}\)。按字面模型它允许窗口随样本变化，不是当前要求的非预见两阶段 SAA。当前模型必须让所有场景共享同一 \(a_j,b_j\)，只允许场景 timing/waiting 调整。
 
+这里的“给定序列后求窗口”不是业务决策先后，而是利用 \(\min_{s,e,d}z=\min_s\min_{e,d}z\) 做条件优化。固定候选序列后，无 setup、无 idle 和独立随机加工使每个位置的完成时间分布由累计均值、方差唯一确定，任务窗口又彼此可分，因此可以解析求分位端点，再把最优窗口值代回外层搜索序列。该文 \(P2\_SAA\) 实际计算的是 \(K^{-1}\sum_k\min_{e^k,d^k}f_k\)，而当前共同承诺窗口需要 \(\min_{e,d}K^{-1}\sum_kf_k\)；前者允许样本自适应窗口，通常给出更低、偏乐观的值，不能作为当前模型的直接 SAA。
+
+共同四费率也不是唯一可行路线。当前新增三个待原型验证的异质候选：其一，采用任务特定 \(\rho_j,\lambda_j\) 和共同 \(\alpha,\beta\)，只拆分任务—位置窗口变量，保留按位置计 ET，不引入场景完工时刻身份 \(H\)，是最优先的折中；其二，采用完整异质四费率，以任务—位置 perspective/凸包式连续变量和由有限 \(U_j\)、场景加工/setup 时长推导的 position-specific 界构造精确 formulation，并研究其 projected Benders；其三，若企业存在少量合同服务等级，则使用 class heterogeneity，把场景身份变量规模从任务数降到类别数。只有这些原型均明显不可用时，才退回全同质核心模型。更激进的无 compact-bound 路线是按完整单机序列列生成，每列内部求异质联合 SAA LP，但其 pricing 将成为非加性的 branch-price-and-Benders 问题，适合另立算法主线。完整分析见[双模型补充分析第 6.2.7--6.2.8 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
+
 ## 6. 非退化与逐任务参数边界
 
 以下三个结论是分布无关的逐任务充分条件。它们通过在保持排程和所有场景 timing 不变时单独移动窗口端点得到，因此允许等待、setup、机器数量和随机分布都不会破坏结论。严格不等式用于获得必然边界；等号通常只产生多个等价最优解，不能直接预处理。
@@ -595,13 +599,14 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 ## 11. 建议的模型与实验层次
 
-1. **唯一核心问题 W3-Core-Common**：同质多机 + 共同 \(\rho,\lambda,\alpha,\beta\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。任务的 \(p_{j\omega},s_{ij\omega},g_{ij},L_j,U_j,D_j^{\min},D_j^{\max}\) 仍保持异质。
-2. **建模比较**：2-indexed 和 machine-position 必须使用同一组 W3-Core-Common 实例、目标和参数。比较内容只有模型表示、松弛、分解 cut 和计算效率，不能混入成本同质性差异。
-3. **异质成本扩展退出当前范围**：不在当前模型和数值实验中实现 W3-Het。其紧凑 position 表示依赖 \(U_j-L_j-D_j^{\min}\) 等 VUB 上界，计算表现会与上界质量纠缠；相关写法只作为被否决方案记录，不作为当前贡献。
-4. **位置锚消融 W3-Position**：保留 \(\rho(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
-5. **范围锚消融 W3-Range**：令 \(\rho=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
-6. **waiting 机制消融 W3-Wait**：令 \(\rho=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
-7. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
+1. **优先原型 W3-WindowHet**：同质多机 + 任务特定 \(\rho_j,\lambda_j\) + 共同 \(\alpha,\beta\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。该层只拆分任务—位置窗口，不需要场景完工时刻身份 \(H\)，是目前业务异质性与 position 紧凑性之间最合理的候选。
+2. **完整异质原型 W3-FullHet**：进一步令 \(\alpha_j,\beta_j\) 任务特定，使用任务—位置 perspective/析取凸包变量和 position-specific completion bounds。先在小规模上核验正确性、LP 界和数值稳定性；若相对 W3-WindowHet 的规模代价可接受，则完整异质模型优先成为正式主模型。
+3. **同质回退 W3-Core-Common**：共同 \(\rho,\lambda,\alpha,\beta\) 不再预先指定为唯一核心，只在两种异质 position 原型均明显不可用时回退。此时任务的 \(p_{j\omega},s_{ij\omega},g_{ij},L_j,U_j,D_j^{\min},D_j^{\max}\) 仍保持异质，并需要由 DRO 或新的序列/分解算法补足与 2026 的方法差异。
+4. **建模比较原则**：2-indexed 和 machine-position 在任何正式比较中必须使用同一个参数层次和同一批实例，不能用完整异质参数测试 2-indexed、再用共同参数测试 position。W3-WindowHet、W3-FullHet 和 W3-Core-Common 是三个模型层次，不应混成一次 formulation 性能比较。
+5. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
+6. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
+7. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
+8. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
 
 核心算例生成后应先做结构审计：检查 \(U_j\) 与加工时间尺度是否匹配、\(D_j^{\min}\le D_j^{\max}\le U_j-L_j\)、三个参数支配条件的任务比例、最小宽度和位置边界命中率、正 ET 任务比例，以及目标各项的数量级。若出现“所有任务 ET=0”，先判断这是正常支付位置/宽度成本后的经济选择，还是由于范围过松、系数失衡或实现漏计成本造成的结构性退化。
 

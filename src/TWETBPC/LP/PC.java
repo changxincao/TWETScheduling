@@ -208,6 +208,14 @@ public class PC {
 			lp.removeCuts(removedCutIds);
 			lp.addCuts(newCutIds);
 			solution = resolveCurrentModelTimed(lp, "after_cut");
+			if (isTimeLimitReached() || solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
+				return solution;
+			}
+			if (solution.getStatus() == TWETMasterStatus.INFEASIBLE) {
+				// 2026-09-01: 新 cut 可能使当前有限列 RMP 暂时不可行。不能据此关闭节点；
+				// 必须在当前全部 active rows 上完成 Phase-I exact pricing 后再判断真实不可行性。
+				solution = repairAfterCutPhaseOne(lp);
+			}
 			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return solution;
 			}
@@ -1050,6 +1058,11 @@ public class PC {
 		return !lp.isNoSlack() || lp.hasPositiveBranchImpliedPenaltyColumn();
 	}
 
+	private boolean needsPhaseOneRepair(LP lp, boolean includeBranchPenaltyColumns) {
+		return !lp.isNoSlack()
+				|| (includeBranchPenaltyColumns && lp.hasPositiveBranchImpliedPenaltyColumn());
+	}
+
 	private TWETMasterSolution repairDomainFilteredStrongBranchingMaster(LP lp) {
 		// 2026-07-01: strong branching 的实验修复路径。这里的 child seed 已经先按分支域筛过，
 		// 若 RMP 不可行，就给所有核心行加 slack 以找回覆盖/机器数/分支行可行性；旧 repair 不受影响。
@@ -1132,25 +1145,43 @@ public class PC {
 		return finalSolution;
 	}
 
-	/**
-	 * 2026-07-20: Pure Phase-I strong-trial repair. Legal columns cost 0; artificial slacks and
-	 * branch-implied competitors cost 1. Restore true costs only after the Phase-I objective reaches 0.
-	 */
+	/** 2026-07-20: 强分支试算的纯 Phase-I 修复。 */
 	private TWETMasterSolution repairStrongBranchingPhaseOne(LP lp) {
+		return repairMasterPhaseOne(lp, false, true,
+				"strong_branching_phase_one", "strongBranchingPhaseOne", "Strong branching");
+	}
+
+	/** 2026-09-01: cut 加入后有限列 RMP 不可行时，在当前全部 active rows 上做纯 Phase-I。 */
+	private TWETMasterSolution repairAfterCutPhaseOne(LP lp) {
+		return repairMasterPhaseOne(lp, true, false,
+				"cut_loop_phase_one", "cutLoopPhaseOne", "Cut-loop");
+	}
+
+	/**
+	 * 合法内部列和外包列成本为 0，人工变量及可选的分支 penalty 列成本为 1；只有
+	 * Phase-I 目标归零后才恢复真实目标。按列外包必须和内部定价在同一 dual 上共同闭合。
+	 */
+	private TWETMasterSolution repairMasterPhaseOne(LP lp, boolean allRowRepair,
+			boolean removeBranchPenaltyColumns, String phasePrefix, String pricingStage,
+			String repairDescription) {
 		lp.setFeasibilityPhaseOneObjectiveMode(true);
-		lp.setFeasibilityRepairMode(true);
+		if (allRowRepair) {
+			lp.setAllRowFeasibilityRepairMode(true);
+		} else {
+			lp.setFeasibilityRepairMode(true);
+		}
 		TWETMasterSolution phaseSolution = null;
 		int generatedForRepair = 0;
 		boolean phaseFeasible = false;
 		boolean phaseInfeasibleCertified = false;
 		try {
-			phaseSolution = solveRelaxationTimed(lp, "strong_branching_phase_one_initial");
+			phaseSolution = solveRelaxationTimed(lp, phasePrefix + "_initial");
 			if (isTimeLimitReached() || phaseSolution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return phaseSolution;
 			}
 			// 2026-07-20: residual 只会在 RMP 重解后变化。缓存结果，避免同一 LP 解上反复
 			// 查询 artificial slack 和全部 branch-implied penalty 变量。
-			boolean repairPending = needsStrongRepair(lp);
+			boolean repairPending = needsPhaseOneRepair(lp, removeBranchPenaltyColumns);
 			phaseFeasible = !repairPending;
 
 			while (repairPending && !isTimeLimitReached()) {
@@ -1169,7 +1200,7 @@ public class PC {
 						HashSet<Integer> seenColumnIds = new HashSet<Integer>();
 						HashSet<Integer> seenOutsourcingColumnIds = new HashSet<Integer>();
 						GeneratedColumnIds generated = generateColumnsFromEngine(lp, engine, true,
-								seenColumnIds, seenOutsourcingColumnIds, "strongBranchingPhaseOne", false,
+								seenColumnIds, seenOutsourcingColumnIds, pricingStage, false,
 								null, Double.NaN);
 						if (engine instanceof OutsourcingPricingEngine) {
 							outsourcingClosedAtCurrentDual = isNonnegativeCertificate(
@@ -1190,11 +1221,14 @@ public class PC {
 						}
 						addedInThisPass = true;
 						addedByThisEngine = true;
-						phaseSolution = resolveCurrentModelTimed(lp, "strong_branching_phase_one_after_pricing");
+						phaseSolution = resolveCurrentModelTimed(lp, phasePrefix + "_after_pricing");
 						if (phaseSolution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 							return phaseSolution;
 						}
-						repairPending = needsStrongRepair(lp);
+						// RMP 重解后 dual 已变化；重解前任何 family 的 exact certificate 均已失效。
+						internalClosedAtCurrentDual = false;
+						outsourcingClosedAtCurrentDual = !lp.isColumnizedOutsourcing();
+						repairPending = needsPhaseOneRepair(lp, removeBranchPenaltyColumns);
 						keepCurrentEngine = engine.repeatFindFeasibleUntilExhausted()
 								&& repairPending;
 					}
@@ -1211,7 +1245,8 @@ public class PC {
 							&& outsourcingClosedAtCurrentDual;
 					if (!phaseInfeasibleCertified) {
 						// Phase-I must not silently switch repair semantics; incomplete closure is a contract error.
-						throw new IllegalStateException("Phase-I strong repair exhausted pricing without a complete "
+						throw new IllegalStateException("Phase-I " + repairDescription
+								+ " repair exhausted pricing without a complete "
 								+ "internal/outsourcing certificate: " + lp.getNode().diagnosticSummary()
 								+ ", internalClosed=" + internalClosedAtCurrentDual
 								+ ", outsourcingClosed=" + outsourcingClosedAtCurrentDual);
@@ -1230,20 +1265,22 @@ public class PC {
 		if (phaseInfeasibleCertified) {
 			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
 					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
-					"Strong branching Phase-I optimum remains positive after generating "
+					repairDescription + " Phase-I optimum remains positive after generating "
 							+ generatedForRepair + " columns");
 		}
 		if (!phaseFeasible) {
-			throw new IllegalStateException("Phase-I strong repair ended without a terminal state: "
+			throw new IllegalStateException("Phase-I " + repairDescription
+					+ " repair ended without a terminal state: "
 					+ lp.getNode().diagnosticSummary());
 		}
 
-		int removedPenaltyColumns = lp.removeBranchImpliedPenaltyColumnsFromRestrictedSet();
+		int removedPenaltyColumns = removeBranchPenaltyColumns
+				? lp.removeBranchImpliedPenaltyColumnsFromRestrictedSet() : 0;
 		traceSink.onStageHeartbeat(lp.getNode(),
-				"strongBranchingPhaseOne.done generated=" + generatedForRepair
+				pricingStage + ".done generated=" + generatedForRepair
 						+ ",removedPenaltyColumns=" + removedPenaltyColumns,
 				totalPoolSize(lp), lp.getCutPool().size());
-		TWETMasterSolution trueSolution = solveRelaxationTimed(lp, "strong_branching_phase_one_true_rmp");
+		TWETMasterSolution trueSolution = solveRelaxationTimed(lp, phasePrefix + "_true_rmp");
 		if (!isTimeLimitReached() && trueSolution.getStatus() == TWETMasterStatus.INFEASIBLE) {
 			throw new IllegalStateException("Phase-I reached zero but true-cost RMP became infeasible: "
 					+ lp.getNode().diagnosticSummary() + ", message=" + trueSolution.getMessage());

@@ -40,12 +40,12 @@ Work 3 可以沿用 2025 和 2026 两篇 TWATSP-ST 的基本思路，把“客�
 窗口 \([a_j,b_j]\) 的一阶段成本写为
 
 \[
-\rho_j(a_j-L_j)+\lambda_j\bigl[(b_j-a_j)-D_j^{\min}\bigr],
+\rho(a_j-L_j)+\lambda\bigl[(b_j-a_j)-D_j^{\min}\bigr],
 \]
 
-其中 \(L_j\) 是任务 \(j\) 最早允许的窗口起点，\(D_j^{\min}\) 是合同、服务目录或验收流程已经包含的基础窗口长度。位置项使窗口整体后移一单位产生 \(\rho_j\) 的边际成本，宽度项只对超过基础长度的增量宽度收费，每扩张一单位产生 \(\lambda_j\) 的边际成本。只要 \(\rho_j>0\) 且 \(\lambda_j>0\)，窗口整体后移和无代价扩张两个方向都受到控制。initial idle 可以免费，因为窗口与排程共同平移会增加位置成本。
+其中 \(L_j\) 是任务 \(j\) 最早允许的窗口起点，\(D_j^{\min}\) 是合同、服务目录或验收流程已经包含的基础窗口长度。当前核心模型对同一制造商和服务等级使用共同费率 \(\rho,\lambda\)：窗口整体后移一单位产生 \(\rho\) 的边际成本，超过基础长度后每扩张一单位产生 \(\lambda\) 的边际成本。只要 \(\rho>0\) 且 \(\lambda>0\)，窗口整体后移和无代价扩张两个方向都受到控制。initial idle 可以免费，因为窗口与排程共同平移会增加位置成本。
 
-位置成本相对 \(L_j\) 而不是相对时间 0 计费更合适。若直接写 \(\rho_j a_j\)，区间 \([0,L_j]\) 是任务根本不能选择的时间，却仍被记入成本；写成 \(\rho_j(a_j-L_j)\) 后，\(L_j\) 对应零基准，只有超出最早可接受承诺的部分收费。两种写法在 \(L_j\) 为常数时只差一个常数，但后者的经济解释和跨任务比较更清楚。
+位置成本相对 \(L_j\) 而不是相对时间 0 计费更合适。若直接写 \(\rho a_j\)，区间 \([0,L_j]\) 是任务根本不能选择的时间，却仍被记入成本；写成 \(\rho(a_j-L_j)\) 后，\(L_j\) 对应零基准，只有超出最早可接受承诺的部分收费。两种写法在 \(L_j\) 为常数时只差一个常数，但后者的经济解释和跨任务比较更清楚。
 
 宽度成本同理应相对 \(D_j^{\min}\) 计费。若 \(D_j^{\min}>0\) 表示客户合同本来就允许的最小验收槽或系统不可避免的基础服务时长，则该部分不应再次产生“承诺模糊度”成本。对所有任务都必须被调度且 \(D_j^{\min}\) 固定的当前模型，减去 \(\lambda_jD_j^{\min}\) 只改变目标常数，不改变最优解、Benders cut 的斜率或此前的参数占优条件；但它使成本分项从“总窗口长度”变为“超过基础服务的额外弹性”。若以后允许拒单、选择服务档位或联合决定 \(D_j^{\min}\)，该项不再是全局常数，必须显式保留。
 
@@ -195,7 +195,7 @@ D^{\min}\le b-a\le D^{\max}
 
 JIT 文献对 ET 的解释相对稳定。earliness 可对应成品库存、仓储、维护、保险、资金占用、变质或过早交付给客户造成的干扰；tardiness 可对应合同罚款、加急、折扣、替代采购、销售损失、客户投诉和声誉损失。Yue and Zhou (2021) 的定制服装例子中，过早完成需要存储与维护，过晚完成会导致投诉和折扣。
 
-\(\alpha_j\) 和 \(\beta_j\) 可以按单位时间的期望边际损失估计。通常 tardiness 的业务后果可能高于 earliness，但不存在必须满足的统一比例，且当前模型是任务特定系数。实验中不应把所有 \(\rho,\lambda,\alpha,\beta\) 从同一独立均匀分布抽取后就称为现实标定；这样会无意产生大量边界支配任务。更合理的做法是先生成业务尺度，再按预定比率档位构造各任务系数，并报告每类结构条件覆盖的任务比例。
+\(\alpha\) 和 \(\beta\) 可以按同一合同模板或服务等级下的单位时间期望边际损失估计。通常 tardiness 的业务后果可能高于 earliness，但不存在必须满足的统一比例。实验中不应把 \(\rho,\lambda,\alpha,\beta\) 从同一独立均匀分布抽取后就称为现实标定；更合理的是设定具有业务解释的比例档位，并检查这些共同参数是否触发第 6 节的系统性边界结构。任务价值差异当前通过窗口范围、随机时间和转换金额反映，不再单独使用任务特定时间费率。
 
 ### 4.5 setup
 
@@ -323,12 +323,12 @@ Cavaliere et al. (2026) 给出的解释更明确。原文直接写明 customers 
 \[
 \min
 \sum_{i,j}g_{ij}x_{ij}
-+\sum_{j\in J}\left[\rho_j(a_j-L_j)+\lambda_j\bigl((b_j-a_j)-D_j^{\min}\bigr)\right]
++\sum_{j\in J}\left[\rho(a_j-L_j)+\lambda\bigl((b_j-a_j)-D_j^{\min}\bigr)\right]
 +\sum_{\omega\in\Omega}\pi_\omega\sum_{j\in J}
-\left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right).
+\left(\alpha E_{j\omega}+\beta T_{j\omega}\right).
 \]
 
-第一项是默认保留的确定 setup 金额。若没有独立转换金额，可令 \(g_{ij}=0\) 做纯 timing 版本；若只知道固定单位时间费率，则用 \(g_{ij}=\kappa^s\sum_\omega\pi_\omega s_{ij\omega}\) 预聚合，不能再在二阶段重复收费。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；超过基础长度的额外宽度降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序以及随机加工/setup 时长又改变所有下游任务在各场景中的完工分布。当前所有任务必须加工，因此 \(-\sum_j\lambda_jD_j^{\min}\) 是目标常数，求解实现可以省略，但论文公式和成本报告保留增量口径。
+第一项是默认保留的确定 setup 金额。若没有独立转换金额，可令 \(g_{ij}=0\) 做纯 timing 版本；若只知道固定单位时间费率，则用 \(g_{ij}=\kappa^s\sum_\omega\pi_\omega s_{ij\omega}\) 预聚合，不能再在二阶段重复收费。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；超过基础长度的额外宽度降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序以及随机加工/setup 时长又改变所有下游任务在各场景中的完工分布。当前所有任务必须加工，因此 \(-\lambda\sum_jD_j^{\min}\) 是目标常数，求解实现可以省略，但论文公式和成本报告保留增量口径。
 
 ### 5.3 主要约束
 
@@ -388,6 +388,10 @@ E_{j\omega},T_{j\omega}\ge0.
 中让所有任务共用四个单位成本；其中 \(d'_j\) 是任务窗口开始时间、\(D_j=d''_j-d'_j\) 是窗口长度，所以该文的 \(\gamma\) 对应本文位置成本 \(\rho\)，\(\delta\) 对应宽度成本 \(\lambda\)。不同论文对希腊字母的分配并不统一，例如 Janiak et al. (2015) 汇总的部分 common due-window 模型把 \(\gamma\) 写在宽度项上、把 \(\delta\) 写在位置项上，因此必须依据目标函数定义，而不能仅凭符号判断。Liman et al. (1998) 的单机模型、Mosheiov and Oron (2004) 及 Janiak et al. (2012) 的同质并行机模型也都采用共同的窗口位置/长度单位系数；共同系数不是为了迁就当前算法才临时增加的假设。
 
 现实上可把研究对象限定为同一制造商、同一合同模板和同一服务等级：统一过渡资源费率 \(\rho\)、验收资源预留费率 \(\lambda\)、库存费率 \(\alpha\) 和迟交费率 \(\beta\)，任务异质性仍由随机加工/setup、转换金额和窗口范围表达。两个候选模型必须求解同一个 W3-Core-Common 问题，不能用异质参数测试 2-indexed、再用同质参数测试 position。只有在统一实例上确认哪种表示更有效后，才考虑在胜出的模型上增加任务特定成本扩展。
+
+随机 DWA 的直接证据需要单独限定。Yue and Zhou (2021) 是当前检索到的最直接随机机器调度 DWA：单机、随机加工、DIF 任务窗口、无 setup、禁止 idle；其 \(\alpha_j,\beta_j,\gamma_j,\delta_j\) 均为任务特定参数，算例分别从 \(U[1,10]\) 生成。因此它支撑“随机加工下联合决定排程和任务窗口”，不支撑共同四费率。当前尚未找到另一篇随机机器调度 DWA 专门采用共同四费率；共同费率的直接依据来自确定性 DWA 和随机 TWA 两条相邻文献流，只能表述为文献支持的合理特例。
+
+该文的主模型分别研究加工时间正态分布已知，以及只知道均值和方差；前者解析期望 ET 并用分支定界搜索序列，后者用上下界的线性组合建立近似问题。其第 5.2 节 \(P2\_SAA\) 只是评价近似质量的 benchmark：排序变量跨样本共享，但原式把窗口写成样本特定 \(e_{kj},d_{kj}\)。按字面模型它允许窗口随样本变化，不是当前要求的非预见两阶段 SAA。当前模型必须让所有场景共享同一 \(a_j,b_j\)，只允许场景 timing/waiting 调整。
 
 ## 6. 非退化与逐任务参数边界
 
@@ -476,7 +480,7 @@ q_j^b=1-\frac{\lambda_j}{\beta_j}.
 
 ## 7. 只有场景 ET 成本是否足够
 
-在推荐模型中足够。TWA 需要 overtime，是因为其窗口没有位置成本，且班次上限是唯一重要的绝对时间终端价格；当前模型已经用 \(\rho_j(a_j-L_j)\) 和有限 \(U_j\) 替代这一功能。ET、位置和宽度三类成本可以形成完整权衡，不需要额外加入 waiting 或 overtime 才使模型成立。
+在推荐模型中足够。TWA 需要 overtime，是因为其窗口没有位置成本，且班次上限是唯一重要的绝对时间终端价格；当前模型已经用 \(\rho(a_j-L_j)\) 和有限 \(U_j\) 替代这一功能。ET、位置和宽度三类成本可以形成完整权衡，不需要额外加入 waiting 或 overtime 才使模型成立。
 
 免费 waiting 会让模型在有利时主动推迟任务，以消除当前任务的 earliness，但这种等待会推迟同一机器上的后续任务，可能增加其 tardiness。因此，不能从“允许免费等待”推出完整序列中所有 earliness 必为 0。机器末任务没有下游传播时，若又没有 terminal cost，其 earliness 通常可以通过等待消除；每台机器至多存在一个这样的内生末任务，这属于局部排程性质，不是模型级退化。
 
@@ -593,7 +597,7 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 1. **唯一核心问题 W3-Core-Common**：同质多机 + 共同 \(\rho,\lambda,\alpha,\beta\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。任务的 \(p_{j\omega},s_{ij\omega},g_{ij},L_j,U_j,D_j^{\min},D_j^{\max}\) 仍保持异质。
 2. **建模比较**：2-indexed 和 machine-position 必须使用同一组 W3-Core-Common 实例、目标和参数。比较内容只有模型表示、松弛、分解 cut 和计算效率，不能混入成本同质性差异。
-3. **异质成本扩展 W3-Het**：仅在主模型比较完成且确有业务必要时研究。在胜出的模型上令 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) 任务特定；紧凑 position 表示此时一般需要 VUB/indicator，不能继续宣称完全无 big-\(M\)。
+3. **异质成本扩展退出当前范围**：不在当前模型和数值实验中实现 W3-Het。其紧凑 position 表示依赖 \(U_j-L_j-D_j^{\min}\) 等 VUB 上界，计算表现会与上界质量纠缠；相关写法只作为被否决方案记录，不作为当前贡献。
 4. **位置锚消融 W3-Position**：保留 \(\rho(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
 5. **范围锚消融 W3-Range**：令 \(\rho=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
 6. **waiting 机制消融 W3-Wait**：令 \(\rho=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
@@ -609,7 +613,9 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 ## 13. 最终判断
 
-当前 Work 3 的核心创新不应表述为“把随机窗口写成分位数并消去变量”，因为最终精确求解仍会回到与 TWA 类似的联合线性窗口/timing 模型。真正清楚的问题差异是：机器调度没有自然的驾驶员班次 overtime，于是使用任务特定位置成本和有限承诺范围替代终端 overtime；同时加入多机分配、随机加工时间和随机 sequence-dependent setup 时长，在允许场景等待的条件下联合设计排程和任务特定 due windows。
+当前 Work 3 的核心创新不应表述为“把随机窗口写成分位数并消去变量”，因为最终精确求解仍会回到与 TWA 类似的联合线性窗口/timing 模型。也不能把“共同成本 + 多两个窗口约束”写成主要贡献：共同成本已有 DWA/TWA 先例，任务特定窗口界本身只是自然扩展。真正清楚的问题差异是：机器调度没有自然的驾驶员班次 overtime，于是使用位置成本和有限承诺范围替代终端 overtime；同时加入多机分配、随机加工时间和随机 sequence-dependent setup 时长，在允许场景等待的条件下联合设计排程和任务特定 due windows。
+
+与 Cavaliere et al. (2026) 的建模重合必须正面承认并引用。该文已经比较了 2-index big-\(M\) 与 3-index position 的 monolithic 模型、强化版本以及多种 Benders 变量划分，因此当前再做双模型比较只是必要基线，不是新贡献。若只是把其单 tour position 模型复制到多台机器，再加 \(L/U/D^{\min}/D^{\max}\)，会有明显的 straightforward-extension 风险。按机器分块的联合 SAA recourse、aggregate/machine/grouped cuts、同质机对称消除、空位置和 position 上限都必须分析，但目前只视为多机算法的必要组成，不预先包装为主要创新。无 overtime 的参数性质只用于模型合理性和数值敏感性，不作为当前理论贡献。deepest/Pareto cuts、local branching 和 scenario aggregation 也都是可借鉴组件，不能仅靠这些通用方法的叠加宣称原创性；如果没有进一步利用随机 setup、窗口界或机器分块结构的新 cut、定界或分解结论，当前强项仍主要是新问题组合而不是新方法。
 
 ET 目标足以使问题成立，并且是保留连续 recourse 与精确 Benders 的关键。位置成本、范围和长度界不仅用于防止数学退化，也分别表达 lead-time 价格、不可违反的承诺边界和客户可接受的时间精度。waiting cost、early/tardy work 和 early/tardy job counts 都有现实意义，但会改变问题含义或算法结构，当前应作为清楚标注的消融或后续扩展，而不是混入核心模型。
 
@@ -645,3 +651,4 @@ ET 目标足以使问题成立，并且是保留连续 recourse 与精确 Bender
 28. Janiak, A., Janiak, W. A., Kovalyov, M. Y., Marek, M., and Werner, F. (2012). Soft due window assignment and scheduling of unit-time jobs on parallel machines. *4OR*, 10, 347-360. https://doi.org/10.1007/s10288-012-0201-4
 29. Bulhões, T., Sadykov, R., Subramanian, A., and Uchoa, E. (2020). On the exact solution of a large class of parallel machine scheduling problems. *Journal of Scheduling*, 23, 411-429. https://doi.org/10.1007/s10951-020-00640-z
 30. Pessoa, A. A., Poggi de Aragão, M., Uchoa, E., and Rodrigues, R. (2010). Algorithms over arc-time indexed formulations for single and parallel machine scheduling problems. *Mathematical Programming Computation*, 2, 259-290. https://doi.org/10.1007/s12532-010-0019-z
+31. Mor, B., and Mosheiov, G. (2024). Due-date assignment with acceptable lead-times on parallel machines. *Computers & Operations Research*, 166, 106617. https://doi.org/10.1016/j.cor.2024.106617

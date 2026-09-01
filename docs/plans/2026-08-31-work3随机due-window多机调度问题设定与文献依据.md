@@ -395,7 +395,7 @@ E_{j\omega},T_{j\omega}\ge0.
 
 这里的“给定序列后求窗口”不是业务决策先后，而是利用 \(\min_{s,e,d}z=\min_s\min_{e,d}z\) 做条件优化。固定候选序列后，无 setup、无 idle 和独立随机加工使每个位置的完成时间分布由累计均值、方差唯一确定，任务窗口又彼此可分，因此可以解析求分位端点，再把最优窗口值代回外层搜索序列。该文 \(P2\_SAA\) 实际计算的是 \(K^{-1}\sum_k\min_{e^k,d^k}f_k\)，而当前共同承诺窗口需要 \(\min_{e,d}K^{-1}\sum_kf_k\)；前者允许样本自适应窗口，通常给出更低、偏乐观的值，不能作为当前模型的直接 SAA。
 
-成本参数只保留两种完整设定，不再采用“只异质一部分费率”或服务等级折中。W3-Common 令 \(\rho,\lambda,\alpha,\beta\) 全部共同，得到最接近 2026、且不需要任务费率身份抽取的 position 基线；W3-FullHet 令 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) 全部任务特定，并承担任务—位置窗口/完成时刻身份变量及有限 \(H\) 的规模代价。两者若允许机器负载可变，都还要处理尾部空位置时钟。部分异质虽然能减少变量，但无法说明为什么只有某类客户成本异质，容易使问题设定受算法便利驱动，因此删除。完整异质 position 的优先强化是相对窗口变量、任务—位置—场景完成界和 one-hot disaggregated/perspective formulation，而不是声称完全无 big-\(M\)。不采用按完整序列列生成。完整分析见[双模型补充分析第 6.2.8--6.2.11 和第 9 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
+成本参数最终只保留完整异质设定 W3-FullHet：\(\rho_j,\lambda_j,\alpha_j,\beta_j\) 全部任务特定，并承担任务—位置窗口/完成时刻身份变量及有限 \(H\) 的规模代价。此前考虑的 W3-Common 虽能消除任务费率身份抽取，但多机可变负载仍需处理尾部空位置时钟，不能获得 2026 单 tour 那种完全无 \(M\) 的 position 结构，因此不再作为独立业务模型，只在数值实验中把 FullHet 的四类系数分别设成共同值，用于测量异质性本身的计算影响。部分异质版本同样删除。完整异质 position 的优先强化是相对窗口变量、任务—位置—场景完成界和 one-hot disaggregated/perspective formulation，而不是声称完全无 big-\(M\)。不采用按完整序列列生成。完整分析见[双模型补充分析第 6.2.8--6.2.11 和第 9 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
 
 ## 6. 非退化与逐任务参数边界
 
@@ -593,15 +593,15 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 序列相关 setup 使当前问题与 TWA 的结构更接近：TWA 的 arc travel time 对应任务转换 setup time，访问顺序对应每台机器上的任务顺序，随机旅行时间对应随机加工或 setup 时间。固定离散顺序后，场景 timing 和窗口仍是连续 LP，setup 不破坏 Benders 的基本条件。
 
-不考虑 setup 时，模型不会自动变得可分或得到统一的 SPT/EDD 规则。W3-FullHet 的任务特定费率、两种版本都存在的随机加工时间、共享 due-window 决策和下游 waiting 传播仍使顺序重要。能得到的主要简化只是时间递推少了 arc-dependent 常数，机器之间在固定分配后更容易分解，主问题也减少 setup 弧成本。只有在进一步加入同质费率、确定加工时间、无自愿 idle 或公共窗口等特殊条件时，才可能恢复交换性质或 DP。
+不考虑 setup 时，模型不会自动变得可分或得到统一的 SPT/EDD 规则。W3-FullHet 的任务特定费率、随机加工时间、共享 due-window 决策和下游 waiting 传播仍使顺序重要。能得到的主要简化只是时间递推少了 arc-dependent 常数，机器之间在固定分配后更容易分解，主问题也减少 setup 弧成本。只有在进一步加入同质费率、确定加工时间、无自愿 idle 或公共窗口等特殊条件时，才可能恢复交换性质或 DP。
 
 因此，主模型保留随机 sequence-dependent setup 时长 \(s_{ij\omega}\) 和确定转换金额 \(g_{ij}\)。至少做两组 matched 消融：一组令 \(g_{ij}=0\) 但保留随机 setup 时长，区分直接弧成本与 timing 传播；另一组同时令 setup 时长和金额为 0，衡量 setup 对算法难度、窗口位置和 ET 传播的总影响。不能把 no-setup 结果直接解释为一般随机多机 DWA 的结构定理。
 
 ## 11. 建议的模型与实验层次
 
-1. **共同费率模型 W3-Common**：同质多机 + 共同 \(\rho,\lambda,\alpha,\beta\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。这是紧凑 position 和与 2026 对照的基线，不预先包装成主要创新。
-2. **完整异质模型 W3-FullHet**：在同一业务结构上令 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) 全部任务特定。position 表示采用任务—位置 perspective/析取凸包变量和 position-specific completion bounds，并明确承认 VUB/有限 \(H\)；2-indexed 表示则保留任务索引成本和弧时间 big-\(M\)。先用小规模核验两种 formulation 的正确性、LP 界和数值稳定性，再决定正式主模型。
-3. **建模比较原则**：2-indexed 和 machine-position 在任何正式比较中必须使用同一个参数版本和同一批实例。W3-Common 与 W3-FullHet 是两个业务参数版本；2-indexed 与 position 是同一版本的两种 formulation，不能把参数差异混入 formulation 性能差异。
+1. **完整异质主模型 W3-FullHet**：同质多机 + 任务特定 \(\rho_j,\lambda_j,\alpha_j,\beta_j\) + 任务特定有限位置区间和长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。position 表示采用任务—位置 perspective/析取变量和 position-specific completion bounds，并明确承认 VUB/有限 \(H\)；2-indexed 表示保留任务索引成本和弧时间 big-\(M\)。
+2. **共同费率消融**：不建立独立的 W3-Common 业务模型，只在相同实例结构下令 \(\rho_j\equiv\rho,\lambda_j\equiv\lambda,\alpha_j\equiv\alpha,\beta_j\equiv\beta\)，用于测量任务费率异质性对模型规模、LP 界和求解时间的影响。
+3. **建模比较原则**：2-indexed 和 machine-position 在任何正式比较中必须使用同一组 FullHet 参数和同一批实例；共同费率只作为两种 formulation 都同时采用的 matched ablation，不能把参数差异混入 formulation 性能差异。
 4. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
 5. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
 6. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。

@@ -40,12 +40,14 @@ Work 3 可以沿用 2025 和 2026 两篇 TWATSP-ST 的基本思路，把“客�
 窗口 \([a_j,b_j]\) 的一阶段成本写为
 
 \[
-\rho_j(a_j-L_j)+\lambda_j(b_j-a_j),
+\rho_j(a_j-L_j)+\lambda_j\bigl[(b_j-a_j)-D_j^{\min}\bigr],
 \]
 
-其中 \(L_j\) 是任务 \(j\) 最早允许的窗口起点。位置项使窗口整体后移一单位产生 \(\rho_j\) 的边际成本，宽度项使窗口扩张一单位产生 \(\lambda_j\) 的边际成本。只要 \(\rho_j>0\) 且 \(\lambda_j>0\)，窗口整体后移和无代价扩张两个方向都受到控制。initial idle 可以免费，因为窗口与排程共同平移会增加位置成本。
+其中 \(L_j\) 是任务 \(j\) 最早允许的窗口起点，\(D_j^{\min}\) 是合同、服务目录或验收流程已经包含的基础窗口长度。位置项使窗口整体后移一单位产生 \(\rho_j\) 的边际成本，宽度项只对超过基础长度的增量宽度收费，每扩张一单位产生 \(\lambda_j\) 的边际成本。只要 \(\rho_j>0\) 且 \(\lambda_j>0\)，窗口整体后移和无代价扩张两个方向都受到控制。initial idle 可以免费，因为窗口与排程共同平移会增加位置成本。
 
 位置成本相对 \(L_j\) 而不是相对时间 0 计费更合适。若直接写 \(\rho_j a_j\)，区间 \([0,L_j]\) 是任务根本不能选择的时间，却仍被记入成本；写成 \(\rho_j(a_j-L_j)\) 后，\(L_j\) 对应零基准，只有超出最早可接受承诺的部分收费。两种写法在 \(L_j\) 为常数时只差一个常数，但后者的经济解释和跨任务比较更清楚。
+
+宽度成本同理应相对 \(D_j^{\min}\) 计费。若 \(D_j^{\min}>0\) 表示客户合同本来就允许的最小验收槽或系统不可避免的基础服务时长，则该部分不应再次产生“承诺模糊度”成本。对所有任务都必须被调度且 \(D_j^{\min}\) 固定的当前模型，减去 \(\lambda_jD_j^{\min}\) 只改变目标常数，不改变最优解、Benders cut 的斜率或此前的参数占优条件；但它使成本分项从“总窗口长度”变为“超过基础服务的额外弹性”。若以后允许拒单、选择服务档位或联合决定 \(D_j^{\min}\)，该项不再是全局常数，必须显式保留。
 
 ### 3.2 模型二：有限位置区间 + 宽度成本
 
@@ -105,6 +107,29 @@ Yue and Zhou (2021) 对随机加工时间下的任务特定 DIF due window 使�
 
 在当前模型中，\(\rho_j\) 是窗口左端从 \(L_j\) 向后移动一单位的边际损失。可以用报价折扣随承诺 lead time 的变化、订单接受概率或取消风险乘以贡献毛利、延迟回款的资金成本，或合同中延长承诺时间的补偿标准进行估计。若客户只在超过某个 acceptable lead time 后才产生损失，更合适的形式是分段线性成本 \(\rho_j(a_j-A_j)^+\)，而不是强行使用从 \(L_j\) 开始的单一直线；核心线性模型可先使用 \(\rho_j(a_j-L_j)\)，再把分段形式作为扩展。
 
+为了给位置和长度系数各提供一个更接近库存成本的业务解释，可以统一采用“客户侧资源占用”口径，但必须限定在确实存在这些资源的 MTO/ETO 场景。
+
+1. **位置系数——过渡资源保有成本。** 在定制设备、关键备件或工程构件交付前，客户可能必须继续租用替代设备、维持安全库存、购买外协产能，或让下游项目继续处于等待状态。把最早可接受承诺 \(L_j\) 推迟到 \(a_j\) 会使这些过渡资源多保留 \(a_j-L_j\) 个时间单位，因此可令
+
+   \[
+   \rho_j=
+   \text{替代设备租金}+
+   \text{额外安全库存/外协成本}+
+   \text{下游延迟边际损失},
+   \]
+
+   单位为货币/小时。Hegedus and Hopp (2001) 直接把客户要求日期与供应商承诺日期之间的正差定义为 order delay cost，并指出较晚报价会损失 goodwill 和订单接受；MTO lead-time/price 文献则表明较短 lead time 可以对应更高报价。因此该项既可按客户实际过渡资源估计，也可按制造商因较晚承诺损失的价格溢价估计。[Hegedus and Hopp (2001)](https://doi.org/10.1016/S0360-8352(01)00007-9) [Zhao et al. (2012)](https://doi.org/10.1111/j.1937-5956.2011.01248.x)
+2. **长度系数——接收资源预留成本。** 对需要到场验收、卸货、安装或联调的订单，客户可能要在承诺区间内保持月台、质检人员、安装班组、吊装设备或停线接口可调用。基础长度 \(D_j^{\min}\) 是完成接收活动本来就需要的时间，额外宽度 \((b_j-a_j)-D_j^{\min}\) 则是因到达时刻不精确而额外锁定资源的时间。因此可令
+
+   \[
+   \lambda_j=
+   \text{接收人员待命成本}+
+   \text{月台/设备机会成本}+
+   \text{下游计划弹性损失},
+   \]
+
+   同样以货币/小时表示。上门服务和 attended-delivery 文献明确指出客户必须根据服务窗口安排日程并保持在场，宽窗口意味着更长等待和更低便利性；这里把同一机制移到 B2B 验收资源。该解释只有在企业确实预留这些资源时才能称为直接成本，否则 \(\lambda_j\) 仍应称为客户服务权重。[Ulmer et al. (2024)](https://doi.org/10.1287/trsc.2023.0004) [Yu et al. (2023)](https://doi.org/10.1016/j.cor.2022.106045)
+
 现有核心调度文献并没有把 \(\rho_j,\lambda_j\) 标定为企业实测货币值。各文的实际处理如下。表中“位置”和“宽度”均按当前问题的经济角色翻译，不强行统一原文符号。
 
 | 文献 | 位置/宽度参数结构 | 论文中的具体数值设置 | 数值根据与可借鉴结论 |
@@ -140,7 +165,7 @@ Oyama et al. (2024) 的配送选择实验让消费者在不同配送日期、时
 | 当前设定 | 现实含义 | 文献支撑及边界 |
 | --- | --- | --- |
 | \(\rho_j(a_j-L_j)\) | 把最早可接受承诺继续推迟会降低订单吸引力、延迟收入或需要折扣 | MTO/ETO 调研和交期报价文献对机制支撑较强；线性、任务特定斜率是局部近似，现有 DWA 算例通常没有企业标定 |
-| \(\lambda_j(b_j-a_j)\) | 宽窗口降低承诺精度和客户价值，但增加制造商执行灵活性 | Yue and Zhou 的定制服装 DWA 与两篇 TWA 直接支撑；配送选择研究证明时间槽精度可单独估值 |
+| \(\lambda_j[(b_j-a_j)-D_j^{\min}]\) | 对超过合同基础槽宽的额外不确定性计价；宽窗口降低承诺精度和客户价值，但增加制造商执行灵活性 | Yue and Zhou 的定制服装 DWA 与两篇 TWA 直接支撑宽度权衡；减去固定最小宽度是当前模型的基准口径 |
 | \(L_j,U_j\) | 物料/合同/客户接收的最早和最晚可承诺边界 | restricted due-date 与 TWAVRP 的营业时间、工时和法规窗口直接支撑；当前任务特定双边范围是自然扩展 |
 | \(D_j^{\max}\) | 客户、合同或 SLA 能接受的最大承诺模糊度 | 时间槽服务和 bounded due-window 文献支撑较强，可由服务目录或合同直接给出 |
 | \(D_j^{\min}\) | 系统最小槽粒度或验收、装卸所需的最短连续时段 | 只在存在相应制度时成立；否则应取 0，不能仅为避免点窗口而人为设正 |
@@ -164,7 +189,7 @@ D^{\min}\le b-a\le D^{\max}
 
 这些文献主要讨论公共窗口或 due date 上界，不是与当前完全相同的“多机、随机、任务特定 DIFW 四个界”。因此，\(L_j,U_j,D_j^{\min},D_j^{\max}\) 应表述为已有 restricted DDA 和 bounded common-DW 设定向任务特定 DIFW 的自然组合扩展，而不是声称已有论文采用了完全相同的模型。
 
-现实中，\(L_j\) 可由材料最早可用时刻、客户最早接收时刻或合同起始日给出；\(U_j\) 可由客户最晚接受承诺、活动结束时刻、下游装配节点或计划期给出。\(D_j^{\min}\) 可表示时间槽最小粒度、必要验收或配送缓冲，也可以取 0 允许模型选择 due date；\(D_j^{\max}\) 表示客户能够接受的最大承诺模糊度。它们应从订单、ERP/MES、合同或服务档位直接获得，而不是用求解需要反推。
+现实中，\(L_j\) 可由材料最早可用时刻、客户最早接收时刻或合同起始日给出；\(U_j\) 可由客户最晚接受承诺、活动结束时刻、下游装配节点或计划期给出。\(D_j^{\min}\) 可表示时间槽最小粒度、必要验收或配送缓冲，也可以取 0 允许模型选择 due date；\(D_j^{\max}\) 表示客户能够接受的最大承诺模糊度。它们应从订单、ERP/MES、合同或服务档位直接获得，而不是用求解需要反推。若 \(D_j^{\min}>0\) 是客户已经接受且合同价格已经覆盖的基础长度，目标中的宽度项应相应写成 \(\lambda_j[(b_j-a_j)-D_j^{\min}]\)，只惩罚额外模糊度。
 
 ### 4.4 ET 成本
 
@@ -240,7 +265,7 @@ Cavaliere et al. (2026) 给出的解释更明确。原文直接写明 customers 
 
 #### 4.7.3 在当前制造业问题中的对应含义
 
-制造业 DWA 文献给出的对应机制同样明确。Mosheiov and Sarig (2008) 直接把 due-window 长度设为销售谈判中与客户共同决定的变量：推迟窗口结束时刻、扩大窗口会增加供应商的生产灵活性和交付选择，但大窗口会降低供应商竞争力。Yue and Wan (2016) 随后指出大窗口可能不被客户接受并造成销售损失，小窗口则减少制造商的生产灵活性和交付选择；Yue and Zhou (2021) 在随机加工的定制服装案例中再次说明，小窗口更吸引客户，大窗口虽然容易满足却可能造成客户流失。对当前按单/定制生产问题，\(\lambda_j(b_j-a_j)\) 因此可以解释为：任务 \(j\) 的承诺区间每扩大一小时，客户因交付精度下降、需要保留更长验收/提货待命区间或无法准确安排下游活动而产生的价值损失。它是客户侧承诺精度损失，经价格、成交概率、折扣或满意度权重转化到制造商目标中。[Mosheiov and Sarig (2008)](https://doi.org/10.1016/j.mcm.2007.08.018) [Yue and Wan (2016)](https://doi.org/10.1057/jors.2015.107) [Yue and Zhou (2021)](https://doi.org/10.1016/j.ejor.2020.08.029)
+制造业 DWA 文献给出的对应机制同样明确。Mosheiov and Sarig (2008) 直接把 due-window 长度设为销售谈判中与客户共同决定的变量：推迟窗口结束时刻、扩大窗口会增加供应商的生产灵活性和交付选择，但大窗口会降低供应商竞争力。Yue and Wan (2016) 随后指出大窗口可能不被客户接受并造成销售损失，小窗口则减少制造商的生产灵活性和交付选择；Yue and Zhou (2021) 在随机加工的定制服装案例中再次说明，小窗口更吸引客户，大窗口虽然容易满足却可能造成客户流失。对当前按单/定制生产问题，\(\lambda_j[(b_j-a_j)-D_j^{\min}]\) 因此可以解释为：任务 \(j\) 在合同基础槽宽之外每增加一小时承诺不确定性，客户因交付精度下降、需要保留更长验收/提货待命区间或无法准确安排下游活动而产生的价值损失。它是客户侧承诺精度损失，经价格、成交概率、折扣或满意度权重转化到制造商目标中。[Mosheiov and Sarig (2008)](https://doi.org/10.1016/j.mcm.2007.08.018) [Yue and Wan (2016)](https://doi.org/10.1057/jors.2015.107) [Yue and Zhou (2021)](https://doi.org/10.1016/j.ejor.2020.08.029)
 
 这个解释与 ET 成本不重复。\(\lambda_j\) 对事前承诺的模糊程度定价，即使最终在窗口内完成也会发生；\(\alpha_j,\beta_j\) 则对事后实际完成早于或晚于承诺窗口的偏差定价。制造商从宽窗口获得的生产灵活性由排程更容易、ET 更低体现，不应把它再次作为负的宽度成本重复计算。
 
@@ -298,12 +323,12 @@ Cavaliere et al. (2026) 给出的解释更明确。原文直接写明 customers 
 \[
 \min
 \sum_{i,j}g_{ij}x_{ij}
-+\sum_{j\in J}\left[\rho_j(a_j-L_j)+\lambda_j(b_j-a_j)\right]
++\sum_{j\in J}\left[\rho_j(a_j-L_j)+\lambda_j\bigl((b_j-a_j)-D_j^{\min}\bigr)\right]
 +\sum_{\omega\in\Omega}\pi_\omega\sum_{j\in J}
 \left(\alpha_jE_{j\omega}+\beta_jT_{j\omega}\right).
 \]
 
-第一项是默认保留的确定 setup 金额。若没有独立转换金额，可令 \(g_{ij}=0\) 做纯 timing 版本；若只知道固定单位时间费率，则用 \(g_{ij}=\kappa^s\sum_\omega\pi_\omega s_{ij\omega}\) 预聚合，不能再在二阶段重复收费。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；更宽的窗口降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序以及随机加工/setup 时长又改变所有下游任务在各场景中的完工分布。
+第一项是默认保留的确定 setup 金额。若没有独立转换金额，可令 \(g_{ij}=0\) 做纯 timing 版本；若只知道固定单位时间费率，则用 \(g_{ij}=\kappa^s\sum_\omega\pi_\omega s_{ij\omega}\) 预聚合，不能再在二阶段重复收费。核心模型不含 overtime、makespan 和 waiting cost。这样得到的权衡是：更晚的窗口降低迟到风险但增加位置成本；超过基础长度的额外宽度降低 ET 但增加客户承诺成本；更早或更窄的窗口降低一阶段服务承诺成本，却迫使排程承受更多场景 ET；任务顺序以及随机加工/setup 时长又改变所有下游任务在各场景中的完工分布。当前所有任务必须加工，因此 \(-\sum_j\lambda_jD_j^{\min}\) 是目标常数，求解实现可以省略，但论文公式和成本报告保留增量口径。
 
 ### 5.3 主要约束
 
@@ -332,6 +357,18 @@ E_{j\omega},T_{j\omega}\ge0.
 \]
 
 正成本最小化保证两变量自动等于相应正部函数。固定一阶段排程和窗口后，所有场景 timing 问题都是 LP；固定排程但把共同窗口也放入联合子问题时，仍然是跨场景共享 \(a,b\) 的 LP。
+
+### 5.4 异质参数与无 big-\(M\) position 模型
+
+2026 的位置模型之所以能够完全按位置定义窗口、ET 和场景时钟，是因为其宽度、ET 和 overtime 权重都是全局统一的，且客户窗口域没有任务特定的 \(L_j,U_j,D_j^{\min},D_j^{\max}\)。当前模型要区分三类异质性。
+
+1. 随机加工/setup 时间、确定 setup 金额 \(g_{ij}\) 和全部窗口界可以保持异质。它们分别作为二元分配/相邻变量的线性系数或加权右端进入模型，不需要 big-\(M\) 激活。
+2. 位置和宽度系数 \(\rho_j,\lambda_j\) 也可以保持异质。通过任务—位置连续窗口变量 \(a_{jkm},b_{jkm}\) 及自然界 \(L_jy_{jkm}\le a_{jkm},b_{jkm}\le U_jy_{jkm}\)，目标可以直接线性计价，不需要时间抽取 \(H\)，代价是增加 \(O(nMK)\) 个连续变量。
+3. 真正导致 position 场景时钟需要身份抽取的是任务特定 ET 系数 \(\alpha_j,\beta_j\)。位置时钟 \(c_{km\omega}\) 必须先判断属于哪个任务，才能施加该任务的 ET 单价；紧凑线性模型需要 \(c_{jkm\omega}\le H_{km\omega}y_{jkm}\) 或等价有界析取。
+
+因此，为消除 position 模型中的 \(H\)，最低要求只是令 \(\alpha_j\equiv\alpha\)、\(\beta_j\equiv\beta\)；此时 \(\rho_j,\lambda_j\) 仍可异质，但窗口连续变量较多。若还希望得到与 2026 同样紧凑的纯位置窗口模型，则进一步令 \(\rho_j\equiv\rho\)、\(\lambda_j\equiv\lambda\)，而 \(L_j,U_j,D_j^{\min},D_j^{\max}\)、\(p_{j\omega},s_{ij\omega},g_{ij}\) 全部仍可异质。详细线性式见[双模型补充分析第 6.2 节](2026-08-31-work3参数结构双模型与分解策略补充分析.md)。
+
+共同时间成本有直接文献先例：两篇 TWA 都使用全局时间权重；Yue and Wan (2016) 的 DIF due-window 模型允许每个任务拥有不同窗口，却让所有任务共用 \(\alpha,\beta,\gamma,\delta\)。现实上可把样本限定为同一制造商、同一合同模板和同一服务等级，使用统一的过渡资源费率、验收资源预留费率、库存费率和迟交费率，而保留任务时间、setup、窗口界和转换金额的异质性。当前建议以共同 \(\rho,\lambda,\alpha,\beta\) 作为无 big-\(M\) position 主基线，再用任务特定系数做异质性扩展；后者不能继续宣称整个 position 模型完全无 big-\(M\)。
 
 ## 6. 非退化与逐任务参数边界
 
@@ -383,7 +420,7 @@ b_j-a_j=D_j^{\min}.
 b_j-a_j=D_j^{\min}.
 \]
 
-若 \(D_j^{\min}=D_j^{\max}\)，宽度已经固定，\(\lambda_j(b_j-a_j)\) 是常数，后两个关于“压缩到最小宽度”的条件失去分析对象。
+若 \(D_j^{\min}=D_j^{\max}\)，宽度已经固定；按当前增量口径，\(\lambda_j[(b_j-a_j)-D_j^{\min}]=0\)。此时后两个关于“压缩到最小宽度”的条件失去分析对象。
 
 ### 6.4 两端点共同导致的最小长度条件
 
@@ -436,14 +473,14 @@ initial idle 免费也没有问题。位置成本和有限范围已锚定窗口�
 \Phi_j(\mathbf C_j)=
 \min_{a_j,b_j}
 \left\{
-\rho_j(a_j-L_j)+\lambda_j(b_j-a_j)
+\rho_j(a_j-L_j)+\lambda_j[(b_j-a_j)-D_j^{\min}]
 +\sum_\omega\pi_\omega
 \left[\alpha_j(a_j-C_{j\omega})^+
 +\beta_j(C_{j\omega}-b_j)^+\right]
 \right\},
 \]
 
-并受位置和长度界约束。忽略这些边界且两个端点为内部解时，端点分别是场景完成时间分布的加权分位数：
+并受位置和长度界约束。由于 \(-\lambda_jD_j^{\min}\) 是常数，它不改变端点的一阶条件。忽略这些边界且两个端点为内部解时，端点分别是场景完成时间分布的加权分位数：
 
 \[
 q^a_j=\frac{\lambda_j-\rho_j}{\alpha_j},
@@ -535,11 +572,13 @@ z^E_{j\omega},z^T_{j\omega}\in\{0,1\},
 
 ## 11. 建议的模型与实验层次
 
-1. **核心模型 W3-Core**：同质多机 + 位置成本 + 宽度成本 + 有限位置区间 + 长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。
-2. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
-3. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
-4. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
-5. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
+1. **核心概念模型 W3-Core-Het**：同质多机 + 任务特定位置/宽度/ET 系数 + 有限位置区间 + 长度上下界 + 免费 waiting + 期望 ET + 与机器无关的随机 sequence-dependent setup 时长 \(s_{ij\omega}\) + 确定转换金额 \(g_{ij}\)；无 overtime、无 waiting cost。该版本优先由 2-indexed 模型表达。
+2. **紧凑 position 基线 W3-Core-Common**：四类单位时间系数取全局 \(\rho,\lambda,\alpha,\beta\)，但 \(p_{j\omega},s_{ij\omega},g_{ij},L_j,U_j,D_j^{\min},D_j^{\max}\) 全部允许任务异质。该版本可以使用每个机器—位置一组时间和窗口变量，避免按任务抽取位置时钟的人工 horizon 大数。
+3. **折中 position 版本 W3-Core-ETCommon**：只令 \(\alpha_j\equiv\alpha,\beta_j\equiv\beta\)，保留异质 \(\rho_j,\lambda_j\)。它不需要任务完工时钟抽取 \(H\)，但需要任务—位置窗口变量及真实业务上界 \(U_j\) 做激活，规模为 \(O(nMK)\)。这里的 \(U_j\) 是模型本身的可接受时间上界，不是人为放大的数值 \(M\)。
+4. **位置锚消融 W3-Position**：保留 \(\rho_j(a_j-L_j)\)，把 \(U_j\) 设为经过验证的不活跃业务上界，用于观察纯价格锚；不能用极大 \(M\) 造成数值污染。
+5. **范围锚消融 W3-Range**：令 \(\rho_j=0\)，保留真实有限 \([L_j,U_j]\)，用于观察纯硬边界锚。
+6. **waiting 机制消融 W3-Wait**：令 \(\rho_j=0\) 且不使用范围，只以正 waiting cost 锚定位置时，必须同时收费 initial idle；若保留范围，则明确称为 W3-Range+Wait，而不是独立模型三。
+7. **结构消融**：先比较“\(g>0\) + 随机 setup 时长”“\(g=0\) + 随机 setup 时长”“无 setup”三组 matched instances。目标始终保持 ET，不同时更换为 work 或 job-count，以免混淆模型结构和目标结构的影响。
 
 核心算例生成后应先做结构审计：检查 \(U_j\) 与加工时间尺度是否匹配、\(D_j^{\min}\le D_j^{\max}\le U_j-L_j\)、三个参数支配条件的任务比例、最小宽度和位置边界命中率、正 ET 任务比例，以及目标各项的数量级。若出现“所有任务 ET=0”，先判断这是正常支付位置/宽度成本后的经济选择，还是由于范围过松、系数失衡或实现漏计成本造成的结构性退化。
 
@@ -579,3 +618,6 @@ ET 目标足以使问题成立，并且是保留连续 recourse 与精确 Bender
 20. Köhler, C., Ehmke, J. F., Campbell, A. M., and Cleophas, C. (2023). Evaluating pricing strategies for premium delivery time windows. *EURO Journal on Transportation and Logistics*, 12, 100108. https://doi.org/10.1016/j.ejtl.2023.100108
 21. Ulmer, M. W., Goodson, J. C., and Thomas, B. W. (2024). Optimal Service Time Windows. *Transportation Science*, 58(2), 394-411. https://doi.org/10.1287/trsc.2023.0004
 22. Zorzini, M., Corti, D., and Pozzetti, A. (2008). Due date (DD) quotation and capacity planning in make-to-order companies: Results from an empirical analysis. *International Journal of Production Economics*, 112(2), 919-933. https://doi.org/10.1016/j.ijpe.2007.08.005
+23. Hegedus, M. G., and Hopp, W. J. (2001). Due date setting with supply constraints in systems using MRP. *Computers & Industrial Engineering*, 39(3-4), 293-305. https://doi.org/10.1016/S0360-8352(01)00007-9
+24. Zhao, X., Stecke, K. E., and Prasad, A. (2012). Lead Time and Price Quotation Mode Selection: Uniform or Differentiated? *Production and Operations Management*, 21(1), 177-193. https://doi.org/10.1111/j.1937-5956.2011.01248.x
+25. Yu, X., Shen, S., Badri-Koohi, B., and Seada, H. (2023). Time window optimization for attended home service delivery under multiple sources of uncertainties. *Computers & Operations Research*, 150, 106045. https://doi.org/10.1016/j.cor.2022.106045

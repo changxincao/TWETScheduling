@@ -10,6 +10,8 @@
 
 该性质中的`q_m`指最终elementary排程中不同任务的数量，不是松弛walk的访问位置数。ng-DSSR中间路线和time-indexed pseudo-schedule都可能重复访问任务，访问长度可以超过不同任务数；更重要的是，它们同样没有机器长度排名。给这些松弛路线施加`floor(n/m)`位置上界会错误删除本可作为第1至第`m-1`长路线的elementary列，因而不能用于exact pricing证书。即使ng-DSSR最终只向master返回elementary列，DSSR过程仍依赖包含这些列的单机松弛域，不能在不知道路线排名时使用机器特定上界。
 
+有一个平凡但安全的例外：可以把任意单条松弛路径的总任务访问次数限制为`n`，因为所有elementary列最多访问`n`次，受限松弛域仍包含全部elementary列。这只使用了`m=1`时的`q_1<=n`，没有利用后续机器的`floor(n/m)`强化。当前ng-DSSR主线没有统一的总depth截断；若在双向算法中实现，还需约束forward与backward拼接后的总depth。time-indexed图若要实施则需增加访问次数维度。现有family困难路线典型长度约20而`n=40`，通常不会触发该上限，因此预计收益很小，状态开销反而可能更大。
+
 当前列池和master已经消除了绝大部分机器置换对称性：列变量没有机器编号，选择同一组排程列不再因交换机器标签形成`M!`个解。因此该排序性质在显式position模型中的主要价值，在现有set-covering列模型里已经被“未标号列”自然吸收。
 
 ## 唯一可迁移方向：master计数cut

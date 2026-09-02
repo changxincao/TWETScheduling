@@ -14,7 +14,7 @@
 
 ## 唯一可迁移方向：master计数cut
 
-该性质可以转换成全局master不等式，而不是pricing长度上界。对任意`m=2,...,M`，令`K_m=floor(n/m)`，真实elementary排程中不可能同时选择`m`条长度大于`K_m`的路线，因此有：
+如果master采用每个任务恰好分配一次的partitioning语义，该性质可以转换成全局master不等式，而不是pricing长度上界。对任意`m=2,...,M`，令`K_m=floor(n/m)`，规范的elementary任务划分中不可能同时选择`m`条长度大于`K_m`的路线，因此有：
 
 ```text
 sum_{r: |r| > K_m} lambda_r <= m-1.
@@ -26,10 +26,12 @@ sum_{r: |r| > K_m} lambda_r <= m-1.
 sum_r floor(|r|/(K_m+1)) lambda_r <= floor(n/(K_m+1)).
 ```
 
-这些不等式对纯调度的真实elementary解有效，但不是免费的robust cut。pricing必须跟踪当前访问数量是否跨过阈值；整除型版本需要维护模`K_m+1`的residual，可能明显削弱dominance。对time-indexed pseudo列可按访问次数定义扩展系数，使cut仍保留所有elementary解，但会新增计数状态；对ng-DSSR也会增加每轮松弛定价复杂度。
+这些不等式对“每个任务恰好出现一次”的elementary任务划分有效，但不能直接当作当前master的普通valid cut。当前覆盖行为`>=1`，允许一个整数表示在不同列中重复覆盖任务；这些重叠表示可能违反上述计数式。虽然全局最优解通常可通过删除重复任务转换成规范划分，但在required arc、adjacency等分支节点下，删除任务未必保持当前节点的分支语义，因此还不足以支撑安全的节点下界。除非改为partitioning master，或者另外证明每个节点都保留一个满足计数式的等价最优表示，否则不能接入。
+
+即使解决上述有效性问题，它也不是免费的robust cut。pricing必须跟踪当前访问数量是否跨过阈值；整除型版本需要维护模`K_m+1`的residual，可能明显削弱dominance。对time-indexed pseudo列可按访问次数定义扩展系数以匹配elementary列，但会新增计数状态；对ng-DSSR也会增加每轮松弛定价复杂度。
 
 预期强度也有限。当前family困难解中，三条单family pseudo列长度约20、权重合计约2。对`n=40,m=3`，阈值为13、右端为2，该解通常恰好满足而不是违反；对`m=2`，阈值为20，也不会切掉长度20的列。因此它不能直接解决family下的重复覆盖、弱LB和多轮DSSR问题。
 
 ## 当前决定
 
-该性质保留给显式machine-position模型做位置缩减；不用于当前ng-DSSR或time-indexed pricing剪枝，也暂不实现master计数cut。只有以后日志显示LP经常同时选择过多超长elementary列，并且该结构对root gap有明确贡献，才值得评估上述计数cut及其pricing状态成本。
+该性质保留给显式machine-position模型做位置缩减；不用于当前ng-DSSR或time-indexed pricing剪枝，也不实现上述master计数式。以后即使日志显示LP经常同时选择过多超长列，也应先解决covering语义和分支节点下的有效性证明，再评估其强度与pricing状态成本。

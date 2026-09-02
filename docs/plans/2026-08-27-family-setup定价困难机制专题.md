@@ -1519,3 +1519,17 @@ random两例的exact合计仅约4--6秒，另外三种probe开启方案总时间
 检查发现一个不影响上述正式结果、但会影响其他入口复用配置对象的隐患：命名profile原来没有显式恢复`enableBidirectionalPricing=true`。若调用者先把该值设为false，再应用`NG_DSSR`，虽然ng-DSSR模式flag为true，组件装配仍会越过整个双向分支并回退到单向定价器。类似地，固定midpoint、relaxed-column返回、实验brancher、SRI和启发式实验开关也有部分依赖构造器默认值。2026-08-16审计中已记录的次级继承项还包括exact返回5000、Tabu`300/30/50/30`、DSSR轮间reuse、branch seed 5000和CPLEX root算法`auto`。现已只做profile自包含加固：显式恢复这些已确认的正式取值，不修改新建配置下的任何有效参数，也不改变正式runner现有运行路径；实例、输出、外包模型、求解时限和节点上限仍由调用者控制。回归测试先写入相反旧值，再应用profile，确认最终仍恢复双向ng-DSSR、普通Arc分支、elementary-only、default midpoint、后续probe、no-cut及上述次级参数。
 
 验证重新编译`BPCAlgorithmProfile`、`BestBpcProfiles`及测试后，`BestBpcProfilesTest`、`NgDssrMidpointProbeConfigurationTest`、`NgDssrMidpointProbePolicyTest`和`TWETBPCContextEffectiveNgDssrConfigurationTest`全部通过。旧midpoint字段`MaxCandidates/MoveRatio/TimeTolerance/TieScore/ExtraCandidates/BracketOnDirectionChange/HighImbalanceRatio`仍会出现在快照，但当前ng-DSSR固定walk/bracket主线不读取它们，不属于漏配；后续可以单独整理配置接口，当前不为减少日志字段改算法。
+
+### 2026-09-02：n50 family的ng-DSSR与TI+SRI结果为何不同
+
+重新逐项核对`n050-set01/family/base/wide/m3.dat`、两套runner和输出日志后，当前最重要的结论是：昨天得到`50441`的ng-DSSR/Cluster实验与得到`20118`的正式TI+SRI实验虽然打印了同一个文件路径，但没有求解同一个解析后的模型。因此两者的目标值差异不能归因于ng-DSSR与TI+SRI的松弛、cuts或搜索树，也不能据此比较两种算法的求解性能。
+
+正式TI+SRI由`FormalExperimentRunner`经`FormalExperimentDataFactory`调用`new Data(path,true,true)`。该读取器正确识别五字段任务行`p,d_e,d_l,w_e,w_t`，并继续读取文件末尾的`SETUP_COST`块。例如首个任务行`33 195 797 2 3`被解析为`p=33`、due window `[195,797]`、`w_e=2`、`w_t=3`。日志中的`CmaxH=5422`与此口径一致。同一V2 seed的三条incumbent序列在该模型中重新评价为`5663+8685+5770=20118`；导出的50任务排程成本分解为ET penalty `10398`和setup cost `9720`，合计仍为`20118`。因此`20118`是正确正式数据口径下的一个可行解值，而不是seed文件保存错了成本。
+
+昨天的ng-DSSR Arc/Cluster实验则通过`GCBBFullDomainComparisonTest.runOne()`调用旧的`TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine()`。该loader只支持旧四字段Tanaka行：它把上述五字段行错误解析为`p=33`、单点due date `195`、`w_e=797`、`w_t=2`，并完全忽略第五个值`3`。它读取完`SETUP`矩阵后立即结束，不读取随后的`SETUP_COST`块；若未额外设置`twet.data.setupCostFromTimeCoefficient`，setup cost保持为0。日志中的`CmaxH=2006.667`直接证明加载后的时间域也已不同。同样三条序列在旧快照中被计为`19185+18016+13247=50448`，ng-DSSR随后在这个误读模型上得到`50441`。这个运行自身的列生成与树闭合可以对它实际加载的错误模型成立，但不代表正式wide-family实例的最优值。
+
+TI+SRI旧运行还存在第二个、彼此独立的问题。它使用的是正确正式数据，但运行发生在after-cut Phase-I修复提交`12444847`之前。根节点只闭合到`4572.546`；两个child分别闭合到`4580.064/4595.562`后，新SRI使当前有限列RMP不可行，旧控制流未经Phase-I修复便直接关闭两个child，最后把空队列误写成`bound=incumbent=20118`。所以`20118`只能保留为可行上界，旧日志中的`FINISHED/0 gap`和最优性证明无效。当前代码已经修复该控制流，但尚未在这个n50实例上完成修复后的正式复跑。
+
+影响范围需要严格限定。经正式`Data`读取器运行的n40 family ng-DSSR/time-indexed/TI+SRI对比不因本次n50 loader问题失效；昨天所有经`GCBBFullDomainComparisonTest`把正式五字段文件送入旧Tanaka loader的Cluster/Arc实验则都不再代表目标正式实例。Arc与Cluster在同一个误读模型上的相对差异仍是内部一致的诊断，但不能用来支持它们在正式wide-family实例上的性能结论。
+
+当前没有一组可用于比较n50 ng-DSSR与TI+SRI的同模型完整结果。后续若需要正式A/B，两者必须统一通过`FormalExperimentRunner`读取同一实例和V2 seed，运行日志必须同时满足`CmaxH=5422`、初始incumbent `20118`和相同seed fingerprint，并使用包含after-cut Phase-I修复的当前代码、相同时间限制、节点上限和CPLEX线程数。只有完成或具有合法certificate的界才能进入比较；本次分析未启动新的求解。

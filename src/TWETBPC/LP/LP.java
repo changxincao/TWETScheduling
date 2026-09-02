@@ -1214,7 +1214,8 @@ public class LP {
 				}
 			}
 		}
-		// 普通 SRI 是 0/1 系数；limited-memory SRI 允许更大的整数系数。
+		// elementary 列的三元 SRI 系数为 0/1；time-indexed pseudo 列可重复访问，
+		// 因而 full-memory 和 limited-memory 的累计系数都可能大于 1。
 		long rangeStart = stats == null ? 0L : System.nanoTime();
 		IloRange range = cplex.addLe(expr, cut.getRhs(), "subsetRow_" + cutId);
 		if (stats != null) {

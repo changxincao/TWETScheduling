@@ -1533,3 +1533,5 @@ TI+SRI旧运行还存在第二个、彼此独立的问题。它使用的是正�
 影响范围需要严格限定。经正式`Data`读取器运行的n40 family ng-DSSR/time-indexed/TI+SRI对比不因本次n50 loader问题失效；昨天所有经`GCBBFullDomainComparisonTest`把正式五字段文件送入旧Tanaka loader的Cluster/Arc实验则都不再代表目标正式实例。Arc与Cluster在同一个误读模型上的相对差异仍是内部一致的诊断，但不能用来支持它们在正式wide-family实例上的性能结论。
 
 当前没有一组可用于比较n50 ng-DSSR与TI+SRI的同模型完整结果。后续若需要正式A/B，两者必须统一通过`FormalExperimentRunner`读取同一实例和V2 seed，运行日志必须同时满足`CmaxH=5422`、初始incumbent `20118`和相同seed fingerprint，并使用包含after-cut Phase-I修复的当前代码、相同时间限制、节点上限和CPLEX线程数。只有完成或具有合法certificate的界才能进入比较；本次分析未启动新的求解。
+
+随后扩展审计到全部历史n40/n50目录，共识别84个`INVALID_WRONG_MODEL`目录，均已逐目录写入`RESULT_INVALID.md`；另对1个n50 TI+SRI错误证书目录写入`RESULT_INVALID.md`，对7个无正式终止状态或启动失败的目录写入`RESULT_INCOMPLETE.md`。最终用于配置选择的16个`20260831-midpoint-fulltree-f40*/r50*`目录走正式runner，仍然有效；n40最终ng-DSSR/plain TI/TI+SRI表也仍有效。完整清单和判定规则见`docs/logs/2026-09-02-n40-n50-ngDSSR-TI结果有效性审计.md`。

@@ -129,11 +129,13 @@ public class PC {
 		}
 
 		// 2026-06-13: 对齐旧 VRP PC.Solve()：pricing 收敛后若 LP 已经整数，不再做 cut separation。
+		// 2026-09-02: time-indexed rank-1 例外。其整数变量解仍可能使用非基本 pseudo-schedule，
+		// 一行 rank-1 cut 必须有机会排除重复访问，不能沿用“VRP 列天然 elementary”的提前返回。
 		applyCutLoopPricingOnlyArcFixing(lp, solution);
 		if (isTimeLimitReached()) {
 			return solution;
 		}
-		if (solution.isInteger()) {
+		if (solution.isInteger() && !usesPaperStyleTimeIndexedRank1Cuts()) {
 			return solution;
 		}
 		removeInactivePaperRank1CutsAfterClosure(lp);
@@ -227,7 +229,8 @@ public class PC {
 			}
 			recordCertifiedNodeBound(lp, solution);
 			applyCutLoopPricingOnlyArcFixing(lp, solution);
-			if (isTimeLimitReached() || solution.isInteger()) {
+			if (isTimeLimitReached()
+					|| (solution.isInteger() && !usesPaperStyleTimeIndexedRank1Cuts())) {
 				return solution;
 			}
 			removeInactivePaperRank1CutsAfterClosure(lp);

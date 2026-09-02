@@ -34,9 +34,51 @@ public final class AfterCutPhaseOneRepairTest {
 	public static void main(String[] args) throws Exception {
 		testDirectAllRowRepairWithTimeIndexedPricing();
 		testSolveRepairsInfeasibleAfterCutRmp();
+		testIntegerTimeIndexedRelaxationStillSeparatesRank1Cut();
 		testSubsetRowCutIgnoresColumnizedOutsourcingColumns();
+		testRank1ColumnizedOutsourcingMembershipBranchCompatibility();
 		testColumnizedOutsourcingRequiresPairedCertificate();
 		System.out.println("AfterCutPhaseOneRepairTest passed");
+	}
+
+	/** 整数取值的非基本 pseudo-schedule 仍必须进入 rank-1 分离，不能被旧 VRP 提前返回绕过。 */
+	private static void testIntegerTimeIndexedRelaxationStillSeparatesRank1Cut() throws Exception {
+		Data data = new Data("data/40-2/wet040_001_2m.dat", true, true);
+		data.n = 1;
+		data.outsourcingCost[1] = Double.MAX_VALUE;
+
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.enableSubsetRowCutsForTimeIndexedGraph = true;
+		config.maxCutRounds = 3;
+		config.enableDualBoundPruning = false;
+
+		Pool pool = new Pool(data);
+		int repeatedColumnId = pool.addColumn(List.of(1, 1), 1.0, ColumnSource.MANUAL, true);
+		CutPool cutPool = new CutPool();
+		Node node = new Node(data, List.of(repeatedColumnId), new ArrayList<Integer>(), 0.0);
+		node.minMachineCount = 1;
+		node.maxMachineCount = 1;
+		LP lp = new LP(data, pool, cutPool, config, new OutsourcingPool(data));
+		lp.construct(node, node.seedColumnIds);
+
+		IntegerRank1RepairPricingEngine engine = new IntegerRank1RepairPricingEngine(data.n);
+		TWETBPC.CUT.SubsetRowCutGenerator generator =
+				new TWETBPC.CUT.SubsetRowCutGenerator(config, PricingMode.TIME_INDEXED_RANK1);
+		PC pc = new PC(config, PricingMode.TIME_INDEXED_RANK1,
+				Collections.<PricingEngine>singletonList(engine),
+				Collections.<CutGenerator>singletonList(generator), new BPCTraceSink() { });
+
+		TWETMasterSolution solution = pc.solve(lp);
+		if (cutPool.size() == 0 || lp.getActiveCutIds().isEmpty()) {
+			throw new AssertionError("Integer non-elementary relaxation bypassed rank-1 separation");
+		}
+		if (!engine.phaseOneColumnReturned) {
+			throw new AssertionError("Rank-1 cut did not trigger Phase-I repair for the integer pseudo-schedule");
+		}
+		if (!solution.isInteger() || solution.getColumnValues().containsKey(Integer.valueOf(repeatedColumnId))) {
+			throw new AssertionError("Integer rank-1 repair did not replace the repeated pseudo-schedule");
+		}
+		lp.closeModel();
 	}
 
 	private static void testDirectAllRowRepairWithTimeIndexedPricing() throws Exception {
@@ -207,6 +249,51 @@ public final class AfterCutPhaseOneRepairTest {
 		lp.closeModel();
 	}
 
+	/** TIME_INDEXED_RANK1、列化外包和required-membership分支叠加时，三类系数必须保持一致。 */
+	private static void testRank1ColumnizedOutsourcingMembershipBranchCompatibility() throws Exception {
+		Data data = new Data("data/40-2/wet040_001_2m.dat", true, true);
+		data.n = 3;
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.outsourcingModel = "columns";
+		config.useTimeIndexedGraphPricing = true;
+		config.useTimeIndexedGraphRank1CutPricing = true;
+		config.enableSubsetRowCutsForTimeIndexedGraph = true;
+
+		Pool pool = new Pool(data);
+		int compatibleInternal = pool.addColumn(List.of(1, 2), 5.0, ColumnSource.MANUAL, true);
+		int branchIncompatibleInternal = pool.addColumn(List.of(1, 2, 3), 0.0, ColumnSource.MANUAL, true);
+		OutsourcingPool outsourcingPool = new OutsourcingPool(data);
+		int requiredOutsourcing = outsourcingPool.addColumn(new TWETOutsourcingColumn(-1,
+				List.of(3), data.n, 1.0, 1.0, ColumnSource.MANUAL, true));
+		CutPool cutPool = new CutPool();
+		int cutId = cutPool.addCut(new TWETCut(-1, TWETCutType.SUBSET_ROW,
+				List.of(1, 2, 3), 1.0, "rank1-columnized-membership"));
+
+		Node node = new Node(data, List.of(compatibleInternal),
+				List.of(compatibleInternal), 0.0);
+		node.minMachineCount = 1;
+		node.maxMachineCount = 1;
+		node.seedOutsourcingColumnIds.add(Integer.valueOf(requiredOutsourcing));
+		node.activeCutIds.add(Integer.valueOf(cutId));
+		node.requireOutsourcingJob(3);
+		LP lp = new LP(data, pool, cutPool, config, outsourcingPool);
+		lp.construct(node, node.seedColumnIds);
+		TWETMasterSolution solution = lp.solveRelaxation();
+		if (solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new AssertionError("Rank-1 + columnized membership child was not feasible: "
+					+ solution.getMessage());
+		}
+		if (node.isColumnCompatible(pool.getColumn(branchIncompatibleInternal))
+				|| !lp.isRestrictedColumnActive(compatibleInternal)
+				|| !lp.getActiveCutIds().contains(Integer.valueOf(cutId))) {
+			throw new AssertionError("Internal branch filtering or inherited SRI row was inconsistent");
+		}
+		if (solution.getOutsourcingValues()[3] < 1.0 - 1e-8) {
+			throw new AssertionError("Required outsourcing job was not covered by the zero-SRI outsourcing column");
+		}
+		lp.closeModel();
+	}
+
 	private static TWETMasterSolution invokeAfterCutRepair(PC pc, LP lp) throws Exception {
 		Method method = PC.class.getDeclaredMethod("repairAfterCutPhaseOne", LP.class);
 		method.setAccessible(true);
@@ -250,6 +337,42 @@ public final class AfterCutPhaseOneRepairTest {
 		@Override
 		public String getName() {
 			return "PhaseOneOnlyPricing";
+		}
+	}
+
+	private static final class IntegerRank1RepairPricingEngine implements PricingEngine {
+		private final int jobCount;
+		boolean phaseOneColumnReturned;
+
+		IntegerRank1RepairPricingEngine(int jobCount) {
+			this.jobCount = jobCount;
+		}
+
+		@Override
+		public PricingResult price(LP lp) {
+			if (!lp.isFeasibilityPhaseOneObjectiveMode()) {
+				return PricingResult.noImprovement("normal exact closed")
+						.withCertifiedInternalReducedCost(0.0);
+			}
+			if (phaseOneColumnReturned) {
+				return PricingResult.noImprovement("phase-I exact closed")
+						.withCertifiedInternalReducedCost(0.0);
+			}
+			phaseOneColumnReturned = true;
+			TWETColumn column = new TWETColumn(-1, List.of(1), jobCount, 2.0,
+					ColumnSource.PRICING_EXACT, false);
+			return new PricingResult(Collections.singletonList(column), true, "elementary Phase-I repair column")
+					.withCertifiedInternalReducedCost(-1.0);
+		}
+
+		@Override
+		public boolean supportsFeasibilityPhaseOneObjective() {
+			return true;
+		}
+
+		@Override
+		public String getName() {
+			return "IntegerRank1RepairPricing";
 		}
 	}
 

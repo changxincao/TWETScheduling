@@ -1874,6 +1874,10 @@ public class LP {
 			for (int index = 0; index < cutEntries.size(); index++) {
 				Map.Entry<Integer, IloRange> entry = cutEntries.get(index);
 				double dual = cutDuals[index];
+				TWETCut cut = cutPool.getCut(entry.getKey().intValue());
+				// 2026-09-02: pricing dual snapshot 必须包含完整的 master dual objective；
+				// SRI 是非零 RHS 的 <= 行，遗漏 dual*rhs 会破坏后续稳定化使用的 dual 点语义。
+				pricingDualRhsObjective += dual * cut.getRhs();
 				if (Utility.compareLt(dual, -VALUE_TOLERANCE)) {
 					activeSubsetRowPricingCutIds.add(entry.getKey());
 					activeSubsetRowPricingDuals.add(Double.valueOf(dual));

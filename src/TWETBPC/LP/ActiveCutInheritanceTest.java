@@ -21,6 +21,8 @@ public final class ActiveCutInheritanceTest {
 	}
 
 	public static void main(String[] args) throws Exception {
+		testSubsetRowDualRhsObjectiveIsComplete();
+
 		Data data = new Data("data/40-2/wet040_001_2m.dat", false, true);
 		TWETBPCConfig config = new TWETBPCConfig();
 		if (!LP.isExactZeroSubsetRowDual(0.0) || !LP.isExactZeroSubsetRowDual(-0.0)
@@ -120,5 +122,42 @@ public final class ActiveCutInheritanceTest {
 		lp.closeModel();
 		childLp.closeModel();
 		System.out.println("ActiveCutInheritanceTest passed");
+	}
+
+	/** 绑定的非零 RHS SRI 必须进入 pricing dual snapshot 的完整 dual objective。 */
+	private static void testSubsetRowDualRhsObjectiveIsComplete() throws Exception {
+		Data data = new Data("data/40-2/wet040_001_2m.dat", false, true);
+		data.n = 3;
+		for (int job = 1; job <= data.n; job++) {
+			data.outsourcingCost[job] = Double.MAX_VALUE;
+		}
+		TWETBPCConfig config = new TWETBPCConfig();
+		Pool pool = new Pool(data);
+		ArrayList<Integer> columns = new ArrayList<Integer>();
+		columns.add(Integer.valueOf(pool.addColumn(Arrays.asList(1, 2), 0.0, ColumnSource.MANUAL, true)));
+		columns.add(Integer.valueOf(pool.addColumn(Arrays.asList(1, 3), 0.0, ColumnSource.MANUAL, true)));
+		columns.add(Integer.valueOf(pool.addColumn(Arrays.asList(2, 3), 0.0, ColumnSource.MANUAL, true)));
+		columns.add(Integer.valueOf(pool.addColumn(Collections.singletonList(1), 10.0, ColumnSource.MANUAL, true)));
+		columns.add(Integer.valueOf(pool.addColumn(Collections.singletonList(2), 10.0, ColumnSource.MANUAL, true)));
+		columns.add(Integer.valueOf(pool.addColumn(Collections.singletonList(3), 10.0, ColumnSource.MANUAL, true)));
+
+		CutPool cutPool = new CutPool();
+		int cutId = cutPool.addCut(new TWETCut(-1, TWETCutType.SUBSET_ROW,
+				Arrays.asList(1, 2, 3), 1.0, "dual-rhs"));
+		Node node = new Node(data, columns, columns, 0.0);
+		node.maxMachineCount = 3;
+		node.activeCutIds.add(Integer.valueOf(cutId));
+		LP lp = new LP(data, pool, cutPool, config, new OutsourcingPool(data));
+		lp.construct(node, node.seedColumnIds);
+		TWETMasterSolution solution = lp.solveRelaxation();
+		if (solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new AssertionError("SRI dual-objective test RMP was not feasible: " + solution.getMessage());
+		}
+		double dualObjective = lp.captureTruePricingDuals().rhsObjective;
+		if (Math.abs(dualObjective - solution.getObjectiveValue()) > 1e-7) {
+			throw new AssertionError("SRI RHS missing from pricing dual objective: primal="
+					+ solution.getObjectiveValue() + ", dual=" + dualObjective);
+		}
+		lp.closeModel();
 	}
 }

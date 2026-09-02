@@ -159,8 +159,9 @@ public class TWETBPCContext {
 				(config.enableSubsetRowCutsForPartialDominance && pricingMode.supportsPartialNgSubsetRowCuts())
 				|| (config.enableSubsetRowCutsForTimeIndexedGraph && pricingMode.supportsTimeIndexedRank1Cuts());
 		if (enableSelectedSubsetRowCuts) {
-			// 2026-09-02: SRI 只约束内部调度列；显式外包变量和列化外包列的系数均为 0，
-			// 因此两种外包模型都可使用同一分离器，外包 pricing 也无需读取 cut dual。
+			// 2026-09-02: 对原问题的精确覆盖排程，SRI 只需约束内部调度列；显式外包变量和
+			// 列化外包列的系数均为 0。它可以切掉 covering master 中重复覆盖的人工整数点，
+			// 但不会切掉任何任务恰好内部加工一次或外包一次的原问题可行解。
 			cutGenerators.add(new SubsetRowCutGenerator(config, pricingMode));
 		}
 

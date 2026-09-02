@@ -18,6 +18,7 @@ public final class SubsetRowCutCoefficientTest {
 	}
 
 	public static void main(String[] args) {
+		testCoefficientCanAccumulateBeyondResidualState();
 		Random random = new Random(20260728L);
 		for (int jobCount = 1; jobCount <= 80; jobCount++) {
 			for (int round = 0; round < 200; round++) {
@@ -44,6 +45,20 @@ public final class SubsetRowCutCoefficientTest {
 			}
 		}
 		System.out.println("SubsetRowCutCoefficientTest passed");
+	}
+
+	/** residual 只保存未配对的 0/1 状态；已完成的访问对仍会累计为大于 1 的整列系数。 */
+	private static void testCoefficientCanAccumulateBeyondResidualState() {
+		ArrayList<Long> memoryArcs = new ArrayList<Long>();
+		memoryArcs.add(Long.valueOf(SubsetRowCutEvaluator.arcKey(0, 1)));
+		memoryArcs.add(Long.valueOf(SubsetRowCutEvaluator.arcKey(1, 1)));
+		TWETCut cut = new TWETCut(-1, TWETCutType.SUBSET_ROW, Arrays.asList(Integer.valueOf(1)), null,
+				memoryArcs, 0.5, 0.0, "accumulatedOneRowCoefficient");
+		int coefficient = SubsetRowCutEvaluator.coefficient(cut,
+				Arrays.asList(Integer.valueOf(1), Integer.valueOf(1), Integer.valueOf(1), Integer.valueOf(1)), 1);
+		if (coefficient != 2) {
+			throw new AssertionError("Four remembered visits must produce coefficient 2, got " + coefficient);
+		}
 	}
 
 	private static int[] randomScope(Random random, int jobCount) {

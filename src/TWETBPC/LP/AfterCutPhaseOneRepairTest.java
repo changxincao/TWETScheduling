@@ -34,15 +34,15 @@ public final class AfterCutPhaseOneRepairTest {
 	public static void main(String[] args) throws Exception {
 		testDirectAllRowRepairWithTimeIndexedPricing();
 		testSolveRepairsInfeasibleAfterCutRmp();
-		testIntegerTimeIndexedRelaxationStillSeparatesRank1Cut();
+		testIntegerTimeIndexedRelaxationReturnsBeforeRank1Separation();
 		testSubsetRowCutIgnoresColumnizedOutsourcingColumns();
 		testRank1ColumnizedOutsourcingMembershipBranchCompatibility();
 		testColumnizedOutsourcingRequiresPairedCertificate();
 		System.out.println("AfterCutPhaseOneRepairTest passed");
 	}
 
-	/** 整数取值的非基本 pseudo-schedule 仍必须进入 rank-1 分离，不能被旧 VRP 提前返回绕过。 */
-	private static void testIntegerTimeIndexedRelaxationStillSeparatesRank1Cut() throws Exception {
+	/** pricing 已闭合且主变量整数时直接返回；一元 rank-1 只用于继续强化分数松弛。 */
+	private static void testIntegerTimeIndexedRelaxationReturnsBeforeRank1Separation() throws Exception {
 		Data data = new Data("data/40-2/wet040_001_2m.dat", true, true);
 		data.n = 1;
 		data.outsourcingCost[1] = Double.MAX_VALUE;
@@ -61,22 +61,30 @@ public final class AfterCutPhaseOneRepairTest {
 		LP lp = new LP(data, pool, cutPool, config, new OutsourcingPool(data));
 		lp.construct(node, node.seedColumnIds);
 
-		IntegerRank1RepairPricingEngine engine = new IntegerRank1RepairPricingEngine(data.n);
+		PricingEngine closedPricing = new PricingEngine() {
+			@Override
+			public PricingResult price(LP currentLp) {
+				return PricingResult.noImprovement("normal exact closed")
+						.withCertifiedInternalReducedCost(0.0);
+			}
+
+			@Override
+			public String getName() {
+				return "ClosedIntegerPricing";
+			}
+		};
 		TWETBPC.CUT.SubsetRowCutGenerator generator =
 				new TWETBPC.CUT.SubsetRowCutGenerator(config, PricingMode.TIME_INDEXED_RANK1);
 		PC pc = new PC(config, PricingMode.TIME_INDEXED_RANK1,
-				Collections.<PricingEngine>singletonList(engine),
+				Collections.singletonList(closedPricing),
 				Collections.<CutGenerator>singletonList(generator), new BPCTraceSink() { });
 
 		TWETMasterSolution solution = pc.solve(lp);
-		if (cutPool.size() == 0 || lp.getActiveCutIds().isEmpty()) {
-			throw new AssertionError("Integer non-elementary relaxation bypassed rank-1 separation");
+		if (!solution.isInteger() || !solution.getColumnValues().containsKey(Integer.valueOf(repeatedColumnId))) {
+			throw new AssertionError("Integer pricing closure did not preserve the early-return solution");
 		}
-		if (!engine.phaseOneColumnReturned) {
-			throw new AssertionError("Rank-1 cut did not trigger Phase-I repair for the integer pseudo-schedule");
-		}
-		if (!solution.isInteger() || solution.getColumnValues().containsKey(Integer.valueOf(repeatedColumnId))) {
-			throw new AssertionError("Integer rank-1 repair did not replace the repeated pseudo-schedule");
+		if (cutPool.size() != 0 || !lp.getActiveCutIds().isEmpty()) {
+			throw new AssertionError("Integer pricing closure unexpectedly entered rank-1 separation");
 		}
 		lp.closeModel();
 	}
@@ -337,42 +345,6 @@ public final class AfterCutPhaseOneRepairTest {
 		@Override
 		public String getName() {
 			return "PhaseOneOnlyPricing";
-		}
-	}
-
-	private static final class IntegerRank1RepairPricingEngine implements PricingEngine {
-		private final int jobCount;
-		boolean phaseOneColumnReturned;
-
-		IntegerRank1RepairPricingEngine(int jobCount) {
-			this.jobCount = jobCount;
-		}
-
-		@Override
-		public PricingResult price(LP lp) {
-			if (!lp.isFeasibilityPhaseOneObjectiveMode()) {
-				return PricingResult.noImprovement("normal exact closed")
-						.withCertifiedInternalReducedCost(0.0);
-			}
-			if (phaseOneColumnReturned) {
-				return PricingResult.noImprovement("phase-I exact closed")
-						.withCertifiedInternalReducedCost(0.0);
-			}
-			phaseOneColumnReturned = true;
-			TWETColumn column = new TWETColumn(-1, List.of(1), jobCount, 2.0,
-					ColumnSource.PRICING_EXACT, false);
-			return new PricingResult(Collections.singletonList(column), true, "elementary Phase-I repair column")
-					.withCertifiedInternalReducedCost(-1.0);
-		}
-
-		@Override
-		public boolean supportsFeasibilityPhaseOneObjective() {
-			return true;
-		}
-
-		@Override
-		public String getName() {
-			return "IntegerRank1RepairPricing";
 		}
 	}
 

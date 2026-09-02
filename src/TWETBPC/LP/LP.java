@@ -840,8 +840,9 @@ public class LP {
 		masterLpPhaseBranchRowsNanos += masterLpTimingElapsed(phaseStartNanos);
 
 		phaseStartNanos = masterLpTimingStart();
+		// SRI 只含内部调度列，两种外包建模方式都必须恢复 active cut 行。
+		buildSubsetRowCutConstraints();
 		if (!isColumnizedOutsourcing()) {
-			buildSubsetRowCutConstraints();
 			buildOutsourcingTariffConstraints();
 		}
 		masterLpPhaseCutRowsNanos += masterLpTimingElapsed(phaseStartNanos);

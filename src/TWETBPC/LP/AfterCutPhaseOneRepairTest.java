@@ -23,6 +23,7 @@ import TWETBPC.Model.TWETCut;
 import TWETBPC.Model.TWETCutType;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
+import TWETBPC.Model.TWETOutsourcingColumn;
 
 /** cut 后有限列 RMP 不可行时，全行 Phase-I 修复的控制流回归。 */
 public final class AfterCutPhaseOneRepairTest {
@@ -33,6 +34,7 @@ public final class AfterCutPhaseOneRepairTest {
 	public static void main(String[] args) throws Exception {
 		testDirectAllRowRepairWithTimeIndexedPricing();
 		testSolveRepairsInfeasibleAfterCutRmp();
+		testSubsetRowCutIgnoresColumnizedOutsourcingColumns();
 		testColumnizedOutsourcingRequiresPairedCertificate();
 		System.out.println("AfterCutPhaseOneRepairTest passed");
 	}
@@ -153,6 +155,56 @@ public final class AfterCutPhaseOneRepairTest {
 		if (lp.isFeasibilityRepairMode() || lp.isFeasibilityPhaseOneObjectiveMode()) {
 			throw new AssertionError("repair flags remained enabled after certified infeasibility");
 		}
+	}
+
+	private static void testSubsetRowCutIgnoresColumnizedOutsourcingColumns() throws Exception {
+		Data data = new Data("data/40-2/wet040_001_2m.dat", true, true);
+		data.n = 3;
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.outsourcingModel = "columns";
+
+		Pool pool = new Pool(data);
+		int internalColumnId = pool.addColumn(List.of(1, 2, 3), 3.0, ColumnSource.MANUAL, true);
+		OutsourcingPool outsourcingPool = new OutsourcingPool(data);
+		int outsourcingColumnId = outsourcingPool.addColumn(new TWETOutsourcingColumn(-1,
+				List.of(1, 2, 3), data.n, 3.0, 3.0, ColumnSource.MANUAL, true));
+		CutPool cutPool = new CutPool();
+		int cutId = cutPool.addCut(new TWETCut(-1, TWETCutType.SUBSET_ROW,
+				List.of(1, 2, 3), 0.0, "internal-only SRI"));
+		Node internalOnlyNode = new Node(data, List.of(internalColumnId), List.of(internalColumnId), 0.0);
+		internalOnlyNode.activeCutIds.add(Integer.valueOf(cutId));
+		LP internalOnlyLp = new LP(data, pool, cutPool, config, outsourcingPool);
+		internalOnlyLp.construct(internalOnlyNode, internalOnlyNode.seedColumnIds);
+		TWETMasterSolution blocked = internalOnlyLp.solveRelaxation();
+		if (blocked.getStatus() != TWETMasterStatus.INFEASIBLE) {
+			throw new AssertionError("Columnized RMP did not enforce SRI on an internal scheduling column");
+		}
+		internalOnlyLp.closeModel();
+
+		Node node = new Node(data, List.of(internalColumnId), List.of(internalColumnId), 0.0);
+		node.seedOutsourcingColumnIds.add(Integer.valueOf(outsourcingColumnId));
+		LP lp = new LP(data, pool, cutPool, config, outsourcingPool);
+		lp.construct(node, node.seedColumnIds);
+		TWETMasterSolution beforeCut = lp.solveRelaxation();
+		if (beforeCut.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new AssertionError("Columnized RMP was infeasible before incremental SRI");
+		}
+		lp.addCuts(List.of(Integer.valueOf(cutId)));
+		TWETMasterSolution solution = lp.resolveCurrentModel();
+		if (solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+			throw new AssertionError("SRI incorrectly constrained a columnized outsourcing column: "
+					+ solution.getStatus() + ", message=" + solution.getMessage());
+		}
+		if (solution.getColumnValues().containsKey(Integer.valueOf(internalColumnId))) {
+			throw new AssertionError("Incremental SRI did not remove the blocked internal scheduling column");
+		}
+		double[] outsourcingValues = solution.getOutsourcingValues();
+		for (int job = 1; job <= data.n; job++) {
+			if (outsourcingValues[job] < 1.0 - 1e-8) {
+				throw new AssertionError("Outsourcing column did not retain zero SRI coefficient for job " + job);
+			}
+		}
+		lp.closeModel();
 	}
 
 	private static TWETMasterSolution invokeAfterCutRepair(PC pc, LP lp) throws Exception {

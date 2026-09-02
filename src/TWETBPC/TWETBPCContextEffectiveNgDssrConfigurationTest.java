@@ -24,6 +24,8 @@ public final class TWETBPCContextEffectiveNgDssrConfigurationTest {
 		assertEffectiveConfigReportedForSelectedNgDssr(data);
 		assertSriGeneratorFollowsSelectedPartialNgDssr(data);
 		assertSriGeneratorFollowsSelectedTimeIndexedRank1(data);
+		assertSriGeneratorSupportsExplicitOutsourcing(data);
+		assertSriGeneratorSupportsColumnizedOutsourcing(data);
 		System.out.println("TWETBPCContextEffectiveNgDssrConfigurationTest passed");
 	}
 
@@ -73,13 +75,31 @@ public final class TWETBPCContextEffectiveNgDssrConfigurationTest {
 	}
 
 	private static void assertSriGeneratorFollowsSelectedTimeIndexedRank1(Data data) {
+		TWETBPCConfig config = timeIndexedRank1Configuration("masterVariables");
+		TWETBPCContext context = new TWETBPCContext(data, config);
+		assertMode(context, PricingMode.TIME_INDEXED_RANK1, "selected time-indexed rank-1 pricing");
+		assertHasComponent(context.cutGenerators, "SubsetRowCutGenerator", "selected time-indexed rank-1 pricing");
+	}
+
+	private static void assertSriGeneratorSupportsExplicitOutsourcing(Data data) {
+		TWETBPCContext context = new TWETBPCContext(data, timeIndexedRank1Configuration("masterVariables"));
+		assertHasComponent(context.cutGenerators, "SubsetRowCutGenerator", "explicit outsourcing");
+		assertMissingPricingEngine(context.pricingEngines, "OutsourcingPricing", "explicit outsourcing");
+	}
+
+	private static void assertSriGeneratorSupportsColumnizedOutsourcing(Data data) {
+		TWETBPCContext context = new TWETBPCContext(data, timeIndexedRank1Configuration("columns"));
+		assertHasComponent(context.cutGenerators, "SubsetRowCutGenerator", "columnized outsourcing");
+		assertHasPricingEngine(context.pricingEngines, "OutsourcingPricing", "columnized outsourcing");
+	}
+
+	private static TWETBPCConfig timeIndexedRank1Configuration(String outsourcingModel) {
 		TWETBPCConfig config = staleNgConfiguration();
 		config.useTimeIndexedGraphPricing = true;
 		config.useTimeIndexedGraphRank1CutPricing = true;
 		config.enableSubsetRowCutsForTimeIndexedGraph = true;
-		TWETBPCContext context = new TWETBPCContext(data, config);
-		assertMode(context, PricingMode.TIME_INDEXED_RANK1, "selected time-indexed rank-1 pricing");
-		assertHasComponent(context.cutGenerators, "SubsetRowCutGenerator", "selected time-indexed rank-1 pricing");
+		config.outsourcingModel = outsourcingModel;
+		return config;
 	}
 
 	private static TWETBPCConfig staleNgConfiguration() {
@@ -137,5 +157,14 @@ public final class TWETBPCContextEffectiveNgDssrConfigurationTest {
 				throw new AssertionError(context + " unexpectedly installed " + name);
 			}
 		}
+	}
+
+	private static void assertHasPricingEngine(List<PricingEngine> engines, String name, String context) {
+		for (PricingEngine engine : engines) {
+			if (name.equals(engine.getName())) {
+				return;
+			}
+		}
+		throw new AssertionError(context + " did not install " + name);
 	}
 }

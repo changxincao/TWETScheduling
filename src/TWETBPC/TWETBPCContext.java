@@ -158,7 +158,9 @@ public class TWETBPCContext {
 		boolean enableSelectedSubsetRowCuts =
 				(config.enableSubsetRowCutsForPartialDominance && pricingMode.supportsPartialNgSubsetRowCuts())
 				|| (config.enableSubsetRowCutsForTimeIndexedGraph && pricingMode.supportsTimeIndexedRank1Cuts());
-		if (!config.useColumnizedOutsourcing() && enableSelectedSubsetRowCuts) {
+		if (enableSelectedSubsetRowCuts) {
+			// 2026-09-02: SRI 只约束内部调度列；显式外包变量和列化外包列的系数均为 0，
+			// 因此两种外包模型都可使用同一分离器，外包 pricing 也无需读取 cut dual。
 			cutGenerators.add(new SubsetRowCutGenerator(config, pricingMode));
 		}
 

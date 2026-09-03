@@ -9,3 +9,7 @@
 2026-09-03 20:58首次排队时，原PID版等待检查因受限账户下`tasklist /FI`返回假阴性而提前进入seed阶段，6个ALNS seed短时与当前6个solver并行。发现后立即尝试按新scheduler PID终止，但远端命令策略拒绝`taskkill`；断开启动SSH也没有终止远端Java。正式solve尚未启动，并已在seed完成前把`run-cluster.cmd`替换为基于`jcmd -l`识别完整旧manifest的二次门禁，因此后续6个正式solve仍只会在当前scheduler结束后启动。该短时seed竞争可能轻微放大当前批次相应时段的wall time，分析时必须保留这一干扰说明。此后删除无效的`start /b`启动脚本，并把主等待检查也改为同一`jcmd`机制。
 
 20:59复核时6个seed均已成功，`succeeded=6, failed=0`，seed错误日志为空。后续目录虽已进入`RUNNING`标记，但此标记表示包装器已调用带门禁的`run-cluster.cmd`；`jcmd -l`确认旧scheduler仍在、后续solve scheduler和solver均为0，因此当前实际状态是等待旧批次结束。等待进程已脱离本地SSH，本机关闭不会取消后续接续。
+
+2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。
+
+2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。

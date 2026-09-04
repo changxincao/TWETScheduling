@@ -18,4 +18,8 @@
 
 同一时段按最近5次完整exact汇总forward/backward比例。`n80-set01/set03/set05-m4`的时间比为`1.41/5.72/3.67`，constructed extension比为`2.75/6.03/5.07`，kept label比为`3.16/5.88/4.20`；`n100-set01/set03/set05-m5`的时间比为`2.98/1.33/0.34`，extension比为`2.64/0.93/0.81`，kept比为`2.79/1.07/0.76`。方向失衡明显依赖算例：80-set03/set05正向重，100-set05反向重，100-set03接近平衡；probe的浅层4倍接受阈值不能保证完整深层时间比低于4。
 
+2026-09-04 11:32复核时6个solver和scheduler均仍在运行。`n80-set03/m4`已用51次root exact闭合根节点，root bound为`51386.500000`，相对初始incumbent `52279`的gap为`1.707%`；随后先后选择`clusterBoundary(...)=1.5`和`clusterPair(1->0)=0.121212`，已进入node 3。`n80-set05/m4`已用46次root exact闭合根节点，root bound为`92541.285714`，相对初始incumbent `92941`的gap为`0.430%`；随后选择`clusterBoundary(...)=2.285714`，已进入node 2。因此本批次已经确认setup-only Cluster候选在两个实例中实际被严格优先的strong branching选中，但尚无Arc对照，不能据此判断收益。
+
+其余4例仍停留根节点。`n80-set01/m4`完成55次root exact，当前最好安全界`79318.053782`、相对incumbent的gap为`2.530%`，最近一轮耗时`258.9秒`并返回29列；`n100-set01/set03/set05-m5`分别完成`22/34/28`次root exact，当前最好安全gap为`8.115%/1.751%/4.811%`，最近一轮耗时`279.6/260.2/397.9秒`并返回`4/5/34`列。它们仍有负列，以上仅是已完成exact产生的最好安全界，不是已闭合root bound。
+
 2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。

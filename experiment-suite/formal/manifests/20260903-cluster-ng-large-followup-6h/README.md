@@ -22,4 +22,8 @@
 
 其余4例仍停留根节点。`n80-set01/m4`完成55次root exact，当前最好安全界`79318.053782`、相对incumbent的gap为`2.530%`，最近一轮耗时`258.9秒`并返回29列；`n100-set01/set03/set05-m5`分别完成`22/34/28`次root exact，当前最好安全gap为`8.115%/1.751%/4.811%`，最近一轮耗时`279.6/260.2/397.9秒`并返回`4/5/34`列。它们仍有负列，以上仅是已完成exact产生的最好安全界，不是已闭合root bound。
 
+2026-09-04 13:39复核时，`n80-set03/m4`已完整求解，`incumbent=bound=51401`、gap为0、总时间`12730.556秒`，依次处理到node 4，其中node 4由pseudo cost直接剪掉；全程进行了2次Cluster分支。`n80-set01/m4`也已闭合根节点，root bound为`80098.352941`、root gap为`1.571%`，完成2次Cluster分支后正在node 3；`n80-set05/m4`同样已进行第2次Cluster分支并正在node 3。`n100-set03/m5`新闭合根节点，root bound为`54494`、root gap为`0.936%`，选择Cluster boundary后正在node 2。
+
+尚未闭合根节点的只剩`n100-set01/m5`和`n100-set05/m5`。前者完成42次exact，当前最好安全gap为`6.578%`，最近一轮耗时`409.5秒`并返回14列；后者完成43次exact，最好安全gap仍为`4.811%`，最近一轮耗时`531.3秒`并返回8列。远端当前保留5个solver和1个scheduler，已完成的`n80-set03/m4`进程正常退出。
+
 2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。

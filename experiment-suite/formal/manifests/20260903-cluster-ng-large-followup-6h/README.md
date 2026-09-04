@@ -26,4 +26,8 @@
 
 尚未闭合根节点的只剩`n100-set01/m5`和`n100-set05/m5`。前者完成42次exact，当前最好安全gap为`6.578%`，最近一轮耗时`409.5秒`并返回14列；后者完成43次exact，最好安全gap仍为`4.811%`，最近一轮耗时`531.3秒`并返回8列。远端当前保留5个solver和1个scheduler，已完成的`n80-set03/m4`进程正常退出。
 
+2026-09-04 14:37按全部已完成exact统计阶段占比。`n80-set01/set03/set05`的forward+backward labeling占`79.1%/73.1%/74.0%`，probe占`9.5%/20.7%/15.2%`，join占`9.8%/4.7%/9.6%`；`n100-set01/set03/set05`的labeling占`85.1%/87.2%/85.9%`，probe占`6.9%/8.8%/8.0%`，join占`6.6%/2.6%/5.1%`。completion-bound构造本身均仅占约`1.0%--1.5%`。因此大头明确是正式forward/backward扩展、dominance和PWLF bound查询，不是RMP、bound构造或join。
+
+最近5次exact的forward/backward时间比分别为：`n80-set01/set03/set05=0.95/3.81/3.65`，`n100-set01/set03/set05=3.41/0.93/0.40`；两例接近平衡，其余方向随算例变化，但均未出现数量级失衡。全部exact平均DSSR轮数为`11.68/19.36/15.91`和`15.37/11.07/11.42`，最近5次均值为`15.4/19.0/18.0`和`15.2/8.8/11.0`，单次最大为`19/26/24`和`20/18/17`。对5个存活JVM抓取主线程栈，均为`RUNNABLE`且分别位于forward/backward扩展、incremental dominance merge或PWLF completion-bound查询，没有锁等待或死循环证据；这里是单次pricing状态量大导致的分钟级运行，不是进程卡死。
+
 2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。

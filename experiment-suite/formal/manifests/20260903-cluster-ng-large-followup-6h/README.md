@@ -30,4 +30,6 @@
 
 最近5次exact的forward/backward时间比分别为：`n80-set01/set03/set05=0.95/3.81/3.65`，`n100-set01/set03/set05=3.41/0.93/0.40`；两例接近平衡，其余方向随算例变化，但均未出现数量级失衡。全部exact平均DSSR轮数为`11.68/19.36/15.91`和`15.37/11.07/11.42`，最近5次均值为`15.4/19.0/18.0`和`15.2/8.8/11.0`，单次最大为`19/26/24`和`20/18/17`。对5个存活JVM抓取主线程栈，均为`RUNNABLE`且分别位于forward/backward扩展、incremental dominance merge或PWLF completion-bound查询，没有锁等待或死循环证据；这里是单次pricing状态量大导致的分钟级运行，不是进程卡死。
 
+最终结果：`n80-set03/m4`以`51401`、0 gap在`12730.556秒`完成。其余5例达到6小时时限：`n80-set01/m4`为`incumbent=81377, bound=80245.646154, gap=1.3903%, nodes到4, Cluster分支3次`；`n80-set05/m4`为`92771/92613, gap=0.1703%, nodes到4, Cluster分支2次`；`n100-set03/m5`为`55009/54494, gap=0.9362%, nodes到3, Cluster分支2次`。`n100-set01/m5`和`n100-set05/m5`分别完成60和66次root exact但仍未闭合根节点，最终没有合法BPC bound。批次结束后远端`jcmd -l`确认scheduler和solver全部退出。
+
 2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。

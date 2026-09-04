@@ -12,4 +12,6 @@
 
 2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。
 
+2026-09-04 09:14复核推翻了上一段的执行预期。watchdog没有在启动SSH断开后继续存活，四个`n100-set02--set05/m4`于9月4日00:00左右启动，并于06:00左右各运行满6小时后由旧scheduler记为成功；它们实际没有被跳过。后续包装器也未自动接续：运行中的`run-cluster.cmd`被原地上传覆盖后提前返回，留下`FAILED: Solve scheduler failed`，没有创建后续scheduler或任何solve目录。远端无Java进程后已清除陈旧状态标记，scan确认6个seed全部成功、6个solve全部pending，并于09:14直接启动`run-cluster.cmd`。断开本地后台SSH并等待8秒后再次核验，远端仍保持1个后续scheduler和6个唯一solver，分别为`n80-set01/set03/set05-m4`与`n100-set01/set03/set05-m5`。本轮不再依赖watchdog或修改运行中的批处理文件。
+
 2026-09-03 23:30按用户决定不再运行原批次队列中的`n100-set02--set05/m4`。由于scheduler仅在启动时读取manifest和检查`SUCCESS`，不能通过修改TSV或补标记改变内存中的pending队列；因此新增`skip-old-remaining.cmd`，只监控四个完整runId，任务一旦由原scheduler启动便立即按其精确PID执行`tskill`。当前首批6个solver及原scheduler均不在匹配范围内，不受影响。四个跳过任务失败退出后，原scheduler结束，已有后续门禁随即启动本批6个正式solve。

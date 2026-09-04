@@ -14,6 +14,7 @@ import Output.BPCTraceSummary;
 import TWETBPC.BP.ArcBrancher;
 import TWETBPC.BP.Brancher;
 import TWETBPC.BP.OutsourcingMembershipBrancher;
+import TWETBPC.BP.SuccessorSetBrancher;
 import TWETBPC.BP.StructuredArcFlowBrancher;
 import TWETBPC.BP.UndirectedAdjacencyBrancher;
 import TWETBPC.CUT.CutGenerator;
@@ -171,6 +172,9 @@ public class TWETBPCContext {
 			if (config.enableUndirectedAdjacencyBranching) {
 				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
 			}
+			if (config.enableSuccessorSetBranching) {
+				branchers.add(new SuccessorSetBrancher(data, config));
+			}
 			branchers.add(createArcFlowBrancher());
 			branchers.add(new OutsourcingMembershipBrancher(config.branchingTolerance));
 		} else {
@@ -178,6 +182,9 @@ public class TWETBPCContext {
 			branchers.add(new TWETBPC.BP.MachineCountBrancher(config.branchingTolerance));
 			if (config.enableUndirectedAdjacencyBranching) {
 				branchers.add(new UndirectedAdjacencyBrancher(config.branchingTolerance));
+			}
+			if (config.enableSuccessorSetBranching) {
+				branchers.add(new SuccessorSetBrancher(data, config));
 			}
 			branchers.add(createArcFlowBrancher());
 		}

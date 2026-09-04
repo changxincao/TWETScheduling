@@ -8,6 +8,7 @@ import Basic.Data;
 import Common.PiecewiseLinearFunction;
 import Common.Utility;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.BP.AggregateArcBranchConstraint;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
@@ -136,6 +137,7 @@ public final class RouteEnumerationFiniteMaster {
 		buildMachine(cplex, lp, x);
 		buildArcBranches(cplex, lp, columnIds, x);
 		buildAdjacencyBranches(cplex, lp, columnIds, x);
+		buildAggregateArcBranches(cplex, lp, columnIds, outsourcingColumnIds, x, w, y);
 		if (lp.isColumnizedOutsourcing()) {
 			buildOutsourcingMembershipBranches(cplex, lp, outsourcingColumnIds, w);
 			buildOutsourcingColumnCount(cplex, w);
@@ -212,6 +214,42 @@ public final class RouteEnumerationFiniteMaster {
 			throws IloException {
 		buildAdjacency(cplex, lp, columnIds, x, lp.getNode().getForbiddenAdjacencyPairs(), false);
 		buildAdjacency(cplex, lp, columnIds, x, lp.getNode().getRequiredAdjacencyPairs(), true);
+	}
+
+	private void buildAggregateArcBranches(IloCplex cplex, LP lp, List<Integer> columnIds,
+			List<Integer> outsourcingColumnIds, IloIntVar[] x, IloIntVar[] w, IloIntVar[] y) throws IloException {
+		List<AggregateArcBranchConstraint> constraints = lp.getNode().getAggregateArcConstraints();
+		for (int constraintIndex = 0; constraintIndex < constraints.size(); constraintIndex++) {
+			AggregateArcBranchConstraint constraint = constraints.get(constraintIndex);
+			IloLinearNumExpr expr = cplex.linearNumExpr();
+			for (int columnIndex = 0; columnIndex < columnIds.size(); columnIndex++) {
+				TWETColumn column = lp.getPool().getColumn(columnIds.get(columnIndex).intValue());
+				int coefficient = constraint.coefficient(column, lp.getNode().sinkId());
+				if (coefficient != 0) {
+					expr.addTerm(coefficient, x[columnIndex]);
+				}
+			}
+			int outsourcingJob = constraint.getOutsourcingJob();
+			if (outsourcingJob > 0) {
+				if (lp.isColumnizedOutsourcing()) {
+					for (int columnIndex = 0; columnIndex < outsourcingColumnIds.size(); columnIndex++) {
+						TWETOutsourcingColumn column = lp.getOutsourcingPool().getColumn(
+								outsourcingColumnIds.get(columnIndex).intValue());
+						int coefficient = constraint.outsourcingCoefficient(column);
+						if (coefficient != 0) {
+							expr.addTerm(coefficient, w[columnIndex]);
+						}
+					}
+				} else {
+					expr.addTerm(1.0, y[outsourcingJob]);
+				}
+			}
+			if (constraint.isLowerBound()) {
+				cplex.addGe(expr, constraint.getRhs(), "enum_aggregateLower_" + constraintIndex);
+			} else {
+				cplex.addLe(expr, constraint.getRhs(), "enum_aggregateUpper_" + constraintIndex);
+			}
+		}
 	}
 
 	private void buildOutsourcingColumnCount(IloCplex cplex, IloIntVar[] w) throws IloException {

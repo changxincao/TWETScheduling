@@ -29,6 +29,7 @@ import TWETBPC.BP.BranchResult;
 import TWETBPC.BP.Brancher;
 import TWETBPC.BP.OutsourcingMembershipBrancher;
 import TWETBPC.BP.StrongBranchingCandidate;
+import TWETBPC.BP.SuccessorSetBrancher;
 import TWETBPC.GC.CompletionBoundSubtreeArcEliminator;
 import TWETBPC.GC.InitialColumnBuilder;
 import TWETBPC.GC.InitialColumnBundle;
@@ -175,6 +176,7 @@ public class Tree {
 				traceSink.onNodeClosed(node, "infeasible_master", queue.size());
 				continue;
 			}
+			recordNodeCoverageDiagnostics(lp, solution);
 			if (pc.wasLastNodePrunedByDualBound()) {
 				double dualBound = Math.max(pc.getLastObservedDualBound(), certifiedNodeBound);
 				bestBound = updateReportedBound(queue, dualBound, incumbentCost);
@@ -205,6 +207,7 @@ public class Tree {
 				break;
 			}
 			if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic
+					&& node.getAggregateArcConstraints().isEmpty()
 					&& !pricingMode.usesTimeIndexedPricing()) {
 				heartbeat(node, "rmih.start");
 				RestrictedMasterIntegerHeuristic.Result integerResult = restrictedMasterIntegerHeuristic.solve(lp);
@@ -220,6 +223,9 @@ public class Tree {
 					incumbentUpdated = true;
 					traceSink.onIncumbentUpdated(node, integerResult.getSolution(), incumbentCost);
 				}
+			} else if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic
+					&& !node.getAggregateArcConstraints().isEmpty()) {
+				heartbeat(node, "rmih.skipped aggregateBranchConstraint");
 			} else if (!solution.isInteger() && config.enableRestrictedMasterIntegerHeuristic
 					&& pricingMode.usesTimeIndexedPricing()) {
 				heartbeat(node, "rmih.skipped timeIndexedGraphPricing");
@@ -458,6 +464,14 @@ public class Tree {
 			return;
 		}
 		traceSink.onStageHeartbeat(node, phase, totalPoolSize(), cutPool.size());
+	}
+
+	private void recordNodeCoverageDiagnostics(LP lp, TWETMasterSolution solution) {
+		if (!config.diagnosticNodeCoverage) {
+			return;
+		}
+		NodeCoverageStats stats = NodeCoverageStats.from(solution, pool, data.n);
+		traceSink.onStageHeartbeat(lp.getNode(), "nodeCoverage " + stats.summary(), totalPoolSize(), cutPool.size());
 	}
 
 	private void maybeDumpRootColumnDiagnostics(LP lp, TWETMasterSolution solution) {
@@ -771,10 +785,17 @@ public class Tree {
 	}
 
 	private boolean useDomainFilteredStrongBranchingRepair(StrongBranchingCandidate candidate, LP parentLp) {
-		if (!config.enableStrongBranchingDomainRepair || candidate == null) {
+		if (candidate == null) {
 			return false;
 		}
 		String type = candidate.getType();
+		// successor-set 左支直接禁止多个 arc/OUT，必须先按 child 域筛列，并用 all-row repair 补覆盖。
+		if ("successorSet".equals(type)) {
+			return true;
+		}
+		if (!config.enableStrongBranchingDomainRepair) {
+			return false;
+		}
 		if ("arc".equals(type)) {
 			return true;
 		}
@@ -837,6 +858,10 @@ public class Tree {
 	}
 
 	private void prepareChildSeedColumns(Node child, LP parentLp, Brancher brancher) {
+		if (brancher instanceof SuccessorSetBrancher) {
+			prepareDomainFilteredChildSeedColumns(child, parentLp);
+			return;
+		}
 		if (useLightweightChildSeedForBrancher(brancher, parentLp)) {
 			prepareLightweightRepairChildSeedColumns(child, parentLp);
 			return;

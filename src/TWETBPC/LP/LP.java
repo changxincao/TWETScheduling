@@ -899,6 +899,9 @@ public class LP {
 		outsourceVars = new IloNumVar[data.n + 1];
 		for (int j = 1; j <= data.n; j++) {
 			double ub = Utility.isBigMValue(data.outsourcingCost[j]) ? 0.0 : 1.0;
+			if (node.getOutsourcingJobState(j) == Node.OUTSOURCE_FORBIDDEN) {
+				ub = 0.0;
+			}
 			outsourceVars[j] = cplex.numVar(0.0, ub, "y_" + j);
 		}
 
@@ -1094,6 +1097,21 @@ public class LP {
 				int coefficient = constraint.coefficient(column, node.sinkId());
 				if (coefficient != 0) {
 					expr.addTerm(coefficient, lambdaVars[columnIndex]);
+				}
+			}
+			int outsourcingJob = constraint.getOutsourcingJob();
+			if (outsourcingJob > 0) {
+				if (isColumnizedOutsourcing()) {
+					for (int columnIndex = 0; columnIndex < restrictedOutsourcingColumnIds.size(); columnIndex++) {
+						TWETOutsourcingColumn column = outsourcingPool.getColumn(
+								restrictedOutsourcingColumnIds.get(columnIndex).intValue());
+						int coefficient = constraint.outsourcingCoefficient(column);
+						if (coefficient != 0) {
+							expr.addTerm(coefficient, outsourceColumnVars[columnIndex]);
+						}
+					}
+				} else if (outsourcingJob < outsourceVars.length && outsourceVars[outsourcingJob] != null) {
+					expr.addTerm(1.0, outsourceVars[outsourcingJob]);
 				}
 			}
 			IloRange range = constraint.isLowerBound()
@@ -1580,6 +1598,13 @@ public class LP {
 				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
 			}
 		}
+		List<AggregateArcBranchConstraint> aggregateConstraints = node.getAggregateArcConstraints();
+		for (int index = 0; index < aggregateArcBranchRanges.size(); index++) {
+			int coefficient = aggregateConstraints.get(index).outsourcingCoefficient(column);
+			if (coefficient != 0) {
+				cplexColumn = cplexColumn.and(cplex.column(aggregateArcBranchRanges.get(index), coefficient));
+			}
+		}
 		IloNumVar var = cplex.numVar(cplexColumn, 0.0, Double.MAX_VALUE, "omega_" + columnId);
 		outsourceColumnById.put(Integer.valueOf(columnId), var);
 		return var;
@@ -1864,7 +1889,7 @@ public class LP {
 			for (int index = 0; index < aggregateDuals.length; index++) {
 				double dual = aggregateDuals[index];
 				AggregateArcBranchConstraint constraint = constraints.get(index);
-				constraint.addDualTo(arcDual, dual);
+				constraint.addDualTo(arcDual, outsourcingMembershipDual, dual);
 				pricingDualRhsObjective += dual * constraint.getRhs();
 			}
 		}

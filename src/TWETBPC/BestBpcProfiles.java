@@ -88,6 +88,7 @@ public final class BestBpcProfiles {
 		config.enableUndirectedAdjacencyBranching = false;
 		config.enableCutSetBranching = false;
 		config.enableClusterBranching = false;
+		config.enableSuccessorSetBranching = false;
 		config.structuredArcStrictTypePriority = false;
 		config.enableSubsetRowCutsForPartialDominance = false;
 		config.enableNodeLocalHorizonImprovement = false;

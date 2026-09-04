@@ -83,6 +83,8 @@ public class Node implements Comparable<Node> {
 	private byte[] outsourcingJobState;
 	private int requiredOutsourcingJobCount;
 	private ArrayList<AggregateArcBranchConstraint> aggregateArcConstraints;
+	/** successor-set 左支一次直接禁止多个后继，RMP 不可行时必须使用 all-row repair。 */
+	private boolean successorSetDirectDomainRestriction;
 	// 只用于子节点首次 LP 不可行时的定向 repair；不是完整分支状态本身。
 	private byte repairType;
 	private int repairFrom;
@@ -116,6 +118,7 @@ public class Node implements Comparable<Node> {
 		this.outsourcingJobState = new byte[data.n + 1];
 		this.requiredOutsourcingJobCount = 0;
 		this.aggregateArcConstraints = new ArrayList<AggregateArcBranchConstraint>();
+		this.successorSetDirectDomainRestriction = false;
 		this.repairType = REPAIR_NONE;
 		this.repairFrom = -1;
 		this.repairTo = -1;
@@ -163,6 +166,7 @@ public class Node implements Comparable<Node> {
 		copy.outsourcingJobState = outsourcingJobState.clone();
 		copy.requiredOutsourcingJobCount = requiredOutsourcingJobCount;
 		copy.aggregateArcConstraints = new ArrayList<AggregateArcBranchConstraint>(aggregateArcConstraints);
+		copy.successorSetDirectDomainRestriction = successorSetDirectDomainRestriction;
 		copy.repairType = repairType;
 		copy.repairFrom = repairFrom;
 		copy.repairTo = repairTo;
@@ -713,6 +717,14 @@ public class Node implements Comparable<Node> {
 
 	public List<AggregateArcBranchConstraint> getAggregateArcConstraints() {
 		return Collections.unmodifiableList(aggregateArcConstraints);
+	}
+
+	public void markSuccessorSetDirectDomainRestriction() {
+		successorSetDirectDomainRestriction = true;
+	}
+
+	public boolean hasSuccessorSetDirectDomainRestriction() {
+		return successorSetDirectDomainRestriction;
 	}
 
 	public byte getRepairType() {

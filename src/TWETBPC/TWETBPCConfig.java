@@ -433,6 +433,10 @@ public class TWETBPCConfig {
 	public boolean enableUndirectedAdjacencyBranching = false;
 	/** 2026-08-26: 动态有向 CutSet 分支实验开关；默认关闭，不改变正式主线。 */
 	public boolean enableCutSetBranching = false;
+	/** 2026-09-04: LP-balanced successor-set 分支实验开关；有候选时位于普通 Arc 之前。 */
+	public boolean enableSuccessorSetBranching = false;
+	/** successor-set 只处理 coverage 不超过 1+epsilon 的任务。 */
+	public double successorSetCoverageUpperTolerance = 0.01;
 	/** 动态 CutSet 在进入共享 strong-branching 候选池前最多保留多少个候选。 */
 	public int cutSetCandidatePoolLimit = 40;
 	/** 2026-08-26: 基于 setup-time/due-center 静态 MST 聚类的 Cluster 分支实验开关。 */
@@ -474,6 +478,8 @@ public class TWETBPCConfig {
 	public boolean diagnosticStageHeartbeat = false;
 	/** 2026-06-05: 每个节点处理完成后输出一行聚合诊断，便于定位长跑主要耗时阶段。 */
 	public boolean diagnosticNodeProgressSummary = false;
+	/** 2026-09-04: 对最终返回可行 LP 解的正式节点记录逐 job 覆盖量；默认关闭，避免长树日志膨胀。 */
+	public boolean diagnosticNodeCoverage = false;
 	/** 2026-06-05: subtree/dual 诊断明细；默认关闭，避免每轮 pricing 扫描列池和所有 job arc。 */
 	public boolean diagnosticPricingSummaryDetails = false;
 	/** 2026-07-15: 启发式 pricing 热点拆分统计；默认关闭，避免高频 nanoTime 影响批量实验。 */

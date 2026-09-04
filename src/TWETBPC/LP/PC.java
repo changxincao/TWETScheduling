@@ -98,7 +98,12 @@ public class PC {
 			if (strongBranchingSeedPrepared) {
 				throw new IllegalStateException("Prepared strong branching child is infeasible on formal solve");
 			}
-			solution = repairInfeasibleMaster(lp);
+			if (lp.getNode() != null && lp.getNode().hasSuccessorSetDirectDomainRestriction()) {
+				solution = repairMasterPhaseOne(lp, true, false,
+						"successor_set_domain_phase_one", "successorSetDomainPhaseOne", "Successor-set domain");
+			} else {
+				solution = repairInfeasibleMaster(lp);
+			}
 			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
 				return solution;
 			}

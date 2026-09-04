@@ -271,9 +271,11 @@ public final class FormalExperimentRunner {
 				+ arguments.ngDssrNonElementaryRouteUpdateMode);
 		lines.add("ngDssrInitialNgSetSizeOverride=" + arguments.ngDssrInitialNgSetSize);
 		lines.add("enableClusterBranchingOverride=" + arguments.enableClusterBranching);
+		lines.add("enableSuccessorSetBranchingOverride=" + arguments.enableSuccessorSetBranching);
 		lines.add("structuredArcStrictTypePriorityOverride=" + arguments.structuredArcStrictTypePriority);
 		lines.add("clusterMstThetaOverride=" + arguments.clusterMstTheta);
 		lines.add("clusterTemporalWeightOverride=" + arguments.clusterTemporalWeight);
+		lines.add("diagnosticNodeCoverageOverride=" + arguments.diagnosticNodeCoverage);
 		if (result != null) {
 			lines.add("status=" + result.getStatus());
 			lines.add("incumbent=" + result.getIncumbentCost());
@@ -296,8 +298,9 @@ public final class FormalExperimentRunner {
 				"bidirectionalMidpointProbeDssrImbalanceThreshold",
 				"bidirectionalMidpointProbeDssrMoveFraction",
 				"ngDssrNonElementaryRouteCandidateLimit", "ngDssrNonElementaryRouteUpdateMode",
-				"ngDssrInitialNgSetSize", "enableClusterBranching", "structuredArcStrictTypePriority",
-				"clusterMstTheta", "clusterTemporalWeight");
+				"ngDssrInitialNgSetSize", "enableClusterBranching", "enableSuccessorSetBranching",
+				"structuredArcStrictTypePriority",
+				"clusterMstTheta", "clusterTemporalWeight", "diagnosticNodeCoverage");
 
 		private final String action;
 		private final Path instance;
@@ -322,9 +325,11 @@ public final class FormalExperimentRunner {
 		private final String ngDssrNonElementaryRouteUpdateMode;
 		private final Integer ngDssrInitialNgSetSize;
 		private final Boolean enableClusterBranching;
+		private final Boolean enableSuccessorSetBranching;
 		private final Boolean structuredArcStrictTypePriority;
 		private final Double clusterMstTheta;
 		private final Double clusterTemporalWeight;
+		private final Boolean diagnosticNodeCoverage;
 
 		private Arguments(Map<String, String> values) {
 			for (String key : values.keySet()) {
@@ -372,9 +377,11 @@ public final class FormalExperimentRunner {
 					"ngDssrNonElementaryRouteUpdateMode");
 			ngDssrInitialNgSetSize = optionalInteger(values, "ngDssrInitialNgSetSize");
 			enableClusterBranching = optionalBoolean(values, "enableClusterBranching");
+			enableSuccessorSetBranching = optionalBoolean(values, "enableSuccessorSetBranching");
 			structuredArcStrictTypePriority = optionalBoolean(values, "structuredArcStrictTypePriority");
 			clusterMstTheta = optionalDouble(values, "clusterMstTheta");
 			clusterTemporalWeight = optionalDouble(values, "clusterTemporalWeight");
+			diagnosticNodeCoverage = optionalBoolean(values, "diagnosticNodeCoverage");
 		}
 
 		/** 仅显式传参时覆盖正式 profile，未传参保持生产配置不变。 */
@@ -427,6 +434,9 @@ public final class FormalExperimentRunner {
 			if (enableClusterBranching != null) {
 				config.enableClusterBranching = enableClusterBranching.booleanValue();
 			}
+			if (enableSuccessorSetBranching != null) {
+				config.enableSuccessorSetBranching = enableSuccessorSetBranching.booleanValue();
+			}
 			if (structuredArcStrictTypePriority != null) {
 				config.structuredArcStrictTypePriority = structuredArcStrictTypePriority.booleanValue();
 			}
@@ -435,6 +445,9 @@ public final class FormalExperimentRunner {
 			}
 			if (clusterTemporalWeight != null) {
 				config.clusterTemporalWeight = clusterTemporalWeight.doubleValue();
+			}
+			if (diagnosticNodeCoverage != null) {
+				config.diagnosticNodeCoverage = diagnosticNodeCoverage.booleanValue();
 			}
 		}
 

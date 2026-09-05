@@ -10,8 +10,8 @@
 
 完整模型、两种 Benders 的对比方式、目标函数定义与 Wasserstein 边界统一记录在：
 
-[决策型 due-window 随机并行机调度方案](../plans/2026-08-30-随机due-window并行机调度与Benders-DRO方案分析.md)
+[决策型 due-window 随机并行机调度方案](2026-08-30-随机due-window并行机调度与Benders-DRO方案分析.md)
 
 位置成本、范围约束、主动等待成本与确定性/SAA 投影的专项文献核对见：
 
-[决策型 due window 的问题设定：文献对照、退化条件与 SAA 结构](../plans/2026-08-30-due-window问题设定文献调研与SAA结构分析.md)
+[决策型 due window 的问题设定：文献对照、退化条件与 SAA 结构](2026-08-30-due-window问题设定文献调研与SAA结构分析.md)

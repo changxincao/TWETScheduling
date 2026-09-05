@@ -2,7 +2,6 @@ package TWETBPC.GC;
 
 import java.util.Arrays;
 import java.util.ArrayList;
-import java.util.BitSet;
 import java.util.List;
 
 import Basic.Data;
@@ -11,6 +10,7 @@ import TWETBPC.TWETBPCConfig;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.TWETCut;
+import TWETBPC.Util.TimeIndexedArcSet;
 
 /**
  * 2026-06-28: 给 ng-DSSR 主线单独使用的 time-indexed relaxed scalar bound。
@@ -35,28 +35,28 @@ public final class TimeIndexedScalarCompletionBound {
 
 	public static final class ArcFixingResult {
 		final boolean available;
-		final int candidates;
-		final int fixed;
-		final int unavailable;
-		final int processFixed;
-		final int idleFixed;
-		final int endFixed;
-		final int cleanupFixed;
+		final long candidates;
+		final long fixed;
+		final long unavailable;
+		final long processFixed;
+		final long idleFixed;
+		final long endFixed;
+		final long cleanupFixed;
 		final String cleanupRounds;
 		final double gap;
 		final long totalNanos;
 		final String message;
 		final WindowReachabilityStats windowStats;
 		final int nodeWindowTightenedJobs;
-		final int nodeTimeArcFixedBefore;
-		final int nodeTimeArcNewlyFixed;
-		final int nodeTimeArcFixedAfter;
+		final long nodeTimeArcFixedBefore;
+		final long nodeTimeArcNewlyFixed;
+		final long nodeTimeArcFixedAfter;
 
-		private ArcFixingResult(boolean available, int candidates, int fixed, int unavailable,
-				int processFixed, int idleFixed, int endFixed, int cleanupFixed, String cleanupRounds,
+		private ArcFixingResult(boolean available, long candidates, long fixed, long unavailable,
+				long processFixed, long idleFixed, long endFixed, long cleanupFixed, String cleanupRounds,
 				double gap, long totalNanos, String message,
 				WindowReachabilityStats windowStats, int nodeWindowTightenedJobs,
-				int nodeTimeArcFixedBefore, int nodeTimeArcNewlyFixed, int nodeTimeArcFixedAfter) {
+				long nodeTimeArcFixedBefore, long nodeTimeArcNewlyFixed, long nodeTimeArcFixedAfter) {
 			this.available = available;
 			this.candidates = candidates;
 			this.fixed = fixed;
@@ -173,7 +173,7 @@ public final class TimeIndexedScalarCompletionBound {
 	private final Node.TimeIndexedArcLookup inheritedTimeIndexedArcLookup;
 	private final boolean available;
 	private final String message;
-	private BitSet localFixedTimeIndexedArc;
+	private TimeIndexedArcSet localFixedTimeIndexedArc;
 	private long buildNanos;
 
 	static TimeIndexedScalarCompletionBound build(Data data, TWETBPCConfig config, LP lp, double pricingHorizon,
@@ -385,7 +385,7 @@ public final class TimeIndexedScalarCompletionBound {
 		if (!available || !exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
 			return new WindowTightening(0, 0);
 		}
-		int fixed = applyLocalArcFixing(0.0);
+		long fixed = applyLocalArcFixing(0.0);
 		if (fixed > 0) {
 			computeForwardDistances();
 			computeBackwardDistances();
@@ -394,12 +394,12 @@ public final class TimeIndexedScalarCompletionBound {
 		return tightenWindows(hStartByJob, hEndByJob);
 	}
 
-	private int applySriAwareLocalArcFixing(SriStateData sri, ArrayList<SriLabel>[] forwardLabels,
-			ArrayList<SriLabel>[] backwardLabels, double cutoff, int[] stats) {
+	private long applySriAwareLocalArcFixing(SriStateData sri, ArrayList<SriLabel>[] forwardLabels,
+			ArrayList<SriLabel>[] backwardLabels, double cutoff, long[] stats) {
 		if (localFixedTimeIndexedArc == null) {
-			localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
+			localFixedTimeIndexedArc = new TimeIndexedArcSet(n + 1, horizon);
 		}
-		int fixed = 0;
+		long fixed = 0L;
 		for (int t = 0; t <= horizon; t++) {
 			for (int from = 0; from <= n; from++) {
 				ArrayList<SriLabel> prefixLabels = forwardLabels[index(from, t)];
@@ -470,11 +470,11 @@ public final class TimeIndexedScalarCompletionBound {
 		return fixed;
 	}
 
-	private int applyLocalArcFixing(double cutoff) {
+	private long applyLocalArcFixing(double cutoff) {
 		if (localFixedTimeIndexedArc == null) {
-			localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
+			localFixedTimeIndexedArc = new TimeIndexedArcSet(n + 1, horizon);
 		}
-		int fixed = 0;
+		long fixed = 0L;
 		for (int t = 0; t <= horizon; t++) {
 			for (int from = 0; from <= n; from++) {
 				double prefix = forward[index(from, t)];
@@ -827,12 +827,12 @@ public final class TimeIndexedScalarCompletionBound {
 		if (sri.size() == 0) {
 			return applyArcFixing(gap);
 		}
-		localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
+		localFixedTimeIndexedArc = new TimeIndexedArcSet(n + 1, horizon);
 		ArrayList<SriLabel>[] forwardLabels = buildSriForwardLabels(sri);
 		ArrayList<SriLabel>[] backwardLabels = buildSriBackwardLabels(sri);
-		int[] stats = new int[5];
-		int fixed = applySriAwareLocalArcFixing(sri, forwardLabels, backwardLabels, gap, stats);
-		int cleanupFixed = 0;
+		long[] stats = new long[5];
+		long fixed = applySriAwareLocalArcFixing(sri, forwardLabels, backwardLabels, gap, stats);
+		long cleanupFixed = 0L;
 		StringBuilder cleanupRoundTrace = new StringBuilder();
 		if (fixed > 0) {
 			computeForwardDistances();
@@ -841,7 +841,7 @@ public final class TimeIndexedScalarCompletionBound {
 		// SRI-aware reduced-cost fixing is handled above. Cleanup is only structural reachability
 		// on the no-SRI relaxed graph, so it is safe under active cuts but weaker than full SRI-state cleanup.
 		for (int cleanupRound = 0; cleanupRound < 8; cleanupRound++) {
-			int roundFixed = cleanupGraph();
+			long roundFixed = cleanupGraph();
 			if (cleanupRoundTrace.length() > 0) {
 				cleanupRoundTrace.append('/');
 			}
@@ -861,9 +861,9 @@ public final class TimeIndexedScalarCompletionBound {
 		SriWindowReachability reachability = analyzeSriReachableWindows(forwardLabels, backwardLabels, sri);
 		WindowReachabilityStats windowStats = reachability.stats;
 		int nodeWindowTightened = applySriReachableWindowsToNode(reachability);
-		int nodeTimeArcFixedBefore = node.countTimeIndexedPricingOnlyForbiddenArcs();
-		int nodeTimeArcFixedAfter = writeLocalFixedArcsToNode();
-		int nodeTimeArcNewlyFixed = nodeTimeArcFixedAfter - nodeTimeArcFixedBefore;
+		long nodeTimeArcFixedBefore = node.countTimeIndexedPricingOnlyForbiddenArcsLong();
+		long nodeTimeArcFixedAfter = writeLocalFixedArcsToNode();
+		long nodeTimeArcNewlyFixed = nodeTimeArcFixedAfter - nodeTimeArcFixedBefore;
 		return new ArcFixingResult(true, stats[0], fixed, stats[1], stats[2], stats[3], stats[4], cleanupFixed,
 				cleanupRoundTrace.toString(), gap, System.nanoTime() - start,
 				"ng-DSSR time-indexed SRI-aware helper arc fixing", windowStats,
@@ -872,14 +872,14 @@ public final class TimeIndexedScalarCompletionBound {
 
 	private ArcFixingResult applyArcFixing(double gap) {
 		long start = System.nanoTime();
-		localFixedTimeIndexedArc = new BitSet(timeIndexedArcCount());
-		int candidates = 0;
-		int fixed = 0;
-		int unavailable = 0;
-		int processFixed = 0;
-		int idleFixed = 0;
-		int endFixed = 0;
-		int cleanupFixed = 0;
+		localFixedTimeIndexedArc = new TimeIndexedArcSet(n + 1, horizon);
+		long candidates = 0L;
+		long fixed = 0L;
+		long unavailable = 0L;
+		long processFixed = 0L;
+		long idleFixed = 0L;
+		long endFixed = 0L;
+		long cleanupFixed = 0L;
 		for (int t = 0; t <= horizon; t++) {
 			for (int from = 0; from <= n; from++) {
 				double prefix = forward[index(from, t)];
@@ -936,7 +936,7 @@ public final class TimeIndexedScalarCompletionBound {
 		// Align scalar helper with paper graphFix cleanup after reduced-cost fixing.
 		StringBuilder cleanupRoundTrace = new StringBuilder();
 		for (int cleanupRound = 0; cleanupRound < 8; cleanupRound++) {
-			int roundFixed = cleanupGraph();
+			long roundFixed = cleanupGraph();
 			if (cleanupRoundTrace.length() > 0) {
 				cleanupRoundTrace.append('/');
 			}
@@ -954,19 +954,19 @@ public final class TimeIndexedScalarCompletionBound {
 		}
 		WindowReachabilityStats windowStats = summarizeReachableWindows();
 		int nodeWindowTightened = applyReachableWindowsToNode();
-		int nodeTimeArcFixedBefore = node.countTimeIndexedPricingOnlyForbiddenArcs();
-		int nodeTimeArcFixedAfter = writeLocalFixedArcsToNode();
-		int nodeTimeArcNewlyFixed = nodeTimeArcFixedAfter - nodeTimeArcFixedBefore;
+		long nodeTimeArcFixedBefore = node.countTimeIndexedPricingOnlyForbiddenArcsLong();
+		long nodeTimeArcFixedAfter = writeLocalFixedArcsToNode();
+		long nodeTimeArcNewlyFixed = nodeTimeArcFixedAfter - nodeTimeArcFixedBefore;
 		return new ArcFixingResult(true, candidates, fixed, unavailable, processFixed, idleFixed, endFixed, cleanupFixed, cleanupRoundTrace.toString(), gap,
 				System.nanoTime() - start, "ng-DSSR time-indexed scalar helper arc fixing", windowStats,
 				nodeWindowTightened, nodeTimeArcFixedBefore, nodeTimeArcNewlyFixed, nodeTimeArcFixedAfter);
 	}
 
-	private int cleanupGraph() {
+	private long cleanupGraph() {
 		if (localFixedTimeIndexedArc == null) {
 			return 0;
 		}
-		int fixed = 0;
+		long fixed = 0L;
 		boolean[] usefulProcessingAtLaterTime = new boolean[n + 1];
 		for (int t = horizon; t >= 0; t--) {
 			for (int from = 0; from <= n; from++) {
@@ -1011,11 +1011,11 @@ public final class TimeIndexedScalarCompletionBound {
 		return fixed;
 	}
 
-	private int writeLocalFixedArcsToNode() {
+	private long writeLocalFixedArcsToNode() {
 		if (!exactIntegerTime || localFixedTimeIndexedArc == null || localFixedTimeIndexedArc.isEmpty()) {
-			return node.countTimeIndexedPricingOnlyForbiddenArcs();
+			return node.countTimeIndexedPricingOnlyForbiddenArcsLong();
 		}
-		return node.mergeTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc, n + 1, horizon);
+		return node.mergeTimeIndexedPricingOnlyArcSet(localFixedTimeIndexedArc);
 	}
 
 	private int applySriReachableWindowsToNode(SriWindowReachability reachability) {
@@ -1392,19 +1392,11 @@ public final class TimeIndexedScalarCompletionBound {
 
 	private boolean isTimeIndexedArcForbidden(int from, int to, int time) {
 		return inheritedTimeIndexedArcLookup.isForbidden(from, to, time)
-				|| (localFixedTimeIndexedArc != null && localFixedTimeIndexedArc.get(timeIndexedArcIndex(from, to, time)));
+				|| (localFixedTimeIndexedArc != null && localFixedTimeIndexedArc.get(from, to, time));
 	}
 
 	private void forbidLocalTimeIndexedArc(int from, int to, int time) {
-		localFixedTimeIndexedArc.set(timeIndexedArcIndex(from, to, time));
-	}
-
-	private int timeIndexedArcIndex(int from, int to, int time) {
-		return (time * (n + 1) + from) * (n + 1) + to;
-	}
-
-	private int timeIndexedArcCount() {
-		return (horizon + 1) * (n + 1) * (n + 1);
+		localFixedTimeIndexedArc.set(from, to, time);
 	}
 
 	private double relaxedBucketPenalty(int job, int time, double hStart, double hEnd) {

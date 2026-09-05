@@ -124,7 +124,7 @@ final class TimeIndexedRootPreprocessor {
 			int promotedOrdinaryArcs =
 					TimeIndexedGraphPricingEngine.promoteFullyForbiddenTimeIndexedArcsToPricingOnly(data, preLp, root);
 			int seedColumnsCopied = copyBestElementaryColumnsToMainRoot(data, config, prePool, preLp, mainPool, root);
-			return Result.applied(prePool.size(), preRoot.countTimeIndexedPricingOnlyForbiddenArcs(), promotedOrdinaryArcs,
+			return Result.applied(prePool.size(), preRoot.countTimeIndexedPricingOnlyForbiddenArcsLong(), promotedOrdinaryArcs,
 					preRoot.countTimeIndexedPricingWindowTightenedJobs(), preRoot.averageTimeIndexedPricingWindowLength(),
 					preRoot.averageTimeIndexedPricingWindowShrinkRatio(), seedColumnsCopied, rootStats.summary(),
 					graphFix.summary(), scalarFix.summary(), System.nanoTime() - start);
@@ -319,7 +319,7 @@ final class TimeIndexedRootPreprocessor {
 			return new Result(false, message, elapsedNanos);
 		}
 
-		static Result applied(int tempPoolSize, int timeArcCount, int promotedOrdinaryArcs, int tightenedJobs,
+		static Result applied(int tempPoolSize, long timeArcCount, int promotedOrdinaryArcs, int tightenedJobs,
 				double avgWindowLength, double avgShrinkRatio, int seedColumnsCopied, String rootColumnStats,
 				String graphSummary, String scalarSummary, long elapsedNanos) {
 			String message = "applied tempPool=" + tempPoolSize

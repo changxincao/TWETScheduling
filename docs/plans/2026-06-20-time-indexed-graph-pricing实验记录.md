@@ -297,3 +297,10 @@ time-indexed pre-heuristic 是不同入口。它读取 hard、永久 compact 和
 ng-DSSR 继续使用 hard、可用的本轮 dual window 与 compact 的交集构造连续 PWLF 并收缩 pricing horizon；普通 pricing-only arc 直接参与扩展过滤，raw `(i,j,t)` 只用于整数 repeatability 判断和 time-indexed helper，不会被误当成连续 PWLF 的普通禁弧。由此确认，撤销提交 `106d1108` 后没有把正式 exact、pre-heuristic、永久 fixing 和 ng-DSSR 四种窗口口径再次混在一起。
 
 为避免以后再次只靠人工检查接线，`TimeIndexedGraphOptimizationTest` 新增 compact 消费边界回归：在同一个 node 上把所有 job compact window 人为收紧到单点并关闭 dual window，正式 no-cut exact 和 rank-1 exact 的 graph horizon 必须仍等于 hard-window horizon，只有 time-indexed pre-heuristic 的 graph horizon 等于 compact horizon。该测试使用实际 engine 入口验证 no-cut/pre-heuristic，并直接验证 rank-1 的独立 graph-window 构造；focused `javac` 与带 CPLEX runtime 的测试均通过。
+## 2026-09-05 超大时空禁弧集合改为分段存储
+
+时间尺度放大的 `n100 high` 实例中，`n=100`、`horizon=224800`，完整 `(from,to,time)` 定义域共有 `2,293,195,001` 个位置，超过 Java `BitSet` 的 `int` 索引上限。原实现先计算扁平容量再构造单个 `BitSet`，乘法溢出后触发 `NegativeArraySizeException`，使 time-indexed arc fixing 在正式定价前直接失败。
+
+本轮保留 arc fixing，不采用超限后跳过。新增 `TimeIndexedArcSet`：定义域不超过 `Integer.MAX_VALUE` 时继续使用原单个扁平 `BitSet`；超过上限时改为按 `(from,to)` 保存独立的时间 `BitSet`，所以每个位集只索引 `0..horizon`。`TimeIndexedGraphPricingEngine` 和 `TimeIndexedScalarCompletionBound` 的本轮禁弧都改用该容器，写回 `Node` 时直接按 pair 合并；禁弧超过完整定义域一半时仍沿用原有 allowed-complement 存储，避免稠密 forbidden 集合无条件驻留。候选数、固定数和节点累计时空禁弧数改为 `long`，旧公开 `int` 接口保留饱和值以兼容已编译实验类。
+
+验证包括：构造一个总位置数刚超过 `Integer.MAX_VALUE`、但只实际写入少量位的自动分段测试，检查重复写入、首次写回、查询和增量合并；原稀疏/稠密 forbidden 与 allowed-complement 对拍继续通过；`src/TWETBPC` 全包编译通过。小规模实例仍选择扁平后端，既有真实 root-preprocessing smoke 得到 `ROOT_PROCESSED, obj=bound=6343, valid=true`。该修改消除了索引容量异常，但不降低 `O(n^2H)` 的 arc-fixing 扫描量；`n100 high` 仍可能因约 22.9 亿个时空位置而耗时很长，需要单独重跑评估性能和内存。

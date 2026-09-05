@@ -19,6 +19,7 @@ import TWETBPC.LP.OutsourcingPool;
 import TWETBPC.LP.Pool;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Util.TimeIndexedArcSet;
 
 /**
  * 2026-07-14: time-indexed 热路径等价性回归测试，不依赖求解器。
@@ -32,6 +33,7 @@ public final class TimeIndexedGraphOptimizationTest {
 		testCompressedPredecessorMatchesFullWaitingChain();
 		testTimeIndexedArcLookupMatchesNode();
 		testIncrementalTimeIndexedArcMergeMatchesPointUpdates();
+		testSegmentedTimeIndexedArcSetBeyondIntIndex();
 		testInternalColumnCompatibilityFastPath();
 		testStaticPricingDataMatchesInstance();
 		testExactPricingRejectsNonIntegerGrid();
@@ -155,8 +157,8 @@ public final class TimeIndexedGraphOptimizationTest {
 		sparseExpected.forbidTimeIndexedPricingOnlyArc(1, 2, 0);
 		sparseExpected.forbidTimeIndexedPricingOnlyArc(2, 3, 4);
 		sparseExpected.forbidTimeIndexedPricingOnlyArc(4, 0, 6);
-		int sparseBefore = sparseActual.countTimeIndexedPricingOnlyForbiddenArcs();
-		int sparseAfter = sparseActual.mergeTimeIndexedPricingOnlyArcSet(sparseAdditions, pairWidth, 6);
+		long sparseBefore = sparseActual.countTimeIndexedPricingOnlyForbiddenArcs();
+		long sparseAfter = sparseActual.mergeTimeIndexedPricingOnlyArcSet(sparseAdditions, pairWidth, 6);
 		if (sparseAfter - sparseBefore != 2) {
 			throw new AssertionError("sparse merge did not report the two unique new forbidden arcs");
 		}
@@ -179,8 +181,8 @@ public final class TimeIndexedGraphOptimizationTest {
 		denseExpected.forbidTimeIndexedPricingOnlyArc(2, 2, 2);
 		denseExpected.forbidTimeIndexedPricingOnlyArc(1, 2, 1);
 		denseExpected.forbidTimeIndexedPricingOnlyArc(3, 4, 7);
-		int denseBefore = denseActual.countTimeIndexedPricingOnlyForbiddenArcs();
-		int denseAfter = denseActual.mergeTimeIndexedPricingOnlyArcSet(denseAdditions, pairWidth, 7);
+		long denseBefore = denseActual.countTimeIndexedPricingOnlyForbiddenArcs();
+		long denseAfter = denseActual.mergeTimeIndexedPricingOnlyArcSet(denseAdditions, pairWidth, 7);
 		if (denseAfter - denseBefore != 2) {
 			throw new AssertionError("dense merge did not report the two unique new forbidden arcs");
 		}
@@ -215,6 +217,47 @@ public final class TimeIndexedGraphOptimizationTest {
 			randomActual.mergeTimeIndexedPricingOnlyArcSet(additions, randomPairWidth, expandedHorizon);
 			assertNodesHaveSameTimeArcs(randomExpected, randomActual, data.n + 2, expandedHorizon + 1);
 			assertNodesHaveSameTimeArcs(randomExpected, randomActual.copy(), data.n + 2, expandedHorizon + 1);
+		}
+	}
+
+	private static void testSegmentedTimeIndexedArcSetBeyondIntIndex() throws Exception {
+		TimeIndexedArcSet failedProductionShape = new TimeIndexedArcSet(101, 224800);
+		if (!failedProductionShape.usesSegmentedStorage()
+				|| failedProductionShape.getTotalArcSlots() != 2_293_195_001L) {
+			throw new AssertionError("n100 high time-arc domain was not represented exactly");
+		}
+		failedProductionShape.set(100, 100, 224800);
+		if (!failedProductionShape.get(100, 100, 224800)) {
+			throw new AssertionError("n100 high terminal time-arc index was lost");
+		}
+
+		int pairWidth = 2;
+		int horizon = Integer.MAX_VALUE / (pairWidth * pairWidth) + 1;
+		TimeIndexedArcSet arcs = new TimeIndexedArcSet(pairWidth, horizon);
+		if (!arcs.usesSegmentedStorage() || arcs.getTotalArcSlots() <= Integer.MAX_VALUE) {
+			throw new AssertionError("oversized time-arc domain did not select segmented storage");
+		}
+		arcs.set(0, 1, 2);
+		arcs.set(1, 0, 7);
+		arcs.set(1, 0, 7);
+		if (!arcs.get(0, 1, 2) || !arcs.get(1, 0, 7) || arcs.cardinality() != 2L) {
+			throw new AssertionError("segmented time-arc set changed point semantics");
+		}
+
+		Data data = loadData();
+		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		long merged = node.mergeTimeIndexedPricingOnlyArcSet(arcs);
+		if (merged != 2L || !node.isTimeIndexedPricingOnlyArcForbidden(0, 1, 2)
+				|| !node.createTimeIndexedPricingOnlyArcLookup().isForbidden(1, 0, 7)) {
+			throw new AssertionError("segmented time-arc merge lost an oversized-domain arc");
+		}
+
+		TimeIndexedArcSet additions = new TimeIndexedArcSet(pairWidth, horizon);
+		additions.set(0, 1, 2);
+		additions.set(1, 1, 9);
+		if (node.mergeTimeIndexedPricingOnlyArcSet(additions) != 3L
+				|| !node.isTimeIndexedPricingOnlyArcForbidden(1, 1, 9)) {
+			throw new AssertionError("segmented incremental merge miscounted duplicate arcs");
 		}
 	}
 

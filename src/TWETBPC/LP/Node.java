@@ -15,6 +15,7 @@ import Common.Utility;
 import TWETBPC.BP.AggregateArcBranchConstraint;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETOutsourcingColumn;
+import TWETBPC.Util.TimeIndexedArcSet;
 
 /**
  * 分支树节点状态。
@@ -73,7 +74,7 @@ public class Node implements Comparable<Node> {
 	private boolean[][] branchImpliedForbiddenArc;
 	private boolean[][] pricingOnlyForbiddenArc;
 	private HashMap<Integer, BitSet> timeIndexedPricingOnlyForbiddenArcTimesByPair;
-	private int timeIndexedPricingOnlyForbiddenArcCount;
+	private long timeIndexedPricingOnlyForbiddenArcCount;
 	private boolean timeIndexedPricingOnlyArcStoreAllowed;
 	private int timeIndexedPricingOnlyArcStoreHorizon;
 	private int[] timeIndexedPricingWindowStartByJob;
@@ -363,6 +364,12 @@ public class Node implements Comparable<Node> {
 		}
 	}
 	public int countTimeIndexedPricingOnlyForbiddenArcs() {
+		return timeIndexedPricingOnlyForbiddenArcCount >= Integer.MAX_VALUE
+				? Integer.MAX_VALUE : (int) timeIndexedPricingOnlyForbiddenArcCount;
+	}
+
+	/** 大规模时空图使用的精确计数；旧 int 接口为兼容既有调用保留饱和值。 */
+	public long countTimeIndexedPricingOnlyForbiddenArcsLong() {
 		return timeIndexedPricingOnlyForbiddenArcCount;
 	}
 
@@ -375,12 +382,12 @@ public class Node implements Comparable<Node> {
 		timeIndexedPricingOnlyForbiddenArcTimesByPair.clear();
 		timeIndexedPricingOnlyForbiddenArcCount = forbiddenArcIndices == null ? 0 : forbiddenArcIndices.cardinality();
 		timeIndexedPricingOnlyArcStoreHorizon = horizon;
-		int total = pairWidth * pairWidth * (horizon + 1);
+		long total = (long) pairWidth * pairWidth * (horizon + 1L);
 		timeIndexedPricingOnlyArcStoreAllowed = forbiddenArcIndices != null
 				&& timeIndexedPricingOnlyForbiddenArcCount > total / 2;
 		if (forbiddenArcIndices == null || total <= 0) {
 			timeIndexedPricingOnlyArcStoreAllowed = false;
-			return timeIndexedPricingOnlyForbiddenArcCount;
+			return countTimeIndexedPricingOnlyForbiddenArcs();
 		}
 		if (timeIndexedPricingOnlyArcStoreAllowed) {
 			for (int index = forbiddenArcIndices.nextClearBit(0); index >= 0 && index < total;
@@ -393,7 +400,7 @@ public class Node implements Comparable<Node> {
 				addStoredTimeIndexedArc(index, pairWidth);
 			}
 		}
-		return timeIndexedPricingOnlyForbiddenArcCount;
+		return countTimeIndexedPricingOnlyForbiddenArcs();
 	}
 
 	/**
@@ -402,7 +409,7 @@ public class Node implements Comparable<Node> {
 	 */
 	public int mergeTimeIndexedPricingOnlyArcSet(BitSet newlyForbiddenArcIndices, int pairWidth, int horizon) {
 		if (newlyForbiddenArcIndices == null || newlyForbiddenArcIndices.isEmpty()) {
-			return timeIndexedPricingOnlyForbiddenArcCount;
+			return countTimeIndexedPricingOnlyForbiddenArcs();
 		}
 		if (pairWidth <= 0 || pairWidth > data.n + 2 || horizon < 0) {
 			throw new IllegalArgumentException("Invalid time-indexed arc dimensions");
@@ -412,7 +419,7 @@ public class Node implements Comparable<Node> {
 		}
 
 		int pairCount = pairWidth * pairWidth;
-		int total = pairCount * (horizon + 1);
+		long total = (long) pairCount * (horizon + 1L);
 		int nodePairWidth = data.n + 2;
 		BitSet[] additionsByPair = new BitSet[nodePairWidth * nodePairWidth];
 		for (int index = newlyForbiddenArcIndices.nextSetBit(0); index >= 0 && index < total;
@@ -458,7 +465,90 @@ public class Node implements Comparable<Node> {
 				timeIndexedPricingOnlyForbiddenArcTimesByPair.remove(pairKey);
 			}
 		}
+		return countTimeIndexedPricingOnlyForbiddenArcs();
+	}
+
+	/**
+	 * 2026-09-05: 合并可超过 int 扁平索引上限的时空禁弧集合。
+	 * 小定义域继续复用旧 BitSet 路径；大定义域按 (from,to) 批量接管时间位集。
+	 */
+	public long mergeTimeIndexedPricingOnlyArcSet(TimeIndexedArcSet newlyForbiddenArcs) {
+		if (newlyForbiddenArcs == null || newlyForbiddenArcs.isEmpty()) {
+			return timeIndexedPricingOnlyForbiddenArcCount;
+		}
+		BitSet flatBits = newlyForbiddenArcs.getFlatBits();
+		if (flatBits != null) {
+			return mergeTimeIndexedPricingOnlyArcSet(flatBits, newlyForbiddenArcs.getPairWidth(),
+					newlyForbiddenArcs.getHorizon());
+		}
+
+		int pairWidth = newlyForbiddenArcs.getPairWidth();
+		int horizon = newlyForbiddenArcs.getHorizon();
+		if (pairWidth <= 0 || pairWidth > data.n + 2 || horizon < 0) {
+			throw new IllegalArgumentException("Invalid time-indexed arc dimensions");
+		}
+		long additionCount = newlyForbiddenArcs.cardinality();
+		BitSet[] additionsBySourcePair = newlyForbiddenArcs.takeSegmentedTimesByPair();
+		int nodePairWidth = data.n + 2;
+		if (timeIndexedPricingOnlyForbiddenArcCount == 0L) {
+			timeIndexedPricingOnlyForbiddenArcTimesByPair.clear();
+			timeIndexedPricingOnlyArcStoreAllowed = additionCount > newlyForbiddenArcs.getTotalArcSlots() / 2L;
+			timeIndexedPricingOnlyArcStoreHorizon = horizon;
+			for (int sourcePair = 0; sourcePair < additionsBySourcePair.length; sourcePair++) {
+				BitSet additions = additionsBySourcePair[sourcePair];
+				int from = sourcePair / pairWidth;
+				int to = sourcePair % pairWidth;
+				if (timeIndexedPricingOnlyArcStoreAllowed) {
+					BitSet allowedTimes = buildAllowedTimeComplement(additions, horizon);
+					if (!allowedTimes.isEmpty()) {
+						timeIndexedPricingOnlyForbiddenArcTimesByPair.put(from * nodePairWidth + to, allowedTimes);
+					}
+				} else if (additions != null && !additions.isEmpty()) {
+					timeIndexedPricingOnlyForbiddenArcTimesByPair.put(from * nodePairWidth + to, additions);
+				}
+			}
+			timeIndexedPricingOnlyForbiddenArcCount = additionCount;
+			return timeIndexedPricingOnlyForbiddenArcCount;
+		}
+
+		for (int sourcePair = 0; sourcePair < additionsBySourcePair.length; sourcePair++) {
+			BitSet additions = additionsBySourcePair[sourcePair];
+			if (additions == null || additions.isEmpty()) {
+				continue;
+			}
+			int from = sourcePair / pairWidth;
+			int to = sourcePair % pairWidth;
+			int pairKey = from * nodePairWidth + to;
+			if (timeIndexedPricingOnlyArcStoreAllowed) {
+				for (int time = additions.nextSetBit(0); time >= 0; time = additions.nextSetBit(time + 1)) {
+					forbidTimeIndexedPricingOnlyArc(from, to, time);
+				}
+				continue;
+			}
+			BitSet stored = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
+			if (stored == null) {
+				timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, additions);
+				timeIndexedPricingOnlyForbiddenArcCount += additions.cardinality();
+				continue;
+			}
+			int before = stored.cardinality();
+			stored.or(additions);
+			timeIndexedPricingOnlyForbiddenArcCount += stored.cardinality() - before;
+		}
 		return timeIndexedPricingOnlyForbiddenArcCount;
+	}
+
+	private static BitSet buildAllowedTimeComplement(BitSet forbiddenTimes, int horizon) {
+		BitSet allowedTimes = new BitSet();
+		if (forbiddenTimes == null || forbiddenTimes.isEmpty()) {
+			allowedTimes.set(0, horizon + 1);
+			return allowedTimes;
+		}
+		for (int time = forbiddenTimes.nextClearBit(0); time >= 0 && time <= horizon;
+				time = forbiddenTimes.nextClearBit(time + 1)) {
+			allowedTimes.set(time);
+		}
+		return allowedTimes;
 	}
 
 	private void addStoredTimeIndexedArc(int index, int pairWidth) {
@@ -644,7 +734,7 @@ public class Node implements Comparable<Node> {
 				+ ",arcReq=" + countRequiredArcStates() + ",arcForbid=" + countForbiddenArcStates()
 				+ ",arcBranchImpliedForbid=" + countBranchImpliedForbiddenArcs()
 				+ ",pricingOnlyArc=" + countPricingOnlyForbiddenArcs()
-				+ ",timePricingOnlyArc=" + countTimeIndexedPricingOnlyForbiddenArcs()
+				+ ",timePricingOnlyArc=" + countTimeIndexedPricingOnlyForbiddenArcsLong()
 				+ ",timeWindowJobs=" + countTimeIndexedPricingWindowTightenedJobs()
 				+ ",timeWindowAvgLen=" + formatOptionalDouble(averageTimeIndexedPricingWindowLength())
 				+ ",timeWindowAvgShrinkRatio=" + formatOptionalDouble(averageTimeIndexedPricingWindowShrinkRatio())

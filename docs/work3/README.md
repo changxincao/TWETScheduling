@@ -25,6 +25,7 @@
 
 ## 前期专项分析
 
+- [网页版 Work 3 对话详细阅读与结论审计](analysis/2026-09-05-网页版work3对话详细阅读与结论审计.md)
 - [随机并行机调度、SAA、Benders 与 Wasserstein-DRO 初始方案](analysis/2026-08-30-随机due-window并行机调度与Benders-DRO方案分析.md)
 - [问题设定、文献对照与 SAA 结构](analysis/2026-08-30-due-window问题设定文献调研与SAA结构分析.md)
 - [非退化条件与 SAA 必要性修订](analysis/2026-08-30-due-window非退化条件与SAA必要性修订分析.md)

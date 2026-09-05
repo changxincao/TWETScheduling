@@ -27,3 +27,5 @@
 运行包构建：用本机javac --release 21、CPLEX/CPoptimizer jar及-sourcepath src编译HEU/Move.java、HEU/ExperimentBatchScheduler.java、Common/formal/FormalExperimentRunner.java和本次回归类，再以jar打包。FormalBatchGuard.java单独以--release 21编译打包为guard.jar，不进入solver.jar；生成清单脚本在scripts/remote/prepare-formal-le60-20260905.ps1。调度器原有SUCCESS跳过语义保留；本批seed生成、正式求解分阶段运行，solve.tsv没有跨阶段依赖，靠guard整体门槛保证seed完整。
 
 部署内容确认：远端`20260905-93685d4a/solver.jar`不是只拿旧solver执行新回归，而是由提交93685d4a对应源码重新编译。该提交包含Node的分段/补集禁弧批量合并、TI fixing静态数据复用以及TI+SRI同次pricing元数据复用。远端jar下载回本机后的SHA256与本机构建jar完全一致，jar内存在新的`TWETBPC/LP/Node.class`和`TimeIndexedGraphPricingEngine.class`；因此本批实际求解会使用这些修改。随后提交7cefac50只增加正式manifest、接续脚本和记录，没有改变solver算法，本批部署名继续以solver源码提交93685d4a标识是有意的。
+
+2026-09-05在途n20配对快照：正式SUCCESS为258项，其中三算法均完成的物理场景84个。只在这84个共同样本上读取core-summary的solveTimeSeconds，NG-DSSR/TI/TI+SRI均值分别为4.147/86.944/33.458秒；三者gap均为0，84组incumbent全部一致。random的54组均值为2.765/3.047/2.518秒；family的30组为6.635/237.958/89.149秒。family均值受TI的3588.491秒和TI+SRI的1802.732秒长尾影响，但即使如此，当前证据仍表现为random三者接近、family下NG-DSSR明显更稳定。该快照只覆盖84/270个n20场景，未完成困难场景尚未进入配对统计，不能作为最终n20均值。

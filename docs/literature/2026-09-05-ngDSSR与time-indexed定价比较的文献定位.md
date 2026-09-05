@@ -49,6 +49,12 @@ Morais、Bulhoes 和 Subramanian（2024）已将 dynamic ng-path relaxation 与 
 
 正式论文宜使用“to the best of our knowledge”和明确的问题范围，不能写成无边界的 first-ever claim。投稿前还应沿 Morais（2024）和 Kowalczyk（2024）的引用与被引文献做一次最终更新检索，重点核对 Morais 全文是否存在未在摘要中体现的内部 no-ng/TI 消融。
 
+## 5.1 检索范围进一步收紧到调度
+
+后续首次性判断以调度文献为主，VRP只用于说明ng-route和DSSR的技术来源，不作为直接比较证据。调度侧现有工作可分为三条线：van den Akker（2000）、Pessoa等（2010）、Oliveira和Pessoa（2020）、Bulhoes等（2020）研究time/arc-time-indexed伪排程及其强化；Kowalczyk等（2024）直接比较TIF、ATIF和decision-diagram表示；Morais等（2024）在调度中使用dynamic ng-path。2026年的open-shop BCP还采用time-indexed schedule master和elementary shortest-path pricing，并将ng-route列为后续方向。
+
+这些文献分别覆盖了TI、图表示比较、elementary pricing和ng-path，但本次检索仍未找到一项调度研究在共同代码与共同实例上直接比较纯TI pseudo-schedule、TI+SRI和最终elementary ng-DSSR。因此本文的首次性只能落在这项具体的三方受控比较及其结构机制分析上，而不是任何单项算法。
+
 ## 6. 主要文献
 
 1. van den Akker, Hurkens, Savelsbergh (2000), *Time-Indexed Formulations for Machine Scheduling Problems: Column Generation*, INFORMS Journal on Computing 12(2), 111-124. DOI: 10.1287/ijoc.12.2.111.11896.
@@ -59,4 +65,3 @@ Morais、Bulhoes 和 Subramanian（2024）已将 dynamic ng-path relaxation 与 
 6. Bulhoes et al. (2020), *On the exact solution of a large class of parallel machine scheduling problems*, Journal of Scheduling 23, 411-429. DOI: 10.1007/s10951-020-00640-z.
 7. Morais, Bulhoes, Subramanian (2024), *Exact and heuristic algorithms for minimizing the makespan on a single machine scheduling problem with sequence-dependent setup times and release dates*, European Journal of Operational Research 315(2), 442-453. DOI: 10.1016/j.ejor.2023.11.024.
 8. Kowalczyk, Leus, Hojny, Ropke (2024), *A Flow-Based Formulation for Parallel Machine Scheduling Using Decision Diagrams*, INFORMS Journal on Computing 36(6), 1696-1714.
-

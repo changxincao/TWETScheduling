@@ -35,6 +35,7 @@ public final class TimeIndexedGraphOptimizationTest {
 		testIncrementalTimeIndexedArcMergeMatchesPointUpdates();
 		testSegmentedTimeIndexedArcSetBeyondIntIndex();
 		testSegmentedMergeMatchesFlatStorage();
+		testWordwiseMergeAgainstPointUpdates();
 		testFlatMergePreservesLongCount();
 		testInternalColumnCompatibilityFastPath();
 		testStaticPricingDataMatchesInstance();
@@ -312,6 +313,44 @@ public final class TimeIndexedGraphOptimizationTest {
 				if (segmented.isTimeIndexedPricingOnlyArcForbidden(1, 2, 14)) {
 					throw new AssertionError("child changed parent's segmented storage");
 				}
+			}
+		}
+	}
+
+	/** 跨64-bit边界、补集边界与overlay重复位，用逐点旧语义作为独立参照。 */
+	private static void testWordwiseMergeAgainstPointUpdates() throws Exception {
+		Data data = loadData();
+		Random random = new Random(20260906L);
+		int width = 4;
+		for (int round = 0; round < 40; round++) {
+			int baseHorizon = new int[] {63, 64, 127, 130}[round % 4];
+			BitSet base = new BitSet();
+			for (int i = 0; i < width * width * (baseHorizon + 1); i++) {
+				if (random.nextDouble() < (round % 2 == 0 ? 0.15 : 0.85)) {
+					base.set(i);
+				}
+			}
+			Node expected = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+			Node actual = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+			expected.replaceTimeIndexedPricingOnlyArcSet(base, width, baseHorizon);
+			actual.replaceTimeIndexedPricingOnlyArcSet(base, width, baseHorizon);
+			for (int pass = 0; pass < 4; pass++) {
+				int horizon = pass == 3 ? 31 : baseHorizon + 65;
+				TimeIndexedArcSet additions = pass % 2 == 0
+						? segmentedTestSet(width, horizon) : new TimeIndexedArcSet(width, horizon);
+				for (int from = 0; from < width; from++) {
+					for (int to = 0; to < width; to++) {
+						for (int time = 0; time <= horizon; time++) {
+							if (random.nextDouble() < 0.7) {
+								additions.set(from, to, time);
+								expected.forbidTimeIndexedPricingOnlyArc(from, to, time);
+							}
+						}
+					}
+				}
+				actual.mergeTimeIndexedPricingOnlyArcSet(additions);
+				assertNodesHaveSameTimeArcs(expected, actual, data.n + 2, baseHorizon + 66);
+				assertNodesHaveSameTimeArcs(expected, actual.copy(), data.n + 2, baseHorizon + 66);
 			}
 		}
 	}

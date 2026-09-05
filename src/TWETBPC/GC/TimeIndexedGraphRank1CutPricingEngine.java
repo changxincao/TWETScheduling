@@ -79,7 +79,7 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		Rank1CutSolver solver = new Rank1CutSolver(lp, true);
 		ArrayList<TWETColumn> columns = solver.solve();
 		if (columns.isEmpty() && !solver.timedOut) {
-			solver = new Rank1CutSolver(lp, false);
+			solver = new Rank1CutSolver(lp, false, solver);
 			columns = solver.solve();
 		}
 		PricingResult result = columns.isEmpty()
@@ -116,6 +116,12 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 	@Override
 	public String getName() {
 		return "TimeIndexedGraphRank1CutPricing";
+	}
+
+	/** 无SRI的safe fixing复用已共享给no-cut delegate的实例级数据。 */
+	public TimeIndexedGraphPricingEngine.ArcFixingResult applyPaperReducedCostArcFixing(LP lp,
+			double incumbentCost) {
+		return noCutDelegate.applyPaperReducedCostArcFixing(lp, incumbentCost);
 	}
 
 	@Override
@@ -173,28 +179,34 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 		private long packedCandidatesEvictedOld;
 		private long packedCandidatesStrictPreRejected;
 
-		@SuppressWarnings("unchecked")
 		Rank1CutSolver(LP lp, boolean heuristicMode) {
+			this(lp, heuristicMode, null);
+		}
+
+		/** 同一次price的fallback复用只读元数据；label、bucket和scratch仍从空状态开始。 */
+		@SuppressWarnings("unchecked")
+		private Rank1CutSolver(LP lp, boolean heuristicMode, Rank1CutSolver previous) {
 			this.lp = lp;
 			this.node = lp.getNode();
 			this.n = data.n;
 			this.sink = node == null ? data.n + 1 : node.sinkId();
-			this.graphWindow = computeGraphWindow(data, lp);
+			this.graphWindow = previous == null ? computeGraphWindow(data, lp) : previous.graphWindow;
 			this.horizon = graphWindow.horizon;
 			this.width = horizon + 1;
-			this.tStar = computeTStar(graphWindow, lp == null ? null : lp.getNode());
+			this.tStar = previous == null ? computeTStar(graphWindow, lp == null ? null : lp.getNode()) : previous.tStar;
 			this.heuristicMode = heuristicMode;
 			this.phaseOneObjective = lp.isFeasibilityPhaseOneObjectiveMode();
 			this.penaltyByJobTime = staticPricingData.penaltyByJobTime;
 			this.durationByArc = staticPricingData.durationByArc;
-			this.processArcBaseReducedCost = new double[n + 1][n + 1];
-			this.sinkArcBaseReducedCost = new double[n + 1];
-			this.processArcForbidden = new boolean[n + 1][n + 1];
-			this.endForbidden = new boolean[n + 1];
-			this.timeIndexedArcLookup = shouldUsePricingOnlyArcs()
+			this.processArcBaseReducedCost = previous == null
+					? new double[n + 1][n + 1] : previous.processArcBaseReducedCost;
+			this.sinkArcBaseReducedCost = previous == null ? new double[n + 1] : previous.sinkArcBaseReducedCost;
+			this.processArcForbidden = previous == null ? new boolean[n + 1][n + 1] : previous.processArcForbidden;
+			this.endForbidden = previous == null ? new boolean[n + 1] : previous.endForbidden;
+			this.timeIndexedArcLookup = previous != null ? previous.timeIndexedArcLookup : shouldUsePricingOnlyArcs()
 					&& node.countTimeIndexedPricingOnlyForbiddenArcs() > 0
 							? node.createTimeIndexedPricingOnlyArcLookup() : null;
-			this.cutStateData = new CutStateData(lp);
+			this.cutStateData = previous == null ? new CutStateData(lp) : new CutStateData(previous.cutStateData);
 			this.forwardBuckets = new ArrayList[(n + 1) * width];
 			this.backwardBuckets = new ArrayList[(n + 1) * width];
 			this.candidateBySignature = new HashMap<SequenceSignature, Candidate>();
@@ -202,7 +214,9 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 					worstCandidateFirstComparator());
 			this.repeatedJobMarks = new int[n + 1];
 			this.bestPseudoReducedCost = INF;
-			precomputePricingData();
+			if (previous == null) {
+				precomputePricingData();
+			}
 		}
 
 		ArrayList<TWETColumn> solve() {
@@ -1052,6 +1066,35 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 			this.legacyPayloadBytes = timingEnabled
 					? (long) cutIds.size() * ((data.n + 1L) * 2L + arcTableSize + 2L) : 0L;
 			this.packedPayloadBytes = timingEnabled ? packedPayloadBytes() : 0L;
+		}
+
+		/** 只在同一LP快照的顺序fallback中调用；共享不可变掩码，隔离可写scratch。 */
+		CutStateData(CutStateData source) {
+			this.cuts = source.cuts;
+			this.duals = source.duals;
+			this.scopeByCut = source.scopeByCut;
+			this.memoryByCut = source.memoryByCut;
+			this.arcMemoryByCut = source.arcMemoryByCut;
+			this.arcMemoryCut = source.arcMemoryCut;
+			this.arcTableSize = source.arcTableSize;
+			this.zeroResidual = source.zeroResidual;
+			this.packedResidualEnabled = source.packedResidualEnabled;
+			this.verifyPackedResidual = source.verifyPackedResidual;
+			this.deferredPackedLabelMaterialization = source.deferredPackedLabelMaterialization;
+			this.residualWordCount = source.residualWordCount;
+			this.zeroPackedResidual = source.zeroPackedResidual;
+			this.scopeMaskByJob = source.scopeMaskByJob;
+			this.forwardRetainMaskByArc = source.forwardRetainMaskByArc;
+			this.forwardToggleMaskByArc = source.forwardToggleMaskByArc;
+			this.backwardRetainMaskByArc = source.backwardRetainMaskByArc;
+			this.timingEnabled = source.timingEnabled;
+			long start = timingEnabled ? System.nanoTime() : 0L;
+			this.scratchPackedResidual = deferredPackedLabelMaterialization ? new long[residualWordCount] : null;
+			this.allocationNanos = timingEnabled ? System.nanoTime() - start : 0L;
+			this.cutLoadNanos = 0L;
+			this.packedBuildNanos = 0L;
+			this.legacyPayloadBytes = source.legacyPayloadBytes;
+			this.packedPayloadBytes = source.packedPayloadBytes;
 		}
 
 		private long packedPayloadBytes() {

@@ -319,14 +319,26 @@ public class PC {
 			}
 			return;
 		}
-		Data data = lp.getData();
 		TimeIndexedGraphPricingEngine.ArcFixingResult result =
-				TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, config, lp,
-						incumbentForDualBoundPruning);
+				applyTimeIndexedGraphArcFixing(lp, incumbentForDualBoundPruning);
 		if (result.isAvailable()) {
 			traceSink.onStageHeartbeat(lp.getNode(), "cutLoopTimeIndexedArcFixing.done " + result.summary(),
 					lp.getPool().size(), lp.getCutPool().size());
 		}
+	}
+
+	/** 优先使用现有图定价engine的静态数据；独立helper入口仍保留原计算路径。 */
+	TimeIndexedGraphPricingEngine.ArcFixingResult applyTimeIndexedGraphArcFixing(LP lp, double incumbentCost) {
+		for (PricingEngine engine : pricingEngines) {
+			if (engine instanceof TimeIndexedGraphRank1CutPricingEngine) {
+				return ((TimeIndexedGraphRank1CutPricingEngine) engine).applyPaperReducedCostArcFixing(lp, incumbentCost);
+			}
+			if (engine instanceof TimeIndexedGraphPricingEngine
+					&& "TimeIndexedGraphPricing".equals(engine.getName())) {
+				return ((TimeIndexedGraphPricingEngine) engine).applyPaperReducedCostArcFixing(lp, incumbentCost);
+			}
+		}
+		return TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(lp.getData(), config, lp, incumbentCost);
 	}
 
 	private void applyCutLoopNgDssrTimeIndexedFixing(LP lp) {

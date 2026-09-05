@@ -435,7 +435,7 @@ public class Tree {
 		}
 		heartbeat(lp.getNode(), "timeIndexedArcFixing.start");
 		TimeIndexedGraphPricingEngine.ArcFixingResult result =
-				TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, config, lp, incumbentCost);
+				pc.applyTimeIndexedGraphArcFixing(lp, incumbentCost);
 		if (result.isAvailable()) {
 			heartbeat(lp.getNode(), "timeIndexedArcFixing.done " + result.summary());
 		}

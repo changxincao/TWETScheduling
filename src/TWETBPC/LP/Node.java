@@ -442,28 +442,7 @@ public class Node implements Comparable<Node> {
 			if (additions == null) {
 				continue;
 			}
-			BitSet stored = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
-			for (int time = additions.nextSetBit(0); time >= 0; time = additions.nextSetBit(time + 1)) {
-				if (timeIndexedPricingOnlyArcStoreAllowed && time <= timeIndexedPricingOnlyArcStoreHorizon) {
-					// allowed-complement 内缺失位本来就表示 forbidden，只清除仍为 allowed 的新弧。
-					if (stored != null && stored.get(time)) {
-						stored.clear(time);
-						timeIndexedPricingOnlyForbiddenArcCount++;
-					}
-					continue;
-				}
-				if (stored == null) {
-					stored = new BitSet();
-					timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, stored);
-				}
-				if (!stored.get(time)) {
-					stored.set(time);
-					timeIndexedPricingOnlyForbiddenArcCount++;
-				}
-			}
-			if (stored != null && stored.isEmpty()) {
-				timeIndexedPricingOnlyForbiddenArcTimesByPair.remove(pairKey);
-			}
+			mergeOwnedTimeIndexedArcTimes(pairKey, additions);
 		}
 		return countTimeIndexedPricingOnlyForbiddenArcs();
 	}
@@ -521,23 +500,43 @@ public class Node implements Comparable<Node> {
 			int from = sourcePair / pairWidth;
 			int to = sourcePair % pairWidth;
 			int pairKey = from * nodePairWidth + to;
-			if (timeIndexedPricingOnlyArcStoreAllowed) {
-				for (int time = additions.nextSetBit(0); time >= 0; time = additions.nextSetBit(time + 1)) {
-					forbidTimeIndexedPricingOnlyArc(from, to, time);
+			mergeOwnedTimeIndexedArcTimes(pairKey, additions);
+		}
+		return timeIndexedPricingOnlyForbiddenArcCount;
+	}
+
+	/**
+	 * 2026-09-05: 按机器字合并，避免大图逐时间位查询。additions必须为本次合并独占。
+	 * 补集仅在原horizon内有效；更晚时间仍保存forbidden overlay，不能统一做andNot。
+	 */
+	private void mergeOwnedTimeIndexedArcTimes(int pairKey, BitSet additions) {
+		BitSet stored = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
+		if (timeIndexedPricingOnlyArcStoreAllowed
+				&& additions.nextSetBit(0) <= timeIndexedPricingOnlyArcStoreHorizon) {
+			int boundary = timeIndexedPricingOnlyArcStoreHorizon + 1;
+			boolean withinHorizon = additions.length() <= boundary;
+			if (stored != null) {
+				int before = stored.cardinality();
+				stored.andNot(withinHorizon ? additions : additions.get(0, boundary));
+				timeIndexedPricingOnlyForbiddenArcCount += before - stored.cardinality();
+				if (stored.isEmpty()) {
+					timeIndexedPricingOnlyForbiddenArcTimesByPair.remove(pairKey);
+					stored = null;
 				}
-				continue;
 			}
-			BitSet stored = timeIndexedPricingOnlyForbiddenArcTimesByPair.get(pairKey);
-			if (stored == null) {
-				timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, additions);
-				timeIndexedPricingOnlyForbiddenArcCount += additions.cardinality();
-				continue;
+			if (withinHorizon) {
+				return;
 			}
+			additions.clear(0, boundary);
+		}
+		if (stored == null) {
+			timeIndexedPricingOnlyForbiddenArcTimesByPair.put(pairKey, additions);
+			timeIndexedPricingOnlyForbiddenArcCount += additions.cardinality();
+		} else {
 			int before = stored.cardinality();
 			stored.or(additions);
 			timeIndexedPricingOnlyForbiddenArcCount += stored.cardinality() - before;
 		}
-		return timeIndexedPricingOnlyForbiddenArcCount;
 	}
 
 	private static BitSet buildAllowedTimeComplement(BitSet forbiddenTimes, int horizon) {

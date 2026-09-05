@@ -289,6 +289,19 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 	 */
 	public static ArcFixingResult applyPaperReducedCostArcFixing(Data data, TWETBPCConfig config, LP lp,
 			double incumbentCost) {
+		return applyPaperReducedCostArcFixing(data, config, lp, incumbentCost, null);
+	}
+
+	/** fixing复用当前engine的基础罚值；safe窗口和本轮距离仍独立计算。 */
+	public ArcFixingResult applyPaperReducedCostArcFixing(LP lp, double incumbentCost) {
+		if (lp != null && lp.getData() != data) {
+			throw new IllegalArgumentException("Arc fixing LP belongs to a different instance");
+		}
+		return applyPaperReducedCostArcFixing(data, config, lp, incumbentCost, staticPricingData);
+	}
+
+	private static ArcFixingResult applyPaperReducedCostArcFixing(Data data, TWETBPCConfig config, LP lp,
+			double incumbentCost, StaticPricingData staticPricingData) {
 		if (!config.useTimeIndexedGraphPricing) {
 			return ArcFixingResult.skipped("time-indexed graph pricing disabled");
 		}
@@ -306,7 +319,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		if (Utility.compareLe(gap, RC_TOLERANCE)) {
 			return ArcFixingResult.skipped("closed gap");
 		}
-		ArcFixingSolver solver = new ArcFixingSolver(data, config, lp, gap);
+		ArcFixingSolver solver = new ArcFixingSolver(data, config, lp, gap, staticPricingData);
 		return solver.apply();
 	}
 
@@ -907,7 +920,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		private final TimeIndexedArcSet localFixedTimeIndexedArc;
 		private final int timeArcPairWidth;
 
-		ArcFixingSolver(Data data, TWETBPCConfig config, LP lp, double gap) {
+		ArcFixingSolver(Data data, TWETBPCConfig config, LP lp, double gap, StaticPricingData staticPricingData) {
 			this.data = data;
 			this.config = config;
 			this.lp = lp;
@@ -921,8 +934,10 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			int stateCount = (n + 1) * width;
 			this.forward = new double[stateCount];
 			this.backward = new double[stateCount];
-			this.penaltyByJobTime = new double[n + 1][width];
-			this.durationByArc = new int[n + 1][n + 1];
+			this.penaltyByJobTime = staticPricingData == null
+					? new double[n + 1][width] : staticPricingData.penaltyByJobTime;
+			this.durationByArc = staticPricingData == null
+					? new int[n + 1][n + 1] : staticPricingData.durationByArc;
 			this.processArcBaseReducedCost = new double[n + 1][n + 1];
 			this.sinkArcBaseReducedCost = new double[n + 1];
 			this.processArcForbidden = new boolean[n + 1][n + 1];
@@ -931,7 +946,7 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					? node.createTimeIndexedPricingOnlyArcLookup() : null;
 			this.timeArcPairWidth = n + 1;
 			this.localFixedTimeIndexedArc = new TimeIndexedArcSet(timeArcPairWidth, horizon);
-			precomputeStaticPricingData();
+			precomputeStaticPricingData(staticPricingData == null);
 		}
 
 		ArcFixingResult apply() {
@@ -1172,26 +1187,30 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 		}
 
-		private void precomputeStaticPricingData() {
-			for (int job = 0; job <= n; job++) {
-				for (int t = 0; t <= horizon; t++) {
-					penaltyByJobTime[job][t] = INF;
+		private void precomputeStaticPricingData(boolean buildStaticData) {
+			if (buildStaticData) {
+				for (int job = 0; job <= n; job++) {
+					for (int t = 0; t <= horizon; t++) {
+						penaltyByJobTime[job][t] = INF;
+					}
 				}
-			}
-			for (int job = 1; job <= n; job++) {
-				int start = Math.max(0, (int) Math.ceil(graphWindow.start[job] - 1e-9));
-				int end = Math.min(horizon, (int) Math.floor(graphWindow.end[job] + 1e-9));
-				for (int t = start; t <= end; t++) {
-					double penalty = data.penaltyFunction[job].evaluate(t);
-					if (!Utility.isBigMValue(penalty)) {
-						penaltyByJobTime[job][t] = penalty;
+				for (int job = 1; job <= n; job++) {
+					int start = Math.max(0, (int) Math.ceil(graphWindow.start[job] - 1e-9));
+					int end = Math.min(horizon, (int) Math.floor(graphWindow.end[job] + 1e-9));
+					for (int t = start; t <= end; t++) {
+						double penalty = data.penaltyFunction[job].evaluate(t);
+						if (!Utility.isBigMValue(penalty)) {
+							penaltyByJobTime[job][t] = penalty;
+						}
 					}
 				}
 			}
 			for (int from = 0; from <= n; from++) {
 				for (int to = 1; to <= n; to++) {
-					durationByArc[from][to] =
-							(int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
+					if (buildStaticData) {
+						durationByArc[from][to] =
+								(int) Math.ceil(data.getSetUp(from, to) + data.getProcessT(to) - 1e-9);
+					}
 					processArcForbidden[from][to] = from == to
 							|| PricingCompatibility.isRequiredOutsourcedJob(node, to)
 							|| isProcessArcForbiddenByNode(from, to);

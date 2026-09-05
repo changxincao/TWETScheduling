@@ -117,7 +117,7 @@ final class TimeIndexedRootPreprocessor {
 				dumpPositiveColumnDiagnostics(data, solution, prePool, preRoot, traceSink, prePool.size(), preCutPool.size());
 			}
 			TimeIndexedGraphPricingEngine.ArcFixingResult graphFix =
-					TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, preConfig, preLp, incumbentCost);
+					prePc.applyTimeIndexedGraphArcFixing(preLp, incumbentCost);
 			TimeIndexedScalarCompletionBound.ArcFixingResult scalarFix =
 					TimeIndexedScalarCompletionBound.applyArcFixing(data, preConfig, preLp, incumbentCost);
 			root.copyTimeIndexedPricingStateFrom(preRoot);

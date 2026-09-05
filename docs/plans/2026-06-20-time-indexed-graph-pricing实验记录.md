@@ -304,3 +304,8 @@ ng-DSSR 继续使用 hard、可用的本轮 dual window 与 compact 的交集构
 本轮保留 arc fixing，不采用超限后跳过。新增 `TimeIndexedArcSet`：定义域不超过 `Integer.MAX_VALUE` 时继续使用原单个扁平 `BitSet`；超过上限时改为按 `(from,to)` 保存独立的时间 `BitSet`，所以每个位集只索引 `0..horizon`。`TimeIndexedGraphPricingEngine` 和 `TimeIndexedScalarCompletionBound` 的本轮禁弧都改用该容器，写回 `Node` 时直接按 pair 合并；禁弧超过完整定义域一半时仍沿用原有 allowed-complement 存储，避免稠密 forbidden 集合无条件驻留。候选数、固定数和节点累计时空禁弧数改为 `long`，旧公开 `int` 接口保留饱和值以兼容已编译实验类。
 
 验证包括：构造一个总位置数刚超过 `Integer.MAX_VALUE`、但只实际写入少量位的自动分段测试，检查重复写入、首次写回、查询和增量合并；原稀疏/稠密 forbidden 与 allowed-complement 对拍继续通过；`src/TWETBPC` 全包编译通过。小规模实例仍选择扁平后端，既有真实 root-preprocessing smoke 得到 `ROOT_PROCESSED, obj=bound=6343, valid=true`。该修改消除了索引容量异常，但不降低 `O(n^2H)` 的 arc-fixing 扫描量；`n100 high` 仍可能因约 22.9 亿个时空位置而耗时很长，需要单独重跑评估性能和内存。
+### 2026-09-05 分段存储复审
+
+复审发现并修复一个计数返回边界：节点继承的累计禁弧数已超过 int 上限、后续 fixing 使用较小的扁平定义域时，long 合并接口原来直接返回旧 int 接口的饱和值，可能使 newlyFixed 日志为负。实际位集和 Node 内部 long 计数没有丢失；现改为完成合并后直接返回内部 long 计数。新增测试先复现失败，修复后通过。
+
+补充 80 组随机对拍，每组连续合并三轮并扩大 horizon，交替测试稀疏 forbidden 和稠密 allowed-complement，逐点比较两种后端的查询、lookup 和累计数量，并验证子节点修改不影响父节点。为避免数亿位内存分配，对拍仅在测试中通过反射强制小域分段；原 n100/high 实际尺寸和自动超限切换测试仍保留。TWETBPC 全包编译及 TimeIndexedGraphOptimizationTest 全部通过。检查 graph、scalar、SRI-aware 三条写回路径，位集所有权移交均发生在窗口提取和图清理完成后，之后立即返回，无移交后访问。尚未重跑远端 n100/high 全树求解。

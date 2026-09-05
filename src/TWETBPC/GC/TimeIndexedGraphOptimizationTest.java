@@ -34,6 +34,8 @@ public final class TimeIndexedGraphOptimizationTest {
 		testTimeIndexedArcLookupMatchesNode();
 		testIncrementalTimeIndexedArcMergeMatchesPointUpdates();
 		testSegmentedTimeIndexedArcSetBeyondIntIndex();
+		testSegmentedMergeMatchesFlatStorage();
+		testFlatMergePreservesLongCount();
 		testInternalColumnCompatibilityFastPath();
 		testStaticPricingDataMatchesInstance();
 		testExactPricingRejectsNonIntegerGrid();
@@ -258,6 +260,69 @@ public final class TimeIndexedGraphOptimizationTest {
 		if (node.mergeTimeIndexedPricingOnlyArcSet(additions) != 3L
 				|| !node.isTimeIndexedPricingOnlyArcForbidden(1, 1, 9)) {
 			throw new AssertionError("segmented incremental merge miscounted duplicate arcs");
+		}
+	}
+
+	// 在小时间域强制分段，仅用于逐点对拍，避免为测试分配数亿个位。
+	private static TimeIndexedArcSet segmentedTestSet(int pairWidth, int horizon) throws Exception {
+		TimeIndexedArcSet set = new TimeIndexedArcSet(pairWidth, horizon);
+		Field flat = TimeIndexedArcSet.class.getDeclaredField("flatBits");
+		flat.setAccessible(true);
+		flat.set(set, null);
+		Field segments = TimeIndexedArcSet.class.getDeclaredField("timesByPair");
+		segments.setAccessible(true);
+		segments.set(set, new BitSet[pairWidth * pairWidth]);
+		return set;
+	}
+
+	private static void testSegmentedMergeMatchesFlatStorage() throws Exception {
+		Data data = loadData();
+		int width = data.n + 1;
+		Random random = new Random(20260905L);
+		for (int round = 0; round < 80; round++) {
+			Node flat = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+			Node segmented = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+			for (int pass = 0; pass < 3; pass++) {
+				int horizon = 6 + pass * 3;
+				TimeIndexedArcSet flatSet = new TimeIndexedArcSet(width, horizon);
+				TimeIndexedArcSet segmentedSet = segmentedTestSet(width, horizon);
+				for (int from = 0; from < width; from++) {
+					for (int to = 0; to < width; to++) {
+						for (int time = 0; time <= horizon; time++) {
+							if (random.nextDouble() < (round % 2 == 0 ? 0.15 : 0.85)) {
+								flatSet.set(from, to, time);
+								segmentedSet.set(from, to, time);
+							}
+						}
+					}
+				}
+				if (flat.mergeTimeIndexedPricingOnlyArcSet(flatSet)
+						!= segmented.mergeTimeIndexedPricingOnlyArcSet(segmentedSet)) {
+					throw new AssertionError("flat/segmented merge counts differ");
+				}
+				assertNodesHaveSameTimeArcs(flat, segmented, data.n + 2, horizon + 2);
+				Node child = segmented.copy();
+				child.forbidTimeIndexedPricingOnlyArc(1, 2, horizon + 1);
+				if (segmented.isTimeIndexedPricingOnlyArcForbidden(1, 2, horizon + 1)) {
+					throw new AssertionError("child changed parent's segmented storage");
+				}
+			}
+		}
+	}
+
+	private static void testFlatMergePreservesLongCount() throws Exception {
+		Data data = loadData();
+		Node node = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+		// 单独模拟计数已超限，集合本身只需一条新增弧即可复现返回值截断。
+		Field count = Node.class.getDeclaredField("timeIndexedPricingOnlyForbiddenArcCount");
+		count.setAccessible(true);
+		long before = Integer.MAX_VALUE + 100L;
+		count.setLong(node, before);
+		TimeIndexedArcSet additions = new TimeIndexedArcSet(2, 3);
+		additions.set(0, 1, 2);
+		if (node.mergeTimeIndexedPricingOnlyArcSet(additions) != before + 1L
+				|| node.countTimeIndexedPricingOnlyForbiddenArcsLong() != before + 1L) {
+			throw new AssertionError("flat merge truncated an inherited long count");
 		}
 	}
 

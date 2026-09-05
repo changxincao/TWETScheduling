@@ -478,8 +478,10 @@ public class Node implements Comparable<Node> {
 		}
 		BitSet flatBits = newlyForbiddenArcs.getFlatBits();
 		if (flatBits != null) {
-			return mergeTimeIndexedPricingOnlyArcSet(flatBits, newlyForbiddenArcs.getPairWidth(),
+			mergeTimeIndexedPricingOnlyArcSet(flatBits, newlyForbiddenArcs.getPairWidth(),
 					newlyForbiddenArcs.getHorizon());
+			// 本轮域虽小，继承的累计数仍可能超过 int；不能返回旧接口的饱和值。
+			return timeIndexedPricingOnlyForbiddenArcCount;
 		}
 
 		int pairWidth = newlyForbiddenArcs.getPairWidth();

@@ -22,4 +22,8 @@
 
 后续只读检查入口为pipeline.status、scheduler-logs/seed-resume.log、scheduler-logs/seed-verify.log、scheduler-logs/solve.log及runs/pricing-comparison。不得再次启动第二个pipeline。正式计算可能持续多日，10800秒为solver软时限，仍保留此前单轮pricing超时响应不及时的风险。本批不修改算法源码，不安装软件或修改远端系统配置。
 
+后续规模口径：本批`n<=60`保持已启动的10800秒，不在运行中修改；后续所有`n>60`正式纯调度比较统一设置为18000秒（5小时），其他并发和单线程约束不因该时间调整而改变。新建大规模manifest时必须逐行检查`timeLimitSeconds=18000`，不能直接复制本批10800秒后遗漏修改。
+
 运行包构建：用本机javac --release 21、CPLEX/CPoptimizer jar及-sourcepath src编译HEU/Move.java、HEU/ExperimentBatchScheduler.java、Common/formal/FormalExperimentRunner.java和本次回归类，再以jar打包。FormalBatchGuard.java单独以--release 21编译打包为guard.jar，不进入solver.jar；生成清单脚本在scripts/remote/prepare-formal-le60-20260905.ps1。调度器原有SUCCESS跳过语义保留；本批seed生成、正式求解分阶段运行，solve.tsv没有跨阶段依赖，靠guard整体门槛保证seed完整。
+
+部署内容确认：远端`20260905-93685d4a/solver.jar`不是只拿旧solver执行新回归，而是由提交93685d4a对应源码重新编译。该提交包含Node的分段/补集禁弧批量合并、TI fixing静态数据复用以及TI+SRI同次pricing元数据复用。远端jar下载回本机后的SHA256与本机构建jar完全一致，jar内存在新的`TWETBPC/LP/Node.class`和`TimeIndexedGraphPricingEngine.class`；因此本批实际求解会使用这些修改。随后提交7cefac50只增加正式manifest、接续脚本和记录，没有改变solver算法，本批部署名继续以solver源码提交93685d4a标识是有意的。

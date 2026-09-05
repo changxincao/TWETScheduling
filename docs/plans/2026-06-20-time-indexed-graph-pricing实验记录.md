@@ -309,3 +309,4 @@ ng-DSSR 继续使用 hard、可用的本轮 dual window 与 compact 的交集构
 复审发现并修复一个计数返回边界：节点继承的累计禁弧数已超过 int 上限、后续 fixing 使用较小的扁平定义域时，long 合并接口原来直接返回旧 int 接口的饱和值，可能使 newlyFixed 日志为负。实际位集和 Node 内部 long 计数没有丢失；现改为完成合并后直接返回内部 long 计数。新增测试先复现失败，修复后通过。
 
 补充 80 组随机对拍，每组连续合并三轮并扩大 horizon，交替测试稀疏 forbidden 和稠密 allowed-complement，逐点比较两种后端的查询、lookup 和累计数量，并验证子节点修改不影响父节点。为避免数亿位内存分配，对拍仅在测试中通过反射强制小域分段；原 n100/high 实际尺寸和自动超限切换测试仍保留。TWETBPC 全包编译及 TimeIndexedGraphOptimizationTest 全部通过。检查 graph、scalar、SRI-aware 三条写回路径，位集所有权移交均发生在窗口提取和图清理完成后，之后立即返回，无移交后访问。尚未重跑远端 n100/high 全树求解。
+2026-09-05 再次复审：未发现新的生产代码错误。后端对拍扩展为 80 组四轮，增加扁平/分段交替合并、horizon 从 12 缩到 4 后旧禁弧保留，并检查 Node.copy 与预处理 copyTimeIndexedPricingStateFrom 的逐点一致性及深复制隔离。断言改用精确 long 计数，编译和整套 TimeIndexedGraphOptimizationTest 通过。本轮仅补充测试；原 n100/high 的完整求解及实际内存峰值仍未验证。

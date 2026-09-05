@@ -282,10 +282,11 @@ public final class TimeIndexedGraphOptimizationTest {
 		for (int round = 0; round < 80; round++) {
 			Node flat = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
 			Node segmented = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
-			for (int pass = 0; pass < 3; pass++) {
-				int horizon = 6 + pass * 3;
+			for (int pass = 0; pass < 4; pass++) {
+				int horizon = pass == 3 ? 4 : 6 + pass * 3;
 				TimeIndexedArcSet flatSet = new TimeIndexedArcSet(width, horizon);
-				TimeIndexedArcSet segmentedSet = segmentedTestSet(width, horizon);
+				TimeIndexedArcSet segmentedSet = (round / 2 + pass) % 3 == 0
+						? new TimeIndexedArcSet(width, horizon) : segmentedTestSet(width, horizon);
 				for (int from = 0; from < width; from++) {
 					for (int to = 0; to < width; to++) {
 						for (int time = 0; time <= horizon; time++) {
@@ -300,10 +301,15 @@ public final class TimeIndexedGraphOptimizationTest {
 						!= segmented.mergeTimeIndexedPricingOnlyArcSet(segmentedSet)) {
 					throw new AssertionError("flat/segmented merge counts differ");
 				}
-				assertNodesHaveSameTimeArcs(flat, segmented, data.n + 2, horizon + 2);
+				assertNodesHaveSameTimeArcs(flat, segmented, data.n + 2, 14);
 				Node child = segmented.copy();
-				child.forbidTimeIndexedPricingOnlyArc(1, 2, horizon + 1);
-				if (segmented.isTimeIndexedPricingOnlyArcForbidden(1, 2, horizon + 1)) {
+				assertNodesHaveSameTimeArcs(flat, child, data.n + 2, 14);
+				child.forbidTimeIndexedPricingOnlyArc(1, 2, 14);
+				Node promoted = new Node(data, new ArrayList<Integer>(), new ArrayList<Integer>(), 0.0);
+				promoted.copyTimeIndexedPricingStateFrom(segmented);
+				assertNodesHaveSameTimeArcs(flat, promoted, data.n + 2, 14);
+				promoted.forbidTimeIndexedPricingOnlyArc(1, 2, 14);
+				if (segmented.isTimeIndexedPricingOnlyArcForbidden(1, 2, 14)) {
 					throw new AssertionError("child changed parent's segmented storage");
 				}
 			}
@@ -332,8 +338,8 @@ public final class TimeIndexedGraphOptimizationTest {
 
 	private static void assertNodesHaveSameTimeArcs(Node expected, Node actual,
 			int pairWidth, int horizon) {
-		if (expected.countTimeIndexedPricingOnlyForbiddenArcs()
-				!= actual.countTimeIndexedPricingOnlyForbiddenArcs()) {
+		if (expected.countTimeIndexedPricingOnlyForbiddenArcsLong()
+				!= actual.countTimeIndexedPricingOnlyForbiddenArcsLong()) {
 			throw new AssertionError("incremental time-arc count mismatch");
 		}
 		for (int from = 0; from < pairWidth; from++) {

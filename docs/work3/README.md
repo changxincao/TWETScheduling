@@ -4,10 +4,11 @@
 
 ## 当前正式入口
 
+0. [双基础模型实现规格](implementation/2026-09-06-双基础模型实现规格.md)与[强化约束实现清单](implementation/2026-09-06-强化约束实现清单.md)：2026-09-06 最新模型实现口径。当前先比较共同费率下的无机器标签 2-index 与 P-W-Abs；聚合 2-index SEC 暂缓，其余已列强化保留为实现或消融候选。若与下列 2026-08-31 方案选择冲突，以本项为准。
 1. [问题设定、非退化机制与文献依据](current/2026-08-31-work3随机due-window多机调度问题设定与文献依据.md)：当前问题定义、现实解释、参数性质和研究边界，以此文档的最新结论为准。
 2. [参数结构、双模型与分解策略补充分析](current/2026-08-31-work3参数结构双模型与分解策略补充分析.md)：2-indexed/machine-position formulation、场景 LP、Benders、异质参数和位置模型技术分析。
 
-当前主模型采用 W3-FullHet：任务特定的 \(\rho_j,\lambda_j,\alpha_j,\beta_j\)，随机加工与序列相关 setup 时间，确定 setup 金额，可决策 due window，有限位置/长度域，免费 waiting 和场景 ET 成本。2-indexed 是当前主基线；machine-position 只在 matched 小中规模测试显示稳定优势后继续投入。共同费率只作同质化消融，不再作为独立业务模型。
+当前实现原型采用共同的 \(\rho,\lambda,\alpha,\beta\)，随机加工与机器无关的随机序列相关 setup 时间、确定 setup 金额、任务特定窗口域、免费场景 waiting 和线性 ET 成本。第一阶段只实现并比较 2-index 与 P-W-Abs 两个基础模型及其静态强化；W3-FullHet 保留为较早的一般化方案，不是本轮实现入口。
 
 ## 目录说明
 
@@ -15,6 +16,7 @@
 - analysis：形成当前结论之前的专项推导、文献分析和历史方案。若与 current 冲突，以 current 为准。
 - records：用户原始需求和聊天导出，只用于追溯讨论过程，不作为当前模型定义。
 - figures：Work 3 分析文档引用的概念图和图形检查记录。
+- implementation：当前模型、约束和实现开关的直接规格；代码实现以这里的最新文件为准。
 
 ## 讨论记录
 

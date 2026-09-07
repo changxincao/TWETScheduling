@@ -49,6 +49,8 @@
 
 ## 远端 Windows SSH 操作边界
 
+- 2026-09-07新增第二主机：`codex-runner@100.68.243.192`，用户指定工作目录 `D:\ccx`；使用同一专用私钥和 `C:\Users\Changxin\.ssh\known_hosts`，仍严格验证指纹。该主机所有写入及运行仅限 `D:\ccx` 子树，其他安全边界与下述旧主机相同，不得混用两台主机的目录。
+
 - 远端主机为 `codex-runner@100.68.243.112`，私钥为 `C:\Users\Changxin\.ssh\codex_solver_auto_ed25519`，known-hosts 文件为 `C:\Users\Changxin\Downloads\solver_known_hosts`。连接时必须使用 `BatchMode=yes`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes` 和上述专用 `UserKnownHostsFile`，不得绕过主机指纹校验。
 - 唯一默认允许的远端工作目录是 `D:\ccx_work\考虑交付的机器调度`。每次进行 SSH 操作前，必须先重新阅读本节，确认目标主机、操作性质和所有远端路径；建立连接本身不构成修改远端的授权。
 - 所有写入、上传、程序运行、覆盖、移动和清理只能发生在上述工作目录及其子目录。任何可能写入或删除该目录之外内容的操作，必须先取得用户针对该次越界操作的明确许可；不能从此前的连接许可或其他任务推定授权。

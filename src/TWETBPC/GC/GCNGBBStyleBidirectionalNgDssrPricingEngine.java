@@ -22,6 +22,7 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 	private CompletionBoundSubtreeArcEliminator.PreparedBounds lastReusableSubtreeArcEliminationBounds;
 	private final NgDssrHistoryWarmStart historyWarmStart;
 	private long pricingCallSequence;
+	private final NgDssrMidpointStartCache midpointStartCache = new NgDssrMidpointStartCache();
 	private final HashMap<Integer, Integer> pricingCallsByNode = new HashMap<Integer, Integer>();
 
 	public GCNGBBStyleBidirectionalNgDssrPricingEngine(Data data, TWETBPCConfig config) {
@@ -49,7 +50,13 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
 				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.PAPER, historyWarmStart);
 		installDiagnosticPricingContext(gc, lp, false);
+		if (config.enableNgDssrSameNodeMidpointStart && !lp.isFeasibilityRepairMode()) {
+			gc.setPreviousPricingMidpoint(midpointStartCache.lookup(lp.getNode(), lp.getActiveCutIds()));
+		}
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
+		if (config.enableNgDssrSameNodeMidpointStart && !lp.isFeasibilityRepairMode()) {
+			midpointStartCache.remember(lp.getNode(), lp.getActiveCutIds(), gc.completedPricingMidpoint());
+		}
 		if (columns.isEmpty()) {
 			lastReusableSubtreeArcEliminationBounds = gc.reusableSubtreeArcEliminationBounds();
 			return PricingResult.noImprovement(gc.getLastMessage())

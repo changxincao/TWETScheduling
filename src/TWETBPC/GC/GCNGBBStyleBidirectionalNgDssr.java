@@ -134,6 +134,16 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double bestGeneratedReducedCost;
 	private double lastRelaxedRoundBestReducedCost;
 	private boolean lastRelaxedRoundCompleted;
+	private double previousPricingMidpoint = Double.NaN;
+
+	/** 只提供首轮probe起点；当前dual的半域和搜索状态仍重新构造。 */
+	void setPreviousPricingMidpoint(double midpoint) {
+		previousPricingMidpoint = midpoint;
+	}
+
+	double completedPricingMidpoint() {
+		return lastRelaxedRoundCompleted && midpointProbePerformed ? tMid : Double.NaN;
+	}
 	private boolean feasibilityPhaseOneObjectiveMode;
 
 	// 2026-05-22: 闂佸憡鐟ラ懟顖炲箖?midpoint闂佹寧绋戦懟顖濄亹瑜忛埀顒傛暩閹虫挾绱炵€ｎ喖绀?pricing 闁哄鍎愰崰妤€锕㈡笟鈧顐﹀醇濞戞帒浜?
@@ -1963,9 +1973,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		sectionStart = System.nanoTime();
 		ensureExtensionArcMasks(lp.getNode());
 		if (!prepareMidpointWithinDssr(lp)) {
-			// 2026-08-30: 首轮仍不继承 node 历史，但实验性静态策略必须作为 probe 起点生效。
-			// 正式 profile 使用 default，因而默认求解路径和原先完全一致。
-			runMidpointProbeIfEnabled(lp, tMid, midpointStrategyUsed);
+			// 2026-09-08: 默认仍从配置起点开始；实验仅替换首轮probe起点，保留原候选裁剪和搜索。
+			boolean reuseStart = ngDssrRound == 1 && Double.isFinite(previousPricingMidpoint);
+			runMidpointProbeIfEnabled(lp, reuseStart ? previousPricingMidpoint : tMid,
+					reuseStart ? "previousPricing" : midpointStrategyUsed);
 			rememberInitialMidpointWithinDssr();
 		}
 		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;

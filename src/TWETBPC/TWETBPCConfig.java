@@ -194,6 +194,8 @@ public class TWETBPCConfig {
 	public boolean enableNgDssrHistoryWarmStart = false;
 	/** 2026-07-12: 实验开关；同一 node 内在基础 ng-set 上有界追加最近困难 exact 的成员。 */
 	public boolean enableNgDssrSameNodeWarmStart = false;
+	/** 实验开关：仅复用同节点同cuts的中点起点，不继承label或ng-memory。 */
+	public boolean enableNgDssrSameNodeMidpointStart = false;
 	/** 同 node 只统计最近若干次正式 exact 的 final ng-set。 */
 	public int ngDssrSameNodeWarmStartWindowSize = 3;
 	/** 每个 job 最多追加多少个历史成员。 */

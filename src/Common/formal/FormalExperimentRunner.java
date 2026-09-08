@@ -185,6 +185,8 @@ public final class FormalExperimentRunner {
 		TWETBPCConfig config = new TWETBPCConfig();
 		profile.apply(config);
 		arguments.applyNgDssrExperimentOverrides(config);
+		// 本机A/B专用，默认关闭；实际值进入标准config快照。
+		config.enableNgDssrSameNodeMidpointStart = Boolean.getBoolean("twet.bpc.midpointPreviousPricing");
 		config.instanceName = arguments.runId;
 		config.bpcMethodName = profile.getName();
 		config.bpcOutputRoot = arguments.outputDir.toString();

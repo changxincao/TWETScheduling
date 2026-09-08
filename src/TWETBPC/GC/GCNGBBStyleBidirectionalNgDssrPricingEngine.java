@@ -23,6 +23,7 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 	private final NgDssrHistoryWarmStart historyWarmStart;
 	private long pricingCallSequence;
 	private final NgDssrMidpointStartCache midpointStartCache = new NgDssrMidpointStartCache();
+	private final NgDssrFirstRoundMidpointHistory midpointHistory = new NgDssrFirstRoundMidpointHistory();
 	private final HashMap<Integer, Integer> pricingCallsByNode = new HashMap<Integer, Integer>();
 
 	public GCNGBBStyleBidirectionalNgDssrPricingEngine(Data data, TWETBPCConfig config) {
@@ -50,10 +51,18 @@ public class GCNGBBStyleBidirectionalNgDssrPricingEngine implements PricingEngin
 		GCNGBBStyleBidirectionalNgDssr gc = new GCNGBBStyleBidirectionalNgDssr(data, config,
 				GCNGBBStyleBidirectionalNgDssr.DominanceBackend.PAPER, historyWarmStart);
 		installDiagnosticPricingContext(gc, lp, false);
-		if (config.enableNgDssrSameNodeMidpointStart && !lp.isFeasibilityRepairMode()) {
+		if (config.enableNgDssrFirstRoundMeanStart && config.enableNgDssrSameNodeMidpointStart) {
+			throw new IllegalArgumentException("Choose only one midpoint history experiment");
+		}
+		NgDssrFirstRoundMidpointHistory.Pools midpointPools = null;
+		if (config.enableNgDssrFirstRoundMeanStart && !lp.isFeasibilityRepairMode()) {
+			midpointPools = midpointHistory.forNode(lp.getNode(), lp.getActiveCutIds());
+			gc.setFirstRoundMeanMidpoint(midpointPools.midpoint(), midpointPools.source());
+		} else if (config.enableNgDssrSameNodeMidpointStart && !lp.isFeasibilityRepairMode()) {
 			gc.setPreviousPricingMidpoint(midpointStartCache.lookup(lp.getNode(), lp.getActiveCutIds()));
 		}
 		ArrayList<TWETColumn> columns = gc.solve(lp, timeLimitChecker);
+		if (midpointPools != null) gc.recordFirstRoundMidpoint(midpointPools);
 		if (config.enableNgDssrSameNodeMidpointStart && !lp.isFeasibilityRepairMode()) {
 			midpointStartCache.remember(lp.getNode(), lp.getActiveCutIds(), gc.completedPricingMidpoint());
 		}

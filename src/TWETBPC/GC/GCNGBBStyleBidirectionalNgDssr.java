@@ -135,6 +135,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private double lastRelaxedRoundBestReducedCost;
 	private boolean lastRelaxedRoundCompleted;
 	private double previousPricingMidpoint = Double.NaN;
+	private String previousPricingMidpointSource = "previousPricing";
+	private double completedFirstRoundMidpoint = Double.NaN;
+	private double completedFirstRoundForwardMillis, completedFirstRoundBackwardMillis;
+
+	void setFirstRoundMeanMidpoint(double midpoint, String source) {
+		previousPricingMidpoint = midpoint;
+		previousPricingMidpointSource = source;
+	}
+
+	/** 只有完整首轮才有有限中点；后续DSSR轮不覆盖这一条样本。 */
+	void recordFirstRoundMidpoint(NgDssrFirstRoundMidpointHistory.Pools pools) {
+		pools.record(completedFirstRoundMidpoint, completedFirstRoundForwardMillis,
+				completedFirstRoundBackwardMillis);
+	}
 
 	/** 只提供首轮probe起点；当前dual的半域和搜索状态仍重新构造。 */
 	void setPreviousPricingMidpoint(double midpoint) {
@@ -1264,6 +1278,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	public ArrayList<TWETColumn> solve(LP lp, TimeLimitChecker timeLimitChecker) {
 		this.timeLimitChecker = timeLimitChecker == null ? TimeLimitChecker.NONE : timeLimitChecker;
 		feasibilityPhaseOneObjectiveMode = lp.isFeasibilityPhaseOneObjectiveMode();
+		completedFirstRoundMidpoint = Double.NaN;
 		ngNeighborhoodByJob = null;
 		ngDssrInitialRepeatableMember = null;
 		ngDssrRoundsExecuted = 0;
@@ -1537,6 +1552,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		boolean roundCompleted = !timeLimitChecker.isTimeLimitReached()
 				&& (midpointProbeLabelsReadyForJoin || (FWUL.isEmpty() && BWUL.isEmpty()));
 		lastRelaxedRoundCompleted = roundCompleted && canContinue();
+		if (ngDssrRound == 1 && lastRelaxedRoundCompleted && midpointProbePerformed) {
+			completedFirstRoundMidpoint = tMid;
+			completedFirstRoundForwardMillis = roundForwardMillis;
+			completedFirstRoundBackwardMillis = roundBackwardMillis;
+		}
 		if (roundCompleted) {
 			rememberDssrRoundMidpointFeedback(roundForwardMillis, roundBackwardMillis);
 			recordMidpointProbeExactFeedback(lp, roundExactNanos, roundForwardMillis, roundBackwardMillis);
@@ -1976,7 +1996,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			// 2026-09-08: 默认仍从配置起点开始；实验仅替换首轮probe起点，保留原候选裁剪和搜索。
 			boolean reuseStart = ngDssrRound == 1 && Double.isFinite(previousPricingMidpoint);
 			runMidpointProbeIfEnabled(lp, reuseStart ? previousPricingMidpoint : tMid,
-					reuseStart ? "previousPricing" : midpointStrategyUsed);
+					reuseStart ? previousPricingMidpointSource : midpointStrategyUsed);
 			rememberInitialMidpointWithinDssr();
 		}
 		exactInitializeMidpointProbeNanos += System.nanoTime() - sectionStart;

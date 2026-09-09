@@ -196,7 +196,7 @@ public class TWETBPCConfig {
 	public boolean enableNgDssrSameNodeWarmStart = false;
 	/** 实验开关：仅复用同节点同cuts的中点起点，不继承label或ng-memory。 */
 	public boolean enableNgDssrSameNodeMidpointStart = false;
-	/** 实验：同节点首轮中点双池均值，优先完整F/B比不超过4的样本。 */
+	/** 同节点首轮中点双池均值，优先完整F/B比不超过4的样本；正式ng-DSSR默认开启。 */
 	public boolean enableNgDssrFirstRoundMeanStart = false;
 	/** 同 node 只统计最近若干次正式 exact 的 final ng-set。 */
 	public int ngDssrSameNodeWarmStartWindowSize = 3;

@@ -185,9 +185,7 @@ public final class FormalExperimentRunner {
 		TWETBPCConfig config = new TWETBPCConfig();
 		profile.apply(config);
 		arguments.applyNgDssrExperimentOverrides(config);
-		// 本机A/B专用，默认关闭；实际值进入标准config快照。
-		config.enableNgDssrSameNodeMidpointStart = Boolean.getBoolean("twet.bpc.midpointPreviousPricing");
-		config.enableNgDssrFirstRoundMeanStart = Boolean.getBoolean("twet.bpc.midpointFirstRoundMean");
+		applyMidpointExperimentSystemPropertyOverrides(config);
 		config.instanceName = arguments.runId;
 		config.bpcMethodName = profile.getName();
 		config.bpcOutputRoot = arguments.outputDir.toString();
@@ -225,6 +223,21 @@ public final class FormalExperimentRunner {
 				result.getProcessedNodes(), result.getGeneratedColumns());
 		if (!isReportableSolveStatus(result.getStatus())) {
 			throw new IllegalStateException("Formal solve ended with non-reportable status: " + result.getStatus());
+		}
+	}
+
+	/** 显式-D属性只用于A/B覆盖；属性缺失时保留正式profile，避免静默关闭生产配置。 */
+	static void applyMidpointExperimentSystemPropertyOverrides(TWETBPCConfig config) {
+		String previousPricing = System.getProperty("twet.bpc.midpointPreviousPricing");
+		if (previousPricing != null) {
+			config.enableNgDssrSameNodeMidpointStart = Boolean.parseBoolean(previousPricing);
+		}
+		String firstRoundMean = System.getProperty("twet.bpc.midpointFirstRoundMean");
+		if (firstRoundMean != null) {
+			config.enableNgDssrFirstRoundMeanStart = Boolean.parseBoolean(firstRoundMean);
+		}
+		if (config.enableNgDssrSameNodeMidpointStart && config.enableNgDssrFirstRoundMeanStart) {
+			throw new IllegalArgumentException("Choose only one midpoint history strategy");
 		}
 	}
 

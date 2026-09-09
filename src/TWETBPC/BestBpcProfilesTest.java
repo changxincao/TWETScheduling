@@ -49,6 +49,8 @@ public final class BestBpcProfilesTest {
 		config.enableSubsetRowCutsForPartialDominance = true;
 		config.enableSubsetRowCutsForTimeIndexedGraph = true;
 		config.enableNodeLocalHorizonImprovement = true;
+		config.enableNgDssrSameNodeMidpointStart = true;
+		config.enableNgDssrFirstRoundMeanStart = false;
 		config.debugSkipBranchColumnFilter = true;
 		config.debugIgnorePricingOnlyArcsAtNode = 4;
 		config.maxExactPricingColumns = 7;
@@ -92,6 +94,8 @@ public final class BestBpcProfilesTest {
 		require(!config.enableSubsetRowCutsForPartialDominance, "stale partial SRI cleared");
 		require(!config.enableSubsetRowCutsForTimeIndexedGraph, "stale time-indexed SRI cleared");
 		require(!config.enableNodeLocalHorizonImprovement, "stale local horizon experiment cleared");
+		require(!config.enableNgDssrSameNodeMidpointStart, "stale previous-pricing midpoint experiment cleared");
+		require(config.enableNgDssrFirstRoundMeanStart, "first-round midpoint mean restored");
 		require(!config.debugSkipBranchColumnFilter, "stale branch filter bypass cleared");
 		require(config.debugIgnorePricingOnlyArcsAtNode == -1, "stale pricing-only bypass cleared");
 		require(config.maxExactPricingColumns == 5000, "exact return limit restored");
@@ -186,6 +190,8 @@ public final class BestBpcProfilesTest {
 		require(config.maxCutRounds == 8, "outer cut rounds");
 		require(config.maxSubsetRowCutAppearancesPerJob == 20, "rank-1 job appearance limit");
 		require(!config.bidirectionalMidpointProbe, "midpoint probe off");
+		require(!config.enableNgDssrSameNodeMidpointStart, "time-indexed old midpoint start off");
+		require(!config.enableNgDssrFirstRoundMeanStart, "time-indexed mean midpoint start off");
 		require(!config.enableStrongBranchingPhaseOneRepair, "time-indexed old M repair");
 		assertCommon(config);
 	}
@@ -209,6 +215,8 @@ public final class BestBpcProfilesTest {
 		require("minimumNewPairsSegment".equals(config.ngDssrNonElementaryRouteUpdateMode), "ng update mode");
 		require(!config.enableNgDssrHistoryWarmStart, "ng history warm-start off");
 		require(!config.enableNgDssrSameNodeWarmStart, "ng same-node warm-start off");
+		require(!config.enableNgDssrSameNodeMidpointStart, "old midpoint start off");
+		require(config.enableNgDssrFirstRoundMeanStart, "first-round midpoint mean on");
 		require(config.ngDssrSameNodeWarmStartWindowSize == 3, "ng same-node history window");
 		require(config.ngDssrSameNodeWarmStartPerJobLimit == 2, "ng same-node per-job cap");
 		require(config.ngDssrSameNodeWarmStartGlobalPairLimit == 10, "ng same-node global cap");

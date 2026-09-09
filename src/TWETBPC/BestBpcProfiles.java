@@ -7,7 +7,7 @@ import java.util.Objects;
  */
 public final class BestBpcProfiles {
 	/** 写入正式实验结果，便于服务器侧确认三组运行使用同一套参数。 */
-	public static final String VERSION = "2026-08-30-v5";
+	public static final String VERSION = "2026-09-09-v6";
 
 	public static final BPCAlgorithmProfile TIME_INDEXED_GRAPH = new BPCAlgorithmProfile(
 			"timeIndexedGraph", true, false, false, config -> applyTimeIndexedDefaults(config, false));
@@ -90,6 +90,8 @@ public final class BestBpcProfiles {
 		config.enableClusterBranching = false;
 		config.enableSuccessorSetBranching = false;
 		config.structuredArcStrictTypePriority = false;
+		config.enableNgDssrSameNodeMidpointStart = false;
+		config.enableNgDssrFirstRoundMeanStart = false;
 		config.enableSubsetRowCutsForPartialDominance = false;
 		config.enableNodeLocalHorizonImprovement = false;
 		config.debugSkipBranchColumnFilter = false;
@@ -179,6 +181,9 @@ public final class BestBpcProfiles {
 		config.enableNgDssrWindowRepeatabilityInitialFilter = true;
 		config.enableNgDssrHistoryWarmStart = false;
 		config.enableNgDssrSameNodeWarmStart = false;
+		// 2026-09-09: 大规模配对中显著减少非复用probe工作；只复用同节点首轮中点统计。
+		config.enableNgDssrSameNodeMidpointStart = false;
+		config.enableNgDssrFirstRoundMeanStart = true;
 		config.ngDssrReturnRelaxedColumns = false;
 		config.enableNgDssrJoinEnvelopeCompression = false;
 		config.bidirectionalJoinBestThresholdMode = "bestUB";

@@ -197,9 +197,8 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			int to = bit % arcWidth;
 			// 理论上fractional Q<1不会包含父节点required arc；若数值边界触发，保留required状态，
 			// 由同时存在的aggregate行把该子节点正确判为不可行，不能静默覆盖父分支。
-			if (node.getArcState(from, to) != Node.ARC_REQUIRED) {
-				node.forbidArc(from, to);
-			}
+			// aggregate行已经承担RMP约束；这里只收紧pricing/列过滤域，避免再建立一批冗余arc rows。
+			node.forbidBranchImpliedArc(from, to);
 		}
 	}
 

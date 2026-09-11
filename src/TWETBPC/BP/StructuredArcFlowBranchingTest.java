@@ -39,8 +39,10 @@ public final class StructuredArcFlowBranchingTest {
 
 		StructuredArcFlowBrancher.applyZeroUpperBoundArcRestrictions(node, mask, width);
 
-		require(node.getArcState(2, 3) == Node.ARC_FORBIDDEN,
-				"Q<=0 directly forbids free member arcs");
+		require(node.isArcForbidden(2, 3),
+				"Q<=0 directly removes free member arcs from the pricing domain");
+		require(node.getArcState(2, 3) == Node.ARC_FREE,
+				"Q<=0 propagation does not create redundant explicit arc rows");
 		require(node.getArcState(4, 5) == Node.ARC_REQUIRED,
 				"Q<=0 propagation does not overwrite inherited required arcs");
 		require(node.getArcState(3, 4) == Node.ARC_FREE,

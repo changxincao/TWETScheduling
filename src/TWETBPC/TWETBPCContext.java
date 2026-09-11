@@ -233,6 +233,12 @@ public class TWETBPCContext {
 		lines.add("run.effective.pricingMode=" + pricingMode);
 		lines.add("run.components.cutGenerators=" + classNames(cutGenerators));
 		lines.add("run.components.branchers=" + classNames(branchers));
+		for (Brancher brancher : branchers) {
+			if (brancher instanceof StructuredArcFlowBrancher && config.enableClusterBranching) {
+				lines.addAll(((StructuredArcFlowBrancher) brancher).clusterDiagnosticConfigurationLines());
+				break;
+			}
+		}
 		if (pricingMode.usesNgDssrPricing()) {
 			lines.add("run.effective.ngDssrMidpointProbe="
 					+ GCNGBBStyleBidirectionalNgDssrPricingEngine.effectiveMidpointProbeConfiguration(config));

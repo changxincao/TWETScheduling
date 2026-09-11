@@ -6,7 +6,10 @@ import java.util.Collections;
 
 import Basic.Data;
 import HEU.TanakaNoOutsourcingBPCTest;
+import TWETBPC.BPCAlgorithmProfile;
+import TWETBPC.BestBpcProfiles;
 import TWETBPC.TWETBPCConfig;
+import TWETBPC.TWETBPCContext;
 import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
@@ -23,8 +26,50 @@ public final class StructuredArcFlowBranchingTest {
 		verifyZeroUpperBoundArcRestriction();
 		verifyHalfIntegerOrdering();
 		verifyNodeCopyIsolation();
+		verifyClusterDiagnostics();
+		verifyClusterAssemblyAcrossFormalPricingModes();
 		verifyDefaultConfigurationIsOff();
 		System.out.println("StructuredArcFlowBranchingTest passed.");
+	}
+
+	private static void verifyClusterAssemblyAcrossFormalPricingModes() throws Exception {
+		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(
+				"experiment-suite/formal/instances/data/n040-set02/family/base/zero/m4.dat", false);
+		for (BPCAlgorithmProfile profile : Arrays.asList(BestBpcProfiles.NG_DSSR,
+				BestBpcProfiles.TIME_INDEXED_GRAPH, BestBpcProfiles.TIME_INDEXED_GRAPH_RANK1)) {
+			TWETBPCConfig config = new TWETBPCConfig();
+			profile.apply(config);
+			config.enableClusterBranching = true;
+			config.clusterTemporalWeight = 0.0;
+			TWETBPCContext context = new TWETBPCContext(data, config);
+			require(context.branchers.stream().anyMatch(brancher -> brancher instanceof StructuredArcFlowBrancher),
+					profile.getName() + " assembles StructuredArcFlowBrancher");
+			require(context.runConfigurationLines().stream()
+					.anyMatch(line -> line.startsWith("run.clusterDiagnostics.setupOnlySilhouette=")),
+					profile.getName() + " reports cluster diagnostics");
+		}
+	}
+
+	private static void verifyClusterDiagnostics() throws Exception {
+		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(
+				"experiment-suite/formal/instances/data/n040-set02/family/base/zero/m4.dat", false);
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.enableClusterBranching = true;
+		config.clusterTemporalWeight = 0.0;
+		config.clusterMstTheta = 0.5;
+		StructuredArcFlowBrancher brancher = new StructuredArcFlowBrancher(data, config);
+		StructuredArcFlowBrancher.ClusterPartitionDiagnostics diagnostics = brancher.getClusterDiagnostics();
+		require(diagnostics.getClusterCount() == 3, "setup-only MST recovers three family clusters");
+		require(diagnostics.getClusterSizes().equals(Arrays.asList(14, 13, 13)),
+				"family cluster sizes are stable");
+		require(diagnostics.getNontrivialClusterCount() == 3, "all family clusters are nontrivial");
+		require(diagnostics.getSetupOnlySilhouette() > 0.7, "family setup silhouette is clear");
+		require(diagnostics.getMaximumClusterShare() == 0.35, "maximum family share");
+		require(diagnostics.getSingletonJobShare() == 0.0, "family partition has no singleton jobs");
+		require(diagnostics.getInterIntraSetupRatio() > 4.0, "family setup separation is strong");
+		require(diagnostics.configurationLines().stream()
+				.anyMatch(line -> line.startsWith("run.clusterDiagnostics.setupOnlySilhouette=")),
+				"diagnostics are available to run configuration output");
 	}
 
 	private static void verifyZeroUpperBoundArcRestriction() throws Exception {

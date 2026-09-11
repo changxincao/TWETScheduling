@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 import Basic.Data;
@@ -25,12 +26,30 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final List<BitSet> clusters;
+	private final ClusterPartitionDiagnostics clusterDiagnostics;
 
 	public StructuredArcFlowBrancher(Data data, TWETBPCConfig config) {
 		super(config.branchingTolerance);
 		this.data = data;
 		this.config = config;
-		this.clusters = config.enableClusterBranching ? buildStaticClusters() : Collections.<BitSet>emptyList();
+		if (config.enableClusterBranching) {
+			ClusterBuild build = buildStaticClusters();
+			this.clusters = build.branchingClusters;
+			this.clusterDiagnostics = build.diagnostics;
+		} else {
+			this.clusters = Collections.<BitSet>emptyList();
+			this.clusterDiagnostics = null;
+		}
+	}
+
+	/** 返回本次静态partition的可落盘诊断；这些指标不参与分支开关。 */
+	public List<String> clusterDiagnosticConfigurationLines() {
+		return clusterDiagnostics == null ? Collections.<String>emptyList()
+				: clusterDiagnostics.configurationLines();
+	}
+
+	public ClusterPartitionDiagnostics getClusterDiagnostics() {
+		return clusterDiagnostics;
 	}
 
 	@Override
@@ -251,9 +270,16 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		return value;
 	}
 
-	private List<BitSet> buildStaticClusters() {
+	private ClusterBuild buildStaticClusters() {
 		if (data.n < 3) {
-			return Collections.emptyList();
+			ArrayList<BitSet> partition = new ArrayList<BitSet>();
+			BitSet allJobs = new BitSet(data.n + 1);
+			allJobs.set(1, data.n + 1);
+			if (!allJobs.isEmpty()) {
+				partition.add(allJobs);
+			}
+			return new ClusterBuild(Collections.<BitSet>emptyList(),
+					analyzePartition(partition, Double.NaN));
 		}
 		double[][] distances = normalizedJobDistances();
 		int[] parent = minimumSpanningTreeParents(distances);
@@ -276,19 +302,132 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 				union(components, job, parent[job]);
 			}
 		}
-		ArrayList<BitSet> result = new ArrayList<BitSet>();
+		ArrayList<BitSet> partition = new ArrayList<BitSet>();
 		for (int job = 1; job <= data.n; job++) {
 			int root = find(components, job);
-			while (result.size() <= root) {
-				result.add(null);
+			while (partition.size() <= root) {
+				partition.add(null);
 			}
-			if (result.get(root) == null) {
-				result.set(root, new BitSet(data.n + 1));
+			if (partition.get(root) == null) {
+				partition.set(root, new BitSet(data.n + 1));
 			}
-			result.get(root).set(job);
+			partition.get(root).set(job);
 		}
-		result.removeIf(cluster -> cluster == null || cluster.isEmpty() || cluster.cardinality() == data.n);
-		return result;
+		partition.removeIf(cluster -> cluster == null || cluster.isEmpty());
+		ArrayList<BitSet> branchingClusters = new ArrayList<BitSet>();
+		for (BitSet cluster : partition) {
+			if (cluster.cardinality() < data.n) {
+				branchingClusters.add((BitSet) cluster.clone());
+			}
+		}
+		return new ClusterBuild(Collections.unmodifiableList(branchingClusters),
+				analyzePartition(partition, threshold));
+	}
+
+	private ClusterPartitionDiagnostics analyzePartition(List<BitSet> partition, double mstThreshold) {
+		double[][] setupDistances = setupOnlyDistances();
+		double silhouette = setupOnlySilhouette(partition, setupDistances);
+		int nontrivial = 0;
+		int singletonJobs = 0;
+		int maximumSize = 0;
+		ArrayList<Integer> sizes = new ArrayList<Integer>();
+		for (BitSet cluster : partition) {
+			int size = cluster.cardinality();
+			sizes.add(Integer.valueOf(size));
+			maximumSize = Math.max(maximumSize, size);
+			if (size == 1) {
+				singletonJobs++;
+			}
+			if (size >= config.clusterMinimumCandidateSize && size < data.n) {
+				nontrivial++;
+			}
+		}
+		Collections.sort(sizes, Collections.reverseOrder());
+
+		double intraSum = 0.0;
+		double interSum = 0.0;
+		long intraPairs = 0L;
+		long interPairs = 0L;
+		int[] clusterByJob = new int[data.n + 1];
+		Arrays.fill(clusterByJob, -1);
+		for (int cluster = 0; cluster < partition.size(); cluster++) {
+			for (int job = partition.get(cluster).nextSetBit(1); job >= 0;
+					job = partition.get(cluster).nextSetBit(job + 1)) {
+				clusterByJob[job] = cluster;
+			}
+		}
+		for (int first = 1; first <= data.n; first++) {
+			for (int second = first + 1; second <= data.n; second++) {
+				if (clusterByJob[first] == clusterByJob[second]) {
+					intraSum += setupDistances[first][second];
+					intraPairs++;
+				} else {
+					interSum += setupDistances[first][second];
+					interPairs++;
+				}
+			}
+		}
+		double intraMean = intraPairs == 0L ? Double.NaN : intraSum / intraPairs;
+		double interMean = interPairs == 0L ? Double.NaN : interSum / interPairs;
+		double separationRatio = Double.isNaN(intraMean) || Double.isNaN(interMean)
+				? Double.NaN : (intraMean == 0.0
+						? (interMean == 0.0 ? Double.NaN : Double.POSITIVE_INFINITY)
+						: interMean / intraMean);
+		return new ClusterPartitionDiagnostics(partition.size(), sizes, nontrivial, silhouette,
+				data.n == 0 ? Double.NaN : (double) maximumSize / data.n,
+				data.n == 0 ? Double.NaN : (double) singletonJobs / data.n,
+				intraMean, interMean, separationRatio, mstThreshold);
+	}
+
+	private double[][] setupOnlyDistances() {
+		double[][] distances = new double[data.n + 1][data.n + 1];
+		for (int first = 1; first <= data.n; first++) {
+			for (int second = first + 1; second <= data.n; second++) {
+				double distance = 0.5 * (data.s[first][second] + data.s[second][first]);
+				distances[first][second] = distances[second][first] = distance;
+			}
+		}
+		return distances;
+	}
+
+	private double setupOnlySilhouette(List<BitSet> partition, double[][] distances) {
+		if (partition.size() <= 1 || data.n == 0) {
+			return 0.0;
+		}
+		double sum = 0.0;
+		for (int clusterIndex = 0; clusterIndex < partition.size(); clusterIndex++) {
+			BitSet own = partition.get(clusterIndex);
+			for (int job = own.nextSetBit(1); job >= 0; job = own.nextSetBit(job + 1)) {
+				if (own.cardinality() <= 1) {
+					continue;
+				}
+				double within = 0.0;
+				for (int other = own.nextSetBit(1); other >= 0; other = own.nextSetBit(other + 1)) {
+					if (other != job) {
+						within += distances[job][other];
+					}
+				}
+				within /= own.cardinality() - 1;
+				double nearestOther = Double.POSITIVE_INFINITY;
+				for (int otherCluster = 0; otherCluster < partition.size(); otherCluster++) {
+					if (otherCluster == clusterIndex) {
+						continue;
+					}
+					BitSet otherJobs = partition.get(otherCluster);
+					double mean = 0.0;
+					for (int other = otherJobs.nextSetBit(1); other >= 0;
+							other = otherJobs.nextSetBit(other + 1)) {
+						mean += distances[job][other];
+					}
+					nearestOther = Math.min(nearestOther, mean / otherJobs.cardinality());
+				}
+				double scale = Math.max(within, nearestOther);
+				if (scale > 0.0 && Double.isFinite(nearestOther)) {
+					sum += (nearestOther - within) / scale;
+				}
+			}
+		}
+		return sum / data.n;
 	}
 
 	private double[][] normalizedJobDistances() {
@@ -383,6 +522,76 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			this.jobs = jobs;
 			this.mask = mask;
 			this.value = value;
+		}
+	}
+
+	private static final class ClusterBuild {
+		final List<BitSet> branchingClusters;
+		final ClusterPartitionDiagnostics diagnostics;
+
+		ClusterBuild(List<BitSet> branchingClusters, ClusterPartitionDiagnostics diagnostics) {
+			this.branchingClusters = branchingClusters;
+			this.diagnostics = diagnostics;
+		}
+	}
+
+	/** 静态Cluster partition的结构质量统计，只用于日志和离线门槛分析。 */
+	public static final class ClusterPartitionDiagnostics {
+		private final int clusterCount;
+		private final List<Integer> clusterSizes;
+		private final int nontrivialClusterCount;
+		private final double setupOnlySilhouette;
+		private final double maximumClusterShare;
+		private final double singletonJobShare;
+		private final double meanIntraClusterSetup;
+		private final double meanInterClusterSetup;
+		private final double interIntraSetupRatio;
+		private final double mstCutThreshold;
+
+		ClusterPartitionDiagnostics(int clusterCount, List<Integer> clusterSizes, int nontrivialClusterCount,
+				double setupOnlySilhouette, double maximumClusterShare, double singletonJobShare,
+				double meanIntraClusterSetup, double meanInterClusterSetup, double interIntraSetupRatio,
+				double mstCutThreshold) {
+			this.clusterCount = clusterCount;
+			this.clusterSizes = Collections.unmodifiableList(new ArrayList<Integer>(clusterSizes));
+			this.nontrivialClusterCount = nontrivialClusterCount;
+			this.setupOnlySilhouette = setupOnlySilhouette;
+			this.maximumClusterShare = maximumClusterShare;
+			this.singletonJobShare = singletonJobShare;
+			this.meanIntraClusterSetup = meanIntraClusterSetup;
+			this.meanInterClusterSetup = meanInterClusterSetup;
+			this.interIntraSetupRatio = interIntraSetupRatio;
+			this.mstCutThreshold = mstCutThreshold;
+		}
+
+		public List<String> configurationLines() {
+			ArrayList<String> lines = new ArrayList<String>();
+			lines.add("run.clusterDiagnostics.clusterCount=" + clusterCount);
+			lines.add("run.clusterDiagnostics.clusterSizes=" + clusterSizes);
+			lines.add("run.clusterDiagnostics.nontrivialClusterCount=" + nontrivialClusterCount);
+			lines.add("run.clusterDiagnostics.setupOnlySilhouette=" + format(setupOnlySilhouette));
+			lines.add("run.clusterDiagnostics.maximumClusterShare=" + format(maximumClusterShare));
+			lines.add("run.clusterDiagnostics.singletonJobShare=" + format(singletonJobShare));
+			lines.add("run.clusterDiagnostics.meanIntraClusterSetup=" + format(meanIntraClusterSetup));
+			lines.add("run.clusterDiagnostics.meanInterClusterSetup=" + format(meanInterClusterSetup));
+			lines.add("run.clusterDiagnostics.interIntraSetupRatio=" + format(interIntraSetupRatio));
+			lines.add("run.clusterDiagnostics.mstCutThreshold=" + format(mstCutThreshold));
+			return Collections.unmodifiableList(lines);
+		}
+
+		public int getClusterCount() { return clusterCount; }
+		public List<Integer> getClusterSizes() { return clusterSizes; }
+		public int getNontrivialClusterCount() { return nontrivialClusterCount; }
+		public double getSetupOnlySilhouette() { return setupOnlySilhouette; }
+		public double getMaximumClusterShare() { return maximumClusterShare; }
+		public double getSingletonJobShare() { return singletonJobShare; }
+		public double getMeanIntraClusterSetup() { return meanIntraClusterSetup; }
+		public double getMeanInterClusterSetup() { return meanInterClusterSetup; }
+		public double getInterIntraSetupRatio() { return interIntraSetupRatio; }
+		public double getMstCutThreshold() { return mstCutThreshold; }
+
+		private static String format(double value) {
+			return Double.isFinite(value) ? String.format(Locale.US, "%.6f", value) : Double.toString(value);
 		}
 	}
 }

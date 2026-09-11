@@ -49,6 +49,8 @@
 
 ## 远端 Windows SSH 操作边界
 
+- 2026-09-11新增第三主机：`codex-runner@100.79.236.222`（`DESKTOP-AS7L732`），用户指定工作目录 `D:\ccxWork`；私钥为 `C:\Users\Changxin\.ssh\codex_solver_auto_ed25519`，known-hosts 文件为 `C:\Users\Changxin\.ssh\known_hosts`。该主机所有写入及运行仅限 `D:\ccxWork` 子树，必须使用 `BatchMode=yes`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes` 和上述专用 `UserKnownHostsFile`，不得与另外两台主机的目录或指纹文件混用。
+
 - 2026-09-07新增第二主机：`codex-runner@100.68.243.192`，用户指定工作目录 `D:\ccx`；使用同一专用私钥和 `C:\Users\Changxin\.ssh\known_hosts`，仍严格验证指纹。该主机所有写入及运行仅限 `D:\ccx` 子树，其他安全边界与下述旧主机相同，不得混用两台主机的目录。
 
 - 远端主机为 `codex-runner@100.68.243.112`，私钥为 `C:\Users\Changxin\.ssh\codex_solver_auto_ed25519`，known-hosts 文件为 `C:\Users\Changxin\Downloads\solver_known_hosts`。连接时必须使用 `BatchMode=yes`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes` 和上述专用 `UserKnownHostsFile`，不得绕过主机指纹校验。

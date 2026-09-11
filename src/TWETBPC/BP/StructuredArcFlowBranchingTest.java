@@ -14,6 +14,7 @@ import TWETBPC.LP.LP;
 import TWETBPC.LP.Node;
 import TWETBPC.Model.ColumnSource;
 import TWETBPC.Model.TWETColumn;
+import TWETBPC.Model.TWETOutsourcingColumn;
 
 /** directed CutSet / Cluster 分支公共语义的轻量回归测试。 */
 public final class StructuredArcFlowBranchingTest {
@@ -37,16 +38,26 @@ public final class StructuredArcFlowBranchingTest {
 				"experiment-suite/formal/instances/data/n040-set02/family/base/zero/m4.dat", false);
 		for (BPCAlgorithmProfile profile : Arrays.asList(BestBpcProfiles.NG_DSSR,
 				BestBpcProfiles.TIME_INDEXED_GRAPH, BestBpcProfiles.TIME_INDEXED_GRAPH_RANK1)) {
-			TWETBPCConfig config = new TWETBPCConfig();
-			profile.apply(config);
-			config.enableClusterBranching = true;
-			config.clusterTemporalWeight = 0.0;
-			TWETBPCContext context = new TWETBPCContext(data, config);
-			require(context.branchers.stream().anyMatch(brancher -> brancher instanceof StructuredArcFlowBrancher),
-					profile.getName() + " assembles StructuredArcFlowBrancher");
-			require(context.runConfigurationLines().stream()
-					.anyMatch(line -> line.startsWith("run.clusterDiagnostics.setupOnlySilhouette=")),
-					profile.getName() + " reports cluster diagnostics");
+			for (String outsourcingModel : Arrays.asList("masterVariables", "columns")) {
+				TWETBPCConfig config = new TWETBPCConfig();
+				profile.apply(config);
+				config.outsourcingModel = outsourcingModel;
+				config.enableClusterBranching = true;
+				config.clusterTemporalWeight = 0.0;
+				TWETBPCContext context = new TWETBPCContext(data, config);
+				String description = profile.getName() + "/" + outsourcingModel;
+				require(context.branchers.stream().anyMatch(brancher -> brancher instanceof StructuredArcFlowBrancher),
+						description + " assembles StructuredArcFlowBrancher");
+				require(context.runConfigurationLines().stream()
+						.anyMatch(line -> line.startsWith("run.clusterDiagnostics.setupOnlySilhouette=")),
+						description + " reports cluster diagnostics");
+				require(context.pricingEngines.stream()
+						.anyMatch(engine -> "OutsourcingPricing".equals(engine.getName())) == config.useColumnizedOutsourcing(),
+						description + " assembles the matching outsourcing pricing family");
+				require(context.branchers.stream()
+						.anyMatch(brancher -> brancher instanceof OutsourcingMembershipBrancher) == config.useColumnizedOutsourcing(),
+						description + " assembles the matching outsourcing brancher");
+			}
 		}
 	}
 
@@ -113,6 +124,14 @@ public final class StructuredArcFlowBranchingTest {
 		constraint.addDualTo(dual, 3.25);
 		require(dual[1][2] == 3.25 && dual[4][2] == 3.25, "member arc dual expansion");
 		require(dual[2][3] == 0.0 && dual[3][2] == 0.0, "inside arcs excluded");
+		TWETOutsourcingColumn outsourcingColumn = new TWETOutsourcingColumn(0, Arrays.asList(2, 3), 5,
+				0.0, 0.0, ColumnSource.MANUAL, false);
+		require(constraint.outsourcingCoefficient(outsourcingColumn) == 0,
+				"cluster/cutset rows exclude outsourcing columns");
+		double[] outsourcingMembershipDual = new double[width];
+		constraint.addDualTo(new double[width][width], outsourcingMembershipDual, 4.5);
+		require(outsourcingMembershipDual[2] == 0.0 && outsourcingMembershipDual[3] == 0.0,
+				"cluster/cutset duals do not enter outsourcing pricing");
 
 		BitSet directedPair = new BitSet(width * width);
 		for (int from : new int[] { 2, 3 }) {

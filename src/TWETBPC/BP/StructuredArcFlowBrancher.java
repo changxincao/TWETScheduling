@@ -176,6 +176,11 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 				Node right = base.copy();
 				left.depth = right.depth = base.depth + 1;
 				left.pseudoCost = right.pseudoCost = currentLp.getLastSolution().getObjectiveValue();
+				if (upper == 0) {
+					// 2026-09-11: aggregate系数非负，Q<=0可直接禁止全部成员arc以收紧pricing域。
+					// 分支行仍保留，用来约束继承自父RMP、尚未按新域过滤的历史列。
+					applyZeroUpperBoundArcRestrictions(left, immutableMask, data.n + 2);
+				}
 				left.addAggregateArcConstraint(new AggregateArcBranchConstraint(family, description,
 						immutableMask, data.n + 2, false, upper));
 				right.addAggregateArcConstraint(new AggregateArcBranchConstraint(family, description,
@@ -184,6 +189,18 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 						"Branched on " + description + " value=" + value + " <= " + upper + " or >= " + lower);
 			}
 		});
+	}
+
+	static void applyZeroUpperBoundArcRestrictions(Node node, BitSet memberArcs, int arcWidth) {
+		for (int bit = memberArcs.nextSetBit(0); bit >= 0; bit = memberArcs.nextSetBit(bit + 1)) {
+			int from = bit / arcWidth;
+			int to = bit % arcWidth;
+			// 理论上fractional Q<1不会包含父节点required arc；若数值边界触发，保留required状态，
+			// 由同时存在的aggregate行把该子节点正确判为不可行，不能静默覆盖父分支。
+			if (node.getArcState(from, to) != Node.ARC_REQUIRED) {
+				node.forbidArc(from, to);
+			}
+		}
 	}
 
 	private boolean isFractional(double value) {

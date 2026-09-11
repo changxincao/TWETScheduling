@@ -20,10 +20,31 @@ public final class StructuredArcFlowBranchingTest {
 
 	public static void main(String[] args) throws Exception {
 		verifyAggregateCoefficientAndDualExpansion();
+		verifyZeroUpperBoundArcRestriction();
 		verifyHalfIntegerOrdering();
 		verifyNodeCopyIsolation();
 		verifyDefaultConfigurationIsOff();
 		System.out.println("StructuredArcFlowBranchingTest passed.");
+	}
+
+	private static void verifyZeroUpperBoundArcRestriction() throws Exception {
+		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(
+				"data/40-2/wet040_001_2m.dat", false);
+		int width = data.n + 2;
+		Node node = new Node(data, Collections.<Integer>emptyList(), Collections.<Integer>emptyList(), 0.0);
+		BitSet mask = new BitSet(width * width);
+		mask.set(2 * width + 3);
+		mask.set(4 * width + 5);
+		node.requireArc(4, 5);
+
+		StructuredArcFlowBrancher.applyZeroUpperBoundArcRestrictions(node, mask, width);
+
+		require(node.getArcState(2, 3) == Node.ARC_FORBIDDEN,
+				"Q<=0 directly forbids free member arcs");
+		require(node.getArcState(4, 5) == Node.ARC_REQUIRED,
+				"Q<=0 propagation does not overwrite inherited required arcs");
+		require(node.getArcState(3, 4) == Node.ARC_FREE,
+				"Q<=0 propagation leaves non-member arcs unchanged");
 	}
 
 	private static void verifyAggregateCoefficientAndDualExpansion() {

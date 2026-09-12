@@ -42,3 +42,16 @@ CutSet侧也没有消除这一类开销，其节点107的两次无列exact repai
 旧 random-like `40-2` 的负结果仍成立，但不能迁移到正式 `F<m` family。当前三个同任务集对照表明：当 Cluster aggregate 已整数而 family 内仍存在分数子结构时，动态 CutSet 作为下一层 fallback 可以比逐条 Arc 更快处理集合边界，两个难例均明显缩树。
 
 证据尚不足以把 CutSet 设为所有算例默认分支。当前 separator 仍会产生嵌套集合，aggregate strong trial 和 Phase-I repair 也明显更贵。下一步若继续，应限定在静态 family partition 清晰、`F<m`、Cluster 后仍形成长树的子集，补不同 set/规模的同 seed 对照；不应据这三个实例推广到 random、`F>m` 或根 pricing 主导的算例。本次未修改候选生成或正式 profile，也未操作远端任务。
+
+## 5. random 无 Cluster 的长算例复核
+
+为避免前一批 `n40` random 对照只有 `15--79s`、不足以观察长树收益，补充两个 `n50/m2/random/base/zero` 完整 BPC。两组均使用正式 profile `2026-09-12-v8`、同一实例和共享 ALNS seed、强分支及 root preprocessing，单次上限 `3600s`。Cluster 明确关闭；Arc 侧关闭 CutSet，CutSet 侧采用严格 `CutSet -> Arc` 回退。配置快照逐项核对后，除运行名、输出路径、`enableCutSetBranching` 及由此装配的 brancher 外没有差异。四次运行均闭合最优，目标和排程复核通过。
+
+| 算例 | Arc | CutSet -> Arc | 总时间变化 | pricing轮数变化 |
+| --- | --- | --- | --- | --- |
+| `n50-set03/m2` | `157.593s`，14节点 | `266.929s`，24节点 | `+69.4%` | `1023 -> 1525` |
+| `n50-set05/m2` | `790.366s`，32节点 | `1448.208s`，60节点 | `+83.2%` | `2651 -> 4468` |
+
+恶化不只是 aggregate strong trial 更贵。set03 的 strong-trial RMP 由 `13.573s/400次` 增至 `43.405s/520次`，set05 由 `34.689s/1000次` 增至 `150.042s/1680次`；即使扣除这部分增量，总时间仍分别多约 `80s` 和 `542s`。真正主导差距的是树和定价调用一起增加：set03 的 NG-DSSR exact 由 `72.461s/197次` 增至 `124.797s/295次`，set05 由 `520.087s/531次` 增至 `897.072s/995次`。set05 的 master LP 也由 `75.627s` 增至 `231.532s`，是更多节点、更多列和更多 strong trials 的共同结果。
+
+因此，当前动态 CutSet 不能作为 random 的默认分支。它在两个几分钟至二十余分钟的 random 长算例上都没有缩树，反而使左右 child 更常存活，节点约增加 `71%--88%`。这与 family `F<m` 的正结果边界一致：CutSet 的价值依赖可识别的局部集合边界；random 缺少稳定 family 分区时，当前贪婪集合没有形成比单 Arc 更强的高层析取。原始日志和完整 CSV 位于 `.codex-tmp/cutset-random-large-20260912/`，汇总另存为 `docs/logs/data/20260912-cutset-random-large.csv`。

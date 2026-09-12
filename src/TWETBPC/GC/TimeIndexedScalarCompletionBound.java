@@ -151,6 +151,17 @@ public final class TimeIndexedScalarCompletionBound {
 			this.maxByJob = maxByJob;
 		}
 	}
+
+	/** no-SRI窗口统计和节点写回复用同一次可达状态扫描。 */
+	private static final class WindowApplication {
+		final WindowReachabilityStats stats;
+		final int tightenedJobs;
+
+		WindowApplication(WindowReachabilityStats stats, int tightenedJobs) {
+			this.stats = stats;
+			this.tightenedJobs = tightenedJobs;
+		}
+	}
 	private final Data data;
 	private final TWETBPCConfig config;
 	private final LP lp;
@@ -168,6 +179,9 @@ public final class TimeIndexedScalarCompletionBound {
 	private final double[] originalWindowStartByJob;
 	private final double[] originalWindowEndByJob;
 	private final int[][] durationByArc;
+	private final double[] jobDualSnapshot;
+	private final double[][] arcDualSnapshot;
+	private final double machineDualSnapshot;
 	private final boolean[][] processArcForbidden;
 	private final boolean[] endForbidden;
 	private final Node.TimeIndexedArcLookup inheritedTimeIndexedArcLookup;
@@ -300,6 +314,9 @@ public final class TimeIndexedScalarCompletionBound {
 			this.suffixAfterByJob = null;
 			this.penaltyByJobTime = null;
 			this.durationByArc = null;
+			this.jobDualSnapshot = null;
+			this.arcDualSnapshot = null;
+			this.machineDualSnapshot = 0.0;
 			this.processArcForbidden = null;
 			this.endForbidden = null;
 			this.available = false;
@@ -313,6 +330,9 @@ public final class TimeIndexedScalarCompletionBound {
 		this.suffixAfterByJob = buildScalarCaches ? new double[n + 1][] : null;
 		this.penaltyByJobTime = new double[n + 1][width];
 		this.durationByArc = new int[n + 1][n + 1];
+		this.jobDualSnapshot = new double[n + 1];
+		this.arcDualSnapshot = new double[n + 1][sink + 1];
+		this.machineDualSnapshot = lp.getMachineDual();
 		this.processArcForbidden = new boolean[n + 1][n + 1];
 		this.endForbidden = new boolean[n + 1];
 		long start = System.nanoTime();
@@ -975,8 +995,9 @@ public final class TimeIndexedScalarCompletionBound {
 		if (fixed > 0 && prefixBeforeByJob != null) {
 			buildScalarCaches();
 		}
-		WindowReachabilityStats windowStats = summarizeReachableWindows();
-		int nodeWindowTightened = applyReachableWindowsToNode();
+		WindowApplication windowApplication = analyzeAndApplyReachableWindows();
+		WindowReachabilityStats windowStats = windowApplication.stats;
+		int nodeWindowTightened = windowApplication.tightenedJobs;
 		long nodeTimeArcFixedBefore = node.countTimeIndexedPricingOnlyForbiddenArcsLong();
 		long nodeTimeArcFixedAfter = writeLocalFixedArcsToNode();
 		long nodeTimeArcNewlyFixed = nodeTimeArcFixedAfter - nodeTimeArcFixedBefore;
@@ -1128,36 +1149,10 @@ public final class TimeIndexedScalarCompletionBound {
 						topOldStart, topOldEnd));
 		return new SriWindowReachability(stats, minByJob, maxByJob);
 	}
-	private int applyReachableWindowsToNode() {
-		if (!exactIntegerTime || !config.timeIndexedCompletionBoundWindowTightening) {
-			return 0;
-		}
-		int tightened = 0;
-		for (int job = 1; job <= n; job++) {
-			int min = -1;
-			int max = -1;
-			for (int t = 0; t <= horizon; t++) {
-				if (isFinite(forward[index(job, t)]) && isFinite(backward[index(job, t)])) {
-					if (min < 0) {
-						min = t;
-					}
-					max = t;
-				}
-			}
-			if (min < 0) {
-				if (node.tightenTimeIndexedPricingWindow(job, 1, 0)) {
-					tightened++;
-				}
-			} else if (node.tightenTimeIndexedPricingWindow(job, min, max)) {
-				tightened++;
-			}
-		}
-		return tightened;
-	}
-
-	private WindowReachabilityStats summarizeReachableWindows() {
+	private WindowApplication analyzeAndApplyReachableWindows() {
 		int reachable = 0;
 		int tightened = 0;
+		int nodeTightened = 0;
 		int unreachable = 0;
 		double originalPointSum = 0.0;
 		double hullPointSum = 0.0;
@@ -1190,6 +1185,10 @@ public final class TimeIndexedScalarCompletionBound {
 			}
 			if (count == 0) {
 				unreachable++;
+				if (exactIntegerTime && config.timeIndexedCompletionBoundWindowTightening
+						&& node.tightenTimeIndexedPricingWindow(job, 1, 0)) {
+					nodeTightened++;
+				}
 				continue;
 			}
 			reachable++;
@@ -1202,14 +1201,19 @@ public final class TimeIndexedScalarCompletionBound {
 			if (min > originalStart || max < originalEnd) {
 				tightened++;
 			}
+			if (exactIntegerTime && config.timeIndexedCompletionBoundWindowTightening
+					&& node.tightenTimeIndexedPricingWindow(job, min, max)) {
+				nodeTightened++;
+			}
 			recordTopWindowShrink(topJob, topShrink, topMin, topMax, topCount, topOldStart, topOldEnd,
 					job, shrink, min, max, count, originalStart, originalEnd);
 		}
 		double divisor = Math.max(1, reachable);
-		return new WindowReachabilityStats(exactIntegerTime, reachable, tightened, unreachable,
+		WindowReachabilityStats stats = new WindowReachabilityStats(exactIntegerTime, reachable, tightened, unreachable,
 				originalPointSum / divisor, hullPointSum / divisor, reachablePointSum / divisor,
 				maxShrink, formatTopWindowShrink(topJob, topShrink, topMin, topMax, topCount,
 						topOldStart, topOldEnd));
+		return new WindowApplication(stats, nodeTightened);
 	}
 
 	private int discreteWindowStart(int job) {
@@ -1270,6 +1274,14 @@ public final class TimeIndexedScalarCompletionBound {
 	}
 
 	private void precomputeStaticData(double[] hStartByJob, double[] hEndByJob) {
+		for (int job = 1; job <= n; job++) {
+			jobDualSnapshot[job] = lp.getJobDual(job);
+		}
+		for (int from = 0; from <= n; from++) {
+			for (int to = 0; to <= sink; to++) {
+				arcDualSnapshot[from][to] = lp.getArcDual(from, to);
+			}
+		}
 		for (int job = 0; job <= n; job++) {
 			Arrays.fill(penaltyByJobTime[job], INF);
 		}
@@ -1398,15 +1410,16 @@ public final class TimeIndexedScalarCompletionBound {
 		if (!isFinite(penalty)) {
 			return INF;
 		}
-		double cost = data.getSetupCost(from, to) + penalty - lp.getJobDual(to) - lp.getArcDual(from, to);
+		double cost = data.getSetupCost(from, to) + penalty
+				- jobDualSnapshot[to] - arcDualSnapshot[from][to];
 		if (from == 0) {
-			cost -= lp.getMachineDual();
+			cost -= machineDualSnapshot;
 		}
 		return cost;
 	}
 
 	private double sinkArcReducedCost(int lastJob) {
-		return -lp.getArcDual(lastJob, sink);
+		return -arcDualSnapshot[lastJob][sink];
 	}
 
 	private boolean isEndAllowed(int lastJob, int time) {
@@ -1419,7 +1432,8 @@ public final class TimeIndexedScalarCompletionBound {
 	}
 
 	private void forbidLocalTimeIndexedArc(int from, int to, int time) {
-		localFixedTimeIndexedArc.set(from, to, time);
+		// 所有调用点都先通过isTimeIndexedArcForbidden确认该位不存在，避免重复BitSet.get。
+		localFixedTimeIndexedArc.setKnownAbsent(from, to, time);
 	}
 
 	private double relaxedBucketPenalty(int job, int time, double hStart, double hEnd) {

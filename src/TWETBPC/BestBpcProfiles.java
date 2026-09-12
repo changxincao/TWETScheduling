@@ -7,7 +7,7 @@ import java.util.Objects;
  */
 public final class BestBpcProfiles {
 	/** 写入正式实验结果，便于服务器侧确认三组运行使用同一套参数。 */
-	public static final String VERSION = "2026-09-12-v7";
+	public static final String VERSION = "2026-09-12-v8";
 
 	public static final BPCAlgorithmProfile TIME_INDEXED_GRAPH = new BPCAlgorithmProfile(
 			"timeIndexedGraph", true, false, false, config -> applyTimeIndexedDefaults(config, false));

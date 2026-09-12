@@ -1270,7 +1270,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 		}
 
 		private void forbidLocalTimeIndexedArc(int from, int to, int time) {
-			localFixedTimeIndexedArc.set(from, to, time);
+			// 所有调用点都先通过isTimeIndexedArcForbidden确认该位不存在，避免重复BitSet.get。
+			localFixedTimeIndexedArc.setKnownAbsent(from, to, time);
 		}
 
 		private boolean shouldUsePricingOnlyArcs() {

@@ -74,6 +74,28 @@ public final class TimeIndexedArcSet {
 		}
 	}
 
+	/**
+	 * 调用方已经确认该弧尚未写入时使用，避免fixing热循环对同一BitSet重复执行get。
+	 * 开启JVM断言时仍检查调用约定；普通调用继续使用具备幂等语义的{@link #set(int, int, int)}。
+	 */
+	public void setKnownAbsent(int from, int to, int time) {
+		assert !get(from, to, time) : "time-indexed arc already present";
+		if (flatBits != null) {
+			flatBits.set(flatIndex(from, to, time));
+			cardinality++;
+			return;
+		}
+		ensureSegmentedAvailable();
+		int pair = pairIndex(from, to);
+		BitSet times = timesByPair[pair];
+		if (times == null) {
+			times = new BitSet();
+			timesByPair[pair] = times;
+		}
+		times.set(time);
+		cardinality++;
+	}
+
 	public boolean isEmpty() {
 		return cardinality == 0L;
 	}

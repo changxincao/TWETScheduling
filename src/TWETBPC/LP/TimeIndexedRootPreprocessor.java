@@ -18,7 +18,6 @@ import TWETBPC.GC.PricingEngine;
 import TWETBPC.GC.PricingMode;
 import TWETBPC.GC.PricingResult;
 import TWETBPC.GC.TimeIndexedGraphPricingEngine;
-import TWETBPC.GC.TimeIndexedScalarCompletionBound;
 import TWETBPC.IO.TWETColumnEvaluator;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Model.TWETMasterSolution;
@@ -118,8 +117,6 @@ final class TimeIndexedRootPreprocessor {
 			}
 			TimeIndexedGraphPricingEngine.ArcFixingResult graphFix =
 					prePc.applyTimeIndexedGraphArcFixing(preLp, incumbentCost);
-			TimeIndexedScalarCompletionBound.ArcFixingResult scalarFix =
-					TimeIndexedScalarCompletionBound.applyArcFixing(data, preConfig, preLp, incumbentCost);
 			root.copyTimeIndexedPricingStateFrom(preRoot);
 			int promotedOrdinaryArcs =
 					TimeIndexedGraphPricingEngine.promoteFullyForbiddenTimeIndexedArcsToPricingOnly(data, preLp, root);
@@ -127,7 +124,7 @@ final class TimeIndexedRootPreprocessor {
 			return Result.applied(prePool.size(), preRoot.countTimeIndexedPricingOnlyForbiddenArcsLong(), promotedOrdinaryArcs,
 					preRoot.countTimeIndexedPricingWindowTightenedJobs(), preRoot.averageTimeIndexedPricingWindowLength(),
 					preRoot.averageTimeIndexedPricingWindowShrinkRatio(), seedColumnsCopied, rootStats.summary(),
-					graphFix.summary(), scalarFix.summary(), System.nanoTime() - start);
+					graphFix.summary(), "not-run: redundant after graphFix", System.nanoTime() - start);
 		} finally {
 			preLp.closeModel();
 		}

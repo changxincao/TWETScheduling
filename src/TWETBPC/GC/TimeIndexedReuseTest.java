@@ -25,6 +25,7 @@ public final class TimeIndexedReuseTest {
 
 	public static void main(String[] args) throws Exception {
 		testFixingCache();
+		testScalarFixingMatchesGraphFixing();
 		String property = "twet.bpc.packedRank1Residual";
 		String original = System.getProperty(property);
 		try {
@@ -70,6 +71,9 @@ public final class TimeIndexedReuseTest {
 		config.useTimeIndexedGraphRank1CutPricing = true;
 		config.enableTimeIndexedGraphDualWindow = false;
 		config.timeIndexedGraphMaxExactPricingColumns = 12;
+		config.timeIndexedCompletionBoundScalarEnhancement = true;
+		config.timeIndexedCompletionBoundArcFixing = true;
+		config.timeIndexedCompletionBoundWindowTightening = true;
 		return config;
 	}
 
@@ -130,6 +134,51 @@ public final class TimeIndexedReuseTest {
 			} finally {
 				fresh.closeModel();
 				cached.closeModel();
+			}
+		}
+	}
+
+	/** NG辅助fixing必须与TI论文版在整数时间实例上删除完全相同的时空弧。 */
+	private static void testScalarFixingMatchesGraphFixing() throws Exception {
+		Data data = tinyData();
+		TWETBPCConfig config = config();
+		for (int variant = 0; variant < 3; variant++) {
+			LP graph = lp(data, config);
+			LP scalar = lp(data, config);
+			try {
+				for (LP current : List.of(graph, scalar)) {
+					if (variant > 0) current.getNode().tightenTimeIndexedPricingWindow(1, 25, 65);
+					if (variant > 1) current.getNode().forbidTimeIndexedPricingOnlyArc(1, 2, 40);
+				}
+				double ub = graph.getLastSolution().getObjectiveValue() + 30;
+				var graphResult = TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(data, config, graph, ub);
+				var scalarResult = TimeIndexedScalarCompletionBound.applyArcFixing(data, config, scalar, ub);
+				if (!graphResult.isAvailable() || !scalarResult.isAvailable()
+						|| graphResult.getFixedLong() != scalarResult.fixed
+						|| graphResult.getNodeTimeArcFixedAfterLong() != scalarResult.nodeTimeArcFixedAfter) {
+					throw new AssertionError("scalar fixing changed graph fixing counts");
+				}
+				for (int from = 0; from <= data.n; from++) {
+					for (int to = 0; to <= data.n; to++) {
+						for (int t = 0; t <= data.CmaxH; t++) {
+							if (graph.getNode().isTimeIndexedPricingOnlyArcForbidden(from, to, t)
+									!= scalar.getNode().isTimeIndexedPricingOnlyArcForbidden(from, to, t)) {
+								throw new AssertionError("scalar fixing changed a forbidden arc");
+							}
+						}
+					}
+				}
+				for (int job = 1; job <= data.n; job++) {
+					if (graph.getNode().getTimeIndexedPricingWindowStart(job)
+							!= scalar.getNode().getTimeIndexedPricingWindowStart(job)
+							|| graph.getNode().getTimeIndexedPricingWindowEnd(job)
+									!= scalar.getNode().getTimeIndexedPricingWindowEnd(job)) {
+						throw new AssertionError("scalar fixing changed a compact window");
+					}
+				}
+			} finally {
+				graph.closeModel();
+				scalar.closeModel();
 			}
 		}
 	}

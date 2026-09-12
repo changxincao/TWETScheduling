@@ -229,3 +229,17 @@ Silva、Uchoa和Subramanian（2025）的公开VRPTW代码没有重新设计CutSe
 对CutSet本身，论文没有给出同等层次的适用性机制或启用判据。CutSet是既有基线，CVRPSep只按当前LP的分数edge flow搜索`omega_S`接近目标的集合，不检查空间cluster、路线稳定性或重优化后的集合含义。论文只给出三类相关观察：总体上长路线或超长路线实例中CutSet更可能优于Edge；VRPTW中clustered和random-clustered类的纯CutSet优于Edge；CMT13根节点的CVRPSep曾偶然命中真实cluster并取得高score，但后续没有重复。由此只能总结经验规律，不能从论文得到“满足某项静态指标就应开启CutSet”的规则。
 
 他们实际使用Cluster时也不是先判断实例属于clustered便强制选择Cluster。聚类划分由MST、K-means、K-medoids或DBSCAN等方法预先构造；每个节点只把当前值为分数的`omega_C`和`psi_CD`加入第一阶段strong branching候选表，再用原有Edge或CutSet候选填满固定预算。第一阶段粗测候选两侧，第二阶段精测少数最好候选，最终仍由strong score选择分支类型。因此Cluster提供的是新的高层候选，不是替代strong branching的硬规则。不同聚类方法和基础分支类型通过独立配置运行后做实验比较。
+
+## 14. 当前TWET Cluster与原文的对应关系，以及它和CutSet的粗细层次
+
+当前TWET实现与Silva、Uchoa和Subramanian（2025）的Cluster Branching在核心数学步骤上是一致的，但属于面向有向调度的适配，不是原代码的逐项复现。原文先从实例静态数据得到客户partition，再在每个节点计算cluster boundary flow与cluster-pair flow；只把当前取分数值的aggregate变量作为strong branching候选，并最终回退到既有Edge或CutSet。当前TWET同样先建立一次静态partition，再生成`clusterBoundary`和`clusterPair`候选，对分数值执行`floor/ceil`分支，约束系数都是原有有向Arc系数，因此仍是robust branching，且三类pricing均可直接读取。
+
+具体实现存在四项有意差异。第一，论文比较MST、K-means、K-medoids和DBSCAN等空间聚类；TWET当前只使用MST，并用`mean + theta * std`切断较长MST边。类中通用默认距离允许混合setup与due-center，但正式Cluster实验清单都显式设置`clusterTemporalWeight=0.0`，实际partition是setup-only：使用双向setup均值构造对称距离。第二，论文基于无向VRP edge；TWET的`clusterBoundary(C)`统计从集合外进入`C`的有向流，`clusterPair(C,D)`又拆成`C->D`和`D->C`两个候选，以保留不对称setup及PWLF后缀成本的方向差异。第三，论文把Cluster候选加入原strong-branching候选表并用基础Edge/CutSet填满固定预算；当前正式实验启用`structuredArcStrictTypePriority=true`，执行严格的`Cluster -> CutSet -> Arc`分层，只要当前层存在分数候选就不让下一层竞争，因此比原文更激进。第四，当前实现没有原文多种partition的横向选择，也没有按silhouette自动关闭Cluster；这些指标目前只输出供离线分析。
+
+Cluster与CutSet的关系必须分成两部分。对cluster boundary候选，确实可以把Cluster看成静态、结构先验驱动的CutSet特例：Cluster预先规定少量明显集合`C`，每个节点只检查这些集合的进入流；CutSet则根据当前LP support动态搜索任意`S`。因此CutSet可能在完整family之后继续找到family内部更小子集、多个family的并集或其他残余分数块，而Cluster主要先处理最容易由setup结构识别的粗粒度集合。
+
+但整个Cluster Branching并不是CutSet的特例。`clusterPair(C,D)`直接统计两个指定cluster之间的有向连接总量；一般不存在一个集合`S`，使其边界流恰好只等于`C->D`。所以Cluster还提供了CutSet没有的“两个已知结构块之间使用多少连接”这一类候选。
+
+“CutSet可以继续找更小、可能归一台机器的分类”作为无外包场景下的直觉基本正确。当前TWET的`z(S)`统计所有机器序列进入`S`的总次数。在无外包整数解中，所有`S`内任务都必须由内部路线覆盖，所以`z(S)<=1`会强制恰好一台机器触及`S`，且`S`在该机器上形成一个连续片段；`z(S)>=2`则表示至少两次进入，既可能是多台机器分别触及，也可能是同一台机器离开后再次进入。不能保证的是动态候选生成器找到的`S`本身一定对应有意义的机器块。若允许外包且CutSet不把`OUT`计入系数，`z(S)<=1`也不能再表示整个`S`都由同一台内部机器加工。现有无外包family实验确实显示Cluster之后选中的CutSet常是family内部约5至6个任务的子集，zero场景节点由334降至151，支持“静态整family之后再动态处理内部残余块”的分层解释；但random中CutSet多退化为二元或三元无向相邻分支并明显变慢，说明动态搜索本身不保证找到有意义的细分类。
+
+因此目前最准确的概括是：`clusterBoundary`负责由静态setup结构直接识别的粗粒度集合，动态CutSet可尝试处理这些集合内部或它们组合后的残余分数片段，最后由有向Arc解决具体顺序；`clusterPair`则额外直接处理两个结构块之间的aggregate连接。这个`Cluster -> CutSet -> Arc`层次在family数据上有清楚的结构解释，但CutSet层的正收益目前只在部分算例成立，仍不能提升为正式默认结论。

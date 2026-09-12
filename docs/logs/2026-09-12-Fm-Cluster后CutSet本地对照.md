@@ -55,3 +55,15 @@ CutSet侧也没有消除这一类开销，其节点107的两次无列exact repai
 恶化不只是 aggregate strong trial 更贵。set03 的 strong-trial RMP 由 `13.573s/400次` 增至 `43.405s/520次`，set05 由 `34.689s/1000次` 增至 `150.042s/1680次`；即使扣除这部分增量，总时间仍分别多约 `80s` 和 `542s`。真正主导差距的是树和定价调用一起增加：set03 的 NG-DSSR exact 由 `72.461s/197次` 增至 `124.797s/295次`，set05 由 `520.087s/531次` 增至 `897.072s/995次`。set05 的 master LP 也由 `75.627s` 增至 `231.532s`，是更多节点、更多列和更多 strong trials 的共同结果。
 
 因此，当前动态 CutSet 不能作为 random 的默认分支。它在两个几分钟至二十余分钟的 random 长算例上都没有缩树，反而使左右 child 更常存活，节点约增加 `71%--88%`。这与 family `F<m` 的正结果边界一致：CutSet 的价值依赖可识别的局部集合边界；random 缺少稳定 family 分区时，当前贪婪集合没有形成比单 Arc 更强的高层析取。原始日志和完整 CSV 位于 `.codex-tmp/cutset-random-large-20260912/`，汇总另存为 `docs/logs/data/20260912-cutset-random-large.csv`。
+
+## 6. random 下 CutSet 失效的机制
+
+当前 CutSet 对任务集合 `S` 统计进入流 `z(S)`，当 `z(S)=k+f` 时分成 `z(S)<=k` 与 `z(S)>=k+1`。这一分支只有在 `S` 对应稳定的路线块时才强：左右侧分别代表该块由较少或较多条路线进入，改变的是高层路线组织。random setup 下没有稳定块，当前 separator 只能从本轮 LP support graph 动态猜集合。它从每个 singleton seed 出发，每次加入与现集合双向 support flow 最大的任务，保存所有分数 prefix，再按进入量接近半整数排序。该 affinity 最大化的是集合内连接量，不直接最大化分支后的 child bound，也不保证集合在 dual 更新后仍有相同结构意义。
+
+因此，random 下得到的 `S` 往往只是当前分数解中的偶然路线片段。限制其进入次数后，pricing 可以换一个边界任务、换一条进入弧或重新组合路线，继续满足 `z(S)<=k` 或 `z(S)>=k+1`，但真实成本变化很小。候选值接近 `1.5/2.5/3.5` 只说明数值上左右距离接近，不代表两侧 bound gain 都大。set03 根节点就是直接证据：Arc 的同根 strong-branching 第一阶段 RMP trial gain 为约 `396/1806`，score约 `715015`；CutSet 虽取值 `1.4954`，两侧 gain 只有约 `384/541`，score约 `207727`。它的弱侧与 Arc 类似，但强侧少了约三分之二的提升。
+
+Arc 还具有 CutSet 没有的域传播。禁止一条 Arc 会从图中删除该弧；要求 `i->j` 会同时禁止 `i` 的其他后继和 `j` 的其他前驱，直接缩小后续 pricing 图。当前被选 CutSet 的值大多大于1，左右界通常是 `<=1/>=2` 或更高，因此不会触发仅适用于 `Q<=0` 的成员弧直接禁用；两侧基本保留完整图，只多一条 aggregate row。由此每个 child 仍需在大量替代边上重新做 exact pricing。aggregate candidate 还不能使用 Arc 的 lightweight/domain strong-trial 路径，但这只是次要放大项；扣除 strong-trial 增量后总时间仍明显增加。
+
+两个算例的恶化程度不同，主要因为弱分支被放大的次数和单次 pricing 成本不同。set03 根 gap 约 `0.32%`，CutSet只实际分支13次；选中集合平均5.46个任务，其中7/13不超过3个任务。set05 根 gap 约 `1.02%`，CutSet分支42次；选中集合平均仅3.31个任务，30/42不超过3个任务，21个就是二元集合。`9-14`、`17-18`、`21-42`等六个集合还在不同子树重复被选，说明根分支没有消除这些相互独立的小块歧义。set05 的队列峰值因此由Arc的24升至41；同时NG-DSSR单次exact平均约 `0.90--0.98s`，明显高于set03的 `0.37--0.42s`。同样的弱分支不仅多产生28个节点，而且每个新增节点更贵，最终形成 `790s -> 1448s` 的差距。
+
+这也解释了它与 `F<m` family 正结果的区别。family 中先经过 Cluster 后，残余 support 集合仍可能与真实低setup块或其子块一致，CutSet有机会一次约束一批可替代边，并避开坏子树或重Phase-I repair。random 中 support 集合随dual和列池变化，没有稳定成本边界；CutSet约束的是本轮分数流的形状，而不是持续存在的调度结构。严格 `CutSet -> Arc` 又使任何分数CutSet存在时都不让Arc参加同节点竞争，放大了候选质量问题。若改为混合候选，强分支大概率会过滤掉不少CutSet，能够降低当前劣化，但现有结果没有证据说明它会比纯Arc更快。

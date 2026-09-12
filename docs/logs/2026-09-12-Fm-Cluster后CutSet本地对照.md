@@ -191,3 +191,31 @@ z(S)=\sum_{i\notin S,j\in S}y_{ij}.
 因此当前实现适合作为结构清晰family树上的实验性Cluster后回退，不适合作为全部算例的默认CutSet。已有TWET数据也支持这一边界：family zero中`Cluster -> CutSet -> Arc`把节点从334降到151，但wide只从26降到21；两个无Cluster random长算例反而分别从14增至24、从32增至60。若后续要形成真正general的CutSet separator，优先项应是围绕`|z(S)-(floor(z(S))+0.5)|`执行add/remove/swap局部搜索、去除高度嵌套候选并保留Jaccard多样性、将二元候选与有向Arc放回同一strong池竞争，并分别记录集合规模、分数层级和同节点child gain。现有证据不足以先修改正式主线。
 
 2025年论文对适用性给出的是经验结论，不是CutSet自动启用判据。纯CSB在CMT13上比Edge强，但24小时后仍只探索估计树的3.75%，总时间估计26.7天；加入Cluster后才在约2小时内闭合。大规模实验中，纯CSB在clustered和random-clustered VRPTW上优于Edge，而Edge在random类更好；超长路线CVRP中CSB相对更强。对大型完全random实例，纯Edge也可能优于CSB。论文由此说明CSB更可能受益于有结构的客户集合或长路线，但没有提出可验证的CutSet适用条件，也没有证明“接近半整数”足以产生强分支。论文明确提出的结构适用性分析主要针对其新方法Cluster Branching，而不是对CVRPSep CutSet建立新的理论分类。
+
+## 12. CVRPSep的真实候选生成与`|x(delta(S))-3|/q(S)`
+
+Lysgaard、Letchford和Eglese（2004）的候选排序应结合分支两侧理解。候选满足`2<x(delta(S))<4`，分支为`x(delta(S))=2`和`x(delta(S))>=4`。当前值越接近3，离两侧边界越对称；若当前值为2.1，等于2的一侧几乎不改变LP，而大于等于4的一侧很远，分支明显失衡。因此分子`|x(delta(S))-3|`越小越优先。
+
+分母`q(S)`是集合总需求。CVRPSep只允许贪婪集合满足`q(S)<=Q`，因为`x(delta(S))=2`表示由一辆车服务该集合；若需求已经超过车辆容量，这一侧本来就被容量约束排除。对同样接近3的候选，除以`q(S)`会优先较大需求集合。其结构解释是：当`q(S)`接近容量时，单车侧剩余容量更小，集合与外部客户重新组合的自由度更低；另一侧则强制至少两辆车触及该集合，因此这一析取通常比很小需求集合更具全局影响。原文没有单独证明或解释这个除法，所以这应表述为与CVRP容量结构一致的启发式解释，而不是定理。公开源码还在分子加`0.0001`后再除以需求，使多个恰好命中目标3的候选明确优先总需求更大的集合。
+
+公开CVRPSep的`BRNCHING_GetCandidateSets`并不是简单地“不断加入内部连接最强的点”。其实际流程如下。
+
+1. 输入当前LP中取正值的无向support edges、客户需求、车辆容量和已有的一车容量cuts。
+2. 先压缩support graph：把`x_e>=0.999`的边连接成supernodes；还会利用接近整数的三点结构和紧的一车容量cut继续压缩。每个supernode的需求是内部客户需求之和。
+3. 对每个supernode分别作为seed，令当前集合为`S`。候选只从当前support邻居中选择，并始终要求加入后`q(S)<=Q`。
+4. 若加入相邻supernode `v`，边界按
+
+   \[
+   x(\delta(S\cup\{v\}))
+   =x(\delta(S))+x(\delta(v))-2x(S,v)
+   \]
+
+   增量更新。每一步选择使新边界最接近目标3的`v`，保存该prefix，再扩充support frontier。这里已经同时考虑了`v`的外部边界和它与`S`的内部连接，不等于只最大化`x(S,v)`。
+5. 展开supernodes后，仅保留需求不超过容量、规模大于2、边界严格位于约`(2,4)`并满足相应内部流范围的集合。同时把所有分数customer edge显式加入为二元集合候选，保证Edge型候选不会因贪婪扩张漏掉。
+6. 所有候选按`(|x(delta(S))-3|+0.0001)/q(S)`升序排序，截取调用者要求的最大数量。
+
+Silva、Uchoa和Subramanian（2025）的公开VRPTW代码没有重新设计CutSet separator，而是直接调用上述CVRPSep例程：目标设为3，最多请求`n`个集合，只传递当前LP中取正值的无向edge flow。CVRPSep返回集合和`x(delta(S))`后，代码计算`omega_S=x(delta(S))/2`，只接受其小数部分位于`(0.1,0.9)`的候选，并构造`0.5`乘全部cut edges的branching expression。若同时启用Cluster Branching，则删除与已知cluster完全相同的CutSet，避免重复候选；其余候选交给BaPCod的strong branching候选机制。论文中的两阶段strong branching在第一阶段粗测最多100个候选，再精测最好的少数候选；Cluster变量加入该候选表时，总候选预算不增加。
+
+论文确实观察到VRPTW中纯CutSet在clustered和random-clustered类优于Edge，而纯Edge在完全random类更好，但没有给出纯CutSet差异的严格机制证明。作者对结构的直接分析主要是：CVRPSep只看分数性、完全不知道cluster；在CMT13根节点，它偶然找到恰好等于真实cluster `C3`的集合，获得很高score，但后续没有再次发生。作者对Cluster Branching进一步解释，大型random实例缺少稳定的natural clusters，因此聚合结构分支不利；100点random实例有时仍会偶然出现自然簇。把这套解释迁移到纯CutSet时，最稳妥的表述是：clustered数据更可能让“接近半整数”的集合同时对应有意义的路线块，random数据中同样分数的集合更可能只是当前LP的临时组合。后一句是由算法和实验共同支持的机制推断，不是论文已经证明的结论。
+
+这与TWET目前的方向一致，但不能视为完全相同的复现。当前TWET separator没有CVRPSep的整数边压缩、容量上限、目标3导向扩张和需求归一化；它从每个任务出发，按双向support affinity最大值增长集合，再按最近半整数筛选所有层级。TWET没有CVRP的需求`q(S)`与容量`Q`，因此不能机械改成除以集合大小：那会改变原指标的容量含义，也可能进一步偏向或压制某些集合规模。当前random负结果还受到小集合偏置和严格CutSet优先挡住有向Arc候选的共同影响，不能全部归结为“random天然不适合CutSet”。

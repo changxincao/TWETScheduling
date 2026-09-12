@@ -33,6 +33,10 @@ narrow 仍暴露 aggregate 分支的修复风险。CutSet 侧虽然总时间只�
 
 CutSet侧也没有消除这一类开销，其节点107的两次无列exact repair仍耗 `126.940s/66.890s`，总repair NG-DSSR为 `203.912s`。它的收益是改变树和strong candidates，减少了遇到更严重坏repair侧的次数与强度，而不是修复过程本身更快。
 
+全部101次repair exact累计执行503轮DSSR，但时间高度集中：节点148三次调用共109轮，其中两次完整无列证明分别为53和55轮；节点169三次调用共94轮，分别为28、31和35轮，最后一次在第35轮触发总时限。五次重调用合计202轮，却占全部repair exact时间的99.9%以上。
+
+重repair的形成机制与普通真实目标定价不同。纯Phase-I把所有合法列的目标系数、setup cost和ET penalty置为0，只保留覆盖、机器数和分支行dual；同时不能使用依赖真实目标的dual-profitable window。于是重复访问同一任务可以反复取得覆盖dual，却不再支付setup和ET目标代价，ng松弛会连续产生大量负的非elementary witness。对于真正不可行的strong side，前几十轮始终存在这种松弛负路线，但不存在可清除最后人工slack的elementary负列，DSSR只能逐轮加入memory，直到松弛也不再产生负路线。memory增大又削弱dominance，最终造成大量label和join组合：节点148两次证明各检查约217万和231万条non-elementary witness；节点169的31轮调用保留约21.3万label并检查约5.24亿个join访问。因此这里不是RMP或启发式本身慢，而是“零真实成本Phase-I + 不可行分支侧 + DSSR精确无列证明”共同构成了NG-DSSR的最坏情形。
+
 ## 4. 当前结论
 
 旧 random-like `40-2` 的负结果仍成立，但不能迁移到正式 `F<m` family。当前三个同任务集对照表明：当 Cluster aggregate 已整数而 family 内仍存在分数子结构时，动态 CutSet 作为下一层 fallback 可以比逐条 Arc 更快处理集合边界，两个难例均明显缩树。

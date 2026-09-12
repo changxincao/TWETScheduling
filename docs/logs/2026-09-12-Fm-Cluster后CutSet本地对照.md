@@ -267,3 +267,18 @@ z(S\cup\{v\})=z(S)+h_v-\sum_{u\in S}(y_{uv}+y_{vu}).
 cluster内定向搜索也暂不加入。supernode本身已经利用当前LP的近整数结构，先验证它能否自然形成family内部较大候选；若不能，再考虑在静态cluster内增加第二组搜索。
 
 最终确定的第一版只有三项：一是按`y_ij+y_ji>=0.999`建立候选搜索supernode；二是扩张时直接最小化`|z_new-1.5|`，且只保存`1<z<2`的候选；三是严格CutSet阶段只接受`|S|>=3`的集合。其余候选池大小、保存该层全部分数prefix、精确去重、strong branching、严格`Cluster -> CutSet -> Arc`顺序和分支约束全部保持不变。新增统计只记录supernode数量与规模、候选`|S|/z`及最终被选类型。先在已有family zero正例和两个random负例做同seedA/B，再决定是否需要高层CutSet或后续筛选。所有这些修改只改变搜索树形状，不改变pricing集合、分支完备性或最优性证明。
+
+## 16. 实现、A/B结果与最终保留范围
+
+按第15节方案实现后，先测试了“近整数supernode + 扩张时目标`z=1.5` + 只保留`1<z<2` + `3<=|S|<=n-2`”。该版在family zero上为`137.964s/142节点`，与旧CutSet的`138.944s/151节点`基本持平；family wide却从旧版`54.487s/21节点`恶化到`247.047s/43节点`；random set03为`344.909s/26节点`，仍劣于旧CutSet的`266.929s/24节点`和Arc的`157.593s/14节点`。主要问题不是候选构造耗时，而是只保留第一层CutSet后，集合规模变小，原来family wide中有用的`z约2.5`高层分支被删除，一些替代候选又触发了昂贵的strong-branching Phase-I repair。
+
+随后恢复全部分数层，仅保留supernode和面向`1.5`的扩张。family wide恢复到`70.713s/33节点`，证明高层候选不能删除；但family zero运行到275秒仍卡在节点69的repair，random同期也已超过旧版时间，说明改变贪婪扩张方向本身就会选到更差的候选链。这两个运行在结论已明确后中止，不当作完整求解结果。
+
+因此最终撤回全部候选语义变化：不使用supernode，不改成`z=1.5`导向，不删二元或高层集合，不缩小最大集合。正式代码恢复原有singleton seed、最大support-affinity扩张、所有分数层、先按距最近半整数再按集合规模的排序及top-40候选。仅保留两项不改语义的性能优化：
+
+1. 预计算singleton进入流，并在扩张时用`z(S∪{v})=z(S)+z({v})-sum(y_uv+y_vu)`增量更新边界；
+2. 候选搜索阶段只保存job set和边界值，排序截取后只为最终top-40建立完整incoming-arc mask。
+
+新回归在同一人工LP-flow上以旧实现作为reference，逐个核对所有候选job set和直接枚举得到的边界值，数量、集合和数值全部一致。family zero完整树的前8次分支也与旧日志的候选、左右trial bound和score逐字段一致。完整树并发运行为`174.482s/162节点`，random set03串行运行为`413.635s/22节点`；两者目标和bound均与旧版一致。总时间受启发式定价路径、并发资源争用和少数exact/repair波动支配，不能用这两个数值声称总求解加速。
+
+候选生成器本身的隔离微基准使用`n=100`同一稀疏LP-flow快照：旧实现平均`316.575ms/次`，增量版`3.661ms/次`，约快`86.48`倍。该数字只证明CutSet候选构造的局部改动有效，不代表BPC总时间同比例下降；实际总时间仍由pricing、strong trial LP和Phase-I repair决定。正式CutSet仍默认关闭，random上不建议开启，family上仅作`Cluster -> CutSet -> Arc`实验性对照。

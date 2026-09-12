@@ -3,6 +3,9 @@ package TWETBPC.BP;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import Basic.Data;
 import HEU.TanakaNoOutsourcingBPCTest;
@@ -26,11 +29,88 @@ public final class StructuredArcFlowBranchingTest {
 		verifyAggregateCoefficientAndDualExpansion();
 		verifyZeroUpperBoundArcRestriction();
 		verifyHalfIntegerOrdering();
+		verifyCutSetIncrementalExpansionMatchesReference();
 		verifyNodeCopyIsolation();
 		verifyClusterDiagnostics();
 		verifyClusterAssemblyAcrossFormalPricingModes();
 		verifyDefaultConfigurationIsOff();
 		System.out.println("StructuredArcFlowBranchingTest passed.");
+	}
+
+	private static void verifyCutSetIncrementalExpansionMatchesReference() throws Exception {
+		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(
+				"data/40-2/wet040_001_2m.dat", false);
+		TWETBPCConfig config = new TWETBPCConfig();
+		StructuredArcFlowBrancher brancher = new StructuredArcFlowBrancher(data, config);
+		int sink = data.n + 1;
+		double[][] flow = new double[sink + 1][sink + 1];
+		for (int job = 1; job <= data.n; job++) {
+			flow[0][job] = 0.2 + (job % 7) * 0.013;
+			for (int other = 1; other <= data.n; other++) {
+				if (job != other) {
+					flow[job][other] = ((job * 37 + other * 13) % 17 + 1) * 0.001;
+				}
+			}
+		}
+
+		List<StructuredArcFlowBrancher.AggregateSpec> specs =
+				brancher.buildCutSetCandidateSpecs(flow, sink);
+		Map<String, Double> reference = buildReferenceCutSetSpecs(data.n, flow, sink);
+		require(specs.size() == reference.size(),
+				"incremental CutSet search preserves the original candidate count");
+		for (StructuredArcFlowBrancher.AggregateSpec spec : specs) {
+			Double expected = reference.get(spec.jobs.toString());
+			require(expected != null, "incremental CutSet search preserves every original job set");
+			require(Math.abs(spec.value - expected.doubleValue()) < 1.0e-9,
+					"incremental CutSet boundary equals direct incoming-flow evaluation");
+		}
+		require(specs.stream().anyMatch(spec -> spec.jobs.cardinality() == 2),
+				"optimized search retains the original pair candidates");
+		require(specs.stream().anyMatch(spec -> spec.jobs.cardinality() == data.n - 1),
+				"optimized search retains the original largest candidate size");
+	}
+
+	private static Map<String, Double> buildReferenceCutSetSpecs(int jobCount, double[][] flow, int sink) {
+		Map<String, Double> result = new HashMap<String, Double>();
+		for (int seed = 1; seed <= jobCount; seed++) {
+			BitSet jobs = new BitSet(jobCount + 1);
+			jobs.set(seed);
+			while (jobs.cardinality() < jobCount - 1) {
+				int bestJob = -1;
+				double bestAffinity = 1.0e-6;
+				for (int candidate = 1; candidate <= jobCount; candidate++) {
+					if (jobs.get(candidate)) {
+						continue;
+					}
+					double affinity = 0.0;
+					for (int member = jobs.nextSetBit(1); member >= 0;
+							member = jobs.nextSetBit(member + 1)) {
+						affinity += flow[member][candidate] + flow[candidate][member];
+					}
+					if (affinity > bestAffinity + 1.0e-6
+							|| (Math.abs(affinity - bestAffinity) <= 1.0e-6 && candidate < bestJob)) {
+						bestAffinity = affinity;
+						bestJob = candidate;
+					}
+				}
+				if (bestJob < 0) {
+					break;
+				}
+				jobs.set(bestJob);
+				double boundary = 0.0;
+				for (int to = jobs.nextSetBit(1); to >= 0; to = jobs.nextSetBit(to + 1)) {
+					for (int from = 0; from < sink; from++) {
+						if (!jobs.get(from)) {
+							boundary += flow[from][to];
+						}
+					}
+				}
+				if (Math.abs(boundary - Math.rint(boundary)) > 1.0e-6) {
+					result.putIfAbsent(jobs.toString(), boundary);
+				}
+			}
+		}
+		return result;
 	}
 
 	private static void verifyClusterAssemblyAcrossFormalPricingModes() throws Exception {

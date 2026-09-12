@@ -69,7 +69,7 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			}
 		}
 		if (config.enableCutSetBranching) {
-			collectCutSetCandidates(candidates, aggregateKeys, lp, arcValues, sink);
+			collectCutSetCandidates(candidates, aggregateKeys, arcValues, sink);
 			if (config.structuredArcStrictTypePriority && !candidates.isEmpty()) {
 				return sortedAndLimited(candidates, limit);
 			}
@@ -123,29 +123,8 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 	}
 
 	private void collectCutSetCandidates(ArrayList<StrongBranchingCandidate> candidates, Set<String> keys,
-			LP lp, double[][] arcValues, int sink) {
-		ArrayList<AggregateSpec> specs = new ArrayList<AggregateSpec>();
-		Set<String> localKeys = new HashSet<String>();
-		for (int seed = 1; seed <= data.n; seed++) {
-			BitSet jobs = new BitSet(data.n + 1);
-			jobs.set(seed);
-			while (jobs.cardinality() < data.n - 1) {
-				int next = strongestConnectedJob(jobs, arcValues);
-				if (next < 0) {
-					break;
-				}
-				jobs.set(next);
-				BitSet mask = incomingMask(jobs, sink);
-				double value = flowValue(mask, arcValues, sink);
-				if (!isFractional(value)) {
-					continue;
-				}
-				String key = mask.toString();
-				if (localKeys.add(key)) {
-					specs.add(new AggregateSpec((BitSet) jobs.clone(), mask, value));
-				}
-			}
-		}
+			double[][] arcValues, int sink) {
+		ArrayList<AggregateSpec> specs = buildCutSetCandidateSpecs(arcValues, sink);
 		Collections.sort(specs, Comparator
 				.comparingDouble((AggregateSpec spec) -> distanceToHalf(spec.value))
 				.thenComparingInt(spec -> spec.jobs.cardinality())
@@ -153,29 +132,71 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		int count = Math.min(config.cutSetCandidatePoolLimit, specs.size());
 		for (int index = 0; index < count; index++) {
 			AggregateSpec spec = specs.get(index);
+			BitSet mask = incomingMask(spec.jobs, sink);
 			addAggregateCandidate(candidates, keys, "cutSet", "cutSet(" + jobSetText(spec.jobs) + ")",
-					spec.mask, spec.value, index);
+					mask, spec.value, index);
 		}
 	}
 
-	private int strongestConnectedJob(BitSet jobs, double[][] arcValues) {
-		int bestJob = -1;
-		double bestAffinity = tolerance;
-		for (int candidate = 1; candidate <= data.n; candidate++) {
-			if (jobs.get(candidate)) {
-				continue;
-			}
-			double affinity = 0.0;
-			for (int member = jobs.nextSetBit(1); member >= 0; member = jobs.nextSetBit(member + 1)) {
-				affinity += arcValues[member][candidate] + arcValues[candidate][member];
-			}
-			if (Utility.compareGt(affinity, bestAffinity)
-					|| (Math.abs(affinity - bestAffinity) <= tolerance && candidate < bestJob)) {
-				bestAffinity = affinity;
-				bestJob = candidate;
+	/**
+	 * 2026-09-12: 保持原有singleton起点和最大support-affinity扩张语义，但增量维护
+	 * 集合进入流，避免每个prefix重建完整arc mask并重扫所有arc。只为排序后的
+	 * 最终候选建立mask，因此不改变CutSet集合、预排序或分支约束。
+	 */
+	ArrayList<AggregateSpec> buildCutSetCandidateSpecs(double[][] arcValues, int sink) {
+		double[] singletonBoundary = new double[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			for (int from = 0; from < sink; from++) {
+				if (from != job) {
+					singletonBoundary[job] += arcValues[from][job];
+				}
 			}
 		}
-		return bestJob;
+		ArrayList<AggregateSpec> specs = new ArrayList<AggregateSpec>();
+		Set<BitSet> uniqueJobSets = new HashSet<BitSet>();
+		for (int seed = 1; seed <= data.n; seed++) {
+			BitSet jobs = new BitSet(data.n + 1);
+			jobs.set(seed);
+			double[] affinityToSet = new double[data.n + 1];
+			for (int candidate = 1; candidate <= data.n; candidate++) {
+				if (candidate != seed) {
+					affinityToSet[candidate] = arcValues[seed][candidate] + arcValues[candidate][seed];
+				}
+			}
+			double boundary = singletonBoundary[seed];
+			while (jobs.cardinality() < data.n - 1) {
+				int next = -1;
+				double bestAffinity = tolerance;
+				for (int candidate = 1; candidate <= data.n; candidate++) {
+					if (jobs.get(candidate)) {
+						continue;
+					}
+					double affinity = affinityToSet[candidate];
+					if (Utility.compareGt(affinity, bestAffinity)
+							|| (Math.abs(affinity - bestAffinity) <= tolerance && candidate < next)) {
+						next = candidate;
+						bestAffinity = affinity;
+					}
+				}
+				if (next < 0) {
+					break;
+				}
+				boundary += singletonBoundary[next] - bestAffinity;
+				jobs.set(next);
+				for (int candidate = 1; candidate <= data.n; candidate++) {
+					if (!jobs.get(candidate)) {
+						affinityToSet[candidate] += arcValues[next][candidate] + arcValues[candidate][next];
+					}
+				}
+				if (isFractional(boundary)) {
+					BitSet snapshot = (BitSet) jobs.clone();
+					if (uniqueJobSets.add(snapshot)) {
+						specs.add(new AggregateSpec(snapshot, boundary));
+					}
+				}
+			}
+		}
+		return specs;
 	}
 
 	private void addAggregateCandidate(ArrayList<StrongBranchingCandidate> candidates, Set<String> keys,
@@ -513,14 +534,12 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		return "StructuredArcFlowBrancher";
 	}
 
-	private static final class AggregateSpec {
+	static final class AggregateSpec {
 		final BitSet jobs;
-		final BitSet mask;
 		final double value;
 
-		AggregateSpec(BitSet jobs, BitSet mask, double value) {
+		AggregateSpec(BitSet jobs, double value) {
 			this.jobs = jobs;
-			this.mask = mask;
 			this.value = value;
 		}
 	}

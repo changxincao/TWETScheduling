@@ -243,6 +243,13 @@ public final class StructuredArcFlowBranchingTest {
 			}
 		};
 		require(candidate.getDistanceToHalf() == 0.0, "aggregate half-integer distance");
+		require(StructuredArcFlowBrancher.cutSetHalfDistanceSortKey(1.5 - 1.0e-12)
+				== StructuredArcFlowBrancher.cutSetHalfDistanceSortKey(1.5 + 1.0e-12),
+				"CutSet three-decimal ordering ignores floating-point tails");
+		require(StructuredArcFlowBrancher.cutSetHalfDistanceSortKey(1.5004) == 0L,
+				"CutSet distance below half a millisecond-equivalent bucket rounds to zero");
+		require(StructuredArcFlowBrancher.cutSetHalfDistanceSortKey(1.5006) == 1L,
+				"CutSet distance above half a bucket remains distinguishable");
 	}
 
 	private static void verifyNodeCopyIsolation() throws Exception {

@@ -126,7 +126,7 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			double[][] arcValues, int sink) {
 		ArrayList<AggregateSpec> specs = buildCutSetCandidateSpecs(arcValues, sink);
 		Collections.sort(specs, Comparator
-				.comparingDouble((AggregateSpec spec) -> distanceToHalf(spec.value))
+				.comparingLong((AggregateSpec spec) -> cutSetHalfDistanceSortKey(spec.value))
 				.thenComparingInt(spec -> spec.jobs.cardinality())
 				.thenComparing(spec -> spec.jobs.toString()));
 		int count = Math.min(config.cutSetCandidatePoolLimit, specs.size());
@@ -248,6 +248,13 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 
 	private double distanceToHalf(double value) {
 		return Math.abs(value - Math.floor(value) - 0.5);
+	}
+
+	/** 2026-09-13: CutSet预排序只保留三位距离，避免增量求和的浮点尾差改变top-K。 */
+	static long cutSetHalfDistanceSortKey(double value) {
+		double fractionalPart = value - Math.floor(value);
+		double distance = Math.abs(fractionalPart - 0.5);
+		return Math.round(distance * 1_000.0);
 	}
 
 	private int familyOrder(String family) {

@@ -165,3 +165,29 @@ z(S\cup\{v\})-z(S)
 在elementary列的分数主问题中，`h_v`是所有包含`v`的列权重之和，也等于进入`v`的总Arc流。覆盖行通常取紧时`h_v`约为1。后一项不是“弧条数”，而是当前LP中`v`与`S`相邻的总权重：约为0表示`v`基本独立于`S`，加入后进入次数约增加1；约为1表示`v`通常在`S`片段的一端，加入后进入次数基本不变；约为2表示`v`通常夹在两个`S`片段之间，加入后两段合并、进入次数约减少1；若为0.5，则表示只有约一半LP流把`v`接在`S`旁边，加入后进入流约增加0.5。
 
 因此，如果当前`z(S)=1.5`，加入一个与`S`相邻流约为1的任务后仍约为1.5，半整数性可沿更大集合保留；加入一个相邻流约为0.5的任务后则变为约2.0，候选立即失去分数性。family中被选CutSet规模明显更大，说明实际贪婪扩张经常找到令相邻流接近整数的后续任务；random中候选大量停留在二元、三元，说明这种保持半整数性的扩张较少。这里的规模结果是实测，逐步相邻流尚未单独输出，后一句仍属于由公式和规模分布共同支持、但待直接日志确认的机制解释。
+
+## 11. 文献来源、当前执行方式与通用性边界
+
+CutSet Branching并不是[Silva、Uchoa和Subramanian（2025）](https://doi.org/10.1287/ijoc.2024.1036)提出的新方法。经典无向VRP中定义
+
+\[
+\omega_S=\frac{1}{2}\sum_{e\in\delta(S)}x_e.
+\]
+
+整数路线跨越割集的次数为偶数，因此`omega_S`应为整数。[Lysgaard、Letchford和Eglese（2004）](https://www.lancaster.ac.uk/staff/letchfoa/articles/2004-cvrp-exact.pdf)在CVRP中选择满足`2<x(delta(S))<4`、即`1<omega_S<2`且尽量靠近`1.5`的集合，分成`x(delta(S))=2`与`x(delta(S))>=4`两侧。他们用贪婪启发式产生若干候选，按`|x(delta(S))-3|/q(S)`预排序，再逐个试算左右子节点下界；若一侧可剪枝立即采用，否则比较两侧下界，并在连续候选不再改善后停止。CVRPSep后来提供了从分数edge flow寻找目标分数CutSet的例程，[Fukasawa等（2006）](https://doi.org/10.1007/s10107-005-0644-X)、Pecin等（2017）等BCP继续采用。2025年论文的新贡献是Cluster Branching；其CutSet基线仍调用CVRPSep，并明确指出该separator只按`omega_S`的分数性找集合，不识别cluster结构。
+
+TWET使用有向机器序列，因此当前实现采用等价的进入流：
+
+\[
+z(S)=\sum_{i\notin S,j\in S}y_{ij}.
+\]
+
+对任意一条完整机器序列，系数就是进入`S`的次数，始终为整数；在通常的depot-to-depot路线表示中，它等于无向割流的一半。因此对当前分数解的`z(S)`做`floor/ceil`分支是有效的robust branching。分支行dual可直接分摊到全部进入Arc，不增加pricing资源或label状态；整体完备性仍由最终回退的有向Arc分支保证，CutSet本身不区分`i->j`与`j->i`，不能单独保证TWET有向排序完整性。
+
+当前候选识别流程不是CVRPSep复现，而是自定义的有向support-flow贪婪适配。每个任务都作为singleton seed；每一步加入与当前集合双向LP相邻流`sum(y_uv+y_vu)`最大的任务；每扩张一次都计算`z(S)`，仅保存分数候选；去重后先按距离最近半整数排序，再按集合规模升序打破平局，最多保留40个。若启用严格类型优先，执行顺序是`Cluster -> CutSet -> Arc`：当前层存在分数Cluster候选就只测试Cluster；没有Cluster候选但存在CutSet时只测试CutSet；两者都没有才回退Arc。若关闭严格优先，三类候选进入共享预排序。正式最佳profile默认关闭CutSet，现有CutSet结果均属于显式开启的消融实验。进入strong branching后，当前最多测试前20个候选的左右restricted LP；正式profile的后续heuristic-CG阶段目前关闭。
+
+该实现的分支约束是通用且正确的，但集合识别器还不能称为通用高质量separator。优点是只依赖当前LP Arc flow，不依赖已知family、空间坐标、容量或硬时间窗，能够用于NG-DSSR、TI和TI+SRI；最大support affinity在覆盖取紧时也等价于尽量减小下一步进入流，具有经典贪婪边界搜索的直接解释。局限是每个seed只生成一条单调增长链，没有add/remove/swap局部改进、min-cut搜索或多样性控制；候选大量嵌套；小集合平局优先造成二元偏置；内部affinity把两个方向相加；所有半整数层级都接受，而经典CVRP主要围绕`z(S)约1.5`的一条路线/多条路线析取；前40名只按分数性产生，可能在strong trial前淘汰真正child gain更高的集合。严格CutSet优先又比2025年论文把Cluster候选加入phase-1候选表、再由strong score统一竞争的处理更激进。
+
+因此当前实现适合作为结构清晰family树上的实验性Cluster后回退，不适合作为全部算例的默认CutSet。已有TWET数据也支持这一边界：family zero中`Cluster -> CutSet -> Arc`把节点从334降到151，但wide只从26降到21；两个无Cluster random长算例反而分别从14增至24、从32增至60。若后续要形成真正general的CutSet separator，优先项应是围绕`|z(S)-(floor(z(S))+0.5)|`执行add/remove/swap局部搜索、去除高度嵌套候选并保留Jaccard多样性、将二元候选与有向Arc放回同一strong池竞争，并分别记录集合规模、分数层级和同节点child gain。现有证据不足以先修改正式主线。
+
+2025年论文对适用性给出的是经验结论，不是CutSet自动启用判据。纯CSB在CMT13上比Edge强，但24小时后仍只探索估计树的3.75%，总时间估计26.7天；加入Cluster后才在约2小时内闭合。大规模实验中，纯CSB在clustered和random-clustered VRPTW上优于Edge，而Edge在random类更好；超长路线CVRP中CSB相对更强。对大型完全random实例，纯Edge也可能优于CSB。论文由此说明CSB更可能受益于有结构的客户集合或长路线，但没有提出可验证的CutSet适用条件，也没有证明“接近半整数”足以产生强分支。论文明确提出的结构适用性分析主要针对其新方法Cluster Branching，而不是对CVRPSep CutSet建立新的理论分类。

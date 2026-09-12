@@ -442,8 +442,10 @@ public class Tree {
 	}
 
 	private void applyTimeIndexedScalarCompletionArcFixing(LP lp, double incumbentCost) {
-		if (!config.timeIndexedCompletionBoundScalarEnhancement || !isNgDssrPricingActive()
-				|| lp == null || lp.getNode() == null) {
+		if (!config.timeIndexedCompletionBoundNodeArcFixing
+				|| !config.timeIndexedCompletionBoundScalarEnhancement || !isNgDssrPricingActive()
+				|| lp == null || lp.getNode() == null
+				|| lp.getNode().depth > config.timeIndexedCompletionBoundNodeArcFixingMaxDepth) {
 			return;
 		}
 		heartbeat(lp.getNode(), "timeIndexedScalarArcFixing.start");

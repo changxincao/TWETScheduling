@@ -292,6 +292,10 @@ public final class FormalExperimentRunner {
 		lines.add("clusterMstThetaOverride=" + arguments.clusterMstTheta);
 		lines.add("clusterTemporalWeightOverride=" + arguments.clusterTemporalWeight);
 		lines.add("diagnosticNodeCoverageOverride=" + arguments.diagnosticNodeCoverage);
+		lines.add("timeIndexedCompletionBoundNodeArcFixingOverride="
+				+ arguments.timeIndexedCompletionBoundNodeArcFixing);
+		lines.add("timeIndexedCompletionBoundNodeArcFixingMaxDepthOverride="
+				+ arguments.timeIndexedCompletionBoundNodeArcFixingMaxDepth);
 		if (result != null) {
 			lines.add("status=" + result.getStatus());
 			lines.add("incumbent=" + result.getIncumbentCost());
@@ -316,7 +320,9 @@ public final class FormalExperimentRunner {
 				"ngDssrNonElementaryRouteCandidateLimit", "ngDssrNonElementaryRouteUpdateMode",
 				"ngDssrInitialNgSetSize", "enableClusterBranching", "enableSuccessorSetBranching",
 				"structuredArcStrictTypePriority",
-				"clusterMstTheta", "clusterTemporalWeight", "diagnosticNodeCoverage");
+				"clusterMstTheta", "clusterTemporalWeight", "diagnosticNodeCoverage",
+				"timeIndexedCompletionBoundNodeArcFixing",
+				"timeIndexedCompletionBoundNodeArcFixingMaxDepth");
 
 		private final String action;
 		private final Path instance;
@@ -346,6 +352,8 @@ public final class FormalExperimentRunner {
 		private final Double clusterMstTheta;
 		private final Double clusterTemporalWeight;
 		private final Boolean diagnosticNodeCoverage;
+		private final Boolean timeIndexedCompletionBoundNodeArcFixing;
+		private final Integer timeIndexedCompletionBoundNodeArcFixingMaxDepth;
 
 		private Arguments(Map<String, String> values) {
 			for (String key : values.keySet()) {
@@ -398,6 +406,10 @@ public final class FormalExperimentRunner {
 			clusterMstTheta = optionalDouble(values, "clusterMstTheta");
 			clusterTemporalWeight = optionalDouble(values, "clusterTemporalWeight");
 			diagnosticNodeCoverage = optionalBoolean(values, "diagnosticNodeCoverage");
+			timeIndexedCompletionBoundNodeArcFixing = optionalBoolean(values,
+					"timeIndexedCompletionBoundNodeArcFixing");
+			timeIndexedCompletionBoundNodeArcFixingMaxDepth = optionalInteger(values,
+					"timeIndexedCompletionBoundNodeArcFixingMaxDepth");
 		}
 
 		/** 仅显式传参时覆盖正式 profile，未传参保持生产配置不变。 */
@@ -464,6 +476,14 @@ public final class FormalExperimentRunner {
 			}
 			if (diagnosticNodeCoverage != null) {
 				config.diagnosticNodeCoverage = diagnosticNodeCoverage.booleanValue();
+			}
+			if (timeIndexedCompletionBoundNodeArcFixing != null) {
+				config.timeIndexedCompletionBoundNodeArcFixing =
+						timeIndexedCompletionBoundNodeArcFixing.booleanValue();
+			}
+			if (timeIndexedCompletionBoundNodeArcFixingMaxDepth != null) {
+				config.timeIndexedCompletionBoundNodeArcFixingMaxDepth =
+						timeIndexedCompletionBoundNodeArcFixingMaxDepth.intValue();
 			}
 		}
 

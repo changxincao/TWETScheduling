@@ -7,7 +7,7 @@ import java.util.Objects;
  */
 public final class BestBpcProfiles {
 	/** 写入正式实验结果，便于服务器侧确认三组运行使用同一套参数。 */
-	public static final String VERSION = "2026-09-09-v6";
+	public static final String VERSION = "2026-09-12-v7";
 
 	public static final BPCAlgorithmProfile TIME_INDEXED_GRAPH = new BPCAlgorithmProfile(
 			"timeIndexedGraph", true, false, false, config -> applyTimeIndexedDefaults(config, false));
@@ -140,6 +140,8 @@ public final class BestBpcProfiles {
 		config.timeIndexedCompletionBoundScalarEnhancement = false;
 		config.timeIndexedCompletionBoundWindowTightening = false;
 		config.timeIndexedCompletionBoundArcFixing = true;
+		config.timeIndexedCompletionBoundNodeArcFixing = true;
+		config.timeIndexedCompletionBoundNodeArcFixingMaxDepth = Integer.MAX_VALUE;
 		config.timeIndexedCompletionBoundInRoundArcFixing = false;
 		config.timeIndexedCompletionBoundCutLoopArcFixing = timeIndexedRank1;
 		config.timeIndexedCompletionBoundSriAwareArcFixing = false;
@@ -215,6 +217,8 @@ public final class BestBpcProfiles {
 		config.timeIndexedCompletionBoundScalarEnhancement = true;
 		config.timeIndexedCompletionBoundWindowTightening = true;
 		config.timeIndexedCompletionBoundArcFixing = true;
+		config.timeIndexedCompletionBoundNodeArcFixing = true;
+		config.timeIndexedCompletionBoundNodeArcFixingMaxDepth = 0;
 		config.timeIndexedCompletionBoundInRoundArcFixing = false;
 		config.timeIndexedCompletionBoundCutLoopArcFixing = true;
 		config.timeIndexedCompletionBoundSriAwareArcFixing = false;

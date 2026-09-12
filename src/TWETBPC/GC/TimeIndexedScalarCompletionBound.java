@@ -187,7 +187,7 @@ public final class TimeIndexedScalarCompletionBound {
 			return null;
 		}
 		TimeIndexedScalarCompletionBound bound =
-				new TimeIndexedScalarCompletionBound(data, config, lp, pricingHorizon, hStartByJob, hEndByJob);
+				new TimeIndexedScalarCompletionBound(data, config, lp, pricingHorizon, hStartByJob, hEndByJob, true);
 		return bound.available ? bound : null;
 	}
 
@@ -223,7 +223,7 @@ public final class TimeIndexedScalarCompletionBound {
 			}
 		}
 		TimeIndexedScalarCompletionBound bound =
-				new TimeIndexedScalarCompletionBound(data, config, lp, data.CmaxH, hStart, hEnd);
+				new TimeIndexedScalarCompletionBound(data, config, lp, data.CmaxH, hStart, hEnd, false);
 		if (!bound.available) {
 			return ArcFixingResult.skipped(bound.message);
 		}
@@ -265,7 +265,7 @@ public final class TimeIndexedScalarCompletionBound {
 			}
 		}
 		TimeIndexedScalarCompletionBound bound =
-				new TimeIndexedScalarCompletionBound(data, config, lp, data.CmaxH, hStart, hEnd);
+				new TimeIndexedScalarCompletionBound(data, config, lp, data.CmaxH, hStart, hEnd, false);
 		if (!bound.available) {
 			return ArcFixingResult.skipped(bound.message);
 		}
@@ -277,7 +277,7 @@ public final class TimeIndexedScalarCompletionBound {
 	}
 
 	private TimeIndexedScalarCompletionBound(Data data, TWETBPCConfig config, LP lp, double pricingHorizon,
-			double[] hStartByJob, double[] hEndByJob) {
+			double[] hStartByJob, double[] hEndByJob, boolean buildScalarCaches) {
 		this.data = data;
 		this.config = config;
 		this.lp = lp;
@@ -285,7 +285,10 @@ public final class TimeIndexedScalarCompletionBound {
 		this.n = data.n;
 		this.sink = node.sinkId();
 		this.exactIntegerTime = data.isExactIntegerTimeInstance();
-		this.horizon = Math.max(0, (int) Math.ceil(pricingHorizon - 1e-9));
+		// 2026-09-12: 最后一个任务完成后可以立即连接 sink。所有任务的有效完成窗口都结束后，
+		// time-indexed 图只剩无意义的等待尾部；按 data.CmaxH 扫描这段尾部会在每个树节点重复
+		// 放大 forward/backward 和 cleanup。裁到最大有效窗口上界不删除任何可行加工弧。
+		this.horizon = effectiveHorizon(pricingHorizon, hEndByJob, n);
 		this.inheritedTimeIndexedArcLookup = node.createTimeIndexedPricingOnlyArcLookup();
 		this.width = horizon + 1;
 		this.originalWindowStartByJob = Arrays.copyOf(hStartByJob, n + 1);
@@ -306,8 +309,8 @@ public final class TimeIndexedScalarCompletionBound {
 		int states = (n + 1) * width;
 		this.forward = new double[states];
 		this.backward = new double[states];
-		this.prefixBeforeByJob = new double[n + 1][];
-		this.suffixAfterByJob = new double[n + 1][];
+		this.prefixBeforeByJob = buildScalarCaches ? new double[n + 1][] : null;
+		this.suffixAfterByJob = buildScalarCaches ? new double[n + 1][] : null;
 		this.penaltyByJobTime = new double[n + 1][width];
 		this.durationByArc = new int[n + 1][n + 1];
 		this.processArcForbidden = new boolean[n + 1][n + 1];
@@ -316,10 +319,30 @@ public final class TimeIndexedScalarCompletionBound {
 		precomputeStaticData(hStartByJob, hEndByJob);
 		computeForwardDistances();
 		computeBackwardDistances();
-		buildScalarCaches();
+		if (buildScalarCaches) {
+			buildScalarCaches();
+		}
 		this.buildNanos = System.nanoTime() - start;
 		this.available = true;
 		this.message = "available";
+	}
+
+	private static int effectiveHorizon(double requestedHorizon, double[] hEndByJob, int n) {
+		double maxEffectiveEnd = 0.0;
+		boolean foundFiniteEnd = false;
+		for (int job = 1; job <= n; job++) {
+			double end = hEndByJob[job];
+			if (Double.isFinite(end)) {
+				foundFiniteEnd = true;
+				maxEffectiveEnd = Math.max(maxEffectiveEnd, end);
+			}
+		}
+		if (!foundFiniteEnd) {
+			maxEffectiveEnd = requestedHorizon;
+		}
+		double finiteRequested = Double.isFinite(requestedHorizon) ? requestedHorizon : maxEffectiveEnd;
+		double effective = Math.min(Math.max(0.0, finiteRequested), maxEffectiveEnd);
+		return Math.max(0, (int) Math.ceil(effective - 1e-9));
 	}
 
 	double suffixLowerBoundAfterFloor(int job, double earliestTime) {
@@ -949,7 +972,7 @@ public final class TimeIndexedScalarCompletionBound {
 			computeForwardDistances();
 			computeBackwardDistances();
 		}
-		if (fixed > 0) {
+		if (fixed > 0 && prefixBeforeByJob != null) {
 			buildScalarCaches();
 		}
 		WindowReachabilityStats windowStats = summarizeReachableWindows();

@@ -182,6 +182,9 @@ public final class BestBpcProfilesTest {
 		require(!config.timeIndexedCompletionBoundScalarEnhancement, "time-indexed scalar helper off");
 		require(!config.timeIndexedCompletionBoundWindowTightening, "time-indexed window helper off");
 		require(config.timeIndexedCompletionBoundArcFixing, "node-end paper arc fixing");
+		require(config.timeIndexedCompletionBoundNodeArcFixing, "unused NG node fixing switch remains enabled");
+		require(config.timeIndexedCompletionBoundNodeArcFixingMaxDepth == Integer.MAX_VALUE,
+				"TI profiles do not inherit the NG root-only depth");
 		require(!config.timeIndexedCompletionBoundInRoundArcFixing, "in-round fixing off");
 		require(config.timeIndexedCompletionBoundCutLoopArcFixing == sri, "cut-loop fixing");
 		require(!config.timeIndexedCompletionBoundSriAwareArcFixing, "SRI-aware fixing off");
@@ -237,6 +240,9 @@ public final class BestBpcProfilesTest {
 		require(config.timeIndexedCompletionBoundScalarEnhancement, "ng time-indexed scalar helper");
 		require(config.timeIndexedCompletionBoundWindowTightening, "ng time-indexed window helper");
 		require(config.timeIndexedCompletionBoundArcFixing, "ng node-end fixing");
+		require(config.timeIndexedCompletionBoundNodeArcFixing, "ng root node-end fixing enabled");
+		require(config.timeIndexedCompletionBoundNodeArcFixingMaxDepth == 0,
+				"ng node-end fixing only at the main root");
 		require(!config.timeIndexedCompletionBoundInRoundArcFixing, "ng in-round fixing off");
 		require(config.timeIndexedCompletionBoundCutLoopArcFixing, "ng cut-loop fixing");
 		require(config.bidirectionalMidpointProbe, "ng midpoint probe");

@@ -302,6 +302,10 @@ public class TWETBPCConfig {
 	public boolean timeIndexedCompletionBoundWindowTightening = true;
 	/** 2026-06-28: node 闭合后，用 time-indexed relaxed graph 做时空弧 pricingOnly fixing。 */
 	public boolean timeIndexedCompletionBoundArcFixing = true;
+	/** 2026-09-12: 是否在每个NG-DSSR待分支节点重新执行scalar时空弧fixing；root预处理不受此开关影响。 */
+	public boolean timeIndexedCompletionBoundNodeArcFixing = true;
+	/** 2026-09-12: 节点scalar fixing允许执行的最大树深度；用于区分根部一次强化与逐节点重算。 */
+	public int timeIndexedCompletionBoundNodeArcFixingMaxDepth = Integer.MAX_VALUE;
 	/** 2026-06-03: 是否用当前 pricing 轮的 completion bound 做本地 job-job arc fixing。 */
 	public boolean bidirectionalCompletionBoundArcFixing = true;
 	/** 2026-06-03: 只诊断 completion bound 能否在当前 pricing 轮安全判掉 job-job arc，不写回 node。 */

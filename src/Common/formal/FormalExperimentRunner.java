@@ -287,6 +287,7 @@ public final class FormalExperimentRunner {
 				+ arguments.ngDssrNonElementaryRouteUpdateMode);
 		lines.add("ngDssrInitialNgSetSizeOverride=" + arguments.ngDssrInitialNgSetSize);
 		lines.add("enableClusterBranchingOverride=" + arguments.enableClusterBranching);
+		lines.add("enableCutSetBranchingOverride=" + arguments.enableCutSetBranching);
 		lines.add("enableSuccessorSetBranchingOverride=" + arguments.enableSuccessorSetBranching);
 		lines.add("structuredArcStrictTypePriorityOverride=" + arguments.structuredArcStrictTypePriority);
 		lines.add("clusterMstThetaOverride=" + arguments.clusterMstTheta);
@@ -318,7 +319,8 @@ public final class FormalExperimentRunner {
 				"bidirectionalMidpointProbeDssrImbalanceThreshold",
 				"bidirectionalMidpointProbeDssrMoveFraction",
 				"ngDssrNonElementaryRouteCandidateLimit", "ngDssrNonElementaryRouteUpdateMode",
-				"ngDssrInitialNgSetSize", "enableClusterBranching", "enableSuccessorSetBranching",
+				"ngDssrInitialNgSetSize", "enableClusterBranching", "enableCutSetBranching",
+				"enableSuccessorSetBranching",
 				"structuredArcStrictTypePriority",
 				"clusterMstTheta", "clusterTemporalWeight", "diagnosticNodeCoverage",
 				"timeIndexedCompletionBoundNodeArcFixing",
@@ -347,6 +349,7 @@ public final class FormalExperimentRunner {
 		private final String ngDssrNonElementaryRouteUpdateMode;
 		private final Integer ngDssrInitialNgSetSize;
 		private final Boolean enableClusterBranching;
+		private final Boolean enableCutSetBranching;
 		private final Boolean enableSuccessorSetBranching;
 		private final Boolean structuredArcStrictTypePriority;
 		private final Double clusterMstTheta;
@@ -401,6 +404,7 @@ public final class FormalExperimentRunner {
 					"ngDssrNonElementaryRouteUpdateMode");
 			ngDssrInitialNgSetSize = optionalInteger(values, "ngDssrInitialNgSetSize");
 			enableClusterBranching = optionalBoolean(values, "enableClusterBranching");
+			enableCutSetBranching = optionalBoolean(values, "enableCutSetBranching");
 			enableSuccessorSetBranching = optionalBoolean(values, "enableSuccessorSetBranching");
 			structuredArcStrictTypePriority = optionalBoolean(values, "structuredArcStrictTypePriority");
 			clusterMstTheta = optionalDouble(values, "clusterMstTheta");
@@ -461,6 +465,9 @@ public final class FormalExperimentRunner {
 			}
 			if (enableClusterBranching != null) {
 				config.enableClusterBranching = enableClusterBranching.booleanValue();
+			}
+			if (enableCutSetBranching != null) {
+				config.enableCutSetBranching = enableCutSetBranching.booleanValue();
 			}
 			if (enableSuccessorSetBranching != null) {
 				config.enableSuccessorSetBranching = enableSuccessorSetBranching.booleanValue();

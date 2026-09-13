@@ -322,3 +322,9 @@ random set03在前三次分支完全一致，第四次已经分叉：旧版从�
 “仅第一层”与“仅规模过滤”两组`family/wide`均在第9节点进入持续的强分支Phase-I修复，分别在约284秒、214秒的Java CPU时间观测后主动中止；两组都未闭合，不能给出最终节点数或最优性比较。前期Cluster选择相同，但两组在第5个分支选择的CutSet不同，不应说成同一搜索路径。这已经足以否定它们在该算例上的快速加速价值，不值得为了这一负例继续消耗1200秒。另有一组random启动时误开Cluster，导致CutSet没有触发；该运行移至`runs/invalid-cluster-on-*`，不参与上述比较，随后关闭Cluster成对重跑。
 
 当前结论是：三位排序固定后，四项新版依然没有跨family/random的稳定收益；只保留第一层和删除小集合在family/wide有明显修复风险，`z=1.5`扩张单项无明确时间收益。supernode单项在两组family有改善信号，但random同节点下明显增大定价工作量，不能作为所有实例的默认设置。正式主线只保留排序修正，CutSet候选语义、默认开关及既有Cluster/Arc流程均不改；如后续要采用supernode，应先针对family再做更多seed与完整树复核。
+
+### 17.1 family场景的使用判断
+
+需要区分“不能全局默认开启”与“family上不使用”。旧CutSet接在Cluster之后，在现有`F=3<m=4`的三组family对照中，wide小幅改善、zero明显缩树提速、narrow一侧闭合而Arc对照在repair内超时。这足以把旧CutSet列为`F<m` family的有价值候选，不能因四项新构造失败或random负例而一并否定。random两个无Cluster完整树均变慢，所以不应对所有算例开启。`F>=m`及其他family规模尚没有同口径证据，不外推。
+
+当前正式默认仍关闭CutSet，是因为三位排序修正后只完成了CutSet内部旧/新对照，尚未重跑同版本、同seed的`Cluster -> Arc`对照；第2节的Arc时间与第17节的CutSet时间不能直接组成正式主表。下一批如果要选family最优配置，应对`F<m`成对运行`Cluster -> Arc`与`Cluster -> 旧CutSet -> Arc`，保留两侧的状态、目标、节点、定价与repair时间，再按同一预定规则选择报告配置。旧CutSet无需等待supernode改造；supernode只是额外的独立试验项。此处只修正使用判断，不自动修改全局配置或补跑实验。

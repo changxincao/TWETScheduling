@@ -87,6 +87,7 @@ public final class BestBpcProfiles {
 		config.enableStrongBranchingDomainRepair = false;
 		config.enableUndirectedAdjacencyBranching = false;
 		config.enableCutSetBranching = false;
+		config.cutSetSupernodeSeeds = false;
 		config.enableClusterBranching = false;
 		config.enableSuccessorSetBranching = false;
 		config.structuredArcStrictTypePriority = false;

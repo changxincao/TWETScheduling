@@ -151,6 +151,9 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 	 * 最终候选建立mask，因此不改变CutSet集合、预排序或分支约束。
 	 */
 	ArrayList<AggregateSpec> buildCutSetCandidateSpecs(double[][] arcValues, int sink) {
+		if (config.cutSetSupernodeSeeds) {
+			return buildSupernodeCutSetCandidateSpecs(arcValues, sink);
+		}
 		double[] singletonBoundary = new double[data.n + 1];
 		for (int job = 1; job <= data.n; job++) {
 			for (int from = 0; from < sink; from++) {
@@ -198,6 +201,71 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 				if (isFractional(boundary)) {
 					BitSet snapshot = (BitSet) jobs.clone();
 					if (uniqueJobSets.add(snapshot)) {
+						specs.add(new AggregateSpec(snapshot, boundary));
+					}
+				}
+			}
+		}
+		return specs;
+	}
+
+	/** 近整数相邻任务合并为起点，之后仍按原CutSet的最大support affinity扩张。 */
+	private ArrayList<AggregateSpec> buildSupernodeCutSetCandidateSpecs(double[][] arcValues, int sink) {
+		int[] parents = new int[data.n + 1];
+		for (int job = 1; job <= data.n; job++) {
+			parents[job] = job;
+		}
+		for (int first = 1; first <= data.n; first++) {
+			for (int second = first + 1; second <= data.n; second++) {
+				if (arcValues[first][second] + arcValues[second][first] >= 0.999) {
+					union(parents, first, second);
+				}
+			}
+		}
+		ArrayList<BitSet> groups = new ArrayList<BitSet>();
+		int[] groupByRoot = new int[data.n + 1];
+		Arrays.fill(groupByRoot, -1);
+		for (int job = 1; job <= data.n; job++) {
+			int root = find(parents, job);
+			int index = groupByRoot[root];
+			if (index < 0) {
+				index = groups.size();
+				groupByRoot[root] = index;
+				groups.add(new BitSet(data.n + 1));
+			}
+			groups.get(index).set(job);
+		}
+		ArrayList<AggregateSpec> specs = new ArrayList<AggregateSpec>();
+		Set<BitSet> unique = new HashSet<BitSet>();
+		for (BitSet seed : groups) {
+			BitSet jobs = (BitSet) seed.clone();
+			while (jobs.cardinality() < data.n - 1) {
+				int chosen = -1;
+				double bestAffinity = tolerance;
+				for (int index = 0; index < groups.size(); index++) {
+					BitSet group = groups.get(index);
+					if (jobs.intersects(group) || jobs.cardinality() + group.cardinality() > data.n - 1) {
+						continue;
+					}
+					double affinity = 0.0;
+					for (int from = jobs.nextSetBit(1); from >= 0; from = jobs.nextSetBit(from + 1)) {
+						for (int to = group.nextSetBit(1); to >= 0; to = group.nextSetBit(to + 1)) {
+							affinity += arcValues[from][to] + arcValues[to][from];
+						}
+					}
+					if (chosen < 0 ? affinity > tolerance : affinity > bestAffinity + tolerance) {
+						chosen = index;
+						bestAffinity = affinity;
+					}
+				}
+				if (chosen < 0) {
+					break;
+				}
+				jobs.or(groups.get(chosen));
+				double boundary = flowValue(incomingMask(jobs, sink), arcValues, sink);
+				if (isFractional(boundary)) {
+					BitSet snapshot = (BitSet) jobs.clone();
+					if (unique.add(snapshot)) {
 						specs.add(new AggregateSpec(snapshot, boundary));
 					}
 				}

@@ -441,6 +441,8 @@ public class TWETBPCConfig {
 	public boolean enableUndirectedAdjacencyBranching = false;
 	/** 2026-08-26: 动态有向 CutSet 分支实验开关；默认关闭，不改变正式主线。 */
 	public boolean enableCutSetBranching = false;
+	/** CutSet实验可用近整数arc连通的supernode作为扩张起点；默认保留原singleton行为。 */
+	public boolean cutSetSupernodeSeeds = false;
 	/** 2026-09-04: LP-balanced successor-set 分支实验开关；有候选时位于普通 Arc 之前。 */
 	public boolean enableSuccessorSetBranching = false;
 	/** successor-set 只处理 coverage 不超过 1+epsilon 的任务。 */

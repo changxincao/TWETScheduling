@@ -31,6 +31,7 @@ public final class StructuredArcFlowBranchingTest {
 		verifyZeroUpperBoundArcRestriction();
 		verifyHalfIntegerOrdering();
 		verifyCutSetIncrementalExpansionMatchesReference();
+		verifySupernodeCutSetSeeds();
 		verifyNodeCopyIsolation();
 		verifyClusterDiagnostics();
 		verifyClusterAssemblyAcrossFormalPricingModes();
@@ -69,6 +70,34 @@ public final class StructuredArcFlowBranchingTest {
 				"optimized search retains the original pair candidates");
 		require(specs.stream().anyMatch(spec -> spec.jobs.cardinality() == data.n - 1),
 				"optimized search retains the original largest candidate size");
+	}
+
+	private static void verifySupernodeCutSetSeeds() throws Exception {
+		Data data = TanakaNoOutsourcingBPCTest.loadTanakaMultiMachine(
+				"data/40-2/wet040_001_2m.dat", false);
+		TWETBPCConfig config = new TWETBPCConfig();
+		config.cutSetSupernodeSeeds = true;
+		StructuredArcFlowBrancher brancher = new StructuredArcFlowBrancher(data, config);
+		int sink = data.n + 1;
+		double[][] flow = new double[sink + 1][sink + 1];
+		flow[1][2] = 0.999;
+		flow[3][4] = 0.999;
+		flow[2][3] = 0.5;
+		for (int job = 1; job <= 4; job++) {
+			flow[0][job] = 0.3;
+		}
+		List<StructuredArcFlowBrancher.AggregateSpec> specs =
+				brancher.buildCutSetCandidateSpecs(flow, sink);
+		require(specs.stream().anyMatch(spec -> spec.jobs.get(1) && spec.jobs.get(2)
+				&& spec.jobs.get(3) && spec.jobs.get(4)), "supernode CutSet expands joined groups");
+		for (StructuredArcFlowBrancher.AggregateSpec spec : specs) {
+			require(spec.jobs.get(1) == spec.jobs.get(2), "first supernode stays intact");
+			require(spec.jobs.get(3) == spec.jobs.get(4), "second supernode stays intact");
+		}
+		config.cutSetSupernodeSeeds = false;
+		require(brancher.buildCutSetCandidateSpecs(flow, sink).stream()
+				.anyMatch(spec -> spec.jobs.get(3) != spec.jobs.get(4)),
+				"disabling supernode seeds restores singleton expansion");
 	}
 
 	private static Map<String, Double> buildReferenceCutSetSpecs(int jobCount, double[][] flow, int sink) {

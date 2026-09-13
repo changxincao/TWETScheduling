@@ -1,5 +1,6 @@
 package TWETBPC.BP;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
@@ -250,6 +251,24 @@ public final class StructuredArcFlowBranchingTest {
 				"CutSet distance below half a millisecond-equivalent bucket rounds to zero");
 		require(StructuredArcFlowBrancher.cutSetHalfDistanceSortKey(1.5006) == 1L,
 				"CutSet distance above half a bucket remains distinguishable");
+		ArrayList<StrongBranchingCandidate> sorted = new ArrayList<StrongBranchingCandidate>();
+		sorted.add(aggregateCandidate("small-set", 1.5 + 1.0e-12));
+		sorted.add(aggregateCandidate("large-set", 1.5));
+		require(StructuredArcFlowBrancher.limitSortedCutSetCandidates(sorted, 1).get(0) == sorted.get(0),
+				"strict CutSet keeps three-decimal preordering through strong-trial truncation");
+		ArrayList<StrongBranchingCandidate> rawSorted = new ArrayList<StrongBranchingCandidate>(sorted);
+		new ArcBrancher(1.0e-6).sortCandidates(rawSorted);
+		require(rawSorted.get(0) == sorted.get(1),
+				"raw-distance resort would reverse the quantized CutSet tie");
+	}
+
+	private static StrongBranchingCandidate aggregateCandidate(String description, double value) {
+		return new StrongBranchingCandidate("aggregate", description, value) {
+			@Override
+			public BranchResult createBranchResult(LP lp) {
+				return BranchResult.none("unused");
+			}
+		};
 	}
 
 	private static void verifyNodeCopyIsolation() throws Exception {

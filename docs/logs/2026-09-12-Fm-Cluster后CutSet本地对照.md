@@ -302,3 +302,23 @@ random set03在前三次分支完全一致，第四次已经分叉：旧版从�
 ### 16.3 后续敏感性复测顺序
 
 后续暂不立即运行。复测时先固定当前三位半整数距离排序，以消除增量求和尾差对top-40/top-20的影响，再分别恢复前面尝试过的新CutSet构造进行同seed A/B，包括supernode、面向`z=1.5`的扩张、只保留第一层和集合规模过滤。每次只改变一项，旧CutSet完整层级作为共同基线；优先复测已有family zero、family wide和random set03，比较节点数、pricing rounds、strong-trial/Phase-I repair及最终时间。只有稳定排序下仍出现一致改善，才考虑保留对应策略；当前正式代码不采用这些候选语义变化，也不启动该批实验。
+
+## 17. 2026-09-13 三位排序下的旧版与新CutSet复测
+
+先纠正一个复测前发现的实现边界：第16.2节的三位小数规则原先只作用于CutSet候选预排序；严格分层返回前仍调用公共`sortCandidates()`，又按原始`double`距离重排，因而top-20实际上没有稳定下来。本次在严格CutSet路径直接保留预排序结果，再由`Tree`取前20个；Cluster和混合候选池路径未改。定向回归构造两条原始距离顺序与三位排序顺序相反的候选，确认不会二次重排，`StructuredArcFlowBranchingTest`通过。
+
+复测中的“旧版”指当前保留的singleton起点、最大support-affinity扩张、全部分数层CutSet；“新版”按第15节记录在隔离源码中重建，组合近整数supernode、朝`z=1.5`扩张、只留`1<z<2`及`3<=|S|<=n-2`。上次新版本的源码未保留，故这不是旧二进制的逐字复现。两侧均使用同一`solver.jar`（SHA-256 `FE2E4FB15BF819C11F5ABCC23D0AD8733CF7343456881CFFDCF0E84624E6F101`），只覆盖`StructuredArcFlowBrancher`类，统一三位排序及截断修正、实例、seed、NG-DSSR v8配置、单线程CPLEX和全树求解。family为`n040-set02/m4`，setup-only Cluster后严格回退CutSet；random为`n050-set03/m2/base/zero`，Cluster关闭，严格CutSet后回退Arc。family时限1200秒，random时限1800秒。隔离源码、启动脚本、配置快照与逐轮日志位于`.codex-tmp/cutset-rounded-sensitivity-20260913/`。
+
+| 算例 | 旧版：秒/节点 | 四项新版：秒/节点 | 仅supernode：秒/节点 | 判断 |
+| --- | ---: | ---: | ---: | --- |
+| family/base/wide | 71.742/34 | 89.293/38 | 54.879/19 | 组合变慢；supernode单项较好 |
+| family/base/zero | 191.175/178 | 280.229/161 | 179.350/160 | 组合虽缩树仍明显变慢；supernode小幅改善 |
+| random/base/zero | 319.728/21 | 366.610/23 | 397.342/21 | 两个新版均变慢 |
+
+以上九次均以相同目标值及`bound=incumbent`闭合。`family/zero`组合版的关键不是普通定价恶化：普通NG-DSSR约`28.3s/429次`，旧版约`35.5s/499次`；真正拖慢的是强分支Phase-I修复NG-DSSR，由旧版约`1.9s/49次`增至`110.5s/106次`。`family/wide`组合版的修复也从约`0.1s/3次`增至`7.9s/25次`。random的supernode单项没有repair，但普通NG-DSSR由`149.0s/241次、541轮`增至`222.0s/275次、742轮`；同为21节点，较慢来自分支路径下的定价工作量，而不只是运行噪声。其root预处理约`35.4s -> 42.3s`，只解释总差约7秒。
+
+单因素`family/wide`进一步显示：仅改向`z=1.5`扩张为`71.698s/29节点`，相对旧版时间几乎不变；仅supernode则将被选CutSet的平均集合规模从`5.1`提高到`10.8`，CutSet分支次数从14降到6。这支持它可能在该family树上减少局部小集合分支，但不是普适证据：random里仅supernode的集合均值也从`3.0`升到`4.0`，节点仍为21、定价却更慢。组合版把高层CutSet全部删除：family/wide被选分支的`z>2`次数由旧版2降为0，family/zero由4降为0；这与修复成本升高同时出现，但不能仅凭相关性断定单一因果。
+
+“仅第一层”与“仅规模过滤”两组`family/wide`均在第9节点进入持续的强分支Phase-I修复，分别在约284秒、214秒的Java CPU时间观测后主动中止；两组都未闭合，不能给出最终节点数或最优性比较。前期Cluster选择相同，但两组在第5个分支选择的CutSet不同，不应说成同一搜索路径。这已经足以否定它们在该算例上的快速加速价值，不值得为了这一负例继续消耗1200秒。另有一组random启动时误开Cluster，导致CutSet没有触发；该运行移至`runs/invalid-cluster-on-*`，不参与上述比较，随后关闭Cluster成对重跑。
+
+当前结论是：三位排序固定后，四项新版依然没有跨family/random的稳定收益；只保留第一层和删除小集合在family/wide有明显修复风险，`z=1.5`扩张单项无明确时间收益。supernode单项在两组family有改善信号，但random同节点下明显增大定价工作量，不能作为所有实例的默认设置。正式主线只保留排序修正，CutSet候选语义、默认开关及既有Cluster/Arc流程均不改；如后续要采用supernode，应先针对family再做更多seed与完整树复核。

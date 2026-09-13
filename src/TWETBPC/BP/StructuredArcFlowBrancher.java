@@ -71,7 +71,7 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		if (config.enableCutSetBranching) {
 			collectCutSetCandidates(candidates, aggregateKeys, arcValues, sink);
 			if (config.structuredArcStrictTypePriority && !candidates.isEmpty()) {
-				return sortedAndLimited(candidates, limit);
+				return limitSortedCutSetCandidates(candidates, limit);
 			}
 		}
 		ArrayList<StrongBranchingCandidate> arcCandidates = collectInternalArcCandidates(lp, node, sink, arcValues);
@@ -136,6 +136,13 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			addAggregateCandidate(candidates, keys, "cutSet", "cutSet(" + jobSetText(spec.jobs) + ")",
 					mask, spec.value, index);
 		}
+	}
+
+	/** CutSet已按三位距离排序；严格分层时不能再由公共排序器按原始double重排。 */
+	static List<StrongBranchingCandidate> limitSortedCutSetCandidates(
+			ArrayList<StrongBranchingCandidate> candidates, int limit) {
+		return candidates.size() <= limit ? candidates
+				: new ArrayList<StrongBranchingCandidate>(candidates.subList(0, limit));
 	}
 
 	/**

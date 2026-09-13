@@ -328,3 +328,19 @@ random set03在前三次分支完全一致，第四次已经分叉：旧版从�
 需要区分“不能全局默认开启”与“family上不使用”。旧CutSet接在Cluster之后，在现有`F=3<m=4`的三组family对照中，wide小幅改善、zero明显缩树提速、narrow一侧闭合而Arc对照在repair内超时。这足以把旧CutSet列为`F<m` family的有价值候选，不能因四项新构造失败或random负例而一并否定。random两个无Cluster完整树均变慢，所以不应对所有算例开启。`F>=m`及其他family规模尚没有同口径证据，不外推。
 
 当前正式默认仍关闭CutSet，是因为三位排序修正后只完成了CutSet内部旧/新对照，尚未重跑同版本、同seed的`Cluster -> Arc`对照；第2节的Arc时间与第17节的CutSet时间不能直接组成正式主表。下一批如果要选family最优配置，应对`F<m`成对运行`Cluster -> Arc`与`Cluster -> 旧CutSet -> Arc`，保留两侧的状态、目标、节点、定价与repair时间，再按同一预定规则选择报告配置。旧CutSet无需等待supernode改造；supernode只是额外的独立试验项。此处只修正使用判断，不自动修改全局配置或补跑实验。
+
+### 17.2 超节点单项与四项组合的区别
+
+需要进一步修正第17.1节的保守建议：在已测的两组`F<m` family上，supernode单项都优于同口径旧CutSet；若当前必须在这两种CutSet之间选择下一批family实验的主候选，应优先考虑“只加supernode”，旧CutSet作对照，而不是把四项新版一起采用。此处说的是下一批实验优先级，尚不是跨family规模、seed和时间尺度均验证的通用最佳配置。supernode实验实现仍只在隔离目录，正式主线没有启用开关。
+
+机制上，旧生成器从每个singleton重复生长相近的prefix。supernode仅在候选搜索时将当前LP里双向合计flow接近1的任务连接成单位，避免在这些近确定连接内部反复起步，使候选更容易覆盖一个有意义的局部块；它不固定这些arc，也不改变pricing或分支约束。family有清晰的低setup块，这种LP局部连接更可能与块内稳定片段一致，这是合理解释而非已证明的跨seed规律。family/wide被选CutSet平均规模从5.1升到10.8、CutSet分支从14次降到6次，与该解释相符。random中集合规模也升到4.0，但节点不降、exact轮数反增，说明“集合变大”本身不是收益来源；近整数连接未必代表值得聚合决策的稳定任务块。
+
+四项组合的失败不能归咎于supernode。其余改动把扩张方向强制指向`z=1.5`、删除`z>2`层和二元/近全集合候选，可能使有用的完整候选被排除；数值更接近1.5并不意味着左右child bound改善更大。组合版family/zero虽然缩树，强分支Phase-I修复exact却从1.9秒升到110.5秒。单因素第一层和规模过滤在family/wide也分别走入耗时修复，支持“候选受限后强分支路径恶化”的判断，但尚不能把110.5秒精确归因到某一过滤项。若继续实现family版本，应只加入supernode搜索单位，其余旧版的最大affinity扩张、全部分数层、40候选预池、20个strong trial和严格`Cluster -> CutSet -> Arc`均保留；random仍关闭CutSet，`F>=m`不外推。
+
+### 17.2 超节点单项与四项组合的区别
+
+需要进一步修正第17.1节的保守建议：在已测的两组`F<m` family上，supernode单项都优于同口径旧CutSet；若当前必须在这两种CutSet之间选择下一批family实验的主候选，应优先考虑“只加supernode”，旧CutSet作对照，而不是把四项新版一起采用。此处说的是下一批实验优先级，尚不是跨family规模、seed和时间尺度均验证的通用最佳配置。supernode实验实现仍只在隔离目录，正式主线没有启用开关。
+
+机制上，旧生成器从每个singleton重复生长相近的prefix。supernode仅在候选搜索时将当前LP里双向合计flow接近1的任务连接成单位，避免在这些近确定连接内部反复起步，使候选更容易覆盖一个有意义的局部块；它不固定这些arc，也不改变pricing或分支约束。family有清晰的低setup块，这种LP局部连接更可能与块内稳定片段一致，这是合理解释而非已证明的跨seed规律。family/wide被选CutSet平均规模从5.1升到10.8、CutSet分支从14次降到6次，与该解释相符。random中集合规模也升到4.0，但节点不降、exact轮数反增，说明“集合变大”本身不是收益来源；近整数连接未必代表值得聚合决策的稳定任务块。
+
+四项组合的失败不能归咎于supernode。其余改动把扩张方向强制指向`z=1.5`、删除`z>2`层和二元/近全集合候选，可能使有用的完整候选被排除；数值更接近1.5并不意味着左右child bound改善更大。组合版family/zero虽然缩树，强分支Phase-I修复exact却从1.9秒升到110.5秒。单因素第一层和规模过滤在family/wide也分别走入耗时修复，支持“候选受限后强分支路径恶化”的判断，但尚不能把110.5秒精确归因到某一过滤项。若继续实现family版本，应只加入supernode搜索单位，其余旧版的最大affinity扩张、全部分数层、40候选预池、20个strong trial和严格`Cluster -> CutSet -> Arc`均保留；random仍关闭CutSet，`F>=m`不外推。

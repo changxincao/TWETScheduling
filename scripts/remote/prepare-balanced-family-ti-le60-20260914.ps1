@@ -25,7 +25,7 @@ function Write-Tsv([string]$path, [object[]]$items) {
 }
 
 function Manifest-Row([string]$id, [string]$argumentText, [string]$output,
-        [string]$block, [string]$action, [object]$input, [string]$algorithm) {
+        [string]$block, [string]$action, [object]$instanceRow, [string]$algorithm) {
     [pscustomobject][ordered]@{
         runId = $id
         mainClass = 'Common.formal.FormalExperimentRunner'
@@ -34,12 +34,12 @@ function Manifest-Row([string]$id, [string]$argumentText, [string]$output,
         dependsOn = ''
         block = $block
         action = $action
-        taskSetId = $input.taskSetId
-        size = $input.size
-        machines = $input.machines
+        taskSetId = $instanceRow.taskSetId
+        size = $instanceRow.size
+        machines = $instanceRow.machines
         setupType = 'family'
-        scaleLevel = $input.scaleLevel
-        windowLevel = $input.windowLevel
+        scaleLevel = $instanceRow.scaleLevel
+        windowLevel = $instanceRow.windowLevel
         algorithm = $algorithm
         outsourcingModel = ''
         outsourcingRate = ''

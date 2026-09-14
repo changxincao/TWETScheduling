@@ -1,6 +1,6 @@
 # 调整 family 数量的本地调度算例（2026-09-14）
 
-本目录是独立的候选数据集，没有替换 `experiment-suite/formal/instances`，也没有修改三台远端电脑上的输入、输出或在途求解。这里只生成纯调度 `.dat` 和审计数据；未生成外包实例、求解 seed 或运行清单，尚无任何求解结果。
+本目录是独立的候选数据集，没有替换 `experiment-suite/formal/instances`。这里只生成纯调度 `.dat` 和审计数据；未生成外包实例、求解 seed 或运行清单，尚无任何求解结果。生成和审计阶段未修改远端；2026-09-14 已将本目录的输入副本部署到三台远端电脑的独立目录，未改动原输入、输出或在途求解。
 
 原正式数据在 `n50/n60/n80/n100` 的 family 数分别是 `4/4/5/6`。新数据只把这四档改为 `3/3/4/4`，机器档仍为 `n50/n60: 2,3,4` 和 `n80/n100: 3,4,5`。因此每个规模都有一档 `F>m`、一档 `F=m` 和一档 `F<m`；四个规模合计每种关系 180 个实例。每规模采用原来的 5 个任务集合、3 个时间尺度和 3 个窗口宽度，共 `4*5*3*3*3=540` 个 family 调度文件，索引在 `instances/instances.tsv`。
 
@@ -25,3 +25,5 @@ java -cp target/classes Common.formal.smoke.FormalPersistedInstanceLoadTest expe
 旧正式索引 `instances.tsv` 的 SHA-256 为 `3485A6CBF9B22551FA30364A01A866F0A4253B9FD04BD0BDC26BA68F8A6E248C`；新索引为 `02EAA7DC0AE6DE83D8059C57FAB4B064DC42CE2ED0BCD548F1BE034C61E3AED2`。旧文件仅用于读取比对，没有覆盖。新数据是否进入论文主表仍取决于后续统一配置下的实际求解和分层结果。
 
 补充复核（2026-09-14）：`post-generation-setup-audit.tsv` 的540行分成180个任务集合/尺度/窗口组，每组三个机器档的正文SHA-256相同；三角违例和二次Floyd改弧均为0。`post-generation-time-scale-audit.tsv` 的processing、window、weight、setup、setup-cost mismatch总数均为0。`--verifyOnly`还按固定种子重算并逐任务比对20个落盘family分组，同时确认新旧family数下的random矩阵相同。生产 `Data` 读取器已全量加载新目录540个纯调度文件，检查任务数、机器数及无外包标记；原正式目录的默认装载测试仍通过1620个调度文件与1710个外包文件。此前正式包还做了独立外包审计与manifest/seed检查，本目录尚未生成外包实例或求解任务，因此这两类检查不适用，不能把“数据验收通过”写成“求解配置已验收”。
+
+远端输入部署（2026-09-14）：三台电脑分别放在 `D:\ccx_work\考虑交付的机器调度\work1\instances\family-count-balanced-20260914`、`D:\ccx\work1\instances\family-count-balanced-20260914` 和 `D:\ccxWork\work1\instances\family-count-balanced-20260914`。每个目录下直接放 `data/`、`instances.tsv`、`design.properties`、六份审计/选择文件和本说明，与旧 `work1\instances\no_outsourcing` 的层级一致。每台均核对到540个 `.dat`、数据文件合计32781153字节，索引SHA-256为 `02EAA7DC0AE6DE83D8059C57FAB4B064DC42CE2ED0BCD548F1BE034C61E3AED2`；n50、n80、n100各抽一份 `.dat` 的SHA-256也与本地相同。此项仅是输入部署，未创建新的求解清单、seed或结果目录，也未启动求解。

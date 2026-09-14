@@ -18,11 +18,19 @@ public final class FormalSetupGenerator {
 	}
 
 	public List<Result> generatePair(FormalTaskSet taskSet) {
+		return generatePair(taskSet, FormalExperimentDesign.familyCount(taskSet.size()));
+	}
+
+	/** 仅覆盖family分组数；random矩阵仍使用同一组分位数和校准流程。 */
+	public List<Result> generatePair(FormalTaskSet taskSet, int familyCount) {
 		int n = taskSet.size();
+		if (familyCount < 1 || familyCount > n) {
+			throw new IllegalArgumentException("Invalid family count: " + familyCount);
+		}
 		double averageProcessing = taskSet.averageProcessing();
 		double targetMean = FormalExperimentDesign.SETUP_MEAN_RATIO * averageProcessing;
 		int cap = Math.max(1, (int) Math.floor(averageProcessing));
-		int[] familyByJob = assignFamilies(taskSet);
+		int[] familyByJob = assignFamilies(taskSet, familyCount);
 		double withinPairRatio = withinPairRatio(familyByJob);
 
 		double randomDeviation = targetMean / 2.0;
@@ -88,9 +96,8 @@ public final class FormalSetupGenerator {
 		return result;
 	}
 
-	private static int[] assignFamilies(FormalTaskSet taskSet) {
+	private static int[] assignFamilies(FormalTaskSet taskSet, int familyCount) {
 		int n = taskSet.size();
-		int familyCount = FormalExperimentDesign.familyCount(n);
 		ArrayList<Integer> jobs = new ArrayList<Integer>(n);
 		for (int job = 1; job <= n; job++) {
 			jobs.add(Integer.valueOf(job));

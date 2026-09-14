@@ -37,6 +37,20 @@ public final class FormalExperimentDataGenerator {
 	}
 
 	public GenerationResult generate(Path outputRoot, int[] sizes) throws IOException {
+		return generate(outputRoot, sizes, Map.of(), false);
+	}
+
+	/** 在独立目录生成指定family数的调度实例，不改正式主数据和外包数据。 */
+	public void generateFamilyVariant(Path outputRoot, int[] sizes, Map<Integer, Integer> familyCounts)
+			throws IOException {
+		if (Files.exists(outputRoot)) {
+			throw new IOException("Family variant output already exists: " + outputRoot);
+		}
+		generate(outputRoot, sizes, Map.copyOf(familyCounts), true);
+	}
+
+	private GenerationResult generate(Path outputRoot, int[] sizes, Map<Integer, Integer> familyCounts,
+			boolean familyOnly) throws IOException {
 		resetGeneratedData(outputRoot.resolve("data"));
 		resetGeneratedData(outputRoot.resolve("outsourcing-data"));
 		Files.createDirectories(outputRoot);
@@ -55,7 +69,12 @@ public final class FormalExperimentDataGenerator {
 			for (Scale scale : scales) {
 				scaleMetadata.add(scaleMetadataRow(taskSet, scale));
 			}
-			for (Result setupResult : setupGenerator.generatePair(taskSet)) {
+			int familyCount = familyCounts.getOrDefault(taskSet.size(),
+					FormalExperimentDesign.familyCount(taskSet.size()));
+			for (Result setupResult : setupGenerator.generatePair(taskSet, familyCount)) {
+				if (familyOnly && setupResult.type() != FormalSetupGenerator.Type.FAMILY) {
+					continue;
+				}
 				for (Scale scale : scales) {
 					ScaledData scaled = timeScaleGenerator.scale(taskSet, centers, setupResult.setup(), scale);
 					Report audit = setupValidator.audit(scaled.setup(), scaled.targetSetupMean(), scaled.setupCap(),
@@ -63,7 +82,7 @@ public final class FormalExperimentDataGenerator {
 					setupValidator.requirePreset(audit, setupResult.type() == FormalSetupGenerator.Type.FAMILY);
 					setupMetadata.add(setupMetadataRow(taskSet, setupResult, scale, audit));
 					for (Window window : windowGenerator.generate(taskSet, scale)) {
-						if (setupResult.type() == FormalSetupGenerator.Type.RANDOM) {
+						if (familyOnly || setupResult.type() == FormalSetupGenerator.Type.RANDOM) {
 							windowMetadata.add(windowMetadataRow(taskSet, scale, window));
 						}
 						for (int machines : FormalExperimentDesign.machines(taskSet.size())) {
@@ -84,9 +103,9 @@ public final class FormalExperimentDataGenerator {
 		Files.write(outputRoot.resolve("scale-selection.tsv"), scaleMetadata, StandardCharsets.UTF_8);
 		Files.write(outputRoot.resolve("window-selection.tsv"), windowMetadata, StandardCharsets.UTF_8);
 		Files.write(outputRoot.resolve("setup-audit.tsv"), setupMetadata, StandardCharsets.UTF_8);
-		writeDesignProperties(outputRoot, sizes, casesPerSize);
-		FormalOutsourcingDataGenerator.Result outsourcing =
-				outsourcingDataGenerator.generate(outputRoot, taskSets, instances);
+		writeDesignProperties(outputRoot, sizes, casesPerSize, familyCounts, familyOnly);
+		FormalOutsourcingDataGenerator.Result outsourcing = familyOnly ? null
+				: outsourcingDataGenerator.generate(outputRoot, taskSets, instances);
 		return new GenerationResult(List.copyOf(taskSets), List.copyOf(instances), outsourcing);
 	}
 
@@ -200,7 +219,8 @@ public final class FormalExperimentDataGenerator {
 		return path.normalize().toString().replace('\\', '/');
 	}
 
-	private static void writeDesignProperties(Path outputRoot, int[] sizes, int casesPerSize) throws IOException {
+	private static void writeDesignProperties(Path outputRoot, int[] sizes, int casesPerSize,
+			Map<Integer, Integer> familyCounts, boolean familyOnly) throws IOException {
 		LinkedHashMap<String, String> values = new LinkedHashMap<String, String>();
 		values.put("taskSizes", Arrays.stream(sizes).mapToObj(Integer::toString)
 				.reduce((first, second) -> first + "," + second).orElse(""));
@@ -210,10 +230,13 @@ public final class FormalExperimentDataGenerator {
 		values.put("windowLevels", "zero,narrow,wide");
 		values.put("baseWindowRanges", "zero:0,narrow:80-120,wide:280-320");
 		values.put("windowScaleMode", "nominal-scale-independent-per-job");
-		values.put("setupTypes", "random,family");
+		values.put("setupTypes", familyOnly ? "family" : "random,family");
 		values.put("setupMeanRatio", "0.5");
 		values.put("setupCapRatio", "1.0");
-		values.put("familyCounts", "20:3,40:3,50:4,60:4,80:5,100:6");
+		values.put("familyCounts", Arrays.stream(FormalExperimentDesign.TASK_SIZES)
+				.mapToObj(size -> size + ":" + familyCounts.getOrDefault(size,
+						FormalExperimentDesign.familyCount(size)))
+				.reduce((first, second) -> first + "," + second).orElse(""));
 		values.put("familySwitchPenaltyRatio", "2.0");
 		values.put("familySeparationRatioRange", "4.0,5.3");
 		values.put("setupCostCoefficient", "20");

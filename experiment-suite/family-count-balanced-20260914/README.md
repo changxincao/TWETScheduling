@@ -17,8 +17,11 @@ java -cp target/classes Common.formal.FormalFamilyCountVariantGenerator data exp
 
 ```powershell
 java -cp target/classes Common.formal.FormalFamilyCountVariantGenerator data experiment-suite/formal/instances experiment-suite/family-count-balanced-20260914 --verifyOnly
+java -cp target/classes Common.formal.smoke.FormalPersistedInstanceLoadTest experiment-suite/family-count-balanced-20260914 --scheduling-only
 ```
 
 2026-09-14 验收：原独立 setup 审计和时间尺度审计均覆盖 540 文件；20 个任务集合的任务、尺度、窗口 metadata 与旧版对应行相同，540 份 `.dat` 的任务行和机器数逐文件相同，20 个任务集合的 family setup 均发生变化。新 family 数为 `50/60:3`、`80/100:4`；base 层 setup 的组间/组内均值比分别为 `4.669–4.753`、`4.692–4.749`、`4.656–4.711`、`4.681–4.727`。全文件最大 setup 均值相对误差为 `0.002800` 以下，三角不等式违反数为 0，base 层无 setup cap 命中。逐文件正文 SHA-256 在 `instances/post-generation-setup-audit.tsv` 中。另在独立临时目录走了一次未改动的正式生成入口，重生成 `n50-set01` 的54份random/family文件，全部与旧正式文件SHA-256一致；临时目录已清理。
 
 旧正式索引 `instances.tsv` 的 SHA-256 为 `3485A6CBF9B22551FA30364A01A866F0A4253B9FD04BD0BDC26BA68F8A6E248C`；新索引为 `02EAA7DC0AE6DE83D8059C57FAB4B064DC42CE2ED0BCD548F1BE034C61E3AED2`。旧文件仅用于读取比对，没有覆盖。新数据是否进入论文主表仍取决于后续统一配置下的实际求解和分层结果。
+
+补充复核（2026-09-14）：`post-generation-setup-audit.tsv` 的540行分成180个任务集合/尺度/窗口组，每组三个机器档的正文SHA-256相同；三角违例和二次Floyd改弧均为0。`post-generation-time-scale-audit.tsv` 的processing、window、weight、setup、setup-cost mismatch总数均为0。`--verifyOnly`还按固定种子重算并逐任务比对20个落盘family分组，同时确认新旧family数下的random矩阵相同。生产 `Data` 读取器已全量加载新目录540个纯调度文件，检查任务数、机器数及无外包标记；原正式目录的默认装载测试仍通过1620个调度文件与1710个外包文件。此前正式包还做了独立外包审计与manifest/seed检查，本目录尚未生成外包实例或求解任务，因此这两类检查不适用，不能把“数据验收通过”写成“求解配置已验收”。

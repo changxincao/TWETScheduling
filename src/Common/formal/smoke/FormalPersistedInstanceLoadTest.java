@@ -15,10 +15,13 @@ public final class FormalPersistedInstanceLoadTest {
 	}
 
 	public static void main(String[] args) throws Exception {
+		if (args.length > 2 || (args.length == 2 && !"--scheduling-only".equals(args[1]))) {
+			throw new IllegalArgumentException("Usage: FormalPersistedInstanceLoadTest [suite-root] [--scheduling-only]");
+		}
 		Path suiteRoot = args.length == 0 ? Path.of("experiment-suite", "formal") : Path.of(args[0]);
 		Path instanceRoot = suiteRoot.resolve("instances");
 		int scheduling = auditScheduling(instanceRoot);
-		int outsourcing = auditOutsourcing(instanceRoot);
+		int outsourcing = args.length == 2 ? 0 : auditOutsourcing(instanceRoot);
 		System.out.printf("FormalPersistedInstanceLoadTest passed: scheduling=%d outsourcing=%d%n",
 				Integer.valueOf(scheduling), Integer.valueOf(outsourcing));
 	}

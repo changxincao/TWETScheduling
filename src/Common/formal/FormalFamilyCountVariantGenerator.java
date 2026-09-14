@@ -42,7 +42,7 @@ public final class FormalFamilyCountVariantGenerator {
 		FormalSetupAuditRunner.AuditSummary setup = FormalSetupAuditRunner.audit(suite);
 		FormalTimeScaleAuditRunner.AuditSummary time = FormalTimeScaleAuditRunner.audit(suite);
 		verifyMatchedData(oldRoot, output);
-		verifyRandomSetupStable(source);
+		verifySetupAssignmentAndRandom(source, output);
 		if (setup.fileCount() != 540 || time.fileCount() != 540) {
 			throw new IOException("Expected 540 family instances, got setup=" + setup.fileCount()
 					+ " time=" + time.fileCount());
@@ -50,16 +50,35 @@ public final class FormalFamilyCountVariantGenerator {
 		System.out.println("Family-count variant verified: 540 instances, F=3/3/4/4, output=" + suite);
 	}
 
-	private static void verifyRandomSetupStable(Path source) throws IOException {
+	private static void verifySetupAssignmentAndRandom(Path source, Path output) throws IOException {
 		FormalSetupGenerator generator = new FormalSetupGenerator(new FormalSetupValidator());
+		Map<String, String[]> assignments = new HashMap<>();
+		List<String> audit = Files.readAllLines(output.resolve("setup-audit.tsv"), StandardCharsets.UTF_8);
+		for (String line : audit.subList(1, audit.size())) {
+			String[] fields = line.split("\\t", -1);
+			if ("family".equals(fields[1]) && "base".equals(fields[2])) {
+				assignments.put(fields[0], fields[22].split(","));
+			}
+		}
 		for (FormalTaskSet taskSet : new FormalTaskSetGenerator(source,
 				FormalExperimentDesign.CASES_PER_SIZE).generate(SIZES)) {
 			int oldCount = FormalExperimentDesign.familyCount(taskSet.size());
 			int newCount = FAMILY_COUNTS.get(taskSet.size());
 			int[][] oldRandom = generator.generatePair(taskSet, oldCount).get(0).setup();
-			int[][] newRandom = generator.generatePair(taskSet, newCount).get(0).setup();
+			List<FormalSetupGenerator.Result> newPair = generator.generatePair(taskSet, newCount);
+			int[][] newRandom = newPair.get(0).setup();
 			if (!Arrays.deepEquals(oldRandom, newRandom)) {
 				throw new IOException("Random setup changed for " + taskSet.id());
+			}
+			String[] labels = assignments.get(taskSet.id());
+			int[] expected = newPair.get(1).familyByJob();
+			if (labels == null || labels.length != taskSet.size()) {
+				throw new IOException("Missing family assignment for " + taskSet.id());
+			}
+			for (int job = 1; job <= taskSet.size(); job++) {
+				if (Integer.parseInt(labels[job - 1]) != expected[job]) {
+					throw new IOException("Family assignment differs from seeded generator: " + taskSet.id());
+				}
 			}
 		}
 	}

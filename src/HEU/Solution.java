@@ -1015,9 +1015,8 @@ public class Solution {
 
 		double bestCost = 0;
 		// 计算s_h2*
-		PiecewiseLinearFunction shiftedF1 = f1.shiftX(shift1);
-		PiecewiseLinearFunction merge12 = shiftedF1.add(b2);
-		shiftedF1.release();
+		// 2026-09-15: 直接融合平移与相加，避免 CrossExchange 热路径反复创建临时 shifted 链表。
+		PiecewiseLinearFunction merge12 = PiecewiseLinearFunction.addShifted(f1, shift1, b2);
 		// 此处b2可行域应该不需要特殊处理，f1移动以后的可行域就是b2的
 		if (merge12.isEmpty()) {
 			merge12.release();
@@ -1037,9 +1036,7 @@ public class Solution {
 		}
 
 		// 计算s_h3*
-		PiecewiseLinearFunction shiftedB3 = b3.shiftX(-shift2);
-		PiecewiseLinearFunction merge23 = f2.add(shiftedB3);
-		shiftedB3.release();
+		PiecewiseLinearFunction merge23 = PiecewiseLinearFunction.addShifted(b3, -shift2, f2);
 		if (merge23.isEmpty()) {
 			merge23.release();
 			return Utility.curUpperBound;
@@ -1063,17 +1060,13 @@ public class Solution {
 //			System.out.println("情况2");
 			double SplitBestCost = f2.findMinimal(true, true)[0];
 			f2.resetDomain(0, data.CmaxH);
-			PiecewiseLinearFunction shiftedF1ForAll = f1.shiftX(shift1);
-			PiecewiseLinearFunction merge12ForAll = shiftedF1ForAll.add(b2);
-			shiftedF1ForAll.release();
-			PiecewiseLinearFunction shiftedF2 = f2.shiftX(-duration2);
-			PiecewiseLinearFunction merge123ForAll = merge12ForAll.add(shiftedF2);
+			PiecewiseLinearFunction merge12ForAll = PiecewiseLinearFunction.addShifted(f1, shift1, b2);
+			PiecewiseLinearFunction merge123ForAll = PiecewiseLinearFunction.addShifted(f2, -duration2,
+					merge12ForAll);
 			merge12ForAll.release();
-			shiftedF2.release();
-			PiecewiseLinearFunction shiftedB3ForAll = b3.shiftX(-shift2 - duration2);
-			PiecewiseLinearFunction newF = merge123ForAll.add(shiftedB3ForAll);
+			PiecewiseLinearFunction newF = PiecewiseLinearFunction.addShifted(b3, -shift2 - duration2,
+					merge123ForAll);
 			merge123ForAll.release();
-			shiftedB3ForAll.release();
 
 			double cost = newF.findMinimal(true, true)[0];
 			newF.release();

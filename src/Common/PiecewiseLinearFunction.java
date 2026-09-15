@@ -481,6 +481,9 @@ public class PiecewiseLinearFunction {
 		Segment q = res.head;
 		Segment p = head.next;
 		while (p != null) {
+			if (p.next == p) {
+				throw new IllegalStateException("PWLF segment chain contains a self-loop while copying");
+			}
 			q.next = SegmentPool.obtain(p.start, p.end, p.slope, p.intercept);
 			p = p.next;
 			q = q.next;
@@ -692,6 +695,9 @@ public class PiecewiseLinearFunction {
 		PiecewiseLinearFunction res = copy();
 		Segment p = res.head;
 		while (p != null) {
+			if (p.next == p) {
+				throw new IllegalStateException("PWLF segment chain contains a self-loop while shifting");
+			}
 			p.start += delta;
 			p.end += delta;
 			p.intercept -= p.slope * delta;

@@ -157,8 +157,12 @@ public class Tree {
 				heartbeat(node, "pc.solve.start");
 				TWETMasterSolution solution = pc.solve(lp, incumbentCost);
 				double certifiedNodeBound = pc.getBestCertifiedNodeBound();
-				if (Double.isFinite(certifiedNodeBound)) {
-					bestBound = updateReportedBound(queue, certifiedNodeBound, incumbentCost);
+				double reportableNodeBound = strongestReportableNodeBound(certifiedNodeBound,
+						pc.getLastObservedDualBound());
+				if (Double.isFinite(reportableNodeBound)) {
+					// 2026-09-15: 节点在 exact pricing 中途超时时，之前完整返回的 reduced-cost
+					// certificate 仍给出合法节点下界；只有一次 certificate 都没有时才保持未知。
+					bestBound = updateReportedBound(queue, reportableNodeBound, incumbentCost);
 				}
 
 				if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
@@ -1000,6 +1004,10 @@ public class Tree {
 			return incumbentCost;
 		}
 		return bound;
+	}
+
+	static double strongestReportableNodeBound(double bestClosureBound, double bestObservedDualBound) {
+		return PC.strongestCertifiedBound(bestClosureBound, bestObservedDualBound);
 	}
 
 	static double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound,

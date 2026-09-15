@@ -33,12 +33,27 @@ public final class TreeFinalBoundTest {
 		assertClose(200.0, Tree.finalBound(empty, 200.0, 100.0, false, false),
 				"completed search with empty queue");
 
+		assertClose(120.0, Tree.strongestReportableNodeBound(Double.NEGATIVE_INFINITY, 120.0),
+				"completed exact pricing certificate must survive a later timeout");
+		assertClose(130.0, Tree.strongestReportableNodeBound(130.0, 120.0),
+				"full pricing closure remains stronger than an earlier observed bound");
+		assertClose(130.0, Tree.strongestReportableNodeBound(120.0, 130.0),
+				"the strongest certified observed bound must be retained");
+		assertNegativeInfinity(Tree.strongestReportableNodeBound(Double.NEGATIVE_INFINITY, Double.NaN),
+				"no completed exact pricing certificate must keep the bound unknown");
+
 		System.out.println("TreeFinalBoundTest passed");
 	}
 
 	private static void assertClose(double expected, double actual, String context) {
 		if (Math.abs(expected - actual) > 1e-9) {
 			throw new AssertionError(context + ": expected=" + expected + ", actual=" + actual);
+		}
+	}
+
+	private static void assertNegativeInfinity(double actual, String context) {
+		if (actual != Double.NEGATIVE_INFINITY) {
+			throw new AssertionError(context + ": actual=" + actual);
 		}
 	}
 }

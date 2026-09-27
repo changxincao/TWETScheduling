@@ -342,7 +342,8 @@ public class LP {
 		try {
 			if (repairSlackVars != null) {
 				for (IloNumVar slack : repairSlackVars) {
-					if (slack != null && Utility.compareGt(cplex.getValue(slack), VALUE_TOLERANCE)) {
+					// VALUE_TOLERANCE 已是本状态的完整判零阈值，不能再叠加 Utility.EPS。
+					if (slack != null && cplex.getValue(slack) > VALUE_TOLERANCE) {
 						return false;
 					}
 				}
@@ -1575,7 +1576,7 @@ public class LP {
 			}
 			try {
 				double value = cplex.getValue(var);
-				if (Utility.compareGt(value, VALUE_TOLERANCE)) {
+				if (value > VALUE_TOLERANCE) {
 					total += value;
 				}
 			} catch (IloException ex) {

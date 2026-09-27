@@ -42,19 +42,26 @@ public class MachineCountBrancher implements Brancher {
 		if (solution == null) {
 			return BranchResult.none("No master solution");
 		}
-		double machineUsage = solution.getMachineUsage();
+		Node base = lp.getNode();
+		double rawMachineUsage = solution.getMachineUsage();
+		// 2026-09-27: CPLEX 可在行可行性容差内返回略越过父节点机器数边界的值。
+		// 这类数值漂移不能生成 [min,max] 反转的 child；先贴回父区间，再判断是否需要分支。
+		double machineUsage = Math.max(base.minMachineCount,
+				Math.min(base.maxMachineCount, rawMachineUsage));
 		double rounded = Math.rint(machineUsage);
 		if (Utility.compareLe(Math.abs(machineUsage - rounded), tolerance)) {
-			return BranchResult.none("Machine usage already integral");
+			return BranchResult.none("Machine usage already integral within parent bounds");
 		}
 
-		Node base = lp.getNode();
 		Node left = base.copy();
 		Node right = base.copy();
 		left.depth = right.depth = base.depth + 1;
 		left.pseudoCost = right.pseudoCost = solution.getObjectiveValue();
-		left.maxMachineCount = (int) Math.floor(machineUsage);
-		right.minMachineCount = (int) Math.ceil(machineUsage);
+		left.maxMachineCount = Math.min(base.maxMachineCount, (int) Math.floor(machineUsage));
+		right.minMachineCount = Math.max(base.minMachineCount, (int) Math.ceil(machineUsage));
+		if (left.minMachineCount > left.maxMachineCount || right.minMachineCount > right.maxMachineCount) {
+			return BranchResult.none("Machine split is empty after intersecting parent bounds");
+		}
 		left.markMachineUpperRepair();
 		right.markMachineLowerRepair();
 		return new BranchResult(true, left, right, "Branched on machine usage");

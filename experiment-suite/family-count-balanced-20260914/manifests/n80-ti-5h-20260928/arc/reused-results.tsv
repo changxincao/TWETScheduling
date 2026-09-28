@@ -1,0 +1,8 @@
+taskSetId	machines	setupType	scaleLevel	windowLevel	algorithm	sourceRunId	sourceOutputDir	reason
+n080-set01	4	random	base	zero	TIME_INDEXED_SRI	large-tisri-r80s01-zero-m4	D:/ccx_work/考虑交付的机器调度/work1/experiments/20260904-ti-tisri-large-random-4h/runs/large-tisri-r80s01-zero-m4	existing-certified-optimal
+n080-set03	4	random	base	zero	TIME_INDEXED	large-ti-r80s03-zero-m4	D:/ccx_work/考虑交付的机器调度/work1/experiments/20260904-ti-tisri-large-random-4h/runs/large-ti-r80s03-zero-m4	existing-certified-optimal
+n080-set03	4	random	base	zero	TIME_INDEXED_SRI	large-tisri-r80s03-zero-m4	D:/ccx_work/考虑交付的机器调度/work1/experiments/20260904-ti-tisri-large-random-4h/runs/large-tisri-r80s03-zero-m4	existing-certified-optimal
+n080-set03	4	random	medium	zero	TIME_INDEXED	ts-ti-r80s03-medium-zero-m4	D:/ccx_work/考虑交付的机器调度/work1/experiments/20260904-time-scale-large-random-4h/runs/ts-ti-r80s03-medium-zero-m4	existing-certified-optimal
+n080-set03	4	random	medium	zero	TIME_INDEXED_SRI	ts-tisri-r80s03-medium-zero-m4	D:/ccx_work/考虑交付的机器调度/work1/experiments/20260904-time-scale-large-random-4h/runs/ts-tisri-r80s03-medium-zero-m4	existing-certified-optimal
+n080-set05	4	random	base	zero	TIME_INDEXED	large-ti-r80s05-zero-m4	D:/ccx_work/考虑交付的机器调度/work1/experiments/20260904-ti-tisri-large-random-4h/runs/large-ti-r80s05-zero-m4	existing-certified-optimal
+n080-set05	4	random	base	zero	TIME_INDEXED_SRI	large-tisri-r80s05-zero-m4	D:/ccx_work/考虑交付的机器调度/work1/experiments/20260904-ti-tisri-large-random-4h/runs/large-tisri-r80s05-zero-m4	existing-certified-optimal

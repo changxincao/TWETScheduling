@@ -1,0 +1,75 @@
+{
+  "tool": "built-in image_gen",
+  "reference": "work1-optimized-4k.png",
+  "prompts": [
+    "imagegen-prompt.txt",
+    "imagegen-correction-prompt.txt"
+  ],
+  "generation_passes": 2,
+  "requested_resolution": "highest native size; second request preferred 3328x2496 if supported",
+  "actual_native_size": [
+    1448,
+    1086
+  ],
+  "original_output": "C:\\Users\\Changxin\\.codex\\generated_images\\01a19267-55f5-7082-a620-a979ee618280\\exec-46f310e5-f1e3-4aad-a31c-382fb9230ed3.png",
+  "copied_without_postprocessing": true,
+  "sha256": "765d2501bcb4f9cb182e9d5418b4e0678b79bdd4604c3c8f1b36c3ff3b0c6168",
+  "source_and_copy_hash_equal": true,
+  "pink_fill_measurements": {
+    "main_J3": {
+      "fill_bbox": [
+        449,
+        114,
+        545,
+        142
+      ],
+      "fill_width": 97
+    },
+    "parameter_J3": {
+      "fill_bbox": [
+        1262,
+        224,
+        1360,
+        252
+      ],
+      "fill_width": 99
+    },
+    "completion_early_J3": {
+      "fill_bbox": [
+        182,
+        387,
+        278,
+        416
+      ],
+      "fill_width": 97
+    },
+    "completion_tardy_J3": {
+      "fill_bbox": [
+        558,
+        483,
+        655,
+        512
+      ],
+      "fill_width": 98
+    },
+    "work_early_J3": {
+      "fill_bbox": [
+        992,
+        395,
+        1087,
+        423
+      ],
+      "fill_width": 96
+    },
+    "work_tardy_J3": {
+      "fill_bbox": [
+        1191,
+        488,
+        1296,
+        517
+      ],
+      "fill_width": 106
+    }
+  },
+  "review_scope": "visual semantic review and raster fill bounding boxes; not an exact geometry certificate"
+}

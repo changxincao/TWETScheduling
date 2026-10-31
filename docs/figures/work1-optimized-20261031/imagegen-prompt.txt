@@ -1,0 +1,37 @@
+Use case: scientific-educational / productivity-visual.
+Input image 1: the exact scientific content, layout, palette and typography reference. Recreate this supplied image as a polished scientific diagram with the same content, not a decorative reinterpretation.
+请依据参考图重新生成一张完整的中文科研示意图。保持约4:3横向比例、四块内容、左列较宽右列较窄、浅蓝标题条、白背景、纤细浅蓝外框、宋体中文和Times/STIX风格数学字体。要求精密整洁的学术排版，所有文字、公式和图形清晰，不用手绘或3D效果。请求本工具允许的最高原生分辨率，尽可能使用4K长边或更高原生输出，不要用插值放大代替原生细节。保留整张图和完整底部图例，外边留少量白边，不裁切。
+
+必须保留并清晰落实的新增内容：
+1. 顶部两条机器时间轴各标一个黑色数字“0”，0刻度与该机器首个任务左边界严格对齐：M1为J1起点，M2为J2起点；轴线在0左侧可以略有延伸。
+2. 右上标题“参数与决策”。逐字写明：
+p_j：给定加工时长
+[e_j,d_j]：给定交付窗口
+决策：任务分配、机内加工顺序、
+开始时刻 S_j；完工时刻 C_j=S_j+p_j
+排程示例
+M_1: J_1 → J_3 → J_5
+M_2: J_2 → J_4 → J_6
+数学变量使用规范下标，不要把j、1、3、5画成与主字母同一基线。右下保留一个粉色J3(p3)小加工条，标出左下S3与右上C3。排程示例只是示例，不增添约束或文字解释。
+
+其他内容应忠实继承参考图，不能删减、改义：
+左上标题“Work 1：给定窗口的并行机调度”。M1上是天蓝J1、粉色J3、紫色J5，之间有两处Idle time；M2上是橙色J2、浅绿J4、黄色J6，三个任务连续。每个任务右端都是黑色完工点C_j。六个绿色给定窗口分别标[e1,d1]至[e6,d6]，与对应任务和C_j的关系保持参考图：J1/J3/J4/J5准时，J2完工早于e2并有蓝色“早到”标识，J6完工晚于d6并有红色“拖期”标识。勿让加工条相互重叠。
+左下大组标题“与完工时间偏差有关的成本”。上方两行示意共用同一水平比例和同一[e3,d3]浅绿窗口、青色竖向虚线边界。第一行“提前完工”：J3整段在e3左侧，S3在加工条左端、C3在右端，蓝色斜线区间E3只从C3到e3。第二行“拖期完工”：同样长度J3跨越d3，约一半位于d3两侧，红色斜线区间T3只从d3到C3；不能把J3整段都画在d3右侧。所有出现的J3加工条必须等长。
+下方两个费用分区，标题和公式完整保留，使用规范上下标、正体括号/定界符、斜体变量：
+“Weighted earliness and tardiness cost”
+φ_3(C_3)=αE_3+βT_3+γ(E_3-u)^++δ(T_3-v)^+
+E_3=(e_3-C_3)^+, T_3=(C_3-d_3)^+, (x)^+=max{x,0}.
+凸分段线性曲线：e3-u之前蓝色斜率−(α+γ)，到e3蓝色斜率−α，[e3,d3]成本为0，d3到d3+v红色斜率β，之后红色斜率β+δ。标清横轴节点e3-u、e3、d3、d3+v，纵轴“成本”，横轴C3。所有对应窗口的绿色阴影和青色虚线必须与轴上e3、d3严格对齐。
+“Weighted number of early and tardy jobs”
+φ_3(C_3)=Σ_i a_i 1{E_3>u_i}+Σ_i b_i 1{T_3>v_i}
+蓝色阶梯随C3增大逐阶下降，在e3到d3之间为0，之后红色阶梯上升。横轴依次e3-u2、e3-u1、e3、d3、d3+v1、d3+v2，纵轴“成本”，横轴C3。此式是加权指标阶梯函数，不要画成光滑曲线。
+右下大组标题“与窗口外加工量有关的成本”。上方两行均有相同[e3,d3]浅绿窗口和青色竖向虚线：第一行J3跨过e3，蓝色EW3只标S3到e3这段真实提前加工；第二行J3跨过d3，红色TW3只标d3到C3这段真实拖期加工。所有J3条与左列等长。
+小标题“Weighted early work and tardy work cost”
+EW_3=min{p_3,(e_3-S_3)^+}
+TW_3=min{p_3,(C_3-d_3)^+}
+φ_3(C_3)=αEW_3+βTW_3
+(x)^+=max{x,0}.
+下方五段曲线：C3≤e3时蓝色水平αp3；e3到e3+p3蓝色直线降至0；e3+p3到d3成本为0；d3到d3+p3红色直线上升到βp3；之后红色水平βp3。横轴节点e3、e3+p3、d3、d3+p3，横轴C3，纵轴“成本”。特别注意右列绿色阴影必须准确从e3延伸到d3，包含e3到e3+p3的蓝色下降段，参考图就是如此；不要错误地只把零成本区涂绿。αp3与βp3的3均只作为p的下标。
+
+底部图例完整保留：六色方块对应J1至J6、黑点“完工点”、绿色横段“给定窗口 [e_j,d_j]”、蓝线“提前成本”、红线“拖期成本”。不再加额外尾注。
+Keep all mathematical meanings and indexing intact. Preserve reference geometry, balanced line weights and consistent task lengths. Improve crispness and spacing without introducing new labels, icons, shadows, gradients, textures, decorative elements or watermark. Render exactly one full diagram.

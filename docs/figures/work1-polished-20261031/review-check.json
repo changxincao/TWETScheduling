@@ -1,0 +1,26 @@
+{
+  "source": "docs\\figures\\work1-layout-20261031\\work1-layout-4k.png",
+  "export_size": [
+    4344,
+    3258
+  ],
+  "left_title": "与完工时间偏差有关的成本",
+  "right_title": "与窗口外加工量有关的成本",
+  "footer_sentence_removed": true,
+  "legend_centered": true,
+  "math_fontset": "stix",
+  "upright_delimiters": true,
+  "proper_work_subscripts": true,
+  "unchanged_pixels_outside_label_edits": true,
+  "unexpected_changed_pixel_count": 0,
+  "inherited_geometry_checks": "../work1-layout-20261031/layout-check.json",
+  "reviewed": [
+    "job and window indices",
+    "equal J3 processing lengths",
+    "window projections",
+    "main early and tardy cases",
+    "partial tardiness",
+    "convex/step/five-piece work curves"
+  ],
+  "pass": true
+}

@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-31",
+  "scope": "Work 1 explanatory figure; common schedule and zoom with three alternative losses",
+  "mathematical_checks": "PASS: setup-aware machine feasibility, exact sample losses, closed zero-cost endpoints and early-work distinction",
+  "panel_alignment": "PASS: equal lower-panel dimensions and gutters within 1.5 pt",
+  "pdf_glyph_floor": "PASS: all glyphs at least 5 pt",
+  "collision_audit": {
+    "fail": 0,
+    "warn": 9,
+    "manual_review": "Reviewed all warnings. Text near the pale window bands, formula/schematic background, curve sample labels, and a label spanning the two-colored processing bar is intentional and remains readable. There is no text clipping or text-stroke collision."
+  },
+  "source_preflight": {"pass": 18, "warn": 3, "fail": 0},
+  "source_warning_review": "Discussion-sized 300 dpi PNG and SVG/PDF are requested; TIFF, 600 dpi and journal column sizing are outside this revision",
+  "ai_styling_draft": "Not selected: it misdescribed processing as only within the due window and changed time geometry",
+  "delivery": "The PNG/SVG/PDF reconstructed from explicit coordinates are authoritative for this draft"
+}

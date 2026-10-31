@@ -1,75 +1,73 @@
 {
   "tool": "built-in image_gen",
-  "reference": "work1-optimized-4k.png",
-  "prompts": [
-    "imagegen-prompt.txt",
-    "imagegen-correction-prompt.txt"
-  ],
-  "generation_passes": 2,
-  "requested_resolution": "highest native size; second request preferred 3328x2496 if supported",
+  "reference": "work1-reviewed-4k.png",
+  "reference_sha256": "48ace4018a25fc478ee5dd9d398c0481af471e5668af45b8a86634661b3a197b",
+  "prompt": "imagegen-latest-prompt.txt",
+  "original_output": "C:\\Users\\Changxin\\.codex\\generated_images\\01a19267-55f5-7082-a620-a979ee618280\\exec-37b3a4a3-b42a-47a7-96c1-84268991275d.png",
+  "saved_image": "work1-model-latest.png",
   "actual_native_size": [
     1448,
     1086
   ],
-  "original_output": "C:\\Users\\Changxin\\.codex\\generated_images\\01a19267-55f5-7082-a620-a979ee618280\\exec-46f310e5-f1e3-4aad-a31c-382fb9230ed3.png",
+  "requested_resolution": "highest native; preferred 3328x2496 if supported",
+  "generation_passes_this_redraw": 1,
   "copied_without_postprocessing": true,
-  "sha256": "765d2501bcb4f9cb182e9d5418b4e0678b79bdd4604c3c8f1b36c3ff3b0c6168",
   "source_and_copy_hash_equal": true,
-  "pink_fill_measurements": {
-    "main_J3": {
-      "fill_bbox": [
-        449,
-        114,
-        545,
-        142
-      ],
-      "fill_width": 97
-    },
-    "parameter_J3": {
-      "fill_bbox": [
-        1262,
-        224,
-        1360,
-        252
-      ],
-      "fill_width": 99
-    },
-    "completion_early_J3": {
-      "fill_bbox": [
-        182,
-        387,
-        278,
-        416
-      ],
-      "fill_width": 97
-    },
-    "completion_tardy_J3": {
-      "fill_bbox": [
-        558,
-        483,
-        655,
-        512
-      ],
-      "fill_width": 98
-    },
-    "work_early_J3": {
-      "fill_bbox": [
-        992,
-        395,
-        1087,
-        423
-      ],
-      "fill_width": 96
-    },
-    "work_tardy_J3": {
-      "fill_bbox": [
-        1191,
-        488,
-        1296,
-        517
-      ],
-      "fill_width": 106
-    }
+  "sha256": "13140533a345822c13ebb5779e245a91be892f131ca97a07a29d605e5cadf3cd",
+  "pink_fill_widths": {
+    "main": 97,
+    "parameter": 98,
+    "completion_early": 96,
+    "completion_tardy": 96,
+    "work_early": 96,
+    "work_tardy": 97
   },
-  "review_scope": "visual semantic review and raster fill bounding boxes; not an exact geometry certificate"
+  "window_fill_bounds": {
+    "completion_early": [
+      408,
+      606
+    ],
+    "completion_tardy": [
+      407,
+      605
+    ],
+    "convex": [
+      408,
+      605
+    ],
+    "step": [
+      407,
+      605
+    ],
+    "work_early": [
+      1041,
+      1238
+    ],
+    "work_tardy": [
+      1042,
+      1238
+    ],
+    "work_curve": [
+      1041,
+      1238
+    ]
+  },
+  "manual_review": [
+    "six main-job labels and windows",
+    "J2 early/J6 tardy",
+    "two zero ticks",
+    "no fixed-sequence example in parameter panel",
+    "centered S3/C3 diagram",
+    "completion E/T intervals",
+    "processing EW/TW intervals",
+    "convex and step formulas and shapes",
+    "work five-segment formula, plateaus and zero interval",
+    "complete six-color legend"
+  ],
+  "review_scope": "raster semantic and alignment review; antialiasing permits small fill-width differences; not an exact vector-geometry certificate",
+  "old_workspace_model_images_removed": [
+    "work1-model-redraw.png",
+    "work1-model-reviewed.png"
+  ],
+  "pass": true
 }

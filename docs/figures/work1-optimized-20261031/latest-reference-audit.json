@@ -1,0 +1,74 @@
+{
+  "reference": "work1-reviewed-4k.png",
+  "sha256": "48ace4018a25fc478ee5dd9d398c0481af471e5668af45b8a86634661b3a197b",
+  "size": [
+    4344,
+    3258
+  ],
+  "pink_fill_widths": {
+    "main": 293,
+    "parameter": 293,
+    "completion_early": 293,
+    "completion_tardy": 293,
+    "work_early": 293,
+    "work_tardy": 293
+  },
+  "window_fill_bounds_in_preview_coordinates": {
+    "completion_early": [
+      408.0,
+      606.0
+    ],
+    "completion_tardy": [
+      408.0,
+      606.0
+    ],
+    "convex": [
+      408.0,
+      606.0
+    ],
+    "step": [
+      408.0,
+      606.0
+    ],
+    "work_early": [
+      1041.0,
+      1239.0
+    ],
+    "work_tardy": [
+      1041.0,
+      1239.0
+    ],
+    "work_curve": [
+      1041.0,
+      1239.0
+    ]
+  },
+  "job_classification": {
+    "1": "on_time",
+    "3": "on_time",
+    "5": "on_time",
+    "2": "early",
+    "4": "on_time",
+    "6": "tardy"
+  },
+  "convex_sample_slopes": [
+    -6.0,
+    -2.0,
+    0.0,
+    3.0,
+    8.0
+  ],
+  "work_overlap_points": 801,
+  "work_zero_interval_example": [
+    14.0,
+    18.0
+  ],
+  "step_direction_and_window_zero": "PASS",
+  "scope": "internal scheduling without setup or outsourcing; work curve shows e+p<d; keep accepted step endpoint style",
+  "layout": "manual full-image review; two zero marks, six windows, decision text, centered S3/C3 diagram, labels and complete legend checked",
+  "old_workspace_model_images_removed": [
+    "work1-model-redraw.png",
+    "work1-model-reviewed.png"
+  ],
+  "pass": true
+}

@@ -98,19 +98,6 @@ OUT.mkdir(parents=True, exist_ok=True)
 canvas.save(OUT / "work1-reviewed-4k.png", dpi=(300, 300))
 canvas.resize((1448, 1086), Image.Resampling.LANCZOS).save(OUT / "work1-reviewed.png")
 
-# 对生图对照版同步本轮参数框；其余模型输出保持原样，保留旧纯生图文件。
-model_src = Image.open(OUT / "work1-model-redraw.png").convert("RGB")
-model = model_src.copy()
-x0, y0, x1, y1 = allowed[-1]
-panel = canvas.crop((x0*S, y0*S, (x1+1)*S, (y1+1)*S))
-model.paste(panel.resize((x1-x0+1, y1-y0+1), Image.Resampling.LANCZOS), (x0, y0))
-model_mask = np.zeros((1086, 1448), dtype=bool)
-model_mask[y0:y1+1, x0:x1+1] = True
-model_changed = np.any(np.asarray(model) != np.asarray(model_src), axis=2)
-model_unexpected = int(np.count_nonzero(model_changed & ~model_mask))
-assert model_unexpected == 0, model_unexpected
-model.save(OUT / "work1-model-reviewed.png")
-
 (OUT / "reviewed-check.json").write_text(json.dumps({
     "source": str(SOURCE.relative_to(ROOT)),
     "export_size": list(canvas.size),
@@ -124,8 +111,6 @@ model.save(OUT / "work1-model-reviewed.png")
     "parameter_line_right_edges": right_edges,
     "unexpected_changed_pixels": unexpected,
     "schedule_and_cost_panels_unchanged": unexpected == 0,
-    "model_changed_pixels_outside_parameter_panel": model_unexpected,
-    "model_reviewed_size": list(model.size),
     "pass": True,
 }, ensure_ascii=False, indent=2), encoding="utf-8")
-print(f"PASS: scheduling is a decision; diagram centered; unchanged outside edits: {unexpected}/{model_unexpected} pixels.")
+print(f"PASS: scheduling is a decision; diagram centered; unchanged outside edits: {unexpected} pixels.")

@@ -35,10 +35,5 @@
   ],
   "unexpected_changed_pixels": 0,
   "schedule_and_cost_panels_unchanged": true,
-  "model_changed_pixels_outside_parameter_panel": 0,
-  "model_reviewed_size": [
-    1448,
-    1086
-  ],
   "pass": true
 }

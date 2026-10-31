@@ -1,0 +1,44 @@
+{
+  "source": "docs\\figures\\work1-polished-20261031\\work1-polished-4k.png",
+  "export_size": [
+    4344,
+    3258
+  ],
+  "source_native_size": [
+    1448,
+    1086
+  ],
+  "origins_at_first_job_start": [
+    [
+      150,
+      145
+    ],
+    [
+      145,
+      253
+    ]
+  ],
+  "decisions": [
+    "任务分配",
+    "机内加工顺序",
+    "开始时刻"
+  ],
+  "scheduling_explicitly_a_decision": true,
+  "fixed_sequence_example_removed": true,
+  "diagram_ink_center_x": 1147.5,
+  "parameter_panel_center_x": 1147.5,
+  "parameter_line_right_edges": [
+    1079.7,
+    1115.31,
+    1258.0,
+    1263.02
+  ],
+  "unexpected_changed_pixels": 0,
+  "schedule_and_cost_panels_unchanged": true,
+  "model_changed_pixels_outside_parameter_panel": 0,
+  "model_reviewed_size": [
+    1448,
+    1086
+  ],
+  "pass": true
+}

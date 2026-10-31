@@ -1,0 +1,27 @@
+{
+  "date": "2026-10-31",
+  "delivery": "New scientific vector reconstruction from explicit parameters, with the approved image style as reference",
+  "geometry": {
+    "all_window_widths_pt": 185.142857142857,
+    "left_e_pt": 354.548571428571,
+    "left_d_pt": 539.691428571429,
+    "assertion_tolerance_pt": 1e-8,
+    "same_time_unit_scale_all_axes": true
+  },
+  "mathematics": {
+    "schedule_feasibility": "PASS",
+    "convex_slopes": [-3, -1, 0, 1.5, 3.5],
+    "processing_intersection_checks": 181,
+    "special_step_markers": false
+  },
+  "alignment": "PASS; narrow vertical-gutter exemption for the schedule/position sections only, because formula spacing differs; x alignment and widths remain checked",
+  "pdf_collision_audit": {
+    "fail": 0,
+    "warn": 10,
+    "manual_adjudication": "Reviewed endpoint labels at the edge of translucent window bands, a job label over its opaque processing block, and the in-axis loss label. All remain readable. No stroke or text-text failures remain."
+  },
+  "pdf_font_audit": {"minimum_found_pt": 6.65, "below_5_pt": 0},
+  "source_preflight": {"pass": 18, "warn": 3, "fail": 0},
+  "source_warning_scope": "Discussion-size layout, PNG 300 dpi and SVG/PDF are intended; no target journal TIFF/600 dpi/column-width contract was requested",
+  "limits": "Illustrative feasible schedule, not optimization or experimental results"
+}

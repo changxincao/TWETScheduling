@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1296.0pt" height="972.0pt" viewBox="0 0 1296.0 972.0">
+<rect width="100%" height="100%" fill="white"/>
+<rect x="123.120" y="58.320" width="648.000" height="150.660" fill="none" stroke="#2c7bb6" stroke-width="1.2"/>
+<text x="125.120" y="68.320" font-family="Arial, sans-serif" font-size="8" fill="#2c7bb6">main</text>
+<rect x="123.120" y="288.684" width="648.000" height="150.660" fill="none" stroke="#2c7bb6" stroke-width="1.2"/>
+<text x="125.120" y="298.684" font-family="Arial, sans-serif" font-size="8" fill="#2c7bb6">completion</text>
+<rect x="842.400" y="288.684" width="416.571" height="150.660" fill="none" stroke="#2c7bb6" stroke-width="1.2"/>
+<text x="844.400" y="298.684" font-family="Arial, sans-serif" font-size="8" fill="#2c7bb6">processing</text>
+<rect x="123.120" y="542.376" width="648.000" height="102.060" fill="none" stroke="#2c7bb6" stroke-width="1.2"/>
+<text x="125.120" y="552.376" font-family="Arial, sans-serif" font-size="8" fill="#2c7bb6">convex</text>
+<rect x="123.120" y="763.020" width="648.000" height="92.340" fill="none" stroke="#2c7bb6" stroke-width="1.2"/>
+<text x="125.120" y="773.020" font-family="Arial, sans-serif" font-size="8" fill="#2c7bb6">number</text>
+<rect x="842.400" y="607.500" width="416.571" height="145.800" fill="none" stroke="#2c7bb6" stroke-width="1.2"/>
+<text x="844.400" y="617.500" font-family="Arial, sans-serif" font-size="8" fill="#2c7bb6">work</text>
+<text x="4" y="967.000" font-family="Arial, sans-serif" font-size="7" fill="#333">PASS: 0 fail, 0 warn</text>
+</svg>

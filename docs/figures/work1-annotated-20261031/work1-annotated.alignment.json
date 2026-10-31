@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "applicable": true,
+  "auditable": true,
+  "verdict": "PASS",
+  "backend": "python-matplotlib",
+  "summary": {
+    "fail": 0,
+    "warn": 0,
+    "comparisons": 2,
+    "exemptions": 1
+  },
+  "tolerances": {
+    "alignment_pt": 1.5,
+    "gutter_pt": 1.5
+  },
+  "layout": {
+    "schema_version": 1,
+    "backend": "python-matplotlib",
+    "figure": {
+      "width_pt": 1296.0,
+      "height_pt": 972.0
+    },
+    "panels": [
+      {
+        "id": "main",
+        "bbox_pt": [
+          123.12,
+          763.02,
+          771.12,
+          913.6800000000001
+        ]
+      },
+      {
+        "id": "completion",
+        "bbox_pt": [
+          123.12,
+          532.6560000000001,
+          771.12,
+          683.316
+        ]
+      },
+      {
+        "id": "processing",
+        "bbox_pt": [
+          842.4,
+          532.6560000000001,
+          1258.9714285714288,
+          683.316
+        ]
+      },
+      {
+        "id": "convex",
+        "bbox_pt": [
+          123.12,
+          327.564,
+          771.12,
+          429.624
+        ]
+      },
+      {
+        "id": "number",
+        "bbox_pt": [
+          123.12,
+          116.64,
+          771.12,
+          208.98
+        ]
+      },
+      {
+        "id": "work",
+        "bbox_pt": [
+          842.4,
+          218.70000000000002,
+          1258.9714285714288,
+          364.5
+        ]
+      }
+    ],
+    "row_groups": [],
+    "column_groups": [
+      {
+        "id": "column-1",
+        "panels": [
+          "main",
+          "completion",
+          "convex",
+          "number"
+        ]
+      },
+      {
+        "id": "column-2",
+        "panels": [
+          "processing",
+          "work"
+        ]
+      }
+    ],
+    "boundary_groups": [],
+    "exemptions": [
+      {
+        "panels": [
+          "main",
+          "completion"
+        ],
+        "checks": [
+          "vertical-gutter"
+        ],
+        "reason": "The schedule and position diagram have different roles and require distinct formula/header spacing; shared x coordinates remain fully checked."
+      }
+    ]
+  },
+  "findings": []
+}

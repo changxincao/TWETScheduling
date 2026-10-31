@@ -1,0 +1,47 @@
+{
+  "date": "2026-10-31",
+  "delivery_scope": "Two-dimensional explanatory drafts, not journal-sized submission figures",
+  "mathematical_checks": {
+    "status": "PASS",
+    "checks": [
+      "Six selected windows satisfy all location and width bounds",
+      "All three scenarios preserve the assignment and order without processing overlap",
+      "ET at C=13 is zero; early work is four units",
+      "Count penalties are zero at both window endpoints",
+      "Early work plus in-window work plus tardy work equals processing time"
+    ]
+  },
+  "panel_alignment": {
+    "et": "PASS",
+    "count": "PASS",
+    "work": "PASS"
+  },
+  "final_pdf_collision_audit": {
+    "et": {"fail": 0, "warn": 1},
+    "count": {"fail": 0, "warn": 1},
+    "work": {"fail": 0, "warn": 1},
+    "manual_review": "Accepted the sole J4 text-fill-edge warning: the job label is drawn on its opaque purple processing bar, above a translucent shared-window background. No text is obscured. The automated result remains REVIEW REQUIRED; this note records the visual adjudication."
+  },
+  "final_pdf_text_audit": {
+    "minimum_required_pt": 5,
+    "minimum_found_pt": 5.6,
+    "below_minimum_count_each": 0
+  },
+  "source_preflight": {
+    "pass": 17,
+    "warn": 4,
+    "fail": 0,
+    "scope_review": [
+      "Chinese legend labels retain the standard lower-case word work",
+      "PNG is a viewing format; TIFF submission output is outside this task",
+      "300 dpi meets the raster floor; 600 dpi is not needed for this explanatory draft",
+      "The 18-inch-wide layout is for discussion and viewing, not a specified journal column"
+    ]
+  },
+  "visual_review": "Reviewed the three PNGs for coordinates, labels, common windows, step endpoints and work shading",
+  "ai_reference": "Composition only; generated subscripts and work shading are not used as mathematical evidence",
+  "limits": [
+    "Schedules are illustrative feasible schedules, not optimized solutions",
+    "Random count and work penalties are formulation extensions, not claims about the current Work 3 solver"
+  ]
+}

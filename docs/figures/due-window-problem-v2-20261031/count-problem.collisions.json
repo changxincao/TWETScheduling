@@ -1,0 +1,48 @@
+{
+  "pdf": "docs\\figures\\due-window-problem-v2-20261031\\count-problem.pdf",
+  "auditable": true,
+  "verdict": "REVIEW REQUIRED",
+  "page_count": 1,
+  "visible_text_box_count": 146,
+  "text_trace_count": 336,
+  "stroke_path_count": 197,
+  "filled_region_count": 145,
+  "image_region_count": 0,
+  "summary": {
+    "fail": 0,
+    "warn": 1,
+    "contained_fill_overlays": 111,
+    "contained_image_overlays": 0
+  },
+  "thresholds": {
+    "text_inset_pt": 0.6,
+    "min_overlap_ratio": 0.05,
+    "clipping_tolerance_pt": 0.5
+  },
+  "findings": [
+    {
+      "severity": "WARN",
+      "kind": "text-fill-edge",
+      "page": 1,
+      "message": "Text partially overlaps the edge of 1 filled region(s)",
+      "text": "J4",
+      "text_bbox": [
+        399.98748779296875,
+        776.8206176757812,
+        407.39031982421875,
+        787.853515625
+      ],
+      "other_text": null,
+      "other_bbox": [
+        403.98748779296875,
+        752.5440063476562,
+        500.37750244140625,
+        814.0758056640625
+      ],
+      "object_count": 1,
+      "object_indexes": [
+        97000
+      ]
+    }
+  ]
+}

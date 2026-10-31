@@ -1,0 +1,124 @@
+{
+  "source_native_size": [
+    1448,
+    1086
+  ],
+  "export_size": [
+    4344,
+    3258
+  ],
+  "export_note": "3x raster export; original model text is resampled, not native 4K generation",
+  "job3_intervals": [
+    [
+      447,
+      547
+    ],
+    [
+      1115,
+      1215
+    ],
+    [
+      180,
+      280
+    ],
+    [
+      560,
+      660
+    ],
+    [
+      990,
+      1090
+    ],
+    [
+      1190,
+      1290
+    ]
+  ],
+  "job3_width": 100,
+  "left_window": [
+    407,
+    607
+  ],
+  "right_window": [
+    1040,
+    1240
+  ],
+  "all_window_widths": 200,
+  "main_schedule": [
+    [
+      1,
+      150,
+      280,
+      145,
+      211,
+      349
+    ],
+    [
+      3,
+      447,
+      547,
+      145,
+      407,
+      607
+    ],
+    [
+      5,
+      674,
+      796,
+      145,
+      720,
+      848
+    ],
+    [
+      2,
+      145,
+      267,
+      253,
+      205,
+      330
+    ],
+    [
+      4,
+      406,
+      551,
+      253,
+      480,
+      625
+    ],
+    [
+      6,
+      551,
+      698,
+      253,
+      623,
+      773
+    ]
+  ],
+  "convex_slopes": [
+    -0.6206896551724138,
+    -0.15833333333333333,
+    0.0,
+    0.2972972972972973,
+    0.5950413223140496
+  ],
+  "work_breakpoints": [
+    1040,
+    1140,
+    1240,
+    1340
+  ],
+  "raster_pink_widths_4k": [
+    293,
+    293,
+    293,
+    293,
+    293,
+    293
+  ],
+  "flat_pink_fill_verified": true,
+  "header_regions_pixel_identical": 7,
+  "formula_regions_black_ink_identical": 3,
+  "axis_label": "成本",
+  "extension_subtitles_removed": true,
+  "pass": true
+}

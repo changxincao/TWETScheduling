@@ -1,6 +1,6 @@
 # Work 1：生图模型修订稿
 
-当前唯一交付入口为[九项批注后的v2图](work1-imagegen-v2.png)，说明及未完成部分见[v2-notes.md](v2-notes.md)。本目录旧图保留为历史输入，不再让用户选择版本。
+本目录保留此前生图尝试与[v2未完成记录](v2-notes.md)。用户后续授权“两种都试试”，当前推荐稿及两条路径的比较见[生图PNG校正版](../work1-final-20261031/README.md)，不再让用户选择历史版本。
 
 2026-10-31。用户再次明确最终图必须由生图模型生成，不能用程序绘制的SVG替代。本稿使用内置image_gen，当前PNG为模型输出原文件的复制，没有程序补画、像素修补或矢量转换。图为[work1-imagegen.png](work1-imagegen.png)，本轮提示词见[prompts.json](prompts.json)。
 

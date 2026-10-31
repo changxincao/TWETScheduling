@@ -1,0 +1,98 @@
+{
+  "source": "docs\\figures\\work1-final-20261031\\work1-corrected-4k.png",
+  "export_size": [
+    4344,
+    3258
+  ],
+  "left_column": [
+    17,
+    852
+  ],
+  "right_column": [
+    864,
+    1431
+  ],
+  "aligned_top_and_bottom": true,
+  "left_outer_group": [
+    17,
+    303,
+    852,
+    1013
+  ],
+  "right_outer_group": [
+    864,
+    303,
+    1431,
+    1013
+  ],
+  "shared_completion_window": [
+    407,
+    607
+  ],
+  "partial_late_job": [
+    557,
+    657
+  ],
+  "main_schedule": [
+    [
+      1,
+      150,
+      280,
+      145,
+      211,
+      349
+    ],
+    [
+      3,
+      447,
+      547,
+      145,
+      407,
+      607
+    ],
+    [
+      5,
+      664,
+      786,
+      145,
+      710,
+      828
+    ],
+    [
+      2,
+      145,
+      267,
+      253,
+      300,
+      340
+    ],
+    [
+      4,
+      267,
+      412,
+      253,
+      365,
+      445
+    ],
+    [
+      6,
+      412,
+      559,
+      253,
+      490,
+      535
+    ]
+  ],
+  "early_job": 2,
+  "tardy_job": 6,
+  "raster_pink_widths": [
+    293,
+    293,
+    293,
+    293,
+    293,
+    293
+  ],
+  "definitions_moved_to_functions": true,
+  "pass": true
+}

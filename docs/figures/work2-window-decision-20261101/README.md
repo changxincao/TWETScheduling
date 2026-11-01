@@ -1,6 +1,6 @@
 # Work 2：窗口决策、可行域与设置成本
 
-当前继续修订稿：[窗口标签样式统一版](work2-a-window-label-unified.png)。
+当前继续修订稿：[e₂、d₂ 正体修正版](work2-a-window-label-upright.png)。
 
 2026-11-01。基于最终 Work 1 生图版制作三个 Work 2 候选，沿用原三类执行费用。上层为每个任务补灰色允许范围 [A_j,B_j]，绿色为选定窗口 [e_j,d_j]；中层新增跨左右两栏的窗口可行域与设置成本框；下层保留原完工偏差和窗口外加工量说明及三类函数。
 
@@ -42,4 +42,6 @@ A 用位置后移 e−A 与额外宽度 D−Dmin 的尺寸标注直接对应两�
 
 2026-11-01 窗口标签样式修正：将顶层 `[e₂,d₂]` 从偏暗绿色斜体改为与相邻决策窗口一致的亮绿色正体，窗口端点和其他区域不变；另存为 [work2-a-window-label-unified.png](work2-a-window-label-unified.png)。
 
-2026-11-01 再核对：上一版只统一了颜色，却误将 `[e₂,d₂]` 改成正体；图中其余决策窗口标签实际均为 Times New Roman 数学斜体。本版保持相同亮绿色，并将该标签的字体、字号和字重统一为数学斜体，另存为 [work2-a-window-label-matched.png](work2-a-window-label-matched.png)。
+2026-11-01 字体误改记录：曾误将用户要求理解为改成斜体，输出 [work2-a-window-label-matched.png](work2-a-window-label-matched.png)，该版不符合要求。不能由生图底稿推断其全部标签的精确字体。
+
+2026-11-01 正体修正：按用户明确要求，将 `[e₂,d₂]` 改为 Times New Roman Regular 正体（times.ttf，23 px），保留已确认的绿色。最新图为 [work2-a-window-label-upright.png](work2-a-window-label-upright.png)；放大核对字形，并检查标签框外像素不变。

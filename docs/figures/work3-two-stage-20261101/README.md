@@ -1,6 +1,6 @@
 # Work 3：两阶段随机工时示意初稿
 
-2026-11-01 开始制作，2026-11-02 保存并修订初稿。当前展示文件为 [work3-annotations-corrected.png](work3-annotations-corrected.png)，实际尺寸 1341×1173。使用内置 `image_gen`，以 [已确认 Work 2](../confirmed-20261101/Work2-窗口决策与并行机调度.png) 为版式与配色参考，生成两轮后对首轮底稿作局部几何校准，再按三处批注修订区间标记和红线。此图仍为待用户审阅的初稿，未加入 Work 1/2 的确认版目录。
+2026-11-01 开始制作，2026-11-02 保存并修订初稿。当前展示文件为 [work3-scenario-windows-upright.png](work3-scenario-windows-upright.png)，实际尺寸 1341×1173。使用内置 `image_gen`，以 [已确认 Work 2](../confirmed-20261101/Work2-窗口决策与并行机调度.png) 为版式与配色参考，生成两轮后对首轮底稿作局部几何校准，再按批注修订区间标记、红线及三个场景窗口的正体字形。此图仍为待用户审阅的初稿，未加入 Work 1/2 的确认版目录。
 
 图上用共同任务序列及工时虚影表示一阶段：机器分配、机内顺序、每项任务的窗口在场景实现前确定。工时 `p_{jω}` 是随机输入；二阶段在既定分配与顺序下调整 `S_{jω},C_{jω}`，允许等待，不把工时本身画成决策。两阶段共享的是同一任务跨场景的窗口，各任务仍有自己的窗口。中层保留窗口范围、宽度界和位置/宽度成本；总成本将只计一次的窗口费用与按场景概率加权的执行费用分开。数学依据见 [三个问题的中文数学描述](../due-window-problem-v2-20261031/三个问题的中文数学描述.md) 第4节及 [Work 2 接续思路](../work2-window-decision-20261101/README.md) 第2节。
 
@@ -23,3 +23,5 @@
 2026-11-02。批注指向首轮生图。本次在已校准场景的初稿上补强蓝色 `C₃,₁→e₃`、红色 `d₃→C₃,₃` 的两端标记，并将端线连接到真实 C₃ 黑点，早到为 `8−6=2`，延迟为 `13−12=1`。复查同时确认原 ET 红线的 β 段末尾多出近乎水平的小段，已删除并重画为两条直线，只在 `dⱼ+v` 处折转；后段斜率比前段大，图示比例 1:2 只是一个满足正费率的例子。拐点投影同步对齐，清除旧线残影，原公式和蓝色提前费用曲线保持不变。
 
 新图另存，不覆盖生图原稿或上一初稿。脚本 [correct_work3_intervals_and_slope.py](correct_work3_intervals_and_slope.py) 已通过语法和实际运行检查；核对区间两端、中段颜色及 C₃ 点对齐，逐列核对两条红线与目标直线的像素位置，最大中心偏差小于 0.8 px。三处允许编辑框外变化像素为 0，详见 [annotations-corrected-check.json](annotations-corrected-check.json)。原尺寸与放大图已复核。
+
+2026-11-02 字体修订：用户指出三个场景的窗口标签又使用了斜体。已将三处 `[e₃,d₃]` 单独改为 Times New Roman Regular（`times.ttf`），主字 19 px、下标 12 px，主字及下标的字体样式均核对为 Regular，另放大检查字形。脚本 [upright_work3_scenario_windows.py](upright_work3_scenario_windows.py) 输出当前展示图；仅三处标签框发生变化，区间端线、完工点与刚校准的成本曲线像素不变，检查见 [scenario-windows-upright-check.json](scenario-windows-upright-check.json)。

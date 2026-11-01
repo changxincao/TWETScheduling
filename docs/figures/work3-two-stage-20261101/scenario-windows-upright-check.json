@@ -1,0 +1,37 @@
+{
+  "source": "work3-annotations-corrected.png",
+  "output": "work3-scenario-windows-upright.png",
+  "size": [
+    1341,
+    1173
+  ],
+  "source_sha256": "3421fe4d3fa0e3893dc30fa7cf8619ab6cd0caaab05de8243174e66c8dcade0b",
+  "output_sha256": "5be4c03fb50b8ded16f76305cffc3bd4f425c082f1f0b4cb46fbe07795ba8c1b",
+  "font_file": "C:\\Windows\\Fonts\\times.ttf",
+  "font_family": "Times New Roman",
+  "main_style": "Regular",
+  "subscript_style": "Regular",
+  "main_font_pixels": 19,
+  "subscript_font_pixels": 12,
+  "label_boxes": [
+    [
+      209,
+      713,
+      268,
+      733
+    ],
+    [
+      642,
+      713,
+      701,
+      733
+    ],
+    [
+      1074,
+      713,
+      1133,
+      733
+    ]
+  ],
+  "unexpected_changed_pixels": 0
+}

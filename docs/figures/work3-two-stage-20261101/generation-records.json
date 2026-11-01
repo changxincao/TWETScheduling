@@ -21,13 +21,21 @@
       "role": "not adopted; scenario alignment still inconsistent and ET red branch altered"
     }
   ],
-  "displayed_draft": {
+  "previous_draft": {
     "file": "work3-two-stage-draft.png",
     "size": [1341, 1173],
     "sha256": "20d841194a0ea0ecafd735b86de87e5419be4ebb89a798ee6e645c94d56241e8",
     "base": "work3-model-v1.png",
     "postprocessing": "calibrate_work3_draft.py",
     "checks": "draft-check.json"
+  },
+  "displayed_draft": {
+    "file": "work3-annotations-corrected.png",
+    "size": [1341, 1173],
+    "sha256": "3421fe4d3fa0e3893dc30fa7cf8619ab6cd0caaab05de8243174e66c8dcade0b",
+    "base": "work3-two-stage-draft.png",
+    "postprocessing": "correct_work3_intervals_and_slope.py",
+    "checks": "annotations-corrected-check.json"
   },
   "confirmed_work1_work2_unchanged": true
 }

@@ -1,0 +1,41 @@
+{
+  "source": "work3-two-stage-draft.png",
+  "output": "work3-annotations-corrected.png",
+  "size": [
+    1341,
+    1173
+  ],
+  "source_sha256": "20d841194a0ea0ecafd735b86de87e5419be4ebb89a798ee6e645c94d56241e8",
+  "output_sha256": "3421fe4d3fa0e3893dc30fa7cf8619ab6cd0caaab05de8243174e66c8dcade0b",
+  "early_interval": {
+    "from_C": 170.8,
+    "to_e": 204.4,
+    "E": 2
+  },
+  "late_interval": {
+    "from_d": 1136.6,
+    "to_C": 1153.4,
+    "T": 1
+  },
+  "red_curve_points": [
+    [
+      1033.0,
+      1090.0
+    ],
+    [
+      1154.0,
+      1074.0
+    ],
+    [
+      1307.0,
+      1033.5371900826447
+    ]
+  ],
+  "red_slope_ratio": 2,
+  "red_curve_max_raster_error": [
+    0.7975206611570229,
+    0.7975206611570229
+  ],
+  "ET_formula_and_blue_curve_unchanged": true,
+  "unexpected_changed_pixels": 0
+}

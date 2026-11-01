@@ -5,11 +5,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "work2-a-top-cleaned-markers.png"
-OUTPUT = HERE / "work2-a-intervals-ew-braces.png"
+OUTPUT = HERE / "work2-a-window-label-unified.png"
 
 BLUE = (20, 55, 245, 255)
 RED = (235, 40, 30, 255)
-GREEN = (0, 190, 35, 255)
+GREEN = (0, 245, 20, 255)
 ORANGE = (224, 102, 0, 255)
 WHITE = (255, 255, 255, 255)
 
@@ -67,9 +67,9 @@ def main() -> None:
     draw = ImageDraw.Draw(image)
     chinese_font = ImageFont.truetype(r"C:\Windows\Fonts\simhei.ttf", 22)
     cost_font = ImageFont.truetype(r"C:\Windows\Fonts\simhei.ttf", 18)
-    math_font = ImageFont.truetype(r"C:\Windows\Fonts\timesi.ttf", 23)
+    math_font = ImageFont.truetype(r"C:\Windows\Fonts\times.ttf", 23)
 
-    # 为早到示例腾出可读区间：将 e2 从 227 调到 260，仍满足 A2 <= e2 <= d2 <= B2。
+    # 为早到示例腾出可读区间：将 e2 从 227 调到 260；标签沿用其他决策窗口的亮绿色正体。
     draw.rectangle((218, 208, 324, 236), fill=WHITE)
     draw.line((260, 229, 321, 229), fill=GREEN, width=2)
     draw.line((260, 222, 260, 236), fill=GREEN, width=2)

@@ -1,9 +1,9 @@
 {
   "date": "2026-11-01",
   "tool": "built-in image_gen",
-  "status": "layout_candidates_not_final",
+  "status": "revised_a_request_checks_pass",
   "recommended_layout": "a-dimensions",
-  "global_semantic_review": "NOT_PASS",
+  "global_semantic_review": "Initial candidates NOT_PASS; see latest_revised_a for current requested-change checks. No global exact-geometry certificate.",
   "window_cost_definition": "K_j = rho_j*(e_j-A_j) + lambda_j*(d_j-e_j-D_j_min)",
   "feasible_region": "A_j<=e_j<=d_j<=B_j; D_j_min<=d_j-e_j<=D_j_max",
   "review_scope": "Manual comparison of layouts, formulas, selected-window execution cost meanings, and visible annotation errors. No exact geometry certificate.",
@@ -153,5 +153,78 @@
     "sha256": "f415362003d82ffe5760596dc3793207e427df3b3316d255b2a0d9a7b53f53fb",
     "copied_without_postprocessing": true,
     "visual_review": "总成本整行已有浅橙底色和细橙边框，公式清晰；本次只复核底色调整。"
+  },
+  "latest_revised_a": {
+    "date": "2026-11-01",
+    "file": "work2-a-layout-et-corrected.png",
+    "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-d557cf3e-227d-437c-8df3-0f13e5910769.png",
+    "native_size": [
+      1374,
+      1145
+    ],
+    "sha256": "b6cb28906d14ede32308493cc63bc621d63e23ad84ebfd9fc34ff2abd11e41e6",
+    "copied_without_postprocessing": true,
+    "requested_changes_review": {
+      "remove_orange_cost_braces": "PASS",
+      "two_constraints_below_left_window_diagram": "PASS",
+      "one_window_cost_formula_on_right": "PASS",
+      "top_C2_before_e2": "PASS",
+      "top_C6_after_d6": "PASS",
+      "top_status_only_no_misplaced_dimension_arrows": "PASS",
+      "lower_T3_from_d3_to_C3": "PASS",
+      "all_three_execution_cost_types_retained": "PASS"
+    },
+    "raster_checks": {
+      "J2_selected_window": {
+        "y": 229,
+        "x": [
+          227,
+          321
+        ]
+      },
+      "J6_selected_window": {
+        "y": 229,
+        "x": [
+          598,
+          701
+        ]
+      },
+      "J2_processing_fill": [
+        136,
+        215
+      ],
+      "J6_processing_fill": [
+        504,
+        793
+      ],
+      "lower_tardy_window": {
+        "y": 764,
+        "x": [
+          381,
+          571
+        ]
+      },
+      "lower_tardy_red": [
+        570,
+        647
+      ]
+    },
+    "raster_coordinate_note": "仅用于本次方向和端点核对的近似像素坐标，不是时间数据；未据此声明所有子图严格等比。",
+    "illustrative_schedule_note": "上层J2加工条缩短、J6加工条延长，形成明确早到和拖期；任务间等待仍允许，图不代表数值算例。",
+    "prompts": [
+      "layout-and-et-fix-prompt.txt",
+      "et-endpoints-fix-prompt.txt",
+      "et-status-and-constraints-prompt.txt",
+      "label-and-tardy-interval-prompt.txt",
+      "restore-tardy-processing-bar-prompt.txt",
+      "restore-crossing-example-prompt.txt"
+    ],
+    "intermediate_outputs": [
+      "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-84e86a1d-553a-4d89-a8fb-3613c0f379f0.png",
+      "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-dcd81a6d-c3fb-40f9-bb58-eec642b11508.png",
+      "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-ee5d8ffd-b99e-4ce4-a1db-9c9d56322819.png",
+      "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-ddc8655e-c692-452c-9e99-22e0dbc62661.png",
+      "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-2a62743a-4dac-402c-a078-776728192318.png"
+    ]
   }
 }

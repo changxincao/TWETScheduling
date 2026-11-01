@@ -41,3 +41,5 @@ A 用位置后移 e−A 与额外宽度 D−Dmin 的尺寸标注直接对应两�
 2026-11-01 区间与成本标注修订：顶层早到标记改为真实的 C2--e2 区间，为保证区间清晰，将 e2 在允许范围内右移并保持 d2 不变；原“拖期”改称“延迟”，红色区间严格从 d6 画到 C6。EW3 在右侧任务示意中以 S3--e3 的加粗蓝色段明确标出。窗口设置成本公式的两个加性项下分别增加大括号和“位置成本”“宽度成本”。此次仍为确定性局部 PNG 编辑，五个允许编辑框之外像素完全不变；脚本为 [edit_work2_intervals_and_cost_labels.py](edit_work2_intervals_and_cost_labels.py)，输出为 1374×1145。
 
 2026-11-01 窗口标签样式修正：将顶层 `[e₂,d₂]` 从偏暗绿色斜体改为与相邻决策窗口一致的亮绿色正体，窗口端点和其他区域不变；另存为 [work2-a-window-label-unified.png](work2-a-window-label-unified.png)。
+
+2026-11-01 再核对：上一版只统一了颜色，却误将 `[e₂,d₂]` 改成正体；图中其余决策窗口标签实际均为 Times New Roman 数学斜体。本版保持相同亮绿色，并将该标签的字体、字号和字重统一为数学斜体，另存为 [work2-a-window-label-matched.png](work2-a-window-label-matched.png)。

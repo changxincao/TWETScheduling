@@ -1,0 +1,27 @@
+Edit this Work 3 diagram. Preserve the whole established composition, title, styles, colors, first-stage sequence diagrams, the window-cost band, and the ET-cost formula and curve. Do not redesign. Correct only the following mathematical drawing errors, using the SAME image size 1341x1173.
+
+MAIN CORRECTION: Redraw ONLY the three scenario miniature Gantt charts (roughly y=711..892), with a precise common time scale 0..20, same due window [8,12] in all three, and exact job durations. The printed scenario headings p3,1=2, p3,2=4, p3,3=7 must match the real pink-bar lengths in ratio 2:4:7.
+Use origin x=70 for scenario1, x=503 for scenario2, x=935 for scenario3. Use 16.8 pixels per unit of time in all three. Existing M1/M2 row heights can stay unchanged. Tick times 0,4,8,12,16,20 must all be equally spaced. Both machines in each card use that same local origin.
+
+Scenario1:
+M1 J1=[0,3], J3=[4,6], J5=[7,10].
+M2 J2=[0,3], J4=[4,7], J6=[8,11].
+Thus pink J3 must run approximately x137..171, ending BEFORE the selected green window x204..272.
+Black completion point C3,1 at x171, not x204. BLUE EARLINESS interval must start at x171 (C3,1) and end at x204 (e3), with a short vertical tick at each true endpoint. Caption "早到 E₃,₁". Green window always starts at time8 and ends at time12, never time14.
+
+Scenario2:
+M1 J1=[0,4], J3=[5,9], J5=[10,14].
+M2 J2=[0,4], J4=[5,9], J6=[10,14].
+Thus J3 runs approximately x587..654. Green window x637..705; C3,2 at x654 INSIDE it. Caption "窗内完成".
+
+Scenario3:
+M1 J1=[0,5], J3=[6,13], J5=[14,19].
+M2 J2=[0,5], J4=[6,11], J6=[12,17].
+Thus pink J3 runs approximately x1036..1153. Green window x1069..1137. Completion C3,3 at x1153. RED DELAY interval must start at x1137 (d3) and end at x1153 (C3,3), not at the end of J5. The delay segment is intentionally SHORT because T=1. Put endpoint ticks at x1137 and x1153, and place caption "延迟 T₃,₃" above with enough space. J5 occupies x1170..1254 and must remain purple; J3 remains pink.
+In every scenario, six jobs appear once, M1 sequence J1,J3,J5 and M2 sequence J2,J4,J6, with small intentional idle gaps and no overlap. Show simple job labels J1 etc within the bars; tiny J3 in scenario1 only needs "J₃". Do not inflate bars to fit text. All green [e3,d3] windows must equal four units and align exactly with ticks8 and12.
+
+TWO SMALL LABEL CORRECTIONS:
+In the TOP FIRST-STAGE panel, the selected green window above PURPLE J5 is incorrectly labeled [e3,d3]. Change ONLY that label to [e5,d5], matching its outer [A5,B5]. Preserve the other five job window labels correctly.
+In the orange TOTAL COST strip, align the first underbrace ONLY under sum_j K_j(e_j,d_j), excluding the following plus sign and sum_omega. Its caption is "一阶段窗口设置成本". The second underbrace should span the ENTIRE expected second-stage term sum_{ω∈Ω} π_ω sum_j φ_j(C_{jω};e_j,d_j), caption "二阶段期望 ET 成本". Keep the objective itself exactly correct.
+
+Everything else, especially the two-stage decision semantics and bottom ET formula/curve, must remain unchanged. No count or work cost, no new sections, no new variables, no processing-time decision. This is a schematic feasible example, not an optimum claim.

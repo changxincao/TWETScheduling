@@ -1,0 +1,166 @@
+{
+  "status": "draft",
+  "base": "work3-model-v1.png",
+  "output": "work3-two-stage-draft.png",
+  "size": [
+    1341,
+    1173
+  ],
+  "source_sha256": "1169a8f538b765b56547baab3db8a0be49340891b9d7a1ed9616fa66f8ed0e14",
+  "output_sha256": "20d841194a0ea0ecafd735b86de87e5419be4ebb89a798ee6e645c94d56241e8",
+  "units_to_pixels": 16.8,
+  "scenario_checks": [
+    {
+      "omega": 1,
+      "probability": 0.3333333333333333,
+      "p3": 2,
+      "S3": 4,
+      "C3": 6,
+      "e3": 8,
+      "d3": 12,
+      "E3": 2,
+      "T3": 0,
+      "rows": {
+        "M1": [
+          [
+            1,
+            0,
+            3
+          ],
+          [
+            3,
+            4,
+            6
+          ],
+          [
+            5,
+            7,
+            10
+          ]
+        ],
+        "M2": [
+          [
+            2,
+            0,
+            3
+          ],
+          [
+            4,
+            4,
+            7
+          ],
+          [
+            6,
+            8,
+            11
+          ]
+        ]
+      }
+    },
+    {
+      "omega": 2,
+      "probability": 0.3333333333333333,
+      "p3": 4,
+      "S3": 5,
+      "C3": 9,
+      "e3": 8,
+      "d3": 12,
+      "E3": 0,
+      "T3": 0,
+      "rows": {
+        "M1": [
+          [
+            1,
+            0,
+            4
+          ],
+          [
+            3,
+            5,
+            9
+          ],
+          [
+            5,
+            10,
+            14
+          ]
+        ],
+        "M2": [
+          [
+            2,
+            0,
+            4
+          ],
+          [
+            4,
+            5,
+            9
+          ],
+          [
+            6,
+            10,
+            14
+          ]
+        ]
+      }
+    },
+    {
+      "omega": 3,
+      "probability": 0.3333333333333333,
+      "p3": 7,
+      "S3": 6,
+      "C3": 13,
+      "e3": 8,
+      "d3": 12,
+      "E3": 0,
+      "T3": 1,
+      "rows": {
+        "M1": [
+          [
+            1,
+            0,
+            5
+          ],
+          [
+            3,
+            6,
+            13
+          ],
+          [
+            5,
+            14,
+            19
+          ]
+        ],
+        "M2": [
+          [
+            2,
+            0,
+            5
+          ],
+          [
+            4,
+            6,
+            11
+          ],
+          [
+            6,
+            12,
+            17
+          ]
+        ]
+      }
+    }
+  ],
+  "stage_one_shared": true,
+  "processing_times_are_scenario_inputs": true,
+  "only_ET_cost": true,
+  "measured_pink_fill_pixels": [
+    30,
+    64,
+    114
+  ],
+  "ET_formula_and_curve_unchanged": true,
+  "window_cost_unchanged": true,
+  "unexpected_changed_pixels": 0
+}

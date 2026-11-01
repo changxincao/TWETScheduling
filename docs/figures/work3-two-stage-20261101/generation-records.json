@@ -1,0 +1,33 @@
+{
+  "tool": "built-in image_gen",
+  "status": "draft awaiting user review",
+  "reference": "../confirmed-20261101/Work2-窗口决策与并行机调度.png",
+  "reference_sha256": "24ed3176cc52914a98779c1275d7a21c420ac824d82d4ea053546cb8f472a029",
+  "raw_outputs": [
+    {
+      "file": "work3-model-v1.png",
+      "prompt": "imagegen-prompt-v1.txt",
+      "original_output": "C:/Users/Changxin/.codex/generated_images/01a194ea-4322-7221-84e9-536d1ad8b3b9/exec-6f87cbfe-8d3a-4bd7-b966-ffc7100543e2.png",
+      "size": [1341, 1173],
+      "sha256": "1169a8f538b765b56547baab3db8a0be49340891b9d7a1ed9616fa66f8ed0e14",
+      "role": "selected layout base; scenario geometry calibrated locally"
+    },
+    {
+      "file": "work3-model-v2.png",
+      "prompt": "imagegen-prompt-v2.txt",
+      "original_output": "C:/Users/Changxin/.codex/generated_images/01a194ea-4322-7221-84e9-536d1ad8b3b9/exec-44127168-ca49-41dc-9d3f-925fb1bfb5c2.png",
+      "size": [1341, 1173],
+      "sha256": "c5f75c712f95d44b1434130a28af98823b74198b24140e45b9b50b318a13ba52",
+      "role": "not adopted; scenario alignment still inconsistent and ET red branch altered"
+    }
+  ],
+  "displayed_draft": {
+    "file": "work3-two-stage-draft.png",
+    "size": [1341, 1173],
+    "sha256": "20d841194a0ea0ecafd735b86de87e5419be4ebb89a798ee6e645c94d56241e8",
+    "base": "work3-model-v1.png",
+    "postprocessing": "calibrate_work3_draft.py",
+    "checks": "draft-check.json"
+  },
+  "confirmed_work1_work2_unchanged": true
+}

@@ -1,0 +1,65 @@
+Use case: scientific-educational.
+Create ONE complete Chinese academic scheduling figure, "Work 3：随机加工时间下的窗口分配与并行机调度", as the next figure after the attached CONFIRMED Work 2. The input image is a STYLE AND CONTENT REFERENCE, not an image to merely relabel. Generate a new, coherent two-stage stochastic figure with the same white background, thin cyan-blue panel borders, very pale blue title bands, black Song/serif Chinese headings, Times-like readable mathematical notation, light green due windows, orange window-cost annotations, and colorful job rectangles. No photographs or 3D. Use the highest practical native resolution, preferably about 2048 by 1792 with a readable, slightly landscape composition. Chinese and mathematical labels must be large and crisp.
+
+PURPOSE AND MODEL:
+First stage BEFORE random processing times are revealed: decide job-machine assignment, within-machine order, and one due-window pair [e_j,d_j] for each job. These decisions are SHARED across all scenarios.
+Random input: p_{jω} with scenario probability π_ω. Processing time is a realization, NEVER a second-stage decision.
+Second stage AFTER a scenario is known: choose start and completion times S_{jω}, C_{jω}, retaining first-stage machine assignments and job order. Allow waiting. C_{jω}=S_{jω}+p_{jω}.
+Only retain the FIRST completion cost type from Work 2: the weighted piecewise earliness/tardiness ET cost. Delete the step/count cost and ALL early-work/tardy-work panels, formulas and labels. Retain the due-window constraints, position cost and width cost. The ET plot is a schematic generalization of the linear ET model, using the same first cost formula as the reference.
+Use "延迟", never "拖期", in Chinese.
+
+COMPOSITION, top to bottom, with balanced spacing:
+1. Full-width main title.
+2. Upper band, roughly 20% of the page: a large left panel "第一阶段：任务分配、机内顺序与窗口", and a narrower right panel "参数与两阶段决策".
+In the left panel show two machine SEQUENCE rails: M1: J1 → J3 → J5 and M2: J2 → J4 → J6. These are sequence diagrams, not fixed start/completion timelines. Do not label S or C in this first-stage diagram. Use the exact consistent colors: J1 cyan, J2 orange, J3 pink, J4 pale green, J5 purple, J6 yellow. Above EACH job, include a small gray dashed allowable interval [A_j,B_j] and a smaller selected green interval [e_j,d_j]. All green window labels share the same typeface, size, weight and green. Add a subtle translucent ghost extension at the sides of the job rectangles as a small visual cue for possible duration variation; do not draw multiple real simultaneous operations. A brief label can say "虚影：加工时长波动". Clearly label the rails "共同任务序列".
+Right panel short readable lines:
+"一阶段：分配、顺序、[e_j,d_j]"
+"随机输入：p_{jω}，π_ω"
+"二阶段：S_{jω}，C_{jω}"
+"C_{jω}=S_{jω}+p_{jω}"
+"各场景共享分配、顺序与窗口"
+Below this upper band, a clean horizontal three-box arrow flow:
+"一阶段共享决策" → "工时场景实现" → "二阶段执行时刻".
+Use small associated variables σ,e,d ; p_{jω} ; S_{jω},C_{jω}. Do not add online rescheduling or optimization-algorithm graphics.
+
+3. A FULL-WIDTH band, roughly 21%, with title "窗口决策：可行范围与设置成本". Closely adapt the middle window band of the reference.
+Left: one precise horizontal dimension diagram for J3:
+gray outer interval [A3,B3]; selected green [e3,d3].
+Show orange position displacement e3−A3, blue minimum width D3^min, orange extra width D3−D3^min, green full width D3.
+The blue minimum-width arrow starts at e3 and ends at e3+D3^min. The extra-width arrow starts EXACTLY at e3+D3^min and ends at d3. Position displacement runs A3→e3.
+Place the constraints UNDER the dimension diagram:
+A_j ≤ e_j ≤ d_j ≤ B_j
+D_j^min ≤ D_j=d_j−e_j ≤ D_j^max.
+Right: just ONE cost formula:
+K_j(e_j,d_j)=ρ_j(e_j−A_j)+λ_j(D_j−D_j^min).
+Put one orange UNDERBRACE under ρ_j(e_j−A_j), caption "位置成本"; a second underbrace under λ_j(D_j−D_j^min), caption "宽度成本". No extra duplicated formulas.
+Caption "窗口设置费只计一次".
+
+4. A full-width scenario section, roughly 25%, title "第二阶段：随机工时下的场景执行". Three equal side-by-side scenario cards ω1,ω2,ω3, each probability 1/3. Each card shows BOTH M1 and M2 actual time axes, using identical scales 0 to 20 and the SAME fixed job assignment/order as above. Blocks must not overlap. Starts and lengths differ by scenario. All job colors are invariant.
+Use this internally consistent illustrative geometry (these are design data; it is not necessary to print every time):
+ω1: M1 J1=[0,3], J3=[4,6], J5=[7,10]; M2 J2=[0,3], J4=[4,7], J6=[8,11].
+ω2: M1 J1=[0,4], J3=[5,9], J5=[10,14]; M2 J2=[0,4], J4=[5,9], J6=[10,14].
+ω3: M1 J1=[0,5], J3=[6,13], J5=[14,19]; M2 J2=[0,5], J4=[6,11], J6=[12,17].
+In EVERY scenario highlight the SAME J3 due window e3=8,d3=12 as a pale-green band with identical absolute horizontal coordinates; label [e3,d3], NOT [e3ω,d3ω]. Other windows are already indicated in the first-stage panel, so do not clutter the scenario plots with every window.
+Use only simple J1,J3,J5 / J2,J4,J6 labels inside the small blocks, not long formulas that cannot fit.
+Mark J3's completion with a black point C_{3,1}, C_{3,2}, C_{3,3}.
+ω1: clearly show a BLUE measured interval C_{3,1}→e3, caption "早到 E_{3,1}".
+ω2: C_{3,2} falls INSIDE the green window, caption "窗内完成".
+ω3: clearly show a RED measured interval d3→C_{3,3}, caption "延迟 T_{3,3}".
+The early/delayed markers must be real two-ended horizontal intervals, not decorative ticks. Three short scenario captions may list p_{3,1}=2, p_{3,2}=4, p_{3,3}=7, respectively; the unequal J3 lengths HERE are intentional random durations.
+Keep all M2 operations feasible and the same ordered sequence J2,J4,J6. Never swap job colors or sequence between scenarios.
+Add a short shared caption "同一窗口，不同场景；分配与顺序保持一致".
+
+5. A pale orange FULL-WIDTH total-cost strip:
+"总成本： ∑_j K_j(e_j,d_j) + ∑_{ω∈Ω} π_ω ∑_j φ_j(C_{jω};e_j,d_j)"
+Show underbraces or small clear captions "一阶段窗口设置成本" for the first sum and "二阶段期望 ET 成本" for the probability-weighted sum. The window charge is NOT multiplied by the scenario count.
+
+6. Bottom section, roughly 22%, one single wide panel "与完工时间偏差有关的 ET 成本", and secondary English heading "Weighted earliness and tardiness cost".
+Definitions:
+E_{jω}=(e_j−C_{jω})^+,  T_{jω}=(C_{jω}−d_j)^+.
+Piecewise cost matching the FIRST cost of Work 2:
+φ_j(C_{jω};e_j,d_j)=αE_{jω}+βT_{jω}+γ(E_{jω}−u)^++δ(T_{jω}−v)^+.
+(x)^+=max{x,0}.
+One LARGE clean cost curve: horizontal axis C_{jω}, vertical axis "成本".
+A positive blue left part decreases with slope −(α+γ) up to e_j−u, then decreases less steeply with slope −α down to zero at e_j. Zero between e_j and d_j under a pale-green window band. A positive red right part rises with slope β until d_j+v, then more steeply with slope β+δ. All four breakpoints must align with their labels. This is the ONLY cost-function plot. No stair steps, EW, TW, capped work curve, makespan, overtime, or solver diagrams.
+Use a compact bottom legend with six job colors, green selected window, gray allowed interval, translucent duration variation, blue early cost and red delay cost. Thin restrained lines, no unnecessary cyan projection lines outside the window dimension diagram or cost plot. Do not call this an optimal schedule, and do not claim scenarios are decisions. No watermark or decorative filler.

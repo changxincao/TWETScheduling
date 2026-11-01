@@ -1,6 +1,8 @@
 {
   "tool": "built-in image_gen",
-  "status": "draft awaiting user review",
+  "status": "confirmed for current use",
+  "confirmed_on": "2026-11-02",
+  "confirmed_copy": "../confirmed-20261101/Work3-随机工时与两阶段并行机调度.png",
   "reference": "../confirmed-20261101/Work2-窗口决策与并行机调度.png",
   "reference_sha256": "24ed3176cc52914a98779c1275d7a21c420ac824d82d4ea053546cb8f472a029",
   "raw_outputs": [

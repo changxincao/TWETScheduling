@@ -1,6 +1,6 @@
 # Work 2：窗口决策、可行域与设置成本
 
-当前修订稿：[Work 2 当前图](work2-a-geometry-polished.png)。已统一 J₃ 加工条、work 曲线端点与中文“延迟”用词；`[e₂,d₂]` 的字形按用户要求保留原状，仍未解决。上一暂存稿 [work2-a-original-label-restored.png](work2-a-original-label-restored.png) 保留。
+当前确认稿：[Work 2 当前图](work2-a-geometry-polished.png)。2026-11-01 用户确认保存，并与最终 Work 1 生图配套放入 [当前确认版目录](../confirmed-20261101/README.md)。已统一 J₃ 加工条、work 曲线端点与中文“延迟”用词；`[e₂,d₂]` 字形沿用现状，本轮未继续修订。上一暂存稿 [work2-a-original-label-restored.png](work2-a-original-label-restored.png) 保留。
 
 2026-11-01。基于最终 Work 1 生图版制作三个 Work 2 候选，沿用原三类执行费用。上层为每个任务补灰色允许范围 [A_j,B_j]，绿色为选定窗口 [e_j,d_j]；中层新增跨左右两栏的窗口可行域与设置成本框；下层保留原完工偏差和窗口外加工量说明及三类函数。
 

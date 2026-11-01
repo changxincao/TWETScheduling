@@ -1,5 +1,7 @@
 # Work 1：调度决策与成本示意
 
+2026-11-01 归档：本目录的最终生图 [work1-model-latest.png](work1-model-latest.png) 已与用户确认的 Work 2 原样复制到 [当前确认版目录](../confirmed-20261101/README.md)，按 Work 编号标记；来源与归档副本 SHA-256 一致。
+
 2026-10-31。当前推荐[最新修订版大图](work1-reviewed-4k.png)，另有[预览](work1-reviewed.png)。工时和交付窗口给定，调度决定任务分配、机内加工顺序及开始时刻，完工时刻满足 Cj=Sj+pj。参数框不放固定顺序示例，S3/C3 加工条图示按完整墨迹边界居中。大图为 4344×3258 的 PNG 导出，底稿原生尺寸为 1448×1086。
 
 本轮对照[当前问题描述](../../../paper/parallel_machine_scheduling_with_due_window/sections/03_problem_description.tex)、[中文数学描述](../due-window-problem-v2-20261031/三个问题的中文数学描述.md)及[三类费用的既定口径](../work1-structured-costs-20261031/README.md)做了详细复查，未发现新的图义问题。六个任务各出现一次，机器内无重叠，J2 早到、J6 拖期，其余四个任务完工入窗；六处 J3 的实际填色宽度均为 293 像素，七处浅绿窗口填充与各自投影一致，参数图示中心与右框中心横坐标均为 1147.5。

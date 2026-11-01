@@ -1,0 +1,142 @@
+{
+  "date": "2026-11-01",
+  "tool": "built-in image_gen",
+  "status": "layout_candidates_not_final",
+  "recommended_layout": "a-dimensions",
+  "global_semantic_review": "NOT_PASS",
+  "window_cost_definition": "K_j = rho_j*(e_j-A_j) + lambda_j*(d_j-e_j-D_j_min)",
+  "feasible_region": "A_j<=e_j<=d_j<=B_j; D_j_min<=d_j-e_j<=D_j_max",
+  "review_scope": "Manual comparison of layouts, formulas, selected-window execution cost meanings, and visible annotation errors. No exact geometry certificate.",
+  "work1_files": [
+    {
+      "path": "../work1-optimized-20261031/work1-model-latest.png",
+      "sha256": "13140533a345822c13ebb5779e245a91be892f131ca97a07a29d605e5cadf3cd",
+      "unchanged_after_generation": true
+    },
+    {
+      "path": "../work1-optimized-20261031/work1-reviewed-4k.png",
+      "sha256": "48ace4018a25fc478ee5dd9d398c0481af471e5668af45b8a86634661b3a197b",
+      "unchanged_after_generation": true
+    }
+  ],
+  "selected": [
+    {
+      "key": "a-dimensions",
+      "title": "尺寸分解",
+      "filename": "work2-a-dimensions.png",
+      "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-3b6ded14-bcca-47f8-89ec-b9eae7b6bb22.png",
+      "selected_stage": "broad_correction",
+      "review_notes": [
+        "窗口成本的尺寸分解与公式保留，可作为推荐布局。",
+        "上层J2窗口仍位于其完工点左侧，与早到标注冲突；J6拖期括号起点与绿色窗口右端不完全一致。",
+        "J3加工条尚未达到统一像素长度。"
+      ],
+      "native_size": [
+        1374,
+        1145
+      ],
+      "sha256": "a267495d8745df3ef4f98a4b3d21103b80861b5c4cb0aee8578c250246b38e55",
+      "copied_without_postprocessing": true
+    },
+    {
+      "key": "b-linear-costs",
+      "title": "两条费用直线",
+      "filename": "work2-b-linear-costs.png",
+      "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-59ebe20c-0437-470f-9226-9de8fdac11c6.png",
+      "selected_stage": "initial",
+      "review_notes": [
+        "位置费与宽度费的两个小函数及其横轴、费率正确保留。",
+        "上层J2窗口位置与早到标注冲突；局部端点仍需精修。"
+      ],
+      "native_size": [
+        1374,
+        1145
+      ],
+      "sha256": "49d82be4ef8243616b029068f254f8d801dbe0653e00e42b1798c4ca6e3477b5",
+      "copied_without_postprocessing": true
+    },
+    {
+      "key": "c-window-changes",
+      "title": "后移与放宽对比",
+      "filename": "work2-c-window-changes.png",
+      "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-67e51719-f7a9-4ca9-801b-f738d89d5bb3.png",
+      "selected_stage": "initial",
+      "review_notes": [
+        "两种变化的费用差公式及完整三类执行成本保留。",
+        "平移前后窗口在栅格上尚未严格等宽；额外宽度箭头不是严格从旧右端点起。",
+        "上层J2、J6窗口与早到拖期的对应仍需修正。"
+      ],
+      "native_size": [
+        1374,
+        1145
+      ],
+      "sha256": "574bb83d484a38f9097ff942b3e098c8c9dd321ce43b797e06f4c87b8ca54026",
+      "copied_without_postprocessing": true
+    }
+  ],
+  "all_attempts": [
+    {
+      "key": "a-dimensions",
+      "title": "尺寸分解",
+      "attempts": [
+        {
+          "stage": "initial",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-552232ba-feeb-4d55-99c5-fc31b3f28940.png",
+          "error": null
+        },
+        {
+          "stage": "broad_correction",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-3b6ded14-bcca-47f8-89ec-b9eae7b6bb22.png",
+          "error": null
+        },
+        {
+          "stage": "window_only_correction",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-8f754f74-9618-435d-81fd-4bdc639e74d6.png",
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "b-linear-costs",
+      "title": "两条费用直线",
+      "attempts": [
+        {
+          "stage": "initial",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-59ebe20c-0437-470f-9226-9de8fdac11c6.png",
+          "error": null
+        },
+        {
+          "stage": "broad_correction",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-714cce9e-c6ae-497b-aa16-9517b5173519.png",
+          "error": null
+        },
+        {
+          "stage": "window_only_correction",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-94edf61e-4e90-46f3-8de8-fccd631e91b3.png",
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "c-window-changes",
+      "title": "后移与放宽对比",
+      "attempts": [
+        {
+          "stage": "initial",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-67e51719-f7a9-4ca9-801b-f738d89d5bb3.png",
+          "error": null
+        },
+        {
+          "stage": "broad_correction",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-aa56404a-966d-4657-b9e0-f19c94fcb4f7.png",
+          "error": null
+        },
+        {
+          "stage": "window_only_correction",
+          "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-d09ba058-ee44-4bf3-acb1-05b7d1a6b651.png",
+          "error": null
+        }
+      ]
+    }
+  ]
+}

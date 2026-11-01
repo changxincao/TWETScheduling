@@ -1,0 +1,11 @@
+Use case: text-localization
+Asset type: exact local typography correction in an existing scientific scheduling figure.
+
+Input image 1 is the FULL EDIT TARGET, the current Work 2 figure. Input image 2 is the user's close-up: its LEFT green [e₂,d₂] label has the WRONG typography; its RIGHT green [e₄,d₄] label is the typography reference.
+
+Correct ONLY the small green label [e₂,d₂] above the yellow J₂ bar on M₂, near x=291, y=217 in the 1374-by-1145 full image. Match the neighboring ORIGINAL green [e₄,d₄] and [e₆,d₆] labels visually, including e and d glyph shapes, character height, stroke weight, true small lowered numeric subscripts, square brackets, comma spacing, green hue, and the soft printed appearance. The result should look like the original neighboring label with only its indices changed from 4 to 2. Do not simply choose an arbitrary typed font. The current left label is visibly different; replace its lettering.
+
+Exact replacement text: "[e₂,d₂]" with 2 rendered as true mathematical subscripts, not baseline digits.
+Center it above the existing green window line between x=260 and x=321. Keep the existing window endpoints and line at y=229 unchanged.
+
+Preserve the entire figure's dimensions, composition, title, Chinese wording, all formulas, job names and processing-time subscripts (especially J₅(p₅)), machine timelines, gray allowed ranges, other green windows, early and delay interval marks, cost curves, orange total-cost strip, and legend. Do not redesign, rescale, crop, move any other element, or add commentary or highlight boxes. Return the full corrected figure, with only this label changed.

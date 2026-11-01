@@ -1,6 +1,6 @@
 # Work 2：窗口决策、可行域与设置成本
 
-当前继续修订稿：[e₂、d₂ 正体修正版](work2-a-window-label-upright.png)。
+当前继续修订稿：[恢复原生图标签字形版](work2-a-original-label-restored.png)。
 
 2026-11-01。基于最终 Work 1 生图版制作三个 Work 2 候选，沿用原三类执行费用。上层为每个任务补灰色允许范围 [A_j,B_j]，绿色为选定窗口 [e_j,d_j]；中层新增跨左右两栏的窗口可行域与设置成本框；下层保留原完工偏差和窗口外加工量说明及三类函数。
 
@@ -44,4 +44,6 @@ A 用位置后移 e−A 与额外宽度 D−Dmin 的尺寸标注直接对应两�
 
 2026-11-01 字体误改记录：曾误将用户要求理解为改成斜体，输出 [work2-a-window-label-matched.png](work2-a-window-label-matched.png)，该版不符合要求。不能由生图底稿推断其全部标签的精确字体。
 
-2026-11-01 正体修正：按用户明确要求，将 `[e₂,d₂]` 改为 Times New Roman Regular 正体（times.ttf，23 px），保留已确认的绿色。最新图为 [work2-a-window-label-upright.png](work2-a-window-label-upright.png)；放大核对字形，并检查标签框外像素不变。
+2026-11-01 正体尝试：将 `[e₂,d₂]` 改为 Times New Roman Regular 正体（times.ttf，23 px），输出 [work2-a-window-label-upright.png](work2-a-window-label-upright.png)。用户指出仍与旁边标签的实际字形和下标不一致，该版未获接受。
+
+2026-11-01 恢复原生图标签：用户要求的是与相邻标签视觉一致。按该要求尝试内置 image_gen 局部编辑，首轮仍未贴合参考字形，且整图像素变化，未采用；提示词见 [label-imagegen-match-prompt.txt](label-imagegen-match-prompt.txt)，原始输出为 `C:/Users/Changxin/.codex/generated_images/01a194ea-4322-7221-84e9-536d1ad8b3b9/exec-aba7994d-c358-4c28-bee2-dfb4b51cec26.png`。随后在原始生图底稿 `work2-a-top-cleaned-markers.png` 中找回同款 `[e₂,d₂]`，原样复制其 58×21 标签区域并水平移动 19 px，居中放到当前窗口上方，不再另选字体。最新图为 [work2-a-original-label-restored.png](work2-a-original-label-restored.png)，仍为 1374×1145；已放大对照旁边标签，核对标签来源像素一致及标签框外像素不变。

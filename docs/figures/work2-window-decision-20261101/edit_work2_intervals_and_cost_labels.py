@@ -5,7 +5,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "work2-a-top-cleaned-markers.png"
-OUTPUT = HERE / "work2-a-window-label-upright.png"
+OUTPUT = HERE / "work2-a-original-label-restored.png"
 
 BLUE = (20, 55, 245, 255)
 RED = (235, 40, 30, 255)
@@ -64,17 +64,18 @@ def draw_underbrace(
 
 def main() -> None:
     image = Image.open(SOURCE).convert("RGBA")
+    # 移动窗口时保留生图底稿原有字形、下标和抗锯齿，避免用另一个字体重写标签。
+    window_label = image.crop((243, 208, 301, 229))
     draw = ImageDraw.Draw(image)
     chinese_font = ImageFont.truetype(r"C:\Windows\Fonts\simhei.ttf", 22)
     cost_font = ImageFont.truetype(r"C:\Windows\Fonts\simhei.ttf", 18)
-    math_font = ImageFont.truetype(r"C:\Windows\Fonts\times.ttf", 23)
 
-    # 为早到示例腾出可读区间：将 e2 从 227 调到 260；按用户要求使用亮绿色正体标签。
+    # 为早到示例腾出可读区间：将 e2 从 227 调到 260，原生图标签同步居中移动。
     draw.rectangle((218, 208, 324, 236), fill=WHITE)
     draw.line((260, 229, 321, 229), fill=GREEN, width=2)
     draw.line((260, 222, 260, 236), fill=GREEN, width=2)
     draw.line((321, 222, 321, 236), fill=GREEN, width=2)
-    draw.text((291, 215), "[e₂,d₂]", font=math_font, fill=GREEN, anchor="mm")
+    image.paste(window_label, (262, 208))
 
     # 上层状态区间：C2--e2 为早到，d6--C6 为延迟。
     draw.rectangle((180, 274, 270, 309), fill=WHITE)

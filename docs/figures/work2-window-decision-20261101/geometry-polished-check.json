@@ -1,0 +1,68 @@
+{
+  "source": "work2-a-original-label-restored.png",
+  "output": "work2-a-geometry-polished.png",
+  "size": [
+    1374,
+    1145
+  ],
+  "source_sha256": "098f49492e0eec4a92f6f3c0e0e621f436fb1fbd22eb4cc0cdaf76fc8c15c8bf",
+  "output_sha256": "24ed3176cc52914a98779c1275d7a21c420ac824d82d4ea053546cb8f472a029",
+  "bars": [
+    {
+      "name": "main",
+      "s": 425,
+      "c": 535,
+      "p3_pixels": 110
+    },
+    {
+      "name": "parameter",
+      "s": 1078,
+      "c": 1188,
+      "p3_pixels": 110
+    },
+    {
+      "name": "ET_early",
+      "s": 144,
+      "c": 254,
+      "p3_pixels": 110
+    },
+    {
+      "name": "ET_late",
+      "s": 537,
+      "c": 647,
+      "p3_pixels": 110
+    },
+    {
+      "name": "EW",
+      "s": 888,
+      "c": 998,
+      "p3_pixels": 110
+    },
+    {
+      "name": "TW",
+      "s": 1110,
+      "c": 1220,
+      "p3_pixels": 110
+    }
+  ],
+  "measured_pink_fill_pixels": {
+    "main": 107,
+    "parameter": 107,
+    "ET_early": 107,
+    "ET_late": 107,
+    "EW": 107,
+    "TW": 107
+  },
+  "work_curve": {
+    "e": 951,
+    "e_plus_p": 1042,
+    "d": 1171,
+    "d_plus_p": 1262,
+    "red_plateau_x": 1262
+  },
+  "measured_red_plateau_start": 1261,
+  "outside_regions_changed_pixels": 0,
+  "e2_d2_unchanged": true,
+  "cost_formulas_unchanged": true,
+  "example_condition_note_added": false
+}

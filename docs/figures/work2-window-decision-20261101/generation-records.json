@@ -138,5 +138,20 @@
         }
       ]
     }
-  ]
+  ],
+  "total_cost_highlight": {
+    "date": "2026-11-01",
+    "tool": "built-in image_gen",
+    "input": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-552232ba-feeb-4d55-99c5-fc31b3f28940.png",
+    "source": "C:\\Users\\Changxin\\.codex\\generated_images\\01a194ea-4322-7221-84e9-536d1ad8b3b9\\exec-955e7272-d3af-4b62-827b-0a282050b14a.png",
+    "file": "work2-a-total-cost-highlight.png",
+    "prompt": "total-cost-highlight-prompt.txt",
+    "native_size": [
+      1373,
+      1145
+    ],
+    "sha256": "f415362003d82ffe5760596dc3793207e427df3b3316d255b2a0d9a7b53f53fb",
+    "copied_without_postprocessing": true,
+    "visual_review": "总成本整行已有浅橙底色和细橙边框，公式清晰；本次只复核底色调整。"
+  }
 }

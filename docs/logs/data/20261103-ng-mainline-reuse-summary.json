@@ -1,0 +1,234 @@
+{
+  "manifestCounts": {
+    "first": 2873,
+    "second": 810,
+    "third": 2700
+  },
+  "ngNormal": 807,
+  "reusableStrictPrimary": 807,
+  "normalInputMatched": 807,
+  "normalSeedPrimaryMatched": 807,
+  "normalSeedAllTIMatched": 807,
+  "normalActualSeedConsistent": 807,
+  "bySizeSetup": [
+    {
+      "n": "20",
+      "setup": "random",
+      "planned": 135,
+      "normal": 135,
+      "inputMatched": 135,
+      "primarySeedMatched": 135,
+      "reusable": 135
+    },
+    {
+      "n": "20",
+      "setup": "family",
+      "planned": 135,
+      "normal": 135,
+      "inputMatched": 135,
+      "primarySeedMatched": 135,
+      "reusable": 135
+    },
+    {
+      "n": "40",
+      "setup": "random",
+      "planned": 135,
+      "normal": 135,
+      "inputMatched": 135,
+      "primarySeedMatched": 135,
+      "reusable": 135
+    },
+    {
+      "n": "40",
+      "setup": "family",
+      "planned": 135,
+      "normal": 135,
+      "inputMatched": 135,
+      "primarySeedMatched": 135,
+      "reusable": 135
+    },
+    {
+      "n": "50",
+      "setup": "random",
+      "planned": 135,
+      "normal": 135,
+      "inputMatched": 135,
+      "primarySeedMatched": 135,
+      "reusable": 135
+    },
+    {
+      "n": "50",
+      "setup": "family",
+      "planned": 135,
+      "normal": 132,
+      "inputMatched": 132,
+      "primarySeedMatched": 132,
+      "reusable": 132
+    }
+  ],
+  "commonParameterDifferences": [],
+  "allConfigDifferences": [
+    {
+      "key": "config.timeIndexedCompletionBoundNodeArcFixingMaxDepth",
+      "ng": "0",
+      "ti": null,
+      "comparisons": 1612
+    },
+    {
+      "key": "config.bidirectionalCompletionBoundScalarPruning",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.bidirectionalCompletionBoundSubtreeArcEliminationPricingOnly",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.bidirectionalCompletionBoundRelaxation",
+      "ng": "allCycles",
+      "ti": "off",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.timeIndexedCompletionBoundNodeArcFixing",
+      "ng": "true",
+      "ti": null,
+      "comparisons": 1612
+    },
+    {
+      "key": "config.useGCNGBBStyleNgDssrPricing",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.timeIndexedCompletionBoundCutLoopArcFixing",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 806
+    },
+    {
+      "key": "config.bidirectionalCompletionBoundArcFixing",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.timeIndexedCompletionBoundScalarEnhancement",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.cutSetSupernodeSeeds",
+      "ng": "false",
+      "ti": null,
+      "comparisons": 1612
+    },
+    {
+      "key": "config.bpcMethodName",
+      "ng": "ngDssr",
+      "ti": "timeIndexedGraph",
+      "comparisons": 806
+    },
+    {
+      "key": "config.bidirectionalJoinBestThresholdMode",
+      "ng": "bestUB",
+      "ti": "zero",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.bidirectionalMidpointProbeDssrEarlyStopRatio",
+      "ng": "4.0",
+      "ti": "NaN",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.bidirectionalMidpointProbeDssrImbalanceThreshold",
+      "ng": "4.0",
+      "ti": "2.0",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.enableHeuristicPricing",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.enableNgDssrFirstRoundMeanStart",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 802
+    },
+    {
+      "key": "config.bidirectionalMidpointProbe",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.timeIndexedCompletionBoundWindowTightening",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.enableStrongBranchingPhaseOneRepair",
+      "ng": "true",
+      "ti": "false",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.bidirectionalMidpointProbeDssrMoveFraction",
+      "ng": "0.05",
+      "ti": "NaN",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.useTimeIndexedGraphPricing",
+      "ng": "false",
+      "ti": "true",
+      "comparisons": 1612
+    },
+    {
+      "key": "config.useTimeIndexedGraphRank1CutPricing",
+      "ng": "false",
+      "ti": "true",
+      "comparisons": 806
+    },
+    {
+      "key": "config.bpcMethodName",
+      "ng": "ngDssr",
+      "ti": "timeIndexedGraphRank1Cut",
+      "comparisons": 806
+    },
+    {
+      "key": "config.enableSubsetRowCutsForTimeIndexedGraph",
+      "ng": "false",
+      "ti": "true",
+      "comparisons": 806
+    },
+    {
+      "key": "config.clusterTemporalWeight",
+      "ng": "0.0",
+      "ti": "1.0",
+      "comparisons": 810
+    },
+    {
+      "key": "config.enableNgDssrFirstRoundMeanStart",
+      "ng": "true",
+      "ti": null,
+      "comparisons": 810
+    },
+    {
+      "key": "config.enableNgDssrSameNodeMidpointStart",
+      "ng": "false",
+      "ti": null,
+      "comparisons": 810
+    }
+  ]
+}

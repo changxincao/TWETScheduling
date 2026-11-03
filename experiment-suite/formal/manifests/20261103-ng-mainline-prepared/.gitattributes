@@ -1,0 +1,5 @@
+*.tsv text eol=lf
+*.properties text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.cmd text eol=crlf

@@ -1,0 +1,12 @@
+{
+  "host": "third",
+  "size": "80",
+  "tasks": 270,
+  "status": "PREPARED_NOT_STARTED",
+  "variant": "A",
+  "maxParallel": 5,
+  "solverThreads": 1,
+  "reused": 807,
+  "historicalFailures": 3,
+  "solverJarSha256": "1b00188438f7a38ddacb809ebe2f7dd736dfb5a31d734a2e0df484713a6e432a"
+}

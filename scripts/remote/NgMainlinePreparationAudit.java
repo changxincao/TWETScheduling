@@ -22,7 +22,8 @@ public class NgMainlinePreparationAudit {
             throw new IllegalArgumentException("Unexpected allowed root");
         }
         Path stage = checked(args[1]);
-        if (!stage.getFileName().toString().equals("20261103-ng-mainline-prepared")) throw new IllegalArgumentException("Wrong stage");
+        if (!Set.of("20261103-ng-mainline-prepared", "20261104-ng-mainline-a-prepared")
+                .contains(stage.getFileName().toString())) throw new IllegalArgumentException("Wrong stage");
         String mode = args.length > 2 ? args[2] : "audit";
         if (mode.equals("--export-assets")) { exportAssets(stage); return; }
         if (mode.equals("--install-ready")) { installReady(stage); return; }
@@ -49,8 +50,9 @@ public class NgMainlinePreparationAudit {
                     for (int i = 0; i < header.length; i++) row.put(header[i], cells[i]);
                     String algorithm = row.get("algorithm");
                     if (spec[2].equals("TI") && !Set.of("TIME_INDEXED", "TIME_INDEXED_SRI").contains(algorithm)) continue;
-                    if (spec[2].equals("NG_B")) {
-                        if (!Set.of("F-B", "R-B").contains(row.get("block"))) continue;
+                    if (Set.of("NG_A", "NG_B").contains(spec[2])) {
+                        Set<String> variants = spec[2].equals("NG_A") ? Set.of("F-A", "R-A") : Set.of("F-B", "R-B");
+                        if (!variants.contains(row.get("block"))) continue;
                         if (spec[0].equals("ng-old") && row.get("size").equals("50") && row.get("setupType").equals("family")) continue;
                     }
                     var matcher = ARG.matcher(row.get("args"));
@@ -159,7 +161,8 @@ public class NgMainlinePreparationAudit {
             var options = new HashMap<String, String>();
             var matcher = ARG.matcher(row.get("args"));
             while (matcher.find()) options.put(matcher.group(1), matcher.group(2) != null ? matcher.group(2) : matcher.group(3));
-            if (!"NG_DSSR".equals(options.get("algorithm")) || !"0".equals(options.get("timeIndexedCompletionBoundNodeArcFixingMaxDepth"))) throw new IllegalStateException("Wrong pricing/fixing");
+            String depth = stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared") ? "2147483647" : "0";
+            if (!"NG_DSSR".equals(options.get("algorithm")) || !depth.equals(options.get("timeIndexedCompletionBoundNodeArcFixingMaxDepth"))) throw new IllegalStateException("Wrong pricing/fixing");
             boolean family = row.get("setupType").equals("family");
             if (!Boolean.toString(family).equals(options.get("enableClusterBranching")) || !Boolean.toString(family).equals(options.get("structuredArcStrictTypePriority"))) throw new IllegalStateException("Wrong branch setting");
             if (!"false".equals(options.get("enableCutSetBranching")) || !"false".equals(options.get("cutSetSupernodeSeeds"))) throw new IllegalStateException("CutSet enabled");
@@ -176,7 +179,7 @@ public class NgMainlinePreparationAudit {
     private static void installReady(Path stage) throws Exception {
         Set<String> metadata = Set.of("solve.tsv", "run.cmd", "worker.cmd", "experiment.properties",
                 "experiment.status", "README.md", "asset-hashes.tsv", "profile-lock.properties",
-                "reuse-index.csv", "case-map.tsv", "preparation-summary.json");
+                "reuse-index.csv", "case-map.tsv", "preparation-summary.json", "profile-family.properties", "profile-random.properties");
         var seen = new HashSet<Path>();
         try (var zip = new ZipInputStream(Files.newInputStream(stage.resolve("ready-package.zip")))) {
             for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {

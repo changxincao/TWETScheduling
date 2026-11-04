@@ -1,0 +1,50 @@
+{
+  "variant": "A",
+  "planned": 810,
+  "reusable": 807,
+  "failures": 3,
+  "bySizeSetup": [
+    {
+      "n": "20",
+      "setup": "family",
+      "reusable": 135
+    },
+    {
+      "n": "20",
+      "setup": "random",
+      "reusable": 135
+    },
+    {
+      "n": "40",
+      "setup": "family",
+      "reusable": 135
+    },
+    {
+      "n": "40",
+      "setup": "random",
+      "reusable": 135
+    },
+    {
+      "n": "50",
+      "setup": "family",
+      "reusable": 132
+    },
+    {
+      "n": "50",
+      "setup": "random",
+      "reusable": 135
+    }
+  ],
+  "statuses": {
+    "FINISHED": 486,
+    "ROOT_PROCESSED": 296,
+    "TIME_LIMIT": 25
+  },
+  "missingGap": 18,
+  "configFields": {
+    "family": 194,
+    "random": 194
+  },
+  "firstHostReference": "2026-11-03 archived audit; no live connection",
+  "jarSha256": "1b00188438f7a38ddacb809ebe2f7dd736dfb5a31d734a2e0df484713a6e432a"
+}

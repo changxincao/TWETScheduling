@@ -16,7 +16,8 @@ public class NgMainlineConfigAudit {
     public static void main(String[] args) throws Exception {
         Path stage = Path.of(args[0]).toRealPath();
         if (!stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared")
-                || !Set.of(Path.of("D:/ccx/work1/experiments"), Path.of("D:/ccxWork/work1/experiments"))
+                || !Set.of(Path.of("D:/ccx/work1/experiments"), Path.of("D:/ccxWork/work1/experiments"),
+                        Path.of("D:/ccx_work/考虑交付的机器调度/work1/experiments"))
                         .contains(stage.getParent())) throw new IllegalArgumentException("Unexpected stage");
         var parser = Class.forName("Common.formal.FormalExperimentRunner$Arguments");
         Method parse = parser.getDeclaredMethod("parse", String[].class);
@@ -27,7 +28,8 @@ public class NgMainlineConfigAudit {
         int count = 0, fields = 0;
         var fingerprints = new HashMap<Path, String>();
         var expectedSeeds = new HashMap<String, String>();
-        for (String line : Files.readAllLines(stage.resolve("case-map.tsv"), StandardCharsets.UTF_8).subList(1, 271)) {
+        var caseLines = Files.readAllLines(stage.resolve("case-map.tsv"), StandardCharsets.UTF_8);
+        for (String line : caseLines.subList(1, caseLines.size())) {
             String[] cell = line.split("\t", -1);
             // case-map列由准备脚本固定为scenario,target,assetSourceHost,inputSha,seedSha,seedFingerprint,...。
             expectedSeeds.put(cell[0], cell[5]);
@@ -84,7 +86,14 @@ public class NgMainlineConfigAudit {
             }
             fields = actual.size(); count++;
         }
-        if (count != 270 || fingerprints.size() != 270) throw new IllegalStateException("Unexpected coverage");
+        // 迁移时已完成场景只保留引用，不再进入待跑清单；数量须与锁定元数据一致。
+        var metadata = new Properties();
+        try (var reader = Files.newBufferedReader(stage.resolve("experiment.properties"), StandardCharsets.UTF_8)) {
+            metadata.load(reader);
+        }
+        int expectedCount = Integer.parseInt(metadata.getProperty("tasks"));
+        if (count != expectedCount || fingerprints.size() != expectedCount || count == 0
+                || count > expectedSeeds.size()) throw new IllegalStateException("Unexpected coverage");
         String worker = Files.readString(stage.resolve("worker.cmd"));
         if (!worker.contains("solve.tsv\" 5 ") || worker.contains("solve.tsv\" 6 ")) throw new IllegalStateException("Wrong worker parallelism");
         for (String file : List.of("runs", "worker.lock", "worker.exit-code"))

@@ -1,0 +1,68 @@
+{
+  "host": "DESKTOP-06K8JI8",
+  "ip": "100.68.243.112",
+  "size": 60,
+  "planned": 270,
+  "tasks": 266,
+  "skippedCompleted": [
+    {
+      "runId": "pricing-n060-set01-m4-family-base-wnarrow-f3-ng_dssr-mainline-a",
+      "sourceHost": "100.68.243.192",
+      "sourceOutput": "D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set01-m4-family-base-wnarrow-f3-ng_dssr-mainline-a",
+      "inputSha": "1f41a045d2fcab88307f775dd3d80c91760e8ca55098b4b59a2383292c3362aa",
+      "seedSha": "0dacdffe5da61384eac8f4789f64a60776416d98e19d2e8a92aba19d22be2e56",
+      "seedFingerprint": "035d0ba9895d93c0f9ae02330b5a8ef2d182e39f2d5520f6410dbb4bd3ec6111",
+      "status": "FINISHED",
+      "solveTimeSeconds": "9941.295242",
+      "nodes": "2759",
+      "gapPercent": "0.000000"
+    },
+    {
+      "runId": "pricing-n060-set01-m4-family-base-wzero-f3-ng_dssr-mainline-a",
+      "sourceHost": "100.68.243.192",
+      "sourceOutput": "D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set01-m4-family-base-wzero-f3-ng_dssr-mainline-a",
+      "inputSha": "52c65c68c8d5d670a8eeaf7123a8897c23d5ba9e8904c547476dc2ee81117f3b",
+      "seedSha": "ca10295eed007bfcbc2025aef54685628fa87bfba7b33b8e4a96e991f5243a48",
+      "seedFingerprint": "5ef5d475e890f7cd6085e06a9538110cd6a9f3f64e03153be3286854e268ac44",
+      "status": "FINISHED",
+      "solveTimeSeconds": "311.038056",
+      "nodes": "91",
+      "gapPercent": "0.000000"
+    },
+    {
+      "runId": "pricing-n060-set01-m4-family-medium-wwide-f3-ng_dssr-mainline-a",
+      "sourceHost": "100.68.243.192",
+      "sourceOutput": "D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set01-m4-family-medium-wwide-f3-ng_dssr-mainline-a",
+      "inputSha": "189ccb049745fb0043490af15fa17c01bf99b8940f57807a8c81c786b689c8b9",
+      "seedSha": "487708da1a8cea781b0353d44d2a025e05aa469140c5e7098f485e612865c805",
+      "seedFingerprint": "e26266e7a9b0a8bfb5f6eba8631d39f45d2482552ef08c70b2f42f1f9e7c9f91",
+      "status": "FINISHED",
+      "solveTimeSeconds": "3737.849766",
+      "nodes": "106",
+      "gapPercent": "0.000000"
+    },
+    {
+      "runId": "pricing-n060-set01-m4-family-medium-wzero-f3-ng_dssr-mainline-a",
+      "sourceHost": "100.68.243.192",
+      "sourceOutput": "D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set01-m4-family-medium-wzero-f3-ng_dssr-mainline-a",
+      "inputSha": "518685ce7cde8afb5b5b3c8d5d08e1b76dc89d9518fd188f55b8aa198dee5a72",
+      "seedSha": "5d94bc70ddafc206d233b5275807a689baa314f6f25b63709007f778a9d8174d",
+      "seedFingerprint": "daff622ab9653ad33d52586f177865ba6380d63fadff0297e5644b8a5314929b",
+      "status": "FINISHED",
+      "solveTimeSeconds": "78.650649",
+      "nodes": "8",
+      "gapPercent": "0.000000"
+    }
+  ],
+  "previousFailuresQueued": 2,
+  "previousInterruptedQueued": 5,
+  "variant": "A",
+  "maxParallel": 5,
+  "solverThreads": 1,
+  "rootOnly": false,
+  "cutSet": false,
+  "timeLimitSeconds": 10800,
+  "solverJarSha256": "1b00188438f7a38ddacb809ebe2f7dd736dfb5a31d734a2e0df484713a6e432a",
+  "javaVersion": "21.0.3",
+  "status": "PREPARED_NOT_STARTED"
+}

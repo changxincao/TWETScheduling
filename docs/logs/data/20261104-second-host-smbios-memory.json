@@ -1,0 +1,79 @@
+{
+  "host": "DESKTOP-42976CD",
+  "ip": "100.68.243.192",
+  "observedDate": "2026-11-04",
+  "method": "GetSystemFirmwareTable RSMB; DMTF SMBIOS Type 17",
+  "readOnly": true,
+  "SMBIOSVersion": "3.6",
+  "platform": {
+    "bios": {
+      "vendor": "Dell Inc.",
+      "version": "1.24.0",
+      "date": "01/27/2026"
+    },
+    "system": {
+      "manufacturer": "Dell Inc.",
+      "product": "OptiPlex Tower Plus 7020",
+      "version": ""
+    },
+    "board": {
+      "manufacturer": "Dell Inc.",
+      "product": "0Y7V6M",
+      "version": "A00"
+    }
+  },
+  "arrays": [
+    {
+      "handle": 4096,
+      "maximumCapacityKiB": 134217728,
+      "slots": 4
+    }
+  ],
+  "memoryDevices": [
+    {
+      "handle": 4356,
+      "slot": "DIMM1",
+      "bank": "",
+      "sizeMiB": 32768,
+      "sizeGiB": 32,
+      "manufacturer": "01980000802C",
+      "partNumber": "99P5782-080.A00G",
+      "speedMTs": 5600,
+      "configuredMTs": 4400
+    },
+    {
+      "handle": 4357,
+      "slot": "DIMM2",
+      "bank": "",
+      "sizeMiB": 32768,
+      "sizeGiB": 32,
+      "manufacturer": "01980000802C",
+      "partNumber": "99P5782-080.A00G",
+      "speedMTs": 5600,
+      "configuredMTs": 4400
+    },
+    {
+      "handle": 4358,
+      "slot": "DIMM3",
+      "bank": "",
+      "sizeMiB": 0,
+      "sizeGiB": 0,
+      "manufacturer": "",
+      "partNumber": "",
+      "speedMTs": 0,
+      "configuredMTs": 0
+    },
+    {
+      "handle": 4359,
+      "slot": "DIMM4",
+      "bank": "",
+      "sizeMiB": 0,
+      "sizeGiB": 0,
+      "manufacturer": "",
+      "partNumber": "",
+      "speedMTs": 0,
+      "configuredMTs": 0
+    }
+  ],
+  "reportedTotalGiB": 64
+}

@@ -22,6 +22,67 @@ def fmt(value, digits=2):
     return '-' if value is None else f'{value:.{digits}f}'
 
 
+def write_pooled_report(aggregates):
+    """按用户口径合并规模，均值以正常运行数加权，不平均已有均值。"""
+    buckets = defaultdict(list)
+    for row in aggregates:
+        if row['scope'] != 'current':
+            continue
+        key = (row['setup'], row['F'], row['m'] if row['setup'] == 'family' else '',
+               row['relation'], row['scale'], row['window'], row['variant'])
+        buckets[key].append(row)
+    pooled = []
+    for key, members in buckets.items():
+        r = dict(zip(('setup', 'F', 'm', 'relation', 'scale', 'window', 'variant'), key))
+        for field in ('planned', 'normal', 'optimal', 'time_limit', 'failed_or_missing',
+                      'valid_gap_count', 'missing_gap_count', 'nodes_one_count',
+                      'common_optimal_count', 'common_optimal_multinode_count'):
+            r[field] = sum(x[field] for x in members)
+        for field, weight in [('mean_seconds', 'normal'), ('mean_nodes', 'normal'),
+                              ('common_optimal_mean_seconds', 'common_optimal_count'),
+                              ('common_optimal_mean_nodes', 'common_optimal_count'),
+                              ('common_multinode_mean_seconds', 'common_optimal_multinode_count')]:
+            r[field] = sum(x[field]*x[weight] for x in members if x[weight]) / r[weight] if r[weight] else None
+        r['mean_gap_percent'] = (sum(x['mean_gap_percent']*x['normal'] for x in members) / r['normal']
+                                 if r['normal'] and r['missing_gap_count'] == 0 else None)
+        for field in ('root_only_geom_ratio', 'cutset_geom_ratio'):
+            selected = [x for x in members if x['common_optimal_multinode_count'] and x[field] is not None]
+            count = sum(x['common_optimal_multinode_count'] for x in selected)
+            r[field] = math.exp(sum(math.log(x[field])*x['common_optimal_multinode_count']
+                                   for x in selected)/count) if count else None
+        pooled.append(r)
+    assert len(pooled) == 126 and sum(r['planned'] for r in pooled) == 2430
+    assert sum(r['normal'] for r in pooled) == 2418
+    output = DEST.with_name('20261104-ng-variants-pooled-scale-window')
+    with output.with_suffix('.csv').open('w', encoding='utf-8-sig', newline='') as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(pooled[0]))
+        writer.writeheader()
+        writer.writerows(pooled)
+    report = ['# NG-DSSR合并规模后的分类统计（2026-11-04）', '',
+              '按用户更正口径合并当前n20/40/50：random只按时间尺度×窗口，family只取F3、按机器数×时间尺度×窗口；旧n50/F4不参与。未启动求解或修改配置。', '',
+              '每个random格有45次运行/变体，每个family格15次/变体；直接按原运行等权汇总。正常时限计实际时间，失败不计0。平均gap有任一正常项缺失就标缺，不以已知部分冒充完整均值。', '',
+              'random顺序A/B为Arc加全节点/root-only fixing。family顺序A/B/C/D为Cluster→Arc加全节点/root-only、Cluster→CutSet→Arc加全节点/root-only。', '']
+    lookup = {(r['setup'], r['m'], r['scale'], r['window'], r['variant']): r for r in pooled}
+    for setup, machines in [('random', '')] + [('family', m) for m in (2, 3, 4)]:
+        variants = ['R-A', 'R-B'] if setup == 'random' else ['F-A', 'F-B', 'F-C', 'F-D']
+        report += ['## ' + setup + (f' F3 / m{machines}' if machines else ''), '',
+                   '| 尺度/窗口 | 正常数 | 最优数 | 平均时间s | 平均节点 | 平均gap% |',
+                   '| --- | --- | --- | --- | --- | --- |']
+        for scale in ('base', 'medium', 'high'):
+            for window in ('zero', 'narrow', 'wide'):
+                records = [lookup[(setup, machines, scale, window, v)] for v in variants]
+                fields = [scale + '/' + window]
+                for field in ('normal', 'optimal', 'mean_seconds', 'mean_nodes', 'mean_gap_percent'):
+                    fields.append(' / '.join(str(r[field]) if field in ('normal', 'optimal')
+                                            else fmt(r[field], 3 if field == 'mean_gap_percent' else 2)
+                                            for r in records))
+                report.append('| ' + ' | '.join(fields) + ' |')
+        report.append('')
+    report += ['n50/F3/base/wide：m3每变体2次失败、m4每变体1次失败，故合并后正常数为13和14，其余family格为15。CSV保留有效gap数、失败/超时数、共同最优及配对指标。', '']
+    output.with_suffix('.md').write_text('\n'.join(report), encoding='utf-8')
+    print('\n'.join(report))
+
+
 def main():
     with SOURCE.open(encoding='utf-8-sig', newline='') as handle:
         rows = list(csv.DictReader(handle))
@@ -137,6 +198,7 @@ def main():
                 rendered.append('')
             rendered.extend([entry, ''])
     DEST.with_suffix('.md').write_text('\n'.join(rendered).lstrip() + '\n', encoding='utf-8')
+    write_pooled_report(aggregates)
     # 对话正文的n40/n50 family表；其余分类全部保留于完整报告。
     print('| n/m | 尺度/窗口 | A | B | C | D |')
     print('| --- | --- | ---: | ---: | ---: | ---: |')

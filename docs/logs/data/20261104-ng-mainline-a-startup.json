@@ -1,0 +1,229 @@
+{
+  "batch": "20261104-ng-mainline-a-prepared",
+  "launchTimeSecond": "2026-11-04T13:46:29+08:00",
+  "launchTimeThird": "2026-11-04T13:46:39+08:00",
+  "launchSshPidsDisconnected": [
+    11076,
+    38384
+  ],
+  "launchSshDisconnected": true,
+  "firstHostUntouched": true,
+  "reports": [
+    {
+      "ip": "100.68.243.192",
+      "time": "2026-11-04T13:49:00.7826270+08:00",
+      "hostName": "DESKTOP-42976CD",
+      "scheduler": [
+        "9064 HEU.ExperimentBatchScheduler D:\\ccx\\work1\\experiments\\20261104-ng-mainline-a-prepared\\solve.tsv 5"
+      ],
+      "solverPids": [
+        "12112",
+        "1552",
+        "9920",
+        "8472",
+        "9644"
+      ],
+      "schedulerCount": 1,
+      "solverCount": 5,
+      "state": "SOLVE_RUNNING",
+      "schedulerErrorBytes": 0,
+      "runtime": [
+        {
+          "runId": "pricing-n060-set01-m4-family-base-wnarrow-f3-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "1552",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 1210907,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n060-set01-m4-family-base-wwide-f3-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "8472",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 370546,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n060-set01-m4-family-base-wzero-f3-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "9920",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 1460256,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n060-set01-m4-family-high-wnarrow-f3-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "12112",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 193332,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n060-set01-m4-family-high-wwide-f3-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "9644",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 212851,
+          "stderrBytes": 0
+        }
+      ],
+      "cpu": [
+        {
+          "Id": 1552,
+          "CPU": 162.25,
+          "WorkingSet64": 851140608
+        },
+        {
+          "Id": 8472,
+          "CPU": 162.359375,
+          "WorkingSet64": 911560704
+        },
+        {
+          "Id": 9064,
+          "CPU": 0.390625,
+          "WorkingSet64": 51322880
+        },
+        {
+          "Id": 9644,
+          "CPU": 157.9375,
+          "WorkingSet64": 2382671872
+        },
+        {
+          "Id": 9920,
+          "CPU": 163.859375,
+          "WorkingSet64": 855220224
+        },
+        {
+          "Id": 12112,
+          "CPU": 159.390625,
+          "WorkingSet64": 1625391104
+        }
+      ]
+    },
+    {
+      "ip": "100.79.236.222",
+      "time": "2026-11-04T13:49:02.6812128+08:00",
+      "hostName": "DESKTOP-AS7L732",
+      "scheduler": [
+        "2380 HEU.ExperimentBatchScheduler D:\\ccxWork\\work1\\experiments\\20261104-ng-mainline-a-prepared\\solve.tsv 5"
+      ],
+      "solverPids": [
+        "12272",
+        "996",
+        "12904",
+        "8936",
+        "5068"
+      ],
+      "schedulerCount": 1,
+      "solverCount": 5,
+      "state": "SOLVE_RUNNING",
+      "schedulerErrorBytes": 0,
+      "runtime": [
+        {
+          "runId": "pricing-n080-set01-m5-family-base-wnarrow-f4-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "5068",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 161175,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n080-set01-m5-family-base-wwide-f4-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "8936",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 238694,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n080-set01-m5-family-base-wzero-f4-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "996",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 287056,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n080-set01-m5-family-high-wnarrow-f4-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "12904",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 124868,
+          "stderrBytes": 0
+        },
+        {
+          "runId": "pricing-n080-set01-m5-family-high-wwide-f4-ng_dssr-mainline-a",
+          "state": "RUNNING",
+          "pid": "12272",
+          "profile": "2026-09-12-v8",
+          "cplexThreads": "1",
+          "fixingDepth": "2147483647",
+          "cluster": "true",
+          "liveBytes": 111603,
+          "stderrBytes": 0
+        }
+      ],
+      "cpu": [
+        {
+          "Id": 996,
+          "CPU": 127.515625,
+          "WorkingSet64": 2551992320
+        },
+        {
+          "Id": 2380,
+          "CPU": 0.109375,
+          "WorkingSet64": 54636544
+        },
+        {
+          "Id": 5068,
+          "CPU": 123.265625,
+          "WorkingSet64": 1961107456
+        },
+        {
+          "Id": 8936,
+          "CPU": 125.53125,
+          "WorkingSet64": 1923084288
+        },
+        {
+          "Id": 12272,
+          "CPU": 124.125,
+          "WorkingSet64": 2862837760
+        },
+        {
+          "Id": 12904,
+          "CPU": 122.90625,
+          "WorkingSet64": 2857410560
+        }
+      ]
+    }
+  ]
+}

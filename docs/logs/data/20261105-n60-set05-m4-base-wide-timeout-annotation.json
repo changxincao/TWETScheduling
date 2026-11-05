@@ -1,0 +1,15 @@
+{
+  "runId": "pricing-n060-set05-m4-family-base-wwide-f3-ng_dssr-mainline-a",
+  "host": "DESKTOP-06K8JI8",
+  "ip": "100.68.243.112",
+  "originalSchedulerState": "FAILED",
+  "classification": "TIME_LIMIT_REPORTING_EXCEPTION",
+  "reason": "Global time limit interrupted Phase-I pricing; missing-certificate check ran before the timeout exit.",
+  "countAsAlgorithmFailure": false,
+  "formalFinalSummaryAvailable": false,
+  "countAsOptimal": false,
+  "rerunRequested": false,
+  "rawLogsPreserved": true,
+  "remoteJarChanged": false,
+  "note": "按已确认的超时收尾异常单列，不作为模型或定价正确性失败；缺失的正式最终时间、gap和证书不填造。后续统计和恢复清单须读取此分类，不能仅按原FAILED自动重跑。"
+}

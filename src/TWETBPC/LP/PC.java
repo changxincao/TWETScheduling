@@ -1253,6 +1253,10 @@ public class PC {
 						resetFollowingPricingEngines(engineIndex + 1);
 					}
 				}
+				// 2026-11-05: 定价可因时限返回空结果且无证书，须先走已有超时出口，不能误报闭合失败。
+				if (isTimeLimitReached()) {
+					break;
+				}
 				if (!repairPending) {
 					phaseFeasible = true;
 					break;

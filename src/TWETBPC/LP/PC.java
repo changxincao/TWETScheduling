@@ -1090,7 +1090,6 @@ public class PC {
 			return solution;
 		}
 
-		int generatedForRepair = 0;
 		while (needsStrongRepair(lp) && !isTimeLimitReached()) {
 			boolean addedInThisPass = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size() && !isTimeLimitReached(); engineIndex++) {
@@ -1112,7 +1111,6 @@ public class PC {
 					}
 					int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
 							+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
-					generatedForRepair += addedColumns;
 					if (addedColumns == 0) {
 						break;
 					}
@@ -1137,20 +1135,8 @@ public class PC {
 			lp.setFeasibilityRepairMode(false);
 			return solution;
 		}
-		if (!lp.isNoSlack()) {
-			lp.setFeasibilityRepairMode(false);
-			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
-					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
-					"Domain-filtered strong branching repair still has positive artificial slack after generating "
-							+ generatedForRepair + " columns");
-		}
-		if (lp.hasPositiveBranchImpliedPenaltyColumn()) {
-			double mValue = lp.branchImpliedPenaltyValue();
-			lp.setFeasibilityRepairMode(false);
-			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
-					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
-					"Domain-filtered strong branching repair still uses branch-implied M columns after generating "
-							+ generatedForRepair + " columns, mValue=" + mValue);
+		if (needsStrongRepair(lp)) {
+			return confirmFiniteMRepairWithPhaseOne(lp, true);
 		}
 
 		lp.setFeasibilityRepairMode(false);
@@ -1166,6 +1152,20 @@ public class PC {
 	private TWETMasterSolution repairStrongBranchingPhaseOne(LP lp) {
 		return repairMasterPhaseOne(lp, false, true,
 				"strong_branching_phase_one", "strongBranchingPhaseOne", "Strong branching");
+	}
+
+	/**
+	 * 2026-11-05: 有限M目标闭合仍可能保留正人工量，不能据此证明节点不可行。
+	 * 保留已有列和人工行范围，用纯Phase-I确认；切换目标前后清除旧定价状态。
+	 */
+	private TWETMasterSolution confirmFiniteMRepairWithPhaseOne(LP lp, boolean allRowRepair) {
+		resetAllPricingEngines();
+		try {
+			return repairMasterPhaseOne(lp, allRowRepair, true,
+					"finite_m_phase_one", "finiteMPhaseOne", "Finite-M confirmation");
+		} finally {
+			resetAllPricingEngines();
+		}
 	}
 
 	/** 2026-09-01: cut 加入后有限列 RMP 不可行时，在当前全部 active rows 上做纯 Phase-I。 */
@@ -1328,7 +1328,6 @@ public class PC {
 			return solution;
 		}
 
-		int generatedForRepair = 0;
 		while (needsStrongRepair(lp) && !isTimeLimitReached()) {
 			boolean addedInThisPass = false;
 			for (int engineIndex = 0; engineIndex < pricingEngines.size()
@@ -1351,7 +1350,6 @@ public class PC {
 					}
 					int addedColumns = generated.improvedActiveInternalColumns + lp.addColumns(generated.internalColumnIds)
 							+ lp.addOutsourcingColumns(generated.outsourcingColumnIds);
-					generatedForRepair += addedColumns;
 					if (addedColumns == 0) {
 						break;
 					}
@@ -1379,20 +1377,11 @@ public class PC {
 			lp.setFeasibilityRepairMode(false);
 			return solution;
 		}
-		if (!lp.isNoSlack()) {
-			lp.setFeasibilityRepairMode(false);
-			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
-					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
-					"Repair RMP still has positive artificial slack after generating " + generatedForRepair
-							+ " columns");
-		}
-		if (lp.hasPositiveBranchImpliedPenaltyColumn()) {
-			double mValue = lp.branchImpliedPenaltyValue();
-			lp.setFeasibilityRepairMode(false);
-			return new TWETMasterSolution(TWETMasterStatus.INFEASIBLE,
-					new java.util.LinkedHashMap<Integer, Double>(), 0.0, false,
-					"Repair RMP still uses branch-implied M columns after generating " + generatedForRepair
-							+ " columns, mValue=" + mValue);
+		if (needsStrongRepair(lp)) {
+			solution = confirmFiniteMRepairWithPhaseOne(lp, false);
+			if (isTimeLimitReached() || solution.getStatus() != TWETMasterStatus.LP_RELAXATION) {
+				return solution;
+			}
 		}
 
 		// 2026-05-18: 旧 VRP UpdateRouteSet 在 FindFeasible 成功后会按当前子节点 LP 的

@@ -1,0 +1,30 @@
+MECHANISM finiteMObjective=2.5576718514300554 singleton1RC=7.442328148569945 certificate=0.0
+TREE rank1=false directPhaseOne=false nodes=3 UB=10.0 LB=10.0
+TREE rank1=false directPhaseOne=true nodes=3 UB=10.0 LB=10.0
+TRIAL rank1=false allRows=false confirmed_feasible mCalls=1 phaseCalls=1
+TRIAL rank1=false allRows=false confirmed_infeasible mCalls=1 phaseCalls=1
+TRIAL rank1=false allRows=false m_success mCalls=1 phaseCalls=0
+TRIAL rank1=false allRows=false timeout_in_m mCalls=1 phaseCalls=0
+TRIAL rank1=false allRows=false timeout_in_phase_one mCalls=1 phaseCalls=1
+TRIAL rank1=false allRows=false missing_certificate mCalls=1 phaseCalls=1
+TRIAL rank1=false allRows=true confirmed_feasible mCalls=1 phaseCalls=1
+TRIAL rank1=false allRows=true confirmed_infeasible mCalls=1 phaseCalls=1
+TRIAL rank1=false allRows=true m_success mCalls=1 phaseCalls=0
+TRIAL rank1=false allRows=true timeout_in_m mCalls=1 phaseCalls=0
+TRIAL rank1=false allRows=true timeout_in_phase_one mCalls=1 phaseCalls=1
+TRIAL rank1=false allRows=true missing_certificate mCalls=1 phaseCalls=1
+TREE rank1=true directPhaseOne=false nodes=3 UB=10.0 LB=10.0
+TREE rank1=true directPhaseOne=true nodes=3 UB=10.0 LB=10.0
+TRIAL rank1=true allRows=false confirmed_feasible mCalls=1 phaseCalls=1
+TRIAL rank1=true allRows=false confirmed_infeasible mCalls=1 phaseCalls=1
+TRIAL rank1=true allRows=false m_success mCalls=1 phaseCalls=0
+TRIAL rank1=true allRows=false timeout_in_m mCalls=1 phaseCalls=0
+TRIAL rank1=true allRows=false timeout_in_phase_one mCalls=1 phaseCalls=1
+TRIAL rank1=true allRows=false missing_certificate mCalls=1 phaseCalls=1
+TRIAL rank1=true allRows=true confirmed_feasible mCalls=1 phaseCalls=1
+TRIAL rank1=true allRows=true confirmed_infeasible mCalls=1 phaseCalls=1
+TRIAL rank1=true allRows=true m_success mCalls=1 phaseCalls=0
+TRIAL rank1=true allRows=true timeout_in_m mCalls=1 phaseCalls=0
+TRIAL rank1=true allRows=true timeout_in_phase_one mCalls=1 phaseCalls=1
+TRIAL rank1=true allRows=true missing_certificate mCalls=1 phaseCalls=1
+FiniteMRepairConfirmationTest passed: mechanism, 4 full trees, 24 repair exits, 2 formal-node repairs, positive penalty-column confirmation

@@ -1,0 +1,6 @@
+MECHANISM finiteMObjective=2.5576718514300554 singleton1RC=7.442328148569945 certificate=0.0
+Exception in thread "main" java.lang.AssertionError: tree incumbent: 50.004999999999995 != 10.0
+	at TWETBPC.LP.FiniteMRepairConfirmationTest.require(FiniteMRepairConfirmationTest.java:333)
+	at TWETBPC.LP.FiniteMRepairConfirmationTest.near(FiniteMRepairConfirmationTest.java:337)
+	at TWETBPC.LP.FiniteMRepairConfirmationTest.verifyWholeTree(FiniteMRepairConfirmationTest.java:96)
+	at TWETBPC.LP.FiniteMRepairConfirmationTest.main(FiniteMRepairConfirmationTest.java:55)

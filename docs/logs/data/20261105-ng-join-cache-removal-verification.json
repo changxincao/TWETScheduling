@@ -1,0 +1,67 @@
+{
+  "date": "2026-11-05",
+  "scope": "Remove only JoinEnvelopeIndex.pruneByGroup and its get/create/put operations",
+  "productionFile": "src/TWETBPC/GC/GCNGBBStyleBidirectionalNgDssr.java",
+  "testFile": "src/TWETBPC/GC/NgDssrJoinPrefilterCacheTest.java",
+  "retained": [
+    "prunedIndicesByBackwardGroup BitSet cache and lifetime",
+    "group-pair pruning predicate and counters",
+    "join traversal order",
+    "production profiles and configuration"
+  ],
+  "compile": { "targetRelease": 21, "passed": true },
+  "classSchema": {
+    "baselineHasPruneByGroup": true,
+    "modifiedHasPruneByGroup": false,
+    "modifiedRetainsBitSetCache": true
+  },
+  "regressions": [
+    "TWETBPC.GC.NgDssrJoinPrefilterCacheTest",
+    "TWETBPC.GC.StrongBranchingPhaseOnePricingTest",
+    "TWETBPC.GC.NgDssrJoinExtensionBoundaryTest",
+    "TWETBPC.GC.NgDssrMinimumRepeatedSegmentUpdateTest",
+    "TWETBPC.GC.NgDssrMidpointProbePolicyTest",
+    "TWETBPC.GC.NgDssrMidpointProbeConfigurationTest",
+    "TWETBPC.BestBpcProfilesTest"
+  ],
+  "allRegressionsPassed": true,
+  "maskAndReuse": {
+    "primaryPrunedIndices": [0, 2, 5, 8, 70, 129],
+    "otherTerminalPrunedIndices": [],
+    "conflictingBackwardGroupPrunedIndices": [0, 1, 2, 5, 8, 64, 70, 129],
+    "finalGroupPairChecks": 9,
+    "repeatUsesSameBitSetWithoutMoreChecks": true
+  },
+  "pricingComparison": {
+    "fixture": "data/40-2/wet040_001_2m.dat, first 6 jobs with widened hard windows and cleared preprocessing arc forbids",
+    "testOnlyControl": "Disable shallow probe and midpoint time feedback to compare the same time split",
+    "compared": ["ordered signatures", "true scheduling costs", "true-dual reduced costs", "certified internal reduced cost"],
+    "snapshots": [
+      {
+        "phaseOne": true, "negative": true, "columns": 20,
+        "certificateHex": "-0x1.428p9",
+        "orderedColumnsSha256": "32530d98ecf0c5cfbc1a950e709d87d08a6d8b865bc6ac3f990974e306515564"
+      },
+      {
+        "phaseOne": true, "negative": false, "columns": 0,
+        "certificateHex": "0x1.ep3",
+        "orderedColumnsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      {
+        "phaseOne": false, "negative": true, "columns": 15,
+        "certificateHex": "-0x1.f5f2c28p25",
+        "orderedColumnsSha256": "b1fc86b9ddd9321862a35060249f08532099d43abfd5e2b14302f8e9eaf6ed80"
+      },
+      {
+        "phaseOne": false, "negative": false, "columns": 0,
+        "certificateHex": "0x0.0p0",
+        "orderedColumnsSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "baselineAndModifiedStdoutSha256": "cc088ef0cb7149ea56f0e0ff2c6f7a4453e018129f85d7b52b7c551074061709",
+    "identical": true
+  },
+  "rawOutputs": ".codex-tmp/ng-join-cache-20261105",
+  "remoteJarUpdated": false,
+  "largeInstancePerformanceOrHeapMeasured": false
+}

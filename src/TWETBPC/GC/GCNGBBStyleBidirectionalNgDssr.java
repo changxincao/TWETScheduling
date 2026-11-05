@@ -8518,10 +8518,6 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final ArrayList<ArrayList<JoinEnvelopeGroup<BackwardLabel>>> backwardByTerminal;
 		final IdentityHashMap<BackwardLabel, JoinEnvelopeGroup<BackwardLabel>> backwardGroupByLabel =
 				new IdentityHashMap<BackwardLabel, JoinEnvelopeGroup<BackwardLabel>>();
-		final IdentityHashMap<JoinEnvelopeGroup<ForwardLabel>,
-				IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean>> pruneByGroup =
-				new IdentityHashMap<JoinEnvelopeGroup<ForwardLabel>,
-						IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean>>();
 		final IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, BitSet[]> prunedIndicesByBackwardGroup =
 				new IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, BitSet[]>();
 		final int terminalCount;
@@ -8567,22 +8563,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 		private boolean canPruneGroup(int lastJob, JoinEnvelopeGroup<ForwardLabel> forwardGroup,
 				JoinEnvelopeGroup<BackwardLabel> backwardGroup, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
-			IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean> byBackward =
-					pruneByGroup.get(forwardGroup);
-			if (byBackward == null) {
-				byBackward = new IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, Boolean>();
-				pruneByGroup.put(forwardGroup, byBackward);
-			}
-			Boolean cached = byBackward.get(backwardGroup);
-			if (cached != null) {
-				return cached.booleanValue();
-			}
+			// 2026-11-05: 同一后向组/终点已由外层BitSet复用，组对只计算一次；不再保存无命中收益的布尔映射。
 			owner.joinEnvelopePrefilterGroupPairs++;
 			boolean prune = owner.canPruneJoinEnvelopeGroupPair(lastJob, forwardGroup, backwardGroup, lp);
 			if (prune) {
 				owner.joinEnvelopePrefilterGroupPairsPruned++;
 			}
-			byBackward.put(backwardGroup, Boolean.valueOf(prune));
 			return prune;
 		}
 	}

@@ -1,0 +1,4 @@
+START version=before input=D:\Èí¼þ\eclipse\workspace\TWETScheduling\experiment-suite\formal\instances\data\n060-set02\random\high-heterogeneous\wide\m4.dat seed=2026110501 budgetMs=60000 stagnation=80
+RESULT version=before seed=2026110501 initial=1859502.000000000 final=366595.000000000 seconds=63.143391 cpu=61.281250 rounds=38 improvements=61 verified=true
+INITIAL [[47, 32, 27, 10, 5, 4, 11, 15, 59, 50, 34, 24, 55, 53, 22, 14, 57, 1], [39, 16, 6, 60, 29, 13, 58, 2, 38, 45, 44, 26], [30, 56, 48, 7, 52, 23, 54, 40, 25, 51, 35, 3, 12, 46, 31, 41, 9, 42], [18, 21, 8, 28, 36, 43, 37, 17, 33, 19, 49, 20]]
+FINAL [[5, 43, 3, 55, 22, 58, 42, 11, 38, 45, 24, 23, 20, 10, 37], [27, 44, 39, 13, 48, 1, 54, 36, 21, 2, 12, 19, 32, 46], [4, 50, 31, 56, 51, 15, 33, 41, 16, 8, 49, 47, 7, 9, 14, 57], [28, 53, 17, 52, 29, 18, 40, 30, 59, 25, 34, 26, 60, 35, 6]]

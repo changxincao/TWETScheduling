@@ -1,0 +1,47 @@
+{
+  "inputs": [
+    {
+      "case": "random-base-zero-m3",
+      "path": "D:\\软件\\eclipse\\workspace\\TWETScheduling\\experiment-suite\\formal\\instances\\data\\n060-set01\\random\\base\\zero\\m3.dat",
+      "sha256": "a14eee8b29e4f3ca5b4c552a8dccb793b7de5626508ac65d96674c0f19ddd89a"
+    },
+    {
+      "case": "random-medium-narrow-m2",
+      "path": "D:\\软件\\eclipse\\workspace\\TWETScheduling\\experiment-suite\\formal\\instances\\data\\n060-set02\\random\\medium-heterogeneous\\narrow\\m2.dat",
+      "sha256": "5c568fec2f5daf1ed39b73713a87e5b0057aaf985ecf23899acd244b6ca60d30"
+    },
+    {
+      "case": "random-high-wide-m4",
+      "path": "D:\\软件\\eclipse\\workspace\\TWETScheduling\\experiment-suite\\formal\\instances\\data\\n060-set02\\random\\high-heterogeneous\\wide\\m4.dat",
+      "sha256": "a6996820ca419b1f3971e5035508e46a2d1e857e75c17aed23e918f99819e5e2"
+    },
+    {
+      "case": "family-base-zero-m2",
+      "path": "D:\\软件\\eclipse\\workspace\\TWETScheduling\\experiment-suite\\family-count-balanced-20260914\\instances\\data\\n060-set01\\family\\base\\zero\\m2.dat",
+      "sha256": "153d01958944afbe4c547b172e3605a168d9406c31d2c4a4678a467666d51e77"
+    },
+    {
+      "case": "family-medium-narrow-m3",
+      "path": "D:\\软件\\eclipse\\workspace\\TWETScheduling\\experiment-suite\\family-count-balanced-20260914\\instances\\data\\n060-set02\\family\\medium-heterogeneous\\narrow\\m3.dat",
+      "sha256": "86ad25021875e7960fd15ae3bb2168da0cf063df4470efc70b14b1984300ea41"
+    },
+    {
+      "case": "family-high-wide-m4",
+      "path": "D:\\软件\\eclipse\\workspace\\TWETScheduling\\experiment-suite\\family-count-balanced-20260914\\instances\\data\\n060-set01\\family\\high-heterogeneous\\wide\\m4.dat",
+      "sha256": "a7ca685a657089ee0e0cca4c7eef86729c768a217f8f580d3ad8dfa1df5dd24a"
+    }
+  ],
+  "seeds": [
+    2026110501,
+    2026110502
+  ],
+  "max_workers": 2,
+  "heap": "3g",
+  "external_timeout_seconds": 300,
+  "formal_alns_budget_ms": 60000,
+  "stagnation_limit": 80,
+  "classes": {
+    "before": "45659ebf18cbd048499bc32c98d61fdfa8eda370c5f30d5925b30c698f1bfda9",
+    "after": "9735132cc6dc1d16a05baad4136a0a1f7b13ffd8b5948d0e0fe9dd60ebd1ac18"
+  }
+}

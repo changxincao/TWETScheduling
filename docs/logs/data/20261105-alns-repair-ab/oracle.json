@@ -1,0 +1,146 @@
+[
+  {
+    "case": "random-base-zero-m3",
+    "seed": "2026110502",
+    "version": "after",
+    "result": "ORACLE_OK total=83480.0 horizon=6699.0"
+  },
+  {
+    "case": "random-base-zero-m3",
+    "seed": "2026110502",
+    "version": "before",
+    "result": "ORACLE_OK total=84059.0 horizon=6699.0"
+  },
+  {
+    "case": "random-base-zero-m3",
+    "seed": "2026110501",
+    "version": "before",
+    "result": "ORACLE_OK total=81773.0 horizon=6699.0"
+  },
+  {
+    "case": "random-base-zero-m3",
+    "seed": "2026110501",
+    "version": "after",
+    "result": "ORACLE_OK total=81773.0 horizon=6699.0"
+  },
+  {
+    "case": "random-medium-narrow-m2",
+    "seed": "2026110501",
+    "version": "before",
+    "result": "ORACLE_OK total=1016942.0 horizon=63052.0"
+  },
+  {
+    "case": "random-medium-narrow-m2",
+    "seed": "2026110501",
+    "version": "after",
+    "result": "ORACLE_OK total=1016120.0 horizon=63052.0"
+  },
+  {
+    "case": "random-medium-narrow-m2",
+    "seed": "2026110502",
+    "version": "after",
+    "result": "ORACLE_OK total=1040516.0 horizon=63052.0"
+  },
+  {
+    "case": "random-medium-narrow-m2",
+    "seed": "2026110502",
+    "version": "before",
+    "result": "ORACLE_OK total=1029826.0 horizon=63052.0"
+  },
+  {
+    "case": "random-high-wide-m4",
+    "seed": "2026110501",
+    "version": "before",
+    "result": "ORACLE_OK total=366595.0 horizon=132671.0"
+  },
+  {
+    "case": "random-high-wide-m4",
+    "seed": "2026110501",
+    "version": "after",
+    "result": "ORACLE_OK total=358430.0 horizon=132671.0"
+  },
+  {
+    "case": "random-high-wide-m4",
+    "seed": "2026110502",
+    "version": "after",
+    "result": "ORACLE_OK total=350507.0 horizon=132671.0"
+  },
+  {
+    "case": "random-high-wide-m4",
+    "seed": "2026110502",
+    "version": "before",
+    "result": "ORACLE_OK total=350507.0 horizon=132671.0"
+  },
+  {
+    "case": "family-base-zero-m2",
+    "seed": "2026110501",
+    "version": "before",
+    "result": "ORACLE_OK total=120591.0 horizon=6398.0"
+  },
+  {
+    "case": "family-base-zero-m2",
+    "seed": "2026110501",
+    "version": "after",
+    "result": "ORACLE_OK total=120476.0 horizon=6398.0"
+  },
+  {
+    "case": "family-base-zero-m2",
+    "seed": "2026110502",
+    "version": "after",
+    "result": "ORACLE_OK total=120556.0 horizon=6398.0"
+  },
+  {
+    "case": "family-base-zero-m2",
+    "seed": "2026110502",
+    "version": "before",
+    "result": "ORACLE_OK total=120699.0 horizon=6398.0"
+  },
+  {
+    "case": "family-medium-narrow-m3",
+    "seed": "2026110501",
+    "version": "before",
+    "result": "ORACLE_OK total=261871.0 horizon=59624.0"
+  },
+  {
+    "case": "family-medium-narrow-m3",
+    "seed": "2026110501",
+    "version": "after",
+    "result": "ORACLE_OK total=264235.0 horizon=59624.0"
+  },
+  {
+    "case": "family-medium-narrow-m3",
+    "seed": "2026110502",
+    "version": "after",
+    "result": "ORACLE_OK total=259630.0 horizon=59624.0"
+  },
+  {
+    "case": "family-medium-narrow-m3",
+    "seed": "2026110502",
+    "version": "before",
+    "result": "ORACLE_OK total=257740.0 horizon=59624.0"
+  },
+  {
+    "case": "family-high-wide-m4",
+    "seed": "2026110501",
+    "version": "before",
+    "result": "ORACLE_OK total=156833.0 horizon=143056.0"
+  },
+  {
+    "case": "family-high-wide-m4",
+    "seed": "2026110501",
+    "version": "after",
+    "result": "ORACLE_OK total=156387.0 horizon=143056.0"
+  },
+  {
+    "case": "family-high-wide-m4",
+    "seed": "2026110502",
+    "version": "after",
+    "result": "ORACLE_OK total=161254.0 horizon=143056.0"
+  },
+  {
+    "case": "family-high-wide-m4",
+    "seed": "2026110502",
+    "version": "before",
+    "result": "ORACLE_OK total=160119.0 horizon=143056.0"
+  }
+]

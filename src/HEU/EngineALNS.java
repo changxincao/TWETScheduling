@@ -74,6 +74,8 @@ public class EngineALNS {
         try {
         while (noImprove < maxNoImpIterN&&remRatioChangeN<maxremRatioChangeN&&withinTimeLimit(startNanos)) {
 	iteration++;
+	// VND会即时更新全局best；必须与本轮开始前的值比较，避免把实际改进误计为停滞。
+	double bestCostBeforeIteration = data.configure.bestSolution.curCost;
 	Solution tmpSol=current.copy();
 	//此处要对这个解重新 M 刷一次，保证ALNS可以对那些差解算出精确值
 	Utility.resetCurUpperBound(Utility.big_M);
@@ -99,9 +101,10 @@ public class EngineALNS {
 
             // 4) 更新全局最优
             double tmpCost = tmpSol.curCost;
-            double bestCost= data.configure.bestSolution.curCost;
-            if (Utility.compareLt(tmpCost, bestCost)) {
+            if (Utility.compareLt(tmpCost, data.configure.bestSolution.curCost)) {
 	 data.configure.updateBestSolution(tmpSol);
+            }
+            if (Utility.compareLt(data.configure.bestSolution.curCost, bestCostBeforeIteration)) {
                 noImprove = 0;
                 remRatioChangeN=0;
                 curRemoveRatioL=defaultRemoveRatioL;
@@ -195,12 +198,13 @@ interface InsertionOperator {
         double shift2=pos==seq.size()-1?0:s.data.s[job][bridgeTo2]+s.data.p[bridgeTo2];
 	PiecewiseLinearFunction f1=f.shiftX(shift1).add(s.data.penaltyFunction[job]);
         // 2026-05-15: 插入任务时两条新弧都要同步计入 setup cost。
-        // 第一条弧属于插入后的前段函数，第二条桥接弧交给 merge2Segments 处理。
+        // 第一条弧属于插入后的前段函数，第二条桥接弧在拼接时计入。
         f1.shiftYInPlace(s.data.getSetupCost(bridgeFrom1, job));
-        double mergedCost = s.merge2Segments(f1, b, shift2,
+        // f1刚叠加任务罚函数，并非前缀最小化函数，尾值不能作为下界。
+        // 后向函数已允许等待，直接复用精确拼接扫描，避免误剪及额外前缀函数构造。
+        double mergedCost = PiecewiseLinearFunction.findMinimalShiftedSumValue(b, -shift2, f1,
                 pos == seq.size() - 1 ? 0.0 : s.data.getSetupCost(job, bridgeTo2));
-        // 2026-05-17: merge 返回 curUpperBound/big_M 时表示该插入位置被剪枝或不可行，
-        // 不能再作为真实机器成本参与 delta。repair 阶段当前只保留可行候选。
+        // 保留已有上界/不可行过滤；先检查完整机器成本，再减旧成本形成delta。
         if (Move.isInvalidMoveCost(mergedCost)) {
 	return Utility.big_M;
         }

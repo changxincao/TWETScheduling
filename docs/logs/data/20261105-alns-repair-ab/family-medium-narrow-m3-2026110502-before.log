@@ -1,0 +1,4 @@
+START version=before input=D:\Èí¼þ\eclipse\workspace\TWETScheduling\experiment-suite\family-count-balanced-20260914\instances\data\n060-set02\family\medium-heterogeneous\narrow\m3.dat seed=2026110502 budgetMs=60000 stagnation=80
+RESULT version=before seed=2026110502 initial=1689276.000000000 final=257740.000000000 seconds=61.578571 cpu=58.578125 rounds=36 improvements=66 verified=true
+INITIAL [[24, 2, 59, 44, 60, 52, 33, 57, 15, 20, 25, 50, 1, 23, 8, 11, 36, 41, 12], [34, 39, 48, 13, 19, 27, 6, 40, 29, 17, 45, 16, 37, 53, 28, 46, 58, 14, 31, 7, 51], [54, 47, 35, 26, 38, 4, 18, 21, 43, 30, 49, 55, 10, 42, 32, 5, 22, 9, 56, 3]]
+FINAL [[12, 18, 42, 44, 30, 45, 2, 17, 50, 57, 23, 14, 31, 43, 55, 35, 26], [48, 60, 41, 37, 28, 59, 8, 49, 38, 54, 27, 10, 58, 1, 39, 40, 20, 13, 19, 32, 46], [52, 16, 56, 51, 15, 24, 53, 7, 11, 22, 4, 29, 36, 3, 25, 33, 34, 9, 47, 5, 21, 6]]

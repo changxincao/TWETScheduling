@@ -1,0 +1,2 @@
+ALNSRepairRegressionTest passed: known repair, 392 insertion/DP comparisons, VND improvement resets stagnation and perturbation
+OutsourcingMoveConsistencyTest passed, checked=14168

@@ -133,8 +133,10 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 		for (int index = 0; index < count; index++) {
 			AggregateSpec spec = specs.get(index);
 			BitSet mask = incomingMask(spec.jobs, sink);
+			// 超节点扩张使用增量和；仅对最终候选按原弧顺序重算，避免累计尾差进入分支界。
+			double value = config.cutSetSupernodeSeeds ? flowValue(mask, arcValues, sink) : spec.value;
 			addAggregateCandidate(candidates, keys, "cutSet", "cutSet(" + jobSetText(spec.jobs) + ")",
-					mask, spec.value, index);
+					mask, value, index);
 		}
 	}
 
@@ -235,22 +237,58 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			}
 			groups.get(index).set(job);
 		}
+		// 2026-11-05: 同一LP快照的组间流不变，预计算后只累加新组，避免每个prefix重扫旧成员。
+		int groupCount = groups.size();
+		int[] groupSizes = new int[groupCount];
+		double[] groupBoundary = new double[groupCount];
+		double[][] groupAffinity = new double[groupCount][groupCount];
+		double magnitude = 0.0;
+		for (int from = 0; from < sink; from++) {
+			for (int to = 1; to < sink; to++) {
+				magnitude += Math.abs(arcValues[from][to]);
+			}
+		}
+		// 两种求和次序每条扩张链均为O(n^2)项；用总流量量级的ulp保守包住舍入尾差。
+		// 只在尾差可能跨越原比较边界时复算，不扩大业务容差。
+		double roundoff = 8.0 * (data.n + 1.0) * (data.n + 1.0) * Math.ulp(4.0 * magnitude);
+		for (int first = 0; first < groupCount; first++) {
+			BitSet group = groups.get(first);
+			groupSizes[first] = group.cardinality();
+			groupBoundary[first] = directIncomingFlow(group, arcValues, sink);
+			for (int second = 0; second < groupCount; second++) {
+				if (first == second) {
+					continue;
+				}
+				BitSet other = groups.get(second);
+				for (int from = group.nextSetBit(1); from >= 0; from = group.nextSetBit(from + 1)) {
+					for (int to = other.nextSetBit(1); to >= 0; to = other.nextSetBit(to + 1)) {
+						groupAffinity[first][second] += arcValues[from][to] + arcValues[to][from];
+					}
+				}
+			}
+		}
 		ArrayList<AggregateSpec> specs = new ArrayList<AggregateSpec>();
 		Set<BitSet> unique = new HashSet<BitSet>();
-		for (BitSet seed : groups) {
-			BitSet jobs = (BitSet) seed.clone();
-			while (jobs.cardinality() < data.n - 1) {
+		for (int seed = 0; seed < groupCount; seed++) {
+			BitSet jobs = (BitSet) groups.get(seed).clone();
+			boolean[] included = new boolean[groupCount];
+			included[seed] = true;
+			int size = groupSizes[seed];
+			double boundary = groupBoundary[seed];
+			double[] affinityToSet = groupAffinity[seed].clone();
+			while (size < data.n - 1) {
 				int chosen = -1;
 				double bestAffinity = tolerance;
-				for (int index = 0; index < groups.size(); index++) {
-					BitSet group = groups.get(index);
-					if (jobs.intersects(group) || jobs.cardinality() + group.cardinality() > data.n - 1) {
+				for (int index = 0; index < groupCount; index++) {
+					if (included[index] || size + groupSizes[index] > data.n - 1) {
 						continue;
 					}
-					double affinity = 0.0;
-					for (int from = jobs.nextSetBit(1); from >= 0; from = jobs.nextSetBit(from + 1)) {
-						for (int to = group.nextSetBit(1); to >= 0; to = group.nextSetBit(to + 1)) {
-							affinity += arcValues[from][to] + arcValues[to][from];
+					double affinity = affinityToSet[index];
+					double threshold = chosen < 0 ? tolerance : bestAffinity + tolerance;
+					if (Math.abs(affinity - threshold) <= 2.0 * roundoff) {
+						affinity = directGroupAffinity(jobs, groups.get(index), arcValues);
+						if (chosen >= 0) {
+							bestAffinity = directGroupAffinity(jobs, groups.get(chosen), arcValues);
 						}
 					}
 					if (chosen < 0 ? affinity > tolerance : affinity > bestAffinity + tolerance) {
@@ -261,8 +299,23 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 				if (chosen < 0) {
 					break;
 				}
+				// z(S并G)=z(S)+z(G)-双向跨组流；组内弧不再属于进入边界。
+				boundary += groupBoundary[chosen] - bestAffinity;
 				jobs.or(groups.get(chosen));
-				double boundary = flowValue(incomingMask(jobs, sink), arcValues, sink);
+				included[chosen] = true;
+				size += groupSizes[chosen];
+				for (int index = 0; index < groupCount; index++) {
+					if (!included[index]) {
+						affinityToSet[index] += groupAffinity[chosen][index];
+					}
+				}
+				double integerDistance = Math.abs(boundary - Math.rint(boundary));
+				double sortDistance = distanceToHalf(boundary) * 1_000.0;
+				if (Math.abs(integerDistance - (tolerance + Utility.EPS)) <= roundoff
+						|| Math.abs(sortDistance - (Math.floor(sortDistance) + 0.5))
+								<= 1_000.0 * roundoff + Math.ulp(sortDistance)) {
+					boundary = directIncomingFlow(jobs, arcValues, sink);
+				}
 				if (isFractional(boundary)) {
 					BitSet snapshot = (BitSet) jobs.clone();
 					if (unique.add(snapshot)) {
@@ -272,6 +325,30 @@ public final class StructuredArcFlowBrancher extends ArcBrancher {
 			}
 		}
 		return specs;
+	}
+
+	/** 仅用于舍入敏感的比较，保持旧版按任务编号累加的次序。 */
+	private static double directGroupAffinity(BitSet jobs, BitSet group, double[][] arcValues) {
+		double affinity = 0.0;
+		for (int from = jobs.nextSetBit(1); from >= 0; from = jobs.nextSetBit(from + 1)) {
+			for (int to = group.nextSetBit(1); to >= 0; to = group.nextSetBit(to + 1)) {
+				affinity += arcValues[from][to] + arcValues[to][from];
+			}
+		}
+		return affinity;
+	}
+
+	/** 与旧mask的位序相同（先from后to），但不为数值复算分配临时mask。 */
+	private static double directIncomingFlow(BitSet jobs, double[][] arcValues, int sink) {
+		double value = 0.0;
+		for (int from = 0; from < sink; from++) {
+			if (!jobs.get(from)) {
+				for (int to = jobs.nextSetBit(1); to >= 0; to = jobs.nextSetBit(to + 1)) {
+					value += arcValues[from][to];
+				}
+			}
+		}
+		return value;
 	}
 
 	private void addAggregateCandidate(ArrayList<StrongBranchingCandidate> candidates, Set<String> keys,

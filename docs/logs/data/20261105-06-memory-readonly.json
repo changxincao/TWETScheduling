@@ -1,0 +1,74 @@
+{
+  "host": "DESKTOP-06K8JI8",
+  "ip": "100.68.243.112",
+  "observedDate": "2026-11-05",
+  "method": "reg query HKLM\\SYSTEM\\CurrentControlSet\\Services\\mssmbios\\Data SMBiosData (registry cache), parsed as RawSMBIOSData",
+  "SMBIOSVersion": "3.4",
+  "platform": {
+    "bios": {
+      "vendor": "Dell Inc.",
+      "version": "1.4.1",
+      "date": "07/20/2022"
+    },
+    "system": {
+      "manufacturer": "Dell Inc.",
+      "product": "OptiPlex 7000"
+    },
+    "board": {
+      "manufacturer": "Dell Inc.",
+      "product": "0FG47G",
+      "version": "A02"
+    }
+  },
+  "arrays": [
+    {
+      "slots": 4,
+      "maximumCapacityKiB": 134217728
+    }
+  ],
+  "memoryDevices": [
+    {
+      "slot": "DIMM1",
+      "bank": "",
+      "sizeMiB": 32768,
+      "sizeGiB": 32,
+      "manufacturer": "80CE000080CE",
+      "partNumber": "M323R4GA3BB0-CQKOD  ",
+      "speedMTs": 4800,
+      "configuredMTs": 4400
+    },
+    {
+      "slot": "DIMM2",
+      "bank": "",
+      "sizeMiB": 32768,
+      "sizeGiB": 32,
+      "manufacturer": "80CE000080CE",
+      "partNumber": "M323R4GA3BB0-CQKOD  ",
+      "speedMTs": 4800,
+      "configuredMTs": 4400
+    },
+    {
+      "slot": "DIMM3",
+      "bank": " ",
+      "sizeMiB": 0,
+      "sizeGiB": 0,
+      "manufacturer": "",
+      "partNumber": "",
+      "speedMTs": 0,
+      "configuredMTs": 0
+    },
+    {
+      "slot": "DIMM4",
+      "bank": " ",
+      "sizeMiB": 0,
+      "sizeGiB": 0,
+      "manufacturer": "",
+      "partNumber": "",
+      "speedMTs": 0,
+      "configuredMTs": 0
+    }
+  ],
+  "reportedTotalGiB": 64,
+  "evidenceScope": "Registry cache only for per-slot inventory. Current OS total independently measured as 65224 MiB by jcmd VM.info. Current BIOS slot inventory not independently verified."
+}
+

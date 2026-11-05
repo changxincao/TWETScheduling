@@ -1,0 +1,52 @@
+{
+  "host": "DESKTOP-42976CD",
+  "ip": "100.68.243.192",
+  "observedDate": "2026-11-05",
+  "method": "GetSystemFirmwareTable RSMB (native API); SMBIOS Type17",
+  "memoryDevices": [
+    {
+      "slot": "DIMM1",
+      "sizeGiB": 32,
+      "partNumber": "99P5782-080.A00G",
+      "speedMTs": 5600,
+      "configuredMTs": 4000
+    },
+    {
+      "slot": "DIMM2",
+      "sizeGiB": 0,
+      "partNumber": "",
+      "speedMTs": 0,
+      "configuredMTs": 0
+    },
+    {
+      "slot": "DIMM3",
+      "sizeGiB": 0,
+      "partNumber": "",
+      "speedMTs": 0,
+      "configuredMTs": 0
+    },
+    {
+      "slot": "DIMM4",
+      "sizeGiB": 32,
+      "partNumber": "99P5782-080.A00G",
+      "speedMTs": 5600,
+      "configuredMTs": 4000
+    }
+  ],
+  "reportedTotalGiB": 64,
+  "registryCacheDiffers": true,
+  "registryCacheSlotsGiB": [
+    32,
+    32,
+    0,
+    0
+  ],
+  "nativeSlotsGiB": [
+    32,
+    0,
+    0,
+    32
+  ],
+  "evidenceScope": "Native GetSystemFirmwareTable RSMB, not the stale registry cache. No DIMM serial numbers retained."
+}
+

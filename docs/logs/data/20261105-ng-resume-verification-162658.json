@@ -1,0 +1,103 @@
+{
+  "time": "2026-11-05T16:26:49.671924+08:00",
+  "hosts": {
+    "first": {
+      "host": "DESKTOP-06K8JI8",
+      "memoryGiB": 127.69602584838867,
+      "freeGiB": 109.5118522644043,
+      "batch": "SOLVE_RUNNING",
+      "scheduler": "10076 HEU.ExperimentBatchScheduler D:\\ccx_work\\????????????????\\work1\\experiments\\20261104-ng-mainline-a-prepared\\resume-selected-20261105.tsv 4",
+      "solvers": [
+        "19264 Common.formal.FormalExperimentRunner --action=solve --runId=pricing-n060-set03-m4-family-high-wwide-f3-ng_dssr-mainline-a --instance=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/inputs/n060-set03-m4-family-high-wwide-f3.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set03-m4-family-high-wwide-f3-ng_dssr-mainline-a --seedFile=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/seeds/n060-set03-m4-family-high-wwide-f3.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647",
+        "10836 Common.formal.FormalExperimentRunner --action=solve --runId=pricing-n060-set02-m4-family-base-wwide-f3-ng_dssr-mainline-a --instance=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/inputs/n060-set02-m4-family-base-wwide-f3.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set02-m4-family-base-wwide-f3-ng_dssr-mainline-a --seedFile=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/seeds/n060-set02-m4-family-base-wwide-f3.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647",
+        "18484 Common.formal.FormalExperimentRunner --action=solve --runId=pricing-n060-set03-m4-family-base-wwide-f3-ng_dssr-mainline-a --instance=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/inputs/n060-set03-m4-family-base-wwide-f3.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set03-m4-family-base-wwide-f3-ng_dssr-mainline-a --seedFile=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/seeds/n060-set03-m4-family-base-wwide-f3.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647",
+        "10344 Common.formal.FormalExperimentRunner --action=solve --runId=pricing-n060-set02-m4-family-high-wwide-f3-ng_dssr-mainline-a --instance=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/inputs/n060-set02-m4-family-high-wwide-f3.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set02-m4-family-high-wwide-f3-ng_dssr-mainline-a --seedFile=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/seeds/n060-set02-m4-family-high-wwide-f3.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647"
+      ],
+      "running": {
+        "pricing-n060-set02-m4-family-base-wwide-f3-ng_dssr-mainline-a": {
+          "success": false,
+          "state": "RUNNING",
+          "inputSha": "76bcc51709b8ef35b82002a32f527a0cd76a5c33675824d65c27383cd817fcbe",
+          "seedSha": "4a64e363911bf81f0940f8c305e688b3702b0c9c25a557ed38131009cfe6acb4",
+          "markerSha": "-",
+          "pid": 10836,
+          "cpuMs": 55218,
+          "liveBytes": 198829,
+          "stderrBytes": 37
+        },
+        "pricing-n060-set02-m4-family-high-wwide-f3-ng_dssr-mainline-a": {
+          "success": false,
+          "state": "RUNNING",
+          "inputSha": "cb5b7f68cbb577098bfa9ddb479fa0de7533b86a14decfe2da62aa2aa7153ba4",
+          "seedSha": "558ae8bf240fe4171c009d795f579d831be887afa830d4824a6efec886a226fa",
+          "markerSha": "-",
+          "pid": 10344,
+          "cpuMs": 56281,
+          "liveBytes": 151252,
+          "stderrBytes": 37
+        },
+        "pricing-n060-set03-m4-family-base-wwide-f3-ng_dssr-mainline-a": {
+          "success": false,
+          "state": "RUNNING",
+          "inputSha": "15fe2df8f5a627e0122e369f25b7ebadf0007739c9d80cd98158b719aaee88aa",
+          "seedSha": "1511d64a6938976ef1b2c24ddb092eca9630a37b51557592b5f32c032f98ede4",
+          "markerSha": "-",
+          "pid": 18484,
+          "cpuMs": 56843,
+          "liveBytes": 287573,
+          "stderrBytes": 37
+        },
+        "pricing-n060-set03-m4-family-high-wwide-f3-ng_dssr-mainline-a": {
+          "success": false,
+          "state": "RUNNING",
+          "inputSha": "dc95501fb1b9da1cbfc83829e3e391d484b2253582a24dc1ecb32baa6b92de2c",
+          "seedSha": "a9714ee4fe010835bb03b92a376cec07125465a14ff96460186f0fbd1b4c9070",
+          "markerSha": "-",
+          "pid": 19264,
+          "cpuMs": 57015,
+          "liveBytes": 270164,
+          "stderrBytes": 37
+        }
+      },
+      "maxHeapGiB": 24,
+      "completedPreserved": 45
+    },
+    "second": {
+      "host": "DESKTOP-42976CD",
+      "memoryGiB": 63.69414138793945,
+      "freeGiB": 56.013427734375,
+      "batch": "SOLVE_RUNNING",
+      "scheduler": "3760 HEU.ExperimentBatchScheduler D:\\ccx\\work1\\experiments\\20261104-ng-mainline-a-prepared\\resume-selected-20261105.tsv 2",
+      "solvers": [
+        "14540 Common.formal.FormalExperimentRunner --action=solve --runId=pricing-n060-set05-m4-family-base-wwide-f3-ng_dssr-mainline-a --instance=D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/assets/inputs/n060-set05-m4-family-base-wwide-f3.dat --algorithm=NG_DSSR --outputDir=D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set05-m4-family-base-wwide-f3-ng_dssr-mainline-a --seedFile=D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/assets/seeds/n060-set05-m4-family-base-wwide-f3.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647",
+        "18060 Common.formal.FormalExperimentRunner --action=solve --runId=pricing-n060-set02-m3-family-base-wnarrow-f3-ng_dssr-mainline-a --instance=D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/assets/inputs/n060-set02-m3-family-base-wnarrow-f3.dat --algorithm=NG_DSSR --outputDir=D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/runs/pricing-n060-set02-m3-family-base-wnarrow-f3-ng_dssr-mainline-a --seedFile=D:/ccx/work1/experiments/20261104-ng-mainline-a-prepared/assets/seeds/n060-set02-m3-family-base-wnarrow-f3.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647"
+      ],
+      "running": {
+        "pricing-n060-set05-m4-family-base-wwide-f3-ng_dssr-mainline-a": {
+          "success": false,
+          "state": "RUNNING",
+          "inputSha": "25996a35c6bff6ea3d8a6f89884c0431a6f0e7a59259c1c78c76a334b742ce29",
+          "seedSha": "25f47c3095bb6e6b9822179c04a42190c3d33d65ea7bc6b6f6090c6127492486",
+          "markerSha": "-",
+          "pid": 14540,
+          "cpuMs": 99921,
+          "liveBytes": 193640,
+          "stderrBytes": 37
+        },
+        "pricing-n060-set02-m3-family-base-wnarrow-f3-ng_dssr-mainline-a": {
+          "success": false,
+          "state": "RUNNING",
+          "inputSha": "10d368b25466fe64b50af3a341f6a108a78e4a31ce6909c826999907c7c1baff",
+          "seedSha": "f168369a14c5b508f49a98a25caba9852dc37a7c1c818111d5943f466d76504d",
+          "markerSha": "-",
+          "pid": 18060,
+          "cpuMs": 100656,
+          "liveBytes": 189281,
+          "stderrBytes": 68
+        }
+      },
+      "maxHeapGiB": 24,
+      "completedPreserved": 4
+    }
+  }
+}

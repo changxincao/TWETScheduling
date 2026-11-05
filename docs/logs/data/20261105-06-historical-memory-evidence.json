@@ -1,0 +1,28 @@
+{
+  "host": "DESKTOP-06K8JI8",
+  "ip": "100.68.243.112",
+  "historical": {
+    "source": "Original local Codex custom_tool_call and custom_tool_call_output, not a copied assistant summary",
+    "sessionFile": "2026/09/14/rollout-2026-09-14T14-25-37-019f3b64-90f2-7b21-ba03-3252fa7972ce_01a09e97-b68f-7153-bbd3-fccde592c488.jsonl",
+    "callId": "call_miq3n3CYSniJqbzHZkI3CE1Q",
+    "callLine": 18902,
+    "outputLine": 18905,
+    "timestampUtc": "2026-09-30T04:13:57.503Z",
+    "sshTarget": "codex-runner@100.68.243.112",
+    "remoteCommand": "D:\\software\\Java\\jdk-21\\bin\\jcmd.exe 66208 VM.info",
+    "hostLine": "Host: 12th Gen Intel(R) Core(TM) i9-12900, 24 cores, 127G,  Windows 11 , 64 bit Build 22621 (10.0.22621.4391)",
+    "memoryLine": "Memory: 4k page, system-wide physical 130760M (72739M free)",
+    "totalPhysicalMiB": 130760,
+    "dimmModelsAvailable": false
+  },
+  "current": {
+    "source": "Live read-only SSH and jcmd VM.info",
+    "observedLocalTime": "2026-11-05 10:50:43",
+    "hostLine": "Host: 12th Gen Intel(R) Core(TM) i9-12900, 24 cores, 63G,  Windows 11 , 64 bit Build 22621 (10.0.22621.4391)",
+    "memoryLine": "Memory: 4k page, system-wide physical 65224M (36602M free)",
+    "totalPhysicalMiB": 65224,
+    "systemProduct": "OptiPlex 7000",
+    "biosVersion": "1.4.1"
+  },
+  "conclusion": "This host did report approximately 128 GiB historically and reports approximately 64 GiB now. The transition date and historical DIMM composition are not established."
+}

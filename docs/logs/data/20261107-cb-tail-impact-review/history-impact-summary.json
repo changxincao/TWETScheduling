@@ -1,0 +1,207 @@
+{
+  "scope": "Local snapshots captured on 2026-11-04/05; not current progress or all historical runs.",
+  "audits": [
+    {
+      "source": ".codex-tmp/ng-mainline-a-20261104-prepared/second/audit-rows.tsv",
+      "groups": {
+        "ng-old": {
+          "rows": 675,
+          "success": 675,
+          "summaries": 675,
+          "preprocessing": {
+            "true": 675
+          },
+          "statuses": {
+            "FINISHED": 431,
+            "ROOT_PROCESSED": 241,
+            "TIME_LIMIT": 3
+          }
+        },
+        "ng-f3": {
+          "rows": 135,
+          "success": 132,
+          "summaries": 132,
+          "preprocessing": {
+            "true": 132
+          },
+          "statuses": {
+            "ROOT_PROCESSED": 55,
+            "FINISHED": 55,
+            "TIME_LIMIT": 22
+          }
+        }
+      }
+    },
+    {
+      "source": ".codex-tmp/ng-mainline-a-20261104-prepared/first/today-audit-rows.tsv",
+      "groups": {
+        "today": {
+          "rows": 270,
+          "success": 4,
+          "summaries": 4,
+          "preprocessing": {
+            "true": 4
+          },
+          "statuses": {
+            "FINISHED": 4
+          }
+        }
+      }
+    }
+  ],
+  "liveSnapshots": [
+    {
+      "runId": "pricing-n060-set01-m3-family-base-wnarrow-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-base-wnarrow-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "626b778de850e37218587c0c3a8fd9159ec2c76780b3c512a5bf701c897c105f",
+      "timeArcs": 23604197,
+      "promotedOrdinaryArcs": 1937,
+      "windowJobs": 60,
+      "ngPricingCalls": 31,
+      "piEnabled": 0,
+      "piDisabled": 31,
+      "piMissing": 0,
+      "reportedHorizons": 31,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-base-wwide-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-base-wwide-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "ffd809eb1b27c263c76fa92bb6382f9bcc9d8a28c9ae7e6def76d80e1e928a51",
+      "timeArcs": 24432269,
+      "promotedOrdinaryArcs": 2462,
+      "windowJobs": 60,
+      "ngPricingCalls": 98,
+      "piEnabled": 0,
+      "piDisabled": 98,
+      "piMissing": 0,
+      "reportedHorizons": 98,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-base-wzero-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-base-wzero-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "1035e97e3b03b74909a92cc0d5a09cb3a9046fdacde9ea692e458fff2dc3e1e8",
+      "timeArcs": 21906870,
+      "promotedOrdinaryArcs": 936,
+      "windowJobs": 60,
+      "ngPricingCalls": 122,
+      "piEnabled": 0,
+      "piDisabled": 121,
+      "piMissing": 1,
+      "reportedHorizons": 121,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-high-wnarrow-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-high-wnarrow-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "194dfba772764229050b54a6e56eba2ed0366e14b06912b8d4cb2fe62b4f13b8",
+      "timeArcs": 497229882,
+      "promotedOrdinaryArcs": 1627,
+      "windowJobs": 60,
+      "ngPricingCalls": 74,
+      "piEnabled": 0,
+      "piDisabled": 74,
+      "piMissing": 0,
+      "reportedHorizons": 74,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-high-wwide-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-high-wwide-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "cc9656f27a5cb2244f9134922099a1bd00eb09292eb4ce3c8ed157cb4dcca388",
+      "timeArcs": 516472169,
+      "promotedOrdinaryArcs": 1913,
+      "windowJobs": 60,
+      "ngPricingCalls": 72,
+      "piEnabled": 0,
+      "piDisabled": 72,
+      "piMissing": 0,
+      "reportedHorizons": 72,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-high-wzero-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-high-wzero-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "899a123e321e10eb5c848f27832fb1cf5fd382886f8536d6281f2d89bdd5940d",
+      "timeArcs": 482527277,
+      "promotedOrdinaryArcs": 1375,
+      "windowJobs": 60,
+      "ngPricingCalls": 91,
+      "piEnabled": 0,
+      "piDisabled": 91,
+      "piMissing": 0,
+      "reportedHorizons": 91,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-medium-wnarrow-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-medium-wnarrow-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "be36b57306ab351c1646a9a8ae2aef4d0dbb4bf6a76031bc2a4e75a792fd86d8",
+      "timeArcs": 214997087,
+      "promotedOrdinaryArcs": 614,
+      "windowJobs": 60,
+      "ngPricingCalls": 74,
+      "piEnabled": 0,
+      "piDisabled": 74,
+      "piMissing": 0,
+      "reportedHorizons": 74,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-medium-wwide-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-medium-wwide-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "e8814ac5fd41bc590b9be135287d9d886066a627e7d367d2a5ad81261df5ecc8",
+      "timeArcs": 234399579,
+      "promotedOrdinaryArcs": 1731,
+      "windowJobs": 60,
+      "ngPricingCalls": 64,
+      "piEnabled": 0,
+      "piDisabled": 64,
+      "piMissing": 0,
+      "reportedHorizons": 64,
+      "fractionalHorizons": 0
+    },
+    {
+      "runId": "pricing-n060-set01-m3-family-medium-wzero-f3-ng_dssr-mainline-a",
+      "source": ".codex-tmp\\ng-m3-pricing-20261105\\pricing-n060-set01-m3-family-medium-wzero-f3-ng_dssr-mainline-a.live.log",
+      "sha256": "94eb9bb05b1dca3049c533fdc291dd87676648401524a483ec85a0458040ce27",
+      "timeArcs": 210672558,
+      "promotedOrdinaryArcs": 592,
+      "windowJobs": 60,
+      "ngPricingCalls": 106,
+      "piEnabled": 0,
+      "piDisabled": 106,
+      "piMissing": 0,
+      "reportedHorizons": 106,
+      "fractionalHorizons": 0
+    }
+  ],
+  "pairs": {
+    "source": "docs\\logs\\data\\20261105-finite-m-history-audit\\pairs.csv",
+    "allSameSeed": {
+      "pairs": 3412,
+      "commonOptimalPairs": 2644,
+      "objectiveTolerance": 1e-05,
+      "distinctCommonOptimalScenarios": 756,
+      "objectiveMismatches": 0,
+      "maxObjectiveDifference": 1.00000761449337e-06,
+      "contradictions": 0
+    },
+    "primarySameSeed": {
+      "pairs": 1709,
+      "commonOptimalPairs": 1409,
+      "objectiveTolerance": 1e-05,
+      "distinctCommonOptimalScenarios": 756,
+      "objectiveMismatches": 0,
+      "maxObjectiveDifference": 1.00000761449337e-06,
+      "contradictions": 0
+    }
+  },
+  "liveTotals": {
+    "ngPricingCalls": 732,
+    "piEnabled": 0,
+    "piDisabled": 731,
+    "piMissing": 1
+  }
+}

@@ -39,6 +39,8 @@ public final class CompletionBoundScalarTailTest {
 		PiecewiseLinearFunction late = function(17.5, 2.5, 17.5, -1, 0);
 		PiecewiseLinearFunction infeasible = function(17.5, 0, 17.5, 0, Utility.big_M);
 		PiecewiseLinearFunction integer = function(18, 1, 18, -1, 0);
+		PiecewiseLinearFunction shorter = function(30, 1, 17.5, -1, 0);
+		PiecewiseLinearFunction point = function(17.5, 17.5, 17.5, 0, -7);
 		try {
 			var b = cached(fractional, 17.5, -17.5);
 			String before = fractional.toString();
@@ -46,6 +48,8 @@ public final class CompletionBoundScalarTailTest {
 			near(b.forwardUBeforeCeil(1, 17.5), -17.5, "exact fractional horizon");
 			near(b.forwardUBeforeCeil(1, 16.4), -17, "interior must use original ceil entry");
 			near(b.forwardUBeforeCeil(1, 17), -17, "exact interior integer");
+			near(b.forwardUBeforeCeil(1, 17 + Utility.EPS / 2), -17, "near integer keeps existing snap");
+			near(b.forwardUBeforeCeil(1, 17 + 2 * Utility.EPS), -17.5, "outside snap reaches tail fallback");
 			check(before.equals(fractional.toString()), "query mutated shared U function");
 			check(Utility.isBigMValue(b.forwardUBeforeCeil(0, 17.4)), "invalid job");
 			check(Utility.isBigMValue(b.forwardUBeforeCeil(1, Double.NaN)), "nonfinite query");
@@ -57,6 +61,10 @@ public final class CompletionBoundScalarTailTest {
 			check(Utility.isBigMValue(blocked.forwardUBeforeCeil(1, 17.4)), "all-M prefix remains infeasible");
 			var empty = new CompletionBoundCalculator.Bounds(1, 17.5);
 			check(Utility.isBigMValue(empty.forwardUBeforeCeil(1, 17.4)), "missing prefix remains unavailable");
+			var shortDomain = cached(shorter, 30, -17.5);
+			near(shortDomain.forwardUBeforeCeil(1, 17.4), -17.5, "physical tail need not equal global horizon");
+			var wholePoint = cached(point, 17.5, -7);
+			near(wholePoint.forwardUBeforeCeil(1, 17.5), -7, "whole point has finite global minimum");
 
 			var integral = cached(integer, 18, -18);
 			for (double p = 0; p <= 18; p += 0.125) {
@@ -69,6 +77,8 @@ public final class CompletionBoundScalarTailTest {
 			late.release();
 			infeasible.release();
 			integer.release();
+			shorter.release();
+			point.release();
 		}
 	}
 

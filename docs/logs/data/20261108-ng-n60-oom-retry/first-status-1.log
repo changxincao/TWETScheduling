@@ -1,0 +1,4 @@
+TIME 2026-11-08T00:20:10.546710600+08:00
+BATCH SOLVE_RUNNING
+RUN	pricing-n060-set02-m4-family-base-wwide-f3-ng_dssr-mainline-a	RUNNING	pid=18160	alive=true	cpuMs=23281	liveBytes=163272	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=8cb0efb7af60d55c6980fb0d052ea530536fe0cc5c7ae5f084060890dc8c1146
+RUN	pricing-n060-set02-m4-family-high-wwide-f3-ng_dssr-mainline-a	RUNNING	pid=3964	alive=true	cpuMs=20453	liveBytes=57983	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=111c2a1a08dae90a54462ee4fae4038ab2ac63631f85d60bb43cd316ca12640c

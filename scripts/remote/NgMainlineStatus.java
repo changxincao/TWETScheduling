@@ -4,11 +4,18 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.Properties;
 
-/** 只读检查06主机本批状态、日志增长及对应子JVM，不启动或停止任何任务。 */
+/** 只读检查两台主机的主批/明确补跑目录，不启动或停止任何任务。 */
 public class NgMainlineStatus {
     public static void main(String[] args) throws Exception {
         Path stage = Path.of(args[0]).toRealPath();
-        if (!stage.equals(Path.of("D:/ccx_work/考虑交付的机器调度/work1/experiments/20261104-ng-mainline-a-prepared")))
+        Path root = switch (System.getenv("COMPUTERNAME")) {
+            case "DESKTOP-06K8JI8" -> Path.of("D:/ccx_work/考虑交付的机器调度");
+            case "DESKTOP-42976CD" -> Path.of("D:/ccx");
+            default -> throw new IllegalArgumentException("Unexpected host");
+        };
+        if (!stage.getParent().equals(root.toRealPath().resolve("work1/experiments"))
+                || !(stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared")
+                || stage.getFileName().toString().matches("20261108-ng-n60-oom-retry-[0-9a-f]{8}")))
             throw new IllegalArgumentException("Unexpected status directory");
         System.out.println("TIME " + OffsetDateTime.now(ZoneId.of("Asia/Shanghai")));
         System.out.println("BATCH " + Files.readString(stage.resolve("experiment.status")).trim());

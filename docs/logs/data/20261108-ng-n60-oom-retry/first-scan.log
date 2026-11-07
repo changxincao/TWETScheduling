@@ -1,0 +1,2 @@
+ExperimentBatchScheduler scan: total=7 matched=7 dependencies=0 selected=7 localSuccess=0 pending=7 scanOnly=true selectors=<none>
+ExperimentBatchScheduler selected solves: algorithms={NG_DSSR=7} outsourcingModels={}

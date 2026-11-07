@@ -1,0 +1,37 @@
+{
+  "sourceCommit": "81e144e45f727f992e02c1a1a753d98c19d796df",
+  "batch": "20261108-ng-n60-oom-retry-81e144e4",
+  "solverJarSha256": "483134956c345a2cf4fc77fc2a73c470466aab1ce7283706b278a41e2afae4b7",
+  "sourceArchiveSha256": "350edaf59749b017b80a9bf275a41ebb1e8508681d9f847283400d2fb3051c9e",
+  "javaRelease": 21,
+  "classes": 473,
+  "parallelPerHost": 2,
+  "solverHeapGiB": 24,
+  "assignments": {
+    "first": {
+      "ip": "100.68.243.112",
+      "remote": "D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-n60-oom-retry-81e144e4",
+      "tasks": [
+        "pricing-n060-set02-m4-family-base-wwide-f3-ng_dssr-mainline-a",
+        "pricing-n060-set02-m4-family-high-wwide-f3-ng_dssr-mainline-a",
+        "pricing-n060-set03-m4-family-base-wwide-f3-ng_dssr-mainline-a",
+        "pricing-n060-set03-m4-family-high-wwide-f3-ng_dssr-mainline-a",
+        "pricing-n060-set02-m3-family-base-wwide-f3-ng_dssr-mainline-a",
+        "pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a",
+        "pricing-n060-set02-m3-family-medium-wwide-f3-ng_dssr-mainline-a"
+      ],
+      "parallel": 2,
+      "preservedSuccess": 186
+    },
+    "second": {
+      "ip": "100.68.243.192",
+      "remote": "D:/ccx/work1/experiments/20261108-ng-n60-oom-retry-81e144e4",
+      "tasks": [
+        "pricing-n060-set02-m3-family-base-wnarrow-f3-ng_dssr-mainline-a",
+        "pricing-n060-set04-m4-random-base-wwide-ng_dssr-mainline-a"
+      ],
+      "parallel": 2,
+      "preservedSuccess": 75
+    }
+  }
+}

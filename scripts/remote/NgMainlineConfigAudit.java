@@ -15,10 +15,29 @@ public class NgMainlineConfigAudit {
 
     public static void main(String[] args) throws Exception {
         Path stage = Path.of(args[0]).toRealPath();
-        if (!stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared")
+        boolean retry = stage.getFileName().toString().matches("20261108-ng-n60-oom-retry-[0-9a-f]{8}");
+        if (!(stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared") || retry)
                 || !Set.of(Path.of("D:/ccx/work1/experiments"), Path.of("D:/ccxWork/work1/experiments"),
                         Path.of("D:/ccx_work/考虑交付的机器调度/work1/experiments"))
                         .contains(stage.getParent())) throw new IllegalArgumentException("Unexpected stage");
+        // 补跑只校验新目录及明确列出的旧资产，不覆盖原结果或重新生成seed。
+        if (retry) {
+            Path allowed = stage.getParent().getParent().getParent().toRealPath();
+            for (String name : List.of("asset-hashes.tsv", "source-hashes.tsv")) {
+                var hashes = Files.readAllLines(stage.resolve(name), StandardCharsets.UTF_8);
+                for (String line : hashes.subList(1, hashes.size())) {
+                    String[] cell = line.split("\t", -1);
+                    Path file = stage.resolve(cell[0]).normalize().toRealPath();
+                    if (!file.startsWith(allowed)) throw new IllegalArgumentException("Asset outside workspace");
+                    String hash;
+                    try (var stream = Files.newInputStream(file)) {
+                        hash = HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                                .digest(stream.readAllBytes()));
+                    }
+                    if (!hash.equals(cell[1])) throw new IllegalStateException("Asset changed: " + file);
+                }
+            }
+        }
         var parser = Class.forName("Common.formal.FormalExperimentRunner$Arguments");
         Method parse = parser.getDeclaredMethod("parse", String[].class);
         Method apply = parser.getDeclaredMethod("applyNgDssrExperimentOverrides", TWETBPCConfig.class);
@@ -92,13 +111,15 @@ public class NgMainlineConfigAudit {
             metadata.load(reader);
         }
         int expectedCount = Integer.parseInt(metadata.getProperty("tasks"));
+        int parallel = Integer.parseInt(metadata.getProperty("maxParallel", "5"));
         if (count != expectedCount || fingerprints.size() != expectedCount || count == 0
                 || count > expectedSeeds.size()) throw new IllegalStateException("Unexpected coverage");
         String worker = Files.readString(stage.resolve("worker.cmd"));
-        if (!worker.contains("solve.tsv\" 5 ") || worker.contains("solve.tsv\" 6 ")) throw new IllegalStateException("Wrong worker parallelism");
+        if (parallel != (retry ? 2 : 5) || !worker.contains("solve.tsv\" " + parallel + " "))
+            throw new IllegalStateException("Wrong worker parallelism");
         for (String file : List.of("runs", "worker.lock", "worker.exit-code"))
             if (Files.exists(stage.resolve(file))) throw new IllegalStateException("Unexpected run artifact " + file);
         System.out.println("CONFIG_ONLY tasks=" + count + " fieldsPerTask=" + fields
-                + " seedContents=" + fingerprints.size() + " maxParallel=5 modelThreads=1 noSolverCreated=true");
+                + " seedContents=" + fingerprints.size() + " maxParallel=" + parallel + " modelThreads=1 noSolverCreated=true");
     }
 }

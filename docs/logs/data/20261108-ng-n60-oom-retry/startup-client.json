@@ -1,0 +1,64 @@
+{
+  "startedAt": "2026-11-08T00:19:26.209052+08:00",
+  "solverJarSha256": "483134956c345a2cf4fc77fc2a73c470466aab1ce7283706b278a41e2afae4b7",
+  "hosts": {
+    "first": {
+      "ip": "100.68.243.112",
+      "remote": "D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-n60-oom-retry-81e144e4",
+      "localSshPid": 34356,
+      "command": [
+        "ssh.exe",
+        "-f",
+        "-n",
+        "-i",
+        "C:/Users/Changxin/.ssh/codex_solver_auto_ed25519",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "UserKnownHostsFile=C:/Users/Changxin/Downloads/solver_known_hosts",
+        "-o",
+        "ConnectTimeout=10",
+        "codex-runner@100.68.243.112",
+        "cmd.exe",
+        "/d",
+        "/c",
+        "D:\\ccx_work\\考虑交付的机器调度\\work1\\experiments\\20261108-ng-n60-oom-retry-81e144e4\\worker.cmd"
+      ],
+      "plannedParallel": 2,
+      "tasks": 7
+    },
+    "second": {
+      "ip": "100.68.243.192",
+      "remote": "D:/ccx/work1/experiments/20261108-ng-n60-oom-retry-81e144e4",
+      "localSshPid": 39152,
+      "command": [
+        "ssh.exe",
+        "-f",
+        "-n",
+        "-i",
+        "C:/Users/Changxin/.ssh/codex_solver_auto_ed25519",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "UserKnownHostsFile=C:/Users/Changxin/.ssh/known_hosts",
+        "-o",
+        "ConnectTimeout=10",
+        "codex-runner@100.68.243.192",
+        "cmd.exe",
+        "/d",
+        "/c",
+        "D:\\ccx\\work1\\experiments\\20261108-ng-n60-oom-retry-81e144e4\\worker.cmd"
+      ],
+      "plannedParallel": 2,
+      "tasks": 2
+    }
+  }
+}

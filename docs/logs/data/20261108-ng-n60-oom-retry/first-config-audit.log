@@ -1,0 +1,1 @@
+CONFIG_ONLY tasks=7 fieldsPerTask=194 seedContents=7 maxParallel=2 modelThreads=1 noSolverCreated=true

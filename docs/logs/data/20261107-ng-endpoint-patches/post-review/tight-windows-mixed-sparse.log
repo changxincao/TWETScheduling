@@ -1,0 +1,13 @@
+PASS sample=0 sequences=102 horizon=70.0 runs=16
+PASS sample=1 sequences=303 horizon=74.0 runs=32
+PASS sample=2 sequences=163 horizon=65.0 runs=48
+PASS sample=3 sequences=328 horizon=72.0 runs=64
+PASS sample=4 sequences=91 horizon=140.0 runs=80
+PASS sample=5 sequences=486 horizon=146.0 runs=96
+PASS sample=6 sequences=204 horizon=140.0 runs=112
+PASS sample=7 sequences=488 horizon=146.0 runs=128
+PASS sample=8 sequences=137 horizon=216.0 runs=144
+PASS sample=9 sequences=394 horizon=228.0 runs=160
+PASS sample=10 sequences=89 horizon=165.0 runs=176
+PASS sample=11 sequences=747 horizon=234.0 runs=192
+SUMMARY runs=192 returned=96 rounds=291 maxRounds=4 mismatches=0

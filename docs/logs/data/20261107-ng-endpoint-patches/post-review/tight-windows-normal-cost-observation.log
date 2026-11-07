@@ -1,0 +1,22 @@
+PASS sample=0 sequences=102 horizon=70.0 runs=16
+PASS sample=1 sequences=303 horizon=74.0 runs=32
+PASS sample=2 sequences=163 horizon=65.0 runs=48
+PASS sample=3 sequences=328 horizon=72.0 runs=64
+PASS sample=4 sequences=91 horizon=140.0 runs=80
+PASS sample=5 sequences=486 horizon=146.0 runs=96
+COST_DEVIATION sample=6 variant=0 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+COST_DEVIATION sample=6 variant=1 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+COST_DEVIATION sample=6 variant=2 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+COST_DEVIATION sample=6 variant=3 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+COST_DEVIATION sample=6 variant=4 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+COST_DEVIATION sample=6 variant=5 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+COST_DEVIATION sample=6 variant=6 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+COST_DEVIATION sample=6 variant=7 sign=1 sequence=[2, 3, 1, 5, 6, 4] reported=195.99699999999999 independent=196.0 signedError=-0.0030000000000143245
+PASS sample=6 sequences=204 horizon=140.0 runs=112
+PASS sample=7 sequences=488 horizon=146.0 runs=128
+PASS sample=8 sequences=137 horizon=216.0 runs=144
+PASS sample=9 sequences=394 horizon=228.0 runs=160
+PASS sample=10 sequences=89 horizon=165.0 runs=176
+PASS sample=11 sequences=747 horizon=234.0 runs=192
+SUMMARY runs=192 returned=116 rounds=312 maxRounds=4 mismatches=0
+COST_SUMMARY deviatingColumns=8 maxAbsoluteError=0.0030000000000143245

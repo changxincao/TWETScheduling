@@ -1,0 +1,32 @@
+{
+  "date": "2026-11-07",
+  "reviewBase": "0fb3d2ec",
+  "productionPatch": "e06bfcf0",
+  "productionSourcesChangedDuringReview": false,
+  "independentFixtureCount": 12,
+  "pricingGroups": [
+    {"name": "ordinary-windows-mixed", "runs": 192, "strictExit": 0, "mismatches": 0, "dssrRounds": 450, "maxRounds": 12},
+    {"name": "tight-windows-mixed", "runs": 192, "strictExit": 0, "mismatches": 0, "dssrRounds": 285, "maxRounds": 4},
+    {"name": "tight-windows-mixed-sparse", "runs": 192, "strictExit": 0, "mismatches": 0, "dssrRounds": 291, "maxRounds": 4},
+    {"name": "tight-windows-normal", "originalStrictExit": 1, "cause": "reported column cost 195.997 versus DP 196",
+     "observationRuns": 192, "observationExit": 0, "routeAndCertificateMismatches": 0,
+     "dssrRounds": 312, "maxRounds": 4, "deviatingColumns": 8,
+     "distinctDeviatingFixtureSequencePairs": 1, "maxAbsoluteCostDeviation": 0.0030000000000143245,
+     "strictCostTestPassed": false}
+  ],
+  "naturalPcRecheck": {
+    "fixtureSha256": "A6AB96B41048305072FB2DCBB01CF95ECD24D0FC3A83F364643AD93B1D807DCD",
+    "cbOff": {"objective": 2, "closedBound": 2, "observedBound": 2, "independentOptimum": 2, "witnessRc": 0},
+    "cbAllCycles": {"objective": 2, "closedBound": 2, "observedBound": 2, "independentOptimum": 2, "witnessRc": 0},
+    "oldFalseClosureReproducedAfterPatch": false,
+    "ordinaryPcNegativeCertificateEmptyResultGuardImplemented": false
+  },
+  "reviewFindings": {
+    "confirmedNewMainlineCorrectnessDefect": false,
+    "joinPerTerminalBitsetEarlyReleaseImplemented": false,
+    "softTimeLimitAcceptedPreviously": true,
+    "extremeEpsHandlingDeferredPreviously": true
+  },
+  "remoteTouched": false,
+  "formalResultsModified": false
+}

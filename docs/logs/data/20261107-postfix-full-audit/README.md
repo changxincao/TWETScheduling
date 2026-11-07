@@ -10,4 +10,6 @@
 
 `rank1-and-fixing-oracle.log`由既有`../20261107-three-pricer-full-audit/TiAudit.java`重新编译后产生，160组受控定价快照零冲突，40组fixing低RC序列保留检查通过。不是160次真实RMP证书验证或正式SRI-aware性能比较。
 
-编译两个新诊断及既有TiAudit时，以fresh的`.codex-tmp/postfix-full-audit-20261107/classes`、本机`cplex.jar`与`ILOG.CP.jar`为classpath，输出到同目录`audit-classes`。运行时将audit-classes放在classes之前，显式传入本机CPLEX/CP Optimizer native路径，均加`-ea`，仅debug-no-ea对照不加。主类分别为`TWETBPC.GC.PostfixAudit`、`TWETBPC.LP.OptionalPathsAudit`与`TWETBPC.GC.TiAudit`。未复制或汇总远端正式结果。
+编译两个新诊断及既有TiAudit时，以fresh的`.codex-tmp/postfix-full-audit-20261107/classes`、本机`cplex.jar`与`ILOG.CP.jar`为classpath，输出到同目录`audit-classes`。运行时将audit-classes放在classes之前，显式传入本机CPLEX/CP Optimizer native路径，默认加`-ea`；debug-no-ea对照及用于观察重复计数后果的segmented-contract不加。后者若加-ea，会在第二次known-absent写入时按约定断言中止，不会执行计数比较。主类分别为`TWETBPC.GC.PostfixAudit`、`TWETBPC.LP.OptionalPathsAudit`与`TWETBPC.GC.TiAudit`。未复制或汇总远端正式结果。
+
+`enumeration-exact`是同一有限master的补充验证：先保存原默认容差结果，再对同一raw模型设置相对与绝对MIP gap为0重新求解，断言UB/LB与独立DP一致。`enumeration-zero-gap.log`记录12组均通过，原三组非最优值分别下降16/5/6；这只改隔离诊断的CPLEX参数，不改生产gap、数据或启停实验。fresh编译及TI重核输出在`.codex-tmp/confirm-enum-debug-20261107/`。

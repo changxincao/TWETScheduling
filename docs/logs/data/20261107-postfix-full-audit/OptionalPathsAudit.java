@@ -37,7 +37,7 @@ public final class OptionalPathsAudit {
     public static void main(String[] args) throws Exception {
         Utility.resetCurUpperBound(Utility.big_M);
         if (args.length > 0 && "stabilization".equals(args[0])) stabilization();
-        else enumeration();
+        else enumeration(args.length > 0 && "enumeration-exact".equals(args[0]));
     }
 
     private static void stabilization() throws Exception {
@@ -148,7 +148,7 @@ public final class OptionalPathsAudit {
     }
 
     @SuppressWarnings("unchecked")
-    private static void enumeration() throws Exception {
+    private static void enumeration(boolean exactCheck) throws Exception {
         int falseProofs = 0;
         for (int seed = 0; seed < 12; seed++) {
             Data d = load(enumerationFixture(seed));
@@ -189,6 +189,17 @@ public final class OptionalPathsAudit {
                             raw.getObjValue(), raw.getBestObjValue(), raw.getMIPRelativeGap(), optimum,
                             result.isProven(), result.getObjective());
                     if (result.isProven() && result.getObjective() > optimum + 1e-6) falseProofs++;
+                    if (exactCheck) {
+                        raw.setParam(IloCplex.Param.MIP.Tolerances.MIPGap, 0.0);
+                        raw.setParam(IloCplex.Param.MIP.Tolerances.AbsMIPGap, 0.0);
+                        if (!raw.solve()) throw new AssertionError("zero-gap re-solve failed");
+                        System.out.printf(Locale.ROOT, "zeroGap seed=%d detail=%s ub=%.9f lb=%.9f oracle=%.9f%n",
+                                seed, raw.getCplexStatus(), raw.getObjValue(), raw.getBestObjValue(), optimum);
+                        if (Math.abs(raw.getObjValue() - optimum) > 1e-6
+                                || Math.abs(raw.getBestObjValue() - optimum) > 1e-6) {
+                            throw new AssertionError("zero-gap solve differs from independent oracle");
+                        }
+                    }
                 } finally { raw.end(); }
             } finally { lp.closeModel(); }
         }

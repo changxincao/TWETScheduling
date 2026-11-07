@@ -1,0 +1,729 @@
+{
+  "scope": "270 n60 scenarios: family F3 Cluster, random Arc; NG A/v8, archived formal TI v5/v6",
+  "timeLimitSeconds": 10800,
+  "all": {
+    "cases": 270,
+    "pairedN": 259,
+    "gapN": 203,
+    "commonOptimalN": 126,
+    "NG-DSSR": {
+      "normal": 261,
+      "optimal": 174,
+      "failed": 9,
+      "timeLimit": 87,
+      "missingGap": 56,
+      "pairedSeconds": 5010.006557247104,
+      "pairedNodes": 99.84169884169884,
+      "gapMean": 0.2772323891625616,
+      "commonOptimalSeconds": 1445.9107314285714
+    },
+    "TI": {
+      "normal": 268,
+      "optimal": 163,
+      "failed": 2,
+      "timeLimit": 105,
+      "missingGap": 0,
+      "pairedSeconds": 5536.171787799228,
+      "pairedNodes": 400.2162162162162,
+      "gapMean": 0.7480013399014779,
+      "commonOptimalSeconds": 1726.0279109126984
+    },
+    "TI+SRI": {
+      "normal": 270,
+      "optimal": 146,
+      "failed": 0,
+      "timeLimit": 124,
+      "missingGap": 0,
+      "pairedSeconds": 5859.35975696139,
+      "pairedNodes": 10.386100386100386,
+      "gapMean": 0.8857318522167488,
+      "commonOptimalSeconds": 1387.3133353253968
+    }
+  },
+  "setup": {
+    "family": {
+      "cases": 135,
+      "pairedN": 126,
+      "gapN": 70,
+      "commonOptimalN": 28,
+      "NG-DSSR": {
+        "normal": 127,
+        "optimal": 50,
+        "failed": 8,
+        "timeLimit": 77,
+        "missingGap": 56,
+        "pairedSeconds": 7393.972657857143,
+        "pairedNodes": 108.17460317460318,
+        "gapMean": 0.5745578571428571,
+        "commonOptimalSeconds": 1404.5777345714287
+      },
+      "TI": {
+        "normal": 134,
+        "optimal": 59,
+        "failed": 1,
+        "timeLimit": 75,
+        "missingGap": 0,
+        "pairedSeconds": 6932.978275198413,
+        "pairedNodes": 627.8650793650794,
+        "gapMean": 0.8748798142857143,
+        "commonOptimalSeconds": 418.30999439285716
+      },
+      "TI+SRI": {
+        "normal": 135,
+        "optimal": 35,
+        "failed": 0,
+        "timeLimit": 100,
+        "missingGap": 0,
+        "pairedSeconds": 8089.797537539683,
+        "pairedNodes": 2.0793650793650795,
+        "gapMean": 1.65848,
+        "commonOptimalSeconds": 718.3609233214286
+      }
+    },
+    "random": {
+      "cases": 135,
+      "pairedN": 133,
+      "gapN": 133,
+      "commonOptimalN": 98,
+      "NG-DSSR": {
+        "normal": 134,
+        "optimal": 124,
+        "failed": 1,
+        "timeLimit": 10,
+        "missingGap": 0,
+        "pairedSeconds": 2751.5123566691727,
+        "pairedNodes": 91.94736842105263,
+        "gapMean": 0.1207453007518797,
+        "commonOptimalSeconds": 1457.7201591020407
+      },
+      "TI": {
+        "normal": 134,
+        "optimal": 104,
+        "failed": 1,
+        "timeLimit": 30,
+        "missingGap": 0,
+        "pairedSeconds": 4212.881431315789,
+        "pairedNodes": 184.54887218045113,
+        "gapMean": 0.6812231954887218,
+        "commonOptimalSeconds": 2099.661601346939
+      },
+      "TI+SRI": {
+        "normal": 135,
+        "optimal": 111,
+        "failed": 0,
+        "timeLimit": 24,
+        "missingGap": 0,
+        "pairedSeconds": 3746.313438518797,
+        "pairedNodes": 18.25563909774436,
+        "gapMean": 0.4790223007518797,
+        "commonOptimalSeconds": 1578.442595897959
+      }
+    }
+  },
+  "familyMachines": {
+    "2": {
+      "cases": 45,
+      "pairedN": 45,
+      "gapN": 0,
+      "commonOptimalN": 0,
+      "NG-DSSR": {
+        "normal": 45,
+        "optimal": 0,
+        "failed": 0,
+        "timeLimit": 45,
+        "missingGap": 45,
+        "pairedSeconds": 10824.0444652,
+        "pairedNodes": 1.0,
+        "gapMean": null,
+        "commonOptimalSeconds": null
+      },
+      "TI": {
+        "normal": 45,
+        "optimal": 0,
+        "failed": 0,
+        "timeLimit": 45,
+        "missingGap": 0,
+        "pairedSeconds": 10800.831432511111,
+        "pairedNodes": 241.82222222222222,
+        "gapMean": null,
+        "commonOptimalSeconds": null
+      },
+      "TI+SRI": {
+        "normal": 45,
+        "optimal": 0,
+        "failed": 0,
+        "timeLimit": 45,
+        "missingGap": 0,
+        "pairedSeconds": 10801.036957488888,
+        "pairedNodes": 1.2444444444444445,
+        "gapMean": null,
+        "commonOptimalSeconds": null
+      }
+    },
+    "3": {
+      "cases": 45,
+      "pairedN": 41,
+      "gapN": 30,
+      "commonOptimalN": 19,
+      "NG-DSSR": {
+        "normal": 41,
+        "optimal": 23,
+        "failed": 4,
+        "timeLimit": 18,
+        "missingGap": 11,
+        "pairedSeconds": 6020.735295146342,
+        "pairedNodes": 1.853658536585366,
+        "gapMean": 0.17790743333333334,
+        "commonOptimalSeconds": 1883.3860517894736
+      },
+      "TI": {
+        "normal": 45,
+        "optimal": 34,
+        "failed": 0,
+        "timeLimit": 11,
+        "missingGap": 0,
+        "pairedSeconds": 3707.1314245609756,
+        "pairedNodes": 319.0731707317073,
+        "gapMean": 0.4418404666666667,
+        "commonOptimalSeconds": 464.8956935789474
+      },
+      "TI+SRI": {
+        "normal": 45,
+        "optimal": 26,
+        "failed": 0,
+        "timeLimit": 19,
+        "missingGap": 0,
+        "pairedSeconds": 4685.595908634146,
+        "pairedNodes": 1.7317073170731707,
+        "gapMean": 0.3955792,
+        "commonOptimalSeconds": 725.0386794210526
+      }
+    },
+    "4": {
+      "cases": 45,
+      "pairedN": 40,
+      "gapN": 40,
+      "commonOptimalN": 9,
+      "NG-DSSR": {
+        "normal": 41,
+        "optimal": 27,
+        "failed": 4,
+        "timeLimit": 14,
+        "missingGap": 0,
+        "pairedSeconds": 4942.710171375,
+        "pairedNodes": 337.725,
+        "gapMean": 0.872045675,
+        "commonOptimalSeconds": 393.760176
+      },
+      "TI": {
+        "normal": 44,
+        "optimal": 25,
+        "failed": 1,
+        "timeLimit": 19,
+        "missingGap": 0,
+        "pairedSeconds": 5888.136495125,
+        "pairedNodes": 1378.675,
+        "gapMean": 1.199659325,
+        "commonOptimalSeconds": 319.9624072222222
+      },
+      "TI+SRI": {
+        "normal": 45,
+        "optimal": 9,
+        "failed": 0,
+        "timeLimit": 36,
+        "missingGap": 0,
+        "pairedSeconds": 8528.959859725,
+        "pairedNodes": 3.375,
+        "gapMean": 2.6056556,
+        "commonOptimalSeconds": 704.2634382222222
+      }
+    }
+  },
+  "scale": {
+    "base": {
+      "cases": 90,
+      "pairedN": 85,
+      "gapN": 66,
+      "commonOptimalN": 56,
+      "NG-DSSR": {
+        "normal": 85,
+        "optimal": 61,
+        "failed": 5,
+        "timeLimit": 24,
+        "missingGap": 19,
+        "pairedSeconds": 4189.789040247058,
+        "pairedNodes": 91.50588235294117,
+        "gapMean": 0.2587182424242424,
+        "commonOptimalSeconds": 1424.627972125
+      },
+      "TI": {
+        "normal": 90,
+        "optimal": 69,
+        "failed": 0,
+        "timeLimit": 21,
+        "missingGap": 0,
+        "pairedSeconds": 3414.0310226588235,
+        "pairedNodes": 560.6470588235294,
+        "gapMean": 0.27694583333333334,
+        "commonOptimalSeconds": 858.047063
+      },
+      "TI+SRI": {
+        "normal": 90,
+        "optimal": 60,
+        "failed": 0,
+        "timeLimit": 30,
+        "missingGap": 0,
+        "pairedSeconds": 3734.317867917647,
+        "pairedNodes": 10.929411764705883,
+        "gapMean": 0.4162780303030303,
+        "commonOptimalSeconds": 464.2092987857143
+      }
+    },
+    "high": {
+      "cases": 90,
+      "pairedN": 86,
+      "gapN": 65,
+      "commonOptimalN": 30,
+      "NG-DSSR": {
+        "normal": 87,
+        "optimal": 53,
+        "failed": 3,
+        "timeLimit": 34,
+        "missingGap": 21,
+        "pairedSeconds": 5591.993042430233,
+        "pairedNodes": 81.40697674418605,
+        "gapMean": 0.3788434461538462,
+        "commonOptimalSeconds": 1288.2161182666666
+      },
+      "TI": {
+        "normal": 89,
+        "optimal": 40,
+        "failed": 1,
+        "timeLimit": 49,
+        "missingGap": 0,
+        "pairedSeconds": 7314.2881314883725,
+        "pairedNodes": 230.12790697674419,
+        "gapMean": 1.2819792153846155,
+        "commonOptimalSeconds": 2389.450858766667
+      },
+      "TI+SRI": {
+        "normal": 90,
+        "optimal": 39,
+        "failed": 0,
+        "timeLimit": 51,
+        "missingGap": 0,
+        "pairedSeconds": 7382.263059546512,
+        "pairedNodes": 7.395348837209302,
+        "gapMean": 1.4114039999999999,
+        "commonOptimalSeconds": 2138.844647433333
+      }
+    },
+    "medium": {
+      "cases": 90,
+      "pairedN": 88,
+      "gapN": 72,
+      "commonOptimalN": 40,
+      "NG-DSSR": {
+        "normal": 89,
+        "optimal": 60,
+        "failed": 1,
+        "timeLimit": 29,
+        "missingGap": 16,
+        "pairedSeconds": 5233.502593829546,
+        "pairedNodes": 125.9090909090909,
+        "gapMean": 0.2024714861111111,
+        "commonOptimalSeconds": 1593.977554325
+      },
+      "TI": {
+        "normal": 89,
+        "optimal": 54,
+        "failed": 1,
+        "timeLimit": 35,
+        "missingGap": 0,
+        "pairedSeconds": 5848.262236431819,
+        "pairedNodes": 411.47727272727275,
+        "gapMean": 0.6977388611111112,
+        "commonOptimalSeconds": 2443.6338871
+      },
+      "TI+SRI": {
+        "normal": 90,
+        "optimal": 47,
+        "failed": 0,
+        "timeLimit": 43,
+        "missingGap": 0,
+        "pairedSeconds": 6423.665172261363,
+        "pairedNodes": 12.784090909090908,
+        "gapMean": 0.8414993888888889,
+        "commonOptimalSeconds": 2116.0105024
+      }
+    }
+  },
+  "window": {
+    "narrow": {
+      "cases": 90,
+      "pairedN": 87,
+      "gapN": 71,
+      "commonOptimalN": 43,
+      "NG-DSSR": {
+        "normal": 89,
+        "optimal": 63,
+        "failed": 1,
+        "timeLimit": 26,
+        "missingGap": 16,
+        "pairedSeconds": 4756.033591609195,
+        "pairedNodes": 123.40229885057471,
+        "gapMean": 0.15513525352112675,
+        "commonOptimalSeconds": 1473.1818886046512
+      },
+      "TI": {
+        "normal": 88,
+        "optimal": 51,
+        "failed": 2,
+        "timeLimit": 37,
+        "missingGap": 0,
+        "pairedSeconds": 5766.268136448276,
+        "pairedNodes": 508.7011494252874,
+        "gapMean": 0.6007960422535211,
+        "commonOptimalSeconds": 1720.7304511860466
+      },
+      "TI+SRI": {
+        "normal": 90,
+        "optimal": 50,
+        "failed": 0,
+        "timeLimit": 40,
+        "missingGap": 0,
+        "pairedSeconds": 5781.606820068965,
+        "pairedNodes": 8.60919540229885,
+        "gapMean": 0.7603814084507042,
+        "commonOptimalSeconds": 1246.8563200232559
+      }
+    },
+    "wide": {
+      "cases": 90,
+      "pairedN": 82,
+      "gapN": 58,
+      "commonOptimalN": 28,
+      "NG-DSSR": {
+        "normal": 82,
+        "optimal": 45,
+        "failed": 8,
+        "timeLimit": 37,
+        "missingGap": 24,
+        "pairedSeconds": 6378.840268426829,
+        "pairedNodes": 103.3048780487805,
+        "gapMean": 0.6374358103448275,
+        "commonOptimalSeconds": 1726.8031824285713
+      },
+      "TI": {
+        "normal": 90,
+        "optimal": 49,
+        "failed": 0,
+        "timeLimit": 41,
+        "missingGap": 0,
+        "pairedSeconds": 6408.672159634146,
+        "pairedNodes": 481.4024390243902,
+        "gapMean": 1.5691995172413793,
+        "commonOptimalSeconds": 2030.89145325
+      },
+      "TI+SRI": {
+        "normal": 90,
+        "optimal": 34,
+        "failed": 0,
+        "timeLimit": 56,
+        "missingGap": 0,
+        "pairedSeconds": 7534.65480945122,
+        "pairedNodes": 15.146341463414634,
+        "gapMean": 1.8848967413793103,
+        "commonOptimalSeconds": 2060.8749295714288
+      }
+    },
+    "zero": {
+      "cases": 90,
+      "pairedN": 90,
+      "gapN": 74,
+      "commonOptimalN": 55,
+      "NG-DSSR": {
+        "normal": 90,
+        "optimal": 66,
+        "failed": 0,
+        "timeLimit": 24,
+        "missingGap": 16,
+        "pairedSeconds": 4008.3541538444447,
+        "pairedNodes": 73.91111111111111,
+        "gapMean": 0.11205804054054054,
+        "commonOptimalSeconds": 1281.5898516727273
+      },
+      "TI": {
+        "normal": 90,
+        "optimal": 63,
+        "failed": 0,
+        "timeLimit": 27,
+        "missingGap": 0,
+        "pairedSeconds": 4518.800534211111,
+        "pairedNodes": 221.37777777777777,
+        "gapMean": 0.24559704054054055,
+        "commonOptimalSeconds": 1574.9663033272727
+      },
+      "TI+SRI": {
+        "normal": 90,
+        "optimal": 62,
+        "failed": 0,
+        "timeLimit": 28,
+        "missingGap": 0,
+        "pairedSeconds": 4408.140992577778,
+        "pairedNodes": 7.766666666666667,
+        "gapMean": 0.2228712837837838,
+        "commonOptimalSeconds": 1154.221099309091
+      }
+    }
+  },
+  "setupScale": {
+    "family": {
+      "base": {
+        "cases": 45,
+        "pairedN": 41,
+        "gapN": 22,
+        "commonOptimalN": 13,
+        "NG-DSSR": {
+          "normal": 41,
+          "optimal": 18,
+          "failed": 4,
+          "timeLimit": 23,
+          "missingGap": 19,
+          "pairedSeconds": 6792.695623463414,
+          "pairedNodes": 120.82926829268293,
+          "gapMean": 0.6196422727272727,
+          "commonOptimalSeconds": 995.9963082307693
+        },
+        "TI": {
+          "normal": 45,
+          "optimal": 25,
+          "failed": 0,
+          "timeLimit": 20,
+          "missingGap": 0,
+          "pairedSeconds": 5713.142233609756,
+          "pairedNodes": 950.1463414634146,
+          "gapMean": 0.6907018636363637,
+          "commonOptimalSeconds": 222.84703938461539
+        },
+        "TI+SRI": {
+          "normal": 45,
+          "optimal": 15,
+          "failed": 0,
+          "timeLimit": 30,
+          "missingGap": 0,
+          "pairedSeconds": 7016.830494170732,
+          "pairedNodes": 2.5853658536585367,
+          "gapMean": 1.248834090909091,
+          "commonOptimalSeconds": 455.37724469230767
+        }
+      },
+      "medium": {
+        "cases": 45,
+        "pairedN": 44,
+        "gapN": 28,
+        "commonOptimalN": 8,
+        "NG-DSSR": {
+          "normal": 44,
+          "optimal": 20,
+          "failed": 1,
+          "timeLimit": 24,
+          "missingGap": 16,
+          "pairedSeconds": 6962.710919136363,
+          "pairedNodes": 111.93181818181819,
+          "gapMean": 0.3842392142857143,
+          "commonOptimalSeconds": 1178.50213125
+        },
+        "TI": {
+          "normal": 45,
+          "optimal": 19,
+          "failed": 0,
+          "timeLimit": 26,
+          "missingGap": 0,
+          "pairedSeconds": 6923.869751840909,
+          "pairedNodes": 566.8863636363636,
+          "gapMean": 0.8788015,
+          "commonOptimalSeconds": 234.351465875
+        },
+        "TI+SRI": {
+          "normal": 45,
+          "optimal": 11,
+          "failed": 0,
+          "timeLimit": 34,
+          "missingGap": 0,
+          "pairedSeconds": 8378.841523545454,
+          "pairedNodes": 1.8863636363636365,
+          "gapMean": 1.73633575,
+          "commonOptimalSeconds": 489.421750625
+        }
+      },
+      "high": {
+        "cases": 45,
+        "pairedN": 41,
+        "gapN": 20,
+        "commonOptimalN": 7,
+        "NG-DSSR": {
+          "normal": 42,
+          "optimal": 12,
+          "failed": 3,
+          "timeLimit": 30,
+          "missingGap": 21,
+          "pairedSeconds": 8458.06716795122,
+          "pairedNodes": 91.48780487804878,
+          "gapMean": 0.7914111,
+          "commonOptimalSeconds": 2421.743930142857
+        },
+        "TI": {
+          "normal": 44,
+          "optimal": 15,
+          "failed": 1,
+          "timeLimit": 29,
+          "missingGap": 0,
+          "pairedSeconds": 8162.589317463415,
+          "pairedNodes": 371.0243902439024,
+          "gapMean": 1.0719852,
+          "commonOptimalSeconds": 991.5509434285715
+        },
+        "TI+SRI": {
+          "normal": 45,
+          "optimal": 9,
+          "failed": 0,
+          "timeLimit": 36,
+          "missingGap": 0,
+          "pairedSeconds": 8852.57103495122,
+          "pairedNodes": 1.7804878048780488,
+          "gapMean": 2.00009245,
+          "commonOptimalSeconds": 1468.4039524285715
+        }
+      }
+    },
+    "random": {
+      "base": {
+        "cases": 45,
+        "pairedN": 44,
+        "gapN": 44,
+        "commonOptimalN": 43,
+        "NG-DSSR": {
+          "normal": 44,
+          "optimal": 43,
+          "failed": 1,
+          "timeLimit": 1,
+          "missingGap": 0,
+          "pairedSeconds": 1764.3533604318181,
+          "pairedNodes": 64.18181818181819,
+          "gapMean": 0.07825622727272728,
+          "commonOptimalSeconds": 1554.2142891162791
+        },
+        "TI": {
+          "normal": 45,
+          "optimal": 44,
+          "failed": 0,
+          "timeLimit": 1,
+          "missingGap": 0,
+          "pairedSeconds": 1271.6773942727273,
+          "pairedNodes": 197.70454545454547,
+          "gapMean": 0.07006781818181819,
+          "commonOptimalSeconds": 1050.0842794418604
+        },
+        "TI+SRI": {
+          "normal": 45,
+          "optimal": 45,
+          "failed": 0,
+          "timeLimit": 0,
+          "missingGap": 0,
+          "pairedSeconds": 675.6129207272727,
+          "pairedNodes": 18.704545454545453,
+          "gapMean": 0.0,
+          "commonOptimalSeconds": 466.8794546744186
+        }
+      },
+      "medium": {
+        "cases": 45,
+        "pairedN": 44,
+        "gapN": 44,
+        "commonOptimalN": 32,
+        "NG-DSSR": {
+          "normal": 45,
+          "optimal": 40,
+          "failed": 0,
+          "timeLimit": 5,
+          "missingGap": 0,
+          "pairedSeconds": 3504.294268522727,
+          "pairedNodes": 139.88636363636363,
+          "gapMean": 0.08680111363636364,
+          "commonOptimalSeconds": 1697.84641009375
+        },
+        "TI": {
+          "normal": 44,
+          "optimal": 35,
+          "failed": 1,
+          "timeLimit": 9,
+          "missingGap": 0,
+          "pairedSeconds": 4772.654721022727,
+          "pairedNodes": 256.0681818181818,
+          "gapMean": 0.5825171818181818,
+          "commonOptimalSeconds": 2995.9544924062498
+        },
+        "TI+SRI": {
+          "normal": 45,
+          "optimal": 36,
+          "failed": 0,
+          "timeLimit": 9,
+          "missingGap": 0,
+          "pairedSeconds": 4468.488820977273,
+          "pairedNodes": 23.681818181818183,
+          "gapMean": 0.2720580681818182,
+          "commonOptimalSeconds": 2522.65769034375
+        }
+      },
+      "high": {
+        "cases": 45,
+        "pairedN": 45,
+        "gapN": 45,
+        "commonOptimalN": 23,
+        "NG-DSSR": {
+          "normal": 45,
+          "optimal": 41,
+          "failed": 0,
+          "timeLimit": 4,
+          "missingGap": 0,
+          "pairedSeconds": 2980.6810614,
+          "pairedNodes": 72.22222222222223,
+          "gapMean": 0.19548004444444445,
+          "commonOptimalSeconds": 943.2293929130435
+        },
+        "TI": {
+          "normal": 45,
+          "optimal": 25,
+          "failed": 0,
+          "timeLimit": 20,
+          "missingGap": 0,
+          "pairedSeconds": 6541.391495377778,
+          "pairedNodes": 101.75555555555556,
+          "gapMean": 1.3753098888888888,
+          "commonOptimalSeconds": 2814.8986590869567
+        },
+        "TI+SRI": {
+          "normal": 45,
+          "optimal": 30,
+          "failed": 0,
+          "timeLimit": 15,
+          "missingGap": 0,
+          "pairedSeconds": 6042.6491264,
+          "pairedNodes": 12.511111111111111,
+          "gapMean": 1.1497646888888888,
+          "commonOptimalSeconds": 2342.891815478261
+        }
+      }
+    }
+  },
+  "sources": {
+    "experiment-suite\\formal\\manifests\\20261104-ng-mainline-a-prepared\\second\\case-map.tsv": "9ec2c3d79563d2a0b962deb77cbe9710ccf5a01e7c0f9fc5cbba58d3811a688e",
+    ".codex-tmp\\ng-mainline-20261103-prepared\\first\\audit-rows.tsv": "63c31e80afd7363db2c7cf77e53a535a16ea6153374f71dde64ad2e44e7258ad",
+    ".codex-tmp\\ng-mainline-a-20261104-prepared\\third\\audit-rows.tsv": "bfa6b9b52b6722163951b0165d8d8fee0cf39c102d67de3315ed7f196526e768",
+    ".codex-tmp\\remote-progress-20261107\\first-inspect.tsv": "dd6c8a83aa0345647928c641c97d97009282a5922ab8ea488f7bebf1aa8d94b1",
+    ".codex-tmp\\remote-progress-20261107\\second-inspect.tsv": "95411a540d974002d025f4275314484da5f7db3bee4f6791433dbc129ada779e",
+    ".codex-tmp\\remote-progress-20261107\\first-core-summary-stream.csv": "c8722accd3bcec09bf2f05981d7b035a894c5e75f0b217c8af5e9acb1d8aa30b",
+    ".codex-tmp\\remote-progress-20261107\\second-core-summary-stream.csv": "b36480996e564650a7de066e185fe2cff0779decd0b515caae2fa47e1f1c7a7b"
+  }
+}

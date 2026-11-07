@@ -1,0 +1,11 @@
+original adjacency pairDual=10.0 cplexRC=2.0 expandedRC=2.0
+adjacency rows incremental=false phaseOne=false sri=false forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=false phaseOne=false sri=true forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=false phaseOne=true sri=false forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=false phaseOne=true sri=true forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=true phaseOne=false sri=false forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=true phaseOne=false sri=true forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=true phaseOne=true sri=false forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=true phaseOne=true sri=true forbidden=false coefficients=0/1/2/3 RC=matched
+adjacency rows incremental=true phaseOne=false sri=false forbidden=true coefficients=0/1/2/3 RC=matched
+UndirectedAdjacencyCoefficientTest all passed

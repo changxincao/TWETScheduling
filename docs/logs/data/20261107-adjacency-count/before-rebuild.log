@@ -1,0 +1,6 @@
+Exception in thread "main" java.lang.AssertionError: adjacency coefficient for [1, 2, 1]: actual=1.0 expected=2.0
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.check(UndirectedAdjacencyCoefficientTest.java:178)
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.near(UndirectedAdjacencyCoefficientTest.java:173)
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.assertRowCoefficients(UndirectedAdjacencyCoefficientTest.java:162)
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.testRows(UndirectedAdjacencyCoefficientTest.java:135)
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.main(UndirectedAdjacencyCoefficientTest.java:38)

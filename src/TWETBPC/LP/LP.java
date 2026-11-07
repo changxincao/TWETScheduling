@@ -1161,11 +1161,14 @@ public class LP {
 			IloLinearNumExpr expr = cplex.linearNumExpr();
 			for (int idx = 0; idx < restrictedColumnIds.size(); idx++) {
 				TWETColumn column = pool.getColumn(restrictedColumnIds.get(idx).intValue());
-				if (column.visitsArc(first, second, sink) || column.visitsArc(second, first, sink)) {
-					expr.addTerm(1.0, lambdaVars[idx]);
+				// 重复列按两方向经过次数计，与pricing逐弧扣dual一致；基本列仍为0/1。
+				int coefficient = column.getArcVisitCount(first, second, sink)
+						+ column.getArcVisitCount(second, first, sink);
+				if (coefficient > 0) {
+					expr.addTerm(coefficient, lambdaVars[idx]);
 				}
 			}
-			// 2026-06-02: 无向相邻右支只要求两方向之一出现，不在 pricing graph 中固定方向。
+			// 无向相邻右支要求至少一次经过，不在pricing graph中固定方向。
 			IloRange range = required ? cplex.addGe(expr, 1.0, "requiredAdjacency_" + first + "_" + second)
 					: cplex.addEq(expr, 0.0, "forbiddenAdjacency_" + first + "_" + second);
 			adjacencyBranchRanges.put(Long.valueOf(pairKey(first, second)), range);
@@ -1464,8 +1467,10 @@ public class LP {
 		for (Map.Entry<Long, IloRange> entry : adjacencyBranchRanges.entrySet()) {
 			int first = decodeFrom(entry.getKey().longValue());
 			int second = decodeTo(entry.getKey().longValue());
-			if (node.columnCoversAdjacencyPair(column, first, second)) {
-				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), 1.0));
+			int coefficient = column.getArcVisitCount(first, second, node.sinkId())
+					+ column.getArcVisitCount(second, first, node.sinkId());
+			if (coefficient > 0) {
+				cplexColumn = cplexColumn.and(cplex.column(entry.getValue(), coefficient));
 			}
 		}
 		List<AggregateArcBranchConstraint> aggregateConstraints = node.getAggregateArcConstraints();

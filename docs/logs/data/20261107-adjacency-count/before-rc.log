@@ -1,0 +1,6 @@
+original adjacency pairDual=10.0 cplexRC=12.0 expandedRC=2.0
+Exception in thread "main" java.lang.AssertionError: original RC mismatch: actual=12.0 expected=2.0
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.check(UndirectedAdjacencyCoefficientTest.java:178)
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.near(UndirectedAdjacencyCoefficientTest.java:173)
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.testOriginalReducedCostSnapshot(UndirectedAdjacencyCoefficientTest.java:98)
+	at TWETBPC.LP.UndirectedAdjacencyCoefficientTest.main(UndirectedAdjacencyCoefficientTest.java:33)

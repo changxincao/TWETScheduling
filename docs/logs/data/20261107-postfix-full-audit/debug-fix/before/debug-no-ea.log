@@ -1,0 +1,5 @@
+public fixing debug=-1 rank1Delegate=false fixed=3 actual={3, 4, 6}
+public fixing debug=-1 rank1Delegate=true fixed=3 actual={3, 4, 6}
+Exception in thread "main" java.lang.AssertionError: duplicate fixing count: paper time-indexed reduced-cost arc fixing, candidates=4, fixed=32, unavailable=1, processFixed=0, idleFixed=0, endFixed=0, cleanupFixed=32, cleanupRounds=4/4/4/4/4/4/4/4, nodeTimeArcFixedBefore=0, nodeTimeArcNewlyFixed=3, nodeTimeArcFixedAfter=3, reusedForward=false, gap=1.0, ms=0.093
+	at TWETBPC.GC.TimeIndexedDebugArcFixingTest.check(TimeIndexedDebugArcFixingTest.java:121)
+	at TWETBPC.GC.TimeIndexedDebugArcFixingTest.main(TimeIndexedDebugArcFixingTest.java:39)

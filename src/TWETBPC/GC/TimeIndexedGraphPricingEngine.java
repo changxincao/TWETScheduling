@@ -988,8 +988,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 							continue;
 						}
 						double cmin = prefix + arcCost + backwardCost;
-						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
-							forbidLocalTimeIndexedArc(from, to, t);
+						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)
+								&& forbidLocalTimeIndexedArc(from, to, t)) {
 							processFixed++;
 						}
 					}
@@ -998,8 +998,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						double backwardCost = backward[index(from, t + 1)];
 						if (isFinite(backwardCost)) {
 							double cmin = prefix + backwardCost;
-							if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
-								forbidLocalTimeIndexedArc(from, from, t);
+							if (Utility.compareGe(cmin, gap - RC_TOLERANCE)
+									&& forbidLocalTimeIndexedArc(from, from, t)) {
 								idleFixed++;
 							}
 						} else {
@@ -1009,8 +1009,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 					if (from > 0 && isEndAllowed(from, t)) {
 						endCandidates++;
 						double cmin = prefix + sinkArcReducedCost(from);
-						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)) {
-							forbidLocalTimeIndexedArc(from, 0, t);
+						if (Utility.compareGe(cmin, gap - RC_TOLERANCE)
+								&& forbidLocalTimeIndexedArc(from, 0, t)) {
 							endFixed++;
 						}
 					}
@@ -1162,25 +1162,24 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 						if (completionUseful && isFinite(processArcReducedCost(from, to, completion))) {
 							usefulProcessingAtCurrentTime = true;
 						}
-						if (!completionUseful) {
-							forbidLocalTimeIndexedArc(from, to, t);
+						if (!completionUseful && forbidLocalTimeIndexedArc(from, to, t)) {
 							fixed++;
 						}
 					}
 					if (t < horizon && !isTimeIndexedArcForbidden(from, from, t)
-							&& (!fromReachable || !isFinite(backward[index(from, t + 1)]))) {
-						forbidLocalTimeIndexedArc(from, from, t);
+							&& (!fromReachable || !isFinite(backward[index(from, t + 1)]))
+							&& forbidLocalTimeIndexedArc(from, from, t)) {
 						fixed++;
 					}
 					// 若当前可以直接结束，且更晚时间没有任何有用处理弧，继续等待只会推迟同一路径的结束。
 					if (from > 0 && t < horizon && isEndAllowed(from, t)
 							&& !isTimeIndexedArcForbidden(from, from, t)
-							&& !usefulProcessingAtLaterTime[from]) {
-						forbidLocalTimeIndexedArc(from, from, t);
+							&& !usefulProcessingAtLaterTime[from]
+							&& forbidLocalTimeIndexedArc(from, from, t)) {
 						fixed++;
 					}
-					if (from > 0 && isEndAllowed(from, t) && !fromReachable) {
-						forbidLocalTimeIndexedArc(from, 0, t);
+					if (from > 0 && isEndAllowed(from, t) && !fromReachable
+							&& forbidLocalTimeIndexedArc(from, 0, t)) {
 						fixed++;
 					}
 					if (usefulProcessingAtCurrentTime) {
@@ -1278,9 +1277,14 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 							&& inheritedTimeIndexedArcLookup.isForbidden(from, to, time));
 		}
 
-		private void forbidLocalTimeIndexedArc(int from, int to, int time) {
-			// 所有调用点都先通过isTimeIndexedArcForbidden确认该位不存在，避免重复BitSet.get。
+		private boolean forbidLocalTimeIndexedArc(int from, int to, int time) {
+			// 2026-11-07: debug只忽略禁弧的传播效果，不表示该位尚未记录；重复记录不能增加计数。
+			// 正常路径已在调用点排重，继续避免额外的BitSet.get。
+			if (!shouldUsePricingOnlyArcs() && localFixedTimeIndexedArc.get(from, to, time)) {
+				return false;
+			}
 			localFixedTimeIndexedArc.setKnownAbsent(from, to, time);
+			return true;
 		}
 
 		private boolean shouldUsePricingOnlyArcs() {

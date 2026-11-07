@@ -1,0 +1,9 @@
+public fixing debug=-1 rank1Delegate=false fixed=3 actual={3, 4, 6}
+public fixing debug=-1 rank1Delegate=true fixed=3 actual={3, 4, 6}
+public fixing debug=1 rank1Delegate=false fixed=3 actual={3, 4, 6}
+public fixing debug=1 rank1Delegate=true fixed=3 actual={3, 4, 6}
+public fixing debug=0 rank1Delegate=false fixed=3 actual={3, 4, 6}
+public fixing debug=0 rank1Delegate=true fixed=3 actual={3, 4, 6}
+debug writer segmented=false local=1 node=1 stillIgnored=true
+debug writer segmented=true local=1 node=1 stillIgnored=true
+TimeIndexedDebugArcFixingTest passed; assertions=true

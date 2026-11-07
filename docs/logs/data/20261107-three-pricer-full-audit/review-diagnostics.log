@@ -1,0 +1,8 @@
+fractional-cache H=17.5 P=17.4 ceilCache=1.0E10 trueMinimum=-0.4 pruned=true
+fractional-cache H=18.0 P=17.4 ceilCache=0.0 trueMinimum=-0.4 pruned=false
+natural-fractional NG scalar=false dataH=22.0 pricingH=17.5 midpoint=12.5 cols=1 cert=-0.3999999999999986 witnessRc=-0.4
+natural-fractional NG scalar=true dataH=22.0 pricingH=17.5 midpoint=12.5 cols=0 cert=0.0 witnessRc=-0.4
+phase-one-helper dataH=4.0 suffixAtA1=0.000000 feasiblePhaseOneSuffix=-1.0 inflated=true
+ti-candidate-heap K=300 liveSignatures=3 heapObjects=1002 staleObjects=999
+optional-adjacency pseudo=[1, 2, 1] pairDual=10.000000 cplexRC=12.000000 expandedArcRC=2.000000
+ti-cleanup noRcFix process=0 idle=0 end=0 repeatedDistancesEqual=true

@@ -6,7 +6,7 @@
 
 `PostfixAudit.java`提供四种模式。`oracle`对应`independent-outsourcing-oracle.log`，120组UB/LB与独立原始成本最优值一致，90组根闭合、30组非根，最多13节点；它不共享评价器硬窗作为独立oracle。`normal`对应`normal-ea.log`，默认debug通过；`debug`分别对应`debug-ea.log`和`debug-no-ea.log`，前者预期exit=1并定位重复写入断言，后者预期exit=0但重复计数；`segmented-contract`对应同名日志，只验证接口后果，不运行巨型网络。不能把这个预期断言退出混为61项正式回归失败。
 
-`OptionalPathsAudit.java`的`stabilization`模式对应`optional-stabilization.log`：H=4受控域的显式稳定化LB=4.5超过真实可行值4，关闭组LB=4；同输入自然H=5的开关对照均正常。代码从真实RMP获取dual，没有注入dual。`enumeration`模式对应`optional-enumeration.log`，12组中3组公共finite master把非最优值标为proven，差值16/5/6；raw求解状态和公共接口结果是两次独立求解。诊断断言用于确认漏洞仍可复现，不是修复后的通过标准；未来修复后应相应改成正确性断言。
+`OptionalPathsAudit.java`的`stabilization`模式对应`optional-stabilization.log`：H=4受控域的显式稳定化LB=4.5超过真实可行值4，关闭组LB=4；同输入自然H=5的开关对照均正常。代码从真实RMP获取dual，没有注入dual。`enumeration`模式对应`optional-enumeration.log`，12组中3组公共finite master返回容差最优但非零gap最优值，差值16/5/6；raw求解状态和公共接口结果是两次独立求解。枚举部分按用户后续确认仅保留为容差差异诊断，不列待修算法漏洞，不改变默认容差；稳定化错界仍是另一项实现问题。
 
 `rank1-and-fixing-oracle.log`由既有`../20261107-three-pricer-full-audit/TiAudit.java`重新编译后产生，160组受控定价快照零冲突，40组fixing低RC序列保留检查通过。不是160次真实RMP证书验证或正式SRI-aware性能比较。
 

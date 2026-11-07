@@ -23,7 +23,7 @@ import TWETBPC.LP.Pool;
 import TWETBPC.Model.TWETColumn;
 import TWETBPC.Util.PackedBitSet;
 
-/** 验证去除组对Boolean缓存后，剪枝掩码、BitSet复用及定价结果保持不变。 */
+/** 验证组对缓存移除及terminal位图释放后，剪枝掩码、组内复用与定价结果保持不变。 */
 public final class NgDssrJoinPrefilterCacheTest {
     private static final Class<?> OWNER = GCNGBBStyleBidirectionalNgDssr.class;
     private static final Class<?> INDEX = nested("JoinEnvelopeIndex");
@@ -32,7 +32,7 @@ public final class NgDssrJoinPrefilterCacheTest {
 
     public static void main(String[] args) throws Exception {
         boolean baseline = args.length == 1 && "--baseline".equals(args[0]);
-        testMasksAndReuse();
+        testMasksAndReuse(!baseline);
         if (!baseline) {
             require(Arrays.stream(INDEX.getDeclaredFields()).noneMatch(f -> f.getName().equals("pruneByGroup")),
                     "unused group-pair cache must not be retained");
@@ -45,7 +45,7 @@ public final class NgDssrJoinPrefilterCacheTest {
     }
 
     @SuppressWarnings("unchecked")
-    private static void testMasksAndReuse() throws Exception {
+    private static void testMasksAndReuse(boolean checkRelease) throws Exception {
         Data data = data();
         TWETBPCConfig config = config();
         LP lp = lp(data, config);
@@ -91,6 +91,35 @@ public final class NgDssrJoinPrefilterCacheTest {
         BitSet union = (BitSet) expected.clone(); union.set(1); union.set(64);
         require(all.equals(union) && counter(owner) == 9, "a different backward memory must be checked independently");
         System.out.println("MASKS " + first + " / " + otherTerminal + " / " + all + ", checks=" + counter(owner));
+        if (checkRelease) {
+            Method release = INDEX.getDeclaredMethod("releaseTerminalPrunedIndices", int.class);
+            release.setAccessible(true);
+            var cache = (IdentityHashMap<Object, BitSet[]>) field(index, "prunedIndicesByBackwardGroup");
+            BitSet[] originalSlots = cache.get(backwardGroup);
+            release.invoke(index, 1);
+            for (BitSet[] slots : cache.values()) {
+                require(slots[1] == null, "completed terminal must retain no cached BitSet");
+            }
+            require(cache.get(backwardGroup) == originalSlots, "release must retain reusable terminal arrays");
+            require(originalSlots[3] == otherTerminal, "release must not discard another terminal");
+            require(first.equals(expected) && all.equals(union), "release must unlink, not clear shared BitSets");
+            release.invoke(index, 1);
+            release.invoke(index, 0);
+            require(prune.invoke(index, 3, candidates, labelB, lp, owner) == otherTerminal && counter(owner) == 9,
+                    "repeated or empty-slot release must preserve other-terminal reuse");
+            BitSet rebuilt = (BitSet) prune.invoke(index, 1, candidates, labelA, lp, owner);
+            require(rebuilt != first && rebuilt.equals(expected) && counter(owner) == 13,
+                    "revisiting a released terminal must rebuild an identical pruning mask");
+            release.invoke(index, 1);
+            release.invoke(index, 3);
+            for (BitSet[] slots : cache.values()) {
+                require(Arrays.stream(slots).allMatch(value -> value == null), "finished terminals retain no bitmap");
+            }
+            Object empty = constructor.newInstance(data.n + 1);
+            release.invoke(empty, 1);
+            require(((IdentityHashMap<?, ?>) field(empty, "prunedIndicesByBackwardGroup")).isEmpty(),
+                    "releasing an empty cache must not allocate entries");
+        }
     }
 
     /** 固定时间切分，避免删除缓存导致的耗时变化干扰probe反馈，比较真实列与证书。 */

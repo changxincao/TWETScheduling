@@ -4456,6 +4456,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (canContinue()) {
 				joinForwardGroupToSink(candidates, lp);
 			}
+			index.releaseTerminalPrunedIndices(lastJob);
 		}
 		joinEnvelopeJoinNanos += System.nanoTime() - joinStart;
 	}
@@ -8616,6 +8617,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			byTerminal[lastJob] = pruned;
 			return pruned;
+		}
+
+		/** terminal 单调处理；普通/单点后向和 sink 都结束后，只解除本终点的位图引用。 */
+		void releaseTerminalPrunedIndices(int lastJob) {
+			for (BitSet[] byTerminal : prunedIndicesByBackwardGroup.values()) {
+				byTerminal[lastJob] = null;
+			}
 		}
 
 		private boolean canPruneGroup(int lastJob, JoinEnvelopeGroup<ForwardLabel> forwardGroup,

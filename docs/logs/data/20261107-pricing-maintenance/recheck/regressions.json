@@ -1,0 +1,27 @@
+[
+  {
+    "test": "TimeIndexedMaintenanceTest",
+    "status": 0,
+    "seconds": 0.516
+  },
+  {
+    "test": "TimeIndexedReuseTest",
+    "status": 0,
+    "seconds": 0.453
+  },
+  {
+    "test": "TimeIndexedGraphOptimizationTest",
+    "status": 0,
+    "seconds": 2.297
+  },
+  {
+    "test": "StrongBranchingPhaseOnePricingTest",
+    "status": 0,
+    "seconds": 1.093
+  },
+  {
+    "test": "BestBpcProfilesTest",
+    "status": 0,
+    "seconds": 0.141
+  }
+]

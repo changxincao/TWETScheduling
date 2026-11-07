@@ -1,0 +1,6 @@
+test,status,seconds
+TimeIndexedMaintenanceTest,0,0.516
+TimeIndexedReuseTest,0,0.453
+TimeIndexedGraphOptimizationTest,0,2.297
+StrongBranchingPhaseOnePricingTest,0,1.093
+BestBpcProfilesTest,0,0.141

@@ -10,10 +10,12 @@
   },
   "unfixedEpsReadDiagnostic": {
     "commandArgument": "eps-diagnostic",
+    "inputHasManuallyConstructedEpsLengthNeighbour": true,
+    "productionReachabilityEstablished": false,
     "rawAddEvaluateAt5": -11.0,
     "backwardNormalizedClosedValueAt5": -11.0,
     "backwardNormalizedEvaluateAt5": 5.0,
-    "scope": "Existing EPS point-location edge, not fixed by changing public evaluate or normalize"
+    "scope": "Generic EPS point-location edge on a manually constructed input; not a confirmed mainline failure"
   },
   "approximation": {
     "maxHalfWidth": 0.0005,

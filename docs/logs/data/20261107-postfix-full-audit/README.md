@@ -17,3 +17,5 @@
 后续授权修复的证据位于`debug-fix/`：before保存新专项在旧源码下开/关断言的失败及默认快照，after保存对应通过日志和相同默认快照；CSV/JSON记录fresh 62项回归全通过。当前验收入口是`src/TWETBPC/GC/TimeIndexedDebugArcFixingTest.java`，开/关断言均应正常退出；不再期望当前公开debug fixing报错。`PostfixAudit`的segmented-contract是刻意绕过生产writer、重复调用known-absent的契约演示，公共位图API未改，因此该模式原说明仍成立。
 
 `debug-fix/recheck/`为两名只读审查者交叉复核后的补测。专项新增非空继承和连续三次fixing断言，分别核对本轮记录数、Node新增数、零新增停止和窗口；开/关断言日志均通过。CSV/JSON为补充后的六项fresh回归，不是重新跑62项；snapshot仍与before逐字相同。生产源码保持`7ccae804`不变，新增内容仅为测试与记录。
+
+`stabilization-review/`为`b18c9d06`后的重新核对：从完整当前sourcepath编译`OptionalPathsAudit`并执行stabilization模式，受控H4报告4.5而已有可行值4，自然H5对照正常。仅确认“已有SRI行的dual从0变负、稳定化循环未重查资格”的原因及切回true-dual循环的最小方案，尚未修生产代码；有效日志为compile-full-source与stabilization-full-source。临时目录中更早的不完整局部classpath编译失败不作为生产故障证据。

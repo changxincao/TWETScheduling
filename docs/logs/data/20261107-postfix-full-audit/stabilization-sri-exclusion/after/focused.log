@@ -1,0 +1,16 @@
+H=4 stabilized=false cut=true sriSwitch=1 initiallyNegative=false incumbent=4.0 RMP=7.0 bound=4.0 stableCalls=0 rawSriCalls=2 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=true sriSwitch=1 initiallyNegative=false incumbent=4.0 RMP=7.0 bound=4.0 stableCalls=0 rawSriCalls=2 mixedSriCalls=0 stopped=false
+H=4 stabilized=false cut=true sriSwitch=1 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=6 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=true sriSwitch=1 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=6 mixedSriCalls=0 stopped=false
+H=5 stabilized=false cut=true sriSwitch=1 initiallyNegative=false incumbent=4.0 RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=3 mixedSriCalls=0 stopped=false
+H=5 stabilized=true cut=true sriSwitch=1 initiallyNegative=false incumbent=4.0 RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=3 mixedSriCalls=0 stopped=false
+H=5 stabilized=false cut=true sriSwitch=1 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=3 mixedSriCalls=0 stopped=false
+H=5 stabilized=true cut=true sriSwitch=1 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=3 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=true sriSwitch=1 initiallyNegative=true incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=5 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=true sriSwitch=1 initiallyNegative=false incumbent=Infinity RMP=7.0 bound=2.0 stableCalls=0 rawSriCalls=0 mixedSriCalls=0 stopped=true
+H=4 stabilized=false cut=false sriSwitch=0 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=0 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=false sriSwitch=0 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.000000000000001 stableCalls=10 rawSriCalls=0 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=false sriSwitch=1 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=0 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=false sriSwitch=2 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=0 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=true sriSwitch=0 initiallyNegative=false incumbent=Infinity RMP=4.0 bound=4.0 stableCalls=0 rawSriCalls=6 mixedSriCalls=0 stopped=false
+DualStabilizationSriGateTest passed

@@ -1,0 +1,8 @@
+H=4 stabilized=false cut=true sriSwitch=1 initiallyNegative=false incumbent=4.0 RMP=7.0 bound=4.0 stableCalls=0 rawSriCalls=2 mixedSriCalls=0 stopped=false
+H=4 stabilized=true cut=true sriSwitch=1 initiallyNegative=false incumbent=4.0 RMP=7.0 bound=4.0 stableCalls=2 rawSriCalls=2 mixedSriCalls=0 stopped=false
+Exception in thread "main" java.lang.AssertionError: SRI-enabled configuration entered stabilization
+	at TWETBPC.LP.DualStabilizationSriGateTest.check(DualStabilizationSriGateTest.java:174)
+	at TWETBPC.LP.DualStabilizationSriGateTest.solve(DualStabilizationSriGateTest.java:127)
+	at TWETBPC.LP.DualStabilizationSriGateTest.solve(DualStabilizationSriGateTest.java:52)
+	at TWETBPC.LP.DualStabilizationSriGateTest.solve(DualStabilizationSriGateTest.java:47)
+	at TWETBPC.LP.DualStabilizationSriGateTest.main(DualStabilizationSriGateTest.java:30)

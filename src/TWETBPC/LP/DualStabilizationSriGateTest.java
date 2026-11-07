@@ -20,7 +20,7 @@ import TWETBPC.Model.TWETCutType;
 import TWETBPC.Model.TWETMasterSolution;
 import TWETBPC.Model.TWETMasterStatus;
 
-/** 已有SRI从零dual变负时，稳定化必须退回真实dual，不能沿用缺少割分量的center。 */
+/** SRI开关或继承割存在时禁止稳定化，不依赖割是否已产生负dual。 */
 public final class DualStabilizationSriGateTest {
 
 	public static void main(String[] args) throws Exception {
@@ -28,7 +28,7 @@ public final class DualStabilizationSriGateTest {
 			for (double incumbent : new double[] {4.0, Double.POSITIVE_INFINITY}) {
 				double reference = solve(horizon, false, true, false, incumbent);
 				double actual = solve(horizon, true, true, false, incumbent);
-				check(Math.abs(actual - reference) <= 1e-8, "fallback changed the final RMP value");
+				check(Math.abs(actual - reference) <= 1e-8, "SRI exclusion changed the final RMP value");
 			}
 		}
 		solve(4, true, true, true, Double.POSITIVE_INFINITY);
@@ -36,6 +36,9 @@ public final class DualStabilizationSriGateTest {
 		double reference = solve(4, false, false, false, Double.POSITIVE_INFINITY);
 		double actual = solve(4, true, false, false, Double.POSITIVE_INFINITY);
 		check(Math.abs(actual - reference) <= 1e-8, "no-cut stabilization changed the closed RMP value");
+		solve(4, true, false, false, Double.POSITIVE_INFINITY, false, 1);
+		solve(4, true, false, false, Double.POSITIVE_INFINITY, false, 2);
+		solve(4, true, true, false, Double.POSITIVE_INFINITY, false, 0);
 		System.out.println("DualStabilizationSriGateTest passed");
 	}
 
@@ -46,6 +49,11 @@ public final class DualStabilizationSriGateTest {
 
 	private static double solve(int horizon, boolean stabilized, boolean withCut, boolean seedPseudo,
 			double incumbent, boolean stopAfterActivation) throws Exception {
+		return solve(horizon, stabilized, withCut, seedPseudo, incumbent, stopAfterActivation, withCut ? 1 : 0);
+	}
+
+	private static double solve(int horizon, boolean stabilized, boolean withCut, boolean seedPseudo,
+			double incumbent, boolean stopAfterActivation, int sriSwitch) throws Exception {
 		Utility.resetCurUpperBound(Utility.big_M);
 		Path input = Files.createTempFile("twet-stabilization-sri-", ".dat");
 		Data data;
@@ -61,6 +69,8 @@ public final class DualStabilizationSriGateTest {
 		TWETBPCConfig config = new TWETBPCConfig();
 		BestBpcProfiles.TIME_INDEXED_GRAPH_RANK1.apply(config);
 		config.enableDualStabilization = stabilized;
+		config.enableSubsetRowCutsForTimeIndexedGraph = sriSwitch == 1;
+		config.enableSubsetRowCutsForPartialDominance = sriSwitch == 2;
 		config.outsourcingModel = "columns";
 		config.timeIndexedGraphMaxExactPricingColumns = 3;
 		config.enableTimeIndexedGraphDualWindow = false;
@@ -106,15 +116,16 @@ public final class DualStabilizationSriGateTest {
 			TWETMasterSolution result = pc.solve(lp, incumbent);
 			double bound = pc.getLastObservedDualBound();
 			System.out.println("H=" + horizon + " stabilized=" + stabilized + " cut=" + withCut
-					+ " initiallyNegative=" + seedPseudo + " incumbent=" + incumbent + " RMP="
+					+ " sriSwitch=" + sriSwitch + " initiallyNegative=" + seedPseudo + " incumbent=" + incumbent + " RMP="
 					+ result.getObjectiveValue() + " bound=" + bound + " stableCalls=" + trace.stableCalls
 					+ " rawSriCalls=" + trace.rawSriCalls + " mixedSriCalls=" + trace.mixedSriCalls
 					+ " stopped=" + trace.stopped);
 			check(Double.isFinite(bound) && bound <= feasible + 1e-8, "pricing bound exceeds a feasible value");
 			check(trace.mixedSriCalls == 0, "stabilized pricing consumed a newly negative SRI dual");
-			check(!lp.hasPricingDualOverride(), "stabilized override leaked after fallback");
+			check(!lp.hasPricingDualOverride(), "stabilized override leaked");
 			if (withCut && !stopAfterActivation) check(trace.rawSriCalls > 0, "SRI never reached true-dual pricing");
-			check((trace.stableCalls > 0) == (stabilized && !seedPseudo), "stabilization entry behavior changed");
+			check((trace.stableCalls > 0) == (stabilized && sriSwitch == 0 && !withCut),
+					"SRI-enabled configuration entered stabilization");
 			if (stopAfterActivation) {
 				check(trace.stopped && !lp.getActiveSubsetRowPricingCutIds().isEmpty(), "timeout boundary not reached");
 				check(result.getStatus() == TWETMasterStatus.LP_RELAXATION && trace.rawSriCalls == 0,
@@ -144,7 +155,7 @@ public final class DualStabilizationSriGateTest {
 
 		@Override public void onMasterLpSolution(Node node, String phase, TWETMasterSolution solution,
 				int restrictedColumnCount, int poolSize, long elapsedNanos) {
-			if (stopAfterActivation && "after_pricing_stabilized".equals(phase)
+			if (stopAfterActivation && ("after_pricing_stabilized".equals(phase) || "after_pricing".equals(phase))
 					&& !lp.getActiveSubsetRowPricingCutIds().isEmpty()) stopped = true;
 		}
 

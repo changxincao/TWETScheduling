@@ -21,3 +21,5 @@
 `stabilization-review/`为`b18c9d06`后的重新核对：从完整当前sourcepath编译`OptionalPathsAudit`并执行stabilization模式，受控H4报告4.5而已有可行值4，自然H5对照正常。仅确认“已有SRI行的dual从0变负、稳定化循环未重查资格”的原因及切回true-dual循环的最小方案，尚未修生产代码；有效日志为compile-full-source与stabilization-full-source。临时目录中更早的不完整局部classpath编译失败不作为生产故障证据。
 
 `stabilization-gate-fix/`保存后续五行资格检查修复：before为新专项在旧生产代码下复现4.5错界，after为12组门禁/切换/完整CG/超时断言及原诊断通过日志。CSV/JSON是fresh 63项回归全部退出0。专项入口为`src/TWETBPC/LP/DualStabilizationSriGateTest.java`；稳定化仍默认关闭，没有改SRI状态或启停远端。此前两个stabilization目录保留为修复前历史证据，不当作当前失败状态。
+
+最终规则按用户后续要求改为SRI开关级互斥，见`stabilization-sri-exclusion/`。入口拒绝两个SRI开关任一开启或已有继承cut的情况，不再等dual变负，五行循环内切换已删除。专项扩为15组，覆盖开关已开但无割、开关全关但有零dual继承割、真实无SRI、原反例、初始负dual和超时；fresh 63项均通过。`stabilization-gate-fix/`继续作为先前循环内切换版本的历史证据，不代表当前启用策略。

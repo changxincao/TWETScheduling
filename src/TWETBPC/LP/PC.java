@@ -633,10 +633,13 @@ public class PC {
 
 	private TWETMasterSolution solvePricingLoop(LP lp, TWETMasterSolution currentSolution) {
 		lp.clearPricingDualOverride();
+		// 2026-11-07: SRI开关与稳定化直接互斥；已有继承割时也不依赖其当前dual判断。
 		if (config.enableDualStabilization && !lp.isFeasibilityRepairMode()
+				&& !config.enableSubsetRowCutsForPartialDominance
+				&& !config.enableSubsetRowCutsForTimeIndexedGraph
 				&& lp.supportsDualStabilizationSnapshot()
 				&& supportsDualStabilizationOracleFamilies(lp)
-				&& lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
+				&& lp.getActiveCutIds().isEmpty()) {
 			return solvePricingLoopWithDualStabilization(lp, currentSolution);
 		}
 		return solvePricingLoopWithTrueDuals(lp, currentSolution);
@@ -710,11 +713,6 @@ public class PC {
 		TWETMasterSolution solution = currentSolution;
 		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals());
 		while (!isTimeLimitReached()) {
-			// 2026-11-07: 已有SRI可能在加列重解后由零dual变负，旧center不含其分量，不能继续混合。
-			if (!lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
-				lp.clearPricingDualOverride();
-				return solvePricingLoopWithTrueDuals(lp, solution);
-			}
 			LP.PricingDualSnapshot outDual = lp.captureTruePricingDuals();
 			PricingPassResult stabilizedPass = runStabilizedPricingSequence(lp, dualState, outDual);
 			if (isTimeLimitReached()) {

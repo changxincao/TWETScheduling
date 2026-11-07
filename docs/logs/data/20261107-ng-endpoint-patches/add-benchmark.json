@@ -1,0 +1,38 @@
+[
+  {
+    "round": 0,
+    "version": "before",
+    "exit_code": 0,
+    "output": "continuous-add benchmark nsPerCall=267.85 checksum=7100000.0"
+  },
+  {
+    "round": 0,
+    "version": "after",
+    "exit_code": 0,
+    "output": "continuous-add benchmark nsPerCall=322.639 checksum=7100000.0"
+  },
+  {
+    "round": 1,
+    "version": "after",
+    "exit_code": 0,
+    "output": "continuous-add benchmark nsPerCall=317.04 checksum=7100000.0"
+  },
+  {
+    "round": 1,
+    "version": "before",
+    "exit_code": 0,
+    "output": "continuous-add benchmark nsPerCall=258.493 checksum=7100000.0"
+  },
+  {
+    "round": 2,
+    "version": "before",
+    "exit_code": 0,
+    "output": "continuous-add benchmark nsPerCall=240.302 checksum=7100000.0"
+  },
+  {
+    "round": 2,
+    "version": "after",
+    "exit_code": 0,
+    "output": "continuous-add benchmark nsPerCall=364.038 checksum=7100000.0"
+  }
+]

@@ -7595,14 +7595,15 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		if (!feasibilityPhaseOneObjectiveMode) {
 			return data.penaltyFunction[job];
 		}
-		double start = job == 0 ? 0.0 : data.hardWindowStart[job];
-		double end = job == 0 ? data.CmaxH : data.hardWindowEnd[job];
-		PiecewiseLinearFunction zero = new PiecewiseLinearFunction();
-		zero.resetDomain(start, end);
-		if (!Utility.compareGt(start, end)) {
-			zero.addSegment(start, end, 0.0, 0.0);
+		// Phase-I 也保留普通目标的完整物理域；复用硬窗接口及其退化窗规则，窗外仍为 M。
+		PiecewiseLinearFunction zero = new PiecewiseLinearFunction(0.0, data.CmaxH);
+		zero.addSegment(0.0, data.CmaxH, 0.0, 0.0);
+		if (job == 0) {
+			return zero;
 		}
-		return zero;
+		PiecewiseLinearFunction windowed = zero.setDomain(data.hardWindowStart[job], data.hardWindowEnd[job], true);
+		zero.release();
+		return windowed;
 	}
 
 	/**
@@ -8118,7 +8119,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			double fEnd = f.end + delta;
 			double lo = Math.max(fStart, b.start);
 			double hi = Math.min(fEnd, b.end);
-			if (Utility.compareLe(lo, hi)) {
+			if (lo <= hi) {
 				double slope = f.slope + b.slope;
 				double intercept = f.intercept - f.slope * delta + b.intercept + yShift;
 				double left = slope * lo + intercept;
@@ -8134,9 +8135,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 					result.backwardLabel = b.source;
 				}
 			}
-			if (Utility.compareLe(fEnd, b.end)) {
+			if (fEnd == b.end) {
+				TraceSegment<ForwardLabel> nextF = fIndex + 1 < forwardEnvelope.segments.size()
+						? forwardEnvelope.segments.get(fIndex + 1) : null;
+				TraceSegment<BackwardLabel> nextB = bIndex + 1 < backwardEnvelope.segments.size()
+						? backwardEnvelope.segments.get(bIndex + 1) : null;
+				// 同时推进会漏掉新旧段交叉组合；耗尽或实际点接触不能套用内部连续快路。
+				if (!canSkipTracedJoinEndpoint(f, nextF, b, nextB, delta, fEnd)) {
+					includeTracedJoinEndpoint(result, nextF, b, delta, fEnd, yShift);
+					includeTracedJoinEndpoint(result, f, nextB, delta, fEnd, yShift);
+				}
+			}
+			if (fEnd <= b.end) {
 				fIndex++;
-				if (Utility.compareEq(fEnd, b.end)) {
+				if (fEnd == b.end) {
 					bIndex++;
 				}
 			} else {
@@ -8144,6 +8156,51 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 		}
 		return result;
+	}
+
+	/** 普通内部共同断点只有反向跳跃可能新增低值，不以 source 相同作为快路条件。 */
+	private boolean canSkipTracedJoinEndpoint(TraceSegment<ForwardLabel> f, TraceSegment<ForwardLabel> nextF,
+			TraceSegment<BackwardLabel> b, TraceSegment<BackwardLabel> nextB, double delta, double time) {
+		if (nextF == null || nextB == null || !(f.start + delta < time) || !(b.start < time)
+				|| nextF.start + delta > time || !(time < nextF.end + delta)
+				|| nextB.start > time || !(time < nextB.end)) {
+			return false;
+		}
+		double leftF = f.value(time - delta);
+		double rightF = nextF.value(time - delta);
+		if (!Double.isFinite(leftF) || !Double.isFinite(rightF)
+				|| Utility.isBigMValue(leftF) || Utility.isBigMValue(rightF)) {
+			return false;
+		}
+		if (Utility.compareEq(leftF, rightF)) {
+			return true;
+		}
+		double leftB = b.value(time);
+		double rightB = nextB.value(time);
+		return Double.isFinite(leftB) && Double.isFinite(rightB)
+				&& !Utility.isBigMValue(leftB) && !Utility.isBigMValue(rightB)
+				&& (Utility.compareEq(leftB, rightB) || (rightF > leftF) == (rightB > leftB));
+	}
+
+	/** 仅消费实际闭区间覆盖的有限端点；严格新低值才同步替换两侧来源。 */
+	private void includeTracedJoinEndpoint(JoinEnvelopeMinResult result, TraceSegment<ForwardLabel> f,
+			TraceSegment<BackwardLabel> b, double delta, double time, double yShift) {
+		if (f == null || b == null || !(f.start + delta <= time && time <= f.end + delta)
+				|| !(b.start <= time && time <= b.end)) {
+			return;
+		}
+		double forwardValue = f.value(time - delta);
+		double backwardValue = b.value(time);
+		if (!Double.isFinite(forwardValue) || !Double.isFinite(backwardValue)
+				|| Utility.isBigMValue(forwardValue) || Utility.isBigMValue(backwardValue)) {
+			return;
+		}
+		double value = forwardValue + backwardValue + yShift;
+		if (Double.isFinite(value) && Utility.compareLt(value, result.reducedCost)) {
+			result.reducedCost = value;
+			result.forwardLabel = f.source;
+			result.backwardLabel = b.source;
+		}
 	}
 
 	private enum InsertStatus {

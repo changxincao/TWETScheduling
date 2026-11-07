@@ -6,7 +6,7 @@ import Common.PiecewiseLinearFunction;
 import Common.Utility;
 
 /**
- * 对拍启发式单任务插入的旧链表实现与无临时 PWLF 标量实现，并提供高频微基准。
+ * 用独立闭区间枚举验证单任务插入；旧实现只保留为微基准，不再作为端点正确性标准。
  */
 public final class PiecewiseLinearInsertScalarTest {
     private static final double TOLERANCE = 1e-6;
@@ -35,9 +35,15 @@ public final class PiecewiseLinearInsertScalarTest {
                 double prefixShift = random.nextInt(51);
                 double suffixShift = random.nextInt(51);
                 double bridgeCost = random.nextDouble() * 100.0 - 20.0;
-                Utility.curUpperBound = test % 5 == 0 ? 50.0 + random.nextDouble() * 500.0 : Utility.big_M;
-
-                double expected = reference(prefix, prefixShift, penalty, suffix, suffixShift, bridgeCost);
+                // 保留原随机序列；有限上界截断由端点专项测试单独覆盖。
+                if (test % 5 == 0) {
+                    random.nextDouble();
+                }
+                Utility.curUpperBound = Utility.big_M;
+                prefix.normalize(PiecewiseLinearFunction.Direction.FORWARD);
+                suffix.normalize(PiecewiseLinearFunction.Direction.BACKWARD);
+                double expected = PiecewiseLinearEndpointPatchTest.insertionOracle(prefix, prefixShift,
+                        penalty, suffix, suffixShift, bridgeCost);
                 double actual = PiecewiseLinearFunction.findMinimalInsertedJobCost(prefix, prefixShift, penalty,
                         suffix, suffixShift, bridgeCost, workspace);
                 double flatActual = PiecewiseLinearFunction.findMinimalInsertedJobCost(
@@ -53,7 +59,7 @@ public final class PiecewiseLinearInsertScalarTest {
         } finally {
             Utility.curUpperBound = originalUpperBound;
         }
-        System.out.println("scalar-insert random equivalence passed: cases=" + cases);
+        System.out.println("scalar-insert independent endpoint oracle passed: cases=" + cases);
     }
 
     private static void runBenchmark(int iterations) {

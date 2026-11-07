@@ -1,0 +1,31 @@
+{
+  "date": "2026-11-07",
+  "baselineCommit": "265532b207a72b2c6936a81e841bdd71903762cc",
+  "targetedRegressionPrograms": 30,
+  "allTargetedProgramsPassed": true,
+  "historicalProperty": {
+    "before": {"passed": 26, "warnings": 2, "failed": 7},
+    "after": {"passed": 26, "warnings": 2, "failed": 7},
+    "bothReportSha256": "E3DD4CDF8A5CC95FE8A463180E7EAC03DA42EC246E6A3C73DF284CDFCE737EB2"
+  },
+  "unfixedEpsReadDiagnostic": {
+    "commandArgument": "eps-diagnostic",
+    "rawAddEvaluateAt5": -11.0,
+    "backwardNormalizedClosedValueAt5": -11.0,
+    "backwardNormalizedEvaluateAt5": 5.0,
+    "scope": "Existing EPS point-location edge, not fixed by changing public evaluate or normalize"
+  },
+  "approximation": {
+    "maxHalfWidth": 0.0005,
+    "uniformObjectiveErrorBoundEstablished": false,
+    "extremeDenseShortSegmentsDeferred": true
+  },
+  "remoteDeploymentPerformed": false,
+  "fullFormalSolverBenchmarkPerformed": false,
+  "workingTreeByteSha256": {
+    "src/Common/PiecewiseLinearFunction.java": "AD99914D6DF6E7FC5E42797D545B49826A7E7CA718B8E4D8EE9D8EA51C2D3794",
+    "src/TWETBPC/GC/CompletionBoundCalculator.java": "5BD4973570D8FC73F2628E7925649A2343232CA352014A074F63BDFCFD546D7A",
+    "src/TWETBPC/GC/GCNGBBStyleBidirectionalNgDssr.java": "9DB0D48541080356D9D8908FAE6EC16FB92CD619340E77B1BDC5E7CD6D14CE77",
+    "src/TWETBPC/IO/TWETColumnEvaluator.java": "1383DFC350A8A2E2C80814A4A32E4BD302FE2E8DE430F48C3332A563F3F57248"
+  }
+}

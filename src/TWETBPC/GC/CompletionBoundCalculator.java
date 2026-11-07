@@ -1053,7 +1053,8 @@ final class CompletionBoundCalculator {
 		if (diagnosticCandidateTiming) {
 			stats.forwardCandidateShiftNanos += System.nanoTime() - start;
 		}
-		if (!hasPositiveDomain(u)) {
+		boolean shiftedPoint = isFiniteWholePoint(u);
+		if (!hasPositiveDomain(u) && !shiftedPoint) {
 			return null;
 		}
 		u.shiftYInPlace(pricingSetupCost(prevJob, job) - lp.getArcDual(prevJob, job));
@@ -1063,6 +1064,10 @@ final class CompletionBoundCalculator {
 			extendForwardWaitingClosure(u);
 		} else {
 			u.normalize(Direction.FORWARD);
+			if (shiftedPoint) {
+				// 真实点先按原方向取小，再恢复完成后等待；方向尽头仍交给 add 接收。
+				extendForwardWaitingClosure(u);
+			}
 		}
 		if (diagnosticCandidateTiming) {
 			stats.forwardCandidateFirstNormalizeNanos += System.nanoTime() - start;
@@ -1084,7 +1089,10 @@ final class CompletionBoundCalculator {
 		if (diagnosticCandidateTiming) {
 			stats.forwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
 		}
-		return hasPositiveDomain(f) ? new FunctionPair(u, f) : null;
+		if (!hasPositiveDomain(f)) {
+			return null;
+		}
+		return new FunctionPair(receiveAuxiliaryPoint(u), f);
 	}
 
 	private FunctionPair buildBackwardSinkCandidate(int job) {
@@ -1117,7 +1125,8 @@ final class CompletionBoundCalculator {
 		if (diagnosticCandidateTiming) {
 			stats.backwardCandidateShiftNanos += System.nanoTime() - start;
 		}
-		if (!hasPositiveDomain(r)) {
+		boolean shiftedPoint = isFiniteWholePoint(r);
+		if (!hasPositiveDomain(r) && !shiftedPoint) {
 			return null;
 		}
 		r.shiftYInPlace(pricingSetupCost(job, successor) - lp.getArcDual(job, successor));
@@ -1127,6 +1136,9 @@ final class CompletionBoundCalculator {
 			extendBackwardWaitingClosure(r);
 		} else {
 			r.normalize(Direction.BACKWARD);
+			if (shiftedPoint) {
+				extendBackwardWaitingClosure(r);
+			}
 		}
 		if (diagnosticCandidateTiming) {
 			stats.backwardCandidateFirstNormalizeNanos += System.nanoTime() - start;
@@ -1148,7 +1160,43 @@ final class CompletionBoundCalculator {
 		if (diagnosticCandidateTiming) {
 			stats.backwardCandidateSecondNormalizeNanos += System.nanoTime() - start;
 		}
-		return hasPositiveDomain(b) ? new FunctionPair(r, b) : null;
+		if (!hasPositiveDomain(b)) {
+			return null;
+		}
+		return new FunctionPair(receiveAuxiliaryPoint(r), b);
+	}
+
+	/** 只识别实际闭域内的有限整体点，不把 EPS 窄段或分离域当作点。 */
+	private boolean isFiniteWholePoint(PiecewiseLinearFunction function) {
+		if (function == null || function.head == null || function.tail == null
+				|| function.head.start != function.tail.end) {
+			return false;
+		}
+		double time = function.head.start;
+		if (!Double.isFinite(time) || time < function.domainStart || time > function.domainEnd) {
+			return false;
+		}
+		for (Segment segment = function.head; segment != null; segment = segment.next) {
+			if (segment.start <= time && time <= segment.end) {
+				double value = segment.getValue(time);
+				if (Double.isFinite(value) && !Utility.isBigMValue(value)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/** 候选成功后仅接收辅助点；不含当前任务成本，也不回写已得到的 F/B。 */
+	private PiecewiseLinearFunction receiveAuxiliaryPoint(PiecewiseLinearFunction function) {
+		if (!isFiniteWholePoint(function)) {
+			return function;
+		}
+		PiecewiseLinearFunction zero = constantFunction(0.0);
+		PiecewiseLinearFunction received = function.add(zero);
+		zero.release();
+		function.release();
+		return received;
 	}
 
 	private void rebuildForwardAuxiliaryBounds(PiecewiseLinearFunction[] forwardU,

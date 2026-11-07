@@ -1,0 +1,2 @@
+scalar-insert independent endpoint oracle passed: cases=2000
+scalar-insert benchmark: mode=both reverse=false iterations=20000 old=0.011s new=0.010s speedup=1.122x checksum=-172625274.098536

@@ -13,6 +13,8 @@ public class PiecewiseLinearFunction {
 	// 粗硬窗本身是预处理剪枝，不是真实物理可行域；把 [d,d] 放宽到 d±0.1 只会少剪一点，
 	// 不会因为这个扰动删掉最优解，同时能避免长度为 0 的点段进入 add/merge/normalize。
 	private static final double WINDOW_EPSILON = 0.1;
+	// 2026-11-07: 仅将相加遗漏的孤立低点局部表示成短平台，不改变全局EPS。
+	private static final double ADD_POINT_HALF_WIDTH = 0.0005;
 
 	/**
 	 * 分段函数集合操作的闭包方向。
@@ -87,11 +89,11 @@ public class PiecewiseLinearFunction {
 			lastSlope = slope;
 			lastIntercept = intercept;
 			size++;
-			if (Utility.compareLt(end, shiftedSuffixStart) || Utility.compareLt(shiftedSuffixEnd, start)) {
+			if (end < shiftedSuffixStart || shiftedSuffixEnd < start) {
 				return;
 			}
 			Segment suffix = suffixCursor;
-			while (suffix != null && Utility.compareLt(suffix.end + suffixDelta, start)) {
+			while (suffix != null && suffix.end + suffixDelta < start) {
 				suffix = suffix.next;
 			}
 			while (suffix != null) {
@@ -99,22 +101,18 @@ public class PiecewiseLinearFunction {
 				double suffixEnd = suffix.end + suffixDelta;
 				double lo = Math.max(Math.max(start, suffixStart), shiftedSuffixStart);
 				double hi = Math.min(Math.min(end, suffixEnd), shiftedSuffixEnd);
-				if (Utility.compareLe(lo, hi)) {
+				if (lo <= hi) {
 					double sumSlope = slope + suffix.slope;
 					double sumIntercept = intercept + suffix.intercept
 							- suffix.slope * suffixDelta + yShift;
 					minimum = Math.min(minimum,
 							Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept));
 				}
-				if (Utility.compareLe(suffixEnd, end)) {
-					boolean bothSegmentsEnd = Utility.compareEq(suffixEnd, end);
-					suffix = suffix.next;
-					if (bothSegmentsEnd) {
-						break;
-					}
-				} else {
+				if (suffixEnd >= end) {
+					// suffix 已做 suffix-min；共同端点保留旧段供下一段 prefix 匹配。
 					break;
 				}
+				suffix = suffix.next;
 			}
 			suffixCursor = suffix;
 		}
@@ -138,12 +136,12 @@ public class PiecewiseLinearFunction {
 			lastSlope = slope;
 			lastIntercept = intercept;
 			size++;
-			if (Utility.compareLt(end, shiftedSuffixStart) || Utility.compareLt(shiftedSuffixEnd, start)) {
+			if (end < shiftedSuffixStart || shiftedSuffixEnd < start) {
 				return;
 			}
 			int suffixIndex = flatSuffixIndex;
 			while (suffixIndex < flatSuffix.size()
-					&& Utility.compareLt(flatSuffix.ends[suffixIndex] + suffixDelta, start)) {
+					&& flatSuffix.ends[suffixIndex] + suffixDelta < start) {
 				suffixIndex++;
 			}
 			while (suffixIndex < flatSuffix.size()) {
@@ -151,7 +149,7 @@ public class PiecewiseLinearFunction {
 				double suffixEnd = flatSuffix.ends[suffixIndex] + suffixDelta;
 				double lo = Math.max(Math.max(start, suffixStart), shiftedSuffixStart);
 				double hi = Math.min(Math.min(end, suffixEnd), shiftedSuffixEnd);
-				if (Utility.compareLe(lo, hi)) {
+				if (lo <= hi) {
 					double suffixSlope = flatSuffix.slopes[suffixIndex];
 					double sumSlope = slope + suffixSlope;
 					double sumIntercept = intercept + flatSuffix.intercepts[suffixIndex]
@@ -159,15 +157,10 @@ public class PiecewiseLinearFunction {
 					minimum = Math.min(minimum,
 							Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept));
 				}
-				if (Utility.compareLe(suffixEnd, end)) {
-					boolean bothSegmentsEnd = Utility.compareEq(suffixEnd, end);
-					suffixIndex++;
-					if (bothSegmentsEnd) {
-						break;
-					}
-				} else {
+				if (suffixEnd >= end) {
 					break;
 				}
+				suffixIndex++;
 			}
 			flatSuffixIndex = suffixIndex;
 		}
@@ -848,11 +841,11 @@ public class PiecewiseLinearFunction {
 		}
 		double start = Math.max(dynamic.head.start, fixed.starts[0]);
 		double end = Math.min(dynamic.tail.end, fixed.ends[fixed.size() - 1]);
-		if (Utility.compareLt(end, start)) {
+		if (end < start) {
 			return Utility.big_M;
 		}
 		Segment dynamicSegment = dynamic.head;
-		while (dynamicSegment != null && Utility.compareLt(dynamicSegment.end, start)) {
+		while (dynamicSegment != null && dynamicSegment.end < start) {
 			dynamicSegment = dynamicSegment.next;
 		}
 		int fixedIndex = firstSegmentEndingAtOrAfter(fixed.ends, start);
@@ -861,7 +854,7 @@ public class PiecewiseLinearFunction {
 			double fixedEnd = fixed.ends[fixedIndex];
 			double lo = Math.max(Math.max(dynamicSegment.start, fixed.starts[fixedIndex]), start);
 			double hi = Math.min(Math.min(dynamicSegment.end, fixedEnd), end);
-			if (Utility.compareLe(lo, hi)) {
+			if (lo <= hi) {
 				double slope = dynamicSegment.slope + fixed.slopes[fixedIndex];
 				double intercept = dynamicSegment.intercept + fixed.intercepts[fixedIndex] + yShift;
 				double leftValue = slope * lo + intercept;
@@ -874,17 +867,23 @@ public class PiecewiseLinearFunction {
 				}
 			}
 			double dynamicEnd = dynamicSegment.end;
-			if (Utility.compareLe(dynamicEnd, fixedEnd)) {
+			if (dynamicEnd == fixedEnd && start <= dynamicEnd && dynamicEnd <= end) {
+				double point = queryUnscannedEndpointSum(dynamicSegment, 0.0, fixed, fixedIndex,
+						dynamicEnd, start, end);
+				if (!Utility.isBigMValue(point) && Utility.compareLt(point + yShift, min)) {
+					min = point + yShift;
+				}
+			}
+			if (dynamicEnd <= fixedEnd) {
 				dynamicSegment = dynamicSegment.next;
-				if (Utility.compareEq(dynamicEnd, fixedEnd)) {
+				if (dynamicEnd == fixedEnd) {
 					fixedIndex++;
 				}
 			} else {
 				fixedIndex++;
 			}
-			if (Utility.compareLt(end,
-					Math.max(dynamicSegment == null ? Double.POSITIVE_INFINITY : dynamicSegment.start,
-							fixedIndex >= fixed.size() ? Double.POSITIVE_INFINITY : fixed.starts[fixedIndex]))) {
+			if (end < Math.max(dynamicSegment == null ? Double.POSITIVE_INFINITY : dynamicSegment.start,
+							fixedIndex >= fixed.size() ? Double.POSITIVE_INFINITY : fixed.starts[fixedIndex])) {
 				break;
 			}
 		}
@@ -920,16 +919,16 @@ public class PiecewiseLinearFunction {
 		}
 		double start = Math.max(shiftedStart, g.head.start);
 		double end = Math.min(shiftedEnd, g.tail.end);
-		if (Utility.compareLt(end, start)) {
+		if (end < start) {
 			return Utility.big_M;
 		}
 		double min = Utility.big_M;
 		Segment p = f.head;
 		Segment q = g.head;
-		while (p != null && Utility.compareLt(p.end + delta, start)) {
+		while (p != null && p.end + delta < start) {
 			p = p.next;
 		}
-		while (q != null && Utility.compareLt(q.end, start)) {
+		while (q != null && q.end < start) {
 			q = q.next;
 		}
 		while (p != null && q != null) {
@@ -937,7 +936,7 @@ public class PiecewiseLinearFunction {
 			double pEnd = p.end + delta;
 			double lo = Math.max(Math.max(pStart, q.start), start);
 			double hi = Math.min(Math.min(pEnd, q.end), end);
-			if (Utility.compareLe(lo, hi)) {
+			if (lo <= hi) {
 				double slope = p.slope + q.slope;
 				double intercept = p.intercept - p.slope * delta + q.intercept + yShift;
 				double leftValue = slope * lo + intercept;
@@ -949,28 +948,104 @@ public class PiecewiseLinearFunction {
 					min = rightValue;
 				}
 			}
-			if (Utility.compareLe(pEnd, q.end)) {
+			if (pEnd == q.end && start <= pEnd && pEnd <= end) {
+				double point = queryUnscannedEndpointSum(p, delta, q, pEnd, start, end);
+				if (!Utility.isBigMValue(point) && Utility.compareLt(point + yShift, min)) {
+					min = point + yShift;
+				}
+			}
+			if (pEnd <= q.end) {
 				p = p.next;
-				if (Utility.compareEq(pEnd, q.end)) {
+				if (pEnd == q.end) {
 					q = q.next;
 				}
 			} else {
 				q = q.next;
 			}
-			if (Utility.compareLt(end, Math.max(p == null ? Double.POSITIVE_INFINITY : p.start + delta,
-					q == null ? Double.POSITIVE_INFINITY : q.start))) {
+			if (end < Math.max(p == null ? Double.POSITIVE_INFINITY : p.start + delta,
+					q == null ? Double.POSITIVE_INFINITY : q.start)) {
 				break;
 			}
 		}
 		return min;
 	}
 
+	/** 相加、标量及融合扫描共享端点补核；真实闭覆盖外及不可行贡献不参与。 */
+	private static double queryEndpointValue(Segment segment, double delta, double time) {
+		if (segment == null || time < segment.start + delta || time > segment.end + delta) {
+			return Double.POSITIVE_INFINITY;
+		}
+		double value = segment.getValue(time - delta);
+		return Double.isFinite(value) && !Utility.isBigMValue(value) ? value : Double.POSITIVE_INFINITY;
+	}
+
+	private static double queryEndpointValue(ReadOnlySegmentView view, int index, double delta, double time) {
+		if (index >= view.size() || time < view.starts[index] + delta || time > view.ends[index] + delta) {
+			return Double.POSITIVE_INFINITY;
+		}
+		double value = view.slopes[index] * (time - delta) + view.intercepts[index];
+		return Double.isFinite(value) && !Utility.isBigMValue(value) ? value : Double.POSITIVE_INFINITY;
+	}
+
+	private static double queryUnscannedEndpointSum(Segment p, double delta, Segment q,
+			double time, double start, double end) {
+		boolean internal = start < time && time < end && p.start + delta < time && q.start < time
+				&& p.next != null && p.next.start + delta == time && p.next.end + delta > time
+				&& q.next != null && q.next.start == time && q.next.end > time;
+		double left = queryEndpointValue(p, delta, time);
+		double right = queryEndpointValue(p.next, delta, time);
+		if (internal && Utility.compareEq(left, right)) {
+			return Utility.big_M;
+		}
+		return queryUnscannedEndpointSum(left, right, queryEndpointValue(q, 0.0, time),
+				queryEndpointValue(q.next, 0.0, time), internal);
+	}
+
+	private static double queryUnscannedEndpointSum(Segment p, double delta, ReadOnlySegmentView q, int index,
+			double time, double start, double end) {
+		boolean internal = start < time && time < end && p.start + delta < time && q.starts[index] < time
+				&& p.next != null && p.next.start + delta == time && p.next.end + delta > time
+				&& index + 1 < q.size() && q.starts[index + 1] == time && q.ends[index + 1] > time;
+		double left = queryEndpointValue(p, delta, time);
+		double right = queryEndpointValue(p.next, delta, time);
+		if (internal && Utility.compareEq(left, right)) {
+			return Utility.big_M;
+		}
+		return queryUnscannedEndpointSum(left, right, queryEndpointValue(q, index, 0.0, time),
+				queryEndpointValue(q, index + 1, 0.0, time), internal);
+	}
+
+	private static double queryUnscannedEndpointSum(ReadOnlySegmentView p, int pi, double delta,
+			ReadOnlySegmentView q, int qi, double time, double start, double end) {
+		boolean internal = start < time && time < end && p.starts[pi] + delta < time && q.starts[qi] < time
+				&& pi + 1 < p.size() && p.starts[pi + 1] + delta == time && p.ends[pi + 1] + delta > time
+				&& qi + 1 < q.size() && q.starts[qi + 1] == time && q.ends[qi + 1] > time;
+		double left = queryEndpointValue(p, pi, delta, time);
+		double right = queryEndpointValue(p, pi + 1, delta, time);
+		if (internal && Utility.compareEq(left, right)) {
+			return Utility.big_M;
+		}
+		return queryUnscannedEndpointSum(left, right, queryEndpointValue(q, qi, 0.0, time),
+				queryEndpointValue(q, qi + 1, 0.0, time), internal);
+	}
+
+	private static double queryUnscannedEndpointSum(double left, double right, double otherLeft,
+			double otherRight, boolean internal) {
+		// 普通内部连续/同向跳跃由原左右区间承载；边界不得套用此快路。
+		if (internal && (Utility.compareEq(otherLeft, otherRight)
+				|| (left < right && otherLeft < otherRight) || (left > right && otherLeft > otherRight))) {
+			return Utility.big_M;
+		}
+		double value = Math.min(left, right) + Math.min(otherLeft, otherRight);
+		return Double.isFinite(value) ? value : Utility.big_M;
+	}
+
 	/**
 	 * 直接计算固定 prefix 后插入单个 job、再连接 suffix 的最小成本。
 	 *
-	 * <p>严格复现 {@code addShifted(prefix, prefixShift, jobPenalty)}、
-	 * {@code minimizePrefixInPlace()} 和 {@code merge2Segments(...)} 的结果，但只构造 primitive
-	 * 片段并立即扫描 suffix，不产生两条临时 Segment 链。该方法只适合调用者最终只需要标量成本的路径。</p>
+	 * <p>融合平移相加、前缀最小化与后缀匹配，按真实闭端点补全段间组合；只构造 primitive
+	 * 片段并立即扫描 suffix，不产生两条临时 Segment 链。输入 prefix/suffix 应已按各自方向
+	 * 最小化，该方法只适合调用者最终只需要标量成本的路径。</p>
 	 */
 	public static double findMinimalInsertedJobCost(PiecewiseLinearFunction prefix, double prefixShift,
 			PiecewiseLinearFunction jobPenalty, PiecewiseLinearFunction suffix, double suffixShift,
@@ -1016,16 +1091,16 @@ public class PiecewiseLinearFunction {
 		double shiftedEnd = Math.min(f.ends[f.size() - 1] + delta, f.domainEnd);
 		double start = Math.max(shiftedStart, g.starts[0]);
 		double end = Math.min(shiftedEnd, g.ends[g.size() - 1]);
-		if (Utility.compareLt(end, start)) {
+		if (end < start) {
 			return false;
 		}
 
 		int p = 0;
 		int q = 0;
-		while (p < f.size() && Utility.compareLt(f.ends[p] + delta, start)) {
+		while (p < f.size() && f.ends[p] + delta < start) {
 			p++;
 		}
-		while (q < g.size() && Utility.compareLt(g.ends[q], start)) {
+		while (q < g.size() && g.ends[q] < start) {
 			q++;
 		}
 
@@ -1034,12 +1109,12 @@ public class PiecewiseLinearFunction {
 		double lastEnd = start;
 		boolean found = false;
 		double current = start;
-		while (p < f.size() && q < g.size() && Utility.compareLe(current, end)) {
+		while (p < f.size() && q < g.size() && current <= end) {
 			double pStart = Math.max(f.starts[p] + delta, f.domainStart);
 			double pEnd = Math.min(f.ends[p] + delta, f.domainEnd);
 			double segmentStart = Math.max(current, Math.max(pStart, g.starts[q]));
 			double segmentEnd = Math.min(Math.min(pEnd, g.ends[q]), end);
-			if (Utility.compareLe(segmentStart, segmentEnd)) {
+			if (segmentStart <= segmentEnd) {
 				if (!found) {
 					previousTime = segmentStart;
 					found = true;
@@ -1078,29 +1153,39 @@ public class PiecewiseLinearFunction {
 				lastEnd = segmentEnd;
 				current = segmentEnd;
 			}
-			if (Utility.compareEq(segmentEnd, pEnd)) {
+			if (segmentStart <= segmentEnd && segmentEnd == pEnd && segmentEnd == g.ends[q]) {
+				double point = queryUnscannedEndpointSum(f, p, delta, g, q, segmentEnd, start, end);
+				if (!Utility.isBigMValue(point) && Utility.compareLt(point, runningMin)) {
+					// 先交付过去的包络，再让端点低值只向未来进入 prefix-min。
+					if (previousTime < segmentEnd) {
+						workspace.appendFlat(previousTime, segmentEnd, 0.0, runningMin);
+					}
+					previousTime = segmentEnd;
+					runningMin = point;
+				}
+			}
+			if (segmentEnd == pEnd) {
 				p++;
 			}
-			if (Utility.compareEq(segmentEnd, g.ends[q])) {
+			if (segmentEnd == g.ends[q]) {
 				q++;
 			}
 			if (p >= f.size() || q >= g.size()) {
 				break;
 			}
 			double nextStart = Math.max(f.starts[p] + delta, g.starts[q]);
-			if (Utility.compareLt(end, nextStart)) {
+			if (end < nextStart) {
 				break;
 			}
 		}
 		if (!found) {
 			return false;
 		}
-		if (Utility.compareLt(previousTime, lastEnd)) {
+		if (previousTime < lastEnd) {
 			workspace.appendFlat(previousTime, lastEnd, 0.0, runningMin);
 		}
-		if (workspace.size == 0 && Utility.compareLe(previousTime, lastEnd)) {
-			workspace.appendFlat(previousTime, lastEnd, 0.0, runningMin);
-		}
+		// 实际末端的最终值与尾状态必须在调用方 endpointLowerBound 截断前交付。
+		workspace.appendFlat(lastEnd, lastEnd, 0.0, runningMin);
 		return workspace.size > 0;
 	}
 	private static boolean buildShiftedSumPrefixMinimum(PiecewiseLinearFunction f, double delta,
@@ -1109,16 +1194,16 @@ public class PiecewiseLinearFunction {
 		double shiftedEnd = Math.min(f.tail.end + delta, f.domainEnd);
 		double start = Math.max(shiftedStart, g.head.start);
 		double end = Math.min(shiftedEnd, g.tail.end);
-		if (Utility.compareLt(end, start)) {
+		if (end < start) {
 			return false;
 		}
 
 		Segment p = f.head;
 		Segment q = g.head;
-		while (p != null && Utility.compareLt(p.end + delta, start)) {
+		while (p != null && p.end + delta < start) {
 			p = p.next;
 		}
-		while (q != null && Utility.compareLt(q.end, start)) {
+		while (q != null && q.end < start) {
 			q = q.next;
 		}
 
@@ -1127,12 +1212,12 @@ public class PiecewiseLinearFunction {
 		double lastEnd = start;
 		boolean found = false;
 		double current = start;
-		while (p != null && q != null && Utility.compareLe(current, end)) {
+		while (p != null && q != null && current <= end) {
 			double pStart = Math.max(p.start + delta, f.domainStart);
 			double pEnd = Math.min(p.end + delta, f.domainEnd);
 			double segmentStart = Math.max(current, Math.max(pStart, q.start));
 			double segmentEnd = Math.min(Math.min(pEnd, q.end), end);
-			if (Utility.compareLe(segmentStart, segmentEnd)) {
+			if (segmentStart <= segmentEnd) {
 				if (!found) {
 					previousTime = segmentStart;
 					found = true;
@@ -1171,29 +1256,38 @@ public class PiecewiseLinearFunction {
 				lastEnd = segmentEnd;
 				current = segmentEnd;
 			}
-			if (Utility.compareEq(segmentEnd, pEnd)) {
+			if (segmentStart <= segmentEnd && segmentEnd == pEnd && segmentEnd == q.end) {
+				double point = queryUnscannedEndpointSum(p, delta, q, segmentEnd, start, end);
+				if (!Utility.isBigMValue(point) && Utility.compareLt(point, runningMin)) {
+					// 不把当前端点才出现的低值回灌到尚未交付的过去区间。
+					if (previousTime < segmentEnd) {
+						workspace.append(previousTime, segmentEnd, 0.0, runningMin);
+					}
+					previousTime = segmentEnd;
+					runningMin = point;
+				}
+			}
+			if (segmentEnd == pEnd) {
 				p = p.next;
 			}
-			if (Utility.compareEq(segmentEnd, q.end)) {
+			if (segmentEnd == q.end) {
 				q = q.next;
 			}
 			if (p == null || q == null) {
 				break;
 			}
 			double nextStart = Math.max(p.start + delta, q.start);
-			if (Utility.compareLt(end, nextStart)) {
+			if (end < nextStart) {
 				break;
 			}
 		}
 		if (!found) {
 			return false;
 		}
-		if (Utility.compareLt(previousTime, lastEnd)) {
+		if (previousTime < lastEnd) {
 			workspace.append(previousTime, lastEnd, 0.0, runningMin);
 		}
-		if (workspace.size == 0 && Utility.compareLe(previousTime, lastEnd)) {
-			workspace.append(previousTime, lastEnd, 0.0, runningMin);
-		}
+		workspace.append(lastEnd, lastEnd, 0.0, runningMin);
 		return workspace.size > 0;
 	}
 
@@ -1217,59 +1311,107 @@ public class PiecewiseLinearFunction {
 	public PiecewiseLinearFunction add(PiecewiseLinearFunction g) {
 		Utility.debugCheckPWLFRightBoundPair("add.input", this, g);
 		PiecewiseLinearFunction res = new PiecewiseLinearFunction(domainStart, domainEnd);
-
-		// 空链表检查
 		if (this.head == null || g.head == null)
 			return res;
-
-		// 计算共有定义域
-		double fStart = this.head.start;
-		double fEnd = this.tail.end;
-		double gStart = g.head.start;
-		double gEnd = g.tail.end;
-		double start = Math.max(fStart, gStart); // 共有起点
-		double end = Math.min(fEnd, gEnd); // 共有终点
-
-		// 如果定义域无交集，返回空函数
-		if (Utility.compareLt(end, start))
+		double start = Math.max(this.head.start, g.head.start);
+		double end = Math.min(this.tail.end, g.tail.end);
+		if (end < start)
 			return res;
 		TimerManager.start("分段线性函数相加");
-
 		Segment p = this.head, q = g.head;
-		double cur = start; // 当前区间起点
-
-		// 跳到第一个有效片段
-		while (p != null && Utility.compareLt(p.end, start))
+		double cur = start;
+		while (p != null && p.end < start)
 			p = p.next;
-		while (q != null && Utility.compareLt(q.end, start))
+		while (q != null && q.end < start)
 			q = q.next;
-
-		// 处理共有区间
-		while (p != null && q != null && Utility.compareLe(cur, end)) {
+		while (p != null && q != null && cur <= end) {
 			double pEnd = p.end;
 			double qEnd = q.end;
-			double nxt = Math.min(Math.min(pEnd, qEnd), end); // 区间终点
-			if (Utility.compareLe(cur, nxt)) { // 有效区间
-				// 只有某个函数的某一段只有单点，此处才会存在单点应该，而函数单点应该基本只会出现在shift以后被砍掉可行域？
-				// 比如都没有库存成本，且d都为90，那此时最优解无等待，Cmax就是任务的最大设置和本身时间的和（单机器），此时假设总时间为480，随着函数迭代最后一个任务的可行域为[480-..]，但由于事先限制了上限为480，此时就会出现单点
-				// 2025.4.23
-//					wet040_021_2m.dat 算例 任务只取2个时，顺序[1,2]，此时计算此处会出现单点，算例满足前边说的情况、若不改为le，就会导致一个空函数，从而报错
-				// 另一种处理方式就是只要Cmax比最优解的稍微大一些，应该就不会出现单点了。设置Cmax为其上界+1即可
-				double ms = p.slope + q.slope;
-				double mi = (p.intercept + q.intercept);
-				res.addSegment(cur, nxt, ms, mi);
-				cur = nxt;
+			double nxt = Math.min(Math.min(pEnd, qEnd), end);
+			double pieceStart = cur;
+			double slope = p.slope + q.slope;
+			double intercept = p.intercept + q.intercept;
+			boolean positivePiece = pieceStart < nxt;
+			double point = 0.0;
+			boolean patchPoint = false;
+			boolean hasLeft = positivePiece;
+			double rightEnd = nxt;
+			boolean hasRight = false;
+			// 普通区间不预读右邻段；共同换段、点交集及最终耗尽才补核。
+			if (pieceStart <= nxt && (pieceStart == nxt
+					|| ((pEnd == nxt && qEnd == nxt) || nxt == end) && (p.next != null || q.next != null))) {
+				Segment nextP = pEnd == nxt ? p.next : p;
+				Segment nextQ = qEnd == nxt ? q.next : q;
+				rightEnd = nextP == null || nextQ == null ? nxt
+						: Math.min(end, Math.min(nextP.end, nextQ.end));
+				hasRight = nextP != null && nextQ != null && nextP.start <= nxt
+						&& nextQ.start <= nxt && nxt < rightEnd;
+				double value = queryUnscannedEndpointSum(p, 0.0, q, nxt, start, end);
+				if (!Utility.isBigMValue(value)) {
+					double left = hasLeft ? p.getValue(nxt) + q.getValue(nxt) : Double.POSITIVE_INFINITY;
+					double right = hasRight ? nextP.getValue(nxt) + nextQ.getValue(nxt)
+							: Double.POSITIVE_INFINITY;
+					if (Utility.compareLt(value, Math.min(left, right))) {
+						point = value;
+						patchPoint = true;
+					}
+				}
 			}
-			// 移动指针
-			if (Utility.compareEq(nxt, pEnd))
+			if (patchPoint && domainStart <= nxt && nxt <= domainEnd) {
+				double leftWidth = hasLeft ? addPointWidth(nxt - pieceStart) : 0.0;
+				double rightWidth = hasRight ? addPointWidth(rightEnd - nxt) : 0.0;
+				if (!hasLeft && !hasRight) {
+					// 整条交集是点，按原计算域接收，不能以零长交集给补片限宽。
+					leftWidth = addPointWidth(nxt - domainStart);
+					rightWidth = addPointWidth(domainEnd - nxt);
+				}
+				double patchStart = Math.max(domainStart, nxt - leftWidth);
+				double patchEnd = Math.min(domainEnd, nxt + rightWidth);
+				if (positivePiece) {
+					appendAddedSegment(res, pieceStart, patchStart, slope, intercept);
+				}
+				// 两个同值正长半片显式保留 t 的接点，避免极短邻段的EPS定位漏读；normalize会合并。
+				appendAddedSegment(res, patchStart, nxt, 0.0, point);
+				appendAddedSegment(res, nxt, patchEnd, 0.0, point);
+				if (patchStart == patchEnd && res.head == null) {
+					res.addSegment(nxt, nxt, 0.0, point);
+				}
+			} else if (positivePiece) {
+				appendAddedSegment(res, pieceStart, nxt, slope, intercept);
+			} else if (pieceStart == nxt && start == end && res.head == null) {
+				res.addSegment(nxt, nxt, slope, intercept);
+			}
+			cur = nxt;
+			if (nxt == pEnd)
 				p = p.next;
-			if (Utility.compareEq(nxt, qEnd))
+			if (nxt == qEnd)
 				q = q.next;
+			if (nxt == end)
+				break;
 		}
 		TimerManager.end("分段线性函数相加");
 		res.recordSegmentNumIfEnabled();
 		Utility.debugCheckPWLFRightBound("add.output", res);
 		return res;
+	}
+
+	private static double addPointWidth(double originalLength) {
+		if (!(originalLength > 0.0)) {
+			return 0.0;
+		}
+		double half = 0.5 * originalLength;
+		return half > Utility.EPS ? Math.min(ADD_POINT_HALF_WIDTH, half) : originalLength;
+	}
+
+	/** 流水输出：上一个端点平台已覆盖的右侧不重写，不回头扫描或截断段链。 */
+	private static void appendAddedSegment(PiecewiseLinearFunction result, double start, double end,
+			double slope, double intercept) {
+		if (result.tail != null) {
+			start = Math.max(start, result.tail.end);
+		}
+		if (start < end) {
+			result.addSegment(start, end, slope, intercept);
+		}
 	}
 	// 未检查输入函数的定义域是否连续。
 
@@ -1507,7 +1649,7 @@ public class PiecewiseLinearFunction {
 			head = tail = null;
 			return;
 		}
-		boolean fromS = !Utility.compareGe(head.start, domainStart);
+		boolean fromS = head.start < domainStart;
 		boolean fromE = !Utility.compareLe(tail.end, domainEnd);
 		if (!fromS && !fromE) {
 			return;
@@ -1515,8 +1657,8 @@ public class PiecewiseLinearFunction {
 		}
 
 		if (fromS) {
-			// 从头部修剪 [end <= domainStart)
-			while (head != null && Utility.compareLe(head.end, domainStart)) {
+			// 只删除严格位于左边界外的段，保留 end == domainStart 的真实接触点。
+			while (head != null && head.end < domainStart) {
 				head = head.next;
 			}
 			if (head == null) {
@@ -1524,7 +1666,7 @@ public class PiecewiseLinearFunction {
 				return;
 			}
 			// 修剪头部部分重叠的 Segment
-			if (Utility.compareLt(head.start, domainStart)) {
+			if (head.start < domainStart) {
 				head.start = domainStart;
 			}
 		}

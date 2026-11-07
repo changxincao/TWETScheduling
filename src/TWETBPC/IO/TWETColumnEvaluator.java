@@ -5,6 +5,7 @@ import java.util.List;
 
 import Basic.Data;
 import Common.PiecewiseLinearFunction;
+import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
 import HEU.Solution;
 
@@ -56,7 +57,29 @@ public class TWETColumnEvaluator {
 					// 2026-07-06: evaluate() is called heavily by pricing checks. Build
 					// the fixed-sequence forward function directly instead of allocating a
 					// scratch Solution and updating unrelated local-search structures.
-					next = data.penaltyFunction[job].setDomain(data.p[job] + data.s[0][job], data.CmaxH);
+					double earliest = data.p[job] + data.s[0][job];
+					PiecewiseLinearFunction penalty = data.penaltyFunction[job];
+					if (earliest == data.CmaxH) {
+						// setDomain(H,H) 会清空；仅接原硬窗在 H 的真实有限值，metadata 仍正宽。
+						double value = Utility.big_M;
+						if (penalty.domainStart <= earliest && earliest <= penalty.domainEnd) {
+							for (Segment segment = penalty.head; segment != null; segment = segment.next) {
+								if (segment.start <= earliest && earliest <= segment.end) {
+									double candidate = segment.getValue(earliest);
+									if (Double.isFinite(candidate) && !Utility.isBigMValue(candidate)) {
+										value = Math.min(value, candidate);
+									}
+								}
+							}
+						}
+						if (Utility.isBigMValue(value)) {
+							return Utility.big_M;
+						}
+						next = new PiecewiseLinearFunction(penalty.domainStart, penalty.domainEnd);
+						next.addSegment(earliest, earliest, 0.0, value);
+					} else {
+						next = penalty.setDomain(earliest, data.CmaxH);
+					}
 				} else {
 					PiecewiseLinearFunction previous = current;
 					PiecewiseLinearFunction shifted =

@@ -1,0 +1,128 @@
+[
+  {
+    "version": "before",
+    "test": "EndpointMini",
+    "native": true,
+    "exit": 0,
+    "signals": [
+      "seq=[1,2] times=[15,16] expected=2 evaluator=1.0E10",
+      "phaseOne=false cb=off expectedRC=-1 columns=0 cert=-1.0",
+      "phaseOne=false cb=allCycles expectedRC=-1 columns=0 cert=-1.0",
+      "phaseOne=true cb=off expectedRC=-1 columns=0 cert=-1.0",
+      "phaseOne=true cb=allCycles expectedRC=-1 columns=0 cert=0.0"
+    ]
+  },
+  {
+    "version": "before",
+    "test": "EndpointProbe",
+    "native": true,
+    "exit": 0,
+    "signals": [
+      "PRICE multi=true cb=true count=0 certificate=6.0",
+      "FIRST_DP_MISMATCH job=2 t=54 cb=86.0 dp=65.0 path=0@0->4@18->3@27->2@54",
+      "FMIN job=1 cb=4.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=86.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=28.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=9.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=true cb=false count=1 certificate=-38.0",
+      "PRICE multi=false cb=true count=1 certificate=-38.0",
+      "FIRST_DP_MISMATCH job=2 t=54 cb=86.0 dp=65.0 path=0@0->4@18->3@27->2@54",
+      "FMIN job=1 cb=-40.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=86.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=-16.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=9.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=false cb=false count=1 certificate=-38.0"
+    ]
+  },
+  {
+    "version": "before",
+    "test": "EndpointProbe",
+    "native": false,
+    "exit": 0,
+    "signals": [
+      "PRICE multi=true cb=true count=0 certificate=6.0",
+      "FIRST_DP_MISMATCH job=2 t=54 cb=86.0 dp=65.0 path=0@0->4@18->3@27->2@54",
+      "FMIN job=1 cb=4.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=86.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=28.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=9.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=true cb=false count=1 certificate=-38.0",
+      "PRICE multi=false cb=true count=1 certificate=-38.0",
+      "FIRST_DP_MISMATCH job=2 t=54 cb=86.0 dp=65.0 path=0@0->4@18->3@27->2@54",
+      "FMIN job=1 cb=-40.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=86.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=-16.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=9.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=false cb=false count=1 certificate=-38.0"
+    ]
+  },
+  {
+    "version": "after",
+    "test": "EndpointMini",
+    "native": true,
+    "exit": 0,
+    "signals": [
+      "seq=[1,2] times=[15,16] expected=2 evaluator=2.0",
+      "phaseOne=false cb=off expectedRC=-1 columns=1 cert=-1.0",
+      "phaseOne=false cb=allCycles expectedRC=-1 columns=1 cert=-1.0",
+      "phaseOne=true cb=off expectedRC=-1 columns=1 cert=-1.0",
+      "phaseOne=true cb=allCycles expectedRC=-1 columns=1 cert=-1.0"
+    ]
+  },
+  {
+    "version": "after",
+    "test": "EndpointProbe",
+    "native": true,
+    "exit": 0,
+    "signals": [
+      "PRICE multi=true cb=true count=1 certificate=-38.0",
+      "FMIN job=1 cb=-40.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=65.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=-35.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=-10.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=true cb=false count=1 certificate=-38.0",
+      "PRICE multi=false cb=true count=1 certificate=-38.0",
+      "FMIN job=1 cb=-40.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=65.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=-35.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=-10.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=false cb=false count=1 certificate=-38.0"
+    ]
+  },
+  {
+    "version": "after",
+    "test": "EndpointProbe",
+    "native": false,
+    "exit": 0,
+    "signals": [
+      "PRICE multi=true cb=true count=1 certificate=-38.0",
+      "FMIN job=1 cb=-40.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=65.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=-35.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=-10.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=true cb=false count=1 certificate=-38.0",
+      "PRICE multi=false cb=true count=1 certificate=-38.0",
+      "FMIN job=1 cb=-40.0 dp=-40.0 t=90 path=0@0->4@12->6@36->5@48->6@57->5@69->1@90",
+      "FMIN job=2 cb=65.0 dp=65.0 t=54 path=0@0->4@18->3@27->2@54",
+      "FMIN job=3 cb=27.0 dp=27.0 t=45 path=0@0->4@18->3@27->4@36->3@45",
+      "FMIN job=4 cb=52.0 dp=52.0 t=36 path=0@0->4@18->3@27->4@36",
+      "FMIN job=5 cb=-35.0 dp=-35.0 t=81 path=0@0->4@18->3@27->4@36->3@45->6@69->5@81",
+      "FMIN job=6 cb=-10.0 dp=-10.0 t=69 path=0@0->4@18->3@27->4@36->3@45->6@69",
+      "PRICE multi=false cb=false count=1 certificate=-38.0"
+    ]
+  }
+]

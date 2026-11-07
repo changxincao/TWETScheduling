@@ -6,7 +6,7 @@
 
 `PostfixAudit.java`提供四种模式。`oracle`对应`independent-outsourcing-oracle.log`，120组UB/LB与独立原始成本最优值一致，90组根闭合、30组非根，最多13节点；它不共享评价器硬窗作为独立oracle。`normal`对应`normal-ea.log`，默认debug通过；`debug`分别对应修复前`debug-ea.log`和`debug-no-ea.log`，前者当时exit=1并定位重复写入断言，后者exit=0但重复计数；`segmented-contract`对应同名日志，只验证调用契约被违反的后果，不运行巨型网络。不能把修复前这个预期断言退出混为61项正式回归失败，也不能将旧日志当成修复后当前状态。
 
-`OptionalPathsAudit.java`的`stabilization`模式对应`optional-stabilization.log`：H=4受控域的显式稳定化LB=4.5超过真实可行值4，关闭组LB=4；同输入自然H=5的开关对照均正常。代码从真实RMP获取dual，没有注入dual。`enumeration`模式对应`optional-enumeration.log`，12组中3组公共finite master返回容差最优但非零gap最优值，差值16/5/6；raw求解状态和公共接口结果是两次独立求解。枚举部分按用户后续确认仅保留为容差差异诊断，不列待修算法漏洞，不改变默认容差；稳定化错界仍是另一项实现问题。
+`OptionalPathsAudit.java`的`stabilization`模式对应修复前`optional-stabilization.log`：H=4受控域的显式稳定化LB=4.5超过真实可行值4，关闭组LB=4；同输入自然H=5的开关对照均正常。代码从真实RMP获取dual，没有注入dual。`enumeration`模式对应`optional-enumeration.log`，12组中3组公共finite master返回容差最优但非零gap最优值，差值16/5/6；raw求解状态和公共接口结果是两次独立求解。枚举部分按用户后续确认仅保留为容差差异诊断，不列待修算法漏洞，不改变默认容差。稳定化错界是另一项实现问题，已按后续授权修复；当前stabilization断言改为要求合法下界。
 
 `rank1-and-fixing-oracle.log`由既有`../20261107-three-pricer-full-audit/TiAudit.java`重新编译后产生，160组受控定价快照零冲突，40组fixing低RC序列保留检查通过。不是160次真实RMP证书验证或正式SRI-aware性能比较。
 
@@ -19,3 +19,5 @@
 `debug-fix/recheck/`为两名只读审查者交叉复核后的补测。专项新增非空继承和连续三次fixing断言，分别核对本轮记录数、Node新增数、零新增停止和窗口；开/关断言日志均通过。CSV/JSON为补充后的六项fresh回归，不是重新跑62项；snapshot仍与before逐字相同。生产源码保持`7ccae804`不变，新增内容仅为测试与记录。
 
 `stabilization-review/`为`b18c9d06`后的重新核对：从完整当前sourcepath编译`OptionalPathsAudit`并执行stabilization模式，受控H4报告4.5而已有可行值4，自然H5对照正常。仅确认“已有SRI行的dual从0变负、稳定化循环未重查资格”的原因及切回true-dual循环的最小方案，尚未修生产代码；有效日志为compile-full-source与stabilization-full-source。临时目录中更早的不完整局部classpath编译失败不作为生产故障证据。
+
+`stabilization-gate-fix/`保存后续五行资格检查修复：before为新专项在旧生产代码下复现4.5错界，after为12组门禁/切换/完整CG/超时断言及原诊断通过日志。CSV/JSON是fresh 63项回归全部退出0。专项入口为`src/TWETBPC/LP/DualStabilizationSriGateTest.java`；稳定化仍默认关闭，没有改SRI状态或启停远端。此前两个stabilization目录保留为修复前历史证据，不当作当前失败状态。

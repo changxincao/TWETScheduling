@@ -710,6 +710,11 @@ public class PC {
 		TWETMasterSolution solution = currentSolution;
 		DualStabilizationState dualState = new DualStabilizationState(lp.captureTruePricingDuals());
 		while (!isTimeLimitReached()) {
+			// 2026-11-07: 已有SRI可能在加列重解后由零dual变负，旧center不含其分量，不能继续混合。
+			if (!lp.getActiveSubsetRowPricingCutIds().isEmpty()) {
+				lp.clearPricingDualOverride();
+				return solvePricingLoopWithTrueDuals(lp, solution);
+			}
 			LP.PricingDualSnapshot outDual = lp.captureTruePricingDuals();
 			PricingPassResult stabilizedPass = runStabilizedPricingSequence(lp, dualState, outDual);
 			if (isTimeLimitReached()) {

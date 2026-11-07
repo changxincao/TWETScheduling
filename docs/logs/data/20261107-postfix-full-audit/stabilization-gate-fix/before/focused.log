@@ -1,0 +1,6 @@
+H=4 stabilized=false cut=true initiallyNegative=false incumbent=4.0 RMP=7.0 bound=4.0 stableCalls=0 rawSriCalls=2 mixedSriCalls=0
+H=4 stabilized=true cut=true initiallyNegative=false incumbent=4.0 RMP=7.0 bound=4.5 stableCalls=4 rawSriCalls=0 mixedSriCalls=2
+Exception in thread "main" java.lang.AssertionError: pricing bound exceeds a feasible value
+	at TWETBPC.LP.DualStabilizationSriGateTest.check(DualStabilizationSriGateTest.java:136)
+	at TWETBPC.LP.DualStabilizationSriGateTest.solve(DualStabilizationSriGateTest.java:104)
+	at TWETBPC.LP.DualStabilizationSriGateTest.main(DualStabilizationSriGateTest.java:29)

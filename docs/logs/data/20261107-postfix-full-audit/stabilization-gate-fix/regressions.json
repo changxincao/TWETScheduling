@@ -1,0 +1,317 @@
+[
+  {
+    "test": "ALNSRepairRegressionTest",
+    "status": 0,
+    "seconds": 0.578
+  },
+  {
+    "test": "ActiveCutInheritanceTest",
+    "status": 0,
+    "seconds": 0.375
+  },
+  {
+    "test": "AfterCutPhaseOneRepairTest",
+    "status": 0,
+    "seconds": 0.844
+  },
+  {
+    "test": "BPCMasterLpTimingSemanticsTest",
+    "status": 0,
+    "seconds": 0.375
+  },
+  {
+    "test": "BPCPricingClosureTraceTest",
+    "status": 0,
+    "seconds": 0.422
+  },
+  {
+    "test": "BPCResultWriterPostSolveCsvTest",
+    "status": 0,
+    "seconds": 0.547
+  },
+  {
+    "test": "BestBpcProfilesTest",
+    "status": 0,
+    "seconds": 0.297
+  },
+  {
+    "test": "CertifiedNodeBoundTrackingTest",
+    "status": 0,
+    "seconds": 0.328
+  },
+  {
+    "test": "ColumnPatternSharingTest",
+    "status": 0,
+    "seconds": 0.344
+  },
+  {
+    "test": "CommonReleaseSetupHorizonTest",
+    "status": 0,
+    "seconds": 0.359
+  },
+  {
+    "test": "CompletionBoundPointReceptionTest",
+    "status": 0,
+    "seconds": 0.406
+  },
+  {
+    "test": "CompletionBoundPreparedBoundsCompatibilityTest",
+    "status": 0,
+    "seconds": 0.36
+  },
+  {
+    "test": "CompletionBoundScalarTailTest",
+    "status": 0,
+    "seconds": 0.609
+  },
+  {
+    "test": "CutPoolActiveRank1MemoryMergeTest",
+    "status": 0,
+    "seconds": 0.344
+  },
+  {
+    "test": "CutPoolCoefficientCacheTest",
+    "status": 0,
+    "seconds": 0.312
+  },
+  {
+    "test": "CutPoolImmutableIdTest",
+    "status": 0,
+    "seconds": 0.297
+  },
+  {
+    "test": "DualStabilizationInPointTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "FiniteMRepairConfirmationTest",
+    "status": 0,
+    "seconds": 0.922
+  },
+  {
+    "test": "FormalExperimentRunnerMidpointOverrideTest",
+    "status": 0,
+    "seconds": 0.281
+  },
+  {
+    "test": "FormalExperimentRunnerStatusTest",
+    "status": 0,
+    "seconds": 0.203
+  },
+  {
+    "test": "HeuristicPricingDiagnosticTraceTest",
+    "status": 0,
+    "seconds": 0.235
+  },
+  {
+    "test": "IncrementalSourcedDominanceGraphConsistencyTest",
+    "status": 0,
+    "seconds": 6.0
+  },
+  {
+    "test": "LPRestrictedColumnMembershipTest",
+    "status": 0,
+    "seconds": 0.219
+  },
+  {
+    "test": "LabelQueueOrderingFallbackTest",
+    "status": 0,
+    "seconds": 0.266
+  },
+  {
+    "test": "MachineCountBrancherBoundaryTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "NgDssrFirstRoundMidpointHistoryTest",
+    "status": 0,
+    "seconds": 0.172
+  },
+  {
+    "test": "NgDssrHeartbeatDiagnosticsTest",
+    "status": 0,
+    "seconds": 0.187
+  },
+  {
+    "test": "NgDssrInitialNgSetSizeTest",
+    "status": 0,
+    "seconds": 0.203
+  },
+  {
+    "test": "NgDssrJoinExtensionBoundaryTest",
+    "status": 0,
+    "seconds": 0.266
+  },
+  {
+    "test": "NgDssrJoinPrefilterCacheTest",
+    "status": 0,
+    "seconds": 0.906
+  },
+  {
+    "test": "NgDssrMidpointProbeConfigurationTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "NgDssrMidpointProbePolicyTest",
+    "status": 0,
+    "seconds": 0.266
+  },
+  {
+    "test": "NgDssrMidpointStartCacheTest",
+    "status": 0,
+    "seconds": 0.188
+  },
+  {
+    "test": "NgDssrMinimumRepeatedSegmentUpdateTest",
+    "status": 0,
+    "seconds": 0.297
+  },
+  {
+    "test": "NgDssrSameNodeWarmStartTest",
+    "status": 0,
+    "seconds": 0.219
+  },
+  {
+    "test": "NgHistoricalEndpointPricingTest",
+    "status": 0,
+    "seconds": 0.609
+  },
+  {
+    "test": "NgTracedJoinPhaseOneEndpointRegressionTest",
+    "status": 0,
+    "seconds": 0.391
+  },
+  {
+    "test": "NodeCoverageStatsTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "OutsourcingMoveConsistencyTest",
+    "status": 0,
+    "seconds": 1.719
+  },
+  {
+    "test": "PackedBitSetIntersectionTest",
+    "status": 0,
+    "seconds": 1.015
+  },
+  {
+    "test": "PackedBitSetStorageTest",
+    "status": 0,
+    "seconds": 1.235
+  },
+  {
+    "test": "PaperDominanceGraphConsistencyTest",
+    "status": 0,
+    "seconds": 1.031
+  },
+  {
+    "test": "PhaseOneRepairTimeoutTest",
+    "status": 0,
+    "seconds": 0.594
+  },
+  {
+    "test": "PiecewiseLinearEndpointPatchTest",
+    "status": 0,
+    "seconds": 0.297
+  },
+  {
+    "test": "PiecewiseLinearInsertScalarTest",
+    "status": 0,
+    "seconds": 0.547
+  },
+  {
+    "test": "PiecewiseLinearMinimalSumViewTest",
+    "status": 0,
+    "seconds": 2.062
+  },
+  {
+    "test": "PositiveOutsourcingColumnCacheTest",
+    "status": 0,
+    "seconds": 0.469
+  },
+  {
+    "test": "SetupTriangleClosureTest",
+    "status": 0,
+    "seconds": 0.265
+  },
+  {
+    "test": "StrongBranchingPhaseOnePricingTest",
+    "status": 0,
+    "seconds": 2.016
+  },
+  {
+    "test": "StructuredArcFlowBranchingTest",
+    "status": 0,
+    "seconds": 0.688
+  },
+  {
+    "test": "SubsetRowColumnPostingIndexTest",
+    "status": 0,
+    "seconds": 0.375
+  },
+  {
+    "test": "SubsetRowCutCoefficientTest",
+    "status": 0,
+    "seconds": 0.421
+  },
+  {
+    "test": "SuccessorSetBranchingTest",
+    "status": 0,
+    "seconds": 0.5
+  },
+  {
+    "test": "SupernodeCutSetIncrementalTest",
+    "status": 0,
+    "seconds": 0.547
+  },
+  {
+    "test": "TWETBPCContextEffectiveNgDssrConfigurationTest",
+    "status": 0,
+    "seconds": 0.375
+  },
+  {
+    "test": "TimeIndexedArcSetTest",
+    "status": 0,
+    "seconds": 0.219
+  },
+  {
+    "test": "TimeIndexedGraphOptimizationTest",
+    "status": 0,
+    "seconds": 3.14
+  },
+  {
+    "test": "TimeIndexedReuseTest",
+    "status": 0,
+    "seconds": 0.578
+  },
+  {
+    "test": "TreeFinalBoundTest",
+    "status": 0,
+    "seconds": 0.204
+  },
+  {
+    "test": "TimeIndexedMaintenanceTest",
+    "status": 0,
+    "seconds": 0.593
+  },
+  {
+    "test": "UndirectedAdjacencyCoefficientTest",
+    "status": 0,
+    "seconds": 0.578
+  },
+  {
+    "test": "TimeIndexedDebugArcFixingTest",
+    "status": 0,
+    "seconds": 0.625
+  },
+  {
+    "test": "DualStabilizationSriGateTest",
+    "status": 0,
+    "seconds": 0.703
+  }
+]

@@ -88,11 +88,8 @@ public final class OptionalPathsAudit {
                 System.out.println("stabilization=" + enabled + " final=" + result.getObjectiveValue()
                         + " observed=" + pc.getLastObservedDualBound() + " best=" + pc.getBestCertifiedNodeBound()
                         + " knownOptimum=4 active=" + lp.getActiveSubsetRowPricingDuals());
-                if (clipped && enabled && !(pc.getLastObservedDualBound() > feasibleCost + 1e-8)) {
-                    throw new AssertionError("conditional stabilization defect not reproduced");
-                }
-                if ((!clipped || !enabled) && pc.getLastObservedDualBound() > feasibleCost + 1e-8) {
-                    throw new AssertionError("control bound exceeded feasible route");
+                if (pc.getLastObservedDualBound() > feasibleCost + 1e-8) {
+                    throw new AssertionError("stabilization bound exceeded feasible route");
                 }
             } finally { lp.closeModel(); }
         }

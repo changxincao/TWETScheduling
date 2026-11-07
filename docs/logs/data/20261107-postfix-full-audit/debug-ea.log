@@ -1,0 +1,10 @@
+debug=true assertions=true H=1.0 node=1 LB=0.0
+Exception in thread "main" java.lang.AssertionError: time-indexed arc already present
+	at TWETBPC.Util.TimeIndexedArcSet.setKnownAbsent(TimeIndexedArcSet.java:82)
+	at TWETBPC.GC.TimeIndexedGraphPricingEngine$ArcFixingSolver.forbidLocalTimeIndexedArc(TimeIndexedGraphPricingEngine.java:1283)
+	at TWETBPC.GC.TimeIndexedGraphPricingEngine$ArcFixingSolver.cleanupGraph(TimeIndexedGraphPricingEngine.java:1179)
+	at TWETBPC.GC.TimeIndexedGraphPricingEngine$ArcFixingSolver.apply(TimeIndexedGraphPricingEngine.java:1023)
+	at TWETBPC.GC.TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(TimeIndexedGraphPricingEngine.java:323)
+	at TWETBPC.GC.TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(TimeIndexedGraphPricingEngine.java:292)
+	at TWETBPC.GC.PostfixAudit.debugFixing(PostfixAudit.java:63)
+	at TWETBPC.GC.PostfixAudit.main(PostfixAudit.java:41)

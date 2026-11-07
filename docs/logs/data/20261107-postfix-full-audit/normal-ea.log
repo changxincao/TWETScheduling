@@ -1,0 +1,2 @@
+debug=false assertions=true H=1.0 node=1 LB=0.0
+paper time-indexed reduced-cost arc fixing, candidates=4, fixed=3, unavailable=1, processFixed=0, idleFixed=0, endFixed=0, cleanupFixed=3, cleanupRounds=3/0, nodeTimeArcFixedBefore=0, nodeTimeArcNewlyFixed=3, nodeTimeArcFixedAfter=3, reusedForward=false, gap=1.0, ms=0.392

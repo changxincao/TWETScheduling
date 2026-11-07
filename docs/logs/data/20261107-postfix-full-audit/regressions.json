@@ -1,0 +1,307 @@
+[
+  {
+    "test": "ALNSRepairRegressionTest",
+    "status": 0,
+    "seconds": 0.5
+  },
+  {
+    "test": "ActiveCutInheritanceTest",
+    "status": 0,
+    "seconds": 0.375
+  },
+  {
+    "test": "AfterCutPhaseOneRepairTest",
+    "status": 0,
+    "seconds": 0.578
+  },
+  {
+    "test": "BPCMasterLpTimingSemanticsTest",
+    "status": 0,
+    "seconds": 0.266
+  },
+  {
+    "test": "BPCPricingClosureTraceTest",
+    "status": 0,
+    "seconds": 0.359
+  },
+  {
+    "test": "BPCResultWriterPostSolveCsvTest",
+    "status": 0,
+    "seconds": 0.594
+  },
+  {
+    "test": "BestBpcProfilesTest",
+    "status": 0,
+    "seconds": 0.344
+  },
+  {
+    "test": "CertifiedNodeBoundTrackingTest",
+    "status": 0,
+    "seconds": 0.312
+  },
+  {
+    "test": "ColumnPatternSharingTest",
+    "status": 0,
+    "seconds": 0.375
+  },
+  {
+    "test": "CommonReleaseSetupHorizonTest",
+    "status": 0,
+    "seconds": 0.407
+  },
+  {
+    "test": "CompletionBoundPointReceptionTest",
+    "status": 0,
+    "seconds": 0.5
+  },
+  {
+    "test": "CompletionBoundPreparedBoundsCompatibilityTest",
+    "status": 0,
+    "seconds": 0.328
+  },
+  {
+    "test": "CompletionBoundScalarTailTest",
+    "status": 0,
+    "seconds": 0.734
+  },
+  {
+    "test": "CutPoolActiveRank1MemoryMergeTest",
+    "status": 0,
+    "seconds": 0.375
+  },
+  {
+    "test": "CutPoolCoefficientCacheTest",
+    "status": 0,
+    "seconds": 0.328
+  },
+  {
+    "test": "CutPoolImmutableIdTest",
+    "status": 0,
+    "seconds": 0.344
+  },
+  {
+    "test": "DualStabilizationInPointTest",
+    "status": 0,
+    "seconds": 0.297
+  },
+  {
+    "test": "FiniteMRepairConfirmationTest",
+    "status": 0,
+    "seconds": 0.703
+  },
+  {
+    "test": "FormalExperimentRunnerMidpointOverrideTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "FormalExperimentRunnerStatusTest",
+    "status": 0,
+    "seconds": 0.203
+  },
+  {
+    "test": "HeuristicPricingDiagnosticTraceTest",
+    "status": 0,
+    "seconds": 0.203
+  },
+  {
+    "test": "IncrementalSourcedDominanceGraphConsistencyTest",
+    "status": 0,
+    "seconds": 5.093
+  },
+  {
+    "test": "LPRestrictedColumnMembershipTest",
+    "status": 0,
+    "seconds": 0.344
+  },
+  {
+    "test": "LabelQueueOrderingFallbackTest",
+    "status": 0,
+    "seconds": 0.344
+  },
+  {
+    "test": "MachineCountBrancherBoundaryTest",
+    "status": 0,
+    "seconds": 0.297
+  },
+  {
+    "test": "NgDssrFirstRoundMidpointHistoryTest",
+    "status": 0,
+    "seconds": 0.218
+  },
+  {
+    "test": "NgDssrHeartbeatDiagnosticsTest",
+    "status": 0,
+    "seconds": 0.204
+  },
+  {
+    "test": "NgDssrInitialNgSetSizeTest",
+    "status": 0,
+    "seconds": 0.187
+  },
+  {
+    "test": "NgDssrJoinExtensionBoundaryTest",
+    "status": 0,
+    "seconds": 0.219
+  },
+  {
+    "test": "NgDssrJoinPrefilterCacheTest",
+    "status": 0,
+    "seconds": 0.781
+  },
+  {
+    "test": "NgDssrMidpointProbeConfigurationTest",
+    "status": 0,
+    "seconds": 0.188
+  },
+  {
+    "test": "NgDssrMidpointProbePolicyTest",
+    "status": 0,
+    "seconds": 0.219
+  },
+  {
+    "test": "NgDssrMidpointStartCacheTest",
+    "status": 0,
+    "seconds": 0.172
+  },
+  {
+    "test": "NgDssrMinimumRepeatedSegmentUpdateTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "NgDssrSameNodeWarmStartTest",
+    "status": 0,
+    "seconds": 0.188
+  },
+  {
+    "test": "NgHistoricalEndpointPricingTest",
+    "status": 0,
+    "seconds": 0.469
+  },
+  {
+    "test": "NgTracedJoinPhaseOneEndpointRegressionTest",
+    "status": 0,
+    "seconds": 0.328
+  },
+  {
+    "test": "NodeCoverageStatsTest",
+    "status": 0,
+    "seconds": 0.219
+  },
+  {
+    "test": "OutsourcingMoveConsistencyTest",
+    "status": 0,
+    "seconds": 1.296
+  },
+  {
+    "test": "PackedBitSetIntersectionTest",
+    "status": 0,
+    "seconds": 0.954
+  },
+  {
+    "test": "PackedBitSetStorageTest",
+    "status": 0,
+    "seconds": 1.125
+  },
+  {
+    "test": "PaperDominanceGraphConsistencyTest",
+    "status": 0,
+    "seconds": 0.968
+  },
+  {
+    "test": "PhaseOneRepairTimeoutTest",
+    "status": 0,
+    "seconds": 0.485
+  },
+  {
+    "test": "PiecewiseLinearEndpointPatchTest",
+    "status": 0,
+    "seconds": 0.343
+  },
+  {
+    "test": "PiecewiseLinearInsertScalarTest",
+    "status": 0,
+    "seconds": 0.469
+  },
+  {
+    "test": "PiecewiseLinearMinimalSumViewTest",
+    "status": 0,
+    "seconds": 1.797
+  },
+  {
+    "test": "PositiveOutsourcingColumnCacheTest",
+    "status": 0,
+    "seconds": 0.313
+  },
+  {
+    "test": "SetupTriangleClosureTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "StrongBranchingPhaseOnePricingTest",
+    "status": 0,
+    "seconds": 1.296
+  },
+  {
+    "test": "StructuredArcFlowBranchingTest",
+    "status": 0,
+    "seconds": 0.469
+  },
+  {
+    "test": "SubsetRowColumnPostingIndexTest",
+    "status": 0,
+    "seconds": 0.172
+  },
+  {
+    "test": "SubsetRowCutCoefficientTest",
+    "status": 0,
+    "seconds": 0.266
+  },
+  {
+    "test": "SuccessorSetBranchingTest",
+    "status": 0,
+    "seconds": 0.25
+  },
+  {
+    "test": "SupernodeCutSetIncrementalTest",
+    "status": 0,
+    "seconds": 0.422
+  },
+  {
+    "test": "TWETBPCContextEffectiveNgDssrConfigurationTest",
+    "status": 0,
+    "seconds": 0.281
+  },
+  {
+    "test": "TimeIndexedArcSetTest",
+    "status": 0,
+    "seconds": 0.188
+  },
+  {
+    "test": "TimeIndexedGraphOptimizationTest",
+    "status": 0,
+    "seconds": 2.921
+  },
+  {
+    "test": "TimeIndexedReuseTest",
+    "status": 0,
+    "seconds": 0.516
+  },
+  {
+    "test": "TreeFinalBoundTest",
+    "status": 0,
+    "seconds": 0.172
+  },
+  {
+    "test": "TimeIndexedMaintenanceTest",
+    "status": 0,
+    "seconds": 0.531
+  },
+  {
+    "test": "UndirectedAdjacencyCoefficientTest",
+    "status": 0,
+    "seconds": 0.547
+  }
+]

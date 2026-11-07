@@ -1,0 +1,5 @@
+Exception in thread "main" java.lang.AssertionError: fractional tail must keep negative lower bound: expected=-17.5 actual=1.0E10
+	at TWETBPC.GC.CompletionBoundScalarTailTest.check(CompletionBoundScalarTailTest.java:158)
+	at TWETBPC.GC.CompletionBoundScalarTailTest.near(CompletionBoundScalarTailTest.java:154)
+	at TWETBPC.GC.CompletionBoundScalarTailTest.testLookup(CompletionBoundScalarTailTest.java:45)
+	at TWETBPC.GC.CompletionBoundScalarTailTest.main(CompletionBoundScalarTailTest.java:31)

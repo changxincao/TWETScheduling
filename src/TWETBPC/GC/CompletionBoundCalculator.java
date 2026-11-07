@@ -84,6 +84,12 @@ final class CompletionBoundCalculator {
 			if (index > maxDiscreteTime) {
 				return Utility.big_M;
 			}
+			// 2026-11-07: ceil可能越过小数物理右端，域外缓存的M不代表前缀不可行。
+			// 回退已缓存的全域最小值以保持乐观下界；域内仍使用原整数缓存。
+			PiecewiseLinearFunction prefix = forwardUByJob[job];
+			if (prefix != null && prefix.tail != null && index > prefix.tail.end) {
+				return forwardUMin(job);
+			}
 			return discreteValue(forwardUBeforeByJob[job], index);
 		}
 

@@ -1,0 +1,5 @@
+scalarTail outsourcing=false scalar=false cols=1 certificate=-0.3999999999999986
+scalarTail outsourcing=false scalar=true cols=1 certificate=-0.3999999999999986
+scalarTail outsourcing=true scalar=false cols=1 certificate=-0.3999999999999986
+scalarTail outsourcing=true scalar=true cols=1 certificate=-0.3999999999999986
+CompletionBoundScalarTailTest all passed

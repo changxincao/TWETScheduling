@@ -1,0 +1,6 @@
+scalarTail outsourcing=false scalar=false cols=1 certificate=-0.3999999999999986
+Exception in thread "main" java.lang.AssertionError: negative certificate: expected=-0.4 actual=0.0
+	at TWETBPC.GC.CompletionBoundScalarTailTest.check(CompletionBoundScalarTailTest.java:158)
+	at TWETBPC.GC.CompletionBoundScalarTailTest.near(CompletionBoundScalarTailTest.java:154)
+	at TWETBPC.GC.CompletionBoundScalarTailTest.testPricing(CompletionBoundScalarTailTest.java:126)
+	at TWETBPC.GC.CompletionBoundScalarTailTest.main(CompletionBoundScalarTailTest.java:32)

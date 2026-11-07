@@ -1,0 +1,7 @@
+test,status,seconds
+TimeIndexedDebugArcFixingTest,0,0.625
+TimeIndexedMaintenanceTest,0,0.672
+TimeIndexedGraphOptimizationTest,0,3.984
+TimeIndexedReuseTest,0,0.891
+TimeIndexedArcSetTest,0,0.468
+BestBpcProfilesTest,0,0.485

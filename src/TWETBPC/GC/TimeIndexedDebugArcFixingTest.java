@@ -53,10 +53,44 @@ public final class TimeIndexedDebugArcFixingTest {
 				}
 			}
 		}
+		checkInheritedAndRepeatedFixing();
 		checkDebugWriter(false);
 		checkDebugWriter(true);
 		System.out.println("TimeIndexedDebugArcFixingTest passed; assertions="
 				+ TimeIndexedDebugArcFixingTest.class.desiredAssertionStatus());
+	}
+
+	/** 本轮记录数可以大于Node新增数，重复fixing不能因继承位再次虚增Node计数。 */
+	private static void checkInheritedAndRepeatedFixing() throws Exception {
+		Field rounds = TimeIndexedGraphPricingEngine.ArcFixingResult.class.getDeclaredField("cleanupRounds");
+		rounds.setAccessible(true);
+		for (boolean debug : new boolean[] {false, true}) {
+			for (boolean rank1 : new boolean[] {false, true}) {
+				try (Fixture f = new Fixture(debug ? 1 : -1, 1)) {
+					f.node.forbidTimeIndexedPricingOnlyArc(0, 1, 1);
+					TimeIndexedGraphRank1CutPricingEngine delegate = rank1
+							? new TimeIndexedGraphRank1CutPricingEngine(f.data, f.config) : null;
+					for (int repeat = 0; repeat < 3; repeat++) {
+						var result = rank1 ? delegate.applyPaperReducedCostArcFixing(f.lp, 1.0)
+								: TimeIndexedGraphPricingEngine.applyPaperReducedCostArcFixing(
+										f.data, f.config, f.lp, 1.0);
+						long expectedLocal = debug ? 3 : repeat == 0 ? 2 : 0;
+						check(result.isAvailable() && result.getFixedLong() == expectedLocal,
+								"local count differs from newly discovered local bits");
+						check(result.getNodeTimeArcFixedBeforeLong() == (repeat == 0 ? 1 : 3)
+								&& result.getNodeTimeArcNewlyFixedLong() == (repeat == 0 ? 2 : 0)
+								&& result.getNodeTimeArcFixedAfterLong() == 3, "inherited bits counted twice");
+						String expectedRounds = expectedLocal == 0 ? "0" : expectedLocal + "/0";
+						check(expectedRounds.equals(rounds.get(result)), "cleanup did not stop on zero new local bits");
+						check(f.node.getTimeIndexedPricingWindowStart(1) == 1
+								&& f.node.getTimeIndexedPricingWindowEnd(1) == 1, "repeated fixing changed the window");
+						System.out.println("inherited debug=" + debug + " rank1Delegate=" + rank1 + " repeat="
+								+ repeat + " local=" + expectedLocal + " nodeNew="
+								+ result.getNodeTimeArcNewlyFixedLong() + " rounds=" + rounds.get(result) + " window=1:1");
+					}
+				}
+			}
+		}
 	}
 
 	/** 分段测试只替换位图，不分配巨型TI图或动态规划数组。 */

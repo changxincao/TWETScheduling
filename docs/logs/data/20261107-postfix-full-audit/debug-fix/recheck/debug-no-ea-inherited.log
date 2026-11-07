@@ -1,0 +1,21 @@
+public fixing debug=-1 rank1Delegate=false fixed=3 actual={3, 4, 6}
+public fixing debug=-1 rank1Delegate=true fixed=3 actual={3, 4, 6}
+public fixing debug=1 rank1Delegate=false fixed=3 actual={3, 4, 6}
+public fixing debug=1 rank1Delegate=true fixed=3 actual={3, 4, 6}
+public fixing debug=0 rank1Delegate=false fixed=3 actual={3, 4, 6}
+public fixing debug=0 rank1Delegate=true fixed=3 actual={3, 4, 6}
+inherited debug=false rank1Delegate=false repeat=0 local=2 nodeNew=2 rounds=2/0 window=1:1
+inherited debug=false rank1Delegate=false repeat=1 local=0 nodeNew=0 rounds=0 window=1:1
+inherited debug=false rank1Delegate=false repeat=2 local=0 nodeNew=0 rounds=0 window=1:1
+inherited debug=false rank1Delegate=true repeat=0 local=2 nodeNew=2 rounds=2/0 window=1:1
+inherited debug=false rank1Delegate=true repeat=1 local=0 nodeNew=0 rounds=0 window=1:1
+inherited debug=false rank1Delegate=true repeat=2 local=0 nodeNew=0 rounds=0 window=1:1
+inherited debug=true rank1Delegate=false repeat=0 local=3 nodeNew=2 rounds=3/0 window=1:1
+inherited debug=true rank1Delegate=false repeat=1 local=3 nodeNew=0 rounds=3/0 window=1:1
+inherited debug=true rank1Delegate=false repeat=2 local=3 nodeNew=0 rounds=3/0 window=1:1
+inherited debug=true rank1Delegate=true repeat=0 local=3 nodeNew=2 rounds=3/0 window=1:1
+inherited debug=true rank1Delegate=true repeat=1 local=3 nodeNew=0 rounds=3/0 window=1:1
+inherited debug=true rank1Delegate=true repeat=2 local=3 nodeNew=0 rounds=3/0 window=1:1
+debug writer segmented=false local=1 node=1 stillIgnored=true
+debug writer segmented=true local=1 node=1 stillIgnored=true
+TimeIndexedDebugArcFixingTest passed; assertions=false

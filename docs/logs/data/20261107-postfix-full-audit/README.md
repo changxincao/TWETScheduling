@@ -15,3 +15,5 @@
 `enumeration-exact`是同一有限master的补充验证：先保存原默认容差结果，再对同一raw模型设置相对与绝对MIP gap为0重新求解，断言UB/LB与独立DP一致。`enumeration-zero-gap.log`记录12组均通过，原三组非最优值分别下降16/5/6；这只改隔离诊断的CPLEX参数，不改生产gap、数据或启停实验。fresh编译及TI重核输出在`.codex-tmp/confirm-enum-debug-20261107/`。
 
 后续授权修复的证据位于`debug-fix/`：before保存新专项在旧源码下开/关断言的失败及默认快照，after保存对应通过日志和相同默认快照；CSV/JSON记录fresh 62项回归全通过。当前验收入口是`src/TWETBPC/GC/TimeIndexedDebugArcFixingTest.java`，开/关断言均应正常退出；不再期望当前公开debug fixing报错。`PostfixAudit`的segmented-contract是刻意绕过生产writer、重复调用known-absent的契约演示，公共位图API未改，因此该模式原说明仍成立。
+
+`debug-fix/recheck/`为两名只读审查者交叉复核后的补测。专项新增非空继承和连续三次fixing断言，分别核对本轮记录数、Node新增数、零新增停止和窗口；开/关断言日志均通过。CSV/JSON为补充后的六项fresh回归，不是重新跑62项；snapshot仍与before逐字相同。生产源码保持`7ccae804`不变，新增内容仅为测试与记录。

@@ -192,8 +192,9 @@ public final class TimeIndexedScalarCompletionBound {
 
 	static TimeIndexedScalarCompletionBound build(Data data, TWETBPCConfig config, LP lp, double pricingHorizon,
 			double[] hStartByJob, double[] hEndByJob) {
+		// Phase-I真实成本为0；该可选helper仍计算真实成本，不能混作Phase-I下界。
 		if (!config.timeIndexedCompletionBoundScalarEnhancement || lp == null || lp.getNode() == null
-				|| lp.getNode().depth <= 0) {
+				|| lp.getNode().depth <= 0 || lp.isFeasibilityPhaseOneObjectiveMode()) {
 			return null;
 		}
 		if (hasActiveSriPricingCuts(lp) && !config.timeIndexedCompletionBoundAllowNoSriWithActiveCuts

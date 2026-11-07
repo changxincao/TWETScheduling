@@ -861,6 +861,11 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 				candidateBySignature.remove(worst.signature);
 				candidateHeap.poll();
 			}
+			// 同序列改进会留下旧堆项；仅在过期项多于有效项时压缩，保留原对象及排序规则。
+			if (candidateHeap.size() > 2L * candidateBySignature.size()) {
+				candidateHeap.clear();
+				candidateHeap.addAll(candidateBySignature.values());
+			}
 		}
 
 		private Candidate currentWorstCandidate() {
@@ -1015,7 +1020,8 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			StringBuilder cleanupRoundTrace = new StringBuilder();
 			boolean cleanupDistancesCurrent = false;
 			for (int cleanupRound = 0; cleanupRound < 8; cleanupRound++) {
-				long roundFixed = cleanupGraph();
+				long roundFixed = cleanupGraph(cleanupRound == 0
+						&& processFixed == 0 && idleFixed == 0 && endFixed == 0);
 				if (cleanupRoundTrace.length() > 0) {
 					cleanupRoundTrace.append('/');
 				}
@@ -1133,9 +1139,12 @@ public class TimeIndexedGraphPricingEngine implements PricingEngine {
 			}
 		}
 
-		private long cleanupGraph() {
-			computeForwardDistances();
-			computeBackwardDistances();
+		private long cleanupGraph(boolean distancesCurrent) {
+			// 首轮RC扫描未改图时复用已有F/B；结构cleanup照常，删弧后的下一轮仍须重算。
+			if (!distancesCurrent) {
+				computeForwardDistances();
+				computeBackwardDistances();
+			}
 			long fixed = 0L;
 			// 2026-07-14: 倒序扫描时增量维护“更晚时间仍有有用处理弧”，避免先额外扫描一遍 O(n^2 H)。
 			boolean[] usefulProcessingAtLaterTime = new boolean[n + 1];

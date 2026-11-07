@@ -1,0 +1,4 @@
+Exception in thread "main" java.lang.AssertionError: stale heap exceeded its bound
+	at TWETBPC.GC.TimeIndexedMaintenanceTest.check(TimeIndexedMaintenanceTest.java:288)
+	at TWETBPC.GC.TimeIndexedMaintenanceTest.testCandidateUpdates(TimeIndexedMaintenanceTest.java:155)
+	at TWETBPC.GC.TimeIndexedMaintenanceTest.main(TimeIndexedMaintenanceTest.java:39)

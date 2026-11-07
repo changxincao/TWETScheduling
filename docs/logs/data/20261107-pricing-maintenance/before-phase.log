@@ -1,0 +1,4 @@
+Exception in thread "main" java.lang.AssertionError: Phase-I must not use a real-cost helper
+	at TWETBPC.GC.TimeIndexedMaintenanceTest.check(TimeIndexedMaintenanceTest.java:288)
+	at TWETBPC.GC.TimeIndexedMaintenanceTest.testPhaseOneHelper(TimeIndexedMaintenanceTest.java:93)
+	at TWETBPC.GC.TimeIndexedMaintenanceTest.main(TimeIndexedMaintenanceTest.java:38)

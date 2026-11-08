@@ -1,0 +1,76 @@
+TIME 2026-11-08T19:21:51.922877100+08:00
+HOST DESKTOP-06K8JI8 memory=137112563712 free=104931393536
+ASSETS_OK 21
+CASE bitmap-n050-set02-family-high-wide-m4 n=50 m=4 H=108579.0 seed=fa69483bd9f22144d5664b58424f30e43eb23c3298bfd258e60dfd964c71294f
+STATUS bitmap-n050-set02-family-high-wide-m4 runId=bitmap-n050-set02-family-high-wide-m4
+ state=SUCCEEDED
+ updatedAt=2026-11-08T11:09:41.710686700Z
+ mainClass=Common.formal.FormalExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n050-set02-family-high-wide-m4
+ pid=6404
+ exitCode=0
+ note=child JVM finished successfully
+ 
+DIAGNOSTIC bitmap-n050-set02-family-high-wide-m4 rounds=199 [NG bitmap compare] node=1 pricingCall=26 nodePricingCall=26 repair=false dssrRound=14 units=14758 abUnits=7379 baUnits=7379 merges=8255993 sumK=18540231 sumW=163063562 orMs=149.105501 setMs=60.435726 prepMs=1.774896 verifyMs=0.434608 binDiagnosticMs=0.605099 indexPayloadBytes=127532 fwGroups=13733 fwLabels=31883 fwKMedian=2 fwKP90=4 fwKMax=69 bwGroups=1978 bwLabels=6027 bwKMedian=2 bwKP90=6 bwKMax=24 sampleUnits=17
+CASE bitmap-n040-set01-random-base-wide-m4 n=40 m=4 H=3971.0 seed=0cae1908cc0da7c87d6614620b83ee03c8816b15eb924266536ba11eef14d901
+STATUS bitmap-n040-set01-random-base-wide-m4 runId=bitmap-n040-set01-random-base-wide-m4
+ state=SUCCEEDED
+ updatedAt=2026-11-08T11:06:50.259853400Z
+ mainClass=Common.formal.FormalExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n040-set01-random-base-wide-m4
+ pid=11776
+ exitCode=0
+ note=child JVM finished successfully
+ 
+DIAGNOSTIC bitmap-n040-set01-random-base-wide-m4 rounds=3 [NG bitmap compare] node=1 pricingCall=2 nodePricingCall=2 repair=false dssrRound=2 units=0 abUnits=0 baUnits=0 merges=0 sumK=0 sumW=0 orMs=0.000000 setMs=0.000000 prepMs=0.020000 verifyMs=0.000000 binDiagnosticMs=0.000000 indexPayloadBytes=224 fwGroups=26 fwLabels=56 fwKMedian=2 fwKP90=4 fwKMax=4 bwGroups=15 bwLabels=21 bwKMedian=1 bwKP90=3 bwKMax=3 sampleUnits=0
+CASE bitmap-n040-set04-family-base-wide-m2 n=40 m=2 H=3710.0 seed=a376e9a689c291501f903be9ad8af87c68885ecfe54f7c2fa129bbdbe004fad4
+STATUS bitmap-n040-set04-family-base-wide-m2 runId=bitmap-n040-set04-family-base-wide-m2
+ state=SUCCEEDED
+ updatedAt=2026-11-08T11:16:53.846898800Z
+ mainClass=Common.formal.FormalExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n040-set04-family-base-wide-m2
+ pid=8604
+ exitCode=0
+ note=child JVM finished successfully
+ 
+DIAGNOSTIC bitmap-n040-set04-family-base-wide-m2 rounds=314 [NG bitmap compare] node=1 pricingCall=38 nodePricingCall=38 repair=false dssrRound=10 units=46578 abUnits=23289 baUnits=23289 merges=3144440 sumK=103879332 sumW=124187332 orMs=75.139923 setMs=167.616140 prepMs=1.260498 verifyMs=1.289780 binDiagnosticMs=0.044299 indexPayloadBytes=384636 fwGroups=2894 fwLabels=96159 fwKMedian=20 fwKP90=83 fwKMax=199 bwGroups=1381 bwLabels=6211 bwKMedian=3 bwKP90=10 bwKMax=19 sampleUnits=16
+CASE bitmap-n040-set01-random-high-wide-m4 n=40 m=4 H=80260.0 seed=5cc481289e21b28a04bcd9d579c528e91e8e8eb2d4ae9abe6453f09f0a41f167
+STATUS bitmap-n040-set01-random-high-wide-m4 runId=bitmap-n040-set01-random-high-wide-m4
+ state=SUCCEEDED
+ updatedAt=2026-11-08T11:07:03.714695400Z
+ mainClass=Common.formal.FormalExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n040-set01-random-high-wide-m4
+ pid=2736
+ exitCode=0
+ note=child JVM finished successfully
+ 
+DIAGNOSTIC bitmap-n040-set01-random-high-wide-m4 rounds=4 [NG bitmap compare] node=1 pricingCall=2 nodePricingCall=2 repair=false dssrRound=3 units=0 abUnits=0 baUnits=0 merges=0 sumK=0 sumW=0 orMs=0.000000 setMs=0.000000 prepMs=0.042700 verifyMs=0.000000 binDiagnosticMs=0.000000 indexPayloadBytes=300 fwGroups=44 fwLabels=75 fwKMedian=1 fwKP90=3 fwKMax=5 bwGroups=15 bwLabels=24 bwKMedian=1 bwKP90=3 bwKMax=3 sampleUnits=0
+CASE bitmap-n040-set02-family-high-wide-m4 n=40 m=4 H=88160.0 seed=79e9cfea9790e816efb626dd93addeac10a16f5380651109c0e32fef84846928
+STATUS bitmap-n040-set02-family-high-wide-m4 runId=bitmap-n040-set02-family-high-wide-m4
+ state=SUCCEEDED
+ updatedAt=2026-11-08T11:07:09.987259700Z
+ mainClass=Common.formal.FormalExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n040-set02-family-high-wide-m4
+ pid=10292
+ exitCode=0
+ note=child JVM finished successfully
+ 
+DIAGNOSTIC bitmap-n040-set02-family-high-wide-m4 rounds=42 [NG bitmap compare] node=1 pricingCall=11 nodePricingCall=11 repair=true dssrRound=6 units=3020 abUnits=1510 baUnits=1510 merges=627 sumK=11758 sumW=1231 orMs=0.117687 setMs=0.138211 prepMs=0.013600 verifyMs=0.093200 binDiagnosticMs=0.000000 indexPayloadBytes=6804 fwGroups=75 fwLabels=1701 fwKMedian=20 fwKP90=39 fwKMax=59 bwGroups=97 bwLabels=1667 bwKMedian=14 bwKP90=34 bwKMax=46 sampleUnits=0
+CASE bitmap-n050-set01-random-high-wide-m4 n=50 m=4 H=117272.0 seed=c4ca952e54ce7a756f95fb24b43022072c02c2e57a431dd0cbcbecbe5bfd6243
+STATUS bitmap-n050-set01-random-high-wide-m4 runId=bitmap-n050-set01-random-high-wide-m4
+ state=SUCCEEDED
+ updatedAt=2026-11-08T11:07:31.343983800Z
+ mainClass=Common.formal.FormalExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n050-set01-random-high-wide-m4
+ pid=576
+ exitCode=0
+ note=child JVM finished successfully
+ 
+DIAGNOSTIC bitmap-n050-set01-random-high-wide-m4 rounds=16 [NG bitmap compare] node=1 pricingCall=12 nodePricingCall=12 repair=false dssrRound=2 units=28 abUnits=14 baUnits=14 merges=162 sumK=322 sumW=162 orMs=0.004501 setMs=0.004000 prepMs=0.035102 verifyMs=0.001500 binDiagnosticMs=0.000000 indexPayloadBytes=1304 fwGroups=150 fwLabels=326 fwKMedian=1 fwKP90=5 fwKMax=10 bwGroups=106 bwLabels=239 bwKMedian=1 bwKP90=5 bwKMax=8 sampleUnits=0
+BATCH FINISHED
+ExperimentBatchScheduler scan: total=6 matched=6 dependencies=0 selected=6 localSuccess=0 pending=6 scanOnly=false selectors=<none>
+ExperimentBatchScheduler selected solves: algorithms={NG_DSSR=6} outsourcingModels={}
+ExperimentBatchScheduler finished: total=6 succeeded=6 skipped=0 failed=0 manifest=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db
+12704 Common.formal.FormalExperimentRunner --action=solve --runId=pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a --instance=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/inputs/n060-set02-m3-family-high-wwide-f3.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261108-ng-n60-join-timing-4ac6cb5a/runs/pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a --seedFile=D:/ccx_work/????????????????/work1/experiments/20261104-ng-mainline-a-prepared/assets/seeds/n060-set02-m3-family-high-wwide-f3.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647
+14488 jdk.jcmd/sun.tools.jcmd.JCmd -l
+8268 HEU.ExperimentBatchScheduler D:\ccx_work\????????????????\work1\experiments\20261108-ng-n60-join-timing-4ac6cb5a\solve.tsv 1

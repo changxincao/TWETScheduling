@@ -286,3 +286,24 @@ Java21 focused编译通过；独立成员并集对照2560批次及分档双序�
 小型验收证据、代码/数据/seed追踪表见data/20261108-ng-bitmap-ab；完整诊断stdout在远端各runs目录，本地工作快照在.codex-tmp/ng-bitmap-ab-20261108。summarize-ng-bitmap-ab-20261108.py输出每轮、每例、q×k和W分档CSV，并核对各档次数/sumK/sumW与原汇总一致；使用sumW/sumK时明确不是mean(W/k)，分档抽样时间不外推全量占比。后续最终状态另续记。
 
 首份每轮/每例、q×k及W分布已保存到data/20261108-ng-bitmap-ab/initial-statistics，capture.json明确为5项返回、1项运行中的快照，不能当六例最终表。对应固定dual的baseline/off/on/both和实际部署JAR回归小日志以txt保留，避免通用log忽略规则漏掉验收证据。
+
+## 25. 六例返回后的最终位图对照
+
+19:21:51（北京时间）完成验收：六个child全部SUCCEEDED/exit0，scheduler末行为total=6 succeeded=6 skipped=0 failed=0，本批solver/scheduler均为0；原长join的12704/8268仍保留，21项静态资产hash仍匹配。六例累计578轮完整诊断、5927284次缓存miss的成对mask构造、316021136次实际可剪组聚合，所有OR/set位图比较通过。SUCCEEDED是组件诊断返回状态，不是六个完整B&P均证明最优。worker的末尾状态未落盘（experiment.status仍SOLVE_RUNNING、worker.exit-code为空），因此不将该空文件当退出码证据；在六个child状态、scheduler完成汇总与本批无JVM三项一致后，保留experiment.status.pre-finalize，仅把实验状态补为FINISHED，未修改任何solver结果。completion-record.json明确worker shell退出码未观测。
+
+下表只统计两种方法填写位图的累计墙钟时间，分配、成员索引准备、相等核对和分档抽样均不混入。
+
+| 场景，均wide | 完整诊断轮 | 实际合并次数 | OR ms | 全set ms | 索引准备 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| family n40/set04/base/m2 | 314 | 197626340 | 5683.821 | 7292.255 | 74.888 |
+| family n50/set02/high/m4 | 199 | 116778716 | 2349.762 | 1554.679 | 63.230 |
+| family n40/set02/high/m4 | 42 | 1613814 | 15.801 | 19.096 | 3.447 |
+| random n40/set01/base/m4 | 3 | 32 | 0.028 | 0.016 | 0.435 |
+| random n40/set01/high/m4 | 4 | 70 | 0.058 | 0.032 | 0.474 |
+| random n50/set01/high/m4 | 16 | 2164 | 0.322 | 0.213 | 0.922 |
+
+当前结论是不应全部替换set：n50 high聚合本身少约0.795秒（33.8%），但n40 family/base反而多约1.608秒；六例累计全set也没有优于全OR。n50的准备时间另约0.063秒，不能把局部1.51倍叫完整求解1.51倍。三个random的聚合不足1毫秒，冷JIT、固定计时开销及调度噪声足以影响比例，不用于选择分界。较小family/high也只有十几毫秒，不与两项较大负载等权解释。
+
+组结构方向与预期相符：n40 family/base静态平均k=34.46、实际合并加权平均k=20.76；n50 family/high分别为7.03和4.96。对应sumW/sumK分别为2.528与4.692，这个工作量比不是mean(W/k)。q×k表保留原始静态组次、合并次数和sampledMerges，便于后续按实际调用权重分析。抽样中1<q<=2两项均OR较快，4<q<=8及8<q<=16更倾向set；2<q<=4在两项负载上胜负不同，说明不能仅凭一个粗档宣布统一阈值，仍需结合k与重复波动。未设置8或其它正式分界。
+
+最终CSV、每轮记录和汇总在data/20261108-ng-bitmap-ab/final-statistics，原始状态及实际profile/CPLEX线程记录在final-status；先前initial-statistics保留其时间边界。完整stdout保留远端及本地隔离snapshot-final，不作大范围结果导出。本批没有重现此前n60上千秒OR量级，因此不能据几秒负载断言极端轮一定获得同倍数收益。正式OR策略和其余求解配置不变，未追加第七个算例。

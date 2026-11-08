@@ -1,0 +1,8 @@
+runId=bitmap-n040-set04-family-base-wide-m2
+state=SUCCEEDED
+updatedAt=2026-11-08T11:16:53.846898800Z
+mainClass=Common.formal.FormalExperimentRunner
+outputDir=D:\ccx_work\考虑交付的机器调度\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n040-set04-family-base-wide-m2
+pid=8604
+exitCode=0
+note=child JVM finished successfully

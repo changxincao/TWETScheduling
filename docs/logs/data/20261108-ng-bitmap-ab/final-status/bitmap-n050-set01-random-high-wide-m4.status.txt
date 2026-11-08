@@ -1,0 +1,8 @@
+runId=bitmap-n050-set01-random-high-wide-m4
+state=SUCCEEDED
+updatedAt=2026-11-08T11:07:31.343983800Z
+mainClass=Common.formal.FormalExperimentRunner
+outputDir=D:\ccx_work\考虑交付的机器调度\work1\experiments\20261108-ng-join-bitmap-ab-caecd7db\runs\bitmap-n050-set01-random-high-wide-m4
+pid=576
+exitCode=0
+note=child JVM finished successfully

@@ -1,0 +1,1 @@
+Picked up JAVA_TOOL_OPTIONS: -Xmx4g -XX:ActiveProcessorCount=2 -XX:ParallelGCThreads=1 -XX:ConcGCThreads=1 -Dtwet.bpc.ngDssrJoinBitmapCompare=true

@@ -1,0 +1,55 @@
+{
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "sourceCommit": "caecd7dbe181f639d1a264501ac54f23a97ef2ce",
+  "cases": [
+    {
+      "runId": "bitmap-n050-set02-family-high-wide-m4",
+      "state": "SUCCEEDED",
+      "exitCode": 0,
+      "note": "diagnostic returned, not a claim of full-tree optimality"
+    },
+    {
+      "runId": "bitmap-n040-set01-random-base-wide-m4",
+      "state": "SUCCEEDED",
+      "exitCode": 0,
+      "note": "diagnostic returned, not a claim of full-tree optimality"
+    },
+    {
+      "runId": "bitmap-n040-set04-family-base-wide-m2",
+      "state": "SUCCEEDED",
+      "exitCode": 0,
+      "note": "diagnostic returned, not a claim of full-tree optimality"
+    },
+    {
+      "runId": "bitmap-n040-set01-random-high-wide-m4",
+      "state": "SUCCEEDED",
+      "exitCode": 0,
+      "note": "diagnostic returned, not a claim of full-tree optimality"
+    },
+    {
+      "runId": "bitmap-n040-set02-family-high-wide-m4",
+      "state": "SUCCEEDED",
+      "exitCode": 0,
+      "note": "diagnostic returned, not a claim of full-tree optimality"
+    },
+    {
+      "runId": "bitmap-n050-set01-random-high-wide-m4",
+      "state": "SUCCEEDED",
+      "exitCode": 0,
+      "note": "diagnostic returned, not a claim of full-tree optimality"
+    }
+  ],
+  "diagnosticRounds": 578,
+  "pairedMaskBuilds": 5927284,
+  "groupMerges": 316021136,
+  "maskMismatchCount": 0,
+  "newExperimentJvmCountAfterFinish": 0,
+  "schedulerSummary": "total=6 succeeded=6 skipped=0 failed=0",
+  "batchStatusReconciledFrom": "SOLVE_RUNNING",
+  "batchStatusBackup": "experiment.status.pre-finalize",
+  "workerShellExitCodeObserved": null,
+  "note": "all six child exit codes and scheduler finished summary verified; empty worker.exit-code not treated as numeric proof; only experiment.status reconciled, no solver result changed",
+  "baselineProductionUses": "OR",
+  "sparseThresholdSelected": false
+}

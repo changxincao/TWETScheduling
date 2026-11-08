@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-11-08T20:11:06.4354006+08:00",
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "state": "RUNNING",
+  "completedDiagnosticRounds": 142,
+  "pricingCall": 8,
+  "dssrRoundInProgress": 21,
+  "phase": "forward.progress",
+  "lastForwardPops": 160000,
+  "rootNode": 1,
+  "oldSolverPidPreserved": 12704,
+  "newSolverPid": 11072,
+  "note": "completed-round snapshot only; original thousand-second OR not yet reproduced; no remote write or job change",
+  "stdoutSnapshotCapturedAtUtc": "2026-11-08T12:11:39.7353704Z"
+}

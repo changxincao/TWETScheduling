@@ -1,0 +1,2 @@
+﻿case,state,rounds,units,abUnits,baUnits,merges,sumK,sumW,orMs,setMs,prepMs,verifyMs,binDiagnosticMs,fwGroups,fwLabels,bwGroups,bwLabels,workWordMemberRatio,orSetTimeRatio,meanStaticForwardK,meanMergedK,maxForwardK,maxIndexPayloadBytes
+pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a,RUNNING,142,3522073,1761073,1761000,209465269,7098807791,89199660878,38628.23162499999,14904.325937,84.309821,135.382195,4.514399,130835,8681749,110129,749373,12.565442466422176,2.5917463015959266,66.3564718920778,33.890142384416,639,2891720

@@ -319,3 +319,9 @@ JVM仍24GiB、CPLEX1线程，不沿用六例中的ActiveProcessorCount=2或GC线
 上传后12项静态资产hash和单任务scan通过；启动前确认本新目录无JVM，只启动worker一次。新solver PID11072、scheduler PID11680。主动关闭本机启动SSH PID24104后，19:40:56独立复查仍为1个scheduler/1个solver；原solver12704/scheduler8268同时保留，未停止、覆盖或改动其目录。实际VM.command_line/flags确认诊断属性、24GiB上限及原CLI，run.properties确认v8/CPLEX1/原seed指纹。此时已有9轮完整诊断并继续运行，原pricingHorizon=52290也已出现，但尚未重现历史大join，不能用早期毫秒级轮次评价优化收益。
 
 版本、原/新CLI、资产hash、启动及断开验收在data/20261108-ng-n60-bitmap-ab，远端有同名startup-record.json。原pricing前缀的4轮启动日志解析通过，汇总脚本重新处理已完成六例也得到完全相同的summary.json。当前结论仅为正确启动并推进，未宣称单项已完成或大join已提速。
+
+## 27. 20:11的n60同状态对照进展
+
+2026-11-08 20:11独立读取06主机，新任务11072/11680仍运行，原任务12704/8268亦保留；12项资产hash仍匹配。已完成142轮诊断、3522073次配对mask构造、209465269次组聚合，OR累计38.628秒、全set累计14.904秒，局部时间比约2.59。索引准备累计0.084秒，核对0.135秒，解释性分档抽样0.0045秒，未混入上述OR/set计时。当前仍是根节点，第8次pricing/DSSR21已到forward.progress，取stdout快照时达到160000 pops，尚未完成本次pricing或整项求解。stderr仅有JAVA_TOOL_OPTIONS提示，已完成双算未见位图不一致。
+
+较大单轮已出现在pricing7/DSSR21：OR36.866秒、set10.770秒，约3.42倍；该轮贡献了绝大多数累计收益，其前一轮pricing7/DSSR20却为OR0.840秒、set0.936秒。因此不能称所有轮次统一受益，仍需看组结构。较大轮有23822个前向组、722930个前向label，组大小中位15/P90为85/最大309；完整q×k/W分布在data/20261108-ng-n60-bitmap-ab/progress-2011。该快照只证明已完成轮次出现较明显位图局部收益，尚未重现旧1325秒OR量级，不外推整个join或完整求解提速。本次仅只读查询与本地记录，没有修改远端任务、配置或代码。

@@ -1,0 +1,28 @@
+[
+  {
+    "case": "pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a",
+    "state": "RUNNING",
+    "rounds": 142,
+    "units": 3522073,
+    "abUnits": 1761073,
+    "baUnits": 1761000,
+    "merges": 209465269,
+    "sumK": 7098807791,
+    "sumW": 89199660878,
+    "orMs": 38628.23162499999,
+    "setMs": 14904.325937,
+    "prepMs": 84.309821,
+    "verifyMs": 135.382195,
+    "binDiagnosticMs": 4.514399,
+    "fwGroups": 130835,
+    "fwLabels": 8681749,
+    "bwGroups": 110129,
+    "bwLabels": 749373,
+    "workWordMemberRatio": 12.565442466422176,
+    "orSetTimeRatio": 2.5917463015959266,
+    "meanStaticForwardK": 66.3564718920778,
+    "meanMergedK": 33.890142384416,
+    "maxForwardK": 639,
+    "maxIndexPayloadBytes": 2891720
+  }
+]

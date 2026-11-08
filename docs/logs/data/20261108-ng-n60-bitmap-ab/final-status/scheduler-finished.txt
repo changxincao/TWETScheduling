@@ -1,0 +1,5 @@
+FINISHED
+0
+ExperimentBatchScheduler scan: total=1 matched=1 dependencies=0 selected=1 localSuccess=0 pending=1 scanOnly=false selectors=<none>
+ExperimentBatchScheduler selected solves: algorithms={NG_DSSR=1} outsourcingModels={}
+ExperimentBatchScheduler finished: total=1 succeeded=1 skipped=0 failed=0 manifest=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-n60-join-bitmap-ab-caecd7db

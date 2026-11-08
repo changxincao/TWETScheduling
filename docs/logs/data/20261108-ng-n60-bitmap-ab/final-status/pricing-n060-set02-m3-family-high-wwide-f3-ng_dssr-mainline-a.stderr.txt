@@ -1,0 +1,1 @@
+Picked up JAVA_TOOL_OPTIONS: -Xmx24g -Dtwet.bpc.ngDssrJoinBitmapCompare=true -Dtwet.bpc.fullDomainCompare.liveTrace=true -Dtwet.bpc.fullDomainCompare.stageHeartbeat=true -Dtwet.bpc.fullDomainCompare.nodeProgressSummary=true

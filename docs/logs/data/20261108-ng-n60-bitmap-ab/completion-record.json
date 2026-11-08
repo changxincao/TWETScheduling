@@ -1,0 +1,42 @@
+{
+  "checkedAt": "2026-11-08T23:24:07.3977475+08:00",
+  "finishedAt": "2026-11-08T22:54:14.1569195+08:00",
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "childState": "SUCCEEDED",
+  "childExitCode": 0,
+  "batchState": "FINISHED",
+  "solverStatus": "TIME_LIMIT",
+  "solveSeconds": 11753.946845,
+  "incumbent": 358596.0,
+  "bestBound": 280807.574575,
+  "gapPercent": 21.692497,
+  "processedNodes": 1,
+  "rootBoundClosed": false,
+  "completeDiagnosticRounds": 167,
+  "pairedMaskBuilds": 7452637,
+  "groupMerges": 9265020055,
+  "maskMismatches": 0,
+  "totalOrSeconds": 5987.2715460029995,
+  "totalSetSeconds": 313.33098702,
+  "largestRound": {
+    "setSeconds": 261.7615858,
+    "dssrRound": 23,
+    "pricingCall": 9,
+    "ratio": 21.913327761097328,
+    "meanSourceWordWidth": 1198.224291261843,
+    "meanMergedK": 10.748846485897237,
+    "orSeconds": 5736.0674249
+  },
+  "effectiveConfigFields": 199,
+  "excludedRuntimeFields": [
+    "config.bpcOutputRoot",
+    "config.liveTraceLogPath",
+    "config.instanceName"
+  ],
+  "comparedFields": 196,
+  "configDifferences": 0,
+  "originalSolverPidPresent": 12704,
+  "formalLogic": "OR unchanged",
+  "scope": "component timings only, no full-solver optimized speedup measured"
+}

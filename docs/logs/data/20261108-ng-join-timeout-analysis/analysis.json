@@ -1,0 +1,47 @@
+{
+  "sourceCommit": "81e144e45f727f992e02c1a1a753d98c19d796df",
+  "status": "TIME_LIMIT",
+  "solveSeconds": 20448.405649,
+  "gapPercent": 20.065771,
+  "processedNodes": 1,
+  "lastPricingCall": 11,
+  "dssrRounds": 23,
+  "lastCallPhaseSeconds": {
+    "total": 17486.643173,
+    "init": 22.693983,
+    "sink": 0.0,
+    "forward": 1608.2726100000002,
+    "backward": 709.142291,
+    "compact": 1.9756969999999998,
+    "join": 15144.549396,
+    "finalize": 0.00068
+  },
+  "joinFractionOfLastCall": 0.8660638434816194,
+  "joinFractionOfSolve": 0.740622504069926,
+  "lastRound": {
+    "forwardKept": 3235470,
+    "backwardKept": 1347808,
+    "groupPairChecks": 16110170167,
+    "groupPairsPruned": 16038978038,
+    "potentialLabelPairsSkipped": 241012943330,
+    "functionLowerBoundCalls": 348366791,
+    "indexBuildSeconds": 4.124626,
+    "wholePrefilterEnabledJoinSeconds": 12629.936693,
+    "groupPruneRatio": 0.9955809201105876,
+    "nonPrunedGroups": 71192129
+  },
+  "limits": {
+    "seconds": 10800,
+    "canContinueChecksTime": false,
+    "prefilterLoopChecksTime": false,
+    "schedulerWaitHasDeadline": false
+  },
+  "evidenceBoundary": "Per-round group counts and whole prefilter-enabled join time; no isolated BitSet.or timer or population histogram",
+  "approximateTimelineSeconds": {
+    "lastPricingStarted": 2961.762476,
+    "lastRoundJoinStarted": 7818.468956000001,
+    "deadline": 10800.0,
+    "returned": 20448.405649,
+    "overrun": 9648.405649
+  }
+}

@@ -1,0 +1,9 @@
+TIME 2026-11-08T12:25:56.821497700+08:00
+BATCH SOLVE_RUNNING
+RUN	pricing-n060-set02-m3-family-base-wwide-f3-ng_dssr-mainline-a	SUCCEEDED	pid=14392	alive=false	cpuMs=-1	liveBytes=242958	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=f125efd57e32a5fbd4baaa3c52a479f93cd1815b7c4a14f902ccdf8aee5eb9a7
+RUN	pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a	SUCCEEDED	pid=12640	alive=false	cpuMs=-1	liveBytes=251418	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4
+RUN	pricing-n060-set02-m3-family-medium-wwide-f3-ng_dssr-mainline-a	RUNNING	pid=18120	alive=true	cpuMs=4891078	liveBytes=432438	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=2ae40971a45c7a05e81c2ec5352e4b254edfc60fb178e745dd9c2da76cc01274
+RUN	pricing-n060-set02-m4-family-base-wwide-f3-ng_dssr-mainline-a	SUCCEEDED	pid=18160	alive=false	cpuMs=-1	liveBytes=333810	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=8cb0efb7af60d55c6980fb0d052ea530536fe0cc5c7ae5f084060890dc8c1146
+RUN	pricing-n060-set02-m4-family-high-wwide-f3-ng_dssr-mainline-a	SUCCEEDED	pid=3964	alive=false	cpuMs=-1	liveBytes=712082	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=111c2a1a08dae90a54462ee4fae4038ab2ac63631f85d60bb43cd316ca12640c
+RUN	pricing-n060-set03-m4-family-base-wwide-f3-ng_dssr-mainline-a	SUCCEEDED	pid=19108	alive=false	cpuMs=-1	liveBytes=3566993	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=1b9e81f9ba03ff4d249ea139583f1b653a65b10cccbbd5d6a64011fbc2c11391
+RUN	pricing-n060-set03-m4-family-high-wwide-f3-ng_dssr-mainline-a	SUCCEEDED	pid=18944	alive=false	cpuMs=-1	liveBytes=524628	stderrBytes=184	profile=2026-09-12-v8	threads=1	seed=9bc26ec33e180f534072a11d47924c842403baa58da81caf885c5207afa43b55

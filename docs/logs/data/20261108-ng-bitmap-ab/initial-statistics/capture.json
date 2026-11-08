@@ -1,0 +1,7 @@
+{
+  "captureUtc": "2026-11-08T11:11:04.6768729Z",
+  "completeDiagnostics": 5,
+  "runningDiagnostics": 1,
+  "partialCase": "bitmap-n040-set04-family-base-wide-m2",
+  "note": "Initial in-progress snapshot, not final six-case performance report; raw stdout stays remote and local .codex-tmp snapshot-first"
+}

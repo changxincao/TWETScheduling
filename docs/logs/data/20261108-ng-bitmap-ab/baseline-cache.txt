@@ -1,0 +1,6 @@
+MASKS {0, 2, 5, 8, 70, 129} / {} / {0, 1, 2, 5, 8, 64, 70, 129}, checks=9
+PRICING phaseOne=true, negative=true, columns=20, certificate=-0x1.428p9, sha=32530d98ecf0c5cfbc1a950e709d87d08a6d8b865bc6ac3f990974e306515564
+PRICING phaseOne=true, negative=false, columns=0, certificate=0x1.ep3, sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+PRICING phaseOne=false, negative=true, columns=15, certificate=-0x1.f5f2c28p25, sha=b1fc86b9ddd9321862a35060249f08532099d43abfd5e2b14302f8e9eaf6ed80
+PRICING phaseOne=false, negative=false, columns=0, certificate=0x0.0p0, sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+NgDssrJoinPrefilterCacheTest passed

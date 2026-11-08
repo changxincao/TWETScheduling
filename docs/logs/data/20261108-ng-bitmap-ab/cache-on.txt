@@ -1,0 +1,12 @@
+MASKS {0, 2, 5, 8, 70, 129} / {} / {0, 1, 2, 5, 8, 64, 70, 129}, checks=9
+[NG bitmap compare] node=0 pricingCall=1 nodePricingCall=1 repair=false dssrRound=1 units=36 abUnits=18 baUnits=18 merges=0 sumK=0 sumW=0 orMs=0.120700 setMs=0.015200 prepMs=1.135800 verifyMs=0.058100 binDiagnosticMs=0.000000 indexPayloadBytes=900 fwGroups=6 fwLabels=225 fwKMedian=33 fwKP90=48 fwKMax=48 bwGroups=6 bwLabels=262 bwKMedian=49 bwKP90=49 bwKMax=49 sampleUnits=0
+[NG bitmap bin] node=0 pricingCall=1 nodePricingCall=1 repair=false dssrRound=1 qBin=0to1 kBin=17to64 groups=6 staticK=225 staticW=6 merges=0 sumK=0 sumW=0 sampledMerges=0 orMs=0.000000 setMs=0.000000 abSamples=0 baSamples=0
+[NG bitmap width] node=0 pricingCall=1 nodePricingCall=1 repair=false dssrRound=1 wordPowerBin=1 groups=6 merges=0
+PRICING phaseOne=true, negative=true, columns=20, certificate=-0x1.428p9, sha=32530d98ecf0c5cfbc1a950e709d87d08a6d8b865bc6ac3f990974e306515564
+PRICING phaseOne=true, negative=false, columns=0, certificate=0x1.ep3, sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+[NG bitmap compare] node=0 pricingCall=1 nodePricingCall=1 repair=false dssrRound=1 units=9 abUnits=5 baUnits=4 merges=0 sumK=0 sumW=0 orMs=0.005800 setMs=0.006500 prepMs=0.157200 verifyMs=0.016500 binDiagnosticMs=0.000000 indexPayloadBytes=508 fwGroups=3 fwLabels=127 fwKMedian=33 fwKP90=61 fwKMax=61 bwGroups=3 bwLabels=115 bwKMedian=33 bwKP90=49 bwKMax=49 sampleUnits=0
+[NG bitmap bin] node=0 pricingCall=1 nodePricingCall=1 repair=false dssrRound=1 qBin=0to1 kBin=17to64 groups=3 staticK=127 staticW=3 merges=0 sumK=0 sumW=0 sampledMerges=0 orMs=0.000000 setMs=0.000000 abSamples=0 baSamples=0
+[NG bitmap width] node=0 pricingCall=1 nodePricingCall=1 repair=false dssrRound=1 wordPowerBin=1 groups=3 merges=0
+PRICING phaseOne=false, negative=true, columns=15, certificate=-0x1.f5f2c28p25, sha=b1fc86b9ddd9321862a35060249f08532099d43abfd5e2b14302f8e9eaf6ed80
+PRICING phaseOne=false, negative=false, columns=0, certificate=0x0.0p0, sha=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+NgDssrJoinPrefilterCacheTest passed

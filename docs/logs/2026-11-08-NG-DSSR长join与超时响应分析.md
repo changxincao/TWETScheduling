@@ -284,3 +284,5 @@ Java21 focused编译通过；独立成员并集对照2560批次及分档双序�
 首份快照显示：n50/set02/family/high/wide/m4已有199轮完整诊断，116778716次实际合并，OR累计2349.762ms、set1554.679ms，成员数组准备63.230ms，静态平均每组7.03个label、实际合并加权平均4.96个；该输入为此前诊断F4系列，不能混入当前F3主线。n40/set02/family/high/wide/m4累计OR15.801ms、set19.096ms；n40/set04/base/wide/m2尚未结束，快照181轮为OR199.528ms、set692.050ms。三个random的聚合总量都很小（OR分别约0.028/0.058/0.322ms），其时间比不足以选择稳定分界。初步支持方法胜负依赖组结构，不支持全量set或固定8阈值；尚未结束的结果不冒充最终比较。
 
 小型验收证据、代码/数据/seed追踪表见data/20261108-ng-bitmap-ab；完整诊断stdout在远端各runs目录，本地工作快照在.codex-tmp/ng-bitmap-ab-20261108。summarize-ng-bitmap-ab-20261108.py输出每轮、每例、q×k和W分档CSV，并核对各档次数/sumK/sumW与原汇总一致；使用sumW/sumK时明确不是mean(W/k)，分档抽样时间不外推全量占比。后续最终状态另续记。
+
+首份每轮/每例、q×k及W分布已保存到data/20261108-ng-bitmap-ab/initial-statistics，capture.json明确为5项返回、1项运行中的快照，不能当六例最终表。对应固定dual的baseline/off/on/both和实际部署JAR回归小日志以txt保留，避免通用log忽略规则漏掉验收证据。

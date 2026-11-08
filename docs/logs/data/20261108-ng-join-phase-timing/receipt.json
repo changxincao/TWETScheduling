@@ -1,0 +1,89 @@
+{
+  "baseCommit": "c400c3e4e52a5c645dba8296ddb92c7e40dac01d",
+  "diagnosticSwitch": "twet.bpc.ngDssrJoinPhaseTiming",
+  "defaultEnabled": false,
+  "java": "21.0.10",
+  "heapGiB": 4,
+  "nominalSeconds": 300,
+  "remoteChanged": false,
+  "sourceSha256": "6E930B0B26530B6CA9D312688BB62BF71D33E908111BCA1190C08C5CFB71C072",
+  "classSha256": "4CC068403BA493E079CFA8C28BFBD44ED12FA2C3553DE98195F3B0B5B765FC06",
+  "baselineJarSha256": "483134956C345A2CF4FC77FC2A73C470466AAB1CE7283706B278A41E2AFAE4B7",
+  "cases": [
+    {
+      "id": "f40-set04-base-wide-m2",
+      "input": "experiment-suite/formal/instances/data/n040-set04/family/base/wide/m2.dat",
+      "inputSha256": "DB1F804BDF0694F5D0260BBBC77A639E7641B0305D7E4684382B69994C33BDF1",
+      "seed": "experiment-suite/formal/seeds/20260902-cluster-f40s04-wide-m2.seed",
+      "seedSha256": "FF016D357A1E1BBAC27B2A948E8C9E612A3A8A0914E661CE7A37D0F008C778A4",
+      "rawLog": ".codex-tmp/ng-join-phase-timing-20261108/f40-set04-timed.stdout.log",
+      "rawLogSha256": "2FBF8EBE83E1C2BB6AD315CA9B2E127E34EF453E625DFDC9B27A2D025344542E",
+      "status": "TIME_LIMIT",
+      "seconds": 300.164913,
+      "incumbent": 12518.0,
+      "bound": 10649.887768,
+      "feasible": "true",
+      "objectiveConsistent": "true"
+    },
+    {
+      "id": "f50-set01-base-wide-m3",
+      "input": "experiment-suite/formal/instances/data/n050-set01/family/base/wide/m3.dat",
+      "inputSha256": "4E9A7CF61548C9E08D9E8833C2A79CFFD5151E5DF711851EF3D4F2EBF4634A53",
+      "seed": "experiment-suite/formal/seeds/20260901-cluster-directed-f50s01-base-wide-m3-v2.seed",
+      "seedSha256": "672F8EF3FEC4FE290BDD22F7DF81B323DA30A2C1357C73C815A88A04C371D9C8",
+      "rawLog": ".codex-tmp/ng-join-phase-timing-20261108/f50-set01-timed.stdout.log",
+      "rawLogSha256": "30989C5AF433A1BE05D69E82F5CE5FDA22F2CAE0CD6498E9294D912694264890",
+      "status": "TIME_LIMIT",
+      "seconds": 300.638618,
+      "incumbent": 20118.0,
+      "bound": 3614.342905,
+      "feasible": "true",
+      "objectiveConsistent": "true"
+    },
+    {
+      "id": "f50-set02-high-wide-m4",
+      "input": "experiment-suite/formal/instances/data/n050-set02/family/high-heterogeneous/wide/m4.dat",
+      "inputSha256": "DAFDAA866FA4097520A69F850029443BAED4E8F8DBD4E28C70BA7DC18963084C",
+      "seed": ".codex-tmp/ng-fixing-cutset-le50-20260913/payload/work1/experiments/20260913-ng-fixing-cutset-le50/seeds/n050-set02-m4-family-high-n20-wwide.seed",
+      "seedSha256": "696E3C026746E56D37FC2E9EEAD0A1C491DFED82E55FF2250240FE6E6C5CE679",
+      "rawLog": ".codex-tmp/ng-join-phase-timing-20261108/f50-set02-timed.stdout.log",
+      "rawLogSha256": "FCDC80F365D26CD0878F3BAA9D1D467FCD2AA84CEC29BA350F0A49C40AB8FD10",
+      "status": "ROOT_PROCESSED",
+      "seconds": 250.241852,
+      "incumbent": 162440.0,
+      "bound": 162440.0,
+      "feasible": "true",
+      "objectiveConsistent": "true"
+    },
+    {
+      "id": "f50-set02-control",
+      "input": "experiment-suite/formal/instances/data/n050-set02/family/high-heterogeneous/wide/m4.dat",
+      "inputSha256": "DAFDAA866FA4097520A69F850029443BAED4E8F8DBD4E28C70BA7DC18963084C",
+      "seed": ".codex-tmp/ng-fixing-cutset-le50-20260913/payload/work1/experiments/20260913-ng-fixing-cutset-le50/seeds/n050-set02-m4-family-high-n20-wwide.seed",
+      "seedSha256": "696E3C026746E56D37FC2E9EEAD0A1C491DFED82E55FF2250240FE6E6C5CE679",
+      "rawLog": ".codex-tmp/ng-join-phase-timing-20261108/f50-set02-control.stdout.log",
+      "rawLogSha256": "159F6A88C1DC8972F8B02DAA3301306A6C22E222D2221BA232D665092EA57DF3",
+      "status": "ROOT_PROCESSED",
+      "seconds": 209.641397,
+      "incumbent": 162440.0,
+      "bound": 162440.0,
+      "feasible": "true",
+      "objectiveConsistent": "true"
+    }
+  ],
+  "jfr": {
+    "path": ".codex-tmp/ng-join-phase-timing-20261108/f50-set02-control.jfr",
+    "sha256": "040D64A682EC68C134D732AEBA82B6E13C87E114372CB8FD2741C78C4ED63892",
+    "sampling": "jdk.ExecutionSample; settings=profile; main thread; joinAllForwardTerminalGroups stack"
+  },
+  "controlConfigAudit": {
+    "fields": 199,
+    "algorithmFieldsMatched": 196,
+    "excludedRuntimeFields": [
+      "config.bpcOutputRoot",
+      "config.liveTraceLogPath",
+      "config.instanceName"
+    ],
+    "passed": true
+  }
+}

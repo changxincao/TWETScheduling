@@ -74,6 +74,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	/** 2026-07-16: group-envelope 已证明可剪时，按 BitSet 连续区间跳过，旧逐项扫描仅用于 A/B 回退。 */
 	private static final boolean JOIN_PREFILTER_SKIP_RUNS = Boolean.parseBoolean(
 			System.getProperty("twet.bpc.ngDssrJoinPrefilterSkipRuns", "true"));
+	/** 仅诊断时逐组读时钟；默认关闭，不改变组预筛、位图或候选遍历。 */
+	private static final boolean JOIN_PHASE_TIMING = Boolean.getBoolean("twet.bpc.ngDssrJoinPhaseTiming");
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}
@@ -304,6 +306,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinEnvelopePrefilterFunctionEvaluations;
 	private long joinEnvelopeBuildNanos;
 	private long joinEnvelopeJoinNanos;
+	private long joinPrefilterTotalNanos;
+	private long joinPrefilterBoundNanos;
+	private long joinPrefilterFunctionNanos;
+	private long joinPrefilterBitmapNanos;
+	private long joinRemainingLabelsNanos;
 	private long exactTotalNanos;
 	private long exactInitializeNanos;
 	private long exactInitializeSetupNanos;
@@ -1531,7 +1538,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			diagnosticHeartbeat(lp, "join.start", true);
 			phaseStart = System.nanoTime();
 			joinAllForwardTerminalGroups(lp);
-			exactJoinNanos += System.nanoTime() - phaseStart;
+			long roundJoinNanos = System.nanoTime() - phaseStart;
+			exactJoinNanos += roundJoinNanos;
+			if (JOIN_PHASE_TIMING) {
+				printJoinPhaseTiming(lp, roundJoinNanos);
+			}
 			diagnosticHeartbeat(lp, "finalize.start", true);
 			phaseStart = System.nanoTime();
 			finalizeGeneratedColumns(lp);
@@ -4481,8 +4492,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			return true;
 		}
 		joinEnvelopePrefilterFunctionEvaluations++;
+		long functionStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 		double reducedCostBound = findMinimalShiftedTracedSum(forward.envelope, delay, backward.envelope,
 				fixedReducedCost).reducedCost;
+		if (JOIN_PHASE_TIMING) {
+			joinPrefilterFunctionNanos += System.nanoTime() - functionStart;
+		}
 		observeRelaxedReducedCost(reducedCostBound);
 		return !Utility.compareLt(reducedCostBound, threshold);
 	}
@@ -4834,8 +4849,13 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			return;
 		}
+		long prefilterStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 		BitSet prefilteredForwardIndices = prefilterIndex == null ? null
 				: prefilterIndex.prunedForwardIndices(lastJob, candidates, backward, lp, this);
+		if (JOIN_PHASE_TIMING) {
+			joinPrefilterTotalNanos += System.nanoTime() - prefilterStart;
+		}
+		long remainingStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 		for (int i = 0; i < candidates.size() && canContinue();) {
 			if (JOIN_PREFILTER_SKIP_RUNS && prefilteredForwardIndices != null
 					&& prefilteredForwardIndices.get(i)) {
@@ -4874,6 +4894,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				continue;
 			}
 			tryJoin(forward, backward, lp, joinFixedReducedCost, delay);
+		}
+		if (JOIN_PHASE_TIMING) {
+			joinRemainingLabelsNanos += System.nanoTime() - remainingStart;
 		}
 	}
 
@@ -5155,6 +5178,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinEnvelopePrefilterFunctionEvaluations = 0;
 		joinEnvelopeBuildNanos = 0;
 		joinEnvelopeJoinNanos = 0;
+		resetJoinPhaseTiming();
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -5305,6 +5329,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinEnvelopeFunctionEvaluations = 0;
 		joinEnvelopeBuildNanos = 0;
 		joinEnvelopeJoinNanos = 0;
+		resetJoinPhaseTiming();
 		forwardSinglePointKept = 0;
 		forwardSinglePointDominatedByStore = 0;
 		forwardSinglePointDominatedByGraph = 0;
@@ -5389,6 +5414,29 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		exactJoinCompactNanos = 0;
 		exactJoinNanos = 0;
 		exactFinalizeNanos = 0;
+	}
+
+	private void resetJoinPhaseTiming() {
+		joinPrefilterTotalNanos = 0;
+		joinPrefilterBoundNanos = 0;
+		joinPrefilterFunctionNanos = 0;
+		joinPrefilterBitmapNanos = 0;
+		joinRemainingLabelsNanos = 0;
+	}
+
+	/** 每轮独立输出；function 是 bound 的子项，不能与 bound 再相加。 */
+	private void printJoinPhaseTiming(LP lp, long totalNanos) {
+		long prefilterOther = joinPrefilterTotalNanos - joinPrefilterBoundNanos - joinPrefilterBitmapNanos;
+		long other = totalNanos - joinPrefilterTotalNanos - joinRemainingLabelsNanos;
+		System.out.printf(Locale.US,
+				"[NG join timing] node=%d%s dssrRound=%d totalMs=%.6f boundMs=%.6f bitmapMs=%.6f"
+				+ " remainingLabelsMs=%.6f prefilterOtherMs=%.6f otherMs=%.6f functionWithinBoundMs=%.6f"
+				+ " buildWithinOtherMs=%.6f groupChecks=%d groupsPruned=%d functionCalls=%d fwGroups=%d bwGroups=%d%n",
+				lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound, totalNanos / 1e6,
+				joinPrefilterBoundNanos / 1e6, joinPrefilterBitmapNanos / 1e6, joinRemainingLabelsNanos / 1e6,
+				prefilterOther / 1e6, other / 1e6, joinPrefilterFunctionNanos / 1e6, joinEnvelopeBuildNanos / 1e6,
+				joinEnvelopePrefilterGroupPairs, joinEnvelopePrefilterGroupPairsPruned,
+				joinEnvelopePrefilterFunctionEvaluations, joinEnvelopeForwardGroups, joinEnvelopeBackwardGroups);
 	}
 
 	private void diagnosticHeartbeat(LP lp, String phase, boolean force) {
@@ -8611,7 +8659,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				for (int i = 0; i < forwardGroups.size(); i++) {
 					JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroups.get(i);
 					if (canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
+						long bitmapStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 						pruned.or(forwardGroup.memberIndices);
+						if (JOIN_PHASE_TIMING) {
+							owner.joinPrefilterBitmapNanos += System.nanoTime() - bitmapStart;
+						}
 					}
 				}
 			}
@@ -8630,7 +8682,11 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				JoinEnvelopeGroup<BackwardLabel> backwardGroup, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
 			// 2026-11-05: 同一后向组/终点已由外层BitSet复用，组对只计算一次；不再保存无命中收益的布尔映射。
 			owner.joinEnvelopePrefilterGroupPairs++;
+			long boundStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 			boolean prune = owner.canPruneJoinEnvelopeGroupPair(lastJob, forwardGroup, backwardGroup, lp);
+			if (JOIN_PHASE_TIMING) {
+				owner.joinPrefilterBoundNanos += System.nanoTime() - boundStart;
+			}
 			if (prune) {
 				owner.joinEnvelopePrefilterGroupPairsPruned++;
 			}

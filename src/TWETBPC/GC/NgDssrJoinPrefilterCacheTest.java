@@ -77,8 +77,20 @@ public final class NgDssrJoinPrefilterCacheTest {
         BitSet first = (BitSet) prune.invoke(index, 1, candidates, labelA, lp, owner);
         require(first.equals(expected), "mixed prune/keep results and multiword member indices");
         require(counter(owner) == 4, "each forward group must be evaluated once");
+        long boundNanos = checkRelease ? (Long) field(owner, "joinPrefilterBoundNanos") : 0;
+        long bitmapNanos = checkRelease ? (Long) field(owner, "joinPrefilterBitmapNanos") : 0;
+        boolean timed = Boolean.getBoolean("twet.bpc.ngDssrJoinPhaseTiming");
+        if (checkRelease) {
+            require(timed ? boundNanos > 0 && bitmapNanos > 0 : boundNanos == 0 && bitmapNanos == 0,
+                    "join phase timing must be explicitly enabled");
+            require(timed == ((Long) field(owner, "joinPrefilterFunctionNanos") > 0),
+                    "PWLF sub-timing must follow the same diagnostic switch");
+        }
         BitSet repeated = (BitSet) prune.invoke(index, 1, candidates, labelB, lp, owner);
         require(first == repeated && counter(owner) == 4, "same backward group must reuse the existing BitSet");
+        require(!checkRelease || (Long) field(owner, "joinPrefilterBoundNanos") == boundNanos
+                && (Long) field(owner, "joinPrefilterBitmapNanos") == bitmapNanos,
+                "cache reuse must not repeat timed group checks or bitmap unions");
         BitSet otherTerminal = (BitSet) prune.invoke(index, 3, candidates, labelB, lp, owner);
         require(otherTerminal.isEmpty() && counter(owner) == 5, "terminal-specific cache must not leak");
         require(prune.invoke(index, 1, candidates, labelA, lp, owner) == first && counter(owner) == 5,
@@ -119,6 +131,15 @@ public final class NgDssrJoinPrefilterCacheTest {
             release.invoke(empty, 1);
             require(((IdentityHashMap<?, ?>) field(empty, "prunedIndicesByBackwardGroup")).isEmpty(),
                     "releasing an empty cache must not allocate entries");
+        }
+        if (checkRelease) {
+            Method reset = OWNER.getDeclaredMethod("resetJoinPhaseTiming");
+            reset.setAccessible(true);
+            reset.invoke(owner);
+            for (String name : new String[] {"joinPrefilterTotalNanos", "joinPrefilterBoundNanos",
+                    "joinPrefilterFunctionNanos", "joinPrefilterBitmapNanos", "joinRemainingLabelsNanos"}) {
+                require((Long) field(owner, name) == 0, "per-round timing reset: " + name);
+            }
         }
     }
 

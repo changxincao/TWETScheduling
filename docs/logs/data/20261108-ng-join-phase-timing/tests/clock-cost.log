@@ -1,0 +1,1 @@
+java=21.0.10 samples=2000000 repeats=7 medianEmptyBracketNs=27.862 medianTwoReadsLoopNs=56.776

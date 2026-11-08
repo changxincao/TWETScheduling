@@ -1,0 +1,13 @@
+category,component,calls,successes,generated,totalSeconds,averageMillis
+pricing,TOTAL,201,182,28930,296.949593,1477.361159
+pricing,TimeIndexedGraphPricing,85,84,19035,1.184957,13.940668
+pricing,HeuristicPricing,99,82,9834,24.638120,248.869898
+pricing,GCNGBBStyleNgDssrPricing,17,16,61,271.126516,15948.618600
+masterLp,TOTAL,184,,,1.780409,9.676134
+masterLp,initial,2,,,0.128044,64.021800
+masterLp,after_pricing,182,,,1.652365,9.078929
+masterLpBuild,TOTAL,2,,,0.106716,53.357950
+masterLpBuild,initial,2,,,0.106716,53.357950
+strongTrialSetup,TOTAL,0,,,0.000000,0.000000
+cut,TOTAL,0,0,0,0.000000,0.000000
+branch,TOTAL,0,0,,,

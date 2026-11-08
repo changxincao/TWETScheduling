@@ -32,7 +32,7 @@ parser.add_argument("output", type=Path)
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=True)
 rounds, bins, widths, cases = [], [], [], []
-for log in sorted(args.logs.glob("bitmap-*.log")):
+for log in sorted(args.logs.glob("*.log")):
     rid = log.stem
     current, joint, word_bins = [], defaultdict(lambda: defaultdict(int)), defaultdict(lambda: defaultdict(int))
     with log.open(encoding="utf-8", errors="replace") as stream:

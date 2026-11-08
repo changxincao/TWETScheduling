@@ -1,0 +1,7 @@
+TIME 2026-11-08T19:37:55.488326300+08:00
+HOST DESKTOP-06K8JI8 memory=137112563712 free=103803248640
+ASSETS_OK 12
+CASE pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a n=60 m=3 H=125394.0 seed=18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4
+BATCH PREPARED
+ExperimentBatchScheduler scan: total=1 matched=1 dependencies=0 selected=1 localSuccess=0 pending=1 scanOnly=true selectors=<none>
+ExperimentBatchScheduler selected solves: algorithms={NG_DSSR=1} outsourcingModels={}

@@ -9,14 +9,14 @@ import java.util.HexFormat;
 import Common.formal.FormalExperimentDataFactory;
 import TWETBPC.IO.FixedInitialSeedSnapshotIO;
 
-/** 只读验收本次六例包及日志；不控制进程或写入求解目录。 */
+/** 只读验收六例包或n60单例包及日志；不控制进程或写入求解目录。 */
 public final class NgBitmapExperimentAudit {
     public static void main(String[] args) throws Exception {
         Path stage = Path.of(args[0]).toRealPath();
         Path allowed = Path.of("D:/ccx_work/考虑交付的机器调度").toRealPath();
         if (!"DESKTOP-06K8JI8".equals(System.getenv("COMPUTERNAME"))
                 || !stage.getParent().equals(allowed.resolve("work1/experiments"))
-                || !stage.getFileName().toString().matches("20261108-ng-join-bitmap-ab-[0-9a-f]{8}")) {
+                || !stage.getFileName().toString().matches("20261108-ng-(?:n60-)?join-bitmap-ab-[0-9a-f]{8}")) {
             throw new IllegalArgumentException("Unexpected audit target");
         }
         var os = (com.sun.management.OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
@@ -39,7 +39,8 @@ public final class NgBitmapExperimentAudit {
         }
         System.out.println("ASSETS_OK " + assets);
         var cases = Files.readAllLines(stage.resolve("cases.tsv"), StandardCharsets.UTF_8);
-        if (cases.size() != 7) throw new IllegalStateException("Expected six cases");
+        int expectedCases = stage.getFileName().toString().startsWith("20261108-ng-n60-") ? 1 : 6;
+        if (cases.size() != expectedCases + 1) throw new IllegalStateException("Unexpected case count");
         for (String line : cases.subList(1, cases.size())) {
             String[] fields = line.split("\t");
             String id = fields[0];

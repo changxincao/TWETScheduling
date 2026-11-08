@@ -1,0 +1,33 @@
+{
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "remoteDirectory": "D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-n60-join-bitmap-ab-caecd7db",
+  "sourceCommit": "caecd7dbe181f639d1a264501ac54f23a97ef2ce",
+  "solverJarSha256": "ed774ae39b15995faee88aac36adda5ca795ac62e104fc4271f2229e5b36a63c",
+  "startedAt": "2026-11-08T19:38:19.100292+08:00",
+  "initialCheckedAt": "2026-11-08T19:38:54.707335+08:00",
+  "detachedCheckedAt": "2026-11-08T19:40:56.8748878+08:00",
+  "solverPid": 11072,
+  "schedulerPid": 11680,
+  "localLaunchSshPidClosed": 24104,
+  "originalSolverPidPreserved": 12704,
+  "originalSchedulerPidPreserved": 8268,
+  "parallel": 1,
+  "heapGiB": 24,
+  "cplexThreads": 1,
+  "nominalSeconds": 10800,
+  "maxNodes": 100000,
+  "unchangedCliArguments": 13,
+  "changedCliArguments": [
+    "instance address",
+    "seedFile address",
+    "outputDir address"
+  ],
+  "initialCompletedDiagnosticRounds": 9,
+  "profileVersion": "2026-09-12-v8",
+  "profileDefaultsAndRunnerUnchangedVsOriginalSource": true,
+  "assetHashesVerified": 12,
+  "state": "RUNNING",
+  "purpose": "same-state all OR vs all member set; only OR drives join; no sparse threshold",
+  "note": "not yet reproduced the historical long join; later state must be read live"
+}

@@ -307,3 +307,15 @@ Java21 focused编译通过；独立成员并集对照2560批次及分档双序�
 组结构方向与预期相符：n40 family/base静态平均k=34.46、实际合并加权平均k=20.76；n50 family/high分别为7.03和4.96。对应sumW/sumK分别为2.528与4.692，这个工作量比不是mean(W/k)。q×k表保留原始静态组次、合并次数和sampledMerges，便于后续按实际调用权重分析。抽样中1<q<=2两项均OR较快，4<q<=8及8<q<=16更倾向set；2<q<=4在两项负载上胜负不同，说明不能仅凭一个粗档宣布统一阈值，仍需结合k与重复波动。未设置8或其它正式分界。
 
 最终CSV、每轮记录和汇总在data/20261108-ng-bitmap-ab/final-statistics，原始状态及实际profile/CPLEX线程记录在final-status；先前initial-statistics保留其时间边界。完整stdout保留远端及本地隔离snapshot-final，不作大范围结果导出。本批没有重现此前n60上千秒OR量级，因此不能据几秒负载断言极端轮一定获得同倍数收益。正式OR策略和其余求解配置不变，未追加第七个算例。
+
+## 26. 原n60慢例另目录启动同状态双算
+
+用户随后明确要求使用原n60长join慢例，在远端独立目录做全OR/全set同次pricing对照，原任务和正式逻辑不动。2026-11-08 19:38:19（北京时间），已在DESKTOP-06K8JI8（100.68.243.112）的D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-n60-join-bitmap-ab-caecd7db启动单项。使用六例已验收的同一caecd7db solver.jar，SHA-256仍为ed774ae39b15995faee88aac36adda5ca795ac62e104fc4271f2229e5b36a63c；本次不修改任何pricing源码或正式profile，只扩展只读验收工具以接受n60单项目录，汇总脚本支持原pricing前缀的日志。
+
+输入为n60/set02/F3/m3/high/wide，复制自原诊断已保存资产；input SHA-256为aa76b25ba89e1a64b62df485b50b48d27fffe6ebeb76d19e9d6e1832feaff324，seed SHA-256为31c4a37f1c9542a72bf0b0b3239a8ef633f65c6996bb7e8371bd87245dcec3c8，均与原case-map匹配；运行seed指纹为18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4，Data读取n=60/m=3/CmaxH=125394且无外包。原runId保留，CLI仅改变instance/seedFile/outputDir三个地址，其余13项完全一致：10800秒名义时限、100000节点上限、Cluster→Arc、CutSet关闭、theta=0.5/temporal=0、全节点TI借鉴fixing深度2147483647等均不动。没有改为六例组件测试的600秒/1节点。git逐文件比较也确认旧4ac6cb5a与caecd7db之间BestBpcProfiles、TWETBPCConfig和FormalExperimentRunner源码相同；未冒充已读取尚未生成的最终config dump做全字段核对。
+
+JVM仍24GiB、CPLEX1线程，不沿用六例中的ActiveProcessorCount=2或GC线程限制。只把旧逐组phase timing改为默认关闭的同状态bitmapCompare诊断，避免A被逐组包钟而B仅批次计时的不对称；保留原live trace/阶段心跳。每个pricing/DSSR轮的labeling、建组及组对判断只做一次，两种极端消费同一可剪名单，计时外交叉核对，只有OR结果进入真实join；记录W/k/q静态、使用加权和解释性分档抽样，不设置稀疏切换阈值。整体求解时间含双算及统计，不能当正式优化时间；probe受时序反馈影响，不能保证走到与旧run相同的pricing编号/dual。原join时限检查缺口未修改，10800秒仍为名义限制，可能超出。
+
+上传后12项静态资产hash和单任务scan通过；启动前确认本新目录无JVM，只启动worker一次。新solver PID11072、scheduler PID11680。主动关闭本机启动SSH PID24104后，19:40:56独立复查仍为1个scheduler/1个solver；原solver12704/scheduler8268同时保留，未停止、覆盖或改动其目录。实际VM.command_line/flags确认诊断属性、24GiB上限及原CLI，run.properties确认v8/CPLEX1/原seed指纹。此时已有9轮完整诊断并继续运行，原pricingHorizon=52290也已出现，但尚未重现历史大join，不能用早期毫秒级轮次评价优化收益。
+
+版本、原/新CLI、资产hash、启动及断开验收在data/20261108-ng-n60-bitmap-ab，远端有同名startup-record.json。原pricing前缀的4轮启动日志解析通过，汇总脚本重新处理已完成六例也得到完全相同的summary.json。当前结论仅为正确启动并推进，未宣称单项已完成或大join已提速。

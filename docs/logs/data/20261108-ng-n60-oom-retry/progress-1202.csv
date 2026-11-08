@@ -1,0 +1,8 @@
+"instanceName","status","solveTimeSeconds","processedNodes","gapPercent","incumbentCost","bestBound","validationFeasible","validationObjectiveConsistent"
+"pricing-n060-set02-m3-family-base-wwide-f3-ng_dssr-mainline-a","TIME_LIMIT","12843.073219","1","22.359592","19010.000000","14759.441492","true","true"
+"pricing-n060-set02-m4-family-base-wwide-f3-ng_dssr-mainline-a","TIME_LIMIT","11522.451464","1","10.410987","7088.000000","6350.069212","true","true"
+"pricing-n060-set02-m4-family-high-wwide-f3-ng_dssr-mainline-a","TIME_LIMIT","11781.365707","6","11.248785","144465.000000","128214.442401","true","true"
+"pricing-n060-set03-m4-family-base-wwide-f3-ng_dssr-mainline-a","TIME_LIMIT","10881.003063","41","1.229727","5611.000000","5542.000000","true","true"
+"pricing-n060-set03-m4-family-high-wwide-f3-ng_dssr-mainline-a","TIME_LIMIT","11058.352308","2","9.282187","109416.000000","99259.802332","true","true"
+"pricing-n060-set02-m3-family-base-wnarrow-f3-ng_dssr-mainline-a","TIME_LIMIT","10801.279939","1","4.728780","42617.000000","40601.735773","true","true"
+"pricing-n060-set04-m4-random-base-wwide-ng_dssr-mainline-a","FINISHED","3569.630676","388","0.000000","12520.000000","12520.000000","true","true"

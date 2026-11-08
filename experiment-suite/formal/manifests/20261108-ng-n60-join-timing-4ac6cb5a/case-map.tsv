@@ -1,0 +1,2 @@
+scenario	target	assetSourceHost	inputSha	seedSha	seedFingerprint	referenceRun	referenceManifest	arcClusterSeedSame
+n060-set02-m3-family-high-wwide-f3	second	third	aa76b25ba89e1a64b62df485b50b48d27fffe6ebeb76d19e9d6e1832feaff324	31c4a37f1c9542a72bf0b0b3239a8ef633f65c6996bb7e8371bd87245dcec3c8	18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4	pricing-n060-set02-m3-family-high-wwide-f3-time_indexed	D:\ccxWork\work1\experiments\20260914-balanced-family-ti-le60\solve.tsv	True

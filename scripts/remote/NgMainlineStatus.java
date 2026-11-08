@@ -15,7 +15,8 @@ public class NgMainlineStatus {
         };
         if (!stage.getParent().equals(root.toRealPath().resolve("work1/experiments"))
                 || !(stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared")
-                || stage.getFileName().toString().matches("20261108-ng-n60-oom-retry-[0-9a-f]{8}")))
+                || stage.getFileName().toString().matches("20261108-ng-n60-oom-retry-[0-9a-f]{8}")
+                || stage.getFileName().toString().matches("20261108-ng-n60-join-timing-[0-9a-f]{8}")))
             throw new IllegalArgumentException("Unexpected status directory");
         System.out.println("TIME " + OffsetDateTime.now(ZoneId.of("Asia/Shanghai")));
         System.out.println("BATCH " + Files.readString(stage.resolve("experiment.status")).trim());
@@ -36,6 +37,20 @@ public class NgMainlineStatus {
                         "profile=" + run.getProperty("profileVersion", "?"),
                         "threads=" + run.getProperty("cplexThreads", "?"),
                         "seed=" + run.getProperty("seedFingerprint", "?")));
+                if (stage.getFileName().toString().startsWith("20261108-ng-n60-join-timing-")
+                        && Files.isRegularFile(dir.resolve("stdout.log"))) {
+                    String lastTiming = null;
+                    // 只提取ASCII计时行；活日志的末尾可能正在写入半个多字节字符。
+                    var decoder = StandardCharsets.UTF_8.newDecoder()
+                            .onMalformedInput(java.nio.charset.CodingErrorAction.REPLACE);
+                    try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                            Files.newInputStream(dir.resolve("stdout.log")), decoder))) {
+                        for (String line; (line = reader.readLine()) != null;) {
+                            if (line.startsWith("[NG join timing]")) lastTiming = line;
+                        }
+                    }
+                    if (lastTiming != null) System.out.println(lastTiming);
+                }
             }
         }
     }

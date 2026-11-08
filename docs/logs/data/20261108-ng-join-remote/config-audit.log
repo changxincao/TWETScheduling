@@ -1,0 +1,2 @@
+CONFIG_ONLY tasks=1 fieldsPerTask=196 seedContents=1 maxParallel=1 modelThreads=1 noSolverCreated=true
+HOST DESKTOP-06K8JI8 totalBytes=137112563712 freeBytes=124981424128

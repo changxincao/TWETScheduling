@@ -1,0 +1,4 @@
+TIME 2026-11-08T14:04:51.651636200+08:00
+BATCH SOLVE_RUNNING
+RUN	pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a	RUNNING	pid=12704	alive=true	cpuMs=125734	liveBytes=155590	stderrBytes=222	profile=2026-09-12-v8	threads=1	seed=18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4
+[NG join timing] node=1 pricingCall=2 nodePricingCall=2 repair=false dssrRound=1 totalMs=352.206700 boundMs=74.542700 bitmapMs=2.441900 remainingLabelsMs=179.590700 prefilterOtherMs=10.464400 otherMs=85.167000 functionWithinBoundMs=69.399100 buildWithinOtherMs=74.325500 groupChecks=104656 groupsPruned=76405 functionCalls=28537 fwGroups=381 bwGroups=361

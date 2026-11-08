@@ -1,6 +1,6 @@
 # NG-DSSR长join与超时响应分析
 
-结论：删掉无复用收益的Boolean组对缓存解决的是无用存储和OOM风险，没有减少组对枚举、函数下界或剪枝位图构造。当前仍存在按位图最高下标扫描大量零字的实现代价，12:02现场线程位于BitSet.or；但该现场没有独立位图计时，不能将全部join时间归给它。3小时不退出则已找到明确控制缺口：全局墙钟checker正确传入NG，join所依赖的canContinue只判断maxExactPricingColumns>0，根本不检查时间，内层预筛循环也不查时间，调度器又没有外部硬期限。第1--5节为此前只读分析；第6节记录随后授权的本地分项计时，不包含算法优化或远端修改。
+结论：删掉无复用收益的Boolean组对缓存解决的是无用存储和OOM风险，没有减少组对枚举、函数下界或剪枝位图构造。当前仍存在按位图最高下标扫描大量零字的实现代价，12:02现场线程位于BitSet.or；但该现场没有独立位图计时，不能将全部join时间归给它。3小时不退出则已找到明确控制缺口：全局墙钟checker正确传入NG，join所依赖的canContinue只判断maxExactPricingColumns>0，根本不检查时间，内层预筛循环也不查时间，调度器又没有外部硬期限。第1--5节为此前只读分析，第6节为本地分项计时，第7节为随后授权的远端单项补跑；尚未实施join算法优化。
 
 ## 1. 这次具体慢在哪里
 
@@ -111,3 +111,17 @@ private boolean canContinue() {
 验证方面，实际部署JAR基线（SHA-256以48313495开头，完整值见receipt）、新代码计时关闭、新代码计时开启，在专项掩码及4个固定dual的普通/Phase-I正负列场景中，掩码、组内复用、列顺序、真实成本、reduced cost和证书完全相同；1081项历史端点/CB检查、1972项traced/Phase-I端点检查及心跳测试通过。每轮计时的互斥项加和及子项范围均经脚本核验。源码只修改NG文件与原有缓存专项测试，没有修改公共PWLF、TI、配置profile或远端。
 
 证据为`data/20261108-ng-join-phase-timing/`：rounds.csv与summary.json、计时原行、有效配置、core summary、tests、JFR分组及800条原栈；receipt.json含输入/seed/源码/class/旧JAR及完整原日志hash。完整运行输出和7.4MB原始JFR留在`.codex-tmp/ng-join-phase-timing-20261108/`。本次没有重新求解远端n60的上万秒join，因此这些比例不能直接替代那一轮的分解，也没有实施稀疏成员或其他join优化。
+
+## 7. 远端重跑原n60长join场景
+
+2026-11-08用户要求开启计时、在远端重跑原场景。14:00:55（北京时间）已在DESKTOP-06K8JI8（100.68.243.112）启动单项`n60/set02/F3/m3/high/wide`，目录为`D:\ccx_work\考虑交付的机器调度\work1\experiments\20261108-ng-n60-join-timing-4ac6cb5a`。只运行这一项，不覆盖20448.405649秒的旧结果，不运行另外两台或TI。runId、原输入及seed路径、10800秒名义时限、100000节点、Cluster→Arc、4/4与5%probe、首轮双池及全节点scalar fixing深度2147483647均保持原A；只改变输出目录、显式开启诊断，外层只需1并发，堆仍为24GiB、CPLEX线程1。
+
+solver.jar从提交4ac6cb5ae3ed1ee30209c4c140db18154bfb10fd的src快照用release21全新构建，473个class均不超过major65，JAR SHA-256为`0e9756b26a4181672737154ed112401f3c1ab2bca69058f0a4fef755decf80a5`。部署前实际新JAR优先的缓存、端点/CB、traced/Phase-I及心跳回归通过。远端验收用原配置及原资产hash逐项比对，196个可比较字段一致；seed指纹为`18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4`。启动前Java工具检查没有在途solver；验收时可见物理内存137112563712字节、空闲124981424128字节，没有为诊断缩小堆或关闭其他算法组件。
+
+实际scheduler PID为8268、solver PID为12704。VM.command_line确认`-Dtwet.bpc.ngDssrJoinPhaseTiming=true`，VM.flags确认MaxHeapSize=25769803776。按既有SSH后台SOP只启动一次，验证后关闭本机启动SSH 43460；它因此返回非零属于主动断开，不是远端solver失败，不能据此重复启动。14:04:51独立连接复查仍为1个scheduler和1个solver，CPU由101687ms增至125734ms，live.log由146197增至155590字节，计时行已正常输出；本地再读完整行已有27条，尚处于早期pricing，未返回最终结果。
+
+运维中PowerShell调用返回拒绝访问，但hostname、whoami、SFTP、Java及jcmd正常；没有改系统权限、服务或配置，改用现有Java验收工具。状态工具首次读取活stdout出现MalformedInputException，仅将这个诊断日志读取器改为允许替换不完整字符；配置、seed等结构化读取仍严格按UTF8。tools.jar替换前保留tools.pre-log-tail.jar，solver.jar未变。asset-hashes.tsv是准备期快照，后更新的README及状态工具hash在startup-record.json另记，不将状态工具异常算作求解失败。
+
+本次目的是测实际大join的组预筛、OR与后续label成本，不是证明该实例无法优化。没有原运行完整的dual/label快照，probe依赖时序反馈，因此不能保证重现相同的第11次pricing第23轮；只按本次实际完整返回的join解释，不拿前几轮小join替代旧上万秒轮。已知时限检查缺口未修，加上诊断读时钟开销，仍可能明显超过3小时；这是单项诊断，不混入正式性能结果。当前结论仅为成功启动并持续推进，不是补跑完成。
+
+本地部署清单为`experiment-suite/formal/manifests/20261108-ng-n60-join-timing-4ac6cb5a/`，准备脚本为`scripts/remote/prepare-ng-join-timing-20261108.py`。启动、196字段验收、原summary、堆及进程证据为`data/20261108-ng-join-remote/`，远端同目录README及startup-record.json已同步。复查可调用该目录status.cmd；逐轮原始计时位于`runs\pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a\stdout.log`。

@@ -16,12 +16,13 @@ public class NgMainlineConfigAudit {
     public static void main(String[] args) throws Exception {
         Path stage = Path.of(args[0]).toRealPath();
         boolean retry = stage.getFileName().toString().matches("20261108-ng-n60-oom-retry-[0-9a-f]{8}");
-        if (!(stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared") || retry)
+        boolean joinTiming = stage.getFileName().toString().matches("20261108-ng-n60-join-timing-[0-9a-f]{8}");
+        if (!(stage.getFileName().toString().equals("20261104-ng-mainline-a-prepared") || retry || joinTiming)
                 || !Set.of(Path.of("D:/ccx/work1/experiments"), Path.of("D:/ccxWork/work1/experiments"),
                         Path.of("D:/ccx_work/考虑交付的机器调度/work1/experiments"))
                         .contains(stage.getParent())) throw new IllegalArgumentException("Unexpected stage");
         // 补跑只校验新目录及明确列出的旧资产，不覆盖原结果或重新生成seed。
-        if (retry) {
+        if (retry || joinTiming) {
             Path allowed = stage.getParent().getParent().getParent().toRealPath();
             for (String name : List.of("asset-hashes.tsv", "source-hashes.tsv")) {
                 var hashes = Files.readAllLines(stage.resolve(name), StandardCharsets.UTF_8);
@@ -96,7 +97,13 @@ public class NgMainlineConfigAudit {
                     int at = value.indexOf('='); expected.put(value.substring(0, at), value.substring(at + 1));
                 }
             }
-            VARIABLE.forEach(actual::remove); VARIABLE.forEach(expected::remove);
+            var variable = new HashSet<>(VARIABLE);
+            if (joinTiming) {
+                // 单项诊断沿用原runId与时限，不能把这两项误当可变运行标识。
+                variable.remove("config.instanceName");
+                variable.remove("config.solveTimeLimitSeconds");
+            }
+            variable.forEach(actual::remove); variable.forEach(expected::remove);
             if (!actual.equals(expected)) {
                 var keys = new TreeSet<>(actual.keySet()); keys.addAll(expected.keySet());
                 for (String key : keys) if (!Objects.equals(actual.get(key), expected.get(key)))
@@ -115,11 +122,18 @@ public class NgMainlineConfigAudit {
         if (count != expectedCount || fingerprints.size() != expectedCount || count == 0
                 || count > expectedSeeds.size()) throw new IllegalStateException("Unexpected coverage");
         String worker = Files.readString(stage.resolve("worker.cmd"));
-        if (parallel != (retry ? 2 : 5) || !worker.contains("solve.tsv\" " + parallel + " "))
+        if (parallel != (joinTiming ? 1 : retry ? 2 : 5) || !worker.contains("solve.tsv\" " + parallel + " "))
             throw new IllegalStateException("Wrong worker parallelism");
+        if (joinTiming && !worker.contains("-Dtwet.bpc.ngDssrJoinPhaseTiming=true"))
+            throw new IllegalStateException("Join timing is not enabled in the worker");
         for (String file : List.of("runs", "worker.lock", "worker.exit-code"))
             if (Files.exists(stage.resolve(file))) throw new IllegalStateException("Unexpected run artifact " + file);
         System.out.println("CONFIG_ONLY tasks=" + count + " fieldsPerTask=" + fields
                 + " seedContents=" + fingerprints.size() + " maxParallel=" + parallel + " modelThreads=1 noSolverCreated=true");
+        if (joinTiming) {
+            var os = (com.sun.management.OperatingSystemMXBean) java.lang.management.ManagementFactory.getOperatingSystemMXBean();
+            System.out.println("HOST " + System.getenv("COMPUTERNAME") + " totalBytes=" + os.getTotalMemorySize()
+                    + " freeBytes=" + os.getFreeMemorySize());
+        }
     }
 }

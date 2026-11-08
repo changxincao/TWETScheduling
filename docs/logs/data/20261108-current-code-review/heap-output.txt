@@ -1,0 +1,9 @@
+memory=full heuristic=true H=200.0 tStar=100 live=5 heap=149 stale=144 returned=5 bestRC=-99.0
+memory=full heuristic=false H=200.0 tStar=100 live=5 heap=149 stale=144 returned=5 bestRC=-99.0
+public price: Time-indexed rank-1 cut heuristic bidirectional pricing generated 5 negative pseudo-schedule columns, bestPseudoRC=-99.0, cuts=1, horizon=200, tStar=100, piWindow=disabled, pricingDiagnostics=off, deferredPackedLabels=true
+memory=node heuristic=true H=200.0 tStar=100 live=5 heap=149 stale=144 returned=5 bestRC=-99.0
+memory=node heuristic=false H=200.0 tStar=100 live=5 heap=149 stale=144 returned=5 bestRC=-99.0
+public price: Time-indexed rank-1 cut heuristic bidirectional pricing generated 5 negative pseudo-schedule columns, bestPseudoRC=-99.0, cuts=1, horizon=200, tStar=100, piWindow=disabled, pricingDiagnostics=off, deferredPackedLabels=true
+memory=arc heuristic=true H=200.0 tStar=100 live=5 heap=149 stale=144 returned=5 bestRC=-99.0
+memory=arc heuristic=false H=200.0 tStar=100 live=5 heap=149 stale=144 returned=5 bestRC=-99.0
+public price: Time-indexed rank-1 cut heuristic bidirectional pricing generated 5 negative pseudo-schedule columns, bestPseudoRC=-99.0, cuts=1, horizon=200, tStar=100, piWindow=disabled, pricingDiagnostics=off, deferredPackedLabels=true

@@ -1,0 +1,42 @@
+n=1 m=1 H=1.0
+cost=1.0
+java.lang.NullPointerException: Cannot read field "end" because "<local4>.tail" is null
+	at HEU.Solution.calCost(Solution.java:1215)
+	at TWETBPC.IO.TWETColumnEvaluator.evaluateTiming(TWETColumnEvaluator.java:121)
+	at TimingBoundaryAudit.main(TimingBoundaryAudit.java:18)
+ngDssr detailed=false status=ROOT_PROCESSED ub=1.0 lb=1.0
+ngDssr detailed=true FAILED
+java.lang.IllegalStateException: Failed to write BPC result artifacts
+	at TWETBPC.TWETBPCSolver.solve(TWETBPCSolver.java:45)
+	at TimingBoundaryAudit.main(TimingBoundaryAudit.java:41)
+Caused by: java.lang.NullPointerException: Cannot read field "end" because "<local4>.tail" is null
+	at HEU.Solution.calCost(Solution.java:1215)
+	at TWETBPC.IO.TWETColumnEvaluator.evaluateTiming(TWETColumnEvaluator.java:121)
+	at Output.BPCResultWriter.writeDetailedArtifacts(BPCResultWriter.java:325)
+	at Output.BPCResultWriter.write(BPCResultWriter.java:234)
+	at TWETBPC.TWETBPCSolver.solve(TWETBPCSolver.java:42)
+	... 1 more
+timeIndexedGraph detailed=false status=ROOT_PROCESSED ub=1.0 lb=1.0
+timeIndexedGraph detailed=true FAILED
+java.lang.IllegalStateException: Failed to write BPC result artifacts
+	at TWETBPC.TWETBPCSolver.solve(TWETBPCSolver.java:45)
+	at TimingBoundaryAudit.main(TimingBoundaryAudit.java:41)
+Caused by: java.lang.NullPointerException: Cannot read field "end" because "<local4>.tail" is null
+	at HEU.Solution.calCost(Solution.java:1215)
+	at TWETBPC.IO.TWETColumnEvaluator.evaluateTiming(TWETColumnEvaluator.java:121)
+	at Output.BPCResultWriter.writeDetailedArtifacts(BPCResultWriter.java:325)
+	at Output.BPCResultWriter.write(BPCResultWriter.java:234)
+	at TWETBPC.TWETBPCSolver.solve(TWETBPCSolver.java:42)
+	... 1 more
+timeIndexedGraphRank1Cut detailed=false status=ROOT_PROCESSED ub=1.0 lb=1.0
+timeIndexedGraphRank1Cut detailed=true FAILED
+java.lang.IllegalStateException: Failed to write BPC result artifacts
+	at TWETBPC.TWETBPCSolver.solve(TWETBPCSolver.java:45)
+	at TimingBoundaryAudit.main(TimingBoundaryAudit.java:41)
+Caused by: java.lang.NullPointerException: Cannot read field "end" because "<local4>.tail" is null
+	at HEU.Solution.calCost(Solution.java:1215)
+	at TWETBPC.IO.TWETColumnEvaluator.evaluateTiming(TWETColumnEvaluator.java:121)
+	at Output.BPCResultWriter.writeDetailedArtifacts(BPCResultWriter.java:325)
+	at Output.BPCResultWriter.write(BPCResultWriter.java:234)
+	at TWETBPC.TWETBPCSolver.solve(TWETBPCSolver.java:42)
+	... 1 more

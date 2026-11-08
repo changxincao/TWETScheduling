@@ -867,6 +867,11 @@ public class TimeIndexedGraphRank1CutPricingEngine implements PricingEngine {
 				candidateBySignature.remove(worst.signature);
 				candidateHeap.poll();
 			}
+			// 与普通TI一致：同签名改进留下旧版本，过期项多于有效项时仅压缩引用，保留原排序。
+			if (candidateHeap.size() > 2L * candidateBySignature.size()) {
+				candidateHeap.clear();
+				candidateHeap.addAll(candidateBySignature.values());
+			}
 		}
 
 		private Candidate currentWorstCandidate() {

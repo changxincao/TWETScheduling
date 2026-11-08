@@ -1,0 +1,5 @@
+Exception in thread "main" java.lang.NullPointerException: Cannot read field "end" because "<local4>.tail" is null
+	at HEU.Solution.calCost(Solution.java:1215)
+	at TWETBPC.IO.TWETColumnEvaluator.evaluateTiming(TWETColumnEvaluator.java:121)
+	at TWETBPC.IO.TWETColumnTimingBoundaryTest.checkTiming(TWETColumnTimingBoundaryTest.java:49)
+	at TWETBPC.IO.TWETColumnTimingBoundaryTest.main(TWETColumnTimingBoundaryTest.java:17)

@@ -117,6 +117,16 @@ public class TWETColumnEvaluator {
 		if (sequence.isEmpty()) {
 			return new Timing(0.0, 0.0, 0.0, new double[0]);
 		}
+		if (sequence.size() == 1) {
+			int job = sequence.get(0);
+			if (data.p[job] + data.s[0][job] == data.CmaxH) {
+				// 唯一合法完工时刻为H；旧Solution的setDomain(H,H)会清空，仅接已确认的有限成本。
+				double cost = evaluate(sequence);
+				if (Double.isFinite(cost) && !Utility.isBigMValue(cost)) {
+					return new Timing(cost, data.CmaxH, data.CmaxH, new double[] {data.CmaxH});
+				}
+			}
+		}
 		Solution scratch = buildScratch(sequence);
 		double cost = scratch.calCost(0);
 		double[] completions = scratch.computeBestCompletionTimesFromCurrentForwardFunctions(0);

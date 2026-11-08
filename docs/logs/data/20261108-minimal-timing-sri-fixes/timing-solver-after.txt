@@ -1,0 +1,9 @@
+n=1 m=1 H=1.0
+cost=1.0
+timing cost=1.0 completion=1.0
+ngDssr detailed=false status=ROOT_PROCESSED ub=1.0 lb=1.0
+ngDssr detailed=true status=ROOT_PROCESSED ub=1.0 lb=1.0
+timeIndexedGraph detailed=false status=ROOT_PROCESSED ub=1.0 lb=1.0
+timeIndexedGraph detailed=true status=ROOT_PROCESSED ub=1.0 lb=1.0
+timeIndexedGraphRank1Cut detailed=false status=ROOT_PROCESSED ub=1.0 lb=1.0
+timeIndexedGraphRank1Cut detailed=true status=ROOT_PROCESSED ub=1.0 lb=1.0

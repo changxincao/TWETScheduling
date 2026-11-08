@@ -1,0 +1,13 @@
+heap full/true live=5 retained=149
+snapshot full/true bestRC=-99.0 49:[1, 2]@NaN/-99.0;50:[1, 2, 1, 2]@NaN/-98.0;147:[1, 2, 1]@NaN/-98.0;52:[2, 1, 2]@NaN/-97.0;148:[1, 3, 2]@NaN/-48.0; columns=[1, 2]@0.0;[1, 2, 1, 2]@200.0;[1, 2, 1]@101.0;[2, 1, 2]@102.0;[1, 3, 2]@51.0;
+heap full/false live=5 retained=149
+snapshot full/false bestRC=-99.0 49:[1, 2]@NaN/-99.0;50:[1, 2, 1, 2]@NaN/-98.0;51:[2, 1, 2]@NaN/-98.0;147:[1, 2, 1]@NaN/-98.0;148:[1, 3, 2]@NaN/-48.0; columns=[1, 2]@0.0;[1, 2, 1, 2]@200.0;[2, 1, 2]@101.0;[1, 2, 1]@101.0;[1, 3, 2]@51.0;
+heap node/true live=5 retained=149
+snapshot node/true bestRC=-99.0 49:[1, 2]@NaN/-99.0;50:[1, 2, 1, 2]@NaN/-98.0;147:[1, 2, 1]@NaN/-98.0;52:[2, 1, 2]@NaN/-97.0;148:[1, 3, 2]@NaN/-48.0; columns=[1, 2]@0.0;[1, 2, 1, 2]@200.0;[1, 2, 1]@101.0;[2, 1, 2]@102.0;[1, 3, 2]@51.0;
+heap node/false live=5 retained=149
+snapshot node/false bestRC=-99.0 49:[1, 2]@NaN/-99.0;50:[1, 2, 1, 2]@NaN/-98.0;51:[2, 1, 2]@NaN/-98.0;147:[1, 2, 1]@NaN/-98.0;148:[1, 3, 2]@NaN/-48.0; columns=[1, 2]@0.0;[1, 2, 1, 2]@200.0;[2, 1, 2]@101.0;[1, 2, 1]@101.0;[1, 3, 2]@51.0;
+heap arc/true live=5 retained=149
+snapshot arc/true bestRC=-99.0 49:[1, 2]@NaN/-99.0;50:[1, 2, 1, 2]@NaN/-98.0;147:[1, 2, 1]@NaN/-98.0;52:[2, 1, 2]@NaN/-97.0;148:[1, 3, 2]@NaN/-48.0; columns=[1, 2]@0.0;[1, 2, 1, 2]@200.0;[1, 2, 1]@101.0;[2, 1, 2]@102.0;[1, 3, 2]@51.0;
+heap arc/false live=5 retained=149
+snapshot arc/false bestRC=-99.0 49:[1, 2]@NaN/-99.0;50:[1, 2, 1, 2]@NaN/-98.0;51:[2, 1, 2]@NaN/-98.0;147:[1, 2, 1]@NaN/-98.0;148:[1, 3, 2]@NaN/-48.0; columns=[1, 2]@0.0;[1, 2, 1, 2]@200.0;[2, 1, 2]@101.0;[1, 2, 1]@101.0;[1, 3, 2]@51.0;
+TimeIndexedRank1CandidateHeapTest passed bounded=false

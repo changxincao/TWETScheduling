@@ -125,3 +125,24 @@ solver.jar从提交4ac6cb5ae3ed1ee30209c4c140db18154bfb10fd的src快照用releas
 本次目的是测实际大join的组预筛、OR与后续label成本，不是证明该实例无法优化。没有原运行完整的dual/label快照，probe依赖时序反馈，因此不能保证重现相同的第11次pricing第23轮；只按本次实际完整返回的join解释，不拿前几轮小join替代旧上万秒轮。已知时限检查缺口未修，加上诊断读时钟开销，仍可能明显超过3小时；这是单项诊断，不混入正式性能结果。当前结论仅为成功启动并持续推进，不是补跑完成。
 
 本地部署清单为`experiment-suite/formal/manifests/20261108-ng-n60-join-timing-4ac6cb5a/`，准备脚本为`scripts/remote/prepare-ng-join-timing-20261108.py`。启动、196字段验收、原summary、堆及进程证据为`data/20261108-ng-join-remote/`，远端同目录README及startup-record.json已同步。复查可调用该目录status.cmd；逐轮原始计时位于`runs\pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a\stdout.log`。
+
+## 8. 15:20只读检查：已完成轮次的初步占比
+
+2026-11-08 15:20:38（北京时间），DESKTOP-06K8JI8/100.68.243.112仍为SOLVE_RUNNING，solver12704存活、累计CPU2441218ms。目录、原版本及配置未改。stdout快照显示第15次pricing第21轮已完成正反向扩展并进入join，但尚未打印本轮计时；最近完整返回的是第15次pricing第20轮43.711秒。没有用活进程或没有新行直接判定卡死。
+
+快照包含269条完整join计时，覆盖pricing1/round1到pricing15/round20，按node/pricingCall/dssrRound无重复，各分项之和与total相符。累计及当前已返回最慢轮为：
+
+| 部分 | 已返回269轮累计 | 占累计join | 最慢完整轮 | 占该轮 |
+| --- | ---: | ---: | ---: | ---: |
+| 剩余label检查及拼接 | 360.602s | 53.45% | 48.423s | 48.36% |
+| 组级下界预筛 | 169.518s | 25.13% | 25.511s | 25.48% |
+| 位图合并 | 51.892s | 7.69% | 13.738s | 13.72% |
+| 预筛其他工作 | 46.000s | 6.82% | 11.107s | 11.09% |
+| join其他工作 | 46.655s | 6.92% | 1.351s | 1.35% |
+| 合计 | 674.668s | 100% | 100.129s | 100% |
+
+最慢完整轮为pricing13/DSSR21；另外pricing14/DSSR16为88.899秒，pricing9/DSSR21为79.872秒。此时最主要是label层剩余工作，其次是组级下界检查，位图并非首要项。但remainingLabels包含逐label下界、相容性等检查及tryJoin，不能把53.45%全部称为PWLF相加；bound仅统计组级预筛，不包含所有逐label下界。functionWithinBound是bound的子项，buildWithinOther是other的子项，均未重复相加。
+
+本次尚未重现历史12629.94秒的单轮join，当前未返回的第21轮也未进入上述分母，不能用100秒以内完整轮的占比代替历史上万秒轮结论。插桩时钟和本次dual/probe轨迹仍限制外推。本节是中途统计，不是本次求解完成报告。
+
+用户同时要求确认最新补丁：重新核对8d57dd60仅两处生产代码新增15行，工作区无新的语义源码差异；再次运行TWETColumnTimingBoundaryTest及TimeIndexedRank1CandidateHeapTest均通过，包括12000次map对照和六组堆压缩检查。此前63项回归和120组oracle的原始退出码/输出也已复核，本次没有声称重新跑完这两整套。证据在data/20261108-ng-join-timing-check-1520，含269轮CSV、状态及堆复核输出；原stdout快照仅留本地隔离目录。本轮没有修改源码、上传、停启或更改远端任务。

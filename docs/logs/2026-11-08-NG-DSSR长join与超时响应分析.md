@@ -381,3 +381,15 @@ JVM仍24GiB、CPLEX1线程，不沿用六例中的ActiveProcessorCount=2或GC线
 本地release21 focused编译通过。OR、SET、SET+分项计时、SET+双算四种模式下，专项多字掩码、缓存复用、释放后重建，以及4种固定dual的Phase-I/普通目标正负列场景，返回列顺序、真实cost/reduced cost摘要和证书完全相同；实际建组另核对不贡献包络的label也进入成员数组且数组只准备一次。2560批位图并集、join边界、1972项traced/Phase-I、1081项历史端点/12次exact、CB单点和心跳回归通过。首次扩大回归命令因PowerShell未引用-D参数而被拆词，仅为启动命令错误；引用后全套通过，未改代码规避。
 
 包由scripts/remote/prepare-ng-pure-set-20261108.py从提交src快照全新构建，逐项检查Java major≤65、原输入/seed SHA、原非地址参数和有效seed指纹。此处记录为已实现和本地验证、准备部署，不能当已启动；实际JAR hash、远端hash验收、进程和断开SSH后存活另续记。两边逐组计时具有读时钟开销，比较总时间时保留这一口径，不以局部bitmap倍数替代整个join或求解收益。
+
+## 33. 七例独立OR/set已按四并发启动
+
+本批源码为83861aeb4978941b24a3a3ed50f5d1085eea4855，包含此前已提交的端点、CB/Phase-I、M修复确认、缓存释放、TI debug及SRI稳定化等主线修正，再加入默认关闭的纯set开关。solver.jar从该提交src快照全新release21构建，484个class均不高于major65，SHA-256为76340285b489cfc9738a143d46fdbad29e36c773b2d215f801bb1688d71d5b12；运维wrapper的tools.jar为a4b603aa3c84df560c64e3ab263c7114bf2a56405ea9499d5b62579df9a6265f。实际打包JAR上再次运行OR/SET分项计时回归，四种固定dual下返回列顺序、cost/RC摘要和证书一致。不是用旧81e144e4部署JAR加一个运行参数。
+
+06主机独立目录为D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-join-pure-set-83861aeb。23:48原按2并发启动，随后用户明确改为4并发；只精确停止本新批18784/6380/19588，复查相关JVM归零，核验绝对路径后把两份未完成输出、旧锁、调度日志和原2并发配置移入本目录interrupted-2parallel，不纳入14项比较。没有删除已完成原实验或停止其它主机任务。修改worker为4并发，solver/wrapper JAR、manifest、输入和seed均未改变，重新scan为14项待运行、已有SUCCESS为0。
+
+四并发于23:51:55启动：scheduler15660，首批为set02/m3的SET6932、OR7892，以及set02/m4的OR14412、SET5268。主动关闭本机启动SSH39524后，23:53:18独立连接仍为1个scheduler/4个solver，runId无重复；主机物理内存137112563712字节，空闲116571709440字节。JVM实际system_properties确认两项UseSet=true、两项false，四项bitmapCompare=false、joinPhaseTiming=true；VM.flags确认四项MaxHeapSize=25769803776，run.properties/CLI为v8、CPLEX1、原seed和全节点fixing深度2147483647。此时m4的OR/SET分别已有11/13轮join分项计时，m3尚在根预处理，不能把初始小轮的计时当最终收益。
+
+启动验收工具首次用严格UTF-8读取活stdout时发生MalformedInputException，只读工具退出，四项solver并未报错或受影响。将该工具的新增扫描改为与原扫描相同的容错解码，只抽取ASCII策略/计时行；当前进程已使用原tools.jar，因此不覆盖它，另置438c9b8c2726260776697f2f264e434ba8d6bc4048aa879d2b903388add966bc的audit-live.jar，并备份原audit.cmd后令验收入口优先使用该独立只读类。solver和wrapper未改、未重启，最终静态hash清单更新为38项。后续查询直接使用本目录audit.cmd，不再调用旧严格解码类。
+
+本地data/20261108-ng-join-pure-set保存完整manifest、7组14项数据/seed追踪、JAR/资产hash、实际四进程属性、启动及断开快照和回归小日志；远端startup-record.json同样落盘。正式策略默认仍为OR，本批为独立实验，未把纯set提升为正式默认；长join超时响应缺口仍未改。此时验证范围为正确启动、实际模式和早期推进，最终总时间、join分解、最优数量与gap待完成后比较。

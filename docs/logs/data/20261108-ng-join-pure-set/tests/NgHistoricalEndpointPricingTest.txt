@@ -1,0 +1,1 @@
+NgHistoricalEndpointPricingTest passed: 1081 checks, 12 exact pricings

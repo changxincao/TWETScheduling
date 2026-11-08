@@ -1,0 +1,22 @@
+{
+  "sourceCommit": "83861aeb4978941b24a3a3ed50f5d1085eea4855",
+  "solverJarSha256": "76340285b489cfc9738a143d46fdbad29e36c773b2d215f801bb1688d71d5b12",
+  "toolsJarSha256": "a4b603aa3c84df560c64e3ab263c7114bf2a56405ea9499d5b62579df9a6265f",
+  "liveAuditJarSha256": "438c9b8c2726260776697f2f264e434ba8d6bc4048aa879d2b903388add966bc",
+  "remote": "D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-join-pure-set-83861aeb",
+  "cases": 7,
+  "runs": 14,
+  "parallel": 4,
+  "heapGiB": 24,
+  "cplexThreads": 1,
+  "nominalSeconds": 10800,
+  "maxNodes": 100000,
+  "bitmapCompare": false,
+  "joinPhaseTiming": true,
+  "defaultStrategy": "OR",
+  "familyBranching": "Cluster then Arc",
+  "cutSet": false,
+  "scalarFixingDepth": 2147483647,
+  "classCount": 484,
+  "note": "same JAR/input/seed/config, only member aggregation strategy differs; no reuse"
+}

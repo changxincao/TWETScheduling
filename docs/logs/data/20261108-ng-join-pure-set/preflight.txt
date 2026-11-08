@@ -1,0 +1,20 @@
+TIME 2026-11-08T23:48:03.071577200+08:00
+HOST DESKTOP-06K8JI8 memory=137112563712 free=124643143680
+ASSETS_OK 37
+CASE join-n060-set02-m3-family-high-wwide-f3-set n=60 m=3 H=125394.0 seed=18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4
+CASE join-n060-set02-m3-family-high-wwide-f3-or n=60 m=3 H=125394.0 seed=18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4
+CASE join-n060-set02-m4-family-high-wwide-f3-or n=60 m=4 H=125394.0 seed=111c2a1a08dae90a54462ee4fae4038ab2ac63631f85d60bb43cd316ca12640c
+CASE join-n060-set02-m4-family-high-wwide-f3-set n=60 m=4 H=125394.0 seed=111c2a1a08dae90a54462ee4fae4038ab2ac63631f85d60bb43cd316ca12640c
+CASE join-n060-set03-m4-family-high-wwide-f3-set n=60 m=4 H=129740.0 seed=9bc26ec33e180f534072a11d47924c842403baa58da81caf885c5207afa43b55
+CASE join-n060-set03-m4-family-high-wwide-f3-or n=60 m=4 H=129740.0 seed=9bc26ec33e180f534072a11d47924c842403baa58da81caf885c5207afa43b55
+CASE join-n060-set01-m3-family-high-wwide-f3-or n=60 m=3 H=143056.0 seed=0523b710f4735d389226f4da6629357c8301c1c12e715db52c0da13dca715afc
+CASE join-n060-set01-m3-family-high-wwide-f3-set n=60 m=3 H=143056.0 seed=0523b710f4735d389226f4da6629357c8301c1c12e715db52c0da13dca715afc
+CASE join-n060-set03-m3-family-high-wwide-f3-set n=60 m=3 H=129740.0 seed=7a370e2b31ef15a80e573aacc61780d3cfdf94b93489589e0c6b8521f3d78259
+CASE join-n060-set03-m3-family-high-wwide-f3-or n=60 m=3 H=129740.0 seed=7a370e2b31ef15a80e573aacc61780d3cfdf94b93489589e0c6b8521f3d78259
+CASE join-n060-set01-m2-family-high-wwide-f3-or n=60 m=2 H=143056.0 seed=3d9b7039ac730dae0d8474426f617b44df51154ea56436ca065bb35a2f0a5c36
+CASE join-n060-set01-m2-family-high-wwide-f3-set n=60 m=2 H=143056.0 seed=3d9b7039ac730dae0d8474426f617b44df51154ea56436ca065bb35a2f0a5c36
+CASE join-n060-set02-m2-family-high-wwide-f3-set n=60 m=2 H=125394.0 seed=e2ff12295e2a14fe24bf3547c68a6a5dc1d80f2fa4a024e669edf655c11832a3
+CASE join-n060-set02-m2-family-high-wwide-f3-or n=60 m=2 H=125394.0 seed=e2ff12295e2a14fe24bf3547c68a6a5dc1d80f2fa4a024e669edf655c11832a3
+BATCH PREPARED
+ExperimentBatchScheduler scan: total=14 matched=14 dependencies=0 selected=14 localSuccess=0 pending=14 scanOnly=true selectors=<none>
+ExperimentBatchScheduler selected solves: algorithms={NG_DSSR=14} outsourcingModels={}

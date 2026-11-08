@@ -1,0 +1,47 @@
+{
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "remoteDirectory": "D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-join-pure-set-83861aeb",
+  "sourceCommit": "83861aeb4978941b24a3a3ed50f5d1085eea4855",
+  "solverJarSha256": "76340285b489cfc9738a143d46fdbad29e36c773b2d215f801bb1688d71d5b12",
+  "toolsJarSha256": "a4b603aa3c84df560c64e3ab263c7114bf2a56405ea9499d5b62579df9a6265f",
+  "cases": 7,
+  "runs": 14,
+  "parallel": 4,
+  "heapGiB": 24,
+  "cplexThreads": 1,
+  "nominalSeconds": 10800,
+  "maxNodes": 100000,
+  "startedAt": "2026-11-08T23:51:55+08:00",
+  "independentCheckedAt": "2026-11-08T23:53:18.652028600+08:00",
+  "schedulerPid": 15660,
+  "solverPids": {
+    "join-n060-set02-m3-family-high-wwide-f3-set": 6932,
+    "join-n060-set02-m3-family-high-wwide-f3-or": 7892,
+    "join-n060-set02-m4-family-high-wwide-f3-or": 14412,
+    "join-n060-set02-m4-family-high-wwide-f3-set": 5268
+  },
+  "startupSshPidClosed": 39524,
+  "detachedSchedulerCount": 1,
+  "detachedSolverCount": 4,
+  "duplicateRunIds": 0,
+  "bitmapCompare": false,
+  "joinPhaseTiming": true,
+  "batchStatus": "SOLVE_RUNNING",
+  "earlyJoinTimingRounds": {
+    "m3-set": 0,
+    "m3-or": 0,
+    "m4-or": 11,
+    "m4-set": 13
+  },
+  "interruptedEarlierAttempt": {
+    "parallel": 2,
+    "schedulerPid": 18784,
+    "solverPids": [6380, 19588],
+    "archiveDirectory": "interrupted-2parallel",
+    "reason": "user requested four-way concurrency",
+    "completedResults": 0,
+    "includedInComparison": false
+  },
+  "notes": "same JAR/input/seed/algorithm configuration; member aggregation mode differs; component timing overhead retained; long-join timeout response unchanged"
+}

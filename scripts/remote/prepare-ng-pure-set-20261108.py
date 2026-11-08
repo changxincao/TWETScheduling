@@ -126,11 +126,11 @@ cmd(payload / "audit.cmd", common + '"%JAVA%" -Xmx512m -Dfile.encoding=UTF-8 -cp
 worker = '@echo off\nsetlocal\ncd /d "%~dp0"\n'
 worker += 'set "JAVA_TOOL_OPTIONS=-Xmx24g -Dtwet.bpc.fullDomainCompare.liveTrace=true -Dtwet.bpc.fullDomainCompare.stageHeartbeat=true -Dtwet.bpc.fullDomainCompare.nodeProgressSummary=true"\n'
 worker += 'mkdir worker.lock 2>nul\nif errorlevel 1 exit /b 19\nif not exist scheduler-logs mkdir scheduler-logs\n'
-worker += '>experiment.status echo SOLVE_RUNNING\ncall "%~dp0run.cmd" "%~dp0solve.tsv" 2 1>"%~dp0scheduler-logs\\solve.out.log" 2>"%~dp0scheduler-logs\\solve.err.log"\n'
+worker += '>experiment.status echo SOLVE_RUNNING\ncall "%~dp0run.cmd" "%~dp0solve.tsv" 4 1>"%~dp0scheduler-logs\\solve.out.log" 2>"%~dp0scheduler-logs\\solve.err.log"\n'
 worker += 'if errorlevel 1 goto failed\n>worker.exit-code echo 0\n>experiment.status echo FINISHED\nexit /b 0\n:failed\n>worker.exit-code echo 1\n>experiment.status echo FAILED\nexit /b 1\n'
 cmd(payload / "worker.cmd", worker)
 receipt = dict(sourceCommit=CODE, solverJarSha256=sha(payload / "solver.jar"), toolsJarSha256=sha(payload / "tools.jar"),
-               remote=REMOTE, cases=7, runs=14, parallel=2, heapGiB=24, cplexThreads=1, nominalSeconds=10800,
+               remote=REMOTE, cases=7, runs=14, parallel=4, heapGiB=24, cplexThreads=1, nominalSeconds=10800,
                maxNodes=100000, bitmapCompare=False, joinPhaseTiming=True, defaultStrategy="OR",
                familyBranching="Cluster then Arc", cutSet=False, scalarFixingDepth=2147483647,
                classCount=len(class_files), note="same JAR/input/seed/config, only member aggregation strategy differs; no reuse")
@@ -139,7 +139,7 @@ receipt = dict(sourceCommit=CODE, solverJarSha256=sha(payload / "solver.jar"), t
     "共14项，不复用历史计时或旧输出。原set02/m3优先，另为set02/m4、set03/m4、set01/m3、set03/m3、set01/m2、set02/m2。"
     "每对使用同一JAR、数据和seed，其余CLI沿用原NG-A。Cluster→Arc、CutSet关闭、全节点scalar fixing、"
     "probe及完整求解流程不改。纯set仍输出原格式的剪枝BitSet，只用紧凑成员索引填充；不改变组对判断或label拼接。\n\n"
-    "两并发，每JVM24GiB、CPLEX1线程、10800秒名义预算和100000节点。两组均开原join分项计时，"
+    "四并发，每JVM24GiB、CPLEX1线程、10800秒名义预算和100000节点。两组均开原join分项计时，"
     "关闭同状态双算。逐组读时钟有开销，报告整体时间时保留此口径；旧join超时响应缺口未改，不能保证严格3小时退出。"
     "solver TIME_LIMIT与child SUCCEEDED需区分，不将本诊断并入正式总表。\n\n源码：" + CODE
     + "\n\n启动和断开验收另记startup-record.json；旧任务和结果均不动。\n", encoding="utf-8")

@@ -1,0 +1,1 @@
+NgJoinBitmapComparisonTest passed, independent batches=2560

@@ -64,7 +64,9 @@ public final class NgBitmapExperimentAudit {
                 if (independentRuns) {
                     String strategy = null, timing = null;
                     long rounds = 0;
-                    try (var reader = Files.newBufferedReader(output.resolve("stdout.log"), StandardCharsets.UTF_8)) {
+                    // 活日志可能含系统编码输出或尚未写完的字符；只抽取ASCII诊断行，不让解码中断只读验收。
+                    try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(
+                            Files.newInputStream(output.resolve("stdout.log")), StandardCharsets.UTF_8))) {
                         for (String log; (log = reader.readLine()) != null;) {
                             if (log.startsWith("[NG join bitmap strategy]")) strategy = log;
                             if (log.startsWith("[NG join timing]")) { rounds++; timing = log; }

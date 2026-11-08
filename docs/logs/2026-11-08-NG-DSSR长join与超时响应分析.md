@@ -356,3 +356,18 @@ JVM仍24GiB、CPLEX1线程，不沿用六例中的ActiveProcessorCount=2或GC线
 全部167轮累计7452637次成对mask构造、9265020055次组聚合，位图不一致0；准备0.567秒、核对1.120秒、抽样0.024秒。最后大轮主导了收益，不推翻六例中密集小跨度组OR更快的观察，也不据此直接选统一阈值。最终config dump共199项config字段，排除输出根目录、live trace路径、instanceName三个运行地址字段，其余196项与原n60配置完全相同；正式流程仍只消费A的OR结果，B仅影子计时。未修改源码、正式profile或其它任务。
 
 当前结论：此前怀疑的长join位图聚合确有很大的局部优化空间，本例中成员set比全宽OR快约21.9倍且结果逐位相同。但没有测出优化后的完整join或完整求解时间；诊断运行还承担B双算和统计开销，wall-time反馈也可能改变后续路径，不能直接减去组件差额冒充正式求解提速。最终逐轮、q×k/W分布及汇总见data/20261108-ng-n60-bitmap-ab/final-statistics，终止状态、core/components/config与scheduler收尾在final-status，完成与配置核对摘要为completion-record.json；完整stdout仍在原远端诊断目录和本地隔离下载目录。
+
+## 31. 同算例TI结果及两种gap口径
+
+23:37复核n60/set02/F3/m3/high/wide的已有TI Cluster结果：从20261107-n60-ng-ti-comparison/paired.csv回到third/audit-rows.tsv中保存的core-summary和run.properties原文解码核对。TI、TI+SRI与本次NG输入SHA、seed文件SHA及seedFingerprint完全一致，均启用Cluster且theta=0.5、temporal=0、CPLEX1线程；TI历史profile为2026-09-09-v6，NG为v8，不能说三算法全部配置字段或版本完全相同。以下TI是已保存的完成输出，不是本次重新求解；四项solver状态均为TIME_LIMIT，incumbent全部为358596。
+
+| 运行 | 总秒 | 节点 | bestBound | gap% |
+| --- | ---: | ---: | ---: | ---: |
+| TI + Cluster，历史完成结果 | 10801.272193 | 656 | 355366.875421 | 0.900491 |
+| TI+SRI + Cluster，历史完成结果 | 10800.054025 | 1 | 338407.135775 | 5.629975 |
+| NG此前已完成原跑，81e144e4 | 20448.405649 | 1 | 286640.947321 | 20.065771 |
+| NG本次OR/set双算，caecd7db | 11753.946845 | 1 | 280807.574575 | 21.692497 |
+
+本例TI根节点用72.576857秒闭合到331243.403979，之后进入树；TI+SRI仍在根处理中。NG此前原跑与本次双算的gap不同，后者大1.626726个百分点，因UB相同，对应LB低5833.372746。两次实际耗时和时序反馈路径不同，这张表不是正式位图策略A/B性能结论。
+
+尤其“全OR和全set的gap是否相同”不能按两个独立求解回答：它们只在同一次pricing内生成两张相同掩码，只有OR进入真实join，因此这次只有一个全局gap=21.692497%，没有另一个全set求解gap。另一项14:00启动的4ac6cb5a逐组计时任务，刚才远端只读仍为RUNNING且没有core-summary，stdout停留于pricing16/DSSR21的join.start；不能把81e144e4已完成原跑的20.065771%冒充该未完成计时任务的最终gap。原任务、正式逻辑均未改动。

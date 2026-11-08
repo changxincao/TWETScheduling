@@ -371,3 +371,13 @@ JVM仍24GiB、CPLEX1线程，不沿用六例中的ActiveProcessorCount=2或GC线
 本例TI根节点用72.576857秒闭合到331243.403979，之后进入树；TI+SRI仍在根处理中。NG此前原跑与本次双算的gap不同，后者大1.626726个百分点，因UB相同，对应LB低5833.372746。两次实际耗时和时序反馈路径不同，这张表不是正式位图策略A/B性能结论。
 
 尤其“全OR和全set的gap是否相同”不能按两个独立求解回答：它们只在同一次pricing内生成两张相同掩码，只有OR进入真实join，因此这次只有一个全局gap=21.692497%，没有另一个全set求解gap。另一项14:00启动的4ac6cb5a逐组计时任务，刚才远端只读仍为RUNNING且没有core-summary，stdout停留于pricing16/DSSR21的join.start；不能把81e144e4已完成原跑的20.065771%冒充该未完成计时任务的最终gap。原任务、正式逻辑均未改动。
+
+## 32. 纯set独立求解实现及七例对照准备
+
+用户授权让set真正参与join，并选择6至7个同类型算例；随后明确要求OR和set分别独立求解、两边开启join分项计时。选定7个n60/F3/high/wide：set02/m3原慢例优先，另为set02/m4、set03/m4、set01/m3、set03/m3、set01/m2、set02/m2。每例同输入、同seed、同JAR独立运行OR和SET，共14项，不复用历史双算或旧版本的求解时间。使用06主机独立新目录，2并发、每JVM24GiB、CPLEX1线程、10800秒名义时限和100000节点；Cluster→Arc、CutSet关闭、全节点scalar fixing和probe等原A参数不动。旧join延后检查时限的问题仍按约定未修，因此名义3小时不等于硬退出期限。
+
+新增默认关闭的twet.bpc.ngDssrJoinBitmapUseSet开关：建组后将forward组的完整memberIndices一次性展开为int数组，每次组判可剪后逐成员set，仍返回相同BitSet供外层缓存和nextClearBit使用。不是只保留包络贡献者，不是每次聚合重扫BitSet，也不改变组对判断、组排序、terminal释放或后续label拼接；默认分支继续原OR。同状态双算诊断优先且仍只返回OR，不能混作纯set实验。独立实验wrapper在NG类初始化之前设置OR/SET，并开启原joinPhaseTiming、关闭bitmapCompare；stdout显式记录实际模式。该wrapper只用于实验，不改正式求解入口与profile。
+
+本地release21 focused编译通过。OR、SET、SET+分项计时、SET+双算四种模式下，专项多字掩码、缓存复用、释放后重建，以及4种固定dual的Phase-I/普通目标正负列场景，返回列顺序、真实cost/reduced cost摘要和证书完全相同；实际建组另核对不贡献包络的label也进入成员数组且数组只准备一次。2560批位图并集、join边界、1972项traced/Phase-I、1081项历史端点/12次exact、CB单点和心跳回归通过。首次扩大回归命令因PowerShell未引用-D参数而被拆词，仅为启动命令错误；引用后全套通过，未改代码规避。
+
+包由scripts/remote/prepare-ng-pure-set-20261108.py从提交src快照全新构建，逐项检查Java major≤65、原输入/seed SHA、原非地址参数和有效seed指纹。此处记录为已实现和本地验证、准备部署，不能当已启动；实际JAR hash、远端hash验收、进程和断开SSH后存活另续记。两边逐组计时具有读时钟开销，比较总时间时保留这一口径，不以局部bitmap倍数替代整个join或求解收益。

@@ -78,6 +78,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private static final boolean JOIN_PHASE_TIMING = Boolean.getBoolean("twet.bpc.ngDssrJoinPhaseTiming");
 	/** 同一次join只重复位图聚合；默认关闭，B不进入真实候选流程。 */
 	private static final boolean JOIN_BITMAP_COMPARISON = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare");
+	/** 纯set实验只替换可剪组的位图聚合；默认仍OR，同状态双算诊断仍返回原OR。 */
+	private static final boolean JOIN_BITMAP_MEMBER_SET = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapUseSet");
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}
@@ -4457,6 +4459,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		long buildStart = System.nanoTime();
 		JoinEnvelopeIndex index = buildJoinEnvelopeIndex();
 		if (index.bitmapComparison != null) index.prepareBitmapComparison();
+		else if (JOIN_BITMAP_MEMBER_SET) index.prepareSetMembers();
 		joinEnvelopeBuildNanos += System.nanoTime() - buildStart;
 		long joinStart = System.nanoTime();
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0);
@@ -8636,6 +8639,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final int terminalCount;
 		final NgJoinBitmapComparison bitmapComparison = JOIN_BITMAP_COMPARISON ? new NgJoinBitmapComparison() : null;
 		private boolean bitmapComparisonPrepared;
+		private boolean setMembersPrepared;
 
 		JoinEnvelopeIndex(int size) {
 			terminalCount = size;
@@ -8679,13 +8683,18 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				return compared;
 			}
 			BitSet pruned = new BitSet(candidates.size());
+			if (JOIN_BITMAP_MEMBER_SET) prepareSetMembers();
 			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups = forwardByTerminal.get(lastJob);
 			if (forwardGroups != null) {
 				for (int i = 0; i < forwardGroups.size(); i++) {
 					JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroups.get(i);
 					if (canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
 						long bitmapStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
-						pruned.or(forwardGroup.memberIndices);
+						if (JOIN_BITMAP_MEMBER_SET) {
+							for (int member : forwardGroup.setMembers) pruned.set(member);
+						} else {
+							pruned.or(forwardGroup.memberIndices);
+						}
 						if (JOIN_PHASE_TIMING) {
 							owner.joinPrefilterBitmapNanos += System.nanoTime() - bitmapStart;
 						}
@@ -8694,6 +8703,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			byTerminal[lastJob] = pruned;
 			return pruned;
+		}
+
+		/** 建组结束后只展开一次全部成员；不能仅用包络贡献者，也不能每次聚合重扫BitSet。 */
+		void prepareSetMembers() {
+			if (setMembersPrepared) return;
+			for (ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups : forwardByTerminal) {
+				if (groups == null) continue;
+				for (JoinEnvelopeGroup<ForwardLabel> group : groups) {
+					group.setMembers = new int[group.memberIndices.cardinality()];
+					int pos = 0;
+					for (int i = group.memberIndices.nextSetBit(0); i >= 0; i = group.memberIndices.nextSetBit(i + 1)) {
+						group.setMembers[pos++] = i;
+					}
+				}
+			}
+			setMembersPrepared = true;
 		}
 
 		/** 只扫描静态组一次；紧凑下标包括所有成员，不限于包络当前贡献者。 */
@@ -8742,6 +8767,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final TracedJoinEnvelope<L> envelope = new TracedJoinEnvelope<L>();
 		final ArrayList<L> labels = new ArrayList<L>();
 		final BitSet memberIndices = new BitSet();
+		int[] setMembers;
 		NgJoinBitmapComparison.Group comparisonMembers;
 		double minReducedCost = Utility.big_M;
 

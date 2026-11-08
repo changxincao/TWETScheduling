@@ -33,7 +33,8 @@ public final class NgDssrJoinPrefilterCacheTest {
     public static void main(String[] args) throws Exception {
         boolean baseline = args.length == 1 && "--baseline".equals(args[0]);
         testMasksAndReuse(!baseline);
-        if (Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")) testRealGroupMembers();
+        if (Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")
+                || Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapUseSet")) testRealGroupMembers();
         if (!baseline) {
             require(Arrays.stream(INDEX.getDeclaredFields()).noneMatch(f -> f.getName().equals("pruneByGroup")),
                     "unused group-pair cache must not be retained");
@@ -174,6 +175,16 @@ public final class NgDssrJoinPrefilterCacheTest {
         var diagnostic = new NgJoinBitmapComparison();
         var prepared = diagnostic.prepare(members);
         require(Arrays.equals(prepared.members, new int[] {7, 65}), "all original candidate indices, not envelope sources");
+        Constructor<?> indexConstructor = INDEX.getDeclaredConstructor(int.class); indexConstructor.setAccessible(true);
+        Object index = indexConstructor.newInstance(8);
+        var terminals = (ArrayList<ArrayList<Object>>) field(index, "forwardByTerminal");
+        terminals.set(1, new ArrayList<>(Arrays.asList(group)));
+        Method prepareSet = INDEX.getDeclaredMethod("prepareSetMembers"); prepareSet.setAccessible(true);
+        prepareSet.invoke(index);
+        int[] setMembers = (int[]) field(group, "setMembers");
+        require(Arrays.equals(setMembers, prepared.members), "production set indices include non-envelope members");
+        prepareSet.invoke(index);
+        require(setMembers == field(group, "setMembers"), "set indices prepared once per join");
     }
 
     /** 固定时间切分，避免删除缓存导致的耗时变化干扰probe反馈，比较真实列与证书。 */

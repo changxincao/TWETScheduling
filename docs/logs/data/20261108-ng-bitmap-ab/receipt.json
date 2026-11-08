@@ -1,0 +1,87 @@
+{
+  "sourceCommit": "caecd7db",
+  "remote": "D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-join-bitmap-ab-caecd7db",
+  "parallel": 6,
+  "heapGiB": 4,
+  "cplexThreads": 1,
+  "nominalSeconds": 600,
+  "maxNodes": 1,
+  "diagnostic": "allOR/allSet; A only feeds real join",
+  "phaseTiming": false,
+  "solverJarSha256": "ed774ae39b15995faee88aac36adda5ca795ac62e104fc4271f2229e5b36a63c",
+  "sourceZipSha256": "c9d595b945c8a0025f16fa866ebe84ab01ce3361434f0cb83aa903b2499648a4",
+  "cases": [
+    {
+      "runId": "bitmap-n050-set02-family-high-wide-m4",
+      "n": 50,
+      "m": 4,
+      "kind": "family",
+      "scale": "high",
+      "window": "wide",
+      "sourceInput": "experiment-suite\\formal\\instances\\data\\n050-set02\\family\\high-heterogeneous\\wide\\m4.dat",
+      "sourceSeed": ".codex-tmp\\ng-fixing-cutset-le50-20260913\\payload\\work1\\experiments\\20260913-ng-fixing-cutset-le50\\seeds\\n050-set02-m4-family-high-n20-wwide.seed",
+      "inputSha256": "dafdaa866fa4097520a69f850029443baed4e8f8dbd4e28c70ba7dc18963084c",
+      "seedSha256": "696e3c026746e56d37fc2e9eead0a1c491dfed82e55ff2250240fe6e6c5ce679"
+    },
+    {
+      "runId": "bitmap-n040-set01-random-base-wide-m4",
+      "n": 40,
+      "m": 4,
+      "kind": "random",
+      "scale": "base",
+      "window": "wide",
+      "sourceInput": "experiment-suite\\formal\\instances\\data\\n040-set01\\random\\base\\wide\\m4.dat",
+      "sourceSeed": ".codex-tmp\\ng-fixing-cutset-le50-20260913\\payload\\work1\\experiments\\20260913-ng-fixing-cutset-le50\\seeds\\n040-set01-m4-random-base-n1-wwide.seed",
+      "inputSha256": "047d3b87c3aae372346b5042ed2afe867c89d50b8a7d96aa05ee079490a67f14",
+      "seedSha256": "74e06d247f4673a56dd18b700bdc352bbd7480aabd8d3658ed2f99555e154f23"
+    },
+    {
+      "runId": "bitmap-n040-set04-family-base-wide-m2",
+      "n": 40,
+      "m": 2,
+      "kind": "family",
+      "scale": "base",
+      "window": "wide",
+      "sourceInput": "experiment-suite\\formal\\instances\\data\\n040-set04\\family\\base\\wide\\m2.dat",
+      "sourceSeed": "experiment-suite\\formal\\seeds\\20260902-cluster-f40s04-wide-m2.seed",
+      "inputSha256": "db1f804bdf0694f5d0260bbbc77a639e7641b0305d7e4684382b69994c33bdf1",
+      "seedSha256": "ff016d357a1e1bbac27b2a948e8c9e612a3a8a0914e661ce7a37d0f008c778a4"
+    },
+    {
+      "runId": "bitmap-n040-set01-random-high-wide-m4",
+      "n": 40,
+      "m": 4,
+      "kind": "random",
+      "scale": "high",
+      "window": "wide",
+      "sourceInput": "experiment-suite\\formal\\instances\\data\\n040-set01\\random\\high-heterogeneous\\wide\\m4.dat",
+      "sourceSeed": ".codex-tmp\\ng-fixing-cutset-le50-20260913\\payload\\work1\\experiments\\20260913-ng-fixing-cutset-le50\\seeds\\n040-set01-m4-random-high-n20-wwide.seed",
+      "inputSha256": "828faf0345b17b1069c8b4c2842545027ccc5fef899db1f96b30986e75d1e773",
+      "seedSha256": "d0686fd23192935c8441b24356160b0e1af1f819d20893120d205be4bbae6232"
+    },
+    {
+      "runId": "bitmap-n040-set02-family-high-wide-m4",
+      "n": 40,
+      "m": 4,
+      "kind": "family",
+      "scale": "high",
+      "window": "wide",
+      "sourceInput": "experiment-suite\\formal\\instances\\data\\n040-set02\\family\\high-heterogeneous\\wide\\m4.dat",
+      "sourceSeed": ".codex-tmp\\ng-fixing-cutset-le50-20260913\\payload\\work1\\experiments\\20260913-ng-fixing-cutset-le50\\seeds\\n040-set02-m4-family-high-n20-wwide.seed",
+      "inputSha256": "0a1219e9c09f1d942b9fb90df5729d24519031a392aafe87cd891a3659dc2105",
+      "seedSha256": "10e4bda8d7c295592c6b2925b851dda21f04352fb9fc420185ebc0f03c76e520"
+    },
+    {
+      "runId": "bitmap-n050-set01-random-high-wide-m4",
+      "n": 50,
+      "m": 4,
+      "kind": "random",
+      "scale": "high",
+      "window": "wide",
+      "sourceInput": "experiment-suite\\formal\\instances\\data\\n050-set01\\random\\high-heterogeneous\\wide\\m4.dat",
+      "sourceSeed": ".codex-tmp\\ng-fixing-cutset-le50-20260913\\payload\\work1\\experiments\\20260913-ng-fixing-cutset-le50\\seeds\\n050-set01-m4-random-high-n20-wwide.seed",
+      "inputSha256": "367f720dd7b83fac28bf5c510d6bcd454c3531d99c1a87911da415d7816ebd28",
+      "seedSha256": "773ee05184f8df5ae21df72d1d1a051e80ce94e6902cf1f95f52e51e300c8b20"
+    }
+  ]
+}

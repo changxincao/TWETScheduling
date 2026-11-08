@@ -1,0 +1,30 @@
+{
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "remoteDirectory": "D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-join-bitmap-ab-caecd7db",
+  "sourceCommit": "caecd7dbe181f639d1a264501ac54f23a97ef2ce",
+  "startedAt": "2026-11-08T19:06:47+08:00",
+  "detachedVerifiedAt": "2026-11-08T19:08:27+08:00",
+  "lastVerifiedAt": "2026-11-08T19:12:04+08:00",
+  "parallel": 6,
+  "solverHeapGiB": 4,
+  "cplexThreads": 1,
+  "maxNodes": 1,
+  "nominalSeconds": 600,
+  "initialSolverPids": [
+    6404,
+    11776,
+    8604,
+    2736,
+    10292,
+    576
+  ],
+  "lastReturned": 5,
+  "lastRunning": 1,
+  "originalSolverPidPreserved": 12704,
+  "originalSchedulerPidPreserved": 8268,
+  "assetHashesVerified": 21,
+  "localLaunchSshPidClosed": 54176,
+  "solverJarSha256": "ed774ae39b15995faee88aac36adda5ca795ac62e104fc4271f2229e5b36a63c",
+  "scope": "diagnostic only, not formal solve-time comparison"
+}

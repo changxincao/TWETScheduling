@@ -272,3 +272,15 @@ reachable在当前buildForward/BackwardChildReachability中包含由frontier时�
 Java21 focused编译通过；独立成员并集对照2560批次及分档双序、跨64位字、高位稀疏、空mask和long计数检查通过。原cache回归在关闭、开启、与原逐组phase timing同开三种模式下，与修改前baseline的mask、四种固定dual下有序列cost/RC摘要SHA及证书完全一致；组内复用和释放后重建保持不变。真实建组测试特意保留一条不贡献包络的较高函数label，确认它仍在紧凑成员索引中。端点边界、1972项traced/Phase-I及1081项历史端点检查通过。独立只读审查未发现生产决策或缓存语义变化，发现的测试反射字段错误已修为检查segments来源并重新通过；不把这一fixture错误当生产缺陷。
 
 准备部署到DESKTOP-06K8JI8（100.68.243.112）允许根目录下的独立实验子目录，六并发、每JVM 4GiB、CPLEX一线程，每例600秒名义预算/最多1节点；这是join组件采样而非完整树性能比较。该主机当前jcmd报告约128GiB物理内存、约100GiB空闲，原长join PID12704及scheduler8268仍在，明确保留不停止。六例拟为family的n50/set02/high/wide/m4、n40/set04/base/wide/m2、n40/set02/high/wide/m4，以及random的n40/set01/base/wide/m4、n40/set01/high/wide/m4、n50/set01/high/wide/m4；输入和seed沿用已有对应文件，部署时逐项hash核对。启动与断开SSH后的验收另记，不能把本节准备安排当作已经启动。
+
+## 24. 06主机六例已启动及断开验收
+
+2026-11-08 19:06:47（北京时间）六例在DESKTOP-06K8JI8（100.68.243.112）独立目录D:/ccx_work/考虑交付的机器调度/work1/experiments/20261108-ng-join-bitmap-ab-caecd7db并行启动。源码为caecd7db，全新release21构建JAR SHA-256为ed774ae39b15995faee88aac36adda5ca795ac62e104fc4271f2229e5b36a63c；上传后21项静态资产hash、六例n/m/无外包口径、seed指纹均验收通过，scan-only确认为6项NG_DSSR、无依赖、无已有SUCCESS。首次传输只漏建assets子目录，随后只补该目录和缺失文件，未重传覆盖已有结果；上述完整hash验收在补齐后执行。
+
+每个JVM4GiB、ActiveProcessorCount=2、GC线程1、CPLEX1线程；开启全OR/全set同状态诊断，原逐组phase timing未开启。family为Cluster→Arc，random为Arc，CutSet与SuccessorSet关闭；原profile其余参数不变，TI借鉴fixing深度2147483647。每例600秒名义预算、最多1节点，根节点内的强分支试探/修复仍保留。六个实际solver PID为6404、11776、8604、2736、10292、576；较小例子在首次独立查询前已结束，不能要求当时仍恰有六个活进程才承认启动。
+
+按SOP只启动worker一次，确认状态后精确关闭本机启动SSH PID54176；19:08:27独立查询仍有本批1个scheduler、2个solver，其余4项SUCCEEDED。19:12:04再查为5项SUCCEEDED、1项运行（n40/set04/family/base/wide/m2，PID8604）；原长join solver12704/scheduler8268均保留，21项资产仍通过。SUCCEEDED仅表示本次诊断正常返回，不等于整棵B&P树已最优。运行flags已核对新属性和MaxHeapSize=4294967296；没有启动六个本地求解JVM，也未操作另两台正式批次。
+
+首份快照显示：n50/set02/family/high/wide/m4已有199轮完整诊断，116778716次实际合并，OR累计2349.762ms、set1554.679ms，成员数组准备63.230ms，静态平均每组7.03个label、实际合并加权平均4.96个；该输入为此前诊断F4系列，不能混入当前F3主线。n40/set02/family/high/wide/m4累计OR15.801ms、set19.096ms；n40/set04/base/wide/m2尚未结束，快照181轮为OR199.528ms、set692.050ms。三个random的聚合总量都很小（OR分别约0.028/0.058/0.322ms），其时间比不足以选择稳定分界。初步支持方法胜负依赖组结构，不支持全量set或固定8阈值；尚未结束的结果不冒充最终比较。
+
+小型验收证据、代码/数据/seed追踪表见data/20261108-ng-bitmap-ab；完整诊断stdout在远端各runs目录，本地工作快照在.codex-tmp/ng-bitmap-ab-20261108。summarize-ng-bitmap-ab-20261108.py输出每轮、每例、q×k和W分档CSV，并核对各档次数/sumK/sumW与原汇总一致；使用sumW/sumK时明确不是mean(W/k)，分档抽样时间不外推全量占比。后续最终状态另续记。

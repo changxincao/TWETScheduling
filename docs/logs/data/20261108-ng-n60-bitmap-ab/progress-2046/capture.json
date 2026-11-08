@@ -1,0 +1,16 @@
+{
+  "auditCheckedAt": "2026-11-08T20:46:50.3315992+08:00",
+  "stdoutSnapshotCapturedAtUtc": "2026-11-08T12:47:11.4152548Z",
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "state": "RUNNING",
+  "completedDiagnosticRounds": 166,
+  "pricingCall": 9,
+  "dssrRoundInProgress": 23,
+  "phase": "forward.progress",
+  "lastForwardPops": 1200000,
+  "rootNode": 1,
+  "oldSolverPidPreserved": 12704,
+  "newSolverPid": 11072,
+  "note": "completed-round OR/set timing only; no whole-join or solver speedup inferred; no remote changes"
+}

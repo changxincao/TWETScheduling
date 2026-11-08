@@ -1,0 +1,7 @@
+runId=pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a
+state=RUNNING
+updatedAt=2026-11-08T11:38:19.100292Z
+mainClass=Common.formal.FormalExperimentRunner
+outputDir=D:\ccx_work\考虑交付的机器调度\work1\experiments\20261108-ng-n60-join-bitmap-ab-caecd7db\runs\pricing-n060-set02-m3-family-high-wwide-f3-ng_dssr-mainline-a
+pid=11072
+note=child JVM running

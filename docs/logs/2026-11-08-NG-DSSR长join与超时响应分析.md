@@ -393,3 +393,5 @@ JVM仍24GiB、CPLEX1线程，不沿用六例中的ActiveProcessorCount=2或GC线
 启动验收工具首次用严格UTF-8读取活stdout时发生MalformedInputException，只读工具退出，四项solver并未报错或受影响。将该工具的新增扫描改为与原扫描相同的容错解码，只抽取ASCII策略/计时行；当前进程已使用原tools.jar，因此不覆盖它，另置438c9b8c2726260776697f2f264e434ba8d6bc4048aa879d2b903388add966bc的audit-live.jar，并备份原audit.cmd后令验收入口优先使用该独立只读类。solver和wrapper未改、未重启，最终静态hash清单更新为38项。后续查询直接使用本目录audit.cmd，不再调用旧严格解码类。
 
 本地data/20261108-ng-join-pure-set保存完整manifest、7组14项数据/seed追踪、JAR/资产hash、实际四进程属性、启动及断开快照和回归小日志；远端startup-record.json同样落盘。正式策略默认仍为OR，本批为独立实验，未把纯set提升为正式默认；长join超时响应缺口仍未改。此时验证范围为正确启动、实际模式和早期推进，最终总时间、join分解、最优数量与gap待完成后比较。
+
+23:58:15按用户要求再次独立只读复核：38项静态hash全部一致，1个scheduler/4个solver和4个唯一runId，均在本实验目录；四份实际system_properties为2项UseSet=true/2项false，全部bitmapCompare=false、joinPhaseTiming=true。四份run.properties再次确认v8、CPLEX1、Cluster开/CutSet关、全节点fixing深度2147483647，实际seed指纹与对应资产一致。m3的SET/OR已完成28/27轮join计时，m4的OR/SET为95/111轮且均已进入节点2，证明不是误用根节点上限；四份stderr均未发现Exception/OOM/fatal error。没有重新启动、改配置或写入远端；证据以recheck-*保存在同一data目录。

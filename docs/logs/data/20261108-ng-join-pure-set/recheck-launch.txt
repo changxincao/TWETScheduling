@@ -1,0 +1,68 @@
+TIME 2026-11-08T23:58:15.784122400+08:00
+HOST DESKTOP-06K8JI8 memory=137112563712 free=115824082944
+ASSETS_OK 38
+CASE join-n060-set02-m3-family-high-wwide-f3-set n=60 m=3 H=125394.0 seed=18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4
+STATUS join-n060-set02-m3-family-high-wwide-f3-set runId=join-n060-set02-m3-family-high-wwide-f3-set
+ state=RUNNING
+ updatedAt=2026-11-08T15:51:55.518521600Z
+ mainClass=NgJoinSetExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-pure-set-83861aeb\runs\join-n060-set02-m3-family-high-wwide-f3-set
+ pid=6932
+ note=child JVM running
+ 
+DIAGNOSTIC join-n060-set02-m3-family-high-wwide-f3-set rounds=0
+STRATEGY join-n060-set02-m3-family-high-wwide-f3-set [NG join bitmap strategy] mode=SET comparison=false phaseTiming=true
+JOIN_TIMING join-n060-set02-m3-family-high-wwide-f3-set rounds=28 [NG join timing] node=1 pricingCall=2 nodePricingCall=2 repair=false dssrRound=12 totalMs=1067.382900 boundMs=286.612300 bitmapMs=30.835700 remainingLabelsMs=543.814100 prefilterOtherMs=34.507300 otherMs=171.613500 functionWithinBoundMs=260.292300 buildWithinOtherMs=108.516000 groupChecks=332454 groupsPruned=239804 functionCalls=147736 fwGroups=759 bwGroups=753
+CASE join-n060-set02-m3-family-high-wwide-f3-or n=60 m=3 H=125394.0 seed=18c2016cd56dcc40bf638b78ab134e2686c79f6cdb6719eedd180ad8c64c22f4
+STATUS join-n060-set02-m3-family-high-wwide-f3-or runId=join-n060-set02-m3-family-high-wwide-f3-or
+ state=RUNNING
+ updatedAt=2026-11-08T15:51:55.534542800Z
+ mainClass=NgJoinSetExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-pure-set-83861aeb\runs\join-n060-set02-m3-family-high-wwide-f3-or
+ pid=7892
+ note=child JVM running
+ 
+DIAGNOSTIC join-n060-set02-m3-family-high-wwide-f3-or rounds=0
+STRATEGY join-n060-set02-m3-family-high-wwide-f3-or [NG join bitmap strategy] mode=OR comparison=false phaseTiming=true
+JOIN_TIMING join-n060-set02-m3-family-high-wwide-f3-or rounds=27 [NG join timing] node=1 pricingCall=2 nodePricingCall=2 repair=false dssrRound=12 totalMs=1116.262300 boundMs=313.700300 bitmapMs=11.067600 remainingLabelsMs=562.373500 prefilterOtherMs=34.159600 otherMs=194.961300 functionWithinBoundMs=286.864300 buildWithinOtherMs=138.715000 groupChecks=352733 groupsPruned=257197 functionCalls=160743 fwGroups=800 bwGroups=736
+CASE join-n060-set02-m4-family-high-wwide-f3-or n=60 m=4 H=125394.0 seed=111c2a1a08dae90a54462ee4fae4038ab2ac63631f85d60bb43cd316ca12640c
+STATUS join-n060-set02-m4-family-high-wwide-f3-or runId=join-n060-set02-m4-family-high-wwide-f3-or
+ state=RUNNING
+ updatedAt=2026-11-08T15:51:55.502007400Z
+ mainClass=NgJoinSetExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-pure-set-83861aeb\runs\join-n060-set02-m4-family-high-wwide-f3-or
+ pid=14412
+ note=child JVM running
+ 
+DIAGNOSTIC join-n060-set02-m4-family-high-wwide-f3-or rounds=0
+STRATEGY join-n060-set02-m4-family-high-wwide-f3-or [NG join bitmap strategy] mode=OR comparison=false phaseTiming=true
+JOIN_TIMING join-n060-set02-m4-family-high-wwide-f3-or rounds=95 [NG join timing] node=2 pricingCall=45 nodePricingCall=12 repair=false dssrRound=7 totalMs=1065.376800 boundMs=274.234000 bitmapMs=17.943800 remainingLabelsMs=602.461300 prefilterOtherMs=39.158700 otherMs=131.579000 functionWithinBoundMs=244.621300 buildWithinOtherMs=76.353200 groupChecks=473794 groupsPruned=383658 functionCalls=158121 fwGroups=1116 bwGroups=1007
+CASE join-n060-set02-m4-family-high-wwide-f3-set n=60 m=4 H=125394.0 seed=111c2a1a08dae90a54462ee4fae4038ab2ac63631f85d60bb43cd316ca12640c
+STATUS join-n060-set02-m4-family-high-wwide-f3-set runId=join-n060-set02-m4-family-high-wwide-f3-set
+ state=RUNNING
+ updatedAt=2026-11-08T15:51:55.488750900Z
+ mainClass=NgJoinSetExperimentRunner
+ outputDir=D:\ccx_work\���ǽ����Ļ�������\work1\experiments\20261108-ng-join-pure-set-83861aeb\runs\join-n060-set02-m4-family-high-wwide-f3-set
+ pid=5268
+ note=child JVM running
+ 
+DIAGNOSTIC join-n060-set02-m4-family-high-wwide-f3-set rounds=0
+STRATEGY join-n060-set02-m4-family-high-wwide-f3-set [NG join bitmap strategy] mode=SET comparison=false phaseTiming=true
+JOIN_TIMING join-n060-set02-m4-family-high-wwide-f3-set rounds=111 [NG join timing] node=2 pricingCall=49 nodePricingCall=11 repair=false dssrRound=3 totalMs=183.727900 boundMs=35.122500 bitmapMs=2.027600 remainingLabelsMs=89.842800 prefilterOtherMs=4.583100 otherMs=52.151900 functionWithinBoundMs=31.557600 buildWithinOtherMs=37.042000 groupChecks=39907 groupsPruned=25779 functionCalls=17744 fwGroups=498 bwGroups=416
+CASE join-n060-set03-m4-family-high-wwide-f3-set n=60 m=4 H=129740.0 seed=9bc26ec33e180f534072a11d47924c842403baa58da81caf885c5207afa43b55
+CASE join-n060-set03-m4-family-high-wwide-f3-or n=60 m=4 H=129740.0 seed=9bc26ec33e180f534072a11d47924c842403baa58da81caf885c5207afa43b55
+CASE join-n060-set01-m3-family-high-wwide-f3-or n=60 m=3 H=143056.0 seed=0523b710f4735d389226f4da6629357c8301c1c12e715db52c0da13dca715afc
+CASE join-n060-set01-m3-family-high-wwide-f3-set n=60 m=3 H=143056.0 seed=0523b710f4735d389226f4da6629357c8301c1c12e715db52c0da13dca715afc
+CASE join-n060-set03-m3-family-high-wwide-f3-set n=60 m=3 H=129740.0 seed=7a370e2b31ef15a80e573aacc61780d3cfdf94b93489589e0c6b8521f3d78259
+CASE join-n060-set03-m3-family-high-wwide-f3-or n=60 m=3 H=129740.0 seed=7a370e2b31ef15a80e573aacc61780d3cfdf94b93489589e0c6b8521f3d78259
+CASE join-n060-set01-m2-family-high-wwide-f3-or n=60 m=2 H=143056.0 seed=3d9b7039ac730dae0d8474426f617b44df51154ea56436ca065bb35a2f0a5c36
+CASE join-n060-set01-m2-family-high-wwide-f3-set n=60 m=2 H=143056.0 seed=3d9b7039ac730dae0d8474426f617b44df51154ea56436ca065bb35a2f0a5c36
+CASE join-n060-set02-m2-family-high-wwide-f3-set n=60 m=2 H=125394.0 seed=e2ff12295e2a14fe24bf3547c68a6a5dc1d80f2fa4a024e669edf655c11832a3
+CASE join-n060-set02-m2-family-high-wwide-f3-or n=60 m=2 H=125394.0 seed=e2ff12295e2a14fe24bf3547c68a6a5dc1d80f2fa4a024e669edf655c11832a3
+BATCH SOLVE_RUNNING
+16996 jdk.jcmd/sun.tools.jcmd.JCmd -l
+5268 NgJoinSetExperimentRunner SET --action=solve --runId=join-n060-set02-m4-family-high-wwide-f3-set --instance=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m4-family-high-wwide-f3-set.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/runs/join-n060-set02-m4-family-high-wwide-f3-set --seedFile=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m4-family-high-wwide-f3-set.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647
+6932 NgJoinSetExperimentRunner SET --action=solve --runId=join-n060-set02-m3-family-high-wwide-f3-set --instance=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m3-family-high-wwide-f3-set.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/runs/join-n060-set02-m3-family-high-wwide-f3-set --seedFile=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m3-family-high-wwide-f3-set.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647
+7892 NgJoinSetExperimentRunner OR --action=solve --runId=join-n060-set02-m3-family-high-wwide-f3-or --instance=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m3-family-high-wwide-f3-or.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/runs/join-n060-set02-m3-family-high-wwide-f3-or --seedFile=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m3-family-high-wwide-f3-or.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647
+14412 NgJoinSetExperimentRunner OR --action=solve --runId=join-n060-set02-m4-family-high-wwide-f3-or --instance=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m4-family-high-wwide-f3-or.dat --algorithm=NG_DSSR --outputDir=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/runs/join-n060-set02-m4-family-high-wwide-f3-or --seedFile=D:/ccx_work/????????????????/work1/experiments/20261108-ng-join-pure-set-83861aeb/assets/join-n060-set02-m4-family-high-wwide-f3-or.seed --timeLimitSeconds=10800 --maxNodes=100000 --enableClusterBranching=true --structuredArcStrictTypePriority=true --enableCutSetBranching=false --cutSetSupernodeSeeds=false --clusterMstTheta=0.5 --clusterTemporalWeight=0.0 --timeIndexedCompletionBoundNodeArcFixing=true --timeIndexedCompletionBoundNodeArcFixingMaxDepth=2147483647
+15660 HEU.ExperimentBatchScheduler D:\ccx_work\????????????????\work1\experiments\20261108-ng-join-pure-set-83861aeb\solve.tsv 4

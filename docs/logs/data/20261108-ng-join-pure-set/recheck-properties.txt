@@ -1,0 +1,16 @@
+6932:
+twet.bpc.ngDssrJoinBitmapCompare=false
+twet.bpc.ngDssrJoinBitmapUseSet=true
+twet.bpc.ngDssrJoinPhaseTiming=true
+7892:
+twet.bpc.ngDssrJoinBitmapCompare=false
+twet.bpc.ngDssrJoinBitmapUseSet=false
+twet.bpc.ngDssrJoinPhaseTiming=true
+14412:
+twet.bpc.ngDssrJoinBitmapCompare=false
+twet.bpc.ngDssrJoinBitmapUseSet=false
+twet.bpc.ngDssrJoinPhaseTiming=true
+5268:
+twet.bpc.ngDssrJoinBitmapCompare=false
+twet.bpc.ngDssrJoinBitmapUseSet=true
+twet.bpc.ngDssrJoinPhaseTiming=true

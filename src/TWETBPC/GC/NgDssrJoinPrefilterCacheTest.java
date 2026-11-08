@@ -33,6 +33,7 @@ public final class NgDssrJoinPrefilterCacheTest {
     public static void main(String[] args) throws Exception {
         boolean baseline = args.length == 1 && "--baseline".equals(args[0]);
         testMasksAndReuse(!baseline);
+        if (Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")) testRealGroupMembers();
         if (!baseline) {
             require(Arrays.stream(INDEX.getDeclaredFields()).noneMatch(f -> f.getName().equals("pruneByGroup")),
                     "unused group-pair cache must not be retained");
@@ -77,6 +78,10 @@ public final class NgDssrJoinPrefilterCacheTest {
         BitSet first = (BitSet) prune.invoke(index, 1, candidates, labelA, lp, owner);
         require(first.equals(expected), "mixed prune/keep results and multiword member indices");
         require(counter(owner) == 4, "each forward group must be evaluated once");
+        NgJoinBitmapComparison comparison = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")
+                ? (NgJoinBitmapComparison) field(index, "bitmapComparison") : null;
+        if (comparison != null) require(comparison.units == 1 && comparison.merges == 3
+                && comparison.sumK == 6 && comparison.sumW == 5, "diagnostic uses actual pruned groups once");
         long boundNanos = checkRelease ? (Long) field(owner, "joinPrefilterBoundNanos") : 0;
         long bitmapNanos = checkRelease ? (Long) field(owner, "joinPrefilterBitmapNanos") : 0;
         boolean timed = Boolean.getBoolean("twet.bpc.ngDssrJoinPhaseTiming");
@@ -88,6 +93,7 @@ public final class NgDssrJoinPrefilterCacheTest {
         }
         BitSet repeated = (BitSet) prune.invoke(index, 1, candidates, labelB, lp, owner);
         require(first == repeated && counter(owner) == 4, "same backward group must reuse the existing BitSet");
+        require(comparison == null || comparison.units == 1, "cache hit must not repeat A/B aggregation");
         require(!checkRelease || (Long) field(owner, "joinPrefilterBoundNanos") == boundNanos
                 && (Long) field(owner, "joinPrefilterBitmapNanos") == bitmapNanos,
                 "cache reuse must not repeat timed group checks or bitmap unions");
@@ -141,6 +147,33 @@ public final class NgDssrJoinPrefilterCacheTest {
                 require((Long) field(owner, name) == 0, "per-round timing reset: " + name);
             }
         }
+    }
+
+    /** 即使某label完全不贡献包络，紧凑索引也必须保留它的原候选位置。 */
+    @SuppressWarnings("unchecked")
+    private static void testRealGroupMembers() throws Exception {
+        var owner = new GCNGBBStyleBidirectionalNgDssr(data(), config());
+        set(owner, "pricingHorizon", 100.0);
+        set(owner, "tMid", 50.0);
+        Constructor<?> c = nested("ForwardLabel").getDeclaredConstructors()[0]; c.setAccessible(true);
+        Object low = c.newInstance(1, 1, null, bits(), bits(), bits(), bits(1),
+                constant(0, 50, 0), null, new byte[0], 0.0, false);
+        Object high = c.newInstance(2, 1, null, bits(), bits(), bits(), bits(1),
+                constant(0, 50, 10), null, new byte[0], 0.0, false);
+        Method add = OWNER.getDeclaredMethod("addForwardJoinEnvelopeGroup", java.util.HashMap.class,
+                int.class, nested("ForwardLabel")); add.setAccessible(true);
+        var map = new java.util.HashMap<Object, Object>();
+        Object group = add.invoke(owner, map, 1, low);
+        require(add.invoke(owner, map, 1, high) == group, "same terminal/memory must share group");
+        require(((ArrayList<?>) field(group, "labels")).size() == 2, "all original members retained");
+        Object envelope = field(group, "envelope");
+        for (Object segment : (ArrayList<?>) field(envelope, "segments")) {
+            require(field(segment, "source") == low, "higher function must not provide envelope minimum");
+        }
+        BitSet members = (BitSet) field(group, "memberIndices"); members.set(7); members.set(65);
+        var diagnostic = new NgJoinBitmapComparison();
+        var prepared = diagnostic.prepare(members);
+        require(Arrays.equals(prepared.members, new int[] {7, 65}), "all original candidate indices, not envelope sources");
     }
 
     /** 固定时间切分，避免删除缓存导致的耗时变化干扰probe反馈，比较真实列与证书。 */

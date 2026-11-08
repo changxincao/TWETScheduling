@@ -76,6 +76,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			System.getProperty("twet.bpc.ngDssrJoinPrefilterSkipRuns", "true"));
 	/** 仅诊断时逐组读时钟；默认关闭，不改变组预筛、位图或候选遍历。 */
 	private static final boolean JOIN_PHASE_TIMING = Boolean.getBoolean("twet.bpc.ngDssrJoinPhaseTiming");
+	/** 同一次join只重复位图聚合；默认关闭，B不进入真实候选流程。 */
+	private static final boolean JOIN_BITMAP_COMPARISON = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare");
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}
@@ -4454,6 +4456,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private void joinAllForwardTerminalGroupsWithEnvelopePrefilter(LP lp) {
 		long buildStart = System.nanoTime();
 		JoinEnvelopeIndex index = buildJoinEnvelopeIndex();
+		if (index.bitmapComparison != null) index.prepareBitmapComparison();
 		joinEnvelopeBuildNanos += System.nanoTime() - buildStart;
 		long joinStart = System.nanoTime();
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0);
@@ -4470,6 +4473,10 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			index.releaseTerminalPrunedIndices(lastJob);
 		}
 		joinEnvelopeJoinNanos += System.nanoTime() - joinStart;
+		if (index.bitmapComparison != null) {
+			index.bitmapComparison.print(System.out, "node=" + lp.getNode().id
+					+ diagnosticPricingHeartbeatContext() + " dssrRound=" + ngDssrRound);
+		}
 	}
 
 	private boolean canPruneJoinEnvelopeGroupPair(int lastJob, JoinEnvelopeGroup<ForwardLabel> forward,
@@ -8627,6 +8634,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, BitSet[]> prunedIndicesByBackwardGroup =
 				new IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, BitSet[]>();
 		final int terminalCount;
+		final NgJoinBitmapComparison bitmapComparison = JOIN_BITMAP_COMPARISON ? new NgJoinBitmapComparison() : null;
+		private boolean bitmapComparisonPrepared;
 
 		JoinEnvelopeIndex(int size) {
 			terminalCount = size;
@@ -8653,6 +8662,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (cachedIndices != null) {
 				return cachedIndices;
 			}
+			if (bitmapComparison != null) {
+				prepareBitmapComparison();
+				ArrayList<NgJoinBitmapComparison.Group> prunedGroups = new ArrayList<>();
+				ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups = forwardByTerminal.get(lastJob);
+				if (groups != null) {
+					for (JoinEnvelopeGroup<ForwardLabel> group : groups) {
+						if (canPruneGroup(lastJob, group, backwardGroup, lp, owner)) {
+							prunedGroups.add(group.comparisonMembers);
+						}
+					}
+				}
+				BitSet compared = bitmapComparison.compare(candidates.size(), prunedGroups);
+				if (JOIN_PHASE_TIMING) owner.joinPrefilterBitmapNanos += bitmapComparison.lastOrNanos;
+				byTerminal[lastJob] = compared;
+				return compared;
+			}
 			BitSet pruned = new BitSet(candidates.size());
 			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups = forwardByTerminal.get(lastJob);
 			if (forwardGroups != null) {
@@ -8669,6 +8694,22 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			byTerminal[lastJob] = pruned;
 			return pruned;
+		}
+
+		/** 只扫描静态组一次；紧凑下标包括所有成员，不限于包络当前贡献者。 */
+		void prepareBitmapComparison() {
+			if (bitmapComparison == null || bitmapComparisonPrepared) return;
+			for (ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups : forwardByTerminal) {
+				if (groups == null) continue;
+				for (JoinEnvelopeGroup<ForwardLabel> group : groups) {
+					group.comparisonMembers = bitmapComparison.prepare(group.memberIndices);
+				}
+			}
+			for (ArrayList<JoinEnvelopeGroup<BackwardLabel>> groups : backwardByTerminal) {
+				if (groups == null) continue;
+				for (JoinEnvelopeGroup<BackwardLabel> group : groups) bitmapComparison.addBackwardGroup(group.labels.size());
+			}
+			bitmapComparisonPrepared = true;
 		}
 
 		/** terminal 单调处理；普通/单点后向和 sink 都结束后，只解除本终点的位图引用。 */
@@ -8701,6 +8742,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final TracedJoinEnvelope<L> envelope = new TracedJoinEnvelope<L>();
 		final ArrayList<L> labels = new ArrayList<L>();
 		final BitSet memberIndices = new BitSet();
+		NgJoinBitmapComparison.Group comparisonMembers;
 		double minReducedCost = Utility.big_M;
 
 		JoinEnvelopeGroup(int terminalJob, PackedBitSet ngMemorySet) {

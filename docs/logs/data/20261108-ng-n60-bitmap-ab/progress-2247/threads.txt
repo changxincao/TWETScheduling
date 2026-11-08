@@ -1,0 +1,149 @@
+11072:
+2026-11-08 22:48:16
+Full thread dump Java HotSpot(TM) 64-Bit Server VM (21.0.3+7-LTS-152 mixed mode, sharing):
+
+Threads class SMR info:
+_java_thread_list=0x000001353645e0d0, length=11, elements={
+0x00000134cd173460, 0x00000134ef64c0e0, 0x00000134ef64cc40, 0x00000134ef64fc80,
+0x00000134ef652d20, 0x00000134ef655a30, 0x00000134ef6548c0, 0x00000134ef65a7e0,
+0x00000134ef65b650, 0x00000134ef80aed0, 0x00000134ef811570
+}
+
+"main" #1 [6244] prio=5 os_prio=0 cpu=5782140.62ms elapsed=11397.49s tid=0x00000134cd173460 nid=6244 runnable  [0x0000002b495fd000]
+   java.lang.Thread.State: RUNNABLE
+	at java.util.BitSet.or(java.base@21.0.3/BitSet.java:951)
+	at TWETBPC.GC.NgJoinBitmapComparison.fillOr(NgJoinBitmapComparison.java:135)
+	at TWETBPC.GC.NgJoinBitmapComparison.measure(NgJoinBitmapComparison.java:129)
+	at TWETBPC.GC.NgJoinBitmapComparison.compare(NgJoinBitmapComparison.java:78)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssr$JoinEnvelopeIndex.prunedForwardIndices(GCNGBBStyleBidirectionalNgDssr.java:8676)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssr.joinForwardGroupWithBackward(GCNGBBStyleBidirectionalNgDssr.java:4861)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssr.joinForwardGroupToBackwardLabels(GCNGBBStyleBidirectionalNgDssr.java:4545)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssr.joinAllForwardTerminalGroupsWithEnvelopePrefilter(GCNGBBStyleBidirectionalNgDssr.java:4469)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssr.joinAllForwardTerminalGroups(GCNGBBStyleBidirectionalNgDssr.java:4428)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssr.solveRelaxedRound(GCNGBBStyleBidirectionalNgDssr.java:1542)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssr.solve(GCNGBBStyleBidirectionalNgDssr.java:1370)
+	at TWETBPC.GC.GCNGBBStyleBidirectionalNgDssrPricingEngine.price(GCNGBBStyleBidirectionalNgDssrPricingEngine.java:64)
+	at TWETBPC.LP.PC.generateColumnsFromEngine(PC.java:1486)
+	at TWETBPC.LP.PC.generateColumnsFromEngine(PC.java:1459)
+	at TWETBPC.LP.PC.generateColumnsFromEngine(PC.java:1452)
+	at TWETBPC.LP.PC.solvePricingLoopWithTrueDuals(PC.java:666)
+	at TWETBPC.LP.PC.solvePricingLoop(PC.java:645)
+	at TWETBPC.LP.PC.solve(PC.java:126)
+	at TWETBPC.LP.Tree.solve(Tree.java:158)
+	at TWETBPC.TWETBPCSolver.solve(TWETBPCSolver.java:33)
+	at Common.formal.FormalExperimentRunner.runSolver(FormalExperimentRunner.java:218)
+	at Common.formal.FormalExperimentRunner.main(FormalExperimentRunner.java:49)
+
+"Reference Handler" #9 [7320] daemon prio=10 os_prio=2 cpu=0.00ms elapsed=11397.47s tid=0x00000134ef64c0e0 nid=7320 waiting on condition  [0x0000002b49dff000]
+   java.lang.Thread.State: RUNNABLE
+	at java.lang.ref.Reference.waitForReferencePendingList(java.base@21.0.3/Native Method)
+	at java.lang.ref.Reference.processPendingReferences(java.base@21.0.3/Reference.java:246)
+	at java.lang.ref.Reference$ReferenceHandler.run(java.base@21.0.3/Reference.java:208)
+
+"Finalizer" #10 [4724] daemon prio=8 os_prio=1 cpu=0.00ms elapsed=11397.47s tid=0x00000134ef64cc40 nid=4724 in Object.wait()  [0x0000002b49eff000]
+   java.lang.Thread.State: WAITING (on object monitor)
+	at java.lang.Object.wait0(java.base@21.0.3/Native Method)
+	- waiting on <0x00000002035f1568> (a java.lang.ref.NativeReferenceQueue$Lock)
+	at java.lang.Object.wait(java.base@21.0.3/Object.java:366)
+	at java.lang.Object.wait(java.base@21.0.3/Object.java:339)
+	at java.lang.ref.NativeReferenceQueue.await(java.base@21.0.3/NativeReferenceQueue.java:48)
+	at java.lang.ref.ReferenceQueue.remove0(java.base@21.0.3/ReferenceQueue.java:158)
+	at java.lang.ref.NativeReferenceQueue.remove(java.base@21.0.3/NativeReferenceQueue.java:89)
+	- locked <0x00000002035f1568> (a java.lang.ref.NativeReferenceQueue$Lock)
+	at java.lang.ref.Finalizer$FinalizerThread.run(java.base@21.0.3/Finalizer.java:173)
+
+"Signal Dispatcher" #11 [12520] daemon prio=9 os_prio=2 cpu=0.00ms elapsed=11397.47s tid=0x00000134ef64fc80 nid=12520 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Attach Listener" #12 [1252] daemon prio=5 os_prio=2 cpu=0.00ms elapsed=11397.47s tid=0x00000134ef652d20 nid=1252 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Service Thread" #13 [18180] daemon prio=9 os_prio=0 cpu=0.00ms elapsed=11397.47s tid=0x00000134ef655a30 nid=18180 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Monitor Deflation Thread" #14 [6224] daemon prio=9 os_prio=0 cpu=93.75ms elapsed=11397.47s tid=0x00000134ef6548c0 nid=6224 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"C2 CompilerThread0" #15 [9596] daemon prio=9 os_prio=2 cpu=2984.38ms elapsed=11397.47s tid=0x00000134ef65a7e0 nid=9596 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+"C1 CompilerThread0" #23 [20328] daemon prio=9 os_prio=2 cpu=187.50ms elapsed=11397.47s tid=0x00000134ef65b650 nid=20328 waiting on condition  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+   No compile task
+
+"Notification Thread" #27 [10812] daemon prio=9 os_prio=0 cpu=0.00ms elapsed=11397.46s tid=0x00000134ef80aed0 nid=10812 runnable  [0x0000000000000000]
+   java.lang.Thread.State: RUNNABLE
+
+"Common-Cleaner" #28 [6820] daemon prio=8 os_prio=1 cpu=0.00ms elapsed=11397.46s tid=0x00000134ef811570 nid=6820 waiting on condition  [0x0000002b4a7fe000]
+   java.lang.Thread.State: TIMED_WAITING (parking)
+	at jdk.internal.misc.Unsafe.park(java.base@21.0.3/Native Method)
+	- parking to wait for  <0x000000020359dab0> (a java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject)
+	at java.util.concurrent.locks.LockSupport.parkNanos(java.base@21.0.3/LockSupport.java:269)
+	at java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(java.base@21.0.3/AbstractQueuedSynchronizer.java:1847)
+	at java.lang.ref.ReferenceQueue.await(java.base@21.0.3/ReferenceQueue.java:71)
+	at java.lang.ref.ReferenceQueue.remove0(java.base@21.0.3/ReferenceQueue.java:143)
+	at java.lang.ref.ReferenceQueue.remove(java.base@21.0.3/ReferenceQueue.java:218)
+	at jdk.internal.ref.CleanerImpl.run(java.base@21.0.3/CleanerImpl.java:140)
+	at java.lang.Thread.runWith(java.base@21.0.3/Thread.java:1596)
+	at java.lang.Thread.run(java.base@21.0.3/Thread.java:1583)
+	at jdk.internal.misc.InnocuousThread.run(java.base@21.0.3/InnocuousThread.java:186)
+
+"VM Thread" os_prio=2 cpu=93.75ms elapsed=11397.48s tid=0x00000134e61df520 nid=16892 runnable  
+
+"GC Thread#0" os_prio=2 cpu=22234.38ms elapsed=11397.49s tid=0x00000134e60b17f0 nid=6604 runnable  
+
+"GC Thread#1" os_prio=2 cpu=22515.62ms elapsed=11397.14s tid=0x00000135354c96f0 nid=17028 runnable  
+
+"GC Thread#2" os_prio=2 cpu=21656.25ms elapsed=11397.14s tid=0x00000135354c9a90 nid=10648 runnable  
+
+"GC Thread#3" os_prio=2 cpu=21562.50ms elapsed=11397.14s tid=0x00000135354ca240 nid=15024 runnable  
+
+"GC Thread#4" os_prio=2 cpu=21734.38ms elapsed=11397.14s tid=0x00000135354ca9f0 nid=16436 runnable  
+
+"GC Thread#5" os_prio=2 cpu=21625.00ms elapsed=11397.14s tid=0x00000135354cad90 nid=17196 runnable  
+
+"GC Thread#6" os_prio=2 cpu=22296.88ms elapsed=11397.14s tid=0x0000013535616620 nid=19148 runnable  
+
+"GC Thread#7" os_prio=2 cpu=22062.50ms elapsed=11397.14s tid=0x00000135356169c0 nid=396 runnable  
+
+"GC Thread#8" os_prio=2 cpu=22015.62ms elapsed=11397.13s tid=0x0000013535617170 nid=18808 runnable  
+
+"GC Thread#9" os_prio=2 cpu=22031.25ms elapsed=11397.13s tid=0x0000013535617d30 nid=2744 runnable  
+
+"GC Thread#10" os_prio=2 cpu=22609.38ms elapsed=11397.13s tid=0x0000013535619010 nid=17916 runnable  
+
+"GC Thread#11" os_prio=2 cpu=22078.12ms elapsed=11397.13s tid=0x00000135356193b0 nid=19864 runnable  
+
+"GC Thread#12" os_prio=2 cpu=22406.25ms elapsed=11397.13s tid=0x0000013535619e90 nid=20432 runnable  
+
+"GC Thread#13" os_prio=2 cpu=22468.75ms elapsed=11397.13s tid=0x0000013535618530 nid=20208 runnable  
+
+"GC Thread#14" os_prio=2 cpu=22593.75ms elapsed=11397.13s tid=0x0000013535619af0 nid=17900 runnable  
+
+"GC Thread#15" os_prio=2 cpu=22656.25ms elapsed=11397.13s tid=0x0000013535618c70 nid=20292 runnable  
+
+"GC Thread#16" os_prio=2 cpu=22203.12ms elapsed=11397.13s tid=0x00000135356188d0 nid=8052 runnable  
+
+"GC Thread#17" os_prio=2 cpu=22265.62ms elapsed=11397.13s tid=0x0000013535619750 nid=19620 runnable  
+
+"G1 Main Marker" os_prio=2 cpu=0.00ms elapsed=11397.49s tid=0x00000134cd1fe8d0 nid=19516 runnable  
+
+"G1 Conc#0" os_prio=2 cpu=53687.50ms elapsed=11397.49s tid=0x00000134cd200340 nid=14680 runnable  
+
+"G1 Conc#1" os_prio=2 cpu=61218.75ms elapsed=10393.08s tid=0x0000013535d2ff00 nid=4116 runnable  
+
+"G1 Conc#2" os_prio=2 cpu=61906.25ms elapsed=10393.08s tid=0x0000013535d302a0 nid=7084 runnable  
+
+"G1 Conc#3" os_prio=2 cpu=61875.00ms elapsed=10393.08s tid=0x0000013535d2f7c0 nid=19764 runnable  
+
+"G1 Conc#4" os_prio=2 cpu=53640.62ms elapsed=10393.08s tid=0x0000013535d2fb60 nid=7820 runnable  
+
+"G1 Refine#0" os_prio=2 cpu=453.12ms elapsed=11397.49s tid=0x00000134e61a9390 nid=15248 runnable  
+
+"G1 Service" os_prio=2 cpu=62.50ms elapsed=11397.49s tid=0x00000134e61a9cb0 nid=3964 runnable  
+
+"VM Periodic Task Thread" os_prio=2 cpu=343.75ms elapsed=11397.48s tid=0x00000134ef63aa00 nid=16924 waiting on condition  
+
+JNI global refs: 26, weak refs: 0
+

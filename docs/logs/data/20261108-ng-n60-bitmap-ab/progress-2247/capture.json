@@ -1,0 +1,19 @@
+{
+  "auditCheckedAt": "2026-11-08T22:47:47.9728569+08:00",
+  "stdoutSnapshotCapturedAtUtc": "2026-11-08T14:48:13.6385378Z",
+  "host": "DESKTOP-06K8JI8",
+  "address": "100.68.243.112",
+  "state": "RUNNING",
+  "completedDiagnosticRounds": 166,
+  "pricingCall": 9,
+  "dssrRoundInProgress": 23,
+  "phase": "join",
+  "lastForwardPops": 1793090,
+  "lastBackwardPops": 513039,
+  "threadSample": "RUNNABLE -> BitSet.or -> NgJoinBitmapComparison.fillOr",
+  "threadMainCpuMillis": 5782140.62,
+  "threadElapsedSeconds": 11397.49,
+  "newSolverPid": 11072,
+  "oldSolverPidPresent": 12704,
+  "note": "one stack sample, not a time-share estimate; current join has not returned; no new timing totals inferred; no remote changes"
+}

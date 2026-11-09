@@ -74,12 +74,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	/** 2026-07-16: group-envelope 已证明可剪时，按 BitSet 连续区间跳过，旧逐项扫描仅用于 A/B 回退。 */
 	private static final boolean JOIN_PREFILTER_SKIP_RUNS = Boolean.parseBoolean(
 			System.getProperty("twet.bpc.ngDssrJoinPrefilterSkipRuns", "true"));
-	/** 仅诊断时逐组读时钟；默认关闭，不改变组预筛、位图或候选遍历。 */
-	private static final boolean JOIN_PHASE_TIMING = Boolean.getBoolean("twet.bpc.ngDssrJoinPhaseTiming");
+	/** 2026-11-09: 默认记录join分项时间；仅增加阶段级计时，不改变组预筛、位图或候选遍历。 */
+	private static final boolean JOIN_PHASE_TIMING = Boolean.parseBoolean(
+			System.getProperty("twet.bpc.ngDssrJoinPhaseTiming", "true"));
 	/** 同一次join只重复位图聚合；默认关闭，B不进入真实候选流程。 */
 	private static final boolean JOIN_BITMAP_COMPARISON = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare");
-	/** 纯set实验只替换可剪组的位图聚合；默认仍OR，同状态双算诊断仍返回原OR。 */
-	private static final boolean JOIN_BITMAP_MEMBER_SET = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapUseSet");
+	/** 2026-11-09: 默认逐成员写入可剪位图，避免稀疏组反复OR整张BitSet；可显式关闭做旧OR对照。 */
+	private static final boolean JOIN_BITMAP_MEMBER_SET = Boolean.parseBoolean(
+			System.getProperty("twet.bpc.ngDssrJoinBitmapUseSet", "true"));
 	private enum LabelQueueOrdering {
 		REDUCED_COST, TIME, REACHABLE_SIZE
 	}

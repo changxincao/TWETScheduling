@@ -34,7 +34,7 @@ public final class NgDssrJoinPrefilterCacheTest {
         boolean baseline = args.length == 1 && "--baseline".equals(args[0]);
         testMasksAndReuse(!baseline);
         if (Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")
-                || Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapUseSet")) testRealGroupMembers();
+                || propertyWithDefault("twet.bpc.ngDssrJoinBitmapUseSet", true)) testRealGroupMembers();
         if (!baseline) {
             require(Arrays.stream(INDEX.getDeclaredFields()).noneMatch(f -> f.getName().equals("pruneByGroup")),
                     "unused group-pair cache must not be retained");
@@ -85,10 +85,10 @@ public final class NgDssrJoinPrefilterCacheTest {
                 && comparison.sumK == 6 && comparison.sumW == 5, "diagnostic uses actual pruned groups once");
         long boundNanos = checkRelease ? (Long) field(owner, "joinPrefilterBoundNanos") : 0;
         long bitmapNanos = checkRelease ? (Long) field(owner, "joinPrefilterBitmapNanos") : 0;
-        boolean timed = Boolean.getBoolean("twet.bpc.ngDssrJoinPhaseTiming");
+        boolean timed = propertyWithDefault("twet.bpc.ngDssrJoinPhaseTiming", true);
         if (checkRelease) {
             require(timed ? boundNanos > 0 && bitmapNanos > 0 : boundNanos == 0 && bitmapNanos == 0,
-                    "join phase timing must be explicitly enabled");
+                    "join phase timing must follow the resolved property value");
             require(timed == ((Long) field(owner, "joinPrefilterFunctionNanos") > 0),
                     "PWLF sub-timing must follow the same diagnostic switch");
         }
@@ -148,6 +148,10 @@ public final class NgDssrJoinPrefilterCacheTest {
                 require((Long) field(owner, name) == 0, "per-round timing reset: " + name);
             }
         }
+    }
+
+    private static boolean propertyWithDefault(String name, boolean defaultValue) {
+        return Boolean.parseBoolean(System.getProperty(name, Boolean.toString(defaultValue)));
     }
 
     /** 即使某label完全不贡献包络，紧凑索引也必须保留它的原候选位置。 */

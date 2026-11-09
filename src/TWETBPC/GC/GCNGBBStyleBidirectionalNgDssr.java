@@ -79,6 +79,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			System.getProperty("twet.bpc.ngDssrJoinPhaseTiming", "true"));
 	/** 同一次join只重复位图聚合；默认关闭，B不进入真实候选流程。 */
 	private static final boolean JOIN_BITMAP_COMPARISON = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare");
+	private static final boolean JOIN_SCALAR_SUFFIX = Boolean.getBoolean("twet.bpc.ngDssrJoinScalarSuffix");
+	private static final boolean JOIN_PRUNE_REASONS = Boolean.getBoolean("twet.bpc.ngDssrJoinPruneReasons");
 	/** 2026-11-09: 默认逐成员写入可剪位图，避免稀疏组反复OR整张BitSet；可显式关闭做旧OR对照。 */
 	private static final boolean JOIN_BITMAP_MEMBER_SET = Boolean.parseBoolean(
 			System.getProperty("twet.bpc.ngDssrJoinBitmapUseSet", "true"));
@@ -310,6 +312,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinEnvelopePrefilterGroupPairsPruned;
 	private long joinEnvelopePrefilterPotentialPairsPruned;
 	private long joinEnvelopePrefilterFunctionEvaluations;
+	private long joinPrefilterCompatibilityRejected;
+	private long joinPrefilterTimeRejected;
+	private long joinPrefilterScalarSuffixSkipped;
 	private long joinEnvelopeBuildNanos;
 	private long joinEnvelopeJoinNanos;
 	private long joinPrefilterTotalNanos;
@@ -1548,6 +1553,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			exactJoinNanos += roundJoinNanos;
 			if (JOIN_PHASE_TIMING) {
 				printJoinPhaseTiming(lp, roundJoinNanos);
+			}
+			if (JOIN_PRUNE_REASONS && useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression()) {
+				printJoinPruneReasons(lp);
 			}
 			diagnosticHeartbeat(lp, "finalize.start", true);
 			phaseStart = System.nanoTime();
@@ -4491,10 +4499,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 				|| isPricingArcForbidden(node, lastJob, backward.terminalJob)
 				|| forward.terminalJob == backward.terminalJob
 				|| bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
+			if (JOIN_PRUNE_REASONS) joinPrefilterCompatibilityRejected++;
 			return true;
 		}
 		double delay = data.getSetUp(lastJob, backward.terminalJob) + data.getProcessT(backward.terminalJob);
 		if (Utility.compareGt(forward.envelope.start() + delay, backward.envelope.end())) {
+			if (JOIN_PRUNE_REASONS) joinPrefilterTimeRejected++;
 			return true;
 		}
 		double fixedReducedCost = pricingSetupCost(lastJob, backward.terminalJob)
@@ -4580,6 +4590,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private JoinEnvelopeIndex buildJoinEnvelopeIndex() {
 		JoinEnvelopeIndex index = new JoinEnvelopeIndex(data.n + 1);
+		index.scalarSuffixEnabled = JOIN_SCALAR_SUFFIX && index.bitmapComparison == null
+				&& useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression();
 		for (int job = 1; job <= data.n; job++) {
 			HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>> forwardMap =
 					new HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>>();
@@ -4596,8 +4608,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (!forwardMap.isEmpty()) {
 				ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups =
 						new ArrayList<JoinEnvelopeGroup<ForwardLabel>>(forwardMap.values());
-				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups);
+				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups, index.scalarSuffixEnabled);
 				Collections.sort(groups);
+				if (index.scalarSuffixEnabled) JoinEnvelopeIndex.foldScalarSuffixFloors(groups);
 				index.forwardByTerminal.set(job, groups);
 				joinEnvelopeForwardGroups += groups.size();
 			}
@@ -4615,7 +4628,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (!backwardMap.isEmpty()) {
 				ArrayList<JoinEnvelopeGroup<BackwardLabel>> groups =
 						new ArrayList<JoinEnvelopeGroup<BackwardLabel>>(backwardMap.values());
-				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups);
+				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups, index.scalarSuffixEnabled);
 				indexBackwardJoinEnvelopeLabels(index, groups);
 				Collections.sort(groups);
 				index.backwardByTerminal.set(job, groups);
@@ -4636,11 +4649,20 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 	}
 
-	private <L extends FunctionLabel> long finalizeJoinEnvelopeGroups(ArrayList<JoinEnvelopeGroup<L>> groups) {
+	private <L extends FunctionLabel> long finalizeJoinEnvelopeGroups(ArrayList<JoinEnvelopeGroup<L>> groups,
+			boolean scalarSuffixEnabled) {
 		long count = 0;
 		for (int i = 0; i < groups.size(); i++) {
 			JoinEnvelopeGroup<L> group = groups.get(i);
 			group.minReducedCost = group.envelope.minValue();
+			if (scalarSuffixEnabled) {
+				// 包络和成员的数值可能不同：取共同下界，才可同时跳过组判断和置位。
+				double floor = group.minReducedCost;
+				for (int j = 0; j < group.labels.size(); j++) {
+					floor = Math.min(floor, group.labels.get(j).minReducedCost);
+				}
+				group.scalarCostFloor = Double.isNaN(floor) ? Double.NEGATIVE_INFINITY : floor;
+			}
 			count += group.envelope.segmentCount();
 		}
 		return count;
@@ -5434,6 +5456,9 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		joinPrefilterFunctionNanos = 0;
 		joinPrefilterBitmapNanos = 0;
 		joinRemainingLabelsNanos = 0;
+		joinPrefilterCompatibilityRejected = 0;
+		joinPrefilterTimeRejected = 0;
+		joinPrefilterScalarSuffixSkipped = 0;
 	}
 
 	/** 每轮独立输出；function 是 bound 的子项，不能与 bound 再相加。 */
@@ -5443,12 +5468,25 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		System.out.printf(Locale.US,
 				"[NG join timing] node=%d%s dssrRound=%d totalMs=%.6f boundMs=%.6f bitmapMs=%.6f"
 				+ " remainingLabelsMs=%.6f prefilterOtherMs=%.6f otherMs=%.6f functionWithinBoundMs=%.6f"
-				+ " buildWithinOtherMs=%.6f groupChecks=%d groupsPruned=%d functionCalls=%d fwGroups=%d bwGroups=%d%n",
+				+ " buildWithinOtherMs=%.6f groupChecks=%d groupsPruned=%d functionCalls=%d fwGroups=%d bwGroups=%d"
+				+ " scalarSuffixSkipped=%d%n",
 				lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound, totalNanos / 1e6,
 				joinPrefilterBoundNanos / 1e6, joinPrefilterBitmapNanos / 1e6, joinRemainingLabelsNanos / 1e6,
 				prefilterOther / 1e6, other / 1e6, joinPrefilterFunctionNanos / 1e6, joinEnvelopeBuildNanos / 1e6,
 				joinEnvelopePrefilterGroupPairs, joinEnvelopePrefilterGroupPairsPruned,
-				joinEnvelopePrefilterFunctionEvaluations, joinEnvelopeForwardGroups, joinEnvelopeBackwardGroups);
+				joinEnvelopePrefilterFunctionEvaluations, joinEnvelopeForwardGroups, joinEnvelopeBackwardGroups,
+				joinPrefilterScalarSuffixSkipped);
+	}
+
+	private void printJoinPruneReasons(LP lp) {
+		long scalarRejected = joinEnvelopePrefilterGroupPairs - joinPrefilterCompatibilityRejected
+				- joinPrefilterTimeRejected - joinEnvelopePrefilterFunctionEvaluations;
+		System.out.printf(Locale.US,
+				"[NG join prune reasons] node=%d%s dssrRound=%d compatibility=%d time=%d scalar=%d"
+				+ " pwlfCalls=%d scalarSuffixSkipped=%d%n",
+				lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound, joinPrefilterCompatibilityRejected,
+				joinPrefilterTimeRejected, scalarRejected, joinEnvelopePrefilterFunctionEvaluations,
+				joinPrefilterScalarSuffixSkipped);
 	}
 
 	private void diagnosticHeartbeat(LP lp, String phase, boolean force) {
@@ -8642,6 +8680,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		final NgJoinBitmapComparison bitmapComparison = JOIN_BITMAP_COMPARISON ? new NgJoinBitmapComparison() : null;
 		private boolean bitmapComparisonPrepared;
 		private boolean setMembersPrepared;
+		private boolean scalarSuffixEnabled;
 
 		JoinEnvelopeIndex(int size) {
 			terminalCount = size;
@@ -8688,7 +8727,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			if (JOIN_BITMAP_MEMBER_SET) prepareSetMembers();
 			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups = forwardByTerminal.get(lastJob);
 			if (forwardGroups != null) {
-				for (int i = 0; i < forwardGroups.size(); i++) {
+				int end = forwardGroups.size();
+				if (scalarSuffixEnabled && Double.isFinite(backwardGroup.scalarCostFloor)) {
+					double fixedCost = owner.pricingSetupCost(lastJob, backwardGroup.terminalJob)
+							- lp.getArcDual(lastJob, backwardGroup.terminalJob);
+					if (Double.isFinite(fixedCost)) {
+						end = scalarJoinPrefix(forwardGroups, backwardGroup.scalarCostFloor, fixedCost);
+						owner.joinPrefilterScalarSuffixSkipped += forwardGroups.size() - end;
+					}
+				}
+				// 后缀无须置位：成员的标量下界也过不了原有 label 级截止。
+				for (int i = 0; i < end; i++) {
 					JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroups.get(i);
 					if (canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
 						long bitmapStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
@@ -8705,6 +8754,31 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			}
 			byTerminal[lastJob] = pruned;
 			return pruned;
+		}
+
+		private static int scalarJoinPrefix(ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
+				double backwardFloor, double fixedCost) {
+			int lo = 0, hi = groups.size();
+			while (lo < hi) {
+				int mid = (lo + hi) >>> 1;
+				double bound = groups.get(mid).scalarCostFloor + backwardFloor + fixedCost;
+				if (Utility.compareLt(bound, REDUCED_COST_TOLERANCE)) {
+					lo = mid + 1;
+				} else {
+					hi = mid;
+				}
+			}
+			return lo;
+		}
+
+		private static void foldScalarSuffixFloors(ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups) {
+			// 保留原组序，避免改变容差敏感的证书更新顺序；后缀最小值本身单调。
+			double floor = Double.POSITIVE_INFINITY;
+			for (int i = groups.size() - 1; i >= 0; i--) {
+				JoinEnvelopeGroup<ForwardLabel> group = groups.get(i);
+				floor = Math.min(floor, group.scalarCostFloor);
+				group.scalarCostFloor = floor;
+			}
 		}
 
 		/** 建组结束后只展开一次全部成员；不能仅用包络贡献者，也不能每次聚合重扫BitSet。 */
@@ -8772,6 +8846,8 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		int[] setMembers;
 		NgJoinBitmapComparison.Group comparisonMembers;
 		double minReducedCost = Utility.big_M;
+		// 后向组保存自身下界；前向组完成建索引后保存所在后缀的下界。
+		double scalarCostFloor;
 
 		JoinEnvelopeGroup(int terminalJob, PackedBitSet ngMemorySet) {
 			this.terminalJob = terminalJob;

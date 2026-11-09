@@ -38,6 +38,7 @@ public final class NgDssrJoinPrefilterCacheTest {
         if (!baseline) {
             require(Arrays.stream(INDEX.getDeclaredFields()).noneMatch(f -> f.getName().equals("pruneByGroup")),
                     "unused group-pair cache must not be retained");
+            if (!Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")) testScalarSuffix();
         }
         testPricingSnapshot(true, true);
         testPricingSnapshot(false, true);
@@ -154,6 +155,57 @@ public final class NgDssrJoinPrefilterCacheTest {
         return Boolean.parseBoolean(System.getProperty(name, Boolean.toString(defaultValue)));
     }
 
+    @SuppressWarnings("unchecked")
+    private static void testScalarSuffix() throws Exception {
+        Data data = data();
+        TWETBPCConfig config = config();
+        LP lp = lp(data, config);
+        var owner = new GCNGBBStyleBidirectionalNgDssr(data, config);
+        set(owner, "joinMemoryIgnoredJobs", bits());
+        Constructor<?> c = INDEX.getDeclaredConstructor(int.class);
+        c.setAccessible(true);
+        Object original = c.newInstance(data.n + 1);
+        Object optimized = c.newInstance(data.n + 1);
+        set(optimized, "scalarSuffixEnabled", true);
+        ArrayList<Object> groups = new ArrayList<>();
+        groups.add(group(false, 1, bits(4), -1e8, 0, 1e6, 0));
+        groups.add(group(false, 1, bits(), -1e8, 0, 1e6, 1));
+        for (int i = 2; i < 4096; i++) groups.add(group(false, 1, bits(), 1e8, 0, 1e6, i));
+        for (Object g : groups) set(g, "scalarCostFloor", field(g, "minReducedCost"));
+        Object backwardGroup = group(true, 2, bits(4), 0, 0, 1e6);
+        Object backwardLabel = backward(1, 2);
+        for (Object index : new Object[] {original, optimized}) {
+            ((ArrayList<ArrayList<Object>>) field(index, "forwardByTerminal")).set(1, groups);
+            ((IdentityHashMap<Object, Object>) field(index, "backwardGroupByLabel")).put(backwardLabel, backwardGroup);
+        }
+        ArrayList<Object> candidates = new ArrayList<>(java.util.Collections.nCopies(groups.size(), null));
+        Method prune = INDEX.getDeclaredMethod("prunedForwardIndices", int.class, ArrayList.class,
+                BACKWARD, LP.class, OWNER);
+        prune.setAccessible(true);
+        BitSet oldMask = (BitSet) prune.invoke(original, 1, candidates, backwardLabel, lp, owner);
+        long before = counter(owner);
+        BitSet newMask = (BitSet) prune.invoke(optimized, 1, candidates, backwardLabel, lp, owner);
+        require(before == 4096 && counter(owner) - before == 2, "cost tail must not enter the group scan");
+        require((long) field(owner, "joinPrefilterScalarSuffixSkipped") == 4094, "skipped groups counted once");
+        require(newMask.cardinality() == 1 && newMask.get(0) && !newMask.get(1), "ordinary prefix mask unchanged");
+        BitSet effective = (BitSet) newMask.clone();
+        effective.set(2, 4096); // 后缀由原 label 级标量下界截断，不需要实际置位。
+        require(effective.equals(oldMask), "implicit cost tail plus explicit prefix must match the old mask");
+        require(prune.invoke(optimized, 1, candidates, backwardLabel, lp, owner) == newMask
+                && counter(owner) - before == 2, "cached partial mask must not repeat the cutoff search");
+        Object early = groups.get(2), late = groups.get(3);
+        set(late, "scalarCostFloor", -1e8);
+        Method fold = INDEX.getDeclaredMethod("foldScalarSuffixFloors", ArrayList.class);
+        fold.setAccessible(true);
+        fold.invoke(null, groups);
+        Method prefix = INDEX.getDeclaredMethod("scalarJoinPrefix", ArrayList.class, double.class, double.class);
+        prefix.setAccessible(true);
+        require(groups.get(2) == early && groups.get(3) == late
+                && (int) prefix.invoke(null, groups, 0.0, 0.0) == 4,
+                "a late lower member floor must extend the scan without reordering original groups");
+        System.out.println("SCALAR_SUFFIX checks=4096->2 skipped=4094");
+    }
+
     /** 即使某label完全不贡献包络，紧凑索引也必须保留它的原候选位置。 */
     @SuppressWarnings("unchecked")
     private static void testRealGroupMembers() throws Exception {
@@ -189,6 +241,15 @@ public final class NgDssrJoinPrefilterCacheTest {
         require(Arrays.equals(setMembers, prepared.members), "production set indices include non-envelope members");
         prepareSet.invoke(index);
         require(setMembers == field(group, "setMembers"), "set indices prepared once per join");
+
+        // 包络近似取值较高时仍须服从成员下界，不能误把该组整个跳过。
+        ((Label) low).minReducedCost = -2e-6;
+        Method finalizeGroups = OWNER.getDeclaredMethod("finalizeJoinEnvelopeGroups", ArrayList.class, boolean.class);
+        finalizeGroups.setAccessible(true);
+        finalizeGroups.invoke(owner, terminals.get(1), true);
+        require((double) field(group, "minReducedCost") == 0.0
+                && (double) field(group, "scalarCostFloor") == -2e-6,
+                "implicit suffix must use the lower of the envelope and actual member minima");
     }
 
     /** 固定时间切分，避免删除缓存导致的耗时变化干扰probe反馈，比较真实列与证书。 */

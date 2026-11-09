@@ -63,7 +63,7 @@ import TWETBPC.Util.SequenceSignature;
  * 4. 婵帗绋掗…鍫ヮ敇婵犳碍鍎庨悗娑櫭径宥吤归敐鍫熺《闁?label/join 闂佽浜介崝宀勵敋闁秴绀勯柧蹇氼潐閻?reduced cost 闂佸憡鐟ョ粔鐢垫暜瑜版帒绀勯柛婵嗗閻忔瑩鏌熺€涙ê濮堟繝鈧导瀛樻櫖婵炴垶锕╁ú銈夋⒒閸ワ絽浜鹃柣搴ｆ嚀閺堫剟寮抽敐鍡樺劅闊洦鎸搁悘娆忣熆鐠鸿櫣校闁绘濞婇弫宥囦沪閽樺顔夐梺鐟扮仛閹稿摜妲?
  * {@link Configure#debugBPCPricingColumnCheck}闂?
  */
-public class GCNGBBStyleBidirectionalNgDssr {
+public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 
 	private static final double REDUCED_COST_TOLERANCE = -1e-6;
 	/** 只写入 message 的高频计数默认关闭；算法反馈所需计数不受影响。 */
@@ -82,6 +82,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	/** 同一次join只重复位图聚合；默认关闭，B不进入真实候选流程。 */
 	private static final boolean JOIN_BITMAP_COMPARISON = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare");
 	private static final boolean JOIN_SCALAR_SUFFIX = Boolean.getBoolean("twet.bpc.ngDssrJoinScalarSuffix");
+	private static final boolean JOIN_SCALAR_SUFFIX_COMPARE = Boolean.getBoolean("twet.bpc.ngDssrJoinScalarSuffixCompare");
 	private static final boolean JOIN_PRUNE_REASONS = Boolean.getBoolean("twet.bpc.ngDssrJoinPruneReasons");
 	/** 2026-11-09: 默认逐成员写入可剪位图，避免稀疏组反复OR整张BitSet；可显式关闭做旧OR对照。 */
 	private static final boolean JOIN_BITMAP_MEMBER_SET = Boolean.parseBoolean(
@@ -317,6 +318,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	private long joinPrefilterCompatibilityRejected;
 	private long joinPrefilterTimeRejected;
 	private long joinPrefilterScalarSuffixSkipped;
+	private long joinScalarSuffixComparisonRounds;
 	private long joinEnvelopeBuildNanos;
 	private long joinEnvelopeJoinNanos;
 	private long joinPrefilterTotalNanos;
@@ -1560,8 +1562,14 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			exactJoinCompactNanos += System.nanoTime() - phaseStart;
 			diagnosticHeartbeat(lp, "join.start", true);
 			phaseStart = System.nanoTime();
-			joinAllForwardTerminalGroups(lp);
-			long roundJoinNanos = System.nanoTime() - phaseStart;
+			long roundJoinNanos;
+			if (JOIN_SCALAR_SUFFIX_COMPARE && useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression()
+					&& !JOIN_BITMAP_COMPARISON) {
+				roundJoinNanos = compareScalarSuffixJoin(lp);
+			} else {
+				joinAllForwardTerminalGroups(lp);
+				roundJoinNanos = System.nanoTime() - phaseStart;
+			}
 			exactJoinNanos += roundJoinNanos;
 			if (JOIN_PHASE_TIMING) {
 				printJoinPhaseTiming(lp, roundJoinNanos);
@@ -4473,13 +4481,140 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		return config.enableNgDssrJoinEnvelopePrefilter && !sriPricingEnabled && !limitedMemorySriPricing;
 	}
 
+	private long compareScalarSuffixJoin(LP lp) {
+		long warmStart = System.nanoTime();
+		warmSharedJoinExtensions();
+		long warmNanos = System.nanoTime() - warmStart;
+		GCNGBBStyleBidirectionalNgDssr shadow = copyJoinComparisonState();
+		boolean primaryFirst = (joinScalarSuffixComparisonRounds++ & 1L) == 0L;
+		long primaryNanos;
+		long shadowNanos;
+		if (primaryFirst) {
+			primaryNanos = timedScalarSuffixJoin(lp, JOIN_SCALAR_SUFFIX);
+			shadowNanos = runShadowScalarSuffixJoin(shadow, lp);
+		} else {
+			shadowNanos = runShadowScalarSuffixJoin(shadow, lp);
+			primaryNanos = timedScalarSuffixJoin(lp, JOIN_SCALAR_SUFFIX);
+		}
+		requireSameJoinComparisonOutcome(shadow);
+		GCNGBBStyleBidirectionalNgDssr off = JOIN_SCALAR_SUFFIX ? shadow : this;
+		GCNGBBStyleBidirectionalNgDssr on = JOIN_SCALAR_SUFFIX ? this : shadow;
+		if (off.joinEnvelopePrefilterGroupPairs != on.joinEnvelopePrefilterGroupPairs
+				+ on.joinPrefilterScalarSuffixSkipped
+				|| off.joinEnvelopePrefilterFunctionEvaluations != on.joinEnvelopePrefilterFunctionEvaluations) {
+			throw new IllegalStateException("Scalar suffix join differs in potential group or PWLF checks");
+		}
+		System.out.printf(Locale.US,
+				"[NG join suffix pair] node=%d%s dssrRound=%d first=%s sharedExtensionMs=%.6f"
+				+ " offMs=%.6f onMs=%.6f offBuildMs=%.6f onBuildMs=%.6f"
+				+ " offBoundMs=%.6f onBoundMs=%.6f offBitmapMs=%.6f onBitmapMs=%.6f"
+				+ " offLabelMs=%.6f onLabelMs=%.6f offChecks=%d onChecks=%d onSkipped=%d"
+				+ " offPwlf=%d onPwlf=%d offCompatibility=%d offTime=%d offScalar=%d"
+				+ " candidates=%d witnesses=%d relaxedRc=%.17g%n",
+				lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound,
+				primaryFirst == JOIN_SCALAR_SUFFIX ? "ON" : "OFF", warmNanos / 1e6,
+				(JOIN_SCALAR_SUFFIX ? shadowNanos : primaryNanos) / 1e6,
+				(JOIN_SCALAR_SUFFIX ? primaryNanos : shadowNanos) / 1e6,
+				off.joinEnvelopeBuildNanos / 1e6, on.joinEnvelopeBuildNanos / 1e6,
+				off.joinPrefilterBoundNanos / 1e6, on.joinPrefilterBoundNanos / 1e6,
+				off.joinPrefilterBitmapNanos / 1e6, on.joinPrefilterBitmapNanos / 1e6,
+				off.joinRemainingLabelsNanos / 1e6, on.joinRemainingLabelsNanos / 1e6,
+				off.joinEnvelopePrefilterGroupPairs, on.joinEnvelopePrefilterGroupPairs,
+				on.joinPrefilterScalarSuffixSkipped, off.joinEnvelopePrefilterFunctionEvaluations,
+				on.joinEnvelopePrefilterFunctionEvaluations, off.joinPrefilterCompatibilityRejected,
+				off.joinPrefilterTimeRejected, JOIN_PRUNE_REASONS ? off.joinPrefilterScalarRejected() : 0L,
+				generatedCandidateBySignature.size(),
+				nonElementaryNegativeRouteBySignature.size(), lastRelaxedRoundBestReducedCost);
+		return primaryNanos;
+	}
+
+	/** 共享只读的扩展函数；两遍仍分别建组、建索引和扫描。 */
+	private void warmSharedJoinExtensions() {
+		for (int job = 1; job <= data.n; job++) {
+			for (ForwardLabel label : activeForwardByLastJob.get(job)) {
+				if (!label.isDominated) getForwardJoinExtension(label);
+			}
+			for (BackwardLabel label : activeBackwardByFirstJob.get(job)) {
+				if (!label.isDominated && !label.isSinkRoot) getBackwardJoinExtension(label);
+			}
+			for (ArrayList<BackwardLabel> labels : backwardSinglePointByFirstJob.get(job).liveLabelsByCardinality) {
+				if (labels == null) continue;
+				for (BackwardLabel label : labels) {
+					if (!label.isDominated && !label.isSinkRoot) getBackwardJoinExtension(label);
+				}
+			}
+		}
+	}
+
+	private long timedScalarSuffixJoin(LP lp, boolean scalarSuffix) {
+		long start = System.nanoTime();
+		joinAllForwardTerminalGroupsWithEnvelopePrefilter(lp, scalarSuffix);
+		return System.nanoTime() - start;
+	}
+
+	private long runShadowScalarSuffixJoin(GCNGBBStyleBidirectionalNgDssr shadow, LP lp) {
+		// 对照遍不计入真实定价轮的单点命中；作用域退出后恢复原计数。
+		try (EndpointPricingDiagnostics ignored = EndpointPricingDiagnostics.begin()) {
+			return shadow.timedScalarSuffixJoin(lp, !JOIN_SCALAR_SUFFIX);
+		}
+	}
+
+	private GCNGBBStyleBidirectionalNgDssr copyJoinComparisonState() {
+		try {
+			GCNGBBStyleBidirectionalNgDssr shadow = (GCNGBBStyleBidirectionalNgDssr) super.clone();
+			// 标签、节点和对偶只读共享；join 写入的候选堆、见证池和调试集合独立。
+			shadow.generatedColumns = new ArrayList<>(generatedColumns);
+			shadow.generatedColumnCandidates = new PriorityQueue<>(generatedColumnCandidates);
+			shadow.generatedCandidateBySignature = new HashMap<>(generatedCandidateBySignature);
+			shadow.nonElementaryNegativeRoutes = new ArrayList<>(nonElementaryNegativeRoutes);
+			shadow.nonElementaryNegativeRouteBySignature = new HashMap<>(nonElementaryNegativeRouteBySignature);
+			shadow.nonElementaryNegativeRouteRanking = new TreeSet<>(nonElementaryNegativeRouteRanking);
+			if (ngDssrCurrentRoundNegativeRoutes != null) {
+				shadow.ngDssrCurrentRoundNegativeRoutes = new HashMap<>(ngDssrCurrentRoundNegativeRoutes);
+			}
+			if (ngDssrDuplicateRepairCandidates != null) {
+				shadow.ngDssrDuplicateRepairCandidates = new ArrayList<>(ngDssrDuplicateRepairCandidates);
+			}
+			return shadow;
+		} catch (CloneNotSupportedException impossible) {
+			throw new AssertionError(impossible);
+		}
+	}
+
+	private void requireSameJoinComparisonOutcome(GCNGBBStyleBidirectionalNgDssr shadow) {
+		if (Double.compare(lastRelaxedRoundBestReducedCost, shadow.lastRelaxedRoundBestReducedCost) != 0
+				|| Double.compare(bestGeneratedReducedCost, shadow.bestGeneratedReducedCost) != 0
+				|| generatedCandidateBySignature.size() != shadow.generatedCandidateBySignature.size()
+				|| nonElementaryNegativeRouteRanking.size() != shadow.nonElementaryNegativeRouteRanking.size()) {
+			throw new IllegalStateException("Scalar suffix join differs in candidate count, witness count or reduced cost");
+		}
+		for (PricingColumnCandidate candidate : generatedCandidateBySignature.values()) {
+			PricingColumnCandidate other = shadow.generatedCandidateBySignature.get(candidate.signature);
+			if (other == null || compareCandidateBestFirst(candidate, other) != 0
+					|| Double.compare(candidate.column.getCost(), other.column.getCost()) != 0) {
+				throw new IllegalStateException("Scalar suffix join returned different candidates");
+			}
+		}
+		var otherRoutes = shadow.nonElementaryNegativeRouteRanking.iterator();
+		for (NonElementaryNegativeRoute route : nonElementaryNegativeRouteRanking) {
+			NonElementaryNegativeRoute other = otherRoutes.next();
+			if (!route.signature.equals(other.signature) || Double.compare(route.reducedCost, other.reducedCost) != 0) {
+				throw new IllegalStateException("Scalar suffix join returned different DSSR witnesses");
+			}
+		}
+	}
+
 	/**
 	 * 2026-07-11: envelope 只证明整组 label pair 不可能形成负 reduced-cost 列。
 	 * 未被证明可剪的 group 仍完整执行标准 label-level join，保持批量加列和证书口径。
 	 */
 	private void joinAllForwardTerminalGroupsWithEnvelopePrefilter(LP lp) {
+		joinAllForwardTerminalGroupsWithEnvelopePrefilter(lp, JOIN_SCALAR_SUFFIX);
+	}
+
+	private void joinAllForwardTerminalGroupsWithEnvelopePrefilter(LP lp, boolean scalarSuffix) {
 		long buildStart = System.nanoTime();
-		JoinEnvelopeIndex index = buildJoinEnvelopeIndex();
+		JoinEnvelopeIndex index = buildJoinEnvelopeIndex(scalarSuffix);
 		if (index.bitmapComparison != null) index.prepareBitmapComparison();
 		else if (JOIN_BITMAP_MEMBER_SET) index.prepareSetMembers();
 		joinEnvelopeBuildNanos += System.nanoTime() - buildStart;
@@ -4601,8 +4736,12 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private JoinEnvelopeIndex buildJoinEnvelopeIndex() {
+		return buildJoinEnvelopeIndex(JOIN_SCALAR_SUFFIX);
+	}
+
+	private JoinEnvelopeIndex buildJoinEnvelopeIndex(boolean scalarSuffix) {
 		JoinEnvelopeIndex index = new JoinEnvelopeIndex(data.n + 1);
-		index.scalarSuffixEnabled = JOIN_SCALAR_SUFFIX && index.bitmapComparison == null
+		index.scalarSuffixEnabled = scalarSuffix && index.bitmapComparison == null
 				&& useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression();
 		for (int job = 1; job <= data.n; job++) {
 			HashMap<PackedBitSet, JoinEnvelopeGroup<ForwardLabel>> forwardMap =
@@ -5491,14 +5630,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 	}
 
 	private void printJoinPruneReasons(LP lp) {
-		long scalarRejected = joinEnvelopePrefilterGroupPairs - joinPrefilterCompatibilityRejected
-				- joinPrefilterTimeRejected - joinEnvelopePrefilterFunctionEvaluations;
 		System.out.printf(Locale.US,
 				"[NG join prune reasons] node=%d%s dssrRound=%d compatibility=%d time=%d scalar=%d"
 				+ " pwlfCalls=%d scalarSuffixSkipped=%d%n",
 				lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound, joinPrefilterCompatibilityRejected,
-				joinPrefilterTimeRejected, scalarRejected, joinEnvelopePrefilterFunctionEvaluations,
+				joinPrefilterTimeRejected, joinPrefilterScalarRejected(), joinEnvelopePrefilterFunctionEvaluations,
 				joinPrefilterScalarSuffixSkipped);
+	}
+
+	private long joinPrefilterScalarRejected() {
+		return joinEnvelopePrefilterGroupPairs - joinPrefilterCompatibilityRejected
+				- joinPrefilterTimeRejected - joinEnvelopePrefilterFunctionEvaluations;
 	}
 
 	private void diagnosticHeartbeat(LP lp, String phase, boolean force) {

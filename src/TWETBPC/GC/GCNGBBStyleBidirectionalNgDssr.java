@@ -22,6 +22,8 @@ import java.util.TreeSet;
 
 import Basic.Data;
 import Common.Configure;
+import Common.EndpointPricingDiagnostics;
+import Common.EndpointPricingDiagnostics.Event;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
@@ -1376,7 +1378,17 @@ public class GCNGBBStyleBidirectionalNgDssr {
 			ngDssrRoundRoutesConsidered = 0;
 			ngDssrRoundRoutesAlreadyBlocked = 0;
 			ngDssrRoundRoutesUpdated = 0;
-			ArrayList<TWETColumn> columns = solveRelaxedRound(lp);
+			ArrayList<TWETColumn> columns;
+			try (EndpointPricingDiagnostics endpointStats = EndpointPricingDiagnostics.begin()) {
+				columns = solveRelaxedRound(lp);
+				if (endpointStats != null) {
+					System.out.println("[NG endpoint events] node=" + lp.getNode().id + diagnosticPricingHeartbeatContext()
+							+ " dssrRound=" + ngDssrRound + " phaseOne=" + feasibilityPhaseOneObjectiveMode
+							+ " completed=" + lastRelaxedRoundCompleted
+							+ " forwardPointKept=" + forwardSinglePointKept + " backwardPointKept=" + backwardSinglePointKept
+							+ endpointStats.summary());
+				}
+			}
 			materializeNonElementaryNegativeRoutes();
 			diagnoseDuplicateRepairs(lp);
 			ngDssrRoundsExecuted = ngDssrRound;
@@ -8204,6 +8216,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 
 	private JoinEnvelopeMinResult findMinimalShiftedTracedSum(TracedJoinEnvelope<ForwardLabel> forwardEnvelope,
 			double delta, TracedJoinEnvelope<BackwardLabel> backwardEnvelope, double yShift) {
+		EndpointPricingDiagnostics.record(Event.TRACED_JOIN_CALL);
 		JoinEnvelopeMinResult result = new JoinEnvelopeMinResult();
 		if (forwardEnvelope == null || backwardEnvelope == null
 				|| forwardEnvelope.segments.isEmpty() || backwardEnvelope.segments.isEmpty()) {
@@ -8296,6 +8309,7 @@ public class GCNGBBStyleBidirectionalNgDssr {
 		}
 		double value = forwardValue + backwardValue + yShift;
 		if (Double.isFinite(value) && Utility.compareLt(value, result.reducedCost)) {
+			EndpointPricingDiagnostics.record(Event.TRACED_JOIN_ENDPOINT_IMPROVED);
 			result.reducedCost = value;
 			result.forwardLabel = f.source;
 			result.backwardLabel = b.source;

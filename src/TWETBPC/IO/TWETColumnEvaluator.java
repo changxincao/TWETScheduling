@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import Basic.Data;
+import Common.EndpointPricingDiagnostics;
+import Common.EndpointPricingDiagnostics.Event;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Segment;
 import Common.Utility;
@@ -44,6 +46,7 @@ public class TWETColumnEvaluator {
 	 * 这是一种“先保证口径一致，再谈优化”的写法。
 	 */
 	public double evaluate(List<Integer> sequence) {
+		EndpointPricingDiagnostics.record(Event.COLUMN_EVALUATE_CALL);
 		if (sequence.isEmpty()) {
 			return 0.0;
 		}
@@ -75,6 +78,7 @@ public class TWETColumnEvaluator {
 						if (Utility.isBigMValue(value)) {
 							return Utility.big_M;
 						}
+						EndpointPricingDiagnostics.record(Event.COLUMN_FIRST_HORIZON_POINT);
 						next = new PiecewiseLinearFunction(penalty.domainStart, penalty.domainEnd);
 						next.addSegment(earliest, earliest, 0.0, value);
 					} else {

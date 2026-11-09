@@ -7,6 +7,8 @@ import java.util.Comparator;
 import java.util.PriorityQueue;
 
 import Basic.Data;
+import Common.EndpointPricingDiagnostics;
+import Common.EndpointPricingDiagnostics.Event;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.MergeResult;
@@ -1060,6 +1062,7 @@ final class CompletionBoundCalculator {
 			stats.forwardCandidateShiftNanos += System.nanoTime() - start;
 		}
 		boolean shiftedPoint = isFiniteWholePoint(u);
+		if (shiftedPoint) EndpointPricingDiagnostics.record(Event.CB_FORWARD_SHIFT_POINT);
 		if (!hasPositiveDomain(u) && !shiftedPoint) {
 			return null;
 		}
@@ -1132,6 +1135,7 @@ final class CompletionBoundCalculator {
 			stats.backwardCandidateShiftNanos += System.nanoTime() - start;
 		}
 		boolean shiftedPoint = isFiniteWholePoint(r);
+		if (shiftedPoint) EndpointPricingDiagnostics.record(Event.CB_BACKWARD_SHIFT_POINT);
 		if (!hasPositiveDomain(r) && !shiftedPoint) {
 			return null;
 		}
@@ -1198,6 +1202,7 @@ final class CompletionBoundCalculator {
 		if (!isFiniteWholePoint(function)) {
 			return function;
 		}
+		EndpointPricingDiagnostics.record(Event.CB_AUXILIARY_POINT);
 		PiecewiseLinearFunction zero = constantFunction(0.0);
 		PiecewiseLinearFunction received = function.add(zero);
 		zero.release();

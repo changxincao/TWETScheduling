@@ -2,6 +2,8 @@ package PWLFTesting;
 
 import java.util.Random;
 
+import Common.EndpointPricingDiagnostics;
+import Common.EndpointPricingDiagnostics.Event;
 import Common.PiecewiseLinearFunction;
 import Common.PiecewiseLinearFunction.Direction;
 import Common.PiecewiseLinearFunction.Segment;
@@ -33,7 +35,34 @@ public final class PiecewiseLinearEndpointPatchTest {
 		testScalarQueries();
 		testFusedInsertion();
 		testLegacyInsertionCounterexample();
+		testPricingDiagnosticScope();
 		System.out.println("PiecewiseLinearEndpointPatchTest passed: " + checks + " checks");
+	}
+
+	private static void testPricingDiagnosticScope() {
+		try (EndpointPricingDiagnostics scope = EndpointPricingDiagnostics.begin()) {
+			if (scope == null) {
+				check(!EndpointPricingDiagnostics.enabled(), "disabled diagnostics do not open a scope");
+				return;
+			}
+			var f = function(10, 0, 5, 0, 8, 5, 10, 0, -4);
+			var g = function(10, 0, 5, 0, -7, 5, 10, 0, 9);
+			f.add(g).release();
+			near(PiecewiseLinearFunction.findMinimalSumValue(f, g, 0), -11, "instrumented endpoint minimum");
+			check(scope.count(Event.ADD_CALL) == 1 && scope.count(Event.ADD_ISOLATED_POINT) == 1,
+					"one isolated add patch");
+			check(scope.count(Event.MIN_SUM_CALL) == 1 && scope.count(Event.MIN_SUM_ENDPOINT_IMPROVED) == 1,
+					"one improving scalar endpoint");
+			try (EndpointPricingDiagnostics nested = EndpointPricingDiagnostics.begin()) {
+				function(10, -2, 0, 0, 3).shiftX(0).release();
+				check(nested.count(Event.TRIM_LEFT_POINT) == 1, "one left contact");
+				check(nested.count(Event.ADD_CALL) == 0, "nested scope starts empty");
+			}
+			check(scope.count(Event.TRIM_LEFT_POINT) == 0, "nested scope does not change its parent");
+		}
+		try (EndpointPricingDiagnostics scope = EndpointPricingDiagnostics.begin()) {
+			check(scope.count(Event.ADD_CALL) == 0, "next pricing round starts empty");
+		}
 	}
 
 	private static void benchmarkContinuousAdd() {

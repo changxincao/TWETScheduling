@@ -5,6 +5,7 @@ import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.Deque;
 
+import Common.EndpointPricingDiagnostics.Event;
 import Common.Utility.TimerManager;
 
 //假设各段之间区间连续的
@@ -105,8 +106,11 @@ public class PiecewiseLinearFunction {
 					double sumSlope = slope + suffix.slope;
 					double sumIntercept = intercept + suffix.intercept
 							- suffix.slope * suffixDelta + yShift;
-					minimum = Math.min(minimum,
-							Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept));
+					double value = Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept);
+					if (EndpointPricingDiagnostics.enabled() && lo == hi && value < minimum) {
+						EndpointPricingDiagnostics.record(Event.FUSED_POINT_MATCH_IMPROVED);
+					}
+					minimum = Math.min(minimum, value);
 				}
 				if (suffixEnd >= end) {
 					// suffix 已做 suffix-min；共同端点保留旧段供下一段 prefix 匹配。
@@ -154,8 +158,11 @@ public class PiecewiseLinearFunction {
 					double sumSlope = slope + suffixSlope;
 					double sumIntercept = intercept + flatSuffix.intercepts[suffixIndex]
 							- suffixSlope * suffixDelta + yShift;
-					minimum = Math.min(minimum,
-							Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept));
+					double value = Math.min(sumSlope * lo + sumIntercept, sumSlope * hi + sumIntercept);
+					if (EndpointPricingDiagnostics.enabled() && lo == hi && value < minimum) {
+						EndpointPricingDiagnostics.record(Event.FUSED_POINT_MATCH_IMPROVED);
+					}
+					minimum = Math.min(minimum, value);
 				}
 				if (suffixEnd >= end) {
 					break;
@@ -836,6 +843,7 @@ public class PiecewiseLinearFunction {
 	 */
 	public static double findMinimalSumValue(PiecewiseLinearFunction dynamic,
 			ReadOnlySegmentView fixed, double yShift) {
+		EndpointPricingDiagnostics.record(Event.MIN_SUM_CALL);
 		if (dynamic == null || fixed == null || dynamic.head == null || fixed.size() == 0) {
 			return Utility.big_M;
 		}
@@ -871,6 +879,7 @@ public class PiecewiseLinearFunction {
 				double point = queryUnscannedEndpointSum(dynamicSegment, 0.0, fixed, fixedIndex,
 						dynamicEnd, start, end);
 				if (!Utility.isBigMValue(point) && Utility.compareLt(point + yShift, min)) {
+					EndpointPricingDiagnostics.record(Event.MIN_SUM_ENDPOINT_IMPROVED);
 					min = point + yShift;
 				}
 			}
@@ -906,6 +915,7 @@ public class PiecewiseLinearFunction {
 
 	private static double findMinimalShiftedSumValue(PiecewiseLinearFunction f, double delta,
 			PiecewiseLinearFunction g, double yShift, boolean trimShiftedToDomain) {
+		EndpointPricingDiagnostics.record(Event.MIN_SUM_CALL);
 		if (f == null || g == null || f.head == null || g.head == null) {
 			return Utility.big_M;
 		}
@@ -951,6 +961,7 @@ public class PiecewiseLinearFunction {
 			if (pEnd == q.end && start <= pEnd && pEnd <= end) {
 				double point = queryUnscannedEndpointSum(p, delta, q, pEnd, start, end);
 				if (!Utility.isBigMValue(point) && Utility.compareLt(point + yShift, min)) {
+					EndpointPricingDiagnostics.record(Event.MIN_SUM_ENDPOINT_IMPROVED);
 					min = point + yShift;
 				}
 			}
@@ -1050,6 +1061,7 @@ public class PiecewiseLinearFunction {
 	public static double findMinimalInsertedJobCost(PiecewiseLinearFunction prefix, double prefixShift,
 			PiecewiseLinearFunction jobPenalty, PiecewiseLinearFunction suffix, double suffixShift,
 			double bridgeCost, PrefixMinimumWorkspace workspace) {
+		EndpointPricingDiagnostics.record(Event.FUSED_INSERT_CALL);
 		if (prefix == null || jobPenalty == null || suffix == null || workspace == null
 				|| prefix.head == null || jobPenalty.head == null || suffix.head == null) {
 			return Utility.big_M;
@@ -1070,6 +1082,7 @@ public class PiecewiseLinearFunction {
 	public static double findMinimalInsertedJobCost(ReadOnlySegmentView prefix, double prefixShift,
 			ReadOnlySegmentView jobPenalty, ReadOnlySegmentView suffix, double suffixShift,
 			double bridgeCost, PrefixMinimumWorkspace workspace) {
+		EndpointPricingDiagnostics.record(Event.FUSED_INSERT_CALL);
 		if (prefix == null || jobPenalty == null || suffix == null || workspace == null
 				|| prefix.size() == 0 || jobPenalty.size() == 0 || suffix.size() == 0) {
 			return Utility.big_M;
@@ -1156,6 +1169,7 @@ public class PiecewiseLinearFunction {
 			if (segmentStart <= segmentEnd && segmentEnd == pEnd && segmentEnd == g.ends[q]) {
 				double point = queryUnscannedEndpointSum(f, p, delta, g, q, segmentEnd, start, end);
 				if (!Utility.isBigMValue(point) && Utility.compareLt(point, runningMin)) {
+					EndpointPricingDiagnostics.record(Event.FUSED_PREFIX_ENDPOINT_IMPROVED);
 					// 先交付过去的包络，再让端点低值只向未来进入 prefix-min。
 					if (previousTime < segmentEnd) {
 						workspace.appendFlat(previousTime, segmentEnd, 0.0, runningMin);
@@ -1259,6 +1273,7 @@ public class PiecewiseLinearFunction {
 			if (segmentStart <= segmentEnd && segmentEnd == pEnd && segmentEnd == q.end) {
 				double point = queryUnscannedEndpointSum(p, delta, q, segmentEnd, start, end);
 				if (!Utility.isBigMValue(point) && Utility.compareLt(point, runningMin)) {
+					EndpointPricingDiagnostics.record(Event.FUSED_PREFIX_ENDPOINT_IMPROVED);
 					// 不把当前端点才出现的低值回灌到尚未交付的过去区间。
 					if (previousTime < segmentEnd) {
 						workspace.append(previousTime, segmentEnd, 0.0, runningMin);
@@ -1309,6 +1324,7 @@ public class PiecewiseLinearFunction {
 //	}
 
 	public PiecewiseLinearFunction add(PiecewiseLinearFunction g) {
+		EndpointPricingDiagnostics.record(Event.ADD_CALL);
 		Utility.debugCheckPWLFRightBoundPair("add.input", this, g);
 		PiecewiseLinearFunction res = new PiecewiseLinearFunction(domainStart, domainEnd);
 		if (this.head == null || g.head == null)
@@ -1358,6 +1374,7 @@ public class PiecewiseLinearFunction {
 				}
 			}
 			if (patchPoint && domainStart <= nxt && nxt <= domainEnd) {
+				EndpointPricingDiagnostics.record(start == end ? Event.ADD_WHOLE_POINT : Event.ADD_ISOLATED_POINT);
 				double leftWidth = hasLeft ? addPointWidth(nxt - pieceStart) : 0.0;
 				double rightWidth = hasRight ? addPointWidth(rightEnd - nxt) : 0.0;
 				if (!hasLeft && !hasRight) {
@@ -1643,6 +1660,7 @@ public class PiecewiseLinearFunction {
 	}
 
 	private void trimToDomain() {
+		EndpointPricingDiagnostics.record(Event.TRIM_CALL);
 		// 这函数切除多余的可行域，感觉也就会用在shift函数和每个节点初始的惩罚函数（使用时间窗限制更紧一点）
 
 		if (head == null || !Utility.compareLt(domainStart, domainEnd)) {
@@ -1667,6 +1685,12 @@ public class PiecewiseLinearFunction {
 			}
 			// 修剪头部部分重叠的 Segment
 			if (head.start < domainStart) {
+				if (EndpointPricingDiagnostics.enabled() && head.end == domainStart) {
+					double value = head.getValue(domainStart);
+					if (Double.isFinite(value) && !Utility.isBigMValue(value)) {
+						EndpointPricingDiagnostics.record(Event.TRIM_LEFT_POINT);
+					}
+				}
 				head.start = domainStart;
 			}
 		}

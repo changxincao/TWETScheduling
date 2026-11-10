@@ -19,6 +19,7 @@ import java.util.Locale;
 import java.util.NavigableSet;
 import java.util.PriorityQueue;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
 
 import Basic.Data;
 import Common.Configure;
@@ -88,6 +89,18 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 	private static final boolean JOIN_PRUNE_REASONS = Boolean.getBoolean("twet.bpc.ngDssrJoinPruneReasons");
 	/** 同轮影子检查，仅比较组兼容性和跳过位图；真实join仍使用旧路径。 */
 	private static final boolean JOIN_COMPATIBILITY_SHADOW = Boolean.getBoolean("twet.bpc.ngDssrJoinCompatibilityShadow");
+	private enum JoinExperiment { NONE, TIMERS, ARC, CACHE, EMPTY, LOOKUP, SURVIVORS }
+	private static final JoinExperiment[] JOIN_EXPERIMENTS = Arrays.stream(
+			System.getProperty("twet.bpc.ngDssrJoinOptimizationCompare", "").split(","))
+			.map(String::trim).filter(s -> !s.isEmpty())
+			.map(s -> JoinExperiment.valueOf(s.toUpperCase(Locale.ROOT))).toArray(JoinExperiment[]::new);
+	private static final boolean JOIN_OPTIMIZATION_COMPARISON = JOIN_EXPERIMENTS.length > 0;
+	// 每次 pricing 新建引擎；按进程轮换，短 pricing 也能覆盖各对照项及两种执行顺序。
+	private static final AtomicLong JOIN_OPTIMIZATION_PAIRS = new AtomicLong();
+	private JoinExperiment joinExperiment = JoinExperiment.NONE;
+	private boolean recordJoinPairOrder;
+	private long joinPairOrderCount;
+	private long joinPairOrderHash;
 	private static final boolean EXTENSION_SCALAR_SHADOW = Boolean.getBoolean("twet.bpc.ngDssrExtensionScalarShadow");
 	private ExtensionScalarShadow forwardScalarShadow;
 	private ExtensionScalarShadow backwardScalarShadow;
@@ -1585,6 +1598,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			if (JOIN_SCALAR_SUFFIX_COMPARE && useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression()
 					&& !JOIN_BITMAP_COMPARISON) {
 				roundJoinNanos = compareScalarSuffixJoin(lp);
+			} else if (JOIN_OPTIMIZATION_COMPARISON && useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression()
+					&& !JOIN_BITMAP_COMPARISON && !JOIN_COMPATIBILITY_SHADOW) {
+				roundJoinNanos = compareJoinOptimization(lp);
 			} else {
 				joinAllForwardTerminalGroups(lp);
 				roundJoinNanos = System.nanoTime() - phaseStart;
@@ -4565,6 +4581,56 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		return primaryNanos;
 	}
 
+	/** 同轮每次只改变一个因素；影子不进入候选列或DSSR更新。 */
+	private long compareJoinOptimization(LP lp) {
+		long pair = JOIN_OPTIMIZATION_PAIRS.getAndIncrement();
+		JoinExperiment experiment = JOIN_EXPERIMENTS[(int) (pair % JOIN_EXPERIMENTS.length)];
+		boolean primaryFirst = ((pair / JOIN_EXPERIMENTS.length) & 1L) == 0;
+		long warmStart = System.nanoTime();
+		warmSharedJoinExtensions();
+		long warmNanos = System.nanoTime() - warmStart;
+		GCNGBBStyleBidirectionalNgDssr shadow = copyJoinComparisonState();
+		shadow.joinExperiment = experiment;
+		long oldNanos = 0L;
+		long newNanos;
+		recordJoinPairOrder = shadow.recordJoinPairOrder = true;
+		joinPairOrderCount = joinPairOrderHash = 0L;
+		shadow.joinPairOrderCount = shadow.joinPairOrderHash = 0L;
+		try {
+			if (primaryFirst) oldNanos = timedScalarSuffixJoin(lp, JOIN_SCALAR_SUFFIX);
+			try (EndpointPricingDiagnostics ignored = EndpointPricingDiagnostics.begin()) {
+				newNanos = shadow.timedScalarSuffixJoin(lp, JOIN_SCALAR_SUFFIX);
+			}
+			if (!primaryFirst) oldNanos = timedScalarSuffixJoin(lp, JOIN_SCALAR_SUFFIX);
+		} finally {
+			recordJoinPairOrder = false;
+		}
+		requireSameJoinComparisonOutcome(shadow);
+		if (joinPairOrderCount != shadow.joinPairOrderCount || joinPairOrderHash != shadow.joinPairOrderHash) {
+			throw new IllegalStateException("Join optimization changed the label pair sequence: " + experiment);
+		}
+		if (joinEnvelopePrefilterFunctionEvaluations != shadow.joinEnvelopePrefilterFunctionEvaluations) {
+			throw new IllegalStateException("Join optimization changed the number of group PWLF evaluations");
+		}
+		System.out.printf(Locale.US,
+				"[NG join optimization pair] node=%d%s dssrRound=%d variant=%s first=%s"
+				+ " oldMs=%.6f newMs=%.6f sharedMs=%.6f oldBuildMs=%.6f newBuildMs=%.6f"
+				+ " oldPrefilterMs=%.6f newPrefilterMs=%.6f oldLabelMs=%.6f newLabelMs=%.6f"
+				+ " oldChecks=%d newChecks=%d groupPwlf=%d labelPairs=%d%n",
+				lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound, experiment,
+				primaryFirst ? "old" : "new", oldNanos / 1e6, newNanos / 1e6, warmNanos / 1e6,
+				joinEnvelopeBuildNanos / 1e6, shadow.joinEnvelopeBuildNanos / 1e6,
+				joinPrefilterTotalNanos / 1e6, shadow.joinPrefilterTotalNanos / 1e6,
+				joinRemainingLabelsNanos / 1e6, shadow.joinRemainingLabelsNanos / 1e6,
+				joinEnvelopePrefilterGroupPairs, shadow.joinEnvelopePrefilterGroupPairs,
+				joinEnvelopePrefilterFunctionEvaluations, joinPairOrderCount);
+		return oldNanos;
+	}
+
+	private boolean joinInnerTiming() {
+		return JOIN_PHASE_TIMING && (!JOIN_OPTIMIZATION_COMPARISON || joinExperiment != JoinExperiment.TIMERS);
+	}
+
 	/** 共享只读的扩展函数；两遍仍分别建组、建索引和扫描。 */
 	private void warmSharedJoinExtensions() {
 		for (int job = 1; job <= data.n; job++) {
@@ -4683,31 +4749,36 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				|| lastJob == backward.terminalJob;
 	}
 
+	private record JoinArcTerms(boolean incompatible, double delay, double fixedCost) {}
+
 	private boolean canPruneJoinEnvelopeGroupPair(int lastJob, JoinEnvelopeGroup<ForwardLabel> forward,
-			JoinEnvelopeGroup<BackwardLabel> backward, LP lp) {
-		boolean incompatible = wholeJoinGroupPairIncompatible(lastJob, backward, lp.getNode())
+			JoinEnvelopeGroup<BackwardLabel> backward, LP lp, JoinArcTerms terms) {
+		boolean incompatible = (terms == null ? wholeJoinGroupPairIncompatible(lastJob, backward, lp.getNode())
+				: terms.incompatible())
 				|| bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet);
 		if (JOIN_COMPATIBILITY_SHADOW) lastJoinGroupIncompatible = incompatible;
 		if (incompatible) {
 			if (JOIN_PRUNE_REASONS) joinPrefilterCompatibilityRejected++;
 			return true;
 		}
-		double delay = data.getSetUp(lastJob, backward.terminalJob) + data.getProcessT(backward.terminalJob);
+		double delay = terms == null ? data.getSetUp(lastJob, backward.terminalJob)
+				+ data.getProcessT(backward.terminalJob) : terms.delay();
 		if (Utility.compareGt(forward.envelope.start() + delay, backward.envelope.end())) {
 			if (JOIN_PRUNE_REASONS) joinPrefilterTimeRejected++;
 			return true;
 		}
-		double fixedReducedCost = pricingSetupCost(lastJob, backward.terminalJob)
-				- lp.getArcDual(lastJob, backward.terminalJob);
+		double fixedReducedCost = terms == null ? pricingSetupCost(lastJob, backward.terminalJob)
+				- lp.getArcDual(lastJob, backward.terminalJob) : terms.fixedCost();
 		double threshold = REDUCED_COST_TOLERANCE;
 		if (!Utility.compareLt(forward.minReducedCost + backward.minReducedCost + fixedReducedCost, threshold)) {
 			return true;
 		}
 		joinEnvelopePrefilterFunctionEvaluations++;
-		long functionStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
+		boolean timed = joinInnerTiming();
+		long functionStart = timed ? System.nanoTime() : 0L;
 		double reducedCostBound = findMinimalShiftedTracedSum(forward.envelope, delay, backward.envelope,
 				fixedReducedCost).reducedCost;
-		if (JOIN_PHASE_TIMING) {
+		if (timed) {
 			joinPrefilterFunctionNanos += System.nanoTime() - functionStart;
 		}
 		observeRelaxedReducedCost(reducedCostBound);
@@ -4783,7 +4854,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 	}
 
 	private JoinEnvelopeIndex buildJoinEnvelopeIndex(boolean scalarSuffix) {
-		JoinEnvelopeIndex index = new JoinEnvelopeIndex(data.n + 1);
+		JoinEnvelopeIndex index = new JoinEnvelopeIndex(data.n + 1, joinExperiment);
 		index.scalarSuffixEnabled = scalarSuffix && index.bitmapComparison == null
 				&& useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression();
 		for (int job = 1; job <= data.n; job++) {
@@ -4796,6 +4867,8 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 					JoinEnvelopeGroup<ForwardLabel> group = addForwardJoinEnvelopeGroup(forwardMap, job, label);
 					if (group != null) {
 						group.memberIndices.set(i);
+					} else if (index.unindexedForward != null) {
+						index.unindexedForward[job].set(i);
 					}
 				}
 			}
@@ -4803,7 +4876,13 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups =
 						new ArrayList<JoinEnvelopeGroup<ForwardLabel>>(forwardMap.values());
 				joinEnvelopeSegments += finalizeJoinEnvelopeGroups(groups, index.scalarSuffixEnabled);
-				Collections.sort(groups);
+				if (JOIN_OPTIMIZATION_COMPARISON && recordJoinPairOrder) {
+					// 两遍独立建组时，用原候选下标固定同成本组的顺序，排除哈希桶顺序差异。
+					groups.sort(Comparator.<JoinEnvelopeGroup<ForwardLabel>>naturalOrder()
+							.thenComparingInt(group -> group.memberIndices.nextSetBit(0)));
+				} else {
+					Collections.sort(groups);
+				}
 				if (index.scalarSuffixEnabled) JoinEnvelopeIndex.foldScalarSuffixFloors(groups);
 				index.forwardByTerminal.set(job, groups);
 				joinEnvelopeForwardGroups += groups.size();
@@ -5079,13 +5158,18 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		}
 		long prefilterStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 		BitSet prefilteredForwardIndices = prefilterIndex == null ? null
-				: prefilterIndex.prunedForwardIndices(lastJob, candidates, backward, lp, this);
+				: prefilterIndex.prunedForwardIndices(lastJob, candidates, backward, lp, this,
+						delay, joinFixedReducedCost);
 		if (JOIN_PHASE_TIMING) {
 			joinPrefilterTotalNanos += System.nanoTime() - prefilterStart;
 		}
 		long remainingStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
+		boolean survivorMask = joinExperiment == JoinExperiment.SURVIVORS && prefilteredForwardIndices != null;
 		for (int i = 0; i < candidates.size() && canContinue();) {
-			if (JOIN_PREFILTER_SKIP_RUNS && prefilteredForwardIndices != null
+			if (survivorMask) {
+				i = prefilteredForwardIndices.nextSetBit(i);
+				if (i < 0) break;
+			} else if (JOIN_PREFILTER_SKIP_RUNS && prefilteredForwardIndices != null
 					&& prefilteredForwardIndices.get(i)) {
 				int nextCandidate = Math.min(candidates.size(), prefilteredForwardIndices.nextClearBit(i));
 				int skipped = nextCandidate - i;
@@ -5117,7 +5201,8 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				}
 				break;
 			}
-			if (prefilteredForwardIndices != null && prefilteredForwardIndices.get(candidateIndex)) {
+			if (!survivorMask && !(JOIN_PREFILTER_SKIP_RUNS && joinExperiment == JoinExperiment.LOOKUP)
+					&& prefilteredForwardIndices != null && prefilteredForwardIndices.get(candidateIndex)) {
 				joinEnvelopePrefilterPotentialPairsPruned++;
 				continue;
 			}
@@ -5132,6 +5217,11 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			double joinDelay) {
 		if (config.maxExactPricingColumns <= 0) {
 			return;
+		}
+		if (JOIN_OPTIMIZATION_COMPARISON && recordJoinPairOrder) {
+			joinPairOrderCount++;
+			joinPairOrderHash = Long.rotateLeft(joinPairOrderHash, 13)
+					^ (((long) forward.labelId << 32) | Integer.toUnsignedLong(backward.labelId));
 		}
 		if (HOT_PATH_DIAGNOSTICS) {
 			joinPairsTried++;
@@ -9009,29 +9099,59 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		private boolean bitmapComparisonPrepared;
 		private boolean setMembersPrepared;
 		private boolean scalarSuffixEnabled;
+		private static final BitSet EMPTY_MASK = new BitSet(0);
+		private final JoinExperiment experiment;
+		private final ArrayList<JoinEnvelopeGroup<BackwardLabel>> touchedGroups;
+		private final BitSet[] unindexedForward;
+		private final JoinGroupConflictIndex survivorConflicts;
 
 		JoinEnvelopeIndex(int size) {
+			this(size, JoinExperiment.NONE);
+		}
+
+		JoinEnvelopeIndex(int size, JoinExperiment experiment) {
 			terminalCount = size;
+			this.experiment = experiment;
+			touchedGroups = experiment == JoinExperiment.CACHE ? new ArrayList<>() : null;
+			unindexedForward = experiment == JoinExperiment.SURVIVORS ? new BitSet[size] : null;
+			survivorConflicts = unindexedForward == null ? null : new JoinGroupConflictIndex();
 			forwardByTerminal = new ArrayList<ArrayList<JoinEnvelopeGroup<ForwardLabel>>>(size);
 			backwardByTerminal = new ArrayList<ArrayList<JoinEnvelopeGroup<BackwardLabel>>>(size);
 			for (int i = 0; i < size; i++) {
 				forwardByTerminal.add(null);
 				backwardByTerminal.add(null);
+				if (unindexedForward != null) unindexedForward[i] = new BitSet(0);
 			}
 		}
 
 		BitSet prunedForwardIndices(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward, LP lp,
 				GCNGBBStyleBidirectionalNgDssr owner) {
+			return prunedForwardIndices(lastJob, candidates, backward, lp, owner, Double.NaN, Double.NaN);
+		}
+
+		BitSet prunedForwardIndices(int lastJob, ArrayList<ForwardLabel> candidates, BackwardLabel backward, LP lp,
+				GCNGBBStyleBidirectionalNgDssr owner, double delay, double joinFixedCost) {
 			JoinEnvelopeGroup<BackwardLabel> backwardGroup = backwardGroupByLabel.get(backward);
+			boolean survivors = survivorConflicts != null;
+			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups = survivors ? forwardByTerminal.get(lastJob) : null;
 			if (backwardGroup == null) {
+				if (survivors) return null;
+				if (experiment == JoinExperiment.EMPTY) return EMPTY_MASK;
 				return new BitSet();
 			}
-			BitSet[] byTerminal = prunedIndicesByBackwardGroup.get(backwardGroup);
-			if (byTerminal == null) {
-				byTerminal = new BitSet[terminalCount];
-				prunedIndicesByBackwardGroup.put(backwardGroup, byTerminal);
+			if (survivors && forwardGroups == null) return null;
+			BitSet[] byTerminal = null;
+			BitSet cachedIndices;
+			if (touchedGroups != null) {
+				cachedIndices = backwardGroup.terminalMask;
+			} else {
+				byTerminal = prunedIndicesByBackwardGroup.get(backwardGroup);
+				if (byTerminal == null) {
+					byTerminal = new BitSet[terminalCount];
+					prunedIndicesByBackwardGroup.put(backwardGroup, byTerminal);
+				}
+				cachedIndices = byTerminal[lastJob];
 			}
-			BitSet cachedIndices = byTerminal[lastJob];
 			if (cachedIndices != null) {
 				return cachedIndices;
 			}
@@ -9041,7 +9161,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups = forwardByTerminal.get(lastJob);
 				if (groups != null) {
 					for (JoinEnvelopeGroup<ForwardLabel> group : groups) {
-						if (canPruneGroup(lastJob, group, backwardGroup, lp, owner)) {
+						if (canPruneGroup(lastJob, group, backwardGroup, lp, owner, null)) {
 							prunedGroups.add(group.comparisonMembers);
 						}
 					}
@@ -9051,14 +9171,18 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				byTerminal[lastJob] = compared;
 				return compared;
 			}
-			BitSet pruned = new BitSet(candidates.size());
+			BitSet pruned = survivors ? (BitSet) unindexedForward[lastJob].clone()
+					: experiment == JoinExperiment.EMPTY ? EMPTY_MASK : new BitSet(candidates.size());
 			if (JOIN_BITMAP_MEMBER_SET) prepareSetMembers();
-			ArrayList<JoinEnvelopeGroup<ForwardLabel>> forwardGroups = forwardByTerminal.get(lastJob);
+			if (!survivors) forwardGroups = forwardByTerminal.get(lastJob);
+			JoinArcTerms terms = experiment == JoinExperiment.ARC
+					? new JoinArcTerms(owner.wholeJoinGroupPairIncompatible(lastJob, backwardGroup, lp.getNode()),
+							delay, joinFixedCost) : null;
 			if (forwardGroups != null) {
 				int end = forwardGroups.size();
 				if (scalarSuffixEnabled && Double.isFinite(backwardGroup.scalarCostFloor)) {
-					double fixedCost = owner.pricingSetupCost(lastJob, backwardGroup.terminalJob)
-							- lp.getArcDual(lastJob, backwardGroup.terminalJob);
+					double fixedCost = terms == null ? owner.pricingSetupCost(lastJob, backwardGroup.terminalJob)
+							- lp.getArcDual(lastJob, backwardGroup.terminalJob) : terms.fixedCost();
 					if (Double.isFinite(fixedCost)) {
 						end = scalarJoinPrefix(forwardGroups, backwardGroup.scalarCostFloor, fixedCost);
 						owner.joinPrefilterScalarSuffixSkipped += forwardGroups.size() - end;
@@ -9069,20 +9193,26 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 					compatibilityShadow.oldConflicts.clear();
 				}
 				// 后缀无须置位：成员的标量下界也过不了原有 label 级截止。
-				for (int i = 0; i < end; i++) {
+				BitSet conflicts = survivors && end > 0
+						? survivorConflicts.find(lastJob, forwardGroups, backwardGroup, end, lp, owner) : null;
+				for (int i = conflicts == null ? 0 : conflicts.nextClearBit(0); i < end;
+						i = conflicts == null ? i + 1 : conflicts.nextClearBit(i + 1)) {
 					JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroups.get(i);
-					if (canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
+					boolean reject = canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner, terms);
+					if (reject != survivors) {
 						if (compatibilityShadow != null) {
 							if (owner.lastJoinGroupIncompatible) compatibilityShadow.oldConflicts.set(i);
 							else compatibilityShadow.otherPruned.set(i);
 						}
-						long bitmapStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
+						boolean timed = owner.joinInnerTiming();
+						long bitmapStart = timed ? System.nanoTime() : 0L;
+						if (pruned == EMPTY_MASK) pruned = new BitSet();
 						if (JOIN_BITMAP_MEMBER_SET) {
 							for (int member : forwardGroup.setMembers) pruned.set(member);
 						} else {
 							pruned.or(forwardGroup.memberIndices);
 						}
-						if (JOIN_PHASE_TIMING) {
+						if (timed) {
 							owner.joinPrefilterBitmapNanos += System.nanoTime() - bitmapStart;
 						}
 					}
@@ -9091,7 +9221,12 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 					compatibilityShadow.compare(lastJob, forwardGroups, backwardGroup, end, pruned, lp, owner);
 				}
 			}
-			byTerminal[lastJob] = pruned;
+			if (touchedGroups != null) {
+				backwardGroup.terminalMask = pruned;
+				touchedGroups.add(backwardGroup);
+			} else {
+				byTerminal[lastJob] = pruned;
+			}
 			return pruned;
 		}
 
@@ -9155,18 +9290,26 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		/** terminal 单调处理；普通/单点后向和 sink 都结束后，只解除本终点的位图引用。 */
 		void releaseTerminalPrunedIndices(int lastJob) {
 			if (compatibilityShadow != null) compatibilityShadow.releaseIndex();
+			if (survivorConflicts != null) survivorConflicts.release();
+			if (touchedGroups != null) {
+				for (JoinEnvelopeGroup<BackwardLabel> group : touchedGroups) group.terminalMask = null;
+				touchedGroups.clear();
+				return;
+			}
 			for (BitSet[] byTerminal : prunedIndicesByBackwardGroup.values()) {
 				byTerminal[lastJob] = null;
 			}
 		}
 
 		private boolean canPruneGroup(int lastJob, JoinEnvelopeGroup<ForwardLabel> forwardGroup,
-				JoinEnvelopeGroup<BackwardLabel> backwardGroup, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
+				JoinEnvelopeGroup<BackwardLabel> backwardGroup, LP lp, GCNGBBStyleBidirectionalNgDssr owner,
+				JoinArcTerms terms) {
 			// 2026-11-05: 同一后向组/终点已由外层BitSet复用，组对只计算一次；不再保存无命中收益的布尔映射。
 			owner.joinEnvelopePrefilterGroupPairs++;
-			long boundStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
-			boolean prune = owner.canPruneJoinEnvelopeGroupPair(lastJob, forwardGroup, backwardGroup, lp);
-			if (JOIN_PHASE_TIMING) {
+			boolean timed = owner.joinInnerTiming();
+			long boundStart = timed ? System.nanoTime() : 0L;
+			boolean prune = owner.canPruneJoinEnvelopeGroupPair(lastJob, forwardGroup, backwardGroup, lp, terms);
+			if (timed) {
 				owner.joinPrefilterBoundNanos += System.nanoTime() - boundStart;
 			}
 			if (prune) {
@@ -9176,20 +9319,60 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		}
 	}
 
+	/** 每个前向终点共享任务到组号的倒排索引；查询结果仅在本次组扫描中使用。 */
+	private static final class JoinGroupConflictIndex {
+		private final BitSet conflicts = new BitSet();
+		private BitSet[] groupsByJob;
+		private int indexedTerminal = -1;
+
+		void release() {
+			groupsByJob = null;
+			indexedTerminal = -1;
+		}
+
+		void prepare(int terminal, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
+				GCNGBBStyleBidirectionalNgDssr owner) {
+			if (indexedTerminal == terminal) return;
+			groupsByJob = new BitSet[owner.data.n + 2];
+			for (int i = 0; i < groups.size(); i++) {
+				PackedBitSet memory = groups.get(i).ngMemorySet;
+				for (int job = memory.nextSetBit(0); job >= 0; job = memory.nextSetBit(job + 1)) {
+					if (owner.joinMemoryIgnoredJobs.contains(job)) continue;
+					if (groupsByJob[job] == null) groupsByJob[job] = new BitSet();
+					groupsByJob[job].set(i);
+				}
+			}
+			indexedTerminal = terminal;
+		}
+
+		BitSet find(int terminal, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
+				JoinEnvelopeGroup<BackwardLabel> backward, int end, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
+			prepare(terminal, groups, owner);
+			conflicts.clear();
+			if (owner.wholeJoinGroupPairIncompatible(terminal, backward, lp.getNode())) {
+				conflicts.set(0, end);
+			} else {
+				PackedBitSet memory = backward.ngMemorySet;
+				for (int job = memory.nextSetBit(0); job >= 0; job = memory.nextSetBit(job + 1)) {
+					if (groupsByJob[job] != null) conflicts.or(groupsByJob[job]);
+				}
+				if (conflicts.length() > end) conflicts.clear(end, conflicts.length());
+			}
+			return conflicts;
+		}
+	}
+
 	/** 同一组前缀重放兼容性和成员落位；时间、标量及PWLF的判定由主遍共享。 */
 	private static final class JoinCompatibilityShadow {
 		final BitSet otherPruned = new BitSet();
 		final BitSet oldConflicts = new BitSet();
-		final BitSet indexedConflicts = new BitSet();
+		final JoinGroupConflictIndex index = new JoinGroupConflictIndex();
 		final BitSet oldMask = new BitSet();
 		final BitSet indexedMask = new BitSet();
-		BitSet[] groupsByJob;
-		int indexedTerminal = -1;
 		long queries, groupsChecked, conflictGroups, indexBuildNanos, oldNanos, indexedNanos, conflictNanos, checkNanos;
 
 		void releaseIndex() {
-			groupsByJob = null;
-			indexedTerminal = -1;
+			index.release();
 		}
 
 		void compare(int lastJob, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
@@ -9204,7 +9387,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				runOld(lastJob, groups, backward, end, lp, owner);
 			}
 			long start = System.nanoTime();
-			if (!oldConflicts.equals(indexedConflicts) || !oldMask.equals(realMask) || !indexedMask.equals(realMask)) {
+			if (!oldConflicts.equals(index.conflicts) || !oldMask.equals(realMask) || !indexedMask.equals(realMask)) {
 				throw new IllegalStateException("Join compatibility shadow mismatch: terminal=" + lastJob
 						+ " backwardTerminal=" + backward.terminalJob + " prefix=" + end);
 			}
@@ -9229,32 +9412,14 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 
 		private void runIndexed(int lastJob, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
 				JoinEnvelopeGroup<BackwardLabel> backward, int end, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
-			if (indexedTerminal != lastJob) {
+			if (index.indexedTerminal != lastJob) {
 				long start = System.nanoTime();
-				groupsByJob = new BitSet[owner.data.n + 2];
-				for (int i = 0; i < groups.size(); i++) {
-					PackedBitSet memory = groups.get(i).ngMemorySet;
-					for (int job = memory.nextSetBit(0); job >= 0; job = memory.nextSetBit(job + 1)) {
-						if (owner.joinMemoryIgnoredJobs.contains(job)) continue;
-						if (groupsByJob[job] == null) groupsByJob[job] = new BitSet();
-						groupsByJob[job].set(i);
-					}
-				}
-				indexedTerminal = lastJob;
+				index.prepare(lastJob, groups, owner);
 				indexBuildNanos += System.nanoTime() - start;
 			}
 			long start = System.nanoTime();
-			indexedConflicts.clear();
 			indexedMask.clear();
-			if (owner.wholeJoinGroupPairIncompatible(lastJob, backward, lp.getNode())) {
-				indexedConflicts.set(0, end);
-			} else {
-				PackedBitSet memory = backward.ngMemorySet;
-				for (int job = memory.nextSetBit(0); job >= 0; job = memory.nextSetBit(job + 1)) {
-					if (groupsByJob[job] != null) indexedConflicts.or(groupsByJob[job]);
-				}
-				if (indexedConflicts.length() > end) indexedConflicts.clear(end, indexedConflicts.length());
-			}
+			BitSet indexedConflicts = index.find(lastJob, groups, backward, end, lp, owner);
 			conflictNanos += System.nanoTime() - start;
 			for (int i = indexedConflicts.nextSetBit(0); i >= 0; i = indexedConflicts.nextSetBit(i + 1)) {
 				addMembers(indexedMask, groups.get(i));
@@ -9291,6 +9456,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		final ArrayList<L> labels = new ArrayList<L>();
 		final BitSet memberIndices = new BitSet();
 		int[] setMembers;
+		BitSet terminalMask;
 		NgJoinBitmapComparison.Group comparisonMembers;
 		double minReducedCost = Utility.big_M;
 		// 后向组保存自身下界；前向组完成建索引后保存所在后缀的下界。

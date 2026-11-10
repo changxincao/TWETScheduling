@@ -86,6 +86,12 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			System.getProperty("twet.bpc.ngDssrJoinScalarSuffix", "true"));
 	private static final boolean JOIN_SCALAR_SUFFIX_COMPARE = Boolean.getBoolean("twet.bpc.ngDssrJoinScalarSuffixCompare");
 	private static final boolean JOIN_PRUNE_REASONS = Boolean.getBoolean("twet.bpc.ngDssrJoinPruneReasons");
+	/** 同轮影子检查，仅比较组兼容性和跳过位图；真实join仍使用旧路径。 */
+	private static final boolean JOIN_COMPATIBILITY_SHADOW = Boolean.getBoolean("twet.bpc.ngDssrJoinCompatibilityShadow");
+	private static final boolean EXTENSION_SCALAR_SHADOW = Boolean.getBoolean("twet.bpc.ngDssrExtensionScalarShadow");
+	private ExtensionScalarShadow forwardScalarShadow;
+	private ExtensionScalarShadow backwardScalarShadow;
+	private boolean lastJoinGroupIncompatible;
 	/** 2026-11-09: 默认逐成员写入可剪位图，避免稀疏组反复OR整张BitSet；可显式关闭做旧OR对照。 */
 	private static final boolean JOIN_BITMAP_MEMBER_SET = Boolean.parseBoolean(
 			System.getProperty("twet.bpc.ngDssrJoinBitmapUseSet", "true"));
@@ -1539,6 +1545,11 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 					? "probe.rank0.reuse" : "probe.partial.reuse", true);
 		}
 		// 2026-05-26: GCNGBB-style 婵犮垼鍩栭悧鏇㈡儑閺夋５瑙勬媴鐞涒剝鐓犻梺闈涙閸婃悂宕㈠☉銏犵闁糕剝顨呴悞濂告煠閻楀牜娈旈柡浣圭墬缁嬪濡堕崟顒佺彿闂傚倸鍟伴崰搴ㄥ垂椤忓牊鏅悘鐐靛亾娴犳﹢鏌涘顒佹崳缂侇喚鍎ょ粙澶愬焵椤掑嫬绠ユい鎰剁到娴?backward labels 闂?crossing-arc join闂?
+		if (EXTENSION_SCALAR_SHADOW && !sriPricingEnabled && !feasibilityPhaseOneObjectiveMode
+				&& completionBounds != null && config.bidirectionalCompletionBoundScalarPruning) {
+			forwardScalarShadow = new ExtensionScalarShadow(true);
+			backwardScalarShadow = new ExtensionScalarShadow(false);
+		}
 		if (!midpointProbeLabelsReadyForJoin) {
 			diagnosticHeartbeat(lp, "forward.start", true);
 			phaseStart = System.nanoTime();
@@ -1556,6 +1567,12 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				exactBackwardExpandNanos += System.nanoTime() - phaseStart;
 				diagnosticHeartbeat(lp, "backward.done", true);
 			}
+		}
+		if (forwardScalarShadow != null) {
+			forwardScalarShadow.print(lp, "F");
+			backwardScalarShadow.print(lp, "B");
+			forwardScalarShadow = null;
+			backwardScalarShadow = null;
 		}
 		if (canContinue() && !timeLimitChecker.isTimeLimitReached()) {
 			diagnosticHeartbeat(lp, "join.compact.start", true);
@@ -3649,10 +3666,14 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			if (HOT_PATH_DIAGNOSTICS) {
 				forwardExtensionCandidates++;
 			}
+			ExtensionScalarShadow shadow = forwardScalarShadow;
+			if (shadow != null) shadow.beginCandidate();
 			long timingStart = extensionTimingStart();
 			ExtensionFrontier candidate = buildForwardExtensionFrontier(label, nextJob, lp);
+			if (shadow != null) shadow.finishBuildSample();
 			recordForwardBuildNanos(timingStart);
 			if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.FORWARD))) {
+				if (shadow != null && shadow.reject) shadow.oldInfeasible++;
 				if (candidate != null) {
 					candidate.release();
 				}
@@ -3665,6 +3686,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			timingStart = extensionTimingStart();
 			boolean boundPruned = isForwardCompletionBoundPruned(nextJob, candidate.noSriFrontier(),
 					candidate.noSriMinReducedCost(Direction.FORWARD));
+			if (shadow != null) shadow.recordResult(boundPruned, label, nextJob, candidate.frontier.head.start);
 			recordForwardBoundCheckNanos(timingStart);
 			if (boundPruned) {
 				completionForwardLabelsPruned++;
@@ -3718,10 +3740,14 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			if (HOT_PATH_DIAGNOSTICS) {
 				backwardExtensionCandidates++;
 			}
+			ExtensionScalarShadow shadow = backwardScalarShadow;
+			if (shadow != null) shadow.beginCandidate();
 			long timingStart = extensionTimingStart();
 			ExtensionFrontier candidate = buildBackwardExtensionFrontier(label, prevJob, lp);
+			if (shadow != null) shadow.finishBuildSample();
 			recordBackwardBuildNanos(timingStart);
 			if (candidate == null || Utility.isBigMValue(candidate.minReducedCost(Direction.BACKWARD))) {
+				if (shadow != null && shadow.reject) shadow.oldInfeasible++;
 				if (candidate != null) {
 					candidate.release();
 				}
@@ -3734,6 +3760,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			timingStart = extensionTimingStart();
 			boolean boundPruned = isBackwardCompletionBoundPruned(prevJob, false, candidate.noSriFrontier(),
 					candidate.noSriMinReducedCost(Direction.BACKWARD));
+			if (shadow != null) shadow.recordResult(boundPruned, label, prevJob, candidate.frontier.tail.end);
 			recordBackwardBoundCheckNanos(timingStart);
 			if (boundPruned) {
 				completionBackwardLabelsPruned++;
@@ -3891,6 +3918,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		if (!hasWindowOverlap) {
 			return null;
 		}
+		if (forwardScalarShadow != null && label.jid > 0) {
+			checkExtensionScalarShadow(forwardScalarShadow, label, nextJob, delay, lp);
+		}
 		timingStart = extensionTimingStart();
 		PiecewiseLinearFunction shifted = label.frontier.shiftX(delay);
 		if (shifted.head == null) {
@@ -4011,6 +4041,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			if (Utility.compareLt(rhoPrime, Math.max(tMid, successorHStart))) {
 				recordBackwardFunctionNanos(timingStart);
 				return null;
+			}
+			if (backwardScalarShadow != null) {
+				checkExtensionScalarShadow(backwardScalarShadow, label, prevJob, delay, lp);
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
 			if (shifted.head == null) {
@@ -4635,19 +4668,25 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			index.releaseTerminalPrunedIndices(lastJob);
 		}
 		joinEnvelopeJoinNanos += System.nanoTime() - joinStart;
+		if (index.compatibilityShadow != null) index.compatibilityShadow.print(lp, this);
 		if (index.bitmapComparison != null) {
 			index.bitmapComparison.print(System.out, "node=" + lp.getNode().id
 					+ diagnosticPricingHeartbeatContext() + " dssrRound=" + ngDssrRound);
 		}
 	}
 
+	private boolean wholeJoinGroupPairIncompatible(int lastJob, JoinEnvelopeGroup<BackwardLabel> backward, Node node) {
+		return backward.ngMemorySet.contains(lastJob)
+				|| isPricingArcForbidden(node, lastJob, backward.terminalJob)
+				|| lastJob == backward.terminalJob;
+	}
+
 	private boolean canPruneJoinEnvelopeGroupPair(int lastJob, JoinEnvelopeGroup<ForwardLabel> forward,
 			JoinEnvelopeGroup<BackwardLabel> backward, LP lp) {
-		Node node = lp.getNode();
-		if (backward.ngMemorySet.contains(lastJob)
-				|| isPricingArcForbidden(node, lastJob, backward.terminalJob)
-				|| forward.terminalJob == backward.terminalJob
-				|| bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet)) {
+		boolean incompatible = wholeJoinGroupPairIncompatible(lastJob, backward, lp.getNode())
+				|| bitSetsIntersectForJoin(forward.ngMemorySet, backward.ngMemorySet);
+		if (JOIN_COMPATIBILITY_SHADOW) lastJoinGroupIncompatible = incompatible;
+		if (incompatible) {
 			if (JOIN_PRUNE_REASONS) joinPrefilterCompatibilityRejected++;
 			return true;
 		}
@@ -6506,6 +6545,133 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		return !Utility.compareLt(lowerBound, cutoff);
 	}
 
+
+	/** 仅在选定中点之后计算，不使用该结果改变候选。 */
+	private void checkExtensionScalarShadow(ExtensionScalarShadow shadow, FunctionLabel label, int job,
+			double delay, LP lp) {
+		boolean sample = (++shadow.windowPassed & 255) == 1;
+		long start = sample ? System.nanoTime() : 0L;
+		try {
+			boolean forward = shadow.forward;
+			double shift = forward ? delay : -delay;
+			double lo = Math.max(Math.max(label.frontier.head.start + shift, label.frontier.domainStart),
+					shadow.windowStart[job]);
+			double hi = Math.min(Math.min(label.frontier.tail.end + shift, label.frontier.domainEnd),
+					shadow.windowEnd[job]);
+			if (!Utility.compareGt(hi, lo)) {
+				shadow.degenerate++;
+				return;
+			}
+			double time = forward ? lo : hi;
+			double completion = forward ? completionBounds.backwardRAfterFloor(job, time)
+					: completionBounds.forwardUBeforeCeil(job, time);
+			if (!Double.isFinite(completion) || Utility.isBigMValue(completion)
+					|| !Double.isFinite(label.minReducedCost) || Utility.isBigMValue(label.minReducedCost)) {
+				shadow.unavailable++;
+				return;
+			}
+			int from = forward ? label.jid : job;
+			int to = forward ? job : label.jid;
+			double fixed = pricingSetupCost(from, to) - lp.getJobDual(job) - lp.getArcDual(from, to);
+			double bound = (label.minReducedCost + shadow.penaltyMin[job] + fixed) + completion;
+			if (!Double.isFinite(bound) || Utility.isBigMValue(bound)) {
+				shadow.unavailable++;
+				return;
+			}
+			shadow.evaluated++;
+			shadow.candidateTime = time;
+			if (!Utility.compareLt(bound, completionBoundCutoff())) {
+				shadow.reject = true;
+				shadow.wouldPrune++;
+				double integer = Math.rint(time);
+				if (Utility.compareEq(time, integer) && (forward ? time < integer : time > integer)) {
+					shadow.inwardSnapWouldPrune++;
+				}
+			}
+		} finally {
+			if (sample) {
+				shadow.samples++;
+				shadow.sampleNanos += System.nanoTime() - start;
+			}
+			if (shadow.reject && (shadow.wouldPrune & 255) == 1) {
+				shadow.buildSampleStart = System.nanoTime();
+			}
+		}
+	}
+
+	private final class ExtensionScalarShadow {
+		final boolean forward;
+		final double[] windowStart = new double[data.n + 1];
+		final double[] windowEnd = new double[data.n + 1];
+		final double[] penaltyMin = new double[data.n + 1];
+		final long setupNanos;
+		long windowPassed, degenerate, unavailable, evaluated, wouldPrune, oldInfeasible, oldPruned, oldKept;
+		long samples, sampleNanos, outsideStoredEndpoint;
+		long buildSampleStart, buildSamples, buildSampleNanos;
+		long baselineConstructed, baselineCbPruned, inwardSnapWouldPrune;
+		int firstKeptLabel = -1, firstKeptJob = -1;
+		boolean reject;
+		double candidateTime;
+
+		ExtensionScalarShadow(boolean forward) {
+			long start = System.nanoTime();
+			this.forward = forward;
+			for (int job = 1; job <= data.n; job++) {
+				double lo = windowStart[job] = Math.max(effectiveJobHStart[job], forward ? 0.0 : tMid);
+				double hi = windowEnd[job] = Math.min(effectiveJobHEnd[job], forward ? tMid : pricingHorizon);
+				penaltyMin[job] = data.w_e[job] * Math.max(0.0, data.d_e[job] - hi)
+						+ data.w_t[job] * Math.max(0.0, lo - data.d_l[job]);
+			}
+			setupNanos = System.nanoTime() - start;
+		}
+
+		void beginCandidate() {
+			reject = false;
+			candidateTime = Double.NaN;
+		}
+
+		void finishBuildSample() {
+			if (buildSampleStart == 0L) return;
+			buildSampleNanos += System.nanoTime() - buildSampleStart;
+			buildSamples++;
+			buildSampleStart = 0L;
+		}
+
+		void recordResult(boolean oldReject, FunctionLabel label, int job, double storedEndpoint) {
+			baselineConstructed++;
+			if (oldReject) baselineCbPruned++;
+			if (Double.isFinite(candidateTime) && (forward ? Utility.compareLt(storedEndpoint, candidateTime)
+					: Utility.compareGt(storedEndpoint, candidateTime))) {
+				outsideStoredEndpoint++;
+			}
+			if (!reject) return;
+			if (oldReject) {
+				oldPruned++;
+			} else {
+				oldKept++;
+				if (firstKeptLabel < 0) {
+					firstKeptLabel = label.labelId;
+					firstKeptJob = job;
+				}
+			}
+		}
+
+		void print(LP lp, String direction) {
+			System.out.printf(java.util.Locale.ROOT,
+					"[NG extension scalar shadow] node=%d%s round=%d dir=%s tMid=%.9f "
+					+ "queuesExhausted=%b probeCompletedExpansion=%b windowPassed=%d degenerate=%d "
+					+ "unavailable=%d evaluated=%d wouldPrune=%d oldPruned=%d oldInfeasible=%d oldKept=%d "
+					+ "baselineConstructed=%d baselineCbPruned=%d outsideStoredEndpoint=%d inwardSnapWouldPrune=%d "
+					+ "firstKeptLabel=%d firstKeptJob=%d cacheMs=%.3f samples=%d "
+					+ "sampledCheckMs=%.3f wouldPruneBuildSamples=%d sampledWouldPruneBuildMs=%.3f%n",
+					lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound, direction, tMid,
+					(forward ? FWUL : BWUL).isEmpty(), midpointProbeLabelsReadyForJoin, windowPassed, degenerate,
+					unavailable, evaluated, wouldPrune, oldPruned, oldInfeasible, oldKept,
+					baselineConstructed, baselineCbPruned, outsideStoredEndpoint, inwardSnapWouldPrune,
+					firstKeptLabel, firstKeptJob, setupNanos / 1e6, samples, sampleNanos / 1e6,
+					buildSamples, buildSampleNanos / 1e6);
+		}
+	}
 
 	private boolean hasCommonCompletionDomain(PiecewiseLinearFunction left, PiecewiseLinearFunction right) {
 		double start = Math.max(left.head.start, right.head.start);
@@ -8836,6 +9002,8 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				new IdentityHashMap<JoinEnvelopeGroup<BackwardLabel>, BitSet[]>();
 		final int terminalCount;
 		final NgJoinBitmapComparison bitmapComparison = JOIN_BITMAP_COMPARISON ? new NgJoinBitmapComparison() : null;
+		final JoinCompatibilityShadow compatibilityShadow = JOIN_COMPATIBILITY_SHADOW && !JOIN_BITMAP_COMPARISON
+				&& !JOIN_SCALAR_SUFFIX_COMPARE ? new JoinCompatibilityShadow() : null;
 		private boolean bitmapComparisonPrepared;
 		private boolean setMembersPrepared;
 		private boolean scalarSuffixEnabled;
@@ -8894,10 +9062,14 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 						owner.joinPrefilterScalarSuffixSkipped += forwardGroups.size() - end;
 					}
 				}
+				if (compatibilityShadow != null) compatibilityShadow.otherPruned.clear();
 				// 后缀无须置位：成员的标量下界也过不了原有 label 级截止。
 				for (int i = 0; i < end; i++) {
 					JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroups.get(i);
 					if (canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
+						if (compatibilityShadow != null && !owner.lastJoinGroupIncompatible) {
+							compatibilityShadow.otherPruned.set(i);
+						}
 						long bitmapStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 						if (JOIN_BITMAP_MEMBER_SET) {
 							for (int member : forwardGroup.setMembers) pruned.set(member);
@@ -8908,6 +9080,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 							owner.joinPrefilterBitmapNanos += System.nanoTime() - bitmapStart;
 						}
 					}
+				}
+				if (compatibilityShadow != null && end > 0) {
+					compatibilityShadow.compare(lastJob, forwardGroups, backwardGroup, end, pruned, lp, owner);
 				}
 			}
 			byTerminal[lastJob] = pruned;
@@ -8973,6 +9148,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 
 		/** terminal 单调处理；普通/单点后向和 sink 都结束后，只解除本终点的位图引用。 */
 		void releaseTerminalPrunedIndices(int lastJob) {
+			if (compatibilityShadow != null) compatibilityShadow.releaseIndex();
 			for (BitSet[] byTerminal : prunedIndicesByBackwardGroup.values()) {
 				byTerminal[lastJob] = null;
 			}
@@ -8991,6 +9167,115 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				owner.joinEnvelopePrefilterGroupPairsPruned++;
 			}
 			return prune;
+		}
+	}
+
+	/** 同一组前缀重放兼容性和成员落位；时间、标量及PWLF的判定由主遍共享。 */
+	private static final class JoinCompatibilityShadow {
+		final BitSet otherPruned = new BitSet();
+		final BitSet oldConflicts = new BitSet();
+		final BitSet indexedConflicts = new BitSet();
+		final BitSet oldMask = new BitSet();
+		final BitSet indexedMask = new BitSet();
+		BitSet[] groupsByJob;
+		int indexedTerminal = -1;
+		long queries, groupsChecked, conflictGroups, indexBuildNanos, oldNanos, indexedNanos, conflictNanos, checkNanos;
+
+		void releaseIndex() {
+			groupsByJob = null;
+			indexedTerminal = -1;
+		}
+
+		void compare(int lastJob, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
+				JoinEnvelopeGroup<BackwardLabel> backward, int end, BitSet realMask, LP lp,
+				GCNGBBStyleBidirectionalNgDssr owner) {
+			// 两种方法交替先跑；组号只对当前已排序的前向终点有效。
+			if ((queries & 1) == 0) {
+				runOld(lastJob, groups, backward, end, lp, owner);
+				runIndexed(lastJob, groups, backward, end, lp, owner);
+			} else {
+				runIndexed(lastJob, groups, backward, end, lp, owner);
+				runOld(lastJob, groups, backward, end, lp, owner);
+			}
+			long start = System.nanoTime();
+			if (!oldConflicts.equals(indexedConflicts) || !oldMask.equals(realMask) || !indexedMask.equals(realMask)) {
+				throw new IllegalStateException("Join compatibility shadow mismatch: terminal=" + lastJob
+						+ " backwardTerminal=" + backward.terminalJob + " prefix=" + end);
+			}
+			conflictGroups += oldConflicts.cardinality();
+			groupsChecked += end;
+			queries++;
+			checkNanos += System.nanoTime() - start;
+		}
+
+		private void runOld(int lastJob, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
+				JoinEnvelopeGroup<BackwardLabel> backward, int end, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
+			long start = System.nanoTime();
+			oldConflicts.clear();
+			oldMask.clear();
+			for (int i = 0; i < end; i++) {
+				JoinEnvelopeGroup<ForwardLabel> group = groups.get(i);
+				boolean incompatible = owner.wholeJoinGroupPairIncompatible(lastJob, backward, lp.getNode())
+						|| owner.bitSetsIntersectForJoin(group.ngMemorySet, backward.ngMemorySet);
+				if (incompatible) oldConflicts.set(i);
+				if (incompatible || otherPruned.get(i)) addMembers(oldMask, group);
+			}
+			oldNanos += System.nanoTime() - start;
+		}
+
+		private void runIndexed(int lastJob, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
+				JoinEnvelopeGroup<BackwardLabel> backward, int end, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
+			if (indexedTerminal != lastJob) {
+				long start = System.nanoTime();
+				groupsByJob = new BitSet[owner.data.n + 2];
+				for (int i = 0; i < groups.size(); i++) {
+					PackedBitSet memory = groups.get(i).ngMemorySet;
+					for (int job = memory.nextSetBit(0); job >= 0; job = memory.nextSetBit(job + 1)) {
+						if (owner.joinMemoryIgnoredJobs.contains(job)) continue;
+						if (groupsByJob[job] == null) groupsByJob[job] = new BitSet();
+						groupsByJob[job].set(i);
+					}
+				}
+				indexedTerminal = lastJob;
+				indexBuildNanos += System.nanoTime() - start;
+			}
+			long start = System.nanoTime();
+			indexedConflicts.clear();
+			indexedMask.clear();
+			if (owner.wholeJoinGroupPairIncompatible(lastJob, backward, lp.getNode())) {
+				indexedConflicts.set(0, end);
+			} else {
+				PackedBitSet memory = backward.ngMemorySet;
+				for (int job = memory.nextSetBit(0); job >= 0; job = memory.nextSetBit(job + 1)) {
+					if (groupsByJob[job] != null) indexedConflicts.or(groupsByJob[job]);
+				}
+				if (indexedConflicts.length() > end) indexedConflicts.clear(end, indexedConflicts.length());
+			}
+			conflictNanos += System.nanoTime() - start;
+			for (int i = indexedConflicts.nextSetBit(0); i >= 0; i = indexedConflicts.nextSetBit(i + 1)) {
+				addMembers(indexedMask, groups.get(i));
+			}
+			for (int i = indexedConflicts.nextClearBit(0); i < end; i = indexedConflicts.nextClearBit(i + 1)) {
+				if (otherPruned.get(i)) addMembers(indexedMask, groups.get(i));
+			}
+			indexedNanos += System.nanoTime() - start;
+		}
+
+		private static void addMembers(BitSet mask, JoinEnvelopeGroup<ForwardLabel> group) {
+			if (JOIN_BITMAP_MEMBER_SET) {
+				for (int member : group.setMembers) mask.set(member);
+			} else {
+				mask.or(group.memberIndices);
+			}
+		}
+
+		void print(LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
+			System.out.printf(java.util.Locale.ROOT,
+					"[NG join compatibility shadow] node=%d%s round=%d tMid=%.9f queries=%d groups=%d "
+					+ "conflicts=%d oldMs=%.3f indexedMs=%.3f indexedConflictWithinMs=%.3f indexBuildMs=%.3f compareMs=%.3f%n",
+					lp.getNode().id, owner.diagnosticPricingHeartbeatContext(), owner.ngDssrRound, owner.tMid,
+					queries, groupsChecked, conflictGroups, oldNanos / 1e6, indexedNanos / 1e6, conflictNanos / 1e6,
+					indexBuildNanos / 1e6, checkNanos / 1e6);
 		}
 	}
 

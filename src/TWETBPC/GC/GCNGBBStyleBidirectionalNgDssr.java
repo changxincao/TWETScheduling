@@ -81,7 +81,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			System.getProperty("twet.bpc.ngDssrJoinPhaseTiming", "true"));
 	/** 同一次join只重复位图聚合；默认关闭，B不进入真实候选流程。 */
 	private static final boolean JOIN_BITMAP_COMPARISON = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare");
-	private static final boolean JOIN_SCALAR_SUFFIX = Boolean.getBoolean("twet.bpc.ngDssrJoinScalarSuffix");
+	/** 默认跳过已被原标量下界排除的组后缀，保留原组顺序；可显式关闭做对照。 */
+	private static final boolean JOIN_SCALAR_SUFFIX = Boolean.parseBoolean(
+			System.getProperty("twet.bpc.ngDssrJoinScalarSuffix", "true"));
 	private static final boolean JOIN_SCALAR_SUFFIX_COMPARE = Boolean.getBoolean("twet.bpc.ngDssrJoinScalarSuffixCompare");
 	private static final boolean JOIN_PRUNE_REASONS = Boolean.getBoolean("twet.bpc.ngDssrJoinPruneReasons");
 	/** 2026-11-09: 默认逐成员写入可剪位图，避免稀疏组反复OR整张BitSet；可显式关闭做旧OR对照。 */

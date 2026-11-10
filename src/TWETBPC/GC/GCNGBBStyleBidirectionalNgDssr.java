@@ -1602,8 +1602,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 					&& !JOIN_BITMAP_COMPARISON) {
 				roundJoinNanos = compareScalarSuffixJoin(lp);
 			} else if (JOIN_OPTIMIZATION_COMPARISON && useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression()
-					&& (JOIN_OPTIMIZATION_MIN_GROUP_CHECKS <= 0 || JOIN_OPTIMIZATION_PAIRS.get() < JOIN_EXPERIMENTS.length)
-					&& !JOIN_BITMAP_COMPARISON && !JOIN_COMPATIBILITY_SHADOW) {
+					&& !JOIN_BITMAP_COMPARISON && !JOIN_COMPATIBILITY_SHADOW
+					&& (JOIN_OPTIMIZATION_MIN_GROUP_CHECKS <= 0 || (JOIN_OPTIMIZATION_PAIRS.get() < JOIN_EXPERIMENTS.length
+							&& canReachJoinGroupCheckThreshold()))) {
 				roundJoinNanos = compareJoinOptimization(lp);
 			} else {
 				joinAllForwardTerminalGroups(lp);
@@ -4643,6 +4644,28 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		return oldNanos;
 	}
 
+	/** 每个检查至少对应一个标签对；上界不足时不做预热、复制或顺序摘要。 */
+	private boolean canReachJoinGroupCheckThreshold() {
+		long forwardCount = 0L;
+		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n;
+				lastJob = activeForwardTerminalJobs.nextSetBit(lastJob + 1)) {
+			forwardCount += activeForwardByLastJob.get(lastJob).size();
+		}
+		if (forwardCount == 0L) return false;
+		// 用除法比较两个标签数的乘积，避免大规模时乘法溢出。
+		long neededBackward = 1L + (JOIN_OPTIMIZATION_MIN_GROUP_CHECKS - 1L) / forwardCount;
+		for (int firstJob = 1; firstJob <= data.n; firstJob++) {
+			neededBackward -= activeBackwardByFirstJob.get(firstJob).size();
+			if (neededBackward <= 0L) return true;
+			for (ArrayList<BackwardLabel> labels : backwardSinglePointByFirstJob.get(firstJob).liveLabelsByCardinality) {
+				if (labels == null) continue;
+				neededBackward -= labels.size();
+				if (neededBackward <= 0L) return true;
+			}
+		}
+		return false;
+	}
+
 	private boolean joinInnerTiming() {
 		return JOIN_PHASE_TIMING && (!JOIN_OPTIMIZATION_COMPARISON || joinExperiment != JoinExperiment.TIMERS);
 	}
@@ -4688,6 +4711,11 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			shadow.nonElementaryNegativeRoutes = new ArrayList<>(nonElementaryNegativeRoutes);
 			shadow.nonElementaryNegativeRouteBySignature = new HashMap<>(nonElementaryNegativeRouteBySignature);
 			shadow.nonElementaryNegativeRouteRanking = new TreeSet<>(nonElementaryNegativeRouteRanking);
+			// 保留目标跟踪判据，但影子不向主遍的日志或观察集合写入。
+			if (targetTrace != null) shadow.targetTrace = new StringBuilder();
+			if (targetTraceWatchedLabelIds != null) {
+				shadow.targetTraceWatchedLabelIds = new HashSet<>(targetTraceWatchedLabelIds);
+			}
 			if (ngDssrCurrentRoundNegativeRoutes != null) {
 				shadow.ngDssrCurrentRoundNegativeRoutes = new HashMap<>(ngDssrCurrentRoundNegativeRoutes);
 			}

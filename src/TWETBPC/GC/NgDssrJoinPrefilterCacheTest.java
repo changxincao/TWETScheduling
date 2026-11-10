@@ -31,6 +31,11 @@ public final class NgDssrJoinPrefilterCacheTest {
     private static final Class<?> BACKWARD = nested("BackwardLabel");
 
     public static void main(String[] args) throws Exception {
+        if (args.length == 1 && "--control-only".equals(args[0])) {
+            testDiagnosticControl();
+            System.out.println("NG-DSSR Join diagnostic control passed");
+            return;
+        }
         boolean baseline = args.length == 1 && "--baseline".equals(args[0]);
         testMasksAndReuse(!baseline);
         if (Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")
@@ -47,6 +52,49 @@ public final class NgDssrJoinPrefilterCacheTest {
         testPricingSnapshot(true, false);
         testPricingSnapshot(false, false);
         System.out.println("NgDssrJoinPrefilterCacheTest passed");
+    }
+
+    /** 验证诊断前置上界和 trace 隔离，不构造 LP 或启动定价。 */
+    @SuppressWarnings("unchecked")
+    private static void testDiagnosticControl() throws Exception {
+        require(Long.getLong("twet.bpc.ngDssrJoinOptimizationMinGroupChecks", 0L) == 12L,
+                "run this fixture with a group threshold of 12");
+        var owner = new GCNGBBStyleBidirectionalNgDssr(data(), config());
+        Method initialize = OWNER.getDeclaredMethod("initializeLabelSearchState");
+        initialize.setAccessible(true);
+        initialize.invoke(owner);
+        Method bound = OWNER.getDeclaredMethod("canReachJoinGroupCheckThreshold");
+        bound.setAccessible(true);
+        var forwards = (ArrayList<ArrayList<Object>>) field(owner, "activeForwardByLastJob");
+        var backwards = (ArrayList<ArrayList<Object>>) field(owner, "activeBackwardByFirstJob");
+        var singlePoints = (ArrayList<Object>) field(owner, "backwardSinglePointByFirstJob");
+        forwards.get(1).addAll(java.util.Collections.nCopies(3, null));
+        backwards.get(2).addAll(java.util.Collections.nCopies(3, null));
+        require(!(boolean) bound.invoke(owner), "inactive forward terminal cannot enter the scan");
+        ((PackedBitSet) field(owner, "activeForwardTerminalJobs")).add(1);
+        require(!(boolean) bound.invoke(owner), "3 x 3 is below threshold");
+        var buckets = (ArrayList<ArrayList<Object>>) field(singlePoints.get(2), "liveLabelsByCardinality");
+        buckets.add(new ArrayList<>(java.util.Collections.nCopies(1, null)));
+        require((boolean) bound.invoke(owner), "3 x (3 + 1) must include single-point labels at equality");
+
+        set(owner, "generatedColumns", new ArrayList<>());
+        set(owner, "generatedColumnCandidates", new java.util.PriorityQueue<>());
+        set(owner, "generatedCandidateBySignature", new java.util.HashMap<>());
+        set(owner, "nonElementaryNegativeRoutes", new ArrayList<>());
+        set(owner, "nonElementaryNegativeRouteBySignature", new java.util.HashMap<>());
+        set(owner, "nonElementaryNegativeRouteRanking", new java.util.TreeSet<>());
+        set(owner, "targetTrace", new StringBuilder("primary"));
+        set(owner, "targetTraceEventLimit", 3);
+        set(owner, "targetTraceWatchedLabelIds", new java.util.HashSet<>(java.util.Set.of(1)));
+        Method clone = OWNER.getDeclaredMethod("copyJoinComparisonState");
+        clone.setAccessible(true);
+        Object shadow = clone.invoke(owner);
+        ((StringBuilder) field(shadow, "targetTrace")).append("shadow");
+        ((java.util.Set<Integer>) field(shadow, "targetTraceWatchedLabelIds")).add(2);
+        require("primary".contentEquals((StringBuilder) field(owner, "targetTrace"))
+                && java.util.Set.of(1).equals(field(owner, "targetTraceWatchedLabelIds"))
+                && field(owner, "targetTraceEventLimit").equals(field(shadow, "targetTraceEventLimit")),
+                "shadow trace writes must not leak, but tracing eligibility must be retained");
     }
 
     @SuppressWarnings("unchecked")

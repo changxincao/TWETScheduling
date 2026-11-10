@@ -9062,13 +9062,17 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 						owner.joinPrefilterScalarSuffixSkipped += forwardGroups.size() - end;
 					}
 				}
-				if (compatibilityShadow != null) compatibilityShadow.otherPruned.clear();
+				if (compatibilityShadow != null) {
+					compatibilityShadow.otherPruned.clear();
+					compatibilityShadow.oldConflicts.clear();
+				}
 				// 后缀无须置位：成员的标量下界也过不了原有 label 级截止。
 				for (int i = 0; i < end; i++) {
 					JoinEnvelopeGroup<ForwardLabel> forwardGroup = forwardGroups.get(i);
 					if (canPruneGroup(lastJob, forwardGroup, backwardGroup, lp, owner)) {
-						if (compatibilityShadow != null && !owner.lastJoinGroupIncompatible) {
-							compatibilityShadow.otherPruned.set(i);
+						if (compatibilityShadow != null) {
+							if (owner.lastJoinGroupIncompatible) compatibilityShadow.oldConflicts.set(i);
+							else compatibilityShadow.otherPruned.set(i);
 						}
 						long bitmapStart = JOIN_PHASE_TIMING ? System.nanoTime() : 0L;
 						if (JOIN_BITMAP_MEMBER_SET) {
@@ -9211,13 +9215,11 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		private void runOld(int lastJob, ArrayList<JoinEnvelopeGroup<ForwardLabel>> groups,
 				JoinEnvelopeGroup<BackwardLabel> backward, int end, LP lp, GCNGBBStyleBidirectionalNgDssr owner) {
 			long start = System.nanoTime();
-			oldConflicts.clear();
 			oldMask.clear();
 			for (int i = 0; i < end; i++) {
 				JoinEnvelopeGroup<ForwardLabel> group = groups.get(i);
 				boolean incompatible = owner.wholeJoinGroupPairIncompatible(lastJob, backward, lp.getNode())
 						|| owner.bitSetsIntersectForJoin(group.ngMemorySet, backward.ngMemorySet);
-				if (incompatible) oldConflicts.set(i);
 				if (incompatible || otherPruned.get(i)) addMembers(oldMask, group);
 			}
 			oldNanos += System.nanoTime() - start;

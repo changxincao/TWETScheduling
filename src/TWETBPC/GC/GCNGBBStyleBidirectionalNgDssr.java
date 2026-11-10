@@ -4043,7 +4043,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 				return null;
 			}
 			if (backwardScalarShadow != null) {
+				recordBackwardFunctionNanos(timingStart);
 				checkExtensionScalarShadow(backwardScalarShadow, label, prevJob, delay, lp);
+				timingStart = extensionTimingStart();
 			}
 			PiecewiseLinearFunction shifted = label.frontier.shiftX(-delay);
 			if (shifted.head == null) {

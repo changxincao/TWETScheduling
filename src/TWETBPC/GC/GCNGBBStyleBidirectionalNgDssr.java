@@ -95,6 +95,9 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			.map(String::trim).filter(s -> !s.isEmpty())
 			.map(s -> JoinExperiment.valueOf(s.toUpperCase(Locale.ROOT))).toArray(JoinExperiment[]::new);
 	private static final boolean JOIN_OPTIMIZATION_COMPARISON = JOIN_EXPERIMENTS.length > 0;
+	/** 重轮诊断仅在原遍实际达到指定组对数后重放，每个指定变体采一轮。 */
+	private static final long JOIN_OPTIMIZATION_MIN_GROUP_CHECKS =
+			Long.getLong("twet.bpc.ngDssrJoinOptimizationMinGroupChecks", 0L);
 	// 每次 pricing 新建引擎；按进程轮换，短 pricing 也能覆盖各对照项及两种执行顺序。
 	private static final AtomicLong JOIN_OPTIMIZATION_PAIRS = new AtomicLong();
 	private JoinExperiment joinExperiment = JoinExperiment.NONE;
@@ -1599,6 +1602,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 					&& !JOIN_BITMAP_COMPARISON) {
 				roundJoinNanos = compareScalarSuffixJoin(lp);
 			} else if (JOIN_OPTIMIZATION_COMPARISON && useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression()
+					&& (JOIN_OPTIMIZATION_MIN_GROUP_CHECKS <= 0 || JOIN_OPTIMIZATION_PAIRS.get() < JOIN_EXPERIMENTS.length)
 					&& !JOIN_BITMAP_COMPARISON && !JOIN_COMPATIBILITY_SHADOW) {
 				roundJoinNanos = compareJoinOptimization(lp);
 			} else {
@@ -4583,14 +4587,14 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 
 	/** 同轮每次只改变一个因素；影子不进入候选列或DSSR更新。 */
 	private long compareJoinOptimization(LP lp) {
-		long pair = JOIN_OPTIMIZATION_PAIRS.getAndIncrement();
-		JoinExperiment experiment = JOIN_EXPERIMENTS[(int) (pair % JOIN_EXPERIMENTS.length)];
-		boolean primaryFirst = ((pair / JOIN_EXPERIMENTS.length) & 1L) == 0;
+		boolean heavyOnly = JOIN_OPTIMIZATION_MIN_GROUP_CHECKS > 0;
+		long pair = heavyOnly ? 0L : JOIN_OPTIMIZATION_PAIRS.getAndIncrement();
+		boolean primaryFirst = heavyOnly || ((pair / JOIN_EXPERIMENTS.length) & 1L) == 0;
 		long warmStart = System.nanoTime();
 		warmSharedJoinExtensions();
 		long warmNanos = System.nanoTime() - warmStart;
 		GCNGBBStyleBidirectionalNgDssr shadow = copyJoinComparisonState();
-		shadow.joinExperiment = experiment;
+		JoinExperiment experiment;
 		long oldNanos = 0L;
 		long newNanos;
 		recordJoinPairOrder = shadow.recordJoinPairOrder = true;
@@ -4598,6 +4602,18 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		shadow.joinPairOrderCount = shadow.joinPairOrderHash = 0L;
 		try {
 			if (primaryFirst) oldNanos = timedScalarSuffixJoin(lp, JOIN_SCALAR_SUFFIX);
+			if (heavyOnly) {
+				if (joinEnvelopePrefilterGroupPairs < JOIN_OPTIMIZATION_MIN_GROUP_CHECKS) return oldNanos;
+				pair = JOIN_OPTIMIZATION_PAIRS.getAndIncrement();
+				if (pair >= JOIN_EXPERIMENTS.length) return oldNanos;
+			}
+			experiment = JOIN_EXPERIMENTS[(int) (pair % JOIN_EXPERIMENTS.length)];
+			shadow.joinExperiment = experiment;
+			if (heavyOnly) {
+				System.out.printf(Locale.US, "[NG join heavy target] node=%d%s dssrRound=%d variant=%s oldChecks=%d%n",
+						lp.getNode().id, diagnosticPricingHeartbeatContext(), ngDssrRound, experiment,
+						joinEnvelopePrefilterGroupPairs);
+			}
 			try (EndpointPricingDiagnostics ignored = EndpointPricingDiagnostics.begin()) {
 				newNanos = shadow.timedScalarSuffixJoin(lp, JOIN_SCALAR_SUFFIX);
 			}

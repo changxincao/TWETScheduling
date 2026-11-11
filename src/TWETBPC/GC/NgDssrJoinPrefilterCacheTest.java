@@ -33,6 +33,7 @@ public final class NgDssrJoinPrefilterCacheTest {
     public static void main(String[] args) throws Exception {
         if (args.length == 1 && "--control-only".equals(args[0])) {
             testDiagnosticControl();
+            testCombinedSwitches();
             System.out.println("NG-DSSR Join diagnostic control passed");
             return;
         }
@@ -52,6 +53,20 @@ public final class NgDssrJoinPrefilterCacheTest {
         testPricingSnapshot(true, false);
         testPricingSnapshot(false, false);
         System.out.println("NgDssrJoinPrefilterCacheTest passed");
+    }
+
+    private static void testCombinedSwitches() throws Exception {
+        Class<?> type = nested("JoinExperiment");
+        Method uses = type.getDeclaredMethod("uses", type);
+        uses.setAccessible(true);
+        Object combined = Arrays.stream(type.getEnumConstants()).filter(v -> v.toString().equals("COMBINED")).findFirst().orElseThrow();
+        for (Object option : type.getEnumConstants()) {
+            boolean expected = switch (option.toString()) {
+                case "ARC", "CACHE", "EMPTY", "LOOKUP", "SURVIVORS", "COMBINED" -> true;
+                default -> false;
+            };
+            require((boolean) uses.invoke(combined, option) == expected, "combined option selection: " + option);
+        }
     }
 
     /** 验证诊断前置上界和 trace 隔离，不构造 LP 或启动定价。 */
@@ -218,7 +233,7 @@ public final class NgDssrJoinPrefilterCacheTest {
             Constructor<?> constructor = INDEX.getDeclaredConstructor(int.class, experiment);
             constructor.setAccessible(true);
             Method prune = INDEX.getDeclaredMethod("prunedForwardIndices", int.class, ArrayList.class,
-                    BACKWARD, LP.class, OWNER);
+                    BACKWARD, LP.class, OWNER, double.class, double.class);
             prune.setAccessible(true);
             Method release = INDEX.getDeclaredMethod("releaseTerminalPrunedIndices", int.class);
             release.setAccessible(true);
@@ -227,7 +242,7 @@ public final class NgDssrJoinPrefilterCacheTest {
             var candidates = new ArrayList<>(java.util.Collections.nCopies(130, null));
             Object backward = backward(1, 2), sameGroup = backward(2, 2), unmapped = backward(3, 2);
             Object backwardGroup = group(true, 2, bits(4, 5), 0, 0, 1e6);
-            for (String name : new String[] {"CACHE", "EMPTY", "SURVIVORS"}) {
+            for (String name : new String[] {"CACHE", "EMPTY", "SURVIVORS", "COMBINED"}) {
                 Object index = constructor.newInstance(data.n + 1, Enum.valueOf(experiment, name));
                 var terminals = (ArrayList<ArrayList<Object>>) field(index, "forwardByTerminal");
                 terminals.set(1, new ArrayList<>(Arrays.asList(
@@ -239,39 +254,47 @@ public final class NgDssrJoinPrefilterCacheTest {
                 var byLabel = (IdentityHashMap<Object, Object>) field(index, "backwardGroupByLabel");
                 byLabel.put(backward, backwardGroup);
                 byLabel.put(sameGroup, backwardGroup);
-                boolean survivors = name.equals("SURVIVORS");
+                boolean survivors = name.equals("SURVIVORS") || name.equals("COMBINED");
                 if (survivors) ((BitSet[]) field(index, "unindexedForward"))[1].set(12);
                 BitSet expected = new BitSet();
                 for (int member : survivors ? new int[] {1, 12, 64} : new int[] {0, 5, 8, 129}) {
                     expected.set(member);
                 }
-                BitSet mask = (BitSet) prune.invoke(index, 1, candidates, backward, lp, owner);
-                require(mask.equals(expected) && mask == prune.invoke(index, 1, candidates, sameGroup, lp, owner),
+                BitSet mask = experimentalMask(prune, index, 1, candidates, backward, lp, owner, data);
+                require(mask.equals(expected) && mask == experimentalMask(prune, index, 1, candidates, sameGroup, lp, owner, data),
                         name + " must produce and reuse the terminal mask");
                 release.invoke(index, 1);
-                BitSet next = (BitSet) prune.invoke(index, 3, candidates, backward, lp, owner);
+                BitSet next = experimentalMask(prune, index, 3, candidates, backward, lp, owner, data);
                 require(next.cardinality() == (survivors ? 1 : 0) && next.get(3) == survivors && mask.equals(expected),
                         name + " must not transfer mask state to the next terminal");
-                Object noGroup = prune.invoke(index, 3, candidates, unmapped, lp, owner);
+                Object noGroup = experimentalMask(prune, index, 3, candidates, unmapped, lp, owner, data);
                 require(survivors ? noGroup == null : ((BitSet) noGroup).isEmpty(),
                         name + " must preserve the ungrouped backward fallback");
                 release.invoke(index, 3);
                 if (survivors) {
-                    require(prune.invoke(index, 6, candidates, backward, lp, owner) == null,
+                    require(experimentalMask(prune, index, 6, candidates, backward, lp, owner, data) == null,
                             "an ungrouped forward terminal must fall back to the original label scan");
                     ArrayList<Object> groups = terminals.get(1);
                     groups.add(groups.remove(2));
                     for (Object group : groups) set(group, "scalarCostFloor", field(group, "minReducedCost"));
                     fold.invoke(null, groups);
                     set(index, "scalarSuffixEnabled", true);
-                    require(expected.equals(prune.invoke(index, 1, candidates, backward, lp, owner))
-                            && (Long) field(owner, "joinPrefilterScalarSuffixSkipped") == 1,
+                    long skipped = (Long) field(owner, "joinPrefilterScalarSuffixSkipped");
+                    require(expected.equals(experimentalMask(prune, index, 1, candidates, backward, lp, owner, data))
+                            && (Long) field(owner, "joinPrefilterScalarSuffixSkipped") == skipped + 1,
                             "survivor mask must omit a cost suffix without losing an ungrouped label");
+                    release.invoke(index, 1);
                 }
             }
         } finally {
             lp.closeModel();
         }
+    }
+
+    private static BitSet experimentalMask(Method prune, Object index, int terminal, ArrayList<?> candidates,
+            Object backward, LP lp, GCNGBBStyleBidirectionalNgDssr owner, Data data) throws Exception {
+        return (BitSet) prune.invoke(index, terminal, candidates, backward, lp, owner,
+                data.getSetUp(terminal, 2) + data.getProcessT(2), data.getSetupCost(terminal, 2) - lp.getArcDual(terminal, 2));
     }
 
     @SuppressWarnings("unchecked")

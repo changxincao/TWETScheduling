@@ -109,6 +109,12 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 			Long.getLong("twet.bpc.ngDssrJoinOptimizationMinGroupChecks", 0L);
 	private static final boolean JOIN_TRIPLE_COMPARISON =
 			JOIN_EXPERIMENTS.length == 1 && JOIN_EXPERIMENTS[0] == JoinExperiment.TRIPLE;
+	// 正式预筛固定使用 B；显式旧版诊断仍以拒绝位图为基准，不混入 C 的额外优化。
+	private static final JoinExperiment DEFAULT_JOIN_EXPERIMENT = Boolean.parseBoolean(
+			System.getProperty("twet.bpc.ngDssrJoinSurvivors", "true"))
+			&& !JOIN_OPTIMIZATION_COMPARISON && !JOIN_BITMAP_COMPARISON && !JOIN_SCALAR_SUFFIX_COMPARE
+			&& !JOIN_COMPATIBILITY_SHADOW && !JOIN_PRUNE_REASONS && JOIN_PREFILTER_SKIP_RUNS
+					? JoinExperiment.SURVIVORS : JoinExperiment.NONE;
 	private static final String[] JOIN_TRIPLE_ORDERS = {"ABC", "BCA", "CAB", "ACB", "CBA", "BAC"};
 	static {
 		if (Arrays.asList(JOIN_EXPERIMENTS).contains(JoinExperiment.TRIPLE)
@@ -118,7 +124,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 	}
 	// 每次 pricing 新建引擎；按进程轮换，短 pricing 也能覆盖各对照项及两种执行顺序。
 	private static final AtomicLong JOIN_OPTIMIZATION_PAIRS = new AtomicLong();
-	private JoinExperiment joinExperiment = JoinExperiment.NONE;
+	private JoinExperiment joinExperiment = DEFAULT_JOIN_EXPERIMENT;
 	private boolean recordJoinPairOrder;
 	private long joinPairOrderCount;
 	private long joinPairOrderHash;
@@ -126,7 +132,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 	private ExtensionScalarShadow forwardScalarShadow;
 	private ExtensionScalarShadow backwardScalarShadow;
 	private boolean lastJoinGroupIncompatible;
-	/** 2026-11-09: 默认逐成员写入可剪位图，避免稀疏组反复OR整张BitSet；可显式关闭做旧OR对照。 */
+	/** 2026-11-09: 默认逐成员写入标签位图，避免稀疏组反复OR整张BitSet；可显式关闭做旧OR对照。 */
 	private static final boolean JOIN_BITMAP_MEMBER_SET = Boolean.parseBoolean(
 			System.getProperty("twet.bpc.ngDssrJoinBitmapUseSet", "true"));
 	private enum LabelQueueOrdering {
@@ -4834,7 +4840,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 
 	private void joinAllForwardTerminalGroupsWithEnvelopePrefilter(LP lp, boolean scalarSuffix) {
 		long buildStart = System.nanoTime();
-		JoinEnvelopeIndex index = buildJoinEnvelopeIndex(scalarSuffix);
+		JoinEnvelopeIndex index = buildJoinEnvelopeIndex(scalarSuffix, joinExperiment);
 		if (index.bitmapComparison != null) index.prepareBitmapComparison();
 		else if (JOIN_BITMAP_MEMBER_SET) index.prepareSetMembers();
 		joinEnvelopeBuildNanos += System.nanoTime() - buildStart;
@@ -4904,7 +4910,7 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 
 	private void joinAllForwardTerminalGroupsByEnvelope(LP lp) {
 		long buildStart = System.nanoTime();
-		JoinEnvelopeIndex index = buildJoinEnvelopeIndex();
+		JoinEnvelopeIndex index = buildJoinEnvelopeIndex(JOIN_SCALAR_SUFFIX, JoinExperiment.NONE);
 		joinEnvelopeBuildNanos += System.nanoTime() - buildStart;
 		long joinStart = System.nanoTime();
 		for (int lastJob = activeForwardTerminalJobs.nextSetBit(0); lastJob >= 0 && lastJob <= data.n && canContinue();
@@ -4966,12 +4972,8 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		}
 	}
 
-	private JoinEnvelopeIndex buildJoinEnvelopeIndex() {
-		return buildJoinEnvelopeIndex(JOIN_SCALAR_SUFFIX);
-	}
-
-	private JoinEnvelopeIndex buildJoinEnvelopeIndex(boolean scalarSuffix) {
-		JoinEnvelopeIndex index = new JoinEnvelopeIndex(data.n + 1, joinExperiment);
+	private JoinEnvelopeIndex buildJoinEnvelopeIndex(boolean scalarSuffix, JoinExperiment experiment) {
+		JoinEnvelopeIndex index = new JoinEnvelopeIndex(data.n + 1, experiment);
 		index.scalarSuffixEnabled = scalarSuffix && index.bitmapComparison == null
 				&& useJoinEnvelopePrefilter() && !useJoinEnvelopeCompression();
 		for (int job = 1; job <= data.n; job++) {
@@ -5284,8 +5286,11 @@ public class GCNGBBStyleBidirectionalNgDssr implements Cloneable {
 		boolean survivorMask = joinExperiment.uses(JoinExperiment.SURVIVORS) && prefilteredForwardIndices != null;
 		for (int i = 0; i < candidates.size() && canContinue();) {
 			if (survivorMask) {
-				i = prefilteredForwardIndices.nextSetBit(i);
-				if (i < 0) break;
+				int nextCandidate = prefilteredForwardIndices.nextSetBit(i);
+				// 用已有跳跃距离计数；B 不需要为统计访问被跳过的标签。
+				joinEnvelopePrefilterPotentialPairsPruned += (nextCandidate < 0 ? candidates.size() : nextCandidate) - i;
+				if (nextCandidate < 0) break;
+				i = nextCandidate;
 			} else if (JOIN_PREFILTER_SKIP_RUNS && prefilteredForwardIndices != null
 					&& prefilteredForwardIndices.get(i)) {
 				int nextCandidate = Math.min(candidates.size(), prefilteredForwardIndices.nextClearBit(i));

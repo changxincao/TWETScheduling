@@ -42,6 +42,7 @@ public final class NgDssrJoinPrefilterCacheTest {
         if (Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")
                 || propertyWithDefault("twet.bpc.ngDssrJoinBitmapUseSet", true)) testRealGroupMembers();
         if (!baseline) {
+            testConfiguredJoinMode();
             require(Arrays.stream(INDEX.getDeclaredFields()).noneMatch(f -> f.getName().equals("pruneByGroup")),
                     "unused group-pair cache must not be retained");
             if (!Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")) testScalarSuffix();
@@ -218,6 +219,21 @@ public final class NgDssrJoinPrefilterCacheTest {
 
     private static boolean propertyWithDefault(String name, boolean defaultValue) {
         return Boolean.parseBoolean(System.getProperty(name, Boolean.toString(defaultValue)));
+    }
+
+    /** 正式走固定保留位图；历史诊断的主遍仍是旧拒绝位图。 */
+    private static void testConfiguredJoinMode() throws Exception {
+        boolean diagnostic = Boolean.getBoolean("twet.bpc.ngDssrJoinBitmapCompare")
+                || Boolean.getBoolean("twet.bpc.ngDssrJoinScalarSuffixCompare")
+                || Boolean.getBoolean("twet.bpc.ngDssrJoinCompatibilityShadow")
+                || Boolean.getBoolean("twet.bpc.ngDssrJoinPruneReasons")
+                || !propertyWithDefault("twet.bpc.ngDssrJoinPrefilterSkipRuns", true)
+                || Arrays.stream(System.getProperty("twet.bpc.ngDssrJoinOptimizationCompare", "").split(","))
+                        .anyMatch(name -> !name.isBlank());
+        String expected = propertyWithDefault("twet.bpc.ngDssrJoinSurvivors", true) && !diagnostic
+                ? "SURVIVORS" : "NONE";
+        var owner = new GCNGBBStyleBidirectionalNgDssr(data(), config());
+        require(expected.equals(field(owner, "joinExperiment").toString()), "configured join mode: " + expected);
     }
 
     /** 同组复用、跨终点释放，以及反向位图保留未入组的标签。 */

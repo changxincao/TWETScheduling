@@ -115,6 +115,7 @@ public class Tree {
 		// 固定初始列实验没有目标实例侧的启发式 Solution；bundle 中的 incumbent 列仍是完整可行解。
 		double incumbentCost = incumbentCostFromInitial(initial);
 		double bestBound = Double.POSITIVE_INFINITY;
+		double currentNodeReportableBound = Double.NEGATIVE_INFINITY;
 		ArrayList<Integer> incumbentColumnIds = new ArrayList<Integer>(initial.getIncumbentColumnIds());
 		double[] incumbentOutsourcingValues = initialOutsourcingValues(initial);
 		int processedNodes = 0;
@@ -133,6 +134,9 @@ public class Tree {
 		while (!queue.isEmpty() && processedNodes < config.maxNodes && !isSolveTimeLimitReached(solveStartNanos)) {
 			Node node = queue.poll();
 			node.id = ++processedNodes;
+			// 2026-11-12: 非根节点的 pseudoCost 是父节点闭合后写入的合法子树下界。
+			// 当前节点中途停止时，后续较弱的观测界不能把这个继承下界冲掉。
+			currentNodeReportableBound = inheritedReportableNodeBound(node);
 			traceSink.onNodePicked(node, queue.size(), totalPoolSize(), cutPool.size());
 			heartbeat(node, "node.pick " + node.diagnosticSummary());
 			// 2026-06-28: 暂停 node-local horizon 改进调用。这个模块的本意是用当前
@@ -162,7 +166,9 @@ public class Tree {
 				if (Double.isFinite(reportableNodeBound)) {
 					// 2026-09-15: 节点在 exact pricing 中途超时时，之前完整返回的 reduced-cost
 					// certificate 仍给出合法节点下界；只有一次 certificate 都没有时才保持未知。
-					bestBound = updateReportedBound(queue, reportableNodeBound, incumbentCost);
+					currentNodeReportableBound = strongestReportableNodeBound(currentNodeReportableBound,
+							reportableNodeBound);
+					bestBound = updateReportedBound(queue, currentNodeReportableBound, incumbentCost);
 				}
 
 				if (solution.getStatus() == TWETMasterStatus.NOT_SOLVED) {
@@ -183,14 +189,17 @@ public class Tree {
 			recordNodeCoverageDiagnostics(lp, solution);
 			if (pc.wasLastNodePrunedByDualBound()) {
 				double dualBound = Math.max(pc.getLastObservedDualBound(), certifiedNodeBound);
-				bestBound = updateReportedBound(queue, dualBound, incumbentCost);
+				currentNodeReportableBound = strongestReportableNodeBound(currentNodeReportableBound, dualBound);
+				bestBound = updateReportedBound(queue, currentNodeReportableBound, incumbentCost);
 				traceSink.onNodeClosed(node, "pruned_by_dual_bound", queue.size());
 				continue;
 			}
 
 			if (solution.getStatus() == TWETMasterStatus.LP_RELAXATION) {
 				double currentNodeBound = Math.max(solution.getObjectiveValue(), certifiedNodeBound);
-				bestBound = updateReportedBound(queue, currentNodeBound, incumbentCost);
+				currentNodeReportableBound = strongestReportableNodeBound(currentNodeReportableBound,
+						currentNodeBound);
+				bestBound = updateReportedBound(queue, currentNodeReportableBound, incumbentCost);
 			}
 
 			boolean incumbentUpdated = false;
@@ -364,7 +373,7 @@ public class Tree {
 		boolean timeLimitReached = isSolveTimeLimitReached(solveStartNanos);
 		boolean currentNodeIncomplete = stoppedByTimeLimit || failedByMaster;
 		bestBound = finalBound(queue, incumbentCost, bestBound,
-				currentNodeIncomplete || timeLimitReached, currentNodeIncomplete);
+				currentNodeIncomplete || timeLimitReached, currentNodeIncomplete, currentNodeReportableBound);
 		TWETSolveStatus status = finalStatus(processedNodes, queue.isEmpty(), stoppedByTimeLimit, timeLimitReached,
 				failedByMaster);
 		if (lightweightSeedPreparationCalls > 0) {
@@ -1010,25 +1019,40 @@ public class Tree {
 		return PC.strongestCertifiedBound(bestClosureBound, bestObservedDualBound);
 	}
 
+	private static double inheritedReportableNodeBound(Node node) {
+		if (node.depth <= 0 || !Double.isFinite(node.pseudoCost) || Utility.isBigMValue(node.pseudoCost)) {
+			return Double.NEGATIVE_INFINITY;
+		}
+		return node.pseudoCost;
+	}
+
 	static double finalBound(PriorityQueue<Node> queue, double incumbentCost, double lastReportedBound,
-			boolean searchIncomplete, boolean currentNodeIncomplete) {
+			boolean searchIncomplete, boolean currentNodeIncomplete, double currentNodeReportableBound) {
 		// 2026-05-19: 如果队列为空，所有节点已经关闭，最终 LB 应等于 incumbent；
 		// 如果搜索因时限或 master 失败而中断，队列为空也不能伪装成正常闭合。
-		if (queue.isEmpty()) {
-			return searchIncomplete ? lastReportedBound : incumbentCost;
+		if (queue.isEmpty() && !searchIncomplete) {
+			return incumbentCost;
 		}
-		double bound = queue.peek().pseudoCost;
+		double queueBound = queue.isEmpty() ? Double.POSITIVE_INFINITY : queue.peek().pseudoCost;
 		// 2026-06-25: root 尚未处理或伪下界仍是占位大数时，不能把 bound 截成 incumbent；
 		// 否则 TIME_LIMIT / NODE_LIMIT 会被误报成 gap=0。
-		if (!Double.isFinite(bound) || Utility.isBigMValue(bound)) {
-			return lastReportedBound;
+		boolean queueBoundValid = Double.isFinite(queueBound) && !Utility.isBigMValue(queueBound);
+		double bound;
+		if (currentNodeIncomplete) {
+			// 当前节点已经出队，open queue 不包含其子树。它自己的最强合法下界必须单独保留，
+			// 再与兄弟节点最小伪下界取 min；不能使用已混合过的 lastReportedBound 覆盖它。
+			if (!Double.isFinite(currentNodeReportableBound)
+					|| Utility.isBigMValue(currentNodeReportableBound)) {
+				bound = lastReportedBound;
+			} else {
+				bound = queueBoundValid ? Math.min(queueBound, currentNodeReportableBound)
+						: currentNodeReportableBound;
+			}
+		} else {
+			bound = queueBoundValid ? queueBound : lastReportedBound;
 		}
-		// 当前节点已经出队；若它在超时/失败时尚未关闭，open queue不包含其子树。
-		// lastReportedBound在退出前已合并当前节点认证界，不能被更高的兄弟节点伪下界覆盖。
-		if (currentNodeIncomplete && Double.isFinite(lastReportedBound)) {
-			bound = Math.min(bound, lastReportedBound);
-		}
-		if (Double.isFinite(incumbentCost) && Utility.compareGt(bound, incumbentCost)) {
+		if (Double.isFinite(bound) && !Utility.isBigMValue(bound)
+				&& Double.isFinite(incumbentCost) && Utility.compareGt(bound, incumbentCost)) {
 			return incumbentCost;
 		}
 		return bound;
